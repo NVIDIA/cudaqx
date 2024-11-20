@@ -582,3 +582,349 @@ TEST(QECCodeTester, checkRepetitionSPAM) {
   EXPECT_FALSE(noiseless_logical_SPAM_test(*repetition,
                                            cudaq::qec::operation::prep1, 0));
 }
+
+enum surface_role { data, a_mx, a_mz, empty };
+
+struct vec2d {
+  int row;
+  int col;
+
+  vec2d(int row_in, int col_in);
+};
+
+vec2d::vec2d(int row_in, int col_in) : row(row_in), col(col_in) {}
+
+vec2d operator+(const vec2d &lhs, const vec2d &rhs) {
+    return {lhs.row + rhs.row, lhs.col + rhs.col};
+}
+
+vec2d operator-(const vec2d &lhs, const vec2d &rhs) {
+    return {lhs.row - rhs.row, lhs.col - rhs.col};
+}
+
+bool operator==(const vec2d &lhs, const vec2d &rhs) {
+    return lhs.row == rhs.row && lhs.col == rhs.col;
+}
+
+// impose 2d ordering for reproducibility
+bool operator<(const vec2d &lhs, const vec2d &rhs) {
+  // sort by row component.
+  // if row is tied, sort by col.
+  if (lhs.row != rhs.row) {
+    return lhs.row < rhs.row;
+  }
+  return lhs.col < rhs.col;
+}
+
+// Grid layout from left to right, top to bottom
+// (0,0)   (0,1)   (0,2)   (0,3)   (0,4)
+// (1,0)   (1,1)   (1,2)   (1,3)   (1,4)
+// (2,0)   (2,1)   (2,2)   (2,3)   (2,4)
+// (3,0)   (3,1)   (3,2)   (3,3)   (3,4)
+// (4,0)   (4,1)   (4,2)   (4,3)   (4,4)
+
+
+
+// Container for keeping track of and printing the grid
+struct stabilizer_grid {
+  // grid idx -> role
+  std::vector<surface_role> roles;
+  // stab index -> 2d coord
+  std::vector<vec2d> z_stab_coords;
+  std::vector<vec2d> x_stab_coords;
+  // 2d coord -> stab index
+  std::map<vec2d, size_t> x_stab_indices;
+  std::map<vec2d, size_t> z_stab_indices;
+
+  // data qubits are in a different coord system
+  // data index -> 2d coord
+  std::vector<vec2d> data_coords;
+  // 2d coord -> data index
+  std::map<vec2d, size_t> data_indices;
+
+  // In surface code, can have weight 2 or weight 4 stabs
+  // So {x,z}_stabilizer[i].size() == 2 || 4
+  std::vector<std::vector<size_t>> x_stabilizers;
+  std::vector<std::vector<size_t>> z_stabilizers;
+
+  stabilizer_grid(size_t nSites);
+};
+
+stabilizer_grid::stabilizer_grid(size_t nSites): roles(nSites){}
+
+void print_stabilizers_coords(stabilizer_grid grid){
+  int dim = sqrt(grid.roles.size());
+  for(size_t row = 0; row < dim; ++row){
+    for(size_t col = 0; col < dim; ++col){
+      size_t idx = row*dim + col;
+      switch (grid.roles[idx]) {
+      case a_mz:
+        printf("z(%zu, %zu)   ", row, col);
+        break;
+      case a_mx:
+        printf("x(%zu, %zu)   ", row, col);
+        break;
+      case empty:
+        printf("          ");
+        /* printf("e(%zu, %zu)   ", row, col); */
+        break;
+      default:
+        printf("broken!");
+      }
+    }
+    printf("\n");
+  }
+  printf("\n");
+
+}
+void print_stabilizers_indices(stabilizer_grid grid){
+  int dim = sqrt(grid.roles.size());
+  for(size_t row = 0; row < dim; ++row){
+    for(size_t col = 0; col < dim; ++col){
+      size_t idx = row*dim + col;
+      switch (grid.roles[idx]) {
+      case a_mz:
+        printf("z%zu   ", grid.z_stab_indices[vec2d(row, col)]);
+        break;
+      case a_mx:
+        printf("x%zu   ", grid.x_stab_indices[vec2d(row, col)]);
+        break;
+      case empty:
+        printf("     ");
+        /* printf("e(%zu, %zu)   ", row, col); */
+        break;
+      default:
+        printf("broken!");
+      }
+    }
+    printf("\n");
+  }
+  printf("\n");
+
+}
+
+void print_data_grid(size_t distance){
+  for(size_t row = 0; row < distance; ++row){
+    for(size_t col = 0; col < distance; ++col){
+      size_t idx = row*distance + col;
+      printf("d%zu   ", idx);
+    }
+    printf("\n");
+  }
+  printf("\n");
+}
+
+void print_stabilizer_grid(stabilizer_grid grid){
+  int dim = sqrt(grid.roles.size());
+  for(size_t row = 0; row < dim; ++row){
+    for(size_t col = 0; col < dim; ++col){
+      size_t idx = row*dim + col;
+      switch (grid.roles[idx]) {
+      case a_mz:
+        printf("z(%zu, %zu)   ", row, col);
+        break;
+      case a_mx:
+        printf("x(%zu, %zu)   ", row, col);
+        break;
+      case empty:
+        printf("e(%zu, %zu)   ", row, col);
+        break;
+      default:
+        printf("broken!");
+      }
+    }
+    printf("\n");
+  }
+  printf("\n");
+}
+
+void print_stabilizers(stabilizer_grid grid) {
+  for (size_t s_i = 0; s_i < grid.x_stabilizers.size(); ++s_i) {
+    printf("s[%zu]: ", s_i);
+    for (size_t op_i = 0; op_i < grid.x_stabilizers[s_i].size(); ++op_i) {
+      printf("X%zu ", grid.x_stabilizers[s_i][op_i]);
+    }
+    printf("\n");
+  }
+  size_t offset = grid.x_stabilizers.size();
+  for (size_t s_i = 0; s_i < grid.z_stabilizers.size(); ++s_i) {
+    printf("s[%zu]: ", s_i + offset);
+    for (size_t op_i = 0; op_i < grid.z_stabilizers[s_i].size(); ++op_i) {
+      printf("Z%zu ", grid.z_stabilizers[s_i][op_i]);
+    }
+    printf("\n");
+  }
+
+  return;
+}
+// Rules: Boundaries are special.
+// Interior just alternates
+
+TEST(QECCodeTester, checkSurfaceCodeGrid) {
+  // only Z basis for repetition
+  printf("testing\n");
+  int distance = 5;
+  // interior plus padding on each boundary
+  int grid_dim = distance+1;
+
+  stabilizer_grid grid(grid_dim*grid_dim);
+
+  // init grid to all empty
+  for(size_t row = 0; row < grid_dim; ++row){
+    for(size_t col = 0; col < grid_dim; ++col){
+      size_t idx = row*grid_dim + col;
+      surface_role role = surface_role::empty;
+      grid.roles[idx] = role;
+    }
+  }
+  print_stabilizer_grid(grid);
+
+
+  // set alternating interior
+  for(size_t row = 1; row < grid_dim-1; ++row){
+    for(size_t col = 1; col < grid_dim-1; ++col){
+      size_t idx = row*grid_dim + col;
+      bool parity = (row+col)%2;
+      if (!parity){
+        grid.roles[idx] = surface_role::a_mz;
+      } else {
+        grid.roles[idx] = surface_role::a_mx;
+      }
+    }
+  }
+  print_stabilizer_grid(grid);
+
+  // set top/bottom boundaries
+  for(size_t row = 0; row < grid_dim; row += grid_dim-1){
+    for(size_t col = 1; col < grid_dim-1; ++col){
+      size_t idx = row*grid_dim + col;
+      bool parity = (row+col)%2;
+      if (!parity)
+        grid.roles[idx] = surface_role::a_mz;
+    }
+  }
+  print_stabilizer_grid(grid);
+
+  // set left/right boundaries
+  for(size_t row = 1; row < grid_dim-1; ++row){
+    for(size_t col = 0; col < grid_dim; col += grid_dim-1){
+      size_t idx = row*grid_dim + col;
+      bool parity = (row+col)%2;
+      if (parity)
+        grid.roles[idx] = surface_role::a_mx;
+    }
+  }
+  print_stabilizer_grid(grid);
+
+  // now use grid to set coord
+  size_t z_count = 0;
+  size_t x_count = 0;
+  for(size_t row = 0; row < grid_dim; ++row){
+    for(size_t col = 0; col < grid_dim; ++col){
+      size_t idx = row*grid_dim + col;
+      switch (grid.roles[idx]) {
+      case a_mz:
+        grid.z_stab_coords.push_back(vec2d(row,col));
+        grid.z_stab_indices[vec2d(row,col)] = z_count;
+        z_count++;
+        break;
+      case a_mx:
+        grid.x_stab_coords.push_back(vec2d(row,col));
+        grid.x_stab_indices[vec2d(row,col)] = x_count;
+        x_count++;
+        break;
+      case empty:
+        // nothing
+        break;
+      default:
+        printf("broken!");
+      }
+    }
+  }
+  print_stabilizers_coords(grid);
+  print_stabilizers_indices(grid);
+
+  printf("%zu mx ancilla qubits:\n", grid.x_stab_coords.size());
+  for (size_t i = 0; i < grid.x_stab_coords.size(); ++i) {
+    printf("amx[%zu] @ (%d, %d)\n", i, grid.x_stab_coords[i].row, grid.x_stab_coords[i].col);
+  }
+  printf("%zu mz ancilla qubits:\n", grid.z_stab_coords.size());
+  for (size_t i = 0; i < grid.z_stab_coords.size(); ++i) {
+    printf("amz[%zu] @ (%d, %d)\n", i, grid.z_stab_coords[i].row, grid.z_stab_coords[i].col);
+  }
+
+  printf("%zu mx ancilla qubits:\n", grid.x_stab_indices.size());
+  for (const auto &[k, v] : grid.x_stab_indices) {
+    printf("@(%d,%d): amx[%zu]\n", k.row, k.col, v);
+  }
+  printf("%zu mz ancilla qubits:\n", grid.z_stab_indices.size());
+  for (const auto &[k, v] : grid.z_stab_indices) {
+    printf("@(%d,%d): amz[%zu]\n", k.row, k.col, v);
+  }
+
+  // Data qubit grid
+  for(size_t row = 0; row < distance; ++row){
+    for(size_t col = 0; col < distance; ++col){
+      size_t idx = row*distance + col;
+      grid.data_coords.push_back(vec2d(row,col));
+      grid.data_indices[vec2d(row,col)] = idx;
+    }
+  }
+  printf("%zu data qubits:\n", grid.data_coords.size());
+  for (size_t i = 0; i < grid.data_coords.size(); ++i) {
+    printf("d[%zu] @ (%d, %d)\n", i, grid.data_coords[i].row, grid.data_coords[i].col);
+  }
+  printf("%zu data qubits:\n", grid.data_indices.size());
+  for (const auto &[k, v] : grid.data_indices) {
+    printf("@(%d,%d): data[%zu]\n", k.row, k.col, v);
+  }
+
+  print_stabilizers_coords(grid);
+  print_stabilizers_indices(grid);
+  // Associate data qubits to stabs
+  /* std::vector<std::vector<size_t>> x_stabilizers; */
+  /* std::vector<std::vector<size_t>> z_stabilizers; */
+
+  /* printf("%zu mx ancilla qubits:\n", grid.x_stab_coords.size()); */
+  for (size_t i = 0; i < grid.x_stab_coords.size(); ++i) {
+    /* printf("amx[%zu] @ (%d, %d)\n", i, grid.x_stab_coords[i].row, grid.x_stab_coords[i].col); */
+    std::vector<size_t> current_stab;
+    for (int row_offset = -1; row_offset < 1; ++row_offset) {
+      for (int col_offset = -1; col_offset < 1; ++col_offset) {
+        int row = grid.x_stab_coords[i].row + row_offset;
+        int col = grid.x_stab_coords[i].col + col_offset;
+        /* printf("data qubit offset: (%d, %d)\n", row, col); */
+        vec2d trial_coord(row, col);
+        if (grid.data_indices.find(trial_coord) != grid.data_indices.end()) {
+          /* printf("found!\n"); */
+          current_stab.push_back(grid.data_indices[trial_coord]);
+        }
+      }
+    }
+    std::sort(current_stab.begin(), current_stab.end());
+    grid.x_stabilizers.push_back(current_stab);
+  }
+  /* printf("%zu mz ancilla qubits:\n", grid.z_stab_coords.size()); */
+  for (size_t i = 0; i < grid.z_stab_coords.size(); ++i) {
+    /* printf("amz[%zu] @ (%d, %d)\n", i, grid.z_stab_coords[i].row, grid.z_stab_coords[i].col); */
+    std::vector<size_t> current_stab;
+    for (int row_offset = -1; row_offset < 1; ++row_offset) {
+      for (int col_offset = -1; col_offset < 1; ++col_offset) {
+        int row = grid.z_stab_coords[i].row + row_offset;
+        int col = grid.z_stab_coords[i].col + col_offset;
+        /* printf("data qubit offset: (%d, %d)\n", row, col); */
+        vec2d trial_coord(row, col);
+        if (grid.data_indices.find(trial_coord) != grid.data_indices.end()) {
+          /* printf("found!\n"); */
+          current_stab.push_back(grid.data_indices[trial_coord]);
+        }
+      }
+    }
+    std::sort(current_stab.begin(), current_stab.end());
+    grid.z_stabilizers.push_back(current_stab);
+  }
+
+  print_stabilizers(grid);
+  print_data_grid(distance);
+
+}
