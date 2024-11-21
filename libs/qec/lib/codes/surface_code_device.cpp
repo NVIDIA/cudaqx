@@ -11,17 +11,13 @@
 
 namespace cudaq::qec::surface_code {
 
-  // TODO: apply to just X_L
-__qpu__ void x(patch logicalQubit) {
-  x(logicalQubit.data);
-}
+// TODO: apply to just X_L
+__qpu__ void x(patch logicalQubit) { x(logicalQubit.data); }
 
 __qpu__ void y(patch logicalQubit) { y(logicalQubit.data); }
 
-  // TODO: apply to just X_L
-__qpu__ void z(patch logicalQubit) {
-  z(logicalQubit.data);
-}
+// TODO: apply to just X_L
+__qpu__ void z(patch logicalQubit) { z(logicalQubit.data); }
 __qpu__ void h(patch logicalQubit) { h(logicalQubit.data); }
 __qpu__ void s(patch logicalQubit) { s(logicalQubit.data); }
 
