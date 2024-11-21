@@ -9,7 +9,8 @@
 cudaqx_add_device_code(cudaq-qec
   SOURCES
     steane_device.cpp
+    surface_code_device.cpp
     repetition_device.cpp
 )
 
-target_sources(cudaq-qec PRIVATE steane.cpp repetition.cpp)
+target_sources(cudaq-qec PRIVATE steane.cpp repetition.cpp surface_code.cpp)
