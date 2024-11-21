@@ -285,7 +285,7 @@ void stabilizer_grid::print_stabilizers() {
 
   size_t offset = this->x_stabilizers.size();
   for (size_t s_i = 0; s_i < this->z_stabilizers.size(); ++s_i) {
-    std::cout << "s[" << s_i << "]: ";
+    std::cout << "s[" << s_i+offset << "]: ";
     for (size_t op_i = 0; op_i < this->z_stabilizers[s_i].size(); ++op_i) {
       std::cout << "Z" << this->z_stabilizers[s_i][op_i] << " ";
     }
