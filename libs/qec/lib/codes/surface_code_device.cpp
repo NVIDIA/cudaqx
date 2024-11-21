@@ -35,8 +35,8 @@ __qpu__ void cz(patch logicalQubitA, patch logicalQubitB) {
   }
 }
 
+// Transversal state prep, turn on stabilizers after these ops
 __qpu__ void prep0(patch logicalQubit) {
-  // Run a stabilizer round
 }
 
 __qpu__ void prep1(patch logicalQubit) {
