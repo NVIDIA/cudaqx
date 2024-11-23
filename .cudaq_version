@@ -1,7 +1,7 @@
 {
   "cudaq": {
     "repository": "NVIDIA/cuda-quantum",
-    "ref": "d63dc8d93b4f9c95677aad2ddad2f9020cde45d0"
+    "ref": "39a46e62ccc85922958925441c0e2e489eb27a83"
   },
   "cuquantum": {
     "url": "https://developer.download.nvidia.com/compute/cuquantum/redist/cuquantum/linux-x86_64/",
