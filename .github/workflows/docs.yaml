@@ -1,6 +1,8 @@
 name: Documentation
 
 on:
+  workflow_call:
+
   workflow_dispatch:
     branches:
       - main
@@ -8,8 +10,6 @@ on:
   push:
     branches:
       - main
-      # FIXME: remove?
-      - "pull-request/[0-9]+"
     paths:
       - '.github/workflows/docs.yaml'
       - 'docs/**'
@@ -18,7 +18,7 @@ on:
       - '**/*.py'
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

@@ -15,8 +15,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          bash .github/workflows/scripts/install_git_cli.sh
-
           pr_number=$(echo ${{ github.event.ref }} | sed 's/.*\///')
 
           # Fetch the list of cache keys

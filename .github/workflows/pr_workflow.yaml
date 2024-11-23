@@ -15,6 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       build-cudaq: ${{ steps.filter.outputs.build-cudaq }}
+      build-docs: ${{ steps.filter.outputs.build-docs }}
       build-all: ${{ steps.filter.outputs.build-all }}
       build-qec: ${{ steps.filter.outputs.build-qec }}
       build-solvers: ${{ steps.filter.outputs.build-solvers }}
@@ -40,6 +41,12 @@ jobs:
               - '.github/workflows/cudaq_bump.yml'
               - '.github/actions/get-cudaq-build/**'
               - '.cudaq_version'
+            build-docs:
+              - '.github/workflows/docs.yaml'
+              - 'docs/**'
+              - '**/*.cpp'
+              - '**/*.h'
+              - '**/*.py'
             build-all:
               - '.github/actions/build-lib/action.yaml'
               - '.github/actions/build-lib/build_all.yaml'
@@ -51,26 +58,26 @@ jobs:
               - '.github/actions/build-lib/build_qec.sh'
               - '.github/workflows/lib_qec.yaml'
               - 'cmake/Modules/**'
-              - 'libs/core/**.cpp'
-              - 'libs/core/**.h'
+              - 'libs/core/**/*.cpp'
+              - 'libs/core/**/*.h'
               - 'libs/core/**/CMakeLists.txt'
-              - 'libs/qec/**.cpp'
-              - 'libs/qec/**.h'
-              - 'libs/qec/**.in'
-              - 'libs/qec/**.py'
+              - 'libs/qec/**/*.cpp'
+              - 'libs/qec/**/*.h'
+              - 'libs/qec/**/*.in'
+              - 'libs/qec/**/*.py'
               - 'libs/qec/**/CMakeLists.txt'
             build-solvers:
               - '.github/actions/build-lib/action.yaml'
               - '.github/actions/build-lib/build_solvers.sh'
               - '.github/workflows/lib_solvers.yaml'
               - 'cmake/Modules/**'
-              - 'libs/core/**.cpp'
-              - 'libs/core/**.h'
+              - 'libs/core/**/*.cpp'
+              - 'libs/core/**/*.h'
               - 'libs/core/**/CMakeLists.txt'
-              - 'libs/solvers/**.cpp'
-              - 'libs/solvers/**.h'
-              - 'libs/solvers/**.in'
-              - 'libs/solvers/**.py'
+              - 'libs/solvers/**/*.cpp'
+              - 'libs/solvers/**/*.h'
+              - 'libs/solvers/**/*.in'
+              - 'libs/solvers/**/*.py'
               - 'libs/solvers/**/CMakeLists.txt'
 
   build-cudaq:
@@ -109,21 +116,35 @@ jobs:
           save-build: true
           save-ccache: false
 
+  build-docs:
+    name: Docs
+    needs: [check-changes, build-cudaq]
+    if: |
+      !failure() && !cancelled() &&
+      needs.check-changes.outputs.build-docs == 'true'
+    uses: ./.github/workflows/docs.yaml
+
   build-all:
     name: All libs
     needs: [check-changes, build-cudaq]
-    if: needs.check-changes.outputs.build-all == 'true' || needs.check-changes.outputs.build-cudaq == 'true'
+    if: |
+      !failure() && !cancelled() &&
+      (needs.check-changes.outputs.build-all == 'true' || needs.check-changes.outputs.build-cudaq == 'true')
     uses: ./.github/workflows/all_libs.yaml
 
   build-qec:
     name: QEC
     needs: [check-changes, build-cudaq]
-    if: needs.check-changes.outputs.build-qec == 'true' || needs.check-changes.outputs.build-cudaq == 'true'
+    if: |
+      !failure() && !cancelled() &&
+      (needs.check-changes.outputs.build-qec == 'true' || needs.check-changes.outputs.build-cudaq == 'true')
     uses: ./.github/workflows/lib_qec.yaml
 
   build-solvers:
     name: Solvers
     needs: [check-changes, build-cudaq]
-    if: needs.check-changes.outputs.build-solvers == 'true' || needs.check-changes.outputs.build-cudaq == 'true'
+    if: |
+      !failure() && !cancelled() &&
+      (needs.check-changes.outputs.build-solvers == 'true' || needs.check-changes.outputs.build-cudaq == 'true')
     uses: ./.github/workflows/lib_solvers.yaml
 
