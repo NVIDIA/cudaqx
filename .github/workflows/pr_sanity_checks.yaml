@@ -1,0 +1,84 @@
+name: PR sanity checks
+
+on:
+  pull_request:
+    branches: 
+      - main
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  LLVM_VERSION: 19
+
+jobs:
+  check-changes:
+    name: Check changes
+    runs-on: ubuntu-latest
+    outputs:
+      check-cpp: ${{ steps.filter.outputs.check-cpp }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          set-safe-directory: true
+
+      - name: Check what needs testing
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          base: ${{ github.base_ref }}
+          filters: |
+            check-cpp:
+              - '**/*.cpp'
+              - '**/*.h'
+
+  check-clang-format:
+    name: Check C++ code formatting
+    if: needs.check-changes.outputs.check-cpp == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          set-safe-directory: true
+
+    - name: Install clang-format
+      run: |
+        # Requirements
+        sudo apt-get install -y wget add-apt-repository gpg
+
+        # Obtain VERSION_CODENAME and UBUNTU_CODENAME
+        source /etc/os-release
+
+        wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+        sudo add-apt-repository "deb http://apt.llvm.org/${UBUNTU_CODENAME}/  llvm-toolchain-${UBUNTU_CODENAME}-${LLVM_VERSION} main"
+        sudo apt-get update && sudo apt-get install -y --no-install-recommends clang-format-${LLVM_VERSION}
+
+    - name: Run clang-format
+      run: |
+        # We did a shallow clone, and thus we need to make sure to fetch the base
+        # commit.
+        git fetch --recurse-submodules=no origin ${{ github.base_ref }}
+        DIFF_COMMIT_SHA=$(git rev-parse origin/${{ github.base_ref }})
+
+        git config clangFormat.binary clang-format-$LLVM_VERSION
+        if ! git clang-format $DIFF_COMMIT_SHA; then
+          git diff --ignore-submodules > clang-format.patch
+          echo "::error::Clang-format found formatting problems." \
+                "Check the uploaded artifact."
+          exit 1
+        fi
+        echo "Clang-format found no formatting problems"
+        exit 0
+
+    - name: Upload format patch
+      uses: actions/upload-artifact@v4
+      continue-on-error: true
+      if: ${{ failure() }}
+      with:
+        name: clang-format-patch
+        path: clang-*.patch
+
