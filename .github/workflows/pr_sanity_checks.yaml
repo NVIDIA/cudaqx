@@ -1,0 +1,103 @@
+name: PR sanity checks
+
+on:
+  pull_request:
+    branches: 
+      - main
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  LLVM_VERSION: 16
+
+jobs:
+  check-changes:
+    name: Check changes
+    runs-on: ubuntu-latest
+    outputs:
+      check-cpp: ${{ steps.filter.outputs.check-cpp }}
+      check-all-cpp: ${{ steps.filter.outputs.check-all-cpp }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          set-safe-directory: true
+
+      - name: Check what needs testing
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            check-all-cpp:
+              - '.github/workflows/pr_sanity_checks.yaml'
+              - '.clang-format'
+            check-cpp:
+              - '**/*.cpp'
+              - '**/*.h'
+
+  check-clang-format:
+    name: Check C++ code formatting
+    needs: [check-changes]
+    if: needs.check-changes.outputs.check-cpp == 'true' || needs.check-changes.outputs.check-all-cpp == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          set-safe-directory: true
+
+      - name: Install clang-format
+        run: |
+          # Requirements
+          sudo apt-get update
+          sudo apt-get install -y wget software-properties-common gpg
+
+          # Obtain VERSION_CODENAME and UBUNTU_CODENAME
+          source /etc/os-release
+
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+          sudo add-apt-repository "deb http://apt.llvm.org/${UBUNTU_CODENAME}/  llvm-toolchain-${UBUNTU_CODENAME}-${LLVM_VERSION} main"
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends clang-format-${LLVM_VERSION}
+
+      # If the `clang-format` file changes, we require the reformatting of all
+      # files. See https://github.com/NVIDIA/cudaqx/pull/15#discussion_r1868174072
+      - name: clang-format all things
+        if: needs.check-changes.outputs.check-all-cpp == 'true'
+        run: |
+          git ls-files '*.cpp' '*.h' | xargs clang-format-${LLVM_VERSION} -i
+
+          if ! git diff --exit-code; then
+            git diff --ignore-submodules > clang-format.patch
+            echo "🟥 Clang-format found formatting problems (check the uploaded artifact)." >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+          echo "🟩 Clang-format found no formatting problems" >> $GITHUB_STEP_SUMMARY
+          exit 0
+
+      - name: clang-format changed files
+        if: needs.check-changes.outputs.check-all-cpp != 'true'
+        run: |
+          # We did a shallow clone, and thus we need to make sure to fetch the base
+          # commit.
+          git fetch --recurse-submodules=no origin ${{ github.base_ref }}
+          DIFF_COMMIT_SHA=$(git rev-parse origin/${{ github.base_ref }})
+
+          if ! git clang-format-$LLVM_VERSION $DIFF_COMMIT_SHA; then
+            git diff --ignore-submodules > clang-format.patch
+            echo "🟥 Clang-format found formatting problems (check the uploaded artifact)." >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+          echo "🟩 Clang-format found no formatting problems" >> $GITHUB_STEP_SUMMARY
+          exit 0
+
+      - name: Upload format patch
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        if: ${{ failure() }}
+        with:
+          name: clang-format-patch
+          path: clang-*.patch
+
