@@ -24,7 +24,7 @@ int main() {
   auto h = molecule.hamiltonian;
 
   // Create the operator pool
-  auto opPool = cudaq::solvers::get_operator_pool(
+  std::vector<cudaq::spin_op> opPool = cudaq::solvers::get_operator_pool(
       "spin_complement_gsd", {{"num-orbitals", h.num_qubits() / 2}});
 
   // Run ADAPT
