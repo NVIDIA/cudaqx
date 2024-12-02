@@ -32,8 +32,8 @@ for i in range(nShots):
     print(f"syndrome: {syndrome}")
 
     # Decode the syndrome to predict what happen to the data
-    result = decoder.decode(syndrome)
-    data_prediction = np.array(result.result, dtype=np.uint8)
+    convergence, result = decoder.decode(syndrome)
+    data_prediction = np.array(result, dtype=np.uint8)
     print(f"data_prediction: {data_prediction}")
 
     # See if this prediction flipped the observable

@@ -28,8 +28,8 @@ for p in PERates:
         # Calculate which syndromes are flagged.
         syndrome = Hz@data % 2
 
-        result = decoder.decode(syndrome)
-        data_prediction = np.array(result.result)
+        convergence, result = decoder.decode(syndrome)
+        data_prediction = np.array(result)
 
         predicted_observable = observable@data_prediction % 2
 

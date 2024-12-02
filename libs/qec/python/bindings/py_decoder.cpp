@@ -96,7 +96,24 @@ void bindDecoder(py::module &mod) {
         Contains the sequence of corrections that should be applied to recover
         the original quantum state. The format depends on the specific decoder
         implementation.
-    )pbdoc");
+    )pbdoc")
+      // Add tuple interface
+      .def("__len__", [](const decoder_result &) { return 2; })
+      .def("__getitem__",
+           [](const decoder_result &r, size_t i) {
+             switch (i) {
+             case 0:
+               return py::cast(r.converged);
+             case 1:
+               return py::cast(r.result);
+             default:
+               throw py::index_error();
+             }
+           })
+      // Enable iteration protocol
+      .def("__iter__", [](const decoder_result &r) -> py::object {
+        return py::iter(py::make_tuple(r.converged, r.result));
+      });
 
   py::class_<decoder, PyDecoder>(
       qecmod, "Decoder", "Represents a decoder for quantum error correction")
