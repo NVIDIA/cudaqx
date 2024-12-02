@@ -91,8 +91,6 @@ runs:
         bash .github/workflows/scripts/install_git_cli.sh
         mkdir -p ${CUQUANTUM_INSTALL_PREFIX}
         python3 .github/actions/get-cudaq-build/get_assets.py
-        cuquantum_archive=$(jq -r '.cuquantum.pattern' .cudaq_version)
-        tar xf "${cuquantum_archive}" --strip-components 1 -C "${CUQUANTUM_INSTALL_PREFIX}"
       shell: bash --noprofile --norc -euo pipefail {0}
 
     # ==========================================================================
