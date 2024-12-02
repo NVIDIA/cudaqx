@@ -36,11 +36,11 @@ def test_decoder_result_structure():
 
 def test_decoder_result_values():
     decoder = qec.get_decoder('example_byod', H)
-    convergence, result = decoder.decode(create_test_syndrome())
+    result = decoder.decode(create_test_syndrome())
 
-    assert convergence is True
-    assert all(isinstance(x, float) for x in result)
-    assert all(0 <= x <= 1 for x in result)
+    assert result.converged is True
+    assert all(isinstance(x, float) for x in result.result)
+    assert all(0 <= x <= 1 for x in result.result)
 
 
 @pytest.mark.parametrize("matrix_shape,syndrome_size", [
