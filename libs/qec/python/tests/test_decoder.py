@@ -36,11 +36,11 @@ def test_decoder_result_structure():
 
 def test_decoder_result_values():
     decoder = qec.get_decoder('example_byod', H)
-    result = decoder.decode(create_test_syndrome())
-    
-    assert result.converged is True
-    assert all(isinstance(x, float) for x in result.result)
-    assert all(0 <= x <= 1 for x in result.result)
+    convergence, result = decoder.decode(create_test_syndrome())
+
+    assert convergence is True
+    assert all(isinstance(x, float) for x in result)
+    assert all(0 <= x <= 1 for x in result)
 
 
 @pytest.mark.parametrize("matrix_shape,syndrome_size", [
@@ -54,12 +54,12 @@ def test_decoder_different_matrix_sizes(matrix_shape, syndrome_size):
     syndrome = np.random.random(syndrome_size).tolist()
     
     decoder = qec.get_decoder('example_byod', H)
-    result = decoder.decode(syndrome)
+    convergence, result = decoder.decode(syndrome)
     
-    assert len(result.result) == syndrome_size
-    assert result.converged is True
-    assert all(isinstance(x, float) for x in result.result)
-    assert all(0 <= x <= 1 for x in result.result)
+    assert len(result) == syndrome_size
+    assert convergence is True
+    assert all(isinstance(x, float) for x in result)
+    assert all(0 <= x <= 1 for x in result)
 
 # FIXME add this back
 # def test_decoder_error_handling():
@@ -80,13 +80,13 @@ def test_decoder_reproducibility():
     decoder = qec.get_decoder('example_byod', H)
     
     np.random.seed(42)
-    result1 = decoder.decode(create_test_syndrome())
+    convergence1, result1 = decoder.decode(create_test_syndrome())
     
     np.random.seed(42)
-    result2 = decoder.decode(create_test_syndrome())
+    convergence2, result2 = decoder.decode(create_test_syndrome())
     
-    assert result1.result == result2.result
-    assert result1.converged == result2.converged
+    assert result1 == result2
+    assert convergence1 == convergence2
 
 def test_pass_weights():
     error_probability = 0.1
