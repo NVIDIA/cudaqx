@@ -8,6 +8,8 @@ CUDA-Q Solvers C++ API
 .. doxygenclass:: cudaq::solvers::uccsd 
 .. doxygenclass:: cudaq::solvers::qaoa_pool 
 
+.. doxygenfunction:: cudaq::solvers::get_operator_pool 
+    
 .. doxygenstruct:: cudaq::solvers::atom 
     :members:
 

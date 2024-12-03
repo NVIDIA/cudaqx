@@ -26,6 +26,17 @@ TEST(UCCSDTest, GenerateWithDefaultConfig) {
   }
 }
 
+TEST(UCCSDTest, GenerateFromAPIFunction) {
+  auto operators = cudaq::solvers::get_operator_pool(
+      "uccsd", {{"num-qubits", 4}, {"num-electrons", 2}});
+  ASSERT_FALSE(operators.empty());
+  EXPECT_EQ(operators.size(), 2 * 2 + 1 * 8);
+
+  for (const auto &op : operators) {
+    EXPECT_EQ(op.num_qubits(), 4);
+  }
+}
+
 TEST(UCCSDTest, GenerateWithCustomCoefficients) {
   auto pool = cudaq::solvers::operator_pool::get("uccsd");
   heterogeneous_map config;

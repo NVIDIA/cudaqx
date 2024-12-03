@@ -42,4 +42,21 @@ public:
   generate(const heterogeneous_map &config) const = 0;
 };
 
+/// @brief Retrieves a quantum operator pool based on the specified name and
+/// configuration options.
+///
+/// This function creates and returns a vector of quantum spin operators by
+/// instantiating the appropriate operator_pool implementation specified by the
+/// name parameter. The generated operators are configured according to the
+/// provided options.
+///
+/// @param name The identifier string for the desired operator pool
+/// implementation
+/// @param options Configuration parameters for operator pool generation stored
+/// in a heterogeneous map
+/// @return std::vector<cudaq::spin_op> A vector containing the generated
+/// quantum spin operators
+std::vector<cudaq::spin_op> get_operator_pool(const std::string &name,
+                                              const heterogeneous_map &options);
+
 } // namespace cudaq::solvers

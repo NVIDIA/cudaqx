@@ -420,9 +420,8 @@ Basic Usage
             auto h = molecule.hamiltonian;
             
             // Generate operator pool
-            auto pool = cudaq::solvers::operator_pool::get(
-                "spin_complement_gsd");
-            auto operators = pool->generate({
+            auto operators = cudaq::solvers::get_operator_pool(
+                "spin_complement_gsd", {
                 {"num-orbitals", h.num_qubits() / 2}
             });
             

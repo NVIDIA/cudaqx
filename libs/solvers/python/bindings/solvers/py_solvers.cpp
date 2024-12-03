@@ -501,15 +501,7 @@ RuntimeError
   mod.def(
       "get_operator_pool",
       [](const std::string &name, py::kwargs config) {
-        heterogeneous_map asCpp;
-        for (auto &[k, v] : config) {
-          std::string asStr = k.cast<std::string>();
-          if (py::isinstance<py::int_>(v))
-            asCpp.insert(asStr, v.cast<std::size_t>());
-          if (py::isinstance<py::list>(v))
-            asCpp.insert(asStr, v.cast<std::vector<double>>());
-        }
-        return operator_pool::get(name)->generate(asCpp);
+        return operator_pool::get(name)->generate(hetMapFromKwargs(config));
       },
       R"#(Get and generate an operator pool based on the specified name and configuration.
 

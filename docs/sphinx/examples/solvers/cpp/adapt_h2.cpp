@@ -24,8 +24,8 @@ int main() {
   auto h = molecule.hamiltonian;
 
   // Create the operator pool
-  auto pool = cudaq::solvers::operator_pool::get("spin_complement_gsd");
-  auto poolList = pool->generate({{"num-orbitals", h.num_qubits() / 2}});
+  std::vector<cudaq::spin_op> opPool = cudaq::solvers::get_operator_pool(
+      "spin_complement_gsd", {{"num-orbitals", h.num_qubits() / 2}});
 
   // Run ADAPT
   auto [energy, thetas, ops] = cudaq::solvers::adapt_vqe(
@@ -33,7 +33,7 @@ int main() {
         x(q[0]);
         x(q[1]);
       },
-      h, poolList, {{"grad_norm_tolerance", 1e-3}});
+      h, opPool, {{"grad_norm_tolerance", 1e-3}});
 
   printf("Final <H> = %.12lf\n", energy);
 }
