@@ -10,6 +10,7 @@ import cudaq_qec as qec
 import cudaq
 from cudaq_qec import patch
 
+
 @cudaq.kernel
 def prep0(logicalQubit: patch):
     h(logicalQubit.data[0], logicalQubit.data[4], logicalQubit.data[6])
@@ -50,8 +51,10 @@ class MySteaneCodeImpl:
 
     def __init__(self, **kwargs):
         qec.Code.__init__(self, **kwargs)
-        self.stabilizers = [cudaq.SpinOperator.from_word(word) for word in 
-            ["XXXXIII", "IXXIXXI", "IIXXIXX", "ZZZZIII", "IZZIZZI", "IIZZIZZ"]]
+        self.stabilizers = [
+            cudaq.SpinOperator.from_word(word) for word in
+            ["XXXXIII", "IXXIXXI", "IIXXIXX", "ZZZZIII", "IZZIZZI", "IIZZIZZ"]
+        ]
         self.operation_encodings = {
             qec.operation.prep0: prep0,
             qec.operation.stabilizer_round: stabilizer

@@ -49,9 +49,7 @@ parser.add_argument('--charge', help="charge of the system", type=int)
 parser.add_argument('--out-file-name',
                     help='base file name for output data.',
                     type=str)
-parser.add_argument('--spin',
-                    help="no. of unpaired electrons (2 *s)",
-                    type=int)
+parser.add_argument('--spin', help="no. of unpaired electrons (2 *s)", type=int)
 parser.add_argument('--symmetry', help="", action='store_true', default=False)
 parser.add_argument('--memory', help="", type=float, default=4000)
 parser.add_argument('--cycles', help="", type=int, default=100)
@@ -90,8 +88,7 @@ if not args.server_mode:
 
     filterArgs = ['xyz', 'basis']
     filteredArgs = {
-        k: v
-        for (k, v) in vars(args).items() if k not in filterArgs
+        k: v for (k, v) in vars(args).items() if k not in filterArgs
     }
     res = hamiltonianGenerator.generate(args.xyz, args.basis, **filteredArgs)
     print(res)
@@ -135,7 +132,6 @@ class MoleculeInput(BaseModel):
     potfile: str = None
 
 
-
 class Molecule(BaseModel):
     energies: dict
     num_orbitals: int
@@ -146,7 +142,8 @@ class Molecule(BaseModel):
 
 @app.get("/status")
 async def get_status():
-    return {"status" : "available"}
+    return {"status": "available"}
+
 
 @app.post("/create_molecule")
 async def create_molecule(molecule: MoleculeInput):
@@ -155,8 +152,7 @@ async def create_molecule(molecule: MoleculeInput):
 
     filterArgs = ['xyz', 'basis']
     filteredArgs = {
-        k: v
-        for (k, v) in vars(molecule).items() if k not in filterArgs
+        k: v for (k, v) in vars(molecule).items() if k not in filterArgs
     }
     filteredArgs['cache_data'] = False
     res = hamiltonianGenerator.generate(molecule.xyz, molecule.basis,

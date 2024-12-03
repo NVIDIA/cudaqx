@@ -7,4 +7,3 @@
 # ============================================================================ #
 
 from ._pycudaqx_solvers_the_suffix_matters_cudaq_solvers import *
-

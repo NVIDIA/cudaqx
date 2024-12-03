@@ -32,25 +32,26 @@ expected_value = 0
 # sample the steane memory circuit with noise on each cx gate
 # reading out the syndromes after each stabilizer round (xor'd against the previous)
 # and readout out the data qubits at the end of the experiment
-syndromes, data = qec.sample_memory_circuit(steane, statePrep, nShots, nRounds, noise)
+syndromes, data = qec.sample_memory_circuit(steane, statePrep, nShots, nRounds,
+                                            noise)
 print("From sample function:\n")
-print("syndromes:\n",syndromes)
-print("data:\n",data)
+print("syndromes:\n", syndromes)
+print("data:\n", data)
 
 # Get a decoder
 decoder = qec.get_decoder("single_error_lut", H)
 nLogicalErrors = 0
 
 # Logical Mz each shot (use Lx if preparing in X-basis)
-logical_measurements = (Lz@data.transpose()) % 2
+logical_measurements = (Lz @ data.transpose()) % 2
 # only one logical qubit, so do not need the second axis
 logical_measurements = logical_measurements.flatten()
 print("LMz:\n", logical_measurements)
 
 # initialize a Pauli frame to track logical flips
 # through the stabilizer rounds
-pauli_frame = np.array([0,0], dtype=np.uint8)
-for shot in range(0,nShots):
+pauli_frame = np.array([0, 0], dtype=np.uint8)
+for shot in range(0, nShots):
     print("shot:", shot)
     for syndrome in syndromes:
         print("syndrome:", syndrome)
@@ -60,7 +61,7 @@ for shot in range(0,nShots):
 
         # see if the decoded result anti-commutes with the observables
         print("decode result:", data_prediction)
-        decoded_observables = (observables@data_prediction) % 2
+        decoded_observables = (observables @ data_prediction) % 2
         print("decoded_observables:", decoded_observables)
 
         # update pauli frame
@@ -79,4 +80,3 @@ for shot in range(0,nShots):
 
 # Count how many shots the decoder failed to correct the errors
 print("Number of logical errors:", nLogicalErrors)
-

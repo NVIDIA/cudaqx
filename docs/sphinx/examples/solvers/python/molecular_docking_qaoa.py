@@ -17,7 +17,7 @@ for i, weight in enumerate(weights):
     G.add_node(i, weight=weight)
 G.add_edges_from(edges)
 
-# Set some parameters we'll need 
+# Set some parameters we'll need
 penalty = 6.0
 num_layers = 3
 
@@ -34,9 +34,9 @@ parameter_count = solvers.get_num_qaoa_parameters(H,
 init_params = np.random.uniform(-np.pi / 8, np.pi / 8, parameter_count)
 
 # Run QAOA, specify full parameterization and counterdiabatic
-# Full parameterization uses an optimization parameter for 
-# every term in the clique Hamiltonian and the mixer hamiltonian. 
-# Specifying counterdiabatic adds extra Ry rotations at the 
+# Full parameterization uses an optimization parameter for
+# every term in the clique Hamiltonian and the mixer hamiltonian.
+# Specifying counterdiabatic adds extra Ry rotations at the
 # end of each layer.
 opt_value, opt_params, opt_config = solvers.qaoa(H,
                                                  num_layers,

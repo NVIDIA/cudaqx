@@ -10,11 +10,7 @@ from scipy.optimize import minimize
 
 # Create the molecular hamiltonian
 geometry = [('H', (0., 0., 0.)), ('H', (0., 0., .7474))]
-molecule = solvers.create_molecule(geometry,
-                                            'sto-3g',
-                                            0,
-                                            0,
-                                            casci=True)
+molecule = solvers.create_molecule(geometry, 'sto-3g', 0, 0, casci=True)
 
 # Get the number of qubits and electrons
 numQubits = molecule.n_orbitals * 2
@@ -35,11 +31,11 @@ def ansatz(thetas: list[float]):
 
 # Run VQE
 energy, params, all_data = solvers.vqe(ansatz,
-                                              molecule.hamiltonian,
-                                              initialX,
-                                              optimizer=minimize,
-                                              method='L-BFGS-B',
-                                              jac='3-point',
-                                              tol=1e-4,
-                                              options={'disp': True})
+                                       molecule.hamiltonian,
+                                       initialX,
+                                       optimizer=minimize,
+                                       method='L-BFGS-B',
+                                       jac='3-point',
+                                       tol=1e-4,
+                                       options={'disp': True})
 print(f'Final <H> = {energy}')

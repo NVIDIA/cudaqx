@@ -1,4 +1,3 @@
-
 # ============================================================================ #
 # Copyright (c) 2024 NVIDIA Corporation & Affiliates.                          #
 # All rights reserved.                                                         #
@@ -28,8 +27,10 @@ sample_code_capacity = qecrt.sample_code_capacity
 from .plugins import decoders, codes
 import pkgutil, importlib, traceback
 
+
 def iter_namespace(ns_pkg):
     return pkgutil.iter_modules(ns_pkg.__path__, ns_pkg.__name__ + ".")
+
 
 for finder, name, ispkg in iter_namespace(plugins.decoders):
     try:
@@ -42,4 +43,3 @@ for finder, name, ispkg in iter_namespace(plugins.codes):
         importlib.import_module(name)
     except ModuleNotFoundError as e:
         pass
-

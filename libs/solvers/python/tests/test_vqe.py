@@ -30,36 +30,34 @@ def test_solvers_vqe():
         0) * spin.y(1) + .21829 * spin.z(0) - 6.125 * spin.z(1)
 
     # Can specify optimizer and gradient
-    energy, params, all_data = solvers.vqe(
-        lambda thetas: ansatz(thetas[0]),
-        hamiltonian, [0.],
-        optimizer='lbfgs',
-        gradient='parameter_shift')
+    energy, params, all_data = solvers.vqe(lambda thetas: ansatz(thetas[0]),
+                                           hamiltonian, [0.],
+                                           optimizer='lbfgs',
+                                           gradient='parameter_shift')
     assert np.isclose(-1.74, energy, atol=1e-2)
     all_data[0].result.dump()
 
     # For gradient-based optimizer, can pick up default gradient (parameter_shift)
-    energy, params, all_data = solvers.vqe(
-        lambda thetas: ansatz(thetas[0]),
-        hamiltonian, [0.],
-        optimizer='lbfgs',
-        verbose=True)
+    energy, params, all_data = solvers.vqe(lambda thetas: ansatz(thetas[0]),
+                                           hamiltonian, [0.],
+                                           optimizer='lbfgs',
+                                           verbose=True)
     assert np.isclose(-1.74, energy, atol=1e-2)
 
     # Can pick up default optimizer (cobyla)
-    energy, params, all_data = solvers.vqe(
-        lambda thetas: ansatz(thetas[0]), hamiltonian, [0.], verbose=True)
+    energy, params, all_data = solvers.vqe(lambda thetas: ansatz(thetas[0]),
+                                           hamiltonian, [0.],
+                                           verbose=True)
     assert np.isclose(-1.74, energy, atol=1e-2)
 
     cudaq.set_random_seed(22)
 
     # Can pick up default optimizer (cobyla)
-    energy, params, all_data = solvers.vqe(
-        lambda thetas: ansatz(thetas[0]),
-        hamiltonian, [0.],
-        verbose=True,
-        shots=10000,
-        max_iterations=10)
+    energy, params, all_data = solvers.vqe(lambda thetas: ansatz(thetas[0]),
+                                           hamiltonian, [0.],
+                                           verbose=True,
+                                           shots=10000,
+                                           max_iterations=10)
     assert energy > -2 and energy < -1.5
     print(energy)
     all_data[0].result.dump()
@@ -91,14 +89,13 @@ def test_scipy_optimizer():
         exp_vals.append(cudaq.observe(ansatz, hamiltonian, xk[0]).expectation())
 
     # Can specify optimizer and gradient
-    energy, params, all_data = solvers.vqe(
-        lambda thetas: ansatz(thetas[0]),
-        hamiltonian, [0.],
-        optimizer=minimize,
-        callback=callback,
-        method='L-BFGS-B',
-        jac='3-point',
-        tol=1e-4,
-        options={'disp': True})
+    energy, params, all_data = solvers.vqe(lambda thetas: ansatz(thetas[0]),
+                                           hamiltonian, [0.],
+                                           optimizer=minimize,
+                                           callback=callback,
+                                           method='L-BFGS-B',
+                                           jac='3-point',
+                                           tol=1e-4,
+                                           options={'disp': True})
     assert np.isclose(-1.74, energy, atol=1e-2)
     print(exp_vals)

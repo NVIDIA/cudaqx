@@ -12,12 +12,12 @@ import cudaq_solvers as solvers
 
 geometry = [('N', (0.0, 0.0, 0.5600)), ('N', (0.0, 0.0, -0.5600))]
 molecule = solvers.create_molecule(geometry,
-                                                'sto-3g',
-                                                0,
-                                                0,
-                                                nele_cas=2,
-                                                norb_cas=3,
-                                                verbose=True)
+                                   'sto-3g',
+                                   0,
+                                   0,
+                                   nele_cas=2,
+                                   norb_cas=3,
+                                   verbose=True)
 
 print('N2 HF Hamiltonian')
 print('Energies : ', molecule.energies)
@@ -28,14 +28,14 @@ print('No. of electrons: ', molecule.n_electrons)
 
 geometry = [('N', (0.0, 0.0, 0.5600)), ('N', (0.0, 0.0, -0.5600))]
 molecule = solvers.create_molecule(geometry,
-                                            'sto-3g',
-                                            0,
-                                            0,
-                                            nele_cas=2,
-                                            norb_cas=3,
-                                            MP2=True,
-                                            integrals_natorb=True,
-                                            verbose=True)
+                                   'sto-3g',
+                                   0,
+                                   0,
+                                   nele_cas=2,
+                                   norb_cas=3,
+                                   MP2=True,
+                                   integrals_natorb=True,
+                                   verbose=True)
 
 print('N2 Natural Orbitals from MP2 Hamiltonian')
 print('Energies: ', molecule.energies)
@@ -47,15 +47,14 @@ print('No. of electrons: ', molecule.n_electrons)
 
 geometry = [('N', (0.0, 0.0, 0.5600)), ('N', (0.0, 0.0, -0.5600))]
 molecule = solvers.create_molecule(geometry,
-                                            'sto-3g',
-                                            0,
-                                            0,
-                                            nele_cas=2,
-                                            norb_cas=3,
-                                            casscf=True,
-                                            integrals_casscf=True,
-                                            verbose=True)
-
+                                   'sto-3g',
+                                   0,
+                                   0,
+                                   nele_cas=2,
+                                   norb_cas=3,
+                                   casscf=True,
+                                   integrals_casscf=True,
+                                   verbose=True)
 
 print('N2 Active Space Hamiltonian Using CASSF Orbitals - HF orbitals')
 print('Energies: ', molecule.energies)
@@ -67,16 +66,16 @@ print('No. of electrons: ', molecule.n_electrons)
 
 geometry = [('N', (0.0, 0.0, 0.5600)), ('N', (0.0, 0.0, -0.5600))]
 molecule = solvers.create_molecule(geometry,
-                                            'sto-3g',
-                                            0,
-                                            0,
-                                            nele_cas=2,
-                                            norb_cas=3,
-                                            MP2=True,
-                                            natorb=True,
-                                            casscf=True,
-                                            integrals_casscf=True,
-                                            verbose=True)
+                                   'sto-3g',
+                                   0,
+                                   0,
+                                   nele_cas=2,
+                                   norb_cas=3,
+                                   MP2=True,
+                                   natorb=True,
+                                   casscf=True,
+                                   integrals_casscf=True,
+                                   verbose=True)
 
 print('N2 Active Space Hamiltonian Using CASSF Orbitals - MP2 natural orbitals')
 print('N2 HF Hamiltonian')
