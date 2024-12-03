@@ -139,6 +139,7 @@ def test_generate_random_bit_flips():
     assert data.shape[0] == 10
     assert np.all(data == 0)
 
+
 def test_steane_code_capacity():
     # Test case 1: error_prob = 0
     steane = qec.get_code("steane")

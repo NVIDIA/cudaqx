@@ -13,8 +13,8 @@ import cudaq_solvers as solvers
 
 def test_generate_with_default_config():
     operators = solvers.get_operator_pool("uccsd",
-                                                   num_qubits=4,
-                                                   num_electrons=2)
+                                          num_qubits=4,
+                                          num_electrons=2)
     assert operators
     assert len(operators) == 2 * 2 + 1 * 8
 
@@ -24,8 +24,8 @@ def test_generate_with_default_config():
 
 def test_generate_with_custom_coefficients():
     operators = solvers.get_operator_pool("uccsd",
-                                                   num_qubits=4,
-                                                   num_electrons=2)
+                                          num_qubits=4,
+                                          num_electrons=2)
 
     assert operators
     assert len(operators) == (2 * 2 + 1 * 8)
@@ -38,9 +38,9 @@ def test_generate_with_custom_coefficients():
 
 def test_generate_with_odd_electrons():
     operators = solvers.get_operator_pool("uccsd",
-                                                   num_qubits=6,
-                                                   num_electrons=3,
-                                                   spin=1)
+                                          num_qubits=6,
+                                          num_electrons=3,
+                                          spin=1)
 
     assert operators
     assert len(operators) == 2 * 4 + 4 * 8
@@ -51,8 +51,8 @@ def test_generate_with_odd_electrons():
 
 def test_generate_with_large_system():
     operators = solvers.get_operator_pool("uccsd",
-                                                   num_qubits=20,
-                                                   num_electrons=10)
+                                          num_qubits=20,
+                                          num_electrons=10)
 
     assert operators
     assert len(operators) > 875
@@ -63,9 +63,7 @@ def test_generate_with_large_system():
 
 def test_uccsd_operator_pool_correctness():
     # Generate the UCCSD operator pool
-    pool = solvers.get_operator_pool("uccsd",
-                                              num_qubits=4,
-                                              num_electrons=2)
+    pool = solvers.get_operator_pool("uccsd", num_qubits=4, num_electrons=2)
 
     # Convert SpinOperators to strings
     pool_strings = [op.to_string(False) for op in pool]

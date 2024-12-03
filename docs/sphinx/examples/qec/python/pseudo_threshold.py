@@ -26,17 +26,17 @@ for p in PERates:
     for i in range(nShots):
         data = qec.generate_random_bit_flips(Hz.shape[1], p)
         # Calculate which syndromes are flagged.
-        syndrome = Hz@data % 2
+        syndrome = Hz @ data % 2
 
         convergence, result = decoder.decode(syndrome)
         data_prediction = np.array(result)
 
-        predicted_observable = observable@data_prediction % 2
+        predicted_observable = observable @ data_prediction % 2
 
-        actual_observable = observable@data % 2
+        actual_observable = observable @ data % 2
         if (predicted_observable != actual_observable):
-             nLogicalErrors += 1
-    LERates.append(nLogicalErrors/nShots)
+            nLogicalErrors += 1
+    LERates.append(nLogicalErrors / nShots)
 
 # Count how many shots the decoder failed to correct the errors
 print("PERates:", PERates)
@@ -57,4 +57,3 @@ ax.set_ylabel("Logical Error Rate")
 # Show the plot
 # plt.show()
 # plt.savefig("myplot.png")
-

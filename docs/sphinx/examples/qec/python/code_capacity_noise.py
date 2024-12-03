@@ -28,7 +28,7 @@ for i in range(nShots):
     print(f"data: {data}")
 
     # Calculate which syndromes are flagged.
-    syndrome = Hz@data % 2
+    syndrome = Hz @ data % 2
     print(f"syndrome: {syndrome}")
 
     # Decode the syndrome to predict what happen to the data
@@ -37,11 +37,11 @@ for i in range(nShots):
     print(f"data_prediction: {data_prediction}")
 
     # See if this prediction flipped the observable
-    predicted_observable = observable@data_prediction % 2
+    predicted_observable = observable @ data_prediction % 2
     print(f"predicted_observable: {predicted_observable}")
 
     # See if the observable was actually flipped
-    actual_observable = observable@data % 2
+    actual_observable = observable @ data % 2
     print(f"actual_observable: {actual_observable}")
     if (predicted_observable != actual_observable):
         nLogicalErrors += 1
@@ -52,5 +52,5 @@ print(f"{nLogicalErrors} logical errors in {nShots} shots\n")
 # Can also generate syndromes and data from a single line with:
 syndromes, data = qec.sample_code_capacity(Hz, nShots, p)
 print("From sample function:")
-print("syndromes:\n",syndromes)
-print("data:\n",data)
+print("syndromes:\n", syndromes)
+print("data:\n", data)

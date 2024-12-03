@@ -256,7 +256,7 @@ class GasPhaseGenerator(HamiltonianGenerator):
                         print(
                             '[pyscf] UR-CASCI energy using natural orbitals= ',
                             mycasci.e_tot)
-                    energies['UR-CASCI'] = mycasci.e_tot 
+                    energies['UR-CASCI'] = mycasci.e_tot
                 else:
                     mycasci_mo = mcscf.UCASCI(myhf, norb_cas, nele_cas)
                     mycasci_mo.kernel()
@@ -264,7 +264,7 @@ class GasPhaseGenerator(HamiltonianGenerator):
                         print(
                             '[pyscf] UR-CASCI energy using molecular orbitals= ',
                             mycasci_mo.e_tot)
-                    energies['UR-CASCI'] = mycasci_mo.e_tot 
+                    energies['UR-CASCI'] = mycasci_mo.e_tot
 
             else:
                 if nele_cas is None:
@@ -283,7 +283,7 @@ class GasPhaseGenerator(HamiltonianGenerator):
                                 '[pyscf] R-CASCI energy using natural orbitals= ',
                                 mycasci.e_tot)
 
-                        energies['R-CASCI'] = mycasci.e_tot 
+                        energies['R-CASCI'] = mycasci.e_tot
 
                     elif natorb and (spin != 0):
                         raise RuntimeError(
@@ -298,8 +298,7 @@ class GasPhaseGenerator(HamiltonianGenerator):
                                 '[pyscf] R-CASCI energy using molecular orbitals= ',
                                 mycasci_mo.e_tot)
 
-                        energies['R-CASCI'] = mycasci_mo.e_tot 
-
+                        energies['R-CASCI'] = mycasci_mo.e_tot
 
         ########################
         # CCSD
@@ -334,8 +333,7 @@ class GasPhaseGenerator(HamiltonianGenerator):
                             '[pyscf] UR-CCSD energy of the active space using molecular orbitals= ',
                             mycc.e_tot)
 
-                energies['UR-CCSD'] = mycc.e_tot 
-
+                energies['UR-CCSD'] = mycc.e_tot
 
             else:
                 if nele_cas is None:
@@ -350,8 +348,8 @@ class GasPhaseGenerator(HamiltonianGenerator):
                     frozen = []
                     frozen += [y for y in range(0, mc.ncore)]
                     frozen += [
-                        y
-                        for y in range(mc.ncore + norb_cas, len(myhf.mo_coeff))
+                        y for y in range(mc.ncore +
+                                         norb_cas, len(myhf.mo_coeff))
                     ]
                     if natorb and (spin == 0):
                         mycc = cc.CCSD(myhf, frozen=frozen, mo_coeff=natorbs)
@@ -376,8 +374,7 @@ class GasPhaseGenerator(HamiltonianGenerator):
                                 '[pyscf] R-CCSD energy of the active space using molecular orbitals= ',
                                 mycc.e_tot)
 
-                    energies['R-CCSD'] = mycc.e_tot 
-
+                    energies['R-CCSD'] = mycc.e_tot
 
         #########################
         # CASSCF
@@ -403,8 +400,8 @@ class GasPhaseGenerator(HamiltonianGenerator):
                         print(
                             '[pyscf] UR-CASSCF energy using molecular orbitals= ',
                             mycas.e_tot)
-                        
-                energies['UR-CASSCF'] = mycas.e_tot 
+
+                energies['UR-CASSCF'] = mycas.e_tot
 
             else:
 
@@ -431,8 +428,7 @@ class GasPhaseGenerator(HamiltonianGenerator):
                             '[pyscf] R-CASSCF energy using molecular orbitals= ',
                             mycas.e_tot)
 
-                energies['R-CASSCF'] = mycas.e_tot 
-
+                energies['R-CASSCF'] = mycas.e_tot
 
         ###################################
         # CASCI: FCI of the active space
@@ -449,10 +445,9 @@ class GasPhaseGenerator(HamiltonianGenerator):
                                                       nele_cas,
                                                       ecore=ecore)
                 if verbose:
-                    print(
-                        '[pyscf] UR-CASCI energy using the casscf orbitals= ',
-                        e_fci)
-                    
+                    print('[pyscf] UR-CASCI energy using the casscf orbitals= ',
+                          e_fci)
+
                 energies['UR-CASCI'] = e_fci
 
             else:
@@ -460,7 +455,7 @@ class GasPhaseGenerator(HamiltonianGenerator):
                     raise RuntimeError(
                         "WARN: Natural orbitals cannot be computed. ROMP2 is unavailable in pyscf."
                     )
-                
+
                 h1e_cas, ecore = mycas.get_h1eff()
                 h2e_cas = mycas.get_h2eff()
 
@@ -470,12 +465,10 @@ class GasPhaseGenerator(HamiltonianGenerator):
                                                         nele_cas,
                                                         ecore=ecore)
                 if verbose:
-                    print(
-                        '[pyscf] R-CASCI energy using the casscf orbitals= ',
-                        e_fci)
-                    
-                energies['R-CASCI'] = e_fci 
+                    print('[pyscf] R-CASCI energy using the casscf orbitals= ',
+                          e_fci)
 
+                energies['R-CASCI'] = e_fci
 
         ###################################################################################
         # Computation of one- and two- electron integrals for the active space Hamiltonian
@@ -509,8 +502,7 @@ class GasPhaseGenerator(HamiltonianGenerator):
                                             order='C')
                     h2e_cas[2] = np.asarray(h2e_cas[2].transpose(0, 2, 3, 1),
                                             order='C')
-                    h2e_cas_prime = np.asarray(h2e_cas[1].transpose(
-                        2, 0, 1, 3),
+                    h2e_cas_prime = np.asarray(h2e_cas[1].transpose(2, 0, 1, 3),
                                                order='C')
                 else:
                     raise RuntimeError(
@@ -560,7 +552,7 @@ class GasPhaseGenerator(HamiltonianGenerator):
                 # molecular electron integrals
                 obi, tbi, e_nn = self.generate_molecular_spin_ham_restricted(
                     h1e, h2e, nuclear_repulsion)
-                energies['nuclear_energy'] = e_nn 
+                energies['nuclear_energy'] = e_nn
 
             else:
 
@@ -608,8 +600,14 @@ class GasPhaseGenerator(HamiltonianGenerator):
             'num_orbitals': norb if nele_cas == None else norb_cas,
             'hf_energy': myhf.e_tot,
             'energies': energies,
-            'hpq': {'data':[(x.real,x.imag) for x in obi.astype(complex).flatten().tolist()]},
-            'hpqrs': {'data': [(x.real, x.imag) for x in tbi.astype(complex).flatten().tolist()]},
+            'hpq': {
+                'data': [(x.real, x.imag)
+                         for x in obi.astype(complex).flatten().tolist()]
+            },
+            'hpqrs': {
+                'data': [(x.real, x.imag)
+                         for x in tbi.astype(complex).flatten().tolist()]
+            },
             'operators': {
                 f'{filename}_one_body.dat': 'obi',
                 f'{filename}_two_body.dat': 'tbi'
@@ -620,7 +618,7 @@ class GasPhaseGenerator(HamiltonianGenerator):
             with open(f'{filename}_metadata.json', 'w') as f:
                 json.dump(results, f)
 
-        return results 
+        return results
 
     def generate(self, xyz, basis, **kwargs):
         if xyz == None:
@@ -660,8 +658,8 @@ class GasPhaseGenerator(HamiltonianGenerator):
             'out_file_name'] if 'out_file_name' in kwargs else None
         return self.get_spin_hamiltonian(xyz, spin, charge, basis, symmetry,
                                          memory, cycles, initguess, UR,
-                                         nele_cas, norb_cas, MP2, natorb,
-                                         casci, ccsd, casscf, integrals_natorb,
+                                         nele_cas, norb_cas, MP2, natorb, casci,
+                                         ccsd, casscf, integrals_natorb,
                                          integrals_casscf, verbose, cache_data,
                                          outfilename)
 
