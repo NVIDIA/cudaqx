@@ -148,3 +148,38 @@ jobs:
       (needs.check-changes.outputs.build-solvers == 'true' || needs.check-changes.outputs.build-cudaq == 'true')
     uses: ./.github/workflows/lib_solvers.yaml
 
+  # This job is used for branch protection checks.
+  verify:
+    name: Verify PR
+    if: ${{ always() }}
+    needs:
+      - build-cudaq
+      - build-all
+      - build-qec
+      - build-solvers
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check results
+        run: |
+          status="success"
+
+          check_result() {
+            name=$1
+            result=$2
+
+            # NOTE: "skipped" is considered success.
+            if [[  "$result" == "failure" || "$result" == "cancelled" ]]; then
+              echo "$name job failed"
+
+              status="failed"
+            fi
+          }
+
+          check_result "build-cudaq"   "${{needs.build-cudaq.result}}"
+          check_result "build-all"     "${{needs.build-all.result}}"
+          check_result "build-qec"     "${{needs.build-qec.result}}"
+          check_result "build-solvers" "${{needs.build-solvers.result}}"
+
+          if [[ "$status" != "success" ]]; then
+            exit 1
+          fi
