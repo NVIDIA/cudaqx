@@ -25,7 +25,8 @@ public:
   /// generate an equivalent operator on spins.
   virtual cudaq::spin_op generate(const double constant,
                                   const cudaqx::tensor<> &hpq,
-                                  const cudaqx::tensor<> &hpqrs) = 0;
+                                  const cudaqx::tensor<> &hpqrs,
+                                  const double tolerance) = 0;
   virtual ~fermion_compiler() {}
 };
 

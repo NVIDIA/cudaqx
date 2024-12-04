@@ -203,7 +203,7 @@ void bindOperators(py::module &mod) {
 
   mod.def(
       "jordan_wigner",
-      [](py::buffer hpq, py::buffer hpqrs, double core_energy = 0.0) {
+      [](py::buffer hpq, py::buffer hpqrs, double core_energy = 0.0, double tolerance = 1e-15) {
         auto hpqInfo = hpq.request();
         auto hpqrsInfo = hpqrs.request();
         auto *hpqData = reinterpret_cast<std::complex<double> *>(hpqInfo.ptr);
@@ -216,9 +216,9 @@ void bindOperators(py::module &mod) {
                       {hpqrsInfo.shape.begin(), hpqrsInfo.shape.end()});
 
         return fermion_compiler::get("jordan_wigner")
-            ->generate(core_energy, hpqT, hpqrsT);
+            ->generate(core_energy, hpqT, hpqrsT, tolerance);
       },
-      py::arg("hpq"), py::arg("hpqrs"), py::arg("core_energy") = 0.0,
+      py::arg("hpq"), py::arg("hpqrs"), py::arg("core_energy") = 0.0, py::arg("tolerance") = 1e-15,
       R"#(
 Perform the Jordan-Wigner transformation on fermionic operators.
 
@@ -235,6 +235,10 @@ hpqrs : numpy.ndarray
     Shape should be (N, N, N, N) where N is the number of spin molecular orbitals.
 core_energy : float, optional
     The core energy of the system when using active space Hamiltonian, nuclear energy otherwise. Default is 0.0.
+tolerance : float, optional
+    The threshold value for ignoring small coefficients in the one-body integrals.
+    Coefficients with absolute values smaller than this tolerance are considered as zero.
+    Default is 1e-15.
 
 Returns:
 --------
@@ -254,7 +258,7 @@ Examples:
 >>> h1 = np.array([[0, 1], [1, 0]], dtype=np.complex128)
 >>> h2 = np.zeros((2, 2, 2, 2), dtype=np.complex128)
 >>> h2[0, 1, 1, 0] = h2[1, 0, 0, 1] = 0.5
->>> qubit_op = jordan_wigner(h1, h2, core_energy=0.1)
+>>> qubit_op = jordan_wigner(h1, h2, core_energy=0.1, tolerance=1e-14)
 
 Notes:
 ------
@@ -267,7 +271,7 @@ Notes:
 
   mod.def(
       "jordan_wigner",
-      [](py::buffer buffer, double core_energy = 0.0) {
+      [](py::buffer buffer, double core_energy = 0.0, double tolerance = 1e-15) {
         auto info = buffer.request();
         auto *data = reinterpret_cast<std::complex<double> *>(info.ptr);
         std::size_t size = 1;
@@ -279,16 +283,16 @@ Notes:
           cudaqx::tensor hpq, hpqrs({dim, dim, dim, dim});
           hpq.borrow(data, {info.shape.begin(), info.shape.end()});
           return fermion_compiler::get("jordan_wigner")
-              ->generate(core_energy, hpq, hpqrs);
+              ->generate(core_energy, hpq, hpqrs, tolerance);
         }
 
         std::size_t dim = info.shape[0];
         cudaqx::tensor hpq({dim, dim}), hpqrs;
         hpqrs.borrow(data, {info.shape.begin(), info.shape.end()});
         return fermion_compiler::get("jordan_wigner")
-            ->generate(core_energy, hpq, hpqrs);
+            ->generate(core_energy, hpq, hpqrs, tolerance);
       },
-      py::arg("hpq"), py::arg("core_energy") = 0.0,
+      py::arg("hpq"), py::arg("core_energy") = 0.0, py::arg("tolerance") = 1e-15,
       R"#(
 Perform the Jordan-Wigner transformation on fermionic operators.
 
@@ -304,6 +308,10 @@ hpq : numpy.ndarray
     where N is the number of orbitals.
 core_energy : float, optional
     The core energy of the system. Default is 0.0.
+tolerance : float, optional
+    The threshold value for ignoring small coefficients in the one-body integrals.
+    Coefficients with absolute values smaller than this tolerance are considered as zero.
+    Default is 1e-15.
 
 Returns:
 --------
@@ -322,7 +330,7 @@ Examples:
 >>> import numpy as np
 >>> # One-body integrals
 >>> h1 = np.array([[0, 1], [1, 0]], dtype=np.complex128)
->>> qubit_op1 = jordan_wigner(h1, core_energy=0.1)
+>>> qubit_op1 = jordan_wigner(h1, core_energy=0.1, tolerance=1e-14)
 
 >>> # Two-body integrals
 >>> h2 = np.zeros((2, 2, 2, 2), dtype=np.complex128)
