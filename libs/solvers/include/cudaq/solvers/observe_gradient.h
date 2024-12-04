@@ -9,8 +9,8 @@
 
 #pragma once
 
-#include "cudaq/algorithms/observe.h"
 #include "optimizer.h"
+#include "cudaq/algorithms/observe.h"
 
 using namespace cudaq;
 using namespace cudaqx;

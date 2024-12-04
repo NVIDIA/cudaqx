@@ -9,10 +9,10 @@
 #include "common/Logger.h"
 #include "cudaq.h"
 
-#include "cudaq/solvers/adapt/adapt_simulator.h"
-#include "cudaq/solvers/vqe.h"
 #include "device/adapt.h"
 #include "device/prepare_state.h"
+#include "cudaq/solvers/adapt/adapt_simulator.h"
+#include "cudaq/solvers/vqe.h"
 
 #include <iostream>
 #include <nlohmann/json.hpp>

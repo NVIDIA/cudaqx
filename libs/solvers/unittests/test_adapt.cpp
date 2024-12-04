@@ -10,8 +10,8 @@
 #include <gtest/gtest.h>
 
 #include "cudaq.h"
-#include "cudaq/solvers/adapt.h"
 #include "nvqpp/test_kernels.h"
+#include "cudaq/solvers/adapt.h"
 
 std::vector<double> h2_data{
     3, 1, 1, 3, 0.0454063,  0,  2, 0, 0, 0, 0.17028,    0,
