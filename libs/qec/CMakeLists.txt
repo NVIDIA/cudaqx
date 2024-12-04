@@ -56,8 +56,6 @@ option(CUDAQX_QEC_INSTALL_PYTHON
 # ==============================================================================
 
 if (CUDAQX_QEC_STANDALONE_BUILD)
-  # FIXME for now, we only use library mode
-  set(CUDAQ_LIBRARY_MODE ON)
   find_package(CUDAQ REQUIRED)
 
   # FIXME
