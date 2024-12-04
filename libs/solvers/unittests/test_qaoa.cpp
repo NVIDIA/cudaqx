@@ -10,9 +10,9 @@
 #include <gtest/gtest.h>
 
 #include "cudaq.h"
+#include "nvqpp/test_kernels.h"
 #include "cudaq/solvers/operators.h"
 #include "cudaq/solvers/qaoa.h"
-#include "nvqpp/test_kernels.h"
 
 using namespace cudaq::spin;
 
