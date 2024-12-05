@@ -180,7 +180,7 @@ public:
 
     // Transform to a spin operator
     auto transform = fermion_compiler::get(options.fermion_to_spin);
-    auto spinHamiltonian = transform->generate(energy, hpq, hpqrs, 1e-15);
+    auto spinHamiltonian = transform->generate(energy, hpq, hpqrs);
 
     // Return the molecular hamiltonian
     return molecular_hamiltonian{spinHamiltonian, hpq,    hpqrs,

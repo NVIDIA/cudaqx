@@ -26,7 +26,7 @@ public:
   virtual cudaq::spin_op generate(const double constant,
                                   const cudaqx::tensor<> &hpq,
                                   const cudaqx::tensor<> &hpqrs,
-                                  const double tolerance) = 0;
+                                  const double tolerance = 1e-15) = 0;
   virtual ~fermion_compiler() {}
 };
 
