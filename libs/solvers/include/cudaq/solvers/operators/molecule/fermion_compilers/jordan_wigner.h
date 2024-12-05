@@ -15,7 +15,7 @@ namespace cudaq::solvers {
 class jordan_wigner : public fermion_compiler {
 public:
   cudaq::spin_op generate(const double constant, const cudaqx::tensor<> &hpq,
-                          const cudaqx::tensor<> &hpqrs, 
+                          const cudaqx::tensor<> &hpqrs,
                           const double tolerance = 1e-15) override;
 
   CUDAQ_EXTENSION_CREATOR_FUNCTION(fermion_compiler, jordan_wigner)

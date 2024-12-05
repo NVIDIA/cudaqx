@@ -203,7 +203,8 @@ void bindOperators(py::module &mod) {
 
   mod.def(
       "jordan_wigner",
-      [](py::buffer hpq, py::buffer hpqrs, double core_energy = 0.0, double tolerance = 1e-15) {
+      [](py::buffer hpq, py::buffer hpqrs, double core_energy = 0.0,
+         double tolerance = 1e-15) {
         auto hpqInfo = hpq.request();
         auto hpqrsInfo = hpqrs.request();
         auto *hpqData = reinterpret_cast<std::complex<double> *>(hpqInfo.ptr);
@@ -218,7 +219,8 @@ void bindOperators(py::module &mod) {
         return fermion_compiler::get("jordan_wigner")
             ->generate(core_energy, hpqT, hpqrsT, tolerance);
       },
-      py::arg("hpq"), py::arg("hpqrs"), py::arg("core_energy") = 0.0, py::arg("tolerance") = 1e-15,
+      py::arg("hpq"), py::arg("hpqrs"), py::arg("core_energy") = 0.0,
+      py::arg("tolerance") = 1e-15,
       R"#(
 Perform the Jordan-Wigner transformation on fermionic operators.
 
@@ -236,7 +238,7 @@ hpqrs : numpy.ndarray
 core_energy : float, optional
     The core energy of the system when using active space Hamiltonian, nuclear energy otherwise. Default is 0.0.
 tolerance : float, optional
-    The threshold value for ignoring small coefficients in the one-body integrals.
+    The threshold value for ignoring small coefficients.
     Coefficients with absolute values smaller than this tolerance are considered as zero.
     Default is 1e-15.
 
@@ -271,7 +273,8 @@ Notes:
 
   mod.def(
       "jordan_wigner",
-      [](py::buffer buffer, double core_energy = 0.0, double tolerance = 1e-15) {
+      [](py::buffer buffer, double core_energy = 0.0,
+         double tolerance = 1e-15) {
         auto info = buffer.request();
         auto *data = reinterpret_cast<std::complex<double> *>(info.ptr);
         std::size_t size = 1;
@@ -292,7 +295,8 @@ Notes:
         return fermion_compiler::get("jordan_wigner")
             ->generate(core_energy, hpq, hpqrs, tolerance);
       },
-      py::arg("hpq"), py::arg("core_energy") = 0.0, py::arg("tolerance") = 1e-15,
+      py::arg("hpq"), py::arg("core_energy") = 0.0,
+      py::arg("tolerance") = 1e-15,
       R"#(
 Perform the Jordan-Wigner transformation on fermionic operators.
 
@@ -309,7 +313,7 @@ hpq : numpy.ndarray
 core_energy : float, optional
     The core energy of the system. Default is 0.0.
 tolerance : float, optional
-    The threshold value for ignoring small coefficients in the one-body integrals.
+    The threshold value for ignoring small coefficients.
     Coefficients with absolute values smaller than this tolerance are considered as zero.
     Default is 1e-15.
 
