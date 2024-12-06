@@ -383,11 +383,14 @@ cudaq::spin_op two_body(std::size_t p, std::size_t q, std::size_t r,
 cudaq::spin_op jordan_wigner::generate(const double constant,
                                        const tensor<> &hpq,
                                        const tensor<> &hpqrs,
-                                       const double tolerance) {
+                                       const heterogeneous_map &options) {
   assert(hpq.rank() == 2 && "hpq must be a rank-2 tensor");
   assert(hpqrs.rank() == 4 && "hpqrs must be a rank-4 tensor");
   auto spin_hamiltonian = constant * cudaq::spin_op();
   std::size_t nqubit = hpq.shape()[0];
+
+  double tolerance =
+      options.get({"tolerance", "tol", "TOLERANCE", "TOL"}, 1e-15);
 
   for (auto p : cudaq::range(nqubit)) {
     auto coef = hpq.at({p, p});

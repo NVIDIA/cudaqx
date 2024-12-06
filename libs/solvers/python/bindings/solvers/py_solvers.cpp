@@ -204,7 +204,7 @@ void bindOperators(py::module &mod) {
   mod.def(
       "jordan_wigner",
       [](py::buffer hpq, py::buffer hpqrs, double core_energy = 0.0,
-         double tolerance = 1e-15) {
+         py::kwargs options) {
         auto hpqInfo = hpq.request();
         auto hpqrsInfo = hpqrs.request();
         auto *hpqData = reinterpret_cast<std::complex<double> *>(hpqInfo.ptr);
@@ -217,10 +217,9 @@ void bindOperators(py::module &mod) {
                       {hpqrsInfo.shape.begin(), hpqrsInfo.shape.end()});
 
         return fermion_compiler::get("jordan_wigner")
-            ->generate(core_energy, hpqT, hpqrsT, tolerance);
+            ->generate(core_energy, hpqT, hpqrsT, hetMapFromKwargs(options));
       },
       py::arg("hpq"), py::arg("hpqrs"), py::arg("core_energy") = 0.0,
-      py::arg("tolerance") = 1e-15,
       R"#(
 Perform the Jordan-Wigner transformation on fermionic operators.
 
@@ -273,8 +272,7 @@ Notes:
 
   mod.def(
       "jordan_wigner",
-      [](py::buffer buffer, double core_energy = 0.0,
-         double tolerance = 1e-15) {
+      [](py::buffer buffer, double core_energy = 0.0, py::kwargs options) {
         auto info = buffer.request();
         auto *data = reinterpret_cast<std::complex<double> *>(info.ptr);
         std::size_t size = 1;
@@ -286,17 +284,16 @@ Notes:
           cudaqx::tensor hpq, hpqrs({dim, dim, dim, dim});
           hpq.borrow(data, {info.shape.begin(), info.shape.end()});
           return fermion_compiler::get("jordan_wigner")
-              ->generate(core_energy, hpq, hpqrs, tolerance);
+              ->generate(core_energy, hpq, hpqrs, hetMapFromKwargs(options));
         }
 
         std::size_t dim = info.shape[0];
         cudaqx::tensor hpq({dim, dim}), hpqrs;
         hpqrs.borrow(data, {info.shape.begin(), info.shape.end()});
         return fermion_compiler::get("jordan_wigner")
-            ->generate(core_energy, hpq, hpqrs, tolerance);
+            ->generate(core_energy, hpq, hpqrs, hetMapFromKwargs(options));
       },
       py::arg("hpq"), py::arg("core_energy") = 0.0,
-      py::arg("tolerance") = 1e-15,
       R"#(
 Perform the Jordan-Wigner transformation on fermionic operators.
 
