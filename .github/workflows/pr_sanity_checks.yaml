@@ -20,6 +20,8 @@ jobs:
     outputs:
       check-cpp: ${{ steps.filter.outputs.check-cpp }}
       check-all-cpp: ${{ steps.filter.outputs.check-all-cpp }}
+      check-python: ${{ steps.filter.outputs.check-python }}
+      check-all-python: ${{ steps.filter.outputs.check-all-python }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -37,8 +39,13 @@ jobs:
             check-cpp:
               - '**/*.cpp'
               - '**/*.h'
+            check-all-python:
+              - '.github/workflows/pr_sanity_checks.yaml'
+              - '.style.yapf'
+            check-python:
+              - '**/*.py'
 
-  check-clang-format:
+  check-cpp:
     name: Check C++ code formatting
     needs: [check-changes]
     if: needs.check-changes.outputs.check-cpp == 'true' || needs.check-changes.outputs.check-all-cpp == 'true'
@@ -101,3 +108,92 @@ jobs:
           name: clang-format-patch
           path: clang-*.patch
 
+  check-python:
+    name: Check Python code formatting
+    needs: [check-changes]
+    if: needs.check-changes.outputs.check-python == 'true' || needs.check-changes.outputs.check-all-python == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          set-safe-directory: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install YAPF
+        run: pip install yapf
+
+      - name: YAPF all things
+        if: needs.check-changes.outputs.check-all-python == 'true'
+        run: |
+          git ls-files '*.py' | xargs yapf -i
+
+          if ! git diff --exit-code; then
+            git diff --ignore-submodules > yapf-format.patch
+            echo "🟥 YAPF found formatting problems (check the uploaded artifact)." >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+          echo "🟩 YAPF found no formatting problems" >> $GITHUB_STEP_SUMMARY
+          exit 0
+
+      - name: YAPF changed files
+        if: needs.check-changes.outputs.check-all-python != 'true'
+        run: |
+          # We did a shallow clone, and thus we need to make sure to fetch the base
+          # commit.
+          git fetch --recurse-submodules=no origin ${{ github.base_ref }}
+          DIFF_COMMIT_SHA=$(git rev-parse origin/${{ github.base_ref }})
+
+          git diff --diff-filter=d $DIFF_COMMIT_SHA -- '*.py' | yapf-diff -i
+
+          if ! git diff --exit-code; then
+            git diff --ignore-submodules > yapf-format.patch
+            echo "🟥 YAPF found formatting problems (check the uploaded artifact)." >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+          echo "🟩 YAPF found no formatting problems" >> $GITHUB_STEP_SUMMARY
+          exit 0
+
+      - name: Upload format patch
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        if: ${{ failure() }}
+        with:
+          name: yapf-format-patch
+          path: yapf-*.patch
+
+  # This job is used for branch protection checks.
+  verify:
+    name: Sanity check PR
+    if: ${{ always() }}
+    needs:
+      - check-cpp
+      - check-python
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check results
+        run: |
+          status="success"
+
+          check_result() {
+            name=$1
+            result=$2
+
+            # NOTE: "skipped" is considered success.
+            if [[  "$result" == "failure" || "$result" == "cancelled" ]]; then
+              echo "$name job failed"
+
+              status="failed"
+            fi
+          }
+
+          check_result "check-cpp"    "${{needs.check-cpp.result}}"
+          check_result "check-python" "${{needs.check-python.result}}"
+
+          if [[ "$status" != "success" ]]; then
+            exit 1
+          fi

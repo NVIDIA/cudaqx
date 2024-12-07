@@ -1,0 +1,27 @@
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: 0 1 * * *
+
+name: "Sync with upstream repository"
+
+jobs:
+  sync:
+    name: Get Updates from Upstream
+    if: ${{ github.repository != 'NVIDIA/cudaqx' }}
+    permissions:
+      actions: write
+      contents: write
+    runs-on: 'ubuntu-latest'
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Fast-forward ${{ github.ref_name }}
+      run: |
+        git config --global user.email "action@github.com"
+        git config --global user.name "GitHub Action"
+        git remote add upstream https://github.com/NVIDIA/cudaqx
+        git pull --ff-only upstream ${{ github.ref_name }}
+        git push origin
