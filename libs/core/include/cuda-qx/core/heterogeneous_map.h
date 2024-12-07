@@ -65,8 +65,10 @@ public:
   /// @param _other The map to assign from
   /// @return Reference to this map
   heterogeneous_map &operator=(const heterogeneous_map &_other) {
-    clear();
-    items = _other.items;
+    if (this != &_other) {
+      clear();
+      items = _other.items;
+    }
     return *this;
   }
 
@@ -76,20 +78,14 @@ public:
   /// @param value The value
   template <typename T>
   void insert(const std::string &key, const T &value) {
-    auto iter = items.find(key);
-    if (iter == items.end()) {
+
+    if constexpr (is_bounded_char_array<T>{}) {
       // Never insert a raw char array or char ptr,
       // auto conver to a string
-      if constexpr (is_bounded_char_array<T>{}) {
-        items.insert({key, std::string(value)});
-        return;
-      }
-
-      items.insert({key, value});
-      return;
+      items.insert_or_assign(key, std::string(value));
+    } else {
+      items.insert_or_assign(key, value);
     }
-
-    items.at(key) = value;
   }
 
   /// @brief Get a value from the map
