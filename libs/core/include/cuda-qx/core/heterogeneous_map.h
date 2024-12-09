@@ -46,10 +46,6 @@ public:
   /// @param _other The map to copy from
   heterogeneous_map(const heterogeneous_map &_other) { *this = _other; }
 
-  /// @brief Move constructor
-  /// @param _other The map to move from
-  heterogeneous_map(heterogeneous_map &_other) { *this = _other; }
-
   /// @brief Constructor from initializer list
   /// @param list The initializer list of key-value pairs
   heterogeneous_map(
