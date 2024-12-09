@@ -9,6 +9,7 @@
 #pragma once
 
 #include "cuda-qx/core/extension_point.h"
+#include "cuda-qx/core/heterogeneous_map.h"
 #include "cuda-qx/core/tensor.h"
 
 #include "cudaq/spin_op.h"
@@ -23,9 +24,10 @@ class fermion_compiler : public cudaqx::extension_point<fermion_compiler> {
 public:
   /// @brief Given a fermionic representation of an operator
   /// generate an equivalent operator on spins.
-  virtual cudaq::spin_op generate(const double constant,
-                                  const cudaqx::tensor<> &hpq,
-                                  const cudaqx::tensor<> &hpqrs) = 0;
+  virtual cudaq::spin_op
+  generate(const double constant, const cudaqx::tensor<> &hpq,
+           const cudaqx::tensor<> &hpqrs,
+           const cudaqx::heterogeneous_map &options = {}) = 0;
   virtual ~fermion_compiler() {}
 };
 
