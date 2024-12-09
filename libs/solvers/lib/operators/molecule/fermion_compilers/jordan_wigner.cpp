@@ -390,7 +390,7 @@ cudaq::spin_op jordan_wigner::generate(const double constant,
   std::size_t nqubit = hpq.shape()[0];
 
   double tolerance =
-      options.get({"tolerance", "tol", "TOLERANCE", "TOL"}, 1e-15);
+      options.get<double>(std::vector<std::string>{"tolerance", "tol"}, 1e-15);
 
   for (auto p : cudaq::range(nqubit)) {
     auto coef = hpq.at({p, p});

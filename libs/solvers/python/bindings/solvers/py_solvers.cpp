@@ -238,6 +238,7 @@ core_energy : float, optional
     The core energy of the system when using active space Hamiltonian, nuclear energy otherwise. Default is 0.0.
 tolerance : float, optional
     The threshold value for ignoring small coefficients.
+    Can also be specified using 'tol'.
     Coefficients with absolute values smaller than this tolerance are considered as zero.
     Default is 1e-15.
 
@@ -311,6 +312,7 @@ core_energy : float, optional
     The core energy of the system. Default is 0.0.
 tolerance : float, optional
     The threshold value for ignoring small coefficients.
+    Can also be specified using 'tol'.
     Coefficients with absolute values smaller than this tolerance are considered as zero.
     Default is 1e-15.
 
