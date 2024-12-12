@@ -55,20 +55,6 @@ private:
  * This function returns a comma-separated list of the registered symbols.
  * @return A C-style string containing the list of registered symbols.
  */
-extern "C" const char *get_exported_symbols() {
-  static std::string exported_symbols;
-  if (exported_symbols.empty()) {
-    std::ostringstream oss;
-    auto symbols = SymbolRegistry::instance().get_symbols();
-    for (size_t i = 0; i < symbols.size(); ++i) {
-      oss << symbols[i];
-      if (i != symbols.size() - 1) {
-        oss << ",";
-      }
-    }
-    exported_symbols = oss.str();
-  }
-  return exported_symbols.c_str();
-}
+extern "C" const char *get_exported_symbols();
 
 #endif // PLUGIN_EXPORTS_H
