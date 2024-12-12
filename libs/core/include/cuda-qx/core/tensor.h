@@ -13,7 +13,9 @@
 
 namespace cudaqx {
 
-/// @brief A tensor class implementing the PIMPL idiom.
+/// @brief A tensor class implementing the PIMPL idiom. The flattened data is
+/// stored where the strides grow from right to left (similar to a
+/// multi-dimensional C array).
 template <typename Scalar = std::complex<double>>
 class tensor {
 private:
@@ -35,7 +37,7 @@ private:
 
 public:
   /// @brief Type alias for the scalar type used in the tensor
-  using scalar_type = details::tensor_impl<Scalar>::scalar_type;
+  using scalar_type = typename details::tensor_impl<Scalar>::scalar_type;
   static constexpr auto ScalarAsString = type_to_string<Scalar>();
 
   /// @brief Construct an empty tensor
@@ -54,7 +56,7 @@ public:
                 .release())) {}
 
   /// @brief Construct a tensor with the given data and shape
-  /// @param data Pointer to the tensor data
+  /// @param data Pointer to the tensor data. This takes ownership of the data.
   /// @param shape The shape of the tensor
   tensor(const scalar_type *data, const std::vector<std::size_t> &shape)
       : pimpl(std::shared_ptr<details::tensor_impl<Scalar>>(

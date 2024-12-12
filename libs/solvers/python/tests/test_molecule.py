@@ -53,8 +53,11 @@ def test_jordan_wigner():
                                        0,
                                        verbose=True,
                                        casci=True)
-    op = solvers.jordan_wigner(molecule.hpq, molecule.hpqrs,
-                               molecule.energies['nuclear_energy'])
+
+    op = solvers.jordan_wigner(molecule.hpq,
+                               molecule.hpqrs,
+                               core_energy=molecule.energies['nuclear_energy'],
+                               tol=1e-15)
     assert molecule.hamiltonian == op
     hpq = np.array(molecule.hpq)
     hpqrs = np.array(molecule.hpqrs)
@@ -115,7 +118,9 @@ def test_jordan_wigner_as():
 
     hpq = np.array(molecule.hpq)
     hpqrs = np.array(molecule.hpqrs)
-    hpqJw = solvers.jordan_wigner(hpq, molecule.energies['core_energy'])
+    hpqJw = solvers.jordan_wigner(hpq,
+                                  core_energy=molecule.energies['core_energy'],
+                                  tolerance=1e-15)
     hpqrsJw = solvers.jordan_wigner(hpqrs)
     op2 = hpqJw + hpqrsJw
 
