@@ -6,11 +6,11 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
+#include "plugin_exports.h" // required for exporting the decoder as a shared library
 #include "cudaq/qec/decoder.h"
 #include <cassert>
 #include <map>
 #include <vector>
-#include "plugin_exports.h" // required for exporting the decoder as a shared library
 
 namespace cudaq::qec {
 
@@ -23,7 +23,7 @@ private:
 
 public:
   single_error_lut_example(const cudaqx::tensor<uint8_t> &H,
-                   const cudaqx::heterogeneous_map &params)
+                           const cudaqx::heterogeneous_map &params)
       : decoder(H) {
     // Decoder-specific constructor arguments can be placed in `params`.
 
@@ -86,7 +86,6 @@ public:
   //                           const cudaqx::heterogeneous_map &params) {
   //       return std::make_unique<single_error_lut_example>(H, params);
   //     })
-
 };
 
 // CUDAQ_REGISTER_TYPE(single_error_lut_example)
@@ -94,10 +93,9 @@ public:
 } // namespace cudaq::qec
 
 // The following is required when compiling the decoder code as a plugin
-extern "C" std::unique_ptr<cudaq::qec::decoder> create_single_error_lut_example(
-    const cudaqx::tensor<uint8_t> &H, 
-    const cudaqx::heterogeneous_map &params
-) {
+extern "C" std::unique_ptr<cudaq::qec::decoder>
+create_single_error_lut_example(const cudaqx::tensor<uint8_t> &H,
+                                const cudaqx::heterogeneous_map &params) {
   return std::make_unique<cudaq::qec::single_error_lut_example>(H, params);
 }
 

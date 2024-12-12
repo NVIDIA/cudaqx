@@ -10,7 +10,9 @@ cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 project(cudaq-qec-example)
 
 # Specify the source file for the plugin
-set(PLUGIN_SRC single_error_lut_example.cpp)
+set(PLUGIN_SRC 
+  single_error_lut_example.cpp
+)
 
 # Create the shared library
 add_library(cudaq-qec-example SHARED ${PLUGIN_SRC})
@@ -34,7 +36,7 @@ target_link_libraries(cudaq-qec-example
 
 # Place the shared library in the specified output directory
 set_target_properties(cudaq-qec-example PROPERTIES 
-  LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
+  LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib/plugins
 )
 
 # Set RPATH so that the shared libraries are properly resolved

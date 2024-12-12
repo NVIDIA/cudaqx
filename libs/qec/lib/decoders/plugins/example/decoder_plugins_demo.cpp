@@ -13,17 +13,17 @@
 // decoder_plugins_demo
 // ./decoder_plugins_demo
 
+#include <dlfcn.h>
+#include <filesystem>
 #include <iostream>
 #include <memory>
-#include <vector>
 #include <string>
-#include <filesystem>
-#include <dlfcn.h>
+#include <vector>
 
 #include "cudaq.h"
+#include "decoder_plugins_loader.h" // required header to load the plugins
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/experiments.h"
-#include "decoder_plugins_loader.h" // required header to load the plugins
 
 int main() {
   auto steane = cudaq::qec::get_code("steane");
@@ -46,14 +46,16 @@ int main() {
   size_t nShots = 5;
 
   DecoderFactory factory;
-  factory.load_plugins("."); // provide the abs path to the directory containing the plugins
+  factory.load_plugins(
+      "."); // provide the abs path to the directory containing the plugins
   auto plugin_names = factory.get_all_plugin_names();
   std::cout << "Decoder plugins contain the following decoders:\n";
-  for (auto& name: plugin_names) {
-    std::cout << "-> " << name <<"\n";
+  for (auto &name : plugin_names) {
+    std::cout << "-> " << name << "\n";
   }
   cudaqx::heterogeneous_map params;
-  std::unique_ptr<cudaq::qec::decoder> lut_decoder = factory.create_decoder("create_single_error_lut_example", Hz, params);
+  std::unique_ptr<cudaq::qec::decoder> lut_decoder =
+      factory.create_decoder("create_single_error_lut_example", Hz, params);
 
   std::cout << "nShots: " << nShots << "\n";
 
@@ -115,4 +117,3 @@ int main() {
   std::cout << "Syn:\n";
   syn.dump();
 }
-
