@@ -104,13 +104,16 @@ public:
     // we have a value of type int, but request here is std::size_t.
     // Handle that case, by getting T's map of related types, and checking
     // if any of them are valid.
-    using RelatedTypes =
-        typename RelatedTypesMap<std::remove_cvref_t<T>>::types;
+    using RelatedTypes = typename RelatedTypesMap<
+        std::remove_cv_t<std::remove_reference_t<T>>>::types;
     std::optional<T> opt;
     cudaqx::tuple_for_each(RelatedTypes(), [&](auto &&el) {
       if (!opt.has_value() &&
-          isCastable<std::remove_cvref_t<decltype(el)>>(iter->second))
-        opt = std::any_cast<std::remove_cvref_t<decltype(el)>>(iter->second);
+          isCastable<std::remove_cv_t<std::remove_reference_t<decltype(el)>>>(
+              iter->second))
+        opt = std::any_cast<
+            std::remove_cv_t<std::remove_reference_t<decltype(el)>>>(
+            iter->second);
     });
 
     if (opt.has_value())
@@ -185,10 +188,12 @@ public:
   /// @brief Check if the map contains a key
   /// @param key The key to check
   /// @return true if the key exists, false otherwise
-  bool contains(const std::string &key) const { return items.contains(key); }
+  bool contains(const std::string &key) const {
+    return items.find(key) != items.end();
+  }
   bool contains(const std::vector<std::string> &keys) const {
     for (auto &key : keys)
-      if (items.contains(key))
+      if (items.find(key) != items.end())
         return true;
 
     return false;
