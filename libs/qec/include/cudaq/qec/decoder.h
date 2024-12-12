@@ -1,5 +1,5 @@
 /****************************************************************-*- C++ -*-****
- * Copyright (c) 2022 - 2024 NVIDIA Corporation & Affiliates.                  *
+ * Copyright (c) 2024 NVIDIA Corporation & Affiliates.                         *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -19,7 +19,7 @@ namespace cudaq::qec {
 #if defined(CUDAQX_QEC_FLOAT_TYPE)
 using float_t = CUDAQX_QEC_FLOAT_TYPE;
 #else
-using float_t = float;
+using float_t = double;
 #endif
 
 /// @brief Decoder results
@@ -30,6 +30,17 @@ struct decoder_result {
   /// @brief Vector of length `block_size` with soft probabilities of errors in
   /// each index.
   std::vector<float_t> result;
+
+  // Manually define the equality operator
+  bool operator==(const decoder_result &other) const {
+    return std::tie(converged, result) ==
+           std::tie(other.converged, other.result);
+  }
+
+  // Manually define the inequality operator
+  bool operator!=(const decoder_result &other) const {
+    return !(*this == other);
+  }
 };
 
 /// @brief The `decoder` base class should be subclassed by specific decoder
