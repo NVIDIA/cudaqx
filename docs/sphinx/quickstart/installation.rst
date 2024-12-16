@@ -22,6 +22,14 @@ The simplest way to install CUDA-QX is via pip. You can install individual compo
     # Install both libraries
     pip install cudaq-qec cudaq-solvers
 
+.. note:: 
+
+    CUDA-Q Solvers will require the presence of :code:`libgfortran`, which is
+    not distributed with the Python wheel, for provided classical optimizers. If
+    :code:`libgfortran` is not installed, you will need to install it via your
+    distribution's package manager. On Debian based systems, you can install
+    this with :code:`apt-get install gfortran`.
+
 Docker Container
 ^^^^^^^^^^^^^^^^
 

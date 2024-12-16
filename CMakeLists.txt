@@ -91,6 +91,68 @@ if (CUDAQX_INCLUDE_TESTS)
   endif()
 endif()
 
+# Hooks setup. If the repo contains a custom pre-push hook, attempt to install
+# it. If the user has a different one installed, then warn them but do not fail
+# configuration.
+# ==============================================================================
+
+# Define the directory where your hooks are stored
+set(SRC_HOOK_PRE_PUSH "${CMAKE_SOURCE_DIR}/.githooks/pre-push")
+
+if(EXISTS "${SRC_HOOK_PRE_PUSH}")
+  # Get the Git hooks directory from the Git configuration
+  execute_process(
+    COMMAND git config --get core.hooksPath
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    OUTPUT_VARIABLE GIT_HOOKS_DIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
+  
+  # Determine the target hooks directory
+  if(GIT_HOOKS_DIR)
+    set(TARGET_HOOKS_DIR "${GIT_HOOKS_DIR}")
+  else()
+    set(TARGET_HOOKS_DIR "${CMAKE_SOURCE_DIR}/.git/hooks")
+  endif()
+  set(DST_HOOK_PRE_PUSH "${TARGET_HOOKS_DIR}/pre-push")
+  
+  if(EXISTS "${DST_HOOK_PRE_PUSH}")
+    # Compare the contents of the src and dst hook.
+    execute_process(
+      COMMAND git hash-object "${DST_HOOK_PRE_PUSH}"
+      OUTPUT_VARIABLE SHA_DST
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    execute_process(
+      COMMAND git hash-object "${SRC_HOOK_PRE_PUSH}"
+      OUTPUT_VARIABLE SHA_SRC
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    if(NOT SHA_SRC STREQUAL SHA_DST)
+      message(WARNING
+        "You already have a ${DST_HOOK_PRE_PUSH} script installed. "
+        "This configuration script will not overwrite it despite the fact that "
+        "it is strongly recommended to use ${SRC_HOOK_PRE_PUSH} in your environment."
+        "\nProceed with caution!")
+    endif()
+  else()
+    if(EXISTS "${TARGET_HOOKS_DIR}")
+      file(COPY "${SRC_HOOK_PRE_PUSH}"
+           DESTINATION "${TARGET_HOOKS_DIR}"
+           FILE_PERMISSIONS
+             OWNER_READ OWNER_WRITE OWNER_EXECUTE
+             GROUP_READ GROUP_EXECUTE
+             WORLD_READ WORLD_EXECUTE)
+      message(STATUS "Git pre-push hook installed to ${TARGET_HOOKS_DIR}")
+    else()
+      message(WARNING
+        "The Git hooks directory does not exist: ${TARGET_HOOKS_DIR}\n"
+        "Are you sure this is a Git repository? Hook cannot be installed."
+      )
+    endif()
+  endif()
+endif()
+
 # Directory setup
 # ==============================================================================
 
