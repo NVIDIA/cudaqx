@@ -870,8 +870,8 @@ Here's a complete example of running a memory experiment:
 
         # Create code and decoder
         code = qec.get_code('steane')
-        decoder = qec.get_decoder('steane_lut',
-                                code.get_parity())
+        decoder = qec.get_decoder('single_error_lut',
+                                  code.get_parity())
 
         # Configure noise
         noise = cudaq.noise_model()
