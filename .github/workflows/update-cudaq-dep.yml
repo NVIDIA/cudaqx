@@ -26,13 +26,27 @@ jobs:
           echo "Latest SHA: $SHA"
           echo "sha=$SHA" >> $GITHUB_ENV
 
-      - name: Update custom config file
+      - name: Check if SHA has changed
+        id: check_change
+        run: |
+          CURRENT_SHA=$(jq -r '.cudaq.ref' .cudaq_version)
+          if [[ "${{ env.LATEST_SHA }}" == "$CURRENT_SHA" ]]; then
+            echo "No changes in SHA. Skipping PR creation."
+            echo "changed=false" >> $GITHUB_OUTPUT
+          else
+            echo "SHA has changed. Proceeding to create PR."
+            echo "changed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Update .cudaq_version file
+        if: ${{ steps.check_change.outputs.changed == 'true' }}
         run: |
           jq '.cudaq.ref = "${{ env.sha }}"' .cudaq_version > .cudaq_version.tmp
           mv .cudaq_version.tmp .cudaq_version
           echo "Updated SHA in .cudaq_version"
 
       - name: Commit and push changes
+        if: ${{ steps.check_change.outputs.changed == 'true' }}
         run: |
           git config --global user.email "action@github.com"
           git config --global user.name "GitHub Action"
@@ -43,6 +57,7 @@ jobs:
           git push origin $BRANCH_NAME
 
       - name: Create Pull Request
+        if: ${{ steps.check_change.outputs.changed == 'true' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
