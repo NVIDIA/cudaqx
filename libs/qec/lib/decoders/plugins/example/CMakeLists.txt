@@ -16,7 +16,6 @@ project(${MODULE_NAME})
 set(PLUGIN_SRC
   single_error_lut_example.cpp
   # single_error_lut_example2.cpp // add other decoder source files here
-  plugin_exports.cpp
 )
 
 # Create the shared library
