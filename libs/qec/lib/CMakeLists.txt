@@ -19,6 +19,8 @@ add_library(${LIBRARY_NAME} SHARED
   decoders/single_error_lut.cpp
 )
 
+add_subdirectory(decoders/plugins/example)
+
 add_subdirectory(codes)
 add_subdirectory(device) 
 
