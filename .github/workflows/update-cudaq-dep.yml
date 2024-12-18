@@ -1,13 +1,13 @@
 on:
   workflow_dispatch:
-  pull_request:
-  #schedule:
-  #  - cron: 0 1 * * *
+  schedule:
+    - cron: 0 1 * * 6
 
-name: "Update CUDA-Q SHA"
+name: "Bump CUDA-Q Commit"
 
 jobs:
-  update-sha:
+  update-cudaq-commit:
+    name: Bump CUDA-Q Commit
     runs-on: ubuntu-latest
     if: ${{ github.repository == 'NVIDIA/cudaqx' }}
     permissions:
@@ -21,7 +21,6 @@ jobs:
           ref: main
 
       - name: Fetch the latest commit
-        id: get_sha
         run: |
           SHA=$(curl -s "https://api.github.com/repos/NVIDIA/cuda-quantum/commits/main" | jq -r '.sha')
           echo "Latest SHA: $SHA"
