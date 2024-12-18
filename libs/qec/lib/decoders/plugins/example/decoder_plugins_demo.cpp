@@ -21,9 +21,9 @@
 #include <vector>
 
 #include "cudaq.h"
+#include "decoder_plugins_loader.h" // required header to load the plugins
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/experiments.h"
-#include "decoder_plugins_loader.h" // required header to load the plugins
 
 int main() {
   auto steane = cudaq::qec::get_code("steane");
