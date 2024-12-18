@@ -1,0 +1,68 @@
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: 0 1 * * 6
+
+name: "Bump CUDA-Q Commit"
+
+jobs:
+  update-cudaq-commit:
+    name: Bump CUDA-Q Commit
+    runs-on: ubuntu-latest
+    if: ${{ github.repository == 'NVIDIA/cudaqx' }}
+    permissions:
+      contents: write  # Required to push changes
+      pull-requests: write  # Required to open PRs
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Fetch the latest commit
+        run: |
+          SHA=$(curl -s "https://api.github.com/repos/NVIDIA/cuda-quantum/commits/main" | jq -r '.sha')
+          echo "Latest SHA: $SHA"
+          echo "sha=$SHA" >> $GITHUB_ENV
+
+      - name: Check if SHA has changed
+        id: check_change
+        run: |
+          CURRENT_SHA=$(jq -r '.cudaq.ref' .cudaq_version)
+          if [[ "${{ env.LATEST_SHA }}" == "$CURRENT_SHA" ]]; then
+            echo "No changes in SHA. Skipping PR creation."
+            echo "changed=false" >> $GITHUB_OUTPUT
+          else
+            echo "SHA has changed. Proceeding to create PR."
+            echo "changed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Update .cudaq_version file
+        if: ${{ steps.check_change.outputs.changed == 'true' }}
+        run: |
+          jq '.cudaq.ref = "${{ env.sha }}"' .cudaq_version > .cudaq_version.tmp
+          mv .cudaq_version.tmp .cudaq_version
+          echo "Updated SHA in .cudaq_version"
+
+      - name: Commit and push changes
+        if: ${{ steps.check_change.outputs.changed == 'true' }}
+        run: |
+          git config --global user.email "action@github.com"
+          git config --global user.name "GitHub Action"
+          BRANCH_NAME="update-cudaq-sha-$(date +%s)"
+          git checkout -b $BRANCH_NAME
+          git add .cudaq_version
+          git commit -m "Update dependency SHA to ${{ env.sha }}"
+          git push origin $BRANCH_NAME
+
+      - name: Create Pull Request
+        if: ${{ steps.check_change.outputs.changed == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          gh pr create \
+            --title "Bump CUDA-Q commit" \
+            --body "Auto update to the latest CUDA-Q commit" \
+            --head "${BRANCH_NAME}" \
+            --base "main"
