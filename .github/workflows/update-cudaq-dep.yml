@@ -1,0 +1,52 @@
+on:
+  workflow_dispatch:
+  pull_request:
+  #schedule:
+  #  - cron: 0 1 * * *
+
+name: "Update CUDA-Q SHA"
+
+jobs:
+  update-sha:
+    runs-on: ubuntu-latest
+    if: ${{ github.repository == 'NVIDIA/cudaqx' }}
+    permissions:
+      contents: write  # Required to push changes
+      pull-requests: write  # Required to open PRs
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Fetch the latest commit
+        id: get_sha
+        run: |
+          SHA=$(curl -s "https://api.github.com/repos/NVIDIA/cuda-quantum/commits/main" | jq -r '.sha')
+          echo "Latest SHA: $SHA"
+          echo "sha=$SHA" >> $GITHUB_ENV
+
+      - name: Update custom config file
+        run: |
+          jq '.cudaq.ref = "${{ env.sha }}"' .cudaq_version > .cudaq_version.tmp
+          mv .cudaq_version.tmp .cudaq_version
+          echo "Updated SHA in .cudaq_version"
+
+      - name: Commit and push changes
+        run: |
+          git config --global user.email "action@github.com"
+          git config --global user.name "GitHub Action"
+          BRANCH_NAME="update-cudaq-sha-$(date +%s)"
+          git checkout -b $BRANCH_NAME
+          git add .cudaq_version
+          git commit -m "Update dependency SHA to ${{ env.sha }}"
+          git push origin $BRANCH_NAME
+
+      - name: Create Pull Request
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          gh pr create \
+            --title "Bump CUDA-Q commit" \
+            --body "Auto update to the latest CUDA-Q commit" \
+            --head "${BRANCH_NAME}" \
+            --base "main"
