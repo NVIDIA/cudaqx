@@ -353,6 +353,158 @@ Notes:
   further manipulated using CUDA Quantum operations.
 )#");
 
+  mod.def(
+      "bravyi_kitaev",
+      [](py::buffer hpq, py::buffer hpqrs, double core_energy = 0.0,
+         py::kwargs options) {
+        auto hpqInfo = hpq.request();
+        auto hpqrsInfo = hpqrs.request();
+        auto *hpqData = reinterpret_cast<std::complex<double> *>(hpqInfo.ptr);
+        auto *hpqrsData =
+            reinterpret_cast<std::complex<double> *>(hpqrsInfo.ptr);
+
+        cudaqx::tensor hpqT, hpqrsT;
+        hpqT.borrow(hpqData, {hpqInfo.shape.begin(), hpqInfo.shape.end()});
+        hpqrsT.borrow(hpqrsData,
+                      {hpqrsInfo.shape.begin(), hpqrsInfo.shape.end()});
+
+        return fermion_compiler::get("bravyi_kitaev")
+            ->generate(core_energy, hpqT, hpqrsT, hetMapFromKwargs(options));
+      },
+      py::arg("hpq"), py::arg("hpqrs"), py::arg("core_energy") = 0.0,
+      R"#(
+Perform the Bravyi-Kitaev transformation on fermionic operators.
+
+This function applies the Bravyi-Kitaev transformation to convert fermionic operators
+(represented by one- and two-body integrals) into qubit operators.
+
+Parameters:
+-----------
+hpq : numpy.ndarray
+    A 2D complex numpy array representing the one-body integrals.
+    Shape should be (N, N) where N is the number of spin molecular orbitals.
+hpqrs : numpy.ndarray
+    A 4D complex numpy array representing the two-body integrals.
+    Shape should be (N, N, N, N) where N is the number of spin molecular orbitals.
+core_energy : float, optional
+    The core energy of the system when using active space Hamiltonian, nuclear energy otherwise. Default is 0.0.
+tolerance : float, optional
+    The threshold value for ignoring small coefficients.
+    Can also be specified using 'tol'.
+    Coefficients with absolute values smaller than this tolerance are considered as zero.
+    Default is 1e-15.
+
+Returns:
+--------
+cudaq.SpinOperator
+    A qubit operator (spin operator) resulting from the Bravyi-Kitaev transformation.
+
+Raises:
+-------
+ValueError
+    If the input arrays have incorrect shapes or types.
+RuntimeError
+    If the Bravyi-Kitaev transformation fails for any reason.
+
+Examples:
+---------
+>>> import numpy as np
+>>> h1 = np.array([[0, 1], [1, 0]], dtype=np.complex128)
+>>> h2 = np.zeros((2, 2, 2, 2), dtype=np.complex128)
+>>> h2[0, 1, 1, 0] = h2[1, 0, 0, 1] = 0.5
+>>> qubit_op = bravyi_kitaev(h1, h2, core_energy=0.1, tolerance=1e-14)
+
+Notes:
+------
+- The input arrays `hpq` and `hpqrs` must be contiguous and in row-major order.
+- This function uses the "bravyi_kitaev" fermion compiler internally to perform
+  the transformation.
+- The resulting qubit operator can be used directly in quantum algorithms or
+  further manipulated using CUDA Quantum operations.
+)#");
+
+  mod.def(
+      "bravyi_kitaev",
+      [](py::buffer buffer, double core_energy = 0.0, py::kwargs options) {
+        auto info = buffer.request();
+        auto *data = reinterpret_cast<std::complex<double> *>(info.ptr);
+        std::size_t size = 1;
+        for (auto &s : info.shape)
+          size *= s;
+        std::vector<std::complex<double>> vec(data, data + size);
+        if (info.shape.size() == 2) {
+          std::size_t dim = info.shape[0];
+          cudaqx::tensor hpq, hpqrs({dim, dim, dim, dim});
+          hpq.borrow(data, {info.shape.begin(), info.shape.end()});
+          return fermion_compiler::get("bravyi_kitaev")
+              ->generate(core_energy, hpq, hpqrs, hetMapFromKwargs(options));
+        }
+
+        std::size_t dim = info.shape[0];
+        cudaqx::tensor hpq({dim, dim}), hpqrs;
+        hpqrs.borrow(data, {info.shape.begin(), info.shape.end()});
+        return fermion_compiler::get("bravyi_kitaev")
+            ->generate(core_energy, hpq, hpqrs, hetMapFromKwargs(options));
+      },
+      py::arg("hpq"), py::arg("core_energy") = 0.0,
+      R"#(
+Perform the Bravyi-Kitaev transformation on fermionic operators.
+
+This function applies the Bravyi-Kitaev transformation to convert fermionic operators
+(represented by either one-body or two-body integrals) into qubit operators.
+
+Parameters:
+-----------
+hpq : numpy.ndarray
+    A complex numpy array representing either:
+    - One-body integrals: 2D array with shape (N, N)
+    - Two-body integrals: 4D array with shape (N, N, N, N)
+    where N is the number of orbitals.
+core_energy : float, optional
+    The core energy of the system. Default is 0.0.
+tolerance : float, optional
+    The threshold value for ignoring small coefficients.
+    Can also be specified using 'tol'.
+    Coefficients with absolute values smaller than this tolerance are considered as zero.
+    Default is 1e-15.
+
+Returns:
+--------
+cudaq.SpinOperator
+    A qubit operator (spin operator) resulting from the Bravyi-Kitaev transformation.
+
+Raises:
+-------
+ValueError
+    If the input array has an incorrect shape or type.
+RuntimeError
+    If the Bravyi-Kitaev transformation fails for any reason.
+
+Examples:
+---------
+>>> import numpy as np
+>>> # One-body integrals
+>>> h1 = np.array([[0, 1], [1, 0]], dtype=np.complex128)
+>>> qubit_op1 = bravyi_kitaev(h1, core_energy=0.1, tolerance=1e-14)
+
+>>> # Two-body integrals
+>>> h2 = np.zeros((2, 2, 2, 2), dtype=np.complex128)
+>>> h2[0, 1, 1, 0] = h2[1, 0, 0, 1] = 0.5
+>>> qubit_op2 = bravyi_kitaev(h2)
+
+Notes:
+------
+- The input array must be contiguous and in row-major order.
+- This function automatically detects whether the input represents one-body or 
+  two-body integrals based on its shape.
+- For one-body integrals input, a zero-initialized two-body tensor is used internally.
+- For two-body integrals input, a zero-initialized one-body tensor is used internally.
+- This function uses the "bravyi_kitaev" fermion compiler internally to perform
+  the transformation.
+- The resulting qubit operator can be used directly in quantum algorithms or
+  further manipulated using CUDA Quantum operations.
+)#");
+
   py::class_<molecular_hamiltonian>(mod, "MolecularHamiltonian")
       .def_readonly("energies", &molecular_hamiltonian::energies,
                     R"#(

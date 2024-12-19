@@ -44,6 +44,11 @@ target_link_libraries(test_molecule PRIVATE GTest::gtest_main cudaq-solvers)
 add_dependencies(CUDAQXSolversUnitTests test_molecule)
 gtest_discover_tests(test_molecule)
 
+add_executable(test_bravyi_kitaev test_bravyi_kitaev.cpp)
+target_link_libraries(test_bravyi_kitaev PRIVATE GTest::gtest_main cudaq-solvers)
+add_dependencies(CUDAQXSolversUnitTests test_bravyi_kitaev)
+gtest_discover_tests(test_bravyi_kitaev)
+
 add_executable(test_optimizers test_optimizers.cpp)
 target_link_libraries(test_optimizers PRIVATE GTest::gtest_main cudaq-solvers)
 add_dependencies(CUDAQXSolversUnitTests test_optimizers)
