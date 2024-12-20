@@ -6,7 +6,7 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
-// This example shows how to load decoders from .so objects
+// This example shows how to use decoders from decoder plugins
 //
 // Compile and run with
 // nvq++ --enable-mlir -lcudaq-qec decoder_plugins_demo.cpp -o
@@ -21,7 +21,6 @@
 #include <vector>
 
 #include "cudaq.h"
-#include "decoder_plugins_loader.h" // required header to load the plugins
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/experiments.h"
 
@@ -46,8 +45,9 @@ int main() {
   double p = 0.2;
   size_t nShots = 5;
 
-  // load the decoder plugins
-  load_plugins(".");
+  // Check for available decoders
+  for (auto &name : cudaq::qec::decoder::get_registered())
+    printf("Decoder: %s\n", name.c_str());
   // create a decoder from the plugins
   auto lut_decoder = cudaq::qec::get_decoder("single_error_lut_example", Hz);
 

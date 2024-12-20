@@ -67,7 +67,16 @@ add_custom_target(cudaqx-pymodules)
 
 if (CUDAQX_INCLUDE_TESTS)
   include(CTest)
+  # Create the directory for decoder plugins before GoogleTest Discovery is run
+  add_custom_command(
+    OUTPUT ${CMAKE_BINARY_DIR}/lib/decoder-plugins
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_INSTALL_PREFIX}/lib/decoder-plugins
+  )
+  add_custom_target(decoder-plugin-dir ALL DEPENDS ${CMAKE_BINARY_DIR}/lib/decoder-plugins)
+
   add_custom_target(CUDAQXUnitTests)
+  add_dependencies(CUDAQXUnitTests decoder-plugin-dir)
+
   add_custom_target(run_tests
     COMMAND ${CMAKE_COMMAND} -E env
             PYTHONPATH="${CUDAQ_INSTALL_DIR}:${CMAKE_BINARY_DIR}/python"
