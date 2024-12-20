@@ -15,6 +15,7 @@ add_library(cudaq-solvers SHARED
   operators/molecule/drivers/pyscf_driver.cpp
   operators/molecule/fermion_compilers/fermion_compiler.cpp
   operators/molecule/fermion_compilers/jordan_wigner.cpp
+  operators/molecule/fermion_compilers/bravyi_kitaev.cpp
   operators/molecule/molecule.cpp
   operators/graph/max_cut.cpp
   operators/graph/clique.cpp
