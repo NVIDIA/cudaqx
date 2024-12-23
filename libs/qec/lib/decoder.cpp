@@ -7,7 +7,10 @@
  ******************************************************************************/
 
 #include "cudaq/qec/decoder.h"
+#include "cudaq/qec/plugin_loader.h"
 #include <cassert>
+#include <dlfcn.h>
+#include <filesystem>
 #include <vector>
 
 INSTANTIATE_REGISTRY(cudaq::qec::decoder, const cudaqx::tensor<uint8_t> &)
@@ -71,3 +74,15 @@ std::unique_ptr<decoder> get_decoder(const std::string &name,
   return decoder::get(name, H, options);
 }
 } // namespace cudaq::qec
+
+// Constructor function for auto-loading plugins
+__attribute__((constructor)) void load_decoder_plugins() {
+  // Load plugins from the decoder-specific plugin directory
+  load_plugins(DECODER_PLUGIN_DIR, PluginType::DECODER);
+}
+
+// Destructor function to clean up only decoder plugins
+__attribute__((destructor)) void cleanup_decoder_plugins() {
+  // Clean up decoder-specific plugins
+  cleanup_plugins(PluginType::DECODER);
+}
