@@ -38,4 +38,9 @@ void load_plugins(const std::string &plugin_dir, PluginType type);
 /// be cleaned up.
 void cleanup_plugins(PluginType type);
 
+/// @brief Checks whether a plugin handle has already been closed
+/// @param handle The handle of the plugin to check
+/// @return Returns true if the handle has been closed, false otherwise
+inline bool is_handle_closed(void *handle);
+
 #endif // PLUGIN_LOADER_H

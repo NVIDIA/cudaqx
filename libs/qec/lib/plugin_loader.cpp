@@ -9,16 +9,28 @@
 #include "cudaq/qec/plugin_loader.h"
 #include <filesystem>
 #include <iostream>
+#include <set>
 
 namespace fs = std::filesystem;
 
-std::map<std::string, PluginHandle> &get_plugin_handles() {
+static std::set<void *> closed_handles; // Track already-closed handles
+
+static std::map<std::string, PluginHandle> &get_plugin_handles() {
   static std::map<std::string, PluginHandle> plugin_handles;
   return plugin_handles;
 }
 
+inline bool is_handle_closed(void *handle) {
+  return closed_handles.find(handle) != closed_handles.end();
+}
+
 // Function to load plugins from a directory based on their type
 void load_plugins(const std::string &plugin_dir, PluginType type) {
+  if (!fs::exists(plugin_dir)) {
+    std::cerr << "WARNING: Plugin directory does not exist: " << plugin_dir
+              << std::endl;
+    return;
+  }
   for (const auto &entry : fs::directory_iterator(plugin_dir)) {
     if (entry.path().extension() == ".so") {
 
@@ -35,19 +47,18 @@ void load_plugins(const std::string &plugin_dir, PluginType type) {
   }
 }
 
-// Function to clean up plugins based on their type
 void cleanup_plugins(PluginType type) {
-  for (auto it = get_plugin_handles().begin();
-       it != get_plugin_handles().end();) {
-    // Only erase if the type matches with the target
-    if (it->second.type == type) {
-      if (it->second.handle)
-        dlclose(it->second.handle);
-      // Erase from the map to avoid double dlclose()
-      // Go the next iterator in the map
-      it = get_plugin_handles().erase(it);
-    } else {
-      ++it; // Only increment if the item wasn't erased
+  for (const auto &[key, plugin] : get_plugin_handles()) {
+    if (plugin.type == type) {
+      if (plugin.handle) {
+        if (!is_handle_closed(plugin.handle)) {
+          dlclose(plugin.handle);
+          closed_handles.insert(plugin.handle);
+        }
+      } else {
+        std::cerr << "WARNING: Invalid or null handle for plugin: " << key
+                  << "\n";
+      }
     }
   }
 }
