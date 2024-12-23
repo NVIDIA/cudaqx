@@ -43,11 +43,9 @@ void load_plugins(const std::string &plugin_dir, PluginType type) {
 void cleanup_plugins(PluginType type) {
   for (auto &[key, plugin] : get_plugin_handles()) {
     if (plugin.type == type) {
-      if (plugin.handle) {
-        if (!plugin.is_closed) {
-          dlclose(plugin.handle);
-          plugin.is_closed = true;
-        }
+      if (plugin.handle && !plugin.is_closed) {
+        dlclose(plugin.handle);
+        plugin.is_closed = true;
       } else {
         std::cerr << "WARNING: Invalid or null handle for plugin: " << key
                   << "\n";
