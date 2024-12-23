@@ -30,7 +30,7 @@ jobs:
         id: check_change
         run: |
           CURRENT_SHA=$(jq -r '.cudaq.ref' .cudaq_version)
-          if [[ "${{ env.LATEST_SHA }}" == "$CURRENT_SHA" ]]; then
+          if [[ "${{ env.sha }}" == "$CURRENT_SHA" ]]; then
             echo "No changes in SHA. Skipping PR creation."
             echo "changed=false" >> $GITHUB_OUTPUT
           else
