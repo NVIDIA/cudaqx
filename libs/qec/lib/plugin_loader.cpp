@@ -9,19 +9,12 @@
 #include "cudaq/qec/plugin_loader.h"
 #include <filesystem>
 #include <iostream>
-#include <set>
 
 namespace fs = std::filesystem;
-
-static std::set<void *> closed_handles; // Track already-closed handles
 
 static std::map<std::string, PluginHandle> &get_plugin_handles() {
   static std::map<std::string, PluginHandle> plugin_handles;
   return plugin_handles;
-}
-
-inline bool is_handle_closed(void *handle) {
-  return closed_handles.find(handle) != closed_handles.end();
 }
 
 // Function to load plugins from a directory based on their type
@@ -41,19 +34,19 @@ void load_plugins(const std::string &plugin_dir, PluginType type) {
                   << " Error: " << dlerror() << std::endl;
       } else {
         get_plugin_handles().emplace(entry.path().filename().string(),
-                                     PluginHandle{handle, type});
+                                     PluginHandle{handle, type, false});
       }
     }
   }
 }
 
 void cleanup_plugins(PluginType type) {
-  for (const auto &[key, plugin] : get_plugin_handles()) {
+  for (auto &[key, plugin] : get_plugin_handles()) {
     if (plugin.type == type) {
       if (plugin.handle) {
-        if (!is_handle_closed(plugin.handle)) {
+        if (!plugin.is_closed) {
           dlclose(plugin.handle);
-          closed_handles.insert(plugin.handle);
+          plugin.is_closed = true;
         }
       } else {
         std::cerr << "WARNING: Invalid or null handle for plugin: " << key

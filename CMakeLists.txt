@@ -68,7 +68,6 @@ add_custom_target(cudaqx-pymodules)
 if (CUDAQX_INCLUDE_TESTS)
   include(CTest)
   add_custom_target(CUDAQXUnitTests)
-  
   add_custom_target(run_tests
     COMMAND ${CMAKE_COMMAND} -E env
             PYTHONPATH="${CUDAQ_INSTALL_DIR}:${CMAKE_BINARY_DIR}/python"

@@ -25,6 +25,7 @@ struct PluginHandle {
   void *handle; // Pointer to the shared library handle. This is the result of
                 // dlopen() function.
   PluginType type; // Type of the plugin (e.g., decoder, code, etc)
+  bool is_closed;  // Flag indicating if the handle is closed
 };
 
 /// @brief Function to load plugins from a directory based on type
@@ -37,10 +38,5 @@ void load_plugins(const std::string &plugin_dir, PluginType type);
 /// @param type The type of plugins to clean up. Only plugins of this type will
 /// be cleaned up.
 void cleanup_plugins(PluginType type);
-
-/// @brief Checks whether a plugin handle has already been closed
-/// @param handle The handle of the plugin to check
-/// @return Returns true if the handle has been closed, false otherwise
-inline bool is_handle_closed(void *handle);
 
 #endif // PLUGIN_LOADER_H
