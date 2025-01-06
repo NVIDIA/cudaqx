@@ -40,6 +40,22 @@ def test_decoder_result_structure():
     assert len(result.result) == 10
 
 
+def test_decoder_plugin_initialization():
+    decoder = qec.get_decoder('single_error_lut_example', H)
+    assert decoder is not None
+    assert hasattr(decoder, 'decode')
+
+
+def test_decoder_plugin_result_structure():
+    decoder = qec.get_decoder('single_error_lut_example', H)
+    result = decoder.decode(create_test_syndrome())
+
+    assert hasattr(result, 'converged')
+    assert hasattr(result, 'result')
+    assert isinstance(result.converged, bool)
+    assert isinstance(result.result, list)
+
+
 def test_decoder_result_values():
     decoder = qec.get_decoder('example_byod', H)
     result = decoder.decode(create_test_syndrome())
