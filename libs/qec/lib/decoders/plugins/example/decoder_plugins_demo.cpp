@@ -27,7 +27,6 @@
 int main() {
   auto steane = cudaq::qec::get_code("steane");
   auto Hz = steane->get_parity_z();
-  cudaqx::heterogeneous_map params;
   std::vector<size_t> t_shape = Hz.shape();
 
   std::cout << "Hz.shape():\n";
