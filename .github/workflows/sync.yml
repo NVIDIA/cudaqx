@@ -9,14 +9,13 @@ jobs:
   sync:
     name: Get Updates from Upstream
     if: ${{ github.repository != 'NVIDIA/cudaqx' }}
-    permissions:
-      actions: write
-      contents: write
     runs-on: 'ubuntu-latest'
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.REPO_BOT_ACCESS_TOKEN }}
 
     - name: Fast-forward ${{ github.ref_name }}
       run: |
