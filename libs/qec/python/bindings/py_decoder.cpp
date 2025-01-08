@@ -14,6 +14,7 @@
 #include "common/Logger.h"
 
 #include "cudaq/qec/decoder.h"
+#include "cudaq/qec/plugin_loader.h"
 
 #include "type_casters.h"
 #include "utils.h"
@@ -70,6 +71,13 @@ std::unordered_map<std::string, std::function<py::object(
     PyDecoderRegistry::registry;
 
 void bindDecoder(py::module &mod) {
+  // Required by all plugin classes
+  auto cleanup_callback = []() {
+    // Change the type to the correct plugin type
+    cleanup_plugins(PluginType::DECODER);
+  };
+  // This ensures the correct shutdown sequence
+  mod.add_object("_cleanup", py::capsule(cleanup_callback));
 
   auto qecmod = py::hasattr(mod, "qecrt")
                     ? mod.attr("qecrt").cast<py::module_>()

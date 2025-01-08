@@ -11,6 +11,7 @@
 
 #include <dlfcn.h>
 #include <map>
+#include <memory>
 #include <string>
 
 /// @brief Enum to define different types of plugins
@@ -22,10 +23,9 @@ enum class PluginType {
 
 /// @brief A struct to store plugin handle with its type
 struct PluginHandle {
-  void *handle; // Pointer to the shared library handle. This is the result of
-                // dlopen() function.
-  PluginType type; // Type of the plugin (e.g., decoder, code, etc)
-  bool is_closed;  // Flag indicating if the handle is closed
+  std::shared_ptr<void> handle; // Pointer to the shared library handle. This is
+                                // the result of dlopen() function.
+  PluginType type;              // Type of the plugin (e.g., decoder, code, etc)
 };
 
 /// @brief Function to load plugins from a directory based on type
