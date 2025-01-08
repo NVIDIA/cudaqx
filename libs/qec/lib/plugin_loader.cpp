@@ -19,6 +19,11 @@ static std::map<std::string, PluginHandle> &get_plugin_handles() {
 
 // Function to load plugins from a directory based on their type
 void load_plugins(const std::string &plugin_dir, PluginType type) {
+  if (!fs::exists(plugin_dir)) {
+    std::cerr << "WARNING: Plugin directory does not exist: " << plugin_dir
+              << std::endl;
+    return;
+  }
   for (const auto &entry : fs::directory_iterator(plugin_dir)) {
     if (entry.path().extension() == ".so") {
       void *raw_handle = dlopen(entry.path().c_str(), RTLD_NOW);
