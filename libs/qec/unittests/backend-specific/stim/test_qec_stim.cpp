@@ -385,7 +385,7 @@ TEST(QECCodeTester, checkNoisySampleMemoryCircuitAndDecode) {
 
     int nShots = 1;
     int nRounds = 10;
-    cudaq::set_random_seed(13);
+    cudaq::set_random_seed(14);
     cudaq::noise_model noise;
     noise.add_all_qubit_channel("x", cudaq::qec::two_qubit_depolarization(0.01),
                                 1);
