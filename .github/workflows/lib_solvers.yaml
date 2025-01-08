@@ -7,7 +7,8 @@ jobs:
   pr-build:
     name: Build and test
     if: startsWith(github.ref, 'refs/heads/pull-request/')
-    runs-on: ${{ startsWith(github.repository, 'NVIDIA/cudaqx') && 'linux-arm64-cpu8' || 'ubuntu-latest' }}
+    runs-on: linux-arm64-gpu-a100-latest-1
+    #runs-on: ${{ startsWith(github.repository, 'NVIDIA/cudaqx') && 'linux-arm64-cpu8' || 'ubuntu-latest' }}
     container: ghcr.io/nvidia/cuda-quantum-devdeps:ext-cu12.0-gcc11-main
     permissions:
       actions: write
