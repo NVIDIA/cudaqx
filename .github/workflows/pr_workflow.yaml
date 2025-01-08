@@ -39,6 +39,7 @@ jobs:
           filters: |
             build-cudaq:
               - '.github/workflows/cudaq_bump.yml'
+              - '.github/workflows/pr_workflow.yaml'
               - '.github/actions/get-cudaq-build/**'
               - '.cudaq_version'
             build-docs:
@@ -84,7 +85,7 @@ jobs:
     name: Build CUDAQ
     needs: [check-changes]
     if: needs.check-changes.outputs.build-cudaq == 'true'
-    runs-on: ${{ startsWith(github.repository, 'NVIDIA/cudaqx') && 'linux-amd64-cpu32' || 'ubuntu-latest' }}
+    runs-on: ${{ startsWith(github.repository, 'NVIDIA/cudaqx') && 'linux-arm64-cpu32' || 'ubuntu-latest' }}
     container: ghcr.io/nvidia/cuda-quantum-devdeps:ext-cu12.0-gcc11-main
     permissions:
       actions: write
