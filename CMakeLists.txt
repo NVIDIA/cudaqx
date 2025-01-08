@@ -16,7 +16,7 @@ project(CUDAQX
   LANGUAGES C CXX)
 
 set(CUDAQX_ALL_LIBS "qec;solvers")
-set(CUDAQX_ENABLE_LIBS "" CACHE STRING
+set(CUDAQX_ENABLE_LIBS "all" CACHE STRING
   "Semicolon-separated list of libs to build (${CUDAQX_ALL_LIBS}), or \"all\".")
 
 # We don't want to handle "all" later, thus expand it here.
@@ -45,9 +45,9 @@ include(CUDA-QX)
 # Options
 # ==============================================================================
 
-option(CUDAQX_INCLUDE_TESTS "Generate build targets for unit tests." OFF)
-option(CUDAQX_INCLUDE_DOCS "Generate build targets for the docs." OFF)
-option(CUDAQX_BINDINGS_PYTHON "Generate build targets for python bindings." OFF)
+option(CUDAQX_INCLUDE_TESTS "Generate build targets for unit tests." ON)
+option(CUDAQX_INCLUDE_DOCS "Generate build targets for the docs." ON)
+option(CUDAQX_BINDINGS_PYTHON "Generate build targets for python bindings." ON)
 
 # Top-level External Dependencies
 # ==============================================================================
