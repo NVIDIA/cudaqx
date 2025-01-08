@@ -9,7 +9,10 @@ jobs:
     if: startsWith(github.ref, 'refs/heads/pull-request/')
     runs-on: linux-arm64-gpu-a100-latest-1
     #runs-on: ${{ startsWith(github.repository, 'NVIDIA/cudaqx') && 'linux-arm64-cpu8' || 'ubuntu-latest' }}
-    container: ghcr.io/nvidia/cuda-quantum-devdeps:ext-cu12.0-gcc11-main
+    container:
+      image: ghcr.io/nvidia/cuda-quantum-devdeps:ext-cu12.0-gcc11-main
+      env:
+        NVIDIA_VISIBLE_DEVICES: ${{ env.NVIDIA_VISIBLE_DEVICES }}
     permissions:
       actions: write
       contents: read
