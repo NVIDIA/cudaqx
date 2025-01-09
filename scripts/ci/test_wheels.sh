@@ -18,6 +18,7 @@ python=python${python_version}
 apt-get update && apt-get install -y --no-install-recommends \
         libgfortran5 python${python_version} python$(echo ${python_version} | cut -d . -f 1)-pip
 
+
 ${python} -m pip install --no-cache-dir pytest
 
 #${python} -m pip install wheels/cuda_quantum_cu12-0.0.0-cp310-cp310-manylinux_2_28_x86_64.whl
