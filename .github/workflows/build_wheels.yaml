@@ -58,3 +58,89 @@ jobs:
           name: wheels-py${{ matrix.python }}-arm64
           path: /wheels/**
 
+  test-cudaqx-wheels:
+    name: Test CUDA-QX wheels (CPU)
+    needs: linux-build
+    runs-on: linux-arm64-cpu4
+    container: ubuntu:22.04
+    permissions:
+      actions: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [arm64]
+        python: ['3.10', '3.11', '3.12']
+  
+    steps:
+      - name: Get code
+        uses: actions/checkout@v4
+        with:
+          set-safe-directory: true
+  
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+  
+      - name: Install requirements
+        run: |
+          bash .github/workflows/scripts/install_git_cli.sh
+          apt install -y --no-install-recommends libgfortran5 unzip
+  
+      - name: Download CUDAQX wheels
+        uses: actions/download-artifact@v4
+        with:
+          name: wheels-py${{ matrix.python }}-${{ matrix.platform }}
+          path: /wheels
+  
+      - name: Test wheels
+        run: |
+          ls /wheels
+          bash scripts/ci/test_wheels.sh ${{ matrix.python }}
+  
+  test-wheels-gpu:
+    name: Test CUDA-QX wheels (GPU)
+    needs: linux-build
+    runs-on: linux-${{ matrix.runner.arch }}-gpu-${{ matrix.runner.gpu }}-latest-1
+    container:
+      image: nvidia/cuda:12.0.0-base-ubuntu22.04
+      env:
+        NVIDIA_VISIBLE_DEVICES: ${{ env.NVIDIA_VISIBLE_DEVICES }}
+    permissions:
+      actions: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [
+          { arch: arm64, gpu: a100 },
+        ]
+        python: ['3.10', '3.11', '3.12']
+  
+    steps:
+      - name: Get code
+        uses: actions/checkout@v4
+        with:
+          set-safe-directory: true
+  
+      - name: Install Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+  
+      - name: Install requirements
+        run: |
+          bash .github/workflows/scripts/install_git_cli.sh
+          apt install -y --no-install-recommends libgfortran5 unzip
+  
+      - name: Download CUDAQX wheels
+        uses: actions/download-artifact@v4
+        with:
+          name: wheels-py${{ matrix.python }}-${{ matrix.runner.arch }}
+          path: /wheels
+  
+      - name: Test wheels
+        run: |
+          ls /wheels
+          bash scripts/ci/test_wheels.sh ${{ matrix.python }}
