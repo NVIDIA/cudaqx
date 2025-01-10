@@ -8,7 +8,6 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
-
 export CUDA_VERSION=12.0
 
 # We need to use a newer toolchain because CUDA-QX libraries rely on c++20
@@ -65,41 +64,7 @@ index 7b7541d..2261334 100644
  endif()
  install(TARGETS cudaq-pyscf DESTINATION lib/plugins)'
 
-CUDAQ_PATCH2='diff --git a/lib/Frontend/nvqpp/ConvertDecl.cpp b/lib/Frontend/nvqpp/ConvertDecl.cpp
-index 149959c8e..ea23990f6 100644
---- a/lib/Frontend/nvqpp/ConvertDecl.cpp
-+++ b/lib/Frontend/nvqpp/ConvertDecl.cpp
-@@ -169,8 +169,10 @@ bool QuakeBridgeVisitor::interceptRecordDecl(clang::RecordDecl *x) {
-       auto fnTy = cast<FunctionType>(popType());
-       return pushType(cc::IndirectCallableType::get(fnTy));
-     }
--    auto loc = toLocation(x);
--    TODO_loc(loc, "unhandled type, " + name + ", in cudaq namespace");
-+    if (!isInNamespace(x, "solvers") && !isInNamespace(x, "qec")) {
-+      auto loc = toLocation(x);
-+      TODO_loc(loc, "unhandled type, " + name + ", in cudaq namespace");
-+    }
-   }
-   if (isInNamespace(x, "std")) {
-     if (name.equals("vector")) {
-diff --git a/lib/Frontend/nvqpp/ConvertExpr.cpp b/lib/Frontend/nvqpp/ConvertExpr.cpp
-index e6350d1c5..28c98c6cb 100644
---- a/lib/Frontend/nvqpp/ConvertExpr.cpp
-+++ b/lib/Frontend/nvqpp/ConvertExpr.cpp
-@@ -2050,7 +2050,9 @@ bool QuakeBridgeVisitor::VisitCallExpr(clang::CallExpr *x) {
-       return pushValue(call.getResult(0));
-     }
- 
--    TODO_loc(loc, "unknown function, " + funcName + ", in cudaq namespace");
-+    if (!isInNamespace(func, "solvers") && !isInNamespace(func, "qec")) {
-+      TODO_loc(loc, "unknown function, " + funcName + ", in cudaq namespace");
-+    }
-   } // end in cudaq namespace
- 
-   if (isInNamespace(func, "std")) {'
-
 echo "$CUDAQ_PATCH" | git apply --verbose
-echo "$CUDAQ_PATCH2" | git apply --verbose
 
 $python -m venv --system-site-packages .venv
 source .venv/bin/activate
