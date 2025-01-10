@@ -20,6 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        python: ['3.10', '3.11', '3.12']
         toolchain:
           - id: cu12.0-gcc11
             cc: gcc-11
@@ -49,3 +50,8 @@ jobs:
           .github/workflows/scripts/build_wheels.sh \
               --cudaq-prefix $HOME/.cudaq \
 
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-py${{ matrix.python }}-amd64
+          path: /wheels/**
