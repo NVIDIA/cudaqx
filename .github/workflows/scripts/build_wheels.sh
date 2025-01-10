@@ -85,18 +85,10 @@ cd libs/qec
 SKBUILD_CMAKE_ARGS="-DCUDAQ_DIR=$cudaq_prefix/lib/cmake/cudaq;-DCMAKE_CXX_COMPILER_EXTERNAL_TOOLCHAIN=/opt/rh/gcc-toolset-11/root/usr/lib/gcc/x86_64-redhat-linux/11/" \
 $python -m build --wheel
 
+CUDAQ_EXCLUDE_LIST=$(for f in $(find $cudaq_prefix/lib -name "*.so" -printf "%P\n" | sort); do echo "--exclude $f"; done | tr '\n' ' ')
+
 LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$(pwd)/_skbuild/lib" \
-$python -m auditwheel -v repair dist/*.whl \
-  --exclude libcudaq-em-default.so \
-  --exclude libcudaq-python-interop.so \
-  --exclude libcudaq-ensmallen.so \
-  --exclude libcudaq-common.so \
-  --exclude libcudaq-platform-default.so \
-  --exclude libnvqir-qpp.so \
-  --exclude libnvqir.so \
-  --exclude libcudaq.so \
-  --exclude libcudaq-spin.so \
-  --exclude libcudaq-nlopt.so \
+$python -m auditwheel -v repair dist/*.whl $CUDAQ_EXCLUDE_LIST \
   --wheel-dir /wheels
 
 # ==============================================================================
@@ -109,17 +101,7 @@ SKBUILD_CMAKE_ARGS="-DCUDAQ_DIR=$cudaq_prefix/lib/cmake/cudaq;-DCMAKE_CXX_COMPIL
 $python -m build --wheel
 
 LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$(pwd)/_skbuild/lib" \
-$python -m auditwheel -v repair dist/*.whl \
-  --exclude libcudaq-em-default.so \
-  --exclude libcudaq-python-interop.so \
-  --exclude libcudaq-ensmallen.so \
-  --exclude libcudaq-common.so \
-  --exclude libcudaq-platform-default.so \
-  --exclude libnvqir-qpp.so \
-  --exclude libnvqir.so \
-  --exclude libcudaq.so \
-  --exclude libcudaq-spin.so \
-  --exclude libcudaq-nlopt.so \
+$python -m auditwheel -v repair dist/*.whl $CUDAQ_EXCLUDE_LIST \
   --exclude libgfortran.so.5 \
   --exclude libquadmath.so.0 \
   --exclude libmvec.so.1 \
