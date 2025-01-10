@@ -10,7 +10,7 @@ concurrency:
 jobs:
   linux-build:
     name: Linux build
-    runs-on: ubuntu-latest
+    runs-on: linux-amd64-cpu8
     # CUDAQ requires a highly specialized environment to build. Thus, it is much
     # easier to rely on their's devdeps images to do the building.
     container: ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-amd64-${{ matrix.toolchain.id }}-main
