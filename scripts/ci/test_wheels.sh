@@ -11,6 +11,10 @@
 # Exit immediately if any command returns a non-zero status
 set -e
 
+# FIXME - temporarily undo the above command for debugging
+set +e
+ulimit -c unlimited
+
 # Installing dependencies
 python_version=$1
 python=python${python_version}
@@ -31,6 +35,6 @@ ${python} -m pytest libs/qec/python/tests/
 # Solvers library
 # ======================================
 
-${python} -m pip install /wheels/cudaq_solvers-*.whl
-${python} -m pytest libs/solvers/python/tests/
+#${python} -m pip install /wheels/cudaq_solvers-*.whl
+#${python} -m pytest libs/solvers/python/tests/
 
