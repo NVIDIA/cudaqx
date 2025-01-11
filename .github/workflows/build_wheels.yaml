@@ -143,6 +143,8 @@ jobs:
         run: |
           bash .github/workflows/scripts/install_git_cli.sh
           apt install -y --no-install-recommends libgfortran5 unzip
+          echo "cat /proc/sys/kernel/core_pattern"
+          cat /proc/sys/kernel/core_pattern
   
       - name: Download CUDAQX wheels
         uses: actions/download-artifact@v4
