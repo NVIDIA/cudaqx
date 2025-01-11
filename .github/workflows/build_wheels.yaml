@@ -87,13 +87,14 @@ jobs:
         with:
           set-safe-directory: true
   
-      - name: Install Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python }}
+      #- name: Install Python
+      #  uses: actions/setup-python@v5
+      #  with:
+      #    python-version: ${{ matrix.python }}
   
       - name: Install requirements
         run: |
+          apt install -y python3 -python3-pip
           bash .github/workflows/scripts/install_git_cli.sh
           apt install -y --no-install-recommends libgfortran5 unzip
   
