@@ -115,6 +115,7 @@ jobs:
     runs-on: linux-${{ matrix.runner.arch }}-gpu-${{ matrix.runner.gpu }}-latest-1
     container:
       image: nvidia/cuda:12.0.0-base-ubuntu22.04
+      options: --user root
       env:
         NVIDIA_VISIBLE_DEVICES: ${{ env.NVIDIA_VISIBLE_DEVICES }}
     permissions:
@@ -143,6 +144,9 @@ jobs:
         run: |
           bash .github/workflows/scripts/install_git_cli.sh
           apt install -y --no-install-recommends libgfortran5 unzip
+          echo 'core.%p' | tee /proc/sys/kernel/core_pattern
+          echo "Running cat /proc/sys/kernel/core_pattern"
+          cat /proc/sys/kernel/core_pattern
   
       - name: Download CUDAQX wheels
         uses: actions/download-artifact@v4
@@ -159,7 +163,8 @@ jobs:
 
       - name: Print all files
         run: |
-          find / -type f
+          #find / -type f
+          ls -R
 
       - name: Upload any core files
         if: success() || failure()
