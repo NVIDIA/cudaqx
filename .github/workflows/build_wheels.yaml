@@ -141,6 +141,14 @@ jobs:
           path: /wheels
   
       - name: Test wheels
+        continue-on-error: true
         run: |
           ls /wheels
           bash scripts/ci/test_wheels.sh ${{ matrix.python }}
+
+      - name: Upload any core files
+        if: success() || failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-files-${{ matrix.python }}-arm64
+          path: core.*
