@@ -47,6 +47,7 @@ jobs:
 
       - name: Commit and push changes
         if: ${{ steps.check_change.outputs.changed == 'true' }}
+        id: commit_and_push
         run: |
           git config --global user.email "action@github.com"
           git config --global user.name "GitHub Action"
@@ -55,11 +56,13 @@ jobs:
           git add .cudaq_version
           git commit -m "Update dependency SHA to ${{ env.sha }}"
           git push origin $BRANCH_NAME
+          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_OUTPUT
 
       - name: Create Pull Request
         if: ${{ steps.check_change.outputs.changed == 'true' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          BRANCH_NAME: ${{ steps.commit_and_push.outputs.BRANCH_NAME }}
         run: |
           gh pr create \
             --title "Bump CUDA-Q commit" \
