@@ -2,6 +2,11 @@ name: Build wheels
 
 on:
   workflow_dispatch:
+    inputs:
+      artifacts_from_run:
+        type: string
+        description: Optional argument to take artifacts from a prior run of this workflow; facilitates rerunning a failed workflow without re-building the artifacts.
+        required: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -35,6 +40,7 @@ jobs:
           set-safe-directory: true
 
       - name: Get CUDAQ code
+        if: ${{ !inputs.artifacts_from_run }}
         uses: actions/checkout@v4
         with:
           repository: 'NVIDIA/cuda-quantum'
@@ -43,16 +49,19 @@ jobs:
           set-safe-directory: true
 
       - name: Build CUDAQ toolchain
+        if: ${{ !inputs.artifacts_from_run }}
         run: |
           .github/workflows/scripts/build_cudaq.sh 
 
       - name: Build wheels
+        if: ${{ !inputs.artifacts_from_run }}
         run: |
           .github/workflows/scripts/build_wheels.sh \
               --cudaq-prefix $HOME/.cudaq \
 
 
       - name: Upload artifact
+        if: ${{ !inputs.artifacts_from_run }}
         uses: actions/upload-artifact@v4
         with:
           name: wheels-py${{ matrix.python }}-arm64
@@ -93,6 +102,7 @@ jobs:
         with:
           name: wheels-py${{ matrix.python }}-${{ matrix.platform }}
           path: /wheels
+          run-id: ${{ inputs.artifacts_from_run || github.run_id }}
   
       - name: Test wheels
         run: |
@@ -139,6 +149,7 @@ jobs:
         with:
           name: wheels-py${{ matrix.python }}-${{ matrix.runner.arch }}
           path: /wheels
+          run-id: ${{ inputs.artifacts_from_run || github.run_id }}
   
       - name: Test wheels
         continue-on-error: true
