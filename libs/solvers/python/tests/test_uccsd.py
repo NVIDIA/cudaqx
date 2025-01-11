@@ -73,18 +73,18 @@ def test_uccsd_active_space():
         numElectrons, numQubits, spin)
 
     @cudaq.kernel
-    def ansatz(thetas: list[float]):
+    def ansatz2(thetas: list[float]):
         q = cudaq.qvector(numQubits)
         for i in range(numElectrons):
             x(q[i])
         solvers.stateprep.uccsd(q, thetas, numElectrons, spin)
 
-    ansatz.compile()
+    ansatz2.compile()
 
     np.random.seed(42)
     x0 = np.random.normal(-np.pi / 8.0, np.pi / 8.0, parameter_count)
 
-    energy, params, all_data = solvers.vqe(ansatz,
+    energy, params, all_data = solvers.vqe(ansatz2,
                                            molecule.hamiltonian,
                                            x0,
                                            optimizer=minimize,
@@ -120,18 +120,18 @@ def test_uccsd_active_space_natorb():
         numElectrons, numQubits, spin)
 
     @cudaq.kernel
-    def ansatz(thetas: list[float]):
+    def ansatz3(thetas: list[float]):
         q = cudaq.qvector(numQubits)
         for i in range(numElectrons):
             x(q[i])
         solvers.stateprep.uccsd(q, thetas, numElectrons, spin)
 
-    ansatz.compile()
+    ansatz3.compile()
 
     np.random.seed(42)
     x0 = np.random.normal(-np.pi / 8.0, np.pi / 8.0, parameter_count)
 
-    energy, params, all_data = solvers.vqe(ansatz,
+    energy, params, all_data = solvers.vqe(ansatz3,
                                            molecule.hamiltonian,
                                            x0,
                                            optimizer=minimize,

@@ -62,7 +62,7 @@ runs:
         fail-on-cache-miss: false
         path: /cudaq-install
         key: ${{ steps.cudaq-build-key.outputs.main }}${{ steps.cudaq-build-key.outputs.pr }}
-        restore-keys: ${{ steps.cudaq-build-key.outputs.main }}
+        #restore-keys: ${{ steps.cudaq-build-key.outputs.main }}
         lookup-only: ${{ inputs.lookup-only }}
 
     # The restore action could find a partial match using the `restore-keys`. In such cases
