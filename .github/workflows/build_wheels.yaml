@@ -115,7 +115,7 @@ jobs:
     runs-on: linux-${{ matrix.runner.arch }}-gpu-${{ matrix.runner.gpu }}-latest-1
     container:
       image: nvidia/cuda:12.0.0-base-ubuntu22.04
-      options: --user root
+      options: --privileged --ulimit core=-1 --security-opt seccomp=unconfined
       env:
         NVIDIA_VISIBLE_DEVICES: ${{ env.NVIDIA_VISIBLE_DEVICES }}
     permissions:
