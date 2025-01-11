@@ -43,11 +43,15 @@ jobs:
         with:
           set-safe-directory: true
 
+      - name: Get required CUDAQ version
+        id: get-cudaq-version
+        uses: ./.github/actions/get-cudaq-version
+
       - name: Get CUDAQ code
         uses: actions/checkout@v4
         with:
-          repository: 'NVIDIA/cuda-quantum'
-          ref: ${{ inputs.ref }}
+          repository: ${{ steps.get-cudaq-version.outputs.repo }}
+          ref: ${{ steps.get-cudaq-version.outputs.ref }}
           path: cudaq
           set-safe-directory: true
 
