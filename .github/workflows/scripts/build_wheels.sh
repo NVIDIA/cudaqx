@@ -69,6 +69,7 @@ parse_options "$@"
 
 python_version=3.10
 python=python${python_version}
+ARCH=$(uname -m)
 
 # We need to use a newer toolchain because CUDA-QX libraries rely on c++20
 source /opt/rh/gcc-toolset-11/enable
@@ -83,7 +84,7 @@ export CXX=g++
 cd libs/qec
 
 SKBUILD_CMAKE_ARGS="-DCUDAQ_DIR=$cudaq_prefix/lib/cmake/cudaq"
-SKBUILD_CMAKE_ARGS+=";-DCMAKE_CXX_COMPILER_EXTERNAL_TOOLCHAIN=/opt/rh/gcc-toolset-11/root/usr/lib/gcc/x86_64-redhat-linux/11/"
+SKBUILD_CMAKE_ARGS+=";-DCMAKE_CXX_COMPILER_EXTERNAL_TOOLCHAIN=/opt/rh/gcc-toolset-11/root/usr/lib/gcc/${ARCH}-redhat-linux/11/"
 SKBUILD_CMAKE_ARGS+=";-DCMAKE_BUILD_TYPE=$build_type"
 export SKBUILD_CMAKE_ARGS
 $python -m build --wheel
@@ -101,7 +102,7 @@ $python -m auditwheel -v repair dist/*.whl $CUDAQ_EXCLUDE_LIST \
 cd ../solvers
 
 SKBUILD_CMAKE_ARGS="-DCUDAQ_DIR=$cudaq_prefix/lib/cmake/cudaq"
-SKBUILD_CMAKE_ARGS+=";-DCMAKE_CXX_COMPILER_EXTERNAL_TOOLCHAIN=/opt/rh/gcc-toolset-11/root/usr/lib/gcc/x86_64-redhat-linux/11/;"
+SKBUILD_CMAKE_ARGS+=";-DCMAKE_CXX_COMPILER_EXTERNAL_TOOLCHAIN=/opt/rh/gcc-toolset-11/root/usr/lib/gcc/${ARCH}-redhat-linux/11/;"
 SKBUILD_CMAKE_ARGS+=";-DCMAKE_BUILD_TYPE=$build_type" \
 export SKBUILD_CMAKE_ARGS
 $python -m build --wheel

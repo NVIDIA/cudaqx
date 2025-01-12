@@ -20,12 +20,12 @@ concurrency:
 jobs:
   linux-build:
     name: Linux build
-    runs-on: linux-amd64-cpu8
+    runs-on: linux-${{ matrix.platform }}-cpu8
     # CUDAQ requires a highly specialized environment to build. Thus, it is much
     # easier to rely on their's devdeps images to do the building.
-    # FIXME: there is no guarantee that this image aligns with the CUDA-Q commit
-    # that we are trying to align with.
-    container: ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-amd64-${{ matrix.toolchain.id }}-main
+    # FIXME: there is no guarantee that this CUDA-Q image aligns with the CUDA-Q
+    # commit that we are trying to align with.
+    container: ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ matrix.platform }}-${{ matrix.toolchain.id }}-main
     permissions:
       actions: write
       contents: read
@@ -33,6 +33,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ['3.10', '3.11', '3.12']
+        platform: ['amd64', 'arm64']
         toolchain:
           - id: cu12.0-gcc11
             cc: gcc-11
@@ -70,5 +71,5 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-py${{ matrix.python }}-amd64
+          name: wheels-py${{ matrix.python }}-${{ matrix.platform }}
           path: /wheels/**
