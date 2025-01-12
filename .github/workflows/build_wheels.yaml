@@ -23,6 +23,8 @@ jobs:
     runs-on: linux-amd64-cpu8
     # CUDAQ requires a highly specialized environment to build. Thus, it is much
     # easier to rely on their's devdeps images to do the building.
+    # FIXME: there is no guarantee that this image aligns with the CUDA-Q commit
+    # that we are trying to align with.
     container: ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-amd64-${{ matrix.toolchain.id }}-main
     permissions:
       actions: write
