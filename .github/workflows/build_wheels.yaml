@@ -20,7 +20,7 @@ concurrency:
 jobs:
   linux-build:
     name: Linux build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     # CUDAQ requires a highly specialized environment to build. Thus, it is much
     # easier to rely on their's devdeps images to do the building.
     # FIXME: there is no guarantee that this CUDA-Q image aligns with the CUDA-Q
