@@ -14,8 +14,13 @@ runs:
 
     - name: Install jq
       run: |
-        apt-get update
-        apt-get install -y --no-install-recommends jq
+        if [ -x "$(command -v apt-get)" ]; then
+          apt-get update
+          apt-get install -y --no-install-recommends jq
+        elif [ -x "$(command -v dnf)" ]; then
+          dnf install -y --nobest --setopt=install_weak_deps=False jq
+        fi
+
       shell: bash
 
     - name: Get required CUDAQ version
