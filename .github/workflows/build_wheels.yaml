@@ -2,6 +2,16 @@ name: Build wheels
 
 on:
   workflow_dispatch:
+    inputs:
+      build_type:
+        type: choice
+        required: true
+        description: 'Build Type'
+        default: 'Release'
+        options:
+        - 'Release'
+        - 'Debug'
+
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -10,16 +20,20 @@ concurrency:
 jobs:
   linux-build:
     name: Linux build
-    runs-on: ubuntu-latest
+    runs-on: linux-${{ matrix.platform }}-cpu8
     # CUDAQ requires a highly specialized environment to build. Thus, it is much
     # easier to rely on their's devdeps images to do the building.
-    container: ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-amd64-${{ matrix.toolchain.id }}-main
+    # FIXME: there is no guarantee that this CUDA-Q image aligns with the CUDA-Q
+    # commit that we are trying to align with.
+    container: ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ matrix.platform }}-${{ matrix.toolchain.id }}-main
     permissions:
       actions: write
       contents: read
     strategy:
       fail-fast: false
       matrix:
+        python: ['3.10', '3.11', '3.12']
+        platform: ['amd64', 'arm64']
         toolchain:
           - id: cu12.0-gcc11
             cc: gcc-11
@@ -32,11 +46,15 @@ jobs:
         with:
           set-safe-directory: true
 
+      - name: Get required CUDAQ version
+        id: get-cudaq-version
+        uses: ./.github/actions/get-cudaq-version
+
       - name: Get CUDAQ code
         uses: actions/checkout@v4
         with:
-          repository: 'NVIDIA/cuda-quantum'
-          ref: ${{ inputs.ref }}
+          repository: ${{ steps.get-cudaq-version.outputs.repo }}
+          ref: ${{ steps.get-cudaq-version.outputs.ref }}
           path: cudaq
           set-safe-directory: true
 
@@ -48,4 +66,10 @@ jobs:
         run: |
           .github/workflows/scripts/build_wheels.sh \
               --cudaq-prefix $HOME/.cudaq \
+              --build-type ${{ inputs.build_type }}
 
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-py${{ matrix.python }}-${{ matrix.platform }}
+          path: /wheels/**
