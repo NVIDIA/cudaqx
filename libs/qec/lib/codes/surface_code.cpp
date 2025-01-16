@@ -359,12 +359,8 @@ surface_code::surface_code(const heterogeneous_map &options) : code() {
   m_pauli_observables = grid.get_spin_op_observables();
 
   operation_encodings.insert(std::make_pair(operation::x, x));
-  operation_encodings.insert(std::make_pair(operation::y, y));
   operation_encodings.insert(std::make_pair(operation::z, z));
-  operation_encodings.insert(std::make_pair(operation::h, h));
-  operation_encodings.insert(std::make_pair(operation::s, s));
   operation_encodings.insert(std::make_pair(operation::cx, cx));
-  operation_encodings.insert(std::make_pair(operation::cy, cy));
   operation_encodings.insert(std::make_pair(operation::cz, cz));
   operation_encodings.insert(
       std::make_pair(operation::stabilizer_round, stabilizer));

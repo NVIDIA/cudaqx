@@ -162,27 +162,9 @@ __qpu__ void x(patch p);
 
 /// \pure_device_kernel
 ///
-/// @brief Apply Y gate to a surface_code patch
-/// @param p The patch to apply the Y gate to
-__qpu__ void y(patch p);
-
-/// \pure_device_kernel
-///
 /// @brief Apply Z gate to a surface_code patch
 /// @param p The patch to apply the Z gate to
 __qpu__ void z(patch p);
-
-/// \pure_device_kernel
-///
-/// @brief Apply Hadamard gate to a surface_code patch
-/// @param p The patch to apply the Hadamard gate to
-__qpu__ void h(patch p);
-
-/// \pure_device_kernel
-///
-/// @brief Apply S gate to a surface_code patch
-/// @param p The patch to apply the S gate to
-__qpu__ void s(patch p);
 
 /// \pure_device_kernel
 ///
@@ -190,13 +172,6 @@ __qpu__ void s(patch p);
 /// @param control The control patch
 /// @param target The target patch
 __qpu__ void cx(patch control, patch target);
-
-/// \pure_device_kernel
-///
-/// @brief Apply controlled-Y gate between two surface_code patches
-/// @param control The control patch
-/// @param target The target patch
-__qpu__ void cy(patch control, patch target);
 
 /// \pure_device_kernel
 ///
