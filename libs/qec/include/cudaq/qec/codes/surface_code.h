@@ -32,38 +32,45 @@ bool operator==(const vec2d &lhs, const vec2d &rhs);
 bool operator<(const vec2d &lhs, const vec2d &rhs);
 
 /// @brief Generates and keeps track of the 2d grid of stabilizers in the
-/// rotated surface code
-// Grid layout is arranged from left to right, top to bottom (row major storage)
-// grid_length = 4 example:
-// (0,0)   (0,1)   (0,2)   (0,3)
-// (1,0)   (1,1)   (1,2)   (1,3)
-// (2,0)   (2,1)   (2,2)   (2,3)
-// (3,0)   (3,1)   (3,2)   (3,3)
-//
-// Each entry on the grid can be an X stabilizer, Z stabilizer,
-// or empty, as is needed on the edges.
-// The grid length of 4 corresponds to a distance 3 surface code, which results
-// in: e(0,0)  e(0,1)  Z(0,2)  e(0,3) X(1,0)  Z(1,1)  X(1,2)  e(1,3) e(2,0)
-// X(2,1)  Z(2,2)  X(2,3) e(3,0)  Z(3,1)  e(3,2)  e(3,3)
-//
-// This is seen through the `print_stabilizer_grid()` member function.
-// To get rid of the empty sites, the `print_stabilizer_coords()` function is
-// used:
-//                 Z(0,2)
-// X(1,0)  Z(1,1)  X(1,2)
-//         X(2,1)  Z(2,2)  X(2,3)
-//         Z(3,1)
-//
-// and to get the familiar visualization of the distance three surface code, the
-// `print_stabilizer_indices` results in:
-//         Z0
-// X0  Z1  X1
-//     X2  Z2  X3
-//     Z3
-//
-// The data qubits are located at the four corners of each of the weight-4
-// stabilizers. They are also organized with index increasing from left to
-// right, top to bottom: d0  d1  d2 d3  d4  d5 d6  d7  d8
+/// rotated surface code.
+/// Following same layout convention as in: https://arxiv.org/abs/2311.10687
+/// Grid layout is arranged from left to right, top to bottom (row major storage)
+/// grid_length = 4 example:
+/// (0,0)   (0,1)   (0,2)   (0,3)
+/// (1,0)   (1,1)   (1,2)   (1,3)
+/// (2,0)   (2,1)   (2,2)   (2,3)
+/// (3,0)   (3,1)   (3,2)   (3,3)
+///
+/// Each entry on the grid can be an X stabilizer, Z stabilizer,
+/// or empty, as is needed on the edges.
+/// The grid length of 4 corresponds to a distance 3 surface code, which results
+/// in:
+/// e(0,0)  e(0,1)  Z(0,2)  e(0,3)
+/// X(1,0)  Z(1,1)  X(1,2)  e(1,3)
+/// e(2,0)  X(2,1)  Z(2,2)  X(2,3)
+/// e(3,0)  Z(3,1)  e(3,2)  e(3,3)
+///
+/// This is seen through the `print_stabilizer_grid()` member function.
+/// To get rid of the empty sites, the `print_stabilizer_coords()` function is
+/// used:
+///                 Z(0,2)
+/// X(1,0)  Z(1,1)  X(1,2)
+///         X(2,1)  Z(2,2)  X(2,3)
+///         Z(3,1)
+///
+/// and to get the familiar visualization of the distance three surface code, the
+/// `print_stabilizer_indices` results in:
+///         Z0
+/// X0  Z1  X1
+///     X2  Z2  X3
+///     Z3
+///
+/// The data qubits are located at the four corners of each of the weight-4
+/// stabilizers. They are also organized with index increasing from left to
+/// right, top to bottom:
+/// d0  d1  d2
+/// d3  d4  d5
+/// d6  d7  d8
 class stabilizer_grid {
 private:
   /// @brief Generates this->roles
@@ -74,18 +81,18 @@ private:
   void generate_stabilizers();
 
 public:
-  /// @brief The distance of the code,
-  // determines the number of data qubits per dimension
-  uint32_t distance;
+  /// @brief The distance of the code
+  /// determines the number of data qubits per dimension
+  uint32_t distance = 0;
 
   /// @brief length of the stabilizer grid
-  // for distance = d data qubits,
-  // the stabilizer grid has length d+1
-  uint32_t grid_length;
+  /// for distance = d data qubits,
+  /// the stabilizer grid has length d+1
+  uint32_t grid_length = 0;
 
   /// @brief flattened vector of the stabilizer grid sites roles'
-  // grid idx -> role
-  // stored in row major order
+  /// grid idx -> role
+  /// stored in row major order
   std::vector<surface_role> roles;
 
   /// @brief x stab index -> 2d coord
@@ -101,7 +108,7 @@ public:
   std::map<vec2d, size_t> z_stab_indices;
 
   /// @brief data index -> 2d coord
-  // data qubits are in an offset 2D coord system from stabilizers
+  /// data qubits are in an offset 2D coord system from stabilizers
   std::vector<vec2d> data_coords;
 
   /// @brief 2d coord -> data index
@@ -109,8 +116,8 @@ public:
 
   /// @brief Each element is an X stabilizer specified by the data qubits it has
   /// support on
-  // In surface code, can have weight 2 or weight 4 stabs
-  // So {x,z}_stabilizer[i].size() == 2 || 4
+  /// In surface code, can have weight 2 or weight 4 stabs
+  /// So {x,z}_stabilizer[i].size() == 2 || 4
   std::vector<std::vector<size_t>> x_stabilizers;
 
   /// @brief Each element is an Z stabilizer specified by the data qubits it has
