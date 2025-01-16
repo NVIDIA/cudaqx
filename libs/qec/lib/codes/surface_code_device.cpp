@@ -12,20 +12,11 @@
 namespace cudaq::qec::surface_code {
 
 __qpu__ void x(patch logicalQubit) { x(logicalQubit.data); }
-__qpu__ void y(patch logicalQubit) { y(logicalQubit.data); }
 __qpu__ void z(patch logicalQubit) { z(logicalQubit.data); }
-__qpu__ void h(patch logicalQubit) { h(logicalQubit.data); }
-__qpu__ void s(patch logicalQubit) { s(logicalQubit.data); }
 
 __qpu__ void cx(patch logicalQubitA, patch logicalQubitB) {
   for (std::size_t i = 0; i < logicalQubitA.data.size(); i++) {
     x<cudaq::ctrl>(logicalQubitA.data[i], logicalQubitB.data[i]);
-  }
-}
-
-__qpu__ void cy(patch logicalQubitA, patch logicalQubitB) {
-  for (std::size_t i = 0; i < logicalQubitA.data.size(); i++) {
-    y<cudaq::ctrl>(logicalQubitA.data[i], logicalQubitB.data[i]);
   }
 }
 
@@ -37,6 +28,8 @@ __qpu__ void cz(patch logicalQubitA, patch logicalQubitB) {
 
 // Transversal state prep, turn on stabilizers after these ops
 __qpu__ void prep0(patch logicalQubit) {
+  for (std::size_t i = 0; i < logicalQubit.data.size(); i++)
+    reset(logicalQubit.data[i]);
 }
 
 __qpu__ void prep1(patch logicalQubit) {
