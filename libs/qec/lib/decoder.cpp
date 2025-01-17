@@ -8,6 +8,7 @@
 
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/plugin_loader.h"
+#include "cudaq/utils/cudaq_utils.h"
 #include <cassert>
 #include <dlfcn.h>
 #include <filesystem>
@@ -78,7 +79,8 @@ std::unique_ptr<decoder> get_decoder(const std::string &name,
 // Constructor function for auto-loading plugins
 __attribute__((constructor)) void load_decoder_plugins() {
   // Load plugins from the decoder-specific plugin directory
-  load_plugins(DECODER_PLUGIN_DIR, PluginType::DECODER);
+  load_plugins(cudaq::getCUDAQLibraryPath() + "/decoder-plugins",
+               PluginType::DECODER);
 }
 
 // Destructor function to clean up only decoder plugins

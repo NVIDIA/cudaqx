@@ -9,7 +9,6 @@
 set(LIBRARY_NAME cudaq-qec)
 
 add_compile_options(-Wno-attributes) 
-add_compile_definitions(DECODER_PLUGIN_DIR="${CMAKE_INSTALL_PREFIX}/lib/decoder-plugins")
 
 # FIXME?: This must be a shared library. Trying to build a static one will fail.
 add_library(${LIBRARY_NAME} SHARED
