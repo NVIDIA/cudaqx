@@ -176,7 +176,6 @@ jobs:
           run-id: ${{ inputs.artifacts_from_run || github.run_id }}
   
       - name: Test wheels
-        continue-on-error: true
         run: |
           ls /wheels
           bash scripts/ci/test_wheels.sh ${{ matrix.python }}
