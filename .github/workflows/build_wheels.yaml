@@ -50,11 +50,6 @@ jobs:
         with:
           set-safe-directory: true
 
-      - name: Install Python ${{ matrix.python }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python }}
-
       - name: Get required CUDAQ version
         if: ${{ !inputs.artifacts_from_run }}
         id: get-cudaq-version
