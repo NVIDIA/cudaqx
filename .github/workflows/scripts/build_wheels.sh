@@ -19,6 +19,7 @@ show_help() {
     echo "  --build-type      Build type (e.g., Release)"
     echo "  --cudaq-prefix    Path to CUDA-Q's install prefix"
     echo "                    (default: \$HOME/.cudaq)"
+    echo "  --python-version  Python version to build wheel for (e.g. 3.10)"
 }
 
 parse_options() {
@@ -42,6 +43,15 @@ parse_options() {
                     exit 1
                 fi
                 ;;
+            --python-version)
+                if [[ -n "$2" && "$2" != -* ]]; then
+                    python_version=("$2")
+                    shift 2
+                else
+                    echo "Error: Argument for $1 is missing" >&2
+                    exit 1
+                fi
+                ;;
             -*)
                 echo "Error: Unknown option $1" >&2
                 show_help
@@ -56,18 +66,20 @@ parse_options() {
     done
 }
 
-# Initialize an empty array to store libs names
+# Defaults
 cudaq_prefix=$HOME/.cudaq
 build_type=Release
+python_version=3.10
 
 # Parse options
 parse_options "$@"
+
+echo "Building in $build_type mode for Python $python_version"
 
 # ==============================================================================
 # Helpers
 # ==============================================================================
 
-python_version=3.10
 python=python${python_version}
 ARCH=$(uname -m)
 

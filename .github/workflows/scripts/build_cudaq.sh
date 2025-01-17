@@ -16,7 +16,8 @@ source /opt/rh/gcc-toolset-11/enable
 export CC=gcc
 export CXX=g++
 
-python_version=3.10
+python_version=$1
+python_version=${python_version:-3.10}
 python=python${python_version}
 ${python} -m pip install --no-cache-dir numpy auditwheel
 

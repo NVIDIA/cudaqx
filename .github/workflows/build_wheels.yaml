@@ -50,6 +50,11 @@ jobs:
         with:
           set-safe-directory: true
 
+      - name: Install Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
       - name: Get required CUDAQ version
         if: ${{ !inputs.artifacts_from_run }}
         id: get-cudaq-version
@@ -67,14 +72,15 @@ jobs:
       - name: Build CUDAQ toolchain
         if: ${{ !inputs.artifacts_from_run }}
         run: |
-          .github/workflows/scripts/build_cudaq.sh 
+          .github/workflows/scripts/build_cudaq.sh  ${{ matrix.python }}
 
       - name: Build wheels
         if: ${{ !inputs.artifacts_from_run }}
         run: |
           .github/workflows/scripts/build_wheels.sh \
               --cudaq-prefix $HOME/.cudaq \
-              --build-type ${{ inputs.build_type }}
+              --build-type ${{ inputs.build_type }} \
+              --python-version ${{ matrix.python }}
 
       - name: Upload artifact
         if: ${{ !inputs.artifacts_from_run }}
