@@ -79,8 +79,9 @@ std::unique_ptr<decoder> get_decoder(const std::string &name,
 // Constructor function for auto-loading plugins
 __attribute__((constructor)) void load_decoder_plugins() {
   // Load plugins from the decoder-specific plugin directory
-  load_plugins(cudaq::getCUDAQLibraryPath() + "/decoder-plugins",
-               PluginType::DECODER);
+  std::filesystem::path cudaqLibPath{cudaq::getCUDAQLibraryPath()};
+  auto pluginPath = cudaqLibPath.parent_path() / "decoder-plugins";
+  load_plugins(pluginPath.string(), PluginType::DECODER);
 }
 
 // Destructor function to clean up only decoder plugins
