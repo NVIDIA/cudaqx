@@ -11,7 +11,10 @@ on:
         options:
         - 'Release'
         - 'Debug'
-
+      artifacts_from_run:
+        type: string
+        description: Optional argument to take artifacts from a prior run of this workflow; facilitates rerunning a failed workflow without re-building the artifacts.
+        required: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -51,6 +54,7 @@ jobs:
         uses: ./.github/actions/get-cudaq-version
 
       - name: Get CUDAQ code
+        if: ${{ !inputs.artifacts_from_run }}
         uses: actions/checkout@v4
         with:
           repository: ${{ steps.get-cudaq-version.outputs.repo }}
@@ -59,17 +63,124 @@ jobs:
           set-safe-directory: true
 
       - name: Build CUDAQ toolchain
+        if: ${{ !inputs.artifacts_from_run }}
         run: |
           .github/workflows/scripts/build_cudaq.sh 
 
       - name: Build wheels
+        if: ${{ !inputs.artifacts_from_run }}
         run: |
           .github/workflows/scripts/build_wheels.sh \
               --cudaq-prefix $HOME/.cudaq \
               --build-type ${{ inputs.build_type }}
 
       - name: Upload artifact
+        if: ${{ !inputs.artifacts_from_run }}
         uses: actions/upload-artifact@v4
         with:
           name: wheels-py${{ matrix.python }}-${{ matrix.platform }}
           path: /wheels/**
+
+  test-cudaqx-wheels:
+    name: Test CUDA-QX wheels (CPU)
+    needs: linux-build
+    runs-on: linux-${{ matrix.platform }}-cpu4
+    container: ubuntu:22.04
+    permissions:
+      actions: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.10', '3.11', '3.12']
+        platform: ['amd64', 'arm64']
+  
+    steps:
+      - name: Get code
+        uses: actions/checkout@v4
+        with:
+          set-safe-directory: true
+  
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+  
+      - name: Install requirements
+        run: |
+          bash .github/workflows/scripts/install_git_cli.sh
+          apt install -y --no-install-recommends libgfortran5 unzip
+  
+      - name: Download CUDAQX wheels
+        uses: actions/download-artifact@v4
+        with:
+          name: wheels-py${{ matrix.python }}-${{ matrix.platform }}
+          path: /wheels
+          run-id: ${{ inputs.artifacts_from_run || github.run_id }}
+  
+      - name: Test wheels
+        run: |
+          ls /wheels
+          bash scripts/ci/test_wheels.sh ${{ matrix.python }}
+  
+  test-wheels-gpu:
+    name: Test CUDA-QX wheels (GPU)
+    needs: linux-build
+    runs-on: linux-${{ matrix.runner.arch }}-gpu-${{ matrix.runner.gpu }}-latest-1
+    container:
+      image: nvidia/cuda:12.0.0-base-ubuntu22.04
+      # Enable this if you want to collect core files. (You may might to enable
+      # Debug builds if you're doing this.)
+      #options: --privileged --ulimit core=-1 --security-opt seccomp=unconfined
+      env:
+        NVIDIA_VISIBLE_DEVICES: ${{ env.NVIDIA_VISIBLE_DEVICES }}
+    permissions:
+      actions: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [
+          { arch: arm64, gpu: a100 },
+          { arch: amd64, gpu: v100 },
+        ]
+        python: ['3.10', '3.11', '3.12']
+  
+    steps:
+      - name: Get code
+        uses: actions/checkout@v4
+        with:
+          set-safe-directory: true
+  
+      - name: Install Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+  
+      - name: Install requirements
+        run: |
+          bash .github/workflows/scripts/install_git_cli.sh
+          apt install -y --no-install-recommends libgfortran5 unzip
+          #echo 'core.%p' | tee /proc/sys/kernel/core_pattern
+          #echo "Running cat /proc/sys/kernel/core_pattern"
+          #cat /proc/sys/kernel/core_pattern
+  
+      - name: Download CUDAQX wheels
+        uses: actions/download-artifact@v4
+        with:
+          name: wheels-py${{ matrix.python }}-${{ matrix.runner.arch }}
+          path: /wheels
+          run-id: ${{ inputs.artifacts_from_run || github.run_id }}
+  
+      - name: Test wheels
+        continue-on-error: true
+        run: |
+          ls /wheels
+          bash scripts/ci/test_wheels.sh ${{ matrix.python }}
+
+      # - name: Upload any core files
+      #   if: success() || failure()
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: core-files-${{ matrix.python }}-arm64
+      #     path: core.*
