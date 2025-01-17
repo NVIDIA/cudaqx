@@ -37,7 +37,7 @@ build-dir = "_skbuild"
 build.verbose = true
 cmake.version = ">=3.28"
 cmake.build-type = "Release"
-install.components = ["qec-python", "qec-lib"]
+install.components = ["qec-python", "qec-lib", "qec-lib-plugins"]
 wheel.packages = []
 logging.level = "DEBUG"
 ninja.version = ">=1.10"
