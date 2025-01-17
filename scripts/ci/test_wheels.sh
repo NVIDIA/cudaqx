@@ -28,11 +28,11 @@ ${python} -m pip install --no-cache-dir pytest
 # QEC library
 # ======================================
 
-${python} -m pip install wheels/cudaq_qec-*-cp${python_version_no_dot}-cp${python_version_no_dot}-*.whl
+${python} -m pip install /wheels/cudaq_qec-*-cp${python_version_no_dot}-cp${python_version_no_dot}-*.whl
 ${python} -m pytest libs/qec/python/tests/
 
 # Solvers library
 # ======================================
 
-${python} -m pip install wheels/cudaq_solvers-*-cp${python_version_no_dot}-cp${python_version_no_dot}-*.whl
+${python} -m pip install /wheels/cudaq_solvers-*-cp${python_version_no_dot}-cp${python_version_no_dot}-*.whl
 ${python} -m pytest libs/solvers/python/tests/
