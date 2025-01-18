@@ -69,9 +69,9 @@ inline static std::string getCUDAQXLibraryPath(const CudaQXLibType lib) {
   data.libName = [&]() -> std::string {
     switch (lib) {
     case CudaQXLibType::QEC:
-      return "cudaq-qec";
+      return "/libcudaq-qec.";
     case CudaQXLibType::Solvers:
-      return "cudaq-solvers";
+      return "/libcudaq-solvers.";
     }
     return "UNKNOWN";
   }();
