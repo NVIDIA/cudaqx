@@ -23,6 +23,7 @@ concurrency:
 jobs:
   build-cudaqx-wheels:
     name: Build CUDA-QX wheels
+    if: ${{ !inputs.artifacts_from_run }}
     runs-on: linux-${{ matrix.platform }}-cpu8
     # CUDAQ requires a highly specialized environment to build. Thus, it is much
     # easier to rely on their's devdeps images to do the building.
@@ -45,18 +46,15 @@ jobs:
 
     steps:
       - name: Get code
-        if: ${{ !inputs.artifacts_from_run }}
         uses: actions/checkout@v4
         with:
           set-safe-directory: true
 
       - name: Get required CUDAQ version
-        if: ${{ !inputs.artifacts_from_run }}
         id: get-cudaq-version
         uses: ./.github/actions/get-cudaq-version
 
       - name: Get CUDAQ code
-        if: ${{ !inputs.artifacts_from_run }}
         uses: actions/checkout@v4
         with:
           repository: ${{ steps.get-cudaq-version.outputs.repo }}
@@ -65,12 +63,10 @@ jobs:
           set-safe-directory: true
 
       - name: Build CUDAQ toolchain
-        if: ${{ !inputs.artifacts_from_run }}
         run: |
           .github/workflows/scripts/build_cudaq.sh ${{ matrix.python }}
 
       - name: Build wheels
-        if: ${{ !inputs.artifacts_from_run }}
         run: |
           .github/workflows/scripts/build_wheels.sh \
               --cudaq-prefix $HOME/.cudaq \
@@ -78,7 +74,6 @@ jobs:
               --python-version ${{ matrix.python }}
 
       - name: Upload artifact
-        if: ${{ !inputs.artifacts_from_run }}
         uses: actions/upload-artifact@v4
         with:
           name: wheels-py${{ matrix.python }}-${{ matrix.platform }}
@@ -88,6 +83,7 @@ jobs:
   # this is a separate job.
   build-cudaq-wheels:
     name: Build CUDA-Q wheels
+    if: ${{ !inputs.artifacts_from_run }}
     strategy:
       fail-fast: false
       matrix:
@@ -99,18 +95,15 @@ jobs:
       pull-requests: read
     steps:
       - name: Get code
-        if: ${{ !inputs.artifacts_from_run }}
         uses: actions/checkout@v4
         with:
           set-safe-directory: true
 
       - name: Get required CUDAQ version
-        if: ${{ !inputs.artifacts_from_run }}
         id: get-cudaq-version
         uses: ./.github/actions/get-cudaq-version
 
       - name: Get CUDAQ wheels
-        if: ${{ !inputs.artifacts_from_run }}
         uses: ./.github/actions/get-cudaq-wheels
         with:
           repo: ${{ steps.get-cudaq-version.outputs.repo }}
@@ -120,7 +113,6 @@ jobs:
           platform: ${{ matrix.platform }}
 
       - name: Upload CUDAQ wheels
-        if: ${{ !inputs.artifacts_from_run }}
         uses: actions/upload-artifact@v4
         with:
           name: cudaq-wheels-${{ matrix.platform }}
@@ -131,6 +123,7 @@ jobs:
   test-cudaqx-wheels:
     name: Test CUDA-QX wheels (CPU)
     needs: [build-cudaqx-wheels, build-cudaq-wheels]
+    if: ${{ !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
     runs-on: linux-${{ matrix.platform }}-cpu4
     container: ubuntu:22.04
     permissions:
@@ -182,6 +175,7 @@ jobs:
   test-wheels-gpu:
     name: Test CUDA-QX wheels (GPU)
     needs: [build-cudaqx-wheels, build-cudaq-wheels]
+    if: ${{ !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
     runs-on: linux-${{ matrix.runner.arch }}-gpu-${{ matrix.runner.gpu }}-latest-1
     container:
       image: nvidia/cuda:12.0.0-base-ubuntu22.04
