@@ -1,0 +1,163 @@
+name: Get CUDAQ wheels
+description: 'Either restore CUDAQ wheels from cache or build them'
+
+inputs:
+  repo:
+    description: 'CUDAQ repository.'
+    required: true
+  ref:
+    description: 'The branch, tag or SHA to checkout.'
+    required: true
+  token:
+    description: 'CUDAQ repository access token.'
+    default: ''
+    required: false
+  pr-number:
+    description: 'Unique pull request identifier.'
+    default: ''
+    required: false
+  save-build:
+    description: 'Indicates whether to save the build'
+    default: 'false'
+    required: false
+  lookup-only:
+    description: 'Check if a cache entry exists without downloading the cache'
+    default: 'false'
+    required: false
+  platform:
+    description: 'Platform (amd64 or arm64)'
+    default: ''
+    required: true
+outputs:
+  found-cache:
+    description: 'A boolean value to indicate that a cache entry was found.'
+    value: ${{ steps.check-cache.outputs.valid }}
+
+runs:
+  using: "composite"
+  steps:
+    # ==========================================================================
+    # Try to restore from cache
+    # ==========================================================================
+
+    - name: Create CUDAQ wheel cache key
+      id: cudaq-wheels-key
+      env:
+        # This are a list of files that when changed should require a new cudaq build
+        to_hash: |
+          .github/actions/get-cudaq-wheels/**
+          .cudaq_version
+      run: |
+        hash=${{ hashFiles(format('{0}', env.to_hash)) }}
+        echo "main=cudaq-wheels-${{ inputs.platform }}-${{ inputs.ref }}-$hash" >> $GITHUB_OUTPUT
+        if [[ -n "${{ inputs.pr-number }}" ]]; then
+          echo "pr=-pr${{ inputs.pr-number }}" >> $GITHUB_OUTPUT
+        fi
+        sudo mkdir /cudaq-wheels && sudo chmod 777 /cudaq-wheels
+      shell: bash --noprofile --norc -euo pipefail {0}
+
+    - name: Try to restoring CUDAQ wheels from cache
+      id: restore-cudaq-wheels
+      uses: actions/cache/restore@v4
+      with:
+        fail-on-cache-miss: false
+        path: /cudaq-wheels
+        key: ${{ steps.cudaq-wheels-key.outputs.main }}${{ steps.cudaq-wheels-key.outputs.pr }}
+        restore-keys: ${{ steps.cudaq-wheels-key.outputs.main }}
+        lookup-only: ${{ inputs.lookup-only }}
+
+    # The restore action could find a partial match using the `restore-keys`. In such cases
+    # it would still report `cache-hit` as false, but would load the cache from the partial
+    # one. Thus, we need to check whether the cache is valid by other means.
+    - name: Check if cache is valid
+      id: check-cache
+      run: |
+        if [[ "${{ steps.restore-cudaq-wheels.outputs.cache-matched-key }}" == "" ]]; then
+          echo "valid=false" >> $GITHUB_OUTPUT
+        else
+          echo "valid=true" >> $GITHUB_OUTPUT
+        fi
+      shell: bash --noprofile --norc -euo pipefail {0}
+
+    # ==========================================================================
+    # Build CUDAQ wheels
+    # ==========================================================================
+
+    - name: Login to GitHub CR
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+
+    - name: Get CUDAQ code
+      if: steps.check-cache.outputs.valid == 'false' && inputs.lookup-only == 'false'
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ inputs.repo }}
+        ref: ${{ inputs.ref }}
+        path: cudaq
+        set-safe-directory: true
+
+    - name: Set up context for buildx
+      run: |
+        docker context create builder_context
+      shell: bash --noprofile --norc -euo pipefail {0}
+
+    - name: Set up buildx runner
+      uses: docker/setup-buildx-action@v3
+      with:
+        endpoint: builder_context
+        driver-opts: network=host
+
+    - name: Build 3.10 wheel
+      uses: docker/build-push-action@v5
+      with:
+        context: cudaq
+        file: ./cudaq/docker/release/cudaq.wheel.Dockerfile
+        build-args: |
+          base_image=ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ inputs.platform }}-cu12.0-gcc11-main
+          release_version=0.99.99
+          python_version=3.10
+        outputs: /cudaq-wheels
+
+    - name: Build 3.11 wheel
+      uses: docker/build-push-action@v5
+      with:
+        context: cudaq
+        file: ./cudaq/docker/release/cudaq.wheel.Dockerfile
+        build-args: |
+          base_image=ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ inputs.platform }}-cu12.0-gcc11-main
+          release_version=0.99.99
+          python_version=3.11
+        outputs: /cudaq-wheels
+
+    - name: Build 3.12 wheel
+      uses: docker/build-push-action@v5
+      with:
+        context: cudaq
+        file: ./cudaq/docker/release/cudaq.wheel.Dockerfile
+        build-args: |
+          base_image=ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ inputs.platform }}-cu12.0-gcc11-main
+          release_version=0.99.99
+          python_version=3.12
+        outputs: /cudaq-wheels
+
+    - name: Upload wheel
+      uses: actions/upload-artifact@v4
+      with:
+        name: cudaq-wheels-${{ inputs.platform }}
+        path: /cudaq-wheels
+        retention-days: 10
+        if-no-files-found: error
+
+    # ==========================================================================
+    # Store CUDAQ wheels cache
+    # ==========================================================================
+ 
+    - name: Store CUDAQ wheels in the cache
+      if: steps.check-cache.outputs.valid == 'false' && inputs.save-build == 'true' && inputs.lookup-only == 'false'
+      uses: actions/cache/save@v4
+      with:
+        path: /cudaq-wheels
+        key: ${{ steps.cudaq-wheels-key.outputs.main }}${{ steps.cudaq-wheels-key.outputs.pr }}

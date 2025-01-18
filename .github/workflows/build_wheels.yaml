@@ -21,8 +21,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  linux-build:
-    name: Linux build
+  build-cudaqx-wheels:
+    name: Build CUDA-QX wheels
     runs-on: linux-${{ matrix.platform }}-cpu8
     # CUDAQ requires a highly specialized environment to build. Thus, it is much
     # easier to rely on their's devdeps images to do the building.
@@ -67,7 +67,7 @@ jobs:
       - name: Build CUDAQ toolchain
         if: ${{ !inputs.artifacts_from_run }}
         run: |
-          .github/workflows/scripts/build_cudaq.sh  ${{ matrix.python }}
+          .github/workflows/scripts/build_cudaq.sh ${{ matrix.python }}
 
       - name: Build wheels
         if: ${{ !inputs.artifacts_from_run }}
@@ -84,9 +84,49 @@ jobs:
           name: wheels-py${{ matrix.python }}-${{ matrix.platform }}
           path: /wheels/**
 
+  # Building the CUDA-Q wheels must be done outside of a container context, so
+  # this is a separate job.
+  build-cudaq-wheels:
+    name: Build CUDA-Q wheels
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ['amd64', 'arm64']
+    runs-on: ${{ startsWith(github.repository, 'NVIDIA/cudaqx') && format('linux-{0}-cpu32', matrix.platform) || 'ubuntu-latest' }}
+    permissions:
+      actions: write
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Get code
+        uses: actions/checkout@v4
+        with:
+          set-safe-directory: true
+
+      - name: Get required CUDAQ version
+        id: get-cudaq-version
+        uses: ./.github/actions/get-cudaq-version
+
+      - name: Get CUDAQ wheels
+        uses: ./.github/actions/get-cudaq-wheels
+        with:
+          repo: ${{ steps.get-cudaq-version.outputs.repo }}
+          ref: ${{ steps.get-cudaq-version.outputs.ref }}
+          token: ${{ secrets.CUDAQ_ACCESS_TOKEN }}
+          save-build: true
+          platform: ${{ matrix.platform }}
+
+      - name: Upload CUDAQ wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: cudaq-wheels-${{ matrix.platform }}
+          path: /cudaq-wheels
+          retention-days: 10
+          if-no-files-found: error
+
   test-cudaqx-wheels:
     name: Test CUDA-QX wheels (CPU)
-    needs: linux-build
+    needs: [build-cudaqx-wheels, build-cudaq-wheels]
     runs-on: linux-${{ matrix.platform }}-cpu4
     container: ubuntu:22.04
     permissions:
@@ -114,7 +154,14 @@ jobs:
           bash .github/workflows/scripts/install_git_cli.sh
           apt install -y --no-install-recommends libgfortran5 unzip
   
-      - name: Download CUDAQX wheels
+      - name: Download CUDA-Q wheels
+        uses: actions/download-artifact@v4
+        with:
+          name: cudaq-wheels-${{ matrix.platform }}
+          path: /cudaq-wheels
+          run-id: ${{ inputs.artifacts_from_run || github.run_id }}
+
+      - name: Download CUDA-QX wheels
         uses: actions/download-artifact@v4
         with:
           name: wheels-py${{ matrix.python }}-${{ matrix.platform }}
@@ -128,7 +175,7 @@ jobs:
   
   test-wheels-gpu:
     name: Test CUDA-QX wheels (GPU)
-    needs: linux-build
+    needs: [build-cudaqx-wheels, build-cudaq-wheels]
     runs-on: linux-${{ matrix.runner.arch }}-gpu-${{ matrix.runner.gpu }}-latest-1
     container:
       image: nvidia/cuda:12.0.0-base-ubuntu22.04
@@ -168,7 +215,14 @@ jobs:
           #echo "Running cat /proc/sys/kernel/core_pattern"
           #cat /proc/sys/kernel/core_pattern
   
-      - name: Download CUDAQX wheels
+      - name: Download CUDA-Q wheels
+        uses: actions/download-artifact@v4
+        with:
+          name: cudaq-wheels-${{ matrix.platform }}
+          path: /cudaq-wheels
+          run-id: ${{ inputs.artifacts_from_run || github.run_id }}
+
+      - name: Download CUDA-QX wheels
         uses: actions/download-artifact@v4
         with:
           name: wheels-py${{ matrix.python }}-${{ matrix.runner.arch }}
