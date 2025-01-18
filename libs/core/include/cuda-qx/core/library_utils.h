@@ -54,10 +54,8 @@ inline static void getCUDAQXLibraryPath(CUDAQXLibraryData *data) {
 inline static int getCUDAQXLibraryPath(struct dl_phdr_info *info, size_t size,
                                        void *data) {
   std::string libraryName(info->dlpi_name);
-  printf("BMH libraryName is %s\n", libraryName.c_str());
   auto casted = static_cast<CUDAQXLibraryData *>(data);
   if (libraryName.find(casted->libName) != std::string::npos) {
-    printf("BMH Setting it.\n");
     casted->path = std::string(info->dlpi_name);
   }
   return 0;
