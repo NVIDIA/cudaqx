@@ -29,7 +29,7 @@ jobs:
     # easier to rely on their's devdeps images to do the building.
     # FIXME: there is no guarantee that this CUDA-Q image aligns with the CUDA-Q
     # commit that we are trying to align with.
-    container: ${{ inputs.artifacts_from_run && 'ubuntu:22.04' || format('ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-{0}-{1}-main', matrix.platform, matrix.toolchain.id) }}
+    container: ${{ format('ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-{0}-{1}-main', matrix.platform, matrix.toolchain.id) }}
     permissions:
       actions: write
       contents: read
@@ -157,7 +157,7 @@ jobs:
           name: cudaq-wheels-${{ matrix.platform }}
           path: /cudaq-wheels
           run-id: ${{ inputs.artifacts_from_run || github.run_id }}
-          github-token: ${{ secrets.WORKFLOW_TOKEN }}
+          github-token: ${{ inputs.artifacts_from_run && secrets.WORKFLOW_TOKEN || github.token }}
 
       - name: Download CUDA-QX wheels
         uses: actions/download-artifact@v4
@@ -165,7 +165,7 @@ jobs:
           name: wheels-py${{ matrix.python }}-${{ matrix.platform }}
           path: /wheels
           run-id: ${{ inputs.artifacts_from_run || github.run_id }}
-          github-token: ${{ secrets.WORKFLOW_TOKEN }}
+          github-token: ${{ inputs.artifacts_from_run && secrets.WORKFLOW_TOKEN || github.token }}
   
       - name: Test wheels
         run: |
@@ -221,7 +221,7 @@ jobs:
           name: cudaq-wheels-${{ matrix.runner.arch }}
           path: /cudaq-wheels
           run-id: ${{ inputs.artifacts_from_run || github.run_id }}
-          github-token: ${{ secrets.WORKFLOW_TOKEN }}
+          github-token: ${{ inputs.artifacts_from_run && secrets.WORKFLOW_TOKEN || github.token }}
 
       - name: Download CUDA-QX wheels
         uses: actions/download-artifact@v4
@@ -229,7 +229,7 @@ jobs:
           name: wheels-py${{ matrix.python }}-${{ matrix.runner.arch }}
           path: /wheels
           run-id: ${{ inputs.artifacts_from_run || github.run_id }}
-          github-token: ${{ secrets.WORKFLOW_TOKEN }}
+          github-token: ${{ inputs.artifacts_from_run && secrets.WORKFLOW_TOKEN || github.token }}
   
       - name: Test wheels
         run: |
