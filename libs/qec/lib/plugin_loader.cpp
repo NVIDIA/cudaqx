@@ -19,6 +19,7 @@ static std::map<std::string, PluginHandle> &get_plugin_handles() {
 
 // Function to load plugins from a directory based on their type
 void load_plugins(const std::string &plugin_dir, PluginType type) {
+  printf("BMH Loading plugins from %s\n", plugin_dir.c_str());
   if (!fs::exists(plugin_dir)) {
     std::cerr << "WARNING: Plugin directory does not exist: " << plugin_dir
               << std::endl;
