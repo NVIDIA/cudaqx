@@ -123,7 +123,7 @@ jobs:
   test-cudaqx-wheels:
     name: Test CUDA-QX wheels (CPU)
     needs: [build-cudaqx-wheels, build-cudaq-wheels]
-    if: ${{ !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
+    if: ${{ !failure() && !cancelled() }}
     runs-on: linux-${{ matrix.platform }}-cpu4
     container: ubuntu:22.04
     permissions:
@@ -175,7 +175,7 @@ jobs:
   test-wheels-gpu:
     name: Test CUDA-QX wheels (GPU)
     needs: [build-cudaqx-wheels, build-cudaq-wheels]
-    if: ${{ !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
+    if: ${{ !failure() && !cancelled() }}
     runs-on: linux-${{ matrix.runner.arch }}-gpu-${{ matrix.runner.gpu }}-latest-1
     container:
       image: nvidia/cuda:12.0.0-base-ubuntu22.04
