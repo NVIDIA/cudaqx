@@ -47,18 +47,18 @@ set_target_properties(${MODULE_NAME} PROPERTIES
 # ==============================================================================
 
 if (NOT SKBUILD)
-  set_target_properties(${LIBRARY_NAME} PROPERTIES
+  set_target_properties(${MODULE_NAME} PROPERTIES
     BUILD_RPATH "$ORIGIN"
     INSTALL_RPATH "$ORIGIN:$ORIGIN/.."
   )
 
   # Let CMake automatically add paths of linked libraries to the RPATH:
-  set_target_properties(${LIBRARY_NAME} PROPERTIES
+  set_target_properties(${MODULE_NAME} PROPERTIES
     INSTALL_RPATH_USE_LINK_PATH TRUE)
 else()
   # CUDA-Q install its libraries in site-packages/lib (or dist-packages/lib)
   # Thus, we need the $ORIGIN/../lib
-  set_target_properties(${LIBRARY_NAME} PROPERTIES
+  set_target_properties(${MODULE_NAME} PROPERTIES
     INSTALL_RPATH "$ORIGIN/../../lib"
   )
 endif()
