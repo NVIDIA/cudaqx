@@ -28,6 +28,9 @@ ${python} -m pip install --no-cache-dir pytest
 # If special CUDA-Q wheels have been built for this test, install them here. This will 
 if [ -d /cudaq-wheels ]; then
   echo "Custom CUDA-Q wheels directory found; installing ..."
+  echo "First ls /cudaq-wheels"
+  ls /cudaq-wheels
+  echo "Now show what will be pip installed"
   ls -1 /cudaq-wheels/cuda_quantum-*-cp${python_version_no_dot}-cp${python_version_no_dot}-*.whl
   ${python} -m pip install /cudaq-wheels/cuda_quantum-*-cp${python_version_no_dot}-cp${python_version_no_dot}-*.whl
 fi
