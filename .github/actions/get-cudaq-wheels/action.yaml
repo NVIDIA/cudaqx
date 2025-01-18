@@ -143,14 +143,6 @@ runs:
           python_version=3.12
         outputs: /cudaq-wheels
 
-    - name: Upload wheel
-      uses: actions/upload-artifact@v4
-      with:
-        name: cudaq-wheels-${{ inputs.platform }}
-        path: /cudaq-wheels
-        retention-days: 10
-        if-no-files-found: error
-
     # ==========================================================================
     # Store CUDAQ wheels cache
     # ==========================================================================
