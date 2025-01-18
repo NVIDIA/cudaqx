@@ -74,7 +74,6 @@ std::unique_ptr<decoder> get_decoder(const std::string &name,
                                      const cudaqx::heterogeneous_map options) {
   return decoder::get(name, H, options);
 }
-} // namespace cudaq::qec
 
 // Constructor function for auto-loading plugins
 __attribute__((constructor)) void load_decoder_plugins() {
@@ -90,3 +89,4 @@ __attribute__((destructor)) void cleanup_decoder_plugins() {
   // Clean up decoder-specific plugins
   cleanup_plugins(PluginType::DECODER);
 }
+} // namespace cudaq::qec

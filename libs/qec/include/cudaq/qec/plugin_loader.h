@@ -6,13 +6,14 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
-#ifndef PLUGIN_LOADER_H
-#define PLUGIN_LOADER_H
+#pragma once
 
 #include <dlfcn.h>
 #include <map>
 #include <memory>
 #include <string>
+
+namespace cudaq::qec {
 
 /// @brief Enum to define different types of plugins
 enum class PluginType {
@@ -21,11 +22,21 @@ enum class PluginType {
            // Add other plugin types here as needed
 };
 
+struct PluginDeleter // deleter
+{
+  void operator()(void *h) const {
+    if (h)
+      dlclose(h);
+  };
+};
+
 /// @brief A struct to store plugin handle with its type
 struct PluginHandle {
-  std::shared_ptr<void> handle; // Pointer to the shared library handle. This is
-                                // the result of dlopen() function.
-  PluginType type;              // Type of the plugin (e.g., decoder, code, etc)
+  // Pointer to the shared library handle. This is the result of dlopen()
+  // function.
+  std::unique_ptr<void, PluginDeleter> handle;
+  // Type of the plugin (e.g., decoder, code, etc)
+  PluginType type;
 };
 
 /// @brief Function to load plugins from a directory based on type
@@ -39,4 +50,4 @@ void load_plugins(const std::string &plugin_dir, PluginType type);
 /// be cleaned up.
 void cleanup_plugins(PluginType type);
 
-#endif // PLUGIN_LOADER_H
+} // namespace cudaq::qec

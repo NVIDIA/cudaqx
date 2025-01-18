@@ -12,6 +12,8 @@
 
 namespace fs = std::filesystem;
 
+namespace cudaq::qec {
+
 static std::map<std::string, PluginHandle> &get_plugin_handles() {
   static std::map<std::string, PluginHandle> plugin_handles;
   return plugin_handles;
@@ -28,15 +30,11 @@ void load_plugins(const std::string &plugin_dir, PluginType type) {
     if (entry.path().extension() == ".so") {
       void *raw_handle = dlopen(entry.path().c_str(), RTLD_NOW);
       if (raw_handle) {
-        // Custom deleter ensures dlclose is called
-        auto deleter = [](void *h) {
-          if (h)
-            dlclose(h);
-        };
-
         get_plugin_handles().emplace(
             entry.path().filename().string(),
-            PluginHandle{std::shared_ptr<void>(raw_handle, deleter), type});
+            PluginHandle{std::unique_ptr<void, PluginDeleter>(raw_handle,
+                                                              PluginDeleter()),
+                         type});
       } else {
         std::cerr << "ERROR: Failed to load plugin: " << entry.path()
                   << " Error: " << dlerror() << std::endl;
@@ -57,3 +55,5 @@ void cleanup_plugins(PluginType type) {
     }
   }
 }
+
+} // namespace cudaq::qec
