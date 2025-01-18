@@ -14,6 +14,8 @@
 #include <filesystem>
 #include <vector>
 
+#include "cuda-qx/core/library_utils.h"
+
 INSTANTIATE_REGISTRY(cudaq::qec::decoder, const cudaqx::tensor<uint8_t> &)
 INSTANTIATE_REGISTRY(cudaq::qec::decoder, const cudaqx::tensor<uint8_t> &,
                      const cudaqx::heterogeneous_map &)
@@ -79,7 +81,8 @@ std::unique_ptr<decoder> get_decoder(const std::string &name,
 // Constructor function for auto-loading plugins
 __attribute__((constructor)) void load_decoder_plugins() {
   // Load plugins from the decoder-specific plugin directory
-  std::filesystem::path cudaqLibPath{cudaq::getCUDAQLibraryPath()};
+  std::filesystem::path cudaqLibPath{cudaqx::__internal__::getCUDAQXLibraryPath(
+      cudaqx::__internal__::CudaQXLibType::QEC)};
   auto pluginPath = cudaqLibPath.parent_path() / "decoder-plugins";
   load_plugins(pluginPath.string(), PluginType::DECODER);
 }

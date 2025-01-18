@@ -20,9 +20,12 @@
 
 namespace cudaqx::__internal__ {
 
+enum class CudaQXLibType { Solvers, QEC };
+
 /// @brief Structure to hold CUDAQX library data.
 struct CUDAQXLibraryData {
   std::string path; ///< The path to the CUDAQX library.
+  std::string libName; // The name to search for
 };
 
 #if defined(__APPLE__) && defined(__MACH__)
@@ -31,11 +34,11 @@ struct CUDAQXLibraryData {
 /// path.
 inline static void getCUDAQXLibraryPath(CUDAQXLibraryData *data) {
   auto nLibs = _dyld_image_count();
+  auto casted = static_cast<CUDAQLibraryData *>(data);
   for (uint32_t i = 0; i < nLibs; i++) {
     auto ptr = _dyld_get_image_name(i);
     std::string libName(ptr);
-    if (libName.find("cudaq-core") != std::string::npos) {
-      auto casted = static_cast<CUDAQLibraryData *>(data);
+    if (libName.find(casted->libName) != std::string::npos) {
       casted->path = std::string(ptr);
     }
   }
@@ -51,8 +54,8 @@ inline static void getCUDAQXLibraryPath(CUDAQXLibraryData *data) {
 inline static int getCUDAQXLibraryPath(struct dl_phdr_info *info, size_t size,
                                        void *data) {
   std::string libraryName(info->dlpi_name);
-  if (libraryName.find("cudaq-solvers") != std::string::npos) {
-    auto casted = static_cast<CUDAQXLibraryData *>(data);
+  auto casted = static_cast<CUDAQXLibraryData *>(data);
+  if (libraryName.find(casted->libName) != std::string::npos) {
     casted->path = std::string(info->dlpi_name);
   }
   return 0;
@@ -61,8 +64,18 @@ inline static int getCUDAQXLibraryPath(struct dl_phdr_info *info, size_t size,
 
 /// @brief Retrieves the path of the CUDAQX library.
 /// @return A string containing the path to the CUDAQX library.
-inline static std::string getCUDAQXLibraryPath() {
+inline static std::string getCUDAQXLibraryPath(const CudaQXLibType lib) {
   __internal__::CUDAQXLibraryData data;
+  data.libName = [&]() -> std::string {
+    switch (lib) {
+    case CudaQXLibType::QEC:
+      return "cudaq-qec";
+    case CudaQXLibType::Solvers:
+      return "cudaq-solvers";
+    }
+    return "UNKNOWN";
+  }();
+
 #if defined(__APPLE__) && defined(__MACH__)
   getCUDAQXLibraryPath(&data);
 #else
