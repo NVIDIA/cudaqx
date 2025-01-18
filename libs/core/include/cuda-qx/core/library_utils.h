@@ -24,7 +24,7 @@ enum class CudaQXLibType { Solvers, QEC };
 
 /// @brief Structure to hold CUDAQX library data.
 struct CUDAQXLibraryData {
-  std::string path; ///< The path to the CUDAQX library.
+  std::string path;    ///< The path to the CUDAQX library.
   std::string libName; // The name to search for
 };
 
