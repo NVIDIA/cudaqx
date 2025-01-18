@@ -7,14 +7,12 @@
  ******************************************************************************/
 
 #include "cudaq/qec/decoder.h"
+#include "cuda-qx/core/library_utils.h"
 #include "cudaq/qec/plugin_loader.h"
-#include "cudaq/utils/cudaq_utils.h"
 #include <cassert>
 #include <dlfcn.h>
 #include <filesystem>
 #include <vector>
-
-#include "cuda-qx/core/library_utils.h"
 
 INSTANTIATE_REGISTRY(cudaq::qec::decoder, const cudaqx::tensor<uint8_t> &)
 INSTANTIATE_REGISTRY(cudaq::qec::decoder, const cudaqx::tensor<uint8_t> &,
