@@ -27,6 +27,7 @@ void load_plugins(const std::string &plugin_dir, PluginType type) {
   }
   for (const auto &entry : fs::directory_iterator(plugin_dir)) {
     if (entry.path().extension() == ".so") {
+      printf("BMH Opening %s\n", entry.path().c_str());
       void *raw_handle = dlopen(entry.path().c_str(), RTLD_NOW);
       if (raw_handle) {
         // Custom deleter ensures dlclose is called
@@ -42,6 +43,8 @@ void load_plugins(const std::string &plugin_dir, PluginType type) {
         std::cerr << "ERROR: Failed to load plugin: " << entry.path()
                   << " Error: " << dlerror() << std::endl;
       }
+    } else {
+      printf("BMH Skipping %s\n", entry.path().c_str());
     }
   }
 }
