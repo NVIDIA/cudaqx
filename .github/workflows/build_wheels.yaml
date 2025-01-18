@@ -225,6 +225,7 @@ jobs:
           name: cudaq-wheels-${{ matrix.platform }}
           path: /cudaq-wheels
           run-id: ${{ inputs.artifacts_from_run || github.run_id }}
+          github-token: ${{ github.token }}
 
       - name: Download CUDA-QX wheels
         uses: actions/download-artifact@v4
@@ -232,6 +233,7 @@ jobs:
           name: wheels-py${{ matrix.python }}-${{ matrix.runner.arch }}
           path: /wheels
           run-id: ${{ inputs.artifacts_from_run || github.run_id }}
+          github-token: ${{ github.token }}
   
       - name: Test wheels
         run: |
