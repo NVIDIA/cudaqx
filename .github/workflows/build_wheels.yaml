@@ -99,15 +99,18 @@ jobs:
       pull-requests: read
     steps:
       - name: Get code
+        if: ${{ !inputs.artifacts_from_run }}
         uses: actions/checkout@v4
         with:
           set-safe-directory: true
 
       - name: Get required CUDAQ version
+        if: ${{ !inputs.artifacts_from_run }}
         id: get-cudaq-version
         uses: ./.github/actions/get-cudaq-version
 
       - name: Get CUDAQ wheels
+        if: ${{ !inputs.artifacts_from_run }}
         uses: ./.github/actions/get-cudaq-wheels
         with:
           repo: ${{ steps.get-cudaq-version.outputs.repo }}
@@ -117,6 +120,7 @@ jobs:
           platform: ${{ matrix.platform }}
 
       - name: Upload CUDAQ wheels
+        if: ${{ !inputs.artifacts_from_run }}
         uses: actions/upload-artifact@v4
         with:
           name: cudaq-wheels-${{ matrix.platform }}
