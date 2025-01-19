@@ -39,7 +39,7 @@ fi
 # ======================================
 
 ${python} -m pip install /wheels/cudaq_qec-*-cp${python_version_no_dot}-cp${python_version_no_dot}-*.whl
-${python} -m pytest -s libs/qec/python/tests/test_decoder.py::test_decoder_plugin_initialization # libs/qec/python/tests/
+${python} -m pytest -s libs/qec/python/tests/
 
 # Solvers library
 # ======================================
