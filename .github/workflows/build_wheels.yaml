@@ -6,11 +6,19 @@ on:
       build_type:
         type: choice
         required: true
-        description: 'Build Type'
+        description: 'Build Type (ignored if using artifacts from prior run)'
         default: 'Release'
         options:
         - 'Release'
         - 'Debug'
+      cudaq_wheels:
+        type: choice
+        required: true
+        description: 'CUDA-Q wheel source (released version from PyPI or Custom built using .cudaq_version in repo)'
+        default: 'Custom'
+        options:
+        - 'Custom'
+        - 'PyPI'
       artifacts_from_run:
         type: string
         description: Optional argument to take artifacts from a prior run of this workflow; facilitates rerunning a failed workflow without re-building the artifacts.
@@ -84,7 +92,7 @@ jobs:
   # this is a separate job.
   build-cudaq-wheels:
     name: Build CUDA-Q wheels
-    if: ${{ !inputs.artifacts_from_run }}
+    if: ${{ !inputs.artifacts_from_run && inputs.cudaq_wheels == 'Custom'}}
     strategy:
       fail-fast: false
       matrix:
@@ -153,6 +161,7 @@ jobs:
           apt install -y --no-install-recommends libgfortran5 unzip
   
       - name: Download CUDA-Q wheels
+        if: ${{ inputs.cudaq_wheels == 'Custom' }}
         uses: actions/download-artifact@v4
         with:
           name: cudaq-wheels-${{ matrix.platform }}
@@ -217,6 +226,7 @@ jobs:
           #cat /proc/sys/kernel/core_pattern
   
       - name: Download CUDA-Q wheels
+        if: ${{ inputs.cudaq_wheels == 'Custom' }}
         uses: actions/download-artifact@v4
         with:
           name: cudaq-wheels-${{ matrix.runner.arch }}
