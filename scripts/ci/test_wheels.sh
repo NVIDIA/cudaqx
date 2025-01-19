@@ -20,9 +20,6 @@ python_version=$1
 python_version_no_dot=$(echo $python_version | tr -d '.') # 3.10 --> 310
 python=python${python_version}
 
-#apt-get update && apt-get install -y --no-install-recommends \
-#        libgfortran5 python${python_version} python$(echo ${python_version} | cut -d . -f 1)-pip
-
 ${python} -m pip install --no-cache-dir pytest
 
 # If special CUDA-Q wheels have been built for this test, install them here. This will 
