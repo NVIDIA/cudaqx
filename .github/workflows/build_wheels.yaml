@@ -78,6 +78,7 @@ jobs:
         with:
           name: wheels-py${{ matrix.python }}-${{ matrix.platform }}
           path: /wheels/**
+          retention-days: 14
 
   # Building the CUDA-Q wheels must be done outside of a container context, so
   # this is a separate job.
@@ -117,7 +118,7 @@ jobs:
         with:
           name: cudaq-wheels-${{ matrix.platform }}
           path: /cudaq-wheels
-          retention-days: 10
+          retention-days: 14
           if-no-files-found: error
 
   test-cudaqx-wheels:
