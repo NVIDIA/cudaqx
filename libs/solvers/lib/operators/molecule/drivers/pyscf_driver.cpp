@@ -63,7 +63,7 @@ public:
 
     // Start up the web service, if failed, return nullptr
     std::filesystem::path libPath{cudaqx::__internal__::getCUDAQXLibraryPath(
-        cudaqx::__internal__::CudaQXLibType::Solvers)};
+        cudaqx::__internal__::CUDAQXLibraryType::Solvers)};
     auto cudaqLibPath = libPath.parent_path();
     auto cudaqPySCFTool = cudaqLibPath.parent_path() / "bin" / "cudaq-pyscf";
     auto argString = cudaqPySCFTool.string() + " --server-mode";

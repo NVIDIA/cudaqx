@@ -20,11 +20,11 @@
 
 namespace cudaqx::__internal__ {
 
-enum class CudaQXLibType { Solvers, QEC };
+enum class CUDAQXLibraryType { Solvers, QEC };
 
 /// @brief Structure to hold CUDAQX library data.
 struct CUDAQXLibraryData {
-  std::string path;    ///< The path to the CUDAQX library.
+  std::string path;    // The path to the CUDAQX library
   std::string libName; // The name to search for
 };
 
@@ -64,13 +64,13 @@ inline static int getCUDAQXLibraryPath(struct dl_phdr_info *info, size_t size,
 
 /// @brief Retrieves the path of the CUDAQX library.
 /// @return A string containing the path to the CUDAQX library.
-inline static std::string getCUDAQXLibraryPath(const CudaQXLibType lib) {
+inline static std::string getCUDAQXLibraryPath(const CUDAQXLibraryType lib) {
   __internal__::CUDAQXLibraryData data;
   data.libName = [&]() -> std::string {
     switch (lib) {
-    case CudaQXLibType::QEC:
+    case CUDAQXLibraryType::QEC:
       return "/libcudaq-qec.";
-    case CudaQXLibType::Solvers:
+    case CUDAQXLibraryType::Solvers:
       return "/libcudaq-solvers.";
     }
     return "UNKNOWN";
