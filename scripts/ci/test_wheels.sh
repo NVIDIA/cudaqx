@@ -11,28 +11,35 @@
 # Exit immediately if any command returns a non-zero status
 set -e
 
+# Uncomment these lines to enable core files
+#set +e
+#ulimit -c unlimited
+
 # Installing dependencies
-python_version=3.10
+python_version=$1
+python_version_no_dot=$(echo $python_version | tr -d '.') # 3.10 --> 310
 python=python${python_version}
 
-apt-get update && apt-get install -y --no-install-recommends \
-        libgfortran5 python${python_version} python$(echo ${python_version} | cut -d . -f 1)-pip
+${python} -m pip install --no-cache-dir pytest
 
-${python} -m pip install --no-cache-dir pytest nvidia-cublas-cu11
-
-cd /cuda-qx
-
-${python} -m pip install wheels/cuda_quantum_cu12-0.0.0-cp310-cp310-manylinux_2_28_x86_64.whl
+# If special CUDA-Q wheels have been built for this test, install them here. This will 
+if [ -d /cudaq-wheels ]; then
+  echo "Custom CUDA-Q wheels directory found; installing ..."
+  echo "First ls /cudaq-wheels"
+  ls /cudaq-wheels
+  echo "Now show what will be pip installed"
+  ls -1 /cudaq-wheels/cuda_quantum_*-cp${python_version_no_dot}-cp${python_version_no_dot}-*.whl
+  ${python} -m pip install /cudaq-wheels/cuda_quantum_*-cp${python_version_no_dot}-cp${python_version_no_dot}-*.whl
+fi
 
 # QEC library
 # ======================================
 
-${python} -m pip install wheels/cudaq_qec-0.0.1-cp310-cp310-*.whl
-${python} -m pytest libs/qec/python/tests/
+${python} -m pip install /wheels/cudaq_qec-*-cp${python_version_no_dot}-cp${python_version_no_dot}-*.whl
+${python} -m pytest -s libs/qec/python/tests/
 
 # Solvers library
 # ======================================
 
-${python} -m pip install wheels/cudaq_solvers-0.0.1-cp310-cp310-*.whl
+${python} -m pip install /wheels/cudaq_solvers-*-cp${python_version_no_dot}-cp${python_version_no_dot}-*.whl
 ${python} -m pytest libs/solvers/python/tests/
-

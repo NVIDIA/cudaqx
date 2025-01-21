@@ -7,6 +7,7 @@
  ******************************************************************************/
 
 #include "cudaq/qec/decoder.h"
+#include "cuda-qx/core/library_utils.h"
 #include "cudaq/qec/plugin_loader.h"
 #include <cassert>
 #include <dlfcn.h>
@@ -73,12 +74,14 @@ std::unique_ptr<decoder> get_decoder(const std::string &name,
                                      const cudaqx::heterogeneous_map options) {
   return decoder::get(name, H, options);
 }
-} // namespace cudaq::qec
 
 // Constructor function for auto-loading plugins
 __attribute__((constructor)) void load_decoder_plugins() {
   // Load plugins from the decoder-specific plugin directory
-  load_plugins(DECODER_PLUGIN_DIR, PluginType::DECODER);
+  std::filesystem::path libPath{cudaqx::__internal__::getCUDAQXLibraryPath(
+      cudaqx::__internal__::CUDAQXLibraryType::QEC)};
+  auto pluginPath = libPath.parent_path() / "decoder-plugins";
+  load_plugins(pluginPath.string(), PluginType::DECODER);
 }
 
 // Destructor function to clean up only decoder plugins
@@ -86,3 +89,4 @@ __attribute__((destructor)) void cleanup_decoder_plugins() {
   // Clean up decoder-specific plugins
   cleanup_plugins(PluginType::DECODER);
 }
+} // namespace cudaq::qec

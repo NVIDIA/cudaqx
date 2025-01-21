@@ -11,7 +11,7 @@ maintainers = [{name = "NVIDIA Corporation & Affiliates"}]
 requires-python = ">=3.10"
 readme = "README.md"
 dependencies = [
-  'cuda-quantum-cu12 ~= 0.9.0',
+  'cuda-quantum-cu12 >= 0.9',
 ]
 classifiers = [
     'Intended Audience :: Science/Research',
@@ -37,7 +37,7 @@ build-dir = "_skbuild"
 build.verbose = true
 cmake.version = ">=3.28"
 cmake.build-type = "Release"
-install.components = ["qec-python", "qec-lib"]
+install.components = ["qec-python", "qec-lib", "qec-lib-plugins"]
 wheel.packages = []
 logging.level = "DEBUG"
 ninja.version = ">=1.10"

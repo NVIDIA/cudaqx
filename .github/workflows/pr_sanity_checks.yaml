@@ -107,6 +107,7 @@ jobs:
         with:
           name: clang-format-patch
           path: clang-*.patch
+          retention-days: 14
 
   check-python:
     name: Check Python code formatting
@@ -165,6 +166,7 @@ jobs:
         with:
           name: yapf-format-patch
           path: yapf-*.patch
+          retention-days: 14
 
   # This job is used for branch protection checks.
   verify:

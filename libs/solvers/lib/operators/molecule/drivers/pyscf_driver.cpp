@@ -8,8 +8,8 @@
 
 #include "nlohmann/json.hpp"
 
+#include "cuda-qx/core/library_utils.h"
 #include "cuda-qx/core/tensor.h"
-#include "library_utils.h"
 #include "process.h"
 #include "cudaq/solvers/operators/molecule/fermion_compiler.h"
 #include "cudaq/solvers/operators/molecule/molecule_package_driver.h"
@@ -62,7 +62,8 @@ public:
   std::unique_ptr<tear_down> make_available() const override {
 
     // Start up the web service, if failed, return nullptr
-    std::filesystem::path libPath{cudaqx::__internal__::getCUDAQXLibraryPath()};
+    std::filesystem::path libPath{cudaqx::__internal__::getCUDAQXLibraryPath(
+        cudaqx::__internal__::CUDAQXLibraryType::Solvers)};
     auto cudaqLibPath = libPath.parent_path();
     auto cudaqPySCFTool = cudaqLibPath.parent_path() / "bin" / "cudaq-pyscf";
     auto argString = cudaqPySCFTool.string() + " --server-mode";

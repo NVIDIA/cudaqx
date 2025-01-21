@@ -14,11 +14,13 @@ runs:
 
     - name: Install jq
       run: |
-        if [ -x "$(command -v apt-get)" ]; then
-          apt-get update
-          apt-get install -y --no-install-recommends jq
-        elif [ -x "$(command -v dnf)" ]; then
-          dnf install -y --nobest --setopt=install_weak_deps=False jq
+        if [ ! -x "$(command -v jq)" ]; then
+          if [ -x "$(command -v apt-get)" ]; then
+            apt-get update
+            apt-get install -y --no-install-recommends jq
+          elif [ -x "$(command -v dnf)" ]; then
+            dnf install -y --nobest --setopt=install_weak_deps=False jq
+          fi
         fi
 
       shell: bash
