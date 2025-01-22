@@ -1,13 +1,14 @@
 #!/bin/sh
 
 # ============================================================================ #
-# Copyright (c) 2022 - 2024 NVIDIA Corporation & Affiliates.                   #
+# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
+set -e  # Exit immediately if a command exits with a non-zero status
 
 # ==============================================================================
 # Handling options
@@ -20,6 +21,9 @@ show_help() {
     echo "  --cudaq-prefix    Path to CUDA-Q's install prefix"
     echo "                    (default: \$HOME/.cudaq)"
     echo "  --python-version  Python version to build wheel for (e.g. 3.10)"
+    echo "  --devdeps         Build wheels suitable for internal testing"
+    echo "                    (not suitable for distribution but sometimes"
+    echo "                    helpful for debugging)"
 }
 
 parse_options() {
@@ -52,6 +56,10 @@ parse_options() {
                     exit 1
                 fi
                 ;;
+            --devdeps)
+                devdeps=true
+                shift 1
+                ;;
             -*)
                 echo "Error: Unknown option $1" >&2
                 show_help
@@ -70,6 +78,7 @@ parse_options() {
 cudaq_prefix=$HOME/.cudaq
 build_type=Release
 python_version=3.10
+devdeps=false
 
 # Parse options
 parse_options "$@"
@@ -82,9 +91,14 @@ echo "Building in $build_type mode for Python $python_version"
 
 python=python${python_version}
 ARCH=$(uname -m)
+PLAT_STR=""
 
-# We need to use a newer toolchain because CUDA-QX libraries rely on c++20
-source /opt/rh/gcc-toolset-11/enable
+if $devdeps; then
+  PLAT_STR="--plat manylinux_2_34_x86_64"
+else
+  # We need to use a newer toolchain because CUDA-QX libraries rely on c++20
+  source /opt/rh/gcc-toolset-11/enable
+fi
 
 export CC=gcc
 export CXX=g++
@@ -96,7 +110,9 @@ export CXX=g++
 cd libs/qec
 
 SKBUILD_CMAKE_ARGS="-DCUDAQ_DIR=$cudaq_prefix/lib/cmake/cudaq"
-SKBUILD_CMAKE_ARGS+=";-DCMAKE_CXX_COMPILER_EXTERNAL_TOOLCHAIN=/opt/rh/gcc-toolset-11/root/usr/lib/gcc/${ARCH}-redhat-linux/11/"
+if ! $devdeps; then
+  SKBUILD_CMAKE_ARGS+=";-DCMAKE_CXX_COMPILER_EXTERNAL_TOOLCHAIN=/opt/rh/gcc-toolset-11/root/usr/lib/gcc/${ARCH}-redhat-linux/11/"
+fi
 SKBUILD_CMAKE_ARGS+=";-DCMAKE_BUILD_TYPE=$build_type"
 export SKBUILD_CMAKE_ARGS
 $python -m build --wheel
@@ -105,7 +121,8 @@ CUDAQ_EXCLUDE_LIST=$(for f in $(find $cudaq_prefix/lib -name "*.so" -printf "%P\
 
 LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$(pwd)/_skbuild/lib" \
 $python -m auditwheel -v repair dist/*.whl $CUDAQ_EXCLUDE_LIST \
-  --wheel-dir /wheels
+  --wheel-dir /wheels \
+  ${PLAT_STR}
 
 # ==============================================================================
 # Solvers library
@@ -114,7 +131,9 @@ $python -m auditwheel -v repair dist/*.whl $CUDAQ_EXCLUDE_LIST \
 cd ../solvers
 
 SKBUILD_CMAKE_ARGS="-DCUDAQ_DIR=$cudaq_prefix/lib/cmake/cudaq"
-SKBUILD_CMAKE_ARGS+=";-DCMAKE_CXX_COMPILER_EXTERNAL_TOOLCHAIN=/opt/rh/gcc-toolset-11/root/usr/lib/gcc/${ARCH}-redhat-linux/11/;"
+if ! $devdeps; then
+  SKBUILD_CMAKE_ARGS+=";-DCMAKE_CXX_COMPILER_EXTERNAL_TOOLCHAIN=/opt/rh/gcc-toolset-11/root/usr/lib/gcc/${ARCH}-redhat-linux/11/;"
+fi
 SKBUILD_CMAKE_ARGS+=";-DCMAKE_BUILD_TYPE=$build_type" \
 export SKBUILD_CMAKE_ARGS
 $python -m build --wheel
@@ -124,5 +143,9 @@ $python -m auditwheel -v repair dist/*.whl $CUDAQ_EXCLUDE_LIST \
   --exclude libgfortran.so.5 \
   --exclude libquadmath.so.0 \
   --exclude libmvec.so.1 \
-  --wheel-dir /wheels
+  --wheel-dir /wheels \
+  ${PLAT_STR}
 
+
+echo "Wheel builds are complete: "
+ls -la /wheels
