@@ -31,6 +31,7 @@ vec2d operator-(const vec2d &lhs, const vec2d &rhs);
 bool operator==(const vec2d &lhs, const vec2d &rhs);
 bool operator<(const vec2d &lhs, const vec2d &rhs);
 
+// clang-format off
 /// @brief Generates and keeps track of the 2d grid of stabilizers in the
 /// rotated surface code.
 /// Following same layout convention as in: https://arxiv.org/abs/2311.10687
@@ -40,6 +41,8 @@ bool operator<(const vec2d &lhs, const vec2d &rhs);
 /// (1,0)   (1,1)   (1,2)   (1,3)
 /// (2,0)   (2,1)   (2,2)   (2,3)
 /// (3,0)   (3,1)   (3,2)   (3,3)
+// clang-format on
+
 ///
 /// Each entry on the grid can be an X stabilizer, Z stabilizer,
 /// or empty, as is needed on the edges.
@@ -58,8 +61,8 @@ bool operator<(const vec2d &lhs, const vec2d &rhs);
 ///         X(2,1)  Z(2,2)  X(2,3)
 ///         Z(3,1)
 ///
-/// and to get the familiar visualization of the distance three surface code, the
-/// `print_stabilizer_indices` results in:
+/// and to get the familiar visualization of the distance three surface code,
+/// the `print_stabilizer_indices` results in:
 ///         Z0
 /// X0  Z1  X1
 ///     X2  Z2  X3
