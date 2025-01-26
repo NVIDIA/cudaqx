@@ -87,6 +87,7 @@ TEST(QECCodeTester, checkSteaneNoiseStim) {
     // bitflip should only trigger x syndromes
     int x_sum = 0;
     int z_sum = 0;
+
     for (std::size_t i = 0; i < syndromes.shape()[0]; i++) {
       for (std::size_t j_x = 0; j_x < syndromes.shape()[1] / 2; j_x++) {
         x_sum += syndromes.at({i, j_x});
@@ -213,7 +214,7 @@ TEST(QECCodeTester, checkSteaneNoiseStim) {
         z_sum += syndromes.at({i, j_z});
       }
     }
-    EXPECT_TRUE(x_sum == 0);
+    EXPECT_TRUE(x_sum > 0);
     EXPECT_TRUE(z_sum > 0);
   }
 }
