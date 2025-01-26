@@ -185,7 +185,9 @@ TEST(QECCodeTester, checkSteaneNoiseStim) {
         z_sum += syndromes.at({i, j_z});
       }
     }
-    EXPECT_TRUE(x_sum == 0);
+    // Even though phase flip is a z error,
+    // additional hadamards in prepp can convert to x error.
+    EXPECT_TRUE(x_sum > 0);
     EXPECT_TRUE(z_sum > 0);
   }
   {
