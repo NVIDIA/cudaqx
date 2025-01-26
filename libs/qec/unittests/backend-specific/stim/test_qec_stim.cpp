@@ -80,7 +80,7 @@ TEST(QECCodeTester, checkSteaneNoiseStim) {
     syndromes.dump();
     printf("data\n");
     d.dump();
-    EXPECT_EQ(syndromes.shape()[0], nShots*nRounds);
+    EXPECT_EQ(syndromes.shape()[0], nShots * nRounds);
     EXPECT_EQ(syndromes.shape()[1], 6);
 
     // Should have some 1s since it's noisy
@@ -482,7 +482,7 @@ TEST(QECCodeTester, checkNoisySampleMemoryCircuitAndDecode) {
         *steane, cudaq::qec::operation::prepp, nShots, nRounds, noise);
     printf("syndromes:\n");
     syndromes.dump();
-    EXPECT_EQ(syndromes.shape()[0], nShots*nRounds);
+    EXPECT_EQ(syndromes.shape()[0], nShots * nRounds);
     EXPECT_EQ(syndromes.shape()[1], 6);
 
     // With noise, Lx will sometimes be flipped

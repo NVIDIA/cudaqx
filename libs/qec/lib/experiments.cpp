@@ -154,14 +154,12 @@ sample_memory_circuit(const code &code, operation statePrep,
   cudaqx::tensor<uint8_t> measuresTensor({numMeasRows, numCols});
   measuresTensor.borrow(measurements.data());
 
-
   // First round, store bare syndrome measurement
   for (std::size_t col = 0; col < numCols; ++col) {
     std::size_t shot = 0;
     std::size_t round = 0;
     std::size_t measIdx = shot * numRounds + round;
-    syndromeTensor.at({measIdx, col}) =
-      measuresTensor.at({measIdx, col});
+    syndromeTensor.at({measIdx, col}) = measuresTensor.at({measIdx, col});
   }
 
   // After first round, store syndrome flips
