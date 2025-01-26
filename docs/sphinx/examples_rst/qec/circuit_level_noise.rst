@@ -58,8 +58,8 @@ Here's how to use CUDA-Q QEC to perform a circuit-level noise model experiment i
     - Each memory circuit runs for an input number of `nRounds`, which specifies how many `stabilizer_round` kernels are ran.
     - After `nRounds` the data qubits are measured and the run is over.
     - This is performed `nShots` number of times.
-    - During a shot, each syndrome is `xor`'d against the preceding syndrome, so that we can track a sparser flow of data showing which round each parity check was violated.
-    - This means we will get a total of `nShots * (nRounds - 1)` syndromes to decode and analyze.
+    - During a shot, each stabilizer round's syndrome is `xor`'d against the preceding syndrome, so that we can track a sparser flow of data showing which round each parity check was violated.
+    - The first round returns the syndrome as is, as there is nothing preceding to `xor` against.
 
 5. Data qubit measurements:
     - The data qubits are only read out after the end of each shot, so there are `nShots` worth of data readouts.
