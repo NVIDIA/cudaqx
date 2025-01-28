@@ -846,7 +846,7 @@ The functions return a tuple containing:
 
 1. **Syndrome Measurements** (:code:`tensor<uint8_t>`):
 
-   * Shape: :code:`(num_shots, (num_rounds-1) * syndrome_size)`
+   * Shape: :code:`(num_shots, num_rounds * syndrome_size)`
    * Contains stabilizer measurement results
    * Values are 0 or 1 representing measurement outcomes
 
