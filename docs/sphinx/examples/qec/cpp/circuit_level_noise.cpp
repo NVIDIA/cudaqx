@@ -6,9 +6,9 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
-// Compile and run with
-// nvq++ --enable-mlir -lcudaq-qec circuit_level_noise.cpp -o circuit_level
-// ./circuit_level
+// Compile and run with:
+// nvq++ --enable-mlir --target=stim -lcudaq-qec circuit_level_noise.cpp
+// ./a.out
 
 #include "cudaq.h"
 #include "cudaq/qec/decoder.h"
