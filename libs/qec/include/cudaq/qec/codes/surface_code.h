@@ -37,10 +37,12 @@ bool operator<(const vec2d &lhs, const vec2d &rhs);
 /// Following same layout convention as in: https://arxiv.org/abs/2311.10687
 /// Grid layout is arranged from left to right, top to bottom (row major storage)
 /// grid_length = 4 example:
+/// ```
 /// (0,0)   (0,1)   (0,2)   (0,3)
 /// (1,0)   (1,1)   (1,2)   (1,3)
 /// (2,0)   (2,1)   (2,2)   (2,3)
 /// (3,0)   (3,1)   (3,2)   (3,3)
+/// ```
 // clang-format on
 
 ///
@@ -48,32 +50,40 @@ bool operator<(const vec2d &lhs, const vec2d &rhs);
 /// or empty, as is needed on the edges.
 /// The grid length of 4 corresponds to a distance 3 surface code, which results
 /// in:
+/// ```
 /// e(0,0)  e(0,1)  Z(0,2)  e(0,3)
 /// X(1,0)  Z(1,1)  X(1,2)  e(1,3)
 /// e(2,0)  X(2,1)  Z(2,2)  X(2,3)
 /// e(3,0)  Z(3,1)  e(3,2)  e(3,3)
+/// ```
 ///
 /// This is seen through the `print_stabilizer_grid()` member function.
 /// To get rid of the empty sites, the `print_stabilizer_coords()` function is
 /// used:
+/// ```
 ///                 Z(0,2)
 /// X(1,0)  Z(1,1)  X(1,2)
 ///         X(2,1)  Z(2,2)  X(2,3)
 ///         Z(3,1)
+/// ```
 ///
 /// and to get the familiar visualization of the distance three surface code,
 /// the `print_stabilizer_indices` results in:
+/// ```
 ///         Z0
 /// X0  Z1  X1
 ///     X2  Z2  X3
 ///     Z3
+/// ```
 ///
 /// The data qubits are located at the four corners of each of the weight-4
 /// stabilizers. They are also organized with index increasing from left to
 /// right, top to bottom:
+/// ```
 /// d0  d1  d2
 /// d3  d4  d5
 /// d6  d7  d8
+/// ```
 class stabilizer_grid {
 private:
   /// @brief Generates this->roles
