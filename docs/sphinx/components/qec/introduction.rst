@@ -658,20 +658,22 @@ Usage Example
         import cudaq_qec as qec
 
         # Get a code instance
-        code = qec.get_code('steane')
+        steane = qec.get_code("steane")
 
         # Create decoder with code's parity matrix
-        decoder = qec.get_decoder('single_error_lut',
-                                H=code.get_parity())
+        decoder = qec.get_decoder('single_error_lut', steane.get_parity())
 
         # Run stabilizer measurements
-        syndromes, dataQubitResults = qec.sample_memory_circuit(steane, numShots, numRounds)
+        syndromes, dataQubitResults = qec.sample_memory_circuit(steane, numShots=1, numRounds=1)
 
-        # Decode syndrome
+        # Decode a syndrome
         result = decoder.decode(syndromes[0])
         if result.converged:
             print("Error locations:",
                 [i for i,p in enumerate(result.result) if p > 0.5])
+            # No errors as we did not include a noise model and
+            # thus prints:
+            # Error locations: []
 
 .. tab:: C++
 
@@ -783,7 +785,14 @@ Function Variants
 
     .. code-block:: python
 
+        import cudaq
         import cudaq_qec as qec
+
+        # Use the stim backend for performance in QEC settings
+        cudaq.set_target("stim")
+
+        # Get a code instance
+        code = qec.get_code("steane")
 
         # Basic memory circuit with |0⟩ state
         syndromes, measurements = qec.sample_memory_circuit(
@@ -795,14 +804,15 @@ Function Variants
         # Memory circuit with custom initial state
         syndromes, measurements = qec.sample_memory_circuit(
             code,                       # QEC code instance
-            state_prep=qec.operation.prep1,  # Initial state
+            op=qec.operation.prep1,  # Initial state
             numShots=1000,            # Number of shots
             numRounds=1               # Number of rounds
         )
 
         # Memory circuit with noise model
-        noise = cudaq.noise_model()
-        noise.add_channel(...)  # Configure noise
+        noise = cudaq.NoiseModel()
+        # Configure noise
+        noise.add_all_qubit_channel("x", qec.TwoQubitDepolarization(0.01), 1)
         syndromes, measurements = qec.sample_memory_circuit(
             code,           # QEC code instance
             numShots=1000, # Number of shots
@@ -859,7 +869,7 @@ The functions return a tuple containing:
 Example Usage
 ~~~~~~~~~~~~~
 
-Here's a complete example of running a memory experiment:
+Example of running a memory experiment:
 
 .. tab:: Python
 
@@ -868,21 +878,24 @@ Here's a complete example of running a memory experiment:
         import cudaq
         import cudaq_qec as qec
 
+        # Use the stim backend for performance in QEC settings
+        cudaq.set_target("stim")
+
         # Create code and decoder
         code = qec.get_code('steane')
         decoder = qec.get_decoder('single_error_lut',
                                   code.get_parity())
 
         # Configure noise
-        noise = cudaq.noise_model()
-        noise.add_channel('x', depolarizing=0.001)
+        noise = cudaq.NoiseModel()
+        noise.add_all_qubit_channel("x", qec.TwoQubitDepolarization(0.01), 1)
 
         # Run memory experiment
         syndromes, measurements = qec.sample_memory_circuit(
             code,
-            state_prep=qec.operation.prep0,
-            num_shots=1000,
-            num_rounds=10,
+            op=qec.operation.prep0,
+            numShots=1000,
+            numRounds=10,
             noise=noise
         )
 
@@ -901,38 +914,46 @@ Here's a complete example of running a memory experiment:
 
     .. code-block:: cpp
 
-        // Top of file
+        // Compile and run with:
+        // nvq++ --enable-mlir --target=stim -lcudaq-qec example.cpp
+        // ./a.out
+
+        #include "cudaq.h"
+        #include "cudaq/qec/decoder.h"
         #include "cudaq/qec/experiments.h"
+        #include "cudaq/qec/noise_model.h"
 
-        // Create a Steane code instance
-        auto code = cudaq::qec::get_code("steane");
+        int main(){
+          // Create a Steane code instance
+          auto code = cudaq::qec::get_code("steane");
 
-        // Configure noise model
-        auto noise = cudaq::noise_model();
-        noise.add_all_qubit_channel("x", cudaq::qec::two_qubit_depolarization(0.1),
-                            /*num_controls=*/1);
+          // Configure noise model
+          cudaq::noise_model noise;
+          noise.add_all_qubit_channel("x", cudaq::qec::two_qubit_depolarization(0.1),
+                              /*num_controls=*/1);
 
-        // Run memory experiment
-        auto [syndromes, measurements] = qec::sample_memory_circuit(
-            code,                    // Code instance
-            operation::prep0,  // Prepare |0⟩ state
-            1000,                    // 1000 shots
-            10,                      // 10 rounds
-            noise                    // Apply noise
-        );
+          // Run memory experiment
+          auto [syndromes, data] = cudaq::qec::sample_memory_circuit(
+              *code,                  // Code instance
+              cudaq::qec::operation::prep0,  // Prepare |0⟩ state
+              1000,                   // 1000 shots
+              1,                      // 1 rounds
+              noise                   // Apply noise
+          );
 
-        // Analyze results
-        auto decoder = qec::get_decoder("single_error_lut", code->get_parity());
-        for (std::size_t shot = 0; shot < 1000; shot++) {
+          // Analyze results
+          auto decoder = cudaq::qec::get_decoder("single_error_lut", code->get_parity());
+          for (std::size_t shot = 0; shot < 1000; shot++) {
             // Get syndrome for this shot
-            std::vector<float> syndrome(code->get_syndrome_size());
+            std::vector<cudaq::qec::float_t> syndrome(syndromes.shape()[1]);
             for (std::size_t i = 0; i < syndrome.size(); i++)
-                syndrome[i] = syndromes.at({shot, i});
+              syndrome[i] = syndromes.at({shot, i});
 
             // Decode syndrome
-            auto result = decoder->decode(syndrome);
+            auto [converged, v_result] = decoder->decode(syndrome);
             // Process correction
             // ...
+          }
         }
 
 Additional Noise Models:
