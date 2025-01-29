@@ -19,7 +19,7 @@ TEST(UCCSDTest, GenerateWithDefaultConfig) {
 
   auto operators = pool->generate(config);
   ASSERT_FALSE(operators.empty());
-  EXPECT_EQ(operators.size(), 2 * 2 + 1 * 8);
+  EXPECT_EQ(operators.size(), 2  + 1);
 
   for (const auto &op : operators) {
     EXPECT_EQ(op.num_qubits(), 4);
@@ -30,7 +30,7 @@ TEST(UCCSDTest, GenerateFromAPIFunction) {
   auto operators = cudaq::solvers::get_operator_pool(
       "uccsd", {{"num-qubits", 4}, {"num-electrons", 2}});
   ASSERT_FALSE(operators.empty());
-  EXPECT_EQ(operators.size(), 2 * 2 + 1 * 8);
+  EXPECT_EQ(operators.size(), 2 + 1);
 
   for (const auto &op : operators) {
     EXPECT_EQ(op.num_qubits(), 4);
@@ -46,12 +46,21 @@ TEST(UCCSDTest, GenerateWithCustomCoefficients) {
   auto operators = pool->generate(config);
 
   ASSERT_FALSE(operators.empty());
-  EXPECT_EQ(operators.size(), (2 * 2 + 1 * 8));
+  EXPECT_EQ(operators.size(), 2 + 1);
 
+  std::vector<std::complex<double>> temp_coeffs;
   for (size_t i = 0; i < operators.size(); ++i) {
     EXPECT_EQ(operators[i].num_qubits(), 4);
-    EXPECT_DOUBLE_EQ(1.0, operators[i].get_coefficient().real());
+    
+    operators[i].for_each_term([&](const auto &term) {
+        temp_coeffs.push_back(term.get_coefficient());
+      });
   }
+    
+  for (size_t j = 0; j < temp_coeffs.size(); ++j)
+    EXPECT_DOUBLE_EQ(1.0, std::abs(temp_coeffs[j].real()));
+    //EXPECT_DOUBLE_EQ(1.0, operators[i].get_coefficient().real());
+  
 }
 
 TEST(UCCSDTest, GenerateWithOddElectrons) {
@@ -64,7 +73,7 @@ TEST(UCCSDTest, GenerateWithOddElectrons) {
   auto operators = pool->generate(config);
 
   ASSERT_FALSE(operators.empty());
-  EXPECT_EQ(operators.size(), 2 * 4 + 4 * 8);
+  EXPECT_EQ(operators.size(), 2 * 2 + 4);
 
   for (const auto &op : operators)
     EXPECT_EQ(op.num_qubits(), 6);
@@ -79,7 +88,7 @@ TEST(UCCSDTest, GenerateWithLargeSystem) {
   auto operators = pool->generate(config);
 
   ASSERT_FALSE(operators.empty());
-  EXPECT_GT(operators.size(), 875);
+  EXPECT_GT(operators.size(), 825);
 
   for (const auto &op : operators) {
     EXPECT_EQ(op.num_qubits(), 20);
@@ -97,32 +106,43 @@ TEST(UccsdOperatorPoolTest, GeneratesCorrectOperators) {
   auto operators = pool->generate(config);
 
   // Convert SpinOperators to strings
+  std::vector<std::string> terms_strings;
   std::vector<std::string> operator_strings;
   for (const auto &op : operators) {
+    op.for_each_term([&](const auto &term) {
+      terms_strings.push_back(term.to_string(false));
+    });
     operator_strings.push_back(op.to_string(false));
   }
 
   // Assert
-  std::vector<std::string> expected_operators = {
-      "YZXI", "XZYI", "IYZX", "IXZY", "XXXY", "XXYX",
-      "XYYY", "YXYY", "XYXX", "YXXX", "YYXY", "YYYX"};
+  std::vector<std::string> expected_terms = {"XZYI", "YZXI", "IXZY", "IYZX", 
+                                            "YYYX", "YXXX", "XXYX","YYXY",
+                                            "XYYY", "XXXY","YXYY", "XYXX"};
 
-  ASSERT_EQ(operator_strings.size(), expected_operators.size())
+  std::vector<std::string> expected_operators = {"XZYIYZXI","IXZYIYZX", "XXXYXXYXXYXXXYYYYXXXYXYYYYXYYYYX"};
+
+  ASSERT_EQ(terms_strings.size(), expected_terms.size())
       << "Number of generated operators does not match expected count";
 
-  for (size_t i = 0; i < expected_operators.size(); ++i) {
-    EXPECT_EQ(operator_strings[i], expected_operators[i])
+  for (size_t i = 0; i < expected_terms.size(); ++i) {
+    EXPECT_EQ(terms_strings[i], expected_terms[i])
         << "Mismatch at index " << i;
   }
 
+  for(size_t i = 0; i < expected_operators.size(); ++i) {
+    EXPECT_EQ(operator_strings[i], expected_operators[i])
+        << "Mismatch operators at index " << i;
+  }
+
   // Additional checks
-  for (const auto &op_string : operator_strings) {
-    EXPECT_EQ(op_string.length(), 4)
-        << "Operator " << op_string
+  for (const auto &term_string : terms_strings) {
+    EXPECT_EQ(term_string.length(), 4)
+        << "Operator " << term_string
         << " does not have the expected length of 4";
 
-    EXPECT_TRUE(op_string.find_first_not_of("IXYZ") == std::string::npos)
-        << "Operator " << op_string << " contains invalid characters";
+    EXPECT_TRUE(term_string.find_first_not_of("IXYZ") == std::string::npos)
+        << "Operator " << term_string << " contains invalid characters";
   }
 }
 
