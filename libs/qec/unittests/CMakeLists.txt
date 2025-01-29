@@ -29,6 +29,7 @@ endif()
 include(GoogleTest)
 
 # ==============================================================================
+add_compile_options(-Wno-attributes) 
 
 add_executable(test_decoders test_decoders.cpp decoders/sample_decoder.cpp)
 target_link_libraries(test_decoders PRIVATE GTest::gtest_main cudaq-qec)
