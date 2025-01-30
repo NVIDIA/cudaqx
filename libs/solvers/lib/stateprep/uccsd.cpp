@@ -532,16 +532,16 @@ __qpu__ void uccsd(cudaq::qview<> qubits, const std::vector<double> &thetas,
 
   counter = 0;
   for (int p = 0; p < numOccBeta - 1; p++)
-   for (int q = p + 1; q < numOccBeta; q++)
-     for (int r = 0; r < numVirtBeta - 1; r++)
-       for (int s = r + 1; s < numVirtBeta; s++)
+    for (int q = p + 1; q < numOccBeta; q++)
+      for (int r = 0; r < numVirtBeta - 1; r++)
+        for (int s = r + 1; s < numVirtBeta; s++)
           counter++;
   std::vector<std::size_t> doublesBeta(4 * counter);
   counter = 0;
   for (int p = 0; p < numOccBeta - 1; p++)
-   for (int q = p + 1; q < numOccBeta; q++)
-     for (int r = 0; r < numVirtBeta - 1; r++)
-       for (int s = r + 1; s < numVirtBeta; s++) {
+    for (int q = p + 1; q < numOccBeta; q++)
+      for (int r = 0; r < numVirtBeta - 1; r++)
+        for (int s = r + 1; s < numVirtBeta; s++) {
           doublesBeta[counter] = occupiedBeta[p];
           counter++;
           doublesBeta[counter] = occupiedBeta[q];
