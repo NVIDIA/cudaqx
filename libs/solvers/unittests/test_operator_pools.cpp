@@ -19,7 +19,7 @@ TEST(UCCSDTest, GenerateWithDefaultConfig) {
 
   auto operators = pool->generate(config);
   ASSERT_FALSE(operators.empty());
-  EXPECT_EQ(operators.size(), 2  + 1);
+  EXPECT_EQ(operators.size(), 2 + 1);
 
   for (const auto &op : operators) {
     EXPECT_EQ(op.num_qubits(), 4);
@@ -51,16 +51,15 @@ TEST(UCCSDTest, GenerateWithCustomCoefficients) {
   std::vector<std::complex<double>> temp_coeffs;
   for (size_t i = 0; i < operators.size(); ++i) {
     EXPECT_EQ(operators[i].num_qubits(), 4);
-    
+
     operators[i].for_each_term([&](const auto &term) {
-        temp_coeffs.push_back(term.get_coefficient());
-      });
+      temp_coeffs.push_back(term.get_coefficient());
+    });
   }
-    
+
   for (size_t j = 0; j < temp_coeffs.size(); ++j)
     EXPECT_DOUBLE_EQ(1.0, std::abs(temp_coeffs[j].real()));
-    //EXPECT_DOUBLE_EQ(1.0, operators[i].get_coefficient().real());
-  
+  // EXPECT_DOUBLE_EQ(1.0, operators[i].get_coefficient().real());
 }
 
 TEST(UCCSDTest, GenerateWithOddElectrons) {
@@ -116,21 +115,21 @@ TEST(UccsdOperatorPoolTest, GeneratesCorrectOperators) {
   }
 
   // Assert
-  std::vector<std::string> expected_terms = {"XZYI", "YZXI", "IXZY", "IYZX", 
-                                            "YYYX", "YXXX", "XXYX","YYXY",
-                                            "XYYY", "XXXY","YXYY", "XYXX"};
+  std::vector<std::string> expected_terms = {"XZYI", "YZXI", "IXZY", "IYZX",
+                                             "YYYX", "YXXX", "XXYX", "YYXY",
+                                             "XYYY", "XXXY", "YXYY", "XYXX"};
 
-  std::vector<std::string> expected_operators = {"XZYIYZXI","IXZYIYZX", "XXXYXXYXXYXXXYYYYXXXYXYYYYXYYYYX"};
+  std::vector<std::string> expected_operators = {
+      "XZYIYZXI", "IXZYIYZX", "XXXYXXYXXYXXXYYYYXXXYXYYYYXYYYYX"};
 
   ASSERT_EQ(terms_strings.size(), expected_terms.size())
       << "Number of generated operators does not match expected count";
 
   for (size_t i = 0; i < expected_terms.size(); ++i) {
-    EXPECT_EQ(terms_strings[i], expected_terms[i])
-        << "Mismatch at index " << i;
+    EXPECT_EQ(terms_strings[i], expected_terms[i]) << "Mismatch at index " << i;
   }
 
-  for(size_t i = 0; i < expected_operators.size(); ++i) {
+  for (size_t i = 0; i < expected_operators.size(); ++i) {
     EXPECT_EQ(operator_strings[i], expected_operators[i])
         << "Mismatch operators at index " << i;
   }
