@@ -486,14 +486,14 @@ The decoder base class defines the core interface for syndrome decoding:
 
     class decoder {
     protected:
-        std::size_t block_size;     // For [n,k] code, this is n
-        std::size_t syndrome_size;   // For [n,k] code, this is n-k
-        tensor<uint8_t> H;          // Parity check matrix
+        std::size_t block_size;       // For [n,k] code, this is n
+        std::size_t syndrome_size;    // For [n,k] code, this is n-k
+        tensor<uint8_t> H;            // Parity check matrix
 
     public:
         struct decoder_result {
-            bool converged;                  // Decoder convergence status
-            std::vector<float_t> result;     // Soft error probabilities
+            bool converged;                 // Decoder convergence status
+            std::vector<float_t> result;    // Soft error probabilities
         };
 
         virtual decoder_result decode(
@@ -797,14 +797,14 @@ Function Variants
         # Basic memory circuit with |0⟩ state
         syndromes, measurements = qec.sample_memory_circuit(
             code,           # QEC code instance
-            numShots=1000, # Number of circuit executions
-            numRounds=1    # Number of stabilizer rounds
+            numShots=1000,  # Number of circuit executions
+            numRounds=1     # Number of stabilizer rounds
         )
 
         # Memory circuit with custom initial state
         syndromes, measurements = qec.sample_memory_circuit(
-            code,                       # QEC code instance
-            op=qec.operation.prep1,  # Initial state
+            code,                     # QEC code instance
+            op=qec.operation.prep1,   # Initial state
             numShots=1000,            # Number of shots
             numRounds=1               # Number of rounds
         )
@@ -814,10 +814,10 @@ Function Variants
         # Configure noise
         noise.add_all_qubit_channel("x", qec.TwoQubitDepolarization(0.01), 1)
         syndromes, measurements = qec.sample_memory_circuit(
-            code,           # QEC code instance
-            numShots=1000, # Number of shots
-            numRounds=1,   # Number of rounds
-            noise=noise     # Noise model
+            code,             # QEC code instance
+            numShots=1000,    # Number of shots
+            numRounds=1,      # Number of rounds
+            noise=noise       # Noise model
         )
 
 .. tab:: C++
@@ -826,27 +826,27 @@ Function Variants
 
         // Basic memory circuit with |0⟩ state
         auto [syndromes, measurements] = qec::sample_memory_circuit(
-            code,           // QEC code instance
-            numShots,       // Number of circuit executions
-            numRounds       // Number of stabilizer rounds
+            code,       // QEC code instance
+            numShots,   // Number of circuit executions
+            numRounds   // Number of stabilizer rounds
         );
 
         // Memory circuit with custom initial state
         auto [syndromes, measurements] = qec::sample_memory_circuit(
-            code,                    // QEC code instance
-            operation::prep1,  // Initial state preparation
-            numShots,                // Number of circuit executions
-            numRounds               // Number of stabilizer rounds
+            code,               // QEC code instance
+            operation::prep1,   // Initial state preparation
+            numShots,           // Number of circuit executions
+            numRounds           // Number of stabilizer rounds
         );
 
         // Memory circuit with noise model
         auto noise_model = cudaq::noise_model();
         noise_model.add_channel(...);  // Configure noise
         auto [syndromes, measurements] = qec::sample_memory_circuit(
-            code,           // QEC code instance
-            numShots,       // Number of circuit executions
-            numRounds,      // Number of stabilizer rounds
-            noise_model     // Noise model to apply
+            code,         // QEC code instance
+            numShots,     // Number of circuit executions
+            numRounds,    // Number of stabilizer rounds
+            noise_model   // Noise model to apply
         );
 
 Return Values
@@ -934,11 +934,11 @@ Example of running a memory experiment:
 
           // Run memory experiment
           auto [syndromes, data] = cudaq::qec::sample_memory_circuit(
-              *code,                  // Code instance
-              cudaq::qec::operation::prep0,  // Prepare |0⟩ state
-              1000,                   // 1000 shots
-              1,                      // 1 rounds
-              noise                   // Apply noise
+              *code,                          // Code instance
+              cudaq::qec::operation::prep0,   // Prepare |0⟩ state
+              1000,                           // 1000 shots
+              1,                              // 1 rounds
+              noise                           // Apply noise
           );
 
           // Analyze results
