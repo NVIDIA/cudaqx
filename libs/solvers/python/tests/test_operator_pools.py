@@ -16,7 +16,7 @@ def test_generate_with_default_config():
                                           num_qubits=4,
                                           num_electrons=2)
     assert operators
-    assert len(operators) == 2 * 2 + 1 * 8
+    assert len(operators) == 2 + 1
 
     for op in operators:
         assert op.get_qubit_count() == 4
@@ -28,12 +28,13 @@ def test_generate_with_custom_coefficients():
                                           num_electrons=2)
 
     assert operators
-    assert len(operators) == (2 * 2 + 1 * 8)
+    assert len(operators) == (2 + 1)
 
     for i, op in enumerate(operators):
         assert op.get_qubit_count() == 4
         expected_coeff = 1.0
-        assert np.isclose(op.get_coefficient().real, expected_coeff)
+        for term in op:
+            assert np.isclose(abs(term.get_coefficient().imag), expected_coeff)
 
 
 def test_generate_with_odd_electrons():
@@ -43,7 +44,7 @@ def test_generate_with_odd_electrons():
                                           spin=1)
 
     assert operators
-    assert len(operators) == 2 * 4 + 4 * 8
+    assert len(operators) == 2 * 2 + 4
 
     for op in operators:
         assert op.get_qubit_count() == 6
@@ -55,7 +56,7 @@ def test_generate_with_large_system():
                                           num_electrons=10)
 
     assert operators
-    assert len(operators) > 875
+    assert len(operators) == 875
 
     for op in operators:
         assert op.get_qubit_count() == 20
@@ -69,24 +70,10 @@ def test_uccsd_operator_pool_correctness():
     pool_strings = [op.to_string(False) for op in pool]
 
     # Expected result
-    expected_pool = [
-        'YZXI', 'XZYI', 'IYZX', 'IXZY', 'XXXY', 'XXYX', 'XYYY', 'YXYY', 'XYXX',
-        'YXXX', 'YYXY', 'YYYX'
-    ]
+    expected_pool = ["XZYIYZXI", "IXZYIYZX", "XXXYXXYXXYXXXYYYYXXXYXYYYYXYYYYX"]
 
     # Assert that the generated pool matches the expected result
     assert pool_strings == expected_pool, f"Expected {expected_pool}, but got {pool_strings}"
-
-    # Additional checks
-    assert len(pool) == len(
-        expected_pool
-    ), f"Expected {len(expected_pool)} operators, but got {len(pool)}"
-
-    # Check that all operators have the correct length (4 qubits)
-    for op_string in pool_strings:
-        assert len(
-            op_string
-        ) == 4, f"Operator {op_string} does not have the expected length of 4"
 
     # Check that all operators contain only valid characters (I, X, Y, Z)
     valid_chars = set('IXYZ')

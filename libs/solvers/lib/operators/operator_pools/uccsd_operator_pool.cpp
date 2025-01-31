@@ -5,9 +5,9 @@
  * This source code and the accompanying materials are made available under    *
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
-
 #include "cudaq/solvers/operators/operator_pools/uccsd_operator_pool.h"
 #include "cudaq/solvers/stateprep/uccsd.h"
+#include <complex>
 
 using namespace cudaqx;
 
@@ -39,10 +39,9 @@ uccsd::generate(const heterogeneous_map &config) const {
     for (std::size_t i = p + 1; i < q; i++)
       o *= cudaq::spin::z(i);
 
-    cudaq::spin_op t = cudaq::spin::y(p) * o * cudaq::spin::x(q) -
-                       cudaq::spin::x(p) * o * cudaq::spin::y(q);
-    ops.emplace_back(cudaq::spin::y(p) * o * cudaq::spin::x(q) -
-                     cudaq::spin::x(p) * o * cudaq::spin::y(q));
+    ops.emplace_back(std::complex<double>{0.0, 1.0} *
+                     (cudaq::spin::y(p) * o * cudaq::spin::x(q) -
+                      cudaq::spin::x(p) * o * cudaq::spin::y(q)));
   };
 
   auto addDoublesExcitation = [numQubits](std::vector<cudaq::spin_op> &ops,
@@ -98,7 +97,7 @@ uccsd::generate(const heterogeneous_map &config) const {
                     cudaq::spin::x(a_virt) * parity_b * cudaq::spin::y(b_virt);
     op_term_temp -= cudaq::spin::y(i_occ) * parity_a * cudaq::spin::y(j_occ) *
                     cudaq::spin::y(a_virt) * parity_b * cudaq::spin::x(b_virt);
-    ops.emplace_back(op_term_temp);
+    ops.emplace_back(std::complex<double>{0.0, 1.0} * op_term_temp);
   };
 
   for (auto &sa : singlesAlpha)
