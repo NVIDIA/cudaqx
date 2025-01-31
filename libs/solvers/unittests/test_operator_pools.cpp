@@ -58,8 +58,7 @@ TEST(UCCSDTest, GenerateWithCustomCoefficients) {
   }
 
   for (size_t j = 0; j < temp_coeffs.size(); ++j)
-    EXPECT_DOUBLE_EQ(1.0, std::abs(temp_coeffs[j].real()));
-  // EXPECT_DOUBLE_EQ(1.0, operators[i].get_coefficient().real());
+    EXPECT_DOUBLE_EQ(1.0, std::abs(temp_coeffs[j].imag()));
 }
 
 TEST(UCCSDTest, GenerateWithOddElectrons) {
@@ -87,7 +86,7 @@ TEST(UCCSDTest, GenerateWithLargeSystem) {
   auto operators = pool->generate(config);
 
   ASSERT_FALSE(operators.empty());
-  EXPECT_GT(operators.size(), 825);
+  EXPECT_EQ(operators.size(), 875);
 
   for (const auto &op : operators) {
     EXPECT_EQ(op.num_qubits(), 20);

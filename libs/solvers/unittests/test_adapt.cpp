@@ -46,3 +46,35 @@ TEST(SolversTester, checkSimpleAdaptGradient) {
   for (std::size_t i = 0; i < thetas.size(); i++)
     printf("%lf -> %s\n", thetas[i], ops[i].to_string().c_str());
 }
+
+TEST(SolversTester, checkSimpleAdaptUCCSD) {
+  cudaq::spin_op h(h2_data, 4);
+  auto pool = cudaq::solvers::operator_pool::get("uccsd");
+  heterogeneous_map config;
+  config.insert("num-qubits", h.num_qubits());
+  config.insert("num-electrons", 2);
+  auto poolList = pool->generate(config);
+
+  auto [energy, thetas, ops] = cudaq::solvers::adapt_vqe(
+      hartreeFock2Electrons, h, poolList,
+      {{"grad_norm_tolerance", 1e-3}, {"verbose", true}});
+  EXPECT_NEAR(energy, -1.13, 1e-2);
+}
+
+TEST(SolversTester, checkSimpleAdaptGradientUCCSD) {
+  cudaq::spin_op h(h2_data, 4);
+  auto pool = cudaq::solvers::operator_pool::get("uccsd");
+  heterogeneous_map config;
+  config.insert("num-qubits", h.num_qubits());
+  config.insert("num-electrons", 2);
+  auto poolList = pool->generate(config);
+
+  auto opt = cudaq::optim::optimizer::get("lbfgs");
+  auto [energy, thetas, ops] = cudaq::solvers::adapt_vqe(
+      hartreeFock2Electrons, h, poolList, *opt, "central_difference",
+      {{"grad_norm_tolerance", 1e-3}, {"verbose", true}});
+  EXPECT_NEAR(energy, -1.13, 1e-2);
+
+  for (std::size_t i = 0; i < thetas.size(); i++)
+    printf("%lf -> %s\n", thetas[i], ops[i].to_string().c_str());
+}
