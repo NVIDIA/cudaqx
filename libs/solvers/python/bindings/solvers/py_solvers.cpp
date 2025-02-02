@@ -132,6 +132,9 @@ public:
     if (kwargs.contains("verbose"))
       kwargs.attr("pop")("verbose");
 
+    if (kwargs.contains("shots"))
+      kwargs.attr("pop")("shots");
+
     if (initParams.empty())
       initParams.resize(dim);
 
