@@ -39,7 +39,7 @@ uccsd::generate(const heterogeneous_map &config) const {
       o *= cudaq::spin::z(i);
 
     ops.emplace_back(cudaq::spin::y(p) * o * cudaq::spin::x(q) -
-                      cudaq::spin::x(p) * o * cudaq::spin::y(q));
+                     cudaq::spin::x(p) * o * cudaq::spin::y(q));
   };
 
   auto addDoublesExcitation = [numQubits](std::vector<cudaq::spin_op> &ops,
