@@ -58,7 +58,7 @@ TEST(UCCSDTest, GenerateWithCustomCoefficients) {
   }
 
   for (size_t j = 0; j < temp_coeffs.size(); ++j)
-    EXPECT_DOUBLE_EQ(1.0, std::abs(temp_coeffs[j].imag()));
+    EXPECT_DOUBLE_EQ(1.0, std::abs(temp_coeffs[j].real()));
 }
 
 TEST(UCCSDTest, GenerateWithOddElectrons) {

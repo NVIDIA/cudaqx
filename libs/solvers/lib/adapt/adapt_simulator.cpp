@@ -21,13 +21,14 @@ namespace cudaq::solvers::adapt {
 
 result
 simulator::run(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
-               const spin_op &H, const std::vector<spin_op> &pool,
+               const spin_op &H, const std::vector<spin_op> &poolOp,
                const optim::optimizer &optimizer, const std::string &gradient,
                const heterogeneous_map options) {
 
-  if (pool.empty())
+  if (poolOp.empty())
     throw std::runtime_error("Invalid adapt input, operator pool is empty.");
 
+  std::vector<spin_op> pool = poolOp; // We need to change the vector, but preserve the original pool
   std::vector<cudaq::pauli_word> pauliWords;
   std::vector<double> thetas, coefficients;
   std::vector<cudaq::spin_op> chosenOps;
@@ -52,8 +53,18 @@ simulator::run(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
   std::size_t start = rank * elements_per_rank + std::min(rank, remainder);
   std::size_t end = start + elements_per_rank + (rank < remainder ? 1 : 0);
   for (int i = start; i < end; i++) {
-    auto op = pool[i];
-    commutators.emplace_back(H * op - op * H);
+    // Check if operator has only imaginary coefficients
+    bool isImaginary = true; 
+    pool[i].for_each_term([&](const auto& term) {
+            const auto& c = term.get_coefficient();
+            if (!(c.real() == 0.0 && c.imag() != 0.0)) {
+              isImaginary = false;
+            }
+        });
+    if(!isImaginary){
+      pool[i] = std::complex<double>{0.0, 1.0} * pool[i];
+    }
+    commutators.push_back(H * pool[i] - pool[i] * H);
   }
 
   nlohmann::json initInfo = {{"num-qpus", numQpus},

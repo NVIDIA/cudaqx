@@ -12,6 +12,7 @@
 #include "cudaq.h"
 #include "nvqpp/test_kernels.h"
 #include "cudaq/solvers/adapt.h"
+#include "cudaq/solvers/operators.h"
 
 std::vector<double> h2_data{
     3, 1, 1, 3, 0.0454063,  0,  2, 0, 0, 0, 0.17028,    0,
@@ -23,6 +24,20 @@ std::vector<double> h2_data{
     0, 2, 2, 0, 0.165607,   0,  0, 0, 2, 2, 0.174073,   0,
     1, 1, 3, 3, -0.0454063, -0, 15};
 
+cudaq::solvers::molecular_geometry geometryLiH = {
+    {"Li", {0., 0., 0.}},
+    {"H", {0., 0., 1.5}}
+};
+
+//auto lih = cudaq::solvers::create_molecule(geometryLiH, "sto-3g", 1, 0, {.casci = true, .verbose = true}); // THIS LINE BREAKS EVERYTHING
+//auto hamLiH = LiH.hamiltonian;
+/*
+cudaq::solvers::molecular_geometry geometryHH{{"H", {0., 0., 0.}},
+                                            {"H", {0., 0., .7474}}};
+auto HH = cudaq::solvers::create_molecule(
+    geometryHH, "sto-3g", 0, 0, {.casci = true, .verbose = true});
+auto hamHH = HH.hamiltonian;
+*/
 TEST(SolversTester, checkSimpleAdapt) {
   cudaq::spin_op h(h2_data, 4);
   auto pool = cudaq::solvers::operator_pool::get("spin_complement_gsd");
@@ -54,6 +69,9 @@ TEST(SolversTester, checkSimpleAdaptUCCSD) {
   config.insert("num-qubits", h.num_qubits());
   config.insert("num-electrons", 2);
   auto poolList = pool->generate(config);
+  //std::vector<spin_op> newops;
+  //for (const auto &op : poolList)
+  //  newops.push_back(std::complex<double>{0.,1.}*op);
 
   auto [energy, thetas, ops] = cudaq::solvers::adapt_vqe(
       hartreeFock2Electrons, h, poolList,

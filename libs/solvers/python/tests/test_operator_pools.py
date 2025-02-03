@@ -34,7 +34,7 @@ def test_generate_with_custom_coefficients():
         assert op.get_qubit_count() == 4
         expected_coeff = 1.0
         for term in op:
-            assert np.isclose(abs(term.get_coefficient().imag), expected_coeff)
+            assert np.isclose(abs(term.get_coefficient().real), expected_coeff)
 
 
 def test_generate_with_odd_electrons():
