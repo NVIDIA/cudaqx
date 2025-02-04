@@ -407,10 +407,10 @@ __qpu__ std::size_t getNumVirtualBeta(std::size_t numElectrons,
 __qpu__ void uccsd(cudaq::qview<> qubits, const std::vector<double> &thetas,
                    std::size_t numElectrons, std::size_t spin) {
 
-  auto numOccAlpha = getNumOccupiedAlpha(numElectrons, spin, qubits.size());
-  auto numOccBeta = getNumOccupiedBeta(numElectrons, spin, qubits.size());
-  auto numVirtAlpha = getNumVirtualAlpha(numElectrons, spin, qubits.size());
-  auto numVirtBeta = getNumVirtualBeta(numElectrons, spin, qubits.size());
+  int numOccAlpha = getNumOccupiedAlpha(numElectrons, spin, qubits.size());
+  int numOccBeta = getNumOccupiedBeta(numElectrons, spin, qubits.size());
+  int numVirtAlpha = getNumVirtualAlpha(numElectrons, spin, qubits.size());
+  int numVirtBeta = getNumVirtualBeta(numElectrons, spin, qubits.size());
   std::vector<std::size_t> occupiedAlpha(numOccAlpha),
       virtualAlpha(numVirtAlpha), occupiedBeta(numOccBeta),
       virtualBeta(numVirtBeta);
@@ -433,10 +433,11 @@ __qpu__ void uccsd(cudaq::qview<> qubits, const std::vector<double> &thetas,
       occupiedBeta[counter] = i * 2 + 1;
       counter++;
     }
-    counter = 0;
 
+    counter = 0;
     for (std::size_t i = 0; i < numVirtBeta; i++) {
       virtualBeta[counter] = i * 2 + numElectrons - 1;
+      counter++;
     }
 
   } else {
@@ -507,18 +508,18 @@ __qpu__ void uccsd(cudaq::qview<> qubits, const std::vector<double> &thetas,
         }
 
   counter = 0;
-  for (std::size_t p = 0; p < numOccAlpha - 1; p++)
-    for (std::size_t q = p + 1; q < numOccAlpha; q++)
-      for (std::size_t r = 0; r < numVirtAlpha - 1; r++)
-        for (std::size_t s = r + 1; s < numVirtAlpha; s++)
+  for (int p = 0; p < numOccAlpha - 1; p++)
+    for (int q = p + 1; q < numOccAlpha; q++)
+      for (int r = 0; r < numVirtAlpha - 1; r++)
+        for (int s = r + 1; s < numVirtAlpha; s++)
           counter++;
 
   std::vector<std::size_t> doublesAlpha(4 * counter);
   counter = 0;
-  for (std::size_t p = 0; p < numOccAlpha - 1; p++)
-    for (std::size_t q = p + 1; q < numOccAlpha; q++)
-      for (std::size_t r = 0; r < numVirtAlpha - 1; r++)
-        for (std::size_t s = r + 1; s < numVirtAlpha; s++) {
+  for (int p = 0; p < numOccAlpha - 1; p++)
+    for (int q = p + 1; q < numOccAlpha; q++)
+      for (int r = 0; r < numVirtAlpha - 1; r++)
+        for (int s = r + 1; s < numVirtAlpha; s++) {
           doublesAlpha[counter] = occupiedAlpha[p];
           counter++;
           doublesAlpha[counter] = occupiedAlpha[q];
@@ -530,17 +531,17 @@ __qpu__ void uccsd(cudaq::qview<> qubits, const std::vector<double> &thetas,
         }
 
   counter = 0;
-  for (std::size_t p = 0; p < numOccBeta - 1; p++)
-    for (std::size_t q = p + 1; q < numOccBeta; q++)
-      for (std::size_t r = 0; r < numVirtBeta - 1; r++)
-        for (std::size_t s = r + 1; s < numVirtBeta; s++)
+  for (int p = 0; p < numOccBeta - 1; p++)
+    for (int q = p + 1; q < numOccBeta; q++)
+      for (int r = 0; r < numVirtBeta - 1; r++)
+        for (int s = r + 1; s < numVirtBeta; s++)
           counter++;
   std::vector<std::size_t> doublesBeta(4 * counter);
   counter = 0;
-  for (std::size_t p = 0; p < numOccBeta - 1; p++)
-    for (std::size_t q = p + 1; q < numOccBeta; q++)
-      for (std::size_t r = 0; r < numVirtBeta - 1; r++)
-        for (std::size_t s = r + 1; s < numVirtBeta; s++) {
+  for (int p = 0; p < numOccBeta - 1; p++)
+    for (int q = p + 1; q < numOccBeta; q++)
+      for (int r = 0; r < numVirtBeta - 1; r++)
+        for (int s = r + 1; s < numVirtBeta; s++) {
           doublesBeta[counter] = occupiedBeta[p];
           counter++;
           doublesBeta[counter] = occupiedBeta[q];

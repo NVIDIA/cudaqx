@@ -141,3 +141,41 @@ def test_uccsd_active_space_natorb():
 
     print(energy)
     assert np.isclose(energy, -107.6059, 1e-2)
+
+
+def test_uccsd_loops():
+    repro_num_electrons = 2
+    repro_num_qubits = 8
+
+    repro_thetas = [
+        -0.00037043841404585794, 0.0003811110195084151, 0.2286823796532558,
+        -0.00037043841404585794, 0.0003811110195084151, 0.2286823796532558,
+        -0.00037043841404585794, 0.0003811110195084151, 0.2286823796532558,
+        -0.00037043841404585794, 0.0003811110195084151, 0.2286823796532558,
+        -0.00037043841404585794, 0.0003811110195084151, 0.2286823796532558,
+        -0.00037043841404585794, 0.0003811110195084151, 0.2286823796532558,
+        -0.00037043841404585794, 0.0003811110195084151, 0.2286823796532558,
+        -0.00037043841404585794, 0.0003811110195084151, 0.2286823796532558,
+        -0.00037043841404585794, 0.0003811110195084151, 0.2286823796532558
+    ]
+
+    @cudaq.kernel
+    def repro_trial_state(qubits: cudaq.qvector, num_electrons: int,
+                          thetas: list[float]):
+        for i in range(num_electrons):
+            x(qubits[i])
+        solvers.stateprep.uccsd(qubits, thetas, num_electrons, 0)
+
+    @cudaq.kernel
+    def repro():
+        repro_qubits = cudaq.qvector(repro_num_qubits)
+        repro_trial_state(repro_qubits, repro_num_electrons, repro_thetas)
+
+    counts = cudaq.sample(repro, shots_count=1000)
+    assert len(counts) == 6
+    assert '00000011' in counts
+    assert '00000110' in counts
+    assert '00010010' in counts
+    assert '01000010' in counts
+    assert '10000001' in counts
+    assert '11000000' in counts
