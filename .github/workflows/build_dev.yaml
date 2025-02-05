@@ -1,6 +1,8 @@
 name: Build dev image
 
 on:
+  # TEMP
+  push:
   workflow_dispatch:
     inputs:
       # FIXME
