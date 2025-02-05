@@ -1,8 +1,6 @@
 name: Build dev image
 
 on:
-  # TEMP
-  push:
   workflow_dispatch:
     inputs:
       # FIXME
@@ -33,7 +31,7 @@ concurrency:
 
 jobs:
   build-cudaqx-dev:
-    runs-on: linux-amd64-cpu16
+    runs-on: linux-amd64-cpu8
     name: Build CUDA-QX Dev Image
     steps:
     - name: Login to GitHub CR
