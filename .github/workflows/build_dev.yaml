@@ -33,6 +33,7 @@ concurrency:
 jobs:
   build-cudaqx-dev:
     name: Build CUDA-QX Dev Image
+    if: ${{ github.repository == 'NVIDIA/cudaqx' }}
     strategy:
       matrix:
         platform: [amd64, arm64]
@@ -45,6 +46,16 @@ jobs:
         registry: ghcr.io
         username: ${{ github.actor }}
         password: ${{ github.token }}
+
+    - name: Get required CUDA-Q version
+      id: get-cudaq-version
+      uses: ./.github/actions/get-cudaq-version
+
+    - name: 
+      id: get-cudaq-version-short
+      run: 
+        echo shortref=$(echo ${{ steps.get-cudaq-version.outputs.ref }} | head -c8) >> $GITHUB_OUTPUT
+        echo commit_date=$(curl -s https://api.github.com/repos/NVIDIA/cuda-quantum/commits/${{ steps.get-cudaq-version.outputs.ref }} | jq -r '.commit.committer.date' | cut -dT -f1)
 
     - name: Set up context for buildx
       run: |
@@ -60,7 +71,10 @@ jobs:
     - name: Build dev image
       uses: docker/build-push-action@v5
       with:
-        file: ./docker/build_env/Dockerfile
-        tags: ghcr.io/nvidia/cudaqx-dev:latest-${{ matrix.platform }}
+        file: ./docker/build_env/cudaqx.dev.Dockerfile
+        tags: |
+          ghcr.io/nvidia/cudaqx-dev:${{ steps.get-cudaq-version-short.outputs.commit_date }}-${{ steps.get-cudaq-version-short.outputs.shortref }}-${{ matrix.platform }}
+          ghcr.io/nvidia/cudaqx-dev:${{ steps.get-cudaq-version-short.outputs.shortref }}-${{ matrix.platform }}
+          ghcr.io/nvidia/cudaqx-dev:latest-${{ matrix.platform }}
         platforms: linux/${{ matrix.platform }}
         push: true
