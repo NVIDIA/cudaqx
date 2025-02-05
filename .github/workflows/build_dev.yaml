@@ -1,0 +1,61 @@
+name: Build dev image
+
+on:
+  workflow_dispatch:
+    inputs:
+      # FIXME
+      build_type:
+        type: choice
+        required: true
+        description: 'Build Type (ignored if using artifacts from prior run)'
+        default: 'Release'
+        options:
+        - 'Release'
+        - 'Debug'
+      #cudaq_wheels:
+      #  type: choice
+      #  required: true
+      #  description: 'CUDA-Q wheel source (released version from PyPI or Custom built using .cudaq_version in repo)'
+      #  default: 'Custom'
+      #  options:
+      #  - 'Custom'
+      #  - 'PyPI'
+      #artifacts_from_run:
+      #  type: string
+      #  description: Optional argument to take artifacts from a prior run of this workflow; facilitates rerunning a failed workflow without re-building the artifacts.
+      #  required: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-cudaqx-dev:
+    runs-on: linux-amd64-cpu16
+    name: Build CUDA-QX Dev Image
+    steps:
+    - name: Login to GitHub CR
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+
+    - name: Set up context for buildx
+      run: |
+        docker context create builder_context
+      shell: bash --noprofile --norc -euo pipefail {0}
+
+    - name: Set up buildx runner
+      uses: docker/setup-buildx-action@v3
+      with:
+        endpoint: builder_context
+        driver-opts: network=host
+
+    - name: Build dev image
+      uses: docker/build-push-action@v5
+      with:
+        file: ./docker/build_env/Dockerfile
+        tags: ghcr.io/nvidia/cudaqx-dev:latest
+        platforms: linux/amd64,linux/arm64
+        #push: true
