@@ -133,6 +133,21 @@ void bindDecoder(py::module &mod) {
           },
           "Decode the given syndrome to determine the error correction",
           py::arg("syndrome"))
+      .def(
+          "decode_async",
+          [](decoder &decoder, const std::vector<float_t> &syndrome) {
+            py::gil_scoped_release release;
+            return decoder.decode_async(syndrome).get();
+          },
+          "Asynchronously decode the given syndrome", py::arg("syndrome"))
+      .def(
+          "decode_multi",
+          [](decoder &decoder,
+             const std::vector<std::vector<float_t>> &syndrome) {
+            return decoder.decode_multi(syndrome);
+          },
+          "Decode multiple syndromes and return the results",
+          py::arg("syndrome"))
       .def("get_block_size", &decoder::get_block_size,
            "Get the size of the code block")
       .def("get_syndrome_size", &decoder::get_syndrome_size,
