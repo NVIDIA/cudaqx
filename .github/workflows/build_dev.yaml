@@ -1,6 +1,7 @@
 name: Build dev image
 
 on:
+  push:
   workflow_dispatch:
     inputs:
       # FIXME
