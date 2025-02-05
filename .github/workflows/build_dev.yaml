@@ -47,6 +47,11 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ github.token }}
 
+    - name: Get code
+      uses: actions/checkout@v4
+      with:
+        set-safe-directory: true
+  
     - name: Get required CUDA-Q version
       id: get-cudaq-version
       uses: ./.github/actions/get-cudaq-version
