@@ -12,6 +12,7 @@
 #include "cudaq.h"
 #include "nvqpp/test_kernels.h"
 #include "cudaq/solvers/adapt.h"
+#include "cudaq/solvers/operators.h"
 
 class SolversTester : public ::testing::Test {
 protected:
