@@ -58,9 +58,9 @@ jobs:
 
     - name: Get additional metadata
       id: get-cudaq-version-short
-      run: 
-        shortref=$(echo ${{ steps.get-cudaq-version.outputs.ref }} | head -c8)
-        commit_date=$(curl -s https://api.github.com/repos/NVIDIA/cuda-quantum/commits/${{ steps.get-cudaq-version.outputs.ref }} | jq -r '.commit.committer.date' | cut -dT -f1)
+      run: |
+        shortref=$(echo "${{ steps.get-cudaq-version.outputs.ref }}"" | head -c8)
+        commit_date=$(curl -s "https://api.github.com/repos/NVIDIA/cuda-quantum/commits/${{ steps.get-cudaq-version.outputs.ref }}" | jq -r '.commit.committer.date' | cut -dT -f1)
         echo "shortref=$shortref" >> $GITHUB_OUTPUT
         echo "commit_date=$commit_date" >> $GITHUB_OUTPUT
 
