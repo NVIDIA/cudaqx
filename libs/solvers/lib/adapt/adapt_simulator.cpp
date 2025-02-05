@@ -54,21 +54,19 @@ simulator::run(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
 
   // Check if operator has only imaginary coefficients
   // checking the first one is enough, we assume the pool is homogeneous
-  const auto& c = pool[0].begin()->get_coefficient();
+  const auto &c = pool[0].begin()->get_coefficient();
   bool isImaginary = (c.real() == 0.0 && c.imag() != 0.0);
 
   if (!isImaginary) {
-    for(auto& op : pool) {
+    for (auto &op : pool) {
       auto pool_item = std::complex<double>{0.0, 1.0} * op;
       commutators.push_back(H * pool_item - pool_item * H);
     }
-  }
-  else{
-    for(auto& op : pool) {
+  } else {
+    for (auto &op : pool) {
       commutators.push_back(H * op - op * H);
     }
-  }  
-  
+  }
 
   nlohmann::json initInfo = {{"num-qpus", numQpus},
                              {"numRanks", numRanks},
@@ -159,7 +157,7 @@ simulator::run(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
 
     // Use the operator from the pool
     auto op = pool[maxOpIdx];
-    if(!isImaginary)
+    if (!isImaginary)
       op = std::complex<double>{0.0, 1.0} * pool[maxOpIdx];
     chosenOps.push_back(op);
     thetas.push_back(0.0);
