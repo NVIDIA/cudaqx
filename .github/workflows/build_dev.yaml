@@ -33,7 +33,7 @@ concurrency:
 jobs:
   build-cudaqx-dev:
     name: Build CUDA-QX Dev Image
-    if: ${{ github.repository == 'NVIDIA/cudaqx' }}
+    if: ${{ false && github.repository == 'NVIDIA/cudaqx' }}
     strategy:
       matrix:
         platform: [amd64, arm64]
@@ -88,7 +88,7 @@ jobs:
 
   build-cudaqx-pydev:
     name: Build CUDA-QX Python Dev Image
-    if: ${{ github.repository == 'NVIDIA/cudaqx' }}
+    if: ${{ false && github.repository == 'NVIDIA/cudaqx' }}
     strategy:
       matrix:
         python: ['3.10', '3.11', '3.12']
@@ -147,14 +147,15 @@ jobs:
 
   cleanup:
     name: Cleanup
-    needs: [build-cudaqx-dev, build-cudaqx-pydev]
+    # TEMP needs: [build-cudaqx-dev, build-cudaqx-pydev]
     runs-on: ubuntu-latest
     if: ${{ github.repository == 'NVIDIA/cudaqx' }}
     steps:
     - name: Delete untagged images
       uses: actions/delete-package-versions@v5
       with: 
-          package-name: ghcr.io/nvidia/cudaqx-dev
-          package-type: 'container'
-          min-versions-to-keep: 0
-          delete-only-untagged-versions: 'true'
+        package-name: ghcr.io/nvidia/cudaqx-dev
+        package-type: 'container'
+        min-versions-to-keep: 0
+        delete-only-untagged-versions: 'true'
+        token: ${{ github.token }}
