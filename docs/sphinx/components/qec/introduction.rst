@@ -386,12 +386,12 @@ To use an implemented code:
 
 
 Pre-built QEC Codes
-----------------------------------------
+-------------------
 
 CUDA-Q QEC provides several well-studied quantum error correction codes out of the box. Here's a detailed overview of each:
 
 Steane Code
-~~~~~~~~~~~
+^^^^^^^^^^^
 
 The Steane code is a ``[[7,1,3]]`` CSS (Calderbank-Shor-Steane) code that encodes
 one logical qubit into seven physical qubits with a code distance of 3.
@@ -429,7 +429,7 @@ Usage:
         auto steane = cudaq::qec::get_code("steane");
 
 Repetition Code
-~~~~~~~~~~~~~~~
+^^^^^^^^^^^^^^^
 The repetition code is a simple [[n,1,n]] code that protects against
 bit-flip (X) errors by encoding one logical qubit into n physical qubits, where n is the code distance.
 

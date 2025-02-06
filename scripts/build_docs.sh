@@ -69,11 +69,20 @@ sed -e "s|@CUDAQ_INSTALL_DIR@|${CUDAQ_INSTALL_DIR}|g" \
 
 echo "Configuration file created at: $sphinx_conf"
 
-
 # Generate API documentation using Doxygen
 echo "Generating XML documentation using Doxygen..."
 mkdir -p "${doxygen_output_dir}"
 doxygen_input="$repo_root/docs/Doxyfile.in"
+
+# Get all the headers
+CUDAQX_ALL_LIBS="solvers qec"
+lib_headers=""
+lib_headers="$lib_headers $(find "$repo_root/libs/core/include" -name "*.h")"
+# Add headers from each library
+for lib in $CUDAQX_ALL_LIBS; do
+    lib_headers="$lib_headers $(find "$repo_root/libs/${lib}/include" -name "*.h")"
+done
+doxygen_input=$(echo "$lib_headers" | tr '\n' ' ')
 
 sed -e "s|@DOXYGEN_OUTPUT_DIR@|${doxygen_output_dir}|g" \
     -e "s|@DOXYGEN_INPUT@|${doxygen_input}|g" \
@@ -87,7 +96,6 @@ if [ ! "$doxygen_exit_code" -eq "0" ]; then
     echo "Doxygen exit code: $doxygen_exit_code"
     docs_exit_code=11
 fi
-
 
 echo "Building CUDA-QX documentation using Sphinx..."
 cd "$repo_root/docs"
