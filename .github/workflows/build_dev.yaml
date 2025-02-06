@@ -33,7 +33,7 @@ concurrency:
 jobs:
   build-cudaqx-dev:
     name: Build CUDA-QX Dev Image
-    if: ${{ false && github.repository == 'NVIDIA/cudaqx' }}
+    if: ${{ github.repository == 'NVIDIA/cudaqx' }}
     strategy:
       matrix:
         platform: [amd64, arm64]
@@ -106,7 +106,7 @@ jobs:
 
   build-cudaqx-pydev:
     name: Build CUDA-QX Python Dev Image
-    if: ${{ false && github.repository == 'NVIDIA/cudaqx' }}
+    if: ${{ github.repository == 'NVIDIA/cudaqx' }}
     strategy:
       matrix:
         python: ['3.10', '3.11', '3.12']
