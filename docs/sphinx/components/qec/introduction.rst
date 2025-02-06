@@ -384,8 +384,9 @@ To use an implemented code:
         // The code can now be used for various numerical
         // experiments - see section below.
 
-Pre-built Quantum Error Correction Codes
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Pre-built QEC Codes
+----------------------------------------
 
 CUDA-Q QEC provides several well-studied quantum error correction codes out of the box. Here's a detailed overview of each:
 
@@ -935,8 +936,8 @@ Here's a complete example of running a memory experiment:
             // ...
         }
 
-Additional Noise Models:
-~~~~~~~~~~~~~~~~~~~~~~~~
+Additional Noise Models
+~~~~~~~~~~~~~~~~~~~~~~~
 
 .. tab:: Python
 
