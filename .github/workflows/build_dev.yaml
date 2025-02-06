@@ -1,7 +1,6 @@
 name: Build dev images
 
 on:
-  push:
   workflow_dispatch:
     inputs:
       force_rebuild:
