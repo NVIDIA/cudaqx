@@ -1,4 +1,4 @@
-name: Build dev image
+name: Build dev images
 
 on:
   push:
@@ -9,18 +9,6 @@ on:
         required: true
         description: 'Force rebuild even if image tags already exist'
         default: false
-      #cudaq_wheels:
-      #  type: choice
-      #  required: true
-      #  description: 'CUDA-Q wheel source (released version from PyPI or Custom built using .cudaq_version in repo)'
-      #  default: 'Custom'
-      #  options:
-      #  - 'Custom'
-      #  - 'PyPI'
-      #artifacts_from_run:
-      #  type: string
-      #  description: Optional argument to take artifacts from a prior run of this workflow; facilitates rerunning a failed workflow without re-building the artifacts.
-      #  required: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
