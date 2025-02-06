@@ -150,12 +150,11 @@ jobs:
     # TEMP needs: [build-cudaqx-dev, build-cudaqx-pydev]
     runs-on: ubuntu-latest
     if: ${{ github.repository == 'NVIDIA/cudaqx' }}
-    permissions: write-all
     steps:
     - name: Delete untagged images
       uses: actions/delete-package-versions@v5
       with: 
-        package-name: ghcr.io/nvidia/cudaqx-dev
+        package-name: cudaqx-dev
         package-type: 'container'
         min-versions-to-keep: 0
         delete-only-untagged-versions: 'true'
