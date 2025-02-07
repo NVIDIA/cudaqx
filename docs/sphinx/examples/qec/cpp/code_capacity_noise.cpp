@@ -10,9 +10,8 @@
 // decoder, code
 //
 // Compile and run with
-// nvq++ --enable-mlir -lcudaq-qec code_capacity_noise.cpp -o
-// code_capacity_noise
-// ./code_capacity_noise
+// nvq++ --enable-mlir --target=stim -lcudaq-qec code_capacity_noise.cpp
+// ./a.out
 
 #include <algorithm>
 #include <cmath>

@@ -62,30 +62,15 @@ jobs:
           echo "IMAGE_EXISTS=false" >> $GITHUB_OUTPUT
         fi
 
-    - name: Set up context for buildx
+    - name: Build and push
       if: ${{ inputs.force_rebuild || steps.check-image.outputs.IMAGE_EXISTS == 'false' }}
       run: |
-        docker context create builder_context
+        TAGS="-t ghcr.io/nvidia/cudaqx-dev:${{ steps.get-cudaq-version-short.outputs.commit_date }}-${{ steps.get-cudaq-version-short.outputs.shortref }}-${{ matrix.platform }}"
+        TAGS+=" -t ghcr.io/nvidia/cudaqx-dev:${{ steps.get-cudaq-version-short.outputs.shortref }}-${{ matrix.platform }}"
+        TAGS+=" -t ghcr.io/nvidia/cudaqx-dev:latest-${{ matrix.platform }}"
+        docker build $TAGS -f docker/build_env/cudaqx.dev.Dockerfile .
+        docker push -a ghcr.io/nvidia/cudaqx-dev
       shell: bash --noprofile --norc -euo pipefail {0}
-
-    - name: Set up buildx runner
-      if: ${{ inputs.force_rebuild ||steps.check-image.outputs.IMAGE_EXISTS == 'false' }}
-      uses: docker/setup-buildx-action@v3
-      with:
-        endpoint: builder_context
-        driver-opts: network=host
-
-    - name: Build dev image
-      if: ${{ inputs.force_rebuild ||steps.check-image.outputs.IMAGE_EXISTS == 'false' }}
-      uses: docker/build-push-action@v5
-      with:
-        file: ./docker/build_env/cudaqx.dev.Dockerfile
-        tags: |
-          ghcr.io/nvidia/cudaqx-dev:${{ steps.get-cudaq-version-short.outputs.commit_date }}-${{ steps.get-cudaq-version-short.outputs.shortref }}-${{ matrix.platform }}
-          ghcr.io/nvidia/cudaqx-dev:${{ steps.get-cudaq-version-short.outputs.shortref }}-${{ matrix.platform }}
-          ghcr.io/nvidia/cudaqx-dev:latest-${{ matrix.platform }}
-        platforms: linux/${{ matrix.platform }}
-        push: true
 
   build-cudaqx-pydev:
     name: Build CUDA-QX Python Dev Image
@@ -136,33 +121,15 @@ jobs:
           echo "IMAGE_EXISTS=false" >> $GITHUB_OUTPUT
         fi
 
-    - name: Set up context for buildx
-      if: ${{ inputs.force_rebuild ||steps.check-image.outputs.IMAGE_EXISTS == 'false' }}
+    - name: Build and push
+      if: ${{ inputs.force_rebuild || steps.check-image.outputs.IMAGE_EXISTS == 'false' }}
       run: |
-        docker context create builder_context
+        TAGS="-t ghcr.io/nvidia/cudaqx-dev:${{ steps.get-cudaq-version-short.outputs.commit_date }}-${{ steps.get-cudaq-version-short.outputs.shortref }}-py${{ matrix.python }}-${{ matrix.platform }}"
+        TAGS+=" -t ghcr.io/nvidia/cudaqx-dev:${{ steps.get-cudaq-version-short.outputs.shortref }}-py${{ matrix.python }}-${{ matrix.platform }}"
+        TAGS+=" -t ghcr.io/nvidia/cudaqx-dev:latest-py${{ matrix.python }}-${{ matrix.platform }}"
+        docker build $TAGS -f docker/build_env/cudaqx.dev.Dockerfile .
+        docker push -a ghcr.io/nvidia/cudaqx-dev
       shell: bash --noprofile --norc -euo pipefail {0}
-
-    - name: Set up buildx runner
-      if: ${{ inputs.force_rebuild ||steps.check-image.outputs.IMAGE_EXISTS == 'false' }}
-      uses: docker/setup-buildx-action@v3
-      with:
-        endpoint: builder_context
-        driver-opts: network=host
-
-    - name: Build pydev image
-      if: ${{ inputs.force_rebuild ||steps.check-image.outputs.IMAGE_EXISTS == 'false' }}
-      uses: docker/build-push-action@v5
-      with:
-        file: ./docker/build_env/cudaqx.wheel.Dockerfile
-        build-args: |
-          base_image=ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ matrix.platform }}-cu12.0-gcc11-main
-          python_version=${{ matrix.python }}
-        tags: |
-          ghcr.io/nvidia/cudaqx-dev:${{ steps.get-cudaq-version-short.outputs.commit_date }}-${{ steps.get-cudaq-version-short.outputs.shortref }}-py${{ matrix.python }}-${{ matrix.platform }}
-          ghcr.io/nvidia/cudaqx-dev:${{ steps.get-cudaq-version-short.outputs.shortref }}-py${{ matrix.python }}-${{ matrix.platform }}
-          ghcr.io/nvidia/cudaqx-dev:latest-py${{ matrix.python }}-${{ matrix.platform }}
-        platforms: linux/${{ matrix.platform }}
-        push: true
 
   cleanup:
     name: Cleanup
