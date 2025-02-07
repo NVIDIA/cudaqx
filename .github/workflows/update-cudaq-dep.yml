@@ -72,9 +72,9 @@ jobs:
           BRANCH_NAME: ${{ steps.commit_and_push.outputs.BRANCH_NAME }}
         run: |
           if [[ "${{ inputs.cudaq_branch_name }}" == "main" ]]; then
-            TITLE_STR="Bump CUDA-Q commit (${{ inputs.cudaq_branch_name }} DO NOT MERGE)"
-          else
             TITLE_STR="Bump CUDA-Q commit"
+          else
+            TITLE_STR="Bump CUDA-Q commit (${{ inputs.cudaq_branch_name }} DO NOT MERGE)"
           fi
           gh pr create \
             --title "${TITLE_STR}" \
