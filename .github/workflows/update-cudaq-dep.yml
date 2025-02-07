@@ -71,7 +71,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           BRANCH_NAME: ${{ steps.commit_and_push.outputs.BRANCH_NAME }}
         run: |
-          if [[ "${{ inputs.cudaq_branch_name }}" == "main"]]; then
+          if [[ "${{ inputs.cudaq_branch_name }}" == "main" ]]; then
             TITLE_STR="Bump CUDA-Q commit (${{ inputs.cudaq_branch_name }} DO NOT MERGE)"
           else
             TITLE_STR="Bump CUDA-Q commit"
