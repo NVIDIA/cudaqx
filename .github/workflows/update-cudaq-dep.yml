@@ -4,7 +4,7 @@ on:
       cudaq_branch_name:
         type: string
         required: true
-        description: 'Branch name for upstream CUDA-Q repo'
+        description: 'Branch name for upstream CUDA-Q repo (e.g. main or pull-request/2407)'
         default: main
 
   schedule:
@@ -71,8 +71,13 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           BRANCH_NAME: ${{ steps.commit_and_push.outputs.BRANCH_NAME }}
         run: |
+          if [[ "${{ inputs.cudaq_branch_name }}" == "main"]]; then
+            TITLE_STR="Bump CUDA-Q commit (${{ inputs.cudaq_branch_name }} DO NOT MERGE)"
+          else
+            TITLE_STR="Bump CUDA-Q commit"
+          fi
           gh pr create \
-            --title "Bump CUDA-Q commit" \
-            --body "Auto update to the latest CUDA-Q commit" \
+            --title "${TITLE_STR}" \
+            --body "Auto update to the latest CUDA-Q commit on ${{ inputs.cudaq_branch_name }} branch" \
             --head "${BRANCH_NAME}" \
             --base "main"
