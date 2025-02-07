@@ -128,6 +128,8 @@ TEST(QECCodeTester, checkSampleMemoryCircuit) {
       auto [syndromes, d] = cudaq::qec::sample_memory_circuit(
           *steane, cudaq::qec::operation::prep0, nShots, nRounds);
       syndromes.dump();
+      EXPECT_EQ(syndromes.shape()[0], nShots * nRounds);
+      EXPECT_EQ(syndromes.shape()[1], 6);
 
       // No noise here, should be all zeros
       int sum = 0;
@@ -489,7 +491,7 @@ TEST(QECCodeTester, checkRepetition) {
         cudaq::qec::sample_memory_circuit(*repetition, nShots, nRounds);
     syndromes.dump();
     data_mz.dump();
-    EXPECT_EQ(nShots * (nRounds - 1), syndromes.shape()[0]);
+    EXPECT_EQ(nShots * nRounds, syndromes.shape()[0]);
     EXPECT_EQ(parity.shape()[0], syndromes.shape()[1]);
     EXPECT_EQ(nShots, data_mz.shape()[0]);
     EXPECT_EQ(parity_z.shape()[1], data_mz.shape()[1]);
