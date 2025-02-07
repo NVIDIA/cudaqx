@@ -1,5 +1,12 @@
 on:
   workflow_dispatch:
+    inputs:
+      cudaq_branch_name:
+        type: string
+        required: true
+        description: 'Branch name for upstream CUDA-Q repo'
+        default: main
+
   schedule:
     - cron: 0 1 * * 6
 
@@ -22,7 +29,7 @@ jobs:
 
       - name: Fetch the latest commit
         run: |
-          SHA=$(curl -s "https://api.github.com/repos/NVIDIA/cuda-quantum/commits/main" | jq -r '.sha')
+          SHA=$(curl -s "https://api.github.com/repos/NVIDIA/cuda-quantum/commits/${{ inputs.cudaq_branch_name }}" | jq -r '.sha')
           echo "Latest SHA: $SHA"
           echo "sha=$SHA" >> $GITHUB_ENV
 
