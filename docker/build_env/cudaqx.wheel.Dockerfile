@@ -20,6 +20,8 @@ RUN dnf install -y jq
 RUN mkdir -p /workspaces/cudaqx
 COPY .cudaq_version /workspaces/cudaqx
 COPY .github/workflows/scripts/build_cudaq.sh /workspaces/cudaqx
+RUN mkdir /cudaq-wheels
+COPY cudaq-wheels/ /cudaq-wheels/
 
 RUN mkdir -p /workspaces/cudaqx/cudaq && cd /workspaces/cudaqx/cudaq \
   && git init \
