@@ -80,7 +80,7 @@ jobs:
         python: ['3.10', '3.11', '3.12']
         platform: ['amd64', 'arm64']
       fail-fast: false
-    runs-on: linux-${{ matrix.platform }}-cpu16
+    runs-on: linux-${{ matrix.platform }}-cpu4
     steps:
     - name: Login to GitHub CR
       uses: docker/login-action@v3
