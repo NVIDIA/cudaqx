@@ -32,8 +32,7 @@ configured by the settings in the [sphinx/conf.py](./sphinx/conf.py) file.
   bindings for the CUDA-QX API. Doc comments are defined as part of
   defining these bindings in C++. To incorporate the API documentation, the
   `cudaqx` Python package needs to be built and installed prior to generating the
-  CUDA-QX documentation. The [build_docs.sh](../scripts/build_docs.sh)
-  script will automatically do that if necessary. This project generates
+  CUDA-QX documentation. This project generates
   ReStructuredText documentation from Python `docstrings` using `autodoc`.
   The generated `.rst` files are in `docs/source/apidoc`. The files are
   generated automatically by `doc-build` and `doc-clean` will remove them.

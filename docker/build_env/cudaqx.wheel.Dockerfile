@@ -13,7 +13,7 @@ ARG python_version=3.10
 
 LABEL org.opencontainers.image.description="Dev tools for building and testing CUDA-QX libraries"
 LABEL org.opencontainers.image.source="https://github.com/NVIDIA/cudaqx"
-LABEL org.opencontainers.image.title="cuda-qx-dev"
+LABEL org.opencontainers.image.title="cudaqx-dev"
 LABEL org.opencontainers.image.url="https://github.com/NVIDIA/cudaqx"
 
 RUN dnf install -y jq
