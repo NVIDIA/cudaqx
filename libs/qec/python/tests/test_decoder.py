@@ -44,7 +44,11 @@ def test_decoder_api():
 
     # Test decode_async
     decoder = qec.get_decoder('example_byod', H)
-    result = decoder.decode_async(create_test_syndrome())
+    result_async = decoder.decode_async(create_test_syndrome())
+    assert hasattr(result_async, 'get')
+    assert hasattr(result_async, 'ready')
+
+    result = result_async.get()
     assert hasattr(result, 'converged')
     assert hasattr(result, 'result')
     assert isinstance(result.converged, bool)

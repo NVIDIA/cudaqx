@@ -56,7 +56,8 @@ decoder::decode_multi(const std::vector<std::vector<float_t>> &syndrome) {
 
 std::future<decoder_result>
 decoder::decode_async(const std::vector<float_t> &syndrome) {
-  return std::async(std::launch::async, [&] { return this->decode(syndrome); });
+  return std::async(std::launch::async,
+                    [this, syndrome] { return this->decode(syndrome); });
 }
 
 std::unique_ptr<decoder>
