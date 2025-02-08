@@ -29,5 +29,5 @@ RUN mkdir -p /workspaces/cudaqx/cudaq && cd /workspaces/cudaqx/cudaq \
   && git fetch -q --depth=1 origin ${CUDAQ_COMMIT} \
   && git reset --hard FETCH_HEAD \
   && cd .. \
-  && bash build_cudaq.sh --python-version ${python_version} -j 8 \
+  && bash build_cudaq.sh --python-version ${python_version} \
   && rm -rf build
