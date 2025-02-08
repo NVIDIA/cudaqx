@@ -10,7 +10,6 @@ ARG base_image=ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-amd64-cu12.0-gcc11-
 FROM ${base_image}
 
 ARG python_version=3.10
-ARG cudaq_ninja_jobs_arg=""
 
 LABEL org.opencontainers.image.description="Dev tools for building and testing CUDA-QX libraries"
 LABEL org.opencontainers.image.source="https://github.com/NVIDIA/cudaqx"
@@ -29,5 +28,5 @@ RUN mkdir -p /workspaces/cudaqx/cudaq && cd /workspaces/cudaqx/cudaq \
   && git remote add origin https://github.com/${CUDAQ_REPO} \
   && git fetch -q --depth=1 origin ${CUDAQ_COMMIT} \
   && git reset --hard FETCH_HEAD \
-  && bash ../build_cudaq.sh --python-version ${python_version} ${cudaq_ninja_jobs_arg} \
+  && bash ../build_cudaq.sh --python-version ${python_version} \
   && rm -rf build
