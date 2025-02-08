@@ -65,6 +65,8 @@ jobs:
     - name: Build and push
       if: ${{ inputs.force_rebuild || steps.check-image.outputs.IMAGE_EXISTS == 'false' }}
       run: |
+        echo "ulimit -a"
+        ulimit -a
         TAGS="-t ghcr.io/nvidia/cudaqx-dev:${{ steps.get-cudaq-version-short.outputs.commit_date }}-${{ steps.get-cudaq-version-short.outputs.shortref }}-${{ matrix.platform }}"
         TAGS+=" -t ghcr.io/nvidia/cudaqx-dev:${{ steps.get-cudaq-version-short.outputs.shortref }}-${{ matrix.platform }}"
         TAGS+=" -t ghcr.io/nvidia/cudaqx-dev:latest-${{ matrix.platform }}"
@@ -80,7 +82,7 @@ jobs:
         python: ['3.10', '3.11', '3.12']
         platform: ['amd64', 'arm64']
       fail-fast: false
-    runs-on: linux-${{ matrix.platform }}-cpu4
+    runs-on: linux-${{ matrix.platform }}-cpu16
     steps:
     - name: Login to GitHub CR
       uses: docker/login-action@v3
@@ -124,6 +126,8 @@ jobs:
     - name: Build and push
       if: ${{ inputs.force_rebuild || steps.check-image.outputs.IMAGE_EXISTS == 'false' }}
       run: |
+        echo "ulimit -a"
+        ulimit -a
         TAGS="-t ghcr.io/nvidia/cudaqx-dev:${{ steps.get-cudaq-version-short.outputs.commit_date }}-${{ steps.get-cudaq-version-short.outputs.shortref }}-py${{ matrix.python }}-${{ matrix.platform }}"
         TAGS+=" -t ghcr.io/nvidia/cudaqx-dev:${{ steps.get-cudaq-version-short.outputs.shortref }}-py${{ matrix.python }}-${{ matrix.platform }}"
         TAGS+=" -t ghcr.io/nvidia/cudaqx-dev:latest-py${{ matrix.python }}-${{ matrix.platform }}"
