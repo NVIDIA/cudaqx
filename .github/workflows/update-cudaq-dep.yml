@@ -29,7 +29,7 @@ jobs:
 
       - name: Fetch the latest commit
         run: |
-          SHA=$(curl -s "https://api.github.com/repos/NVIDIA/cuda-quantum/commits/${{ inputs.cudaq_branch_name }}" | jq -r '.sha')
+          SHA=$(curl -s "https://api.github.com/repos/NVIDIA/cuda-quantum/commits/${{ inputs.cudaq_branch_name || 'main' }}" | jq -r '.sha')
           echo "Latest SHA: $SHA"
           echo "sha=$SHA" >> $GITHUB_ENV
 
