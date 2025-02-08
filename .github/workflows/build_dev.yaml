@@ -129,6 +129,8 @@ jobs:
         TAGS+=" -t ghcr.io/nvidia/cudaqx-dev:latest-py${{ matrix.python }}-${{ matrix.platform }}"
         BUILDARGS="--build-arg base_image=ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ matrix.platform }}-cu12.0-gcc11-main"
         BUILDARGS+=" --build-arg python_version=${{ matrix.python }}"
+        # Failure to link if there are too many jobs
+        BUILDARGS+=" --build-arg cudaq_ninja_jobs_arg="-j 8"
         docker build $TAGS $BUILDARGS -f docker/build_env/cudaqx.wheel.Dockerfile .
         docker push -a ghcr.io/nvidia/cudaqx-dev
       shell: bash --noprofile --norc -euo pipefail {0}
