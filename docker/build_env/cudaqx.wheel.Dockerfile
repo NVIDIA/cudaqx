@@ -30,4 +30,4 @@ RUN mkdir -p /workspaces/cudaqx/cudaq && cd /workspaces/cudaqx/cudaq \
   && git reset --hard FETCH_HEAD \
   && cd .. \
   && bash build_cudaq.sh --python-version ${python_version} \
-  && rm -rf build
+  && rm -rf cudaq
