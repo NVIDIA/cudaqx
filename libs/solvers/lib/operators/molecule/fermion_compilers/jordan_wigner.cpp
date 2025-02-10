@@ -5,6 +5,17 @@
  * This source code and the accompanying materials are made available under    *
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
+ /******************************************************************************
+ *                                                                             *
+ * This file was translated and modified from jordan_wigner.py                 * 
+ * Original work Copyright OpenFermion                                         *
+ * Licensed under the Apache License, Version 2.0                              *
+ *                                                                             *
+ * Modifications:                                                              *
+ * - Translated from Python to C++                                             *
+ *                                                                             *
+ ******************************************************************************/
+
 #include "cudaq/solvers/operators/molecule/fermion_compilers/jordan_wigner.h"
 
 #include <cppitertools/combinations.hpp>
@@ -27,7 +38,8 @@ cudaq::spin_op one_body(std::size_t p, std::size_t q, std::complex<double> coeff
     for (std::size_t i = p + 1; i < q; i++)
       parity *= cudaq::spin::z(i);
 
-    auto spin_hamiltonian = cudaq::spin_op();
+    cudaq::spin_op spin_hamiltonian;
+    spin_hamiltonian *= 0;
     std::vector<std::tuple<double, cudaq::spin_op(*)(std::size_t), cudaq::spin_op(*)(std::size_t)>> operations = {
       {coeff.real(), cudaq::spin::x, cudaq::spin::x},
       {coeff.real(), cudaq::spin::y, cudaq::spin::y},
@@ -35,7 +47,7 @@ cudaq::spin_op one_body(std::size_t p, std::size_t q, std::complex<double> coeff
       {-coeff.imag(), cudaq::spin::x, cudaq::spin::y}
     };
     for(const auto& [c, op_a, op_b] : operations){
-      if(spin_hamiltonian.empty())
+      if(spin_hamiltonian.num_terms() == 1) // when initialized a spin op is never really empty
         spin_hamiltonian = 0.5 * c * op_a(p) * parity * op_b(q);
       else
         spin_hamiltonian += 0.5 * c * op_a(p) * parity * op_b(q);
@@ -48,7 +60,8 @@ cudaq::spin_op one_body(std::size_t p, std::size_t q, std::complex<double> coeff
 cudaq::spin_op two_body(std::size_t p, std::size_t q, std::size_t r,
                         std::size_t s, std::complex<double> coef) {
 
-  auto spin_hamiltonian = cudaq::spin_op();
+  cudaq::spin_op spin_hamiltonian;
+  spin_hamiltonian *= 0;
   std::set<std::size_t> tmp{p, q, r, s};
 
   //return zero terms
@@ -62,7 +75,7 @@ cudaq::spin_op two_body(std::size_t p, std::size_t q, std::size_t r,
       } else { // if (q == r) 
         mult_coef *= 0.25;
       }
-      spin_hamiltonian = mult_coef * cudaq::spin::i(p) * cudaq::spin::i(q);
+      spin_hamiltonian = -mult_coef * cudaq::spin::i(p) * cudaq::spin::i(q);
       spin_hamiltonian += mult_coef * cudaq::spin::i(p) * cudaq::spin::z(q);
       spin_hamiltonian += mult_coef * cudaq::spin::z(p) * cudaq::spin::i(q);
       spin_hamiltonian -= mult_coef * cudaq::spin::z(p) * cudaq::spin::z(q);
@@ -146,9 +159,10 @@ cudaq::spin_op two_body(std::size_t p, std::size_t q, std::size_t r,
         coef *= -1.0;
       }
       std::vector<std::vector<char>> ops_combinations = {
-          {'X', 'Y', 'X', 'X'}, {'Y', 'X', 'X', 'X'}, 
-          {'Y', 'Y', 'X', 'Y'}, {'Y', 'Y', 'Y', 'X'},
-          {'X', 'X', 'Y', 'Y'}, {'Y', 'Y', 'X', 'X'}
+          {'X', 'X', 'X', 'X'}, {'X', 'X', 'X', 'Y'}, {'X', 'X', 'Y', 'X'}, {'X', 'X', 'Y', 'Y'},
+          {'X', 'Y', 'X', 'X'}, {'X', 'Y', 'X', 'Y'}, {'X', 'Y', 'Y', 'X'}, {'X', 'Y', 'Y', 'Y'},
+          {'Y', 'X', 'X', 'X'}, {'Y', 'X', 'X', 'Y'}, {'Y', 'X', 'Y', 'X'}, {'Y', 'X', 'Y', 'Y'},
+          {'Y', 'Y', 'X', 'X'}, {'Y', 'Y', 'X', 'Y'}, {'Y', 'Y', 'Y', 'X'}, {'Y', 'Y', 'Y', 'Y'}
       };
       std::complex<double> multcoef;
       for (const auto& ops : ops_combinations) {
@@ -208,6 +222,7 @@ cudaq::spin_op two_body(std::size_t p, std::size_t q, std::size_t r,
           term *= parity_c;
           term *= operator_term(d, operator_d);
 
+
           spin_hamiltonian += multcoef*term;
       }
       return spin_hamiltonian;
@@ -225,16 +240,13 @@ cudaq::spin_op jordan_wigner::generate(const double constant,
 
   auto spin_hamiltonian = constant * cudaq::spin_op();
   std::size_t nqubit = hpq.shape()[0];
-  double tolerance = options.get<double>(std::vector<std::string>{"tolerance", "tol"}, 1e-15);
+  double tolerance = options.get<double>(std::vector<std::string>{"tolerance", "tol"}, 1e-12);
 
   for (auto p : cudaq::range(nqubit)) {
     auto coef = hpq.at({p, p});
 
     if (std::fabs(coef) > tolerance){
-      auto temp_rslt = one_body(p, p, coef);
-      std::string strrs = temp_rslt.to_string();
-      spin_hamiltonian += temp_rslt;
-      std::string strrsham = spin_hamiltonian.to_string();
+      spin_hamiltonian += one_body(p, p, coef);
     }
   }
 
@@ -244,15 +256,18 @@ cudaq::spin_op jordan_wigner::generate(const double constant,
       auto q = combo[1];
       next.push_back({p, q});
       auto coef = 0.5 * (hpq.at({p, q}) + std::conj(hpq.at({q, p})));
-      if (std::fabs(coef) > tolerance)
+      if (std::fabs(coef) > tolerance){
         spin_hamiltonian += one_body(p, q, coef);
-
+      }
+      
       coef =  hpqrs.at({p, q, p, q}) 
             + hpqrs.at({q, p, q, p})
             - hpqrs.at({p, q, q, p}) 
             - hpqrs.at({q, p, p, q});
-      if (std::fabs(coef) > tolerance)
+      if (std::fabs(coef) > tolerance){
         spin_hamiltonian += two_body(p, q, p, q, coef);
+      }
+        
     }
   
 
@@ -261,6 +276,7 @@ cudaq::spin_op jordan_wigner::generate(const double constant,
     auto q = combo[0][1];
     auto r = combo[1][0];
     auto s = combo[1][1];
+
     auto coef = 0.5 * (hpqrs.at({p, q, r, s}) 
                       + std::conj(hpqrs.at({s, r, q, p})) 
                       - hpqrs.at({p, q, s, r}) 
@@ -271,8 +287,9 @@ cudaq::spin_op jordan_wigner::generate(const double constant,
                       + std::conj(hpqrs.at({r, s, p, q}))
                       );
 
-    if (std::fabs(coef) > tolerance)
-      spin_hamiltonian += two_body(p, q, r, s, coef);
+    if (std::fabs(coef) > tolerance){
+      spin_hamiltonian +=two_body(p, q, r, s, coef);
+    }
   }
   return spin_hamiltonian;
 }
