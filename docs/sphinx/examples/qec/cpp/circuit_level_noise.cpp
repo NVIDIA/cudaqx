@@ -6,9 +6,9 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
-// Compile and run with
-// nvq++ --enable-mlir -lcudaq-qec circuit_level_noise.cpp -o circuit_level
-// ./circuit_level
+// Compile and run with:
+// nvq++ --enable-mlir --target=stim -lcudaq-qec circuit_level_noise.cpp
+// ./a.out
 
 #include "cudaq.h"
 #include "cudaq/qec/decoder.h"
@@ -80,11 +80,11 @@ int main() {
   for (size_t shot = 0; shot < nShots; ++shot) {
     std::cout << "shot: " << shot << "\n";
 
-    for (size_t round = 0; round < nRounds - 1; ++round) {
+    for (size_t round = 0; round < nRounds; ++round) {
       std::cout << "round: " << round << "\n";
 
       // Access one row of the syndrome tensor
-      size_t count = shot * (nRounds - 1) + round;
+      size_t count = shot * nRounds + round;
       size_t stride = syndromes.shape()[1];
       cudaqx::tensor<uint8_t> syndrome({stride});
       syndrome.borrow(syndromes.data() + stride * count);

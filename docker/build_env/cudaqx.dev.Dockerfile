@@ -10,7 +10,7 @@ FROM ghcr.io/nvidia/cuda-quantum-devdeps:ext-cu12.0-gcc11-main
 
 LABEL org.opencontainers.image.description="Dev tools for building and testing CUDA-QX libraries"
 LABEL org.opencontainers.image.source="https://github.com/NVIDIA/cudaqx"
-LABEL org.opencontainers.image.title="cuda-qx-dev"
+LABEL org.opencontainers.image.title="cudaqx-dev"
 LABEL org.opencontainers.image.url="https://github.com/NVIDIA/cudaqx"
 
 RUN apt-get update && apt-get install -y gfortran libblas-dev jq cuda-nvtx-12-0 \

@@ -119,7 +119,7 @@ sample_memory_circuit(const code &code, operation statePrep,
   std::size_t numCols = numAncx + numAncz;
 
   // Allocate the tensor data for the syndromes and data.
-  cudaqx::tensor<uint8_t> syndromeTensor({numShots * (numRounds - 1), numCols});
+  cudaqx::tensor<uint8_t> syndromeTensor({numShots * numRounds, numCols});
   cudaqx::tensor<uint8_t> dataResults({numShots, numData});
 
   // Run the memory circuit experiment
@@ -151,20 +151,25 @@ sample_memory_circuit(const code &code, operation statePrep,
   auto &measurements = getMemoryCircuitAncillaMeasurements();
 
   std::size_t numMeasRows = numShots * numRounds;
-  std::size_t numSyndRows = numShots * (numRounds - 1);
   cudaqx::tensor<uint8_t> measuresTensor({numMeasRows, numCols});
   measuresTensor.borrow(measurements.data());
 
-  // Convert to Syndromes
+  // First round, store bare syndrome measurement
+  for (std::size_t col = 0; col < numCols; ++col) {
+    std::size_t shot = 0;
+    std::size_t round = 0;
+    std::size_t measIdx = shot * numRounds + round;
+    syndromeTensor.at({measIdx, col}) = measuresTensor.at({measIdx, col});
+  }
 
+  // After first round, store syndrome flips
   // #pragma omp parallel for collapse(2)
   for (std::size_t shot = 0; shot < numShots; ++shot)
     for (std::size_t round = 1; round < numRounds; ++round)
       for (std::size_t col = 0; col < numCols; ++col) {
         std::size_t measIdx = shot * numRounds + round;
         std::size_t prevMeasIdx = shot * numRounds + (round - 1);
-        std::size_t syndIdx = shot * (numRounds - 1) + (round - 1);
-        syndromeTensor.at({syndIdx, col}) =
+        syndromeTensor.at({measIdx, col}) =
             measuresTensor.at({measIdx, col}) ^
             measuresTensor.at({prevMeasIdx, col});
       }
