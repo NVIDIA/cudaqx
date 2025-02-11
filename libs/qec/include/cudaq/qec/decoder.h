@@ -53,6 +53,17 @@ public:
   async_decoder_result(std::future<cudaq::qec::decoder_result> &&f)
       : fut(std::move(f)) {}
 
+  async_decoder_result(async_decoder_result &&other) noexcept
+      : fut(std::move(other.fut)) {}
+
+  async_decoder_result &operator=(async_decoder_result &&other) noexcept {
+    if (this != &other) {
+      fut = std::move(other.fut);
+    }
+
+    return *this;
+  }
+
   /// @brief Block until the decoder result is ready and retrieve it.
   /// Wait until the underlying future is ready and then
   /// return the stored decoder result.
