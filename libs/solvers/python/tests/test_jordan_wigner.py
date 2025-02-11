@@ -12,21 +12,24 @@ import cudaq, cudaq_solvers as solvers
 from pyscf import gto, scf, fci
 import numpy as np
 
+
 def test_ground_state():
     #xyz = [('H', (0., 0., 0.)), ('H', (0., 0., .7474))]
     #xyz = [('H', (0., 0., 0.)), ('H', (0., 0., .7474)), ('H', (1., 0., 0.)), ('H', (1., 0., .7474))]
-    xyz = [('H', (0., 0., 0.)), ('H', (1.0, 0., 0.)), ('H', (0.322, 2.592, 0.1)), ('H', (1.2825, 2.292, 0.1))]
+    xyz = [('H', (0., 0., 0.)), ('H', (1.0, 0., 0.)),
+           ('H', (0.322, 2.592, 0.1)), ('H', (1.2825, 2.292, 0.1))]
     # xyz = [('Li', (0., 0., 0.)), ('H', (0., 0., 1.1774))]
     #xyz = [('O', (0.000000, 0.000000, 0.000000)), ('H', (0.757000, 0.586000, 0.000000)), ('H', (-0.757000, 0.586000, 0.000000))]
 
     # Compute FCI energy
-    mol = gto.M (atom = xyz, basis = 'sto-3g',symmetry=False)
+    mol = gto.M(atom=xyz, basis='sto-3g', symmetry=False)
     mf = scf.RHF(mol).run()
     fci_energy = fci.FCI(mf).kernel()[0]
     print(f'FCI energy: {fci_energy}')
 
     # Compute energy using CUDA-Q/OpenFermion
-    of_hamiltonian, data = cudaq.chemistry.create_molecular_hamiltonian(xyz, 'sto-3g', 1, 0)
+    of_hamiltonian, data = cudaq.chemistry.create_molecular_hamiltonian(
+        xyz, 'sto-3g', 1, 0)
     of_energy = np.min(np.linalg.eigvals(of_hamiltonian.to_matrix()))
     print(f'OpenFermion energy: {of_energy.real}')
 
@@ -40,7 +43,7 @@ def test_ground_state():
     num_terms = of_hamiltonian.get_term_count()
     print(num_terms)
     num_terms = molecule.hamiltonian.get_term_count()
-    print(num_terms) 
+    print(num_terms)
 
     def extract_pauli_terms(hamiltonian):
         pauli_dict = {}
@@ -61,6 +64,6 @@ def test_ground_state():
     #for (k1, v1), (k2, v2) in zip(sorted_of.items(), sorted_cudaq.items()):
     #if k1 != k2:
     #    pass
-        # print(f"Mismatch: {k1} vs {k2}")
+    #    print(f"Mismatch: {k1} vs {k2}")
     #print(openfermion_terms))
     #print(len(cudaqx_terms))
