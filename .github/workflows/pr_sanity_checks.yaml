@@ -37,8 +37,15 @@ jobs:
               - '.github/workflows/pr_sanity_checks.yaml'
               - '.clang-format'
             check-cpp:
-              - '**/*.cpp'
+              - '**/*.c'
               - '**/*.h'
+              - '**/*.cpp'
+              - '**/*.hpp'
+              - '**/*.cc'
+              - '**/*.hh'
+              - '**/*.cxx'
+              - '**/*.cu'
+              - '**/*.cuh'
             check-all-python:
               - '.github/workflows/pr_sanity_checks.yaml'
               - '.style.yapf'
@@ -74,7 +81,7 @@ jobs:
       - name: clang-format all things
         if: needs.check-changes.outputs.check-all-cpp == 'true'
         run: |
-          git ls-files '*.cpp' '*.h' | xargs clang-format-${LLVM_VERSION} -i
+          git ls-files '*.c' '*.h' '*.cpp' '*.hpp' '*.cc' '*.hh' '*.cxx' '*.hxx' '*.cu' '*.cuh' | xargs clang-format-${LLVM_VERSION} -i
 
           if ! git diff --exit-code; then
             git diff --ignore-submodules > clang-format.patch
