@@ -27,7 +27,7 @@ cudaq::spin_op jordan_wigner::generate(const double constant,
   auto spin_hamiltonian = constant * cudaq::spin_op();
   std::size_t nqubit = hpq.shape()[0];
   double tol =
-      options.get<double>(std::vector<std::string>{"tolerance", "tol"}, 1e-12);
+      options.get<double>(std::vector<std::string>{"tolerance", "tol"}, 1e-15);
 
   auto is_complex_zero = [tol](const std::complex<double> &z) {
     return std::abs(z.real()) < tol && std::abs(z.imag()) < tol;

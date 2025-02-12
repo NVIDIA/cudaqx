@@ -45,7 +45,8 @@ def jw_molecule_compare_hamiltonians_test(xyz):
     cqx_op = solvers.jordan_wigner(
         molecule.hpq,
         molecule.hpqrs,
-        core_energy=molecule.energies['nuclear_energy'])
+        core_energy=molecule.energies['nuclear_energy'],
+        tol=1e-12)
 
     of_hamiltonian_dict = extract_spin_op_to_dict(of_hamiltonian)
     cqx_op_dict = extract_spin_op_to_dict(cqx_op)
