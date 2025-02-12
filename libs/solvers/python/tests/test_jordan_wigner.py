@@ -111,4 +111,5 @@ def test_ground_state():
            ('H', (0.757000, 0.586000, 0.000000)),
            ('H', (-0.757000, 0.586000, 0.000000))]
     jw_molecule_compare_hamiltonians_test(xyz)
+    # This is commented out by default because it is a very long test.
     # jw_molecule_test(xyz)
