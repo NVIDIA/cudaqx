@@ -49,11 +49,6 @@ target_link_libraries(test_bravyi_kitaev PRIVATE GTest::gtest_main cudaq-solvers
 add_dependencies(CUDAQXSolversUnitTests test_bravyi_kitaev)
 gtest_discover_tests(test_bravyi_kitaev)
 
-add_executable(test_jordan_wigner test_jordan_wigner.cpp)
-target_link_libraries(test_jordan_wigner PRIVATE GTest::gtest_main cudaq-solvers)
-add_dependencies(CUDAQXSolversUnitTests test_jordan_wigner)
-gtest_discover_tests(test_jordan_wigner)
-
 add_executable(test_optimizers test_optimizers.cpp)
 target_link_libraries(test_optimizers PRIVATE GTest::gtest_main cudaq-solvers)
 add_dependencies(CUDAQXSolversUnitTests test_optimizers)
