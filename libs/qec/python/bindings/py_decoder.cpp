@@ -82,6 +82,7 @@ void bindDecoder(py::module &mod) {
   auto qecmod = py::hasattr(mod, "qecrt")
                     ? mod.attr("qecrt").cast<py::module_>()
                     : mod.def_submodule("qecrt");
+
   py::class_<decoder_result>(qecmod, "DecoderResult", R"pbdoc(
     A class representing the results of a quantum error correction decoding operation.
 
@@ -123,6 +124,19 @@ void bindDecoder(py::module &mod) {
         return py::iter(py::make_tuple(r.converged, r.result));
       });
 
+  py::class_<async_decoder_result>(qecmod, "AsyncDecoderResult",
+                                   R"pbdoc(
+      A future-like object that holds the result of an asynchronous decoder call.
+      Call get() to block until the result is available.
+    )pbdoc")
+      .def("get", &async_decoder_result::get,
+           py::call_guard<py::gil_scoped_release>(),
+           "Return the decoder result (blocking until ready)")
+      .def("ready", &async_decoder_result::ready,
+           py::call_guard<py::gil_scoped_release>(),
+           "Return True if the asynchronous decoder result is ready, False "
+           "otherwise");
+
   py::class_<decoder, PyDecoder>(
       qecmod, "Decoder", "Represents a decoder for quantum error correction")
       .def(py::init_alias<const py::array_t<uint8_t> &>())
@@ -132,6 +146,23 @@ void bindDecoder(py::module &mod) {
             return decoder.decode(syndrome);
           },
           "Decode the given syndrome to determine the error correction",
+          py::arg("syndrome"))
+      .def(
+          "decode_async",
+          [](decoder &dec,
+             const std::vector<float_t> &syndrome) -> async_decoder_result {
+            // Release the GIL while launching asynchronous work.
+            py::gil_scoped_release release;
+            return async_decoder_result(dec.decode_async(syndrome));
+          },
+          "Asynchronously decode the given syndrome", py::arg("syndrome"))
+      .def(
+          "decode_multi",
+          [](decoder &decoder,
+             const std::vector<std::vector<float_t>> &syndrome) {
+            return decoder.decode_multi(syndrome);
+          },
+          "Decode multiple syndromes and return the results",
           py::arg("syndrome"))
       .def("get_block_size", &decoder::get_block_size,
            "Get the size of the code block")

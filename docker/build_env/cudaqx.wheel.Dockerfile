@@ -20,6 +20,8 @@ RUN dnf install -y jq
 RUN mkdir -p /workspaces/cudaqx
 COPY .cudaq_version /workspaces/cudaqx
 COPY .github/workflows/scripts/build_cudaq.sh /workspaces/cudaqx
+RUN mkdir /cudaq-wheels
+COPY cudaq-wheels/ /cudaq-wheels/
 
 RUN mkdir -p /workspaces/cudaqx/cudaq && cd /workspaces/cudaqx/cudaq \
   && git init \
@@ -28,5 +30,6 @@ RUN mkdir -p /workspaces/cudaqx/cudaq && cd /workspaces/cudaqx/cudaq \
   && git remote add origin https://github.com/${CUDAQ_REPO} \
   && git fetch -q --depth=1 origin ${CUDAQ_COMMIT} \
   && git reset --hard FETCH_HEAD \
-  && bash ../build_cudaq.sh --python-version ${python_version} \
-  && rm -rf build
+  && cd .. \
+  && bash build_cudaq.sh --python-version ${python_version} \
+  && rm -rf cudaq
