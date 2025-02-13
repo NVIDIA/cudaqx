@@ -32,7 +32,11 @@ cd cudaqx
 mkdir build && cd build
 
 # Configure your build (adjust as necessary)
-~/.local/bin/cmake -G Ninja -S .. -DCUDAQ_INSTALL_DIR=$CUDAQ_INSTALL_PREFIX -DCMAKE_INSTALL_PREFIX=${CUDAQX_INSTALL_PREFIX} -DCUDAQ_DIR=${CUDAQ_INSTALL_PREFIX}/lib/cmake/cudaq -DCMAKE_BUILD_TYPE=Release
+~/.local/bin/cmake -G Ninja -S .. \
+  -DCUDAQ_INSTALL_DIR=$CUDAQ_INSTALL_PREFIX \
+  -DCMAKE_INSTALL_PREFIX=${CUDAQX_INSTALL_PREFIX} \
+  -DCUDAQ_DIR=${CUDAQ_INSTALL_PREFIX}/lib/cmake/cudaq \
+  -DCMAKE_BUILD_TYPE=Release
 
 # Install your build
 ninja install
