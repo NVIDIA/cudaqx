@@ -155,11 +155,12 @@ sample_memory_circuit(const code &code, operation statePrep,
   measuresTensor.borrow(measurements.data());
 
   // First round, store bare syndrome measurement
-  for (std::size_t col = 0; col < numCols; ++col) {
-    std::size_t shot = 0;
-    std::size_t round = 0;
-    std::size_t measIdx = shot * numRounds + round;
-    syndromeTensor.at({measIdx, col}) = measuresTensor.at({measIdx, col});
+  for (std::size_t shot = 0; shot < numShots; ++shot) {
+    for (std::size_t col = 0; col < numCols; ++col) {
+      std::size_t round = 0;
+      std::size_t measIdx = shot * numRounds + round;
+      syndromeTensor.at({measIdx, col}) = measuresTensor.at({measIdx, col});
+    }
   }
 
   // After first round, store syndrome flips
