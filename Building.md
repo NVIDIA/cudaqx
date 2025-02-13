@@ -16,7 +16,11 @@ adjust to `arm64` if you are using ARM machines.
 ```bash
 docker pull ghcr.io/nvidia/cudaqx-dev:latest-amd64
 docker run -it --gpus all --name cudaqx-dev ghcr.io/nvidia/cudaqx-dev:latest-amd64
+```
 
+Then inside the container...
+
+```bash
 # Then inside the container
 export CUDAQ_INSTALL_PREFIX=~/.cudaq
 export CUDAQX_INSTALL_PREFIX=~/.cudaqx
