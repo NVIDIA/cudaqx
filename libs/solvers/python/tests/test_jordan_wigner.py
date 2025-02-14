@@ -57,7 +57,7 @@ def jw_molecule_compare_hamiltonians_test(xyz):
         assert (k in of_hamiltonian_dict.keys())
 
     for k in of_hamiltonian_dict.keys():
-        np.isclose(of_hamiltonian_dict[k], cqx_op_dict[k], 1e-12)
+        assert np.isclose(of_hamiltonian_dict[k], cqx_op_dict[k], 1e-12)
 
 
 def jw_molecule_test(xyz):
@@ -77,7 +77,8 @@ def jw_molecule_test(xyz):
     molecule = solvers.create_molecule(xyz, 'sto-3g', 0, 0, casci=True)
     op = solvers.jordan_wigner(molecule.hpq,
                                molecule.hpqrs,
-                               core_energy=molecule.energies['nuclear_energy'])
+                               core_energy=molecule.energies['nuclear_energy'],
+                               tol=1e-12)
     assert op == molecule.hamiltonian
     assert of_hamiltonian == molecule.hamiltonian
 
