@@ -29,6 +29,33 @@ def test_decoder_initialization():
     assert hasattr(decoder, 'decode')
 
 
+def test_decoder_api():
+    # Test decode_multi
+    decoder = qec.get_decoder('example_byod', H)
+    result = decoder.decode_multi(
+        [create_test_syndrome(), create_test_syndrome()])
+    assert len(result) == 2
+    for r in result:
+        assert hasattr(r, 'converged')
+        assert hasattr(r, 'result')
+        assert isinstance(r.converged, bool)
+        assert isinstance(r.result, list)
+        assert len(r.result) == 10
+
+    # Test decode_async
+    decoder = qec.get_decoder('example_byod', H)
+    result_async = decoder.decode_async(create_test_syndrome())
+    assert hasattr(result_async, 'get')
+    assert hasattr(result_async, 'ready')
+
+    result = result_async.get()
+    assert hasattr(result, 'converged')
+    assert hasattr(result, 'result')
+    assert isinstance(result.converged, bool)
+    assert isinstance(result.result, list)
+    assert len(result.result) == 10
+
+
 def test_decoder_result_structure():
     decoder = qec.get_decoder('example_byod', H)
     result = decoder.decode(create_test_syndrome())

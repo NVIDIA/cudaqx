@@ -1,15 +1,16 @@
 CUDA-Q QEC C++ API
 ******************************
 
-.. doxygentypedef:: cudaq::qec::float_t
+Code
+=============
 
-.. doxygenstruct:: cudaq::qec::decoder_result
-    :members:
-
-.. doxygenclass:: cudaq::qec::decoder
+.. doxygenclass:: cudaq::qec::code
     :members:
 
 .. doxygenstruct:: cudaq::qec::patch
+    :members:
+
+.. doxygenclass:: cudaq::qec::repetition::repetition
     :members:
 
 .. doxygenclass:: cudaq::qec::steane::steane
@@ -21,11 +22,21 @@ CUDA-Q QEC C++ API
 .. doxygenclass:: cudaq::qec::surface_code::surface_code
     :members:
 
-.. doxygenclass:: cudaq::qec::repetition::repetition
+
+Decoder
+=============
+
+.. doxygenclass:: cudaq::qec::decoder
     :members:
 
-.. doxygenclass:: cudaq::qec::code
+.. doxygenstruct:: cudaq::qec::decoder_result
     :members:
+
+
+Common
+=============
+
+.. doxygentypedef:: cudaq::qec::float_t
 
 .. doxygenenum:: cudaq::qec::operation
 

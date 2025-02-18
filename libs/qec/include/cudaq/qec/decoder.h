@@ -43,6 +43,40 @@ struct decoder_result {
   }
 };
 
+/// @brief Return type for asynchronous decoding results
+class async_decoder_result {
+public:
+  std::future<cudaq::qec::decoder_result> fut;
+
+  /// @brief Construct an async_decoder_result from a std::future.
+  /// @param f A rvalue reference to a std::future containing a decoder_result.
+  async_decoder_result(std::future<cudaq::qec::decoder_result> &&f)
+      : fut(std::move(f)) {}
+
+  async_decoder_result(async_decoder_result &&other) noexcept
+      : fut(std::move(other.fut)) {}
+
+  async_decoder_result &operator=(async_decoder_result &&other) noexcept {
+    if (this != &other) {
+      fut = std::move(other.fut);
+    }
+
+    return *this;
+  }
+
+  /// @brief Block until the decoder result is ready and retrieve it.
+  /// Wait until the underlying future is ready and then
+  /// return the stored decoder result.
+  /// @return The decoder_result obtained from the asynchronous operation.
+  cudaq::qec::decoder_result get() { return fut.get(); }
+
+  /// @brief Check if the asynchronous result is ready.
+  /// @return `true` if the future is ready, `false` otherwise.
+  bool ready() {
+    return fut.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
+  }
+};
+
 /// @brief The `decoder` base class should be subclassed by specific decoder
 /// implementations. The `heterogeneous_map` provides a placeholder for
 /// arbitrary constructor parameters that can be unique to each specific

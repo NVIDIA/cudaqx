@@ -8,6 +8,7 @@
 
 #include "cudaq/qec/decoder.h"
 #include <cmath>
+#include <future>
 #include <gtest/gtest.h>
 
 TEST(DecoderUtils, CovertHardToSoft) {
@@ -83,6 +84,8 @@ TEST(SampleDecoder, checkAPI) {
   for (auto x : dec_result.result)
     ASSERT_EQ(x, 0.0f);
 
+  // Test the move constructor and move assignment operator
+
   // Multi test
   auto dec_results = d->decode_multi({syndromes, syndromes});
   ASSERT_EQ(dec_results.size(), 2);
@@ -146,4 +149,27 @@ TEST(SteaneLutDecoder, checkAPI) {
   }
   ASSERT_TRUE(convergeTrueFound);
   ASSERT_FALSE(convergeFalseFound);
+}
+
+TEST(AsyncDecoderResultTest, MoveConstructorTransfersFuture) {
+  std::promise<cudaq::qec::decoder_result> promise;
+  std::future<cudaq::qec::decoder_result> future = promise.get_future();
+
+  cudaq::qec::async_decoder_result original(std::move(future));
+  EXPECT_TRUE(original.fut.valid());
+
+  cudaq::qec::async_decoder_result moved(std::move(original));
+  EXPECT_TRUE(moved.fut.valid());
+  EXPECT_FALSE(original.fut.valid());
+}
+
+TEST(AsyncDecoderResultTest, MoveAssignmentTransfersFuture) {
+  std::promise<cudaq::qec::decoder_result> promise;
+  std::future<cudaq::qec::decoder_result> future = promise.get_future();
+
+  cudaq::qec::async_decoder_result first(std::move(future));
+  cudaq::qec::async_decoder_result second = std::move(first);
+
+  EXPECT_TRUE(second.fut.valid());
+  EXPECT_FALSE(first.fut.valid());
 }

@@ -58,14 +58,14 @@ def test_sample_memory_circuit():
                                                        numShots=10,
                                                        numRounds=4)
     assert isinstance(syndromes, np.ndarray)
-    assert syndromes.shape == (30, 6)
+    assert syndromes.shape == (40, 6)
     print(syndromes)
 
     syndromes_with_op, dataResults = qec.sample_memory_circuit(
         steane, qec.operation.prep1, 10, 4)
     assert isinstance(syndromes_with_op, np.ndarray)
     print(syndromes_with_op)
-    assert syndromes_with_op.shape == (30, 6)
+    assert syndromes_with_op.shape == (40, 6)
 
 
 def test_custom_steane_code():
@@ -99,7 +99,7 @@ def test_noisy_simulation():
                                                        numRounds=4,
                                                        noise=noise)
     assert isinstance(syndromes, np.ndarray)
-    assert syndromes.shape == (30, 6)
+    assert syndromes.shape == (40, 6)
     print(syndromes)
     assert np.any(syndromes)
     cudaq.reset_target()
@@ -111,7 +111,7 @@ def test_python_code():
                                                        numShots=10,
                                                        numRounds=4)
     assert isinstance(syndromes, np.ndarray)
-    assert syndromes.shape == (30, 6)
+    assert syndromes.shape == (40, 6)
     print(syndromes)
     assert not np.any(syndromes)
 

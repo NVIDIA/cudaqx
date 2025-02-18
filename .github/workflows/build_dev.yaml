@@ -1,0 +1,174 @@
+name: Build dev images
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_rebuild:
+        type: boolean
+        required: true
+        description: 'Force rebuild even if image tags already exist'
+        default: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-cudaqx-dev:
+    name: Build CUDA-QX Dev Image
+    if: ${{ github.repository == 'NVIDIA/cudaqx' }}
+    strategy:
+      matrix:
+        platform: [amd64, arm64]
+      fail-fast: false
+    runs-on: linux-${{ matrix.platform }}-cpu8
+    steps:
+    - name: Login to GitHub CR
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+
+    - name: Get code
+      uses: actions/checkout@v4
+      with:
+        set-safe-directory: true
+  
+    - name: Get required CUDA-Q version
+      id: get-cudaq-version
+      uses: ./.github/actions/get-cudaq-version
+
+    - name: Get additional metadata
+      id: get-cudaq-version-short
+      run: |
+        shortref=$(echo "${{ steps.get-cudaq-version.outputs.ref }}" | head -c8)
+        commit_date=$(curl -s "https://api.github.com/repos/NVIDIA/cuda-quantum/commits/${{ steps.get-cudaq-version.outputs.ref }}" | jq -r '.commit.committer.date' | cut -dT -f1)
+        echo "shortref=$shortref" >> $GITHUB_OUTPUT
+        echo "commit_date=$commit_date" >> $GITHUB_OUTPUT
+
+    - name: Check if image already exists
+      id: check-image
+      run: |
+        IMAGE_TAG="${{ steps.get-cudaq-version-short.outputs.commit_date }}-${{ steps.get-cudaq-version-short.outputs.shortref }}-${{ matrix.platform }}"
+        CONTAINER_VERSION_METADATA=$(curl -s -L -H "Accept: applicat/vnd.github+json" -H "Authorization: Bearer ${{ github.token }}" "https://api.github.com/orgs/NVIDIA/packages/container/cudaqx-dev/versions")
+        CONTAINER_TAGS=$(echo $CONTAINER_VERSION_METADATA | jq -r '.[] | .metadata.container.tags[]')
+
+        if echo "$CONTAINER_TAGS" | grep -qx "$IMAGE_TAG"; then
+          echo "Image tag $IMAGE_TAG already exists. Skipping build."
+          echo "IMAGE_EXISTS=true" >> $GITHUB_OUTPUT
+        else
+          echo "Image tag $IMAGE_TAG does not exist. Proceeding with build."
+          echo "IMAGE_EXISTS=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Build and push
+      if: ${{ inputs.force_rebuild || steps.check-image.outputs.IMAGE_EXISTS == 'false' }}
+      run: |
+        TAGS="-t ghcr.io/nvidia/cudaqx-dev:${{ steps.get-cudaq-version-short.outputs.commit_date }}-${{ steps.get-cudaq-version-short.outputs.shortref }}-${{ matrix.platform }}"
+        TAGS+=" -t ghcr.io/nvidia/cudaqx-dev:${{ steps.get-cudaq-version-short.outputs.shortref }}-${{ matrix.platform }}"
+        TAGS+=" -t ghcr.io/nvidia/cudaqx-dev:latest-${{ matrix.platform }}"
+        docker build $TAGS -f docker/build_env/cudaqx.dev.Dockerfile .
+        docker push -a ghcr.io/nvidia/cudaqx-dev
+      shell: bash --noprofile --norc -euo pipefail {0}
+
+  build-cudaqx-pydev:
+    name: Build CUDA-QX Python Dev Image
+    if: ${{ github.repository == 'NVIDIA/cudaqx' }}
+    strategy:
+      matrix:
+        python: ['3.10', '3.11', '3.12']
+        platform: ['amd64', 'arm64']
+      fail-fast: false
+    runs-on: linux-${{ matrix.platform }}-cpu8
+    steps:
+    - name: Login to GitHub CR
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+
+    - name: Get code
+      uses: actions/checkout@v4
+      with:
+        set-safe-directory: true
+  
+    - name: Get required CUDA-Q version
+      id: get-cudaq-version
+      uses: ./.github/actions/get-cudaq-version
+
+    - name: Get additional metadata
+      id: get-cudaq-version-short
+      run: |
+        shortref=$(echo "${{ steps.get-cudaq-version.outputs.ref }}" | head -c8)
+        commit_date=$(curl -s "https://api.github.com/repos/NVIDIA/cuda-quantum/commits/${{ steps.get-cudaq-version.outputs.ref }}" | jq -r '.commit.committer.date' | cut -dT -f1)
+        echo "shortref=$shortref" >> $GITHUB_OUTPUT
+        echo "commit_date=$commit_date" >> $GITHUB_OUTPUT
+
+    - name: Check if image already exists
+      id: check-image
+      run: |
+        IMAGE_TAG="${{ steps.get-cudaq-version-short.outputs.commit_date }}-${{ steps.get-cudaq-version-short.outputs.shortref }}-${{ matrix.platform }}"
+        CONTAINER_VERSION_METADATA=$(curl -s -L -H "Accept: applicat/vnd.github+json" -H "Authorization: Bearer ${{ github.token }}" "https://api.github.com/orgs/NVIDIA/packages/container/cudaqx-dev/versions")
+        CONTAINER_TAGS=$(echo $CONTAINER_VERSION_METADATA | jq -r '.[] | .metadata.container.tags[]')
+
+        if echo "$CONTAINER_TAGS" | grep -qx "$IMAGE_TAG"; then
+          echo "Image tag $IMAGE_TAG already exists. Skipping build."
+          echo "IMAGE_EXISTS=true" >> $GITHUB_OUTPUT
+        else
+          echo "Image tag $IMAGE_TAG does not exist. Proceeding with build."
+          echo "IMAGE_EXISTS=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Fetch CUDA-Q
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ steps.get-cudaq-version.outputs.repo }}
+        ref: ${{ steps.get-cudaq-version.outputs.ref }}
+        path: cudaq
+        set-safe-directory: true
+
+    - name: Build CUDA-Q wheels
+      id: wheel_build
+      uses: docker/build-push-action@v5
+      with:
+        context: cudaq
+        file: cudaq/docker/release/cudaq.wheel.Dockerfile
+        build-args: |
+          base_image=ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ matrix.platform }}-cu12.0-gcc11-main
+          python_version=${{ matrix.python }}
+        outputs: type=local,dest=/tmp/wheels
+
+    - name: Build and push dev image with prebuilt CUDA-Q wheels
+      if: ${{ inputs.force_rebuild || steps.check-image.outputs.IMAGE_EXISTS == 'false' }}
+      run: |
+        # Bring wheels into upcoming Docker context
+        mkdir cudaq-wheels
+        cp /tmp/wheels/*.whl cudaq-wheels/
+
+        # Perform build
+        TAGS="-t ghcr.io/nvidia/cudaqx-dev:${{ steps.get-cudaq-version-short.outputs.commit_date }}-${{ steps.get-cudaq-version-short.outputs.shortref }}-py${{ matrix.python }}-${{ matrix.platform }}"
+        TAGS+=" -t ghcr.io/nvidia/cudaqx-dev:${{ steps.get-cudaq-version-short.outputs.shortref }}-py${{ matrix.python }}-${{ matrix.platform }}"
+        TAGS+=" -t ghcr.io/nvidia/cudaqx-dev:latest-py${{ matrix.python }}-${{ matrix.platform }}"
+        BUILDARGS="--build-arg base_image=ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ matrix.platform }}-cu12.0-gcc11-main"
+        BUILDARGS+=" --build-arg python_version=${{ matrix.python }}"
+        # For some reason, this fails on amd64 unless DOCKER_BUILDKIT=0 is set.
+        # The exact error is: too many open files.
+        DOCKER_BUILDKIT=0 docker build $TAGS $BUILDARGS -f docker/build_env/cudaqx.wheel.Dockerfile .
+        docker push -a ghcr.io/nvidia/cudaqx-dev
+      shell: bash --noprofile --norc -euo pipefail {0}
+
+  cleanup:
+    name: Cleanup
+    needs: [build-cudaqx-dev, build-cudaqx-pydev]
+    runs-on: ubuntu-latest
+    if: ${{ github.repository == 'NVIDIA/cudaqx' }}
+    steps:
+    - name: Delete untagged images
+      uses: actions/delete-package-versions@v5
+      with: 
+        package-name: cudaqx-dev
+        package-type: 'container'
+        min-versions-to-keep: 0
+        delete-only-untagged-versions: 'true'

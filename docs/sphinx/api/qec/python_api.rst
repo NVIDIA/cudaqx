@@ -4,14 +4,23 @@ CUDA-Q QEC Python API
 .. automodule:: cudaq_qec
     :members:
 
+Code
+=============
+
 .. autoclass:: cudaq_qec.Code
     :members:
+
+Decoder
+=============
 
 .. autoclass:: cudaq_qec.Decoder
     :members:
 
 .. autoclass:: cudaq_qec.DecoderResult
     :members:
+
+Common
+=============
 
 .. autofunction:: cudaq_qec.sample_memory_circuit
 

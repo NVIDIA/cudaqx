@@ -39,14 +39,55 @@ docs_build_output="$repo_root/build/docs"
 sphinx_output_dir="$docs_build_output/sphinx"
 doxygen_output_dir="$docs_build_output/doxygen"
 dialect_output_dir="$docs_build_output/Dialects"
+
+# Clean up any previous build output and then recreate the build directory
 rm -rf "$docs_build_output"
+mkdir -p "$docs_build_output"
+
 doxygen_exe=doxygen
+
+# Create the conf.py file needed by Sphinx
+echo "Generating conf.py ..."
+sphinx_conf_in="$repo_root/docs/sphinx/conf.py.in"
+sphinx_conf="$repo_root/docs/sphinx/conf.py"
+
+# Verify that the input file exists before proceeding
+if [ ! -f "$sphinx_conf_in" ]; then
+  echo "Error: Sphinx configuration template '$sphinx_conf_in' does not exist." >&2
+  exit 1
+fi
+
+# Replace placeholders of the form @VAR@ in the template file with their variable values.
+CUDAQ_INSTALL_DIR=${CUDAQ_INSTALL_DIR:-"$HOME/.cudaq"}
+CMAKE_BINARY_DIR="$repo_root/build"
+SPHINX_SOURCE="$repo_root/docs/sphinx"
+
+sed -e "s|@CUDAQ_INSTALL_DIR@|${CUDAQ_INSTALL_DIR}|g" \
+    -e "s|@CMAKE_BINARY_DIR@|${CMAKE_BINARY_DIR}|g" \
+    -e "s|@SPHINX_SOURCE@|${SPHINX_SOURCE}|g" \
+    "$sphinx_conf_in" > "$sphinx_conf"
+
+echo "Configuration file created at: $sphinx_conf"
 
 # Generate API documentation using Doxygen
 echo "Generating XML documentation using Doxygen..."
 mkdir -p "${doxygen_output_dir}"
-sed 's@${DOXYGEN_OUTPUT_PREFIX}@'"${doxygen_output_dir}"'@' "$repo_root/docs/Doxyfile.in" | \
-sed 's@${CUDAQX_REPO_ROOT}@'"${repo_root}"'@' > "${doxygen_output_dir}/Doxyfile"
+doxygen_input="$repo_root/docs/Doxyfile.in"
+
+# Get all the headers
+CUDAQX_ALL_LIBS="solvers qec"
+lib_headers=""
+lib_headers="$lib_headers $(find "$repo_root/libs/core/include" -name "*.h")"
+# Add headers from each library
+for lib in $CUDAQX_ALL_LIBS; do
+    lib_headers="$lib_headers $(find "$repo_root/libs/${lib}/include" -name "*.h")"
+done
+doxygen_input=$(echo "$lib_headers" | tr '\n' ' ')
+
+sed -e "s|@DOXYGEN_OUTPUT_DIR@|${doxygen_output_dir}|g" \
+    -e "s|@DOXYGEN_INPUT@|${doxygen_input}|g" \
+    "$repo_root/docs/Doxyfile.in" > "${doxygen_output_dir}/Doxyfile"
+
 "$doxygen_exe" "${doxygen_output_dir}/Doxyfile" 2> "$logs_dir/doxygen_error.txt" 1> "$logs_dir/doxygen_output.txt"
 doxygen_exit_code=$?
 if [ ! "$doxygen_exit_code" -eq "0" ]; then
@@ -67,7 +108,10 @@ cp -r "$doxygen_output_dir" sphinx/_doxygen/
 # cp -r "$dialect_output_dir" sphinx/_mdgen/ # uncomment once we use the content from those files
 
 rm -rf "$sphinx_output_dir"
-sphinx-build -v -n -W --keep-going -b html sphinx "$sphinx_output_dir" -j auto #2> "$logs_dir/sphinx_error.txt" 1> "$logs_dir/sphinx_output.txt"
+sphinx-build -v -n  --keep-going -b html \
+  -Dbreathe_projects.cudaqx="${doxygen_output_dir}/xml" \
+  sphinx "$sphinx_output_dir" -j auto #2> "$logs_dir/sphinx_error.txt" 1> "$logs_dir/sphinx_output.txt"
+
 sphinx_exit_code=$?
 if [ ! "$sphinx_exit_code" -eq "0" ]; then
     echo "Failed to generate documentation using sphinx-build."
