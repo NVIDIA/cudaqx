@@ -8,9 +8,9 @@
 #include "cudaq/qec/stabilizer_utils.h"
 
 namespace cudaq::qec {
-// Sort the stabilizers by the occurrence of 'Z' first, then by 'X'. 
-// An earlier occurrence is considered "less". 
-// Example: a = "ZZX", b = "XXZ" -> a < b 
+// Sort the stabilizers by the occurrence of 'Z' first, then by 'X'.
+// An earlier occurrence is considered "less".
+// Example: a = "ZZX", b = "XXZ" -> a < b
 static bool spinOpComparator(const cudaq::spin_op &a, const cudaq::spin_op &b) {
   auto astr = a.to_string(false);
   auto bstr = b.to_string(false);
