@@ -1,5 +1,5 @@
-/****************************************************************-*- C++ -*-****
- * Copyright (c) 2024 NVIDIA Corporation & Affiliates.                         *
+/*******************************************************************************
+ * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -8,7 +8,9 @@
 #include "cudaq/qec/stabilizer_utils.h"
 
 namespace cudaq::qec {
-// Sort the stabilizers, z first, then x
+// Sort the stabilizers by the occurrence of 'Z' first, then by 'X'. 
+// An earlier occurrence is considered "less". 
+// Example: a = "ZZX", b = "XXZ" -> a < b 
 static bool spinOpComparator(const cudaq::spin_op &a, const cudaq::spin_op &b) {
   auto astr = a.to_string(false);
   auto bstr = b.to_string(false);
@@ -30,7 +32,7 @@ static bool spinOpComparator(const cudaq::spin_op &a, const cudaq::spin_op &b) {
   return zIdxA < zIdxB;
 }
 
-static bool isSorted(const std::vector<cudaq::spin_op> &ops) {
+static bool isStabilizerSorted(const std::vector<cudaq::spin_op> &ops) {
   return std::is_sorted(ops.begin(), ops.end(), spinOpComparator);
 }
 
@@ -53,7 +55,7 @@ to_parity_matrix(const std::vector<cudaq::spin_op> &stabilizers,
   // the downstream code use the sorted copy.
   const std::vector<cudaq::spin_op> *p_stabilizers = &stabilizers;
   std::vector<cudaq::spin_op> stabilizers_copy; // only use if necessary
-  if (!isSorted(stabilizers)) {
+  if (!isStabilizerSorted(stabilizers)) {
     // Make a copy and sort them
     stabilizers_copy = stabilizers;
     sortStabilizerOps(stabilizers_copy);
