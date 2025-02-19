@@ -16,7 +16,7 @@ LABEL org.opencontainers.image.source="https://github.com/NVIDIA/cudaqx"
 LABEL org.opencontainers.image.title="cudaqx-dev"
 LABEL org.opencontainers.image.url="https://github.com/NVIDIA/cudaqx"
 
-RUN dnf install -y jq
+RUN dnf install -y jq cuda-nvtx-12-0
 RUN mkdir -p /workspaces/cudaqx
 COPY .cudaq_version /workspaces/cudaqx
 COPY .github/workflows/scripts/build_cudaq.sh /workspaces/cudaqx
