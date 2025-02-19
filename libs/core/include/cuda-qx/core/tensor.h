@@ -1,5 +1,5 @@
 /****************************************************************-*- C++ -*-****
- * Copyright (c) 2024 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -43,8 +43,9 @@ public:
   /// @brief Construct an empty tensor
   tensor()
       : pimpl(std::shared_ptr<details::tensor_impl<Scalar>>(
-            details::tensor_impl<Scalar>::get(
-                std::string("xtensor") + std::string(ScalarAsString), {})
+            details::tensor_impl<Scalar>::get(std::string("xtensor") +
+                                                  std::string(ScalarAsString),
+                                              std::vector<std::size_t>())
                 .release())) {}
 
   /// @brief Construct a tensor with the given shape
@@ -63,6 +64,16 @@ public:
             details::tensor_impl<Scalar>::get(std::string("xtensor") +
                                                   std::string(ScalarAsString),
                                               data, shape)
+                .release())) {}
+
+  /// @brief Construct a tensor with the given bitstrings
+  /// @param data Bitstrings from which to construct tensor
+  template <typename T, typename = std::enable_if_t<
+                            std::is_convertible<T, std::string>::value>>
+  tensor(const std::vector<T> &data)
+      : pimpl(std::shared_ptr<details::tensor_impl<Scalar>>(
+            details::tensor_impl<Scalar>::get(
+                std::string("xtensor") + std::string(ScalarAsString), data)
                 .release())) {}
 
   /// @brief Get the rank of the tensor
@@ -228,6 +239,10 @@ public:
   const scalar_type *data() const { return pimpl->data(); }
 
   void dump() const { pimpl->dump(); }
+
+  /// @brief Dump tensor as bits, where non-zero elements are shown as '1' and
+  /// zero-elements are shown as '.'.
+  void dump_bits() const { pimpl->dump_bits(); }
 };
 
 } // namespace cudaqx

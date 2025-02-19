@@ -1,5 +1,5 @@
 /****************************************************************-*- C++ -*-****
- * Copyright (c) 2024 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -47,6 +47,38 @@ public:
                                        std::multiplies<size_t>());
     scalar_type *data = new scalar_type[size]();
     return iter->second(data, shape);
+  }
+
+  /// @brief Create a tensor implementation with the given set of bit strings
+  /// @param name The name of the tensor implementation
+  /// @param data Pointer to the tensor data as a vector of bitstrings
+  /// @return A unique pointer to the created tensor implementation
+  /// @throws std::runtime_error if the requested tensor implementation is
+  /// invalid
+  static std::unique_ptr<tensor_impl<Scalar>>
+  get(const std::string &name, const std::vector<std::string> &data) {
+    auto &registry = BaseExtensionPoint::get_registry();
+    auto iter = registry.find(name);
+    if (iter == registry.end())
+      throw std::runtime_error("invalid tensor_impl requested: " + name);
+    auto num_rows = data.size();
+    if (num_rows == 0)
+      return iter->second(nullptr, {});
+    auto num_cols = data[0].size();
+    for (size_t r = 1; r < num_rows; r++)
+      if (data[r].size() != num_cols)
+        throw std::runtime_error("inconsistent tensor_impl dimensions found in "
+                                 "std::vector<std::string> inputs");
+    std::size_t size = num_rows * num_cols;
+    scalar_type *scalar_data = new scalar_type[size]();
+    auto result = iter->second(scalar_data, {num_rows, num_cols});
+    for (size_t r = 0; r < num_rows; r++) {
+      Scalar __restrict__ *resultRow = &result->at({r, 0});
+      for (size_t c = 0; c < num_cols; c++) {
+        resultRow[c] = data[r][c] - '0';
+      }
+    }
+    return std::move(result);
   }
 
   /// @brief Create a tensor implementation with the given name, data, and shape
@@ -152,6 +184,10 @@ public:
   virtual const scalar_type *data() const = 0;
 
   virtual void dump() const = 0;
+
+  /// @brief Dump tensor as bits, where non-zero elements are shown as '1' and
+  /// zero-elements are shown as '.'.
+  virtual void dump_bits() const = 0;
 
   virtual ~tensor_impl() = default;
 };
