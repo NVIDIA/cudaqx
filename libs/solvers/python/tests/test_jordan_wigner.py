@@ -61,8 +61,12 @@ def jw_molecule_compare_hamiltonians_test(xyz):
         assert (k in of_hamiltonian_dict.keys())
 
     for k in of_hamiltonian_dict.keys():
-        assert np.isclose(abs(of_hamiltonian_dict[k]), abs(cqx_op_dict[k]),
-                          1e-12)
+        # Use abs() checks because the sign can mismatch and still keep the same
+        # eigenvalues. Also, see OMP_NUM_THREADS note above.
+        assert np.isclose(abs(np.real(of_hamiltonian_dict[k])),
+                          abs(np.real(cqx_op_dict[k])), 1e-12)
+        assert np.isclose(abs(np.imag(of_hamiltonian_dict[k])),
+                          abs(np.imag(cqx_op_dict[k])), 1e-12)
 
 
 def jw_molecule_test(xyz):
