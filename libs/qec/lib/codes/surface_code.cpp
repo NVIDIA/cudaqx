@@ -358,6 +358,10 @@ surface_code::surface_code(const heterogeneous_map &options) : code() {
   m_stabilizers = grid.get_spin_op_stabilizers();
   m_pauli_observables = grid.get_spin_op_observables();
 
+  // Sort now to avoid repeated sorts later.
+  sortStabilizerOps(m_stabilizers);
+  sortStabilizerOps(m_pauli_observables);
+
   operation_encodings.insert(std::make_pair(operation::x, x));
   operation_encodings.insert(std::make_pair(operation::z, z));
   operation_encodings.insert(std::make_pair(operation::cx, cx));
