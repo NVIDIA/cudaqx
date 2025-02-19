@@ -40,7 +40,11 @@ def jw_molecule_compare_hamiltonians_test(xyz):
     of_hamiltonian, data = cudaq.chemistry.create_molecular_hamiltonian(
         xyz, 'sto-3g', 1, 0)
 
-    # Compute energy using CUDA-QX
+    # Compute energy using CUDA-QX. Note you must run with
+    # OMP_NUM_THREADS=1 if you want this to be bit-for-bit repeatable.
+    # This is a PySCF limitation. With OMP_NUM_THREADS>1, the Hamiltonian
+    # coefficients will randomly toggle their signs, but the resulting
+    # eigenvalues of the Hamiltonian will still be correct.
     molecule = solvers.create_molecule(xyz, 'sto-3g', 0, 0, casci=True)
     cqx_op = solvers.jordan_wigner(
         molecule.hpq,
@@ -57,7 +61,8 @@ def jw_molecule_compare_hamiltonians_test(xyz):
         assert (k in of_hamiltonian_dict.keys())
 
     for k in of_hamiltonian_dict.keys():
-        assert np.isclose(of_hamiltonian_dict[k], cqx_op_dict[k], 1e-12)
+        assert np.isclose(abs(of_hamiltonian_dict[k]), abs(cqx_op_dict[k]),
+                          1e-12)
 
 
 def jw_molecule_test(xyz):
@@ -73,7 +78,11 @@ def jw_molecule_test(xyz):
     of_energy = np.min(np.linalg.eigvals(of_hamiltonian.to_matrix()))
     print(f'OpenFermion energy:    {of_energy.real}')
 
-    # Compute energy using CUDA-QX
+    # Compute energy using CUDA-QX. Note you must run with
+    # OMP_NUM_THREADS=1 if you want this to be bit-for-bit repeatable.
+    # This is a PySCF limitation. With OMP_NUM_THREADS>1, the Hamiltonian
+    # coefficients will randomly toggle their signs, but the resulting
+    # eigenvalues of the Hamiltonian will still be correct.
     molecule = solvers.create_molecule(xyz, 'sto-3g', 0, 0, casci=True)
     op = solvers.jordan_wigner(molecule.hpq,
                                molecule.hpqrs,
@@ -82,7 +91,6 @@ def jw_molecule_test(xyz):
     assert op == molecule.hamiltonian
     assert of_hamiltonian == molecule.hamiltonian
 
-    # FIXME - why do we need to call eigvals again if we can just assert the equality checks above?
     cudaqx_eig = np.min(np.linalg.eigvals(op.to_matrix()))
     print(f'CUDA-QX energy:        {cudaqx_eig.real}')
     assert np.isclose(cudaqx_eig, of_energy.real, atol=1e-4)
