@@ -44,6 +44,10 @@ repetition::repetition(const heterogeneous_map &options) : code() {
   Lz = Lz * cudaq::spin::i(get_num_data_qubits() - 1);
 
   m_pauli_observables.push_back(Lz);
+
+  // Sort now to avoid repeated sorts later.
+  sortStabilizerOps(m_stabilizers);
+  sortStabilizerOps(m_pauli_observables);
 }
 
 /// @brief Register the repetition code type

@@ -30,6 +30,10 @@ steane::steane(const heterogeneous_map &options) : code() {
   m_stabilizers = fromPauliWords(
       {"XXXXIII", "IXXIXXI", "IIXXIXX", "ZZZZIII", "IZZIZZI", "IIZZIZZ"});
   m_pauli_observables = fromPauliWords({"IIIIXXX", "IIIIZZZ"});
+
+  // Sort now to avoid repeated sorts later.
+  sortStabilizerOps(m_stabilizers);
+  sortStabilizerOps(m_pauli_observables);
 }
 
 /// @brief Register the Steane code type
