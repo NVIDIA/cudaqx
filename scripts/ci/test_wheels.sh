@@ -1,7 +1,7 @@
 #!/bin/sh
 
 # ============================================================================ #
-# Copyright (c) 2022 - 2024 NVIDIA Corporation & Affiliates.                   #
+# Copyright (c) 2022 - 2025 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -21,6 +21,11 @@ python_version_no_dot=$(echo $python_version | tr -d '.') # 3.10 --> 310
 python=python${python_version}
 
 ${python} -m pip install --no-cache-dir pytest
+
+# The following packages are needed for our tests. They are not true
+# dependencies for our delivered package though.
+${python} -m pip install openfermion
+${python} -m pip install openfermionpyscf
 
 # If special CUDA-Q wheels have been built for this test, install them here. This will 
 if [ -d /cudaq-wheels ]; then
