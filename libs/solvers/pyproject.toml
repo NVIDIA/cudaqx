@@ -17,8 +17,6 @@ dependencies = [
   'pyscf',
   'scipy',
   'uvicorn',
-  'openfermion',
-  'openfermionpyscf',
 ]
 classifiers = [
     'Intended Audience :: Science/Research',
