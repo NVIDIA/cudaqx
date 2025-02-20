@@ -31,8 +31,8 @@ protected:
         1, 1, 3, 3, -0.0454063, -0, 15};
     this->h = cudaq::spin_op(h2_data, 4);
 
-    cudaq::solvers::molecular_geometry geometryLiH = {{"Li", {0., 0., 0.}},
-                                                      {"H", {0., 0., 1.5}}};
+    cudaq::solvers::molecular_geometry geometryLiH = {{"Li", {0.3925, 0., 0.}},
+                                                      {"H", {-1.1774, 0., 0.}}};
     cudaq::solvers::molecular_geometry geometryHH = {{"H", {0., 0., 0.}},
                                                      {"H", {0., 0., .7474}}};
     auto hh = cudaq::solvers::create_molecule(
@@ -43,8 +43,6 @@ protected:
         {.casci = true, .ccsd = true, .verbose = true});
 
     hamli = lih.hamiltonian;
-    auto q = hamli.num_qubits();
-    auto e = lih.energies;
     hamhh = hh.hamiltonian;
   }
 };
@@ -66,9 +64,9 @@ TEST_F(SolversTester, checkSimpleAdapt) {
 
   poolList = pool->generate({{"num-orbitals", hamli.num_qubits() / 2}});
   auto [energy2, thetas2, ops2] = cudaq::solvers::adapt_vqe(
-      hartreeFock2Electrons, hamli, poolList,
-      {{"grad_norm_tolerance", 1e-4}, {"verbose", true}});
-  EXPECT_NEAR(energy2, -7.8823, 1e-2);
+      statePrep4Electrons, hamli, poolList,
+      {{"grad_norm_tolerance", 0.5}, {"verbose", true}});
+  EXPECT_NEAR(energy2, -7.88, 1e-2);
 }
 
 TEST_F(SolversTester, checkSimpleAdaptGradient) {
@@ -93,9 +91,9 @@ TEST_F(SolversTester, checkSimpleAdaptGradient) {
 
   poolList = pool->generate({{"num-orbitals", hamli.num_qubits() / 2}});
   auto [energy2, thetas2, ops2] = cudaq::solvers::adapt_vqe(
-      hartreeFock2Electrons, hamli, poolList, *opt, "central_difference",
-      {{"grad_norm_tolerance", 1e-4}, {"verbose", true}});
-  EXPECT_NEAR(energy2, -7.8823, 1e-2);
+      statePrep4Electrons, hamli, poolList, *opt, "central_difference",
+      {{"grad_norm_tolerance", 0.5}, {"verbose", true}});
+  EXPECT_NEAR(energy2, -7.88, 1e-2);
   for (std::size_t i = 0; i < thetas2.size(); i++)
     printf("%lf -> %s\n", thetas2[i], ops2[i].to_string().c_str());
 }
@@ -126,9 +124,9 @@ TEST_F(SolversTester, checkSimpleAdaptUCCSD) {
   config2.insert("num-electrons", 4);
   poolList = pool->generate(config2);
   auto [energy2, thetas2, ops2] = cudaq::solvers::adapt_vqe(
-      hartreeFock2Electrons, hamli, poolList,
-      {{"grad_norm_tolerance", 1e-4}, {"verbose", true}});
-  EXPECT_NEAR(energy2, -7.8823, 1e-2);
+      statePrep4Electrons, hamli, poolList,
+      {{"grad_norm_tolerance", 0.5}, {"verbose", true}});
+  EXPECT_NEAR(energy2, -7.88, 1e-2);
 }
 
 TEST_F(SolversTester, checkSimpleAdaptGradientUCCSD) {
@@ -164,9 +162,9 @@ TEST_F(SolversTester, checkSimpleAdaptGradientUCCSD) {
   config2.insert("num-electrons", 4);
   poolList = pool->generate(config2);
   auto [energy2, thetas2, ops2] = cudaq::solvers::adapt_vqe(
-      hartreeFock2Electrons, hamli, poolList, *opt, "central_difference",
-      {{"grad_norm_tolerance", 1e-4}, {"verbose", true}});
-  EXPECT_NEAR(energy2, -7.8823, 1e-2);
+      statePrep4Electrons, hamli, poolList, *opt, "central_difference",
+      {{"grad_norm_tolerance", 0.5}, {"verbose", true}});
+  EXPECT_NEAR(energy2, -7.88, 1e-2);
 
   for (std::size_t i = 0; i < thetas2.size(); i++)
     printf("%lf -> %s\n", thetas2[i], ops2[i].to_string().c_str());

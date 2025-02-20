@@ -1,6 +1,7 @@
 #include "cudaq.h"
 
 __qpu__ void hartreeFock2Electrons(cudaq::qvector<> &q);
+__qpu__ void statePrep4Electrons(cudaq::qvector<> &q);
 __qpu__ void ansatz(std::vector<double> theta);
 __qpu__ void ansatzNonStdSignature(double theta, int N);
 __qpu__ void callUccsdStatePrep(std::vector<double> params);

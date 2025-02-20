@@ -14,7 +14,6 @@
 #include "cudaq/solvers/adapt/adapt_simulator.h"
 #include "cudaq/solvers/vqe.h"
 
-#include <iostream>
 #include <nlohmann/json.hpp>
 
 namespace cudaq::solvers::adapt {
@@ -83,9 +82,8 @@ simulator::run(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
   // Start of with the initial |psi_n>
   cudaq::state state = get_state(adapt_kernel, numQubits, initialState, thetas,
                                  coefficients, pauliWords);
-  std::size_t count = 0;
-  while (true) {
 
+  while (true) {
     // Step 1 - compute <psi|[H,Oi]|psi> vector
     std::vector<double> gradients;
     double gradNorm = 0.0;
