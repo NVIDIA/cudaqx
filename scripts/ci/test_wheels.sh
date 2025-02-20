@@ -1,7 +1,7 @@
 #!/bin/sh
 
 # ============================================================================ #
-# Copyright (c) 2022 - 2025 NVIDIA Corporation & Affiliates.                   #
+# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -23,7 +23,7 @@ python=python${python_version}
 ${python} -m pip install --no-cache-dir pytest
 
 # The following packages are needed for our tests. They are not true
-# dependencies for our delivered package though.
+# dependencies for our delivered package.
 ${python} -m pip install openfermion
 ${python} -m pip install openfermionpyscf
 
