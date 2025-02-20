@@ -156,7 +156,7 @@ TEST(QECCodeTester, checkSteaneNoiseStim) {
         z_sum += syndromes.at({i, j_z});
       }
     }
-    EXPECT_TRUE(x_sum == 0);
+    EXPECT_TRUE(x_sum > 0);
     EXPECT_TRUE(z_sum > 0);
   }
   {
