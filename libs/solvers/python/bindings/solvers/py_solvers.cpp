@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2022 - 2023 NVIDIA Corporation & Affiliates.                  *
+ * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -589,6 +589,15 @@ Notes:
     inOptions.integrals_casscf =
         getValueOr<bool>(options, "integrals_casscf", false);
     inOptions.verbose = getValueOr<bool>(options, "verbose", false);
+
+    // We are already running in a specific Python environment. Get the fully
+    // qualified path to the executable and populate it here so that we don't
+    // accidentally use the wrong Python environment for any child processes
+    // that may be spawned.
+    inOptions.python_path = []() {
+      auto sys = py::module::import("sys");
+      return sys.attr("executable").cast<std::string>();
+    }();
 
     if (inOptions.verbose)
       inOptions.dump();

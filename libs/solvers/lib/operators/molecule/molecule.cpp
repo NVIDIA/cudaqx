@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2024 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -76,7 +76,7 @@ molecular_hamiltonian create_molecule(const molecular_geometry &geometry,
                              options.driver + ")");
   auto driver = MoleculePackageDriver::get(options.driver);
   if (!driver->is_available()) {
-    auto tearDownRoutine = driver->make_available();
+    auto tearDownRoutine = driver->make_available(options.python_path);
     if (!tearDownRoutine)
       throw std::runtime_error("invalid molecule generator.");
 
@@ -88,6 +88,7 @@ molecular_hamiltonian create_molecule(const molecular_geometry &geometry,
 
 void molecule_options::dump() {
   std::cout << "\tmolecule_options dump() [\n";
+  std::cout << "\tpython_path: " << python_path << "\n";
   std::cout << "\tfermion_to_spin: " << fermion_to_spin << "\n";
   std::cout << "\ttype: " << type << "\n";
   std::cout << "\tsymmetry: " << symmetry << "\n";

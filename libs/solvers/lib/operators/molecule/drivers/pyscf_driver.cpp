@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2022 - 2023 NVIDIA Corporation & Affiliates.                  *
+ * Copyright (c) 2022 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -59,7 +59,8 @@ public:
     return true;
   }
 
-  std::unique_ptr<tear_down> make_available() const override {
+  std::unique_ptr<tear_down>
+  make_available(const std::string &python_path) const override {
 
     // Start up the web service, if failed, return nullptr
     std::filesystem::path libPath{cudaqx::__internal__::getCUDAQXLibraryPath(
@@ -67,6 +68,8 @@ public:
     auto cudaqLibPath = libPath.parent_path();
     auto cudaqPySCFTool = cudaqLibPath.parent_path() / "bin" / "cudaq-pyscf";
     auto argString = cudaqPySCFTool.string() + " --server-mode";
+    if (!python_path.empty())
+      argString = python_path + " " + argString;
     int a0, a1;
     auto [ret, msg] = cudaqx::launchProcess(argString.c_str());
     if (ret == -1)
