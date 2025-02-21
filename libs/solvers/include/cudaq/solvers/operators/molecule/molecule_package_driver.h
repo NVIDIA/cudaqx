@@ -1,5 +1,5 @@
 /****************************************************************-*- C++ -*-****
- * Copyright (c) 2024 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -33,7 +33,10 @@ public:
   /// @brief In the case that this service is not available,
   /// make it available and return any required application shutdown
   /// routines as a new tear_down instance.
-  virtual std::unique_ptr<tear_down> make_available() const = 0;
+  /// @param python_path If a fully-qualified Python executable path name is
+  /// known, use it here.
+  virtual std::unique_ptr<tear_down>
+  make_available(const std::string &python_path = "") const = 0;
 
   /// Virtual destructor needed when deleting an instance of a derived class
   /// via a pointer to the base class.
