@@ -1,17 +1,10 @@
 # ============================================================================ #
-# Copyright (c) 2024 NVIDIA Corporation & Affiliates.                          #
+# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
-
-# FIXME This needs to be in CUDA-Q.
-add_library(cudaq::cudaq-stim-target SHARED IMPORTED)
-set_target_properties(cudaq::cudaq-stim-target PROPERTIES
-  IMPORTED_LOCATION "${CUDAQ_LIBRARY_DIR}/libnvqir-stim${CMAKE_SHARED_LIBRARY_SUFFIX}"
-  IMPORTED_SONAME "libnvqir-stim${CMAKE_SHARED_LIBRARY_SUFFIX}"
-  IMPORTED_LINK_INTERFACE_LIBRARIES "cudaq::cudaq-platform-default;cudaq::cudaq-em-default")
 
 cudaqx_set_target(stim) 
 
