@@ -118,10 +118,8 @@ sample_memory_circuit(const code &code, operation statePrep,
   cudaqx::tensor<uint8_t> syndromeTensor({numShots * numRounds, numCols});
   cudaqx::tensor<uint8_t> dataResults({numShots, numData});
 
-  cudaq::sample_options opts;
-  opts.shots = numShots;
-  opts.noise = noise;
-  opts.explicit_measurements = true;
+  cudaq::sample_options opts{
+      .shots = numShots, .noise = noise, .explicit_measurements = true};
 
   cudaq::sample_result result;
 
