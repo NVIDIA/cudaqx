@@ -15,13 +15,31 @@ namespace cudaq::solvers {
 // adapted from
 // https://github.com/mayhallgroup/adapt-vqe/blob/master/src/operator_pools.py
 
-/// @brief Test
+/// @brief spin_complement_gsd operator pool is a class which generates a pool
+/// of operators with the spin complement ground state degeneracy method for use
+/// in quantum algorithms, like Adapt-VQE.
+/// @details This class extends the operator_pool interface
+/// therefore inhers extension_point template, allowing for
+/// runtime extensibility.
 class spin_complement_gsd : public operator_pool {
 
 public:
+  /// @brief Generate a vector of spin operators based on the provided
+  /// configuration.
+  /// @param config A heterogeneous map containing configuration parameters for
+  /// operator generation.
+  /// @return A vector of cudaq::spin_op objects representing the generated
+  /// operator pool.
   std::vector<cudaq::spin_op>
   generate(const heterogeneous_map &config) const override;
+
+  /// @brief Call to macro for defining the creator function for the
+  /// spin_complement_gsd extension
+  /// @details This function is used by the extension point mechanism to create
+  /// instances of the spin_complement_gsd class.
   CUDAQ_EXTENSION_CREATOR_FUNCTION(operator_pool, spin_complement_gsd)
 };
+/// @brief Register the spin_complement_gsd extension type with the CUDA-Q
+/// framework
 CUDAQ_REGISTER_TYPE(spin_complement_gsd)
 } // namespace cudaq::solvers

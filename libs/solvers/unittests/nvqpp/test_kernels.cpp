@@ -7,6 +7,11 @@ __qpu__ void hartreeFock2Electrons(cudaq::qvector<> &q) {
     x(q[i]);
 }
 
+__qpu__ void statePrep4Electrons(cudaq::qvector<> &q) {
+  for (std::size_t i = 0; i < 4; i++)
+    x(q[i]);
+}
+
 __qpu__ void ansatz(std::vector<double> theta) {
   cudaq::qvector q(2);
   x(q[0]);
