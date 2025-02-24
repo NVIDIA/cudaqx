@@ -1,5 +1,5 @@
 /****************************************************************-*- C++ -*-****
- * Copyright (c) 2024 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -16,6 +16,12 @@
 #include <fmt/ranges.h>
 
 namespace cudaqx {
+
+// Use is_complex<T> to evaluate whether or not T is std::complex.
+template <typename T>
+struct is_complex : std::false_type {};
+template <typename T>
+struct is_complex<std::complex<T>> : std::true_type {};
 
 /// @brief An implementation of tensor_impl using xtensor library
 template <typename Scalar>
@@ -93,7 +99,7 @@ public:
     if (m_data)
       std::free(m_data);
 
-    m_data = m_data = new Scalar[size];
+    m_data = new Scalar[size];
     std::copy(d, d + size, m_data);
     m_shape = shape;
     ownsData = true;
@@ -130,7 +136,7 @@ public:
     auto x = xt::adapt(m_data, size(), xt::no_ownership(), m_shape);
     bool result;
     // For non-complex types, use regular bool casting
-    if constexpr (std::is_integral_v<Scalar>) {
+    if constexpr (!is_complex<Scalar>::value) {
       result = xt::any(x);
     }
     // For complex types, implement custom ny
@@ -257,7 +263,31 @@ public:
   Scalar *data() override { return m_data; }
   const Scalar *data() const override { return m_data; }
   void dump() const override {
-    std::cerr << xt::adapt(m_data, size(), xt::no_ownership(), m_shape) << '\n';
+    std::cout << xt::adapt(m_data, size(), xt::no_ownership(), m_shape) << '\n';
+  }
+
+  void dump_bits() const override {
+    if constexpr (is_complex<Scalar>::value) {
+      throw std::runtime_error("dump_bits() unsupported for complex types");
+    } else if (rank() == 1) {
+      // Dump bits on 1 row
+      size_t num_elements = m_shape[0];
+      for (size_t ix = 0; ix < num_elements; ix++)
+        std::cout << (m_data[ix] > 0 ? '1' : '.');
+      std::cout << '\n';
+    } else if (rank() == 2) {
+      // Dump bits as a matrix
+      size_t nr = m_shape[0];
+      size_t nc = m_shape[1];
+      size_t ix = 0;
+      for (size_t r = 0; r < nr; r++) {
+        for (size_t c = 0; c < nc; c++, ix++)
+          std::cout << (m_data[ix] > 0 ? '1' : '.');
+        std::cout << '\n';
+      }
+    } else {
+      throw std::runtime_error("dump_bits() unsupported for rank > 2");
+    }
   }
 
   static constexpr auto ScalarAsString = cudaqx::type_to_string<Scalar>();

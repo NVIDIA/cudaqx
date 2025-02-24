@@ -1,7 +1,7 @@
 #!/bin/sh
 
 # ============================================================================ #
-# Copyright (c) 2022 - 2024 NVIDIA Corporation & Affiliates.                   #
+# Copyright (c) 2022 - 2025 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -94,11 +94,11 @@ echo "Building MLIR bindings for ${python}" && \
 # ==============================================================================
 
 CUDAQ_PATCH='diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 3f2c138..ddb15b3 100644
+index 737001b56..195b2f44f 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -540,7 +540,7 @@ add_subdirectory(tools)
- add_subdirectory(utils)
+@@ -559,7 +559,7 @@ if(CUDAQ_BUILD_TESTS)
+ endif()
  
  if (CUDAQ_ENABLE_PYTHON)
 -  find_package(Python 3 COMPONENTS Interpreter Development)

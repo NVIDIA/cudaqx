@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2024 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -186,7 +186,7 @@ TEST(QECCodeTester, checkSteaneNoiseStim) {
       }
     }
     // Even though phase flip is a z error,
-    // additional hadamards in prepp can convert to x error.
+    // additional hadamards in prepp can convert to x error (first round only)
     EXPECT_TRUE(x_sum > 0);
     EXPECT_TRUE(z_sum > 0);
   }
@@ -221,7 +221,7 @@ TEST(QECCodeTester, checkSteaneNoiseStim) {
   }
 }
 
-TEST(QECCodeTester, checkSampleMemoryCircuit) {
+TEST(QECCodeTester, checkSampleMemoryCircuitStim) {
   {
     // Steane tests
     auto steane = cudaq::qec::get_code("steane");
@@ -326,7 +326,7 @@ TEST(QECCodeTester, checkSampleMemoryCircuit) {
   }
 }
 
-TEST(QECCodeTester, checkTwoQubitBitflip) {
+TEST(QECCodeTester, checkTwoQubitBitflipStim) {
   // This circuit should read out |00> with and without bitflip noise
   struct null1 {
     void operator()() __qpu__ {
@@ -380,7 +380,7 @@ TEST(QECCodeTester, checkBitflip) {
   EXPECT_TRUE(counts2.probability("0") < 0.9);
 }
 
-TEST(QECCodeTester, checkNoisySampleMemoryCircuitAndDecode) {
+TEST(QECCodeTester, checkNoisySampleMemoryCircuitAndDecodeStim) {
   {
     // Steane tests
     auto steane = cudaq::qec::get_code("steane");

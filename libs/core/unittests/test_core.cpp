@@ -1,5 +1,5 @@
-/****************************************************************-*- C++ -*-****
- * Copyright (c) 2024 NVIDIA Corporation & Affiliates.                         *
+/*******************************************************************************
+ * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -271,6 +271,20 @@ TEST(CoreTester, checkTensorSimple) {
 
     EXPECT_ANY_THROW({ t.at({2, 2, 2}); });
   }
+}
+
+TEST(TensorTest, checkBitStringConstruction) {
+  std::vector<std::string> bitstrings;
+  bitstrings.push_back("000"); // Shot 0
+  bitstrings.push_back("001"); // Shot 1
+
+  cudaqx::tensor<uint8_t> t(bitstrings);
+  EXPECT_EQ(t.at({0, 0}), 0);
+  EXPECT_EQ(t.at({0, 1}), 0);
+  EXPECT_EQ(t.at({0, 2}), 0);
+  EXPECT_EQ(t.at({1, 0}), 0);
+  EXPECT_EQ(t.at({1, 1}), 0);
+  EXPECT_EQ(t.at({1, 2}), 1);
 }
 
 // Test elementwise operations

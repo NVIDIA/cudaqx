@@ -1,5 +1,5 @@
 /****************************************************************-*- C++ -*-****
- * Copyright (c) 2024 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -12,17 +12,6 @@
 #include "cudaq/qec/code.h"
 
 namespace cudaq::qec {
-
-/// @brief Get a reference to the raw measurements from the memory circuit
-/// execution
-/// @return Reference to the vector of integers storing syndrome information
-std::vector<uint8_t> &getMemoryCircuitMeasurements();
-
-std::vector<uint8_t> &getMemoryCircuitAncillaMeasurements();
-
-std::vector<uint8_t> &getMemoryCircuitDataMeasurements();
-
-void clearRawMeasurements();
 
 /// \entry_point_kernel
 ///

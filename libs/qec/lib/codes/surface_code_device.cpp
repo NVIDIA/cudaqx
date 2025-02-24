@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2024 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -64,7 +64,7 @@ stabilizer(patch logicalQubit, const std::vector<std::size_t> &x_stabilizers,
       if (z_stabilizers[zi * logicalQubit.data.size() + di] == 1)
         cudaq::x<cudaq::ctrl>(logicalQubit.data[di], logicalQubit.ancz[zi]);
 
-  // S = (S_X, S_Z), (x flip syndromes, z flip syndrones).
+  // S = (S_X, S_Z), (x flip syndromes, z flip syndromes).
   // x flips are triggered by z-stabilizers (ancz)
   // z flips are triggered by x-stabilizers (ancx)
   auto results = mz(logicalQubit.ancz, logicalQubit.ancx);

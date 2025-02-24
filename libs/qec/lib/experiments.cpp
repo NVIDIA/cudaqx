@@ -1,12 +1,12 @@
-/****************************************************************-*- C++ -*-****
- * Copyright (c) 2024 NVIDIA Corporation & Affiliates.                         *
+/*******************************************************************************
+ * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
-#include "cudaq/qec/experiments.h"
 
+#include "cudaq/qec/experiments.h"
 #include "device/memory_circuit.h"
 
 using namespace cudaqx;
@@ -100,10 +100,6 @@ sample_memory_circuit(const code &code, operation statePrep,
   auto &stabRound =
       code.get_operation<code::stabilizer_round>(operation::stabilizer_round);
 
-  cudaq::ExecutionContext ctx("");
-  ctx.noiseModel = &noise;
-  auto &platform = cudaq::get_platform();
-
   auto parity_x = code.get_parity_x();
   auto parity_z = code.get_parity_z();
   auto numData = code.get_num_data_qubits();
@@ -122,60 +118,62 @@ sample_memory_circuit(const code &code, operation statePrep,
   cudaqx::tensor<uint8_t> syndromeTensor({numShots * numRounds, numCols});
   cudaqx::tensor<uint8_t> dataResults({numShots, numData});
 
+  cudaq::sample_options opts{
+      .shots = numShots, .noise = noise, .explicit_measurements = true};
+
+  cudaq::sample_result result;
+
   // Run the memory circuit experiment
   if (statePrep == operation::prep0 || statePrep == operation::prep1) {
     // run z basis
-    for (std::size_t shot = 0; shot < numShots; shot++) {
-      platform.set_exec_ctx(&ctx);
-      memory_circuit_mz(stabRound, prep, numData, numAncx, numAncz, numRounds,
-                        xVec, zVec);
-      platform.reset_exec_ctx();
-    }
+    result = cudaq::sample(opts, memory_circuit_mz, stabRound, prep, numData,
+                           numAncx, numAncz, numRounds, xVec, zVec);
   } else if (statePrep == operation::prepp || statePrep == operation::prepm) {
-    // run z basis
-    for (std::size_t shot = 0; shot < numShots; shot++) {
-      platform.set_exec_ctx(&ctx);
-      memory_circuit_mx(stabRound, prep, numData, numAncx, numAncz, numRounds,
-                        xVec, zVec);
-      platform.reset_exec_ctx();
-    }
+    // run x basis
+    result = cudaq::sample(opts, memory_circuit_mx, stabRound, prep, numData,
+                           numAncx, numAncz, numRounds, xVec, zVec);
   } else {
     throw std::runtime_error(
         "sample_memory_circuit_error - invalid requested state prep kernel.");
   }
 
-  auto &dataMeasures = getMemoryCircuitDataMeasurements();
-  dataResults.copy(dataMeasures.data());
+  cudaqx::tensor<uint8_t> mzTable(result.sequential_data());
+  const auto numColsBeforeData = numCols * numRounds;
 
-  // Get the raw ancilla measurments
-  auto &measurements = getMemoryCircuitAncillaMeasurements();
+  // Populate dataResults from mzTable
+  for (std::size_t shot = 0; shot < numShots; shot++) {
+    uint8_t __restrict__ *dataResultsRow = &dataResults.at({shot, 0});
+    uint8_t __restrict__ *mzTableRow = &mzTable.at({shot, 0});
+    for (std::size_t d = 0; d < numData; d++)
+      dataResultsRow[d] = mzTableRow[numColsBeforeData + d];
+  }
 
-  std::size_t numMeasRows = numShots * numRounds;
-  cudaqx::tensor<uint8_t> measuresTensor({numMeasRows, numCols});
-  measuresTensor.borrow(measurements.data());
+  // Now populate syndromeTensor.
 
   // First round, store bare syndrome measurement
   for (std::size_t shot = 0; shot < numShots; ++shot) {
-    for (std::size_t col = 0; col < numCols; ++col) {
-      std::size_t round = 0;
-      std::size_t measIdx = shot * numRounds + round;
-      syndromeTensor.at({measIdx, col}) = measuresTensor.at({measIdx, col});
-    }
+    std::size_t round = 0;
+    std::size_t measIdx = shot * numRounds + round;
+    std::uint8_t __restrict__ *syndromeTensorRow =
+        &syndromeTensor.at({measIdx, 0});
+    std::uint8_t __restrict__ *mzTableRow = &mzTable.at({shot, 0});
+    for (std::size_t col = 0; col < numCols; ++col)
+      syndromeTensorRow[col] = mzTableRow[col];
   }
 
   // After first round, store syndrome flips
-  // #pragma omp parallel for collapse(2)
-  for (std::size_t shot = 0; shot < numShots; ++shot)
-    for (std::size_t round = 1; round < numRounds; ++round)
+  for (std::size_t shot = 0; shot < numShots; ++shot) {
+    std::uint8_t __restrict__ *mzTableRow = &mzTable.at({shot, 0});
+    for (std::size_t round = 1; round < numRounds; ++round) {
+      std::size_t measIdx = shot * numRounds + round;
+      std::uint8_t __restrict__ *syndromeTensorRow =
+          &syndromeTensor.at({measIdx, 0});
       for (std::size_t col = 0; col < numCols; ++col) {
-        std::size_t measIdx = shot * numRounds + round;
-        std::size_t prevMeasIdx = shot * numRounds + (round - 1);
-        syndromeTensor.at({measIdx, col}) =
-            measuresTensor.at({measIdx, col}) ^
-            measuresTensor.at({prevMeasIdx, col});
+        syndromeTensorRow[col] = mzTableRow[round * numCols + col] ^
+                                 mzTableRow[(round - 1) * numCols + col];
       }
-
-  clearRawMeasurements();
+    }
+  }
 
   // Return the data.
   return std::make_tuple(syndromeTensor, dataResults);
