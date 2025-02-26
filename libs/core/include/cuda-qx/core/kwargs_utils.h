@@ -7,7 +7,7 @@
  ******************************************************************************/
 #pragma once
 
-#include "cuda-qx/core/heterogeneous_map.h"
+#include "cuda-qx/core/tensor.h"
 #include "pybind11/numpy.h"
 #include "pybind11/pybind11.h"
 
@@ -70,5 +70,21 @@ inline heterogeneous_map hetMapFromKwargs(const py::kwargs &kwargs) {
   }
 
   return result;
+}
+
+template <typename T>
+tensor<T> toTensor(const py::array_t<T> &H) {
+  py::buffer_info buf = H.request();
+
+  // Create a vector of the array dimensions
+  std::vector<std::size_t> shape;
+  for (py::ssize_t d : buf.shape) {
+    shape.push_back(static_cast<std::size_t>(d));
+  }
+
+  // Create a tensor and borrow the NumPy array data
+  cudaqx::tensor<T> tensor_H(shape);
+  tensor_H.borrow(static_cast<T *>(buf.ptr), shape);
+  return tensor_H;
 }
 } // namespace cudaqx
