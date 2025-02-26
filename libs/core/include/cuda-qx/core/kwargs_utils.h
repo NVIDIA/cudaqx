@@ -7,6 +7,7 @@
  ******************************************************************************/
 #pragma once
 
+#include "cuda-qx/core/heterogeneous_map.h"
 #include "cuda-qx/core/tensor.h"
 #include "pybind11/numpy.h"
 #include "pybind11/pybind11.h"
