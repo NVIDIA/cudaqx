@@ -134,8 +134,31 @@ html_static_path = ['@SPHINX_SOURCE@/_static']
 # Output file base name for HTML help builder.
 htmlhelp_basename = 'cudaqxDoc'
 
+# A table of string replacements to apply to docs. These strings are unnecessary
+# implementation details that add noise to the documentation.
+doc_replacements = (
+    ('_pycudaqx_qec_the_suffix_matters_cudaq_qec.qecrt.', ''),
+    ('mlir._mlir_libs._quakeDialects.cudaq_runtime.', ''),
+)
+
+def fix_string(input):
+    """Fixes a string by applying the replacements in `doc_replacements`"""
+    if not isinstance(input, str):
+        return input
+    for old, new in doc_replacements:
+        input = input.replace(old, new)
+    return input
+
+def process_signature(app, what, name, obj, options, signature, return_annotation):
+    return (fix_string(signature), fix_string(return_annotation))
+
+def process_docstring(app, what, name, obj, options, lines):
+    for i, line in enumerate(lines):
+        lines[i] = fix_string(line)
 
 def setup(app):
+    app.connect('autodoc-process-signature', process_signature)
+    app.connect('autodoc-process-docstring', process_docstring)
     app.add_css_file('cudaq_override.css')
 
 
