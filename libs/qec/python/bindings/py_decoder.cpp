@@ -157,10 +157,10 @@ void bindDecoder(py::module &mod) {
           },
           "Asynchronously decode the given syndrome", py::arg("syndrome"))
       .def(
-          "decode_multi",
+          "decode_batch",
           [](decoder &decoder,
              const std::vector<std::vector<float_t>> &syndrome) {
-            return decoder.decode_multi(syndrome);
+            return decoder.decode_batch(syndrome);
           },
           "Decode multiple syndromes and return the results",
           py::arg("syndrome"))

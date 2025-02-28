@@ -30,9 +30,9 @@ def test_decoder_initialization():
 
 
 def test_decoder_api():
-    # Test decode_multi
+    # Test decode_batch
     decoder = qec.get_decoder('example_byod', H)
-    result = decoder.decode_multi(
+    result = decoder.decode_batch(
         [create_test_syndrome(), create_test_syndrome()])
     assert len(result) == 2
     for r in result:

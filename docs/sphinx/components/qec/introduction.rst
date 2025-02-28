@@ -500,7 +500,7 @@ The decoder base class defines the core interface for syndrome decoding:
         virtual decoder_result decode(
             const std::vector<float_t>& syndrome) = 0;
 
-        virtual std::vector<decoder_result> decode_multi(
+        virtual std::vector<decoder_result> decode_batch(
             const std::vector<std::vector<float_t>>& syndrome);
     };
 
