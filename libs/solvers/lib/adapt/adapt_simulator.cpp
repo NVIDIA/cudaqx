@@ -14,7 +14,6 @@
 #include "cudaq/solvers/adapt/adapt_simulator.h"
 #include "cudaq/solvers/vqe.h"
 
-#include <iostream>
 #include <nlohmann/json.hpp>
 
 namespace cudaq::solvers::adapt {
@@ -51,9 +50,21 @@ simulator::run(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
   std::size_t remainder = total_elements % numRanks;
   std::size_t start = rank * elements_per_rank + std::min(rank, remainder);
   std::size_t end = start + elements_per_rank + (rank < remainder ? 1 : 0);
-  for (int i = start; i < end; i++) {
-    auto op = pool[i];
-    commutators.emplace_back(H * op - op * H);
+
+  // Check if operator has only imaginary coefficients
+  // checking the first one is enough, we assume the pool is homogeneous
+  const auto &c = pool[0].begin()->get_coefficient();
+  bool isImaginary = (c.real() == 0.0 && c.imag() != 0.0);
+
+  if (!isImaginary) {
+    for (auto &op : pool) {
+      auto pool_item = std::complex<double>{0.0, 1.0} * op;
+      commutators.push_back(H * pool_item - pool_item * H);
+    }
+  } else {
+    for (auto &op : pool) {
+      commutators.push_back(H * op - op * H);
+    }
   }
 
   nlohmann::json initInfo = {{"num-qpus", numQpus},
@@ -71,9 +82,8 @@ simulator::run(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
   // Start of with the initial |psi_n>
   cudaq::state state = get_state(adapt_kernel, numQubits, initialState, thetas,
                                  coefficients, pauliWords);
-  std::size_t count = 0;
-  while (true) {
 
+  while (true) {
     // Step 1 - compute <psi|[H,Oi]|psi> vector
     std::vector<double> gradients;
     double gradNorm = 0.0;
@@ -145,6 +155,8 @@ simulator::run(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
 
     // Use the operator from the pool
     auto op = pool[maxOpIdx];
+    if (!isImaginary)
+      op = std::complex<double>{0.0, 1.0} * pool[maxOpIdx];
     chosenOps.push_back(op);
     thetas.push_back(0.0);
     for (auto o : op) {
