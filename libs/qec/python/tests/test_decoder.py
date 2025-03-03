@@ -1,5 +1,5 @@
 # ============================================================================ #
-# Copyright (c) 2024 NVIDIA Corporation & Affiliates.                          #
+# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -30,9 +30,9 @@ def test_decoder_initialization():
 
 
 def test_decoder_api():
-    # Test decode_multi
+    # Test decode_batch
     decoder = qec.get_decoder('example_byod', H)
-    result = decoder.decode_multi(
+    result = decoder.decode_batch(
         [create_test_syndrome(), create_test_syndrome()])
     assert len(result) == 2
     for r in result:
@@ -71,6 +71,41 @@ def test_decoder_plugin_initialization():
     decoder = qec.get_decoder('single_error_lut_example', H)
     assert decoder is not None
     assert hasattr(decoder, 'decode')
+
+
+def test_decoder_plugin_initialization_with_double_vec():
+    vec = np.array([1, 2, 3], dtype=np.float64)
+    decoder = qec.get_decoder('single_error_lut_example', H, vec=vec)
+    assert decoder is not None
+    assert hasattr(decoder, 'decode')
+
+
+def test_decoder_plugin_initialization_with_float_vec():
+    vec = np.array([1, 2, 3], dtype=np.float32)
+    decoder = qec.get_decoder('single_error_lut_example', H, vec=vec)
+    assert decoder is not None
+    assert hasattr(decoder, 'decode')
+
+
+def test_decoder_plugin_initialization_with_uint8_vec():
+    vec = np.array([1, 2, 3], dtype=np.uint8)
+    decoder = qec.get_decoder('single_error_lut_example', H, vec=vec)
+    assert decoder is not None
+    assert hasattr(decoder, 'decode')
+
+
+def test_decoder_plugin_initialization_with_int32_vec():
+    vec = np.array([1, 2, 3], dtype=np.int32)
+    decoder = qec.get_decoder('single_error_lut_example', H, vec=vec)
+    assert decoder is not None
+    assert hasattr(decoder, 'decode')
+
+
+def test_decoder_plugin_initialization_with_int16_vec():
+    vec = np.array([1, 2, 3], dtype=np.int16)
+    with pytest.raises(RuntimeError) as e:
+        decoder = qec.get_decoder('single_error_lut_example', H, vec=vec)
+    assert "Unsupported array data type" in repr(e)
 
 
 def test_decoder_plugin_result_structure():
