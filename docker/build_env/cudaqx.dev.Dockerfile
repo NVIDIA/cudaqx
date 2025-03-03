@@ -19,6 +19,8 @@ RUN apt-get update && apt-get install -y gfortran libblas-dev jq cuda-nvtx-12-0 
 
 COPY .cudaq_version /cudaq_version
 
+ENV CUDAQ_INSTALL_PREFIX=/usr/local/cudaq
+
 RUN mkdir -p /workspaces/cudaq && cd /workspaces/cudaq \
   && git init \
   && CUDAQ_REPO=$(jq -r '.cudaq.repository' /cudaq_version) \
@@ -30,5 +32,5 @@ RUN mkdir -p /workspaces/cudaq && cd /workspaces/cudaq \
   && rm -rf build
 
 #RUN mkdir -p /workspaces/cudaqx && cd /workspaces/cudaqx \
-#  && ~/.local/bin/cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DCUDAQ_DIR=~/.cudaq/lib/cmake/cudaq .. \
+#  && ~/.local/bin/cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DCUDAQ_DIR=/usr/local/cudaq/lib/cmake/cudaq .. \
 #  && ninja install

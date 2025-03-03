@@ -77,7 +77,7 @@ jobs:
       - name: Build CUDA-QX wheels
         run: |
           .github/workflows/scripts/build_wheels.sh \
-              --cudaq-prefix $HOME/.cudaq \
+              --cudaq-prefix /usr/local/cudaq \
               --build-type ${{ inputs.build_type }} \
               --python-version ${{ matrix.python }}
 
