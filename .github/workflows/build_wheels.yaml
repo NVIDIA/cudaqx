@@ -71,6 +71,8 @@ jobs:
           set-safe-directory: true
 
       - name: Build CUDAQ toolchain
+        env: 
+          CUDAQ_INSTALL_PREFIX: /usr/local/cudaq
         run: |
           .github/workflows/scripts/build_cudaq.sh --python-version ${{ matrix.python }}
 
