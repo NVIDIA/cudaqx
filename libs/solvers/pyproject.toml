@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "cudaq-solvers"
-version = "0.2.0"
+dynamic = ["version"]
 description = "Accelerated libraries for quantum-classical solvers built on CUDA-Q"
 authors = [{name = "NVIDIA Corporation & Affiliates"}]
 maintainers = [{name = "NVIDIA Corporation & Affiliates"}]
