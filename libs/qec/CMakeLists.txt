@@ -149,3 +149,37 @@ if (CUDAQX_QEC_INCLUDE_TESTS)
   endif()
   add_subdirectory(unittests)
 endif()
+
+# Making an external decoder available inside wheel. This will modify the rpath
+# of any .so files provided.
+function(add_target_libs_to_wheel decoder_lib)
+  if (NOT EXISTS "${decoder_lib}")
+    message(FATAL_ERROR "Invalid file path to external decoder: ${decoder_lib}.")
+  endif()
+  message(STATUS "Installing external decoder '${decoder_lib}'")
+  # Patch the file's rpath during configuration time
+  execute_process(
+    COMMAND patchelf --set-rpath $ORIGIN/.. "${decoder_lib}"
+    RESULT_VARIABLE patchelf_result
+    OUTPUT_VARIABLE patchelf_output
+    ERROR_VARIABLE patchelf_error
+  )
+  if (NOT patchelf_result EQUAL 0)
+    message(FATAL_ERROR "Failed to patch rpath on ${decoder_lib}: ${patchelf_error}")
+  endif()
+  message(STATUS "Successfully patched rpath on ${decoder_lib}")
+  install(FILES ${decoder_lib}
+          DESTINATION cudaq_qec/lib/decoder-plugins
+          COMPONENT qec-lib-plugins)
+endfunction()
+
+if(NOT QEC_EXTERNAL_DECODERS)
+  SET(QEC_EXTERNAL_DECODERS $ENV{QEC_EXTERNAL_DECODERS})
+endif()
+
+if (QEC_EXTERNAL_DECODERS)
+  while(QEC_EXTERNAL_DECODERS)
+    list(POP_FRONT QEC_EXTERNAL_DECODERS LIB_FILE)
+    add_target_libs_to_wheel(${LIB_FILE})
+  endwhile()
+endif()
