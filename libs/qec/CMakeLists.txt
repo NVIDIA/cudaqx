@@ -150,8 +150,10 @@ if (CUDAQX_QEC_INCLUDE_TESTS)
   add_subdirectory(unittests)
 endif()
 
-# Making an external decoder available inside wheel. This will modify the rpath
-# of any .so files provided.
+# External decoder setup
+# ==============================================================================
+# Make an external decoder available inside wheel. This will modify the rpath of
+# any .so files provided.
 function(add_target_libs_to_wheel decoder_lib)
   if (NOT EXISTS "${decoder_lib}")
     message(FATAL_ERROR "Invalid file path to external decoder: ${decoder_lib}.")
@@ -169,7 +171,7 @@ function(add_target_libs_to_wheel decoder_lib)
   endif()
   message(STATUS "Successfully patched rpath on ${decoder_lib}")
   install(FILES ${decoder_lib}
-          DESTINATION cudaq_qec/lib/decoder-plugins
+          DESTINATION ${CMAKE_INSTALL_LIBDIR}/decoder-plugins
           COMPONENT qec-lib-plugins)
 endfunction()
 
