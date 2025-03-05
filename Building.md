@@ -22,7 +22,7 @@ Then inside the container...
 
 ```bash
 # Then inside the container
-export CUDAQ_INSTALL_PREFIX=~/.cudaq
+export CUDAQ_INSTALL_PREFIX=/usr/local/cudaq
 export CUDAQX_INSTALL_PREFIX=~/.cudaqx
 cd /workspaces
 
