@@ -4,14 +4,14 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "cudaq-solvers"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Accelerated libraries for quantum-classical solvers built on CUDA-Q"
 authors = [{name = "NVIDIA Corporation & Affiliates"}]
 maintainers = [{name = "NVIDIA Corporation & Affiliates"}]
 requires-python = ">=3.10"
 readme = "README.md"
 dependencies = [
-  'cuda-quantum-cu12 >= 0.9',
+  'cuda-quantum-cu12 >= 0.10',
   'fastapi',
   'networkx',
   'pyscf',
@@ -38,6 +38,7 @@ Documentation = "https://nvidia.github.io/cudaqx/components/solvers/introduction
 Repository = "https://github.com/NVIDIA/cudaqx"
 
 [tool.scikit-build]
+metadata.version.provider = "scikit_build_core.metadata.setuptools_scm"
 build-dir = "_skbuild"
 build.verbose = true
 cmake.version = ">=3.28"
@@ -50,3 +51,6 @@ ninja.version = ">=1.10"
 [tool.scikit-build.cmake.define]
 CUDAQX_SOLVERS_INCLUDE_TESTS = false
 CUDAQX_SOLVERS_BINDINGS_PYTHON = true
+
+[tool.setuptools_scm]
+write_to = "_version.py"

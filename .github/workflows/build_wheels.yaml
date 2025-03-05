@@ -11,6 +11,10 @@ on:
         options:
         - 'Release'
         - 'Debug'
+      version:
+        type: string
+        description: Version number to create wheels with (e.g. 0.2.0). Defaults to 0.0.0 if unspecified
+        required: false
       cudaq_wheels:
         type: choice
         required: true
@@ -19,6 +23,14 @@ on:
         options:
         - 'Custom'
         - 'PyPI'
+      assets_repo:
+        type: string
+        description: Retrieve assets from a draft release from this repo (e.g. NVIDIA/cudaqx)
+        required: false
+      assets_tag:
+        type: string
+        description: Retrieve assets from a draft release with this tag (e.g. installed_files-1)
+        required: false
       artifacts_from_run:
         type: string
         description: Optional argument to take artifacts from a prior run of this workflow; facilitates rerunning a failed workflow without re-building the artifacts.
@@ -38,9 +50,7 @@ jobs:
     # FIXME: there is no guarantee that this CUDA-Q image aligns with the CUDA-Q
     # commit that we are trying to align with.
     container: ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ matrix.platform }}-${{ matrix.toolchain.id }}-main
-    permissions:
-      actions: write
-      contents: read
+    permissions: write-all
     strategy:
       fail-fast: false
       matrix:
@@ -57,6 +67,19 @@ jobs:
         uses: actions/checkout@v4
         with:
           set-safe-directory: true
+
+      # Do this early to help validate user inputs (if present)
+      - name: Fetch assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        id: fetch-assets
+        run: |
+          bash .github/workflows/scripts/install_git_cli.sh
+          if [[ -n "${{ inputs.assets_repo }}" ]] && [[ -n "${{ inputs.assets_tag }}" ]]; then
+            # Fetch the assets into this directory
+            gh release download -R ${{ inputs.assets_repo }} ${{ inputs.assets_tag }}
+            ls
+          fi
 
       - name: Get required CUDAQ version
         id: get-cudaq-version
@@ -75,11 +98,21 @@ jobs:
           .github/workflows/scripts/build_cudaq.sh --python-version ${{ matrix.python }}
 
       - name: Build CUDA-QX wheels
+        env:
+          SUFFIX: ${{ matrix.platform == 'amd64' && 'x86_64' || 'aarch64' }}
         run: |
+          if [[ -n "${{ inputs.assets_repo }}" ]] && [[ -n "${{ inputs.assets_tag }}" ]]; then
+            # Extract the decoder that needs to be embedded in the wheel
+            mkdir -p tmp
+            PYVER=$(echo ${{ matrix.python }} | tr -d '.')
+            unzip -d tmp cudaq_qec-*-cp${PYVER}-cp${PYVER}-manylinux*${SUFFIX}*.whl
+            export QEC_EXTERNAL_DECODERS=$(pwd)/tmp/cudaq_qec/lib/decoder-plugins/libcudaq-qec-nv-qldpc-decoder.so
+          fi
           .github/workflows/scripts/build_wheels.sh \
               --cudaq-prefix /usr/local/cudaq \
               --build-type ${{ inputs.build_type }} \
-              --python-version ${{ matrix.python }}
+              --python-version ${{ matrix.python }} \
+              --version ${{ inputs.version || '0.0.0' }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

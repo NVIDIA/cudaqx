@@ -24,6 +24,8 @@ show_help() {
     echo "  --devdeps         Build wheels suitable for internal testing"
     echo "                    (not suitable for distribution but sometimes"
     echo "                    helpful for debugging)"
+    echo "  --version         Specify version of wheels to produce"
+    echo "                    (default: 0.0.0)"
 }
 
 parse_options() {
@@ -60,6 +62,15 @@ parse_options() {
                 devdeps=true
                 shift 1
                 ;;
+            --version)
+                if [[ -n "$2" && "$2" != -* ]]; then
+                    wheels_version=("$2")
+                    shift 2
+                else
+                    echo "Error: Argument for $1 is missing" >&2
+                    exit 1
+                fi
+                ;;
             -*)
                 echo "Error: Unknown option $1" >&2
                 show_help
@@ -79,11 +90,12 @@ cudaq_prefix=$HOME/.cudaq
 build_type=Release
 python_version=3.10
 devdeps=false
+wheels_version=0.0.0
 
 # Parse options
 parse_options "$@"
 
-echo "Building in $build_type mode for Python $python_version"
+echo "Building in $build_type mode for Python $python_version, version $wheels_version"
 
 # ==============================================================================
 # Helpers
@@ -102,6 +114,7 @@ fi
 
 export CC=gcc
 export CXX=g++
+export SETUPTOOLS_SCM_PRETEND_VERSION=$wheels_version
 
 # ==============================================================================
 # QEC library
