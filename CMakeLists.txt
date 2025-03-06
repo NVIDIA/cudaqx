@@ -166,3 +166,17 @@ foreach(lib ${CUDAQX_ENABLE_LIBS})
   add_subdirectory(libs/${lib})
 endforeach()
 
+
+# Custom targets
+# ==============================================================================
+set(ZIP_OUTPUT "${CMAKE_BINARY_DIR}/installed_files.zip")
+
+# Custom target to zip up installed files. The resulting zip file can be used to
+# overlay CUDA-QX files into a separate (already existing) CUDA-Q install
+# directory.
+add_custom_target(zip_installed_files
+    COMMAND bash -c "sed 's#^${CMAKE_INSTALL_PREFIX}/##' ${CMAKE_BINARY_DIR}/install_manifest.txt | zip -@ '${ZIP_OUTPUT}'"
+    WORKING_DIRECTORY "${CMAKE_INSTALL_PREFIX}"
+    COMMENT "Creating zip archive of installed files"
+    VERBATIM
+)

@@ -24,8 +24,8 @@
 #include "cudaq/solvers/operators/molecule/fermion_compiler.h"
 #include "cudaq/solvers/operators/operator_pool.h"
 
-#include "bindings/utils/kwargs_utils.h"
 #include "bindings/utils/type_casters.h"
+#include "cuda-qx/core/kwargs_utils.h"
 
 namespace py = pybind11;
 

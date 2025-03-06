@@ -126,7 +126,7 @@ public:
   /// @returns 2-D vector of size `N` x `block_size` with soft probabilities of
   /// errors in each index.
   virtual std::vector<decoder_result>
-  decode_multi(const std::vector<std::vector<float_t>> &syndrome);
+  decode_batch(const std::vector<std::vector<float_t>> &syndrome);
 
   /// @brief This `get` overload supports default values.
   static std::unique_ptr<decoder>

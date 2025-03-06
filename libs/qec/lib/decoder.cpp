@@ -46,7 +46,7 @@ decoder_result decoder::decode(const cudaqx::tensor<uint8_t> &syndrome) {
 // Provide a trivial implementation of the multi-syndrome decoder. Child classes
 // should override this if they can do it more efficiently than this.
 std::vector<decoder_result>
-decoder::decode_multi(const std::vector<std::vector<float_t>> &syndrome) {
+decoder::decode_batch(const std::vector<std::vector<float_t>> &syndrome) {
   std::vector<decoder_result> result;
   result.reserve(syndrome.size());
   for (auto &s : syndrome)

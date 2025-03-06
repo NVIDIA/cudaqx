@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2022 - 2023 NVIDIA Corporation & Affiliates.                  *
+ * Copyright (c) 2022 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -13,8 +13,8 @@
 #include "cudaq/solvers/observe_gradient.h"
 #include "cudaq/solvers/optimizer.h"
 
-#include "bindings/utils/kwargs_utils.h"
 #include "bindings/utils/type_casters.h"
+#include "cuda-qx/core/kwargs_utils.h"
 
 namespace py = pybind11;
 
