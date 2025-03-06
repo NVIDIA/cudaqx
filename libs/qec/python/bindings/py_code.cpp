@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2022 - 2023 NVIDIA Corporation & Affiliates.                  *
+ * Copyright (c) 2022 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -17,8 +17,8 @@
 
 #include "cudaq/qec/experiments.h"
 
+#include "cuda-qx/core/kwargs_utils.h"
 #include "type_casters.h"
-#include "utils.h"
 
 namespace py = pybind11;
 using namespace cudaqx;

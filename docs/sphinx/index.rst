@@ -25,8 +25,8 @@ solvers.
    :maxdepth: 2
    :caption: Examples
 
-   examples_rst/solvers/examples
    examples_rst/qec/examples
+   examples_rst/solvers/examples
 
 .. toctree::
    :maxdepth: 1

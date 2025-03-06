@@ -87,7 +87,7 @@ TEST(SampleDecoder, checkAPI) {
   // Test the move constructor and move assignment operator
 
   // Multi test
-  auto dec_results = d->decode_multi({syndromes, syndromes});
+  auto dec_results = d->decode_batch({syndromes, syndromes});
   ASSERT_EQ(dec_results.size(), 2);
   for (auto &m : dec_results)
     for (auto x : m.result)

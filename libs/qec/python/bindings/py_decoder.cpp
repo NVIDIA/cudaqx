@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2022 - 2023 NVIDIA Corporation & Affiliates.                  *
+ * Copyright (c) 2022 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -16,8 +16,8 @@
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/plugin_loader.h"
 
+#include "cuda-qx/core/kwargs_utils.h"
 #include "type_casters.h"
-#include "utils.h"
 
 namespace py = pybind11;
 using namespace cudaqx;
@@ -157,10 +157,10 @@ void bindDecoder(py::module &mod) {
           },
           "Asynchronously decode the given syndrome", py::arg("syndrome"))
       .def(
-          "decode_multi",
+          "decode_batch",
           [](decoder &decoder,
              const std::vector<std::vector<float_t>> &syndrome) {
-            return decoder.decode_multi(syndrome);
+            return decoder.decode_batch(syndrome);
           },
           "Decode multiple syndromes and return the results",
           py::arg("syndrome"))
