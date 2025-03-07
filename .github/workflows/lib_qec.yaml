@@ -97,7 +97,7 @@ jobs:
 
       - name: Debug Python Path and Version
         run: |
-          export PYTHONPATH="/cudaq-install/cudaq:$PYTHONPATH"
+          export PYTHONPATH="$PYTHONPATH:/cudaq-install/cudaq"
           echo "Python version:"
           python3 --version
           echo "Python sys.path:"

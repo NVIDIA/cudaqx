@@ -9,7 +9,7 @@
 # ============================================================================ #
 
 # Set PATH
-export PYTHONPATH="/cudaq-install/cudaq:$PYTHONPATH"
+export PYTHONPATH="$PYTHONPATH:/cudaq-install/cudaq"
 export PATH="/cudaq-install/bin:$PATH"
 echo "Setting PYTHONPATH=$PYTHONPATH"
 
