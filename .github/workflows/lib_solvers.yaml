@@ -90,4 +90,4 @@ jobs:
       # ========================================================================
 
       - name: Run example tests
-        run: bash scripts/ci/test_example.sh solvers
+        run: bash scripts/ci/test_examples.sh solvers
