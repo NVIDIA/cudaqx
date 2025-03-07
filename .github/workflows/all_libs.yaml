@@ -98,5 +98,5 @@ jobs:
           echo "PATH=$PATH"
 
       - name: Run example tests
-        run: ./.github/workflows/scripts/run_example.sh all 
+        run: ./scripts/ci/test_example.sh all 
 

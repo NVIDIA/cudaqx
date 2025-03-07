@@ -81,3 +81,10 @@ jobs:
       - name: Run Python tests
         run: cmake --build ${{ steps.build.outputs.build-dir }} --target run_python_tests
 
+      # ========================================================================
+      # Run example tests
+      # ========================================================================
+
+      - name: Run example tests
+        run: ./scripts/ci/test_example.sh qec
+
