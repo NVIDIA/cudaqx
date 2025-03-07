@@ -84,7 +84,22 @@ jobs:
       # ========================================================================
       # Run example tests
       # ========================================================================
+      - name: Get some debug info
+        run: |
+          echo "Current Directory: $(pwd)"
+          echo "Checking if scripts directory exists:"
+          ls -l scripts/ci || echo "scripts/ci directory not found"
 
+          echo "Checking if test_examples.sh exists:"
+          ls -l scripts/ci/test_examples.sh || echo "test_examples.sh not found"
+
+          echo "Checking absolute path:"
+          if [ -f "$GITHUB_WORKSPACE/scripts/ci/test_examples.sh" ]; then
+              echo "test_examples.sh found at $GITHUB_WORKSPACE/scripts/ci/test_examples.sh"
+          else
+              echo "test_examples.sh still not found"
+          fi
+          
       - name: Run example tests
         run: bash scripts/ci/test_example.sh qec
 
