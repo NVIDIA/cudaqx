@@ -67,9 +67,9 @@ jobs:
       # ========================================================================
       # Run tests
       # ========================================================================
-      #
-      # - name: Run tests
-      #   run: cmake --build ${{ steps.build.outputs.build-dir }} --target run_tests
+      
+      - name: Run tests
+        run: cmake --build ${{ steps.build.outputs.build-dir }} --target run_tests
 
       # ========================================================================
       # Run python tests
@@ -78,46 +78,12 @@ jobs:
       - name: Install python requirements
         run: pip install numpy pytest cupy-cuda12x cuquantum-python-cu12
 
-      # - name: Run Python tests
-      #   run: cmake --build ${{ steps.build.outputs.build-dir }} --target run_python_tests
+      - name: Run Python tests
+        run: cmake --build ${{ steps.build.outputs.build-dir }} --target run_python_tests
 
       # ========================================================================
       # Run example tests
       # ========================================================================
-
-      - name: Find nvq++ installation
-        run: |
-          echo "Checking nvq++ location..."
-          find / -name "nvq++" 2>/dev/null | head -n 20
-
-      - name: Verify nvq++ availability
-        run: |
-          export PATH="/cudaq-install/bin:$PATH" 
-          which nvq++ || echo "nvq++ not found in PATH"
-
-      - name: Debug Python Path and Version
-        run: |
-          echo "Python version:"
-          python3 --version
-
-          echo "Checking contents of /cudaq-install:"
-          ls -l /cudaq-install 
-
-          echo "Trying PYTHONPATH=/cudaq-install:~/.cudaqx..."
-          export PYTHONPATH="/cudaq-install:$HOME/.cudaqx"
-          echo "Python sys.path after setting PYTHONPATH=/cudaq-install:~/.cudaqx:"
-          python3 -c "import sys; print('\n'.join(sys.path))"
-          echo "Trying to import cudaq_qec..."
-          if python3 -c "import cudaq_qec" 2>/dev/null; then
-              echo "Successfully imported cudaq with PYTHONPATH=/cudaq-install:~/.cudaqx."
-              exit 0
-          fi
-
-          # If both failed, print final sys.path and exit with error
-          echo "cudaq still not found. Final sys.path:"
-          python3 -c "import sys; print('\n'.join(sys.path))"
-          exit 1
-
 
       - name: Run example tests
         run: bash scripts/ci/test_examples.sh qec
