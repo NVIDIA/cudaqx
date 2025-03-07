@@ -92,16 +92,18 @@ jobs:
 
       - name: Verify nvq++ availability
         run: |
+          export PATH="/cudaq-install/bin:$PATH" 
           which nvq++ || echo "nvq++ not found in PATH"
 
       - name: Debug Python Path and Version
         run: |
+          export PYTHONPATH="/cudaq-install/cudaq:$PYTHONPATH"
           echo "Python version:"
           python3 --version
-          echo "Python executable location:"
-          which python3
           echo "Python sys.path:"
           python3 -c "import sys; print('\n'.join(sys.path))"
+          echo "Trying to import cudaq..."
+          python3 -c "import cudaq; print('Successfully imported cudaq')"
 
 
 
