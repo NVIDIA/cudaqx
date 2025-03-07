@@ -85,3 +85,18 @@ jobs:
       - name: Run Python tests
         run: cmake --build ${{ steps.build.outputs.build-dir }} --target run_python_tests
 
+      # ========================================================================
+      # Run example tests
+      # ========================================================================
+ 
+      - name: Get PATH in this environment
+        run: |
+          echo "Checking CUDAQ installation..."
+          find / -name "cudaq" 2>/dev/null | head -n 20
+          echo "Checking environment variables..."
+          echo "PYTHONPATH=$PYTHONPATH"
+          echo "PATH=$PATH"
+
+      - name: Run example tests
+        run: ./.github/workflows/scripts/run_example.sh all 
+
