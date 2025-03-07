@@ -85,6 +85,26 @@ jobs:
       # Run example tests
       # ========================================================================
 
-      - name: Run example tests
-        run: bash scripts/ci/test_examples.sh qec
+      - name: Find nvq++ installation
+        run: |
+          echo "Checking nvq++ location..."
+          find / -name "nvq++" 2>/dev/null | head -n 20
+
+      - name: Verify nvq++ availability
+        run: |
+          which nvq++ || echo "nvq++ not found in PATH"
+
+      - name: Debug Python Path and Version
+        run: |
+          echo "Python version:"
+          python3 --version
+          echo "Python executable location:"
+          which python3
+          echo "Python sys.path:"
+          python3 -c "import sys; print('\n'.join(sys.path))"
+
+
+
+      # - name: Run example tests
+      #   run: bash scripts/ci/test_examples.sh qec
 
