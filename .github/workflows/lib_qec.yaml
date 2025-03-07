@@ -97,27 +97,35 @@ jobs:
 
       - name: Debug Python Path and Version
         run: |
-          # export PYTHONPATH="$PYTHONPATH:/cudaq-install/cudaq"
           echo "Python version:"
           python3 --version
-          echo "Python sys.path:"
+
+          echo "Checking contents of /cudaq-install:"
+          ls -l /cudaq-install 
+
+          # Attempt 1: Set PYTHONPATH to /cudaq-install only
+          echo "Trying PYTHONPATH=/cudaq-install..."
+          export PYTHONPATH="/cudaq-install"
+          echo "Python sys.path after setting PYTHONPATH=/cudaq-install:"
           python3 -c "import sys; print('\n'.join(sys.path))"
-
-          export PYTHONPATH="$PYTHONPATH:$HOME/.cudaqx"
-          echo "Trying to import cudaq after appending to PYTHONPATH..."
+          echo "Trying to import cudaq..."
           if python3 -c "import cudaq" 2>/dev/null; then
-              echo "Successfully imported cudaq with appended PYTHONPATH."
+              echo "Successfully imported cudaq with PYTHONPATH=/cudaq-install."
               exit 0
           fi
 
-          echo " Appending didn't work. Trying to prepend cudaqx path..."
-          export PYTHONPATH="$HOME/.cudaqx:$PYTHONPATH"
-          echo "Trying to import cudaq again..."
+          # Attempt 2: Set PYTHONPATH to /cudaq-install:~/.cudaqx
+          echo "cudaq not found. Trying PYTHONPATH=/cudaq-install:~/.cudaqx..."
+          export PYTHONPATH="/cudaq-install:$HOME/.cudaqx"
+          echo "Python sys.path after setting PYTHONPATH=/cudaq-install:~/.cudaqx:"
+          python3 -c "import sys; print('\n'.join(sys.path))"
+          echo "Trying to import cudaq..."
           if python3 -c "import cudaq" 2>/dev/null; then
-              echo "Successfully imported cudaq with prepended PYTHONPATH."
+              echo "Successfully imported cudaq with PYTHONPATH=/cudaq-install:~/.cudaqx."
               exit 0
           fi
 
+          # If both failed, print final sys.path and exit with error
           echo "cudaq still not found. Final sys.path:"
           python3 -c "import sys; print('\n'.join(sys.path))"
           exit 1
