@@ -86,5 +86,5 @@ jobs:
       # ========================================================================
 
       - name: Run example tests
-        run: ./scripts/ci/test_example.sh qec
+        run: bash scripts/ci/test_example.sh qec
 

@@ -89,14 +89,19 @@ jobs:
       # Run example tests
       # ========================================================================
  
-      - name: Get PATH in this environment
+      - name: Get some debug info
         run: |
-          echo "Checking CUDAQ installation..."
-          find / -name "cudaq" 2>/dev/null | head -n 20
-          echo "Checking environment variables..."
-          echo "PYTHONPATH=$PYTHONPATH"
-          echo "PATH=$PATH"
+          echo "Current Directory: $(pwd)"
+          echo "Listing all files in the workspace:"
+          ls -R $GITHUB_WORKSPACE
+
+          echo "Checking if test_examples.sh exists:"
+          if [ -f "$GITHUB_WORKSPACE/scripts/ci/test_examples.sh" ]; then
+              echo "Found test_examples.sh"
+          else
+              echo "test_examples.sh NOT FOUND!"
+          fi
 
       - name: Run example tests
-        run: ./scripts/ci/test_example.sh all 
+        run: bash scripts/ci/test_example.sh all 
 
