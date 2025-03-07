@@ -103,24 +103,12 @@ jobs:
           echo "Checking contents of /cudaq-install:"
           ls -l /cudaq-install 
 
-          # Attempt 1: Set PYTHONPATH to /cudaq-install only
-          echo "Trying PYTHONPATH=/cudaq-install..."
-          export PYTHONPATH="/cudaq-install"
-          echo "Python sys.path after setting PYTHONPATH=/cudaq-install:"
-          python3 -c "import sys; print('\n'.join(sys.path))"
-          echo "Trying to import cudaq..."
-          if python3 -c "import cudaq" 2>/dev/null; then
-              echo "Successfully imported cudaq with PYTHONPATH=/cudaq-install."
-              exit 0
-          fi
-
-          # Attempt 2: Set PYTHONPATH to /cudaq-install:~/.cudaqx
-          echo "cudaq not found. Trying PYTHONPATH=/cudaq-install:~/.cudaqx..."
+          echo "Trying PYTHONPATH=/cudaq-install:~/.cudaqx..."
           export PYTHONPATH="/cudaq-install:$HOME/.cudaqx"
           echo "Python sys.path after setting PYTHONPATH=/cudaq-install:~/.cudaqx:"
           python3 -c "import sys; print('\n'.join(sys.path))"
-          echo "Trying to import cudaq..."
-          if python3 -c "import cudaq" 2>/dev/null; then
+          echo "Trying to import cudaq_qec..."
+          if python3 -c "import cudaq_qec" 2>/dev/null; then
               echo "Successfully imported cudaq with PYTHONPATH=/cudaq-install:~/.cudaqx."
               exit 0
           fi
