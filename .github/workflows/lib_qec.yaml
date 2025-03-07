@@ -131,6 +131,6 @@ jobs:
           exit 1
 
 
-      # - name: Run example tests
-      #   run: bash scripts/ci/test_examples.sh qec
+      - name: Run example tests
+        run: bash scripts/ci/test_examples.sh qec
 

@@ -11,6 +11,7 @@
 # Set PATH
 # export PYTHONPATH="$PYTHONPATH:/cudaq-install/cudaq"
 export PATH="/cudaq-install/bin:$PATH"
+export PYTHONPATH="/cudaq-install"
 echo "Setting PYTHONPATH=$PYTHONPATH"
 
 # Set CUDA-QX paths for nvq++
