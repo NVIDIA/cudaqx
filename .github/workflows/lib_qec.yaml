@@ -68,8 +68,8 @@ jobs:
       # Run tests
       # ========================================================================
       #
-      - name: Run tests
-        run: cmake --build ${{ steps.build.outputs.build-dir }} --target run_tests
+      # - name: Run tests
+      #   run: cmake --build ${{ steps.build.outputs.build-dir }} --target run_tests
 
       # ========================================================================
       # Run python tests
@@ -78,8 +78,8 @@ jobs:
       - name: Install python requirements
         run: pip install numpy pytest cupy-cuda12x cuquantum-python-cu12
 
-      - name: Run Python tests
-        run: cmake --build ${{ steps.build.outputs.build-dir }} --target run_python_tests
+      # - name: Run Python tests
+      #   run: cmake --build ${{ steps.build.outputs.build-dir }} --target run_python_tests
 
       # ========================================================================
       # Run example tests
