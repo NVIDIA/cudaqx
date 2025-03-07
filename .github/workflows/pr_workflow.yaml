@@ -80,6 +80,10 @@ jobs:
               - 'libs/solvers/**/*.in'
               - 'libs/solvers/**/*.py'
               - 'libs/solvers/**/CMakeLists.txt'
+            build-examples-qec:
+              - 'docs/sphinx/examples/qec/**'
+            build-examples-solvers:
+              - 'docs/sphinx/examples/solvers/**'
 
   build-cudaq:
     name: Build CUDAQ
@@ -143,7 +147,11 @@ jobs:
     needs: [check-changes, build-cudaq]
     if: |
       !failure() && !cancelled() &&
-      (needs.check-changes.outputs.build-qec == 'true' || needs.check-changes.outputs.build-cudaq == 'true')
+      (
+        needs.check-changes.outputs.build-qec == 'true' || 
+        needs.check-changes.outputs.build-cudaq == 'true' ||
+        needs.check-changes.outputs.build-examples-qec == 'true'
+      )
     uses: ./.github/workflows/lib_qec.yaml
 
   build-solvers:
@@ -151,7 +159,11 @@ jobs:
     needs: [check-changes, build-cudaq]
     if: |
       !failure() && !cancelled() &&
-      (needs.check-changes.outputs.build-solvers == 'true' || needs.check-changes.outputs.build-cudaq == 'true')
+      (
+        needs.check-changes.outputs.build-solvers == 'true' || 
+        needs.check-changes.outputs.build-cudaq == 'true' ||
+        needs.check-changes.outputs.build-examples-solvers == 'true'
+      )
     uses: ./.github/workflows/lib_solvers.yaml
 
   # This job is used for branch protection checks.

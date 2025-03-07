@@ -9,7 +9,8 @@ cmake -S . -B "$1" \
   -DCUDAQ_DIR=/cudaq-install/lib/cmake/cudaq/ \
   -DCUDAQX_ENABLE_LIBS="all" \
   -DCUDAQX_INCLUDE_TESTS=ON \
-  -DCUDAQX_BINDINGS_PYTHON=ON
+  -DCUDAQX_BINDINGS_PYTHON=ON \
+  -DCMAKE_INSTALL_PREFIX=$HOME/.cudaqx
 
 cmake --build "$1" --target install
 

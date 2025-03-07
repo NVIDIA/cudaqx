@@ -8,7 +8,8 @@ cmake -S libs/solvers -B "$1" \
   -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
   -DCUDAQ_DIR=/cudaq-install/lib/cmake/cudaq/ \
   -DCUDAQX_INCLUDE_TESTS=ON \
-  -DCUDAQX_BINDINGS_PYTHON=ON
+  -DCUDAQX_BINDINGS_PYTHON=ON \
+  -DCMAKE_INSTALL_PREFIX=$HOME/.cudaqx
 
 cmake --build "$1" --target install
 

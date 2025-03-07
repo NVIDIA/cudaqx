@@ -67,7 +67,7 @@ jobs:
       # ========================================================================
       # Run tests
       # ========================================================================
-      #
+      
       - name: Run tests
         run: cmake --build ${{ steps.build.outputs.build-dir }} --target run_tests
 
@@ -80,4 +80,11 @@ jobs:
 
       - name: Run Python tests
         run: cmake --build ${{ steps.build.outputs.build-dir }} --target run_python_tests
+
+      # ========================================================================
+      # Run example tests
+      # ========================================================================
+
+      - name: Run example tests
+        run: bash scripts/ci/test_examples.sh qec
 
