@@ -102,9 +102,25 @@ jobs:
           python3 --version
           echo "Python sys.path:"
           python3 -c "import sys; print('\n'.join(sys.path))"
-          echo "Trying to import cudaq..."
-          python3 -c "import cudaq; print('Successfully imported cudaq')"
 
+          export PYTHONPATH="$PYTHONPATH:$HOME/.cudaqx"
+          echo "Trying to import cudaq after appending to PYTHONPATH..."
+          if python3 -c "import cudaq" 2>/dev/null; then
+              echo "Successfully imported cudaq with appended PYTHONPATH."
+              exit 0
+          fi
+
+          echo " Appending didn't work. Trying to prepend cudaqx path..."
+          export PYTHONPATH="$HOME/.cudaqx:$PYTHONPATH"
+          echo "Trying to import cudaq again..."
+          if python3 -c "import cudaq" 2>/dev/null; then
+              echo "Successfully imported cudaq with prepended PYTHONPATH."
+              exit 0
+          fi
+
+          echo "cudaq still not found. Final sys.path:"
+          python3 -c "import sys; print('\n'.join(sys.path))"
+          exit 1
 
 
       # - name: Run example tests
