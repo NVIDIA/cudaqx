@@ -41,10 +41,10 @@ std::size_t get_num_qaoa_parameters(const cudaq::spin_op &problemHamiltonian,
   std::size_t expectedNumParams = 0;
   if (full_parameterization) {
     auto nonIdTerms = 0;
-    referenceHamiltonian.for_each_term([&](cudaq::spin_op &term) {
+    for (const auto &term : referenceHamiltonian)
       if (!term.is_identity())
         nonIdTerms++;
-    });
+
     expectedNumParams =
         numLayers * (problemHamiltonian.num_terms() + nonIdTerms);
   } else {

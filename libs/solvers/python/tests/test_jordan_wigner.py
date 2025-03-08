@@ -14,16 +14,11 @@ import numpy as np
 
 
 def extract_words(hamiltonian: cudaq.SpinOperator):
-    result = []
-    hamiltonian.for_each_term(lambda term: result.append(term.to_string(False)))
-    return result
+    return [term.to_string(False) for term in hamiltonian]
 
 
 def extract_coefficients(hamiltonian: cudaq.SpinOperator):
-    result = []
-    hamiltonian.for_each_term(
-        lambda term: result.append(term.get_coefficient()))
-    return result
+    return [term.get_coefficient() for term in hamiltonian]
 
 
 def extract_spin_op_to_dict(op: cudaq.SpinOperator) -> dict:

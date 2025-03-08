@@ -62,6 +62,13 @@ to_parity_matrix(const std::vector<cudaq::spin_op> &stabilizers,
     p_stabilizers = &stabilizers_copy;
   }
 
+  auto isZ = [](const cudaq::spin_op &op, std::size_t idx) {
+    return op.to_string(false)[idx] == 'Z';
+  };
+  auto isX = [](const cudaq::spin_op &op, std::size_t idx) {
+    return op.to_string(false)[idx] == 'X';
+  };
+
   if (type == stabilizer_type::XZ) {
     auto numQubits = (*p_stabilizers)[0].num_qubits();
     cudaqx::tensor<uint8_t> t({p_stabilizers->size(), 2 * numQubits});
@@ -76,7 +83,7 @@ to_parity_matrix(const std::vector<cudaq::spin_op> &stabilizers,
     // Need to shift Z bits left
     for (std::size_t row = 0; row < numZRows; row++) {
       for (std::size_t i = numQubits; i < 2 * numQubits; i++) {
-        if ((*p_stabilizers)[row].get_raw_data().first[0][i])
+        if (isZ((*p_stabilizers)[row], i - numQubits))
           t.at({row, i - numQubits}) = 1;
       }
     }
@@ -85,7 +92,7 @@ to_parity_matrix(const std::vector<cudaq::spin_op> &stabilizers,
 
     for (std::size_t row = 0; row < numXRows; row++) {
       for (std::size_t i = 0; i < numQubits; i++) {
-        if ((*p_stabilizers)[numZRows + row].get_raw_data().first[0][i])
+        if (isX((*p_stabilizers)[numZRows + row], i))
           t.at({numZRows + row, i + numQubits}) = 1;
       }
     }
@@ -109,7 +116,7 @@ to_parity_matrix(const std::vector<cudaq::spin_op> &stabilizers,
     cudaqx::tensor<uint8_t> ret({numZRows, numQubits});
     for (std::size_t row = 0; row < numZRows; row++) {
       for (std::size_t i = numQubits; i < 2 * numQubits; i++) {
-        if ((*p_stabilizers)[row].get_raw_data().first[0][i])
+        if (isZ((*p_stabilizers)[row], i - numQubits))
           ret.at({row, i - numQubits}) = 1;
       }
     }
@@ -134,7 +141,7 @@ to_parity_matrix(const std::vector<cudaq::spin_op> &stabilizers,
   cudaqx::tensor<uint8_t> ret({numXRows, numQubits});
   for (std::size_t row = 0; row < numXRows; row++) {
     for (std::size_t i = 0; i < numQubits; i++) {
-      if ((*p_stabilizers)[numZRows + row].get_raw_data().first[0][i])
+      if (isX((*p_stabilizers)[numZRows + row], i))
         ret.at({row, i}) = 1;
     }
   }
