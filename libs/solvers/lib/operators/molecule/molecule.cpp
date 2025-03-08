@@ -116,7 +116,7 @@ cudaq::spin_op one_particle_op(std::size_t numQubits, std::size_t p,
   using namespace cudaq;
 
   if (p == q)
-    return 0.5 * spin::i(numQubits - 1) * spin::i(p) - 0.5 * spin::z(p);
+    return 0.5 * spin_op::i(numQubits - 1) * spin_op::i(p) - 0.5 * spin_op::z(p);
 
   std::complex<double> coeff(0., 1.);
   double m = -.25;
@@ -129,17 +129,17 @@ cudaq::spin_op one_particle_op(std::size_t numQubits, std::size_t p,
   for (auto i : cudaq::range((long)p + 1, (long)q))
     z_indices.push_back(i);
 
-  auto parity = spin::z(z_indices.front());
+  auto parity = spin_op::z(z_indices.front());
   for (std::size_t i = 1; i < z_indices.size(); i++) {
-    parity *= spin::z(i);
+    parity *= spin_op::z(i);
   }
 
-  auto ret = m * spin::x(p) * parity * spin::x(q);
+  auto ret = m * spin_op::x(p) * parity * spin_op::x(q);
 
-  ret += m * spin::y(p) * parity * spin::y(q);
-  ret -= coeff * m * spin::y(p) * parity * spin::x(q);
-  ret += coeff * m * spin::x(p) * parity * spin::y(q);
-  return spin::i(numQubits - 1) * ret;
+  ret += m * spin_op::y(p) * parity * spin_op::y(q);
+  ret -= coeff * m * spin_op::y(p) * parity * spin_op::x(q);
+  ret += coeff * m * spin_op::x(p) * parity * spin_op::y(q);
+  return spin_op::i(numQubits - 1) * ret;
 }
 
 } // namespace cudaq::solvers

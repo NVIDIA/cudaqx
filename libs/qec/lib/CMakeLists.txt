@@ -43,7 +43,7 @@ target_link_libraries(${LIBRARY_NAME}
   PUBLIC 
     cudaqx-core
     cudaq::cudaq 
-    cudaq::cudaq-spin
+    cudaq::cudaq-operator
   PRIVATE
     cudaq::cudaq-common
 )

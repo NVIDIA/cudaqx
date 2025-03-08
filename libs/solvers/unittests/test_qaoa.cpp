@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2024 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -36,10 +36,10 @@ TEST(SolversTester, checkSimpleQAOA) {
 // Test basic QAOA execution with custom mixing Hamiltonian
 TEST(QAOATest, CustomMixingHamiltonianExecution) {
   // Create a simple 2-qubit problem Hamiltonian
-  cudaq::spin_op problemHam = 0.5 * cudaq::spin::z(0) * cudaq::spin::z(1);
+  cudaq::spin_op problemHam = 0.5 * cudaq::spin_op::z(0) * cudaq::spin_op::z(1);
 
   // Create mixing Hamiltonian (X terms)
-  cudaq::spin_op mixingHam = cudaq::spin::x(0) + cudaq::spin::x(1);
+  cudaq::spin_op mixingHam = cudaq::spin_op::x(0) + cudaq::spin_op::x(1);
 
   // Create optimizer
   auto opt = cudaq::optim::optimizer::get("cobyla");
@@ -59,7 +59,7 @@ TEST(QAOATest, CustomMixingHamiltonianExecution) {
 // Test QAOA with default mixing Hamiltonian
 TEST(QAOATest, DefaultMixingHamiltonianExecution) {
   // Single-qubit problem Hamiltonian
-  cudaq::spin_op problemHam = cudaq::spin::z(0);
+  cudaq::spin_op problemHam = cudaq::spin_op::z(0);
 
   auto opt = cudaq::optim::optimizer::get("cobyla");
   std::vector<double> initParams = {0.1, 0.1};
@@ -74,7 +74,7 @@ TEST(QAOATest, DefaultMixingHamiltonianExecution) {
 
 // Test parameter validation
 TEST(QAOATest, ParameterValidation) {
-  cudaq::spin_op problemHam = cudaq::spin::z(0);
+  cudaq::spin_op problemHam = cudaq::spin_op::z(0);
   std::vector<double> emptyParams;
 
   EXPECT_THROW(cudaq::solvers::qaoa(problemHam, 1, emptyParams),
@@ -83,7 +83,7 @@ TEST(QAOATest, ParameterValidation) {
 
 // Test multi-layer QAOA
 TEST(QAOATest, MultiLayerExecution) {
-  cudaq::spin_op problemHam = cudaq::spin::z(0) * cudaq::spin::z(1);
+  cudaq::spin_op problemHam = cudaq::spin_op::z(0) * cudaq::spin_op::z(1);
   std::vector<double> initParams = {0.1, 0.1, 0.2, 0.2}; // 2 layers
 
   auto result = cudaq::solvers::qaoa(problemHam, 2, initParams);
@@ -95,7 +95,7 @@ TEST(QAOATest, MultiLayerExecution) {
 
 // // Test QAOA with options
 // TEST(QAOATest, OptionsHandling) {
-//     cudaq::spin_op problemHam = cudaq::spin::z(0)[1];
+//     cudaq::spin_op problemHam = cudaq::spin_op::z(0)[1];
 //     std::vector<double> initParams = {0.1, 0.1};
 
 //     cudaq::heterogeneous_map options;
@@ -110,8 +110,8 @@ TEST(QAOATest, MultiLayerExecution) {
 
 // Test consistency between different QAOA overloads
 TEST(QAOATest, OverloadConsistency) {
-  cudaq::spin_op problemHam = cudaq::spin::z(0) * cudaq::spin::z(1);
-  cudaq::spin_op mixingHam = cudaq::spin::x(0) + cudaq::spin::x(1);
+  cudaq::spin_op problemHam = cudaq::spin_op::z(0) * cudaq::spin_op::z(1);
+  cudaq::spin_op mixingHam = cudaq::spin_op::x(0) + cudaq::spin_op::x(1);
   auto opt = cudaq::optim::optimizer::get("cobyla");
   std::vector<double> initParams = {0.1, 0.1};
 
@@ -198,7 +198,7 @@ TEST(CliqueHamiltonianTest, SingleNode) {
   auto ham = cudaq::solvers::get_clique_hamiltonian(g);
   ham.dump();
   EXPECT_EQ(ham.num_terms(), 2);
-  EXPECT_EQ(ham, 0.75 * cudaq::spin::z(0) - .75 * cudaq::spin::i(0));
+  EXPECT_EQ(ham, 0.75 * cudaq::spin_op::z(0) - .75 * cudaq::spin_op::i(0));
 }
 
 TEST(CliqueHamiltonianTest, CompleteGraph) {
@@ -422,7 +422,7 @@ TEST(QAOAMaxCutTest, CustomMixer) {
   auto problem_ham = cudaq::solvers::get_maxcut_hamiltonian(g);
 
   // Create custom X-mixer Hamiltonian
-  auto mixer_ham = cudaq::spin::x(0) + cudaq::spin::x(1) + cudaq::spin::x(2);
+  auto mixer_ham = cudaq::spin_op::x(0) + cudaq::spin_op::x(1) + cudaq::spin_op::x(2);
 
   std::size_t num_layers = 2;
   std::vector<double> initial_params = {0.5, 0.5, 0.5, 0.5};

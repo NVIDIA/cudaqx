@@ -8,7 +8,7 @@
 
 #pragma once
 
-#include "cudaq/spin_op.h"
+#include "cudaq/operators.h"
 
 #include "cuda-qx/core/tensor.h"
 

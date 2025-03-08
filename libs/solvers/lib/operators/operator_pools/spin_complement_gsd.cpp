@@ -15,17 +15,17 @@ namespace cudaq::solvers {
 inline cudaq::spin_op adag(std::size_t numQubits, std::size_t j) {
   cudaq::spin_op zprod(numQubits);
   for (std::size_t k = 0; k < j; k++)
-    zprod *= cudaq::spin::z(k);
+    zprod *= cudaq::spin_op::z(k);
   return 0.5 * zprod *
-         (cudaq::spin::x(j) - std::complex<double>{0, 1} * cudaq::spin::y(j));
+         (cudaq::spin_op::x(j) - std::complex<double>{0, 1} * cudaq::spin_op::y(j));
 }
 
 inline cudaq::spin_op a(std::size_t numQubits, std::size_t j) {
   cudaq::spin_op zprod(numQubits);
   for (std::size_t k = 0; k < j; k++)
-    zprod *= cudaq::spin::z(k);
+    zprod *= cudaq::spin_op::z(k);
   return 0.5 * zprod *
-         (cudaq::spin::x(j) + std::complex<double>{0, 1} * cudaq::spin::y(j));
+         (cudaq::spin_op::x(j) + std::complex<double>{0, 1} * cudaq::spin_op::y(j));
 }
 
 std::vector<cudaq::spin_op>

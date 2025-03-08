@@ -177,7 +177,7 @@ public:
       hpqrsValues.push_back(
           {element[0].get<double>(), element[1].get<double>()});
 
-    tensor hpq, hpqrs;
+    cudaqx::tensor hpq, hpqrs;
     hpq.copy(hpqValues.data(), {numQubits, numQubits});
     hpqrs.copy(hpqrsValues.data(),
                {numQubits, numQubits, numQubits, numQubits});

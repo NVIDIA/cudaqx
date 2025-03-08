@@ -1,5 +1,5 @@
 /****************************************************************-*- C++ -*-****
- * Copyright (c) 2024 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -14,7 +14,7 @@
 
 #include "cuda-qx/core/extension_point.h"
 #include "cuda-qx/core/heterogeneous_map.h"
-#include "cudaq/spin_op.h"
+#include "cudaq/operators.h"
 
 using namespace cudaqx;
 

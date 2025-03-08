@@ -20,7 +20,6 @@
 //
 TEST(BravyiKitaev, testH2Hamiltonian) {
   using double_complex = std::complex<double>;
-  using namespace cudaq::spin;
 
   cudaqx::tensor<> hpq({4, 4});
   cudaqx::tensor<> hpqrs({4, 4, 4, 4});
@@ -66,17 +65,17 @@ TEST(BravyiKitaev, testH2Hamiltonian) {
   cudaq::solvers::bravyi_kitaev transform{};
   cudaq::spin_op result = transform.generate(h_constant, hpq, hpqrs, {});
   cudaq::spin_op gold =
-      -0.1064770114930045 * i(0) + 0.04540633286914125 * x(0) * z(1) * x(2) +
-      0.04540633286914125 * x(0) * z(1) * x(2) * z(3) +
-      0.04540633286914125 * y(0) * z(1) * y(2) +
-      0.04540633286914125 * y(0) * z(1) * y(2) * z(3) +
-      0.17028010135220506 * z(0) + 0.1702801013522051 * z(0) * z(1) +
-      0.16560682358174256 * z(0) * z(1) * z(2) +
-      0.16560682358174256 * z(0) * z(1) * z(2) * z(3) +
-      0.12020049071260128 * z(0) * z(2) +
-      0.12020049071260128 * z(0) * z(2) * z(3) + 0.1683359862516207 * z(1) -
-      0.22004130022421792 * z(1) * z(2) * z(3) +
-      0.17407289249680227 * z(1) * z(3) - 0.22004130022421792 * z(2);
+      -0.1064770114930045 * cudaq::spin_op::i(0) + 0.04540633286914125 * cudaq::spin_op::x(0) * z(1) * cudaq::spin_op::x(2) +
+      0.04540633286914125 * cudaq::spin_op::x(0) * cudaq::spin_op::z(1) * cudaq::spin_op::x(2) * z(3) +
+      0.04540633286914125 * cudaq::spin_op::y(0) * cudaq::spin_op::z(1) * y(2) +
+      0.04540633286914125 * cudaq::spin_op::y(0) * cudaq::spin_op::z(1) * y(2) * z(3) +
+      0.17028010135220506 * cudaq::spin_op::z(0) + 0.1702801013522051 * z(0) * z(1) +
+      0.16560682358174256 * cudaq::spin_op::z(0) * cudaq::spin_op::z(1) * z(2) +
+      0.16560682358174256 * cudaq::spin_op::z(0) * cudaq::spin_op::z(1) * z(2) * z(3) +
+      0.12020049071260128 * cudaq::spin_op::z(0) * cudaq::spin_op::z(2) +
+      0.12020049071260128 * cudaq::spin_op::z(0) * cudaq::spin_op::z(2) * z(3) + 0.1683359862516207 * z(1) -
+      0.22004130022421792 * cudaq::spin_op::z(1) * cudaq::spin_op::z(2) * z(3) +
+      0.17407289249680227 * cudaq::spin_op::z(1) * cudaq::spin_op::z(3) - 0.22004130022421792 * z(2);
   auto [terms, residuals] = (result - gold).get_raw_data();
   for (auto r : residuals)
     EXPECT_NEAR(std::abs(r), 0.0, 1e-4);
@@ -84,7 +83,6 @@ TEST(BravyiKitaev, testH2Hamiltonian) {
 
 TEST(BravyiKitaev, testSRLCase0) {
   using double_complex = std::complex<double>;
-  using namespace cudaq::spin;
 
   auto result = cudaq::solvers::seeley_richard_love(2, 2, 4.0, 20);
 

@@ -33,7 +33,7 @@ target_link_libraries(${MODULE_NAME}
   PUBLIC
     cudaqx-core
     cudaq::cudaq
-    cudaq::cudaq-spin
+    cudaq::cudaq-operator
   PRIVATE
     cudaq::cudaq-common
     cudaq-qec

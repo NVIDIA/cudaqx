@@ -24,67 +24,67 @@ qaoa_pool::generate(const heterogeneous_map &config) const {
 
   // Single qubit X terms
   for (std::size_t i = 0; i < qubits_num; ++i) {
-    op.push_back(cudaq::spin::x(i));
+    op.push_back(cudaq::spin_op::x(i));
   }
 
   // Single qubit Y terms
   for (std::size_t i = 0; i < qubits_num; ++i) {
-    op.push_back(cudaq::spin::y(i));
+    op.push_back(cudaq::spin_op::y(i));
   }
 
   // XX terms
   for (std::size_t i = 0; i < qubits_num - 1; ++i) {
     for (std::size_t j = i + 1; j < qubits_num; ++j) {
-      op.push_back(cudaq::spin::x(i) * cudaq::spin::x(j));
+      op.push_back(cudaq::spin_op::x(i) * cudaq::spin_op::x(j));
     }
   }
 
   // YY terms
   for (std::size_t i = 0; i < qubits_num - 1; ++i) {
     for (std::size_t j = i + 1; j < qubits_num; ++j) {
-      op.push_back(cudaq::spin::y(i) * cudaq::spin::y(j));
+      op.push_back(cudaq::spin_op::y(i) * cudaq::spin_op::y(j));
     }
   }
 
   // YZ terms
   for (std::size_t i = 0; i < qubits_num - 1; ++i) {
     for (std::size_t j = i + 1; j < qubits_num; ++j) {
-      op.push_back(cudaq::spin::y(i) * cudaq::spin::z(j));
+      op.push_back(cudaq::spin_op::y(i) * cudaq::spin_op::z(j));
     }
   }
 
   // ZY terms
   for (std::size_t i = 0; i < qubits_num - 1; ++i) {
     for (std::size_t j = i + 1; j < qubits_num; ++j) {
-      op.push_back(cudaq::spin::z(i) * cudaq::spin::y(j));
+      op.push_back(cudaq::spin_op::z(i) * cudaq::spin_op::y(j));
     }
   }
 
   // XY terms
   for (std::size_t i = 0; i < qubits_num - 1; ++i) {
     for (std::size_t j = i + 1; j < qubits_num; ++j) {
-      op.push_back(cudaq::spin::x(i) * cudaq::spin::y(j));
+      op.push_back(cudaq::spin_op::x(i) * cudaq::spin_op::y(j));
     }
   }
 
   // YX terms
   for (std::size_t i = 0; i < qubits_num - 1; ++i) {
     for (std::size_t j = i + 1; j < qubits_num; ++j) {
-      op.push_back(cudaq::spin::y(i) * cudaq::spin::x(j));
+      op.push_back(cudaq::spin_op::y(i) * cudaq::spin_op::x(j));
     }
   }
 
   // XZ terms
   for (std::size_t i = 0; i < qubits_num - 1; ++i) {
     for (std::size_t j = i + 1; j < qubits_num; ++j) {
-      op.push_back(cudaq::spin::x(i) * cudaq::spin::z(j));
+      op.push_back(cudaq::spin_op::x(i) * cudaq::spin_op::z(j));
     }
   }
 
   // ZX terms
   for (std::size_t i = 0; i < qubits_num - 1; ++i) {
     for (std::size_t j = i + 1; j < qubits_num; ++j) {
-      op.push_back(cudaq::spin::z(i) * cudaq::spin::x(j));
+      op.push_back(cudaq::spin_op::z(i) * cudaq::spin_op::x(j));
     }
   }
 
