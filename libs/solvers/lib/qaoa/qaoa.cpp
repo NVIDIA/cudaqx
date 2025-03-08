@@ -41,10 +41,10 @@ std::size_t get_num_qaoa_parameters(const cudaq::spin_op &problemHamiltonian,
   std::size_t expectedNumParams = 0;
   if (full_parameterization) {
     auto nonIdTerms = 0;
-    referenceHamiltonian.for_each_term([&](cudaq::spin_op &term) {
+    for (const auto &term : referenceHamiltonian)
       if (!term.is_identity())
         nonIdTerms++;
-    });
+
     expectedNumParams =
         numLayers * (problemHamiltonian.num_terms() + nonIdTerms);
   } else {
@@ -88,12 +88,12 @@ qaoa_result qaoa(const cudaq::spin_op &problemHamiltonian,
   std::vector<cudaq::pauli_word> probHWords, refHWords;
   for (const auto &o : problemHamiltonian) {
     probHWords.emplace_back(o.to_string(false));
-    probHCoeffs.push_back(o.get_coefficient().real());
+    probHCoeffs.push_back(o.get_coefficient().evaluate().real());
   }
 
   for (const auto &o : referenceHamiltonian) {
     refHWords.emplace_back(o.to_string(false));
-    refHCoeffs.push_back(o.get_coefficient().real());
+    refHCoeffs.push_back(o.get_coefficient().evaluate().real());
   }
 
   auto numQubits = problemHamiltonian.num_qubits();

@@ -66,7 +66,7 @@ cudaq::spin_op jordan_wigner::generate(const double constant,
   std::vector<cudaq::spin_op> nonZeros;
   for (auto &term : spin_hamiltonian) {
     auto coeff = term.get_coefficient();
-    if (std::fabs(coeff) > tol)
+    if (std::fabs(coeff.evaluate()) > tol) // FIXME is there a better way to do this?
       nonZeros.push_back(term);
   }
   auto op = nonZeros[0];

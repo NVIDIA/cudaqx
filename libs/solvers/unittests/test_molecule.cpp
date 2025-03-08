@@ -27,7 +27,7 @@ TEST(MoleculeTester, checkSimple) {
     auto molecule = cudaq::solvers::create_molecule(
         geometry, "sto-3g", 0, 0, {.casci = true, .verbose = true});
 
-    molecule.hamiltonian.dump();
+    // FIXME how? molecule.hamiltonian.dump();
 
     EXPECT_NEAR(molecule.energies["fci_energy"], -1.137, 1e-3);
     EXPECT_NEAR(molecule.energies["hf_energy"], -1.1163255644, 1e-3);

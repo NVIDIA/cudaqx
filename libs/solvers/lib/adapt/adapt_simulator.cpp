@@ -149,7 +149,7 @@ simulator::run(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
     thetas.push_back(0.0);
     for (auto o : op) {
       pauliWords.emplace_back(o.to_string(false));
-      coefficients.push_back(o.get_coefficient().imag());
+      coefficients.push_back(o.get_coefficient().evaluate().imag());
     }
 
     optim::optimizable_function objective;

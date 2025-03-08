@@ -134,7 +134,7 @@ cudaq::spin_op one_particle_op(std::size_t numQubits, std::size_t p,
     parity *= spin_op::z(i);
   }
 
-  auto ret = m * spin_op::x(p) * parity * spin_op::x(q);
+  cudaq::spin_op ret = m * spin_op::x(p) * parity * spin_op::x(q);
 
   ret += m * spin_op::y(p) * parity * spin_op::y(q);
   ret -= coeff * m * spin_op::y(p) * parity * spin_op::x(q);
