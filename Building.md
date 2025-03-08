@@ -10,19 +10,26 @@ available on this repository. It will always contain a recent version of CUDA-Q
 (currently updated approximately weekly).
 
 The instructions below provide a complete set of commands to get you up and
-running. They assume you are running with the `amd64` platform; you need to
-adjust to `arm64` if you are using ARM machines.
+running. The dev containers are named
+
+- `ghcr.io/nvidia/cudaqx-dev:latest-amd64` for AMD64 platforms
+- `ghcr.io/nvidia/cudaqx-dev:latest-arm64` for ARM64 platforms
+
+With the name appropriate for your system, run
 
 ```bash
-docker pull ghcr.io/nvidia/cudaqx-dev:latest-amd64
-docker run -it --gpus all --name cudaqx-dev ghcr.io/nvidia/cudaqx-dev:latest-amd64
+docker pull <container-name>
+docker run -it --gpus all --name <container-name>
 ```
+
+If your system does not have local GPUs (eg. a Macbook), omit the `--gpus all`
+argument.
 
 Then inside the container...
 
 ```bash
 # Then inside the container
-export CUDAQ_INSTALL_PREFIX=~/.cudaq
+export CUDAQ_INSTALL_PREFIX=/usr/local/cudaq
 export CUDAQX_INSTALL_PREFIX=~/.cudaqx
 cd /workspaces
 
