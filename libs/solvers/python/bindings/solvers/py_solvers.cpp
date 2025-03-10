@@ -850,7 +850,7 @@ The exact set of possible types may depend on the specific optimization algorith
         return py::make_tuple(result.energy, result.optimal_parameters,
                               result.iteration_data);
       },
-      py::arg("kernel"), py::arg("spin_op") = cudaq::spin_op::identity(), py::arg("initial_parameters"), R"#(
+      py::arg("kernel"), py::arg("spin_op"), py::arg("initial_parameters"), R"#(
 Execute the Variational Quantum Eigensolver (VQE) algorithm.
 
 This function implements the VQE algorithm, a hybrid quantum-classical algorithm

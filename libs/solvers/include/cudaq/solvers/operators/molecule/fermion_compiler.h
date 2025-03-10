@@ -12,7 +12,7 @@
 #include "cuda-qx/core/heterogeneous_map.h"
 #include "cuda-qx/core/tensor.h"
 
-#include "cudaq/operators.h"
+#include "cudaq/spin_op.h"
 
 namespace cudaq::solvers {
 

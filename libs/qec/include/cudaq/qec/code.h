@@ -1,5 +1,5 @@
 /****************************************************************-*- C++ -*-****
- * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
+ * Copyright (c) 2024 NVIDIA Corporation & Affiliates.                         *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -117,14 +117,14 @@ protected:
   std::unordered_map<operation, encoding> operation_encodings;
 
   /// @brief Stabilizer generators for the code
-  std::vector<cudaq::spin_op_term> m_stabilizers;
+  std::vector<cudaq::spin_op> m_stabilizers;
 
   /// @brief Pauli Logical operators
-  std::vector<cudaq::spin_op_term> m_pauli_observables;
+  std::vector<cudaq::spin_op> m_pauli_observables;
 
-  std::vector<cudaq::spin_op_term>
+  std::vector<cudaq::spin_op>
   fromPauliWords(const std::vector<std::string> &words) {
-    std::vector<cudaq::spin_op_term> ops;
+    std::vector<cudaq::spin_op> ops;
     for (auto &os : words)
       ops.emplace_back(cudaq::spin_op::from_word(os));
     sortStabilizerOps(ops);
@@ -158,7 +158,7 @@ public:
   /// @param options Optional code-specific configuration options
   /// @return Unique pointer to created code instance
   static std::unique_ptr<code>
-  get(const std::string &name, const std::vector<cudaq::spin_op_term> &stabilizers,
+  get(const std::string &name, const std::vector<cudaq::spin_op> &stabilizers,
       const heterogeneous_map options = {});
 
   /// @brief Factory method to create a code instance
@@ -194,7 +194,7 @@ public:
 
   /// @brief Get the stabilizer generators
   /// @return Reference to stabilizers
-  const std::vector<cudaq::spin_op_term> &get_stabilizers() const {
+  const std::vector<cudaq::spin_op> &get_stabilizers() const {
     return m_stabilizers;
   }
 
@@ -229,7 +229,7 @@ std::unique_ptr<code> get_code(const std::string &name,
 /// @param stab stabilizers
 /// @return Unique pointer to the created code instance
 std::unique_ptr<code> get_code(const std::string &name,
-                               const std::vector<cudaq::spin_op_term> &stab,
+                               const std::vector<cudaq::spin_op> &stab,
                                const heterogeneous_map options = {});
 
 /// Get a list of available quantum error correcting codes

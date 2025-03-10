@@ -1,5 +1,5 @@
 /****************************************************************-*- C++ -*-****
- * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
+ * Copyright (c) 2024 NVIDIA Corporation & Affiliates.                         *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -9,7 +9,7 @@
 #pragma once
 
 #include "cuda-qx/core/graph.h"
-#include "cudaq/operators.h"
+#include "cudaq/spin_op.h"
 
 namespace cudaq::solvers {
 

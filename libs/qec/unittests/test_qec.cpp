@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
+ * Copyright (c) 2024 NVIDIA Corporation & Affiliates.                         *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -17,7 +17,7 @@
 TEST(StabilizerTester, checkConstructFromSpinOps) {
   {
     // Constructor will always auto sort
-    std::vector<cudaq::spin_op_term> stab{cudaq::spin_op::from_word("ZZZZIII"),
+    std::vector<cudaq::spin_op> stab{cudaq::spin_op::from_word("ZZZZIII"),
                                      cudaq::spin_op::from_word("XXXXIII"),
                                      cudaq::spin_op::from_word("IXXIXXI"),
                                      cudaq::spin_op::from_word("IIXXIXX"),
@@ -258,7 +258,7 @@ TEST(QECCodeTester, checkSteane) {
     // From Stabilizers
     std::vector<std::string> words{"ZZZZIII", "XXXXIII", "IXXIXXI",
                                    "IIXXIXX", "IZZIZZI", "IIZZIZZ"};
-    std::vector<cudaq::spin_op_term> ops;
+    std::vector<cudaq::spin_op> ops;
     for (auto &os : words)
       ops.emplace_back(cudaq::spin_op::from_word(os));
     cudaq::qec::sortStabilizerOps(ops);

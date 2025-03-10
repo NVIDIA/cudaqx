@@ -66,7 +66,7 @@ struct type_caster<cudaq::observe_result> {
       return false;
 
     auto e = src.attr("expectation")().cast<double>();
-    value = cudaq::observe_result(e, static_cast<cudaq::spin_op>(cudaq::spin_op::identity()));
+    value = cudaq::observe_result(e, cudaq::spin_op());
     // etc.
     return true;
   }

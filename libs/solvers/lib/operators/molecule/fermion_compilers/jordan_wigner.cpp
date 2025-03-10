@@ -24,7 +24,7 @@ cudaq::spin_op jordan_wigner::generate(const double constant,
   assert(hpq.rank() == 2 && "hpq must be a rank-2 tensor");
   assert(hpqrs.rank() == 4 && "hpqrs must be a rank-4 tensor");
 
-  cudaq::spin_op spin_hamiltonian = constant * cudaq::spin_op::identity();
+  auto spin_hamiltonian = constant * cudaq::spin_op();
   std::size_t nqubit = hpq.shape()[0];
   double tol =
       options.get<double>(std::vector<std::string>{"tolerance", "tol"}, 1e-15);
@@ -36,17 +36,17 @@ cudaq::spin_op jordan_wigner::generate(const double constant,
   auto adag = [](std::size_t numQubits, std::size_t j) {
     cudaq::spin_op zprod(numQubits);
     for (std::size_t k = 0; k < j; k++)
-      zprod *= cudaq::spin_op::z(k);
+      zprod *= cudaq::spin::z(k);
     return 0.5 * zprod *
-           (cudaq::spin_op::x(j) - std::complex<double>{0, 1} * cudaq::spin_op::y(j));
+           (cudaq::spin::x(j) - std::complex<double>{0, 1} * cudaq::spin::y(j));
   };
 
   auto a = [](std::size_t numQubits, std::size_t j) {
     cudaq::spin_op zprod(numQubits);
     for (std::size_t k = 0; k < j; k++)
-      zprod *= cudaq::spin_op::z(k);
+      zprod *= cudaq::spin::z(k);
     return 0.5 * zprod *
-           (cudaq::spin_op::x(j) + std::complex<double>{0, 1} * cudaq::spin_op::y(j));
+           (cudaq::spin::x(j) + std::complex<double>{0, 1} * cudaq::spin::y(j));
   };
 
   for (std::size_t i = 0; i < hpq.shape()[0]; i++)
@@ -66,7 +66,7 @@ cudaq::spin_op jordan_wigner::generate(const double constant,
   std::vector<cudaq::spin_op> nonZeros;
   for (auto &term : spin_hamiltonian) {
     auto coeff = term.get_coefficient();
-    if (std::fabs(coeff.evaluate()) > tol) // FIXME is there a better way to do this?
+    if (std::fabs(coeff.evaluate()) > tol)
       nonZeros.push_back(term);
   }
   auto op = nonZeros[0];
