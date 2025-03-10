@@ -15,7 +15,7 @@
 namespace cudaq::solvers {
 cudaq::spin_op
 getDefaultReferenceHamiltonian(const cudaq::spin_op &problemHamiltonian) {
-  cudaq::spin_op referenceHamiltonian;
+  cudaq::spin_op referenceHamiltonian = cudaq::spin_op::identity();
   auto numQubits = problemHamiltonian.num_qubits();
 
   // Add X terms for each qubit as the default mixer

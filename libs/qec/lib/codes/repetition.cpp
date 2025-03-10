@@ -40,7 +40,7 @@ repetition::repetition(const heterogeneous_map &options) : code() {
   // Default Logical Observable is ZI...I
   // This class is only for Z basis experiments
   // so there is no X observable included.
-  cudaq::spin_op Lz = cudaq::spin_op::z(0);
+  cudaq::spin_op_term Lz = cudaq::spin_op::z(0);
   Lz = Lz * cudaq::spin_op::i(get_num_data_qubits() - 1);
 
   m_pauli_observables.push_back(Lz);

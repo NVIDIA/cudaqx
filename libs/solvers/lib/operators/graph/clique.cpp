@@ -15,7 +15,7 @@ cudaq::spin_op get_clique_hamiltonian(const cudaqx::graph &graph,
   // Get all nodes
   auto nodes = graph.get_nodes();
   if (nodes.empty())
-    return cudaq::spin_op();
+    return cudaq::spin_op::identity();
 
   // Initialize empty spin operator
   cudaq::spin_op hamiltonian(nodes.size());

@@ -77,7 +77,7 @@ public:
 
     // Get the stabilizers
     m_stabilizers =
-        registeredCode.attr("stabilizers").cast<std::vector<cudaq::spin_op>>();
+        registeredCode.attr("stabilizers").cast<std::vector<cudaq::spin_op_term>>();
     // Get the CUDA-Q kernels for the operation encodings
     auto opsDict = registeredCode.attr("operation_encodings").cast<py::dict>();
 
@@ -263,16 +263,16 @@ void bindCode(py::module &mod) {
           if (py::isinstance<py::str>(obj.cast<py::list>()[0])) {
             options.attr("pop")("stabilizers");
             auto words = obj.cast<std::vector<std::string>>();
-            std::vector<cudaq::spin_op> ops;
+            std::vector<cudaq::spin_op_term> ops;
             for (auto &os : words)
               ops.emplace_back(cudaq::spin_op::from_word(os));
             sortStabilizerOps(ops);
             return get_code(name, ops, hetMapFromKwargs(options));
           }
 
-          if (py::isinstance<cudaq::spin_op>(obj[0])) {
+          if (py::isinstance<cudaq::spin_op_term>(obj[0])) {
             options.attr("pop")("stabilizers");
-            return get_code(name, obj.cast<std::vector<cudaq::spin_op>>(),
+            return get_code(name, obj.cast<std::vector<cudaq::spin_op_term>>(),
                             hetMapFromKwargs(options));
           }
 

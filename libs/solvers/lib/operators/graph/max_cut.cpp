@@ -14,7 +14,7 @@ cudaq::spin_op get_maxcut_hamiltonian(const cudaqx::graph &graph) {
   // Get all nodes to iterate through edges
   auto nodes = graph.get_nodes();
   if (nodes.empty())
-    return cudaq::spin_op();
+    return cudaq::spin_op::identity();
 
   // Initialize empty spin operator
   cudaq::spin_op hamiltonian(nodes.size());

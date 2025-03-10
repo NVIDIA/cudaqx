@@ -24,7 +24,7 @@ cudaq::spin_op jordan_wigner::generate(const double constant,
   assert(hpq.rank() == 2 && "hpq must be a rank-2 tensor");
   assert(hpqrs.rank() == 4 && "hpqrs must be a rank-4 tensor");
 
-  auto spin_hamiltonian = constant * cudaq::spin_op();
+  cudaq::spin_op spin_hamiltonian = constant * cudaq::spin_op::identity();
   std::size_t nqubit = hpq.shape()[0];
   double tol =
       options.get<double>(std::vector<std::string>{"tolerance", "tol"}, 1e-15);
