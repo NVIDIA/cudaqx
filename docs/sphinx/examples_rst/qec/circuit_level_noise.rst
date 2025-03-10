@@ -49,7 +49,7 @@ Here's how to use CUDA-Q QEC to perform a circuit-level noise model experiment i
 
 3. Noise model:
     - To add noisy gates we use the `cudaq.NoiseModel` type.
-    - CUDA-Q supports the generation of arbitrary noise channels, but here we use a `qec.TwoQubitDepolarization` channel to add a depolarization channel.
+    - CUDA-Q supports the generation of arbitrary noise channels. Here we use a `cudaq.Depolarization2` channel to add a depolarization channel.
     - This is added to the `CX` gate by adding it to the `X` gate with 1 control.
     - This noisy gate is added to every qubit via that `noise.add_all_qubit_channel` function.
 
