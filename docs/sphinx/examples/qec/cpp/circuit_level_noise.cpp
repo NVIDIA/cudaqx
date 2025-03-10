@@ -46,9 +46,8 @@ int main() {
   cudaq::noise_model noise;
 
   // Add a depolarization noise channel after each cx gate
-  noise.add_all_qubit_channel(
-      "x", cudaq::depolarization2(/*probability*/ 0.01),
-      /*numControls*/ 1);
+  noise.add_all_qubit_channel("x", cudaq::depolarization2(/*probability*/ 0.01),
+                              /*numControls*/ 1);
 
   // Perform a noisy z-basis memory circuit experiment
   auto [syndromes, data] = cudaq::qec::sample_memory_circuit(
