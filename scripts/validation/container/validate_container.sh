@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ============================================================================ #
-# Copyright (c) 2024 NVIDIA Corporation & Affiliates.                          #
+# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -14,7 +14,8 @@ CURRENT_ARCH=$(uname -m)
 PY_TARGETS=("nvidia" "nvidia --option fp64", "qpp-cpu")
 CPP_TARGETS=("nvidia" "nvidia --target-option fp64", "qpp-cpu")
 
-FINAL_IMAGE="ghcr.io/nvidia/cudaqx-private:latest"
+# FIXME - update this
+FINAL_IMAGE="ghcr.io/nvidia/cudaqx:latest"
 
 # Function to run Python tests
 run_python_tests() {
@@ -29,7 +30,7 @@ run_python_tests() {
     # Clone repository and run tests with specific target
     docker exec ${container_name} bash -c "\
         cd /home/cudaq && \
-        python3 -m pytest /opt/nvidia/cudaq/cudaqx_pytests -v"
+        python3 -m pytest /home/cudaq/cudaqx_pytests -v"
 
     local test_result=$?
     if [ ${test_result} -ne 0 ]; then
@@ -120,7 +121,7 @@ test_examples() {
 # Main execution
 echo "Starting CUDA-Q image validation for ${CURRENT_ARCH}..."
 
-tag="${FINAL_IMAGE}-${CURRENT_ARCH}"
+tag="${FINAL_IMAGE}"
 test_examples ${tag} || {
     echo "Tests failed for Python on ${CURRENT_ARCH}"
     exit 1
