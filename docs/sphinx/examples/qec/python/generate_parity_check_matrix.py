@@ -18,7 +18,7 @@ def construct_measurement_error_syndrome(distance, nRounds):
     # In this scheme, need two rounds for each measurement syndrome
     for i in range(nRounds - 1):
         for j in range(num_stabilizers):
-            syndrome = np.zeros((num_mea_q,), dtype=np.int8)
+            syndrome = np.zeros((num_mea_q,), dtype=np.uint8)
 
             # The error on ancilla (j) in round (i) affects stabilizer checks at two positions:
             # First occurrence in round i
@@ -50,7 +50,7 @@ def get_code_and_pcm(distance, nRounds):
 
     # Extends H to nRounds
     rows, cols = H.shape
-    H_nrounds = np.zeros((rows * nRounds, cols * nRounds), dtype=int)
+    H_nrounds = np.zeros((rows * nRounds, cols * nRounds), dtype=np.uint8)
     for i in range(nRounds):
         H_nrounds[i * rows:(i + 1) * rows, i * cols:(i + 1) * cols] = H
     print("H_nrounds\n", H_nrounds)
@@ -71,7 +71,8 @@ code, H_pcm, Mz = get_code_and_pcm(distance, nRounds)
 # Define the error probability
 p = 0.01
 noise = cudaq.NoiseModel()
-noise.add_all_qubit_channel("x", qec.TwoQubitDepolarization(p), 1)
+noise.add_all_qubit_channel("x", cudaq.Depolarization2(p), 1)
+noise.add_all_qubit_channel("mz", cudaq.BitFlipChannel(p))
 
 # Prepare the logical |0> state
 statePrep = qec.operation.prep0
