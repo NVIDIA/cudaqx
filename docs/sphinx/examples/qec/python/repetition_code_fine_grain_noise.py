@@ -47,5 +47,6 @@ noise_model.add_all_qubit_channel("mz", cudaq.BitFlipChannel(0.01))
 
 # Run the kernel and observe results
 # The percent of samples that are 000 corresponds to the logical error rate
+cudaq.set_target("stim")
 result = cudaq.sample(three_qubit_repetition_code, noise_model=noise_model)
 print(result)
