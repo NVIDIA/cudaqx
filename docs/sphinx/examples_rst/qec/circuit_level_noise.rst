@@ -75,3 +75,10 @@ Here's how to use CUDA-Q QEC to perform a circuit-level noise model experiment i
 
 The CUDA-Q QEC library thus provides a platform for numerical QEC experiments. The `qec.code` can be used to analyze a variety of QEC codes (both library or user provided), with a variety of decoders (both library or user provided).
 The CUDA-Q QEC library also provides tools to speed up the automation of generating noisy data and syndromes.
+
+Addtionally, here's how to use CUDA-Q QEC to construct a multi-round parity check matrix for the circuit-level noise model experiment in Python:
+
+.. tab:: Python
+
+   .. literalinclude:: ../../examples/qec/python/generate_parity_check_matrix.py
+      :language: python
