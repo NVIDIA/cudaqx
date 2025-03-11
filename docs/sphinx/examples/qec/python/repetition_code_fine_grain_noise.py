@@ -1,6 +1,7 @@
 import cudaq
 import numpy as np
 
+
 @cudaq.kernel
 def three_qubit_repetition_code():
     data_qubits = cudaq.qvector(3)
@@ -30,15 +31,14 @@ def three_qubit_repetition_code():
     s1 = mz(ancilla_qubits[1])
 
     # Correct errors based on syndromes
-    if s0 and s1: 
+    if s0 and s1:
         x(data_qubits[1])
-    elif s0: 
+    elif s0:
         x(data_qubits[0])
-    elif s1: 
+    elif s1:
         x(data_qubits[2])
 
     mz(data_qubits)
-
 
 
 noise_model = cudaq.NoiseModel()
