@@ -6,6 +6,7 @@ nRounds = 3
 nShots = 500
 p = 0.1
 
+
 # Construct the measurement error syndrome matrix based on the distance and number of rounds
 def construct_measurement_error_syndrome(distance, nRounds):
     num_stabilizers = distance - 1
@@ -32,6 +33,7 @@ def construct_measurement_error_syndrome(distance, nRounds):
 
     return np.array(syndrome_rows).T
 
+
 # Generate the parity check matrix for n-rounds by duplicating the input parity check matrix Hz
 # and appending the measurement error syndrome matrix.
 def get_code_and_pcm(distance, nRounds, Hz):
@@ -55,15 +57,16 @@ def get_code_and_pcm(distance, nRounds, Hz):
     print("Mz\n", Mz)
     assert H_nrounds.shape[0] == Mz.shape[
         0], "Dimensions of H_nrounds and Mz do not match"
-    
+
     # Append columns for measurement errors to H
     H_pcm = np.concatenate((H_nrounds, Mz), axis=1)
     print(f"H_pcm:\n{H_pcm}")
 
     return H_pcm, Mz
 
-# Example of how to construct a repetition code with a distance of 3 and random 
-# bit flip errors applied to the data qubits 
+
+# Example of how to construct a repetition code with a distance of 3 and random
+# bit flip errors applied to the data qubits
 @cudaq.kernel
 def three_qubit_repetition_code():
     data_qubits = cudaq.qvector(3)
@@ -115,7 +118,7 @@ result = cudaq.sample(three_qubit_repetition_code,
 
 # The following section will demonstrate how to decode the results
 # Get the parity check matrix for n-rounds of the repetition code
-Hz = [[1, 1, 0],[0, 1, 1]] # Parity check matrix for 1 round
+Hz = [[1, 1, 0], [0, 1, 1]]  # Parity check matrix for 1 round
 H_pcm, Mz = get_code_and_pcm(3, nRounds, Hz)
 
 # Get observables
