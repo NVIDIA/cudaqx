@@ -15,7 +15,7 @@ namespace cudaq::solvers {
 /// @brief UCCSD operator pool is a class with generates a pool
 /// of UCCSD operators for use in quantum algorithms, like Adapt-VQE.
 /// @details This class extends the operator_pool interface
-/// therefore inhers the extension_point template, allowing for
+/// therefore inherits the extension_point template, allowing for
 /// runtime extensibility.
 class uccsd : public operator_pool {
 
