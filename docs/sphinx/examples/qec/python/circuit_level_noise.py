@@ -22,7 +22,7 @@ nRounds = 4
 # error probabily
 p = 0.01
 noise = cudaq.NoiseModel()
-noise.add_all_qubit_channel("x", qec.TwoQubitDepolarization(p), 1)
+noise.add_all_qubit_channel("x", cudaq.Depolarization2(p), 1)
 
 # prepare logical |0> state, tells the sampler to do z-basis experiment
 statePrep = qec.operation.prep0

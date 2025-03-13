@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2024 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -46,9 +46,8 @@ int main() {
   cudaq::noise_model noise;
 
   // Add a depolarization noise channel after each cx gate
-  noise.add_all_qubit_channel(
-      "x", cudaq::qec::two_qubit_depolarization(/*probability*/ 0.01),
-      /*numControls*/ 1);
+  noise.add_all_qubit_channel("x", cudaq::depolarization2(/*probability*/ 0.01),
+                              /*numControls*/ 1);
 
   // Perform a noisy z-basis memory circuit experiment
   auto [syndromes, data] = cudaq::qec::sample_memory_circuit(
