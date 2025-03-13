@@ -4,7 +4,9 @@ import numpy as np
 
 nRounds = 3
 nShots = 500
-p = 0.1
+# Physical error rate
+p_per_round = 0.01
+p_per_mz = 0.01
 
 
 # Construct the measurement error syndrome matrix based on the distance and number of rounds
