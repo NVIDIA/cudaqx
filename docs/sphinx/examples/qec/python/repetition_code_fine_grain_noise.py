@@ -38,7 +38,7 @@ def construct_measurement_error_syndrome(distance, nRounds):
 
 # Generate the parity check matrix for n-rounds by duplicating the input parity check matrix Hz
 # and appending the measurement error syndrome matrix.
-def get_code_and_pcm(distance, nRounds, Hz):
+def get_circuit_level_pcm(distance, nRounds, Hz):
     if nRounds < 2:
         raise ValueError("nRounds must be greater than or equal to 2")
     if distance < 3:
@@ -55,16 +55,16 @@ def get_code_and_pcm(distance, nRounds, Hz):
     print("H_nrounds\n", H_nrounds)
 
     # Construct the measurement error syndrome matrix for Z errors
-    Mz = construct_measurement_error_syndrome(distance, nRounds)
-    print("Mz\n", Mz)
-    assert H_nrounds.shape[0] == Mz.shape[
-        0], "Dimensions of H_nrounds and Mz do not match"
+    H_mz = construct_measurement_error_syndrome(distance, nRounds)
+    print("H_mz\n", H_mz)
+    assert H_nrounds.shape[0] == H_mz.shape[
+        0], "Dimensions of H_nrounds and H_mz do not match"
 
     # Append columns for measurement errors to H
-    H_pcm = np.concatenate((H_nrounds, Mz), axis=1)
+    H_pcm = np.concatenate((H_nrounds, H_mz), axis=1)
     print(f"H_pcm:\n{H_pcm}")
 
-    return H_pcm, Mz
+    return H_pcm
 
 
 # Example of how to construct a repetition code with a distance of 3 and random
@@ -121,7 +121,7 @@ result = cudaq.sample(three_qubit_repetition_code,
 # The following section will demonstrate how to decode the results
 # Get the parity check matrix for n-rounds of the repetition code
 Hz = [[1, 1, 0], [0, 1, 1]]  # Parity check matrix for 1 round
-H_pcm, Mz = get_code_and_pcm(3, nRounds, Hz)
+H_pcm = get_circuit_level_pcm(3, nRounds, Hz)
 
 # Get observables
 observables = np.array([1, 0, 0, 0, 0, 0], dtype=np.uint8)
@@ -130,7 +130,8 @@ print(f"observables:\n{observables}")
 print(f"Lz:\n{Lz}")
 # Pad the observables to be the same dimension as the decoded observable
 Lz_nrounds = np.tile(Lz, nRounds)
-Lz_nround_mz = np.pad(Lz_nrounds, (0, Mz.shape[1]), mode='constant')
+pad_size = max(0, H_pcm.shape[1] - Lz_nrounds.shape[0])
+Lz_nround_mz = np.pad(Lz_nrounds, (0, pad_size), mode='constant')
 print(f"Lz_nround_mz\n{Lz_nround_mz}")
 
 # Get a decoder
