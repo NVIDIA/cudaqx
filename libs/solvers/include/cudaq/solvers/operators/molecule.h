@@ -110,7 +110,10 @@ struct molecule_options {
   std::string python_path = "";
 
   /// @brief Method for mapping fermionic operators to qubit operators
-  /// default "jordan_wigner"
+  ///
+  /// Currently two methods are available:
+  /// - "jordan_wigner": the standard Jordan-Wigner transformation, default.
+  /// - "bravyi_kitaev": Bravyi and Kitaev's mapping.
   std::string fermion_to_spin = "jordan_wigner";
 
   /// @brief Type of molecular system
