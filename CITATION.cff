@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+title: CUDA-QX
+message: >-
+  If you use CUDA-QX in your work, please cite it as well as
+  [CUDA-Q](https://github.com/NVIDIA/cuda-quantum). Thanks!
+type: software
+authors:
+  - name: NVIDIA Corporation, CUDA-QX Development Team
+    address: 2788 San Tomas Expy
+    city: Santa Clara
+    region: California
+    post-code: '95051'
+    tel: '+1 408-486-2000'
+repository-code: 'https://github.com/NVIDIA/cudaqx'
+url: 'https://nvidia.github.io/cudaqx/'
+license: Apache-2.0
+license-url: 'https://github.com/NVIDIA/cudaqx/blob/main/LICENSE'
