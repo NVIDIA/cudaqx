@@ -19,7 +19,7 @@ namespace cudaq::solvers {
 /// of operators with the spin complement ground state degeneracy method for use
 /// in quantum algorithms, like Adapt-VQE.
 /// @details This class extends the operator_pool interface
-/// therefore inhers extension_point template, allowing for
+/// therefore inherits extension_point template, allowing for
 /// runtime extensibility.
 class spin_complement_gsd : public operator_pool {
 
