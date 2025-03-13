@@ -78,7 +78,7 @@ def three_qubit_repetition_code():
     for i in range(nRounds):
         # Random Bit Flip Errors
         for j in range(3):
-            cudaq.apply_noise(cudaq.XError, p, data_qubits[j])
+            cudaq.apply_noise(cudaq.XError, p_per_round, data_qubits[j])
 
         # Extract Syndromes
         h(ancilla_qubits)
@@ -106,7 +106,7 @@ def three_qubit_repetition_code():
 # Create a noise model
 noise_model = cudaq.NoiseModel()
 # Add measurement noise
-noise_model.add_all_qubit_channel("mz", cudaq.BitFlipChannel(0.01))
+noise_model.add_all_qubit_channel("mz", cudaq.BitFlipChannel(p_per_mz))
 
 # Run the kernel and observe results
 # The percent of samples that are 000 corresponds to the logical error rate

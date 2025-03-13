@@ -111,7 +111,7 @@ additional ways to introduce errors into a quantum kernel:
             # Inject a Y error into the second qubit
             cudaq.apply_noise(cudaq.YError, 0.1, q[1])
 
-            # Apply a general Pauli noise channel to the third qubit
+            # Apply a general Pauli noise channel to the third qubit, where the 3 values indicate the probability of X, Y, and Z errors.
             cudaq.apply_noise(cudaq.Pauli1, 0.1, 0.1, 0.1, q[2])
 
         # Define and apply a noise model
