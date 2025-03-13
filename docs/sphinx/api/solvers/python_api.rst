@@ -6,6 +6,8 @@ CUDA-Q Solvers Python API
 
 .. autofunction:: cudaq_solvers.jordan_wigner
 
+.. autofunction:: cudaq_solvers.bravyi_kitaev
+
 .. autoclass:: cudaq_solvers.MolecularHamiltonian
     :members:
 
