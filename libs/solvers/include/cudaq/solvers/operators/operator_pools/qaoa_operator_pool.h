@@ -15,7 +15,7 @@ namespace cudaq::solvers {
 /// @brief QAOA operator pool is a class with generates a pool
 /// of QAOA operators for use in quantum algorithms, like Adapt-QAOA.
 /// @details This class extends the operator_pool interface
-/// therefore inhers the extension_point template, allowing for
+/// therefore inherits the extension_point template, allowing for
 /// runtime extensibility.
 class qaoa_pool : public operator_pool {
 public:
