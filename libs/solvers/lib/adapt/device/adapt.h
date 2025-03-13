@@ -27,6 +27,8 @@ namespace cudaq {
 /// @param coefficients Vector of coefficients for the Hamiltonian terms
 /// @param trotterOpList Vector of Pauli words representing the Trotter
 /// operators
+/// @param poolIndices Vector of indices indicating which terms belong to which
+/// operator
 ///
 /// @note This is a CUDA-Q quantum kernel function and should be executed within
 /// the CUDA-Q framework. It applies the ADAPT-VQE circuit construction based on
@@ -37,6 +39,7 @@ void adapt_kernel(std::size_t numQubits,
                   const cudaq::qkernel<void(cudaq::qvector<> &)> &statePrep,
                   const std::vector<double> &thetas,
                   const std::vector<double> &coefficients,
-                  const std::vector<cudaq::pauli_word> &trotterOpList);
+                  const std::vector<cudaq::pauli_word> &trotterOpList,
+                  const std::vector<size_t> poolIndices);
 
 } // namespace cudaq

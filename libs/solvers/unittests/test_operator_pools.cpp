@@ -7,7 +7,11 @@
  ******************************************************************************/
 
 #include "cudaq/solvers/operators/operator_pool.h"
+#include <complex>
+#include <cstddef>
 #include <gtest/gtest.h>
+#include <string>
+#include <vector>
 
 using namespace cudaqx;
 
@@ -57,8 +61,13 @@ TEST(UCCSDTest, GenerateWithCustomCoefficients) {
     });
   }
 
-  for (size_t j = 0; j < temp_coeffs.size(); ++j)
-    EXPECT_DOUBLE_EQ(1.0, std::abs(temp_coeffs[j].real()));
+  for (size_t j = 0; j < temp_coeffs.size(); ++j) {
+    double real_part = temp_coeffs[j].real();
+    EXPECT_TRUE(real_part == 0.5 || real_part == -0.5 || real_part == 0.125 ||
+                real_part == -0.125)
+        << "Coefficient at index " << j
+        << " has unexpected value: " << real_part;
+  }
 }
 
 TEST(UCCSDTest, GenerateWithOddElectrons) {
@@ -104,43 +113,59 @@ TEST(UccsdOperatorPoolTest, GeneratesCorrectOperators) {
   auto operators = pool->generate(config);
 
   // Convert SpinOperators to strings
-  std::vector<std::string> terms_strings;
-  std::vector<std::string> operator_strings;
+  std::vector<std::vector<std::string>> terms_strings;
+  std::vector<std::vector<std::complex<double>>> coefficients;
   for (const auto &op : operators) {
+    std::vector<std::complex<double>> temp_coeffs;
+    std::vector<std::string> string_rep;
     op.for_each_term([&](const auto &term) {
-      terms_strings.push_back(term.to_string(false));
+      string_rep.push_back(term.to_string(false));
+      temp_coeffs.push_back(term.get_coefficient());
     });
-    operator_strings.push_back(op.to_string(false));
+    terms_strings.push_back(string_rep);
+    coefficients.push_back(temp_coeffs);
   }
 
   // Assert
-  std::vector<std::string> expected_terms = {"XZYI", "YZXI", "IXZY", "IYZX",
-                                             "YYYX", "YXXX", "XXYX", "YYXY",
-                                             "XYYY", "XXXY", "YXYY", "XYXX"};
+  std::vector<std::vector<std::string>> expected_operators = {
+      {"XZYI", "YZXI"},
+      {"IXZY", "IYZX"},
+      {"YYYX", "YXXX", "XXYX", "YYXY", "XYYY", "XXXY", "YXYY", "XYXX"}};
 
-  std::vector<std::string> expected_operators = {
-      "XZYIYZXI", "IXZYIYZX", "XXXYXXYXXYXXXYYYYXXXYXYYYYXYYYYX"};
-
-  ASSERT_EQ(terms_strings.size(), expected_terms.size())
+  std::vector<std::vector<std::complex<double>>> expected_coefficients = {
+      {std::complex<double>(-0.5, 0), std::complex<double>(0.5, 0)},
+      {std::complex<double>(-0.5, 0), std::complex<double>(0.5, 0)},
+      {std::complex<double>(-0.125, 0), std::complex<double>(-0.125, 0),
+       std::complex<double>(0.125, 0), std::complex<double>(-0.125, 0),
+       std::complex<double>(0.125, 0), std::complex<double>(0.125, 0),
+       std::complex<double>(0.125, 0), std::complex<double>(-0.125, 0)}};
+  ASSERT_EQ(terms_strings.size(), expected_operators.size())
       << "Number of generated operators does not match expected count";
 
-  for (size_t i = 0; i < expected_terms.size(); ++i) {
-    EXPECT_EQ(terms_strings[i], expected_terms[i]) << "Mismatch at index " << i;
-  }
-
   for (size_t i = 0; i < expected_operators.size(); ++i) {
-    EXPECT_EQ(operator_strings[i], expected_operators[i])
-        << "Mismatch operators at index " << i;
+    for (size_t j = 0; j < expected_operators[i].size(); ++j) {
+
+      EXPECT_EQ(expected_operators[i][j].length(), 4)
+          << "Operator " << expected_operators[i][j]
+          << " does not have the expected length of 4";
+
+      EXPECT_EQ(terms_strings[i][j], expected_operators[i][j])
+          << "Mismatch at index " << i << ", " << j;
+      std::cout << coefficients[i][j] << std::endl;
+      std::cout << expected_coefficients[i][j] << std::endl;
+      EXPECT_EQ(coefficients[i][j], expected_coefficients[i][j])
+          << "Mismatch at index " << i << ", " << j;
+    }
   }
 
   // Additional checks
-  for (const auto &term_string : terms_strings) {
-    EXPECT_EQ(term_string.length(), 4)
-        << "Operator " << term_string
-        << " does not have the expected length of 4";
-
-    EXPECT_TRUE(term_string.find_first_not_of("IXYZ") == std::string::npos)
-        << "Operator " << term_string << " contains invalid characters";
+  for (size_t k = 0; k < terms_strings.size(); ++k) {
+    for (size_t l = 0; l < terms_strings[k].size(); ++l) {
+      std::string term_string = terms_strings[k][l];
+      EXPECT_EQ(term_string.size(), 4)
+          << "Operator  " << term_string
+          << " does not have the expected length of 4";
+    }
   }
 }
 

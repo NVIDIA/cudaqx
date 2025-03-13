@@ -37,9 +37,9 @@ uccsd::generate(const heterogeneous_map &config) const {
     cudaq::spin_op o(numQubits);
     for (std::size_t i = p + 1; i < q; i++)
       o *= cudaq::spin::z(i);
-
-    ops.emplace_back(cudaq::spin::y(p) * o * cudaq::spin::x(q) -
-                     cudaq::spin::x(p) * o * cudaq::spin::y(q));
+    std::complex<double> c = {0.5, 0};
+    ops.emplace_back(c * cudaq::spin::y(p) * o * cudaq::spin::x(q) -
+                     c * cudaq::spin::x(p) * o * cudaq::spin::y(q));
   };
 
   auto addDoublesExcitation = [numQubits](std::vector<cudaq::spin_op> &ops,
@@ -64,9 +64,7 @@ uccsd::generate(const heterogeneous_map &config) const {
       j_occ = q;
       a_virt = s;
       b_virt = r;
-    } else if
-
-        (p > q && r < s) {
+    } else if (p > q && r < s) {
       i_occ = q;
       j_occ = p;
       a_virt = r;
@@ -95,7 +93,9 @@ uccsd::generate(const heterogeneous_map &config) const {
                     cudaq::spin::x(a_virt) * parity_b * cudaq::spin::y(b_virt);
     op_term_temp -= cudaq::spin::y(i_occ) * parity_a * cudaq::spin::y(j_occ) *
                     cudaq::spin::y(a_virt) * parity_b * cudaq::spin::x(b_virt);
-    ops.emplace_back(op_term_temp);
+
+    std::complex<double> c = {0.125, 0};
+    ops.emplace_back(c * op_term_temp);
   };
 
   for (auto &sa : singlesAlpha)
