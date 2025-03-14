@@ -139,7 +139,7 @@ TEST(UccsdOperatorPoolTest, GeneratesCorrectOperators) {
        std::complex<double>(0.125, 0), std::complex<double>(-0.125, 0),
        std::complex<double>(0.125, 0), std::complex<double>(0.125, 0),
        std::complex<double>(0.125, 0), std::complex<double>(-0.125, 0)}};
-  ASSERT_EQ(terms_strings.size(), expected_operators.size())
+  EXPECT_EQ(terms_strings.size(), expected_operators.size())
       << "Number of generated operators does not match expected count";
 
   for (size_t i = 0; i < expected_operators.size(); ++i) {
