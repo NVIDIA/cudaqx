@@ -6,6 +6,12 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
+#include <cmath>
+#include <cstddef>
+#include <cstdio>
+#include <fmt/core.h>
+#include <iostream>
+
 #include "common/Logger.h"
 #include "cudaq.h"
 
@@ -14,7 +20,6 @@
 #include "cudaq/solvers/adapt/adapt_simulator.h"
 #include "cudaq/solvers/vqe.h"
 
-#include <iostream>
 #include <nlohmann/json.hpp>
 
 namespace cudaq::solvers::adapt {
@@ -30,8 +35,17 @@ simulator::run(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
 
   std::vector<cudaq::pauli_word> pauliWords;
   std::vector<double> thetas, coefficients;
+  std::vector<std::size_t> poolIndices;
   std::vector<cudaq::spin_op> chosenOps;
+  double latestEnergy = std::numeric_limits<double>::max();
+  double ediff = std::numeric_limits<double>::max();
+
+  int maxIter = options.get<int>("maxIter", 30);
   auto tol = options.get<double>("grad_norm_tolerance", 1e-5);
+  auto tolNormDiff = options.get<double>("grad_norm_diff_tolerance", 1e-5);
+  auto thresholdE = options.get<double>("threshold_energy", 1e-6);
+  auto initTheta = options.get<double>("initial_theta", 0.0);
+
   auto numQubits = H.num_qubits();
   // Assumes each rank can see numQpus, models a distributed
   // architecture where each rank is a compute node, and each node
@@ -51,9 +65,39 @@ simulator::run(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
   std::size_t remainder = total_elements % numRanks;
   std::size_t start = rank * elements_per_rank + std::min(rank, remainder);
   std::size_t end = start + elements_per_rank + (rank < remainder ? 1 : 0);
-  for (int i = start; i < end; i++) {
-    auto op = pool[i];
-    commutators.emplace_back(H * op - op * H);
+
+  // Check if operator has only imaginary coefficients
+  // checking the first one is enough, we assume the pool is homogeneous
+  const auto &c = pool[0].begin()->get_coefficient();
+  bool isImaginary =
+      (std::abs(c.real()) <= 1e-9) && (std::abs(c.imag()) > 1e-9);
+  auto coeff = (!isImaginary) ? std::complex<double>{0.0, 1.0}
+                              : std::complex<double>{1.0, 0.0};
+
+  auto cleanCommutator =
+      [](cudaq::spin_op commutator) -> std::tuple<cudaq::spin_op, std::size_t> {
+    cudaq::spin_op cleaned;
+    std::size_t numTerms = 0;
+    commutator.for_each_term([&](const auto &term) {
+      if (term.get_coefficient().real() != 0.0 ||
+          term.get_coefficient().imag() != 0.0) {
+        if (numTerms == 0) {
+          cleaned = term;
+          numTerms++;
+        } else {
+          cleaned += term;
+          numTerms++;
+        }
+      }
+    });
+    return std::make_tuple(cleaned, numTerms);
+  };
+
+  for (auto &op : pool) {
+    auto commutator = H * op - op * H;
+    auto [cleanedCom, numTerms] = cleanCommutator(commutator);
+    if (numTerms > 0)
+      commutators.push_back(coeff * cleanedCom);
   }
 
   nlohmann::json initInfo = {{"num-qpus", numQpus},
@@ -70,9 +114,18 @@ simulator::run(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
 
   // Start of with the initial |psi_n>
   cudaq::state state = get_state(adapt_kernel, numQubits, initialState, thetas,
-                                 coefficients, pauliWords);
-  std::size_t count = 0;
+                                 coefficients, pauliWords, poolIndices);
+
+  int step = 0;
   while (true) {
+    printf("Step %d\n", step);
+    if (step >= maxIter) {
+      std::cerr
+          << "Warning: Timed out, number of iteration steps exceeds maxIter!"
+          << std::endl;
+      break;
+    }
+    step++;
 
     // Step 1 - compute <psi|[H,Oi]|psi> vector
     std::vector<double> gradients;
@@ -101,15 +154,16 @@ simulator::run(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
     double norm = 0.0;
     for (auto &g : gradients)
       norm += g * g;
+    norm = std::sqrt(norm);
 
     // All ranks have a norm, need to reduce that across all
     if (mpi::is_initialized())
       norm = cudaq::mpi::all_reduce(norm, std::plus<double>());
 
-    // All ranks have a max gradient and index
     auto iter = std::max_element(gradients.begin(), gradients.end());
     double maxGrad = *iter;
     auto maxOpIdx = std::distance(gradients.begin(), iter);
+
     if (mpi::is_initialized()) {
       std::vector<int> allMaxOpIndices(numRanks);
       std::vector<double> allMaxGrads(numRanks);
@@ -140,16 +194,22 @@ simulator::run(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
     }
 
     // Convergence is reached if gradient values are small
-    if (std::sqrt(std::fabs(norm)) < tol || std::fabs(lastNorm - norm) < tol)
+    if (norm < tol || std::fabs(lastNorm - norm) < tolNormDiff ||
+        ediff < thresholdE)
       break;
 
     // Use the operator from the pool
     auto op = pool[maxOpIdx];
+    if (!isImaginary)
+      op = std::complex<double>{0.0, 1.0} * pool[maxOpIdx];
+
     chosenOps.push_back(op);
-    thetas.push_back(0.0);
+    thetas.push_back(initTheta);
+
     for (auto o : op) {
       pauliWords.emplace_back(o.to_string(false));
       coefficients.push_back(o.get_coefficient().imag());
+      poolIndices.push_back(maxOpIdx);
     }
 
     optim::optimizable_function objective;
@@ -159,13 +219,9 @@ simulator::run(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
       objective = [&, thetas, coefficients](const std::vector<double> &x,
                                             std::vector<double> &dx) mutable {
         auto res = cudaq::observe(adapt_kernel, H, numQubits, initialState, x,
-                                  coefficients, pauliWords);
+                                  coefficients, pauliWords, poolIndices);
         if (options.get("verbose", false))
           printf("<H> = %.12lf\n", res.expectation());
-        // data.emplace_back(x, res, observe_execution_type::function);
-        // for (auto datum : gradient->data)
-        //   data.push_back(datum);
-
         return res.expectation();
       };
     } else {
@@ -178,23 +234,19 @@ simulator::run(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
           [&, thetas, coefficients, pauliWords](const std::vector<double> xx) {
             std::apply([&](auto &&...new_args) { adapt_kernel(new_args...); },
                        std::forward_as_tuple(numQubits, initialState, xx,
-                                             coefficients, pauliWords));
+                                             coefficients, pauliWords,
+                                             poolIndices));
           },
           H);
       objective = [&, thetas, coefficients](const std::vector<double> &x,
                                             std::vector<double> &dx) mutable {
         // FIXME get shots in here...
         auto res = cudaq::observe(adapt_kernel, H, numQubits, initialState, x,
-                                  coefficients, pauliWords);
+                                  coefficients, pauliWords, poolIndices);
         if (options.get("verbose", false))
           printf("<H> = %.12lf\n", res.expectation());
         defaultGradient->compute(x, dx, res.expectation(),
                                  options.get("shots", -1));
-
-        // data.emplace_back(x, res, observe_execution_type::function);
-        // for (auto datum : gradient->data)
-        //   data.push_back(datum);
-
         return res.expectation();
       };
     }
@@ -210,7 +262,10 @@ simulator::run(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
     // Set the norm for the next iteration's check
     lastNorm = norm;
     state = get_state(adapt_kernel, numQubits, initialState, thetas,
-                      coefficients, pauliWords);
+                      coefficients, pauliWords, poolIndices);
+
+    ediff = std::fabs(latestEnergy - groundEnergy);
+    latestEnergy = groundEnergy;
   }
 
   return std::make_tuple(energy, thetas, chosenOps);
