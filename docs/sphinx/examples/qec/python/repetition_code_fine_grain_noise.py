@@ -6,6 +6,7 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
+# [Begin Documentation]
 import cudaq
 import cudaq_qec as qec
 import numpy as np

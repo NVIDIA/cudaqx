@@ -36,11 +36,13 @@ Here's how to use CUDA-Q QEC to perform a code capacity noise model experiment i
 
    .. literalinclude:: ../../examples/qec/python/code_capacity_noise.py
       :language: python
+      :start-after: [Begin Documentation]
 
 .. tab:: C++
 
    .. literalinclude:: ../../examples/qec/cpp/code_capacity_noise.cpp
       :language: cpp
+      :start-after: [Begin Documentation]
 
    Compile and run with
 
