@@ -813,7 +813,7 @@ Function Variants
         # Memory circuit with noise model
         noise = cudaq.NoiseModel()
         # Configure noise
-        noise.add_all_qubit_channel("x", qec.TwoQubitDepolarization(0.01), 1)
+        noise.add_all_qubit_channel("x", cudaq.Depolarization2(0.01), 1)
         syndromes, measurements = qec.sample_memory_circuit(
             code,             # QEC code instance
             numShots=1000,    # Number of shots
@@ -889,7 +889,7 @@ Example of running a memory experiment:
 
         # Configure noise
         noise = cudaq.NoiseModel()
-        noise.add_all_qubit_channel("x", qec.TwoQubitDepolarization(0.01), 1)
+        noise.add_all_qubit_channel("x", cudaq.Depolarization2(0.01), 1)
 
         # Run memory experiment
         syndromes, measurements = qec.sample_memory_circuit(
@@ -930,7 +930,7 @@ Example of running a memory experiment:
 
           // Configure noise model
           cudaq::noise_model noise;
-          noise.add_all_qubit_channel("x", cudaq::qec::two_qubit_depolarization(0.1),
+          noise.add_all_qubit_channel("x", cudaq::depolarization2(0.1),
                               /*num_controls=*/1);
 
           // Run memory experiment
@@ -970,7 +970,7 @@ Additional Noise Models
      noise.add_all_qubit_channel('h', cudaq.BitFlipChannel(0.001))
 
      # Specify two qubit errors
-     noise.add_all_qubit_channel("x", qec.TwoQubitDepolarization(p), 1)
+     noise.add_all_qubit_channel("x", cudaq.Depolarization2(p), 1)
 
 .. tab:: C++
 
@@ -978,12 +978,12 @@ Additional Noise Models
 
       cudaq::noise_model noise;
 
-      # Add multiple error channels
+      // Add multiple error channels
       noise.add_all_qubit_channel(
-          "x", cudaq::BitFlipChannel(/*probability*/ 0.01));
+          "x", cudaq::bit_flip_channel(/*probability*/ 0.01));
 
-      # Specify two qubit errors
+      // Specify two qubit errors
       noise.add_all_qubit_channel(
-          "x", cudaq::qec::two_qubit_depolarization(/*probability*/ 0.01),
+          "x", cudaq::depolarization2(/*probability*/ 0.01),
           /*numControls*/ 1);
 

@@ -19,6 +19,8 @@ jobs:
       build-all: ${{ steps.filter.outputs.build-all }}
       build-qec: ${{ steps.filter.outputs.build-qec }}
       build-solvers: ${{ steps.filter.outputs.build-solvers }}
+      build-examples-qec: ${{ steps.filter.outputs.build-examples-qec }}
+      build-examples-solvers: ${{ steps.filter.outputs.build-examples-solvers }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
