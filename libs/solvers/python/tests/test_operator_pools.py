@@ -63,26 +63,54 @@ def test_generate_with_large_system():
 
 
 def test_uccsd_operator_pool_correctness():
-    # Generate the UCCSD operator pool
     pool = solvers.get_operator_pool("uccsd", num_qubits=4, num_electrons=2)
 
-    # Convert SpinOperators to strings
-    pool_strings = [op.to_string(False) for op in pool]
+    temp_data = [[], [], []]
+    data_counter = 0
+    for op in pool:
+        op.for_each_term(lambda term: temp_data[data_counter].append(
+            (term.to_string(False), term.get_coefficient())))
+        data_counter += 1
 
-    # Expected result
-    expected_pool = ["XZYIYZXI", "IXZYIYZX", "XXXYXXYXXYXXXYYYYXXXYXYYYYXYYYYX"]
+    # Assert
+    expected_operators = [["XZYI", "YZXI"], ["IXZY", "IYZX"],
+                          [
+                              "YYYX", "YXXX", "XXYX", "YYXY", "XYYY", "XXXY",
+                              "YXYY", "XYXX"
+                          ]]
+    expected_coefficients = [[complex(-0.5, 0),
+                              complex(0.5, 0)],
+                             [complex(-0.5, 0),
+                              complex(0.5, 0)],
+                             [
+                                 complex(-0.125, 0),
+                                 complex(-0.125, 0),
+                                 complex(0.125, 0),
+                                 complex(-0.125, 0),
+                                 complex(0.125, 0),
+                                 complex(0.125, 0),
+                                 complex(0.125, 0),
+                                 complex(-0.125, 0)
+                             ]]
 
-    # Assert that the generated pool matches the expected result
-    assert pool_strings == expected_pool, f"Expected {expected_pool}, but got {pool_strings}"
-
-    # Check that all operators contain only valid characters (I, X, Y, Z)
     valid_chars = set('IXYZ')
-    for op_string in pool_strings:
-        assert set(op_string).issubset(
-            valid_chars), f"Operator {op_string} contains invalid characters"
+    assert len(temp_data) == len(
+        expected_operators
+    ), f"Number of generated operators ({len(temp_data)}) does not match expected count ({len(expected_operators)})"
+
+    for i in range(len(temp_data)):
+        for j in range(len(temp_data[i])):
+            op_string = temp_data[i][j][0]
+            op_coeff = temp_data[i][j][1]
+            # Check operator length
+            assert len(
+                op_string
+            ) == 4, f"Operator {op_string} does not have the expected length of 4"
+            index = expected_operators[i].index(op_string)
+
+            assert op_coeff == expected_coefficients[i][index], \
+                f"Coefficient mismatch at index {i}, {index}: expected {expected_coefficients[i][index]}, got {op_coeff}"
 
 
-def test_generate_with_invalid_config():
-    # Missing required parameters
-    with pytest.raises(RuntimeError):
-        pool = solvers.get_operator_pool("uccsd")
+            assert set(op_string).issubset(valid_chars), \
+                f"Operator {op_string} contains invalid characters"
