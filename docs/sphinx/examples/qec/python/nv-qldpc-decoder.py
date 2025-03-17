@@ -120,7 +120,8 @@ def run_decoder(filename, num_shots, run_as_batched):
         nv_dec_args['bp_batch_size'] = min(1000, num_shots)
 
     try:
-        nv_dec_gpu_and_cpu = qec.get_decoder("nv-qldpc-decoder", H, **nv_dec_args)
+        nv_dec_gpu_and_cpu = qec.get_decoder("nv-qldpc-decoder", H,
+                                             **nv_dec_args)
     except Exception as e:
         print(
             'The nv-qldpc-decoder is not available with your current CUDA-Q ' +
