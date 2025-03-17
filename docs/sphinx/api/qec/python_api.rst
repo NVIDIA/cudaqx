@@ -10,14 +10,19 @@ Code
 .. autoclass:: cudaq_qec.Code
     :members:
 
-Decoder
-=============
+Decoder Interfaces
+==================
 
 .. autoclass:: cudaq_qec.Decoder
     :members:
 
 .. autoclass:: cudaq_qec.DecoderResult
     :members:
+
+Built-in Decoders
+=================
+
+.. include:: nv_qldpc_decoder_api.rst
 
 Common
 =============

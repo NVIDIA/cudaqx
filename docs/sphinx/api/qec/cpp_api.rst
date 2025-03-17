@@ -23,8 +23,8 @@ Code
     :members:
 
 
-Decoder
-=============
+Decoder Interfaces
+==================
 
 .. doxygenclass:: cudaq::qec::decoder
     :members:
@@ -32,6 +32,10 @@ Decoder
 .. doxygenstruct:: cudaq::qec::decoder_result
     :members:
 
+Built-in Decoders
+=================
+
+.. include:: nv_qldpc_decoder_api.rst
 
 Common
 =============
