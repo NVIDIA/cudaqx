@@ -111,6 +111,5 @@ def test_uccsd_operator_pool_correctness():
             assert op_coeff == expected_coefficients[i][index], \
                 f"Coefficient mismatch at index {i}, {index}: expected {expected_coefficients[i][index]}, got {op_coeff}"
 
-
             assert set(op_string).issubset(valid_chars), \
                 f"Operator {op_string} contains invalid characters"
