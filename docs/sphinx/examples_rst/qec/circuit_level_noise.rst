@@ -128,7 +128,7 @@ Getting Started with the NVIDIA QLDPC Decoder
 
 Starting with CUDA-Q QEC v0.2, a GPU-accelerated decoder is included with the
 CUDA-Q QEC library. The library follows the CUDA-Q decoder Python and C++ interfaces
-for (namely :class:`cudaq_qec.Decoder` for Python and
+(namely :class:`cudaq_qec.Decoder` for Python and
 :cpp:class:`cudaq::qec::decoder` for C++), but as documented in the API sections
 (:ref:`nv_qldpc_decoder_api_python` for Python and
 :ref:`nv_qldpc_decoder_api_cpp` for C++), there are many configuration options
