@@ -5,6 +5,7 @@
  * This source code and the accompanying materials are made available under    *
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
+// [Begin Documentation]
 #include "cudaq.h"
 #include "cudaq/solvers/adapt.h"
 #include "cudaq/solvers/operators.h"

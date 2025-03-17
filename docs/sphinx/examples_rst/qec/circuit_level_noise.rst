@@ -26,11 +26,13 @@ Here's how to use CUDA-Q QEC to perform a circuit-level noise model experiment i
 
    .. literalinclude:: ../../examples/qec/python/circuit_level_noise.py
       :language: python
+      :start-after: [Begin Documentation]
 
 .. tab:: C++
 
    .. literalinclude:: ../../examples/qec/cpp/circuit_level_noise.cpp
       :language: cpp
+      :start-after: [Begin Documentation]
 
    Compile and run with
 
@@ -82,6 +84,7 @@ Addtionally, here's how to use CUDA-Q QEC to construct a multi-round parity chec
 
    .. literalinclude:: ../../examples/qec/python/repetition_code_fine_grain_noise.py
       :language: python
+      :start-after: [Begin Documentation]
 
 This example illustrates how to:
 

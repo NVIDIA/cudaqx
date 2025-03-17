@@ -26,11 +26,13 @@ CUDA-Q Solvers provides a high-level interface for running VQE simulations. Here
 
    .. literalinclude:: ../../examples/solvers/python/uccsd_vqe.py
       :language: python
+      :start-after: [Begin Documentation]
 
 .. tab:: C++
 
    .. literalinclude:: ../../examples/solvers/cpp/uccsd_vqe.cpp
       :language: cpp
+      :start-after: [Begin Documentation]
 
    Compile and run with
 
