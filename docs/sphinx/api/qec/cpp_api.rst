@@ -35,6 +35,11 @@ Decoder Interfaces
 Built-in Decoders
 =================
 
+.. _nv_qldpc_decoder_api_cpp:
+
+NVIDIA QLDPC Decoder
+--------------------
+
 .. include:: nv_qldpc_decoder_api.rst
 
 Common

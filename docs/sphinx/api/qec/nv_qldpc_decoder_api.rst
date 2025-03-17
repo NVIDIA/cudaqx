@@ -33,7 +33,7 @@
                           [0, 1, 0, 1, 1, 0, 1],
                           [0, 0, 1, 0, 1, 1, 1]], dtype=np.uint8) # sample 3x7 PCM
             opts = dict() # see below for options
-            nvdec = qec.get_decoder('nv-qldpc-decoder', H, opts)
+            nvdec = qec.get_decoder('nv-qldpc-decoder', H, **opts)
 
       .. tab:: C++
 
@@ -56,8 +56,8 @@
       
     .. note::
       The `"nv-qldpc-decoder"` implements the :class:`cudaq_qec.Decoder`
-      interface for Python and the :class:`cudaq::qec::decoder` interface for
-      C++, so it supports all the methods in those respective classes.
+      interface for Python and the :cpp:class:`cudaq::qec::decoder` interface
+      for C++, so it supports all the methods in those respective classes.
 
     :param H: Parity check matrix (tensor format)
     :param params: Heterogeneous map of parameters:

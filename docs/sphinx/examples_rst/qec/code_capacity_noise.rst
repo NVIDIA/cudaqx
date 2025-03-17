@@ -74,7 +74,7 @@ Code Explanation
     - Since we are using the `Z` parity check matrix `H_Z`, we want to simulate random `X` errors on our 7 data qubits.
 
 4. Logical Errors:
-    - Once we have noisy data, we see what the resuling syndromes are by multiplying our noisy data vector with our parity check matrix (mod 2).
+    - Once we have noisy data, we see what the resulting syndromes are by multiplying our noisy data vector with our parity check matrix (mod 2).
     - From this syndrome, we see what the decoder predicts what errors occurred in the data.
     - To classify as a logical error, the decoder does not need to exactly guess what happened to the data, but if there was a flip in the logical observable or not.
     - If the decoder guesses this successfully, we have corrected the quantum error. If not, we have incurred a logical error.
