@@ -15,6 +15,10 @@ on:
         type: string
         description: Retrieve assets from a draft release with this tag (e.g. docker-files-89)
         required: false
+      pub_tag:
+        type: string
+        description: Docker tag to use for published image (e.g. ghcr.io/nvidia/cudaqx:latest-pub)
+        required: false
 
 jobs:
   build-combined-img:
@@ -43,7 +47,7 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.PACKAGE_TOKEN }}
+          password: ${{ secrets.PACKAGE_TOKEN || github.token }}
 
       # Do this early to help validate user inputs (if present)
       - name: Fetch assets
@@ -77,8 +81,6 @@ jobs:
           labels: |
             org.opencontainers.image.source=${{ github.repositoryUrl }}
             org.opencontainers.image.revision=${{ github.sha }}
-          tags: ghcr.io/nvidia/private/cuda-quantum:${{ env.tag }}-cudaqx
+          tags: ${{ inputs.pub_tag || format('ghcr.io/nvidia/private/cuda-quantum:{}-cudaqx', env.tag) }}
           platforms: linux/amd64,linux/arm64
           push: true
-          #outputs: type=docker,dest=/tmp/image.tar
-          #outputs: type=registry
