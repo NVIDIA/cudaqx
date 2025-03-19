@@ -1,0 +1,73 @@
+name: Build Image for QA Wheel Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      assets_repo:
+        type: string
+        description: Retrieve assets from a draft release from this repo (e.g. NVIDIA/cudaqx)
+        required: false
+      assets_tag:
+        type: string
+        description: Retrieve assets from a draft release with this tag (e.g. docker-files-89)
+        required: false
+
+jobs:
+  build-img:
+    name: Build Image for QA Wheel Tests 
+    runs-on: linux-amd64-cpu8
+    permissions: write-all
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up context for buildx
+        run: |
+          docker context create builder_context
+
+      - name: Set up buildx runner
+        uses: docker/setup-buildx-action@v3
+        with:
+          endpoint: builder_context
+          version: v0.19.0
+          driver-opts: |
+            network=host
+            image=moby/buildkit:v0.19.0
+
+      - name: Log in to GitHub CR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.PACKAGE_TOKEN }}
+
+      # Do this early to help validate user inputs (if present)
+      - name: Fetch assets
+        env:
+          GH_TOKEN: ${{ secrets.PACKAGE_TOKEN }}
+        id: fetch-assets
+        run: |
+          mkdir wheels && cd wheels
+          # TODO - make this more generic by accepting repos as inputs. However,
+          # note that this process changes from release to release.
+          # Fetch the cuQuantum assets
+          gh release download -R NVIDIA/cudaq-private cuquantum-25.03 -p '*cu12*.whl'
+          # Fetch the CUDA-Q wheels
+          gh release download -R NVIDIA/cudaq-private staging-0.10.0 -p '*cu12*.whl'
+          # Fetch the CUDA-QX wheels
+          gh run download -R NVIDIA/cudaqx-private 13798216600 -p 'wheels-py*'
+          mv */*.whl .
+          ls
+
+      - name: Build and push image
+        id: docker_build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/release/Dockerfile.wheel
+          labels: |
+            org.opencontainers.image.source=${{ github.repositoryUrl }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          tags: ghcr.io/nvidia/private/cudaqx-private-wheels-test:latest
+          platforms: linux/amd64,linux/arm64
+          push: true

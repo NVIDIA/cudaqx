@@ -123,3 +123,26 @@ additional ways to introduce errors into a quantum kernel:
 
 For a full list of supported noise models and their parameters, refer to the `CUDA-Q documentation <https://nvidia.github.io/cuda-quantum/latest/index.html>`_.
 
+Getting Started with the NVIDIA QLDPC Decoder
++++++++++++++++++++++++++++++++++++++++++++++
+
+Starting with CUDA-Q QEC v0.2, a GPU-accelerated decoder is included with the
+CUDA-Q QEC library. The library follows the CUDA-Q decoder Python and C++ interfaces
+(namely :class:`cudaq_qec.Decoder` for Python and
+:cpp:class:`cudaq::qec::decoder` for C++), but as documented in the API sections
+(:ref:`nv_qldpc_decoder_api_python` for Python and
+:ref:`nv_qldpc_decoder_api_cpp` for C++), there are many configuration options
+that can be passed to the constructor. The following example shows how to
+exercise the decoder using non-trivial pre-generated test data. The test data
+was generated using scripts originating from the GitHub repo for
+`BivariateBicycleCodes
+<https://github.com/sbravyi/BivariateBicycleCodes>`_ [#f1]_; it includes parity
+check matrices (PCMs) and test syndromes to exercise a decoder.
+
+.. literalinclude:: ../../examples/qec/python/nv-qldpc-decoder.py
+    :language: python
+    :start-after: [Begin Documentation]
+
+.. rubric:: Footnotes
+
+.. [#f1] [BCGMRY] Sergey Bravyi, Andrew Cross, Jay Gambetta, Dmitri Maslov, Patrick Rall, Theodore Yoder, High-threshold and low-overhead fault-tolerant quantum memory https://arxiv.org/abs/2308.07915

@@ -18,6 +18,20 @@ foreach(lib ${CUDAQX_ALL_LIBS})
   list(APPEND CUDAQX_PUBLIC_HEADERS ${LIB_PUBLIC_HEADERS})
 endforeach()
 
+# Find all the public Python files
+set(CUDAQX_PUBLIC_PYTHON)
+foreach(lib ${CUDAQX_ALL_LIBS})
+  file(GLOB_RECURSE LIB_PUBLIC_PYTHON "../libs/${lib}/python/*.py")
+  list(APPEND CUDAQX_PUBLIC_PYTHON ${LIB_PUBLIC_PYTHON})
+endforeach()
+
+# Find all the rst files
+set(CUDAQX_PUBLIC_RST)
+foreach(lib ${CUDAQX_ALL_LIBS})
+  file(GLOB_RECURSE RST_FILES "*.rst")
+  list(APPEND CUDAQX_PUBLIC_RST ${RST_FILES})
+endforeach()
+
 # ==============================================================================
 # Doxygen
 # ==============================================================================
@@ -99,6 +113,8 @@ add_custom_command(
     ${SPHINX_SOURCE}/index.rst
     ${DOXYGEN_INDEX_FILE}
     cudaqx-pymodules
+    ${CUDAQX_PUBLIC_PYTHON}
+    ${CUDAQX_PUBLIC_RST}
   MAIN_DEPENDENCY ${SPHINX_CONF_IN} ${SPHINX_CONF}
   COMMENT "Generating documentation with Sphinx"
 )
