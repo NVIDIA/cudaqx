@@ -33,11 +33,23 @@ def test_solvers_adapt():
     print(energy)
     assert np.isclose(energy, -1.137, atol=1e-3)
 
-    energy, thetas, ops = solvers.adapt_vqe(initState,
-                                            molecule.hamiltonian,
-                                            operators,
-                                            optimizer='lbfgs',
-                                            gradient='central_difference')
+    energy, thetas, ops = solvers.adapt_vqe(
+        initState,
+        molecule.hamiltonian,
+        operators,
+        optimizer='lbfgs',
+        gradient='central_difference',
+        options={
+            'max_iter': 5,  # Maximum iterations
+            'grad_norm_tolerance': 1e-6,  # Gradient norm convergence tolerance
+            'grad_norm_diff_tolerance':
+                1e-6,  # Gradient norm difference tolerance
+            'threshold_energy': 1e-7,  # Energy convergence threshold
+            'initial_theta': 0.1,  # Initial theta parameter
+            'verbose': True,  # Enable detailed logging
+            'shots': 10000  # Number of measurement shots
+        })
+
     print(energy)
     assert np.isclose(energy, -1.137, atol=1e-3)
 

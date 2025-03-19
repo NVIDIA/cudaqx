@@ -930,8 +930,21 @@ Notes:
         auto *p = reinterpret_cast<void *>(fptr);
         cudaq::registry::__cudaq_registerLinkableKernel(p, baseName.c_str(), p);
         heterogeneous_map optOptions;
+        optOptions.insert("maxIter", getValueOr<int>(options, "max_iter", 30));
+        optOptions.insert(
+            "grad_norm_tolerance",
+            getValueOr<double>(options, "grad_norm_tolerance", 1e-5));
+        optOptions.insert(
+            "grad_norm_diff_tolerance",
+            getValueOr<double>(options, "grad_norm_diff_tolerance", 1e-5));
+        optOptions.insert(
+            "threshold_energy",
+            getValueOr<double>(options, "threshold_energy", 1e-6));
+        optOptions.insert("initial_theta",
+                          getValueOr<double>(options, "initial_theta", 0.0));
         optOptions.insert("verbose",
                           getValueOr<bool>(options, "verbose", false));
+        optOptions.insert("shots", getValueOr<int>(options, "shots", -1));
 
         // Handle the case where the user has provided a SciPy optimizer
         if (options.contains("optimizer") &&
@@ -967,6 +980,17 @@ Notes:
     Keyword Args:
         optimizer (str): Optional name of the optimizer to use. Defaults to cobyla.
         gradient (str): Optional name of the gradient method to use. Defaults to empty.
+    
+    Options Dictionary:
+        The following keys are supported in the options dictionary:
+        - max_iter (int): Maximum number of iterations. Default: 30
+        - grad_norm_tolerance (float): Convergence tolerance for gradient norm. Default: 1e-5
+        - grad_norm_diff_tolerance (float): Tolerance for difference between gradient norms. Default: 1e-5
+        - threshold_energy (float): Energy convergence threshold. Default: 1e-6
+        - initial_theta (float): Initial value for theta parameter. Default: 0.0
+        - verbose (bool): Enable detailed output logging. Default: False
+        - shots (int): Number of measurement shots (-1 for exact simulation). Default: -1
+
 
     Returns:
         The result of the ADAPT-VQE optimization.

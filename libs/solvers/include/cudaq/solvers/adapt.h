@@ -71,6 +71,19 @@ public:
   /// @param optimizer Optimization algorithm
   /// @param gradient Gradient calculation method
   /// @param options Additional options for the algorithm
+  /// @par Supported Keys:
+  ///  - "maxIter" (int): Maximum number of iterations [default: 30]
+  ///  - "grad_norm_tolerance" (double): Convergence tolerance for gradient norm
+  ///  [default: 1e-5]
+  ///  - "grad_norm_diff_tolerance" (double): Tolerance for difference between
+  ///  gradient norms [default: 1e-5]
+  ///  - "threshold_energy" (double): Energy convergence threshold [default:
+  ///  1e-6]
+  ///  - "initial_theta" (double): Initial value for theta parameter [default:
+  ///  0.0]
+  ///  - "verbose" (bool): Enable detailed output logging [default: false]
+  ///  - "shots" (int): Number of measurement shots (-1 for exact simulation)
+  ///  [default: -1]
   /// @return Result of the ADAPT-VQE algorithm
   virtual result run(const cudaq::qkernel<void(cudaq::qvector<> &)> &initState,
                      const spin_op &H, const std::vector<spin_op> &pool,
@@ -89,6 +102,18 @@ public:
 /// @param H Hamiltonian operator
 /// @param poolList Pool of operators
 /// @param options Additional options for the algorithm
+/// @par Supported Keys:
+///  - "maxIter" (int): Maximum number of iterations [default: 30]
+///  - "grad_norm_tolerance" (double): Convergence tolerance for gradient norm
+///  [default: 1e-5]
+///  - "grad_norm_diff_tolerance" (double): Tolerance for difference between
+///  gradient norms [default: 1e-5]
+///  - "threshold_energy" (double): Energy convergence threshold [default: 1e-6]
+///  - "initial_theta" (double): Initial value for theta parameter [default:
+///  0.0]
+///  - "verbose" (bool): Enable detailed output logging [default: false]
+///  - "shots" (int): Number of measurement shots (-1 for exact simulation)
+///  [default: -1]
 /// @return Result of the ADAPT-VQE algorithm
 static inline adapt::result
 adapt_vqe(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
@@ -107,6 +132,18 @@ adapt_vqe(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
 /// @param poolList Pool of operators
 /// @param optimizer Custom optimization algorithm
 /// @param options Additional options for the algorithm
+/// @par Supported Keys:
+///  - "maxIter" (int): Maximum number of iterations [default: 30]
+///  - "grad_norm_tolerance" (double): Convergence tolerance for gradient norm
+///  [default: 1e-5]
+///  - "grad_norm_diff_tolerance" (double): Tolerance for difference between
+///  gradient norms [default: 1e-5]
+///  - "threshold_energy" (double): Energy convergence threshold [default: 1e-6]
+///  - "initial_theta" (double): Initial value for theta parameter [default:
+///  0.0]
+///  - "verbose" (bool): Enable detailed output logging [default: false]
+///  - "shots" (int): Number of measurement shots (-1 for exact simulation)
+///  [default: -1]
 /// @return Result of the ADAPT-VQE algorithm
 static inline adapt::result
 adapt_vqe(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
@@ -126,6 +163,18 @@ adapt_vqe(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
 /// @param optimizer Custom optimization algorithm
 /// @param gradient Gradient calculation method
 /// @param options Additional options for the algorithm
+/// @par Supported Keys:
+///  - "maxIter" (int): Maximum number of iterations [default: 30]
+///  - "grad_norm_tolerance" (double): Convergence tolerance for gradient norm
+///  [default: 1e-5]
+///  - "grad_norm_diff_tolerance" (double): Tolerance for difference between
+///  gradient norms [default: 1e-5]
+///  - "threshold_energy" (double): Energy convergence threshold [default: 1e-6]
+///  - "initial_theta" (double): Initial value for theta parameter [default:
+///  0.0]
+///  - "verbose" (bool): Enable detailed output logging [default: false]
+///  - "shots" (int): Number of measurement shots (-1 for exact simulation)
+///  [default: -1]
 /// @return Result of the ADAPT-VQE algorithm
 static inline adapt::result
 adapt_vqe(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
