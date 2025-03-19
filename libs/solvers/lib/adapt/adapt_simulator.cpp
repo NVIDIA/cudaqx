@@ -114,7 +114,8 @@ simulator::run(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
 
   int step = 0;
   while (true) {
-    printf("Step %d\n", step);
+    if (options.get("verbose", false))
+      printf("Step %d\n", step);
     if (step >= maxIter) {
       std::cerr
           << "Warning: Timed out, number of iteration steps exceeds maxIter!"
