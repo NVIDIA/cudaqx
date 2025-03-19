@@ -696,6 +696,67 @@ Usage Example
         auto result = decoder->decode(syndromes[0]);
 
 
+Pre-built QEC Decoders
+----------------------
+
+CUDA-Q QEC provides pre-built decoders. Here's a detailed overview of each:
+
+Quantum Low-Density Parity-Check Decoder
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The Quantum Low-Density Parity-Check (QLDPC) decoder leverages GPU-accelerated belief propagation (BP) for efficient error correction. 
+Since belief propagation is an iterative method which may not converge, decoding can be improved with a second-stage post-processing step. The `nv-qldpc-decoder`
+API provides various post-processing options, which can be selected through its parameters.
+
+The QLDPC decoder `nv-qldpc-decoder` requires a CUDA-Q compatible GPU. See the list below for dependencies and compatibility:
+https://nvidia.github.io/cuda-quantum/latest/using/install/local_installation.html#dependencies-and-compatibility
+
+The decoder is based on the following references:
+
+* https://arxiv.org/pdf/2005.07016 
+* https://github.com/quantumgizmos/ldpc
+
+
+Usage:
+
+.. tab:: Python
+
+    .. code-block:: python
+
+        import cudaq_qec as qec
+
+        H_list = [
+                    [1, 0, 0, 1, 0, 1, 1], 
+                    [0, 1, 0, 1, 1, 0, 1],
+                    [0, 0, 1, 0, 1, 1, 1]
+                 ]
+
+        H_np = np.array(H_list, dtype=np.uint8)
+
+        decoder = qec.get_decoder("nv-qldpc-decoder", H_np)
+
+.. tab:: C++
+
+    .. code-block:: cpp
+
+        std::size_t block_size = 7;
+        std::size_t syndrome_size = 3;
+        cudaqx::tensor<uint8_t> H;
+
+        std::vector<uint8_t> H_vec = {1, 0, 0, 1, 0, 1, 1, 
+                                      0, 1, 0, 1, 1, 0, 1,
+                                      0, 0, 1, 0, 1, 1, 1};
+        H.copy(H_vec.data(), {syndrome_size, block_size});
+
+        cudaqx::heterogeneous_map nv_custom_args;
+        nv_custom_args.insert("use_osd", true);
+
+        auto d1 = cudaq::qec::get_decoder("nv-qldpc-decoder", H, nv_custom_args);
+
+        // Alternatively, configure the decoder without instantiating a heterogeneous_map 
+        auto d2 = cudaq::qec::get_decoder("nv-qldpc-decoder", H, {{"use_osd", true}, {"bp_batch_size", 100}});
+
+
 Numerical Experiments
 ---------------------
 
@@ -813,7 +874,7 @@ Function Variants
         # Memory circuit with noise model
         noise = cudaq.NoiseModel()
         # Configure noise
-        noise.add_all_qubit_channel("x", qec.TwoQubitDepolarization(0.01), 1)
+        noise.add_all_qubit_channel("x", cudaq.Depolarization2(0.01), 1)
         syndromes, measurements = qec.sample_memory_circuit(
             code,             # QEC code instance
             numShots=1000,    # Number of shots
@@ -889,7 +950,7 @@ Example of running a memory experiment:
 
         # Configure noise
         noise = cudaq.NoiseModel()
-        noise.add_all_qubit_channel("x", qec.TwoQubitDepolarization(0.01), 1)
+        noise.add_all_qubit_channel("x", cudaq.Depolarization2(0.01), 1)
 
         # Run memory experiment
         syndromes, measurements = qec.sample_memory_circuit(
@@ -930,7 +991,7 @@ Example of running a memory experiment:
 
           // Configure noise model
           cudaq::noise_model noise;
-          noise.add_all_qubit_channel("x", cudaq::qec::two_qubit_depolarization(0.1),
+          noise.add_all_qubit_channel("x", cudaq::depolarization2(0.1),
                               /*num_controls=*/1);
 
           // Run memory experiment
@@ -970,7 +1031,7 @@ Additional Noise Models
      noise.add_all_qubit_channel('h', cudaq.BitFlipChannel(0.001))
 
      # Specify two qubit errors
-     noise.add_all_qubit_channel("x", qec.TwoQubitDepolarization(p), 1)
+     noise.add_all_qubit_channel("x", cudaq.Depolarization2(p), 1)
 
 .. tab:: C++
 
@@ -978,12 +1039,12 @@ Additional Noise Models
 
       cudaq::noise_model noise;
 
-      # Add multiple error channels
+      // Add multiple error channels
       noise.add_all_qubit_channel(
-          "x", cudaq::BitFlipChannel(/*probability*/ 0.01));
+          "x", cudaq::bit_flip_channel(/*probability*/ 0.01));
 
-      # Specify two qubit errors
+      // Specify two qubit errors
       noise.add_all_qubit_channel(
-          "x", cudaq::qec::two_qubit_depolarization(/*probability*/ 0.01),
+          "x", cudaq::depolarization2(/*probability*/ 0.01),
           /*numControls*/ 1);
 

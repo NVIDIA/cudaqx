@@ -25,11 +25,13 @@ Here we demonstrate how to use the CUDA-Q Solvers library to execute the ADAPT-V
 
    .. literalinclude:: ../../examples/solvers/python/adapt_h2.py
       :language: python
+      :start-after: [Begin Documentation]
 
 .. tab:: C++
 
    .. literalinclude:: ../../examples/solvers/cpp/adapt_h2.cpp
       :language: cpp
+      :start-after: [Begin Documentation]
 
    Compile and run with
 

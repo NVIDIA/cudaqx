@@ -14,11 +14,13 @@ Key features of QAOA:
 
    .. literalinclude:: ../../examples/solvers/python/molecular_docking_qaoa.py
       :language: python
+      :start-after: [Begin Documentation]
 
 .. tab:: C++
 
    .. literalinclude:: ../../examples/solvers/cpp/molecular_docking_qaoa.cpp
       :language: cpp
+      :start-after: [Begin Documentation]
 
    Compile and run with
 

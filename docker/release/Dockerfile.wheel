@@ -1,98 +1,33 @@
 # ============================================================================ #
-# Copyright (c) 2024 NVIDIA Corporation & Affiliates.                          #
+# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
-# To build the image that tests the wheels, run the following from the top-level of the repo
-#
-# docker build -t ghcr.io/nvidia/cudaqx-private-wheels-test:latest-$(uname -m) . -f docker/release/Dockerfile.wheel --build-arg GITHUB_API_TOKEN=TOKEN 
-#
-# Test the wheels with 
-# 
-# scripts/validation/wheel/validate_wheels.sh 
-#
-# This tests wheels for 3.10, 3.11, and 3.12 
-# 
-# Potential Build Arguments: 
-#  CUDAQX_PRIVATE_ARTIFACTS_ID - this is the run ID of the workflow that built the wheels. 
-#     i.e. https://github.com/NVIDIA/cudaqx-private/actions/runs/11810855185, it is 11810855185
-#  CUQUANTUM_RELEASE - the name of the cuQuantum release uploaded to cudaq-private 
-#  CUDAQ_RELEASE - the name of the CUDA-Q release uploaded to cudaq-private 
+# We have multi-platform wheels, so we make a multi-platform Docker image to
+# test those wheels.
 
+# Use the the .github/workflows/build_qa_wheel_test.yaml workflow to build an
+# image than can be delivered to QA for testing.
+
+# The resulting image can be tested with the wheels with
+# `scripts/validation/wheel/validate_wheels.sh`, which is copied into the image.
+#
 FROM ubuntu:22.04 
 ARG DEBIAN_FRONTEND=noninteractive
 
-ARG CUDAQX_PRIVATE_ARTIFACTS_ID=11871513805
-ARG CUQUANTUM_RELEASE=cuquantum-24.11 
-ARG CUDAQ_RELEASE=0.9.0-rc4
-ARG GITHUB_API_TOKEN
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates vim wget openssh-client gfortran
 
-# Install build dependencies
-RUN apt-get update && apt-get install -y \
-    software-properties-common \
-    build-essential \
-    libssl-dev \
-    zlib1g-dev \
-    libbz2-dev \
-    libreadline-dev \
-    libsqlite3-dev \
-    curl \
-    libncursesw5-dev \
-    xz-utils \
-    tk-dev \
-    libxml2-dev \
-    libxmlsec1-dev \
-    libffi-dev \
-    liblzma-dev \
-    unzip \
-    sudo \
-    wget git
+COPY wheels /root/wheels
+COPY scripts/validation/wheel/validate_wheels.sh /root
+COPY libs /root/libs
+COPY docs/sphinx/examples /root/examples
 
-# Install pyenv
-RUN curl https://pyenv.run | bash
-ENV PYENV_ROOT="/root/.pyenv"
-ENV PATH="${PYENV_ROOT}/bin:${PATH}"
-RUN echo 'eval "$(pyenv init -)"' >> ~/.bashrc
-
-# Install Python versions
-RUN pyenv install 3.10.13 && \
-    pyenv install 3.11.7 && \
-    pyenv install 3.12.1 && \
-    pyenv global 3.10.13
-
-# Install GitHub CLI
-RUN mkdir -p -m 755 /etc/apt/keyrings && \
-    wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null && \
-    chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg && \
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && \
-    apt-get update && apt-get install -y gh
-
-# Setup GitHub auth
-RUN echo "${GITHUB_API_TOKEN}" | gh auth login --with-token
-
-# Download required releases
-RUN gh release download ${CUQUANTUM_RELEASE} --repo NVIDIA/cudaq-private \
-    && gh release download ${CUDAQ_RELEASE} --repo NVIDIA/cudaq-private
-
-RUN gh run download ${CUDAQX_PRIVATE_ARTIFACTS_ID} --repo NVIDIA/cudaqx-private
-
-# Function to install packages for a specific Python version
-COPY scripts/validation/wheel/install_packages.sh /
-RUN chmod +x /install_packages.sh
-
-# Install packages for each Python version
-
-# Configure pyenv shell integration
-RUN unzip wheelhouse.zip
-
-RUN for version in 3.10.13 3.11.7 3.12.1; do \
-    PYTHON_WHEEL_VER="cp$(echo $version | cut -d. -f1-2 | sed 's/\.//')" && \
-    /install_packages.sh $PYTHON_WHEEL_VER ${version}; \
-    done
-
-WORKDIR /workspace
-RUN gh repo clone https://github.com/NVIDIA/cudaqx-private -- -b staging/2024.11 --depth 1
-RUN apt-get update && apt-get install -y gfortran
+RUN mkdir -p /root/.miniconda3 \
+    && wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-$(uname -m).sh -O /root/.miniconda3/miniconda.sh \
+    && bash /root/.miniconda3/miniconda.sh -b -u -p /root/.miniconda3 \
+    && rm -rf /root/.miniconda3/miniconda.sh \
+    && /root/.miniconda3/bin/conda init bash

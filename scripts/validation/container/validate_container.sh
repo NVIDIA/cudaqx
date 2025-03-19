@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ============================================================================ #
-# Copyright (c) 2024 NVIDIA Corporation & Affiliates.                          #
+# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -14,7 +14,7 @@ CURRENT_ARCH=$(uname -m)
 PY_TARGETS=("nvidia" "nvidia --option fp64", "qpp-cpu")
 CPP_TARGETS=("nvidia" "nvidia --target-option fp64", "qpp-cpu")
 
-FINAL_IMAGE="ghcr.io/nvidia/cudaqx-private:latest"
+FINAL_IMAGE="ghcr.io/nvidia/private/cuda-quantum:cu12-0.10.0-cudaqx-rc2"
 
 # Function to run Python tests
 run_python_tests() {
@@ -29,7 +29,7 @@ run_python_tests() {
     # Clone repository and run tests with specific target
     docker exec ${container_name} bash -c "\
         cd /home/cudaq && \
-        python3 -m pytest /opt/nvidia/cudaq/cudaqx_pytests -v"
+        python3 -m pytest /home/cudaq/cudaqx_pytests -v"
 
     local test_result=$?
     if [ ${test_result} -ne 0 ]; then
@@ -60,11 +60,16 @@ test_examples() {
         return 1
     fi
 
+    num_failures=0
+
     # Run Python tests first
     if ! run_python_tests ${container_name} ${target}; then
-        docker stop ${container_name}
-        docker rm ${container_name}
-        return 1
+        echo "Python tests failed, but continuing with other tests."
+        num_failures=$((num_failures+1))
+        # Note, if we want to stop tests here, uncomment these lines.
+        # docker stop ${container_name}
+        # docker rm ${container_name}
+        # return 1
     fi
     
     # Run tests for each target
@@ -115,14 +120,16 @@ test_examples() {
     # Cleanup
     docker stop ${container_name}
     docker rm ${container_name}
+
+    return $num_failures
 }
 
 # Main execution
 echo "Starting CUDA-Q image validation for ${CURRENT_ARCH}..."
 
-tag="${FINAL_IMAGE}-${CURRENT_ARCH}"
+tag="${FINAL_IMAGE}"
 test_examples ${tag} || {
-    echo "Tests failed for Python on ${CURRENT_ARCH}"
+    echo "Tests failed on ${CURRENT_ARCH}"
     exit 1
 }
 

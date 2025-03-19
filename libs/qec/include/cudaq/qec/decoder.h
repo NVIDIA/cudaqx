@@ -1,5 +1,5 @@
 /****************************************************************-*- C++ -*-****
- * Copyright (c) 2024 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -97,8 +97,7 @@ public:
   /// @brief Decode a single syndrome
   /// @param syndrome A vector of syndrome measurements where the floating point
   /// value is the probability that the syndrome measurement is a |1>. The
-  /// length of the syndrome vector should be an integer multiple of the
-  /// decoder's \p syndrome_size.
+  /// length of the syndrome vector should be equal to \p syndrome_size.
   /// @returns Vector of length \p block_size with soft probabilities of errors
   /// in each index.
   virtual decoder_result decode(const std::vector<float_t> &syndrome) = 0;
@@ -106,8 +105,7 @@ public:
   /// @brief Decode a single syndrome
   /// @param syndrome An order-1 tensor of syndrome measurements where a 1 bit
   /// represents that the syndrome measurement is a |1>. The
-  /// length of the syndrome vector should be an integer multiple of the
-  /// decoder's \p syndrome_size.
+  /// length of the syndrome vector should be equal to \p syndrome_size.
   /// @returns Vector of length \p block_size of errors in each index.
   virtual decoder_result decode(const cudaqx::tensor<uint8_t> &syndrome);
 
