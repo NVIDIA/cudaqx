@@ -15,6 +15,9 @@ project(CUDAQX
   VERSION 0.0.0
   LANGUAGES C CXX)
 
+# TEMP FIXME
+add_compile_options(-Wno-deprecated-declarations)
+
 set(CUDAQX_ALL_LIBS "qec;solvers")
 set(CUDAQX_ENABLE_LIBS "all" CACHE STRING
   "Semicolon-separated list of libs to build (${CUDAQX_ALL_LIBS}), or \"all\".")

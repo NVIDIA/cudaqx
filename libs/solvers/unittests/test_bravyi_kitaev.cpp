@@ -77,6 +77,11 @@ TEST(BravyiKitaev, testH2Hamiltonian) {
       0.12020049071260128 * z(0) * z(2) * z(3) + 0.1683359862516207 * z(1) -
       0.22004130022421792 * z(1) * z(2) * z(3) +
       0.17407289249680227 * z(1) * z(3) - 0.22004130022421792 * z(2);
+  // TEMP - FIXME
+  printf("result: %s\n", result.to_string().c_str());
+  printf("gold  : %s\n", gold.to_string().c_str());
+  auto diff = result - gold;
+  printf("diff  : %s\n", diff.to_string().c_str());
   auto [terms, residuals] = (result - gold).get_raw_data();
   for (auto r : residuals)
     EXPECT_NEAR(std::abs(r), 0.0, 1e-4);

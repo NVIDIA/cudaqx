@@ -62,8 +62,9 @@ to_parity_matrix(const std::vector<cudaq::spin_op> &stabilizers,
     p_stabilizers = &stabilizers_copy;
   }
 
+  auto numQubits = (*p_stabilizers)[0].to_string(false).size();
+
   if (type == stabilizer_type::XZ) {
-    auto numQubits = (*p_stabilizers)[0].num_qubits();
     cudaqx::tensor<uint8_t> t({p_stabilizers->size(), 2 * numQubits});
     // Start by counting the number of Z spin_ops
     std::size_t numZRows = 0;
@@ -76,9 +77,8 @@ to_parity_matrix(const std::vector<cudaq::spin_op> &stabilizers,
     // Need to shift Z bits left
     for (std::size_t row = 0; row < numZRows; row++) {
       for (std::size_t i = numQubits; i < 2 * numQubits; i++) {
-        // FIXME
-        // if ((*p_stabilizers)[row].get_raw_data().first[0][i])
-        //   t.at({row, i - numQubits}) = 1;
+        if ((*p_stabilizers)[row].get_raw_data().first[0][i])
+          t.at({row, i - numQubits}) = 1;
       }
     }
 
@@ -86,9 +86,8 @@ to_parity_matrix(const std::vector<cudaq::spin_op> &stabilizers,
 
     for (std::size_t row = 0; row < numXRows; row++) {
       for (std::size_t i = 0; i < numQubits; i++) {
-        // FIXME
-        // if ((*p_stabilizers)[numZRows + row].get_raw_data().first[0][i])
-        //   t.at({numZRows + row, i + numQubits}) = 1;
+        if ((*p_stabilizers)[numZRows + row].get_raw_data().first[0][i])
+          t.at({numZRows + row, i + numQubits}) = 1;
       }
     }
 
@@ -96,7 +95,6 @@ to_parity_matrix(const std::vector<cudaq::spin_op> &stabilizers,
   }
 
   if (type == stabilizer_type::Z) {
-    auto numQubits = (*p_stabilizers)[0].num_qubits();
     // Start by counting the number of Z spin_ops
     std::size_t numZRows = 0;
     for (auto &op : *p_stabilizers)
@@ -111,16 +109,14 @@ to_parity_matrix(const std::vector<cudaq::spin_op> &stabilizers,
     cudaqx::tensor<uint8_t> ret({numZRows, numQubits});
     for (std::size_t row = 0; row < numZRows; row++) {
       for (std::size_t i = numQubits; i < 2 * numQubits; i++) {
-        // FIXME
-        // if ((*p_stabilizers)[row].get_raw_data().first[0][i])
-        //   ret.at({row, i - numQubits}) = 1;
+        if ((*p_stabilizers)[row].get_raw_data().first[0][i])
+          ret.at({row, i - numQubits}) = 1;
       }
     }
 
     return ret;
   }
 
-  auto numQubits = (*p_stabilizers)[0].num_qubits();
   // Start by counting the number of Z spin_ops
   std::size_t numZRows = 0;
   for (auto &op : *p_stabilizers)
@@ -137,9 +133,8 @@ to_parity_matrix(const std::vector<cudaq::spin_op> &stabilizers,
   cudaqx::tensor<uint8_t> ret({numXRows, numQubits});
   for (std::size_t row = 0; row < numXRows; row++) {
     for (std::size_t i = 0; i < numQubits; i++) {
-      // FIXME
-      // if ((*p_stabilizers)[numZRows + row].get_raw_data().first[0][i])
-      //   ret.at({row, i}) = 1;
+      if ((*p_stabilizers)[numZRows + row].get_raw_data().first[0][i])
+        ret.at({row, i}) = 1;
     }
   }
 

@@ -18,7 +18,7 @@ using excitation_list = std::vector<std::vector<std::size_t>>;
 std::vector<cudaq::spin_op>
 uccsd::generate(const heterogeneous_map &config) const {
 
-  auto numQubits =
+  std::size_t numQubits =
       config.get<int>({"num-qubits", "num_qubits", "n-qubits", "n_qubits"});
   auto numElectrons = config.get<int>({"num-electrons", "num_electrons"});
   std::size_t spin = 0;
