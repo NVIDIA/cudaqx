@@ -47,10 +47,10 @@ TEST(UCCSDTest, GenerateFromAPIFunction) {
 
 TEST(UCCSDTest, GenerateWithCustomCoefficients) {
   auto pool = cudaq::solvers::operator_pool::get("uccsd");
-  const std::size_t num_qubits = 2;
+  const std::size_t num_qubits = 4;
   heterogeneous_map config;
   config.insert("num-qubits", num_qubits);
-  config.insert("num-electrons", num_qubits);
+  config.insert("num-electrons", 2);
 
   auto operators = pool->generate(config);
 

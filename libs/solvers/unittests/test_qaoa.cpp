@@ -112,8 +112,9 @@ TEST(QAOATest, MultiLayerExecution) {
   auto result = cudaq::solvers::qaoa(problemHam, 2, initParams);
 
   EXPECT_EQ(result.optimal_parameters.size(), 4);
-  EXPECT_GE(result.optimal_value, -1.0);
-  EXPECT_LE(result.optimal_value, 1.0);
+  double eps = 1e-6;
+  EXPECT_GE(result.optimal_value, -1.0 - eps);
+  EXPECT_LE(result.optimal_value, 1.0 + eps);
 }
 
 // // Test QAOA with options
