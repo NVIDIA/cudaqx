@@ -86,17 +86,17 @@ qaoa_result qaoa(const cudaq::spin_op &problemHamiltonian,
                         false);
   std::vector<double> probHCoeffs, refHCoeffs;
   std::vector<cudaq::pauli_word> probHWords, refHWords;
+  auto numQubits = problemHamiltonian.num_qubits();
   for (const auto &o : problemHamiltonian) {
-    probHWords.emplace_back(o.to_string(false));
+    probHWords.emplace_back(o.get_pauli_word(numQubits));
     probHCoeffs.push_back(o.get_coefficient().evaluate().real());
   }
 
   for (const auto &o : referenceHamiltonian) {
-    refHWords.emplace_back(o.to_string(false));
+    refHWords.emplace_back(o.get_pauli_word(numQubits));
     refHCoeffs.push_back(o.get_coefficient().evaluate().real());
   }
 
-  auto numQubits = problemHamiltonian.num_qubits();
   auto argsTranslator = [&](std::vector<double> x) {
     return std::make_tuple(numQubits, numLayers, x, probHCoeffs, probHWords,
                            refHCoeffs, refHWords, full_parameterization,
