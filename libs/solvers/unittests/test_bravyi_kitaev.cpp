@@ -15,6 +15,27 @@
 
 #include "cudaq/solvers/operators/molecule/fermion_compilers/bravyi_kitaev.h"
 
+void checkEqual(cudaq::complex_matrix a, cudaq::complex_matrix b, double tol = 1e-8) {
+  // Uncomment the following for debugging
+  // std::cout << "matrix a:" << std::endl;
+  // a.dump();
+  // std::cout << "matrix b:" << std::endl;
+  // b.dump();
+
+  ASSERT_EQ(a.get_rank(), b.get_rank());
+  ASSERT_EQ(a.rows(), b.rows());
+  ASSERT_EQ(a.cols(), b.cols());
+  ASSERT_EQ(a.size(), b.size());
+  for (std::size_t i = 0; i < a.rows(); i++) {
+    for (std::size_t j = 0; j < a.cols(); j++) {
+      auto a_val = a[{i, j}];
+      auto b_val = b[{i, j}];
+      EXPECT_NEAR(a_val.real(), b_val.real(), tol);
+      EXPECT_NEAR(a_val.imag(), b_val.imag(), tol);
+    }
+  }
+}
+
 // One- and Two-body integrals were copied from test_molecule.cpp.
 // They were further validated using the script ./support/h2_pyscf_hf.py.
 //
@@ -66,7 +87,7 @@ TEST(BravyiKitaev, testH2Hamiltonian) {
   cudaq::solvers::bravyi_kitaev transform{};
   cudaq::spin_op result = transform.generate(h_constant, hpq, hpqrs, {});
   cudaq::spin_op gold =
-      -0.1064770114930045 * i(0) + 0.04540633286914125 * x(0) * z(1) * x(2) +
+      -0.1064770114930045 + 0.04540633286914125 * x(0) * z(1) * x(2) +
       0.04540633286914125 * x(0) * z(1) * x(2) * z(3) +
       0.04540633286914125 * y(0) * z(1) * y(2) +
       0.04540633286914125 * y(0) * z(1) * y(2) * z(3) +
@@ -77,14 +98,7 @@ TEST(BravyiKitaev, testH2Hamiltonian) {
       0.12020049071260128 * z(0) * z(2) * z(3) + 0.1683359862516207 * z(1) -
       0.22004130022421792 * z(1) * z(2) * z(3) +
       0.17407289249680227 * z(1) * z(3) - 0.22004130022421792 * z(2);
-  // TEMP - FIXME
-  printf("result: %s\n", result.to_string().c_str());
-  printf("gold  : %s\n", gold.to_string().c_str());
-  auto diff = result - gold;
-  printf("diff  : %s\n", diff.to_string().c_str());
-  auto [terms, residuals] = (result - gold).get_raw_data();
-  for (auto r : residuals)
-    EXPECT_NEAR(std::abs(r), 0.0, 1e-4);
+  checkEqual(gold.to_matrix(), result.to_matrix(), 1.5e-4);
 }
 
 TEST(BravyiKitaev, testSRLCase0) {
@@ -93,12 +107,10 @@ TEST(BravyiKitaev, testSRLCase0) {
 
   auto result = cudaq::solvers::seeley_richard_love(2, 2, 4.0, 20);
 
-  cudaq::spin_op gold = double_complex(-2.0, 0.0) * i(0) * i(1) * z(2) +
-                        double_complex(2.0, 0.0) * i(0) * i(1) * i(2);
+  cudaq::spin_op gold = double_complex(-2.0, 0.0) * z(2) +
+                        double_complex(2.0, 0.0);
 
-  auto [terms, residuals] = (result - gold).get_raw_data();
-  for (auto r : residuals)
-    EXPECT_NEAR(std::abs(r), 0.0, 1e-4);
+  checkEqual(gold.to_matrix(), result.to_matrix(), 1.5e-4);
 }
 
 TEST(BravyiKitaev, testSRLCase1) {
@@ -106,17 +118,17 @@ TEST(BravyiKitaev, testSRLCase1) {
   using namespace cudaq::spin;
 
   auto result = cudaq::solvers::seeley_richard_love(2, 6, 4.0, 20);
-  cudaq::spin_op gold = double_complex(1.0, 0.0) * i(0) * z(1) * x(2) * y(3) *
-                            i(4) * z(5) * y(6) +
-                        double_complex(-1.0, 0.0) * i(0) * z(1) * y(2) * y(3) *
-                            i(4) * z(5) * x(6) +
-                        double_complex(0.0, -1.0) * i(0) * z(1) * x(2) * y(3) *
-                            i(4) * z(5) * x(6) +
-                        double_complex(0.0, -1.0) * i(0) * z(1) * y(2) * y(3) *
-                            i(4) * z(5) * y(6);
-  auto [terms, residuals] = (result - gold).get_raw_data();
-  for (auto r : residuals)
-    EXPECT_NEAR(std::abs(r), 0.0, 1e-4);
+  cudaq::spin_op gold = double_complex(1.0, 0.0) * z(1) * x(2) * y(3) *
+                            z(5) * y(6) +
+                        double_complex(-1.0, 0.0) * z(1) * y(2) * y(3) *
+                            z(5) * x(6) +
+                        double_complex(0.0, -1.0) * z(1) * x(2) * y(3) *
+                            z(5) * x(6) +
+                        double_complex(0.0, -1.0) * z(1) * y(2) * y(3) *
+                            z(5) * y(6);
+  auto t1 = gold.to_matrix();
+  auto t2 = result.to_matrix();
+  checkEqual(gold.to_matrix(), result.to_matrix(), 1.5e-4);
 }
 
 TEST(BravyiKitaev, testSRLCase2) {
@@ -130,9 +142,7 @@ TEST(BravyiKitaev, testSRLCase2) {
       double_complex(1.0, 0.0) * z(1) * x(2) * y(3) * y(5) +
       double_complex(0.0, 1.0) * z(1) * y(2) * y(3) * y(5);
 
-  auto [terms, residuals] = (result - gold).get_raw_data();
-  for (auto r : residuals)
-    EXPECT_NEAR(std::abs(r), 0.0, 1e-4);
+  checkEqual(gold.to_matrix(), result.to_matrix(), 1.5e-4);
 }
 
 TEST(BravyiKitaev, testSRLCase3) {
@@ -145,9 +155,7 @@ TEST(BravyiKitaev, testSRLCase3) {
                         double_complex(1.0, 0.0) * i(0) * x(1) * x(2) +
                         double_complex(0.0, 1.0) * i(0) * x(1) * y(2);
 
-  auto [terms, residuals] = (result - gold).get_raw_data();
-  for (auto r : residuals)
-    EXPECT_NEAR(std::abs(r), 0.0, 1e-4);
+  checkEqual(gold.to_matrix(), result.to_matrix(), 1.5e-4);
 }
 
 TEST(BravyiKitaev, testSRLCase4) {
@@ -156,14 +164,12 @@ TEST(BravyiKitaev, testSRLCase4) {
 
   auto result = cudaq::solvers::seeley_richard_love(0, 5, 4.0, 20);
   cudaq::spin_op gold =
-      double_complex(-1.0, 0.0) * y(0) * x(1) * i(2) * y(3) * z(4) * x(5) +
-      double_complex(0.0, -1.0) * x(0) * x(1) * i(2) * y(3) * z(4) * x(5) +
-      double_complex(1.0, 0.0) * x(0) * x(1) * i(2) * y(3) * i(4) * y(5) +
-      double_complex(0.0, -1.0) * y(0) * x(1) * i(2) * y(3) * i(4) * y(5);
+      double_complex(-1.0, 0.0) * y(0) * x(1) * y(3) * z(4) * x(5) +
+      double_complex(0.0, -1.0) * x(0) * x(1) * y(3) * z(4) * x(5) +
+      double_complex(1.0, 0.0) * x(0) * x(1) * y(3) * y(5) +
+      double_complex(0.0, -1.0) * y(0) * x(1) * y(3) * y(5);
 
-  auto [terms, residuals] = (result - gold).get_raw_data();
-  for (auto r : residuals)
-    EXPECT_NEAR(std::abs(r), 0.0, 1e-4);
+  checkEqual(gold.to_matrix(), result.to_matrix(), 1.5e-4);
 }
 
 TEST(BravyiKitaev, testSRLCase6) {
@@ -171,14 +177,12 @@ TEST(BravyiKitaev, testSRLCase6) {
   using namespace cudaq::spin;
 
   auto result = cudaq::solvers::seeley_richard_love(18, 19, 4.0, 20);
-  cudaq::spin_op gold = double_complex(1.0, 0.0) * x(18) * i(19) +
-                        double_complex(0.0, -1.0) * y(18) * i(19) +
+  cudaq::spin_op gold = double_complex(1.0, 0.0) * x(18) +
+                        double_complex(0.0, -1.0) * y(18) +
                         double_complex(0.0, 1.0) * z(17) * y(18) * z(19) +
                         double_complex(-1.0, 0.0) * z(17) * x(18) * z(19);
 
-  auto [terms, residuals] = (result - gold).get_raw_data();
-  for (auto r : residuals)
-    EXPECT_NEAR(std::abs(r), 0.0, 1e-4);
+  checkEqual(gold.to_matrix(), result.to_matrix(), 1.5e-4);
 }
 
 TEST(BravyiKitaev, testSRLCase7) {
@@ -193,9 +197,7 @@ TEST(BravyiKitaev, testSRLCase7) {
       double_complex(1.0, 0.0) * z(3) * z(4) * x(5) * y(7) * y(11) +
       double_complex(0.0, 1.0) * z(3) * y(5) * y(7) * y(11);
 
-  auto [terms, residuals] = (result - gold).get_raw_data();
-  for (auto r : residuals)
-    EXPECT_NEAR(std::abs(r), 0.0, 1e-4);
+  checkEqual(gold.to_matrix(), result.to_matrix(), 1.5e-4);
 }
 
 TEST(BravyiKitaev, testSRLCase8) {
@@ -210,9 +212,7 @@ TEST(BravyiKitaev, testSRLCase8) {
       double_complex(1.0, 0.0) * x(7) * z(8) * x(9) * x(11) +
       double_complex(0.0, 1.0) * x(7) * y(9) * x(11);
 
-  auto [terms, residuals] = (result - gold).get_raw_data();
-  for (auto r : residuals)
-    EXPECT_NEAR(std::abs(r), 0.0, 1e-4);
+  checkEqual(gold.to_matrix(), result.to_matrix(), 1.5e-4);
 }
 
 TEST(BravyiKitaev, testSRLCase9) {
@@ -226,9 +226,7 @@ TEST(BravyiKitaev, testSRLCase9) {
       double_complex(-1.0, 0.0) * z(7) * z(8) * x(9) * x(11) * z(15) +
       double_complex(0.0, 1.0) * z(7) * y(9) * x(11) * z(15);
 
-  auto [terms, residuals] = (result - gold).get_raw_data();
-  for (auto r : residuals)
-    EXPECT_NEAR(std::abs(r), 0.0, 1e-4);
+  checkEqual(gold.to_matrix(), result.to_matrix(), 1.5e-4);
 }
 
 TEST(BravyiKitaev, testSRLCase10) {
@@ -242,7 +240,5 @@ TEST(BravyiKitaev, testSRLCase10) {
       double_complex(-1.0, 0.0) * z(1) * z(2) * x(3) * z(7) +
       double_complex(0.0, 1.0) * y(3) * z(7);
 
-  auto [terms, residuals] = (result - gold).get_raw_data();
-  for (auto r : residuals)
-    EXPECT_NEAR(std::abs(r), 0.0, 1e-4);
+  checkEqual(gold.to_matrix(), result.to_matrix(), 1.5e-4);
 }

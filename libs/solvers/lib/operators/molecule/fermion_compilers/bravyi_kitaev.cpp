@@ -163,7 +163,7 @@ cudaq::spin_op seeley_richard_love(std::size_t i, std::size_t j,
 
   coef *= 0.25;
 
-  cudaq::spin_op seeley_richard_love_result = 0.0 * cudaq::spin::i(0);
+  cudaq::spin_op seeley_richard_love_result;
 
   // Case 0
   if (i == j) {
@@ -174,7 +174,7 @@ cudaq::spin_op seeley_richard_love(std::size_t i, std::size_t j,
       }
       seeley_richard_love_result += -coef * 2.0 * ops;
     }
-    seeley_richard_love_result += coef * 2.0 * cudaq::spin::i(0);
+    seeley_richard_love_result += coef * 2.0;
   }
 
   // Case 1
@@ -693,7 +693,7 @@ cudaq::spin_op bravyi_kitaev::generate(const double constant,
     }
   }
 
-  spin_hamiltonian += constant_term * cudaq::spin::i(0);
+  spin_hamiltonian += constant_term;
   return spin_hamiltonian;
 }
 } // namespace cudaq::solvers
