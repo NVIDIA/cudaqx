@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2024 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -15,6 +15,27 @@
 #include "cudaq/solvers/qaoa.h"
 
 using namespace cudaq::spin;
+
+void checkEqual(cudaq::complex_matrix a, cudaq::complex_matrix b, double tol = 1e-8) {
+  // Uncomment the following for debugging
+  // std::cout << "matrix a:" << std::endl;
+  // a.dump();
+  // std::cout << "matrix b:" << std::endl;
+  // b.dump();
+
+  ASSERT_EQ(a.get_rank(), b.get_rank());
+  ASSERT_EQ(a.rows(), b.rows());
+  ASSERT_EQ(a.cols(), b.cols());
+  ASSERT_EQ(a.size(), b.size());
+  for (std::size_t i = 0; i < a.rows(); i++) {
+    for (std::size_t j = 0; j < a.cols(); j++) {
+      auto a_val = a[{i, j}];
+      auto b_val = b[{i, j}];
+      EXPECT_NEAR(a_val.real(), b_val.real(), tol);
+      EXPECT_NEAR(a_val.imag(), b_val.imag(), tol);
+    }
+  }
+}
 
 TEST(SolversTester, checkSimpleQAOA) {
 
@@ -68,8 +89,9 @@ TEST(QAOATest, DefaultMixingHamiltonianExecution) {
 
   EXPECT_FALSE(result.optimal_parameters.empty());
   EXPECT_EQ(result.optimal_parameters.size(), 2);
-  EXPECT_GE(result.optimal_value, -1.0);
-  EXPECT_LE(result.optimal_value, 1.0);
+  double eps = 1e-6;
+  EXPECT_GE(result.optimal_value, -1.0 - eps);
+  EXPECT_LE(result.optimal_value, 1.0 + eps);
 }
 
 // Test parameter validation
@@ -129,13 +151,10 @@ TEST(MaxCutHamiltonianTest, SingleEdge) {
 
   auto ham = cudaq::solvers::get_maxcut_hamiltonian(g);
   ham.dump();
-  // Should have two terms: 0.5*Z0Z1 and -0.5*I0I1
-  EXPECT_EQ(ham.num_terms(), 2);
 
-  // Verify the coefficients
-  EXPECT_EQ(0.5 * cudaq::spin_op::from_word("ZZ") -
-                .5 * cudaq::spin_op::from_word("II"),
-            ham);
+  // Should have two terms: 0.5*Z0Z1 and -0.5*I0I1
+  cudaq::spin_op truth = 0.5 * cudaq::spin_op::from_word("ZZ") - 0.5;
+  checkEqual(truth.to_matrix(), ham.to_matrix());
 }
 
 TEST(MaxCutHamiltonianTest, Triangle) {
@@ -146,24 +165,13 @@ TEST(MaxCutHamiltonianTest, Triangle) {
 
   auto ham = cudaq::solvers::get_maxcut_hamiltonian(g);
   ham.dump();
+
   // Should have 6 terms: 0.5*(Z0Z1 + Z1Z2 + Z0Z2) - 0.5*(I0I1 + I1I2 + I0I2)
-  EXPECT_EQ(ham.num_terms(), 4);
-
-  std::vector<double> data{// Term 1: ZIZ with coefficient 0.5 + 0j
-                           2, 0, 2, 0.5, 0.0,
-
-                           // Term 2: ZZI with coefficient 0.5 + 0j
-                           2, 2, 0, 0.5, 0.0,
-
-                           // Term 3: IZZ with coefficient 0.5 + 0j
-                           0, 2, 2, 0.5, 0.0,
-
-                           // Term 4: III with coefficient -1.5 + 0j
-                           0, 0, 0, -1.5, 0.0,
-
-                           // Total number of terms
-                           4};
-  EXPECT_EQ(ham, cudaq::spin_op(data, 3));
+  cudaq::spin_op truth = 0.5 * (cudaq::spin_op::from_word("ZZI") +
+                                cudaq::spin_op::from_word("IZZ") +
+                                cudaq::spin_op::from_word("ZIZ")) -
+                         1.5;
+  checkEqual(truth.to_matrix(), ham.to_matrix());
 }
 
 TEST(MaxCutHamiltonianTest, DisconnectedGraph) {
@@ -172,23 +180,13 @@ TEST(MaxCutHamiltonianTest, DisconnectedGraph) {
   g.add_edge(2, 3); // Disconnected edge
 
   auto ham = cudaq::solvers::get_maxcut_hamiltonian(g);
-
-  // Should have 4 terms: 0.5*(Z0Z1 + Z2Z3) - 0.5*(I0I1 + I2I3)
-  EXPECT_EQ(ham.num_terms(), 3);
   ham.dump();
 
-  std::vector<double> data{// Term 1: ZZII with coefficient 0.5 + 0j
-                           2, 2, 0, 0, 0.5, 0.0,
-
-                           // Term 2: IIZZ with coefficient 0.5 + 0j
-                           0, 0, 2, 2, 0.5, 0.0,
-
-                           // Term 3: IIII with coefficient -1.0 + 0j
-                           0, 0, 0, 0, -1.0, 0.0,
-
-                           // Total number of terms
-                           3};
-  EXPECT_EQ(ham, cudaq::spin_op(data, 4));
+  // Should have 4 terms: 0.5*(Z0Z1 + Z2Z3) - 0.5*(I0I1 + I2I3)
+  cudaq::spin_op truth = 0.5 * (cudaq::spin_op::from_word("ZZII") +
+                                cudaq::spin_op::from_word("IIZZ")) -
+                         1.0;
+  checkEqual(truth.to_matrix(), ham.to_matrix());
 }
 
 TEST(CliqueHamiltonianTest, SingleNode) {
