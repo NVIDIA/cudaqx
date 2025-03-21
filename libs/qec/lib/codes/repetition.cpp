@@ -33,6 +33,7 @@ repetition::repetition(const heterogeneous_map &options) : code() {
 
   // Default Stabilizers should be Zi-1 Zi
   for (std::size_t i = 1; i < get_num_data_qubits(); i++) {
+    // TODO - remove the apparently useless but still needed "i" terms.
     m_stabilizers.push_back(cudaq::spin::i(get_num_data_qubits() - 1) *
                             cudaq::spin::z(i - 1) * cudaq::spin::z(i));
   }

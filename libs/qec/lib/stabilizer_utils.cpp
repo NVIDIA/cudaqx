@@ -62,7 +62,18 @@ to_parity_matrix(const std::vector<cudaq::spin_op> &stabilizers,
     p_stabilizers = &stabilizers_copy;
   }
 
-  auto numQubits = (*p_stabilizers)[0].to_string(false).size();
+  // Get the number of qubits. TODO - is there a cleaner way to do this?
+  std::size_t numQubits = [&]() {
+    std::size_t max_id = 0;
+    // Loop over all the degrees of all the stabilizers to find the maximum
+    // degree.
+    for (const auto &s : stabilizers) {
+      auto d = s.degrees();
+      if (!d.empty())
+        max_id = std::max(max_id, *std::max_element(d.begin(), d.end()));
+    }
+    return max_id + 1; // add 1 to get the number of qubits
+  }();
 
   if (type == stabilizer_type::XZ) {
     cudaqx::tensor<uint8_t> t({p_stabilizers->size(), 2 * numQubits});
