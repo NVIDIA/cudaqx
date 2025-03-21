@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2024 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -68,8 +68,9 @@ TEST(QAOATest, DefaultMixingHamiltonianExecution) {
 
   EXPECT_FALSE(result.optimal_parameters.empty());
   EXPECT_EQ(result.optimal_parameters.size(), 2);
-  EXPECT_GE(result.optimal_value, -1.0);
-  EXPECT_LE(result.optimal_value, 1.0);
+  double eps = 1e-6;
+  EXPECT_GE(result.optimal_value, -1.0 - eps);
+  EXPECT_LE(result.optimal_value, 1.0 + eps);
 }
 
 // Test parameter validation
@@ -89,8 +90,9 @@ TEST(QAOATest, MultiLayerExecution) {
   auto result = cudaq::solvers::qaoa(problemHam, 2, initParams);
 
   EXPECT_EQ(result.optimal_parameters.size(), 4);
-  EXPECT_GE(result.optimal_value, -1.0);
-  EXPECT_LE(result.optimal_value, 1.0);
+  double eps = 1e-6;
+  EXPECT_GE(result.optimal_value, -1.0 - eps);
+  EXPECT_LE(result.optimal_value, 1.0 + eps);
 }
 
 // // Test QAOA with options
@@ -146,24 +148,12 @@ TEST(MaxCutHamiltonianTest, Triangle) {
 
   auto ham = cudaq::solvers::get_maxcut_hamiltonian(g);
   ham.dump();
-  // Should have 6 terms: 0.5*(Z0Z1 + Z1Z2 + Z0Z2) - 0.5*(I0I1 + I1I2 + I0I2)
-  EXPECT_EQ(ham.num_terms(), 4);
-
-  std::vector<double> data{// Term 1: ZIZ with coefficient 0.5 + 0j
-                           2, 0, 2, 0.5, 0.0,
-
-                           // Term 2: ZZI with coefficient 0.5 + 0j
-                           2, 2, 0, 0.5, 0.0,
-
-                           // Term 3: IZZ with coefficient 0.5 + 0j
-                           0, 2, 2, 0.5, 0.0,
-
-                           // Term 4: III with coefficient -1.5 + 0j
-                           0, 0, 0, -1.5, 0.0,
-
-                           // Total number of terms
-                           4};
-  EXPECT_EQ(ham, cudaq::spin_op(data, 3));
+  // Should have: 0.5*(Z0Z1 + Z1Z2 + Z0Z2) - 0.5*(I0I1 + I1I2 + I0I2)
+  cudaq::spin_op truth = 0.5 * (cudaq::spin_op::from_word("ZZI") +
+                                cudaq::spin_op::from_word("IZZ") +
+                                cudaq::spin_op::from_word("ZIZ")) -
+                         1.5 * cudaq::spin_op::from_word("III");
+  EXPECT_EQ(truth, ham);
 }
 
 TEST(MaxCutHamiltonianTest, DisconnectedGraph) {
@@ -173,22 +163,11 @@ TEST(MaxCutHamiltonianTest, DisconnectedGraph) {
 
   auto ham = cudaq::solvers::get_maxcut_hamiltonian(g);
 
-  // Should have 4 terms: 0.5*(Z0Z1 + Z2Z3) - 0.5*(I0I1 + I2I3)
-  EXPECT_EQ(ham.num_terms(), 3);
-  ham.dump();
-
-  std::vector<double> data{// Term 1: ZZII with coefficient 0.5 + 0j
-                           2, 2, 0, 0, 0.5, 0.0,
-
-                           // Term 2: IIZZ with coefficient 0.5 + 0j
-                           0, 0, 2, 2, 0.5, 0.0,
-
-                           // Term 3: IIII with coefficient -1.0 + 0j
-                           0, 0, 0, 0, -1.0, 0.0,
-
-                           // Total number of terms
-                           3};
-  EXPECT_EQ(ham, cudaq::spin_op(data, 4));
+  // Should have: 0.5*(Z0Z1 + Z2Z3) - 0.5*(I0I1 + I2I3)
+  cudaq::spin_op truth = 0.5 * (cudaq::spin_op::from_word("ZZII") +
+                                cudaq::spin_op::from_word("IIZZ")) -
+                         1.0 * cudaq::spin_op::from_word("IIII");
+  EXPECT_EQ(truth, ham);
 }
 
 TEST(CliqueHamiltonianTest, SingleNode) {
@@ -197,8 +176,8 @@ TEST(CliqueHamiltonianTest, SingleNode) {
 
   auto ham = cudaq::solvers::get_clique_hamiltonian(g);
   ham.dump();
-  EXPECT_EQ(ham.num_terms(), 2);
-  EXPECT_EQ(ham, 0.75 * cudaq::spin::z(0) - .75 * cudaq::spin::i(0));
+  cudaq::spin_op truth = 0.75 * cudaq::spin::z(0) - .75 * cudaq::spin::i(0);
+  EXPECT_EQ(truth, ham);
 }
 
 TEST(CliqueHamiltonianTest, CompleteGraph) {
@@ -215,23 +194,12 @@ TEST(CliqueHamiltonianTest, CompleteGraph) {
 
   auto ham = cudaq::solvers::get_clique_hamiltonian(g, 4.0);
   ham.dump();
-  EXPECT_EQ(ham.num_terms(), 4);
 
-  std::vector<double> data{// Term 1: ZII with coefficient 1.0 + 0j
-                           2, 0, 0, 1.0, 0.0,
-
-                           // Term 2: IZI with coefficient 0.75 + 0j
-                           0, 2, 0, 0.75, 0.0,
-
-                           // Term 3: IIZ with coefficient 0.5 + 0j
-                           0, 0, 2, 0.5, 0.0,
-
-                           // Term 4: III with coefficient -2.25 + 0j
-                           0, 0, 0, -2.25, 0.0,
-
-                           // Total number of terms
-                           4};
-  EXPECT_EQ(ham, cudaq::spin_op(data, 3));
+  cudaq::spin_op truth = 1.00 * cudaq::spin_op::from_word("ZII") +
+                         0.75 * cudaq::spin_op::from_word("IZI") +
+                         0.50 * cudaq::spin_op::from_word("IIZ") -
+                         2.25 * cudaq::spin_op::from_word("III");
+  EXPECT_EQ(truth, ham);
 }
 
 TEST(CliqueHamiltonianTest, DisconnectedNodes) {
@@ -244,22 +212,9 @@ TEST(CliqueHamiltonianTest, DisconnectedNodes) {
   auto ham = cudaq::solvers::get_clique_hamiltonian(g, 2.0);
   ham.dump();
   // Should have 2 vertex terms + 1 penalty term for the non-edge
-  EXPECT_EQ(ham.num_terms(), 4);
-  std::vector<double> data{// Term 1: ZZ with coefficient 0.5 + 0j
-                           2, 2, 0.5, 0.0,
-
-                           // Term 2: ZI with coefficient 0.0 + 0j
-                           2, 0, 0.0, 0.0,
-
-                           // Term 3: IZ with coefficient 0.0 + 0j
-                           0, 2, 0.0, 0.0,
-
-                           // Term 4: II with coefficient -0.5 + 0j
-                           0, 0, -0.5, 0.0,
-
-                           // Total number of terms
-                           4};
-  EXPECT_EQ(ham, cudaq::spin_op(data, 2));
+  cudaq::spin_op truth = 0.5 * cudaq::spin_op::from_word("ZZ") -
+                         0.5 * cudaq::spin_op::from_word("II");
+  EXPECT_EQ(truth, ham);
 }
 
 TEST(CliqueHamiltonianTest, TriangleWithDisconnectedNode) {
@@ -281,35 +236,15 @@ TEST(CliqueHamiltonianTest, TriangleWithDisconnectedNode) {
   auto ham = cudaq::solvers::get_clique_hamiltonian(g, 4.0);
   ham.dump();
 
-  EXPECT_EQ(ham.num_terms(), 8);
-
-  std::vector<double> data{// Term 1: IIZZ with coefficient 1.0 + 0j
-                           0, 0, 2, 2, 1.0, 0.0,
-
-                           // Term 2: IZIZ with coefficient 1.0 + 0j
-                           0, 2, 0, 2, 1.0, 0.0,
-
-                           // Term 3: ZIIZ with coefficient 1.0 + 0j
-                           2, 0, 0, 2, 1.0, 0.0,
-
-                           // Term 4: IIIZ with coefficient -2.5 + 0j
-                           0, 0, 0, 2, -2.5, 0.0,
-
-                           // Term 5: IZII with coefficient -0.5 + 0j
-                           0, 2, 0, 0, -0.5, 0.0,
-
-                           // Term 6: IIII with coefficient 1.0 + 0j
-                           0, 0, 0, 0, 1.0, 0.0,
-
-                           // Term 7: IIZI with coefficient -0.5 + 0j
-                           0, 0, 2, 0, -0.5, 0.0,
-
-                           // Term 8: ZIII with coefficient -0.5 + 0j
-                           2, 0, 0, 0, -0.5, 0.0,
-
-                           // Total number of terms
-                           8};
-  EXPECT_EQ(ham, cudaq::spin_op(data, 4));
+  cudaq::spin_op truth = 1.0 * cudaq::spin_op::from_word("IIZZ") +
+                         1.0 * cudaq::spin_op::from_word("IZIZ") +
+                         1.0 * cudaq::spin_op::from_word("ZIIZ") -
+                         2.5 * cudaq::spin_op::from_word("IIIZ") -
+                         0.5 * cudaq::spin_op::from_word("IZII") +
+                         1.0 * cudaq::spin_op::from_word("IIII") -
+                         0.5 * cudaq::spin_op::from_word("IIZI") -
+                         0.5 * cudaq::spin_op::from_word("ZIII");
+  EXPECT_EQ(truth, ham);
 }
 
 TEST(CliqueHamiltonianTest, DifferentPenalties) {
@@ -322,9 +257,8 @@ TEST(CliqueHamiltonianTest, DifferentPenalties) {
   auto ham1 = cudaq::solvers::get_clique_hamiltonian(g, 2.0);
   auto ham2 = cudaq::solvers::get_clique_hamiltonian(g, 4.0);
 
-  // Same number of terms but different coefficients
-  EXPECT_EQ(ham1.num_terms(), ham2.num_terms());
-  EXPECT_NE(ham1.to_string(), ham2.to_string());
+  // Expect differences
+  EXPECT_NE(ham1, ham2);
 }
 
 TEST(CliqueHamiltonianTest, WeightedNodes) {
@@ -338,19 +272,10 @@ TEST(CliqueHamiltonianTest, WeightedNodes) {
   auto ham = cudaq::solvers::get_clique_hamiltonian(g);
   ham.dump();
   // Should have 2 vertex terms with different coefficients
-  EXPECT_EQ(ham.num_terms(), 3);
-  std::vector<double> data{// Term 1: ZI with coefficient 1.0 + 0j
-                           2, 0, 1.0, 0.0,
-
-                           // Term 2: IZ with coefficient 1.5 + 0j
-                           0, 2, 1.5, 0.0,
-
-                           // Term 3: II with coefficient -2.5 + 0j
-                           0, 0, -2.5, 0.0,
-
-                           // Total number of terms
-                           3};
-  EXPECT_EQ(ham, cudaq::spin_op(data, 2));
+  cudaq::spin_op truth = 1.0 * cudaq::spin_op::from_word("ZI") +
+                         1.5 * cudaq::spin_op::from_word("IZ") -
+                         2.5 * cudaq::spin_op::from_word("II");
+  EXPECT_EQ(truth, ham);
 }
 
 TEST(QAOAMaxCutTest, SingleEdge) {

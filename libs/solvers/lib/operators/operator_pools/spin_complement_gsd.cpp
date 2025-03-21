@@ -13,7 +13,7 @@ using namespace cudaqx;
 namespace cudaq::solvers {
 
 inline cudaq::spin_op adag(std::size_t numQubits, std::size_t j) {
-  cudaq::spin_op zprod(numQubits);
+  cudaq::spin_op_term zprod(0, numQubits);
   for (std::size_t k = 0; k < j; k++)
     zprod *= cudaq::spin::z(k);
   return 0.5 * zprod *
@@ -21,7 +21,7 @@ inline cudaq::spin_op adag(std::size_t numQubits, std::size_t j) {
 }
 
 inline cudaq::spin_op a(std::size_t numQubits, std::size_t j) {
-  cudaq::spin_op zprod(numQubits);
+  cudaq::spin_op_term zprod(0, numQubits);
   for (std::size_t k = 0; k < j; k++)
     zprod *= cudaq::spin::z(k);
   return 0.5 * zprod *
@@ -49,20 +49,9 @@ spin_complement_gsd::generate(const heterogeneous_map &config) const {
       oneElectron += adag(numQubits, q + 1) * a(numQubits, p + 1) -
                      adag(numQubits, p + 1) * a(numQubits, q + 1);
 
-      std::unordered_map<cudaq::spin_op::spin_op_term, std::complex<double>>
-          terms;
-      oneElectron.for_each_term([&](cudaq::spin_op &term) {
-        auto coeff = term.get_coefficient();
-        if (std::fabs(coeff.real()) < 1e-12 && std::fabs(coeff.imag()) < 1e-12)
-          return;
-
-        if (std::fabs(coeff.real()) < 1e-12)
-          terms.insert({term.get_raw_data().first[0],
-                        std::complex<double>{0., coeff.imag()}});
-      });
-
-      if (!terms.empty())
-        pool.emplace_back(terms);
+      oneElectron.trim(0.0);
+      if (oneElectron.num_terms() != 0)
+        pool.emplace_back(oneElectron);
     }
   }
 
@@ -89,21 +78,9 @@ spin_complement_gsd::generate(const heterogeneous_map &config) const {
                          adag(numQubits, q + 1) * a(numQubits, s + 1) *
                              adag(numQubits, p + 1) * a(numQubits, r + 1);
 
-          std::unordered_map<cudaq::spin_op::spin_op_term, std::complex<double>>
-              terms;
-          twoElectron.for_each_term([&](cudaq::spin_op &term) {
-            auto coeff = term.get_coefficient();
-            if (std::fabs(coeff.real()) < 1e-12 &&
-                std::fabs(coeff.imag()) < 1e-12)
-              return;
-
-            if (std::fabs(coeff.real()) < 1e-12)
-              terms.insert({term.get_raw_data().first[0],
-                            std::complex<double>{0., coeff.imag()}});
-          });
-
-          if (!terms.empty())
-            pool.push_back(terms);
+          twoElectron.trim(0.0);
+          if (twoElectron.num_terms() != 0)
+            pool.emplace_back(twoElectron);
           rs++;
         }
       }
@@ -133,20 +110,9 @@ spin_complement_gsd::generate(const heterogeneous_map &config) const {
                              adag(numQubits, r + 1) * a(numQubits, p + 1) -
                          adag(numQubits, p + 1) * a(numQubits, r + 1) *
                              adag(numQubits, q - 1) * a(numQubits, s - 1);
-          std::unordered_map<cudaq::spin_op::spin_op_term, std::complex<double>>
-              terms;
-          twoElectron.for_each_term([&](cudaq::spin_op &term) {
-            auto coeff = term.get_coefficient();
-            if (std::fabs(coeff.real()) < 1e-12 &&
-                std::fabs(coeff.imag()) < 1e-12)
-              return;
-
-            if (std::fabs(coeff.real()) < 1e-12)
-              terms.insert({term.get_raw_data().first[0],
-                            std::complex<double>{0., coeff.imag()}});
-          });
-          if (!terms.empty())
-            pool.push_back(terms);
+          twoElectron.trim(0.0);
+          if (twoElectron.num_terms() != 0)
+            pool.push_back(twoElectron);
           rs++;
         }
       }

@@ -1,5 +1,5 @@
-/****************************************************************-*- C++ -*-****
- * Copyright (c) 2024 NVIDIA Corporation & Affiliates.                         *
+/*******************************************************************************
+ * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -50,7 +50,8 @@ TEST(UCCSDTest, GenerateWithCustomCoefficients) {
 
   for (size_t i = 0; i < operators.size(); ++i) {
     EXPECT_EQ(operators[i].num_qubits(), 4);
-    EXPECT_DOUBLE_EQ(1.0, operators[i].get_coefficient().real());
+    EXPECT_DOUBLE_EQ(1.0,
+                     operators[i].begin()->get_coefficient().evaluate().real());
   }
 }
 

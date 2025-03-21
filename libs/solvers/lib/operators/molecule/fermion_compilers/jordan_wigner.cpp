@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2024 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -18,14 +18,14 @@ using namespace cudaqx;
 namespace cudaq::solvers {
 
 cudaq::spin_op jordan_wigner::generate(const double constant,
-                                       const tensor<> &hpq,
-                                       const tensor<> &hpqrs,
+                                       const cudaqx::tensor<> &hpq,
+                                       const cudaqx::tensor<> &hpqrs,
                                        const heterogeneous_map &options) {
   assert(hpq.rank() == 2 && "hpq must be a rank-2 tensor");
   assert(hpqrs.rank() == 4 && "hpqrs must be a rank-4 tensor");
 
-  auto spin_hamiltonian = constant * cudaq::spin_op();
   std::size_t nqubit = hpq.shape()[0];
+  cudaq::spin_op spin_hamiltonian = constant * cudaq::spin_op_term(0, nqubit);
   double tol =
       options.get<double>(std::vector<std::string>{"tolerance", "tol"}, 1e-15);
 
@@ -34,7 +34,7 @@ cudaq::spin_op jordan_wigner::generate(const double constant,
   };
 
   auto adag = [](std::size_t numQubits, std::size_t j) {
-    cudaq::spin_op zprod(numQubits);
+    cudaq::spin_op_term zprod(0, numQubits);
     for (std::size_t k = 0; k < j; k++)
       zprod *= cudaq::spin::z(k);
     return 0.5 * zprod *
@@ -42,7 +42,7 @@ cudaq::spin_op jordan_wigner::generate(const double constant,
   };
 
   auto a = [](std::size_t numQubits, std::size_t j) {
-    cudaq::spin_op zprod(numQubits);
+    cudaq::spin_op_term zprod(0, numQubits);
     for (std::size_t k = 0; k < j; k++)
       zprod *= cudaq::spin::z(k);
     return 0.5 * zprod *
@@ -63,16 +63,8 @@ cudaq::spin_op jordan_wigner::generate(const double constant,
                                 adag(nqubit, j) * a(nqubit, k) * a(nqubit, l);
 
   // Remove terms with 0.0 coefficient
-  std::vector<cudaq::spin_op> nonZeros;
-  for (auto &term : spin_hamiltonian) {
-    auto coeff = term.get_coefficient();
-    if (std::fabs(coeff) > tol)
-      nonZeros.push_back(term);
-  }
-  auto op = nonZeros[0];
-  for (std::size_t i = 1; i < nonZeros.size(); i++)
-    op += nonZeros[i];
+  spin_hamiltonian.trim(tol);
 
-  return op;
+  return spin_hamiltonian;
 }
 } // namespace cudaq::solvers

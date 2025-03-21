@@ -18,9 +18,10 @@ using excitation_list = std::vector<std::vector<std::size_t>>;
 std::vector<cudaq::spin_op>
 uccsd::generate(const heterogeneous_map &config) const {
 
-  auto numQubits =
+  std::size_t numQubits =
       config.get<int>({"num-qubits", "num_qubits", "n-qubits", "n_qubits"});
-  auto numElectrons = config.get<int>({"num-electrons", "num_electrons"});
+  std::size_t numElectrons =
+      config.get<int>({"num-electrons", "num_electrons"});
   std::size_t spin = 0;
   if (config.contains("spin"))
     spin = config.get<std::size_t>("spin");
@@ -35,7 +36,7 @@ uccsd::generate(const heterogeneous_map &config) const {
                                           std::size_t p, std::size_t q) {
     double parity = 1.0;
 
-    cudaq::spin_op o(numQubits);
+    cudaq::spin_op_term o(0, numQubits);
     for (std::size_t i = p + 1; i < q; i++)
       o *= cudaq::spin::z(i);
 
@@ -46,7 +47,8 @@ uccsd::generate(const heterogeneous_map &config) const {
   auto addDoublesExcitation = [numQubits](std::vector<cudaq::spin_op> &ops,
                                           std::size_t p, std::size_t q,
                                           std::size_t r, std::size_t s) {
-    cudaq::spin_op parity_a(numQubits), parity_b(numQubits);
+    cudaq::spin_op_term parity_a(0, numQubits);
+    cudaq::spin_op_term parity_b(0, numQubits);
     std::size_t i_occ = 0, j_occ = 0, a_virt = 0, b_virt = 0;
     if (p < q && r < s) {
       i_occ = p;

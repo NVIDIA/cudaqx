@@ -15,15 +15,15 @@
 namespace cudaq::solvers {
 cudaq::spin_op
 getDefaultReferenceHamiltonian(const cudaq::spin_op &problemHamiltonian) {
-  cudaq::spin_op referenceHamiltonian;
+  cudaq::spin_op referenceHamiltonian = cudaq::spin_op::empty();
   auto numQubits = problemHamiltonian.num_qubits();
 
   // Add X terms for each qubit as the default mixer
   for (std::size_t i = 0; i < numQubits; i++) {
-    referenceHamiltonian += cudaq::spin::i(numQubits - 1) * cudaq::spin::x(i);
+    referenceHamiltonian +=
+        cudaq::spin_op_term(0, numQubits) * cudaq::spin::x(i);
   }
 
-  referenceHamiltonian -= cudaq::spin::i(numQubits - 1);
   return referenceHamiltonian;
 }
 
@@ -41,10 +41,10 @@ std::size_t get_num_qaoa_parameters(const cudaq::spin_op &problemHamiltonian,
   std::size_t expectedNumParams = 0;
   if (full_parameterization) {
     auto nonIdTerms = 0;
-    referenceHamiltonian.for_each_term([&](cudaq::spin_op &term) {
+    for (const auto &term : referenceHamiltonian)
       if (!term.is_identity())
         nonIdTerms++;
-    });
+
     expectedNumParams =
         numLayers * (problemHamiltonian.num_terms() + nonIdTerms);
   } else {
@@ -86,17 +86,17 @@ qaoa_result qaoa(const cudaq::spin_op &problemHamiltonian,
                         false);
   std::vector<double> probHCoeffs, refHCoeffs;
   std::vector<cudaq::pauli_word> probHWords, refHWords;
+  auto numQubits = problemHamiltonian.num_qubits();
   for (const auto &o : problemHamiltonian) {
-    probHWords.emplace_back(o.to_string(false));
-    probHCoeffs.push_back(o.get_coefficient().real());
+    probHWords.emplace_back(o.get_pauli_word(numQubits));
+    probHCoeffs.push_back(o.get_coefficient().evaluate().real());
   }
 
   for (const auto &o : referenceHamiltonian) {
-    refHWords.emplace_back(o.to_string(false));
-    refHCoeffs.push_back(o.get_coefficient().real());
+    refHWords.emplace_back(o.get_pauli_word(numQubits));
+    refHCoeffs.push_back(o.get_coefficient().evaluate().real());
   }
 
-  auto numQubits = problemHamiltonian.num_qubits();
   auto argsTranslator = [&](std::vector<double> x) {
     return std::make_tuple(numQubits, numLayers, x, probHCoeffs, probHWords,
                            refHCoeffs, refHWords, full_parameterization,

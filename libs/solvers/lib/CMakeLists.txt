@@ -46,7 +46,7 @@ target_link_libraries(cudaq-solvers
   PUBLIC
     cudaqx-core
     cudaq::cudaq
-    cudaq::cudaq-spin
+    cudaq::cudaq-operator
   PRIVATE
     cudaq::cudaq-common
     nlohmann_json::nlohmann_json

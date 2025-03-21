@@ -12,6 +12,8 @@ namespace cudaq::qec {
 // An earlier occurrence is considered "less".
 // Example: a = "ZZX", b = "XXZ" -> a < b
 static bool spinOpComparator(const cudaq::spin_op &a, const cudaq::spin_op &b) {
+  // TODO - update this logic once the stabilizers are converted to
+  // spin_op_terms.
   auto astr = a.to_string(false);
   auto bstr = b.to_string(false);
   auto zIdxA = astr.find_first_of("Z");
