@@ -35,8 +35,8 @@ cudaq::spin_op get_maxcut_hamiltonian(const cudaqx::graph &graph) {
 
         // For each weighted edge (u,v), add w/2(Z_u Z_v - I) to the Hamiltonian
         // This matches the mathematical form: H = Σ w_ij/2(Z_i Z_j - I)
-        hamiltonian +=
-            weight * 0.5 * identity * (cudaq::spin::z(u) * cudaq::spin::z(v) - 1.0);
+        hamiltonian += weight * 0.5 * identity *
+                       (cudaq::spin::z(u) * cudaq::spin::z(v) - 1.0);
       }
     }
   }

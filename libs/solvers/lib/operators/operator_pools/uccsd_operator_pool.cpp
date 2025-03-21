@@ -20,7 +20,8 @@ uccsd::generate(const heterogeneous_map &config) const {
 
   std::size_t numQubits =
       config.get<int>({"num-qubits", "num_qubits", "n-qubits", "n_qubits"});
-  std::size_t numElectrons = config.get<int>({"num-electrons", "num_electrons"});
+  std::size_t numElectrons =
+      config.get<int>({"num-electrons", "num_electrons"});
   std::size_t spin = 0;
   if (config.contains("spin"))
     spin = config.get<std::size_t>("spin");
