@@ -217,7 +217,7 @@ TEST_F(SolversTester, checkSimpleAdaptGradientUCCSD_H2Sto3g) {
     printf("%lf -> %s\n", thetas[i], ops[i].to_string().c_str());
 }
 
-TEST_F(SolversTester, checkSimpleAdaptUCCSD_H2_greedy) {
+TEST_F(SolversTester, checkSimpleAdaptUCCSD_H2_warm) {
   auto pool = cudaq::solvers::operator_pool::get("uccsd");
   heterogeneous_map config;
   config.insert("num-qubits", h.num_qubits());
@@ -232,11 +232,11 @@ TEST_F(SolversTester, checkSimpleAdaptUCCSD_H2_greedy) {
                                  {"threshold_energy", 5e-6},
                                  {"initial_theta", 0.0},
                                  {"tol", 1e-6},
-                                 {"opt_mode", "greedy"}});
+                                 {"dynamic_start", "warm"}});
   EXPECT_NEAR(energy, -1.13, 1e-2);
 }
 
-TEST_F(SolversTester, checkSimpleAdaptUCCSD_H2Sto3g_greedy) {
+TEST_F(SolversTester, checkSimpleAdaptUCCSD_H2Sto3g_warm) {
   auto pool = cudaq::solvers::operator_pool::get("uccsd");
   heterogeneous_map config;
   config.insert("num-qubits", hamhh.num_qubits());
@@ -251,11 +251,11 @@ TEST_F(SolversTester, checkSimpleAdaptUCCSD_H2Sto3g_greedy) {
                                  {"threshold_energy", 5e-6},
                                  {"initial_theta", 0.0},
                                  {"tol", 1e-6},
-                                 {"opt_mode", "greedy"}});
+                                 {"dynamic_start", "warm"}});
   EXPECT_NEAR(energy, -1.13, 1e-2);
 }
 
-TEST_F(SolversTester, checkSimpleAdaptGradientUCCSD_H2_greedy) {
+TEST_F(SolversTester, checkSimpleAdaptGradientUCCSD_H2_warm) {
   auto pool = cudaq::solvers::operator_pool::get("uccsd");
   auto opt = cudaq::optim::optimizer::get("lbfgs");
   heterogeneous_map config;
@@ -271,14 +271,14 @@ TEST_F(SolversTester, checkSimpleAdaptGradientUCCSD_H2_greedy) {
        {"threshold_energy", 5e-6},
        {"initial_theta", 0.0},
        {"tol", 1e-6},
-       {"opt_mode", "greedy"}});
+       {"dynamic_start", "warm"}});
   EXPECT_NEAR(energy, -1.13, 1e-2);
 
   for (std::size_t i = 0; i < thetas.size(); i++)
     printf("%lf -> %s\n", thetas[i], ops[i].to_string().c_str());
 }
 
-TEST_F(SolversTester, checkSimpleAdaptGradientUCCSD_H2Sto3g_greedy) {
+TEST_F(SolversTester, checkSimpleAdaptGradientUCCSD_H2Sto3g_warm) {
   auto pool = cudaq::solvers::operator_pool::get("uccsd");
   auto opt = cudaq::optim::optimizer::get("lbfgs");
   heterogeneous_map config;
@@ -294,7 +294,7 @@ TEST_F(SolversTester, checkSimpleAdaptGradientUCCSD_H2Sto3g_greedy) {
        {"threshold_energy", 5e-6},
        {"initial_theta", 0.0},
        {"tol", 1e-6},
-       {"opt_mode", "greedy"}});
+       {"dynamic_start", "warm"}});
   EXPECT_NEAR(energy, -1.13, 1e-2);
   for (std::size_t i = 0; i < thetas.size(); i++)
     printf("%lf -> %s\n", thetas[i], ops[i].to_string().c_str());
@@ -384,7 +384,7 @@ TEST_F(SolversTester, checkSimpleAdaptGradientUCCSD_LiHSto3g) {
     printf("%lf -> %s\n", thetas[i], ops[i].to_string().c_str());
 }
 
-TEST_F(SolversTester, checkSimpleAdaptGradientUCCSD_LiHSto3g_greedy) {
+TEST_F(SolversTester, checkSimpleAdaptGradientUCCSD_LiHSto3g_warm) {
   if (!check_gpu_available())
     GTEST_SKIP() << "No GPU available, skipping test because CPU is slow";
 
@@ -403,7 +403,7 @@ TEST_F(SolversTester, checkSimpleAdaptGradientUCCSD_LiHSto3g_greedy) {
        {"threshold_energy", 5e-6},
        {"initial_theta", 0.0},
        {"tol", 1e-5},
-       {"opt_mode", "greedy"}});
+       {"dynamic_start", "warm"}});
   EXPECT_NEAR(energy, -7.88, 1e-2);
   for (std::size_t i = 0; i < thetas.size(); i++)
     printf("%lf -> %s\n", thetas[i], ops[i].to_string().c_str());
