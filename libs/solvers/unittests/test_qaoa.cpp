@@ -16,28 +16,6 @@
 
 using namespace cudaq::spin;
 
-void checkEqual(cudaq::complex_matrix a, cudaq::complex_matrix b,
-                double tol = 1e-8) {
-  // Uncomment the following for debugging
-  // std::cout << "matrix a:" << std::endl;
-  // a.dump();
-  // std::cout << "matrix b:" << std::endl;
-  // b.dump();
-
-  ASSERT_EQ(a.get_rank(), b.get_rank());
-  ASSERT_EQ(a.rows(), b.rows());
-  ASSERT_EQ(a.cols(), b.cols());
-  ASSERT_EQ(a.size(), b.size());
-  for (std::size_t i = 0; i < a.rows(); i++) {
-    for (std::size_t j = 0; j < a.cols(); j++) {
-      auto a_val = a[{i, j}];
-      auto b_val = b[{i, j}];
-      EXPECT_NEAR(a_val.real(), b_val.real(), tol);
-      EXPECT_NEAR(a_val.imag(), b_val.imag(), tol);
-    }
-  }
-}
-
 TEST(SolversTester, checkSimpleQAOA) {
 
   auto Hp = 0.5 * z(0) * z(1) + 0.5 * z(1) * z(2) + 0.5 * z(0) * z(3) +
@@ -153,10 +131,13 @@ TEST(MaxCutHamiltonianTest, SingleEdge) {
 
   auto ham = cudaq::solvers::get_maxcut_hamiltonian(g);
   ham.dump();
-
   // Should have two terms: 0.5*Z0Z1 and -0.5*I0I1
-  cudaq::spin_op truth = 0.5 * cudaq::spin_op::from_word("ZZ") - 0.5;
-  checkEqual(truth.to_matrix(), ham.to_matrix());
+  EXPECT_EQ(ham.num_terms(), 2);
+
+  // Verify the coefficients
+  EXPECT_EQ(0.5 * cudaq::spin_op::from_word("ZZ") -
+                .5 * cudaq::spin_op::from_word("II"),
+            ham);
 }
 
 TEST(MaxCutHamiltonianTest, Triangle) {
@@ -167,13 +148,12 @@ TEST(MaxCutHamiltonianTest, Triangle) {
 
   auto ham = cudaq::solvers::get_maxcut_hamiltonian(g);
   ham.dump();
-
   // Should have 6 terms: 0.5*(Z0Z1 + Z1Z2 + Z0Z2) - 0.5*(I0I1 + I1I2 + I0I2)
   cudaq::spin_op truth = 0.5 * (cudaq::spin_op::from_word("ZZI") +
                                 cudaq::spin_op::from_word("IZZ") +
                                 cudaq::spin_op::from_word("ZIZ")) -
-                         1.5;
-  checkEqual(truth.to_matrix(), ham.to_matrix());
+                         1.5 * cudaq::spin_op::from_word("III");
+  EXPECT_EQ(truth, ham);
 }
 
 TEST(MaxCutHamiltonianTest, DisconnectedGraph) {
@@ -182,13 +162,12 @@ TEST(MaxCutHamiltonianTest, DisconnectedGraph) {
   g.add_edge(2, 3); // Disconnected edge
 
   auto ham = cudaq::solvers::get_maxcut_hamiltonian(g);
-  ham.dump();
 
   // Should have 4 terms: 0.5*(Z0Z1 + Z2Z3) - 0.5*(I0I1 + I2I3)
   cudaq::spin_op truth = 0.5 * (cudaq::spin_op::from_word("ZZII") +
                                 cudaq::spin_op::from_word("IIZZ")) -
-                         1.0;
-  checkEqual(truth.to_matrix(), ham.to_matrix());
+                         1.0 * cudaq::spin_op::from_word("IIII");
+  EXPECT_EQ(truth, ham);
 }
 
 TEST(CliqueHamiltonianTest, SingleNode) {
@@ -197,8 +176,8 @@ TEST(CliqueHamiltonianTest, SingleNode) {
 
   auto ham = cudaq::solvers::get_clique_hamiltonian(g);
   ham.dump();
-  cudaq::spin_op truth = 0.75 * cudaq::spin::z(0) - .75;
-  checkEqual(truth.to_matrix(), ham.to_matrix());
+  cudaq::spin_op truth = 0.75 * cudaq::spin::z(0) - .75 * cudaq::spin::i(0);
+  EXPECT_EQ(truth, ham);
 }
 
 TEST(CliqueHamiltonianTest, CompleteGraph) {
@@ -216,10 +195,11 @@ TEST(CliqueHamiltonianTest, CompleteGraph) {
   auto ham = cudaq::solvers::get_clique_hamiltonian(g, 4.0);
   ham.dump();
 
-  cudaq::spin_op truth = 1.00 * cudaq::spin_op::z(0) +
-                         0.75 * cudaq::spin_op::z(1) +
-                         0.50 * cudaq::spin_op::z(2) - 2.25;
-  checkEqual(truth.to_matrix(), ham.to_matrix());
+  cudaq::spin_op truth = 1.00 * cudaq::spin_op::from_word("ZII") +
+                         0.75 * cudaq::spin_op::from_word("IZI") +
+                         0.50 * cudaq::spin_op::from_word("IIZ") -
+                         2.25 * cudaq::spin_op::from_word("III");
+  EXPECT_EQ(truth, ham);
 }
 
 TEST(CliqueHamiltonianTest, DisconnectedNodes) {
@@ -232,8 +212,9 @@ TEST(CliqueHamiltonianTest, DisconnectedNodes) {
   auto ham = cudaq::solvers::get_clique_hamiltonian(g, 2.0);
   ham.dump();
   // Should have 2 vertex terms + 1 penalty term for the non-edge
-  cudaq::spin_op truth = 0.5 * cudaq::spin_op::from_word("ZZ") - 0.5;
-  checkEqual(truth.to_matrix(), ham.to_matrix());
+  cudaq::spin_op truth = 0.5 * cudaq::spin_op::from_word("ZZ") -
+                         0.5 * cudaq::spin_op::from_word("II");
+  EXPECT_EQ(truth, ham);
 }
 
 TEST(CliqueHamiltonianTest, TriangleWithDisconnectedNode) {
@@ -259,10 +240,11 @@ TEST(CliqueHamiltonianTest, TriangleWithDisconnectedNode) {
                          1.0 * cudaq::spin_op::from_word("IZIZ") +
                          1.0 * cudaq::spin_op::from_word("ZIIZ") -
                          2.5 * cudaq::spin_op::from_word("IIIZ") -
-                         0.5 * cudaq::spin_op::from_word("IZII") + 1.0 -
+                         0.5 * cudaq::spin_op::from_word("IZII") +
+                         1.0 * cudaq::spin_op::from_word("IIII") -
                          0.5 * cudaq::spin_op::from_word("IIZI") -
                          0.5 * cudaq::spin_op::from_word("ZIII");
-  checkEqual(truth.to_matrix(), ham.to_matrix());
+  EXPECT_EQ(truth, ham);
 }
 
 TEST(CliqueHamiltonianTest, DifferentPenalties) {
@@ -275,9 +257,8 @@ TEST(CliqueHamiltonianTest, DifferentPenalties) {
   auto ham1 = cudaq::solvers::get_clique_hamiltonian(g, 2.0);
   auto ham2 = cudaq::solvers::get_clique_hamiltonian(g, 4.0);
 
-  // Same number of terms but different coefficients
-  EXPECT_EQ(ham1.num_terms(), ham2.num_terms());
-  EXPECT_NE(ham1.to_string(), ham2.to_string());
+  // Expect differences
+  EXPECT_NE(ham1, ham2);
 }
 
 TEST(CliqueHamiltonianTest, WeightedNodes) {
@@ -291,9 +272,10 @@ TEST(CliqueHamiltonianTest, WeightedNodes) {
   auto ham = cudaq::solvers::get_clique_hamiltonian(g);
   ham.dump();
   // Should have 2 vertex terms with different coefficients
-  cudaq::spin_op truth =
-      1.0 * cudaq::spin_op::z(0) + 1.5 * cudaq::spin_op::z(1) - 2.5;
-  checkEqual(truth.to_matrix(), ham.to_matrix());
+  cudaq::spin_op truth = 1.0 * cudaq::spin_op::from_word("ZI") +
+                         1.5 * cudaq::spin_op::from_word("IZ") -
+                         2.5 * cudaq::spin_op::from_word("II");
+  EXPECT_EQ(truth, ham);
 }
 
 TEST(QAOAMaxCutTest, SingleEdge) {

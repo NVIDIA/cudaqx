@@ -18,7 +18,10 @@ cudaq::spin_op get_clique_hamiltonian(const cudaqx::graph &graph,
     return cudaq::spin_op();
 
   // Initialize empty spin operator
-  cudaq::spin_op hamiltonian(nodes.size());
+  cudaq::spin_op hamiltonian;
+
+  // "IIII..." (identity term for each node)
+  cudaq::spin_op_term ii(0, nodes.size());
 
   // First term: Sum over all nodes
   for (const auto &node : nodes) {
@@ -26,8 +29,7 @@ cudaq::spin_op get_clique_hamiltonian(const cudaqx::graph &graph,
     double weight = graph.get_node_weight(node);
 
     // Add 0.5 * weight * (Z_i - I)
-    hamiltonian += 0.5 * weight *
-                   (cudaq::spin::z(node) - cudaq::spin::i(nodes.size() - 1));
+    hamiltonian += 0.5 * weight * ii * (cudaq::spin::z(node) - 1.0);
   }
 
   // Second term: Sum over non-edges
@@ -40,12 +42,13 @@ cudaq::spin_op get_clique_hamiltonian(const cudaqx::graph &graph,
     int v = non_edge.second;
 
     // Add penalty/4 * (Z_u Z_v - Z_u - Z_v + I)
-    hamiltonian += penalty / 4.0 *
+    hamiltonian += penalty / 4.0 * ii *
                    (cudaq::spin::z(u) * cudaq::spin::z(v) - cudaq::spin::z(u) -
-                    cudaq::spin::z(v) + cudaq::spin::i(nodes.size() - 1));
+                    cudaq::spin::z(v) + 1.0);
   }
 
-  return hamiltonian - cudaq::spin_op(nodes.size() - 1);
+  hamiltonian.trim();
+  return hamiltonian;
 }
 
 } // namespace cudaq::solvers
