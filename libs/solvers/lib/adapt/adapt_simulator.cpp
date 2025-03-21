@@ -37,10 +37,11 @@ simulator::run(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
   double ediff = std::numeric_limits<double>::max();
 
   int maxIter = options.get<int>("maxIter", 30);
-  auto tol = options.get<double>("grad_norm_tolerance", 1e-5);
+  auto grad_norm_tolerance = options.get<double>("grad_norm_tolerance", 1e-5);
   auto tolNormDiff = options.get<double>("grad_norm_diff_tolerance", 1e-5);
   auto thresholdE = options.get<double>("threshold_energy", 1e-6);
   auto initTheta = options.get<double>("initial_theta", 0.0);
+  auto mutable_options = options;
 
   auto numQubits = H.num_qubits();
   // Assumes each rank can see numQpus, models a distributed
@@ -126,21 +127,27 @@ simulator::run(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
 
     // Step 1 - compute <psi|[H,Oi]|psi> vector
     std::vector<double> gradients;
+    std::vector<observe_result> results;
     double gradNorm = 0.0;
     std::vector<async_observe_result> resultHandles;
-    for (std::size_t i = 0, qpuCounter = 0; i < commutators.size(); i++) {
-      if (rank == 0)
+
+    if (numQpus == 1) {
+      for (std::size_t i = 0; i < commutators.size(); i++) {
         cudaq::info("Compute commutator {}", i);
-      if (qpuCounter % numQpus == 0)
-        qpuCounter = 0;
-
-      resultHandles.emplace_back(
-          observe_async(qpuCounter++, prepare_state, commutators[i], state));
+        results.emplace_back(observe(prepare_state, commutators[i], state));
+      }
+    } else {
+      for (std::size_t i = 0, qpuCounter = 0; i < commutators.size(); i++) {
+        if (rank == 0)
+          cudaq::info("Compute commutator {}", i);
+        if (qpuCounter % numQpus == 0)
+          qpuCounter = 0;
+        resultHandles.emplace_back(
+            observe_async(qpuCounter++, prepare_state, commutators[i], state));
+      }
+      for (auto &handle : resultHandles)
+        results.emplace_back(handle.get());
     }
-
-    std::vector<observe_result> results;
-    for (auto &handle : resultHandles)
-      results.emplace_back(handle.get());
 
     // Get the gradient results
     std::transform(results.begin(), results.end(),
@@ -191,8 +198,8 @@ simulator::run(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
     }
 
     // Convergence is reached if gradient values are small
-    if (norm < tol || std::fabs(lastNorm - norm) < tolNormDiff ||
-        ediff < thresholdE)
+    if (norm < grad_norm_tolerance ||
+        std::fabs(lastNorm - norm) < tolNormDiff || ediff < thresholdE)
       break;
 
     // Use the operator from the pool
@@ -248,10 +255,15 @@ simulator::run(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
       };
     }
 
-    // FIXME fix the const_cast
+    if (options.contains("opt_mode")) {
+      if (options.get<std::string>("opt_mode") == "greedy")
+        mutable_options.insert("initial_parameters", thetas);
+    }
+
     auto [groundEnergy, optParams] =
-        const_cast<optim::optimizer &>(optimizer).optimize(thetas.size(),
-                                                           objective, options);
+        const_cast<optim::optimizer &>(optimizer).optimize(
+            thetas.size(), objective, mutable_options);
+
     // Set the new optimzal parameters
     thetas = optParams;
     energy = groundEnergy;
