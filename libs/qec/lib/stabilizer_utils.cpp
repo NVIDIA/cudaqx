@@ -64,16 +64,8 @@ to_parity_matrix(const std::vector<cudaq::spin_op> &stabilizers,
     p_stabilizers = &stabilizers_copy;
   }
 
-  // Get the number of qubits.
-  std::size_t numQubits = [&]() {
-    std::size_t max_id = 0;
-    // Loop over all the stabilizers to find the maximum degree.
-    for (const auto &s : stabilizers)
-      max_id = std::max(max_id, s.max_degree());
-    return max_id + 1; // add 1 to get the number of qubits
-  }();
-
   if (type == stabilizer_type::XZ) {
+    auto numQubits = (*p_stabilizers)[0].num_qubits();
     cudaqx::tensor<uint8_t> t({p_stabilizers->size(), 2 * numQubits});
     // Start by counting the number of Z spin_ops
     std::size_t numZRows = 0;
@@ -104,6 +96,7 @@ to_parity_matrix(const std::vector<cudaq::spin_op> &stabilizers,
   }
 
   if (type == stabilizer_type::Z) {
+    auto numQubits = (*p_stabilizers)[0].num_qubits();
     // Start by counting the number of Z spin_ops
     std::size_t numZRows = 0;
     for (auto &op : *p_stabilizers)
@@ -126,6 +119,7 @@ to_parity_matrix(const std::vector<cudaq::spin_op> &stabilizers,
     return ret;
   }
 
+  auto numQubits = (*p_stabilizers)[0].num_qubits();
   // Start by counting the number of Z spin_ops
   std::size_t numZRows = 0;
   for (auto &op : *p_stabilizers)

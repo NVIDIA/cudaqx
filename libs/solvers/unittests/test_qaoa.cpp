@@ -148,7 +148,7 @@ TEST(MaxCutHamiltonianTest, Triangle) {
 
   auto ham = cudaq::solvers::get_maxcut_hamiltonian(g);
   ham.dump();
-  // Should have 6 terms: 0.5*(Z0Z1 + Z1Z2 + Z0Z2) - 0.5*(I0I1 + I1I2 + I0I2)
+  // Should have: 0.5*(Z0Z1 + Z1Z2 + Z0Z2) - 0.5*(I0I1 + I1I2 + I0I2)
   cudaq::spin_op truth = 0.5 * (cudaq::spin_op::from_word("ZZI") +
                                 cudaq::spin_op::from_word("IZZ") +
                                 cudaq::spin_op::from_word("ZIZ")) -
@@ -163,7 +163,7 @@ TEST(MaxCutHamiltonianTest, DisconnectedGraph) {
 
   auto ham = cudaq::solvers::get_maxcut_hamiltonian(g);
 
-  // Should have 4 terms: 0.5*(Z0Z1 + Z2Z3) - 0.5*(I0I1 + I2I3)
+  // Should have: 0.5*(Z0Z1 + Z2Z3) - 0.5*(I0I1 + I2I3)
   cudaq::spin_op truth = 0.5 * (cudaq::spin_op::from_word("ZZII") +
                                 cudaq::spin_op::from_word("IIZZ")) -
                          1.0 * cudaq::spin_op::from_word("IIII");

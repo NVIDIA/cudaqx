@@ -1,5 +1,5 @@
-/****************************************************************-*- C++ -*-****
- * Copyright (c) 2024 NVIDIA Corporation & Affiliates.                         *
+/*******************************************************************************
+ * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -13,9 +13,8 @@ using namespace cudaqx;
 
 TEST(UCCSDTest, GenerateWithDefaultConfig) {
   auto pool = cudaq::solvers::operator_pool::get("uccsd");
-  const std::size_t num_qubits = 4;
   heterogeneous_map config;
-  config.insert("num-qubits", num_qubits);
+  config.insert("num-qubits", 4);
   config.insert("num-electrons", 2);
 
   auto operators = pool->generate(config);
@@ -23,33 +22,25 @@ TEST(UCCSDTest, GenerateWithDefaultConfig) {
   EXPECT_EQ(operators.size(), 2 * 2 + 1 * 8);
 
   for (const auto &op : operators) {
-    auto degrees = op.degrees();
-    EXPECT_LE(degrees.size(), num_qubits);
-    for (auto d : degrees)
-      EXPECT_LT(d, num_qubits);
+    EXPECT_EQ(op.num_qubits(), 4);
   }
 }
 
 TEST(UCCSDTest, GenerateFromAPIFunction) {
-  const std::size_t num_qubits = 4;
   auto operators = cudaq::solvers::get_operator_pool(
-      "uccsd", {{"num-qubits", num_qubits}, {"num-electrons", 2}});
+      "uccsd", {{"num-qubits", 4}, {"num-electrons", 2}});
   ASSERT_FALSE(operators.empty());
   EXPECT_EQ(operators.size(), 2 * 2 + 1 * 8);
 
   for (const auto &op : operators) {
-    auto degrees = op.degrees();
-    EXPECT_LE(degrees.size(), num_qubits);
-    for (auto d : degrees)
-      EXPECT_LT(d, num_qubits);
+    EXPECT_EQ(op.num_qubits(), 4);
   }
 }
 
 TEST(UCCSDTest, GenerateWithCustomCoefficients) {
   auto pool = cudaq::solvers::operator_pool::get("uccsd");
-  const std::size_t num_qubits = 4;
   heterogeneous_map config;
-  config.insert("num-qubits", num_qubits);
+  config.insert("num-qubits", 4);
   config.insert("num-electrons", 2);
 
   auto operators = pool->generate(config);
@@ -58,10 +49,7 @@ TEST(UCCSDTest, GenerateWithCustomCoefficients) {
   EXPECT_EQ(operators.size(), (2 * 2 + 1 * 8));
 
   for (size_t i = 0; i < operators.size(); ++i) {
-    auto degrees = operators[i].degrees();
-    EXPECT_LE(degrees.size(), num_qubits);
-    for (auto d : degrees)
-      EXPECT_LT(d, num_qubits);
+    EXPECT_EQ(operators[i].num_qubits(), 4);
     EXPECT_DOUBLE_EQ(1.0,
                      operators[i].begin()->get_coefficient().evaluate().real());
   }
@@ -80,7 +68,7 @@ TEST(UCCSDTest, GenerateWithOddElectrons) {
   EXPECT_EQ(operators.size(), 2 * 4 + 4 * 8);
 
   for (const auto &op : operators)
-    EXPECT_EQ(op.to_string(false).size(), 6);
+    EXPECT_EQ(op.num_qubits(), 6);
 }
 
 TEST(UCCSDTest, GenerateWithLargeSystem) {
@@ -95,7 +83,7 @@ TEST(UCCSDTest, GenerateWithLargeSystem) {
   EXPECT_GT(operators.size(), 875);
 
   for (const auto &op : operators) {
-    EXPECT_EQ(op.to_string(false).size(), 20);
+    EXPECT_EQ(op.num_qubits(), 20);
   }
 }
 

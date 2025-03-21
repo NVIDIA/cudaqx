@@ -420,8 +420,8 @@ TEST(QECCodeTester, checkRepetition) {
     // must provide distance
     EXPECT_THROW(cudaq::qec::get_code("repetition"), std::runtime_error);
   }
-  // FIXME (repeated): is there a better way to do this?
-  auto repetition = cudaq::qec::get_code("repetition", cudaqx::heterogeneous_map{{"distance", 9}});
+  auto repetition = cudaq::qec::get_code(
+      "repetition", cudaqx::heterogeneous_map{{"distance", 9}});
 
   {
     auto stabilizers = repetition->get_stabilizers();
@@ -513,7 +513,8 @@ TEST(QECCodeTester, checkSurfaceCode) {
   }
   {
     // with default stabilizers
-    auto surf_code = cudaq::qec::get_code("surface_code", cudaqx::heterogeneous_map{{"distance", 3}});
+    auto surf_code = cudaq::qec::get_code(
+        "surface_code", cudaqx::heterogeneous_map{{"distance", 3}});
     cudaqx::tensor<uint8_t> parity = surf_code->get_parity();
     cudaqx::tensor<uint8_t> parity_x = surf_code->get_parity_x();
     cudaqx::tensor<uint8_t> parity_z = surf_code->get_parity_z();
@@ -669,7 +670,8 @@ TEST(QECCodeTester, checkSteaneSPAM) {
 
 TEST(QECCodeTester, checkRepetitionSPAM) {
   // only Z basis for repetition
-  auto repetition = cudaq::qec::get_code("repetition", cudaqx::heterogeneous_map{{"distance", 9}});
+  auto repetition = cudaq::qec::get_code(
+      "repetition", cudaqx::heterogeneous_map{{"distance", 9}});
   EXPECT_TRUE(noiseless_logical_SPAM_test(*repetition,
                                           cudaq::qec::operation::prep0, 0));
   EXPECT_TRUE(noiseless_logical_SPAM_test(*repetition,
@@ -682,7 +684,8 @@ TEST(QECCodeTester, checkRepetitionSPAM) {
 
 TEST(QECCodeTester, checkSurfaceCodeSPAM) {
   // Must compile with stim for larger distances
-  auto surf_code = cudaq::qec::get_code("surface_code", cudaqx::heterogeneous_map{{"distance", 3}});
+  auto surf_code = cudaq::qec::get_code(
+      "surface_code", cudaqx::heterogeneous_map{{"distance", 3}});
   EXPECT_TRUE(
       noiseless_logical_SPAM_test(*surf_code, cudaq::qec::operation::prep0, 0));
   EXPECT_TRUE(

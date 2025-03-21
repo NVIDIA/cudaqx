@@ -16,7 +16,8 @@
 
 TEST(QECCodeTester, checkRepetitionNoiseStim) {
 
-  auto repetition = cudaq::qec::get_code("repetition", cudaqx::heterogeneous_map{{"distance", 9}});
+  auto repetition = cudaq::qec::get_code(
+      "repetition", cudaqx::heterogeneous_map{{"distance", 9}});
   {
     cudaq::set_random_seed(13);
     cudaq::noise_model noise;

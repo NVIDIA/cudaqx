@@ -572,7 +572,7 @@ cudaq::spin_op seeley_richard_love(std::size_t i, std::size_t j,
                                   cudaq::spin::y(i) * right_pad_4;
   }
 
-  seeley_richard_love_result.trim();
+  seeley_richard_love_result.trim(0.0);
 
   return seeley_richard_love_result;
 }
@@ -696,7 +696,7 @@ cudaq::spin_op bravyi_kitaev::generate(const double constant,
   }
 
   spin_hamiltonian += constant_term;
-  spin_hamiltonian.trim();
+  spin_hamiltonian.trim(0.0);
   return spin_hamiltonian;
 }
 } // namespace cudaq::solvers

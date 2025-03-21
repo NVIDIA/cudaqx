@@ -31,18 +31,19 @@ repetition::repetition(const heterogeneous_map &options) : code() {
   operation_encodings.insert(std::make_pair(operation::prep0, prep0));
   operation_encodings.insert(std::make_pair(operation::prep1, prep1));
 
+  // "IIII..." (identity term for each data qubit)
+  cudaq::spin_op_term identity(0, get_num_data_qubits());
+
   // Default Stabilizers should be Zi-1 Zi
   for (std::size_t i = 1; i < get_num_data_qubits(); i++) {
-    // TODO - remove the apparently useless but still needed "i" terms.
-    m_stabilizers.push_back(cudaq::spin::i(get_num_data_qubits() - 1) *
-                            cudaq::spin::z(i - 1) * cudaq::spin::z(i));
+    m_stabilizers.push_back(identity * cudaq::spin::z(i - 1) *
+                            cudaq::spin::z(i));
   }
 
   // Default Logical Observable is ZI...I
   // This class is only for Z basis experiments
   // so there is no X observable included.
-  cudaq::spin_op Lz = cudaq::spin::z(0);
-  Lz = Lz * cudaq::spin::i(get_num_data_qubits() - 1);
+  cudaq::spin_op Lz = cudaq::spin::z(0) * identity;
 
   m_pauli_observables.push_back(Lz);
 
