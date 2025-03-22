@@ -54,8 +54,7 @@ TEST(OptimTester, checkLBFGS) {
     {
       auto nIters = optimizer->history.size();
       // Try to set the tolerance
-      auto [opt, params] =
-          optimizer->optimize(2, f, {{"function_tolerance", 1e-3}});
+      auto [opt, params] = optimizer->optimize(2, f, {{"tol", 1e-3}});
 
       EXPECT_TRUE(optimizer->history.size() < nIters);
     }
