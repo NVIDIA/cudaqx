@@ -945,6 +945,10 @@ Notes:
         optOptions.insert("verbose",
                           getValueOr<bool>(options, "verbose", false));
         optOptions.insert("shots", getValueOr<int>(options, "shots", -1));
+        optOptions.insert("tol", getValueOr<double>(options, "tol", 1e-12));
+        optOptions.insert(
+            "dynamic_start",
+            getValueOr<std::string>(options, "dynamic_start", "cold"));
 
         // Handle the case where the user has provided a SciPy optimizer
         if (options.contains("optimizer") &&
@@ -990,6 +994,8 @@ Notes:
         - initial_theta (float): Initial value for theta parameter. Default: 0.0
         - verbose (bool): Enable detailed output logging. Default: False
         - shots (int): Number of measurement shots (-1 for exact simulation). Default: -1
+        - tol (double): Tolerance value for the optimizer. Default 1e-12
+        - dynamic_start (string): Optimization mode for the theta parameters at each iteration. It can be either "warm", or "cold". [default: "cold"]
 
 
     Returns:

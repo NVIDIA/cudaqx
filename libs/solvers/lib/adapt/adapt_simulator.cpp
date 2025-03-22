@@ -255,8 +255,8 @@ simulator::run(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
       };
     }
 
-    if (options.contains("opt_mode")) {
-      if (options.get<std::string>("opt_mode") == "warm")
+    if (options.contains("dynamic_start")) {
+      if (options.get<std::string>("dynamic_start") == "warm")
         mutable_options.insert("initial_parameters", thetas);
     }
 
