@@ -995,7 +995,7 @@ Notes:
         - verbose (bool): Enable detailed output logging. Default: False
         - shots (int): Number of measurement shots (-1 for exact simulation). Default: -1
         - tol (double): Tolerance value for the optimizer. Default 1e-12
-        - dynamic_start (string): Optimization mode for the theta parameters at each iteration. It can be either "warm", or "cold". [default: "cold"]
+        - dynamic_start (string): Optimization mode for the theta parameters at each iteration. It can be either "warm", or "cold". Default: "cold"
 
 
     Returns:
