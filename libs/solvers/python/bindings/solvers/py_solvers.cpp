@@ -807,6 +807,8 @@ The exact set of possible types may depend on the specific optimization algorith
           optOptions.insert(
               "max_iterations",
               cudaqx::getValueOr<int>(options, "max_iterations", -1));
+        // in case the privded optimizer is not a scipy one
+        optOptions.insert("tol", getValueOr<double>(options, "tol", 1e-12));
 
         optOptions.insert("verbose",
                           cudaqx::getValueOr<bool>(options, "verbose", false));
@@ -876,6 +878,7 @@ options : dict
     - verbose : bool, optional Whether to print verbose output. Default is False.
     - optimizer : str, optional Name of the classical optimizer to use. Default is 'cobyla'.
     - gradient : str, optional Method for gradient computation (for gradient-based optimizers). Default is 'parameter_shift'.
+    - tol (double): Tolerance value for the optimizer. Default 1e-12.
 
 Returns:
 --------
