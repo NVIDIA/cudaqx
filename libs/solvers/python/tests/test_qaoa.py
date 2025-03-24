@@ -1,5 +1,5 @@
 # ============================================================================ #
-# Copyright (c) 2024 NVIDIA Corporation & Affiliates.                          #
+# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -249,26 +249,18 @@ def test_clique_disconnected_nodes():
 
     ham = solvers.get_clique_hamiltonian(G, penalty=2.0)
 
-    assert ham.get_term_count() == 4
+    assert ham.get_term_count() == 2
 
     expected_data = [
         2,
         2,
         0.5,
         0.0,  # ZZ
-        2,
-        0,
-        0.0,
-        0.0,  # ZI
-        0,
-        2,
-        0.0,
-        0.0,  # IZ
         0,
         0,
         -0.5,
         0.0,  # II
-        4
+        2
     ]
     expected_ham = cudaq.SpinOperator(expected_data, 2)
     assert ham == expected_ham
@@ -347,7 +339,10 @@ def test_clique_different_penalties():
     ham1 = solvers.get_clique_hamiltonian(G, penalty=2.0)
     ham2 = solvers.get_clique_hamiltonian(G, penalty=4.0)
 
-    assert ham1.get_term_count() == ham2.get_term_count()
+    # Note, they *would* have the same number of terms except terms with
+    # 0-valued coefficients will get trimmed, so that makes the results
+    # have a different number of terms.
+    assert ham1.get_term_count() != ham2.get_term_count()
     assert str(ham1) != str(ham2)
 
 

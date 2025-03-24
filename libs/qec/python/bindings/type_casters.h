@@ -23,14 +23,14 @@ struct type_caster<cudaq::spin_op> {
       return false;
     auto data = src.attr("serialize")().cast<std::vector<double>>();
     auto numQubits = src.attr("get_qubit_count")().cast<std::size_t>();
-    value = cudaq::spin_op(data, numQubits);
+    value = cudaq::spin_op(data);
     return true;
   }
 
   static handle cast(cudaq::spin_op v, return_value_policy /*policy*/,
                      handle /*parent*/) {
     py::object tv_py = py::module::import("cudaq").attr("SpinOperator")(
-        v.getDataRepresentation(), v.num_qubits()); // Construct new python obj
+        v.get_data_representation()); // Construct new python obj
     return tv_py.release();
   }
 };

@@ -1,5 +1,5 @@
 # ============================================================================ #
-# Copyright (c) 2024 NVIDIA Corporation & Affiliates.                          #
+# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -64,7 +64,10 @@ def test_jordan_wigner():
     hpqJw = solvers.jordan_wigner(hpq, molecule.energies['nuclear_energy'])
     hpqrsJw = solvers.jordan_wigner(hpqrs)
     op2 = hpqJw + hpqrsJw
-    assert op2 == molecule.hamiltonian
+    # FIXME - revisit
+    # print(str(op2))
+    # print(str(molecule.hamiltonian))
+    assert str(op2) == str(molecule.hamiltonian)
 
     spin_ham_matrix = molecule.hamiltonian.to_matrix()
     e, c = np.linalg.eig(spin_ham_matrix)
