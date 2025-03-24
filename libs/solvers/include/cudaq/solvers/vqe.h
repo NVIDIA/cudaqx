@@ -37,8 +37,7 @@ struct vqe_result {
 /// @param optimizer Optimization algorithm to use
 /// @param gradient Gradient computation method
 /// @param initial_parameters Initial parameters for the optimization
-/// @param options Additional options for the VQE algorithm
-/// @par Available options
+/// @param options Additional options for the VQE algorithm. Available options
 /// - "tol" (double): Tolerance for optimization [default: 1e-12]
 /// @return VQE result containing optimal energy, parameters, and iteration data
 template <typename QuantumKernel>

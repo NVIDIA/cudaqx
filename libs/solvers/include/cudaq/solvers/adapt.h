@@ -70,9 +70,8 @@ public:
   /// @param pool Pool of operators
   /// @param optimizer Optimization algorithm
   /// @param gradient Gradient calculation method
-  /// @param options Additional options for the algorithm
-  /// @par Supported Keys:
-  ///  - "maxIter" (int): Maximum number of iterations [default: 30]
+  /// @param options Additional options for the algorithm. Supported Keys:
+  ///  - "max_iter" (int): Maximum number of iterations [default: 30]
   ///  - "grad_norm_tolerance" (double): Convergence tolerance for gradient norm
   ///  [default: 1e-5]
   ///  - "grad_norm_diff_tolerance" (double): Tolerance for difference between
@@ -105,9 +104,8 @@ public:
 /// @param initialState Initial state preparation quantum kernel
 /// @param H Hamiltonian operator
 /// @param poolList Pool of operators
-/// @param options Additional options for the algorithm
-/// @par Supported Keys:
-///  - "maxIter" (int): Maximum number of iterations [default: 30]
+/// @param options Additional options for the algorithm. Supported Keys:
+///  - "max_iter" (int): Maximum number of iterations [default: 30]
 ///  - "grad_norm_tolerance" (double): Convergence tolerance for gradient norm
 ///  [default: 1e-5]
 ///  - "grad_norm_diff_tolerance" (double): Tolerance for difference between
@@ -139,9 +137,8 @@ adapt_vqe(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
 /// @param H Hamiltonian operator
 /// @param poolList Pool of operators
 /// @param optimizer Custom optimization algorithm
-/// @param options Additional options for the algorithm
-/// @par Supported Keys:
-///  - "maxIter" (int): Maximum number of iterations [default: 30]
+/// @param options Additional options for the algorithm. Supported Keys:
+///  - "max_iter" (int): Maximum number of iterations [default: 30]
 ///  - "grad_norm_tolerance" (double): Convergence tolerance for gradient norm
 ///  [default: 1e-5]
 ///  - "grad_norm_diff_tolerance" (double): Tolerance for difference between
@@ -174,9 +171,8 @@ adapt_vqe(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
 /// @param poolList Pool of operators
 /// @param optimizer Custom optimization algorithm
 /// @param gradient Gradient calculation method
-/// @param options Additional options for the algorithm
-/// @par Supported Keys:
-///  - "maxIter" (int): Maximum number of iterations [default: 30]
+/// @param options Additional options for the algorithm. Supported Keys:
+///  - "max_iter" (int): Maximum number of iterations [default: 30]
 ///  - "grad_norm_tolerance" (double): Convergence tolerance for gradient norm
 ///  [default: 1e-5]
 ///  - "grad_norm_diff_tolerance" (double): Tolerance for difference between

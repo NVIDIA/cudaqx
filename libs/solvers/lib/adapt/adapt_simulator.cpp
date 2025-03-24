@@ -36,7 +36,7 @@ simulator::run(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
   double latestEnergy = std::numeric_limits<double>::max();
   double ediff = std::numeric_limits<double>::max();
 
-  int maxIter = options.get<int>("maxIter", 30);
+  int maxIter = options.get<int>("max_iter", 30);
   auto grad_norm_tolerance = options.get<double>("grad_norm_tolerance", 1e-5);
   auto tolNormDiff = options.get<double>("grad_norm_diff_tolerance", 1e-5);
   auto thresholdE = options.get<double>("threshold_energy", 1e-6);

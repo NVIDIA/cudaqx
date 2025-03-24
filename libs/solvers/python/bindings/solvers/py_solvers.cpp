@@ -933,7 +933,7 @@ Notes:
         auto *p = reinterpret_cast<void *>(fptr);
         cudaq::registry::__cudaq_registerLinkableKernel(p, baseName.c_str(), p);
         heterogeneous_map optOptions;
-        optOptions.insert("maxIter", getValueOr<int>(options, "max_iter", 30));
+        optOptions.insert("max_iter", getValueOr<int>(options, "max_iter", 30));
         optOptions.insert(
             "grad_norm_tolerance",
             getValueOr<double>(options, "grad_norm_tolerance", 1e-5));
