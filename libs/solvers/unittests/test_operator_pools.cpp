@@ -22,7 +22,7 @@ TEST(UCCSDTest, GenerateWithDefaultConfig) {
   EXPECT_EQ(operators.size(), 2 * 2 + 1 * 8);
 
   for (const auto &op : operators) {
-    EXPECT_EQ(op.num_qubits(), 4);
+    EXPECT_LT(op.max_degree(), 4);
   }
 }
 
@@ -33,7 +33,7 @@ TEST(UCCSDTest, GenerateFromAPIFunction) {
   EXPECT_EQ(operators.size(), 2 * 2 + 1 * 8);
 
   for (const auto &op : operators) {
-    EXPECT_EQ(op.num_qubits(), 4);
+    EXPECT_LT(op.max_degree(), 4);
   }
 }
 
@@ -49,7 +49,7 @@ TEST(UCCSDTest, GenerateWithCustomCoefficients) {
   EXPECT_EQ(operators.size(), (2 * 2 + 1 * 8));
 
   for (size_t i = 0; i < operators.size(); ++i) {
-    EXPECT_EQ(operators[i].num_qubits(), 4);
+    EXPECT_LT(operators[i].max_degree(), 4);
     EXPECT_DOUBLE_EQ(1.0,
                      operators[i].begin()->get_coefficient().evaluate().real());
   }
@@ -68,7 +68,7 @@ TEST(UCCSDTest, GenerateWithOddElectrons) {
   EXPECT_EQ(operators.size(), 2 * 4 + 4 * 8);
 
   for (const auto &op : operators)
-    EXPECT_EQ(op.num_qubits(), 6);
+    EXPECT_LT(op.max_degree(), 6);
 }
 
 TEST(UCCSDTest, GenerateWithLargeSystem) {
@@ -83,7 +83,7 @@ TEST(UCCSDTest, GenerateWithLargeSystem) {
   EXPECT_GT(operators.size(), 875);
 
   for (const auto &op : operators) {
-    EXPECT_EQ(op.num_qubits(), 20);
+    EXPECT_LT(op.max_degree(), 20);
   }
 }
 
@@ -99,8 +99,10 @@ TEST(UccsdOperatorPoolTest, GeneratesCorrectOperators) {
 
   // Convert SpinOperators to strings
   std::vector<std::string> operator_strings;
+  std::set<std::size_t> s{0, 1, 2, 3};
   for (const auto &op : operators) {
-    operator_strings.push_back(op.to_string(false));
+    operator_strings.push_back(
+        cudaq::spin_op(op).canonicalize(s).to_string(false));
   }
 
   // Assert

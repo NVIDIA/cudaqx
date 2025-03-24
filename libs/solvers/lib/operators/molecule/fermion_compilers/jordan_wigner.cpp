@@ -25,7 +25,7 @@ cudaq::spin_op jordan_wigner::generate(const double constant,
   assert(hpqrs.rank() == 4 && "hpqrs must be a rank-4 tensor");
 
   std::size_t nqubit = hpq.shape()[0];
-  cudaq::spin_op spin_hamiltonian = constant * cudaq::spin_op_term(0, nqubit);
+  cudaq::spin_op spin_hamiltonian = constant * cudaq::spin_op_term();
   double tol =
       options.get<double>(std::vector<std::string>{"tolerance", "tol"}, 1e-15);
 
@@ -34,7 +34,7 @@ cudaq::spin_op jordan_wigner::generate(const double constant,
   };
 
   auto adag = [](std::size_t numQubits, std::size_t j) {
-    cudaq::spin_op_term zprod(0, numQubits);
+    cudaq::spin_op_term zprod;
     for (std::size_t k = 0; k < j; k++)
       zprod *= cudaq::spin::z(k);
     return 0.5 * zprod *
@@ -42,7 +42,7 @@ cudaq::spin_op jordan_wigner::generate(const double constant,
   };
 
   auto a = [](std::size_t numQubits, std::size_t j) {
-    cudaq::spin_op_term zprod(0, numQubits);
+    cudaq::spin_op_term zprod;
     for (std::size_t k = 0; k < j; k++)
       zprod *= cudaq::spin::z(k);
     return 0.5 * zprod *
@@ -63,8 +63,6 @@ cudaq::spin_op jordan_wigner::generate(const double constant,
                                 adag(nqubit, j) * a(nqubit, k) * a(nqubit, l);
 
   // Remove terms with 0.0 coefficient
-  spin_hamiltonian.trim(tol);
-
-  return spin_hamiltonian;
+  return spin_hamiltonian.canonicalize().trim(tol);
 }
 } // namespace cudaq::solvers

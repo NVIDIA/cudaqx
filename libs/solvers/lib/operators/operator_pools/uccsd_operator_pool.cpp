@@ -36,7 +36,7 @@ uccsd::generate(const heterogeneous_map &config) const {
                                           std::size_t p, std::size_t q) {
     double parity = 1.0;
 
-    cudaq::spin_op_term o(0, numQubits);
+    cudaq::spin_op_term o;
     for (std::size_t i = p + 1; i < q; i++)
       o *= cudaq::spin::z(i);
 
@@ -47,8 +47,8 @@ uccsd::generate(const heterogeneous_map &config) const {
   auto addDoublesExcitation = [numQubits](std::vector<cudaq::spin_op> &ops,
                                           std::size_t p, std::size_t q,
                                           std::size_t r, std::size_t s) {
-    cudaq::spin_op_term parity_a(0, numQubits);
-    cudaq::spin_op_term parity_b(0, numQubits);
+    cudaq::spin_op_term parity_a;
+    cudaq::spin_op_term parity_b;
     std::size_t i_occ = 0, j_occ = 0, a_virt = 0, b_virt = 0;
     if (p < q && r < s) {
       i_occ = p;
@@ -67,9 +67,7 @@ uccsd::generate(const heterogeneous_map &config) const {
       j_occ = q;
       a_virt = s;
       b_virt = r;
-    } else if
-
-        (p > q && r < s) {
+    } else if (p > q && r < s) {
       i_occ = q;
       j_occ = p;
       a_virt = r;

@@ -19,9 +19,6 @@ cudaq::spin_op get_maxcut_hamiltonian(const cudaqx::graph &graph) {
   // Initialize empty spin operator
   cudaq::spin_op hamiltonian;
 
-  // "IIII..." (identity term for each node)
-  cudaq::spin_op_term identity(0, nodes.size());
-
   // Iterate through all nodes
   for (const auto &u : nodes) {
     // Get neighbors of current node
@@ -35,14 +32,13 @@ cudaq::spin_op get_maxcut_hamiltonian(const cudaqx::graph &graph) {
 
         // For each weighted edge (u,v), add w/2(Z_u Z_v - I) to the Hamiltonian
         // This matches the mathematical form: H = Σ w_ij/2(Z_i Z_j - I)
-        hamiltonian += weight * 0.5 * identity *
-                       (cudaq::spin::z(u) * cudaq::spin::z(v) - 1.0);
+        hamiltonian +=
+            weight * 0.5 * (cudaq::spin::z(u) * cudaq::spin::z(v) - 1.0);
       }
     }
   }
 
-  hamiltonian.trim(0.0);
-  return hamiltonian;
+  return hamiltonian.canonicalize().trim();
 }
 
 } // namespace cudaq::solvers

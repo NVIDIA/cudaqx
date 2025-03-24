@@ -135,9 +135,7 @@ TEST(MaxCutHamiltonianTest, SingleEdge) {
   EXPECT_EQ(ham.num_terms(), 2);
 
   // Verify the coefficients
-  EXPECT_EQ(0.5 * cudaq::spin_op::from_word("ZZ") -
-                .5 * cudaq::spin_op::from_word("II"),
-            ham);
+  EXPECT_EQ(0.5 * cudaq::spin_op::from_word("ZZ") - 0.5, ham);
 }
 
 TEST(MaxCutHamiltonianTest, Triangle) {
@@ -153,7 +151,7 @@ TEST(MaxCutHamiltonianTest, Triangle) {
                                 cudaq::spin_op::from_word("IZZ") +
                                 cudaq::spin_op::from_word("ZIZ")) -
                          1.5 * cudaq::spin_op::from_word("III");
-  EXPECT_EQ(truth, ham);
+  EXPECT_EQ(truth.canonicalize(), ham);
 }
 
 TEST(MaxCutHamiltonianTest, DisconnectedGraph) {
@@ -167,7 +165,7 @@ TEST(MaxCutHamiltonianTest, DisconnectedGraph) {
   cudaq::spin_op truth = 0.5 * (cudaq::spin_op::from_word("ZZII") +
                                 cudaq::spin_op::from_word("IIZZ")) -
                          1.0 * cudaq::spin_op::from_word("IIII");
-  EXPECT_EQ(truth, ham);
+  EXPECT_EQ(truth.canonicalize(), ham);
 }
 
 TEST(CliqueHamiltonianTest, SingleNode) {
@@ -177,7 +175,7 @@ TEST(CliqueHamiltonianTest, SingleNode) {
   auto ham = cudaq::solvers::get_clique_hamiltonian(g);
   ham.dump();
   cudaq::spin_op truth = 0.75 * cudaq::spin::z(0) - .75 * cudaq::spin::i(0);
-  EXPECT_EQ(truth, ham);
+  EXPECT_EQ(truth.canonicalize(), ham);
 }
 
 TEST(CliqueHamiltonianTest, CompleteGraph) {
@@ -199,7 +197,7 @@ TEST(CliqueHamiltonianTest, CompleteGraph) {
                          0.75 * cudaq::spin_op::from_word("IZI") +
                          0.50 * cudaq::spin_op::from_word("IIZ") -
                          2.25 * cudaq::spin_op::from_word("III");
-  EXPECT_EQ(truth, ham);
+  EXPECT_EQ(truth.canonicalize(), ham);
 }
 
 TEST(CliqueHamiltonianTest, DisconnectedNodes) {
@@ -214,7 +212,7 @@ TEST(CliqueHamiltonianTest, DisconnectedNodes) {
   // Should have 2 vertex terms + 1 penalty term for the non-edge
   cudaq::spin_op truth = 0.5 * cudaq::spin_op::from_word("ZZ") -
                          0.5 * cudaq::spin_op::from_word("II");
-  EXPECT_EQ(truth, ham);
+  EXPECT_EQ(truth.canonicalize(), ham);
 }
 
 TEST(CliqueHamiltonianTest, TriangleWithDisconnectedNode) {
@@ -244,7 +242,7 @@ TEST(CliqueHamiltonianTest, TriangleWithDisconnectedNode) {
                          1.0 * cudaq::spin_op::from_word("IIII") -
                          0.5 * cudaq::spin_op::from_word("IIZI") -
                          0.5 * cudaq::spin_op::from_word("ZIII");
-  EXPECT_EQ(truth, ham);
+  EXPECT_EQ(truth.canonicalize(), ham);
 }
 
 TEST(CliqueHamiltonianTest, DifferentPenalties) {
@@ -275,7 +273,7 @@ TEST(CliqueHamiltonianTest, WeightedNodes) {
   cudaq::spin_op truth = 1.0 * cudaq::spin_op::from_word("ZI") +
                          1.5 * cudaq::spin_op::from_word("IZ") -
                          2.5 * cudaq::spin_op::from_word("II");
-  EXPECT_EQ(truth, ham);
+  EXPECT_EQ(truth.canonicalize(), ham);
 }
 
 TEST(QAOAMaxCutTest, SingleEdge) {

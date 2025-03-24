@@ -20,8 +20,7 @@ getDefaultReferenceHamiltonian(const cudaq::spin_op &problemHamiltonian) {
 
   // Add X terms for each qubit as the default mixer
   for (std::size_t i = 0; i < numQubits; i++) {
-    referenceHamiltonian +=
-        cudaq::spin_op_term(0, numQubits) * cudaq::spin::x(i);
+    referenceHamiltonian += cudaq::spin::x(i);
   }
 
   return referenceHamiltonian;
