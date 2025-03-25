@@ -1,5 +1,5 @@
 # ============================================================================ #
-# Copyright (c) 2024 NVIDIA Corporation & Affiliates.                          #
+# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -19,7 +19,7 @@ def test_generate_with_default_config():
     assert len(operators) == 2 * 2 + 1 * 8
 
     for op in operators:
-        assert op.get_qubit_count() == 4
+        assert op.get_qubit_count() <= 4
 
 
 def test_generate_with_custom_coefficients():
@@ -31,7 +31,7 @@ def test_generate_with_custom_coefficients():
     assert len(operators) == (2 * 2 + 1 * 8)
 
     for i, op in enumerate(operators):
-        assert op.get_qubit_count() == 4
+        assert op.get_qubit_count() <= 4
         expected_coeff = 1.0
         assert np.isclose(op.get_coefficient().real, expected_coeff)
 
@@ -46,7 +46,7 @@ def test_generate_with_odd_electrons():
     assert len(operators) == 2 * 4 + 4 * 8
 
     for op in operators:
-        assert op.get_qubit_count() == 6
+        assert op.get_qubit_count() <= 6
 
 
 def test_generate_with_large_system():
@@ -58,7 +58,7 @@ def test_generate_with_large_system():
     assert len(operators) > 875
 
     for op in operators:
-        assert op.get_qubit_count() == 20
+        assert op.get_qubit_count() <= 20
 
 
 def test_uccsd_operator_pool_correctness():
@@ -70,7 +70,7 @@ def test_uccsd_operator_pool_correctness():
 
     # Expected result
     expected_pool = [
-        'YZXI', 'XZYI', 'IYZX', 'IXZY', 'XXXY', 'XXYX', 'XYYY', 'YXYY', 'XYXX',
+        'YZX', 'XZY', 'IYZX', 'IXZY', 'XXXY', 'XXYX', 'XYYY', 'YXYY', 'XYXX',
         'YXXX', 'YYXY', 'YYYX'
     ]
 
@@ -82,11 +82,11 @@ def test_uccsd_operator_pool_correctness():
         expected_pool
     ), f"Expected {len(expected_pool)} operators, but got {len(pool)}"
 
-    # Check that all operators have the correct length (4 qubits)
+    # Check that all operators have the correct length (up to 4 qubits)
     for op_string in pool_strings:
         assert len(
             op_string
-        ) == 4, f"Operator {op_string} does not have the expected length of 4"
+        ) <= 4, f"Operator {op_string} does not have the expected length of <= 4"
 
     # Check that all operators contain only valid characters (I, X, Y, Z)
     valid_chars = set('IXYZ')

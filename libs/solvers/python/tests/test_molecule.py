@@ -64,10 +64,9 @@ def test_jordan_wigner():
     hpqJw = solvers.jordan_wigner(hpq, molecule.energies['nuclear_energy'])
     hpqrsJw = solvers.jordan_wigner(hpqrs)
     op2 = hpqJw + hpqrsJw
-    # FIXME - revisit
-    # print(str(op2))
-    # print(str(molecule.hamiltonian))
-    assert str(op2) == str(molecule.hamiltonian)
+    assert np.allclose(op2.to_matrix(),
+                       molecule.hamiltonian.to_matrix(),
+                       atol=1e-12)
 
     spin_ham_matrix = molecule.hamiltonian.to_matrix()
     e, c = np.linalg.eig(spin_ham_matrix)

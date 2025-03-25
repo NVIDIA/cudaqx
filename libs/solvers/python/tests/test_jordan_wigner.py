@@ -54,22 +54,19 @@ def jw_molecule_compare_hamiltonians_test(xyz):
 
     of_hamiltonian_dict = extract_spin_op_to_dict(of_hamiltonian)
     cqx_op_dict = extract_spin_op_to_dict(cqx_op)
-    # FIXME - these are different by 'Z' != 'ZIII'
-    print(of_hamiltonian_dict)
-    print(cqx_op_dict)
 
-    # for k in of_hamiltonian_dict.keys():
-    #     assert (k in cqx_op_dict.keys())
-    # for k in cqx_op_dict.keys():
-    #     assert (k in of_hamiltonian_dict.keys())
+    for k in of_hamiltonian_dict.keys():
+        assert (k in cqx_op_dict.keys())
+    for k in cqx_op_dict.keys():
+        assert (k in of_hamiltonian_dict.keys())
 
-    # for k in of_hamiltonian_dict.keys():
-    #     # Use abs() checks because the sign can mismatch and still keep the same
-    #     # eigenvalues. Also, see OMP_NUM_THREADS note above.
-    #     assert np.isclose(abs(np.real(of_hamiltonian_dict[k])),
-    #                       abs(np.real(cqx_op_dict[k])), 1e-12)
-    #     assert np.isclose(abs(np.imag(of_hamiltonian_dict[k])),
-    #                       abs(np.imag(cqx_op_dict[k])), 1e-12)
+    for k in of_hamiltonian_dict.keys():
+        # Use abs() checks because the sign can mismatch and still keep the same
+        # eigenvalues. Also, see OMP_NUM_THREADS note above.
+        assert np.isclose(abs(np.real(of_hamiltonian_dict[k])),
+                          abs(np.real(cqx_op_dict[k])), 1e-12)
+        assert np.isclose(abs(np.imag(of_hamiltonian_dict[k])),
+                          abs(np.imag(cqx_op_dict[k])), 1e-12)
 
 
 def jw_molecule_test(xyz):
@@ -97,9 +94,12 @@ def jw_molecule_test(xyz):
                                tol=1e-12)
     assert op == molecule.hamiltonian
     # FIXME - these are different by 'Z' != 'ZIII'
-    print(of_hamiltonian)
-    print(molecule.hamiltonian)
+    # print(of_hamiltonian)
+    # print(molecule.hamiltonian)
     # assert of_hamiltonian == molecule.hamiltonian
+    assert np.allclose(of_hamiltonian.to_matrix(),
+                       molecule.hamiltonian.to_matrix(),
+                       atol=1e-3)
 
     cudaqx_eig = np.min(np.linalg.eigvals(op.to_matrix()))
     print(f'CUDA-QX energy:        {cudaqx_eig.real}')

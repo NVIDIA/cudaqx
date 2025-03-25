@@ -99,7 +99,7 @@ def test_maxcut_single_edge():
 
     # Should have two terms: 0.5*Z0Z1 and -0.5*I0I1
     assert ham.get_term_count() == 2
-    expected_ham = 0.5 * spin.z(0) * spin.z(1) - 0.5 * spin.i(0) * spin.i(1)
+    expected_ham = 0.5 * spin.z(0) * spin.z(1) - 0.5
     assert ham == expected_ham
 
 
@@ -115,36 +115,8 @@ def test_maxcut_triangle():
     assert ham.get_term_count() == 4
 
     # Create expected Hamiltonian using the exact structure
-    expected_data = [
-        # ZIZ term
-        2,
-        0,
-        2,
-        0.5,
-        0.0,
-        # ZZI term
-        2,
-        2,
-        0,
-        0.5,
-        0.0,
-        # IZZ term
-        0,
-        2,
-        2,
-        0.5,
-        0.0,
-        # III term
-        0,
-        0,
-        0,
-        -1.5,
-        0.0,
-        4
-    ]
-
-    # Convert to spin operator
-    expected_ham = cudaq.SpinOperator(expected_data, 3)
+    expected_ham = 0.5 * spin.z(0) * spin.z(2) + 0.5 * spin.z(0) * spin.z(
+        1) + 0.5 * spin.z(1) * spin.z(2) - 1.5
 
     # Compare Hamiltonians
     assert ham == expected_ham
@@ -161,33 +133,8 @@ def test_maxcut_disconnected():
     assert ham.get_term_count() == 3
 
     # Create expected Hamiltonian using the exact structure
-    expected_data = [
-        # ZZII term
-        2,
-        2,
-        0,
-        0,
-        0.5,
-        0.0,
-        # IIZZ term
-        0,
-        0,
-        2,
-        2,
-        0.5,
-        0.0,
-        # IIII term
-        0,
-        0,
-        0,
-        0,
-        -1.0,
-        0.0,
-        3
-    ]
-
-    # Convert to spin operator
-    expected_ham = cudaq.SpinOperator(expected_data, 4)
+    expected_ham = 0.5 * spin.z(0) * spin.z(1) + 0.5 * spin.z(2) * spin.z(
+        3) - 1.0
 
     # Compare Hamiltonians
     assert ham == expected_ham
@@ -200,7 +147,7 @@ def test_clique_single_node():
     ham = solvers.get_clique_hamiltonian(G)
 
     assert ham.get_term_count() == 2
-    expected_ham = 0.75 * spin.z(0) - 0.75 * spin.i(0)
+    expected_ham = 0.75 * spin.z(0) - 0.75
     assert ham == expected_ham
 
 
@@ -216,30 +163,7 @@ def test_clique_complete_graph():
 
     assert ham.get_term_count() == 4
 
-    expected_data = [
-        2,
-        0,
-        0,
-        1.0,
-        0.0,  # ZII
-        0,
-        2,
-        0,
-        0.75,
-        0.0,  # IZI
-        0,
-        0,
-        2,
-        0.5,
-        0.0,  # IIZ
-        0,
-        0,
-        0,
-        -2.25,
-        0.0,  # III
-        4
-    ]
-    expected_ham = cudaq.SpinOperator(expected_data, 3)
+    expected_ham = spin.z(0) + 0.75 * spin.z(1) + 0.5 * spin.z(2) - 2.25
     assert ham == expected_ham
 
 
@@ -251,18 +175,7 @@ def test_clique_disconnected_nodes():
 
     assert ham.get_term_count() == 2
 
-    expected_data = [
-        2,
-        2,
-        0.5,
-        0.0,  # ZZ
-        0,
-        0,
-        -0.5,
-        0.0,  # II
-        2
-    ]
-    expected_ham = cudaq.SpinOperator(expected_data, 2)
+    expected_ham = 0.5 * spin.z(0) * spin.z(1) - 0.5
     assert ham == expected_ham
 
 
@@ -277,58 +190,16 @@ def test_clique_triangle_with_disconnected():
 
     assert ham.get_term_count() == 8
 
-    expected_data = [
-        0,
-        0,
-        2,
-        2,
-        1.0,
-        0.0,  # IIZZ
-        0,
-        2,
-        0,
-        2,
-        1.0,
-        0.0,  # IZIZ
-        2,
-        0,
-        0,
-        2,
-        1.0,
-        0.0,  # ZIIZ
-        0,
-        0,
-        0,
-        2,
-        -2.5,
-        0.,  # IIIZ
-        0,
-        2,
-        0,
-        0,
-        -0.5,
-        0.0,  # IZII
-        0,
-        0,
-        0,
-        0,
-        1.0,
-        0.0,  # IIII
-        0,
-        0,
-        2,
-        0,
-        -0.5,
-        0.0,  # IIZI
-        2,
-        0,
-        0,
-        0,
-        -0.5,
-        0.0,  # ZIII
-        8
-    ]
-    expected_ham = cudaq.SpinOperator(expected_data, 4)
+    # yapf: disable
+    expected_ham  =        spin.z(2) * spin.z(3)  # IIZZ
+    expected_ham +=        spin.z(1) * spin.z(3)  # IZIZ
+    expected_ham +=  1.0 * spin.z(0) * spin.z(3)  # ZIIZ
+    expected_ham += -2.5 * spin.z(3)              # IIIZ
+    expected_ham += -0.5 * spin.z(1)              # IZII
+    expected_ham +=  1.0                          # IIII
+    expected_ham += -0.5 * spin.z(2)              # IIZI
+    expected_ham += -0.5 * spin.z(0)              # ZIII
+    # yapf: enable
     assert ham == expected_ham
 
 
@@ -355,20 +226,5 @@ def test_clique_weighted_nodes():
 
     assert ham.get_term_count() == 3
 
-    expected_data = [
-        2,
-        0,
-        1.0,
-        0.0,  # ZI
-        0,
-        2,
-        1.5,
-        0.0,  # IZ
-        0,
-        0,
-        -2.5,
-        0.0,  # II
-        3
-    ]
-    expected_ham = cudaq.SpinOperator(expected_data, 2)
+    expected_ham = spin.z(0) + 1.5 * spin.z(1) - 2.5
     assert ham == expected_ham
