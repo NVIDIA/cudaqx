@@ -1,6 +1,6 @@
 {
   "cudaq": {
     "repository": "NVIDIA/cuda-quantum",
-    "ref": "c1a97d7bef51930cf514aae47cc89f3b30c320c5"
+    "ref": "9fb800a2fd42d837135dcb69076e61168e5e8167"
   }
 }
