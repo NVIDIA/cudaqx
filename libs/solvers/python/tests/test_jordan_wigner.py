@@ -93,10 +93,6 @@ def jw_molecule_test(xyz):
                                core_energy=molecule.energies['nuclear_energy'],
                                tol=1e-12)
     assert op == molecule.hamiltonian
-    # FIXME - these are different by 'Z' != 'ZIII'
-    # print(of_hamiltonian)
-    # print(molecule.hamiltonian)
-    # assert of_hamiltonian == molecule.hamiltonian
     assert np.allclose(of_hamiltonian.to_matrix(),
                        molecule.hamiltonian.to_matrix(),
                        atol=1e-3)
