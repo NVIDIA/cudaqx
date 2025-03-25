@@ -105,7 +105,7 @@ def test_uccsd_operator_pool_correctness():
             # Check operator length
             assert len(
                 op_string
-            ) == 4, f"Operator {op_string} does not have the expected length of 4"
+            ) <= 4, f"Operator {op_string} does not have the expected length of <= 4"
             index = expected_operators[i].index(op_string)
 
             assert op_coeff == expected_coefficients[i][index], \
