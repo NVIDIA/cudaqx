@@ -1,5 +1,5 @@
 # ============================================================================ #
-# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
+# Copyright (c) 2024 NVIDIA Corporation & Affiliates.                          #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -64,10 +64,10 @@ def test_solvers_vqe():
     all_data[0].result.dump()
     counts = all_data[0].result.counts()
     assert 5 == len(counts.register_names)
-    assert 4 == len(counts.get_register_counts('X0X1'))
-    assert 4 == len(counts.get_register_counts('Y0Y1'))
-    assert 1 == len(counts.get_register_counts('Z0'))
-    assert 1 == len(counts.get_register_counts('Z1'))
+    assert 4 == len(counts.get_register_counts('XX'))
+    assert 4 == len(counts.get_register_counts('YY'))
+    assert 1 == len(counts.get_register_counts('ZI'))
+    assert 1 == len(counts.get_register_counts('IZ'))
 
 
 def test_scipy_optimizer():
