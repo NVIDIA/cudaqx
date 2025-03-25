@@ -88,12 +88,12 @@ qaoa_result qaoa(const cudaq::spin_op &problemHamiltonian,
   auto numQubits = problemHamiltonian.num_qubits();
   for (const auto &o : problemHamiltonian) {
     probHWords.emplace_back(o.get_pauli_word(numQubits));
-    probHCoeffs.push_back(o.get_coefficient().evaluate().real());
+    probHCoeffs.push_back(o.evaluate_coefficient().real());
   }
 
   for (const auto &o : referenceHamiltonian) {
     refHWords.emplace_back(o.get_pauli_word(numQubits));
-    refHCoeffs.push_back(o.get_coefficient().evaluate().real());
+    refHCoeffs.push_back(o.evaluate_coefficient().real());
   }
 
   auto argsTranslator = [&](std::vector<double> x) {

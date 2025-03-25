@@ -71,18 +71,11 @@ simulator::run(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
   auto coeff = (!isImaginary) ? std::complex<double>{0.0, 1.0}
                               : std::complex<double>{1.0, 0.0};
 
-  auto cleanCommutator =
-      [](cudaq::spin_op commutator) -> std::tuple<cudaq::spin_op, std::size_t> {
-    cudaq::spin_op cleaned = commutator;
-    cleaned.canonicalize().trim();
-    return std::make_tuple(cleaned, cleaned.num_terms());
-  };
-
   for (auto &op : pool) {
     auto commutator = H * op - op * H;
-    auto [cleanedCom, numTerms] = cleanCommutator(commutator);
-    if (numTerms > 0)
-      commutators.push_back(coeff * cleanedCom);
+    commutator.canonicalize().trim();
+    if (commutator.num_terms() > 0)
+      commutators.push_back(coeff * commutator);
   }
 
   nlohmann::json initInfo = {{"num-qpus", numQpus},
@@ -200,7 +193,7 @@ simulator::run(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
 
     for (auto o : op) {
       pauliWords.emplace_back(o.get_pauli_word(numQubits));
-      coefficients.push_back(o.get_coefficient().evaluate().imag());
+      coefficients.push_back(o.evaluate_coefficient().imag());
       poolIndices.push_back(maxOpIdx);
     }
 
