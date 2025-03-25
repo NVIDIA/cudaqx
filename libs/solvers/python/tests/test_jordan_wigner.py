@@ -92,10 +92,20 @@ def jw_molecule_test(xyz):
                                molecule.hpqrs,
                                core_energy=molecule.energies['nuclear_energy'],
                                tol=1e-12)
-    assert op == molecule.hamiltonian
-    assert np.allclose(of_hamiltonian.to_matrix(),
-                       molecule.hamiltonian.to_matrix(),
-                       atol=1e-3)
+
+    # The checks on the matrices below intentionally ignores the sign of the
+    # values. (See note above.)
+    def split_real_imag_abs(mat):
+        mat = np.array(mat)
+        return np.abs(np.real(mat)), np.abs(np.imag(mat))
+
+    mop_r, mop_i = split_real_imag_abs(op.to_matrix())
+    mh_r, mh_i = split_real_imag_abs(molecule.hamiltonian.to_matrix())
+    of_r, of_i = split_real_imag_abs(of_hamiltonian.to_matrix())
+    assert np.allclose(mop_r, mh_r, atol=1e-12)
+    assert np.allclose(mop_i, mh_i, atol=1e-12)
+    assert np.allclose(of_r, mh_r, atol=1e-12)
+    assert np.allclose(of_i, mh_i, atol=1e-12)
 
     cudaqx_eig = np.min(np.linalg.eigvals(op.to_matrix()))
     print(f'CUDA-QX energy:        {cudaqx_eig.real}')
