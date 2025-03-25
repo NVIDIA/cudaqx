@@ -29,11 +29,12 @@ def test_solvers_vqe():
     hamiltonian = 5.907 - 2.1433 * spin.x(0) * spin.x(1) - 2.1433 * spin.y(
         0) * spin.y(1) + .21829 * spin.z(0) - 6.125 * spin.z(1)
 
-    # Can specify optimizer and gradient
+    # Can specify optimizer and gradient and tol
     energy, params, all_data = solvers.vqe(lambda thetas: ansatz(thetas[0]),
                                            hamiltonian, [0.],
                                            optimizer='lbfgs',
-                                           gradient='parameter_shift')
+                                           gradient='parameter_shift',
+                                           tol=1e-7)
     assert np.isclose(-1.74, energy, atol=1e-2)
     all_data[0].result.dump()
 

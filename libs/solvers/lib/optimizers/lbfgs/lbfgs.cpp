@@ -16,7 +16,7 @@ optimization_result lbfgs::optimize(std::size_t dim,
   history.clear();
   cudaq::optim::LBFGSObjective f(
       opt_function, options.get("initial_parameters", std::vector<double>(dim)),
-      options.get("function_tolerance", 1e-12),
+      options.get("tol", 1e-12),
       options.get("max_iterations", std::numeric_limits<std::size_t>::max()),
       history, options.get("verbose", false));
   return f.run(dim);

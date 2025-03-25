@@ -5,7 +5,6 @@
  * This source code and the accompanying materials are made available under    *
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
-
 #include "cudaq/solvers/operators/operator_pools/uccsd_operator_pool.h"
 #include "cudaq/solvers/stateprep/uccsd.h"
 
@@ -39,9 +38,9 @@ uccsd::generate(const heterogeneous_map &config) const {
     cudaq::spin_op_term o;
     for (std::size_t i = p + 1; i < q; i++)
       o *= cudaq::spin::z(i);
-
-    ops.emplace_back(cudaq::spin::y(p) * o * cudaq::spin::x(q));
-    ops.emplace_back(cudaq::spin::x(p) * o * cudaq::spin::y(q));
+    std::complex<double> c = {0.5, 0};
+    ops.emplace_back(c * cudaq::spin::y(p) * o * cudaq::spin::x(q) -
+                     c * cudaq::spin::x(p) * o * cudaq::spin::y(q));
   };
 
   auto addDoublesExcitation = [numQubits](std::vector<cudaq::spin_op> &ops,
@@ -79,30 +78,26 @@ uccsd::generate(const heterogeneous_map &config) const {
     for (std::size_t i = a_virt + 1; i < b_virt; i++)
       parity_b *= cudaq::spin::z(i);
 
-    ops.emplace_back(cudaq::spin::x(i_occ) * parity_a * cudaq::spin::x(j_occ) *
-                     cudaq::spin::x(a_virt) * parity_b *
-                     cudaq::spin::y(b_virt));
-    ops.emplace_back(cudaq::spin::x(i_occ) * parity_a * cudaq::spin::x(j_occ) *
-                     cudaq::spin::y(a_virt) * parity_b *
-                     cudaq::spin::x(b_virt));
-    ops.emplace_back(cudaq::spin::x(i_occ) * parity_a * cudaq::spin::y(j_occ) *
-                     cudaq::spin::y(a_virt) * parity_b *
-                     cudaq::spin::y(b_virt));
-    ops.emplace_back(cudaq::spin::y(i_occ) * parity_a * cudaq::spin::x(j_occ) *
-                     cudaq::spin::y(a_virt) * parity_b *
-                     cudaq::spin::y(b_virt));
-    ops.emplace_back(cudaq::spin::x(i_occ) * parity_a * cudaq::spin::y(j_occ) *
-                     cudaq::spin::x(a_virt) * parity_b *
-                     cudaq::spin::x(b_virt));
-    ops.emplace_back(cudaq::spin::y(i_occ) * parity_a * cudaq::spin::x(j_occ) *
-                     cudaq::spin::x(a_virt) * parity_b *
-                     cudaq::spin::x(b_virt));
-    ops.emplace_back(cudaq::spin::y(i_occ) * parity_a * cudaq::spin::y(j_occ) *
-                     cudaq::spin::x(a_virt) * parity_b *
-                     cudaq::spin::y(b_virt));
-    ops.emplace_back(cudaq::spin::y(i_occ) * parity_a * cudaq::spin::y(j_occ) *
-                     cudaq::spin::y(a_virt) * parity_b *
-                     cudaq::spin::x(b_virt));
+    cudaq::spin_op op_term_temp =
+        cudaq::spin::x(i_occ) * parity_a * cudaq::spin::x(j_occ) *
+        cudaq::spin::x(a_virt) * parity_b * cudaq::spin::y(b_virt);
+    op_term_temp += cudaq::spin::x(i_occ) * parity_a * cudaq::spin::x(j_occ) *
+                    cudaq::spin::y(a_virt) * parity_b * cudaq::spin::x(b_virt);
+    op_term_temp += cudaq::spin::x(i_occ) * parity_a * cudaq::spin::y(j_occ) *
+                    cudaq::spin::y(a_virt) * parity_b * cudaq::spin::y(b_virt);
+    op_term_temp += cudaq::spin::y(i_occ) * parity_a * cudaq::spin::x(j_occ) *
+                    cudaq::spin::y(a_virt) * parity_b * cudaq::spin::y(b_virt);
+    op_term_temp -= cudaq::spin::x(i_occ) * parity_a * cudaq::spin::y(j_occ) *
+                    cudaq::spin::x(a_virt) * parity_b * cudaq::spin::x(b_virt);
+    op_term_temp -= cudaq::spin::y(i_occ) * parity_a * cudaq::spin::x(j_occ) *
+                    cudaq::spin::x(a_virt) * parity_b * cudaq::spin::x(b_virt);
+    op_term_temp -= cudaq::spin::y(i_occ) * parity_a * cudaq::spin::y(j_occ) *
+                    cudaq::spin::x(a_virt) * parity_b * cudaq::spin::y(b_virt);
+    op_term_temp -= cudaq::spin::y(i_occ) * parity_a * cudaq::spin::y(j_occ) *
+                    cudaq::spin::y(a_virt) * parity_b * cudaq::spin::x(b_virt);
+
+    std::complex<double> c = {0.125, 0};
+    ops.emplace_back(c * op_term_temp);
   };
 
   for (auto &sa : singlesAlpha)

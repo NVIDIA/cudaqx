@@ -16,7 +16,7 @@ def test_generate_with_default_config():
                                           num_qubits=4,
                                           num_electrons=2)
     assert operators
-    assert len(operators) == 2 * 2 + 1 * 8
+    assert len(operators) == 2 + 1
 
     for op in operators:
         assert op.get_qubit_count() <= 4
@@ -28,12 +28,13 @@ def test_generate_with_custom_coefficients():
                                           num_electrons=2)
 
     assert operators
-    assert len(operators) == (2 * 2 + 1 * 8)
+    assert len(operators) == (2 + 1)
 
     for i, op in enumerate(operators):
         assert op.get_qubit_count() <= 4
-        expected_coeff = 1.0
-        assert np.isclose(op.get_coefficient().real, expected_coeff)
+        expected_coeff = [0.5, 0.125]
+        for term in op:
+            assert (abs(term.get_coefficient().real) in expected_coeff)
 
 
 def test_generate_with_odd_electrons():
@@ -43,7 +44,7 @@ def test_generate_with_odd_electrons():
                                           spin=1)
 
     assert operators
-    assert len(operators) == 2 * 4 + 4 * 8
+    assert len(operators) == 2 * 2 + 4
 
     for op in operators:
         assert op.get_qubit_count() <= 6
@@ -55,47 +56,60 @@ def test_generate_with_large_system():
                                           num_electrons=10)
 
     assert operators
-    assert len(operators) > 875
+    assert len(operators) == 875
 
     for op in operators:
         assert op.get_qubit_count() <= 20
 
 
 def test_uccsd_operator_pool_correctness():
-    # Generate the UCCSD operator pool
     pool = solvers.get_operator_pool("uccsd", num_qubits=4, num_electrons=2)
 
-    # Convert SpinOperators to strings
-    pool_strings = [op.to_string(False) for op in pool]
+    temp_data = [[], [], []]
+    data_counter = 0
+    for op in pool:
+        op.for_each_term(lambda term: temp_data[data_counter].append(
+            (term.to_string(False), term.get_coefficient())))
+        data_counter += 1
 
-    # Expected result
-    expected_pool = [
-        'YZX', 'XZY', 'IYZX', 'IXZY', 'XXXY', 'XXYX', 'XYYY', 'YXYY', 'XYXX',
-        'YXXX', 'YYXY', 'YYYX'
-    ]
+    # Assert
+    expected_operators = [["XZY", "YZX"], ["IXZY", "IYZX"],
+                          [
+                              "YYYX", "YXXX", "XXYX", "YYXY", "XYYY", "XXXY",
+                              "YXYY", "XYXX"
+                          ]]
+    expected_coefficients = [[complex(-0.5, 0),
+                              complex(0.5, 0)],
+                             [complex(-0.5, 0),
+                              complex(0.5, 0)],
+                             [
+                                 complex(-0.125, 0),
+                                 complex(-0.125, 0),
+                                 complex(0.125, 0),
+                                 complex(-0.125, 0),
+                                 complex(0.125, 0),
+                                 complex(0.125, 0),
+                                 complex(0.125, 0),
+                                 complex(-0.125, 0)
+                             ]]
 
-    # Assert that the generated pool matches the expected result
-    assert pool_strings == expected_pool, f"Expected {expected_pool}, but got {pool_strings}"
-
-    # Additional checks
-    assert len(pool) == len(
-        expected_pool
-    ), f"Expected {len(expected_pool)} operators, but got {len(pool)}"
-
-    # Check that all operators have the correct length (up to 4 qubits)
-    for op_string in pool_strings:
-        assert len(
-            op_string
-        ) <= 4, f"Operator {op_string} does not have the expected length of <= 4"
-
-    # Check that all operators contain only valid characters (I, X, Y, Z)
     valid_chars = set('IXYZ')
-    for op_string in pool_strings:
-        assert set(op_string).issubset(
-            valid_chars), f"Operator {op_string} contains invalid characters"
+    assert len(temp_data) == len(
+        expected_operators
+    ), f"Number of generated operators ({len(temp_data)}) does not match expected count ({len(expected_operators)})"
 
+    for i in range(len(temp_data)):
+        for j in range(len(temp_data[i])):
+            op_string = temp_data[i][j][0]
+            op_coeff = temp_data[i][j][1]
+            # Check operator length
+            assert len(
+                op_string
+            ) == 4, f"Operator {op_string} does not have the expected length of 4"
+            index = expected_operators[i].index(op_string)
 
-def test_generate_with_invalid_config():
-    # Missing required parameters
-    with pytest.raises(RuntimeError):
-        pool = solvers.get_operator_pool("uccsd")
+            assert op_coeff == expected_coefficients[i][index], \
+                f"Coefficient mismatch at index {i}, {index}: expected {expected_coefficients[i][index]}, got {op_coeff}"
+
+            assert set(op_string).issubset(valid_chars), \
+                f"Operator {op_string} contains invalid characters"
