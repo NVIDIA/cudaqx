@@ -428,7 +428,7 @@ TEST(QECCodeTester, checkRepetition) {
 
     std::vector<std::string> actual_stabs;
     for (auto &s : stabilizers)
-      actual_stabs.push_back(s.to_string(false));
+      actual_stabs.push_back(s.begin()->get_pauli_word());
 
     std::vector<std::string> expected_strings = {
         "ZZIIIIIII", "IZZIIIIII", "IIZZIIIII", "IIIZZIIII",

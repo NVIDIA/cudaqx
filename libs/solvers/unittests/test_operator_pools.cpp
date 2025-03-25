@@ -102,7 +102,7 @@ TEST(UccsdOperatorPoolTest, GeneratesCorrectOperators) {
   std::set<std::size_t> s{0, 1, 2, 3};
   for (const auto &op : operators) {
     operator_strings.push_back(
-        cudaq::spin_op(op).canonicalize(s).to_string(false));
+        cudaq::spin_op(op).canonicalize(s).begin()->get_pauli_word());
   }
 
   // Assert

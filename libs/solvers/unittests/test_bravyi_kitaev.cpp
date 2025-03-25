@@ -77,9 +77,9 @@ TEST(BravyiKitaev, testH2Hamiltonian) {
       0.12020049071260128 * z(0) * z(2) * z(3) + 0.1683359862516207 * z(1) -
       0.22004130022421792 * z(1) * z(2) * z(3) +
       0.17407289249680227 * z(1) * z(3) - 0.22004130022421792 * z(2);
-  auto [terms, residuals] = (result - gold).get_raw_data();
+  auto residuals = result - gold;
   for (auto r : residuals)
-    EXPECT_NEAR(std::abs(r), 0.0, 1e-4);
+    EXPECT_NEAR(std::abs(r.evaluate_coefficient()), 0.0, 1e-4);
 }
 
 TEST(BravyiKitaev, testSRLCase0) {
@@ -91,9 +91,9 @@ TEST(BravyiKitaev, testSRLCase0) {
   cudaq::spin_op gold = double_complex(-2.0, 0.0) * i(0) * i(1) * z(2) +
                         double_complex(2.0, 0.0) * i(0) * i(1) * i(2);
 
-  auto [terms, residuals] = (result - gold.canonicalize()).get_raw_data();
+  auto residuals = result - gold.canonicalize();
   for (auto r : residuals)
-    EXPECT_NEAR(std::abs(r), 0.0, 1e-4);
+    EXPECT_NEAR(std::abs(r.evaluate_coefficient()), 0.0, 1e-4);
 }
 
 TEST(BravyiKitaev, testSRLCase1) {
@@ -109,9 +109,9 @@ TEST(BravyiKitaev, testSRLCase1) {
                             i(4) * z(5) * x(6) +
                         double_complex(0.0, -1.0) * i(0) * z(1) * y(2) * y(3) *
                             i(4) * z(5) * y(6);
-  auto [terms, residuals] = (result - gold.canonicalize()).get_raw_data();
+  auto residuals = result - gold.canonicalize();
   for (auto r : residuals)
-    EXPECT_NEAR(std::abs(r), 0.0, 1e-4);
+    EXPECT_NEAR(std::abs(r.evaluate_coefficient()), 0.0, 1e-4);
 }
 
 TEST(BravyiKitaev, testSRLCase2) {
@@ -125,9 +125,9 @@ TEST(BravyiKitaev, testSRLCase2) {
       double_complex(1.0, 0.0) * z(1) * x(2) * y(3) * y(5) +
       double_complex(0.0, 1.0) * z(1) * y(2) * y(3) * y(5);
 
-  auto [terms, residuals] = (result - gold.canonicalize()).get_raw_data();
+  auto residuals = result - gold.canonicalize();
   for (auto r : residuals)
-    EXPECT_NEAR(std::abs(r), 0.0, 1e-4);
+    EXPECT_NEAR(std::abs(r.evaluate_coefficient()), 0.0, 1e-4);
 }
 
 TEST(BravyiKitaev, testSRLCase3) {
@@ -140,9 +140,9 @@ TEST(BravyiKitaev, testSRLCase3) {
                         double_complex(1.0, 0.0) * i(0) * x(1) * x(2) +
                         double_complex(0.0, 1.0) * i(0) * x(1) * y(2);
 
-  auto [terms, residuals] = (result - gold.canonicalize()).get_raw_data();
+  auto residuals = result - gold.canonicalize();
   for (auto r : residuals)
-    EXPECT_NEAR(std::abs(r), 0.0, 1e-4);
+    EXPECT_NEAR(std::abs(r.evaluate_coefficient()), 0.0, 1e-4);
 }
 
 TEST(BravyiKitaev, testSRLCase4) {
@@ -156,9 +156,9 @@ TEST(BravyiKitaev, testSRLCase4) {
       double_complex(1.0, 0.0) * x(0) * x(1) * i(2) * y(3) * i(4) * y(5) +
       double_complex(0.0, -1.0) * y(0) * x(1) * i(2) * y(3) * i(4) * y(5);
 
-  auto [terms, residuals] = (result - gold.canonicalize()).get_raw_data();
+  auto residuals = result - gold.canonicalize();
   for (auto r : residuals)
-    EXPECT_NEAR(std::abs(r), 0.0, 1e-4);
+    EXPECT_NEAR(std::abs(r.evaluate_coefficient()), 0.0, 1e-4);
 }
 
 TEST(BravyiKitaev, testSRLCase6) {
@@ -171,9 +171,9 @@ TEST(BravyiKitaev, testSRLCase6) {
                         double_complex(0.0, 1.0) * z(17) * y(18) * z(19) +
                         double_complex(-1.0, 0.0) * z(17) * x(18) * z(19);
 
-  auto [terms, residuals] = (result - gold.canonicalize()).get_raw_data();
+  auto residuals = result - gold.canonicalize();
   for (auto r : residuals)
-    EXPECT_NEAR(std::abs(r), 0.0, 1e-4);
+    EXPECT_NEAR(std::abs(r.evaluate_coefficient()), 0.0, 1e-4);
 }
 
 TEST(BravyiKitaev, testSRLCase7) {
@@ -188,9 +188,9 @@ TEST(BravyiKitaev, testSRLCase7) {
       double_complex(1.0, 0.0) * z(3) * z(4) * x(5) * y(7) * y(11) +
       double_complex(0.0, 1.0) * z(3) * y(5) * y(7) * y(11);
 
-  auto [terms, residuals] = (result - gold.canonicalize()).get_raw_data();
+  auto residuals = result - gold.canonicalize();
   for (auto r : residuals)
-    EXPECT_NEAR(std::abs(r), 0.0, 1e-4);
+    EXPECT_NEAR(std::abs(r.evaluate_coefficient()), 0.0, 1e-4);
 }
 
 TEST(BravyiKitaev, testSRLCase8) {
@@ -205,9 +205,9 @@ TEST(BravyiKitaev, testSRLCase8) {
       double_complex(1.0, 0.0) * x(7) * z(8) * x(9) * x(11) +
       double_complex(0.0, 1.0) * x(7) * y(9) * x(11);
 
-  auto [terms, residuals] = (result - gold.canonicalize()).get_raw_data();
+  auto residuals = result - gold.canonicalize();
   for (auto r : residuals)
-    EXPECT_NEAR(std::abs(r), 0.0, 1e-4);
+    EXPECT_NEAR(std::abs(r.evaluate_coefficient()), 0.0, 1e-4);
 }
 
 TEST(BravyiKitaev, testSRLCase9) {
@@ -221,9 +221,9 @@ TEST(BravyiKitaev, testSRLCase9) {
       double_complex(-1.0, 0.0) * z(7) * z(8) * x(9) * x(11) * z(15) +
       double_complex(0.0, 1.0) * z(7) * y(9) * x(11) * z(15);
 
-  auto [terms, residuals] = (result - gold.canonicalize()).get_raw_data();
+  auto residuals = result - gold.canonicalize();
   for (auto r : residuals)
-    EXPECT_NEAR(std::abs(r), 0.0, 1e-4);
+    EXPECT_NEAR(std::abs(r.evaluate_coefficient()), 0.0, 1e-4);
 }
 
 TEST(BravyiKitaev, testSRLCase10) {
@@ -237,7 +237,7 @@ TEST(BravyiKitaev, testSRLCase10) {
       double_complex(-1.0, 0.0) * z(1) * z(2) * x(3) * z(7) +
       double_complex(0.0, 1.0) * y(3) * z(7);
 
-  auto [terms, residuals] = (result - gold.canonicalize()).get_raw_data();
+  auto residuals = result - gold.canonicalize();
   for (auto r : residuals)
-    EXPECT_NEAR(std::abs(r), 0.0, 1e-4);
+    EXPECT_NEAR(std::abs(r.evaluate_coefficient()), 0.0, 1e-4);
 }
