@@ -34,6 +34,7 @@ spin_complement_gsd::generate(const heterogeneous_map &config) const {
 
   std::vector<cudaq::spin_op> pool;
   auto numQubits = 2 * numOrbitals;
+  const double trimThreshold = 1e-12;
   std::vector<int> alphaOrbs, betaOrbs;
   for (auto i : cudaq::range(numOrbitals)) {
     alphaOrbs.push_back(2 * i);
@@ -49,7 +50,7 @@ spin_complement_gsd::generate(const heterogeneous_map &config) const {
       oneElectron += adag(numQubits, q + 1) * a(numQubits, p + 1) -
                      adag(numQubits, p + 1) * a(numQubits, q + 1);
 
-      oneElectron.trim();
+      oneElectron.trim(trimThreshold);
       if (oneElectron.num_terms() != 0)
         pool.emplace_back(oneElectron);
     }
@@ -78,7 +79,7 @@ spin_complement_gsd::generate(const heterogeneous_map &config) const {
                          adag(numQubits, q + 1) * a(numQubits, s + 1) *
                              adag(numQubits, p + 1) * a(numQubits, r + 1);
 
-          twoElectron.trim();
+          twoElectron.trim(trimThreshold);
           if (twoElectron.num_terms() != 0)
             pool.emplace_back(twoElectron);
           rs++;
@@ -110,7 +111,7 @@ spin_complement_gsd::generate(const heterogeneous_map &config) const {
                              adag(numQubits, r + 1) * a(numQubits, p + 1) -
                          adag(numQubits, p + 1) * a(numQubits, r + 1) *
                              adag(numQubits, q - 1) * a(numQubits, s - 1);
-          twoElectron.trim();
+          twoElectron.trim(trimThreshold);
           if (twoElectron.num_terms() != 0)
             pool.push_back(twoElectron);
           rs++;

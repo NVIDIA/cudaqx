@@ -69,11 +69,11 @@ def test_uccsd_operator_pool_correctness():
     data_counter = 0
     for op in pool:
         op.for_each_term(lambda term: temp_data[data_counter].append(
-            (term.to_string(False), term.get_coefficient())))
+            (term.get_pauli_word(4), term.get_coefficient())))
         data_counter += 1
 
     # Assert
-    expected_operators = [["XZY", "YZX"], ["IXZY", "IYZX"],
+    expected_operators = [["XZYI", "YZXI"], ["IXZY", "IYZX"],
                           [
                               "YYYX", "YXXX", "XXYX", "YYXY", "XYYY", "XXXY",
                               "YXYY", "XYXX"
