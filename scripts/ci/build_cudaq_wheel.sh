@@ -1,7 +1,7 @@
 #!/bin/sh
 
 # ============================================================================ #
-# Copyright (c) 2022 - 2024 NVIDIA Corporation & Affiliates.                   #
+# Copyright (c) 2022 - 2025 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -110,8 +110,8 @@ index 7b7541d..2261334 100644
      if (NOT Python_FOUND)
        message(FATAL_ERROR "find_package(Python) not run?")
      endif()
--    target_link_libraries(cudaq-pyscf PRIVATE Python::Python pybind11::pybind11 cudaq-chemistry cudaq-spin cudaq cudaq-py-utils)
-+    target_link_libraries(cudaq-pyscf PRIVATE Python::Module pybind11::pybind11 cudaq-chemistry cudaq-spin cudaq cudaq-py-utils)
+-    target_link_libraries(cudaq-pyscf PRIVATE Python::Python pybind11::pybind11 cudaq-chemistry cudaq-operator cudaq cudaq-py-utils)
++    target_link_libraries(cudaq-pyscf PRIVATE Python::Module pybind11::pybind11 cudaq-chemistry cudaq-operator cudaq cudaq-py-utils)
  endif()
  install(TARGETS cudaq-pyscf DESTINATION lib/plugins)'
 
