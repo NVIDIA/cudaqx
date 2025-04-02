@@ -56,12 +56,15 @@ logical_measurements = (Lz @ data.transpose()) % 2
 logical_measurements = logical_measurements.flatten()
 print("LMz:\n", logical_measurements)
 
+# organize data by shot and round if desired
+syndromes = syndromes.reshape((nShots, nRounds, syndromes.shape[1]))
+
 # initialize a Pauli frame to track logical flips
 # through the stabilizer rounds
 pauli_frame = np.array([0, 0], dtype=np.uint8)
 for shot in range(0, nShots):
     print("shot:", shot)
-    for syndrome in syndromes:
+    for syndrome in syndromes[shot]:
         print("syndrome:", syndrome)
         # decode the syndrome
         convergence, result = decoder.decode(syndrome)
