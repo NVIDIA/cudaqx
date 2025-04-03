@@ -7,6 +7,7 @@
  ******************************************************************************/
 
 #include "cudaq/solvers/operators/operator_pools/spin_complement_gsd.h"
+#include "cudaq/utils/cudaq_utils.h"
 
 using namespace cudaqx;
 

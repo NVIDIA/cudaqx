@@ -6,6 +6,7 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 #include "cudaq/solvers/operators/molecule/molecule_package_driver.h"
+#include "cudaq/utils/cudaq_utils.h"
 
 #include <fstream>
 #include <iostream>
