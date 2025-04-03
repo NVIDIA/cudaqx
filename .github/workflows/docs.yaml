@@ -70,6 +70,7 @@ jobs:
       - name: Build docs
         run: |
           cmake -S . -B "build" \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER=gcc-11 \
             -DCMAKE_CXX_COMPILER=g++-11 \
