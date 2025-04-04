@@ -13,6 +13,7 @@ LABEL org.opencontainers.image.source="https://github.com/NVIDIA/cudaqx"
 LABEL org.opencontainers.image.title="cudaqx-dev"
 LABEL org.opencontainers.image.url="https://github.com/NVIDIA/cudaqx"
 
+# FIXME: Remove the cmake install once private repos are updated.
 RUN apt-get update && apt-get install -y gfortran libblas-dev jq cuda-nvtx-12-0 \
   && python3 -m pip install "cmake<4" --user \
   && apt-get autoremove -y --purge && apt-get clean && rm -rf /var/lib/apt/lists/*
@@ -32,5 +33,5 @@ RUN mkdir -p /workspaces/cudaq && cd /workspaces/cudaq \
   && rm -rf build
 
 #RUN mkdir -p /workspaces/cudaqx && cd /workspaces/cudaqx \
-#  && ~/.local/bin/cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DCUDAQ_DIR=/usr/local/cudaq/lib/cmake/cudaq .. \
+#  && cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DCUDAQ_DIR=/usr/local/cudaq/lib/cmake/cudaq .. \
 #  && ninja install

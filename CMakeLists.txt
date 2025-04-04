@@ -1,5 +1,5 @@
 # ============================================================================ #
-# Copyright (c) 2024 NVIDIA Corporation & Affiliates.                          #
+# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -10,6 +10,15 @@ set(CMAKE_WARN_DEPRECATED OFF CACHE BOOL "" FORCE)
 
 # We need 3.28 because of the `EXCLUDE_FROM_ALL` in FetchContent_Declare
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
+
+# Set a default build type if none was specified. Must set this before
+# project().
+set(CMAKE_BUILD_TYPE "Release" CACHE STRING
+    "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel")
+
+# Set a default install prefix if none was specified.
+set(CMAKE_INSTALL_PREFIX "$ENV{HOME}/.cudaqx" CACHE STRING
+    "Install path prefix, prepended onto install directories")
 
 project(CUDAQX
   VERSION 0.0.0
