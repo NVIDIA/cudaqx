@@ -64,7 +64,7 @@ jobs:
             sphinx_copybutton sphinx_inline_tabs sphinx_gallery sphinx_rtd_theme \
             sphinx_reredirects sphinx_toolbox cupy-cuda12x cuquantum-python-cu12
 
-          python3 -m pip install cmake --user
+          python3 -m pip install "cmake<4" --user
           echo "$HOME/.local/bin:$PATH" >> $GITHUB_PATH
 
       - name: Build docs

@@ -14,7 +14,7 @@ LABEL org.opencontainers.image.title="cudaqx-dev"
 LABEL org.opencontainers.image.url="https://github.com/NVIDIA/cudaqx"
 
 RUN apt-get update && apt-get install -y gfortran libblas-dev jq cuda-nvtx-12-0 \
-  && python3 -m pip install cmake --user \
+  && python3 -m pip install "cmake<4" --user \
   && apt-get autoremove -y --purge && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 COPY .cudaq_version /cudaq_version

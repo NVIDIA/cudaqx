@@ -62,7 +62,7 @@ Prerequisites
 Before building CUDA-QX from source, ensure your system meets the following requirements:
 
 * **CUDA-Q**: The NVIDIA quantum-classical programming model
-* **CMake**: Version 3.28 or higher (``pip install cmake>=3.28``)
+* **CMake**: Version 3.28 or higher (``pip install "cmake<4"``), less than 4.0
 * **GCC**: Version 11 or higher
 * **Python**: Version 3.10, 3.11, or 3.12
 * **NVIDIA GPU**: CUDA-capable GPU with compute capability 12.0 or higher
