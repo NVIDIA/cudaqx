@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ============================================================================ #
-# Copyright (c) 2022 - 2023 NVIDIA Corporation & Affiliates.                   #
+# Copyright (c) 2022 - 2025 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -35,7 +35,7 @@ clang_format_executable=${clang_format_executable:-clang-format}
 cd $(git rev-parse --show-toplevel)
 
 # Run Clang Format
-git ls-files -- '*.cpp' '*.h' ':!:tpls/*' ':!:test' ':!:targettests' | xargs $clang_format_executable -i
+git ls-files -- '*.cpp' '*.h' '*.cu' '*.cuh' | xargs $clang_format_executable -i
 
 # Take us back to where we were
 cd -
