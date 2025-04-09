@@ -209,6 +209,22 @@ void bindDecoder(py::module &mod) {
 
         py::buffer_info buf = H.request();
 
+        if (buf.ndim != 2) {
+          throw std::runtime_error(
+              "Parity check matrix must be 2-dimensional.");
+        }
+
+        if (buf.itemsize != sizeof(uint8_t)) {
+          throw std::runtime_error(
+              "Parity check matrix must be an array of uint8_t.");
+        }
+
+        if (buf.strides[0] == buf.itemsize) {
+          throw std::runtime_error(
+              "Parity check matrix must be in row-major order, but "
+              "column-major order was detected.");
+        }
+
         // Create a vector of the array dimensions
         std::vector<std::size_t> shape;
         for (py::ssize_t d : buf.shape) {

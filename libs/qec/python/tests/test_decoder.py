@@ -29,6 +29,13 @@ def test_decoder_initialization():
     assert hasattr(decoder, 'decode')
 
 
+def test_decoder_initialization_with_error():
+    # We do not support column-major order (Fortran order)
+    H_bad = np.zeros((10, 20), dtype=np.uint8, order='F')
+    with pytest.raises(RuntimeError) as e:
+        decoder = qec.get_decoder('single_error_lut_example', H_bad)
+
+
 def test_decoder_api():
     # Test decode_batch
     decoder = qec.get_decoder('example_byod', H)
