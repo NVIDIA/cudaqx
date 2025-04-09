@@ -29,7 +29,7 @@ runs:
       run: |
         apt update
         apt install -y --no-install-recommends ccache
-        python3 -m pip install cmake --user
+        python3 -m pip install "cmake<4" --user
         echo "$HOME/.local/bin:$PATH" >> $GITHUB_PATH
       shell: bash
 
