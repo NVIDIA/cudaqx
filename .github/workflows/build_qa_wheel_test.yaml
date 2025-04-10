@@ -9,7 +9,7 @@ on:
         required: false
       wheels_run_id:
         type: string
-        description: Retrieve assets from a draft release with this tag (e.g. docker-files-89)
+        description: Retrieve wheels from this GitHub Actions run (e.g. 14368511401)
         required: false
 
 jobs:
