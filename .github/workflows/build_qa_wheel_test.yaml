@@ -3,11 +3,11 @@ name: Build Image for QA Wheel Tests
 on:
   workflow_dispatch:
     inputs:
-      assets_repo:
+      wheels_repo:
         type: string
         description: Retrieve assets from a draft release from this repo (e.g. NVIDIA/cudaqx)
         required: false
-      assets_tag:
+      wheels_run_id:
         type: string
         description: Retrieve assets from a draft release with this tag (e.g. docker-files-89)
         required: false
@@ -39,23 +39,23 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.PACKAGE_TOKEN }}
+          password: ${{ github.token }}
 
       # Do this early to help validate user inputs (if present)
       - name: Fetch assets
         env:
-          GH_TOKEN: ${{ secrets.PACKAGE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         id: fetch-assets
         run: |
           mkdir wheels && cd wheels
           # TODO - make this more generic by accepting repos as inputs. However,
           # note that this process changes from release to release.
           # Fetch the cuQuantum assets
-          gh release download -R NVIDIA/cudaq-private cuquantum-25.03 -p '*cu12*.whl'
+          # gh release download -R NVIDIA/cudaq-private cuquantum-25.03 -p '*cu12*.whl'
           # Fetch the CUDA-Q wheels
-          gh release download -R NVIDIA/cudaq-private staging-0.10.0 -p '*cu12*.whl'
+          # gh release download -R NVIDIA/cudaq-private staging-0.10.0 -p '*cu12*.whl'
           # Fetch the CUDA-QX wheels
-          gh run download -R NVIDIA/cudaqx-private 13798216600 -p 'wheels-py*'
+          gh run download -R ${{ inputs.wheels_repo }} ${{ inputs.wheels_run_id }} -p 'wheels-py*'
           mv */*.whl .
           ls
 
