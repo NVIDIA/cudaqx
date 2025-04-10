@@ -33,6 +33,10 @@
                           [0, 1, 0, 1, 1, 0, 1],
                           [0, 0, 1, 0, 1, 1, 1]], dtype=np.uint8) # sample 3x7 PCM
             opts = dict() # see below for options
+            # Note: H must be in row-major order. If you use
+            # `scipy.sparse.csr_matrix.todense()` to get the parity check
+            # matrix, you must specify todense(order='C') to get a row-major
+            # matrix.
             nvdec = qec.get_decoder('nv-qldpc-decoder', H, **opts)
 
       .. tab:: C++

@@ -76,6 +76,13 @@ jobs:
           sudo add-apt-repository "deb http://apt.llvm.org/${UBUNTU_CODENAME}/  llvm-toolchain-${UBUNTU_CODENAME}-${LLVM_VERSION} main"
           sudo apt-get update && sudo apt-get install -y --no-install-recommends clang-format-${LLVM_VERSION}
 
+          # The Ubuntu base image provided by GitHub Actions has the wrong
+          # clang-format. We install the right one here.  This is important
+          # because the "git clang-format-16" command will use still attempt to
+          # use clang-format.
+          sudo rm /usr/bin/clang-format
+          sudo ln -s /usr/bin/clang-format-${LLVM_VERSION} /usr/bin/clang-format
+
       # If the `clang-format` file changes, we require the reformatting of all
       # files. See https://github.com/NVIDIA/cudaqx/pull/15#discussion_r1868174072
       - name: clang-format all things

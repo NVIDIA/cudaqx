@@ -77,6 +77,11 @@ template <typename T>
 tensor<T> toTensor(const py::array_t<T> &H) {
   py::buffer_info buf = H.request();
 
+  if (buf.ndim >= 1 && buf.strides[0] == buf.itemsize) {
+    throw std::runtime_error("toTensor: data must be in row-major order, but "
+                             "column-major order was detected.");
+  }
+
   // Create a vector of the array dimensions
   std::vector<std::size_t> shape;
   for (py::ssize_t d : buf.shape) {
