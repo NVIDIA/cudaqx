@@ -34,7 +34,6 @@ jobs:
         with:
           filters: |
             check-all-cpp:
-              - '.github/workflows/pr_sanity_checks.yaml'
               - '.clang-format'
             check-cpp:
               - '**/*.c'
