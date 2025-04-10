@@ -238,7 +238,8 @@ void bindDecoder(py::module &mod) {
         return get_decoder(name, tensor_H, hetMapFromKwargs(options));
       },
       "Get a decoder by name with a given parity check matrix"
-      "and optional decoder-specific parameters");
+      "and optional decoder-specific parameters. Note: the parity check matrix "
+      "must be in row-major order.");
 }
 
 } // namespace cudaq::qec
