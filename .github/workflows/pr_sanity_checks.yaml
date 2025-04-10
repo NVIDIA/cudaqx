@@ -96,14 +96,10 @@ jobs:
           # We did a shallow clone, and thus we need to make sure to fetch the base
           # commit.
           # Dont exit if clang-format is not installed.
-          echo "clang-format --version"
-          clang-format --version || true
-          which clang-format || true
-          echo "clang-format-${LLVM_VERSION} --version"
-          clang-format-${LLVM_VERSION} --version || true
-          which clang-format-${LLVM_VERSION} || true
+          # The Ubuntu base image provided by GitHub Actions has the wrong
+          # clang-format. We install the right one here.
           sudo rm /usr/bin/clang-format
-          #sudo ln -s /usr/bin/clang-format-${LLVM_VERSION} /usr/bin/clang-format
+          sudo ln -s /usr/bin/clang-format-${LLVM_VERSION} /usr/bin/clang-format
           git fetch --recurse-submodules=no origin ${{ github.base_ref }}
           DIFF_COMMIT_SHA=$(git rev-parse origin/${{ github.base_ref }})
 
