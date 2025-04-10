@@ -102,6 +102,8 @@ jobs:
           echo "clang-format-${LLVM_VERSION} --version"
           clang-format-${LLVM_VERSION} --version || true
           which clang-format-${LLVM_VERSION} || true
+          rm /usr/bin/clang-format
+          ln -s /usr/bin/clang-format-${LLVM_VERSION} /usr/bin/clang-format
           git fetch --recurse-submodules=no origin ${{ github.base_ref }}
           DIFF_COMMIT_SHA=$(git rev-parse origin/${{ github.base_ref }})
 
