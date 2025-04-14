@@ -28,7 +28,8 @@ The simplest way to install CUDA-QX is via pip. You can install individual compo
     not distributed with the Python wheel, for provided classical optimizers. If
     :code:`libgfortran` is not installed, you will need to install it via your
     distribution's package manager. On Debian based systems, you can install
-    this with :code:`apt-get install gfortran`.
+    this with :code:`apt-get install gfortran`. On MacOS, you can install it by
+    running :code:`brew install gcc`.
 
 Docker Container
 ^^^^^^^^^^^^^^^^
