@@ -47,6 +47,11 @@ CUDA-QX is available as a Docker container with all dependencies pre-installed:
 
     docker run --gpus all -it ghcr.io/nvidia/cudaqx
 
+.. note::
+
+    If your system does not have local GPUs (eg. a MacBook), omit the `--gpus all`
+    argument.
+
 The container includes:
     * CUDA-Q compiler and runtime
     * CUDA-QX libraries (QEC and Solvers)
