@@ -39,12 +39,12 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ github.token }}
+          password: ${{ secrets.PACKAGE_TOKEN }}
 
       # Do this early to help validate user inputs (if present)
       - name: Fetch assets
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.PACKAGE_TOKEN }}
         id: fetch-assets
         run: |
           mkdir wheels && cd wheels

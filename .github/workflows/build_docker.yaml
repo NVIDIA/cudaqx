@@ -17,7 +17,7 @@ on:
         required: false
       pub_tag:
         type: string
-        description: Docker tag to use for published image (e.g. ghcr.io/nvidia/cudaqx:latest-pub)
+        description: Docker tag to use for published image (e.g. ghcr.io/nvidia/cudaqx:latest-pub, defaults to private repo if blank)
         required: false
 
 jobs:
