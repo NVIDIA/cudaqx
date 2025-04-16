@@ -81,6 +81,6 @@ jobs:
           labels: |
             org.opencontainers.image.source=${{ github.repositoryUrl }}
             org.opencontainers.image.revision=${{ github.sha }}
-          tags: ${{ inputs.pub_tag || format('ghcr.io/nvidia/private/cuda-quantum:{}-cudaqx', env.tag) }}
+          tags: ${{ inputs.pub_tag || format('ghcr.io/nvidia/private/cuda-quantum:{0}-cudaqx', env.tag) }}
           platforms: linux/amd64,linux/arm64
           push: true
