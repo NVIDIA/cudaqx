@@ -43,6 +43,7 @@ jobs:
               - '.github/workflows/cudaq_bump.yml'
               - '.github/actions/get-cudaq-build/**'
               - '.github/workflows/scripts/build_cudaq.sh'
+              - '.github/workflows/scripts/cudaq.patch'
               - '.cudaq_version'
             build-docs:
               - '.github/workflows/docs.yaml'
