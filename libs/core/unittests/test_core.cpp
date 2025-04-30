@@ -275,7 +275,7 @@ TEST(CoreTester, checkTensorSimple) {
   {
     const cudaqx::tensor<int> t({1, 2, 1});
     EXPECT_NEAR(t.at({0, 0, 0}), 0.0, 1e-8);
-    EXPECT_THROW(t.at({0, 1}); , std::runtime_error);
+    EXPECT_THROW(t.at({0, 1}), std::runtime_error);
   }
 
   {
@@ -672,9 +672,8 @@ TEST(TensorTest, CopyData) {
 
 TEST(TensorTest, TakeData) {
   std::vector<std::size_t> shape = {2, 2};
-  auto data = new std::complex<double>[4] {
-    {1.0, 0.0}, {0.0, 1.0}, {0.0, -1.0}, { 1.0, 0.0 }
-  };
+  auto data = new std::complex<double>[4]{
+      {1.0, 0.0}, {0.0, 1.0}, {0.0, -1.0}, {1.0, 0.0}};
   cudaqx::tensor t(shape);
 
   t.take(data, shape);
@@ -777,7 +776,8 @@ TEST(HeterogeneousMapTest, Contains) {
 
   EXPECT_TRUE(map.contains("existing_key"));
   EXPECT_FALSE(map.contains("nonexistent_key"));
-  EXPECT_FALSE(map.contains(std::vector<std::string>{"nonexistent_key1", "nonexistent_key2"}));
+  EXPECT_FALSE(map.contains(
+      std::vector<std::string>{"nonexistent_key1", "nonexistent_key2"}));
 }
 
 TEST(HeterogeneousMapTest, Size) {
@@ -1171,4 +1171,3 @@ TEST(GraphTest, EdgeExists) {
   EXPECT_FALSE(g.edge_exists(1, 3));
   EXPECT_FALSE(g.edge_exists(3, 4));
 }
-
