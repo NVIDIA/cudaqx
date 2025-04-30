@@ -19,7 +19,7 @@ def test_generate_with_default_config():
     assert len(operators) == 2 + 1
 
     for op in operators:
-        assert op.get_qubit_count() <= 4
+        assert op.qubit_count <= 4
 
 
 def test_generate_with_custom_coefficients():
@@ -31,10 +31,10 @@ def test_generate_with_custom_coefficients():
     assert len(operators) == (2 + 1)
 
     for i, op in enumerate(operators):
-        assert op.get_qubit_count() <= 4
+        assert op.qubit_count <= 4
         expected_coeff = [0.5, 0.125]
         for term in op:
-            assert (abs(term.get_coefficient().real) in expected_coeff)
+            assert (abs(term.evaluate_coefficient().real) in expected_coeff)
 
 
 def test_generate_with_odd_electrons():
@@ -47,7 +47,7 @@ def test_generate_with_odd_electrons():
     assert len(operators) == 2 * 2 + 4
 
     for op in operators:
-        assert op.get_qubit_count() <= 6
+        assert op.qubit_count <= 6
 
 
 def test_generate_with_large_system():
@@ -59,7 +59,7 @@ def test_generate_with_large_system():
     assert len(operators) == 875
 
     for op in operators:
-        assert op.get_qubit_count() <= 20
+        assert op.qubit_count <= 20
 
 
 def test_uccsd_operator_pool_correctness():
@@ -70,7 +70,7 @@ def test_uccsd_operator_pool_correctness():
     for op in pool:
         for term in op:
             temp_data[data_counter].append(
-                (term.get_pauli_word(4), term.get_coefficient()))
+                (term.get_pauli_word(4), term.evaluate_coefficient()))
         data_counter += 1
 
     # Assert

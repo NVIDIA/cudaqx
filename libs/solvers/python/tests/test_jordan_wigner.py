@@ -15,14 +15,15 @@ import numpy as np
 
 def extract_words(hamiltonian: cudaq.SpinOperator):
     result = []
-    hamiltonian.for_each_term(lambda term: result.append(term.to_string(False)))
+    for term in hamiltonian:
+        result.append(term.get_pauli_word(hamiltonian.qubit_count))
     return result
 
 
 def extract_coefficients(hamiltonian: cudaq.SpinOperator):
     result = []
-    hamiltonian.for_each_term(
-        lambda term: result.append(term.get_coefficient()))
+    for term in hamiltonian:
+        result.append(term.evaluate_coefficient())
     return result
 
 
@@ -111,9 +112,9 @@ def jw_molecule_test(xyz):
     print(f'CUDA-QX energy:        {cudaqx_eig.real}')
     assert np.isclose(cudaqx_eig, of_energy.real, atol=1e-4)
 
-    num_terms = of_hamiltonian.get_term_count()
+    num_terms = of_hamiltonian.term_count
     print(f'Number of terms in CUDA-Q/OpenFermion: {num_terms}')
-    num_terms = molecule.hamiltonian.get_term_count()
+    num_terms = molecule.hamiltonian.term_count
     print(f'Number of terms in CUDA-QX           : {num_terms}')
 
 

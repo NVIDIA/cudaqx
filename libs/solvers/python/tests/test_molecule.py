@@ -23,7 +23,7 @@ def test_operators():
                                        0,
                                        verbose=True,
                                        casci=True)
-    print(molecule.hamiltonian.to_string())
+    print(molecule.hamiltonian)
     print(molecule.energies)
     assert np.isclose(-1.11, molecule.energies['hf_energy'], atol=1e-2)
     assert np.isclose(-1.13, molecule.energies['fci_energy'], atol=1e-2)
@@ -137,7 +137,7 @@ def test_jordan_wigner_as():
     op = solvers.jordan_wigner(molecule.hpq, molecule.hpqrs,
                                molecule.energies['core_energy'])
 
-    print(op.to_string())
+    print(op)
     assert molecule.hamiltonian == op
 
     hpq = np.array(molecule.hpq)

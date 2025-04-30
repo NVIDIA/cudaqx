@@ -1,5 +1,5 @@
 # ============================================================================ #
-# Copyright (c) 2024 NVIDIA Corporation & Affiliates.                          #
+# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -44,7 +44,7 @@ def test_code_stabilizers():
     assert isinstance(stabilizers, list)
     assert len(stabilizers) == 6
     assert all(isinstance(stab, cudaq.Operator) for stab in stabilizers)
-    stabStrings = [s.to_string(False) for s in stabilizers]
+    stabStrings = [term.get_pauli_word() for s in stabilizers for term in s]
     expected = [
         "ZZZZIII", "XXXXIII", "IXXIXXI", "IIXXIXX", "IZZIZZI", "IIZZIZZ"
     ]

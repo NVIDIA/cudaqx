@@ -22,7 +22,7 @@ def test_simple_qaoa():
          0.5 * spin.z(0) * spin.z(3) + 0.5 * spin.z(2) * spin.z(3)
     Href = spin.x(0) + spin.x(1) + spin.x(2) + spin.x(3)
 
-    n_qubits = Hp.get_qubit_count()
+    n_qubits = Hp.qubit_count
     n_layers = 2
     n_params = 2 * n_layers
     initial_parameters = np.random.uniform(-np.pi / 2, np.pi / 2, n_params)
@@ -98,7 +98,7 @@ def test_maxcut_single_edge():
     ham = solvers.get_maxcut_hamiltonian(G)
 
     # Should have two terms: 0.5*Z0Z1 and -0.5*I0I1
-    assert ham.get_term_count() == 2
+    assert ham.term_count == 2
     expected_ham = 0.5 * spin.z(0) * spin.z(1) - 0.5
     assert ham == expected_ham
 
@@ -112,7 +112,7 @@ def test_maxcut_triangle():
     print(ham)
 
     # Should have 4 terms
-    assert ham.get_term_count() == 4
+    assert ham.term_count == 4
 
     # Create expected Hamiltonian using the exact structure
     expected_ham = 0.5 * spin.z(0) * spin.z(2) + 0.5 * spin.z(0) * spin.z(
@@ -130,7 +130,7 @@ def test_maxcut_disconnected():
     ham = solvers.get_maxcut_hamiltonian(G)
 
     # Should have 3 terms
-    assert ham.get_term_count() == 3
+    assert ham.term_count == 3
 
     # Create expected Hamiltonian using the exact structure
     expected_ham = 0.5 * spin.z(0) * spin.z(1) + 0.5 * spin.z(2) * spin.z(
@@ -146,7 +146,7 @@ def test_clique_single_node():
 
     ham = solvers.get_clique_hamiltonian(G)
 
-    assert ham.get_term_count() == 2
+    assert ham.term_count == 2
     expected_ham = 0.75 * spin.z(0) - 0.75
     assert ham == expected_ham
 
@@ -161,7 +161,7 @@ def test_clique_complete_graph():
 
     ham = solvers.get_clique_hamiltonian(G, penalty=4.0)
 
-    assert ham.get_term_count() == 4
+    assert ham.term_count == 4
 
     expected_ham = spin.z(0) + 0.75 * spin.z(1) + 0.5 * spin.z(2) - 2.25
     assert ham == expected_ham
@@ -173,7 +173,7 @@ def test_clique_disconnected_nodes():
 
     ham = solvers.get_clique_hamiltonian(G, penalty=2.0)
 
-    assert ham.get_term_count() == 2
+    assert ham.term_count == 2
 
     expected_ham = 0.5 * spin.z(0) * spin.z(1) - 0.5
     assert ham == expected_ham
@@ -188,7 +188,7 @@ def test_clique_triangle_with_disconnected():
 
     ham = solvers.get_clique_hamiltonian(G, penalty=4.0)
 
-    assert ham.get_term_count() == 8
+    assert ham.term_count == 8
 
     # yapf: disable
     expected_ham  =        spin.z(2) * spin.z(3)  # IIZZ
@@ -213,7 +213,7 @@ def test_clique_different_penalties():
     # Note, they *would* have the same number of terms except terms with
     # 0-valued coefficients will get trimmed, so that makes the results
     # have a different number of terms.
-    assert ham1.get_term_count() != ham2.get_term_count()
+    assert ham1.term_count != ham2.term_count
     assert str(ham1) != str(ham2)
 
 
@@ -224,7 +224,7 @@ def test_clique_weighted_nodes():
 
     ham = solvers.get_clique_hamiltonian(G)
 
-    assert ham.get_term_count() == 3
+    assert ham.term_count == 3
 
     expected_ham = spin.z(0) + 1.5 * spin.z(1) - 2.5
     assert ham == expected_ham
