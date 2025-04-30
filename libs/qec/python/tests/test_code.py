@@ -223,6 +223,9 @@ def test_steane_code_capacity():
     assert np.array_equal(data, seeded_data)
     assert np.array_equal(syndromes, checked_syndromes)
 
+def test_het_map_from_kwargs_bool():
+    steane = qec.get_code("steane", bool_true=True, bool_false=False)
+    assert isinstance(steane, qec.Code)
 
 if __name__ == "__main__":
     pytest.main()

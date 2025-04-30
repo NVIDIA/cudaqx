@@ -271,10 +271,35 @@ TEST(CoreTester, checkTensorSimple) {
 
     EXPECT_ANY_THROW({ t.at({2, 2, 2}); });
   }
+
+  {
+    const cudaqx::tensor<int> t({1, 2, 1});
+    EXPECT_NEAR(t.at({0, 0, 0}), 0.0, 1e-8);
+    EXPECT_THROW(t.at({0, 1}); , std::runtime_error);
+  }
+
+  {
+    cudaqx::tensor<double> a({2, 3});
+    cudaqx::tensor<double> v({3});
+    EXPECT_EQ(a.rank(), 2);
+    EXPECT_EQ(v.rank(), 1);
+    testing::internal::CaptureStdout();
+    a.dump_bits();
+    std::string output = testing::internal::GetCapturedStdout();
+    EXPECT_EQ(output, "...\n...\n");
+
+    testing::internal::CaptureStdout();
+    v.dump_bits();
+    output = testing::internal::GetCapturedStdout();
+    EXPECT_EQ(output, "...\n");
+  }
 }
 
 TEST(TensorTest, checkBitStringConstruction) {
   std::vector<std::string> bitstrings;
+  cudaqx::tensor<uint8_t> t_empty(bitstrings);
+  EXPECT_EQ(t_empty.rank(), 0);
+
   bitstrings.push_back("000"); // Shot 0
   bitstrings.push_back("001"); // Shot 1
 
@@ -752,6 +777,7 @@ TEST(HeterogeneousMapTest, Contains) {
 
   EXPECT_TRUE(map.contains("existing_key"));
   EXPECT_FALSE(map.contains("nonexistent_key"));
+  EXPECT_FALSE(map.contains(std::vector<std::string>{"nonexistent_key1", "nonexistent_key2"}));
 }
 
 TEST(HeterogeneousMapTest, Size) {
@@ -869,11 +895,12 @@ TEST(GraphTester, GetNeighbors) {
   g.add_edge(1, 2, 0.5);
   g.add_edge(1, 3, 1.5);
   g.add_edge(2, 3, 2.0);
-  std::vector<int> tmp{2, 3}, tmp2{1, 2}, tmp3{1, 3};
+  std::vector<int> tmp{2, 3}, tmp2{1, 2}, tmp3{1, 3}, tmp4{};
 
   EXPECT_EQ(g.get_neighbors(1), tmp);
   EXPECT_EQ(g.get_neighbors(2), tmp3);
   EXPECT_EQ(g.get_neighbors(3), tmp2);
+  EXPECT_EQ(g.get_neighbors(4), tmp4);
 }
 
 TEST(GraphTester, GetWeightedNeighbors) {
@@ -885,10 +912,12 @@ TEST(GraphTester, GetWeightedNeighbors) {
   std::vector<std::pair<int, double>> expected1 = {{2, 0.5}, {3, 1.5}};
   std::vector<std::pair<int, double>> expected2 = {{1, 0.5}, {3, 2.0}};
   std::vector<std::pair<int, double>> expected3 = {{1, 1.5}, {2, 2.0}};
+  std::vector<std::pair<int, double>> expected4 = {};
 
   EXPECT_EQ(g.get_weighted_neighbors(1), expected1);
   EXPECT_EQ(g.get_weighted_neighbors(2), expected2);
   EXPECT_EQ(g.get_weighted_neighbors(3), expected3);
+  EXPECT_EQ(g.get_weighted_neighbors(4), expected4);
 }
 
 TEST(GraphTester, GetNodes) {
@@ -1133,3 +1162,13 @@ TEST(GraphTest, GetDisconnectedVertices) {
   auto disconnected2 = g2.get_disconnected_vertices();
   EXPECT_TRUE(disconnected2.empty());
 }
+
+TEST(GraphTest, EdgeExists) {
+  cudaqx::graph g;
+  g.add_edge(1, 2);
+  EXPECT_TRUE(g.edge_exists(1, 2));
+  EXPECT_TRUE(g.edge_exists(2, 1));
+  EXPECT_FALSE(g.edge_exists(1, 3));
+  EXPECT_FALSE(g.edge_exists(3, 4));
+}
+

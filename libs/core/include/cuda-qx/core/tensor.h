@@ -102,7 +102,7 @@ public:
   /// @param indices The indices of the element to access
   /// @return A const reference to the element at the specified indices
   const scalar_type &at(const std::vector<size_t> &indices) const {
-    return pimpl->at(indices);
+    return const_cast<const details::tensor_impl<Scalar>*>(pimpl.get())->at(indices);
   }
 
   /// @brief Copy data into the tensor
