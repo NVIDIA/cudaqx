@@ -68,8 +68,9 @@ def test_uccsd_operator_pool_correctness():
     temp_data = [[], [], []]
     data_counter = 0
     for op in pool:
-        op.for_each_term(lambda term: temp_data[data_counter].append(
-            (term.get_pauli_word(4), term.get_coefficient())))
+        for term in op:
+            temp_data[data_counter].append(
+                (term.get_pauli_word(4), term.get_coefficient()))
         data_counter += 1
 
     # Assert

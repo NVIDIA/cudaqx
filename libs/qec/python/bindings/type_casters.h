@@ -21,10 +21,21 @@ struct type_caster<cudaq::spin_op> {
   bool load(handle src, bool) {
     if (!src)
       return false;
-    auto data = src.attr("serialize")().cast<std::vector<double>>();
-    auto numQubits = src.attr("get_qubit_count")().cast<std::size_t>();
-    value = cudaq::spin_op(data);
-    return true;
+    auto className = src.attr("__class__").attr("__name__");
+    if (className.cast<std::string>() == "SpinOperator") {
+      auto data = src.attr("serialize")().cast<std::vector<double>>();
+      auto numQubits = src.attr("get_qubit_count")().cast<std::size_t>();
+      value = cudaq::spin_op(data);
+    } else if (className.cast<std::string>() == "SpinOperatorTerm") {
+      // Construct a SpinOperator from a SpinOperatorTerm
+      auto cudaq_module = py::module::import("cudaq");
+      auto spinop_cls = cudaq_module.attr("SpinOperator");
+      py::object spinop_src = spinop_cls(src);
+      auto data = spinop_src.attr("serialize")().cast<std::vector<double>>();
+      auto numQubits = spinop_src.attr("get_qubit_count")().cast<std::size_t>();
+      value = cudaq::spin_op(data);
+    }
+    return false;
   }
 
   static handle cast(cudaq::spin_op v, return_value_policy /*policy*/,
