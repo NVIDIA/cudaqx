@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2022 - 2024 NVIDIA Corporation & Affiliates.                  *
+ * Copyright (c) 2022 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -9,6 +9,7 @@
 #include "cudaq/qec/decoder.h"
 #include "cuda-qx/core/library_utils.h"
 #include "cudaq/qec/plugin_loader.h"
+#include "cudaq/qec/version.h"
 #include <cassert>
 #include <dlfcn.h>
 #include <filesystem>
@@ -52,6 +53,13 @@ decoder::decode_batch(const std::vector<std::vector<float_t>> &syndrome) {
   for (auto &s : syndrome)
     result.push_back(decode(s));
   return result;
+}
+
+std::string decoder::get_version() const {
+  std::stringstream ss;
+  ss << "CUDA-Q QEC Base Decoder Interface " << cudaq::qec::getVersion() << " ("
+     << cudaq::qec::getFullRepositoryVersion() << ")";
+  return ss.str();
 }
 
 std::future<decoder_result>

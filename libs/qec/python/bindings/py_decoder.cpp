@@ -167,7 +167,9 @@ void bindDecoder(py::module &mod) {
       .def("get_block_size", &decoder::get_block_size,
            "Get the size of the code block")
       .def("get_syndrome_size", &decoder::get_syndrome_size,
-           "Get the size of the syndrome");
+           "Get the size of the syndrome")
+      .def("get_version", &decoder::get_version,
+           "Get the version of the decoder");
 
   // Expose decorator function that handles inheritance
   qecmod.def("decoder", [&](const std::string &name) {

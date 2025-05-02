@@ -188,5 +188,10 @@ def test_pass_weights():
     # Test is that no error is thrown
 
 
+def test_version():
+    decoder = qec.get_decoder('example_byod', H)
+    assert "CUDA-Q QEC Base Decoder" in decoder.get_version()
+
+
 if __name__ == "__main__":
     pytest.main()

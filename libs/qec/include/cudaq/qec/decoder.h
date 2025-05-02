@@ -137,6 +137,12 @@ public:
   /// @brief Destructor
   virtual ~decoder() {}
 
+  /// @brief Get the version of the decoder. Subclasses that are not part of the
+  /// standard GitHub repo should override this to provide a more tailored
+  /// version string.
+  /// @return A string containing the version of the decoder
+  virtual std::string get_version() const;
+
 protected:
   /// @brief For a classical `[n,k]` code, this is `n`.
   std::size_t block_size = 0;
