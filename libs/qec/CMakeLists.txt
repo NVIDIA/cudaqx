@@ -130,7 +130,7 @@ if (DEFINED ENV{CUDAQX_QEC_VERSION})
   set(CUDAQX_QEC_VERSION "$ENV{CUDAQX_QEC_VERSION}")
   message(STATUS "CUDAQX_QEC_VERSION is set to ${CUDAQX_QEC_VERSION}")
 else()
-  # Otherwise, create a version based on the nearest tag in the git repo.
+  # Otherwise, create a 0.0.0 version string.
   set(CUDAQX_QEC_VERSION "0.0.0")
 endif()
 

@@ -161,7 +161,7 @@ if (DEFINED ENV{CUDAQX_SOLVERS_VERSION})
   set(CUDAQX_SOLVERS_VERSION "$ENV{CUDAQX_SOLVERS_VERSION}")
   message(STATUS "CUDAQX_SOLVERS_VERSION is set to ${CUDAQX_SOLVERS_VERSION}")
 else()
-  # Otherwise, create a version based on the nearest tag in the git repo.
+  # Otherwise, create a 0.0.0 version string.
   set(CUDAQX_SOLVERS_VERSION "0.0.0")
 endif()
 
