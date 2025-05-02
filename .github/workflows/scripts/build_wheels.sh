@@ -115,6 +115,8 @@ fi
 export CC=gcc
 export CXX=g++
 export SETUPTOOLS_SCM_PRETEND_VERSION=$wheels_version
+export CUDAQX_QEC_VERSION=$wheels_version
+export CUDAQX_SOLVERS_VERSION=$wheels_version
 
 # ==============================================================================
 # QEC library
