@@ -1,5 +1,5 @@
 # ============================================================================ #
-# Copyright (c) 2024 NVIDIA Corporation & Affiliates.                          #
+# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -18,6 +18,7 @@ add_library(${LIBRARY_NAME} SHARED
   experiments.cpp
   decoders/single_error_lut.cpp
   plugin_loader.cpp
+  version.cpp
 )
 
 add_subdirectory(decoders/plugins/example)

@@ -16,6 +16,7 @@
 #include "cudaq/solvers/adapt.h"
 #include "cudaq/solvers/qaoa.h"
 #include "cudaq/solvers/stateprep/uccsd.h"
+#include "cudaq/solvers/version.h"
 #include "cudaq/solvers/vqe.h"
 
 #include "cudaq/solvers/operators/graph/clique.h"
@@ -1141,6 +1142,11 @@ Notes:
       },
       "Generate Clique Hamiltonian from a NetworkX graph", py::arg("graph"),
       py::arg("penalty") = 4.0);
+
+  std::stringstream ss;
+  ss << "CUDA-Q Solvers " << cudaq::solvers::getVersion() << " ("
+     << cudaq::solvers::getFullRepositoryVersion() << ")";
+  solvers.attr("__version__") = ss.str();
 }
 
 } // namespace cudaq::solvers

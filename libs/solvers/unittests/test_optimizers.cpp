@@ -5,7 +5,9 @@
  * This source code and the accompanying materials are made available under    *
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
+
 #include "cudaq/solvers/optimizer.h"
+#include "cudaq/solvers/version.h"
 
 #include <cmath>
 #include <iostream>
@@ -82,4 +84,15 @@ TEST(OptimTester, checkLBFGS) {
       EXPECT_NEAR(1.0, params[1], 1e-3);
     }
   }
+}
+
+TEST(OptimTester, checkVersion) {
+  std::string version = cudaq::solvers::getVersion();
+  EXPECT_FALSE(version.empty());
+  EXPECT_TRUE(version.find("CUDAQX_SOLVERS_VERSION") == std::string::npos);
+
+  std::string fullVersion = cudaq::solvers::getFullRepositoryVersion();
+  EXPECT_TRUE(fullVersion.find("NVIDIA/cudaqx") != std::string::npos);
+  EXPECT_TRUE(fullVersion.find("CUDAQX_SOLVERS_COMMIT_SHA") ==
+              std::string::npos);
 }

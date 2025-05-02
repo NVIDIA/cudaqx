@@ -13,6 +13,7 @@
 
 #include "cudaq/qec/codes/surface_code.h"
 #include "cudaq/qec/experiments.h"
+#include "cudaq/qec/version.h"
 
 TEST(StabilizerTester, checkConstructFromSpinOps) {
   {
@@ -770,4 +771,15 @@ TEST(QECCodeTester, checkStabilizerGrid) {
     EXPECT_EQ(144, grid.x_stabilizers.size());
     EXPECT_EQ(144, grid.z_stabilizers.size());
   }
+}
+
+TEST(QECCodeTester, checkVersion) {
+  std::string version = cudaq::qec::getVersion();
+  EXPECT_FALSE(version.empty());
+  EXPECT_TRUE(version.find("CUDAQX_QEC_VERSION") == std::string::npos);
+
+  std::string fullVersion = cudaq::qec::getFullRepositoryVersion();
+  EXPECT_TRUE(fullVersion.find("NVIDIA/cudaqx") != std::string::npos);
+  EXPECT_TRUE(fullVersion.find("CUDAQX_SOLVERS_COMMIT_SHA") ==
+              std::string::npos);
 }

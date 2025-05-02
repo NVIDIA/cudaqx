@@ -1,5 +1,5 @@
 # ============================================================================ #
-# Copyright (c) 2024 NVIDIA Corporation & Affiliates.                          #
+# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -9,6 +9,7 @@
 from .patch import patch
 from ._pycudaqx_qec_the_suffix_matters_cudaq_qec import *
 
+__version__ = qecrt.__version__
 code = qecrt.code
 Code = qecrt.Code
 decoder = qecrt.decoder

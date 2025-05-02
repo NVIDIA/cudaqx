@@ -12,10 +12,11 @@
 #include <pybind11/stl.h>
 
 #include "common/Logger.h"
-#include "cudaq/python/PythonCppInterop.h"
-#include "cudaq/utils/registry.h"
 
+#include "cudaq/python/PythonCppInterop.h"
 #include "cudaq/qec/experiments.h"
+#include "cudaq/qec/version.h"
+#include "cudaq/utils/registry.h"
 
 #include "cuda-qx/core/kwargs_utils.h"
 #include "type_casters.h"
@@ -453,5 +454,10 @@ void bindCode(py::module &mod) {
       },
       "Sample syndrome measurements with code capacity noise.", py::arg("H"),
       py::arg("numShots"), py::arg("errorProb"), py::arg("seed") = py::none());
+
+  std::stringstream ss;
+  ss << "CUDA-Q QEC " << cudaq::qec::getVersion() << " ("
+     << cudaq::qec::getFullRepositoryVersion() << ")";
+  qecmod.attr("__version__") = ss.str();
 }
 } // namespace cudaq::qec

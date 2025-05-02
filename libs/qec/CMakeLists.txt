@@ -122,6 +122,26 @@ if (SKBUILD)
   set(CMAKE_INSTALL_LIBDIR cudaq_qec/lib)
 endif()
 
+# Version
+# ==============================================================================
+if (DEFINED ENV{CUDAQX_QEC_VERSION})
+  # The version was defined by the user (likely a bot performing the build), so
+  # use the value provided as is.
+  set(CUDAQX_QEC_VERSION "$ENV{CUDAQX_QEC_VERSION}")
+  message(STATUS "CUDAQX_QEC_VERSION is set to ${CUDAQX_QEC_VERSION}")
+else()
+  # Otherwise, create a version based on the nearest tag in the git repo.
+  set(CUDAQX_QEC_VERSION "0.0.0")
+endif()
+
+# Retrieve the commit SHA for full revision description
+execute_process(COMMAND git rev-parse --verify HEAD
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    OUTPUT_VARIABLE CUDAQX_QEC_COMMIT_SHA OUTPUT_STRIP_TRAILING_WHITESPACE)
+
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/lib/version.cpp.in"
+               "${CMAKE_CURRENT_BINARY_DIR}/lib/version.cpp" @ONLY)
+
 # Directory setup
 # ==============================================================================
 

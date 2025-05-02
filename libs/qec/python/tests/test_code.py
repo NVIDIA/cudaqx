@@ -229,5 +229,9 @@ def test_het_map_from_kwargs_bool():
     assert isinstance(steane, qec.Code)
 
 
+def test_version():
+    assert "CUDA-Q QEC" in qec.__version__
+
+
 if __name__ == "__main__":
     pytest.main()

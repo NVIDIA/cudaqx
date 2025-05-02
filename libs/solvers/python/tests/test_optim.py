@@ -1,5 +1,5 @@
 # ============================================================================ #
-# Copyright (c) 2024 NVIDIA Corporation & Affiliates.                          #
+# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -32,3 +32,7 @@ def test_cobyla():
     assert np.isclose(0.0, opt, atol=1e-6)
     assert np.isclose(1.0, params[0], atol=1e-6)
     assert np.isclose(1.0, params[1], atol=1e-6)
+
+
+def test_version():
+    assert "CUDA-Q Solvers" in solvers.__version__

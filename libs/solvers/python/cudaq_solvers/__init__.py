@@ -1,5 +1,5 @@
 # ============================================================================ #
-# Copyright (c) 2024 NVIDIA Corporation & Affiliates.                          #
+# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -7,3 +7,4 @@
 # ============================================================================ #
 
 from ._pycudaqx_solvers_the_suffix_matters_cudaq_solvers import *
+from ._pycudaqx_solvers_the_suffix_matters_cudaq_solvers import __version__
