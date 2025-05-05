@@ -1,5 +1,5 @@
 # ============================================================================ #
-# Copyright (c) 2024 NVIDIA Corporation & Affiliates.                          #
+# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -13,11 +13,12 @@ add_compile_options(-Wno-attributes)
 # FIXME?: This must be a shared library. Trying to build a static one will fail.
 add_library(${LIBRARY_NAME} SHARED
   code.cpp
-  stabilizer_utils.cpp 
   decoder.cpp
   experiments.cpp
-  decoders/single_error_lut.cpp
+  pcm_utils.cpp
   plugin_loader.cpp
+  stabilizer_utils.cpp 
+  decoders/single_error_lut.cpp
 )
 
 add_subdirectory(decoders/plugins/example)
