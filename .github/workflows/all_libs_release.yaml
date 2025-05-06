@@ -34,8 +34,8 @@ jobs:
           echo "CUDAQX_QEC_VERSION=${{ inputs.release-number }}" >> $GITHUB_ENV
           echo "CUDAQX_SOLVERS_VERSION=${{ inputs.release-number }}" >> $GITHUB_ENV
           # And output to the GitHub Actions summary.
-          echo "Setting CUDAQX_QEC_VERSION=$CUDAQX_QEC_VERSION" >> $GITHUB_STEP_SUMMARY
-          echo "Setting CUDAQX_SOLVERS_VERSION=$CUDAQX_SOLVERS_VERSION" >> $GITHUB_STEP_SUMMARY
+          echo "Setting CUDAQX_QEC_VERSION=${{ inputs.release-number }}" >> $GITHUB_STEP_SUMMARY
+          echo "Setting CUDAQX_SOLVERS_VERSION=${{ inputs.release-number }}" >> $GITHUB_STEP_SUMMARY
           
       # ========================================================================
       # Build
@@ -58,8 +58,8 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: installed_files-${{ matrix.platform }}.zip
-          path: ${{ steps.build.outputs.build-dir }}/installed_files.zip
+          name: installed_files-${{ matrix.platform }}
+          path: ${{ steps.build.outputs.build-dir }}/installed_files-${{ matrix.platform }}.zip
 
       # ========================================================================
       # Run tests
@@ -83,5 +83,7 @@ jobs:
       # ========================================================================
  
       - name: Run example tests
-        run: bash scripts/ci/test_examples.sh all 
+        run: |
+          ln -s /usr/local/cudaq /cudaq-install
+          bash scripts/ci/test_examples.sh all 
 
