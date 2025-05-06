@@ -7,6 +7,14 @@ on:
         description: 'Release Number (e.g. 0.3.0)'
         required: true
         default: '0.0.0'
+      assets_repo:
+        type: string
+        description: Retrieve assets from a draft release from this repo (e.g. NVIDIA/cudaqx)
+        required: false
+      assets_tag:
+        type: string
+        description: Retrieve assets from a draft release with this tag (e.g. installed_files-1)
+        required: false
 
 jobs:
   pr-build:
@@ -39,6 +47,23 @@ jobs:
           # And output to the GitHub Actions summary.
           echo "Setting CUDAQX_QEC_VERSION=${{ inputs.release-number }}" >> $GITHUB_STEP_SUMMARY
           echo "Setting CUDAQX_SOLVERS_VERSION=${{ inputs.release-number }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Fetch assets and set QEC_EXTERNAL_DECODERS
+        env:
+          GH_TOKEN: ${{ github.token }}
+        id: fetch-assets
+        run: |
+          if [[ -n "${{ inputs.assets_repo }}" ]] && [[ -n "${{ inputs.assets_tag }}" ]]; then
+            bash .github/workflows/scripts/install_git_cli.sh
+            # Fetch the assets into this directory
+            gh release download -R ${{ inputs.assets_repo }} ${{ inputs.assets_tag }}
+            # Show what was downloaded
+            ls
+            # Extract the decoder that needs to be embedded in the release
+            mkdir -p tmp
+            unzip -d tmp installed_files-${{ matrix.platform }}.zip
+            export QEC_EXTERNAL_DECODERS=$(pwd)/tmp/lib/decoder-plugins/libcudaq-qec-nv-qldpc-decoder.so
+          fi
           
       # ========================================================================
       # Build
