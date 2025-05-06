@@ -12,7 +12,7 @@ on:
 jobs:
   pr-build:
     name: Build and test
-    if: startsWith(github.ref, 'refs/heads/pull-request/')
+    if: startsWith(github.ref, 'refs/heads/pull-request/') || startsWith(github.ref, 'refs/heads/releases/') || startsWith(github.ref, 'refs/heads/workflows')
     strategy:
       fail-fast: false
       matrix:
