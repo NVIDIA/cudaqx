@@ -1,7 +1,6 @@
 name: All libs (Release)
 
 on:
-  push:
   workflow_dispatch:
     inputs:
       release-number:
