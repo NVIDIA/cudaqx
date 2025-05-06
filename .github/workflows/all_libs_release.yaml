@@ -17,7 +17,7 @@ jobs:
       matrix:
         platform: ['amd64', 'arm64']
     runs-on: ${{ startsWith(github.repository, 'NVIDIA/cudaqx') && format('linux-{0}-cpu8', matrix.platform) || 'ubuntu-latest' }}
-    container: format('ghcr.io/nvidia/cudaqx-dev:{0}-{1}', inputs.release-number, matrix.platform)
+    container: ${{ format('ghcr.io/nvidia/cudaqx-dev:{0}-{1}', inputs.release-number, matrix.platform) }}
     permissions:
       actions: write
       contents: read
