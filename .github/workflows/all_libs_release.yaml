@@ -1,0 +1,91 @@
+name: All libs (Release)
+
+on:
+  workflow_dispatch:
+    inputs:
+      release-number:
+        description: 'Release Number (e.g. 0.3.0)'
+        required: true
+        default: '0.0.0'
+
+jobs:
+  pr-build:
+    name: Build and test
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ['amd64', 'arm64']
+    runs-on: ${{ startsWith(github.repository, 'NVIDIA/cudaqx') && format('linux-{0}-cpu8', matrix.platform) || 'ubuntu-latest' }}
+    container: format('ghcr.io/nvidia/cudaqx-dev:{0}-{1}', inputs.release-number, matrix.platform)
+    permissions:
+      actions: write
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: releases/v${{ inputs.release-number }}
+          set-safe-directory: true
+
+      - name: Set release number
+        id: set-release-number
+        run: |
+          echo "CUDAQX_QEC_VERSION=${{ inputs.release-number }}" >> $GITHUB_ENV
+          echo "CUDAQX_SOLVERS_VERSION=${{ inputs.release-number }}" >> $GITHUB_ENV
+          # And output to the GitHub Actions summary.
+          echo "Setting CUDAQX_QEC_VERSION=$CUDAQX_QEC_VERSION" >> $GITHUB_STEP_SUMMARY
+          echo "Setting CUDAQX_SOLVERS_VERSION=$CUDAQX_SOLVERS_VERSION" >> $GITHUB_STEP_SUMMARY
+          
+      # ========================================================================
+      # Build
+      # ========================================================================
+
+      - name: Install build requirements
+        run: |
+          apt install -y --no-install-recommends gfortran libblas-dev libcusolver-dev-12-0
+
+      - name: Build
+        id: build
+        uses: ./.github/actions/build-lib
+        with:
+          lib: "all"
+          platform: ${{ matrix.platform }}
+      
+      - name: Save build artifacts
+        run: |
+          apt update && apt install -y --no-install-recommends zip
+          cmake --build ${{ steps.build.outputs.build-dir }} --target zip_installed_files
+          cd ${{ steps.build.outputs.build-dir }}
+          mv installed_files.zip installed_files-${{ matrix.platform }}.zip
+      
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: installed_files-${{ matrix.platform }}.zip
+          path: ${{ steps.build.outputs.build-dir }}/installed_files.zip
+
+      # ========================================================================
+      # Run tests
+      # ========================================================================
+      #
+      - name: Run tests
+        run: cmake --build ${{ steps.build.outputs.build-dir }} --target run_tests
+
+      # ========================================================================
+      # Run python tests
+      # ========================================================================
+ 
+      - name: Install python requirements
+        run: pip install numpy pytest cupy-cuda12x cuquantum-python-cu12
+
+      - name: Run Python tests
+        run: cmake --build ${{ steps.build.outputs.build-dir }} --target run_python_tests
+
+      # ========================================================================
+      # Run example tests
+      # ========================================================================
+ 
+      - name: Run example tests
+        run: bash scripts/ci/test_examples.sh all 
+
