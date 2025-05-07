@@ -58,6 +58,7 @@ jobs:
             ls
             # Extract the decoder that needs to be embedded in the release
             mkdir -p tmp
+            apt update && apt install -y --no-install-recommends unzip
             unzip -d tmp installed_files-${{ matrix.platform }}.zip
             export QEC_EXTERNAL_DECODERS=$(pwd)/tmp/lib/decoder-plugins/libcudaq-qec-nv-qldpc-decoder.so
           fi
