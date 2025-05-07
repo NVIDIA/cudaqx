@@ -11,6 +11,14 @@ on:
         type: string
         description: Retrieve wheels from this GitHub Actions run (e.g. 14368511401)
         required: false
+      cudaq_repo:
+        type: string
+        description: Retrieve CUDA-Q from this repo (e.g. NVIDIA/cudaq)
+        required: false
+      cudaq_assets_tag:
+        type: string
+        description: Retrieve CUDA-Q assets from this release (e.g. 0.11.0)
+        required: false
 
 jobs:
   build-img:
@@ -54,14 +62,17 @@ jobs:
           # gh release download -R NVIDIA/cudaq-private cuquantum-25.03 -p '*cu12*.whl'
           # Fetch the CUDA-Q wheels
           # gh release download -R NVIDIA/cudaq-private staging-0.10.0 -p '*cu12*.whl'
-          gh release download -R NVIDIA/cudaq 0.11.0 -p 'wheelhouse-*.zip'
-          unzip wheelhouse-*.zip
-          mv wheelhouse-*/*.whl .
+          if [[ -n "${{ inputs.cudaq_assets_tag }}" ]]; then
+            gh release download -R ${{ inputs.cudaq_repo }} ${{ inputs.cudaq_assets_tag }} -p 'wheelhouse-*.zip'
+            unzip wheelhouse-*.zip
+            mv wheelhouse-*/*.whl .
+          fi
 
           # Fetch the CUDA-QX wheels
           gh run download -R ${{ inputs.wheels_repo }} ${{ inputs.wheels_run_id }} -p 'wheels-py*'
           mv */*.whl .
           ls
+        shell: bash
 
       - name: Build and push image
         id: docker_build
