@@ -15,6 +15,10 @@ on:
         type: string
         description: Retrieve assets from a draft release with this tag (e.g. docker-files-89)
         required: false
+      artifacts_from_run:
+        type: string
+        description: As opposed to downloading assets from a release (`asset_tag`), download them from a run of the "All Libs (Release)" workflow.
+        required: false
       pub_tag:
         type: string
         description: Docker tag to use for published image (e.g. ghcr.io/nvidia/cudaqx:latest-pub, defaults to private repo if blank)
@@ -59,6 +63,12 @@ jobs:
           if [[ -n "${{ inputs.assets_repo }}" ]] && [[ -n "${{ inputs.assets_tag }}" ]]; then
             # Fetch the assets into this directory
             gh release download -R ${{ inputs.assets_repo }} ${{ inputs.assets_tag }}
+            ls
+          fi
+          if [[ -n "${{ inputs.artifacts_from_run }}" ]]; then
+            # Download the artifacts from the run
+            gh run download -R ${{ inputs.assets_repo }} ${{ inputs.artifacts_from_run }}
+            mv installed_files-*/installed_files-*.zip .
             ls
           fi
 
