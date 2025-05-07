@@ -60,7 +60,7 @@ jobs:
             mkdir -p tmp
             apt update && apt install -y --no-install-recommends unzip
             unzip -d tmp installed_files-${{ matrix.platform }}.zip
-            export QEC_EXTERNAL_DECODERS=$(pwd)/tmp/lib/decoder-plugins/libcudaq-qec-nv-qldpc-decoder.so
+            echo "QEC_EXTERNAL_DECODERS=$(pwd)/tmp/lib/decoder-plugins/libcudaq-qec-nv-qldpc-decoder.so" >> $GITHUB_ENV
           fi
         shell: bash
           
