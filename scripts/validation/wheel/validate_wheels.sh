@@ -62,7 +62,7 @@ test_examples() {
 
         # Needed for tests:
         pip install pytest
-        pip install openfermion==1.6.1 openfermionpyscf
+        pip install openfermion openfermionpyscf
 
         # Dump a version string to the logs
         python3 -c 'import cudaq; print(cudaq.__version__)'

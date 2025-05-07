@@ -17,7 +17,7 @@ on:
         required: false
       pub_tag:
         type: string
-        description: Docker tag to use for published image (e.g. ghcr.io/nvidia/cudaqx:latest-pub)
+        description: Docker tag to use for published image (e.g. ghcr.io/nvidia/cudaqx:latest-pub, defaults to private repo if blank)
         required: false
 
 jobs:
@@ -81,6 +81,6 @@ jobs:
           labels: |
             org.opencontainers.image.source=${{ github.repositoryUrl }}
             org.opencontainers.image.revision=${{ github.sha }}
-          tags: ${{ inputs.pub_tag || format('ghcr.io/nvidia/private/cuda-quantum:{}-cudaqx', env.tag) }}
+          tags: ${{ inputs.pub_tag || format('ghcr.io/nvidia/private/cuda-quantum:{0}-cudaqx', env.tag) }}
           platforms: linux/amd64,linux/arm64
           push: true
