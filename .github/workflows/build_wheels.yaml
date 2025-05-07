@@ -108,6 +108,9 @@ jobs:
             unzip -d tmp cudaq_qec-*-cp${PYVER}-cp${PYVER}-manylinux*${SUFFIX}*.whl
             export QEC_EXTERNAL_DECODERS=$(pwd)/tmp/cudaq_qec/lib/decoder-plugins/libcudaq-qec-nv-qldpc-decoder.so
           fi
+          # This is needed to allow the "git rev-parse" commands in the build
+          # scripts to work.
+          git config --global --add safe.directory $GITHUB_WORKSPACE
           .github/workflows/scripts/build_wheels.sh \
               --cudaq-prefix /usr/local/cudaq \
               --build-type ${{ inputs.build_type }} \
