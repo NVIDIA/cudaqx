@@ -105,7 +105,14 @@ jobs:
         run: pip install numpy pytest cupy-cuda12x cuquantum-python-cu12
 
       - name: Run Python tests
-        run: cmake --build ${{ steps.build.outputs.build-dir }} --target run_python_tests
+        run: |
+          if [[ -n "${{ env.QEC_EXTERNAL_DECODERS }}" ]]; then
+            # Verify that external decoder is available if applicable
+            export PYTHONPATH="/cudaq-install:$HOME/.cudaqx"
+            python3 -c "import cudaq_qec as qec; print(qec.__version__); d = qec.get_decoder('nv-qldpc-decoder', qec.get_code('steane').get_parity()); print(d.get_version())"
+          fi
+          cmake --build ${{ steps.build.outputs.build-dir }} --target run_python_tests
+        shell: bash
 
       # ========================================================================
       # Run example tests
