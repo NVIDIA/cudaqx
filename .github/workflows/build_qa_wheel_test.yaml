@@ -13,7 +13,7 @@ on:
         required: false
       cudaq_repo:
         type: string
-        description: Retrieve CUDA-Q from this repo (e.g. NVIDIA/cudaq)
+        description: Retrieve CUDA-Q from this repo (e.g. NVIDIA/cuda-quantum)
         required: false
       cudaq_assets_tag:
         type: string
