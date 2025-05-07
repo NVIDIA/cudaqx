@@ -6,11 +6,11 @@ on:
       wheels_repo:
         type: string
         description: Retrieve assets from a draft release from this repo (e.g. NVIDIA/cudaqx)
-        required: false
+        required: true
       wheels_run_id:
         type: string
         description: Retrieve wheels from this GitHub Actions run (e.g. 14368511401)
-        required: false
+        required: true
       cudaq_repo:
         type: string
         description: Retrieve CUDA-Q from this repo (e.g. NVIDIA/cuda-quantum)
@@ -64,7 +64,7 @@ jobs:
           # gh release download -R NVIDIA/cudaq-private staging-0.10.0 -p '*cu12*.whl'
           if [[ -n "${{ inputs.cudaq_assets_tag }}" ]]; then
             gh release download -R ${{ inputs.cudaq_repo }} ${{ inputs.cudaq_assets_tag }} -p 'wheelhouse-*.zip'
-            unzip wheelhouse-*.zip
+            for f in wheelhouse-*.zip; do unzip $f; done
             mv wheelhouse-*/*.whl .
           fi
 
