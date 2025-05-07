@@ -45,6 +45,10 @@ jobs:
           echo "Setting CUDAQX_QEC_VERSION=${{ inputs.release-number }}" >> $GITHUB_STEP_SUMMARY
           echo "Setting CUDAQX_SOLVERS_VERSION=${{ inputs.release-number }}" >> $GITHUB_STEP_SUMMARY
 
+      - name: Install dependencies
+        run: |
+          apt update && apt install -y --no-install-recommends zip unzip patchelf
+
       - name: Fetch assets and set QEC_EXTERNAL_DECODERS
         env:
           GH_TOKEN: ${{ github.token }}
@@ -58,7 +62,6 @@ jobs:
             ls
             # Extract the decoder that needs to be embedded in the release
             mkdir -p tmp
-            apt update && apt install -y --no-install-recommends unzip patchelf
             unzip -d tmp installed_files-${{ matrix.platform }}.zip
             echo "QEC_EXTERNAL_DECODERS=$(pwd)/tmp/lib/decoder-plugins/libcudaq-qec-nv-qldpc-decoder.so" >> $GITHUB_ENV
           fi
@@ -77,7 +80,6 @@ jobs:
       
       - name: Save build artifacts
         run: |
-          apt update && apt install -y --no-install-recommends zip
           cmake --build ${{ steps.build.outputs.build-dir }} --target zip_installed_files
           cd ${{ steps.build.outputs.build-dir }}
           mv installed_files.zip installed_files-${{ matrix.platform }}.zip
