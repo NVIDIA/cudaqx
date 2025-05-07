@@ -51,9 +51,13 @@ jobs:
           # TODO - make this more generic by accepting repos as inputs. However,
           # note that this process changes from release to release.
           # Fetch the cuQuantum assets
-          gh release download -R NVIDIA/cudaq-private cuquantum-25.03 -p '*cu12*.whl'
+          # gh release download -R NVIDIA/cudaq-private cuquantum-25.03 -p '*cu12*.whl'
           # Fetch the CUDA-Q wheels
-          gh release download -R NVIDIA/cudaq-private staging-0.10.0 -p '*cu12*.whl'
+          # gh release download -R NVIDIA/cudaq-private staging-0.10.0 -p '*cu12*.whl'
+          gh release download -R NVIDIA/cudaq 0.11.0 -p 'wheelhouse-*.zip'
+          unzip wheelhouse-*.zip
+          mv wheelhouse-*/*.whl .
+
           # Fetch the CUDA-QX wheels
           gh run download -R ${{ inputs.wheels_repo }} ${{ inputs.wheels_run_id }} -p 'wheels-py*'
           mv */*.whl .
