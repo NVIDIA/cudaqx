@@ -50,7 +50,7 @@ USER cudaq
 RUN python3 -m pip install --user fastapi uvicorn pyscf networkx
 
 # Needed for testing
-RUN python3 -m pip install --user openfermion==1.6.1 openfermionpyscf
+RUN python3 -m pip install --user openfermion openfermionpyscf
 
 WORKDIR /home/cudaq
 ENTRYPOINT ["bash", "-l"]
