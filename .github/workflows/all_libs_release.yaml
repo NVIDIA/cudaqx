@@ -25,10 +25,7 @@ jobs:
         platform: ['amd64', 'arm64']
     runs-on: ${{ startsWith(github.repository, 'NVIDIA/cudaqx') && format('linux-{0}-cpu8', matrix.platform) || 'ubuntu-latest' }}
     container: ${{ format('ghcr.io/nvidia/cudaqx-dev:{0}-{1}', inputs.release-number, matrix.platform) }}
-    permissions:
-      actions: write
-      contents: read
-      pull-requests: read
+    permissions: write-all
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
