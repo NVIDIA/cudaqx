@@ -143,6 +143,10 @@ jobs:
         with:
           set-safe-directory: true
 
+      # Required in order for the build scripts to be able to get the SHA
+      - name: Set git safe directory
+        run: git config --global --add safe.directory $GITHUB_WORKSPACE
+
       - name: Get required CUDAQ version
         id: get-cudaq-version
         uses: ./.github/actions/get-cudaq-version
