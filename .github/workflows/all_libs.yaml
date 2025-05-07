@@ -2,17 +2,11 @@ name: All libs
 
 on:
   workflow_call:
-  workflow_dispatch:
-    inputs:
-      release-number:
-        description: 'Release Number (e.g. 0.3.0)'
-        required: false
-        default: ''
 
 jobs:
   pr-build:
     name: Build and test
-    if: startsWith(github.ref, 'refs/heads/pull-request/') || startsWith(github.ref, 'refs/heads/releases/') || startsWith(github.ref, 'refs/heads/workflows')
+    if: startsWith(github.ref, 'refs/heads/pull-request/')
     strategy:
       fail-fast: false
       matrix:
@@ -39,26 +33,6 @@ jobs:
         id: export-pr-info
         run: |
           echo "pr_number=${{ fromJSON(steps.get-pr-info.outputs.pr-info).number }}" >> $GITHUB_OUTPUT
-      
-      - name: Set release number
-        id: set-release-number
-        run: |
-          # If the user provided a release number, use that. Else if we are
-          # running this from a release branch like releases/v0.3.0, set the
-          # release number from that (e.g. 0.3.0 without the 'v' prefix).
-          if [ -n "${{ inputs.release-number }}" ]; then
-            echo "CUDAQX_QEC_VERSION=${{ inputs.release-number }}" >> $GITHUB_ENV
-            echo "CUDAQX_SOLVERS_VERSION=${{ inputs.release-number }}" >> $GITHUB_ENV
-            # And output to the GitHub Actions summary.
-            echo "Setting CUDAQX_QEC_VERSION=$CUDAQX_QEC_VERSION" >> $GITHUB_STEP_SUMMARY
-            echo "Setting CUDAQX_SOLVERS_VERSION=$CUDAQX_SOLVERS_VERSION" >> $GITHUB_STEP_SUMMARY
-          elif [[ "${{ github.ref_name }}" =~ releases\/v([0-9]+\.[0-9]+\.[0-9]+) ]]; then
-            VERSION="${BASH_REMATCH[1]}"
-            echo "CUDAQX_QEC_VERSION=$VERSION" >> $GITHUB_ENV
-            echo "CUDAQX_SOLVERS_VERSION=$VERSION" >> $GITHUB_ENV
-            # And output to the GitHub Actions summary.
-            echo "Setting CUDAQX_QEC_VERSION=$CUDAQX_QEC_VERSION" >> $GITHUB_STEP_SUMMARY
-            echo "Setting CUDAQX_SOLVERS_VERSION=$CUDAQX_SOLVERS_VERSION" >> $GITHUB_STEP_SUMMARY
 
       # ========================================================================
       # CUDA Quantum build
@@ -93,21 +67,6 @@ jobs:
           pr-number: ${{ steps.export-pr-info.outputs.pr_number }}
           save-ccache: true
           platform: ${{ matrix.platform }}
-      
-      - name: Save build artifacts
-        if: steps.set-release-number.outputs.CUDAQX_QEC_VERSION
-        run: |
-          apt update && apt install -y --no-install-recommends zip
-          cmake --build ${{ steps.build.outputs.build-dir }} --target zip_installed_files
-          cd ${{ steps.build.outputs.build-dir }}
-          mv installed_files.zip installed_files-${{ matrix.platform }}.zip
-      
-      - name: Upload build artifacts
-        if: steps.set-release-number.outputs.CUDAQX_QEC_VERSION
-        uses: actions/upload-artifact@v4
-        with:
-          name: installed_files-${{ matrix.platform }}.zip
-          path: ${{ steps.build.outputs.build-dir }}/installed_files.zip
 
       # ========================================================================
       # Run tests
