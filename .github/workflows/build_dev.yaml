@@ -65,9 +65,16 @@ jobs:
     - name: Build and push
       if: ${{ inputs.force_rebuild || steps.check-image.outputs.IMAGE_EXISTS == 'false' }}
       run: |
+        other_tag="latest"
+        is_versioned=${{ startsWith(github.ref_name, 'releases/') }}
+        if ${is_versioned}; then
+          ver=`echo ${{ github.ref_name }} | egrep -o "([0-9]{1,}\.)+[0-9]{1,}"`
+          echo "Versioned release: $ver"
+          other_tag=$ver
+        fi
         TAGS="-t ghcr.io/nvidia/cudaqx-dev:${{ steps.get-cudaq-version-short.outputs.commit_date }}-${{ steps.get-cudaq-version-short.outputs.shortref }}-${{ matrix.platform }}"
         TAGS+=" -t ghcr.io/nvidia/cudaqx-dev:${{ steps.get-cudaq-version-short.outputs.shortref }}-${{ matrix.platform }}"
-        TAGS+=" -t ghcr.io/nvidia/cudaqx-dev:latest-${{ matrix.platform }}"
+        TAGS+=" -t ghcr.io/nvidia/cudaqx-dev:${other_tag}-${{ matrix.platform }}"
         docker build $TAGS -f docker/build_env/cudaqx.dev.Dockerfile .
         docker push -a ghcr.io/nvidia/cudaqx-dev
       shell: bash --noprofile --norc -euo pipefail {0}
@@ -151,7 +158,16 @@ jobs:
         # Perform build
         TAGS="-t ghcr.io/nvidia/cudaqx-dev:${{ steps.get-cudaq-version-short.outputs.commit_date }}-${{ steps.get-cudaq-version-short.outputs.shortref }}-py${{ matrix.python }}-${{ matrix.platform }}"
         TAGS+=" -t ghcr.io/nvidia/cudaqx-dev:${{ steps.get-cudaq-version-short.outputs.shortref }}-py${{ matrix.python }}-${{ matrix.platform }}"
-        TAGS+=" -t ghcr.io/nvidia/cudaqx-dev:latest-py${{ matrix.python }}-${{ matrix.platform }}"
+
+        other_tag="latest"
+        is_versioned=${{ startsWith(github.ref_name, 'releases/') }}
+        if ${is_versioned}; then
+          ver=`echo ${{ github.ref_name }} | egrep -o "([0-9]{1,}\.)+[0-9]{1,}"`
+          echo "Versioned release: $ver"
+          other_tag=$ver
+        fi
+
+        TAGS+=" -t ghcr.io/nvidia/cudaqx-dev:${other_tag}-py${{ matrix.python }}-${{ matrix.platform }}"
         BUILDARGS="--build-arg base_image=ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ matrix.platform }}-cu12.0-gcc11-main"
         BUILDARGS+=" --build-arg python_version=${{ matrix.python }}"
         # For some reason, this fails on amd64 unless DOCKER_BUILDKIT=0 is set.
