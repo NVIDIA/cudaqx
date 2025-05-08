@@ -85,7 +85,8 @@ jobs:
         with:
           lib: "all"
           platform: ${{ matrix.runner.arch }}
-      
+          install-prefix: /usr/local/cudaq
+
       - name: Save build artifacts
         run: |
           cmake --build ${{ steps.build.outputs.build-dir }} --target zip_installed_files
