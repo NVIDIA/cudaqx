@@ -9,7 +9,7 @@ cmake -S libs/qec -B "$1" \
   -DCUDAQ_DIR=/cudaq-install/lib/cmake/cudaq/ \
   -DCUDAQX_INCLUDE_TESTS=ON \
   -DCUDAQX_BINDINGS_PYTHON=ON \
-  -DCMAKE_INSTALL_PREFIX=$HOME/.cudaqx
+  -DCMAKE_INSTALL_PREFIX="$2"
 
 cmake --build "$1" --target install
 
