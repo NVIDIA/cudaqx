@@ -16,6 +16,10 @@ inputs:
     description: 'Platform (amd64 or arm64)'
     default: ''
     required: true
+  install-prefix:
+    description: 'Install prefix'
+    default: '~/.cudaqx'
+    required: false
 outputs:
   build-dir:
     description: 'Build dir.'
@@ -56,7 +60,7 @@ runs:
         CCACHE_DIR: /ccache-${{ inputs.lib }}
       run: |
         build_dir=build_${{ inputs.lib }}
-        .github/actions/build-lib/build_${{ inputs.lib }}.sh $build_dir
+        .github/actions/build-lib/build_${{ inputs.lib }}.sh $build_dir ${{ inputs.install-prefix }}
         echo "build_dir=$build_dir" >> $GITHUB_OUTPUT
       shell: bash
 
