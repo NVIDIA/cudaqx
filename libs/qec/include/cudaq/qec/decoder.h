@@ -168,10 +168,9 @@ template <typename t_soft, typename t_hard,
 inline void convert_vec_soft_to_hard(const std::vector<t_soft> &in,
                                      std::vector<t_hard> &out,
                                      t_soft thresh = 0.5) {
-  out.clear();
-  out.reserve(in.size());
-  for (auto x : in)
-    out.push_back(static_cast<t_hard>(x >= thresh ? 1 : 0));
+  out.resize(in.size());
+  for (std::size_t i = 0; i < in.size(); i++)
+    out[i] = static_cast<t_hard>(in[i] >= thresh ? 1 : 0);
 }
 
 /// @brief Convert a vector of soft probabilities to a tensor<uint8_t> of hard
@@ -197,8 +196,9 @@ inline void convert_vec_soft_to_tensor_hard(const std::vector<t_soft> &in,
   if (out.shape()[0] != in.size())
     throw std::runtime_error(
         "Vector to tensor conversion requires tensor dim == vector length");
+  auto raw_ptr = out.data();
   for (size_t i = 0; i < in.size(); ++i)
-    out.at({i}) = static_cast<t_hard>(in[i] >= thresh ? 1 : 0);
+    raw_ptr[i] = static_cast<t_hard>(in[i] >= thresh ? 1 : 0);
 }
 
 /// @brief Convert a vector of hard probabilities to a vector of soft
@@ -218,10 +218,9 @@ inline void convert_vec_hard_to_soft(const std::vector<t_hard> &in,
                                      std::vector<t_soft> &out,
                                      const t_soft true_val = 1.0,
                                      const t_soft false_val = 0.0) {
-  out.clear();
-  out.reserve(in.size());
-  for (auto x : in)
-    out.push_back(static_cast<t_soft>(x ? true_val : false_val));
+  out.resize(in.size());
+  for (std::size_t i = 0; i < in.size(); i++)
+    out[i] = static_cast<t_soft>(in[i] ? true_val : false_val);
 }
 
 /// @brief Convert a 2D vector of soft probabilities to a 2D vector of hard
@@ -238,14 +237,13 @@ template <typename t_soft, typename t_hard,
 inline void convert_vec_soft_to_hard(const std::vector<std::vector<t_soft>> &in,
                                      std::vector<std::vector<t_hard>> &out,
                                      t_soft thresh = 0.5) {
-  out.clear();
-  out.reserve(in.size());
+  std::size_t row_index = 0;
+  out.resize(in.size());
   for (auto &r : in) {
-    std::vector<t_hard> out_row;
-    out_row.reserve(r.size());
-    for (auto c : r)
-      out_row.push_back(static_cast<t_hard>(c >= thresh ? 1 : 0));
-    out.push_back(std::move(out_row));
+    auto &out_row = out[row_index++];
+    out_row.resize(r.size());
+    for (std::size_t c = 0; c < r.size(); c++)
+      out_row[c] = static_cast<t_hard>(r[c] >= thresh ? 1 : 0);
   }
 }
 
