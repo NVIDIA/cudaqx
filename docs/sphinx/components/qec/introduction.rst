@@ -148,7 +148,7 @@ To implement a new quantum error correcting code:
 
 
    Note that in your constructor, you have access to user-provided ``options``. For
-   example, if your code depends on an integer paramter called ``distance``, you can
+   example, if your code depends on an integer parameter called ``distance``, you can
    retrieve that from the user via
 
    .. code-block:: cpp
@@ -457,7 +457,7 @@ Usage:
         import cudaq_qec as qec
 
         # Create distance-3 repetition code
-        code = qec.get_code('repetition', distance=3})
+        code = qec.get_code('repetition', distance=3)
 
         # Access stabilizers
         stabilizers = code.get_stabilizers()  # Returns ["ZZI", "IZZ"]
@@ -804,7 +804,7 @@ For bitflip errors, we check that the residual error `R = D_X + E_X` is not `L_X
 with `Z`, we can check that `L_Z(D_X + E_X) = 0`. This is because we just need to check if they have mutual support on an even
 or odd number of qubits. We could also check that `R` is not a stabilizer.
 
-Similar to the parity check matrix, the logical obvervables are also stored in a matrix as
+Similar to the parity check matrix, the logical observables are also stored in a matrix as
 
 .. math::
   L = \begin{pmatrix}
