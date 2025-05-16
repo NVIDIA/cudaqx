@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2022 - 2024 NVIDIA Corporation & Affiliates.                  *
+ * Copyright (c) 2022 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -10,6 +10,7 @@
 #include <cmath>
 #include <future>
 #include <gtest/gtest.h>
+#include <random>
 
 TEST(DecoderUtils, CovertHardToSoft) {
   std::vector<int> in = {1, 0, 1, 1};
@@ -63,6 +64,37 @@ TEST(DecoderUtils, CovertSoftToHard) {
     for (int c = 0; c < out2.size(); c++)
       ASSERT_EQ(out2[r][c], expected_out2[r][c]);
   }
+}
+
+TEST(DecoderUtils, ConvertVecSoftToTensorHard) {
+  // Generate a million random floats between 0 and 1 using mt19937
+  std::mt19937_64 gen(13);
+  std::uniform_real_distribution<> dis(0.0, 1.0);
+  std::vector<double> in(1000000);
+  for (int i = 0; i < in.size(); i++)
+    in[i] = dis(gen);
+
+  // Test the conversion to a tensor
+  cudaqx::tensor<uint8_t> out_tensor;
+  auto t0 = std::chrono::high_resolution_clock::now();
+  cudaq::qec::convert_vec_soft_to_tensor_hard(in, out_tensor);
+  auto t1 = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double> diff = t1 - t0;
+  std::cout << "Time taken for cudaqx::tensor: " << diff.count() * 1000.0
+            << "ms" << std::endl;
+
+  // Use the conversion to a vector as a baseline
+  std::vector<uint8_t> out_vec(in.size());
+  t0 = std::chrono::high_resolution_clock::now();
+  cudaq::qec::convert_vec_soft_to_hard(in, out_vec);
+  t1 = std::chrono::high_resolution_clock::now();
+  diff = t1 - t0;
+  std::cout << "Time taken for std::vector: " << diff.count() * 1000.0 << "ms"
+            << std::endl;
+
+  // Check the results are the same
+  for (std::size_t i = 0; i < in.size(); i++)
+    ASSERT_EQ(out_tensor.at({i}), out_vec[i]);
 }
 
 TEST(SampleDecoder, checkAPI) {
