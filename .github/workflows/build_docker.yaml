@@ -9,11 +9,11 @@ on:
         required: false
       assets_repo:
         type: string
-        description: Retrieve assets from a draft release from this repo (e.g. NVIDIA/cudaqx)
+        description: Retrieve artifacts from a draft release from this repo (e.g. NVIDIA/cudaqx)
         required: false
       assets_tag:
         type: string
-        description: Retrieve assets from a draft release with this tag (e.g. docker-files-89)
+        description: (Deprecated) Retrieve assets from a draft release with this tag (e.g. docker-files-89)
         required: false
       artifacts_from_run:
         type: string
