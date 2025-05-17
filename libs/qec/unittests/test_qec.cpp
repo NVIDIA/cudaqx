@@ -18,12 +18,12 @@
 TEST(StabilizerTester, checkConstructFromSpinOps) {
   {
     // Constructor will always auto sort
-    std::vector<cudaq::spin_op> stab{cudaq::spin_op::from_word("ZZZZIII"),
-                                     cudaq::spin_op::from_word("XXXXIII"),
-                                     cudaq::spin_op::from_word("IXXIXXI"),
-                                     cudaq::spin_op::from_word("IIXXIXX"),
-                                     cudaq::spin_op::from_word("IZZIZZI"),
-                                     cudaq::spin_op::from_word("IIZZIZZ")};
+    std::vector<cudaq::spin_op_term> stab{cudaq::spin_op::from_word("ZZZZIII"),
+                                          cudaq::spin_op::from_word("XXXXIII"),
+                                          cudaq::spin_op::from_word("IXXIXXI"),
+                                          cudaq::spin_op::from_word("IIXXIXX"),
+                                          cudaq::spin_op::from_word("IZZIZZI"),
+                                          cudaq::spin_op::from_word("IIZZIZZ")};
     EXPECT_EQ(stab.size(), 6);
     auto parity = cudaq::qec::to_parity_matrix(stab);
     parity.dump();
@@ -259,7 +259,7 @@ TEST(QECCodeTester, checkSteane) {
     // From Stabilizers
     std::vector<std::string> words{"ZZZZIII", "XXXXIII", "IXXIXXI",
                                    "IIXXIXX", "IZZIZZI", "IIZZIZZ"};
-    std::vector<cudaq::spin_op> ops;
+    std::vector<cudaq::spin_op_term> ops;
     for (auto &os : words)
       ops.emplace_back(cudaq::spin_op::from_word(os));
     cudaq::qec::sortStabilizerOps(ops);
@@ -429,7 +429,7 @@ TEST(QECCodeTester, checkRepetition) {
 
     std::vector<std::string> actual_stabs;
     for (auto &s : stabilizers)
-      actual_stabs.push_back(s.begin()->get_pauli_word());
+      actual_stabs.push_back(s.get_pauli_word());
 
     std::vector<std::string> expected_strings = {
         "ZZIIIIIII", "IZZIIIIII", "IIZZIIIII", "IIIZZIIII",
