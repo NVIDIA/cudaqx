@@ -44,7 +44,7 @@ def test_code_stabilizers():
     assert isinstance(stabilizers, list)
     assert len(stabilizers) == 6
     assert all(isinstance(stab, cudaq.Operator) for stab in stabilizers)
-    stabStrings = [term.get_pauli_word() for s in stabilizers for term in s]
+    stabStrings = [term.get_pauli_word() for term in stabilizers]
     expected = [
         "ZZZZIII", "XXXXIII", "IXXIXXI", "IIXXIXX", "IZZIZZI", "IIZZIZZ"
     ]

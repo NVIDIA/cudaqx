@@ -13,9 +13,10 @@ INSTANTIATE_REGISTRY(cudaq::qec::code, const cudaqx::heterogeneous_map &)
 
 namespace cudaq::qec {
 
-std::unique_ptr<code> code::get(const std::string &name,
-                                const std::vector<cudaq::spin_op> &_stabilizers,
-                                const heterogeneous_map options) {
+std::unique_ptr<code>
+code::get(const std::string &name,
+          const std::vector<cudaq::spin_op_term> &_stabilizers,
+          const heterogeneous_map options) {
   auto &registry = get_registry();
   auto iter = registry.find(name);
   if (iter == registry.end())
@@ -59,7 +60,7 @@ cudaqx::tensor<uint8_t> code::get_observables_z() const {
 }
 
 std::unique_ptr<code> get_code(const std::string &name,
-                               const std::vector<cudaq::spin_op> &stab,
+                               const std::vector<cudaq::spin_op_term> &stab,
                                const heterogeneous_map options) {
   return code::get(name, stab, options);
 }

@@ -1,5 +1,5 @@
 /****************************************************************-*- C++ -*-****
- * Copyright (c) 2024 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -160,11 +160,11 @@ public:
   /// @brief Print the stabilizers in sparse pauli format
   void print_stabilizers() const;
 
-  /// @brief Get the stabilizers as a vector of cudaq::spin_ops
-  std::vector<cudaq::spin_op> get_spin_op_stabilizers() const;
+  /// @brief Get the stabilizers as a vector of cudaq::spin_op_terms
+  std::vector<cudaq::spin_op_term> get_spin_op_stabilizers() const;
 
-  /// @brief Get the observables as a vector of cudaq::spin_ops
-  std::vector<cudaq::spin_op> get_spin_op_observables() const;
+  /// @brief Get the observables as a vector of cudaq::spin_op_terms
+  std::vector<cudaq::spin_op_term> get_spin_op_observables() const;
 };
 
 /// \pure_device_kernel

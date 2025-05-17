@@ -1,5 +1,5 @@
 /****************************************************************-*- C++ -*-****
- * Copyright (c) 2024 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -16,12 +16,12 @@
 
 namespace cudaq::qec {
 enum class stabilizer_type { XZ, X, Z };
-void sortStabilizerOps(std::vector<cudaq::spin_op> &ops);
+void sortStabilizerOps(std::vector<cudaq::spin_op_term> &ops);
 
 /// Convert stabilizers to a parity check matrix
 /// @return Tensor representing the parity check matrix
 cudaqx::tensor<uint8_t>
-to_parity_matrix(const std::vector<cudaq::spin_op> &stabilizers,
+to_parity_matrix(const std::vector<cudaq::spin_op_term> &stabilizers,
                  stabilizer_type type = stabilizer_type::XZ);
 cudaqx::tensor<uint8_t>
 to_parity_matrix(const std::vector<std::string> &words,
