@@ -25,6 +25,15 @@ generate_random_bit_flips = qecrt.generate_random_bit_flips
 sample_memory_circuit = qecrt.sample_memory_circuit
 sample_code_capacity = qecrt.sample_code_capacity
 
+dump_pcm = qecrt.dump_pcm
+generate_random_pcm = qecrt.generate_random_pcm
+get_pcm_for_rounds = qecrt.get_pcm_for_rounds
+get_sorted_pcm_column_indices = qecrt.get_sorted_pcm_column_indices
+reorder_pcm_columns = qecrt.reorder_pcm_columns
+shuffle_pcm_columns = qecrt.shuffle_pcm_columns
+simplify_pcm = qecrt.simplify_pcm
+sort_pcm_columns = qecrt.sort_pcm_columns
+
 from .plugins import decoders, codes
 import pkgutil, importlib, traceback
 

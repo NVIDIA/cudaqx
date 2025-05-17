@@ -1,5 +1,5 @@
 /****************************************************************-*- C++ -*-****
- * Copyright (c) 2024 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -100,4 +100,9 @@ sample_memory_circuit(const code &code, std::size_t numShots,
 std::tuple<cudaqx::tensor<uint8_t>, cudaqx::tensor<uint8_t>>
 sample_memory_circuit(const code &code, std::size_t numShots,
                       std::size_t numRounds, cudaq::noise_model &noise);
+
+std::tuple<cudaqx::tensor<uint8_t>, std::vector<double>,
+           cudaqx::tensor<uint8_t>, std::vector<double>>
+pcm_memory_circuit(const code &code, operation statePrep, std::size_t numShots,
+                   std::size_t numRounds, cudaq::noise_model &noise);
 } // namespace cudaq::qec
