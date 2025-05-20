@@ -106,8 +106,19 @@ void bindDecoder(py::module &mod) {
         the original quantum state. The format depends on the specific decoder
         implementation.
     )pbdoc")
+      .def("has_optional_results", &decoder_result::has_optional_results, R"pbdoc(
+        Check if optional results exist.
+        
+        Returns True if the decoder has additional optional results, False otherwise.
+    )pbdoc")
+      .def("get_optional_results", &decoder_result::get_optional_results, R"pbdoc(
+        Get the optional results if they exist.
+        
+        Returns a heterogeneous map containing the optional results, or an empty map
+        if no optional results exist.
+    )pbdoc")
       // Add tuple interface
-      .def("__len__", [](const decoder_result &) { return 2; })
+      .def("__len__", [](const decoder_result &) { return 2; })  // Only expose converged and result
       .def("__getitem__",
            [](const decoder_result &r, size_t i) {
              switch (i) {

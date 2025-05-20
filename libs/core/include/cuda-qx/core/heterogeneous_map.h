@@ -39,6 +39,18 @@ private:
   }
 
 public:
+  // Type aliases for iterators
+  using iterator = std::unordered_map<std::string, std::any>::iterator;
+  using const_iterator = std::unordered_map<std::string, std::any>::const_iterator;
+
+  // Iterator methods
+  iterator begin() { return items.begin(); }
+  iterator end() { return items.end(); }
+  const_iterator begin() const { return items.begin(); }
+  const_iterator end() const { return items.end(); }
+  const_iterator cbegin() const { return items.cbegin(); }
+  const_iterator cend() const { return items.cend(); }
+
   /// @brief Default constructor
   heterogeneous_map() = default;
 
