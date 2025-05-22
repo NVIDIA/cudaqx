@@ -82,6 +82,7 @@
           (defaults to 1). Ignored unless `use_osd` is true.
         - `osd_order` (int): OSD postprocessor order (defaults to 0). Ref:
           `Decoding Across the Quantum LDPC Code Landscape <https://arxiv.org/pdf/2005.07016>`_
+
             - For `osd_method=2` (Exhaustive), the number of possible
               permutations searched after OSD-0 grows by 2^osd_order.
             - For `osd_method=3` (Combination Sweep), this is the λ parameter. All
@@ -89,6 +90,7 @@
               permutations are searched after OSD-0. This is (syndrome_length -
               block_size + λ * (λ - 1) / 2) additional permutations.
             - For other `osd_method` values, this is ignored.
+
         - `bp_batch_size` (int): Number of syndromes that will be decoded in
           parallel for the BP decoder (defaults to 1)
         - `osd_batch_size` (int): Number of syndromes that will be decoded in

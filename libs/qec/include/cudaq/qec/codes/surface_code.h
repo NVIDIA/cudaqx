@@ -1,5 +1,5 @@
 /****************************************************************-*- C++ -*-****
- * Copyright (c) 2024 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -251,6 +251,9 @@ protected:
   std::size_t get_num_ancilla_z_qubits() const override;
 
 public:
+  /// @brief Grid to keep track of topological arrangement of qubits.
+  stabilizer_grid grid;
+
   /// @brief Constructor for the surface_code
   surface_code(const heterogeneous_map &);
   // Grid constructor would be useful
@@ -261,9 +264,6 @@ public:
                         const cudaqx::heterogeneous_map &options) {
         return std::make_unique<surface_code>(options);
       })
-
-  /// @brief Grid to keep track of topological arrangement of qubits.
-  stabilizer_grid grid;
 };
 
 } // namespace cudaq::qec::surface_code
