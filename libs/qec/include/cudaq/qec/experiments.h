@@ -1,5 +1,5 @@
 /****************************************************************-*- C++ -*-****
- * Copyright (c) 2024 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -8,6 +8,7 @@
 #pragma once
 
 #include "cudaq/qec/code.h"
+#include "cudaq/qec/detector_error_model.h"
 
 namespace cudaq::qec {
 
@@ -100,4 +101,55 @@ sample_memory_circuit(const code &code, std::size_t numShots,
 std::tuple<cudaqx::tensor<uint8_t>, cudaqx::tensor<uint8_t>>
 sample_memory_circuit(const code &code, std::size_t numShots,
                       std::size_t numRounds, cudaq::noise_model &noise);
+
+/// @brief Given a memory circuit setup, generate a DEM
+cudaq::qec::detector_error_model
+dem_from_memory_circuit(const code &code, operation statePrep,
+                        std::size_t numRounds, cudaq::noise_model &noise);
+
+/// @brief Given a memory circuit setup, generate a DEM. Overload for Pauli
+/// observable matrix
+detector_error_model
+dem_from_memory_circuit(const code &code, operation statePrep,
+                        const cudaqx::tensor<uint8_t> &obs_matrix,
+                        std::size_t numRounds, cudaq::noise_model &noise);
+
+/// @brief Given a memory circuit setup, generate a DEM. Overload for Pauli
+/// observables.
+detector_error_model
+dem_from_memory_circuit(const code &code, operation statePrep,
+                        const std::vector<spin_op_term> &observables,
+                        std::size_t numRounds, cudaq::noise_model &noise);
+
+// For CSS codes, may want to partition x vs z decoding
+detector_error_model x_dem_from_memory_circuit(const code &code,
+                                               operation statePrep,
+                                               std::size_t numRounds,
+                                               cudaq::noise_model &noise);
+detector_error_model z_dem_from_memory_circuit(const code &code,
+                                               operation statePrep,
+                                               std::size_t numRounds,
+                                               cudaq::noise_model &noise);
+
+// CSS version
+// Overload for Pauli observable matrix
+detector_error_model
+x_dem_from_memory_circuit(const code &code, operation statePrep,
+                          const cudaqx::tensor<uint8_t> &obs_matrix,
+                          std::size_t numRounds, cudaq::noise_model &noise);
+detector_error_model
+z_dem_from_memory_circuit(const code &code, operation statePrep,
+                          const cudaqx::tensor<uint8_t> &obs_matrix,
+                          std::size_t numRounds, cudaq::noise_model &noise);
+
+// CSS version
+// Overload for Pauli observables
+detector_error_model
+x_dem_from_memory_circuit(const code &code, operation statePrep,
+                          const std::vector<spin_op_term> &observables,
+                          std::size_t numRounds, cudaq::noise_model &noise);
+detector_error_model
+z_dem_from_memory_circuit(const code &code, operation statePrep,
+                          const std::vector<spin_op_term> &observables,
+                          std::size_t numRounds, cudaq::noise_model &noise);
 } // namespace cudaq::qec
