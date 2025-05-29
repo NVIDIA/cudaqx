@@ -143,7 +143,7 @@ def test_decoder_different_matrix_sizes(matrix_shape, syndrome_size):
     syndrome = np.random.random(syndrome_size).tolist()
 
     decoder = qec.get_decoder('example_byod', H)
-    convergence, result = decoder.decode(syndrome)
+    convergence, result, opt = decoder.decode(syndrome)
 
     assert len(result) == syndrome_size
     assert convergence is True
@@ -171,10 +171,10 @@ def test_decoder_reproducibility():
     decoder = qec.get_decoder('example_byod', H)
 
     np.random.seed(42)
-    convergence1, result1 = decoder.decode(create_test_syndrome())
+    convergence1, result1, opt1 = decoder.decode(create_test_syndrome())
 
     np.random.seed(42)
-    convergence2, result2 = decoder.decode(create_test_syndrome())
+    convergence2, result2, opt2 = decoder.decode(create_test_syndrome())
 
     assert result1 == result2
     assert convergence1 == convergence2

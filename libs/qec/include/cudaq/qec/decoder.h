@@ -12,8 +12,8 @@
 #include "cuda-qx/core/heterogeneous_map.h"
 #include "cuda-qx/core/tensor.h"
 #include <future>
-#include <vector>
 #include <optional>
+#include <vector>
 
 namespace cudaq::qec {
 
@@ -32,39 +32,23 @@ struct decoder_result {
   /// each index.
   std::vector<float_t> result;
 
-  /// @brief Optional additional results from the decoder stored in a heterogeneous map
-  std::optional<cudaqx::heterogeneous_map> optional_results;
-
-  /// @brief Check if optional results exist
-  bool has_optional_results() const { return optional_results.has_value(); }
-
-  /// @brief Get optional results if they exist, otherwise return empty map
-  cudaqx::heterogeneous_map get_optional_results() const {
-    return optional_results.value_or(cudaqx::heterogeneous_map());
-  }
-
-  // Tuple-like interface for structured binding
-  template<std::size_t I>
-  auto& get() {
-    if constexpr (I == 0) return converged;
-    if constexpr (I == 1) return result;
-  }
-
-  template<std::size_t I>
-  const auto& get() const {
-    if constexpr (I == 0) return converged;
-    if constexpr (I == 1) return result;
-  }
+  /// @brief Optional additional results from the decoder stored in a
+  /// heterogeneous map
+  std::optional<cudaqx::heterogeneous_map> opt_results;
 
   // Manually define the equality operator
   bool operator==(const decoder_result &other) const {
     // First compare the non-optional fields
-    if (std::tie(converged, result) != std::tie(other.converged, other.result)) {
+    if (std::tie(converged, result) !=
+        std::tie(other.converged, other.result)) {
       return false;
     }
-
-    // Handle optional_results comparison - just check if both have or don't have it
-    return optional_results.has_value() == other.optional_results.has_value();
+    // If both do not have opt_results, then they are equal
+    if (!opt_results.has_value() && !other.opt_results.has_value()) {
+      return true;
+    }
+    // Otherwise, they are not equal
+    return false;
   }
 
   // Manually define the inequality operator
@@ -72,7 +56,6 @@ struct decoder_result {
     return !(*this == other);
   }
 };
-
 
 /// @brief Decoder results
 struct decoder_result_2 {
@@ -83,7 +66,8 @@ struct decoder_result_2 {
   /// each index.
   std::vector<float_t> result;
 
-  /// @brief Optional additional results from the decoder stored in a heterogeneous map
+  /// @brief Optional additional results from the decoder stored in a
+  /// heterogeneous map
   std::optional<cudaqx::heterogeneous_map> optional_results;
 
   /// @brief Check if optional results exist
@@ -97,11 +81,13 @@ struct decoder_result_2 {
   // Manually define the equality operator
   bool operator==(const decoder_result_2 &other) const {
     // First compare the non-optional fields
-    if (std::tie(converged, result) != std::tie(other.converged, other.result)) {
+    if (std::tie(converged, result) !=
+        std::tie(other.converged, other.result)) {
       return false;
     }
 
-    // Handle optional_results comparison - just check if both have or don't have it
+    // Handle optional_results comparison - just check if both have or don't
+    // have it
     return optional_results.has_value() == other.optional_results.has_value();
   }
 
@@ -347,23 +333,3 @@ std::unique_ptr<decoder>
 get_decoder(const std::string &name, const cudaqx::tensor<uint8_t> &H,
             const cudaqx::heterogeneous_map options = {});
 } // namespace cudaq::qec
-
-// Add tuple_size specialization
-namespace std {
-  template<>
-  struct tuple_size<cudaq::qec::decoder_result> : std::integral_constant<std::size_t, 2> {};
-}
-
-// Add tuple_element specializations
-namespace std {
-  template<>
-  struct tuple_element<0, cudaq::qec::decoder_result> {
-    using type = bool;
-  };
-  template<>
-  struct tuple_element<1, cudaq::qec::decoder_result> {
-    using type = std::vector<cudaq::qec::float_t>;
-  };
-}
-
-
