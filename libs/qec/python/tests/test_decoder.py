@@ -67,11 +67,22 @@ def test_decoder_result_structure():
     decoder = qec.get_decoder('example_byod', H)
     result = decoder.decode(create_test_syndrome())
 
+    # Test basic structure
     assert hasattr(result, 'converged')
     assert hasattr(result, 'result')
+    assert hasattr(result, 'opt_results')
     assert isinstance(result.converged, bool)
     assert isinstance(result.result, list)
     assert len(result.result) == 10
+
+    # Test opt_results functionality
+    assert result.opt_results is None  # Default should be None
+
+    # Test that opt_results is preserved in async decode
+    async_result = decoder.decode_async(create_test_syndrome())
+    result = async_result.get()
+    assert hasattr(result, 'opt_results')
+    assert result.opt_results is None
 
 
 def test_decoder_plugin_initialization():

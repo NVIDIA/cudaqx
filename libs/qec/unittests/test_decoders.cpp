@@ -205,3 +205,38 @@ TEST(AsyncDecoderResultTest, MoveAssignmentTransfersFuture) {
   EXPECT_TRUE(second.fut.valid());
   EXPECT_FALSE(first.fut.valid());
 }
+
+TEST(DecoderResultTest, DefaultConstructor) {
+  cudaq::qec::decoder_result result;
+  EXPECT_FALSE(result.converged);
+  EXPECT_TRUE(result.result.empty());
+  EXPECT_FALSE(result.opt_results.has_value());
+}
+
+TEST(DecoderResultTest, OptResultsAssignment) {
+  cudaq::qec::decoder_result result;
+  cudaqx::heterogeneous_map opt_map;
+  opt_map.insert("test_key", 42);
+  result.opt_results = opt_map;
+
+  EXPECT_TRUE(result.opt_results.has_value());
+  EXPECT_EQ(result.opt_results->get<int>("test_key"), 42);
+}
+
+TEST(DecoderResultTest, EqualityOperator) {
+  cudaq::qec::decoder_result result1;
+  cudaq::qec::decoder_result result2;
+
+  // Test equality with no opt_results
+  EXPECT_TRUE(result1 == result2);
+
+  // Test inequality when one has opt_results
+  cudaqx::heterogeneous_map opt_map;
+  opt_map.insert("test_key", 42);
+  result1.opt_results = opt_map;
+  EXPECT_FALSE(result1 == result2);
+
+  // Test inequality when both have opt_results (even if same)
+  result2.opt_results = opt_map;
+  EXPECT_FALSE(result1 == result2);
+}
