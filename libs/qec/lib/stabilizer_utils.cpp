@@ -31,17 +31,18 @@ static bool spinOpComparatorStr(const std::string &astr,
   return zIdxA < zIdxB;
 }
 
-static bool spinOpComparator(const cudaq::spin_op &a, const cudaq::spin_op &b) {
-  auto astr = a.begin()->get_pauli_word();
-  auto bstr = b.begin()->get_pauli_word();
+static bool spinOpComparator(const cudaq::spin_op_term &a,
+                             const cudaq::spin_op_term &b) {
+  auto astr = a.get_pauli_word();
+  auto bstr = b.get_pauli_word();
   return spinOpComparatorStr(astr, bstr);
 }
 
-static bool isStabilizerSorted(const std::vector<cudaq::spin_op> &ops) {
+static bool isStabilizerSorted(const std::vector<cudaq::spin_op_term> &ops) {
   return std::is_sorted(ops.begin(), ops.end(), spinOpComparator);
 }
 
-void sortStabilizerOps(std::vector<cudaq::spin_op> &ops) {
+void sortStabilizerOps(std::vector<cudaq::spin_op_term> &ops) {
   std::sort(ops.begin(), ops.end(), spinOpComparator);
 }
 
@@ -49,14 +50,14 @@ void sortStabilizerOps(std::vector<cudaq::spin_op> &ops) {
 // H = [ H_Z | 0   ]
 //     [ 0   | H_X ]
 cudaqx::tensor<uint8_t>
-to_parity_matrix(const std::vector<cudaq::spin_op> &stabilizers,
+to_parity_matrix(const std::vector<cudaq::spin_op_term> &stabilizers,
                  stabilizer_type type) {
   if (stabilizers.empty())
     return cudaqx::tensor<uint8_t>();
 
   std::vector<std::string> stab_strings;
   for (auto &s : stabilizers)
-    stab_strings.emplace_back(s.begin()->get_pauli_word());
+    stab_strings.emplace_back(s.get_pauli_word());
   std::sort(stab_strings.begin(), stab_strings.end(), spinOpComparatorStr);
 
   auto numQubits = stab_strings[0].size();
@@ -141,7 +142,7 @@ to_parity_matrix(const std::vector<cudaq::spin_op> &stabilizers,
 cudaqx::tensor<uint8_t> to_parity_matrix(const std::vector<std::string> &words,
                                          stabilizer_type type) {
 
-  std::vector<cudaq::spin_op> ops;
+  std::vector<cudaq::spin_op_term> ops;
   for (auto &os : words)
     ops.emplace_back(cudaq::spin_op::from_word(os));
   sortStabilizerOps(ops);
