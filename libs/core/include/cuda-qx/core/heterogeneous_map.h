@@ -41,7 +41,8 @@ private:
 public:
   // Type aliases for iterators
   using iterator = std::unordered_map<std::string, std::any>::iterator;
-  using const_iterator = std::unordered_map<std::string, std::any>::const_iterator;
+  using const_iterator =
+      std::unordered_map<std::string, std::any>::const_iterator;
 
   // Iterator methods
   iterator begin() { return items.begin(); }
