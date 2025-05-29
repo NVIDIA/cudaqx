@@ -57,46 +57,6 @@ struct decoder_result {
   }
 };
 
-/// @brief Decoder results
-struct decoder_result_2 {
-  /// @brief Whether or not the decoder converged
-  bool converged = false;
-
-  /// @brief Vector of length `block_size` with soft probabilities of errors in
-  /// each index.
-  std::vector<float_t> result;
-
-  /// @brief Optional additional results from the decoder stored in a
-  /// heterogeneous map
-  std::optional<cudaqx::heterogeneous_map> optional_results;
-
-  /// @brief Check if optional results exist
-  bool has_optional_results() const { return optional_results.has_value(); }
-
-  /// @brief Get optional results if they exist, otherwise return empty map
-  cudaqx::heterogeneous_map get_optional_results() const {
-    return optional_results.value_or(cudaqx::heterogeneous_map());
-  }
-
-  // Manually define the equality operator
-  bool operator==(const decoder_result_2 &other) const {
-    // First compare the non-optional fields
-    if (std::tie(converged, result) !=
-        std::tie(other.converged, other.result)) {
-      return false;
-    }
-
-    // Handle optional_results comparison - just check if both have or don't
-    // have it
-    return optional_results.has_value() == other.optional_results.has_value();
-  }
-
-  // Manually define the inequality operator
-  bool operator!=(const decoder_result_2 &other) const {
-    return !(*this == other);
-  }
-};
-
 /// @brief Return type for asynchronous decoding results
 class async_decoder_result {
 public:
