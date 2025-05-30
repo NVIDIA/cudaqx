@@ -204,5 +204,34 @@ def test_version():
     assert "CUDA-Q QEC Base Decoder" in decoder.get_version()
 
 
+def test_single_error_lut_opt_results():
+    # Test with invalid opt_results
+    invalid_args = {"opt_results": {"invalid_type": True}}
+    with pytest.raises(RuntimeError) as e:
+        decoder = qec.get_decoder("single_error_lut", H, **invalid_args)
+        decoder.decode(create_test_syndrome())
+    assert "Requested result types not available" in str(e.value)
+
+    # Test with valid opt_results
+    valid_args = {
+        "opt_results": {
+            "error_probability": True,
+            "syndrome_weight": True,
+            "decoding_time": False,
+            "num_repetitions": 5
+        }
+    }
+    decoder = qec.get_decoder("single_error_lut", H, **valid_args)
+    result = decoder.decode(create_test_syndrome())
+
+    # Verify opt_results
+    assert result.opt_results is not None
+    assert "error_probability" in result.opt_results
+    assert "syndrome_weight" in result.opt_results
+    assert "decoding_time" not in result.opt_results  # Was set to False
+    assert "num_repetitions" in result.opt_results
+    assert result.opt_results["num_repetitions"] == 5
+
+
 if __name__ == "__main__":
     pytest.main()

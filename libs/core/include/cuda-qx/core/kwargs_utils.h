@@ -44,6 +44,9 @@ inline heterogeneous_map hetMapFromKwargs(const py::kwargs &kwargs) {
       result.insert(key, value.cast<double>());
     } else if (py::isinstance<py::str>(value)) {
       result.insert(key, value.cast<std::string>());
+    } else if (py::isinstance<py::dict>(value)) {
+      // Recursively convert nested dictionary
+      result.insert(key, hetMapFromKwargs(value.cast<py::dict>()));
     } else if (py::isinstance<py::array>(value)) {
       py::array np_array = value.cast<py::array>();
       py::buffer_info info = np_array.request();
