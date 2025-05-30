@@ -106,8 +106,12 @@ void bindDecoder(py::module &mod) {
         the original quantum state. The format depends on the specific decoder
         implementation.
     )pbdoc")
-      // Add tuple interface
-      .def("__len__", [](const decoder_result &) { return 2; })
+      .def_readwrite("opt_results", &decoder_result::opt_results, R"pbdoc(
+        Optional additional results from the decoder stored in a heterogeneous map.
+        
+        This field may be empty if no additional results are available.
+    )pbdoc")
+      .def("__len__", [](const decoder_result &) { return 3; })
       .def("__getitem__",
            [](const decoder_result &r, size_t i) {
              switch (i) {
@@ -115,13 +119,15 @@ void bindDecoder(py::module &mod) {
                return py::cast(r.converged);
              case 1:
                return py::cast(r.result);
+             case 2:
+               return py::cast(r.opt_results);
              default:
                throw py::index_error();
              }
            })
       // Enable iteration protocol
       .def("__iter__", [](const decoder_result &r) -> py::object {
-        return py::iter(py::make_tuple(r.converged, r.result));
+        return py::iter(py::make_tuple(r.converged, r.result, r.opt_results));
       });
 
   py::class_<async_decoder_result>(qecmod, "AsyncDecoderResult",

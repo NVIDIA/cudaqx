@@ -22,4 +22,5 @@ class ExampleDecoder:
         res = qec.DecoderResult()
         res.converged = True
         res.result = np.random.random(len(syndrome)).tolist()
+        res.opt_results = None
         return res

@@ -67,11 +67,22 @@ def test_decoder_result_structure():
     decoder = qec.get_decoder('example_byod', H)
     result = decoder.decode(create_test_syndrome())
 
+    # Test basic structure
     assert hasattr(result, 'converged')
     assert hasattr(result, 'result')
+    assert hasattr(result, 'opt_results')
     assert isinstance(result.converged, bool)
     assert isinstance(result.result, list)
     assert len(result.result) == 10
+
+    # Test opt_results functionality
+    assert result.opt_results is None  # Default should be None
+
+    # Test that opt_results is preserved in async decode
+    async_result = decoder.decode_async(create_test_syndrome())
+    result = async_result.get()
+    assert hasattr(result, 'opt_results')
+    assert result.opt_results is None
 
 
 def test_decoder_plugin_initialization():
@@ -143,7 +154,7 @@ def test_decoder_different_matrix_sizes(matrix_shape, syndrome_size):
     syndrome = np.random.random(syndrome_size).tolist()
 
     decoder = qec.get_decoder('example_byod', H)
-    convergence, result = decoder.decode(syndrome)
+    convergence, result, opt = decoder.decode(syndrome)
 
     assert len(result) == syndrome_size
     assert convergence is True
@@ -171,10 +182,10 @@ def test_decoder_reproducibility():
     decoder = qec.get_decoder('example_byod', H)
 
     np.random.seed(42)
-    convergence1, result1 = decoder.decode(create_test_syndrome())
+    convergence1, result1, opt1 = decoder.decode(create_test_syndrome())
 
     np.random.seed(42)
-    convergence2, result2 = decoder.decode(create_test_syndrome())
+    convergence2, result2, opt2 = decoder.decode(create_test_syndrome())
 
     assert result1 == result2
     assert convergence1 == convergence2
@@ -191,6 +202,35 @@ def test_pass_weights():
 def test_version():
     decoder = qec.get_decoder('example_byod', H)
     assert "CUDA-Q QEC Base Decoder" in decoder.get_version()
+
+
+def test_single_error_lut_opt_results():
+    # Test with invalid opt_results
+    invalid_args = {"opt_results": {"invalid_type": True}}
+    with pytest.raises(RuntimeError) as e:
+        decoder = qec.get_decoder("single_error_lut", H, **invalid_args)
+        decoder.decode(create_test_syndrome())
+    assert "Requested result types not available" in str(e.value)
+
+    # Test with valid opt_results
+    valid_args = {
+        "opt_results": {
+            "error_probability": True,
+            "syndrome_weight": True,
+            "decoding_time": False,
+            "num_repetitions": 5
+        }
+    }
+    decoder = qec.get_decoder("single_error_lut", H, **valid_args)
+    result = decoder.decode(create_test_syndrome())
+
+    # Verify opt_results
+    assert result.opt_results is not None
+    assert "error_probability" in result.opt_results
+    assert "syndrome_weight" in result.opt_results
+    assert "decoding_time" not in result.opt_results  # Was set to False
+    assert "num_repetitions" in result.opt_results
+    assert result.opt_results["num_repetitions"] == 5
 
 
 if __name__ == "__main__":

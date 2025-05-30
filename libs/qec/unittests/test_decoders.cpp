@@ -181,6 +181,46 @@ TEST(SteaneLutDecoder, checkAPI) {
   }
   ASSERT_TRUE(convergeTrueFound);
   ASSERT_FALSE(convergeFalseFound);
+
+  // Test opt_results functionality
+  // Test case 1: Invalid result type
+  cudaqx::heterogeneous_map invalid_args;
+  cudaqx::heterogeneous_map invalid_opt_results;
+  invalid_opt_results.insert("invalid_type", true);
+  invalid_args.insert("opt_results", invalid_opt_results);
+
+  EXPECT_THROW(
+      {
+        auto d2 = cudaq::qec::decoder::get("single_error_lut", H, invalid_args);
+        std::vector<float_t> syndrome(syndrome_size, 0.0);
+        d2->decode(syndrome);
+      },
+      std::runtime_error);
+
+  // Test case 2: Valid result types
+  cudaqx::heterogeneous_map valid_args;
+  cudaqx::heterogeneous_map valid_opt_results;
+  valid_opt_results.insert("error_probability", true);
+  valid_opt_results.insert("syndrome_weight", true);
+  valid_opt_results.insert("decoding_time", false);
+  valid_opt_results.insert("num_repetitions", 5);
+  valid_args.insert("opt_results", valid_opt_results);
+
+  auto d3 = cudaq::qec::decoder::get("single_error_lut", H, valid_args);
+  std::vector<float_t> syndrome(syndrome_size, 0.0);
+  // Set syndrome to 101
+  syndrome[0] = 1.0;
+  syndrome[2] = 1.0;
+  auto result = d3->decode(syndrome);
+
+  // Verify opt_results
+  ASSERT_TRUE(result.opt_results.has_value());
+  ASSERT_TRUE(result.opt_results->contains("error_probability"));
+  ASSERT_TRUE(result.opt_results->contains("syndrome_weight"));
+  ASSERT_FALSE(
+      result.opt_results->contains("decoding_time")); // Was set to false
+  ASSERT_TRUE(result.opt_results->contains("num_repetitions"));
+  ASSERT_EQ(result.opt_results->get<int>("num_repetitions"), 5);
 }
 
 TEST(AsyncDecoderResultTest, MoveConstructorTransfersFuture) {
@@ -204,4 +244,39 @@ TEST(AsyncDecoderResultTest, MoveAssignmentTransfersFuture) {
 
   EXPECT_TRUE(second.fut.valid());
   EXPECT_FALSE(first.fut.valid());
+}
+
+TEST(DecoderResultTest, DefaultConstructor) {
+  cudaq::qec::decoder_result result;
+  EXPECT_FALSE(result.converged);
+  EXPECT_TRUE(result.result.empty());
+  EXPECT_FALSE(result.opt_results.has_value());
+}
+
+TEST(DecoderResultTest, OptResultsAssignment) {
+  cudaq::qec::decoder_result result;
+  cudaqx::heterogeneous_map opt_map;
+  opt_map.insert("test_key", 42);
+  result.opt_results = opt_map;
+
+  EXPECT_TRUE(result.opt_results.has_value());
+  EXPECT_EQ(result.opt_results->get<int>("test_key"), 42);
+}
+
+TEST(DecoderResultTest, EqualityOperator) {
+  cudaq::qec::decoder_result result1;
+  cudaq::qec::decoder_result result2;
+
+  // Test equality with no opt_results
+  EXPECT_TRUE(result1 == result2);
+
+  // Test inequality when one has opt_results
+  cudaqx::heterogeneous_map opt_map;
+  opt_map.insert("test_key", 42);
+  result1.opt_results = opt_map;
+  EXPECT_FALSE(result1 == result2);
+
+  // Test inequality when both have opt_results (even if same)
+  result2.opt_results = opt_map;
+  EXPECT_FALSE(result1 == result2);
 }
