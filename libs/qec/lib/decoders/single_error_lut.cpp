@@ -62,11 +62,11 @@ public:
         } else {
           has_opt_results = true;
           error_probability =
-              requested_results.get<bool>("error_probability", false);
+              requested_results.get<bool>("error_probability", error_probability);
           syndrome_weight =
-              requested_results.get<bool>("syndrome_weight", false);
-          decoding_time = requested_results.get<bool>("decoding_time", false);
-          num_repetitions = requested_results.get<int>("num_repetitions", 0);
+              requested_results.get<bool>("syndrome_weight", syndrome_weight);
+          decoding_time = requested_results.get<bool>("decoding_time", decoding_time);
+          num_repetitions = requested_results.get<int>("num_repetitions", num_repetitions);
         }
       } catch (const std::runtime_error &e) {
         throw; // Re-throw if it's our error
