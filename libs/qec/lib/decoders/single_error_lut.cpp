@@ -28,11 +28,11 @@ private:
       "num_repetitions"    // Number of repetitions to perform (int > 0)
   };
 
-  bool has_opt_results;
-  bool error_probability;
-  bool syndrome_weight;
-  bool decoding_time;
-  int num_repetitions;
+  bool has_opt_results = false;
+  bool error_probability = false;
+  bool syndrome_weight = false;
+  bool decoding_time = false;
+  int num_repetitions = 0;
 
 public:
   single_error_lut(const cudaqx::tensor<uint8_t> &H,
