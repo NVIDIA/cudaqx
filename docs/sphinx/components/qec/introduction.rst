@@ -1012,7 +1012,7 @@ Example of running a memory experiment:
               syndrome[i] = syndromes.at({shot, i});
 
             // Decode syndrome
-            auto [converged, v_result] = decoder->decode(syndrome);
+            auto results = decoder->decode(syndrome);
             // Process correction
             // ...
           }
