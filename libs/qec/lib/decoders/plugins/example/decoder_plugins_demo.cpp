@@ -73,7 +73,8 @@ int main() {
     std::cout << "syndrome:\n";
     syndrome.dump();
 
-    auto [converged, v_result] = lut_decoder->decode(syndrome);
+    auto results = lut_decoder->decode(syndrome);
+    auto v_result = results.result;
     cudaqx::tensor<uint8_t> result_tensor;
     // v_result is a std::vector<float_t>, of soft information. We'll convert
     // this to hard information and store as a tensor<uint8_t>.
