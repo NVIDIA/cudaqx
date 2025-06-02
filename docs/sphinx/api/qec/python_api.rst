@@ -19,6 +19,9 @@ Decoder Interfaces
 .. autoclass:: cudaq_qec.DecoderResult
     :members:
 
+.. autoclass:: cudaq_qec.AsyncDecoderResult
+    :members:
+
 Built-in Decoders
 =================
 

@@ -139,6 +139,7 @@ htmlhelp_basename = 'cudaqxDoc'
 doc_replacements = (
     ('_pycudaqx_qec_the_suffix_matters_cudaq_qec.qecrt.', ''),
     ('mlir._mlir_libs._quakeDialects.cudaq_runtime.', ''),
+    ('*', '\*'),
 )
 
 def fix_string(input):
@@ -183,6 +184,8 @@ redirects = {"versions": "../latest/releases.html"}
 nitpick_ignore = [
     ('cpp:identifier', 'pid_t'),
     ('cpp:identifier', 'uint8_t'),
+    ('cpp:identifier', 'uint32_t'),
+    ('cpp:identifier', 'vec2d'),
     ('cpp:identifier', 'details::tensor_impl<Scalar>::scalar_type'),
     ('cpp:identifier', 'cudaqx'),
     ('cpp:identifier', 'size_t'),
@@ -198,6 +201,8 @@ nitpick_ignore = [
     ('cpp:identifier', 'cudaq::qvector<>'),
     ('cpp:identifier', 'cudaq::qview<>'),
     ('cpp:identifier', 'cudaq::measure_result'),
+    ('py:class', 'cudaq.qview'),
+    ('py:class', 'cudaq.SpinOperator'),
     ('py:class', 'SpinOperator'),
     ('py:class', 'numpy.int32'),
     ('py:class', 'numpy.uint8'),
