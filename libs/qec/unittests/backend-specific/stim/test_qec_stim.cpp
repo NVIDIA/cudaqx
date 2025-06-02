@@ -437,7 +437,7 @@ TEST(QECCodeTester, checkNoisySampleMemoryCircuitAndDecodeStim) {
       syndrome.borrow(syndromes.data() + i * stride);
       printf("syndrome:\n");
       syndrome.dump();
-      auto [converged, v_result] = decoder->decode(syndrome);
+      auto [converged, v_result, opt] = decoder->decode(syndrome);
       cudaqx::tensor<uint8_t> result_tensor;
       cudaq::qec::convert_vec_soft_to_tensor_hard(v_result, result_tensor);
       printf("decode result:\n");
@@ -519,7 +519,7 @@ TEST(QECCodeTester, checkNoisySampleMemoryCircuitAndDecodeStim) {
         syndrome.borrow(syndromes.data() + stride * count);
         printf("syndrome:\n");
         syndrome.dump();
-        auto [converged, v_result] = decoder->decode(syndrome);
+        auto [converged, v_result, opt] = decoder->decode(syndrome);
         cudaqx::tensor<uint8_t> result_tensor;
         cudaq::qec::convert_vec_soft_to_tensor_hard(v_result, result_tensor);
 

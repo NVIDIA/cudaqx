@@ -12,6 +12,7 @@
 #include "cuda-qx/core/heterogeneous_map.h"
 #include "cuda-qx/core/tensor.h"
 #include <future>
+#include <optional>
 #include <vector>
 
 namespace cudaq::qec {
@@ -22,19 +23,57 @@ using float_t = CUDAQX_QEC_FLOAT_TYPE;
 using float_t = double;
 #endif
 
+/// @brief Validates that all keys in a heterogeneous map are found in a list of
+/// acceptable types
+/// @param config The heterogeneous map to validate
+/// @param acceptable_types List of acceptable key types
+/// @return Vector of invalid keys (empty if all keys are valid)
+inline std::vector<std::string>
+validate_config_parameters(const cudaqx::heterogeneous_map &config,
+                           const std::vector<std::string> &acceptable_types) {
+  std::vector<std::string> invalid_types;
+  for (const auto &[key, _] : config) {
+    if (std::find(acceptable_types.begin(), acceptable_types.end(), key) ==
+        acceptable_types.end()) {
+      invalid_types.push_back(key);
+    }
+  }
+  return invalid_types;
+}
+
 /// @brief Decoder results
 struct decoder_result {
-  /// @brief Whether or not the decoder converged
+  /// @brief Whether or not the decoder converged.
   bool converged = false;
 
   /// @brief Vector of length `block_size` with soft probabilities of errors in
   /// each index.
   std::vector<float_t> result;
 
+  /// @brief Optional additional results from the decoder stored in a
+  /// heterogeneous map. For equality comparison, this field is treated as a
+  /// boolean flag - two decoder_results are considered equal only if both have
+  /// empty opt_results (either std::nullopt or an empty map). If either result
+  /// has non-empty opt_results, they are considered not equal.
+  std::optional<cudaqx::heterogeneous_map> opt_results;
+
   // Manually define the equality operator
   bool operator==(const decoder_result &other) const {
-    return std::tie(converged, result) ==
-           std::tie(other.converged, other.result);
+    // First compare the non-optional fields
+    if (std::tie(converged, result) !=
+        std::tie(other.converged, other.result)) {
+      return false;
+    }
+    // If both do not have opt_results or both have empty maps, then they are
+    // equal
+    bool this_empty = !opt_results.has_value() || opt_results->size() == 0;
+    bool other_empty =
+        !other.opt_results.has_value() || other.opt_results->size() == 0;
+    if (this_empty && other_empty) {
+      return true;
+    }
+    // Otherwise, they are not equal
+    return false;
   }
 
   // Manually define the inequality operator

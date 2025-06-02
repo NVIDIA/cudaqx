@@ -91,9 +91,9 @@ int main() {
       syndrome.dump();
 
       // Decode the syndrome
-      auto [converged, v_result] = decoder->decode(syndrome);
+      auto result = decoder->decode(syndrome);
       cudaqx::tensor<uint8_t> result_tensor;
-      cudaq::qec::convert_vec_soft_to_tensor_hard(v_result, result_tensor);
+      cudaq::qec::convert_vec_soft_to_tensor_hard(result.result, result_tensor);
       std::cout << "decode result:\n";
       result_tensor.dump();
 

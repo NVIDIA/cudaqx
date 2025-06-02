@@ -8,6 +8,7 @@
 #pragma once
 
 #include "common/ObserveResult.h"
+#include "cuda-qx/core/kwargs_utils.h"
 #include "pybind11/pybind11.h"
 #include "pybind11/pytypes.h"
 namespace py = pybind11;
@@ -75,6 +76,44 @@ struct type_caster<cudaq::observe_result> {
     py::object tv_py = py::module::import("cudaq").attr("ObserveResult")(
         v.expectation(), v.get_spin(), v.raw_data());
     return tv_py.release();
+  }
+};
+
+template <>
+struct type_caster<cudaqx::heterogeneous_map> {
+  PYBIND11_TYPE_CASTER(cudaqx::heterogeneous_map, const_name("dict"));
+
+  bool load(handle src, bool) {
+    if (!src)
+      return false;
+    try {
+      value = cudaqx::hetMapFromKwargs(src.cast<py::dict>());
+      return true;
+    } catch (...) {
+      return false;
+    }
+  }
+
+  static handle cast(cudaqx::heterogeneous_map v,
+                     return_value_policy /*policy*/, handle /*parent*/) {
+    py::dict result;
+    for (const auto &[key, val] : v) {
+      if (auto *bool_val = std::any_cast<bool>(&val)) {
+        result[key.c_str()] = *bool_val;
+      } else if (auto *int_val = std::any_cast<std::size_t>(&val)) {
+        result[key.c_str()] = *int_val;
+      } else if (auto *int_val = std::any_cast<int>(&val)) {
+        result[key.c_str()] = *int_val;
+      } else if (auto *double_val = std::any_cast<double>(&val)) {
+        result[key.c_str()] = *double_val;
+      } else if (auto *str_val = std::any_cast<std::string>(&val)) {
+        result[key.c_str()] = *str_val;
+      } else if (auto *vec_val = std::any_cast<std::vector<double>>(&val)) {
+        result[key.c_str()] = py::array_t<double>(
+            {vec_val->size()}, {sizeof(double)}, vec_val->data());
+      }
+    }
+    return result.release();
   }
 };
 } // namespace detail
