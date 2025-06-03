@@ -16,9 +16,18 @@ ALIASES += "pure_device_kernel=\par This function is a pure-device CUDA-Q quantu
 # Build related configuration options
 #---------------------------------------------------------------------------
 
-EXTRACT_ALL            = YES
-EXTRACT_PRIVATE        = YES
+EXTRACT_ALL            = NO
+EXTRACT_PRIVATE        = NO
 EXTRACT_STATIC         = YES
+WARN_AS_ERROR          = FAIL_ON_WARNINGS
+WARN_IF_INCOMPLETE_DOC = NO
+WARN_IF_UNDOCUMENTED   = NO
+
+#---------------------------------------------------------------------------
+# Configuration options related to the input files
+#---------------------------------------------------------------------------
+
+EXCLUDE_SYMBOLS        = "classcudaqx_1_1*"
 
 #---------------------------------------------------------------------------
 # Configuration options related to the preprocessor
