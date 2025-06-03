@@ -16,10 +16,12 @@ Code
 .. doxygenclass:: cudaq::qec::steane::steane
     :members:
 
-.. doxygenclass:: cudaq::qec::surface_code::stabilizer_grid
+.. doxygenclass:: cudaq::qec::surface_code::surface_code
     :members:
 
-.. doxygenclass:: cudaq::qec::surface_code::surface_code
+.. doxygenenum:: cudaq::qec::surface_code::surface_role
+
+.. doxygenclass:: cudaq::qec::surface_code::stabilizer_grid
     :members:
 
 
