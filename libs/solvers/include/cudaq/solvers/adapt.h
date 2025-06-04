@@ -1,5 +1,5 @@
 /****************************************************************-*- C++ -*-****
- * Copyright (c) 2024 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -62,7 +62,7 @@ using result =
     std::tuple<double, std::vector<double>, std::vector<cudaq::spin_op>>;
 
 /// Abstract base class for ADAPT-VQE implementation
-class adapt_impl : public extension_point<adapt_impl> {
+class adapt_impl : public cudaqx::extension_point<adapt_impl> {
 public:
   /// Run the ADAPT-VQE algorithm
   /// @param initState Initial state preparation quantum kernel

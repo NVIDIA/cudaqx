@@ -1,5 +1,5 @@
 /****************************************************************-*- C++ -*-****
- * Copyright (c) 2024 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -24,7 +24,7 @@ namespace cudaq::solvers {
 /// algorithms.
 /// @details This class extends the extension_point template, allowing for
 /// runtime extensibility.
-class operator_pool : public extension_point<operator_pool> {
+class operator_pool : public cudaqx::extension_point<operator_pool> {
 public:
   /// @brief Default constructor.
   operator_pool() = default;

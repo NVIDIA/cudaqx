@@ -17,7 +17,8 @@ namespace cudaq::solvers {
 
 /// @brief MoleculePackageDriver provides an extensible interface for
 /// generating molecular Hamiltonians and associated metadata.
-class MoleculePackageDriver : public extension_point<MoleculePackageDriver> {
+class MoleculePackageDriver
+    : public cudaqx::extension_point<MoleculePackageDriver> {
 public:
   /// @brief Return a `molecular_hamiltonian` described by the given
   /// geometry, basis set, spin, and charge. Optionally

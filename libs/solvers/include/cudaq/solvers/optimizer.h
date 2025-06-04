@@ -1,5 +1,5 @@
 /****************************************************************-*- C++ -*-****
- * Copyright (c) 2024 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -87,7 +87,7 @@ public:
 /// requires gradients or not. Parameterizing optimization strategies
 /// is left as a task for sub-types (things like initial parameters, max
 /// function evaluations, etc.).
-class optimizer : public extension_point<optimizer> {
+class optimizer : public cudaqx::extension_point<optimizer> {
 public:
   virtual ~optimizer() = default;
 

@@ -18,7 +18,7 @@
 namespace cudaqx::testing {
 
 // Define a new extension point for the framework
-class MyExtensionPoint : public extension_point<MyExtensionPoint> {
+class MyExtensionPoint : public cudaqx::extension_point<MyExtensionPoint> {
 public:
   virtual std::string parrotBack(const std::string &msg) const = 0;
   virtual ~MyExtensionPoint() = default;
@@ -81,7 +81,7 @@ TEST(CoreTester, checkSimpleExtensionPoint) {
 namespace cudaqx::testing {
 
 class MyExtensionPointWithArgs
-    : public extension_point<MyExtensionPointWithArgs, int, double> {
+    : public cudaqx::extension_point<MyExtensionPointWithArgs, int, double> {
 protected:
   int i;
   double d;

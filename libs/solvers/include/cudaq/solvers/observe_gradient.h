@@ -1,5 +1,5 @@
 /****************************************************************-*- C++ -*-****
- * Copyright (c) 2024 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -7,13 +7,8 @@
  ******************************************************************************/
 #pragma once
 
-#pragma once
-
 #include "optimizer.h"
 #include "cudaq/algorithms/observe.h"
-
-using namespace cudaq;
-using namespace cudaqx;
 
 namespace cudaq {
 
@@ -41,8 +36,8 @@ struct observe_iteration {
 /// used in global optimization of expectation values in
 /// typical quantum variational tasks.
 class observe_gradient
-    : public extension_point<observe_gradient, const ParameterizedKernel &,
-                             const spin_op &> {
+    : public cudaqx::extension_point<
+          observe_gradient, const ParameterizedKernel &, const spin_op &> {
 protected:
   /// The spin operator used in computing expectation values
   /// via `cudaq::observe`
@@ -115,7 +110,9 @@ public:
   static std::unique_ptr<observe_gradient>
   get(const std::string &name, const ParameterizedKernel &kernel,
       const spin_op &op) {
-    return extension_point::get(name, kernel, op);
+    return cudaqx::extension_point<observe_gradient,
+                                   const ParameterizedKernel &,
+                                   const spin_op &>::get(name, kernel, op);
   }
 
   void set_spin_op(const spin_op in_op) { op = in_op; }
