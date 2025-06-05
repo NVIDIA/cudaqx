@@ -14,6 +14,8 @@
 #include "common/Logger.h"
 
 #include "cudaq/qec/decoder.h"
+#include "cudaq/qec/detector_error_model.h"
+#include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/plugin_loader.h"
 
 #include "cuda-qx/core/kwargs_utils.h"
@@ -177,6 +179,44 @@ void bindDecoder(py::module &mod) {
       .def("get_version", &decoder::get_version,
            "Get the version of the decoder");
 
+  py::class_<detector_error_model>(qecmod, "DetectorErrorModel",
+                                   R"pbdoc(
+      A class representing a detector error model for quantum error correction.
+    )pbdoc")
+      .def(py::init<>())
+      .def_property_readonly(
+          "detector_error_matrix",
+          [](const detector_error_model &self) {
+            const auto &t = self.detector_error_matrix;
+            // Question: do you need py::cast(&self) here?
+            return py::array_t<uint8_t>(
+                t.shape(), {t.shape()[1] * sizeof(uint8_t), sizeof(uint8_t)},
+                t.data());
+          },
+          "The detector error matrix of the detector error model")
+      .def_readwrite("error_rates", &detector_error_model::error_rates,
+                     "The error rate of the detector error model")
+      .def_property_readonly(
+          "observables_flips_matrix",
+          [](const detector_error_model &self) {
+            const auto &t = self.observables_flips_matrix;
+            // Question: do you need py::cast(&self) here?
+            return py::array_t<uint8_t>(
+                t.shape(), {t.shape()[1] * sizeof(uint8_t), sizeof(uint8_t)},
+                t.data());
+          },
+          "The observables flips matrix of the detector error model")
+      .def("num_detectors", &detector_error_model::num_detectors,
+           "The number of detectors in the detector error model")
+      .def("num_error_mechanisms", &detector_error_model::num_error_mechanisms,
+           "The number of error mechanisms in the detector error model")
+      .def("num_observables", &detector_error_model::num_observables,
+           "The number of observables in the detector error model")
+      .def("canonicalize_for_rounds",
+           &detector_error_model::canonicalize_for_rounds,
+           "Canonicalize the detector error model for a given number of rounds",
+           py::arg("num_syndromes_per_round"));
+
   // Expose decorator function that handles inheritance
   qecmod.def("decoder", [&](const std::string &name) {
     return py::cpp_function([name](py::object decoder_class) -> py::object {
@@ -248,6 +288,151 @@ void bindDecoder(py::module &mod) {
       "Get a decoder by name with a given parity check matrix"
       "and optional decoder-specific parameters. Note: the parity check matrix "
       "must be in row-major order.");
+
+  qecmod.def(
+      "get_sorted_pcm_column_indices",
+      [](const py::array_t<uint8_t> &H, std::uint32_t num_syndromes_per_round) {
+        auto tensor_H = pcmToTensor(H);
+
+        return cudaq::qec::get_sorted_pcm_column_indices(
+            tensor_H, num_syndromes_per_round);
+      },
+      "Get the sorted column indices of a parity check matrix.", py::arg("H"),
+      py::arg("num_syndromes_per_round") = 0);
+
+  qecmod.def(
+      "reorder_pcm_columns",
+      [](const py::array_t<uint8_t> &H,
+         const py::array_t<uint32_t> &column_order) {
+        auto tensor_H = pcmToTensor(H);
+
+        // Use pybind to create a std::vector from the column_order array
+        std::vector<std::uint32_t> column_order_vec =
+            column_order.cast<std::vector<std::uint32_t>>();
+
+        auto H_new =
+            cudaq::qec::reorder_pcm_columns(tensor_H, column_order_vec);
+
+        // Construct a new py_array_t<uint8_t> from H_new (deep copy)
+        return py::array_t<uint8_t>(
+                   H_new.shape(),
+                   {H_new.shape()[1] * sizeof(uint8_t), sizeof(uint8_t)},
+                   H_new.data())
+            .attr("copy")();
+      },
+      "Reorder the columns of a parity check matrix.");
+
+  qecmod.def(
+      "sort_pcm_columns",
+      [](py::array_t<uint8_t> &H, std::uint32_t num_syndromes_per_round) {
+        auto tensor_H = pcmToTensor(H);
+        auto H_new =
+            cudaq::qec::sort_pcm_columns(tensor_H, num_syndromes_per_round);
+
+        // Construct a new py_array_t<uint8_t> from H_new (deep copy)
+        return py::array_t<uint8_t>(
+                   H_new.shape(),
+                   {H_new.shape()[1] * sizeof(uint8_t), sizeof(uint8_t)},
+                   H_new.data())
+            .attr("copy")();
+      },
+      "Sort the columns of a parity check matrix.", py::arg("H"),
+      py::arg("num_syndromes_per_round") = 0);
+
+  qecmod.def(
+      "dump_pcm",
+      [](const py::array_t<uint8_t> &H) {
+        auto tensor_H = pcmToTensor(H);
+        tensor_H.dump_bits();
+        printf("\n");
+        fflush(stdout);
+      },
+      "Dump the parity check matrix to stdout.");
+
+  qecmod.def(
+      "generate_random_pcm",
+      [](std::uint32_t n_rounds, std::uint32_t n_errs_per_round,
+         std::uint32_t n_syndromes_per_round, std::uint32_t weight,
+         std::uint32_t seed) {
+        std::mt19937_64 rng(seed);
+        if (seed == 0)
+          rng = std::mt19937_64(std::random_device()());
+
+        auto H_new = cudaq::qec::generate_random_pcm(n_rounds, n_errs_per_round,
+                                                     n_syndromes_per_round,
+                                                     weight, std::move(rng));
+        // Construct a new py_array_t<uint8_t> from H_new (deep copy)
+        return py::array_t<uint8_t>(
+                   H_new.shape(),
+                   {H_new.shape()[1] * sizeof(uint8_t), sizeof(uint8_t)},
+                   H_new.data())
+            .attr("copy")();
+      },
+      "Generate a random parity check matrix.", py::arg("n_rounds"),
+      py::arg("n_errs_per_round"), py::arg("n_syndromes_per_round"),
+      py::arg("weight"), py::arg("seed") = 0);
+
+  qecmod.def(
+      "get_pcm_for_rounds",
+      [](const py::array_t<uint8_t> &H, std::uint32_t num_syndromes_per_round,
+         std::uint32_t start_round, std::uint32_t end_round) {
+        auto tensor_H = pcmToTensor(H);
+
+        auto [H_new, first_column, last_column] =
+            cudaq::qec::get_pcm_for_rounds(tensor_H, num_syndromes_per_round,
+                                           start_round, end_round);
+
+        // Construct a new py_array_t<uint8_t> from H_new (deep copy)
+        return py::array_t<uint8_t>(
+                   H_new.shape(),
+                   {H_new.shape()[1] * sizeof(uint8_t), sizeof(uint8_t)},
+                   H_new.data())
+            .attr("copy")();
+      },
+      "Get a sub-PCM for a range of rounds.", py::arg("H"),
+      py::arg("num_syndromes_per_round"), py::arg("start_round"),
+      py::arg("end_round"));
+
+  qecmod.def(
+      "shuffle_pcm_columns",
+      [](const py::array_t<uint8_t> &H, std::uint32_t seed) {
+        auto tensor_H = pcmToTensor(H);
+        std::mt19937_64 rng(seed);
+        if (seed == 0)
+          rng = std::mt19937_64(std::random_device()());
+
+        auto H_new = cudaq::qec::shuffle_pcm_columns(tensor_H, std::move(rng));
+        // Construct a new py_array_t<uint8_t> from H_new (deep copy)
+        return py::array_t<uint8_t>(
+                   H_new.shape(),
+                   {H_new.shape()[1] * sizeof(uint8_t), sizeof(uint8_t)},
+                   H_new.data())
+            .attr("copy")();
+      },
+      "Shuffle the columns of a parity check matrix.", py::arg("H"),
+      py::arg("seed") = 0);
+
+  qecmod.def(
+      "simplify_pcm",
+      [](const py::array_t<uint8_t> &H, const py::array_t<double> &weights,
+         std::uint32_t num_syndromes_per_round) {
+        auto tensor_H = pcmToTensor(H);
+        auto weights_vec = weights.cast<std::vector<double>>();
+        auto [H_new, weights_new] = cudaq::qec::simplify_pcm(
+            tensor_H, weights_vec, num_syndromes_per_round);
+        // Construct a new py_array_t<uint8_t> from H_new.
+        py::array_t<uint8_t> H_new_py(
+            H_new.shape(),
+            {H_new.shape()[1] * sizeof(uint8_t), sizeof(uint8_t)},
+            H_new.data());
+        // Construct a new py_array_t<double> from weights_new.
+        py::array_t<double> weights_new_py(
+            {weights_new.size()}, {sizeof(double)}, weights_new.data());
+        return py::make_tuple(H_new_py.attr("copy")(),
+                              weights_new_py.attr("copy")());
+      },
+      "Simplify a parity check matrix.", py::arg("H"), py::arg("weights"),
+      py::arg("num_syndromes_per_round"));
 }
 
 } // namespace cudaq::qec
