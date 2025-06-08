@@ -59,6 +59,11 @@ public:
   /// @param _other The map to copy from
   heterogeneous_map(const heterogeneous_map &_other) { *this = _other; }
 
+  /// @brief Move constructor
+  /// @param _other The map to move from
+  heterogeneous_map(heterogeneous_map &&_other) noexcept
+      : items(std::move(_other.items)) {}
+
   /// @brief Constructor from initializer list
   /// @param list The initializer list of key-value pairs
   heterogeneous_map(
@@ -77,6 +82,16 @@ public:
     if (this != &_other) {
       clear();
       items = _other.items;
+    }
+    return *this;
+  }
+
+  /// @brief Move assignment operator
+  /// @param _other The map to move from
+  /// @return Reference to this map
+  heterogeneous_map &operator=(heterogeneous_map &&_other) {
+    if (this != &_other) {
+      items = std::move(_other.items);
     }
     return *this;
   }

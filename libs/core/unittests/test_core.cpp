@@ -866,6 +866,55 @@ TEST(HeterogeneousMapTest, InitializerListConstructor) {
   EXPECT_DOUBLE_EQ(map.get<double>("double_key"), 3.14);
 }
 
+TEST(HeterogeneousMapTest, MoveConstructor) {
+  cudaqx::heterogeneous_map original_map;
+  original_map.insert("int_key", 42);
+  original_map.insert("string_key", std::string("hello"));
+  original_map.insert("double_key", 3.14);
+
+  EXPECT_EQ(original_map.size(), 3);
+
+  // Move construct new map
+  cudaqx::heterogeneous_map moved_map(std::move(original_map));
+
+  // Verify the moved map has the data
+  EXPECT_EQ(moved_map.size(), 3);
+  EXPECT_EQ(moved_map.get<int>("int_key"), 42);
+  EXPECT_EQ(moved_map.get<std::string>("string_key"), "hello");
+  EXPECT_DOUBLE_EQ(moved_map.get<double>("double_key"), 3.14);
+
+  // Original map should be empty after move
+  EXPECT_EQ(original_map.size(), 0);
+}
+
+TEST(HeterogeneousMapTest, MoveAssignmentOperator) {
+  cudaqx::heterogeneous_map source_map;
+  source_map.insert("int_key", 42);
+  source_map.insert("string_key", std::string("hello"));
+  source_map.insert("double_key", 3.14);
+
+  cudaqx::heterogeneous_map target_map;
+  target_map.insert("old_key", std::string("old_value"));
+
+  EXPECT_EQ(source_map.size(), 3);
+  EXPECT_EQ(target_map.size(), 1);
+
+  // Move assign
+  target_map = std::move(source_map);
+
+  // Verify the target map has the moved data
+  EXPECT_EQ(target_map.size(), 3);
+  EXPECT_EQ(target_map.get<int>("int_key"), 42);
+  EXPECT_EQ(target_map.get<std::string>("string_key"), "hello");
+  EXPECT_DOUBLE_EQ(target_map.get<double>("double_key"), 3.14);
+
+  // Old data should be gone
+  EXPECT_FALSE(target_map.contains("old_key"));
+
+  // Source map should be empty after move
+  EXPECT_EQ(source_map.size(), 0);
+}
+
 TEST(GraphTester, AddEdge) {
   cudaqx::graph g;
   g.add_edge(1, 2, 1.5);
