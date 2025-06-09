@@ -41,7 +41,9 @@ for i in range(nShots):
     print(f"syndrome: {syndrome}")
 
     # Decode the syndrome to predict what happened to the data
-    convergence, result, opt = decoder.decode(syndrome)
+    results = decoder.decode(syndrome)
+    convergence = results.converged
+    result = results.result
     data_prediction = np.array(result, dtype=np.uint8)
     print(f"data_prediction: {data_prediction}")
 

@@ -67,7 +67,9 @@ for shot in range(0, nShots):
     for syndrome in syndromes[shot]:
         print("syndrome:", syndrome)
         # Decode the syndrome
-        convergence, result, opt = decoder.decode(syndrome)
+        results = decoder.decode(syndrome)
+        convergence = results.converged
+        result = results.result
         data_prediction = np.array(result, dtype=np.uint8)
 
         # see if the decoded result anti-commutes with the observables

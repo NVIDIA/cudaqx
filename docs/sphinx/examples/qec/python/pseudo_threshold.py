@@ -38,7 +38,9 @@ for p in PERates:
         syndrome = Hz @ data % 2
 
         # Decode the syndrome
-        convergence, result, opt = decoder.decode(syndrome)
+        results = decoder.decode(syndrome)
+        convergence = results.converged
+        result = results.result
         data_prediction = np.array(result)
 
         predicted_observable = observable @ data_prediction % 2
