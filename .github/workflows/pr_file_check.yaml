@@ -1,0 +1,49 @@
+name: Check for Large Files and Restricted Extensions
+
+on:
+  pull_request:
+    branches: 
+      - main
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  LLVM_VERSION: 16
+
+jobs:
+  check-files:
+    name: Check file size and type
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          set-safe-directory: true
+          fetch-depth: 1
+
+      - name: Fetch base branch
+        run: git fetch origin ${{ github.event.pull_request.base.ref }} --depth=1
+
+      - name: Check for large files
+        run: |
+          MAX_SIZE=5M  # Set max file size limit
+          LARGE_FILES=$(git diff --name-only --diff-filter=A origin/${{ github.event.pull_request.base.ref }} | xargs du -h | awk -v max="$MAX_SIZE" '$1 > max {print $2}')
+
+          if [[ ! -z "$LARGE_FILES" ]]; then
+            echo "❌ The following files exceed the allowed size of $MAX_SIZE:"
+            echo "$LARGE_FILES"
+            exit 1
+          fi
+
+      - name: Check for restricted file types
+        run: |
+          BLOCKED_EXTENSIONS="(exe|zip|tar.gz|bz2)"  # Add any forbidden extensions
+          BAD_FILES=$(git diff --name-only --diff-filter=A origin/${{ github.event.pull_request.base.ref }} | grep -E "\.($BLOCKED_EXTENSIONS)$" || true)
+          if [[ ! -z "$BAD_FILES" ]]; then
+            echo "❌ The following files have restricted extensions:"
+            echo "$BAD_FILES"
+            exit 1
+          fi
