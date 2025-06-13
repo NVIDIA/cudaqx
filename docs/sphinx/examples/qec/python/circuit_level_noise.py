@@ -27,7 +27,10 @@ print(f"Lz:\n{Lz}")
 nShots = 3
 nRounds = 4
 
-# error probabily
+# Uncomment for repeatability
+# cudaq.set_random_seed(13)
+
+# error probability
 p = 0.01
 noise = cudaq.NoiseModel()
 noise.add_all_qubit_channel("x", cudaq.Depolarization2(p), 1)
@@ -37,14 +40,18 @@ statePrep = qec.operation.prep0
 # our expected measurement in this state is 0
 expected_value = 0
 
+# For large runs, set verbose to False to suppress output
+verbose = nShots <= 10
+
 # sample the steane memory circuit with noise on each cx gate
 # reading out the syndromes after each stabilizer round (xor'd against the previous)
 # and readout out the data qubits at the end of the experiment
 syndromes, data = qec.sample_memory_circuit(steane, statePrep, nShots, nRounds,
                                             noise)
-print("From sample function:\n")
-print("syndromes:\n", syndromes)
-print("data:\n", data)
+if verbose:
+    print("From sample function:\n")
+    print("syndromes:\n", syndromes)
+    print("data:\n", data)
 
 # Get a decoder
 decoder = qec.get_decoder("single_error_lut", H)
@@ -54,7 +61,8 @@ nLogicalErrors = 0
 logical_measurements = (Lz @ data.transpose()) % 2
 # only one logical qubit, so do not need the second axis
 logical_measurements = logical_measurements.flatten()
-print("LMz:\n", logical_measurements)
+if verbose:
+    print("LMz:\n", logical_measurements)
 
 # organize data by shot and round if desired
 syndromes = syndromes.reshape((nShots, nRounds, syndromes.shape[1]))
@@ -63,9 +71,11 @@ syndromes = syndromes.reshape((nShots, nRounds, syndromes.shape[1]))
 # through the stabilizer rounds
 pauli_frame = np.array([0, 0], dtype=np.uint8)
 for shot in range(0, nShots):
-    print("shot:", shot)
+    if verbose:
+        print("shot:", shot)
     for syndrome in syndromes[shot]:
-        print("syndrome:", syndrome)
+        if verbose:
+            print("syndrome:", syndrome)
         # Decode the syndrome
         results = decoder.decode(syndrome)
         convergence = results.converged
@@ -73,23 +83,27 @@ for shot in range(0, nShots):
         data_prediction = np.array(result, dtype=np.uint8)
 
         # see if the decoded result anti-commutes with the observables
-        print("decode result:", data_prediction)
+        if verbose:
+            print("decode result:", data_prediction)
         decoded_observables = (observables @ data_prediction) % 2
-        print("decoded_observables:", decoded_observables)
+        if verbose:
+            print("decoded_observables:", decoded_observables)
 
         # update pauli frame
         pauli_frame = (pauli_frame + decoded_observables) % 2
-        print("pauli frame:", pauli_frame)
+        if verbose:
+            print("pauli frame:", pauli_frame)
 
     # after pauli frame has tracked corrections through the rounds
     # apply the pauli frame correction to the measurement, and see
     # if this matches the state we intended to prepare
     # We prepared |0>, so we check if logical measurement Mz + Pf_X = 0
     corrected_mz = (logical_measurements[shot] + pauli_frame[0]) % 2
-    print("Expected value:", expected_value)
-    print("Corrected value:", corrected_mz)
+    if verbose:
+        print("Expected value:", expected_value)
+        print("Corrected value:", corrected_mz)
     if (corrected_mz != expected_value):
         nLogicalErrors += 1
 
 # Count how many shots the decoder failed to correct the errors
-print("Number of logical errors:", nLogicalErrors)
+print(f"Number of logical errors out of {nShots} shots: {nLogicalErrors}")

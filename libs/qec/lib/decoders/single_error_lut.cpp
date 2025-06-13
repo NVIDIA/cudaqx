@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2022 - 2024 NVIDIA Corporation & Affiliates.                  *
+ * Copyright (c) 2022 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -83,12 +83,7 @@ public:
     for (std::size_t qErr = 0; qErr < block_size; qErr++) {
       std::string err_sig(syndrome_size, '0');
       for (std::size_t r = 0; r < syndrome_size; r++) {
-        bool syndrome = 0;
-        // Toggle syndrome on every "1" entry in the row.
-        // Except if there is an error on this qubit (c == qErr).
-        for (std::size_t c = 0; c < block_size; c++)
-          syndrome ^= (c != qErr) && H.at({r, c});
-        err_sig[r] = syndrome ? '1' : '0';
+        err_sig[r] = H.at({r, qErr}) ? '1' : '0';
       }
       // printf("Adding err_sig=%s for qErr=%lu\n", err_sig.c_str(), qErr);
       single_qubit_err_signatures.insert({err_sig, qErr});
