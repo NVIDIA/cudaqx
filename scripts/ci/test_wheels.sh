@@ -40,8 +40,21 @@ fi
 # QEC library
 # ======================================
 
-${python} -m pip install /wheels/cudaq_qec-*-cp${python_version_no_dot}-cp${python_version_no_dot}-*.whl
-${python} -m pytest -s libs/qec/python/tests/
+# Check platform from matrix configuration
+if [ "$2" = "amd64" ]; then
+  # Install the wheel with tensor network decoder optional dependencies
+  ${python} -m pip install /wheels/cudaq_qec-*-cp${python_version_no_dot}-cp${python_version_no_dot}-*.whl[tn_decoder]
+  ${python} -m pytest -s libs/qec/python/tests/
+
+  # Run additional tensor network decoder tests
+  ${python} -m pytest -s libs/qec/python/cudaq_qec/plugins/decoders/test_tensor_network_decoder.py
+  ${python} -m pytest -s libs/qec/python/cudaq_qec/plugins/decoders/tensor_network_utils/test_tensor_network_utils.py
+else
+  # On ARM, install without tensor network decoder dependencies
+  echo "Running on ARM architecture - skipping tensor network decoder tests"
+  ${python} -m pip install /wheels/cudaq_qec-*-cp${python_version_no_dot}-cp${python_version_no_dot}-*.whl
+  ${python} -m pytest -s libs/qec/python/tests/
+fi
 
 # Solvers library
 # ======================================
