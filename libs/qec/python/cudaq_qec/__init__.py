@@ -25,14 +25,8 @@ generate_random_bit_flips = qecrt.generate_random_bit_flips
 sample_memory_circuit = qecrt.sample_memory_circuit
 sample_code_capacity = qecrt.sample_code_capacity
 dem_from_memory_circuit = qecrt.dem_from_memory_circuit
-dem_from_memory_circuit_obs_matrix = qecrt.dem_from_memory_circuit_obs_matrix
-dem_from_memory_circuit_obs_terms = qecrt.dem_from_memory_circuit_obs_terms
 x_dem_from_memory_circuit = qecrt.x_dem_from_memory_circuit
-x_dem_from_memory_circuit_obs_matrix = qecrt.x_dem_from_memory_circuit_obs_matrix
-x_dem_from_memory_circuit_obs_terms = qecrt.x_dem_from_memory_circuit_obs_terms
 z_dem_from_memory_circuit = qecrt.z_dem_from_memory_circuit
-z_dem_from_memory_circuit_obs_matrix = qecrt.z_dem_from_memory_circuit_obs_matrix
-z_dem_from_memory_circuit_obs_terms = qecrt.z_dem_from_memory_circuit_obs_terms
 
 dump_pcm = qecrt.dump_pcm
 generate_random_pcm = qecrt.generate_random_pcm

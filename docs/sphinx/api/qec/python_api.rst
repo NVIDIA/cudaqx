@@ -17,14 +17,8 @@ Detector Error Model
     :members:
 
 .. autofunction:: cudaq_qec.dem_from_memory_circuit
-.. autofunction:: cudaq_qec.dem_from_memory_circuit_obs_matrix
-.. autofunction:: cudaq_qec.dem_from_memory_circuit_obs_terms
 .. autofunction:: cudaq_qec.x_dem_from_memory_circuit
-.. autofunction:: cudaq_qec.x_dem_from_memory_circuit_obs_matrix
-.. autofunction:: cudaq_qec.x_dem_from_memory_circuit_obs_terms
 .. autofunction:: cudaq_qec.z_dem_from_memory_circuit
-.. autofunction:: cudaq_qec.z_dem_from_memory_circuit_obs_matrix
-.. autofunction:: cudaq_qec.z_dem_from_memory_circuit_obs_terms
 
 Decoder Interfaces
 ==================

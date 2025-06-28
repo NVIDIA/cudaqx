@@ -29,14 +29,8 @@ Detector Error Model
     :members:
 
 .. doxygenfunction:: cudaq::qec::dem_from_memory_circuit(const code &, operation, std::size_t, cudaq::noise_model &)
-.. doxygenfunction:: cudaq::qec::dem_from_memory_circuit_obs_matrix(const code &, operation, const cudaqx::tensor<uint8_t> &, std::size_t, cudaq::noise_model &)
-.. doxygenfunction:: cudaq::qec::dem_from_memory_circuit_obs_terms(const code &, operation, const std::vector<spin_op_term> &, std::size_t, cudaq::noise_model &)
 .. doxygenfunction:: cudaq::qec::x_dem_from_memory_circuit(const code &, operation, std::size_t, cudaq::noise_model &)
-.. doxygenfunction:: cudaq::qec::x_dem_from_memory_circuit_obs_matrix(const code &, operation, const cudaqx::tensor<uint8_t> &, std::size_t, cudaq::noise_model &)
-.. doxygenfunction:: cudaq::qec::x_dem_from_memory_circuit_obs_terms(const code &, operation, const std::vector<spin_op_term> &, std::size_t, cudaq::noise_model &)
 .. doxygenfunction:: cudaq::qec::z_dem_from_memory_circuit(const code &, operation, std::size_t, cudaq::noise_model &)
-.. doxygenfunction:: cudaq::qec::z_dem_from_memory_circuit_obs_matrix(const code &, operation, const cudaqx::tensor<uint8_t> &, std::size_t, cudaq::noise_model &)
-.. doxygenfunction:: cudaq::qec::z_dem_from_memory_circuit_obs_terms(const code &, operation, const std::vector<spin_op_term> &, std::size_t, cudaq::noise_model &)
 
 Decoder Interfaces
 ==================

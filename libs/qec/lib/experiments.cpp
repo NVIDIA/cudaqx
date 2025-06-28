@@ -386,122 +386,31 @@ dem_from_memory_circuit(const code &code, operation statePrep,
       keep_x_stabilizers, keep_z_stabilizers);
 }
 
-/// @brief Given a memory circuit setup, generate a DEM. Overload for Pauli
-/// observable matrix
-detector_error_model
-dem_from_memory_circuit_obs_matrix(const code &code, operation statePrep,
-                                   const cudaqx::tensor<uint8_t> &obs_matrix,
-                                   std::size_t numRounds,
-                                   cudaq::noise_model &noise) {
-  constexpr bool keep_x_stabilizers = true;
-  constexpr bool keep_z_stabilizers = true;
-  const bool is_z =
-      statePrep == operation::prep0 || statePrep == operation::prep1;
-  return details::dem_from_memory_circuit(code, statePrep, numRounds, noise,
-                                          obs_matrix, is_z, keep_x_stabilizers,
-                                          keep_z_stabilizers);
-}
-
-/// @brief Given a memory circuit setup, generate a DEM. Overload for Pauli
-/// observables.
-detector_error_model
-dem_from_memory_circuit_obs_terms(const code &code, operation statePrep,
-                                  const std::vector<spin_op_term> &observables,
-                                  std::size_t numRounds,
-                                  cudaq::noise_model &noise) {
-  constexpr bool keep_x_stabilizers = true;
-  constexpr bool keep_z_stabilizers = true;
-  const bool is_z =
-      statePrep == operation::prep0 || statePrep == operation::prep1;
-  // FIXME - confirm this is the correct behavior for this overload.
-  const auto obs_matrix =
-      is_z ? to_parity_matrix(observables, stabilizer_type::Z)
-           : to_parity_matrix(observables, stabilizer_type::X);
-  return dem_from_memory_circuit_obs_matrix(code, statePrep, obs_matrix,
-                                            numRounds, noise);
-}
-
 // For CSS codes, may want to partition x vs z decoding
 detector_error_model x_dem_from_memory_circuit(const code &code,
                                                operation statePrep,
                                                std::size_t numRounds,
                                                cudaq::noise_model &noise) {
+  constexpr bool keep_x_stabilizers = true;
+  constexpr bool keep_z_stabilizers = false;
   bool is_z = statePrep == operation::prep0 || statePrep == operation::prep1;
   auto obs_matrix = is_z ? code.get_observables_z() : code.get_observables_x();
-  return x_dem_from_memory_circuit_obs_matrix(code, statePrep, obs_matrix,
-                                              numRounds, noise);
+  return details::dem_from_memory_circuit(code, statePrep, numRounds, noise,
+                                          obs_matrix, is_z, keep_x_stabilizers,
+                                          keep_z_stabilizers);
 }
 
 detector_error_model z_dem_from_memory_circuit(const code &code,
                                                operation statePrep,
                                                std::size_t numRounds,
                                                cudaq::noise_model &noise) {
-  bool is_z = statePrep == operation::prep0 || statePrep == operation::prep1;
-  auto obs_matrix = is_z ? code.get_observables_z() : code.get_observables_x();
-  return z_dem_from_memory_circuit_obs_matrix(code, statePrep, obs_matrix,
-                                              numRounds, noise);
-}
-
-// CSS version
-// Overload for Pauli observable matrix
-detector_error_model
-x_dem_from_memory_circuit_obs_matrix(const code &code, operation statePrep,
-                                     const cudaqx::tensor<uint8_t> &obs_matrix,
-                                     std::size_t numRounds,
-                                     cudaq::noise_model &noise) {
-  constexpr bool keep_x_stabilizers = true;
-  constexpr bool keep_z_stabilizers = false;
-  const bool is_z =
-      statePrep == operation::prep0 || statePrep == operation::prep1;
-  const bool run_mz_circuit = is_z;
-  return details::dem_from_memory_circuit(
-      code, statePrep, numRounds, noise, obs_matrix, run_mz_circuit,
-      keep_x_stabilizers, keep_z_stabilizers);
-}
-
-detector_error_model
-z_dem_from_memory_circuit_obs_matrix(const code &code, operation statePrep,
-                                     const cudaqx::tensor<uint8_t> &obs_matrix,
-                                     std::size_t numRounds,
-                                     cudaq::noise_model &noise) {
   constexpr bool keep_x_stabilizers = false;
   constexpr bool keep_z_stabilizers = true;
-  const bool is_z =
-      statePrep == operation::prep0 || statePrep == operation::prep1;
-  const bool run_mz_circuit = is_z;
-  return details::dem_from_memory_circuit(
-      code, statePrep, numRounds, noise, obs_matrix, run_mz_circuit,
-      keep_x_stabilizers, keep_z_stabilizers);
-}
-
-// CSS version
-// Overload for Pauli observables
-detector_error_model x_dem_from_memory_circuit_obs_terms(
-    const code &code, operation statePrep,
-    const std::vector<spin_op_term> &observables, std::size_t numRounds,
-    cudaq::noise_model &noise) {
-  const bool is_z =
-      statePrep == operation::prep0 || statePrep == operation::prep1;
-  // FIXME - confirm this is the correct behavior for this overload.
-  const auto obs_matrix =
-      is_z ? to_parity_matrix(observables, stabilizer_type::Z)
-           : to_parity_matrix(observables, stabilizer_type::X);
-  return x_dem_from_memory_circuit_obs_matrix(code, statePrep, obs_matrix,
-                                              numRounds, noise);
-}
-
-detector_error_model z_dem_from_memory_circuit_obs_terms(
-    const code &code, operation statePrep,
-    const std::vector<spin_op_term> &observables, std::size_t numRounds,
-    cudaq::noise_model &noise) {
-  const bool is_z =
-      statePrep == operation::prep0 || statePrep == operation::prep1;
-  // FIXME - confirm this is the correct behavior for this overload.
-  const auto obs_matrix =
-      is_z ? to_parity_matrix(observables, stabilizer_type::Z)
-           : to_parity_matrix(observables, stabilizer_type::X);
-  return z_dem_from_memory_circuit_obs_matrix(code, statePrep, obs_matrix,
-                                              numRounds, noise);
+  bool is_z = statePrep == operation::prep0 || statePrep == operation::prep1;
+  auto obs_matrix = is_z ? code.get_observables_z() : code.get_observables_x();
+  return details::dem_from_memory_circuit(code, statePrep, numRounds, noise,
+                                          obs_matrix, is_z, keep_x_stabilizers,
+                                          keep_z_stabilizers);
 }
 
 } // namespace cudaq::qec

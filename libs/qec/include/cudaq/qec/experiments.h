@@ -112,34 +112,6 @@ cudaq::qec::detector_error_model
 dem_from_memory_circuit(const code &code, operation statePrep,
                         std::size_t numRounds, cudaq::noise_model &noise);
 
-/// @brief Given a memory circuit setup, generate a DEM. Overload for Pauli
-/// observable matrix.
-/// @param code QEC Code to sample
-/// @param statePrep Initial state preparation operation
-/// @param obs_matrix Pauli observable matrix
-/// @param numRounds Number of stabilizer measurement rounds
-/// @param noise Noise model to apply
-/// @return Detector error model
-detector_error_model
-dem_from_memory_circuit_obs_matrix(const code &code, operation statePrep,
-                                   const cudaqx::tensor<uint8_t> &obs_matrix,
-                                   std::size_t numRounds,
-                                   cudaq::noise_model &noise);
-
-/// @brief Given a memory circuit setup, generate a DEM. Overload for Pauli
-/// observables.
-/// @param code QEC Code to sample
-/// @param statePrep Initial state preparation operation
-/// @param observables Pauli observables
-/// @param numRounds Number of stabilizer measurement rounds
-/// @param noise Noise model to apply
-/// @return Detector error model
-detector_error_model
-dem_from_memory_circuit_obs_terms(const code &code, operation statePrep,
-                                  const std::vector<spin_op_term> &observables,
-                                  std::size_t numRounds,
-                                  cudaq::noise_model &noise);
-
 /// @brief Given a memory circuit setup, generate a DEM for X basis.
 /// @param code QEC Code to sample
 /// @param statePrep Initial state preparation operation
@@ -161,58 +133,4 @@ detector_error_model z_dem_from_memory_circuit(const code &code,
                                                operation statePrep,
                                                std::size_t numRounds,
                                                cudaq::noise_model &noise);
-
-/// @brief Given a memory circuit setup, generate a DEM for X basis. Overload
-/// for Pauli observable matrix.
-/// @param code QEC Code to sample
-/// @param statePrep Initial state preparation operation
-/// @param obs_matrix Pauli observable matrix
-/// @param numRounds Number of stabilizer measurement rounds
-/// @param noise Noise model to apply
-/// @return Detector error model
-detector_error_model
-x_dem_from_memory_circuit_obs_matrix(const code &code, operation statePrep,
-                                     const cudaqx::tensor<uint8_t> &obs_matrix,
-                                     std::size_t numRounds,
-                                     cudaq::noise_model &noise);
-
-/// @brief Given a memory circuit setup, generate a DEM for Z basis. Overload
-/// for Pauli observable matrix.
-/// @param code QEC Code to sample
-/// @param statePrep Initial state preparation operation
-/// @param obs_matrix Pauli observable matrix
-/// @param numRounds Number of stabilizer measurement rounds
-/// @param noise Noise model to apply
-/// @return Detector error model
-detector_error_model
-z_dem_from_memory_circuit_obs_matrix(const code &code, operation statePrep,
-                                     const cudaqx::tensor<uint8_t> &obs_matrix,
-                                     std::size_t numRounds,
-                                     cudaq::noise_model &noise);
-
-/// @brief Given a memory circuit setup, generate a DEM for X basis. Overload
-/// for Pauli observables.
-/// @param code QEC Code to sample
-/// @param statePrep Initial state preparation operation
-/// @param observables Pauli observables
-/// @param numRounds Number of stabilizer measurement rounds
-/// @param noise Noise model to apply
-/// @return Detector error model
-detector_error_model x_dem_from_memory_circuit_obs_terms(
-    const code &code, operation statePrep,
-    const std::vector<spin_op_term> &observables, std::size_t numRounds,
-    cudaq::noise_model &noise);
-
-/// @brief Given a memory circuit setup, generate a DEM for Z basis. Overload
-/// for Pauli observables.
-/// @param code QEC Code to sample
-/// @param statePrep Initial state preparation operation
-/// @param observables Pauli observables
-/// @param numRounds Number of stabilizer measurement rounds
-/// @param noise Noise model to apply
-/// @return Detector error model
-detector_error_model z_dem_from_memory_circuit_obs_terms(
-    const code &code, operation statePrep,
-    const std::vector<spin_op_term> &observables, std::size_t numRounds,
-    cudaq::noise_model &noise);
 } // namespace cudaq::qec
