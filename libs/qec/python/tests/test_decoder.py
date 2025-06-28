@@ -264,7 +264,8 @@ def test_get_pcm_for_rounds():
                                   weight=3,
                                   seed=13)
     pcm = qec.sort_pcm_columns(pcm)
-    pcm_for_rounds = qec.get_pcm_for_rounds(pcm, 10, 0, 1)
+    pcm_for_rounds, first_column, last_column = qec.get_pcm_for_rounds(
+        pcm, 10, 0, 1)
     assert pcm_for_rounds.shape == (20, 30)
     print('')
     qec.dump_pcm(pcm_for_rounds)
