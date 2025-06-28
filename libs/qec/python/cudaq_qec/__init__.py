@@ -43,6 +43,7 @@ reorder_pcm_columns = qecrt.reorder_pcm_columns
 shuffle_pcm_columns = qecrt.shuffle_pcm_columns
 simplify_pcm = qecrt.simplify_pcm
 sort_pcm_columns = qecrt.sort_pcm_columns
+pcm_extend_to_n_rounds = qecrt.pcm_extend_to_n_rounds
 
 from .plugins import decoders, codes
 import pkgutil, importlib, traceback

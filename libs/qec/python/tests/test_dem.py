@@ -223,5 +223,35 @@ def test_decoding_from_surface_code_dem_from_memory_circuit(
     assert nLogicalErrorsWithDecoding < nLogicalErrorsWithoutDecoding
 
 
+def test_pcm_extend_to_n_rounds():
+    # This test independently compares the functionality of dem_from_memory_circuit
+    # (of two different numbers of rounds) to pcm_extend_to_n_rounds.
+    statePrep = qec.operation.prep0
+    nRounds = 5
+    noise = cudaq.NoiseModel()
+    noise.add_all_qubit_channel("x", cudaq.Depolarization2(0.003), 1)
+    code = qec.get_code('surface_code', distance=5)
+    dem05 = qec.z_dem_from_memory_circuit(code, statePrep, nRounds, noise)
+    nSyndromesPerRound = dem05.detector_error_matrix.shape[0] // nRounds
+    dem15 = qec.z_dem_from_memory_circuit(code, statePrep, 3 * nRounds, noise)
+    H05 = dem05.detector_error_matrix
+    H15 = dem15.detector_error_matrix
+    H15_new, column_list = qec.pcm_extend_to_n_rounds(H05, nSyndromesPerRound,
+                                                      3 * nRounds)
+    # Check if H15 == H15_new, one column at a time.
+    for c in range(H15.shape[1]):
+        if not np.allclose(H15[:, c], H15_new[:, c]):
+            print(f'Column {c} is not equal')
+            # Use join to print the columns as a string without spaces
+            print(f'H15    [:, c] : {"".join(map(str, H15[:, c]))}')
+            print(f'H15_new[:, c] : {"".join(map(str, H15_new[:, c]))}')
+            assert False
+    assert len(column_list) == H15_new.shape[1]
+
+    # Check the extended error rates.
+    H15_new_error_rates = np.array(dem05.error_rates)[column_list]
+    assert np.allclose(H15_new_error_rates, dem15.error_rates, atol=1e-6)
+
+
 if __name__ == "__main__":
     pytest.main()

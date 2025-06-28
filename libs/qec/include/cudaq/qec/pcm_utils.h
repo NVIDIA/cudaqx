@@ -119,4 +119,15 @@ cudaqx::tensor<uint8_t> generate_random_pcm(std::size_t n_rounds,
 cudaqx::tensor<uint8_t> shuffle_pcm_columns(const cudaqx::tensor<uint8_t> &pcm,
                                             std::mt19937_64 &&rng);
 
+/// @brief Extend a PCM to the given number of rounds.
+/// @param pcm The PCM to extend.
+/// @param num_syndromes_per_round The number of syndromes per round.
+/// @param n_rounds The number of rounds to extend the PCM to.
+/// @return A pair of the new PCM and the list of column indices from the
+/// original PCM that were used to form the new PCM.
+std::pair<cudaqx::tensor<uint8_t>, std::vector<std::uint32_t>>
+pcm_extend_to_n_rounds(const cudaqx::tensor<uint8_t> &pcm,
+                       std::size_t num_syndromes_per_round,
+                       std::uint32_t n_rounds);
+
 } // namespace cudaq::qec

@@ -7,6 +7,7 @@
  ******************************************************************************/
 
 #include "cudaq/qec/pcm_utils.h"
+#include <cassert>
 #include <cstring>
 #include <random>
 
@@ -346,12 +347,12 @@ get_pcm_for_rounds(const cudaqx::tensor<uint8_t> &pcm,
       columns_in_range.push_back(c);
     // If it straddles the start_round, then we only include it if
     // straddle_start_round is true.
-    else if (straddle_start_round && first_round < start_round &&
+    else if (straddle_start_round && first_round <= start_round &&
              last_round >= start_round)
       columns_in_range.push_back(c);
     // If it straddles the end_round, then we only include it if
     // straddle_end_round is true.
-    else if (straddle_end_round && first_round < end_round &&
+    else if (straddle_end_round && first_round <= end_round &&
              last_round >= end_round)
       columns_in_range.push_back(c);
   }
@@ -424,5 +425,162 @@ cudaqx::tensor<uint8_t> shuffle_pcm_columns(const cudaqx::tensor<uint8_t> &pcm,
   std::iota(column_order.begin(), column_order.end(), 0);
   std::shuffle(column_order.begin(), column_order.end(), rng);
   return reorder_pcm_columns(pcm, column_order);
+}
+
+/// @brief Extend a PCM to the given number of rounds.
+/// @param pcm The PCM to extend.
+/// @param num_syndromes_per_round The number of syndromes per round.
+/// @param n_rounds The number of rounds to extend the PCM to.
+/// @return A pair of the new PCM and the list of column indices from the
+/// original PCM that were used to form the new PCM.
+std::pair<cudaqx::tensor<uint8_t>, std::vector<std::uint32_t>>
+pcm_extend_to_n_rounds(const cudaqx::tensor<uint8_t> &pcm,
+                       std::size_t num_syndromes_per_round,
+                       std::uint32_t n_rounds) {
+  // Current number of rounds
+  auto orig_num_rounds = pcm.shape()[0] / num_syndromes_per_round;
+
+  if (orig_num_rounds > n_rounds) {
+    throw std::invalid_argument(
+        "extend_pcm_to_n_rounds: original number of "
+        "rounds must be less than or equal to n_rounds");
+  }
+
+  // Verify the PCM is already sorted.
+  if (!pcm_is_sorted(pcm, num_syndromes_per_round)) {
+    throw std::invalid_argument(
+        "extend_pcm_to_n_rounds: input PCM is not sorted");
+  }
+
+  // Find out the number of non-zero columns in the PCM.
+  auto num_orig_non_zero_cols = [&]() -> std::uint32_t {
+    auto [sub_pcm, first_column, last_column] = get_pcm_for_rounds(
+        pcm, num_syndromes_per_round, 0, orig_num_rounds - 1, true, true);
+    return static_cast<std::uint32_t>(sub_pcm.shape()[1]);
+  }();
+
+  // Traverse the PCM, fetching one round at a time. Save the first and
+  // last time the PCM matches the previous round. Once it mismatches after it
+  // had started matching, then exit the loop.
+  auto [prior_sub_pcm, prior_first_column, prior_last_column] =
+      get_pcm_for_rounds(pcm, num_syndromes_per_round, 0, 0, true, true);
+  std::uint32_t first_match = std::numeric_limits<std::uint32_t>::max();
+  std::uint32_t last_match = std::numeric_limits<std::uint32_t>::min();
+  std::vector<std::uint32_t> first_columns;
+  std::vector<std::uint32_t> last_columns;
+  first_columns.push_back(prior_first_column);
+  last_columns.push_back(prior_last_column);
+  for (std::uint32_t w = 1; w < orig_num_rounds; w++) {
+    auto [sub_pcm, first_column, last_column] =
+        get_pcm_for_rounds(pcm, num_syndromes_per_round, w, w, true, true);
+    first_columns.push_back(first_column);
+    last_columns.push_back(last_column);
+    if (sub_pcm.shape()[0] == prior_sub_pcm.shape()[0] &&
+        sub_pcm.shape()[1] == prior_sub_pcm.shape()[1] &&
+        memcmp(sub_pcm.data(), prior_sub_pcm.data(),
+               sub_pcm.size() * sizeof(uint8_t)) == 0) {
+      // The PCM matches the previous round, so we start (or continue) tracking
+      // first_match and last_match.
+      first_match = std::min(first_match, w);
+      last_match = std::max(last_match, w);
+    } else if (first_match != std::numeric_limits<std::uint32_t>::max()) {
+      // We've found a mismatch after we started matching, so we can stop here.
+      break;
+    }
+    prior_sub_pcm = std::move(sub_pcm);
+  }
+
+  if (first_match == std::numeric_limits<std::uint32_t>::max()) {
+    throw std::invalid_argument(
+        "extend_pcm_to_n_rounds: PCM round analysis determined that "
+        "consecutive rounds never matched each other, so we don't know how to "
+        "insert more rounds");
+  }
+
+  // prior_sub_pcm contains the sub-PCM that we are going to insert
+  // (potentially multiple times).
+  std::uint32_t num_overlap_cols_per_round =
+      last_columns[first_match - 1] + 1 - first_columns[first_match];
+  std::uint32_t num_cols_per_inserted_round =
+      prior_sub_pcm.shape()[1] - num_overlap_cols_per_round;
+
+  // Calculate the size of the new PCM.
+  std::uint32_t num_added_rounds = n_rounds - orig_num_rounds;
+  std::uint32_t num_added_cols = num_cols_per_inserted_round * num_added_rounds;
+  std::uint32_t num_added_rows = num_syndromes_per_round * num_added_rounds;
+
+  // Now we insert the new rounds into the PCM.
+
+  auto copy_sub_pcm_into_big_pcm = [](const cudaqx::tensor<uint8_t> &sub_pcm,
+                                      cudaqx::tensor<uint8_t> &big_pcm,
+                                      std::uint32_t starting_row,
+                                      std::uint32_t starting_col) {
+    assert(starting_row + sub_pcm.shape()[0] <= big_pcm.shape()[0]);
+    assert(starting_col + sub_pcm.shape()[1] <= big_pcm.shape()[1]);
+    for (std::uint32_t r = 0; r < sub_pcm.shape()[0]; r++) {
+      auto *sub_pcm_row = &sub_pcm.at({r, 0});
+      auto *big_pcm_row = &big_pcm.at({starting_row + r, starting_col});
+      std::memcpy(big_pcm_row, sub_pcm_row,
+                  sub_pcm.shape()[1] * sizeof(uint8_t));
+    }
+  };
+
+  auto new_pcm_size = std::vector<std::size_t>{
+      pcm.shape()[0] + num_added_rows, num_orig_non_zero_cols + num_added_cols};
+  cudaqx::tensor<uint8_t> new_pcm(new_pcm_size);
+  std::vector<std::uint32_t> column_list;
+  column_list.reserve(new_pcm_size[1]);
+  std::uint32_t num_rows_populated = 0;
+  std::uint32_t num_cols_populated = 0;
+  // Copy the beginning.
+  {
+    auto [sub_pcm, first_column, last_column] = get_pcm_for_rounds(
+        pcm, num_syndromes_per_round, 0, last_match - 1, true, true);
+    copy_sub_pcm_into_big_pcm(sub_pcm, new_pcm, 0, 0);
+    for (std::uint32_t c = 0; c <= last_column; c++)
+      column_list.push_back(c);
+    num_rows_populated = sub_pcm.shape()[0];
+    num_cols_populated = sub_pcm.shape()[1];
+  }
+  // Do the extension.
+  {
+    auto [sub_pcm, first_column, last_column] = get_pcm_for_rounds(
+        pcm, num_syndromes_per_round, first_match, first_match, true, true);
+    for (std::uint32_t w = 0; w < num_added_rounds; w++) {
+      copy_sub_pcm_into_big_pcm(sub_pcm, new_pcm, num_rows_populated,
+                                num_cols_populated -
+                                    num_overlap_cols_per_round);
+      for (std::uint32_t c = first_column + num_overlap_cols_per_round;
+           c <= last_column; c++)
+        column_list.push_back(c);
+      num_rows_populated += num_syndromes_per_round;
+      num_cols_populated += num_cols_per_inserted_round;
+    }
+  }
+  // Copy the end.
+  {
+    auto [sub_pcm, first_column, last_column] =
+        get_pcm_for_rounds(pcm, num_syndromes_per_round, last_match,
+                           orig_num_rounds - 1, true, true);
+    std::uint32_t col_insert_start =
+        new_pcm.shape()[1] - (pcm.shape()[1] - first_column);
+    std::uint32_t first_orig_col = first_column + num_overlap_cols_per_round;
+    copy_sub_pcm_into_big_pcm(sub_pcm, new_pcm, num_rows_populated,
+                              col_insert_start);
+    for (std::uint32_t c = first_orig_col; c <= last_column; c++)
+      column_list.push_back(c);
+    num_cols_populated += last_column - first_orig_col + 1;
+    num_rows_populated += num_syndromes_per_round;
+  }
+
+  if (column_list.size() != new_pcm.shape()[1]) {
+    throw std::runtime_error(
+        "extend_pcm_to_n_rounds: column_list.size() [value: " +
+        std::to_string(column_list.size()) +
+        "] != new_pcm.shape()[1] [value: " +
+        std::to_string(new_pcm.shape()[1]) + "]");
+  }
+
+  return std::make_pair(new_pcm, column_list);
 }
 } // namespace cudaq::qec
