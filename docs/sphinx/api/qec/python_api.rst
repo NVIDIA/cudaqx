@@ -33,11 +33,17 @@ Built-in Decoders
 =================
 
 .. _nv_qldpc_decoder_api_python:
+.. _sliding_window_decoder_api_python:
 
 NVIDIA QLDPC Decoder
 --------------------
 
 .. include:: nv_qldpc_decoder_api.rst
+
+Sliding Window Decoder
+----------------------
+
+.. include:: sliding_window_api.rst
 
 Common
 =============

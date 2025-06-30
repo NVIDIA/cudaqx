@@ -61,7 +61,7 @@ def test_sliding_window_1(decoder_name, batched, num_rounds, num_windows):
         straddle_end_round=True,
         error_rate_vec=np.array(dem.error_rates),
         inner_decoder_name=decoder_name,
-        inner_decoder_params={})
+        inner_decoder_params={'dummy_parm': 1})
     if batched:
         full_results = full_decoder.decode_batch(syndromes)
         sw_results = sw_as_full_decoder.decode_batch(syndromes)
