@@ -34,11 +34,12 @@ std::size_t detector_error_model::num_observables() const {
 }
 
 /// @brief Return a sparse representation of the PCM.
+/// @param pcm The PCM to convert to a sparse representation.
 /// @return A vector of vectors that sparsely represents the PCM. The size of
 /// the outer vector is the number of columns in the PCM, and the i-th element
 /// contains an inner vector of the row indices of the non-zero elements in the
 /// i-th column of the PCM.
-static std::vector<std::vector<std::uint32_t>>
+std::vector<std::vector<std::uint32_t>>
 dense_to_sparse(const cudaqx::tensor<uint8_t> &pcm) {
   if (pcm.rank() != 2) {
     throw std::invalid_argument("dense_to_sparse: PCM must be a 2D tensor");

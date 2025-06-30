@@ -13,6 +13,15 @@
 
 namespace cudaq::qec {
 
+/// @brief Return a sparse representation of the PCM.
+/// @param pcm The PCM to convert to a sparse representation.
+/// @return A vector of vectors that sparsely represents the PCM. The size of
+/// the outer vector is the number of columns in the PCM, and the i-th element
+/// contains an inner vector of the row indices of the non-zero elements in the
+/// i-th column of the PCM.
+std::vector<std::vector<std::uint32_t>>
+dense_to_sparse(const cudaqx::tensor<uint8_t> &pcm);
+
 /// @brief Return a vector of column indices that would sort the PCM columns
 /// in topological order.
 /// @param row_indices For each column, a vector of row indices that have a
