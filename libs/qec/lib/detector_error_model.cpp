@@ -124,12 +124,7 @@ void detector_error_model::canonicalize_for_rounds(
           }
         }
         if (!match) {
-          // printf("detector_error_matrix:\n");
-          // this->detector_error_matrix.dump_bits();
-          // printf("observables_flips_matrix:\n");
-          // this->observables_flips_matrix.dump_bits();
-          // fflush(stdout);
-          cudaq::warn(
+          cudaq::info(
               "detector_error_model::canonicalize_for_rounds: identical "
               "syndromes exist in detector_error_matrix but have different "
               "observables in observables_flips_matrix (columns {} and {})",

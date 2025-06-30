@@ -338,6 +338,7 @@ cudaq::qec::detector_error_model dem_from_memory_circuit(
     }
   }
 
+  // Uncomment for debugging:
   // printf("dem.detector_error_matrix:\n");
   // dem.detector_error_matrix.dump_bits();
 
@@ -356,6 +357,7 @@ cudaq::qec::detector_error_model dem_from_memory_circuit(
   // measurements to logical observables.
   dem.observables_flips_matrix = obs_matrix.dot(msm_obs) % 2;
 
+  // Uncomment print statements for debugging:
   // printf("dem.detector_error_matrix Before canonicalization:\n");
   // dem.detector_error_matrix.dump_bits();
   // printf("dem.observables_flips_matrix Before canonicalization:\n");

@@ -51,7 +51,6 @@ def set_target():
 
 def test_dem_from_memory_circuit():
     code = qec.get_code('steane')
-    # observables = code.get_pauli_observables_matrix()
     p = 0.01
     noise = cudaq.NoiseModel()
     noise.add_all_qubit_channel("x", cudaq.Depolarization2(p), 1)
@@ -67,12 +66,18 @@ def test_dem_from_memory_circuit():
 ..........1.11..1.111.
 ..............1..11.11
 """
+    # Uncomment the following line to get a string representation of the DEM
+    # that you can compare to expected_detector_error_matrix.
     # print(mat_to_str(dem.detector_error_matrix), end='')
     assert '\n' + mat_to_str(
         dem.detector_error_matrix) == expected_detector_error_matrix
 
-    # Round to 4 decimal places
+    # Uncomment the following line to get a string representation of the error
+    # rates that you can compare to expected_error_rates.
     # print(np.round(dem.error_rates, 4))
+
+    # The following error rates were captured from the above print statement and
+    # are considered "truth" data now.
     expected_error_rates = [
         0.0183, 0.0235, 0.0158, 0.0209, 0.0310, 0.0235, 0.0183, 0.0106, 0.0053,
         0.0053, 0.0106, 0.0053, 0.0053, 0.0053, 0.0106, 0.0235, 0.0158, 0.0158,
@@ -81,7 +86,9 @@ def test_dem_from_memory_circuit():
     assert np.allclose(dem.error_rates, expected_error_rates, atol=1e-4)
 
     expected_observables_flips_matrix = '1....11.....1......111\n'
-    # print(mat_to_str(dem.observables_flips_matrix), end='')
+    # Uncomment the following line to get a string representation of the
+    # observables flips matrix that you can compare to
+    # expected_observables_flips_matrix.
     assert mat_to_str(
         dem.observables_flips_matrix) == expected_observables_flips_matrix
 
@@ -89,7 +96,6 @@ def test_dem_from_memory_circuit():
 def test_decoding_from_dem_from_memory_circuit():
     cudaq.set_random_seed(13)
     code = qec.get_code('steane')
-    observables = code.get_pauli_observables_matrix()
     Lz = code.get_observables_z()
     p = 0.001
     noise = cudaq.NoiseModel()
@@ -139,7 +145,6 @@ def test_decoding_from_surface_code_dem_from_memory_circuit(
         decoder_name, error_rate):
     cudaq.set_random_seed(13)
     code = qec.get_code('surface_code', distance=5)
-    observables = code.get_pauli_observables_matrix()
     Lz = code.get_observables_z()
     p = error_rate
     noise = cudaq.NoiseModel()

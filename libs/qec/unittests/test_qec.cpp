@@ -1001,12 +1001,7 @@ TEST(PCMUtilsTester, checkShufflePCMColumns) {
   auto pcm_permuted = cudaq::qec::shuffle_pcm_columns(pcm, std::move(rng));
   // Verify that the new PCM is different from the original.
   EXPECT_FALSE(are_pcms_equal(pcm, pcm_permuted));
-  // printf("Original PCM:\n");
-  // pcm.dump_bits();
-  // printf("--------------------------------\n");
-  // printf("Permuted PCM:\n");
-  // pcm_permuted.dump_bits();
-  // printf("--------------------------------\n");
+  // Verify that the resorted permutedPCM is the same as the original.
   auto pcm_permuted_and_sorted =
       cudaq::qec::sort_pcm_columns(pcm_permuted, n_syndromes_per_round);
   check_pcm_equality(pcm_permuted_and_sorted, pcm);
