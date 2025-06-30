@@ -12,16 +12,18 @@
 
 namespace cudaq::qec {
 
-/// A detector error model (DEM) for a quantum error correction code. A
-/// DEM can be created from a QEC code and a noise model. It contains
-/// information used by the decoder to help convert syndromes into predictions
-/// about observables flips.
+/// A detector error model (DEM) for a quantum error correction circuit. A
+/// DEM can be created from a QEC circuit and a noise model. It contains
+/// information about which errors flip which detectors. This is used by the
+/// decoder to help make predictions about observables flips.
 ///
 /// Shared size parameters among the matrix types.
 /// - \p detector_error_matrix: num_detectors x num_error_mechanisms [d, e]
 /// - \p error_rates: num_error_mechanisms
 /// - \p observables_flips_matrix: num_observables x num_error_mechanisms [k, e]
-
+///
+/// @note The C++ API for this class may change in the future. The Python API is
+/// more likely to be backwards compatible.
 struct detector_error_model {
   /// The detector error matrix is a specific kind of circuit-level parity-check
   /// matrix where each row represents a detector, and each column represents

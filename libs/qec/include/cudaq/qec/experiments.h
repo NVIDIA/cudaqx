@@ -112,7 +112,7 @@ cudaq::qec::detector_error_model
 dem_from_memory_circuit(const code &code, operation statePrep,
                         std::size_t numRounds, cudaq::noise_model &noise);
 
-/// @brief Given a memory circuit setup, generate a DEM for X basis.
+/// @brief Given a memory circuit setup, generate a DEM for X stabilizers.
 /// @param code QEC Code to sample
 /// @param statePrep Initial state preparation operation
 /// @param numRounds Number of stabilizer measurement rounds
@@ -123,7 +123,7 @@ detector_error_model x_dem_from_memory_circuit(const code &code,
                                                std::size_t numRounds,
                                                cudaq::noise_model &noise);
 
-/// @brief Given a memory circuit setup, generate a DEM for Z basis.
+/// @brief Given a memory circuit setup, generate a DEM for Z stabilizers.
 /// @param code QEC Code to sample
 /// @param statePrep Initial state preparation operation
 /// @param numRounds Number of stabilizer measurement rounds

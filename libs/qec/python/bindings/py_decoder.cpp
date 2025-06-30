@@ -181,10 +181,10 @@ void bindDecoder(py::module &mod) {
 
   py::class_<detector_error_model>(qecmod, "DetectorErrorModel",
                                    R"pbdoc(
-      A detector error model (DEM) for a quantum error correction code. A DEM
-      can be created from a QEC code and a noise model. It contains information
-      used by the decoder to help convert syndromes into predictions about
-      observables flips.
+      A detector error model (DEM) for a quantum error correction circuit. A
+      DEM can be created from a QEC circuit and a noise model. It contains
+      information about which errors flip which detectors. This is used by the
+      decoder to help make predictions about observables flips.
     )pbdoc")
       .def(py::init<>())
       .def_property_readonly(
