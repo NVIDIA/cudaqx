@@ -111,7 +111,7 @@ jobs:
       # ========================================================================
  
       - name: Install python requirements
-        run: pip install numpy pytest cupy-cuda12x cuquantum-python-cu12
+        run: pip install numpy pytest cupy-cuda12x cuquantum-python-cu12 quimb opt_einsum torch
 
       - name: Run Python tests
         run: |
