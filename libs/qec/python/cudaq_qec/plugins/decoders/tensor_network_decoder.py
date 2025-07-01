@@ -16,10 +16,8 @@ import cupy
 
 from .tensor_network_utils.contractors import ContractorConfig, optimize_path
 from .tensor_network_utils.tensor_network_factory import (
-    tensor_network_from_parity_check,
-    tensor_network_from_single_syndrome,
-    tensor_network_from_syndrome_batch,
-    tensor_network_from_logical_observable)
+    tensor_network_from_parity_check, tensor_network_from_single_syndrome,
+    tensor_network_from_syndrome_batch, tensor_network_from_logical_observable)
 
 
 def set_tensor_type(
@@ -177,8 +175,9 @@ class TensorNetworkDecoder:
             gpu_available = cupy.cuda.is_available()
         except cupy.cuda.runtime.CUDARuntimeError:
             gpu_available = False
-            print("CUDA driver error on first check, assuming no GPU or insufficient driver.")
-
+            print(
+                "CUDA driver error on first check, assuming no GPU or insufficient driver."
+            )
 
         if gpu_available and "cuda" in device:
             contractor_name = "cutensornet"

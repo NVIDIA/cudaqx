@@ -16,7 +16,8 @@ from cudaq_qec.plugins.decoders.tensor_network_utils.tensor_network_factory impo
     prepare_syndrome_data_batch, tensor_network_from_syndrome_batch,
     tensor_network_from_logical_observable)
 from cudaq_qec.plugins.decoders.tensor_network_utils.contractors import (
-    optimize_path, cutn_contractor, ContractorConfig, contractor, cutn_contractor)
+    optimize_path, cutn_contractor, ContractorConfig, contractor,
+    cutn_contractor)
 from cudaq_qec.plugins.decoders.tensor_network_utils.noise_models import factorized_noise_model, error_pairs_noise_model
 
 
@@ -28,7 +29,6 @@ def is_nvidia_gpu_available():
         # The nvidia-smi command is not found, indicating no NVIDIA GPU drivers
         return False
     return False
-
 
 
 def make_simple_code():
@@ -153,7 +153,8 @@ def test_decoder_decode_batch():
     assert isinstance(res, list)
     assert all(hasattr(r, "converged") and hasattr(r, "result") for r in res)
     assert all(
-        isinstance(r.result, list) and 0.0 <= np.round(r.result[0]) <= 1.0 for r in res)
+        isinstance(r.result, list) and 0.0 <= np.round(r.result[0]) <= 1.0
+        for r in res)
 
 
 def test_decoder_set_contractor_invalid():
@@ -163,7 +164,8 @@ def test_decoder_set_contractor_invalid():
                               logical_obs=logical,
                               noise_model=noise)
     with pytest.raises(ValueError):
-        decoder.set_contractor("not_a_contractor", "not_a_device", "not_a_backend")
+        decoder.set_contractor("not_a_contractor", "not_a_device",
+                               "not_a_backend")
 
 
 def test_TensorNetworkDecoder_optimize_path_all_variants():
@@ -248,7 +250,9 @@ def test_decoder_batch_vs_single_and_expected_results_with_contractors():
     for contractor, dtype, device, backend in contractors:
         if "cuda" in device and not is_nvidia_gpu_available():
             # Skip cutensornet tests if no GPU is available
-            print(f"Skipping contractor {contractor} ({dtype}, {device}): No GPU available.")
+            print(
+                f"Skipping contractor {contractor} ({dtype}, {device}): No GPU available."
+            )
             continue
         try:
             decoder.set_contractor(contractor, device, backend, dtype=dtype)
@@ -414,7 +418,6 @@ def test_tensor_network_from_logical_observable():
         assert f"OBS_{i}" in t.tags
 
 
-
 def test_optimize_path_numpy_variants():
     from quimb.tensor import TensorNetwork, Tensor
     from cuquantum import tensornet as cutn
@@ -507,6 +510,7 @@ def test_valid_numpy_cpu():
     assert cfg.device_id == 0
     assert cfg.contractor is contractor
 
+
 def test_valid_torch_cpu():
     cfg = ContractorConfig("torch", "torch", "cpu")
     assert cfg.contractor_name == "torch"
@@ -514,6 +518,7 @@ def test_valid_torch_cpu():
     assert cfg.device == "cpu"
     assert cfg.device_id == 0
     assert cfg.contractor is contractor
+
 
 def test_valid_cutensornet_numpy_cuda():
     cfg = ContractorConfig("cutensornet", "numpy", "cuda")
@@ -523,6 +528,7 @@ def test_valid_cutensornet_numpy_cuda():
     assert cfg.device_id == 0
     assert cfg.contractor is cutn_contractor
 
+
 def test_valid_cutensornet_torch_cuda():
     cfg = ContractorConfig("cutensornet", "torch", "cuda")
     assert cfg.contractor_name == "cutensornet"
@@ -531,18 +537,22 @@ def test_valid_cutensornet_torch_cuda():
     assert cfg.device_id == 0
     assert cfg.contractor is cutn_contractor
 
+
 def test_cuda_device_id_parsing():
     cfg = ContractorConfig("cutensornet", "torch", "cuda:3")
     assert cfg.device == "cuda:3"
     assert cfg.device_id == 3
 
+
 def test_invalid_contractor_name():
     with pytest.raises(ValueError):
         ContractorConfig("invalid", "numpy", "cpu")
 
+
 def test_invalid_backend():
     with pytest.raises(ValueError):
         ContractorConfig("numpy", "invalid", "cpu")
+
 
 def test_invalid_combo():
     with pytest.raises(ValueError):

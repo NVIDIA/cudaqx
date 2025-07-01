@@ -124,7 +124,7 @@ class ContractorConfig:
     backend: str
     device: str
     device_id: int = field(init=False)
-    
+
     _allowed_configs: ClassVar[tuple[tuple[str, str, str], ...]] = (
         ("numpy", "numpy", "cpu"),
         ("torch", "torch", "cpu"),
@@ -140,21 +140,18 @@ class ContractorConfig:
 
     def __post_init__(self):
         dev = "cuda" if "cuda" in self.device else "cpu"
-        if (self.contractor_name, self.backend, dev) not in self._allowed_configs:
+        if (self.contractor_name, self.backend,
+                dev) not in self._allowed_configs:
             raise ValueError(
                 f"Invalid contractor configuration: "
                 f"{self.contractor_name}, {self.backend}, {self.device}. "
-                f"Allowed configurations are: {self._allowed_configs}."
-            )
+                f"Allowed configurations are: {self._allowed_configs}.")
         if self.backend not in self._allowed_backends:
-            raise ValueError(
-                f"Invalid backend: {self.backend}. "
-                f"Allowed backends are: {self._allowed_backends}."
-            )
+            raise ValueError(f"Invalid backend: {self.backend}. "
+                             f"Allowed backends are: {self._allowed_backends}.")
         object.__setattr__(
             self, "device_id",
-            int(self.device.split(":")[-1]) if "cuda:" in self.device else 0
-        )
+            int(self.device.split(":")[-1]) if "cuda:" in self.device else 0)
 
     @property
     def contractor(self) -> Callable:
