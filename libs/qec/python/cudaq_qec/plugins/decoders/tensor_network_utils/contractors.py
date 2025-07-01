@@ -7,7 +7,7 @@
 # ============================================================================ #
 from typing import Any, Callable, Optional
 from dataclasses import dataclass, field
-from typing import Callable, ClassVar, Tuple, Dict, List
+from typing import Callable, ClassVar
 
 import opt_einsum as oe
 import torch
@@ -114,19 +114,25 @@ def optimize_path(optimize: Any, output_inds: tuple[str, ...],
 
 @dataclass(frozen=True)
 class ContractorConfig:
+    """
+    Configuration for a tensor network contractor.
+    This class encapsulates the contractor name, backend, and device
+    to be used for tensor network contractions.
+    It validates the configuration against allowed combinations and provides
+    the appropriate contractor function based on the configuration."""
     contractor_name: str
     backend: str
     device: str
     device_id: int = field(init=False)
     
-    _allowed_configs: ClassVar[Tuple[Tuple[str, str, str], ...]] = (
+    _allowed_configs: ClassVar[tuple[tuple[str, str, str], ...]] = (
         ("numpy", "numpy", "cpu"),
         ("torch", "torch", "cpu"),
         ("cutensornet", "numpy", "cuda"),
         ("cutensornet", "torch", "cuda"),
     )
-    _allowed_backends: ClassVar[List[str]] = ["numpy", "torch"]
-    _contractors: ClassVar[Dict[str, Callable]] = {
+    _allowed_backends: ClassVar[list[str]] = ["numpy", "torch"]
+    _contractors: ClassVar[dict[str, Callable]] = {
         "numpy": contractor,
         "torch": contractor,
         "cutensornet": cutn_contractor,
