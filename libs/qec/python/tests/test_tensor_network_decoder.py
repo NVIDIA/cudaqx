@@ -11,7 +11,7 @@ import pytest
 from quimb.tensor import TensorNetwork
 import cudaq_qec as qec
 
-from cudaq_qec.plugins.decoders.tensor_network_decoder import (
+from cudaq_qec.plugins.decoders.tensor_network_utils.tensor_network_factory import (
     tensor_network_from_parity_check, tensor_network_from_single_syndrome,
     prepare_syndrome_data_batch, tensor_network_from_syndrome_batch,
     tensor_network_from_logical_observable)
