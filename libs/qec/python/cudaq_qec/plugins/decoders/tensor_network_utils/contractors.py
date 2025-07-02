@@ -144,6 +144,16 @@ class ContractorConfig:
     }
 
     def __post_init__(self):
+        """Validate the contractor configuration."""
+        if self.contractor_name not in self._contractors:
+            raise ValueError(
+                f"Invalid contractor name: {self.contractor_name}. "
+                f"Allowed contractor names are: {list(self._contractors.keys())}."
+            )
+        if self.backend not in self._allowed_backends:
+            raise ValueError(f"Invalid backend: {self.backend}. "
+                             f"Allowed backends are: {self._allowed_backends}.")
+
         if "cuda" in self.device:
             dev = "cuda"
         elif "cpu" in self.device:
