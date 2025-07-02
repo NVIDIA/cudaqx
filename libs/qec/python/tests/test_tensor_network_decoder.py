@@ -557,3 +557,7 @@ def test_invalid_backend():
 def test_invalid_combo():
     with pytest.raises(ValueError):
         ContractorConfig("torch", "numpy", "cpu")
+
+
+if __name__ == "__main__":
+    pytest.main()

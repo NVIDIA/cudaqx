@@ -20,42 +20,6 @@ from .tensor_network_utils.tensor_network_factory import (
     tensor_network_from_syndrome_batch, tensor_network_from_logical_observable)
 
 
-def set_tensor_type(
-    tn: TensorNetwork,
-    backend: str,
-    dtype: str = "float32",
-) -> None:
-    """Set the backend for the tensor network.
-
-    Args:
-        tn (TensorNetwork): The tensor network.
-        backend (str): The backend to use ("numpy" or "torch").
-        dtype (str, optional): The data type to use. Defaults to "float32".
-    """
-    tn.apply_to_arrays(lambda x: do(
-        "array",
-        x,
-        like=backend,
-        dtype=to_backend_dtype(dtype, like=backend),
-    ))
-
-
-def _adjust_default_path_value(val: Any, is_cutensornet: bool) -> Any:
-    """Adjust the default path value for the contractor.
-
-    Args:
-        val: The current value.
-        is_cutensornet (bool): Whether the contractor is cutensornet.
-
-    Returns:
-        Any: The adjusted value.
-    """
-    if is_cutensornet:
-        return None if val == "auto" else val
-    else:
-        return "auto" if val is None else val
-
-
 @qec.decoder("tensor_network_decoder")
 class TensorNetworkDecoder:
     """A general class for tensor network decoders.
@@ -192,8 +156,18 @@ class TensorNetworkDecoder:
         num_checks, num_errs = H.shape
         if check_inds is None:
             self.check_inds = [f"s_{j}" for j in range(num_checks)]
+        else:
+            assert len(check_inds) == num_checks, (
+                f"check_inds must have length {num_checks}, "
+                f"but got {len(check_inds)}.")
+            self.check_inds = check_inds
         if error_inds is None:
             self.error_inds = [f"e_{j}" for j in range(num_errs)]
+        else:
+            assert len(error_inds) == num_errs, (
+                f"error_inds must have length {num_errs}, "
+                f"but got {len(error_inds)}.")
+            self.error_inds = error_inds
 
         self.logical_obs_inds = ["obs"]  # Open logical index
 
@@ -260,6 +234,9 @@ class TensorNetworkDecoder:
         if logical_inds is None:
             self.logical_inds = ["l_0"]  # Index before the Hadamard tensor
         else:
+            assert len(logical_inds) == 1, (
+                "logical_inds must be a list of length 1, "
+                "as only single logical observables are supported for now.")
             self.logical_inds = logical_inds
 
         if logical_tags is None:
@@ -285,8 +262,7 @@ class TensorNetworkDecoder:
             self.full_tn = (self.code_tn | self.logical_tn | self.syndrome_tn |
                             self.noise_model)
 
-            set_tensor_type(self.full_tn, self.contractor_config.backend,
-                            self._dtype)
+            self._set_tensor_type(self.full_tn)
 
     def init_noise_model(self,
                          noise_model: TensorNetwork,
@@ -297,9 +273,13 @@ class TensorNetworkDecoder:
             noise_model (TensorNetwork): The noise model tensor network.
             contract (bool, optional): Whether to contract the noise model with the tensor network. Defaults to False.
         """
+        assert isinstance(noise_model, TensorNetwork), (
+            "noise_model must be an instance of quimb.tensor.TensorNetwork.")
+        assert sorted(noise_model.outer_inds()) == sorted(self.error_inds), (
+            f"Noise model has {len(noise_model.outer_inds())} open indices, "
+            f"but expected {len(self.error_inds)} for the error indices.")
         self.noise_model = noise_model
-        set_tensor_type(self.noise_model, self.contractor_config.backend,
-                        self._dtype)
+        self._set_tensor_type(self.noise_model)
         self.full_tn = (self.code_tn | self.logical_tn | self.syndrome_tn |
                         self.noise_model)
 
@@ -317,6 +297,11 @@ class TensorNetworkDecoder:
 
         # Below we use autoray.do to ensure that the data is
         # defined via the correct backend: numpy, torch, etc.
+        assert len(values) == len(self.check_inds), (
+            f"Values length {len(values)} does not match the number of checks {len(self.check_inds)}."
+        )
+        assert all(isinstance(v, float)
+                   for v in values), "Syndrome values must be float."
 
         dtype = to_backend_dtype(self._dtype,
                                  like=self.contractor_config.backend)
@@ -358,10 +343,16 @@ class TensorNetworkDecoder:
         if dtype is not None:
             self._dtype = dtype
 
-        set_tensor_type(self.full_tn, self.contractor_config.backend,
-                        self._dtype)
+        self._set_tensor_type(self.full_tn)
 
         is_cutensornet = contractor == "cutensornet"
+
+        def _adjust_default_path_value(val: Any):
+            if is_cutensornet:
+                return None if val == "auto" else val
+            else:
+                return "auto" if val is None else val
+
         self.path_batch = _adjust_default_path_value(self.path_batch,
                                                      is_cutensornet)
         self.path_single = _adjust_default_path_value(self.path_single,
@@ -380,11 +371,14 @@ class TensorNetworkDecoder:
 
         Returns:
             qec.DecoderResult: The result of the decoding.
+                The probability that the logical observable flipped.
         """
         assert hasattr(self, "noise_model")
         assert len(syndrome) == len(self.check_inds), (
             f"Syndrome length {len(syndrome)} does not match the number of checks {len(self.check_inds)}."
         )
+        assert all(isinstance(s, float)
+                   for s in syndrome), "Syndrome values must be float."
 
         # adjust the values of the syndromes
         self.flip_syndromes(syndrome)
@@ -423,6 +417,7 @@ class TensorNetworkDecoder:
 
         Returns:
             list[qec.DecoderResult]: list of results for each detection event in the batch.
+                The probabilities that the logical observable flipped for each syndrome.
         """
 
         assert hasattr(self, "noise_model")
@@ -436,7 +431,7 @@ class TensorNetworkDecoder:
         tn |= tensor_network_from_syndrome_batch(syndrome_batch,
                                                  self.check_inds,
                                                  batch_index="batch_index")
-        set_tensor_type(tn, self.contractor_config.backend, self._dtype)
+        self._set_tensor_type(tn)
 
         if self.path_batch is None or syndrome_batch.shape[
                 0] != self._batch_size:
@@ -470,7 +465,7 @@ class TensorNetworkDecoder:
 
     def optimize_path(
         self,
-        output_inds: Any,
+        output_inds: tuple[str, ...],
         optimize: Any = None,
         syndrome_batch: Optional[npt.NDArray[Any]] = None,
     ) -> Any:
@@ -479,7 +474,7 @@ class TensorNetworkDecoder:
         Args:
             output_inds (tuple[str]): The output indices of the contraction.
             optimize (Optional[cutn.OptimizerOptions], optional): The optimization options to use. 
-                If None or cuquantum.tensornet.OptimizerOptions, the default options are used.
+                If None or cuquantum.tensornet.OptimizerOptions, we use cuquantum.tensornet.
                 Else, Quimb interface at 
                 https://quimb.readthedocs.io/en/latest/autoapi/quimb/tensor/tensor_core/index.html#quimb.tensor.tensor_core.TensorNetwork.contraction_info
             syndrome_batch (Optional[np.ndarray], optional): A batch of syndromes to use for the optimization. If None, the full tensor network is used.
@@ -487,6 +482,14 @@ class TensorNetworkDecoder:
         Returns:
             Any: The optimizer info object.
         """
+        assert isinstance(output_inds, tuple), (
+            "output_inds must be a tuple of strings representing the output indices."
+        )
+        if len(output_inds) > 1:
+            assert syndrome_batch is not None, (
+                "If output_inds has more than one index, "
+                "syndrome_batch must be provided to optimize the path correctly."
+            )
         from cuquantum.tensornet import OptimizerOptions
 
         is_batch = syndrome_batch is not None
@@ -500,7 +503,7 @@ class TensorNetworkDecoder:
                                                      batch_index="batch_index")
         else:
             tn = self.full_tn
-        set_tensor_type(tn, self.contractor_config.backend, self._dtype)
+        self._set_tensor_type(tn)
 
         # Optimize the path
         path, info = optimize_path(optimize, output_inds, tn)
@@ -514,3 +517,16 @@ class TensorNetworkDecoder:
         setattr(self, target, slices)
 
         return info
+
+    def _set_tensor_type(self, tn: TensorNetwork) -> None:
+        """Set the backend for the tensor network."""
+        assert isinstance(tn, TensorNetwork), (
+            "The tensor network must be an instance of quimb.tensor.TensorNetwork."
+        )
+        tn.apply_to_arrays(lambda x: do(
+            "array",
+            x,
+            like=self.contractor_config.backend,
+            dtype=to_backend_dtype(self._dtype,
+                                   like=self.contractor_config.backend),
+        ))

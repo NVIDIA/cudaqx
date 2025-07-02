@@ -5,7 +5,8 @@
 # This source code and the accompanying materials are made available under     #
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Union
+import numpy.typing as npt
 from dataclasses import dataclass, field
 from typing import Callable, ClassVar
 
@@ -61,7 +62,7 @@ def contractor(subscripts: str,
 
 
 def cutn_contractor(subscripts: str,
-                    tensors: list[Any],
+                    tensors: list[Union[torch.Tensor, npt.NDArray]],
                     optimize: Optional[Any] = None,
                     slicing: tuple = tuple(),
                     device_id: int = 0) -> Any:
@@ -72,6 +73,7 @@ def cutn_contractor(subscripts: str,
         subscripts (str): The einsum subscripts.
         tensors (list[Any]): list of tensors to contract.
         optimize (Optional[Any], optional): cuQuantum optimizer options or path. Defaults to None.
+            If None, uses default optimization. Else, cuquantum.tensornet.OptimizerOptions.
         slicing (tuple, optional): Slicing specification. Defaults to empty tuple.
         device_id (int, optional): Device ID for the contraction. Defaults to 0.
 
@@ -92,7 +94,10 @@ def optimize_path(optimize: Any, output_inds: tuple[str, ...],
     Optimize the contraction path for a tensor network.
 
     Args:
-        optimize (Any): Optimization strategy or cuQuantum optimizer options.
+        optimize (Any): The optimization options to use. 
+            If None or cuquantum.tensornet.OptimizerOptions, we use cuquantum.tensornet.
+            Else, Quimb interface at 
+            https://quimb.readthedocs.io/en/latest/autoapi/quimb/tensor/tensor_core/index.html#quimb.tensor.tensor_core.TensorNetwork.contraction_info
         output_inds (tuple[str, ...]): Output indices for the contraction.
         tn (TensorNetwork): The tensor network.
 
