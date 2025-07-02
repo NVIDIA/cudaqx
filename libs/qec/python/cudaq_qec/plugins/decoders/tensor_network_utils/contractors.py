@@ -144,7 +144,12 @@ class ContractorConfig:
     }
 
     def __post_init__(self):
-        dev = "cuda" if "cuda" in self.device else "cpu"
+        if "cuda" in self.device:
+            dev = "cuda"  
+        elif "cpu" in self.device: 
+            dev = "cpu"
+        else:
+            dev = self.device
         if (self.contractor_name, self.backend,
                 dev) not in self._allowed_configs:
             raise ValueError(
