@@ -168,7 +168,8 @@ def test_decoder_set_contractor_invalid():
     with pytest.raises(ValueError):
         decoder._set_contractor("numpy", "not_a_device", "numpy")
     with pytest.raises(ValueError):
-        decoder._set_contractor("numpy", "cpu", "not_a_backend")    
+        decoder._set_contractor("numpy", "cpu", "not_a_backend")
+
 
 def test_TensorNetworkDecoder_optimize_path_all_variants():
     import cotengra

@@ -145,8 +145,8 @@ class ContractorConfig:
 
     def __post_init__(self):
         if "cuda" in self.device:
-            dev = "cuda"  
-        elif "cpu" in self.device: 
+            dev = "cuda"
+        elif "cpu" in self.device:
             dev = "cpu"
         else:
             dev = self.device
