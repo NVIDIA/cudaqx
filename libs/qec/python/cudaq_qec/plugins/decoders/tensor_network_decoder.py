@@ -353,10 +353,8 @@ class TensorNetworkDecoder:
             else:
                 return "auto" if val is None else val
 
-        self.path_batch = _adjust_default_path_value(self.path_batch,
-                                                     is_cutensornet)
-        self.path_single = _adjust_default_path_value(self.path_single,
-                                                      is_cutensornet)
+        self.path_batch = _adjust_default_path_value(self.path_batch)
+        self.path_single = _adjust_default_path_value(self.path_single)
 
     def decode(
         self,

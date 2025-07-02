@@ -186,9 +186,9 @@ def tensor_network_from_logical_observable(
     """
     assert logical.ndim == 2, \
         "The logical matrix must be a 2D array."
-    assert len(logical_inds) == logical.shape[0], \
+    assert len(logical_inds) == 1, \
         "The number of logical indices must match the number of rows in the logical matrix."
-    assert len(logical_obs_inds) == logical.shape[1], \
+    assert len(logical_obs_inds) == 1, \
         "The number of logical observable indices must match the number of columns in the logical matrix."
     assert all(isinstance(ind, str) for ind in logical_inds), \
         "All logical indices must be strings."
