@@ -548,3 +548,93 @@ TEST(QECCodeTester, checkNoisySampleMemoryCircuitAndDecodeStim) {
     EXPECT_TRUE(numLerrors > 0);
   }
 }
+
+// Utility function to check if a matrix matches a string of bits.
+void check_matrix_bits(const std::string &name,
+                       const cudaqx::tensor<uint8_t> &matrix,
+                       const std::vector<std::string> &expected_str) {
+  EXPECT_EQ(expected_str.size(), matrix.shape()[0])
+      << name << " shape mismatch";
+  const auto *data_ptr = matrix.data();
+  for (std::size_t i = 0; i < expected_str.size(); i++) {
+    for (std::size_t j = 0; j < expected_str[i].size(); j++) {
+      if (expected_str[i][j] == '.') {
+        EXPECT_EQ(*data_ptr, 0)
+            << name << " bit mismatch at " << i << ", " << j;
+      } else {
+        EXPECT_EQ(*data_ptr, 1)
+            << name << " bit mismatch at " << i << ", " << j;
+      }
+      data_ptr++;
+    }
+  }
+}
+
+TEST(QECCodeTester, checkDemFromMemoryCircuit) {
+  auto steane = cudaq::qec::get_code("steane");
+  int num_rounds = 4;
+  cudaq::noise_model noise;
+  noise.add_all_qubit_channel("mz", cudaq::bit_flip_channel(0.01));
+  auto dem = cudaq::qec::dem_from_memory_circuit(
+      *steane, cudaq::qec::operation::prep0, num_rounds, noise);
+
+  // Uncomment if desired:
+  // printf("dem:\n");
+  // dem.detector_error_matrix.dump_bits();
+
+  // clang-format off
+  std::vector<std::string> expected_dem_str = {
+      "1.......................", 
+      ".1......................",
+      "..1.....................", 
+      "...1....................",
+      "....1...................", 
+      ".....1..................",
+      "1.....1.................", 
+      ".1.....1................",
+      "..1.....1...............", 
+      "...1.....1..............",
+      "....1.....1.............", 
+      ".....1.....1............",
+      "......1.....1...........", 
+      ".......1.....1..........",
+      "........1.....1.........", 
+      ".........1.....1........",
+      "..........1.....1.......", 
+      "...........1.....1......",
+      "............1.....1.....", 
+      ".............1.....1....",
+      "..............1.....1...", 
+      "...............1.....1..",
+      "................1.....1.", 
+      ".................1.....1"};
+  // clang-format on
+  check_matrix_bits("detector_error_matrix", dem.detector_error_matrix,
+                    expected_dem_str);
+
+  // Print the error probabilities (uncomment if desired)
+  // printf("error probabilities: { ");
+  // for (std::size_t i = 0; i < dem.error_rates.size(); i++) {
+  //   printf("%f ", dem.error_rates[i]);
+  // }
+  // printf("}\n");
+
+  // Check error rates
+  ASSERT_EQ(dem.error_rates.size(), 24);
+  std::vector<double> expected_error_rates(24, 0.01);
+  for (std::size_t i = 0; i < dem.error_rates.size(); i++) {
+    EXPECT_FLOAT_EQ(dem.error_rates[i], expected_error_rates[i])
+        << "i: " << i << ", error_rates[i]: " << dem.error_rates[i]
+        << ", expected_error_rates[i]: " << expected_error_rates[i];
+  }
+
+  // Uncomment if desired:
+  // printf("observables_flips_matrix:\n");
+  // dem.observables_flips_matrix.dump_bits();
+
+  // Check observables flips matrix
+  std::vector<std::string> expected_observables_flips_matrix_str = {
+      "........................"};
+  check_matrix_bits("observables_flips_matrix", dem.observables_flips_matrix,
+                    expected_observables_flips_matrix_str);
+}

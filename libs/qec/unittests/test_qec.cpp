@@ -9,10 +9,9 @@
 #include <cmath>
 #include <gtest/gtest.h>
 
-#include "cudaq.h"
-
 #include "cudaq/qec/codes/surface_code.h"
 #include "cudaq/qec/experiments.h"
+#include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/version.h"
 
 TEST(StabilizerTester, checkConstructFromSpinOps) {
@@ -771,6 +770,241 @@ TEST(QECCodeTester, checkStabilizerGrid) {
     EXPECT_EQ(144, grid.x_stabilizers.size());
     EXPECT_EQ(144, grid.z_stabilizers.size());
   }
+}
+
+TEST(PCMUtilsTester, checkReorderPCMColumns) {
+  std::vector<uint8_t> data = {
+      0, 1, 0, 0, 1, 0, 0, 0, 1, /* row 0 */
+      1, 0, 0, 1, 1, 0, 0, 0, 0, /* row 1 */
+      0, 0, 1, 0, 1, 0, 1, 0, 0, /* row 2 */
+      0, 0, 0, 1, 1, 0, 0, 1, 0, /* row 3 */
+      0, 0, 0, 0, 1, 1, 1, 1, 1, /* row 4 */
+  };
+  cudaqx::tensor<uint8_t> pcm(std::vector<std::size_t>{5, 9});
+  pcm.borrow(data.data());
+  auto column_order = cudaq::qec::get_sorted_pcm_column_indices(pcm);
+  const std::vector<std::uint32_t> expected_order = {1, 8, 4, 0, 3, 2, 6, 7, 5};
+  EXPECT_EQ(column_order, expected_order);
+  auto pcm_reordered = cudaq::qec::reorder_pcm_columns(pcm, column_order);
+
+  const std::vector<std::vector<uint8_t>> expected_data = {
+      {1, 1, 1, 0, 0, 0, 0, 0, 0}, /* row 0 */
+      {0, 0, 1, 1, 1, 0, 0, 0, 0}, /* row 1 */
+      {0, 0, 1, 0, 0, 1, 1, 0, 0}, /* row 2 */
+      {0, 0, 1, 0, 1, 0, 0, 1, 0}, /* row 3 */
+      {0, 1, 1, 0, 0, 0, 1, 1, 1}  /* row 4 */
+  };
+
+  // Compare expected data with reordered data
+  for (std::size_t i = 0; i < pcm.shape()[0]; ++i)
+    for (std::size_t j = 0; j < pcm_reordered.shape()[1]; ++j)
+      EXPECT_EQ(expected_data[i][j], pcm_reordered.at({i, j}));
+
+  // Now try the whole flow with sort_pcm_columns
+  auto pcm_reordered2 = cudaq::qec::sort_pcm_columns(pcm);
+  for (std::size_t i = 0; i < pcm_reordered2.shape()[0]; ++i)
+    for (std::size_t j = 0; j < pcm_reordered2.shape()[1]; ++j)
+      EXPECT_EQ(expected_data[i][j], pcm_reordered2.at({i, j}));
+}
+
+TEST(PCMUtilsTester, checkSimplifyPCM1) {
+  // No simplification occurs here, but reordering occurs.
+  std::vector<uint8_t> data = {
+      0, 1, /* row 0 */
+      1, 0  /* row 1 */
+  };
+  std::vector<double> weights = {0.5, 0.5};
+  cudaqx::tensor<uint8_t> pcm(std::vector<std::size_t>{2, 2});
+  pcm.borrow(data.data());
+  auto column_order = cudaq::qec::get_sorted_pcm_column_indices(pcm);
+  const std::vector<std::uint32_t> expected_order = {1, 0};
+  EXPECT_EQ(column_order, expected_order);
+  auto pcm_reordered = cudaq::qec::reorder_pcm_columns(pcm, column_order);
+  auto [H_new, weights_new] = cudaq::qec::simplify_pcm(pcm_reordered, weights);
+  std::vector<double> expected_weights = {0.5, 0.5};
+  EXPECT_EQ(weights_new, expected_weights);
+}
+
+TEST(PCMUtilsTester, checkSimplifyPCM2) {
+  // Simplification (combining columns) occurs here.
+  std::vector<uint8_t> data = {
+      0, 1, 0, /* row 0 */
+      1, 0, 1  /* row 1 */
+  };
+  std::vector<double> weights = {0.1, 0.2, 0.3};
+  cudaqx::tensor<uint8_t> pcm(std::vector<std::size_t>{2, 3});
+  pcm.borrow(data.data());
+
+  auto column_order = cudaq::qec::get_sorted_pcm_column_indices(pcm);
+  const std::vector<std::uint32_t> expected_order = {1, 0, 2};
+  EXPECT_EQ(column_order, expected_order);
+
+  auto [H_new, weights_new] = cudaq::qec::simplify_pcm(pcm, weights);
+  std::vector<double> expected_weights = {0.2, 0.1 + 0.3 - 2 * 0.1 * 0.3};
+  for (std::size_t i = 0; i < weights_new.size(); ++i)
+    EXPECT_NEAR(weights_new[i], expected_weights[i], 1e-6);
+}
+
+bool are_pcms_equal(const cudaqx::tensor<uint8_t> &a,
+                    const cudaqx::tensor<uint8_t> &b) {
+  if (a.rank() != 2 || b.rank() != 2) {
+    throw std::runtime_error("PCM must be a 2D tensor");
+  }
+  if (a.shape() != b.shape())
+    return false;
+  for (std::size_t r = 0; r < a.shape()[0]; ++r)
+    for (std::size_t c = 0; c < a.shape()[1]; ++c)
+      if (a.at({r, c}) != b.at({r, c}))
+        return false;
+  return true;
+}
+
+void check_pcm_equality(const cudaqx::tensor<uint8_t> &a,
+                        const cudaqx::tensor<uint8_t> &b,
+                        bool use_assert = true) {
+  if (a.rank() != 2 || b.rank() != 2) {
+    throw std::runtime_error("PCM must be a 2D tensor");
+  }
+  ASSERT_EQ(a.shape(), b.shape());
+  auto num_rows = a.shape()[0];
+  auto num_cols = a.shape()[1];
+  for (std::size_t r = 0; r < num_rows; ++r) {
+    for (std::size_t c = 0; c < num_cols; ++c) {
+      if (a.at({r, c}) != b.at({r, c})) {
+        if (use_assert)
+          ASSERT_EQ(a.at({r, c}), b.at({r, c}))
+              << "a.at({" << r << ", " << c << "}) = " << a.at({r, c})
+              << ", b.at({" << r << ", " << c << "}) = " << b.at({r, c})
+              << "\n";
+        else
+          EXPECT_EQ(a.at({r, c}), b.at({r, c}))
+              << "a.at({" << r << ", " << c << "}) = " << a.at({r, c})
+              << ", b.at({" << r << ", " << c << "}) = " << b.at({r, c})
+              << "\n";
+      }
+    }
+  }
+}
+
+TEST(PCMUtilsTester, checkSparsePCM) {
+  std::size_t n_rounds = 4;
+  std::size_t n_errs_per_round = 30;
+  std::size_t n_syndromes_per_round = 10;
+  std::size_t n_cols = n_rounds * n_errs_per_round;
+  std::size_t n_rows = n_rounds * n_syndromes_per_round;
+  std::size_t weight = 3;
+  cudaqx::tensor<uint8_t> pcm = cudaq::qec::generate_random_pcm(
+      n_rounds, n_errs_per_round, n_syndromes_per_round, weight,
+      std::mt19937_64(13));
+  printf("--------------------------------\n");
+  printf("Original PCM:\n");
+  pcm.dump_bits();
+  auto pcm2 = cudaq::qec::sort_pcm_columns(pcm);
+  printf("--------------------------------\n");
+  printf("Sorted PCM (without specifying num syndromes per round):\n");
+  pcm2.dump_bits();
+  pcm2 = cudaq::qec::sort_pcm_columns(pcm, n_syndromes_per_round);
+  printf("--------------------------------\n");
+  printf("Sorted PCM (with num syndromes per round specified):\n");
+  pcm2.dump_bits();
+  printf("--------------------------------\n");
+
+  // Make sure that the first round where an error occurs is non-decreasing
+  // and the last round where an error occurs is non-increasing.
+  std::size_t prev_col_first_round = 0;
+  std::size_t prev_col_last_round = 0;
+  for (std::size_t c = 0; c < n_cols; ++c) {
+    // Find the first and last row where an error occurs in this column.
+    auto first_row = std::numeric_limits<std::size_t>::max();
+    auto last_row = std::numeric_limits<std::size_t>::min();
+    for (std::size_t r = 0; r < n_rows; ++r) {
+      if (pcm2.at({r, c}) == 1) {
+        first_row = std::min(first_row, r);
+        last_row = std::max(last_row, r);
+      }
+    }
+    // Convert rows to rounds.
+    auto first_round = first_row / n_syndromes_per_round;
+    auto last_round = last_row / n_syndromes_per_round;
+
+    // Make sure we are not going backwards.
+    ASSERT_GE(first_round, prev_col_first_round);
+    ASSERT_GE(last_round, prev_col_last_round);
+
+    // Save for the next iteration.
+    prev_col_first_round = first_round;
+    prev_col_last_round = last_round;
+  }
+
+  // Make sure that the sort is stable, regardless of the input order of the
+  // columns.
+  int num_tests = 10;
+  std::mt19937_64 rng(/*seed=*/13);
+  for (int iter = 0; iter < num_tests; ++iter) {
+    std::vector<std::uint32_t> shuffle_vector(n_cols);
+    std::iota(shuffle_vector.begin(), shuffle_vector.end(), 0);
+    std::shuffle(shuffle_vector.begin(), shuffle_vector.end(), rng);
+    auto pcm_shuffled = cudaq::qec::reorder_pcm_columns(pcm, shuffle_vector);
+
+    for (std::size_t c = 0; c < n_cols; ++c)
+      for (std::size_t r = 0; r < n_rows; ++r)
+        pcm_shuffled.at({r, c}) = pcm.at({r, shuffle_vector[c]});
+    auto pcm_sorted =
+        cudaq::qec::sort_pcm_columns(pcm_shuffled, n_syndromes_per_round);
+    check_pcm_equality(pcm2, pcm_sorted);
+  }
+}
+
+TEST(PCMUtilsTester, checkGetPCMForRounds) {
+  std::size_t n_rounds = 4;
+  std::size_t n_errs_per_round = 30;
+  std::size_t n_syndromes_per_round = 10;
+  std::size_t n_cols = n_rounds * n_errs_per_round;
+  std::size_t n_rows = n_rounds * n_syndromes_per_round;
+  std::size_t weight = 3;
+
+  cudaqx::tensor<uint8_t> pcm = cudaq::qec::generate_random_pcm(
+      n_rounds, n_errs_per_round, n_syndromes_per_round, weight,
+      std::mt19937_64(13));
+
+  pcm = cudaq::qec::sort_pcm_columns(pcm, n_syndromes_per_round);
+  auto [pcm_for_rounds, first_column, last_column] =
+      cudaq::qec::get_pcm_for_rounds(pcm, n_syndromes_per_round, 0,
+                                     n_rounds - 1);
+  check_pcm_equality(pcm_for_rounds, pcm);
+
+  // Try all possible combinations of start and end rounds.
+  for (int start_round = 0; start_round < n_rounds; ++start_round) {
+    for (int end_round = start_round; end_round < n_rounds; ++end_round) {
+      auto [pcm_test, first_column_test, last_column_test] =
+          cudaq::qec::get_pcm_for_rounds(pcm, n_syndromes_per_round,
+                                         start_round, end_round);
+      // I don't have a good test criteria for this yet. It mainly just runs to
+      // see if it runs without errors.
+      printf("pcm_test for start_round = %u, end_round = %u:\n", start_round,
+             end_round);
+      pcm_test.dump_bits();
+    }
+  }
+}
+
+TEST(PCMUtilsTester, checkShufflePCMColumns) {
+  std::size_t n_rounds = 4;
+  std::size_t n_errs_per_round = 30;
+  std::size_t n_syndromes_per_round = 10;
+  std::size_t weight = 3;
+  std::mt19937_64 rng(13);
+  cudaqx::tensor<uint8_t> pcm = cudaq::qec::generate_random_pcm(
+      n_rounds, n_errs_per_round, n_syndromes_per_round, weight,
+      std::move(rng));
+  pcm = cudaq::qec::sort_pcm_columns(pcm, n_syndromes_per_round);
+  auto pcm_permuted = cudaq::qec::shuffle_pcm_columns(pcm, std::move(rng));
+  // Verify that the new PCM is different from the original.
+  EXPECT_FALSE(are_pcms_equal(pcm, pcm_permuted));
+  // Verify that the resorted permutedPCM is the same as the original.
+  auto pcm_permuted_and_sorted =
+      cudaq::qec::sort_pcm_columns(pcm_permuted, n_syndromes_per_round);
+  check_pcm_equality(pcm_permuted_and_sorted, pcm);
 }
 
 TEST(QECCodeTester, checkVersion) {

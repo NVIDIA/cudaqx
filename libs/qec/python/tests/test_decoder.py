@@ -199,6 +199,115 @@ def test_pass_weights():
     # Test is that no error is thrown
 
 
+def test_sort_pcm_columns_non_decreasing_column_weight():
+    # Create a test parity-check matrix with random binary values.
+    # yapf: disable
+    H = np.array([[0, 1, 0, 0, 1, 0, 0, 0, 1],
+                  [1, 0, 0, 1, 1, 0, 0, 0, 0],
+                  [0, 0, 1, 0, 1, 0, 1, 0, 0],
+                  [0, 0, 0, 1, 1, 0, 0, 1, 0],
+                  [0, 0, 0, 0, 1, 1, 1, 1, 1]],
+                 dtype=np.uint8)
+    # yapf: enable
+
+    H_calculated = qec.sort_pcm_columns(H)
+
+    # yapf: disable
+    H_expected = np.array(
+        [[1, 1, 1, 0, 0, 0, 0, 0, 0],
+         [0, 0, 1, 1, 1, 0, 0, 0, 0],
+         [0, 0, 1, 0, 0, 1, 1, 0, 0],
+         [0, 0, 1, 0, 1, 0, 0, 1, 0],
+         [0, 1, 1, 0, 0, 0, 1, 1, 1]],
+        dtype=np.uint8)
+    # yapf: enable
+
+    assert np.array_equal(H_calculated, H_expected)
+
+    col_order = qec.get_sorted_pcm_column_indices(H)
+    expected_order = [1, 8, 4, 0, 3, 2, 6, 7, 5]
+    assert col_order == expected_order
+
+    # Now check that reordering the columns of H yields H_expected
+    H_reordered = qec.reorder_pcm_columns(H, col_order)
+    assert np.array_equal(H_reordered, H_expected)
+
+
+def test_sort_pcm_columns_invalid_input():
+    # Test that passing a non-2D array raises an error.
+    H_invalid = np.array([0, 1, 0, 1], dtype=np.uint8)
+    with pytest.raises(RuntimeError):
+        qec.get_sorted_pcm_column_indices(H_invalid)
+
+
+def test_gen_random_pcm():
+    pcm = qec.generate_random_pcm(n_rounds=10,
+                                  n_errs_per_round=20,
+                                  n_syndromes_per_round=10,
+                                  weight=3,
+                                  seed=13)
+    is_sorted = qec.pcm_is_sorted(pcm)
+    assert is_sorted is False
+    pcm = qec.sort_pcm_columns(pcm)
+    is_sorted = qec.pcm_is_sorted(pcm)
+    assert is_sorted is True
+    print('')
+    qec.dump_pcm(pcm)
+    print('')
+    assert pcm.shape == (100, 200)
+
+
+def test_get_pcm_for_rounds():
+    pcm = qec.generate_random_pcm(n_rounds=10,
+                                  n_errs_per_round=20,
+                                  n_syndromes_per_round=10,
+                                  weight=3,
+                                  seed=13)
+    pcm = qec.sort_pcm_columns(pcm)
+    pcm_for_rounds, first_column, last_column = qec.get_pcm_for_rounds(
+        pcm, 10, 0, 1)
+    assert pcm_for_rounds.shape == (20, 30)
+    print('')
+    qec.dump_pcm(pcm_for_rounds)
+    print('')
+
+
+def test_shuffle_pcm_columns():
+    pcm = qec.generate_random_pcm(n_rounds=10,
+                                  n_errs_per_round=20,
+                                  n_syndromes_per_round=10,
+                                  weight=3,
+                                  seed=13)
+    sorted_pcm = qec.sort_pcm_columns(pcm)
+    shuffled_pcm = qec.shuffle_pcm_columns(sorted_pcm, seed=13)
+
+    # They should not be equal here
+    assert not np.array_equal(sorted_pcm, shuffled_pcm)
+
+    # They should be equal after sorting
+    assert np.array_equal(qec.sort_pcm_columns(shuffled_pcm), sorted_pcm)
+
+
+def test_simplify_pcm():
+    syndromes_per_round = 10
+    pcm = qec.generate_random_pcm(
+        n_rounds=10,
+        n_errs_per_round=30,
+        n_syndromes_per_round=syndromes_per_round,
+        weight=1,  # force some duplicate columns for this test
+        seed=13)
+    weights = np.ones(pcm.shape[1]) * 0.01
+    new_pcm, new_weights = qec.simplify_pcm(pcm, weights, syndromes_per_round)
+    # qec.dump_pcm(new_pcm)
+    print(new_pcm.shape)
+    assert new_pcm.shape[0] == pcm.shape[0]
+    assert new_pcm.shape[1] < pcm.shape[1]  # we expect fewer columns
+    assert new_weights.shape == (new_pcm.shape[1],)
+
+    # Test that the new weights are not all uniform.
+    assert not np.allclose(new_weights, new_weights[0])
+
+
 def test_version():
     decoder = qec.get_decoder('example_byod', H)
     assert "CUDA-Q QEC Base Decoder" in decoder.get_version()

@@ -1,5 +1,5 @@
 /****************************************************************-*- C++ -*-****
- * Copyright (c) 2024 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -182,6 +182,10 @@ public:
   /// @brief Get the size of the map
   /// @return The number of key-value pairs in the map
   std::size_t size() const { return items.size(); }
+
+  /// @brief Check if the map is empty
+  /// @return true if the map is empty, false otherwise
+  bool empty() const { return items.empty(); }
 
   /// @brief Check if the map contains a key
   /// @param key The key to check

@@ -24,6 +24,20 @@ DecoderResult = qecrt.DecoderResult
 generate_random_bit_flips = qecrt.generate_random_bit_flips
 sample_memory_circuit = qecrt.sample_memory_circuit
 sample_code_capacity = qecrt.sample_code_capacity
+dem_from_memory_circuit = qecrt.dem_from_memory_circuit
+x_dem_from_memory_circuit = qecrt.x_dem_from_memory_circuit
+z_dem_from_memory_circuit = qecrt.z_dem_from_memory_circuit
+
+dump_pcm = qecrt.dump_pcm
+generate_random_pcm = qecrt.generate_random_pcm
+get_pcm_for_rounds = qecrt.get_pcm_for_rounds
+get_sorted_pcm_column_indices = qecrt.get_sorted_pcm_column_indices
+pcm_is_sorted = qecrt.pcm_is_sorted
+reorder_pcm_columns = qecrt.reorder_pcm_columns
+shuffle_pcm_columns = qecrt.shuffle_pcm_columns
+simplify_pcm = qecrt.simplify_pcm
+sort_pcm_columns = qecrt.sort_pcm_columns
+pcm_extend_to_n_rounds = qecrt.pcm_extend_to_n_rounds
 
 from .plugins import decoders, codes
 import pkgutil, importlib, traceback

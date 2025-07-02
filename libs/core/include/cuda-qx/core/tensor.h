@@ -193,7 +193,11 @@ public:
       throw std::runtime_error("Dot product requires rank-2 tensors");
     }
     if (shape()[1] != other.shape()[0]) {
-      throw std::runtime_error("Invalid matrix dimensions for dot product");
+      throw std::runtime_error(
+          "Invalid matrix dimensions for dot product: matrix1 dimensions: " +
+          std::to_string(shape()[0]) + "x" + std::to_string(shape()[1]) +
+          ", matrix2 dimensions: " + std::to_string(other.shape()[0]) + "x" +
+          std::to_string(other.shape()[1]));
     }
 
     std::vector<std::size_t> result_shape = {shape()[0], other.shape()[1]};

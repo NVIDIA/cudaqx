@@ -1,5 +1,5 @@
 /****************************************************************-*- C++ -*-****
- * Copyright (c) 2024 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -8,6 +8,7 @@
 #pragma once
 
 #include "cudaq/qec/code.h"
+#include "cudaq/qec/detector_error_model.h"
 
 namespace cudaq::qec {
 
@@ -100,4 +101,36 @@ sample_memory_circuit(const code &code, std::size_t numShots,
 std::tuple<cudaqx::tensor<uint8_t>, cudaqx::tensor<uint8_t>>
 sample_memory_circuit(const code &code, std::size_t numShots,
                       std::size_t numRounds, cudaq::noise_model &noise);
+
+/// @brief Given a memory circuit setup, generate a DEM
+/// @param code QEC Code to sample
+/// @param statePrep Initial state preparation operation
+/// @param numRounds Number of stabilizer measurement rounds
+/// @param noise Noise model to apply
+/// @return Detector error model
+cudaq::qec::detector_error_model
+dem_from_memory_circuit(const code &code, operation statePrep,
+                        std::size_t numRounds, cudaq::noise_model &noise);
+
+/// @brief Given a memory circuit setup, generate a DEM for X stabilizers.
+/// @param code QEC Code to sample
+/// @param statePrep Initial state preparation operation
+/// @param numRounds Number of stabilizer measurement rounds
+/// @param noise Noise model to apply
+/// @return Detector error model
+detector_error_model x_dem_from_memory_circuit(const code &code,
+                                               operation statePrep,
+                                               std::size_t numRounds,
+                                               cudaq::noise_model &noise);
+
+/// @brief Given a memory circuit setup, generate a DEM for Z stabilizers.
+/// @param code QEC Code to sample
+/// @param statePrep Initial state preparation operation
+/// @param numRounds Number of stabilizer measurement rounds
+/// @param noise Noise model to apply
+/// @return Detector error model
+detector_error_model z_dem_from_memory_circuit(const code &code,
+                                               operation statePrep,
+                                               std::size_t numRounds,
+                                               cudaq::noise_model &noise);
 } // namespace cudaq::qec

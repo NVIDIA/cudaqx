@@ -67,6 +67,9 @@ inline heterogeneous_map hetMapFromKwargs(const py::kwargs &kwargs) {
       } else {
         throw std::runtime_error("Unsupported array data type in kwargs.");
       }
+    } else if (py::isinstance<py::dict>(value)) {
+      // Check if it is a kwargs dict
+      result.insert(key, hetMapFromKwargs(value.cast<py::dict>()));
     } else {
       throw std::runtime_error(
           "Invalid python type for mapping kwargs to a heterogeneous_map.");
@@ -77,12 +80,23 @@ inline heterogeneous_map hetMapFromKwargs(const py::kwargs &kwargs) {
 }
 
 template <typename T>
-tensor<T> toTensor(const py::array_t<T> &H) {
+tensor<T> toTensor(const py::array_t<T> &H, bool perform_pcm_checks = false) {
   py::buffer_info buf = H.request();
 
   if (buf.ndim >= 1 && buf.strides[0] == buf.itemsize) {
     throw std::runtime_error("toTensor: data must be in row-major order, but "
                              "column-major order was detected.");
+  }
+
+  if (perform_pcm_checks) {
+    if (buf.itemsize != sizeof(uint8_t)) {
+      throw std::runtime_error(
+          "Parity check matrix must be an array of uint8_t.");
+    }
+
+    if (buf.ndim != 2) {
+      throw std::runtime_error("Parity check matrix must be 2-dimensional.");
+    }
   }
 
   // Create a vector of the array dimensions
@@ -96,4 +110,12 @@ tensor<T> toTensor(const py::array_t<T> &H) {
   tensor_H.borrow(static_cast<T *>(buf.ptr), shape);
   return tensor_H;
 }
+
+/// @brief Convert a py::array_t<uint8_t> to a tensor<uint8_t>. This is the same
+/// as toTensor, but with additional checks.
+template <typename T>
+tensor<T> pcmToTensor(const py::array_t<T> &H) {
+  return toTensor(H, /*perform_pcm_checks=*/true);
+}
+
 } // namespace cudaqx

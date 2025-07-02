@@ -419,6 +419,84 @@ void bindCode(py::module &mod) {
       py::arg("noise") = std::nullopt);
 
   qecmod.def(
+      "dem_from_memory_circuit",
+      [](code &code, operation op, std::size_t numRounds,
+         std::optional<cudaq::noise_model> noise = std::nullopt) {
+        return dem_from_memory_circuit(code, op, numRounds, *noise);
+      },
+      R"pbdoc(
+        Generate a detector error model from a memory circuit.
+
+        This function generates a detector error model from a memory circuit.
+        The memory circuit is specified by the code, the initial state preparation
+        operation, and the number of stabilizer measurement rounds. The noise
+        model is optional and defaults to no noise.
+
+        Args:
+            code: The code to generate the detector error model for.
+            op: The initial state preparation operation.
+            numRounds: The number of stabilizer measurement rounds.
+            noise: The noise model to apply to the memory circuit.
+
+        Returns:
+            A detector error model.
+      )pbdoc",
+      py::arg("code"), py::arg("op"), py::arg("numRounds"),
+      py::arg("noise") = std::nullopt);
+
+  qecmod.def(
+      "x_dem_from_memory_circuit",
+      [](code &code, operation op, std::size_t numRounds,
+         std::optional<cudaq::noise_model> noise = std::nullopt) {
+        return x_dem_from_memory_circuit(code, op, numRounds, *noise);
+      },
+      R"pbdoc(
+        Generate a detector error model from a memory circuit in the X basis.
+
+        This function generates a detector error model from a memory circuit in
+        the X basis. The memory circuit is specified by the code, the initial
+        state preparation operation, and the number of stabilizer measurement
+        rounds. The noise model is optional and defaults to no noise.
+
+        Args:
+            code: The code to generate the detector error model for.
+            op: The initial state preparation operation.
+            numRounds: The number of stabilizer measurement rounds.
+            noise: The noise model to apply to the memory circuit.
+
+        Returns:
+            A detector error model.
+      )pbdoc",
+      py::arg("code"), py::arg("op"), py::arg("numRounds"),
+      py::arg("noise") = std::nullopt);
+
+  qecmod.def(
+      "z_dem_from_memory_circuit",
+      [](code &code, operation op, std::size_t numRounds,
+         std::optional<cudaq::noise_model> noise = std::nullopt) {
+        return z_dem_from_memory_circuit(code, op, numRounds, *noise);
+      },
+      R"pbdoc(
+        Generate a detector error model from a memory circuit in the Z basis.
+
+        This function generates a detector error model from a memory circuit in
+        the Z basis. The memory circuit is specified by the code, the initial
+        state preparation operation, and the number of stabilizer measurement
+        rounds. The noise model is optional and defaults to no noise.
+
+        Args:
+            code: The code to generate the detector error model for.
+            op: The initial state preparation operation.
+            numRounds: The number of stabilizer measurement rounds.
+            noise: The noise model to apply to the memory circuit.
+
+        Returns:
+            A detector error model.
+      )pbdoc",
+      py::arg("code"), py::arg("op"), py::arg("numRounds"),
+      py::arg("noise") = std::nullopt);
+
+  qecmod.def(
       "sample_code_capacity",
       [](code &code, std::size_t numShots, double errorProb,
          std::optional<int> seed = std::nullopt) {
