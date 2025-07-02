@@ -4,6 +4,7 @@ from typing import Any, Optional
 from quimb import oset
 from quimb.tensor import Tensor, TensorNetwork
 
+
 def tensor_network_from_parity_check(
     parity_check_matrix: npt.NDArray[Any],
     row_inds: list[str],
@@ -147,7 +148,6 @@ def tensor_network_from_syndrome_batch(
         "All syndrome indices must be strings."
     assert isinstance(batch_index, str), \
         "The batch index must be a string."
-    
 
     shots, syndrome_length = detection_events.shape
 

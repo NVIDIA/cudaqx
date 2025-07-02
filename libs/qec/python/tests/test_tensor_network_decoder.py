@@ -164,8 +164,8 @@ def test_decoder_set_contractor_invalid():
                               logical_obs=logical,
                               noise_model=noise)
     with pytest.raises(ValueError):
-        decoder.set_contractor("not_a_contractor", "not_a_device",
-                               "not_a_backend")
+        decoder._set_contractor("not_a_contractor", "not_a_device",
+                                "not_a_backend")
 
 
 def test_TensorNetworkDecoder_optimize_path_all_variants():
@@ -255,7 +255,7 @@ def test_decoder_batch_vs_single_and_expected_results_with_contractors():
             )
             continue
         try:
-            decoder.set_contractor(contractor, device, backend, dtype=dtype)
+            decoder._set_contractor(contractor, device, backend, dtype=dtype)
         except Exception as e:
             print(f"Skipping contractor {contractor} ({dtype}, {device}): {e}")
             continue

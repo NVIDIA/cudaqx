@@ -200,7 +200,7 @@ class TensorNetworkDecoder:
         self.slicing_single = tuple()
         self._batch_size = 1
 
-        self.set_contractor(contractor_name, device, backend, dtype)
+        self._set_contractor(contractor_name, device, backend, dtype)
 
         # Initialize the noise model
         if isinstance(noise_model, TensorNetwork):
@@ -315,7 +315,7 @@ class TensorNetworkDecoder:
                 iter(self.syndrome_tn.tag_map[f"SYN_{ind}"]))]
             t.modify(data=values[ind] * minus + (1.0 - values[ind]) * plus,)
 
-    def set_contractor(
+    def _set_contractor(
         self,
         contractor: str,
         device: str,
@@ -347,7 +347,7 @@ class TensorNetworkDecoder:
 
         is_cutensornet = contractor == "cutensornet"
 
-        def _adjust_default_path_value(val: Any):
+        def _adjust_default_path_value(val):
             if is_cutensornet:
                 return None if val == "auto" else val
             else:
