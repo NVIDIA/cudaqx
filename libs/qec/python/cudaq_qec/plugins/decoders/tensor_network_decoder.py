@@ -400,9 +400,7 @@ class TensorNetworkDecoder:
 
         if self.path_single is None:
             # If the path is not set, we need to optimize it
-            self.optimize_path(
-                optimize=self.path_single,
-            )
+            self.optimize_path(optimize=self.path_single,)
 
         contraction_value = self.contractor_config.contractor(
             self.full_tn.get_equation(output_inds=(self.logical_obs_inds[0],)),
@@ -493,9 +491,8 @@ class TensorNetworkDecoder:
         Returns:
             Any: The optimizer info object.
         """
-        assert isinstance(batch_size, int), (
-            "batch_size must be an integer, "
-            "or -1 to indicate no batching.")
+        assert isinstance(batch_size, int), ("batch_size must be an integer, "
+                                             "or -1 to indicate no batching.")
         from cuquantum.tensornet import OptimizerOptions
 
         is_batch = batch_size > 0
@@ -506,8 +503,8 @@ class TensorNetworkDecoder:
             self._batch_size = batch_size
             tn = TensorNetwork(
                 [t for t in self.full_tn.tensors if "SYNDROME" not in t.tags])
-            fake_batch = np.ones(
-                (batch_size, len(self.check_inds)), dtype=self._dtype)
+            fake_batch = np.ones((batch_size, len(self.check_inds)),
+                                 dtype=self._dtype)
             tn = tn.combine(tensor_network_from_syndrome_batch(
                 fake_batch, self.check_inds, batch_index="batch_index"),
                             virtual=True)
