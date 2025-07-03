@@ -26,6 +26,16 @@ def factorized_noise_model(
     Returns:
         TensorNetwork: The tensor network representing the factorized noise model.
     """
+    assert len(error_indices) == len(error_probabilities), \
+        "Length of error_indices and error_probabilities must match."
+    if isinstance(error_probabilities, np.ndarray):
+        assert error_probabilities.ndim == 1 and len(error_probabilities) == len(
+            error_indices), "error_probabilities must be a 1D array with length matching error_indices."
+    elif isinstance(error_probabilities, list):
+        assert all(isinstance(p, (float, int)) for p in error_probabilities), \
+            "error_probabilities must be a list of floats or ints."
+    else:
+        raise TypeError("error_probabilities must be a list or numpy array.")
     tensors = []
 
     if tensors_tags is None:
@@ -57,6 +67,19 @@ def error_pairs_noise_model(
     Returns:
         TensorNetwork: The tensor network representing the error pairs noise model.
     """
+    assert len(error_index_pairs) == len(error_probabilities), \
+        "Length of error_index_pairs and error_probabilities must match."
+    if isinstance(error_probabilities, np.ndarray):
+        assert (error_probabilities.ndim == 2 and
+                error_probabilities.shape[1] == 2 and
+                error_probabilities.shape[0] == len(error_index_pairs)), \
+            "error_probabilities must be a 2D array with shape (N, 2) where N is the number of error pairs."
+    elif isinstance(error_probabilities, list):
+        assert all(isinstance(p, np.ndarray) and p.ndim == 2 and p.shape == (2, 2)
+                   for p in error_probabilities), \
+            "error_probabilities must be a list of 2x2 numpy arrays."
+    else:
+        raise TypeError("error_probabilities must be a list or numpy array.")
     tensors = []
 
     if tensors_tags is None:
