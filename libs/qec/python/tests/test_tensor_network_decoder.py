@@ -245,9 +245,9 @@ def test_decoder_batch_vs_single_and_expected_results_with_contractors():
 
     try:
         decoder = qec.get_decoder("tensor_network_decoder",
-                                H,
-                                logical_obs=logical,
-                                noise_model=noise)
+                                  H,
+                                  logical_obs=logical,
+                                  noise_model=noise)
         assert isinstance(decoder, TensorNetworkDecoder)
     except Exception as e:
         logging.error(f"Test failed due to: {e}")
