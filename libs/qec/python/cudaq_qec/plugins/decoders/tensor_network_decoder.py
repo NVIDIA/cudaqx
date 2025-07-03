@@ -291,8 +291,11 @@ class TensorNetworkDecoder:
             f"but expected {len(self.error_inds)} for the error indices.")
         self.noise_model = noise_model
         self._set_tensor_type(self.noise_model)
-        self.full_tn = (self.code_tn | self.logical_tn | self.syndrome_tn |
-                        self.noise_model)
+        self.full_tn = TensorNetwork()
+        self.full_tn = self.full_tn.combine(self.code_tn, virtual=True)
+        self.full_tn = self.full_tn.combine(self.logical_tn, virtual=True)
+        self.full_tn = self.full_tn.combine(self.syndrome_tn, virtual=True)
+        self.full_tn = self.full_tn.combine(self.noise_model, virtual=True)
 
         if contract:
             for ie in self.error_inds:
