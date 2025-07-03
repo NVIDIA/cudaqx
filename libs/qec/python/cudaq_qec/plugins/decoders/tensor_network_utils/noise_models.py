@@ -30,7 +30,8 @@ def factorized_noise_model(
         "Length of error_indices and error_probabilities must match."
     if isinstance(error_probabilities, np.ndarray):
         assert error_probabilities.ndim == 1 and len(error_probabilities) == len(
-            error_indices), "error_probabilities must be a 1D array with length matching error_indices."
+            error_indices
+        ), "error_probabilities must be a 1D array with length matching error_indices."
     elif isinstance(error_probabilities, list):
         assert all(isinstance(p, (float, int)) for p in error_probabilities), \
             "error_probabilities must be a list of floats or ints."
