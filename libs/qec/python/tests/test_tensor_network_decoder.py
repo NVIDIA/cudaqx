@@ -499,7 +499,7 @@ def test_error_pairs_noise_model_basic():
 
 def test_error_pairs_noise_model_default_tags():
     error_index_pairs = [('x', 'y')]
-    error_probabilities = [np.array([[0.6, 0.4], [0.3, 0.7]])]
+    error_probabilities = [np.array([[0.6, 0.5], [0.3, 0.7]])]
     tn = error_pairs_noise_model(error_index_pairs, error_probabilities)
     for t in tn.tensors:
         assert "NOISE" in t.tags
