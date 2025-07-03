@@ -401,7 +401,6 @@ class TensorNetworkDecoder:
         if self.path_single is None:
             # If the path is not set, we need to optimize it
             self.optimize_path(
-                output_inds=(self.logical_obs_inds[0],),
                 optimize=self.path_single,
             )
 
@@ -453,9 +452,8 @@ class TensorNetworkDecoder:
                 0] != self._batch_size:
             # If the path is not set, we need to optimize it
             self.optimize_path(
-                output_inds=("batch_index", self.logical_obs_inds[0]),
                 optimize=self.path_batch,
-                syndrome_batch=syndrome_batch,
+                batch_size=syndrome_batch.shape[0],
             )
             self._batch_size = syndrome_batch.shape[0]
 
@@ -481,44 +479,44 @@ class TensorNetworkDecoder:
 
     def optimize_path(
         self,
-        output_inds: tuple[str, ...],
         optimize: Any = None,
-        syndrome_batch: Optional[npt.NDArray[Any]] = None,
+        batch_size: int = -1,
     ) -> Any:
         """Optimize the contraction path of the tensor network.
 
         Args:
-            output_inds (tuple[str]): The output indices of the contraction.
             optimize (Optional[cutn.OptimizerOptions], optional): The optimization options to use. 
                 If None or cuquantum.tensornet.OptimizerOptions, we use cuquantum.tensornet.
                 Else, Quimb interface at 
                 https://quimb.readthedocs.io/en/latest/autoapi/quimb/tensor/tensor_core/index.html#quimb.tensor.tensor_core.TensorNetwork.contraction_info
-            syndrome_batch (Optional[np.ndarray], optional): A batch of syndromes to use for the optimization. If None, the full tensor network is used.
-
+            batch_size (int, optional): The batch size for the optimization. Defaults to -1, which means no batching.
         Returns:
             Any: The optimizer info object.
         """
-        assert isinstance(output_inds, tuple), (
-            "output_inds must be a tuple of strings representing the output indices."
-        )
-        if len(output_inds) > 1:
-            assert syndrome_batch is not None, (
-                "If output_inds has more than one index, "
-                "syndrome_batch must be provided to optimize the path correctly."
-            )
+        assert isinstance(batch_size, int), (
+            "batch_size must be an integer, "
+            "or -1 to indicate no batching.")
         from cuquantum.tensornet import OptimizerOptions
 
-        is_batch = syndrome_batch is not None
+        is_batch = batch_size > 0
 
         # Build the tensor network
         if is_batch:
+            import numpy as np
+            self._batch_size = batch_size
             tn = TensorNetwork(
                 [t for t in self.full_tn.tensors if "SYNDROME" not in t.tags])
+            fake_batch = np.ones(
+                (batch_size, len(self.check_inds)), dtype=self._dtype)
             tn = tn.combine(tensor_network_from_syndrome_batch(
-                syndrome_batch, self.check_inds, batch_index="batch_index"),
+                fake_batch, self.check_inds, batch_index="batch_index"),
                             virtual=True)
+            self._set_tensor_type(tn)
+            output_inds = ("batch_index", self.logical_obs_inds[0])
         else:
             tn = self.full_tn
+            output_inds = (self.logical_obs_inds[0],)
+
         self._set_tensor_type(tn)
 
         # Optimize the path

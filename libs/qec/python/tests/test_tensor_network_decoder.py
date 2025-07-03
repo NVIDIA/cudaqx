@@ -188,7 +188,7 @@ def test_TensorNetworkDecoder_optimize_path_all_variants():
                               noise_model=noise)
 
     # optimize="auto" (opt_einsum)
-    info = decoder.optimize_path(output_inds=("l_0",), optimize="auto")
+    info = decoder.optimize_path(optimize="auto")
     assert isinstance(decoder.path_single, (list, tuple))
     assert decoder.slicing_single is not None
     assert isinstance(info, PathInfo)
@@ -198,14 +198,14 @@ def test_TensorNetworkDecoder_optimize_path_all_variants():
 
     # optimize=cuQuantum OptimizerOptions
     opt = cutn.OptimizerOptions()
-    info2 = decoder.optimize_path(output_inds=("l_0",), optimize=opt)
+    info2 = decoder.optimize_path(optimize=opt)
     assert isinstance(decoder.path_single, (list, tuple))
     assert decoder.slicing_single is not None
     assert isinstance(info2, OptimizerInfo)
 
     # optimize=cotengra.HyperOptimizer()
     hyper = cotengra.HyperOptimizer()
-    info3 = decoder.optimize_path(output_inds=("l_0",), optimize=hyper)
+    info3 = decoder.optimize_path(optimize=hyper)
     assert isinstance(decoder.path_single, (list, tuple))
     assert decoder.slicing_single is not None
     assert isinstance(info3, PathInfo)
