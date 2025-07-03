@@ -226,6 +226,8 @@ def test_decoder_batch_vs_single_and_expected_results_with_contractors():
 
     import cudaq_qec as qec
     import cupy
+    import logging
+    from cudaq_qec.plugins.decoders.tensor_network_decoder import TensorNetworkDecoder
 
     # Provided expected results
     expected = [
@@ -241,10 +243,15 @@ def test_decoder_batch_vs_single_and_expected_results_with_contractors():
         ("cutensornet", "float32", "cuda:0", "numpy"),
     ]
 
-    decoder = qec.get_decoder("tensor_network_decoder",
-                              H,
-                              logical_obs=logical,
-                              noise_model=noise)
+    try:
+        decoder = qec.get_decoder("tensor_network_decoder",
+                                H,
+                                logical_obs=logical,
+                                noise_model=noise)
+        assert isinstance(decoder, TensorNetworkDecoder)
+    except Exception as e:
+        logging.error(f"Test failed due to: {e}")
+        pytest.fail(f"Operation failed: {e}")
 
     # Generate a batch of random syndromes
     batch = np.random.choice([False, True], size=(n_batch, n_checks))
@@ -266,7 +273,14 @@ def test_decoder_batch_vs_single_and_expected_results_with_contractors():
         # Decode each syndrome individually
         single_results = []
         for syndrome in batch:
-            res = decoder.decode(syndrome.tolist())
+
+            try:
+                res = decoder.decode(syndrome.tolist())
+                assert isinstance(res, qec.DecoderResult)
+                assert hasattr(res, "converged")
+            except Exception as e:
+                logging.error(f"Test failed due to: {e}")
+                pytest.fail(f"Operation failed: {e}")
             # Use float32 for float32 contractors, float64 otherwise
             if dtype == "float32":
                 single_results.append(np.float32(res.result[0]))
@@ -274,7 +288,15 @@ def test_decoder_batch_vs_single_and_expected_results_with_contractors():
                 single_results.append(np.float64(res.result[0]))
 
         # Decode the batch
-        res_batch = decoder.decode_batch(batch)
+        try:
+            res_batch = decoder.decode_batch(batch)
+            assert isinstance(res_batch, list)
+            assert all(isinstance(r, qec.DecoderResult) for r in res_batch)
+            assert all(r.converged for r in res_batch)
+        except Exception as e:
+            logging.error(f"Test failed due to: {e}")
+            pytest.fail(f"Operation failed: {e}")
+
         if dtype == "float32":
             batch_results = [np.float32(r.result[0]) for r in res_batch]
             expected_cast = np.array(expected, dtype=np.float32)

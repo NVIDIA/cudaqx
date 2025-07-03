@@ -346,7 +346,7 @@ class TensorNetworkDecoder:
         Raises:
             ValueError: If the contractor is not found or device is invalid for the contractor.
         """
-
+        print(f"Using contractor: {contractor} on device: {device} with backend: {backend}")
         self.contractor_config = ContractorConfig(
             contractor_name=contractor,
             backend=backend,
@@ -356,6 +356,7 @@ class TensorNetworkDecoder:
         # Reset only if specified
         if dtype is not None:
             self._dtype = dtype
+        print(f"Using dtype: {self._dtype}")
 
         self._set_tensor_type(self.full_tn)
 
