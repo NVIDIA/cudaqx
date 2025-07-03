@@ -85,7 +85,7 @@ def error_pairs_noise_model(
             "error_probabilities must be a list of 2x2 numpy arrays."
     else:
         raise TypeError("error_probabilities must be a list or numpy array.")
-    assert all(p >= 0 and p <= 1 for p in error_probabilities), \
+    assert all((p >=0).all() and (p <= 1).all() for p in error_probabilities), \
         "All error probabilities must be in the range [0, 1]."
     tensors = []
 
