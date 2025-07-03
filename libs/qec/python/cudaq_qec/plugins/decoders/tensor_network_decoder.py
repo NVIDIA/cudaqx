@@ -347,7 +347,7 @@ class TensorNetworkDecoder:
             ValueError: If the contractor is not found or device is invalid for the contractor.
         """
         print(
-            f"Using contractor: {contractor} on device: {device} with backend: {backend}"
+            f"(Re-)set contractor: {contractor} on device: {device} with backend: {backend}"
         )
         self.contractor_config = ContractorConfig(
             contractor_name=contractor,
