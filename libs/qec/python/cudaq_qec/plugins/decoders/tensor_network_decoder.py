@@ -191,7 +191,10 @@ class TensorNetworkDecoder:
 
         # Construct the tensor network of code + logical + syndromes
         # The noise model is added later
-        self.full_tn = self.code_tn | self.logical_tn | self.syndrome_tn
+        self.full_tn = TensorNetwork()
+        self.full_tn = self.full_tn.combine(self.code_tn, virtual=True)
+        self.full_tn = self.full_tn.combine(self.logical_tn, virtual=True)
+        self.full_tn = self.full_tn.combine(self.syndrome_tn, virtual=True)
 
         # Default values for the path finders
         self.path_single = None if contractor_name == "cutensornet" else "auto"
@@ -254,13 +257,21 @@ class TensorNetworkDecoder:
         )
 
         # Add a Hadamard tensor for each logical observable for its outer leg
-        self.logical_tn |= tensor_network_from_logical_observable(
-            self.logical_obs, self.logical_inds, self.logical_obs_inds,
-            self.logical_tags)
+        self.logical_tn = self.logical_tn.combine(
+            tensor_network_from_logical_observable(self.logical_obs,
+                                                   self.logical_inds,
+                                                   self.logical_obs_inds,
+                                                   self.logical_tags),
+            virtual=True)
 
         if hasattr(self, "full_tn"):
-            self.full_tn = (self.code_tn | self.logical_tn | self.syndrome_tn |
-                            self.noise_model)
+            self.full_tn = TensorNetwork()
+            self.full_tn = self.full_tn.combine(self.code_tn, virtual=True)
+            self.full_tn = self.full_tn.combine(self.logical_tn, virtual=True)
+            self.full_tn = self.full_tn.combine(self.syndrome_tn, virtual=True)
+            if hasattr(self, "noise_model"):
+                self.full_tn = self.full_tn.combine(self.noise_model,
+                                                    virtual=True)
 
             self._set_tensor_type(self.full_tn)
 
@@ -429,9 +440,10 @@ class TensorNetworkDecoder:
         tn = TensorNetwork(
             [t for t in self.full_tn.tensors if "SYNDROME" not in t.tags])
 
-        tn |= tensor_network_from_syndrome_batch(syndrome_batch,
-                                                 self.check_inds,
-                                                 batch_index="batch_index")
+        tn = tn.combine(tensor_network_from_syndrome_batch(
+            syndrome_batch, self.check_inds, batch_index="batch_index"),
+                        virtual=True)
+        # Set the tensor type for the new tensor network
         self._set_tensor_type(tn)
 
         if self.path_batch is None or syndrome_batch.shape[
@@ -499,9 +511,9 @@ class TensorNetworkDecoder:
         if is_batch:
             tn = TensorNetwork(
                 [t for t in self.full_tn.tensors if "SYNDROME" not in t.tags])
-            tn |= tensor_network_from_syndrome_batch(syndrome_batch,
-                                                     self.check_inds,
-                                                     batch_index="batch_index")
+            tn = tn.combine(tensor_network_from_syndrome_batch(
+                syndrome_batch, self.check_inds, batch_index="batch_index"),
+                            virtual=True)
         else:
             tn = self.full_tn
         self._set_tensor_type(tn)
