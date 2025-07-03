@@ -37,6 +37,10 @@ def factorized_noise_model(
             "error_probabilities must be a list of floats or ints."
     else:
         raise TypeError("error_probabilities must be a list or numpy array.")
+    assert all(p >= 0 and p <= 1 for p in error_probabilities), \
+        "All error probabilities must be in the range [0, 1]."
+    assert all(isinstance(ind, str) for ind in error_indices), \
+        "All error indices must be strings."
     tensors = []
 
     if tensors_tags is None:
@@ -81,6 +85,8 @@ def error_pairs_noise_model(
             "error_probabilities must be a list of 2x2 numpy arrays."
     else:
         raise TypeError("error_probabilities must be a list or numpy array.")
+    assert all(p >= 0 and p <= 1 for p in error_probabilities), \
+        "All error probabilities must be in the range [0, 1]."
     tensors = []
 
     if tensors_tags is None:
