@@ -49,3 +49,10 @@ CUDAQX_QEC_BINDINGS_PYTHON = true
 
 [tool.setuptools_scm]
 write_to = "_version.py"
+
+[project.optional-dependencies]
+tn_decoder = [
+  "quimb",
+  "opt_einsum",
+  "torch",
+]
