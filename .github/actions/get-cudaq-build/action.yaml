@@ -124,6 +124,9 @@ runs:
       run: |
           bash .github/workflows/scripts/install_git_cli.sh
           apt install -y --no-install-recommends ccache
+          # Temporary because of cuQuantum 25.03 installing the wrong version of cudensitymat
+          # in the upstream devdeps images.
+          pip install cudensitymat-cu12==0.1.0
       shell: bash --noprofile --norc -euo pipefail {0}
 
     - name: Build CUDAQ
