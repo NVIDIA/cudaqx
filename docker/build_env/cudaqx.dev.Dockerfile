@@ -18,10 +18,6 @@ RUN apt-get update && apt-get install -y gfortran libblas-dev jq cuda-nvtx-12-0 
   && python3 -m pip install "cmake<4" --user \
   && apt-get autoremove -y --purge && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Temporary because of cuQuantum 25.03 installing the wrong version of cudensitymat
-# in the upstream devdeps images.
-RUN python3 -m pip install cudensitymat-cu12==0.1.0
-
 COPY .cudaq_version /cudaq_version
 
 ENV CUDAQ_INSTALL_PREFIX=/usr/local/cudaq

@@ -18,10 +18,6 @@ LABEL org.opencontainers.image.url="https://github.com/NVIDIA/cudaqx"
 
 ENV CUDAQ_INSTALL_PREFIX=/usr/local/cudaq
 
-# Temporary because of cuQuantum 25.03 installing the wrong version of cudensitymat
-# in the upstream devdeps images.
-RUN python${python_version} -m pip install cudensitymat-cu12==0.1.0
-
 RUN dnf install -y jq cuda-nvtx-12-0
 RUN mkdir -p /workspaces/cudaqx
 COPY .cudaq_version /workspaces/cudaqx
