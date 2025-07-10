@@ -6,7 +6,8 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
-FROM ghcr.io/nvidia/cuda-quantum-devdeps:ext-cu12.0-gcc11-main
+ARG base_image=ghcr.io/nvidia/cuda-quantum-devdeps:ext-amd64-cu12.0-gcc11-main
+FROM $base_image
 
 LABEL org.opencontainers.image.description="Dev tools for building and testing CUDA-QX libraries"
 LABEL org.opencontainers.image.source="https://github.com/NVIDIA/cudaqx"
