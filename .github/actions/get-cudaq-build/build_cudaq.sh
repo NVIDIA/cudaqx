@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ============================================================================ #
-# Copyright (c) 2022 - 2024 NVIDIA Corporation & Affiliates.                   #
+# Copyright (c) 2022 - 2025 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -14,7 +14,7 @@ CC=${3:-"gcc"}
 CXX=${4:-"g++"}
 
 LLVM_INSTALL_PREFIX=/usr/local/llvm
-CUQUANTUM_INSTALL_PREFIX="$(pip show cuquantum-python-cu12 | grep "Location:" | cut -d " " -f 2)/cuquantum"
+CUQUANTUM_INSTALL_PREFIX="$(pip show cuquantum-cu12 | grep "Location:" | cut -d " " -f 2)/cuquantum"
 CUTENSOR_INSTALL_PREFIX="$(pip show cutensor-cu12 | grep "Location:" | cut -d " " -f 2)/cutensor"
 
 cd cudaq
