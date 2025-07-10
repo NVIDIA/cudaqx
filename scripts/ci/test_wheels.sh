@@ -40,9 +40,16 @@ fi
 # QEC library
 # ======================================
 
-# Install QEC library with tensor network decoder
 wheel_file=$(ls /wheels/cudaq_qec-*-cp${python_version_no_dot}-cp${python_version_no_dot}-*.whl)
-${python} -m pip install "${wheel_file}[tn_decoder]"
+# If Python version is 3.10, then install without tensor network decoder.
+# Otherwise, install with the tensor network decoder.
+if [ $python_version == "3.10" ]; then
+  echo "Installing QEC library without tensor network decoder"
+  ${python} -m pip install "${wheel_file}"
+else
+  echo "Installing QEC library with tensor network decoder"
+  ${python} -m pip install "${wheel_file}[tn_decoder]"
+fi
 ${python} -m pytest -v -s libs/qec/python/tests/
 
 # Solvers library
