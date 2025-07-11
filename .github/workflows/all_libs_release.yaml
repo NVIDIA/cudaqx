@@ -120,7 +120,11 @@ jobs:
             export PYTHONPATH="/usr/local/cudaq:$HOME/.cudaqx"
             python3 -c "import cudaq_qec as qec; print(qec.__version__); d = qec.get_decoder('nv-qldpc-decoder', qec.get_code('steane').get_parity()); print(d.get_version())"
           fi
-          cmake --build ${{ steps.build.outputs.build-dir }} --target run_python_tests
+          # Skip the tensor network decoder tests. Once we advance to Python 3.11 for this test, we can restore this back to:
+          # cmake --build ${{ steps.build.outputs.build-dir }} --target run_python_tests
+          # But for now, we do this:
+          export PYTHONPATH="/cudaq-install:${{ steps.build.outputs.build-dir }}/python"
+          python3 -m pytest -v --ignore=python/tests/test_tensor_network_decoder.py libs/*/python/tests
         shell: bash
 
       # ========================================================================
