@@ -76,7 +76,7 @@ jobs:
       # ========================================================================
  
       - name: Install python requirements
-        # Note: install quimb opt_einsum torch when we advance to Python 3.11
+        # Note: install tensor_network_decoder's dependencies quimb, opt_einsum, and torch when we advance to Python 3.11
         run: pip install numpy pytest cupy-cuda12x cuquantum-cu12
 
       - name: Run Python tests
