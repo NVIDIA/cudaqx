@@ -75,6 +75,16 @@ jobs:
           fi
         shell: bash
           
+      - name: Update to Python 3.11
+        run: |
+          # Install Python 3.11
+          apt update && apt install -y --no-install-recommends python3.11 python3.11-dev python3.11-venv
+          # Set Python 3.11 as the default Python version
+          update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
+          update-alternatives --install /usr/bin/python3-config python3-config /usr/bin/python3.11-config 1
+          # Migrate all Python 3.10 packages to Python 3.11
+          python3.10 -m pip freeze | python3.11 -m pip install -r /dev/stdin
+
       # ========================================================================
       # Build
       # ========================================================================
@@ -111,7 +121,7 @@ jobs:
       # ========================================================================
  
       - name: Install python requirements
-        run: pip install numpy pytest cupy-cuda12x cuquantum-cu12
+        run: pip install numpy pytest cupy-cuda12x cuquantum-python-cu12 quimb opt_einsum torch
 
       - name: Run Python tests
         run: |
