@@ -6,19 +6,26 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
-import numpy as np
+import sys
 import pytest
-from quimb.tensor import TensorNetwork
+
+import numpy as np
 import cudaq_qec as qec
 
-from cudaq_qec.plugins.decoders.tensor_network_utils.tensor_network_factory import (
-    tensor_network_from_parity_check, tensor_network_from_single_syndrome,
-    prepare_syndrome_data_batch, tensor_network_from_syndrome_batch,
-    tensor_network_from_logical_observable)
-from cudaq_qec.plugins.decoders.tensor_network_utils.contractors import (
-    optimize_path, cutn_contractor, ContractorConfig, contractor,
-    cutn_contractor)
-from cudaq_qec.plugins.decoders.tensor_network_utils.noise_models import factorized_noise_model, error_pairs_noise_model
+if sys.version_info >= (3, 11):
+    from quimb.tensor import TensorNetwork
+
+    from cudaq_qec.plugins.decoders.tensor_network_utils.tensor_network_factory import (
+        tensor_network_from_parity_check, tensor_network_from_single_syndrome,
+        prepare_syndrome_data_batch, tensor_network_from_syndrome_batch,
+        tensor_network_from_logical_observable)
+    from cudaq_qec.plugins.decoders.tensor_network_utils.contractors import (
+        optimize_path, cutn_contractor, ContractorConfig, contractor,
+        cutn_contractor)
+    from cudaq_qec.plugins.decoders.tensor_network_utils.noise_models import factorized_noise_model, error_pairs_noise_model
+
+pytestmark = pytest.mark.skipif(sys.version_info < (3, 11),
+                                reason="Requires Python >= 3.11")
 
 
 def is_nvidia_gpu_available():

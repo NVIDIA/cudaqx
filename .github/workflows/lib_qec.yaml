@@ -76,15 +76,11 @@ jobs:
       # ========================================================================
  
       - name: Install python requirements
+        # Note: install quimb opt_einsum torch when we advance to Python 3.11
         run: pip install numpy pytest cupy-cuda12x cuquantum-cu12
 
       - name: Run Python tests
-        run: |
-          # Skip the tensor network decoder tests. Once we advance to Python 3.11 for this test, we can restore this back to:
-          # cmake --build ${{ steps.build.outputs.build-dir }} --target run_python_tests
-          # But for now, we do this:
-          export PYTHONPATH="/cudaq-install:${{ steps.build.outputs.build-dir }}/python"
-          python3 -m pytest -v --ignore=python/tests/test_tensor_network_decoder.py libs/qec/python/tests
+        run: cmake --build ${{ steps.build.outputs.build-dir }} --target run_python_tests
 
       # ========================================================================
       # Run example tests
