@@ -46,12 +46,11 @@ wheel_file=$(ls /wheels/cudaq_qec-*-cp${python_version_no_dot}-cp${python_versio
 if [ $python_version == "3.10" ]; then
   echo "Installing QEC library without tensor network decoder"
   ${python} -m pip install "${wheel_file}"
-  ${python} -m pytest -v -s libs/qec/python/tests/ --ignore=libs/qec/python/tests/test_tensor_network_decoder.py
 else
   echo "Installing QEC library with tensor network decoder"
   ${python} -m pip install "${wheel_file}[tn_decoder]"
-  ${python} -m pytest -v -s libs/qec/python/tests/
 fi
+${python} -m pytest -v -s libs/qec/python/tests/
 
 # Solvers library
 # ======================================
