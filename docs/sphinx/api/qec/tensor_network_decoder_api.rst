@@ -37,10 +37,10 @@
 
     .. code-block:: none
 
-                  open leg      < logical observable
+              open/output index < logical observable
                   --------
                      |
-        s1      s2   |     s3   < syndromes               : product state of zeros/ones
+        s1      s2   |     s3   < syndromes               : product of 2D vectors [1 , 1-2pi] (pi is the probability detector i flipped)
         |       |    |     |                        ----|
         c1      c2  l1     c3   < checks / logical      | : delta tensors
         |     / |   | \    |                            |
@@ -78,7 +78,7 @@
         Decode a batch of syndromes.
 
         :param syndrome_batch: numpy.ndarray of shape (batch_size, num_checks)
-        :returns: List of DecoderResult objects, one for each syndrome.
+        :returns: List of DecoderResult objects with the probability that the logical observable has flipped for each syndrome.
 
     .. method:: replace_logical_observable(logical_obs, logical_inds=None, logical_tags=None)
 
