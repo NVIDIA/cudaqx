@@ -91,92 +91,127 @@ def three_qubit_repetition_code():
         for j in range(3):
             cudaq.apply_noise(cudaq.XError, p_per_round, data_qubits[j])
 
-        # Extract Syndromes
-        h(ancilla_qubits)
+            # Extract Syndromes
+            h(ancilla_qubits)
 
-        # First Parity Check
-        z.ctrl(ancilla_qubits[0], data_qubits[0])
-        z.ctrl(ancilla_qubits[0], data_qubits[1])
+            # First Parity Check
+            z.ctrl(ancilla_qubits[0], data_qubits[0])
+            z.ctrl(ancilla_qubits[0], data_qubits[1])
 
-        # Second Parity Check
-        z.ctrl(ancilla_qubits[1], data_qubits[1])
-        z.ctrl(ancilla_qubits[1], data_qubits[2])
+            # Second Parity Check
+            z.ctrl(ancilla_qubits[1], data_qubits[1])
+            z.ctrl(ancilla_qubits[1], data_qubits[2])
 
-        h(ancilla_qubits)
+            h(ancilla_qubits)
 
-        # Measure the ancilla qubits
-        s0 = mz(ancilla_qubits[0])
-        s1 = mz(ancilla_qubits[1])
-        reset(ancilla_qubits[0])
-        reset(ancilla_qubits[1])
+            # Measure the ancilla qubits
+            s0 = mz(ancilla_qubits[0])
+            s1 = mz(ancilla_qubits[1])
+            reset(ancilla_qubits[0])
+            reset(ancilla_qubits[1])
 
     # Final measurement to get the data qubits
     mz(data_qubits)
 """
 
-
-
 @cudaq.kernel
 def prep0(logicalQubit: patch):
-    h(logicalQubit.data[0], logicalQubit.data[4], logicalQubit.data[6])
-    x.ctrl(logicalQubit.data[0], logicalQubit.data[1])
-    x.ctrl(logicalQubit.data[4], logicalQubit.data[5])
-    x.ctrl(logicalQubit.data[6], logicalQubit.data[3])
-    x.ctrl(logicalQubit.data[6], logicalQubit.data[5])
-    x.ctrl(logicalQubit.data[4], logicalQubit.data[2])
-    x.ctrl(logicalQubit.data[0], logicalQubit.data[3])
-    x.ctrl(logicalQubit.data[4], logicalQubit.data[1])
-    x.ctrl(logicalQubit.data[3], logicalQubit.data[2])
-
+    for i in range(len(logicalQubit.data)):
+        cudaq.reset(logicalQubit.data[i])
 
 @cudaq.kernel
-def stabilizer(logicalQubit: patch, x_stabilizers: list[int],
-               z_stabilizers: list[int]) -> list[bool]:
-    h(logicalQubit.ancx)
-    for xi in range(len(logicalQubit.ancx)):
-        for di in range(len(logicalQubit.data)):
-            if x_stabilizers[xi * len(logicalQubit.data) + di] == 1:
-                x.ctrl(logicalQubit.ancx[xi], logicalQubit.data[di])
+def x(logicalQubit: patch):
+    for i in range(len(logicalQubit.data)):
+        cudaq.x(logicalQubit.data[i])   
 
-    h(logicalQubit.ancx)
-    for zi in range(len(logicalQubit.ancx)):
-        for di in range(len(logicalQubit.data)):
-            if z_stabilizers[zi * len(logicalQubit.data) + di] == 1:
-                x.ctrl(logicalQubit.data[di], logicalQubit.ancz[zi])
+@cudaq.kernel
+def prep1(logicalQubit: patch):
+    prep0(logicalQubit)
+    x(logicalQubit)
 
-    results = mz(logicalQubit.ancx, logicalQubit.ancz)
+@cudaq.kernel
+def stabilizer(logicalQubit: Patch):
+    data_qubits = logicalQubit.data[:3]
+    ancilla_qubits = logicalQubit.data[3:7]
+    ancilla_measurements = []
 
-    reset(logicalQubit.ancx)
-    reset(logicalQubit.ancz)
-    return results
+    for i in range(nRounds):
+        # Random Bit Flip Errors
+        for j in range(3):
+            cudaq.apply_noise(cudaq.XError, p_per_round, data_qubits[j])
+
+    x.ctrl(ancilla_qubits[0], data_qubits[0])
+    x.ctrl(ancilla_qubits[0], data_qubits[1])
+
+    # Second Parity Check
+    x.ctrl(ancilla_qubits[1], data_qubits[1])
+    x.ctrl(ancilla_qubits[1], data_qubits[2])
+    ancilla_measurements.append(mz(ancilla_qubits[0]))
+    ancilla_measurements.append(mz(ancilla_qubits[1]))
+
+    # Extract Syndromes
+    h(ancilla_qubits)
+
+    # First Parity Check
+    z.ctrl(ancilla_qubits[0], data_qubits[0])
+    z.ctrl(ancilla_qubits[0], data_qubits[1])
+
+    # Second Parity Check
+    z.ctrl(ancilla_qubits[1], data_qubits[1])
+    z.ctrl(ancilla_qubits[1], data_qubits[2])
+
+    h(ancilla_qubits)
+
+    # Measure the ancilla qubits
+    ancilla_measurements.append(mz(ancilla_qubits[0]))
+    ancilla_measurements.append(mz(ancilla_qubits[1]))
+
+    reset(ancilla_qubits[0])
+    reset(ancilla_qubits[1])
+    reset(ancilla_qubits[2])
+    reset(ancilla_qubits[3])
+
+    return ancilla_measurements
 
 
-@qec.code('py-steane-example')
-class MySteaneCodeImpl:
+@qec.code('3-qubit-repetition-code')
+class ThreeQubitRepetitionCode(qec.Code):
+    """ A three-qubit repetition code with fine-grained noise model.
+        This code encodes a single logical qubit into three physical qubits
+        and uses ancilla qubits to measure stabilizers.
+        Warning: This code is just an example, the repetitino code does not need X ancilla qubits.
+    """
 
     def __init__(self, **kwargs):
         qec.Code.__init__(self, **kwargs)
         self.stabilizers = [
             cudaq.SpinOperator.from_word(word) for word in
-            ["XXXXIII", "IXXIXXI", "IIXXIXX", "ZZZZIII", "IZZIZZI", "IIZZIZZ"]
+            ["XII", "IIX",  "ZZI", "IZZ"]
         ]
         self.operation_encodings = {
             qec.operation.prep0: prep0,
+            qec.operation.prep1: prep1,
+            qec.operation.x: x,
             qec.operation.stabilizer_round: stabilizer
         }
 
     def get_num_data_qubits(self):
-        return 7
+        return 3
 
     def get_num_ancilla_x_qubits(self):
-        return 3
+        return 2
 
     def get_num_ancilla_z_qubits(self):
-        return 3
+        return 2
 
     def get_num_ancilla_qubits(self):
-        return 6
+        return 4
 
+# Create an instance of the three-qubit repetition code
+three_qubit_repetition_code = qec.get_code("3-qubit-repetition-code")
+
+# Create a state preparation kernel
+statePrep = qec.operation.prep1
 
 # Create a noise model
 noise_model = cudaq.NoiseModel()
@@ -201,7 +236,7 @@ H_pcm = get_circuit_level_pcm(3, nRounds, Hz)
 # after the nRounds of the repetition code
 # It is useful for more complex codes where the parity check matrix is not trivial.
 
-dem_rep = qec.dem_from_memory_circuit(three_qubit_repetition_code, statePrep, nRounds, noise_model)
+dem_rep = qec.z_dem_from_memory_circuit(three_qubit_repetition_code, statePrep, nRounds, noise_model)
 H_pcm_from_dem = dem_rep.detector_error_matrix
 
 # Get observables
