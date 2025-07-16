@@ -8,9 +8,6 @@
 
     The Tensor Network Decoder is a Python-only implementation. C++ APIs are not available for this decoder.
 
-    For related work, see:
-    `Tensor Network Decoding Beyond 2D <https://arxiv.org/abs/2310.10722>`_
-
 
     .. note::
       It is recommended to create decoders using the `cudaq_qec` plugin API:

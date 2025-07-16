@@ -16,6 +16,9 @@
     List <https://nvidia.github.io/cuda-quantum/latest/using/install/local_installation.html#dependencies-and-compatibility>`_
     for a list of valid GPU configurations.
 
+    References:
+    `Decoding Across the Quantum LDPC Code Landscape <https://arxiv.org/pdf/2005.07016>`_
+
     .. note::
       It is required to create decoders with the `get_decoder` API from the CUDA-QX
       extension points API, such as
