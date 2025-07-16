@@ -75,7 +75,7 @@ def get_circuit_level_pcm(distance, nRounds, Hz):
 
     return H_pcm
 
-
+"""
 # Example of how to construct a repetition code with a distance of 3 and random
 # bit flip errors applied to the data qubits
 @cudaq.kernel
@@ -112,6 +112,70 @@ def three_qubit_repetition_code():
 
     # Final measurement to get the data qubits
     mz(data_qubits)
+"""
+
+
+
+@cudaq.kernel
+def prep0(logicalQubit: patch):
+    h(logicalQubit.data[0], logicalQubit.data[4], logicalQubit.data[6])
+    x.ctrl(logicalQubit.data[0], logicalQubit.data[1])
+    x.ctrl(logicalQubit.data[4], logicalQubit.data[5])
+    x.ctrl(logicalQubit.data[6], logicalQubit.data[3])
+    x.ctrl(logicalQubit.data[6], logicalQubit.data[5])
+    x.ctrl(logicalQubit.data[4], logicalQubit.data[2])
+    x.ctrl(logicalQubit.data[0], logicalQubit.data[3])
+    x.ctrl(logicalQubit.data[4], logicalQubit.data[1])
+    x.ctrl(logicalQubit.data[3], logicalQubit.data[2])
+
+
+@cudaq.kernel
+def stabilizer(logicalQubit: patch, x_stabilizers: list[int],
+               z_stabilizers: list[int]) -> list[bool]:
+    h(logicalQubit.ancx)
+    for xi in range(len(logicalQubit.ancx)):
+        for di in range(len(logicalQubit.data)):
+            if x_stabilizers[xi * len(logicalQubit.data) + di] == 1:
+                x.ctrl(logicalQubit.ancx[xi], logicalQubit.data[di])
+
+    h(logicalQubit.ancx)
+    for zi in range(len(logicalQubit.ancx)):
+        for di in range(len(logicalQubit.data)):
+            if z_stabilizers[zi * len(logicalQubit.data) + di] == 1:
+                x.ctrl(logicalQubit.data[di], logicalQubit.ancz[zi])
+
+    results = mz(logicalQubit.ancx, logicalQubit.ancz)
+
+    reset(logicalQubit.ancx)
+    reset(logicalQubit.ancz)
+    return results
+
+
+@qec.code('py-steane-example')
+class MySteaneCodeImpl:
+
+    def __init__(self, **kwargs):
+        qec.Code.__init__(self, **kwargs)
+        self.stabilizers = [
+            cudaq.SpinOperator.from_word(word) for word in
+            ["XXXXIII", "IXXIXXI", "IIXXIXX", "ZZZZIII", "IZZIZZI", "IIZZIZZ"]
+        ]
+        self.operation_encodings = {
+            qec.operation.prep0: prep0,
+            qec.operation.stabilizer_round: stabilizer
+        }
+
+    def get_num_data_qubits(self):
+        return 7
+
+    def get_num_ancilla_x_qubits(self):
+        return 3
+
+    def get_num_ancilla_z_qubits(self):
+        return 3
+
+    def get_num_ancilla_qubits(self):
+        return 6
 
 
 # Create a noise model
@@ -132,6 +196,14 @@ result = cudaq.sample(three_qubit_repetition_code,
 Hz = [[1, 1, 0], [0, 1, 1]]  # Parity check matrix for 1 round
 H_pcm = get_circuit_level_pcm(3, nRounds, Hz)
 
+# in alternative to the above, you can also use the following fucntion.
+# This will give you the parity check matrix for the repetition code
+# after the nRounds of the repetition code
+# It is useful for more complex codes where the parity check matrix is not trivial.
+
+dem_rep = qec.dem_from_memory_circuit(three_qubit_repetition_code, statePrep, nRounds, noise_model)
+H_pcm_from_dem = dem_rep.detector_error_matrix
+
 # Get observables
 observables = np.array([1, 0, 0, 0, 0, 0], dtype=np.uint8)
 Lz = np.array([1, 0, 0], dtype=np.uint8)
@@ -140,11 +212,19 @@ print(f"Lz:\n{Lz}")
 # Pad the observables to be the same dimension as the decoded observable
 Lz_nrounds = np.tile(Lz, nRounds)
 pad_size = max(0, H_pcm.shape[1] - Lz_nrounds.shape[0])
-Lz_nround_mz = np.pad(Lz_nrounds, (0, pad_size), mode='constant')
+Lz_nround_mz_padded = np.pad(Lz_nrounds, (0, pad_size), mode='constant')
 print(f"Lz_nround_mz\n{Lz_nround_mz}")
 
+# It is also possible to get the observables from the DEM
+# This will give you the observables for the logical Z measurement
+# after the nRounds of the repetition code
+# This is useful for more complex codes where the observables are not trivial,
+# such as surface codes or other stabilizer codes.
+
+Lz_nround_mz = dem_rep.observables_flips_matrix
+
 # Get a decoder
-decoder = qec.get_decoder("single_error_lut", H_pcm)
+decoder = qec.get_decoder("single_error_lut", H_pcm_from_dem)
 nLogicalErrors = 0
 
 # initialize a Pauli frame to track logical flips
