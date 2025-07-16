@@ -759,10 +759,6 @@ Usage:
 Tensor Network Decoder
 ^^^^^^^^^^^^^^^^^^^^^^
 
-This example demonstrates how to use the ``TensorNetworkDecoder`` class from the ``cudaq_qec`` library to decode syndromes for a simple quantum error-correcting code using tensor networks.
-
-Overview:
-
 The ``TensorNetworkDecoder`` constructs a tensor network representation of a quantum code given its parity check matrix, logical observable(s), and noise model. It can decode individual syndromes or batches of syndromes, returning the probability that a logical observable has flipped.
 
 Key Steps:
@@ -783,6 +779,10 @@ Usage:
 .. tab:: Python
 
     .. code-block:: python
+
+        # This example demonstrates how to use the ``TensorNetworkDecoder`` class 
+        # from the ``cudaq_qec`` library to decode syndromes for a simple 
+        # quantum error-correcting code using tensor networks.
 
         import cudaq_qec as qec
         import numpy as np
@@ -807,7 +807,7 @@ Usage:
 
 .. tab:: C++
 
-    We don't provide a C++ API for the tensor network decoder at this time.
+    The Tensor Network Decoder is a Python-only implementation. C++ APIs are not available for this decoder.
 
 Output:
 

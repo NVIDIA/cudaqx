@@ -1,5 +1,3 @@
-.. filepath: /workspaces/tensor_network_decoder_example.rst
-
 TensorNetworkDecoder Example
 ===========================
 

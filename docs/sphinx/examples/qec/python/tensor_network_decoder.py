@@ -5,6 +5,13 @@
 # This source code and the accompanying materials are made available under     #
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
+import sys
+# Check Python version
+# Remove this check once the pipeline advances to Python 3.11
+if sys.version_info < (3, 11):
+    print("Skipping tensor network decoder example")
+    sys.exit(0)
+
 # [Begin Documentation]
 """
 Example usage of TensorNetworkDecoder from cudaq_qec.
