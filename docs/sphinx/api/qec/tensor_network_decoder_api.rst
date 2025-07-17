@@ -6,7 +6,7 @@
 
     The decoder supports both single-syndrome and batch decoding, and can run on CPU or GPU (using cuTensorNet if available).
 
-    The Tensor Network Decoder is a Python-only implementation. C++ APIs are not available for this decoder.
+    The tensor_network_decoder is a Python-only implementation. C++ APIs are not available for this decoder.
 
 
     .. note::
@@ -77,21 +77,6 @@
         :param syndrome_batch: numpy.ndarray of shape (batch_size, num_checks)
         :returns: List of DecoderResult objects with the probability that the logical observable has flipped for each syndrome.
 
-    .. method:: replace_logical_observable(logical_obs, logical_inds=None, logical_tags=None)
-
-        Replace the logical observable(s) in the tensor network.
-
-        :param logical_obs: Logical observable matrix (numpy.ndarray)
-        :param logical_inds: (optional) List of logical index names
-        :param logical_tags: (optional) List of logical tags
-
-    .. method:: init_noise_model(noise_model, contract=False)
-
-        Initialize or replace the noise model in the tensor network.
-
-        :param noise_model: TensorNetwork representing the noise model
-        :param contract: (bool, optional) Whether to contract the noise model immediately
-
     .. method:: optimize_path(optimize=None, batch_size=-1)
 
         Optimize the contraction path for the tensor network.
@@ -99,9 +84,3 @@
         :param optimize: Optimization options or None
         :param batch_size: (int, optional) Batch size for optimization (default: -1, no batching)
         :returns: Optimizer info object
-
-    .. method:: flip_syndromes(values)
-
-        Update the tensor network to represent a given syndrome.
-
-        :param values: List of float values for the syndrome
