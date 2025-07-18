@@ -74,6 +74,6 @@ class MySteaneCodeImpl:
 
     def get_num_x_stabilizers(self):
         return 3
-    
+
     def get_num_z_stabilizers(self):
         return 3
