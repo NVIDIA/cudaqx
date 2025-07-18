@@ -258,7 +258,7 @@ cudaq::qec::detector_error_model dem_from_memory_circuit(
 
   if (!ctx_msm_size.msm_dimensions.has_value()) {
     throw std::runtime_error(
-        "dem_from_memory_circuit error: no MSM dimensions found");
+        "dem_from_memory_circuit error: no MSM dimensions found. One reason could be missing a target.");
   }
   if (ctx_msm_size.msm_dimensions.value().second == 0) {
     throw std::runtime_error(
@@ -294,7 +294,7 @@ cudaq::qec::detector_error_model dem_from_memory_circuit(
   mzTable = mzTable.transpose();
   std::size_t numNoiseMechs = mzTable.shape()[1];
 
-  std::size_t numSyndromesPerRound = numCols;
+  std::size_t numSyndromesPerRound = numXStabs + numZStabs;
 
   // Populate dem.detector_error_matrix by XORing consecutive rounds. Generally
   // speaking, this is calculating H = D*Ω, where H is the Detector Error

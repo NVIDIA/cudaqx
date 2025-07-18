@@ -9,10 +9,20 @@ The relationship between errors and syndromes is captured mathematically by the 
 stabilizer measurement, while each column represents a possible error. When we multiply an error pattern by this matrix, we get the syndrome 
 that would result from those errors.
 
-Creating a Multi-Round Parity Check Matrix
-++++++++++++++++++++++++++++++++++++++++++
+Detector Error Model
++++++++++++++++++++++
 
-Below, we'll show how to use CUDA-Q QEC to construct the multi-round parity check matrix of an error correction code for the circuit-level noise model experiment in Python:
+Here we introduce the `cudaq.qec.detector_error_model` type, which allows us to create a detector error model (DEM) from a QEC circuit and noise model.
+
+The DEM can be generated from a QEC circuit and noise model using functions like `dem_from_memory_circuit()`. For circuit-level noise, the DEM can be put into a 
+canonical form that's organized by measurement rounds, making it suitable for multi-round decoding.
+
+For a complete example of using the surface code with DEM to generate parity check matrices and perform decoding, see the :doc:`circuit level noise example <circuit_level_noise>`.
+
+Generating a Multi-Round Parity Check Matrix
+++++++++++++++++++++++++++++++++++++++++++++
+
+Below, we demonstrate how to use CUDA-Q QEC to construct a multi-round parity check matrix for an error correction code under a circuit-level noise model in Python:
 
 .. tab:: Python
 
@@ -22,52 +32,17 @@ Below, we'll show how to use CUDA-Q QEC to construct the multi-round parity chec
 
 This example illustrates how to:
 
-1. Construct a multi-round parity check matrix – Users can extend a single-round parity check matrix across multiple rounds, 
-incorporating measurement errors to track syndrome evolution over time. This enables more accurate circuit-level noise modeling for decoders.
+* Retrieve and configure an error correction code  
+  Load a repetition code using ``qec.get_code(...)`` from the CUDA-Q QEC library, and define a custom circuit-level noise model using ``.add_all_qubit_channel(...)``.
 
-2. Define custom error correction circuits with precise noise injection – Using `cudaq.apply_noise`, users can introduce specific error channels 
-at targeted locations within the QEC circuit. This fine-grained control allows for precise testing of how different noise sources affect logical error rates.
+* Generate a multi-round parity check matrix  
+  Extend a single-round detector error model (DEM) across multiple rounds using ``qec.dem_from_memory_circuit(...)``. This captures syndrome evolution over time, including measurement noise, and provides:
+  
+  * ``detector_error_matrix`` – the multi-round parity check matrix
+  * ``observables_flips_matrix`` – used to identify logical flips due to physical errors
 
-In the previous example, we demonstrated how to introduce random X errors into each data qubit using `cudaq.apply_noise` during each round of syndrome extraction. 
-CUDA-Q allows users to inject a variety of error channels at different locations within their circuits, enabling fine-grained noise modeling. The example below showcases 
-additional ways to introduce errors into a quantum kernel:
-
-   .. code-block:: python
-
-        @cudaq.kernel
-        def inject_noise_example():
-            q = cudaq.qvector(3)
-
-            # Apply depolarization noise to the first qubit
-            cudaq.apply_noise(cudaq.DepolarizationChannel, 0.1, q[0])
-
-            # Perform gate operations
-            h(q[1])
-            x.ctrl(q[1], q[2])
-
-            # Inject a Y error into the second qubit
-            cudaq.apply_noise(cudaq.YError, 0.1, q[1])
-
-            # Apply a general Pauli noise channel to the third qubit, where the 3 values indicate the probability of X, Y, and Z errors.
-            cudaq.apply_noise(cudaq.Pauli1, 0.1, 0.1, 0.1, q[2])
-
-        # Define and apply a noise model
-        noise = cudaq.NoiseModel()
-        counts = cudaq.sample(inject_noise_example, noise_model=noise)
-
-For a full list of supported noise models and their parameters, refer to the `CUDA-Q documentation <https://nvidia.github.io/cuda-quantum/latest/index.html>`_.
-
-
-Detector Error Model
-+++++++++++++++++++++
-
-In the previous example, we showed how to create a multi-round parity check matrix manually. Here we introduce the `cudaq.qec.detector_error_model` type, which 
-allows us to create a detector error model (DEM) from a QEC circuit and noise model.
-
-The DEM can be generated from a QEC circuit and noise model using functions like `dem_from_memory_circuit()`. For circuit-level noise, the DEM can be put into a 
-canonical form that's organized by measurement rounds, making it suitable for multi-round decoding.
-
-For a complete example of using the surface code with DEM to generate parity check matrices and perform decoding, see the :doc:`circuit level noise example <circuit_level_noise>`.
+* Simulate circuit-level noise and collect data  
+  Run multiple shots of the memory experiment using ``qec.sample_memory_circuit(...)`` to sample both the data and syndrome measurements from noisy executions. The resulting bitstrings can be used for decoding and performance evaluation of the error correction scheme.
 
 Getting Started with the NVIDIA QLDPC Decoder
 +++++++++++++++++++++++++++++++++++++++++++++
