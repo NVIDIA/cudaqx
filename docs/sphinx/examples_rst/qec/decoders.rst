@@ -12,11 +12,11 @@ that would result from those errors.
 Creating a Multi-Round Parity Check Matrix
 ++++++++++++++++++++++++++++++++++++++++++
 
-Below, we'll show how to use CUDA-Q QEC to construct a multi-round parity check matrix and a custom error correction code for the circuit-level noise model experiment in Python:
+Below, we'll show how to use CUDA-Q QEC to construct the multi-round parity check matrix of an error correction code for the circuit-level noise model experiment in Python:
 
 .. tab:: Python
 
-   .. literalinclude:: ../../examples/qec/python/repetition_code_fine_grain_noise.py
+   .. literalinclude:: ../../examples/qec/python/repetition_code_pcm.py
       :language: python
       :start-after: [Begin Documentation]
 
