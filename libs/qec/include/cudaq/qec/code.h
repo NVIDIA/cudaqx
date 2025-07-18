@@ -148,6 +148,14 @@ public:
   /// @return Number of Z-type ancilla qubits
   virtual std::size_t get_num_ancilla_z_qubits() const = 0;
 
+  /// @brief Get number of X stabilizer that can be measured
+  /// @return Number of X-type stabilizers
+  virtual std::size_t get_num_x_stabilizers() const = 0;
+
+  /// @brief Get number of Z stabilizer that can be measured
+  /// @return Number of Z-type stabilizers
+  virtual std::size_t get_num_z_stabilizers() const = 0;
+
   code() = default;
   virtual ~code() {}
 

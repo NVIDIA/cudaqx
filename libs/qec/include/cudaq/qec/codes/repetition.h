@@ -63,6 +63,14 @@ protected:
   /// @return Number of Z ancilla qubits
   std::size_t get_num_ancilla_z_qubits() const override;
 
+  /// @brief Get number of X stabilizer that can be measured
+  /// @return Number of X-type stabilizers
+  std::size_t get_num_x_stabilizers() const override;
+
+  /// @brief Get number of Z stabilizer that can be measured
+  /// @return Number of Z-type stabilizers
+  std::size_t get_num_z_stabilizers() const override;
+
 public:
   /// @brief Constructs a repetition code instance
   repetition(const heterogeneous_map &);

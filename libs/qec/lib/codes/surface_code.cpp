@@ -392,6 +392,14 @@ std::size_t surface_code::get_num_ancilla_z_qubits() const {
   return (distance * distance - 1) / 2;
 }
 
+std::size_t surface_code::get_num_x_stabilizers() const {
+  return (distance * distance - 1) / 2;
+}
+
+std::size_t surface_code::get_num_z_stabilizers() const {
+  return (distance * distance - 1) / 2;
+}
+
 /// @brief Register the surace_code type
 CUDAQ_REGISTER_TYPE(surface_code)
 

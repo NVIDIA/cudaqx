@@ -16,6 +16,8 @@ std::size_t repetition::get_num_ancilla_x_qubits() const { return 0; }
 std::size_t repetition::get_num_ancilla_z_qubits() const {
   return get_num_ancilla_qubits();
 }
+std::size_t repetition::get_num_x_stabilizers() const { return 0; }
+std::size_t repetition::get_num_z_stabilizers() const { return distance - 1; }
 
 repetition::repetition(const heterogeneous_map &options) : code() {
   if (!options.contains("distance"))
