@@ -11,3 +11,4 @@ Examples that illustrate how to use CUDA-QX for application development are avai
       ADAPT-VQE <adapt.rst>
       VQE <vqe.rst>
       QAOA <qaoa.rst>
+      GQE <gqe.rst>
