@@ -121,15 +121,11 @@ protected:
 
   /// @brief Get number of X stabilizer that can be measured
   /// @return Number of X-type stabilizers
-  std::size_t get_num_x_stabilizers() const override{
-    return 3;
-  }
+  std::size_t get_num_x_stabilizers() const override { return 3; }
 
   /// @brief Get number of Z stabilizer that can be measured
   /// @return Number of Z-type stabilizers
-  std::size_t get_num_z_stabilizers() const override {
-    return 3;
-  }
+  std::size_t get_num_z_stabilizers() const override { return 3; }
 
 public:
   /// @brief Constructor for the Steane code

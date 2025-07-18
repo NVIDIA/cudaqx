@@ -381,7 +381,7 @@ void bindCode(py::module &mod) {
       if (!py::hasattr(code_class, "get_num_ancilla_z_qubits"))
         throw std::runtime_error(
             "Code class must implement get_num_ancilla_z_qubits method");
-      
+
       if (!py::hasattr(code_class, "get_num_x_stabilizers"))
         throw std::runtime_error(
             "Code class must implement get_num_x_stabilizers method");

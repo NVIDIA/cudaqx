@@ -223,7 +223,8 @@ cudaq::qec::detector_error_model dem_from_memory_circuit(
     throw std::runtime_error("sample_memory_circuit error - no stabilizer "
                              "round kernel for this code.");
 
-  auto &stabRound = code.get_operation<code::stabilizer_round>(operation::stabilizer_round);
+  auto &stabRound =
+      code.get_operation<code::stabilizer_round>(operation::stabilizer_round);
 
   auto parity_x = code.get_parity_x();
   auto parity_z = code.get_parity_z();
@@ -257,8 +258,8 @@ cudaq::qec::detector_error_model dem_from_memory_circuit(
   platform.reset_exec_ctx();
 
   if (!ctx_msm_size.msm_dimensions.has_value()) {
-    throw std::runtime_error(
-        "dem_from_memory_circuit error: no MSM dimensions found. One reason could be missing a target.");
+    throw std::runtime_error("dem_from_memory_circuit error: no MSM dimensions "
+                             "found. One reason could be missing a target.");
   }
   if (ctx_msm_size.msm_dimensions.value().second == 0) {
     throw std::runtime_error(
