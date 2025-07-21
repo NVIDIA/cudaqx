@@ -19,9 +19,12 @@ nShots = 10000  # Number of circuit samples to run
 
 # Set verbosity based on shot count
 verbose = nShots <= 10
+
+
 def vprint(*args, **kwargs):
     if verbose:
         print(*args, **kwargs)
+
 
 # Retrieve a 3-qubit repetition code instance
 three_qubit_repetition_code = qec.get_code("repetition", distance=distance)
@@ -116,6 +119,10 @@ for i in range(nShots):
     nCorrections += int(predicted_observable_flip[0])
 
 # === Summary statistics ===
-print(f"{nLogicalErrorsWithoutDecoding} logical errors without decoding in {nShots} shots\n")
-print(f"{nLogicalErrorsWDecoding} logical errors with decoding in {nShots} shots\n")
+print(
+    f"{nLogicalErrorsWithoutDecoding} logical errors without decoding in {nShots} shots\n"
+)
+print(
+    f"{nLogicalErrorsWDecoding} logical errors with decoding in {nShots} shots\n"
+)
 print(f"{nCorrections} corrections applied in {nShots} shots\n")
