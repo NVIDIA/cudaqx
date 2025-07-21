@@ -118,7 +118,7 @@ for i in range(nShots):
         nLogicalErrorsWithoutDecoding += 1
 
     # Correct prediction by combining predicted flip with actual measurement
-    predicted_observable = predicted_observable_flip ^ measured_obserable
+    predicted_observable = predicted_observable_flip ^ measured_observable
     print(f"predicted_observable: {predicted_observable}")
 
     # Count logical error after decoding
