@@ -14,8 +14,14 @@ import numpy as np
 cudaq.set_target("stim")
 
 distance = 3  # Code distance (number of physical qubits for repetition code)
-nRounds = 4  # Number of syndrome measurement rounds
+nRounds = 6  # Number of syndrome measurement rounds
 nShots = 10000  # Number of circuit samples to run
+
+# Set verbosity based on shot count
+verbose = nShots <= 10
+def vprint(*args, **kwargs):
+    if verbose:
+        print(*args, **kwargs)
 
 # Retrieve a 3-qubit repetition code instance
 three_qubit_repetition_code = qec.get_code("repetition", distance=distance)
@@ -69,12 +75,7 @@ syndromes, data = qec.sample_memory_circuit(three_qubit_repetition_code,
                                             noise_model)
 
 syndromes = syndromes.reshape((nShots, nRounds, -1))
-
-# Now flatten to two dimensions again
 syndromes = syndromes.reshape((nShots, -1))
-
-# Initialize Pauli frame (Z only for repetition code)
-pauli_frame = np.array([0, 0], dtype=np.uint8)
 
 # Expected logical measurement (we prepared |1⟩)
 expected_value = 1
@@ -86,46 +87,35 @@ nCorrections = 0
 
 # === Loop over shots ===
 for i in range(nShots):
-    # print(f"shot: {i}")
+    vprint(f"shot: {i}")
 
     data_i = data[i, :]  # Final data measurement
-    # print(f"data: {data_i}")
+    vprint(f"data: {data_i}")
 
-    # Decode syndrome into predicted error pattern
     results = decoder.decode(syndromes[i, :])
     convergence = results.converged
     result = results.result
     error_prediction = np.array(result, dtype=np.uint8)
-    # print(f"error_prediction: {error_prediction}")
+    vprint(f"error_prediction: {error_prediction}")
 
-    # Apply prediction to infer logical flip
     predicted_observable_flip = Lz_observables_flips_matrix @ error_prediction % 2
-    # print(f"predicted_observable_flip: {predicted_observable_flip}")
+    vprint(f"predicted_observable_flip: {predicted_observable_flip}")
 
-    # Check what the circuit actually measured
     measured_observable = logical_single_round @ data_i % 2
-    # print(f"measured_observable: {measured_observable}")
+    vprint(f"measured_observable: {measured_observable}")
 
-    # Count error without decoding
-    if (measured_observable != expected_value):
+    if measured_observable != expected_value:
         nLogicalErrorsWithoutDecoding += 1
 
-    # Correct prediction by combining predicted flip with actual measurement
     predicted_observable = predicted_observable_flip ^ measured_observable
-    # print(f"predicted_observable: {predicted_observable}")
+    vprint(f"predicted_observable: {predicted_observable}")
 
-    # Count logical error after decoding
-    if (predicted_observable != expected_value):
+    if predicted_observable != expected_value:
         nLogicalErrorsWDecoding += 1
 
-    # Track how many corrections were made
     nCorrections += int(predicted_observable_flip[0])
 
 # === Summary statistics ===
-print(
-    f"{nLogicalErrorsWithoutDecoding} logical errors without decoding in {nShots} shots\n"
-)
-print(
-    f"{nLogicalErrorsWDecoding} logical errors with decoding in {nShots} shots\n"
-)
+print(f"{nLogicalErrorsWithoutDecoding} logical errors without decoding in {nShots} shots\n")
+print(f"{nLogicalErrorsWDecoding} logical errors with decoding in {nShots} shots\n")
 print(f"{nCorrections} corrections applied in {nShots} shots\n")
