@@ -114,7 +114,7 @@ for i in range(nShots):
     print(f"measured_observable: {measured_observable}")
 
     # Count error without decoding
-    if (measured_obserable != expected_value):
+    if (measured_observable != expected_value):
         nLogicalErrorsWithoutDecoding += 1
 
     # Correct prediction by combining predicted flip with actual measurement
