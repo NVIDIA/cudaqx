@@ -314,7 +314,7 @@ cudaq::qec::detector_error_model dem_from_memory_circuit(
 
   // If we are returning only x-stabilizers, we need to offset the syndrome
   // indices of mzTable by numSyndromesPerRound / 2.
-  auto offset = keep_x_stabilizers && !keep_z_stabilizers ? numXStabs : 0;
+  auto offset = keep_x_stabilizers && !keep_z_stabilizers ? numZStabs : 0;
   dem.detector_error_matrix = cudaqx::tensor<uint8_t>(
       {numRounds * numReturnSynPerRound, numNoiseMechs});
   for (std::size_t round = 0; round < numRounds; round++) {
