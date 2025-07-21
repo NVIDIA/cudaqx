@@ -54,7 +54,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ['3.10', '3.11', '3.12']
+        python: ['3.10', '3.11', '3.12', '3.13']
         platform: ['amd64', 'arm64']
         toolchain:
           - id: cu12.0-gcc11
@@ -179,7 +179,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ['3.10', '3.11', '3.12']
+        python: ['3.10', '3.11', '3.12', '3.13']
         platform: ['amd64', 'arm64']
   
     steps:
@@ -242,7 +242,7 @@ jobs:
           { arch: arm64, gpu: a100 },
           { arch: amd64, gpu: v100 },
         ]
-        python: ['3.10', '3.11', '3.12']
+        python: ['3.10', '3.11', '3.12', '3.13']
   
     steps:
       - name: Get code
