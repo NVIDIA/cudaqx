@@ -48,7 +48,7 @@ if [ $python_version == "3.10" ]; then
   ${python} -m pip install "${wheel_file}"
 else
   echo "Installing QEC library with tensor network decoder"
-  ${python} -m pip install "${wheel_file}[tn_decoder]"
+  ${python} -m pip install "${wheel_file}[tensor_network_decoder]"
 fi
 ${python} -m pytest -v -s libs/qec/python/tests/
 

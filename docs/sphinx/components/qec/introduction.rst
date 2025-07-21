@@ -756,6 +756,64 @@ Usage:
         // Alternatively, configure the decoder without instantiating a heterogeneous_map 
         auto d2 = cudaq::qec::get_decoder("nv-qldpc-decoder", H, {{"use_osd", true}, {"bp_batch_size", 100}});
 
+Tensor Network Decoder
+^^^^^^^^^^^^^^^^^^^^^^
+
+The ``tensor_network_decoder`` constructs a tensor network representation of a quantum code given its parity check matrix, logical observable(s), and noise model. It can decode individual syndromes or batches of syndromes, returning the probability that a logical observable has flipped.
+
+Key Steps:
+
+1. **Define the parity check matrix**: This matrix encodes the structure of the quantum code. In the example, a simple [3,1] repetition code is used.
+
+2. **Specify the logical observable**: This is typically a row vector indicating which qubits participate in the logical operator.
+
+3. **Set the noise model**: The example uses a factorized noise model with independent bit-flip probability for each error mechanism.
+
+4. **Instantiate the decoder**: Create a decoder object using ``qec.get_decoder("tensor_network_decoder", ...)`` with the code parameters.
+
+5. **Decode syndromes**: Use the ``decode`` method for single syndromes or ``decode_batch`` for multiple syndromes.
+
+
+Usage:
+
+.. tab:: Python
+
+    .. code-block:: python
+
+        # This example demonstrates how to use the get_decoder("tensor_network_decoder", ...) API
+        # from the ``cudaq_qec`` library to decode syndromes for a simple 
+        # quantum error-correcting code using tensor networks.
+
+        import cudaq_qec as qec
+        import numpy as np
+
+        # Define code parameters
+        H = np.array([[1, 1, 0], [0, 1, 1]], dtype=np.uint8)
+        logical_obs = np.array([[1, 1, 1]], dtype=np.uint8)
+        noise_model = [0.1, 0.1, 0.1]
+
+        decoder = qec.get_decoder("tensor_network_decoder", H, logical_obs=logical_obs, noise_model=noise_model)
+
+        # Decode a single syndrome
+        syndrome = [0.0, 1.0]
+        result = decoder.decode(syndrome)
+        print(result.result)
+
+        # Decode a batch of syndromes
+        syndrome_batch = np.array([[0.0, 0.0], [0.0, 1.0], [1.0, 0.0]], dtype=np.float32)
+        batch_results = decoder.decode_batch(syndrome_batch)
+        for res in batch_results:
+            print(res.result)
+
+.. tab:: C++
+
+    The ``tensor_network_decoder`` is a Python-only implementation. C++ APIs are not available for this decoder.
+
+Output:
+
+The decoder returns the probability that the logical observable has flipped for each syndrome. This can be used to assess the performance of the code and the decoder under different error scenarios.
+
+
 
 Numerical Experiments
 ---------------------

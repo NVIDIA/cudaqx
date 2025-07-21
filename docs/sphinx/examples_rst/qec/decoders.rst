@@ -67,3 +67,28 @@ check matrices (PCMs) and test syndromes to exercise a decoder.
 .. rubric:: Footnotes
 
 .. [#f1] [BCGMRY] Sergey Bravyi, Andrew Cross, Jay Gambetta, Dmitri Maslov, Patrick Rall, Theodore Yoder, High-threshold and low-overhead fault-tolerant quantum memory https://arxiv.org/abs/2308.07915
+
+Exact Maximum Likelihood Decoding with NVIDIA Tensor Networks Decoder
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+Starting with CUDA-Q QEC v0.4.0, a GPU-accelerated Maximum Likelihood Decoder is included with the
+CUDA-Q QEC library. The library follows the CUDA-Q decoder Python interface, namely :class:`cudaq_qec.Decoder`.
+At this time, we only support the Python interface for the decoder, which is
+available at :class:`cudaq_qec.plugins.decoders.tensor_network_decoder.TensorNetworkDecoder`.
+As documented in the API sections :ref:`tensor_network_decoder_api_python`, there are many configuration options
+that can be passed to the constructor.
+
+In the following example, we show how to use the `TensorNetworkDecoder` class from the `cudaq_qec` library to decode a circuit-level noise problem derived from a Stim surface code circuit.
+
+.. literalinclude:: ../../examples/qec/python/tensor_network_decoder.py
+    :language: python
+    :start-after: [Begin Documentation]
+
+Output:
+
+The decoder returns the probability that the logical observable has flipped for each syndrome. This can be used to assess the performance of the code and the decoder under different error scenarios.
+
+See Also:
+
+- ``cudaq_qec.plugins.decoders.tensor_network_decoder``
