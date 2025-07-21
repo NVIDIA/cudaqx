@@ -25,9 +25,6 @@ __qpu__ std::vector<cudaq::measure_result>
 stabilizer(patch logicalQubit, const std::vector<std::size_t> &x_stabilizers,
            const std::vector<std::size_t> &z_stabilizers) {
 
-  for (std::size_t i = 0; i < logicalQubit.ancz.size(); i++)
-    reset(logicalQubit.ancz[i]);
-
   // cnot between every data qubit
   for (std::size_t i = 0; i < logicalQubit.ancz.size(); i++)
     cudaq::x<cudaq::ctrl>(logicalQubit.data[i], logicalQubit.ancz[i]);
@@ -36,6 +33,9 @@ stabilizer(patch logicalQubit, const std::vector<std::size_t> &x_stabilizers,
     cudaq::x<cudaq::ctrl>(logicalQubit.data[i], logicalQubit.ancz[i - 1]);
 
   auto results = mz(logicalQubit.ancz);
+
+  for (std::size_t i = 0; i < logicalQubit.ancz.size(); i++)
+    reset(logicalQubit.ancz[i]);
 
   return results;
 }

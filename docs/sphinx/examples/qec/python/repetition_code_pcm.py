@@ -15,7 +15,7 @@ cudaq.set_target("stim")
 
 distance = 3  # Code distance (number of physical qubits for repetition code)
 nRounds = 4  # Number of syndrome measurement rounds
-nShots = 1000  # Number of circuit samples to run
+nShots = 10000  # Number of circuit samples to run
 
 # Retrieve a 3-qubit repetition code instance
 three_qubit_repetition_code = qec.get_code("repetition", distance=distance)
@@ -68,6 +68,11 @@ syndromes, data = qec.sample_memory_circuit(three_qubit_repetition_code,
                                             statePrep, nShots, nRounds,
                                             noise_model)
 
+syndromes = syndromes.reshape((nShots, nRounds, -1))
+
+# Now flatten to two dimensions again
+syndromes = syndromes.reshape((nShots, -1))
+
 # Initialize Pauli frame (Z only for repetition code)
 pauli_frame = np.array([0, 0], dtype=np.uint8)
 
@@ -81,37 +86,25 @@ nCorrections = 0
 
 # === Loop over shots ===
 for i in range(nShots):
-    print(f"shot: {i}")
+    # print(f"shot: {i}")
 
-    data_i = data[i]  # Final data measurement
-    print(f"data: {data_i}")
-
-    # Construct multi-round syndrome vector
-    multi_round_syndromes = []
-    previous_syndrome = [0] * len(syndromes[0])
-    for j in range(nRounds):
-        syndrome_i_j = syndromes[i + j]
-        print(f"syndrome: {syndrome_i_j}")
-
-        # Compute syndrome difference (flip tracking)
-        multi_round_syndromes += list(
-            np.bitwise_xor(previous_syndrome, syndrome_i_j))
-        previous_syndrome = syndrome_i_j
+    data_i = data[i, :]  # Final data measurement
+    # print(f"data: {data_i}")
 
     # Decode syndrome into predicted error pattern
-    results = decoder.decode(np.array(multi_round_syndromes))
+    results = decoder.decode(syndromes[i, :])
     convergence = results.converged
     result = results.result
     error_prediction = np.array(result, dtype=np.uint8)
-    print(f"error_prediction: {error_prediction}")
+    # print(f"error_prediction: {error_prediction}")
 
     # Apply prediction to infer logical flip
     predicted_observable_flip = Lz_observables_flips_matrix @ error_prediction % 2
-    print(f"predicted_observable_flip: {predicted_observable_flip}")
+    # print(f"predicted_observable_flip: {predicted_observable_flip}")
 
     # Check what the circuit actually measured
     measured_observable = logical_single_round @ data_i % 2
-    print(f"measured_observable: {measured_observable}")
+    # print(f"measured_observable: {measured_observable}")
 
     # Count error without decoding
     if (measured_observable != expected_value):
@@ -119,7 +112,7 @@ for i in range(nShots):
 
     # Correct prediction by combining predicted flip with actual measurement
     predicted_observable = predicted_observable_flip ^ measured_observable
-    print(f"predicted_observable: {predicted_observable}")
+    # print(f"predicted_observable: {predicted_observable}")
 
     # Count logical error after decoding
     if (predicted_observable != expected_value):

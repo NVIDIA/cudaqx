@@ -365,12 +365,18 @@ cudaq::qec::detector_error_model dem_from_memory_circuit(
   // measurements to logical observables.
   dem.observables_flips_matrix = obs_matrix.dot(msm_obs) % 2;
 
+  // printf("getting obs_matrix : \n");
+  // obs_matrix.dump_bits();
+
+  // printf("getting msm_obs : \n");
+  // msm_obs.dump_bits();
+
   // Uncomment print statements for debugging:
   // printf("dem.detector_error_matrix Before canonicalization:\n");
   // dem.detector_error_matrix.dump_bits();
   // printf("dem.observables_flips_matrix Before canonicalization:\n");
   // dem.observables_flips_matrix.dump_bits();
-  dem.canonicalize_for_rounds(numReturnSynPerRound);
+  // dem.canonicalize_for_rounds(numReturnSynPerRound);
   // printf("dem.detector_error_matrix After canonicalization:\n");
   // dem.detector_error_matrix.dump_bits();
   // printf("dem.observables_flips_matrix After canonicalization:\n");
