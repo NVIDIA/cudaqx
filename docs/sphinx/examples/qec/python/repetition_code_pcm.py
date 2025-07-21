@@ -110,8 +110,8 @@ for i in range(nShots):
     print(f"predicted_observable_flip: {predicted_observable_flip}")
 
     # Check what the circuit actually measured
-    measured_obserable = logical_single_round @ data_i % 2
-    print(f"measured_obserable: {measured_obserable}")
+    measured_observable = logical_single_round @ data_i % 2
+    print(f"measured_observable: {measured_observable}")
 
     # Count error without decoding
     if (measured_obserable != expected_value):
