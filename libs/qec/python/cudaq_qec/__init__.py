@@ -50,11 +50,11 @@ def iter_namespace(ns_pkg):
 for finder, name, ispkg in iter_namespace(plugins.decoders):
     try:
         importlib.import_module(name)
-    except ModuleNotFoundError:
+    except (ModuleNotFoundError, ImportError) as e:
         pass
 
 for finder, name, ispkg in iter_namespace(plugins.codes):
     try:
         importlib.import_module(name)
-    except ModuleNotFoundError as e:
+    except (ModuleNotFoundError, ImportError) as e:
         pass
