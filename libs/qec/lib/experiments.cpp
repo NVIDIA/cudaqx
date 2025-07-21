@@ -376,7 +376,7 @@ cudaq::qec::detector_error_model dem_from_memory_circuit(
   // dem.detector_error_matrix.dump_bits();
   // printf("dem.observables_flips_matrix Before canonicalization:\n");
   // dem.observables_flips_matrix.dump_bits();
-  // dem.canonicalize_for_rounds(numReturnSynPerRound);
+  dem.canonicalize_for_rounds(numReturnSynPerRound);
   // printf("dem.detector_error_matrix After canonicalization:\n");
   // dem.detector_error_matrix.dump_bits();
   // printf("dem.observables_flips_matrix After canonicalization:\n");
