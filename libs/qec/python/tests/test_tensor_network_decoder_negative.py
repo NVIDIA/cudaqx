@@ -1,0 +1,43 @@
+# ============================================================================ #
+# Copyright (c) 2025 NVIDIA Corporation & Affiliates.                          #
+# All rights reserved.                                                         #
+#                                                                              #
+# This source code and the accompanying materials are made available under     #
+# the terms of the Apache License 2.0 which accompanies this distribution.     #
+# ============================================================================ #
+
+import sys
+import pytest
+import numpy as np
+import cudaq_qec as qec
+
+
+# Relevant to Python3.10 only
+# Update this once the CI advances to Python3.11
+@pytest.mark.skipif(
+    sys.version_info >= (3, 11),
+    reason="Only meaningful on Python < 3.11 when dependencies are missing")
+def test_tensor_network_decoder_missing_dependencies():
+    """Test that when tensor_network_decoder dependencies are missing, 
+    we get the proper C++ error message instead of a Python ImportError."""
+
+    # Create a simple test case
+    H = np.array([[1, 1, 0], [0, 1, 1]])
+    logical = np.array([[1, 0, 1]])
+    noise = [0.1, 0.2, 0.3]
+
+    # Test that we get the specific C++ error message when dependencies are missing
+    with pytest.raises(RuntimeError) as excinfo:
+        qec.get_decoder("tensor_network_decoder",
+                        H,
+                        logical_obs=logical,
+                        noise_model=noise)
+
+    # Verify the error message contains the expected C++ message and installation instructions
+    error_msg = str(excinfo.value)
+    assert "Decoder 'tensor_network_decoder' is not available" in error_msg and "pip install cudaq_qec[tensor_network_decoder]" in error_msg, f"Unexpected error message: {error_msg}"
+
+    # Verify this is NOT a Python ImportError (which would indicate the graceful failure didn't work)
+    assert not isinstance(
+        excinfo.value, ImportError
+    ), "Should not be an ImportError, should be a RuntimeError from C++"
