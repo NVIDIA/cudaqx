@@ -11,7 +11,7 @@ maintainers = [{name = "NVIDIA Corporation & Affiliates"}]
 requires-python = ">=3.10"
 readme = "README.md"
 dependencies = [
-  'cuda-quantum-cu12 >= 0.11.1',
+  'cuda-quantum-cu12 >= 0.12',
 ]
 classifiers = [
     'Intended Audience :: Science/Research',

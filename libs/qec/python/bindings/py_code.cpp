@@ -44,6 +44,14 @@ protected:
   std::size_t get_num_ancilla_z_qubits() const override {
     PYBIND11_OVERRIDE_PURE(std::size_t, qec::code, get_num_ancilla_z_qubits);
   }
+
+  std::size_t get_num_x_stabilizers() const override {
+    PYBIND11_OVERRIDE_PURE(std::size_t, qec::code, get_num_x_stabilizers);
+  }
+
+  std::size_t get_num_z_stabilizers() const override {
+    PYBIND11_OVERRIDE_PURE(std::size_t, qec::code, get_num_z_stabilizers);
+  }
 };
 
 /// @brief A wrapper class that handles Python-defined quantum error correction
@@ -143,6 +151,14 @@ protected:
 
   std::size_t get_num_ancilla_z_qubits() const override {
     return pyCode.attr("get_num_ancilla_z_qubits")().cast<std::size_t>();
+  }
+
+  std::size_t get_num_x_stabilizers() const override {
+    return pyCode.attr("get_num_x_stabilizers")().cast<std::size_t>();
+  }
+
+  std::size_t get_num_z_stabilizers() const override {
+    return pyCode.attr("get_num_z_stabilizers")().cast<std::size_t>();
   }
 };
 
@@ -365,6 +381,14 @@ void bindCode(py::module &mod) {
       if (!py::hasattr(code_class, "get_num_ancilla_z_qubits"))
         throw std::runtime_error(
             "Code class must implement get_num_ancilla_z_qubits method");
+
+      if (!py::hasattr(code_class, "get_num_x_stabilizers"))
+        throw std::runtime_error(
+            "Code class must implement get_num_x_stabilizers method");
+
+      if (!py::hasattr(code_class, "get_num_z_stabilizers"))
+        throw std::runtime_error(
+            "Code class must implement get_num_z_stabilizers method");
 
       py::object new_class =
           py::reinterpret_steal<py::object>(PyType_Type.tp_new(
