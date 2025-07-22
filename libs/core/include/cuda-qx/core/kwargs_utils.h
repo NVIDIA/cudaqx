@@ -67,9 +67,6 @@ inline heterogeneous_map hetMapFromKwargs(const py::kwargs &kwargs) {
       } else {
         throw std::runtime_error("Unsupported array data type in kwargs.");
       }
-    } else if (py::isinstance<py::dict>(value)) {
-      // Check if it is a kwargs dict
-      result.insert(key, hetMapFromKwargs(value.cast<py::dict>()));
     } else {
       throw std::runtime_error(
           "Invalid python type for mapping kwargs to a heterogeneous_map.");
