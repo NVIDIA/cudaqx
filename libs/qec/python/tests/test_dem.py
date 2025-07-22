@@ -110,11 +110,13 @@ def test_x_dem_from_memory_circuit():
     assert dem.detector_error_matrix.shape[1] > 0
     assert len(dem.error_rates) == dem.detector_error_matrix.shape[1]
     assert dem.observables_flips_matrix.shape[0] > 0
-    assert dem.observables_flips_matrix.shape[1] == dem.detector_error_matrix.shape[1]
+    assert dem.observables_flips_matrix.shape[
+        1] == dem.detector_error_matrix.shape[1]
 
     # Error rates should be positive
     assert all(rate >= 0 for rate in dem.error_rates)
-    assert any(rate > 0 for rate in dem.error_rates)  # At least some non-zero rates
+    # At least some non-zero rates
+    assert any(rate > 0 for rate in dem.error_rates)
 
 
 def test_decoding_from_dem_from_memory_circuit():

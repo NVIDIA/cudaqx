@@ -7,10 +7,10 @@
  ******************************************************************************/
 
 #include <cmath>
-#include <fstream>
 #include <filesystem>
-#include <unistd.h>
+#include <fstream>
 #include <gtest/gtest.h>
+#include <unistd.h>
 
 #include "cudaq/qec/codes/surface_code.h"
 #include "cudaq/qec/experiments.h"
@@ -111,7 +111,7 @@ TEST(StabilizerTester, checkConstructFromSpinOps) {
 }
 
 TEST(StabilizerTester, checkToParityMatrixEdgeCases) {
-    // Test case 1: Empty stabilizers vector (triggers line 56)
+  // Test case 1: Empty stabilizers vector (triggers line 56)
   {
     std::vector<cudaq::spin_op_term> empty_stab;
     auto parity_empty = cudaq::qec::to_parity_matrix(empty_stab);
@@ -128,10 +128,10 @@ TEST(StabilizerTester, checkToParityMatrixEdgeCases) {
     std::vector<cudaq::spin_op_term> x_only_stab{
         cudaq::spin_op::from_word("XXXIII"),
         cudaq::spin_op::from_word("IXXXII"),
-        cudaq::spin_op::from_word("IIXXXI")
-    };
+        cudaq::spin_op::from_word("IIXXXI")};
 
-        auto parity_z_only = cudaq::qec::to_parity_matrix(x_only_stab, cudaq::qec::stabilizer_type::Z);
+    auto parity_z_only = cudaq::qec::to_parity_matrix(
+        x_only_stab, cudaq::qec::stabilizer_type::Z);
 
     // Should return empty tensor because no Z stabilizers found
     EXPECT_EQ(parity_z_only.size(), 0);
@@ -449,7 +449,8 @@ TEST(QECCodeTester, checkCodeCapacity) {
 }
 
 TEST(QECCodeTester, checkCodeCapacityWithCodeObject) {
-  // Test sample_code_capacity(const code &code, std::size_t nShots, double error_probability)
+  // Test sample_code_capacity(const code &code, std::size_t nShots, double
+  // error_probability)
   {
     auto steane = cudaq::qec::get_code("steane");
     int nShots = 5;
@@ -458,7 +459,8 @@ TEST(QECCodeTester, checkCodeCapacityWithCodeObject) {
     auto [syndromes, data] =
         cudaq::qec::sample_code_capacity(*steane, nShots, error_prob);
 
-    // get_parity() returns the full parity check matrix (both X and Z stabilizers)
+    // get_parity() returns the full parity check matrix (both X and Z
+    // stabilizers)
     auto H = steane->get_parity();
     EXPECT_EQ(nShots, syndromes.shape()[0]);
     EXPECT_EQ(H.shape()[0], syndromes.shape()[1]);
@@ -479,7 +481,8 @@ TEST(QECCodeTester, checkCodeCapacityWithCodeObject) {
     }
   }
 
-    // Test sample_code_capacity(const code &code, std::size_t nShots, double error_probability, unsigned seed)
+  // Test sample_code_capacity(const code &code, std::size_t nShots, double
+  // error_probability, unsigned seed)
   {
     auto steane = cudaq::qec::get_code("steane");
     int nShots = 8;
@@ -520,7 +523,7 @@ TEST(QECCodeTester, checkCodeCapacityWithCodeObject) {
     double error_prob = 0.2;
     unsigned seed = 42;
 
-        auto [syndromes, data] =
+    auto [syndromes, data] =
         cudaq::qec::sample_code_capacity(*repetition, nShots, error_prob, seed);
 
     auto H = repetition->get_parity();
@@ -529,8 +532,8 @@ TEST(QECCodeTester, checkCodeCapacityWithCodeObject) {
     EXPECT_EQ(nShots, data.shape()[0]);
     EXPECT_EQ(H.shape()[1], data.shape()[1]);
 
-    // Verify that results are consistent - if we call with same parameters again,
-    // we should get the same results
+    // Verify that results are consistent - if we call with same parameters
+    // again, we should get the same results
     auto [syndromes2, data2] =
         cudaq::qec::sample_code_capacity(*repetition, nShots, error_prob, seed);
 
@@ -553,7 +556,7 @@ TEST(QECCodeTester, checkCodeCapacityWithCodeObject) {
     int nShots = 3;
     double error_prob = 0.1;
 
-        auto [syndromes1, data1] =
+    auto [syndromes1, data1] =
         cudaq::qec::sample_code_capacity(*steane, nShots, error_prob);
     auto [syndromes2, data2] =
         cudaq::qec::sample_code_capacity(*steane, nShots, error_prob);
@@ -573,7 +576,8 @@ TEST(QECCodeTester, checkCodeCapacityWithCodeObject) {
     EXPECT_EQ(H.shape()[1], data2.shape()[1]);
 
     // Since we're using random seeds, the results might be different
-    // We just verify the function completes successfully and returns valid shapes
+    // We just verify the function completes successfully and returns valid
+    // shapes
   }
 }
 
@@ -771,10 +775,13 @@ TEST(QECCodeTester, checkSurfaceCode) {
         << "Surface code distance 3 should have 4 Z ancilla qubits";
 
     // Verify relationships between qubit counts
-    EXPECT_EQ(surf_code->get_num_ancilla_x_qubits() + surf_code->get_num_ancilla_z_qubits(),
+    EXPECT_EQ(surf_code->get_num_ancilla_x_qubits() +
+                  surf_code->get_num_ancilla_z_qubits(),
               surf_code->get_num_ancilla_qubits())
         << "X and Z ancilla qubits should sum to total ancilla qubits";
-    EXPECT_EQ(surf_code->get_num_data_qubits() + surf_code->get_num_ancilla_qubits(), 17)
+    EXPECT_EQ(surf_code->get_num_data_qubits() +
+                  surf_code->get_num_ancilla_qubits(),
+              17)
         << "Total qubits should be 17 for distance 3 surface code";
   }
 }
@@ -869,11 +876,13 @@ TEST(QECCodeTester, checkSteaneQubitCounts) {
 
   // Verify that X + Z ancilla qubits equals total ancilla qubits
   EXPECT_EQ(steane->get_num_ancilla_qubits(),
-            steane->get_num_ancilla_x_qubits() + steane->get_num_ancilla_z_qubits())
+            steane->get_num_ancilla_x_qubits() +
+                steane->get_num_ancilla_z_qubits())
       << "Total ancilla qubits should equal sum of X and Z ancilla qubits";
 
   // Test total qubit count (data + ancilla)
-  std::size_t total_qubits = steane->get_num_data_qubits() + steane->get_num_ancilla_qubits();
+  std::size_t total_qubits =
+      steane->get_num_data_qubits() + steane->get_num_ancilla_qubits();
   EXPECT_EQ(13, total_qubits)
       << "Steane code should use 13 total qubits (7 data + 6 ancilla)";
 }
@@ -989,8 +998,8 @@ TEST(SurfaceCodeTester, checkVec2dOperators) {
   // Test constructor
   vec2d v1(2, 3);
   vec2d v2(5, 7);
-  vec2d v3(2, 3);  // same as v1
-  vec2d v4(1, 3);  // for ordering test
+  vec2d v3(2, 3); // same as v1
+  vec2d v4(1, 3); // for ordering test
 
   // Test operator+
   vec2d sum = v1 + v2;
@@ -999,28 +1008,29 @@ TEST(SurfaceCodeTester, checkVec2dOperators) {
 
   // Test operator-
   vec2d diff = v2 - v1;
-  EXPECT_EQ(diff.row, 3);  // 5 - 2
-  EXPECT_EQ(diff.col, 4);  // 7 - 3
+  EXPECT_EQ(diff.row, 3); // 5 - 2
+  EXPECT_EQ(diff.col, 4); // 7 - 3
 
   // Test operator== (equality)
-  EXPECT_TRUE(v1 == v3);   // same coordinates
-  EXPECT_FALSE(v1 == v2);  // different coordinates
-  EXPECT_FALSE(v1 == v4);  // different row
+  EXPECT_TRUE(v1 == v3);  // same coordinates
+  EXPECT_FALSE(v1 == v2); // different coordinates
+  EXPECT_FALSE(v1 == v4); // different row
 
   // Test operator< (ordering used in std::map)
-  EXPECT_TRUE(v4 < v1);    // (1,3) < (2,3) - different row
-  EXPECT_TRUE(v1 < v2);    // (2,3) < (5,7) - different row
-  EXPECT_FALSE(v1 < v3);   // (2,3) not < (2,3) - same coordinates
-  EXPECT_FALSE(v2 < v1);   // (5,7) not < (2,3)
+  EXPECT_TRUE(v4 < v1);  // (1,3) < (2,3) - different row
+  EXPECT_TRUE(v1 < v2);  // (2,3) < (5,7) - different row
+  EXPECT_FALSE(v1 < v3); // (2,3) not < (2,3) - same coordinates
+  EXPECT_FALSE(v2 < v1); // (5,7) not < (2,3)
 
   // Test ordering by column when row is same
-  vec2d v5(2, 1);  // same row as v1, but smaller column
-  vec2d v6(2, 5);  // same row as v1, but larger column
-  EXPECT_TRUE(v5 < v1);    // (2,1) < (2,3) - same row, smaller col
-  EXPECT_TRUE(v1 < v6);    // (2,3) < (2,5) - same row, larger col
-  EXPECT_FALSE(v1 < v5);   // (2,3) not < (2,1)
+  vec2d v5(2, 1);        // same row as v1, but smaller column
+  vec2d v6(2, 5);        // same row as v1, but larger column
+  EXPECT_TRUE(v5 < v1);  // (2,1) < (2,3) - same row, smaller col
+  EXPECT_TRUE(v1 < v6);  // (2,3) < (2,5) - same row, larger col
+  EXPECT_FALSE(v1 < v5); // (2,3) not < (2,1)
 
-  // Verify operator< works correctly with std::map (this is where it's actually used)
+  // Verify operator< works correctly with std::map (this is where it's actually
+  // used)
   std::map<vec2d, int> coord_map;
   coord_map[v1] = 1;
   coord_map[v2] = 2;
@@ -1039,7 +1049,8 @@ TEST(SurfaceCodeTester, checkVec2dOperators) {
   EXPECT_EQ(coord_map[v3], 1);
 
   // Verify map ordering by iterating (should be sorted by operator<)
-  std::vector<vec2d> expected_order = {v4, v5, v1, v6, v2}; // (1,3), (2,1), (2,3), (2,5), (5,7)
+  std::vector<vec2d> expected_order = {v4, v5, v1, v6,
+                                       v2}; // (1,3), (2,1), (2,3), (2,5), (5,7)
   std::vector<vec2d> actual_order;
   for (const auto &pair : coord_map) {
     actual_order.push_back(pair.first);
@@ -1158,7 +1169,8 @@ TEST(PCMUtilsTester, checkSimplifyPCMEdgeCases) {
   cudaqx::tensor<uint8_t> pcm_with_empty(std::vector<std::size_t>{5, 4});
   pcm_with_empty.borrow(data_with_empty.data());
 
-  auto [H_new2, weights_new2] = cudaq::qec::simplify_pcm(pcm_with_empty, weights_with_empty, 5);
+  auto [H_new2, weights_new2] =
+      cudaq::qec::simplify_pcm(pcm_with_empty, weights_with_empty, 5);
 
   // Columns 1 and 3 are empty, columns 0 and 2 are identical
   EXPECT_EQ(H_new2.shape()[1], 1); // Only one column should remain
@@ -1173,7 +1185,8 @@ TEST(PCMUtilsTester, checkSimplifyPCMEdgeCases) {
   cudaqx::tensor<uint8_t> empty_pcm(std::vector<std::size_t>{5, 3});
   empty_pcm.borrow(empty_data.data());
 
-  auto [H_new3, weights_new3] = cudaq::qec::simplify_pcm(empty_pcm, zero_weights, 5);
+  auto [H_new3, weights_new3] =
+      cudaq::qec::simplify_pcm(empty_pcm, zero_weights, 5);
 
   // Should result in empty PCM
   EXPECT_EQ(H_new3.shape()[1], 0);
@@ -1203,7 +1216,7 @@ TEST(PCMUtilsTester, checkGetPCMForRoundsEdgeCases) {
   // columns 6, 7, 8 are all empty
 
   // Round 3 (rows 15-19): normal columns
-  pcm.at({15, 9}) = 1;  // column 9 has errors in round 3
+  pcm.at({15, 9}) = 1; // column 9 has errors in round 3
   pcm.at({17, 9}) = 1;
   pcm.at({16, 10}) = 1; // column 10 has errors in round 3
   pcm.at({18, 10}) = 1;
@@ -1237,9 +1250,12 @@ TEST(PCMUtilsTester, checkGetPCMForRoundsEdgeCases) {
   EXPECT_EQ(pcm_multi.shape()[0], 10);
   EXPECT_GE(pcm_multi.shape()[1], 0);
 
-  printf("Round 1 PCM shape: (%zu, %zu)\n", pcm_round1.shape()[0], pcm_round1.shape()[1]);
-  printf("Round 2 PCM shape: (%zu, %zu)\n", pcm_round2.shape()[0], pcm_round2.shape()[1]);
-  printf("Multi-round PCM shape: (%zu, %zu)\n", pcm_multi.shape()[0], pcm_multi.shape()[1]);
+  printf("Round 1 PCM shape: (%zu, %zu)\n", pcm_round1.shape()[0],
+         pcm_round1.shape()[1]);
+  printf("Round 2 PCM shape: (%zu, %zu)\n", pcm_round2.shape()[0],
+         pcm_round2.shape()[1]);
+  printf("Multi-round PCM shape: (%zu, %zu)\n", pcm_multi.shape()[0],
+         pcm_multi.shape()[1]);
 }
 
 bool are_pcms_equal(const cudaqx::tensor<uint8_t> &a,
@@ -1477,7 +1493,8 @@ TEST(DetectorErrorModelTest, NumObservables) {
   EXPECT_EQ(dem.num_observables(), 0);
 
   // Test case 4: Valid 2D matrix - covers line 30 return shape[0]
-  std::vector<std::size_t> shape_2d = {2, 5}; // 2 observables, 5 error mechanisms
+  std::vector<std::size_t> shape_2d = {2,
+                                       5}; // 2 observables, 5 error mechanisms
   dem.observables_flips_matrix = cudaqx::tensor<uint8_t>(shape_2d);
   EXPECT_EQ(dem.num_observables(), 2);
 
@@ -1493,11 +1510,13 @@ TEST(DetectorErrorModelTest, NumObservables) {
 }
 
 TEST(DetectorErrorModelTest, NumObservablesInCanonicalize) {
-  // This test verifies the calling stack: canonicalize_for_rounds -> num_observables()
+  // This test verifies the calling stack: canonicalize_for_rounds ->
+  // num_observables()
   cudaq::qec::detector_error_model dem;
 
   // Set up a simple detector_error_matrix
-  std::vector<std::size_t> detector_shape = {2, 3}; // 2 detectors, 3 error mechanisms
+  std::vector<std::size_t> detector_shape = {
+      2, 3}; // 2 detectors, 3 error mechanisms
   dem.detector_error_matrix = cudaqx::tensor<uint8_t>(detector_shape);
   // Initialize with some data
   dem.detector_error_matrix.at({0, 0}) = 1;
@@ -1508,7 +1527,8 @@ TEST(DetectorErrorModelTest, NumObservablesInCanonicalize) {
   dem.detector_error_matrix.at({1, 2}) = 0;
 
   // Set up observables_flips_matrix
-  std::vector<std::size_t> obs_shape = {1, 3}; // 1 observable, 3 error mechanisms
+  std::vector<std::size_t> obs_shape = {1,
+                                        3}; // 1 observable, 3 error mechanisms
   dem.observables_flips_matrix = cudaqx::tensor<uint8_t>(obs_shape);
   dem.observables_flips_matrix.at({0, 0}) = 0;
   dem.observables_flips_matrix.at({0, 1}) = 1;
@@ -1520,7 +1540,8 @@ TEST(DetectorErrorModelTest, NumObservablesInCanonicalize) {
   // Before canonicalize: verify num_observables works
   EXPECT_EQ(dem.num_observables(), 1);
 
-  // This will internally call num_observables() at line 73 in canonicalize_for_rounds
+  // This will internally call num_observables() at line 73 in
+  // canonicalize_for_rounds
   dem.canonicalize_for_rounds(2);
 
   // After canonicalize: verify num_observables still works
@@ -1532,8 +1553,10 @@ TEST(DetectorErrorModelTest, CanonicalizeWithoutErrorIds) {
   // when has_error_ids is false and duplicate columns need to be merged
   cudaq::qec::detector_error_model dem;
 
-  // Set up detector_error_matrix with duplicate columns (columns 0 and 2 are identical)
-  std::vector<std::size_t> detector_shape = {3, 4}; // 3 detectors, 4 error mechanisms
+  // Set up detector_error_matrix with duplicate columns (columns 0 and 2 are
+  // identical)
+  std::vector<std::size_t> detector_shape = {
+      3, 4}; // 3 detectors, 4 error mechanisms
   dem.detector_error_matrix = cudaqx::tensor<uint8_t>(detector_shape);
 
   // Column 0: detectors 0,2 triggered
@@ -1557,7 +1580,8 @@ TEST(DetectorErrorModelTest, CanonicalizeWithoutErrorIds) {
   dem.detector_error_matrix.at({2, 3}) = 0;
 
   // Set up observables_flips_matrix
-  std::vector<std::size_t> obs_shape = {1, 4}; // 1 observable, 4 error mechanisms
+  std::vector<std::size_t> obs_shape = {1,
+                                        4}; // 1 observable, 4 error mechanisms
   dem.observables_flips_matrix = cudaqx::tensor<uint8_t>(obs_shape);
   dem.observables_flips_matrix.at({0, 0}) = 0;
   dem.observables_flips_matrix.at({0, 1}) = 1;
@@ -1583,13 +1607,14 @@ TEST(DetectorErrorModelTest, CanonicalizeWithoutErrorIds) {
   // After canonicalization, duplicate columns should be merged
   // The matrix should have fewer columns
   EXPECT_LT(dem.num_error_mechanisms(), 4);
-  EXPECT_EQ(dem.num_detectors(), 3); // detectors count shouldn't change
+  EXPECT_EQ(dem.num_detectors(), 3);   // detectors count shouldn't change
   EXPECT_EQ(dem.num_observables(), 1); // observables count shouldn't change
 }
 
 TEST(DetectorErrorModelTest, CanonicalizeWithMismatchedErrorIds) {
-  // This test covers the case where error_ids exists but size doesn't match error_rates
-  // so has_error_ids becomes false, triggering the std::numeric_limits branch
+  // This test covers the case where error_ids exists but size doesn't match
+  // error_rates so has_error_ids becomes false, triggering the
+  // std::numeric_limits branch
   cudaq::qec::detector_error_model dem;
 
   // Set up detector_error_matrix with duplicate columns
@@ -1615,14 +1640,16 @@ TEST(DetectorErrorModelTest, CanonicalizeWithMismatchedErrorIds) {
   dem.error_rates = {0.1, 0.2, 0.15};
 
   // Set up error_ids with MISMATCHED size (2 elements instead of 3)
-  // This will make has_error_ids = false because error_ids->size() != error_rates.size()
+  // This will make has_error_ids = false because error_ids->size() !=
+  // error_rates.size()
   dem.error_ids = std::vector<std::size_t>{100, 200}; // Only 2 elements, not 3
 
   EXPECT_EQ(dem.error_rates.size(), 3);
   EXPECT_EQ(dem.error_ids->size(), 2); // Mismatched size
 
   // This will trigger has_error_ids = false due to size mismatch
-  // and then use std::numeric_limits<std::size_t>::max() when merging columns 0 and 2
+  // and then use std::numeric_limits<std::size_t>::max() when merging columns 0
+  // and 2
   dem.canonicalize_for_rounds(2);
 
   // Verify the function completed successfully
@@ -1631,7 +1658,8 @@ TEST(DetectorErrorModelTest, CanonicalizeWithMismatchedErrorIds) {
 
 TEST(PluginLoaderTester, checkCleanupPluginsEdgeCases) {
   // Test edge cases for cleanup_plugins function to cover the else branch
-  // The plugin loader is loaded in the constructor of load_decoder_plugins() with type
-  // PluginType::DECODER, so cleanup with type PluginType::CODE will not do anything.
+  // The plugin loader is loaded in the constructor of load_decoder_plugins()
+  // with type PluginType::DECODER, so cleanup with type PluginType::CODE will
+  // not do anything.
   cudaq::qec::cleanup_plugins(cudaq::qec::PluginType::CODE);
 }

@@ -232,14 +232,18 @@ TEST(SteaneLutDecoder, checkAPI) {
   multi_invalid_opt_results.insert("invalid_type3", 10);
   multi_invalid_args.insert("opt_results", multi_invalid_opt_results);
 
-  // The error message should contain all three invalid types separated by commas
-  std::string expected_error = "Requested result types not available in single_error_lut decoder: ";
-  // Note: The exact order may vary depending on map iteration, but should contain all types
+  // The error message should contain all three invalid types separated by
+  // commas
+  std::string expected_error =
+      "Requested result types not available in single_error_lut decoder: ";
+  // Note: The exact order may vary depending on map iteration, but should
+  // contain all types
 
   try {
-    auto d4 = cudaq::qec::decoder::get("single_error_lut", H, multi_invalid_args);
+    auto d4 =
+        cudaq::qec::decoder::get("single_error_lut", H, multi_invalid_args);
     FAIL() << "Expected std::runtime_error to be thrown";
-  } catch (const std::runtime_error& e) {
+  } catch (const std::runtime_error &e) {
     std::string error_msg = e.what();
 
     // Verify the error message contains the expected prefix
@@ -267,7 +271,8 @@ TEST(SteaneLutDecoder, checkAPI) {
         << " in message: " << error_msg;
   }
 
-  // Test case 4: Test decoding_time=true to cover line 142 in single_error_lut.cpp
+  // Test case 4: Test decoding_time=true to cover line 142 in
+  // single_error_lut.cpp
   cudaqx::heterogeneous_map decoding_time_args;
   cudaqx::heterogeneous_map decoding_time_opt_results;
   decoding_time_opt_results.insert("decoding_time", true);
@@ -347,7 +352,8 @@ TEST(AsyncDecoderResultTest, ReadyMethodWithException) {
   EXPECT_FALSE(async_result.ready());
 
   // Set an exception to make the future ready with an error
-  promise.set_exception(std::make_exception_ptr(std::runtime_error("Test error")));
+  promise.set_exception(
+      std::make_exception_ptr(std::runtime_error("Test error")));
 
   // The future should be ready even though it contains an exception
   EXPECT_TRUE(async_result.ready());
@@ -465,7 +471,8 @@ TEST(DecoderTest, GetBlockSizeAndSyndromeSize) {
 
 TEST(DecoderRegistryTest, SingleParameterRegistry) {
   // Test the single-parameter registry instantiation (line 18 in decoder.cpp)
-  // This tests the registry for decoder constructors that only take tensor<uint8_t>
+  // This tests the registry for decoder constructors that only take
+  // tensor<uint8_t>
 
   std::size_t block_size = 8;
   std::size_t syndrome_size = 4;
@@ -487,13 +494,15 @@ TEST(DecoderRegistryTest, SingleParameterRegistry) {
   EXPECT_EQ(decoder1->get_block_size(), block_size);
   EXPECT_EQ(decoder1->get_syndrome_size(), syndrome_size);
 
-  // Test with a different decoder type to ensure registry works for multiple types
+  // Test with a different decoder type to ensure registry works for multiple
+  // types
   std::vector<cudaq::qec::float_t> syndrome(syndrome_size, 0.0f);
   auto result = decoder1->decode(syndrome);
   EXPECT_EQ(result.result.size(), block_size);
 
-  // Test that the registry properly differentiates from the two-parameter version
-  // by calling with explicit empty heterogeneous_map (should still work)
+  // Test that the registry properly differentiates from the two-parameter
+  // version by calling with explicit empty heterogeneous_map (should still
+  // work)
   cudaqx::heterogeneous_map empty_map;
   auto decoder2 = cudaq::qec::decoder::get("sample_decoder", H, empty_map);
   ASSERT_NE(decoder2, nullptr);
