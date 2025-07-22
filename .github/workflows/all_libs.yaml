@@ -80,10 +80,15 @@ jobs:
       # ========================================================================
  
       - name: Install python requirements
+        env:
+          LD_LIBRARY_PATH: ${{ env.MPI_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
         # Note: install tensor_network_decoder's dependencies quimb, opt_einsum, and torch when we advance to Python 3.11
-        run: pip install numpy pytest cupy-cuda12x cuquantum-cu12
+        run: pip install numpy pytest cupy-cuda12x cuquantum-cu12 torch lightning ml_collections mpi4py transformers
 
       - name: Run Python tests
+        env:
+          LD_LIBRARY_PATH: ${{ env.MPI_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
+          OMPI_MCA_pml: ob1
         run: cmake --build ${{ steps.build.outputs.build-dir }} --target run_python_tests
 
       # ========================================================================
@@ -91,5 +96,8 @@ jobs:
       # ========================================================================
  
       - name: Run example tests
+        env:
+          LD_LIBRARY_PATH: ${{ env.MPI_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
+          OMPI_MCA_pml: ob1
         run: bash scripts/ci/test_examples.sh all 
 
