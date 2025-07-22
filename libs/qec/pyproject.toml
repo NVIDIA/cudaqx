@@ -11,7 +11,7 @@ maintainers = [{name = "NVIDIA Corporation & Affiliates"}]
 requires-python = ">=3.10"
 readme = "README.md"
 dependencies = [
-  'cuda-quantum-cu12 >= 0.11',
+  'cuda-quantum-cu12 >= 0.11.1',
 ]
 classifiers = [
     'Intended Audience :: Science/Research',
@@ -21,6 +21,7 @@ classifiers = [
     'Programming Language :: Python :: 3.10',
     'Programming Language :: Python :: 3.11',
     'Programming Language :: Python :: 3.12',
+    'Programming Language :: Python :: 3.13',
     "Environment :: GPU :: NVIDIA CUDA",
     "Environment :: GPU :: NVIDIA CUDA :: 12",
     'Topic :: Software Development',
@@ -51,7 +52,7 @@ CUDAQX_QEC_BINDINGS_PYTHON = true
 write_to = "_version.py"
 
 [project.optional-dependencies]
-tn_decoder = [
+tensor_network_decoder = [
   "quimb",
   "opt_einsum",
   "torch",

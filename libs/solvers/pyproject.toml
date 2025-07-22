@@ -11,7 +11,7 @@ maintainers = [{name = "NVIDIA Corporation & Affiliates"}]
 requires-python = ">=3.10"
 readme = "README.md"
 dependencies = [
-  'cuda-quantum-cu12 >= 0.11',
+  'cuda-quantum-cu12 >= 0.11.1',
   'fastapi',
   'networkx',
   'pyscf',
@@ -26,6 +26,7 @@ classifiers = [
     'Programming Language :: Python :: 3.10',
     'Programming Language :: Python :: 3.11',
     'Programming Language :: Python :: 3.12',
+    'Programming Language :: Python :: 3.13',
     "Environment :: GPU :: NVIDIA CUDA",
     "Environment :: GPU :: NVIDIA CUDA :: 12",
     'Topic :: Software Development',

@@ -143,6 +143,17 @@ runs:
           python_version=3.12
         outputs: /cudaq-wheels
 
+    - name: Build 3.13 wheel
+      uses: docker/build-push-action@v5
+      with:
+        context: cudaq
+        file: ./cudaq/docker/release/cudaq.wheel.Dockerfile
+        build-args: |
+          base_image=ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ inputs.platform }}-cu12.0-gcc11-main
+          release_version=0.99.99
+          python_version=3.13
+        outputs: /cudaq-wheels
+
     # ==========================================================================
     # Store CUDAQ wheels cache
     # ==========================================================================
