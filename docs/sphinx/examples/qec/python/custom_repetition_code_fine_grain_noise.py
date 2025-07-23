@@ -1,3 +1,12 @@
+# ============================================================================ #
+# Copyright (c) 2025 NVIDIA Corporation & Affiliates.                          #
+# All rights reserved.                                                         #
+#                                                                              #
+# This source code and the accompanying materials are made available under     #
+# the terms of the Apache License 2.0 which accompanies this distribution.     #
+# ============================================================================ #
+
+# [Begin Documentation]
 import cudaq
 import cudaq_qec as qec
 from cudaq_qec import patch
@@ -46,6 +55,8 @@ def stabilizer_round(logicalQubit: patch) -> list[bool]:
     for i in range(num_data):
         cudaq.apply_noise(cudaq.DepolarizationChannel, 0.1,
                           logicalQubit.data[i])
+        # It is possible to have even more control over the noise.
+        # cudaq.apply_noise(cudaq.Pauli1, 0.1, 0.1, 0.1, q[2]) # in order pX, pY, and pZ errors.
 
     # Measure each ZZ stabilizer using CNOTs from data to ancilla
     for i in range(num_ancilla):
@@ -128,20 +139,22 @@ print(f"\n Created custom repetition code with distance {distance}.")
 available_codes = qec.get_available_codes()
 print("\n  Available built-in QEC codes:", available_codes)
 
-all_codes = qec.qecrt.get_all_available_codes()
+all_codes = qec.get_all_available_codes()
 print("\n  Available QEC codes both in the library and in Python:", all_codes)
 
+# Let's check some propreties to verify that code is correctly created
 # Display the code's stabilizer generators
 stabilizers = my_repetition_code.get_stabilizers()
 print(f"\n The code has {len(stabilizers)} stabilizers:")
 for s in stabilizers:
     print(" ", s)
 
+logical_single_round = my_repetition_code.get_observables_z()
+
 # Define and register a noise model
 noise_model = cudaq.NoiseModel()
 p = 0.01  # depolarizing noise strength
 
-# Apply depolarizing noise to all X gates (single-qubit gates)
 noise_model.add_all_qubit_channel("x", cudaq.Depolarization2(p), 1)
 
 # Set initial logical state to |0⟩
@@ -158,9 +171,6 @@ H_pcm = dem_rep.detector_error_matrix
 # Extract observable flips matrix (maps physical errors to logical flips)
 Lz_observables_flips_matrix = dem_rep.observables_flips_matrix
 
-# Retrieve the logical Z operator for later decoding
-logical_single_round = my_repetition_code.get_observables_z()
-
 # Sample noisy executions of the full memory circuit
 print("\n Sampling noisy memory circuit executions...")
 syndromes, data = qec.sample_memory_circuit(my_repetition_code, statePrep,
@@ -170,7 +180,6 @@ syndromes, data = qec.sample_memory_circuit(my_repetition_code, statePrep,
 syndromes = syndromes.reshape((nShots, nRounds, -1))
 syndromes = syndromes.reshape((nShots, -1))
 
-# Show a few sampled results
 print(f"\n Showing first 5 of {nShots} sampled results:")
 for i in range(5):
     print(
