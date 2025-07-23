@@ -147,6 +147,8 @@ void detector_error_model::canonicalize_for_rounds(
   if (has_error_ids)
     std::swap(*this->error_ids, new_error_ids);
 
+  // These two data structures should have the same number of columns.
+  // (number of canonicalized error mechanisms)
   // Create the reordered, reduced Detector Error Matrix.
   this->detector_error_matrix = cudaq::qec::reorder_pcm_columns(
       this->detector_error_matrix, final_column_order);
