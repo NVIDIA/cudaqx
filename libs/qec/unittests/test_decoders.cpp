@@ -524,5 +524,4 @@ TEST(DecoderRegistryTest, SingleParameterRegistryDirect) {
   // The registry should exist (even if empty), proving line 18 instantiation
   // works This test passes if no exceptions are thrown, proving the
   // single-parameter registry is instantiated
-  EXPECT_TRUE(true);
 }
