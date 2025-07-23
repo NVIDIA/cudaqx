@@ -231,6 +231,8 @@ cudaq::qec::detector_error_model dem_from_memory_circuit(
   auto numData = code.get_num_data_qubits();
   auto numAncx = code.get_num_ancilla_x_qubits();
   auto numAncz = code.get_num_ancilla_z_qubits();
+  auto numXStabs = code.get_num_x_stabilizers();
+  auto numZStabs = code.get_num_z_stabilizers();
 
   std::vector<std::size_t> xVec(parity_x.data(),
                                 parity_x.data() + parity_x.size());
@@ -256,8 +258,8 @@ cudaq::qec::detector_error_model dem_from_memory_circuit(
   platform.reset_exec_ctx();
 
   if (!ctx_msm_size.msm_dimensions.has_value()) {
-    throw std::runtime_error(
-        "dem_from_memory_circuit error: no MSM dimensions found");
+    throw std::runtime_error("dem_from_memory_circuit error: no MSM dimensions "
+                             "found. One reason could be missing a target.");
   }
   if (ctx_msm_size.msm_dimensions.value().second == 0) {
     throw std::runtime_error(
@@ -292,7 +294,8 @@ cudaq::qec::detector_error_model dem_from_memory_circuit(
   cudaqx::tensor<uint8_t> mzTable(msm_as_strings);
   mzTable = mzTable.transpose();
   std::size_t numNoiseMechs = mzTable.shape()[1];
-  std::size_t numSyndromesPerRound = numCols;
+
+  std::size_t numSyndromesPerRound = numXStabs + numZStabs;
 
   // Populate dem.detector_error_matrix by XORing consecutive rounds. Generally
   // speaking, this is calculating H = D*Ω, where H is the Detector Error
@@ -300,13 +303,18 @@ cudaq::qec::detector_error_model dem_from_memory_circuit(
   // However, D is very sparse, and is it represents simple XORs of a syndrome
   // with the prior round's syndrome.
   // Reference: https://arxiv.org/pdf/2407.13826
-  auto numReturnSynPerRound = keep_x_stabilizers && keep_z_stabilizers
-                                  ? numSyndromesPerRound
-                                  : numSyndromesPerRound / 2;
+
+  auto numReturnSynPerRound = numSyndromesPerRound;
+
+  if (keep_x_stabilizers && !keep_z_stabilizers) {
+    numReturnSynPerRound = numXStabs;
+  } else if (!keep_x_stabilizers && keep_z_stabilizers) {
+    numReturnSynPerRound = numZStabs;
+  }
+
   // If we are returning only x-stabilizers, we need to offset the syndrome
   // indices of mzTable by numSyndromesPerRound / 2.
-  auto offset =
-      keep_x_stabilizers && !keep_z_stabilizers ? numSyndromesPerRound / 2 : 0;
+  auto offset = keep_x_stabilizers && !keep_z_stabilizers ? numZStabs : 0;
   dem.detector_error_matrix = cudaqx::tensor<uint8_t>(
       {numRounds * numReturnSynPerRound, numNoiseMechs});
   for (std::size_t round = 0; round < numRounds; round++) {
@@ -356,6 +364,12 @@ cudaq::qec::detector_error_model dem_from_memory_circuit(
   // Populate dem.observables_flips_matrix by converting the physical data qubit
   // measurements to logical observables.
   dem.observables_flips_matrix = obs_matrix.dot(msm_obs) % 2;
+
+  // printf("getting obs_matrix : \n");
+  // obs_matrix.dump_bits();
+
+  // printf("getting msm_obs : \n");
+  // msm_obs.dump_bits();
 
   // Uncomment print statements for debugging:
   // printf("dem.detector_error_matrix Before canonicalization:\n");
