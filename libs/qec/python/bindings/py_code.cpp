@@ -93,7 +93,7 @@ public:
       auto obs_terms = registeredCode.attr("pauli_observables")
                            .cast<std::vector<cudaq::spin_op_term>>();
       m_pauli_observables.reserve(obs_terms.size());
-      for (auto &term : obs_terms)
+      for (auto &&term : obs_terms)
         m_pauli_observables.emplace_back(std::move(term));
     }
     // Get the stabilizers. First convert to spin_op_term's and then convert to
