@@ -177,7 +177,6 @@ syndromes, data = qec.sample_memory_circuit(my_repetition_code, statePrep,
                                             nShots, nRounds, noise_model)
 
 # Reshape syndromes to flatten rounds per shot
-syndromes = syndromes.reshape((nShots, nRounds, -1))
 syndromes = syndromes.reshape((nShots, -1))
 
 print(f"\n Showing first 5 of {nShots} sampled results:")
