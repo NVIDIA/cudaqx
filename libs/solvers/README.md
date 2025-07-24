@@ -20,7 +20,7 @@ not require a GPU to use, but some components are GPU-accelerated.
 
 Note: if you would like to use our Generative Quantum Eigensolver API, you will need
 additional dependencies installed. You can install them with
-`pip install cudaq-solvers[qge]`.
+`pip install cudaq-solvers[gqe]`.
 
 ## Getting Started
 
