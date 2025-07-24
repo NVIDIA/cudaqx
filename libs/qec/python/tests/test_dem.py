@@ -28,13 +28,6 @@ def is_nvidia_gpu_available():
     return False
 
 
-# Usage
-if is_nvidia_gpu_available():
-    print("NVIDIA GPU detected!")
-else:
-    print("No NVIDIA GPU found.")
-
-
 # Helper function to convert a binary matrix to a convenient string
 def mat_to_str(mat):
     s = ''
