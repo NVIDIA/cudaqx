@@ -327,9 +327,6 @@ void bindCode(py::module &mod) {
       "Retrieve a quantum error correction code by name with optional "
       "parameters");
 
-  qecmod.def("get_available_codes", &get_available_codes,
-             "Get a list of all available quantum error correction codes");
-
   qecmod.def(
       "get_available_codes",
       []() {

@@ -56,7 +56,7 @@ def stabilizer_round(logicalQubit: patch) -> list[bool]:
         cudaq.apply_noise(cudaq.DepolarizationChannel, 0.1,
                           logicalQubit.data[i])
         # It is possible to have even more control over the noise.
-        # cudaq.apply_noise(cudaq.Pauli1, 0.1, 0.1, 0.1, q[2]) # in order pX, pY, and pZ errors.
+        # cudaq.apply_noise(cudaq.Pauli1, 0.1, 0.1, 0.1, logicalQubit.data[i]) # in order pX, pY, and pZ errors.
 
     # Measure each ZZ stabilizer using CNOTs from data to ancilla
     for i in range(num_ancilla):
@@ -135,11 +135,7 @@ class MyRepetitionCode:
 my_repetition_code = qec.get_code("custom_repetition_code", distance=distance)
 print(f"\n Created custom repetition code with distance {distance}.")
 
-# Show available codes (doesn't include Python-defined custom codes)
-available_codes = qec.get_available_codes()
-print("\n  Available built-in QEC codes:", available_codes)
-
-all_codes = qec.get_all_available_codes()
+all_codes = qec.get_available_codes()
 print("\n  Available QEC codes both in the library and in Python:", all_codes)
 
 # Let's check some propreties to verify that code is correctly created
@@ -179,8 +175,8 @@ syndromes, data = qec.sample_memory_circuit(my_repetition_code, statePrep,
 # Reshape syndromes to flatten rounds per shot
 syndromes = syndromes.reshape((nShots, -1))
 
-print(f"\n Showing first 5 of {nShots} sampled results:")
-for i in range(5):
+print(f"\n Showing first {min(nShots, 5)} of {nShots} sampled results:")
+for i in range(min(nShots, 5)):
     print(
         f"Shot {i+1:>2}: Logical measurement = {data[i]}, Syndromes = {syndromes[i]}"
     )
