@@ -18,6 +18,10 @@ not require a GPU to use, but some components are GPU-accelerated.
 - Quantum approximate optimization algorithm (QAOA)
 - Hamiltonian simulation routines
 
+Note: if you would like to use our Generative Quantum Eigensolver API, you will need
+additional dependencies installed. You can install them with
+`pip install cudaq-solvers[qge]`.
+
 ## Getting Started
 
 For detailed documentation, tutorials, and API reference,
