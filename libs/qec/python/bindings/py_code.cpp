@@ -77,13 +77,25 @@ public:
     if (!py::hasattr(registeredCode, "stabilizers"))
       throw std::runtime_error(
           "Invalid Python QEC Code. Must have self.stabilizers = "
-          "qec.Stabilizers(...). Please provide the stabilizers.");
+          "[cudaq.SpinOperator(...)] (qec.Stabilizers(...)). Please provide "
+          "the stabilizers.");
+    if (!py::hasattr(registeredCode, "pauli_observables"))
+      throw std::runtime_error(
+          "Invalid Python QEC Code. Must have self.pauli_observables = "
+          "[cudaq.SpinOperator(...)]. Please provide the observables.");
     if (!py::hasattr(registeredCode, "operation_encodings"))
       throw std::runtime_error(
           "Invalid Python QEC Code. Must have self.operation_encodings = "
           "{...}. Please provide the CUDA-Q kernels for the operation "
           "encodings.");
 
+    if (py::hasattr(registeredCode, "pauli_observables")) {
+      auto obs_terms = registeredCode.attr("pauli_observables")
+                           .cast<std::vector<cudaq::spin_op_term>>();
+      m_pauli_observables.reserve(obs_terms.size());
+      for (auto &&term : obs_terms)
+        m_pauli_observables.emplace_back(std::move(term));
+    }
     // Get the stabilizers. First convert to spin_op_term's and then convert to
     // spin_op's.
     auto stab_terms = registeredCode.attr("stabilizers")
@@ -169,6 +181,14 @@ private:
       registry;
 
 public:
+  static std::vector<std::string> get_keys() {
+    std::vector<std::string> keys;
+    for (const auto &pair : registry) {
+      keys.push_back(pair.first);
+    }
+    return keys;
+  }
+
   static void register_code(const std::string &name,
                             std::function<py::object(py::kwargs)> factory) {
     cudaq::info("Registering Pythonic QEC Code with name {}", name);
@@ -307,8 +327,16 @@ void bindCode(py::module &mod) {
       "Retrieve a quantum error correction code by name with optional "
       "parameters");
 
-  qecmod.def("get_available_codes", &get_available_codes,
-             "Get a list of all available quantum error correction codes");
+  qecmod.def(
+      "get_available_codes",
+      []() {
+        auto codes = cudaq::qec::get_available_codes();
+        auto py_codes = PyCodeRegistry::get_keys();
+        codes.insert(codes.end(), py_codes.begin(), py_codes.end());
+        return codes;
+      },
+      "Get a list of all available quantum error correction codes (C++ and "
+      "Python).");
 
   py::class_<code, PyCode>(qecmod, "Code",
                            "Represents a quantum error correction code")
