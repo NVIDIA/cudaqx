@@ -331,7 +331,7 @@ void bindCode(py::module &mod) {
              "Get a list of all available quantum error correction codes");
 
   qecmod.def(
-      "get_all_available_codes",
+      "get_available_codes",
       []() {
         auto codes = cudaq::qec::get_available_codes();
         auto py_codes = PyCodeRegistry::get_keys();
