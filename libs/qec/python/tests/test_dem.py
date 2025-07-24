@@ -10,6 +10,23 @@ import numpy as np
 import cudaq
 import cudaq_qec as qec
 
+import subprocess
+
+
+def is_nvidia_gpu_available():
+    """Check if NVIDIA GPU is available using nvidia-smi command."""
+    try:
+        result = subprocess.run(["nvidia-smi"],
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE,
+                                text=True)
+        if result.returncode == 0 and "GPU" in result.stdout:
+            return True
+    except FileNotFoundError:
+        # The nvidia-smi command is not found, indicating no NVIDIA GPU drivers
+        return False
+    return False
+
 
 # Helper function to convert a binary matrix to a convenient string
 def mat_to_str(mat):
@@ -143,6 +160,10 @@ def test_decoding_from_dem_from_memory_circuit():
     ])
 def test_decoding_from_surface_code_dem_from_memory_circuit(
         decoder_name, error_rate):
+    # If this machine only has a CPU, then skip the nv-qldpc-decoder test.
+    if decoder_name == "nv-qldpc-decoder" and not is_nvidia_gpu_available():
+        pytest.skip("nv-qldpc-decoder requires a GPU")
+
     cudaq.set_random_seed(13)
     code = qec.get_code('surface_code', distance=5)
     Lz = code.get_observables_z()
