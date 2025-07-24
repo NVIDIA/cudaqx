@@ -18,7 +18,7 @@
 set -e
 
 CURRENT_ARCH=$(uname -m)
-PYTHON_VERSIONS=("3.10" "3.11" "3.12")
+PYTHON_VERSIONS=("3.10" "3.11" "3.12" "3.13")
 TARGETS=("nvidia" "nvidia --option fp64", "qpp-cpu")
 
 # OpenBLAS can get bogged down on some machines if using too many threads.
