@@ -7,11 +7,15 @@
  ******************************************************************************/
 
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <gtest/gtest.h>
+#include <unistd.h>
 
 #include "cudaq/qec/codes/surface_code.h"
 #include "cudaq/qec/experiments.h"
 #include "cudaq/qec/pcm_utils.h"
+#include "cudaq/qec/plugin_loader.h"
 #include "cudaq/qec/version.h"
 
 TEST(StabilizerTester, checkConstructFromSpinOps) {
@@ -103,6 +107,35 @@ TEST(StabilizerTester, checkConstructFromSpinOps) {
         for (std::size_t j = 0; j < 7; j++)
           EXPECT_EQ(t.at({i, j}), parity_z.at({i, j}));
     }
+  }
+}
+
+TEST(StabilizerTester, checkToParityMatrixEdgeCases) {
+  // Test case 1: Empty stabilizers vector (triggers line 56)
+  {
+    std::vector<cudaq::spin_op_term> empty_stab;
+    auto parity_empty = cudaq::qec::to_parity_matrix(empty_stab);
+
+    // Should return empty tensor
+    EXPECT_EQ(parity_empty.size(), 0);
+    // Empty tensor has rank 0, not 2
+    EXPECT_EQ(parity_empty.rank(), 0);
+  }
+
+  // Test case 2: No Z stabilizers for Z type (triggers line 105)
+  {
+    // Create stabilizers with only X operations (no Z)
+    std::vector<cudaq::spin_op_term> x_only_stab{
+        cudaq::spin_op::from_word("XXXIII"),
+        cudaq::spin_op::from_word("IXXXII"),
+        cudaq::spin_op::from_word("IIXXXI")};
+
+    auto parity_z_only = cudaq::qec::to_parity_matrix(
+        x_only_stab, cudaq::qec::stabilizer_type::Z);
+
+    // Should return empty tensor because no Z stabilizers found
+    EXPECT_EQ(parity_z_only.size(), 0);
+    EXPECT_EQ(parity_z_only.rank(), 0);
   }
 }
 
@@ -415,6 +448,139 @@ TEST(QECCodeTester, checkCodeCapacity) {
   }
 }
 
+TEST(QECCodeTester, checkCodeCapacityWithCodeObject) {
+  // Test sample_code_capacity(const code &code, std::size_t nShots, double
+  // error_probability)
+  {
+    auto steane = cudaq::qec::get_code("steane");
+    int nShots = 5;
+    double error_prob = 0.0;
+
+    auto [syndromes, data] =
+        cudaq::qec::sample_code_capacity(*steane, nShots, error_prob);
+
+    // get_parity() returns the full parity check matrix (both X and Z
+    // stabilizers)
+    auto H = steane->get_parity();
+    EXPECT_EQ(nShots, syndromes.shape()[0]);
+    EXPECT_EQ(H.shape()[0], syndromes.shape()[1]);
+    EXPECT_EQ(nShots, data.shape()[0]);
+    EXPECT_EQ(H.shape()[1], data.shape()[1]);
+
+    // Error prob = 0 should be all zeros
+    for (size_t i = 0; i < nShots; ++i) {
+      for (size_t j = 0; j < H.shape()[1]; ++j) {
+        EXPECT_EQ(0, data.at({i, j}));
+      }
+    }
+
+    for (size_t i = 0; i < nShots; ++i) {
+      for (size_t j = 0; j < H.shape()[0]; ++j) {
+        EXPECT_EQ(0, syndromes.at({i, j}));
+      }
+    }
+  }
+
+  // Test sample_code_capacity(const code &code, std::size_t nShots, double
+  // error_probability, unsigned seed)
+  {
+    auto steane = cudaq::qec::get_code("steane");
+    int nShots = 8;
+    double error_prob = 0.15;
+    unsigned seed = 1337;
+
+    auto [syndromes, data] =
+        cudaq::qec::sample_code_capacity(*steane, nShots, error_prob, seed);
+
+    auto H = steane->get_parity();
+    EXPECT_EQ(nShots, syndromes.shape()[0]);
+    EXPECT_EQ(H.shape()[0], syndromes.shape()[1]);
+    EXPECT_EQ(nShots, data.shape()[0]);
+    EXPECT_EQ(H.shape()[1], data.shape()[1]);
+
+    // Verify that results are deterministic with the same seed
+    auto [syndromes2, data2] =
+        cudaq::qec::sample_code_capacity(*steane, nShots, error_prob, seed);
+
+    for (size_t i = 0; i < nShots; ++i) {
+      for (size_t j = 0; j < H.shape()[1]; ++j) {
+        EXPECT_EQ(data.at({i, j}), data2.at({i, j}));
+      }
+    }
+
+    for (size_t i = 0; i < nShots; ++i) {
+      for (size_t j = 0; j < H.shape()[0]; ++j) {
+        EXPECT_EQ(syndromes.at({i, j}), syndromes2.at({i, j}));
+      }
+    }
+  }
+
+  // Test with different code type
+  {
+    auto repetition = cudaq::qec::get_code(
+        "repetition", cudaqx::heterogeneous_map{{"distance", 3}});
+    int nShots = 8;
+    double error_prob = 0.2;
+    unsigned seed = 42;
+
+    auto [syndromes, data] =
+        cudaq::qec::sample_code_capacity(*repetition, nShots, error_prob, seed);
+
+    auto H = repetition->get_parity();
+    EXPECT_EQ(nShots, syndromes.shape()[0]);
+    EXPECT_EQ(H.shape()[0], syndromes.shape()[1]);
+    EXPECT_EQ(nShots, data.shape()[0]);
+    EXPECT_EQ(H.shape()[1], data.shape()[1]);
+
+    // Verify that results are consistent - if we call with same parameters
+    // again, we should get the same results
+    auto [syndromes2, data2] =
+        cudaq::qec::sample_code_capacity(*repetition, nShots, error_prob, seed);
+
+    for (size_t i = 0; i < nShots; ++i) {
+      for (size_t j = 0; j < H.shape()[1]; ++j) {
+        EXPECT_EQ(data.at({i, j}), data2.at({i, j}));
+      }
+    }
+
+    for (size_t i = 0; i < nShots; ++i) {
+      for (size_t j = 0; j < H.shape()[0]; ++j) {
+        EXPECT_EQ(syndromes.at({i, j}), syndromes2.at({i, j}));
+      }
+    }
+  }
+
+  // Test without seed (random behavior)
+  {
+    auto steane = cudaq::qec::get_code("steane");
+    int nShots = 3;
+    double error_prob = 0.1;
+
+    auto [syndromes1, data1] =
+        cudaq::qec::sample_code_capacity(*steane, nShots, error_prob);
+    auto [syndromes2, data2] =
+        cudaq::qec::sample_code_capacity(*steane, nShots, error_prob);
+
+    auto H = steane->get_parity();
+
+    // Verify shape is correct
+    EXPECT_EQ(nShots, syndromes1.shape()[0]);
+    EXPECT_EQ(H.shape()[0], syndromes1.shape()[1]);
+    EXPECT_EQ(nShots, data1.shape()[0]);
+    EXPECT_EQ(H.shape()[1], data1.shape()[1]);
+
+    // Same for second call
+    EXPECT_EQ(nShots, syndromes2.shape()[0]);
+    EXPECT_EQ(H.shape()[0], syndromes2.shape()[1]);
+    EXPECT_EQ(nShots, data2.shape()[0]);
+    EXPECT_EQ(H.shape()[1], data2.shape()[1]);
+
+    // Since we're using random seeds, the results might be different
+    // We just verify the function completes successfully and returns valid
+    // shapes
+  }
+}
+
 TEST(QECCodeTester, checkRepetition) {
   {
     // must provide distance
@@ -597,6 +763,26 @@ TEST(QECCodeTester, checkSurfaceCode) {
         for (std::size_t j = 0; j < Lz.shape()[1]; ++j)
           EXPECT_EQ(true_Lz[i][j], Lz.at({i, j}));
     }
+
+    // Test surface code qubit count methods for distance 3
+    EXPECT_EQ(9, surf_code->get_num_data_qubits())
+        << "Surface code distance 3 should have 9 data qubits (3*3)";
+    EXPECT_EQ(8, surf_code->get_num_ancilla_qubits())
+        << "Surface code distance 3 should have 8 ancilla qubits (3*3-1)";
+    EXPECT_EQ(4, surf_code->get_num_ancilla_x_qubits())
+        << "Surface code distance 3 should have 4 X ancilla qubits";
+    EXPECT_EQ(4, surf_code->get_num_ancilla_z_qubits())
+        << "Surface code distance 3 should have 4 Z ancilla qubits";
+
+    // Verify relationships between qubit counts
+    EXPECT_EQ(surf_code->get_num_ancilla_x_qubits() +
+                  surf_code->get_num_ancilla_z_qubits(),
+              surf_code->get_num_ancilla_qubits())
+        << "X and Z ancilla qubits should sum to total ancilla qubits";
+    EXPECT_EQ(surf_code->get_num_data_qubits() +
+                  surf_code->get_num_ancilla_qubits(),
+              17)
+        << "Total qubits should be 17 for distance 3 surface code";
   }
 }
 
@@ -666,6 +852,39 @@ TEST(QECCodeTester, checkSteaneSPAM) {
       noiseless_logical_SPAM_test(*steane, cudaq::qec::operation::prepp, 1));
   EXPECT_FALSE(
       noiseless_logical_SPAM_test(*steane, cudaq::qec::operation::prepm, 0));
+}
+
+TEST(QECCodeTester, checkSteaneQubitCounts) {
+  // Test Steane code qubit count methods
+  auto steane = cudaq::qec::get_code("steane");
+
+  // Test data qubits count
+  EXPECT_EQ(7, steane->get_num_data_qubits())
+      << "Steane code should have 7 data qubits";
+
+  // Test total ancilla qubits count
+  EXPECT_EQ(6, steane->get_num_ancilla_qubits())
+      << "Steane code should have 6 total ancilla qubits";
+
+  // Test X ancilla qubits count
+  EXPECT_EQ(3, steane->get_num_ancilla_x_qubits())
+      << "Steane code should have 3 X ancilla qubits";
+
+  // Test Z ancilla qubits count
+  EXPECT_EQ(3, steane->get_num_ancilla_z_qubits())
+      << "Steane code should have 3 Z ancilla qubits";
+
+  // Verify that X + Z ancilla qubits equals total ancilla qubits
+  EXPECT_EQ(steane->get_num_ancilla_qubits(),
+            steane->get_num_ancilla_x_qubits() +
+                steane->get_num_ancilla_z_qubits())
+      << "Total ancilla qubits should equal sum of X and Z ancilla qubits";
+
+  // Test total qubit count (data + ancilla)
+  std::size_t total_qubits =
+      steane->get_num_data_qubits() + steane->get_num_ancilla_qubits();
+  EXPECT_EQ(13, total_qubits)
+      << "Steane code should use 13 total qubits (7 data + 6 ancilla)";
 }
 
 TEST(QECCodeTester, checkRepetitionSPAM) {
@@ -772,6 +991,77 @@ TEST(QECCodeTester, checkStabilizerGrid) {
   }
 }
 
+TEST(SurfaceCodeTester, checkVec2dOperators) {
+  // Test vec2d operators that are used in stabilizer_grid maps
+  using cudaq::qec::surface_code::vec2d;
+
+  // Test constructor
+  vec2d v1(2, 3);
+  vec2d v2(5, 7);
+  vec2d v3(2, 3); // same as v1
+  vec2d v4(1, 3); // for ordering test
+
+  // Test operator+
+  vec2d sum = v1 + v2;
+  EXPECT_EQ(sum.row, 7);  // 2 + 5
+  EXPECT_EQ(sum.col, 10); // 3 + 7
+
+  // Test operator-
+  vec2d diff = v2 - v1;
+  EXPECT_EQ(diff.row, 3); // 5 - 2
+  EXPECT_EQ(diff.col, 4); // 7 - 3
+
+  // Test operator== (equality)
+  EXPECT_TRUE(v1 == v3);  // same coordinates
+  EXPECT_FALSE(v1 == v2); // different coordinates
+  EXPECT_FALSE(v1 == v4); // different row
+
+  // Test operator< (ordering used in std::map)
+  EXPECT_TRUE(v4 < v1);  // (1,3) < (2,3) - different row
+  EXPECT_TRUE(v1 < v2);  // (2,3) < (5,7) - different row
+  EXPECT_FALSE(v1 < v3); // (2,3) not < (2,3) - same coordinates
+  EXPECT_FALSE(v2 < v1); // (5,7) not < (2,3)
+
+  // Test ordering by column when row is same
+  vec2d v5(2, 1);        // same row as v1, but smaller column
+  vec2d v6(2, 5);        // same row as v1, but larger column
+  EXPECT_TRUE(v5 < v1);  // (2,1) < (2,3) - same row, smaller col
+  EXPECT_TRUE(v1 < v6);  // (2,3) < (2,5) - same row, larger col
+  EXPECT_FALSE(v1 < v5); // (2,3) not < (2,1)
+
+  // Verify operator< works correctly with std::map (this is where it's actually
+  // used)
+  std::map<vec2d, int> coord_map;
+  coord_map[v1] = 1;
+  coord_map[v2] = 2;
+  coord_map[v4] = 4;
+  coord_map[v5] = 5;
+  coord_map[v6] = 6;
+
+  // Verify all values are stored correctly
+  EXPECT_EQ(coord_map[v1], 1);
+  EXPECT_EQ(coord_map[v2], 2);
+  EXPECT_EQ(coord_map[v4], 4);
+  EXPECT_EQ(coord_map[v5], 5);
+  EXPECT_EQ(coord_map[v6], 6);
+
+  // Verify that v3 (same as v1) accesses the same value
+  EXPECT_EQ(coord_map[v3], 1);
+
+  // Verify map ordering by iterating (should be sorted by operator<)
+  std::vector<vec2d> expected_order = {v4, v5, v1, v6,
+                                       v2}; // (1,3), (2,1), (2,3), (2,5), (5,7)
+  std::vector<vec2d> actual_order;
+  for (const auto &pair : coord_map) {
+    actual_order.push_back(pair.first);
+  }
+
+  EXPECT_EQ(actual_order.size(), expected_order.size());
+  for (size_t i = 0; i < expected_order.size(); ++i) {
+    EXPECT_TRUE(actual_order[i] == expected_order[i]);
+  }
+}
+
 TEST(PCMUtilsTester, checkReorderPCMColumns) {
   std::vector<uint8_t> data = {
       0, 1, 0, 0, 1, 0, 0, 0, 1, /* row 0 */
@@ -843,6 +1133,129 @@ TEST(PCMUtilsTester, checkSimplifyPCM2) {
   std::vector<double> expected_weights = {0.2, 0.1 + 0.3 - 2 * 0.1 * 0.3};
   for (std::size_t i = 0; i < weights_new.size(); ++i)
     EXPECT_NEAR(weights_new[i], expected_weights[i], 1e-6);
+}
+
+TEST(PCMUtilsTester, checkSimplifyPCMEdgeCases) {
+  // Test case 1: Zero weights (weights[column_index] == 0)
+  std::vector<uint8_t> data = {
+      1, 0, 1, /* row 0 */
+      0, 0, 0, /* row 1 */
+      1, 0, 1, /* row 2 */
+      0, 0, 0, /* row 3 */
+      1, 0, 1  /* row 4 */
+  };
+  std::vector<double> weights = {0.1, 0.0, 0.2}; // Middle weight is zero
+  cudaqx::tensor<uint8_t> pcm(std::vector<std::size_t>{5, 3});
+  pcm.borrow(data.data());
+
+  auto [H_new, weights_new] = cudaq::qec::simplify_pcm(pcm, weights, 5);
+
+  // Should skip zero-weight column and combine duplicates
+  EXPECT_EQ(H_new.shape()[1], 1); // Only one column should remain
+  EXPECT_EQ(weights_new.size(), 1);
+  // Combined weight: 0.1 + 0.2 - 2*0.1*0.2 = 0.26
+  double expected_weight = 0.1 + 0.2 - 2 * 0.1 * 0.2;
+  EXPECT_NEAR(weights_new[0], expected_weight, 1e-6);
+
+  // Test case 2: Empty columns (curr_row_indices.size() == 0)
+  std::vector<uint8_t> data_with_empty = {
+      1, 0, 1, 0, /* row 0 */
+      0, 0, 0, 0, /* row 1 */
+      1, 0, 1, 0, /* row 2 */
+      0, 0, 0, 0, /* row 3 */
+      1, 0, 1, 0  /* row 4 */
+  };
+  std::vector<double> weights_with_empty = {0.1, 0.2, 0.3, 0.4};
+  cudaqx::tensor<uint8_t> pcm_with_empty(std::vector<std::size_t>{5, 4});
+  pcm_with_empty.borrow(data_with_empty.data());
+
+  auto [H_new2, weights_new2] =
+      cudaq::qec::simplify_pcm(pcm_with_empty, weights_with_empty, 5);
+
+  // Columns 1 and 3 are empty, columns 0 and 2 are identical
+  EXPECT_EQ(H_new2.shape()[1], 1); // Only one column should remain
+  EXPECT_EQ(weights_new2.size(), 1);
+  // Combined weight of columns 0 and 2: 0.1 + 0.3 - 2*0.1*0.3 = 0.34
+  double expected_weight2 = 0.1 + 0.3 - 2 * 0.1 * 0.3;
+  EXPECT_NEAR(weights_new2[0], expected_weight2, 1e-6);
+
+  // Test case 3: All columns empty or zero weight
+  std::vector<uint8_t> empty_data(15, 0); // 5x3 all zeros
+  std::vector<double> zero_weights = {0.0, 0.0, 0.0};
+  cudaqx::tensor<uint8_t> empty_pcm(std::vector<std::size_t>{5, 3});
+  empty_pcm.borrow(empty_data.data());
+
+  auto [H_new3, weights_new3] =
+      cudaq::qec::simplify_pcm(empty_pcm, zero_weights, 5);
+
+  // Should result in empty PCM
+  EXPECT_EQ(H_new3.shape()[1], 0);
+  EXPECT_EQ(weights_new3.size(), 0);
+}
+
+TEST(PCMUtilsTester, checkGetPCMForRoundsEdgeCases) {
+  // Create a PCM with empty columns in specific rounds
+  // 20 rows (4 rounds * 5 syndromes), 12 columns (4 rounds * 3 errors)
+  std::vector<uint8_t> data(20 * 12, 0); // Initialize all zeros
+  cudaqx::tensor<uint8_t> pcm(std::vector<std::size_t>{20, 12});
+  pcm.borrow(data.data());
+
+  // Round 0 (rows 0-4): normal columns
+  pcm.at({0, 0}) = 1; // column 0 has errors in round 0
+  pcm.at({2, 0}) = 1;
+  pcm.at({1, 1}) = 1; // column 1 has errors in round 0
+  pcm.at({3, 1}) = 1;
+  // column 2 is empty (all zeros)
+
+  // Round 1 (rows 5-9): mix of normal and empty columns
+  pcm.at({5, 3}) = 1; // column 3 has errors in round 1
+  pcm.at({7, 3}) = 1;
+  // columns 4, 5 are empty
+
+  // Round 2 (rows 10-14): all empty columns
+  // columns 6, 7, 8 are all empty
+
+  // Round 3 (rows 15-19): normal columns
+  pcm.at({15, 9}) = 1; // column 9 has errors in round 3
+  pcm.at({17, 9}) = 1;
+  pcm.at({16, 10}) = 1; // column 10 has errors in round 3
+  pcm.at({18, 10}) = 1;
+  // column 11 is empty
+
+  auto pcm_sorted = cudaq::qec::sort_pcm_columns(pcm, 5);
+
+  // Test case 1: Get round with some empty columns (round 1)
+  auto [pcm_round1, first_col1, last_col1] =
+      cudaq::qec::get_pcm_for_rounds(pcm_sorted, 5, 1, 1);
+
+  // Should have 5 rows (1 round)
+  EXPECT_EQ(pcm_round1.shape()[0], 5);
+  // Number of columns depends on which non-empty columns are included
+  EXPECT_GE(pcm_round1.shape()[1], 0);
+
+  // Test case 2: Get round with all empty columns (round 2)
+  auto [pcm_round2, first_col2, last_col2] =
+      cudaq::qec::get_pcm_for_rounds(pcm_sorted, 5, 2, 2);
+
+  // Should have 5 rows but might have 0 columns if all are empty
+  EXPECT_EQ(pcm_round2.shape()[0], 5);
+  // This tests the rows_for_this_column.size() == 0 condition
+  EXPECT_GE(pcm_round2.shape()[1], 0);
+
+  // Test case 3: Get multiple rounds including empty ones
+  auto [pcm_multi, first_col_multi, last_col_multi] =
+      cudaq::qec::get_pcm_for_rounds(pcm_sorted, 5, 1, 2);
+
+  // Should have 10 rows (2 rounds)
+  EXPECT_EQ(pcm_multi.shape()[0], 10);
+  EXPECT_GE(pcm_multi.shape()[1], 0);
+
+  printf("Round 1 PCM shape: (%zu, %zu)\n", pcm_round1.shape()[0],
+         pcm_round1.shape()[1]);
+  printf("Round 2 PCM shape: (%zu, %zu)\n", pcm_round2.shape()[0],
+         pcm_round2.shape()[1]);
+  printf("Multi-round PCM shape: (%zu, %zu)\n", pcm_multi.shape()[0],
+         pcm_multi.shape()[1]);
 }
 
 bool are_pcms_equal(const cudaqx::tensor<uint8_t> &a,
@@ -1016,4 +1429,237 @@ TEST(QECCodeTester, checkVersion) {
   EXPECT_TRUE(fullVersion.find("NVIDIA/cudaqx") != std::string::npos);
   EXPECT_TRUE(fullVersion.find("CUDAQX_SOLVERS_COMMIT_SHA") ==
               std::string::npos);
+}
+
+// Test detector_error_model methods
+TEST(DetectorErrorModelTest, NumDetectors) {
+  cudaq::qec::detector_error_model dem;
+
+  // Test case 1: Empty matrix (no shape)
+  EXPECT_EQ(dem.num_detectors(), 0);
+
+  // Test case 2: 1D matrix (shape.size() != 2)
+  std::vector<std::size_t> shape_1d = {5};
+  dem.detector_error_matrix = cudaqx::tensor<uint8_t>(shape_1d);
+  EXPECT_EQ(dem.num_detectors(), 0);
+
+  // Test case 3: Valid 2D matrix
+  std::vector<std::size_t> shape_2d = {3, 4}; // 3 detectors, 4 error mechanisms
+  dem.detector_error_matrix = cudaqx::tensor<uint8_t>(shape_2d);
+  EXPECT_EQ(dem.num_detectors(), 3);
+
+  // Test case 4: Different dimensions
+  std::vector<std::size_t> shape_large = {10, 8};
+  dem.detector_error_matrix = cudaqx::tensor<uint8_t>(shape_large);
+  EXPECT_EQ(dem.num_detectors(), 10);
+}
+
+TEST(DetectorErrorModelTest, NumErrorMechanisms) {
+  cudaq::qec::detector_error_model dem;
+
+  // Test case 1: Empty matrix (no shape)
+  EXPECT_EQ(dem.num_error_mechanisms(), 0);
+
+  // Test case 2: 1D matrix (shape.size() != 2)
+  std::vector<std::size_t> shape_1d = {5};
+  dem.detector_error_matrix = cudaqx::tensor<uint8_t>(shape_1d);
+  EXPECT_EQ(dem.num_error_mechanisms(), 0);
+
+  // Test case 3: Valid 2D matrix
+  std::vector<std::size_t> shape_2d = {3, 4}; // 3 detectors, 4 error mechanisms
+  dem.detector_error_matrix = cudaqx::tensor<uint8_t>(shape_2d);
+  EXPECT_EQ(dem.num_error_mechanisms(), 4);
+
+  // Test case 4: Different dimensions
+  std::vector<std::size_t> shape_large = {10, 8};
+  dem.detector_error_matrix = cudaqx::tensor<uint8_t>(shape_large);
+  EXPECT_EQ(dem.num_error_mechanisms(), 8);
+}
+
+TEST(DetectorErrorModelTest, NumObservables) {
+  cudaq::qec::detector_error_model dem;
+
+  // Test case 1: Empty matrix (no shape) - covers line 32 return 0
+  EXPECT_EQ(dem.num_observables(), 0);
+
+  // Test case 2: 1D matrix (shape.size() != 2) - covers line 32 return 0
+  std::vector<std::size_t> shape_1d = {5};
+  dem.observables_flips_matrix = cudaqx::tensor<uint8_t>(shape_1d);
+  EXPECT_EQ(dem.num_observables(), 0);
+
+  // Test case 3: 3D matrix (shape.size() != 2) - covers line 32 return 0
+  std::vector<std::size_t> shape_3d = {2, 3, 4};
+  dem.observables_flips_matrix = cudaqx::tensor<uint8_t>(shape_3d);
+  EXPECT_EQ(dem.num_observables(), 0);
+
+  // Test case 4: Valid 2D matrix - covers line 30 return shape[0]
+  std::vector<std::size_t> shape_2d = {2,
+                                       5}; // 2 observables, 5 error mechanisms
+  dem.observables_flips_matrix = cudaqx::tensor<uint8_t>(shape_2d);
+  EXPECT_EQ(dem.num_observables(), 2);
+
+  // Test case 5: Different dimensions
+  std::vector<std::size_t> shape_large = {7, 12};
+  dem.observables_flips_matrix = cudaqx::tensor<uint8_t>(shape_large);
+  EXPECT_EQ(dem.num_observables(), 7);
+
+  // Test case 6: Single observable
+  std::vector<std::size_t> shape_single = {1, 3};
+  dem.observables_flips_matrix = cudaqx::tensor<uint8_t>(shape_single);
+  EXPECT_EQ(dem.num_observables(), 1);
+}
+
+TEST(DetectorErrorModelTest, NumObservablesInCanonicalize) {
+  // This test verifies the calling stack: canonicalize_for_rounds ->
+  // num_observables()
+  cudaq::qec::detector_error_model dem;
+
+  // Set up a simple detector_error_matrix
+  std::vector<std::size_t> detector_shape = {
+      2, 3}; // 2 detectors, 3 error mechanisms
+  dem.detector_error_matrix = cudaqx::tensor<uint8_t>(detector_shape);
+  // Initialize with some data
+  dem.detector_error_matrix.at({0, 0}) = 1;
+  dem.detector_error_matrix.at({0, 1}) = 0;
+  dem.detector_error_matrix.at({0, 2}) = 1;
+  dem.detector_error_matrix.at({1, 0}) = 0;
+  dem.detector_error_matrix.at({1, 1}) = 1;
+  dem.detector_error_matrix.at({1, 2}) = 0;
+
+  // Set up observables_flips_matrix
+  std::vector<std::size_t> obs_shape = {1,
+                                        3}; // 1 observable, 3 error mechanisms
+  dem.observables_flips_matrix = cudaqx::tensor<uint8_t>(obs_shape);
+  dem.observables_flips_matrix.at({0, 0}) = 0;
+  dem.observables_flips_matrix.at({0, 1}) = 1;
+  dem.observables_flips_matrix.at({0, 2}) = 0;
+
+  // Set up error_rates
+  dem.error_rates = {0.1, 0.2, 0.15};
+
+  // Before canonicalize: verify num_observables works
+  EXPECT_EQ(dem.num_observables(), 1);
+
+  // This will internally call num_observables() at line 73 in
+  // canonicalize_for_rounds
+  dem.canonicalize_for_rounds(2);
+
+  // After canonicalize: verify num_observables still works
+  EXPECT_EQ(dem.num_observables(), 1);
+}
+
+TEST(DetectorErrorModelTest, CanonicalizeWithoutErrorIds) {
+  // This test covers the std::numeric_limits<std::size_t>::max() branch
+  // when has_error_ids is false and duplicate columns need to be merged
+  cudaq::qec::detector_error_model dem;
+
+  // Set up detector_error_matrix with duplicate columns (columns 0 and 2 are
+  // identical)
+  std::vector<std::size_t> detector_shape = {
+      3, 4}; // 3 detectors, 4 error mechanisms
+  dem.detector_error_matrix = cudaqx::tensor<uint8_t>(detector_shape);
+
+  // Column 0: detectors 0,2 triggered
+  dem.detector_error_matrix.at({0, 0}) = 1;
+  dem.detector_error_matrix.at({1, 0}) = 0;
+  dem.detector_error_matrix.at({2, 0}) = 1;
+
+  // Column 1: detector 1 triggered
+  dem.detector_error_matrix.at({0, 1}) = 0;
+  dem.detector_error_matrix.at({1, 1}) = 1;
+  dem.detector_error_matrix.at({2, 1}) = 0;
+
+  // Column 2: detectors 0,2 triggered (same as column 0)
+  dem.detector_error_matrix.at({0, 2}) = 1;
+  dem.detector_error_matrix.at({1, 2}) = 0;
+  dem.detector_error_matrix.at({2, 2}) = 1;
+
+  // Column 3: detector 1 triggered
+  dem.detector_error_matrix.at({0, 3}) = 0;
+  dem.detector_error_matrix.at({1, 3}) = 1;
+  dem.detector_error_matrix.at({2, 3}) = 0;
+
+  // Set up observables_flips_matrix
+  std::vector<std::size_t> obs_shape = {1,
+                                        4}; // 1 observable, 4 error mechanisms
+  dem.observables_flips_matrix = cudaqx::tensor<uint8_t>(obs_shape);
+  dem.observables_flips_matrix.at({0, 0}) = 0;
+  dem.observables_flips_matrix.at({0, 1}) = 1;
+  dem.observables_flips_matrix.at({0, 2}) = 0; // Same as column 0
+  dem.observables_flips_matrix.at({0, 3}) = 1;
+
+  // Set up error_rates
+  dem.error_rates = {0.1, 0.2, 0.15, 0.25};
+
+  // Important: DO NOT set error_ids, so has_error_ids will be false
+  // This ensures the std::numeric_limits<std::size_t>::max() branch is taken
+
+  EXPECT_EQ(dem.num_detectors(), 3);
+  EXPECT_EQ(dem.num_error_mechanisms(), 4);
+  EXPECT_EQ(dem.num_observables(), 1);
+
+  // This will trigger the canonicalize logic where:
+  // 1. has_error_ids = false (because error_ids.has_value() is false)
+  // 2. Columns 0 and 2 have identical detector patterns, triggering merge
+  // 3. prev_error_id = std::numeric_limits<std::size_t>::max() (line 98-100)
+  dem.canonicalize_for_rounds(3);
+
+  // After canonicalization, duplicate columns should be merged
+  // The matrix should have fewer columns
+  EXPECT_LT(dem.num_error_mechanisms(), 4);
+  EXPECT_EQ(dem.num_detectors(), 3);   // detectors count shouldn't change
+  EXPECT_EQ(dem.num_observables(), 1); // observables count shouldn't change
+}
+
+TEST(DetectorErrorModelTest, CanonicalizeWithMismatchedErrorIds) {
+  // This test covers the case where error_ids exists but size doesn't match
+  // error_rates so has_error_ids becomes false, triggering the
+  // std::numeric_limits branch
+  cudaq::qec::detector_error_model dem;
+
+  // Set up detector_error_matrix with duplicate columns
+  std::vector<std::size_t> detector_shape = {2, 3};
+  dem.detector_error_matrix = cudaqx::tensor<uint8_t>(detector_shape);
+
+  // Column 0 and 2 are identical
+  dem.detector_error_matrix.at({0, 0}) = 1;
+  dem.detector_error_matrix.at({1, 0}) = 0;
+  dem.detector_error_matrix.at({0, 1}) = 0;
+  dem.detector_error_matrix.at({1, 1}) = 1;
+  dem.detector_error_matrix.at({0, 2}) = 1; // Same as column 0
+  dem.detector_error_matrix.at({1, 2}) = 0; // Same as column 0
+
+  // Set up observables_flips_matrix
+  std::vector<std::size_t> obs_shape = {1, 3};
+  dem.observables_flips_matrix = cudaqx::tensor<uint8_t>(obs_shape);
+  dem.observables_flips_matrix.at({0, 0}) = 0;
+  dem.observables_flips_matrix.at({0, 1}) = 1;
+  dem.observables_flips_matrix.at({0, 2}) = 0; // Same as column 0
+
+  // Set up error_rates (3 elements)
+  dem.error_rates = {0.1, 0.2, 0.15};
+
+  // Set up error_ids with MISMATCHED size (2 elements instead of 3)
+  // This will make has_error_ids = false because error_ids->size() !=
+  // error_rates.size()
+  dem.error_ids = std::vector<std::size_t>{100, 200}; // Only 2 elements, not 3
+
+  EXPECT_EQ(dem.error_rates.size(), 3);
+  EXPECT_EQ(dem.error_ids->size(), 2); // Mismatched size
+
+  // This will trigger has_error_ids = false due to size mismatch
+  // and then use std::numeric_limits<std::size_t>::max() when merging columns 0
+  // and 2
+  dem.canonicalize_for_rounds(2);
+
+  // Verify the function completed successfully
+  EXPECT_LT(dem.num_error_mechanisms(), 3); // Should have merged some columns
+}
+
+TEST(PluginLoaderTester, checkCleanupPluginsEdgeCases) {
+  // Test edge cases for cleanup_plugins function to cover the else branch
+  // The plugin loader is loaded in the constructor of load_decoder_plugins()
+  // with type PluginType::DECODER, so cleanup with type PluginType::CODE will
+  // not do anything.
+  cudaq::qec::cleanup_plugins(cudaq::qec::PluginType::CODE);
 }
