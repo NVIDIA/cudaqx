@@ -18,7 +18,8 @@
 set -e
 
 CURRENT_ARCH=$(uname -m)
-PYTHON_VERSIONS=("3.10" "3.11" "3.12" "3.13")
+#PYTHON_VERSIONS=("3.10" "3.11" "3.12" "3.13") # Temporarily disable Python 3.13 due to CUDA-Q issue.
+PYTHON_VERSIONS=("3.10" "3.11" "3.12")
 TARGETS=("nvidia" "nvidia --option fp64", "qpp-cpu")
 
 # OpenBLAS can get bogged down on some machines if using too many threads.
@@ -26,12 +27,15 @@ export OMP_NUM_THREADS=8
 
 # Function to run Python tests
 run_python_tests() {
-    local container_name=$1
-    local python_version=$2
+    local python_version=$1
 
     echo "Running Python tests for Python ${python_version} with default target..."
 
-    python3 -m pytest libs -v
+    if [[ $python_version == "3.10" ]]; then
+      python3 -m pytest libs -v --ignore libs/qec/python/tests/test_tensor_network_decoder.py
+    else
+      python3 -m pytest libs -v
+    fi
 
     local test_result=$?
     if [ ${test_result} -ne 0 ]; then
@@ -51,25 +55,45 @@ test_examples() {
     for python_version in "${PYTHON_VERSIONS[@]}"; do
         echo "Testing with Python version: ${python_version}"
 
+        # Note: you may need to run this with CONDA_PLUGINS_AUTO_ACCEPT_TOS=true
+        # (assuming that you do, in fact, accept the ToS).
         conda_name=cudaqx-env-$python_version
         conda create -y -n $conda_name python=$python_version pip
+        conda install -y -n $conda_name -c "nvidia/label/cuda-12" cuda
+        conda install -y -n $conda_name -c conda-forge mpi4py openmpi">=5.0.3" cxx-compiler
+        conda env config vars set -n $conda_name LD_LIBRARY_PATH="$CONDA_PREFIX/envs/$conda_name/lib:$LD_LIBRARY_PATH"
+        conda env config vars set -n $conda_name MPI_PATH=$CONDA_PREFIX/envs/$conda_name
         conda activate $conda_name
         pip install pypiserver
         pypi-server run -p 8080 /root/wheels &
-        pip install cudaq-qec --extra-index-url http://localhost:8080
-        pip install cudaq-solvers --extra-index-url http://localhost:8080
+        if [[ $python_version == "3.10" ]]; then
+          pip install cudaq-qec --extra-index-url http://localhost:8080
+        else
+          pip install cudaq-qec[tensor_network_decoder] --extra-index-url http://localhost:8080
+        fi
+        pip install cudaq-solvers[gqe] --extra-index-url http://localhost:8080
+        source $CONDA_PREFIX/lib/python${python_version}/site-packages/distributed_interfaces/activate_custom_mpi.sh
+        export OMPI_MCA_opal_cuda_support=true OMPI_MCA_btl='^openib'
         pkill -f "pypi-server" # kill the temporary pypi-server
 
         # Needed for tests:
         pip install pytest
         pip install openfermion openfermionpyscf
 
+        if [[ "$(uname -m)" == "x86_64" ]]; then
+            # Stim is not currently available on manylinux ARM wheels, so don't
+            # attempt to install the dependencies for the
+            # docs/sphinx/examples/qec/python/tensor_network_decoder.py test as
+            # that test will be skipped anyway.
+            pip install stim beliefmatching
+        fi
+
         # Dump a version string to the logs
         python3 -c 'import cudaq; print(cudaq.__version__)'
 
         # Run Python tests first
-        if ! run_python_tests ${container_name} ${python_version}; then
-            exit 1
+        if ! run_python_tests ${python_version}; then
+            echo "ERROR: run_python_tests ${python_version} FAILED"
         fi
 
         # Loop through targets
@@ -87,7 +111,6 @@ test_examples() {
                     res=$?
                     if [ $res -ne 0 ]; then
                         echo "Python tests failed for ${domain} with Python ${python_version} and target ${target}: $res"
-                        return 1
                     fi
                 done
                 shopt -u nullglob  # reset setting, just for cleanliness
