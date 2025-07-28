@@ -6,7 +6,7 @@
 
     The decoder supports both single-syndrome and batch decoding, and can run on CPU or GPU (using cuTensorNet if available).
 
-    The Tensor Network Decoder is a Python-only implementation. C++ APIs are not available for this decoder.
+    The Tensor Network Decoder is a Python-only implementation and it requires Python 3.11 or higher. C++ APIs are not available for this decoder.
 
 
     .. note::

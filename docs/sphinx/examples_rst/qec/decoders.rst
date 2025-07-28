@@ -90,7 +90,7 @@ check matrices (PCMs) and test syndromes to exercise a decoder.
 
 .. [#f1] [BCGMRY] Sergey Bravyi, Andrew Cross, Jay Gambetta, Dmitri Maslov, Patrick Rall, Theodore Yoder, High-threshold and low-overhead fault-tolerant quantum memory https://arxiv.org/abs/2308.07915
 
-Exact Maximum Likelihood Decoding with NVIDIA Tensor Networks Decoder
+Exact Maximum Likelihood Decoding with NVIDIA Tensor Network Decoder
 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 
@@ -99,7 +99,7 @@ CUDA-Q QEC library. The library follows the CUDA-Q decoder Python interface, nam
 At this time, we only support the Python interface for the decoder, which is
 available at :class:`cudaq_qec.plugins.decoders.tensor_network_decoder.TensorNetworkDecoder`.
 As documented in the API sections :ref:`tensor_network_decoder_api_python`, there are many configuration options
-that can be passed to the constructor.
+that can be passed to the constructor. The decoder requires Python 3.11 or higher.
 
 In the following example, we show how to use the `TensorNetworkDecoder` class from the `cudaq_qec` library to decode a circuit-level noise problem derived from a Stim surface code circuit.
 

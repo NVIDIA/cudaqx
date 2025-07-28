@@ -807,7 +807,7 @@ Usage:
 
 .. tab:: C++
 
-    The ``tensor_network_decoder`` is a Python-only implementation. C++ APIs are not available for this decoder.
+    The ``tensor_network_decoder`` is a Python-only implementation and it requires Python 3.11 or higher. C++ APIs are not available for this decoder.
 
 Output:
 
