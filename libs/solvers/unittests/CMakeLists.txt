@@ -35,40 +35,40 @@ add_subdirectory(nvqpp)
 # ==============================================================================
 
 add_executable(test_adapt test_adapt.cpp)
-target_link_libraries(test_adapt PRIVATE GTest::gtest_main cudaq-solvers test-kernels)
+target_link_libraries(test_adapt PRIVATE GTest::gtest_main cudaq-solvers test-kernels cudaq::cudaq)
 add_dependencies(CUDAQXSolversUnitTests test_adapt)
 gtest_discover_tests(test_adapt)
 
 add_executable(test_molecule test_molecule.cpp)
-target_link_libraries(test_molecule PRIVATE GTest::gtest_main cudaq-solvers)
+target_link_libraries(test_molecule PRIVATE GTest::gtest_main cudaq-solvers cudaq::cudaq)
 add_dependencies(CUDAQXSolversUnitTests test_molecule)
 gtest_discover_tests(test_molecule)
 
 add_executable(test_bravyi_kitaev test_bravyi_kitaev.cpp)
-target_link_libraries(test_bravyi_kitaev PRIVATE GTest::gtest_main cudaq-solvers)
+target_link_libraries(test_bravyi_kitaev PRIVATE GTest::gtest_main cudaq-solvers cudaq::cudaq)
 add_dependencies(CUDAQXSolversUnitTests test_bravyi_kitaev)
 gtest_discover_tests(test_bravyi_kitaev)
 
 add_executable(test_optimizers test_optimizers.cpp)
-target_link_libraries(test_optimizers PRIVATE GTest::gtest_main cudaq-solvers)
+target_link_libraries(test_optimizers PRIVATE GTest::gtest_main cudaq-solvers cudaq::cudaq)
 add_dependencies(CUDAQXSolversUnitTests test_optimizers)
 gtest_discover_tests(test_optimizers)
 
 add_executable(test_operator_pools test_operator_pools.cpp)
-target_link_libraries(test_operator_pools PRIVATE GTest::gtest_main cudaq-solvers)
+target_link_libraries(test_operator_pools PRIVATE GTest::gtest_main cudaq-solvers cudaq::cudaq)
 add_dependencies(CUDAQXSolversUnitTests test_operator_pools)
 gtest_discover_tests(test_operator_pools)
 
 add_executable(test_vqe test_vqe.cpp)
-target_link_libraries(test_vqe PRIVATE GTest::gtest_main cudaq-solvers test-kernels)
+target_link_libraries(test_vqe PRIVATE GTest::gtest_main cudaq-solvers test-kernels cudaq::cudaq)
 add_dependencies(CUDAQXSolversUnitTests test_vqe)
 gtest_discover_tests(test_vqe)
 
 add_executable(test_uccsd test_uccsd.cpp)
-target_link_libraries(test_uccsd PRIVATE GTest::gtest_main cudaq-solvers test-kernels)
+target_link_libraries(test_uccsd PRIVATE GTest::gtest_main cudaq-solvers test-kernels cudaq::cudaq)
 add_dependencies(CUDAQXSolversUnitTests test_uccsd)
 gtest_discover_tests(test_uccsd)
 
 add_executable(test_qaoa test_qaoa.cpp)
-target_link_libraries(test_qaoa PRIVATE GTest::gtest_main cudaq-solvers test-kernels)
+target_link_libraries(test_qaoa PRIVATE GTest::gtest_main cudaq-solvers test-kernels cudaq::cudaq)
 gtest_discover_tests(test_qaoa)

@@ -45,7 +45,6 @@ target_link_options(${LIBRARY_NAME} PUBLIC
 target_link_libraries(${LIBRARY_NAME}
   PUBLIC 
     cudaqx-core
-    cudaq::cudaq 
     cudaq::cudaq-operator
   PRIVATE
     cudaq::cudaq-common

@@ -1,5 +1,5 @@
 # ============================================================================ #
-# Copyright (c) 2024 NVIDIA Corporation & Affiliates.                          #
+# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -34,7 +34,6 @@ target_include_directories(${MODULE_NAME} PRIVATE .)
 target_link_libraries(${MODULE_NAME} 
   PRIVATE 
     cudaq-solvers
-    cudaq::cudaq
     cudaq::cudaq-python-interop
 )
 
