@@ -149,3 +149,16 @@ Troubleshooting (Common Issues)
     * Verify installation path is in ``PYTHONPATH``
 
 For additional support, please visit our `GitHub Issues <https://github.com/nvidia/cudaqx/issues>`_ page.
+
+
+Known Blackwell Issues
+----------------------
+.. note::
+    If you are attempting to use torch on Blackwell, you will need to install the nightly version of torch.
+    You can do this by running:
+
+    .. code-block:: bash
+
+        python3 -m pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/cu128
+
+    torch is a dependency of the tensor network decoder and the GQE algorithm. 
