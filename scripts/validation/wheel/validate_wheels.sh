@@ -17,9 +17,24 @@
 
 set -e
 
+# Parse command line arguments
+BLACKWELL_MODE=false
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --blackwell)
+            BLACKWELL_MODE=true
+            shift
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Usage: $0 [--blackwell]"
+            exit 1
+            ;;
+    esac
+done
+
 CURRENT_ARCH=$(uname -m)
-#PYTHON_VERSIONS=("3.10" "3.11" "3.12" "3.13") # Temporarily disable Python 3.13 due to CUDA-Q issue.
-PYTHON_VERSIONS=("3.10" "3.11" "3.12")
+PYTHON_VERSIONS=("3.10" "3.11" "3.12" "3.13")
 TARGETS=("nvidia" "nvidia --option fp64", "qpp-cpu")
 
 # OpenBLAS can get bogged down on some machines if using too many threads.
@@ -76,6 +91,12 @@ test_examples() {
         export OMPI_MCA_opal_cuda_support=true OMPI_MCA_btl='^openib'
         pkill -f "pypi-server" # kill the temporary pypi-server
 
+        # Install nightly version PyTorch for Blackwell if flag is provided
+        if [ "$BLACKWELL_MODE" = true ]; then
+            echo "Installing nightly version PyTorch for Blackwell mode..."
+            pip install --upgrade --force-reinstall --pre torch --index-url https://download.pytorch.org/whl/nightly/cu128
+        fi
+
         # Needed for tests:
         pip install pytest
         pip install openfermion openfermionpyscf
@@ -124,6 +145,9 @@ test_examples() {
 
 # Main execution
 echo "Starting CUDA-Q image validation for ${CURRENT_ARCH}..."
+if [ "$BLACKWELL_MODE" = true ]; then
+    echo "Running in Blackwell mode with PyTorch installation"
+fi
 
 conda init bash
 source activate base
