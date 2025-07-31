@@ -32,13 +32,13 @@ public:
   /// extension
   /// @details This function is used by the extension point mechanism to create
   /// instances of the qaoa_pool class. The extension is registered with a name
-  CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION_WITH_NAME(
+  CUDAQ_ADD_EXTENSION_CUSTOM_CREATOR_FUNCTION_WITH_NAME(
       qaoa_pool, "qaoa", static std::unique_ptr<operator_pool> create() {
         return std::make_unique<qaoa_pool>();
       })
 };
 
 /// @brief Register the qaoa_pool extension type with the CUDA-Q framework
-CUDAQ_REGISTER_TYPE(qaoa_pool)
+CUDAQ_REGISTER_EXTENSION(qaoa_pool)
 
 } // namespace cudaq::solvers

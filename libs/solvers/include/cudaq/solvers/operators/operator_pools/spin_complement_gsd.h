@@ -37,9 +37,9 @@ public:
   /// spin_complement_gsd extension
   /// @details This function is used by the extension point mechanism to create
   /// instances of the spin_complement_gsd class.
-  CUDAQ_EXTENSION_CREATOR_FUNCTION(operator_pool, spin_complement_gsd)
+  CUDAQ_ADD_EXTENSION_CREATOR_FUNCTION(operator_pool, spin_complement_gsd)
 };
 /// @brief Register the spin_complement_gsd extension type with the CUDA-Q
 /// framework
-CUDAQ_REGISTER_TYPE(spin_complement_gsd)
+CUDAQ_REGISTER_EXTENSION(spin_complement_gsd)
 } // namespace cudaq::solvers

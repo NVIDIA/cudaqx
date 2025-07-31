@@ -8,9 +8,9 @@
 
 #pragma once
 
-#include "cuda-qx/core/extension_point.h"
 #include "cuda-qx/core/heterogeneous_map.h"
 #include "cuda-qx/core/tensor.h"
+#include "cudaq/utils/extension_point.h"
 
 #include "cudaq/spin_op.h"
 
@@ -20,7 +20,7 @@ namespace cudaq::solvers {
 /// and interface for clients to map fermionic molecular operators to
 /// `cudaq::spin_op` instances. The fermionic operator is represented
 /// via its one body and two body electron overlap integrals.
-class fermion_compiler : public cudaqx::extension_point<fermion_compiler> {
+class fermion_compiler : public cudaq::extension_point<fermion_compiler> {
 public:
   /// @brief Given a fermionic representation of an operator
   /// generate an equivalent operator on spins.

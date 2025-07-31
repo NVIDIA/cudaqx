@@ -9,6 +9,6 @@
 
 #include "cudaq/solvers/observe_gradient.h"
 
-INSTANTIATE_REGISTRY(cudaq::observe_gradient,
-                     std::function<void(std::vector<double>)> const &,
-                     cudaq::spin_op const &)
+CUDAQ_INSTANTIATE_REGISTRY(cudaq::observe_gradient,
+                           std::function<void(std::vector<double>)> const &,
+                           cudaq::spin_op const &)

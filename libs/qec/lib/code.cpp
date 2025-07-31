@@ -9,7 +9,7 @@
 
 #include "device/memory_circuit.h"
 
-INSTANTIATE_REGISTRY(cudaq::qec::code, const cudaqx::heterogeneous_map &)
+CUDAQ_INSTANTIATE_REGISTRY(cudaq::qec::code, const cudaqx::heterogeneous_map &)
 
 namespace cudaq::qec {
 

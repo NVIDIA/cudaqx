@@ -33,7 +33,7 @@ public:
 
   virtual ~sample_decoder() {}
 
-  CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
+  CUDAQ_ADD_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       sample_decoder, static std::unique_ptr<decoder> create(
                           const cudaqx::tensor<uint8_t> &H,
                           const cudaqx::heterogeneous_map &params) {
@@ -41,6 +41,6 @@ public:
       })
 };
 
-CUDAQ_REGISTER_TYPE(sample_decoder)
+CUDAQ_REGISTER_EXTENSION(sample_decoder)
 
 } // namespace cudaq::qec

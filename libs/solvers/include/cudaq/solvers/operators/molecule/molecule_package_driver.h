@@ -8,8 +8,8 @@
 
 #pragma once
 
-#include "cuda-qx/core/extension_point.h"
 #include "cuda-qx/core/tear_down.h"
+#include "cudaq/utils/extension_point.h"
 
 #include "cudaq/solvers/operators/molecule.h"
 
@@ -18,7 +18,7 @@ namespace cudaq::solvers {
 /// @brief MoleculePackageDriver provides an extensible interface for
 /// generating molecular Hamiltonians and associated metadata.
 class MoleculePackageDriver
-    : public cudaqx::extension_point<MoleculePackageDriver> {
+    : public cudaq::extension_point<MoleculePackageDriver> {
 public:
   /// @brief Return a `molecular_hamiltonian` described by the given
   /// geometry, basis set, spin, and charge. Optionally

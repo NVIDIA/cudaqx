@@ -12,9 +12,9 @@
 #include <optional>
 #include <unordered_map>
 
-#include "cuda-qx/core/extension_point.h"
 #include "cuda-qx/core/heterogeneous_map.h"
 #include "cudaq/spin_op.h"
+#include "cudaq/utils/extension_point.h"
 
 using namespace cudaqx;
 
@@ -24,7 +24,7 @@ namespace cudaq::solvers {
 /// algorithms.
 /// @details This class extends the extension_point template, allowing for
 /// runtime extensibility.
-class operator_pool : public cudaqx::extension_point<operator_pool> {
+class operator_pool : public cudaq::extension_point<operator_pool> {
 public:
   /// @brief Default constructor.
   operator_pool() = default;

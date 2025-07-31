@@ -7,7 +7,6 @@
  ******************************************************************************/
 #pragma once
 
-#include "extension_point.h"
 #include "tensor_impl.h"
 #include "type_traits.h"
 

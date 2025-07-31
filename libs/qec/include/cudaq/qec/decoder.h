@@ -8,9 +8,9 @@
 
 #pragma once
 
-#include "cuda-qx/core/extension_point.h"
 #include "cuda-qx/core/heterogeneous_map.h"
 #include "cuda-qx/core/tensor.h"
+#include "cudaq/utils/extension_point.h"
 #include <future>
 #include <optional>
 #include <vector>
@@ -121,8 +121,8 @@ public:
 /// arbitrary constructor parameters that can be unique to each specific
 /// decoder.
 class decoder
-    : public cudaqx::extension_point<decoder, const cudaqx::tensor<uint8_t> &,
-                                     const cudaqx::heterogeneous_map &> {
+    : public cudaq::extension_point<decoder, const cudaqx::tensor<uint8_t> &,
+                                    const cudaqx::heterogeneous_map &> {
 public:
   decoder() = delete;
 

@@ -29,9 +29,9 @@ public:
                                const optimizable_function &opt_function,
                                const heterogeneous_map &options) override;
 
-  CUDAQ_EXTENSION_CREATOR_FUNCTION(optimizer, cobyla);
+  CUDAQ_ADD_EXTENSION_CREATOR_FUNCTION(optimizer, cobyla);
 };
 
-CUDAQ_REGISTER_TYPE(cobyla)
+CUDAQ_REGISTER_EXTENSION(cobyla)
 
 } // namespace cudaq::optim

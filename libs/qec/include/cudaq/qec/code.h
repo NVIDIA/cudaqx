@@ -16,9 +16,9 @@
 #include "cudaq/qec/patch.h"
 #include "cudaq/qec/stabilizer_utils.h"
 
-#include "cuda-qx/core/extension_point.h"
 #include "cuda-qx/core/heterogeneous_map.h"
 #include "cuda-qx/core/tensor.h"
+#include "cudaq/utils/extension_point.h"
 
 using namespace cudaqx;
 
@@ -95,7 +95,7 @@ enum class operation {
 /// CUDAQ_REGISTER_TYPE(my_code)
 /// @endcode
 /// @brief Supported quantum operations for error correcting codes
-class code : public cudaqx::extension_point<code, const heterogeneous_map &> {
+class code : public cudaq::extension_point<code, const heterogeneous_map &> {
 public:
   /// @brief Type alias for single qubit quantum kernels
   using one_qubit_encoding = cudaq::qkernel<void(patch)>;

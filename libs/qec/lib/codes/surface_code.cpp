@@ -401,6 +401,6 @@ std::size_t surface_code::get_num_z_stabilizers() const {
 }
 
 /// @brief Register the surace_code type
-CUDAQ_REGISTER_TYPE(surface_code)
+CUDAQ_REGISTER_EXTENSION(surface_code)
 
 } // namespace cudaq::qec::surface_code

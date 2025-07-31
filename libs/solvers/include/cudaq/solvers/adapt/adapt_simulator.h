@@ -38,12 +38,12 @@ public:
   /// @brief Creator function for the simulator implementation
   /// @details This function is used by the extension point mechanism to create
   /// instances of the simulator class.
-  CUDAQ_EXTENSION_CREATOR_FUNCTION(adapt_impl, simulator);
+  CUDAQ_ADD_EXTENSION_CREATOR_FUNCTION(adapt_impl, simulator);
 
   virtual ~simulator() {}
 };
 
 /// @brief Register the simulator type with the CUDA-Q framework
-CUDAQ_REGISTER_TYPE(simulator)
+CUDAQ_REGISTER_EXTENSION(simulator)
 
 } // namespace cudaq::solvers::adapt

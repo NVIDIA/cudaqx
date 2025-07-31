@@ -36,7 +36,7 @@ struct observe_iteration {
 /// used in global optimization of expectation values in
 /// typical quantum variational tasks.
 class observe_gradient
-    : public cudaqx::extension_point<
+    : public cudaq::extension_point<
           observe_gradient, const ParameterizedKernel &, const spin_op &> {
 protected:
   /// The spin operator used in computing expectation values
@@ -110,9 +110,8 @@ public:
   static std::unique_ptr<observe_gradient>
   get(const std::string &name, const ParameterizedKernel &kernel,
       const spin_op &op) {
-    return cudaqx::extension_point<observe_gradient,
-                                   const ParameterizedKernel &,
-                                   const spin_op &>::get(name, kernel, op);
+    return cudaq::extension_point<observe_gradient, const ParameterizedKernel &,
+                                  const spin_op &>::get(name, kernel, op);
   }
 
   void set_spin_op(const spin_op in_op) { op = in_op; }

@@ -7,26 +7,27 @@
  ******************************************************************************/
 #pragma once
 
-#include "extension_point.h"
+#include "cudaq/utils/extension_point.h"
 
 #include <complex>
 #include <iostream>
 #include <memory>
 #include <numeric>
 #include <vector>
+
 namespace cudaqx::details {
 
 /// @brief Implementation class for tensor operations following the PIMPL idiom
 template <typename Scalar = std::complex<double>>
 class tensor_impl
-    : public cudaqx::extension_point<tensor_impl<Scalar>, const Scalar *,
-                                     const std::vector<std::size_t>> {
+    : public cudaq::extension_point<tensor_impl<Scalar>, const Scalar *,
+                                    const std::vector<std::size_t>> {
 public:
   /// @brief Type alias for the scalar type used in the tensor
   using scalar_type = Scalar;
   using BaseExtensionPoint =
-      cudaqx::extension_point<tensor_impl<Scalar>, const Scalar *,
-                              const std::vector<std::size_t>>;
+      cudaq::extension_point<tensor_impl<Scalar>, const Scalar *,
+                             const std::vector<std::size_t>>;
 
   /// @brief Create a tensor implementation with the given name and shape
   /// @param name The name of the tensor implementation

@@ -11,7 +11,7 @@
 #include <fstream>
 #include <iostream>
 
-INSTANTIATE_REGISTRY_NO_ARGS(cudaq::solvers::MoleculePackageDriver)
+CUDAQ_INSTANTIATE_REGISTRY_NO_ARGS(cudaq::solvers::MoleculePackageDriver)
 
 namespace cudaq::solvers {
 

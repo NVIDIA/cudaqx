@@ -11,4 +11,4 @@
 
 #include "cudaq/solvers/adapt.h"
 
-INSTANTIATE_REGISTRY_NO_ARGS(cudaq::solvers::adapt::adapt_impl)
+CUDAQ_INSTANTIATE_REGISTRY_NO_ARGS(cudaq::solvers::adapt::adapt_impl)

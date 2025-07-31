@@ -43,7 +43,7 @@ public:
 class RESTPySCFDriver : public MoleculePackageDriver {
 
 public:
-  CUDAQ_EXTENSION_CREATOR_FUNCTION(MoleculePackageDriver, RESTPySCFDriver)
+  CUDAQ_ADD_EXTENSION_CREATOR_FUNCTION(MoleculePackageDriver, RESTPySCFDriver)
 
   bool is_available() const override {
     cudaq::RestClient client;
@@ -191,6 +191,6 @@ public:
                                  num_electrons,   numOrb, energies};
   }
 };
-CUDAQ_REGISTER_TYPE(RESTPySCFDriver)
+CUDAQ_REGISTER_EXTENSION(RESTPySCFDriver)
 
 } // namespace cudaq::solvers

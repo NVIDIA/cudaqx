@@ -19,6 +19,8 @@ target_include_directories(cudaqx-core
 )
 
 target_link_libraries(cudaqx-core
+  PUBLIC     
+    cudaq::cudaq
   PRIVATE
     xtensor
     xtensor-blas

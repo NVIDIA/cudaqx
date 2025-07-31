@@ -23,7 +23,7 @@ public:
                           const cudaqx::tensor<> &hpqrs,
                           const cudaqx::heterogeneous_map &options) override;
 
-  CUDAQ_EXTENSION_CREATOR_FUNCTION(fermion_compiler, bravyi_kitaev)
+  CUDAQ_ADD_EXTENSION_CREATOR_FUNCTION(fermion_compiler, bravyi_kitaev)
 };
-CUDAQ_REGISTER_TYPE(bravyi_kitaev)
+CUDAQ_REGISTER_EXTENSION(bravyi_kitaev)
 } // namespace cudaq::solvers

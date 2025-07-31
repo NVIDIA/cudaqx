@@ -152,7 +152,7 @@ public:
 
   virtual ~single_error_lut() {}
 
-  CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
+  CUDAQ_ADD_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       single_error_lut, static std::unique_ptr<decoder> create(
                             const cudaqx::tensor<uint8_t> &H,
                             const cudaqx::heterogeneous_map &params) {
@@ -160,6 +160,6 @@ public:
       })
 };
 
-CUDAQ_REGISTER_TYPE(single_error_lut)
+CUDAQ_REGISTER_EXTENSION(single_error_lut)
 
 } // namespace cudaq::qec

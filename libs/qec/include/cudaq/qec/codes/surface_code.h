@@ -264,7 +264,7 @@ public:
   // Grid constructor would be useful
 
   /// @brief Extension creator function for the surface_code
-  CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
+  CUDAQ_ADD_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       surface_code, static std::unique_ptr<cudaq::qec::code> create(
                         const cudaqx::heterogeneous_map &options) {
         return std::make_unique<surface_code>(options);

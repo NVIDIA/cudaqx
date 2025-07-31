@@ -7,4 +7,4 @@
  ******************************************************************************/
 #include "cudaq/solvers/operators/molecule/fermion_compiler.h"
 
-INSTANTIATE_REGISTRY_NO_ARGS(cudaq::solvers::fermion_compiler)
+CUDAQ_INSTANTIATE_REGISTRY_NO_ARGS(cudaq::solvers::fermion_compiler)

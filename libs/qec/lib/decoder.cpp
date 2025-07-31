@@ -15,9 +15,9 @@
 #include <filesystem>
 #include <vector>
 
-INSTANTIATE_REGISTRY(cudaq::qec::decoder, const cudaqx::tensor<uint8_t> &)
-INSTANTIATE_REGISTRY(cudaq::qec::decoder, const cudaqx::tensor<uint8_t> &,
-                     const cudaqx::heterogeneous_map &)
+CUDAQ_INSTANTIATE_REGISTRY(cudaq::qec::decoder, const cudaqx::tensor<uint8_t> &)
+CUDAQ_INSTANTIATE_REGISTRY(cudaq::qec::decoder, const cudaqx::tensor<uint8_t> &,
+                           const cudaqx::heterogeneous_map &)
 
 namespace cudaq::qec {
 

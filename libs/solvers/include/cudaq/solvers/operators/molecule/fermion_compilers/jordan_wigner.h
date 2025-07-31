@@ -18,7 +18,7 @@ public:
                           const cudaqx::tensor<> &hpqrs,
                           const cudaqx::heterogeneous_map &options) override;
 
-  CUDAQ_EXTENSION_CREATOR_FUNCTION(fermion_compiler, jordan_wigner)
+  CUDAQ_ADD_EXTENSION_CREATOR_FUNCTION(fermion_compiler, jordan_wigner)
 };
-CUDAQ_REGISTER_TYPE(jordan_wigner)
+CUDAQ_REGISTER_EXTENSION(jordan_wigner)
 } // namespace cudaq::solvers

@@ -30,7 +30,7 @@ public:
   optimize(std::size_t dim, const optimizable_function &opt_function,
            const cudaqx::heterogeneous_map &options) override;
 
-  CUDAQ_EXTENSION_CREATOR_FUNCTION(optimizer, lbfgs)
+  CUDAQ_ADD_EXTENSION_CREATOR_FUNCTION(optimizer, lbfgs)
 };
-CUDAQ_REGISTER_TYPE(lbfgs)
+CUDAQ_REGISTER_EXTENSION(lbfgs)
 } // namespace cudaq::optim

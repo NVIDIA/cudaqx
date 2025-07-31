@@ -8,7 +8,7 @@
 
 #include "cudaq/solvers/operators/operator_pool.h"
 
-INSTANTIATE_REGISTRY_NO_ARGS(cudaq::solvers::operator_pool)
+CUDAQ_INSTANTIATE_REGISTRY_NO_ARGS(cudaq::solvers::operator_pool)
 
 namespace cudaq::solvers {
 std::vector<cudaq::spin_op>

@@ -76,7 +76,7 @@ public:
   repetition(const heterogeneous_map &);
 
   /// @brief Factory function to create repetition code instances
-  CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
+  CUDAQ_ADD_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       repetition, static std::unique_ptr<cudaq::qec::code> create(
                       const cudaqx::heterogeneous_map &options) {
         return std::make_unique<repetition>(options);

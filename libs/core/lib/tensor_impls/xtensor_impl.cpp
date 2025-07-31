@@ -296,7 +296,7 @@ public:
   /// @param d Pointer to the tensor data
   /// @param s Shape of the tensor
   /// @return A unique pointer to the created xtensor object
-  CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION_WITH_NAME(
+  CUDAQ_ADD_EXTENSION_CUSTOM_CREATOR_FUNCTION_WITH_NAME(
       xtensor<Scalar>, std::string("xtensor") + std::string(ScalarAsString),
       static std::unique_ptr<cudaqx::details::tensor_impl<Scalar>> create(
           const Scalar *d, const std::vector<std::size_t> s) {
@@ -310,11 +310,13 @@ public:
   }
 };
 
+} // namespace cudaqx
+
 /// @brief Register the xtensor types
 
 #define INSTANTIATE_REGISTRY_TENSOR_IMPL(TYPE)                                 \
-  INSTANTIATE_REGISTRY(cudaqx::details::tensor_impl<TYPE>, const TYPE *,       \
-                       const std::vector<std::size_t>)
+  CUDAQ_INSTANTIATE_REGISTRY(cudaqx::details::tensor_impl<TYPE>, const TYPE *, \
+                             const std::vector<std::size_t>)
 
 INSTANTIATE_REGISTRY_TENSOR_IMPL(std::complex<double>)
 INSTANTIATE_REGISTRY_TENSOR_IMPL(std::complex<float>)
@@ -324,6 +326,7 @@ INSTANTIATE_REGISTRY_TENSOR_IMPL(double)
 INSTANTIATE_REGISTRY_TENSOR_IMPL(float)
 INSTANTIATE_REGISTRY_TENSOR_IMPL(std::size_t)
 
+namespace cudaqx {
 template <>
 const bool xtensor<std::complex<double>>::registered_ =
     xtensor<std::complex<double>>::register_type();

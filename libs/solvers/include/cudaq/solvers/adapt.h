@@ -62,7 +62,7 @@ using result =
     std::tuple<double, std::vector<double>, std::vector<cudaq::spin_op>>;
 
 /// Abstract base class for ADAPT-VQE implementation
-class adapt_impl : public cudaqx::extension_point<adapt_impl> {
+class adapt_impl : public cudaq::extension_point<adapt_impl> {
 public:
   /// Run the ADAPT-VQE algorithm
   /// @param initState Initial state preparation quantum kernel

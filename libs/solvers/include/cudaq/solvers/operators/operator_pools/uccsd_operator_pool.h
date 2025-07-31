@@ -35,9 +35,9 @@ public:
   /// @brief Call to macro for defining the creator function for an extension
   /// @details This function is used by the extension point mechanism to create
   /// instances of the uccsd class.
-  CUDAQ_EXTENSION_CREATOR_FUNCTION(operator_pool, uccsd)
+  CUDAQ_ADD_EXTENSION_CREATOR_FUNCTION(operator_pool, uccsd)
 };
 /// @brief Register the uccsd extension type with the CUDA-Q framework
-CUDAQ_REGISTER_TYPE(uccsd)
+CUDAQ_REGISTER_EXTENSION(uccsd)
 
 } // namespace cudaq::solvers

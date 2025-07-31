@@ -24,7 +24,7 @@ public:
   void calculateGradient(const std::vector<double> &x, std::vector<double> &dx,
                          double exp_h) override;
 
-  CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
+  CUDAQ_ADD_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       central_difference,
       static std::unique_ptr<observe_gradient> create(
           const ParameterizedKernel &functor, const spin_op &op) {
@@ -32,6 +32,6 @@ public:
       })
 };
 
-CUDAQ_REGISTER_TYPE(central_difference)
+CUDAQ_REGISTER_EXTENSION(central_difference)
 
 } // namespace cudaq

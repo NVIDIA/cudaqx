@@ -11,8 +11,8 @@
 #include <cassert>
 #include <optional>
 
-#include "cuda-qx/core/extension_point.h"
 #include "cuda-qx/core/heterogeneous_map.h"
+#include "cudaq/utils/extension_point.h"
 
 using namespace cudaqx;
 
@@ -87,7 +87,7 @@ public:
 /// requires gradients or not. Parameterizing optimization strategies
 /// is left as a task for sub-types (things like initial parameters, max
 /// function evaluations, etc.).
-class optimizer : public cudaqx::extension_point<optimizer> {
+class optimizer : public cudaq::extension_point<optimizer> {
 public:
   virtual ~optimizer() = default;
 

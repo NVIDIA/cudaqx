@@ -8,4 +8,4 @@
 
 #include "cudaq/solvers/optimizer.h"
 
-INSTANTIATE_REGISTRY_NO_ARGS(cudaq::optim::optimizer)
+CUDAQ_INSTANTIATE_REGISTRY_NO_ARGS(cudaq::optim::optimizer)

@@ -132,7 +132,7 @@ public:
   steane(const heterogeneous_map &);
 
   /// @brief Extension creator function for the Steane code
-  CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
+  CUDAQ_ADD_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       steane, static std::unique_ptr<cudaq::qec::code> create(
                   const cudaqx::heterogeneous_map &options) {
         return std::make_unique<steane>(options);
