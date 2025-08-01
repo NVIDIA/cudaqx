@@ -10,11 +10,27 @@
 
 set -e
 
+# Parse command line arguments
+BLACKWELL_MODE=false
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --blackwell)
+            BLACKWELL_MODE=true
+            shift
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Usage: $0 [--blackwell]"
+            exit 1
+            ;;
+    esac
+done
+
 CURRENT_ARCH=$(uname -m)
 PY_TARGETS=("nvidia" "nvidia --option fp64", "qpp-cpu")
 CPP_TARGETS=("nvidia" "nvidia --target-option fp64", "qpp-cpu")
 
-FINAL_IMAGE="ghcr.io/nvidia/private/cuda-quantum:cu12-0.10.0-cudaqx-rc2"
+FINAL_IMAGE="ghcr.io/nvidia/private/cuda-quantum:cu12-0.12.0-cudaqx-rc2"
 
 # Function to run Python tests
 run_python_tests() {
@@ -45,14 +61,14 @@ run_python_tests() {
 test_examples() {
     local tag=$1
     local container_name="cudaqx-test-$(date +%s)"
-    
+
     echo "Testing examples in ${tag}..."
     # Start container with a command that keeps it running
     docker run --net=host -d -it --name ${container_name} --gpus all ${tag}
-    
+
     # Wait for container to be fully up
     sleep 2
-    
+
     # Verify container is running
     if ! docker ps | grep -q ${container_name}; then
         echo "Container failed to start properly"
@@ -61,6 +77,17 @@ test_examples() {
     fi
 
     num_failures=0
+
+    # Install PyTorch for Blackwell if flag is provided, otherwise use default packages
+    if [ "$BLACKWELL_MODE" = true ]; then
+        echo "Installing PyTorch for Blackwell mode..."
+        docker exec ${container_name} bash -c "pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/cu128"
+        # Install other required packages
+        docker exec ${container_name} bash -c "pip install 'lightning>=2.0.0' 'ml_collections>=0.1.0' 'mpi4py>=3.1.0' 'transformers>=4.30.0'"
+    else
+        # default package installation
+        docker exec ${container_name} bash -c "pip install 'torch>=2.0.0' 'lightning>=2.0.0' 'ml_collections>=0.1.0' 'mpi4py>=3.1.0' 'transformers>=4.30.0'"
+    fi
 
     # Run Python tests first
     if ! run_python_tests ${container_name} ${target}; then
@@ -71,7 +98,7 @@ test_examples() {
         # docker rm ${container_name}
         # return 1
     fi
-    
+
     # Run tests for each target
     for target in "${PY_TARGETS[@]}"; do
         echo "Testing with target: ${target}"
@@ -91,8 +118,8 @@ test_examples() {
                 echo "Skipping ${domain} Python examples - directory empty or not found"
             fi
         done
-    done 
-    
+    done
+
     for target in "${CPP_TARGETS[@]}"; do
 
         # Test C++ examples
@@ -116,7 +143,7 @@ test_examples() {
             fi
         done
     done
-    
+
     # Cleanup
     docker stop ${container_name}
     docker rm ${container_name}
@@ -126,6 +153,9 @@ test_examples() {
 
 # Main execution
 echo "Starting CUDA-Q image validation for ${CURRENT_ARCH}..."
+if [ "$BLACKWELL_MODE" = true ]; then
+    echo "Running in Blackwell mode with PyTorch installation"
+fi
 
 tag="${FINAL_IMAGE}"
 test_examples ${tag} || {
