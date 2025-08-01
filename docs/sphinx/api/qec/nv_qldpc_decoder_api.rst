@@ -94,4 +94,21 @@
         - `osd_batch_size` (int): Number of syndromes that will be decoded in
           parallel for OSD (defaults to the number of concurrent threads supported
           by the hardware)
+        - `iter_per_check` (int): Number of iterations between BP convergence checks
+          (defaults to 1, and max is `max_iterations`). Introduced in 0.4.0.
+        - `clip_value` (float): Value to clip the BP messages to. Should be a
+          non-negative value (defaults to 0.0, which disables clipping). Introduced in
+          0.4.0.
+        - `bp_method` (int): The BP method to use. 0 for sum-product, 1 for min-sum.
+          Defaults to 0. Introduced in 0.4.0.
+        - `scale_factor` (float): The scale factor to use for min-sum. Defaults to 1.0.
+          When set to 0.0, the scale factor is dynamically computed based on the
+          number of iterations. Introduced in 0.4.0.
+        - `opt_results` (heterogeneous_map): Optional results to return. This field can be
+          left empty if no additional results are desired. Choices are:
+            - `bp_llr_history` (int): Return the last `bp_llr_history` iterations
+              of the BP LLR history. Minimum value is 0 and maximum value is
+              max_iterations. The actual number of returned iterations might be fewer
+              than `bp_llr_history` if BP converges before the requested number of
+              iterations. Introduced in 0.4.0.
 

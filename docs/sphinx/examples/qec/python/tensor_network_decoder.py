@@ -9,7 +9,9 @@ import sys
 # Check Python version
 # Remove this check once the pipeline advances to Python 3.11
 if sys.version_info < (3, 11):
-    print("Skipping tensor network decoder example")
+    print(
+        "Warning: The tensor network decoder requires Python 3.11 or higher. Exiting..."
+    )
     sys.exit(0)
 
 # [Begin Documentation]
@@ -30,6 +32,13 @@ pip install stim beliefmatching
 """
 import cudaq_qec as qec
 import numpy as np
+
+import platform
+if platform.machine().lower() in ("arm64", "aarch64"):
+    print(
+        "Warning: stim is not supported on manylinux ARM64/aarch64. Skipping this example..."
+    )
+    sys.exit(0)
 
 import stim
 

@@ -17,6 +17,10 @@ not require a GPU to use, but some components are GPU-accelerated.
 - Real-time decoding capabilities for quantum feedback
 - Integration with CUDA-Q quantum program execution
 
+Note: if you would like to use our Tensor Network Decoder, you will need
+additional dependencies installed. You can install them with
+`pip install cudaq-qec[tensor_network_decoder]`.
+
 ## Getting Started
 
 For detailed documentation, tutorials, and API reference, visit the
