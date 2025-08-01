@@ -45,7 +45,6 @@ target_link_options(cudaq-solvers PUBLIC
 target_link_libraries(cudaq-solvers
   PUBLIC
     cudaqx-core
-    cudaq::cudaq
     cudaq::cudaq-operator
   PRIVATE
     cudaq::cudaq-common

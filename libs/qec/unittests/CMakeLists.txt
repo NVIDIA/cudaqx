@@ -32,12 +32,12 @@ include(GoogleTest)
 add_compile_options(-Wno-attributes) 
 
 add_executable(test_decoders test_decoders.cpp decoders/sample_decoder.cpp)
-target_link_libraries(test_decoders PRIVATE GTest::gtest_main cudaq-qec)
+target_link_libraries(test_decoders PRIVATE GTest::gtest_main cudaq-qec cudaq::cudaq)
 add_dependencies(CUDAQXQECUnitTests test_decoders)
 gtest_discover_tests(test_decoders)
 
 add_executable(test_qec test_qec.cpp)
-target_link_libraries(test_qec PRIVATE GTest::gtest_main cudaq-qec)
+target_link_libraries(test_qec PRIVATE GTest::gtest_main cudaq-qec cudaq::cudaq)
 add_dependencies(CUDAQXQECUnitTests test_qec)
 gtest_discover_tests(test_qec)
 

@@ -1,5 +1,5 @@
 # ============================================================================ #
-# Copyright (c) 2024 NVIDIA Corporation & Affiliates.                          #
+# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -32,7 +32,6 @@ target_include_directories(${MODULE_NAME}
 target_link_libraries(${MODULE_NAME}
   PUBLIC
     cudaqx-core
-    cudaq::cudaq
     cudaq::cudaq-operator
   PRIVATE
     cudaq::cudaq-common
