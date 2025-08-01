@@ -24,7 +24,7 @@ install individual components:
     # Install both libraries
     pip install cudaq-qec cudaq-solvers
 
-.. note:: 
+.. note::
 
     CUDA-Q Solvers will require the presence of :code:`libgfortran`, which is
     not distributed with the Python wheel, for provided classical optimizers. If
@@ -71,8 +71,8 @@ Before building CUDA-QX from source, ensure your system meets the following requ
 * **CUDA-Q**: The NVIDIA quantum-classical programming model
 * **CMake**: Version 3.28 or higher (``pip install "cmake<4"``), less than 4.0
 * **GCC**: Version 11 or higher
-* **Python**: Version 3.10, 3.11, or 3.12
-* **NVIDIA GPU**: CUDA-capable GPU with compute capability 12.0 or higher
+* **Python**: Version 3.10, 3.11, 3.12, or 3.13
+* **NVIDIA GPU**: CUDA-capable GPU with compute capability 7.0 or higher
 * **Git**: For cloning the repository
 
 Build Instructions
@@ -126,7 +126,7 @@ To verify your installation, run the following Python code:
 
 .. code-block:: python
 
-    import cudaq_qec as qec 
+    import cudaq_qec as qec
     import cudaq_solvers as solvers
 
 
@@ -161,4 +161,4 @@ Known Blackwell Issues
 
         python3 -m pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/cu128
 
-    torch is a dependency of the tensor network decoder and the GQE algorithm. 
+    torch is a dependency of the tensor network decoder and the GQE algorithm.
