@@ -11,22 +11,33 @@
 # python3 gqe_h2.py
 #
 # In order to leverage CUDA-Q MQPU and distribute the work across
-# multiple QPUs (thereby observing a speed-up), set the target and
-# use MPI:
-#
-# cudaq.set_target('nvidia', option='mqpu')
-# cudaq.mpi.initialize()
-#
-# run with
+# multiple QPUs (thereby observing a speed-up), run with:
 #
 # mpiexec -np N and vary N to see the speedup...
-# e.g. mpiexec -np 2 python3 gqe_h2.py
-#
-# End the script with
-# cudaq.mpi.finalize()
+# e.g. PMIX_MCA_gds=hash mpiexec -np 2 python3 gqe_h2.py --mpi
 
-import numpy as np
-import cudaq, cudaq_solvers as solvers
+import argparse, cudaq
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--mpi', action='store_true')
+args = parser.parse_args()
+
+if args.mpi:
+    try:
+        cudaq.set_target('nvidia', option='mqpu')
+        cudaq.mpi.initialize()
+    except RuntimeError:
+        print(
+            'Warning: NVIDIA GPUs or MPI not available, unable to use CUDA-Q MQPU. Skipping...'
+        )
+        exit(0)
+else:
+    try:
+        cudaq.set_target('nvidia', option='fp64')
+    except RuntimeError:
+        cudaq.set_target('qpp-cpu')
+
+import cudaq_solvers as solvers
 from cudaq import spin
 
 from lightning.fabric.loggers import CSVLogger
@@ -41,13 +52,6 @@ torch.manual_seed(3047)
 torch.use_deterministic_algorithms(True)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
-
-# Check if NVIDIA GPUs are available and set target accordingly
-try:
-    cudaq.set_target('nvidia', option='fp64')
-except RuntimeError:
-    # Fall back to CPU target
-    cudaq.set_target('qpp-cpu')
 
 # Create the molecular hamiltonian
 geometry = [('H', (0., 0., 0.)), ('H', (0., 0., .7474))]
@@ -147,35 +151,39 @@ def cost(sampled_ops: list[cudaq.SpinOperator], **kwargs):
         full_coeffs += [c.real for c in term_coefficients(op)]
         full_words += term_words(op)
 
-    # If using CUDA-Q MQPU,
-    # use observe_async with the provided qpu_id:
-    # handle = cudaq.observe_async(kernel,
-    #                             spin_ham,
-    #                             n_qubits,
-    #                             n_electrons,
-    #                             full_coeffs,
-    #                             full_words,
-    #                             qpu_id=kwargs['qpu_id'])
-    # return handle, lambda res: res.get().expectation()
-
-    return cudaq.observe(kernel, spin_ham, n_qubits, n_electrons, full_coeffs,
-                         full_words).expectation()
+    if args.mpi:
+        handle = cudaq.observe_async(kernel,
+                                     spin_ham,
+                                     n_qubits,
+                                     n_electrons,
+                                     full_coeffs,
+                                     full_words,
+                                     qpu_id=kwargs['qpu_id'])
+        return handle, lambda res: res.get().expectation()
+    else:
+        return cudaq.observe(kernel, spin_ham, n_qubits, n_electrons,
+                             full_coeffs, full_words).expectation()
 
 
 # Configure GQE
 cfg = get_default_config()
-cfg.use_fabric_logging = True
+cfg.use_fabric_logging = False
 logger = CSVLogger("gqe_h2_logs/gqe.csv")
 cfg.fabric_logger = logger
-cfg.save_trajectory = True
+cfg.save_trajectory = False
 cfg.verbose = True
 
 # Run GQE
 minE, best_ops = solvers.gqe(cost, op_pool, max_iters=25, ngates=10, config=cfg)
 
-print(f'Ground Energy = {minE}')
-print('Ansatz Ops')
-for idx in best_ops:
-    # Get the first (and only) term since these are simple operators
-    term = next(iter(op_pool[idx]))
-    print(term.evaluate_coefficient().real, term.get_pauli_word(n_qubits))
+# Only print results from rank 0 when using MPI
+if not args.mpi or cudaq.mpi.rank() == 0:
+    print(f'Ground Energy = {minE}')
+    print('Ansatz Ops')
+    for idx in best_ops:
+        # Get the first (and only) term since these are simple operators
+        term = next(iter(op_pool[idx]))
+        print(term.evaluate_coefficient().real, term.get_pauli_word(n_qubits))
+
+if args.mpi:
+    cudaq.mpi.finalize()
