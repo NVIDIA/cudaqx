@@ -119,6 +119,14 @@ protected:
   /// @return Number of data qubits (3 for Steane code)
   std::size_t get_num_ancilla_z_qubits() const override { return 3; }
 
+  /// @brief Get number of X stabilizer that can be measured
+  /// @return Number of X-type stabilizers
+  std::size_t get_num_x_stabilizers() const override { return 3; }
+
+  /// @brief Get number of Z stabilizer that can be measured
+  /// @return Number of Z-type stabilizers
+  std::size_t get_num_z_stabilizers() const override { return 3; }
+
 public:
   /// @brief Constructor for the Steane code
   steane(const heterogeneous_map &);

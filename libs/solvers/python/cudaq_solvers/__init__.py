@@ -8,3 +8,12 @@
 
 from ._pycudaqx_solvers_the_suffix_matters_cudaq_solvers import *
 from ._pycudaqx_solvers_the_suffix_matters_cudaq_solvers import __version__
+try:
+    from .gqe_algorithm.gqe import gqe
+except ImportError:
+
+    def gqe(*args, **kwargs):
+        raise ImportError(
+            "Failed to load GQE solver due to missing dependencies. "
+            "Recommend installing the required dependencies with: "
+            "'pip install cudaq-solvers[gqe]'")

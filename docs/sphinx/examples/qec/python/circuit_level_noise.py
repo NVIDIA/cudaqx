@@ -12,26 +12,21 @@ import cudaq_qec as qec
 
 # Get a QEC code
 cudaq.set_target("stim")
-steane = qec.get_code("steane")
+distance = 5
+surface_code = qec.get_code("surface_code", distance=distance)
 
-# Get the parity check matrix of a code
-# Can get the full code, or for CSS codes
-# just the X or Z component
-H = steane.get_parity()
-print(f"H:\n{H}")
-observables = steane.get_pauli_observables_matrix()
-Lz = steane.get_observables_z()
-print(f"observables:\n{observables}")
+# Get the Z observables.
+Lz = surface_code.get_observables_z()
 print(f"Lz:\n{Lz}")
 
-nShots = 3
-nRounds = 4
+nShots = 1000
+nRounds = distance
 
 # Uncomment for repeatability
 # cudaq.set_random_seed(13)
 
 # error probability
-p = 0.01
+p = 0.001
 noise = cudaq.NoiseModel()
 noise.add_all_qubit_channel("x", cudaq.Depolarization2(p), 1)
 
@@ -40,21 +35,23 @@ statePrep = qec.operation.prep0
 # our expected measurement in this state is 0
 expected_value = 0
 
+# Get the detector error model for this circuit.
+dem = qec.z_dem_from_memory_circuit(surface_code, statePrep, nRounds, noise)
+
 # For large runs, set verbose to False to suppress output
 verbose = nShots <= 10
 
-# sample the steane memory circuit with noise on each cx gate
-# reading out the syndromes after each stabilizer round (xor'd against the previous)
-# and readout out the data qubits at the end of the experiment
-syndromes, data = qec.sample_memory_circuit(steane, statePrep, nShots, nRounds,
-                                            noise)
+# Sample the surface code memory circuit with noise on each cx gate
+syndromes, data = qec.sample_memory_circuit(surface_code, statePrep, nShots,
+                                            nRounds, noise)
+
 if verbose:
     print("From sample function:\n")
     print("syndromes:\n", syndromes)
     print("data:\n", data)
 
 # Get a decoder
-decoder = qec.get_decoder("single_error_lut", H)
+decoder = qec.get_decoder("single_error_lut", dem.detector_error_matrix)
 nLogicalErrors = 0
 
 # Logical Mz each shot (use Lx if preparing in X-basis)
@@ -64,46 +61,21 @@ logical_measurements = logical_measurements.flatten()
 if verbose:
     print("LMz:\n", logical_measurements)
 
-# organize data by shot and round if desired
-syndromes = syndromes.reshape((nShots, nRounds, syndromes.shape[1]))
+# Reshape and drop the X stabilizers, keeping just the Z stabilizers (since this is prep0)
+syndromes = syndromes.reshape((nShots, nRounds, -1))
+syndromes = syndromes[:, :, :syndromes.shape[2] // 2]
+# Now flatten to two dimensions again
+syndromes = syndromes.reshape((nShots, -1))
 
-# initialize a Pauli frame to track logical flips
-# through the stabilizer rounds
-pauli_frame = np.array([0, 0], dtype=np.uint8)
-for shot in range(0, nShots):
-    if verbose:
-        print("shot:", shot)
-    for syndrome in syndromes[shot]:
-        if verbose:
-            print("syndrome:", syndrome)
-        # Decode the syndrome
-        results = decoder.decode(syndrome)
-        convergence = results.converged
-        result = results.result
-        data_prediction = np.array(result, dtype=np.uint8)
+dr = decoder.decode_batch(syndromes)
+error_predictions = np.array([e.result for e in dr], dtype=np.uint8)
+data_predictions = (dem.observables_flips_matrix @ error_predictions.T) % 2
 
-        # see if the decoded result anti-commutes with the observables
-        if verbose:
-            print("decode result:", data_prediction)
-        decoded_observables = (observables @ data_prediction) % 2
-        if verbose:
-            print("decoded_observables:", decoded_observables)
-
-        # update pauli frame
-        pauli_frame = (pauli_frame + decoded_observables) % 2
-        if verbose:
-            print("pauli frame:", pauli_frame)
-
-    # after pauli frame has tracked corrections through the rounds
-    # apply the pauli frame correction to the measurement, and see
-    # if this matches the state we intended to prepare
-    # We prepared |0>, so we check if logical measurement Mz + Pf_X = 0
-    corrected_mz = (logical_measurements[shot] + pauli_frame[0]) % 2
-    if verbose:
-        print("Expected value:", expected_value)
-        print("Corrected value:", corrected_mz)
-    if (corrected_mz != expected_value):
-        nLogicalErrors += 1
-
-# Count how many shots the decoder failed to correct the errors
-print(f"Number of logical errors out of {nShots} shots: {nLogicalErrors}")
+nLogicalErrorsWithoutDecoding = np.sum(logical_measurements)
+nLogicalErrorsWithDecoding = np.sum(data_predictions ^ logical_measurements)
+print(
+    f'Number of logical errors without decoding (out of {nShots} shots): {nLogicalErrorsWithoutDecoding}'
+)
+print(
+    f'Number of logical errors with decoding    (out of {nShots} shots): {nLogicalErrorsWithDecoding}'
+)

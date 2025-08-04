@@ -10,6 +10,23 @@ import numpy as np
 import cudaq
 import cudaq_qec as qec
 
+import subprocess
+
+
+def is_nvidia_gpu_available():
+    """Check if NVIDIA GPU is available using nvidia-smi command."""
+    try:
+        result = subprocess.run(["nvidia-smi"],
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE,
+                                text=True)
+        if result.returncode == 0 and "GPU" in result.stdout:
+            return True
+    except FileNotFoundError:
+        # The nvidia-smi command is not found, indicating no NVIDIA GPU drivers
+        return False
+    return False
+
 
 # Helper function to convert a binary matrix to a convenient string
 def mat_to_str(mat):
@@ -93,6 +110,32 @@ def test_dem_from_memory_circuit():
         dem.observables_flips_matrix) == expected_observables_flips_matrix
 
 
+def test_x_dem_from_memory_circuit():
+    code = qec.get_code('steane')
+    p = 0.01
+    noise = cudaq.NoiseModel()
+    # X stabilizers detect Z errors, but we need X errors for X basis prep
+    noise.add_all_qubit_channel("x", cudaq.Depolarization2(p), 1)
+    statePrep = qec.operation.prepp  # X basis preparation
+    nRounds = 2
+
+    dem = qec.x_dem_from_memory_circuit(code, statePrep, nRounds, noise)
+
+    # X DEM should have different structure from Z DEM
+    # Verify basic properties
+    assert dem.detector_error_matrix.shape[0] > 0
+    assert dem.detector_error_matrix.shape[1] > 0
+    assert len(dem.error_rates) == dem.detector_error_matrix.shape[1]
+    assert dem.observables_flips_matrix.shape[0] > 0
+    assert dem.observables_flips_matrix.shape[
+        1] == dem.detector_error_matrix.shape[1]
+
+    # Error rates should be positive
+    assert all(rate >= 0 for rate in dem.error_rates)
+    # At least some non-zero rates
+    assert any(rate > 0 for rate in dem.error_rates)
+
+
 def test_decoding_from_dem_from_memory_circuit():
     cudaq.set_random_seed(13)
     code = qec.get_code('steane')
@@ -143,6 +186,10 @@ def test_decoding_from_dem_from_memory_circuit():
     ])
 def test_decoding_from_surface_code_dem_from_memory_circuit(
         decoder_name, error_rate):
+    # If this machine only has a CPU, then skip the nv-qldpc-decoder test.
+    if decoder_name == "nv-qldpc-decoder" and not is_nvidia_gpu_available():
+        pytest.skip("nv-qldpc-decoder requires a GPU")
+
     cudaq.set_random_seed(13)
     code = qec.get_code('surface_code', distance=5)
     Lz = code.get_observables_z()

@@ -63,6 +63,6 @@ to re-build CUDA-Q.
 
 The above instructions provide a fully open-source way of building and
 contributing to CUDA-QX, but it should be noted that while this environment
-will have many GPU-accelerated simulators installed it it, it won't contain the
+will have many GPU-accelerated simulators installed in it, it won't contain the
 *highest* performing CUDA-Q simulators. See [this note](https://nvidia.github.io/cuda-quantum/latest/using/install/data_center_install.html)
 for more details.

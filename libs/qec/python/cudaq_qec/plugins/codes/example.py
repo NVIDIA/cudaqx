@@ -55,6 +55,9 @@ class MySteaneCodeImpl:
             cudaq.SpinOperator.from_word(word) for word in
             ["XXXXIII", "IXXIXXI", "IIXXIXX", "ZZZZIII", "IZZIZZI", "IIZZIZZ"]
         ]
+        self.pauli_observables = [
+            cudaq.SpinOperator.from_word(p) for p in ["IIIIXXX", "IIIIZZZ"]
+        ]
         self.operation_encodings = {
             qec.operation.prep0: prep0,
             qec.operation.stabilizer_round: stabilizer
@@ -71,3 +74,9 @@ class MySteaneCodeImpl:
 
     def get_num_ancilla_qubits(self):
         return 6
+
+    def get_num_x_stabilizers(self):
+        return 3
+
+    def get_num_z_stabilizers(self):
+        return 3

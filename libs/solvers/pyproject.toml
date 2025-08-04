@@ -11,7 +11,7 @@ maintainers = [{name = "NVIDIA Corporation & Affiliates"}]
 requires-python = ">=3.10"
 readme = "README.md"
 dependencies = [
-  'cuda-quantum-cu12 >= 0.11',
+  'cuda-quantum-cu12 >= 0.12',
   'fastapi',
   'networkx',
   'pyscf',
@@ -26,6 +26,7 @@ classifiers = [
     'Programming Language :: Python :: 3.10',
     'Programming Language :: Python :: 3.11',
     'Programming Language :: Python :: 3.12',
+    'Programming Language :: Python :: 3.13',
     "Environment :: GPU :: NVIDIA CUDA",
     "Environment :: GPU :: NVIDIA CUDA :: 12",
     'Topic :: Software Development',
@@ -54,3 +55,12 @@ CUDAQX_SOLVERS_BINDINGS_PYTHON = true
 
 [tool.setuptools_scm]
 write_to = "_version.py"
+
+[project.optional-dependencies]
+gqe = [
+  'torch>=2.0.0',
+  'lightning>=2.0.0',
+  'ml_collections>=0.1.0',
+  'mpi4py>=3.1.0',
+  'transformers>=4.30.0',
+]

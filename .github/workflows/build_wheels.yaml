@@ -54,7 +54,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ['3.10', '3.11', '3.12']
+        python: ['3.10', '3.11', '3.12', '3.13']
         platform: ['amd64', 'arm64']
         toolchain:
           - id: cu12.0-gcc11
@@ -179,7 +179,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ['3.10', '3.11', '3.12']
+        python: ['3.10', '3.11', '3.12', '3.13']
         platform: ['amd64', 'arm64']
   
     steps:
@@ -196,7 +196,7 @@ jobs:
       - name: Install requirements
         run: |
           bash .github/workflows/scripts/install_git_cli.sh
-          apt install -y --no-install-recommends libgfortran5 unzip
+          apt install -y --no-install-recommends libgfortran5 unzip openmpi-bin libopenmpi3
   
       - name: Download CUDA-Q wheels
         if: ${{ inputs.cudaq_wheels == 'Custom' }}
@@ -242,7 +242,7 @@ jobs:
           { arch: arm64, gpu: a100 },
           { arch: amd64, gpu: v100 },
         ]
-        python: ['3.10', '3.11', '3.12']
+        python: ['3.10', '3.11', '3.12', '3.13']
   
     steps:
       - name: Get code
@@ -258,7 +258,7 @@ jobs:
       - name: Install requirements
         run: |
           bash .github/workflows/scripts/install_git_cli.sh
-          apt install -y --no-install-recommends libgfortran5 unzip
+          apt install -y --no-install-recommends libgfortran5 unzip openmpi-bin libopenmpi3
           #echo 'core.%p' | tee /proc/sys/kernel/core_pattern
           #echo "Running cat /proc/sys/kernel/core_pattern"
           #cat /proc/sys/kernel/core_pattern

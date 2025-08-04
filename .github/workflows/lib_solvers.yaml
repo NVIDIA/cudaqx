@@ -12,7 +12,7 @@ jobs:
       matrix:
         platform: ['amd64', 'arm64']
     runs-on: ${{ startsWith(github.repository, 'NVIDIA/cudaqx') && format('linux-{0}-cpu8', matrix.platform) || 'ubuntu-latest' }}
-    container: ghcr.io/nvidia/cuda-quantum-devdeps:ext-cu12.0-gcc11-main
+    container: ghcr.io/nvidia/cuda-quantum-devdeps:ext-${{ matrix.platform }}-cu12.0-gcc11-main
     permissions:
       actions: write
       contents: read
@@ -71,18 +71,24 @@ jobs:
       # ========================================================================
       # Run tests
       # ========================================================================
-      #
+      
       - name: Run tests
         run: cmake --build ${{ steps.build.outputs.build-dir }} --target run_tests
 
       # ========================================================================
       # Run python tests
       # ========================================================================
- 
+
       - name: Install python requirements
-        run: pip install numpy pytest cupy-cuda12x cuquantum-python-cu12
+        env:
+          LD_LIBRARY_PATH: ${{ env.MPI_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
+        run: pip install numpy pytest cupy-cuda12x cuquantum-cu12 torch lightning ml_collections mpi4py transformers pytest
+
 
       - name: Run Python tests
+        env:
+          LD_LIBRARY_PATH: ${{ env.MPI_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
+          OMPI_MCA_pml: ob1
         run: cmake --build ${{ steps.build.outputs.build-dir }} --target run_python_tests
 
       # ========================================================================
@@ -90,4 +96,7 @@ jobs:
       # ========================================================================
 
       - name: Run example tests
+        env:
+          LD_LIBRARY_PATH: ${{ env.MPI_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
+          OMPI_MCA_pml: ob1
         run: bash scripts/ci/test_examples.sh solvers
