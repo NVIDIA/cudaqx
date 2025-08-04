@@ -110,6 +110,32 @@ def test_dem_from_memory_circuit():
         dem.observables_flips_matrix) == expected_observables_flips_matrix
 
 
+def test_x_dem_from_memory_circuit():
+    code = qec.get_code('steane')
+    p = 0.01
+    noise = cudaq.NoiseModel()
+    # X stabilizers detect Z errors, but we need X errors for X basis prep
+    noise.add_all_qubit_channel("x", cudaq.Depolarization2(p), 1)
+    statePrep = qec.operation.prepp  # X basis preparation
+    nRounds = 2
+
+    dem = qec.x_dem_from_memory_circuit(code, statePrep, nRounds, noise)
+
+    # X DEM should have different structure from Z DEM
+    # Verify basic properties
+    assert dem.detector_error_matrix.shape[0] > 0
+    assert dem.detector_error_matrix.shape[1] > 0
+    assert len(dem.error_rates) == dem.detector_error_matrix.shape[1]
+    assert dem.observables_flips_matrix.shape[0] > 0
+    assert dem.observables_flips_matrix.shape[
+        1] == dem.detector_error_matrix.shape[1]
+
+    # Error rates should be positive
+    assert all(rate >= 0 for rate in dem.error_rates)
+    # At least some non-zero rates
+    assert any(rate > 0 for rate in dem.error_rates)
+
+
 def test_decoding_from_dem_from_memory_circuit():
     cudaq.set_random_seed(13)
     code = qec.get_code('steane')
