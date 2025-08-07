@@ -91,11 +91,3 @@ for domain in "solvers" "qec"; do
     shopt -u nullglob  # reset setting, just for cleanliness
     cd - # back to the original directory
 done
-
-
-
-
-
-
-
-
