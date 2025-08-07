@@ -81,6 +81,17 @@ if [[ "$LIB" == "solvers" || "$LIB" == "all" ]]; then
     for file in examples/solvers/python/*.py; do
         run_python_test "$file"
     done
+
+    # Test python examples with MPI option
+    for file in examples/solvers/python/*.py; do
+        if echo "$file" | grep -qi "mpi"; then
+            echo "Running MPI example: $file"
+            # Run MPI using CUDAQ MPI
+            python3 "$file" --mpi
+            # Repeat using MPI Python API
+            PMIX_MCA_gds=hash mpiexec -np 1 --allow-run-as-root python3 $file --mpi
+        fi
+    done
     
     for file in examples/solvers/cpp/*.cpp; do
         run_cpp_test "$file" "-lcudaq-solvers"
