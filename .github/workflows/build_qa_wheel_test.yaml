@@ -46,7 +46,7 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          username: ${{ github.actor }}
+          username: ${{ secrets.PACKAGE_USER || github.actor }}
           password: ${{ secrets.PACKAGE_TOKEN }}
 
       # Do this early to help validate user inputs (if present)

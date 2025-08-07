@@ -1,5 +1,5 @@
 # ============================================================================ #
-# Copyright (c) 2024 NVIDIA Corporation & Affiliates.                          #
+# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -32,7 +32,6 @@ cudaqx_add_pymodule(${MODULE_NAME}
 target_link_libraries(${MODULE_NAME} 
   PRIVATE 
     cudaq-qec
-    cudaq::cudaq
 )
 
 set_target_properties(${MODULE_NAME} PROPERTIES
