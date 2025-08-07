@@ -52,6 +52,7 @@ else
 fi
 ${python} -m pytest -v -s libs/qec/python/tests/
 
+
 # Solvers library
 # ======================================
 # Test the base solvers library without optional dependencies
@@ -64,3 +65,34 @@ ${python} -m pytest -v -s libs/solvers/python/tests/ --ignore=libs/solvers/pytho
 echo "Installing Solvers library with GQE"
 ${python} -m pip install "${solver_wheel}[gqe]"
 ${python} -m pytest -v -s libs/solvers/python/tests/test_gqe.py
+
+# Test the libraries with examples
+# ======================================
+echo "Testing libraries with examples"
+echo "Listing the directories"
+ls -l $PWD
+echo "Now begin testing examples"
+
+for domain in "solvers" "qec"; do
+    echo "Testing ${domain} Python examples with Python ${python_version} ..."
+    cd examples/${domain}/python
+    shopt -s nullglob # don't throw errors if no Python files exist
+    for f in *.py; do \
+        echo Testing $f...; \
+        ${python} $f 
+        res=$?
+        if [ $res -ne 0 ]; then
+            echo "Python tests failed for ${domain} with Python ${python_version}: $res"
+        fi
+    done
+    shopt -u nullglob  # reset setting, just for cleanliness
+    cd - # back to the original directory
+done
+
+
+
+
+
+
+
+
