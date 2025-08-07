@@ -72,8 +72,8 @@ echo "Testing libraries with examples"
 
 # Install stim for AMD platform for tensor network decoder examples
 if echo $platform | grep -qi "amd64"; then
-  echo "Installing stim for AMD64 platform"
-  ${python} -m pip install stim
+  echo "Installing stim and beliefmatching for AMD64 platform"
+  ${python} -m pip install stim beliefmatching
 fi
 
 for domain in "solvers" "qec"; do
