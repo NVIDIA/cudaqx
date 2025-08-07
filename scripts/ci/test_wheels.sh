@@ -19,6 +19,7 @@ set -e
 python_version=$1
 python_version_no_dot=$(echo $python_version | tr -d '.') # 3.10 --> 310
 python=python${python_version}
+platform=$2
 
 ${python} -m pip install --no-cache-dir pytest
 
@@ -52,7 +53,6 @@ else
 fi
 ${python} -m pytest -v -s libs/qec/python/tests/
 
-
 # Solvers library
 # ======================================
 # Test the base solvers library without optional dependencies
@@ -69,9 +69,12 @@ ${python} -m pytest -v -s libs/solvers/python/tests/test_gqe.py
 # Test the libraries with examples
 # ======================================
 echo "Testing libraries with examples"
-echo "Listing the directories"
-ls -l $PWD
-echo "Now begin testing examples"
+
+# Install stim for AMD platform for tensor network decoder examples
+if echo $platform | grep -qi "amd64"; then
+  echo "Installing stim for AMD64 platform"
+  ${python} -m pip install stim
+fi
 
 for domain in "solvers" "qec"; do
     echo "Testing ${domain} Python examples with Python ${python_version} ..."

@@ -218,7 +218,7 @@ jobs:
       - name: Test wheels
         run: |
           ls /wheels
-          bash scripts/ci/test_wheels.sh ${{ matrix.python }}
+          bash scripts/ci/test_wheels.sh ${{ matrix.python }} ${{ matrix.platform }}
   
   test-wheels-gpu:
     name: Test CUDA-QX wheels (GPU)
@@ -283,7 +283,7 @@ jobs:
       - name: Test wheels
         run: |
           ls /wheels
-          bash scripts/ci/test_wheels.sh ${{ matrix.python }}
+          bash scripts/ci/test_wheels.sh ${{ matrix.python }} ${{ matrix.runner.arch }}
 
       # - name: Upload any core files
       #   if: success() || failure()
