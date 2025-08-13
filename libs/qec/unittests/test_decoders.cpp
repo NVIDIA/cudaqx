@@ -22,6 +22,11 @@ TEST(DecoderUtils, CovertHardToSoft) {
   for (int i = 0; i < out.size(); i++)
     ASSERT_EQ(out[i], expected_out[i]);
 
+  cudaq::qec::convert_vec_hard_to_soft(in.data(), in.size(), out);
+  ASSERT_EQ(out.size(), expected_out.size());
+  for (int i = 0; i < out.size(); i++)
+    ASSERT_EQ(out[i], expected_out[i]);
+
   expected_out = {0.9, 0.1, 0.9, 0.9};
   cudaq::qec::convert_vec_hard_to_soft(in, out, 0.9f, 0.1f);
   ASSERT_EQ(out.size(), expected_out.size());

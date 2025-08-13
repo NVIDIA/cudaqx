@@ -1,5 +1,5 @@
 # ============================================================================ #
-# Copyright (c) 2024 NVIDIA Corporation & Affiliates.                          #
+# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -43,6 +43,9 @@ resulting object files to the specified library target.
 Note: This function assumes that the CUDAQ_INSTALL_DIR variable is set
 to the CUDAQ installation directory.
 
+Note: You can use DEPENDS_ON if you want to delay compilation until some other
+target has been built.
+
 Example usage:
   cudaqx_add_device_code(
     my_library
@@ -52,13 +55,15 @@ Example usage:
     COMPILER_FLAGS
       --enable-mlir
       -v
+    DEPENDS_ON
+      SomeOtherTarget
   )
 
 #]=======================================================================]
 function(cudaqx_add_device_code LIBRARY_NAME)
   set(options)
   set(oneValueArgs)
-  set(multiValueArgs SOURCES COMPILER_FLAGS)
+  set(multiValueArgs SOURCES COMPILER_FLAGS DEPENDS_ON)
   cmake_parse_arguments(ARGS "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
   if(NOT DEFINED CUDAQ_INSTALL_DIR)
@@ -83,7 +88,7 @@ function(cudaqx_add_device_code LIBRARY_NAME)
   set(prop "$<TARGET_PROPERTY:${LIBRARY_NAME},INCLUDE_DIRECTORIES>")
   foreach(source ${ARGS_SOURCES})
     get_filename_component(filename ${source} NAME_WE)
-    set(output_file "${CMAKE_CURRENT_BINARY_DIR}/${filename}.o")
+    set(output_file "${CMAKE_CURRENT_BINARY_DIR}/${LIBRARY_NAME}_${filename}.o")
     cmake_path(GET output_file FILENAME baseName)
 
     add_custom_command(
@@ -92,15 +97,15 @@ function(cudaqx_add_device_code LIBRARY_NAME)
         ${ARGS_COMPILER_FLAGS} -c -fPIC --enable-mlir
         ${CMAKE_CURRENT_SOURCE_DIR}/${source} -o ${baseName}
         "$<$<BOOL:${prop}>:-I $<JOIN:${prop}, -I >>"
-      DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${source}
+      DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${source} ${ARGS_DEPENDS_ON}
       COMMENT "Compiling ${source} with nvq++"
       VERBATIM
     )
 
     list(APPEND object_files ${output_file})
-    list(APPEND custom_targets ${filename}_target)
+    list(APPEND custom_targets ${LIBRARY_NAME}_${filename}_target)
 
-    add_custom_target(${filename}_target DEPENDS ${output_file})
+    add_custom_target(${LIBRARY_NAME}_${filename}_target DEPENDS ${output_file})
   endforeach()
 
   add_dependencies(${LIBRARY_NAME} ${custom_targets})
