@@ -1549,7 +1549,7 @@ TEST(DetectorErrorModelTest, NumObservablesInCanonicalize) {
 }
 
 TEST(DetectorErrorModelTest, FailureOnEmptyErrorRatesCanonicalize) {
-cudaq::qec::detector_error_model dem;
+  cudaq::qec::detector_error_model dem;
 
   // Set up a simple detector_error_matrix
   std::vector<std::size_t> detector_shape = {
@@ -1577,11 +1577,7 @@ cudaq::qec::detector_error_model dem;
   // Before canonicalize: verify num_observables works
   EXPECT_EQ(dem.num_observables(), 1);
 
-  EXPECT_THROW(
-      dem.canonicalize_for_rounds(2),
-      std::runtime_error
-  );
-
+  EXPECT_THROW(dem.canonicalize_for_rounds(2), std::runtime_error);
 }
 
 TEST(DetectorErrorModelTest, CanonicalizeWithoutErrorIds) {

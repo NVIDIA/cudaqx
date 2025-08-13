@@ -78,7 +78,8 @@ void detector_error_model::canonicalize_for_rounds(
 
   if (row_indices.size() > error_rates.size()) {
     throw std::runtime_error(
-        "canonicalize_for_rounds: row_indices size (" + std::to_string(row_indices.size()) +
+        "canonicalize_for_rounds: row_indices size (" +
+        std::to_string(row_indices.size()) +
         ") is greater than the number of error rates (" +
         std::to_string(error_rates.size()) +
         "). This likely means either 'error_rates' was populated incorrectly "
