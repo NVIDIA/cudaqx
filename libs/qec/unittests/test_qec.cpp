@@ -1548,6 +1548,42 @@ TEST(DetectorErrorModelTest, NumObservablesInCanonicalize) {
   EXPECT_EQ(dem.num_observables(), 1);
 }
 
+TEST(DetectorErrorModelTest, FailureOnEmptyErrorRatesCanonicalize) {
+cudaq::qec::detector_error_model dem;
+
+  // Set up a simple detector_error_matrix
+  std::vector<std::size_t> detector_shape = {
+      2, 3}; // 2 detectors, 3 error mechanisms
+  dem.detector_error_matrix = cudaqx::tensor<uint8_t>(detector_shape);
+  // Initialize with some data
+  dem.detector_error_matrix.at({0, 0}) = 1;
+  dem.detector_error_matrix.at({0, 1}) = 0;
+  dem.detector_error_matrix.at({0, 2}) = 1;
+  dem.detector_error_matrix.at({1, 0}) = 0;
+  dem.detector_error_matrix.at({1, 1}) = 1;
+  dem.detector_error_matrix.at({1, 2}) = 0;
+
+  // Set up observables_flips_matrix
+  std::vector<std::size_t> obs_shape = {1,
+                                        3}; // 1 observable, 3 error mechanisms
+  dem.observables_flips_matrix = cudaqx::tensor<uint8_t>(obs_shape);
+  dem.observables_flips_matrix.at({0, 0}) = 0;
+  dem.observables_flips_matrix.at({0, 1}) = 1;
+  dem.observables_flips_matrix.at({0, 2}) = 0;
+
+  // Set up error_rates
+  dem.error_rates = {};
+
+  // Before canonicalize: verify num_observables works
+  EXPECT_EQ(dem.num_observables(), 1);
+
+  EXPECT_THROW(
+      dem.canonicalize_for_rounds(2),
+      std::runtime_error
+  );
+
+}
+
 TEST(DetectorErrorModelTest, CanonicalizeWithoutErrorIds) {
   // This test covers the std::numeric_limits<std::size_t>::max() branch
   // when has_error_ids is false and duplicate columns need to be merged
