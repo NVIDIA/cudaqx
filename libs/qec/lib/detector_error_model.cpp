@@ -75,6 +75,16 @@ void detector_error_model::canonicalize_for_rounds(
   const auto num_cols = column_order.size();
   bool has_error_ids =
       error_ids.has_value() && error_ids->size() == error_rates.size();
+
+  if (row_indices > error_rates.size()) {
+    throw std::runtime_error(
+        "canonicalize_for_rounds: row_indices (" + std::to_string(row_indices) +
+        ") is greater than the number of error rates (" +
+        std::to_string(error_rates.size()) +
+        "). This likely means either 'error_rates' was populated incorrectly "
+        "or the detector_error_matrix  was computed incorrectly.");
+  }
+
   for (std::size_t c = 0; c < num_cols; c++) {
     auto column_index = column_order[c];
     auto &curr_row_indices = row_indices[column_index];
