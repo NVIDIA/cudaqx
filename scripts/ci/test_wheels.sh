@@ -19,6 +19,7 @@ set -e
 python_version=$1
 python_version_no_dot=$(echo $python_version | tr -d '.') # 3.10 --> 310
 python=python${python_version}
+platform=$2
 
 ${python} -m pip install --no-cache-dir pytest
 
@@ -64,3 +65,29 @@ ${python} -m pytest -v -s libs/solvers/python/tests/ --ignore=libs/solvers/pytho
 echo "Installing Solvers library with GQE"
 ${python} -m pip install "${solver_wheel}[gqe]"
 ${python} -m pytest -v -s libs/solvers/python/tests/test_gqe.py
+
+# Test the libraries with examples
+# ======================================
+echo "Testing libraries with examples"
+
+# Install stim for AMD platform for tensor network decoder examples
+if echo $platform | grep -qi "amd64"; then
+  echo "Installing stim and beliefmatching for AMD64 platform"
+  ${python} -m pip install stim beliefmatching
+fi
+
+for domain in "solvers" "qec"; do
+    echo "Testing ${domain} Python examples with Python ${python_version} ..."
+    cd examples/${domain}/python
+    shopt -s nullglob # don't throw errors if no Python files exist
+    for f in *.py; do \
+        echo Testing $f...; \
+        ${python} $f 
+        res=$?
+        if [ $res -ne 0 ]; then
+            echo "Python tests failed for ${domain} with Python ${python_version}: $res"
+        fi
+    done
+    shopt -u nullglob  # reset setting, just for cleanliness
+    cd - # back to the original directory
+done
