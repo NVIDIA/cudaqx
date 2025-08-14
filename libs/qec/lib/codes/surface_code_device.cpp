@@ -51,6 +51,11 @@ __qpu__ void prepm(patch logicalQubit) {
 __qpu__ std::vector<cudaq::measure_result>
 stabilizer(patch logicalQubit, const std::vector<std::size_t> &x_stabilizers,
            const std::vector<std::size_t> &z_stabilizers) {
+  for (std::size_t i = 0; i < logicalQubit.ancx.size(); i++)
+    reset(logicalQubit.ancx[i]);
+  for (std::size_t i = 0; i < logicalQubit.ancz.size(); i++)
+    reset(logicalQubit.ancz[i]);
+
   h(logicalQubit.ancx);
   for (std::size_t xi = 0; xi < logicalQubit.ancx.size(); ++xi)
     for (std::size_t di = 0; di < logicalQubit.data.size(); ++di)
@@ -68,11 +73,6 @@ stabilizer(patch logicalQubit, const std::vector<std::size_t> &x_stabilizers,
   // x flips are triggered by z-stabilizers (ancz)
   // z flips are triggered by x-stabilizers (ancx)
   auto results = mz(logicalQubit.ancz, logicalQubit.ancx);
-
-  for (std::size_t i = 0; i < logicalQubit.ancx.size(); i++)
-    reset(logicalQubit.ancx[i]);
-  for (std::size_t i = 0; i < logicalQubit.ancz.size(); i++)
-    reset(logicalQubit.ancz[i]);
 
   return results;
 }

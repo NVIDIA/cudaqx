@@ -1431,6 +1431,46 @@ TEST(QECCodeTester, checkVersion) {
               std::string::npos);
 }
 
+TEST(PCMUtilsTester, checkPCMToSparseString) {
+  // Generate a random PCM.
+  std::size_t n_rounds = 4;
+  std::size_t n_errs_per_round = 30;
+  std::size_t n_syndromes_per_round = 10;
+  std::size_t weight = 3;
+  std::mt19937_64 rng(13);
+  cudaqx::tensor<uint8_t> pcm = cudaq::qec::generate_random_pcm(
+      n_rounds, n_errs_per_round, n_syndromes_per_round, weight,
+      std::move(rng));
+  // Get the string version of the PCM
+  auto sparse_str = cudaq::qec::pcm_to_sparse_string(pcm);
+  // Get the PCM from the string
+  auto pcm_from_str = cudaq::qec::pcm_from_sparse_string(
+      sparse_str, n_rounds * n_syndromes_per_round,
+      n_rounds * n_errs_per_round);
+  // Verify that the original and the from-string PCM are the same
+  check_pcm_equality(pcm, pcm_from_str, true);
+}
+
+TEST(PCMUtilsTester, checkPCMToSparseVec) {
+  // Generate a random PCM.
+  std::size_t n_rounds = 7;
+  std::size_t n_errs_per_round = 10;
+  std::size_t n_syndromes_per_round = 100;
+  std::size_t weight = 3;
+  std::mt19937_64 rng(13);
+  cudaqx::tensor<uint8_t> pcm = cudaq::qec::generate_random_pcm(
+      n_rounds, n_errs_per_round, n_syndromes_per_round, weight,
+      std::move(rng));
+  // Get the string version of the PCM
+  auto sparse_vec = cudaq::qec::pcm_to_sparse_vec(pcm);
+  // Get the PCM from the string
+  auto pcm_from_vec = cudaq::qec::pcm_from_sparse_vec(
+      sparse_vec, n_rounds * n_syndromes_per_round,
+      n_rounds * n_errs_per_round);
+  // Verify that the original and the from-string PCM are the same
+  check_pcm_equality(pcm, pcm_from_vec, true);
+}
+
 // Test detector_error_model methods
 TEST(DetectorErrorModelTest, NumDetectors) {
   cudaq::qec::detector_error_model dem;
