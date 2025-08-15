@@ -35,7 +35,7 @@ def test_tensor_network_decoder_missing_dependencies():
 
     # Verify the error message contains the expected C++ message and installation instructions
     error_msg = str(excinfo.value)
-    assert "Decoder 'tensor_network_decoder' is not available" in error_msg and "pip install cudaq_qec[tensor_network_decoder]" in error_msg, f"Unexpected error message: {error_msg}"
+    assert "Decoder 'tensor_network_decoder' is not available" in error_msg and "pip install cudaq-qec[tensor-network-decoder]" in error_msg, f"Unexpected error message: {error_msg}"
 
     # Verify this is NOT a Python ImportError (which would indicate the graceful failure didn't work)
     assert not isinstance(
