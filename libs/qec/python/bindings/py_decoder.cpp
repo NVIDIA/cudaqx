@@ -284,7 +284,7 @@ void bindDecoder(py::module &mod) {
           throw std::runtime_error(
               "Decoder 'tensor_network_decoder' is not available. "
               "To enable it, install the python module's dependencies via:\n\n"
-              "    pip install cudaq_qec[tensor_network_decoder]\n");
+              "    pip install cudaq-qec[tensor-network-decoder]\n");
         }
 
         py::buffer_info buf = H.request();
