@@ -13,7 +13,7 @@
     decoder. Use `pip install cudaq-qec[tensor-network-decoder]` in order to use
     this decoder.
     
-    The Tensor Network Decoder has the same GPU support as the `Quantum Low-Density Parity-Check Decoder<https://nvidia.github.io/cudaqx/components/qec/introduction.html#quantum-low-density-parity-check-decoder>`__.
+    The Tensor Network Decoder has the same GPU support as the `Quantum Low-Density Parity-Check Decoder <https://nvidia.github.io/cudaqx/components/qec/introduction.html#quantum-low-density-parity-check-decoder>`__.
     However, if you are using the V100 GPU (SM70), you will need to pin your
     cuTensor version to 2.2 by running `pip install cutensor_cu12==2.2`. Note
     that this GPU will not be supported by the Tensor Network Decoder when
