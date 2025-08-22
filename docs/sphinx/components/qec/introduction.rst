@@ -724,6 +724,7 @@ Usage:
     .. code-block:: python
 
         import cudaq_qec as qec
+        import numpy as np
 
         H_list = [
                     [1, 0, 0, 1, 0, 1, 1], 
