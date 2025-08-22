@@ -65,10 +65,10 @@ for f in wheels_orig/*.whl; do
 
   # Re-package into a new whl file now
   cd $TMP_DIR
-  mv cudaq_qec-${ORIG_VER}/${PACKAGE_NAME_UNDER}-${ORIG_VER}.dist-info ${PACKAGE_NAME_UNDER}-${ORIG_VER}/${PACKAGE_NAME_UNDER}-${NEW_VER}.dist-info
-  python3 -m wheel pack cudaq_qec-${ORIG_VER} -d .
+  mv ${PACKAGE_NAME_UNDER}-${ORIG_VER}/${PACKAGE_NAME_UNDER}-${ORIG_VER}.dist-info ${PACKAGE_NAME_UNDER}-${ORIG_VER}/${PACKAGE_NAME_UNDER}-${NEW_VER}.dist-info
+  python3 -m wheel pack ${PACKAGE_NAME_UNDER}-${ORIG_VER} -d .
   cd -
-  mv $TMP_DIR/cudaq_qec-${NEW_VER}*.whl wheels_new
+  mv $TMP_DIR/${PACKAGE_NAME_UNDER}-${NEW_VER}*.whl wheels_new
   rm -rf $TMP_DIR
 done
 
