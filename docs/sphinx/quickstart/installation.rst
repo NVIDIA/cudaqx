@@ -27,6 +27,7 @@ install individual components:
 CUDA-QX provides optional pip-installable components:
 
 .. code-block:: bash
+
     # Install the Tensor Network Decoder from the QEC library
     pip install cudaq-qec[tensor-network-decoder]
 
