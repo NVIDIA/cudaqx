@@ -24,6 +24,15 @@ install individual components:
     # Install both libraries
     pip install cudaq-qec cudaq-solvers
 
+CUDA-QX provides optional pip-installable components:
+
+.. code-block:: bash
+    # Install the Tensor Network Decoder from the QEC library
+    pip install cudaq-qec[tensor-network-decoder]
+
+    # Install the GQE algorithm from the Solvers library
+    pip install cudaq-solvers[gqe]
+
 .. note::
 
     CUDA-Q Solvers will require the presence of :code:`libgfortran`, which is
