@@ -1,6 +1,11 @@
 name: Build dev images
 
 on:
+  push:
+    branches:
+      # NOTE: We're intentionally not including releases/* here because we want
+      # more manual control over that.
+      - main
   workflow_dispatch:
     inputs:
       force_rebuild:
