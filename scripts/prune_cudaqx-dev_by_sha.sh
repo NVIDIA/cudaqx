@@ -1,3 +1,4 @@
+#!/bin/bash
 # ============================================================================ #
 # Copyright (c) 2025 NVIDIA Corporation & Affiliates.                          #
 # All rights reserved.                                                         #
@@ -6,7 +7,18 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
-#!/usr/bin/env bash
+# NOTE: This script is intended to be run by CUDA-QX maintainers, not regular
+# users.
+
+# This script is used to prune the old cudaqx-dev packages from the GitHub
+# Packages.  In general, the .github/workflows/build_dev.yaml creates new images
+# whenever the CUDA-Q commit is updated, so this script will need to be
+# periodically run to keep the number of packages in the GitHub Packages
+# manageable.
+
+# The script requires a TOKEN environment variable to be set by the user. The
+# token must have read:packages and delete:packages scopes.
+
 set -euo pipefail
 
 JSON_FILE="versions.json"
