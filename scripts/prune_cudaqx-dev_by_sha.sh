@@ -84,7 +84,7 @@ if [[ ! "$SHORTSHA" =~ ^[0-9a-f]{8}$ ]]; then
   exit 1
 fi
 
-# 3) Compute candidate IDs & show what would be deleted
+# 2) Compute candidate IDs & show what would be deleted
 echo
 echo "Matching versions for SHA '$SHORTSHA':"
 cat ids.txt | grep "$SHORTSHA" > ids_to_delete.txt
@@ -93,7 +93,7 @@ IDS=$(cat ids_to_delete.txt | awk -F: '{gsub(/^[ \t]+/, "", $1); print $1}')
 # Convert IDS to array
 mapfile -t IDS < <(echo "$IDS")
 
-# Check for semver tags (x.y.z) among candidates
+# 3) Check for semver tags (x.y.z) among candidates
 HAS_SEMVER=$(cat ids_to_delete.txt | grep -q "[0-9]\+\.[0-9]\+\.[0-9]\+" && echo "true" || echo "false")
 
 if [[ "$HAS_SEMVER" == "true" && "$FORCE" != "true" ]]; then
@@ -102,7 +102,7 @@ if [[ "$HAS_SEMVER" == "true" && "$FORCE" != "true" ]]; then
   exit 1
 fi
 
-# 5) Final confirmation
+# 4) Final confirmation
 echo "About to delete ${#IDS[@]} version(s) from org '$ORG' package '$PKG'."
 read -rp "Type 'delete' to proceed: " CONFIRM
 if [[ "$CONFIRM" != "delete" ]]; then
