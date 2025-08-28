@@ -60,7 +60,7 @@ for f in wheels_orig/*.whl; do
   # Update the version
   sed -i "s/^Version: ${ORIG_VER}/Version: ${NEW_VER}/" $TMP_DIR/${PACKAGE_NAME_UNDER}-${ORIG_VER}/${PACKAGE_NAME_UNDER}-${ORIG_VER}.dist-info/METADATA
   # MODIFY_ME2 - review and modify the METADATA file here
-  # ...
+  sed -i "s/tensor_network_decoder/tensor-network-decoder/" $TMP_DIR/${PACKAGE_NAME_UNDER}-${ORIG_VER}/${PACKAGE_NAME_UNDER}-${ORIG_VER}.dist-info/METADATA 
   # --- End modifications
 
   # Re-package into a new whl file now
