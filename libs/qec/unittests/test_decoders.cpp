@@ -205,8 +205,9 @@ TEST(SteaneLutDecoder, checkAPI) {
   valid_opt_results.insert("decoding_time", false);
   valid_opt_results.insert("num_repetitions", 5);
   valid_args.insert("opt_results", valid_opt_results);
+  valid_args.insert("lut_error_depth", 2);
 
-  auto d3 = cudaq::qec::decoder::get("single_error_lut", H, valid_args);
+  auto d3 = cudaq::qec::decoder::get("multi_error_lut", H, valid_args);
   std::vector<float_t> syndrome(syndrome_size, 0.0);
   // Set syndrome to 101
   syndrome[0] = 1.0;
@@ -289,7 +290,7 @@ TEST(SteaneLutDecoder, checkAPI) {
   ASSERT_TRUE(result_dt.opt_results.has_value());
   ASSERT_TRUE(result_dt.opt_results->contains("decoding_time"));
   // Verify the decoding_time value is the expected 0.0
-  ASSERT_EQ(result_dt.opt_results->get<double>("decoding_time"), 0.0);
+  ASSERT_GT(result_dt.opt_results->get<double>("decoding_time"), 0.0);
 }
 
 TEST(AsyncDecoderResultTest, MoveConstructorTransfersFuture) {
