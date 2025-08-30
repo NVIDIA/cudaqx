@@ -275,7 +275,6 @@ to prototype and develop new codes.
            h(logicalQubit.ancx)
 
            # Measure Z stabilizers
-           h(logicalQubit.ancz)
            for zi in range(len(logicalQubit.ancz)):
                for di in range(len(logicalQubit.data)):
                    if z_stabilizers[zi * len(logicalQubit.data) + di] == 1:
