@@ -223,6 +223,7 @@ The Steane [[7,1,3]] code provides a complete example implementation:
            // Measure X stabilizers
            h(logicalQubit.ancx);
            // ... apply controlled-X gates ...
+           h(logicalQubit.ancx);
 
            // Measure Z stabilizers
            // ... apply controlled-X gates ...
@@ -271,6 +272,7 @@ to prototype and develop new codes.
                for di in range(len(logicalQubit.data)):
                    if x_stabilizers[xi * len(logicalQubit.data) + di] == 1:
                        x.ctrl(logicalQubit.ancx[xi], logicalQubit.data[di])
+           h(logicalQubit.ancx)
 
            # Measure Z stabilizers
            h(logicalQubit.ancz)
