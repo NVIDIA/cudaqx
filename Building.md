@@ -61,6 +61,11 @@ commands to switch to whichever version you need. You can then use
 [these instructions](https://github.com/NVIDIA/cuda-quantum/blob/main/Building.md)
 to re-build CUDA-Q.
 
+Additionally, the following CMake options can be configured:
+* `CUDAQX_ENABLE_LIBS`: Specify which libraries to build (`all`, `qec`, `solvers`)
+* `CUDAQX_INCLUDE_TESTS`: Enable building of tests
+* `CUDAQX_BINDINGS_PYTHON`: Enable Python bindings
+
 The above instructions provide a fully open-source way of building and
 contributing to CUDA-QX, but it should be noted that while this environment
 will have many GPU-accelerated simulators installed in it, it won't contain the
