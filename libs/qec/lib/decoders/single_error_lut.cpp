@@ -6,7 +6,9 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
+#include "common/Logger.h"
 #include "cudaq/qec/decoder.h"
+#include <algorithm>
 #include <cassert>
 #include <map>
 #include <vector>
@@ -98,7 +100,8 @@ public:
       }
     }
 
-    // Build a lookup table for an error on each possible qubit
+    // For each error e, build a list of detectors that are set if the error
+    // occurs.
     std::vector<std::vector<std::size_t>> H_e2d(block_size);
     for (std::size_t c = 0; c < block_size; c++)
       for (std::size_t r = 0; r < syndrome_size; r++)
@@ -111,45 +114,33 @@ public:
     };
 
     // For each qubit with a possible error, calculate an error signature.
-    if (lut_error_depth >= 1) {
-      std::string err_sig(syndrome_size, '0');
-      for (std::size_t qErr = 0; qErr < block_size; qErr++) {
-        toggleSynForError(err_sig, qErr);
-        // printf("Adding err_sig=%s for qErr=%lu\n", err_sig.c_str(), qErr);
-        error_signatures.insert({err_sig, {qErr}});
-        toggleSynForError(err_sig, qErr);
-      }
-    }
-    if (lut_error_depth >= 2) {
-      std::string err_sig(syndrome_size, '0');
-      for (std::size_t qErr1 = 0; qErr1 < block_size; qErr1++) {
-        toggleSynForError(err_sig, qErr1);
-        for (std::size_t qErr2 = qErr1 + 1; qErr2 < block_size; qErr2++) {
-          toggleSynForError(err_sig, qErr2);
-          error_signatures.insert({err_sig, {qErr1, qErr2}});
-          toggleSynForError(err_sig, qErr2);
-        }
-        toggleSynForError(err_sig, qErr1);
-      }
-    }
-    if (lut_error_depth >= 3) {
-      std::string err_sig(syndrome_size, '0');
-      for (std::size_t qErr1 = 0; qErr1 < block_size; qErr1++) {
-        toggleSynForError(err_sig, qErr1);
-        for (std::size_t qErr2 = qErr1 + 1; qErr2 < block_size; qErr2++) {
-          toggleSynForError(err_sig, qErr2);
-          for (std::size_t qErr3 = qErr2 + 1; qErr3 < block_size; qErr3++) {
-            toggleSynForError(err_sig, qErr3);
-            error_signatures.insert({err_sig, {qErr1, qErr2, qErr3}});
-            toggleSynForError(err_sig, qErr3);
+    for (std::size_t k = 1; k <= lut_error_depth; k++) {
+      std::string bitmask(block_size, 0);
+      // Initialize the leading "k" values to 1.
+      std::fill(bitmask.begin(), bitmask.begin() + k, 1);
+      // Now loop over all the permutations of the bitmask.
+      do {
+        std::string err_sig(syndrome_size, '0');
+        std::vector<std::size_t> error_list;
+        error_list.reserve(lut_error_depth);
+        for (std::size_t qErr = 0; qErr < block_size; qErr++) {
+          if (bitmask[qErr]) {
+            toggleSynForError(err_sig, qErr);
+            error_list.push_back(qErr);
           }
-          toggleSynForError(err_sig, qErr2);
         }
-        toggleSynForError(err_sig, qErr1);
-      }
-    }
-    if (lut_error_depth >= 4) {
-      throw std::runtime_error("lut_error_depth >= 4 is not supported");
+        auto it = error_signatures.find(err_sig);
+        if (it != error_signatures.end()) {
+          // Syndrome already found, so we have ambiguous errors. Defer to the
+          // one that was previously added, so don't add it again.
+          CUDAQ_INFO("Ambiguous error signature: err_sig={} for error_list={}",
+                     err_sig, error_list);
+        } else {
+          CUDAQ_INFO("Adding err_sig={} for error_list={}", err_sig,
+                     error_list);
+          error_signatures.insert({std::move(err_sig), std::move(error_list)});
+        }
+      } while (std::prev_permutation(bitmask.begin(), bitmask.end()));
     }
   }
 
