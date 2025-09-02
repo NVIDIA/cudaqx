@@ -20,17 +20,25 @@ namespace cudaq::qec {
 /// in the block.
 class multi_error_lut : public decoder {
 private:
-  std::map<std::string, std::vector<std::size_t>> error_signatures;
+  /// @brief This is a struct that contains the list of errors for a LUT entry
+  /// and the probability of the list of errors.
+  struct lut_entry {
+    /// List of errors for this LUT entry
+    std::vector<std::size_t> error_list;
+    /// Probability of the list of errors in error_list.
+    double p;
+  };
+  std::map<std::string, lut_entry> error_signatures;
 
   // Input parameters
   int lut_error_depth = 1;
+  std::vector<double> error_rate_vec;
 
   // List of available result types for this decoder
   const std::vector<std::string> available_result_types = {
       "error_probability", // Probability of the detected error (bool)
       "syndrome_weight",   // Number of non-zero syndrome measurements (bool)
-      "decoding_time",     // Time taken to perform the decoding (bool)
-      "num_repetitions"    // Number of repetitions to perform (int > 0)
+      "decoding_time"      // Time taken to perform the decoding (bool)
   };
 
   // Output parameters
@@ -38,7 +46,6 @@ private:
   bool error_probability = false;
   bool syndrome_weight = false;
   bool decoding_time = false;
-  int num_repetitions = 0;
 
 public:
   multi_error_lut(const cudaqx::tensor<uint8_t> &H,
@@ -53,13 +60,25 @@ public:
         throw std::runtime_error("lut_error_depth must be <= block_size");
       }
     }
+    if (params.contains("error_rate_vec")) {
+      error_rate_vec = params.get<std::vector<double>>("error_rate_vec");
+      if (error_rate_vec.size() != block_size) {
+        throw std::runtime_error("error_rate_vec must be of size block_size");
+      }
+      // Validate that the values in the error_rate_vec are between 0 and 1.
+      for (auto error_rate : error_rate_vec) {
+        if (error_rate < 0.0 || error_rate > 1.0) {
+          throw std::runtime_error(
+              "error_rate_vec value is out of range [0, 1]");
+        }
+      }
+    }
     // Binomial coefficient to check if lut_error_depth is too large
     auto binom = [](int n, int k) {
       return 1 / ((n + 1) * std::beta(n - k + 1, k + 1));
     };
     if (binom(block_size, lut_error_depth) > 1e9) {
-      throw std::runtime_error(
-          "lut_error_depth is too large for multi_error_lut decoder");
+      throw std::runtime_error("lut_error_depth is too large for LUT decoder");
     }
     // Decoder-specific constructor arguments can be placed in `params`.
     // Check if opt_results was requested
@@ -73,8 +92,8 @@ public:
                                                         available_result_types);
 
         if (!invalid_types.empty()) {
-          std::string error_msg = "Requested result types not available in "
-                                  "single_error_lut decoder: ";
+          std::string error_msg =
+              "Requested result types not available in LUT decoder: ";
           for (size_t i = 0; i < invalid_types.size(); ++i) {
             error_msg += invalid_types[i];
             if (i < invalid_types.size() - 1) {
@@ -90,8 +109,6 @@ public:
               requested_results.get<bool>("syndrome_weight", syndrome_weight);
           decoding_time =
               requested_results.get<bool>("decoding_time", decoding_time);
-          num_repetitions =
-              requested_results.get<int>("num_repetitions", num_repetitions);
         }
       } catch (const std::runtime_error &e) {
         throw; // Re-throw if it's our error
@@ -123,10 +140,14 @@ public:
         std::string err_sig(syndrome_size, '0');
         std::vector<std::size_t> error_list;
         error_list.reserve(lut_error_depth);
+        double p = 1.0;
         for (std::size_t qErr = 0; qErr < block_size; qErr++) {
           if (bitmask[qErr]) {
             toggleSynForError(err_sig, qErr);
             error_list.push_back(qErr);
+            if (qErr < error_rate_vec.size()) {
+              p *= error_rate_vec[qErr];
+            }
           }
         }
         auto it = error_signatures.find(err_sig);
@@ -138,7 +159,8 @@ public:
         } else {
           CUDAQ_INFO("Adding err_sig={} for error_list={}", err_sig,
                      error_list);
-          error_signatures.insert({std::move(err_sig), std::move(error_list)});
+          error_signatures.insert(
+              {std::move(err_sig), lut_entry{std::move(error_list), p}});
         }
       } while (std::prev_permutation(bitmask.begin(), bitmask.end()));
     }
@@ -151,12 +173,14 @@ public:
 
     // Convert syndrome to a string
     std::string syndrome_str(syndrome.size(), '0');
+    int syndrome_weight = 0;
     assert(syndrome_str.length() == syndrome_size);
     bool anyErrors = false;
     for (std::size_t i = 0; i < syndrome_size; i++) {
       if (syndrome[i] >= 0.5) {
         syndrome_str[i] = '1';
         anyErrors = true;
+        syndrome_weight++;
       }
     }
 
@@ -168,7 +192,7 @@ public:
     auto it = error_signatures.find(syndrome_str);
     if (it != error_signatures.end()) {
       result.converged = true;
-      for (auto qErr : it->second)
+      for (auto qErr : it->second.error_list)
         result.result[qErr] = 1.0 - result.result[qErr];
     } else {
       // Leave result.converged set to false.
@@ -181,7 +205,6 @@ public:
      *   "error_probability": true,    // Include error probability in results
      *   "syndrome_weight": true,      // Include syndrome weight in results
      *   "decoding_time": false,       // Don't include decoding time
-     *   "num_repetitions": 5          // Include num_repetitions=5 in results
      * }
      */
     if (has_opt_results) {
@@ -189,18 +212,18 @@ public:
           cudaqx::heterogeneous_map(); // Initialize the optional map
       // Values are for demonstration purposes only.
       if (error_probability) {
-        result.opt_results->insert("error_probability", 1.0);
+        if (it != error_signatures.end())
+          result.opt_results->insert("error_probability", it->second.p);
+        else
+          result.opt_results->insert("error_probability", 0.0);
       }
       if (syndrome_weight) {
-        result.opt_results->insert("syndrome_weight", 1);
+        result.opt_results->insert("syndrome_weight", syndrome_weight);
       }
       if (decoding_time) {
         auto t1 = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double> duration = t1 - t0;
         result.opt_results->insert("decoding_time", duration.count());
-      }
-      if (num_repetitions > 0) {
-        result.opt_results->insert("num_repetitions", num_repetitions);
       }
     }
 

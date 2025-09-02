@@ -203,7 +203,6 @@ TEST(SteaneLutDecoder, checkAPI) {
   valid_opt_results.insert("error_probability", true);
   valid_opt_results.insert("syndrome_weight", true);
   valid_opt_results.insert("decoding_time", false);
-  valid_opt_results.insert("num_repetitions", 5);
   valid_args.insert("opt_results", valid_opt_results);
   valid_args.insert("lut_error_depth", 2);
 
@@ -220,8 +219,6 @@ TEST(SteaneLutDecoder, checkAPI) {
   ASSERT_TRUE(result.opt_results->contains("syndrome_weight"));
   ASSERT_FALSE(
       result.opt_results->contains("decoding_time")); // Was set to false
-  ASSERT_TRUE(result.opt_results->contains("num_repetitions"));
-  ASSERT_EQ(result.opt_results->get<int>("num_repetitions"), 5);
 
   // Test case 3: Multiple invalid result types
   cudaqx::heterogeneous_map multi_invalid_args;
@@ -236,7 +233,7 @@ TEST(SteaneLutDecoder, checkAPI) {
   // The error message should contain all three invalid types separated by
   // commas
   std::string expected_error =
-      "Requested result types not available in single_error_lut decoder: ";
+      "Requested result types not available in LUT decoder: ";
   // Note: The exact order may vary depending on map iteration, but should
   // contain all types
 
