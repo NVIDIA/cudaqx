@@ -210,7 +210,6 @@ public:
     if (has_opt_results) {
       result.opt_results =
           cudaqx::heterogeneous_map(); // Initialize the optional map
-      // Values are for demonstration purposes only.
       if (error_probability) {
         if (it != error_signatures.end())
           result.opt_results->insert("error_probability", it->second.p);
