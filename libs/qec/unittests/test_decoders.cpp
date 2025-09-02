@@ -272,8 +272,7 @@ TEST(SteaneLutDecoder, checkAPI) {
         << " in message: " << error_msg;
   }
 
-  // Test case 4: Test decoding_time=true to cover line 142 in
-  // single_error_lut.cpp
+  // Test case 4: Test decoding_time=true in lut.cpp
   cudaqx::heterogeneous_map decoding_time_args;
   cudaqx::heterogeneous_map decoding_time_opt_results;
   decoding_time_opt_results.insert("decoding_time", true);

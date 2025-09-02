@@ -19,7 +19,7 @@ add_library(${LIBRARY_NAME} SHARED
   pcm_utils.cpp
   plugin_loader.cpp
   stabilizer_utils.cpp 
-  decoders/single_error_lut.cpp
+  decoders/lut.cpp
   version.cpp
 )
 
