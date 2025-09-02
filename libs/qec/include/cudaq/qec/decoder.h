@@ -174,7 +174,7 @@ public:
   std::size_t get_syndrome_size() { return syndrome_size; }
 
   /// @brief Destructor
-  virtual ~decoder() {}
+  virtual ~decoder() = default;
 
   /// @brief Get the version of the decoder. Subclasses that are not part of the
   /// standard GitHub repo should override this to provide a more tailored
@@ -243,6 +243,29 @@ inline void convert_vec_soft_to_tensor_hard(const std::vector<t_soft> &in,
 /// @brief Convert a vector of hard probabilities to a vector of soft
 /// probabilities.
 /// @param in Hard probability input vector containing only 0/false or 1/true.
+/// @param in_size The size of the input vector (in elements)
+/// @param out Soft probability output vector in the range [0.0, 1.0]
+/// @param true_val The soft probability value assigned when the input is 1
+/// (default to 1.0)
+/// @param false_val The soft probability value assigned when the input is 0
+/// (default to 0.0)
+template <typename t_soft, typename t_hard,
+          typename std::enable_if<std::is_floating_point<t_soft>::value &&
+                                      (std::is_integral<t_hard>::value ||
+                                       std::is_same<t_hard, bool>::value),
+                                  int>::type = 0>
+inline void convert_vec_hard_to_soft(const t_hard *in, std::size_t in_size,
+                                     std::vector<t_soft> &out,
+                                     const t_soft true_val = 1.0,
+                                     const t_soft false_val = 0.0) {
+  out.resize(in_size);
+  for (std::size_t i = 0; i < in_size; i++)
+    out[i] = static_cast<t_soft>(in[i] ? true_val : false_val);
+}
+
+/// @brief Convert a vector of hard probabilities to a vector of soft
+/// probabilities.
+/// @param in Hard probability input vector containing only 0/false or 1/true.
 /// @param out Soft probability output vector in the range [0.0, 1.0]
 /// @param true_val The soft probability value assigned when the input is 1
 /// (default to 1.0)
@@ -257,9 +280,7 @@ inline void convert_vec_hard_to_soft(const std::vector<t_hard> &in,
                                      std::vector<t_soft> &out,
                                      const t_soft true_val = 1.0,
                                      const t_soft false_val = 0.0) {
-  out.resize(in.size());
-  for (std::size_t i = 0; i < in.size(); i++)
-    out[i] = static_cast<t_soft>(in[i] ? true_val : false_val);
+  convert_vec_hard_to_soft(in.data(), in.size(), out, true_val, false_val);
 }
 
 /// @brief Convert a 2D vector of soft probabilities to a 2D vector of hard
