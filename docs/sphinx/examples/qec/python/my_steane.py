@@ -12,6 +12,7 @@ import cudaq_qec as qec
 from cudaq_qec import patch
 # [End Documentation1]
 
+
 # [Begin Documentation2]
 @cudaq.kernel
 def prep0(logicalQubit: patch):
@@ -20,10 +21,10 @@ def prep0(logicalQubit: patch):
     x.ctrl(logicalQubit.data[4], logicalQubit.data[5])
     # ... additional initialization gates ...
 
+
 @cudaq.kernel
-def stabilizer(logicalQubit: patch,
-                x_stabilizers: list[int],
-                z_stabilizers: list[int]) -> list[bool]:
+def stabilizer(logicalQubit: patch, x_stabilizers: list[int],
+               z_stabilizers: list[int]) -> list[bool]:
     # Measure X stabilizers
     h(logicalQubit.ancx)
     for xi in range(len(logicalQubit.ancx)):
@@ -43,18 +44,21 @@ def stabilizer(logicalQubit: patch,
     reset(logicalQubit.ancx)
     reset(logicalQubit.ancz)
     return results
+
+
 # [End Documentation2]
+
 
 # [Begin Documentation3]
 @qec.code('py-steane-example')
 class MySteaneCodeImpl:
+
     def __init__(self, **kwargs):
         qec.Code.__init__(self, **kwargs)
 
         # Define stabilizer generators
         stabilizers_str = [
-            "XXXXIII", "IXXIXXI", "IIXXIXX",
-            "ZZZZIII", "IZZIZZI", "IIZZIZZ"
+            "XXXXIII", "IXXIXXI", "IIXXIXX", "ZZZZIII", "IZZIZZI", "IIZZIZZ"
         ]
         self.stabilizers = [
             cudaq.SpinOperator.from_word(s) for s in stabilizers_str
@@ -89,4 +93,6 @@ class MySteaneCodeImpl:
 
     def get_num_z_stabilizers(self):
         return 3
+
+
 # [End Documentation3]
