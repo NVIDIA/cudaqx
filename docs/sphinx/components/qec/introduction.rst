@@ -298,10 +298,19 @@ to prototype and develop new codes.
                qec.Code.__init__(self, **kwargs)
 
                # Define stabilizer generators
-               self.stabilizers = qec.Stabilizers([
+               stabilizers_str = [
                    "XXXXIII", "IXXIXXI", "IIXXIXX",
                    "ZZZZIII", "IZZIZZI", "IIZZIZZ"
-               ])
+               ]
+               self.stabilizers = [
+                   cudaq.SpinOperator.from_word(s) for s in stabilizers_str
+               ]
+
+               # Define observables
+               obs_str = ["IIIIXXX", "IIIIZZZ"]
+               self.pauli_observables = [
+                   cudaq.SpinOperator.from_word(p) for p in obs_str
+               ]
 
                # Register quantum kernels
                self.operation_encodings = {
@@ -321,21 +330,23 @@ to prototype and develop new codes.
            def get_num_ancilla_qubits(self):
                return 6
 
-4. **Install the Code**:
+           def get_num_x_stabilizers(self):
+               return 3
 
-   Install your Python-implemented code using :code:`cudaqx-config`:
+           def get_num_z_stabilizers(self):
+               return 3
 
-   .. code-block:: bash
-
-       cudaqx-config --install-code my_steane.py
-
-5. **Using the Code**:
+4. **Using the Code**:
 
    The code can now be used like any other CUDA-Q QEC code:
 
    .. code-block:: python
 
        import cudaq_qec as qec
+       # Either import your code directly (e.g. "import my_steane", assuming
+       # your my_steane.py file is in the same directory), or you can paste the
+       # above code here without importing the file.
+       import my_steane
 
        # Create instance of your code
        code = qec.get_code('py-steane-example')
