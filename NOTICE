@@ -55,7 +55,8 @@ License at <https://github.com/chokkan/liblbfgs/blob/master/COPYING>
 
 ----------------------------------------------------------------
 
-Prima - BSD 3-Clause 
+PRIMA - BSD 3-Clause
+Developed by Zaikun Zhang and contributors based on the works of M.J.D. Powell.
 <https://github.com/libprima/prima>
 
 License at <https://github.com/libprima/prima/blob/main/LICENCE.txt>
