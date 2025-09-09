@@ -19,7 +19,7 @@ not require a GPU to use, but some components are GPU-accelerated.
 
 Note: if you would like to use our Tensor Network Decoder, you will need
 additional dependencies installed. You can install them with
-`pip install cudaq-qec[tensor_network_decoder]`.
+`pip install cudaq-qec[tensor-network-decoder]`.
 
 ## Getting Started
 

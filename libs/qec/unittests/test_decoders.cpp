@@ -204,10 +204,10 @@ TEST(SteaneLutDecoder, checkAPI) {
   valid_opt_results.insert("error_probability", true);
   valid_opt_results.insert("syndrome_weight", true);
   valid_opt_results.insert("decoding_time", false);
-  valid_opt_results.insert("num_repetitions", 5);
   valid_args.insert("opt_results", valid_opt_results);
+  valid_args.insert("lut_error_depth", 2);
 
-  auto d3 = cudaq::qec::decoder::get("single_error_lut", H, valid_args);
+  auto d3 = cudaq::qec::decoder::get("multi_error_lut", H, valid_args);
   std::vector<float_t> syndrome(syndrome_size, 0.0);
   // Set syndrome to 101
   syndrome[0] = 1.0;
@@ -220,8 +220,6 @@ TEST(SteaneLutDecoder, checkAPI) {
   ASSERT_TRUE(result.opt_results->contains("syndrome_weight"));
   ASSERT_FALSE(
       result.opt_results->contains("decoding_time")); // Was set to false
-  ASSERT_TRUE(result.opt_results->contains("num_repetitions"));
-  ASSERT_EQ(result.opt_results->get<int>("num_repetitions"), 5);
 
   // Test case 3: Multiple invalid result types
   cudaqx::heterogeneous_map multi_invalid_args;
@@ -236,7 +234,7 @@ TEST(SteaneLutDecoder, checkAPI) {
   // The error message should contain all three invalid types separated by
   // commas
   std::string expected_error =
-      "Requested result types not available in single_error_lut decoder: ";
+      "Requested result types not available in LUT decoder: ";
   // Note: The exact order may vary depending on map iteration, but should
   // contain all types
 
@@ -272,8 +270,7 @@ TEST(SteaneLutDecoder, checkAPI) {
         << " in message: " << error_msg;
   }
 
-  // Test case 4: Test decoding_time=true to cover line 142 in
-  // single_error_lut.cpp
+  // Test case 4: Test decoding_time=true in lut.cpp
   cudaqx::heterogeneous_map decoding_time_args;
   cudaqx::heterogeneous_map decoding_time_opt_results;
   decoding_time_opt_results.insert("decoding_time", true);
@@ -290,7 +287,7 @@ TEST(SteaneLutDecoder, checkAPI) {
   ASSERT_TRUE(result_dt.opt_results.has_value());
   ASSERT_TRUE(result_dt.opt_results->contains("decoding_time"));
   // Verify the decoding_time value is the expected 0.0
-  ASSERT_EQ(result_dt.opt_results->get<double>("decoding_time"), 0.0);
+  ASSERT_GT(result_dt.opt_results->get<double>("decoding_time"), 0.0);
 }
 
 void check_pcm_equality(const cudaqx::tensor<uint8_t> &a,

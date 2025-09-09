@@ -240,7 +240,7 @@ jobs:
       matrix:
         runner: [
           { arch: arm64, gpu: a100 },
-          { arch: amd64, gpu: v100 },
+          { arch: amd64, gpu: a100 },
         ]
         python: ['3.10', '3.11', '3.12', '3.13']
   
