@@ -76,7 +76,14 @@ jobs:
       # ========================================================================
  
       - name: Install python requirements
-        run: pip install numpy pytest cupy-cuda12x cuquantum-cu12 quimb opt_einsum torch nvidia-cublas-cu12 cuquantum-python-cu12==25.06
+        run: |
+          pip install numpy pytest cupy-cuda12x cuquantum-cu12 quimb opt_einsum torch nvidia-cublas-cu12 cuquantum-python-cu12==25.06
+          # The following tests are needed for docs/sphinx/examples/qec/python/tensor_network_decoder.py.
+          if [[ "$(uname -m)" == "x86_64" ]]; then
+              # Stim is not currently available on manylinux ARM wheels, so only
+              # install for x86_64.
+              pip install stim beliefmatching
+          fi
 
       - name: Run Python tests
         run: cmake --build ${{ steps.build.outputs.build-dir }} --target run_python_tests
