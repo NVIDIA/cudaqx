@@ -82,7 +82,7 @@ jobs:
       - name: Install python requirements
         env:
           LD_LIBRARY_PATH: ${{ env.MPI_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
-        run: pip install numpy pytest cupy-cuda12x cuquantum-cu12 torch lightning ml_collections mpi4py transformers quimb opt_einsum torch nvidia-cublas-cu12
+        run: pip install numpy pytest cupy-cuda12x cuquantum-cu12 torch lightning ml_collections mpi4py transformers quimb opt_einsum torch nvidia-cublas-cu12 cuquantum-python-cu12==25.06
 
       - name: Run Python tests
         env:

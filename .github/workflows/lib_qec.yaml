@@ -76,7 +76,7 @@ jobs:
       # ========================================================================
  
       - name: Install python requirements
-        run: pip install numpy pytest cupy-cuda12x cuquantum-cu12 quimb opt_einsum torch nvidia-cublas-cu12
+        run: pip install numpy pytest cupy-cuda12x cuquantum-cu12 quimb opt_einsum torch nvidia-cublas-cu12 cuquantum-python-cu12==25.06
 
       - name: Run Python tests
         run: cmake --build ${{ steps.build.outputs.build-dir }} --target run_python_tests
