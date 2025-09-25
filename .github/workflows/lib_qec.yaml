@@ -76,6 +76,7 @@ jobs:
       # ========================================================================
  
       - name: Install python requirements
+        shell: bash
         run: |
           pip install numpy pytest cupy-cuda12x cuquantum-cu12 quimb opt_einsum torch nvidia-cublas-cu12 cuquantum-python-cu12==25.06
           # The following tests are needed for docs/sphinx/examples/qec/python/tensor_network_decoder.py.
