@@ -38,7 +38,7 @@ runs:
     - name: Compilation cache key
       id: ccache-key
       run: |
-        echo "main=ccache-${{ inputs.lib }}-cu12.0-gcc11-${{ inputs.platform }}" >> $GITHUB_OUTPUT
+        echo "main=ccache-${{ inputs.lib }}-cu12.6-gcc11-${{ inputs.platform }}" >> $GITHUB_OUTPUT
         if [[ -n "${{ inputs.pr-number }}" ]]; then
           echo "pr=-pr${{ inputs.pr-number }}" >> $GITHUB_OUTPUT
         fi
