@@ -57,7 +57,7 @@ jobs:
 
       - name: Install build requirements
         run: |
-          apt install -y --no-install-recommends gfortran libblas-dev libcusolver-dev-12-6
+          apt install -y --no-install-recommends gfortran libblas-dev
 
       - name: Build
         id: build
