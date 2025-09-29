@@ -25,6 +25,7 @@ jobs:
     strategy:
       matrix:
         platform: [amd64, arm64]
+        cuda_version: ['12.6']
       fail-fast: false
     runs-on: linux-${{ matrix.platform }}-cpu8
     steps:
@@ -80,7 +81,7 @@ jobs:
         TAGS="-t ghcr.io/nvidia/cudaqx-dev:${{ steps.get-cudaq-version-short.outputs.commit_date }}-${{ steps.get-cudaq-version-short.outputs.shortref }}-${{ matrix.platform }}"
         TAGS+=" -t ghcr.io/nvidia/cudaqx-dev:${{ steps.get-cudaq-version-short.outputs.shortref }}-${{ matrix.platform }}"
         TAGS+=" -t ghcr.io/nvidia/cudaqx-dev:${other_tag}-${{ matrix.platform }}"
-        docker build $TAGS -f docker/build_env/cudaqx.dev.Dockerfile . --build-arg base_image=ghcr.io/nvidia/cuda-quantum-devdeps:ext-${{ matrix.platform }}-cu12.6-gcc11-main
+        docker build $TAGS -f docker/build_env/cudaqx.dev.Dockerfile . --build-arg base_image=ghcr.io/nvidia/cuda-quantum-devdeps:ext-${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc11-main
         docker push -a ghcr.io/nvidia/cudaqx-dev
       shell: bash --noprofile --norc -euo pipefail {0}
 
@@ -91,6 +92,7 @@ jobs:
       matrix:
         python: ['3.10', '3.11', '3.12', '3.13']
         platform: ['amd64', 'arm64']
+        cuda_version: ['12.6']
       fail-fast: false
     runs-on: linux-${{ matrix.platform }}-cpu8
     steps:
@@ -150,7 +152,7 @@ jobs:
         context: cudaq
         file: cudaq/docker/release/cudaq.wheel.Dockerfile
         build-args: |
-          base_image=ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ matrix.platform }}-cu12.6-gcc11-main
+          base_image=ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc11-main
           release_version=0.99.99
           python_version=${{ matrix.python }}
         outputs: type=local,dest=/tmp/wheels
@@ -175,7 +177,7 @@ jobs:
         fi
 
         TAGS+=" -t ghcr.io/nvidia/cudaqx-dev:${other_tag}-py${{ matrix.python }}-${{ matrix.platform }}"
-        BUILDARGS="--build-arg base_image=ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ matrix.platform }}-cu12.6-gcc11-main"
+        BUILDARGS="--build-arg base_image=ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc11-main"
         BUILDARGS+=" --build-arg python_version=${{ matrix.python }}"
         # For some reason, this fails on amd64 unless DOCKER_BUILDKIT=0 is set.
         # The exact error is: too many open files.
