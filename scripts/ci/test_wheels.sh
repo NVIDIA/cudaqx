@@ -46,10 +46,10 @@ qec_wheel=$(ls /wheels/cudaq_qec-*-cp${python_version_no_dot}-cp${python_version
 # Otherwise, install with the tensor network decoder.
 if [ $python_version == "3.10" ]; then
   echo "Installing QEC library without tensor network decoder"
-  ${python} -m pip install --upgrade-strategy only-if-needed "${qec_wheel}"
+  ${python} -m pip install "${qec_wheel}"
 else
   echo "Installing QEC library with tensor network decoder"
-  ${python} -m pip install --upgrade-strategy only-if-needed "${qec_wheel}[tensor_network_decoder]"
+  ${python} -m pip install "${qec_wheel}[tensor_network_decoder]"
 fi
 ${python} -m pytest -v -s libs/qec/python/tests/
 
@@ -58,12 +58,12 @@ ${python} -m pytest -v -s libs/qec/python/tests/
 # Test the base solvers library without optional dependencies
 echo "Installing Solvers library without GQE"
 solver_wheel=$(ls /wheels/cudaq_solvers-*-cp${python_version_no_dot}-cp${python_version_no_dot}-*.whl)
-${python} -m pip install --upgrade-strategy only-if-needed "${solver_wheel}"
+${python} -m pip install "${solver_wheel}"
 ${python} -m pytest -v -s libs/solvers/python/tests/ --ignore=libs/solvers/python/tests/test_gqe.py
 
 # Test the solvers library with GQE
 echo "Installing Solvers library with GQE"
-${python} -m pip install --upgrade-strategy only-if-needed "${solver_wheel}[gqe]"
+${python} -m pip install "${solver_wheel}[gqe]"
 ${python} -m pytest -v -s libs/solvers/python/tests/test_gqe.py
 
 # Test the libraries with examples
