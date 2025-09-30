@@ -33,6 +33,7 @@ private:
   std::size_t num_windows = 0;
   std::size_t num_rounds = 0;
   std::size_t num_syndromes_per_window = 0;
+  std::size_t num_rounds_since_last_decode = 0;
   std::vector<std::unique_ptr<decoder>> inner_decoders;
   std::vector<std::size_t> first_columns;
   cudaqx::tensor<std::uint8_t> full_pcm;
@@ -142,13 +143,13 @@ public:
       CUDAQ_DBG("Decoding whole block");
       // Decode the whole thing, iterating over windows manually.
       decoder_result result;
-      std::vector<float_t> syndrome_round(step_size * num_syndromes_per_round);
-      for (std::size_t w = 0; w < num_rounds; ++w) {
-        std::copy(syndrome.begin() + w * step_size * num_syndromes_per_round,
-                  syndrome.begin() +
-                      (w + 1) * step_size * num_syndromes_per_round,
+      std::vector<float_t> syndrome_round(num_syndromes_per_round);
+      for (std::size_t r = 0; r < num_rounds; ++r) {
+        std::copy(syndrome.begin() + r * num_syndromes_per_round,
+                  syndrome.begin() + (r + 1) * num_syndromes_per_round,
                   syndrome_round.begin());
         result = decode(syndrome_round);
+        // Note: result will be empty until the final loop iteration.
       }
       auto t1 = std::chrono::high_resolution_clock::now();
       std::chrono::duration<double> diff = t1 - t0;
@@ -173,6 +174,7 @@ public:
       window_proc_times.resize(num_windows);
       std::fill(window_proc_times.begin(), window_proc_times.end(), 0.0);
       rw_filled = 0;
+      num_rounds_since_last_decode = 0;
       CUDAQ_DBG("Initializing window");
       auto t1 = std::chrono::high_resolution_clock::now();
       window_proc_times_arr[0] =
@@ -199,9 +201,12 @@ public:
       window_proc_times_arr[2] +=
           std::chrono::duration<double>(t1 - t0).count() * 1000;
     }
-    if (rw_filled == num_syndromes_per_window) {
+    num_rounds_since_last_decode++;
+    if (rw_filled == num_syndromes_per_window &&
+        num_rounds_since_last_decode >= step_size) {
       CUDAQ_DBG("Decoding window {}/{}", num_windows_decoded + 1, num_windows);
       decode_window();
+      num_rounds_since_last_decode = 0;
 
       num_windows_decoded++;
       if (num_windows_decoded == num_windows) {
@@ -225,13 +230,11 @@ public:
       // Decode the whole thing, iterating over windows manually.
       std::vector<decoder_result> results;
       std::vector<std::vector<float_t>> syndromes_round(syndromes.size());
-      for (std::size_t w = 0; w < num_rounds; ++w) {
+      for (std::size_t r = 0; r < num_rounds; ++r) {
         for (std::size_t s = 0; s < syndromes.size(); ++s) {
           syndromes_round[s].resize(num_syndromes_per_round);
-          std::copy(syndromes[s].begin() +
-                        w * step_size * num_syndromes_per_round,
-                    syndromes[s].begin() +
-                        (w + 1) * step_size * num_syndromes_per_round,
+          std::copy(syndromes[s].begin() + r * num_syndromes_per_round,
+                    syndromes[s].begin() + (r + 1) * num_syndromes_per_round,
                     syndromes_round[s].begin());
         }
         results = decode_batch(syndromes_round);
@@ -261,6 +264,7 @@ public:
       window_proc_times.resize(num_windows);
       std::fill(window_proc_times.begin(), window_proc_times.end(), 0.0);
       rw_filled = 0;
+      num_rounds_since_last_decode = 0;
       CUDAQ_DBG("Initializing window");
     }
     if (this->rw_filled == num_syndromes_per_window) {
@@ -274,6 +278,7 @@ public:
         std::copy(syndromes[s].begin(), syndromes[s].end(),
                   this->rolling_window[s].end() - num_syndromes_per_round);
       }
+      num_rounds_since_last_decode++;
     } else {
       // Just copy the data to the end of the rolling window.
       CUDAQ_DBG("Copying data to the end of the rolling window");
@@ -282,11 +287,13 @@ public:
                   this->rolling_window[s].begin() + this->rw_filled);
       }
       this->rw_filled += num_syndromes_per_round;
+      num_rounds_since_last_decode++;
     }
-    if (rw_filled == num_syndromes_per_window) {
+    if (rw_filled == num_syndromes_per_window &&
+        num_rounds_since_last_decode >= step_size) {
       CUDAQ_DBG("Decoding window {}/{}", num_windows_decoded + 1, num_windows);
       decode_window();
-
+      num_rounds_since_last_decode = 0;
       num_windows_decoded++;
       if (num_windows_decoded == num_windows) {
         num_windows_decoded = 0;
