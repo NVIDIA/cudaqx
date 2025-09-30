@@ -19,14 +19,25 @@ namespace cudaq::qec {
 /// provided in the decoder.
 class sliding_window : public decoder {
 private:
-  // Input parameters.
+  // --- Input parameters ---
+
+  /// The number of rounds of syndrome data in each window.
   std::size_t window_size = 1;
+  /// The number of rounds to advance the window by each time.
   std::size_t step_size = 1;
+  /// The number of syndromes per round.
   std::size_t num_syndromes_per_round = 0;
+  /// When forming a window, should error mechanisms that span the start round
+  /// and any preceding rounds be included?
   bool straddle_start_round = false;
+  /// When forming a window, should error mechanisms that span the end round and
+  /// any subsequent rounds be included?
   bool straddle_end_round = true;
+  /// The vector of error rates for the error mechanisms.
   std::vector<cudaq::qec::float_t> error_rate_vec;
+  /// The name of the inner decoder to use.
   std::string inner_decoder_name;
+  /// The parameters to pass to the inner decoder.
   cudaqx::heterogeneous_map inner_decoder_params;
 
   // Derived parameters.
