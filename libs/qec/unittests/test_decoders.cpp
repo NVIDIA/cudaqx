@@ -317,10 +317,10 @@ void check_pcm_equality(const cudaqx::tensor<uint8_t> &a,
   }
 }
 
-void SlidingWindowDecoderTest(bool run_batched) {
-  std::size_t n_rounds = 8;
-  std::size_t n_errs_per_round = 30;
-  std::size_t n_syndromes_per_round = 10;
+void SlidingWindowDecoderTest(bool run_batched, std::size_t n_rounds,
+                              std::size_t n_errs_per_round,
+                              std::size_t n_syndromes_per_round,
+                              std::size_t window_size, std::size_t step_size) {
   std::size_t n_cols = n_rounds * n_errs_per_round;
   std::size_t n_rows = n_rounds * n_syndromes_per_round;
   std::size_t weight = 3;
@@ -335,8 +335,6 @@ void SlidingWindowDecoderTest(bool run_batched) {
       cudaq::qec::simplify_pcm(pcm, weights, n_syndromes_per_round);
   ASSERT_TRUE(cudaq::qec::pcm_is_sorted(simplified_pcm, n_syndromes_per_round));
 
-  const std::size_t window_size = 3;
-  const std::size_t step_size = 1;
   const std::size_t commit_size = window_size - step_size;
   const std::size_t n_windows = (n_rounds - window_size) / step_size + 1;
   const std::size_t num_syndromes_per_window =
@@ -463,12 +461,28 @@ void SlidingWindowDecoderTest(bool run_batched) {
   }
 }
 
-TEST(SlidingWindowDecoder, SlidingWindowDecoderTestNonBatched) {
-  SlidingWindowDecoderTest(false);
+TEST(SlidingWindowDecoder, SlidingWindowDecoderTestNonBatchedStepSize1) {
+  SlidingWindowDecoderTest(false, /*n_rounds=*/8, /*n_errs_per_round=*/30,
+                           /*n_syndromes_per_round=*/10, /*window_size=*/3,
+                           /*step_size=*/1);
 }
 
-TEST(SlidingWindowDecoder, SlidingWindowDecoderTestBatched) {
-  SlidingWindowDecoderTest(true);
+TEST(SlidingWindowDecoder, SlidingWindowDecoderTestBatchedStepSize1) {
+  SlidingWindowDecoderTest(true, /*n_rounds=*/8, /*n_errs_per_round=*/30,
+                           /*n_syndromes_per_round=*/10, /*window_size=*/3,
+                           /*step_size=*/1);
+}
+
+TEST(SlidingWindowDecoder, SlidingWindowDecoderTestNonBatchedStepSize2) {
+  SlidingWindowDecoderTest(false, /*n_rounds=*/13, /*n_errs_per_round=*/30,
+                           /*n_syndromes_per_round=*/10, /*window_size=*/3,
+                           /*step_size=*/2);
+}
+
+TEST(SlidingWindowDecoder, SlidingWindowDecoderTestBatchedStepSize2) {
+  SlidingWindowDecoderTest(true, /*n_rounds=*/13, /*n_errs_per_round=*/30,
+                           /*n_syndromes_per_round=*/10, /*window_size=*/3,
+                           /*step_size=*/2);
 }
 
 TEST(AsyncDecoderResultTest, MoveConstructorTransfersFuture) {
