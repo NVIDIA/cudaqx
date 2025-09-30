@@ -74,7 +74,7 @@ private:
   std::array<double, WindowProcTimes::NUM_WINDOW_PROC_TIMES>
       window_proc_times_arr = {};
 
-protected:
+private:
   void validate_inputs() {
     if (window_size < 1 || window_size > num_rounds) {
       throw std::invalid_argument(
@@ -121,6 +121,39 @@ protected:
       throw std::invalid_argument("sliding_window constructor: PCM must be "
                                   "sorted. See cudaq::qec::simplify_pcm.");
     }
+  }
+
+  /// Helper function to initialize the window.
+  /// @param num_syndromes The number of syndromes to initialize the window for.
+  /// This will be 1 for non-batched mode.
+  void initialize_window(std::size_t num_syndromes) {
+    // Initialize the syndrome mods and rw_results.
+    auto t0 = std::chrono::high_resolution_clock::now();
+    window_proc_times_arr.fill(0.0);
+    syndrome_mods.resize(num_syndromes);
+    for (std::size_t s = 0; s < num_syndromes; ++s) {
+      syndrome_mods[s].clear();
+      syndrome_mods[s].resize(this->syndrome_size);
+    }
+    rw_results.clear();
+    rw_results.resize(num_syndromes);
+    for (std::size_t s = 0; s < num_syndromes; ++s) {
+      rw_results[s].converged = true; // Gets set to false if we fail to decode
+      rw_results[s].result.resize(this->block_size);
+    }
+    rolling_window.resize(num_syndromes);
+    for (std::size_t s = 0; s < num_syndromes; ++s) {
+      rolling_window[s].clear();
+      rolling_window[s].resize(num_syndromes_per_window);
+    }
+    window_proc_times.resize(num_windows);
+    std::fill(window_proc_times.begin(), window_proc_times.end(), 0.0);
+    rw_filled = 0;
+    num_rounds_since_last_decode = 0;
+    CUDAQ_DBG("Initializing window");
+    auto t1 = std::chrono::high_resolution_clock::now();
+    window_proc_times_arr[WindowProcTimes::INITIALIZE_WINDOW] =
+        std::chrono::duration<double>(t1 - t0).count() * 1000;
   }
 
 public:
@@ -198,27 +231,7 @@ public:
     }
     // Else we're receiving a single round.
     if (rw_filled == 0) {
-      // Initialize the syndrome mods and rw_results.
-      auto t0 = std::chrono::high_resolution_clock::now();
-      window_proc_times_arr.fill(0.0);
-      syndrome_mods.resize(1);
-      syndrome_mods[0].clear();
-      syndrome_mods[0].resize(this->syndrome_size);
-      rw_results.clear();
-      rw_results.resize(1);
-      rw_results[0].converged = true; // Gets set to false if we fail to decode
-      rw_results[0].result.resize(this->block_size);
-      rolling_window.resize(1);
-      rolling_window[0].clear();
-      rolling_window[0].resize(num_syndromes_per_window);
-      window_proc_times.resize(num_windows);
-      std::fill(window_proc_times.begin(), window_proc_times.end(), 0.0);
-      rw_filled = 0;
-      num_rounds_since_last_decode = 0;
-      CUDAQ_DBG("Initializing window");
-      auto t1 = std::chrono::high_resolution_clock::now();
-      window_proc_times_arr[WindowProcTimes::INITIALIZE_WINDOW] =
-          std::chrono::duration<double>(t1 - t0).count() * 1000;
+      initialize_window(/*num_syndromes=*/1);
     }
     if (this->rw_filled == num_syndromes_per_window) {
       auto t0 = std::chrono::high_resolution_clock::now();
@@ -283,29 +296,7 @@ public:
     }
     // Else we're receiving a single round.
     if (rw_filled == 0) {
-      // Initialize the syndrome mods and rw_results.
-      syndrome_mods.resize(syndromes.size());
-      for (std::size_t s = 0; s < syndromes.size(); ++s) {
-        syndrome_mods[s].clear();
-        syndrome_mods[s].resize(this->syndrome_size);
-      }
-      rw_results.clear();
-      rw_results.resize(syndromes.size());
-      for (std::size_t s = 0; s < syndromes.size(); ++s) {
-        rw_results[s].converged =
-            true; // Gets set to false if we fail to decode
-        rw_results[s].result.resize(this->block_size);
-      }
-      rolling_window.resize(syndromes.size());
-      for (std::size_t s = 0; s < syndromes.size(); ++s) {
-        rolling_window[s].clear();
-        rolling_window[s].resize(num_syndromes_per_window);
-      }
-      window_proc_times.resize(num_windows);
-      std::fill(window_proc_times.begin(), window_proc_times.end(), 0.0);
-      rw_filled = 0;
-      num_rounds_since_last_decode = 0;
-      CUDAQ_DBG("Initializing window");
+      initialize_window(syndromes.size());
     }
     if (this->rw_filled == num_syndromes_per_window) {
       CUDAQ_DBG("Window is full, sliding the window");
