@@ -317,6 +317,16 @@ void check_pcm_equality(const cudaqx::tensor<uint8_t> &a,
   }
 }
 
+/// This is a parameterized helper function that tests the sliding window
+/// decoder by comparing the results of the global decoder and the windowed
+/// decoder. The global decoder uses a single decoder for the entire block,
+/// while the windowed decoder uses a sliding window of decoders.
+/// @param run_batched Whether to run the decoder in batched mode.
+/// @param n_rounds The number of rounds in the block.
+/// @param n_errs_per_round The number of error mechanisms per round.
+/// @param n_syndromes_per_round The number of syndromes per round.
+/// @param window_size The size of the sliding window (in rounds).
+/// @param step_size The step size for the sliding window (in rounds).
 void SlidingWindowDecoderTest(bool run_batched, std::size_t n_rounds,
                               std::size_t n_errs_per_round,
                               std::size_t n_syndromes_per_round,

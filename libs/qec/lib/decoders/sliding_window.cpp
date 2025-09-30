@@ -310,6 +310,10 @@ public:
     return std::vector<decoder_result>(); // empty return value
   }
 
+  /// This is an internal helper function that decodes a single window. Regular
+  /// users should use the regular `cudaq::qec::decoder::decode` or
+  /// `cudaq::qec::decoder::decode_batch` functions instead of trying to access
+  /// this function.
   void decode_window() {
     auto t0 = std::chrono::high_resolution_clock::now();
     const auto &w = this->num_windows_decoded;
