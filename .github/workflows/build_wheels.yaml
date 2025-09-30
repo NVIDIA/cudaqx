@@ -194,9 +194,16 @@ jobs:
           python-version: ${{ matrix.python }}
   
       - name: Install requirements
+        shell: bash
         run: |
           bash .github/workflows/scripts/install_git_cli.sh
-          apt install -y --no-install-recommends libgfortran5 libquadmath0 unzip openmpi-bin libopenmpi3
+          apt install -y --no-install-recommends libgfortran5 unzip openmpi-bin libopenmpi3
+          # If this is x86_64, then install libquadmath0. This is normally
+          # installed by Ubuntu Python, but the action/setup-python package does
+          # not install it.
+          if [ "$(uname -m)" == "x86_64" ]; then
+            apt install -y --no-install-recommends libquadmath0
+          fi
   
       - name: Download CUDA-Q wheels
         if: ${{ inputs.cudaq_wheels == 'Custom' }}
@@ -256,9 +263,16 @@ jobs:
           python-version: ${{ matrix.python }}
   
       - name: Install requirements
+        shell: bash
         run: |
           bash .github/workflows/scripts/install_git_cli.sh
-          apt install -y --no-install-recommends libgfortran5 libquadmath0 unzip openmpi-bin libopenmpi3
+          apt install -y --no-install-recommends libgfortran5 unzip openmpi-bin libopenmpi3
+          # If this is x86_64, then install libquadmath0. This is normally
+          # installed by Ubuntu Python, but the action/setup-python package does
+          # not install it.
+          if [ "$(uname -m)" == "x86_64" ]; then
+            apt install -y --no-install-recommends libquadmath0
+          fi
           #echo 'core.%p' | tee /proc/sys/kernel/core_pattern
           #echo "Running cat /proc/sys/kernel/core_pattern"
           #cat /proc/sys/kernel/core_pattern
