@@ -76,6 +76,24 @@ private:
 
 protected:
   void validate_inputs() {
+    if (window_size < 1 || window_size > num_rounds) {
+      throw std::invalid_argument(
+          fmt::format("sliding_window constructor: window_size ({}) must "
+                      "be between 1 and num_rounds ({})",
+                      window_size, num_rounds));
+    }
+    if (step_size < 1 || step_size > window_size) {
+      throw std::invalid_argument(
+          fmt::format("sliding_window constructor: step_size ({}) must "
+                      "be between 1 and window_size ({})",
+                      step_size, window_size));
+    }
+    if ((num_rounds - window_size) % step_size != 0) {
+      throw std::invalid_argument(
+          fmt::format("sliding_window constructor: num_rounds - "
+                      "window_size ({}) must be divisible by step_size ({})",
+                      num_rounds - window_size, step_size));
+    }
     if (num_syndromes_per_round == 0) {
       throw std::invalid_argument("sliding_window constructor: "
                                   "num_syndromes_per_round must be non-zero");
@@ -92,10 +110,6 @@ protected:
     if (inner_decoder_params.empty()) {
       CUDAQ_WARN("sliding_window constructor: inner_decoder_params is empty. "
                  "Is that intentional?");
-    }
-    if (step_size == 0) {
-      throw std::invalid_argument(
-          "sliding_window constructor: step_size must be non-zero");
     }
     if (error_rate_vec.empty()) {
       throw std::invalid_argument(
@@ -130,11 +144,11 @@ public:
     inner_decoder_params = params.get<cudaqx::heterogeneous_map>(
         "inner_decoder_params", inner_decoder_params);
 
-    validate_inputs();
-
     num_rounds = H.shape()[0] / num_syndromes_per_round;
     num_windows = (num_rounds - window_size) / step_size + 1;
     num_syndromes_per_window = num_syndromes_per_round * window_size;
+
+    validate_inputs();
 
     // Create the inner decoders.
     for (std::size_t w = 0; w < num_windows; ++w) {
