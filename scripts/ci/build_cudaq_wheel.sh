@@ -15,7 +15,7 @@ mkdir /wheels
 git clone --filter=tree:0 https://github.com/NVIDIA/cuda-quantum.git /cuda-quantum
 cd /cuda-quantum
 
-export CUDA_VERSION=12.0
+export CUDA_VERSION=12.6
 
 # We need to use a newer toolchain because CUDA-QX libraries rely on c++20
 source /opt/rh/gcc-toolset-11/enable

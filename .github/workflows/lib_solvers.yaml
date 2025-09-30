@@ -12,7 +12,7 @@ jobs:
       matrix:
         platform: ['amd64', 'arm64']
     runs-on: ${{ startsWith(github.repository, 'NVIDIA/cudaqx') && format('linux-{0}-cpu8', matrix.platform) || 'ubuntu-latest' }}
-    container: ghcr.io/nvidia/cuda-quantum-devdeps:ext-${{ matrix.platform }}-cu12.0-gcc11-main
+    container: ghcr.io/nvidia/cuda-quantum-devdeps:ext-${{ matrix.platform }}-cu12.6-gcc11-main
     permissions:
       actions: write
       contents: read
@@ -57,7 +57,7 @@ jobs:
 
       - name: Install build requirements
         run: |
-          apt install -y --no-install-recommends gfortran libblas-dev libcusolver-dev-12-0
+          apt install -y --no-install-recommends gfortran libblas-dev
 
       - name: Build
         id: build

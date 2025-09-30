@@ -1,14 +1,14 @@
 #!/bin/sh
 
 # ============================================================================ #
-# Copyright (c) 2022 - 2024 NVIDIA Corporation & Affiliates.                   #
+# Copyright (c) 2022 - 2025 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
-IMAGE_NAME=ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-amd64-cu12.0-gcc11-main
+IMAGE_NAME=ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-amd64-cu12.6-gcc11-main
 
 CONTAINER_NAME=cudaqx_wheel_builder
 CONTAINER_STATUS=$(docker container inspect -f '{{.State.Status}}' $CONTAINER_NAME 2>/dev/null)

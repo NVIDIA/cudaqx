@@ -12,7 +12,7 @@ jobs:
       matrix:
         platform: ['amd64', 'arm64']
     runs-on: ${{ startsWith(github.repository, 'NVIDIA/cudaqx') && format('linux-{0}-cpu8', matrix.platform) || 'ubuntu-latest' }}
-    container: ghcr.io/nvidia/cuda-quantum-devdeps:ext-${{ matrix.platform }}-cu12.0-gcc11-main
+    container: ghcr.io/nvidia/cuda-quantum-devdeps:ext-${{ matrix.platform }}-cu12.6-gcc11-main
     permissions:
       actions: write
       contents: read
@@ -57,7 +57,7 @@ jobs:
 
       - name: Install build requirements
         run: |
-          apt install -y --no-install-recommends gfortran libblas-dev libcusolver-dev-12-0
+          apt install -y --no-install-recommends gfortran libblas-dev
 
       - name: Build
         id: build
@@ -82,8 +82,15 @@ jobs:
       - name: Install python requirements
         env:
           LD_LIBRARY_PATH: ${{ env.MPI_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
-        # Note: install tensor_network_decoder's dependencies quimb, opt_einsum, and torch when we advance to Python 3.11
-        run: pip install numpy pytest cupy-cuda12x cuquantum-cu12 torch lightning ml_collections mpi4py transformers
+        shell: bash
+        run: |
+          pip install numpy pytest cupy-cuda12x cuquantum-cu12 torch lightning ml_collections mpi4py transformers quimb opt_einsum torch nvidia-cublas-cu12 cuquantum-python-cu12==25.06
+          # The following tests are needed for docs/sphinx/examples/qec/python/tensor_network_decoder.py.
+          if [ "$(uname -m)" == "x86_64" ]; then
+              # Stim is not currently available on manylinux ARM wheels, so only
+              # install for x86_64.
+              pip install stim beliefmatching
+          fi
 
       - name: Run Python tests
         env:
