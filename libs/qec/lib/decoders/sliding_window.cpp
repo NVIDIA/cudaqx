@@ -66,6 +66,9 @@ private:
   // State data
   std::vector<std::vector<cudaq::qec::float_t>>
       rolling_window; // [batch_size, num_syndromes_per_window]
+  // rolling window read and write indices (circular buffer)
+  std::size_t rw_next_write_index = 0; // [0, num_syndromes_per_window)
+  std::size_t rw_next_read_index = 0;  // [0, num_syndromes_per_window)
   std::size_t rw_filled = 0;
   std::size_t num_windows_decoded = 0;
   std::vector<std::vector<bool>> syndrome_mods; // [batch_size, syndrome_size]
@@ -74,7 +77,6 @@ private:
   std::array<double, WindowProcTimes::NUM_WINDOW_PROC_TIMES>
       window_proc_times_arr = {};
 
-private:
   void validate_inputs() {
     if (window_size < 1 || window_size > num_rounds) {
       throw std::invalid_argument(
@@ -148,12 +150,91 @@ private:
     }
     window_proc_times.resize(num_windows);
     std::fill(window_proc_times.begin(), window_proc_times.end(), 0.0);
+    rw_next_write_index = 0;
+    rw_next_read_index = 0;
     rw_filled = 0;
     num_rounds_since_last_decode = 0;
     CUDAQ_DBG("Initializing window");
     auto t1 = std::chrono::high_resolution_clock::now();
     window_proc_times_arr[WindowProcTimes::INITIALIZE_WINDOW] =
         std::chrono::duration<double>(t1 - t0).count() * 1000;
+  }
+
+  /// Helper function to add a single syndrome to the rolling window (circular
+  /// buffer).
+  void add_syndrome_to_rolling_window(const std::vector<float_t> &syndrome,
+                                      std::size_t syndrome_index,
+                                      bool update_next_write_index = true) {
+    // This assumes that the syndrome size evenly divides into the rolling
+    // window (of length num_syndromes_per_window), so verify that here.
+    if (num_syndromes_per_window % syndrome.size() != 0) {
+      throw std::invalid_argument(
+          fmt::format("add_syndrome_to_rolling_window: syndrome "
+                      "size ({}) must evenly divide into the rolling "
+                      "window size ({})",
+                      syndrome.size(), num_syndromes_per_window));
+    }
+    std::copy(syndrome.begin(), syndrome.end(),
+              rolling_window[syndrome_index].begin() + rw_next_write_index);
+    if (update_next_write_index) {
+      rw_next_write_index += syndrome.size();
+      if (rw_next_write_index >= num_syndromes_per_window)
+        rw_next_write_index = 0;
+    }
+  }
+
+  /// Helper function to add a batch of syndromes to the rolling window
+  /// (circular buffer).
+  void add_syndromes_to_rolling_window(
+      const std::vector<std::vector<float_t>> &syndromes) {
+    // Set update_next_write_index to false in the loop because we will update
+    // it once at the end.
+    for (std::size_t s = 0; s < syndromes.size(); ++s) {
+      add_syndrome_to_rolling_window(syndromes[s], s,
+                                     /*update_next_write_index=*/false);
+      if (syndromes[s].size() != syndromes[0].size()) {
+        throw std::invalid_argument(
+            fmt::format("add_syndromes_to_rolling_window: syndrome "
+                        "size ({}) must be the same as the first syndrome "
+                        "size ({})",
+                        syndromes[s].size(), syndromes[0].size()));
+      }
+    }
+    rw_next_write_index += syndromes[0].size();
+    if (rw_next_write_index >= num_syndromes_per_window)
+      rw_next_write_index = 0;
+  }
+
+  /// Helper function to get a single syndrome from the rolling window
+  /// (unwrapping a circular buffer).
+  std::vector<float_t>
+  get_syndrome_from_rolling_window(std::size_t syndrome_index) {
+    std::vector<float_t> syndrome(num_syndromes_per_window);
+    // Copy from rw_next_read_index to the end of the buffer.
+    std::copy(rolling_window[syndrome_index].begin() + rw_next_read_index,
+              rolling_window[syndrome_index].end(), syndrome.begin());
+    // Copy from the beginning of the rolling window to rw_next_read_index.
+    std::copy(rolling_window[syndrome_index].begin(),
+              rolling_window[syndrome_index].begin() + rw_next_read_index,
+              syndrome.end() - rw_next_read_index);
+    return syndrome;
+  }
+
+  /// Helper function to get a batch of syndromes from the rolling window
+  /// (unwrapping a circular buffer).
+  std::vector<std::vector<float_t>> get_syndromes_from_rolling_window() {
+    std::vector<std::vector<float_t>> syndromes(rolling_window.size());
+    for (std::size_t s = 0; s < rolling_window.size(); ++s) {
+      syndromes[s] = get_syndrome_from_rolling_window(s);
+    }
+    return syndromes;
+  }
+
+  /// Helper function to update the read index for the rolling window.
+  void update_rw_next_read_index() {
+    rw_next_read_index += step_size * num_syndromes_per_round;
+    if (rw_next_read_index >= num_syndromes_per_window)
+      rw_next_read_index -= num_syndromes_per_window;
   }
 
 public:
@@ -236,10 +317,8 @@ public:
     if (this->rw_filled == num_syndromes_per_window) {
       auto t0 = std::chrono::high_resolution_clock::now();
       CUDAQ_DBG("Window is full, sliding the window");
-      std::copy(this->rolling_window[0].begin() + num_syndromes_per_round,
-                this->rolling_window[0].end(), this->rolling_window[0].begin());
-      std::copy(syndrome.begin(), syndrome.end(),
-                this->rolling_window[0].end() - num_syndromes_per_round);
+      add_syndrome_to_rolling_window(syndrome, 0);
+
       auto t1 = std::chrono::high_resolution_clock::now();
       window_proc_times_arr[WindowProcTimes::SLIDE_WINDOW] +=
           std::chrono::duration<double>(t1 - t0).count() * 1000;
@@ -247,8 +326,7 @@ public:
       // Just copy the data to the end of the rolling window.
       auto t0 = std::chrono::high_resolution_clock::now();
       CUDAQ_DBG("Copying data to the end of the rolling window");
-      std::copy(syndrome.begin(), syndrome.end(),
-                this->rolling_window[0].begin() + this->rw_filled);
+      add_syndrome_to_rolling_window(syndrome, 0);
       this->rw_filled += num_syndromes_per_round;
       auto t1 = std::chrono::high_resolution_clock::now();
       window_proc_times_arr[WindowProcTimes::COPY_DATA] +=
@@ -302,21 +380,12 @@ public:
       CUDAQ_DBG("Window is full, sliding the window");
       // The window is full. Slide existing data to the left and write the new
       // data at the end.
-      for (std::size_t s = 0; s < syndromes.size(); ++s) {
-        std::copy(this->rolling_window[s].begin() + num_syndromes_per_round,
-                  this->rolling_window[s].end(),
-                  this->rolling_window[s].begin());
-        std::copy(syndromes[s].begin(), syndromes[s].end(),
-                  this->rolling_window[s].end() - num_syndromes_per_round);
-      }
+      add_syndromes_to_rolling_window(syndromes);
       num_rounds_since_last_decode++;
     } else {
       // Just copy the data to the end of the rolling window.
       CUDAQ_DBG("Copying data to the end of the rolling window");
-      for (std::size_t s = 0; s < syndromes.size(); ++s) {
-        std::copy(syndromes[s].begin(), syndromes[s].end(),
-                  this->rolling_window[s].begin() + this->rw_filled);
-      }
+      add_syndromes_to_rolling_window(syndromes);
       this->rw_filled += num_syndromes_per_round;
       num_rounds_since_last_decode++;
     }
@@ -358,11 +427,15 @@ public:
     if (w > 0) {
       // Modify the syndrome slice to account for the previous windows.
       for (std::size_t s = 0; s < this->rolling_window.size(); ++s) {
+        std::size_t r2 = rw_next_read_index;
         for (std::size_t r = 0; r < num_syndromes_per_window; ++r) {
-          auto &slice_val = this->rolling_window[s].at(r);
+          auto &slice_val = this->rolling_window[s].at(r2);
           slice_val =
               static_cast<double>(static_cast<std::uint8_t>(slice_val) ^
                                   syndrome_mods[s].at(r + syndrome_start));
+          r2++;
+          if (r2 >= num_syndromes_per_window)
+            r2 = 0;
         }
       }
     }
@@ -374,10 +447,14 @@ public:
     std::vector<decoder_result> inner_results;
     if (this->rolling_window.size() == 1) {
       inner_results.push_back(
-          inner_decoders[w]->decode(this->rolling_window[0]));
+          inner_decoders[w]->decode(get_syndrome_from_rolling_window(0)));
     } else {
-      inner_results = inner_decoders[w]->decode_batch(this->rolling_window);
+      inner_results =
+          inner_decoders[w]->decode_batch(get_syndromes_from_rolling_window());
     }
+    // We've grabbed data from the rolling window, so we need to update the
+    // read index for the next call to decode_window.
+    update_rw_next_read_index();
     if (!inner_results[0].converged) {
       CUDAQ_DBG("Window {}: inner decoder failed to converge", w);
     }
