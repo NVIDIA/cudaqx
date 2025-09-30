@@ -20,7 +20,7 @@ show_help() {
     echo "  --build-type      Build type (e.g., Release)"
     echo "  --cudaq-prefix    Path to CUDA-Q's install prefix"
     echo "                    (default: \$HOME/.cudaq)"
-    echo "  --python-version  Python version to build wheel for (e.g. 3.10)"
+    echo "  --python-version  Python version to build wheel for (e.g. 3.11)"
     echo "  --devdeps         Build wheels suitable for internal testing"
     echo "                    (not suitable for distribution but sometimes"
     echo "                    helpful for debugging)"
@@ -88,7 +88,7 @@ parse_options() {
 # Defaults
 cudaq_prefix=$HOME/.cudaq
 build_type=Release
-python_version=3.10
+python_version=3.11
 devdeps=false
 wheels_version=0.0.0
 
