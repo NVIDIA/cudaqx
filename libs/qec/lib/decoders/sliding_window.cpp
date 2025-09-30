@@ -74,28 +74,8 @@ private:
   std::array<double, WindowProcTimes::NUM_WINDOW_PROC_TIMES>
       window_proc_times_arr = {};
 
-public:
-  sliding_window(const cudaqx::tensor<uint8_t> &H,
-                 const cudaqx::heterogeneous_map &params)
-      : decoder(H), full_pcm(H) {
-    full_pcm_T = full_pcm.transpose();
-    // Fetch parameters from the params map.
-    window_size = params.get<std::size_t>("window_size", window_size);
-    step_size = params.get<std::size_t>("step_size", step_size);
-    num_syndromes_per_round = params.get<std::size_t>("num_syndromes_per_round",
-                                                      num_syndromes_per_round);
-    straddle_start_round =
-        params.get<bool>("straddle_start_round", straddle_start_round);
-    straddle_end_round =
-        params.get<bool>("straddle_end_round", straddle_end_round);
-    error_rate_vec = params.get<std::vector<cudaq::qec::float_t>>(
-        "error_rate_vec", error_rate_vec);
-    inner_decoder_name =
-        params.get<std::string>("inner_decoder_name", inner_decoder_name);
-    inner_decoder_params = params.get<cudaqx::heterogeneous_map>(
-        "inner_decoder_params", inner_decoder_params);
-
-    // Perform error checking on the inputs.
+protected:
+  void validate_inputs() {
     if (num_syndromes_per_round == 0) {
       throw std::invalid_argument("sliding_window constructor: "
                                   "num_syndromes_per_round must be non-zero");
@@ -127,6 +107,30 @@ public:
       throw std::invalid_argument("sliding_window constructor: PCM must be "
                                   "sorted. See cudaq::qec::simplify_pcm.");
     }
+  }
+
+public:
+  sliding_window(const cudaqx::tensor<uint8_t> &H,
+                 const cudaqx::heterogeneous_map &params)
+      : decoder(H), full_pcm(H) {
+    full_pcm_T = full_pcm.transpose();
+    // Fetch parameters from the params map.
+    window_size = params.get<std::size_t>("window_size", window_size);
+    step_size = params.get<std::size_t>("step_size", step_size);
+    num_syndromes_per_round = params.get<std::size_t>("num_syndromes_per_round",
+                                                      num_syndromes_per_round);
+    straddle_start_round =
+        params.get<bool>("straddle_start_round", straddle_start_round);
+    straddle_end_round =
+        params.get<bool>("straddle_end_round", straddle_end_round);
+    error_rate_vec = params.get<std::vector<cudaq::qec::float_t>>(
+        "error_rate_vec", error_rate_vec);
+    inner_decoder_name =
+        params.get<std::string>("inner_decoder_name", inner_decoder_name);
+    inner_decoder_params = params.get<cudaqx::heterogeneous_map>(
+        "inner_decoder_params", inner_decoder_params);
+
+    validate_inputs();
 
     num_rounds = H.shape()[0] / num_syndromes_per_round;
     num_windows = (num_rounds - window_size) / step_size + 1;
