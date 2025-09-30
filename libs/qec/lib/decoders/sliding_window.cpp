@@ -50,8 +50,18 @@ private:
   cudaqx::tensor<std::uint8_t> full_pcm;
   cudaqx::tensor<std::uint8_t> full_pcm_T;
 
-  // Constants
-  static constexpr int NUM_WINDOW_PROC_TIMES = 10;
+  // Enum type for timing data.
+  enum WindowProcTimes {
+    INITIALIZE_WINDOW,     // 0
+    SLIDE_WINDOW,          // 1
+    COPY_DATA,             // 2
+    INDEX_CALCULATION,     // 3
+    MODIFY_SYNDROME_SLICE, // 4
+    INNER_DECODE,          // 5
+    CONVERT_TO_HARD,       // 6
+    COMMIT_TO_RESULT,      // 7
+    NUM_WINDOW_PROC_TIMES  // 8
+  };
 
   // State data
   std::vector<std::vector<cudaq::qec::float_t>>
@@ -61,7 +71,8 @@ private:
   std::vector<std::vector<bool>> syndrome_mods; // [batch_size, syndrome_size]
   std::vector<decoder_result> rw_results;       // [batch_size]
   std::vector<double> window_proc_times;
-  std::array<double, NUM_WINDOW_PROC_TIMES> window_proc_times_arr = {};
+  std::array<double, WindowProcTimes::NUM_WINDOW_PROC_TIMES>
+      window_proc_times_arr = {};
 
 public:
   sliding_window(const cudaqx::tensor<uint8_t> &H,
@@ -188,7 +199,7 @@ public:
       num_rounds_since_last_decode = 0;
       CUDAQ_DBG("Initializing window");
       auto t1 = std::chrono::high_resolution_clock::now();
-      window_proc_times_arr[0] =
+      window_proc_times_arr[WindowProcTimes::INITIALIZE_WINDOW] =
           std::chrono::duration<double>(t1 - t0).count() * 1000;
     }
     if (this->rw_filled == num_syndromes_per_window) {
@@ -199,7 +210,7 @@ public:
       std::copy(syndrome.begin(), syndrome.end(),
                 this->rolling_window[0].end() - num_syndromes_per_round);
       auto t1 = std::chrono::high_resolution_clock::now();
-      window_proc_times_arr[1] +=
+      window_proc_times_arr[WindowProcTimes::SLIDE_WINDOW] +=
           std::chrono::duration<double>(t1 - t0).count() * 1000;
     } else {
       // Just copy the data to the end of the rolling window.
@@ -209,7 +220,7 @@ public:
                 this->rolling_window[0].begin() + this->rw_filled);
       this->rw_filled += num_syndromes_per_round;
       auto t1 = std::chrono::high_resolution_clock::now();
-      window_proc_times_arr[2] +=
+      window_proc_times_arr[WindowProcTimes::COPY_DATA] +=
           std::chrono::duration<double>(t1 - t0).count() * 1000;
     }
     num_rounds_since_last_decode++;
@@ -420,15 +431,15 @@ public:
     auto t7 = std::chrono::high_resolution_clock::now();
     window_proc_times.at(w) +=
         std::chrono::duration<double>(t7 - t0).count() * 1000;
-    window_proc_times_arr[3] =
+    window_proc_times_arr[WindowProcTimes::INDEX_CALCULATION] =
         std::chrono::duration<double>(t3 - t0).count() * 1000;
-    window_proc_times_arr[4] =
+    window_proc_times_arr[WindowProcTimes::MODIFY_SYNDROME_SLICE] =
         std::chrono::duration<double>(t4 - t3).count() * 1000;
-    window_proc_times_arr[5] =
+    window_proc_times_arr[WindowProcTimes::INNER_DECODE] =
         std::chrono::duration<double>(t5 - t4).count() * 1000;
-    window_proc_times_arr[6] =
+    window_proc_times_arr[WindowProcTimes::CONVERT_TO_HARD] =
         std::chrono::duration<double>(t6 - t5).count() * 1000;
-    window_proc_times_arr[7] =
+    window_proc_times_arr[WindowProcTimes::COMMIT_TO_RESULT] =
         std::chrono::duration<double>(t7 - t6).count() * 1000;
     CUDAQ_INFO("Window {} time: {:.3f} ms (0:{:.3f}ms 1:{:.3f}ms 2:{:.3f}ms "
                "3:{:.3f}ms 4:{:.3f}ms 5:{:.3f}ms 6:{:.3f}ms 7:{:.3f}ms)",
