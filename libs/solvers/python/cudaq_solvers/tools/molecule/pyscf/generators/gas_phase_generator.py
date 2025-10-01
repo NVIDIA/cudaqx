@@ -65,47 +65,92 @@ class GasPhaseGenerator(HamiltonianGenerator):
 
         return one_body_coeff, two_body_coeff, ecore
 
-    def generate_molecular_spin_ham_ur(self, h1e, h2e, h2e_prime, ecore):
+    def a_idx(p):
+        return 2 * p  # alpha spin-orbital index
+
+    def b_idx(p):
+        return 2 * p + 1  # beta  spin-orbital index
+
+    def generate_molecular_spin_ham_ur(self, h1e_alpha,
+                                        h1e_beta,
+                                        h2e_alpha_alpha,  # `(pq|rs)`
+                                        h2e_beta_beta,  # `(pq|rs)`
+                                        h2e_alpha_beta,  # `(pq|rs)`
+                                        h2e_beta_alpha,  # `(pq|rs)`
+                                        ecore):
 
         # This function generates the molecular spin Hamiltonian
         # H= E_core+sum_{pq}  h_{pq} a_p^dagger a_q +
-        #                          0.5 * h_{pqrs} a_p^dagger a_q^dagger a_r a_s
-        # h1e: one body integrals h_{pq}
-        # h2e: two body integrals h_{pqrs}
-        # ecore: constant (nuclear repulsion or core energy in the active space Hamiltonian)
+        #  0.5 * h_{pqrs} a_p^dagger a_q^dagger a_s a_r
+        
+        #Inputs:
+        #h1e_alpha, h1e_beta:  (nmo, nmo) one-electron MO integrals for alpha and beta
+        #h2e_*:                (nmo, nmo, nmo, nmo) two-electron MO integrals (pq|rs)
+        #ecore:                nuclear repulsion
+        #
+        #Returns:
+        #  `one_body_coeff: (2nmo, 2nmo)`
+        #  `two_body_coeff: (2nmo, 2nmo, 2nmo, 2nmo)`
+        #  `ecore:          float`(nuclear repulsion or core energy in the active space Hamiltonian)
 
-        # Total number of qubits equals the number of spin molecular orbitals
-        nqubits = 2 * h1e[0].shape[0]
+        
+        n_mos = h1e_alpha.shape[0]
+        nqubits = 2 * n_mos
 
-        # Initialization
-        one_body_coeff = np.zeros((nqubits, nqubits))
-        two_body_coeff = np.zeros((nqubits, nqubits, nqubits, nqubits))
+        one_body_coeff = np.zeros((nqubits, nqubits), dtype=np.complex128)
+        two_body_coeff = np.zeros((nqubits, nqubits, nqubits, nqubits),
+                                dtype=np.complex128)
+        
 
-        for p in range(nqubits // 2):
-            for q in range(nqubits // 2):
+        # ---------- One-body terms ----------
+        for p in range(n_mos):
+            for q in range(n_mos):
+                # Alpha spin
+                one_body_coeff[a_idx(p), a_idx(q)] = h1e_alpha[p, q]
 
-                # p & q have the same spin <a|a>, <b,b>
-                one_body_coeff[2 * p, 2 * q] = h1e[0, p, q]
-                one_body_coeff[2 * p + 1, 2 * q + 1] = h1e[1, p, q]
+                # Beta spin
+                one_body_coeff[b_idx(p), b_idx(q)] = h1e_beta[p, q]
 
-                for r in range(nqubits // 2):
-                    for s in range(nqubits // 2):
+        # ---------- Two-body terms ----------
+        half = 0.5
+        for p in range(n_mos):
+            for q in range(n_mos):
+                for r in range(n_mos):
+                    for s in range(n_mos):
+                        # --- alpha-alpha ---
+                        val = half * h2e_alpha_alpha[p, q, r, s]
+                        two_body_coeff[a_idx(p),
+                                    a_idx(q),
+                                    a_idx(s),
+                                    a_idx(r)] += val
+                        
 
-                        # Same spin (aaaa, bbbbb) <a|a><a|a>, <b|b><b|b>
-                        two_body_coeff[2 * p, 2 * q, 2 * r,
-                                       2 * s] = 0.5 * h2e[0, p, q, r, s]
-                        two_body_coeff[2 * p + 1, 2 * q + 1, 2 * r + 1,
-                                       2 * s + 1] = 0.5 * h2e[2, p, q, r, s]
+                        # --- beta-beta ---
+                        val = half * h2e_beta_beta[p, q, r, s]
+                        two_body_coeff[b_idx(p),
+                                    b_idx(q),
+                                    b_idx(s),
+                                    b_idx(r)] += val
 
-                        # Mixed spin(abba, baab) <a|a><b|b>, <b|b><a|a>
-                        two_body_coeff[2 * p + 1, 2 * q, 2 * r,
-                                       2 * s + 1] = 0.5 * h2e_prime[p, q, r, s]
-                        two_body_coeff[2 * p, 2 * q + 1, 2 * r + 1,
-                                       2 * s] = 0.5 * h2e[1, p, q, r, s]
+                        # --- alpha-beta ---
+                        # a_{pα}† b_{qβ}† b_{sβ} a_{rα}
+                        val = half * h2e_alpha_beta[p, q, r, s]
+                        two_body_coeff[a_idx(p),
+                                    b_idx(q),
+                                    b_idx(s),
+                                    a_idx(r)] += val
 
-        return one_body_coeff, two_body_coeff, ecore
+                        # --- beta-alpha ---
+                        # b_{pβ}† a_{qα}† a_{sα} b_{rβ}
+                        val = half * h2e_beta_alpha[p, q, r, s]
+                        two_body_coeff[b_idx(p),
+                                    a_idx(q),
+                                    a_idx(s),
+                                    b_idx(r)] += val
+        
+        return one_body_coeff, two_body_coeff, ecore, 
 
-
+        
 ####################################################################
 
 # A- Without solvent
@@ -134,14 +179,21 @@ class GasPhaseGenerator(HamiltonianGenerator):
                         or have values")
 
         ########################################################################
-        # To add (coming soon)
+        # To add 
 
-        if UR and nele_cas is None:
+        if UR and integrals_natorb:
             raise RuntimeError(
-                "WARN: Unrestricted spin calculation for the full space is not supported yet on Cudaq.\
-                        Only active space is currently supported for the unrestricted spin calculations."
+                "WARN: .[pyscf] WARNING: integrals_natorb is not supported for unrestricted calculations. \
+                Set integrals_natorb to False. HF molecular orbitals are only supported for calculating integrals."
             )
-
+        
+        if UR and integrals_casscf:
+            raise RuntimeError(
+                "WARN: .[pyscf] WARNING: integrals_casscf is not supported for unrestricted calculations. \
+                Set integrals_casscf to False. HF molecular orbitals are only supported for calculating integrals."
+            )
+        ########################################################################
+        
         mol = gto.M(atom=xyz,
                     spin=spin,
                     charge=charge,
@@ -172,21 +224,38 @@ class GasPhaseGenerator(HamiltonianGenerator):
                       norb)
 
         else:
-            myhf = scf.RHF(mol)
-            myhf.max_cycle = cycles
-            myhf.chkfile = filename + '-pyscf.chk'
-            myhf.init_guess = initguess
-            myhf.kernel()
+            if spin ==0 :
+                myhf = scf.RHF(mol)
+                myhf.max_cycle = cycles
+                myhf.chkfile = filename + '-pyscf.chk'
+                myhf.init_guess = initguess
+                myhf.kernel()
 
-            norb = myhf.mo_coeff.shape[1]
-            if verbose:
-                print('[pyscf] Total number of orbitals = ', norb)
+                norb = myhf.mo_coeff.shape[1]
+                if verbose:
+                    print('[pyscf] Total number of orbitals = ', norb)
+            else:
+                myhf = scf.ROHF(mol)
+                myhf.max_cycle = cycles
+                myhf.chkfile = filename + '-pyscf.chk'
+                myhf.init_guess = initguess
+                myhf.kernel()
+
+                norb = myhf.mo_coeff.shape[1]
+                if verbose:
+                    print('[pyscf] Total number of orbitals = ', norb)
 
         nelec = mol.nelectron
         energies['hf_energy'] = myhf.e_tot
+        
         if verbose:
             print('[pyscf] Total number of electrons = ', nelec)
             print('[pyscf] HF energy = ', myhf.e_tot)
+        
+        if not myhf.converged:
+
+            raise ValueError("[pyscf] WARNING: HF calculation did not converge!")
+
 
         ##########################
         # MP2
@@ -241,6 +310,7 @@ class GasPhaseGenerator(HamiltonianGenerator):
                                 '[pyscf] Natural orbital occupation number from R-MP2: '
                             )
                             print(noons)
+            energies['MP2_energy'] = mymp.e_tot
 
         #######################################
         # CASCI if active space is defined
@@ -249,22 +319,44 @@ class GasPhaseGenerator(HamiltonianGenerator):
         if casci:
 
             if UR:
-                if natorb:
-                    mycasci = mcscf.UCASCI(myhf, norb_cas, nele_cas)
-                    mycasci.kernel(natorbs)
+                if nele_cas is None:
+                    myfci = fci.FCI(myhf)
+                    result = myfci.kernel()
+                    energies['fci'] = result[0]
                     if verbose:
-                        print(
-                            '[pyscf] UR-CASCI energy using natural orbitals= ',
-                            mycasci.e_tot)
-                    energies['UR-CASCI'] = mycasci.e_tot
-                else:
-                    mycasci_mo = mcscf.UCASCI(myhf, norb_cas, nele_cas)
-                    mycasci_mo.kernel()
-                    if verbose:
-                        print(
-                            '[pyscf] UR-CASCI energy using molecular orbitals= ',
-                            mycasci_mo.e_tot)
-                    energies['UR-CASCI'] = mycasci_mo.e_tot
+                        print('[pyscf] FCI energy = ', result[0])
+                        
+                else: 
+                    # Convert `nele_cas` to the correct format for UCASCI
+                    if isinstance(nele_cas, (int, float)):
+                        # For unrestricted calculations, `nele_cas` must be a tuple (alpha, beta)
+                        nelec_beta = (nele_cas - mol.spin) // 2
+                        nelec_alpha = nele_cas - nelec_beta
+                        nele_cas_tuple = (nelec_alpha, nelec_beta)
+                        if verbose:
+                            print(
+                                f'[pyscf] Converting nele_cas from {nele_cas} to {nele_cas_tuple} (alpha, beta)'
+                            )
+                    else:
+                        # If already a tuple, use as is
+                        nele_cas_tuple = nele_cas
+                        
+                    if natorb:
+                        mycasci = mcscf.UCASCI(myhf, norb_cas, nele_cas_tuple)
+                        mycasci.kernel(natorbs)
+                        if verbose:
+                            print(
+                                '[pyscf] UR-CASCI energy using natural orbitals= ',
+                                mycasci.e_tot)
+                        energies['UR-CASCI'] = mycasci.e_tot
+                    else:
+                        mycasci = mcscf.UCASCI(myhf, norb_cas, nele_cas_tuple)
+                        mycasci.kernel()
+                        if verbose:
+                            print(
+                                '[pyscf] UR-CASCI energy using molecular orbitals= ',
+                                mycasci.e_tot)
+                        energies['UR-CASCI'] = mycasci.e_tot
 
             else:
                 if nele_cas is None:
@@ -291,14 +383,14 @@ class GasPhaseGenerator(HamiltonianGenerator):
                         )
 
                     else:
-                        mycasci_mo = mcscf.CASCI(myhf, norb_cas, nele_cas)
-                        mycasci_mo.kernel()
+                        mycasci = mcscf.CASCI(myhf, norb_cas, nele_cas)
+                        mycasci.kernel()
                         if verbose:
                             print(
                                 '[pyscf] R-CASCI energy using molecular orbitals= ',
-                                mycasci_mo.e_tot)
+                                mycasci.e_tot)
 
-                        energies['R-CASCI'] = mycasci_mo.e_tot
+                        energies['R-CASCI'] = mycasci.e_tot
 
         ########################
         # CCSD
@@ -306,34 +398,54 @@ class GasPhaseGenerator(HamiltonianGenerator):
         if ccsd:
 
             if UR:
-
-                mc = mcscf.UCASCI(myhf, norb_cas, nele_cas)
-                frozen = []
-                frozen = [y for y in range(0, mc.ncore[0])]
-                frozen += [
-                    y for y in range(mc.ncore[0] +
-                                     mc.ncas, len(myhf.mo_coeff[0]))
-                ]
-
-                if natorb:
-                    mycc = cc.UCCSD(myhf, frozen=frozen, mo_coeff=natorbs)
-                    mycc.max_cycle = cycles
-                    mycc.kernel()
+                
+                if nele_cas is None:
+                    mycc = myhf.CCSD().run()
                     if verbose:
-                        print(
-                            '[pyscf] UR-CCSD energy of the active space using natural orbitals= ',
-                            mycc.e_tot)
+                        print('[pyscf] Total UR-CCSD energy = ', mycc.e_tot)
 
                 else:
-                    mycc = cc.UCCSD(myhf, frozen=frozen)
-                    mycc.max_cycle = cycles
-                    mycc.kernel()
-                    if verbose:
-                        print(
-                            '[pyscf] UR-CCSD energy of the active space using molecular orbitals= ',
-                            mycc.e_tot)
+                    
+                    if isinstance(nele_cas, (int, float)):
+                        # For unrestricted calculations, `nele_cas` must be a tuple (alpha, beta)
+                        nelec_beta = (nele_cas - mol.spin) // 2
+                        nelec_alpha = nele_cas - nelec_beta
+                        nele_cas_tuple = (nelec_alpha, nelec_beta)
+                        if verbose:
+                            print(
+                                f'[pyscf] Converting nele_cas from {nele_cas} to {nele_cas_tuple} (alpha, beta)'
+                            )
+                    else:
+                        # If already a tuple, use as is
+                        nele_cas_tuple = nele_cas
 
-                energies['UR-CCSD'] = mycc.e_tot
+                    mc = mcscf.UCASCI(myhf, norb_cas, nele_cas_tuple)
+                    frozen = []
+                    frozen = [y for y in range(0, mc.ncore[0])]
+                    frozen += [
+                        y for y in range(mc.ncore[0] +
+                                        mc.ncas, len(myhf.mo_coeff[0]))
+                    ]
+
+                    if natorb:
+                        mycc = cc.UCCSD(myhf, frozen=frozen, mo_coeff=natorbs)
+                        mycc.max_cycle = cycles
+                        mycc.kernel()
+                        if verbose:
+                            print(
+                                '[pyscf] UR-CCSD energy of the active space using natural orbitals= ',
+                                mycc.e_tot)
+
+                    else:
+                        mycc = cc.UCCSD(myhf, frozen=frozen)
+                        mycc.max_cycle = cycles
+                        mycc.kernel()
+                        if verbose:
+                            print(
+                                '[pyscf] UR-CCSD energy of the active space using molecular orbitals= ',
+                                mycc.e_tot)
+
+                    energies['UR-CCSD'] = mycc.e_tot
 
             else:
                 if nele_cas is None:
@@ -384,8 +496,20 @@ class GasPhaseGenerator(HamiltonianGenerator):
                 raise RuntimeError("WARN: You should define the active space.")
 
             if UR:
+                if isinstance(nele_cas, (int, float)):
+                    # For unrestricted calculations, `nele_cas` must be a tuple (alpha, beta)
+                    nelec_beta = (nele_cas - mol.spin) // 2
+                    nelec_alpha = nele_cas - nelec_beta
+                    nele_cas_tuple = (nelec_alpha, nelec_beta)
+                    if verbose:
+                        print(
+                            f'[pyscf] Converting nele_cas from {nele_cas} to {nele_cas_tuple} (alpha, beta)'
+                        )
+                else:
+                    # If already a tuple, use as is
+                    nele_cas_tuple = nele_cas
                 if natorb:
-                    mycas = mcscf.UCASSCF(myhf, norb_cas, nele_cas)
+                    mycas = mcscf.UCASSCF(myhf, norb_cas, nele_cas_tuple)
                     mycas.max_cycle_macro = cycles
                     mycas.kernel(natorbs)
                     if verbose:
@@ -393,7 +517,7 @@ class GasPhaseGenerator(HamiltonianGenerator):
                             '[pyscf] UR-CASSCF energy using natural orbitals= ',
                             mycas.e_tot)
                 else:
-                    mycas = mcscf.UCASSCF(myhf, norb_cas, nele_cas)
+                    mycas = mcscf.UCASSCF(myhf, norb_cas, nele_cas_tuple)
                     mycas.max_cycle_macro = cycles
                     mycas.kernel()
                     if verbose:
@@ -475,58 +599,118 @@ class GasPhaseGenerator(HamiltonianGenerator):
         ###################################################################################
 
         if UR:
-            if integrals_natorb:
-                mc = mcscf.UCASCI(myhf, norb_cas, nele_cas)
-                h1e, ecore = mc.get_h1eff(natorbs)
-                h1e_cas = np.array(h1e)
-                h2e = mc.get_h2eff(natorbs)
-                h2e_cas = np.array(h2e)
-                h2e_cas[0] = np.asarray(h2e_cas[0].transpose(0, 2, 3, 1),
-                                        order='C')
-                h2e_cas[1] = np.asarray(h2e_cas[1].transpose(0, 2, 3, 1),
-                                        order='C')
-                h2e_cas[2] = np.asarray(h2e_cas[2].transpose(0, 2, 3, 1),
-                                        order='C')
-                h2e_cas_prime = np.asarray(h2e_cas[1].transpose(2, 0, 1, 3),
-                                           order='C')
+            if nele_cas is None:
+                # Get one-electron integrals in AO basis
+                h1e_ao = mol.intor("int1e_kin") + mol.intor("int1e_nuc")
 
-            elif integrals_casscf:
-                if casscf:
-                    h1e, ecore = mycas.get_h1eff()
-                    h1e_cas = np.array(h1e)
-                    h2e = mycas.get_h2eff()
-                    h2e_cas = np.array(h2e)
-                    h2e_cas[0] = np.asarray(h2e_cas[0].transpose(0, 2, 3, 1),
-                                            order='C')
-                    h2e_cas[1] = np.asarray(h2e_cas[1].transpose(0, 2, 3, 1),
-                                            order='C')
-                    h2e_cas[2] = np.asarray(h2e_cas[2].transpose(0, 2, 3, 1),
-                                            order='C')
-                    h2e_cas_prime = np.asarray(h2e_cas[1].transpose(2, 0, 1, 3),
-                                               order='C')
-                else:
-                    raise RuntimeError(
-                        "WARN: You need to run casscf. Use casscf=True.")
+                # Convert one-electron integrals to MO basis for alpha and beta spins
+                h1e_alpha = reduce(np.dot,
+                                (myhf.mo_coeff[0].T, h1e_ao, myhf.mo_coeff[0]))
+                h1e_beta = reduce(np.dot,
+                                (myhf.mo_coeff[1].T, h1e_ao, myhf.mo_coeff[1]))
+
+                # Get two-electron integrals in AO basis
+                h2e_ao = mol.intor(
+                    "int2e_sph",
+                    aosym='s1')  # Use 's1' for unrestricted calculations
+                nmo = myhf.mo_coeff[0].shape[1]
+
+                # Convert two-electron integrals to MO basis
+                eri_aa = ao2mo.incore.general(h2e_ao,
+                                            (myhf.mo_coeff[0], myhf.mo_coeff[0],
+                                            myhf.mo_coeff[0], myhf.mo_coeff[0]),
+                                            compact=False).reshape(
+                                                nmo, nmo, nmo, nmo)
+                eri_bb = ao2mo.incore.general(h2e_ao,
+                                            (myhf.mo_coeff[1], myhf.mo_coeff[1],
+                                            myhf.mo_coeff[1], myhf.mo_coeff[1]),
+                                            compact=False).reshape(
+                                                nmo, nmo, nmo, nmo)
+                eri_ab = ao2mo.incore.general(h2e_ao,
+                                            (myhf.mo_coeff[0], myhf.mo_coeff[0],
+                                            myhf.mo_coeff[1], myhf.mo_coeff[1]),
+                                            compact=False).reshape(
+                                                nmo, nmo, nmo, nmo)
+                eri_ba = ao2mo.incore.general(h2e_ao,
+                                            (myhf.mo_coeff[1], myhf.mo_coeff[1],
+                                            myhf.mo_coeff[0], myhf.mo_coeff[0]),
+                                            compact=False).reshape(
+                                                nmo, nmo, nmo, nmo)
+
+                # Reorder integrals from `(pr|qs) to (pq|rs)`
+                h2e_alpha_alpha = eri_aa.transpose(0, 2, 1, 3)
+                h2e_beta_beta = eri_bb.transpose(0, 2, 1, 3)
+                h2e_alpha_beta = eri_ab.transpose(0, 2, 1, 3)
+                h2e_beta_alpha = eri_ba.transpose(0, 2, 1, 3)
+                
+                nuclear_repulsion = myhf.energy_nuc()
+                energies['nuclear_energy'] = nuclear_repulsion
+
+                obi, tbi, e_nn, ferm_ham = self.generate_molecular_spin_ham_ur(
+                    h1e_alpha, h1e_beta, h2e_alpha_alpha, h2e_beta_beta,
+                    h2e_alpha_beta, h2e_beta_alpha, nuclear_repulsion)
 
             else:
-                mc = mcscf.UCASCI(myhf, norb_cas, nele_cas)
-                h1e, ecore = mc.get_h1eff(myhf.mo_coeff)
-                h1e_cas = np.array(h1e)
-                h2e = mc.get_h2eff(myhf.mo_coeff)
-                h2e_cas = np.array(h2e)
-                h2e_cas[0] = np.asarray(h2e_cas[0].transpose(0, 2, 3, 1),
-                                        order='C')
-                h2e_cas[1] = np.asarray(h2e_cas[1].transpose(0, 2, 3, 1),
-                                        order='C')
-                h2e_cas[2] = np.asarray(h2e_cas[2].transpose(0, 2, 3, 1),
-                                        order='C')
-                h2e_cas_prime = np.asarray(h2e_cas[1].transpose(2, 0, 1, 3),
-                                           order='C')
 
-            # Compute the molecular spin electronic Hamiltonian from the
-            # molecular electron integrals
-            obi, tbi, core_energy = self.generate_molecular_spin_ham_ur(
-                h1e_cas, h2e_cas, h2e_cas_prime, ecore)
+                if isinstance(nele_cas, (int, float)):
+                    # For unrestricted calculations, `nele_cas` must be a tuple (alpha, beta)
+                    nelec_beta = (nele_cas - mol.spin) // 2
+                    nelec_alpha = nele_cas - nelec_beta
+
+                    nele_cas_tuple = (nelec_alpha, nelec_beta)
+                    if verbose:
+                        print(
+                            f'[pyscf] Converting nele_cas from {nele_cas} to {nele_cas_tuple} (alpha, beta)'
+                        )
+                else:
+                    # If already a tuple, use as is
+                    nele_cas_tuple = nele_cas
+
+                mc = mcscf.UCASCI(myhf, norb_cas, nele_cas_tuple)
+                (h1e_alpha_cas, h1e_beta_cas), ecore = mc.get_h1eff(myhf.mo_coeff)
+
+                # 1. Get the density matrices for the frozen core orbitals
+                # The number of core orbitals for alpha and beta spins
+                ncore_a = myhf.nelec[0] - nele_cas_tuple[0]
+                ncore_b = myhf.nelec[1] - nele_cas_tuple[1]
+
+                # Get two-electron integrals in AO basis
+                h2e_ao = mol.intor("int2e_sph", aosym='s1')
+
+                # Select the active space MOs and transform the integrals
+                # The number of core orbitals
+                active_idx_a = slice(ncore_a, ncore_a + norb_cas)
+                active_idx_b = slice(ncore_b, ncore_b + norb_cas)
+                active_mo_a = myhf.mo_coeff[0][:, active_idx_a]
+                active_mo_b = myhf.mo_coeff[1][:, active_idx_b]
+
+                # Transform 2-e integrals to the active space MO basis
+                eri_aa = ao2mo.incore.general(
+                    h2e_ao, (active_mo_a, active_mo_a, active_mo_a, active_mo_a),
+                    compact=False).reshape(norb_cas, norb_cas, norb_cas, norb_cas)
+                eri_bb = ao2mo.incore.general(
+                    h2e_ao, (active_mo_b, active_mo_b, active_mo_b, active_mo_b),
+                    compact=False).reshape(norb_cas, norb_cas, norb_cas, norb_cas)
+                eri_ab = ao2mo.incore.general(
+                    h2e_ao, (active_mo_a, active_mo_a, active_mo_b, active_mo_b),
+                    compact=False).reshape(norb_cas, norb_cas, norb_cas, norb_cas)
+                eri_ba = ao2mo.incore.general(
+                    h2e_ao, (active_mo_b, active_mo_b, active_mo_a, active_mo_a),
+                    compact=False).reshape(norb_cas, norb_cas, norb_cas, norb_cas)
+
+                # Reorder integrals from `(pr|qs) to (pq|rs)`
+                h2e_alpha_alpha = eri_aa.transpose(0, 2, 1, 3)
+                h2e_beta_beta = eri_bb.transpose(0, 2, 1, 3)
+                h2e_alpha_beta = eri_ab.transpose(0, 2, 1, 3)
+                h2e_beta_alpha = eri_ba.transpose(0, 2, 1, 3)
+                
+                energies['core_energy'] = ecore
+        
+                # Compute the molecular spin electronic Hamiltonian from the
+                # molecular electron integrals
+                obi, tbi, core_energy = self.generate_molecular_spin_ham_ur(
+                    h1e_alpha_cas, h1e_beta_cas, h2e_alpha_alpha, h2e_beta_beta,
+                    h2e_alpha_beta, h2e_beta_alpha, ecore)
 
         else:
 
