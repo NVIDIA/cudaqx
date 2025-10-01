@@ -11,7 +11,7 @@ import numpy as np
 import json
 from functools import reduce
 try:
-    from pyscf import gto, scf, cc, ao2mo, mp, mcscf, solvent, fci
+    from pyscf import gto, scf, cc, ao2mo, mp, mcscf, fci
 except RuntimeError:
     print(
         'PySCF should be installed to use cudaq-pyscf tool. Use pip install pyscf'
@@ -50,14 +50,14 @@ class GasPhaseGenerator(HamiltonianGenerator):
                 for r in range(nqubits // 2):
                     for s in range(nqubits // 2):
 
-                        # Same spin (aaaa, bbbbb) <a|a><a|a>, <b|b><b|b>
+                        # Same spin (aaaa, bbbb) <a|a><a|a>, <b|b><b|b>
                         two_body_coeff[2 * p, 2 * q, 2 * r,
                                        2 * s] = 0.5 * h2e[p, q, r, s]
                         two_body_coeff[2 * p + 1, 2 * q + 1, 2 * r + 1,
                                        2 * s + 1] = 0.5 * h2e[p, q, r, s]
 
                         # Mixed spin(abab, baba) <a|a><b|b>, <b|b><a|a>
-                        #<a|b>= 0 (orthogoanl)
+                        #<a|b>= 0 (orthogonal)
                         two_body_coeff[2 * p, 2 * q + 1, 2 * r + 1,
                                        2 * s] = 0.5 * h2e[p, q, r, s]
                         two_body_coeff[2 * p + 1, 2 * q, 2 * r,
@@ -65,10 +65,10 @@ class GasPhaseGenerator(HamiltonianGenerator):
 
         return one_body_coeff, two_body_coeff, ecore
 
-    def a_idx(p):
+    def a_idx(self, p):
         return 2 * p  # alpha spin-orbital index
 
-    def b_idx(p):
+    def b_idx(self, p):
         return 2 * p + 1  # beta  spin-orbital index
 
     def generate_molecular_spin_ham_ur(self, h1e_alpha,
@@ -106,10 +106,10 @@ class GasPhaseGenerator(HamiltonianGenerator):
         for p in range(n_mos):
             for q in range(n_mos):
                 # Alpha spin
-                one_body_coeff[a_idx(p), a_idx(q)] = h1e_alpha[p, q]
+                one_body_coeff[self.a_idx(p), self.a_idx(q)] = h1e_alpha[p, q]
 
                 # Beta spin
-                one_body_coeff[b_idx(p), b_idx(q)] = h1e_beta[p, q]
+                one_body_coeff[self.b_idx(p), self.b_idx(q)] = h1e_beta[p, q]
 
         # ---------- Two-body terms ----------
         half = 0.5
@@ -119,36 +119,36 @@ class GasPhaseGenerator(HamiltonianGenerator):
                     for s in range(n_mos):
                         # --- alpha-alpha ---
                         val = half * h2e_alpha_alpha[p, q, r, s]
-                        two_body_coeff[a_idx(p),
-                                    a_idx(q),
-                                    a_idx(s),
-                                    a_idx(r)] += val
+                        two_body_coeff[self.a_idx(p),
+                                    self.a_idx(q),
+                                    self.a_idx(s),
+                                    self.a_idx(r)] += val
                         
 
                         # --- beta-beta ---
                         val = half * h2e_beta_beta[p, q, r, s]
-                        two_body_coeff[b_idx(p),
-                                    b_idx(q),
-                                    b_idx(s),
-                                    b_idx(r)] += val
+                        two_body_coeff[self.b_idx(p),
+                                    self.b_idx(q),
+                                    self.b_idx(s),
+                                    self.b_idx(r)] += val
 
                         # --- alpha-beta ---
                         # a_{pα}† b_{qβ}† b_{sβ} a_{rα}
                         val = half * h2e_alpha_beta[p, q, r, s]
-                        two_body_coeff[a_idx(p),
-                                    b_idx(q),
-                                    b_idx(s),
-                                    a_idx(r)] += val
+                        two_body_coeff[self.a_idx(p),
+                                    self.b_idx(q),
+                                    self.b_idx(s),
+                                    self.a_idx(r)] += val
 
                         # --- beta-alpha ---
                         # b_{pβ}† a_{qα}† a_{sα} b_{rβ}
                         val = half * h2e_beta_alpha[p, q, r, s]
-                        two_body_coeff[b_idx(p),
-                                    a_idx(q),
-                                    a_idx(s),
-                                    b_idx(r)] += val
+                        two_body_coeff[self.b_idx(p),
+                                    self.a_idx(q),
+                                    self.a_idx(s),
+                                    self.b_idx(r)] += val
         
-        return one_body_coeff, two_body_coeff, ecore, 
+        return one_body_coeff, two_body_coeff, ecore
 
         
 ####################################################################
@@ -294,7 +294,7 @@ class GasPhaseGenerator(HamiltonianGenerator):
 
             else:
                 if spin != 0:
-                    raise RuntimeError("WARN: ROMP2 is unvailable in pyscf.")
+                    raise RuntimeError("WARN: ROMP2 is unavailable in pyscf.")
                 else:
                     mymp = mp.MP2(myhf)
                     mp_ecorr, mp_t2 = mymp.kernel()
@@ -322,7 +322,7 @@ class GasPhaseGenerator(HamiltonianGenerator):
                 if nele_cas is None:
                     myfci = fci.FCI(myhf)
                     result = myfci.kernel()
-                    energies['fci'] = result[0]
+                    energies['fci_energy'] = result[0]
                     if verbose:
                         print('[pyscf] FCI energy = ', result[0])
                         
@@ -379,7 +379,7 @@ class GasPhaseGenerator(HamiltonianGenerator):
 
                     elif natorb and (spin != 0):
                         raise RuntimeError(
-                            "WARN: Natural orbitals cannot be computed. ROMP2 is unvailable in pyscf."
+                            "WARN: Natural orbitals cannot be computed. ROMP2 is unavailable in pyscf."
                         )
 
                     else:
@@ -474,7 +474,7 @@ class GasPhaseGenerator(HamiltonianGenerator):
 
                     elif natorb and (spin != 0):
                         raise RuntimeError(
-                            "WARN: Natural orbitals cannot be computed. ROMP2 is unvailable in pyscf."
+                            "WARN: Natural orbitals cannot be computed. ROMP2 is unavailable in pyscf."
                         )
 
                     else:
@@ -540,7 +540,7 @@ class GasPhaseGenerator(HamiltonianGenerator):
 
                 elif natorb and (spin != 0):
                     raise RuntimeError(
-                        "WARN: Natural orbitals cannot be computed. ROMP2 is unvailable in pyscf."
+                        "WARN: Natural orbitals cannot be computed. ROMP2 is unavailable in pyscf."
                     )
 
                 else:
@@ -743,7 +743,7 @@ class GasPhaseGenerator(HamiltonianGenerator):
                 if integrals_natorb:
                     if spin != 0:
                         raise RuntimeError(
-                            "WARN: ROMP2 is unvailable in pyscf.")
+                            "WARN: ROMP2 is unavailable in pyscf.")
                     else:
                         mc = mcscf.CASCI(myhf, norb_cas, nele_cas)
                         h1e_cas, ecore = mc.get_h1eff(natorbs)
