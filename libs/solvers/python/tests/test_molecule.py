@@ -280,3 +280,4 @@ def test_N2_UR_as():
     from scipy.linalg import eigh
     minE = eigh(molecule.hamiltonian.to_matrix(), eigvals_only=True)[0]
     assert np.isclose(minE, -108.9436, rtol=1e-3)
+
