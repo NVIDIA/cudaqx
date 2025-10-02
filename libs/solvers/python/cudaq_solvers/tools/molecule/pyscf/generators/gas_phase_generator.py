@@ -224,7 +224,7 @@ class GasPhaseGenerator(HamiltonianGenerator):
                       norb)
 
         else:
-            if spin ==0 :
+            if spin == 0 :
                 myhf = scf.RHF(mol)
                 myhf.max_cycle = cycles
                 myhf.chkfile = filename + '-pyscf.chk'
@@ -646,7 +646,7 @@ class GasPhaseGenerator(HamiltonianGenerator):
                 nuclear_repulsion = myhf.energy_nuc()
                 energies['nuclear_energy'] = nuclear_repulsion
 
-                obi, tbi, e_nn, ferm_ham = self.generate_molecular_spin_ham_ur(
+                obi, tbi, e_nn = self.generate_molecular_spin_ham_ur(
                     h1e_alpha, h1e_beta, h2e_alpha_alpha, h2e_beta_beta,
                     h2e_alpha_beta, h2e_beta_alpha, nuclear_repulsion)
 
