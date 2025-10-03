@@ -16,7 +16,7 @@ env:
 jobs:
   check-changes:
     name: Check changes
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       check-cpp: ${{ steps.filter.outputs.check-cpp }}
       check-all-cpp: ${{ steps.filter.outputs.check-all-cpp }}
@@ -127,7 +127,7 @@ jobs:
     name: Check Python code formatting
     needs: [check-changes]
     if: needs.check-changes.outputs.check-python == 'true' || needs.check-changes.outputs.check-all-python == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
