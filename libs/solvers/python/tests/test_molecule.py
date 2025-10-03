@@ -234,6 +234,7 @@ def test_as_with_casscf():
     print(molecule.n_orbitals)
     print(molecule.n_electrons)
 
+
 def test_H2_UR():
     geometry = [('H', (0., 0., 0.)), ('H', (0., 0., .7474))]
     molecule = solvers.create_molecule(geometry,
@@ -251,6 +252,7 @@ def test_H2_UR():
     from scipy.linalg import eigh
     minE = eigh(molecule.hamiltonian.to_matrix(), eigvals_only=True)[0]
     assert np.isclose(-1.137, minE, atol=1e-2)
+
 
 def test_N2_UR_as():
     geometry = [('N', (0., 0., 0.56)), ('N', (0., 0., -0.56))]
@@ -276,8 +278,7 @@ def test_N2_UR_as():
                                molecule.energies['core_energy'])
 
     assert molecule.hamiltonian == op
-    
+
     from scipy.linalg import eigh
     minE = eigh(molecule.hamiltonian.to_matrix(), eigvals_only=True)[0]
     assert np.isclose(minE, -108.9436, rtol=1e-3)
-
