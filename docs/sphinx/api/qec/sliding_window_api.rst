@@ -1,32 +1,36 @@
 .. class:: sliding_window
 
-    The sliding window decoder is a wrapper around a standard decoder that
-    differs from standard decoders in two important ways.
-
-    1. The actual decoding step is performed in a sliding window fashion, one
-       window at a time. The window size is specified by the user. This allows
-       the decoding process to begin before all of the syndromes have been
-       received.
-
-    2. Unlike the standard decoder interface, the :code:`decode` function (and
-       its variants like :code:`decode_batch`) can accept partial syndromes. If
-       a partial syndrome is provided, then the return vector will be empty, and
-       the decoder object will be in an intermediate state (awaiting future
-       syndromes to complete its processing). The only time the return vector
-       will be non-empty is when the user has called :code:`decode` with enough
-       data to fill the original syndrome size (as calculated from the original
-       Parity Check Matrix).
-
-    Sliding window decoders are useful for QEC codes with circuit-level noise
-    that have multiple rounds. They allow decoding processing to begin prior to
-    the full syndrome being available, which can - under the right conditions -
-    reduce the latency for the final decoding call. However, note that this
-    reduced latency can increase the logical error rate, so one needs to study
-    their particular system carefully to ensure this trade-off is acceptable.
-
-    The only structural requirement for Parity Check Matrices used by the
-    Sliding Window decoder is that each round has a constant number of syndromes;
-    no other assumptions about repeatable noise structure are used.
+    The Sliding Window Decoder is a wrapper around a standard decoder that
+    introduces two key differences:
+    
+    1. **Sliding Window Decoding**: The decoding process is performed
+    incrementally, one window at a time.  The window size is specified by the
+    user. This allows decoding to begin before all syndromes have been received,
+    potentially reducing overall latency in multi-round QEC codes.
+    
+    2. **Partial Syndrome Support**: Unlike standard decoders, the
+    :code:`decode` function (and its variants like :code:`decode_batch`) can
+    accept partial syndromes. If partial syndromes are provided, the return
+    vector will be empty, the decoder will not complete the processing and
+    remain in an intermediate state, awaiting future syndromes. The return
+    vector is only non-empty once enough data has been provided to match the
+    original syndrome size (calculated from the Parity Check Matrix).
+    
+    Sliding window decoders are advantageous in QEC codes subject to
+    circuit-level noise across multiple syndrome extraction rounds. These
+    decoders permit syndrome processing to begin before the complete syndrome
+    measurement sequence is obtained, potentially reducing the overall decoding
+    latency. However, this approach introduces a trade-off: the reduction in
+    latency typically comes at the cost of increased logical error rates.
+    Therefore, the viability of sliding window decoding depends critically on
+    the specific code parameters, noise model, and latency requirements of the
+    system under consideration.
+    
+    Sliding window decoding imposes only a single structural constraint on the
+    parity check matrices: each syndrome extraction round must produce a
+    constant number of syndrome measurements. Notably, the decoder makes no
+    assumptions about temporal correlations or periodicity in the underlying
+    noise process.
 
     References:
     `Toward Low-latency Iterative Decoding of QLDPC Codes Under Circuit-Level Noise <https://arxiv.org/abs/2403.18901>`_
