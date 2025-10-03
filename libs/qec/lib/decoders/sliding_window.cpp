@@ -316,7 +316,7 @@ public:
     }
     if (this->rw_filled == num_syndromes_per_window) {
       auto t0 = std::chrono::high_resolution_clock::now();
-      CUDAQ_DBG("Window is full, sliding the window");
+      CUDAQ_DBG("Window is full, sliding the window by one round");
       add_syndrome_to_rolling_window(syndrome, 0);
 
       auto t1 = std::chrono::high_resolution_clock::now();
@@ -377,7 +377,7 @@ public:
       initialize_window(syndromes.size());
     }
     if (this->rw_filled == num_syndromes_per_window) {
-      CUDAQ_DBG("Window is full, sliding the window");
+      CUDAQ_DBG("Window is full, sliding the window by one round");
       // The window is full. Slide existing data to the left and write the new
       // data at the end.
       add_syndromes_to_rolling_window(syndromes);
