@@ -9,7 +9,7 @@
 ARG base_image=ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-amd64-cu12.6-gcc11-main
 FROM ${base_image}
 
-ARG python_version=3.10
+ARG python_version=3.12
 
 LABEL org.opencontainers.image.description="Dev tools for building and testing CUDA-QX libraries"
 LABEL org.opencontainers.image.source="https://github.com/NVIDIA/cudaqx"

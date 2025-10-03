@@ -14,6 +14,7 @@ import cudaq_qec as qec
 
 # Relevant to Python3.10 only
 # Update this once the CI advances to Python3.11
+# TODO: Should still perform negative tests for Python>=3.11 which may require modifications of test scripts
 @pytest.mark.skipif(
     sys.version_info >= (3, 11),
     reason="Only meaningful on Python < 3.11 when dependencies are missing")
