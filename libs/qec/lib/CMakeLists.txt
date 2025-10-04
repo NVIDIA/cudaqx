@@ -25,6 +25,7 @@ add_library(${LIBRARY_NAME} SHARED
 )
 
 add_subdirectory(decoders/plugins/example)
+add_subdirectory(decoders/plugins/trt_decoder)
 add_subdirectory(codes)
 add_subdirectory(device) 
 

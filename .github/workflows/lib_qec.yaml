@@ -54,6 +54,14 @@ jobs:
       # ========================================================================
       # Build library
       # ========================================================================
+      - name: Install build requirements
+        run: |
+          apt install -y --no-install-recommends gfortran libblas-dev wget
+          wget https://developer.download.nvidia.com/compute/tensorrt/10.13.3/local_installers/nv-tensorrt-local-repo-ubuntu2404-10.13.3-cuda-12.9_1.0-1_amd64.deb
+          dpkg -i nv-tensorrt-local-repo-ubuntu2404-10.13.3-cuda-12.9_1.0-1_amd64.deb
+          cp /var/nv-tensorrt-local-repo-ubuntu2404-10.13.3-cuda-12.9/nv-tensorrt-local-4B177B4F-keyring.gpg /usr/share/keyrings/
+          apt update
+          apt install -y tensorrt-dev
 
       - name: Build
         id: build
