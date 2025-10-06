@@ -90,7 +90,7 @@ jobs:
     if: ${{ github.repository == 'NVIDIA/cudaqx' }}
     strategy:
       matrix:
-        python: ['3.10', '3.11', '3.12', '3.13']
+        python: ['3.11', '3.12', '3.13']
         platform: ['amd64', 'arm64']
         cuda_version: ['12.6']
       fail-fast: false

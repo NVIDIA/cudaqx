@@ -17,7 +17,7 @@ set -e
 
 # Installing dependencies
 python_version=$1
-python_version_no_dot=$(echo $python_version | tr -d '.') # 3.10 --> 310
+python_version_no_dot=$(echo $python_version | tr -d '.') # 3.12 --> 312
 python=python${python_version}
 platform=$2
 
@@ -42,15 +42,9 @@ fi
 # ======================================
 
 qec_wheel=$(ls /wheels/cudaq_qec-*-cp${python_version_no_dot}-cp${python_version_no_dot}-*.whl)
-# If Python version is 3.10, then install without tensor network decoder.
-# Otherwise, install with the tensor network decoder.
-if [ $python_version == "3.10" ]; then
-  echo "Installing QEC library without tensor network decoder"
-  ${python} -m pip install "${qec_wheel}"
-else
-  echo "Installing QEC library with tensor network decoder"
-  ${python} -m pip install "${qec_wheel}[tensor_network_decoder]"
-fi
+# Install QEC library with tensor network decoder (requires Python >=3.11)
+echo "Installing QEC library with tensor network decoder"
+${python} -m pip install "${qec_wheel}[tensor_network_decoder]"
 ${python} -m pytest -v -s libs/qec/python/tests/
 
 # Solvers library
