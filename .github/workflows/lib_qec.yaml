@@ -56,7 +56,7 @@ jobs:
           ref: ${{ steps.get-cudaq-version.outputs.ref }}
           token: ${{ secrets.CUDAQ_ACCESS_TOKEN }}
           pr-number: ${{ steps.export-pr-info.outputs.pr_number }}
-          platform: ${{ matrix.platform }}
+          platform: ${{ matrix.platform }}-cu${{ steps.config.outputs.cuda_major }}
 
       # ========================================================================
       # Build library

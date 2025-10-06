@@ -114,6 +114,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         uses: nv-gha-runners/get-pr-info@main
 
+      - name: Configure
+        id: config
+        run: |
+          cuda_major=`echo ${{ matrix.cuda_version }} | cut -d . -f1`
+          echo "cuda_major=$cuda_major" >> $GITHUB_OUTPUT
+
       - name: Get required CUDAQ version
         id: get-cudaq-version
         uses: ./.github/actions/get-cudaq-version
@@ -127,7 +133,7 @@ jobs:
           pr-number: ${{ fromJSON(steps.get-pr-info.outputs.pr-info).number }}
           save-build: true
           save-ccache: false
-          platform: ${{ matrix.platform }}
+          platform: ${{ matrix.platform }}-cu${{ steps.config.outputs.cuda_major }}
 
   build-docs:
     name: Docs

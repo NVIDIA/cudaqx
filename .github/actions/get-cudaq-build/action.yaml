@@ -29,7 +29,7 @@ inputs:
     default: 'false'
     required: false
   platform:
-    description: 'Platform (amd64 or arm64)'
+    description: 'Platform ({amd64,arm64}-cu{12,13})'
     default: ''
     required: true
 outputs:

@@ -49,7 +49,7 @@ jobs:
           repo: ${{ steps.get-cudaq-version.outputs.repo }}
           ref: ${{ steps.get-cudaq-version.outputs.ref }}
           token: ${{ secrets.CUDAQ_ACCESS_TOKEN }}
-          platform: 'amd64'
+          platform: 'amd64-cu12' # Just choose one platform for docs
 
       # ========================================================================
       # Build docs
