@@ -35,6 +35,12 @@ jobs:
         run: |
           echo "pr_number=${{ fromJSON(steps.get-pr-info.outputs.pr-info).number }}" >> $GITHUB_OUTPUT
 
+      - name: Configure
+        id: config
+        run: |
+          cuda_major=`echo ${{ matrix.cuda_version }} | cut -d . -f1`
+          echo "cuda_major=$cuda_major" >> $GITHUB_OUTPUT
+
       # ========================================================================
       # CUDA Quantum build
       # ========================================================================
@@ -83,7 +89,7 @@ jobs:
       - name: Install python requirements
         env:
           LD_LIBRARY_PATH: ${{ env.MPI_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
-        run: pip install numpy pytest cupy-cuda12x cuquantum-cu12 torch lightning ml_collections mpi4py transformers pytest
+        run: pip install numpy pytest cupy-cuda${{ steps.config.outputs.cuda_major }}x cuquantum-cu${{ steps.config.outputs.cuda_major }} torch lightning ml_collections mpi4py transformers pytest
 
 
       - name: Run Python tests

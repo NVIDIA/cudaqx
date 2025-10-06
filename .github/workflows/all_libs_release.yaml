@@ -75,7 +75,13 @@ jobs:
             echo "QEC_EXTERNAL_DECODERS=$(pwd)/tmp/lib/decoder-plugins/libcudaq-qec-nv-qldpc-decoder.so" >> $GITHUB_ENV
           fi
         shell: bash
-          
+
+      - name: Configure
+        id: config
+        run: |
+          cuda_major=`echo ${{ matrix.cuda_version }} | cut -d . -f1`
+          echo "cuda_major=$cuda_major" >> $GITHUB_OUTPUT
+
       # ========================================================================
       # Build
       # ========================================================================
@@ -115,7 +121,7 @@ jobs:
       - name: Install python requirements
         env:
           LD_LIBRARY_PATH: ${{ env.MPI_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
-        run: pip install numpy pytest cupy-cuda12x cuquantum-cu12 torch lightning ml_collections mpi4py transformers quimb opt_einsum torch
+        run: pip install numpy pytest cupy-cuda${{ steps.config.outputs.cuda_major }}x cuquantum-cu${{ steps.config.outputs.cuda_major }} torch lightning ml_collections mpi4py transformers quimb opt_einsum torch
 
       - name: Run Python tests
         env:

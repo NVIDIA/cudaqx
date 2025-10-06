@@ -35,6 +35,12 @@ jobs:
         run: |
           echo "pr_number=${{ fromJSON(steps.get-pr-info.outputs.pr-info).number }}" >> $GITHUB_OUTPUT
 
+      - name: Configure
+        id: config
+        run: |
+          cuda_major=`echo ${{ matrix.cuda_version }} | cut -d . -f1`
+          echo "cuda_major=$cuda_major" >> $GITHUB_OUTPUT
+
       # ========================================================================
       # CUDA Quantum build
       # ========================================================================
@@ -86,7 +92,7 @@ jobs:
           LD_LIBRARY_PATH: ${{ env.MPI_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
         shell: bash
         run: |
-          pip install numpy pytest cupy-cuda12x cuquantum-cu12 torch lightning ml_collections mpi4py transformers quimb opt_einsum torch nvidia-cublas-cu12 cuquantum-python-cu12==25.06
+          pip install numpy pytest cupy-cuda${{ steps.config.outputs.cuda_major }}x cuquantum-cu${{ steps.config.outputs.cuda_major }} torch lightning ml_collections mpi4py transformers quimb opt_einsum torch nvidia-cublas-cu${{ steps.config.outputs.cuda_major }} cuquantum-python-cu${{ steps.config.outputs.cuda_major }}==25.06
           # The following tests are needed for docs/sphinx/examples/qec/python/tensor_network_decoder.py.
           if [ "$(uname -m)" == "x86_64" ]; then
               # Stim is not currently available on manylinux ARM wheels, so only
