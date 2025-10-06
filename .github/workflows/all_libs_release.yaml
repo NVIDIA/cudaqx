@@ -26,6 +26,7 @@ jobs:
           { arch: arm64, gpu: a100 },
           { arch: amd64, gpu: a100 },
         ]
+        cuda_version: ['12.6']
     runs-on: linux-${{ matrix.runner.arch }}-gpu-${{ matrix.runner.gpu }}-latest-1
     container: 
       image: ${{ format('ghcr.io/nvidia/cudaqx-dev:{0}-{1}', inputs.release-number, matrix.runner.arch) }}
@@ -84,6 +85,7 @@ jobs:
         uses: ./.github/actions/build-lib
         with:
           lib: "all"
+          cuda_version: ${{ matrix.cuda_version }}
           platform: ${{ matrix.runner.arch }}
           install-prefix: /usr/local/cudaq
 

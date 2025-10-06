@@ -28,6 +28,9 @@ inputs:
     description: 'Platform (amd64 or arm64)'
     default: ''
     required: true
+  cuda_version:
+    description: 'CUDA version to build against. (e.g, 12.6)'
+    required: true
 outputs:
   found-cache:
     description: 'A boolean value to indicate that a cache entry was found.'
@@ -116,7 +119,7 @@ runs:
         context: cudaq
         file: ./cudaq/docker/release/cudaq.wheel.Dockerfile
         build-args: |
-          base_image=ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ inputs.platform }}-cu12.6-gcc11-main
+          base_image=ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ inputs.platform }}-cu${{ inputs.cuda_version }}-gcc11-main
           release_version=0.99.99
           python_version=3.11
         outputs: /cudaq-wheels
@@ -127,7 +130,7 @@ runs:
         context: cudaq
         file: ./cudaq/docker/release/cudaq.wheel.Dockerfile
         build-args: |
-          base_image=ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ inputs.platform }}-cu12.6-gcc11-main
+          base_image=ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ inputs.platform }}-cu${{ inputs.cuda_version }}-gcc11-main
           release_version=0.99.99
           python_version=3.12
         outputs: /cudaq-wheels
@@ -138,7 +141,7 @@ runs:
         context: cudaq
         file: ./cudaq/docker/release/cudaq.wheel.Dockerfile
         build-args: |
-          base_image=ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ inputs.platform }}-cu12.6-gcc11-main
+          base_image=ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ inputs.platform }}-cu${{ inputs.cuda_version }}-gcc11-main
           release_version=0.99.99
           python_version=3.13
         outputs: /cudaq-wheels
