@@ -49,16 +49,16 @@ jobs:
     # easier to rely on their's devdeps images to do the building.
     # FIXME: there is no guarantee that this CUDA-Q image aligns with the CUDA-Q
     # commit that we are trying to align with.
-    container: ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ matrix.platform }}-${{ matrix.toolchain.id }}-main
+    container: ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc11-main
     permissions: write-all
     strategy:
       fail-fast: false
       matrix:
         python: ['3.11', '3.12', '3.13']
         platform: ['amd64', 'arm64']
+        cuda_version: ['12.6']
         toolchain:
-          - id: cu12.6-gcc11
-            cc: gcc-11
+          - cc: gcc-11
             cxx: g++-11
             build-type: Release
 
@@ -235,7 +235,7 @@ jobs:
     if: ${{ !failure() && !cancelled() }}
     runs-on: linux-${{ matrix.runner.arch }}-gpu-${{ matrix.runner.gpu }}-latest-1
     container:
-      image: nvidia/cuda:12.6.0-base-ubuntu24.04
+      image: nvidia/cuda:${{ matrix.cuda_version }}.0-base-ubuntu24.04
       # Enable this if you want to collect core files. (You may might to enable
       # Debug builds if you're doing this.)
       #options: --privileged --ulimit core=-1 --security-opt seccomp=unconfined
@@ -252,6 +252,7 @@ jobs:
           { arch: amd64, gpu: a100 },
         ]
         python: ['3.11', '3.12', '3.13']
+        cuda_version: ['12.6']
   
     steps:
       - name: Get code
