@@ -12,8 +12,8 @@ available on this repository. It will always contain a recent version of CUDA-Q
 The instructions below provide a complete set of commands to get you up and
 running. There are images available called
 
-- `ghcr.io/nvidia/cudaqx-dev:latest-amd64` for AMD64 platforms
-- `ghcr.io/nvidia/cudaqx-dev:latest-arm64` for ARM64 platforms
+- `ghcr.io/nvidia/cudaqx-dev:latest-amd64-cu12` for AMD64 platforms
+- `ghcr.io/nvidia/cudaqx-dev:latest-arm64-cu12` for ARM64 platforms
 
 With the image appropriate for your system, run
 
