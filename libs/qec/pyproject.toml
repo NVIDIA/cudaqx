@@ -55,5 +55,5 @@ tensor_network_decoder = [
   "quimb",
   "opt_einsum",
   "torch",
-  "cuquantum-python-cu12==25.06"
+  "cuquantum-python-cu12==25.09"
 ]
