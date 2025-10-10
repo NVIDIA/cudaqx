@@ -3,7 +3,7 @@ requires = ["scikit-build-core>=0.10"]
 build-backend = "scikit_build_core.build"
 
 [project]
-name = "cudaq-solvers"
+name = "cudaq-solvers-cu13"
 dynamic = ["version"]
 description = "Accelerated libraries for quantum-classical solvers built on CUDA-Q"
 authors = [{name = "NVIDIA Corporation & Affiliates"}]
@@ -11,7 +11,7 @@ maintainers = [{name = "NVIDIA Corporation & Affiliates"}]
 requires-python = ">=3.11"
 readme = "README.md"
 dependencies = [
-  'cuda-quantum-cu12 >= 0.12',
+  'cuda-quantum-cu13 >= 0.12',
   'fastapi',
   'networkx',
   'pyscf',
@@ -28,6 +28,7 @@ classifiers = [
     'Programming Language :: Python :: 3.13',
     "Environment :: GPU :: NVIDIA CUDA",
     "Environment :: GPU :: NVIDIA CUDA :: 12",
+    "Environment :: GPU :: NVIDIA CUDA :: 13",
     'Topic :: Software Development',
     'Topic :: Scientific/Engineering',
 ]

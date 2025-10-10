@@ -68,6 +68,12 @@ jobs:
         with:
           set-safe-directory: true
 
+      - name: Configure
+        id: config
+        run: |
+          cuda_major=`echo ${{ matrix.cuda_version }} | cut -d . -f1`
+          echo "cuda_major=$cuda_major" >> $GITHUB_OUTPUT
+
       # Do this early to help validate user inputs (if present)
       - name: Fetch assets
         env:
@@ -120,7 +126,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-py${{ matrix.python }}-${{ matrix.platform }}
+          name: wheels-py${{ matrix.python }}-${{ matrix.platform }}-cu${{ steps.config.outputs.cuda_major }}
           path: /wheels/**
           retention-days: 14
 
@@ -147,6 +153,12 @@ jobs:
         with:
           set-safe-directory: true
 
+      - name: Configure
+        id: config
+        run: |
+          cuda_major=`echo ${{ matrix.cuda_version }} | cut -d . -f1`
+          echo "cuda_major=$cuda_major" >> $GITHUB_OUTPUT
+
       - name: Get required CUDAQ version
         id: get-cudaq-version
         uses: ./.github/actions/get-cudaq-version
@@ -164,7 +176,7 @@ jobs:
       - name: Upload CUDAQ wheels
         uses: actions/upload-artifact@v4
         with:
-          name: cudaq-wheels-${{ matrix.platform }}
+          name: cudaq-wheels-${{ matrix.platform }}-cu${{ steps.config.outputs.cuda_major }}
           path: /cudaq-wheels
           retention-days: 14
           if-no-files-found: error
@@ -183,12 +195,19 @@ jobs:
       matrix:
         python: ['3.11', '3.12', '3.13']
         platform: ['amd64', 'arm64']
+        cuda_version: ['13.0']
   
     steps:
       - name: Get code
         uses: actions/checkout@v4
         with:
           set-safe-directory: true
+
+      - name: Configure
+        id: config
+        run: |
+          cuda_major=`echo ${{ matrix.cuda_version }} | cut -d . -f1`
+          echo "cuda_major=$cuda_major" >> $GITHUB_OUTPUT
   
       - name: Install Python
         uses: actions/setup-python@v5
@@ -211,7 +230,7 @@ jobs:
         if: ${{ inputs.cudaq_wheels == 'Custom' }}
         uses: actions/download-artifact@v4
         with:
-          name: cudaq-wheels-${{ matrix.platform }}
+          name: cudaq-wheels-${{ matrix.platform }}-cu${{ steps.config.outputs.cuda_major }}
           path: /cudaq-wheels
           run-id: ${{ inputs.artifacts_from_run || github.run_id }}
           github-token: ${{ inputs.artifacts_from_run && secrets.WORKFLOW_TOKEN || github.token }}
@@ -219,7 +238,7 @@ jobs:
       - name: Download CUDA-QX wheels
         uses: actions/download-artifact@v4
         with:
-          name: wheels-py${{ matrix.python }}-${{ matrix.platform }}
+          name: wheels-py${{ matrix.python }}-${{ matrix.platform }}-cu${{ steps.config.outputs.cuda_major }}
           path: /wheels
           run-id: ${{ inputs.artifacts_from_run || github.run_id }}
           github-token: ${{ inputs.artifacts_from_run && secrets.WORKFLOW_TOKEN || github.token }}
@@ -260,6 +279,12 @@ jobs:
         with:
           set-safe-directory: true
   
+      - name: Configure
+        id: config
+        run: |
+          cuda_major=`echo ${{ matrix.cuda_version }} | cut -d . -f1`
+          echo "cuda_major=$cuda_major" >> $GITHUB_OUTPUT
+
       - name: Install Python ${{ matrix.python }}
         uses: actions/setup-python@v5
         with:
@@ -284,7 +309,7 @@ jobs:
         if: ${{ inputs.cudaq_wheels == 'Custom' }}
         uses: actions/download-artifact@v4
         with:
-          name: cudaq-wheels-${{ matrix.runner.arch }}
+          name: cudaq-wheels-${{ matrix.runner.arch }}-cu${{ steps.config.outputs.cuda_major }}
           path: /cudaq-wheels
           run-id: ${{ inputs.artifacts_from_run || github.run_id }}
           github-token: ${{ inputs.artifacts_from_run && secrets.WORKFLOW_TOKEN || github.token }}
@@ -292,7 +317,7 @@ jobs:
       - name: Download CUDA-QX wheels
         uses: actions/download-artifact@v4
         with:
-          name: wheels-py${{ matrix.python }}-${{ matrix.runner.arch }}
+          name: wheels-py${{ matrix.python }}-${{ matrix.runner.arch }}-cu${{ steps.config.outputs.cuda_major }}
           path: /wheels
           run-id: ${{ inputs.artifacts_from_run || github.run_id }}
           github-token: ${{ inputs.artifacts_from_run && secrets.WORKFLOW_TOKEN || github.token }}
