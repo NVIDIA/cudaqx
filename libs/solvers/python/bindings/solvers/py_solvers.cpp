@@ -16,6 +16,7 @@
 #include "cudaq/solvers/adapt.h"
 #include "cudaq/solvers/qaoa.h"
 #include "cudaq/solvers/stateprep/uccsd.h"
+#include "cudaq/solvers/stateprep/uccgsd.h"
 #include "cudaq/solvers/version.h"
 #include "cudaq/solvers/vqe.h"
 
@@ -182,6 +183,25 @@ void addStatePrepKernels(py::module &mod) {
                 "    int: Number of UCCSD parameters");
   stateprep.def("get_uccsd_excitations",
                 &cudaq::solvers::stateprep::get_uccsd_excitations, "");
+  
+  stateprep.def("get_uccgsd_pauli_lists",
+                &cudaq::solvers::stateprep::get_uccgsd_pauli_lists,
+                py::arg("num_electrons"),
+                py::arg("num_qubits"),
+                py::arg("only_singles") = false,
+                py::arg("only_doubles") = false,
+                R"(
+  Generate UCCGSD operator pool and extract Pauli words and coefficients grouped by excitation.
+
+  Args:
+      num_electrons (int): Number of electrons.
+      num_qubits (int): Number of spin orbitals (qubits).
+      only_singles (bool): If True, only single excitations.
+      only_doubles (bool): If True, only double excitations.
+
+  Returns:
+      Tuple[List[List[PauliWord]], List[List[float]]]: Pauli words and coefficients grouped by excitation.
+  )");
 }
 
 // Helper function to convert tensor to numpy array
