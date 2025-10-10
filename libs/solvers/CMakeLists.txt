@@ -109,7 +109,6 @@ if(CMAKE_CUDA_COMPILER)
       set(CUDA_TARGET_ARCHS  "80;90;100")
     endif()
   endif()
-  endif()
   CUDA_get_gencode_args(CUDA_gencode_flags ${CUDA_TARGET_ARCHS})
   set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -shared -std=c++17 ${CUDA_gencode_flags} --compiler-options -fPIC")
 
