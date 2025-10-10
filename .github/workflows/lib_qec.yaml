@@ -67,6 +67,7 @@ jobs:
         uses: ./.github/actions/build-lib
         with:
           lib: "qec"
+          cuda_version: ${{ steps.config.outputs.cuda_version }}
           pr-number: ${{ steps.export-pr-info.outputs.pr_number }}
           save-ccache: true
           platform: ${{ matrix.platform }}
