@@ -111,4 +111,6 @@
               max_iterations. The actual number of returned iterations might be fewer
               than `bp_llr_history` if BP converges before the requested number of
               iterations. Introduced in 0.4.0.
+            - `num_iter` (bool): If true, return the number of BP iterations run. 
+              Introduced in x.x.x.
 
