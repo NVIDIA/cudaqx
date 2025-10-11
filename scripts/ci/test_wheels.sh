@@ -28,6 +28,10 @@ ${python} -m pip install --no-cache-dir pytest
 ${python} -m pip install openfermion
 ${python} -m pip install openfermionpyscf
 
+# TODO: Remove this once PyTorch 2.9.0 is released. That should happen before
+# this PR is merged.
+${python} -m pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/test/cu130
+
 # If special CUDA-Q wheels have been built for this test, install them here. This will 
 if [ -d /cudaq-wheels ]; then
   echo "Custom CUDA-Q wheels directory found; installing ..."
@@ -41,19 +45,11 @@ fi
 # QEC library
 # ======================================
 
-${python} -m pip install pipdeptree
-
 qec_wheel=$(ls /wheels/cudaq_qec_*-cp${python_version_no_dot}-cp${python_version_no_dot}-*.whl)
 # Install QEC library with tensor network decoder (requires Python >=3.11)
 echo "Installing QEC library with tensor network decoder"
-
 ${python} -m pip install "${qec_wheel}[tensor_network_decoder]"
 ${python} -m pytest -v -s libs/qec/python/tests/
-
-echo "BMH BEGIN pipdeptree"
-pipdeptree -p "${qec_wheel}[tensor_network_decoder]"
-echo "BMH END pipdeptree"
-
 
 # Solvers library
 # ======================================
