@@ -41,17 +41,25 @@ fi
 # QEC library
 # ======================================
 
-qec_wheel=$(ls /wheels/cudaq_qec-*-cp${python_version_no_dot}-cp${python_version_no_dot}-*.whl)
+${python} -m pip install pipdeptree
+
+qec_wheel=$(ls /wheels/cudaq_qec_*-cp${python_version_no_dot}-cp${python_version_no_dot}-*.whl)
 # Install QEC library with tensor network decoder (requires Python >=3.11)
 echo "Installing QEC library with tensor network decoder"
+
 ${python} -m pip install "${qec_wheel}[tensor_network_decoder]"
 ${python} -m pytest -v -s libs/qec/python/tests/
+
+echo "BMH BEGIN pipdeptree"
+pipdeptree -p "${qec_wheel}[tensor_network_decoder]"
+echo "BMH END pipdeptree"
+
 
 # Solvers library
 # ======================================
 # Test the base solvers library without optional dependencies
 echo "Installing Solvers library without GQE"
-solver_wheel=$(ls /wheels/cudaq_solvers-*-cp${python_version_no_dot}-cp${python_version_no_dot}-*.whl)
+solver_wheel=$(ls /wheels/cudaq_solvers_*-cp${python_version_no_dot}-cp${python_version_no_dot}-*.whl)
 ${python} -m pip install "${solver_wheel}"
 ${python} -m pytest -v -s libs/solvers/python/tests/ --ignore=libs/solvers/python/tests/test_gqe.py
 
