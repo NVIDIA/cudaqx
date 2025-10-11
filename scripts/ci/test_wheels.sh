@@ -41,9 +41,16 @@ fi
 # QEC library
 # ======================================
 
+${python} -m pip install pipdeptree
+
 qec_wheel=$(ls /wheels/cudaq_qec_*-cp${python_version_no_dot}-cp${python_version_no_dot}-*.whl)
 # Install QEC library with tensor network decoder (requires Python >=3.11)
 echo "Installing QEC library with tensor network decoder"
+
+echo "BMH BEGIN pipdeptree"
+pipdeptree -p "${qec_wheel}[tensor_network_decoder]"
+echo "BMH END pipdeptree"
+
 ${python} -m pip install "${qec_wheel}[tensor_network_decoder]"
 ${python} -m pytest -v -s libs/qec/python/tests/
 
