@@ -97,3 +97,11 @@ apps/
 
 # vim files
 *.tmp
+
+# Temporary build files for metapackages
+libs/*/python/metapackages/LICENSE
+libs/*/python/metapackages/NOTICE
+libs/*/python/metapackages/CITATION.cff
+libs/*/python/metapackages/_*.*
+libs/*/python/metapackages/*.egg-info
+libs/*/python/metapackages/dist/*
