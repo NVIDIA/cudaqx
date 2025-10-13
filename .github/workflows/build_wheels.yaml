@@ -391,7 +391,7 @@ jobs:
         ]
         python: ['3.11']
         cuda_version: ['13.0']
-        lib: ['cudaq-solvers', 'cudaq-qec']
+        lib: ['solvers', 'qec']
   
     steps:
       - name: Get code
@@ -456,7 +456,7 @@ jobs:
         run: |
           ls /wheels
           python${{ matrix.python }} -m pip list
-          python${{ matrix.python }} -m pip install --find-links /metapackages/ --find-links /wheels/ --find-links /cudaq-wheels/ cudaq-${{ matrix.lib }}-cu${{ steps.config.outputs.cuda_major }}
+          python${{ matrix.python }} -m pip install --find-links /metapackages/ --find-links /wheels/ --find-links /cudaq-wheels/ cudaq-${{ matrix.lib }}
 
       # - name: Upload any core files
       #   if: success() || failure()
