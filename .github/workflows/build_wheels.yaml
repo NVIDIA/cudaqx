@@ -257,6 +257,7 @@ jobs:
       - name: Install requirements
         shell: bash
         run: |
+          apt update
           apt install -y --no-install-recommends libgfortran5 unzip openmpi-bin libopenmpi3
           # If this is x86_64, then install libquadmath0. This is normally
           # installed by Ubuntu Python, but the action/setup-python package does
@@ -338,6 +339,7 @@ jobs:
       - name: Install requirements
         shell: bash
         run: |
+          apt update
           apt install -y --no-install-recommends libgfortran5 unzip openmpi-bin libopenmpi3
           # If this is x86_64, then install libquadmath0. This is normally
           # installed by Ubuntu Python, but the action/setup-python package does
