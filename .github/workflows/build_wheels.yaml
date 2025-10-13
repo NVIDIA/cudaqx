@@ -130,6 +130,36 @@ jobs:
           path: /wheels/**
           retention-days: 14
 
+  build-cudaqx-metapackages:
+    name: Build CUDA-QX Meta Packages
+    runs-on: linux-amd64-cpu4 # No need to matrix this because it is a source distribution
+    container: ubuntu:24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          set-safe-directory: true
+
+      - name: Install requirements
+        shell: bash
+        run: |
+          apt update && apt install -y --no-install-recommends python3 python3-pip python3-venv
+          python3 -m pip install --break-system-packages build
+
+      - name: Build CUDA-QX Meta Packages
+        run: |
+          bash scripts/ci/build_metapackages.sh ${{ inputs.version || '0.0.0' }}
+          mv libs/{qec,solvers}/python/metapackages/dist/* /metapackages/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: metapackages-${{ inputs.version || '0.0.0' }}
+          path: /metapackages/**
+          retention-days: 14
+
   # Building the CUDA-Q wheels must be done outside of a container context, so
   # this is a separate job.
   build-cudaq-wheels:
