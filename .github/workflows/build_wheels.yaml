@@ -149,8 +149,10 @@ jobs:
           python3 -m pip install --break-system-packages build
 
       - name: Build CUDA-QX Meta Packages
+        shell: bash
         run: |
           bash scripts/ci/build_metapackages.sh ${{ inputs.version || '0.0.0' }}
+          find libs -name dist | xargs ls -la
           mv libs/{qec,solvers}/python/metapackages/dist/* /metapackages/
 
       - name: Upload artifact
