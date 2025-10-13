@@ -14,7 +14,7 @@ from typing import Optional
 
 
 def _log(msg: str) -> None:
-    sys.stdout.write(f'[cudaq-qec] {msg}\n')
+    sys.stdout.write(f'[cudaq-solvers] {msg}\n')
     sys.stdout.flush()
 
 
@@ -185,20 +185,20 @@ def _infer_best_package() -> str:
     """
     # Find the existing wheel installation
     installed = []
-    for pkg in ['cudaq-qec', 'cudaq-qec-cu12', 'cudaq-qec-cu13']:
+    for pkg in ['cudaq-solvers', 'cudaq-solvers-cu12', 'cudaq-solvers-cu13']:
         _log(f"Looking for existing installation of {pkg}.")
         if _check_package_installed(pkg):
             installed.append(pkg)
 
     cuda_version = _get_cuda_version()
     if cuda_version is None:
-        cudaq_qec_bdist = 'cudaq-qec-cu12'
+        cudaq_qec_bdist = 'cudaq-solvers-cu12'
     elif cuda_version < 12000:
         raise Exception(f'Your CUDA version ({cuda_version}) is too old.')
     elif cuda_version < 13000:
-        cudaq_qec_bdist = 'cudaq-qec-cu12'
+        cudaq_qec_bdist = 'cudaq-solvers-cu12'
     elif cuda_version <= 14000:
-        cudaq_qec_bdist = 'cudaq-qec-cu13'
+        cudaq_qec_bdist = 'cudaq-solvers-cu13'
     else:
         raise Exception(f'Your CUDA version ({cuda_version}) is too new.')
     _log(f"Identified {cudaq_qec_bdist} as the best package.")
@@ -210,7 +210,7 @@ def _infer_best_package() -> str:
     if conflicting != '':
         _log("Abort.")
         raise Exception(
-            f'You have a conflicting CUDAQ-QEC version installed.'
+            f'You have a conflicting CUDAQ-Solvers version installed.'
             f'Please remove the following package(s): {conflicting}')
     return cudaq_qec_bdist
 
@@ -229,7 +229,7 @@ if os.environ.get('CUDAQ_META_WHEEL_BUILD', '0') == '1':
     # Case 1: create source distribution, do nothing.
     pass
 else:
-    # Case 2: install cudaq-qec source distribution
+    # Case 2: install cudaq-solvers source distribution
     with open(os.path.join(setup_dir, "_version.txt"), "r") as f:
         __version__ = f.read()
     install_requires = [
