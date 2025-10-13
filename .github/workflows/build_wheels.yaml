@@ -379,7 +379,7 @@ jobs:
       #     path: core.*
 
   test-wheels-gpu-cudaqx-metapackages:
-    name: Test CUDA-QX wheels (GPU) with Meta Packages
+    name: Test Meta Packages
     needs: [build-cudaqx-wheels, build-cudaq-wheels, build-cudaqx-metapackages]
     if: ${{ !failure() && !cancelled() }}
     runs-on: linux-${{ matrix.runner.arch }}-gpu-${{ matrix.runner.gpu }}-latest-1
