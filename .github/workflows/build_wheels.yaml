@@ -447,6 +447,7 @@ jobs:
         with:
           # Download multiple CUDA versions to test the metapackages.
           pattern: wheels-py${{ matrix.python }}-${{ matrix.runner.arch }}-cu*
+          merge-multiple: true
           path: /wheels
           run-id: ${{ inputs.artifacts_from_run || github.run_id }}
           github-token: ${{ inputs.artifacts_from_run && secrets.WORKFLOW_TOKEN || github.token }}
@@ -454,8 +455,10 @@ jobs:
       - name: Test Meta Packages (${{ matrix.lib }})
         shell: bash
         run: |
-          ls /wheels
-          python${{ matrix.python }} -m pip list
+          for d in /metapackages /wheels /cudaq-wheels; do
+            echo "ls $d"
+            ls $d
+          done
           python${{ matrix.python }} -m pip install --find-links /metapackages/ --find-links /wheels/ --find-links /cudaq-wheels/ cudaq-${{ matrix.lib }}==0.0.0
 
       # - name: Upload any core files
