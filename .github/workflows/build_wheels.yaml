@@ -400,7 +400,7 @@ jobs:
           { arch: arm64, gpu: a100 },
           { arch: amd64, gpu: a100 },
         ]
-        python: ['3.11']
+        python: ['3.11', '3.12', '3.13']
         cuda_version: ['13.0']
         lib: ['solvers', 'qec']
   
