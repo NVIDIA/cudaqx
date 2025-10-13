@@ -17,9 +17,23 @@ set -e
 
 # Installing dependencies
 python_version=$1
-python_version_no_dot=$(echo $python_version | tr -d '.') # 3.12 --> 312
 python=python${python_version}
 platform=$2
+cuda_version=$3
+
+# Verify the input arguments aren't empty, one at a time.
+if [ -z "$python_version" ] ; then
+  echo "Error: python_version is empty"
+  exit 1
+fi
+if [ -z "$platform" ] ; then
+  echo "Error: platform is empty"
+  exit 1
+fi
+if [ -z "$cuda_version" ] ; then
+  echo "Error: cuda_version is empty"
+  exit 1
+fi
 
 ${python} -m pip install --no-cache-dir pytest
 
@@ -32,36 +46,34 @@ ${python} -m pip install openfermionpyscf
 # this PR is merged.
 ${python} -m pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/test/cu130
 
-# If special CUDA-Q wheels have been built for this test, install them here. This will 
+FIND_LINKS="--find-links /wheels/ --find-links /cudaq-wheels/"
+
+# If special CUDA-Q wheels have been built for this test, install them here.
 if [ -d /cudaq-wheels ]; then
   echo "Custom CUDA-Q wheels directory found; installing ..."
   echo "First ls /cudaq-wheels"
   ls /cudaq-wheels
-  echo "Now show what will be pip installed"
-  ls -1 /cudaq-wheels/cuda_quantum_*-cp${python_version_no_dot}-cp${python_version_no_dot}-*.whl
-  ${python} -m pip install /cudaq-wheels/cuda_quantum_*-cp${python_version_no_dot}-cp${python_version_no_dot}-*.whl
+  ${python} -m pip install ${FIND_LINKS} cuda-quantum-cu${cuda_version}
 fi
 
 # QEC library
 # ======================================
 
-qec_wheel=$(ls /wheels/cudaq_qec_*-cp${python_version_no_dot}-cp${python_version_no_dot}-*.whl)
 # Install QEC library with tensor network decoder (requires Python >=3.11)
 echo "Installing QEC library with tensor network decoder"
-${python} -m pip install "${qec_wheel}[tensor_network_decoder]"
+${python} -m pip install ${FIND_LINKS} cudaq-qec-cu${cuda_version}[tensor_network_decoder]
 ${python} -m pytest -v -s libs/qec/python/tests/
 
 # Solvers library
 # ======================================
 # Test the base solvers library without optional dependencies
 echo "Installing Solvers library without GQE"
-solver_wheel=$(ls /wheels/cudaq_solvers_*-cp${python_version_no_dot}-cp${python_version_no_dot}-*.whl)
-${python} -m pip install "${solver_wheel}"
+${python} -m pip install ${FIND_LINKS} cudaq-solvers-cu${cuda_version}
 ${python} -m pytest -v -s libs/solvers/python/tests/ --ignore=libs/solvers/python/tests/test_gqe.py
 
 # Test the solvers library with GQE
 echo "Installing Solvers library with GQE"
-${python} -m pip install "${solver_wheel}[gqe]"
+${python} -m pip install ${FIND_LINKS} cudaq-solvers-cu${cuda_version}[gqe]
 ${python} -m pytest -v -s libs/solvers/python/tests/test_gqe.py
 
 # Test the libraries with examples

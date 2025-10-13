@@ -159,7 +159,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: metapackages-${{ inputs.version || '0.0.0' }}
+          name: metapackages
           path: /metapackages/**
           retention-days: 14
 
@@ -279,7 +279,7 @@ jobs:
       - name: Test wheels
         run: |
           ls /wheels
-          bash scripts/ci/test_wheels.sh ${{ matrix.python }} ${{ matrix.platform }}
+          bash scripts/ci/test_wheels.sh ${{ matrix.python }} ${{ matrix.platform }} ${{ steps.config.outputs.cuda_major }}
   
   test-wheels-gpu:
     name: Test CUDA-QX wheels (GPU)
@@ -358,7 +358,105 @@ jobs:
       - name: Test wheels
         run: |
           ls /wheels
-          bash scripts/ci/test_wheels.sh ${{ matrix.python }} ${{ matrix.runner.arch }}
+          bash scripts/ci/test_wheels.sh ${{ matrix.python }} ${{ matrix.runner.arch }} ${{ steps.config.outputs.cuda_major }}
+
+      # - name: Upload any core files
+      #   if: success() || failure()
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: core-files-${{ matrix.python }}-arm64
+      #     path: core.*
+
+  test-wheels-gpu-cudaqx-metapackages:
+    name: Test CUDA-QX wheels (GPU) with Meta Packages
+    needs: [build-cudaqx-wheels, build-cudaq-wheels, build-cudaqx-metapackages]
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: linux-${{ matrix.runner.arch }}-gpu-${{ matrix.runner.gpu }}-latest-1
+    container:
+      image: nvidia/cuda:${{ matrix.cuda_version }}.0-base-ubuntu24.04
+      # Enable this if you want to collect core files. (You may might to enable
+      # Debug builds if you're doing this.)
+      #options: --privileged --ulimit core=-1 --security-opt seccomp=unconfined
+      env:
+        NVIDIA_VISIBLE_DEVICES: ${{ env.NVIDIA_VISIBLE_DEVICES }}
+    permissions:
+      actions: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [
+          { arch: arm64, gpu: a100 },
+          { arch: amd64, gpu: a100 },
+        ]
+        python: ['3.11']
+        cuda_version: ['13.0']
+        lib: ['cudaq-solvers', 'cudaq-qec']
+  
+    steps:
+      - name: Get code
+        uses: actions/checkout@v4
+        with:
+          set-safe-directory: true
+  
+      - name: Configure
+        id: config
+        run: |
+          cuda_major=`echo ${{ matrix.cuda_version }} | cut -d . -f1`
+          echo "cuda_major=$cuda_major" >> $GITHUB_OUTPUT
+
+      - name: Install Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+  
+      - name: Install requirements
+        shell: bash
+        run: |
+          bash .github/workflows/scripts/install_git_cli.sh
+          apt install -y --no-install-recommends libgfortran5 unzip openmpi-bin libopenmpi3
+          # If this is x86_64, then install libquadmath0. This is normally
+          # installed by Ubuntu Python, but the action/setup-python package does
+          # not install it.
+          if [ "$(uname -m)" == "x86_64" ]; then
+            apt install -y --no-install-recommends libquadmath0
+          fi
+          #echo 'core.%p' | tee /proc/sys/kernel/core_pattern
+          #echo "Running cat /proc/sys/kernel/core_pattern"
+          #cat /proc/sys/kernel/core_pattern
+  
+      - name: Download CUDA-Q wheels
+        if: ${{ inputs.cudaq_wheels == 'Custom' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: cudaq-wheels-${{ matrix.runner.arch }}-cu${{ steps.config.outputs.cuda_major }}
+          path: /cudaq-wheels
+          run-id: ${{ inputs.artifacts_from_run || github.run_id }}
+          github-token: ${{ inputs.artifacts_from_run && secrets.WORKFLOW_TOKEN || github.token }}
+
+      - name: Download CUDA-QX Meta Packages
+        uses: actions/download-artifact@v4
+        with:
+          name: metapackages
+          path: /metapackages
+          run-id: ${{ inputs.artifacts_from_run || github.run_id }}
+          github-token: ${{ inputs.artifacts_from_run && secrets.WORKFLOW_TOKEN || github.token }}
+
+      - name: Download CUDA-QX wheels
+        uses: actions/download-artifact@v4
+        with:
+          # Download multiple CUDA versions to test the metapackages.
+          pattern: wheels-py${{ matrix.python }}-${{ matrix.runner.arch }}-cu*
+          path: /wheels
+          run-id: ${{ inputs.artifacts_from_run || github.run_id }}
+          github-token: ${{ inputs.artifacts_from_run && secrets.WORKFLOW_TOKEN || github.token }}
+  
+      - name: Test Meta Packages (${{ matrix.lib }})
+        shell: bash
+        run: |
+          ls /wheels
+          python${{ matrix.python }} -m pip list
+          python${{ matrix.python }} -m pip install --find-links /metapackages/ --find-links /wheels/ --find-links /cudaq-wheels/ cudaq-${{ matrix.lib }}-cu${{ steps.config.outputs.cuda_major }}
 
       # - name: Upload any core files
       #   if: success() || failure()
