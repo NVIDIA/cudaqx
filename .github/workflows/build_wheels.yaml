@@ -480,7 +480,7 @@ jobs:
           done
           python${{ matrix.python }} -m pip install --find-links /metapackages/ --find-links /wheels/ --find-links /cudaq-wheels/ cudaq-${{ matrix.lib }}==0.0.0
           # Verify that the correct package was installed.
-          package_installed=$(python${{ matrix.python }} -m pip list | grep cudaq-${{ matrix.lib }}-cu)
+          package_installed=$(python${{ matrix.python }} -m pip list | grep cudaq-${{ matrix.lib }}-cu | cut -d ' ' -f1)
           package_expected=cudaq-${{ matrix.lib }}-cu${{ steps.config.outputs.cuda_major }}
           if [ "$package_installed" != "$package_expected" ]; then
             echo "::error Expected installation of $package_expected package, but got $package_installed."
