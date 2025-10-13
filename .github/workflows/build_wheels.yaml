@@ -456,7 +456,7 @@ jobs:
         run: |
           ls /wheels
           python${{ matrix.python }} -m pip list
-          python${{ matrix.python }} -m pip install --find-links /metapackages/ --find-links /wheels/ --find-links /cudaq-wheels/ cudaq-${{ matrix.lib }}
+          python${{ matrix.python }} -m pip install --find-links /metapackages/ --find-links /wheels/ --find-links /cudaq-wheels/ cudaq-${{ matrix.lib }}==0.0.0
 
       # - name: Upload any core files
       #   if: success() || failure()
