@@ -106,6 +106,7 @@ jobs:
       - name: Build CUDA-QX wheels
         env:
           SUFFIX: ${{ matrix.platform == 'amd64' && 'x86_64' || 'aarch64' }}
+        shell: bash
         run: |
           if [[ -n "${{ inputs.assets_repo }}" ]] && [[ -n "${{ inputs.assets_tag }}" ]]; then
             # Extract the decoder that needs to be embedded in the wheel
@@ -117,6 +118,11 @@ jobs:
           # This is needed to allow the "git rev-parse" commands in the build
           # scripts to work.
           git config --global --add safe.directory $GITHUB_WORKSPACE
+          # Modify the pyproject.toml file to use the correct CUDA version for the name and dependencies.
+          if [[ "${{ steps.config.outputs.cuda_major }}" == "12" ]]; then
+            sed -i "s/cu13/cu12/g" libs/qec/pyproject.toml
+            sed -i "s/cu13/cu12/g" libs/solvers/pyproject.toml
+          fi
           .github/workflows/scripts/build_wheels.sh \
               --cudaq-prefix /usr/local/cudaq \
               --build-type ${{ inputs.build_type }} \
