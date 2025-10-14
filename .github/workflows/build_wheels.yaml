@@ -118,12 +118,8 @@ jobs:
           # This is needed to allow the "git rev-parse" commands in the build
           # scripts to work.
           git config --global --add safe.directory $GITHUB_WORKSPACE
-          # Modify the pyproject.toml file to use the correct CUDA version for the name and dependencies.
-          if [[ "${{ steps.config.outputs.cuda_major }}" == "12" ]]; then
-            sed -i "s/cu13/cu12/g" libs/qec/pyproject.toml
-            sed -i "s/cu13/cu12/g" libs/solvers/pyproject.toml
-          fi
           .github/workflows/scripts/build_wheels.sh \
+              --cuda-version ${{ steps.config.outputs.cuda_major }} \
               --cudaq-prefix /usr/local/cudaq \
               --build-type ${{ inputs.build_type }} \
               --python-version ${{ matrix.python }} \

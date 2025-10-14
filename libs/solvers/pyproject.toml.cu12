@@ -3,15 +3,20 @@ requires = ["scikit-build-core>=0.10"]
 build-backend = "scikit_build_core.build"
 
 [project]
-name = "cudaq-qec-cu13"
+name = "cudaq-solvers-cu12"
 dynamic = ["version"]
-description = "Accelerated libraries for Quantum Error Correction built on CUDA-Q"
+description = "Accelerated libraries for quantum-classical solvers built on CUDA-Q"
 authors = [{name = "NVIDIA Corporation & Affiliates"}]
 maintainers = [{name = "NVIDIA Corporation & Affiliates"}]
 requires-python = ">=3.11"
 readme = "README.md"
 dependencies = [
-  'cuda-quantum-cu13 >= 0.12',
+  'cuda-quantum-cu12 >= 0.12',
+  'fastapi',
+  'networkx',
+  'pyscf',
+  'scipy',
+  'uvicorn',
 ]
 classifiers = [
     'Intended Audience :: Science/Research',
@@ -30,7 +35,7 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://nvidia.github.io/cudaqx"
-Documentation = "https://nvidia.github.io/cudaqx/components/qec/introduction.html"
+Documentation = "https://nvidia.github.io/cudaqx/components/solvers/introduction.html"
 Repository = "https://github.com/NVIDIA/cudaqx"
 
 [tool.scikit-build]
@@ -39,22 +44,23 @@ build-dir = "_skbuild"
 build.verbose = true
 cmake.version = ">=3.28"
 cmake.build-type = "Release"
-install.components = ["qec-python", "qec-lib", "qec-lib-plugins"]
+install.components = ["solvers-python", "solvers-lib", "solvers-tools"]
 wheel.packages = []
 logging.level = "DEBUG"
 ninja.version = ">=1.10"
 
 [tool.scikit-build.cmake.define]
-CUDAQX_QEC_INCLUDE_TESTS = false
-CUDAQX_QEC_BINDINGS_PYTHON = true
+CUDAQX_SOLVERS_INCLUDE_TESTS = false
+CUDAQX_SOLVERS_BINDINGS_PYTHON = true
 
 [tool.setuptools_scm]
 write_to = "_version.py"
 
 [project.optional-dependencies]
-tensor_network_decoder = [
-  "quimb",
-  "opt_einsum",
-  "torch",
-  "cuquantum-python-cu13==25.09"
+gqe = [
+  'torch>=2.0.0',
+  'lightning>=2.0.0',
+  'ml_collections>=0.1.0',
+  'mpi4py>=3.1.0',
+  'transformers>=4.30.0',
 ]

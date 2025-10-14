@@ -58,7 +58,7 @@ write_to = "_version.py"
 
 [project.optional-dependencies]
 gqe = [
-  'torch>=2.0.0',
+  'torch>=2.9.0',
   'lightning>=2.0.0',
   'ml_collections>=0.1.0',
   'mpi4py>=3.1.0',
