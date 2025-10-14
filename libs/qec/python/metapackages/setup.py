@@ -219,7 +219,7 @@ def _infer_best_package() -> str:
     if conflicting != '':
         _log("Abort.")
         raise Exception(
-            f'You have a conflicting CUDAQ-QEC version installed.'
+            f'You have a conflicting {package_name} version installed.'
             f'Please remove the following package(s): {conflicting}')
     return cudaq_qec_bdist
 

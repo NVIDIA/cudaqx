@@ -96,6 +96,9 @@ if [ "$package_installed" != "$package_expected" ]; then
   exit 1
 fi
 
+# Prepare for the next test
+${python} -m pip uninstall -y cudaq-solvers cudaq-solvers-cu${cuda_version}
+
 # Test the solvers library with GQE
 echo "Installing Solvers library with GQE"
 ${python} -m pip install --no-cache-dir --force-reinstall ${FIND_LINKS} "cudaq-solvers[gqe]"
