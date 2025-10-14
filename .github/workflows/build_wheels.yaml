@@ -13,7 +13,7 @@ on:
         - 'Debug'
       version:
         type: string
-        description: Version number to create wheels with (e.g. 0.2.0). Defaults to 0.0.0 if unspecified
+        description: Version number to create wheels with (e.g. 0.2.0). Defaults to 0.99.99 if unspecified
         required: false
       cudaq_wheels:
         type: choice
@@ -123,7 +123,7 @@ jobs:
               --cudaq-prefix /usr/local/cudaq \
               --build-type ${{ inputs.build_type }} \
               --python-version ${{ matrix.python }} \
-              --version ${{ inputs.version || '0.0.0' }}
+              --version ${{ inputs.version || '0.99.99' }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -154,7 +154,7 @@ jobs:
       - name: Build CUDA-QX Meta Packages
         shell: bash
         run: |
-          bash scripts/ci/build_metapackages.sh ${{ inputs.version || '0.0.0' }}
+          bash scripts/ci/build_metapackages.sh ${{ inputs.version || '0.99.99' }}
           find libs -name dist | xargs ls -la
           mkdir -p /metapackages
           mv libs/{qec,solvers}/python/metapackages/dist/* /metapackages/
@@ -479,7 +479,7 @@ jobs:
             echo "ls $d"
             ls $d
           done
-          python${{ matrix.python }} -m pip install --find-links /metapackages/ --find-links /wheels/ --find-links /cudaq-wheels/ cudaq-${{ matrix.lib }}==0.0.0
+          python${{ matrix.python }} -m pip install --find-links /metapackages/ --find-links /wheels/ --find-links /cudaq-wheels/ cudaq-${{ matrix.lib }}==0.99.99
           # Verify that the correct package was installed.
           package_installed=$(python${{ matrix.python }} -m pip list | grep cudaq-${{ matrix.lib }}-cu | cut -d ' ' -f1)
           package_expected=cudaq-${{ matrix.lib }}-cu${{ steps.config.outputs.cuda_major }}
