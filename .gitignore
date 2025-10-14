@@ -105,3 +105,6 @@ libs/*/python/metapackages/CITATION.cff
 libs/*/python/metapackages/_*.*
 libs/*/python/metapackages/*.egg-info
 libs/*/python/metapackages/dist/*
+
+# This file is cloned from the qec dir; do not commit after cloning.
+libs/solvers/python/metapackages/setup.py
