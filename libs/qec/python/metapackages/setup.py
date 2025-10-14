@@ -234,6 +234,7 @@ def _infer_best_package() -> str:
 setup_dir = os.path.dirname(os.path.abspath(__file__))
 data_files = []
 install_requires = []
+opt_deps = {}
 if os.environ.get('CUDAQ_META_WHEEL_BUILD', '0') == '1':
     # Case 1: create source distribution, do nothing.
     pass
@@ -241,12 +242,44 @@ else:
     # Case 2: install `package_name` source distribution
     with open(os.path.join(setup_dir, "_version.txt"), "r") as f:
         __version__ = f.read()
+    best_package = _infer_best_package()
     install_requires = [
-        f"{_infer_best_package()}=={__version__}",
+        f"{best_package}=={__version__}",
     ]
+    if package_name == 'cudaq-qec':
+        # This must stay in alignment with libs/qec/pyproject.toml.cu12
+        if 'cu12' in best_package:
+            opt_deps['tensor_network_decoder'] = [
+                'quimb', 'opt_einsum', 'torch', 'cuquantum-python-cu12==25.09'
+            ]
+        # This must stay in alignment with libs/qec/pyproject.toml.cu13
+        elif 'cu13' in best_package:
+            opt_deps['tensor_network_decoder'] = [
+                'quimb', 'opt_einsum', 'torch', 'cuquantum-python-cu13==25.09'
+            ]
+    elif package_name == 'cudaq-solvers':
+        # This must stay in alignment with libs/solvers/pyproject.toml.cu12
+        if 'cu12' in best_package:
+            opt_deps['gqe'] = [
+                'torch>=2.0.0',  # unique for cu12
+                'lightning>=2.0.0',
+                'ml_collections>=0.1.0',
+                'mpi4py>=3.1.0',
+                'transformers>=4.30.0',
+            ]
+        # This must stay in alignment with libs/solvers/pyproject.toml.cu13
+        elif 'cu13' in best_package:
+            opt_deps['gqe'] = [
+                'torch>=2.9.0',  # unique for cu13
+                'lightning>=2.0.0',
+                'ml_collections>=0.1.0',
+                'mpi4py>=3.1.0',
+                'transformers>=4.30.0',
+            ]
 
 setup(
     zip_safe=False,
     data_files=data_files,
     install_requires=install_requires,
+    extras_require=opt_deps,
 )

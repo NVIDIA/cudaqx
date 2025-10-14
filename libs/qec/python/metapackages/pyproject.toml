@@ -8,7 +8,7 @@
 
 [project]
 name = "cudaq-qec"
-dynamic = ["version", "dependencies"]
+dynamic = ["version", "dependencies", "optional-dependencies"]
 keywords = [ "qec", "cudaq", "cuda-quantum", "cuda", "quantum", "quantum computing", "nvidia", "high-performance computing" ]
 description = "Accelerated libraries for Quantum Error Correction built on CUDA-Q"
 authors = [{name = "NVIDIA Corporation & Affiliates"}]
