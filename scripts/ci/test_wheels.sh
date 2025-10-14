@@ -56,6 +56,8 @@ if [ -d /cudaq-wheels ]; then
   FIND_LINKS="${FIND_LINKS} --find-links /cudaq-wheels/"
 fi
 
+${python} -m pip install $FIND_LINKS "cuda-quantum-cu${cuda_version}==0.99.99"
+
 # QEC library
 # ======================================
 
