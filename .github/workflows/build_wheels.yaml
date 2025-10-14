@@ -464,8 +464,7 @@ jobs:
       - name: Download CUDA-QX wheels
         uses: actions/download-artifact@v4
         with:
-          # Download multiple CUDA versions to test the metapackages.
-          pattern: wheels-py${{ matrix.python }}-${{ matrix.runner.arch }}-cu*
+          pattern: wheels-py${{ matrix.python }}-${{ matrix.runner.arch }}-cu${{ steps.config.outputs.cuda_major }}
           merge-multiple: true
           path: /wheels
           run-id: ${{ steps.config.outputs.run_id_to_use }}
