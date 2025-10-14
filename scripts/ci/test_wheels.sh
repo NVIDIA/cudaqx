@@ -44,7 +44,7 @@ ${python} -m pip install openfermionpyscf
 
 # TODO: Remove this once PyTorch 2.9.0 is released. That should happen before
 # this PR is merged.
-if [[ "$cuda_version" == "13.0" ]]; then
+if [[ "$cuda_version" == "13" ]]; then
   ${python} -m pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/test/cu130
 fi
 
