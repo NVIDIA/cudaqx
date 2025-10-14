@@ -277,6 +277,14 @@ jobs:
           run-id: ${{ steps.config.outputs.run_id_to_use }}
           github-token: ${{ inputs.artifacts_from_run && secrets.WORKFLOW_TOKEN || github.token }}
 
+      - name: Download CUDA-QX Meta Packages
+        uses: actions/download-artifact@v4
+        with:
+          name: metapackages
+          path: /metapackages
+          run-id: ${{ steps.config.outputs.run_id_to_use }}
+          github-token: ${{ inputs.artifacts_from_run && secrets.WORKFLOW_TOKEN || github.token }}
+
       - name: Download CUDA-QX wheels
         uses: actions/download-artifact@v4
         with:
