@@ -6,15 +6,24 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
+# Maintenance note: this script is used to build the meta-package for both
+# cudaq-qec and cudaq-solvers. It is the same script for both meta-packages, so
+# the scripts/ci/build_metapackages.sh will take the cudaq-qec meta-package as
+# the original source of truth, and it will be copied and the "package_name"
+# will be updated for the cudaq-solvers meta-package.
+
 import ctypes, os, sys
 import importlib.util
 import site, glob
 from setuptools import setup
 from typing import Optional
 
+# Get the package name the Python environment that is running this script.
+package_name = 'cudaq-qec'
+
 
 def _log(msg: str) -> None:
-    sys.stdout.write(f'[cudaq-qec] {msg}\n')
+    sys.stdout.write(f'[{package_name}] {msg}\n')
     sys.stdout.flush()
 
 
@@ -185,20 +194,20 @@ def _infer_best_package() -> str:
     """
     # Find the existing wheel installation
     installed = []
-    for pkg in ['cudaq-qec', 'cudaq-qec-cu12', 'cudaq-qec-cu13']:
+    for pkg in [package_name, f'{package_name}-cu12', f'{package_name}-cu13']:
         _log(f"Looking for existing installation of {pkg}.")
         if _check_package_installed(pkg):
             installed.append(pkg)
 
     cuda_version = _get_cuda_version()
     if cuda_version is None:
-        cudaq_qec_bdist = 'cudaq-qec-cu12'
+        cudaq_qec_bdist = f'{package_name}-cu12'
     elif cuda_version < 12000:
         raise Exception(f'Your CUDA version ({cuda_version}) is too old.')
     elif cuda_version < 13000:
-        cudaq_qec_bdist = 'cudaq-qec-cu12'
+        cudaq_qec_bdist = f'{package_name}-cu12'
     elif cuda_version <= 14000:
-        cudaq_qec_bdist = 'cudaq-qec-cu13'
+        cudaq_qec_bdist = f'{package_name}-cu13'
     else:
         raise Exception(f'Your CUDA version ({cuda_version}) is too new.')
     _log(f"Identified {cudaq_qec_bdist} as the best package.")
@@ -229,7 +238,7 @@ if os.environ.get('CUDAQ_META_WHEEL_BUILD', '0') == '1':
     # Case 1: create source distribution, do nothing.
     pass
 else:
-    # Case 2: install cudaq-qec source distribution
+    # Case 2: install `package_name` source distribution
     with open(os.path.join(setup_dir, "_version.txt"), "r") as f:
         __version__ = f.read()
     install_requires = [
