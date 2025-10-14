@@ -295,7 +295,10 @@ jobs:
   
       - name: Test wheels
         run: |
-          ls /wheels
+          for f in /wheels /metapackages /cudaq-wheels; do
+            echo "ls $f"
+            ls $f
+          done
           bash scripts/ci/test_wheels.sh ${{ matrix.python }} ${{ matrix.platform }} ${{ steps.config.outputs.cuda_major }}
   
   test-wheels-gpu:
@@ -388,7 +391,10 @@ jobs:
   
       - name: Test wheels
         run: |
-          ls /wheels
+          for f in /wheels /metapackages /cudaq-wheels; do
+            echo "ls $f"
+            ls $f
+          done
           bash scripts/ci/test_wheels.sh ${{ matrix.python }} ${{ matrix.runner.arch }} ${{ steps.config.outputs.cuda_major }}
 
       # - name: Upload any core files
