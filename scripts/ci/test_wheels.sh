@@ -20,6 +20,8 @@ python_version=$1
 python=python${python_version}
 platform=$2
 cuda_version=$3
+cudaq_version=$4
+cudaqx_version=$5
 
 # Verify the input arguments aren't empty, one at a time.
 if [ -z "$python_version" ] ; then
@@ -32,6 +34,14 @@ if [ -z "$platform" ] ; then
 fi
 if [ -z "$cuda_version" ] ; then
   echo "Error: cuda_version is empty"
+  exit 1
+fi
+if [ -z "$cudaq_version" ] ; then
+  echo "Error: cudaq_version is empty"
+  exit 1
+fi
+if [ -z "$cudaqx_version" ] ; then
+  echo "Error: cudaqx_version is empty"
   exit 1
 fi
 
@@ -54,16 +64,15 @@ FIND_LINKS="--find-links /wheels/ --find-links /metapackages/"
 if [ -d /cudaq-wheels ]; then
   echo "Custom CUDA-Q wheels directory found. Will add to the --find-links list."
   FIND_LINKS="${FIND_LINKS} --find-links /cudaq-wheels/"
+  ${python} -m pip install $FIND_LINKS "cuda-quantum-cu${cuda_version}==${cudaq_version}"
 fi
-
-${python} -m pip install $FIND_LINKS "cuda-quantum-cu${cuda_version}==0.99.99"
 
 # QEC library
 # ======================================
 
 # Install QEC library with tensor network decoder (requires Python >=3.11)
 echo "Installing QEC library with tensor network decoder"
-${python} -m pip install ${FIND_LINKS} "cudaq-qec[tensor-network-decoder]==0.99.99"
+${python} -m pip install ${FIND_LINKS} "cudaq-qec[tensor-network-decoder]==${cudaqx_version}"
 ${python} -m pytest -v -s libs/qec/python/tests/
 
 # Verify that the correct version of cuda-quantum and cudaq-qec were installed.
@@ -85,7 +94,7 @@ fi
 # ======================================
 # Test the base solvers library without optional dependencies
 echo "Installing Solvers library without GQE"
-${python} -m pip install ${FIND_LINKS} "cudaq-solvers==0.99.99"
+${python} -m pip install ${FIND_LINKS} "cudaq-solvers==${cudaqx_version}"
 ${python} -m pytest -v -s libs/solvers/python/tests/ --ignore=libs/solvers/python/tests/test_gqe.py
 
 # Verify that the correct version of cudaq-solvers was installed.
@@ -98,7 +107,7 @@ fi
 
 # Test the solvers library with GQE
 echo "Installing Solvers library with GQE"
-${python} -m pip install ${FIND_LINKS} "cudaq-solvers[gqe]==0.99.99"
+${python} -m pip install ${FIND_LINKS} "cudaq-solvers[gqe]==${cudaqx_version}"
 ${python} -m pytest -v -s libs/solvers/python/tests/test_gqe.py
 
 # Test the libraries with examples

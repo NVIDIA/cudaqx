@@ -299,7 +299,12 @@ jobs:
             echo "ls $f"
             ls $f
           done
-          bash scripts/ci/test_wheels.sh ${{ matrix.python }} ${{ matrix.platform }} ${{ steps.config.outputs.cuda_major }}
+          bash scripts/ci/test_wheels.sh \
+             ${{ matrix.python }} \
+             ${{ matrix.platform }} \
+             ${{ steps.config.outputs.cuda_major }} \
+             ${{ inputs.cudaq_wheels == 'Custom' && '0.99.99' || 'SKIP' }} \
+             ${{ inputs.version || '0.99.99' }}
   
   test-wheels-gpu:
     name: Test CUDA-QX wheels (GPU)
@@ -395,7 +400,13 @@ jobs:
             echo "ls $f"
             ls $f
           done
-          bash scripts/ci/test_wheels.sh ${{ matrix.python }} ${{ matrix.runner.arch }} ${{ steps.config.outputs.cuda_major }}
+          bash scripts/ci/test_wheels.sh \
+             ${{ matrix.python }} \
+             ${{ matrix.runner.arch }} \
+             ${{ steps.config.outputs.cuda_major }} \
+             ${{ inputs.cudaq_wheels == 'Custom' && '0.99.99' || 'SKIP' }} \
+             ${{ inputs.version || '0.99.99' }}
+
 
       # - name: Upload any core files
       #   if: success() || failure()
