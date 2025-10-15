@@ -52,12 +52,6 @@ ${python} -m pip install --no-cache-dir pytest
 ${python} -m pip install openfermion
 ${python} -m pip install openfermionpyscf
 
-# TODO: Remove this once PyTorch 2.9.0 is released. That should happen before
-# this PR is merged.
-if [[ "$cuda_version" == "13" ]]; then
-  ${python} -m pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu130
-fi
-
 FIND_LINKS="--find-links /wheels/ --find-links /metapackages/"
 
 # If special CUDA-Q wheels have been built for this test, install them here.
@@ -65,6 +59,14 @@ if [ -d /cudaq-wheels ]; then
   echo "Custom CUDA-Q wheels directory found. Will add to the --find-links list."
   FIND_LINKS="${FIND_LINKS} --find-links /cudaq-wheels/"
   ${python} -m pip install $FIND_LINKS "cuda-quantum-cu${cuda_version}==${cudaq_version}"
+fi
+
+# TODO: Remove this once PyTorch 2.9.0 is released. That should happen before
+# this PR is merged.
+if [[ "$cuda_version" == "13" ]]; then
+  ${python} -m pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu130
+elif [[ "$cuda_version" == "12" ]]; then
+  ${python} -m pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu126
 fi
 
 # QEC library
