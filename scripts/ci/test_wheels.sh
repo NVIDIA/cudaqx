@@ -52,6 +52,8 @@ ${python} -m pip install --no-cache-dir pytest
 ${python} -m pip install openfermion
 ${python} -m pip install openfermionpyscf
 
+${python} -m pip install "torch==2.9.0"
+
 FIND_LINKS="--find-links /wheels/ --find-links /metapackages/"
 
 # If special CUDA-Q wheels have been built for this test, install them here.
