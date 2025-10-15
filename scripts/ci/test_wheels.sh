@@ -63,7 +63,7 @@ ${python} -m pip install $FIND_LINKS "cuda-quantum-cu${cuda_version}==0.99.99"
 
 # Install QEC library with tensor network decoder (requires Python >=3.11)
 echo "Installing QEC library with tensor network decoder"
-${python} -m pip install ${FIND_LINKS} "cudaq-qec[tensor-network-decoder]"
+${python} -m pip install ${FIND_LINKS} "cudaq-qec[tensor-network-decoder]==0.99.99"
 ${python} -m pytest -v -s libs/qec/python/tests/
 
 # Verify that the correct version of cuda-quantum and cudaq-qec were installed.
@@ -85,7 +85,7 @@ fi
 # ======================================
 # Test the base solvers library without optional dependencies
 echo "Installing Solvers library without GQE"
-${python} -m pip install ${FIND_LINKS} cudaq-solvers
+${python} -m pip install ${FIND_LINKS} "cudaq-solvers==0.99.99"
 ${python} -m pytest -v -s libs/solvers/python/tests/ --ignore=libs/solvers/python/tests/test_gqe.py
 
 # Verify that the correct version of cudaq-solvers was installed.
@@ -98,7 +98,7 @@ fi
 
 # Test the solvers library with GQE
 echo "Installing Solvers library with GQE"
-${python} -m pip install ${FIND_LINKS} "cudaq-solvers[gqe]"
+${python} -m pip install ${FIND_LINKS} "cudaq-solvers[gqe]==0.99.99"
 ${python} -m pytest -v -s libs/solvers/python/tests/test_gqe.py
 
 # Test the libraries with examples
