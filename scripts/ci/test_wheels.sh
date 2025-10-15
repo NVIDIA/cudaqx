@@ -52,7 +52,11 @@ ${python} -m pip install --no-cache-dir pytest
 ${python} -m pip install openfermion
 ${python} -m pip install openfermionpyscf
 
-${python} -m pip install "torch==2.9.0"
+# TODO: Remove this once PyTorch 2.9.0 is released. That should happen before
+# this PR is merged.
+if [[ "$cuda_version" == "13" ]]; then
+  ${python} -m pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/test/cu130
+fi
 
 FIND_LINKS="--find-links /wheels/ --find-links /metapackages/"
 
