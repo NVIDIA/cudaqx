@@ -119,7 +119,7 @@ runs:
         context: cudaq
         file: ./cudaq/docker/release/cudaq.wheel.Dockerfile
         build-args: |
-          base_image=ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ inputs.platform }}-cu${{ inputs.cuda_version }}-gcc11-test-ubuntu2404
+          base_image=ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ inputs.platform }}-cu${{ inputs.cuda_version }}-gcc11-main
           release_version=0.99.99
           python_version=3.11
         outputs: /cudaq-wheels
@@ -130,7 +130,7 @@ runs:
         context: cudaq
         file: ./cudaq/docker/release/cudaq.wheel.Dockerfile
         build-args: |
-          base_image=ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ inputs.platform }}-cu${{ inputs.cuda_version }}-gcc11-test-ubuntu2404
+          base_image=ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ inputs.platform }}-cu${{ inputs.cuda_version }}-gcc11-main
           release_version=0.99.99
           python_version=3.12
         outputs: /cudaq-wheels
@@ -141,7 +141,7 @@ runs:
         context: cudaq
         file: ./cudaq/docker/release/cudaq.wheel.Dockerfile
         build-args: |
-          base_image=ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ inputs.platform }}-cu${{ inputs.cuda_version }}-gcc11-test-ubuntu2404
+          base_image=ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ inputs.platform }}-cu${{ inputs.cuda_version }}-gcc11-main
           release_version=0.99.99
           python_version=3.13
         outputs: /cudaq-wheels

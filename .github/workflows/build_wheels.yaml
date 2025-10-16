@@ -49,7 +49,7 @@ jobs:
     # easier to rely on their's devdeps images to do the building.
     # FIXME: there is no guarantee that this CUDA-Q image aligns with the CUDA-Q
     # commit that we are trying to align with.
-    container: ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc11-test-ubuntu2404
+    container: ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc11-main
     permissions: write-all
     strategy:
       fail-fast: false
