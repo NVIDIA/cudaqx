@@ -54,4 +54,17 @@ for package in qec solvers; do
 
   CUDAQ_META_WHEEL_BUILD=1 python3 -m build . --sdist
 
+  # Verify the expected file was created.
+  EXPECTED_FILE=dist/cudaq_${package}-${VERSION}.tar.gz
+  if [ ! -f $EXPECTED_FILE ]; then
+    echo "Error: Expected file $EXPECTED_FILE not found"
+    exit 1
+  fi
+
+  # Verify tarball is valid
+  if ! tar -tzf $EXPECTED_FILE > /dev/null 2>&1; then
+    echo "Error: Invalid tarball created: $EXPECTED_FILE"
+    exit 1
+  fi
+
 done

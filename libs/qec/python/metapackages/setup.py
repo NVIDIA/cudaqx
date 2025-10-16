@@ -201,9 +201,12 @@ def _infer_best_package() -> str:
 
     cuda_version = _get_cuda_version()
     if cuda_version is None:
+        _log("CUDA version not detected. Assuming CUDA 12.0.")
         cudaq_qec_bdist = f'{package_name}-cu12'
     elif cuda_version < 12000:
-        raise Exception(f'Your CUDA version ({cuda_version}) is too old.')
+        raise Exception(
+            f'Your CUDA version ({cuda_version}) is not supported. Minimum required: CUDA 12.0.'
+        )
     elif cuda_version < 13000:
         cudaq_qec_bdist = f'{package_name}-cu12'
     elif cuda_version <= 14000:
