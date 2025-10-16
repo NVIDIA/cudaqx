@@ -161,6 +161,18 @@ void addStatePrepKernels(py::module &mod) {
       "qubits to apply the ansatz on, the rotational parameters, the number of "
       "electrons in the system, and the total spin (the number of unpaired "
       "electrons).");
+    
+    // Add this for UCCGSD
+  cudaq::python::addDeviceKernelInterop<
+      cudaq::qview<>,
+      const std::vector<double>&,
+      const std::vector<std::vector<cudaq::pauli_word>>&,
+      const std::vector<std::vector<double>>&
+  >(
+      mod, "stateprep", "uccgsd",
+      "Unitary Coupled Cluster Generalized Singles Doubles Ansatz. "
+      "Takes as input the qubits, grouped rotational parameters, grouped Pauli words, and grouped coefficients."
+  );
   cudaq::python::addDeviceKernelInterop<cudaq::qview<>, double, std::size_t,
                                         std::size_t>(
       mod, "stateprep", "single_excitation",
