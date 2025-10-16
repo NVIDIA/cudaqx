@@ -12,8 +12,10 @@ available on this repository. It will always contain a recent version of CUDA-Q
 The instructions below provide a complete set of commands to get you up and
 running. There are images available called
 
-- `ghcr.io/nvidia/cudaqx-dev:latest-amd64-cu12.6` for AMD64 platforms
-- `ghcr.io/nvidia/cudaqx-dev:latest-arm64-cu12.6` for ARM64 platforms
+- `ghcr.io/nvidia/cudaqx-dev:latest-amd64-cu12.6` for AMD64 platforms with CUDA >= 12.6, < 13
+- `ghcr.io/nvidia/cudaqx-dev:latest-amd64-cu13.0` for AMD64 platforms with CUDA >= 13.0
+- `ghcr.io/nvidia/cudaqx-dev:latest-arm64-cu12.6` for ARM64 platforms with CUDA >= 12.6, < 13
+- `ghcr.io/nvidia/cudaqx-dev:latest-arm64-cu13.0` for ARM64 platforms with CUDA >= 13.0
 
 With the image appropriate for your system, run
 
@@ -62,6 +64,7 @@ commands to switch to whichever version you need. You can then use
 to re-build CUDA-Q.
 
 Additionally, the following CMake options can be configured:
+
 - `CUDAQX_ENABLE_LIBS`: Specify which libraries to build (`all`, `qec`, `solvers`)
 - `CUDAQX_INCLUDE_TESTS`: Enable building of tests
 - `CUDAQX_BINDINGS_PYTHON`: Enable Python bindings
