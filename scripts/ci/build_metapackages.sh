@@ -52,6 +52,12 @@ for package in qec solvers; do
   # Create a version.txt file in the metapackage directory.
   echo $VERSION > _version.txt
 
+  # Copy the appropriate pyproject.toml.cu12/13 files to the metapackage
+  # directory. This allows the setup.py running on the end-user system to
+  # dynamically read the appropriate optional dependencies for the different
+  # CUDA versions.
+  cp $TOP_DIR/libs/${package}/pyproject.toml.cu* .
+
   CUDAQ_META_WHEEL_BUILD=1 python3 -m build . --sdist
 
   # Verify the expected file was created.
@@ -66,5 +72,10 @@ for package in qec solvers; do
     echo "Error: Invalid tarball created: $EXPECTED_FILE"
     exit 1
   fi
+
+  # Clean up
+  rm $TOP_DIR/libs/${package}/python/metapackages/pyproject.toml.cu*
+  rm $FILES_TO_COPY
+  rm _version.txt
 
 done

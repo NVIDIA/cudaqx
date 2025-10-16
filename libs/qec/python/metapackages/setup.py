@@ -15,6 +15,7 @@
 import ctypes, os, sys
 import importlib.util
 import site, glob
+import tomllib
 from setuptools import setup
 from typing import Optional
 
@@ -249,36 +250,17 @@ else:
     install_requires = [
         f"{best_package}=={__version__}",
     ]
-    if package_name == 'cudaq-qec':
-        # This must stay in alignment with libs/qec/pyproject.toml.cu12
-        if 'cu12' in best_package:
-            opt_deps['tensor_network_decoder'] = [
-                'quimb', 'opt_einsum', 'torch', 'cuquantum-python-cu12==25.09'
-            ]
-        # This must stay in alignment with libs/qec/pyproject.toml.cu13
-        elif 'cu13' in best_package:
-            opt_deps['tensor_network_decoder'] = [
-                'quimb', 'opt_einsum', 'torch', 'cuquantum-python-cu13==25.09'
-            ]
-    elif package_name == 'cudaq-solvers':
-        # This must stay in alignment with libs/solvers/pyproject.toml.cu12
-        if 'cu12' in best_package:
-            opt_deps['gqe'] = [
-                'torch>=2.0.0',  # unique for cu12
-                'lightning>=2.0.0',
-                'ml_collections>=0.1.0',
-                'mpi4py>=3.1.0',
-                'transformers>=4.30.0',
-            ]
-        # This must stay in alignment with libs/solvers/pyproject.toml.cu13
-        elif 'cu13' in best_package:
-            opt_deps['gqe'] = [
-                'torch>=2.9.0',  # unique for cu13
-                'lightning>=2.0.0',
-                'ml_collections>=0.1.0',
-                'mpi4py>=3.1.0',
-                'transformers>=4.30.0',
-            ]
+
+    # Read the optional dependencies from the embedded pyproject.toml.cu12/13
+    # files.
+    suffix = None
+    if 'cu12' in best_package:
+        suffix = 'cu12'
+    elif 'cu13' in best_package:
+        suffix = 'cu13'
+    with open(os.path.join(setup_dir, f"pyproject.toml.{suffix}"), "r") as f:
+        data = tomllib.load(f)
+        opt_deps = data.get('project', {}).get('optional-dependencies', {})
 
 setup(
     zip_safe=False,
