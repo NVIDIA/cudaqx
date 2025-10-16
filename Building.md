@@ -52,6 +52,8 @@ ninja install
 export PYTHONPATH=${CUDAQ_INSTALL_PREFIX}:${CUDAQX_INSTALL_PREFIX}
 export PATH="${CUDAQ_INSTALL_PREFIX}/bin:${CUDAQX_INSTALL_PREFIX}/bin:${PATH}"
 ctest
+cd ..
+python3 -m pytest -v libs/qec/python/tests --ignore libs/qec/python/tests/test_tensor_network_decoder.py
 ```
 
 If you want to change which version of CUDA-Q that CUDA-QX is paired with, you
