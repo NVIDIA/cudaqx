@@ -9,27 +9,6 @@
 
 namespace cudaq::solvers::stateprep {
 
-// Efficient binomial coefficient calculation
-std::size_t binomial_coefficient(std::size_t n, std::size_t k) {
-  if (k > n - k) k = n - k;
-  std::size_t result = 1;
-  for (std::size_t i = 0; i < k; ++i) {
-    result *= (n - i);
-    result /= (i + 1);
-  }
-  return result;
-}
-
-// Return the number of UCCGSD ansatz parameters
-std::tuple<std::size_t, std::size_t, std::size_t>
-uccgsd_parameter_size(std::size_t nelectrons, std::size_t norbitals) {
-  if (nelectrons > norbitals)
-    throw std::runtime_error("Number of electrons cannot exceed number of spin molecular orbitals.");
-  std::size_t n_single_excitations = norbitals * (norbitals - 1) / 2;
-  std::size_t n_double_excitations = binomial_coefficient(norbitals, nelectrons);
-  return {n_single_excitations, n_double_excitations, n_single_excitations + n_double_excitations};
-}
-
 // Helper for single excitation operator pool
 void addGeneralizedSingleExcitation(std::vector<cudaq::spin_op> &ops, std::size_t p, std::size_t q) {
   if (p > q) {
@@ -113,15 +92,13 @@ get_uccgsd_pauli_lists(std::size_t nelectrons,
 
 __qpu__ void uccgsd(cudaq::qview<> qubits,
                                    const std::vector<double>& thetas,
-                                   const std::vector<std::vector<cudaq::pauli_word>>& pauliWordsList,
-                                   const std::vector<std::vector<double>>& coefficientsList) {
+                                   const std::vector<std::vector<cudaq::pauli_word>>& pauliWordsList) {
   for (std::size_t i = 0; i < pauliWordsList.size(); ++i) {
     // Use the same theta for all terms in this group
     double theta = thetas[i];
     const auto& words = pauliWordsList[i];
-    const auto& coeffs = coefficientsList[i];
     for (std::size_t j = 0; j < words.size(); ++j) {
-      exp_pauli(theta * coeffs[j], qubits, words[j]);
+      exp_pauli(theta , qubits, words[j]);
     }
   }
 }

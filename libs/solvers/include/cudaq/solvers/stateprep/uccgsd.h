@@ -13,13 +13,6 @@
 
 namespace cudaq::solvers::stateprep {
 
-/// @brief Calculate the number of UCCGSD parameters
-/// @param nelectrons Number of electrons in the system
-/// @param norbitals Number of spin orbitals (qubits)
-/// @return Tuple: (num singles, num doubles, total)
-std::tuple<std::size_t, std::size_t, std::size_t>
-uccgsd_parameter_size(std::size_t nelectrons, std::size_t norbitals);
-
 /// @brief Generate UCCGSD operator pool and extract Pauli words and coefficients
 /// @param nelectrons Number of electrons
 /// @param norbitals Number of spin orbitals (qubits)
@@ -39,10 +32,8 @@ get_uccgsd_pauli_lists(std::size_t nelectrons,
 /// @param qubits Qubit register
 /// @param thetas Vector of rotation angles (one per excitation group)
 /// @param pauliWordsList Pauli words grouped by excitation
-/// @param coefficientsList Coefficients grouped by excitation
-__qpu__ void uccgsd_grouped_kernel(cudaq::qview<> qubits,
-                                   const std::vector<double>& thetas,
-                                   const std::vector<std::vector<cudaq::pauli_word>>& pauliWordsList,
-                                   const std::vector<std::vector<double>>& coefficientsList);
+__qpu__ void uccgsd(cudaq::qview<> qubits,
+                    const std::vector<double>& thetas,
+                    const std::vector<std::vector<cudaq::pauli_word>>& pauliWordsList);
 
 } // namespace cudaq::solvers::stateprep

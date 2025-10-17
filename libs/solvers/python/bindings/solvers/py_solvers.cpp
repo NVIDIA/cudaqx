@@ -166,12 +166,11 @@ void addStatePrepKernels(py::module &mod) {
   cudaq::python::addDeviceKernelInterop<
       cudaq::qview<>,
       const std::vector<double>&,
-      const std::vector<std::vector<cudaq::pauli_word>>&,
-      const std::vector<std::vector<double>>&
+      const std::vector<std::vector<cudaq::pauli_word>>&
   >(
       mod, "stateprep", "uccgsd",
       "Unitary Coupled Cluster Generalized Singles Doubles Ansatz. "
-      "Takes as input the qubits, grouped rotational parameters, grouped Pauli words, and grouped coefficients."
+      "Takes as input the qubits, grouped rotational parameters, grouped Pauli words"
   );
   cudaq::python::addDeviceKernelInterop<cudaq::qview<>, double, std::size_t,
                                         std::size_t>(
