@@ -76,7 +76,7 @@ jobs:
         is_versioned=${{ startsWith(github.ref_name, 'releases/') }}
         if ${is_main_branch}; then
           other_tag="latest"
-        elsif ${is_versioned}; then
+        elif ${is_versioned}; then
           ver=`echo ${{ github.ref_name }} | egrep -o "([0-9]{1,}\.)+[0-9]{1,}"`
           echo "Versioned release: $ver"
           other_tag=$ver
@@ -181,7 +181,7 @@ jobs:
         is_versioned=${{ startsWith(github.ref_name, 'releases/') }}
         if ${is_main_branch}; then
           other_tag="latest"
-        elsif ${is_versioned}; then
+        elif ${is_versioned}; then
           ver=`echo ${{ github.ref_name }} | egrep -o "([0-9]{1,}\.)+[0-9]{1,}"`
           echo "Versioned release: $ver"
           other_tag=$ver
