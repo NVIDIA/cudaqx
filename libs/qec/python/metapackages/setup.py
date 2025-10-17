@@ -258,9 +258,11 @@ else:
         suffix = 'cu12'
     elif 'cu13' in best_package:
         suffix = 'cu13'
-    with open(os.path.join(setup_dir, f"pyproject.toml.{suffix}"), "r") as f:
+    with open(os.path.join(setup_dir, f"pyproject.toml.{suffix}"), "rb") as f:
         data = tomllib.load(f)
         opt_deps = data.get('project', {}).get('optional-dependencies', {})
+    # Print the optional dependencies.
+    _log(f"Optional dependencies: {opt_deps}")
 
 setup(
     zip_safe=False,
