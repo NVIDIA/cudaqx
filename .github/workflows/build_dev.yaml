@@ -25,7 +25,7 @@ jobs:
     strategy:
       matrix:
         platform: [amd64, arm64]
-        cuda_version: ['12.6']
+        cuda_version: ['12.6', '13.0']
       fail-fast: false
     runs-on: linux-${{ matrix.platform }}-cpu8
     steps:
@@ -81,7 +81,9 @@ jobs:
         TAGS="-t ghcr.io/nvidia/cudaqx-dev:${{ steps.get-cudaq-version-short.outputs.commit_date }}-${{ steps.get-cudaq-version-short.outputs.shortref }}-${{ matrix.platform }}-cu${{ matrix.cuda_version }}"
         TAGS+=" -t ghcr.io/nvidia/cudaqx-dev:${{ steps.get-cudaq-version-short.outputs.shortref }}-${{ matrix.platform }}-cu${{ matrix.cuda_version }}"
         TAGS+=" -t ghcr.io/nvidia/cudaqx-dev:${other_tag}-${{ matrix.platform }}-cu${{ matrix.cuda_version }}"
-        docker build $TAGS -f docker/build_env/cudaqx.dev.Dockerfile . --build-arg base_image=ghcr.io/nvidia/cuda-quantum-devdeps:ext-${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc11-main
+        docker build $TAGS -f docker/build_env/cudaqx.dev.Dockerfile . \
+          --build-arg base_image=ghcr.io/nvidia/cuda-quantum-devdeps:ext-${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc11-main \
+          --build-arg cuda_version=${{ matrix.cuda_version }}
         docker push -a ghcr.io/nvidia/cudaqx-dev
       shell: bash --noprofile --norc -euo pipefail {0}
 
@@ -92,7 +94,7 @@ jobs:
       matrix:
         python: ['3.11', '3.12', '3.13']
         platform: ['amd64', 'arm64']
-        cuda_version: ['12.6']
+        cuda_version: ['12.6', '13.0']
       fail-fast: false
     runs-on: linux-${{ matrix.platform }}-cpu8
     steps:
@@ -155,6 +157,7 @@ jobs:
           base_image=ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc11-main
           release_version=0.99.99
           python_version=${{ matrix.python }}
+          cuda_version=${{ matrix.cuda_version }}
         outputs: type=local,dest=/tmp/wheels
 
     - name: Build and push dev image with prebuilt CUDA-Q wheels
@@ -179,6 +182,7 @@ jobs:
         TAGS+=" -t ghcr.io/nvidia/cudaqx-dev:${other_tag}-py${{ matrix.python }}-${{ matrix.platform }}-cu${{ matrix.cuda_version }}"
         BUILDARGS="--build-arg base_image=ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc11-main"
         BUILDARGS+=" --build-arg python_version=${{ matrix.python }}"
+        BUILDARGS+=" --build-arg cuda_version=${{ matrix.cuda_version }}"
         # For some reason, this fails on amd64 unless DOCKER_BUILDKIT=0 is set.
         # The exact error is: too many open files.
         DOCKER_BUILDKIT=0 docker build $TAGS $BUILDARGS -f docker/build_env/cudaqx.wheel.Dockerfile .
