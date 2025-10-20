@@ -56,7 +56,7 @@ jobs:
     - name: Check if image already exists
       id: check-image
       run: |
-        IMAGE_TAG="${{ steps.get-cudaq-version-short.outputs.commit_date }}-${{ steps.get-cudaq-version-short.outputs.shortref }}-${{ matrix.platform }}"
+        IMAGE_TAG="${{ steps.get-cudaq-version-short.outputs.commit_date }}-${{ steps.get-cudaq-version-short.outputs.shortref }}-${{ matrix.platform }}-cu${{ matrix.cuda_version }}"
         CONTAINER_VERSION_METADATA=$(curl -s -L -H "Accept: applicat/vnd.github+json" -H "Authorization: Bearer ${{ github.token }}" "https://api.github.com/orgs/NVIDIA/packages/container/cudaqx-dev/versions")
         CONTAINER_TAGS=$(echo $CONTAINER_VERSION_METADATA | jq -r '.[] | .metadata.container.tags[]')
 
@@ -130,7 +130,7 @@ jobs:
     - name: Check if image already exists
       id: check-image
       run: |
-        IMAGE_TAG="${{ steps.get-cudaq-version-short.outputs.commit_date }}-${{ steps.get-cudaq-version-short.outputs.shortref }}-py${{ matrix.python }}-${{ matrix.platform }}"
+        IMAGE_TAG="${{ steps.get-cudaq-version-short.outputs.commit_date }}-${{ steps.get-cudaq-version-short.outputs.shortref }}-py${{ matrix.python }}-${{ matrix.platform }}-cu${{ matrix.cuda_version }}"
         CONTAINER_VERSION_METADATA=$(curl -s -L -H "Accept: applicat/vnd.github+json" -H "Authorization: Bearer ${{ github.token }}" "https://api.github.com/orgs/NVIDIA/packages/container/cudaqx-dev/versions")
         CONTAINER_TAGS=$(echo $CONTAINER_VERSION_METADATA | jq -r '.[] | .metadata.container.tags[]')
 
