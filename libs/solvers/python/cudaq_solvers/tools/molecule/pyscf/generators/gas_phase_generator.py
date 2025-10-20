@@ -819,7 +819,7 @@ class GasPhaseGenerator(HamiltonianGenerator):
         for option in requiredOptions:
             if option not in kwargs or kwargs[option] == None:
                 raise RuntimeError(
-                    f'solvent Hamiltonian generator missing required option - {option}'
+                    f'Hamiltonian generator missing required option - {option}'
                 )
 
         spin = kwargs['spin']
