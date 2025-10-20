@@ -25,11 +25,11 @@ def test_operators():
                                        casci=True)
     print(molecule.hamiltonian)
     print(molecule.energies)
-    assert np.isclose(-1.11, molecule.energies['hf_energy'], atol=1e-2)
-    assert np.isclose(-1.13, molecule.energies['fci_energy'], atol=1e-2)
+    assert np.isclose(-1.1163, molecule.energies['hf_energy'], atol=1e-2)
+    assert np.isclose(-1.1371, molecule.energies['fci_energy'], atol=1e-4)
     from scipy.linalg import eigh
     minE = eigh(molecule.hamiltonian.to_matrix(), eigvals_only=True)[0]
-    assert np.isclose(-1.13, minE, atol=1e-2)
+    assert np.isclose(-1.1371, minE, atol=1e-4)
 
 
 def test_from_xyz_filename():
@@ -247,11 +247,11 @@ def test_H2_UR():
                                        verbose=True)
 
     print(molecule.energies)
-    assert np.isclose(-1.11, molecule.energies['hf_energy'], atol=1e-2)
-    assert np.isclose(-1.13, molecule.energies['fci_energy'], atol=1e-2)
+    assert np.isclose(-1.1163, molecule.energies['hf_energy'], atol=1e-4)
+    assert np.isclose(-1.1371, molecule.energies['fci_energy'], atol=1e-4)
     from scipy.linalg import eigh
     minE = eigh(molecule.hamiltonian.to_matrix(), eigvals_only=True)[0]
-    assert np.isclose(-1.137, minE, atol=1e-2)
+    assert np.isclose(-1.1371, minE, atol=1e-4)
 
 
 def test_N2_UR_as():
@@ -281,4 +281,4 @@ def test_N2_UR_as():
 
     from scipy.linalg import eigh
     minE = eigh(molecule.hamiltonian.to_matrix(), eigvals_only=True)[0]
-    assert np.isclose(minE, -108.9436, rtol=1e-3)
+    assert np.isclose(minE, -108.9436, rtol=1e-4)
