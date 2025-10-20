@@ -75,10 +75,10 @@ class GasPhaseGenerator(HamiltonianGenerator):
             self,
             h1e_alpha,
             h1e_beta,
-            h2e_alpha_alpha,  # `(pq|rs)`
-            h2e_beta_beta,  # `(pq|rs)`
-            h2e_alpha_beta,  # `(pq|rs)`
-            h2e_beta_alpha,  # `(pq|rs)`
+            h2e_alpha_alpha,  # `<pq|rs>`
+            h2e_beta_beta,  # `<pq|rs>`
+            h2e_alpha_beta,  # `<pq|rs>`
+            h2e_beta_alpha,  # `<pq|rs>`
             ecore):
 
         # This function generates the molecular spin Hamiltonian
@@ -632,7 +632,7 @@ class GasPhaseGenerator(HamiltonianGenerator):
                              myhf.mo_coeff[0], myhf.mo_coeff[0]),
                     compact=False).reshape(nmo, nmo, nmo, nmo)
 
-                # Reorder integrals from `(pr|qs) to (pq|rs)`
+                # Reorder integrals from `(pr|qs)_chem to <pq|rs>_phys`
                 h2e_alpha_alpha = eri_aa.transpose(0, 2, 1, 3)
                 h2e_beta_beta = eri_bb.transpose(0, 2, 1, 3)
                 h2e_alpha_beta = eri_ab.transpose(0, 2, 1, 3)
@@ -702,7 +702,7 @@ class GasPhaseGenerator(HamiltonianGenerator):
                     compact=False).reshape(norb_cas, norb_cas, norb_cas,
                                            norb_cas)
 
-                # Reorder integrals from `(pr|qs) to (pq|rs)`
+                # Reorder integrals from `(pr|qs)_chem to <pq|rs>_phys`
                 h2e_alpha_alpha = eri_aa.transpose(0, 2, 1, 3)
                 h2e_beta_beta = eri_bb.transpose(0, 2, 1, 3)
                 h2e_alpha_beta = eri_ab.transpose(0, 2, 1, 3)
