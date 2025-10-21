@@ -104,6 +104,8 @@
         - `scale_factor` (float): The scale factor to use for min-sum. Defaults to 1.0.
           When set to 0.0, the scale factor is dynamically computed based on the
           number of iterations. Introduced in 0.4.0.
+        - `proc_float` (string): The processing float type to use. Defaults to
+          "fp64". Valid values are "fp32" and "fp64". Introduced in 0.5.0.
         - `opt_results` (heterogeneous_map): Optional results to return. This field can be
           left empty if no additional results are desired. Choices are:
             - `bp_llr_history` (int): Return the last `bp_llr_history` iterations
