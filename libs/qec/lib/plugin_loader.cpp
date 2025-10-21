@@ -15,8 +15,16 @@ namespace fs = std::filesystem;
 namespace cudaq::qec {
 
 static std::map<std::string, PluginHandle> &get_plugin_handles() {
-  static std::map<std::string, PluginHandle> plugin_handles;
-  return plugin_handles;
+  // Formerly this code was like this:
+  // static std::map<std::string, PluginHandle> plugin_handles;
+  // return plugin_handles;
+  // But that created a double free error when the program exited.
+  // This was because the static destructor for the map was called first,
+  // and then the cleanup_plugins function was called which tried to access the
+  // already destroyed map. This new approach does create a small memory leak,
+  // but it prevents the double free error.
+  static auto *plugin_handles = new std::map<std::string, PluginHandle>();
+  return *plugin_handles; // Dereference pointer to return reference
 }
 
 // Function to load plugins from a directory based on their type
