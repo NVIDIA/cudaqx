@@ -26,6 +26,7 @@ jobs:
           { arch: arm64, gpu: a100 },
           { arch: amd64, gpu: a100 },
         ]
+        cuda_version: ['12.6']
     runs-on: linux-${{ matrix.runner.arch }}-gpu-${{ matrix.runner.gpu }}-latest-1
     container: 
       image: ${{ format('ghcr.io/nvidia/cudaqx-dev:{0}-{1}', inputs.release-number, matrix.runner.arch) }}
@@ -74,7 +75,13 @@ jobs:
             echo "QEC_EXTERNAL_DECODERS=$(pwd)/tmp/lib/decoder-plugins/libcudaq-qec-nv-qldpc-decoder.so" >> $GITHUB_ENV
           fi
         shell: bash
-          
+
+      - name: Configure
+        id: config
+        run: |
+          cuda_major=`echo ${{ matrix.cuda_version }} | cut -d . -f1`
+          echo "cuda_major=$cuda_major" >> $GITHUB_OUTPUT
+
       # ========================================================================
       # Build
       # ========================================================================
@@ -84,6 +91,7 @@ jobs:
         uses: ./.github/actions/build-lib
         with:
           lib: "all"
+          cuda_version: ${{ matrix.cuda_version }}
           platform: ${{ matrix.runner.arch }}
           install-prefix: /usr/local/cudaq
 
@@ -91,13 +99,13 @@ jobs:
         run: |
           cmake --build ${{ steps.build.outputs.build-dir }} --target zip_installed_files
           cd ${{ steps.build.outputs.build-dir }}
-          mv installed_files.zip installed_files-${{ matrix.runner.arch }}.zip
+          mv installed_files.zip installed_files-${{ matrix.runner.arch }}-cu${{ matrix.cuda_version}}.zip
       
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: installed_files-${{ matrix.runner.arch }}
-          path: ${{ steps.build.outputs.build-dir }}/installed_files-${{ matrix.runner.arch }}.zip
+          name: installed_files-${{ matrix.runner.arch }}-cu${{ matrix.cuda_version}}
+          path: ${{ steps.build.outputs.build-dir }}/installed_files-${{ matrix.runner.arch }}-cu${{ matrix.cuda_version}}.zip
 
       # ========================================================================
       # Run tests
@@ -113,7 +121,7 @@ jobs:
       - name: Install python requirements
         env:
           LD_LIBRARY_PATH: ${{ env.MPI_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
-        run: pip install numpy pytest cupy-cuda12x cuquantum-cu12 torch lightning ml_collections mpi4py transformers quimb opt_einsum torch
+        run: pip install numpy pytest cupy-cuda${{ steps.config.outputs.cuda_major }}x cuquantum-cu${{ steps.config.outputs.cuda_major }} torch lightning ml_collections mpi4py transformers quimb opt_einsum torch
 
       - name: Run Python tests
         env:

@@ -17,9 +17,33 @@ set -e
 
 # Installing dependencies
 python_version=$1
-python_version_no_dot=$(echo $python_version | tr -d '.') # 3.10 --> 310
 python=python${python_version}
 platform=$2
+cuda_version=$3
+cudaq_version=$4
+cudaqx_version=$5
+
+# Verify the input arguments aren't empty, one at a time.
+if [ -z "$python_version" ] ; then
+  echo "Error: python_version is empty"
+  exit 1
+fi
+if [ -z "$platform" ] ; then
+  echo "Error: platform is empty"
+  exit 1
+fi
+if [ -z "$cuda_version" ] ; then
+  echo "Error: cuda_version is empty"
+  exit 1
+fi
+if [ -z "$cudaq_version" ] ; then
+  echo "Error: cudaq_version is empty"
+  exit 1
+fi
+if [ -z "$cudaqx_version" ] ; then
+  echo "Error: cudaqx_version is empty"
+  exit 1
+fi
 
 ${python} -m pip install --no-cache-dir pytest
 
@@ -28,42 +52,64 @@ ${python} -m pip install --no-cache-dir pytest
 ${python} -m pip install openfermion
 ${python} -m pip install openfermionpyscf
 
-# If special CUDA-Q wheels have been built for this test, install them here. This will 
+FIND_LINKS="--find-links /wheels/ --find-links /metapackages/"
+
+# If special CUDA-Q wheels have been built for this test, install them here.
 if [ -d /cudaq-wheels ]; then
-  echo "Custom CUDA-Q wheels directory found; installing ..."
-  echo "First ls /cudaq-wheels"
-  ls /cudaq-wheels
-  echo "Now show what will be pip installed"
-  ls -1 /cudaq-wheels/cuda_quantum_*-cp${python_version_no_dot}-cp${python_version_no_dot}-*.whl
-  ${python} -m pip install /cudaq-wheels/cuda_quantum_*-cp${python_version_no_dot}-cp${python_version_no_dot}-*.whl
+  echo "Custom CUDA-Q wheels directory found. Will add to the --find-links list."
+  FIND_LINKS="${FIND_LINKS} --find-links /cudaq-wheels/"
+  ${python} -m pip install $FIND_LINKS "cuda-quantum-cu${cuda_version}==${cudaq_version}"
+fi
+
+# TODO: Remove this once PyTorch 2.9.0 is released. That should happen before
+# this PR is merged.
+if [[ "$cuda_version" == "13" ]]; then
+  ${python} -m pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu130
+elif [[ "$cuda_version" == "12" ]]; then
+  ${python} -m pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu126
 fi
 
 # QEC library
 # ======================================
 
-qec_wheel=$(ls /wheels/cudaq_qec-*-cp${python_version_no_dot}-cp${python_version_no_dot}-*.whl)
-# If Python version is 3.10, then install without tensor network decoder.
-# Otherwise, install with the tensor network decoder.
-if [ $python_version == "3.10" ]; then
-  echo "Installing QEC library without tensor network decoder"
-  ${python} -m pip install "${qec_wheel}"
-else
-  echo "Installing QEC library with tensor network decoder"
-  ${python} -m pip install "${qec_wheel}[tensor_network_decoder]"
-fi
+# Install QEC library with tensor network decoder (requires Python >=3.11)
+echo "Installing QEC library with tensor network decoder"
+${python} -m pip install ${FIND_LINKS} "cudaq-qec[tensor-network-decoder]==${cudaqx_version}"
 ${python} -m pytest -v -s libs/qec/python/tests/
+
+# Verify that the correct version of cuda-quantum and cudaq-qec were installed.
+package_installed=$(python${python_version} -m pip list | grep cudaq-qec-cu | cut -d ' ' -f1)
+package_expected=cudaq-qec-cu${cuda_version}
+if [ "$package_installed" != "$package_expected" ]; then
+  echo "::error Expected installation of $package_expected package, but got $package_installed."
+  exit 1
+fi
+
+package_installed=$(python${python_version} -m pip list | grep cuda-quantum-cu | cut -d ' ' -f1)
+package_expected=cuda-quantum-cu${cuda_version}
+if [ "$package_installed" != "$package_expected" ]; then
+  echo "::error Expected installation of $package_expected package, but got $package_installed."
+  exit 1
+fi
 
 # Solvers library
 # ======================================
 # Test the base solvers library without optional dependencies
 echo "Installing Solvers library without GQE"
-solver_wheel=$(ls /wheels/cudaq_solvers-*-cp${python_version_no_dot}-cp${python_version_no_dot}-*.whl)
-${python} -m pip install "${solver_wheel}"
+${python} -m pip install ${FIND_LINKS} "cudaq-solvers==${cudaqx_version}"
 ${python} -m pytest -v -s libs/solvers/python/tests/ --ignore=libs/solvers/python/tests/test_gqe.py
+
+# Verify that the correct version of cudaq-solvers was installed.
+package_installed=$(python${python_version} -m pip list | grep cudaq-solvers-cu | cut -d ' ' -f1)
+package_expected=cudaq-solvers-cu${cuda_version}
+if [ "$package_installed" != "$package_expected" ]; then
+  echo "::error Expected installation of $package_expected package, but got $package_installed."
+  exit 1
+fi
 
 # Test the solvers library with GQE
 echo "Installing Solvers library with GQE"
-${python} -m pip install "${solver_wheel}[gqe]"
+${python} -m pip install ${FIND_LINKS} "cudaq-solvers[gqe]==${cudaqx_version}"
 ${python} -m pytest -v -s libs/solvers/python/tests/test_gqe.py
 
 # Test the libraries with examples

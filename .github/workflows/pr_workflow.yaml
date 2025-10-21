@@ -95,8 +95,9 @@ jobs:
       fail-fast: false
       matrix:
         platform: ['amd64', 'arm64']
+        cuda_version: ['12.6', '13.0']
     runs-on: ${{ startsWith(github.repository, 'NVIDIA/cudaqx') && format('linux-{0}-cpu32', matrix.platform) || 'ubuntu-latest' }}
-    container: ghcr.io/nvidia/cuda-quantum-devdeps:ext-${{ matrix.platform }}-cu12.6-gcc11-main
+    container: ghcr.io/nvidia/cuda-quantum-devdeps:ext-${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc11-main
     permissions:
       actions: write
       contents: read
@@ -113,6 +114,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         uses: nv-gha-runners/get-pr-info@main
 
+      - name: Configure
+        id: config
+        run: |
+          cuda_major=`echo ${{ matrix.cuda_version }} | cut -d . -f1`
+          echo "cuda_major=$cuda_major" >> $GITHUB_OUTPUT
+
       - name: Get required CUDAQ version
         id: get-cudaq-version
         uses: ./.github/actions/get-cudaq-version
@@ -126,7 +133,7 @@ jobs:
           pr-number: ${{ fromJSON(steps.get-pr-info.outputs.pr-info).number }}
           save-build: true
           save-ccache: false
-          platform: ${{ matrix.platform }}
+          platform: ${{ matrix.platform }}-cu${{ steps.config.outputs.cuda_major }}
 
   build-docs:
     name: Docs

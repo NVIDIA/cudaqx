@@ -27,7 +27,7 @@ export CXX=g++
 # Installing dependencies
 # ==============================================================================
 
-python_version=3.10
+python_version=3.12
 python=python${python_version}
 ${python} -m pip install --no-cache-dir numpy auditwheel
 

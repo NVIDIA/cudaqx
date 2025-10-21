@@ -10,7 +10,7 @@
 
 # /!\ This script must be run inside an docker container /!\
 
-python_version=3.10
+python_version=3.12
 python=python${python_version}
 
 # Delete previous wheels

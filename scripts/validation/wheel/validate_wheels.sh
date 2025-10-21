@@ -34,7 +34,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 CURRENT_ARCH=$(uname -m)
-PYTHON_VERSIONS=("3.10" "3.11" "3.12" "3.13")
+PYTHON_VERSIONS=("3.11" "3.12" "3.13")
 TARGETS=("nvidia" "nvidia --option fp64", "qpp-cpu")
 
 # OpenBLAS can get bogged down on some machines if using too many threads.
@@ -46,11 +46,7 @@ run_python_tests() {
 
     echo "Running Python tests for Python ${python_version} with default target..."
 
-    if [[ $python_version == "3.10" ]]; then
-      python3 -m pytest libs -v --ignore libs/qec/python/tests/test_tensor_network_decoder.py
-    else
-      python3 -m pytest libs -v
-    fi
+    python3 -m pytest libs -v
 
     local test_result=$?
     if [ ${test_result} -ne 0 ]; then
@@ -81,11 +77,7 @@ test_examples() {
         conda activate $conda_name
         pip install pypiserver
         pypi-server run -p 8080 /root/wheels &
-        if [[ $python_version == "3.10" ]]; then
-          pip install cudaq-qec --extra-index-url http://localhost:8080
-        else
-          pip install cudaq-qec[tensor_network_decoder] --extra-index-url http://localhost:8080
-        fi
+        pip install cudaq-qec[tensor_network_decoder] --extra-index-url http://localhost:8080
         pip install cudaq-solvers[gqe] --extra-index-url http://localhost:8080
         source $CONDA_PREFIX/lib/python${python_version}/site-packages/distributed_interfaces/activate_custom_mpi.sh
         export OMPI_MCA_opal_cuda_support=true OMPI_MCA_btl='^openib'
