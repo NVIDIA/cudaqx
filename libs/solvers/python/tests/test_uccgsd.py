@@ -51,7 +51,7 @@ def test_solvers_adapt_uccgsd_lih():
     
     
     print(energy)
-    assert np.isclose(energy, -7.8638, atol=1e-3)
+    assert np.isclose(energy, -7.8638, atol=1e-4)
 
 
 def test_solvers_adapt_uccgsd_N2():
@@ -84,7 +84,7 @@ def test_solvers_adapt_uccgsd_N2():
                                             operators)
     
     print(energy)
-    assert np.isclose(energy, -107.5421, atol=1e-3)
+    assert np.isclose(energy, -107.5421, atol=1e-4)
     
    
 

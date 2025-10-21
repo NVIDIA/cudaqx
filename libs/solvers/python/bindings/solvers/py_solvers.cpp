@@ -166,7 +166,8 @@ void addStatePrepKernels(py::module &mod) {
   cudaq::python::addDeviceKernelInterop<
       cudaq::qview<>,
       const std::vector<double>&,
-      const std::vector<std::vector<cudaq::pauli_word>>&
+      const std::vector<std::vector<cudaq::pauli_word>>&,
+      const std::vector<std::vector<double>>&
   >(
       mod, "stateprep", "uccgsd",
       "Unitary Coupled Cluster Generalized Singles Doubles Ansatz. "
@@ -194,7 +195,7 @@ void addStatePrepKernels(py::module &mod) {
                 "    int: Number of UCCSD parameters");
   stateprep.def("get_uccsd_excitations",
                 &cudaq::solvers::stateprep::get_uccsd_excitations, "");
-  
+
   stateprep.def("get_uccgsd_pauli_lists",
                 &cudaq::solvers::stateprep::get_uccgsd_pauli_lists,
                 py::arg("num_electrons"),
@@ -202,7 +203,7 @@ void addStatePrepKernels(py::module &mod) {
                 py::arg("only_singles") = false,
                 py::arg("only_doubles") = false,
                 R"(
-  Generate UCCGSD operator pool and extract Pauli words and coefficients grouped by excitation.
+  Generate UCCGSD operator pool (Python-style unique singles/doubles) and extract Pauli words and coefficients grouped by excitation.
 
   Args:
       num_electrons (int): Number of electrons.

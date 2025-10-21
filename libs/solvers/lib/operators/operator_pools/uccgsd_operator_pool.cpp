@@ -28,36 +28,37 @@ uccgsd::generate(const heterogeneous_map &config) const {
       for (std::size_t i = q + 1; i < p; ++i)
         parity *= cudaq::spin::z(i);
 
-      ops.emplace_back( cudaq::spin::y(q) * parity * cudaq::spin::x(p) -
-                        cudaq::spin::x(q) * parity * cudaq::spin::y(p));
+      ops.emplace_back( 0.5* cudaq::spin::y(q) * parity * cudaq::spin::x(p) -
+                        0.5 * cudaq::spin::x(q) * parity * cudaq::spin::y(p));
     }
   };
 
   auto addDoubleExcitation = [](std::vector<cudaq::spin_op> &ops,
                                 std::size_t p, std::size_t q,
                                 std::size_t r, std::size_t s) {
-    if (p > q && q > r && r > s) {
+    
+    if (p > q && r > s) {
       cudaq::spin_op_term parity_a, parity_b;
       for (std::size_t i = q + 1; i < p; ++i)
         parity_a *= cudaq::spin::z(i);
       for (std::size_t i = s + 1; i < r; ++i)
         parity_b *= cudaq::spin::z(i);
 
-      cudaq::spin_op temp_op = cudaq::spin::y(s) * parity_b * cudaq::spin::x(r) * 
+      cudaq::spin_op temp_op = 0.125 * cudaq::spin::y(s) * parity_b * cudaq::spin::x(r) * 
                                 cudaq::spin::x(q) * parity_a * cudaq::spin::x(p);
-      temp_op += cudaq::spin::x(s) * parity_b * cudaq::spin::y(r) * 
+      temp_op += 0.125 * cudaq::spin::x(s) * parity_b * cudaq::spin::y(r) * 
                 cudaq::spin::x(q) * parity_a * cudaq::spin::x(p);
-      temp_op += cudaq::spin::y(s) * parity_b * cudaq::spin::y(r) * 
+      temp_op += 0.125 * cudaq::spin::y(s) * parity_b * cudaq::spin::y(r) * 
                 cudaq::spin::y(q) * parity_a * cudaq::spin::x(p);
-      temp_op += cudaq::spin::y(s) * parity_b * cudaq::spin::y(r) * 
+      temp_op += 0.125 * cudaq::spin::y(s) * parity_b * cudaq::spin::y(r) * 
                 cudaq::spin::x(q) * parity_a * cudaq::spin::y(p);
-      temp_op -= cudaq::spin::x(s) * parity_b * cudaq::spin::x(r) * 
+      temp_op -= 0.125 * cudaq::spin::x(s) * parity_b * cudaq::spin::x(r) * 
                 cudaq::spin::y(q) * parity_a * cudaq::spin::x(p);
-      temp_op -= cudaq::spin::x(s) * parity_b * cudaq::spin::x(r) * 
+      temp_op -= 0.125 * cudaq::spin::x(s) * parity_b * cudaq::spin::x(r) * 
                 cudaq::spin::x(q) * parity_a * cudaq::spin::y(p);
-      temp_op -= cudaq::spin::x(s) * parity_b * cudaq::spin::y(r) * 
+      temp_op -= 0.125 * cudaq::spin::x(s) * parity_b * cudaq::spin::y(r) * 
                 cudaq::spin::y(q) * parity_a * cudaq::spin::y(p);
-      temp_op -= cudaq::spin::y(s) * parity_b * cudaq::spin::x(r) * 
+      temp_op -= 0.125 * cudaq::spin::y(s) * parity_b * cudaq::spin::x(r) * 
                 cudaq::spin::y(q) * parity_a * cudaq::spin::y(p);
 
       ops.emplace_back(temp_op);
@@ -69,12 +70,33 @@ uccgsd::generate(const heterogeneous_map &config) const {
     for (std::size_t q = 0; q < p; ++q)
       addSingleExcitation(ops, p, q);
 
-  // Generate all double excitations
-  for (std::size_t p = 3; p < numQubits; ++p)
-    for (std::size_t q = 2; q < p; ++q)
-      for (std::size_t r = 1; r < q; ++r)
-        for (std::size_t s = 0; s < r; ++s)
-          addDoubleExcitation(ops, p, q, r, s);
+  // Generate all unique unordered double excitations
+  std::set<std::pair<std::pair<std::size_t, std::size_t>,
+                     std::pair<std::size_t, std::size_t>>> doubles;
+  for (std::size_t a = 0; a < numQubits; ++a)
+    for (std::size_t b = a + 1; b < numQubits; ++b)
+      for (std::size_t c = b + 1; c < numQubits; ++c)
+        for (std::size_t d = c + 1; d < numQubits; ++d) {
+          std::array<std::size_t, 4> arr = {a, b, c, d};
+          // All 3 unique pairings
+          std::vector<std::pair<std::pair<std::size_t, std::size_t>,
+                                std::pair<std::size_t, std::size_t>>> pairings = {
+            {{arr[0], arr[1]}, {arr[2], arr[3]}},
+            {{arr[0], arr[2]}, {arr[1], arr[3]}},
+            {{arr[0], arr[3]}, {arr[1], arr[2]}}
+          };
+          for (auto &pairing : pairings) {
+            auto p1 = pairing.first, p2 = pairing.second;
+            if (p1.first < p1.second) std::swap(p1.first, p1.second);
+            if (p2.first < p2.second) std::swap(p2.first, p2.second);
+            auto sorted_pairing = std::minmax(p1, p2);
+            doubles.insert({sorted_pairing.first, sorted_pairing.second});
+          }
+        }
+  for (const auto &pair : doubles) {
+    auto [pq, rs] = pair;
+    addDoubleExcitation(ops, pq.first, pq.second, rs.first, rs.second);
+  }
 
   return ops;
 }

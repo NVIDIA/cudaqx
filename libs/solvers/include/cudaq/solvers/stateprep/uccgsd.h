@@ -13,7 +13,7 @@
 
 namespace cudaq::solvers::stateprep {
 
-/// @brief Generate UCCGSD operator pool and extract Pauli words and coefficients
+/// @brief Generate UCCGSD operator pool (Python-style unique singles/doubles) and extract Pauli words and coefficients
 /// @param nelectrons Number of electrons
 /// @param norbitals Number of spin orbitals (qubits)
 /// @param only_singles If true, only single excitations
@@ -22,10 +22,10 @@ namespace cudaq::solvers::stateprep {
 std::pair<std::vector<std::vector<cudaq::pauli_word>>,
           std::vector<std::vector<double>>>
 get_uccgsd_pauli_lists(std::size_t nelectrons,
-                       std::size_t norbitals,
-                       bool only_singles = false,
-                       bool only_doubles = false);
-
+                           std::size_t norbitals,
+                           bool only_singles = false,
+                           bool only_doubles = false);
+                           
 /// \pure_device_kernel
 ///
 /// @brief Apply UCCGSD ansatz to a qubit register using grouped Pauli words and coefficients
@@ -34,6 +34,7 @@ get_uccgsd_pauli_lists(std::size_t nelectrons,
 /// @param pauliWordsList Pauli words grouped by excitation
 __qpu__ void uccgsd(cudaq::qview<> qubits,
                     const std::vector<double>& thetas,
-                    const std::vector<std::vector<cudaq::pauli_word>>& pauliWordsList);
+                    const std::vector<std::vector<cudaq::pauli_word>>& pauliWordsList,
+                    const std::vector<std::vector<double>>& coefficientsList);
 
 } // namespace cudaq::solvers::stateprep
