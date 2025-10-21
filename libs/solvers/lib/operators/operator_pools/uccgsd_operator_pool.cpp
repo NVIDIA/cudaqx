@@ -27,9 +27,9 @@ uccgsd::generate(const heterogeneous_map &config) const {
       cudaq::spin_op_term parity;
       for (std::size_t i = q + 1; i < p; ++i)
         parity *= cudaq::spin::z(i);
-
-      ops.emplace_back( 0.5* cudaq::spin::y(q) * parity * cudaq::spin::x(p) -
-                        0.5 * cudaq::spin::x(q) * parity * cudaq::spin::y(p));
+      std::complex<double> c = {0.5, 0};
+      ops.emplace_back(c * cudaq::spin::y(q) * parity * cudaq::spin::x(p) -
+                       c * cudaq::spin::x(q) * parity * cudaq::spin::y(p));
     }
   };
 
@@ -43,22 +43,22 @@ uccgsd::generate(const heterogeneous_map &config) const {
         parity_a *= cudaq::spin::z(i);
       for (std::size_t i = s + 1; i < r; ++i)
         parity_b *= cudaq::spin::z(i);
-
-      cudaq::spin_op temp_op = 0.125 * cudaq::spin::y(s) * parity_b * cudaq::spin::x(r) * 
+      std::complex<double> c = {0.125, 0};
+      cudaq::spin_op temp_op = c * cudaq::spin::y(s) * parity_b * cudaq::spin::x(r) *
                                 cudaq::spin::x(q) * parity_a * cudaq::spin::x(p);
-      temp_op += 0.125 * cudaq::spin::x(s) * parity_b * cudaq::spin::y(r) * 
-                cudaq::spin::x(q) * parity_a * cudaq::spin::x(p);
-      temp_op += 0.125 * cudaq::spin::y(s) * parity_b * cudaq::spin::y(r) * 
-                cudaq::spin::y(q) * parity_a * cudaq::spin::x(p);
-      temp_op += 0.125 * cudaq::spin::y(s) * parity_b * cudaq::spin::y(r) * 
+      temp_op += c * cudaq::spin::x(s) * parity_b * cudaq::spin::y(r) *
+                 cudaq::spin::x(q) * parity_a * cudaq::spin::x(p);
+      temp_op += c * cudaq::spin::y(s) * parity_b * cudaq::spin::y(r) *
+                 cudaq::spin::y(q) * parity_a * cudaq::spin::x(p);
+      temp_op += c * cudaq::spin::y(s) * parity_b * cudaq::spin::y(r) *
+                 cudaq::spin::x(q) * parity_a * cudaq::spin::y(p);
+      temp_op -= c * cudaq::spin::x(s) * parity_b * cudaq::spin::x(r) *
+                 cudaq::spin::y(q) * parity_a * cudaq::spin::x(p);
+      temp_op -= c * cudaq::spin::x(s) * parity_b * cudaq::spin::x(r) *
                 cudaq::spin::x(q) * parity_a * cudaq::spin::y(p);
-      temp_op -= 0.125 * cudaq::spin::x(s) * parity_b * cudaq::spin::x(r) * 
-                cudaq::spin::y(q) * parity_a * cudaq::spin::x(p);
-      temp_op -= 0.125 * cudaq::spin::x(s) * parity_b * cudaq::spin::x(r) * 
-                cudaq::spin::x(q) * parity_a * cudaq::spin::y(p);
-      temp_op -= 0.125 * cudaq::spin::x(s) * parity_b * cudaq::spin::y(r) * 
+      temp_op -= c * cudaq::spin::x(s) * parity_b * cudaq::spin::y(r) *
                 cudaq::spin::y(q) * parity_a * cudaq::spin::y(p);
-      temp_op -= 0.125 * cudaq::spin::y(s) * parity_b * cudaq::spin::x(r) * 
+      temp_op -= c * cudaq::spin::y(s) * parity_b * cudaq::spin::x(r) *
                 cudaq::spin::y(q) * parity_a * cudaq::spin::y(p);
 
       ops.emplace_back(temp_op);

@@ -90,8 +90,7 @@ uccgsd_unique_doubles(std::size_t norbitals) {
 // New function: Python-style unique singles/doubles pool
 std::pair<std::vector<std::vector<cudaq::pauli_word>>,
           std::vector<std::vector<double>>>
-get_uccgsd_pauli_lists(std::size_t nelectrons,
-                           std::size_t norbitals,
+get_uccgsd_pauli_lists(std::size_t norbitals,
                            bool only_singles,
                            bool only_doubles) {
 
