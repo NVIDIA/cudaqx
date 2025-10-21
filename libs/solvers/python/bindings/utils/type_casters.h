@@ -10,6 +10,7 @@
 #include "common/ObserveResult.h"
 #include "pybind11/pybind11.h"
 #include "pybind11/pytypes.h"
+#include "cudaq/qis/pauli_word.h"
 namespace py = pybind11;
 
 namespace pybind11 {
@@ -75,6 +76,43 @@ struct type_caster<cudaq::observe_result> {
     py::object tv_py = py::module::import("cudaq").attr("ObserveResult")(
         v.expectation(), v.get_spin(), v.raw_data());
     return tv_py.release();
+  }
+};
+
+template <>
+struct type_caster<cudaq::pauli_word> {
+  PYBIND11_TYPE_CASTER(cudaq::pauli_word, const_name("pauli_word"));
+
+  // Load from Python to C++
+  bool load(handle src, bool) {
+    if (!src)
+      return false;
+
+    try {
+      // If it's already a pauli_word object from cudaq module
+      if (hasattr(src, "str")) {
+        auto str_val = src.attr("str")().cast<std::string>();
+        value = cudaq::pauli_word(str_val);
+        return true;
+      }
+      // If it's just a string
+      else if (py::isinstance<py::str>(src)) {
+        value = cudaq::pauli_word(src.cast<std::string>());
+        return true;
+      }
+    } catch (...) {
+      return false;
+    }
+    return false;
+  }
+
+  // Cast from C++ to Python
+  static handle cast(const cudaq::pauli_word &v, return_value_policy /*policy*/,
+                     handle /*parent*/) {
+    py::object pauli_word_class =
+        py::module::import("cudaq").attr("pauli_word");
+    py::object pauli_word_obj = pauli_word_class(v.str());
+    return pauli_word_obj.release();
   }
 };
 } // namespace detail
