@@ -270,9 +270,9 @@ def test_N2_UR_as():
     print(molecule.energies)
     assert molecule.n_orbitals == 4
     assert molecule.n_electrons == 4
-    assert np.isclose(molecule.energies['core_energy'], -103.31815, rtol=1e-4)
-    assert np.isclose(molecule.energies['UR-CCSD'], -108.942725, rtol=1e-4)
-    assert np.isclose(molecule.energies['UR-CASCI'], -108.94365, rtol=1e-4)
+    assert np.isclose(molecule.energies['core_energy'], -103.31815, atol=1e-5)
+    assert np.isclose(molecule.energies['UR-CCSD'], -108.942725, atol=1e-5)
+    assert np.isclose(molecule.energies['UR-CASCI'], -108.94365, atol=1e-5)
 
     op = solvers.jordan_wigner(molecule.hpq, molecule.hpqrs,
                                molecule.energies['core_energy'])
@@ -281,4 +281,4 @@ def test_N2_UR_as():
 
     from scipy.linalg import eigh
     minE = eigh(molecule.hamiltonian.to_matrix(), eigvals_only=True)[0]
-    assert np.isclose(minE, -108.9436, rtol=1e-4)
+    assert np.isclose(minE, -108.9436, atol=1e-4)
