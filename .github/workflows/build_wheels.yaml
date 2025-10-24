@@ -353,6 +353,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           set-safe-directory: true
+          lfs: true # download assets file(s) for TRT tests
   
       - name: Configure
         id: config
