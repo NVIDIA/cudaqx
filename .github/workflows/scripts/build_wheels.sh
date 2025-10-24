@@ -160,6 +160,9 @@ CUDAQ_EXCLUDE_LIST=$(for f in $(find $cudaq_prefix/lib -name "*.so" -printf "%P\
 
 LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$(pwd)/_skbuild/lib:$tensorrt_path/lib" \
 $python -m auditwheel -v repair dist/*.whl $CUDAQ_EXCLUDE_LIST \
+  --exclude libcudart.so.${cuda_version} \
+  --exclude libnvinfer.so.10 \
+  --exclude libnvonnxparser.so.10 \
   --wheel-dir /wheels \
   ${PLAT_STR}
 
