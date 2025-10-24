@@ -118,7 +118,7 @@ set_target_properties(${MODULE_NAME} PROPERTIES
 if (NOT SKBUILD)
   set_target_properties(${MODULE_NAME} PROPERTIES
     BUILD_RPATH "$ORIGIN:${TENSORRT_ROOT}/lib"
-    INSTALL_RPATH "$ORIGIN:$ORIGIN/../../../tensorrt_libs"
+    INSTALL_RPATH "$ORIGIN:$ORIGIN/../../lib:$ORIGIN/../../../tensorrt_libs"
   )
 
   # Let CMake automatically add paths of linked libraries to the RPATH:
@@ -128,7 +128,7 @@ else()
   # CUDA-Q install its libraries in site-packages/lib (or dist-packages/lib)
   # Thus, we need the $ORIGIN/../lib
   set_target_properties(${MODULE_NAME} PROPERTIES
-    INSTALL_RPATH "$ORIGIN:$ORIGIN/../../../tensorrt_libs"
+    INSTALL_RPATH "$ORIGIN:$ORIGIN/../../lib:$ORIGIN/../../../tensorrt_libs"
   )
 endif()
 
