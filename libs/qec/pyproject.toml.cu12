@@ -66,5 +66,5 @@ all = [
   "opt_einsum",
   "torch",
   "cuquantum-python-cu12==25.09",
-  "tensorrt-cu12"
+  "tensorrt-cu12; platform_machine == 'x86_64'"
 ]
