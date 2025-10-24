@@ -164,6 +164,9 @@ $python -m auditwheel -v repair dist/*.whl $CUDAQ_EXCLUDE_LIST \
   --exclude libnvinfer.so.10 \
   --exclude libnvonnxparser.so.10 \
   --wheel-dir /wheels \
+  --exclude libcudart.so.${cuda_version} \
+  --exclude libnvinfer.so.10 \
+  --exclude libnvonnxparser.so.10 \
   ${PLAT_STR}
 
 # ==============================================================================

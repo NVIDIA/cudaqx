@@ -30,7 +30,7 @@ NUM_DETECTORS = 24
 NUM_OBSERVABLES = 1
 
 # Path to the ONNX model file for testing (relative to this test file)
-ONNX_MODEL_PATH = "../../../../assets/tests/surface_code_decoder.onnx"
+ONNX_MODEL_PATH = "assets/tests/surface_code_decoder.onnx"
 
 
 # Check if CUDA/GPU is available for TensorRT tests
