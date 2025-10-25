@@ -22,6 +22,8 @@ show_help() {
     echo "  --cudaq-prefix    Path to CUDA-Q's install prefix"
     echo "                    (default: \$HOME/.cudaq)"
     echo "  --python-version  Python version to build wheel for (e.g. 3.11)"
+    echo "  --tensorrt-path   Path to TensorRT installation directory"
+    echo "                    (default: /trt_download/TensorRT-10.13.3.9)"
     echo "  --devdeps         Build wheels suitable for internal testing"
     echo "                    (not suitable for distribution but sometimes"
     echo "                    helpful for debugging)"
@@ -68,6 +70,15 @@ parse_options() {
                     exit 1
                 fi
                 ;;
+            --tensorrt-path)
+                if [[ -n "$2" && "$2" != -* ]]; then
+                    tensorrt_path=("$2")
+                    shift 2
+                else
+                    echo "Error: Argument for $1 is missing" >&2
+                    exit 1
+                fi
+                ;;
             --devdeps)
                 devdeps=true
                 shift 1
@@ -99,6 +110,7 @@ parse_options() {
 cudaq_prefix=$HOME/.cudaq
 build_type=Release
 python_version=3.11
+tensorrt_path=/trt_download/TensorRT-10.13.3.9
 devdeps=false
 wheels_version=0.0.0
 cuda_version=12
@@ -136,7 +148,7 @@ export CUDAQX_SOLVERS_VERSION=$wheels_version
 cd libs/qec
 cp pyproject.toml.cu${cuda_version} pyproject.toml
 
-SKBUILD_CMAKE_ARGS="-DCUDAQ_DIR=$cudaq_prefix/lib/cmake/cudaq"
+SKBUILD_CMAKE_ARGS="-DCUDAQ_DIR=$cudaq_prefix/lib/cmake/cudaq;-DTENSORRT_ROOT=$tensorrt_path"
 if ! $devdeps; then
   SKBUILD_CMAKE_ARGS+=";-DCMAKE_CXX_COMPILER_EXTERNAL_TOOLCHAIN=/opt/rh/gcc-toolset-11/root/usr/lib/gcc/${ARCH}-redhat-linux/11/"
 fi
@@ -146,9 +158,12 @@ $python -m build --wheel
 
 CUDAQ_EXCLUDE_LIST=$(for f in $(find $cudaq_prefix/lib -name "*.so" -printf "%P\n" | sort); do echo "--exclude $f"; done | tr '\n' ' ')
 
-LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$(pwd)/_skbuild/lib" \
+LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$(pwd)/_skbuild/lib:$tensorrt_path/lib" \
 $python -m auditwheel -v repair dist/*.whl $CUDAQ_EXCLUDE_LIST \
   --wheel-dir /wheels \
+  --exclude libcudart.so.${cuda_version} \
+  --exclude libnvinfer.so.10 \
+  --exclude libnvonnxparser.so.10 \
   ${PLAT_STR}
 
 # ==============================================================================

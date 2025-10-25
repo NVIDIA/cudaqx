@@ -58,3 +58,13 @@ tensor_network_decoder = [
   "torch",
   "cuquantum-python-cu12==25.09"
 ]
+trt_decoder = [
+  "tensorrt-cu12"
+]
+all = [
+  "quimb",
+  "opt_einsum",
+  "torch",
+  "cuquantum-python-cu12==25.09",
+  "tensorrt-cu12; platform_machine == 'x86_64'"
+]
