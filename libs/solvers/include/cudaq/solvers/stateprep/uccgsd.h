@@ -8,32 +8,34 @@
 #pragma once
 
 #include "cudaq.h"
-#include <vector>
 #include <utility>
+#include <vector>
 
 namespace cudaq::solvers::stateprep {
 
-/// @brief Generate UCCGSD operator pool (Python-style unique singles/doubles) and extract Pauli words and coefficients
+/// @brief Generate UCCGSD operator pool (Python-style unique singles/doubles)
+/// and extract Pauli words and coefficients
 /// @param norbitals Number of spin orbitals (qubits)
 /// @param only_singles If true, only single excitations
 /// @param only_doubles If true, only double excitations
-/// @return Pair of lists: [Pauli words grouped by excitation], [coefficients grouped by excitation]
+/// @return Pair of lists: [Pauli words grouped by excitation], [coefficients
+/// grouped by excitation]
 std::pair<std::vector<std::vector<cudaq::pauli_word>>,
           std::vector<std::vector<double>>>
-get_uccgsd_pauli_lists(std::size_t norbitals,
-                           bool only_singles = false,
-                           bool only_doubles = false);
-                           
+get_uccgsd_pauli_lists(std::size_t norbitals, bool only_singles = false,
+                       bool only_doubles = false);
+
 /// \pure_device_kernel
 ///
-/// @brief Apply UCCGSD ansatz to a qubit register using grouped Pauli words and coefficients
+/// @brief Apply UCCGSD ansatz to a qubit register using grouped Pauli words and
+/// coefficients
 /// @param qubits Qubit register
 /// @param thetas Vector of rotation angles (one per excitation group)
 /// @param pauliWordsList Pauli words grouped by excitation
 /// @param coefficientsList Coefficients grouped by excitation
-__qpu__ void uccgsd(cudaq::qview<> qubits,
-                    const std::vector<double>& thetas,
-                    const std::vector<std::vector<cudaq::pauli_word>>& pauliWordsList,
-                    const std::vector<std::vector<double>>& coefficientsList);
+__qpu__ void
+uccgsd(cudaq::qview<> qubits, const std::vector<double> &thetas,
+       const std::vector<std::vector<cudaq::pauli_word>> &pauliWordsList,
+       const std::vector<std::vector<double>> &coefficientsList);
 
 } // namespace cudaq::solvers::stateprep

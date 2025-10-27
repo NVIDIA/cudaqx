@@ -22,9 +22,9 @@ class uccgsd : public operator_pool {
 public:
   /// @brief Generate a vector of spin operators based on the provided
   /// configuration.
-  /// @details The UCCGSD operator pool is generated with an imaginary factor 'i'
-  /// in the coefficients of the operators, which simplifies the use for running
-  /// Adapt-VQE.
+  /// @details The UCCGSD operator pool is generated with an imaginary factor
+  /// 'i' in the coefficients of the operators, which simplifies the use for
+  /// running Adapt-VQE.
   /// @param config A heterogeneous map containing configuration parameters for
   /// operator generation.
   /// @return A vector of cudaq::spin_op objects representing the generated

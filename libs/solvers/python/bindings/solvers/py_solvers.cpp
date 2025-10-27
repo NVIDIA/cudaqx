@@ -15,8 +15,8 @@
 
 #include "cudaq/solvers/adapt.h"
 #include "cudaq/solvers/qaoa.h"
-#include "cudaq/solvers/stateprep/uccsd.h"
 #include "cudaq/solvers/stateprep/uccgsd.h"
+#include "cudaq/solvers/stateprep/uccsd.h"
 #include "cudaq/solvers/version.h"
 #include "cudaq/solvers/vqe.h"
 
@@ -161,19 +161,17 @@ void addStatePrepKernels(py::module &mod) {
       "qubits to apply the ansatz on, the rotational parameters, the number of "
       "electrons in the system, and the total spin (the number of unpaired "
       "electrons).");
-    
-    // Add this for UCCGSD
+
+  // Add this for UCCGSD
   cudaq::python::addDeviceKernelInterop<
-      cudaq::qview<>,
-      const std::vector<double>&,
-      const std::vector<std::vector<cudaq::pauli_word>>&,
-      const std::vector<std::vector<double>>&
-  >(
+      cudaq::qview<>, const std::vector<double> &,
+      const std::vector<std::vector<cudaq::pauli_word>> &,
+      const std::vector<std::vector<double>> &>(
       mod, "stateprep", "uccgsd",
       "Unitary Coupled Cluster Generalized Singles Doubles Ansatz. "
-      "Takes as input the qubits, grouped rotational parameters, grouped Pauli words, "
-      "and grouped coefficients."
-  );
+      "Takes as input the qubits, grouped rotational parameters, grouped Pauli "
+      "words, "
+      "and grouped coefficients.");
   cudaq::python::addDeviceKernelInterop<cudaq::qview<>, double, std::size_t,
                                         std::size_t>(
       mod, "stateprep", "single_excitation",
@@ -199,8 +197,7 @@ void addStatePrepKernels(py::module &mod) {
 
   stateprep.def("get_uccgsd_pauli_lists",
                 &cudaq::solvers::stateprep::get_uccgsd_pauli_lists,
-                py::arg("num_qubits"),
-                py::arg("only_singles") = false,
+                py::arg("num_qubits"), py::arg("only_singles") = false,
                 py::arg("only_doubles") = false,
                 R"(
   Generate UCCGSD operator pool (Python-style unique singles/doubles) and extract Pauli words and coefficients grouped by excitation.
