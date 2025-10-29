@@ -66,12 +66,17 @@ jobs:
         run: |
           apt install -y --no-install-recommends gfortran libblas-dev wget
 
-      - name: Install TensorRT (x86_64 only)
+      - name: Install TensorRT (amd64)
         if: matrix.platform == 'amd64'
         run: |
-          wget https://developer.download.nvidia.com/compute/tensorrt/10.13.3/local_installers/nv-tensorrt-local-repo-ubuntu2404-10.13.3-cuda-12.9_1.0-1_amd64.deb
-          dpkg -i nv-tensorrt-local-repo-ubuntu2404-10.13.3-cuda-12.9_1.0-1_amd64.deb
-          cp /var/nv-tensorrt-local-repo-ubuntu2404-10.13.3-cuda-12.9/nv-tensorrt-local-4B177B4F-keyring.gpg /usr/share/keyrings/
+          apt-cache search tensorrt | awk '{print "Package: "$1"\nPin: version *+cuda${{ matrix.cuda_version }}\nPin-Priority: 1001\n"}' | tee /etc/apt/preferences.d/tensorrt-cuda${{ matrix.cuda_version }}.pref > /dev/null
+          apt update
+          apt install -y tensorrt-dev
+
+      - name: Install TensorRT (arm64)
+        if: matrix.platform == 'arm64'
+        run: |
+          apt-cache search tensorrt | awk '{print "Package: "$1"\nPin: version *+cuda13.0\nPin-Priority: 1001\n"}' | tee /etc/apt/preferences.d/tensorrt-cuda13.0.pref > /dev/null
           apt update
           apt install -y tensorrt-dev
 

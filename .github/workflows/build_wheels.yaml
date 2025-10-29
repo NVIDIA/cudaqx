@@ -68,18 +68,45 @@ jobs:
         run: |
           cuda_major=`echo ${{ matrix.cuda_version }} | cut -d . -f1`
           echo "cuda_major=$cuda_major" >> $GITHUB_OUTPUT
-          tensorrt_version="10.13.3.9"
+          # Map CUDA 12.6 to 12.9 for TensorRT filename
+          if [ "${{ matrix.cuda_version }}" == "12.6" ]; then
+            tensorrt_cuda_version="12.9"
+            tensorrt_cuda_major="12"
+          else
+            tensorrt_cuda_version="${{ matrix.cuda_version }}"
+            tensorrt_cuda_major="$cuda_major"
+          fi
+          echo "tensorrt_cuda_version=$tensorrt_cuda_version" >> $GITHUB_OUTPUT
+          echo "tensorrt_cuda_major=$tensorrt_cuda_major" >> $GITHUB_OUTPUT
+          tensorrt_major_version="10.13.3"
+          tensorrt_minor_version="9"
+          tensorrt_version="${tensorrt_major_version}.${tensorrt_minor_version}"
+          echo "tensorrt_major_version=$tensorrt_major_version" >> $GITHUB_OUTPUT
           echo "tensorrt_version=$tensorrt_version" >> $GITHUB_OUTPUT
 
-      - name: Install TensorRT (x86_64 only)
+      - name: Install TensorRT (amd64)
         shell: bash
         if: matrix.platform == 'amd64'
         run: |
           mkdir -p /trt_download
           pushd /trt_download
           pwd
-          wget https://developer.nvidia.com/downloads/compute/machine-learning/tensorrt/10.13.3/tars/TensorRT-${{ steps.config.outputs.tensorrt_version }}.Linux.x86_64-gnu.cuda-12.9.tar.gz
-          tar -zxvf TensorRT-${{ steps.config.outputs.tensorrt_version }}.Linux.x86_64-gnu.cuda-12.9.tar.gz
+          wget https://developer.nvidia.com/downloads/compute/machine-learning/tensorrt/${{ steps.config.outputs.tensorrt_major_version }}/tars/TensorRT-${{ steps.config.outputs.tensorrt_version }}.Linux.x86_64-gnu.cuda-${{ steps.config.outputs.tensorrt_cuda_version }}.tar.gz
+          tar -zxvf TensorRT-${{ steps.config.outputs.tensorrt_version }}.Linux.x86_64-gnu.cuda-${{ steps.config.outputs.tensorrt_cuda_version }}.tar.gz
+          pwd
+          popd
+          find /trt_download/TensorRT-${{ steps.config.outputs.tensorrt_version }} -name "NvInfer.h"
+          find /trt_download/TensorRT-${{ steps.config.outputs.tensorrt_version }} -name "NvInferRuntime.h"
+
+      - name: Install TensorRT (arm64)
+        shell: bash
+        if: matrix.platform == 'arm64'
+        run: |
+          mkdir -p /trt_download
+          pushd /trt_download
+          pwd
+          wget https://developer.nvidia.com/downloads/compute/machine-learning/tensorrt/${{ steps.config.outputs.tensorrt_major_version }}/tars/TensorRT-${{ steps.config.outputs.tensorrt_version }}.Linux.aarch64-gnu.cuda-13.0.tar.gz
+          tar -zxvf TensorRT-${{ steps.config.outputs.tensorrt_version }}.Linux.aarch64-gnu.cuda-13.0.tar.gz
           pwd
           popd
           find /trt_download/TensorRT-${{ steps.config.outputs.tensorrt_version }} -name "NvInfer.h"
@@ -360,7 +387,7 @@ jobs:
         with:
           set-safe-directory: true
           lfs: true # download assets file(s) for TRT tests
-  
+ 
       - name: Configure
         id: config
         run: |
