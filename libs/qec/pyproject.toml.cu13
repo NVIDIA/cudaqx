@@ -59,6 +59,7 @@ tensor_network_decoder = [
   "cuquantum-python-cu13==25.09"
 ]
 trt_decoder = [
+  "nvidia-cuda-runtime~=13.0",
   "tensorrt-cu13"
 ]
 all = [
@@ -66,5 +67,6 @@ all = [
   "opt_einsum",
   "torch>=2.9.0",
   "cuquantum-python-cu13==25.09",
+  "nvidia-cuda-runtime~=13.0",
   "tensorrt-cu13"
 ]
