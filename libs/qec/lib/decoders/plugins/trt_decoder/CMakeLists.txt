@@ -115,10 +115,21 @@ set_target_properties(${MODULE_NAME} PROPERTIES
 # RPATH configuration 
 # ==============================================================================
 
+# Get the CUDA version (12 or 13)
+string(REGEX REPLACE "^([0-9]+)\\..*" "\\1" CUDA_MAJOR_VERSION ${CUDAToolkit_VERSION})
+message(STATUS "TRT CUDA version: ${CUDA_MAJOR_VERSION}")
+
+string(CONCAT TRT_INSTALL_RPATH
+  "$ORIGIN"
+  ":$ORIGIN/../../nvidia/cu${CUDA_MAJOR_VERSION}/lib"
+  ":$ORIGIN/../../lib"
+  ":$ORIGIN/../../../tensorrt_libs")
+message(STATUS "TRT_INSTALL_RPATH: ${TRT_INSTALL_RPATH}")
+
 if (NOT SKBUILD)
   set_target_properties(${MODULE_NAME} PROPERTIES
     BUILD_RPATH "$ORIGIN:${TENSORRT_ROOT}/lib"
-    INSTALL_RPATH "$ORIGIN:$ORIGIN/../../lib:$ORIGIN/../../../tensorrt_libs"
+    INSTALL_RPATH "${TRT_INSTALL_RPATH}"
   )
 
   # Let CMake automatically add paths of linked libraries to the RPATH:
@@ -128,7 +139,7 @@ else()
   # CUDA-Q install its libraries in site-packages/lib (or dist-packages/lib)
   # Thus, we need the $ORIGIN/../lib
   set_target_properties(${MODULE_NAME} PROPERTIES
-    INSTALL_RPATH "$ORIGIN:$ORIGIN/../../lib:$ORIGIN/../../../tensorrt_libs"
+    INSTALL_RPATH "${TRT_INSTALL_RPATH}"
   )
 endif()
 
