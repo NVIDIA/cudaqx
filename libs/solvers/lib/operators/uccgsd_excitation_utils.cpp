@@ -65,8 +65,8 @@ generate_uccgsd_doubles(std::size_t numQubits) {
       doubles.begin(), doubles.end());
 }
 
-void addUCCGSDSingleExcitation(std::vector<cudaq::spin_op> &ops,
-                               std::size_t p, std::size_t q) {
+void addUCCGSDSingleExcitation(std::vector<cudaq::spin_op> &ops, std::size_t p,
+                               std::size_t q) {
   if (p > q) {
     // Compute parity string (Z operators between q and p)
     cudaq::spin_op_term parity;
@@ -81,9 +81,8 @@ void addUCCGSDSingleExcitation(std::vector<cudaq::spin_op> &ops,
   }
 }
 
-void addUCCGSDDoubleExcitation(std::vector<cudaq::spin_op> &ops,
-                               std::size_t p, std::size_t q, std::size_t r,
-                               std::size_t s) {
+void addUCCGSDDoubleExcitation(std::vector<cudaq::spin_op> &ops, std::size_t p,
+                               std::size_t q, std::size_t r, std::size_t s) {
   if (p > q && r > s) {
     // Compute parity strings
     cudaq::spin_op_term parity_a, parity_b;
@@ -122,4 +121,3 @@ void addUCCGSDDoubleExcitation(std::vector<cudaq::spin_op> &ops,
 }
 
 } // namespace cudaq::solvers
-

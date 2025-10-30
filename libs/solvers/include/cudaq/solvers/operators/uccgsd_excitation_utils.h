@@ -39,8 +39,8 @@ generate_uccgsd_doubles(std::size_t numQubits);
 /// @param ops Vector to append the operator to
 /// @param p Higher qubit index (p > q)
 /// @param q Lower qubit index (p > q)
-void addUCCGSDSingleExcitation(std::vector<cudaq::spin_op> &ops,
-                               std::size_t p, std::size_t q);
+void addUCCGSDSingleExcitation(std::vector<cudaq::spin_op> &ops, std::size_t p,
+                               std::size_t q);
 
 /// @brief Add a UCCGSD double excitation operator to the operator pool
 /// @details Generates the generalized double excitation operator with 8 terms
@@ -49,11 +49,7 @@ void addUCCGSDSingleExcitation(std::vector<cudaq::spin_op> &ops,
 /// @param q Second qubit index (p > q)
 /// @param r Third qubit index (r > s)
 /// @param s Fourth qubit index (r > s)
-void addUCCGSDDoubleExcitation(std::vector<cudaq::spin_op> &ops,
-                               std::size_t p, std::size_t q, std::size_t r,
-                               std::size_t s);
+void addUCCGSDDoubleExcitation(std::vector<cudaq::spin_op> &ops, std::size_t p,
+                               std::size_t q, std::size_t r, std::size_t s);
 
 } // namespace cudaq::solvers
-
-
-

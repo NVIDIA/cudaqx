@@ -16,23 +16,24 @@
 using namespace cudaqx;
 
 // Helper function to count operators by degree (singles vs doubles)
-std::pair<size_t, size_t> countSinglesAndDoubles(
-    const std::vector<cudaq::spin_op> &ops) {
+std::pair<size_t, size_t>
+countSinglesAndDoubles(const std::vector<cudaq::spin_op> &ops) {
   size_t singles = 0, doubles = 0;
   for (const auto &op : ops) {
     // Singles have 2 Pauli terms (each with 2 X/Y operators)
     // Doubles have 8 Pauli terms (each with 4 X/Y operators)
     // Count total X and Y characters (excluding those in complex numbers)
     std::string op_str = op.to_string();
-    
+
     // Count X and Y followed by a digit (Pauli operators like X0, Y1, etc.)
     size_t xy_count = 0;
     for (size_t i = 0; i < op_str.length() - 1; ++i) {
-      if ((op_str[i] == 'X' || op_str[i] == 'Y') && std::isdigit(op_str[i + 1])) {
+      if ((op_str[i] == 'X' || op_str[i] == 'Y') &&
+          std::isdigit(op_str[i + 1])) {
         xy_count++;
       }
     }
-    
+
     // Singles have ~4 X/Y operators total (2 terms × 2 operators each)
     // Doubles have ~32 X/Y operators total (8 terms × 4 operators each)
     if (xy_count <= 10)
@@ -55,8 +56,8 @@ TEST(UCCGSDOperatorPoolTest, CorrectNumberOfOperators) {
     config.insert("num-orbitals", 2);
     auto ops = pool->generate(config);
 
-    size_t n = 4; // qubits
-    size_t expected_singles = n * (n - 1) / 2;          // = 6
+    size_t n = 4;                                                  // qubits
+    size_t expected_singles = n * (n - 1) / 2;                     // = 6
     size_t expected_doubles = n * (n - 1) * (n - 2) * (n - 3) / 8; // = 3
     size_t expected_total = expected_singles + expected_doubles;   // = 9
 
@@ -71,7 +72,7 @@ TEST(UCCGSDOperatorPoolTest, CorrectNumberOfOperators) {
     auto ops = pool->generate(config);
 
     size_t n = 6;
-    size_t expected_singles = n * (n - 1) / 2;          // = 15
+    size_t expected_singles = n * (n - 1) / 2;                     // = 15
     size_t expected_doubles = n * (n - 1) * (n - 2) * (n - 3) / 8; // = 30
     size_t expected_total = expected_singles + expected_doubles;   // = 45
 
@@ -86,7 +87,7 @@ TEST(UCCGSDOperatorPoolTest, CorrectNumberOfOperators) {
     auto ops = pool->generate(config);
 
     size_t n = 8;
-    size_t expected_singles = n * (n - 1) / 2;          // = 28
+    size_t expected_singles = n * (n - 1) / 2;                     // = 28
     size_t expected_doubles = n * (n - 1) * (n - 2) * (n - 3) / 8; // = 70
     size_t expected_total = expected_singles + expected_doubles;   // = 98
 
@@ -137,7 +138,7 @@ TEST(UCCGSDOperatorPoolTest, CorrectSinglesAndDoublesCount) {
   auto [singles_count, doubles_count] = countSinglesAndDoubles(ops);
 
   size_t n = 4;
-  size_t expected_singles = n * (n - 1) / 2;          // = 6
+  size_t expected_singles = n * (n - 1) / 2;                     // = 6
   size_t expected_doubles = n * (n - 1) * (n - 2) * (n - 3) / 8; // = 3
 
   EXPECT_EQ(singles_count, expected_singles)
@@ -213,8 +214,8 @@ TEST(UCCGSDOperatorPoolTest, VerifyOperatorCoefficients) {
   for (size_t i = 0; i < coefficients.size(); ++i) {
     bool is_valid = (std::abs(coefficients[i] - 0.5) < 1e-10) ||
                     (std::abs(coefficients[i] - 0.125) < 1e-10);
-    EXPECT_TRUE(is_valid) << "Coefficient " << i << " has unexpected value: "
-                          << coefficients[i]
+    EXPECT_TRUE(is_valid) << "Coefficient " << i
+                          << " has unexpected value: " << coefficients[i]
                           << " (expected 0.5 or 0.125)";
   }
 }
@@ -289,11 +290,11 @@ TEST(UCCGSDOperatorPoolTest, ScalingBehavior) {
 
   // Test multiple system sizes
   std::vector<std::pair<size_t, size_t>> test_cases = {
-      {1, 1},    // 2 qubits: 1 single + 0 doubles = 1
-      {2, 9},    // 4 qubits: 6 singles + 3 doubles = 9
-      {3, 60},   // 6 qubits: 15 singles + 45 doubles = 60
-      {4, 238},  // 8 qubits: 28 singles + 210 doubles = 238
-      {5, 675},  // 10 qubits: 45 singles + 630 doubles = 675
+      {1, 1},   // 2 qubits: 1 single + 0 doubles = 1
+      {2, 9},   // 4 qubits: 6 singles + 3 doubles = 9
+      {3, 60},  // 6 qubits: 15 singles + 45 doubles = 60
+      {4, 238}, // 8 qubits: 28 singles + 210 doubles = 238
+      {5, 675}, // 10 qubits: 45 singles + 630 doubles = 675
   };
 
   for (auto [n_orbitals, expected_count] : test_cases) {
@@ -306,9 +307,9 @@ TEST(UCCGSDOperatorPoolTest, ScalingBehavior) {
     size_t doubles = n * (n - 1) * (n - 2) * (n - 3) / 8;
     size_t total = singles + doubles;
 
-    EXPECT_EQ(ops.size(), total) << "For " << n << " qubits (n_orbitals="
-                                 << n_orbitals << "): expected " << total
-                                 << " operators, got " << ops.size();
+    EXPECT_EQ(ops.size(), total)
+        << "For " << n << " qubits (n_orbitals=" << n_orbitals << "): expected "
+        << total << " operators, got " << ops.size();
     EXPECT_EQ(total, expected_count)
         << "Formula mismatch for " << n << " qubits";
   }
@@ -346,7 +347,7 @@ TEST(UCCGSDOperatorPoolTest, OperatorsAreAntiHermitian) {
   for (size_t i = 0; i < ops.size(); ++i) {
     // Get the matrix representation of G
     auto matrix_G = ops[i].to_matrix();
-    
+
     // First verify G is Hermitian: G† = G
     auto adjoint_G = ops[i].to_matrix();
     for (size_t row = 0; row < matrix_G.rows(); ++row) {
@@ -354,7 +355,7 @@ TEST(UCCGSDOperatorPoolTest, OperatorsAreAntiHermitian) {
         adjoint_G(row, col) = std::conj(matrix_G(col, row));
       }
     }
-    
+
     bool is_hermitian = true;
     for (size_t row = 0; row < matrix_G.rows(); ++row) {
       for (size_t col = 0; col < matrix_G.cols(); ++col) {
@@ -367,10 +368,9 @@ TEST(UCCGSDOperatorPoolTest, OperatorsAreAntiHermitian) {
       if (!is_hermitian)
         break;
     }
-    
-    EXPECT_TRUE(is_hermitian)
-        << "Operator " << i << " (G) is not Hermitian";
-    
+
+    EXPECT_TRUE(is_hermitian) << "Operator " << i << " (G) is not Hermitian";
+
     // Now compute iG and verify it's anti-Hermitian
     auto matrix_iG = ops[i].to_matrix();
     std::complex<double> imag_unit(0.0, 1.0);
@@ -379,7 +379,7 @@ TEST(UCCGSDOperatorPoolTest, OperatorsAreAntiHermitian) {
         matrix_iG(row, col) = imag_unit * matrix_G(row, col);
       }
     }
-    
+
     // Compute adjoint of iG: (iG)†
     auto adjoint_iG = ops[i].to_matrix();
     for (size_t row = 0; row < matrix_iG.rows(); ++row) {
@@ -387,7 +387,7 @@ TEST(UCCGSDOperatorPoolTest, OperatorsAreAntiHermitian) {
         adjoint_iG(row, col) = std::conj(matrix_iG(col, row));
       }
     }
-    
+
     // Check if (iG)† = -iG (anti-Hermitian property)
     // Equivalently: (iG)† + iG = 0
     bool is_anti_hermitian = true;
@@ -455,25 +455,25 @@ TEST(UCCGSDOperatorPoolTest, LargeSystemPerformance) {
 
 TEST(UCCGSDOperatorPoolTest, AllUniquePairingsGenerated) {
   // This tests the core logic that was buggy!
-  
+
   // Manually compute expected pairings for 4 qubits
-  std::set<std::pair<std::pair<size_t, size_t>,
-                     std::pair<size_t, size_t>>> expected;
-  
+  std::set<std::pair<std::pair<size_t, size_t>, std::pair<size_t, size_t>>>
+      expected;
+
   // For quartet (0,1,2,3):
-  expected.insert({{3, 2}, {1, 0}});  // (0,1) <-> (2,3)
-  expected.insert({{3, 1}, {2, 0}});  // (0,2) <-> (1,3)
-  expected.insert({{3, 0}, {2, 1}});  // (0,3) <-> (1,2)
-  
+  expected.insert({{3, 2}, {1, 0}}); // (0,1) <-> (2,3)
+  expected.insert({{3, 1}, {2, 0}}); // (0,2) <-> (1,3)
+  expected.insert({{3, 0}, {2, 1}}); // (0,3) <-> (1,2)
+
   // Now generate using the actual code
   auto pool = cudaq::solvers::operator_pool::get("uccgsd");
   heterogeneous_map config;
   config.insert("num-orbitals", 2);
   auto ops = pool->generate(config);
-  
+
   // We'd need to extract the indices from the operators
   // This is complex but verifies the algorithm
-  
+
   EXPECT_EQ(expected.size(), 3);
   // More detailed verification would go here
 }
