@@ -52,7 +52,7 @@ runs:
           .cudaq_version
       run: |
         hash=${{ hashFiles(format('{0}', env.to_hash)) }}
-        echo "main=cudaq-wheels-${{ inputs.platform }}-${{ inputs.ref }}-$hash" >> $GITHUB_OUTPUT
+        echo "main=cudaq-wheels-${{ inputs.platform }}-cu${{ inputs.cuda_version }}-${{ inputs.ref }}-$hash" >> $GITHUB_OUTPUT
         if [[ -n "${{ inputs.pr-number }}" ]]; then
           echo "pr=-pr${{ inputs.pr-number }}" >> $GITHUB_OUTPUT
         fi

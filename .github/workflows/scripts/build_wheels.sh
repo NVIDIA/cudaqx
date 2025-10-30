@@ -18,6 +18,7 @@ show_help() {
     echo "Usage: $0 [options]"
     echo "Options:"
     echo "  --build-type      Build type (e.g., Release)"
+    echo "  --cuda-version    CUDA version to build wheel for (e.g. 12 or 13)"
     echo "  --cudaq-prefix    Path to CUDA-Q's install prefix"
     echo "                    (default: \$HOME/.cudaq)"
     echo "  --python-version  Python version to build wheel for (e.g. 3.11)"
@@ -34,6 +35,15 @@ parse_options() {
             --build-type)
                 if [[ -n "$2" && "$2" != -* ]]; then
                     build_type=("$2")
+                    shift 2
+                else
+                    echo "Error: Argument for $1 is missing" >&2
+                    exit 1
+                fi
+                ;;
+            --cuda-version)
+                if [[ -n "$2" && "$2" != -* ]]; then
+                    cuda_version=("$2")
                     shift 2
                 else
                     echo "Error: Argument for $1 is missing" >&2
@@ -91,11 +101,12 @@ build_type=Release
 python_version=3.11
 devdeps=false
 wheels_version=0.0.0
+cuda_version=12
 
 # Parse options
 parse_options "$@"
 
-echo "Building in $build_type mode for Python $python_version, version $wheels_version"
+echo "Building in $build_type mode for Python $python_version, version $wheels_version, CUDA version $cuda_version"
 
 # ==============================================================================
 # Helpers
@@ -123,6 +134,7 @@ export CUDAQX_SOLVERS_VERSION=$wheels_version
 # ==============================================================================
 
 cd libs/qec
+cp pyproject.toml.cu${cuda_version} pyproject.toml
 
 SKBUILD_CMAKE_ARGS="-DCUDAQ_DIR=$cudaq_prefix/lib/cmake/cudaq"
 if ! $devdeps; then
@@ -144,6 +156,7 @@ $python -m auditwheel -v repair dist/*.whl $CUDAQ_EXCLUDE_LIST \
 # ==============================================================================
 
 cd ../solvers
+cp pyproject.toml.cu${cuda_version} pyproject.toml
 
 SKBUILD_CMAKE_ARGS="-DCUDAQ_DIR=$cudaq_prefix/lib/cmake/cudaq"
 if ! $devdeps; then
