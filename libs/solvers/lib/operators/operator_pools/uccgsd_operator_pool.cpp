@@ -17,6 +17,8 @@ uccgsd::generate(const heterogeneous_map &config) const {
 
   auto numOrbitals = config.get<std::size_t>({"num-orbitals", "num_orbitals"});
   auto numQubits = 2 * numOrbitals;
+  if (numOrbitals == 0)
+    throw std::invalid_argument("num-orbitals must be > 0");
 
   // For UCCGSD, we do not use alpha/beta/mixed excitations, but generate all
   // singles and doubles
