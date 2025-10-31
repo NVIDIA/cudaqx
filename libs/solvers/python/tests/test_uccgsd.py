@@ -43,8 +43,6 @@ def test_solvers_adapt_uccgsd_lih():
 
     numElectrons = molecule.n_electrons
 
-    from scipy.optimize import minimize
-
     @cudaq.kernel
     def initState(q: cudaq.qview):
         for i in range(numElectrons):
