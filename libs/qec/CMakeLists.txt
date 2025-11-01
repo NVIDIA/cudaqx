@@ -61,6 +61,9 @@ option(CUDAQX_QEC_INSTALL_PYTHON
        "Install python files alongside the library."
        ${CUDAQX_INSTALL_PYTHON})
 
+# Option to control TRT decoder build (default: ON)
+option(CUDAQ_QEC_BUILD_TRT_DECODER "Build the TensorRT decoder plugin" ON)
+
 # Check for CUDA Support (ref: cuda-quantum/CMakeLists.txt)
 # ==============================================================================
 include(CheckLanguage)

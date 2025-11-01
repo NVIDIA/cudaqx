@@ -187,8 +187,9 @@ TEST(UCCGSDOperatorPoolTest, AllOperatorsNonEmpty) {
   for (size_t i = 0; i < ops.size(); ++i) {
     EXPECT_GT(ops[i].num_terms(), 0)
         << "Operator " << i << " is empty (has 0 terms)";
-    EXPECT_FALSE(ops[i].is_identity())
-        << "Operator " << i << " should not be identity";
+    for (const auto &term : ops[i])
+      EXPECT_FALSE(term.is_identity())
+          << "Term " << term.to_string() << " is identity";
   }
 }
 

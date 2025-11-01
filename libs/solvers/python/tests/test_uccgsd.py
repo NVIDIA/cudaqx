@@ -6,6 +6,22 @@ import numpy as np
 import cudaq
 import cudaq_solvers as solvers
 from scipy.optimize import minimize
+import subprocess
+
+
+def is_nvidia_gpu_available():
+    """Check if NVIDIA GPU is available using nvidia-smi command."""
+    try:
+        result = subprocess.run(["nvidia-smi"],
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE,
+                                text=True)
+        if result.returncode == 0 and "GPU" in result.stdout:
+            return True
+    except FileNotFoundError:
+        # The nvidia-smi command is not found, indicating no NVIDIA GPU drivers
+        return False
+    return False
 
 
 def test_solvers_adapt_uccgsd_h2():
@@ -138,6 +154,9 @@ def test_solvers_vqe_uccgsd_h2():
     assert np.isclose(energy, -1.1371, atol=1e-4)
 
 
+# Since this test is so slow on the CPU, only run this test if a GPU was found.
+@pytest.mark.skipif(not is_nvidia_gpu_available(),
+                    reason="NVIDIA GPU not found")
 def test_solvers_vqe_uccgsd_lih():
 
     geometry = [('Li', (0.3925, 0., 0.)), ('H', (-1.1774, 0., .0))]

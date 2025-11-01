@@ -25,7 +25,11 @@ add_library(${LIBRARY_NAME} SHARED
 )
 
 add_subdirectory(decoders/plugins/example)
-add_subdirectory(decoders/plugins/trt_decoder)
+
+if(CUDAQ_QEC_BUILD_TRT_DECODER)
+  add_subdirectory(decoders/plugins/trt_decoder)
+endif()
+
 add_subdirectory(codes)
 add_subdirectory(device) 
 
