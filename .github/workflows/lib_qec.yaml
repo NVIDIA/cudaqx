@@ -61,6 +61,23 @@ jobs:
       # ========================================================================
       # Build library
       # ========================================================================
+      - name: Install build requirements
+        run: |
+          apt install -y --no-install-recommends gfortran libblas-dev wget
+
+      - name: Install TensorRT (amd64)
+        if: matrix.platform == 'amd64'
+        run: |
+          apt-cache search tensorrt | awk '{print "Package: "$1"\nPin: version *+cuda${{ matrix.cuda_version }}\nPin-Priority: 1001\n"}' | tee /etc/apt/preferences.d/tensorrt-cuda${{ matrix.cuda_version }}.pref > /dev/null
+          apt update
+          apt install -y tensorrt-dev
+
+      - name: Install TensorRT (arm64)
+        if: matrix.platform == 'arm64'
+        run: |
+          apt-cache search tensorrt | awk '{print "Package: "$1"\nPin: version *+cuda13.0\nPin-Priority: 1001\n"}' | tee /etc/apt/preferences.d/tensorrt-cuda13.0.pref > /dev/null
+          apt update
+          apt install -y tensorrt-dev
 
       - name: Build
         id: build

@@ -72,10 +72,17 @@ fi
 # QEC library
 # ======================================
 
-# Install QEC library with tensor network decoder (requires Python >=3.11)
-echo "Installing QEC library with tensor network decoder"
-${python} -m pip install ${FIND_LINKS} "cudaq-qec[tensor-network-decoder]==${cudaqx_version}"
-${python} -m pytest -v -s libs/qec/python/tests/
+# Install QEC library with tensor network decoder and trt_decoder (requires Python >=3.11)
+echo "Installing QEC library with tensor network decoder and trt_decoder"
+${python} -m pip install ${FIND_LINKS} --extra-index-url https://pypi.nvidia.com/ "cudaq-qec[all]==${cudaqx_version}"
+# Check if CUDA is available
+if command -v nvidia-smi &> /dev/null && nvidia-smi &> /dev/null; then
+  # CUDA available - run all tests
+  ${python} -m pytest -v -s libs/qec/python/tests/
+else
+  # No CUDA - skip TRT decoder tests
+  ${python} -m pytest -v -s libs/qec/python/tests/ --ignore=libs/qec/python/tests/test_trt_decoder.py
+fi
 
 # Verify that the correct version of cuda-quantum and cudaq-qec were installed.
 package_installed=$(python${python_version} -m pip list | grep cudaq-qec-cu | cut -d ' ' -f1)
