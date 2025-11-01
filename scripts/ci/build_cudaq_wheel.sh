@@ -45,12 +45,9 @@ echo "Building MLIR bindings for ${python}" && \
 echo "Building CUDA-Q wheel for ${python}."
 cd /cuda-quantum
 
-# Patch the pyproject.toml file to change the CUDA version if needed
-if [ "${CUDA_VERSION#12.}" != "${CUDA_VERSION}" ]; then \
-  sed -i "s/-cu11/-cu12/g" pyproject.toml && \
-  sed -i -E "s/(nvidia-cublas-cu[0-9]* ~= )[0-9\.]*/\1${CUDA_VERSION}/g" pyproject.toml; \
-  sed -i -E "s/(nvidia-cuda-runtime-cu[0-9]* ~= )[0-9\.]*/\1${CUDA_VERSION}/g" pyproject.toml; \
-fi
+# Select the correct pyproject.toml file.
+rm -f pyproject.toml # remove the symlink if it exists
+cp pyproject.toml.cu${CUDA_VERSION} pyproject.toml
 
 # Build the wheel
 echo "Building wheel for python${python_version}."
