@@ -40,14 +40,12 @@ git clone https://github.com/NVIDIA/cudaqx.git
 cd cudaqx
 mkdir build && cd build
 
-# Configure your build (adjust as necessary). Note TRT requires extra
-# dependencies, so the command below disables it from the build.
+# Configure your build (adjust as necessary)
 cmake -G Ninja -S .. \
   -DCUDAQ_INSTALL_DIR=$CUDAQ_INSTALL_PREFIX \
   -DCMAKE_INSTALL_PREFIX=${CUDAQX_INSTALL_PREFIX} \
   -DCUDAQ_DIR=${CUDAQ_INSTALL_PREFIX}/lib/cmake/cudaq \
   -DCMAKE_BUILD_TYPE=Release
-  -DCUDAQ_QEC_BUILD_TRT_DECODER=OFF
 
 # Install your build
 ninja install
@@ -57,7 +55,7 @@ export PYTHONPATH=${CUDAQ_INSTALL_PREFIX}:${CUDAQX_INSTALL_PREFIX}
 export PATH="${CUDAQ_INSTALL_PREFIX}/bin:${CUDAQX_INSTALL_PREFIX}/bin:${PATH}"
 ctest
 # Run the python tests
-# The --ignore option is to bypass tests that require additional packages not contained in
+# The --ignore option is to bypass tests that require additional packages not contained in 
 # the standard docker container
 cd ..
 python3 -m pytest -v libs/qec/python/tests --ignore libs/qec/python/tests/test_tensor_network_decoder.py
