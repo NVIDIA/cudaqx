@@ -74,7 +74,7 @@ jobs:
           apt install -y tensorrt-dev
 
       - name: Install TensorRT (arm64)
-        if: matrix.platform == 'arm64'
+        if: matrix.platform == 'arm64' && !startsWith(matrix.cuda_version, '12')
         run: |
           apt-cache search tensorrt | awk '{print "Package: "$1"\nPin: version *+cuda13.0\nPin-Priority: 1001\n"}' | tee /etc/apt/preferences.d/tensorrt-cuda13.0.pref > /dev/null
           apt update
