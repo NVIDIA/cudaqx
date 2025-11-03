@@ -13,9 +13,7 @@ set(MODULE_NAME "cudaq-qec-trt-decoder")
 project(${MODULE_NAME})
 
 # Set default TensorRT root if not provided
-if(NOT DEFINED TENSORRT_ROOT)
-    message(STATUS "TENSORRT_ROOT not provided, using default: ${TENSORRT_ROOT}")
-else()
+if(DEFINED TENSORRT_ROOT)
     message(STATUS "Using TENSORRT_ROOT: ${TENSORRT_ROOT}")
 endif()
 
@@ -104,9 +102,16 @@ if(TENSORRT_INCLUDE_DIR AND TENSORRT_LIBRARY AND TENSORRT_ONNX_LIBRARY)
     # ==============================================================================
 
     if (NOT SKBUILD)
+      if(DEFINED TENSORRT_ROOT)
+        set(TENSORRT_BUILD_RPATH   "$ORIGIN:${TENSORRT_ROOT}/lib")
+        set(TENSORRT_INSTALL_RPATH "$ORIGIN:$ORIGIN/../../lib:${TENSORRT_ROOT}/lib")
+      else()
+        set(TENSORRT_BUILD_RPATH   "$ORIGIN")
+        set(TENSORRT_INSTALL_RPATH "$ORIGIN:$ORIGIN/../../lib:$ORIGIN/../../../tensorrt_libs")
+      endif()
       set_target_properties(${MODULE_NAME} PROPERTIES
-        BUILD_RPATH "$ORIGIN:${TENSORRT_ROOT}/lib"
-        INSTALL_RPATH "$ORIGIN:$ORIGIN/../../lib:$ORIGIN/../../../tensorrt_libs"
+        BUILD_RPATH "${TENSORRT_BUILD_RPATH}"
+        INSTALL_RPATH "${TENSORRT_INSTALL_RPATH}"
       )
 
       # Let CMake automatically add paths of linked libraries to the RPATH:
