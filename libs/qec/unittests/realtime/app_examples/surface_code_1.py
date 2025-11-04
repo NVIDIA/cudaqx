@@ -68,7 +68,7 @@ def save_dem_to_file(dem, dem_filename, numSyndromesPerRound, num_logical):
         numRounds = dem.num_detectors() // numSyndromesPerRound + 1
         config = qec.decoder_config()
         config.id = i
-        config.type = "nv-qldpc-decoder"
+        config.type = "multi_error_lut"
         config.block_size = dem.num_error_mechanisms()
         config.syndrome_size = dem.num_detectors()
         config.num_syndromes_per_round = numSyndromesPerRound
@@ -76,14 +76,9 @@ def save_dem_to_file(dem, dem_filename, numSyndromesPerRound, num_logical):
         config.O_sparse = qec.pcm_to_sparse_vec(dem.observables_flips_matrix)
         config.D_sparse = qec.generate_timelike_sparse_detector_matrix(
             numSyndromesPerRound, numRounds, False)
-        nv = qec.nv_qldpc_decoder_config()
-        nv.use_sparsity = True
-        nv.error_rate_vec = dem.error_rates
-        nv.use_osd = True
-        nv.max_iterations = 50
-        nv.osd_order = 60
-        nv.osd_method = 3
-        config.set_decoder_custom_args(nv)
+        multi_error_lut_config = qec.multi_error_lut_config()
+        multi_error_lut_config.lut_error_depth = 2
+        config.set_decoder_custom_args(multi_error_lut_config)
         decoders.append(config)
 
     multi_config.decoders = decoders
@@ -109,7 +104,7 @@ def load_dem_from_file(dem_filename: str, dem: qec.DetectorErrorModel,
         sys.exit(1)
 
     dec_cfg = multi_cfg.decoders[0]
-    nv_qldpc_cfg = dec_cfg.decoder_custom_args
+    multi_error_lut_cfg = dec_cfg.decoder_custom_args
 
     dem.detector_error_matrix = pcm_from_sparse_vec(dec_cfg.H_sparse,
                                                     dec_cfg.syndrome_size,
@@ -121,7 +116,6 @@ def load_dem_from_file(dem_filename: str, dem: qec.DetectorErrorModel,
                                                        num_observables,
                                                        dec_cfg.block_size)
 
-    dem.error_rates = nv_qldpc_cfg.error_rate_vec
     print(f"Loaded dem from file: {dem_filename}")
 
     # Configure the decoder

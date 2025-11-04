@@ -33,19 +33,22 @@ CASES = [
             "number_of_corrections_decoder_threshold": 40
         },
         id="d3-local"),
-    pytest.param(
-        {
-            "distance": 5,
-            "p_spam": 0.01,
-            "num_rounds": 20,
-            "decoder_window": 10,
-            "num_shots": 1000,
-            "target": "stim",
-            "number_of_non_zero_values_threshold": 40,
-            "number_of_corrections_decoder_threshold": 40
-        },
-        id="d5-local",
-    ),
+    # This must be disabled for now because the multi_error_lut decoder is not
+    # powerful enough to pass this test. The nv-qldpc-decoder can pass this test,
+    # but that is not available on the GitHub repo.
+    # pytest.param(
+    #     {
+    #         "distance": 5,
+    #         "p_spam": 0.01,
+    #         "num_rounds": 20,
+    #         "decoder_window": 10,
+    #         "num_shots": 1000,
+    #         "target": "stim",
+    #         "number_of_non_zero_values_threshold": 40,
+    #         "number_of_corrections_decoder_threshold": 40
+    #     },
+    #     id="d5-local",
+    # ),
     pytest.param(
         {
             "distance": 3,
