@@ -93,6 +93,4 @@ install(DIRECTORY ${CUDAQX_QEC_INCLUDE_DIR}/cudaq
   FILES_MATCHING PATTERN "*.h"
 )
 
-if (NOT SKBUILD)
-  add_subdirectory(realtime)
-endif()
+add_subdirectory(realtime)
