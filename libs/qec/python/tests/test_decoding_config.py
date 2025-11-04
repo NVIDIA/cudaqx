@@ -307,12 +307,14 @@ def test_configure_valid_decoders():
 
     dc = qec.decoder_config()
     dc.id = 0
-    dc.type = "nv-qldpc-decoder"
+    dc.type = "multi_error_lut"
     dc.block_size = 10
     dc.syndrome_size = 3
     dc.num_syndromes_per_round = 3
     dc.H_sparse = [1, 2, 3, -1, 6, 7, 8, -1, -1]
-    dc.set_decoder_custom_args(nv)
+    lut_config = qec.multi_error_lut_config()
+    lut_config.lut_error_depth = 2
+    dc.set_decoder_custom_args(lut_config)
 
     mdc = qec.multi_decoder_config()
     mdc.decoders = [dc]
