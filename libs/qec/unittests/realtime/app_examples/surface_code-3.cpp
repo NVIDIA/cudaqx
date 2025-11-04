@@ -37,7 +37,7 @@ create_decoder_config(uint64_t id, const cudaq::qec::detector_error_model &dem,
                       uint64_t numSyndromesPerRound) {
   cudaq::qec::decoding::config::decoder_config config;
   config.id = id;
-  config.type = "nv-qldpc-decoder";
+  config.type = "multi_error_lut";
   config.block_size = dem.num_error_mechanisms();
   config.syndrome_size = dem.num_detectors();
   config.num_syndromes_per_round = numSyndromesPerRound;
@@ -45,16 +45,11 @@ create_decoder_config(uint64_t id, const cudaq::qec::detector_error_model &dem,
   config.O_sparse = cudaq::qec::pcm_to_sparse_vec(dem.observables_flips_matrix);
   config.D_sparse = det_mat;
   config.decoder_custom_args =
-      cudaq::qec::decoding::config::nv_qldpc_decoder_config();
-  auto &nv_config =
-      std::get<cudaq::qec::decoding::config::nv_qldpc_decoder_config>(
+      cudaq::qec::decoding::config::multi_error_lut_config();
+  auto &multi_error_lut_config =
+      std::get<cudaq::qec::decoding::config::multi_error_lut_config>(
           config.decoder_custom_args);
-  nv_config.use_sparsity = true;
-  nv_config.error_rate_vec = dem.error_rates;
-  nv_config.use_osd = true;
-  nv_config.max_iterations = 50;
-  nv_config.osd_order = 60;
-  nv_config.osd_method = 3;
+  multi_error_lut_config.lut_error_depth = 2;
   return config;
 }
 
@@ -111,11 +106,11 @@ void load_dem_from_file(const std::string &dem_filename,
     const auto &decoder_config_z = config.decoders[2 * i];
     const auto &decoder_config_x = config.decoders[2 * i + 1];
 
-    auto nv_qldpc_config_z =
-        std::get<cudaq::qec::decoding::config::nv_qldpc_decoder_config>(
+    auto multi_error_lut_config_z =
+        std::get<cudaq::qec::decoding::config::multi_error_lut_config>(
             decoder_config_z.decoder_custom_args);
-    auto nv_qldpc_config_x =
-        std::get<cudaq::qec::decoding::config::nv_qldpc_decoder_config>(
+    auto multi_error_lut_config_x =
+        std::get<cudaq::qec::decoding::config::multi_error_lut_config>(
             decoder_config_x.decoder_custom_args);
 
     // Z stab decoder
@@ -129,8 +124,6 @@ void load_dem_from_file(const std::string &dem_filename,
         decoder_config_z.O_sparse, num_observables_z,
         decoder_config_z.block_size);
 
-    dem_z[i].error_rates = nv_qldpc_config_z.error_rate_vec.value();
-
     // X stab decoder
     dem_x[i].detector_error_matrix = cudaq::qec::pcm_from_sparse_vec(
         decoder_config_x.H_sparse, decoder_config_x.syndrome_size,
@@ -141,8 +134,6 @@ void load_dem_from_file(const std::string &dem_filename,
     dem_x[i].observables_flips_matrix = cudaq::qec::pcm_from_sparse_vec(
         decoder_config_x.O_sparse, num_observables_x,
         decoder_config_x.block_size);
-
-    dem_x[i].error_rates = nv_qldpc_config_x.error_rate_vec.value();
   }
 
   printf("Loaded %lu Z and %lu X DEMs from file: %s\n", dem_z.size(),

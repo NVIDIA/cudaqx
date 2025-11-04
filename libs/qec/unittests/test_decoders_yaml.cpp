@@ -111,7 +111,29 @@ create_test_decoder_config_nv_qldpc(int id) {
   return config;
 }
 
+bool is_nv_qldpc_decoder_available() {
+  try {
+    std::size_t block_size = 7;
+    std::size_t syndrome_size = 3;
+    cudaqx::tensor<uint8_t> H;
+    // clang-format off
+    std::vector<uint8_t> H_vec = {1, 0, 0, 1, 0, 1, 1,
+                                  0, 1, 0, 1, 1, 0, 1,
+                                  0, 0, 1, 0, 1, 1, 1};
+    // clang-format on
+    H.copy(H_vec.data(), {syndrome_size, block_size});
+
+    auto d = cudaq::qec::decoder::get("nv-qldpc-decoder", H);
+    return true;
+  } catch (const std::exception &e) {
+    return false;
+  }
+}
+
 TEST(DecoderYAMLTest, SingleDecoder) {
+  if (!is_nv_qldpc_decoder_available()) {
+    GTEST_SKIP() << "nv-qldpc-decoder is not available";
+  }
   cudaq::qec::decoding::config::multi_decoder_config multi_config;
   cudaq::qec::decoding::config::decoder_config config =
       create_test_decoder_config_nv_qldpc(0);
@@ -122,6 +144,9 @@ TEST(DecoderYAMLTest, SingleDecoder) {
 }
 
 TEST(DecoderYAMLTest, MultiDecoder) {
+  if (!is_nv_qldpc_decoder_available()) {
+    GTEST_SKIP() << "nv-qldpc-decoder is not available";
+  }
   cudaq::qec::decoding::config::multi_decoder_config multi_config;
   cudaq::qec::decoding::config::decoder_config config1 =
       create_test_decoder_config_nv_qldpc(0);

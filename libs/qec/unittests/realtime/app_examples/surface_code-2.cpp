@@ -38,7 +38,7 @@ void save_dem_to_file(const cudaq::qec::detector_error_model &dem,
   for (uint64_t i = 0; i < numLogical; i++) {
     cudaq::qec::decoding::config::decoder_config config;
     config.id = i;
-    config.type = "nv-qldpc-decoder";
+    config.type = "multi_error_lut";
     config.block_size = dem.num_error_mechanisms();
     config.syndrome_size = dem.num_detectors();
     config.num_syndromes_per_round = numSyndromesPerRound;
@@ -47,16 +47,11 @@ void save_dem_to_file(const cudaq::qec::detector_error_model &dem,
         cudaq::qec::pcm_to_sparse_vec(dem.observables_flips_matrix);
     config.D_sparse = std::vector<int64_t>(det_mat);
     config.decoder_custom_args =
-        cudaq::qec::decoding::config::nv_qldpc_decoder_config();
-    auto &nv_config =
-        std::get<cudaq::qec::decoding::config::nv_qldpc_decoder_config>(
+        cudaq::qec::decoding::config::multi_error_lut_config();
+    auto &multi_error_lut_config =
+        std::get<cudaq::qec::decoding::config::multi_error_lut_config>(
             config.decoder_custom_args);
-    nv_config.use_sparsity = true;
-    nv_config.error_rate_vec = dem.error_rates;
-    nv_config.use_osd = true;
-    nv_config.max_iterations = 50;
-    nv_config.osd_order = 60;
-    nv_config.osd_method = 3;
+    multi_error_lut_config.lut_error_depth = 2;
     multi_config.decoders.push_back(config);
   }
   std::string config_str = multi_config.to_yaml_str(200);
@@ -85,8 +80,8 @@ void load_dem_from_file(const std::string &dem_filename,
     exit(1);
   }
   auto decoder_config = config.decoders[0];
-  auto nv_qldpc_config =
-      std::get<cudaq::qec::decoding::config::nv_qldpc_decoder_config>(
+  auto multi_error_lut_config =
+      std::get<cudaq::qec::decoding::config::multi_error_lut_config>(
           decoder_config.decoder_custom_args);
   dem.detector_error_matrix = cudaq::qec::pcm_from_sparse_vec(
       decoder_config.H_sparse, decoder_config.syndrome_size,
@@ -97,7 +92,6 @@ void load_dem_from_file(const std::string &dem_filename,
                                       decoder_config.O_sparse.end(), -1);
   dem.observables_flips_matrix = cudaq::qec::pcm_from_sparse_vec(
       decoder_config.O_sparse, num_observables, decoder_config.block_size);
-  dem.error_rates = nv_qldpc_config.error_rate_vec.value();
   printf("Loaded dem from file: %s\n", dem_filename.c_str());
 
   // Now configure the decoders
