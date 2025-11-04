@@ -11,6 +11,21 @@ import numpy as np
 import cudaq_qec as qec
 
 
+def is_nv_qldpc_decoder_available():
+    """
+    Helper function to check if the NV-QLDPC decoder is available.
+    """
+    try:
+        H_list = [[1, 0, 0, 1, 0, 1, 1], [0, 1, 0, 1, 1, 0, 1],
+                  [0, 0, 1, 0, 1, 1, 1]]
+
+        H_np = np.array(H_list, dtype=np.uint8)
+        nv_dec_gpu_and_cpu = qec.get_decoder("nv-qldpc-decoder", H_np)
+        return True
+    except Exception as e:
+        return False
+
+
 def check_decoder_yaml_roundtrip(multi_config):
     """
     Helper function to test that a decoder configuration can be serialized to
@@ -119,6 +134,8 @@ def test_single_decoder():
     """
     Test YAML serialization/deserialization and creation of a single NV-QLDPC decoder.
     """
+    if not is_nv_qldpc_decoder_available():
+        pytest.skip("NV-QLDPC decoder is not available, skipping test")
     multi_config = qec.multi_decoder_config()
     config = create_test_decoder_config_nv_qldpc(0)
     multi_config.decoders = [config]
@@ -131,6 +148,8 @@ def test_multi_decoder():
     """
     Test YAML serialization/deserialization and creation of multiple NV-QLDPC decoders.
     """
+    if not is_nv_qldpc_decoder_available():
+        pytest.skip("NV-QLDPC decoder is not available, skipping test")
     multi_config = qec.multi_decoder_config()
     config1 = create_test_decoder_config_nv_qldpc(0)
     config2 = create_test_decoder_config_nv_qldpc(1)
