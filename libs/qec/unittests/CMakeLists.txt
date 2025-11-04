@@ -34,14 +34,20 @@ find_package(CUDAToolkit REQUIRED)
 add_compile_options(-Wno-attributes) 
 
 add_executable(test_decoders test_decoders.cpp decoders/sample_decoder.cpp)
-target_link_libraries(test_decoders PRIVATE GTest::gtest_main cudaq-qec cudaq::cudaq)
+target_link_libraries(test_decoders PRIVATE GTest::gtest_main cudaq-qec cudaq-qec-realtime-decoding cudaq::cudaq)
 add_dependencies(CUDAQXQECUnitTests test_decoders)
 gtest_discover_tests(test_decoders)
+
+add_executable(test_decoders_yaml test_decoders_yaml.cpp decoders/sample_decoder.cpp)
+target_link_libraries(test_decoders_yaml PRIVATE GTest::gtest_main cudaq-qec cudaq-qec-realtime-decoding cudaq::cudaq)
+add_dependencies(CUDAQXQECUnitTests test_decoders_yaml)
+gtest_discover_tests(test_decoders_yaml)
 
 add_executable(test_qec test_qec.cpp)
 target_link_libraries(test_qec PRIVATE GTest::gtest_main cudaq-qec cudaq::cudaq)
 add_dependencies(CUDAQXQECUnitTests test_qec)
 gtest_discover_tests(test_qec)
+
 
 # TensorRT decoder test is only built for x86 architectures
 if(CUDAQ_QEC_BUILD_TRT_DECODER AND CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64)|(AMD64|amd64)|(^i.86$)")
@@ -69,4 +75,5 @@ endif()
 # ==============================================================================
 
 add_subdirectory(backend-specific)
+add_subdirectory(realtime)
 
