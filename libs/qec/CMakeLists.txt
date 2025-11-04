@@ -226,3 +226,20 @@ if (QEC_EXTERNAL_DECODERS)
     add_target_libs_to_wheel(${LIB_FILE})
   endwhile()
 endif()
+
+# External Dependencies 
+# ==============================================================================
+
+include(FetchContent)
+
+# We need version 3.11.1 because that is what CUDA-Q uses. If CUDA-Q updates,
+# then we need to remember to update.
+# TODO: remove when no longer needed.
+FetchContent_Declare(
+  json
+  GIT_REPOSITORY https://github.com/nlohmann/json
+  GIT_TAG v3.11.1
+  EXCLUDE_FROM_ALL
+)
+
+FetchContent_MakeAvailable(json)
