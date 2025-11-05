@@ -167,8 +167,9 @@ def test_configure_valid_multi_error_lut_decoders():
     dc.type = "multi_error_lut"
     dc.block_size = 10
     dc.syndrome_size = 3
-    dc.num_syndromes_per_round = 3
     dc.H_sparse = [1, 2, 3, -1, 6, 7, 8, -1, -1]
+    dc.D_sparse = qec.generate_timelike_sparse_detector_matrix(
+        dc.syndrome_size, 2, include_first_round=False)
     dc.set_decoder_custom_args(nv)
 
     mdc = qec.multi_decoder_config()
@@ -195,7 +196,6 @@ def test_decoder_config_yaml_roundtrip_and_custom_args():
     dc.type = "nv-qldpc-decoder"
     dc.block_size = 10
     dc.syndrome_size = 3
-    dc.num_syndromes_per_round = 3
     dc.H_sparse = [1, 2, 3, -1, 6, 7, 8, -1, -1]
     dc.set_decoder_custom_args(nv)
 
@@ -210,7 +210,6 @@ def test_decoder_config_yaml_roundtrip_and_custom_args():
     assert dc2.type == "nv-qldpc-decoder"
     assert dc2.block_size == 10
     assert dc2.syndrome_size == 3
-    assert dc2.num_syndromes_per_round == 3
 
     # Recover NV config from decoder_custom_args (it's already the config object)
     nv2 = dc2.decoder_custom_args
@@ -236,7 +235,6 @@ def test_multi_decoder_config_yaml_roundtrip():
     d1.type = "nv-qldpc-decoder"
     d1.block_size = 10
     d1.syndrome_size = 3
-    d1.num_syndromes_per_round = 3
     d1.H_sparse = [1, 2, 3, -1, 6, 7, 8, -1, -1]
     d1.set_decoder_custom_args(nv)
 
@@ -248,7 +246,6 @@ def test_multi_decoder_config_yaml_roundtrip():
     d2.type = "multi_error_lut"
     d2.block_size = 10
     d2.syndrome_size = 3
-    d2.num_syndromes_per_round = 3
     d2.H_sparse = [1, 2, 3, -1, 6, 7, 8, -1, -1]
     d2.set_decoder_custom_args(lut_config)
 
@@ -280,7 +277,6 @@ def test_configure_decoders_from_str_smoke():
     decoder_config.type = "nv-qldpc-decoder"
     decoder_config.block_size = 10
     decoder_config.syndrome_size = 3
-    decoder_config.num_syndromes_per_round = 3
     decoder_config.H_sparse = [1, 2, 3, -1, 6, 7, 8, -1, -1]
     decoder_config.set_decoder_custom_args(nv)
     yaml_str = decoder_config.to_yaml_str()
@@ -310,8 +306,9 @@ def test_configure_valid_decoders():
     dc.type = "multi_error_lut"
     dc.block_size = 10
     dc.syndrome_size = 3
-    dc.num_syndromes_per_round = 3
     dc.H_sparse = [1, 2, 3, -1, 6, 7, 8, -1, -1]
+    dc.D_sparse = qec.generate_timelike_sparse_detector_matrix(
+        dc.syndrome_size, 2, include_first_round=False)
     lut_config = qec.multi_error_lut_config()
     lut_config.lut_error_depth = 2
     dc.set_decoder_custom_args(lut_config)
@@ -336,7 +333,6 @@ def test_configure_invalid_decoders():
     decoder_config.type = "invalid-decoder"
     decoder_config.block_size = 10
     decoder_config.syndrome_size = 3
-    decoder_config.num_syndromes_per_round = 3
     decoder_config.H_sparse = [1, 2, 3, -1, 6, 7, 8, -1, -1]
     decoder_config.set_decoder_custom_args(nv)
 

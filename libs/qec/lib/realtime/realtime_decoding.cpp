@@ -76,18 +76,8 @@ int configure_decoders(
       if (decoder_config.D_sparse.has_value()) {
         new_decoder->set_D_sparse(*decoder_config.D_sparse);
       } else {
-        // Auto-generate a hard-wired D_sparse.
-        auto num_rounds = decoder_config.syndrome_size /
-                          decoder_config.num_syndromes_per_round;
-        CUDAQ_INFO("Auto-generating D_sparse for decoder {} with "
-                   "num_syndromes_per_round {} and num_rounds {}",
-                   decoder_config.id, decoder_config.num_syndromes_per_round,
-                   num_rounds);
-        std::vector<std::int64_t> D_sparse =
-            cudaq::qec::generate_timelike_sparse_detector_matrix(
-                decoder_config.num_syndromes_per_round, num_rounds,
-                /*include_first_round=*/false);
-        new_decoder->set_D_sparse(D_sparse);
+        throw std::runtime_error(
+            "D_sparse must be provided in decoder configuration");
       }
 
       // Invoke a dummy decoding operation to force the decoder to be

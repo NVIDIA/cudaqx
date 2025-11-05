@@ -349,7 +349,6 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
     io.mapRequired("type", config.type);
     io.mapRequired("block_size", config.block_size);
     io.mapRequired("syndrome_size", config.syndrome_size);
-    io.mapRequired("num_syndromes_per_round", config.num_syndromes_per_round);
     io.mapRequired("H_sparse", config.H_sparse);
     io.mapRequired("O_sparse", config.O_sparse);
     io.mapOptional("D_sparse", config.D_sparse);
@@ -424,18 +423,6 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
     } else if (config.type == "sliding_window") {
       INIT_AND_MAP_DECODER_CUSTOM_ARGS(
           cudaq::qec::decoding::config::sliding_window_config);
-    }
-
-    // Validate that the number of syndromes per round is less than or equal to
-    // the syndrome size and >= 0.
-    if (config.num_syndromes_per_round < 0 ||
-        config.num_syndromes_per_round > config.syndrome_size) {
-      throw std::runtime_error(
-          "num_syndromes_per_round (" +
-          std::to_string(config.num_syndromes_per_round) +
-          ") is not greater than 0 and less than or equal to syndrome_size (" +
-          std::to_string(config.syndrome_size) + ") for decoder " +
-          std::to_string(config.id));
     }
   }
 };

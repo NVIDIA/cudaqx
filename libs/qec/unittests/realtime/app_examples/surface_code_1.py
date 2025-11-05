@@ -71,7 +71,6 @@ def save_dem_to_file(dem, dem_filename, numSyndromesPerRound, num_logical):
         config.type = "multi_error_lut"
         config.block_size = dem.num_error_mechanisms()
         config.syndrome_size = dem.num_detectors()
-        config.num_syndromes_per_round = numSyndromesPerRound
         config.H_sparse = qec.pcm_to_sparse_vec(dem.detector_error_matrix)
         config.O_sparse = qec.pcm_to_sparse_vec(dem.observables_flips_matrix)
         config.D_sparse = qec.generate_timelike_sparse_detector_matrix(
