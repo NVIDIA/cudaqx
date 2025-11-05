@@ -497,6 +497,7 @@ CUDA-QX provides several pre-built operator pools for ADAPT-VQE:
 
 * **spin_complement_gsd**: Spin-complemented generalized singles and doubles
 * **uccsd**: UCCSD operators
+* **uccgsd**: UCC generalized singles and doubles
 * **qaoa**: QAOA mixer excitation operators
 
 .. code-block:: python
@@ -512,6 +513,58 @@ CUDA-QX provides several pre-built operator pools for ADAPT-VQE:
         num_orbitals=molecule.n_orbitals,
         num_electrons=molecule.n_electrons
     )
+
+    uccgsd_ops = solvers.get_operator_pool(
+        "uccgsd",
+        num_orbitals=molecule.n_orbitals
+    )
+
+Available Ansatz
+^^^^^^^^^^^^^^^^^^
+
+CUDA-QX provides several state preparations ansatz for VQE.
+
+* **uccsd**: UCCSD operators
+* **uccgsd**: UCC generalized singles and doubles
+
+.. code-block:: python
+
+    # Using UCCSD ansatz
+    geometry = [('H', (0., 0., 0.)), ('H', (0., 0., .7474))]
+    molecule = solvers.create_molecule(geometry, 'sto-3g', 0, 0, casci=True)
+
+    numQubits = molecule.n_orbitals * 2
+    numElectrons = molecule.n_electrons
+    spin = 0
+
+    @cudaq.kernel
+    def ansatz(thetas: list[float]):
+        q = cudaq.qvector(numQubits)
+        for i in range(numElectrons):
+            x(q[i])
+        solvers.stateprep.uccsd(q, thetas, numElectrons, spin)
+
+    
+    # Using UCCGSD ansatz
+    geometry = [('H', (0., 0., 0.)), ('H', (0., 0., .7474))]
+    molecule = solvers.create_molecule(geometry, 'sto-3g', 0, 0, casci=True)
+
+    numQubits = molecule.n_orbitals * 2
+    numElectrons = molecule.n_electrons
+
+    # Get grouped Pauli words and coefficients from UCCGSD pool
+    pauliWordsList, coefficientsList = solvers.stateprep.get_uccgsd_pauli_lists(
+        numQubits, only_singles=False, only_doubles=False)
+    
+    @cudaq.kernel
+    def ansatz(numQubits: int, numElectrons: int, thetas: list[float],
+               pauliWordsList: list[list[cudaq.pauli_word]],
+               coefficientsList: list[list[float]]):
+        q = cudaq.qvector(numQubits)
+        for i in range(numElectrons):
+            x(q[i])
+        solvers.stateprep.uccgsd(q, thetas, pauliWordsList, coefficientsList)
+
 
 Algorithm Parameters
 ^^^^^^^^^^^^^^^^^^^^^^
