@@ -153,7 +153,7 @@ jobs:
           if [[ -n "${{ inputs.assets_repo }}" ]] && [[ -n "${{ inputs.assets_tag }}" ]]; then
             # Extract the decoder that needs to be embedded in the wheel
             mkdir -p tmp
-            tar -C tmp -xzvf nv-qldpc-decoder-${{ matrix.platform }}_ubuntu24.04_cuda{{ matrix.cuda_version }}_py{{ matrix.python }}_release.tar.gz
+            tar -C tmp -xzvf nv-qldpc-decoder-${{ matrix.platform }}_ubuntu24.04_cuda${{ matrix.cuda_version }}_py${{ matrix.python }}_release.tar.gz
             export QEC_EXTERNAL_DECODERS=$(pwd)/tmp/libcudaq-qec-nv-qldpc-decoder.so
           fi
           # This is needed to allow the "git rev-parse" commands in the build
