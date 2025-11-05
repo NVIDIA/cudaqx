@@ -146,7 +146,7 @@ def test_single_decoder():
     """
     Test YAML serialization/deserialization and creation of a single NV-QLDPC decoder.
     """
-    if not is_nv_qldpc_decoder_available() or not is_nvidia_gpu_available():
+    if not is_nvidia_gpu_available() or not is_nv_qldpc_decoder_available():
         pytest.skip("NV-QLDPC decoder is not available, skipping test")
     multi_config = qec.multi_decoder_config()
     config = create_test_decoder_config_nv_qldpc(0)
@@ -160,7 +160,7 @@ def test_multi_decoder():
     """
     Test YAML serialization/deserialization and creation of multiple NV-QLDPC decoders.
     """
-    if not is_nv_qldpc_decoder_available() or not is_nvidia_gpu_available():
+    if not is_nvidia_gpu_available() or not is_nv_qldpc_decoder_available():
         pytest.skip("NV-QLDPC decoder is not available, skipping test")
     multi_config = qec.multi_decoder_config()
     config1 = create_test_decoder_config_nv_qldpc(0)
