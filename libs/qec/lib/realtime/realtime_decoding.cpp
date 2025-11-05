@@ -73,8 +73,8 @@ int configure_decoders(
       auto observable_matrix = cudaq::qec::pcm_from_sparse_vec(
           decoder_config.O_sparse, num_observables, decoder_config.block_size);
       new_decoder->set_O_sparse(decoder_config.O_sparse);
-      if (decoder_config.D_sparse.has_value()) {
-        new_decoder->set_D_sparse(*decoder_config.D_sparse);
+      if (!decoder_config.D_sparse.empty()) {
+        new_decoder->set_D_sparse(decoder_config.D_sparse);
       } else {
         throw std::runtime_error(
             "D_sparse must be provided in decoder configuration");

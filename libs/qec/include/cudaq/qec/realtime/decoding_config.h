@@ -120,7 +120,7 @@ struct decoder_config {
   uint64_t syndrome_size = 0;
   std::vector<std::int64_t> H_sparse;
   std::vector<std::int64_t> O_sparse;
-  std::optional<std::vector<std::int64_t>> D_sparse;
+  std::vector<std::int64_t> D_sparse;
   std::variant<single_error_lut_config, multi_error_lut_config,
                nv_qldpc_decoder_config, sliding_window_config>
       decoder_custom_args;

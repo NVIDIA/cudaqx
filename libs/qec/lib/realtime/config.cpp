@@ -351,7 +351,7 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
     io.mapRequired("syndrome_size", config.syndrome_size);
     io.mapRequired("H_sparse", config.H_sparse);
     io.mapRequired("O_sparse", config.O_sparse);
-    io.mapOptional("D_sparse", config.D_sparse);
+    io.mapRequired("D_sparse", config.D_sparse);
 
     // Validate that the number of rows in the H_sparse vector is equal to
     // syndrome_size.
@@ -383,9 +383,9 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
     // Validate that if the D_sparse is provided, it is a valid D matrix. That
     // means that the number of rows in the D_sparse matrix should be equal to
     // the number of rows in the H_sparse matrix, and no row should be empty.
-    if (config.D_sparse.has_value()) {
+    if (!config.D_sparse.empty()) {
       auto num_D_rows =
-          std::count(config.D_sparse->begin(), config.D_sparse->end(), -1);
+          std::count(config.D_sparse.begin(), config.D_sparse.end(), -1);
       if (num_D_rows != config.syndrome_size) {
         throw std::runtime_error("Number of rows in D_sparse vector is not "
                                  "equal to syndrome_size: " +
@@ -394,14 +394,13 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
       }
       // No row should be empty, which means that there should be no
       // back-to-back -1 values.
-      for (std::size_t i = 0; i < config.D_sparse->size() - 1; ++i) {
-        if (config.D_sparse->at(i) == -1 && config.D_sparse->at(i + 1) == -1) {
+      for (std::size_t i = 0; i < config.D_sparse.size() - 1; ++i) {
+        if (config.D_sparse.at(i) == -1 && config.D_sparse.at(i + 1) == -1) {
           throw std::runtime_error("D_sparse row is empty for decoder " +
                                    std::to_string(config.id));
         }
       }
     }
-
 #define INIT_AND_MAP_DECODER_CUSTOM_ARGS(type)                                 \
   do {                                                                         \
     if (!std::holds_alternative<type>(config.decoder_custom_args)) {           \
