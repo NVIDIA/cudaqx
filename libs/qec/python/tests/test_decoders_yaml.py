@@ -9,6 +9,7 @@
 import pytest
 import numpy as np
 import cudaq_qec as qec
+import subprocess
 
 
 def is_nv_qldpc_decoder_available():
@@ -23,6 +24,17 @@ def is_nv_qldpc_decoder_available():
         nv_dec_gpu_and_cpu = qec.get_decoder("nv-qldpc-decoder", H_np)
         return True
     except Exception as e:
+        return False
+
+
+def is_nvidia_gpu_available():
+    """
+    Helper function to check if an NVIDIA GPU is available.
+    """
+    try:
+        result = subprocess.run(["nvidia-smi"], capture_output=True, timeout=2)
+        return result.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired):
         return False
 
 
@@ -134,7 +146,7 @@ def test_single_decoder():
     """
     Test YAML serialization/deserialization and creation of a single NV-QLDPC decoder.
     """
-    if not is_nv_qldpc_decoder_available():
+    if not is_nv_qldpc_decoder_available() or not is_nvidia_gpu_available():
         pytest.skip("NV-QLDPC decoder is not available, skipping test")
     multi_config = qec.multi_decoder_config()
     config = create_test_decoder_config_nv_qldpc(0)
@@ -148,7 +160,7 @@ def test_multi_decoder():
     """
     Test YAML serialization/deserialization and creation of multiple NV-QLDPC decoders.
     """
-    if not is_nv_qldpc_decoder_available():
+    if not is_nv_qldpc_decoder_available() or not is_nvidia_gpu_available():
         pytest.skip("NV-QLDPC decoder is not available, skipping test")
     multi_config = qec.multi_decoder_config()
     config1 = create_test_decoder_config_nv_qldpc(0)
