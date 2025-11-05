@@ -104,13 +104,13 @@ print('No. of electrons: ', molecule.n_electrons)
 # For open-shell systems: Generate active space Hamiltonian using ROHF molecular orbitals
 geometry = [('N', (0.0, 0.0, 0.5600)), ('N', (0.0, 0.0, -0.5600))]
 molecule = solvers.create_molecule(geometry,
-                                    'sto-3g',
-                                    1,
-                                    1,
-                                    nele_cas=3,
-                                    norb_cas=3,
-                                    ccsd=True,
-                                    verbose=True)
+                                   'sto-3g',
+                                   1,
+                                   1,
+                                   nele_cas=3,
+                                   norb_cas=3,
+                                   ccsd=True,
+                                   verbose=True)
 
 print('N2+ ROHF Hamiltonian')
 print('Energies : ', molecule.energies)
@@ -120,14 +120,14 @@ print('No. of electrons: ', molecule.n_electrons)
 # For open-shell systems: Generate active space Hamiltonian using UHF molecular orbitals
 geometry = [('N', (0.0, 0.0, 0.5600)), ('N', (0.0, 0.0, -0.5600))]
 molecule = solvers.create_molecule(geometry,
-                                    'sto-3g',
-                                    1,
-                                    1,
-                                    nele_cas=3,
-                                    norb_cas=3,
-                                    ccsd=True,
-                                    UR=True,
-                                    verbose=True)
+                                   'sto-3g',
+                                   1,
+                                   1,
+                                   nele_cas=3,
+                                   norb_cas=3,
+                                   ccsd=True,
+                                   UR=True,
+                                   verbose=True)
 
 print('N2+ UHF Hamiltonian')
 print('Energies : ', molecule.energies)
