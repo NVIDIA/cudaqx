@@ -135,6 +135,7 @@ if echo $platform | grep -qi "amd64"; then
   ${python} -m pip install stim beliefmatching
 fi
 
+# FIXME TEMP
 gpu_is_available=$(nvidia-smi &> /dev/null && echo "true" || echo "false")
 
 for domain in "solvers" "qec"; do
@@ -142,6 +143,7 @@ for domain in "solvers" "qec"; do
     cd examples/${domain}/python
     shopt -s nullglob # don't throw errors if no Python files exist
     for f in *.py; do
+        # FIXME TEMP
         if [ "$f" == "nv-qldpc-decoder.py" ] && [ "$gpu_is_available" == "false" ]; then
             continue
         fi
