@@ -2,16 +2,16 @@ Generating Molecular Hamiltonians
 ----------------------------------
 
 The CUDA-Q Solvers library accelerates a wide range of applications in the domain of quantum chemistry.
-To facilitate these calculations, CUDA-Q Solvers provides the `solver.create_molecule` function to allow users to generate basis sets and Hamiltonians for many systems of interest.
-The molecule class contains basis set informations, and the Hamiltonian (`molecule.hamiltonian`) for the target systems.
+To facilitate these calculations, CUDA-Q Solvers provides the `solver.create_molecule` function to allow users to generate the electronic Hamiltonians for many systems of interest.
+The molecule class contains informations about the Hamiltonian (`molecule.hamiltonian`) for the target systems.
 These Hamiltonians can then be used as input into the hybrid quantum-classical solvers that the CUDA-Q Solvers API provides.
 
 
 Molecular Orbitals and Hamiltonians
 +++++++++++++++++++++++++++++++++++
 
-First we define the atomic geometry of the molecule by specifying a array of atomic symbols as strings, and coordinates in 3D space. We then get a molecule object from the `solvers.create_molecule` call.
-Here we create "default" Hamiltonian for the N2 system using complete active space molecular orbitals constructed from Restricted Hartree-Fock molecular orbitals.
+First, we define the atomic geometry of the molecule by specifying an array of atomic symbols as strings, and coordinates in 3D space. We then get a molecule object from the `solvers.create_molecule` call.
+Here, we create "default" Hamiltonian for the N2 system using complete active space molecular orbitals constructed from Restricted Hartree-Fock molecular orbitals.
 
 .. tab:: Python
 
@@ -28,16 +28,16 @@ Here we create "default" Hamiltonian for the N2 system using complete active spa
 
 We specify:
   - The geometry previously created
-  - The single particle basis set (here STO-3G)
-  - The total spin
+  - The basis set (here STO-3G)
+  - The total spin (2 * S)
   - The total charge
   - The number of electrons in the complete active space
-  - The number of orbitals in the complete activate space
+  - The number of orbitals in the complete active space
   - A verbosity flag to help introspect on the data what was generated.
 
-Along with the orbitals and Hamiltonian, we can also view various properties like the Hartree-Fock energy, and the energy of the frozen core orbitals by printing `molecule.energies`.
+Along with the Hamiltonian, we can also view various properties like the Hartree-Fock energy, and the energy of the frozen core orbitals by printing `molecule.energies`.
 
-For using Unrestricted Hartree-Fock (UHF) orbitals, you can set the `UR` parameter to `True` in the `create_molecule` function. Here's an example:
+For using Unrestricted Hartree-Fock (UHF) orbitals, user can set the `UR` parameter to `True` in the `create_molecule` function. Here's an example:
 
 .. tab:: Python
 
@@ -79,7 +79,9 @@ This option is unallowed yet when using `UR=True`. When using `UR=True`, only UH
 CASSCF Orbitals
 +++++++++++++++
 
-Next, we can start from either Hartree-Fock or perturbation theory atomic orbitals and build complete active space self-consistent field (CASSCF) molecular orbitals.
+Next, we can start from either Hartree-Fock or perturbation theory natural orbitals and build complete active space self-consistent field (CASSCF) molecular orbitals.
+
+In the example below, we employ the CASSCF procedure starting from RHF molecular orbitals to generate the spin molecular Hamiltonian.
 
 .. tab:: Python
 
@@ -96,7 +98,8 @@ Next, we can start from either Hartree-Fock or perturbation theory atomic orbita
                                        integrals_casscf=True,
                                        verbose=True)
 
-For Hartree-Fock, or
+Alternatively, we can also start from RHF, then MP2 natural orbitals and then perform CASSCF to generate the spin molecular Hamiltonian.
+In this case, natural orbitals from MP2 are used to set the active space for the CASSCF procedure.
 
 .. tab:: Python
 
@@ -115,15 +118,13 @@ For Hartree-Fock, or
                                        integrals_casscf=True,
                                        verbose=True)
 
-for MP2 natural orbitals. In these cases, printing the `molecule.energies` also shows the `R-CASSCF` energy for the system.
-
-Now that we have seen how to generate basis sets and Hamiltonians for quantum chemistry systems, we can use these as inputs to hybrid quantum-classical methods like VQE or adapt VQE via the CUDA-Q Solvers API.
+In these cases, printing the `molecule.energies` also shows the `R-CASSCF` energy for the system.
 
 
 For open-shell systems
 ++++++++++++++++++++++++++
 
-If you want to use Restricted Open-shell Hartree-Fock (ROHF) orbitals, you can set the `spin` parameter to a non-zero value while keeping the `charge` parameter as needed. For example, for a molecule with one unpaired electron, you can set `spin=1` and `charge=1`. Here's an example:
+For Restricted Open-shell Hartree-Fock (ROHF) orbitals, user can set the `spin` parameter to a non-zero value while keeping the `charge` parameter as needed. For example, for a molecule with one unpaired electron, you can set `spin=1` and `charge=1`. Here's an example:
 
 .. tab:: Python
 
@@ -139,7 +140,7 @@ If you want to use Restricted Open-shell Hartree-Fock (ROHF) orbitals, you can s
                                        verbose=True)
 
 
-If you want to use Unrestricted Hartree-Fock (UHF) orbitals, you can set `UR=True` and the `spin` parameter to a non-zero value while keeping the `charge` parameter as needed. Here's an example:
+For Unrestricted Hartree-Fock (UHF) orbitals, user can set `UR=True` and the `spin` parameter to a non-zero value while keeping the `charge` parameter as needed. Here's an example:
 
 .. tab:: Python
 
@@ -154,3 +155,5 @@ If you want to use Unrestricted Hartree-Fock (UHF) orbitals, you can set `UR=Tru
                                        norb_cas=3,
                                        UR=True,
                                        verbose=True)
+
+Now that we have seen how to generate the spin molecular Hamiltonians for quantum chemistry systems, we can use these as inputs to hybrid quantum-classical methods like VQE or adapt VQE via the CUDA-Q Solvers API.
