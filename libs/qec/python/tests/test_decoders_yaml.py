@@ -9,7 +9,6 @@
 import pytest
 import numpy as np
 import cudaq_qec as qec
-import subprocess
 
 
 def is_nv_qldpc_decoder_available():
@@ -17,13 +16,9 @@ def is_nv_qldpc_decoder_available():
     Helper function to check if the NV-QLDPC decoder is available.
     """
     try:
-        # First check to sure a GPU is available.
-        result = subprocess.run(["nvidia-smi"], capture_output=True, timeout=2)
-        if result.returncode != 0:
-            return False
-        # Now make sure that the NV-QLDPC decoder is available.
         H_list = [[1, 0, 0, 1, 0, 1, 1], [0, 1, 0, 1, 1, 0, 1],
                   [0, 0, 1, 0, 1, 1, 1]]
+
         H_np = np.array(H_list, dtype=np.uint8)
         nv_dec_gpu_and_cpu = qec.get_decoder("nv-qldpc-decoder", H_np)
         return True

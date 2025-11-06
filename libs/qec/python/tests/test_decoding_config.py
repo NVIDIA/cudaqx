@@ -20,11 +20,6 @@ def is_nv_qldpc_decoder_available():
     Helper function to check if the NV-QLDPC decoder is available.
     """
     try:
-        # First check to sure a GPU is available.
-        result = subprocess.run(["nvidia-smi"], capture_output=True, timeout=2)
-        if result.returncode != 0:
-            return False
-        # Now make sure that the NV-QLDPC decoder is available.
         H_list = [[1, 0, 0, 1, 0, 1, 1], [0, 1, 0, 1, 1, 0, 1],
                   [0, 0, 1, 0, 1, 1, 1]]
         H_np = np.array(H_list, dtype=np.uint8)
