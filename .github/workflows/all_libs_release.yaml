@@ -104,7 +104,7 @@ jobs:
 
       - name: Save build artifacts
         run: |
-          cmake --build ${{ steps.build.outputs.build-dir }} --target zip_installed_files -j
+          cmake --build ${{ steps.build.outputs.build-dir }} --target zip_installed_files --parallel
           cd ${{ steps.build.outputs.build-dir }}
           mv installed_files.zip installed_files-${{ matrix.runner.arch }}-cu${{ matrix.cuda_version }}.zip
       
