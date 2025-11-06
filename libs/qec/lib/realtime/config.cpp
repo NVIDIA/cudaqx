@@ -16,7 +16,6 @@
 #include "cudaq/qec/realtime/decoding_config.h"
 #include <filesystem>
 #include <fstream>
-#include <nlohmann/json.hpp> // FIXME: remove with upcoming public CUDA-Q changes
 #include <type_traits>
 
 // Helper function(s) to remove the optional wrapper from a type.
@@ -494,28 +493,7 @@ public:
   }
   virtual std::string
   getExtraPayload(const cudaq::RuntimeTarget &target) override {
-    // TEMPORARY: we obfuscate the payload in a JSON object customized for
-    // Quantinuum, the launch partner of the decoder. After this can be made
-    // public, we will only return the YAML string. The server helpers,
-    // Quantinuum and others, will handle the contents according the remote REST
-    // service endpoints.
-    nlohmann::json decoderPayloadSpec;
-
-    // The endpoint to upload gpu_decoder_config
-    decoderPayloadSpec["path"] = "api/gpu_decoder_configs/v1beta/";
-    // The name of the resource (this name is filterable)
-    const auto timestamp =
-        fmt::format("{:%Y-%m-%d_%H:%M:%S}", std::chrono::system_clock::now());
-    decoderPayloadSpec["name"] =
-        fmt::format("{}_{}", "decoder_config", timestamp);
-    // Config contents
-    decoderPayloadSpec["content"] = llvm::encodeBase64(decoderConfigYmlStr);
-
-    // The field name to inject the decoder config UUID after uploading.
-    decoderPayloadSpec["key"] = "gpu_decoder_config_id";
-    CUDAQ_DBG("[Decoder Config] Extra payload data: {}",
-              decoderPayloadSpec.dump());
-    return decoderPayloadSpec.dump();
+    return decoderConfigYmlStr;
   }
 };
 } // namespace
