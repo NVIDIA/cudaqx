@@ -23,7 +23,8 @@ INSTANTIATE_REGISTRY(cudaq::qec::decoder, const cudaqx::tensor<uint8_t> &,
 namespace cudaq::qec {
 
 struct decoder::rt_impl {
-  /// The number of syndromes per round (enables incremental detector computation)
+  /// The number of syndromes per round (enables incremental detector
+  /// computation)
   uint32_t num_syndromes_per_round = 0;
 
   /// The number of measurement syndromes to be decoded per decode call
@@ -31,25 +32,27 @@ struct decoder::rt_impl {
   uint32_t num_msyn_per_decode = 0;
 
   /// Counter of total syndromes buffered but not yet processed.
-  /// Used to detect complete rounds (when this is a multiple of num_msyn_per_decode).
-  /// Gets decremented after each round is decoded. Not a direct buffer index.
+  /// Used to detect complete rounds (when this is a multiple of
+  /// num_msyn_per_decode). Gets decremented after each round is decoded. Not a
+  /// direct buffer index.
   uint32_t num_syndromes_buffered_but_not_decoded = 0;
 
-  /// The buffer of measurement syndromes received from the client. 
+  /// The buffer of measurement syndromes received from the client.
   /// For incremental mode: size is calculated from max D_sparse column + 1
   /// This allows buffering multiple rounds while still decoding incrementally
   std::vector<uint8_t> msyn_buffer;
-  
+
   /// Total buffer capacity (max column index in D_sparse + 1)
   uint32_t buffer_capacity = 0;
 
   /// Track which round we're on (0 = reference round)
   uint32_t current_round = 0;
-  
+
   /// Circular buffer write position for the current round
-  // Values are 0, num_msyn_per_decode * 2, num_msyn_per_decode * 3, etc. then wrap around to 0.
+  // Values are 0, num_msyn_per_decode * 2, num_msyn_per_decode * 3, etc. then
+  // wrap around to 0.
   uint32_t current_round_buffer_offset = 0;
-  
+
   /// Circular buffer position of the previous round (for incremental XOR)
   uint32_t prev_round_buffer_offset = 0;
 
@@ -193,31 +196,33 @@ uint32_t decoder::get_decoder_id() const { return pimpl->decoder_id; }
 
 void decoder::set_D_sparse(const std::vector<std::vector<uint32_t>> &D_sparse) {
   this->D_sparse = D_sparse;
-  
+
   // Infer num_syndromes_per_round from D_sparse timelike structure
-  // For timelike detectors, consecutive detectors XOR syndromes from consecutive rounds
-  // e.g., detector[0] = [0, 24], detector[1] = [1, 25], so num_syndromes_per_round = 24
-  if (D_sparse.size() >= 2 && D_sparse[0].size() >= 2 && D_sparse[1].size() >= 2) {
-    pimpl->num_syndromes_per_round = D_sparse[1][0] - D_sparse[0][0];
+  // For timelike detectors, each detector XORs two syndromes from consecutive
+  // rounds e.g., detector[0] = [0, 24] means XOR syndrome 0 (round 0) with
+  // syndrome 24 (round 1) So num_syndromes_per_round = 24 - 0 = 24
+  if (D_sparse.size() >= 1 && D_sparse[0].size() >= 2) {
+    pimpl->num_syndromes_per_round = D_sparse[0][1] - D_sparse[0][0];
   } else {
     // Fallback: assume 1:1 mapping
     pimpl->num_syndromes_per_round = 1;
   }
-  
+
   // Calculate minimum buffer capacity from max column in D_sparse
   uint32_t min_capacity = calculate_num_msyn_per_decode(D_sparse);
-  
+
   // Enable incremental mode: process one round at a time
   pimpl->num_msyn_per_decode = pimpl->num_syndromes_per_round;
-  
-  // Add one extra round to buffer capacity to guarantee no wraparound within operations
-  // This eliminates all wraparound checks in hot loops (write and detector computation)
+
+  // Add one extra round to buffer capacity to guarantee no wraparound within
+  // operations This eliminates all wraparound checks in hot loops (write and
+  // detector computation)
   pimpl->buffer_capacity = min_capacity + pimpl->num_syndromes_per_round;
-  
+
   // Allocate buffer to hold all syndromes plus extra round
   pimpl->msyn_buffer.clear();
   pimpl->msyn_buffer.resize(pimpl->buffer_capacity);
-  
+
   pimpl->num_syndromes_buffered_but_not_decoded = 0;
   pimpl->current_round = 0;
   pimpl->current_round_buffer_offset = 0;
@@ -226,31 +231,33 @@ void decoder::set_D_sparse(const std::vector<std::vector<uint32_t>> &D_sparse) {
 
 void decoder::set_D_sparse(const std::vector<int64_t> &D_sparse_vec_in) {
   set_sparse_from_vec(D_sparse_vec_in, this->D_sparse);
-  
+
   // Infer num_syndromes_per_round from D_sparse timelike structure
-  // For timelike detectors, consecutive detectors XOR syndromes from consecutive rounds
-  // e.g., detector[0] = [0, 24], detector[1] = [1, 25], so num_syndromes_per_round = 24
-  if (D_sparse.size() >= 2 && D_sparse[0].size() >= 2 && D_sparse[1].size() >= 2) {
-    pimpl->num_syndromes_per_round = D_sparse[1][0] - D_sparse[0][0];
+  // For timelike detectors, each detector XORs two syndromes from consecutive
+  // rounds e.g., detector[0] = [0, 24] means XOR syndrome 0 (round 0) with
+  // syndrome 24 (round 1) So num_syndromes_per_round = 24 - 0 = 24
+  if (D_sparse.size() >= 1 && D_sparse[0].size() >= 2) {
+    pimpl->num_syndromes_per_round = D_sparse[0][1] - D_sparse[0][0];
   } else {
     // Fallback: assume 1:1 mapping
     pimpl->num_syndromes_per_round = 1;
   }
-  
+
   // Calculate minimum buffer capacity from max column in D_sparse
   uint32_t min_capacity = calculate_num_msyn_per_decode(D_sparse);
-  
+
   // Enable incremental mode: process one round at a time
   pimpl->num_msyn_per_decode = pimpl->num_syndromes_per_round;
-  
-  // Add one extra round to buffer capacity to guarantee no wraparound within operations
-  // This eliminates all wraparound checks in hot loops (write and detector computation)
+
+  // Add one extra round to buffer capacity to guarantee no wraparound within
+  // operations This eliminates all wraparound checks in hot loops (write and
+  // detector computation)
   pimpl->buffer_capacity = min_capacity + pimpl->num_syndromes_per_round;
-  
+
   // Allocate buffer to hold all syndromes plus extra round
   pimpl->msyn_buffer.clear();
   pimpl->msyn_buffer.resize(pimpl->buffer_capacity);
-  
+
   pimpl->num_syndromes_buffered_but_not_decoded = 0;
   pimpl->current_round = 0;
   pimpl->current_round_buffer_offset = 0;
@@ -259,33 +266,41 @@ void decoder::set_D_sparse(const std::vector<int64_t> &D_sparse_vec_in) {
 
 bool decoder::enqueue_syndrome(const uint8_t *syndrome,
                                std::size_t syndrome_length) {
-  // position_in_round represents how many syndromes of the current round have already been buffered but not yet decoded
-  // Values range from 0 to num_msyn_per_decode - 1.
-  uint32_t position_in_round = pimpl->num_syndromes_buffered_but_not_decoded % pimpl->num_msyn_per_decode;
-  
+  // position_in_round represents how many syndromes of the current round have
+  // already been buffered but not yet decoded Values range from 0 to
+  // num_msyn_per_decode - 1.
+  uint32_t position_in_round = pimpl->num_syndromes_buffered_but_not_decoded %
+                               pimpl->num_msyn_per_decode;
+
   // Check if this write would overwrite the previous round
   // We need to preserve prev_round_buffer for XOR computation, so the maximum
-  // safe write from the start of the current round is buffer_capacity minus one round
-  uint32_t max_safe_from_round_start = pimpl->buffer_capacity - pimpl->num_syndromes_per_round;
+  // safe write from the start of the current round is buffer_capacity minus one
+  // round
+  uint32_t max_safe_from_round_start =
+      pimpl->buffer_capacity - pimpl->num_syndromes_per_round;
   if (position_in_round + syndrome_length > max_safe_from_round_start) {
-    // CUDAQ_WARN("Syndrome data too large - would overwrite previous round. Data will be ignored.");
-    printf("Syndrome data too large - would overwrite previous round. Data will be ignored.\n");
+    // CUDAQ_WARN("Syndrome data too large - would overwrite previous round.
+    // Data will be ignored.");
+    printf("Syndrome data too large - would overwrite previous round. Data "
+           "will be ignored.\n");
     return false;
   }
   bool did_decode = false;
   // Buffer the incoming syndromes
-  // No wraparound check needed: buffer is sized to guarantee operations never wrap mid-execution
+  // No wraparound check needed: buffer is sized to guarantee operations never
+  // wrap mid-execution
   uint32_t write_start = pimpl->current_round_buffer_offset + position_in_round;
   for (std::size_t i = 0; i < syndrome_length; i++) {
     pimpl->msyn_buffer[write_start + i] = syndrome[i];
   }
   pimpl->num_syndromes_buffered_but_not_decoded += syndrome_length;
-  
+
   // Process all complete rounds that are now available
-  while ((pimpl->num_syndromes_buffered_but_not_decoded % pimpl->num_msyn_per_decode) == 0 && 
+  while ((pimpl->num_syndromes_buffered_but_not_decoded %
+          pimpl->num_msyn_per_decode) == 0 &&
          pimpl->num_syndromes_buffered_but_not_decoded > 0) {
     pimpl->current_round++;
-    
+
     // First round (round 1): store as reference, don't decode yet
     if (pimpl->current_round == 1) {
       // Previous round stays at current position for next round's XOR
@@ -294,10 +309,11 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
       pimpl->current_round_buffer_offset += pimpl->num_msyn_per_decode;
       if (pimpl->current_round_buffer_offset >= pimpl->buffer_capacity)
         pimpl->current_round_buffer_offset -= pimpl->buffer_capacity;
-      pimpl->num_syndromes_buffered_but_not_decoded -= pimpl->num_msyn_per_decode;  // Decrement for next iteration
-      continue;  // Skip to next round
+      pimpl->num_syndromes_buffered_but_not_decoded -=
+          pimpl->num_msyn_per_decode; // Decrement for next iteration
+      continue;                       // Skip to next round
     }
-    
+
     // These are just for logging. They are initialized in such a way to avoid
     // dynamic memory allocation if logging is disabled.
     std::vector<uint32_t> log_msyn;
@@ -319,15 +335,16 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
       log_observable_corrections.resize(O_sparse.size());
     }
 
-    // Compute detectors incrementally by XORing current round with previous round
-    // Using circular buffer offsets - no D_sparse access needed
-    // No wraparound checks needed: buffer is sized to guarantee operations never wrap mid-execution
+    // Compute detectors incrementally by XORing current round with previous
+    // round Using circular buffer offsets - no D_sparse access needed No
+    // wraparound checks needed: buffer is sized to guarantee operations never
+    // wrap mid-execution
     for (std::size_t i = 0; i < pimpl->num_syndromes_per_round; i++) {
-      pimpl->persistent_detector_buffer[i] = 
-          pimpl->msyn_buffer[pimpl->prev_round_buffer_offset + i] ^ 
+      pimpl->persistent_detector_buffer[i] =
+          pimpl->msyn_buffer[pimpl->prev_round_buffer_offset + i] ^
           pimpl->msyn_buffer[pimpl->current_round_buffer_offset + i];
     }
-    
+
     // Update offsets for next round: current becomes previous, advance current
     pimpl->prev_round_buffer_offset = pimpl->current_round_buffer_offset;
     pimpl->current_round_buffer_offset += pimpl->num_msyn_per_decode;
@@ -400,11 +417,11 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
         printf("%s\n", s.c_str());
     }
     did_decode = true;
-    
+
     // Decrement counter for next iteration of while loop
     pimpl->num_syndromes_buffered_but_not_decoded -= pimpl->num_msyn_per_decode;
   }
-  
+
   return did_decode;
 }
 
@@ -454,12 +471,12 @@ void decoder::reset_decoder() {
   pimpl->num_syndromes_buffered_but_not_decoded = 0;
   pimpl->msyn_buffer.clear();
   pimpl->msyn_buffer.resize(pimpl->buffer_capacity);
-  
+
   // Reset incremental computation state
   pimpl->current_round = 0;
   pimpl->current_round_buffer_offset = 0;
   pimpl->prev_round_buffer_offset = 0;
-  
+
   pimpl->corrections.clear();
   pimpl->corrections.resize(O_sparse.size());
   const bool log_due_to_log_level =

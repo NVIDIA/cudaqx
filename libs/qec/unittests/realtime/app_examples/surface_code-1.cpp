@@ -41,7 +41,7 @@ void save_dem_to_file(const cudaq::qec::detector_error_model &dem,
     auto numRounds = dem.num_detectors() / numSyndromesPerRound + 1;
     cudaq::qec::decoding::config::decoder_config config;
     config.id = i;
-    config.type = decoder_type;  // Use parameter instead of hardcoded
+    config.type = decoder_type; // Use parameter instead of hardcoded
     config.block_size = dem.num_error_mechanisms();
     config.syndrome_size = dem.num_detectors();
     config.num_syndromes_per_round = numSyndromesPerRound;
@@ -50,7 +50,7 @@ void save_dem_to_file(const cudaq::qec::detector_error_model &dem,
         cudaq::qec::pcm_to_sparse_vec(dem.observables_flips_matrix);
     config.D_sparse = cudaq::qec::generate_timelike_sparse_detector_matrix(
         numSyndromesPerRound, numRounds, /*include_first_round=*/false);
-    
+
     if (decoder_type == "nv-qldpc-decoder") {
       // Original NV-QLDPC configuration
       config.decoder_custom_args =
@@ -64,7 +64,7 @@ void save_dem_to_file(const cudaq::qec::detector_error_model &dem,
       nv_config.max_iterations = 50;
       nv_config.osd_order = 60;
       nv_config.osd_method = 3;
-      
+
     } else if (decoder_type == "sliding_window") {
       // Sliding window configuration
       cudaq::qec::decoding::config::sliding_window_config sw_config;
@@ -74,8 +74,8 @@ void save_dem_to_file(const cudaq::qec::detector_error_model &dem,
       sw_config.straddle_start_round = false;
       sw_config.straddle_end_round = true;
       sw_config.inner_decoder_name = "nv-qldpc-decoder";
-      sw_config.error_rate_vec = dem.error_rates;  // Required by sliding_window
-      
+      sw_config.error_rate_vec = dem.error_rates; // Required by sliding_window
+
       // Configure inner NV-QLDPC decoder
       cudaq::qec::decoding::config::nv_qldpc_decoder_config nv_config;
       nv_config.use_sparsity = true;
@@ -84,11 +84,11 @@ void save_dem_to_file(const cudaq::qec::detector_error_model &dem,
       nv_config.max_iterations = 50;
       nv_config.osd_order = 60;
       nv_config.osd_method = 3;
-      
+
       sw_config.nv_qldpc_decoder_params = nv_config;
       config.decoder_custom_args = sw_config;
     }
-    
+
     multi_config.decoders.push_back(config);
   }
   std::string config_str = multi_config.to_yaml_str(200);
@@ -118,16 +118,16 @@ void load_dem_from_file(const std::string &dem_filename,
     exit(1);
   }
   auto decoder_config = config.decoders[0];
-  
+
   // Extract error rates based on decoder type
   std::vector<cudaq::qec::float_t> error_rates;
-  
+
   if (decoder_config.type == "nv-qldpc-decoder") {
     auto nv_config =
         std::get<cudaq::qec::decoding::config::nv_qldpc_decoder_config>(
             decoder_config.decoder_custom_args);
     error_rates = nv_config.error_rate_vec.value();
-    
+
   } else if (decoder_config.type == "sliding_window") {
     auto sw_config =
         std::get<cudaq::qec::decoding::config::sliding_window_config>(
@@ -137,7 +137,7 @@ void load_dem_from_file(const std::string &dem_filename,
       error_rates = sw_config.error_rate_vec;
     }
   }
-  
+
   dem.detector_error_matrix = cudaq::qec::pcm_from_sparse_vec(
       decoder_config.H_sparse, decoder_config.syndrome_size,
       decoder_config.block_size);
@@ -677,11 +677,11 @@ int main(int argc, char **argv) {
   bool save_dem = false;
   bool load_dem = false;
   std::string dem_filename;
-  
+
   // Decoder type selection
-  std::string decoder_type = "nv-qldpc-decoder";  // Default
-  int sw_window_size = -1;  // For sliding_window, default to decoder_window
-  int sw_step_size = 1;     // For sliding_window
+  std::string decoder_type = "nv-qldpc-decoder"; // Default
+  int sw_window_size = -1; // For sliding_window, default to decoder_window
+  int sw_step_size = 1;    // For sliding_window
 
   // Parse the command line arguments
   for (int i = 1; i < argc; i++) {
@@ -745,10 +745,11 @@ int main(int argc, char **argv) {
     decoder_window = distance;
   if (sw_window_size == -1)
     sw_window_size = decoder_window;
-  
+
   // Validate decoder type
   if (decoder_type != "nv-qldpc-decoder" && decoder_type != "sliding_window") {
-    printf("Error: --decoder_type must be 'nv-qldpc-decoder' or 'sliding_window'\n");
+    printf("Error: --decoder_type must be 'nv-qldpc-decoder' or "
+           "'sliding_window'\n");
     return 1;
   }
 
