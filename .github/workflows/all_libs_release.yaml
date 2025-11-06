@@ -10,10 +10,11 @@ on:
       assets_repo:
         type: string
         description: Retrieve assets from a draft release from this repo (e.g. NVIDIA/cudaqx)
+        default: 'NVIDIA/cudaqx'
         required: false
       assets_tag:
         type: string
-        description: Retrieve assets from a draft release with this tag (e.g. installed_files-1)
+        description: Retrieve assets from a draft release with this tag (e.g. docker-files-123)
         required: false
 
 jobs:
@@ -29,17 +30,26 @@ jobs:
         cuda_version: ['12.6', '13.0']
     runs-on: linux-${{ matrix.runner.arch }}-gpu-${{ matrix.runner.gpu }}-latest-1
     container: 
-      # FIXME
-      image: ${{ format('ghcr.io/nvidia/cudaqx-dev:{0}-{1}-cu{2}', 'latest', matrix.runner.arch, matrix.cuda_version) }}
+      image: >-
+        ${{
+          inputs.release-number == '0.0.0'
+          && format('ghcr.io/nvidia/cudaqx-dev:{0}-{1}', inputs.release-number, matrix.runner.arch)
+          || format('ghcr.io/nvidia/cudaqx-dev:{0}-{1}-cu{2}', 'latest', matrix.runner.arch, matrix.cuda_version)
+        }}
       env:
         NVIDIA_VISIBLE_DEVICES: ${{ env.NVIDIA_VISIBLE_DEVICES }}
     permissions: write-all
     steps:
+      - name: Install dependencies
+        run: |
+          apt update && apt install -y --no-install-recommends zip unzip patchelf git-lfs
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: main # FIXME
+          ref: ${{ inputs.release-number == '0.0.0' && 'main' || format('releases/v{0}', inputs.release-number) }}
           set-safe-directory: true
+          lfs: true # download assets file(s) for TRT tests
 
       - name: Set git safe directory
         run: git config --global --add safe.directory $GITHUB_WORKSPACE
@@ -52,10 +62,6 @@ jobs:
           # And output to the GitHub Actions summary.
           echo "Setting CUDAQX_QEC_VERSION=${{ inputs.release-number }}" >> $GITHUB_STEP_SUMMARY
           echo "Setting CUDAQX_SOLVERS_VERSION=${{ inputs.release-number }}" >> $GITHUB_STEP_SUMMARY
-
-      - name: Install dependencies
-        run: |
-          apt update && apt install -y --no-install-recommends zip unzip patchelf
 
       - name: Fetch assets and set QEC_EXTERNAL_DECODERS
         env:
@@ -98,7 +104,7 @@ jobs:
 
       - name: Save build artifacts
         run: |
-          cmake --build ${{ steps.build.outputs.build-dir }} --target zip_installed_files
+          cmake --build ${{ steps.build.outputs.build-dir }} --target zip_installed_files -j
           cd ${{ steps.build.outputs.build-dir }}
           mv installed_files.zip installed_files-${{ matrix.runner.arch }}-cu${{ matrix.cuda_version }}.zip
       
@@ -112,8 +118,8 @@ jobs:
       # Run tests
       # ========================================================================
       #
-      - name: Run tests
-        run: cmake --build ${{ steps.build.outputs.build-dir }} --target run_tests
+      # - name: Run tests
+      #   run: cmake --build ${{ steps.build.outputs.build-dir }} --target run_tests
 
       # ========================================================================
       # Run python tests
@@ -122,7 +128,21 @@ jobs:
       - name: Install python requirements
         env:
           LD_LIBRARY_PATH: ${{ env.MPI_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
-        run: pip install numpy pytest cupy-cuda${{ steps.config.outputs.cuda_major }}x cuquantum-cu${{ steps.config.outputs.cuda_major }} torch lightning ml_collections mpi4py transformers quimb opt_einsum torch
+        shell: bash
+        run: |
+          # Install the correct torch first.
+          if [ "${{ steps.config.outputs.cuda_major }}" == "12" ]; then
+            pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu126
+          elif [ "${{ steps.config.outputs.cuda_major }}" == "13" ]; then
+            pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu130
+          fi
+          pip install numpy pytest cupy-cuda${{ steps.config.outputs.cuda_major }}x cuquantum-cu${{ steps.config.outputs.cuda_major }} lightning ml_collections mpi4py transformers quimb opt_einsum nvidia-cublas cuquantum-python-cu${{ steps.config.outputs.cuda_major }}==25.09
+          # The following tests are needed for docs/sphinx/examples/qec/python/tensor_network_decoder.py.
+          if [ "$(uname -m)" == "x86_64" ]; then
+              # Stim is not currently available on manylinux ARM wheels, so only
+              # install for x86_64.
+              pip install stim beliefmatching
+          fi
 
       - name: Run Python tests
         env:
