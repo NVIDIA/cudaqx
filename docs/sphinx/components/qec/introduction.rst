@@ -7,11 +7,18 @@ The ``cudaq-qec`` library provides a comprehensive framework for quantum
 error correction research and development. It leverages GPU acceleration
 for efficient syndrome decoding and error correction simulations (coming soon).
 
+The library supports both offline analysis and real-time error correction on quantum hardware,
+enabling low-latency decoding for practical quantum computing applications.
+
 Core Components
 ----------------
-``cudaq-qec`` is composed of two main interfaces - the :code:`cudaq::qec::code` and
-:code:`cudaq::qec::decoder` types. These types are meant to be extended by developers
-to provide new error correcting codes and new decoding strategies.
+``cudaq-qec`` is composed of three main interfaces:
+
+1. **QEC Codes** (:code:`cudaq::qec::code`) - Define quantum error correcting codes with logical operations
+2. **Decoders** (:code:`cudaq::qec::decoder`) - Implement syndrome decoding algorithms
+3. **Real-Time Decoding** (:code:`cudaq::qec::decoding`) - Enable online error correction on quantum hardware
+
+These types are meant to be extended by developers to provide new error correcting codes and decoding strategies.
 
 QEC Code Framework :code:`cudaq::qec::code`
 -------------------------------------------
@@ -1051,4 +1058,70 @@ Additional Noise Models
       noise.add_all_qubit_channel(
           "x", cudaq::depolarization2(/*probability*/ 0.01),
           /*numControls*/ 1);
+
+Real-Time Decoding
+------------------
+
+CUDA-Q QEC provides real-time decoding capabilities for quantum error correction on actual quantum hardware.
+Real-time decoding enables decoders to process syndromes and compute corrections within qubit coherence times,
+making active error correction practical for real quantum computers.
+
+Key Features
+^^^^^^^^^^^^
+
+* **Low-Latency Operation**: Syndrome processing within coherence time constraints
+* **Hardware Integration**: Direct integration with quantum hardware backends (Quantinuum H-Series)
+* **Simulation Support**: Test real-time workflows locally before deploying to hardware
+* **Multiple Decoder Types**: Support for LUT decoders, QLDPC decoders, and sliding window approaches
+* **GPU Acceleration**: Leverage CUDA for high-performance syndrome decoding
+
+Quick Example
+^^^^^^^^^^^^^
+
+Here's a minimal example of using real-time decoding in a quantum circuit:
+
+.. code-block:: cpp
+
+    #include "cudaq/qec/realtime/decoding.h"
+    #include "cudaq/qec/realtime/decoding_config.h"
+    
+    // Configure decoder before circuit execution
+    cudaq::qec::decoding::config::configure_decoders_from_file("decoder_config.yaml");
+    
+    // Quantum kernel with real-time decoding
+    __qpu__ void qec_circuit(int decoder_id, int num_rounds) {
+        // Reset decoder state
+        cudaq::qec::decoding::reset_decoder(decoder_id);
+        
+        // Allocate qubits
+        cudaq::qvector data(25), ancx(12), ancz(12);
+        cudaq::qec::patch logical(data, ancx, ancz);
+        
+        // Prepare logical state
+        prep0(logical);
+        
+        // Syndrome extraction with real-time decoding
+        for (int round = 0; round < num_rounds; ++round) {
+            auto syndromes = measure_stabilizers(logical);
+            cudaq::qec::decoding::enqueue_syndromes(decoder_id, syndromes);
+        }
+        
+        // Get and apply corrections
+        auto corrections = cudaq::qec::decoding::get_corrections(decoder_id, 1, false);
+        if (corrections[0]) {
+            cudaq::x(data);  // Apply correction
+        }
+        
+        // Measure logical observable
+        auto result = mz(data);
+    }
+    
+    // Clean up
+    cudaq::qec::decoding::config::finalize_decoders();
+
+For detailed information on real-time decoding, see:
+
+* :doc:`/examples_rst/qec/realtime_decoding` - Complete Guide with Examples
+* :doc:`/api/qec/cpp_api` - C++ API Reference (see Real-Time Decoding section)
+* :doc:`/api/qec/python_api` - Python API Reference (see Real-Time Decoding section)
 

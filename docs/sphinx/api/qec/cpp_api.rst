@@ -51,6 +51,13 @@ NVIDIA QLDPC Decoder
 
 .. include:: nv_qldpc_decoder_api.rst
 
+.. _realtime_decoding_api_cpp:
+
+Real-Time Decoding
+------------------
+
+.. include:: realtime_decoding_api.rst
+
 Parity Check Matrix Utilities
 =============================
 

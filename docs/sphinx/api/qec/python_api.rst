@@ -46,6 +46,13 @@ Tensor Network Decoder
 
 .. include:: tensor_network_decoder_api.rst
 
+.. _realtime_decoding_api_python:
+
+Real-Time Decoding
+------------------
+
+.. include:: realtime_decoding_api.rst
+
 
 Common
 =============
