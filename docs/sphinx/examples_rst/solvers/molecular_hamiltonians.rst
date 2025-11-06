@@ -27,7 +27,7 @@ Here, we create "default" Hamiltonian for the N2 system using complete active sp
                                        verbose=True)
 
 We specify:
-  - The geometry previously created
+  - The geometry previously created. User can also provide geometry through the path to the XYZ file. For example, `geometry='path/to/xyz/file.xyz'`.
   - The basis set (here STO-3G)
   - The total spin (2 * S)
   - The total charge
