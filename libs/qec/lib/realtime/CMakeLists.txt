@@ -35,7 +35,6 @@ target_link_libraries(cudaq-qec-realtime-decoding
   PRIVATE
     cudaq::cudaq-common
     LLVMSupport
-    nlohmann_json::nlohmann_json # FIXME: remove with upcoming public CUDA-Q changes
 )
 
 set_target_properties(cudaq-qec-realtime-decoding PROPERTIES
