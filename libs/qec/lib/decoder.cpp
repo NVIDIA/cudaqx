@@ -72,6 +72,9 @@ struct decoder::rt_impl {
 
   /// The id of the decoder (for instrumentation)
   uint32_t decoder_id = 0;
+
+  /// Whether D_sparse has first-round detectors (determined in set_D_sparse)
+  bool has_first_round_detectors = false;
 };
 
 void decoder::rt_impl_deleter::operator()(rt_impl *p) const { delete p; }
@@ -197,15 +200,24 @@ uint32_t decoder::get_decoder_id() const { return pimpl->decoder_id; }
 void decoder::set_D_sparse(const std::vector<std::vector<uint32_t>> &D_sparse) {
   this->D_sparse = D_sparse;
 
-  // Infer num_syndromes_per_round from D_sparse timelike structure
-  // For timelike detectors, each detector XORs two syndromes from consecutive
-  // rounds e.g., detector[0] = [0, 24] means XOR syndrome 0 (round 0) with
-  // syndrome 24 (round 1) So num_syndromes_per_round = 24 - 0 = 24
-  if (D_sparse.size() >= 1 && D_sparse[0].size() >= 2) {
-    pimpl->num_syndromes_per_round = D_sparse[0][1] - D_sparse[0][0];
-  } else {
-    // Fallback: assume 1:1 mapping
-    pimpl->num_syndromes_per_round = 1;
+  // Analyze D_sparse structure (assumes well-formed D_sparse from generator):
+  // 1. First-round detectors (if any) are always at the beginning
+  // 2. All timelike detectors have the same stride (num_syndromes_per_round)
+  
+  // Check if first row is a first-round detector (single syndrome index)
+  pimpl->has_first_round_detectors = (D_sparse.size() > 0 && D_sparse[0].size() == 1);
+  
+  // Find num_syndromes_per_round from first timelike detector
+  // (skip first-round detectors if present, they're all at the beginning)
+  pimpl->num_syndromes_per_round = 1; // Default fallback
+  for (const auto& detector_syndrome_indices : D_sparse) {
+    if (detector_syndrome_indices.size() >= 2) {
+      // First timelike detector found: XORs syndromes from consecutive rounds
+      // e.g., [0, 8] means XOR syndrome 0 (round 1) with syndrome 8 (round 2)
+      // so num_syndromes_per_round = 8
+      pimpl->num_syndromes_per_round = detector_syndrome_indices[1] - detector_syndrome_indices[0];
+      break; // Found it, no need to continue
+    }
   }
 
   // Calculate minimum buffer capacity from max column in D_sparse
@@ -232,15 +244,24 @@ void decoder::set_D_sparse(const std::vector<std::vector<uint32_t>> &D_sparse) {
 void decoder::set_D_sparse(const std::vector<int64_t> &D_sparse_vec_in) {
   set_sparse_from_vec(D_sparse_vec_in, this->D_sparse);
 
-  // Infer num_syndromes_per_round from D_sparse timelike structure
-  // For timelike detectors, each detector XORs two syndromes from consecutive
-  // rounds e.g., detector[0] = [0, 24] means XOR syndrome 0 (round 0) with
-  // syndrome 24 (round 1) So num_syndromes_per_round = 24 - 0 = 24
-  if (D_sparse.size() >= 1 && D_sparse[0].size() >= 2) {
-    pimpl->num_syndromes_per_round = D_sparse[0][1] - D_sparse[0][0];
-  } else {
-    // Fallback: assume 1:1 mapping
-    pimpl->num_syndromes_per_round = 1;
+  // Analyze D_sparse structure (assumes well-formed D_sparse from generator):
+  // 1. First-round detectors (if any) are always at the beginning
+  // 2. All timelike detectors have the same stride (num_syndromes_per_round)
+  
+  // Check if first row is a first-round detector (single syndrome index)
+  pimpl->has_first_round_detectors = (D_sparse.size() > 0 && D_sparse[0].size() == 1);
+  
+  // Find num_syndromes_per_round from first timelike detector
+  // (skip first-round detectors if present, they're all at the beginning)
+  pimpl->num_syndromes_per_round = 1; // Default fallback
+  for (const auto& detector_syndrome_indices : D_sparse) {
+    if (detector_syndrome_indices.size() >= 2) {
+      // First timelike detector found: XORs syndromes from consecutive rounds
+      // e.g., [0, 8] means XOR syndrome 0 (round 1) with syndrome 8 (round 2)
+      // so num_syndromes_per_round = 8
+      pimpl->num_syndromes_per_round = detector_syndrome_indices[1] - detector_syndrome_indices[0];
+      break; // Found it, no need to continue
+    }
   }
 
   // Calculate minimum buffer capacity from max column in D_sparse
@@ -301,8 +322,10 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
          pimpl->num_syndromes_buffered_but_not_decoded > 0) {
     pimpl->current_round++;
 
-    // First round (round 1): store as reference, don't decode yet
-    if (pimpl->current_round == 1) {
+    // First round (round 1): skip decoding (store as reference)
+    // UNLESS there are first-round detectors that need immediate decoding
+    // (first-round detector check is done once in set_D_sparse)
+    if (pimpl->current_round == 1 && !pimpl->has_first_round_detectors) {
       // Previous round stays at current position for next round's XOR
       pimpl->prev_round_buffer_offset = pimpl->current_round_buffer_offset;
       // Advance to next round position in circular buffer
@@ -335,14 +358,24 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
       log_observable_corrections.resize(O_sparse.size());
     }
 
-    // Compute detectors incrementally by XORing current round with previous
-    // round Using circular buffer offsets - no D_sparse access needed No
-    // wraparound checks needed: buffer is sized to guarantee operations never
-    // wrap mid-execution
-    for (std::size_t i = 0; i < pimpl->num_syndromes_per_round; i++) {
-      pimpl->persistent_detector_buffer[i] =
-          pimpl->msyn_buffer[pimpl->prev_round_buffer_offset + i] ^
-          pimpl->msyn_buffer[pimpl->current_round_buffer_offset + i];
+    // Compute detectors based on whether first-round detectors exist
+    if (pimpl->has_first_round_detectors) {
+      // When first-round detectors exist, must use D_sparse for all detectors
+      // because first-round detectors reference only one syndrome (not two)
+      for (std::size_t i = 0; i < this->D_sparse.size(); i++) {
+        pimpl->persistent_detector_buffer[i] = 0;
+        for (auto col : this->D_sparse[i])
+          pimpl->persistent_detector_buffer[i] ^= pimpl->msyn_buffer[col];
+      }
+    } else {
+      // Pure timelike detectors: use incremental XOR (current ⊕ previous round)
+      // Using circular buffer offsets - no D_sparse access needed
+      // No wraparound checks needed: buffer is sized to guarantee operations never wrap
+      for (std::size_t i = 0; i < pimpl->num_syndromes_per_round; i++) {
+        pimpl->persistent_detector_buffer[i] =
+            pimpl->msyn_buffer[pimpl->prev_round_buffer_offset + i] ^
+            pimpl->msyn_buffer[pimpl->current_round_buffer_offset + i];
+      }
     }
 
     // Update offsets for next round: current becomes previous, advance current
