@@ -51,7 +51,7 @@ Tensor Network Decoder
 Real-Time Decoding
 ------------------
 
-.. include:: realtime_decoding_api.rst
+.. include:: python_realtime_decoding_api.rst
 
 
 Common
@@ -62,7 +62,7 @@ Common
 .. autofunction:: cudaq_qec.sample_code_capacity
 
 Parity Check Matrix Utilities
--------------
+=============================
 
 .. autofunction:: cudaq_qec.generate_random_pcm
 .. autofunction:: cudaq_qec.get_pcm_for_rounds
