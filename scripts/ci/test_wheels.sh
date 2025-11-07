@@ -69,6 +69,12 @@ elif [[ "$cuda_version" == "12" ]]; then
   ${python} -m pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu126
 fi
 
+# Temporary hack until tensorrt-cu13 bumps its package version to accommodate
+# for the breaking change in nvidia-cuda-runtime-cu13.
+if [[ "$cuda_version" == "13" ]]; then
+  ${python} -m pip install ${FIND_LINKS} "nvidia-cuda-runtime-cu13==0.0.0a0"
+fi
+
 # QEC library
 # ======================================
 

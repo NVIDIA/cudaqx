@@ -11,6 +11,21 @@ import numpy as np
 import cudaq_qec as qec
 
 
+def is_nv_qldpc_decoder_available():
+    """
+    Helper function to check if the NV-QLDPC decoder is available.
+    """
+    try:
+        H_list = [[1, 0, 0, 1, 0, 1, 1], [0, 1, 0, 1, 1, 0, 1],
+                  [0, 0, 1, 0, 1, 1, 1]]
+
+        H_np = np.array(H_list, dtype=np.uint8)
+        nv_dec_gpu_and_cpu = qec.get_decoder("nv-qldpc-decoder", H_np)
+        return True
+    except Exception as e:
+        return False
+
+
 def check_decoder_yaml_roundtrip(multi_config):
     """
     Helper function to test that a decoder configuration can be serialized to
@@ -53,7 +68,6 @@ def create_test_empty_decoder_config(decoder_id):
     config.type = "single_error_lut"
     config.block_size = 20
     config.syndrome_size = 10
-    config.num_syndromes_per_round = config.syndrome_size
 
     # Create sparse H matrix representation from a zero matrix
     H = np.zeros((config.syndrome_size, config.block_size), dtype=np.uint8)
@@ -65,8 +79,7 @@ def create_test_empty_decoder_config(decoder_id):
 
     # Generate timelike sparse detector matrix
     config.D_sparse = qec.generate_timelike_sparse_detector_matrix(
-        config.num_syndromes_per_round, 2, include_first_round=False)
-
+        config.syndrome_size, 2, include_first_round=False)
     return config
 
 
@@ -119,6 +132,8 @@ def test_single_decoder():
     """
     Test YAML serialization/deserialization and creation of a single NV-QLDPC decoder.
     """
+    if not is_nv_qldpc_decoder_available():
+        pytest.skip("NV-QLDPC decoder is not available, skipping test")
     multi_config = qec.multi_decoder_config()
     config = create_test_decoder_config_nv_qldpc(0)
     multi_config.decoders = [config]
@@ -131,6 +146,8 @@ def test_multi_decoder():
     """
     Test YAML serialization/deserialization and creation of multiple NV-QLDPC decoders.
     """
+    if not is_nv_qldpc_decoder_available():
+        pytest.skip("NV-QLDPC decoder is not available, skipping test")
     multi_config = qec.multi_decoder_config()
     config1 = create_test_decoder_config_nv_qldpc(0)
     config2 = create_test_decoder_config_nv_qldpc(1)
@@ -200,7 +217,6 @@ def test_sliding_window_decoder():
     config.type = "sliding_window"
     config.block_size = n_cols
     config.syndrome_size = n_rows
-    config.num_syndromes_per_round = n_syndromes_per_round
 
     # Convert PCM to sparse representation
     config.H_sparse = qec.pcm_to_sparse_vec(pcm)
@@ -209,8 +225,8 @@ def test_sliding_window_decoder():
     O = np.zeros((2, n_cols), dtype=np.uint8)
     config.O_sparse = qec.pcm_to_sparse_vec(O)
 
-    # Reset D_sparse for sliding window (set to None to indicate it's not used)
-    config.D_sparse = None
+    config.D_sparse = qec.generate_timelike_sparse_detector_matrix(
+        config.syndrome_size, 2, include_first_round=False)
 
     # Sliding window config
     sw_config = qec.qecrt.config.sliding_window_config()

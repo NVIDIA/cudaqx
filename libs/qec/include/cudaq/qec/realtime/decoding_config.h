@@ -118,10 +118,9 @@ struct decoder_config {
   std::string type;
   uint64_t block_size = 0;
   uint64_t syndrome_size = 0;
-  uint64_t num_syndromes_per_round = 0;
   std::vector<std::int64_t> H_sparse;
   std::vector<std::int64_t> O_sparse;
-  std::optional<std::vector<std::int64_t>> D_sparse;
+  std::vector<std::int64_t> D_sparse;
   std::variant<single_error_lut_config, multi_error_lut_config,
                nv_qldpc_decoder_config, sliding_window_config>
       decoder_custom_args;
