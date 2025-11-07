@@ -65,15 +65,17 @@ fi
 # this PR is merged.
 if [[ "$cuda_version" == "13" ]]; then
   ${python} -m pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu130
+  ${python} -m pip install tensorrt-cu13==10.13.3.9.post1
 elif [[ "$cuda_version" == "12" ]]; then
   ${python} -m pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu126
+  ${python} -m pip install tensorrt-cu12==10.13.3.9.post1
 fi
 
 # Temporary hack until tensorrt-cu13 bumps its package version to accommodate
 # for the breaking change in nvidia-cuda-runtime-cu13.
-if [[ "$cuda_version" == "13" ]]; then
-  ${python} -m pip install ${FIND_LINKS} "nvidia-cuda-runtime-cu13==0.0.0a0"
-fi
+# if [[ "$cuda_version" == "13" ]]; then
+#   ${python} -m pip install ${FIND_LINKS} "nvidia-cuda-runtime-cu13==0.0.0a0"
+# fi
 
 # QEC library
 # ======================================
