@@ -23,6 +23,8 @@ cuda_version=$3
 cudaq_version=$4
 cudaqx_version=$5
 
+apt-get update && apt-get install -y ca-certificates && update-ca-certificates
+
 # Verify the input arguments aren't empty, one at a time.
 if [ -z "$python_version" ] ; then
   echo "Error: python_version is empty"
