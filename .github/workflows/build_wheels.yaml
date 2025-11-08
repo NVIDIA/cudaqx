@@ -300,6 +300,10 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
   
+      - name: Quick test
+        run: |
+          python3 -m pip install tensorrt-cu12==10.13.3.9.post1
+
       - name: Install requirements
         shell: bash
         run: |
