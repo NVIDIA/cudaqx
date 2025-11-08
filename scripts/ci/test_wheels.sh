@@ -11,6 +11,9 @@
 # Exit immediately if any command returns a non-zero status
 set -e
 
+# Show each command as it is executed.
+set -x
+
 # Uncomment these lines to enable core files
 #set +e
 #ulimit -c unlimited
