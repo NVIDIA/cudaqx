@@ -304,6 +304,8 @@ jobs:
         run: |
           apt update && apt install -y --no-install-recommends wget openssl
           openssl s_client -connect pypi.nvidia.com:443 -servername pypi.nvidia.com -showcerts </dev/null 2>&1 | tee /tmp/pypi-nvidia-ssl.txt
+          grep -i "DigiCert Global Root G3" -r /etc/ssl/certs || echo "/etc/ssl/certs/ Not found"
+          grep -i "DigiCert Global Root G3" /etc/ssl/certs/ca-certificates.crt || echo "/etc/ssl/certs/ca-certificates.crt Not found"
           wget https://pypi.nvidia.com/
           python3 -m pip install tensorrt-cu12==10.13.3.9.post1
 
