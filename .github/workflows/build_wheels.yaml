@@ -303,7 +303,7 @@ jobs:
       - name: Quick test
         run: |
           apt update && apt install -y --no-install-recommends wget
-          wget https://pypi.nvidia.com/index.html
+          wget https://pypi.nvidia.com/
           python3 -m pip install tensorrt-cu12==10.13.3.9.post1
 
       - name: Install requirements
@@ -415,7 +415,7 @@ jobs:
       - name: Quick test
         run: |
           apt update && apt install -y --no-install-recommends wget
-          wget https://pypi.nvidia.com/index.html
+          wget https://pypi.nvidia.com/
           python3 -m pip install tensorrt-cu12==10.13.3.9.post1
 
       - name: Install requirements
