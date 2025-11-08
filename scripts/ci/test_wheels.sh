@@ -23,8 +23,6 @@ cuda_version=$3
 cudaq_version=$4
 cudaqx_version=$5
 
-apt-get update && apt-get install -y ca-certificates && update-ca-certificates
-
 # Verify the input arguments aren't empty, one at a time.
 if [ -z "$python_version" ] ; then
   echo "Error: python_version is empty"
@@ -69,7 +67,10 @@ if [[ "$cuda_version" == "13" ]]; then
   ${python} -m pip install tensorrt-cu13==10.13.3.9.post1
   ${python} -m pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu130
 elif [[ "$cuda_version" == "12" ]]; then
-  ${python} -m pip install tensorrt-cu12==10.13.3.9.post1
+  # If x86_64, then install tensorrt-cu12. If arm64, then do not install tensorrt-cu12.
+  if [ "$(uname -m)" == "x86_64" ]; then
+    ${python} -m pip install tensorrt-cu12==10.13.3.9.post1
+  fi
   ${python} -m pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu126
 fi
 
