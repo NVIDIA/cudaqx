@@ -344,7 +344,7 @@ jobs:
           bash scripts/ci/test_wheels.sh \
              ${{ matrix.python }} \
              ${{ matrix.platform }} \
-             ${{ steps.config.outputs.cuda_major }} \
+             ${{ matrix.cuda_version }} \
              ${{ inputs.cudaq_wheels == 'Custom' && '0.99.99' || 'SKIP' }} \
              ${{ inputs.version || '0.99.99' }}
   
@@ -453,7 +453,7 @@ jobs:
           bash scripts/ci/test_wheels.sh \
              ${{ matrix.python }} \
              ${{ matrix.runner.arch }} \
-             ${{ steps.config.outputs.cuda_major }} \
+             ${{ matrix.cuda_version }} \
              ${{ inputs.cudaq_wheels == 'Custom' && '0.99.99' || 'SKIP' }} \
              ${{ inputs.version || '0.99.99' }}
 
