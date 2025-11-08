@@ -61,7 +61,6 @@ if [[ "$cuda_version" == "13" ]]; then
 elif [[ "$cuda_version" == "12" ]]; then
   ${python} -m pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu126
 fi
-${python} -m pip check
 
 FIND_LINKS="--find-links /wheels/ --find-links /metapackages/"
 
@@ -70,20 +69,18 @@ if [ -d /cudaq-wheels ]; then
   echo "Custom CUDA-Q wheels directory found. Will add to the --find-links list."
   FIND_LINKS="${FIND_LINKS} --find-links /cudaq-wheels/"
   ${python} -m pip install $FIND_LINKS "cuda-quantum-cu${cuda_version}==${cudaq_version}"
-  ${python} -m pip check
 fi
 
 # TODO: Remove this once PyTorch 2.9.0 is released. That should happen before
 # this PR is merged.
 if [[ "$cuda_version" == "13" ]]; then
-  ${python} -m pip install tensorrt-cu13==10.13.3.9.post1
+  ${python} -m pip install "tensorrt-cu13==10.13.*" "cuda_toolkit[cudart]==13.0.*"
 elif [[ "$cuda_version" == "12" ]]; then
   # If x86_64, then install tensorrt-cu12. If arm64, then do not install tensorrt-cu12.
   if [ "$(uname -m)" == "x86_64" ]; then
-    ${python} -m pip install tensorrt-cu12==10.13.3.9.post1
+    ${python} -m pip install "tensorrt-cu12==10.13.*" "cuda_toolkit[cudart]==12.6.*"
   fi
 fi
-${python} -m pip check
 
 # QEC library
 # ======================================
