@@ -64,11 +64,11 @@ fi
 # TODO: Remove this once PyTorch 2.9.0 is released. That should happen before
 # this PR is merged.
 if [[ "$cuda_version" == "13" ]]; then
-  ${python} -m pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu130
   ${python} -m pip install tensorrt-cu13==10.13.3.9.post1
+  ${python} -m pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu130
 elif [[ "$cuda_version" == "12" ]]; then
-  ${python} -m pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu126
   ${python} -m pip install tensorrt-cu12==10.13.3.9.post1
+  ${python} -m pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu126
 fi
 
 # Temporary hack until tensorrt-cu13 bumps its package version to accommodate
