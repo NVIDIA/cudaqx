@@ -119,7 +119,10 @@ decoder::get(const std::string &name, const cudaqx::tensor<uint8_t> &H,
   auto &registry = get_registry();
   auto iter = registry.find(name);
   if (iter == registry.end())
-    throw std::runtime_error("invalid decoder requested: " + name);
+    throw std::runtime_error(
+        "invalid decoder requested: " + name +
+        ". Run with CUDAQ_LOG_LEVEL=info (environment variable) to see "
+        "additional plugin diagnostics at startup.");
   return iter->second(H, param_map);
 }
 
