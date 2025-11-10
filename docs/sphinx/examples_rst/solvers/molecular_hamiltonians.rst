@@ -74,7 +74,7 @@ Now we take our same N2 molecule, but generate natural orbitals from second orde
                                        verbose=True)
 
 Note that we use the same API but,toggle `MP2=True` and `integrals_natorb=True`. This will generate the molecular orbitals from MP2 natural orbitals, and compute the Hamiltonian integrals in this basis.
-This option is unallowed yet when using `UR=True`. When using `UR=True`, only UHF molecular orbitals are employed to generate the electronic Hamiltonian.
+This option is not yet available when using `UR=True`. When using `UR=True`, only UHF molecular orbitals are employed to generate the electronic Hamiltonian.
 
 CASSCF Orbitals
 +++++++++++++++
