@@ -36,7 +36,7 @@ The workflow consists of four stages:
 Real-Time Decoding Example
 ----------------
 
-Here is an example demonstrating real-time decoding:
+Here is a small example demonstrating real-time decoding in Python and C++:
 
 .. tab:: Python
 
@@ -50,6 +50,27 @@ Here is an example demonstrating real-time decoding:
       :language: cpp
       :start-after: // [Begin Documentation]
 
+The examples above showcase the main components of the real-time decoding workflow:
+
+- Decoder configuration file: Initializes and configures the decoders before circuit execution.
+
+- Quantum kernel: Uses the real-time decoding API to interact with the decoders, primarily through reset_decoder, enqueue_syndromes, and get_corrections.
+
+- Syndrome extraction: Measures the stabilizers of the logical qubits.
+
+- Correction application: Applies the corrections to the logical qubits.
+
+- Logical observable measurement: Measures the logical observables of the logical qubits.
+
+- Decoder finalization: Frees up resources after circuit execution.
+
+The API is designed to be called from within quantum kernels (marked with ``@cudaq.kernel`` in Python or ``__qpu__``  in C++). The runtime automatically routes these calls to the appropriate backend—whether a simulation environment on your local machine or a low-latency connection to quantum hardware. The API is device-agnostic, so the same kernel code works across different deployment scenarios.
+
+However, the user is still required to provide a configuration file, or generate one if it is not present. The generation process depends on the decoder type and the detector error model studied in other sections of the documentation. Moreover, the user must write an appropriate kernel that describes the correct syndrome extraction and correction application logic.
+
+Please, follow the instructions in the next section to generate a configuration file, write a quantum kernel, and compile and run the examples correctly.
+
+
 Configuration
 -------------
 
@@ -58,9 +79,13 @@ The configuration process transforms your quantum circuit's error characteristic
 Step 1: Generate Detector Error Model
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The first step is to characterize your quantum circuit's behavior under noise. A detector error model (DEM) captures the relationship between physical errors and the syndrome patterns they produce. This characterization is circuit-specific and depends on your code structure, noise model, and measurement schedule.
+The first step is to characterize your quantum circuit's behavior under noise. 
+A detector error model (DEM) captures the relationship between physical errors and the syndrome patterns they produce. 
+This characterization is circuit-specific and depends on your code structure, noise model, and measurement schedule.
 
-To generate a DEM, you'll run your circuit through a noisy simulator that tracks how errors propagate. The CUDA-Q QEC library uses the Memory Syndrome Matrix (MSM) representation to efficiently encode this information. The MSM captures all possible error chains and their syndrome signatures, which you then process into the matrices that decoders need.
+To generate a DEM, you'll run your circuit through a noisy simulator that tracks how errors propagate. 
+The CUDA-Q QEC library uses the Memory Syndrome Matrix (MSM) representation to efficiently encode this information. 
+The MSM captures all possible error chains and their syndrome signatures, which you then process into the matrices that decoders need.
 
 Here's how to generate a DEM for your circuit:
 
@@ -114,12 +139,22 @@ Here's how to generate a DEM for your circuit:
 Step 2: Configure Decoder
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Once you have a DEM, the next step is to package this information into a decoder configuration. The configuration structure holds all the parameters a decoder needs: the syndrome-to-error mappings (H_sparse), the error-to-observable mappings (O_sparse), the temporal correlations between syndrome rounds (D_sparse), and decoder-specific tuning parameters.
+Once you have a DEM, the next step is to package this information into a decoder configuration. 
+The configuration structure holds all the parameters a decoder needs: the parity check matrix (H_sparse), 
+the observable flip matrix (O_sparse), the detector error matrix (D_sparse), 
+and decoder-specific tuning parameters. 
 
-The sparse matrix format is crucial for performance. Real-time decoders process thousands of syndrome measurements per second, so compact representation is essential. The ``pcm_to_sparse_vec`` function converts dense binary matrices into a space-efficient format where -1 marks row boundaries and integers represent column indices of non-zero elements.
+These matrices are generated in sparse matrix format, which is crucial for performance. 
+They can be large considering error correcting codes with large number of physical qubits, and moreover, 
+real-time decoders process thousands of syndrome measurements per second, and take decision based on these matrices, so compact representations are essential.
+We use the helper function ``pcm_to_sparse_vec`` to convert the dense binary matrices into a space-efficient format where -1 marks row boundaries and integers represent column indices of non-zero elements.
 
-Each decoder type has its own configuration structure with specific parameters. For lookup table decoders, you specify how many simultaneous errors to consider. For belief propagation decoders, you set iteration limits and convergence criteria. The configuration API provides type-safe structures for each decoder, ensuring you don't miss required parameters.
+Each decoder type has its own configuration structure with specific parameters. 
+For lookup table decoders, you specify how many simultaneous errors to consider. 
+For belief propagation decoders, you set iteration limits and convergence criteria. 
+The configuration API provides type-safe structures for each decoder, ensuring you don't miss required parameters.
 
+The generation of the configuration will depend on the decoder type and the detector error model that we studied in other sections of the documentation.
 Here's how to create a decoder configuration:
 
 .. tab:: Python

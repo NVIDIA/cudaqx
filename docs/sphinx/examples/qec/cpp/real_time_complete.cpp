@@ -6,13 +6,21 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 // [Begin Documentation]
-// This example shows the complete workflow for real-time decoding.
 
 #include "cudaq/qec/realtime/decoding.h"
 #include "cudaq/qec/realtime/decoding_config.h"
 
 // Configure decoder before circuit execution
 cudaq::qec::decoding::config::configure_decoders_from_file("decoder_config.yaml");
+
+__qpu__ void prep0(cudaq::qec::patch logical) {
+    // Your state preparation logic
+    continue;
+}
+__qpu__ std::vector<bool> measure_stabilizers(cudaq::qec::patch logical) {
+    // Your stabilizer measurement logic
+    return std::vector<bool>(12, false);
+}
 
 // Quantum kernel with real-time decoding
 __qpu__ void qec_circuit(int decoder_id, int num_rounds) {

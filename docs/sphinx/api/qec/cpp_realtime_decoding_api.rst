@@ -1,14 +1,9 @@
 .. _cpp_realtime_decoding_api:
 
-Real-Time Decoding C++ API
-===========================
 
 The Real-Time Decoding API enables low-latency error correction on quantum hardware by allowing CUDA-Q quantum kernels to interact with decoders during circuit execution. This API is designed for use cases where corrections must be calculated and applied within qubit coherence times.
 
 The real-time decoding system supports both hardware integration (e.g., Quantinuum H-Series) and simulation environments for local testing.
-
-.. note::
-   The NV-QLDPC decoder is not included in the public repository by default and requires additional installation. For most applications, the ``multi_error_lut`` decoder provides excellent performance and is readily available.
 
 Core Decoding Functions
 ------------------------
@@ -99,52 +94,6 @@ The configuration API enables setting up decoders before circuit execution. Deco
 .. function:: void cudaq::qec::decoding::config::finalize_decoders()
 
    Finalize and clean up decoder resources. Should be called before program exit.
-
-Configuration Structures
-^^^^^^^^^^^^^^^^^^^^^^^^^
-
-.. doxygenstruct:: cudaq::qec::decoding::config::decoder_config
-   :members:
-
-.. doxygenclass:: cudaq::qec::decoding::config::multi_decoder_config
-   :members:
-
-Configuration Example
-^^^^^^^^^^^^^^^^^^^^^
-
-.. code-block:: cpp
-
-   #include "cudaq/qec/realtime/decoding_config.h"
-   #include "cudaq/qec/pcm_utils.h"
-
-   using namespace cudaq::qec::decoding::config;
-
-   // Create decoder configuration
-   decoder_config config;
-   config.id = 0;
-   config.type = "multi_error_lut";
-   config.block_size = dem.num_error_mechanisms();
-   config.syndrome_size = dem.num_detectors();
-   config.H_sparse = cudaq::qec::pcm_to_sparse_vec(dem.detector_error_matrix);
-   config.O_sparse = cudaq::qec::pcm_to_sparse_vec(dem.observables_flips_matrix);
-
-   // Set decoder parameters
-   multi_error_lut_config lut_config;
-   lut_config.lut_error_depth = 2;
-   config.decoder_custom_args = lut_config;
-
-   // Configure decoder
-   multi_decoder_config multi_config;
-   multi_config.decoders.push_back(config);
-   int status = configure_decoders(multi_config);
-
-   // Or save to file and load
-   std::string yaml_str = multi_config.to_yaml_str();
-   std::ofstream file("decoder_config.yaml");
-   file << yaml_str;
-   file.close();
-   
-   status = configure_decoders_from_file("decoder_config.yaml");
 
 Helper Functions
 ----------------

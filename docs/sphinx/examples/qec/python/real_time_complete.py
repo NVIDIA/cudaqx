@@ -19,12 +19,12 @@ qec.configure_decoders_from_file("decoder_config.yaml")
 @cudaq.kernel
 def prep0(logical: patch):
     # Your state preparation logic
-    pass
+    return
 
 @cudaq.kernel
 def measure_stabilizers(logical: patch) -> list[bool]:
     # Your stabilizer measurement logic
-    pass
+    return [False] * 12  # 12 stabilizers for the surface code
 
 # Quantum kernel with real-time decoding (device-side)
 @cudaq.kernel
