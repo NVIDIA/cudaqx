@@ -11,26 +11,38 @@
 set -e
 
 # Parse command line arguments
-BLACKWELL_MODE=false
+FINAL_IMAGE="ghcr.io/nvidia/private/cuda-quantum:cu12-0.13.0-cudaqx-rc1"
+CUDA_VERSION="12.6"
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --blackwell)
-            BLACKWELL_MODE=true
-            shift
+        --final-image)
+            FINAL_IMAGE=$2
+            shift 2
             ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [--blackwell]"
+            echo "Usage: $0 [--final-image <final image>]"
             exit 1
             ;;
     esac
 done
 
+# if FINAL_IMAGE contains cu12, then set CUDA_VERSION to 12.6
+if [[ "${FINAL_IMAGE}" == *"cu12"* ]]; then
+    CUDA_VERSION="12.6"
+elif [[ "${FINAL_IMAGE}" == *"cu13"* ]]; then
+    CUDA_VERSION="13.0"
+else
+    echo "Unsupported CUDA version in ${FINAL_IMAGE}"
+    exit 1
+fi
+
 CURRENT_ARCH=$(uname -m)
 PY_TARGETS=("nvidia" "nvidia --option fp64", "qpp-cpu")
 CPP_TARGETS=("nvidia" "nvidia --target-option fp64", "qpp-cpu")
-
-FINAL_IMAGE="ghcr.io/nvidia/private/cuda-quantum:cu12-0.12.0-cudaqx-rc2"
+cuda_major=$(echo ${CUDA_VERSION} | cut -d '.' -f 1)
+cuda_minor=$(echo ${CUDA_VERSION} | cut -d '.' -f 2)
+cuda_no_dot="${cuda_major}${cuda_minor}"
 
 # Function to run Python tests
 run_python_tests() {
@@ -78,16 +90,10 @@ test_examples() {
 
     num_failures=0
 
-    # Install PyTorch for Blackwell if flag is provided, otherwise use default packages
-    if [ "$BLACKWELL_MODE" = true ]; then
-        echo "Installing PyTorch for Blackwell mode..."
-        docker exec ${container_name} bash -c "pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/cu128"
-        # Install other required packages
-        docker exec ${container_name} bash -c "pip install 'lightning>=2.0.0' 'ml_collections>=0.1.0' 'mpi4py>=3.1.0' 'transformers>=4.30.0'"
-    else
-        # default package installation
-        docker exec ${container_name} bash -c "pip install 'torch>=2.0.0' 'lightning>=2.0.0' 'ml_collections>=0.1.0' 'mpi4py>=3.1.0' 'transformers>=4.30.0'"
-    fi
+    docker exec ${container_name} bash -c "pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu${cuda_no_dot}"
+    # Install other required packages
+    docker exec ${container_name} bash -c "pip install 'lightning>=2.0.0' 'ml_collections>=0.1.0' 'mpi4py>=3.1.0' 'transformers>=4.30.0'"
+    docker exec ${container_name} bash -c "pip install 'quimb' 'opt_einsum' 'cuquantum-python-cu${cuda_major}==25.09.1'"
 
     # Run Python tests first
     if ! run_python_tests ${container_name} ${target}; then
@@ -153,9 +159,6 @@ test_examples() {
 
 # Main execution
 echo "Starting CUDA-Q image validation for ${CURRENT_ARCH}..."
-if [ "$BLACKWELL_MODE" = true ]; then
-    echo "Running in Blackwell mode with PyTorch installation"
-fi
 
 tag="${FINAL_IMAGE}"
 test_examples ${tag} || {
