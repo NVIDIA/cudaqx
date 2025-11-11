@@ -18,9 +18,6 @@ Key Features
 * **Device-Agnostic API**: Unified API that works across simulation and hardware backends
 * **GPU Acceleration**: Leverages CUDA for high-performance syndrome decoding
 
-.. note::
-   The NV-QLDPC decoder is not included in the public repository by default and requires additional installation. For most use cases, the ``multi_error_lut`` decoder provides excellent performance and is readily available.
-
 Workflow Overview
 -----------------
 
@@ -36,10 +33,10 @@ The workflow consists of four stages:
 
 4. **Real-Time Decoding**: During quantum circuit execution, you use the decoding API within quantum kernels to interact with decoders. As your circuit measures stabilizers, you enqueue syndromes to the decoder, which processes them concurrently. When you need corrections, you query the decoder and apply the suggested operations to your logical qubits. This entire process happens within the coherence time constraints of your quantum hardware.
 
-Complete Example
+Real-Time Decoding Example
 ----------------
 
-Here is a complete end-to-end example demonstrating real-time decoding:
+Here is an example demonstrating real-time decoding:
 
 .. tab:: Python
 
@@ -63,7 +60,7 @@ Step 1: Generate Detector Error Model
 
 The first step is to characterize your quantum circuit's behavior under noise. A detector error model (DEM) captures the relationship between physical errors and the syndrome patterns they produce. This characterization is circuit-specific and depends on your code structure, noise model, and measurement schedule.
 
-To generate a DEM, you'll run your circuit through a noisy simulator that tracks how errors propagate. The CUDA-Q QEC library uses the Memory State Machine (MSM) representation to efficiently encode this information. The MSM captures all possible error chains and their syndrome signatures, which you then process into the matrices that decoders need.
+To generate a DEM, you'll run your circuit through a noisy simulator that tracks how errors propagate. The CUDA-Q QEC library uses the Memory Syndrome Matrix (MSM) representation to efficiently encode this information. The MSM captures all possible error chains and their syndrome signatures, which you then process into the matrices that decoders need.
 
 Here's how to generate a DEM for your circuit:
 
@@ -178,7 +175,7 @@ Decoder configurations can be substantial - containing detailed error models wit
 
 The YAML format is human-readable, making it easy to inspect, modify, and share configurations. You can maintain a library of configurations for different code distances, noise levels, and decoder types, then simply load the appropriate one when running experiments. The configuration system handles all serialization details automatically, preserving the exact sparse matrix representations and decoder parameters.
 
-When you load a configuration from file, the library validates all required fields and initializes the decoder instances in the background. This initialization happens quickly - typically in milliseconds - so it won't add noticeable latency to your workflow.
+When you load a configuration from file, the library validates all required fields and initializes the decoder instances in the background. This initialization happens quickly, typically only a few milliseconds at startup, so it won't add noticeable latency to your workflow.
 
 Here's how to save and load configurations:
 
@@ -672,6 +669,313 @@ Use the Quantinuum backend for hardware or emulation:
             -lcudaq-qec-realtime-quantinuum
       
       ./a.out
+
+Compilation and Execution Details
+-----------------------------------
+
+This section provides **complete, tested compilation and execution commands** for both simulation and hardware backends, extracted from the CUDA-Q QEC test infrastructure.
+
+C++ Compilation
+^^^^^^^^^^^^^^^
+
+**Simulation Backend (Stim)**
+
+Compile with the simulation backend for local testing:
+
+.. code-block:: bash
+
+   nvq++ --target stim my_circuit.cpp \
+         -lcudaq-qec \
+         -lcudaq-qec-realtime-decoding \
+         -lcudaq-qec-realtime-decoding-simulation \
+         -o my_circuit_sim
+
+   # Execute
+   ./my_circuit_sim --distance 3 --num_shots 1000 --save_dem config.yaml
+
+**Key Points:**
+
+- ``--target stim``: Use the Stim quantum simulator
+- ``-lcudaq-qec``: Core QEC library with codes and experiments
+- ``-lcudaq-qec-realtime-decoding``: Real-time decoding core API
+- ``-lcudaq-qec-realtime-decoding-simulation``: Simulation-specific decoder backend
+
+**Quantinuum Backend (Emulation)**
+
+Compile for Quantinuum emulation mode:
+
+.. code-block:: bash
+
+   nvq++ --target quantinuum --emulate \
+         --quantinuum-machine Helios-Fake \
+         my_circuit.cpp \
+         -lcudaq-qec \
+         -lcudaq-qec-realtime-decoding \
+         -lcudaq-qec-realtime-decoding-quantinuum \
+         -Wl,--export-dynamic \
+         -o my_circuit_quantinuum
+
+   # Execute
+   ./my_circuit_quantinuum --distance 3 --num_shots 1000 --load_dem config.yaml
+
+**Key Points:**
+
+- ``--target quantinuum --emulate``: Use Quantinuum emulator
+- ``--quantinuum-machine Helios-Fake``: Specify machine (``Helios-Fake`` for emulation)
+- ``-lcudaq-qec-realtime-decoding-quantinuum``: Quantinuum-specific decoder backend (replaces ``-simulation``)
+- ``-Wl,--export-dynamic``: **Required** linker flag for dynamic symbol resolution
+
+**Quantinuum Backend (Hardware)**
+
+Compile for actual Quantinuum hardware:
+
+.. code-block:: bash
+
+   nvq++ --target quantinuum \
+         --quantinuum-machine H2-1 \
+         my_circuit.cpp \
+         -lcudaq-qec \
+         -lcudaq-qec-realtime-decoding \
+         -lcudaq-qec-realtime-decoding-quantinuum \
+         -Wl,--export-dynamic \
+         -o my_circuit_hardware
+
+   # Execute
+   export CUDAQ_QUANTINUUM_CREDENTIALS=<your_credentials_file>
+   ./my_circuit_hardware --distance 3 --num_shots 100 --load_dem config.yaml
+
+**Key Points:**
+
+- Remove ``--emulate`` flag for hardware execution
+- Use real machine names: ``H2-1``, ``H2-2``, etc.
+- Set ``CUDAQ_QUANTINUUM_CREDENTIALS`` environment variable with your credentials
+
+Python Execution
+^^^^^^^^^^^^^^^^
+
+**Simulation Backend (Stim)**
+
+.. code-block:: python
+
+   import os
+   import cudaq
+   import cudaq_qec as qec
+
+   # IMPORTANT: Set simulator BEFORE importing cudaq
+   os.environ["CUDAQ_DEFAULT_SIMULATOR"] = "stim"
+
+   # Configure target
+   cudaq.set_target("stim")
+   
+   # Load decoder configuration
+   qec.configure_decoders_from_file("config.yaml")
+   
+   # Run circuit
+   result = cudaq.run(my_circuit, shots_count=1000, noise_model=cudaq.NoiseModel())
+   
+   # Cleanup
+   qec.finalize_decoders()
+
+**Key Points:**
+
+- ``os.environ["CUDAQ_DEFAULT_SIMULATOR"] = "stim"`` **must be set before importing cudaq**
+- ``cudaq.set_target("stim")`` configures the simulator target
+- No special compilation needed - Python bindings handle library loading
+
+**Quantinuum Backend (Emulation)**
+
+.. code-block:: python
+
+   import cudaq
+   import cudaq_qec as qec
+
+   # Configure target with decoder support
+   cudaq.set_target("quantinuum",
+                    emulate=True,
+                    machine="Helios-1Dummy",  # Use "Helios-1Dummy" for emulation
+                    extra_payload_provider="decoder")  # REQUIRED for real-time decoding
+   
+   # Load decoder configuration (uploads to Quantinuum servers)
+   qec.configure_decoders_from_file("config.yaml")
+   
+   # Run circuit
+   result = cudaq.run(my_circuit, shots_count=1000)
+   
+   # Cleanup
+   qec.finalize_decoders()
+
+**Key Points:**
+
+- ``emulate=True``: Use Quantinuum emulator
+- ``extra_payload_provider="decoder"``: **Required** - registers decoder configuration with Quantinuum's REST API
+- Decoder config is automatically uploaded to Quantinuum's servers when ``configure_decoders_from_file()`` is called
+
+**Quantinuum Backend (Hardware)**
+
+.. code-block:: python
+
+   import cudaq
+   import cudaq_qec as qec
+
+   # Configure credentials (alternative: use environment variable CUDAQ_QUANTINUUM_CREDENTIALS)
+   cudaq.set_credentials("quantinuum", credentials_file="path/to/credentials.json")
+
+   # Configure target for hardware
+   cudaq.set_target("quantinuum",
+                    emulate=False,  # Hardware execution
+                    machine="H2-1",  # Use actual hardware: H2-1, H2-2, etc.
+                    extra_payload_provider="decoder")
+   
+   # Load decoder configuration
+   qec.configure_decoders_from_file("config.yaml")
+   
+   # Run circuit
+   result = cudaq.run(my_circuit, shots_count=100)  # Fewer shots for hardware
+   
+   # Cleanup
+   qec.finalize_decoders()
+
+**Key Points:**
+
+- ``emulate=False``: Execute on real quantum hardware
+- Use real machine names (check Quantinuum portal for available machines)
+- Reduce shot count for hardware experiments (hardware time is expensive)
+
+Complete Workflow Example
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Here's the complete two-phase workflow (characterization + execution) using the test scripts as reference:
+
+.. code-block:: bash
+
+   # Phase 1: Generate Detector Error Model (DEM)
+   # This is done once per code/distance/noise configuration
+   
+   ## C++
+   ./my_circuit_sim --distance 3 --num_shots 1000 --p_spam 0.01 \
+                    --save_dem config_d3.yaml --num_rounds 12 --decoder_window 6
+   
+   ## Python
+   python my_circuit.py --distance 3 --num_shots 1000 --p_spam 0.01 \
+                        --save_dem config_d3.yaml --num_rounds 12 --decoder_window 6
+   
+   # Phase 2: Run with Real-Time Decoding
+   # Use the saved DEM configuration
+   
+   ## Simulation
+   ./my_circuit_sim --distance 3 --num_shots 1000 --load_dem config_d3.yaml \
+                    --num_rounds 12 --decoder_window 6
+   
+   ## Quantinuum Emulation
+   ./my_circuit_quantinuum --distance 3 --num_shots 1000 --load_dem config_d3.yaml \
+                           --num_rounds 12 --decoder_window 6
+   
+   ## Quantinuum Hardware
+   export CUDAQ_QUANTINUUM_CREDENTIALS=credentials.json
+   ./my_circuit_hardware --distance 3 --num_shots 100 --load_dem config_d3.yaml \
+                         --num_rounds 12 --decoder_window 6
+
+**Workflow Parameters:**
+
+- ``--distance``: Code distance (3, 5, 7, etc.)
+- ``--num_shots``: Number of circuit repetitions
+- ``--p_spam``: Physical error rate for noise model (DEM generation only)
+- ``--save_dem``: Generate and save DEM configuration to file
+- ``--load_dem``: Load existing DEM configuration from file
+- ``--num_rounds``: Total number of syndrome measurement rounds
+- ``--decoder_window``: Number of rounds processed per decoding window
+
+Debugging and Environment Variables
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**Useful Environment Variables:**
+
+.. code-block:: bash
+
+   # Enable decoder configuration debugging
+   export CUDAQ_QEC_DEBUG_DECODER=1
+   
+   # Set default simulator (Python only, before importing cudaq)
+   export CUDAQ_DEFAULT_SIMULATOR=stim
+   
+   # Dump JIT IR for debugging compilation issues
+   export CUDAQ_DUMP_JIT_IR=1
+   
+   # Keep log files after test execution
+   export KEEP_LOG_FILES=true
+   
+   # Set Quantinuum credentials file
+   export CUDAQ_QUANTINUUM_CREDENTIALS=/path/to/credentials.json
+
+**Common Compilation Issues:**
+
+1. **Missing libraries**: Ensure all ``-lcudaq-qec-*`` libraries are linked in correct order
+2. **Wrong backend library**: Use ``-simulation`` for Stim, ``-quantinuum`` for Quantinuum
+3. **Missing ``--export-dynamic``**: Required for Quantinuum targets
+4. **Wrong target flags**: ``--emulate`` with ``Helios-Fake`` for emulation, remove for hardware
+
+**Common Runtime Issues:**
+
+1. **"Decoder X not found"**: Call ``configure_decoders_from_file()`` before circuit execution
+2. **"Configuration upload failed"**: Check network connectivity and Quantinuum credentials
+3. **Dimension mismatch errors**: Verify DEM dimensions match your circuit's syndrome count
+4. **High error rates**: Check decoder window size matches DEM generation window
+
+Testing Your Setup
+^^^^^^^^^^^^^^^^^^^
+
+Verify your installation with this minimal test:
+
+.. tab:: Python
+
+   .. code-block:: python
+
+      import os
+      os.environ["CUDAQ_DEFAULT_SIMULATOR"] = "stim"
+      
+      import cudaq
+      import cudaq_qec as qec
+      
+      # Test decoder configuration
+      print("Testing real-time decoding setup...")
+      
+      # Create minimal decoder config
+      config = qec.decoder_config()
+      config.id = 0
+      config.type = "multi_error_lut"
+      config.block_size = 10
+      config.syndrome_size = 5
+      config.H_sparse = [0, 1, -1, 1, 2, -1]  # Minimal test data
+      config.O_sparse = [0, -1]
+      config.D_sparse = [0, -1]
+      
+      lut_config = qec.multi_error_lut_config()
+      lut_config.lut_error_depth = 1
+      config.set_decoder_custom_args(lut_config)
+      
+      multi_config = qec.multi_decoder_config()
+      multi_config.decoders = [config]
+      
+      status = qec.configure_decoders(multi_config)
+      print(f"Configuration status: {status}")
+      
+      qec.finalize_decoders()
+      print("Setup verified!")
+
+.. tab:: C++
+
+   .. code-block:: bash
+
+      # Compile test
+      nvq++ --target stim test_setup.cpp \
+            -lcudaq-qec \
+            -lcudaq-qec-realtime-decoding \
+            -lcudaq-qec-realtime-decoding-simulation
+      
+      # Run
+      ./a.out
+
+If the test completes without errors, your setup is ready for real-time decoding experiments.
 
 Best Practices
 --------------
