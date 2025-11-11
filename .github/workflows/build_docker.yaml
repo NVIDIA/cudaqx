@@ -5,11 +5,20 @@ on:
     inputs:
       base_image:
         type: string
-        description: Base image to overlay CUDA-QX files into (e.g. nvcr.io/nvidia/nightly/cuda-quantum:cu12-latest)
-        required: false
+        description: Base image to overlay CUDA-QX files into (e.g. nvcr.io/nvidia/nightly/cuda-quantum:cu12-0.13.0)
+        default: nvcr.io/nvidia/nightly/cuda-quantum:cu12-0.13.0
+        required: true
+      cuda_version:
+        type: choice
+        description: CUDA version of the installed_files-*.zip file
+        options:
+          - 12.6
+          - 13.0
+        default: '12.6'
+        required: true
       assets_repo:
         type: string
-        description: Retrieve artifacts from a draft release from this repo (e.g. NVIDIA/cudaqx)
+        description: (Deprecated) Retrieve artifacts from a draft release from this repo (e.g. NVIDIA/cudaqx)
         required: false
       assets_tag:
         type: string
@@ -88,6 +97,7 @@ jobs:
           file: ./docker/release/Dockerfile
           build-args: |
             base_image=${{ env.base_image }}
+            cuda_version=${{ inputs.cuda_version }}
           labels: |
             org.opencontainers.image.source=${{ github.repositoryUrl }}
             org.opencontainers.image.revision=${{ github.sha }}
