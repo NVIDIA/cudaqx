@@ -64,7 +64,7 @@ cudaq_ninja_jobs_arg=""
 parse_options "$@"
 
 
-export CUDA_VERSION=12.0
+export CUDA_VERSION=12.6
 export CUDAQ_INSTALL_PREFIX=/usr/local/cudaq
 
 # We need to use a newer toolchain because CUDA-QX libraries rely on c++20

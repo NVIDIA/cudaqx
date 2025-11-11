@@ -16,17 +16,17 @@ if sys.version_info < (3, 11):
 
 # [Begin Documentation]
 """
-Example usage of tensor_network_decoder from cudaq_qec.
+Example usage of tensor_network_decoder from cudaq-qec.
 
 This script demonstrates how to instantiate and use the tensor network decoder
 to decode a circuit level noise problem derived from a Stim surface code experiment.
 
-This example requires the `cudaq-qec` package and the optional tensor-network dependencies.
+This example requires the `cudaq-qec` package and the optional tensor-network-decoder dependencies.
 To install the required dependencies, run:
 
-pip install cudaq-qec[tensor_network_decoder]
+pip install cudaq-qec[tensor-network-decoder]
 
-Additionaly, you will need `stim` and `beliefmatching` packages:
+Additionaly, in this example, you will need `stim` and `beliefmatching` packages:
 pip install stim beliefmatching
 
 """

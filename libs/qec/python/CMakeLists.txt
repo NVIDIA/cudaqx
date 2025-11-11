@@ -27,11 +27,17 @@ cudaqx_add_pymodule(${MODULE_NAME}
   bindings/cudaqx_qec.cpp
   bindings/py_code.cpp
   bindings/py_decoder.cpp
+  bindings/py_decoding_config.cpp
+  bindings/py_decoding.cpp
+  bindings/py_surface_code.cpp
+  bindings/py_patch.cpp
 )
 
 target_link_libraries(${MODULE_NAME} 
   PRIVATE 
     cudaq-qec
+    cudaq-qec-realtime-decoding
+    cudaq::cudaq-python-interop
 )
 
 set_target_properties(${MODULE_NAME} PROPERTIES

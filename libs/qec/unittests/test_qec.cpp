@@ -1431,6 +1431,46 @@ TEST(QECCodeTester, checkVersion) {
               std::string::npos);
 }
 
+TEST(PCMUtilsTester, checkPCMToSparseString) {
+  // Generate a random PCM.
+  std::size_t n_rounds = 4;
+  std::size_t n_errs_per_round = 30;
+  std::size_t n_syndromes_per_round = 10;
+  std::size_t weight = 3;
+  std::mt19937_64 rng(13);
+  cudaqx::tensor<uint8_t> pcm = cudaq::qec::generate_random_pcm(
+      n_rounds, n_errs_per_round, n_syndromes_per_round, weight,
+      std::move(rng));
+  // Get the string version of the PCM
+  auto sparse_str = cudaq::qec::pcm_to_sparse_string(pcm);
+  // Get the PCM from the string
+  auto pcm_from_str = cudaq::qec::pcm_from_sparse_string(
+      sparse_str, n_rounds * n_syndromes_per_round,
+      n_rounds * n_errs_per_round);
+  // Verify that the original and the from-string PCM are the same
+  check_pcm_equality(pcm, pcm_from_str, true);
+}
+
+TEST(PCMUtilsTester, checkPCMToSparseVec) {
+  // Generate a random PCM.
+  std::size_t n_rounds = 7;
+  std::size_t n_errs_per_round = 10;
+  std::size_t n_syndromes_per_round = 100;
+  std::size_t weight = 3;
+  std::mt19937_64 rng(13);
+  cudaqx::tensor<uint8_t> pcm = cudaq::qec::generate_random_pcm(
+      n_rounds, n_errs_per_round, n_syndromes_per_round, weight,
+      std::move(rng));
+  // Get the string version of the PCM
+  auto sparse_vec = cudaq::qec::pcm_to_sparse_vec(pcm);
+  // Get the PCM from the string
+  auto pcm_from_vec = cudaq::qec::pcm_from_sparse_vec(
+      sparse_vec, n_rounds * n_syndromes_per_round,
+      n_rounds * n_errs_per_round);
+  // Verify that the original and the from-string PCM are the same
+  check_pcm_equality(pcm, pcm_from_vec, true);
+}
+
 // Test detector_error_model methods
 TEST(DetectorErrorModelTest, NumDetectors) {
   cudaq::qec::detector_error_model dem;
@@ -1546,6 +1586,38 @@ TEST(DetectorErrorModelTest, NumObservablesInCanonicalize) {
 
   // After canonicalize: verify num_observables still works
   EXPECT_EQ(dem.num_observables(), 1);
+}
+
+TEST(DetectorErrorModelTest, FailureOnEmptyErrorRatesCanonicalize) {
+  cudaq::qec::detector_error_model dem;
+
+  // Set up a simple detector_error_matrix
+  std::vector<std::size_t> detector_shape = {
+      2, 3}; // 2 detectors, 3 error mechanisms
+  dem.detector_error_matrix = cudaqx::tensor<uint8_t>(detector_shape);
+  // Initialize with some data
+  dem.detector_error_matrix.at({0, 0}) = 1;
+  dem.detector_error_matrix.at({0, 1}) = 0;
+  dem.detector_error_matrix.at({0, 2}) = 1;
+  dem.detector_error_matrix.at({1, 0}) = 0;
+  dem.detector_error_matrix.at({1, 1}) = 1;
+  dem.detector_error_matrix.at({1, 2}) = 0;
+
+  // Set up observables_flips_matrix
+  std::vector<std::size_t> obs_shape = {1,
+                                        3}; // 1 observable, 3 error mechanisms
+  dem.observables_flips_matrix = cudaqx::tensor<uint8_t>(obs_shape);
+  dem.observables_flips_matrix.at({0, 0}) = 0;
+  dem.observables_flips_matrix.at({0, 1}) = 1;
+  dem.observables_flips_matrix.at({0, 2}) = 0;
+
+  // Set up error_rates
+  dem.error_rates = {};
+
+  // Before canonicalize: verify num_observables works
+  EXPECT_EQ(dem.num_observables(), 1);
+
+  EXPECT_THROW(dem.canonicalize_for_rounds(2), std::runtime_error);
 }
 
 TEST(DetectorErrorModelTest, CanonicalizeWithoutErrorIds) {

@@ -243,104 +243,36 @@ to prototype and develop new codes.
 
    Create a new file (e.g., :code:`my_steane.py`) with your code implementation:
 
-   .. code-block:: python
-
-       import cudaq
-       import cudaq_qec as qec
-       from cudaq_qec import patch
+   .. literalinclude:: ../../examples/qec/python/my_steane.py
+      :language: python
+      :start-after: [Begin Documentation1]
+      :end-before: [End Documentation1]
 
 2. **Define Quantum Kernels**:
 
    Implement the required quantum kernels using the :code:`@cudaq.kernel` decorator:
 
-   .. code-block:: python
-
-       @cudaq.kernel
-       def prep0(logicalQubit: patch):
-           h(logicalQubit.data[0], logicalQubit.data[4], logicalQubit.data[6])
-           x.ctrl(logicalQubit.data[0], logicalQubit.data[1])
-           x.ctrl(logicalQubit.data[4], logicalQubit.data[5])
-           # ... additional initialization gates ...
-
-       @cudaq.kernel
-       def stabilizer(logicalQubit: patch,
-                     x_stabilizers: list[int],
-                     z_stabilizers: list[int]) -> list[bool]:
-           # Measure X stabilizers
-           h(logicalQubit.ancx)
-           for xi in range(len(logicalQubit.ancx)):
-               for di in range(len(logicalQubit.data)):
-                   if x_stabilizers[xi * len(logicalQubit.data) + di] == 1:
-                       x.ctrl(logicalQubit.ancx[xi], logicalQubit.data[di])
-           h(logicalQubit.ancx)
-
-           # Measure Z stabilizers
-           for zi in range(len(logicalQubit.ancx)):
-               for di in range(len(logicalQubit.data)):
-                   if z_stabilizers[zi * len(logicalQubit.data) + di] == 1:
-                       x.ctrl(logicalQubit.data[di], logicalQubit.ancz[zi])
-
-           # Get and reset ancillas
-           results = mz(logicalQubit.ancz, logicalQubit.ancx)
-           reset(logicalQubit.ancx)
-           reset(logicalQubit.ancz)
-           return results
+   .. literalinclude:: ../../examples/qec/python/my_steane.py
+      :language: python
+      :start-after: [Begin Documentation2]
+      :end-before: [End Documentation2]
 
 3. **Implement the Code Class**:
 
    Create a class decorated with :code:`@qec.code` that implements the required interface:
 
-   .. code-block:: python
+   .. literalinclude:: ../../examples/qec/python/my_steane.py
+      :language: python
+      :start-after: [Begin Documentation3]
+      :end-before: [End Documentation3]
 
-       @qec.code('py-steane-example')
-       class MySteaneCodeImpl:
-           def __init__(self, **kwargs):
-               qec.Code.__init__(self, **kwargs)
-
-               # Define stabilizer generators
-               self.stabilizers = qec.Stabilizers([
-                   "XXXXIII", "IXXIXXI", "IIXXIXX",
-                   "ZZZZIII", "IZZIZZI", "IIZZIZZ"
-               ])
-
-               # Register quantum kernels
-               self.operation_encodings = {
-                   qec.operation.prep0: prep0,
-                   qec.operation.stabilizer_round: stabilizer
-               }
-
-           def get_num_data_qubits(self):
-               return 7
-
-           def get_num_ancilla_x_qubits(self):
-               return 3
-
-           def get_num_ancilla_z_qubits(self):
-               return 3
-
-           def get_num_ancilla_qubits(self):
-               return 6
-
-4. **Install the Code**:
-
-   Install your Python-implemented code using :code:`cudaqx-config`:
-
-   .. code-block:: bash
-
-       cudaqx-config --install-code my_steane.py
-
-5. **Using the Code**:
+4. **Using the Code**:
 
    The code can now be used like any other CUDA-Q QEC code:
 
-   .. code-block:: python
-
-       import cudaq_qec as qec
-
-       # Create instance of your code
-       code = qec.get_code('py-steane-example')
-
-       # Use the code for various numerical experiments
+   .. literalinclude:: ../../examples/qec/python/my_steane_test.py
+      :language: python
+      :start-after: [Begin Documentation]
 
 Key Points
 ^^^^^^^^^^^
@@ -724,6 +656,7 @@ Usage:
     .. code-block:: python
 
         import cudaq_qec as qec
+        import numpy as np
 
         H_list = [
                     [1, 0, 0, 1, 0, 1, 1], 
@@ -760,6 +693,11 @@ Tensor Network Decoder
 ^^^^^^^^^^^^^^^^^^^^^^
 
 The ``tensor_network_decoder`` constructs a tensor network representation of a quantum code given its parity check matrix, logical observable(s), and noise model. It can decode individual syndromes or batches of syndromes, returning the probability that a logical observable has flipped.
+
+Due to the additional dependencies of the Tensor Network Decoder, you must
+specify the optional pip package when installing CUDA-Q QEC in order to use this
+decoder. Use `pip install cudaq-qec[tensor-network-decoder]` in order to use
+this decoder.
 
 Key Steps:
 
@@ -813,6 +751,14 @@ Output:
 
 The decoder returns the probability that the logical observable has flipped for each syndrome. This can be used to assess the performance of the code and the decoder under different error scenarios.
 
+.. note::
+
+    In general, the Tensor Network Decoder has the same GPU support as the
+    `Quantum Low-Density Parity-Check Decoder <https://nvidia.github.io/cudaqx/components/qec/introduction.html#quantum-low-density-parity-check-decoder>`__.
+    However, if you are using the V100 GPU (SM70), you will need to pin your
+    cuTensor version to 2.2 by running `pip install cutensor_cu12==2.2`. Note
+    that this GPU will not be supported by the Tensor Network Decoder when
+    CUDA-Q 0.5.0 is released.
 
 
 Numerical Experiments

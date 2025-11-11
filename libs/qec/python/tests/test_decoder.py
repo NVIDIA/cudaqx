@@ -326,8 +326,7 @@ def test_single_error_lut_opt_results():
         "opt_results": {
             "error_probability": True,
             "syndrome_weight": True,
-            "decoding_time": False,
-            "num_repetitions": 5
+            "decoding_time": False
         }
     }
     decoder = qec.get_decoder("single_error_lut", H, **valid_args)
@@ -338,8 +337,6 @@ def test_single_error_lut_opt_results():
     assert "error_probability" in result.opt_results
     assert "syndrome_weight" in result.opt_results
     assert "decoding_time" not in result.opt_results  # Was set to False
-    assert "num_repetitions" in result.opt_results
-    assert result.opt_results["num_repetitions"] == 5
 
 
 if __name__ == "__main__":

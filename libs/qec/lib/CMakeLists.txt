@@ -19,11 +19,17 @@ add_library(${LIBRARY_NAME} SHARED
   pcm_utils.cpp
   plugin_loader.cpp
   stabilizer_utils.cpp 
-  decoders/single_error_lut.cpp
+  decoders/lut.cpp
+  decoders/sliding_window.cpp
   version.cpp
 )
 
 add_subdirectory(decoders/plugins/example)
+
+if(CUDAQ_QEC_BUILD_TRT_DECODER)
+  add_subdirectory(decoders/plugins/trt_decoder)
+endif()
+
 add_subdirectory(codes)
 add_subdirectory(device) 
 
@@ -87,3 +93,4 @@ install(DIRECTORY ${CUDAQX_QEC_INCLUDE_DIR}/cudaq
   FILES_MATCHING PATTERN "*.h"
 )
 
+add_subdirectory(realtime)

@@ -4,6 +4,9 @@ inputs:
   lib:
     description: 'Library name to build. (e.g, all, qec or solvers)'
     required: true
+  cuda_version:
+    description: 'CUDA version to build against. (e.g, 12.6)'
+    required: true
   pr-number:
     description: 'Unique pull request identifier.'
     default: ''
@@ -38,7 +41,7 @@ runs:
     - name: Compilation cache key
       id: ccache-key
       run: |
-        echo "main=ccache-${{ inputs.lib }}-cu12.0-gcc11-${{ inputs.platform }}" >> $GITHUB_OUTPUT
+        echo "main=ccache-${{ inputs.lib }}-cu${{ inputs.cuda_version }}-gcc11-${{ inputs.platform }}" >> $GITHUB_OUTPUT
         if [[ -n "${{ inputs.pr-number }}" ]]; then
           echo "pr=-pr${{ inputs.pr-number }}" >> $GITHUB_OUTPUT
         fi

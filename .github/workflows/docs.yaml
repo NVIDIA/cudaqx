@@ -25,7 +25,7 @@ jobs:
   build:
     name: Build
     runs-on: ${{ startsWith(github.repository, 'NVIDIA/cudaqx') && 'linux-amd64-cpu8' || 'ubuntu-latest' }}
-    container: ghcr.io/nvidia/cuda-quantum-devdeps:ext-amd64-cu12.0-gcc11-main
+    container: ghcr.io/nvidia/cuda-quantum-devdeps:ext-amd64-cu12.6-gcc11-main
     permissions:
       actions: write
       contents: read
@@ -49,7 +49,7 @@ jobs:
           repo: ${{ steps.get-cudaq-version.outputs.repo }}
           ref: ${{ steps.get-cudaq-version.outputs.ref }}
           token: ${{ secrets.CUDAQ_ACCESS_TOKEN }}
-          platform: 'amd64'
+          platform: 'amd64-cu12' # Just choose one platform for docs
 
       # ========================================================================
       # Build docs
@@ -58,7 +58,7 @@ jobs:
       - name: Install requirements
         run: |
           apt install -y --no-install-recommends \
-            gfortran libblas-dev libcusolver-dev-12-0 doxygen
+            gfortran libblas-dev doxygen
 
           python3 -m pip install IPython breathe enum_tools myst_parser nbsphinx \
             sphinx_copybutton sphinx_inline_tabs sphinx_gallery sphinx_rtd_theme \

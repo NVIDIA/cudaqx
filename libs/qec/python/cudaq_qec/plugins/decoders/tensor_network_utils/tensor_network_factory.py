@@ -19,7 +19,7 @@ def tensor_network_from_parity_check(
     col_inds: list[str],
     tags: Optional[list[str]] = None,
 ) -> TensorNetwork:
-    """Build a sparse tensor-network representation of a parity-check matrix.
+    r"""Build a sparse tensor-network representation of a parity-check matrix.
 
     The parity-check matrix is a binary adjacency matrix of a bipartite graph.
     The tensor network is a sparse representation of the bipartite graph where the nodes

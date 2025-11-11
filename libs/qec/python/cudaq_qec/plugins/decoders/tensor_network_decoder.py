@@ -22,7 +22,7 @@ from .tensor_network_utils.tensor_network_factory import (
 
 @qec.decoder("tensor_network_decoder")
 class TensorNetworkDecoder:
-    """A general class for tensor network decoders.
+    r"""A general class for tensor network decoders.
 
     Constructs a tensor network with the following tensors:
     Hadamard matrices for each edge of the Tanner graph:
@@ -47,7 +47,7 @@ class TensorNetworkDecoder:
                      |
         s1      s2   |     s3   < syndromes               : product state of zeros/ones
         |       |    |     |                        ----|
-        c1      c2  l1     c3   < checks / logical     | : delta tensors
+        c1      c2  l1     c3   < checks / logical      | : delta tensors
         |     / |   | \    |                            |
         H   H   H   H  H   H    < Hadamard matrices     | TANNER (bipartite) GRAPH
           \ |   |  /   |  /                             |

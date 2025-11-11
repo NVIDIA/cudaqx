@@ -5,20 +5,24 @@
  * This source code and the accompanying materials are made available under    *
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
-#include <limits>
-#include <pybind11/complex.h>
-#include <pybind11/numpy.h>
-#include <pybind11/operators.h>
-#include <pybind11/stl.h>
-
+#include "common/ExecutionContext.h"
 #include "common/Logger.h"
-
+#include "cudaq/platform.h"
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/detector_error_model.h"
 #include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/plugin_loader.h"
+#include <filesystem>
+#include <limits>
+#include <link.h>
+#include <pybind11/complex.h>
+#include <pybind11/functional.h>
+#include <pybind11/numpy.h>
+#include <pybind11/operators.h>
+#include <pybind11/stl.h>
 
 #include "cuda-qx/core/kwargs_utils.h"
+#include "cuda-qx/core/library_utils.h"
 #include "type_casters.h"
 
 namespace py = pybind11;
@@ -187,7 +191,7 @@ void bindDecoder(py::module &mod) {
       decoder to help make predictions about observables flips.
     )pbdoc")
       .def(py::init<>())
-      .def_property_readonly(
+      .def_property(
           "detector_error_matrix",
           [](const detector_error_model &self) {
             const auto &t = self.detector_error_matrix;
@@ -195,6 +199,12 @@ void bindDecoder(py::module &mod) {
             return py::array_t<uint8_t>(
                 t.shape(), {t.shape()[1] * sizeof(uint8_t), sizeof(uint8_t)},
                 t.data());
+          },
+          [](detector_error_model &self, const py::array_t<uint8_t> &a) {
+            auto borrow = toTensor(a);
+            // Make sure that we own the data within the `detector_error_model`
+            // as the input array may go out of scope.
+            self.detector_error_matrix.copy(borrow.data(), borrow.shape());
           },
           R"pbdoc(
             The detector error matrix is a specific kind of circuit-level parity-check
@@ -207,7 +217,13 @@ void bindDecoder(py::module &mod) {
       The list of weights has length equal to the number of columns of the
       detector error matrix, which assigns a likelihood to each error mechanism.
     )pbdoc")
-      .def_property_readonly(
+      .def_readwrite("error_ids", &detector_error_model::error_ids, R"pbdoc(
+       Error mechanism ID. From a probability perspective, each error mechanism
+       ID is independent of all other error mechanism ID. For all errors with
+       the *same* ID, only one of them can happen. That is - the errors
+       containing the same ID are correlated with each other.
+    )pbdoc")
+      .def_property(
           "observables_flips_matrix",
           [](const detector_error_model &self) {
             const auto &t = self.observables_flips_matrix;
@@ -215,6 +231,12 @@ void bindDecoder(py::module &mod) {
             return py::array_t<uint8_t>(
                 t.shape(), {t.shape()[1] * sizeof(uint8_t), sizeof(uint8_t)},
                 t.data());
+          },
+          [](detector_error_model &self, const py::array_t<uint8_t> &a) {
+            auto borrow = toTensor(a);
+            // Make sure that we own the data within the `detector_error_model`
+            // as the input array may go out of scope.
+            self.observables_flips_matrix.copy(borrow.data(), borrow.shape());
           },
           R"pbdoc(
             The observables flips matrix is a specific kind of circuit-level parity-
@@ -284,7 +306,7 @@ void bindDecoder(py::module &mod) {
           throw std::runtime_error(
               "Decoder 'tensor_network_decoder' is not available. "
               "To enable it, install the python module's dependencies via:\n\n"
-              "    pip install cudaq_qec[tensor_network_decoder]\n");
+              "    pip install cudaq-qec[tensor-network-decoder]\n");
         }
 
         py::buffer_info buf = H.request();
@@ -659,6 +681,158 @@ void bindDecoder(py::module &mod) {
             implementation of this function.
       )pbdoc",
       py::arg("H"), py::arg("weights"), py::arg("num_syndromes_per_round"));
+
+  const auto loadDecoderLibrary = [](const std::string &path) {
+    static void *decoderLibHandle = nullptr;
+
+    // Unload if previously-loaded
+    // Note: dlclose makes no guarantees about unloading. Hence, we need to
+    // manually execute `init_func` of the kernels (should be executed as static
+    // initializers in those libs) to make sure they are registered again.
+    if (decoderLibHandle)
+      dlclose(decoderLibHandle);
+
+    decoderLibHandle = dlopen(path.c_str(), RTLD_GLOBAL | RTLD_NOW);
+    if (!decoderLibHandle) {
+      // Retrieve the error message
+      char *error_msg = dlerror();
+      throw std::runtime_error(
+          fmt::format("Failed to load decoder library at '{}': {}", path,
+                      (error_msg ? std::string(error_msg) : "unknown error.")));
+    }
+
+    // List of `init_func` names to call for decoder registration
+    // clang-format off
+    static const std::vector<std::string> initFuncNames = {
+        "function_enqueue_syndromes._ZN5cudaq3qec8decoding17enqueue_syndromesEmRKSt6vectorIbSaIbEEm.init_func",
+        "function_get_corrections._ZN5cudaq3qec8decoding15get_correctionsEmmb.init_func",
+        "function_reset_decoder._ZN5cudaq3qec8decoding13reset_decoderEm.init_func"};
+    // clang-format on
+    for (const auto &funcName : initFuncNames) {
+      // Use dlsym to get the function pointer
+      using InitFuncType = void (*)();
+      InitFuncType initFunc = reinterpret_cast<InitFuncType>(
+          dlsym(decoderLibHandle, funcName.c_str()));
+      if (!initFunc) {
+        char *error_msg = dlerror();
+        throw std::runtime_error(fmt::format(
+            "Failed to locate init function '{}' in decoder library at '{}': "
+            "{}",
+            funcName, path,
+            (error_msg ? std::string(error_msg) : "unknown error.")));
+      }
+      // Call the init function to register/update the decoder quake code
+      initFunc();
+    }
+  };
+
+  qecmod.def(
+      "load_quantinuum_realtime_decoding",
+      [&]() {
+        const std::filesystem::path path{
+            cudaqx::__internal__::getCUDAQXLibraryPath(
+                cudaqx::__internal__::CUDAQXLibraryType::QEC)};
+        const auto quantinuumLibPath =
+            path.parent_path() / "libcudaq-qec-realtime-decoding-quantinuum.so";
+        loadDecoderLibrary(quantinuumLibPath);
+      },
+      R"pbdoc(
+        [Internal] Load Quantinuum realtime decoder library.
+      )pbdoc");
+
+  qecmod.def(
+      "load_simulation_realtime_decoding",
+      [&]() {
+        const std::filesystem::path path{
+            cudaqx::__internal__::getCUDAQXLibraryPath(
+                cudaqx::__internal__::CUDAQXLibraryType::QEC)};
+        const auto simulationLibPath =
+            path.parent_path() / "libcudaq-qec-realtime-decoding-simulation.so";
+        loadDecoderLibrary(simulationLibPath);
+      },
+      R"pbdoc(
+        [Internal] Load local simulation realtime decoder library.
+      )pbdoc");
+
+  qecmod.def(
+      "compute_msm",
+      [](std::function<void()> kernel, bool verbose = false) {
+        cudaq::ExecutionContext ctx_msm_size("msm_size");
+        auto &platform = cudaq::get_platform();
+        platform.set_exec_ctx(&ctx_msm_size);
+        kernel();
+        platform.reset_exec_ctx();
+        if (!ctx_msm_size.msm_dimensions.has_value()) {
+          throw std::runtime_error("No MSM dimensions found");
+        }
+        if (ctx_msm_size.msm_dimensions.value().second == 0) {
+          throw std::runtime_error("No MSM dimensions found");
+        }
+        cudaq::ExecutionContext ctx_msm("msm");
+        ctx_msm.msm_dimensions = ctx_msm_size.msm_dimensions;
+        platform.set_exec_ctx(&ctx_msm);
+        kernel();
+        platform.reset_exec_ctx();
+
+        auto msm_as_strings = ctx_msm.result.sequential_data();
+        if (verbose) {
+          printf("MSM Dimensions: %ld measurements x %ld error mechanisms\n",
+                 ctx_msm.msm_dimensions.value().first,
+                 ctx_msm.msm_dimensions.value().second);
+          for (std::size_t i = 0; i < ctx_msm.msm_dimensions.value().first;
+               i++) {
+            for (std::size_t j = 0; j < ctx_msm.msm_dimensions.value().second;
+                 j++) {
+              printf("%c", msm_as_strings[j][i] == '1' ? '1' : '.');
+            }
+            printf("\n");
+          }
+        }
+        return std::make_tuple(msm_as_strings, ctx_msm.msm_dimensions.value(),
+                               ctx_msm.msm_probabilities.value(),
+                               ctx_msm.msm_prob_err_id.value());
+      },
+      "");
+  qecmod.def(
+      "construct_mz_table",
+      [](const std::vector<std::string> &msm_as_strings) {
+        cudaqx::tensor<uint8_t> mzTable(msm_as_strings);
+        mzTable = mzTable.transpose();
+        return cudaq::python::copyCUDAQXTensorToPyArray(mzTable);
+      },
+      "");
+
+  qecmod.def(
+      "generate_timelike_sparse_detector_matrix",
+      [](std::uint32_t num_syndromes_per_round, std::uint32_t num_rounds,
+         bool include_first_round) {
+        return cudaq::qec::generate_timelike_sparse_detector_matrix(
+            num_syndromes_per_round, num_rounds, include_first_round);
+      },
+      R"pbdoc(
+        Generate a sparse detector matrix for a given number of syndromes per round
+        and number of rounds. Time-like here means that each round of syndrome measurement
+        bits are xor'd against the preceding round.
+        Args:
+            num_syndromes_per_round: The number of syndrome measurements per round
+            num_rounds: The number of rounds to generate the sparse detector matrix for
+            include_first_round: Whether to include the first round of syndrome measurements
+        Returns:
+            The detector matrix format is CSR-like, with -1 values indicating the end of each row.
+      )pbdoc",
+      py::arg("num_syndromes_per_round"), py::arg("num_rounds"),
+      py::arg("include_first_round"));
+
+  qecmod.def(
+      "pcm_to_sparse_vec",
+      [](const py::array_t<uint8_t> &pcm) {
+        auto tensor_pcm = pcmToTensor(pcm);
+        return cudaq::qec::pcm_to_sparse_vec(tensor_pcm);
+      },
+      R"pbdoc(
+        Return a sparse representation of the PCM.
+      )pbdoc",
+      py::arg("pcm"));
 }
 
 } // namespace cudaq::qec

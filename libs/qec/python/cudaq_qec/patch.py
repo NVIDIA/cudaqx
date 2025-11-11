@@ -9,7 +9,7 @@ from cudaq import qvector
 from dataclasses import dataclass
 
 
-@dataclass
+@dataclass(slots=True)
 class patch:
     """A logical qubit patch representation for surface code quantum error correction.
     
