@@ -93,7 +93,7 @@ test_examples() {
     docker exec ${container_name} bash -c "pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu${cuda_no_dot}"
     # Install other required packages
     docker exec ${container_name} bash -c "pip install 'lightning>=2.0.0' 'ml_collections>=0.1.0' 'mpi4py>=3.1.0' 'transformers>=4.30.0'"
-    docker exec ${container_name} bash -c "pip install 'quimb' 'opt_einsum' 'cuquantum-python-cu${cuda_major}==25.09.1'"
+    docker exec ${container_name} bash -c "pip install 'quimb' 'opt_einsum' 'cuquantum-python-cu${cuda_major}==25.09.1' 'stim' 'beliefmatching'"
 
     # Run Python tests first
     if ! run_python_tests ${container_name} ${target}; then
@@ -114,7 +114,15 @@ test_examples() {
             if docker exec ${container_name} bash -c "[ -d /home/cudaq/cudaqx-examples/${domain}/python ] && [ -n \"\$(ls -A /home/cudaq/cudaqx-examples/${domain}/python/*.py 2>/dev/null)\" ]"; then
                 echo "Testing ${domain} Python examples with target ${target}..."
                 if ! docker exec ${container_name} bash -c "cd /home/cudaq/cudaqx-examples/${domain}/python && \
-                    for f in *.py; do echo Testing \$f...; python3 \$f --target ${target} || exit 1; done"; then
+                    for f in *.py; do \
+                        echo Testing \$f...; \
+                        if [ \"\$f\" = \"gqe_h2.py\" ]; then \
+                            python3 \"\$f\" || exit 1; \
+                            python3 \"\$f\" --mpi || exit 1; \
+                        else \
+                            python3 \"\$f\" --target ${target} || exit 1; \
+                        fi; \
+                    done"; then
                     echo "Python tests failed for ${domain} with target ${target}"
                     docker stop ${container_name}
                     docker rm ${container_name}
