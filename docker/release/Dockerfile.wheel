@@ -15,7 +15,7 @@
 # The resulting image can be tested with the wheels with
 # `scripts/validation/wheel/validate_wheels.sh`, which is copied into the image.
 #
-FROM ubuntu:22.04 
+FROM ubuntu:24.04 
 ARG DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
