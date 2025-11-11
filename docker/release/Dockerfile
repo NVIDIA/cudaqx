@@ -20,20 +20,23 @@
 # scripts/validation/container/validate_container.sh
 
 ARG base_image=nvcr.io/nvidia/nightly/cuda-quantum:cu12-latest
+ARG cuda_version=12.6
 FROM $base_image
 
 # Set build-time variables for architecture-specific files
 ARG TARGETARCH
 
+ARG cuda_version
+
 USER root
 
 # Determine the appropriate zip file
-COPY installed_files-${TARGETARCH}.zip /tmp/
+COPY installed_files-${TARGETARCH}-cu${cuda_version}.zip /tmp/
 
 # Overlay installed files (and install gfortran)
 RUN apt-get update && apt-get install -y unzip gfortran && \
-    unzip /tmp/installed_files-${TARGETARCH}.zip -d /opt/nvidia/cudaq && \
-    rm /tmp/installed_files-${TARGETARCH}.zip && \
+    unzip /tmp/installed_files-${TARGETARCH}-cu${cuda_version}.zip -d /opt/nvidia/cudaq && \
+    rm /tmp/installed_files-${TARGETARCH}-cu${cuda_version}.zip && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Copy CUDA-QX examples and tests
