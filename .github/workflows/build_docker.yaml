@@ -18,7 +18,8 @@ on:
         required: true
       assets_repo:
         type: string
-        description: (Deprecated) Retrieve artifacts from a draft release from this repo (e.g. NVIDIA/cudaqx)
+        description: Retrieve artifacts from this repo (e.g. NVIDIA/cudaqx)
+        default: NVIDIA/cudaqx
         required: false
       assets_tag:
         type: string
