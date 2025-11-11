@@ -14,6 +14,21 @@ import cudaq_qec as qec
 
 # nv_qldpc_decoder_config tests
 
+
+def is_nv_qldpc_decoder_available():
+    """
+    Helper function to check if the NV-QLDPC decoder is available.
+    """
+    try:
+        H_list = [[1, 0, 0, 1, 0, 1, 1], [0, 1, 0, 1, 1, 0, 1],
+                  [0, 0, 1, 0, 1, 1, 1]]
+        H_np = np.array(H_list, dtype=np.uint8)
+        nv_dec_gpu_and_cpu = qec.get_decoder("nv-qldpc-decoder", H_np)
+        return True
+    except Exception as e:
+        return False
+
+
 FIELDS = {
     "use_sparsity": (bool, True, False),
     "error_rate": (float, 1e-3, 5e-2),
@@ -280,6 +295,9 @@ def test_configure_decoders_from_str_smoke():
     decoder_config.H_sparse = [1, 2, 3, -1, 6, 7, 8, -1, -1]
     decoder_config.set_decoder_custom_args(nv)
     yaml_str = decoder_config.to_yaml_str()
+    # Do not instantiate the decoder if it is not available.
+    if not is_nv_qldpc_decoder_available():
+        return
     status = qec.configure_decoders_from_str(yaml_str)
     assert isinstance(status, int)
     qec.finalize_decoders()
