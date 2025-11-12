@@ -62,6 +62,8 @@ run_python_tests() {
 test_examples() {
     echo "Testing examples ..."
 
+    local num_failures=0
+
     # Loop through Python versions
     for python_version in "${PYTHON_VERSIONS[@]}"; do
         echo "Testing with Python version: ${python_version}"
@@ -107,6 +109,7 @@ test_examples() {
         # Run Python tests first
         if ! run_python_tests ${python_version}; then
             echo "ERROR: run_python_tests ${python_version} FAILED"
+            num_failures=$((num_failures + 1))
         fi
 
         # Loop through targets
@@ -118,12 +121,22 @@ test_examples() {
                 echo "Testing ${domain} Python examples with Python ${python_version} and target ${target}..."
                 cd examples/${domain}/python
                 shopt -s nullglob # don't throw errors if no Python files exist
-                for f in *.py; do \
-                    echo Testing $f...; \
-                    python3 $f --target ${target}
-                    res=$?
-                    if [ $res -ne 0 ]; then
-                        echo "Python tests failed for ${domain} with Python ${python_version} and target ${target}: $res"
+                for f in *.py; do
+                    echo Testing $f...
+                    if [ "$f" = "gqe_h2.py" ]; then
+                        if ! python3 "$f"; then
+                            echo "Python tests failed for ${domain} with Python ${python_version} (default target)"
+                            num_failures=$((num_failures + 1))
+                        fi
+                        if ! python3 "$f" --mpi; then
+                            echo "Python tests failed for ${domain} with Python ${python_version} using --mpi"
+                            num_failures=$((num_failures + 1))
+                        fi
+                    else
+                        if ! python3 "$f" --target ${target}; then
+                            echo "Python tests failed for ${domain} with Python ${python_version} and target ${target}"
+                            num_failures=$((num_failures + 1))
+                        fi
                     fi
                 done
                 shopt -u nullglob  # reset setting, just for cleanliness
@@ -133,6 +146,8 @@ test_examples() {
 
         conda deactivate
     done
+
+    return $num_failures
 }
 
 # Main execution
