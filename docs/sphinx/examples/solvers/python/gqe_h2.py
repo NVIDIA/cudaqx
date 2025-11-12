@@ -17,6 +17,7 @@
 # e.g. PMIX_MCA_gds=hash mpiexec -np 2 python3 gqe_h2.py --mpi
 
 import argparse, cudaq
+from mpi4py import MPI
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--mpi', action='store_true')
@@ -25,7 +26,8 @@ args = parser.parse_args()
 if args.mpi:
     try:
         cudaq.set_target('nvidia', option='mqpu')
-        cudaq.mpi.initialize()
+        # CUSTOM-0.4.0: Change to use mpi4py instead of cudaq.mpi, so disable this line
+        # cudaq.mpi.initialize()
     except RuntimeError:
         print(
             'Warning: NVIDIA GPUs or MPI not available, unable to use CUDA-Q MQPU. Skipping...'
@@ -177,7 +179,8 @@ cfg.verbose = True
 minE, best_ops = solvers.gqe(cost, op_pool, max_iters=25, ngates=10, config=cfg)
 
 # Only print results from rank 0 when using MPI
-if not args.mpi or cudaq.mpi.rank() == 0:
+# CUSTOM-0.4.0: Change to use mpi4py instead of cudaq.mpi
+if not args.mpi or MPI.COMM_WORLD.Get_rank() == 0:
     print(f'Ground Energy = {minE}')
     print('Ansatz Ops')
     for idx in best_ops:
@@ -185,5 +188,6 @@ if not args.mpi or cudaq.mpi.rank() == 0:
         term = next(iter(op_pool[idx]))
         print(term.evaluate_coefficient().real, term.get_pauli_word(n_qubits))
 
-if args.mpi:
-    cudaq.mpi.finalize()
+# CUSTOM-0.4.0: Change to use mpi4py instead of cudaq.mpi, so disable this line
+#if args.mpi:
+#    cudaq.mpi.finalize()

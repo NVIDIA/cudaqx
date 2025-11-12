@@ -134,9 +134,10 @@ class Transformer(LightningModule):
             RuntimeError: If cost function returns invalid type
         """
         res = []
-        if cudaq.mpi.is_initialized():
-            rank = cudaq.mpi.rank()
-            numRanks = cudaq.mpi.num_ranks()
+        # CUSTOM-0.4.0: Change to use mpi4py instead of cudaq.mpi
+        if MPI.Is_initialized():
+            rank = MPI.COMM_WORLD.Get_rank()
+            numRanks = MPI.COMM_WORLD.Get_size()
             total_elements = len(idx_output)
             elements_per_rank = total_elements // numRanks
             remainder = total_elements % numRanks
@@ -166,7 +167,8 @@ class Transformer(LightningModule):
                 'Invalid return type detected from user cost function.')
 
         # Need to perform MPI all gather here
-        if cudaq.mpi.is_initialized():
+        # CUSTOM-0.4.0: Change to use mpi4py instead of cudaq.mpi
+        if MPI.Is_initialized():
             res = MPI.COMM_WORLD.allgather(res)
             res = [x for xs in res for x in xs]
 
