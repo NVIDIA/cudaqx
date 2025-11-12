@@ -33,8 +33,7 @@
 void save_dem_to_file(const cudaq::qec::detector_error_model &dem,
                       std::string dem_filename, uint64_t numSyndromesPerRound,
                       uint64_t numLogical, const std::string &decoder_type,
-                      int decoder_window, int sw_window_size,
-                      int sw_step_size) {
+                      int sw_window_size, int sw_step_size) {
   cudaq::qec::decoding::config::multi_decoder_config multi_config;
   for (uint64_t i = 0; i < numLogical; i++) {
     // We actually send 1 additional round in this example, so add 1.
@@ -558,8 +557,7 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
 
     if (save_dem) {
       save_dem_to_file(dem, dem_filename, numSyndromesPerRound, numLogical,
-                       decoder_type, decoder_window, sw_window_size,
-                       sw_step_size);
+                       decoder_type, sw_window_size, sw_step_size);
       return;
     }
   }

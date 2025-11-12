@@ -300,9 +300,9 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
       } else {
         // Buffer is full with 2 rounds: compute timelike detectors (XOR of two
         // rounds)
+        std::size_t index =
+            (pimpl->current_round - 2) * pimpl->num_syndromes_per_round;
         for (std::size_t i = 0; i < pimpl->num_syndromes_per_round; i++) {
-          std::size_t index =
-              (pimpl->current_round - 2) * pimpl->num_syndromes_per_round;
           pimpl->persistent_detector_buffer[i] =
               pimpl->msyn_buffer[index + i] ^
               pimpl->msyn_buffer[index + i + pimpl->num_syndromes_per_round];
