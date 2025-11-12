@@ -329,7 +329,9 @@ single_error_lut
 
 The single-error lookup table decoder is the fastest option available, designed for scenarios where you can safely assume at most one error has occurred between correction cycles. It works by pre-computing all possible single-error syndromes and their corrections, then performing direct table lookups at runtime. This approach provides microsecond-level latency but limited error correction capability.
 
-This decoder shines in early-stage hardware with low error rates, or for very small codes where the overhead of more sophisticated decoders isn't justified. If your physical error rate is below 0.1% and you're working with distance-3 or distance-5 codes, the single-error LUT offers excellent performance. However, as error rates increase or code distances grow, you'll need decoders that can handle correlated errors.
+This decoder shines in early-stage hardware with low error rates, or for very small codes where the overhead of more sophisticated decoders isn't justified. 
+If your physical error rate is below 0.1% (it also depends on code distance and noise model) and you're working with distance-3 or distance-5 codes, the single-error LUT offers excellent performance. However, as error rates increase or code distances grow, you'll need decoders that can handle correlated errors.
+We should note that this decoder cannot handle correlated errors.
 
 The configuration is straightforward with no tunable parameters:
 
@@ -353,9 +355,10 @@ The configuration is straightforward with no tunable parameters:
 multi_error_lut
 ^^^^^^^^^^^^^^^
 
-The multi-error lookup table decoder extends the single-error approach by considering combinations of multiple simultaneous errors. **This is the recommended decoder for most applications.** It pre-computes syndrome patterns for all possible combinations of up to ``N`` errors (where ``N`` is the ``lut_error_depth`` parameter), providing accurate corrections even when multiple errors occur in the same round.
+The multi-error lookup table decoder extends the single-error approach by considering combinations of multiple simultaneous errors. It pre-computes syndrome patterns for all possible combinations of up to ``N`` errors (where ``N`` is the ``lut_error_depth`` parameter), providing accurate corrections even when multiple errors occur in the same round.
 
-The key parameter is ``lut_error_depth``, which controls the error correction capability. Setting this to 2 means the decoder considers all possible pairs of errors, significantly improving performance over the single-error version. Increasing to 3 provides even better correction but requires more memory and preprocessing time. For most practical scenarios with distance-5 to distance-9 codes and error rates around 0.1-1%, a depth of 2 offers the sweet spot between accuracy and performance.
+The key parameter is ``lut_error_depth``, which controls the error correction capability. Setting this to 2 means the decoder considers all possible pairs of errors, significantly improving performance over the single-error version. Increasing to 3 provides even better correction but requires more memory and preprocessing time. 
+For most practical scenarios with distance-5 to distance-9 codes and error rates around 0.1-1% (it also depends on noise model and code distance), a depth of 2 offers the sweet spot between accuracy and performance.
 
 This decoder works well up to moderate code distances because the lookup table size scales combinatorially with the number of error locations and the error depth. Beyond distance 9, or when you need to handle higher error rates, you'll want to consider belief propagation decoders like the NV-QLDPC decoder.
 
@@ -384,9 +387,6 @@ nv-qldpc-decoder
 ^^^^^^^^^^^^^^^^
 
 The NVIDIA QLDPC decoder is an advanced belief propagation (BP) decoder optimized for GPU execution, designed for medium to large quantum codes. Unlike lookup table approaches that pre-compute all possible syndromes, belief propagation iteratively refines probability estimates for each error location, making it scalable to larger codes. The decoder optionally includes Ordered Statistics Decoding (OSD) post-processing, which provides a fallback when BP fails to converge.
-
-.. note::
-   The NV-QLDPC decoder requires additional installation and is not included in the public repository. Contact NVIDIA for access if you need this decoder for large-scale codes.
 
 This decoder excels when you're working with codes beyond distance 9, where lookup tables become prohibitively large. The belief propagation algorithm scales more gracefully with code size, and GPU acceleration makes it practical for real-time use even with hundreds of syndrome bits. The OSD post-processing is particularly valuable: when BP gets stuck in local minima, OSD performs a focused search over the most likely error patterns to find the correct solution.
 
@@ -425,8 +425,11 @@ The decoder offers extensive tunability. You can adjust the number of BP iterati
 
 sliding_window
 ^^^^^^^^^^^^^^
-
-Wrapper that applies an inner decoder to windows of syndrome data.
+The windowed decoder is designed for larger codes where full maximum-likelihood decoding is impractical. 
+It works by dividing the decoding problem into overlapping "windows" of syndrome data, 
+decoding each window independently (using a standard inner decoder), 
+and then combining the results to form a global correction. 
+This approach reduces memory and computational requirements while still capturing most local error correlations.
 
 * **Best for**: Very long circuits, memory-constrained systems
 * **Parameters**:
@@ -462,154 +465,6 @@ Wrapper that applies an inner decoder to windows of syndrome data.
       inner_config.lut_error_depth = 2;
       sw_config.multi_error_lut_params = inner_config;
       config.decoder_custom_args = sw_config;
-
-Use Cases and Examples
-----------------------
-
-Example 1: Basic Memory Experiment
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Preserve quantum information over multiple rounds of error correction.
-
-**Application**: Quantum memory, logical qubit benchmarking
-
-**Complete Example**: ``libs/qec/unittests/realtime/app_examples/surface_code-1.cpp`` (C++), ``surface_code_1.py`` (Python)
-
-Key features demonstrated:
-
-* Detector error model generation using MSM
-* Multi-error LUT decoder configuration
-* Syndrome extraction and correction application
-* Multiple syndrome extraction rounds with windowing
-
-Running the example:
-
-.. tab:: Python
-
-   .. code-block:: bash
-
-      python surface_code_1.py --distance 5 --num_shots 100 --p_spam 0.01
-
-.. tab:: C++
-
-   .. code-block:: bash
-
-      # Generate DEM
-      ./surface_code-1 --distance 5 --save_dem surface_d5.yaml --p_spam 0.01
-      
-      # Run with DEM
-      ./surface_code-1 --distance 5 --num_shots 100 --load_dem surface_d5.yaml
-
-Example 2: Windowed Decoding
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Process syndromes in fixed-size windows for long circuits.
-
-**Application**: Long-duration quantum computations, memory-constrained systems
-
-Key configuration changes:
-
-.. tab:: Python
-
-   .. code-block:: python
-
-      decoder_window = 5  # Process 5 rounds at a time
-      num_rounds = 20     # Total 20 rounds
-      
-      # Generate DEM for window size (not total rounds)
-      msm_strings, _, _, _ = qec.compute_msm(
-          lambda: circuit(decoder_window), True)
-
-.. tab:: C++
-
-   .. code-block:: cpp
-
-      int decoder_window = 5;  // Process 5 rounds at a time
-      int num_rounds = 20;     // Total 20 rounds
-      
-      // Generate DEM for window size
-      cudaq::qec::qpu::demo_circuit_qpu(
-          false, prep, numData, numAncx, numAncz,
-          decoder_window,  // Use window size for DEM
-          1, schedX, schedZ, p_spam, false, decoder_window);
-
-Example 3: Multi-Qubit System
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Manage multiple logical qubits with independent decoders.
-
-**Application**: Multi-qubit algorithms, quantum networking
-
-Configuration:
-
-.. tab:: Python
-
-   .. code-block:: python
-
-      num_logical_qubits = 3
-      multi_config = qec.multi_decoder_config()
-      
-      for qubit_id in range(num_logical_qubits):
-          config = qec.decoder_config()
-          config.id = qubit_id
-          config.type = "multi_error_lut"
-          # ... configure ...
-          multi_config.decoders.append(config)
-      
-      qec.configure_decoders(multi_config)
-
-.. tab:: C++
-
-   .. code-block:: cpp
-
-      int num_logical_qubits = 3;
-      multi_decoder_config multi_config;
-      
-      for (int i = 0; i < num_logical_qubits; ++i) {
-          decoder_config config;
-          config.id = i;
-          config.type = "multi_error_lut";
-          // ... configure ...
-          multi_config.decoders.push_back(config);
-      }
-      
-      configure_decoders(multi_config);
-
-Usage in kernel:
-
-.. tab:: Python
-
-   .. code-block:: python
-
-      @cudaq.kernel
-      def multi_qubit_circuit():
-          for qubit_id in range(num_logical_qubits):
-              qec.reset_decoder(qubit_id)
-              # ... measure and enqueue ...
-              qec.enqueue_syndromes(qubit_id, syndromes)
-          
-          for qubit_id in range(num_logical_qubits):
-              corrections = qec.get_corrections(qubit_id, 1, False)
-              if corrections[0]:
-                  apply_correction(qubit_id)
-
-.. tab:: C++
-
-   .. code-block:: cpp
-
-      __qpu__ void multi_qubit_circuit() {
-          for (int i = 0; i < num_logical_qubits; ++i) {
-              cudaq::qec::decoding::reset_decoder(i);
-              // ... measure and enqueue ...
-              cudaq::qec::decoding::enqueue_syndromes(i, syndromes);
-          }
-          
-          for (int i = 0; i < num_logical_qubits; ++i) {
-              auto corrections = cudaq::qec::decoding::get_corrections(i, 1, false);
-              if (corrections[0])
-                  apply_correction(i);
-          }
-      }
 
 Backend Selection
 -----------------
@@ -666,7 +521,9 @@ The Quantinuum hardware backend connects your quantum circuits to real ion-trap 
 
 **Emulation vs. Hardware Modes:**
 
-Emulation mode (``emulate=True``) is particularly valuable for testing your deployment setup without consuming hardware credits. It uses the **exact same** communication infrastructure as hardware execution - your decoder config is still uploaded, decoders still run on Quantinuum's servers, but your circuit executes on their emulators instead of real quantum computers. This is crucial for verifying that:
+Emulation mode (``emulate=True``) is particularly valuable for testing your deployment setup without consuming hardware credits. It uses the **exact same** communication infrastructure as hardware execution, 
+your decoder config is still uploaded, decoders still run on Quantinuum's servers, but your circuit executes on their emulators instead of real quantum computers. This is crucial for verifying that:
+
 - Your decoder configuration uploads successfully
 - The correct decoder is invoked during circuit execution
 - Syndrome measurements are transmitted properly
@@ -705,10 +562,23 @@ Use the Quantinuum backend for hardware or emulation:
       
       ./a.out
 
-Compilation and Execution Details
+Compilation and Execution Examples
 -----------------------------------
 
-This section provides **complete, tested compilation and execution commands** for both simulation and hardware backends, extracted from the CUDA-Q QEC test infrastructure.
+This section provides **complete, tested compilation and execution commands** for both simulation and hardware backends, extracted from the CUDA-Q QEC test infrastructure. We begin with common usage patterns that will guide your decoder and compilation choices, then provide the specific commands needed for each backend.
+
+Common Use Cases
+^^^^^^^^^^^^^^^^^^^^^^
+
+Before diving into compilation details, it's helpful to understand the typical scenarios and how they map to decoder choices and workflow parameters. 
+We have prepared for you a full set of common examples that you can use to guide your development on.
+These example try to describe in one single file the complete workflow for developing an application that uses real-time decoding.
+The user interested can find all the relavent examples at the follwoing path: ``libs/qec/unittests/realtime/app_examples/`` (C++) and the corresponding Python examples.
+The files will have names like ``surface_code-1.cpp`` and ``surface_code_1.py``.
+
+We hope that the user felt supported in the development of their application, and that enough information was provided to guide them in the process.
+The subsequent step, once the user has chosen the appropiate decoder and the appropiate backend, is to compile and execute the application.
+We will provide the instructions to do so for both the simulation and the hardware backends.
 
 C++ Compilation
 ^^^^^^^^^^^^^^^
@@ -878,8 +748,8 @@ Python Execution
 
 Complete Workflow Example
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+Given that the user follows the structure of the examples provided,  where each executable takes terminal arguments to configure the application, the user can follow the following workflow to compile and execute their application.
 
-Here's the complete two-phase workflow (characterization + execution) using the test scripts as reference:
 
 .. code-block:: bash
 
@@ -1050,34 +920,7 @@ Configuration errors are one of the most common sources of problems in real-time
 
 The validation process should check that matrix dimensions are consistent, syndrome sizes match your circuit's stabilizer count, and decoder-specific parameters are within valid ranges. Pay special attention to the temporal dimension: if your circuit runs for N rounds, your D_sparse matrix must be sized appropriately. A good practice is to write a dedicated validation function that you run before every major experiment.
 
-Always validate your configuration with these checks:
-
-.. tab:: Python
-
-   .. code-block:: python
-
-      # Check matrix dimensions
-      assert config.syndrome_size == H_matrix.shape[0]
-      assert config.block_size == H_matrix.shape[1]
-      
-      # Test configuration
-      status = qec.configure_decoders(multi_config)
-      if status != 0:
-          print("Configuration failed!")
-
-.. tab:: C++
-
-   .. code-block:: cpp
-
-      // Check matrix dimensions
-      assert(config.syndrome_size == H_matrix.shape()[0]);
-      assert(config.block_size == H_matrix.shape()[1]);
-      
-      // Test configuration
-      int status = configure_decoders(multi_config);
-      if (status != 0) {
-          std::cerr << "Configuration failed!" << std::endl;
-      }
+Always validate your configuration!
 
 Troubleshooting
 ---------------

@@ -10,7 +10,7 @@ Core Decoding Functions
 
 These functions can be called from within CUDA-Q quantum kernels (``__qpu__`` functions) to interact with real-time decoders.
 
-.. function:: void cudaq::qec::decoding::enqueue_syndromes(uint64_t decoder_id, const std::vector<cudaq::measure_result>& syndromes, uint64_t tag = 0)
+.. cpp:function:: void cudaq::qec::decoding::enqueue_syndromes(uint64_t decoder_id, const std::vector<cudaq::measure_result>& syndromes, uint64_t tag = 0)
 
    Enqueue syndrome measurements for decoding.
 
@@ -29,7 +29,7 @@ These functions can be called from within CUDA-Q quantum kernels (``__qpu__`` fu
           cudaq::qec::decoding::enqueue_syndromes(decoder_id, syndromes, 0);
       }
 
-.. function:: std::vector<bool> cudaq::qec::decoding::get_corrections(uint64_t decoder_id, uint64_t return_size, bool reset = false)
+.. cpp:function:: std::vector<bool> cudaq::qec::decoding::get_corrections(uint64_t decoder_id, uint64_t return_size, bool reset = false)
 
    Retrieve calculated corrections from the decoder.
 
@@ -50,7 +50,7 @@ These functions can be called from within CUDA-Q quantum kernels (``__qpu__`` fu
           }
       }
 
-.. function:: void cudaq::qec::decoding::reset_decoder(uint64_t decoder_id)
+.. cpp:function:: void cudaq::qec::decoding::reset_decoder(uint64_t decoder_id)
 
    Reset decoder state, clearing all queued syndromes and accumulated corrections.
 
@@ -70,28 +70,28 @@ Configuration API
 
 The configuration API enables setting up decoders before circuit execution. Decoders are configured using YAML files or programmatically constructed configuration objects.
 
-.. function:: int cudaq::qec::decoding::config::configure_decoders(const multi_decoder_config& config)
+.. cpp:function:: int cudaq::qec::decoding::config::configure_decoders(const multi_decoder_config& config)
 
    Configure decoders from a multi_decoder_config object.
 
    :param config: multi_decoder_config object containing decoder specifications
    :returns: 0 on success, non-zero error code on failure
 
-.. function:: int cudaq::qec::decoding::config::configure_decoders_from_file(const std::string& config_file)
+.. cpp:function:: int cudaq::qec::decoding::config::configure_decoders_from_file(const std::string& config_file)
 
    Configure decoders from a YAML file.
 
    :param config_file: Path to YAML configuration file
    :returns: 0 on success, non-zero error code on failure
 
-.. function:: int cudaq::qec::decoding::config::configure_decoders_from_str(const std::string& config_str)
+.. cpp:function:: int cudaq::qec::decoding::config::configure_decoders_from_str(const std::string& config_str)
 
    Configure decoders from a YAML string.
 
    :param config_str: YAML configuration as a string
    :returns: 0 on success, non-zero error code on failure
 
-.. function:: void cudaq::qec::decoding::config::finalize_decoders()
+.. cpp:function:: void cudaq::qec::decoding::config::finalize_decoders()
 
    Finalize and clean up decoder resources. Should be called before program exit.
 
@@ -100,7 +100,7 @@ Helper Functions
 
 Real-time decoding requires converting matrices to sparse format for efficient decoder configuration. The following utility functions are essential:
 
-.. function:: std::vector<std::int64_t> cudaq::qec::pcm_to_sparse_vec(const cudaqx::tensor<uint8_t>& pcm)
+.. cpp:function:: std::vector<std::int64_t> cudaq::qec::pcm_to_sparse_vec(const cudaqx::tensor<uint8_t>& pcm)
 
    Convert a parity check matrix (PCM) to sparse vector representation for decoder configuration.
 
@@ -114,7 +114,7 @@ Real-time decoding requires converting matrices to sparse format for efficient d
       config.H_sparse = cudaq::qec::pcm_to_sparse_vec(dem.detector_error_matrix);
       config.O_sparse = cudaq::qec::pcm_to_sparse_vec(dem.observables_flips_matrix);
 
-.. function:: cudaqx::tensor<uint8_t> cudaq::qec::pcm_from_sparse_vec(const std::vector<std::int64_t>& sparse_vec, std::size_t num_rows, std::size_t num_cols)
+.. cpp:function:: cudaqx::tensor<uint8_t> cudaq::qec::pcm_from_sparse_vec(const std::vector<std::int64_t>& sparse_vec, std::size_t num_rows, std::size_t num_cols)
 
    Convert sparse vector representation back to a dense parity check matrix.
 
@@ -123,7 +123,7 @@ Real-time decoding requires converting matrices to sparse format for efficient d
    :param num_cols: Number of columns in the output matrix
    :returns: Dense binary matrix
 
-.. function:: std::vector<std::int64_t> cudaq::qec::generate_timelike_sparse_detector_matrix(std::uint32_t num_syndromes_per_round, std::uint32_t num_rounds, bool include_first_round = false)
+.. cpp:function:: std::vector<std::int64_t> cudaq::qec::generate_timelike_sparse_detector_matrix(std::uint32_t num_syndromes_per_round, std::uint32_t num_rounds, bool include_first_round = false)
 
    Generate the D_sparse matrix that encodes how detectors relate across syndrome measurement rounds.
 
