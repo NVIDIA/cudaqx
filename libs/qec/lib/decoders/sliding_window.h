@@ -13,11 +13,12 @@
 
 namespace cudaq::qec {
 
-/// @brief A sliding window decoder that processes syndromes in overlapping windows
-/// 
-/// This decoder divides the syndrome stream into overlapping windows and decodes each
-/// window independently using an inner decoder. It's designed for low-latency decoding
-/// of streaming syndrome data.
+/// @brief A sliding window decoder that processes syndromes in overlapping
+/// windows
+///
+/// This decoder divides the syndrome stream into overlapping windows and
+/// decodes each window independently using an inner decoder. It's designed for
+/// low-latency decoding of streaming syndrome data.
 class sliding_window : public decoder {
 private:
   // --- Input parameters ---
@@ -80,29 +81,32 @@ private:
 
   /// @brief Validate constructor inputs
   void validate_inputs();
-  
+
   /// @brief Initialize the window
   /// @param num_syndromes The number of syndromes to initialize the window for
   void initialize_window(std::size_t num_syndromes);
-  
+
   /// @brief Add a single syndrome to the rolling window (circular buffer)
   void add_syndrome_to_rolling_window(const std::vector<float_t> &syndrome,
-                                       std::size_t syndrome_index,
-                                       bool update_next_write_index = true);
-  
+                                      std::size_t syndrome_index,
+                                      bool update_next_write_index = true);
+
   /// @brief Add a batch of syndromes to the rolling window (circular buffer)
   void add_syndromes_to_rolling_window(
       const std::vector<std::vector<float_t>> &syndromes);
-  
-  /// @brief Get a single syndrome from the rolling window (unwrapping circular buffer)
-  std::vector<float_t> get_syndrome_from_rolling_window(std::size_t syndrome_index);
-  
-  /// @brief Get a batch of syndromes from the rolling window (unwrapping circular buffer)
+
+  /// @brief Get a single syndrome from the rolling window (unwrapping circular
+  /// buffer)
+  std::vector<float_t>
+  get_syndrome_from_rolling_window(std::size_t syndrome_index);
+
+  /// @brief Get a batch of syndromes from the rolling window (unwrapping
+  /// circular buffer)
   std::vector<std::vector<float_t>> get_syndromes_from_rolling_window();
-  
+
   /// @brief Update the read index for the rolling window
   void update_rw_next_read_index();
-  
+
   /// @brief Decode a single window (internal helper)
   void decode_window();
 
@@ -127,7 +131,8 @@ public:
   /// @brief Decode multiple syndromes in batch
   /// @param syndromes Multiple syndrome measurements to decode
   /// @return The decoded error corrections
-  std::vector<decoder_result> decode_batch(const std::vector<std::vector<float_t>> &syndromes) override;
+  std::vector<decoder_result>
+  decode_batch(const std::vector<std::vector<float_t>> &syndromes) override;
 
   /// @brief Get the number of syndromes per round
   /// @return The number of syndromes measured in each round
@@ -146,4 +151,3 @@ public:
 };
 
 } // namespace cudaq::qec
-
