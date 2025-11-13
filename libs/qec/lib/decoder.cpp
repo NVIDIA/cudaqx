@@ -190,9 +190,11 @@ void decoder::set_decoder_id(uint32_t decoder_id) {
 
 uint32_t decoder::get_decoder_id() const { return pimpl->decoder_id; }
 
-void decoder::set_D_sparse(const std::vector<std::vector<uint32_t>> &D_sparse) {
-  this->D_sparse = D_sparse;
-  auto *sw_decoder = dynamic_cast<sliding_window *>(this);
+template <typename PimplType>
+void set_D_sparse_common(decoder *decoder,
+                         const std::vector<std::vector<uint32_t>> &D_sparse,
+                         PimplType *pimpl) {
+  auto *sw_decoder = dynamic_cast<sliding_window *>(decoder);
 
   if (sw_decoder != nullptr) {
     pimpl->is_sliding_window = true;
@@ -215,28 +217,14 @@ void decoder::set_D_sparse(const std::vector<std::vector<uint32_t>> &D_sparse) {
   pimpl->msyn_buffer_index = 0;
 }
 
+void decoder::set_D_sparse(const std::vector<std::vector<uint32_t>> &D_sparse) {
+  this->D_sparse = D_sparse;
+  set_D_sparse_common(this, D_sparse, pimpl.get());
+}
+
 void decoder::set_D_sparse(const std::vector<int64_t> &D_sparse_vec_in) {
   set_sparse_from_vec(D_sparse_vec_in, this->D_sparse);
-  auto *sw_decoder = dynamic_cast<sliding_window *>(this);
-
-  if (sw_decoder != nullptr) {
-    pimpl->is_sliding_window = true;
-    pimpl->num_syndromes_per_round = sw_decoder->get_num_syndromes_per_round();
-    // Check if first row is a first-round detector (single syndrome index)
-    pimpl->has_first_round_detectors =
-        (this->D_sparse.size() > 0 && this->D_sparse[0].size() == 1);
-    pimpl->current_round = 0;
-    pimpl->persistent_detector_buffer.resize(pimpl->num_syndromes_per_round);
-    pimpl->persistent_soft_detector_buffer.resize(
-        pimpl->num_syndromes_per_round);
-  } else {
-    pimpl->is_sliding_window = false;
-  }
-
-  pimpl->num_msyn_per_decode = calculate_num_msyn_per_decode(this->D_sparse);
-  pimpl->msyn_buffer.clear();
-  pimpl->msyn_buffer.resize(pimpl->num_msyn_per_decode);
-  pimpl->msyn_buffer_index = 0;
+  set_D_sparse_common(this, this->D_sparse, pimpl.get());
 }
 
 bool decoder::enqueue_syndrome(const uint8_t *syndrome,
