@@ -652,8 +652,10 @@ Compile for actual Quantinuum hardware:
 **Key Points:**
 
 - Remove ``--emulate`` flag for hardware execution
-- Use real machine names: ``H2-1``, ``H2-2``, etc.
+- Use real machine names: ``Helios``, `Helios-1SC`, etc.
 - Set ``CUDAQ_QUANTINUUM_CREDENTIALS`` environment variable with the user's credentials
+
+Check out the `Quantinuum hardware backend documentation <https://nvidia.github.io/cuda-quantum/latest/using/backends/hardware/iontrap.html#quantinuum>`_ for more information.
 
 Python Execution
 ^^^^^^^^^^^^^^^^
