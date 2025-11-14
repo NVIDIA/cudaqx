@@ -26,24 +26,24 @@ import cudaq_qec as qec
 @cudaq.kernel
 def prep0(logical: qec.patch):
     for i in range(logical.data.size()):
-        cudaq.reset(logical.data[i])
+        reset(logical.data[i])
 
 
 # Measure ZZ stabilizers for 3-qubit repetition code
 @cudaq.kernel
-def measure_stabilizers(logical: qec.patch):
+def measure_stabilizers(logical: qec.patch) -> list[bool]:
     for i in range(logical.ancz.size()):
-        cudaq.reset(logical.ancz[i])
+        reset(logical.ancz[i])
 
     # Z0Z1 stabilizer
-    cudaq.cx(logical.data[0], logical.ancz[0])
-    cudaq.cx(logical.data[1], logical.ancz[0])
+    cx(logical.data[0], logical.ancz[0])
+    cx(logical.data[1], logical.ancz[0])
 
     # Z1Z2 stabilizer
-    cudaq.cx(logical.data[1], logical.ancz[1])
-    cudaq.cx(logical.data[2], logical.ancz[1])
+    cx(logical.data[1], logical.ancz[1])
+    cx(logical.data[2], logical.ancz[1])
 
-    return [cudaq.mz(logical.ancz[0]), cudaq.mz(logical.ancz[1])]
+    return [mz(logical.ancz[0]), mz(logical.ancz[1])]
 
 
 # [Begin QEC Circuit]
@@ -55,22 +55,22 @@ def qec_circuit():
     data = cudaq.qvector(3)
     ancz = cudaq.qvector(2)
     ancx = cudaq.qvector(0)
-    logical = qec.patch(data, ancx, ancz)
+    logical = patch(data, ancx, ancz)
 
     prep0(logical)
 
     # 3 rounds of syndrome measurement
     for _ in range(3):
         syndromes = measure_stabilizers(logical)
-        qec.enqueue_syndromes(0, syndromes)
+        qec.enqueue_syndromes(0, syndromes, 0)
 
     # Get corrections and apply them
     corrections = qec.get_corrections(0, 3, False)
     for i in range(3):
         if corrections[i]:
-            cudaq.x(data[i])
+            x(data[i])
 
-    cudaq.mz(data)
+    mz(data)
 
 
 # [End QEC Circuit]
@@ -96,7 +96,7 @@ def main():
 
     # [Begin Save DEM]
     # Save decoder config
-    config = qec.DecoderConfig()
+    config = qec.decoder_config()
     config.id = 0
     config.type = "multi_error_lut"
     config.block_size = dem.detector_error_matrix.shape[1]
@@ -110,9 +110,11 @@ def main():
         0] // num_syndromes_per_round + 1
     config.D_sparse = qec.generate_timelike_sparse_detector_matrix(
         num_syndromes_per_round, num_rounds, False)
-    config.decoder_custom_args = {"lut_error_depth": 2}
+    lut_config = qec.multi_error_lut_config()
+    lut_config.lut_error_depth = 2
+    config.set_decoder_custom_args(lut_config)
 
-    multi_config = qec.MultiDecoderConfig()
+    multi_config = qec.multi_decoder_config()
     multi_config.decoders = [config]
 
     with open("config.yaml", 'w') as f:
