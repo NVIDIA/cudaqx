@@ -7,6 +7,7 @@
  ******************************************************************************/
 #include <limits>
 #include <pybind11/complex.h>
+#include <pybind11/functional.h>
 #include <pybind11/numpy.h>
 #include <pybind11/operators.h>
 #include <pybind11/stl.h>
@@ -64,6 +65,10 @@ protected:
   /// @brief Python object representing the registered QEC code
   py::object pyCode;
 
+  /// @brief Keep the original Python kernels so that we can hand them back to
+  /// Python.
+  std::unordered_map<qec::operation, py::object> m_py_operation_encodings;
+
 public:
   /// @brief Constructs a PyCodeHandle from a Python QEC code object
   /// @param registeredCode Python object containing the QEC code definition
@@ -112,6 +117,10 @@ public:
       py::object kernel = py::cast<py::object>(kernelHandle);
       auto opKeyEnum = opKey.cast<qec::operation>();
 
+      // Save the original Python kernel object so that we can return a valid
+      // CUDA-Q kernel back to Python later.
+      m_py_operation_encodings.emplace(opKeyEnum, kernel);
+
       // Create the kernel interop object
       cudaq::python::CppPyKernelDecorator opInterop(kernel);
       opInterop.compile();
@@ -147,6 +156,12 @@ public:
     }
   }
 
+  /// @brief Expose read-only access to stored Python kernels.
+  const std::unordered_map<qec::operation, py::object> &
+  get_py_operation_encodings() const {
+    return m_py_operation_encodings;
+  }
+
 protected:
   // Trampoline methods for pure virtual functions
   std::size_t get_num_data_qubits() const override {
@@ -173,6 +188,22 @@ protected:
     return pyCode.attr("get_num_z_stabilizers")().cast<std::size_t>();
   }
 };
+
+namespace {
+static py::object get_python_kernel_or_throw(const code &self, operation op) {
+  auto *pyHandle = dynamic_cast<const PyCodeHandle *>(&self);
+  if (!pyHandle)
+    throw std::runtime_error("This code was not registered from Python; no "
+                             "Python kernel is available.");
+
+  const auto &pyKernels = pyHandle->get_py_operation_encodings();
+  auto it = pyKernels.find(op);
+  if (it == pyKernels.end())
+    throw std::runtime_error("No Python kernel registered for requested op.");
+
+  return it->second;
+}
+} // namespace
 
 // Registry to store code factory functions
 class PyCodeRegistry {
@@ -212,42 +243,6 @@ public:
 
 std::unordered_map<std::string, std::function<py::object(py::kwargs)>>
     PyCodeRegistry::registry;
-
-template <typename T>
-auto copyCUDAQXTensorToPyArray(const cudaqx::tensor<T> &tensor) {
-  auto shape = tensor.shape();
-  auto rows = shape[0];
-  auto cols = shape[1];
-  size_t total_size = rows * cols;
-
-  // Allocate new memory and copy the data
-  T *data_copy = new T[total_size];
-  std::memcpy(data_copy, tensor.data(), total_size * sizeof(T));
-
-  // Create a NumPy array using the buffer protocol
-  return py::array_t<T>(
-      {rows, cols},                  // Shape of the array
-      {cols * sizeof(T), sizeof(T)}, // Strides for row-major layout
-      data_copy,                     // Pointer to the data
-      py::capsule(data_copy, [](void *p) { delete[] static_cast<T *>(p); }));
-}
-
-template <typename T>
-auto copy1DCUDAQXTensorToPyArray(const cudaqx::tensor<T> &tensor) {
-  auto shape = tensor.shape();
-  auto rows = shape[0];
-  size_t total_size = rows;
-
-  // Allocate new memory and copy the data
-  T *data_copy = new T[total_size];
-  std::memcpy(data_copy, tensor.data(), total_size * sizeof(T));
-
-  // Create a NumPy array using the buffer protocol
-  return py::array_t<T>(
-      {static_cast<py::ssize_t>(rows)}, // Shape of the array
-      data_copy,                        // Pointer to the data
-      py::capsule(data_copy, [](void *p) { delete[] static_cast<T *>(p); }));
-}
 
 void bindCode(py::module &mod) {
 
@@ -344,42 +339,107 @@ void bindCode(py::module &mod) {
       .def(
           "get_parity",
           [](code &code) {
-            return copyCUDAQXTensorToPyArray(code.get_parity());
+            return cudaq::python::copyCUDAQXTensorToPyArray(code.get_parity());
           },
           "Get the parity check matrix of the code")
       .def(
           "get_parity_x",
           [](code &code) {
-            return copyCUDAQXTensorToPyArray(code.get_parity_x());
+            return cudaq::python::copyCUDAQXTensorToPyArray(
+                code.get_parity_x());
           },
           "Get the X-type parity check matrix of the code")
       .def(
           "get_parity_z",
           [](code &code) {
-            return copyCUDAQXTensorToPyArray(code.get_parity_z());
+            return cudaq::python::copyCUDAQXTensorToPyArray(
+                code.get_parity_z());
           },
           "Get the Z-type parity check matrix of the code")
       .def(
           "get_pauli_observables_matrix",
           [](code &code) {
-            return copyCUDAQXTensorToPyArray(
+            return cudaq::python::copyCUDAQXTensorToPyArray(
                 code.get_pauli_observables_matrix());
           },
           "Get a matrix of the Pauli observables of the code")
       .def(
           "get_observables_x",
           [](code &code) {
-            return copyCUDAQXTensorToPyArray(code.get_observables_x());
+            return cudaq::python::copyCUDAQXTensorToPyArray(
+                code.get_observables_x());
           },
           "Get the Pauli X observables of the code")
       .def(
           "get_observables_z",
           [](code &code) {
-            return copyCUDAQXTensorToPyArray(code.get_observables_z());
+            return cudaq::python::copyCUDAQXTensorToPyArray(
+                code.get_observables_z());
           },
           "Get the Pauli Z observables of the code")
       .def("get_stabilizers", &code::get_stabilizers,
-           "Get the stabilizer generators of the code");
+           "Get the stabilizer generators of the code")
+      .def("contains_operation", &code::contains_operation, py::arg("op"),
+           "Return true if this code contains the given operation encoding")
+      .def(
+          "get_operation_one_qubit",
+          [](const code &self, operation op) -> py::object {
+            if (!self.contains_operation(op))
+              throw std::runtime_error(
+                  "No encoding registered for requested op.");
+            return get_python_kernel_or_throw(self, op);
+          },
+          py::arg("op"),
+          R"pbdoc(
+              Get a CUDA-Q Python kernel for a one-qubit logical operation.
+
+              Returns:
+                A valid CUDA-Q Python kernel object.
+            )pbdoc")
+      .def(
+          "get_operation_two_qubit",
+          [](const code &self, operation op) -> py::object {
+            if (!self.contains_operation(op))
+              throw std::runtime_error(
+                  "No encoding registered for requested op.");
+            return get_python_kernel_or_throw(self, op);
+          },
+          py::arg("op"),
+          R"pbdoc(
+              Get a CUDA-Q Python kernel for a two-qubit logical operation.
+
+              Returns:
+                A valid CUDA-Q Python kernel object.
+            )pbdoc")
+      .def(
+          "get_stabilizer_round",
+          [](const code &self) -> py::object {
+            if (!self.contains_operation(operation::stabilizer_round))
+              throw std::runtime_error(
+                  "No stabilizer_round encoding is registered.");
+            return get_python_kernel_or_throw(self,
+                                              operation::stabilizer_round);
+          },
+          R"pbdoc(
+              Get a CUDA-Q Python kernel for a stabilizer round logical operation.
+
+              Returns:
+                A valid CUDA-Q Python kernel object.
+            )pbdoc")
+      .def("get_num_data_qubits", &code::get_num_data_qubits,
+           "Total number of physical data qubits required by the code.")
+      .def("get_num_ancilla_qubits", &code::get_num_ancilla_qubits,
+           "Total number of ancilla qubits required by the code.")
+      .def(
+          "get_num_ancilla_x_qubits", &code::get_num_ancilla_x_qubits,
+          "Number of X-type ancilla qubits used for X stabilizer measurements.")
+      .def(
+          "get_num_ancilla_z_qubits", &code::get_num_ancilla_z_qubits,
+          "Number of Z-type ancilla qubits used for Z stabilizer measurements.")
+      .def("get_num_x_stabilizers", &code::get_num_x_stabilizers,
+           "Number of X-type stabilizers.")
+      .def("get_num_z_stabilizers", &code::get_num_z_stabilizers,
+           "Number of Z-type stabilizers.");
 
   qecmod.def("code", [&](const std::string &name) {
     auto cppCodes = qec::get_available_codes();
@@ -438,7 +498,7 @@ void bindCode(py::module &mod) {
       "generate_random_bit_flips",
       [](std::size_t numBits, double error_probability) {
         auto data = generate_random_bit_flips(numBits, error_probability);
-        return copy1DCUDAQXTensorToPyArray(data);
+        return cudaq::python::copy1DCUDAQXTensorToPyArray(data);
       },
       "Generate a rank-1 tensor for random bits", py::arg("numBits"),
       py::arg("error_probability"));
@@ -449,8 +509,9 @@ void bindCode(py::module &mod) {
         auto [synd, dataRes] =
             noise ? sample_memory_circuit(code, numShots, numRounds, *noise)
                   : sample_memory_circuit(code, numShots, numRounds);
-        return py::make_tuple(copyCUDAQXTensorToPyArray(synd),
-                              copyCUDAQXTensorToPyArray(dataRes));
+        return py::make_tuple(
+            cudaq::python::copyCUDAQXTensorToPyArray(synd),
+            cudaq::python::copyCUDAQXTensorToPyArray(dataRes));
       },
       "Sample the memory circuit of the code", py::arg("code"),
       py::arg("numShots"), py::arg("numRounds"),
@@ -462,8 +523,9 @@ void bindCode(py::module &mod) {
         auto [synd, dataRes] =
             noise ? sample_memory_circuit(code, op, numShots, numRounds, *noise)
                   : sample_memory_circuit(code, op, numShots, numRounds);
-        return py::make_tuple(copyCUDAQXTensorToPyArray(synd),
-                              copyCUDAQXTensorToPyArray(dataRes));
+        return py::make_tuple(
+            cudaq::python::copyCUDAQXTensorToPyArray(synd),
+            cudaq::python::copyCUDAQXTensorToPyArray(dataRes));
       },
       "Sample the memory circuit of the code with a specific initial "
       "operation",
@@ -555,14 +617,16 @@ void bindCode(py::module &mod) {
         if (seed.has_value()) {
           auto [syndromes, dataRes] =
               sample_code_capacity(code, numShots, errorProb, seed.value());
-          return py::make_tuple(copyCUDAQXTensorToPyArray(syndromes),
-                                copyCUDAQXTensorToPyArray(dataRes));
+          return py::make_tuple(
+              cudaq::python::copyCUDAQXTensorToPyArray(syndromes),
+              cudaq::python::copyCUDAQXTensorToPyArray(dataRes));
         }
 
         auto [syndromes, dataRes] =
             sample_code_capacity(code, numShots, errorProb);
-        return py::make_tuple(copyCUDAQXTensorToPyArray(syndromes),
-                              copyCUDAQXTensorToPyArray(dataRes));
+        return py::make_tuple(
+            cudaq::python::copyCUDAQXTensorToPyArray(syndromes),
+            cudaq::python::copyCUDAQXTensorToPyArray(dataRes));
       },
       "Sample syndrome measurements with code capacity noise.", py::arg("code"),
       py::arg("numShots"), py::arg("errorProb"), py::arg("seed") = py::none());
@@ -573,14 +637,16 @@ void bindCode(py::module &mod) {
         if (seed.has_value()) {
           auto [syndromes, dataRes] = sample_code_capacity(
               toTensor(H), numShots, errorProb, seed.value());
-          return py::make_tuple(copyCUDAQXTensorToPyArray(syndromes),
-                                copyCUDAQXTensorToPyArray(dataRes));
+          return py::make_tuple(
+              cudaq::python::copyCUDAQXTensorToPyArray(syndromes),
+              cudaq::python::copyCUDAQXTensorToPyArray(dataRes));
         }
 
         auto [syndromes, dataRes] =
             sample_code_capacity(toTensor(H), numShots, errorProb);
-        return py::make_tuple(copyCUDAQXTensorToPyArray(syndromes),
-                              copyCUDAQXTensorToPyArray(dataRes));
+        return py::make_tuple(
+            cudaq::python::copyCUDAQXTensorToPyArray(syndromes),
+            cudaq::python::copyCUDAQXTensorToPyArray(dataRes));
       },
       "Sample syndrome measurements with code capacity noise.", py::arg("H"),
       py::arg("numShots"), py::arg("errorProb"), py::arg("seed") = py::none());

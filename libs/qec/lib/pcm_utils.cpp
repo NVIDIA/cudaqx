@@ -583,4 +583,132 @@ pcm_extend_to_n_rounds(const cudaqx::tensor<uint8_t> &pcm,
 
   return std::make_pair(new_pcm, column_list);
 }
+
+std::string pcm_to_sparse_string(const cudaqx::tensor<uint8_t> &pcm) {
+  // Output the string like:
+  // 2,5,7,-1,2,5,32,-1,...
+  std::stringstream ss;
+  for (std::size_t r = 0; r < pcm.shape()[0]; r++) {
+    const uint8_t *row = &pcm.at({r, 0});
+    for (std::size_t c = 0; c < pcm.shape()[1]; c++) {
+      if (row[c] == 1) {
+        ss << c << ",";
+      }
+    }
+    ss << "-1,";
+  }
+  std::string result = ss.str();
+  result.pop_back(); // trim the final comma
+  return result;
+}
+
+std::vector<std::int64_t>
+pcm_to_sparse_vec(const cudaqx::tensor<uint8_t> &pcm) {
+  std::vector<std::int64_t> sparse_vec;
+  for (std::size_t r = 0; r < pcm.shape()[0]; r++) {
+    for (std::size_t c = 0; c < pcm.shape()[1]; c++) {
+      if (pcm.at({r, c}) == 1) {
+        sparse_vec.push_back(static_cast<std::int64_t>(c));
+      }
+    }
+    sparse_vec.push_back(-1);
+  }
+  return sparse_vec;
+}
+
+cudaqx::tensor<uint8_t> pcm_from_sparse_string(const std::string &sparse_str,
+                                               std::size_t num_rows,
+                                               std::size_t num_cols) {
+  cudaqx::tensor<uint8_t> pcm(std::vector<std::size_t>{num_rows, num_cols});
+  std::stringstream ss(sparse_str);
+  std::string item;
+  std::uint32_t row = 0;
+  while (std::getline(ss, item, ',')) {
+    if (item == "-1") {
+      row++;
+      continue;
+    }
+    std::uint32_t col = std::stoul(item);
+    pcm.at({row, col}) = 1;
+  }
+  return pcm;
+}
+
+cudaqx::tensor<uint8_t>
+pcm_from_sparse_vec(const std::vector<std::int64_t> &sparse_vec,
+                    std::size_t num_rows, std::size_t num_cols) {
+  cudaqx::tensor<uint8_t> pcm(std::vector<std::size_t>{num_rows, num_cols});
+  std::uint64_t row = 0;
+  for (std::int64_t col : sparse_vec) {
+    if (col < 0) {
+      row++;
+      continue;
+    }
+    pcm.at({row, static_cast<uint64_t>(col)}) = 1;
+  }
+  return pcm;
+}
+
+std::vector<std::int64_t>
+generate_timelike_sparse_detector_matrix(std::uint32_t num_syndromes_per_round,
+                                         std::uint32_t num_rounds,
+                                         bool include_first_round) {
+  std::vector<std::int64_t> detector_matrix;
+  if (include_first_round) {
+    for (std::uint32_t i = 0; i < num_syndromes_per_round; i++) {
+      detector_matrix.push_back(i);
+      detector_matrix.push_back(-1);
+    }
+  }
+  // Every round after this is a XOR of the prior round's syndrome with the
+  // current round's syndrome.
+  for (std::uint32_t i = 1; i < num_rounds; i++) {
+    for (std::uint32_t j = 0; j < num_syndromes_per_round; j++) {
+      detector_matrix.push_back((i - 1) * num_syndromes_per_round + j);
+      detector_matrix.push_back(i * num_syndromes_per_round + j);
+      detector_matrix.push_back(-1);
+    }
+  }
+
+  return detector_matrix;
+}
+
+std::vector<std::int64_t> generate_timelike_sparse_detector_matrix(
+    std::uint32_t num_syndromes_per_round, std::uint32_t num_rounds,
+    std::vector<std::int64_t> first_round_matrix) {
+  if (first_round_matrix.size() == 0) {
+    throw std::invalid_argument("generate_timelike_sparse_detector_matrix: "
+                                "first_round_matrix must be non-empty");
+  }
+
+  for (std::uint32_t i = 0; i < first_round_matrix.size(); i++) {
+    bool index_parity = (i % 2 == 0);
+    // even elements should be >= 0
+    if (index_parity && (first_round_matrix[i] < 0)) {
+      throw std::invalid_argument(
+          "generate_timelike_sparse_detector_matrix: first_round_matrix should "
+          "have one index per row (row end indicated by -1)");
+    }
+    // odd elements should be -1
+    if (!index_parity && (first_round_matrix[i] != -1)) {
+      throw std::invalid_argument(
+          "generate_timelike_sparse_detector_matrix: first_round_matrix should "
+          "have one index per row (row end indicated by -1)");
+    }
+  }
+
+  std::vector<std::int64_t> detector_matrix(first_round_matrix);
+
+  // Every round after this is a XOR of the prior round's syndrome with the
+  // current round's syndrome.
+  for (std::uint32_t i = 1; i < num_rounds; i++) {
+    for (std::uint32_t j = 0; j < num_syndromes_per_round; j++) {
+      detector_matrix.push_back((i - 1) * num_syndromes_per_round + j);
+      detector_matrix.push_back(i * num_syndromes_per_round + j);
+      detector_matrix.push_back(-1);
+    }
+  }
+
+  return detector_matrix;
+}
 } // namespace cudaq::qec

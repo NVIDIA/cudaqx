@@ -14,7 +14,8 @@ using namespace cudaqx;
 
 namespace cudaq::optim {
 
-/// @brief The
+/// @brief The COBYLA derivative-free black-box function optimizer from the
+/// [PRIMA](https://www.libprima.net) library.
 class cobyla : public optimizer {
 public:
   using optimizer::optimize;

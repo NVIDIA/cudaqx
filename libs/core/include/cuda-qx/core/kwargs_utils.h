@@ -47,6 +47,31 @@ inline heterogeneous_map hetMapFromKwargs(const py::kwargs &kwargs) {
     } else if (py::isinstance<py::dict>(value)) {
       // Recursively convert nested dictionary
       result.insert(key, hetMapFromKwargs(value.cast<py::dict>()));
+    } else if (py::isinstance<py::list>(value)) {
+      // Handle Python lists
+      py::list py_list = value.cast<py::list>();
+      if (py_list.size() > 0) {
+        // Check if it's a nested list (list of lists)
+        if (py::isinstance<py::list>(py_list[0])) {
+          std::vector<std::vector<double>> vec_vec;
+          for (const auto &item : py_list) {
+            py::list inner_list = item.cast<py::list>();
+            std::vector<double> inner_vec;
+            for (const auto &v : inner_list) {
+              inner_vec.push_back(v.cast<double>());
+            }
+            vec_vec.push_back(inner_vec);
+          }
+          result.insert(key, std::move(vec_vec));
+        } else {
+          // Single-level list - try to convert to vector<double>
+          std::vector<double> vec;
+          for (const auto &item : py_list) {
+            vec.push_back(item.cast<double>());
+          }
+          result.insert(key, std::move(vec));
+        }
+      }
     } else if (py::isinstance<py::array>(value)) {
       py::array np_array = value.cast<py::array>();
       py::buffer_info info = np_array.request();

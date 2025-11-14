@@ -18,9 +18,12 @@ show_help() {
     echo "Usage: $0 [options]"
     echo "Options:"
     echo "  --build-type      Build type (e.g., Release)"
+    echo "  --cuda-version    CUDA version to build wheel for (e.g. 12 or 13)"
     echo "  --cudaq-prefix    Path to CUDA-Q's install prefix"
     echo "                    (default: \$HOME/.cudaq)"
-    echo "  --python-version  Python version to build wheel for (e.g. 3.10)"
+    echo "  --python-version  Python version to build wheel for (e.g. 3.11)"
+    echo "  --tensorrt-path   Path to TensorRT installation directory"
+    echo "                    (default: /trt_download/TensorRT-10.13.3.9)"
     echo "  --devdeps         Build wheels suitable for internal testing"
     echo "                    (not suitable for distribution but sometimes"
     echo "                    helpful for debugging)"
@@ -40,6 +43,15 @@ parse_options() {
                     exit 1
                 fi
                 ;;
+            --cuda-version)
+                if [[ -n "$2" && "$2" != -* ]]; then
+                    cuda_version=("$2")
+                    shift 2
+                else
+                    echo "Error: Argument for $1 is missing" >&2
+                    exit 1
+                fi
+                ;;
             --cudaq-prefix)
                 if [[ -n "$2" && "$2" != -* ]]; then
                     cudaq_prefix=("$2")
@@ -52,6 +64,15 @@ parse_options() {
             --python-version)
                 if [[ -n "$2" && "$2" != -* ]]; then
                     python_version=("$2")
+                    shift 2
+                else
+                    echo "Error: Argument for $1 is missing" >&2
+                    exit 1
+                fi
+                ;;
+            --tensorrt-path)
+                if [[ -n "$2" && "$2" != -* ]]; then
+                    tensorrt_path=("$2")
                     shift 2
                 else
                     echo "Error: Argument for $1 is missing" >&2
@@ -88,14 +109,16 @@ parse_options() {
 # Defaults
 cudaq_prefix=$HOME/.cudaq
 build_type=Release
-python_version=3.10
+python_version=3.11
+tensorrt_path=/trt_download/TensorRT-10.13.3.9
 devdeps=false
 wheels_version=0.0.0
+cuda_version=12
 
 # Parse options
 parse_options "$@"
 
-echo "Building in $build_type mode for Python $python_version, version $wheels_version"
+echo "Building in $build_type mode for Python $python_version, version $wheels_version, CUDA version $cuda_version"
 
 # ==============================================================================
 # Helpers
@@ -123,8 +146,9 @@ export CUDAQX_SOLVERS_VERSION=$wheels_version
 # ==============================================================================
 
 cd libs/qec
+cp pyproject.toml.cu${cuda_version} pyproject.toml
 
-SKBUILD_CMAKE_ARGS="-DCUDAQ_DIR=$cudaq_prefix/lib/cmake/cudaq"
+SKBUILD_CMAKE_ARGS="-DCUDAQ_DIR=$cudaq_prefix/lib/cmake/cudaq;-DTENSORRT_ROOT=$tensorrt_path"
 if ! $devdeps; then
   SKBUILD_CMAKE_ARGS+=";-DCMAKE_CXX_COMPILER_EXTERNAL_TOOLCHAIN=/opt/rh/gcc-toolset-11/root/usr/lib/gcc/${ARCH}-redhat-linux/11/"
 fi
@@ -134,9 +158,15 @@ $python -m build --wheel
 
 CUDAQ_EXCLUDE_LIST=$(for f in $(find $cudaq_prefix/lib -name "*.so" -printf "%P\n" | sort); do echo "--exclude $f"; done | tr '\n' ' ')
 
-LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$(pwd)/_skbuild/lib" \
+# We need to exclude a few libraries to prevent auditwheel from mistakenly grafting them into the wheel.
+LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$(pwd)/_skbuild/lib:$tensorrt_path/lib" \
 $python -m auditwheel -v repair dist/*.whl $CUDAQ_EXCLUDE_LIST \
   --wheel-dir /wheels \
+  --exclude libcudart.so.${cuda_version} \
+  --exclude libnvinfer.so.10 \
+  --exclude libnvonnxparser.so.10 \
+  --exclude libcudaq-qec.so \
+  --exclude libcudaq-qec-realtime-decoding.so \
   ${PLAT_STR}
 
 # ==============================================================================
@@ -144,6 +174,7 @@ $python -m auditwheel -v repair dist/*.whl $CUDAQ_EXCLUDE_LIST \
 # ==============================================================================
 
 cd ../solvers
+cp pyproject.toml.cu${cuda_version} pyproject.toml
 
 SKBUILD_CMAKE_ARGS="-DCUDAQ_DIR=$cudaq_prefix/lib/cmake/cudaq"
 if ! $devdeps; then

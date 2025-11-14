@@ -35,7 +35,7 @@ clang_format_executable=${clang_format_executable:-clang-format}
 cd $(git rev-parse --show-toplevel)
 
 # Run Clang Format
-git ls-files -- '*.cpp' '*.h' '*.cu' '*.cuh' | xargs $clang_format_executable -i
+git ls-files -- '*.cpp' '*.c' '*.h' '*.cu' '*.cuh' | xargs $clang_format_executable -i
 
 # Take us back to where we were
 cd -

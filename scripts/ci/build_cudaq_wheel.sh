@@ -15,7 +15,7 @@ mkdir /wheels
 git clone --filter=tree:0 https://github.com/NVIDIA/cuda-quantum.git /cuda-quantum
 cd /cuda-quantum
 
-export CUDA_VERSION=12.0
+export CUDA_VERSION=12.6
 
 # We need to use a newer toolchain because CUDA-QX libraries rely on c++20
 source /opt/rh/gcc-toolset-11/enable
@@ -27,7 +27,7 @@ export CXX=g++
 # Installing dependencies
 # ==============================================================================
 
-python_version=3.10
+python_version=3.12
 python=python${python_version}
 ${python} -m pip install --no-cache-dir numpy auditwheel
 
@@ -45,12 +45,9 @@ echo "Building MLIR bindings for ${python}" && \
 echo "Building CUDA-Q wheel for ${python}."
 cd /cuda-quantum
 
-# Patch the pyproject.toml file to change the CUDA version if needed
-if [ "${CUDA_VERSION#12.}" != "${CUDA_VERSION}" ]; then \
-  sed -i "s/-cu11/-cu12/g" pyproject.toml && \
-  sed -i -E "s/(nvidia-cublas-cu[0-9]* ~= )[0-9\.]*/\1${CUDA_VERSION}/g" pyproject.toml; \
-  sed -i -E "s/(nvidia-cuda-runtime-cu[0-9]* ~= )[0-9\.]*/\1${CUDA_VERSION}/g" pyproject.toml; \
-fi
+# Select the correct pyproject.toml file.
+rm -f pyproject.toml # remove the symlink if it exists
+cp pyproject.toml.cu${CUDA_VERSION} pyproject.toml
 
 # Build the wheel
 echo "Building wheel for python${python_version}."

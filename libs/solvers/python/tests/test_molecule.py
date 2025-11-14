@@ -25,11 +25,11 @@ def test_operators():
                                        casci=True)
     print(molecule.hamiltonian)
     print(molecule.energies)
-    assert np.isclose(-1.11, molecule.energies['hf_energy'], atol=1e-2)
-    assert np.isclose(-1.13, molecule.energies['fci_energy'], atol=1e-2)
+    assert np.isclose(-1.1163, molecule.energies['hf_energy'], atol=1e-2)
+    assert np.isclose(-1.1371, molecule.energies['fci_energy'], atol=1e-4)
     from scipy.linalg import eigh
     minE = eigh(molecule.hamiltonian.to_matrix(), eigvals_only=True)[0]
-    assert np.isclose(-1.13, minE, atol=1e-2)
+    assert np.isclose(-1.1371, minE, atol=1e-4)
 
 
 def test_from_xyz_filename():
@@ -233,3 +233,52 @@ def test_as_with_casscf():
     print(molecule.energies)
     print(molecule.n_orbitals)
     print(molecule.n_electrons)
+
+
+def test_H2_UR():
+    geometry = [('H', (0., 0., 0.)), ('H', (0., 0., .7474))]
+    molecule = solvers.create_molecule(geometry,
+                                       'sto-3g',
+                                       0,
+                                       0,
+                                       UR=True,
+                                       ccsd=True,
+                                       casci=True,
+                                       verbose=True)
+
+    print(molecule.energies)
+    assert np.isclose(-1.1163, molecule.energies['hf_energy'], atol=1e-4)
+    assert np.isclose(-1.1371, molecule.energies['fci_energy'], atol=1e-4)
+    from scipy.linalg import eigh
+    minE = eigh(molecule.hamiltonian.to_matrix(), eigvals_only=True)[0]
+    assert np.isclose(-1.1371, minE, atol=1e-4)
+
+
+def test_N2_UR_as():
+    geometry = [('N', (0., 0., 0.56)), ('N', (0., 0., -0.56))]
+    molecule = solvers.create_molecule(geometry,
+                                       '631g',
+                                       0,
+                                       0,
+                                       UR=True,
+                                       nele_cas=4,
+                                       norb_cas=4,
+                                       ccsd=True,
+                                       casci=True,
+                                       verbose=True)
+
+    print(molecule.energies)
+    assert molecule.n_orbitals == 4
+    assert molecule.n_electrons == 4
+    assert np.isclose(molecule.energies['core_energy'], -103.31815, atol=1e-5)
+    assert np.isclose(molecule.energies['UR-CCSD'], -108.942725, atol=1e-5)
+    assert np.isclose(molecule.energies['UR-CASCI'], -108.94365, atol=1e-5)
+
+    op = solvers.jordan_wigner(molecule.hpq, molecule.hpqrs,
+                               molecule.energies['core_energy'])
+
+    assert molecule.hamiltonian == op
+
+    from scipy.linalg import eigh
+    minE = eigh(molecule.hamiltonian.to_matrix(), eigvals_only=True)[0]
+    assert np.isclose(minE, -108.9436, atol=1e-4)

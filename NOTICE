@@ -48,21 +48,29 @@ License at <https://github.com/xtensor-stack/xtensor/blob/master/LICENSE>
 
 ----------------------------------------------------------------
 
-liblbfgs - MIT License 
+libgfortran - GCC Runtime Library Exception
+<https://github.com/gcc-mirror/gcc/tree/releases/gcc-11.2.0/libgfortran>
+
+License at <https://github.com/gcc-mirror/gcc/blob/releases/gcc-11.2.0/libgfortran/libgfortran.h>
+
+----------------------------------------------------------------
+
+liblbfgs - MIT License
 <https://github.com/chokkan/liblbfgs>
 
 License at <https://github.com/chokkan/liblbfgs/blob/master/COPYING>
 
 ----------------------------------------------------------------
 
-Prima - BSD 3-Clause 
+PRIMA - BSD 3-Clause
+Developed by Zaikun Zhang and contributors based on the works of M.J.D. Powell.
 <https://github.com/libprima/prima>
 
 License at <https://github.com/libprima/prima/blob/main/LICENCE.txt>
 
 ----------------------------------------------------------------
 
-Stim - Apache 2.0 
+Stim - Apache 2.0
 <https://github.com/quantumlib/Stim>
 
 License at <https://github.com/quantumlib/Stim/blob/main/LICENSE>
