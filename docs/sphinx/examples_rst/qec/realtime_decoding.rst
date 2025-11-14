@@ -437,7 +437,7 @@ This approach reduces memory and computational requirements while still capturin
   * ``window_size``: Number of rounds per window
   * ``step_size``: Window advancement (equals window_size for non-overlapping)
   * ``num_syndromes_per_round``: Syndromes per round
-  * ``inner_decoder_name``: Type of decoder for each window
+  * ``inner_decoder_name``: Type of decoder for the windows
 
 .. tab:: Python
 
