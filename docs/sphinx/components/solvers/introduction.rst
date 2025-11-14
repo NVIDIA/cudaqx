@@ -502,6 +502,8 @@ CUDA-QX provides several pre-built operator pools for ADAPT-VQE:
 
 .. code-block:: python
 
+    import cudaq_solvers as solvers
+
     # Generate different operator pools
     gsd_ops = solvers.get_operator_pool(
         "spin_complement_gsd",
@@ -528,6 +530,8 @@ CUDA-QX provides several state preparations ansatz for VQE.
 * **uccgsd**: UCC generalized singles and doubles
 
 .. code-block:: python
+
+    import cudaq_solvers as solvers
 
     # Using UCCSD ansatz
     geometry = [('H', (0., 0., 0.)), ('H', (0., 0., .7474))]
