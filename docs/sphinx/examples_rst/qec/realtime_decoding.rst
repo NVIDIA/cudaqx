@@ -25,11 +25,11 @@ Real-time decoding integrates seamlessly into quantum error correction pipelines
 
 The workflow consists of four stages:
 
-1. **Detector Error Model (DEM) Generation**: Before running a quantum program, the user first characterizes how errors propagate through the quantum circuit. This involves running the circuit through a noisy simulator (like Stim) to construct a detector error model that maps error mechanisms to syndrome patterns. This step is performed once during development and produces a detailed error characterization that informs the decoder about the circuit's error structure.
+1. **Detector Error Model (DEM) Generation**: Before running a quantum program, the user first characterizes how errors propagate through the quantum circuit. The library internally uses Memory Syndrome Matrix (MSM) representations to track error propagation, but this complexity is abstracted through helper functions like ``z_dem_from_memory_circuit``. The user simply provides a quantum code, noise model, and circuit parameters, and receives a complete detector error model that maps error mechanisms to syndrome patterns. This step is performed once during development.
 
-2. **Decoder Configuration**: Using the DEM, the user configures decoder instances with the specific error model data. This includes converting parity check matrices to sparse format, setting decoder-specific parameters (like lookup table depth or BP iterations), and assigning unique IDs to each logical qubit's decoder. The configuration captures all the information decoders need to interpret syndrome measurements correctly.
+2. **Decoder Configuration and Saving**: Using the DEM, the user configures decoder instances with the specific error model data. This includes converting parity check matrices to sparse format, setting decoder-specific parameters (like lookup table depth or BP iterations), and assigning unique IDs to each logical qubit's decoder. The configuration is then saved to a YAML file, capturing all the information decoders need to interpret syndrome measurements correctly. This creates a portable, reusable configuration that separates characterization from execution.
 
-3. **Decoder Initialization**: Just before circuit execution, the user loads the saved configuration to initialize the decoder instances. This step prepares the decoders for operation and can be done from YAML files for easy reuse across experiments. The initialization is fast and happens on the host system before any quantum operations begin.
+3. **Decoder Loading and Initialization**: Just before circuit execution, the user loads the saved YAML configuration file. The library parses the configuration, instantiates the appropriate decoder implementations, initializes internal data structures, and registers the decoders with the CUDA-Q runtime. For GPU-based decoders, matrices are transferred to device memory; for lookup table decoders, syndrome-to-correction mappings are constructed. This initialization takes milliseconds to seconds depending on code size and happens before quantum operations begin.
 
 4. **Real-Time Decoding**: During quantum circuit execution, the decoding API is used within quantum kernels to interact with decoders. As the circuit measures stabilizers, syndromes are enqueued to the decoder, which processes them concurrently. When corrections are needed, the decoder is queried and the suggested operations are applied to the logical qubits. This entire process happens within the coherence time constraints of the quantum hardware.
 
@@ -83,63 +83,36 @@ The first step is to characterize the quantum circuit's behavior under noise.
 A detector error model (DEM) captures the relationship between physical errors and the syndrome patterns they produce. 
 This characterization is circuit-specific and depends on the code structure, noise model, and measurement schedule.
 
-To generate a DEM, the user runs the circuit through a noisy simulator that tracks how errors propagate. 
-The CUDA-Q QEC library uses the Memory Syndrome Matrix (MSM) representation to efficiently encode this information. 
-The MSM captures all possible error chains and their syndrome signatures, which are then processed into the matrices that decoders need.
+Under the hood, the CUDA-Q QEC library uses the Memory Syndrome Matrix (MSM) representation to efficiently encode error propagation information. The MSM captures all possible error chains and their syndrome signatures, tracking how errors propagate through the circuit over time. However, this complexity is abstracted away from the user through convenient helper functions.
+
+The library provides a family of ``dem_from_memory_circuit`` functions that automatically handle the MSM generation and processing:
+
+* ``z_dem_from_memory_circuit``: For circuits measuring Z-basis stabilizers (used in the example below)
+* ``x_dem_from_memory_circuit``: For circuits measuring X-basis stabilizers
+* ``dem_from_memory_circuit``: General-purpose function for arbitrary stabilizer measurements
+
+These functions take a quantum code, an initial state preparation operation, the number of measurement rounds, and a noise model, then return a complete detector error model ready for decoder configuration. The user simply needs to configure the noise model and specify the circuit structure—the library handles all the error tracking and matrix construction automatically.
 
 Here is how to generate a DEM for a circuit:
 
 .. tab:: Python
 
-   .. code-block:: python
-
-      import cudaq
-      import cudaq_qec as qec
-
-      # Set up code and noise
-      cudaq.set_target("stim")
-      code = qec.get_code("surface_code", distance=5)
-      noise = cudaq.NoiseModel()
-      # ... configure noise ...
-
-      # Generate DEM using MSM
-      msm_strings, msm_dims, probs, err_ids = qec.compute_msm(
-          my_quantum_circuit, return_full=True)
-
-      dem = qec.DetectorErrorModel()
-      dem.error_rates = probs
-      dem.error_ids = err_ids
-      
-      # Process MSM to create detector error matrix
-      mz_table = qec.construct_mz_table(msm_strings)
-      # ... build detector_error_matrix from mz_table ...
+   .. literalinclude:: ../../examples/qec/python/real_time_complete.py
+      :language: python
+      :start-after: # [Begin DEM Generation]
+      :end-before: # [End DEM Generation]
 
 .. tab:: C++
 
-   .. code-block:: cpp
+   .. literalinclude:: ../../examples/qec/cpp/real_time_complete.cpp
+      :language: cpp
+      :start-after: // [Begin DEM Generation]
+      :end-before: // [End DEM Generation]
 
-      #include "cudaq.h"
-      #include "cudaq/qec/decoder.h"
+Step 2: Configure and Save Decoder
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-      // Generate MSM
-      cudaq::noise_model noise;
-      cudaq::ExecutionContext ctx_msm("msm");
-      ctx_msm.noiseModel = &noise;
-      
-      auto &platform = cudaq::get_platform();
-      platform.set_exec_ctx(&ctx_msm);
-      my_quantum_circuit(/*...*/);
-      platform.reset_exec_ctx();
-      
-      // Extract DEM from MSM
-      auto msm_strings = ctx_msm.result.sequential_data();
-      cudaq::qec::detector_error_model dem;
-      // ... build DEM from MSM ...
-
-Step 2: Configure Decoder
-^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Once a DEM has been generated, the next step is to package this information into a decoder configuration. 
+Once a DEM has been generated, the next step is to package this information into a decoder configuration and save it to a YAML file. 
 The configuration structure holds all the parameters a decoder needs: the parity check matrix (H_sparse), 
 the observable flip matrix (O_sparse), the detector error matrix (D_sparse), 
 and decoder-specific tuning parameters. 
@@ -154,94 +127,62 @@ For lookup table decoders, the user specifies how many simultaneous errors to co
 For belief propagation decoders, the user sets iteration limits and convergence criteria. 
 The configuration API provides type-safe structures for each decoder, ensuring that all required parameters are included.
 
-The generation of the configuration will depend on the decoder type and the detector error model studied in other sections of the documentation.
-Here is how to create a decoder configuration:
+The configuration is then saved to a YAML file for reuse. The YAML format is human-readable, making it easy to inspect, modify, and share configurations across different execution environments.
+
+Here is how to create and save a decoder configuration:
 
 .. tab:: Python
 
-   .. code-block:: python
-
-      # Create configuration
-      config = qec.decoder_config()
-      config.id = 0
-      config.type = "multi_error_lut"
-      config.block_size = dem.num_error_mechanisms()
-      config.syndrome_size = dem.num_detectors()
-      
-      # Convert matrices to sparse format
-      config.H_sparse = qec.pcm_to_sparse_vec(dem.detector_error_matrix)
-      config.O_sparse = qec.pcm_to_sparse_vec(dem.observables_flips_matrix)
-      config.D_sparse = qec.generate_timelike_sparse_detector_matrix(
-          num_syndromes_per_round, num_rounds, False)
-      
-      # Set decoder parameters
-      lut_config = qec.multi_error_lut_config()
-      lut_config.lut_error_depth = 2
-      config.set_decoder_custom_args(lut_config)
+   .. literalinclude:: ../../examples/qec/python/real_time_complete.py
+      :language: python
+      :start-after: # [Begin Save DEM]
+      :end-before: # [End Save DEM]
 
 .. tab:: C++
 
-   .. code-block:: cpp
+   .. literalinclude:: ../../examples/qec/cpp/real_time_complete.cpp
+      :language: cpp
+      :start-after: // [Begin Save DEM]
+      :end-before: // [End Save DEM]
 
-      using namespace cudaq::qec::decoding::config;
-      
-      // Create configuration
-      decoder_config config;
-      config.id = 0;
-      config.type = "multi_error_lut";
-      config.block_size = dem.num_error_mechanisms();
-      config.syndrome_size = dem.num_detectors();
-      
-      // Convert matrices to sparse format
-      config.H_sparse = cudaq::qec::pcm_to_sparse_vec(dem.detector_error_matrix);
-      config.O_sparse = cudaq::qec::pcm_to_sparse_vec(dem.observables_flips_matrix);
-      config.D_sparse = cudaq::qec::generate_timelike_sparse_detector_matrix(
-          num_syndromes_per_round, num_rounds, false);
-      
-      // Set decoder parameters
-      multi_error_lut_config lut_config;
-      lut_config.lut_error_depth = 2;
-      config.decoder_custom_args = lut_config;
-
-Step 3: Save and Load Configuration
+Step 3: Load Configuration
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Decoder configurations can be substantial - containing detailed error models with thousands of entries. Rather than reconstructing these configurations for every experiment, they can be saved to YAML files for reuse. This approach offers several benefits: it separates the characterization workflow from the runtime workflow, makes configurations portable across different execution environments, and allows version control of decoder settings alongside code.
+Before running quantum circuits with real-time decoding, the saved decoder configuration must be loaded and initialized. 
+This step bridges the gap between the offline characterization phase (Steps 1-2) and the online execution phase (Step 4), 
+preparing the decoder instances for real-time operation.
 
-The YAML format is human-readable, making it easy to inspect, modify, and share configurations. The user can maintain a library of configurations for different code distances, noise levels, and decoder types, then simply load the appropriate one when running experiments. The configuration system handles all serialization details automatically, preserving the exact sparse matrix representations and decoder parameters.
+The configuration loading process performs several important operations:
 
-When a configuration is loaded from file, the library validates all required fields and initializes the decoder instances in the background. This initialization happens quickly, typically only a few milliseconds at startup, so it does not add noticeable latency to the workflow.
+1. **YAML Parsing**: The configuration file is parsed and validated to ensure all required fields are present and properly formatted. This includes checking matrix dimensions, decoder parameters, and metadata.
 
-Here is how to save and load configurations:
+2. **Decoder Instantiation**: Based on the decoder type specified in the configuration (e.g., ``multi_error_lut``, ``nv-qldpc-decoder``), the appropriate decoder implementation is instantiated and allocated resources on the GPU or CPU.
+
+3. **Matrix Initialization**: The sparse matrices (H_sparse, O_sparse, D_sparse) are loaded into the decoder's internal data structures. For GPU-based decoders, this includes transferring data to device memory.
+
+4. **Decoder-Specific Initialization**: Each decoder type performs its own preparation: lookup table decoders build syndrome-to-correction mappings, belief propagation decoders initialize message-passing structures, and sliding window decoders configure their buffering mechanisms.
+
+5. **Backend Registration**: The decoder instances are registered with the CUDA-Q runtime so they can be accessed from quantum kernels using their unique IDs.
+
+This initialization happens quickly, typically only a few milliseconds for small codes and up to a few seconds for large distance codes with complex decoders. Since it occurs before quantum circuit execution, it does not impact the latency-critical decoding operations.
+
+The separation of configuration from execution provides significant benefits: users can maintain a library of configurations for different code distances, noise levels, and decoder types, then simply load the appropriate one when running experiments. Configurations can be version-controlled alongside code, shared across research teams, and validated offline before deployment to quantum hardware.
+
+Here is how to load a decoder configuration:
 
 .. tab:: Python
 
-   .. code-block:: python
-
-      multi_config = qec.multi_decoder_config()
-      multi_config.decoders = [config]
-      
-      yaml_str = multi_config.to_yaml_str(200)
-      with open("decoder_config.yaml", "w") as f:
-          f.write(yaml_str)
-      
-      # Load configuration
-      status = qec.configure_decoders_from_file("decoder_config.yaml")
+   .. literalinclude:: ../../examples/qec/python/real_time_complete.py
+      :language: python
+      :start-after: # [Begin Load DEM]
+      :end-before: # [End Load DEM]
 
 .. tab:: C++
 
-   .. code-block:: cpp
-
-      multi_decoder_config multi_config;
-      multi_config.decoders.push_back(config);
-      
-      std::string yaml_str = multi_config.to_yaml_str(200);
-      std::ofstream file("decoder_config.yaml");
-      file << yaml_str;
-      file.close();
-      
-      // Load configuration
-      int status = configure_decoders_from_file("decoder_config.yaml");
+   .. literalinclude:: ../../examples/qec/cpp/real_time_complete.cpp
+      :language: cpp
+      :start-after: // [Begin Load DEM]
+      :end-before: // [End Load DEM]
 
 Step 4: Use in Quantum Kernels
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -256,68 +197,17 @@ Here is how to use the real-time decoding API in quantum kernels:
 
 .. tab:: Python
 
-   .. code-block:: python
-
-      @cudaq.kernel
-      def qec_circuit(num_rounds: int, decoder_id: int):
-          # Reset decoder
-          qec.reset_decoder(decoder_id)
-          
-          # Allocate qubits
-          data = cudaq.qvector(25)
-          ancx = cudaq.qvector(12)
-          ancz = cudaq.qvector(12)
-          logical = qec.patch(data, ancx, ancz)
-          
-          # Prepare logical state
-          prep_0(logical)
-          
-          # Syndrome extraction with real-time decoding
-          for round_idx in range(num_rounds):
-              syndromes = measure_stabilizers(logical)
-              qec.enqueue_syndromes(decoder_id, syndromes)
-          
-          # Get and apply corrections
-          corrections = qec.get_corrections(decoder_id, 1, False)
-          if corrections[0]:
-              x(data)  # Apply correction
-          
-          # Measure logical observable
-          result = mz(data)
+   .. literalinclude:: ../../examples/qec/python/real_time_complete.py
+      :language: python
+      :start-after: # [Begin QEC Circuit]
+      :end-before: # [End QEC Circuit]
 
 .. tab:: C++
 
-   .. code-block:: cpp
-
-      #include "cudaq/qec/realtime/decoding.h"
-      
-      __qpu__ void qec_circuit(int num_rounds, int decoder_id) {
-          // Reset decoder
-          cudaq::qec::decoding::reset_decoder(decoder_id);
-          
-          // Allocate qubits
-          cudaq::qvector data(25), ancx(12), ancz(12);
-          cudaq::qec::patch logical(data, ancx, ancz);
-          
-          // Prepare logical state
-          prep0(logical);
-          
-          // Syndrome extraction with real-time decoding
-          for (int round = 0; round < num_rounds; ++round) {
-              auto syndromes = measure_stabilizers(logical);
-              cudaq::qec::decoding::enqueue_syndromes(decoder_id, syndromes);
-          }
-          
-          // Get and apply corrections
-          auto corrections = cudaq::qec::decoding::get_corrections(
-              decoder_id, 1, false);
-          if (corrections[0]) {
-              cudaq::x(data);  // Apply correction
-          }
-          
-          // Measure logical observable
-          auto result = mz(data);
-      }
+   .. literalinclude:: ../../examples/qec/cpp/real_time_complete.cpp
+      :language: cpp
+      :start-after: // [Begin QEC Circuit]
+      :end-before: // [End QEC Circuit]
 
 Decoder Types
 -------------
