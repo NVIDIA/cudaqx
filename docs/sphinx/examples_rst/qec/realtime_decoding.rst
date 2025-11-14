@@ -36,7 +36,7 @@ The workflow consists of four stages:
 Real-Time Decoding Example
 ----------------
 
-Here is a small example demonstrating real-time decoding in Python and C++:
+Here are two examples demonstrating real-time decoding in Python and C++:
 
 .. tab:: Python
 
