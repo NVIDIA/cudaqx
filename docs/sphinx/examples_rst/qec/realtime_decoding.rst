@@ -714,7 +714,7 @@ They are valid both for python and C++ applications, however, they must be set b
 
 1. **Missing libraries**: Ensure all ``-lcudaq-qec-*`` libraries are linked in correct order
 2. **Wrong backend library**: Use ``-simulation`` for Stim, ``-quantinuum`` for Quantinuum
-3. **Missing ``--export-dynamic``**: Required for Quantinuum targets
+3. **Missing** ``--export-dynamic`` **flag**: Required for Quantinuum targets
 4. **Wrong target flags**: ``--emulate`` with ``Helios-Fake`` for emulation, remove for hardware
 
 **Common Runtime Issues:**
