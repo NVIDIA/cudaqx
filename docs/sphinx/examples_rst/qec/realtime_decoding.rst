@@ -548,6 +548,11 @@ Compile for actual Quantinuum hardware:
 - Set ``CUDAQ_QUANTINUUM_CREDENTIALS`` environment variable with the user's credentials.
   Check out the `Quantinuum hardware backend documentation <https://nvidia.github.io/cuda-quantum/latest/using/backends/hardware/iontrap.html#quantinuum>`_ for more information.
 
+.. note::
+  When running with `--emulate`, there is no noise being applied because there
+  is currently no way to express noise in target-specific QIR. Therefore, when
+  running with emulation, users will see noise-free sample data.
+
 Python Execution
 ^^^^^^^^^^^^^^^^
 
