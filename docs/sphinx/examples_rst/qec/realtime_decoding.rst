@@ -435,7 +435,7 @@ Use the Quantinuum backend for hardware or emulation:
 
       cudaq.set_target("quantinuum",
                        emulate=False,  # True for emulation
-                       machine="H2-1",
+                       machine="Helios-1",
                        extra_payload_provider="decoder")
       
       qec.configure_decoders_from_file("config.yaml")
@@ -446,7 +446,7 @@ Use the Quantinuum backend for hardware or emulation:
    .. code-block:: bash
 
       # Compile for Quantinuum
-      nvq++ --target quantinuum --quantinuum-machine H2-1 \
+      nvq++ --target quantinuum --quantinuum-machine Helios-1 \
             my_circuit.cpp -lcudaq-qec \
             -lcudaq-qec-realtime-quantinuum
       
@@ -527,7 +527,7 @@ Compile for actual Quantinuum hardware:
 .. code-block:: bash
 
    nvq++ --target quantinuum \
-         --quantinuum-machine H2-1 \
+         --quantinuum-machine Helios-1 \
          my_circuit.cpp \
          -lcudaq-qec \
          -lcudaq-qec-realtime-decoding \
@@ -619,8 +619,8 @@ Python Execution
 
    # Configure target for hardware
    cudaq.set_target("quantinuum",
-                    emulate=False,  # Hardware execution
-                    machine="H2-1",  # Use actual hardware: H2-1, H2-2, etc.
+                    emulate=False,       # Hardware execution
+                    machine="Helios-1",  # Use actual hardware
                     extra_payload_provider="decoder")
    
    # Load decoder configuration
