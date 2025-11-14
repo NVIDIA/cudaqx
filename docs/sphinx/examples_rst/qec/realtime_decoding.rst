@@ -357,7 +357,7 @@ multi_error_lut
 
 The multi-error lookup table decoder extends the single-error approach by considering combinations of multiple simultaneous errors. It pre-computes syndrome patterns for all possible combinations of up to ``N`` errors (where ``N`` is the ``lut_error_depth`` parameter), providing accurate corrections even when multiple errors occur in the same round.
 
-The key parameter is ``lut_error_depth``, which controls the error correction capability. Setting this to 2 means the decoder considers all possible pairs of errors, significantly improving performance over the single-error version. Increasing to 3 provides even better correction but requires more memory and preprocessing time. 
+The configurable parameter is ``lut_error_depth``, which controls the error correction capability. Setting this to 2 means the decoder considers all possible pairs of errors, significantly improving performance over the single-error version. Increasing to 3 provides even better correction but requires more memory and preprocessing time. 
 For most practical scenarios with distance-5 to distance-9 codes and error rates around 0.1-1% (it also depends on noise model and code distance), a depth of 2 offers the sweet spot between accuracy and performance.
 
 This decoder works well up to moderate code distances because the lookup table size scales combinatorially with the number of error locations and the error depth. Beyond distance 9, or when you need to handle higher error rates, you'll want to consider belief propagation decoders like the NV-QLDPC decoder.
