@@ -5,6 +5,11 @@
  * This source code and the accompanying materials are made available under    *
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
+
+// Compile and run:
+// nvq++ --target=stim -lcudaq-qec -lcudaq-qec-realtime-decoding -lcudaq-qec-realtime-decoding-simulation real_time_complete.cpp
+// NOTE: This must be on one line for the CI system to parse it correctly.
+
 // [Begin Documentation]
 
 // Simple 3-qubit repetition code with real-time decoding
