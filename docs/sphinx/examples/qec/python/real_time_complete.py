@@ -49,7 +49,7 @@ def measure_stabilizers(logical: qec.patch) -> list[bool]:
 # [Begin QEC Circuit]
 # QEC circuit with real-time decoding
 @cudaq.kernel
-def qec_circuit():
+def qec_circuit() -> list[bool]:
     qec.reset_decoder(0)
 
     data = cudaq.qvector(3)
@@ -70,7 +70,7 @@ def qec_circuit():
         if corrections[i]:
             x(data[i])
 
-    mz(data)
+    return mz(data)
 
 
 # [End QEC Circuit]
@@ -129,7 +129,7 @@ def main():
     qec.configure_decoders_from_file("config.yaml")
     # [End Load DEM]
 
-    cudaq.sample(qec_circuit, shots_count=10)
+    run_result = cudaq.run(qec_circuit, shots_count=10)
     print("Ran 10 shots")
 
     qec.finalize_decoders()
