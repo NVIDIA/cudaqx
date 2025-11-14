@@ -768,6 +768,30 @@ The decoder returns the probability that the logical observable has flipped for 
     CUDA-Q 0.5.0 is released.
 
 
+Real-Time Decoding
+------------------
+
+CUDA-Q QEC provides real-time decoding capabilities for quantum error correction on actual quantum hardware.
+Real-time decoding enables decoders to process syndromes and compute corrections within qubit coherence times,
+making active error correction practical for real quantum computers.
+
+Key Features
+^^^^^^^^^^^^
+
+* **Low-Latency Operation**: Syndrome processing within coherence time constraints.
+* **Hardware Integration**: Direct integration with quantum hardware backends (Quantinuum H-Series).
+* **Simulation Support**: Test real-time workflows locally before deploying to hardware.
+* **Multiple Decoder Types**: Support for LUT decoders, QLDPC decoders, and sliding window approaches.
+* **GPU Acceleration**: Leverage CUDA for high-performance syndrome decoding.
+
+For detailed information on real-time decoding, see:
+
+* :doc:`/examples_rst/qec/realtime_decoding` - Complete Guide with Examples
+* :doc:`/api/qec/cpp_api` - C++ API Reference (see Real-Time Decoding section)
+* :doc:`/api/qec/python_api` - Python API Reference (see Real-Time Decoding section)
+
+
+
 Numerical Experiments
 ---------------------
 
@@ -1058,26 +1082,3 @@ Additional Noise Models
       noise.add_all_qubit_channel(
           "x", cudaq::depolarization2(/*probability*/ 0.01),
           /*numControls*/ 1);
-
-Real-Time Decoding
-------------------
-
-CUDA-Q QEC provides real-time decoding capabilities for quantum error correction on actual quantum hardware.
-Real-time decoding enables decoders to process syndromes and compute corrections within qubit coherence times,
-making active error correction practical for real quantum computers.
-
-Key Features
-^^^^^^^^^^^^
-
-* **Low-Latency Operation**: Syndrome processing within coherence time constraints
-* **Hardware Integration**: Direct integration with quantum hardware backends (Quantinuum H-Series)
-* **Simulation Support**: Test real-time workflows locally before deploying to hardware
-* **Multiple Decoder Types**: Support for LUT decoders, QLDPC decoders, and sliding window approaches
-* **GPU Acceleration**: Leverage CUDA for high-performance syndrome decoding
-
-For detailed information on real-time decoding, see:
-
-* :doc:`/examples_rst/qec/realtime_decoding` - Complete Guide with Examples
-* :doc:`/api/qec/cpp_api` - C++ API Reference (see Real-Time Decoding section)
-* :doc:`/api/qec/python_api` - Python API Reference (see Real-Time Decoding section)
-

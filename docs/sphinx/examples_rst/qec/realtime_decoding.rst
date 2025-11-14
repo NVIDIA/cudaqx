@@ -11,12 +11,12 @@ The real-time decoding framework supports two primary deployment scenarios:
 Key Features
 ------------
 
-* **Low-Latency Decoding**: Syndrome processing and correction calculation within coherence time constraints
-* **Streaming Syndrome Interface**: Continuous syndrome enqueueing from quantum circuits
-* **Multiple Decoder Support**: Concurrent management of multiple logical qubits, each with independent decoder instances
-* **Flexible Configuration**: YAML-based decoder configuration supporting various decoder types and parameters
-* **Device-Agnostic API**: Unified API that works across simulation and hardware backends
-* **GPU Acceleration**: Leverages CUDA for high-performance syndrome decoding
+* **Low-Latency Decoding**: Syndrome processing and correction calculation within coherence time constraints.  
+* **Streaming Syndrome Interface**: Continuous syndrome enqueueing from quantum circuits.
+* **Multiple Decoder Support**: Concurrent management of multiple logical qubits, each with independent decoder instances.
+* **Flexible Configuration**: YAML-based decoder configuration supporting various decoder types and parameters.
+* **Device-Agnostic API**: Unified API that works across simulation and hardware backends.
+* **GPU Acceleration**: Leverages CUDA for high-performance syndrome decoding.
 
 Workflow Overview
 -----------------
@@ -64,7 +64,7 @@ The examples above showcase the main components of the real-time decoding workfl
 
 - Decoder finalization: Frees up resources after circuit execution.
 
-The API is designed to be called from within quantum kernels (marked with ``@cudaq.kernel`` in Python or ``__qpu__``  in C++). The runtime automatically routes these calls to the appropriate backend—whether a simulation environment on your local machine or a low-latency connection to quantum hardware. The API is device-agnostic, so the same kernel code works across different deployment scenarios.
+The API is designed to be called from within quantum kernels (marked with ``@cudaq.kernel`` in Python or ``__qpu__``  in C++). The runtime automatically routes these calls to the appropriate backend—whether a simulation environment on the local machine or a low-latency connection to quantum hardware. The API is device-agnostic, so the same kernel code works across different deployment scenarios.
 
 The user is required to provide a configuration file or generate one if it is not present. The generation process depends on the decoder type and the detector error model studied in other sections of the documentation. Moreover, the user must write an appropriate kernel that describes the correct syndrome extraction and correction application logic.
 
@@ -250,7 +250,7 @@ With decoders configured and initialized, they can be used within quantum kernel
 
 These functions are designed to be called from within quantum kernels (marked with ``@cudaq.kernel`` in Python or ``__qpu__`` in C++). The runtime automatically routes these calls to the appropriate backend - whether that is a simulation environment on the local machine or a low-latency connection to quantum hardware. The API is device-agnostic, so the same kernel code works across different deployment scenarios.
 
-The typical pattern is: reset the decoder at the start of each shot, enqueue syndromes after each stabilizer measurement round, then get corrections before measuring the logical observables. Decoders process syndromes asynchronously, so by the time ``get_corrections`` is called, the decoder has usually finished its analysis. If decoding takes longer than expected, ``get_corrections`` will block until results are available.
+The typical procedure is: reset the decoder at the start of each shot, enqueue syndromes after each stabilizer measurement round, then get corrections before measuring the logical observables. Decoders process syndromes asynchronously, so by the time ``get_corrections`` is called, the decoder has usually finished its analysis. If decoding takes longer than expected, ``get_corrections`` will block until results are available.
 
 Here is how to use the real-time decoding API in quantum kernels:
 
@@ -363,7 +363,7 @@ For most practical scenarios with distance-5 to distance-9 codes and error rates
 This decoder works well up to moderate code distances because the lookup table size scales combinatorially with the number of error locations and the error depth. Beyond distance 9, or when higher error rates need to be handled, belief propagation decoders like the NV-QLDPC decoder should be considered.
 
 * **Best for**: Small to medium codes (distance 5-9), moderate error rates (0.1-1%), good balance of speed and accuracy
-* **Parameters**:
+* **Configuration Parameters**:
   
   * ``lut_error_depth`` (int): Maximum number of simultaneous errors to consider (typically 2-3). Higher values improve accuracy but increase memory usage.
 
@@ -393,7 +393,7 @@ This decoder excels when working with codes beyond distance 9, where lookup tabl
 The decoder offers extensive tunability. The number of BP iterations can be adjusted to trade off latency for accuracy, the user can choose between sum-product and min-sum BP variants, and OSD search depth can be controlled. For real-time applications, conservative settings (50 iterations, OSD order 7) are a good starting point, with tuning based on observed error rates and latency requirements.
 
 * **Best for**: Medium to large codes (distance ≥ 7), moderate to high error rates, scenarios where GPU acceleration is available
-* **Key Parameters**:
+* **Configuration Parameters**:
   
   * ``error_rate_vec`` (list/vector of floats): Per-mechanism error probabilities - crucial for BP convergence. These should match the DEM's error rates.
   * ``max_iterations`` (int): Maximum BP iterations (typically 50-100). More iterations improve accuracy but increase latency.
@@ -432,7 +432,7 @@ and then combining the results to form a global correction.
 This approach reduces memory and computational requirements while still capturing most local error correlations.
 
 * **Best for**: Very long circuits, memory-constrained systems
-* **Parameters**:
+* **ConfigurationParameters**:
   
   * ``window_size``: Number of rounds per window
   * ``step_size``: Window advancement (equals window_size for non-overlapping)
@@ -782,7 +782,7 @@ Given that the user follows the structure of the examples provided, where each e
    ./my_circuit_hardware --distance 3 --num_shots 100 --load_dem config_d3.yaml \
                          --num_rounds 12 --decoder_window 6
 
-**Workflow Parameters:**
+**Application Parameters:**
 
 - ``--distance``: Code distance (3, 5, 7, etc.)
 - ``--num_shots``: Number of circuit repetitions
@@ -794,7 +794,7 @@ Given that the user follows the structure of the examples provided, where each e
 
 Debugging and Environment Variables
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
+ 
 **Useful Environment Variables:**
 
 .. code-block:: bash
@@ -802,17 +802,17 @@ Debugging and Environment Variables
    # Enable decoder configuration debugging
    export CUDAQ_QEC_DEBUG_DECODER=1
    
-   # Set default simulator (Python only, before importing cudaq)
+   # Set default simulator
    export CUDAQ_DEFAULT_SIMULATOR=stim
    
    # Dump JIT IR for debugging compilation issues
    export CUDAQ_DUMP_JIT_IR=1
    
-   # Keep log files after test execution
-   export KEEP_LOG_FILES=true
-   
    # Set Quantinuum credentials file
    export CUDAQ_QUANTINUUM_CREDENTIALS=/path/to/credentials.json
+
+The variables can be set in the user's environment or in a script.
+They are valid both for python and C++ applications, however, they must be set before importing the cudaq or cudaq_qec libraries.
 
 **Common Compilation Issues:**
 
@@ -828,61 +828,6 @@ Debugging and Environment Variables
 3. **Dimension mismatch errors**: Verify DEM dimensions match the circuit's syndrome count
 4. **High error rates**: Check decoder window size matches DEM generation window
 
-Testing Your Setup
-^^^^^^^^^^^^^^^^^^^
-
-The installation can be verified with this minimal test:
-
-.. tab:: Python
-
-   .. code-block:: python
-
-      import os
-      os.environ["CUDAQ_DEFAULT_SIMULATOR"] = "stim"
-      
-      import cudaq
-      import cudaq_qec as qec
-      
-      # Test decoder configuration
-      print("Testing real-time decoding setup...")
-      
-      # Create minimal decoder config
-      config = qec.decoder_config()
-      config.id = 0
-      config.type = "multi_error_lut"
-      config.block_size = 10
-      config.syndrome_size = 5
-      config.H_sparse = [0, 1, -1, 1, 2, -1]  # Minimal test data
-      config.O_sparse = [0, -1]
-      config.D_sparse = [0, -1]
-      
-      lut_config = qec.multi_error_lut_config()
-      lut_config.lut_error_depth = 1
-      config.set_decoder_custom_args(lut_config)
-      
-      multi_config = qec.multi_decoder_config()
-      multi_config.decoders = [config]
-      
-      status = qec.configure_decoders(multi_config)
-      print(f"Configuration status: {status}")
-      
-      qec.finalize_decoders()
-      print("Setup verified!")
-
-.. tab:: C++
-
-   .. code-block:: bash
-
-      # Compile test
-      nvq++ --target stim test_setup.cpp \
-            -lcudaq-qec \
-            -lcudaq-qec-realtime-decoding \
-            -lcudaq-qec-realtime-decoding-simulation
-      
-      # Run
-      ./a.out
-
-If the test completes without errors, the setup is ready for real-time decoding experiments.
 
 Best Practices
 --------------
@@ -891,6 +836,7 @@ Successfully deploying real-time decoding requires attention to several key deta
 
 Decoder Selection
 ^^^^^^^^^^^^^^^^^
+The page `CUDA-Q QEC Decoders <https://nvidia.github.io/cudaqx/components/qec/introduction.html#pre-built-qec-decoders>`_ provides initial guidance on how to choose the right decoder for the target application.
 
 Choosing the right decoder is crucial for balancing accuracy, latency, and resource usage. The decision depends on multiple factors: the quantum code's distance, expected physical error rates, available computational resources, and latency requirements. This table provides initial guidance, but validation with the specific workload is always recommended:
 
