@@ -427,7 +427,7 @@ sliding_window
 ^^^^^^^^^^^^^^
 The windowed decoder is designed for larger codes where full maximum-likelihood decoding is impractical. 
 It works by dividing the decoding problem into overlapping "windows" of syndrome data, 
-decoding each window independently (using a standard inner decoder), 
+decoding each window independently (using an inner decoder), 
 and then combining the results to form a global correction. 
 This approach reduces memory and computational requirements while still capturing most local error correlations.
 
