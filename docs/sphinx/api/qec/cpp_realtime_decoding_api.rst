@@ -10,90 +10,20 @@ Core Decoding Functions
 
 These functions can be called from within CUDA-Q quantum kernels (``__qpu__`` functions) to interact with real-time decoders.
 
-.. cpp:function:: void cudaq::qec::decoding::enqueue_syndromes(uint64_t decoder_id, const std::vector<cudaq::measure_result>& syndromes, uint64_t tag = 0)
+.. doxygenfunction:: cudaq::qec::decoding::enqueue_syndromes
+.. doxygenfunction:: cudaq::qec::decoding::get_corrections
+.. doxygenfunction:: cudaq::qec::decoding::reset_decoder
 
-   Enqueue syndrome measurements for decoding.
-
-   :param decoder_id: Unique identifier for the decoder instance (matches configured decoder ID)
-   :param syndromes: Vector of syndrome measurement results from stabilizer measurements
-   :param tag: Optional tag for logging and debugging (default: 0)
-
-   **Example:**
-
-   .. code-block:: cpp
-
-      #include "cudaq/qec/realtime/decoding.h"
-
-      __qpu__ void measure_and_decode(cudaq::qec::patch logical, int decoder_id) {
-          auto syndromes = measure_stabilizers(logical);
-          cudaq::qec::decoding::enqueue_syndromes(decoder_id, syndromes, 0);
-      }
-
-.. cpp:function:: std::vector<bool> cudaq::qec::decoding::get_corrections(uint64_t decoder_id, uint64_t return_size, bool reset = false)
-
-   Retrieve calculated corrections from the decoder.
-
-   :param decoder_id: Unique identifier for the decoder instance
-   :param return_size: Number of correction bits to return (typically equals number of logical observables)
-   :param reset: Whether to reset accumulated corrections after retrieval (default: false)
-   :returns: Vector of boolean values indicating detected bit flips for each logical observable
-
-   **Example:**
-
-   .. code-block:: cpp
-
-      __qpu__ void apply_corrections(cudaq::qec::patch logical, int decoder_id) {
-          auto corrections = cudaq::qec::decoding::get_corrections(
-              decoder_id, /*return_size=*/1, /*reset=*/false);
-          if (corrections[0]) {
-              cudaq::x(logical.data);  // Apply transversal X correction
-          }
-      }
-
-.. cpp:function:: void cudaq::qec::decoding::reset_decoder(uint64_t decoder_id)
-
-   Reset decoder state, clearing all queued syndromes and accumulated corrections.
-
-   :param decoder_id: Unique identifier for the decoder instance to reset
-
-   **Example:**
-
-   .. code-block:: cpp
-
-      __qpu__ void run_experiment(int decoder_id) {
-          cudaq::qec::decoding::reset_decoder(decoder_id);  // Reset at start of each shot
-          // ... perform experiment ...
-      }
 
 Configuration API
 -----------------
 
 The configuration API enables setting up decoders before circuit execution. Decoders are configured using YAML files or programmatically constructed configuration objects.
 
-.. cpp:function:: int cudaq::qec::decoding::config::configure_decoders(const multi_decoder_config& config)
-
-   Configure decoders from a multi_decoder_config object.
-
-   :param config: multi_decoder_config object containing decoder specifications
-   :returns: 0 on success, non-zero error code on failure
-
-.. cpp:function:: int cudaq::qec::decoding::config::configure_decoders_from_file(const std::string& config_file)
-
-   Configure decoders from a YAML file.
-
-   :param config_file: Path to YAML configuration file
-   :returns: 0 on success, non-zero error code on failure
-
-.. cpp:function:: int cudaq::qec::decoding::config::configure_decoders_from_str(const std::string& config_str)
-
-   Configure decoders from a YAML string.
-
-   :param config_str: YAML configuration as a string
-   :returns: 0 on success, non-zero error code on failure
-
-.. cpp:function:: void cudaq::qec::decoding::config::finalize_decoders()
-
-   Finalize and clean up decoder resources. Should be called before program exit.
+.. doxygenfunction:: cudaq::qec::decoding::config::configure_decoders
+.. doxygenfunction:: cudaq::qec::decoding::config::configure_decoders_from_file
+.. doxygenfunction:: cudaq::qec::decoding::config::configure_decoders_from_str
+.. doxygenfunction:: cudaq::qec::decoding::config::finalize_decoders
 
 Helper Functions
 ----------------
