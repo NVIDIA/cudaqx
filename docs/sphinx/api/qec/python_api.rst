@@ -39,6 +39,11 @@ NVIDIA QLDPC Decoder
 
 .. include:: nv_qldpc_decoder_api.rst
 
+Sliding Window Decoder
+----------------------
+
+.. include:: sliding_window_api.rst
+
 .. _tensor_network_decoder_api_python:
 
 Tensor Network Decoder
