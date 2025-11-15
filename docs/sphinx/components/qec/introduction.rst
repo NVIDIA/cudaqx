@@ -804,7 +804,7 @@ Key Features
 ^^^^^^^^^^^^
 
 * **Low-Latency Operation**: Syndrome processing within coherence time constraints.
-* **Hardware Integration**: Direct integration with quantum hardware backends (Quantinuum H-Series).
+* **Hardware Integration**: Direct integration with quantum hardware backends (`Quantinuum's Helios QPU <https://www.quantinuum.com/products-solutions/quantinuum-systems/helios>`_).
 * **Simulation Support**: Test real-time workflows locally before deploying to hardware.
 * **Multiple Decoder Types**: Support for LUT decoders, QLDPC decoders, and sliding window approaches.
 * **GPU Acceleration**: Leverage CUDA for high-performance syndrome decoding.

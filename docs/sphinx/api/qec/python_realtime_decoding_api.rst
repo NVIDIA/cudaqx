@@ -3,7 +3,9 @@
 
 The Real-Time Decoding API enables low-latency error correction on quantum hardware by allowing CUDA-Q quantum kernels to interact with decoders during circuit execution. This API is designed for use cases where corrections must be calculated and applied within qubit coherence times.
 
-The real-time decoding system supports both hardware integration (e.g., Quantinuum H-Series) and simulation environments for local testing.
+The real-time decoding system supports simulation environments for local testing and hardware integration (e.g., on
+`Quantinuum's Helios QPU
+<https://www.quantinuum.com/products-solutions/quantinuum-systems/helios>`_).
 
 Core Decoding Functions
 ------------------------
