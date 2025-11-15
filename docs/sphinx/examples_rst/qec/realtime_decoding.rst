@@ -481,8 +481,9 @@ Common Use Cases
 Before diving into compilation details, it is helpful to understand the typical scenarios and how they map to decoder choices and workflow parameters. 
 A full set of common examples is provided to guide development.
 These examples describe the complete workflow for developing an application that uses real-time decoding in a single file.
-The relevant examples can be found at the following path: ``libs/qec/unittests/realtime/app_examples/`` (C++) and the corresponding Python examples.
-The files have names like ``surface_code-1.cpp`` and ``surface_code_1.py``.
+The relevant C++ and Python examples can be found at the following path:
+`libs/qec/unittests/realtime/app_examples <https://github.com/NVIDIA/cudaqx/tree/main/libs/qec/unittests/realtime/app_examples>`_.
+The files have names like ``surface_code-1.cpp`` and ``surface_code_1.py``. The rest of this section shows how to compile and run these 2 examples.
 
 These examples provide comprehensive support for application development with real-time decoding.
 The subsequent step, once the user has chosen the appropriate decoder and the appropriate backend, is to compile and execute the application.
@@ -497,14 +498,14 @@ Compile with the simulation backend for local testing:
 
 .. code-block:: bash
 
-   nvq++ --target stim my_circuit.cpp \
-         -lcudaq-qec \
-         -lcudaq-qec-realtime-decoding \
+   nvq++ --target stim surface_code-1.cpp         \
+         -lcudaq-qec                              \
+         -lcudaq-qec-realtime-decoding            \
          -lcudaq-qec-realtime-decoding-simulation \
-         -o my_circuit_sim
+         -o surface_code-1
 
    # Execute
-   ./my_circuit_sim --distance 3 --num_shots 1000 --save_dem config.yaml
+   ./surface_code-1 --distance 3 --num_shots 1000 --save_dem config.yaml
 
 **Key Points:**
 
@@ -519,17 +520,17 @@ Compile for Quantinuum emulation mode:
 
 .. code-block:: bash
 
-   nvq++ --target quantinuum --emulate \
-         --quantinuum-machine Helios-Fake \
-         my_circuit.cpp \
-         -lcudaq-qec \
-         -lcudaq-qec-realtime-decoding \
+   nvq++ --target quantinuum --emulate            \
+         --quantinuum-machine Helios-Fake         \
+         surface_code-1.cpp                       \
+         -lcudaq-qec                              \
+         -lcudaq-qec-realtime-decoding            \
          -lcudaq-qec-realtime-decoding-quantinuum \
-         -Wl,--export-dynamic \
-         -o my_circuit_quantinuum
+         -Wl,--export-dynamic                     \
+         -o surface_code-1-quantinuum-emulate
 
    # Execute
-   ./my_circuit_quantinuum --distance 3 --num_shots 1000 --load_dem config.yaml
+   ./surface_code-1-quantinuum-emulate --distance 3 --num_shots 1000 --load_dem config.yaml
 
 **Key Points:**
 
@@ -544,18 +545,19 @@ Compile for actual Quantinuum hardware:
 
 .. code-block:: bash
 
-   nvq++ --target quantinuum \
-         --quantinuum-machine Helios-1 \
-         my_circuit.cpp \
-         -lcudaq-qec \
-         -lcudaq-qec-realtime-decoding \
-         -lcudaq-qec-realtime-decoding-quantinuum \
-         -Wl,--export-dynamic \
-         -o my_circuit_hardware
+   nvq++ --target quantinuum                         \
+         --quantinuum-machine Helios-1               \
+         --quantinuum-extra-payload-provider decoder \
+         surface_code-1.cpp                          \
+         -lcudaq-qec                                 \
+         -lcudaq-qec-realtime-decoding               \
+         -lcudaq-qec-realtime-decoding-quantinuum    \
+         -Wl,--export-dynamic                        \
+         -o surface_code-1-quantinuum-hardware
 
    # Execute
    export CUDAQ_QUANTINUUM_CREDENTIALS=<credentials_file_path>
-   ./my_circuit_hardware --distance 3 --num_shots 100 --load_dem config.yaml
+   ./surface_code-1-quantinuum-hardware --distance 3 --num_shots 100 --load_dem config.yaml
 
 **Key Points:**
 
@@ -576,91 +578,33 @@ Python Execution
 
 **Simulation Backend (Stim)**
 
-.. code-block:: python
+.. code-block:: bash
 
-   import os
-   import cudaq
-   import cudaq_qec as qec
-
-   # IMPORTANT: Set simulator BEFORE importing cudaq
-   os.environ["CUDAQ_DEFAULT_SIMULATOR"] = "stim"
-
-   # Configure target
-   cudaq.set_target("stim")
-   
-   # Load decoder configuration
-   qec.configure_decoders_from_file("config.yaml")
-   
-   # Run circuit
-   result = cudaq.run(my_circuit, shots_count=1000, noise_model=cudaq.NoiseModel())
-   
-   # Cleanup
-   qec.finalize_decoders()
-
-**Key Points:**
-
-- ``os.environ["CUDAQ_DEFAULT_SIMULATOR"] = "stim"`` **must be set before importing cudaq**
-- ``cudaq.set_target("stim")`` configures the simulator target
-- No special compilation needed - Python bindings handle library loading
+   # Generate a decoder configuration file
+   python3 surface_code-1.py --distance 3 --save_dem config.yaml
+   # Run the circuit with the decoder configuration
+   python3 surface_code-1.py --distance 3 --load_dem config.yaml --num_shots 1000
 
 **Quantinuum Backend (Emulation)**
 
-.. code-block:: python
+.. code-block:: bash
 
-   import cudaq
-   import cudaq_qec as qec
-
-   # Configure target with decoder support
-   cudaq.set_target("quantinuum",
-                    emulate=True,
-                    machine="Helios-1Dummy",  # Use "Helios-1Dummy" for emulation
-                    extra_payload_provider="decoder")  # REQUIRED for real-time decoding
-   
-   # Load decoder configuration (uploads to Quantinuum servers)
-   qec.configure_decoders_from_file("config.yaml")
-   
-   # Run circuit
-   result = cudaq.run(my_circuit, shots_count=1000)
-   
-   # Cleanup
-   qec.finalize_decoders()
-
+   python3 surface_code-1.py --distance 3 --load_dem config.yaml --num_shots 1000 --target quantinuum --emulate
 **Key Points:**
 
 - ``emulate=True``: Use Quantinuum emulator
-- ``extra_payload_provider="decoder"``: **Required** - registers decoder configuration with Quantinuum's REST API
 - Decoder config is automatically uploaded to Quantinuum's servers when
   :py:func:`cudaq_qec.configure_decoders_from_file` (Python) or
   :cpp:func:`cudaq::qec::decoding::config::configure_decoders_from_file` (C++) is called
 
 **Quantinuum Backend (Hardware)**
 
-.. code-block:: python
+.. code-block:: bash
 
-   import cudaq
-   import cudaq_qec as qec
-
-   # Configure credentials (alternative: use environment variable CUDAQ_QUANTINUUM_CREDENTIALS)
-   cudaq.set_credentials("quantinuum", credentials_file="path/to/credentials.json")
-
-   # Configure target for hardware
-   cudaq.set_target("quantinuum",
-                    emulate=False,       # Hardware execution
-                    machine="Helios-1",  # Use actual hardware
-                    extra_payload_provider="decoder")
-   
-   # Load decoder configuration
-   qec.configure_decoders_from_file("config.yaml")
-   
-   # Run circuit
-   result = cudaq.run(my_circuit, shots_count=100)  # Fewer shots for hardware
-   
-   # Cleanup
-   qec.finalize_decoders()
+   python3 surface_code-1.py --distance 3 --load_dem config.yaml --num_shots 1000 --target quantinuum --machine-name Helios-1
 
 **Key Points:**
 
-- ``emulate=False``: Execute on real quantum hardware
 - Use real machine names (check Quantinuum portal for available machines)
 - Reduce shot count for hardware experiments (hardware time is expensive)
 
@@ -675,27 +619,27 @@ Given that the user follows the structure of the examples provided, where each e
    # This is done once per code/distance/noise configuration
    
    ## C++
-   ./my_circuit_sim --distance 3 --num_shots 1000 --p_spam 0.01 \
+   ./surface_code-1 --distance 3 --num_shots 1000 --p_spam 0.01 \
                     --save_dem config_d3.yaml --num_rounds 12 --decoder_window 6
    
    ## Python
-   python my_circuit.py --distance 3 --num_shots 1000 --p_spam 0.01 \
-                        --save_dem config_d3.yaml --num_rounds 12 --decoder_window 6
+   python surface_code-1.py --distance 3 --num_shots 1000 --p_spam 0.01 \
+                            --save_dem config_d3.yaml --num_rounds 12 --decoder_window 6
    
    # Phase 2: Run with Real-Time Decoding
    # Use the saved DEM configuration
    
    ## Simulation
-   ./my_circuit_sim --distance 3 --num_shots 1000 --load_dem config_d3.yaml \
+   ./surface_code-1 --distance 3 --num_shots 1000 --load_dem config_d3.yaml \
                     --num_rounds 12 --decoder_window 6
    
    ## Quantinuum Emulation
-   ./my_circuit_quantinuum --distance 3 --num_shots 1000 --load_dem config_d3.yaml \
+   ./surface_code-1-quantinuum-emulate --distance 3 --num_shots 1000 --load_dem config_d3.yaml \
                            --num_rounds 12 --decoder_window 6
    
    ## Quantinuum Hardware
    export CUDAQ_QUANTINUUM_CREDENTIALS=credentials.json
-   ./my_circuit_hardware --distance 3 --num_shots 100 --load_dem config_d3.yaml \
+   ./surface_code-1-quantinuum-hardware --distance 3 --num_shots 100 --load_dem config_d3.yaml \
                          --num_rounds 12 --decoder_window 6
 
 **Application Parameters:**
