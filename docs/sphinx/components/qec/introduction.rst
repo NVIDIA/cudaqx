@@ -641,13 +641,13 @@ Pre-built QEC Decoders
 CUDA-Q QEC provides pre-built decoders for a variety of use cases.
 
 +------------------------+-----------------------------+----------+----------+-------------------+--------------------------------------------------+
-| Decoder                | Decoder String Identifier   | Python   | C++      | Real-time Enabled | Notes                                            |
+| Decoder                | Decoder String Identifier   | Python   | C++      | Real-Time Enabled | Notes                                            |
 +========================+=============================+==========+==========+===================+==================================================+
 | NVIDIA QLDPC Decoder¹  | `"nv-qldpc-decoder"`        | Yes      | Yes      | Yes               | Supports Relay BP and BP+OSD                     |
 +------------------------+-----------------------------+----------+----------+-------------------+--------------------------------------------------+
 | Tensor Network Decoder¹| `"tensor_network_decoder"`  | Yes²     | No       | No                | Exact Maximum Likelihood Decoder                 |
 +------------------------+-----------------------------+----------+----------+-------------------+--------------------------------------------------+
-| Tensor RT Decoder¹     | `"trt_decoder"`             | Yes³     | Yes      | Not yet           | AI decoder                                       |
+| Tensor RT Decoder¹     | `"trt_decoder"`             | Yes³     | Yes      | Not yet           | AI decoder. Bring your own model.                |
 +------------------------+-----------------------------+----------+----------+-------------------+--------------------------------------------------+
 | Look-Up Table Decoder  | `"single_error_lut"`        | Yes      | Yes      | Yes               | Simple decoder with no configurable options      |
 +                        +-----------------------------+----------+----------+-------------------+--------------------------------------------------+
