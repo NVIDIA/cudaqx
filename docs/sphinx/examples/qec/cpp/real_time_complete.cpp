@@ -126,12 +126,9 @@ __qpu__ int64_t qec_circuit() {
 }
 // [End QEC Circuit]
 
-// [Begin Main]
 int main() {
-  // [Begin Get Code]
   auto code = cudaq::qec::get_code("repetition",
                                    cudaqx::heterogeneous_map{{"distance", 3}});
-  // [End Get Code]
 
   // [Begin DEM Generation]
   // Step 1: Generate detector error model
@@ -143,11 +140,8 @@ int main() {
       *code, cudaq::qec::operation::prep0, 3, noise);
   // [End DEM Generation]
 
-  // [Begin Save DEM]
   save_dem(dem, "config.yaml");
-  // [End Save DEM]
 
-  // [Begin Load and Run]
   // Step 2: Load config and run circuit
   printf("\nStep 2: Running circuit with decoding...\n");
   load_dem("config.yaml");
@@ -156,10 +150,8 @@ int main() {
   printf("Ran 10 shots\n");
 
   cudaq::qec::decoding::config::finalize_decoders();
-  // [End Load and Run]
 
   printf("\nDone!\n");
   return 0;
 }
-// [End Main]
 // [End Documentation]

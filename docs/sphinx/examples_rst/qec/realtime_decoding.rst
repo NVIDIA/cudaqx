@@ -294,13 +294,7 @@ This decoder excels when working with codes beyond distance 9, where lookup tabl
 The decoder offers extensive tunability. The number of BP iterations can be adjusted to trade off latency for accuracy, the user can choose between sum-product and min-sum BP variants, and OSD search depth can be controlled. For real-time applications, conservative settings (50 iterations, OSD order 7) are a good starting point, with tuning based on observed error rates and latency requirements.
 
 * **Best for**: Medium to large codes (distance ≥ 7), moderate to high error rates, scenarios where GPU acceleration is available
-* **Configuration Parameters**:
-  
-  * ``error_rate_vec`` (list/vector of floats): Per-mechanism error probabilities - crucial for BP convergence. These should match the DEM's error rates.
-  * ``max_iterations`` (int): Maximum BP iterations (typically 50-100). More iterations improve accuracy but increase latency.
-  * ``use_osd`` (bool): Enable Ordered Statistics Decoding post-processing when BP fails to converge. Recommended for production use.
-  * ``osd_order`` (int): OSD search depth (typically 7-10). Higher values are more thorough but slower.
-  * ``bp_method`` (int): BP algorithm variant (0: sum-product, 1: min-sum). Min-sum is faster but slightly less accurate.
+* **Configuration Parameters**: See :ref:`NVIDIA QLDPC Decoder API <nv_qldpc_decoder_api_cpp>` for more details.
 
 .. tab:: Python
 
@@ -635,7 +629,9 @@ Python Execution
 
 - ``emulate=True``: Use Quantinuum emulator
 - ``extra_payload_provider="decoder"``: **Required** - registers decoder configuration with Quantinuum's REST API
-- Decoder config is automatically uploaded to Quantinuum's servers when ``configure_decoders_from_file()`` is called
+- Decoder config is automatically uploaded to Quantinuum's servers when
+  :py:func:`cudaq_qec.configure_decoders_from_file` (Python) or
+  :cpp:func:`cudaq::qec::decoding::config::configure_decoders_from_file` (C++) is called
 
 **Quantinuum Backend (Hardware)**
 
@@ -736,7 +732,7 @@ They are valid both for python and C++ applications, however, they must be set b
 
 **Common Compilation Issues:**
 
-1. **Missing libraries**: Ensure all ``-lcudaq-qec-*`` libraries are linked in correct order
+1. **Missing libraries**: Ensure all ``-lcudaq-qec-*`` libraries are linked
 2. **Wrong backend library**: Use ``-simulation`` for Stim, ``-quantinuum`` for Quantinuum
 3. **Missing** ``--export-dynamic`` **flag**: Required for Quantinuum targets
 4. **Wrong target flags**: ``--emulate`` with ``Helios-Fake`` for emulation, remove for hardware

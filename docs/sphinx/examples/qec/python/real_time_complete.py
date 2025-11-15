@@ -76,12 +76,9 @@ def qec_circuit() -> list[bool]:
 # [End QEC Circuit]
 
 
-# [Begin Main]
 def main():
-    # [Begin Get Code]
     # Get 3-qubit repetition code
     code = qec.get_code("repetition", distance=3)
-    # [End Get Code]
 
     # [Begin DEM Generation]
     # Step 1: Generate detector error model
@@ -122,7 +119,6 @@ def main():
     print("Saved config to config.yaml")
     # [End Save DEM]
 
-    # [Begin Load and Run]
     # Step 2: Load config and run circuit
     print("\nStep 2: Running circuit with decoding...")
     # [Begin Load DEM]
@@ -133,12 +129,9 @@ def main():
     print("Ran 10 shots")
 
     qec.finalize_decoders()
-    # [End Load and Run]
 
     print("\nDone!")
 
-
-# [End Main]
 
 if __name__ == "__main__":
     main()
