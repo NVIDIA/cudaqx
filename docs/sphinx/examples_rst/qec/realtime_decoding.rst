@@ -191,7 +191,18 @@ With decoders configured and initialized, they can be used within quantum kernel
 
 These functions are designed to be called from within quantum kernels (marked with ``@cudaq.kernel`` in Python or ``__qpu__`` in C++). The runtime automatically routes these calls to the appropriate backend - whether that is a simulation environment on the local machine or a low-latency connection to quantum hardware. The API is device-agnostic, so the same kernel code works across different deployment scenarios.
 
-The typical procedure is: reset the decoder at the start of each shot, enqueue syndromes after each stabilizer measurement round, then get corrections before measuring the logical observables. Decoders process syndromes asynchronously, so by the time ``get_corrections`` is called, the decoder has usually finished its analysis. If decoding takes longer than expected, ``get_corrections`` will block until results are available.
+The typical usage pattern is: reset the decoder at the start of each shot, enqueue
+syndromes after each stabilizer measurement round, then get corrections before
+measuring the logical observables. Decoders process syndromes asynchronously, so
+by the time ``get_corrections`` is called, the decoder has usually finished its
+analysis. If decoding takes longer than expected, ``get_corrections`` will block
+until results are available.
+
+.. note::
+   While resetting the decoder at the beginning of each shot isn't strictly
+   required, it is **strongly** recommended to ensure that when running on a
+   remote QPU, any potential errors encountered in one shot do not affect future
+   shot results.
 
 Here is how to use the real-time decoding API in quantum kernels:
 
