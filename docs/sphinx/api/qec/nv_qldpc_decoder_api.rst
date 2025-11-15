@@ -82,14 +82,13 @@
           (defaults to 1). Ignored unless `use_osd` is true.
         - `osd_order` (int): OSD postprocessor order (defaults to 0). Ref:
           `Decoding Across the Quantum LDPC Code Landscape <https://arxiv.org/pdf/2005.07016>`_
-
-          - For `osd_method=2` (Exhaustive), the number of possible
-            permutations searched after OSD-0 grows by 2^osd_order.
-          - For `osd_method=3` (Combination Sweep), this is the λ parameter. All
-            weight 1 permutations and the first λ bits worth of weight 2
-            permutations are searched after OSD-0. This is (syndrome_length -
-            block_size + λ * (λ - 1) / 2) additional permutations.
-          - For other `osd_method` values, this is ignored.
+            - For `osd_method=2` (Exhaustive), the number of possible
+              permutations searched after OSD-0 grows by 2^osd_order.
+            - For `osd_method=3` (Combination Sweep), this is the λ parameter. All
+              weight 1 permutations and the first λ bits worth of weight 2
+              permutations are searched after OSD-0. This is (syndrome_length -
+              block_size + λ * (λ - 1) / 2) additional permutations.
+            - For other `osd_method` values, this is ignored.
         - `bp_batch_size` (int): Number of syndromes that will be decoded in
           parallel for the BP decoder (defaults to 1)
         - `osd_batch_size` (int): Number of syndromes that will be decoded in
@@ -107,10 +106,9 @@
           number of iterations. Introduced in 0.4.0.
         - `opt_results` (heterogeneous_map): Optional results to return. This field can be
           left empty if no additional results are desired. Choices are:
-
-          - `bp_llr_history` (int): Return the last `bp_llr_history` iterations
-            of the BP LLR history. Minimum value is 0 and maximum value is
-            max_iterations. The actual number of returned iterations might be fewer
-            than `bp_llr_history` if BP converges before the requested number of
-            iterations. Introduced in 0.4.0.
+            - `bp_llr_history` (int): Return the last `bp_llr_history` iterations
+              of the BP LLR history. Minimum value is 0 and maximum value is
+              max_iterations. The actual number of returned iterations might be fewer
+              than `bp_llr_history` if BP converges before the requested number of
+              iterations. Introduced in 0.4.0.
 
