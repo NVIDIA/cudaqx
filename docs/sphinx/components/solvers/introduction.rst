@@ -75,9 +75,6 @@ The :code:`molecule_options` structure provides extensive configuration for mole
 +---------------------+---------------+------------------+------------------------------------------+
 | integrals_casscf    | bool          | false            | Use CASSCF orbitals for integrals        |
 +---------------------+---------------+------------------+------------------------------------------+
-| potfile             | optional      | nullopt          | Path to external potential file          |
-|                     | <string>      |                  |                                          |
-+---------------------+---------------+------------------+------------------------------------------+
 | verbose             | bool          | false            | Enable detailed output logging           |
 +---------------------+---------------+------------------+------------------------------------------+
 
