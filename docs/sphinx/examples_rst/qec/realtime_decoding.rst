@@ -364,9 +364,20 @@ CUDA-Q QEC's real-time decoding system is designed to work seamlessly across dif
 Simulation Backend
 ^^^^^^^^^^^^^^^^^^
 
-The simulation backend is the primary tool during development, testing, and algorithm validation. It runs entirely on the local machine, using quantum simulators like Stim to execute circuits while decoders process syndromes in parallel threads. This setup is ideal for rapid iteration: the user can test decoder configurations, validate circuit logic, and debug syndrome processing without waiting for hardware access or paying for compute time.
+The simulation backend is the primary tool during development, testing, and
+algorithm validation. It runs entirely on the local machine, using quantum
+simulators like Stim to execute circuits while decoders process syndromes and
+calculation corrections. This setup is ideal for rapid iteration: the user can
+test decoder configurations, validate circuit logic, and debug syndrome
+processing without waiting for hardware access or paying for compute time.
 
-The simulation backend faithfully mimics real-time decoding's concurrent operation - decoders run in separate threads and process syndromes asynchronously, just as they would on hardware. This means code will behave the same way whether testing locally or running on a quantum computer. The main difference is that simulation does not have the same strict latency constraints, making it easier to experiment with complex decoder configurations.
+The simulation backend mimics real-time decoding's concurrent operation by
+running the decoder(s) within the same process as the simulator. This means that
+other than GPU hardware differences between the local environment and the remote
+NVQLink decoders, the decoders behave the same way whether testing locally or
+running on a quantum computer. The main difference is that simulation does not
+have the same strict latency constraints, making it easier to experiment with
+complex decoder configurations.
 
 Use the simulation backend for local development and testing:
 
@@ -390,7 +401,8 @@ Use the simulation backend for local development and testing:
 
       # Compile with simulation support
       nvq++ -std=c++20 my_circuit.cpp -lcudaq-qec \
-            -lcudaq-qec-realtime-simulation
+            -lcudaq-qec-realtime-decoding \
+            -lcudaq-qec-realtime-decoding-simulation
       
       ./a.out
 
@@ -405,7 +417,7 @@ The Quantinuum hardware backend connects quantum circuits to real ion-trap quant
 
 2. **Extra Payload Provider**: The user **must** specify ``extra_payload_provider="decoder"`` when setting the target. This registers a payload provider that injects the decoder configuration UUID into each job request, telling Quantinuum which decoder configuration to use for the circuit.
 
-3. **Backend Compilation**: For C++, the user must link against ``-lcudaq-qec-realtime-quantinuum`` instead of the simulation library. This library implements the Quantinuum-specific communication protocol for syndrome transmission.
+3. **Backend Compilation**: For C++, the user must link against ``-lcudaq-qec-realtime-decoding-quantinuum`` instead of the simulation library. This library implements the Quantinuum-specific communication protocol for syndrome transmission.
 
 4. **Configuration Lifetime**: Decoder configurations persist on Quantinuum's servers and are referenced by UUID. If the configuration is modified, it must be uploaded again - the system will generate a new UUID and use the new configuration for subsequent jobs.
 
@@ -448,7 +460,8 @@ Use the Quantinuum backend for hardware or emulation:
       # Compile for Quantinuum
       nvq++ --target quantinuum --quantinuum-machine Helios-1 \
             my_circuit.cpp -lcudaq-qec \
-            -lcudaq-qec-realtime-quantinuum
+            -lcudaq-qec-realtime-decoding \
+            -lcudaq-qec-realtime-decoding-quantinuum
       
       ./a.out
 
