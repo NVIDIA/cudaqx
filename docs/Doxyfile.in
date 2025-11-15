@@ -27,7 +27,8 @@ EXTRACT_STATIC         = YES
 ENABLE_PREPROCESSING   = YES
 MACRO_EXPANSION        = YES
 EXPAND_ONLY_PREDEF     = YES
-PREDEFINED             = "__qpu__="
+PREDEFINED             = "__qpu__=" \
+                         "__attribute__(x)="
 
 #---------------------------------------------------------------------------
 # Configuration options related to the HTML output
