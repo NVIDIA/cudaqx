@@ -813,10 +813,12 @@ void bindDecoder(py::module &mod) {
         Generate a sparse detector matrix for a given number of syndromes per round
         and number of rounds. Time-like here means that each round of syndrome measurement
         bits are xor'd against the preceding round.
+        
         Args:
             num_syndromes_per_round: The number of syndrome measurements per round
             num_rounds: The number of rounds to generate the sparse detector matrix for
             include_first_round: Whether to include the first round of syndrome measurements
+
         Returns:
             The detector matrix format is CSR-like, with -1 values indicating the end of each row.
       )pbdoc",
