@@ -10,6 +10,7 @@ authors = [{name = "NVIDIA Corporation & Affiliates"}]
 maintainers = [{name = "NVIDIA Corporation & Affiliates"}]
 requires-python = ">=3.11"
 readme = "README.md"
+license = { text = "NVIDIA Proprietary Software" }
 dependencies = [
   'cuda-quantum-cu13 >= 0.13',
 ]
@@ -24,6 +25,7 @@ classifiers = [
     "Environment :: GPU :: NVIDIA CUDA",
     "Environment :: GPU :: NVIDIA CUDA :: 12",
     "Environment :: GPU :: NVIDIA CUDA :: 13",
+    "License :: Other/Proprietary License",
     'Topic :: Software Development',
     'Topic :: Scientific/Engineering',
 ]
@@ -43,6 +45,7 @@ install.components = ["qec-python", "qec-lib", "qec-lib-plugins"]
 wheel.packages = []
 logging.level = "DEBUG"
 ninja.version = ">=1.10"
+wheel.license-files = [ "LICENSE", "NOTICE", "CITATION.cff" ]
 
 [tool.scikit-build.cmake.define]
 CUDAQX_QEC_INCLUDE_TESTS = false

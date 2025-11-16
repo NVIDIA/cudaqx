@@ -14,8 +14,8 @@ description = "Accelerated libraries for Quantum Error Correction built on CUDA-
 authors = [{name = "NVIDIA Corporation & Affiliates"}]
 maintainers = [{name = "NVIDIA Corporation & Affiliates"}]
 readme = "README.md"
+license = { text = "NVIDIA Proprietary Software" }
 requires-python = ">=3.11"
-license-files = [ "LICENSE", "NOTICE", "CITATION.cff" ]
 classifiers = [
     'Intended Audience :: Science/Research',
     'Intended Audience :: Developers',
@@ -27,6 +27,7 @@ classifiers = [
     "Environment :: GPU :: NVIDIA CUDA",
     "Environment :: GPU :: NVIDIA CUDA :: 12",
     "Environment :: GPU :: NVIDIA CUDA :: 13",
+    "License :: Other/Proprietary License",
     'Topic :: Software Development',
     'Topic :: Scientific/Engineering',
 ]
@@ -43,6 +44,7 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools]
 packages = []
 include-package-data = true
+license-files = [ "LICENSE", "NOTICE", "CITATION.cff" ]
 
 [tool.setuptools.dynamic]
 version = {file = "_version.txt"}

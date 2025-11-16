@@ -49,6 +49,9 @@ wheel.packages = []
 logging.level = "DEBUG"
 ninja.version = ">=1.10"
 
+[tool.setuptools]
+license-files = [ "LICENSE", "NOTICE", "CITATION.cff" ]
+
 [tool.scikit-build.cmake.define]
 CUDAQX_SOLVERS_INCLUDE_TESTS = false
 CUDAQX_SOLVERS_BINDINGS_PYTHON = true
