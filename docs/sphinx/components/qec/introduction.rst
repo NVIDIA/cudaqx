@@ -842,7 +842,7 @@ The non-real-time decoders require a detector error model which is specified via
 This matrix has dimensions of `[numDetectors, numErrors]`, where the each row is a detector, and each column is a possible error.
 For real-time decoding, we first need to convert the circuit measurements into detectors.
 This is specified via the detector matrix `D`, which has dimensions `[numDetectors, numMeasurements]`.
-Each row of the detector matrix defines which detectors a measurement participates in by including an entry of `1`.
+Each column of the detector matrix defines which detectors a measurement participates in by including an entry of `1`.
 This when, once all `numMeasurements` measurements are enqueued, a matrix-vector multiply can convert this buffer of raw measurements into detectors which are then passed into the decoding algorithm.
 
 Similarly, an observables flips matrix `O` of size `[numObs, numErrors]` must be provided.
