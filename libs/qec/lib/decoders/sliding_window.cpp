@@ -14,11 +14,6 @@
 
 namespace cudaq::qec {
 
-// ============================================================================
-// Private helper method implementations
-// ============================================================================
-
-/// Helper function to validate constructor inputs.
 void sliding_window::validate_inputs() {
   if (window_size < 1 || window_size > num_rounds) {
     throw std::invalid_argument(
@@ -180,11 +175,6 @@ void sliding_window::update_rw_next_read_index() {
     rw_next_read_index -= num_syndromes_per_window;
 }
 
-// ============================================================================
-// Public method implementations
-// ============================================================================
-
-/// Constructor for the sliding window decoder.
 sliding_window::sliding_window(const cudaqx::tensor<uint8_t> &H,
                                const cudaqx::heterogeneous_map &params)
     : decoder(H), full_pcm(H) {
@@ -237,7 +227,6 @@ sliding_window::sliding_window(const cudaqx::tensor<uint8_t> &H,
   }
 }
 
-/// Decode a syndrome vector (either full block or single round).
 decoder_result sliding_window::decode(const std::vector<float_t> &syndrome) {
   if (syndrome.size() == this->syndrome_size) {
     auto t0 = std::chrono::high_resolution_clock::now();
@@ -301,7 +290,6 @@ decoder_result sliding_window::decode(const std::vector<float_t> &syndrome) {
   return decoder_result(); // empty return value
 }
 
-/// Decode a batch of syndrome vectors.
 std::vector<decoder_result> sliding_window::decode_batch(
     const std::vector<std::vector<float_t>> &syndromes) {
   if (syndromes[0].size() == this->syndrome_size) {
@@ -483,11 +471,11 @@ void sliding_window::decode_window() {
              window_proc_times_arr[7]);
 }
 
+sliding_window::~sliding_window() {}
+
 std::size_t sliding_window::get_num_syndromes_per_round() const {
   return num_syndromes_per_round;
 }
-
-sliding_window::~sliding_window() {}
 
 CUDAQ_REGISTER_TYPE(sliding_window)
 
