@@ -100,11 +100,43 @@
         - `clip_value` (float): Value to clip the BP messages to. Should be a
           non-negative value (defaults to 0.0, which disables clipping). Introduced in
           0.4.0.
-        - `bp_method` (int): The BP method to use. 0 for sum-product, 1 for min-sum.
-          Defaults to 0. Introduced in 0.4.0.
+        - `bp_method` (int): Core BP algorithm to use (defaults to 0). Introduced in 0.4.0,
+          expanded in 0.5.0:
+
+          - 0: sum-product
+          - 1: min-sum (introduced in 0.4.0)
+          - 2: min-sum+mem (uniform memory strength, introduced in 0.5.0)
+          - 3: min-sum+dmem (disordered memory strength, introduced in 0.5.0)
+        - `composition` (int): Iteration strategy (defaults to 0). Introduced in 0.5.0:
+
+          - 0: Standard (single run)
+          - 1: Sequential relay (multiple gamma legs). Requires: `bp_method=3`, `srelay_config`
         - `scale_factor` (float): The scale factor to use for min-sum. Defaults to 1.0.
           When set to 0.0, the scale factor is dynamically computed based on the
           number of iterations. Introduced in 0.4.0.
+        - `gamma0` (float): Memory strength parameter. Required for `bp_method=2`, and for
+          `composition=1` (sequential relay). Introduced in 0.5.0.
+        - `gamma_dist` (vector<float>): Gamma distribution interval [min, max] for disordered
+          memory strength. Required for `bp_method=3` if `explicit_gammas` not provided.
+          Introduced in 0.5.0.
+        - `explicit_gammas` (vector<vector<float>>): Explicit gamma values for each variable node.
+          For `bp_method=3` with `composition=0`, provide a 2D vector where each row has
+          `block_size` columns. For `composition=1` (Sequential relay), provide `num_sets` rows
+          (one per relay leg). Overrides `gamma_dist` if provided. Introduced in 0.5.0.
+        - `srelay_config` (heterogeneous_map): Sequential relay configuration (required for
+          `composition=1`). Contains the following parameters. Introduced in 0.5.0:
+
+          - `pre_iter` (int): Number of pre-iterations to run before relay legs
+          - `num_sets` (int): Number of relay sets (legs) to run
+          - `stopping_criterion` (string): When to stop relay legs:
+
+            - "All": Run all legs
+            - "FirstConv": Stop relay after first convergence
+            - "NConv": Stop after N convergences (requires `stop_nconv` parameter)
+          - `stop_nconv` (int): Number of convergences to wait for before stopping
+            (required only when `stopping_criterion="NConv"`)
+        - `bp_seed` (int): Seed for random number generation used in `bp_method=3` (disordered
+          memory BP). Optional parameter, defaults to 42 if not provided. Introduced in 0.5.0.
         - `opt_results` (heterogeneous_map): Optional results to return. This field can be
           left empty if no additional results are desired. Choices are:
 
@@ -112,5 +144,7 @@
             of the BP LLR history. Minimum value is 0 and maximum value is
             max_iterations. The actual number of returned iterations might be fewer
             than `bp_llr_history` if BP converges before the requested number of
-            iterations. Introduced in 0.4.0.
+            iterations. Introduced in 0.4.0. Note: Not supported for `composition=1`.
+          - `num_iter` (bool): If true, return the number of BP iterations run.
+            Introduced in 0.5.0.
 
