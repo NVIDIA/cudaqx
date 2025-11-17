@@ -19,7 +19,7 @@ not require a GPU to use, but some components are GPU-accelerated.
 
 ## Optional Dependencies
 
-Some decoders require additional dependencies to operate. You can install them with with
+Some decoders require additional dependencies to operate. You can install them with
 
 - `pip install cudaq-qec[tensor-network-decoder]` for the Tensor Network Decoder
 - `pip install cudaq-qec[trt-decoder]` for the TensorRT Decoder
