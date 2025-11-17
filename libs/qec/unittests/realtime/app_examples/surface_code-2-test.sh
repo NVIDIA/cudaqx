@@ -42,6 +42,8 @@ NUM_SHOTS=1000
 # Get timestamp suffix in YYYY-MM-DD-HH-MM-SS, with random number appended using /dev/urandom.
 timestamp=$(date +%Y-%m-%d-%H-%M-%S)
 RNG_SUFFIX=$(od -An -N4 -i /dev/urandom | tr -d ' ')
+# Remove any negative sign.
+RNG_SUFFIX=$(echo $RNG_SUFFIX | sed 's/-//g')
 FULL_SUFFIX=$timestamp-$RNG_SUFFIX
 
 CONFIG_FILE=config-${FULL_SUFFIX}.yml
@@ -66,6 +68,14 @@ export CUDAQ_DUMP_JIT_IR=${CUDAQ_DUMP_JIT_IR:-0}
 echo Running $EXE_PATH2 --distance $DISTANCE --num_shots $NUM_SHOTS --load_dem $CONFIG_FILE
 $EXE_PATH2 --distance $DISTANCE --num_shots $NUM_SHOTS --load_dem $CONFIG_FILE |& tee load_dem-$FULL_SUFFIX.log
 
+# If CUDAQ_DUMP_JIT_IR is "1", then extract the QIR from the
+# load_dem-$FULL_SUFFIX.log file and place it in qir-$FULL_SUFFIX.ll.
+if [[ "${CUDAQ_DUMP_JIT_IR}" == "1" ]]; then
+  # The QIR starts with "ModuleID" and ends with "backwards_branching"
+  QIR=$(sed -n '/ModuleID/,/backwards_branching/p' load_dem-$FULL_SUFFIX.log)
+  echo "Writing QIR to qir-$FULL_SUFFIX.ll"
+  echo "$QIR" > qir-$FULL_SUFFIX.ll
+fi
 
 # Look for results like this in the output:
 # Number of non-zero values measured : 2
