@@ -30,6 +30,11 @@ ARG cuda_version
 
 USER root
 
+# Update the copyright notification:
+RUN echo -e "This container also includes CUDA-Q QEC and CUDA-Q Solvers.\n"\
+"Use of this container implies consent to the NVIDIA Software License agreement at\n"\
+"https://github.com/NVIDIA/cudaqx/blob/main/libs/qec/LICENSE\n" >> "$CUDA_QUANTUM_PATH/Copyright.txt"
+
 # Determine the appropriate zip file
 COPY installed_files-${TARGETARCH}-cu${cuda_version}.zip /tmp/
 
