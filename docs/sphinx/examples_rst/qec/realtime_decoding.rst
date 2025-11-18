@@ -279,8 +279,7 @@ Note: The real-time decoding interfaces are experimental, and subject to change.
 
 **Emulation vs. Hardware Modes:**
 
-Emulation mode (``emulate=True``) is particularly valuable for testing the deployment setup without consuming hardware credits.
-However, the Quantinuum Helios-1 emulator does not support real-time decoder calls at this time.
+Emulation mode (``emulate=True``) is particularly valuable for testing the deployment setup without consuming hardware credits. Running with this flag performs a local, noise-free simulation without any actual submission to Quantinuum's servers.
 
 Use the Quantinuum backend for hardware or emulation:
 
