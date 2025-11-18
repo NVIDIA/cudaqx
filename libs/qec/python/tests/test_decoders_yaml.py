@@ -68,7 +68,6 @@ def create_test_empty_decoder_config(decoder_id):
     config.type = "single_error_lut"
     config.block_size = 20
     config.syndrome_size = 10
-    config.num_syndromes_per_round = config.syndrome_size
 
     # Create sparse H matrix representation from a zero matrix
     H = np.zeros((config.syndrome_size, config.block_size), dtype=np.uint8)
@@ -80,8 +79,7 @@ def create_test_empty_decoder_config(decoder_id):
 
     # Generate timelike sparse detector matrix
     config.D_sparse = qec.generate_timelike_sparse_detector_matrix(
-        config.num_syndromes_per_round, 2, include_first_round=False)
-
+        config.syndrome_size, 2, include_first_round=False)
     return config
 
 
@@ -219,7 +217,6 @@ def test_sliding_window_decoder():
     config.type = "sliding_window"
     config.block_size = n_cols
     config.syndrome_size = n_rows
-    config.num_syndromes_per_round = n_syndromes_per_round
 
     # Convert PCM to sparse representation
     config.H_sparse = qec.pcm_to_sparse_vec(pcm)
@@ -228,8 +225,8 @@ def test_sliding_window_decoder():
     O = np.zeros((2, n_cols), dtype=np.uint8)
     config.O_sparse = qec.pcm_to_sparse_vec(O)
 
-    # Reset D_sparse for sliding window (set to None to indicate it's not used)
-    config.D_sparse = None
+    config.D_sparse = qec.generate_timelike_sparse_detector_matrix(
+        config.syndrome_size, 2, include_first_round=False)
 
     # Sliding window config
     sw_config = qec.qecrt.config.sliding_window_config()

@@ -49,6 +49,7 @@ set_target_properties(cudaq-qec-realtime-decoding-quantinuum PROPERTIES
 )
 
 install(TARGETS cudaq-qec-realtime-decoding-quantinuum
+  COMPONENT qec-lib
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 
@@ -65,5 +66,6 @@ set_target_properties(cudaq-qec-realtime-decoding-cudaq-stubs PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 install(TARGETS cudaq-qec-realtime-decoding-cudaq-stubs
+  COMPONENT qec-lib
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
 

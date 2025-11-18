@@ -7,6 +7,15 @@
 # ============================================================================ #
 
 #------------------------------------------------------------------------------#
+# Maintenance note: to generate QIR files and corresponding config files for
+# Quantinuum, you may manually run tests like the following:
+#    CUDAQ_DUMP_JIT_IR=1 KEEP_LOG_FILES=1 ctest -R quantinuum
+# The resulting files will be in:
+#    build/libs/qec/unittests/realtime/app_examples/config-*.yml
+#    build/libs/qec/unittests/realtime/app_examples/qir-*.ll
+#------------------------------------------------------------------------------#
+
+#------------------------------------------------------------------------------#
 # Surface code 1, fully local, regular Stim simulator
 add_executable(surface_code-1-local)
 

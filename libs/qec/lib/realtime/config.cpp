@@ -16,7 +16,6 @@
 #include "cudaq/qec/realtime/decoding_config.h"
 #include <filesystem>
 #include <fstream>
-#include <nlohmann/json.hpp> // FIXME: remove with upcoming public CUDA-Q changes
 #include <type_traits>
 
 // Helper function(s) to remove the optional wrapper from a type.
@@ -349,10 +348,9 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
     io.mapRequired("type", config.type);
     io.mapRequired("block_size", config.block_size);
     io.mapRequired("syndrome_size", config.syndrome_size);
-    io.mapRequired("num_syndromes_per_round", config.num_syndromes_per_round);
     io.mapRequired("H_sparse", config.H_sparse);
     io.mapRequired("O_sparse", config.O_sparse);
-    io.mapOptional("D_sparse", config.D_sparse);
+    io.mapRequired("D_sparse", config.D_sparse);
 
     // Validate that the number of rows in the H_sparse vector is equal to
     // syndrome_size.
@@ -384,9 +382,9 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
     // Validate that if the D_sparse is provided, it is a valid D matrix. That
     // means that the number of rows in the D_sparse matrix should be equal to
     // the number of rows in the H_sparse matrix, and no row should be empty.
-    if (config.D_sparse.has_value()) {
+    if (!config.D_sparse.empty()) {
       auto num_D_rows =
-          std::count(config.D_sparse->begin(), config.D_sparse->end(), -1);
+          std::count(config.D_sparse.begin(), config.D_sparse.end(), -1);
       if (num_D_rows != config.syndrome_size) {
         throw std::runtime_error("Number of rows in D_sparse vector is not "
                                  "equal to syndrome_size: " +
@@ -395,14 +393,13 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
       }
       // No row should be empty, which means that there should be no
       // back-to-back -1 values.
-      for (std::size_t i = 0; i < config.D_sparse->size() - 1; ++i) {
-        if (config.D_sparse->at(i) == -1 && config.D_sparse->at(i + 1) == -1) {
+      for (std::size_t i = 0; i < config.D_sparse.size() - 1; ++i) {
+        if (config.D_sparse.at(i) == -1 && config.D_sparse.at(i + 1) == -1) {
           throw std::runtime_error("D_sparse row is empty for decoder " +
                                    std::to_string(config.id));
         }
       }
     }
-
 #define INIT_AND_MAP_DECODER_CUSTOM_ARGS(type)                                 \
   do {                                                                         \
     if (!std::holds_alternative<type>(config.decoder_custom_args)) {           \
@@ -424,18 +421,6 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
     } else if (config.type == "sliding_window") {
       INIT_AND_MAP_DECODER_CUSTOM_ARGS(
           cudaq::qec::decoding::config::sliding_window_config);
-    }
-
-    // Validate that the number of syndromes per round is less than or equal to
-    // the syndrome size and >= 0.
-    if (config.num_syndromes_per_round < 0 ||
-        config.num_syndromes_per_round > config.syndrome_size) {
-      throw std::runtime_error(
-          "num_syndromes_per_round (" +
-          std::to_string(config.num_syndromes_per_round) +
-          ") is not greater than 0 and less than or equal to syndrome_size (" +
-          std::to_string(config.syndrome_size) + ") for decoder " +
-          std::to_string(config.id));
     }
   }
 };
@@ -508,28 +493,7 @@ public:
   }
   virtual std::string
   getExtraPayload(const cudaq::RuntimeTarget &target) override {
-    // TEMPORARY: we obfuscate the payload in a JSON object customized for
-    // Quantinuum, the launch partner of the decoder. After this can be made
-    // public, we will only return the YAML string. The server helpers,
-    // Quantinuum and others, will handle the contents according the remote REST
-    // service endpoints.
-    nlohmann::json decoderPayloadSpec;
-
-    // The endpoint to upload gpu_decoder_config
-    decoderPayloadSpec["path"] = "api/gpu_decoder_configs/v1beta/";
-    // The name of the resource (this name is filterable)
-    const auto timestamp =
-        fmt::format("{:%Y-%m-%d_%H:%M:%S}", std::chrono::system_clock::now());
-    decoderPayloadSpec["name"] =
-        fmt::format("{}_{}", "decoder_config", timestamp);
-    // Config contents
-    decoderPayloadSpec["content"] = llvm::encodeBase64(decoderConfigYmlStr);
-
-    // The field name to inject the decoder config UUID after uploading.
-    decoderPayloadSpec["key"] = "gpu_decoder_config_id";
-    CUDAQ_DBG("[Decoder Config] Extra payload data: {}",
-              decoderPayloadSpec.dump());
-    return decoderPayloadSpec.dump();
+    return decoderConfigYmlStr;
   }
 };
 } // namespace

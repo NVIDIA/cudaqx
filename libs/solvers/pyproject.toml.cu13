@@ -10,8 +10,9 @@ authors = [{name = "NVIDIA Corporation & Affiliates"}]
 maintainers = [{name = "NVIDIA Corporation & Affiliates"}]
 requires-python = ">=3.11"
 readme = "README.md"
+license = "Apache-2.0"
 dependencies = [
-  'cuda-quantum-cu13 >= 0.12',
+  'cuda-quantum-cu13 >= 0.13',
   'fastapi',
   'networkx',
   'pyscf',
@@ -46,6 +47,7 @@ cmake.version = ">=3.28"
 cmake.build-type = "Release"
 install.components = ["solvers-python", "solvers-lib", "solvers-tools"]
 wheel.packages = []
+wheel.license-files = [ "LICENSE", "NOTICE", "CITATION.cff" ]
 logging.level = "DEBUG"
 ninja.version = ">=1.10"
 

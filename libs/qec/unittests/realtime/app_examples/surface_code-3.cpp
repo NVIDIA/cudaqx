@@ -40,16 +40,12 @@ create_decoder_config(uint64_t id, const cudaq::qec::detector_error_model &dem,
   config.type = "multi_error_lut";
   config.block_size = dem.num_error_mechanisms();
   config.syndrome_size = dem.num_detectors();
-  config.num_syndromes_per_round = numSyndromesPerRound;
   config.H_sparse = cudaq::qec::pcm_to_sparse_vec(dem.detector_error_matrix);
   config.O_sparse = cudaq::qec::pcm_to_sparse_vec(dem.observables_flips_matrix);
   config.D_sparse = det_mat;
-  config.decoder_custom_args =
-      cudaq::qec::decoding::config::multi_error_lut_config();
-  auto &multi_error_lut_config =
-      std::get<cudaq::qec::decoding::config::multi_error_lut_config>(
-          config.decoder_custom_args);
-  multi_error_lut_config.lut_error_depth = 2;
+  cudaq::qec::decoding::config::multi_error_lut_config lut_config;
+  lut_config.lut_error_depth = 2;
+  config.decoder_custom_args = lut_config;
   return config;
 }
 

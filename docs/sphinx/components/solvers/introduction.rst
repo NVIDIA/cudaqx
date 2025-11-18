@@ -492,11 +492,31 @@ Available Operator Pools
 
 CUDA-QX provides several pre-built operator pools for ADAPT-VQE:
 
-* **spin_complement_gsd**: Spin-complemented generalized singles and doubles
-* **uccsd**: UCCSD operators
+* **spin_complement_gsd**: Spin-complemented generalized singles and doubles.
+    This operator pool combines generalized excitations with enforced spin symmetry. It is 
+    more powerful than UCCSD because its generalized operators capture more electron correlation,
+     and it is more reliable than both UCCSD and UCCGSD because its spin-complemented 
+     construction prevents the unphysical "spin-symmetry breaking".
+* **uccsd**: UCCSD operators. 
+    The standard, chemically-inspired ansatz. Excitation Space 
+    is Restricted. It only includes single and double excitations 
+    where electrons move from a reference-occupied orbital (i) 
+    to a reference-virtual orbital (a), 
+    relative to the starting Hartree-Fock state. Excellent at capturing dynamic correlation 
+    (short-range, instantaneous electron interactions).
+* **uccgsd**: UCC generalized singles and doubles.
+    More expressive than UCCSD, as it includes all possible 
+    single and double excitations, regardless of their occupied/virtual status in the reference state.
+    Capable of capturing both dynamic and static (strong) correlation
+    but at the cost of increased circuit depth and parameter count.
 * **qaoa**: QAOA mixer excitation operators
-
+    It generates all possible single-qubit X and Y terms, along with all possible 
+    two-qubit interaction terms (XX, YY, XY, YX, XZ, ZX, YZ, ZY) across every pair of qubits. 
+    This pool offers a rich basis for constructing the mixer Hamiltonian for ADAPT-QAOA algorithms.
+    
 .. code-block:: python
+
+    import cudaq_solvers as solvers
 
     # Generate different operator pools
     gsd_ops = solvers.get_operator_pool(
@@ -509,6 +529,60 @@ CUDA-QX provides several pre-built operator pools for ADAPT-VQE:
         num_orbitals=molecule.n_orbitals,
         num_electrons=molecule.n_electrons
     )
+
+    uccgsd_ops = solvers.get_operator_pool(
+        "uccgsd",
+        num_orbitals=molecule.n_orbitals
+    )
+
+Available Ansatz
+^^^^^^^^^^^^^^^^^^
+
+CUDA-QX provides several state preparations ansatz for VQE.
+
+* **uccsd**: UCCSD operators
+* **uccgsd**: UCC generalized singles and doubles
+
+.. code-block:: python
+
+    import cudaq_solvers as solvers
+
+    # Using UCCSD ansatz
+    geometry = [('H', (0., 0., 0.)), ('H', (0., 0., .7474))]
+    molecule = solvers.create_molecule(geometry, 'sto-3g', 0, 0, casci=True)
+
+    numQubits = molecule.n_orbitals * 2
+    numElectrons = molecule.n_electrons
+    spin = 0
+
+    @cudaq.kernel
+    def ansatz(thetas: list[float]):
+        q = cudaq.qvector(numQubits)
+        for i in range(numElectrons):
+            x(q[i])
+        solvers.stateprep.uccsd(q, thetas, numElectrons, spin)
+
+    
+    # Using UCCGSD ansatz
+    geometry = [('H', (0., 0., 0.)), ('H', (0., 0., .7474))]
+    molecule = solvers.create_molecule(geometry, 'sto-3g', 0, 0, casci=True)
+
+    numQubits = molecule.n_orbitals * 2
+    numElectrons = molecule.n_electrons
+
+    # Get grouped Pauli words and coefficients from UCCGSD pool
+    pauliWordsList, coefficientsList = solvers.stateprep.get_uccgsd_pauli_lists(
+        numQubits, only_singles=False, only_doubles=False)
+    
+    @cudaq.kernel
+    def ansatz(numQubits: int, numElectrons: int, thetas: list[float],
+               pauliWordsList: list[list[cudaq.pauli_word]],
+               coefficientsList: list[list[float]]):
+        q = cudaq.qvector(numQubits)
+        for i in range(numElectrons):
+            x(q[i])
+        solvers.stateprep.uccgsd(q, thetas, pauliWordsList, coefficientsList)
+
 
 Algorithm Parameters
 ^^^^^^^^^^^^^^^^^^^^^^

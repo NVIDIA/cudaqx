@@ -198,3 +198,25 @@ def test_quantinuum_requires_machine_name(case, code_obj, dem_file):
         )
 
     qec.finalize_decoders()
+
+
+def test_quantinuum_requires_project_id_remote(case, code_obj, dem_file):
+    with pytest.raises(RuntimeError):
+        demo_circuit_host(
+            code_obj=code_obj,
+            distance=case["distance"],
+            p_spam=case["p_spam"],
+            state_prep_op=qec.operation.prep0,
+            num_shots=1,
+            num_rounds=case["num_rounds"],
+            num_logical=1,
+            dem_filename=str(dem_file),
+            save_dem=False,
+            load_dem=True,
+            decoder_window=case["decoder_window"],
+            target_name="quantinuum",
+            emulate=False,  # attempt remote execution but no project_id
+            machine_name="Helios-1SC",
+        )
+
+    qec.finalize_decoders()

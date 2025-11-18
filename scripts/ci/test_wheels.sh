@@ -45,6 +45,13 @@ if [ -z "$cudaqx_version" ] ; then
   exit 1
 fi
 
+# Validate that $cuda_version has exactly 1 dot (i.e. 12.6, not 12.6.0)
+if [[ $(echo $cuda_version | grep -o '\.' | wc -l) -ne 1 ]]; then
+  echo "Error: cuda_version must have exactly 1 dot"
+  exit 1
+fi
+cuda_major=$(echo $cuda_version | cut -d '.' -f 1)
+
 ${python} -m pip install --no-cache-dir pytest
 
 # The following packages are needed for our tests. They are not true
@@ -52,21 +59,27 @@ ${python} -m pip install --no-cache-dir pytest
 ${python} -m pip install openfermion
 ${python} -m pip install openfermionpyscf
 
+# Now install torch.
+cuda_no_dot=$(echo $cuda_version | sed 's/\.//')
+${python} -m pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu${cuda_no_dot}
+
 FIND_LINKS="--find-links /wheels/ --find-links /metapackages/"
 
 # If special CUDA-Q wheels have been built for this test, install them here.
 if [ -d /cudaq-wheels ]; then
   echo "Custom CUDA-Q wheels directory found. Will add to the --find-links list."
   FIND_LINKS="${FIND_LINKS} --find-links /cudaq-wheels/"
-  ${python} -m pip install $FIND_LINKS "cuda-quantum-cu${cuda_version}==${cudaq_version}"
+  ${python} -m pip install $FIND_LINKS "cuda-quantum-cu${cuda_major}==${cudaq_version}"
 fi
 
-# TODO: Remove this once PyTorch 2.9.0 is released. That should happen before
-# this PR is merged.
-if [[ "$cuda_version" == "13" ]]; then
-  ${python} -m pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu130
-elif [[ "$cuda_version" == "12" ]]; then
-  ${python} -m pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu126
+# Install TensorRT.
+if [[ "$cuda_major" == "13" ]]; then
+  ${python} -m pip install "tensorrt-cu13==10.13.*" "cuda_toolkit[cudart]==${cuda_version}.*"
+elif [[ "$cuda_major" == "12" ]]; then
+  # If x86_64, then install tensorrt-cu12. If arm64, then do not install tensorrt-cu12.
+  if [ "$(uname -m)" == "x86_64" ]; then
+    ${python} -m pip install "tensorrt-cu12==10.13.*" "cuda_toolkit[cudart]==${cuda_version}.*"
+  fi
 fi
 
 # QEC library
@@ -86,14 +99,14 @@ fi
 
 # Verify that the correct version of cuda-quantum and cudaq-qec were installed.
 package_installed=$(python${python_version} -m pip list | grep cudaq-qec-cu | cut -d ' ' -f1)
-package_expected=cudaq-qec-cu${cuda_version}
+package_expected=cudaq-qec-cu${cuda_major}
 if [ "$package_installed" != "$package_expected" ]; then
   echo "::error Expected installation of $package_expected package, but got $package_installed."
   exit 1
 fi
 
 package_installed=$(python${python_version} -m pip list | grep cuda-quantum-cu | cut -d ' ' -f1)
-package_expected=cuda-quantum-cu${cuda_version}
+package_expected=cuda-quantum-cu${cuda_major}
 if [ "$package_installed" != "$package_expected" ]; then
   echo "::error Expected installation of $package_expected package, but got $package_installed."
   exit 1
@@ -108,7 +121,7 @@ ${python} -m pytest -v -s libs/solvers/python/tests/ --ignore=libs/solvers/pytho
 
 # Verify that the correct version of cudaq-solvers was installed.
 package_installed=$(python${python_version} -m pip list | grep cudaq-solvers-cu | cut -d ' ' -f1)
-package_expected=cudaq-solvers-cu${cuda_version}
+package_expected=cudaq-solvers-cu${cuda_major}
 if [ "$package_installed" != "$package_expected" ]; then
   echo "::error Expected installation of $package_expected package, but got $package_installed."
   exit 1

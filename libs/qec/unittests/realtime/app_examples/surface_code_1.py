@@ -71,7 +71,6 @@ def save_dem_to_file(dem, dem_filename, numSyndromesPerRound, num_logical):
         config.type = "multi_error_lut"
         config.block_size = dem.num_error_mechanisms()
         config.syndrome_size = dem.num_detectors()
-        config.num_syndromes_per_round = numSyndromesPerRound
         config.H_sparse = qec.pcm_to_sparse_vec(dem.detector_error_matrix)
         config.O_sparse = qec.pcm_to_sparse_vec(dem.observables_flips_matrix)
         config.D_sparse = qec.generate_timelike_sparse_detector_matrix(
@@ -409,7 +408,10 @@ def demo_circuit_host(code_obj: qec.code,
                       decoder_window: int,
                       target_name: str = "stim",
                       emulate: bool = True,
-                      machine_name: str = ""):
+                      machine_name: str = "",
+                      project_id: str = "",
+                      max_cost: int = 0,
+                      max_qubits: int = 0):
     if not code_obj.contains_operation(state_prep_op):
         raise RuntimeError(
             f"sample_memory_circuit_error - requested state prep kernel not found."
@@ -551,15 +553,37 @@ def demo_circuit_host(code_obj: qec.code,
         return
 
     # Actual run
+    extra_target_kwargs = {}
     if target_name == "quantinuum":
         if machine_name == "":
             raise RuntimeError(
                 "demo_circuit_host: machine_name must be set when target_name is quantinuum."
             )
+        if not emulate:
+            if project_id == "":
+                raise RuntimeError(
+                    "demo_circuit_host: project_id must be set when target_name is quantinuum and emulate is false (remote execution)."
+                )
+            extra_target_kwargs["project"] = project_id
+
+            # If not syntax checker, max_cost and max_qubits are also required
+            if not machine_name.endswith("SC"):
+                if max_cost <= 0:
+                    raise RuntimeError(
+                        "demo_circuit_host: max_cost must be set to a positive integer when running on Quantinuum QPU/Emulator."
+                    )
+                extra_target_kwargs["max_cost"] = max_cost
+                if max_qubits <= 0:
+                    raise RuntimeError(
+                        "demo_circuit_host: max_qubits must be set to a positive integer when running on Quantinuum QPU/Emulator."
+                    )
+                extra_target_kwargs["max_qubits"] = max_qubits
+
     cudaq.set_target(target_name,
                      emulate=emulate,
                      machine=machine_name,
-                     extra_payload_provider="decoder")
+                     extra_payload_provider="decoder",
+                     **extra_target_kwargs)
     print("target: " + cudaq.get_target().name)
 
     num_syndromes_per_round = distance * distance - 1
@@ -578,6 +602,7 @@ def demo_circuit_host(code_obj: qec.code,
     print("Calling cudaq.run ...")
     manually_inject_errors = target_name == "quantinuum" and emulate
     print("manually_inject_errors: " + str(manually_inject_errors))
+    is_remote_qpu = target_name == "quantinuum" and not emulate
     # Run shots
     run_result = cudaq.run(
         demo_circuit_qpu,
@@ -595,7 +620,7 @@ def demo_circuit_host(code_obj: qec.code,
         decoder_window,
         manually_inject_errors,
         shots_count=num_shots,
-        noise_model=cudaq.NoiseModel())
+        noise_model=cudaq.NoiseModel() if not is_remote_qpu else None)
 
     print("Done with cudaq.run!")
     # print(f"Result: {len(run_result)}")
@@ -666,6 +691,20 @@ def main(argv: List[str]) -> int:
                         type=int,
                         default=None,
                         help="Random seed to use.")
+    parser.add_argument(
+        "--project_id",
+        type=str,
+        default="",
+        help="Project ID to use when running on a real QPU target.")
+    parser.add_argument("--max_cost",
+                        type=int,
+                        default=-1,
+                        help="Max cost for Quantinuum target.")
+    parser.add_argument("--max_qubits",
+                        type=int,
+                        default=-1,
+                        help="Max qubits for Quantinuum target.")
+
     args = parser.parse_args(argv)
 
     save_dem = args.save_dem is not None
@@ -674,7 +713,19 @@ def main(argv: List[str]) -> int:
     target_name = args.target
     machine_name = args.machine_name
     emulate = args.emulate
+    if isinstance(emulate, str):
+        if emulate.lower() in ("true", "1", "yes"):
+            emulate = True
+        elif emulate.lower() in ("false", "0", "no"):
+            emulate = False
+        else:
+            raise RuntimeError(
+                f"Invalid value for emulate: {args.emulate}. Must be a boolean."
+            )
     seed = args.seed
+    project_id = args.project_id
+    max_cost = args.max_cost
+    max_qubits = args.max_qubits
 
     if target_name == "quantinuum" and machine_name == "":
         if not emulate:
@@ -774,6 +825,9 @@ def main(argv: List[str]) -> int:
         target_name,
         emulate,
         machine_name,
+        project_id,
+        max_cost,
+        max_qubits,
     )
 
     qec.finalize_decoders()

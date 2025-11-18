@@ -27,6 +27,8 @@ CUDA-Q Solvers Python API
 .. autofunction:: cudaq_solvers.stateprep.double_excitation
 .. autofunction:: cudaq_solvers.stateprep.get_num_uccsd_parameters
 .. autofunction:: cudaq_solvers.stateprep.get_uccsd_excitations    
+.. autofunction:: cudaq_solvers.stateprep.get_uccgsd_pauli_lists
+.. autofunction:: cudaq_solvers.stateprep.uccgsd
 
 .. autofunction:: cudaq_solvers.get_num_qaoa_parameters
 

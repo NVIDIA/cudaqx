@@ -158,12 +158,15 @@ $python -m build --wheel
 
 CUDAQ_EXCLUDE_LIST=$(for f in $(find $cudaq_prefix/lib -name "*.so" -printf "%P\n" | sort); do echo "--exclude $f"; done | tr '\n' ' ')
 
+# We need to exclude a few libraries to prevent auditwheel from mistakenly grafting them into the wheel.
 LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$(pwd)/_skbuild/lib:$tensorrt_path/lib" \
 $python -m auditwheel -v repair dist/*.whl $CUDAQ_EXCLUDE_LIST \
   --wheel-dir /wheels \
   --exclude libcudart.so.${cuda_version} \
   --exclude libnvinfer.so.10 \
   --exclude libnvonnxparser.so.10 \
+  --exclude libcudaq-qec.so \
+  --exclude libcudaq-qec-realtime-decoding.so \
   ${PLAT_STR}
 
 # ==============================================================================
