@@ -43,6 +43,7 @@ set_target_properties(cudaq-qec-realtime-decoding-simulation PROPERTIES
 
 
 install(TARGETS cudaq-qec-realtime-decoding-simulation
+  COMPONENT qec-lib
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 

@@ -152,8 +152,6 @@ void bindDecodingConfig(py::module &mod) {
       .def_readwrite("type", &decoder_config::type)
       .def_readwrite("block_size", &decoder_config::block_size)
       .def_readwrite("syndrome_size", &decoder_config::syndrome_size)
-      .def_readwrite("num_syndromes_per_round",
-                     &decoder_config::num_syndromes_per_round)
       .def_readwrite("H_sparse", &decoder_config::H_sparse)
       .def_readwrite("O_sparse", &decoder_config::O_sparse)
       .def_readwrite("D_sparse", &decoder_config::D_sparse)

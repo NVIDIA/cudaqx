@@ -7,6 +7,7 @@
  ******************************************************************************/
 
 #include "cudaq/qec/plugin_loader.h"
+#include "common/Logger.h"
 #include <filesystem>
 #include <iostream>
 
@@ -43,9 +44,14 @@ void load_plugins(const std::string &plugin_dir, PluginType type) {
             PluginHandle{std::unique_ptr<void, PluginDeleter>(raw_handle,
                                                               PluginDeleter()),
                          type});
+        CUDAQ_INFO("Successfully loaded plugin: {}", entry.path().string());
       } else {
-        std::cerr << "ERROR: Failed to load plugin: " << entry.path()
-                  << " Error: " << dlerror() << std::endl;
+        // The TRT decoder is an optional decoder that is not always available.
+        // Do not clutter up the console with error messages if it is not
+        // available. We only output an error message if info logging is
+        // enabled.
+        CUDAQ_INFO("Failed to load plugin {} Error: {}. Continuing anyway.",
+                   entry.path().string(), dlerror());
       }
     }
   }

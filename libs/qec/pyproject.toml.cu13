@@ -10,8 +10,9 @@ authors = [{name = "NVIDIA Corporation & Affiliates"}]
 maintainers = [{name = "NVIDIA Corporation & Affiliates"}]
 requires-python = ">=3.11"
 readme = "README.md"
+license = "LicenseRef-NVIDIA-Proprietary"
 dependencies = [
-  'cuda-quantum-cu13 >= 0.12',
+  'cuda-quantum-cu13 >= 0.13',
 ]
 classifiers = [
     'Intended Audience :: Science/Research',
@@ -41,6 +42,7 @@ cmake.version = ">=3.28"
 cmake.build-type = "Release"
 install.components = ["qec-python", "qec-lib", "qec-lib-plugins"]
 wheel.packages = []
+wheel.license-files = [ "LICENSE", "NOTICE", "CITATION.cff" ]
 logging.level = "DEBUG"
 ninja.version = ">=1.10"
 
@@ -56,7 +58,7 @@ tensor_network_decoder = [
   "quimb",
   "opt_einsum",
   "torch>=2.9.0",
-  "cuquantum-python-cu13==25.09"
+  "cuquantum-python-cu13==25.09.1"
 ]
 trt_decoder = [
   "tensorrt-cu13"
@@ -65,6 +67,6 @@ all = [
   "quimb",
   "opt_einsum",
   "torch>=2.9.0",
-  "cuquantum-python-cu13==25.09",
+  "cuquantum-python-cu13==25.09.1",
   "tensorrt-cu13"
 ]

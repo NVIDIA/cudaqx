@@ -56,13 +56,12 @@ create_test_empty_decoder_config(int id) {
   config.type = "single_error_lut";
   config.block_size = 20;
   config.syndrome_size = 10;
-  config.num_syndromes_per_round = config.syndrome_size;
   cudaqx::tensor<uint8_t> H({config.syndrome_size, config.block_size});
   cudaqx::tensor<uint8_t> O({2, config.block_size});
   config.H_sparse = cudaq::qec::pcm_to_sparse_vec(H);
   config.O_sparse = cudaq::qec::pcm_to_sparse_vec(O);
   config.D_sparse = cudaq::qec::generate_timelike_sparse_detector_matrix(
-      config.num_syndromes_per_round, 2, /*include_first_round=*/false);
+      config.syndrome_size, 2, /*include_first_round=*/false);
   return config;
 }
 
@@ -208,7 +207,6 @@ TEST(DecoderYAMLTest, SlidingWindowDecoder) {
   config.type = "sliding_window";
   config.block_size = n_cols;
   config.syndrome_size = n_rows;
-  config.num_syndromes_per_round = n_syndromes_per_round;
 
   // Sliding window config
   config.decoder_custom_args =
@@ -219,7 +217,8 @@ TEST(DecoderYAMLTest, SlidingWindowDecoder) {
   config.H_sparse = cudaq::qec::pcm_to_sparse_vec(pcm);
   config.O_sparse =
       cudaq::qec::pcm_to_sparse_vec(cudaqx::tensor<uint8_t>({2, n_cols}));
-  config.D_sparse.reset();
+  config.D_sparse = cudaq::qec::generate_timelike_sparse_detector_matrix(
+      config.syndrome_size, 2, /*include_first_round=*/false);
   sw_config.window_size = 1;
   sw_config.step_size = 1;
   sw_config.num_syndromes_per_round = n_syndromes_per_round;

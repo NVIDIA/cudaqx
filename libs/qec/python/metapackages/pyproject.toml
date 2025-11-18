@@ -14,6 +14,7 @@ description = "Accelerated libraries for Quantum Error Correction built on CUDA-
 authors = [{name = "NVIDIA Corporation & Affiliates"}]
 maintainers = [{name = "NVIDIA Corporation & Affiliates"}]
 readme = "README.md"
+license = "LicenseRef-NVIDIA-Proprietary"
 requires-python = ">=3.11"
 license-files = [ "LICENSE", "NOTICE", "CITATION.cff" ]
 classifiers = [
