@@ -98,6 +98,9 @@ apps/
 # vim files
 *.tmp
 
+# Wheel files
+*.whl
+
 # Temporary build files for metapackages
 libs/*/python/metapackages/LICENSE
 libs/*/python/metapackages/NOTICE
