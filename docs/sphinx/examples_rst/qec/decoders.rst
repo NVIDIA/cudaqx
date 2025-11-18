@@ -75,33 +75,12 @@ CUDA-Q QEC library. The library follows the CUDA-Q decoder Python and C++ interf
 :cpp:class:`cudaq::qec::decoder` for C++), but as documented in the API sections
 (:ref:`nv_qldpc_decoder_api_python` for Python and
 :ref:`nv_qldpc_decoder_api_cpp` for C++), there are many configuration options
-that can be passed to the constructor.
-
-Belief Propagation Methods
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The ``nv-qldpc-decoder`` supports multiple belief propagation (BP) algorithms, each with different trade-offs 
-between accuracy, convergence, and speed:
-
-* **Sum-Product BP** (``bp_method=0``): The standard BP algorithm. Good baseline performance.
-* **Min-Sum BP** (``bp_method=1``): Faster approximation to sum-product. Can be tuned with ``scale_factor``.
-* **Memory-based BP** (``bp_method=2``): Adds uniform memory (``gamma0``) to help escape local minima. Useful when standard BP fails to converge.
-* **Disordered Memory BP** (``bp_method=3``): Uses per-variable memory strengths for better adaptability to code structure.
-* **Sequential Relay BP** (``composition=1``): Advanced method that runs multiple "relay legs" with different gamma configurations. See examples below for configuration.
-
-Usage Example
-~~~~~~~~~~~~~
-
-The following example shows how to exercise the decoder using non-trivial pre-generated test data. 
-The test data was generated using scripts originating from the GitHub repo for
-`BivariateBicycleCodes <https://github.com/sbravyi/BivariateBicycleCodes>`_ [#f1]_; 
-it includes parity check matrices (PCMs) and test syndromes to exercise a decoder.
-
-The example demonstrates:
-
-1. **Basic decoder configuration** with OSD post-processing
-2. **All BP methods** including Sequential Relay BP
-3. **Batched decoding** for improved performance
+that can be passed to the constructor. The following example shows how to
+exercise the decoder using non-trivial pre-generated test data. The test data
+was generated using scripts originating from the GitHub repo for
+`BivariateBicycleCodes
+<https://github.com/sbravyi/BivariateBicycleCodes>`_ [#f1]_; it includes parity
+check matrices (PCMs) and test syndromes to exercise a decoder.
 
 .. literalinclude:: ../../examples/qec/python/nv-qldpc-decoder.py
     :language: python
