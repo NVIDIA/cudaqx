@@ -76,14 +76,32 @@ Building from Source
 The instructions for building CUDA-QX from source are maintained on our GitHub
 repository: `Building CUDA-QX from Source <https://github.com/NVIDIA/cudaqx/blob/main/Building.md>`__.
 
-Known Blackwell Issues
-----------------------
+.. _installing-pytorch:
+
+Installing PyTorch
+------------------
+
+PyTorch (``torch``) is required for several CUDA-QX features:
+
+* **Tensor Network Decoder**: Used by the QEC library for tensor network-based decoding (CPU version of PyTorch is sufficient)
+* **GQE Algorithm**: Used by the Solvers library for the Generative Quantum Eigensolver
+* **Training AI Decoders**: Optionally used for training custom neural network decoders (see :ref:`Deploying AI Decoders with TensorRT <deploying-ai-decoders>`)
+
+PyTorch is automatically installed when you install the optional components:
+
+.. code-block:: bash
+
+    # Installs PyTorch as a dependency
+    pip install cudaq-qec[tensor-network-decoder]
+    pip install cudaq-solvers[gqe]
+
+Alternatively, you can install PyTorch directly. For detailed installation instructions, visit the 
+`PyTorch installation page <https://pytorch.org/get-started/locally/>`_.
+
+.. code-block:: bash
+
+    pip install torch
+
 .. note::
-    If you are attempting to use torch on Blackwell, you will need to install the nightly version of torch.
-    You can do this by running:
-
-    .. code-block:: bash
-
-        python3 -m pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/cu128
-
-    torch is a dependency of the tensor network decoder and the GQE algorithm.
+    Users with NVIDIA Blackwell architecture GPUs require PyTorch with CUDA 12.8 or later support. 
+    When installing PyTorch, make sure to select the appropriate CUDA version for your system.

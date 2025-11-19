@@ -37,7 +37,8 @@ cudaqx::tensor<uint8_t> pcm_from_sparse_string(const std::string &sparse_str,
                                                std::size_t num_cols);
 
 /// @brief Return a PCM from a sparse representation.
-/// @param sparse_vec The sparse representation of the PCM.
+/// @param sparse_vec The sparse representation of the PCM, where -1 separates
+/// rows.
 /// @param num_rows The number of rows in the PCM.
 /// @param num_cols The number of columns in the PCM.
 /// @return A PCM tensor.
@@ -47,7 +48,8 @@ pcm_from_sparse_vec(const std::vector<std::int64_t> &sparse_vec,
 
 /// @brief Return a sparse representation of the PCM.
 /// @param pcm The PCM to convert to a sparse representation.
-/// @return A vector of integers that represents the PCM in a sparse format.
+/// @return A vector of integers that represents the PCM in a sparse format,
+/// where -1 separates rows.
 std::vector<std::int64_t> pcm_to_sparse_vec(const cudaqx::tensor<uint8_t> &pcm);
 
 /// @brief Generate a sparse detector matrix for a given number of syndromes per

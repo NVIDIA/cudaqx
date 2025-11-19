@@ -32,7 +32,7 @@ if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+ ]]; then
   exit 1
 fi
 
-FILES_TO_COPY=(LICENSE NOTICE CITATION.cff)
+FILES_TO_COPY=(NOTICE CITATION.cff)
 
 # Copy setup.py file for the qec meta-package to the solvers meta-package directory.
 cp $TOP_DIR/libs/qec/python/metapackages/setup.py $TOP_DIR/libs/solvers/python/metapackages/setup.py
@@ -43,11 +43,20 @@ for package in qec solvers; do
   echo "Building $package metapackage..."
   cd $TOP_DIR/libs/$package/python/metapackages
 
-  # Copy the appropriate LICENSE, NOTICE, and CITATION.cff files to the metapackage directory.
+  # Copy the appropriate NOTICE and CITATION.cff files to the metapackage directory.
   rm -rf dist *.egg-info _version.txt $FILES_TO_COPY
   for file in ${FILES_TO_COPY[@]}; do
     cp $TOP_DIR/$file .
   done
+
+  rm -f LICENSE
+  if [ $package == "qec" ]; then
+    # Use LICENSE file from qec directory
+    cp $TOP_DIR/libs/qec/LICENSE .
+  else
+    # Use top-level LICENSE file
+    cp $TOP_DIR/LICENSE .
+  fi
 
   # Create a version.txt file in the metapackage directory.
   echo $VERSION > _version.txt
@@ -76,6 +85,7 @@ for package in qec solvers; do
   # Clean up
   rm $TOP_DIR/libs/${package}/python/metapackages/pyproject.toml.cu*
   rm $FILES_TO_COPY
+  rm LICENSE
   rm _version.txt
 
 done
