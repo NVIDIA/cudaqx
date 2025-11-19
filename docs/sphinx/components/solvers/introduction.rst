@@ -526,8 +526,8 @@ CUDA-QX provides several pre-built operator pools for ADAPT-VQE:
     
     uccsd_ops = solvers.get_operator_pool(
         "uccsd",
-        num_orbitals=molecule.n_orbitals,
-        num_electrons=molecule.n_electrons
+        num_qubits = 2 * molecule.n_orbitals,
+        num_electrons = molecule.n_electrons
     )
 
     uccgsd_ops = solvers.get_operator_pool(
