@@ -518,6 +518,9 @@ CUDA-QX provides several pre-built operator pools for ADAPT-VQE:
 
     import cudaq_solvers as solvers
 
+    geometry = [('H', (0., 0., 0.)), ('H', (0., 0., .7474))]
+    molecule = solvers.create_molecule(geometry, 'sto-3g', 0, 0, casci=True)
+    
     # Generate different operator pools
     gsd_ops = solvers.get_operator_pool(
         "spin_complement_gsd",
