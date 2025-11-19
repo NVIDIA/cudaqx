@@ -61,14 +61,15 @@ std::tuple<cudaqx::tensor<uint8_t>, cudaqx::tensor<uint8_t>>
 sample_code_capacity(const code &code, std::size_t numShots,
                      double error_probability);
 
-/// @brief Sample measurements from a check matrix with per-mechanism error probabilities
+/// @brief Sample measurements from a check matrix with per-mechanism error
+/// probabilities
 /// @param check_matrix Binary matrix [num_checks × num_error_mechanisms]
 /// @param numShots Number of measurement shots
 /// @param error_probabilities Per-error-mechanism probabilities
-/// @return Tuple of check measurements [numShots × num_checks] and error occurrences [numShots × num_error_mechanisms]
+/// @return Tuple of check measurements [numShots × num_checks] and error
+/// occurrences [numShots × num_error_mechanisms]
 std::tuple<cudaqx::tensor<uint8_t>, cudaqx::tensor<uint8_t>>
-dem_sampling(const cudaqx::tensor<uint8_t> &check_matrix,
-             std::size_t numShots,
+dem_sampling(const cudaqx::tensor<uint8_t> &check_matrix, std::size_t numShots,
              const std::vector<double> &error_probabilities);
 
 /// @brief Sample measurements from a check matrix with seed
@@ -76,12 +77,11 @@ dem_sampling(const cudaqx::tensor<uint8_t> &check_matrix,
 /// @param numShots Number of measurement shots
 /// @param error_probabilities Per-error-mechanism probabilities
 /// @param seed RNG seed for reproducible experiments
-/// @return Tuple of check measurements [numShots × num_checks] and error occurrences [numShots × num_error_mechanisms]
+/// @return Tuple of check measurements [numShots × num_checks] and error
+/// occurrences [numShots × num_error_mechanisms]
 std::tuple<cudaqx::tensor<uint8_t>, cudaqx::tensor<uint8_t>>
-dem_sampling(const cudaqx::tensor<uint8_t> &check_matrix,
-             std::size_t numShots,
-             const std::vector<double> &error_probabilities,
-             unsigned seed);
+dem_sampling(const cudaqx::tensor<uint8_t> &check_matrix, std::size_t numShots,
+             const std::vector<double> &error_probabilities, unsigned seed);
 
 /// @brief Sample syndrome measurements with circuit-level noise
 /// @param statePrep Initial state preparation operation

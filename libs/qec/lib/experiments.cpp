@@ -131,14 +131,14 @@ std::tuple<cudaqx::tensor<uint8_t>, cudaqx::tensor<uint8_t>>
 dem_sampling(const cudaqx::tensor<uint8_t> &check_matrix, std::size_t nShots,
              const std::vector<double> &error_probabilities) {
   return details::__dem_sampling(check_matrix, nShots, error_probabilities,
-                                  std::random_device()());
+                                 std::random_device()());
 }
 
 std::tuple<cudaqx::tensor<uint8_t>, cudaqx::tensor<uint8_t>>
 dem_sampling(const cudaqx::tensor<uint8_t> &check_matrix, std::size_t nShots,
              const std::vector<double> &error_probabilities, unsigned seed) {
   return details::__dem_sampling(check_matrix, nShots, error_probabilities,
-                                  seed);
+                                 seed);
 }
 
 std::tuple<cudaqx::tensor<uint8_t>, cudaqx::tensor<uint8_t>>

@@ -587,9 +587,9 @@ TEST(QECCodeTester, checkDemSampling) {
     // Create a simple check matrix [3 checks x 5 error mechanisms]
     cudaqx::tensor<uint8_t> check_matrix({3, 5});
     std::vector<uint8_t> matrix_data = {
-        1, 0, 1, 0, 0,  // check 0 triggered by errors 0, 2
-        0, 1, 1, 0, 0,  // check 1 triggered by errors 1, 2
-        0, 0, 0, 1, 1   // check 2 triggered by errors 3, 4
+        1, 0, 1, 0, 0, // check 0 triggered by errors 0, 2
+        0, 1, 1, 0, 0, // check 1 triggered by errors 1, 2
+        0, 0, 0, 1, 1  // check 2 triggered by errors 3, 4
     };
     check_matrix.copy(matrix_data.data(), check_matrix.shape());
 
@@ -602,9 +602,9 @@ TEST(QECCodeTester, checkDemSampling) {
 
     // Validate shapes
     EXPECT_EQ(nShots, checks.shape()[0]);
-    EXPECT_EQ(3, checks.shape()[1]);  // 3 checks
+    EXPECT_EQ(3, checks.shape()[1]); // 3 checks
     EXPECT_EQ(nShots, errors.shape()[0]);
-    EXPECT_EQ(5, errors.shape()[1]);  // 5 error mechanisms
+    EXPECT_EQ(5, errors.shape()[1]); // 5 error mechanisms
 
     // Verify determinism with same seed
     auto [checks2, errors2] =
@@ -624,8 +624,7 @@ TEST(QECCodeTester, checkDemSampling) {
       for (size_t check = 0; check < 3; ++check) {
         uint8_t expected = 0;
         for (size_t err = 0; err < 5; ++err) {
-          expected ^=
-              (errors.at({shot, err}) & check_matrix.at({check, err}));
+          expected ^= (errors.at({shot, err}) & check_matrix.at({check, err}));
         }
         EXPECT_EQ(expected, checks.at({shot, check}));
       }
@@ -684,16 +683,15 @@ TEST(QECCodeTester, checkDemSampling) {
     std::vector<uint8_t> matrix_data = {1, 0, 1, 0, 1, 1};
     check_matrix.copy(matrix_data.data(), check_matrix.shape());
 
-    std::vector<double> wrong_size_probs = {0.1, 0.2};  // Should be size 3
+    std::vector<double> wrong_size_probs = {0.1, 0.2}; // Should be size 3
 
-    EXPECT_THROW(
-        cudaq::qec::dem_sampling(check_matrix, 10, wrong_size_probs),
-        std::invalid_argument);
+    EXPECT_THROW(cudaq::qec::dem_sampling(check_matrix, 10, wrong_size_probs),
+                 std::invalid_argument);
   }
 
   // Test error: non-rank-2 matrix
   {
-    cudaqx::tensor<uint8_t> bad_matrix({5});  // rank-1
+    cudaqx::tensor<uint8_t> bad_matrix({5}); // rank-1
     std::vector<uint8_t> matrix_data = {1, 0, 1, 0, 1};
     bad_matrix.copy(matrix_data.data(), bad_matrix.shape());
 
