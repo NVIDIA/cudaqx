@@ -83,6 +83,64 @@ sample_code_capacity(const code &code, std::size_t nShots,
                               seed);
 }
 
+namespace details {
+auto __dem_sampling(const cudaqx::tensor<uint8_t> &check_matrix,
+                    std::size_t nShots,
+                    const std::vector<double> &error_probabilities,
+                    unsigned seed) {
+  // Validate input
+  if (check_matrix.rank() != 2)
+    throw std::invalid_argument("check_matrix must be rank-2");
+
+  size_t num_checks = check_matrix.shape()[0];
+  size_t num_error_mechanisms = check_matrix.shape()[1];
+
+  if (error_probabilities.size() != num_error_mechanisms)
+    throw std::invalid_argument(
+        "error_probabilities size must match number of error mechanisms");
+
+  // Init RNG and distributions
+  std::mt19937 rng(seed);
+  std::vector<std::bernoulli_distribution> distributions;
+  distributions.reserve(num_error_mechanisms);
+  for (double p : error_probabilities)
+    distributions.emplace_back(p);
+
+  // Prepare output tensors
+  cudaqx::tensor<uint8_t> errors({nShots, num_error_mechanisms});
+  cudaqx::tensor<uint8_t> checks({nShots, num_checks});
+
+  // Generate error occurrences
+  std::vector<uint8_t> error_bits(nShots * num_error_mechanisms);
+  for (size_t shot = 0; shot < nShots; ++shot) {
+    for (size_t err = 0; err < num_error_mechanisms; ++err) {
+      error_bits[shot * num_error_mechanisms + err] = distributions[err](rng);
+    }
+  }
+
+  errors.copy(error_bits.data(), errors.shape());
+
+  // Compute checks: Checks = Errors * CheckMatrix^T (mod 2)
+  checks = errors.dot(check_matrix.transpose()) % 2;
+
+  return std::make_tuple(checks, errors);
+}
+} // namespace details
+
+std::tuple<cudaqx::tensor<uint8_t>, cudaqx::tensor<uint8_t>>
+dem_sampling(const cudaqx::tensor<uint8_t> &check_matrix, std::size_t nShots,
+             const std::vector<double> &error_probabilities) {
+  return details::__dem_sampling(check_matrix, nShots, error_probabilities,
+                                  std::random_device()());
+}
+
+std::tuple<cudaqx::tensor<uint8_t>, cudaqx::tensor<uint8_t>>
+dem_sampling(const cudaqx::tensor<uint8_t> &check_matrix, std::size_t nShots,
+             const std::vector<double> &error_probabilities, unsigned seed) {
+  return details::__dem_sampling(check_matrix, nShots, error_probabilities,
+                                  seed);
+}
+
 std::tuple<cudaqx::tensor<uint8_t>, cudaqx::tensor<uint8_t>>
 sample_memory_circuit(const code &code, operation statePrep,
                       std::size_t numShots, std::size_t numRounds,
