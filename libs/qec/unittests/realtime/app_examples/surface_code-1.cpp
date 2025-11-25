@@ -32,14 +32,15 @@
 
 void save_dem_to_file(const cudaq::qec::detector_error_model &dem,
                       std::string dem_filename, uint64_t numSyndromesPerRound,
-                      uint64_t numLogical) {
+                      uint64_t numLogical, const std::string &decoder_type,
+                      int sw_window_size, int sw_step_size) {
   cudaq::qec::decoding::config::multi_decoder_config multi_config;
   for (uint64_t i = 0; i < numLogical; i++) {
     // We actually send 1 additional round in this example, so add 1.
     auto numRounds = dem.num_detectors() / numSyndromesPerRound + 1;
     cudaq::qec::decoding::config::decoder_config config;
     config.id = i;
-    config.type = "multi_error_lut";
+    config.type = decoder_type; // Use parameter instead of hardcoded
     config.block_size = dem.num_error_mechanisms();
     config.syndrome_size = dem.num_detectors();
     config.H_sparse = cudaq::qec::pcm_to_sparse_vec(dem.detector_error_matrix);
@@ -47,16 +48,38 @@ void save_dem_to_file(const cudaq::qec::detector_error_model &dem,
         cudaq::qec::pcm_to_sparse_vec(dem.observables_flips_matrix);
     config.D_sparse = cudaq::qec::generate_timelike_sparse_detector_matrix(
         numSyndromesPerRound, numRounds, /*include_first_round=*/false);
-    cudaq::qec::decoding::config::multi_error_lut_config lut_config;
-    lut_config.lut_error_depth = 2;
-    config.decoder_custom_args = lut_config;
+
+    if (decoder_type == "multi_error_lut") {
+      // Original multi_error_lut configuration
+      cudaq::qec::decoding::config::multi_error_lut_config lut_config;
+      lut_config.lut_error_depth = 2;
+      config.decoder_custom_args = lut_config;
+    } else if (decoder_type == "sliding_window") {
+      // Sliding window configuration
+      cudaq::qec::decoding::config::sliding_window_config sw_config;
+      sw_config.window_size = sw_window_size;
+      sw_config.step_size = sw_step_size;
+      sw_config.num_syndromes_per_round = numSyndromesPerRound;
+      sw_config.straddle_start_round = false;
+      sw_config.straddle_end_round = true;
+      sw_config.inner_decoder_name = "multi_error_lut";
+      sw_config.error_rate_vec = dem.error_rates; // Required by sliding_window
+
+      // Configure inner multi_error_lut decoder
+      cudaq::qec::decoding::config::multi_error_lut_config lut_config;
+      lut_config.lut_error_depth = 2;
+      sw_config.multi_error_lut_params = lut_config;
+      config.decoder_custom_args = sw_config;
+    }
+
     multi_config.decoders.push_back(config);
   }
   std::string config_str = multi_config.to_yaml_str(200);
   std::ofstream config_file(dem_filename);
   config_file << config_str;
   config_file.close();
-  printf("Saved config to file: %s\n", dem_filename.c_str());
+  printf("Saved %s config to file: %s\n", decoder_type.c_str(),
+         dem_filename.c_str());
   return;
 }
 
@@ -73,14 +96,22 @@ void load_dem_from_file(const std::string &dem_filename,
       cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(
           dem_str);
   if (numLogical != config.decoders.size()) {
-    printf("ERROR: numLogical [%ld] !- config.decoders.size() [%ld]\n",
+    printf("ERROR: numLogical [%ld] != config.decoders.size() [%ld]\n",
            numLogical, config.decoders.size());
     exit(1);
   }
   auto decoder_config = config.decoders[0];
-  auto nv_qldpc_config =
-      std::get<cudaq::qec::decoding::config::multi_error_lut_config>(
-          decoder_config.decoder_custom_args);
+
+  if (decoder_config.type == "sliding_window") {
+    auto sw_config =
+        std::get<cudaq::qec::decoding::config::sliding_window_config>(
+            decoder_config.decoder_custom_args);
+    // Extract from top-level error_rate_vec (required for sliding_window)
+    if (!sw_config.error_rate_vec.empty()) {
+      dem.error_rates = sw_config.error_rate_vec;
+    }
+  }
+
   dem.detector_error_matrix = cudaq::qec::pcm_from_sparse_vec(
       decoder_config.H_sparse, decoder_config.syndrome_size,
       decoder_config.block_size);
@@ -90,9 +121,10 @@ void load_dem_from_file(const std::string &dem_filename,
                                       decoder_config.O_sparse.end(), -1);
   dem.observables_flips_matrix = cudaq::qec::pcm_from_sparse_vec(
       decoder_config.O_sparse, num_observables, decoder_config.block_size);
-  printf("Loaded dem from file: %s\n", dem_filename.c_str());
+  printf("Loaded %s config from file: %s\n", decoder_config.type.c_str(),
+         dem_filename.c_str());
 
-  // Now configure the decoders
+  // Now configure the decoders (works for both types)
   cudaq::qec::decoding::config::configure_decoders(config);
 }
 
@@ -366,7 +398,9 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
                        double p_spam, cudaq::qec::operation statePrep,
                        std::size_t numShots, std::size_t numRounds,
                        std::size_t numLogical, std::string dem_filename,
-                       bool save_dem, bool load_dem, int decoder_window) {
+                       bool save_dem, bool load_dem, int decoder_window,
+                       const std::string &decoder_type, int sw_window_size,
+                       int sw_step_size) {
   if (!code.contains_operation(statePrep))
     throw std::runtime_error(
         "sample_memory_circuit_error - requested state prep kernel not found.");
@@ -522,7 +556,8 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
     dem.observables_flips_matrix.dump_bits();
 
     if (save_dem) {
-      save_dem_to_file(dem, dem_filename, numSyndromesPerRound, numLogical);
+      save_dem_to_file(dem, dem_filename, numSyndromesPerRound, numLogical,
+                       decoder_type, sw_window_size, sw_step_size);
       return;
     }
   }
@@ -593,6 +628,11 @@ void show_help() {
          "distance\n");
   printf("  --decoder_window <int>  Number of rounds to use for the decoder "
          "window. Default: distance\n");
+  printf("  --decoder_type <string> Decoder type: 'multi_error_lut' or "
+         "'sliding_window'. Default: multi_error_lut\n");
+  printf("  --sw_window_size <int>  Sliding window size (only for "
+         "sliding_window decoder). Default: decoder_window\n");
+  printf("  --sw_step_size <int>    Sliding window step size. Default: 1\n");
   printf("  --save_dem <string> Save the detector error model to a file.\n");
   printf("  --load_dem <string> Load the detector error model from a file. "
          "(Cannot be used with --save_dem)\n");
@@ -609,6 +649,11 @@ int main(int argc, char **argv) {
   bool save_dem = false;
   bool load_dem = false;
   std::string dem_filename;
+
+  // Decoder type selection
+  std::string decoder_type = "multi_error_lut"; // Default
+  int sw_window_size = -1; // For sliding_window, default to decoder_window
+  int sw_step_size = 1;    // For sliding_window
 
   // Parse the command line arguments
   for (int i = 1; i < argc; i++) {
@@ -633,6 +678,15 @@ int main(int argc, char **argv) {
       i++;
     } else if (arg == "--decoder_window") {
       decoder_window = std::stoi(argv[i + 1]);
+      i++;
+    } else if (arg == "--decoder_type") {
+      decoder_type = argv[i + 1];
+      i++;
+    } else if (arg == "--sw_window_size") {
+      sw_window_size = std::stoi(argv[i + 1]);
+      i++;
+    } else if (arg == "--sw_step_size") {
+      sw_step_size = std::stoi(argv[i + 1]);
       i++;
     } else if (arg == "--save_dem") {
       save_dem = true;
@@ -661,6 +715,15 @@ int main(int argc, char **argv) {
     num_rounds = distance;
   if (decoder_window == -1)
     decoder_window = distance;
+  if (sw_window_size == -1)
+    sw_window_size = decoder_window;
+
+  // Validate decoder type
+  if (decoder_type != "multi_error_lut" && decoder_type != "sliding_window") {
+    printf("Error: --decoder_type must be 'multi_error_lut' or "
+           "'sliding_window'\n");
+    return 1;
+  }
 
   // Validate that num_rounds >= distance
   if (num_rounds < distance || num_rounds % distance != 0) {
@@ -711,7 +774,8 @@ int main(int argc, char **argv) {
 
   demo_circuit_host(*code, distance, p_spam, cudaq::qec::operation::prep0,
                     num_shots, num_rounds, num_logical, dem_filename, save_dem,
-                    load_dem, decoder_window);
+                    load_dem, decoder_window, decoder_type, sw_window_size,
+                    sw_step_size);
 
   // Ensure clean shutdown
   cudaq::qec::decoding::config::finalize_decoders();
