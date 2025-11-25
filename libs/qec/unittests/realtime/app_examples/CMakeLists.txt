@@ -47,6 +47,20 @@ add_test(
       ${CMAKE_BINARY_DIR}/lib
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
+
+# Test with sliding_window decoder
+add_test(
+  NAME app_examples.surface_code-1-local-test-distance-3-sliding-window
+  COMMAND
+    bash "${CMAKE_CURRENT_SOURCE_DIR}/surface_code-1-test.sh"
+      ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-local
+      ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-local
+      3 40 40 NULL 12 6
+      ${CMAKE_BINARY_DIR}/lib
+      sliding_window 6 1
+  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+)
+
 # This must be disabled for now because the multi_error_lut decoder is not
 # powerful enough to pass this test. The nv-qldpc-decoder can pass this test,
 # but that is not available on the GitHub repo.
