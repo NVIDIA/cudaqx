@@ -66,14 +66,6 @@ jobs:
             build-type: Release
 
     steps:
-      - name: Check ulimit
-        run: |
-          echo "ulimit -n:"
-          ulimit -n
-          echo
-          echo "/proc/self/limits:"
-          grep "open files" /proc/self/limits
-
       - name: Configure
         id: config
         run: |
