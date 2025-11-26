@@ -11,7 +11,6 @@ from mpi4py import MPI
 from torch.nn import functional as F
 from transformers import GPT2LMHeadModel, GPT2Config
 from lightning import LightningModule
-from .loss import ExpLogitMatching, GFlowLogitMatching
 
 
 def get_device():
@@ -25,21 +24,6 @@ def get_device():
     elif torch.backends.mps.is_available():
         return 'mps'
     return 'cpu'
-
-
-class SmallConfig(GPT2Config):
-    """Reduced-size configuration for GPT2 model.
-    
-    Uses fewer layers (6) and attention heads (6) than the default GPT2
-    configuration, resulting in a smaller model that trains faster.
-    
-    Args:
-        **kwargs: Additional GPT2 configuration parameters
-    """
-
-    def __init__(self, **kwargs):
-        super().__init__(n_layer=6, n_head=6, **kwargs)
-
 
 class Pipeline(LightningModule):
     """GPT2-based transformer model for quantum operator selection.
@@ -55,12 +39,15 @@ class Pipeline(LightningModule):
         numQPUs: Number of QPUs available for cost evaluation
     """
 
-    def __init__(self, cfg, cost, model, loss="exp", numQPUs=1):
+    def __init__(self, cfg, cost, model, factory, numQPUs=1):
         super().__init__()
         self._label = 'label_stand_in'
         self.numQPUs = numQPUs
         self.cfg = cfg
         self.model = model
+        self.factory = factory
+        self._cost = cost
+        self.loss = self.factory.create_loss_fn(cfg, self._label)
         self.model.to(get_device())
         self.ngates = cfg.ngates
         self.num_samples = cfg.num_samples
@@ -70,12 +57,6 @@ class Pipeline(LightningModule):
                                          1,
                                          dtype=torch.int,
                                          device=get_device())
-        if loss == "exp":
-            self.loss = ExpLogitMatching(cfg.energy_offset, self._label)
-        else:
-            self.loss = GFlowLogitMatching(cfg.energy_offset, get_device(),
-                                           self._label, self)
-        self._cost = cost
 
     def generate_logits(self, idx):
         """Generate logits for the next token given input indices.

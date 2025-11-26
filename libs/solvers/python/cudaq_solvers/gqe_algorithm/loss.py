@@ -68,13 +68,12 @@ class GFlowLogitMatching(LogitMatchingLoss):
         nn: Neural network module to register the offset parameter with
     """
 
-    def __init__(self, energy_offset, device, label, nn: torch.nn) -> None:
+    def __init__(self, energy_offset, label) -> None:
         self._label = label
         self.loss_fn = torch.nn.MSELoss()
         self.energy_offset = energy_offset
         self.normalization = 10**-5
-        self.param = torch.nn.Parameter(torch.tensor([0.0]).to(device))
-        nn.register_parameter(name="energy_offset", param=self.param)
+        self.param = torch.nn.Parameter(torch.tensor([0.0]))
 
     def compute(self, energies, logits_tensor, log_values):
         mean_logits = torch.mean(logits_tensor, 1)

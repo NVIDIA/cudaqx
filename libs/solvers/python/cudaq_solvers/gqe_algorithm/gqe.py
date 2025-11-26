@@ -8,6 +8,7 @@
 
 from .pipeline import Pipeline
 from .model import GPT2
+from .factory import Factory
 import torch
 import lightning as L
 from abc import ABC, abstractmethod
@@ -258,6 +259,7 @@ def get_default_config():
     cfg.save_trajectory = False  # Whether to save trajectory data
     cfg.trajectory_file_path = "gqe_logs/gqe_trajectory.json"  # Path to save trajectory data
     cfg.verbose = False
+    cfg.loss = "exp"
     return cfg
 
 def __internal_run_gqe(temperature_scheduler: TemperatureScheduler,
@@ -379,8 +381,9 @@ def gqe(cost, pool, config=None, **kwargs):
     cfg.vocab_size = len(pool)
     cudaqTarget = cudaq.get_target()
     numQPUs = cudaqTarget.num_qpus()
+    factory = Factory()
     model = GPT2(cfg.small, cfg.vocab_size) if 'model' not in kwargs else kwargs['model']
-    pipeline = Pipeline(cfg, cost, model, loss='exp', numQPUs=numQPUs)
+    pipeline = Pipeline(cfg, cost, model, factory, numQPUs=numQPUs)
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=cfg.lr) if 'optimizer' not in kwargs else kwargs['optimizer']
