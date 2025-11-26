@@ -41,7 +41,7 @@ class SmallConfig(GPT2Config):
         super().__init__(n_layer=6, n_head=6, **kwargs)
 
 
-class Transformer(LightningModule):
+class Pipeline(LightningModule):
     """GPT2-based transformer model for quantum operator selection.
     
     This model learns to select quantum operators from a pool to minimize
@@ -55,18 +55,13 @@ class Transformer(LightningModule):
         numQPUs: Number of QPUs available for cost evaluation
     """
 
-    def __init__(self, cfg, cost, loss="exp", numQPUs=1):
+    def __init__(self, cfg, cost, model, loss="exp", numQPUs=1):
         super().__init__()
         self._label = 'label_stand_in'
         self.numQPUs = numQPUs
         self.cfg = cfg
-        gpt2cfg = GPT2Config(
-            **{k: cfg[k] for k in GPT2Config().to_dict().keys() & cfg.keys()})
-        if cfg.small:
-            gpt2cfg = SmallConfig(
-                **
-                {k: cfg[k] for k in GPT2Config().to_dict().keys() & cfg.keys()})
-        self.transformer = GPT2LMHeadModel(gpt2cfg).to(get_device())
+        self.model = model
+        self.model.to(get_device())
         self.ngates = cfg.ngates
         self.num_samples = cfg.num_samples
         self.temperature = cfg.temperature
@@ -91,7 +86,7 @@ class Transformer(LightningModule):
         Returns:
             torch.Tensor: Logits for next token prediction
         """
-        logits = self.transformer(idx)[0]
+        logits = self.model(idx)[0]
         return logits
 
     def set_cost(self, cost):

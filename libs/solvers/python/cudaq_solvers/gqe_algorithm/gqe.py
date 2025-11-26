@@ -6,7 +6,8 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
-from .transformer import Transformer
+from .pipeline import Pipeline
+from .model import GPT2
 import torch
 import lightning as L
 from abc import ABC, abstractmethod
@@ -259,7 +260,6 @@ def get_default_config():
     cfg.verbose = False
     return cfg
 
-
 def __internal_run_gqe(temperature_scheduler: TemperatureScheduler,
                        cfg: ConfigDict, model, pool, optimizer):
     """Internal implementation of the GQE training loop.
@@ -379,10 +379,9 @@ def gqe(cost, pool, config=None, **kwargs):
     cfg.vocab_size = len(pool)
     cudaqTarget = cudaq.get_target()
     numQPUs = cudaqTarget.num_qpus()
-    model = Transformer(
-        cfg, cost, loss='exp',
-        numQPUs=numQPUs) if 'model' not in kwargs else kwargs['model']
+    model = GPT2(cfg.small, cfg.vocab_size) if 'model' not in kwargs else kwargs['model']
+    pipeline = Pipeline(cfg, cost, model, loss='exp', numQPUs=numQPUs)
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=cfg.lr) if 'optimizer' not in kwargs else kwargs['optimizer']
-    return __internal_run_gqe(None, cfg, model, pool, optimizer)
+    return __internal_run_gqe(None, cfg, pipeline, pool, optimizer)
