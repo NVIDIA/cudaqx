@@ -50,7 +50,9 @@ jobs:
     # easier to rely on their's devdeps images to do the building.
     # FIXME: there is no guarantee that this CUDA-Q image aligns with the CUDA-Q
     # commit that we are trying to align with.
-    container: ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc11-main
+    container:
+      image: ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc11-main
+      # options: --ulimit nofile=1048576:1048576
     permissions: write-all
     strategy:
       fail-fast: false
@@ -64,6 +66,14 @@ jobs:
             build-type: Release
 
     steps:
+      - name: Check ulimit
+        run: |
+          echo "ulimit -n:"
+          ulimit -n
+          echo
+          echo "/proc/self/limits:"
+          grep "open files" /proc/self/limits
+
       - name: Configure
         id: config
         run: |
