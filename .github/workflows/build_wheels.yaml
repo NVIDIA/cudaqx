@@ -145,7 +145,7 @@ jobs:
 
       - name: Build CUDAQ toolchain
         run: |
-          .github/workflows/scripts/build_cudaq.sh --python-version ${{ matrix.python }}
+          .github/workflows/scripts/build_cudaq.sh --python-version ${{ matrix.python }} --cuda-version ${{ matrix.cuda_version }}
 
       - name: Build CUDA-QX wheels
         shell: bash

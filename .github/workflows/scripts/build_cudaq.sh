@@ -16,6 +16,7 @@ show_help() {
     echo "Usage: $0 [options]"
     echo "Options:"
     echo "  --python-version  Python version to build wheel for (e.g. 3.10)"
+    echo "  --cuda-version    CUDA version to build wheel for (e.g. 12.6 or 13.0)"
     echo "  -j                Number of parallel jobs to build CUDA-Q with"
     echo "                    (e.g. 8)"
 }
@@ -26,6 +27,15 @@ parse_options() {
             --python-version)
                 if [[ -n "$2" && "$2" != -* ]]; then
                     python_version=("$2")
+                    shift 2
+                else
+                    echo "Error: Argument for $1 is missing" >&2
+                    exit 1
+                fi
+                ;;
+            --cuda-version)
+                if [[ -n "$2" && "$2" != -* ]]; then
+                    cuda_version=("$2")
                     shift 2
                 else
                     echo "Error: Argument for $1 is missing" >&2
@@ -59,12 +69,13 @@ parse_options() {
 # Defaults
 python_version=3.10
 cudaq_ninja_jobs_arg=""
+cuda_version=12.6
 
 # Parse options
 parse_options "$@"
 
 
-export CUDA_VERSION=12.6
+export CUDA_VERSION=${cuda_version}
 export CUDAQ_INSTALL_PREFIX=/usr/local/cudaq
 
 # We need to use a newer toolchain because CUDA-QX libraries rely on c++20
