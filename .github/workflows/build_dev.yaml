@@ -193,6 +193,7 @@ jobs:
         BUILDARGS="--build-arg base_image=ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc11-main"
         BUILDARGS+=" --build-arg python_version=${{ matrix.python }}"
         BUILDARGS+=" --build-arg cuda_version=${{ matrix.cuda_version }}"
+        BUILDARGS+=" --ulimit nofile=1048576:1048576"
         # For some reason, this fails on amd64 unless DOCKER_BUILDKIT=0 is set.
         # The exact error is: too many open files.
         DOCKER_BUILDKIT=0 docker build $TAGS $BUILDARGS -f docker/build_env/cudaqx.wheel.Dockerfile .
