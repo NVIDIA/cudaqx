@@ -52,7 +52,7 @@ jobs:
     # commit that we are trying to align with.
     container:
       image: ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc11-main
-      # options: --ulimit nofile=1048576:1048576
+      options: --ulimit nofile=1048576:1048576
     permissions: write-all
     strategy:
       fail-fast: false
