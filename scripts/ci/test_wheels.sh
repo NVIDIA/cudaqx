@@ -58,6 +58,7 @@ ${python} -m pip install --no-cache-dir pytest
 # dependencies for our delivered package.
 ${python} -m pip install openfermion
 ${python} -m pip install openfermionpyscf
+${python} -m pip install onnxscript # for trt decoder tests
 
 # Now install torch.
 cuda_no_dot=$(echo $cuda_version | sed 's/\.//')

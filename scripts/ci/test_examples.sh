@@ -70,7 +70,17 @@ if [[ "$LIB" == "qec" || "$LIB" == "all" ]]; then
     done
     
     for file in examples/qec/cpp/*.cpp; do
-        run_cpp_test "$file" "--target=stim -lcudaq-qec"
+        # Get the filename without the path.
+        filename=$(basename $file)
+        # If the cpp file contains an nvq++ command, fetch the command line
+        # options from it and use them here. If there is no nvq++ command, use
+        # the default options.
+        nvqpp_options=$(grep nvq++ $file | sed -re "s/.*nvq\+\+ //" | sed -re "s/ $filename//")
+        if [ -n "$nvqpp_options" ]; then
+            run_cpp_test "$file" "$nvqpp_options"
+        else
+            run_cpp_test "$file" "--target=stim -lcudaq-qec"
+        fi
     done
 fi
 
