@@ -14,6 +14,7 @@ from torch.nn import functional as F
 from lightning import LightningModule
 from .data import ReplayBuffer, BufferDataset
 from torch.utils.data import DataLoader
+from torch.distributions import Categorical
 
 
 class Pipeline(LightningModule):
@@ -32,10 +33,10 @@ class Pipeline(LightningModule):
 
     def __init__(self, cfg, cost, pool, model, factory, numQPUs=1):
         super().__init__()
-        
+
         # Set seed for reproducibility
         L.seed_everything(cfg.seed)
-        
+
         self._label = 'label_stand_in'
         self.numQPUs = numQPUs
         self.cfg = cfg
@@ -43,7 +44,7 @@ class Pipeline(LightningModule):
         self.factory = factory
         self.pool = pool
         self._cost = cost
-        self.loss = self.factory.create_loss_fn(cfg, self._label)
+        self.loss = self.factory.create_loss_fn(cfg)
         self.scheduler = self.factory.create_temperature_scheduler(self.cfg)
         self.ngates = cfg.ngates
         self.num_samples = cfg.num_samples
@@ -57,7 +58,7 @@ class Pipeline(LightningModule):
 
     def configure_optimizers(self):
         """Configure optimizer for training.
-        
+
         Returns:
             torch.optim.Optimizer: Configured optimizer
         """
@@ -78,7 +79,7 @@ class Pipeline(LightningModule):
 
     def collect_rollout(self):
         idx_output = self.generate()
-        energies = self.computeCost(idx_output, self.pool)
+        energies = self.computeCost(idx_output[:, 1:], self.pool)
         for seq, energy in zip(idx_output, energies):
             self.buffer.push(seq, energy)
         self.scheduler.update(energies=energies)
@@ -162,15 +163,40 @@ class Pipeline(LightningModule):
         # Move batch data to device
         idx = batch["idx"].to(self.device)
         energies = batch["energy"].to(self.device)
-        
+
         log_values = {}
-        log_probs = self.log_probs(idx, self.scheduler.get_inverse_temperature())
-        loss = self.loss.compute(energies, log_probs, log_values)
-        
+        logits = self.model(idx).logits
+        loss = self.loss.compute(energies,
+                                 logits,
+                                 idx[:,1:],
+                                 log_values,
+                                 inverse_temperature=self.scheduler.get_inverse_temperature(), 
+                                 current_step=batch_idx)
+
         # Log metrics
-        if self.trainer.logger is not None:
-            self.log_dict(log_values, prog_bar=False, logger=True)
-        
+        self.log_dict(
+            log_values,
+            prog_bar=False,
+            on_step=True,
+            on_epoch=False)
+        self.log("loss", loss, prog_bar=True, on_step=True, on_epoch=False)
+        self.log(
+            "energy_mean",
+            energies.mean(),
+            prog_bar=True,
+            on_epoch=True, on_step=False)
+        self.log(
+            "energy_min",
+            energies.min(),
+            prog_bar=True,
+            on_epoch=True,
+            on_step=False)
+        self.log(
+            "inverse_temperature",
+            self.scheduler.get_inverse_temperature(),
+            prog_bar=True,
+            on_epoch=True, on_step=False)
+
         return loss
 
     def train_dataloader(self):
@@ -195,12 +221,13 @@ class Pipeline(LightningModule):
             idx_cond = idx
             logits_base = self.model(idx_cond)
             logits = logits_base.logits[:, -1, :]
-            probs = F.softmax(-current_temp * logits, dim=-1)
-            idx_next = torch.multinomial(probs, num_samples=1)
-            idx = torch.cat((idx, idx_next), dim=1)
+            probs = Categorical(logits=-current_temp * logits)
+            idx_next = probs.sample()
+            idx = torch.cat((idx, idx_next.unsqueeze(1)), dim=1)
         return idx
 
-    def log_probs(self, idx, temperature):
+    def logits(self, idx):
         logits_base = self.model(idx)
-        log_probs = F.log_softmax(-temperature * logits_base.logits, dim=-1)
-        return torch.gather(log_probs, 2, idx.unsqueeze(-1)).squeeze(-1)
+        idx = idx[:, 1:]
+        return torch.gather(logits_base.logits, 2,
+                            idx.unsqueeze(-1)).squeeze(-1)

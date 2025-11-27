@@ -156,7 +156,7 @@ def get_default_config():
         attn_pdrop (float): The dropout ratio for the attention, see `GPT2Config <https://github.com/huggingface/transformers/blob/main/src/transformers/models/gpt2/configuration_gpt2.py>`_. Default=0.0
         small (bool): Uses a small transformer (6 hidden layers and 6 attention heads as opposed to
             the default transformer of 12 of each). Default=False
-        use_fabric_logging (bool): Whether to enable fabric logging. Default=False
+        use_lightning_logging (bool): Whether to enable lightning logging. Default=False
         fabric_logger (object): Fabric logger to use for logging. If None, no logging will be done. Default=None
         save_trajectory (bool): Whether to save the trajectory data to a file. Default=False
         trajectory_file_path (str): Path to save the trajectory data file. Default="gqe_logs/gqe_trajectory.json"
@@ -171,32 +171,32 @@ def get_default_config():
         ConfigDict: Default configuration for GQE
     """
     cfg = ConfigDict()
-    cfg.num_samples = 5  # akin to batch size
+    cfg.num_samples = 20  # akin to batch size
     cfg.max_iters = 100
     cfg.ngates = 20
     cfg.seed = 3047
     cfg.lr = 5e-7
     cfg.energy_offset = 0.0
     cfg.grad_norm_clip = 1.0
-    cfg.temperature = 5.0
-    cfg.del_temperature = 0.05
+    cfg.temperature = 0.5
+    cfg.del_temperature = 0.02
     cfg.resid_pdrop = 0.0
     cfg.embd_pdrop = 0.0
     cfg.attn_pdrop = 0.0
     cfg.small = False
-    cfg.use_fabric_logging = False  # Whether to enable fabric logging
-    cfg.fabric_logger = None  # Fabric logger
+    cfg.use_lightning_logging = False  # Whether to enable lightning logging
+    cfg.lightning_logger = None  # Lightning logger
     cfg.save_trajectory = False  # Whether to save trajectory data
     cfg.trajectory_file_path = "gqe_logs/gqe_trajectory.json"  # Path to save trajectory data
     cfg.verbose = False
-    cfg.loss = "exp"
+    cfg.loss = "grpo"
     # Replay buffer parameters
-    cfg.buffer_size = 5  # Size of replay buffer
-    cfg.warmup_size = 5  # Initial buffer warmup size
+    cfg.buffer_size = 20  # Size of replay buffer
+    cfg.warmup_size = 20  # Initial buffer warmup size
     # Trainer parameters
     cfg.trainer = ConfigDict()
-    cfg.trainer.step_per_epoch = 10  # Steps per training epoch
-    cfg.trainer.batch_size = 5  # Batch size for training
+    cfg.trainer.step_per_epoch = 20  # Steps per training epoch
+    cfg.trainer.batch_size = 20  # Batch size for training
     return cfg
 
 
@@ -227,12 +227,12 @@ def __internal_run_gqe(cfg: ConfigDict, pipeline, pool):
     }
     
     # Set up logging
-    if cfg.use_fabric_logging:
-        if cfg.fabric_logger is None:
+    if cfg.use_lightning_logging:
+        if cfg.lightning_logger is None:
             raise ValueError(
-                "Fabric Logger is not set. Please set it in the config by providing a logger to `cfg.fabric_logger`."
+                "Lightning Logger is not set. Please set it in the config by providing a logger to `cfg.lightning_logger`."
             )
-        trainer_kwargs["logger"] = cfg.fabric_logger
+        trainer_kwargs["logger"] = cfg.lightning_logger
     else:
         trainer_kwargs["logger"] = False
     
@@ -267,7 +267,7 @@ def __internal_run_gqe(cfg: ConfigDict, pipeline, pool):
         min_indices = min_indices.cpu().numpy().tolist()
     
     # Log final circuit if logging is enabled
-    if cfg.use_fabric_logging and min_indices is not None:
+    if cfg.use_lightning_logging and min_indices is not None:
         trainer.logger.log_metrics({'circuit': json.dumps(min_indices)})
     
     # Clean up

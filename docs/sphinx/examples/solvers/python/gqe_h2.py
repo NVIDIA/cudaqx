@@ -44,7 +44,7 @@ else:
 import cudaq_solvers as solvers
 from cudaq import spin
 
-from lightning.fabric.loggers import CSVLogger
+from lightning.pytorch.loggers import CSVLogger
 from cudaq_solvers.gqe_algorithm.gqe import get_default_config
 
 # Set deterministic seed and environment variables for deterministic behavior
@@ -171,18 +171,21 @@ def cost(sampled_ops: list[cudaq.SpinOperator], **kwargs):
 
 # Configure GQE
 cfg = get_default_config()
-cfg.use_fabric_logging = False
-logger = CSVLogger("gqe_h2_logs/gqe.csv")
-cfg.fabric_logger = logger
+cfg.use_lightning_logging = True
+logger = CSVLogger(save_dir="gqe_h2_logs", name="gqe")
+cfg.max_iters = 50
+cfg.ngates = 10
+cfg.lightning_logger = logger
 cfg.save_trajectory = False
 cfg.verbose = True
 
 # Run GQE
-minE, best_ops = solvers.gqe(cost, op_pool, max_iters=25, ngates=10, config=cfg)
+minE, best_ops = solvers.gqe(cost, op_pool, config=cfg)
 
 # Only print results from rank 0 when using MPI
 if not args.mpi or cudaq.mpi.rank() == 0:
-    print(f'Ground Energy = {minE}')
+    print(f'Ground Energy = {minE} (mHa)')
+    print(f'Error = {minE - molecule.energies["fci_energy"]} (mHa)')
     print('Ansatz Ops')
     for idx in best_ops:
         # Get the first (and only) term since these are simple operators
