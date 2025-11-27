@@ -64,6 +64,7 @@ if(CUDAQ_QEC_BUILD_TRT_DECODER AND CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64)|(AMD
   )
 
   target_include_directories(test_trt_decoder PRIVATE
+      ${TENSORRT_INCLUDE_DIR}
       ${CUDAToolkit_INCLUDE_DIRS}
   )
 
