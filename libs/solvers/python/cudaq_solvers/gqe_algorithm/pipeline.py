@@ -6,32 +6,23 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
-import torch, cudaq
+import torch
+import cudaq
+import lightning as L
 from mpi4py import MPI
 from torch.nn import functional as F
-from transformers import GPT2LMHeadModel, GPT2Config
 from lightning import LightningModule
+from .data import ReplayBuffer, BufferDataset
+from torch.utils.data import DataLoader
 
-
-def get_device():
-    """Determine the appropriate device for tensor operations.
-    
-    Returns:
-        str: 'cuda' if GPU available, 'mps' for Apple Silicon, 'cpu' otherwise
-    """
-    if torch.cuda.is_available():
-        return 'cuda'
-    elif torch.backends.mps.is_available():
-        return 'mps'
-    return 'cpu'
 
 class Pipeline(LightningModule):
     """GPT2-based transformer model for quantum operator selection.
-    
+
     This model learns to select quantum operators from a pool to minimize
     a given cost function. It can be configured to use either a full-size
     or reduced-size architecture.
-    
+
     Args:
         cfg: Configuration object containing model parameters
         cost: Cost function to evaluate operator sequences
@@ -39,73 +30,81 @@ class Pipeline(LightningModule):
         numQPUs: Number of QPUs available for cost evaluation
     """
 
-    def __init__(self, cfg, cost, model, factory, numQPUs=1):
+    def __init__(self, cfg, cost, pool, model, factory, numQPUs=1):
         super().__init__()
+        
+        # Set seed for reproducibility
+        L.seed_everything(cfg.seed)
+        
         self._label = 'label_stand_in'
         self.numQPUs = numQPUs
         self.cfg = cfg
-        self.model = model
+        self.model = model.to(self.device)
         self.factory = factory
+        self.pool = pool
         self._cost = cost
         self.loss = self.factory.create_loss_fn(cfg, self._label)
-        self.model.to(get_device())
+        self.scheduler = self.factory.create_temperature_scheduler(self.cfg)
         self.ngates = cfg.ngates
         self.num_samples = cfg.num_samples
         self.temperature = cfg.temperature
-        self.save_hyperparameters()
+        self.buffer = ReplayBuffer(size=cfg.buffer_size)
+        self.save_hyperparameters(ignore=['cost', 'pool', 'model', 'factory'])
         self._starting_idx = torch.zeros(self.num_samples,
                                          1,
-                                         dtype=torch.int,
-                                         device=get_device())
+                                         dtype=torch.long,
+                                         device=self.device)
 
-    def generate_logits(self, idx):
-        """Generate logits for the next token given input indices.
+    def configure_optimizers(self):
+        """Configure optimizer for training.
         
-        Args:
-            idx: Input token indices
-            
         Returns:
-            torch.Tensor: Logits for next token prediction
+            torch.optim.Optimizer: Configured optimizer
         """
-        logits = self.model(idx)[0]
-        return logits
+        return torch.optim.AdamW(self.model.parameters(), lr=self.cfg.lr)
+
+    def on_fit_start(self):
+        # Recreate _starting_idx with correct device after model setup
+        self._starting_idx = torch.zeros(self.num_samples,
+                                         1,
+                                         dtype=torch.long,
+                                         device=self.device)
+        while len(self.buffer) < self.cfg.warmup_size:
+            self.collect_rollout()
+        super().on_fit_start()
+
+    def on_train_epoch_start(self):
+        self.collect_rollout()
+
+    def collect_rollout(self):
+        idx_output = self.generate()
+        energies = self.computeCost(idx_output, self.pool)
+        for seq, energy in zip(idx_output, energies):
+            self.buffer.push(seq, energy)
+        self.scheduler.update(energies=energies)
 
     def set_cost(self, cost):
         """Set the cost function used to evaluate operator sequences.
-        
+
         Args:
             cost: New cost function to use
         """
         self._cost = cost
 
-    def gather(self, idx, logits_base):
-        """Gather logits for specific indices from base logits.
-        
-        Args:
-            idx: Indices to gather logits for
-            logits_base: Base logits to gather from
-            
-        Returns:
-            torch.Tensor: Gathered logits
-        """
-        b_size = idx.shape[0]
-        return torch.gather(logits_base, 2, idx.reshape(b_size, -1,
-                                                        1)).reshape(b_size, -1)
-
     @torch.no_grad()
     def computeCost(self, idx_output, pool, **kwargs):
         """Compute cost for given operator sequences.
-        
+
         Supports distributed computation using MPI if available.
-        
+
         Args:
             idx_output: Indices of selected operators
             pool: Pool of quantum operators
             **kwargs: Additional arguments passed to cost function
-            
+
         Returns:
             torch.Tensor: Computed costs for each sequence
-            
+
         Raises:
             RuntimeError: If cost function returns invalid type
         """
@@ -148,44 +147,39 @@ class Pipeline(LightningModule):
 
         return torch.tensor(res, dtype=torch.float)
 
-    def train_step(self,
-                   pool,
-                   indices=None,
-                   energies=None,
-                   numQPUs=None,
-                   comm=None):
+    def training_step(self, batch, batch_idx):
         """Perform one training step.
-        
-        Either generates new sequences and computes their costs,
-        or uses provided sequences and energies for training.
-        
-        Args:
-            pool: Pool of quantum operators
-            indices: Optional pre-computed operator indices
-            energies: Optional pre-computed energies
-            numQPUs: Optional number of QPUs to use
-            comm: Optional MPI communicator
-            
-        Returns:
-            tuple: (loss, energies, indices, log_values)
-        """
-        log_values = {}
-        if energies is not None:
-            assert indices is not None
-            idx_output = indices[:, 1:]
-            logits_base = self.generate_logits(idx_output)
-        else:
-            idx_output, logits_base = self.generate()
-            energies = self.computeCost(idx_output,
-                                        pool,
-                                        numQPUs=numQPUs,
-                                        comm=comm)
-        logits_tensor = self.gather(idx_output, logits_base)
-        allLogits = logits_tensor
 
-        loss = self.loss.compute(energies, allLogits, log_values)
-        log_values[f"loss at {self._label}"] = loss
-        return loss, energies, idx_output, log_values
+        Lightning calls this method during training with batches from train_dataloader.
+
+        Args:
+            batch: Dictionary containing 'idx' (sequences) and 'energy' (energy values)
+            batch_idx: Index of current batch
+
+        Returns:
+            torch.Tensor: Loss value for this batch
+        """
+        # Move batch data to device
+        idx = batch["idx"].to(self.device)
+        energies = batch["energy"].to(self.device)
+        
+        log_values = {}
+        log_probs = self.log_probs(idx, self.scheduler.get_inverse_temperature())
+        loss = self.loss.compute(energies, log_probs, log_values)
+        
+        # Log metrics
+        if self.trainer.logger is not None:
+            self.log_dict(log_values, prog_bar=False, logger=True)
+        
+        return loss
+
+    def train_dataloader(self):
+        return DataLoader(
+            BufferDataset(self.buffer, self.cfg.trainer.step_per_epoch),
+            batch_size=self.cfg.trainer.batch_size,
+            shuffle=False,
+            num_workers=0,  # Avoid multiprocessing to prevent pickling issues with CUDA-Q objects
+        )
 
     def generate(self, idx=None, ngates=None):
         """
@@ -194,15 +188,19 @@ class Pipeline(LightningModule):
         """
         if idx is None:
             idx = self._starting_idx.clone()
-        condition_length = idx.size(dim=1)
         if ngates is None:
             ngates = self.ngates
+        current_temp = self.scheduler.get_inverse_temperature()
         for _ in range(ngates):
             idx_cond = idx
-            logits_base = self.generate_logits(idx_cond)
-            logits = logits_base[:, -1, :]
-            probs = F.softmax(-self.temperature * logits, dim=-1)
+            logits_base = self.model(idx_cond)
+            logits = logits_base.logits[:, -1, :]
+            probs = F.softmax(-current_temp * logits, dim=-1)
             idx_next = torch.multinomial(probs, num_samples=1)
             idx = torch.cat((idx, idx_next), dim=1)
-        idx = idx[:, condition_length:]
-        return idx, logits_base
+        return idx
+
+    def log_probs(self, idx, temperature):
+        logits_base = self.model(idx)
+        log_probs = F.log_softmax(-temperature * logits_base.logits, dim=-1)
+        return torch.gather(log_probs, 2, idx.unsqueeze(-1)).squeeze(-1)

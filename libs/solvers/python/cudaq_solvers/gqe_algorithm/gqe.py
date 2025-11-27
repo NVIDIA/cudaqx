@@ -9,10 +9,10 @@
 from .pipeline import Pipeline
 from .model import GPT2
 from .factory import Factory
-from .scheduler import TemperatureScheduler, DefaultScheduler, CosineScheduler
 import torch
 import lightning as L
-import json, sys, time, os
+import json
+import os
 from ml_collections import ConfigDict
 import cudaq
 
@@ -91,8 +91,8 @@ class FileMonitor:
         if os.path.exists(path):
             print(f"Warning: Overwriting existing trajectory file at {path}")
         with open(path, 'w') as f:
-            for l in self.lines:
-                f.write(f"{l}\n")
+            for line in self.lines:
+                f.write(f"{line}\n")
 
 
 def validate_config(cfg: ConfigDict):
@@ -144,24 +144,28 @@ def get_default_config():
         ngates (int): Number of gates that make up each generated circuit. Default=20
         seed (int): Random seed. Default=3047
         lr (float): Learning rate used by the optimizer. Default=5e-7
-        energy_offset (float): Offset added to expectation value of the circuit (Energy) for numerical 
+        energy_offset (float): Offset added to expectation value of the circuit (Energy) for numerical
             stability, see `K. Nakaji et al. (2024) <https://arxiv.org/abs/2401.09253>`_ Sec. 3. Default=0.0
         grad_norm_clip (float): max_norm for clipping gradients, see `Lightning docs <https://lightning.ai/docs/fabric/stable/api/fabric_methods.html#clip-gradients>`_. Default=1.0
-        temperature (float): Starting inverse temperature β as described in `K. Nakaji et al. (2024) <https://arxiv.org/abs/2401.09253>`_ 
+        temperature (float): Starting inverse temperature β as described in `K. Nakaji et al. (2024) <https://arxiv.org/abs/2401.09253>`_
             Sec. 2.2. Default=5.0
         del_temperature (float): Temperature increase after each epoch. Default=0.05
-        resid_pdrop (float): The dropout probability for all fully connected layers in the embeddings, 
+        resid_pdrop (float): The dropout probability for all fully connected layers in the embeddings,
             encoder, and pooler, see `GPT2Config <https://github.com/huggingface/transformers/blob/main/src/transformers/models/gpt2/configuration_gpt2.py>`_. Default=0.0
         embd_pdrop (float): The dropout ratio for the embeddings, see `GPT2Config <https://github.com/huggingface/transformers/blob/main/src/transformers/models/gpt2/configuration_gpt2.py>`_. Default=0.0
         attn_pdrop (float): The dropout ratio for the attention, see `GPT2Config <https://github.com/huggingface/transformers/blob/main/src/transformers/models/gpt2/configuration_gpt2.py>`_. Default=0.0
-        small (bool): Uses a small transformer (6 hidden layers and 6 attention heads as opposed to 
+        small (bool): Uses a small transformer (6 hidden layers and 6 attention heads as opposed to
             the default transformer of 12 of each). Default=False
         use_fabric_logging (bool): Whether to enable fabric logging. Default=False
         fabric_logger (object): Fabric logger to use for logging. If None, no logging will be done. Default=None
         save_trajectory (bool): Whether to save the trajectory data to a file. Default=False
         trajectory_file_path (str): Path to save the trajectory data file. Default="gqe_logs/gqe_trajectory.json"
-        verbose (bool): Enable verbose output to the console. Output includes the epoch, loss, 
+        verbose (bool): Enable verbose output to the console. Output includes the epoch, loss,
             model.train_step time, and minimum energy. Default=False
+        buffer_size (int): Size of replay buffer for storing trajectories. Default=50
+        warmup_size (int): Initial buffer warmup size before training starts. Default=50
+        trainer.step_per_epoch (int): Number of training steps per epoch. Default=10
+        trainer.batch_size (int): Batch size for training. Default=50
         
     Returns:
         ConfigDict: Default configuration for GQE
@@ -186,80 +190,89 @@ def get_default_config():
     cfg.trajectory_file_path = "gqe_logs/gqe_trajectory.json"  # Path to save trajectory data
     cfg.verbose = False
     cfg.loss = "exp"
+    # Replay buffer parameters
+    cfg.buffer_size = 5  # Size of replay buffer
+    cfg.warmup_size = 5  # Initial buffer warmup size
+    # Trainer parameters
+    cfg.trainer = ConfigDict()
+    cfg.trainer.step_per_epoch = 10  # Steps per training epoch
+    cfg.trainer.batch_size = 5  # Batch size for training
     return cfg
 
-def __internal_run_gqe(temperature_scheduler: TemperatureScheduler,
-                       cfg: ConfigDict, model, pool, optimizer):
-    """Internal implementation of the GQE training loop.
+
+def __internal_run_gqe(cfg: ConfigDict, pipeline, pool):
+    """Internal implementation of the GQE training loop using Lightning Trainer.
     
     Args:
-        temperature_scheduler: Optional scheduler for temperature parameter
         cfg: Configuration object
-        model: The transformer model to train
+        pipeline: The Pipeline module containing model and training logic
         pool: Pool of quantum operators to select from
-        optimizer: Optimizer for model parameters
         
     Returns:
         tuple: (minimum energy found, corresponding operator indices)
     """
-    # Configure Fabric with optional logging
-    fabric_kwargs = {"accelerator": "auto", "devices": 1}
+    from .callbacks import MinEnergyCallback, TrajectoryCallback
+    
+    # Configure trainer kwargs
+    trainer_kwargs = {
+        "accelerator": "auto",
+        "devices": 1,
+        "max_epochs": cfg.max_iters,
+        "gradient_clip_val": cfg.grad_norm_clip,
+        "enable_progress_bar": cfg.verbose,
+        "enable_model_summary": cfg.verbose,
+        "enable_checkpointing": False,  # Disable checkpointing for speed
+        "log_every_n_steps": 1,
+        "num_sanity_val_steps": 0,  # Disable validation sanity checks
+    }
+    
+    # Set up logging
     if cfg.use_fabric_logging:
         if cfg.fabric_logger is None:
             raise ValueError(
                 "Fabric Logger is not set. Please set it in the config by providing a logger to `cfg.fabric_logger`."
             )
-        fabric_kwargs["loggers"] = [cfg.fabric_logger]
+        trainer_kwargs["logger"] = cfg.fabric_logger
     else:
-        fabric_kwargs["loggers"] = False
-
-    fabric = L.Fabric(**fabric_kwargs)
-    fabric.seed_everything(cfg.seed)
-    fabric.launch()
+        trainer_kwargs["logger"] = False
+    
+    # Set up callbacks
+    callbacks = []
+    min_energy_callback = MinEnergyCallback()
+    callbacks.append(min_energy_callback)
+    
     if cfg.save_trajectory:
-        monitor = FileMonitor()
-    else:
-        monitor = None
-    model, optimizer = fabric.setup(model, optimizer)
-    model.mark_forward_method('train_step')
-    pytorch_total_params = sum(
-        p.numel() for p in model.parameters() if p.requires_grad)
+        trajectory_callback = TrajectoryCallback(cfg.trajectory_file_path)
+        callbacks.append(trajectory_callback)
+    
+    trainer_kwargs["callbacks"] = callbacks
+    
+    # Create trainer
+    trainer = L.Trainer(**trainer_kwargs)
+    
+    # Print model parameters if verbose
     if cfg.verbose:
+        pytorch_total_params = sum(
+            p.numel() for p in pipeline.model.parameters() if p.requires_grad)
         print(f"total trainable params: {pytorch_total_params / 1e6:.2f}M")
-    min_energy = sys.maxsize
-    min_indices = None
-    for epoch in range(cfg.max_iters):
-        optimizer.zero_grad()
-        start = time.time()
-        loss, energies, indices, log_values = model.train_step(pool)
-        if cfg.verbose:
-            print('epoch', epoch, 'loss', loss, 'model.train_step time:',
-                  time.time() - start, torch.min(energies))
-        if monitor is not None:
-            monitor.record(epoch, loss, energies, indices)
-        for e, indices in zip(energies, indices):
-            energy = e.item()
-            if energy < min_energy:
-                min_energy = e.item()
-                min_indices = indices
-        if cfg.use_fabric_logging:
-            log_values[f"min_energy at"] = min_energy
-            log_values[f"temperature at"] = model.temperature
-            log_values[f"loss at"] = loss
-            fabric.log_dict(log_values, step=epoch)
-        fabric.backward(loss)
-        fabric.clip_gradients(model, optimizer, max_norm=cfg.grad_norm_clip)
-        optimizer.step()
-        if temperature_scheduler is not None:
-            model.temperature = temperature_scheduler.get(epoch)
-        else:
-            model.temperature += cfg.del_temperature
-    model.set_cost(None)
-    min_indices = min_indices.cpu().numpy().tolist()
-    if cfg.use_fabric_logging:
-        fabric.log('circuit', json.dumps(min_indices))
-    if cfg.save_trajectory:
-        monitor.save(cfg.trajectory_file_path)
+    
+    # Train the model
+    trainer.fit(pipeline)
+    
+    # Get results from callback
+    min_energy, min_indices = min_energy_callback.get_results()
+    
+    # Convert indices to list if needed
+    if min_indices is not None and isinstance(min_indices, torch.Tensor):
+        min_indices = min_indices.cpu().numpy().tolist()
+    
+    # Log final circuit if logging is enabled
+    if cfg.use_fabric_logging and min_indices is not None:
+        trainer.logger.log_metrics({'circuit': json.dumps(min_indices)})
+    
+    # Clean up
+    pipeline.set_cost(None)
+    
     return min_energy, min_indices
 
 
@@ -279,7 +292,6 @@ def gqe(cost, pool, config=None, **kwargs):
             special arguments are supported:
             
             - model: Can pass in an already constructed transformer
-            - optimizer: Can pass in an already constructed optimizer
             
             Additionally, any default config parameter can be overridden via kwargs if no
             config object is provided, for example:
@@ -292,7 +304,7 @@ def gqe(cost, pool, config=None, **kwargs):
     """
     cfg = get_default_config()
 
-    if config == None:
+    if config is None:
         [
             setattr(cfg, a, kwargs[a])
             for a in dir(cfg)
@@ -309,8 +321,5 @@ def gqe(cost, pool, config=None, **kwargs):
     numQPUs = cudaqTarget.num_qpus()
     factory = Factory()
     model = GPT2(cfg.small, cfg.vocab_size) if 'model' not in kwargs else kwargs['model']
-    pipeline = Pipeline(cfg, cost, model, factory, numQPUs=numQPUs)
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=cfg.lr) if 'optimizer' not in kwargs else kwargs['optimizer']
-    return __internal_run_gqe(None, cfg, pipeline, pool, optimizer)
+    pipeline = Pipeline(cfg, cost, pool, model, factory, numQPUs=numQPUs)
+    return __internal_run_gqe(cfg, pipeline, pool)

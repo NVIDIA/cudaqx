@@ -18,14 +18,22 @@ class TemperatureScheduler(ABC):
     """
 
     @abstractmethod
-    def get(self, iter):
-        """Get temperature value for the given iteration.
+    def get_inverse_temperature(self):
+        """Get current inverse temperature value.
+        
+        Returns:
+            float: Current inverse temperature (beta)
+        """
+        pass
+    
+    @abstractmethod
+    def update(self, **kwargs):
+        """Update scheduler state.
+        
+        This can be used to adjust temperature dynamically based on training progress.
         
         Args:
-            iter: Current iteration number
-            
-        Returns:
-            float: Temperature value for this iteration
+            **kwargs: Optional keyword arguments (e.g., energies, loss, iteration)
         """
         pass
 
@@ -41,17 +49,23 @@ class DefaultScheduler(TemperatureScheduler):
     def __init__(self, start, delta) -> None:
         self.start = start
         self.delta = delta
+        self.current_temperature = start
 
-    def get(self, iter):
-        """Get linearly increasing temperature value.
+    def get_inverse_temperature(self):
+        """Get current inverse temperature value.
+        
+        Returns:
+            float: Current inverse temperature (beta)
+        """
+        return self.current_temperature
+
+    def update(self, **kwargs):
+        """Update temperature by incrementing by delta.
         
         Args:
-            iter: Current iteration number
-            
-        Returns:
-            float: start + iter * delta
+            **kwargs: Unused, but accepts any keyword arguments for interface compatibility
         """
-        return self.start + iter * self.delta
+        self.current_temperature += self.delta
 
 
 class CosineScheduler(TemperatureScheduler):
@@ -69,17 +83,24 @@ class CosineScheduler(TemperatureScheduler):
         self.minimum = minimum
         self.maximum = maximum
         self.frequency = frequency
+        self.current_iter = 0
+        self.current_temperature = (maximum + minimum) / 2
 
-    def get(self, iter):
-        """Get temperature value following a cosine curve.
+    def get_inverse_temperature(self):
+        """Get current inverse temperature value.
+        
+        Returns:
+            float: Current inverse temperature (beta)
+        """
+        return self.current_temperature
+
+    def update(self, **kwargs):
+        """Update temperature following cosine schedule.
         
         Args:
-            iter: Current iteration number
-            
-        Returns:
-            float: Temperature value between minimum and maximum following cosine curve
+            **kwargs: Unused, but accepts any keyword arguments for interface compatibility
         """
-        return (self.maximum + self.minimum) / 2 - (
+        self.current_iter += 1
+        self.current_temperature = (self.maximum + self.minimum) / 2 - (
             self.maximum - self.minimum) / 2 * math.cos(
-                2 * math.pi * iter / self.frequency)
-
+                2 * math.pi * self.current_iter / self.frequency)
