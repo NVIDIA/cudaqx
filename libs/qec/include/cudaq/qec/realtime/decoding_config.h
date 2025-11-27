@@ -9,6 +9,7 @@
 #pragma once
 
 #include "cuda-qx/core/heterogeneous_map.h"
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <variant>
