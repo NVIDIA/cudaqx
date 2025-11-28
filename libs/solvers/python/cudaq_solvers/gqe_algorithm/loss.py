@@ -11,7 +11,7 @@ import torch
 import torch.nn.functional as F
 
 
-class Loss(ABC):
+class Loss(ABC, torch.nn.Module):
     """Abstract base class for logit-energy matching loss functions.
 
     Loss functions in GQE compare the model's logits (predictions) with
@@ -45,6 +45,7 @@ class ExpLogitMatching(Loss):
     """
 
     def __init__(self, energy_offset) -> None:
+        super().__init__()
         self.energy_offset = energy_offset
         self.loss_fn = torch.nn.MSELoss()
 
@@ -82,6 +83,7 @@ class GFlowLogitMatching(Loss):
     """
 
     def __init__(self, energy_offset) -> None:
+        super().__init__()
         self.loss_fn = torch.nn.MSELoss()
         self.energy_offset = energy_offset
         self.normalization = 10**-5
@@ -112,6 +114,7 @@ class GRPOLoss(Loss):
     """Generalized-RPO / clipped-PPO variant used in the original code."""
 
     def __init__(self, clip_ratio: float = 0.2):
+        super().__init__()
         self.clip_ratio = clip_ratio
         self.old_log_probs = None
         self.advantages = None

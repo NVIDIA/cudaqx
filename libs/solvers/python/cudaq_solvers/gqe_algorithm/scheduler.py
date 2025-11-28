@@ -104,3 +104,51 @@ class CosineScheduler(TemperatureScheduler):
         self.current_temperature = (self.maximum + self.minimum) / 2 - (
             self.maximum - self.minimum) / 2 * math.cos(
                 2 * math.pi * self.current_iter / self.frequency)
+
+
+class VarBasedScheduler(TemperatureScheduler):
+    """Variance-based adaptive temperature scheduler.
+    
+    Adjusts temperature based on the variance of energies in the current batch.
+    When variance is high (diverse energies), increases temperature to encourage exploration.
+    When variance is low (converged energies), decreases temperature for exploitation.
+    
+    Args:
+        initial: Initial temperature value
+        delta: Amount to adjust temperature each iteration
+        target_var: Target variance threshold for determining adjustment direction
+    """
+
+    def __init__(self, initial, delta, target_var) -> None:
+        self.delta = delta
+        self.current_temperature = initial
+        self.target_var = target_var
+
+    def get_inverse_temperature(self):
+        """Get current inverse temperature value.
+        
+        Returns:
+            float: Current inverse temperature (beta)
+        """
+        return self.current_temperature
+
+    def update(self, **kwargs):
+        """Update temperature based on energy variance.
+        
+        If current variance exceeds target, increases temperature (more exploration).
+        Otherwise, decreases temperature (more exploitation).
+        
+        Args:
+            **kwargs: Must contain 'energies' key with a tensor of energy values
+        """
+        energies = kwargs["energies"]
+        current_var = energies.var().item()
+        
+        # Adjust temperature based on variance
+        if current_var > self.target_var:
+            self.current_temperature += self.delta  # Increase inverse temperature (decrease T)
+        else:
+            self.current_temperature -= self.delta  # Decrease inverse temperature (increase T)
+        
+        # Keep temperature positive
+        self.current_temperature = max(self.current_temperature, 0.01)
