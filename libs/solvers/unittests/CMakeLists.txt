@@ -74,6 +74,11 @@ target_link_libraries(test_uccgsd_operator_pool PRIVATE GTest::gtest_main cudaq-
 add_dependencies(CUDAQXSolversUnitTests test_uccgsd_operator_pool)
 gtest_discover_tests(test_uccgsd_operator_pool)
 
+add_executable(test_upccgsd_operator_pool test_upccgsd_operator_pool.cpp)
+target_link_libraries(test_upccgsd_operator_pool PRIVATE GTest::gtest_main cudaq-solvers cudaq::cudaq)
+add_dependencies(CUDAQXSolversUnitTests test_upccgsd_operator_pool)
+gtest_discover_tests(test_upccgsd_operator_pool)
+
 add_executable(test_qaoa test_qaoa.cpp)
 target_link_libraries(test_qaoa PRIVATE GTest::gtest_main cudaq-solvers test-kernels cudaq::cudaq)
 gtest_discover_tests(test_qaoa)
