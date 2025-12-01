@@ -230,6 +230,7 @@ def __internal_run_gqe(cfg: ConfigDict, pipeline, pool):
         "gradient_clip_val": cfg.grad_norm_clip,
         "enable_progress_bar": cfg.verbose,
         "enable_model_summary": cfg.verbose,
+        "enable_checkpointing": False,
         "reload_dataloaders_every_n_epochs": 1,
         "log_every_n_steps": 1,
         "num_sanity_val_steps": 0,  # Disable validation sanity checks
