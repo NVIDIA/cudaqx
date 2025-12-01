@@ -139,7 +139,7 @@ def get_default_config():
     """Create a default configuration for GQE.
     
     Args:
-        num_samples (int): Number of circuits to generate during each epoch/batch. Default=5
+        num_samples (int): Number of circuits to generate during each epoch/batch. Default=20
         max_iters (int): Number of epochs to run. Default=100
         ngates (int): Number of gates that make up each generated circuit. Default=20
         seed (int): Random seed. Default=3047
@@ -148,8 +148,8 @@ def get_default_config():
             stability, see `K. Nakaji et al. (2024) <https://arxiv.org/abs/2401.09253>`_ Sec. 3. Default=0.0
         grad_norm_clip (float): max_norm for clipping gradients, see `Lightning docs <https://lightning.ai/docs/fabric/stable/api/fabric_methods.html#clip-gradients>`_. Default=1.0
         temperature (float): Starting inverse temperature β as described in `K. Nakaji et al. (2024) <https://arxiv.org/abs/2401.09253>`_
-            Sec. 2.2. Default=5.0
-        del_temperature (float): Temperature increase after each epoch. Default=0.05
+            Sec. 2.2. Default=0.5
+        del_temperature (float): Temperature increase after each epoch. Default=0.02
         resid_pdrop (float): The dropout probability for all fully connected layers in the embeddings,
             encoder, and pooler, see `GPT2Config <https://github.com/huggingface/transformers/blob/main/src/transformers/models/gpt2/configuration_gpt2.py>`_. Default=0.0
         embd_pdrop (float): The dropout ratio for the embeddings, see `GPT2Config <https://github.com/huggingface/transformers/blob/main/src/transformers/models/gpt2/configuration_gpt2.py>`_. Default=0.0
@@ -157,15 +157,22 @@ def get_default_config():
         small (bool): Uses a small transformer (6 hidden layers and 6 attention heads as opposed to
             the default transformer of 12 of each). Default=False
         use_lightning_logging (bool): Whether to enable lightning logging. Default=False
-        fabric_logger (object): Fabric logger to use for logging. If None, no logging will be done. Default=None
+        lightning_logger (object): Lightning logger to use for logging. If None, no logging will be done. Default=None
         save_trajectory (bool): Whether to save the trajectory data to a file. Default=False
         trajectory_file_path (str): Path to save the trajectory data file. Default="gqe_logs/gqe_trajectory.json"
         verbose (bool): Enable verbose output to the console. Output includes the epoch, loss,
             model.train_step time, and minimum energy. Default=False
-        buffer_size (int): Size of replay buffer for storing trajectories. Default=50
-        warmup_size (int): Initial buffer warmup size before training starts. Default=50
-        trainer.step_per_epoch (int): Number of training steps per epoch. Default=10
-        trainer.batch_size (int): Batch size for training. Default=50
+        loss (str): Loss function to use. Default="grpo"
+        scheduler (str): Learning rate scheduler to use. Default="default"
+        benchmark_energy (dict): Reference energy of the molecule for comparison. Default={}
+        enable_checkpointing (bool): Whether to enable model checkpointing. Default=False
+        buffer_size (int): Size of replay buffer for storing trajectories. Default=20
+        warmup_size (int): Initial buffer warmup size before training starts. Default=20
+        step_per_epoch (int): Number of training steps per epoch. Default=10
+        batch_size (int): Batch size for training. Default=20
+        trainer_kwargs (dict): Additional keyword arguments to pass to Lightning Trainer. Default={}
+        callbacks (list): Additional callbacks to pass to Lightning Trainer. Note that MinEnergyCallback
+            is always included automatically. Default=[]
         
     Returns:
         ConfigDict: Default configuration for GQE
@@ -190,13 +197,15 @@ def get_default_config():
     cfg.trajectory_file_path = "gqe_logs/gqe_trajectory.json"  # Path to save trajectory data
     cfg.verbose = False
     cfg.loss = "grpo"
+    cfg.scheduler = "default"
+    cfg.benchmark_energy = {}  # Reference energy of the molecule
     # Replay buffer parameters
     cfg.buffer_size = 20  # Size of replay buffer
     cfg.warmup_size = 20  # Initial buffer warmup size
-    # Trainer parameters
-    cfg.trainer = ConfigDict()
-    cfg.trainer.step_per_epoch = 20  # Steps per training epoch
-    cfg.trainer.batch_size = 20  # Batch size for training
+    cfg.step_per_epoch = 10  # Steps per training epoch
+    cfg.batch_size = 20  # Batch size for training
+    cfg.trainer_kwargs = {}  # Additional kwargs to pass to Lightning Trainer
+    cfg.callbacks = []  # Additional callbacks to pass to Lightning Trainer
     return cfg
 
 
@@ -221,10 +230,14 @@ def __internal_run_gqe(cfg: ConfigDict, pipeline, pool):
         "gradient_clip_val": cfg.grad_norm_clip,
         "enable_progress_bar": cfg.verbose,
         "enable_model_summary": cfg.verbose,
-        "enable_checkpointing": False,  # Disable checkpointing for speed
+        "reload_dataloaders_every_n_epochs": 1,
         "log_every_n_steps": 1,
         "num_sanity_val_steps": 0,  # Disable validation sanity checks
     }
+    
+    # Merge user-provided trainer kwargs
+    if hasattr(cfg, 'trainer_kwargs') and cfg.trainer_kwargs:
+        trainer_kwargs.update(cfg.trainer_kwargs)
     
     # Set up logging
     if cfg.use_lightning_logging:
@@ -238,24 +251,25 @@ def __internal_run_gqe(cfg: ConfigDict, pipeline, pool):
     
     # Set up callbacks
     callbacks = []
+    
+    # MinEnergyCallback is required for returning results
     min_energy_callback = MinEnergyCallback()
     callbacks.append(min_energy_callback)
     
+    # Add trajectory callback if requested
     if cfg.save_trajectory:
         trajectory_callback = TrajectoryCallback(cfg.trajectory_file_path)
         callbacks.append(trajectory_callback)
+    
+    # Add user-provided callbacks
+    if hasattr(cfg, 'callbacks') and cfg.callbacks:
+        callbacks.extend(cfg.callbacks)
     
     trainer_kwargs["callbacks"] = callbacks
     
     # Create trainer
     trainer = L.Trainer(**trainer_kwargs)
-    
-    # Print model parameters if verbose
-    if cfg.verbose:
-        pytorch_total_params = sum(
-            p.numel() for p in pipeline.model.parameters() if p.requires_grad)
-        print(f"total trainable params: {pytorch_total_params / 1e6:.2f}M")
-    
+        
     # Train the model
     trainer.fit(pipeline)
     

@@ -45,11 +45,18 @@ class MinEnergyCallback(Callback):
 
             self.min_energy_history.append(self.min_energy)
             pl_module.log(
-                "min_energy",
+                "best energy",
                 self.min_energy,
-                prog_bar=True,
+                prog_bar=False,
                 on_epoch=True,
                 on_step=False)
+            for key, value in pl_module.benchmark_energy.items():
+                pl_module.log(
+                    f"best energy - {key}",
+                    self.min_energy - value,
+                    prog_bar=False,
+                    on_epoch=True,
+                    on_step=False)
 
     def get_results(self):
         """Get the minimum energy and corresponding indices.

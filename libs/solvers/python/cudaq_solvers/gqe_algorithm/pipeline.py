@@ -37,18 +37,17 @@ class Pipeline(LightningModule):
         # Set seed for reproducibility
         L.seed_everything(cfg.seed)
 
-        self._label = 'label_stand_in'
         self.numQPUs = numQPUs
         self.cfg = cfg
         self.model = model.to(self.device)
         self.factory = factory
         self.pool = pool
+        self.benchmark_energy = cfg.benchmark_energy
         self._cost = cost
-        self.loss = self.factory.create_loss_fn(cfg)
+        self.loss = self.factory.create_loss_fn(cfg).to(self.device)
         self.scheduler = self.factory.create_temperature_scheduler(self.cfg)
         self.ngates = cfg.ngates
         self.num_samples = cfg.num_samples
-        self.temperature = cfg.temperature
         self.buffer = ReplayBuffer(size=cfg.buffer_size)
         self.save_hyperparameters(ignore=['cost', 'pool', 'model', 'factory'])
         self._starting_idx = torch.zeros(self.num_samples,
@@ -168,27 +167,27 @@ class Pipeline(LightningModule):
         logits = self.model(idx).logits
         loss = self.loss.compute(energies,
                                  logits,
-                                 idx[:,1:],
+                                 idx[:, 1:],
                                  log_values,
-                                 inverse_temperature=self.scheduler.get_inverse_temperature(), 
+                                 inverse_temperature=self.scheduler.get_inverse_temperature(),
                                  current_step=batch_idx)
 
         # Log metrics
         self.log_dict(
             log_values,
             prog_bar=False,
-            on_step=True,
-            on_epoch=False)
-        self.log("loss", loss, prog_bar=True, on_step=True, on_epoch=False)
+            on_step=False,
+            on_epoch=True)
+        self.log("loss", loss, prog_bar=True, on_step=False, on_epoch=True)
         self.log(
             "energy_mean",
             energies.mean(),
-            prog_bar=True,
+            prog_bar=False,
             on_epoch=True, on_step=False)
         self.log(
             "energy_min",
             energies.min(),
-            prog_bar=True,
+            prog_bar=False,
             on_epoch=True,
             on_step=False)
         self.log(
@@ -201,8 +200,8 @@ class Pipeline(LightningModule):
 
     def train_dataloader(self):
         return DataLoader(
-            BufferDataset(self.buffer, self.cfg.trainer.step_per_epoch),
-            batch_size=self.cfg.trainer.batch_size,
+            BufferDataset(self.buffer, self.cfg.step_per_epoch),
+            batch_size=self.cfg.batch_size,
             shuffle=False,
             num_workers=0,  # Avoid multiprocessing to prevent pickling issues with CUDA-Q objects
         )

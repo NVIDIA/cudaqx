@@ -30,7 +30,7 @@ class Factory:
             frequency = getattr(cfg, 'scheduler_frequency', 100)
             return CosineScheduler(minimum, maximum, frequency)
         elif scheduler_type == 'variance':
-            target_var = getattr(cfg, 'target_variance', 0.1)
+            target_var = getattr(cfg, 'target_variance', 1e-5)
             return VarBasedScheduler(cfg.temperature, cfg.del_temperature, target_var)
         elif scheduler_type == 'default':
             return DefaultScheduler(cfg.temperature, cfg.del_temperature)
