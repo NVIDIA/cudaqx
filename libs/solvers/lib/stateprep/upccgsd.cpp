@@ -30,7 +30,7 @@ static void addUpCCGSDDoubleExcitation(std::vector<cudaq::spin_op> &ops,
 }
 
 // UpCCGSD unique singles: spin-preserving generalized singles
-// norbitals is interpreted as the number of spin orbitals (i.e. qubits).
+// norbitals is interpreted as the number of spin orbitals.
 std::vector<std::pair<std::size_t, std::size_t>>
 upccgsd_unique_singles(std::size_t norbitals) {
   // Start from all generalized singles over spin orbitals
