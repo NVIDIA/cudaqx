@@ -11,7 +11,7 @@ jobs:
       fail-fast: false
       matrix:
         platform: ['amd64', 'arm64']
-        cuda_version: ['12.6']
+        cuda_version: ['12.6', '13.0']
     runs-on: ${{ startsWith(github.repository, 'NVIDIA/cudaqx') && format('linux-{0}-cpu8', matrix.platform) || 'ubuntu-latest' }}
     container: ghcr.io/nvidia/cuda-quantum-devdeps:ext-${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc11-main
     permissions:
@@ -61,12 +61,30 @@ jobs:
       # ========================================================================
       # Build library
       # ========================================================================
+      - name: Install build requirements
+        run: |
+          apt install -y --no-install-recommends gfortran libblas-dev wget
+
+      - name: Install TensorRT (amd64)
+        if: matrix.platform == 'amd64'
+        run: |
+          apt-cache search tensorrt | awk '{print "Package: "$1"\nPin: version *+cuda${{ matrix.cuda_version }}\nPin-Priority: 1001\n"}' | tee /etc/apt/preferences.d/tensorrt-cuda${{ matrix.cuda_version }}.pref > /dev/null
+          apt update
+          apt install -y tensorrt-dev
+
+      - name: Install TensorRT (arm64)
+        if: matrix.platform == 'arm64' && !startsWith(matrix.cuda_version, '12')
+        run: |
+          apt-cache search tensorrt | awk '{print "Package: "$1"\nPin: version *+cuda13.0\nPin-Priority: 1001\n"}' | tee /etc/apt/preferences.d/tensorrt-cuda13.0.pref > /dev/null
+          apt update
+          apt install -y tensorrt-dev
 
       - name: Build
         id: build
         uses: ./.github/actions/build-lib
         with:
           lib: "qec"
+          cuda_version: ${{ matrix.cuda_version }}
           pr-number: ${{ steps.export-pr-info.outputs.pr_number }}
           save-ccache: true
           platform: ${{ matrix.platform }}
@@ -85,7 +103,10 @@ jobs:
       - name: Install python requirements
         shell: bash
         run: |
-          pip install numpy pytest cupy-cuda${{ steps.config.outputs.cuda_major }}x cuquantum-cu${{ steps.config.outputs.cuda_major }} quimb opt_einsum torch nvidia-cublas-cu${{ steps.config.outputs.cuda_major }} cuquantum-python-cu${{ steps.config.outputs.cuda_major }}==25.06
+          # Install the correct torch first.
+          cuda_no_dot=$(echo ${{ matrix.cuda_version }} | sed 's/\.//')
+          pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu${cuda_no_dot}
+          pip install numpy pytest onnxscript cupy-cuda${{ steps.config.outputs.cuda_major }}x cuquantum-cu${{ steps.config.outputs.cuda_major }} quimb opt_einsum nvidia-cublas cuquantum-python-cu${{ steps.config.outputs.cuda_major }}==25.09.1
           # The following tests are needed for docs/sphinx/examples/qec/python/tensor_network_decoder.py.
           if [ "$(uname -m)" == "x86_64" ]; then
               # Stim is not currently available on manylinux ARM wheels, so only

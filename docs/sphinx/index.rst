@@ -49,7 +49,8 @@ APIs for common quantum-classical solver workflows.
 * **cudaq-qec**: Quantum Error Correction Library
     * Extensible framework describing quantum error correcting codes as a collection of CUDA-Q kernels.
     * Extensible framework for describing syndrome decoders
-    * State-of-the-art, performant decoder implementations on NVIDIA GPUs (coming soon)
+    * State-of-the-art, performant decoder implementations on NVIDIA GPUs
+    * Real-time decoding for active error correction on quantum hardware
     * Pre-built numerical experiment APIs
 
 * **cudaq-solvers**: Performant Quantum-Classical Simulation Workflows

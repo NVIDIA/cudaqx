@@ -12,8 +12,10 @@ available on this repository. It will always contain a recent version of CUDA-Q
 The instructions below provide a complete set of commands to get you up and
 running. There are images available called
 
-- `ghcr.io/nvidia/cudaqx-dev:latest-amd64-cu12.6` for AMD64 platforms
-- `ghcr.io/nvidia/cudaqx-dev:latest-arm64-cu12.6` for ARM64 platforms
+- `ghcr.io/nvidia/cudaqx-dev:latest-amd64-cu12.6` for AMD64 platforms with CUDA >= 12.6, < 13
+- `ghcr.io/nvidia/cudaqx-dev:latest-amd64-cu13.0` for AMD64 platforms with CUDA >= 13.0
+- `ghcr.io/nvidia/cudaqx-dev:latest-arm64-cu12.6` for ARM64 platforms with CUDA >= 12.6, < 13
+- `ghcr.io/nvidia/cudaqx-dev:latest-arm64-cu13.0` for ARM64 platforms with CUDA >= 13.0
 
 With the image appropriate for your system, run
 
@@ -52,6 +54,12 @@ ninja install
 export PYTHONPATH=${CUDAQ_INSTALL_PREFIX}:${CUDAQX_INSTALL_PREFIX}
 export PATH="${CUDAQ_INSTALL_PREFIX}/bin:${CUDAQX_INSTALL_PREFIX}/bin:${PATH}"
 ctest
+# Run the python tests
+# The --ignore option is to bypass tests that require additional packages not contained in
+# the standard docker container
+cd ..
+python3 -m pytest -v libs/qec/python/tests --ignore libs/qec/python/tests/test_tensor_network_decoder.py
+python3 -m pytest -v libs/solvers/python/tests --ignore libs/solvers/python/tests/test_gqe.py
 ```
 
 If you want to change which version of CUDA-Q that CUDA-QX is paired with, you
@@ -62,6 +70,7 @@ commands to switch to whichever version you need. You can then use
 to re-build CUDA-Q.
 
 Additionally, the following CMake options can be configured:
+
 - `CUDAQX_ENABLE_LIBS`: Specify which libraries to build (`all`, `qec`, `solvers`)
 - `CUDAQX_INCLUDE_TESTS`: Enable building of tests
 - `CUDAQX_BINDINGS_PYTHON`: Enable Python bindings
@@ -71,3 +80,14 @@ contributing to CUDA-QX, but it should be noted that while this environment
 will have many GPU-accelerated simulators installed in it, it won't contain the
 *highest* performing CUDA-Q simulators. See [this note](https://nvidia.github.io/cuda-quantum/latest/using/install/data_center_install.html)
 for more details.
+
+## Building CUDA-QX Documentation from Source
+
+If you want to build and render our documentation from source, you can do this
+with the same environment as above. In particular, after running `ninja install`,
+you can run `ninja docs`. This places the documentation into the
+`/workspaces/cudaqx/build/docs/build/` directory. From there, you can open
+the `index.html` file in your browser, or if you are using VSCode or Cursor, you
+can simply browse to the `index.html` file in the Explorer panel, right click on
+the file, and select "Open with Live Server", and that will open your browser
+with the main docs page loaded automatically.

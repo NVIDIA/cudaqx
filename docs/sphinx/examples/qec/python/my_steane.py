@@ -40,7 +40,7 @@ def stabilizer(logicalQubit: patch, x_stabilizers: list[int],
                 x.ctrl(logicalQubit.data[di], logicalQubit.ancz[zi])
 
     # Get and reset ancillas
-    results = mz(logicalQubit.ancz, logicalQubit.ancx)
+    results = mz([*logicalQubit.ancz, *logicalQubit.ancx])
     reset(logicalQubit.ancx)
     reset(logicalQubit.ancz)
     return results

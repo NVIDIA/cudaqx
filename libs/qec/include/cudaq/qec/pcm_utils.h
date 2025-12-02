@@ -22,6 +22,64 @@ namespace cudaq::qec {
 std::vector<std::vector<std::uint32_t>>
 dense_to_sparse(const cudaqx::tensor<uint8_t> &pcm);
 
+/// @brief Return a sparse representation of the PCM as a string.
+/// @param pcm The PCM to convert to a sparse representation.
+/// @return A string that represents the PCM in a sparse format.
+std::string pcm_to_sparse_string(const cudaqx::tensor<uint8_t> &pcm);
+
+/// @brief Return a PCM from a sparse representation.
+/// @param sparse_str The sparse representation of the PCM.
+/// @param num_rows The number of rows in the PCM.
+/// @param num_cols The number of columns in the PCM.
+/// @return A PCM tensor.
+cudaqx::tensor<uint8_t> pcm_from_sparse_string(const std::string &sparse_str,
+                                               std::size_t num_rows,
+                                               std::size_t num_cols);
+
+/// @brief Return a PCM from a sparse representation.
+/// @param sparse_vec The sparse representation of the PCM, where -1 separates
+/// rows.
+/// @param num_rows The number of rows in the PCM.
+/// @param num_cols The number of columns in the PCM.
+/// @return A PCM tensor.
+cudaqx::tensor<uint8_t>
+pcm_from_sparse_vec(const std::vector<std::int64_t> &sparse_vec,
+                    std::size_t num_rows, std::size_t num_cols);
+
+/// @brief Return a sparse representation of the PCM.
+/// @param pcm The PCM to convert to a sparse representation.
+/// @return A vector of integers that represents the PCM in a sparse format,
+/// where -1 separates rows.
+std::vector<std::int64_t> pcm_to_sparse_vec(const cudaqx::tensor<uint8_t> &pcm);
+
+/// @brief Generate a sparse detector matrix for a given number of syndromes per
+/// round and number of rounds. Timelike here means that each round of syndrome
+/// bits are xor'd against the preceding round.
+/// @param num_syndromes_per_round The number of syndromes per round.
+/// @param num_rounds The number of rounds.
+/// @param include_first_round Whether to include the first round in the
+/// detector matrix.
+/// @return The detector matrix format is CSR-like, with -1 values
+/// indicating the end of a row.
+std::vector<std::int64_t>
+generate_timelike_sparse_detector_matrix(std::uint32_t num_syndromes_per_round,
+                                         std::uint32_t num_rounds,
+                                         bool include_first_round = false);
+
+/// @brief Generate a sparse detector matrix for a given number of syndromes per
+/// round and number of rounds. Timelike here means that each round of syndrome
+/// bits are xor'd against the preceding round. The first round is supplied by
+/// the user, to allow for a mixture of detectors and non-detectors.
+/// @param num_syndromes_per_round The number of syndromes per round.
+/// @param num_rounds The number of rounds.
+/// @param first_round_matrix User specified detector matrix for the first
+/// round.
+/// @return The detector matrix format is CSR-like, with -1 values
+/// indicating the end of a row.
+std::vector<std::int64_t> generate_timelike_sparse_detector_matrix(
+    std::uint32_t num_syndromes_per_round, std::uint32_t num_rounds,
+    std::vector<std::int64_t> first_round_matrix);
+
 /// @brief Return a vector of column indices that would sort the PCM columns
 /// in topological order.
 /// @param row_indices For each column, a vector of row indices that have a

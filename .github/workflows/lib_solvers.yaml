@@ -11,7 +11,7 @@ jobs:
       fail-fast: false
       matrix:
         platform: ['amd64', 'arm64']
-        cuda_version: ['12.6']
+        cuda_version: ['12.6', '13.0']
     runs-on: ${{ startsWith(github.repository, 'NVIDIA/cudaqx') && format('linux-{0}-cpu8', matrix.platform) || 'ubuntu-latest' }}
     container: ghcr.io/nvidia/cuda-quantum-devdeps:ext-${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc11-main
     permissions:
@@ -71,6 +71,7 @@ jobs:
         uses: ./.github/actions/build-lib
         with:
           lib: "solvers"
+          cuda_version: ${{ matrix.cuda_version }}
           pr-number: ${{ steps.export-pr-info.outputs.pr_number }}
           save-ccache: true
           platform: ${{ matrix.platform }}
@@ -89,7 +90,11 @@ jobs:
       - name: Install python requirements
         env:
           LD_LIBRARY_PATH: ${{ env.MPI_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
-        run: pip install numpy pytest cupy-cuda${{ steps.config.outputs.cuda_major }}x cuquantum-cu${{ steps.config.outputs.cuda_major }} torch lightning ml_collections mpi4py transformers pytest
+        run: |
+          # Install the correct torch first.
+          cuda_no_dot=$(echo ${{ matrix.cuda_version }} | sed 's/\.//')
+          pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu${cuda_no_dot}
+          pip install numpy pytest onnxscript cupy-cuda${{ steps.config.outputs.cuda_major }}x cuquantum-cu${{ steps.config.outputs.cuda_major }} lightning ml_collections mpi4py transformers pytest
 
 
       - name: Run Python tests

@@ -25,7 +25,7 @@ jobs:
     strategy:
       matrix:
         platform: [amd64, arm64]
-        cuda_version: ['12.6']
+        cuda_version: ['12.6', '13.0']
       fail-fast: false
     runs-on: linux-${{ matrix.platform }}-cpu8
     steps:
@@ -56,8 +56,8 @@ jobs:
     - name: Check if image already exists
       id: check-image
       run: |
-        IMAGE_TAG="${{ steps.get-cudaq-version-short.outputs.commit_date }}-${{ steps.get-cudaq-version-short.outputs.shortref }}-${{ matrix.platform }}"
-        CONTAINER_VERSION_METADATA=$(curl -s -L -H "Accept: applicat/vnd.github+json" -H "Authorization: Bearer ${{ github.token }}" "https://api.github.com/orgs/NVIDIA/packages/container/cudaqx-dev/versions")
+        IMAGE_TAG="${{ steps.get-cudaq-version-short.outputs.commit_date }}-${{ steps.get-cudaq-version-short.outputs.shortref }}-${{ matrix.platform }}-cu${{ matrix.cuda_version }}"
+        CONTAINER_VERSION_METADATA=$(curl -s -L -H "Accept: applicat/vnd.github+json" -H "Authorization: Bearer ${{ github.token }}" "https://api.github.com/orgs/NVIDIA/packages/container/cudaqx-dev/versions?per_page=100")
         CONTAINER_TAGS=$(echo $CONTAINER_VERSION_METADATA | jq -r '.[] | .metadata.container.tags[]')
 
         if echo "$CONTAINER_TAGS" | grep -qx "$IMAGE_TAG"; then
@@ -71,17 +71,24 @@ jobs:
     - name: Build and push
       if: ${{ inputs.force_rebuild || steps.check-image.outputs.IMAGE_EXISTS == 'false' }}
       run: |
-        other_tag="latest"
+        other_tag=""
+        is_main_branch=${{ github.ref_name == 'main' }}
         is_versioned=${{ startsWith(github.ref_name, 'releases/') }}
-        if ${is_versioned}; then
+        if ${is_main_branch}; then
+          other_tag="latest"
+        elif ${is_versioned}; then
           ver=`echo ${{ github.ref_name }} | egrep -o "([0-9]{1,}\.)+[0-9]{1,}"`
           echo "Versioned release: $ver"
           other_tag=$ver
         fi
         TAGS="-t ghcr.io/nvidia/cudaqx-dev:${{ steps.get-cudaq-version-short.outputs.commit_date }}-${{ steps.get-cudaq-version-short.outputs.shortref }}-${{ matrix.platform }}-cu${{ matrix.cuda_version }}"
         TAGS+=" -t ghcr.io/nvidia/cudaqx-dev:${{ steps.get-cudaq-version-short.outputs.shortref }}-${{ matrix.platform }}-cu${{ matrix.cuda_version }}"
-        TAGS+=" -t ghcr.io/nvidia/cudaqx-dev:${other_tag}-${{ matrix.platform }}-cu${{ matrix.cuda_version }}"
-        docker build $TAGS -f docker/build_env/cudaqx.dev.Dockerfile . --build-arg base_image=ghcr.io/nvidia/cuda-quantum-devdeps:ext-${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc11-main
+        if [ -n "$other_tag" ]; then
+          TAGS+=" -t ghcr.io/nvidia/cudaqx-dev:${other_tag}-${{ matrix.platform }}-cu${{ matrix.cuda_version }}"
+        fi
+        docker build $TAGS -f docker/build_env/cudaqx.dev.Dockerfile . \
+          --build-arg base_image=ghcr.io/nvidia/cuda-quantum-devdeps:ext-${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc11-main \
+          --build-arg cuda_version=${{ matrix.cuda_version }}
         docker push -a ghcr.io/nvidia/cudaqx-dev
       shell: bash --noprofile --norc -euo pipefail {0}
 
@@ -92,7 +99,7 @@ jobs:
       matrix:
         python: ['3.11', '3.12', '3.13']
         platform: ['amd64', 'arm64']
-        cuda_version: ['12.6']
+        cuda_version: ['12.6', '13.0']
       fail-fast: false
     runs-on: linux-${{ matrix.platform }}-cpu8
     steps:
@@ -123,8 +130,8 @@ jobs:
     - name: Check if image already exists
       id: check-image
       run: |
-        IMAGE_TAG="${{ steps.get-cudaq-version-short.outputs.commit_date }}-${{ steps.get-cudaq-version-short.outputs.shortref }}-py${{ matrix.python }}-${{ matrix.platform }}"
-        CONTAINER_VERSION_METADATA=$(curl -s -L -H "Accept: applicat/vnd.github+json" -H "Authorization: Bearer ${{ github.token }}" "https://api.github.com/orgs/NVIDIA/packages/container/cudaqx-dev/versions")
+        IMAGE_TAG="${{ steps.get-cudaq-version-short.outputs.commit_date }}-${{ steps.get-cudaq-version-short.outputs.shortref }}-py${{ matrix.python }}-${{ matrix.platform }}-cu${{ matrix.cuda_version }}"
+        CONTAINER_VERSION_METADATA=$(curl -s -L -H "Accept: applicat/vnd.github+json" -H "Authorization: Bearer ${{ github.token }}" "https://api.github.com/orgs/NVIDIA/packages/container/cudaqx-dev/versions?per_page=100")
         CONTAINER_TAGS=$(echo $CONTAINER_VERSION_METADATA | jq -r '.[] | .metadata.container.tags[]')
 
         if echo "$CONTAINER_TAGS" | grep -qx "$IMAGE_TAG"; then
@@ -155,6 +162,7 @@ jobs:
           base_image=ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc11-main
           release_version=0.99.99
           python_version=${{ matrix.python }}
+          cuda_version=${{ matrix.cuda_version }}
         outputs: type=local,dest=/tmp/wheels
 
     - name: Build and push dev image with prebuilt CUDA-Q wheels
@@ -168,33 +176,40 @@ jobs:
         TAGS="-t ghcr.io/nvidia/cudaqx-dev:${{ steps.get-cudaq-version-short.outputs.commit_date }}-${{ steps.get-cudaq-version-short.outputs.shortref }}-py${{ matrix.python }}-${{ matrix.platform }}-cu${{ matrix.cuda_version }}"
         TAGS+=" -t ghcr.io/nvidia/cudaqx-dev:${{ steps.get-cudaq-version-short.outputs.shortref }}-py${{ matrix.python }}-${{ matrix.platform }}-cu${{ matrix.cuda_version }}"
 
-        other_tag="latest"
+        other_tag=""
+        is_main_branch=${{ github.ref_name == 'main' }}
         is_versioned=${{ startsWith(github.ref_name, 'releases/') }}
-        if ${is_versioned}; then
+        if ${is_main_branch}; then
+          other_tag="latest"
+        elif ${is_versioned}; then
           ver=`echo ${{ github.ref_name }} | egrep -o "([0-9]{1,}\.)+[0-9]{1,}"`
           echo "Versioned release: $ver"
           other_tag=$ver
         fi
 
-        TAGS+=" -t ghcr.io/nvidia/cudaqx-dev:${other_tag}-py${{ matrix.python }}-${{ matrix.platform }}-cu${{ matrix.cuda_version }}"
+        if [ -n "$other_tag" ]; then
+          TAGS+=" -t ghcr.io/nvidia/cudaqx-dev:${other_tag}-py${{ matrix.python }}-${{ matrix.platform }}-cu${{ matrix.cuda_version }}"
+        fi
         BUILDARGS="--build-arg base_image=ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc11-main"
         BUILDARGS+=" --build-arg python_version=${{ matrix.python }}"
+        BUILDARGS+=" --build-arg cuda_version=${{ matrix.cuda_version }}"
+        BUILDARGS+=" --ulimit nofile=1048576:1048576"
         # For some reason, this fails on amd64 unless DOCKER_BUILDKIT=0 is set.
         # The exact error is: too many open files.
         DOCKER_BUILDKIT=0 docker build $TAGS $BUILDARGS -f docker/build_env/cudaqx.wheel.Dockerfile .
         docker push -a ghcr.io/nvidia/cudaqx-dev
       shell: bash --noprofile --norc -euo pipefail {0}
 
-  cleanup:
-    name: Cleanup
-    needs: [build-cudaqx-dev, build-cudaqx-pydev]
-    runs-on: ubuntu-latest
-    if: ${{ github.repository == 'NVIDIA/cudaqx' }}
-    steps:
-    - name: Delete untagged images
-      uses: actions/delete-package-versions@v5
-      with: 
-        package-name: cudaqx-dev
-        package-type: 'container'
-        min-versions-to-keep: 0
-        delete-only-untagged-versions: 'true'
+  # cleanup:
+  #   name: Cleanup
+  #   needs: [build-cudaqx-dev, build-cudaqx-pydev]
+  #   runs-on: ubuntu-latest
+  #   if: ${{ github.repository == 'NVIDIA/cudaqx' }}
+  #   steps:
+  #   - name: Delete untagged images
+  #     uses: actions/delete-package-versions@v5
+  #     with: 
+  #       package-name: cudaqx-dev
+  #       package-type: 'container'
+  #       min-versions-to-keep: 0
+  #       delete-only-untagged-versions: 'true'

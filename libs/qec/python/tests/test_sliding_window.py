@@ -51,6 +51,7 @@ def test_sliding_window_1(decoder_name, batched, num_rounds, num_windows):
     # be the same.
     full_decoder = qec.get_decoder(decoder_name, dem.detector_error_matrix)
     num_syndromes_per_round = dem.detector_error_matrix.shape[0] // num_rounds
+
     sw_as_full_decoder = qec.get_decoder(
         "sliding_window",
         dem.detector_error_matrix,
@@ -61,7 +62,8 @@ def test_sliding_window_1(decoder_name, batched, num_rounds, num_windows):
         straddle_end_round=True,
         error_rate_vec=np.array(dem.error_rates),
         inner_decoder_name=decoder_name,
-        inner_decoder_params={'dummy_parm': 1})
+        inner_decoder_params={'dummy_param': 1})
+
     if batched:
         full_results = full_decoder.decode_batch(syndromes)
         sw_results = sw_as_full_decoder.decode_batch(syndromes)

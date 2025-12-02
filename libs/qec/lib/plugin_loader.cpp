@@ -7,6 +7,7 @@
  ******************************************************************************/
 
 #include "cudaq/qec/plugin_loader.h"
+#include "common/Logger.h"
 #include <filesystem>
 #include <iostream>
 
@@ -15,8 +16,16 @@ namespace fs = std::filesystem;
 namespace cudaq::qec {
 
 static std::map<std::string, PluginHandle> &get_plugin_handles() {
-  static std::map<std::string, PluginHandle> plugin_handles;
-  return plugin_handles;
+  // Formerly this code was like this:
+  // static std::map<std::string, PluginHandle> plugin_handles;
+  // return plugin_handles;
+  // But that created a double free error when the program exited.
+  // This was because the static destructor for the map was called first,
+  // and then the cleanup_plugins function was called which tried to access the
+  // already destroyed map. This new approach does create a small memory leak,
+  // but it prevents the double free error.
+  static auto *plugin_handles = new std::map<std::string, PluginHandle>();
+  return *plugin_handles; // Dereference pointer to return reference
 }
 
 // Function to load plugins from a directory based on their type
@@ -35,9 +44,14 @@ void load_plugins(const std::string &plugin_dir, PluginType type) {
             PluginHandle{std::unique_ptr<void, PluginDeleter>(raw_handle,
                                                               PluginDeleter()),
                          type});
+        CUDAQ_INFO("Successfully loaded plugin: {}", entry.path().string());
       } else {
-        std::cerr << "ERROR: Failed to load plugin: " << entry.path()
-                  << " Error: " << dlerror() << std::endl;
+        // The TRT decoder is an optional decoder that is not always available.
+        // Do not clutter up the console with error messages if it is not
+        // available. We only output an error message if info logging is
+        // enabled.
+        CUDAQ_INFO("Failed to load plugin {} Error: {}. Continuing anyway.",
+                   entry.path().string(), dlerror());
       }
     }
   }
