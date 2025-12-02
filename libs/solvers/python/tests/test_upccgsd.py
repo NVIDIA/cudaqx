@@ -25,12 +25,20 @@ def is_nvidia_gpu_available():
 def test_solvers_upccgsd_exc_list():
     N = 20  # or whatever molecule.n_orbitals * 2 would be
     pauliWordsList, coefficientsList = solvers.stateprep.get_upccgsd_pauli_lists(
-        N, only_singles=False, only_doubles=False
+        N, only_doubles=False
     )
     parameter_count = len(coefficientsList)
     M = N/2
     ideal_count = (3/2) * M * (M-1)
     assert parameter_count == ideal_count
+    pauliWordsList, coefficientsList = solvers.stateprep.get_upccgsd_pauli_lists(
+        N, only_doubles=True
+    )
+    parameter_count = len(coefficientsList)
+    M = N/2
+    ideal_count = (1/2) * M * (M-1)
+    assert parameter_count == ideal_count
+
 
 
 
@@ -45,7 +53,7 @@ def test_solvers_vqe_upccgsd_h2():
 
     # Get grouped Pauli words and coefficients from UpCCGSD pool
     pauliWordsList, coefficientsList = solvers.stateprep.get_upccgsd_pauli_lists(
-        numQubits, only_singles=False, only_doubles=False)
+        numQubits, only_doubles=False)
 
     # Number of theta parameters = number of excitation groups
     parameter_count = len(coefficientsList)

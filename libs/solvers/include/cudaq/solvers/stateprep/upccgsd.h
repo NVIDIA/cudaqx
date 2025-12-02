@@ -19,14 +19,12 @@ namespace cudaq::solvers::stateprep {
 /// singles and paired αβ→αβ generalized doubles in an interleaved spin-orbital
 /// ordering (α0, β0, α1, β1, ..., α_{N-1}, β_{N-1}).
 /// @param norbitals Number of spin orbitals (qubits)
-/// @param only_singles If true, include only single excitations
 /// @param only_doubles If true, include only double excitations
 /// @return Pair of lists: [Pauli words grouped by excitation],
 /// [coefficients grouped by excitation]
 std::pair<std::vector<std::vector<cudaq::pauli_word>>,
           std::vector<std::vector<double>>>
-get_upccgsd_pauli_lists(std::size_t norbitals, bool only_singles = false,
-                        bool only_doubles = false);
+get_upccgsd_pauli_lists(std::size_t norbitals,bool only_doubles = false);
 
 /// \pure_device_kernel
 ///

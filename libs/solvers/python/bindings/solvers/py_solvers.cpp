@@ -223,7 +223,7 @@ void addStatePrepKernels(py::module &mod) {
   )");
   stateprep.def("get_upccgsd_pauli_lists",
                 &cudaq::solvers::stateprep::get_upccgsd_pauli_lists,
-                py::arg("num_qubits"), py::arg("only_singles") = false,
+                py::arg("num_qubits"),
                 py::arg("only_doubles") = false,
                 R"(
   Generate UpCCGSD operator pool (Python-style unique singles/doubles) and extract Pauli words and coefficients grouped by excitation.

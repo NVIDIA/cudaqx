@@ -201,7 +201,7 @@ TEST(UPCCGSDOperatorPoolTest, ConsistentWithStateprep) {
   // stateprep uses "norbitals" = #spin orbitals = #qubits
   std::size_t n_qubits = 4;
   auto [pauli_lists, coeff_lists] =
-      cudaq::solvers::stateprep::get_upccgsd_pauli_lists(n_qubits, false, false);
+      cudaq::solvers::stateprep::get_upccgsd_pauli_lists(n_qubits, false);
 
   EXPECT_EQ(pool_ops.size(), pauli_lists.size())
       << "Operator pool and stateprep should generate same number of "
@@ -216,24 +216,9 @@ TEST(UPCCGSDOperatorPoolTest, ConsistentWithStateprep) {
   }
 }
 
-// ============================================================================
-// Test 7: Singles Only Option (via stateprep)
-// ============================================================================
-TEST(UPCCGSDOperatorPoolTest, SinglesOnlyGeneration) {
-  std::size_t M = 3;           // spatial orbitals
-  std::size_t n_qubits = 2*M;  // spin orbitals
-
-  auto [pauli_lists, coeff_lists] =
-      cudaq::solvers::stateprep::get_upccgsd_pauli_lists(
-          n_qubits, /*only_singles=*/true, /*only_doubles=*/false);
-
-  std::size_t expected_singles = M * (M - 1); // generalized spin-preserving
-  EXPECT_EQ(pauli_lists.size(), expected_singles)
-      << "Singles-only should generate " << expected_singles << " operators";
-}
 
 // ============================================================================
-// Test 8: Doubles Only Option (via stateprep)
+// Test 7: Doubles Only Option (via stateprep)
 // ============================================================================
 TEST(UPCCGSDOperatorPoolTest, DoublesOnlyGeneration) {
   std::size_t M = 3;           // spatial orbitals
@@ -241,7 +226,7 @@ TEST(UPCCGSDOperatorPoolTest, DoublesOnlyGeneration) {
 
   auto [pauli_lists, coeff_lists] =
       cudaq::solvers::stateprep::get_upccgsd_pauli_lists(
-          n_qubits, /*only_singles=*/false, /*only_doubles=*/true);
+          n_qubits, /*only_doubles=*/true);
 
   std::size_t expected_doubles = M * (M - 1) / 2; // paired αβ→αβ
   EXPECT_EQ(pauli_lists.size(), expected_doubles)
@@ -249,7 +234,7 @@ TEST(UPCCGSDOperatorPoolTest, DoublesOnlyGeneration) {
 }
 
 // ============================================================================
-// Test 9: Scaling Test - Verify Formula for Multiple Sizes
+// Test 8: Scaling Test - Verify Formula for Multiple Sizes
 // ============================================================================
 TEST(UPCCGSDOperatorPoolTest, ScalingBehavior) {
   auto pool = cudaq::solvers::operator_pool::get("upccgsd");
@@ -280,7 +265,7 @@ TEST(UPCCGSDOperatorPoolTest, ScalingBehavior) {
 }
 
 // ============================================================================
-// Test 10: Edge Case - Minimal System
+// Test 9: Edge Case - Minimal System
 // ============================================================================
 TEST(UPCCGSDOperatorPoolTest, MinimalSystem) {
   auto pool = cudaq::solvers::operator_pool::get("upccgsd");
@@ -306,7 +291,7 @@ TEST(UPCCGSDOperatorPoolTest, MinimalSystem) {
 }
 
 // ============================================================================
-// Test 11: Verify Hermiticity / Anti-Hermiticity Structure
+// Test 10: Verify Hermiticity / Anti-Hermiticity Structure
 // ============================================================================
 TEST(UPCCGSDOperatorPoolTest, OperatorsAreHermitianGenerators) {
   auto pool = cudaq::solvers::operator_pool::get("upccgsd");
@@ -341,7 +326,7 @@ TEST(UPCCGSDOperatorPoolTest, OperatorsAreHermitianGenerators) {
 }
 
 // ============================================================================
-// Test 12: Verify Operator Pool Returns Correct Type
+// Test 11: Verify Operator Pool Returns Correct Type
 // ============================================================================
 TEST(UPCCGSDOperatorPoolTest, ReturnsSpinOperators) {
   auto pool = cudaq::solvers::operator_pool::get("upccgsd");
@@ -358,7 +343,7 @@ TEST(UPCCGSDOperatorPoolTest, ReturnsSpinOperators) {
 }
 
 // ============================================================================
-// Test 13: Performance Test - Larger System
+// Test 12: Performance Test - Larger System
 // ============================================================================
 TEST(UPCCGSDOperatorPoolTest, LargeSystemPerformance) {
   auto pool = cudaq::solvers::operator_pool::get("upccgsd");

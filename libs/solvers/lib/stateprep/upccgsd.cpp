@@ -103,24 +103,21 @@ upccgsd_unique_doubles(std::size_t norbitals) {
 // norbitals = # spin orbitals / qubits (same as uccgsd stateprep).
 std::pair<std::vector<std::vector<cudaq::pauli_word>>,
           std::vector<std::vector<double>>>
-get_upccgsd_pauli_lists(std::size_t norbitals, bool only_singles,
-                        bool only_doubles) {
+get_upccgsd_pauli_lists(std::size_t norbitals, bool only_doubles) {
 
   std::vector<cudaq::spin_op> ops;
 
-  if (!only_singles && !only_doubles) {
-    // Add all UpCCGSD singles
-    for (auto [p, q] : upccgsd_unique_singles(norbitals))
-      addUpCCGSDSingleExcitation(ops, p, q);
-    // Add all UpCCGSD paired doubles
+  if (only_doubles) {
+    // Only UpCCGSD paired doubles
     for (auto pair : upccgsd_unique_doubles(norbitals)) {
       auto [pq, rs] = pair;
       addUpCCGSDDoubleExcitation(ops, pq.first, pq.second, rs.first, rs.second);
     }
-  } else if (only_singles) {
+  } else {
+    // Default: add all UpCCGSD singles...
     for (auto [p, q] : upccgsd_unique_singles(norbitals))
       addUpCCGSDSingleExcitation(ops, p, q);
-  } else if (only_doubles) {
+    // ...and all UpCCGSD paired doubles
     for (auto pair : upccgsd_unique_doubles(norbitals)) {
       auto [pq, rs] = pair;
       addUpCCGSDDoubleExcitation(ops, pq.first, pq.second, rs.first, rs.second);
@@ -143,7 +140,6 @@ get_upccgsd_pauli_lists(std::size_t norbitals, bool only_singles,
 
   return {pauliWordsList, coefficientsList};
 }
-
 // QPU kernel: exp(i θ_k H_k) with H_k expanded into Pauli words
 __qpu__ void
 upccgsd(cudaq::qview<> qubits, const std::vector<double> &thetas,
