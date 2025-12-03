@@ -131,7 +131,8 @@ decoder::decode_async(const std::vector<float_t> &syndrome) {
 std::unique_ptr<decoder>
 decoder::get(const std::string &name, const cudaqx::tensor<uint8_t> &H,
              const cudaqx::heterogeneous_map &param_map) {
-  auto &registry = get_registry();
+  auto [mutex, registry] = get_registry();
+  std::lock_guard<std::mutex> lock(mutex);
   auto iter = registry.find(name);
   if (iter == registry.end())
     throw std::runtime_error(
