@@ -105,12 +105,12 @@
 
           - 0: sum-product
           - 1: min-sum (introduced in 0.4.0)
-          - 2: min-sum+mem (uniform memory strength, introduced in 0.5.0)
-          - 3: min-sum+dmem (disordered memory strength, introduced in 0.5.0)
+          - 2: min-sum+mem (uniform memory strength, requires `use_sparsity=True`. Introduced in 0.5.0)
+          - 3: min-sum+dmem (disordered memory strength, requires `use_sparsity=True`. Introduced in 0.5.0)
         - `composition` (int): Iteration strategy (defaults to 0). Introduced in 0.5.0:
 
           - 0: Standard (single run)
-          - 1: Sequential relay (multiple gamma legs). Requires: `bp_method=3`, `srelay_config`
+          - 1: Sequential relay (multiple gamma legs). Requires: `bp_method=3`, `use_sparsity=True`, and `srelay_config`
         - `scale_factor` (float): The scale factor to use for min-sum. Defaults to 1.0.
           When set to 0.0, the scale factor is dynamically computed based on the
           number of iterations. Introduced in 0.4.0.
