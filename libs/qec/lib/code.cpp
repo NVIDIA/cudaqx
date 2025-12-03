@@ -18,7 +18,7 @@ code::get(const std::string &name,
           const std::vector<cudaq::spin_op_term> &_stabilizers,
           const heterogeneous_map options) {
   auto [mutex, registry] = get_registry();
-  std::lock_guard<std::mutex> lock(mutex);
+  std::lock_guard<std::recursive_mutex> lock(mutex);
   auto iter = registry.find(name);
   if (iter == registry.end())
     throw std::runtime_error("invalid qec_code requested: " + name);
@@ -30,7 +30,7 @@ code::get(const std::string &name,
 std::unique_ptr<code> code::get(const std::string &name,
                                 const heterogeneous_map options) {
   auto [mutex, registry] = get_registry();
-  std::lock_guard<std::mutex> lock(mutex);
+  std::lock_guard<std::recursive_mutex> lock(mutex);
   auto iter = registry.find(name);
   if (iter == registry.end())
     throw std::runtime_error("invalid qec_code requested: " + name);

@@ -132,7 +132,7 @@ std::unique_ptr<decoder>
 decoder::get(const std::string &name, const cudaqx::tensor<uint8_t> &H,
              const cudaqx::heterogeneous_map &param_map) {
   auto [mutex, registry] = get_registry();
-  std::lock_guard<std::mutex> lock(mutex);
+  std::lock_guard<std::recursive_mutex> lock(mutex);
   auto iter = registry.find(name);
   if (iter == registry.end())
     throw std::runtime_error(
