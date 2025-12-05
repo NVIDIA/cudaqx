@@ -94,7 +94,8 @@ public:
   static std::unique_ptr<observe_gradient>
   get(const std::string &name, NonStdKernel &&kernel, const spin_op &op,
       ArgTranslator &&translator) {
-    auto &registry = get_registry();
+    auto [mutex, registry] = get_registry();
+    std::lock_guard<std::recursive_mutex> lock(mutex);
     auto iter = registry.find(name);
     if (iter == registry.end())
       throw std::runtime_error("Cannot find extension with name = " + name);

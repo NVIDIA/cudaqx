@@ -44,7 +44,7 @@ add_dependencies(CUDAQXQECUnitTests test_decoders_yaml)
 gtest_discover_tests(test_decoders_yaml)
 
 add_executable(test_qec test_qec.cpp)
-target_link_libraries(test_qec PRIVATE GTest::gtest_main cudaq-qec cudaq::cudaq)
+target_link_libraries(test_qec PRIVATE GTest::gtest_main cudaq-qec cudaq::cudaq-stim-target)
 add_dependencies(CUDAQXQECUnitTests test_qec)
 gtest_discover_tests(test_qec)
 
