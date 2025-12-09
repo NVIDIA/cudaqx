@@ -243,6 +243,7 @@ def demonstrate_bp_methods():
                                   H,
                                   bp_method=2,
                                   max_iterations=30,
+                                  use_sparsity=True,
                                   gamma0=0.5)
     print("   Created decoder with Mem-BP (gamma0=0.5)")
 
@@ -253,6 +254,7 @@ def demonstrate_bp_methods():
                                    H,
                                    bp_method=3,
                                    max_iterations=30,
+                                   use_sparsity=True,
                                    gamma_dist=[0.1, 0.5],
                                    bp_seed=42)
     print("   Created decoder with DMem-BP (gamma_dist=[0.1, 0.5])")
@@ -264,6 +266,7 @@ def demonstrate_bp_methods():
                                             H,
                                             bp_method=3,
                                             max_iterations=30,
+                                            use_sparsity=True,
                                             explicit_gammas=explicit_gammas)
     print("   Created decoder with DMem-BP (explicit gammas)")
 
@@ -284,6 +287,7 @@ def demonstrate_bp_methods():
                                     bp_method=3,
                                     composition=1,
                                     max_iterations=50,
+                                    use_sparsity=True,
                                     gamma0=0.3,
                                     gamma_dist=[0.1, 0.5],
                                     srelay_config=srelay_config,
@@ -310,6 +314,7 @@ def demonstrate_bp_methods():
         bp_method=3,
         composition=1,
         max_iterations=50,
+        use_sparsity=True,
         gamma0=0.3,
         explicit_gammas=explicit_relay_gammas,
         srelay_config=srelay_config_all)
@@ -328,6 +333,7 @@ def demonstrate_bp_methods():
                                           bp_method=3,
                                           composition=1,
                                           max_iterations=50,
+                                          use_sparsity=True,
                                           gamma0=0.3,
                                           gamma_dist=[0.1, 0.6],
                                           srelay_config=srelay_config_nconv,
