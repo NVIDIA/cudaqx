@@ -68,7 +68,9 @@ def test_solvers_adapt_uccgsd_lih():
                                             operators)
 
     print(energy)
-    assert np.isclose(energy, -7.8638, atol=1e-4)
+    # Tolerance of 1e-4 was good enough most of the time, but a PySCF
+    # non-repeatability sometimes makes this fail w/ 1e-4, so we make it 1e-3.
+    assert np.isclose(energy, -7.8638, atol=1e-3)
 
 
 def test_solvers_adapt_uccgsd_N2():
