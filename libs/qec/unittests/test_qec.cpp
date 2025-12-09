@@ -670,6 +670,11 @@ TEST(QECCodeTester, checkRepetition) {
 
     EXPECT_TRUE(sum == 0);
   }
+  {
+    // Test get_num_x_stabilizers and get_num_z_stabilizers
+    EXPECT_EQ(repetition->get_num_x_stabilizers(), 0);
+    EXPECT_EQ(repetition->get_num_z_stabilizers(), 8);
+  }
 }
 
 TEST(QECCodeTester, checkSurfaceCode) {
