@@ -165,36 +165,32 @@ class Pipeline(LightningModule):
 
         log_values = {}
         logits = self.model(idx).logits
-        loss = self.loss.compute(energies,
-                                 logits,
-                                 idx[:, 1:],
-                                 log_values,
-                                 inverse_temperature=self.scheduler.get_inverse_temperature(),
-                                 current_step=batch_idx)
+        loss = self.loss.compute(
+            energies,
+            logits,
+            idx[:, 1:],
+            log_values,
+            inverse_temperature=self.scheduler.get_inverse_temperature(),
+            current_step=batch_idx)
 
         # Log metrics
-        self.log_dict(
-            log_values,
-            prog_bar=False,
-            on_step=False,
-            on_epoch=True)
+        self.log_dict(log_values, prog_bar=False, on_step=False, on_epoch=True)
         self.log("loss", loss, prog_bar=True, on_step=False, on_epoch=True)
-        self.log(
-            "energy_mean",
-            energies.mean(),
-            prog_bar=False,
-            on_epoch=True, on_step=False)
-        self.log(
-            "energy_min",
-            energies.min(),
-            prog_bar=False,
-            on_epoch=True,
-            on_step=False)
-        self.log(
-            "inverse_temperature",
-            self.scheduler.get_inverse_temperature(),
-            prog_bar=True,
-            on_epoch=True, on_step=False)
+        self.log("energy_mean",
+                 energies.mean(),
+                 prog_bar=False,
+                 on_epoch=True,
+                 on_step=False)
+        self.log("energy_min",
+                 energies.min(),
+                 prog_bar=False,
+                 on_epoch=True,
+                 on_step=False)
+        self.log("inverse_temperature",
+                 self.scheduler.get_inverse_temperature(),
+                 prog_bar=True,
+                 on_epoch=True,
+                 on_step=False)
 
         return loss
 
@@ -203,7 +199,8 @@ class Pipeline(LightningModule):
             BufferDataset(self.buffer, self.cfg.step_per_epoch),
             batch_size=self.cfg.batch_size,
             shuffle=False,
-            num_workers=0,  # Avoid multiprocessing to prevent pickling issues with CUDA-Q objects
+            num_workers=
+            0,  # Avoid multiprocessing to prevent pickling issues with CUDA-Q objects
         )
 
     def generate(self, idx=None, ngates=None):

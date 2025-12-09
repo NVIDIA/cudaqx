@@ -34,8 +34,10 @@ class MinEnergyCallback(Callback):
         # Get energies from the buffer
         if len(pl_module.buffer) > 0:
             # Check recent energies added to buffer
-            for i in range(max(0, len(pl_module.buffer) -
-                               pl_module.num_samples), len(pl_module.buffer)):
+            for i in range(
+                    max(0,
+                        len(pl_module.buffer) - pl_module.num_samples),
+                    len(pl_module.buffer)):
                 seq, energy = pl_module.buffer.buf[i]
                 if isinstance(energy, torch.Tensor):
                     energy = energy.item()
@@ -44,19 +46,17 @@ class MinEnergyCallback(Callback):
                     self.min_indices = seq
 
             self.min_energy_history.append(self.min_energy)
-            pl_module.log(
-                "best energy",
-                self.min_energy,
-                prog_bar=False,
-                on_epoch=True,
-                on_step=False)
+            pl_module.log("best energy",
+                          self.min_energy,
+                          prog_bar=False,
+                          on_epoch=True,
+                          on_step=False)
             for key, value in pl_module.benchmark_energy.items():
-                pl_module.log(
-                    f"best energy - {key}",
-                    self.min_energy - value,
-                    prog_bar=False,
-                    on_epoch=True,
-                    on_step=False)
+                pl_module.log(f"best energy - {key}",
+                              self.min_energy - value,
+                              prog_bar=False,
+                              on_epoch=True,
+                              on_step=False)
 
     def get_results(self):
         """Get the minimum energy and corresponding indices.
@@ -82,13 +82,7 @@ class TrajectoryCallback(Callback):
         self.trajectory_file_path = trajectory_file_path
         self.trajectory_data = []
 
-    def on_train_batch_end(
-            self,
-            trainer,
-            pl_module,
-            outputs,
-            batch,
-            batch_idx):
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
         """Record trajectory data after each training batch.
 
         Args:
@@ -135,7 +129,8 @@ class TrajectoryCallback(Callback):
         os.makedirs(os.path.dirname(self.trajectory_file_path), exist_ok=True)
         if os.path.exists(self.trajectory_file_path):
             print(
-                f"Warning: Overwriting existing trajectory file at {self.trajectory_file_path}")
+                f"Warning: Overwriting existing trajectory file at {self.trajectory_file_path}"
+            )
 
         with open(self.trajectory_file_path, 'w') as f:
             for data in self.trajectory_data:

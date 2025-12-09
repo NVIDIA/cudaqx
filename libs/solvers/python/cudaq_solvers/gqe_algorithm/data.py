@@ -1,3 +1,11 @@
+# ============================================================================ #
+# Copyright (c) 2025 NVIDIA Corporation & Affiliates.                          #
+# All rights reserved.                                                         #
+#                                                                              #
+# This source code and the accompanying materials are made available under     #
+# the terms of the Apache License 2.0 which accompanies this distribution.     #
+# ============================================================================ #
+
 from collections import deque
 from torch.utils.data import Dataset
 import sys
@@ -5,6 +13,7 @@ import pickle
 
 
 class ReplayBuffer:
+
     def __init__(self, size=sys.maxsize, capacity=1000000):
         self.size = size
         self.buf = deque(maxlen=capacity)
@@ -31,6 +40,7 @@ class ReplayBuffer:
 
 
 class BufferDataset(Dataset):
+
     def __init__(self, buffer: ReplayBuffer, repetition):
         self.buffer = buffer
         self.repetition = repetition

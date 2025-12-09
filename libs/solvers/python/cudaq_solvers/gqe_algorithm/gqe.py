@@ -221,7 +221,7 @@ def __internal_run_gqe(cfg: ConfigDict, pipeline, pool):
         tuple: (minimum energy found, corresponding operator indices)
     """
     from .callbacks import MinEnergyCallback, TrajectoryCallback
-    
+
     # Configure trainer kwargs
     trainer_kwargs = {
         "accelerator": "auto",
@@ -235,11 +235,11 @@ def __internal_run_gqe(cfg: ConfigDict, pipeline, pool):
         "log_every_n_steps": 1,
         "num_sanity_val_steps": 0,  # Disable validation sanity checks
     }
-    
+
     # Merge user-provided trainer kwargs
     if hasattr(cfg, 'trainer_kwargs') and cfg.trainer_kwargs:
         trainer_kwargs.update(cfg.trainer_kwargs)
-    
+
     # Set up logging
     if cfg.use_lightning_logging:
         if cfg.lightning_logger is None:
@@ -249,45 +249,45 @@ def __internal_run_gqe(cfg: ConfigDict, pipeline, pool):
         trainer_kwargs["logger"] = cfg.lightning_logger
     else:
         trainer_kwargs["logger"] = False
-    
+
     # Set up callbacks
     callbacks = []
-    
+
     # MinEnergyCallback is required for returning results
     min_energy_callback = MinEnergyCallback()
     callbacks.append(min_energy_callback)
-    
+
     # Add trajectory callback if requested
     if cfg.save_trajectory:
         trajectory_callback = TrajectoryCallback(cfg.trajectory_file_path)
         callbacks.append(trajectory_callback)
-    
+
     # Add user-provided callbacks
     if hasattr(cfg, 'callbacks') and cfg.callbacks:
         callbacks.extend(cfg.callbacks)
-    
+
     trainer_kwargs["callbacks"] = callbacks
-    
+
     # Create trainer
     trainer = L.Trainer(**trainer_kwargs)
-        
+
     # Train the model
     trainer.fit(pipeline)
-    
+
     # Get results from callback
     min_energy, min_indices = min_energy_callback.get_results()
-    
+
     # Convert indices to list if needed
     if min_indices is not None and isinstance(min_indices, torch.Tensor):
         min_indices = min_indices.cpu().numpy().tolist()
-    
+
     # Log final circuit if logging is enabled
     if cfg.use_lightning_logging and min_indices is not None:
         trainer.logger.log_metrics({'circuit': json.dumps(min_indices)})
-    
+
     # Clean up
     pipeline.set_cost(None)
-    
+
     return min_energy, min_indices
 
 
@@ -335,6 +335,7 @@ def gqe(cost, pool, config=None, **kwargs):
     cudaqTarget = cudaq.get_target()
     numQPUs = cudaqTarget.num_qpus()
     factory = Factory()
-    model = GPT2(cfg.small, cfg.vocab_size) if 'model' not in kwargs else kwargs['model']
+    model = GPT2(cfg.small,
+                 cfg.vocab_size) if 'model' not in kwargs else kwargs['model']
     pipeline = Pipeline(cfg, cost, pool, model, factory, numQPUs=numQPUs)
     return __internal_run_gqe(cfg, pipeline, pool)

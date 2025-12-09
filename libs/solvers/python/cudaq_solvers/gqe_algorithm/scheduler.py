@@ -25,7 +25,7 @@ class TemperatureScheduler(ABC):
             float: Current inverse temperature (beta)
         """
         pass
-    
+
     @abstractmethod
     def update(self, **kwargs):
         """Update scheduler state.
@@ -143,12 +143,12 @@ class VarBasedScheduler(TemperatureScheduler):
         """
         energies = kwargs["energies"]
         current_var = energies.var().item()
-        
+
         # Adjust temperature based on variance
         if current_var > self.target_var:
             self.current_temperature += self.delta  # Increase inverse temperature (decrease T)
         else:
             self.current_temperature -= self.delta  # Decrease inverse temperature (increase T)
-        
+
         # Keep temperature positive
         self.current_temperature = max(self.current_temperature, 0.01)

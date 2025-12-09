@@ -20,13 +20,8 @@ class Loss(ABC, torch.nn.Module):
     """
 
     @abstractmethod
-    def compute(
-            self,
-            energies,
-            gate_logits,
-            gate_indices,
-            log_values,
-            **kwargs):
+    def compute(self, energies, gate_logits, gate_indices, log_values,
+                **kwargs):
         pass
 
 
@@ -49,18 +44,12 @@ class ExpLogitMatching(Loss):
         self.energy_offset = energy_offset
         self.loss_fn = torch.nn.MSELoss()
 
-    def compute(
-            self,
-            energies,
-            gate_logits,
-            gate_indices,
-            log_values,
-            **kwargs):
-        logits_tensor = torch.gather(
-            gate_logits, 2, gate_indices.unsqueeze(-1)).squeeze(-1)
+    def compute(self, energies, gate_logits, gate_indices, log_values,
+                **kwargs):
+        logits_tensor = torch.gather(gate_logits, 2,
+                                     gate_indices.unsqueeze(-1)).squeeze(-1)
         mean_logits = torch.mean(logits_tensor, 1)
-        log_values["mean_logits"] = torch.mean(
-            mean_logits - self.energy_offset)
+        log_values["mean_logits"] = torch.mean(mean_logits - self.energy_offset)
         mean_logits = torch.mean(logits_tensor, 1)
         device = mean_logits.device
         return self.loss_fn(
@@ -89,15 +78,10 @@ class GFlowLogitMatching(Loss):
         self.normalization = 10**-5
         self.param = torch.nn.Parameter(torch.tensor([0.0]))
 
-    def compute(
-            self,
-            energies,
-            gate_logits,
-            gate_indices,
-            log_values,
-            **kwargs):
-        logits_tensor = torch.gather(
-            gate_logits, 2, gate_indices.unsqueeze(-1)).squeeze(-1)
+    def compute(self, energies, gate_logits, gate_indices, log_values,
+                **kwargs):
+        logits_tensor = torch.gather(gate_logits, 2,
+                                     gate_indices.unsqueeze(-1)).squeeze(-1)
         mean_logits = torch.mean(logits_tensor, 1)
         energy_offset = self.energy_offset + self.param / self.normalization
         log_values["energy_offset"] = energy_offset
@@ -119,16 +103,14 @@ class GRPOLoss(Loss):
         self.old_log_probs = None
         self.advantages = None
 
-    def compute(
-            self,
-            energies,
-            gate_logits,
-            gate_indices,
-            log_values=None,
-            **kwargs):
-        current_log_probs = self.log_prob(
-            gate_indices, gate_logits, kwargs["inverse_temperature"]
-        )
+    def compute(self,
+                energies,
+                gate_logits,
+                gate_indices,
+                log_values=None,
+                **kwargs):
+        current_log_probs = self.log_prob(gate_indices, gate_logits,
+                                          kwargs["inverse_temperature"])
 
         # nagative log likelihood loss
         win_id = torch.argmin(energies)
@@ -147,8 +129,8 @@ class GRPOLoss(Loss):
             clipped_ratio = 1
         else:
             ratio = torch.exp(current_log_probs - self.old_log_probs)
-            clipped_ratio = torch.clamp(
-                ratio, 1. - self.clip_ratio, 1. + self.clip_ratio)
+            clipped_ratio = torch.clamp(ratio, 1. - self.clip_ratio,
+                                        1. + self.clip_ratio)
 
         loss -= (clipped_ratio * self.advantages.unsqueeze(1)).mean()
         return loss
@@ -156,14 +138,8 @@ class GRPOLoss(Loss):
     def calc_advantage(self, energies):
         return (energies.mean() - energies) / (energies.std() + 1e-8)
 
-    def log_prob(
-            self,
-            gate_seqs,
-            gate_logits,
-            inverse_temperature):
+    def log_prob(self, gate_seqs, gate_logits, inverse_temperature):
         log_probs = torch.gather(
-            F.log_softmax(-inverse_temperature * gate_logits, dim=-1),
-            2,
-            gate_seqs.unsqueeze(-1)
-        ).squeeze(-1)
+            F.log_softmax(-inverse_temperature * gate_logits, dim=-1), 2,
+            gate_seqs.unsqueeze(-1)).squeeze(-1)
         return log_probs

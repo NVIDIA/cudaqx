@@ -111,8 +111,7 @@ def test_variance_scheduler():
 
     # Simulate low variance scenario (should decrease temperature)
     scheduler2 = VarBasedScheduler(initial=2.0, delta=0.1, target_var=0.5)
-    low_var_energies = torch.tensor(
-        [1.0, 1.1, 1.05, 0.95, 1.02])  # var ≈ 0.003
+    low_var_energies = torch.tensor([1.0, 1.1, 1.05, 0.95, 1.02])  # var ≈ 0.003
     initial_temp2 = scheduler2.current_temperature
     scheduler2.update(energies=low_var_energies)
     temp_after_low_var = scheduler2.current_temperature
