@@ -509,6 +509,12 @@ CUDA-QX provides several pre-built operator pools for ADAPT-VQE:
     single and double excitations, regardless of their occupied/virtual status in the reference state.
     Capable of capturing both dynamic and static (strong) correlation
     but at the cost of increased circuit depth and parameter count.
+* **upccgsd**: UCC generalized singles and paired doubles.
+    A structured, lower-depth variant of UCCGSD in which double excitations are restricted to paired electron 
+    transfers between spatial orbitals, following the UpCC (pair-cluster) construction.
+    While less expressive than full UCCGSD, it retains generalized spin-preserving singles 
+    and the most physically relevant pair-correlation channels, substantially reducing circuit depth and parameter count.
+    This makes UpCCGSD attractive for larger systems or hardware-constrained regimes where UCCGSD is too costly.
 * **qaoa**: QAOA mixer excitation operators
     It generates all possible single-qubit X and Y terms, along with all possible 
     two-qubit interaction terms (XX, YY, XY, YX, XZ, ZX, YZ, ZY) across every pair of qubits. 
@@ -537,6 +543,10 @@ CUDA-QX provides several pre-built operator pools for ADAPT-VQE:
         "uccgsd",
         num_orbitals=molecule.n_orbitals
     )
+    upccgsd_ops = solvers.get_operator_pool(
+        "upccgsd",                      
+        num_orbitals=molecule.n_orbitals
+)
 
 Available Ansatz
 ^^^^^^^^^^^^^^^^^^
@@ -545,6 +555,7 @@ CUDA-QX provides several state preparations ansatz for VQE.
 
 * **uccsd**: UCCSD operators
 * **uccgsd**: UCC generalized singles and doubles
+* **upccgsd**: UCC generalized singles and paired doubles
 
 .. code-block:: python
 
@@ -585,6 +596,26 @@ CUDA-QX provides several state preparations ansatz for VQE.
         for i in range(numElectrons):
             x(q[i])
         solvers.stateprep.uccgsd(q, thetas, pauliWordsList, coefficientsList)
+    
+    # Using UpCCGSD ansatz
+    geometry = [('H', (0., 0., 0.)), ('H', (0., 0., .7474))]
+    molecule = solvers.create_molecule(geometry, 'sto-3g', 0, 0, casci=True)
+
+    numQubits = molecule.n_orbitals * 2
+    numElectrons = molecule.n_electrons
+
+    # Get grouped Pauli words and coefficients from UpCCGSD pool
+    pauliWordsList, coefficientsList = solvers.stateprep.get_upccgsd_pauli_lists(
+        numQubits, only_singles=False, only_doubles=False)
+    
+    @cudaq.kernel
+    def ansatz(numQubits: int, numElectrons: int, thetas: list[float],
+               pauliWordsList: list[list[cudaq.pauli_word]],
+               coefficientsList: list[list[float]]):
+        q = cudaq.qvector(numQubits)
+        for i in range(numElectrons):
+            x(q[i])
+        solvers.stateprep.upccgsd(q, thetas, pauliWordsList, coefficientsList)
 
 
 Algorithm Parameters
