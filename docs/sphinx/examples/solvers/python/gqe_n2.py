@@ -64,7 +64,13 @@ torch.backends.cudnn.benchmark = False
 
 # Create the molecular hamiltonian
 geometry = [('N', (0., 0., 0.)), ('N', (0., 0., 1.1))]
-molecule = solvers.create_molecule(geometry, 'sto-3g', 0, 0, nele_cas=6, norb_cas=6, casci=True)
+molecule = solvers.create_molecule(geometry,
+                                   'sto-3g',
+                                   0,
+                                   0,
+                                   nele_cas=6,
+                                   norb_cas=6,
+                                   casci=True)
 
 spin_ham = molecule.hamiltonian
 n_qubits = molecule.n_orbitals * 2
@@ -127,7 +133,7 @@ def cost(sampled_ops: list[cudaq.SpinOperator], **kwargs):
 cfg = get_default_config()
 cfg.use_lightning_logging = True
 logger = CSVLogger(save_dir="gqe_n2_logs", name="gqe")
-cfg.max_iters = 50 # For full training, set to more than 1000
+cfg.max_iters = 50  # For full training, set to more than 1000
 cfg.ngates = 60
 cfg.num_samples = 50
 cfg.buffer_size = 50
@@ -155,4 +161,3 @@ if not args.mpi or cudaq.mpi.rank() == 0:
 
 if args.mpi:
     cudaq.mpi.finalize()
-
