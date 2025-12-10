@@ -127,7 +127,7 @@ def cost(sampled_ops: list[cudaq.SpinOperator], **kwargs):
 cfg = get_default_config()
 cfg.use_lightning_logging = True
 logger = CSVLogger(save_dir="gqe_n2_logs", name="gqe")
-cfg.max_iters = 1500
+cfg.max_iters = 50 # For full training, set to more than 1000
 cfg.ngates = 60
 cfg.num_samples = 50
 cfg.buffer_size = 50
