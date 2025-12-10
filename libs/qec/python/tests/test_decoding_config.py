@@ -361,5 +361,144 @@ def test_configure_invalid_decoders():
     assert ret != 0
 
 
+# srelay_bp_config tests
+def test_srelay_bp_config_heterogeneous_map():
+    """Test srelay_bp_config to_heterogeneous_map and from_heterogeneous_map"""
+    srelay = qec.qecrt.config.srelay_bp_config()
+    srelay.pre_iter = 5
+    srelay.num_sets = 10
+    srelay.stopping_criterion = "NConv"
+    srelay.stop_nconv = 10
+
+    # Test to_heterogeneous_map
+    map = srelay.to_heterogeneous_map()
+    assert "pre_iter" in map
+    assert "num_sets" in map
+    assert "stopping_criterion" in map
+    assert "stop_nconv" in map
+    assert map["pre_iter"] == 5
+    assert map["num_sets"] == 10
+    assert map["stopping_criterion"] == "NConv"
+    assert map["stop_nconv"] == 10
+
+    # Test from_heterogeneous_map
+    srelay2 = qec.qecrt.config.srelay_bp_config.from_heterogeneous_map(map)
+    assert srelay2.pre_iter == 5
+    assert srelay2.num_sets == 10
+    assert srelay2.stopping_criterion == "NConv"
+    assert srelay2.stop_nconv == 10
+
+
+def test_srelay_bp_config_partial_fields():
+    """Test srelay_bp_config with partial fields"""
+    srelay = qec.qecrt.config.srelay_bp_config()
+    srelay.pre_iter = 3
+    # Leave other fields as None
+
+    map = srelay.to_heterogeneous_map()
+    assert "pre_iter" in map
+    assert "num_sets" not in map
+    assert "stopping_criterion" not in map
+    assert "stop_nconv" not in map
+
+    srelay2 = qec.qecrt.config.srelay_bp_config.from_heterogeneous_map(map)
+    assert srelay2.pre_iter == 3
+    assert srelay2.num_sets is None
+    assert srelay2.stopping_criterion is None
+    assert srelay2.stop_nconv is None
+
+
+def test_nv_qldpc_decoder_config_srelay_serialization():
+    """Test nv_qldpc_decoder_config with srelay_config serialization"""
+    nv = qec.nv_qldpc_decoder_config()
+    nv.use_sparsity = True
+    nv.max_iterations = 50
+    nv.srelay_config = qec.qecrt.config.srelay_bp_config()
+    nv.srelay_config.pre_iter = 5
+    nv.srelay_config.num_sets = 10
+    nv.srelay_config.stopping_criterion = "NConv"
+    nv.srelay_config.stop_nconv = 10
+
+    # Test to_heterogeneous_map with srelay_config
+    map = nv.to_heterogeneous_map()
+    assert "srelay_config" in map
+    srelay_map = map["srelay_config"]
+    assert "pre_iter" in srelay_map
+    assert "num_sets" in srelay_map
+    assert srelay_map["pre_iter"] == 5
+    assert srelay_map["num_sets"] == 10
+
+    # Test from_heterogeneous_map with srelay_config as heterogeneous_map (Python round-trip)
+    nv2 = qec.nv_qldpc_decoder_config.from_heterogeneous_map(map)
+    assert nv2.srelay_config is not None
+    assert nv2.srelay_config.pre_iter == 5
+    assert nv2.srelay_config.num_sets == 10
+    assert nv2.srelay_config.stopping_criterion == "NConv"
+    assert nv2.srelay_config.stop_nconv == 10
+
+
+# sliding_window_config tests
+def test_sliding_window_config_single_error_lut():
+    """Test sliding_window_config with single_error_lut inner decoder"""
+    sw_config = qec.qecrt.config.sliding_window_config()
+    sw_config.window_size = 2
+    sw_config.step_size = 1
+    sw_config.num_syndromes_per_round = 10
+    sw_config.straddle_start_round = True
+    sw_config.straddle_end_round = False
+    sw_config.error_rate_vec = [0.1, 0.2, 0.3]
+    sw_config.inner_decoder_name = "single_error_lut"
+    sw_config.single_error_lut_params = qec.qecrt.config.single_error_lut_config()
+
+    # Test to_heterogeneous_map
+    map = sw_config.to_heterogeneous_map()
+    # Note: inner_decoder_params may not be present if it's empty (single_error_lut_config has no fields)
+    # The implementation only inserts inner_decoder_params if it's not empty
+    # So we need to manually add it for the round-trip test
+    if "inner_decoder_params" not in map:
+        map["inner_decoder_params"] = {}
+
+    # Test from_heterogeneous_map
+    sw_config2 = qec.qecrt.config.sliding_window_config.from_heterogeneous_map(map)
+    assert sw_config2.inner_decoder_name == "single_error_lut"
+    assert sw_config2.single_error_lut_params is not None
+    assert sw_config2.multi_error_lut_params is None
+    assert sw_config2.nv_qldpc_decoder_params is None
+
+
+def test_sliding_window_config_nv_qldpc_decoder():
+    """Test sliding_window_config with nv-qldpc-decoder inner decoder"""
+    if not is_nv_qldpc_decoder_available():
+        pytest.skip("nv-qldpc-decoder is not available")
+
+    sw_config = qec.qecrt.config.sliding_window_config()
+    sw_config.window_size = 2
+    sw_config.step_size = 1
+    sw_config.num_syndromes_per_round = 10
+    sw_config.straddle_start_round = True
+    sw_config.straddle_end_round = False
+    sw_config.error_rate_vec = [0.1, 0.2, 0.3]
+    sw_config.inner_decoder_name = "nv-qldpc-decoder"
+    sw_config.nv_qldpc_decoder_params = qec.nv_qldpc_decoder_config()
+    sw_config.nv_qldpc_decoder_params.use_sparsity = True
+    sw_config.nv_qldpc_decoder_params.max_iterations = 50
+
+    # Test to_heterogeneous_map
+    map = sw_config.to_heterogeneous_map()
+    assert "inner_decoder_params" in map
+    inner_map = map["inner_decoder_params"]
+    assert "use_sparsity" in inner_map
+    assert "max_iterations" in inner_map
+
+    # Test from_heterogeneous_map
+    sw_config2 = qec.qecrt.config.sliding_window_config.from_heterogeneous_map(map)
+    assert sw_config2.inner_decoder_name == "nv-qldpc-decoder"
+    assert sw_config2.nv_qldpc_decoder_params is not None
+    assert sw_config2.nv_qldpc_decoder_params.use_sparsity is True
+    assert sw_config2.nv_qldpc_decoder_params.max_iterations == 50
+    assert sw_config2.single_error_lut_params is None
+    assert sw_config2.multi_error_lut_params is None
+
+
 if __name__ == "__main__":
     pytest.main()
