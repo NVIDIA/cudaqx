@@ -14,6 +14,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <variant>
 #include <vector>
 
 // TensorRT headers
@@ -101,208 +102,482 @@ static Logger gLogger;
 /// not both.
 namespace cudaq::qec {
 
+// ============================================================================
+// Executor implementations (internal)
+// ============================================================================
+
+namespace {
+// Traditional TensorRT execution without CUDA graphs
+struct TraditionalExecutor {
+  void execute(nvinfer1::IExecutionContext *context, cudaStream_t stream,
+               void *input_buffer, void *output_buffer, int input_index,
+               int output_index, nvinfer1::ICudaEngine *engine) {
+    context->setTensorAddress(engine->getIOTensorName(input_index),
+                              input_buffer);
+    context->setTensorAddress(engine->getIOTensorName(output_index),
+                              output_buffer);
+    context->enqueueV3(stream);
+    HANDLE_CUDA_ERROR(cudaStreamSynchronize(stream));
+  }
+};
+
+// CUDA graph-based execution for optimized performance
+struct CudaGraphExecutor {
+  bool captured = false;
+  cudaGraph_t graph;
+  cudaGraphExec_t graph_exec;
+
+  void execute(nvinfer1::IExecutionContext *context, cudaStream_t stream,
+               void *input_buffer, void *output_buffer, int input_index,
+               int output_index, nvinfer1::ICudaEngine *engine) {
+
+    if (!captured) {
+      CUDAQ_INFO("Capturing CUDA graph for TensorRT inference optimization");
+
+      HANDLE_CUDA_ERROR(
+          cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal));
+      context->setTensorAddress(engine->getIOTensorName(input_index),
+                                input_buffer);
+      context->setTensorAddress(engine->getIOTensorName(output_index),
+                                output_buffer);
+      context->enqueueV3(stream);
+      HANDLE_CUDA_ERROR(cudaStreamEndCapture(stream, &graph));
+
+      HANDLE_CUDA_ERROR(cudaGraphInstantiate(&graph_exec, graph, 0));
+      captured = true;
+
+      CUDAQ_INFO("CUDA graph captured successfully");
+    }
+
+    HANDLE_CUDA_ERROR(cudaGraphLaunch(graph_exec, stream));
+    HANDLE_CUDA_ERROR(cudaStreamSynchronize(stream));
+  }
+
+  ~CudaGraphExecutor() {
+    if (captured) {
+      HANDLE_CUDA_ERROR_NO_THROW(cudaGraphExecDestroy(graph_exec));
+      HANDLE_CUDA_ERROR_NO_THROW(cudaGraphDestroy(graph));
+    }
+  }
+};
+
+// Check if CUDA graphs are supported for this engine
+bool supports_cuda_graphs(const nvinfer1::ICudaEngine *engine) {
+  // Check for dynamic shapes
+  for (int i = 0; i < engine->getNbIOTensors(); ++i) {
+    const char *name = engine->getIOTensorName(i);
+    auto dims = engine->getTensorShape(name);
+    for (int j = 0; j < dims.nbDims; ++j) {
+      if (dims.d[j] == -1) {
+        CUDAQ_INFO(
+            "Dynamic shape detected in tensor '{}', CUDA graphs not supported",
+            name);
+        return false;
+      }
+    }
+  }
+
+  // Check for multiple optimization profiles (often used with dynamic shapes)
+  if (engine->getNbOptimizationProfiles() > 1) {
+    CUDAQ_INFO(
+        "Multiple optimization profiles detected, CUDA graphs not supported");
+    return false;
+  }
+
+  return true;
+}
+} // anonymous namespace
+
+// ============================================================================
+// trt_decoder implementation
+// ============================================================================
+
 class trt_decoder : public decoder {
 private:
-  // TensorRT-specific members
-  std::unique_ptr<nvinfer1::ICudaEngine> engine_;
-  std::unique_ptr<nvinfer1::IExecutionContext> context_;
-  int input_index_ = 0;
-  int output_index_ = 0;
-  int input_size_ = 0;
-  int output_size_ = 0;
-  void *buffers_[2] = {nullptr, nullptr};
-  cudaStream_t stream_;
-  bool initialized_ = false;
+  // Forward declaration, of implementation
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
+
+  // True when decoder is fully configured and ready for inference
+  bool decoder_ready_ = false;
+
+  // Batch dimension from TensorRT model (first dimension of input tensor)
+  size_t model_batch_size_ = 1;
+
+  // Per-sample sizes (without batch dimension)
+  size_t syndrome_size_per_sample_ = 0;
+  size_t output_size_per_sample_ = 0;
 
 public:
   trt_decoder(const cudaqx::tensor<uint8_t> &H,
-              const cudaqx::heterogeneous_map &params)
-      : decoder(H), initialized_(false) {
-    // Decoder-specific constructor arguments can be placed in `params`.
+              const cudaqx::heterogeneous_map &params);
 
-    try {
-      // Validate parameters
-      trt_decoder_internal::validate_trt_decoder_parameters(params);
+  virtual decoder_result decode(const std::vector<float_t> &syndrome) override;
 
-      // Check if CUDA is available
-      check_cuda();
+  virtual std::vector<decoder_result>
+  decode_batch(const std::vector<std::vector<float_t>> &syndromes) override;
 
-      bool has_engine_path = params.contains("engine_load_path");
+  virtual ~trt_decoder();
 
-      if (has_engine_path) {
-        // Load pre-built TensorRT engine directly
-        std::string engine_path = params.get<std::string>("engine_load_path");
-        auto engineData = trt_decoder_internal::load_file(engine_path);
-
-        // Create runtime and deserialize engine
-        auto runtime = std::unique_ptr<nvinfer1::IRuntime>(
-            nvinfer1::createInferRuntime(gLogger));
-        if (!runtime) {
-          throw std::runtime_error("Failed to create TensorRT runtime");
-        }
-
-        engine_ = std::unique_ptr<nvinfer1::ICudaEngine>(
-            runtime->deserializeCudaEngine(engineData.data(),
-                                           engineData.size()));
-        if (!engine_) {
-          throw std::runtime_error(
-              "Failed to deserialize TensorRT engine from: " + engine_path);
-        }
-      } else {
-        // Load ONNX model and build engine
-        std::string onnx_model_path = params.get<std::string>("onnx_load_path");
-        engine_ = trt_decoder_internal::build_engine_from_onnx(onnx_model_path,
-                                                               params, gLogger);
-
-        // Save engine if requested
-        if (params.contains("engine_save_path")) {
-          std::string engine_save_path =
-              params.get<std::string>("engine_save_path");
-          trt_decoder_internal::save_engine_to_file(engine_.get(),
-                                                    engine_save_path);
-        }
-      }
-
-      // Create execution context
-      context_ = std::unique_ptr<nvinfer1::IExecutionContext>(
-          engine_->createExecutionContext());
-      if (!context_) {
-        throw std::runtime_error("Failed to create execution context");
-      }
-
-      // Get input/output info
-      int n_bindings = engine_->getNbIOTensors();
-      input_index_ = -1;
-      output_index_ = -1;
-      for (int i = 0; i < n_bindings; ++i) {
-        const char *tensorName = engine_->getIOTensorName(i);
-        if (engine_->getTensorIOMode(tensorName) ==
-            nvinfer1::TensorIOMode::kINPUT) {
-          input_index_ = i;
-        } else {
-          output_index_ = i;
-        }
-      }
-
-      if (input_index_ == -1 || output_index_ == -1) {
-        throw std::runtime_error("Failed to identify input/output tensors");
-      }
-
-      auto inputDims =
-          engine_->getTensorShape(engine_->getIOTensorName(input_index_));
-      input_size_ = 1;
-      for (int j = 0; j < inputDims.nbDims; ++j)
-        input_size_ *= inputDims.d[j];
-
-      auto outputDims =
-          engine_->getTensorShape(engine_->getIOTensorName(output_index_));
-      output_size_ = 1;
-      for (int j = 0; j < outputDims.nbDims; ++j)
-        output_size_ *= outputDims.d[j];
-
-      // Allocate GPU buffers
-      HANDLE_CUDA_ERROR(
-          cudaMalloc(&buffers_[input_index_], input_size_ * sizeof(float)));
-      HANDLE_CUDA_ERROR(
-          cudaMalloc(&buffers_[output_index_], output_size_ * sizeof(float)));
-
-      // Create CUDA stream
-      HANDLE_CUDA_ERROR(cudaStreamCreate(&stream_));
-
-      initialized_ = true;
-
-    } catch (const std::exception &e) {
-      CUDAQ_WARN("TensorRT initialization failed: {}", e.what());
-      initialized_ = false;
-    }
-  }
-
-  virtual decoder_result decode(const std::vector<float_t> &syndrome) override {
-    decoder_result result{false, std::vector<float_t>(output_size_, 0.0)};
-
-    if (!initialized_) {
-      // Return unconverged result if not properly initialized
-      return result;
-    }
-
-    try {
-      // Preprocess syndrome data for TensorRT input
-      // Ensure input size matches expected TensorRT input size
-      assert(syndrome.size() == input_size_);
-      std::vector<float> input_host(syndrome.begin(), syndrome.end());
-
-      // Copy input to GPU
-      HANDLE_CUDA_ERROR(cudaMemcpy(buffers_[input_index_], input_host.data(),
-                                   input_size_ * sizeof(float),
-                                   cudaMemcpyHostToDevice));
-
-      // Set tensor addresses for TensorRT V1 API
-      context_->setTensorAddress(engine_->getIOTensorName(input_index_),
-                                 buffers_[input_index_]);
-      context_->setTensorAddress(engine_->getIOTensorName(output_index_),
-                                 buffers_[output_index_]);
-
-      // Run inference
-      context_->enqueueV3(stream_);
-      HANDLE_CUDA_ERROR(cudaStreamSynchronize(stream_));
-
-      // Copy output back from GPU
-      std::vector<float> output_host(output_size_);
-      HANDLE_CUDA_ERROR(cudaMemcpy(output_host.data(), buffers_[output_index_],
-                                   output_size_ * sizeof(float),
-                                   cudaMemcpyDeviceToHost));
-
-      // Postprocess output to get error probabilities
-      std::transform(output_host.begin(), output_host.end(),
-                     result.result.begin(),
-                     [](float val) { return static_cast<float_t>(val); });
-
-      result.converged = true;
-
-    } catch (const std::exception &e) {
-      CUDAQ_WARN("TensorRT inference failed: {}", e.what());
-      result.converged = false;
-    }
-
-    return result;
-  }
-
-  virtual ~trt_decoder() {
-    // Clean up TensorRT resources
-    if (initialized_) {
-      HANDLE_CUDA_ERROR(cudaStreamDestroy(stream_));
-      HANDLE_CUDA_ERROR(cudaFree(buffers_[input_index_]));
-      HANDLE_CUDA_ERROR(cudaFree(buffers_[output_index_]));
-      // TensorRT engine and context will be automatically destroyed by
-      // unique_ptr
-    }
-  }
-
-private:
-  void check_cuda() {
-    int deviceCount = 0;
-    cudaError_t error = cudaGetDeviceCount(&deviceCount);
-    if (error != cudaSuccess || deviceCount == 0) {
-      throw std::runtime_error(
-          "CUDA is not available or no CUDA-capable devices found. "
-          "TensorRT decoder requires CUDA to be installed and at least one "
-          "CUDA-capable GPU. Error: " +
-          std::string(cudaGetErrorString(error)));
-    }
-  }
-
-public:
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       trt_decoder, static std::unique_ptr<decoder> create(
                        const cudaqx::tensor<uint8_t> &H,
                        const cudaqx::heterogeneous_map &params) {
         return std::make_unique<trt_decoder>(H, params);
       })
+
+private:
+  void check_cuda();
 };
 
-} // namespace cudaq::qec
+// ============================================================================
+// PIMPL Implementation struct
+// ============================================================================
 
-namespace cudaq::qec {
+struct trt_decoder::Impl {
+  // TensorRT resources
+  std::unique_ptr<nvinfer1::ICudaEngine> engine;
+  std::unique_ptr<nvinfer1::IExecutionContext> context;
+  int input_index = 0;
+  int output_index = 0;
+  int input_size = 0;
+  int output_size = 0;
+  void *buffers[2] = {nullptr, nullptr};
+  cudaStream_t stream;
+
+  // Executor (chosen once at construction, never changes)
+  std::variant<TraditionalExecutor, CudaGraphExecutor> executor;
+
+  // Execute inference (variant dispatch)
+  void execute_inference() {
+    std::visit(
+        [&](auto &exec) {
+          exec.execute(context.get(), stream, buffers[input_index],
+                       buffers[output_index], input_index, output_index,
+                       engine.get());
+        },
+        executor);
+  }
+
+  ~Impl() {
+    if (buffers[input_index]) {
+      HANDLE_CUDA_ERROR_NO_THROW(cudaFree(buffers[input_index]));
+    }
+    if (buffers[output_index]) {
+      HANDLE_CUDA_ERROR_NO_THROW(cudaFree(buffers[output_index]));
+    }
+    HANDLE_CUDA_ERROR_NO_THROW(cudaStreamDestroy(stream));
+  }
+};
+
+// ============================================================================
+// trt_decoder method implementations
+// ============================================================================
+
+trt_decoder::trt_decoder(const cudaqx::tensor<uint8_t> &H,
+                         const cudaqx::heterogeneous_map &params)
+    : decoder(H), decoder_ready_(false) {
+
+  impl_ = std::make_unique<Impl>();
+
+  try {
+    // Validate parameters
+    trt_decoder_internal::validate_trt_decoder_parameters(params);
+
+    // Check if CUDA is available
+    check_cuda();
+
+    bool has_engine_path = params.contains("engine_load_path");
+
+    if (has_engine_path) {
+      // Load pre-built TensorRT engine directly
+      std::string engine_path = params.get<std::string>("engine_load_path");
+      auto engineData = trt_decoder_internal::load_file(engine_path);
+
+      // Create runtime and deserialize engine
+      auto runtime = std::unique_ptr<nvinfer1::IRuntime>(
+          nvinfer1::createInferRuntime(gLogger));
+      if (!runtime) {
+        throw std::runtime_error("Failed to create TensorRT runtime");
+      }
+
+      impl_->engine = std::unique_ptr<nvinfer1::ICudaEngine>(
+          runtime->deserializeCudaEngine(engineData.data(), engineData.size()));
+      if (!impl_->engine) {
+        throw std::runtime_error(
+            "Failed to deserialize TensorRT engine from: " + engine_path);
+      }
+    } else {
+      // Load ONNX model and build engine
+      std::string onnx_model_path = params.get<std::string>("onnx_load_path");
+      impl_->engine = trt_decoder_internal::build_engine_from_onnx(
+          onnx_model_path, params, gLogger);
+
+      // Save engine if requested
+      if (params.contains("engine_save_path")) {
+        std::string engine_save_path =
+            params.get<std::string>("engine_save_path");
+        trt_decoder_internal::save_engine_to_file(impl_->engine.get(),
+                                                  engine_save_path);
+      }
+    }
+
+    // Create execution context
+    impl_->context = std::unique_ptr<nvinfer1::IExecutionContext>(
+        impl_->engine->createExecutionContext());
+    if (!impl_->context) {
+      throw std::runtime_error("Failed to create execution context");
+    }
+
+    // Get input/output info
+    int n_bindings = impl_->engine->getNbIOTensors();
+    impl_->input_index = -1;
+    impl_->output_index = -1;
+    for (int i = 0; i < n_bindings; ++i) {
+      const char *tensorName = impl_->engine->getIOTensorName(i);
+      if (impl_->engine->getTensorIOMode(tensorName) ==
+          nvinfer1::TensorIOMode::kINPUT) {
+        impl_->input_index = i;
+      } else {
+        impl_->output_index = i;
+      }
+    }
+
+    if (impl_->input_index == -1 || impl_->output_index == -1) {
+      throw std::runtime_error("Failed to identify input/output tensors");
+    }
+
+    auto inputDims = impl_->engine->getTensorShape(
+        impl_->engine->getIOTensorName(impl_->input_index));
+
+    // Extract batch size from first dimension
+    // If first dimension is -1, it's dynamic (not supported for batching)
+    if (inputDims.nbDims > 0 && inputDims.d[0] > 0) {
+      model_batch_size_ = static_cast<size_t>(inputDims.d[0]);
+    } else {
+      model_batch_size_ = 1;
+    }
+
+    // Calculate total input size and per-sample size
+    impl_->input_size = 1;
+    for (int j = 0; j < inputDims.nbDims; ++j)
+      impl_->input_size *= inputDims.d[j];
+
+    syndrome_size_per_sample_ = impl_->input_size / model_batch_size_;
+
+    auto outputDims = impl_->engine->getTensorShape(
+        impl_->engine->getIOTensorName(impl_->output_index));
+    impl_->output_size = 1;
+    for (int j = 0; j < outputDims.nbDims; ++j)
+      impl_->output_size *= outputDims.d[j];
+
+    output_size_per_sample_ = impl_->output_size / model_batch_size_;
+
+    CUDAQ_INFO("TensorRT model configuration: batch_size={}, "
+               "syndrome_size_per_sample={}, output_size_per_sample={}",
+               model_batch_size_, syndrome_size_per_sample_,
+               output_size_per_sample_);
+
+    // Allocate GPU buffers
+    HANDLE_CUDA_ERROR(cudaMalloc(&impl_->buffers[impl_->input_index],
+                                 impl_->input_size * sizeof(float)));
+    HANDLE_CUDA_ERROR(cudaMalloc(&impl_->buffers[impl_->output_index],
+                                 impl_->output_size * sizeof(float)));
+
+    // Create CUDA stream
+    HANDLE_CUDA_ERROR(cudaStreamCreate(&impl_->stream));
+
+    // ========================================================================
+    // SELECT EXECUTOR (once, at construction - never changes)
+    // ========================================================================
+    bool use_cuda_graph = true; // default preference
+
+    // User override
+    if (params.contains("use_cuda_graph")) {
+      use_cuda_graph = params.get<bool>("use_cuda_graph");
+      if (!use_cuda_graph) {
+        CUDAQ_INFO("CUDA graphs explicitly disabled by user");
+      }
+    }
+
+    // Check engine compatibility
+    if (use_cuda_graph && !supports_cuda_graphs(impl_->engine.get())) {
+      CUDAQ_WARN("Model has dynamic shapes or multiple profiles, "
+                 "CUDA graphs not supported. Using traditional execution.");
+      use_cuda_graph = false;
+    }
+
+    // Initialize the executor variant (NEVER CHANGES AFTER THIS)
+    if (use_cuda_graph) {
+      impl_->executor = CudaGraphExecutor{};
+      CUDAQ_INFO("TensorRT decoder initialized with CUDA graph execution");
+    } else {
+      impl_->executor = TraditionalExecutor{};
+      CUDAQ_INFO("TensorRT decoder initialized with traditional execution");
+    }
+
+    // Decoder is now fully configured and ready for inference
+    decoder_ready_ = true;
+
+  } catch (const std::exception &e) {
+    CUDAQ_WARN("TensorRT initialization failed: {}", e.what());
+    decoder_ready_ = false;
+  }
+}
+
+decoder_result trt_decoder::decode(const std::vector<float_t> &syndrome) {
+  // Validate syndrome size
+  if (syndrome.size() != syndrome_size_per_sample_) {
+    throw std::runtime_error("Syndrome size mismatch: expected " +
+                             std::to_string(syndrome_size_per_sample_) +
+                             " but got " + std::to_string(syndrome.size()));
+  }
+
+  // For models with batch_size > 1, zero-pad to fill the batch
+  // This allows decode() to work with any batch size by filling unused slots
+  // with zeros
+  if (model_batch_size_ > 1) {
+    CUDAQ_INFO(
+        "Model has batch_size={}, zero-padding single syndrome to fill batch",
+        model_batch_size_);
+
+    // Create a batch with the real syndrome plus zero-padded syndromes
+    std::vector<std::vector<float_t>> padded_batch;
+    padded_batch.reserve(model_batch_size_);
+
+    // First syndrome is the real one
+    padded_batch.push_back(syndrome);
+
+    // Fill remaining batch slots with zero syndromes
+    std::vector<float_t> zero_syndrome(syndrome_size_per_sample_, 0.0f);
+    for (size_t i = 1; i < model_batch_size_; ++i) {
+      padded_batch.push_back(zero_syndrome);
+    }
+
+    auto results = decode_batch(padded_batch);
+
+    // Return only the first result (the real syndrome)
+    return results[0];
+  }
+
+  // For batch_size == 1, directly delegate to decode_batch
+  auto results = decode_batch({syndrome});
+  return results[0];
+}
+
+std::vector<decoder_result>
+trt_decoder::decode_batch(const std::vector<std::vector<float_t>> &syndromes) {
+  // Validate that we have syndromes to decode
+  if (syndromes.empty()) {
+    return {};
+  }
+
+  // Validate all syndrome sizes match expected size
+  for (size_t i = 0; i < syndromes.size(); ++i) {
+    if (syndromes[i].size() != syndrome_size_per_sample_) {
+      throw std::runtime_error(
+          "Syndrome size mismatch at index " + std::to_string(i) +
+          ": expected " + std::to_string(syndrome_size_per_sample_) +
+          " but got " + std::to_string(syndromes[i].size()));
+    }
+  }
+
+  // Check if number of syndromes is an integral multiple of batch size
+  if (syndromes.size() % model_batch_size_ != 0) {
+    throw std::runtime_error(
+        "Number of syndromes (" + std::to_string(syndromes.size()) +
+        ") must be an integral multiple of the model batch size (" +
+        std::to_string(model_batch_size_) + ")");
+  }
+
+  if (!decoder_ready_) {
+    // Return unconverged results if decoder is not ready
+    CUDAQ_WARN(
+        "Decoder not ready for inference, returning {} unconverged results. "
+        "Check decoder initialization logs for errors.",
+        syndromes.size());
+
+    std::vector<decoder_result> results(syndromes.size());
+    for (auto &result : results) {
+      result.converged = false;
+      result.result.resize(output_size_per_sample_, 0.0);
+    }
+    return results;
+  }
+
+  std::vector<decoder_result> results;
+  results.reserve(syndromes.size());
+
+  try {
+    // Process syndromes in batches of model_batch_size_
+    for (size_t batch_start = 0; batch_start < syndromes.size();
+         batch_start += model_batch_size_) {
+
+      // Prepare input buffer with current batch
+      std::vector<float> input_host(impl_->input_size);
+      for (size_t batch_idx = 0; batch_idx < model_batch_size_; ++batch_idx) {
+        const auto &syndrome = syndromes[batch_start + batch_idx];
+        for (size_t i = 0; i < syndrome_size_per_sample_; ++i) {
+          input_host[batch_idx * syndrome_size_per_sample_ + i] =
+              static_cast<float>(syndrome[i]);
+        }
+      }
+
+      // Copy input to GPU
+      HANDLE_CUDA_ERROR(cudaMemcpy(
+          impl_->buffers[impl_->input_index], input_host.data(),
+          impl_->input_size * sizeof(float), cudaMemcpyHostToDevice));
+
+      // Execute inference
+      impl_->execute_inference();
+
+      // Copy output back from GPU
+      std::vector<float> output_host(impl_->output_size);
+      HANDLE_CUDA_ERROR(cudaMemcpy(
+          output_host.data(), impl_->buffers[impl_->output_index],
+          impl_->output_size * sizeof(float), cudaMemcpyDeviceToHost));
+
+      // Extract results for each syndrome in the batch
+      for (size_t batch_idx = 0; batch_idx < model_batch_size_; ++batch_idx) {
+        decoder_result result;
+        result.converged = true;
+        result.result.resize(output_size_per_sample_);
+
+        // Extract output for this batch index
+        std::transform(
+            output_host.begin() + batch_idx * output_size_per_sample_,
+            output_host.begin() + (batch_idx + 1) * output_size_per_sample_,
+            result.result.begin(),
+            [](float val) { return static_cast<float_t>(val); });
+
+        results.push_back(std::move(result));
+      }
+    }
+
+  } catch (const std::exception &e) {
+    CUDAQ_WARN("TensorRT batch inference failed: {}", e.what());
+    // Mark all results as unconverged
+    for (auto &result : results) {
+      result.converged = false;
+    }
+  }
+
+  return results;
+}
+
+trt_decoder::~trt_decoder() = default;
+
+void trt_decoder::check_cuda() {
+  int deviceCount = 0;
+  cudaError_t error = cudaGetDeviceCount(&deviceCount);
+  if (error != cudaSuccess || deviceCount == 0) {
+    throw std::runtime_error(
+        "CUDA is not available or no CUDA-capable devices found. "
+        "TensorRT decoder requires CUDA to be installed and at least one "
+        "CUDA-capable GPU. Error: " +
+        std::string(cudaGetErrorString(error)));
+  }
+}
 
 CUDAQ_REGISTER_TYPE(trt_decoder)
 
