@@ -88,6 +88,22 @@ struct single_error_lut_config {
   from_heterogeneous_map(const cudaqx::heterogeneous_map &map);
 };
 
+struct trt_decoder_config {
+  std::optional<std::string> onnx_load_path;
+  std::optional<std::string> engine_load_path;
+  std::optional<std::string> engine_save_path;
+  std::optional<std::string> precision;
+  std::optional<std::size_t> memory_workspace;
+
+  bool operator==(const trt_decoder_config &) const = default;
+
+  __attribute__((visibility("default"))) cudaqx::heterogeneous_map
+  to_heterogeneous_map() const;
+
+  __attribute__((visibility("default"))) static trt_decoder_config
+  from_heterogeneous_map(const cudaqx::heterogeneous_map &map);
+};
+
 struct sliding_window_config {
   std::optional<std::size_t> window_size;
   std::optional<std::size_t> step_size;
@@ -122,7 +138,8 @@ struct decoder_config {
   std::vector<std::int64_t> O_sparse;
   std::vector<std::int64_t> D_sparse;
   std::variant<single_error_lut_config, multi_error_lut_config,
-               nv_qldpc_decoder_config, sliding_window_config>
+               nv_qldpc_decoder_config, sliding_window_config,
+               trt_decoder_config>
       decoder_custom_args;
 
   bool operator==(const decoder_config &) const = default;
@@ -144,6 +161,10 @@ struct decoder_config {
                    decoder_custom_args)) {
       return std::get<sliding_window_config>(decoder_custom_args)
           .to_heterogeneous_map();
+    } else if (std::holds_alternative<trt_decoder_config>(
+                   decoder_custom_args)) {
+      return std::get<trt_decoder_config>(decoder_custom_args)
+          .to_heterogeneous_map();
     }
     return cudaqx::heterogeneous_map();
   }
@@ -161,6 +182,8 @@ struct decoder_config {
           nv_qldpc_decoder_config::from_heterogeneous_map(map);
     } else if (type == "sliding_window") {
       decoder_custom_args = sliding_window_config::from_heterogeneous_map(map);
+    } else if (type == "trt_decoder") {
+      decoder_custom_args = trt_decoder_config::from_heterogeneous_map(map);
     }
   }
 

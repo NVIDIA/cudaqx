@@ -188,6 +188,31 @@ single_error_lut_config single_error_lut_config::from_heterogeneous_map(
   return config;
 }
 
+// ------ trt_decoder_config ------
+cudaqx::heterogeneous_map trt_decoder_config::to_heterogeneous_map() const {
+  cudaqx::heterogeneous_map config_map;
+
+  INSERT_ARG(onnx_load_path);
+  INSERT_ARG(engine_load_path);
+  INSERT_ARG(engine_save_path);
+  INSERT_ARG(precision);
+  INSERT_ARG(memory_workspace);
+
+  return config_map;
+}
+
+trt_decoder_config trt_decoder_config::from_heterogeneous_map(
+    const cudaqx::heterogeneous_map &map) {
+  trt_decoder_config config;
+  GET_ARG(onnx_load_path);
+  GET_ARG(engine_load_path);
+  GET_ARG(engine_save_path);
+  GET_ARG(precision);
+  GET_ARG(memory_workspace);
+
+  return config;
+}
+
 // ------ sliding_window_config ------
 cudaqx::heterogeneous_map sliding_window_config::to_heterogeneous_map() const {
   cudaqx::heterogeneous_map config_map;
@@ -318,6 +343,18 @@ struct MappingTraits<cudaq::qec::decoding::config::single_error_lut_config> {
 };
 
 template <>
+struct MappingTraits<cudaq::qec::decoding::config::trt_decoder_config> {
+  static void
+  mapping(IO &io, cudaq::qec::decoding::config::trt_decoder_config &config) {
+    io.mapOptional("onnx_load_path", config.onnx_load_path);
+    io.mapOptional("engine_load_path", config.engine_load_path);
+    io.mapOptional("engine_save_path", config.engine_save_path);
+    io.mapOptional("precision", config.precision);
+    io.mapOptional("memory_workspace", config.memory_workspace);
+  }
+};
+
+template <>
 struct MappingTraits<cudaq::qec::decoding::config::sliding_window_config> {
   static void
   mapping(IO &io, cudaq::qec::decoding::config::sliding_window_config &config) {
@@ -418,6 +455,9 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
     } else if (config.type == "single_error_lut") {
       INIT_AND_MAP_DECODER_CUSTOM_ARGS(
           cudaq::qec::decoding::config::single_error_lut_config);
+    } else if (config.type == "trt_decoder") {
+      INIT_AND_MAP_DECODER_CUSTOM_ARGS(
+          cudaq::qec::decoding::config::trt_decoder_config);
     } else if (config.type == "sliding_window") {
       INIT_AND_MAP_DECODER_CUSTOM_ARGS(
           cudaq::qec::decoding::config::sliding_window_config);
