@@ -24,6 +24,11 @@ TEST(MoleculeTester, checkSimple) {
   {
     cudaq::solvers::molecular_geometry geometry{{"H", {0., 0., 0.}},
                                                 {"H", {0., 0., .7474}}};
+
+    // Test molecular_geometry::name()
+    std::string name = geometry.name();
+    EXPECT_EQ(name, "HH");
+
     auto molecule = cudaq::solvers::create_molecule(
         geometry, "sto-3g", 0, 0, {.casci = true, .verbose = true});
 
@@ -135,4 +140,28 @@ H -0.4691 -0.7570 0.0
   // molecule.hamiltonian.dump();
   EXPECT_EQ(molecule.n_electrons, 6);
   EXPECT_EQ(molecule.n_orbitals, 6);
+}
+
+TEST(OperatorsTester, checkOneParticleOp) {
+  // Test one_particle_op function
+  {
+    // Test case where p == q
+    auto op1 = cudaq::solvers::one_particle_op(4, 1, 1, "jordan_wigner");
+    EXPECT_GT(op1.num_terms(), 0);
+  }
+  {
+    // Test case where p < q
+    auto op2 = cudaq::solvers::one_particle_op(4, 0, 2, "jordan_wigner");
+    EXPECT_GT(op2.num_terms(), 0);
+  }
+  {
+    // Test case where p > q (should swap)
+    auto op3 = cudaq::solvers::one_particle_op(4, 2, 0, "jordan_wigner");
+    EXPECT_GT(op3.num_terms(), 0);
+  }
+  {
+    // Test with bravyi_kitaev compiler
+    auto op4 = cudaq::solvers::one_particle_op(4, 0, 1, "bravyi_kitaev");
+    EXPECT_GT(op4.num_terms(), 0);
+  }
 }

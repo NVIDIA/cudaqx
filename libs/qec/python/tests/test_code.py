@@ -229,6 +229,27 @@ def test_het_map_from_kwargs_bool():
     assert isinstance(steane, qec.Code)
 
 
+def test_het_map_from_kwargs_list():
+    """Test hetMapFromKwargs with Python lists (single-level and nested)"""
+    # Test single-level list via get_code kwargs
+    single_list = [1.0, 2.0, 3.0]
+    steane = qec.get_code("steane", test_param=single_list)
+    assert isinstance(steane, qec.Code)
+
+    # Test nested list via get_code kwargs
+    nested_list = [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]]
+    steane2 = qec.get_code("steane", test_param_nested=nested_list)
+    assert isinstance(steane2, qec.Code)
+
+
+def test_het_map_from_kwargs_empty_list():
+    """Test hetMapFromKwargs with empty Python list"""
+    # Test empty list via get_code kwargs
+    empty_list = []
+    steane = qec.get_code("steane", test_param=empty_list)
+    assert isinstance(steane, qec.Code)
+
+
 def test_version():
     assert "CUDA-Q QEC" in qec.__version__
 
