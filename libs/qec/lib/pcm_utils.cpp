@@ -110,9 +110,6 @@ std::vector<std::uint32_t> get_sorted_pcm_column_indices(
                 a_it_tail--;
                 b_it_tail--;
               } while (true);
-
-              // Unreachable.
-              return a < b;
             });
 
   return column_order;

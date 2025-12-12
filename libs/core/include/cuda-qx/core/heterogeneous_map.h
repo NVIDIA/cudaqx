@@ -121,8 +121,6 @@ public:
     throw std::runtime_error(
         "heterogeneous_map::get() error - Invalid type or key (" +
         std::string(key) + ").");
-
-    return T();
   }
 
   /// @brief Get a value from the map, search for the value
