@@ -36,7 +36,8 @@ public:
   /// invalid
   static std::unique_ptr<tensor_impl<Scalar>>
   get(const std::string &name, const std::vector<std::size_t> &shape) {
-    auto &registry = BaseExtensionPoint::get_registry();
+    auto [mutex, registry] = BaseExtensionPoint::get_registry();
+    std::lock_guard<std::recursive_mutex> lock(mutex);
     auto iter = registry.find(name);
     if (iter == registry.end())
       throw std::runtime_error("invalid tensor_impl requested: " + name);
@@ -58,7 +59,8 @@ public:
   /// invalid
   static std::unique_ptr<tensor_impl<Scalar>>
   get(const std::string &name, const std::vector<std::string> &data) {
-    auto &registry = BaseExtensionPoint::get_registry();
+    auto [mutex, registry] = BaseExtensionPoint::get_registry();
+    std::lock_guard<std::recursive_mutex> lock(mutex);
     auto iter = registry.find(name);
     if (iter == registry.end())
       throw std::runtime_error("invalid tensor_impl requested: " + name);
@@ -92,7 +94,8 @@ public:
   static std::unique_ptr<tensor_impl<Scalar>>
   get(const std::string &name, const scalar_type *data,
       const std::vector<std::size_t> &shape) {
-    auto &registry = BaseExtensionPoint::get_registry();
+    auto [mutex, registry] = BaseExtensionPoint::get_registry();
+    std::lock_guard<std::recursive_mutex> lock(mutex);
     auto iter = registry.find(name);
     if (iter == registry.end())
       throw std::runtime_error("invalid tensor_impl requested: " + name);
