@@ -6,7 +6,7 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 #include "cudaq/solvers/stateprep/ceo.h"
-#include "cudaq/solvers/operators/operator_pools/ceo_operator_pool.h"
+#include "cudaq/solvers/operators/operator_pool.h"
 #include <algorithm>
 #include <tuple>
 
@@ -24,9 +24,9 @@ get_ceo_pauli_lists(std::size_t norbitals) {
 
   // Use ceo::generate to fill in the ops vector
   // to avoid code redundancy 
-  cudaq::solvers::heterogeneous_map config;
+  heterogeneous_map config;
   config.insert("num-orbitals", norbitals);
-  ops = cudaq::solvers::ceo::generate(config);
+  ops = cudaq::solvers::operator_pool::get("ceo")->generate(config);
 
   std::vector<std::vector<cudaq::pauli_word>> pauliWordsList;
   std::vector<std::vector<double>> coefficientsList;

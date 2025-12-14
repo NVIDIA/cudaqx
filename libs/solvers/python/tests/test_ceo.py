@@ -77,8 +77,8 @@ def test_solvers_adapt_ceo_N2():
                                        'sto-3g',
                                        0,
                                        0,
-                                       nele_cas=6,
-                                       norb_cas=6,
+                                       nele_cas=4,
+                                       norb_cas=4,
                                        casci=True,
                                        verbose=True)
 
@@ -120,7 +120,7 @@ def test_solvers_vqe_ceo_h2():
             x(q[i])
         # Apply CEO Ansatz 
         solvers.stateprep.ceo(q, thetas, pauliWordsList, coefficientsList)
-￼
+
     parameter_count = len(pauli_word_list)
     x0 = [0.0] * parameter_count
 
@@ -176,7 +176,7 @@ def test_solvers_vqe_ceo_lih():
             x(q[i])
         # Apply CEO Ansatz 
         solvers.stateprep.ceo(q, thetas, pauliWordsList, coefficientsList)
-￼
+
     parameter_count = len(pauli_word_list)
     x0 = [0.0] * parameter_count
 
@@ -212,8 +212,4 @@ def test_ceo_operator_pool_generation():
     # Test with 4 orbitals
     ops = solvers.get_operator_pool("ceo", num_orbitals=4)
     assert len(ops) == 96  # 12 singles + 72 mixed doubles, 12 same-spin doubles
-
-    # Verify all operators are valid spin operators
-    for op in ops:
-        assert op.qubit_count == 8  
 

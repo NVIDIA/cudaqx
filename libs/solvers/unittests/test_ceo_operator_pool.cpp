@@ -160,7 +160,7 @@ TEST(CEOOperatorPoolTest, NoDuplicateOperators) {
   // Number of unique operators should equal total operators
   EXPECT_EQ(unique_ops.size(), ops.size())
       << "Found duplicate operators! Expected " << ops.size()
-￼      << " unique operators but got " << unique_ops.size();
+      << " unique operators but got " << unique_ops.size();
 }
 
 // ============================================================================
@@ -177,7 +177,7 @@ TEST(CEOOperatorPoolTest, AllOperatorsNonEmpty) {
       EXPECT_FALSE(term.is_identity())
           << "Term " << term.to_string() << " is identity";
   }
-￼}
+}
 
 // ============================================================================
 // Test 5: Verify Operator Coefficients
@@ -201,7 +201,7 @@ TEST(CEOOperatorPoolTest, VerifyOperatorCoefficients) {
                           << " has unexpected value: " << coefficients[i]
                           << " (expected 0.5 or 0.25)";
   }
-￼}
+}
 
 // ============================================================================
 // Test 6: CEO State Preparation Helper Function
@@ -218,11 +218,11 @@ TEST(CEOOperatorPoolTest, StatePrepPauliLists) {
   EXPECT_EQ(coeffs.size(), ops.size());
 
   for (size_t i = 0; i < std::min(ops.size(), pauliWords.size()); ++i) {
-    EXPECT_EQ(pool_ops[i].num_terms(), pauli_lists[i].size())
+    EXPECT_EQ(ops[i].num_terms(), pauliWords[i].size())
         << "Operator " << i << " has different number of terms. "
-        << "Pool: " << pool_ops[i].num_terms()
-        << ", Stateprep: " << pauli_lists[i].size();
-￼  }
+        << "Pool: " << ops[i].num_terms()
+        << ", Stateprep: " << pauliWords[i].size();
+  }
 }
 
 // ============================================================================
@@ -252,7 +252,7 @@ TEST(CEOOperatorPoolTest, OperatorsAreHermitianGenerators) {
 
     EXPECT_TRUE(is_hermitian) << "Operator " << i << " (G) is not Hermitian";
   }
-￼}
+}
 
 // ============================================================================
 // Test 8: Performance Test - Large System
@@ -275,9 +275,9 @@ TEST(CEOOperatorPoolTest, LargeSystemPerformance) {
       << "Generation took too long: " << duration.count() << "ms";
 
   // Verify correct count
-  size_t n = 12;
+  size_t n = 6;
   size_t expected = n * (n - 1); // Singles alpha and beta
   expected += (n * (n - 1) / 2) * (n * (n - 1) / 2) * 2; // Mixed doubles
   expected += (n * (n - 1) * (n - 2) * (n - 3) / 24) * 12; // Doubles alpha and beta
   EXPECT_EQ(ops.size(), expected);
-￼}
+}
