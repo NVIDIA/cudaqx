@@ -34,10 +34,11 @@ generate_ceo_beta_singles(std::size_t numOrbitals);
 /// @details All four indices are alpha spin orbitals. For p>q>r>s, generates
 /// three pairings:
 ///          (p,q)->(r,s), (p,r)->(q,s), (q,p)->(r,s)
-/// Note that the CEO operators have a special structure that is different from 
-/// either UCCSD or UCCGSD. We are following the index convention from the CEO paper
-/// (https://arxiv.org/abs/2407.08696) which is a bit counterintuitive but where
-/// (p,q) -> (r,s) generates a different excitation type from (q,p) -> (r,s).
+/// Note that the CEO operators have a special structure that is different from
+/// either UCCSD or UCCGSD. We are following the index convention from the CEO
+/// paper (https://arxiv.org/abs/2407.08696) which is a bit counterintuitive but
+/// where (p,q) -> (r,s) generates a different excitation type from (q,p) ->
+/// (r,s).
 /// @param numOrbitals Number of spatial orbitals
 /// @return Vector of (p, q, r, s) tuples representing alpha double excitations
 std::vector<std::tuple<std::size_t, std::size_t, std::size_t, std::size_t>>
@@ -55,7 +56,7 @@ generate_ceo_beta_doubles(std::size_t numOrbitals);
 
 /// @brief Generate all mixed double excitation index tuples
 /// @details Mixed spin double excitations. Indices p,q,r,s
-/// correspond to the following spins: alpha, beta, alpha, beta respectively ; 
+/// correspond to the following spins: alpha, beta, alpha, beta respectively ;
 /// and we have p > r and q > s.
 /// @param numOrbitals Number of spatial orbitals
 /// @return Vector of (p, q, r, s) tuples representing mixed double excitations
@@ -76,9 +77,10 @@ void addCEOSingleExcitation(std::vector<cudaq::spin_op> &ops, std::size_t p,
 ///          A: 0.25 * (X_r X_p X_s Y_q - X_r X_p Y_s X_q + Y_r Y_p X_s Y_q -
 ///          Y_r Y_p Y_s X_q) B: 0.25 * (X_r Y_p X_s X_q + X_r Y_p Y_s Y_q - Y_r
 ///          X_p X_s X_q - Y_r X_p Y_s Y_q)
-///          These operators correspond to the OVP-CEO operators in the CEO paper
-///          (https://arxiv.org/abs/2407.08696). They combine qubit excitation operators
-///          Q_1 and Q_2 for the same 4 spin-orbitals as A = Q_1 + Q_2 and B = Q_1 - Q_2.
+///          These operators correspond to the OVP-CEO operators in the CEO
+///          paper (https://arxiv.org/abs/2407.08696). They combine qubit
+///          excitation operators Q_1 and Q_2 for the same 4 spin-orbitals as A
+///          = Q_1 + Q_2 and B = Q_1 - Q_2.
 /// @param ops Vector to append the operators to
 /// @param p First qubit index
 /// @param q Second qubit index
@@ -88,5 +90,3 @@ void addCEODoubleExcitation(std::vector<cudaq::spin_op> &ops, std::size_t p,
                             std::size_t q, std::size_t r, std::size_t s);
 
 } // namespace cudaq::solvers
-
-

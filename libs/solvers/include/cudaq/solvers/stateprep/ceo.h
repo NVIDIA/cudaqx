@@ -14,10 +14,11 @@
 namespace cudaq::solvers::stateprep {
 
 /// @brief Generate CEO operator pool and extract Pauli words and coefficients
-/// @details The CEO pool is constructed using qubit excitation operators that are
-/// coupled to reduce the circuit implementation cost. The excitations preserve the 
-/// particle number and Sz quantum numbers, but do not include Z parity strings.
-/// For more details, see the CEO paper (https://arxiv.org/abs/2407.08696).
+/// @details The CEO pool is constructed using qubit excitation operators that
+/// are coupled to reduce the circuit implementation cost. The excitations
+/// preserve the particle number and Sz quantum numbers, but do not include Z
+/// parity strings. For more details, see the CEO paper
+/// (https://arxiv.org/abs/2407.08696).
 /// @param norbitals Number of spatial orbitals
 /// @return Pair of lists: [Pauli words grouped by excitation], [coefficients
 /// grouped by excitation]
@@ -39,5 +40,3 @@ ceo(cudaq::qview<> qubits, const std::vector<double> &thetas,
     const std::vector<std::vector<double>> &coefficientsList);
 
 } // namespace cudaq::solvers::stateprep
-
-

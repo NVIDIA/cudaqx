@@ -225,7 +225,7 @@ void addStatePrepKernels(py::module &mod) {
 
   stateprep.def("get_ceo_pauli_lists",
                 &cudaq::solvers::stateprep::get_ceo_pauli_lists,
-                py::arg("num_orbitals"), 
+                py::arg("num_orbitals"),
                 R"(
   Generate CEO operator pool (spin-dependent generalized singles/doubles coupled qubit excitation operators) and extract Pauli words and coefficients grouped by excitation.
 

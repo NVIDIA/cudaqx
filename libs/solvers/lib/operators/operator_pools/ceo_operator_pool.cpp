@@ -15,7 +15,8 @@ namespace cudaq::solvers {
 std::vector<cudaq::spin_op>
 ceo::generate(const heterogeneous_map &config) const {
 
-  const std::size_t numOrbitals = config.get<std::size_t>({"num-orbitals", "num_orbitals"});
+  const std::size_t numOrbitals =
+      config.get<std::size_t>({"num-orbitals", "num_orbitals"});
   if (numOrbitals == 0)
     throw std::invalid_argument("num-orbitals must be > 0");
 
@@ -58,5 +59,3 @@ ceo::generate(const heterogeneous_map &config) const {
 }
 
 } // namespace cudaq::solvers
-
-

@@ -23,7 +23,7 @@ get_ceo_pauli_lists(std::size_t norbitals) {
   std::size_t numQubits = 2 * norbitals;
 
   // Use ceo::generate to fill in the ops vector
-  // to avoid code redundancy 
+  // to avoid code redundancy
   heterogeneous_map config;
   config.insert("num-orbitals", norbitals);
   ops = cudaq::solvers::operator_pool::get("ceo")->generate(config);
@@ -45,8 +45,8 @@ get_ceo_pauli_lists(std::size_t norbitals) {
   return {pauliWordsList, coefficientsList};
 }
 
-// Note: The CEO paper (https://arxiv.org/abs/2407.08696) presents an 
-// optimized implementation for the CEO doubles operators, that is 
+// Note: The CEO paper (https://arxiv.org/abs/2407.08696) presents an
+// optimized implementation for the CEO doubles operators, that is
 // more efficient than the simple kernel below.
 // TODO: Implement the optimized kernel.
 __qpu__ void
@@ -65,5 +65,3 @@ ceo(cudaq::qview<> qubits, const std::vector<double> &thetas,
 }
 
 } // namespace cudaq::solvers::stateprep
-
-

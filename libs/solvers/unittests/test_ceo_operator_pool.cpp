@@ -32,7 +32,7 @@ countSinglesAndDoubles(const std::vector<cudaq::spin_op> &ops) {
         xy_count++;
       }
     }
-    
+
     // Singles should have 4 X/Y operators
     if (xy_count == 4)
       singles++;
@@ -101,7 +101,8 @@ TEST(CEOOperatorPoolTest, CorrectNumberOfOperators) {
     // Mixed doubles: 4 * 3 / 2 alpha pairs, same for beta pairs.
     // 36 alpha-beta combinations, each creates 2 operators = 72 operators
 
-    // Same-spin doubles: single set of indices for each spin, each creates 6 operators = 12 operators
+    // Same-spin doubles: single set of indices for each spin, each creates 6
+    // operators = 12 operators
 
     // Total: 12 + 72 + 12
     EXPECT_EQ(ops.size(), 96);
@@ -133,7 +134,8 @@ TEST(CEOOperatorPoolTest, ConfigurationValidation) {
   // Test valid configuration
   {
     heterogeneous_map config{{"num_orbitals", 2}};
-    EXPECT_NO_THROW(cudaq::solvers::operator_pool::get("ceo")->generate(config));
+    EXPECT_NO_THROW(
+        cudaq::solvers::operator_pool::get("ceo")->generate(config));
   }
 }
 
@@ -246,8 +248,8 @@ TEST(CEOOperatorPoolTest, OperatorsAreHermitianGenerators) {
           break;
         }
       }
-        if (!is_hermitian)
-          break;
+      if (!is_hermitian)
+        break;
     }
 
     EXPECT_TRUE(is_hermitian) << "Operator " << i << " (G) is not Hermitian";
@@ -278,6 +280,7 @@ TEST(CEOOperatorPoolTest, LargeSystemPerformance) {
   size_t n = 6;
   size_t expected = n * (n - 1); // Singles alpha and beta
   expected += (n * (n - 1) / 2) * (n * (n - 1) / 2) * 2; // Mixed doubles
-  expected += (n * (n - 1) * (n - 2) * (n - 3) / 24) * 12; // Doubles alpha and beta
+  expected +=
+      (n * (n - 1) * (n - 2) * (n - 3) / 24) * 12; // Doubles alpha and beta
   EXPECT_EQ(ops.size(), expected);
 }

@@ -118,7 +118,7 @@ def test_solvers_vqe_ceo_h2():
         q = cudaq.qvector(numQubits)
         for i in range(numElectrons):
             x(q[i])
-        # Apply CEO Ansatz 
+        # Apply CEO Ansatz
         solvers.stateprep.ceo(q, thetas, pauliWordsList, coefficientsList)
 
     parameter_count = len(pauli_word_list)
@@ -133,17 +133,16 @@ def test_solvers_vqe_ceo_h2():
 
         return energy
 
-    res = minimize(cost, 
-                   x0, 
-                   method='COBYLA', 
+    res = minimize(cost,
+                   x0,
+                   method='COBYLA',
                    options={
-                    'maxiter': 1000,
-                    'rhobeg': 0.1,
-                    'disp': True
-                    })
+                       'maxiter': 1000,
+                       'rhobeg': 0.1,
+                       'disp': True
+                   })
 
     energy = res.fun
-
 
     print(energy)
     assert np.isclose(energy, -1.1371, atol=1e-4)
@@ -151,12 +150,12 @@ def test_solvers_vqe_ceo_h2():
 
 def test_solvers_vqe_ceo_lih():
     geometry = [('Li', (0.3925, 0., 0.)), ('H', (-1.1774, 0., .0))]
-    molecule = solvers.create_molecule(geometry, 
-                                       'sto-3g', 
-                                       0, 
-                                       0, 
-                                       nele_cas=4, 
-                                       norb_cas=4, 
+    molecule = solvers.create_molecule(geometry,
+                                       'sto-3g',
+                                       0,
+                                       0,
+                                       nele_cas=4,
+                                       norb_cas=4,
                                        casci=True)
 
     numOrbitals = molecule.n_orbitals
@@ -174,7 +173,7 @@ def test_solvers_vqe_ceo_lih():
         q = cudaq.qvector(numQubits)
         for i in range(numElectrons):
             x(q[i])
-        # Apply CEO Ansatz 
+        # Apply CEO Ansatz
         solvers.stateprep.ceo(q, thetas, pauliWordsList, coefficientsList)
 
     parameter_count = len(pauli_word_list)
@@ -189,13 +188,13 @@ def test_solvers_vqe_ceo_lih():
 
         return energy
 
-    res = minimize(cost, 
-                   x0, 
-                   method='COBYLA', 
+    res = minimize(cost,
+                   x0,
+                   method='COBYLA',
                    options={
-                    'maxiter': 6000,
-                    'rhobeg': 0.1,
-                    })
+                       'maxiter': 6000,
+                       'rhobeg': 0.1,
+                   })
 
     energy = res.fun
 
@@ -212,4 +211,3 @@ def test_ceo_operator_pool_generation():
     # Test with 4 orbitals
     ops = solvers.get_operator_pool("ceo", num_orbitals=4)
     assert len(ops) == 96  # 12 singles + 72 mixed doubles, 12 same-spin doubles
-

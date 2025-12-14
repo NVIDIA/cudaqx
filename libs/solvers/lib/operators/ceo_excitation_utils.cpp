@@ -32,7 +32,7 @@ generate_ceo_beta_singles(std::size_t numOrbitals) {
   std::vector<std::pair<std::size_t, std::size_t>> singles;
   // Beta spin orbitals are at odd indices: 1, 3, 5, ..., 2*numOrbitals-1
   singles.reserve(numOrbitals * (numOrbitals - 1) / 2);
-  for (std::size_t i = 0; i < numOrbitals; ++i) { 
+  for (std::size_t i = 0; i < numOrbitals; ++i) {
     for (std::size_t j = 0; j < i; ++j) {
       std::size_t p = 2 * i + 1; // Higher beta index
       std::size_t q = 2 * j + 1; // Lower beta index
@@ -112,10 +112,10 @@ std::vector<std::tuple<std::size_t, std::size_t, std::size_t, std::size_t>>
 generate_ceo_mixed_doubles(std::size_t numOrbitals) {
   std::vector<std::tuple<std::size_t, std::size_t, std::size_t, std::size_t>>
       doubles;
-  // Mixed doubles: following the CEO convention (https://arxiv.org/abs/2407.08696), 
-  // the excitation operator for p,q,r,s excites pair (p,q) to (r,s), so
-  // the spins should be (alpha, beta) -> (alpha, beta), and we want 
-  // p > r and q > s.
+  // Mixed doubles: following the CEO convention
+  // (https://arxiv.org/abs/2407.08696), the excitation operator for p,q,r,s
+  // excites pair (p,q) to (r,s), so the spins should be (alpha, beta) ->
+  // (alpha, beta), and we want p > r and q > s.
 
   for (std::size_t i = 0; i < numOrbitals; ++i) {
     for (std::size_t j = 0; j < numOrbitals; ++j) {
@@ -176,5 +176,3 @@ void addCEODoubleExcitation(std::vector<cudaq::spin_op> &ops, std::size_t p,
 }
 
 } // namespace cudaq::solvers
-
-
