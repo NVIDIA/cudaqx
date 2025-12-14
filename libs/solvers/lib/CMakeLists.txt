@@ -24,7 +24,9 @@ add_library(cudaq-solvers SHARED
   operators/operator_pools/uccsd_operator_pool.cpp
   operators/operator_pools/qaoa_operator_pool.cpp
   operators/operator_pools/uccgsd_operator_pool.cpp
+  operators/operator_pools/ceo_operator_pool.cpp
   operators/uccgsd_excitation_utils.cpp
+  operators/ceo_excitation_utils.cpp
   version.cpp
 )
 
