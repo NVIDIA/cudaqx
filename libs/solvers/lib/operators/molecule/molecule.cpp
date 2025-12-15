@@ -130,9 +130,15 @@ cudaq::spin_op one_particle_op(std::size_t numQubits, std::size_t p,
   for (auto i : cudaq::range((long)p + 1, (long)q))
     z_indices.push_back(i);
 
-  auto parity = spin::z(z_indices.front());
-  for (std::size_t i = 1; i < z_indices.size(); i++) {
-    parity *= spin::z(i);
+  cudaq::spin_op parity;
+  if (z_indices.empty()) {
+    // When z_indices is empty, parity is the identity operator
+    parity = cudaq::spin_op_term(0, numQubits);
+  } else {
+    parity = spin::z(z_indices.front());
+    for (std::size_t i = 1; i < z_indices.size(); i++) {
+      parity *= spin::z(z_indices[i]);
+    }
   }
 
   cudaq::spin_op ret = m * spin::x(p) * parity * spin::x(q);

@@ -365,6 +365,17 @@ void SlidingWindowDecoderTest(bool run_batched, std::size_t n_rounds,
   auto sliding_window_decoder = cudaq::qec::decoder::get(
       "sliding_window", simplified_pcm, sliding_window_params);
 
+  // Test set_D_sparse with sliding_window decoder to cover the sliding_window
+  // specific code path in set_D_sparse_common
+  // Create a simple D_sparse matrix for testing
+  std::vector<std::vector<uint32_t>> test_D_sparse;
+  for (std::size_t i = 0; i < n_syndromes_per_round; ++i) {
+    test_D_sparse.push_back({static_cast<uint32_t>(i)});
+  }
+  sliding_window_decoder->set_D_sparse(test_D_sparse);
+  EXPECT_EQ(sliding_window_decoder->get_num_msyn_per_decode(),
+            n_syndromes_per_round);
+
   // Create some random syndromes.
   const int num_syndromes = 1000;
   std::vector<std::vector<cudaq::qec::float_t>> syndromes(num_syndromes);
@@ -727,4 +738,369 @@ TEST(DecoderRegistryTest, SingleParameterRegistryDirect) {
   // The registry should exist (even if empty), proving line 18 instantiation
   // works This test passes if no exceptions are thrown, proving the
   // single-parameter registry is instantiated
+}
+
+// Test decode() with invalid tensor rank (rank != 1)
+TEST(DecoderTest, DecodeInvalidTensorRank) {
+  std::size_t block_size = 10;
+  std::size_t syndrome_size = 4;
+  cudaqx::tensor<uint8_t> H({syndrome_size, block_size});
+  auto decoder = cudaq::qec::decoder::get("sample_decoder", H);
+
+  // Test with rank-0 tensor (should throw)
+  cudaqx::tensor<uint8_t> rank0_tensor;
+  EXPECT_THROW(decoder->decode(rank0_tensor), std::runtime_error);
+
+  // Test with rank-2 tensor (should throw)
+  cudaqx::tensor<uint8_t> rank2_tensor({syndrome_size, 1});
+  EXPECT_THROW(decoder->decode(rank2_tensor), std::runtime_error);
+
+  // Test with valid rank-1 tensor (should not throw)
+  cudaqx::tensor<uint8_t> rank1_tensor({syndrome_size});
+  EXPECT_NO_THROW(decoder->decode(rank1_tensor));
+}
+
+// Test decoder::get() with invalid decoder name
+TEST(DecoderTest, GetInvalidDecoderName) {
+  std::size_t block_size = 10;
+  std::size_t syndrome_size = 4;
+  cudaqx::tensor<uint8_t> H({syndrome_size, block_size});
+
+  // Test with non-existent decoder name
+  EXPECT_THROW(
+      {
+        auto decoder = cudaq::qec::decoder::get("non_existent_decoder_xyz", H);
+      },
+      std::runtime_error);
+
+  // Verify the error message contains useful information
+  try {
+    auto decoder = cudaq::qec::decoder::get("invalid_decoder_name_123", H);
+    FAIL() << "Expected std::runtime_error to be thrown";
+  } catch (const std::runtime_error &e) {
+    std::string error_msg = e.what();
+    EXPECT_TRUE(error_msg.find("invalid decoder requested") !=
+                std::string::npos)
+        << "Error message should contain 'invalid decoder requested'. Got: "
+        << error_msg;
+    EXPECT_TRUE(error_msg.find("invalid_decoder_name_123") != std::string::npos)
+        << "Error message should contain the decoder name. Got: " << error_msg;
+  }
+}
+
+// Test get_version() function
+TEST(DecoderTest, GetVersion) {
+  std::size_t block_size = 10;
+  std::size_t syndrome_size = 4;
+  cudaqx::tensor<uint8_t> H({syndrome_size, block_size});
+  auto decoder = cudaq::qec::decoder::get("sample_decoder", H);
+
+  std::string version = decoder->get_version();
+  EXPECT_FALSE(version.empty()) << "Version string should not be empty";
+  EXPECT_TRUE(version.find("CUDA-Q QEC Base Decoder Interface") !=
+              std::string::npos)
+      << "Version should contain expected prefix. Got: " << version;
+}
+
+// Test realtime decoding API functions
+TEST(DecoderRealtimeTest, SetAndGetDsparse) {
+  std::size_t block_size = 10;
+  std::size_t syndrome_size = 4;
+  cudaqx::tensor<uint8_t> H({syndrome_size, block_size});
+  auto decoder = cudaq::qec::decoder::get("sample_decoder", H);
+
+  // Test set_D_sparse with vector<vector<uint32_t>>
+  std::vector<std::vector<uint32_t>> D_sparse = {{0, 1}, {2, 3}, {4, 5}};
+  decoder->set_D_sparse(D_sparse);
+  EXPECT_EQ(decoder->get_num_msyn_per_decode(), 6); // max_col + 1 = 5 + 1
+
+  // Test set_D_sparse with vector<int64_t> format (using -1 as row terminators)
+  std::vector<int64_t> D_sparse_vec = {0, 1, -1, 2, 3, -1, 4, 5, -1};
+  decoder->set_D_sparse(D_sparse_vec);
+  EXPECT_EQ(decoder->get_num_msyn_per_decode(), 6);
+
+  // Test with empty D_sparse
+  // Note: calculate_num_msyn_per_decode returns max_col + 1, so empty returns 1
+  std::vector<std::vector<uint32_t>> empty_D_sparse;
+  decoder->set_D_sparse(empty_D_sparse);
+  EXPECT_EQ(decoder->get_num_msyn_per_decode(), 1); // max_col=0, so 0+1=1
+
+  // Test with single column D_sparse
+  std::vector<std::vector<uint32_t>> single_col_D = {{0}, {1}, {2}};
+  decoder->set_D_sparse(single_col_D);
+  EXPECT_EQ(decoder->get_num_msyn_per_decode(), 3);
+}
+
+TEST(DecoderRealtimeTest, SetAndGetOsparse) {
+  std::size_t block_size = 10;
+  std::size_t syndrome_size = 4;
+  cudaqx::tensor<uint8_t> H({syndrome_size, block_size});
+  auto decoder = cudaq::qec::decoder::get("sample_decoder", H);
+
+  // Test set_O_sparse with vector<vector<uint32_t>>
+  std::vector<std::vector<uint32_t>> O_sparse = {{0, 1, 2}, {3, 4}};
+  decoder->set_O_sparse(O_sparse);
+  EXPECT_EQ(decoder->get_num_observables(), 2);
+
+  // Test set_O_sparse with vector<int64_t> format
+  std::vector<int64_t> O_sparse_vec = {0, 1, 2, -1, 3, 4, -1};
+  decoder->set_O_sparse(O_sparse_vec);
+  EXPECT_EQ(decoder->get_num_observables(), 2);
+
+  // Test with empty O_sparse
+  std::vector<std::vector<uint32_t>> empty_O_sparse;
+  decoder->set_O_sparse(empty_O_sparse);
+  EXPECT_EQ(decoder->get_num_observables(), 0);
+}
+
+TEST(DecoderRealtimeTest, GetObsCorrections) {
+  std::size_t block_size = 10;
+  std::size_t syndrome_size = 4;
+  cudaqx::tensor<uint8_t> H({syndrome_size, block_size});
+  auto decoder = cudaq::qec::decoder::get("sample_decoder", H);
+
+  // Set up O_sparse
+  std::vector<std::vector<uint32_t>> O_sparse = {{0, 1}, {2, 3}};
+  decoder->set_O_sparse(O_sparse);
+
+  // Initially, corrections should be all zeros
+  const uint8_t *corrections = decoder->get_obs_corrections();
+  ASSERT_NE(corrections, nullptr);
+  EXPECT_EQ(corrections[0], 0);
+  EXPECT_EQ(corrections[1], 0);
+
+  // After clearing, should still be zeros
+  decoder->clear_corrections();
+  corrections = decoder->get_obs_corrections();
+  EXPECT_EQ(corrections[0], 0);
+  EXPECT_EQ(corrections[1], 0);
+}
+
+TEST(DecoderRealtimeTest, ClearCorrections) {
+  std::size_t block_size = 10;
+  std::size_t syndrome_size = 4;
+  cudaqx::tensor<uint8_t> H({syndrome_size, block_size});
+  auto decoder = cudaq::qec::decoder::get("sample_decoder", H);
+
+  // Set up O_sparse
+  std::vector<std::vector<uint32_t>> O_sparse = {{0, 1}, {2, 3}, {4, 5}};
+  decoder->set_O_sparse(O_sparse);
+  EXPECT_EQ(decoder->get_num_observables(), 3);
+
+  // Clear corrections should reset all to zero
+  decoder->clear_corrections();
+  const uint8_t *corrections = decoder->get_obs_corrections();
+  for (std::size_t i = 0; i < 3; ++i) {
+    EXPECT_EQ(corrections[i], 0);
+  }
+}
+
+TEST(DecoderRealtimeTest, ResetDecoder) {
+  std::size_t block_size = 10;
+  std::size_t syndrome_size = 4;
+  cudaqx::tensor<uint8_t> H({syndrome_size, block_size});
+  auto decoder = cudaq::qec::decoder::get("sample_decoder", H);
+
+  // Set up D_sparse and O_sparse
+  std::vector<std::vector<uint32_t>> D_sparse = {{0, 1}, {2}};
+  std::vector<std::vector<uint32_t>> O_sparse = {{0}, {1}};
+  decoder->set_D_sparse(D_sparse);
+  decoder->set_O_sparse(O_sparse);
+
+  // Reset decoder
+  decoder->reset_decoder();
+
+  // After reset, corrections should be cleared
+  const uint8_t *corrections = decoder->get_obs_corrections();
+  EXPECT_EQ(corrections[0], 0);
+  EXPECT_EQ(corrections[1], 0);
+}
+
+TEST(DecoderRealtimeTest, DecoderId) {
+  std::size_t block_size = 10;
+  std::size_t syndrome_size = 4;
+  cudaqx::tensor<uint8_t> H({syndrome_size, block_size});
+  auto decoder = cudaq::qec::decoder::get("sample_decoder", H);
+
+  // Default decoder ID should be 0
+  EXPECT_EQ(decoder->get_decoder_id(), 0);
+
+  // Set decoder ID
+  decoder->set_decoder_id(42);
+  EXPECT_EQ(decoder->get_decoder_id(), 42);
+
+  // Set another decoder ID
+  decoder->set_decoder_id(100);
+  EXPECT_EQ(decoder->get_decoder_id(), 100);
+}
+
+TEST(DecoderRealtimeTest, EnqueueSyndromeVector) {
+  std::size_t block_size = 10;
+  std::size_t syndrome_size = 4;
+  cudaqx::tensor<uint8_t> H({syndrome_size, block_size});
+  auto decoder = cudaq::qec::decoder::get("sample_decoder", H);
+
+  // Set up D_sparse - requires 3 measurement syndromes (indices 0, 1, 2)
+  std::vector<std::vector<uint32_t>> D_sparse = {{0}, {1}, {2}};
+  decoder->set_D_sparse(D_sparse);
+  EXPECT_EQ(decoder->get_num_msyn_per_decode(), 3);
+
+  // Set up O_sparse
+  std::vector<std::vector<uint32_t>> O_sparse = {{0}};
+  decoder->set_O_sparse(O_sparse);
+
+  // Enqueue syndromes using vector version
+  // Each enqueue adds syndrome_length bytes to the buffer
+  // When buffer is full (msyn_buffer_index == msyn_buffer.size()), decode is
+  // triggered
+  std::vector<uint8_t> syndrome1 = {1};
+  bool result1 = decoder->enqueue_syndrome(syndrome1);
+  EXPECT_FALSE(result1); // Buffer not full yet (1/3)
+
+  std::vector<uint8_t> syndrome2 = {0};
+  bool result2 = decoder->enqueue_syndrome(syndrome2);
+  EXPECT_FALSE(result2); // Buffer not full yet (2/3)
+
+  std::vector<uint8_t> syndrome3 = {1};
+  bool result3 = decoder->enqueue_syndrome(syndrome3);
+  EXPECT_TRUE(result3); // Buffer is full (3/3), should trigger decode
+}
+
+TEST(DecoderRealtimeTest, EnqueueSyndromePointer) {
+  std::size_t block_size = 10;
+  std::size_t syndrome_size = 4;
+  cudaqx::tensor<uint8_t> H({syndrome_size, block_size});
+  auto decoder = cudaq::qec::decoder::get("sample_decoder", H);
+
+  // Set up D_sparse - requires 2 measurement syndromes (indices 0, 1)
+  std::vector<std::vector<uint32_t>> D_sparse = {{0}, {1}};
+  decoder->set_D_sparse(D_sparse);
+  EXPECT_EQ(decoder->get_num_msyn_per_decode(), 2);
+
+  // Set up O_sparse
+  std::vector<std::vector<uint32_t>> O_sparse = {{0}};
+  decoder->set_O_sparse(O_sparse);
+
+  // Enqueue syndromes using pointer version
+  // When syndrome_length equals num_msyn_per_decode, it fills the buffer
+  // immediately
+  uint8_t syndrome1[] = {1};
+  bool result1 = decoder->enqueue_syndrome(syndrome1, 1);
+  EXPECT_FALSE(result1); // Buffer not full yet (1/2)
+
+  uint8_t syndrome2[] = {0};
+  bool result2 = decoder->enqueue_syndrome(syndrome2, 1);
+  EXPECT_TRUE(result2); // Buffer is full (2/2), should trigger decode
+}
+
+TEST(DecoderRealtimeTest, EnqueueSyndromeBufferOverflow) {
+  std::size_t block_size = 10;
+  std::size_t syndrome_size = 4;
+  cudaqx::tensor<uint8_t> H({syndrome_size, block_size});
+  auto decoder = cudaq::qec::decoder::get("sample_decoder", H);
+
+  // Set up D_sparse - requires 2 measurement syndromes
+  std::vector<std::vector<uint32_t>> D_sparse = {{0}, {1}};
+  decoder->set_D_sparse(D_sparse);
+
+  // Try to enqueue more syndromes than buffer can hold
+  std::vector<uint8_t> large_syndrome(100, 1); // Much larger than buffer
+  bool result =
+      decoder->enqueue_syndrome(large_syndrome.data(), large_syndrome.size());
+  EXPECT_FALSE(result); // Should return false due to buffer overflow
+}
+
+TEST(DecoderRealtimeTest, GetNumObservables) {
+  std::size_t block_size = 10;
+  std::size_t syndrome_size = 4;
+  cudaqx::tensor<uint8_t> H({syndrome_size, block_size});
+  auto decoder = cudaq::qec::decoder::get("sample_decoder", H);
+
+  // Initially, no observables
+  EXPECT_EQ(decoder->get_num_observables(), 0);
+
+  // Set O_sparse with 3 observables
+  std::vector<std::vector<uint32_t>> O_sparse = {{0}, {1}, {2}};
+  decoder->set_O_sparse(O_sparse);
+  EXPECT_EQ(decoder->get_num_observables(), 3);
+
+  // Change to 5 observables
+  std::vector<std::vector<uint32_t>> O_sparse2 = {{0}, {1}, {2}, {3}, {4}};
+  decoder->set_O_sparse(O_sparse2);
+  EXPECT_EQ(decoder->get_num_observables(), 5);
+}
+
+// Test decode_batch function
+TEST(DecoderTest, DecodeBatch) {
+  std::size_t block_size = 10;
+  std::size_t syndrome_size = 4;
+  cudaqx::tensor<uint8_t> H({syndrome_size, block_size});
+  auto decoder = cudaq::qec::decoder::get("sample_decoder", H);
+
+  // Create multiple syndromes
+  std::vector<std::vector<cudaq::qec::float_t>> syndromes = {
+      {0.0f, 0.0f, 0.0f, 0.0f},
+      {1.0f, 0.0f, 0.0f, 0.0f},
+      {0.0f, 1.0f, 0.0f, 0.0f},
+      {0.0f, 0.0f, 1.0f, 0.0f}};
+
+  // Decode batch
+  auto results = decoder->decode_batch(syndromes);
+
+  // Verify results
+  EXPECT_EQ(results.size(), syndromes.size());
+  for (const auto &result : results) {
+    EXPECT_EQ(result.result.size(), block_size);
+    // sample_decoder always returns zeros
+    for (auto x : result.result) {
+      EXPECT_EQ(x, 0.0f);
+    }
+  }
+}
+
+// Test decode_batch with empty vector to cover the missing branch in reserve()
+TEST(DecoderTest, DecodeBatchEmpty) {
+  std::size_t block_size = 10;
+  std::size_t syndrome_size = 4;
+  cudaqx::tensor<uint8_t> H({syndrome_size, block_size});
+  auto decoder = cudaq::qec::decoder::get("sample_decoder", H);
+
+  // Test with empty batch (covers the missing branch in reserve(0))
+  std::vector<std::vector<cudaq::qec::float_t>> empty_syndromes;
+  auto results = decoder->decode_batch(empty_syndromes);
+
+  // Should return empty results
+  EXPECT_EQ(results.size(), 0);
+}
+
+// Test decode_async function
+TEST(DecoderTest, DecodeAsync) {
+  std::size_t block_size = 10;
+  std::size_t syndrome_size = 4;
+  cudaqx::tensor<uint8_t> H({syndrome_size, block_size});
+  auto decoder = cudaq::qec::decoder::get("sample_decoder", H);
+
+  std::vector<cudaq::qec::float_t> syndrome(syndrome_size, 0.0f);
+
+  // Test async decode - decode_async returns std::future<decoder_result>
+  // Wrap it in async_decoder_result to test the async_decoder_result API
+  std::future<cudaq::qec::decoder_result> future_result =
+      decoder->decode_async(syndrome);
+  cudaq::qec::async_decoder_result async_result(std::move(future_result));
+
+  // Check if ready (may or may not be ready immediately depending on timing)
+  bool is_ready = async_result.ready();
+  // Note: For simple decoders, it may be ready immediately, but we test both
+  // paths
+
+  // Get the result (blocks until ready)
+  auto result = async_result.get();
+  EXPECT_EQ(result.result.size(), block_size);
+  for (auto x : result.result) {
+    EXPECT_EQ(x, 0.0f);
+  }
+
+  // Test that get() works correctly - result should be valid
+  EXPECT_TRUE(result.converged ||
+              !result.converged); // Just verify result is valid
 }

@@ -12,6 +12,7 @@
 #include "nvqpp/test_kernels.h"
 
 #include "cudaq.h"
+#include "cudaq/solvers/observe_gradients/forward_difference.h"
 #include "cudaq/solvers/vqe.h"
 
 TEST(SolversVQETester, checkAPI) {
@@ -89,5 +90,29 @@ TEST(SolversVQETester, checkAPI) {
       o.result.dump();
     }
     EXPECT_TRUE(result.energy > -2.0 && result.energy < -1.5);
+  }
+}
+
+TEST(SolversVQETester, checkForwardDifferenceGradient) {
+  using namespace cudaq::spin;
+
+  cudaq::spin_op h = 5.907 - 2.1433 * x(0) * x(1) - 2.1433 * y(0) * y(1) +
+                     .21829 * z(0) - 6.125 * z(1);
+
+  {
+    // Test forward_difference gradient
+    auto optimizer = cudaq::optim::optimizer::get("lbfgs");
+    auto gradient =
+        cudaq::observe_gradient::get("forward_difference", ansatz, h);
+
+    // Verify gradient is registered
+    EXPECT_TRUE(cudaq::observe_gradient::is_registered("forward_difference"));
+
+    // Test gradient calculation (this internally calls
+    // getRequiredNumExpectationComputations)
+    auto [energy, params, data] =
+        cudaq::solvers::vqe(ansatz, h, *optimizer, *gradient, {0.0});
+    EXPECT_NEAR(energy, -1.748,
+                1e-2); // Slightly relaxed tolerance for forward difference
   }
 }
