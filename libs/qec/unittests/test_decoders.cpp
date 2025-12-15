@@ -951,7 +951,8 @@ TEST(DecoderRealtimeTest, EnqueueSyndromeVector) {
 
   // Enqueue syndromes using vector version
   // Each enqueue adds syndrome_length bytes to the buffer
-  // When buffer is full (msyn_buffer_index == msyn_buffer.size()), decode is triggered
+  // When buffer is full (msyn_buffer_index == msyn_buffer.size()), decode is
+  // triggered
   std::vector<uint8_t> syndrome1 = {1};
   bool result1 = decoder->enqueue_syndrome(syndrome1);
   EXPECT_FALSE(result1); // Buffer not full yet (1/3)
@@ -981,7 +982,8 @@ TEST(DecoderRealtimeTest, EnqueueSyndromePointer) {
   decoder->set_O_sparse(O_sparse);
 
   // Enqueue syndromes using pointer version
-  // When syndrome_length equals num_msyn_per_decode, it fills the buffer immediately
+  // When syndrome_length equals num_msyn_per_decode, it fills the buffer
+  // immediately
   uint8_t syndrome1[] = {1};
   bool result1 = decoder->enqueue_syndrome(syndrome1, 1);
   EXPECT_FALSE(result1); // Buffer not full yet (1/2)
@@ -1003,8 +1005,8 @@ TEST(DecoderRealtimeTest, EnqueueSyndromeBufferOverflow) {
 
   // Try to enqueue more syndromes than buffer can hold
   std::vector<uint8_t> large_syndrome(100, 1); // Much larger than buffer
-  bool result = decoder->enqueue_syndrome(large_syndrome.data(),
-                                          large_syndrome.size());
+  bool result =
+      decoder->enqueue_syndrome(large_syndrome.data(), large_syndrome.size());
   EXPECT_FALSE(result); // Should return false due to buffer overflow
 }
 
@@ -1082,12 +1084,14 @@ TEST(DecoderTest, DecodeAsync) {
 
   // Test async decode - decode_async returns std::future<decoder_result>
   // Wrap it in async_decoder_result to test the async_decoder_result API
-  std::future<cudaq::qec::decoder_result> future_result = decoder->decode_async(syndrome);
+  std::future<cudaq::qec::decoder_result> future_result =
+      decoder->decode_async(syndrome);
   cudaq::qec::async_decoder_result async_result(std::move(future_result));
 
   // Check if ready (may or may not be ready immediately depending on timing)
   bool is_ready = async_result.ready();
-  // Note: For simple decoders, it may be ready immediately, but we test both paths
+  // Note: For simple decoders, it may be ready immediately, but we test both
+  // paths
 
   // Get the result (blocks until ready)
   auto result = async_result.get();
@@ -1097,5 +1101,6 @@ TEST(DecoderTest, DecodeAsync) {
   }
 
   // Test that get() works correctly - result should be valid
-  EXPECT_TRUE(result.converged || !result.converged); // Just verify result is valid
+  EXPECT_TRUE(result.converged ||
+              !result.converged); // Just verify result is valid
 }

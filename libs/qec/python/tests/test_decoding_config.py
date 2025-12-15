@@ -448,7 +448,8 @@ def test_sliding_window_config_single_error_lut():
     sw_config.straddle_end_round = False
     sw_config.error_rate_vec = [0.1, 0.2, 0.3]
     sw_config.inner_decoder_name = "single_error_lut"
-    sw_config.single_error_lut_params = qec.qecrt.config.single_error_lut_config()
+    sw_config.single_error_lut_params = qec.qecrt.config.single_error_lut_config(
+    )
 
     # Test to_heterogeneous_map
     map = sw_config.to_heterogeneous_map()
@@ -459,7 +460,8 @@ def test_sliding_window_config_single_error_lut():
         map["inner_decoder_params"] = {}
 
     # Test from_heterogeneous_map
-    sw_config2 = qec.qecrt.config.sliding_window_config.from_heterogeneous_map(map)
+    sw_config2 = qec.qecrt.config.sliding_window_config.from_heterogeneous_map(
+        map)
     assert sw_config2.inner_decoder_name == "single_error_lut"
     assert sw_config2.single_error_lut_params is not None
     assert sw_config2.multi_error_lut_params is None
@@ -491,7 +493,8 @@ def test_sliding_window_config_nv_qldpc_decoder():
     assert "max_iterations" in inner_map
 
     # Test from_heterogeneous_map
-    sw_config2 = qec.qecrt.config.sliding_window_config.from_heterogeneous_map(map)
+    sw_config2 = qec.qecrt.config.sliding_window_config.from_heterogeneous_map(
+        map)
     assert sw_config2.inner_decoder_name == "nv-qldpc-decoder"
     assert sw_config2.nv_qldpc_decoder_params is not None
     assert sw_config2.nv_qldpc_decoder_params.use_sparsity is True

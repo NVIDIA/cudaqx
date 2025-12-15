@@ -6,10 +6,10 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
+#include "cuda-qx/core/heterogeneous_map.h"
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/realtime/decoding_config.h"
-#include "cuda-qx/core/heterogeneous_map.h"
 #include <cmath>
 #include <gtest/gtest.h>
 
@@ -260,7 +260,9 @@ TEST(DecoderConfigTest, SrelayBpConfigHeterogeneousMap) {
   EXPECT_EQ(map.get<std::size_t>("stop_nconv"), 10);
 
   // Test from_heterogeneous_map
-  auto config2 = cudaq::qec::decoding::config::srelay_bp_config::from_heterogeneous_map(map);
+  auto config2 =
+      cudaq::qec::decoding::config::srelay_bp_config::from_heterogeneous_map(
+          map);
   EXPECT_EQ(config2.pre_iter, config.pre_iter);
   EXPECT_EQ(config2.num_sets, config.num_sets);
   EXPECT_EQ(config2.stopping_criterion, config.stopping_criterion);
@@ -280,7 +282,9 @@ TEST(DecoderConfigTest, SrelayBpConfigPartialFields) {
   EXPECT_FALSE(map.contains("stopping_criterion"));
   EXPECT_FALSE(map.contains("stop_nconv"));
 
-  auto config2 = cudaq::qec::decoding::config::srelay_bp_config::from_heterogeneous_map(map);
+  auto config2 =
+      cudaq::qec::decoding::config::srelay_bp_config::from_heterogeneous_map(
+          map);
   EXPECT_EQ(config2.pre_iter, 3);
   EXPECT_FALSE(config2.num_sets.has_value());
   EXPECT_FALSE(config2.stopping_criterion.has_value());
@@ -307,8 +311,10 @@ TEST(DecoderConfigTest, NvQldpcDecoderConfigSrelaySerialization) {
   EXPECT_EQ(srelay_map.get<std::size_t>("pre_iter"), 5);
   EXPECT_EQ(srelay_map.get<std::size_t>("num_sets"), 10);
 
-  // Test from_heterogeneous_map with srelay_config as heterogeneous_map (Python round-trip)
-  auto nv_config2 = cudaq::qec::decoding::config::nv_qldpc_decoder_config::from_heterogeneous_map(map);
+  // Test from_heterogeneous_map with srelay_config as heterogeneous_map (Python
+  // round-trip)
+  auto nv_config2 = cudaq::qec::decoding::config::nv_qldpc_decoder_config::
+      from_heterogeneous_map(map);
   EXPECT_TRUE(nv_config2.srelay_config.has_value());
   EXPECT_EQ(nv_config2.srelay_config->pre_iter, 5);
   EXPECT_EQ(nv_config2.srelay_config->num_sets, 10);
@@ -326,20 +332,23 @@ TEST(DecoderConfigTest, SlidingWindowConfigSingleErrorLut) {
   sw_config.straddle_end_round = false;
   sw_config.error_rate_vec = {0.1, 0.2, 0.3};
   sw_config.inner_decoder_name = "single_error_lut";
-  sw_config.single_error_lut_params = cudaq::qec::decoding::config::single_error_lut_config();
+  sw_config.single_error_lut_params =
+      cudaq::qec::decoding::config::single_error_lut_config();
 
   // Test to_heterogeneous_map
   auto map = sw_config.to_heterogeneous_map();
-  // Note: inner_decoder_params may not be present if it's empty (single_error_lut_config has no fields)
-  // The implementation only inserts inner_decoder_params if it's not empty (see config.cpp line 214)
-  // So we need to manually add it for the round-trip test
+  // Note: inner_decoder_params may not be present if it's empty
+  // (single_error_lut_config has no fields) The implementation only inserts
+  // inner_decoder_params if it's not empty (see config.cpp line 214) So we need
+  // to manually add it for the round-trip test
   if (!map.contains("inner_decoder_params")) {
     cudaqx::heterogeneous_map empty_inner_map;
     map.insert("inner_decoder_params", empty_inner_map);
   }
 
   // Test from_heterogeneous_map
-  auto sw_config2 = cudaq::qec::decoding::config::sliding_window_config::from_heterogeneous_map(map);
+  auto sw_config2 = cudaq::qec::decoding::config::sliding_window_config::
+      from_heterogeneous_map(map);
   EXPECT_EQ(sw_config2.inner_decoder_name, "single_error_lut");
   EXPECT_TRUE(sw_config2.single_error_lut_params.has_value());
   EXPECT_FALSE(sw_config2.multi_error_lut_params.has_value());
@@ -360,7 +369,8 @@ TEST(DecoderConfigTest, SlidingWindowConfigNvQldpcDecoder) {
   sw_config.straddle_end_round = false;
   sw_config.error_rate_vec = {0.1, 0.2, 0.3};
   sw_config.inner_decoder_name = "nv-qldpc-decoder";
-  sw_config.nv_qldpc_decoder_params = cudaq::qec::decoding::config::nv_qldpc_decoder_config();
+  sw_config.nv_qldpc_decoder_params =
+      cudaq::qec::decoding::config::nv_qldpc_decoder_config();
   sw_config.nv_qldpc_decoder_params->use_sparsity = true;
   sw_config.nv_qldpc_decoder_params->max_iterations = 50;
 
@@ -372,7 +382,8 @@ TEST(DecoderConfigTest, SlidingWindowConfigNvQldpcDecoder) {
   EXPECT_TRUE(inner_map.contains("max_iterations"));
 
   // Test from_heterogeneous_map
-  auto sw_config2 = cudaq::qec::decoding::config::sliding_window_config::from_heterogeneous_map(map);
+  auto sw_config2 = cudaq::qec::decoding::config::sliding_window_config::
+      from_heterogeneous_map(map);
   EXPECT_EQ(sw_config2.inner_decoder_name, "nv-qldpc-decoder");
   EXPECT_TRUE(sw_config2.nv_qldpc_decoder_params.has_value());
   EXPECT_EQ(sw_config2.nv_qldpc_decoder_params->use_sparsity, true);
@@ -381,20 +392,25 @@ TEST(DecoderConfigTest, SlidingWindowConfigNvQldpcDecoder) {
   EXPECT_FALSE(sw_config2.multi_error_lut_params.has_value());
 }
 
-// Test decoder_config::decoder_custom_args_to_heterogeneous_map for different decoder types
+// Test decoder_config::decoder_custom_args_to_heterogeneous_map for different
+// decoder types
 TEST(DecoderConfigTest, DecoderCustomArgsToHeterogeneousMap) {
   // Test single_error_lut
   cudaq::qec::decoding::config::decoder_config config1;
   config1.type = "single_error_lut";
-  config1.decoder_custom_args = cudaq::qec::decoding::config::single_error_lut_config();
+  config1.decoder_custom_args =
+      cudaq::qec::decoding::config::single_error_lut_config();
   auto map1 = config1.decoder_custom_args_to_heterogeneous_map();
   EXPECT_TRUE(map1.empty()); // single_error_lut_config has no fields
 
   // Test multi_error_lut
   cudaq::qec::decoding::config::decoder_config config2;
   config2.type = "multi_error_lut";
-  config2.decoder_custom_args = cudaq::qec::decoding::config::multi_error_lut_config();
-  auto &lut_config = std::get<cudaq::qec::decoding::config::multi_error_lut_config>(config2.decoder_custom_args);
+  config2.decoder_custom_args =
+      cudaq::qec::decoding::config::multi_error_lut_config();
+  auto &lut_config =
+      std::get<cudaq::qec::decoding::config::multi_error_lut_config>(
+          config2.decoder_custom_args);
   lut_config.lut_error_depth = 3;
   auto map2 = config2.decoder_custom_args_to_heterogeneous_map();
   EXPECT_TRUE(map2.contains("lut_error_depth"));
@@ -404,8 +420,11 @@ TEST(DecoderConfigTest, DecoderCustomArgsToHeterogeneousMap) {
   if (is_nv_qldpc_decoder_available()) {
     cudaq::qec::decoding::config::decoder_config config3;
     config3.type = "nv-qldpc-decoder";
-    config3.decoder_custom_args = cudaq::qec::decoding::config::nv_qldpc_decoder_config();
-    auto &nv_config = std::get<cudaq::qec::decoding::config::nv_qldpc_decoder_config>(config3.decoder_custom_args);
+    config3.decoder_custom_args =
+        cudaq::qec::decoding::config::nv_qldpc_decoder_config();
+    auto &nv_config =
+        std::get<cudaq::qec::decoding::config::nv_qldpc_decoder_config>(
+            config3.decoder_custom_args);
     nv_config.use_sparsity = true;
     nv_config.max_iterations = 100;
     auto map3 = config3.decoder_custom_args_to_heterogeneous_map();
@@ -418,11 +437,15 @@ TEST(DecoderConfigTest, DecoderCustomArgsToHeterogeneousMap) {
   // Test sliding_window
   cudaq::qec::decoding::config::decoder_config config4;
   config4.type = "sliding_window";
-  config4.decoder_custom_args = cudaq::qec::decoding::config::sliding_window_config();
-  auto &sw_config = std::get<cudaq::qec::decoding::config::sliding_window_config>(config4.decoder_custom_args);
+  config4.decoder_custom_args =
+      cudaq::qec::decoding::config::sliding_window_config();
+  auto &sw_config =
+      std::get<cudaq::qec::decoding::config::sliding_window_config>(
+          config4.decoder_custom_args);
   sw_config.window_size = 5;
   sw_config.inner_decoder_name = "multi_error_lut";
-  sw_config.multi_error_lut_params = cudaq::qec::decoding::config::multi_error_lut_config();
+  sw_config.multi_error_lut_params =
+      cudaq::qec::decoding::config::multi_error_lut_config();
   sw_config.multi_error_lut_params->lut_error_depth = 2;
   auto map4 = config4.decoder_custom_args_to_heterogeneous_map();
   EXPECT_TRUE(map4.contains("window_size"));
@@ -431,14 +454,17 @@ TEST(DecoderConfigTest, DecoderCustomArgsToHeterogeneousMap) {
   EXPECT_EQ(map4.get<std::string>("inner_decoder_name"), "multi_error_lut");
 }
 
-// Test decoder_config::set_decoder_custom_args_from_heterogeneous_map for different decoder types
+// Test decoder_config::set_decoder_custom_args_from_heterogeneous_map for
+// different decoder types
 TEST(DecoderConfigTest, SetDecoderCustomArgsFromHeterogeneousMap) {
   // Test single_error_lut
   cudaq::qec::decoding::config::decoder_config config1;
   config1.type = "single_error_lut";
   cudaqx::heterogeneous_map map1;
   config1.set_decoder_custom_args_from_heterogeneous_map(map1);
-  EXPECT_TRUE(std::holds_alternative<cudaq::qec::decoding::config::single_error_lut_config>(config1.decoder_custom_args));
+  EXPECT_TRUE(std::holds_alternative<
+              cudaq::qec::decoding::config::single_error_lut_config>(
+      config1.decoder_custom_args));
 
   // Test multi_error_lut
   cudaq::qec::decoding::config::decoder_config config2;
@@ -446,8 +472,12 @@ TEST(DecoderConfigTest, SetDecoderCustomArgsFromHeterogeneousMap) {
   cudaqx::heterogeneous_map map2;
   map2.insert("lut_error_depth", 4);
   config2.set_decoder_custom_args_from_heterogeneous_map(map2);
-  EXPECT_TRUE(std::holds_alternative<cudaq::qec::decoding::config::multi_error_lut_config>(config2.decoder_custom_args));
-  auto &lut_config = std::get<cudaq::qec::decoding::config::multi_error_lut_config>(config2.decoder_custom_args);
+  EXPECT_TRUE(std::holds_alternative<
+              cudaq::qec::decoding::config::multi_error_lut_config>(
+      config2.decoder_custom_args));
+  auto &lut_config =
+      std::get<cudaq::qec::decoding::config::multi_error_lut_config>(
+          config2.decoder_custom_args);
   EXPECT_EQ(lut_config.lut_error_depth, 4);
 
   // Test nv-qldpc-decoder
@@ -458,8 +488,12 @@ TEST(DecoderConfigTest, SetDecoderCustomArgsFromHeterogeneousMap) {
     map3.insert("use_sparsity", true);
     map3.insert("max_iterations", 75);
     config3.set_decoder_custom_args_from_heterogeneous_map(map3);
-    EXPECT_TRUE(std::holds_alternative<cudaq::qec::decoding::config::nv_qldpc_decoder_config>(config3.decoder_custom_args));
-    auto &nv_config = std::get<cudaq::qec::decoding::config::nv_qldpc_decoder_config>(config3.decoder_custom_args);
+    EXPECT_TRUE(std::holds_alternative<
+                cudaq::qec::decoding::config::nv_qldpc_decoder_config>(
+        config3.decoder_custom_args));
+    auto &nv_config =
+        std::get<cudaq::qec::decoding::config::nv_qldpc_decoder_config>(
+            config3.decoder_custom_args);
     EXPECT_EQ(nv_config.use_sparsity, true);
     EXPECT_EQ(nv_config.max_iterations, 75);
   }
@@ -473,8 +507,12 @@ TEST(DecoderConfigTest, SetDecoderCustomArgsFromHeterogeneousMap) {
   cudaqx::heterogeneous_map inner_map;
   map4.insert("inner_decoder_params", inner_map);
   config4.set_decoder_custom_args_from_heterogeneous_map(map4);
-  EXPECT_TRUE(std::holds_alternative<cudaq::qec::decoding::config::sliding_window_config>(config4.decoder_custom_args));
-  auto &sw_config = std::get<cudaq::qec::decoding::config::sliding_window_config>(config4.decoder_custom_args);
+  EXPECT_TRUE(std::holds_alternative<
+              cudaq::qec::decoding::config::sliding_window_config>(
+      config4.decoder_custom_args));
+  auto &sw_config =
+      std::get<cudaq::qec::decoding::config::sliding_window_config>(
+          config4.decoder_custom_args);
   EXPECT_EQ(sw_config.window_size, 3);
   EXPECT_EQ(sw_config.inner_decoder_name, "single_error_lut");
   EXPECT_TRUE(sw_config.single_error_lut_params.has_value());
