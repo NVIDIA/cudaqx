@@ -11,6 +11,7 @@
 #include "cudaq/qis/qubit_qis.h"
 #include "cudaq/solvers/operators/operator_pool.h"
 #include "cudaq/solvers/vqe.h"
+#include "cudaq/solvers/adapt/variant.h"
 
 #include <functional>
 
@@ -121,6 +122,7 @@ public:
 ///      It can be either "warm", or "cold". [default: "cold"]
 ///  - "tol" (double): Tolerance for optimization [default: 1e-12]
 /// @return Result of the ADAPT-VQE algorithm
+[[deprecated("cudaq::solvers::adapt_vqe is deprecated; use cudaq::solvers::adapt(..., AdaptVariant::VQE, ...) instead.")]]
 static inline adapt::result
 adapt_vqe(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
           const spin_op &H, const std::vector<spin_op> &poolList,
@@ -154,6 +156,7 @@ adapt_vqe(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
 ///      It can be either "warm", or "cold". [default: "cold"]
 ///  - "tol" (double): Tolerance for optimization [default: 1e-12]
 /// @return Result of the ADAPT-VQE algorithm
+[[deprecated("cudaq::solvers::adapt_vqe is deprecated; use cudaq::solvers::adapt(..., AdaptVariant::VQE, ...) instead.")]]
 static inline adapt::result
 adapt_vqe(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
           const spin_op &H, const std::vector<spin_op> &poolList,
@@ -188,6 +191,7 @@ adapt_vqe(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
 ///      It can be either "warm", or "cold". [default: "cold"]
 ///  - "tol" (double): Tolerance for optimization [default: 1e-12]
 /// @return Result of the ADAPT-VQE algorithm
+[[deprecated("cudaq::solvers::adapt_vqe is deprecated; use cudaq::solvers::adapt(..., AdaptVariant::VQE, ...) instead.")]]
 static inline adapt::result
 adapt_vqe(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
           const spin_op &H, const std::vector<spin_op> &poolList,
@@ -197,6 +201,39 @@ adapt_vqe(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
   auto impl =
       adapt::adapt_impl::get(platform.is_simulator() ? "simulator" : "remote");
   return impl->run(initialState, H, poolList, optimizer, gradient, options);
+}
+
+// Generic ADAPT front-door with optimizer & gradient
+static inline adapt::result
+adapt(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
+      const spin_op &H, const std::vector<spin_op> &poolList,
+      const optim::optimizer &optimizer, AdaptVariant variant,
+      const std::string &gradient = "",
+      const heterogeneous_map options = heterogeneous_map()) {
+  auto opts = options;
+  opts.insert("adapt_variant", static_cast<int>(variant));
+  auto &platform = cudaq::get_platform();
+  auto impl =
+      adapt::adapt_impl::get(platform.is_simulator() ? "simulator" : "remote");
+  return impl->run(initialState, H, poolList, optimizer, gradient, opts);
+}
+
+// Overload without gradient
+static inline adapt::result
+adapt(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
+      const spin_op &H, const std::vector<spin_op> &poolList,
+      const optim::optimizer &optimizer, AdaptVariant variant,
+      const heterogeneous_map options = heterogeneous_map()) {
+  return adapt(initialState, H, poolList, optimizer, variant, "", options);
+}
+
+// Overload with default optimizer
+static inline adapt::result
+adapt(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
+      const spin_op &H, const std::vector<spin_op> &poolList,
+      AdaptVariant variant, const heterogeneous_map options = heterogeneous_map()) {
+  auto opt = optim::optimizer::get("cobyla");
+  return adapt(initialState, H, poolList, *opt, variant, "", options);
 }
 
 } // namespace cudaq::solvers
