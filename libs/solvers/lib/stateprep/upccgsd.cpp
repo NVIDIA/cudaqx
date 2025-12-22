@@ -107,21 +107,16 @@ get_upccgsd_pauli_lists(std::size_t norbitals, bool only_doubles) {
 
   std::vector<cudaq::spin_op> ops;
 
-  if (only_doubles) {
-    // Only UpCCGSD paired doubles
-    for (auto pair : upccgsd_unique_doubles(norbitals)) {
-      auto [pq, rs] = pair;
-      addUpCCGSDDoubleExcitation(ops, pq.first, pq.second, rs.first, rs.second);
-    }
-  } else {
-    // Default: add all UpCCGSD singles...
+  if (!only_doubles) {
+    // Add UpCCGSD singles
     for (auto [p, q] : upccgsd_unique_singles(norbitals))
       addUpCCGSDSingleExcitation(ops, p, q);
-    // ...and all UpCCGSD paired doubles
-    for (auto pair : upccgsd_unique_doubles(norbitals)) {
-      auto [pq, rs] = pair;
-      addUpCCGSDDoubleExcitation(ops, pq.first, pq.second, rs.first, rs.second);
-    }
+  }
+
+  // Always add UpCCGSD paired doubles
+  for (auto pair : upccgsd_unique_doubles(norbitals)) {
+    auto [pq, rs] = pair;
+    addUpCCGSDDoubleExcitation(ops, pq.first, pq.second, rs.first, rs.second);
   }
 
   std::vector<std::vector<cudaq::pauli_word>> pauliWordsList;

@@ -606,7 +606,7 @@ CUDA-QX provides several state preparations ansatz for VQE.
 
     # Get grouped Pauli words and coefficients from UpCCGSD pool
     pauliWordsList, coefficientsList = solvers.stateprep.get_upccgsd_pauli_lists(
-        numQubits, only_singles=False, only_doubles=False)
+        numQubits, only_doubles=False)
     
     @cudaq.kernel
     def ansatz(numQubits: int, numElectrons: int, thetas: list[float],

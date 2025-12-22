@@ -85,24 +85,10 @@ upccgsd::generate(const heterogeneous_map &config) const {
       const std::size_t q_alpha = 2 * q;
       const std::size_t q_beta  = 2 * q + 1;
 
-      // Sort each pair so that first > second, as required by the helper.
-      std::size_t P, Qp;
-      if (q_beta > q_alpha) {
-        P  = q_beta;
-        Qp = q_alpha;
-      } else {
-        P  = q_alpha;
-        Qp = q_beta;
-      }
-
-      std::size_t R, S;
-      if (p_beta > p_alpha) {
-        R = p_beta;
-        S = p_alpha;
-      } else {
-        R = p_alpha;
-        S = p_beta;
-      }
+      const std::size_t P = q_beta;
+      const std::size_t Qp = q_alpha;
+      const std::size_t R = p_beta;
+      const std::size_t S = p_alpha;
 
       // Use the same double-excitation JW mapping helper as UCCGSD,
       // but restricted to these UpCC-style pair indices.

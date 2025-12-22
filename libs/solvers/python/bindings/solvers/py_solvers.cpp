@@ -230,7 +230,6 @@ void addStatePrepKernels(py::module &mod) {
 
   Args:
       num_qubits (int): Number of spin orbitals (qubits).
-      only_singles (bool): If True, only single excitations.
       only_doubles (bool): If True, only double excitations.
 
   Returns:

@@ -89,8 +89,31 @@ def test_solvers_vqe_upccgsd_h2():
                        'disp': True
                    })
     energy = res.fun
+    print(energy)
+    assert np.isclose(energy, -1.1371, atol=1e-4)
 
-    hf_energy = molecule.energies.get("HF", None)
+def test_solvers_adapt_upccgsd_lih():
+    geometry = [('Li', (0.3925, 0., 0.)), ('H', (-1.1774, 0., .0))]
+    molecule = solvers.create_molecule(geometry,
+                                    'sto-3g',
+                                    0,
+                                    0,
+                                    nele_cas=4,
+                                    norb_cas=4,
+                                    casci=True)
 
-    if hf_energy is not None:
-      assert energy <= hf_energy + 1e-4
+    operators = solvers.get_operator_pool("upccgsd",
+                                        num_orbitals=molecule.n_orbitals)
+
+    numElectrons = molecule.n_electrons
+
+    @cudaq.kernel
+    def initState(q: cudaq.qview):
+        for i in range(numElectrons):
+            x(q[i])
+
+    energy, thetas, ops = solvers.adapt_vqe(initState, molecule.hamiltonian,
+                                            operators)
+
+    print(energy)
+    assert np.isclose(energy, -7.8638, atol=1e-4)
