@@ -341,7 +341,13 @@ jobs:
   
       - name: Test wheels
         run: |
-          for f in /wheels /metapackages /cudaq-wheels; do
+          # If using Custom CUDA-Q wheels, then /cudaq-wheels will exist.
+          # Otherwise, the directory will not exist, and that is ok.
+          WHEEL_DIRS="/wheels /metapackages"
+          if [ "${{ inputs.cudaq_wheels == 'Custom' }}" == "true" ]; then
+            WHEEL_DIRS+=" /cudaq-wheels"
+          fi
+          for f in $WHEEL_DIRS; do
             echo "ls $f"
             ls $f
           done
@@ -451,7 +457,13 @@ jobs:
   
       - name: Test wheels
         run: |
-          for f in /wheels /metapackages /cudaq-wheels; do
+          # If using Custom CUDA-Q wheels, then /cudaq-wheels will exist.
+          # Otherwise, the directory will not exist, and that is ok.
+          WHEEL_DIRS="/wheels /metapackages"
+          if [ "${{ inputs.cudaq_wheels == 'Custom' }}" == "true" ]; then
+            WHEEL_DIRS+=" /cudaq-wheels"
+          fi
+          for f in $WHEEL_DIRS; do
             echo "ls $f"
             ls $f
           done
