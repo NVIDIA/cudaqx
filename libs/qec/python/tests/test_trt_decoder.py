@@ -470,5 +470,199 @@ class TestTRTDecoderEdgeCases(TestTRTDecoderSetup):
         assert len(result.result) > 0
 
 
+class TestTRTDecoderBatchValidation:
+    """Tests for TRT decoder batch size validation using programmatically created engines."""
+
+    @pytest.fixture(params=[1, 2, 4])
+    def decoder_with_batch_size(self, request, tmp_path):
+        """Create TRT decoder with specific batch size using dummy MLP network."""
+        if not CUDA_AVAILABLE:
+            pytest.skip("CUDA/GPU not available")
+
+        batch_size = request.param
+        syndrome_size = 25
+        output_size = 25
+        engine_path = None
+
+        try:
+            import tensorrt as trt
+        except ImportError:
+            pytest.skip("TensorRT Python API not available")
+
+        try:
+            # Create dummy H matrix (identity matrix for syndrome_size)
+            H = np.eye(syndrome_size, dtype=np.uint8)
+
+            # Build TensorRT engine with explicit batch size
+            logger = trt.Logger(trt.Logger.WARNING)
+            builder = trt.Builder(logger)
+            network = builder.create_network(0)  # Explicit batch network
+            config = builder.create_builder_config()
+
+            # Input: [batch_size, syndrome_size]
+            input_tensor = network.add_input("syndrome", trt.float32,
+                                             (batch_size, syndrome_size))
+
+            # Simple network: Just use matrix multiplication with random weights
+            # This is sufficient for testing batch validation logic
+            # weights shape: [syndrome_size, output_size]
+            weights_data = np.random.randn(syndrome_size, output_size).astype(
+                np.float32) * 0.1
+            weights = trt.Weights(weights_data)
+            weights_const = network.add_constant((syndrome_size, output_size),
+                                                 weights)
+
+            # Matrix multiply: [batch, syndrome_size] x [syndrome_size, output_size] -> [batch, output_size]
+            matmul = network.add_matrix_multiply(input_tensor,
+                                                 trt.MatrixOperation.NONE,
+                                                 weights_const.get_output(0),
+                                                 trt.MatrixOperation.NONE)
+
+            # Output
+            output = matmul.get_output(0)
+            output.name = "correction"
+            network.mark_output(output)
+
+            # Build engine
+            serialized_engine = builder.build_serialized_network(
+                network, config)
+            if serialized_engine is None:
+                pytest.skip("Failed to build TensorRT engine")
+
+            # Save engine to file (tmp_path is automatically cleaned up by pytest)
+            engine_path = tmp_path / f"test_decoder_batch{batch_size}.trt"
+            with open(engine_path, "wb") as f:
+                f.write(serialized_engine)
+
+            # Create decoder from engine
+            try:
+                decoder = qec.get_decoder("trt_decoder",
+                                          H,
+                                          engine_load_path=str(engine_path))
+            except Exception as e:
+                pytest.skip(f"Failed to create decoder: {e}")
+
+            yield decoder, batch_size, syndrome_size, output_size
+
+        finally:
+            # Explicit cleanup (pytest's tmp_path also auto-cleans)
+            if engine_path is not None and engine_path.exists():
+                try:
+                    engine_path.unlink()
+                except Exception:
+                    pass  # tmp_path cleanup will handle it
+
+    def test_decode_batch_non_integral_multiple_should_fail(
+            self, decoder_with_batch_size):
+        """Test that decode_batch fails when syndrome count is not an integral multiple of batch size."""
+        decoder, batch_size, syndrome_size, _ = decoder_with_batch_size
+
+        if batch_size == 1:
+            pytest.skip("All counts work for batch_size=1")
+
+        # Create syndromes (batch_size + 1) - not a multiple
+        syndromes = [[float(i + j)
+                      for i in range(syndrome_size)]
+                     for j in range(batch_size + 1)]
+
+        with pytest.raises(RuntimeError, match="integral multiple"):
+            decoder.decode_batch(syndromes)
+
+    def test_decode_batch_syndrome_size_mismatch(self, decoder_with_batch_size):
+        """Test that decode_batch validates individual syndrome sizes."""
+        decoder, batch_size, syndrome_size, _ = decoder_with_batch_size
+
+        # Create one valid and one invalid syndrome
+        valid_syndrome = [0.0] * syndrome_size
+        invalid_syndrome = [0.0] * (syndrome_size + 5)
+
+        # Need batch_size syndromes, make second one wrong
+        if batch_size > 1:
+            syndromes = [valid_syndrome, invalid_syndrome
+                        ] + [valid_syndrome] * (batch_size - 2)
+        else:
+            syndromes = [invalid_syndrome]
+
+        with pytest.raises(RuntimeError, match="Syndrome size mismatch"):
+            decoder.decode_batch(syndromes)
+
+    def test_decode_single_syndrome_size_mismatch(self,
+                                                  decoder_with_batch_size):
+        """Test that decode validates syndrome size."""
+        decoder, batch_size, syndrome_size, _ = decoder_with_batch_size
+
+        # Create syndrome with wrong size
+        wrong_size_syndrome = [0.0] * (syndrome_size + 5)
+
+        with pytest.raises(RuntimeError, match="Syndrome size mismatch"):
+            decoder.decode(wrong_size_syndrome)
+
+    def test_decode_batch_empty_list(self, decoder_with_batch_size):
+        """Test that decode_batch handles empty syndrome list."""
+        decoder, _, _, _ = decoder_with_batch_size
+
+        results = decoder.decode_batch([])
+        assert len(results) == 0, "Empty batch should return empty results"
+
+    def test_decode_batch_large_integral_multiple(self,
+                                                  decoder_with_batch_size):
+        """Test batch decoding with a larger integral multiple of batch size."""
+        decoder, batch_size, syndrome_size, _ = decoder_with_batch_size
+
+        # Test with 2x and 3x the batch size
+        for multiplier in [2, 3]:
+            count = batch_size * multiplier
+            syndromes = [[float(i + j)
+                          for i in range(syndrome_size)]
+                         for j in range(count)]
+
+            results = decoder.decode_batch(syndromes)
+
+            # Verify results
+            assert len(
+                results
+            ) == count, f"Expected {count} results, got {len(results)}"
+
+            # Verify all results are valid
+            for i, result in enumerate(results):
+                assert result.converged, f"Result {i} did not converge"
+                assert len(result.result) == syndrome_size, \
+                    f"Result {i} has wrong output size: {len(result.result)}"
+
+    def test_decode_zero_padding_for_batch_gt_1(self, decoder_with_batch_size):
+        """Test that decode() zero-pads correctly for batch_size > 1 models."""
+        decoder, batch_size, syndrome_size, output_size = decoder_with_batch_size
+
+        if batch_size == 1:
+            pytest.skip("Zero-padding only applies to batch_size > 1")
+
+        # Create a non-zero syndrome
+        syndrome = [float(i * 0.1) for i in range(syndrome_size)]
+
+        # Method 1: Use decode() (should zero-pad internally)
+        result_decode = decoder.decode(syndrome)
+
+        # Method 2: Manually create zero-padded batch and use decode_batch()
+        zero_syndrome = [0.0] * syndrome_size
+        manual_batch = [syndrome] + [zero_syndrome] * (batch_size - 1)
+        result_batch = decoder.decode_batch(manual_batch)
+
+        # Results should be identical
+        assert result_decode.converged == result_batch[0].converged, \
+            "Convergence status should match"
+
+        assert len(result_decode.result) == len(result_batch[0].result), \
+            "Output sizes should match"
+
+        # Compare results (should be very close)
+        np.testing.assert_allclose(
+            result_decode.result,
+            result_batch[0].result,
+            rtol=1e-5,
+            atol=1e-7,
+            err_msg=
+            "Zero-padded decode() should match manually padded decode_batch()")
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
