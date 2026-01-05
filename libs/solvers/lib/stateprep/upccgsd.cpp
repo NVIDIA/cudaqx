@@ -75,22 +75,12 @@ upccgsd_unique_doubles(std::size_t norbitals) {
 
       // Sort each pair so that first > second, as required by the helper.
       std::size_t P, Qp;
-      if (q_beta > q_alpha) {
-        P  = q_beta;
-        Qp = q_alpha;
-      } else {
-        P  = q_alpha;
-        Qp = q_beta;
-      }
+      P  = q_beta;
+      Qp = q_alpha;
 
       std::size_t R, S;
-      if (p_beta > p_alpha) {
-        R = p_beta;
-        S = p_alpha;
-      } else {
-        R = p_alpha;
-        S = p_beta;
-      }
+      R = p_beta;
+      S = p_alpha;
 
       doubles.push_back({{P, Qp}, {R, S}});
     }
