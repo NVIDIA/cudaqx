@@ -56,6 +56,13 @@ Sliding Window Decoder
 
 .. include:: sliding_window_api.rst
 
+.. _trt_decoder_api_cpp:
+
+TensorRT Decoder
+----------------
+
+.. include:: trt_decoder_api.rst
+
 Real-Time Decoding
 ==================
 

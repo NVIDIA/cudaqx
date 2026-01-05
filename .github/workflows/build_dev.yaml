@@ -200,16 +200,16 @@ jobs:
         docker push -a ghcr.io/nvidia/cudaqx-dev
       shell: bash --noprofile --norc -euo pipefail {0}
 
-  cleanup:
-    name: Cleanup
-    needs: [build-cudaqx-dev, build-cudaqx-pydev]
-    runs-on: ubuntu-latest
-    if: ${{ github.repository == 'NVIDIA/cudaqx' }}
-    steps:
-    - name: Delete untagged images
-      uses: actions/delete-package-versions@v5
-      with: 
-        package-name: cudaqx-dev
-        package-type: 'container'
-        min-versions-to-keep: 0
-        delete-only-untagged-versions: 'true'
+  # cleanup:
+  #   name: Cleanup
+  #   needs: [build-cudaqx-dev, build-cudaqx-pydev]
+  #   runs-on: ubuntu-latest
+  #   if: ${{ github.repository == 'NVIDIA/cudaqx' }}
+  #   steps:
+  #   - name: Delete untagged images
+  #     uses: actions/delete-package-versions@v5
+  #     with: 
+  #       package-name: cudaqx-dev
+  #       package-type: 'container'
+  #       min-versions-to-keep: 0
+  #       delete-only-untagged-versions: 'true'

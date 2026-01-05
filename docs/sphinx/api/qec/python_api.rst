@@ -44,6 +44,13 @@ Sliding Window Decoder
 
 .. include:: sliding_window_api.rst
 
+.. _trt_decoder_api_python:
+
+TensorRT Decoder
+----------------
+
+.. include:: trt_decoder_api.rst
+
 .. _tensor_network_decoder_api_python:
 
 Tensor Network Decoder

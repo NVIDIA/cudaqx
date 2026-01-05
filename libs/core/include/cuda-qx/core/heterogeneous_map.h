@@ -90,7 +90,8 @@ public:
   template <typename T, typename KeyT,
             std::enable_if_t<std::is_convertible_v<KeyT, std::string>, int> = 0>
   const T get(const KeyT &key) const {
-    auto iter = items.find(key);
+    const std::string keyStr{key}; // build once to avoid repeated conversions
+    auto iter = items.find(keyStr);
     if (iter == items.end())
       throw std::runtime_error("Invalid key.");
 
@@ -119,8 +120,8 @@ public:
 
     // Can't find it, throw an exception
     throw std::runtime_error(
-        "heterogeneous_map::get() error - Invalid type or key (" +
-        std::string(key) + ").");
+        "heterogeneous_map::get() error - Invalid type or key (" + keyStr +
+        ").");
 
     return T();
   }
