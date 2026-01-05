@@ -59,6 +59,11 @@ compile_commands.json
 **/.antlr
 __pycache__/
 
+# Scientific computing generated files (PySCF, molecular calculations, etc.)
+*.chk
+*.log
+*_metadata.json
+
 # IDE files
 .vscode/*
 .theia/*
