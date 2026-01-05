@@ -175,14 +175,14 @@ void addStatePrepKernels(py::module &mod) {
       "words, "
       "and grouped coefficients.");
   cudaq::python::addDeviceKernelInterop<
-    cudaq::qview<>, const std::vector<double> &,
-    const std::vector<std::vector<cudaq::pauli_word>> &,
-    const std::vector<std::vector<double>> &>(
-    mod, "stateprep", "upccgsd",
-    "Unitary Coupled Cluster Generalized Singles and Paired Doubles Ansatz. "
-    "Takes as input the qubits, grouped rotational parameters, grouped Pauli "
-    "words, "
-    "and grouped coefficients.");
+      cudaq::qview<>, const std::vector<double> &,
+      const std::vector<std::vector<cudaq::pauli_word>> &,
+      const std::vector<std::vector<double>> &>(
+      mod, "stateprep", "upccgsd",
+      "Unitary Coupled Cluster Generalized Singles and Paired Doubles Ansatz. "
+      "Takes as input the qubits, grouped rotational parameters, grouped Pauli "
+      "words, "
+      "and grouped coefficients.");
   cudaq::python::addDeviceKernelInterop<cudaq::qview<>, double, std::size_t,
                                         std::size_t>(
       mod, "stateprep", "single_excitation",
@@ -222,8 +222,7 @@ void addStatePrepKernels(py::module &mod) {
   )");
   stateprep.def("get_upccgsd_pauli_lists",
                 &cudaq::solvers::stateprep::get_upccgsd_pauli_lists,
-                py::arg("num_qubits"),
-                py::arg("only_doubles") = false,
+                py::arg("num_qubits"), py::arg("only_doubles") = false,
                 R"(
   Generate UpCCGSD operator pool (Python-style unique singles/doubles) and extract Pauli words and coefficients grouped by excitation.
 

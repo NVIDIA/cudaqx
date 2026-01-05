@@ -8,6 +8,7 @@ import cudaq_solvers as solvers
 from scipy.optimize import minimize
 import subprocess
 
+
 def is_nvidia_gpu_available():
     """Check if NVIDIA GPU is available using nvidia-smi command."""
     try:
@@ -22,25 +23,21 @@ def is_nvidia_gpu_available():
         return False
     return False
 
+
 def test_solvers_upccgsd_exc_list():
     N = 20  # or whatever molecule.n_orbitals * 2 would be
     pauliWordsList, coefficientsList = solvers.stateprep.get_upccgsd_pauli_lists(
-        N, only_doubles=False
-    )
+        N, only_doubles=False)
     parameter_count = len(coefficientsList)
-    M = N/2
-    ideal_count = (3/2) * M * (M-1)
+    M = N / 2
+    ideal_count = (3 / 2) * M * (M - 1)
     assert parameter_count == ideal_count
     pauliWordsList, coefficientsList = solvers.stateprep.get_upccgsd_pauli_lists(
-        N, only_doubles=True
-    )
+        N, only_doubles=True)
     parameter_count = len(coefficientsList)
-    M = N/2
-    ideal_count = (1/2) * M * (M-1)
+    M = N / 2
+    ideal_count = (1 / 2) * M * (M - 1)
     assert parameter_count == ideal_count
-
-
-
 
 
 def test_solvers_vqe_upccgsd_h2():
@@ -92,18 +89,19 @@ def test_solvers_vqe_upccgsd_h2():
     print(energy)
     assert np.isclose(energy, -1.1371, atol=1e-4)
 
+
 def test_solvers_adapt_upccgsd_lih():
     geometry = [('Li', (0.3925, 0., 0.)), ('H', (-1.1774, 0., .0))]
     molecule = solvers.create_molecule(geometry,
-                                    'sto-3g',
-                                    0,
-                                    0,
-                                    nele_cas=4,
-                                    norb_cas=4,
-                                    casci=True)
+                                       'sto-3g',
+                                       0,
+                                       0,
+                                       nele_cas=4,
+                                       norb_cas=4,
+                                       casci=True)
 
     operators = solvers.get_operator_pool("upccgsd",
-                                        num_orbitals=molecule.n_orbitals)
+                                          num_orbitals=molecule.n_orbitals)
 
     numElectrons = molecule.n_electrons
 

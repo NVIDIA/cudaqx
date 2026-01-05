@@ -24,7 +24,7 @@ namespace cudaq::solvers::stateprep {
 /// [coefficients grouped by excitation]
 std::pair<std::vector<std::vector<cudaq::pauli_word>>,
           std::vector<std::vector<double>>>
-get_upccgsd_pauli_lists(std::size_t norbitals,bool only_doubles = false);
+get_upccgsd_pauli_lists(std::size_t norbitals, bool only_doubles = false);
 
 /// \pure_device_kernel
 ///

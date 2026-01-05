@@ -58,9 +58,9 @@ TEST(UPCCGSDOperatorPoolTest, CorrectNumberOfOperators) {
     auto ops = pool->generate(config);
 
     std::size_t M = 2;
-    std::size_t expected_singles = M * (M - 1);        // 2
-    std::size_t expected_doubles = M * (M - 1) / 2;    // 1
-    std::size_t expected_total   = expected_singles + expected_doubles; // 3
+    std::size_t expected_singles = M * (M - 1);                       // 2
+    std::size_t expected_doubles = M * (M - 1) / 2;                   // 1
+    std::size_t expected_total = expected_singles + expected_doubles; // 3
 
     EXPECT_EQ(ops.size(), expected_total)
         << "For 2 orbitals: expected " << expected_total << " operators";
@@ -73,9 +73,9 @@ TEST(UPCCGSDOperatorPoolTest, CorrectNumberOfOperators) {
     auto ops = pool->generate(config);
 
     std::size_t M = 3;
-    std::size_t expected_singles = M * (M - 1);        // 6
-    std::size_t expected_doubles = M * (M - 1) / 2;    // 3
-    std::size_t expected_total   = expected_singles + expected_doubles; // 9
+    std::size_t expected_singles = M * (M - 1);                       // 6
+    std::size_t expected_doubles = M * (M - 1) / 2;                   // 3
+    std::size_t expected_total = expected_singles + expected_doubles; // 9
 
     EXPECT_EQ(ops.size(), expected_total)
         << "For 3 orbitals: expected " << expected_total << " operators";
@@ -88,9 +88,9 @@ TEST(UPCCGSDOperatorPoolTest, CorrectNumberOfOperators) {
     auto ops = pool->generate(config);
 
     std::size_t M = 4;
-    std::size_t expected_singles = M * (M - 1);        // 12
-    std::size_t expected_doubles = M * (M - 1) / 2;    // 6
-    std::size_t expected_total   = expected_singles + expected_doubles; // 18
+    std::size_t expected_singles = M * (M - 1);                       // 12
+    std::size_t expected_doubles = M * (M - 1) / 2;                   // 6
+    std::size_t expected_total = expected_singles + expected_doubles; // 18
 
     EXPECT_EQ(ops.size(), expected_total)
         << "For 4 orbitals: expected " << expected_total << " operators";
@@ -135,8 +135,8 @@ TEST(UPCCGSDOperatorPoolTest, CorrectSinglesAndDoublesCount) {
   auto [singles_count, doubles_count] = countSinglesAndDoubles(ops);
 
   std::size_t M = 3;
-  std::size_t expected_singles = M * (M - 1);        // 6
-  std::size_t expected_doubles = M * (M - 1) / 2;    // 3
+  std::size_t expected_singles = M * (M - 1);     // 6
+  std::size_t expected_doubles = M * (M - 1) / 2; // 3
 
   EXPECT_EQ(singles_count, expected_singles)
       << "Expected " << expected_singles << " single excitations";
@@ -216,17 +216,16 @@ TEST(UPCCGSDOperatorPoolTest, ConsistentWithStateprep) {
   }
 }
 
-
 // ============================================================================
 // Test 7: Doubles Only Option (via stateprep)
 // ============================================================================
 TEST(UPCCGSDOperatorPoolTest, DoublesOnlyGeneration) {
-  std::size_t M = 3;           // spatial orbitals
-  std::size_t n_qubits = 2*M;  // spin orbitals
+  std::size_t M = 3;            // spatial orbitals
+  std::size_t n_qubits = 2 * M; // spin orbitals
 
   auto [pauli_lists, coeff_lists] =
-      cudaq::solvers::stateprep::get_upccgsd_pauli_lists(
-          n_qubits, /*only_doubles=*/true);
+      cudaq::solvers::stateprep::get_upccgsd_pauli_lists(n_qubits,
+                                                         /*only_doubles=*/true);
 
   std::size_t expected_doubles = M * (M - 1) / 2; // paired αβ→αβ
   EXPECT_EQ(pauli_lists.size(), expected_doubles)
@@ -241,10 +240,10 @@ TEST(UPCCGSDOperatorPoolTest, ScalingBehavior) {
 
   // (M = numOrbitals, expected total count)
   std::vector<std::pair<std::size_t, std::size_t>> test_cases = {
-      {2, 3},   // M=2: singles=2, doubles=1
-      {3, 9},   // M=3: singles=6, doubles=3
-      {4, 18},  // M=4: singles=12, doubles=6
-      {5, 30},  // M=5: singles=20, doubles=10
+      {2, 3},  // M=2: singles=2, doubles=1
+      {3, 9},  // M=3: singles=6, doubles=3
+      {4, 18}, // M=4: singles=12, doubles=6
+      {5, 30}, // M=5: singles=20, doubles=10
   };
 
   for (auto [M, expected_count] : test_cases) {
@@ -254,11 +253,10 @@ TEST(UPCCGSDOperatorPoolTest, ScalingBehavior) {
 
     std::size_t singles = M * (M - 1);
     std::size_t doubles = M * (M - 1) / 2;
-    std::size_t total   = singles + doubles;
+    std::size_t total = singles + doubles;
 
-    EXPECT_EQ(ops.size(), total)
-        << "For M=" << M << " orbitals: expected "
-        << total << " operators, got " << ops.size();
+    EXPECT_EQ(ops.size(), total) << "For M=" << M << " orbitals: expected "
+                                 << total << " operators, got " << ops.size();
     EXPECT_EQ(total, expected_count)
         << "Formula mismatch for M=" << M << " orbitals";
   }
@@ -361,7 +359,6 @@ TEST(UPCCGSDOperatorPoolTest, LargeSystemPerformance) {
       << "Generation took too long: " << duration.count() << "ms";
 
   std::size_t M = 8;
-  std::size_t expected =
-      M * (M - 1) + M * (M - 1) / 2; // singles + doubles
+  std::size_t expected = M * (M - 1) + M * (M - 1) / 2; // singles + doubles
   EXPECT_EQ(ops.size(), expected);
 }

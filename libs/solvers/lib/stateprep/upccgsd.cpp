@@ -8,13 +8,12 @@
 #include "cudaq/solvers/stateprep/upccgsd.h"
 #include "cudaq/solvers/operators/uccgsd_excitation_utils.h"
 #include <algorithm>
-#include <tuple>
 #include <stdexcept>
+#include <tuple>
 
 namespace cudaq::solvers::stateprep {
 
 // Wrapper helpers that reuse the shared JW excitation utilities
-
 
 static void addUpCCGSDSingleExcitation(std::vector<cudaq::spin_op> &ops,
                                        std::size_t p, std::size_t q) {
@@ -69,13 +68,13 @@ upccgsd_unique_doubles(std::size_t norbitals) {
     for (std::size_t q = p + 1; q < numSpatialOrbitals; ++q) {
       // Interleaved spin-orbital indices for spatial orbitals p and q
       const std::size_t p_alpha = 2 * p;
-      const std::size_t p_beta  = 2 * p + 1;
+      const std::size_t p_beta = 2 * p + 1;
       const std::size_t q_alpha = 2 * q;
-      const std::size_t q_beta  = 2 * q + 1;
+      const std::size_t q_beta = 2 * q + 1;
 
       // Sort each pair so that first > second, as required by the helper.
       std::size_t P, Qp;
-      P  = q_beta;
+      P = q_beta;
       Qp = q_alpha;
 
       std::size_t R, S;

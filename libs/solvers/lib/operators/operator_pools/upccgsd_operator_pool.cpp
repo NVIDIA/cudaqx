@@ -27,7 +27,6 @@ upccgsd::generate(const heterogeneous_map &config) const {
 
   std::vector<cudaq::spin_op> ops;
 
- 
   // 1) Spin-preserving generalized singles on α and β
   //
   // We use generate_uccgsd_singles(numQubits) to get all unordered pairs
@@ -81,9 +80,9 @@ upccgsd::generate(const heterogeneous_map &config) const {
     for (std::size_t q = p + 1; q < numOrbitals; ++q) {
       // Interleaved spin-orbital indices for p and q
       const std::size_t p_alpha = 2 * p;
-      const std::size_t p_beta  = 2 * p + 1;
+      const std::size_t p_beta = 2 * p + 1;
       const std::size_t q_alpha = 2 * q;
-      const std::size_t q_beta  = 2 * q + 1;
+      const std::size_t q_beta = 2 * q + 1;
 
       const std::size_t P = q_beta;
       const std::size_t Qp = q_alpha;
