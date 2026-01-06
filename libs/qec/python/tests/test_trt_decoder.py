@@ -23,6 +23,13 @@ import cudaq_qec as qec
 import os
 import tempfile
 
+# TensorRT imports (optional, for building engines)
+try:
+    import tensorrt as trt
+    TRT_AVAILABLE = True
+except ImportError:
+    TRT_AVAILABLE = False
+
 # Test data constants
 NUM_TEST_SAMPLES = 200
 NUM_DETECTORS = 24
@@ -44,6 +51,142 @@ def _is_cuda_available():
 
 
 CUDA_AVAILABLE = _is_cuda_available()
+
+
+def build_simple_mlp_engine(input_size,
+                            hidden_size,
+                            output_size,
+                            engine_path,
+                            use_dynamic_shapes=False):
+    """
+    Build a simple MLP TensorRT engine using the TensorRT Python API.
+    
+    Architecture: Input -> Dense(hidden_size) -> ReLU -> Dense(output_size)
+    
+    Args:
+        input_size: Size of input layer
+        hidden_size: Size of hidden layer
+        output_size: Size of output layer
+        engine_path: Path where to save the engine file
+        use_dynamic_shapes: If True, creates engine with dynamic shapes (incompatible with CUDA graphs)
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    if not TRT_AVAILABLE:
+        return False
+
+    try:
+        # Create logger and builder
+        logger = trt.Logger(trt.Logger.WARNING)
+        builder = trt.Builder(logger)
+        network = builder.create_network(
+            1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
+        config = builder.create_builder_config()
+
+        # Set memory pool limit (1GB)
+        config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, 1 << 30)
+
+        # Define input tensor (with multiple optimization profiles if requested)
+        if use_dynamic_shapes:
+            # Use dynamic shapes with MULTIPLE optimization profiles
+            # According to trt_decoder.cpp: multiple profiles = CUDA graphs not supported
+            input_shape = (-1, input_size)
+            input_tensor = network.add_input(name="input",
+                                             dtype=trt.float32,
+                                             shape=input_shape)
+
+            # Add MULTIPLE optimization profiles (this makes CUDA graphs unsupported)
+            # Profile 1: batch size = 1
+            profile1 = builder.create_optimization_profile()
+            profile1.set_shape("input",
+                               min=(1, input_size),
+                               opt=(1, input_size),
+                               max=(1, input_size))
+            config.add_optimization_profile(profile1)
+
+            # Profile 2: batch size = 2 (adding a second profile disables CUDA graphs)
+            profile2 = builder.create_optimization_profile()
+            profile2.set_shape("input",
+                               min=(2, input_size),
+                               opt=(2, input_size),
+                               max=(2, input_size))
+            config.add_optimization_profile(profile2)
+        else:
+            # Static shape
+            input_tensor = network.add_input(name="input",
+                                             dtype=trt.float32,
+                                             shape=(1, input_size))
+
+        # Layer 1: Fully Connected (Input -> Hidden) using matrix multiply
+        # Initialize random weights and biases
+        np.random.seed(42)
+        # Weights shape for matrix multiply: (input_size, hidden_size) for op: input @ weights
+        weights1 = np.random.randn(input_size, hidden_size).astype(np.float32)
+        bias1 = np.random.randn(1, hidden_size).astype(np.float32)
+
+        # Add weights as constant
+        weights1_const = network.add_constant(shape=(input_size, hidden_size),
+                                              weights=trt.Weights(weights1))
+
+        # Matrix multiply: (1, input_size) @ (input_size, hidden_size) = (1, hidden_size)
+        mm1 = network.add_matrix_multiply(input_tensor,
+                                          trt.MatrixOperation.NONE,
+                                          weights1_const.get_output(0),
+                                          trt.MatrixOperation.NONE)
+
+        # Add bias
+        bias1_const = network.add_constant(shape=(1, hidden_size),
+                                           weights=trt.Weights(bias1))
+        fc1 = network.add_elementwise(mm1.get_output(0),
+                                      bias1_const.get_output(0),
+                                      trt.ElementWiseOperation.SUM)
+
+        # Activation: ReLU
+        relu = network.add_activation(input=fc1.get_output(0),
+                                      type=trt.ActivationType.RELU)
+
+        # Layer 2: Fully Connected (Hidden -> Output) using matrix multiply
+        weights2 = np.random.randn(hidden_size, output_size).astype(np.float32)
+        bias2 = np.random.randn(1, output_size).astype(np.float32)
+
+        # Add weights as constant
+        weights2_const = network.add_constant(shape=(hidden_size, output_size),
+                                              weights=trt.Weights(weights2))
+
+        # Matrix multiply: (1, hidden_size) @ (hidden_size, output_size) = (1, output_size)
+        mm2 = network.add_matrix_multiply(relu.get_output(0),
+                                          trt.MatrixOperation.NONE,
+                                          weights2_const.get_output(0),
+                                          trt.MatrixOperation.NONE)
+
+        # Add bias
+        bias2_const = network.add_constant(shape=(1, output_size),
+                                           weights=trt.Weights(bias2))
+        fc2 = network.add_elementwise(mm2.get_output(0),
+                                      bias2_const.get_output(0),
+                                      trt.ElementWiseOperation.SUM)
+
+        # Mark output
+        output_tensor = fc2.get_output(0)
+        output_tensor.name = "output"
+        network.mark_output(tensor=output_tensor)
+
+        # Build engine
+        serialized_engine = builder.build_serialized_network(network, config)
+        if serialized_engine is None:
+            return False
+
+        # Save engine to file
+        with open(engine_path, 'wb') as f:
+            f.write(serialized_engine)
+
+        return True
+
+    except Exception as e:
+        print(f"Failed to build TensorRT engine: {e}")
+        return False
+
 
 # Test inputs - 30 test cases with 24 detectors each
 TEST_INPUTS = [[
@@ -468,6 +611,229 @@ class TestTRTDecoderEdgeCases(TestTRTDecoderSetup):
 
         assert hasattr(result, 'result')
         assert len(result.result) > 0
+
+    def test_performance_comparison_cuda_graph_vs_traditional(self):
+        """
+        Test performance comparison: CUDA Graph vs Traditional execution.
+        
+        This test benchmarks the TRT decoder with CUDA graphs enabled vs disabled
+        to measure the performance improvement from graph optimization.
+        """
+        if not os.path.exists(ONNX_MODEL_PATH) or not CUDA_AVAILABLE:
+            pytest.skip("ONNX model file not found or CUDA/GPU not available")
+
+        # Create dummy H matrix
+        num_detectors = NUM_DETECTORS
+        H = np.eye(num_detectors, dtype=np.uint8)
+
+        # Create test syndrome (using first test input)
+        syndrome = TEST_INPUTS[0]
+
+        # =====================================================================
+        # Create decoder WITH CUDA graphs (default)
+        # =====================================================================
+        try:
+            decoder_cuda_graph = qec.get_decoder('trt_decoder',
+                                                 H,
+                                                 onnx_load_path=ONNX_MODEL_PATH,
+                                                 precision='fp16',
+                                                 use_cuda_graph=True)
+        except Exception as e:
+            pytest.skip(f"Failed to create CUDA graph decoder: {e}")
+
+        # =====================================================================
+        # Create decoder WITHOUT CUDA graphs (traditional)
+        # =====================================================================
+        try:
+            decoder_traditional = qec.get_decoder(
+                'trt_decoder',
+                H,
+                onnx_load_path=ONNX_MODEL_PATH,
+                precision='fp16',
+                use_cuda_graph=False)
+        except Exception as e:
+            pytest.skip(f"Failed to create traditional decoder: {e}")
+
+        # =====================================================================
+        # Warm-up phase (for fair comparison)
+        # =====================================================================
+        warmup_iterations = 5
+        print("\n=== Warming up decoders ===")
+
+        for _ in range(warmup_iterations):
+            decoder_cuda_graph.decode(syndrome)
+            decoder_traditional.decode(syndrome)
+
+        # =====================================================================
+        # Benchmark CUDA Graph Executor
+        # =====================================================================
+        benchmark_iterations = 200
+        print("Benchmarking CUDA Graph executor...")
+
+        import time
+        start_cuda_graph = time.perf_counter()
+        for i in range(benchmark_iterations):
+            result = decoder_cuda_graph.decode(syndrome)
+            assert result.converged, f"CUDA graph decoder failed at iteration {i}"
+        end_cuda_graph = time.perf_counter()
+
+        duration_cuda_graph = (end_cuda_graph -
+                               start_cuda_graph) * 1_000_000  # Convert to μs
+        avg_time_cuda_graph = duration_cuda_graph / benchmark_iterations
+
+        # =====================================================================
+        # Benchmark Traditional Executor
+        # =====================================================================
+        print("Benchmarking Traditional executor...")
+
+        start_traditional = time.perf_counter()
+        for i in range(benchmark_iterations):
+            result = decoder_traditional.decode(syndrome)
+            assert result.converged, f"Traditional decoder failed at iteration {i}"
+        end_traditional = time.perf_counter()
+
+        duration_traditional = (end_traditional -
+                                start_traditional) * 1_000_000  # Convert to μs
+        avg_time_traditional = duration_traditional / benchmark_iterations
+
+        # =====================================================================
+        # Calculate and report performance improvement
+        # =====================================================================
+        speedup = avg_time_traditional / avg_time_cuda_graph
+        improvement_percent = ((avg_time_traditional - avg_time_cuda_graph) /
+                               avg_time_traditional) * 100.0
+
+        print("\n=== Performance Comparison Results ===")
+        print(f"Iterations: {benchmark_iterations}")
+        print(f"CUDA Graph avg time:   {avg_time_cuda_graph:.2f} μs")
+        print(f"Traditional avg time:  {avg_time_traditional:.2f} μs")
+        print(f"Speedup:               {speedup:.2f}x")
+        print(f"Improvement:           {improvement_percent:.2f}%")
+        print("======================================\n")
+
+        # =====================================================================
+        # Performance assertions
+        # =====================================================================
+        # CUDA graphs should provide at least 5% improvement
+        # (Conservative threshold - typical improvement is 10-20%)
+        assert speedup > 1.05, (
+            f"CUDA graph execution should be at least 5% faster than traditional. "
+            f"Speedup: {speedup:.2f}x, Improvement: {improvement_percent:.2f}%")
+
+        # Sanity check: both should be reasonably fast (< 100ms per decode)
+        assert avg_time_cuda_graph < 100000.0, (
+            f"CUDA graph execution unexpectedly slow: {avg_time_cuda_graph:.2f} μs"
+        )
+        assert avg_time_traditional < 100000.0, (
+            f"Traditional execution unexpectedly slow: {avg_time_traditional:.2f} μs"
+        )
+
+    def test_cuda_graph_vs_traditional_correctness(self):
+        """
+        Test that CUDA graph and traditional executors produce identical results.
+        
+        This test builds a simple MLP engine and verifies that both execution
+        paths (CUDA graph and traditional) produce the same output for random inputs.
+        """
+        if not CUDA_AVAILABLE or not TRT_AVAILABLE:
+            pytest.skip(
+                "CUDA/GPU or TensorRT Python API not available for this test")
+
+        # Define network architecture
+        input_size = NUM_DETECTORS  # 24
+        hidden_size = 16
+        output_size = NUM_DETECTORS  # 24
+
+        # Create temporary directory for engine file
+        with tempfile.TemporaryDirectory() as tmpdir:
+            engine_path = os.path.join(tmpdir, "test_mlp.engine")
+
+            # Build TensorRT engine
+            print(
+                f"\nBuilding simple MLP engine ({input_size}->{hidden_size}->{output_size})..."
+            )
+            success = build_simple_mlp_engine(input_size, hidden_size,
+                                              output_size, engine_path)
+            if not success:
+                pytest.skip("Failed to build TensorRT engine")
+
+            assert os.path.exists(
+                engine_path), "Engine file was not created successfully"
+
+            # Create dummy H matrix
+            H = np.eye(input_size, dtype=np.uint8)
+
+            # =================================================================
+            # Create decoder WITH CUDA graphs
+            # =================================================================
+            try:
+                decoder_cuda_graph = qec.get_decoder(
+                    'trt_decoder',
+                    H,
+                    engine_load_path=engine_path,
+                    use_cuda_graph=True)
+            except Exception as e:
+                pytest.skip(f"Failed to create CUDA graph decoder: {e}")
+
+            # =================================================================
+            # Create decoder WITHOUT CUDA graphs (traditional)
+            # =================================================================
+            try:
+                decoder_traditional = qec.get_decoder(
+                    'trt_decoder',
+                    H,
+                    engine_load_path=engine_path,
+                    use_cuda_graph=False)
+            except Exception as e:
+                pytest.skip(f"Failed to create traditional decoder: {e}")
+
+            # =================================================================
+            # Test with multiple random inputs
+            # =================================================================
+            num_test_cases = 10
+            np.random.seed(123)
+
+            print(f"Testing correctness with {num_test_cases} random inputs...")
+
+            for test_idx in range(num_test_cases):
+                # Generate random syndrome (values between -1 and 1)
+                random_syndrome = (np.random.rand(input_size) * 2 - 1).astype(
+                    np.float32).tolist()
+
+                # Run both decoders
+                result_cuda_graph = decoder_cuda_graph.decode(random_syndrome)
+                result_traditional = decoder_traditional.decode(random_syndrome)
+
+                # Verify both converged (if applicable)
+                assert result_cuda_graph.converged == result_traditional.converged, (
+                    f"Test {test_idx}: Convergence status differs: "
+                    f"CUDA graph={result_cuda_graph.converged}, "
+                    f"Traditional={result_traditional.converged}")
+
+                # Convert results to numpy arrays for comparison
+                result_cuda_np = np.array(result_cuda_graph.result)
+                result_trad_np = np.array(result_traditional.result)
+
+                # Verify results are the same length
+                assert len(result_cuda_np) == len(result_trad_np), (
+                    f"Test {test_idx}: Result lengths differ: "
+                    f"CUDA graph={len(result_cuda_np)}, "
+                    f"Traditional={len(result_trad_np)}")
+
+                # Verify results are numerically identical (or very close)
+                max_diff = np.max(np.abs(result_cuda_np - result_trad_np))
+                assert max_diff < 1e-5, (
+                    f"Test {test_idx}: Results differ by {max_diff:.2e}. "
+                    f"CUDA graph result: {result_cuda_np[:5]}..., "
+                    f"Traditional result: {result_trad_np[:5]}...")
+
+                print(
+                    f"  Test {test_idx + 1}/{num_test_cases}: PASS (max_diff={max_diff:.2e})"
+                )
+
+            print(
+                "✓ All tests passed: CUDA graph and traditional execution produce identical results"
+            )
 
 
 if __name__ == "__main__":

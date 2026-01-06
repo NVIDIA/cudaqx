@@ -98,6 +98,24 @@ void bindDecodingConfig(py::module &mod) {
                   &multi_error_lut_config::from_heterogeneous_map,
                   py::arg("map"));
 
+  // trt_decoder_config
+  py::class_<config::trt_decoder_config>(mod_cfg, "trt_decoder_config",
+                                         "TensorRT decoder configuration.")
+      .def(py::init<>())
+      .def(py::init([](const cudaqx::heterogeneous_map &map) {
+             return trt_decoder_config::from_heterogeneous_map(map);
+           }),
+           py::arg("map"))
+      .def_readwrite("onnx_load_path", &trt_decoder_config::onnx_load_path)
+      .def_readwrite("engine_load_path", &trt_decoder_config::engine_load_path)
+      .def_readwrite("engine_save_path", &trt_decoder_config::engine_save_path)
+      .def_readwrite("precision", &trt_decoder_config::precision)
+      .def_readwrite("memory_workspace", &trt_decoder_config::memory_workspace)
+      .def("to_heterogeneous_map", &trt_decoder_config::to_heterogeneous_map,
+           py::return_value_policy::move)
+      .def_static("from_heterogeneous_map",
+                  &trt_decoder_config::from_heterogeneous_map, py::arg("map"));
+
   // single_error_lut_config
   py::class_<config::single_error_lut_config>(
       mod_cfg, "single_error_lut_config",

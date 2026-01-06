@@ -166,6 +166,16 @@ FIELDS_MULTI_ERROR_LUT = {
     "lut_error_depth": (int, 1, 3),
 }
 
+# trt_decoder_config tests
+
+FIELDS_TRT_DECODER = {
+    "onnx_load_path": (str, "/path/to/model.onnx", "/other/path/model.onnx"),
+    "engine_load_path": (str, "/path/to/engine.trt", "/other/engine.trt"),
+    "engine_save_path": (str, "/path/to/save.trt", "/other/save.trt"),
+    "precision": (str, "fp16", "fp32"),
+    "memory_workspace": (int, 1073741824, 2147483648),  # 1GB, 2GB
+}
+
 
 def test_multi_error_lut_config_defaults_are_none():
     m = qec.multi_error_lut_config()
@@ -193,6 +203,74 @@ def test_configure_valid_multi_error_lut_decoders():
     qec.finalize_decoders()
     assert isinstance(ret, int)
     assert ret == 0
+
+
+# trt_decoder_config tests
+
+
+def test_trt_decoder_config_defaults_are_none():
+    trt = qec.trt_decoder_config()
+    for name in FIELDS_TRT_DECODER:
+        assert getattr(trt, name) is None, f"Expected {name} to default to None"
+
+
+@pytest.mark.parametrize("name, meta", list(FIELDS_TRT_DECODER.items()))
+def test_trt_decoder_config_set_and_get_each_optional(name, meta):
+    trt = qec.trt_decoder_config()
+
+    py_type, sample_val, alt_val = meta
+
+    # Initially None
+    assert getattr(trt, name) is None
+
+    # Set to a valid value and get back
+    setattr(trt, name, sample_val)
+    got = getattr(trt, name)
+    assert isinstance(got, py_type)
+    assert got == sample_val
+
+    # Change to an alternate valid value
+    setattr(trt, name, alt_val)
+    got2 = getattr(trt, name)
+    assert got2 == alt_val
+
+    # Set value to None
+    setattr(trt, name, None)
+    assert getattr(trt, name) is None
+
+
+def test_trt_decoder_config_yaml_roundtrip():
+    trt = qec.trt_decoder_config()
+    trt.engine_load_path = "/path/to/engine.trt"
+    trt.precision = "fp16"
+    trt.memory_workspace = 1073741824  # 1GB
+
+    dc = qec.decoder_config()
+    dc.id = 0
+    dc.type = "trt_decoder"
+    dc.block_size = 10
+    dc.syndrome_size = 3
+    dc.H_sparse = [1, 2, 3, -1, 6, 7, 8, -1, -1]
+    dc.set_decoder_custom_args(trt)
+
+    yaml_text = dc.to_yaml_str()
+    assert isinstance(yaml_text, str) and len(yaml_text) > 0
+
+    dc2 = qec.decoder_config.from_yaml_str(yaml_text)
+
+    # Basic scalar fields
+    assert dc2 is not None
+    assert dc2.id == 0
+    assert dc2.type == "trt_decoder"
+    assert dc2.block_size == 10
+    assert dc2.syndrome_size == 3
+
+    # Recover TRT config from decoder_custom_args
+    trt2 = dc2.decoder_custom_args
+    assert trt2 is not None
+    assert trt2.engine_load_path == "/path/to/engine.trt"
+    assert trt2.precision == "fp16"
+    assert trt2.memory_workspace == 1073741824
 
 
 # decoder_config tests
