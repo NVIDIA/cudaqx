@@ -7,6 +7,7 @@ CUDA-Q Solvers C++ API
 .. doxygenclass:: cudaq::solvers::spin_complement_gsd 
 .. doxygenclass:: cudaq::solvers::uccsd 
 .. doxygenclass:: cudaq::solvers::uccgsd 
+.. doxygenclass:: cudaq::solvers::ceo 
 .. doxygenclass:: cudaq::solvers::qaoa_pool 
 
 .. doxygenfunction:: cudaq::solvers::get_operator_pool 
@@ -70,6 +71,8 @@ CUDA-Q Solvers C++ API
 .. doxygenfunction:: cudaq::solvers::stateprep::uccsd(cudaq::qview<>, const std::vector<double>&, std::size_t)
 .. doxygenfunction:: cudaq::solvers::stateprep::get_uccgsd_pauli_lists
 .. doxygenfunction:: cudaq::solvers::stateprep::uccgsd(cudaq::qview<>, const std::vector<double>&, const std::vector<std::vector<cudaq::pauli_word>>&, const std::vector<std::vector<double>>&)
+.. doxygenfunction:: cudaq::solvers::stateprep::get_ceo_pauli_lists
+.. doxygenfunction:: cudaq::solvers::stateprep::ceo
 
 
 .. doxygenstruct:: cudaq::solvers::qaoa_result

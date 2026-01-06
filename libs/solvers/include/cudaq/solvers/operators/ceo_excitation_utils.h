@@ -75,8 +75,10 @@ void addCEOSingleExcitation(std::vector<cudaq::spin_op> &ops, std::size_t p,
 /// @brief Add CEO double excitation operators to the operator pool
 /// @details Generates two operators for indices (p, q, r, s):
 ///          A: 0.25 * (X_r X_p X_s Y_q - X_r X_p Y_s X_q + Y_r Y_p X_s Y_q -
-///          Y_r Y_p Y_s X_q) B: 0.25 * (X_r Y_p X_s X_q + X_r Y_p Y_s Y_q - Y_r
-///          X_p X_s X_q - Y_r X_p Y_s Y_q)
+///             Y_r Y_p Y_s X_q)
+///
+///          B: 0.25 * (X_r Y_p X_s X_q + X_r Y_p Y_s Y_q - Y_r X_p X_s X_q -
+///             Y_r X_p Y_s Y_q)
 ///          These operators correspond to the OVP-CEO operators in the CEO
 ///          paper (https://arxiv.org/abs/2407.08696). They combine qubit
 ///          excitation operators Q_1 and Q_2 for the same 4 spin-orbitals as A
