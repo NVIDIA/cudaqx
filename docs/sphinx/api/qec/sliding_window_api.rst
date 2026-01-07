@@ -32,6 +32,14 @@
     assumptions about temporal correlations or periodicity in the underlying
     noise process.
 
+    **Streaming Syndrome Interface**
+    
+    For real-time applications, the decoder provides an ``enqueue_syndrome()``
+    method that accepts syndrome data one round at a time. This allows the host
+    to feed syndrome measurements as they arrive without waiting for all rounds
+    to complete. The decoder automatically manages internal buffering and triggers
+    window decodes at appropriate boundaries.
+
     References:
     `Toward Low-latency Iterative Decoding of QLDPC Codes Under Circuit-Level Noise <https://arxiv.org/abs/2403.18901>`_
 
