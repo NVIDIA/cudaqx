@@ -1,5 +1,5 @@
-/****************************************************************-*- C++ -*-****
- * Copyright (c) 2024 NVIDIA Corporation & Affiliates.                         *
+/*******************************************************************************
+ * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -8,8 +8,11 @@
 
 #pragma once
 
-#include "operators/block_encoding.h"
-#include "operators/graph/clique.h"
-#include "operators/graph/max_cut.h"
-#include "operators/molecule.h"
-#include "operators/operator_pool.h"
+#include <pybind11/pybind11.h>
+
+namespace cudaq::solvers {
+
+/// @brief Bind block encoding and quantum exact lanczos functionality to Python
+void bindBlockEncoding(pybind11::module &mod);
+
+} // namespace cudaq::solvers
