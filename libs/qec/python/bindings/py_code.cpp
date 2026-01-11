@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2022 - 2025 NVIDIA Corporation & Affiliates.                  *
+ * Copyright (c) 2022 - 2026 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -12,12 +12,12 @@
 #include <pybind11/operators.h>
 #include <pybind11/stl.h>
 
+#include "common/DeviceCodeRegistry.h"
 #include "common/Logger.h"
 
 #include "cudaq/python/PythonCppInterop.h"
 #include "cudaq/qec/experiments.h"
 #include "cudaq/qec/version.h"
-#include "cudaq/utils/registry.h"
 
 #include "cuda-qx/core/kwargs_utils.h"
 #include "type_casters.h"
