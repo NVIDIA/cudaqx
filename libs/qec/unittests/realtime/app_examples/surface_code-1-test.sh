@@ -120,9 +120,63 @@ fi
 
 echo "Test completed for distance $DISTANCE with return code $return_code"
 
+# ============================================================================ #
+# Test --save_syndrome and --load_syndrome functionality
+# ============================================================================ #
+echo ""
+echo "=== Testing syndrome save/load functionality ==="
+
+SYNDROME_FILE=syndromes-${FULL_SUFFIX}.txt
+SYNDROME_NUM_SHOTS=10  # Use fewer shots for syndrome test
+
+# Step 1: Run simulation with --save_syndrome to capture syndrome data
+# Use local executable for syndrome capture (works with any platform)
+echo "Step 1: Saving syndromes to $SYNDROME_FILE"
+$EXE_PATH1 --distance $DISTANCE --num_shots $SYNDROME_NUM_SHOTS --load_dem $CONFIG_FILE --num_rounds $NUM_ROUNDS --decoder_window $DECODER_WINDOW --decoder_type $DECODER_TYPE --sw_window_size $SW_WINDOW_SIZE --sw_step_size $SW_STEP_SIZE --save_syndrome $SYNDROME_FILE |& tee save_syndrome-$FULL_SUFFIX.log
+
+# Check that the syndrome file was created
+if [[ ! -f "$SYNDROME_FILE" ]]; then
+  echo "Error: Syndrome file was not created"
+  return_code=1
+else
+  echo "Syndrome file created successfully"
+  
+  # Check that the file contains expected markers
+  if grep -q "SHOT_START" $SYNDROME_FILE && grep -q "CORRECTIONS_START" $SYNDROME_FILE; then
+    echo "Syndrome file contains expected markers"
+  else
+    echo "Error: Syndrome file missing expected markers"
+    return_code=1
+  fi
+  
+  # Step 2: Replay syndromes with --load_syndrome
+  # Use local executable for replay (doesn't need quantum simulation)
+  echo "Step 2: Replaying syndromes from $SYNDROME_FILE"
+  $EXE_PATH1 --distance $DISTANCE --num_shots $SYNDROME_NUM_SHOTS --load_dem $CONFIG_FILE --num_rounds $NUM_ROUNDS --decoder_window $DECODER_WINDOW --decoder_type $DECODER_TYPE --sw_window_size $SW_WINDOW_SIZE --sw_step_size $SW_STEP_SIZE --load_syndrome $SYNDROME_FILE |& tee load_syndrome-$FULL_SUFFIX.log
+  
+  # Check for successful replay
+  if grep -q "Replay complete" load_syndrome-$FULL_SUFFIX.log; then
+    echo "Syndrome replay completed successfully"
+    
+    # Check if corrections matched (if verification was performed)
+    if grep -q "SUCCESS: All corrections match" load_syndrome-$FULL_SUFFIX.log; then
+      echo "Correction verification: PASSED"
+    elif grep -q "mismatched" load_syndrome-$FULL_SUFFIX.log; then
+      echo "Error: Corrections did not match during replay"
+      return_code=1
+    fi
+  else
+    echo "Error: Syndrome replay did not complete"
+    return_code=1
+  fi
+fi
+
+echo "Syndrome save/load test completed"
+
 # Remove the log files and the config file, unless an environment variable is set.
 if [[ -z "${KEEP_LOG_FILES}" ]]; then
   rm -f load_dem-$FULL_SUFFIX.log save_dem-$FULL_SUFFIX.log server-$FULL_SUFFIX.log $CONFIG_FILE
+  rm -f save_syndrome-$FULL_SUFFIX.log load_syndrome-$FULL_SUFFIX.log $SYNDROME_FILE
 fi
 
 exit $return_code

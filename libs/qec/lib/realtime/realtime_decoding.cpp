@@ -13,7 +13,31 @@
 #include "cudaq/qec/realtime/decoding_config.h"
 #include <set>
 
+// Optional syndrome capture callback for --save_syndrome feature
+namespace {
+using SyndromeCaptureCallback = void (*)(const uint8_t *, size_t);
+SyndromeCaptureCallback g_syndrome_capture_callback = nullptr;
+} // namespace
+
 std::vector<std::unique_ptr<cudaq::qec::decoder>> g_decoders;
+
+// Helper to pack syndrome bits into bytes (8 bits per byte, MSB first for
+// readability)
+static std::vector<uint8_t> pack_syndrome_bits(const uint8_t *syndromes,
+                                               size_t length) {
+  size_t num_bytes = (length + 7) / 8; // Round up
+  std::vector<uint8_t> packed(num_bytes, 0);
+
+  for (size_t i = 0; i < length; i++) {
+    if (syndromes[i]) {
+      size_t byte_idx = i / 8;
+      size_t bit_idx = 7 - (i % 8); // MSB first
+      packed[byte_idx] |= (1 << bit_idx);
+    }
+  }
+
+  return packed;
+}
 
 namespace cudaq::qec::decoding::host {
 
@@ -109,8 +133,20 @@ void finalize_decoders() {
   g_decoders.clear();
 }
 
+__attribute__((visibility("default"))) void
+set_syndrome_capture_callback(void (*callback)(const uint8_t *, size_t)) {
+  g_syndrome_capture_callback = callback;
+}
+
 void enqueue_syndromes(std::size_t decoder_id, uint8_t *syndromes,
                        std::uint64_t syndrome_length, std::uint64_t tag) {
+  // Invoke syndrome capture callback if registered (for --save_syndrome
+  // feature)
+  if (g_syndrome_capture_callback) {
+    auto packed_syndrome = pack_syndrome_bits(syndromes, syndrome_length);
+    g_syndrome_capture_callback(packed_syndrome.data(), packed_syndrome.size());
+  }
+
   std::vector<uint8_t> syndrome_u8(syndrome_length);
   bool did_decode = false;
   for (std::size_t i = 0; i < syndrome_length; i++) {
