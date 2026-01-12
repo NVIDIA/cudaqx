@@ -970,8 +970,8 @@ int main(int argc, char **argv) {
 
   // Validate syndrome save/load options
   if (save_syndrome && load_syndrome) {
-    printf(
-        "Error: Cannot use both --save_syndrome and --load_syndrome together\n");
+    printf("Error: Cannot use both --save_syndrome and --load_syndrome "
+           "together\n");
     return 1;
   }
   if (save_syndrome && save_dem) {
