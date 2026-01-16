@@ -129,7 +129,7 @@ public:
       auto baseName = kernelHandle.attr("name").cast<std::string>();
       std::string kernelName = "__nvqpp__mlirgen__" + baseName;
 
-      // Extract teh function pointer, register with qkernel system
+      // Extract the function pointer, register with qkernel system
       auto capsule = kernel.attr("extract_c_function_pointer")(kernelName)
                          .cast<py::capsule>();
       void *ptr = capsule;
@@ -286,6 +286,8 @@ void bindCode(py::module &mod) {
   qecmod.def(
       "get_code",
       [](const std::string &name, py::kwargs options) -> std::unique_ptr<code> {
+        throw std::runtime_error(
+            "get_code Python API in Code has been temporarily disabled.");
         if (PyCodeRegistry::contains(name))
           return std::make_unique<PyCodeHandle>(
               PyCodeRegistry::get_code(name, options));
@@ -384,6 +386,8 @@ void bindCode(py::module &mod) {
       .def(
           "get_operation_one_qubit",
           [](const code &self, operation op) -> py::object {
+            throw std::runtime_error("get_operation_one_qubit Python API in "
+                                     "Code has been temporarily disabled.");
             if (!self.contains_operation(op))
               throw std::runtime_error(
                   "No encoding registered for requested op.");
@@ -399,6 +403,8 @@ void bindCode(py::module &mod) {
       .def(
           "get_operation_two_qubit",
           [](const code &self, operation op) -> py::object {
+            throw std::runtime_error("get_operation_two_qubit Python API in "
+                                     "Code has been temporarily disabled.");
             if (!self.contains_operation(op))
               throw std::runtime_error(
                   "No encoding registered for requested op.");
@@ -414,6 +420,8 @@ void bindCode(py::module &mod) {
       .def(
           "get_stabilizer_round",
           [](const code &self) -> py::object {
+            throw std::runtime_error("get_stabilizer_round Python API in Code "
+                                     "has been temporarily disabled.");
             if (!self.contains_operation(operation::stabilizer_round))
               throw std::runtime_error(
                   "No stabilizer_round encoding is registered.");
