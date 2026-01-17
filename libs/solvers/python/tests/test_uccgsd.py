@@ -23,7 +23,11 @@ def is_nvidia_gpu_available():
         return False
     return False
 
-@pytest.mark.skip(reason="Disabling support for calling kernels defined in Python from kernels defined in C++.")
+
+@pytest.mark.skip(
+    reason=
+    "Disabling support for calling kernels defined in Python from kernels defined in C++."
+)
 def test_solvers_adapt_uccgsd_h2():
     geometry = [('H', (0., 0., 0.)), ('H', (0., 0., .7474))]
     molecule = solvers.create_molecule(geometry, 'sto-3g', 0, 0, casci=True)
@@ -43,7 +47,11 @@ def test_solvers_adapt_uccgsd_h2():
     print(energy)
     assert np.isclose(energy, -1.1371, atol=1e-3)
 
-@pytest.mark.skip(reason="Disabling support for calling kernels defined in Python from kernels defined in C++.")
+
+@pytest.mark.skip(
+    reason=
+    "Disabling support for calling kernels defined in Python from kernels defined in C++."
+)
 def test_solvers_adapt_uccgsd_lih():
     geometry = [('Li', (0.3925, 0., 0.)), ('H', (-1.1774, 0., .0))]
     molecule = solvers.create_molecule(geometry,
@@ -72,7 +80,11 @@ def test_solvers_adapt_uccgsd_lih():
     # non-repeatability sometimes makes this fail w/ 1e-4, so we make it 1e-3.
     assert np.isclose(energy, -7.8638, atol=1e-3)
 
-@pytest.mark.skip(reason="Disabling support for calling kernels defined in Python from kernels defined in C++.")
+
+@pytest.mark.skip(
+    reason=
+    "Disabling support for calling kernels defined in Python from kernels defined in C++."
+)
 def test_solvers_adapt_uccgsd_N2():
 
     geometry = [('N', (0.0, 0.0, 0.5600)), ('N', (0.0, 0.0, -0.5600))]
