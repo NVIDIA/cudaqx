@@ -124,6 +124,10 @@ def dem_file(case, code_obj, tmp_case_dir):
 # Tests (parameterized via `case`)
 
 
+@pytest.mark.skip(
+    reason=
+    "Disabling support for calling kernels defined in Python from kernels defined in C++."
+)
 def test_run_from_demo_in_process(case, code_obj, dem_file, capsys):
     result_dict = demo_circuit_host(
         code_obj=code_obj,
@@ -154,6 +158,10 @@ def test_run_from_demo_in_process(case, code_obj, dem_file, capsys):
         "number_of_corrections_decoder_threshold"]
 
 
+@pytest.mark.skip(
+    reason=
+    "Disabling support for calling kernels defined in Python from kernels defined in C++."
+)
 def test_build_dem_with_zero_p_spam_raises(case, code_obj, tmp_case_dir):
     bad_dem = pathlib.Path(tmp_case_dir) / f"bad_dem_d{case['distance']}.yaml"
     with pytest.raises(RuntimeError,
@@ -176,6 +184,10 @@ def test_build_dem_with_zero_p_spam_raises(case, code_obj, tmp_case_dir):
         )
 
 
+@pytest.mark.skip(
+    reason=
+    "Disabling support for calling kernels defined in Python from kernels defined in C++."
+)
 def test_quantinuum_requires_machine_name(case, code_obj, dem_file):
     with pytest.raises(
             RuntimeError,
@@ -200,6 +212,10 @@ def test_quantinuum_requires_machine_name(case, code_obj, dem_file):
     qec.finalize_decoders()
 
 
+@pytest.mark.skip(
+    reason=
+    "Disabling support for calling kernels defined in Python from kernels defined in C++."
+)
 def test_quantinuum_requires_project_id_remote(case, code_obj, dem_file):
     with pytest.raises(RuntimeError):
         demo_circuit_host(
