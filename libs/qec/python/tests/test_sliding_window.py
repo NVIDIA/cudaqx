@@ -20,6 +20,10 @@ def setTarget():
     cudaq.set_target(old_target)
 
 
+@pytest.mark.skip(
+    reason=
+    "Disabling support for calling kernels defined in Python from kernels defined in C++."
+)
 @pytest.mark.parametrize("decoder_name", ["single_error_lut"])
 @pytest.mark.parametrize("batched", [True, False])
 @pytest.mark.parametrize("num_rounds", [5, 10])

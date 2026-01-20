@@ -148,6 +148,10 @@ def test_python_code():
     assert not np.any(syndromes)
 
 
+@pytest.mark.skip(
+    reason=
+    "Disabling support for calling kernels defined in Python from kernels defined in C++."
+)
 def test_invalid_code():
     with pytest.raises(RuntimeError):
         qec.get_code("invalid_code_name")
