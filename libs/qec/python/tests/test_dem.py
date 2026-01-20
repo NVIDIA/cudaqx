@@ -66,6 +66,10 @@ def set_target():
     cudaq.reset_target()
 
 
+@pytest.mark.skip(
+    reason=
+    "Disabling support for calling kernels defined in Python from kernels defined in C++."
+)
 def test_dem_from_memory_circuit():
     code = qec.get_code('steane')
     p = 0.01
@@ -110,6 +114,10 @@ def test_dem_from_memory_circuit():
         dem.observables_flips_matrix) == expected_observables_flips_matrix
 
 
+@pytest.mark.skip(
+    reason=
+    "Disabling support for calling kernels defined in Python from kernels defined in C++."
+)
 def test_x_dem_from_memory_circuit():
     code = qec.get_code('steane')
     p = 0.01
@@ -136,6 +144,10 @@ def test_x_dem_from_memory_circuit():
     assert any(rate > 0 for rate in dem.error_rates)
 
 
+@pytest.mark.skip(
+    reason=
+    "Disabling support for calling kernels defined in Python from kernels defined in C++."
+)
 def test_decoding_from_dem_from_memory_circuit():
     cudaq.set_random_seed(13)
     code = qec.get_code('steane')
@@ -177,6 +189,10 @@ def test_decoding_from_dem_from_memory_circuit():
 
 
 # TODO: Enable tensor network decoder once that goes into main.
+@pytest.mark.skip(
+    reason=
+    "Disabling support for calling kernels defined in Python from kernels defined in C++."
+)
 @pytest.mark.parametrize(
     "decoder_name,error_rate",
     [
@@ -275,6 +291,10 @@ def test_decoding_from_surface_code_dem_from_memory_circuit(
     assert nLogicalErrorsWithDecoding < nLogicalErrorsWithoutDecoding
 
 
+@pytest.mark.skip(
+    reason=
+    "Disabling support for calling kernels defined in Python from kernels defined in C++."
+)
 def test_pcm_extend_to_n_rounds():
     # This test independently compares the functionality of dem_from_memory_circuit
     # (of two different numbers of rounds) to pcm_extend_to_n_rounds.
