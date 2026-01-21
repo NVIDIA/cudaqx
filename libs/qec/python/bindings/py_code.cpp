@@ -14,10 +14,10 @@
 
 #include "common/Logger.h"
 
+#include "common/DeviceCodeRegistry.h"
 #include "cudaq/python/PythonCppInterop.h"
 #include "cudaq/qec/experiments.h"
 #include "cudaq/qec/version.h"
-#include "cudaq/utils/registry.h"
 
 #include "cuda-qx/core/kwargs_utils.h"
 #include "type_casters.h"
