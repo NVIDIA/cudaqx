@@ -80,6 +80,8 @@ cudaq::spin_op SolversTester::hamhh;
 cudaq::spin_op SolversTester::hambeh2;
 
 TEST_F(SolversTester, checkSimpleAdapt_H2) {
+  GTEST_SKIP() << "Disabling support for calling kernels defined in Python "
+                  "from kernels defined in C++.";
   auto pool = cudaq::solvers::operator_pool::get("spin_complement_gsd");
   auto poolList = pool->generate({{"num-orbitals", h.num_qubits() / 2}});
   auto [energy, thetas, ops] =
@@ -95,6 +97,8 @@ TEST_F(SolversTester, checkSimpleAdapt_H2) {
 }
 
 TEST_F(SolversTester, checkSimpleAdapt_H2Sto3g) {
+  GTEST_SKIP() << "Disabling support for calling kernels defined in Python "
+                  "from kernels defined in C++.";
   auto pool = cudaq::solvers::operator_pool::get("spin_complement_gsd");
   auto poolList = pool->generate({{"num-orbitals", hamhh.num_qubits() / 2}});
   auto [energy, thetas, ops] =
@@ -110,6 +114,8 @@ TEST_F(SolversTester, checkSimpleAdapt_H2Sto3g) {
 }
 
 TEST_F(SolversTester, checkSimpleAdaptGradient_H2) {
+  GTEST_SKIP() << "Disabling support for calling kernels defined in Python "
+                  "from kernels defined in C++.";
   auto pool = cudaq::solvers::operator_pool::get("spin_complement_gsd");
   auto opt = cudaq::optim::optimizer::get("lbfgs");
   auto poolList = pool->generate({{"num-orbitals", h.num_qubits() / 2}});
@@ -128,6 +134,8 @@ TEST_F(SolversTester, checkSimpleAdaptGradient_H2) {
 }
 
 TEST_F(SolversTester, checkSimpleAdaptGradient_H2Sto3g) {
+  GTEST_SKIP() << "Disabling support for calling kernels defined in Python "
+                  "from kernels defined in C++.";
   auto pool = cudaq::solvers::operator_pool::get("spin_complement_gsd");
   auto opt = cudaq::optim::optimizer::get("lbfgs");
   auto poolList = pool->generate({{"num-orbitals", hamhh.num_qubits() / 2}});
@@ -146,6 +154,8 @@ TEST_F(SolversTester, checkSimpleAdaptGradient_H2Sto3g) {
 }
 
 TEST_F(SolversTester, checkSimpleAdaptUCCSD_H2) {
+  GTEST_SKIP() << "Disabling support for calling kernels defined in Python "
+                  "from kernels defined in C++.";
   auto pool = cudaq::solvers::operator_pool::get("uccsd");
   heterogeneous_map config;
   config.insert("num-qubits", h.num_qubits());
@@ -164,6 +174,8 @@ TEST_F(SolversTester, checkSimpleAdaptUCCSD_H2) {
 }
 
 TEST_F(SolversTester, checkSimpleAdaptUCCSD_H2Sto3g) {
+  GTEST_SKIP() << "Disabling support for calling kernels defined in Python "
+                  "from kernels defined in C++.";
   auto pool = cudaq::solvers::operator_pool::get("uccsd");
   heterogeneous_map config;
   config.insert("num-qubits", hamhh.num_qubits());
@@ -182,6 +194,8 @@ TEST_F(SolversTester, checkSimpleAdaptUCCSD_H2Sto3g) {
 }
 
 TEST_F(SolversTester, checkSimpleAdaptGradientUCCSD_H2) {
+  GTEST_SKIP() << "Disabling support for calling kernels defined in Python "
+                  "from kernels defined in C++.";
   auto pool = cudaq::solvers::operator_pool::get("uccsd");
   auto opt = cudaq::optim::optimizer::get("lbfgs");
   heterogeneous_map config;
@@ -204,6 +218,8 @@ TEST_F(SolversTester, checkSimpleAdaptGradientUCCSD_H2) {
 }
 
 TEST_F(SolversTester, checkSimpleAdaptGradientUCCSD_H2Sto3g) {
+  GTEST_SKIP() << "Disabling support for calling kernels defined in Python "
+                  "from kernels defined in C++.";
   auto pool = cudaq::solvers::operator_pool::get("uccsd");
   auto opt = cudaq::optim::optimizer::get("lbfgs");
   heterogeneous_map config;
@@ -225,6 +241,8 @@ TEST_F(SolversTester, checkSimpleAdaptGradientUCCSD_H2Sto3g) {
 }
 
 TEST_F(SolversTester, checkSimpleAdaptUCCSD_H2_warm) {
+  GTEST_SKIP() << "Disabling support for calling kernels defined in Python "
+                  "from kernels defined in C++.";
   auto pool = cudaq::solvers::operator_pool::get("uccsd");
   heterogeneous_map config;
   config.insert("num-qubits", h.num_qubits());
@@ -244,6 +262,8 @@ TEST_F(SolversTester, checkSimpleAdaptUCCSD_H2_warm) {
 }
 
 TEST_F(SolversTester, checkSimpleAdaptUCCSD_H2Sto3g_warm) {
+  GTEST_SKIP() << "Disabling support for calling kernels defined in Python "
+                  "from kernels defined in C++.";
   auto pool = cudaq::solvers::operator_pool::get("uccsd");
   heterogeneous_map config;
   config.insert("num-qubits", hamhh.num_qubits());
@@ -263,6 +283,8 @@ TEST_F(SolversTester, checkSimpleAdaptUCCSD_H2Sto3g_warm) {
 }
 
 TEST_F(SolversTester, checkSimpleAdaptGradientUCCSD_H2_warm) {
+  GTEST_SKIP() << "Disabling support for calling kernels defined in Python "
+                  "from kernels defined in C++.";
   auto pool = cudaq::solvers::operator_pool::get("uccsd");
   auto opt = cudaq::optim::optimizer::get("lbfgs");
   heterogeneous_map config;
@@ -286,6 +308,8 @@ TEST_F(SolversTester, checkSimpleAdaptGradientUCCSD_H2_warm) {
 }
 
 TEST_F(SolversTester, checkSimpleAdaptGradientUCCSD_H2Sto3g_warm) {
+  GTEST_SKIP() << "Disabling support for calling kernels defined in Python "
+                  "from kernels defined in C++.";
   auto pool = cudaq::solvers::operator_pool::get("uccsd");
   auto opt = cudaq::optim::optimizer::get("lbfgs");
   heterogeneous_map config;
@@ -308,6 +332,8 @@ TEST_F(SolversTester, checkSimpleAdaptGradientUCCSD_H2Sto3g_warm) {
 }
 
 TEST_F(SolversTester, checkSimpleAdapt_LiHSto3g) {
+  GTEST_SKIP() << "Disabling support for calling kernels defined in Python "
+                  "from kernels defined in C++.";
   if (!check_gpu_available())
     GTEST_SKIP() << "No GPU available, skipping test because CPU is slow";
 
@@ -326,6 +352,8 @@ TEST_F(SolversTester, checkSimpleAdapt_LiHSto3g) {
 }
 
 TEST_F(SolversTester, checkSimpleAdaptGradient_LiHSto3g) {
+  GTEST_SKIP() << "Disabling support for calling kernels defined in Python "
+                  "from kernels defined in C++.";
   if (!check_gpu_available())
     GTEST_SKIP() << "No GPU available, skipping test because CPU is slow";
 
@@ -347,6 +375,8 @@ TEST_F(SolversTester, checkSimpleAdaptGradient_LiHSto3g) {
 }
 
 TEST_F(SolversTester, checkSimpleAdaptUCCSD_LiHSto3g) {
+  GTEST_SKIP() << "Disabling support for calling kernels defined in Python "
+                  "from kernels defined in C++.";
   if (!check_gpu_available())
     GTEST_SKIP() << "No GPU available, skipping test because CPU is slow";
 
@@ -368,6 +398,8 @@ TEST_F(SolversTester, checkSimpleAdaptUCCSD_LiHSto3g) {
 }
 
 TEST_F(SolversTester, checkSimpleAdaptGradientUCCSD_LiHSto3g) {
+  GTEST_SKIP() << "Disabling support for calling kernels defined in Python "
+                  "from kernels defined in C++.";
   if (!check_gpu_available())
     GTEST_SKIP() << "No GPU available, skipping test because CPU is slow";
 
@@ -392,6 +424,8 @@ TEST_F(SolversTester, checkSimpleAdaptGradientUCCSD_LiHSto3g) {
 }
 
 TEST_F(SolversTester, checkSimpleAdaptGradientUCCSD_LiHSto3g_warm) {
+  GTEST_SKIP() << "Disabling support for calling kernels defined in Python "
+                  "from kernels defined in C++.";
   if (!check_gpu_available())
     GTEST_SKIP() << "No GPU available, skipping test because CPU is slow";
 
@@ -417,6 +451,8 @@ TEST_F(SolversTester, checkSimpleAdaptGradientUCCSD_LiHSto3g_warm) {
 }
 
 TEST_F(SolversTester, checkSimpleAdapt_BeH2Sto3g) {
+  GTEST_SKIP() << "Disabling support for calling kernels defined in Python "
+                  "from kernels defined in C++.";
   if (!check_gpu_available())
     GTEST_SKIP() << "No GPU available, skipping test because CPU is slow";
 
@@ -435,6 +471,8 @@ TEST_F(SolversTester, checkSimpleAdapt_BeH2Sto3g) {
 }
 
 TEST_F(SolversTester, checkSimpleAdaptGradient_BeH2Sto3g) {
+  GTEST_SKIP() << "Disabling support for calling kernels defined in Python "
+                  "from kernels defined in C++.";
   if (!check_gpu_available())
     GTEST_SKIP() << "No GPU available, skipping test because CPU is slow";
 
@@ -456,6 +494,8 @@ TEST_F(SolversTester, checkSimpleAdaptGradient_BeH2Sto3g) {
 }
 
 TEST_F(SolversTester, checkSimpleAdaptUCCSD_BeH2Sto3g) {
+  GTEST_SKIP() << "Disabling support for calling kernels defined in Python "
+                  "from kernels defined in C++.";
   if (!check_gpu_available())
     GTEST_SKIP() << "No GPU available, skipping test because CPU is slow";
 
@@ -477,6 +517,8 @@ TEST_F(SolversTester, checkSimpleAdaptUCCSD_BeH2Sto3g) {
 }
 
 TEST_F(SolversTester, checkSimpleAdaptGradientUCCSD_BeH2Sto3g) {
+  GTEST_SKIP() << "Disabling support for calling kernels defined in Python "
+                  "from kernels defined in C++.";
   if (!check_gpu_available())
     GTEST_SKIP() << "No GPU available, skipping test because CPU is slow";
 
