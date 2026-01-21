@@ -48,6 +48,8 @@ def initState(q: cudaq.qview):
 
 
 # Run ADAPT-VQE
+# Temporarily disbaling the call as the apat_vqe API has been disabled for teh reason below.
+# (Disabling support for calling kernels defined in Python from kernels defined in C++)
 energy, thetas, ops = solvers.adapt_vqe(initState, molecule.hamiltonian,
                                         operators)
 
