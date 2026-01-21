@@ -11,14 +11,19 @@
 # dependencies, run:
 # pip install cudaq-solvers[gqe]
 #
+# This example demonstrates GQE on the N2 molecule using the utility function
+# get_gqe_pauli_pool() to generate an operator pool based on UCCSD Pauli terms.
+# The pool is automatically generated from UCCSD operators and scaled by
+# different parameter values, making it suitable for variational quantum algorithms.
+#
 # Run this script with
-# python3 gqe_h2.py
+# python3 gqe_n2.py
 #
 # In order to leverage CUDA-Q MQPU and distribute the work across
 # multiple QPUs (thereby observing a speed-up), run with:
 #
 # mpiexec -np N and vary N to see the speedup...
-# e.g. PMIX_MCA_gds=hash mpiexec -np 2 python3 gqe_h2.py --mpi
+# e.g. PMIX_MCA_gds=hash mpiexec -np 2 python3 gqe_n2.py --mpi
 
 import argparse, cudaq
 
@@ -42,10 +47,10 @@ else:
         cudaq.set_target('qpp-cpu')
 
 import cudaq_solvers as solvers
-from cudaq import spin
 
 from lightning.pytorch.loggers import CSVLogger
 from cudaq_solvers.gqe_algorithm.gqe import get_default_config
+from cudaq_solvers.gqe_algorithm.utils import get_gqe_pauli_pool
 
 # Set deterministic seed and environment variables for deterministic behavior
 # Disable this section for non-deterministic behavior
@@ -58,71 +63,26 @@ torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
 # Create the molecular hamiltonian
-geometry = [('H', (0., 0., 0.)), ('H', (0., 0., .7474))]
-molecule = solvers.create_molecule(geometry, 'sto-3g', 0, 0, casci=True)
+geometry = [('N', (0., 0., 0.)), ('N', (0., 0., 1.1))]
+molecule = solvers.create_molecule(geometry,
+                                   'sto-3g',
+                                   0,
+                                   0,
+                                   nele_cas=6,
+                                   norb_cas=6,
+                                   casci=True)
 
 spin_ham = molecule.hamiltonian
 n_qubits = molecule.n_orbitals * 2
 n_electrons = molecule.n_electrons
 
-# Generate the operator pool
-
+# Generate the operator pool using utility function
 params = [
     0.003125, -0.003125, 0.00625, -0.00625, 0.0125, -0.0125, 0.025, -0.025,
     0.05, -0.05, 0.1, -0.1
 ]
 
-
-def pool(params):
-    ops = []
-    i = 0
-
-    ops.append(
-        cudaq.SpinOperator(
-            spin.y(i) * spin.z(i + 1) * spin.x(i + 2) * spin.i(i + 3)))
-    ops.append(
-        cudaq.SpinOperator(
-            spin.x(i) * spin.z(i + 1) * spin.y(i + 2) * spin.i(i + 3)))
-    ops.append(
-        cudaq.SpinOperator(
-            spin.i(i) * spin.y(i + 1) * spin.z(i + 2) * spin.x(i + 3)))
-    ops.append(
-        cudaq.SpinOperator(
-            spin.i(i) * spin.x(i + 1) * spin.z(i + 2) * spin.y(i + 3)))
-    ops.append(
-        cudaq.SpinOperator(
-            spin.x(i) * spin.x(i + 1) * spin.x(i + 2) * spin.y(i + 3)))
-    ops.append(
-        cudaq.SpinOperator(
-            spin.x(i) * spin.x(i + 1) * spin.y(i + 2) * spin.x(i + 3)))
-    ops.append(
-        cudaq.SpinOperator(
-            spin.x(i) * spin.y(i + 1) * spin.y(i + 2) * spin.y(i + 3)))
-    ops.append(
-        cudaq.SpinOperator(
-            spin.y(i) * spin.x(i + 1) * spin.y(i + 2) * spin.y(i + 3)))
-    ops.append(
-        cudaq.SpinOperator(
-            spin.x(i) * spin.y(i + 1) * spin.x(i + 2) * spin.x(i + 3)))
-    ops.append(
-        cudaq.SpinOperator(
-            spin.y(i) * spin.x(i + 1) * spin.x(i + 2) * spin.x(i + 3)))
-    ops.append(
-        cudaq.SpinOperator(
-            spin.y(i) * spin.y(i + 1) * spin.x(i + 2) * spin.y(i + 3)))
-    ops.append(
-        cudaq.SpinOperator(
-            spin.y(i) * spin.y(i + 1) * spin.y(i + 2) * spin.x(i + 3)))
-
-    pool = []
-    for c in params:
-        for op in ops:
-            pool.append(c * op)
-
-    return pool
-
-
-op_pool = pool(params)
+op_pool = get_gqe_pauli_pool(n_qubits, n_electrons, params)
 
 
 def term_coefficients(op: cudaq.SpinOperator) -> list[complex]:
@@ -172,13 +132,19 @@ def cost(sampled_ops: list[cudaq.SpinOperator], **kwargs):
 # Configure GQE
 cfg = get_default_config()
 cfg.use_lightning_logging = True
-logger = CSVLogger(save_dir="gqe_h2_logs", name="gqe")
-cfg.max_iters = 50
-cfg.ngates = 10
+logger = CSVLogger(save_dir="gqe_n2_logs", name="gqe")
+cfg.max_iters = 50  # For full training, set to more than 1000
+cfg.ngates = 60
+cfg.num_samples = 50
+cfg.buffer_size = 50
+cfg.warmup_size = 50
+cfg.batch_size = 50
+
+cfg.scheduler = 'variance'
 cfg.lightning_logger = logger
 cfg.save_trajectory = False
 cfg.verbose = True
-cfg.enable_checkpointing = True
+cfg.benchmark_energy = molecule.energies
 
 # Run GQE
 minE, best_ops = solvers.gqe(cost, op_pool, config=cfg)
@@ -186,7 +152,7 @@ minE, best_ops = solvers.gqe(cost, op_pool, config=cfg)
 # Only print results from rank 0 when using MPI
 if not args.mpi or cudaq.mpi.rank() == 0:
     print(f'Ground Energy = {minE} (Ha)')
-    print(f'Error = {minE - molecule.energies["fci_energy"]} (Ha)')
+    print(f'Error = {minE - molecule.energies["R-CASCI"]} (Ha)')
     print('Ansatz Ops')
     for idx in best_ops:
         # Get the first (and only) term since these are simple operators
