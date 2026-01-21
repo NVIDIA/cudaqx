@@ -111,6 +111,10 @@ def test_solvers_adapt_ceo_N2():
     assert np.isclose(energy, -107.5421, atol=1e-4)
 
 
+@pytest.mark.skip(
+    reason=
+    "Disabling support for calling kernels defined in Python from kernels defined in C++."
+)
 def test_solvers_vqe_ceo_h2():
     geometry = [('H', (0., 0., 0.)), ('H', (0., 0., .7474))]
     molecule = solvers.create_molecule(geometry, 'sto-3g', 0, 0, casci=True)
@@ -160,6 +164,10 @@ def test_solvers_vqe_ceo_h2():
     assert np.isclose(energy, -1.1371, atol=1e-4)
 
 
+@pytest.mark.skip(
+    reason=
+    "Disabling support for calling kernels defined in Python from kernels defined in C++."
+)
 def test_solvers_vqe_ceo_lih():
     geometry = [('Li', (0.3925, 0., 0.)), ('H', (-1.1774, 0., .0))]
     molecule = solvers.create_molecule(geometry,

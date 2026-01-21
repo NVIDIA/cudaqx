@@ -31,6 +31,10 @@ def test_default_sim_target():
     assert "_ZN5cudaq3qec8decoding10simulation13reset_decoderEm" in kernel_code
 
 
+@pytest.mark.skip(
+    reason=
+    "Disabling support for calling kernels defined in Python from kernels defined in C++."
+)
 def test_quantinuum_target():
     # A Quantinuum target uses the Quantinuum decoder
     cudaq.reset_target()
@@ -40,6 +44,10 @@ def test_quantinuum_target():
     assert "@reset_decoder_ui64" in kernel_code
 
 
+@pytest.mark.skip(
+    reason=
+    "Disabling support for calling kernels defined in Python from kernels defined in C++."
+)
 def test_target_swap():
     # Swapping targets back and forth generates correct code each time
     cudaq.reset_target()
