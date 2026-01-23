@@ -7,7 +7,7 @@
 # ============================================================================ #
 
 # Requiring the same version as the others.
-cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.22 FATAL_ERROR)
 
 # Set a default build type if none was specified. Must set this before
 # project().

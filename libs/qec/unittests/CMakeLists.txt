@@ -28,7 +28,7 @@ if (CMAKE_COMPILER_IS_GNUCXX
 endif()
 include(GoogleTest)
 
-find_package(CUDAToolkit REQUIRED)
+#find_package(CUDAToolkit REQUIRED)
 
 # ==============================================================================
 add_compile_options(-Wno-attributes) 

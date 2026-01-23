@@ -29,14 +29,14 @@ cudaqx_add_pymodule(${MODULE_NAME}
   bindings/solvers/py_solvers.cpp
 )
 
-target_include_directories(${MODULE_NAME} PRIVATE .)
+target_include_directories(${MODULE_NAME} PUBLIC ${MLIR_INCLUDE_DIRS} PRIVATE .)
 
 # TODO - Remove dependency on cudaq::cudaq in order to avoid automatic linking
 # of a specific simulator like libnvqir-qpp.so.
 target_link_libraries(${MODULE_NAME} 
   PRIVATE 
     cudaq-solvers
-    cudaq::cudaq
+    #cudaq::cudaq
     cudaq::cudaq-python-interop
 )
 
