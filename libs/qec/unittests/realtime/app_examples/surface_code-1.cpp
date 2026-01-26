@@ -62,7 +62,40 @@ void save_dem_to_file(const cudaq::qec::detector_error_model &dem,
     config.D_sparse = cudaq::qec::generate_timelike_sparse_detector_matrix(
         numSyndromesPerRound, numRounds, /*include_first_round=*/false);
 
-    if (decoder_type == "multi_error_lut") {
+    if (decoder_type == "nv-qldpc-decoder") {
+      config.decoder_custom_args =
+          cudaq::qec::decoding::config::nv_qldpc_decoder_config();
+      auto &nv_config =
+          std::get<cudaq::qec::decoding::config::nv_qldpc_decoder_config>(
+              config.decoder_custom_args);
+
+      // Basic settings
+      nv_config.use_sparsity = true;
+      nv_config.error_rate_vec = dem.error_rates;
+      nv_config.max_iterations = 50;
+
+      // BP Relay required settings
+      // Uncomment for BP Relay specific cases
+      // nv_config.bp_method = 3;   // min-sum+dmem (required for relay)
+      // nv_config.composition = 1; // Enable sequential relay
+      // nv_config.gamma0 = 0.0;    // Initial gamma value
+      // Relay configuration
+      // nv_config.srelay_config =
+      //    cudaq::qec::decoding::config::srelay_bp_config();
+      // nv_config.srelay_config->pre_iter = 5;  // Pre-iterations before relay
+      // nv_config.srelay_config->num_sets = 10; // Number of relay sets
+      // nv_config.srelay_config->stopping_criterion =
+      //    "All";                               // "All", "FirstConv", or
+      //    "NConv"
+      // nv_config.srelay_config->stop_nconv = 1; // For NConv criterion
+      // Gamma distribution for relay legs
+      // nv_config.gamma_dist = {0.1, 0.2};
+
+      // OSD post-processor
+      nv_config.use_osd = true;
+      nv_config.osd_order = 60;
+      nv_config.osd_method = 3;
+    } else if (decoder_type == "multi_error_lut") {
       // Original multi_error_lut configuration
       cudaq::qec::decoding::config::multi_error_lut_config lut_config;
       lut_config.lut_error_depth = 2;
@@ -869,8 +902,8 @@ void show_help() {
          "distance\n");
   printf("  --decoder_window <int>  Number of rounds to use for the decoder "
          "window. Default: distance\n");
-  printf("  --decoder_type <string> Decoder type: 'multi_error_lut' or "
-         "'sliding_window'. Default: multi_error_lut\n");
+  printf("  --decoder_type <string> Decoder type: 'multi_error_lut', "
+         "'nv-qldpc-decoder', or 'sliding_window'. Default: multi_error_lut\n");
   printf("  --sw_window_size <int>  Sliding window size (only for "
          "sliding_window decoder). Default: decoder_window\n");
   printf("  --sw_step_size <int>    Sliding window step size. Default: 1\n");
@@ -989,9 +1022,10 @@ int main(int argc, char **argv) {
     sw_window_size = decoder_window;
 
   // Validate decoder type
-  if (decoder_type != "multi_error_lut" && decoder_type != "sliding_window") {
-    printf("Error: --decoder_type must be 'multi_error_lut' or "
-           "'sliding_window'\n");
+  if (decoder_type != "multi_error_lut" && decoder_type != "sliding_window" &&
+      decoder_type != "nv-qldpc-decoder") {
+    printf("Error: --decoder_type must be 'multi_error_lut', "
+           "'nv-qldpc-decoder', or 'sliding_window'\n");
     return 1;
   }
 
