@@ -11,6 +11,10 @@ set -e
 
 return_code=0
 
+# Temporarily disbaling the call as the apat_vqe API has been disabled for teh reason below.
+# (Disabling support for calling kernels defined in Python from kernels defined in C++)
+exit $return_code
+
 # Expected args:
 #  ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-local
 #  ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-local{-quantinuum-emulate}

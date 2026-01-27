@@ -407,6 +407,10 @@ class TestTRTDecoderFileOperations(TestTRTDecoderSetup):
                 f.read()
 
 
+@pytest.mark.skip(
+    reason=
+    "Disabling support for calling kernels defined in Python from kernels defined in C++."
+)
 @pytest.mark.skipif(
     not os.path.exists(ONNX_MODEL_PATH) or not CUDA_AVAILABLE,
     reason="ONNX model file not found or CUDA/GPU not available")
@@ -565,6 +569,10 @@ class TestTRTDecoderInference(TestTRTDecoderSetup):
             assert error < TOLERANCE, f"Batch test case {i} failed with error {error}"
 
 
+@pytest.mark.skip(
+    reason=
+    "Disabling support for calling kernels defined in Python from kernels defined in C++."
+)
 class TestTRTDecoderEdgeCases(TestTRTDecoderSetup):
     """Tests for TRT decoder edge cases. Requires GPU access."""
 

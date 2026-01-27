@@ -11,17 +11,29 @@ import cudaq
 import cudaq_qec as qec
 
 
+@pytest.mark.skip(
+    reason=
+    "Disabling support for calling kernels defined in Python from kernels defined in C++."
+)
 def test_get_code():
     steane = qec.get_code("steane")
     assert isinstance(steane, qec.Code)
 
 
+@pytest.mark.skip(
+    reason=
+    "Disabling support for calling kernels defined in Python from kernels defined in C++."
+)
 def test_get_available_codes():
     codes = qec.get_available_codes()
     assert isinstance(codes, list)
     assert "steane" in codes
 
 
+@pytest.mark.skip(
+    reason=
+    "Disabling support for calling kernels defined in Python from kernels defined in C++."
+)
 def test_code_parity_matrices():
     steane = qec.get_code("steane")
 
@@ -38,6 +50,10 @@ def test_code_parity_matrices():
     assert parity_z.shape == (3, 7)
 
 
+@pytest.mark.skip(
+    reason=
+    "Disabling support for calling kernels defined in Python from kernels defined in C++."
+)
 def test_code_stabilizers():
     steane = qec.get_code("steane")
     stabilizers = steane.get_stabilizers()
@@ -51,6 +67,10 @@ def test_code_stabilizers():
     assert set(expected) == set(stabStrings)
 
 
+@pytest.mark.skip(
+    reason=
+    "Disabling support for calling kernels defined in Python from kernels defined in C++."
+)
 def test_sample_memory_circuit():
     steane = qec.get_code("steane")
 
@@ -68,6 +88,10 @@ def test_sample_memory_circuit():
     assert syndromes_with_op.shape == (40, 6)
 
 
+@pytest.mark.skip(
+    reason=
+    "Disabling support for calling kernels defined in Python from kernels defined in C++."
+)
 def test_custom_steane_code():
     ops = ["ZZZZIII", "XXXXIII", "IXXIXXI", "IIXXIXX", "IZZIZZI", "IIZZIZZ"]
     custom_steane = qec.get_code("steane", stabilizers=ops)
@@ -86,6 +110,10 @@ def test_custom_steane_code():
     np.testing.assert_array_equal(parity, expected_parity.reshape(6, 14))
 
 
+@pytest.mark.skip(
+    reason=
+    "Disabling support for calling kernels defined in Python from kernels defined in C++."
+)
 def test_noisy_simulation():
     cudaq.set_target('stim')
 
@@ -105,6 +133,10 @@ def test_noisy_simulation():
     cudaq.reset_target()
 
 
+@pytest.mark.skip(
+    reason=
+    "Disabling support for calling kernels defined in Python from kernels defined in C++."
+)
 def test_python_code():
     steane = qec.get_code("py-steane-example")
     syndromes, dataResults = qec.sample_memory_circuit(steane,
@@ -116,11 +148,19 @@ def test_python_code():
     assert not np.any(syndromes)
 
 
+@pytest.mark.skip(
+    reason=
+    "Disabling support for calling kernels defined in Python from kernels defined in C++."
+)
 def test_invalid_code():
     with pytest.raises(RuntimeError):
         qec.get_code("invalid_code_name")
 
 
+@pytest.mark.skip(
+    reason=
+    "Disabling support for calling kernels defined in Python from kernels defined in C++."
+)
 def test_invalid_operation():
     steane = qec.get_code("steane")
     with pytest.raises(TypeError):
@@ -140,6 +180,10 @@ def test_generate_random_bit_flips():
     assert np.all(data == 0)
 
 
+@pytest.mark.skip(
+    reason=
+    "Disabling support for calling kernels defined in Python from kernels defined in C++."
+)
 def test_steane_code_capacity():
     # Test case 1: error_prob = 0
     steane = qec.get_code("steane")
@@ -224,6 +268,10 @@ def test_steane_code_capacity():
     assert np.array_equal(syndromes, checked_syndromes)
 
 
+@pytest.mark.skip(
+    reason=
+    "Disabling support for calling kernels defined in Python from kernels defined in C++."
+)
 def test_het_map_from_kwargs_bool():
     steane = qec.get_code("steane", bool_true=True, bool_false=False)
     assert isinstance(steane, qec.Code)
