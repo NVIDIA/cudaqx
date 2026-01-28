@@ -1001,8 +1001,8 @@ Notes:
          const std::vector<cudaq::spin_op> &pool, py::kwargs options) {
         cudaq::python::CppPyKernelDecorator initialStateKernelWrapper(
             initialStateKernel);
-        auto fptr = initialStateKernelWrapper
-	   .getEntryPointFunction<cudaq::qkernel<void(cudaq::qvector<> &)>>();
+        auto fptr = initialStateKernelWrapper.getEntryPointFunction<
+            cudaq::qkernel<void(cudaq::qvector<> &)>>();
         heterogeneous_map optOptions;
         optOptions.insert("max_iter", getValueOr<int>(options, "max_iter", 30));
         optOptions.insert(
