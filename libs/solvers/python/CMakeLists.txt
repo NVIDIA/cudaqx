@@ -1,5 +1,5 @@
 # ============================================================================ #
-# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
+# Copyright (c) 2024 - 2026 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -38,6 +38,7 @@ target_link_libraries(${MODULE_NAME}
     cudaq-solvers
     cudaq::cudaq
     cudaq::cudaq-python-interop
+    cudaq-mlir-runtime
 )
 
 set_target_properties(${MODULE_NAME} PROPERTIES
