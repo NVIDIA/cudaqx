@@ -38,7 +38,6 @@ target_link_libraries(${MODULE_NAME}
     cudaq-qec
     cudaq-qec-realtime-decoding
     cudaq::cudaq-python-interop
-    cudaq-mlir-runtime
 )
 
 set_target_properties(${MODULE_NAME} PROPERTIES

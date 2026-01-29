@@ -31,6 +31,9 @@ cudaqx_add_pymodule(${MODULE_NAME}
 
 target_include_directories(${MODULE_NAME} PRIVATE .)
 
+# TEMP change
+link_directories(${CUDAQ_INSTALL_DIR}/lib)
+
 # TODO - Remove dependency on cudaq::cudaq in order to avoid automatic linking
 # of a specific simulator like libnvqir-qpp.so.
 target_link_libraries(${MODULE_NAME} 
@@ -38,7 +41,7 @@ target_link_libraries(${MODULE_NAME}
     cudaq-solvers
     cudaq::cudaq
     cudaq::cudaq-python-interop
-    cudaq-mlir-runtime
+    cudaq-mlir-runtime # TEMP change
 )
 
 set_target_properties(${MODULE_NAME} PROPERTIES
