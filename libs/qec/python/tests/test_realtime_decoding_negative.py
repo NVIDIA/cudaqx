@@ -55,9 +55,9 @@ def get_corrections_kernel(return_size: int):
 
 def test_get_corrections_rejects_bad_return_size(configured_decoder):
     # User-facing kernel call: invalid return sizes should raise.
-    with pytest.raises(RuntimeError, match="correction_length must be greater"):
+    with pytest.raises(ValueError, match="correction_length must be greater"):
         cudaq.sample(get_corrections_kernel, 0, shots_count=1)
-    with pytest.raises(RuntimeError,
+    with pytest.raises(ValueError,
                        match="does not match number of observables"):
         cudaq.sample(get_corrections_kernel, 2, shots_count=1)
 
@@ -65,9 +65,9 @@ def test_get_corrections_rejects_bad_return_size(configured_decoder):
 def test_enqueue_syndromes_rejects_bad_args(configured_decoder):
     # User-facing kernel call: invalid decoder_id and oversize syndromes.
     max_syndromes = _max_syndromes_from_sparse(configured_decoder.D_sparse)
-    with pytest.raises(RuntimeError, match="Decoder 1 not found"):
+    with pytest.raises(ValueError, match="Decoder 1 not found"):
         cudaq.sample(enqueue_kernel, 1, max_syndromes, shots_count=1)
-    with pytest.raises(RuntimeError,
+    with pytest.raises(ValueError,
                        match="exceeds configured measurement count"):
         cudaq.sample(enqueue_kernel, 0, max_syndromes + 1, shots_count=1)
 
@@ -78,6 +78,8 @@ def test_configure_decoders_rejects_invalid_o_sparse():
     config = _make_decoder_config()
     config.O_sparse = [config.block_size + 1, -1]
     multi_config.decoders = [config]
-    status = qec.configure_decoders(multi_config)
-    qec.finalize_decoders()
-    assert status != 0
+    try:
+        with pytest.raises(RuntimeError, match="out of range"):
+            qec.configure_decoders(multi_config)
+    finally:
+        qec.finalize_decoders()
