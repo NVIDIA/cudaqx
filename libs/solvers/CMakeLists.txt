@@ -6,6 +6,8 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
+# Do not merge
+
 # We need 3.28 because of the `EXCLUDE_FROM_ALL` in FetchContent_Declare
 cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 
