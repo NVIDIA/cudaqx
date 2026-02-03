@@ -10,6 +10,11 @@
     architecture and supports various precision modes (FP16, BF16, INT8, FP8)
     to balance accuracy and speed.
 
+    Neural network-based decoders can be trained to perform syndrome decoding
+    for specific quantum error correction codes and noise models. The TRT decoder
+    provides a high-performance inference engine for these models, with automatic
+    CUDA graph optimization for reduced latency.
+
     Requires a CUDA-capable GPU and TensorRT installation. See the `CUDA-Q GPU
     Compatibility List
     <https://nvidia.github.io/cuda-quantum/latest/using/install/local_installation.html#dependencies-and-compatibility>`_
@@ -80,6 +85,13 @@
       only required to satisfy the decoder interface. You can pass any valid
       parity check matrix of appropriate dimensions.
 
+    .. note::
+      **Batch Processing**: The TRT decoder automatically handles batch size
+      optimization. Models trained with batch_size > 1 will receive
+      zero-padded inputs when using `decode()` on a single syndrome. When
+      using `decode_batch()`, provide syndromes in multiples of the model's
+      batch size for optimal performance.
+
     :param H: Parity check matrix (tensor format). Note: This parameter is not
               used by the TRT decoder but is required by the decoder interface.
     :param params: Heterogeneous map of parameters:
@@ -116,3 +128,16 @@
           engine building (defaults to 1GB = 1073741824 bytes). Larger workspaces
           may allow TensorRT to explore more optimization strategies.
 
+        - `use_cuda_graph` (bool): Enable CUDA graph optimization for improved
+          performance (defaults to True). CUDA graphs capture inference operations
+          and replay them with reduced kernel launch overhead, providing ~20%
+          speedup. The optimization is applied automatically on the first decode
+          call. Automatically disabled for models with dynamic shapes or
+          multiple optimization profiles. Set to False to force traditional
+          execution path.
+
+        - `batch_size` (automatic): The decoder automatically detects the model's
+          batch size from the first input dimension. For models with batch_size > 1,
+          the `decode()` method automatically zero-pads single syndromes to fill
+          the batch. The `decode_batch()` method requires the number of syndromes
+          to be an integral multiple of the model's batch size.

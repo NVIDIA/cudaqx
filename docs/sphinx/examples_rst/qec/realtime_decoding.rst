@@ -529,6 +529,12 @@ Decoder Selection
 ^^^^^^^^^^^^^^^^^
 The page `CUDA-Q QEC Decoders <https://nvidia.github.io/cudaqx/components/qec/introduction.html#pre-built-qec-decoders>`_ provides information about which decoders are compatible with real-time decoding.
 
+The TRT decoder (``trt_decoder``) can be configured for real-time decoding by specifying 
+``trt_decoder_config`` parameters. This is useful for neural network-based 
+decoders trained for specific codes and noise models. Note that TRT models 
+must be trained with the appropriate input/output dimensions matching the 
+syndrome and error spaces. See :ref:`trt_decoder_api_python` for detailed configuration options.
+
 Troubleshooting
 ---------------
 
