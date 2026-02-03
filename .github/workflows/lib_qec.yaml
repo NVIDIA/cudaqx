@@ -95,7 +95,7 @@ jobs:
       
       - name: Run tests
         env:
-          PYTHONPATH: /usr/local/cudaq:${{ steps.build.outputs.build-dir }}/python
+          PYTHONPATH: /cudaq-install:${{ steps.build.outputs.build-dir }}/python
         run: |
           cd ${{ steps.build.outputs.build-dir }}
           ctest --output-on-failure -E "GpuKernelsTest|test_realtime_decoding"
