@@ -91,11 +91,13 @@ jobs:
           platform: ${{ matrix.platform }}
 
       # ========================================================================
-      # Run tests
+      # Run tests (excluding GPU-only tests)
       # ========================================================================
       #
       - name: Run tests
-        run: cmake --build ${{ steps.build.outputs.build-dir }} --target run_tests
+        run: |
+          cd ${{ steps.build.outputs.build-dir }}
+          ctest --output-on-failure -E "test_gpu_kernels|test_realtime_decoding"
 
       # ========================================================================
       # Run python tests
@@ -131,5 +133,4 @@ jobs:
         env:
           LD_LIBRARY_PATH: ${{ env.MPI_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
           OMPI_MCA_pml: ob1
-        run: bash scripts/ci/test_examples.sh all 
-
+        run: bash scripts/ci/test_examples.sh all
