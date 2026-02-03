@@ -65,6 +65,7 @@ runs:
       id: build-lib
       env:
         CCACHE_DIR: /ccache-${{ inputs.lib }}
+        GH_TOKEN: ${{ github.token }}
       run: |
         build_dir=build_${{ inputs.lib }}
         .github/actions/build-lib/build_${{ inputs.lib }}.sh $build_dir ${{ inputs.install-prefix }}
