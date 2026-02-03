@@ -143,8 +143,6 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(cppitertools json)
 
 if (CUDAQX_SOLVERS_STANDALONE_BUILD)
-  # FIXME for now, we only use library mode
-  set(CUDAQ_LIBRARY_MODE ON)
   find_package(CUDAQ REQUIRED)
 
   # FIXME
