@@ -97,7 +97,7 @@ jobs:
       - name: Run tests
         run: |
           cd ${{ steps.build.outputs.build-dir }}
-          ctest --output-on-failure -E "test_gpu_kernels|test_realtime_decoding"
+          ctest --output-on-failure -E "GpuKernelsTest|test_realtime_decoding"
 
       # ========================================================================
       # Run python tests
