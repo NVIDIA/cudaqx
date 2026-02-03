@@ -81,6 +81,8 @@ jobs:
 
       - name: Build
         id: build
+        env:
+          GH_TOKEN: ${{ github.token }}
         uses: ./.github/actions/build-lib
         with:
           lib: "qec"
@@ -95,7 +97,7 @@ jobs:
       
       - name: Run tests
         env:
-          PYTHONPATH: /cudaq-install:${{ steps.build.outputs.build-dir }}/python
+          PYTHONPATH: /cudaq-install:${{ github.workspace }}/${{ steps.build.outputs.build-dir }}/python
         run: |
           cd ${{ steps.build.outputs.build-dir }}
           ctest --output-on-failure -E "GpuKernelsTest|test_realtime_decoding"
@@ -128,11 +130,29 @@ jobs:
       - name: Run example tests
         run: bash scripts/ci/test_examples.sh qec
 
+      # ========================================================================
+      # Upload build artifacts for GPU tests
+      # ========================================================================
+      - name: Create artifact archive
+        run: |
+          tar czf /tmp/qec-build-artifacts.tar.gz \
+            /cudaq-install \
+            /tmp/cudaq-realtime \
+            ${{ github.workspace }}/${{ steps.build.outputs.build-dir }}
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: qec-build-${{ matrix.platform }}-cu${{ matrix.cuda_version }}
+          path: /tmp/qec-build-artifacts.tar.gz
+          retention-days: 1
+
   # ==========================================================================
-  # GPU Tests - Run on GPU runners
+  # GPU Tests - Run on GPU runners (uses build artifacts from pr-build)
   # ==========================================================================
   pr-build-gpu:
-    name: Build and test (GPU)
+    name: GPU tests
+    needs: pr-build
     if: startsWith(github.ref, 'refs/heads/pull-request/')
     strategy:
       fail-fast: false
@@ -145,72 +165,21 @@ jobs:
       env:
         NVIDIA_VISIBLE_DEVICES: ${{ env.NVIDIA_VISIBLE_DEVICES }}
     permissions:
-      actions: write
+      actions: read
       contents: read
-      pull-requests: read
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
         with:
-          set-safe-directory: true
+          name: qec-build-${{ matrix.platform }}-cu${{ matrix.cuda_version }}
+          path: /tmp
 
-      - name: Lookup PR info
-        id: get-pr-info
-        env:
-          GH_TOKEN: ${{ github.token }}
-        uses: nv-gha-runners/get-pr-info@main
-
-      - name: Export PR info
-        id: export-pr-info
+      - name: Extract build artifacts
         run: |
-          echo "pr_number=${{ fromJSON(steps.get-pr-info.outputs.pr-info).number }}" >> $GITHUB_OUTPUT
+          tar xzf /tmp/qec-build-artifacts.tar.gz -C /
 
-      - name: Configure
-        id: config
-        run: |
-          cuda_major=`echo ${{ matrix.cuda_version }} | cut -d . -f1`
-          echo "cuda_major=$cuda_major" >> $GITHUB_OUTPUT
-
-      # ========================================================================
-      # CUDA Quantum build
-      # ========================================================================
-
-      - name: Get required CUDAQ version
-        id: get-cudaq-version
-        uses: ./.github/actions/get-cudaq-version
-
-      - name: Get CUDAQ build
-        uses: ./.github/actions/get-cudaq-build
-        with:
-          repo: ${{ steps.get-cudaq-version.outputs.repo }}
-          ref: ${{ steps.get-cudaq-version.outputs.ref }}
-          token: ${{ secrets.CUDAQ_ACCESS_TOKEN }}
-          pr-number: ${{ steps.export-pr-info.outputs.pr_number }}
-          platform: ${{ matrix.platform }}-cu${{ steps.config.outputs.cuda_major }}
-
-      # ========================================================================
-      # Build library
-      # ========================================================================
-      - name: Install build requirements
-        run: |
-          apt install -y --no-install-recommends gfortran libblas-dev wget
-
-      - name: Build
-        id: build
-        uses: ./.github/actions/build-lib
-        with:
-          lib: "qec"
-          cuda_version: ${{ matrix.cuda_version }}
-          pr-number: ${{ steps.export-pr-info.outputs.pr_number }}
-          save-ccache: false
-          platform: ${{ matrix.platform }}
-
-      # ========================================================================
-      # Run GPU tests only
-      # ========================================================================
-      
       - name: Run GPU tests
         run: |
-          cd ${{ steps.build.outputs.build-dir }}
+          cd ${{ github.workspace }}/build_qec
           ctest --output-on-failure -R "GpuKernelsTest|test_realtime_decoding"
 

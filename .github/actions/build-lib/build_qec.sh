@@ -4,14 +4,20 @@
 if [ -z "$CUDAQ_REALTIME_ROOT" ]; then
   CUDAQ_REALTIME_ROOT=/tmp/cudaq-realtime
   mkdir -p $CUDAQ_REALTIME_ROOT
-
-  # Download from GitHub release
-  RELEASE_URL="https://github.com/NVIDIA/cudaqx/releases/download/cudaq-realtime-no-push"
-  wget -qO- ${RELEASE_URL}/cudaq-realtime-headers.tar.gz | tar xzf - -C $CUDAQ_REALTIME_ROOT
-
-  ARCH=$(uname -m | sed 's/aarch64/arm64/' | sed 's/x86_64/x86_64/')
   mkdir -p $CUDAQ_REALTIME_ROOT/lib
-  wget -qO- ${RELEASE_URL}/cudaq-realtime-libs-${ARCH}.tar.gz | tar xzf - -C $CUDAQ_REALTIME_ROOT/lib
+
+  # Download from GitHub draft release using gh CLI
+  RELEASE_TAG="cudaq-realtime-no-push2"
+  ARCH=$(uname -m | sed 's/aarch64/arm64/' | sed 's/x86_64/x86_64/')
+  
+  gh release download "$RELEASE_TAG" \
+    --pattern "cudaq-realtime-headers.tar.gz" \
+    --pattern "cudaq-realtime-libs-${ARCH}.tar.gz" \
+    --repo NVIDIA/cudaqx \
+    --dir /tmp
+
+  tar xzf /tmp/cudaq-realtime-headers.tar.gz -C $CUDAQ_REALTIME_ROOT
+  tar xzf /tmp/cudaq-realtime-libs-${ARCH}.tar.gz -C $CUDAQ_REALTIME_ROOT/lib
 fi
 
 cmake -S libs/qec -B "$1" \
