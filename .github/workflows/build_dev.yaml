@@ -87,7 +87,7 @@ jobs:
           TAGS+=" -t ghcr.io/nvidia/cudaqx-dev:${other_tag}-${{ matrix.platform }}-cu${{ matrix.cuda_version }}"
         fi
         docker build $TAGS -f docker/build_env/cudaqx.dev.Dockerfile . \
-          --build-arg base_image=ghcr.io/nvidia/cuda-quantum-devdeps:ext-${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc11-main \
+          --build-arg base_image=ghcr.io/nvidia/cuda-quantum-devcontainer:${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc11-main \
           --build-arg cuda_version=${{ matrix.cuda_version }}
         docker push -a ghcr.io/nvidia/cudaqx-dev
       shell: bash --noprofile --norc -euo pipefail {0}
