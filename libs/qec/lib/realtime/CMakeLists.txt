@@ -44,9 +44,16 @@ if(CMAKE_CUDA_COMPILER)
       POSITION_INDEPENDENT_CODE ON
     )
     
+    # Handle both standalone (libs/qec) and full repo builds
+    if(CUDAQX_QEC_STANDALONE_BUILD)
+      set(_core_include_dir "${CMAKE_SOURCE_DIR}/../core/include")
+    else()
+      set(_core_include_dir "${CMAKE_SOURCE_DIR}/libs/core/include")
+    endif()
+    
     target_include_directories(cudaq-qec-realtime-cudevice PUBLIC
       $<BUILD_INTERFACE:${CUDAQX_QEC_INCLUDE_DIR}>
-      $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/libs/core/include>
+      $<BUILD_INTERFACE:${_core_include_dir}>
       $<BUILD_INTERFACE:${CUDAQ_REALTIME_INCLUDE_DIR}>
       $<INSTALL_INTERFACE:include>
     )
