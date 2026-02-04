@@ -174,11 +174,22 @@ std::vector<SyndromeEntry> load_syndromes(const std::string &path,
   return entries;
 }
 
+// Helper function to check if a GPU is available
+bool isGpuAvailable() {
+  int deviceCount = 0;
+  cudaError_t err = cudaGetDeviceCount(&deviceCount);
+  return (err == cudaSuccess && deviceCount > 0);
+}
+
 } // namespace
 
 class GpuKernelsTest : public ::testing::Test {
 protected:
   void SetUp() override {
+    // Skip all tests if no GPU is available
+    if (!isGpuAvailable()) {
+      GTEST_SKIP() << "No GPU available, skipping GPU kernel tests";
+    }
     // Get the path to the test data directory
     data_dir_ = std::string(TEST_DATA_DIR);
 

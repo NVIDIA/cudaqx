@@ -274,6 +274,13 @@ extern "C" void launch_dispatch_kernel_wrapper(
       num_slots, num_blocks, threads_per_block, stream);
 }
 
+// Helper function to check if a GPU is available
+bool isGpuAvailable() {
+  int deviceCount = 0;
+  cudaError_t err = cudaGetDeviceCount(&deviceCount);
+  return (err == cudaSuccess && deviceCount > 0);
+}
+
 } // namespace
 
 //==============================================================================
@@ -283,6 +290,11 @@ extern "C" void launch_dispatch_kernel_wrapper(
 class RealtimeDecodingTest : public ::testing::Test {
 protected:
   void SetUp() override {
+    // Skip all tests if no GPU is available
+    if (!isGpuAvailable()) {
+      GTEST_SKIP() << "No GPU available, skipping realtime decoding tests";
+    }
+
     // Enable host-mapped memory before any CUDA context creation.
     cudaError_t flags_err = cudaSetDeviceFlags(cudaDeviceMapHost);
     ASSERT_TRUE(flags_err == cudaSuccess ||
