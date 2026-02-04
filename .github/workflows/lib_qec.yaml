@@ -90,13 +90,11 @@ jobs:
           platform: ${{ matrix.platform }}
 
       # ========================================================================
-      # Run tests (excluding GPU-only tests)
+      # Run tests
       # ========================================================================
       
       - name: Run tests
-        run: |
-          cd ${{ steps.build.outputs.build-dir }}
-          cmake -E env PYTHONPATH="/cudaq-install:$(pwd)/python" ctest --output-on-failure -E "GpuKernelsTest|test_realtime_decoding"
+        run: cmake --build ${{ steps.build.outputs.build-dir }} --target run_tests
 
       # ========================================================================
       # Run python tests
