@@ -134,7 +134,7 @@ jobs:
           tar czf /tmp/qec-build-artifacts.tar.gz \
             /cudaq-install \
             /tmp/cudaq-realtime \
-            ${{ github.workspace }}/${{ steps.build.outputs.build-dir }}
+            $GITHUB_WORKSPACE/${{ steps.build.outputs.build-dir }}
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -176,6 +176,6 @@ jobs:
 
       - name: Run GPU tests
         run: |
-          cd ${{ github.workspace }}/build_qec
+          cd $GITHUB_WORKSPACE/build_qec
           ctest --output-on-failure -R "GpuKernelsTest|test_realtime_decoding"
 
