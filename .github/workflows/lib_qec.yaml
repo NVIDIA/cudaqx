@@ -94,11 +94,9 @@ jobs:
       # ========================================================================
       
       - name: Run tests
-        env:
-          PYTHONPATH: /cudaq-install:${{ github.workspace }}/${{ steps.build.outputs.build-dir }}/python
         run: |
           cd ${{ steps.build.outputs.build-dir }}
-          ctest --output-on-failure -E "GpuKernelsTest|test_realtime_decoding"
+          cmake -E env PYTHONPATH="/cudaq-install:$(pwd)/python" ctest --output-on-failure -E "GpuKernelsTest|test_realtime_decoding"
 
       # ========================================================================
       # Run python tests
