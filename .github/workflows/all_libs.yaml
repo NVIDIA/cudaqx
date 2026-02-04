@@ -91,13 +91,11 @@ jobs:
           platform: ${{ matrix.platform }}
 
       # ========================================================================
-      # Run tests (excluding GPU-only tests)
+      # Run tests
       # ========================================================================
       #
       - name: Run tests
-        run: |
-          cd ${{ steps.build.outputs.build-dir }}
-          ctest --output-on-failure -E "GpuKernelsTest|test_realtime_decoding"
+        run: cmake --build ${{ steps.build.outputs.build-dir }} --target run_tests
 
       # ========================================================================
       # Run python tests
