@@ -16,7 +16,7 @@ jobs:
     container: ghcr.io/nvidia/cuda-quantum-devcontainer:${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc11-main
     permissions:
       actions: write
-      contents: write
+      contents: write # REVERT-WITH-CUDAQ-REALTIME-BUILD change back to read
       pull-requests: read
     steps:
       - name: Checkout repository
