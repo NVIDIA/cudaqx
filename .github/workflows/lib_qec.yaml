@@ -134,6 +134,7 @@ jobs:
           tar czf /tmp/qec-build-artifacts.tar.gz \
             /cudaq-install \
             /tmp/cudaq-realtime \
+            $GITHUB_WORKSPACE/libs/qec/unittests/decoders/realtime/data \
             $GITHUB_WORKSPACE/${{ steps.build.outputs.build-dir }}
 
       - name: Upload build artifacts
