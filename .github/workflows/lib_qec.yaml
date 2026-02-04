@@ -16,7 +16,7 @@ jobs:
     container: ghcr.io/nvidia/cuda-quantum-devcontainer:${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc11-main
     permissions:
       actions: write
-      contents: read
+      contents: write
       pull-requests: read
     steps:
       - name: Checkout repository
@@ -81,8 +81,6 @@ jobs:
 
       - name: Build
         id: build
-        env:
-          GH_TOKEN: ${{ github.token }}
         uses: ./.github/actions/build-lib
         with:
           lib: "qec"
