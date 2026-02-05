@@ -12,45 +12,70 @@
 #include <cstdint>
 #include <cuda_runtime.h>
 
+#include "cudaq/qec/realtime/autonomous_decoder.cuh"
 #include "cudaq/qec/realtime/decoder_context.h"
 
 namespace cudaq::qec::realtime {
 
 //==============================================================================
-// Global Device Context
+// Mock Decoder Class (CRTP)
 //==============================================================================
 
-/// @brief Global device pointer to mock decoder context.
-/// Must be set via set_mock_decoder_context() before kernel launch.
-extern __device__ mock_decoder_context *g_mock_decoder_ctx;
+/// @brief Mock decoder for CI testing, inheriting from autonomous_decoder.
+///
+/// This decoder uses a lookup table to map input measurements to expected
+/// corrections. It demonstrates the autonomous_decoder CRTP pattern and
+/// provides a testable implementation for verifying the real-time dispatch
+/// infrastructure.
+class mock_decoder : public autonomous_decoder<mock_decoder> {
+public:
+  /// @brief Constructor taking a reference to the decoder context.
+  ///
+  /// @param ctx Reference to mock_decoder_context with lookup tables
+  __device__ __host__ explicit mock_decoder(mock_decoder_context &ctx)
+      : ctx_(ctx) {}
 
-/// @brief Set the mock decoder context from host.
-/// @param ctx Device pointer to mock_decoder_context
-inline void set_mock_decoder_context(mock_decoder_context *ctx) {
-  cudaMemcpyToSymbol(g_mock_decoder_ctx, &ctx, sizeof(mock_decoder_context *));
+  /// @brief Core decode implementation (required by CRTP base).
+  ///
+  /// Searches the lookup table for matching measurements and returns the
+  /// corresponding corrections. This is called by the base class's decode()
+  /// method.
+  ///
+  /// @param measurements Input raw measurements from quantum circuit
+  /// @param corrections Output buffer for computed corrections
+  /// @param num_measurements Number of input measurements
+  /// @param num_observables Number of observable corrections to output
+  __device__ void decode_impl(const uint8_t *__restrict__ measurements,
+                              uint8_t *__restrict__ corrections,
+                              std::size_t num_measurements,
+                              std::size_t num_observables);
+
+  /// @brief Get the decoder context.
+  /// @return Reference to the mock_decoder_context
+  __device__ __host__ mock_decoder_context &context() { return ctx_; }
+
+  /// @brief Get the decoder context (const version).
+  __device__ __host__ const mock_decoder_context &context() const {
+    return ctx_;
+  }
+
+private:
+  mock_decoder_context &ctx_; ///< Reference to decoder context
+};
+
+//==============================================================================
+// Global Device Decoder Instance
+//==============================================================================
+
+/// @brief Global device pointer to mock decoder instance.
+/// Must be set via set_mock_decoder() before kernel launch.
+extern __device__ mock_decoder *g_mock_decoder;
+
+/// @brief Set the mock decoder instance from host.
+/// @param decoder Device pointer to mock_decoder instance
+inline void set_mock_decoder(mock_decoder *decoder) {
+  cudaMemcpyToSymbol(g_mock_decoder, &decoder, sizeof(mock_decoder *));
 }
-
-//==============================================================================
-// Core Mock Decode Handler
-//==============================================================================
-
-/// @brief Mock decode handler for CI testing.
-///
-/// This handler looks up the input measurements in a pre-recorded table
-/// and returns the corresponding expected corrections. It does NOT perform
-/// actual decoding - it simply verifies that the infrastructure can correctly
-/// route data through the decode pipeline.
-///
-/// @param ctx Mock decoder context with lookup table pointers
-/// @param input_measurements Input raw measurements from RX buffer
-/// @param output_corrections Output buffer for corrections (TX buffer)
-/// @param num_measurements Size of input measurements
-/// @param num_observables Number of observables (corrections to output)
-__device__ void
-mock_decode_handler(const mock_decoder_context &ctx,
-                    const uint8_t *__restrict__ input_measurements,
-                    uint8_t *__restrict__ output_corrections,
-                    std::size_t num_measurements, std::size_t num_observables);
 
 //==============================================================================
 // DeviceRPCFunction-Compatible Wrapper
@@ -75,12 +100,15 @@ __device__ int mock_decode_rpc(void *buffer, std::uint32_t arg_len,
 __device__ auto get_mock_decode_rpc_ptr();
 
 //==============================================================================
-// Legacy Direct-Call Wrapper
+// Graph-Compatible RPC Handler (for CUDAQ_DISPATCH_GRAPH_LAUNCH)
 //==============================================================================
 
-/// @brief Wrapper for direct device-to-device calls (non-RPC path).
-__device__ void mock_decode_dispatch(void *ctx_ptr, const uint8_t *input,
-                                     std::size_t input_size, uint8_t *output,
-                                     std::size_t output_size);
+/// @brief Graph kernel using pointer indirection pattern.
+///
+/// This kernel reads the buffer address from a device pointer, allowing
+/// the launching kernel to update which buffer to process before each launch.
+///
+/// @param buffer_ptr Pointer to current RPC buffer address (device pointer)
+__global__ void mock_decode_graph_kernel(void **buffer_ptr);
 
 } // namespace cudaq::qec::realtime
