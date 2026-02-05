@@ -11,11 +11,19 @@ if [ -z "$CUDAQ_REALTIME_ROOT" ]; then
   RELEASE_TAG="cudaq-realtime-no-push2"
   ARCH=$(uname -m | sed 's/aarch64/arm64/' | sed 's/x86_64/x86_64/')
   
-  gh release download "$RELEASE_TAG" \
+  if ! gh release download "$RELEASE_TAG" \
     --pattern "cudaq-realtime-headers.tar.gz" \
     --pattern "cudaq-realtime-libs-${ARCH}.tar.gz" \
     --repo NVIDIA/cudaqx \
-    --dir /tmp
+    --dir /tmp; then
+    echo "ERROR: Failed to download cudaq-realtime assets from release ${RELEASE_TAG}."
+    exit 1
+  fi
+
+  if [ ! -f "/tmp/cudaq-realtime-headers.tar.gz" ] || [ ! -f "/tmp/cudaq-realtime-libs-${ARCH}.tar.gz" ]; then
+    echo "ERROR: cudaq-realtime asset files missing after download."
+    exit 1
+  fi
 
   tar xzf /tmp/cudaq-realtime-headers.tar.gz -C $CUDAQ_REALTIME_ROOT
   tar xzf /tmp/cudaq-realtime-libs-${ARCH}.tar.gz -C $CUDAQ_REALTIME_ROOT/lib
