@@ -167,13 +167,12 @@ std::vector<SyndromeEntry> load_syndromes(const std::string &path,
   return entries;
 }
 
-std::vector<uint8_t> build_rpc_payload(
-    const std::vector<uint8_t> &measurements) {
+std::vector<uint8_t>
+build_rpc_payload(const std::vector<uint8_t> &measurements) {
   std::vector<uint8_t> payload(sizeof(cudaq::nvqlink::RPCHeader) +
                                measurements.size());
 
-  auto *header =
-      reinterpret_cast<cudaq::nvqlink::RPCHeader *>(payload.data());
+  auto *header = reinterpret_cast<cudaq::nvqlink::RPCHeader *>(payload.data());
   header->magic = cudaq::nvqlink::RPC_MAGIC_REQUEST;
   header->function_id = MOCK_DECODE_FUNCTION_ID;
   header->arg_len = static_cast<std::uint32_t>(measurements.size());
@@ -210,13 +209,16 @@ void print_usage(const char *argv0) {
       << "  --config <path>             Config YAML path\n"
       << "  --syndromes <path>          Syndromes text path\n"
       << "  --window-number <n>         Number of windows to program\n"
-      << "  --frame-size <bytes>        Frame size per window (must be >= payload, "
+      << "  --frame-size <bytes>        Frame size per window (must be >= "
+         "payload, "
          "multiple of 64)\n"
-      << "  --timer-value <ticks>       Raw timer value (overrides board/spacing)\n"
+      << "  --timer-value <ticks>       Raw timer value (overrides "
+         "board/spacing)\n"
       << "  --timer-spacing-us <us>     Spacing for timer calculation\n"
       << "  --board <RFSoC|Other>       Board type for timer calculation\n"
       << "  --mtu <bytes>               Suggest MTU in enumeration metadata\n"
-      << "  --uuid <uuid>               Set explicit UUID enumeration strategy\n"
+      << "  --uuid <uuid>               Set explicit UUID enumeration "
+         "strategy\n"
       << "  --total-sensors <n>         Enumeration strategy sensors\n"
       << "  --total-dataplanes <n>      Enumeration strategy dataplanes\n"
       << "  --sifs-per-sensor <n>       Enumeration strategy SIFs per sensor\n"
@@ -264,13 +266,17 @@ Options parse_args(int argc, char **argv) {
   if (kv.count("uuid"))
     options.uuid = kv["uuid"];
   if (kv.count("total-sensors"))
-    options.total_sensors = static_cast<std::uint32_t>(std::stoul(kv["total-sensors"]));
+    options.total_sensors =
+        static_cast<std::uint32_t>(std::stoul(kv["total-sensors"]));
   if (kv.count("total-dataplanes"))
-    options.total_dataplanes = static_cast<std::uint32_t>(std::stoul(kv["total-dataplanes"]));
+    options.total_dataplanes =
+        static_cast<std::uint32_t>(std::stoul(kv["total-dataplanes"]));
   if (kv.count("sifs-per-sensor"))
-    options.sifs_per_sensor = static_cast<std::uint32_t>(std::stoul(kv["sifs-per-sensor"]));
+    options.sifs_per_sensor =
+        static_cast<std::uint32_t>(std::stoul(kv["sifs-per-sensor"]));
   if (kv.count("timer-value"))
-    options.timer_value = static_cast<std::uint32_t>(std::stoul(kv["timer-value"]));
+    options.timer_value =
+        static_cast<std::uint32_t>(std::stoul(kv["timer-value"]));
   if (kv.count("timer-spacing-us"))
     options.timer_spacing_us =
         static_cast<std::uint32_t>(std::stoul(kv["timer-spacing-us"]));
@@ -292,7 +298,8 @@ Options parse_args(int argc, char **argv) {
 uint32_t compute_timer_value(const Options &options) {
   if (options.timer_value)
     return *options.timer_value;
-  uint32_t scale = options.board_is_rfsoc ? RF_SOC_TIMER_SCALE : OTHER_TIMER_SCALE;
+  uint32_t scale =
+      options.board_is_rfsoc ? RF_SOC_TIMER_SCALE : OTHER_TIMER_SCALE;
   return scale * options.timer_spacing_us;
 }
 
@@ -339,8 +346,7 @@ void write_bram(hololink::Hololink &hololink,
         }
 
         uint32_t ram_addr = static_cast<uint32_t>(i << (w_sample_addr + 2));
-        uint32_t sample_addr =
-            static_cast<uint32_t>((s + (w * cycles)) * 0x4);
+        uint32_t sample_addr = static_cast<uint32_t>((s + (w * cycles)) * 0x4);
         uint32_t address = RAM_ADDR + ram_addr + sample_addr;
 
         write_data.queue_write_uint32(address, value);
@@ -423,8 +429,8 @@ int main(int argc, char **argv) {
   std::size_t window_number =
       options.window_number ? *options.window_number : windows.size();
   if (window_number == 0 || window_number > windows.size()) {
-    std::cerr << "Invalid --window-number; must be in [1, "
-              << windows.size() << "]\n";
+    std::cerr << "Invalid --window-number; must be in [1, " << windows.size()
+              << "]\n";
     return 1;
   }
   windows.resize(window_number);
