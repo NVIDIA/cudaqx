@@ -72,8 +72,8 @@ constexpr std::uint32_t ILA_SAMPLE_ADDR_OFFSET = 0x0084;
 constexpr std::uint32_t ILA_W_DATA = 521;
 constexpr std::uint32_t ILA_DEPTH = 8192;
 constexpr std::uint32_t ILA_NUM_RAM = (ILA_W_DATA + 31) / 32; // 17
-constexpr std::uint32_t ILA_W_ADDR = 13;  // log2(8192)
-constexpr std::uint32_t ILA_W_RAM = 5;    // ceil(log2(17))
+constexpr std::uint32_t ILA_W_ADDR = 13;                      // log2(8192)
+constexpr std::uint32_t ILA_W_RAM = 5;                        // ceil(log2(17))
 
 constexpr std::uint32_t ILA_CTRL_ENABLE = 0x0000'0001;
 constexpr std::uint32_t ILA_CTRL_RESET = 0x0000'0002;
@@ -219,8 +219,7 @@ build_rpc_payload(const std::vector<std::uint8_t> &measurements) {
   std::vector<std::uint8_t> payload(sizeof(cudaq::nvqlink::RPCHeader) +
                                     measurements.size());
 
-  auto *header =
-      reinterpret_cast<cudaq::nvqlink::RPCHeader *>(payload.data());
+  auto *header = reinterpret_cast<cudaq::nvqlink::RPCHeader *>(payload.data());
   header->magic = cudaq::nvqlink::RPC_MAGIC_REQUEST;
   header->function_id = MOCK_DECODE_FUNCTION_ID;
   header->arg_len = static_cast<std::uint32_t>(measurements.size());
@@ -319,10 +318,8 @@ void write_bram(hololink::Hololink &hololink,
           value = load_le_u32(window.data() + byte_offset);
         }
 
-        auto ram_addr =
-            static_cast<std::uint32_t>(i << (w_sample_addr + 2));
-        auto sample_addr =
-            static_cast<std::uint32_t>((s + (w * cycles)) * 0x4);
+        auto ram_addr = static_cast<std::uint32_t>(i << (w_sample_addr + 2));
+        auto sample_addr = static_cast<std::uint32_t>((s + (w * cycles)) * 0x4);
         std::uint32_t address = RAM_ADDR + ram_addr + sample_addr;
 
         write_data.queue_write_uint32(address, value);
@@ -351,8 +348,7 @@ bool verify_bram(hololink::Hololink &hololink,
                  const std::vector<std::vector<std::uint8_t>> &windows,
                  std::size_t bytes_per_window) {
   const std::size_t cycles = bytes_per_window / 64;
-  const auto total_cycles =
-      static_cast<std::uint32_t>(windows.size() * cycles);
+  const auto total_cycles = static_cast<std::uint32_t>(windows.size() * cycles);
   const std::uint32_t w_sample_addr = bram_w_sample_addr();
   auto timeout = std::shared_ptr<hololink::Timeout>();
 
@@ -360,8 +356,7 @@ bool verify_bram(hololink::Hololink &hololink,
   std::size_t mismatches = 0;
 
   for (std::uint32_t i = 0; i < RAM_NUM; ++i) {
-    std::uint32_t bank_base =
-        RAM_ADDR + (i << (w_sample_addr + 2));
+    std::uint32_t bank_base = RAM_ADDR + (i << (w_sample_addr + 2));
     auto [ok, readback] =
         hololink.read_uint32(bank_base, total_cycles, timeout);
     if (!ok) {
@@ -384,9 +379,8 @@ bool verify_bram(hololink::Hololink &hololink,
         if (actual != expected) {
           if (mismatches < 10) {
             std::cerr << "  BRAM mismatch: bank=" << i
-                      << " sample=" << sample_idx << " expected=0x"
-                      << std::hex << expected << " got=0x" << actual
-                      << std::dec << "\n";
+                      << " sample=" << sample_idx << " expected=0x" << std::hex
+                      << expected << " got=0x" << actual << std::dec << "\n";
           }
           all_ok = false;
           ++mismatches;
@@ -396,8 +390,7 @@ bool verify_bram(hololink::Hololink &hololink,
   }
 
   if (mismatches > 10) {
-    std::cerr << "  ... and " << (mismatches - 10)
-              << " more mismatches\n";
+    std::cerr << "  ... and " << (mismatches - 10) << " more mismatches\n";
   }
 
   return all_ok;
@@ -447,10 +440,9 @@ bool ila_wait_for_samples(hololink::Hololink &hl,
 /// Read @p num_samples captured ILA samples using block reads (one per bank).
 /// Returns vector of samples; each sample is ILA_NUM_RAM uint32 words ordered
 /// LSW-first (word[0] = bits [31:0], word[1] = bits [63:32], ...).
-std::vector<std::vector<std::uint32_t>>
-ila_dump(hololink::Hololink &hl, std::uint32_t num_samples) {
-  constexpr std::uint32_t ctrl_switch =
-      1u << (ILA_W_ADDR + 2 + ILA_W_RAM);
+std::vector<std::vector<std::uint32_t>> ila_dump(hololink::Hololink &hl,
+                                                 std::uint32_t num_samples) {
+  constexpr std::uint32_t ctrl_switch = 1u << (ILA_W_ADDR + 2 + ILA_W_RAM);
   auto timeout = std::shared_ptr<hololink::Timeout>();
 
   // Read each bank with a single block read.
@@ -460,8 +452,7 @@ ila_dump(hololink::Hololink &hl, std::uint32_t num_samples) {
         ILA_BASE_ADDR + ctrl_switch + (y << (ILA_W_ADDR + 2));
     auto [ok, data] = hl.read_uint32(bank_base, num_samples, timeout);
     if (!ok)
-      throw std::runtime_error("Failed to read ILA bank " +
-                               std::to_string(y));
+      throw std::runtime_error("Failed to read ILA bank " + std::to_string(y));
     bank_data[y] = std::move(data);
   }
 
@@ -536,10 +527,9 @@ struct VerifyResult {
 ///   bytes [4:7]   RPCResponse.status     = 0 (success)
 ///   bytes [8:11]  RPCResponse.result_len = 1
 ///   byte  [12]    correction value
-VerifyResult
-verify_captured_responses(const std::vector<std::vector<std::uint32_t>> &samples,
-                          const std::vector<SyndromeEntry> &syndromes,
-                          std::size_t num_expected) {
+VerifyResult verify_captured_responses(
+    const std::vector<std::vector<std::uint32_t>> &samples,
+    const std::vector<SyndromeEntry> &syndromes, std::size_t num_expected) {
   VerifyResult result;
   result.total_samples = samples.size();
   std::size_t response_idx = 0;
@@ -563,7 +553,8 @@ verify_captured_responses(const std::vector<std::vector<std::uint32_t>> &samples
 
     cudaq::nvqlink::RPCResponse resp{};
     std::memcpy(&resp, data_bytes.data(), sizeof(resp));
-    std::uint8_t correction_byte = data_bytes[sizeof(cudaq::nvqlink::RPCResponse)];
+    std::uint8_t correction_byte =
+        data_bytes[sizeof(cudaq::nvqlink::RPCResponse)];
 
     std::cout << "  Sample " << i << " (tlast=" << tlast
               << " wr_tcnt=" << wr_tcnt << "):\n";
@@ -602,10 +593,9 @@ verify_captured_responses(const std::vector<std::vector<std::uint32_t>> &samples
       continue;
     }
 
-    std::uint8_t expected =
-        (response_idx < syndromes.size())
-            ? syndromes[response_idx].expected_correction
-            : 0;
+    std::uint8_t expected = (response_idx < syndromes.size())
+                                ? syndromes[response_idx].expected_correction
+                                : 0;
     std::cout << "    Correction: got=" << static_cast<int>(correction_byte)
               << " expected=" << static_cast<int>(expected);
     if (correction_byte == expected) {
@@ -662,9 +652,9 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  std::size_t num_shots =
-      options.num_shots ? std::min(*options.num_shots, syndromes.size())
-                        : syndromes.size();
+  std::size_t num_shots = options.num_shots
+                              ? std::min(*options.num_shots, syndromes.size())
+                              : syndromes.size();
   if (num_shots == 0) {
     std::cerr << "No shots to play back\n";
     return 1;
@@ -693,8 +683,9 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  std::cout << "Loaded " << num_shots << " shots (syndrome_size="
-            << syndrome_size << ", payload=" << payload_size
+  std::cout << "Loaded " << num_shots
+            << " shots (syndrome_size=" << syndrome_size
+            << ", payload=" << payload_size
             << " bytes, padded=" << bytes_per_window << " bytes, "
             << cycles_per_window << " cycles/shot)\n";
 
@@ -720,17 +711,15 @@ int main(int argc, char **argv) {
   hololink::Hololink::WriteData config_write;
   config_write.queue_write_uint32(PLAYER_ADDR + PLAYER_WINDOW_SIZE_OFFSET,
                                   static_cast<std::uint32_t>(bytes_per_window));
-  config_write.queue_write_uint32(
-      PLAYER_ADDR + PLAYER_WINDOW_NUMBER_OFFSET,
-      static_cast<std::uint32_t>(num_shots));
-  config_write.queue_write_uint32(
-      PLAYER_ADDR + PLAYER_TIMER_OFFSET,
-      RF_SOC_TIMER_SCALE * DEFAULT_TIMER_SPACING_US);
+  config_write.queue_write_uint32(PLAYER_ADDR + PLAYER_WINDOW_NUMBER_OFFSET,
+                                  static_cast<std::uint32_t>(num_shots));
+  config_write.queue_write_uint32(PLAYER_ADDR + PLAYER_TIMER_OFFSET,
+                                  RF_SOC_TIMER_SCALE *
+                                      DEFAULT_TIMER_SPACING_US);
   if (!hololink->write_uint32(config_write))
     throw std::runtime_error("Failed to configure player");
 
-  std::cout << "Writing " << num_shots
-            << " windows to playback BRAM...\n";
+  std::cout << "Writing " << num_shots << " windows to playback BRAM...\n";
   write_bram(*hololink, windows, bytes_per_window);
 
   // ------------------------------------------------------------------
@@ -770,8 +759,7 @@ int main(int argc, char **argv) {
   // ------------------------------------------------------------------
   if (options.verify) {
     std::cout << "\n=== ILA Capture & Verification ===\n";
-    std::cout << "Waiting for " << num_shots
-              << " correction responses...\n";
+    std::cout << "Waiting for " << num_shots << " correction responses...\n";
 
     constexpr int kVerifyTimeoutMs = 5000;
     bool captured = ila_wait_for_samples(
@@ -793,8 +781,8 @@ int main(int argc, char **argv) {
     }
 
     std::uint32_t samples_to_read = actual_samples;
-    std::cout << "Reading " << samples_to_read << " samples ("
-              << ILA_NUM_RAM << " words each)...\n";
+    std::cout << "Reading " << samples_to_read << " samples (" << ILA_NUM_RAM
+              << " words each)...\n";
     auto captured_samples = ila_dump(*hololink, samples_to_read);
 
     std::cout << "\nVerifying " << num_shots
@@ -803,12 +791,10 @@ int main(int argc, char **argv) {
         verify_captured_responses(captured_samples, syndromes, num_shots);
 
     std::cout << "\n=== Verification Summary ===\n"
-              << "  Captured samples:       " << vresult.total_samples
-              << "\n"
+              << "  Captured samples:       " << vresult.total_samples << "\n"
               << "  RPC responses matched:  " << vresult.responses_matched
               << " / " << num_shots << "\n"
-              << "  Header errors:          " << vresult.header_errors
-              << "\n"
+              << "  Header errors:          " << vresult.header_errors << "\n"
               << "  Correction mismatches:  " << vresult.correction_errors
               << "\n";
 
