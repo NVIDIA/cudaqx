@@ -34,7 +34,14 @@ if [ -z "$CUDAQ_REALTIME_ROOT" ]; then
     tar tzf /tmp/cudaq-realtime-headers.tar.gz | head -n 50
     exit 1
   fi
+  if [ ! -f "$CUDAQ_REALTIME_ROOT/lib/libcudaq-realtime.so" ] || [ ! -f "$CUDAQ_REALTIME_ROOT/lib/libcudaq-realtime-dispatch.a" ]; then
+    echo "ERROR: Expected realtime libraries not found after extraction."
+    ls -la "$CUDAQ_REALTIME_ROOT/lib"
+    exit 1
+  fi
 fi
+
+echo "Using CUDAQ_REALTIME_ROOT=$CUDAQ_REALTIME_ROOT"
 
 cmake -S libs/qec -B "$1" \
   -DCMAKE_BUILD_TYPE=Release \
