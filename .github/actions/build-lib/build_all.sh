@@ -56,4 +56,9 @@ cmake -S . -B "$1" \
   -DCMAKE_INSTALL_PREFIX="$2" \
   -DCUDAQ_REALTIME_ROOT=$CUDAQ_REALTIME_ROOT
 
+if [ -f "$1/CMakeCache.txt" ]; then
+  echo "CUDAQ realtime cache values:"
+  grep -E "CUDAQ_REALTIME_(ROOT|INCLUDE_DIR|LIBRARY|DISPATCH_LIBRARY)" "$1/CMakeCache.txt" || true
+fi
+
 cmake --build "$1" --target install
