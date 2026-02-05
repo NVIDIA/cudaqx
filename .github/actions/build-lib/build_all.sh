@@ -19,6 +19,7 @@ if [ -z "$CUDAQ_REALTIME_ROOT" ]; then
     echo "ERROR: Failed to download cudaq-realtime assets from release ${RELEASE_TAG}."
     exit 1
   fi
+  echo "Downloaded cudaq-realtime assets from release ${RELEASE_TAG}."
 
   if [ ! -f "/tmp/cudaq-realtime-headers.tar.gz" ] || [ ! -f "/tmp/cudaq-realtime-libs-${ARCH}.tar.gz" ]; then
     echo "ERROR: cudaq-realtime asset files missing after download."
@@ -27,6 +28,12 @@ if [ -z "$CUDAQ_REALTIME_ROOT" ]; then
 
   tar xzf /tmp/cudaq-realtime-headers.tar.gz -C $CUDAQ_REALTIME_ROOT
   tar xzf /tmp/cudaq-realtime-libs-${ARCH}.tar.gz -C $CUDAQ_REALTIME_ROOT/lib
+
+  if [ ! -f "$CUDAQ_REALTIME_ROOT/include/cudaq/nvqlink/daemon/dispatcher/cudaq_realtime.h" ]; then
+    echo "ERROR: Expected realtime header not found after extraction."
+    tar tzf /tmp/cudaq-realtime-headers.tar.gz | head -n 50
+    exit 1
+  fi
 fi
 
 cmake -S . -B "$1" \
