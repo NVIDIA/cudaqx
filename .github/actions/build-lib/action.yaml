@@ -23,10 +23,6 @@ inputs:
     description: 'Install prefix'
     default: '~/.cudaqx'
     required: false
-  token:
-    description: 'GitHub token for accessing draft release assets'
-    default: ''
-    required: false
 outputs:
   build-dir:
     description: 'Build dir.'
@@ -69,7 +65,7 @@ runs:
       id: build-lib
       env:
         CCACHE_DIR: /ccache-${{ inputs.lib }}
-        GH_TOKEN: ${{ inputs.token || github.token }} # REVERT-WITH-CUDAQ-REALTIME-BUILD
+        GH_TOKEN: ${{ github.token }} # REVERT-WITH-CUDAQ-REALTIME-BUILD
       run: |
         build_dir=build_${{ inputs.lib }}
         .github/actions/build-lib/build_${{ inputs.lib }}.sh $build_dir ${{ inputs.install-prefix }}

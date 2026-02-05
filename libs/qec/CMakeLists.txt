@@ -73,8 +73,6 @@ set(HOLOSCAN_SENSOR_BRIDGE_SOURCE_DIR "" CACHE PATH
     "Path to holoscan-sensor-bridge source tree (for headers)")
 set(HOLOSCAN_SENSOR_BRIDGE_BUILD_DIR "" CACHE PATH
     "Path to holoscan-sensor-bridge build tree (for libraries)")
-set(CUDAQ_REALTIME_INCLUDE_DIR "" CACHE PATH
-    "Path to CUDA-Q realtime include root (contains cudaq/nvqlink/daemon/...)")
 find_package(CUDAToolkit REQUIRED)
 
 # Check for CUDA Support (ref: cuda-quantum/CMakeLists.txt)

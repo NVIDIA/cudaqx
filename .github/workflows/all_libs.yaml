@@ -89,7 +89,6 @@ jobs:
           pr-number: ${{ steps.export-pr-info.outputs.pr_number }}
           save-ccache: true
           platform: ${{ matrix.platform }}
-          token: ${{ secrets.CUDAQ_ACCESS_TOKEN }}
 
       # ========================================================================
       # Run tests
