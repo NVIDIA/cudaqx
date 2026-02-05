@@ -44,6 +44,7 @@ fi
 echo "Using CUDAQ_REALTIME_ROOT=$CUDAQ_REALTIME_ROOT"
 
 cmake -S libs/qec -B "$1" \
+  -U CUDAQ_REALTIME_.* \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_C_COMPILER=gcc-11 \
   -DCMAKE_CXX_COMPILER=g++-11 \
