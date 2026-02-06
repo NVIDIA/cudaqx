@@ -128,6 +128,41 @@ find_library(CUDAQ_REALTIME_DISPATCH_LIBRARY
 )
 
 # =========================================================================== #
+# hololink_fpga_syndrome_playback
+# =========================================================================== #
+# FPGA stimulus tool: loads syndromes into FPGA BRAM and triggers playback.
+
+add_executable(hololink_fpga_syndrome_playback
+  hololink_fpga_syndrome_playback.cpp)
+
+target_include_directories(hololink_fpga_syndrome_playback
+  PRIVATE "${HOLOSCAN_SENSOR_BRIDGE_SOURCE_DIR}/src")
+
+if (DEFINED CUDAQ_INCLUDE_DIR AND CUDAQ_INCLUDE_DIR)
+  target_include_directories(hololink_fpga_syndrome_playback
+    PRIVATE "${CUDAQ_INCLUDE_DIR}")
+endif()
+
+if (DEFINED CUDAQ_INSTALL_DIR AND CUDAQ_INSTALL_DIR)
+  target_include_directories(hololink_fpga_syndrome_playback
+    PRIVATE "${CUDAQ_INSTALL_DIR}/include")
+endif()
+
+if (CUDAQ_REALTIME_INCLUDE_DIR)
+  target_include_directories(hololink_fpga_syndrome_playback
+    PRIVATE "${CUDAQ_REALTIME_INCLUDE_DIR}")
+endif()
+
+target_include_directories(hololink_fpga_syndrome_playback
+  PRIVATE "${CUDAToolkit_INCLUDE_DIRS}")
+
+target_link_libraries(hololink_fpga_syndrome_playback
+  PRIVATE CUDA::cudart)
+
+target_link_libraries(hololink_fpga_syndrome_playback
+  PRIVATE ${HOLOLINK_CORE_LIB} Threads::Threads)
+
+# =========================================================================== #
 # hololink_mock_decoder_bridge
 # =========================================================================== #
 # Bridge tool: Hololink GPU-RoCE Transceiver <-> cudaq dispatch kernel (mock decoder)
