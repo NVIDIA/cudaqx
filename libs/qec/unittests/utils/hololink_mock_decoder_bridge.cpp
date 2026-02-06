@@ -6,7 +6,7 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
-/// @file hololink_mock_decoder_bridge.cu
+/// @file hololink_mock_decoder_bridge.cpp
 /// @brief Bridge tool connecting Hololink GPU-RoCE Transceiver to the cudaq
 ///        realtime mock decoder via the dispatch kernel.
 ///
@@ -49,8 +49,11 @@
 // cuda-quantum RPC types/hash helper
 #include "cudaq/nvqlink/daemon/dispatcher/dispatch_kernel_launch.h"
 
-// cudaqx mock decoder
+// cudaqx mock decoder (host-callable wrappers)
 #include "cudaq/qec/realtime/mock_decode_handler.cuh"
+
+// Shared setup helpers (config parsing, syndrome loading, GPU context, launch wrapper)
+#include "cudaq/qec/realtime/mock_decode_setup.h"
 
 // Hololink wrapper (C interface to avoid fmt conflicts)
 #include "hololink_wrapper.h"
@@ -151,184 +154,6 @@ static BridgeArgs parse_args(int argc, char *argv[]) {
 }
 
 //==============================================================================
-// Config File Parsing (simple YAML parser)
-//==============================================================================
-
-static uint64_t parse_scalar(const std::string &content,
-                             const std::string &field_name) {
-  std::size_t pos = content.find(field_name + ":");
-  if (pos == std::string::npos)
-    return 0;
-
-  pos = content.find(':', pos);
-  if (pos == std::string::npos)
-    return 0;
-
-  std::size_t end_pos = content.find_first_of("\n[", pos + 1);
-  if (end_pos == std::string::npos)
-    end_pos = content.length();
-
-  std::string value_str = content.substr(pos + 1, end_pos - pos - 1);
-  value_str.erase(0, value_str.find_first_not_of(" \t\n\r"));
-  value_str.erase(value_str.find_last_not_of(" \t\n\r") + 1);
-
-  try {
-    return std::stoull(value_str);
-  } catch (...) {
-    return 0;
-  }
-}
-
-//==============================================================================
-// Syndrome Loading
-//==============================================================================
-
-struct SyndromeEntry {
-  std::vector<uint8_t> measurements;
-  uint8_t expected_correction;
-};
-
-static std::vector<SyndromeEntry> load_syndromes(const std::string &path,
-                                                  std::size_t syndrome_size) {
-  std::vector<SyndromeEntry> entries;
-  std::ifstream file(path);
-  if (!file.good())
-    return entries;
-
-  std::string line;
-  std::vector<uint8_t> current_shot;
-  std::vector<std::vector<uint8_t>> shots;
-  std::vector<uint8_t> corrections;
-  bool reading_shot = false;
-  bool reading_corrections = false;
-
-  while (std::getline(file, line)) {
-    if (line.find("SHOT_START") == 0) {
-      if (reading_shot && !current_shot.empty()) {
-        shots.push_back(current_shot);
-      }
-      current_shot.clear();
-      reading_shot = true;
-      reading_corrections = false;
-      continue;
-    }
-    if (line == "CORRECTIONS_START") {
-      if (reading_shot && !current_shot.empty()) {
-        shots.push_back(current_shot);
-      }
-      current_shot.clear();
-      reading_shot = false;
-      reading_corrections = true;
-      continue;
-    }
-    if (line == "CORRECTIONS_END") {
-      break;
-    }
-    if (line.find("NUM_DATA") == 0 || line.find("NUM_LOGICAL") == 0) {
-      continue;
-    } else if (reading_shot) {
-      line.erase(0, line.find_first_not_of(" \t\n\r"));
-      line.erase(line.find_last_not_of(" \t\n\r") + 1);
-      if (line.empty())
-        continue;
-
-      try {
-        int bit = std::stoi(line);
-        current_shot.push_back(static_cast<uint8_t>(bit));
-      } catch (...) {
-      }
-    } else if (reading_corrections) {
-      line.erase(0, line.find_first_not_of(" \t\n\r"));
-      line.erase(line.find_last_not_of(" \t\n\r") + 1);
-      if (line.empty())
-        continue;
-      try {
-        int bit = std::stoi(line);
-        corrections.push_back(static_cast<uint8_t>(bit));
-      } catch (...) {
-      }
-    }
-  }
-
-  if (reading_shot && !current_shot.empty()) {
-    shots.push_back(current_shot);
-  }
-
-  for (std::size_t i = 0; i < shots.size(); ++i) {
-    if (shots[i].size() < syndrome_size) {
-      shots[i].resize(syndrome_size, 0);
-    } else if (shots[i].size() > syndrome_size) {
-      shots[i].resize(syndrome_size);
-    }
-    SyndromeEntry entry{};
-    entry.measurements = std::move(shots[i]);
-    entry.expected_correction = (i < corrections.size()) ? corrections[i] : 0;
-    entries.push_back(std::move(entry));
-  }
-
-  return entries;
-}
-
-//==============================================================================
-// Function ID for mock decoder
-//==============================================================================
-
-namespace {
-constexpr std::uint32_t MOCK_DECODE_FUNCTION_ID =
-    cudaq::nvqlink::fnv1a_hash("mock_decode");
-}
-
-//==============================================================================
-// Kernel to initialize function table on device
-//==============================================================================
-
-__global__ void init_function_table(cudaq_function_entry_t *entries) {
-  if (threadIdx.x == 0 && blockIdx.x == 0) {
-    entries[0].handler.device_fn_ptr =
-        reinterpret_cast<void *>(&cudaq::qec::realtime::mock_decode_rpc);
-    entries[0].function_id = MOCK_DECODE_FUNCTION_ID;
-    entries[0].dispatch_mode = CUDAQ_DISPATCH_DEVICE_CALL;
-    entries[0].reserved[0] = 0;
-    entries[0].reserved[1] = 0;
-    entries[0].reserved[2] = 0;
-
-    // Schema: 1 bit-packed argument, 1 uint8 result
-    entries[0].schema.num_args = 1;
-    entries[0].schema.num_results = 1;
-    entries[0].schema.reserved = 0;
-    entries[0].schema.args[0].type_id = CUDAQ_TYPE_BIT_PACKED;
-    entries[0].schema.args[0].reserved[0] = 0;
-    entries[0].schema.args[0].reserved[1] = 0;
-    entries[0].schema.args[0].reserved[2] = 0;
-    entries[0].schema.args[0].size_bytes = 16;    // 128 bits
-    entries[0].schema.args[0].num_elements = 128; // 128 bits
-    entries[0].schema.results[0].type_id = CUDAQ_TYPE_UINT8;
-    entries[0].schema.results[0].reserved[0] = 0;
-    entries[0].schema.results[0].reserved[1] = 0;
-    entries[0].schema.results[0].reserved[2] = 0;
-    entries[0].schema.results[0].size_bytes = 1;
-    entries[0].schema.results[0].num_elements = 1;
-  }
-}
-
-//==============================================================================
-// Host Launch Wrapper (C-compatible, matches cudaq_dispatch_launch_fn_t)
-//==============================================================================
-
-extern "C" void bridge_launch_dispatch_kernel(
-    volatile std::uint64_t *rx_flags, volatile std::uint64_t *tx_flags,
-    std::uint8_t *rx_data, std::uint8_t *tx_data, std::size_t rx_stride_sz,
-    std::size_t tx_stride_sz, cudaq_function_entry_t *function_table,
-    std::size_t func_count, volatile int *shutdown_flag, std::uint64_t *stats,
-    std::size_t num_slots, std::uint32_t num_blocks,
-    std::uint32_t threads_per_block, cudaStream_t stream) {
-  cudaq_launch_dispatch_kernel_regular(
-      rx_flags, tx_flags, rx_data, tx_data, rx_stride_sz, tx_stride_sz,
-      function_table, func_count, shutdown_flag, stats, num_slots, num_blocks,
-      threads_per_block, stream);
-}
-
-//==============================================================================
 // MAIN
 //==============================================================================
 
@@ -377,8 +202,10 @@ int main(int argc, char *argv[]) {
     std::string config_content((std::istreambuf_iterator<char>(config_file)),
                                std::istreambuf_iterator<char>());
 
-    std::size_t syndrome_size = parse_scalar(config_content, "syndrome_size");
-    std::size_t block_size = parse_scalar(config_content, "block_size");
+    std::size_t syndrome_size =
+        cudaq::qec::realtime::parse_scalar(config_content, "syndrome_size");
+    std::size_t block_size =
+        cudaq::qec::realtime::parse_scalar(config_content, "block_size");
     if (syndrome_size == 0 || block_size == 0) {
       std::cerr << "ERROR: Invalid config (syndrome_size=" << syndrome_size
                 << ", block_size=" << block_size << ")" << std::endl;
@@ -388,7 +215,8 @@ int main(int argc, char *argv[]) {
     std::cout << "  block_size: " << block_size << std::endl;
 
     // Load syndromes for mock decoder lookup table
-    auto syndromes = load_syndromes(args.syndrome_path, syndrome_size);
+    auto syndromes =
+        cudaq::qec::realtime::load_syndromes(args.syndrome_path, syndrome_size);
     if (syndromes.empty()) {
       std::cerr << "ERROR: No syndrome data loaded from: "
                 << args.syndrome_path << std::endl;
@@ -402,43 +230,15 @@ int main(int argc, char *argv[]) {
     //==========================================================================
     std::cout << "\n[2/5] Setting up mock decoder context..." << std::endl;
 
-    // Build lookup tables
-    std::size_t num_lookup_entries = syndromes.size();
-    std::vector<uint8_t> lookup_measurements(num_lookup_entries *
-                                             syndrome_size);
-    std::vector<uint8_t> lookup_corrections(num_lookup_entries);
-
-    for (std::size_t i = 0; i < num_lookup_entries; ++i) {
-      memcpy(lookup_measurements.data() + i * syndrome_size,
-             syndromes[i].measurements.data(), syndrome_size);
-      lookup_corrections[i] = syndromes[i].expected_correction;
+    cudaq::qec::realtime::MockDecoderGpuResources gpu_resources;
+    cudaError_t ctx_err =
+        cudaq::qec::realtime::setup_mock_decoder_from_syndromes(
+            syndromes, syndrome_size, gpu_resources);
+    if (ctx_err != cudaSuccess) {
+      std::cerr << "ERROR: Failed to set up mock decoder on GPU: "
+                << cudaGetErrorString(ctx_err) << std::endl;
+      return 1;
     }
-
-    // Allocate device memory for lookup tables
-    uint8_t *d_lookup_measurements = nullptr;
-    uint8_t *d_lookup_corrections = nullptr;
-    CUDA_CHECK(cudaMalloc(&d_lookup_measurements, lookup_measurements.size()));
-    CUDA_CHECK(cudaMalloc(&d_lookup_corrections, lookup_corrections.size()));
-    CUDA_CHECK(cudaMemcpy(d_lookup_measurements, lookup_measurements.data(),
-                          lookup_measurements.size(), cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(d_lookup_corrections, lookup_corrections.data(),
-                          lookup_corrections.size(), cudaMemcpyHostToDevice));
-
-    // Set up mock decoder context
-    cudaq::qec::realtime::mock_decoder_context ctx;
-    ctx.num_measurements = syndrome_size;
-    ctx.num_observables = 1;
-    ctx.lookup_measurements = d_lookup_measurements;
-    ctx.lookup_corrections = d_lookup_corrections;
-    ctx.num_lookup_entries = num_lookup_entries;
-
-    cudaq::qec::realtime::mock_decoder_context *d_ctx = nullptr;
-    CUDA_CHECK(
-        cudaMalloc(&d_ctx, sizeof(cudaq::qec::realtime::mock_decoder_context)));
-    CUDA_CHECK(cudaMemcpy(d_ctx, &ctx, sizeof(ctx), cudaMemcpyHostToDevice));
-
-    // Set global context for RPC-style calls
-    cudaq::qec::realtime::set_mock_decoder_context(d_ctx);
     std::cout << "  Mock decoder context initialized" << std::endl;
 
     //==========================================================================
@@ -465,7 +265,7 @@ int main(int argc, char *argv[]) {
     // Create transceiver with both RX and TX kernels enabled
     hololink_transceiver_t transceiver = hololink_create_transceiver(
         args.device.c_str(), 1, // ib_port
-        args.gpu_id, frame_size, args.page_size, args.num_pages,
+        frame_size, args.page_size, args.num_pages,
         args.peer_ip.c_str(),
         0, // forward = false
         1, // rx_only = true
@@ -518,12 +318,11 @@ int main(int argc, char *argv[]) {
     //==========================================================================
     std::cout << "\n[4/5] Wiring cudaq dispatch kernel..." << std::endl;
 
-    // Set up function table for dispatch kernel
+    // Set up function table using library helper (no nvcc kernel launch needed)
     cudaq_function_entry_t *d_function_entries = nullptr;
     CUDA_CHECK(
         cudaMalloc(&d_function_entries, sizeof(cudaq_function_entry_t)));
-    init_function_table<<<1, 1>>>(d_function_entries);
-    CUDA_CHECK(cudaDeviceSynchronize());
+    cudaq::qec::realtime::setup_mock_decode_function_table(d_function_entries);
 
     // Allocate control variables (mapped memory for host+device access)
     void *tmp_shutdown = nullptr;
@@ -597,8 +396,9 @@ int main(int argc, char *argv[]) {
       return 1;
     }
 
-    if (cudaq_dispatcher_set_launch_fn(dispatcher,
-                                       &bridge_launch_dispatch_kernel) !=
+    if (cudaq_dispatcher_set_launch_fn(
+            dispatcher,
+            &cudaq::qec::realtime::mock_decode_launch_dispatch_kernel) !=
         CUDAQ_OK) {
       std::cerr << "ERROR: Failed to set launch function" << std::endl;
       return 1;
@@ -699,12 +499,8 @@ int main(int argc, char *argv[]) {
       cudaFree(d_stats);
     if (d_function_entries)
       cudaFree(d_function_entries);
-    if (d_lookup_measurements)
-      cudaFree(d_lookup_measurements);
-    if (d_lookup_corrections)
-      cudaFree(d_lookup_corrections);
-    if (d_ctx)
-      cudaFree(d_ctx);
+
+    gpu_resources.cleanup();
 
     std::cout << "\n*** Bridge shutdown complete ***" << std::endl;
     return 0;

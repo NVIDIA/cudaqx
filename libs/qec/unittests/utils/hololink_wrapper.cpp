@@ -36,7 +36,7 @@ struct HololinkTransceiverImpl {
 //==============================================================================
 
 hololink_transceiver_t hololink_create_transceiver(const char *device_name,
-                                                   int ib_port, int gpu_id,
+                                                   int ib_port,
                                                    size_t frame_size,
                                                    size_t page_size,
                                                    unsigned num_pages,
@@ -49,7 +49,7 @@ hololink_transceiver_t hololink_create_transceiver(const char *device_name,
     impl->num_pages = num_pages;
     impl->transceiver = std::make_unique<GpuRoceTransceiver>(
         device_name, static_cast<unsigned>(ib_port),
-        static_cast<uint32_t>(gpu_id), frame_size, page_size, num_pages,
+        frame_size, page_size, num_pages,
         peer_ip, forward != 0, rx_only != 0, tx_only != 0);
     return reinterpret_cast<hololink_transceiver_t>(impl);
   } catch (const std::exception &e) {
@@ -122,11 +122,10 @@ uint64_t hololink_get_buffer_addr(hololink_transceiver_t handle) {
 }
 
 int hololink_get_gid(hololink_transceiver_t handle, uint8_t *gid_out) {
-  // Note: GpuRoceTransceiver does not currently expose get_gid().
-  // For RoCE v2, the GID can be derived from the local IP address.
-  // This is a placeholder that returns 0 (not implemented).
-  (void)handle;
-  (void)gid_out;
+  if (handle) {
+    auto *impl = reinterpret_cast<HololinkTransceiverImpl *>(handle);
+    return impl->transceiver->get_gid(gid_out);
+  }
   return 0;
 }
 
@@ -136,15 +135,10 @@ int hololink_get_gid(hololink_transceiver_t handle, uint8_t *gid_out) {
 
 int hololink_reconnect_qp(hololink_transceiver_t handle,
                            const uint8_t *remote_gid, uint32_t remote_qpn) {
-  // Note: GpuRoceTransceiver does not currently expose reconnect_qp().
-  // The QP is connected during start() using the peer_ip from construction.
-  // Emulator mode (--exchange-qp) requires this to be added to Hololink.
-  (void)handle;
-  (void)remote_gid;
-  (void)remote_qpn;
-  std::cerr << "WARNING: hololink_reconnect_qp() not implemented in current "
-               "Hololink API"
-            << std::endl;
+  if (handle) {
+    auto *impl = reinterpret_cast<HololinkTransceiverImpl *>(handle);
+    return impl->transceiver->reconnect_qp(remote_gid, remote_qpn) ? 1 : 0;
+  }
   return 0;
 }
 
@@ -185,10 +179,10 @@ uint64_t *hololink_get_tx_ring_flag_addr(hololink_transceiver_t handle) {
 }
 
 uint64_t *hololink_get_tx_ring_flag_host_addr(hololink_transceiver_t handle) {
-  // Note: GpuRoceTransceiver does not currently expose host TX flag addr.
-  // For the bridge tool, this is not needed since the dispatch kernel
-  // writes to the TX flags directly.
-  (void)handle;
+  if (handle) {
+    auto *impl = reinterpret_cast<HololinkTransceiverImpl *>(handle);
+    return impl->transceiver->get_tx_ring_flag_host_addr();
+  }
   return nullptr;
 }
 

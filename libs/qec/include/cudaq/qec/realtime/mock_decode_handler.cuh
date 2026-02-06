@@ -14,6 +14,10 @@
 
 #include "cudaq/qec/realtime/decoder_context.h"
 
+// cudaq_function_entry_t for function table initialization
+#include "cudaq/nvqlink/daemon/dispatcher/cudaq_realtime.h"
+#include "cudaq/nvqlink/daemon/dispatcher/dispatch_kernel_launch.h"
+
 namespace cudaq::qec::realtime {
 
 //==============================================================================
@@ -82,5 +86,70 @@ __device__ auto get_mock_decode_rpc_ptr();
 __device__ void mock_decode_dispatch(void *ctx_ptr, const uint8_t *input,
                                      std::size_t input_size, uint8_t *output,
                                      std::size_t output_size);
+
+//==============================================================================
+// Mock Decoder Context GPU Setup
+//==============================================================================
+
+/// @brief GPU resources for mock decoder context.
+///
+/// Holds device pointers allocated during setup. Call cleanup() to free.
+struct MockDecoderGpuResources {
+  uint8_t *d_lookup_measurements = nullptr;
+  uint8_t *d_lookup_corrections = nullptr;
+  mock_decoder_context *d_ctx = nullptr;
+
+  void cleanup() {
+    if (d_lookup_measurements)
+      cudaFree(d_lookup_measurements);
+    if (d_lookup_corrections)
+      cudaFree(d_lookup_corrections);
+    if (d_ctx)
+      cudaFree(d_ctx);
+    d_lookup_measurements = nullptr;
+    d_lookup_corrections = nullptr;
+    d_ctx = nullptr;
+  }
+};
+
+/// @brief Build lookup tables and upload mock decoder context to the GPU.
+///
+/// After this call, the global device context is set and the dispatch kernel
+/// can invoke mock_decode_rpc.
+///
+/// @param measurements Flat array of measurements (num_entries * syndrome_size)
+/// @param corrections  Array of expected corrections (num_entries)
+/// @param num_entries  Number of lookup entries
+/// @param syndrome_size Number of measurements per entry
+/// @param[out] resources Device pointers (caller must call cleanup())
+/// @return cudaSuccess on success
+cudaError_t setup_mock_decoder_on_gpu(
+    const uint8_t *measurements, const uint8_t *corrections,
+    std::size_t num_entries, std::size_t syndrome_size,
+    MockDecoderGpuResources &resources);
+
+//==============================================================================
+// Function Table Initialization
+//==============================================================================
+
+/// @brief Function ID for mock decoder (FNV-1a hash of "mock_decode").
+constexpr std::uint32_t MOCK_DECODE_FUNCTION_ID =
+    cudaq::nvqlink::fnv1a_hash("mock_decode");
+
+/// @brief Device kernel to initialize a cudaq function table entry for the
+///        mock decoder RPC handler.
+///
+/// Must be called as: init_mock_decode_function_table<<<1,1>>>(d_entries);
+/// @param entries Device pointer to pre-allocated cudaq_function_entry_t array
+__global__ void init_mock_decode_function_table(
+    cudaq_function_entry_t *entries);
+
+/// @brief Host-callable wrapper that launches init_mock_decode_function_table
+///        and synchronizes.
+///
+/// This allows callers compiled by a C++ compiler (not nvcc) to set up the
+/// function table without needing CUDA kernel launch syntax.
+/// @param d_entries Device pointer to pre-allocated cudaq_function_entry_t
+void setup_mock_decode_function_table(cudaq_function_entry_t *d_entries);
 
 } // namespace cudaq::qec::realtime

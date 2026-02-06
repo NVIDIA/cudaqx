@@ -60,6 +60,36 @@ if (NOT GPU_ROCE_TRANSCEIVER_LIB)
 endif()
 
 # --------------------------------------------------------------------------- #
+# Find transitive Hololink libraries (required by gpu_roce_transceiver)
+# --------------------------------------------------------------------------- #
+
+find_library(HOLOLINK_COMMON_LIB
+  NAMES hololink
+  PATHS
+    "${HOLOSCAN_SENSOR_BRIDGE_BUILD_DIR}"
+    "${HOLOSCAN_SENSOR_BRIDGE_BUILD_DIR}/src/hololink/common"
+    "${HOLOSCAN_SENSOR_BRIDGE_BUILD_DIR}/lib"
+  NO_DEFAULT_PATH)
+
+find_library(ROCE_RECEIVER_LIB
+  NAMES roce_receiver
+  PATHS
+    "${HOLOSCAN_SENSOR_BRIDGE_BUILD_DIR}"
+    "${HOLOSCAN_SENSOR_BRIDGE_BUILD_DIR}/src/hololink/operators/roce_receiver"
+    "${HOLOSCAN_SENSOR_BRIDGE_BUILD_DIR}/lib"
+  NO_DEFAULT_PATH)
+
+find_library(BASE_RECEIVER_OP_LIB
+  NAMES base_receiver_op
+  PATHS
+    "${HOLOSCAN_SENSOR_BRIDGE_BUILD_DIR}"
+    "${HOLOSCAN_SENSOR_BRIDGE_BUILD_DIR}/src/hololink/operators"
+    "${HOLOSCAN_SENSOR_BRIDGE_BUILD_DIR}/lib"
+  NO_DEFAULT_PATH)
+
+find_library(IBVERBS_LIB NAMES ibverbs)
+
+# --------------------------------------------------------------------------- #
 # Find DOCA libraries (required by gpu_roce_transceiver)
 # --------------------------------------------------------------------------- #
 
@@ -183,11 +213,21 @@ if (GPU_ROCE_TRANSCEIVER_LIB AND CUDAQ_REALTIME_INCLUDE_DIR AND
     hololink_wrapper.cpp
   )
 
+  # fmt is needed transitively by hololink/core/logging_internal.hpp
+  find_path(FMT_INCLUDE_DIR
+    NAMES fmt/format.h
+    PATHS /opt/nvidia/holoscan /usr/local/cudaq /usr /usr/local
+    PATH_SUFFIXES include
+    NO_DEFAULT_PATH
+  )
+
   target_include_directories(hololink_wrapper_bridge
     PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}
       "${HOLOSCAN_SENSOR_BRIDGE_SOURCE_DIR}/src"
       ${DOCA_INCLUDE_DIR}
+      ${CUDAToolkit_INCLUDE_DIRS}
+      ${FMT_INCLUDE_DIR}
   )
 
   target_link_libraries(hololink_wrapper_bridge
@@ -198,15 +238,19 @@ if (GPU_ROCE_TRANSCEIVER_LIB AND CUDAQ_REALTIME_INCLUDE_DIR AND
   # Suppress deprecated declarations warning for DOCA APIs
   target_compile_options(hololink_wrapper_bridge PRIVATE -Wno-deprecated-declarations)
 
-  # The bridge tool itself is a CUDA executable
+  # The bridge tool is a C++ executable -- all CUDA device code
+  # lives in the cudaq-qec-realtime-cudevice library.
+  # LINKER_LANGUAGE CUDA forces nvcc for the final link step so that
+  # device symbols from the linked static libraries are resolved,
+  # while the .cpp source itself is compiled by the host C++ compiler.
   add_executable(hololink_mock_decoder_bridge
-    hololink_mock_decoder_bridge.cu
+    hololink_mock_decoder_bridge.cpp
   )
 
   set_target_properties(hololink_mock_decoder_bridge PROPERTIES
+    LINKER_LANGUAGE CUDA
     CUDA_SEPARABLE_COMPILATION ON
     CUDA_RESOLVE_DEVICE_SYMBOLS ON
-    CUDA_STANDARD 17
   )
 
   target_include_directories(hololink_mock_decoder_bridge
@@ -222,18 +266,28 @@ if (GPU_ROCE_TRANSCEIVER_LIB AND CUDAQ_REALTIME_INCLUDE_DIR AND
     BRIDGE_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../decoders/realtime/data"
   )
 
+  # Link order matters: static archives first, then shared libs that resolve
+  # their symbols.  gpu_roce_transceiver -> roce_receiver -> base_receiver_op
+  # -> hololink_core -> hololink (common) form the Hololink dependency chain.
   target_link_libraries(hololink_mock_decoder_bridge
     PRIVATE
-      CUDA::cudart
-      Threads::Threads
       cudaq-qec-realtime-cudevice
-      ${CUDAQ_REALTIME_LIBRARY}
       ${CUDAQ_REALTIME_DISPATCH_LIBRARY}
       hololink_wrapper_bridge
       ${GPU_ROCE_TRANSCEIVER_LIB}
+      ${ROCE_RECEIVER_LIB}
+      ${BASE_RECEIVER_OP_LIB}
+      ${HOLOLINK_CORE_LIB}
+      ${HOLOLINK_COMMON_LIB}
+      ${CUDAQ_REALTIME_LIBRARY}
+      CUDA::cudart
+      CUDA::cuda_driver
       ${DOCA_VERBS_LIB}
       ${DOCA_GPUNETIO_LIB}
       ${DOCA_COMMON_LIB}
+      ${IBVERBS_LIB}
+      Threads::Threads
+      ${CMAKE_DL_LIBS}
   )
 
   if (holoscan_FOUND)

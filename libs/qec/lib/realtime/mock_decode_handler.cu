@@ -106,4 +106,94 @@ __device__ void mock_decode_dispatch(void *ctx_ptr, const uint8_t *input,
                       ctx->num_observables);
 }
 
+//==============================================================================
+// Mock Decoder Context GPU Setup
+//==============================================================================
+
+cudaError_t setup_mock_decoder_on_gpu(
+    const uint8_t *measurements, const uint8_t *corrections,
+    std::size_t num_entries, std::size_t syndrome_size,
+    MockDecoderGpuResources &resources) {
+  cudaError_t err;
+
+  std::size_t meas_size = num_entries * syndrome_size;
+
+  // Allocate and copy lookup measurements
+  err = cudaMalloc(&resources.d_lookup_measurements, meas_size);
+  if (err != cudaSuccess)
+    return err;
+  err = cudaMemcpy(resources.d_lookup_measurements, measurements,
+                   meas_size, cudaMemcpyHostToDevice);
+  if (err != cudaSuccess)
+    return err;
+
+  // Allocate and copy lookup corrections
+  err = cudaMalloc(&resources.d_lookup_corrections, num_entries);
+  if (err != cudaSuccess)
+    return err;
+  err = cudaMemcpy(resources.d_lookup_corrections, corrections,
+                   num_entries, cudaMemcpyHostToDevice);
+  if (err != cudaSuccess)
+    return err;
+
+  // Build and upload context
+  mock_decoder_context ctx;
+  ctx.num_measurements = syndrome_size;
+  ctx.num_observables = 1;
+  ctx.lookup_measurements = resources.d_lookup_measurements;
+  ctx.lookup_corrections = resources.d_lookup_corrections;
+  ctx.num_lookup_entries = num_entries;
+
+  err = cudaMalloc(&resources.d_ctx, sizeof(mock_decoder_context));
+  if (err != cudaSuccess)
+    return err;
+  err = cudaMemcpy(resources.d_ctx, &ctx, sizeof(ctx), cudaMemcpyHostToDevice);
+  if (err != cudaSuccess)
+    return err;
+
+  // Set global device context (calls cudaMemcpyToSymbol)
+  set_mock_decoder_context(resources.d_ctx);
+
+  return cudaSuccess;
+}
+
+//==============================================================================
+// Function Table Initialization
+//==============================================================================
+
+__global__ void
+init_mock_decode_function_table(cudaq_function_entry_t *entries) {
+  if (threadIdx.x == 0 && blockIdx.x == 0) {
+    entries[0].handler.device_fn_ptr =
+        reinterpret_cast<void *>(&mock_decode_rpc);
+    entries[0].function_id = MOCK_DECODE_FUNCTION_ID;
+    entries[0].dispatch_mode = CUDAQ_DISPATCH_DEVICE_CALL;
+    entries[0].reserved[0] = 0;
+    entries[0].reserved[1] = 0;
+    entries[0].reserved[2] = 0;
+
+    // Schema: 1 bit-packed argument (128 bits = 16 bytes), 1 uint8 result
+    entries[0].schema.num_args = 1;
+    entries[0].schema.num_results = 1;
+    entries[0].schema.reserved = 0;
+    entries[0].schema.args[0].type_id = CUDAQ_TYPE_BIT_PACKED;
+    entries[0].schema.args[0].reserved[0] = 0;
+    entries[0].schema.args[0].reserved[1] = 0;
+    entries[0].schema.args[0].reserved[2] = 0;
+    entries[0].schema.args[0].size_bytes = 16;    // 128 bits
+    entries[0].schema.args[0].num_elements = 128; // 128 bits
+    entries[0].schema.results[0].type_id = CUDAQ_TYPE_UINT8;
+    entries[0].schema.results[0].reserved[0] = 0;
+    entries[0].schema.results[0].reserved[1] = 0;
+    entries[0].schema.results[0].reserved[2] = 0;
+    entries[0].schema.results[0].size_bytes = 1;
+    entries[0].schema.results[0].num_elements = 1;
+  }
+}
+
+void setup_mock_decode_function_table(cudaq_function_entry_t *d_entries) {
+  init_mock_decode_function_table<<<1, 1>>>(d_entries);
+  cudaDeviceSynchronize();
+}
+
 } // namespace cudaq::qec::realtime
