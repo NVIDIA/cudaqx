@@ -170,51 +170,6 @@ configure_file("${CMAKE_CURRENT_SOURCE_DIR}/lib/version.cpp.in"
 
 add_subdirectory(lib)
 
-if (CUDAQX_QEC_ENABLE_HOLOLINK_TOOLS)
-  if (NOT HOLOSCAN_SENSOR_BRIDGE_SOURCE_DIR)
-    message(FATAL_ERROR "HOLOSCAN_SENSOR_BRIDGE_SOURCE_DIR must be set when building hololink tools.")
-  endif()
-  if (NOT HOLOSCAN_SENSOR_BRIDGE_BUILD_DIR)
-    message(FATAL_ERROR "HOLOSCAN_SENSOR_BRIDGE_BUILD_DIR must be set when building hololink tools.")
-  endif()
-
-  find_package(Threads REQUIRED)
-  find_library(HOLOLINK_CORE_LIB
-    NAMES hololink_core
-    PATHS
-      "${HOLOSCAN_SENSOR_BRIDGE_BUILD_DIR}"
-      "${HOLOSCAN_SENSOR_BRIDGE_BUILD_DIR}/src/hololink/core"
-      "${HOLOSCAN_SENSOR_BRIDGE_BUILD_DIR}/lib"
-    NO_DEFAULT_PATH)
-
-  if (NOT HOLOLINK_CORE_LIB)
-    message(FATAL_ERROR "Could not find hololink_core library under ${HOLOSCAN_SENSOR_BRIDGE_BUILD_DIR}.")
-  endif()
-
-  add_executable(hololink_fpga_syndrome_playback
-    utils/hololink_fpga_syndrome_playback.cpp)
-  target_include_directories(hololink_fpga_syndrome_playback
-    PRIVATE "${HOLOSCAN_SENSOR_BRIDGE_SOURCE_DIR}/src")
-  if (DEFINED CUDAQ_INCLUDE_DIR AND CUDAQ_INCLUDE_DIR)
-    target_include_directories(hololink_fpga_syndrome_playback
-      PRIVATE "${CUDAQ_INCLUDE_DIR}")
-  endif()
-  if (DEFINED CUDAQ_INSTALL_DIR AND CUDAQ_INSTALL_DIR)
-    target_include_directories(hololink_fpga_syndrome_playback
-      PRIVATE "${CUDAQ_INSTALL_DIR}/include")
-  endif()
-  if (CUDAQ_REALTIME_INCLUDE_DIR)
-    target_include_directories(hololink_fpga_syndrome_playback
-      PRIVATE "${CUDAQ_REALTIME_INCLUDE_DIR}")
-  endif()
-  target_include_directories(hololink_fpga_syndrome_playback
-    PRIVATE "${CUDAToolkit_INCLUDE_DIRS}")
-  target_link_libraries(hololink_fpga_syndrome_playback
-    PRIVATE CUDA::cudart)
-  target_link_libraries(hololink_fpga_syndrome_playback
-    PRIVATE ${HOLOLINK_CORE_LIB} Threads::Threads)
-endif()
-
 if (CUDAQX_QEC_BINDINGS_PYTHON)
   add_subdirectory(python)
 endif()
@@ -245,6 +200,13 @@ if (CUDAQX_QEC_INCLUDE_TESTS)
     add_dependencies(CUDAQXUnitTests CUDAQXQECUnitTests)
   endif()
   add_subdirectory(unittests)
+endif()
+
+# Hololink FPGA tools live under unittests/utils/ but are not tests themselves.
+# When tests are enabled the path is already included via unittests/CMakeLists.txt;
+# this block covers the case where tests are disabled but hololink tools are enabled.
+if (CUDAQX_QEC_ENABLE_HOLOLINK_TOOLS AND NOT CUDAQX_QEC_INCLUDE_TESTS)
+  add_subdirectory(unittests/utils)
 endif()
 
 # External decoder setup
