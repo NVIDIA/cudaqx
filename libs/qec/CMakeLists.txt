@@ -64,6 +64,16 @@ option(CUDAQX_QEC_INSTALL_PYTHON
 # Option to control TRT decoder build (default: ON)
 option(CUDAQ_QEC_BUILD_TRT_DECODER "Build the TensorRT decoder plugin" ON)
 
+# Optional hololink/holoscan-sensor-bridge tools
+option(CUDAQX_QEC_ENABLE_HOLOLINK_TOOLS
+       "Build hololink FPGA playback tools (requires holoscan-sensor-bridge)."
+       OFF)
+
+set(HOLOSCAN_SENSOR_BRIDGE_SOURCE_DIR "" CACHE PATH
+    "Path to holoscan-sensor-bridge source tree (for headers)")
+set(HOLOSCAN_SENSOR_BRIDGE_BUILD_DIR "" CACHE PATH
+    "Path to holoscan-sensor-bridge build tree (for libraries)")
+
 # Check for CUDA Support (ref: cuda-quantum/CMakeLists.txt)
 # ==============================================================================
 include(CheckLanguage)
