@@ -1,5 +1,5 @@
 /****************************************************************-*- C++ -*-****
- * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
+ * Copyright (c) 2024 - 2026 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -11,8 +11,10 @@
 #include "cuda-qx/core/extension_point.h"
 #include "cuda-qx/core/heterogeneous_map.h"
 #include "cuda-qx/core/tensor.h"
+#include "sparse_binary_matrix.h"
 #include <future>
 #include <optional>
+#include <variant>
 #include <vector>
 
 namespace cudaq::qec {
@@ -273,7 +275,7 @@ protected:
   std::size_t syndrome_size = 0;
 
   /// @brief The decoder's parity check matrix
-  cudaqx::tensor<uint8_t> H;
+  std::variant<cudaqx::tensor<uint8_t>, sparse_binary_matrix> H;
 
   /// @brief The decoder's observable matrix in sparse format
   std::vector<std::vector<uint32_t>> O_sparse;
