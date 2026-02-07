@@ -23,6 +23,7 @@
 #include <hololink/core/data_channel.hpp>
 #include <hololink/core/enumerator.hpp>
 #include <hololink/core/hololink.hpp>
+#include <hololink/core/metadata.hpp>
 #include <hololink/core/timeout.hpp>
 
 #include "cudaq/nvqlink/daemon/dispatcher/dispatch_kernel_launch.h"
@@ -239,6 +240,12 @@ struct Options {
   std::optional<std::size_t> num_shots;
   bool verify = false;
 
+  // When set, bypass BOOTP enumeration and connect directly to this UDP port.
+  // Used with the FPGA emulator which doesn't support BOOTP.
+  std::optional<std::uint16_t> control_port;
+  std::uint32_t vp_address = 0x1000;   // VP register base (sensor 0 default)
+  std::uint32_t hif_address = 0x0800;  // HIF register base
+
   // RDMA target configuration (from bridge tool output).
   // When all three are provided, the FPGA SIF registers are configured
   // so playback data is sent via RDMA to the bridge tool's GPU buffers.
@@ -254,12 +261,16 @@ void print_usage(const char *argv0) {
       << "Usage: " << argv0
       << " --hololink <ip> --data-dir <path> [options]\n\n"
       << "Required:\n"
-      << "  --hololink <ip>       FPGA IP address\n"
+      << "  --hololink <ip>       FPGA or emulator IP address\n"
       << "  --data-dir <path>     Path to syndrome data directory\n\n"
       << "Optional:\n"
       << "  --num-shots <n>       Number of shots to play back (default: all)\n"
       << "  --verify              Capture and verify correction responses "
          "via ILA\n\n"
+      << "Emulator mode (bypass BOOTP enumeration):\n"
+      << "  --control-port <n>   UDP control port of the emulator\n"
+      << "  --vp-address <n>     VP register base (default: 0x1000)\n"
+      << "  --hif-address <n>    HIF register base (default: 0x0800)\n\n"
       << "RDMA target (from bridge tool output):\n"
       << "  --qp-number <n>      Destination QP number (hex or decimal)\n"
       << "  --rkey <n>            Remote key\n"
@@ -298,6 +309,15 @@ Options parse_args(int argc, char **argv) {
           static_cast<std::uint32_t>(std::stoul(argv[++i], nullptr, 0));
     } else if (arg == "--num-pages" && i + 1 < argc) {
       options.rdma_num_pages =
+          static_cast<std::uint32_t>(std::stoul(argv[++i], nullptr, 0));
+    } else if (arg == "--control-port" && i + 1 < argc) {
+      options.control_port =
+          static_cast<std::uint16_t>(std::stoul(argv[++i], nullptr, 0));
+    } else if (arg == "--vp-address" && i + 1 < argc) {
+      options.vp_address =
+          static_cast<std::uint32_t>(std::stoul(argv[++i], nullptr, 0));
+    } else if (arg == "--hif-address" && i + 1 < argc) {
+      options.hif_address =
           static_cast<std::uint32_t>(std::stoul(argv[++i], nullptr, 0));
     } else if (arg == "--help" || arg == "-h") {
       print_usage(argv[0]);
@@ -724,16 +744,43 @@ int main(int argc, char **argv) {
             << cycles_per_window << " cycles/shot)\n";
 
   // ------------------------------------------------------------------
-  // Connect to Hololink and reset
+  // Connect to Hololink (or emulator) and reset
   // ------------------------------------------------------------------
-  auto channel_metadata =
-      hololink::Enumerator::find_channel(options.hololink_ip);
-  hololink::DataChannel::use_sensor(channel_metadata, 0);
+  hololink::Metadata channel_metadata;
+  bool using_emulator = options.control_port.has_value();
+
+  if (using_emulator) {
+    // Direct connection to emulator — bypass BOOTP enumeration.
+    // Construct synthetic metadata with the required fields.
+    std::cout << "Using direct connection to emulator at "
+              << options.hololink_ip << ":" << *options.control_port << "\n";
+    channel_metadata["peer_ip"] = options.hololink_ip;
+    channel_metadata["control_port"] =
+        static_cast<std::int64_t>(*options.control_port);
+    channel_metadata["serial_number"] = std::string("emulator");
+    channel_metadata["sequence_number_checking"] =
+        static_cast<std::int64_t>(0);
+    channel_metadata["vp_mask"] = static_cast<std::int64_t>(0x1);
+    channel_metadata["data_plane"] = static_cast<std::int64_t>(0);
+    channel_metadata["sensor"] = static_cast<std::int64_t>(0);
+    channel_metadata["sif_address"] = static_cast<std::int64_t>(0);
+    channel_metadata["vp_address"] =
+        static_cast<std::int64_t>(options.vp_address);
+    channel_metadata["hif_address"] =
+        static_cast<std::int64_t>(options.hif_address);
+  } else {
+    channel_metadata =
+        hololink::Enumerator::find_channel(options.hololink_ip);
+    hololink::DataChannel::use_sensor(channel_metadata, 0);
+  }
+
   hololink::DataChannel hololink_channel(channel_metadata);
   auto hololink = hololink_channel.hololink();
 
   hololink->start();
-  hololink->reset();
+  if (!using_emulator) {
+    hololink->reset();
+  }
 
   // ------------------------------------------------------------------
   // Configure FPGA SIF registers for RDMA target (if provided)

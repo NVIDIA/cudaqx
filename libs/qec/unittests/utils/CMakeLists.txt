@@ -316,3 +316,24 @@ else()
                     "hololink_mock_decoder_bridge requires DOCA.")
   endif()
 endif()
+
+# =========================================================================== #
+# hololink_fpga_emulator
+# =========================================================================== #
+# Software FPGA emulator: replaces the physical FPGA for testing.
+# Uses libibverbs for RDMA (no DOCA / GPU dependency).
+
+if (IBVERBS_LIB)
+  message(STATUS "Building hololink_fpga_emulator")
+
+  add_executable(hololink_fpga_emulator
+    hololink_fpga_emulator.cpp)
+
+  target_link_libraries(hololink_fpga_emulator
+    PRIVATE
+      ${IBVERBS_LIB}
+      Threads::Threads
+  )
+else()
+  message(WARNING "libibverbs not found. hololink_fpga_emulator will not be built.")
+endif()
