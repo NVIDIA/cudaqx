@@ -8,34 +8,40 @@
 
 #include "cudaq/qec/sparse_binary_matrix.h"
 #include <cassert>
+#include <cstring>
 #include <limits>
 #include <stdexcept>
-#include <cstring>
 
 namespace cudaq::qec {
 
-sparse_binary_matrix::sparse_binary_matrix(sparse_binary_matrix_layout layout, index_type num_rows,
-                       index_type num_cols, std::vector<index_type> ptr,
-                       std::vector<index_type> indices)
+sparse_binary_matrix::sparse_binary_matrix(sparse_binary_matrix_layout layout,
+                                           index_type num_rows,
+                                           index_type num_cols,
+                                           std::vector<index_type> ptr,
+                                           std::vector<index_type> indices)
     : layout_(layout), num_rows_(num_rows), num_cols_(num_cols),
       ptr_(std::move(ptr)), indices_(std::move(indices)) {}
 
-sparse_binary_matrix sparse_binary_matrix::from_csc(index_type num_rows, index_type num_cols,
-                                std::vector<index_type> col_ptrs,
-                                std::vector<index_type> row_indices) {
+sparse_binary_matrix
+sparse_binary_matrix::from_csc(index_type num_rows, index_type num_cols,
+                               std::vector<index_type> col_ptrs,
+                               std::vector<index_type> row_indices) {
   assert(col_ptrs.size() == static_cast<std::size_t>(num_cols) + 1);
   assert(col_ptrs.back() == row_indices.size());
-  return sparse_binary_matrix(sparse_binary_matrix_layout::csc, num_rows, num_cols,
-                   std::move(col_ptrs), std::move(row_indices));
+  return sparse_binary_matrix(sparse_binary_matrix_layout::csc, num_rows,
+                              num_cols, std::move(col_ptrs),
+                              std::move(row_indices));
 }
 
-sparse_binary_matrix sparse_binary_matrix::from_csr(index_type num_rows, index_type num_cols,
-                                std::vector<index_type> row_ptrs,
-                                std::vector<index_type> col_indices) {
+sparse_binary_matrix
+sparse_binary_matrix::from_csr(index_type num_rows, index_type num_cols,
+                               std::vector<index_type> row_ptrs,
+                               std::vector<index_type> col_indices) {
   assert(row_ptrs.size() == static_cast<std::size_t>(num_rows) + 1);
   assert(row_ptrs.back() == col_indices.size());
-  return sparse_binary_matrix(sparse_binary_matrix_layout::csr, num_rows, num_cols,
-                   std::move(row_ptrs), std::move(col_indices));
+  return sparse_binary_matrix(sparse_binary_matrix_layout::csr, num_rows,
+                              num_cols, std::move(row_ptrs),
+                              std::move(col_indices));
 }
 
 sparse_binary_matrix sparse_binary_matrix::from_nested_csc(
@@ -59,8 +65,9 @@ sparse_binary_matrix sparse_binary_matrix::from_nested_csc(
     }
     col_ptrs[j + 1] = static_cast<index_type>(row_indices.size());
   }
-  return sparse_binary_matrix(sparse_binary_matrix_layout::csc, num_rows, num_cols,
-                   std::move(col_ptrs), std::move(row_indices));
+  return sparse_binary_matrix(sparse_binary_matrix_layout::csc, num_rows,
+                              num_cols, std::move(col_ptrs),
+                              std::move(row_indices));
 }
 
 sparse_binary_matrix sparse_binary_matrix::from_nested_csr(
@@ -84,20 +91,24 @@ sparse_binary_matrix sparse_binary_matrix::from_nested_csr(
     }
     row_ptrs[i + 1] = static_cast<index_type>(col_indices.size());
   }
-  return sparse_binary_matrix(sparse_binary_matrix_layout::csr, num_rows, num_cols,
-                   std::move(row_ptrs), std::move(col_indices));
+  return sparse_binary_matrix(sparse_binary_matrix_layout::csr, num_rows,
+                              num_cols, std::move(row_ptrs),
+                              std::move(col_indices));
 }
 
-sparse_binary_matrix::sparse_binary_matrix(const cudaqx::tensor<std::uint8_t> &dense,
-                       sparse_binary_matrix_layout layout) {
+sparse_binary_matrix::sparse_binary_matrix(
+    const cudaqx::tensor<std::uint8_t> &dense,
+    sparse_binary_matrix_layout layout) {
   if (dense.rank() != 2) {
     throw std::invalid_argument(
         "sparse_pcm: dense PCM tensor must have rank 2");
   }
   const std::size_t nrows = dense.shape()[0];
   const std::size_t ncols = dense.shape()[1];
-  if (nrows > static_cast<std::size_t>(std::numeric_limits<index_type>::max()) ||
-      ncols > static_cast<std::size_t>(std::numeric_limits<index_type>::max())) {
+  if (nrows >
+          static_cast<std::size_t>(std::numeric_limits<index_type>::max()) ||
+      ncols >
+          static_cast<std::size_t>(std::numeric_limits<index_type>::max())) {
     throw std::invalid_argument(
         "sparse_pcm: dense PCM dimensions exceed index_type range");
   }
@@ -112,7 +123,8 @@ sparse_binary_matrix::sparse_binary_matrix(const cudaqx::tensor<std::uint8_t> &d
     ptr_[0] = 0;
     for (index_type c = 0; c < num_cols_; ++c) {
       for (index_type r = 0; r < num_rows_; ++r) {
-        if (dense.at({static_cast<std::size_t>(r), static_cast<std::size_t>(c)}))
+        if (dense.at(
+                {static_cast<std::size_t>(r), static_cast<std::size_t>(c)}))
           row_indices.push_back(r);
       }
       ptr_[c + 1] = static_cast<index_type>(row_indices.size());
@@ -125,7 +137,8 @@ sparse_binary_matrix::sparse_binary_matrix(const cudaqx::tensor<std::uint8_t> &d
     ptr_[0] = 0;
     for (index_type r = 0; r < num_rows_; ++r) {
       for (index_type c = 0; c < num_cols_; ++c) {
-        if (dense.at({static_cast<std::size_t>(r), static_cast<std::size_t>(c)}))
+        if (dense.at(
+                {static_cast<std::size_t>(r), static_cast<std::size_t>(c)}))
           col_indices.push_back(c);
       }
       ptr_[r + 1] = static_cast<index_type>(col_indices.size());
@@ -136,8 +149,8 @@ sparse_binary_matrix::sparse_binary_matrix(const cudaqx::tensor<std::uint8_t> &d
 
 sparse_binary_matrix sparse_binary_matrix::to_csc() const {
   if (layout_ == sparse_binary_matrix_layout::csc) {
-    return sparse_binary_matrix(sparse_binary_matrix_layout::csc, num_rows_, num_cols_, ptr_,
-                      indices_);
+    return sparse_binary_matrix(sparse_binary_matrix_layout::csc, num_rows_,
+                                num_cols_, ptr_, indices_);
   }
   // CSR -> CSC: for each column j, gather row indices i where (i,j) is stored
   // In CSR, row i has col indices in indices_[row_ptrs[i] .. row_ptrs[i+1]-1]
@@ -163,14 +176,15 @@ sparse_binary_matrix sparse_binary_matrix::to_csc() const {
       ++col_nnz[j];
     }
   }
-  return sparse_binary_matrix(sparse_binary_matrix_layout::csc, num_rows_, num_cols_,
-                   std::move(col_ptrs), std::move(row_indices));
+  return sparse_binary_matrix(sparse_binary_matrix_layout::csc, num_rows_,
+                              num_cols_, std::move(col_ptrs),
+                              std::move(row_indices));
 }
 
 sparse_binary_matrix sparse_binary_matrix::to_csr() const {
   if (layout_ == sparse_binary_matrix_layout::csr) {
-    return sparse_binary_matrix(sparse_binary_matrix_layout::csr, num_rows_, num_cols_, ptr_,
-                      indices_);
+    return sparse_binary_matrix(sparse_binary_matrix_layout::csr, num_rows_,
+                                num_cols_, ptr_, indices_);
   }
   // CSC -> CSR: for each row i, gather column indices j where (i,j) is stored
   // In CSC, col j has row indices in indices_[col_ptrs[j] .. col_ptrs[j+1]-1]
@@ -196,8 +210,9 @@ sparse_binary_matrix sparse_binary_matrix::to_csr() const {
       ++row_nnz[i];
     }
   }
-  return sparse_binary_matrix(sparse_binary_matrix_layout::csr, num_rows_, num_cols_,
-                   std::move(row_ptrs), std::move(col_indices));
+  return sparse_binary_matrix(sparse_binary_matrix_layout::csr, num_rows_,
+                              num_cols_, std::move(row_ptrs),
+                              std::move(col_indices));
 }
 
 cudaqx::tensor<std::uint8_t> sparse_binary_matrix::to_dense() const {
@@ -229,8 +244,7 @@ sparse_binary_matrix::to_nested_csc() const {
   std::vector<std::vector<index_type>> out(num_cols_);
   if (layout_ == sparse_binary_matrix_layout::csc) {
     for (index_type j = 0; j < num_cols_; ++j) {
-      out[j].assign(indices_.begin() + ptr_[j],
-                    indices_.begin() + ptr_[j + 1]);
+      out[j].assign(indices_.begin() + ptr_[j], indices_.begin() + ptr_[j + 1]);
     }
   } else {
     for (index_type i = 0; i < num_rows_; ++i) {
@@ -248,8 +262,7 @@ sparse_binary_matrix::to_nested_csr() const {
   std::vector<std::vector<index_type>> out(num_rows_);
   if (layout_ == sparse_binary_matrix_layout::csr) {
     for (index_type i = 0; i < num_rows_; ++i) {
-      out[i].assign(indices_.begin() + ptr_[i],
-                    indices_.begin() + ptr_[i + 1]);
+      out[i].assign(indices_.begin() + ptr_[i], indices_.begin() + ptr_[i + 1]);
     }
   } else {
     for (index_type j = 0; j < num_cols_; ++j) {

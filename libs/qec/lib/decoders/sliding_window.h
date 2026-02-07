@@ -1,5 +1,5 @@
 /****************************************************************-*- C++ -*-****
- * Copyright (c) 2025 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2025 - 2026 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -120,7 +120,7 @@ public:
   ///   - num_syndromes_per_round: Number of syndromes per round
   ///   - inner_decoder: Name of the inner decoder to use
   ///   - inner_decoder_params: Parameters for the inner decoder (optional)
-  sliding_window(const cudaqx::tensor<uint8_t> &H,
+  sliding_window(const cudaq::qec::sparse_binary_matrix &H,
                  const cudaqx::heterogeneous_map &params);
 
   /// @brief Decode a syndrome vector
@@ -144,7 +144,7 @@ public:
   // Plugin registration macros
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       sliding_window, static std::unique_ptr<decoder> create(
-                          const cudaqx::tensor<uint8_t> &H,
+                          const cudaq::qec::sparse_binary_matrix &H,
                           const cudaqx::heterogeneous_map &params) {
         return std::make_unique<sliding_window>(H, params);
       })

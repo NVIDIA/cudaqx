@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2022 - 2024 NVIDIA Corporation & Affiliates.                  *
+ * Copyright (c) 2022 - 2026 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -21,12 +21,13 @@ private:
   std::map<std::string, std::size_t> single_qubit_err_signatures;
 
 public:
-  single_error_lut_example(const cudaqx::tensor<uint8_t> &H,
+  single_error_lut_example(const cudaq::qec::sparse_binary_matrix &H,
                            const cudaqx::heterogeneous_map &params)
       : decoder(H) {
     // Decoder-specific constructor arguments can be placed in `params`.
 
     // Build a lookup table for an error on each possible qubit
+    std::vector<std::vector<std::uint32_t>> H_e2d = H.to_nested_csc();
 
     // For each qubit with a possible error, calculate an error signature.
     for (std::size_t qErr = 0; qErr < block_size; qErr++) {
@@ -34,9 +35,8 @@ public:
       for (std::size_t r = 0; r < syndrome_size; r++) {
         bool syndrome = 0;
         // Toggle syndrome on every "1" entry in the row.
-        // Except if there is an error on this qubit (c == qErr).
-        for (std::size_t c = 0; c < block_size; c++)
-          syndrome ^= (c != qErr) && H.at({r, c});
+        for (std::uint32_t c : H_e2d[qErr])
+          syndrome ^= 1;
         err_sig[r] = syndrome ? '1' : '0';
       }
       // printf("Adding err_sig=%s for qErr=%lu\n", err_sig.c_str(), qErr);
@@ -80,7 +80,7 @@ public:
 
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       single_error_lut_example, static std::unique_ptr<decoder> create(
-                                    const cudaqx::tensor<uint8_t> &H,
+                                    const cudaq::qec::sparse_binary_matrix &H,
                                     const cudaqx::heterogeneous_map &params) {
         return std::make_unique<single_error_lut_example>(H, params);
       })

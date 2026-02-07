@@ -123,7 +123,8 @@ public:
 /// arbitrary constructor parameters that can be unique to each specific
 /// decoder.
 class decoder
-    : public cudaqx::extension_point<decoder, const cudaqx::tensor<uint8_t> &,
+    : public cudaqx::extension_point<decoder,
+                                     const cudaq::qec::sparse_binary_matrix &,
                                      const cudaqx::heterogeneous_map &> {
 private:
   struct rt_impl;
@@ -136,11 +137,9 @@ public:
   decoder() = delete;
 
   /// @brief Constructor
-  /// @param H Decoder's parity check matrix represented as a tensor. The tensor
-  /// is required be rank 2 and must be of dimensions \p syndrome_size x
-  /// \p block_size.
-  /// will use the same \p H.
-  decoder(const cudaqx::tensor<uint8_t> &H);
+  /// @param H Decoder's parity check matrix represented as a sparse binary
+  /// matrix.
+  decoder(const cudaq::qec::sparse_binary_matrix &H);
 
   /// @brief Decode a single syndrome
   /// @param syndrome A vector of syndrome measurements where the floating point
@@ -176,7 +175,7 @@ public:
 
   /// @brief This `get` overload supports default values.
   static std::unique_ptr<decoder>
-  get(const std::string &name, const cudaqx::tensor<uint8_t> &H,
+  get(const std::string &name, const cudaq::qec::sparse_binary_matrix &H,
       const cudaqx::heterogeneous_map &param_map = cudaqx::heterogeneous_map());
 
   std::size_t get_block_size() { return block_size; }
@@ -275,7 +274,7 @@ protected:
   std::size_t syndrome_size = 0;
 
   /// @brief The decoder's parity check matrix
-  std::variant<cudaqx::tensor<uint8_t>, sparse_binary_matrix> H;
+  sparse_binary_matrix H;
 
   /// @brief The decoder's observable matrix in sparse format
   std::vector<std::vector<uint32_t>> O_sparse;
@@ -427,6 +426,6 @@ inline void convert_vec_hard_to_soft(const std::vector<std::vector<t_hard>> &in,
 }
 
 std::unique_ptr<decoder>
-get_decoder(const std::string &name, const cudaqx::tensor<uint8_t> &H,
+get_decoder(const std::string &name, const sparse_binary_matrix &H,
             const cudaqx::heterogeneous_map options = {});
 } // namespace cudaq::qec

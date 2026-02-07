@@ -18,7 +18,7 @@ namespace {
 using index_type = sparse_binary_matrix::index_type;
 
 bool dense_pcm_equal(const cudaqx::tensor<std::uint8_t> &a,
-                    const cudaqx::tensor<std::uint8_t> &b) {
+                     const cudaqx::tensor<std::uint8_t> &b) {
   if (a.rank() != 2 || b.rank() != 2)
     return false;
   if (a.shape()[0] != b.shape()[0] || a.shape()[1] != b.shape()[1])
@@ -37,9 +37,9 @@ bool dense_pcm_equal(const cudaqx::tensor<std::uint8_t> &a,
 TEST(SparseBinaryMatrix, DenseToCscToDense_Small) {
   // 3x4 matrix: rows x cols
   std::vector<std::uint8_t> data = {
-      1, 0, 1, 0,  // row 0
-      0, 1, 1, 0,  // row 1
-      1, 1, 0, 1   // row 2
+      1, 0, 1, 0, // row 0
+      0, 1, 1, 0, // row 1
+      1, 1, 0, 1  // row 2
   };
   cudaqx::tensor<std::uint8_t> dense({3, 4});
   dense.copy(data.data(), {3, 4});
@@ -55,9 +55,7 @@ TEST(SparseBinaryMatrix, DenseToCscToDense_Small) {
 }
 
 TEST(SparseBinaryMatrix, DenseToCsrToDense_Small) {
-  std::vector<std::uint8_t> data = {
-      1, 0, 1, 0, 0, 1, 1, 0, 1, 1, 0, 1
-  };
+  std::vector<std::uint8_t> data = {1, 0, 1, 0, 0, 1, 1, 0, 1, 1, 0, 1};
   cudaqx::tensor<std::uint8_t> dense({3, 4});
   dense.copy(data.data(), {3, 4});
 
@@ -77,7 +75,8 @@ TEST(SparseBinaryMatrix, FromCscToDense) {
   std::vector<index_type> col_ptrs = {0, 2, 2, 3};
   std::vector<index_type> row_indices = {0, 1, 1};
 
-  auto sp = sparse_binary_matrix::from_csc(num_rows, num_cols, col_ptrs, row_indices);
+  auto sp =
+      sparse_binary_matrix::from_csc(num_rows, num_cols, col_ptrs, row_indices);
   auto dense = sp.to_dense();
 
   EXPECT_EQ(dense.shape()[0], 2);
@@ -96,7 +95,8 @@ TEST(SparseBinaryMatrix, FromCsrToDense) {
   std::vector<index_type> row_ptrs = {0, 1, 3};
   std::vector<index_type> col_indices = {0, 0, 2};
 
-  auto sp = sparse_binary_matrix::from_csr(num_rows, num_cols, row_ptrs, col_indices);
+  auto sp =
+      sparse_binary_matrix::from_csr(num_rows, num_cols, row_ptrs, col_indices);
   auto dense = sp.to_dense();
 
   EXPECT_EQ(dense.shape()[0], 2);
@@ -179,7 +179,8 @@ TEST(SparseBinaryMatrix, Small2x2) {
   cudaqx::tensor<std::uint8_t> dense({2, 2});
   dense.copy(data.data(), {2, 2});
 
-  for (auto layout : {sparse_binary_matrix_layout::csc, sparse_binary_matrix_layout::csr}) {
+  for (auto layout :
+       {sparse_binary_matrix_layout::csc, sparse_binary_matrix_layout::csr}) {
     sparse_binary_matrix sp(dense, layout);
     auto back = sp.to_dense();
     EXPECT_TRUE(dense_pcm_equal(dense, back));
@@ -238,7 +239,8 @@ TEST(SparseBinaryMatrix, ToNestedCsc_FromCsc) {
   std::vector<index_type> col_ptrs = {0, 2, 2, 3};
   std::vector<index_type> row_indices = {0, 1, 1};
 
-  auto sp = sparse_binary_matrix::from_csc(num_rows, num_cols, col_ptrs, row_indices);
+  auto sp =
+      sparse_binary_matrix::from_csc(num_rows, num_cols, col_ptrs, row_indices);
   auto nested = sp.to_nested_csc();
 
   ASSERT_EQ(nested.size(), 3);
@@ -253,7 +255,8 @@ TEST(SparseBinaryMatrix, ToNestedCsr_FromCsr) {
   std::vector<index_type> row_ptrs = {0, 1, 3};
   std::vector<index_type> col_indices = {0, 0, 2};
 
-  auto sp = sparse_binary_matrix::from_csr(num_rows, num_cols, row_ptrs, col_indices);
+  auto sp =
+      sparse_binary_matrix::from_csr(num_rows, num_cols, row_ptrs, col_indices);
   auto nested = sp.to_nested_csr();
 
   ASSERT_EQ(nested.size(), 2);
@@ -266,7 +269,8 @@ TEST(SparseBinaryMatrix, ToNestedCsc_RoundTrip) {
   cudaqx::tensor<std::uint8_t> dense({3, 4});
   dense.copy(data.data(), {3, 4});
 
-  for (auto layout : {sparse_binary_matrix_layout::csc, sparse_binary_matrix_layout::csr}) {
+  for (auto layout :
+       {sparse_binary_matrix_layout::csc, sparse_binary_matrix_layout::csr}) {
     sparse_binary_matrix sp(dense, layout);
     auto nested = sp.to_nested_csc();
     ASSERT_EQ(nested.size(), sp.num_cols());
@@ -281,7 +285,8 @@ TEST(SparseBinaryMatrix, ToNestedCsc_RoundTrip) {
     }
     EXPECT_EQ(nnz, sp.num_nnz());
     auto sp2 = sparse_binary_matrix::from_csc(sp.num_rows(), sp.num_cols(),
-                                   std::move(col_ptrs), std::move(row_indices));
+                                              std::move(col_ptrs),
+                                              std::move(row_indices));
     EXPECT_TRUE(dense_pcm_equal(dense, sp2.to_dense()));
   }
 }
@@ -291,7 +296,8 @@ TEST(SparseBinaryMatrix, ToNestedCsr_RoundTrip) {
   cudaqx::tensor<std::uint8_t> dense({3, 4});
   dense.copy(data.data(), {3, 4});
 
-  for (auto layout : {sparse_binary_matrix_layout::csc, sparse_binary_matrix_layout::csr}) {
+  for (auto layout :
+       {sparse_binary_matrix_layout::csc, sparse_binary_matrix_layout::csr}) {
     sparse_binary_matrix sp(dense, layout);
     auto nested = sp.to_nested_csr();
     ASSERT_EQ(nested.size(), sp.num_rows());
@@ -306,7 +312,8 @@ TEST(SparseBinaryMatrix, ToNestedCsr_RoundTrip) {
     }
     EXPECT_EQ(nnz, sp.num_nnz());
     auto sp2 = sparse_binary_matrix::from_csr(sp.num_rows(), sp.num_cols(),
-                                   std::move(row_ptrs), std::move(col_indices));
+                                              std::move(row_ptrs),
+                                              std::move(col_indices));
     EXPECT_TRUE(dense_pcm_equal(dense, sp2.to_dense()));
   }
 }
@@ -320,7 +327,8 @@ TEST(SparseBinaryMatrix, FromNestedCsc_MatchesFromCsc) {
   EXPECT_EQ(sp.num_nnz(), 3);
   std::vector<index_type> col_ptrs = {0, 2, 2, 3};
   std::vector<index_type> row_indices = {0, 1, 1};
-  auto sp_ref = sparse_binary_matrix::from_csc(num_rows, num_cols, col_ptrs, row_indices);
+  auto sp_ref =
+      sparse_binary_matrix::from_csc(num_rows, num_cols, col_ptrs, row_indices);
   EXPECT_TRUE(dense_pcm_equal(sp.to_dense(), sp_ref.to_dense()));
 }
 
@@ -333,7 +341,8 @@ TEST(SparseBinaryMatrix, FromNestedCsr_MatchesFromCsr) {
   EXPECT_EQ(sp.num_nnz(), 3);
   std::vector<index_type> row_ptrs = {0, 1, 3};
   std::vector<index_type> col_indices = {0, 0, 2};
-  auto sp_ref = sparse_binary_matrix::from_csr(num_rows, num_cols, row_ptrs, col_indices);
+  auto sp_ref =
+      sparse_binary_matrix::from_csr(num_rows, num_cols, row_ptrs, col_indices);
   EXPECT_TRUE(dense_pcm_equal(sp.to_dense(), sp_ref.to_dense()));
 }
 
@@ -343,7 +352,8 @@ TEST(SparseBinaryMatrix, FromNestedCsc_RoundTrip) {
   dense.copy(data.data(), {3, 4});
   sparse_binary_matrix sp(dense, sparse_binary_matrix_layout::csc);
   const auto nested = sp.to_nested_csc();
-  auto sp2 = sparse_binary_matrix::from_nested_csc(sp.num_rows(), sp.num_cols(), nested);
+  auto sp2 = sparse_binary_matrix::from_nested_csc(sp.num_rows(), sp.num_cols(),
+                                                   nested);
   EXPECT_TRUE(dense_pcm_equal(dense, sp2.to_dense()));
 }
 
@@ -353,18 +363,21 @@ TEST(SparseBinaryMatrix, FromNestedCsr_RoundTrip) {
   dense.copy(data.data(), {3, 4});
   sparse_binary_matrix sp(dense, sparse_binary_matrix_layout::csr);
   const auto nested = sp.to_nested_csr();
-  auto sp2 = sparse_binary_matrix::from_nested_csr(sp.num_rows(), sp.num_cols(), nested);
+  auto sp2 = sparse_binary_matrix::from_nested_csr(sp.num_rows(), sp.num_cols(),
+                                                   nested);
   EXPECT_TRUE(dense_pcm_equal(dense, sp2.to_dense()));
 }
 
 TEST(SparseBinaryMatrix, FromNestedCsc_InvalidSizeThrows) {
   std::vector<std::vector<index_type>> nested = {{0}, {1}};
-  EXPECT_THROW(sparse_binary_matrix::from_nested_csc(2, 3, nested), std::invalid_argument);
+  EXPECT_THROW(sparse_binary_matrix::from_nested_csc(2, 3, nested),
+               std::invalid_argument);
 }
 
 TEST(SparseBinaryMatrix, FromNestedCsr_InvalidSizeThrows) {
   std::vector<std::vector<index_type>> nested = {{0}, {1}, {0}};
-  EXPECT_THROW(sparse_binary_matrix::from_nested_csr(2, 2, nested), std::invalid_argument);
+  EXPECT_THROW(sparse_binary_matrix::from_nested_csr(2, 2, nested),
+               std::invalid_argument);
 }
 
 } // namespace

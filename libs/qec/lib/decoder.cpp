@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2022 - 2025 NVIDIA Corporation & Affiliates.                  *
+ * Copyright (c) 2022 - 2026 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -17,8 +17,10 @@
 #include <filesystem>
 #include <vector>
 
-INSTANTIATE_REGISTRY(cudaq::qec::decoder, const cudaqx::tensor<uint8_t> &)
-INSTANTIATE_REGISTRY(cudaq::qec::decoder, const cudaqx::tensor<uint8_t> &,
+INSTANTIATE_REGISTRY(cudaq::qec::decoder,
+                     const cudaq::qec::sparse_binary_matrix &)
+INSTANTIATE_REGISTRY(cudaq::qec::decoder,
+                     const cudaq::qec::sparse_binary_matrix &,
                      const cudaqx::heterogeneous_map &)
 
 // Include decoder implementations AFTER registry instantiation
@@ -70,12 +72,10 @@ struct decoder::rt_impl {
 
 void decoder::rt_impl_deleter::operator()(rt_impl *p) const { delete p; }
 
-decoder::decoder(const cudaqx::tensor<uint8_t> &H)
+decoder::decoder(const cudaq::qec::sparse_binary_matrix &H)
     : H(H), pimpl(std::unique_ptr<rt_impl, rt_impl_deleter>(new rt_impl())) {
-  const auto H_shape = H.shape();
-  assert(H_shape.size() == 2 && "H tensor must be of rank 2");
-  syndrome_size = H_shape[0];
-  block_size = H_shape[1];
+  syndrome_size = H.num_rows();
+  block_size = H.num_cols();
   reset_decoder();
   pimpl->persistent_detector_buffer.resize(this->syndrome_size);
   pimpl->persistent_soft_detector_buffer.resize(this->syndrome_size);
@@ -130,7 +130,7 @@ decoder::decode_async(const std::vector<float_t> &syndrome) {
 }
 
 std::unique_ptr<decoder>
-decoder::get(const std::string &name, const cudaqx::tensor<uint8_t> &H,
+decoder::get(const std::string &name, const cudaq::qec::sparse_binary_matrix &H,
              const cudaqx::heterogeneous_map &param_map) {
   auto [mutex, registry] = get_registry();
   std::lock_guard<std::recursive_mutex> lock(mutex);
@@ -479,7 +479,7 @@ void decoder::reset_decoder() {
 }
 
 std::unique_ptr<decoder> get_decoder(const std::string &name,
-                                     const cudaqx::tensor<uint8_t> &H,
+                                     const sparse_binary_matrix &H,
                                      const cudaqx::heterogeneous_map options) {
   return decoder::get(name, H, options);
 }
