@@ -27,6 +27,7 @@ cudaqx_add_pymodule(${MODULE_NAME}
   bindings/cudaqx_solvers.cpp
   bindings/solvers/py_optim.cpp
   bindings/solvers/py_solvers.cpp
+  bindings/solvers/py_block_encoding.cpp
 )
 
 target_include_directories(${MODULE_NAME} PRIVATE .)
