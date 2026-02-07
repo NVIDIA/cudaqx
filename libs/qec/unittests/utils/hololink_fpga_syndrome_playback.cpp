@@ -238,6 +238,15 @@ struct Options {
   std::string data_dir;
   std::optional<std::size_t> num_shots;
   bool verify = false;
+
+  // RDMA target configuration (from bridge tool output).
+  // When all three are provided, the FPGA SIF registers are configured
+  // so playback data is sent via RDMA to the bridge tool's GPU buffers.
+  std::optional<std::uint32_t> qp_number;
+  std::optional<std::uint32_t> rkey;
+  std::optional<std::uint64_t> buffer_addr;
+  std::optional<std::uint32_t> rdma_page_size;  // ring buffer slot size (bytes)
+  std::optional<std::uint32_t> rdma_num_pages;  // number of ring buffer slots
 };
 
 void print_usage(const char *argv0) {
@@ -250,7 +259,17 @@ void print_usage(const char *argv0) {
       << "Optional:\n"
       << "  --num-shots <n>       Number of shots to play back (default: all)\n"
       << "  --verify              Capture and verify correction responses "
-         "via ILA\n";
+         "via ILA\n\n"
+      << "RDMA target (from bridge tool output):\n"
+      << "  --qp-number <n>      Destination QP number (hex or decimal)\n"
+      << "  --rkey <n>            Remote key\n"
+      << "  --buffer-addr <n>    GPU buffer address (hex or decimal)\n"
+      << "  --page-size <n>      Ring buffer slot size in bytes (default: 256)\n"
+      << "  --num-pages <n>      Number of ring buffer slots (default: 64)\n"
+      << "\n"
+      << "When --qp-number, --rkey, and --buffer-addr are all provided, the\n"
+      << "FPGA SIF registers are configured to send playback data via RDMA\n"
+      << "to the bridge tool's GPU buffers.\n";
 }
 
 Options parse_args(int argc, char **argv) {
@@ -265,6 +284,20 @@ Options parse_args(int argc, char **argv) {
       options.num_shots = std::stoull(argv[++i]);
     } else if (arg == "--verify") {
       options.verify = true;
+    } else if (arg == "--qp-number" && i + 1 < argc) {
+      options.qp_number =
+          static_cast<std::uint32_t>(std::stoul(argv[++i], nullptr, 0));
+    } else if (arg == "--rkey" && i + 1 < argc) {
+      options.rkey =
+          static_cast<std::uint32_t>(std::stoul(argv[++i], nullptr, 0));
+    } else if (arg == "--buffer-addr" && i + 1 < argc) {
+      options.buffer_addr = std::stoull(argv[++i], nullptr, 0);
+    } else if (arg == "--page-size" && i + 1 < argc) {
+      options.rdma_page_size =
+          static_cast<std::uint32_t>(std::stoul(argv[++i], nullptr, 0));
+    } else if (arg == "--num-pages" && i + 1 < argc) {
+      options.rdma_num_pages =
+          static_cast<std::uint32_t>(std::stoul(argv[++i], nullptr, 0));
     } else if (arg == "--help" || arg == "-h") {
       print_usage(argv[0]);
       std::exit(0);
@@ -700,6 +733,31 @@ int main(int argc, char **argv) {
 
   hololink->start();
   hololink->reset();
+
+  // ------------------------------------------------------------------
+  // Configure FPGA SIF registers for RDMA target (if provided)
+  // ------------------------------------------------------------------
+  if (options.qp_number && options.rkey && options.buffer_addr) {
+    std::uint32_t rdma_page_size = options.rdma_page_size.value_or(256);
+    std::uint32_t rdma_num_pages = options.rdma_num_pages.value_or(64);
+
+    std::cout << "Configuring FPGA SIF for RDMA target:\n"
+              << "  QP number:    0x" << std::hex << *options.qp_number
+              << std::dec << "\n"
+              << "  RKEY:         " << *options.rkey << "\n"
+              << "  Buffer addr:  0x" << std::hex << *options.buffer_addr
+              << std::dec << "\n"
+              << "  Page size:    " << rdma_page_size << " bytes\n"
+              << "  Num pages:    " << rdma_num_pages << "\n"
+              << "  Frame size:   " << bytes_per_window << " bytes\n";
+
+    hololink_channel.authenticate(*options.qp_number, *options.rkey);
+    hololink_channel.configure_roce(*options.buffer_addr, bytes_per_window,
+                                    rdma_page_size, rdma_num_pages,
+                                    /*local_data_port=*/0);
+
+    std::cout << "FPGA SIF registers configured for RDMA\n";
+  }
 
   // ------------------------------------------------------------------
   // Disable player, configure, and write BRAM
