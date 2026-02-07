@@ -245,8 +245,8 @@ struct Options {
   std::optional<std::uint32_t> qp_number;
   std::optional<std::uint32_t> rkey;
   std::optional<std::uint64_t> buffer_addr;
-  std::optional<std::uint32_t> rdma_page_size;  // ring buffer slot size (bytes)
-  std::optional<std::uint32_t> rdma_num_pages;  // number of ring buffer slots
+  std::optional<std::uint32_t> rdma_page_size; // ring buffer slot size (bytes)
+  std::optional<std::uint32_t> rdma_num_pages; // number of ring buffer slots
 };
 
 void print_usage(const char *argv0) {
@@ -264,7 +264,8 @@ void print_usage(const char *argv0) {
       << "  --qp-number <n>      Destination QP number (hex or decimal)\n"
       << "  --rkey <n>            Remote key\n"
       << "  --buffer-addr <n>    GPU buffer address (hex or decimal)\n"
-      << "  --page-size <n>      Ring buffer slot size in bytes (default: 256)\n"
+      << "  --page-size <n>      Ring buffer slot size in bytes (default: "
+         "256)\n"
       << "  --num-pages <n>      Number of ring buffer slots (default: 64)\n"
       << "\n"
       << "When --qp-number, --rkey, and --buffer-addr are all provided, the\n"
