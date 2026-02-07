@@ -12,7 +12,7 @@
 #include <pybind11/operators.h>
 #include <pybind11/stl.h>
 
-#include "common/Logger.h"
+#include "cudaq/runtime/logger/logger.h"
 
 #include "common/DeviceCodeRegistry.h"
 #include "cudaq/python/PythonCppInterop.h"

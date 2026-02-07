@@ -6,8 +6,8 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
-#include "common/Logger.h"
 #include "cudaq/qec/decoder.h"
+#include "cudaq/runtime/logger/logger.h"
 #include <algorithm>
 #include <cassert>
 #include <map>
