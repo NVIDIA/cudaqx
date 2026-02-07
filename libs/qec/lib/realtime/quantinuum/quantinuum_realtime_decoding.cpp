@@ -7,7 +7,7 @@
  ******************************************************************************/
 
 #include "common/Environment.h"
-#include "common/Logger.h"
+#include "cudaq/runtime/logger/logger.h"
 
 #include "quantinuum_decoding.h"
 #include "../realtime_decoding.h"

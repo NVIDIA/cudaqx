@@ -8,10 +8,10 @@
 
 #include "realtime_decoding.h"
 #include "common/FmtCore.h"
-#include "common/Logger.h"
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/realtime/decoding_config.h"
+#include "cudaq/runtime/logger/logger.h"
 #include <set>
 
 // Optional syndrome capture callback for --save_syndrome feature

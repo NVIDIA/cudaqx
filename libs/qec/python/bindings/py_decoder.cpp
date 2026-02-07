@@ -7,12 +7,12 @@
  ******************************************************************************/
 #include "common/ExecutionContext.h"
 #include "common/FmtCore.h"
-#include "common/Logger.h"
 #include "cudaq/platform.h"
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/detector_error_model.h"
 #include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/plugin_loader.h"
+#include "cudaq/runtime/logger/logger.h"
 #include <filesystem>
 #include <limits>
 #include <link.h>
