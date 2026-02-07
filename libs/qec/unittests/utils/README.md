@@ -59,6 +59,61 @@ hardware.
 | `--data-dir <path>` | yes      | Path to syndrome data directory (contains `config_multi_err_lut.yml` and `syndromes_multi_err_lut.txt`)  |
 | `--num-shots <n>`   | no       | Number of shots to play back (default: all shots in the file)                                            |
 | `--verify`          | no       | Capture and verify correction responses via ILA (requires mock decoder running on GPU)                   |
+| `--qp-number <n>`   | no       | Destination QP number for RDMA (hex or decimal, from bridge tool output)                                 |
+| `--rkey <n>`        | no       | Remote key for RDMA (from bridge tool output)                                                            |
+| `--buffer-addr <n>` | no       | GPU buffer address for RDMA (hex or decimal, from bridge tool output)                                    |
+| `--page-size <n>`   | no       | Ring buffer slot size in bytes (default: 256)                                                            |
+| `--num-pages <n>`   | no       | Number of ring buffer slots (default: 64)                                                                |
+
+When `--qp-number`, `--rkey`, and `--buffer-addr` are all provided, the tool
+configures the FPGA SIF registers so that playback data is sent via RDMA to
+the bridge tool's GPU buffers.  The values come from the bridge tool's
+console output (see below).
+
+### Using with the mock decoder bridge
+
+The `hololink_mock_decoder_bridge` tool (on the `hololink_bridge` branch)
+sets up a GPU-side RDMA transceiver and the cudaq dispatch kernel with the
+mock decoder.  To run an end-to-end test:
+
+1. Start the bridge tool on the GPU host:
+
+```bash
+./hololink_mock_decoder_bridge \
+    --device rocep1s0f0 \
+    --peer-ip 10.0.0.2 \
+    --config /path/to/config_multi_err_lut.yml \
+    --syndromes /path/to/syndromes_multi_err_lut.txt
+```
+
+2. Note the QP, RKEY, and buffer address from its output:
+
+```
+  Hololink QP Number: 0x1a
+  Hololink RKey: 12345
+  Hololink Buffer Addr: 0x7f1234560000
+```
+
+3. Run the playback tool, passing those values:
+
+```bash
+./hololink_fpga_syndrome_playback \
+    --hololink 10.0.0.2 \
+    --data-dir /path/to/data \
+    --qp-number 0x1a \
+    --rkey 12345 \
+    --buffer-addr 0x7f1234560000 \
+    --page-size 256 \
+    --num-pages 64 \
+    --verify
+```
+
+The playback tool configures the FPGA SIF registers via
+`DataChannel::authenticate()` and `DataChannel::configure_roce()`, loads
+syndromes into BRAM, and starts playback.  The FPGA sends syndrome data via
+RDMA to the GPU, the dispatch kernel invokes the mock decoder, and correction
+responses are sent back.  With `--verify`, the ILA captures the responses and
+the tool checks them against expected values.
 
 ### Verification details
 
