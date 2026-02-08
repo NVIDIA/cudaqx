@@ -204,12 +204,15 @@ sliding_window::sliding_window(const cudaq::qec::sparse_binary_matrix &H,
 
   validate_inputs();
 
+  // FIXME - update downstream code to support sparse matrices.
+  auto H_dense = H.to_dense();
+
   // Create the inner decoders.
   for (std::size_t w = 0; w < num_windows; ++w) {
     std::size_t start_round = w * step_size;
     std::size_t end_round = start_round + window_size - 1;
     auto [H_round, first_column, last_column] = cudaq::qec::get_pcm_for_rounds(
-        H.to_dense(), num_syndromes_per_round, start_round, end_round,
+        H_dense, num_syndromes_per_round, start_round, end_round,
         straddle_start_round, straddle_end_round);
     first_columns.push_back(first_column);
 
@@ -224,6 +227,14 @@ sliding_window::sliding_window(const cudaq::qec::sparse_binary_matrix &H,
                "first_column = {}, last_column = {}",
                start_round, end_round, H_round.shape()[0], H_round.shape()[1],
                first_column, last_column);
+
+    if (last_column - first_column + 1 != H_round.shape()[1]) {
+      throw std::invalid_argument(
+          fmt::format("last_column - first_column + 1 ({}) must be equal to "
+                      "the number of columns in H_round ({})",
+                      last_column - first_column + 1, H_round.shape()[1]));
+    }
+
     auto inner_decoder =
         decoder::get(inner_decoder_name, H_round, inner_decoder_params_mod);
     inner_decoders.push_back(std::move(inner_decoder));
