@@ -59,7 +59,10 @@ MTU=4096
 GPU_ID=0
 TIMEOUT=60
 NUM_SHOTS=""
-PAGE_SIZE=256
+# Page size must be >= frame_size (RPCHeader + max(syndrome_size, 256))
+# and 128-byte aligned (Hololink PAGE_SIZE=128).  384 safely covers the
+# typical frame_size of 268 bytes without requiring adjustment.
+PAGE_SIZE=384
 NUM_PAGES=64
 CONTROL_PORT=8193
 
@@ -266,6 +269,22 @@ setup_port() {
     _info "  Done: $iface is up at $ip"
 }
 
+# Add a static ARP entry: _add_static_arp <local_iface> <remote_ip> <remote_iface>
+# Reads the MAC of remote_iface and adds it as a permanent neighbor entry.
+_add_static_arp() {
+    local local_iface="$1"
+    local remote_ip="$2"
+    local remote_iface="$3"
+    local mac
+    mac=$(ip link show "$remote_iface" | awk '/ether/ {print $2}')
+    if [[ -z "$mac" ]]; then
+        _err "Cannot determine MAC address for $remote_iface"
+        return 1
+    fi
+    sudo ip neigh replace "$remote_ip" lladdr "$mac" nud permanent dev "$local_iface"
+    _info "  Static ARP: $remote_ip -> $mac on $local_iface"
+}
+
 do_setup_network() {
     _log "Setting up ConnectX network"
 
@@ -306,10 +325,15 @@ do_setup_network() {
             setup_port "$iface_bridge" "$BRIDGE_IP" "$MTU"
             setup_port "$iface_emulator" "$EMULATOR_IP" "$MTU"
 
-            # Derive IB device names for the tools (roce device names like rocep1s0f0)
-            # The tools use the roce-style name, which is the netdev name.
-            BRIDGE_DEVICE="$iface_bridge"
-            EMULATOR_DEVICE="$iface_emulator"
+            # Derive IB device names for the tools (ibv_open_device needs the
+            # IB device name like roceP2p1s0f0, not the netdev name).
+            BRIDGE_DEVICE=$(netdev_to_ib "$iface_bridge")
+            EMULATOR_DEVICE=$(netdev_to_ib "$iface_emulator")
+
+            # Add static ARP entries so the two loopback ports can reach each
+            # other (normal ARP may be filtered by Linux on same-host ports).
+            _add_static_arp "$iface_bridge" "$EMULATOR_IP" "$iface_emulator"
+            _add_static_arp "$iface_emulator" "$BRIDGE_IP" "$iface_bridge"
         else
             # User specified a device -- assume port 1 = bridge, port 2 = emulator
             local iface1 iface2
@@ -321,9 +345,16 @@ do_setup_network() {
             fi
             setup_port "$iface1" "$BRIDGE_IP" "$MTU"
             setup_port "$iface2" "$EMULATOR_IP" "$MTU"
-            BRIDGE_DEVICE="$iface1"
-            EMULATOR_DEVICE="$iface2"
+            BRIDGE_DEVICE=$(netdev_to_ib "$iface1")
+            EMULATOR_DEVICE=$(netdev_to_ib "$iface2")
+
+            _add_static_arp "$iface1" "$EMULATOR_IP" "$iface2"
+            _add_static_arp "$iface2" "$BRIDGE_IP" "$iface1"
         fi
+
+        # Allow GID tables to populate after IP assignment
+        _info "Waiting 2s for GID tables to populate..."
+        sleep 2
     else
         # FPGA mode: only one port needed (for the bridge tool).
         local iface_bridge
@@ -340,7 +371,7 @@ do_setup_network() {
 
         _info "Bridge interface: $iface_bridge"
         setup_port "$iface_bridge" "$BRIDGE_IP" "$MTU"
-        BRIDGE_DEVICE="$iface_bridge"
+        BRIDGE_DEVICE=$(netdev_to_ib "$iface_bridge")
     fi
 }
 

@@ -358,7 +358,9 @@ void write_bram(hololink::Hololink &hololink,
 
   const std::uint32_t w_sample_addr = bram_w_sample_addr();
 
-  constexpr std::size_t kBatchWrites = 4096;
+  // Hololink WR_BLOCK packet has 6-byte header + 8 bytes per (addr, value)
+  // pair. With CONTROL_PACKET_SIZE=1472, max pairs = (1472-6)/8 = 183.
+  constexpr std::size_t kBatchWrites = 180;
   hololink::Hololink::WriteData write_data;
 
   for (std::size_t w = 0; w < windows.size(); ++w) {
@@ -393,6 +395,37 @@ void write_bram(hololink::Hololink &hololink,
 }
 
 // ============================================================================
+// Chunked block read helper
+// ============================================================================
+
+/// Hololink RD_BLOCK packets have a 6-byte header plus 8 bytes per address.
+/// With CONTROL_PACKET_SIZE=1472, the maximum number of contiguous 32-bit
+/// registers that can be read in one RD_BLOCK is (1472-6)/8 = 183.
+/// This helper splits a large block read into multiple chunks.
+constexpr std::uint32_t kMaxBlockReadCount = 183;
+
+std::tuple<bool, std::vector<std::uint32_t>>
+chunked_read_uint32(hololink::Hololink &hl, std::uint32_t base_addr,
+                    std::uint32_t count,
+                    std::shared_ptr<hololink::Timeout> timeout = {}) {
+  std::vector<std::uint32_t> result;
+  result.reserve(count);
+  std::uint32_t remaining = count;
+  std::uint32_t offset = 0;
+  while (remaining > 0) {
+    std::uint32_t chunk = std::min(remaining, kMaxBlockReadCount);
+    auto [ok, data] =
+        hl.read_uint32(base_addr + offset * 4, chunk, timeout);
+    if (!ok)
+      return {false, {}};
+    result.insert(result.end(), data.begin(), data.end());
+    offset += chunk;
+    remaining -= chunk;
+  }
+  return {true, result};
+}
+
+// ============================================================================
 // BRAM Readback Verification
 // ============================================================================
 
@@ -404,7 +437,6 @@ bool verify_bram(hololink::Hololink &hololink,
   const std::size_t cycles = bytes_per_window / 64;
   const auto total_cycles = static_cast<std::uint32_t>(windows.size() * cycles);
   const std::uint32_t w_sample_addr = bram_w_sample_addr();
-  auto timeout = std::shared_ptr<hololink::Timeout>();
 
   bool all_ok = true;
   std::size_t mismatches = 0;
@@ -412,7 +444,7 @@ bool verify_bram(hololink::Hololink &hololink,
   for (std::uint32_t i = 0; i < RAM_NUM; ++i) {
     std::uint32_t bank_base = RAM_ADDR + (i << (w_sample_addr + 2));
     auto [ok, readback] =
-        hololink.read_uint32(bank_base, total_cycles, timeout);
+        chunked_read_uint32(hololink, bank_base, total_cycles);
     if (!ok) {
       std::cerr << "BRAM readback: failed to read bank " << i << "\n";
       return false;
@@ -499,12 +531,12 @@ std::vector<std::vector<std::uint32_t>> ila_dump(hololink::Hololink &hl,
   constexpr std::uint32_t ctrl_switch = 1u << (ILA_W_ADDR + 2 + ILA_W_RAM);
   auto timeout = std::shared_ptr<hololink::Timeout>();
 
-  // Read each bank with a single block read.
+  // Read each bank using chunked block reads.
   std::vector<std::vector<std::uint32_t>> bank_data(ILA_NUM_RAM);
   for (std::uint32_t y = 0; y < ILA_NUM_RAM; ++y) {
     std::uint32_t bank_base =
         ILA_BASE_ADDR + ctrl_switch + (y << (ILA_W_ADDR + 2));
-    auto [ok, data] = hl.read_uint32(bank_base, num_samples, timeout);
+    auto [ok, data] = chunked_read_uint32(hl, bank_base, num_samples, timeout);
     if (!ok)
       throw std::runtime_error("Failed to read ILA bank " + std::to_string(y));
     bank_data[y] = std::move(data);
@@ -760,6 +792,9 @@ int main(int argc, char **argv) {
     channel_metadata["serial_number"] = std::string("emulator");
     channel_metadata["sequence_number_checking"] =
         static_cast<std::int64_t>(0);
+    channel_metadata["hsb_ip_version"] =
+        static_cast<std::int64_t>(0x2501);  // minimum required by DataChannel
+    channel_metadata["fpga_uuid"] = std::string("emulator");
     channel_metadata["vp_mask"] = static_cast<std::int64_t>(0x1);
     channel_metadata["data_plane"] = static_cast<std::int64_t>(0);
     channel_metadata["sensor"] = static_cast<std::int64_t>(0);
@@ -804,7 +839,7 @@ int main(int argc, char **argv) {
                                     rdma_page_size, rdma_num_pages,
                                     /*local_data_port=*/0);
 
-    std::cout << "FPGA SIF registers configured for RDMA\n";
+    std::cout << "FPGA SIF registers configured for RDMA" << std::endl;
   }
 
   // ------------------------------------------------------------------
@@ -825,13 +860,13 @@ int main(int argc, char **argv) {
   if (!hololink->write_uint32(config_write))
     throw std::runtime_error("Failed to configure player");
 
-  std::cout << "Writing " << num_shots << " windows to playback BRAM...\n";
+  std::cout << "Writing " << num_shots << " windows to playback BRAM..." << std::endl;
   write_bram(*hololink, windows, bytes_per_window);
 
   // ------------------------------------------------------------------
   // BRAM readback verification (always-on)
   // ------------------------------------------------------------------
-  std::cout << "Verifying playback BRAM contents...\n";
+  std::cout << "Verifying playback BRAM contents..." << std::endl;
   if (!verify_bram(*hololink, windows, bytes_per_window)) {
     std::cerr << "BRAM readback verification FAILED\n";
     return 1;

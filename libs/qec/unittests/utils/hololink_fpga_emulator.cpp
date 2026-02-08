@@ -395,6 +395,11 @@ struct RdmaTargetConfig {
   uint32_t page_lsb = 0;
   uint32_t page_msb = 0;
 
+  // Track whether key fields were explicitly set (buffer_addr=0 is valid
+  // when Hololink uses IOVA with dmabuf).
+  bool qp_set = false;
+  bool rkey_set = false;
+
   void update_addr() {
     // Hololink encodes: PAGE_LSB = addr >> 7, PAGE_MSB = addr >> 32
     // Reconstruct: addr = (MSB << 32) | (LSB << 7)
@@ -403,7 +408,9 @@ struct RdmaTargetConfig {
   }
 
   bool is_complete() const {
-    return qp_number != 0 && rkey != 0 && buffer_addr != 0;
+    // buffer_addr=0 is valid (Hololink IOVA/dmabuf), so we only check
+    // that QP and RKEY were explicitly set.
+    return qp_set && rkey_set;
   }
 
   void print() const {
@@ -695,9 +702,11 @@ private:
     switch (offset) {
     case DP_QP:
       target_.qp_number = val;
+      target_.qp_set = true;
       break;
     case DP_RKEY:
       target_.rkey = val;
+      target_.rkey_set = true;
       break;
     case DP_PAGE_LSB:
       target_.page_lsb = val;
@@ -771,12 +780,15 @@ reassemble_window(const RegisterFile &regs, uint32_t window_index,
 
 /// Store a correction response into the ILA capture register file.
 /// The ILA stores each sample across 17 banks of 32-bit words.
-/// We store the raw correction bytes (RPCResponse + data) split across banks.
+/// Banks 0-15 = 512-bit AXI data bus (raw correction bytes).
+/// Bank 16    = control signals:
+///   bit 0 = tvalid (bit 512 of the captured word)
+///   bit 1 = tlast  (bit 513)
+///   bits [8:2] = wr_tcnt (bits 520:514, 7-bit write transaction count)
 static void store_ila_sample(RegisterFile &regs, uint32_t sample_index,
                              const uint8_t *data, size_t data_len) {
-  // Spread the data across 17 banks, 4 bytes per bank per sample.
-  // Total storage per sample = 17 * 4 = 68 bytes.
-  for (int bank = 0; bank < ILA_NUM_BANKS; bank++) {
+  // Spread the data across banks 0-15 (the 512-bit AXI data bus).
+  for (int bank = 0; bank < ILA_NUM_BANKS - 1; bank++) {
     uint32_t addr =
         ILA_DATA_BASE + (bank << (ILA_W_ADDR + 2)) + (sample_index * 4);
     uint32_t val = 0;
@@ -786,6 +798,18 @@ static void store_ila_sample(RegisterFile &regs, uint32_t sample_index,
       memcpy(&val, data + byte_offset, copy_len);
     }
     regs.write(addr, val);
+  }
+
+  // Bank 16: set control signals (tvalid=1, tlast=1, wr_tcnt=1)
+  {
+    uint32_t ctrl_addr =
+        ILA_DATA_BASE + ((ILA_NUM_BANKS - 1) << (ILA_W_ADDR + 2)) +
+        (sample_index * 4);
+    uint32_t ctrl_val = 0;
+    ctrl_val |= (1u << 0); // tvalid (bit 512)
+    ctrl_val |= (1u << 1); // tlast  (bit 513)
+    ctrl_val |= (1u << 2); // wr_tcnt = 1 (bits 514+, value 1 in 7-bit field)
+    regs.write(ctrl_addr, ctrl_val);
   }
 
   // Update sample count

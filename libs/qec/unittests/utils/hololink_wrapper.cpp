@@ -192,6 +192,18 @@ uint64_t *hololink_get_rx_ring_flag_host_addr(hololink_transceiver_t handle) {
   return nullptr;
 }
 
+bool hololink_query_kernel_occupancy(void) {
+  int prep = 0, rx = 0, tx = 0;
+  cudaError_t err = GpuRoceTransceiverQueryOccupancy(&prep, &rx, &tx);
+  if (err != cudaSuccess) {
+    fprintf(stderr, "ERROR: Hololink kernel occupancy query failed: %s\n",
+            cudaGetErrorString(err));
+    return false;
+  }
+  printf("  Hololink kernel occupancy: prepare=%d rx=%d tx=%d\n", prep, rx, tx);
+  return true;
+}
+
 size_t hololink_get_page_size(hololink_transceiver_t handle) {
   if (handle) {
     auto *impl = reinterpret_cast<HololinkTransceiverImpl *>(handle);

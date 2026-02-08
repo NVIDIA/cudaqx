@@ -43,6 +43,8 @@
 #include <thread>
 #include <vector>
 
+#include <arpa/inet.h>
+
 // cuda-quantum host API
 #include "cudaq/nvqlink/daemon/dispatcher/cudaq_realtime.h"
 
@@ -262,11 +264,13 @@ int main(int argc, char *argv[]) {
     std::cout << "  Page size: " << args.page_size << " bytes" << std::endl;
     std::cout << "  Num pages: " << args.num_pages << std::endl;
 
-    // Create transceiver with both RX and TX kernels enabled
+    // Create transceiver in deferred connection mode ("0.0.0.0") so we can
+    // specify the correct remote QP number.  The default hardcodes QP=0x2
+    // (physical FPGA), but in emulator mode the QP is dynamic.
     hololink_transceiver_t transceiver = hololink_create_transceiver(
         args.device.c_str(), 1, // ib_port
         frame_size, args.page_size, args.num_pages,
-        args.peer_ip.c_str(),
+        "0.0.0.0",  // deferred connection
         0, // forward = false
         1, // rx_only = true
         1  // tx_only = true
@@ -281,6 +285,26 @@ int main(int argc, char *argv[]) {
       std::cerr << "ERROR: Failed to start Hololink transceiver" << std::endl;
       hololink_destroy_transceiver(transceiver);
       return 1;
+    }
+
+    // Now connect the QP to the actual remote peer
+    {
+      uint8_t remote_gid[16] = {};
+      // Build IPv4-mapped GID: ::ffff:a.b.c.d
+      remote_gid[10] = 0xff;
+      remote_gid[11] = 0xff;
+      inet_pton(AF_INET, args.peer_ip.c_str(), &remote_gid[12]);
+
+      std::cout << "  Connecting QP to remote QP 0x" << std::hex
+                << args.remote_qp << std::dec
+                << " at " << args.peer_ip << "..." << std::endl;
+
+      if (!hololink_reconnect_qp(transceiver, remote_gid, args.remote_qp)) {
+        std::cerr << "ERROR: Failed to connect QP to remote peer" << std::endl;
+        hololink_destroy_transceiver(transceiver);
+        return 1;
+      }
+      std::cout << "  QP connected to remote peer" << std::endl;
     }
 
     // Get QP info (for display and potential future use by FPGA stimulus tool)
@@ -311,6 +335,34 @@ int main(int argc, char *argv[]) {
       std::cerr << "ERROR: Failed to get ring buffer pointers" << std::endl;
       hololink_destroy_transceiver(transceiver);
       return 1;
+    }
+
+    //==========================================================================
+    // Force eager CUDA module loading via occupancy queries.
+    // Without this, lazy module loading can deadlock when persistent kernels
+    // (dispatch, rx_only, tx_only) are running and another module tries to load.
+    //==========================================================================
+    std::cout << "\n  Forcing CUDA module loading (occupancy queries)..."
+              << std::endl;
+    {
+      // Dispatch kernel module
+      int dispatch_blocks = 0;
+      cudaError_t occ_err = cudaq_dispatch_kernel_query_occupancy(
+          &dispatch_blocks, 1);
+      if (occ_err != cudaSuccess) {
+        std::cerr << "ERROR: Dispatch kernel occupancy query failed: "
+                  << cudaGetErrorString(occ_err) << std::endl;
+        return 1;
+      }
+      std::cout << "  Dispatch kernel occupancy: " << dispatch_blocks
+                << " blocks/SM" << std::endl;
+
+      // Hololink kernel module
+      if (!hololink_query_kernel_occupancy()) {
+        std::cerr << "ERROR: Hololink kernel occupancy query failed"
+                  << std::endl;
+        return 1;
+      }
     }
 
     //==========================================================================
@@ -411,6 +463,13 @@ int main(int argc, char *argv[]) {
     }
     std::cout << "  Dispatch kernel launched" << std::endl;
 
+    // Check CUDA error state after dispatch kernel launch
+    {
+      cudaError_t post_dispatch_err = cudaPeekAtLastError();
+      std::cout << "  CUDA state after dispatch launch: "
+                << cudaGetErrorString(post_dispatch_err) << std::endl;
+    }
+
     //==========================================================================
     // [5/5] Launch Hololink kernels and run
     //==========================================================================
@@ -425,6 +484,13 @@ int main(int argc, char *argv[]) {
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     std::cout << "  Hololink RX+TX kernels started" << std::endl;
 
+    // Check CUDA error state after Hololink kernel launches
+    {
+      cudaError_t post_hololink_err = cudaPeekAtLastError();
+      std::cout << "  CUDA state after Hololink launch: "
+                << cudaGetErrorString(post_hololink_err) << std::endl;
+    }
+
     // Print QP info for use by the FPGA stimulus tool
     std::cout << "\n=== Bridge Ready ===" << std::endl;
     std::cout << "  QP Number: 0x" << std::hex << our_qp << std::dec
@@ -436,10 +502,28 @@ int main(int argc, char *argv[]) {
               << args.timeout_sec << "s)..." << std::endl;
 
     //==========================================================================
-    // Main run loop - monitor progress
+    // Main run loop - monitor progress with diagnostics
     //==========================================================================
+    // Create a dedicated CUDA stream for diagnostic memcpy operations.
+    // The default (NULL) stream implicitly synchronizes with all other streams,
+    // which would hang since the dispatch kernel is an infinite loop.
+    cudaStream_t diag_stream = nullptr;
+    CUDA_CHECK(cudaStreamCreateWithFlags(&diag_stream,
+                                         cudaStreamNonBlocking));
+
+    {
+      cudaError_t pre_loop_err = cudaPeekAtLastError();
+      FILE *df = fopen("/tmp/bridge_diag.txt", "w");
+      if (df) {
+        fprintf(df, "ENTERING MAIN LOOP g_shutdown=%d cuda_state=%s\n",
+                (int)g_shutdown, cudaGetErrorString(pre_loop_err));
+        fflush(df);
+        fclose(df);
+      }
+    }
     auto start_time = std::chrono::steady_clock::now();
     uint64_t last_processed = 0;
+    int diag_count = 0;
 
     while (!g_shutdown) {
       auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
@@ -451,10 +535,53 @@ int main(int argc, char *argv[]) {
         break;
       }
 
-      // Print progress every 5 seconds
+      // Diagnostic: read GPU ring buffer state
+      if (diag_count < 30) {
+        diag_count++;
+
+        // Read stats
+        uint64_t processed = 0;
+        cudaMemcpyAsync(&processed, d_stats, sizeof(uint64_t),
+                        cudaMemcpyDeviceToHost, diag_stream);
+
+        // Read first 4 rx_flags and first 4 tx_flags
+        uint64_t rx_flags_h[4] = {};
+        uint64_t tx_flags_h[4] = {};
+        cudaMemcpyAsync(rx_flags_h, rx_ring_flag, 4 * sizeof(uint64_t),
+                        cudaMemcpyDeviceToHost, diag_stream);
+        cudaMemcpyAsync(tx_flags_h, tx_ring_flag, 4 * sizeof(uint64_t),
+                        cudaMemcpyDeviceToHost, diag_stream);
+
+        // Read first 16 bytes of rx_ring_data slot 0
+        uint32_t slot0[4] = {};
+        cudaMemcpyAsync(slot0, rx_ring_data, 16,
+                        cudaMemcpyDeviceToHost, diag_stream);
+
+        cudaStreamSynchronize(diag_stream);
+
+        FILE *df = fopen("/tmp/bridge_diag.txt", "a");
+        if (df) {
+          fprintf(df, "[DIAG %d] dispatched=%lu"
+                      " rx_flags=[%lx %lx %lx %lx]"
+                      " tx_flags=[%lx %lx %lx %lx]"
+                      " slot0=[%08x %08x %08x %08x]\n",
+                  diag_count, (unsigned long)processed,
+                  (unsigned long)rx_flags_h[0], (unsigned long)rx_flags_h[1],
+                  (unsigned long)rx_flags_h[2], (unsigned long)rx_flags_h[3],
+                  (unsigned long)tx_flags_h[0], (unsigned long)tx_flags_h[1],
+                  (unsigned long)tx_flags_h[2], (unsigned long)tx_flags_h[3],
+                  slot0[0], slot0[1], slot0[2], slot0[3]);
+          fflush(df);
+          fclose(df);
+        }
+      }
+
+      // Print progress every 5 seconds (use async memcpy to avoid hang)
       if (elapsed > 0 && elapsed % 5 == 0) {
         uint64_t processed = 0;
-        cudaq_dispatcher_get_processed(dispatcher, &processed);
+        cudaMemcpyAsync(&processed, d_stats, sizeof(uint64_t),
+                        cudaMemcpyDeviceToHost, diag_stream);
+        cudaStreamSynchronize(diag_stream);
         if (processed != last_processed) {
           std::cout << "  [" << elapsed << "s] Processed " << processed
                     << " packets" << std::endl;
@@ -462,7 +589,7 @@ int main(int argc, char *argv[]) {
         }
       }
 
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      std::this_thread::sleep_for(std::chrono::milliseconds(500));
     }
 
     //==========================================================================
@@ -470,12 +597,18 @@ int main(int argc, char *argv[]) {
     //==========================================================================
     std::cout << "\n=== Shutting down ===" << std::endl;
 
+    // Destroy diag stream before stopping dispatcher
+    if (diag_stream) {
+      cudaStreamDestroy(diag_stream);
+      diag_stream = nullptr;
+    }
+
     // Signal dispatch kernel to stop
     *shutdown_flag = 1;
     __sync_synchronize();
     cudaq_dispatcher_stop(dispatcher);
 
-    // Get final stats
+    // Get final stats (safe now that dispatch kernel is stopped)
     uint64_t total_processed = 0;
     cudaq_dispatcher_get_processed(dispatcher, &total_processed);
     std::cout << "  Total packets processed: " << total_processed << std::endl;

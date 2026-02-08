@@ -127,6 +127,11 @@ uint64_t *hololink_get_tx_ring_flag_host_addr(hololink_transceiver_t handle);
 /** Get host-accessible pointer to RX ring flag array. */
 uint64_t *hololink_get_rx_ring_flag_host_addr(hololink_transceiver_t handle);
 
+/** Force eager CUDA module loading by querying kernel occupancy.
+ *  Call before launching any persistent kernels.
+ *  Returns true on success (all kernels valid). */
+bool hololink_query_kernel_occupancy(void);
+
 /** Get the page (slot) size configured for this transceiver. */
 size_t hololink_get_page_size(hololink_transceiver_t handle);
 
