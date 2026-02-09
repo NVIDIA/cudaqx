@@ -13,10 +13,10 @@ jobs:
         platform: ['amd64', 'arm64']
         cuda_version: ['12.6', '13.0']
     runs-on: ${{ startsWith(github.repository, 'NVIDIA/cudaqx') && format('linux-{0}-cpu8', matrix.platform) || 'ubuntu-latest' }}
-    container: ghcr.io/nvidia/cuda-quantum-devdeps:ext-${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc11-main
+    container: ghcr.io/nvidia/cuda-quantum-devcontainer:${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc11-main
     permissions:
       actions: write
-      contents: read
+      contents: write # REVERT-WITH-CUDAQ-REALTIME-BUILD change back to read
       pull-requests: read
     steps:
       - name: Checkout repository
@@ -131,5 +131,4 @@ jobs:
         env:
           LD_LIBRARY_PATH: ${{ env.MPI_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
           OMPI_MCA_pml: ob1
-        run: bash scripts/ci/test_examples.sh all 
-
+        run: bash scripts/ci/test_examples.sh all

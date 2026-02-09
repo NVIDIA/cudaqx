@@ -13,10 +13,10 @@ jobs:
         platform: ['amd64', 'arm64']
         cuda_version: ['12.6', '13.0']
     runs-on: ${{ startsWith(github.repository, 'NVIDIA/cudaqx') && format('linux-{0}-cpu8', matrix.platform) || 'ubuntu-latest' }}
-    container: ghcr.io/nvidia/cuda-quantum-devdeps:ext-${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc11-main
+    container: ghcr.io/nvidia/cuda-quantum-devcontainer:${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc11-main
     permissions:
       actions: write
-      contents: read
+      contents: write # REVERT-WITH-CUDAQ-REALTIME-BUILD change back to read
       pull-requests: read
     steps:
       - name: Checkout repository
@@ -123,4 +123,58 @@ jobs:
 
       - name: Run example tests
         run: bash scripts/ci/test_examples.sh qec
+
+      # ========================================================================
+      # Upload build artifacts for GPU tests
+      # ========================================================================
+      - name: Create artifact archive
+        run: |
+          tar czf /tmp/qec-build-artifacts.tar.gz \
+            /cudaq-install \
+            /tmp/cudaq-realtime \
+            $GITHUB_WORKSPACE/libs/qec/unittests/decoders/realtime/data \
+            $GITHUB_WORKSPACE/${{ steps.build.outputs.build-dir }}
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: qec-build-${{ matrix.platform }}-cu${{ matrix.cuda_version }}
+          path: /tmp/qec-build-artifacts.tar.gz
+          retention-days: 1
+
+  # ==========================================================================
+  # GPU Tests - Run on GPU runners (uses build artifacts from pr-build)
+  # ==========================================================================
+  pr-build-gpu:
+    name: GPU tests
+    needs: pr-build
+    if: startsWith(github.ref, 'refs/heads/pull-request/')
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ['amd64', 'arm64']
+        cuda_version: ['12.6', '13.0']
+    runs-on: ${{ startsWith(github.repository, 'NVIDIA/cudaqx') && format('linux-{0}-gpu-a100-latest-1', matrix.platform) || 'ubuntu-latest' }}
+    container:
+      image: ghcr.io/nvidia/cuda-quantum-devcontainer:${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc11-main
+      env:
+        NVIDIA_VISIBLE_DEVICES: ${{ env.NVIDIA_VISIBLE_DEVICES }}
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: qec-build-${{ matrix.platform }}-cu${{ matrix.cuda_version }}
+          path: /tmp
+
+      - name: Extract build artifacts
+        run: |
+          tar xzf /tmp/qec-build-artifacts.tar.gz -C /
+
+      - name: Run GPU tests
+        run: |
+          cd $GITHUB_WORKSPACE/build_qec
+          ctest --output-on-failure -R "GpuKernelsTest|test_realtime_decoding"
 
