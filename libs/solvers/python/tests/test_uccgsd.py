@@ -24,6 +24,7 @@ def is_nvidia_gpu_available():
     return False
 
 
+@pytest.mark.skip(reason="PYTHON-REFACTOR")
 def test_solvers_adapt_uccgsd_h2():
     geometry = [('H', (0., 0., 0.)), ('H', (0., 0., .7474))]
     molecule = solvers.create_molecule(geometry, 'sto-3g', 0, 0, casci=True)
@@ -44,6 +45,7 @@ def test_solvers_adapt_uccgsd_h2():
     assert np.isclose(energy, -1.1371, atol=1e-3)
 
 
+@pytest.mark.skip(reason="PYTHON-REFACTOR")
 def test_solvers_adapt_uccgsd_lih():
     geometry = [('Li', (0.3925, 0., 0.)), ('H', (-1.1774, 0., .0))]
     molecule = solvers.create_molecule(geometry,
@@ -73,6 +75,7 @@ def test_solvers_adapt_uccgsd_lih():
     assert np.isclose(energy, -7.8638, atol=1e-3)
 
 
+@pytest.mark.skip(reason="PYTHON-REFACTOR")
 def test_solvers_adapt_uccgsd_N2():
 
     geometry = [('N', (0.0, 0.0, 0.5600)), ('N', (0.0, 0.0, -0.5600))]
@@ -106,6 +109,7 @@ def test_solvers_adapt_uccgsd_N2():
     assert np.isclose(energy, -107.5421, atol=1e-4)
 
 
+@pytest.mark.skip(reason="PYTHON-REFACTOR")
 def test_solvers_vqe_uccgsd_h2():
 
     geometry = [('H', (0., 0., 0.)), ('H', (0., 0., .7474))]

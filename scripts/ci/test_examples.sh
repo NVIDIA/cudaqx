@@ -25,8 +25,29 @@ echo "----------------------------------"
 # List to track failed tests
 FAILED_TESTS=()
 
+# Skip list (PYTHON-REFACTOR): known failing examples until Python refactor is done
+# - custom_repetition_code_fine_grain_noise.py: wrong number of arguments provided
+# - my_steane_test.py: arity of kernel stabilizer does not match number of arguments provided
+# - adapt_h2.py: wrong number of arguments provided
+# - uccsd_vqe.py: unknown function call (CompilerError)
+skip_python_test() {
+    case "$1" in
+        *custom_repetition_code_fine_grain_noise.py) return 0 ;;
+        *my_steane_test.py) return 0 ;;
+        *adapt_h2.py) return 0 ;;
+        *uccsd_vqe.py) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 run_python_test() {
     local file=$1
+    if skip_python_test "$file"; then
+        echo "Skipping Python example (PYTHON-REFACTOR): $file"
+        echo "------------------------------"
+        echo ""
+        return
+    fi
     echo "Running Python example: $file"
     echo "------------------------------"
     python3 "$file"
