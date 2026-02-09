@@ -57,10 +57,15 @@ runs:
         restore-keys: |
           ${{ steps.ccache-key.outputs.main }}
 
+    - name: Install GitHub CLI
+      run: bash .github/workflows/scripts/install_git_cli.sh
+      shell: bash
+
     - name: Build library
       id: build-lib
       env:
         CCACHE_DIR: /ccache-${{ inputs.lib }}
+        GH_TOKEN: ${{ github.token }} # REVERT-WITH-CUDAQ-REALTIME-BUILD
       run: |
         build_dir=build_${{ inputs.lib }}
         .github/actions/build-lib/build_${{ inputs.lib }}.sh $build_dir ${{ inputs.install-prefix }}

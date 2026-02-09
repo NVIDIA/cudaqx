@@ -16,7 +16,7 @@ jobs:
     container: ghcr.io/nvidia/cuda-quantum-devcontainer:${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc11-main
     permissions:
       actions: write
-      contents: read
+      contents: write # REVERT-WITH-CUDAQ-REALTIME-BUILD change back to read
       pull-requests: read
     steps:
       - name: Checkout repository
@@ -132,5 +132,4 @@ jobs:
         env:
           LD_LIBRARY_PATH: ${{ env.MPI_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
           OMPI_MCA_pml: ob1
-        run: bash scripts/ci/test_examples.sh all 
-
+        run: bash scripts/ci/test_examples.sh all

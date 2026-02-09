@@ -153,6 +153,20 @@ static uint32_t calculate_num_msyn_per_decode(
 }
 
 static void
+validate_sparse_column_indices(const std::vector<std::vector<uint32_t>> &sparse,
+                               std::size_t max_col, const char *name) {
+  for (std::size_t row = 0; row < sparse.size(); ++row) {
+    for (const auto col : sparse[row]) {
+      if (col >= max_col) {
+        throw std::invalid_argument(
+            fmt::format("{} column index {} out of range [0, {}) at row {}",
+                        name, col, max_col, row));
+      }
+    }
+  }
+}
+
+static void
 set_sparse_from_vec(const std::vector<int64_t> &vec_in,
                     std::vector<std::vector<uint32_t>> &sparse_out) {
   sparse_out.clear();
@@ -172,12 +186,14 @@ set_sparse_from_vec(const std::vector<int64_t> &vec_in,
 
 void decoder::set_O_sparse(const std::vector<std::vector<uint32_t>> &O_sparse) {
   this->O_sparse = O_sparse;
+  validate_sparse_column_indices(this->O_sparse, block_size, "O_sparse");
   this->pimpl->corrections.clear();
   this->pimpl->corrections.resize(O_sparse.size());
 }
 
 void decoder::set_O_sparse(const std::vector<int64_t> &O_sparse_vec_in) {
   set_sparse_from_vec(O_sparse_vec_in, this->O_sparse);
+  validate_sparse_column_indices(this->O_sparse, block_size, "O_sparse");
   this->pimpl->corrections.clear();
   this->pimpl->corrections.resize(O_sparse.size());
 }
@@ -211,6 +227,11 @@ void set_D_sparse_common(decoder *decoder,
 
   } else {
     pimpl->is_sliding_window = false;
+    if (D_sparse.size() != decoder->get_syndrome_size()) {
+      throw std::invalid_argument(
+          fmt::format("D_sparse row count ({}) must match syndrome_size ({})",
+                      D_sparse.size(), decoder->get_syndrome_size()));
+    }
   }
 
   pimpl->num_msyn_per_decode = calculate_num_msyn_per_decode(D_sparse);
@@ -327,6 +348,14 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
       if (decoded_result.result.size() == 0) {
         return false;
       }
+    }
+    if ((!pimpl->is_sliding_window &&
+         decoded_result.result.size() != block_size) ||
+        (pimpl->is_sliding_window && !decoded_result.result.empty() &&
+         decoded_result.result.size() != block_size)) {
+      throw std::runtime_error(
+          fmt::format("Decoder result size ({}) does not match block_size ({})",
+                      decoded_result.result.size(), block_size));
     }
 
     if (should_log) {

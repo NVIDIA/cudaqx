@@ -115,10 +115,10 @@ __qpu__ int64_t qec_circuit() {
     cudaq::qec::decoding::enqueue_syndromes(0, syndromes);
   }
 
-  // Get corrections and apply them
-  auto corrections = cudaq::qec::decoding::get_corrections(0, 3);
-  for (std::size_t i = 0; i < 3; ++i) {
-    if (corrections[i])
+  // Get corrections and apply them (single logical observable)
+  auto corrections = cudaq::qec::decoding::get_corrections(0, 1);
+  if (corrections[0]) {
+    for (std::size_t i = 0; i < 3; ++i)
       cudaq::x(data[i]);
   }
 

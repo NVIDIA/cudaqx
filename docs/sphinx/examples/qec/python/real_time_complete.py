@@ -49,7 +49,7 @@ def measure_stabilizers(logical: qec.patch) -> list[bool]:
 # [Begin QEC Circuit]
 # QEC circuit with real-time decoding
 @cudaq.kernel
-def qec_circuit() -> list[bool]:
+def qec_circuit() -> int:
     qec.reset_decoder(0)
 
     data = cudaq.qvector(3)
@@ -64,13 +64,13 @@ def qec_circuit() -> list[bool]:
         syndromes = measure_stabilizers(logical)
         qec.enqueue_syndromes(0, syndromes, 0)
 
-    # Get corrections and apply them
-    corrections = qec.get_corrections(0, 3, False)
-    for i in range(3):
-        if corrections[i]:
+    # Get corrections and apply them (single logical observable)
+    corrections = qec.get_corrections(0, 1, False)
+    if corrections[0]:
+        for i in range(3):
             x(data[i])
 
-    return mz(data)
+    return cudaq.to_integer(mz(data))
 
 
 # [End QEC Circuit]
