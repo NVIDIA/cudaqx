@@ -1,5 +1,5 @@
 # ============================================================================ #
-# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
+# Copyright (c) 2024 - 2026 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -75,7 +75,7 @@ endif()
 # ==============================================================================
 
 # GPU kernel tests for realtime decoder infrastructure
-if(CMAKE_CUDA_COMPILER)
+if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
   enable_language(CUDA)
   
   add_executable(test_gpu_kernels 
