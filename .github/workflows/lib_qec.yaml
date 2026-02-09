@@ -115,7 +115,7 @@ jobs:
           fi
 
       - name: Run Python tests
-        run: cmake --build ${{ steps.build.outputs.build-dir }} --target run_python_tests || true
+        run: cmake --build ${{ steps.build.outputs.build-dir }} --target run_python_tests
 
       # ========================================================================
       # Run example tests
