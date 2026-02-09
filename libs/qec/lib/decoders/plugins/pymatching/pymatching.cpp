@@ -105,6 +105,11 @@ public:
     }
   }
 
+  /// @brief Decode the syndrome using the MWPM decoder.
+  /// @param syndrome The syndrome to decode.
+  /// @return The decoder result.
+  /// @throws std::runtime_error if no matching solution is found, or
+  /// std::out_of_range if an edge is not found in the edge2col_idx map.
   virtual decoder_result decode(const std::vector<float_t> &syndrome) {
     decoder_result result{false, std::vector<float_t>(block_size, 0.0)};
     auto &mwpm = user_graph.get_mwpm_with_search_graph();

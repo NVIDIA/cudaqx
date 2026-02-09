@@ -351,7 +351,6 @@ def test_decoder_pymatching_results():
     columns = np.random.choice(pcm.shape[1], 3, replace=False)
     syndrome = np.sum(pcm[:, columns], axis=1) % 2
     decoder = qec.get_decoder('pymatching', pcm)
-    print(syndrome)
     result = decoder.decode(syndrome)
     assert result.converged is True
     assert all(isinstance(x, float) for x in result.result)
