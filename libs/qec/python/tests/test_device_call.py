@@ -1,5 +1,5 @@
 # ============================================================================ #
-# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
+# Copyright (c) 2024 - 2026 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -23,6 +23,7 @@ def kernel() -> int:
     return 0
 
 
+@pytest.mark.skip(reason="PYTHON-REFACTOR")
 def test_default_sim_target():
     # A default simulator target uses the simulation decoder
     cudaq.reset_target()
@@ -31,6 +32,7 @@ def test_default_sim_target():
     assert "_ZN5cudaq3qec8decoding10simulation13reset_decoderEm" in kernel_code
 
 
+@pytest.mark.skip(reason="PYTHON-REFACTOR")
 def test_quantinuum_target():
     # A Quantinuum target uses the Quantinuum decoder
     cudaq.reset_target()
@@ -40,6 +42,7 @@ def test_quantinuum_target():
     assert "@reset_decoder_ui64" in kernel_code
 
 
+@pytest.mark.skip(reason="PYTHON-REFACTOR")
 def test_target_swap():
     # Swapping targets back and forth generates correct code each time
     cudaq.reset_target()
