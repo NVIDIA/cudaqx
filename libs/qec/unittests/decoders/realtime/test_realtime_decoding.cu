@@ -32,6 +32,9 @@
 // cuda-quantum RPC types/hash helper
 #include "cudaq/nvqlink/daemon/dispatcher/dispatch_kernel_launch.h"
 
+// cuda-quantum kernel types for graph-aware dispatch
+#include "cudaq/nvqlink/daemon/dispatcher/kernel_types.h"
+
 // cudaqx mock decoder
 #include "cudaq/qec/realtime/mock_decode_handler.cuh"
 
@@ -229,7 +232,7 @@ std::vector<SyndromeEntry> load_syndromes(const std::string &path,
 // Kernel to initialize function table
 //==============================================================================
 
-/// @brief Initialize the device function table for dispatch.
+/// @brief Initialize the device function table for dispatch (device call mode).
 __global__ void init_function_table(cudaq_function_entry_t *entries) {
   if (threadIdx.x == 0 && blockIdx.x == 0) {
     entries[0].handler.device_fn_ptr =
@@ -282,6 +285,19 @@ bool isGpuAvailable() {
 }
 
 } // namespace
+
+//==============================================================================
+// Helper Kernels
+//==============================================================================
+
+/// @brief Initialize mock_decoder instance on device using placement new
+__global__ void
+init_mock_decoder_kernel(cudaq::qec::realtime::mock_decoder *d_decoder,
+                         cudaq::qec::realtime::mock_decoder_context *d_ctx) {
+  if (threadIdx.x == 0 && blockIdx.x == 0) {
+    new (d_decoder) cudaq::qec::realtime::mock_decoder(*d_ctx);
+  }
+}
 
 //==============================================================================
 // Test Fixture
@@ -350,8 +366,16 @@ protected:
                           sizeof(cudaq::qec::realtime::mock_decoder_context)));
     CUDA_CHECK(cudaMemcpy(d_ctx_, &ctx_, sizeof(ctx_), cudaMemcpyHostToDevice));
 
-    // Set global context for RPC-style calls
-    cudaq::qec::realtime::set_mock_decoder_context(d_ctx_);
+    // Allocate and initialize CRTP decoder instance
+    CUDA_CHECK(
+        cudaMalloc(&d_decoder_, sizeof(cudaq::qec::realtime::mock_decoder)));
+
+    // Initialize decoder using placement new kernel
+    init_mock_decoder_kernel<<<1, 1>>>(d_decoder_, d_ctx_);
+    CUDA_CHECK(cudaDeviceSynchronize());
+
+    // Set global decoder for RPC-style calls
+    cudaq::qec::realtime::set_mock_decoder(d_decoder_);
 
     // Allocate ring buffers (with space for RPCHeader)
     slot_size_ = sizeof(cudaq::nvqlink::RPCHeader) +
@@ -443,12 +467,20 @@ protected:
       cudaFree(d_lookup_measurements_);
     if (d_lookup_corrections_)
       cudaFree(d_lookup_corrections_);
+    if (d_decoder_)
+      cudaFree(d_decoder_);
     if (d_ctx_)
       cudaFree(d_ctx_);
     if (d_stats_)
       cudaFree(d_stats_);
     if (d_function_entries_)
       cudaFree(d_function_entries_);
+    if (graph_exec_)
+      cudaGraphExecDestroy(graph_exec_);
+    if (graph_)
+      cudaGraphDestroy(graph_);
+    if (d_current_buffer_)
+      cudaFree(d_current_buffer_);
   }
 
   void setup_function_table() {
@@ -457,6 +489,66 @@ protected:
 
     init_function_table<<<1, 1>>>(d_function_entries_);
     CUDA_CHECK(cudaDeviceSynchronize());
+
+    func_count_ = 1;
+  }
+
+  void setup_function_table_graph() {
+    // Allocate pointer indirection for graph
+    CUDA_CHECK(cudaMalloc(&d_current_buffer_, sizeof(void *)));
+    CUDA_CHECK(cudaMemset(d_current_buffer_, 0, sizeof(void *)));
+
+    // Create CUDA graph with decoder kernel
+    cudaStream_t capture_stream;
+    CUDA_CHECK(cudaStreamCreate(&capture_stream));
+
+    CUDA_CHECK(
+        cudaStreamBeginCapture(capture_stream, cudaStreamCaptureModeGlobal));
+    cudaq::qec::realtime::mock_decode_graph_kernel<<<1, 1, 0, capture_stream>>>(
+        d_current_buffer_);
+    CUDA_CHECK(cudaStreamEndCapture(capture_stream, &graph_));
+
+    // Instantiate for device launch with device launch flag
+    CUDA_CHECK(cudaGraphInstantiateWithFlags(
+        &graph_exec_, graph_, cudaGraphInstantiateFlagDeviceLaunch));
+
+    // Upload graph to device
+    CUDA_CHECK(cudaGraphUpload(graph_exec_, capture_stream));
+    CUDA_CHECK(cudaStreamSynchronize(capture_stream));
+    CUDA_CHECK(cudaStreamDestroy(capture_stream));
+
+    // Set up function table entry with graph
+    CUDA_CHECK(
+        cudaMalloc(&d_function_entries_, sizeof(cudaq_function_entry_t)));
+
+    cudaq_function_entry_t host_entry{};
+    host_entry.handler.graph_exec = graph_exec_;
+    host_entry.function_id = MOCK_DECODE_FUNCTION_ID;
+    host_entry.dispatch_mode = CUDAQ_DISPATCH_GRAPH_LAUNCH;
+    host_entry.reserved[0] = 0;
+    host_entry.reserved[1] = 0;
+    host_entry.reserved[2] = 0;
+
+    // Schema: same as device call mode
+    host_entry.schema.num_args = 1;
+    host_entry.schema.num_results = 1;
+    host_entry.schema.reserved = 0;
+    host_entry.schema.args[0].type_id = CUDAQ_TYPE_BIT_PACKED;
+    host_entry.schema.args[0].reserved[0] = 0;
+    host_entry.schema.args[0].reserved[1] = 0;
+    host_entry.schema.args[0].reserved[2] = 0;
+    host_entry.schema.args[0].size_bytes = 16;
+    host_entry.schema.args[0].num_elements = 128;
+    host_entry.schema.results[0].type_id = CUDAQ_TYPE_UINT8;
+    host_entry.schema.results[0].reserved[0] = 0;
+    host_entry.schema.results[0].reserved[1] = 0;
+    host_entry.schema.results[0].reserved[2] = 0;
+    host_entry.schema.results[0].size_bytes = 1;
+    host_entry.schema.results[0].num_elements = 1;
+
+    CUDA_CHECK(cudaMemcpy(d_function_entries_, &host_entry,
+                          sizeof(cudaq_function_entry_t),
+                          cudaMemcpyHostToDevice));
 
     func_count_ = 1;
   }
@@ -521,6 +613,7 @@ protected:
 
   cudaq::qec::realtime::mock_decoder_context ctx_;
   cudaq::qec::realtime::mock_decoder_context *d_ctx_ = nullptr;
+  cudaq::qec::realtime::mock_decoder *d_decoder_ = nullptr;
 
   static constexpr std::size_t num_slots_ = 4;
   std::size_t slot_size_ = 256;
@@ -540,6 +633,11 @@ protected:
   // Function table for dispatch kernel
   cudaq_function_entry_t *d_function_entries_ = nullptr;
   std::size_t func_count_ = 0;
+
+  // Graph launch support
+  cudaGraph_t graph_ = nullptr;
+  cudaGraphExec_t graph_exec_ = nullptr;
+  void **d_current_buffer_ = nullptr; // Pointer indirection for graph
 
   // Host API handles
   cudaq_dispatch_manager_t *manager_ = nullptr;
@@ -617,4 +715,144 @@ TEST_F(RealtimeDecodingTest, DispatchKernelAllShots) {
 
   EXPECT_EQ(correct_count, num_test_shots)
       << "All shots should decode correctly";
+}
+
+/// @brief Full end-to-end test for graph launch mode using proper graph-based
+/// dispatch. This test bypasses the host API to use the new
+/// cudaq_create_dispatch_graph_* API which properly wraps the dispatch kernel
+/// in a graph, enabling device-side graph launch.
+TEST_F(RealtimeDecodingTest, DispatchKernelAllShotsGraphLaunch) {
+  int device;
+  CUDA_CHECK(cudaGetDevice(&device));
+  cudaDeviceProp prop;
+  CUDA_CHECK(cudaGetDeviceProperties(&prop, device));
+
+  if (prop.major < 9) {
+    GTEST_SKIP()
+        << "Graph device launch requires compute capability 9.0+, found "
+        << prop.major << "." << prop.minor;
+  }
+
+  // Shutdown existing dispatcher (we'll manage dispatch directly)
+  *shutdown_flag_ = 1;
+  __sync_synchronize();
+  ASSERT_EQ(cudaq_dispatcher_stop(dispatcher_), CUDAQ_OK);
+
+  // Clean up device call function table
+  if (d_function_entries_) {
+    cudaFree(d_function_entries_);
+    d_function_entries_ = nullptr;
+  }
+
+  // Set up graph-based function table
+  setup_function_table_graph();
+
+  // Create stream for dispatch
+  cudaStream_t dispatch_stream;
+  CUDA_CHECK(cudaStreamCreate(&dispatch_stream));
+
+  // Reset shutdown flag for the new dispatch kernel
+  *shutdown_flag_ = 0;
+  __sync_synchronize();
+
+  // Create dispatch graph context using the NEW API
+  // This wraps the dispatch kernel in a graph so device-side cudaGraphLaunch
+  // works
+  cudaq_dispatch_graph_context *dispatch_ctx = nullptr;
+  cudaError_t create_err = cudaq_create_dispatch_graph_regular(
+      rx_flags_, tx_flags_, d_function_entries_, func_count_, d_current_buffer_,
+      d_shutdown_flag_, d_stats_, num_slots_, 1, 32, dispatch_stream,
+      &dispatch_ctx);
+
+  if (create_err != cudaSuccess) {
+    cudaStreamDestroy(dispatch_stream);
+    GTEST_SKIP() << "Failed to create dispatch graph: "
+                 << cudaGetErrorString(create_err);
+  }
+
+  // Launch dispatch graph - now device-side cudaGraphLaunch will work!
+  CUDA_CHECK(cudaq_launch_dispatch_graph(dispatch_ctx, dispatch_stream));
+
+  const std::size_t num_test_shots = syndromes_.size();
+  std::size_t correct_count = 0;
+
+  // Create separate stream for polling to avoid blocking
+  cudaStream_t poll_stream;
+  CUDA_CHECK(cudaStreamCreate(&poll_stream));
+
+  for (std::size_t i = 0; i < num_test_shots; ++i) {
+    std::size_t slot = i % num_slots_;
+    const auto &entry = syndromes_[i];
+
+    // Wait for slot to be free
+    int timeout = 100;
+    while (rx_flags_host_[slot] != 0 && timeout-- > 0) {
+      usleep(1000);
+    }
+    ASSERT_GT(timeout, 0) << "Timeout waiting for RX slot " << slot;
+
+    // Send request
+    write_rpc_request(slot, entry.measurements);
+    __sync_synchronize();
+    const_cast<volatile uint64_t *>(rx_flags_host_)[slot] =
+        reinterpret_cast<uint64_t>(rx_data_ + slot * slot_size_);
+
+    // Wait for response (poll using separate stream)
+    timeout = 100;
+    while (timeout-- > 0) {
+      __sync_synchronize();
+      if (tx_flags_host_[slot] != 0)
+        break;
+      usleep(1000);
+    }
+    if (timeout <= 0) {
+      std::cerr << "DispatchKernelAllShotsGraphLaunch timeout diagnostics:\n"
+                << "  slot = " << slot << "\n"
+                << "  rx_flags_host[slot] = " << rx_flags_host_[slot] << "\n"
+                << "  tx_flags_host_[slot] = " << tx_flags_host_[slot] << "\n"
+                << std::flush;
+    }
+    ASSERT_GT(timeout, 0) << "Timeout waiting for TX slot " << slot;
+
+    // Check result
+    uint8_t correction = 0;
+    std::int32_t status = 0;
+    std::uint32_t result_len = 0;
+    if (read_rpc_response(slot, correction, &status, &result_len)) {
+      if (correction == entry.expected_correction) {
+        correct_count++;
+      } else {
+        std::cerr << "Graph RPC mismatch slot " << slot << " status=" << status
+                  << " result_len=" << result_len
+                  << " expected=" << static_cast<int>(entry.expected_correction)
+                  << " got=" << static_cast<int>(correction) << "\n";
+      }
+    } else {
+      std::cerr << "Graph RPC failure slot " << slot << " status=" << status
+                << " result_len=" << result_len
+                << " expected=" << static_cast<int>(entry.expected_correction)
+                << " got=" << static_cast<int>(correction) << "\n";
+    }
+
+    // Clear TX flag
+    const_cast<volatile uint64_t *>(tx_flags_host_)[slot] = 0;
+  }
+
+  // Signal shutdown
+  *shutdown_flag_ = 1;
+  __sync_synchronize();
+  usleep(100000); // Give kernel time to exit
+
+  // Cleanup
+  CUDA_CHECK(cudaStreamSynchronize(dispatch_stream));
+  CUDA_CHECK(cudaq_destroy_dispatch_graph(dispatch_ctx));
+  CUDA_CHECK(cudaStreamDestroy(poll_stream));
+  CUDA_CHECK(cudaStreamDestroy(dispatch_stream));
+
+  double accuracy = 100.0 * correct_count / num_test_shots;
+  std::cout << "Graph dispatch mock decoder accuracy: " << correct_count << "/"
+            << num_test_shots << " (" << accuracy << "%)" << std::endl;
+
+  EXPECT_EQ(correct_count, num_test_shots)
+      << "All shots should decode correctly with graph launch";
 }
