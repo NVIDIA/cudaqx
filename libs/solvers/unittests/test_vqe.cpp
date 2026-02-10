@@ -148,8 +148,8 @@ TEST(SolversVQETester, checkCentralDifference3Params) {
   auto lbfgs = cudaq::optim::optimizer::get("lbfgs");
   auto gradient =
       cudaq::observe_gradient::get("central_difference", ansatz3Params, h);
-  auto [energy, params, data] = cudaq::solvers::vqe(
-      ansatz3Params, h, *lbfgs, *gradient, {0.0, 0.0, 0.0});
+  auto [energy, params, data] =
+      cudaq::solvers::vqe(ansatz3Params, h, *lbfgs, *gradient, {0.0, 0.0, 0.0});
   // Same H2 ground state. 3 parameters give the ansatz more freedom, but
   // the optimizer still must find E = -1.748 with correct gradients.
   EXPECT_NEAR(energy, -1.748, 1e-3);
@@ -163,8 +163,8 @@ TEST(SolversVQETester, checkParameterShift3Params) {
   auto lbfgs = cudaq::optim::optimizer::get("lbfgs");
   auto gradient =
       cudaq::observe_gradient::get("parameter_shift", ansatz3Params, h);
-  auto [energy, params, data] = cudaq::solvers::vqe(
-      ansatz3Params, h, *lbfgs, *gradient, {0.0, 0.0, 0.0});
+  auto [energy, params, data] =
+      cudaq::solvers::vqe(ansatz3Params, h, *lbfgs, *gradient, {0.0, 0.0, 0.0});
   // Same H2 ground state. 3 parameters give the ansatz more freedom, but
   // the optimizer still must find E = -1.748 with correct gradients.
   EXPECT_NEAR(energy, -1.748, 1e-3);
@@ -178,8 +178,8 @@ TEST(SolversVQETester, checkForwardDifference3Params) {
   auto lbfgs = cudaq::optim::optimizer::get("lbfgs");
   auto gradient =
       cudaq::observe_gradient::get("forward_difference", ansatz3Params, h);
-  auto [energy, params, data] = cudaq::solvers::vqe(
-      ansatz3Params, h, *lbfgs, *gradient, {0.0, 0.0, 0.0});
+  auto [energy, params, data] =
+      cudaq::solvers::vqe(ansatz3Params, h, *lbfgs, *gradient, {0.0, 0.0, 0.0});
   // Same H2 ground state. 3 parameters give the ansatz more freedom, but
   // the optimizer still must find E = -1.748 with correct gradients.
   EXPECT_NEAR(energy, -1.748, 1e-3);
