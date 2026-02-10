@@ -129,7 +129,8 @@ index cf0197f9fd..cceb843bdc 100644
 -      Python::Python pybind11::pybind11
 +      Python::Module pybind11::pybind11
        cudaq-chemistry cudaq-operator cudaq cudaq-py-utils cudaq-platform-default)
- endif()'
+ endif()
+'
 
 echo "$CUDAQ_PATCH" | git apply --verbose
 
