@@ -66,13 +66,14 @@ __device__ void mock_decoder::decode_impl(
 // DeviceRPCFunction-Compatible Wrapper
 //==============================================================================
 
-__device__ int mock_decode_rpc(void *buffer, std::uint32_t arg_len,
+__device__ int mock_decode_rpc(const void *input, void *output,
+                               std::uint32_t arg_len,
                                std::uint32_t max_result_len,
                                std::uint32_t *result_len) {
 
   if (g_mock_decoder != nullptr) {
-    uint8_t *measurements = static_cast<uint8_t *>(buffer);
-    uint8_t *corrections = static_cast<uint8_t *>(buffer);
+    const uint8_t *measurements = static_cast<const uint8_t *>(input);
+    uint8_t *corrections = static_cast<uint8_t *>(output);
 
     const auto &ctx = g_mock_decoder->context();
     g_mock_decoder->decode(measurements, corrections, ctx.num_measurements,
@@ -93,27 +94,29 @@ __device__ auto get_mock_decode_rpc_ptr() { return &mock_decode_rpc; }
 // Graph-Compatible RPC Handler (for CUDAQ_DISPATCH_GRAPH_LAUNCH)
 //==============================================================================
 
-__global__ void mock_decode_graph_kernel(void **buffer_ptr) {
-  void *data_buffer = (buffer_ptr != nullptr) ? *buffer_ptr : nullptr;
+__global__ void mock_decode_graph_kernel(
+    cudaq::nvqlink::GraphIOContext *io_ctx) {
   if (threadIdx.x == 0 && blockIdx.x == 0) {
-    if (data_buffer == nullptr)
+    if (io_ctx == nullptr || io_ctx->rx_slot == nullptr)
       return;
 
-    // Parse RPC header
-    auto *header = static_cast<cudaq::nvqlink::RPCHeader *>(data_buffer);
-    void *arg_buffer = static_cast<void *>(header + 1);
+    // Parse RPC header from RX slot (input)
+    auto *header =
+        static_cast<cudaq::nvqlink::RPCHeader *>(io_ctx->rx_slot);
+    uint8_t *measurements = reinterpret_cast<uint8_t *>(header + 1);
 
-    auto *response = static_cast<cudaq::nvqlink::RPCResponse *>(data_buffer);
+    // TX slot for response (output)
+    auto *response =
+        reinterpret_cast<cudaq::nvqlink::RPCResponse *>(io_ctx->tx_slot);
+    uint8_t *corrections =
+        io_ctx->tx_slot + sizeof(cudaq::nvqlink::RPCResponse);
 
     if (g_mock_decoder != nullptr) {
-      uint8_t *measurements = static_cast<uint8_t *>(arg_buffer);
-      uint8_t *corrections = static_cast<uint8_t *>(arg_buffer);
-
       const auto &ctx = g_mock_decoder->context();
       g_mock_decoder->decode(measurements, corrections, ctx.num_measurements,
                              ctx.num_observables);
 
-      // Write response
+      // Write response header to TX slot
       response->magic = cudaq::nvqlink::RPC_MAGIC_RESPONSE;
       response->status = 0;
       response->result_len = static_cast<std::uint32_t>(ctx.num_observables);
@@ -123,6 +126,12 @@ __global__ void mock_decode_graph_kernel(void **buffer_ptr) {
       response->status = -1;
       response->result_len = 0;
     }
+
+    // Signal completion: write tx_flag so the host/emulator knows the
+    // response is ready.  Must fence before the flag write.
+    __threadfence_system();
+    if (io_ctx->tx_flag != nullptr)
+      *(io_ctx->tx_flag) = io_ctx->tx_flag_value;
   }
 }
 

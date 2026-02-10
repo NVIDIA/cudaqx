@@ -323,14 +323,17 @@ protected:
       cudaGraphExecDestroy(graph_exec_);
     if (graph_)
       cudaGraphDestroy(graph_);
-    if (d_current_buffer_)
-      cudaFree(d_current_buffer_);
+    if (d_graph_io_ctx_)
+      cudaFree(d_graph_io_ctx_);
   }
 
   void setup_function_table_graph() {
-    // Allocate pointer indirection for graph
-    CUDA_CHECK(cudaMalloc(&d_current_buffer_, sizeof(void *)));
-    CUDA_CHECK(cudaMemset(d_current_buffer_, 0, sizeof(void *)));
+    // Allocate GraphIOContext on device (dispatch kernel fills it before
+    // each fire-and-forget graph launch)
+    CUDA_CHECK(cudaMalloc(&d_graph_io_ctx_,
+                          sizeof(cudaq::nvqlink::GraphIOContext)));
+    CUDA_CHECK(cudaMemset(d_graph_io_ctx_, 0,
+                          sizeof(cudaq::nvqlink::GraphIOContext)));
 
     // Create CUDA graph with decoder kernel
     cudaStream_t capture_stream;
@@ -339,7 +342,7 @@ protected:
     CUDA_CHECK(
         cudaStreamBeginCapture(capture_stream, cudaStreamCaptureModeGlobal));
     cudaq::qec::realtime::mock_decode_graph_kernel<<<1, 1, 0, capture_stream>>>(
-        d_current_buffer_);
+        d_graph_io_ctx_);
     CUDA_CHECK(cudaStreamEndCapture(capture_stream, &graph_));
 
     // Instantiate for device launch with device launch flag
@@ -472,7 +475,7 @@ protected:
   // Graph launch support
   cudaGraph_t graph_ = nullptr;
   cudaGraphExec_t graph_exec_ = nullptr;
-  void **d_current_buffer_ = nullptr; // Pointer indirection for graph
+  cudaq::nvqlink::GraphIOContext *d_graph_io_ctx_ = nullptr; // IO context for graph
 
   // Host API handles
   cudaq_dispatch_manager_t *manager_ = nullptr;
@@ -596,7 +599,7 @@ TEST_F(RealtimeDecodingTest, DispatchKernelAllShotsGraphLaunch) {
   cudaq_dispatch_graph_context *dispatch_ctx = nullptr;
   cudaError_t create_err = cudaq_create_dispatch_graph_regular(
       rx_flags_, tx_flags_, rx_data_, tx_data_, slot_size_, slot_size_,
-      d_function_entries_, func_count_, d_current_buffer_,
+      d_function_entries_, func_count_, d_graph_io_ctx_,
       d_shutdown_flag_, d_stats_, num_slots_, 1, 32, dispatch_stream,
       &dispatch_ctx);
 
