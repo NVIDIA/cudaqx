@@ -1,7 +1,7 @@
 #!/bin/sh
 
 # ============================================================================ #
-# Copyright (c) 2022 - 2025 NVIDIA Corporation & Affiliates.                   #
+# Copyright (c) 2022 - 2026 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -106,10 +106,10 @@ echo "Building MLIR bindings for ${python}" && \
 # ==============================================================================
 
 CUDAQ_PATCH='diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 737001b56..195b2f44f 100644
+index e12aed8871..d2960728e4 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -559,7 +559,7 @@ if(CUDAQ_BUILD_TESTS)
+@@ -657,7 +657,7 @@ if(CUDAQ_BUILD_TESTS)
  endif()
  
  if (CUDAQ_ENABLE_PYTHON)
@@ -119,17 +119,17 @@ index 737001b56..195b2f44f 100644
    # Apply specific patch to pybind11 for our documentation.
    # Only apply the patch if not already applied.
 diff --git a/python/runtime/cudaq/domains/plugins/CMakeLists.txt b/python/runtime/cudaq/domains/plugins/CMakeLists.txt
-index 7b7541d..2261334 100644
+index cf0197f9fd..cceb843bdc 100644
 --- a/python/runtime/cudaq/domains/plugins/CMakeLists.txt
 +++ b/python/runtime/cudaq/domains/plugins/CMakeLists.txt
-@@ -17,6 +17,6 @@ if (SKBUILD)
-     if (NOT Python_FOUND)
-       message(FATAL_ERROR "find_package(Python) not run?")
-     endif()
--    target_link_libraries(cudaq-pyscf PRIVATE Python::Python pybind11::pybind11 cudaq-chemistry cudaq-operator cudaq cudaq-py-utils)
-+    target_link_libraries(cudaq-pyscf PRIVATE Python::Module pybind11::pybind11 cudaq-chemistry cudaq-operator cudaq cudaq-py-utils)
- endif()
- install(TARGETS cudaq-pyscf DESTINATION lib/plugins)'
+@@ -27,7 +27,7 @@ else()
+   endif()
+   target_link_libraries(cudaq-pyscf
+     PRIVATE
+-      Python::Python pybind11::pybind11
++      Python::Module pybind11::pybind11
+       cudaq-chemistry cudaq-operator cudaq cudaq-py-utils cudaq-platform-default)
+ endif()'
 
 echo "$CUDAQ_PATCH" | git apply --verbose
 
