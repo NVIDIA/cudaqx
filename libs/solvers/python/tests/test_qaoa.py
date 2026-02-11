@@ -91,6 +91,30 @@ def test_overload_consistency():
     assert abs(result1.optimal_value - result2.optimal_value) < 1e-6
 
 
+# These two negative tests are to verify that qaoa() forwards the user-selected optimizer.
+# ASSERTs: lbfgs requires gradients; qaoa() uses no-gradient VQE path, so a
+# forwarded lbfgs must raise RuntimeError from vqe().
+def test_user_optimizer_user_hamiltonian_negative():
+    problem_ham = spin.z(0) * spin.z(1)
+    mixing_ham = spin.x(0) + spin.x(1)
+    init_params = [0.1, 0.1]
+
+    with pytest.raises(
+            RuntimeError,
+            match=r"requires gradients.*gradient instance not provided"):
+        solvers.qaoa(problem_ham, mixing_ham, 1, init_params, optimizer='lbfgs')
+
+
+def test_user_optimizer_default_hamiltonian_negative():
+    problem_ham = spin.z(0)
+    init_params = [0.1, 0.1]
+
+    with pytest.raises(
+            RuntimeError,
+            match=r"requires gradients.*gradient instance not provided"):
+        solvers.qaoa(problem_ham, 1, init_params, optimizer='lbfgs')
+
+
 def test_maxcut_single_edge():
     G = nx.Graph()
     G.add_edge(0, 1)
