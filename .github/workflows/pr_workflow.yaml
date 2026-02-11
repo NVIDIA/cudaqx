@@ -65,6 +65,8 @@ jobs:
               - 'libs/core/**/*.h'
               - 'libs/core/**/CMakeLists.txt'
               - 'libs/qec/**/*.cpp'
+              - 'libs/qec/**/*.cu'
+              - 'libs/qec/**/*.cuh'
               - 'libs/qec/**/*.h'
               - 'libs/qec/**/*.in'
               - 'libs/qec/**/*.py'
