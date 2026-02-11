@@ -1,5 +1,5 @@
 # ============================================================================ #
-# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
+# Copyright (c) 2024 - 2026 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -337,6 +337,27 @@ def test_single_error_lut_opt_results():
     assert "error_probability" in result.opt_results
     assert "syndrome_weight" in result.opt_results
     assert "decoding_time" not in result.opt_results  # Was set to False
+
+
+def test_decoder_pymatching_results():
+    pcm = qec.generate_random_pcm(n_rounds=2,
+                                  n_errs_per_round=10,
+                                  n_syndromes_per_round=5,
+                                  weight=2,
+                                  seed=7)
+    pcm, _ = qec.simplify_pcm(pcm, np.ones(pcm.shape[1]), 10)
+    # Pick 3 random columns from the PCM and XOR them together to get the
+    # syndrome.
+    columns = np.random.choice(pcm.shape[1], 3, replace=False)
+    syndrome = np.sum(pcm[:, columns], axis=1) % 2
+    decoder = qec.get_decoder('pymatching', pcm)
+    result = decoder.decode(syndrome)
+    assert result.converged is True
+    assert all(isinstance(x, float) for x in result.result)
+    assert all(0 <= x <= 1 for x in result.result)
+    actual_errors = np.zeros(pcm.shape[1], dtype=np.uint8)
+    actual_errors[columns] = 1
+    assert np.array_equal(result.result, actual_errors)
 
 
 if __name__ == "__main__":

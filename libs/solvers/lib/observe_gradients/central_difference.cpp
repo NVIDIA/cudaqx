@@ -27,6 +27,8 @@ void central_difference::calculateGradient(const std::vector<double> &x,
     tmpX[i] -= 2 * step;
     auto mx = expectation(tmpX);
     dx[i] = (px - mx) / (2. * step);
+    // restore the value to x_i
+    tmpX[i] += step;
   }
 }
 } // namespace cudaq
