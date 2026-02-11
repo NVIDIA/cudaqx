@@ -38,7 +38,6 @@ target_link_libraries(${MODULE_NAME}
     cudaq-solvers
     cudaq::cudaq
     cudaq::cudaq-python-interop
-    clang-cpp # TEMP change
 )
 
 set_target_properties(${MODULE_NAME} PROPERTIES
