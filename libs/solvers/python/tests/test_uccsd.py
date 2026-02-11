@@ -16,7 +16,6 @@ import cudaq, cudaq_solvers as solvers
 from scipy.optimize import minimize
 
 
-@pytest.mark.skip(reason="PYTHON-REFACTOR")
 def test_solvers_uccsd():
     geometry = [('H', (0., 0., 0.)), ('H', (0., 0., .7474))]
     molecule = solvers.create_molecule(geometry, 'sto-3g', 0, 0, casci=True)
@@ -46,7 +45,6 @@ def test_solvers_uccsd():
     assert np.isclose(energy, -1.13, 1e-2)
 
 
-@pytest.mark.skip(reason="PYTHON-REFACTOR")
 def test_uccsd_active_space():
 
     geometry = [('N', (0.0, 0.0, 0.5600)), ('N', (0.0, 0.0, -0.5600))]
@@ -98,7 +96,6 @@ def test_uccsd_active_space():
     assert np.isclose(energy, -107.542, 1e-2)
 
 
-@pytest.mark.skip(reason="PYTHON-REFACTOR")
 def test_uccsd_active_space_natorb():
 
     geometry = [('N', (0.0, 0.0, 0.5600)), ('N', (0.0, 0.0, -0.5600))]
@@ -146,7 +143,6 @@ def test_uccsd_active_space_natorb():
     assert np.isclose(energy, -107.6059, 1e-2)
 
 
-@pytest.mark.skip(reason="PYTHON-REFACTOR")
 def test_uccsd_loops():
     repro_num_electrons = 2
     repro_num_qubits = 8
