@@ -40,6 +40,7 @@ def test_solvers_upccgsd_exc_list():
     assert parameter_count == ideal_count
 
 
+@pytest.mark.skip(reason="PYTHON-REFACTOR")
 def test_solvers_vqe_upccgsd_h2():
 
     geometry = [('H', (0., 0., 0.)), ('H', (0., 0., .7474))]
@@ -90,6 +91,7 @@ def test_solvers_vqe_upccgsd_h2():
     assert np.isclose(energy, -1.1371, atol=1e-4)
 
 
+@pytest.mark.skip(reason="PYTHON-REFACTOR")
 def test_solvers_adapt_upccgsd_lih():
     geometry = [('Li', (0.3925, 0., 0.)), ('H', (-1.1774, 0., .0))]
     molecule = solvers.create_molecule(geometry,

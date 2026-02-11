@@ -39,11 +39,14 @@ def configured_decoder():
         qec.finalize_decoders()
 
 
+# qec.enqueue_syndromes uses conditional feedback so we must use cudaq.run, and
+# cudaq.run requires that kernels return non-void values.
 @cudaq.kernel
-def enqueue_kernel(decoder_id: int, num_syndromes: int):
+def enqueue_kernel(decoder_id: int, num_syndromes: int) -> int:
     q = cudaq.qvector(num_syndromes)
     syndromes = mz(q)
     qec.enqueue_syndromes(decoder_id, syndromes, 0)
+    return 0
 
 
 @cudaq.kernel
@@ -66,10 +69,10 @@ def test_enqueue_syndromes_rejects_bad_args(configured_decoder):
     # User-facing kernel call: invalid decoder_id and oversize syndromes.
     max_syndromes = _max_syndromes_from_sparse(configured_decoder.D_sparse)
     with pytest.raises(ValueError, match="Decoder 1 not found"):
-        cudaq.sample(enqueue_kernel, 1, max_syndromes, shots_count=1)
+        cudaq.run(enqueue_kernel, 1, max_syndromes, shots_count=1)
     with pytest.raises(ValueError,
                        match="exceeds configured measurement count"):
-        cudaq.sample(enqueue_kernel, 0, max_syndromes + 1, shots_count=1)
+        cudaq.run(enqueue_kernel, 0, max_syndromes + 1, shots_count=1)
 
 
 def test_configure_decoders_rejects_invalid_o_sparse():

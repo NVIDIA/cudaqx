@@ -12,7 +12,7 @@
 #include <pybind11/operators.h>
 #include <pybind11/stl.h>
 
-#include "common/Logger.h"
+#include "cudaq/runtime/logger/logger.h"
 
 #include "common/DeviceCodeRegistry.h"
 #include "cudaq/python/PythonCppInterop.h"
@@ -122,37 +122,21 @@ public:
       m_py_operation_encodings.emplace(opKeyEnum, kernel);
 
       // Create the kernel interop object
-      cudaq::python::CppPyKernelDecorator opInterop(kernel);
-      opInterop.compile();
-
-      // Get the kernel name
-      auto baseName = kernelHandle.attr("name").cast<std::string>();
-      std::string kernelName = "__nvqpp__mlirgen__" + baseName;
-
-      // Extract teh function pointer, register with qkernel system
-      auto capsule = kernel.attr("extract_c_function_pointer")(kernelName)
-                         .cast<py::capsule>();
-      void *ptr = capsule;
-      cudaq::registry::__cudaq_registerLinkableKernel(ptr, baseName.c_str(),
-                                                      ptr);
+      cudaq::python::CppPyKernelDecorator kernInterop(kernel);
 
       // Make sure we cast the function pointer correctly
       if (opKeyEnum == operation::stabilizer_round) {
-        auto *casted = reinterpret_cast<std::vector<cudaq::measure_result> (*)(
-            patch, const std::vector<std::size_t> &,
-            const std::vector<std::size_t> &)>(ptr);
-        operation_encodings.insert(
-            {opKeyEnum, cudaq::qkernel<std::vector<cudaq::measure_result>(
-                            patch, const std::vector<std::size_t> &,
-                            const std::vector<std::size_t> &)>(casted)});
+        encoding fptr = kernInterop.getEntryPointFunction<qkernel<
+            std::vector<measure_result>(patch, const std::vector<std::size_t> &,
+                                        const std::vector<std::size_t> &)>>();
+        operation_encodings.insert({opKeyEnum, std::move(fptr)});
         continue;
       }
 
       // FIXME handle other signatures later... this assumes single patch
       // signatures
-      auto *casted = reinterpret_cast<void (*)(patch)>(ptr);
-      operation_encodings.insert(
-          {opKeyEnum, cudaq::qkernel<void(patch)>(casted)});
+      encoding fptr = kernInterop.getEntryPointFunction<qkernel<void(patch)>>();
+      operation_encodings.insert({opKeyEnum, std::move(fptr)});
     }
   }
 

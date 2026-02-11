@@ -244,18 +244,16 @@ cudaq::qec::detector_error_model dem_from_memory_circuit(
   cudaq::ExecutionContext ctx_msm_size("msm_size");
   ctx_msm_size.noiseModel = &noise;
   auto &platform = cudaq::get_platform();
-  platform.set_exec_ctx(&ctx_msm_size);
-
-  // Run the memory circuit experiment
-  if (run_mz_circuit) {
-    memory_circuit_mz(stabRound, prep, numData, numAncx, numAncz, numRounds,
-                      xVec, zVec);
-  } else {
-    memory_circuit_mx(stabRound, prep, numData, numAncx, numAncz, numRounds,
-                      xVec, zVec);
-  }
-
-  platform.reset_exec_ctx();
+  platform.with_execution_context(ctx_msm_size, [&] {
+    // Run the memory circuit experiment
+    if (run_mz_circuit) {
+      memory_circuit_mz(stabRound, prep, numData, numAncx, numAncz, numRounds,
+                        xVec, zVec);
+    } else {
+      memory_circuit_mx(stabRound, prep, numData, numAncx, numAncz, numRounds,
+                        xVec, zVec);
+    }
+  });
 
   if (!ctx_msm_size.msm_dimensions.has_value()) {
     throw std::runtime_error("dem_from_memory_circuit error: no MSM dimensions "
@@ -270,18 +268,16 @@ cudaq::qec::detector_error_model dem_from_memory_circuit(
   cudaq::ExecutionContext ctx_msm("msm");
   ctx_msm.noiseModel = &noise;
   ctx_msm.msm_dimensions = ctx_msm_size.msm_dimensions;
-  platform.set_exec_ctx(&ctx_msm);
-
-  // Run the memory circuit experiment
-  if (run_mz_circuit) {
-    memory_circuit_mz(stabRound, prep, numData, numAncx, numAncz, numRounds,
-                      xVec, zVec);
-  } else {
-    memory_circuit_mx(stabRound, prep, numData, numAncx, numAncz, numRounds,
-                      xVec, zVec);
-  }
-
-  platform.reset_exec_ctx();
+  platform.with_execution_context(ctx_msm, [&] {
+    // Run the memory circuit experiment
+    if (run_mz_circuit) {
+      memory_circuit_mz(stabRound, prep, numData, numAncx, numAncz, numRounds,
+                        xVec, zVec);
+    } else {
+      memory_circuit_mx(stabRound, prep, numData, numAncx, numAncz, numRounds,
+                        xVec, zVec);
+    }
+  });
 
   // Populate error rates and error IDs
   dem.error_rates = std::move(ctx_msm.msm_probabilities.value());

@@ -8,8 +8,8 @@
 
 #include <iostream>
 
-#include "common/Logger.h"
 #include "cudaq.h"
+#include "cudaq/runtime/logger/logger.h"
 
 #include "device/adapt.h"
 #include "device/prepare_state.h"

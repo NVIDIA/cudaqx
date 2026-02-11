@@ -8,10 +8,10 @@
 
 #include "cudaq/qec/decoder.h"
 #include "common/FmtCore.h"
-#include "common/Logger.h"
 #include "cuda-qx/core/library_utils.h"
 #include "cudaq/qec/plugin_loader.h"
 #include "cudaq/qec/version.h"
+#include "cudaq/runtime/logger/logger.h"
 #include <cassert>
 #include <dlfcn.h>
 #include <filesystem>
