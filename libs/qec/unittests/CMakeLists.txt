@@ -196,4 +196,5 @@ endif()
 
 add_subdirectory(backend-specific)
 add_subdirectory(realtime)
+add_subdirectory(decoders/pymatching)
 
