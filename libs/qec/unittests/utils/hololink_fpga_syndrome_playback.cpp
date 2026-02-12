@@ -126,6 +126,42 @@ std::uint64_t parse_scalar(const std::string &content,
   }
 }
 
+/// @brief Derive num_measurements from D_sparse in the config.
+///
+/// D_sparse encodes the detector-measurement matrix in row-major order with
+/// -1 as the row delimiter.  The column indices are measurement indices, so
+/// max(column indices) + 1 = num_measurements.  Returns 0 if D_sparse is
+/// absent or empty.
+std::size_t derive_num_measurements(const std::string &content) {
+  std::size_t pos = content.find("D_sparse:");
+  if (pos == std::string::npos)
+    return 0;
+  std::size_t bracket_start = content.find('[', pos);
+  if (bracket_start == std::string::npos)
+    return 0;
+  std::size_t bracket_end = content.find(']', bracket_start);
+  if (bracket_end == std::string::npos)
+    return 0;
+  std::string arr = content.substr(bracket_start + 1,
+                                   bracket_end - bracket_start - 1);
+  int max_col = -1;
+  std::istringstream ss(arr);
+  std::string token;
+  while (std::getline(ss, token, ',')) {
+    token.erase(0, token.find_first_not_of(" \t\n\r"));
+    token.erase(token.find_last_not_of(" \t\n\r") + 1);
+    if (token.empty())
+      continue;
+    try {
+      int val = std::stoi(token);
+      if (val >= 0 && val > max_col)
+        max_col = val;
+    } catch (...) {
+    }
+  }
+  return (max_col >= 0) ? static_cast<std::size_t>(max_col + 1) : 0;
+}
+
 // ============================================================================
 // Syndrome Data
 // ============================================================================
@@ -216,13 +252,14 @@ std::vector<SyndromeEntry> load_syndromes(const std::string &path,
 }
 
 std::vector<std::uint8_t>
-build_rpc_payload(const std::vector<std::uint8_t> &measurements) {
+build_rpc_payload(const std::vector<std::uint8_t> &measurements,
+                  std::uint32_t function_id) {
   std::vector<std::uint8_t> payload(sizeof(cudaq::nvqlink::RPCHeader) +
                                     measurements.size());
 
   auto *header = reinterpret_cast<cudaq::nvqlink::RPCHeader *>(payload.data());
   header->magic = cudaq::nvqlink::RPC_MAGIC_REQUEST;
-  header->function_id = MOCK_DECODE_FUNCTION_ID;
+  header->function_id = function_id;
   header->arg_len = static_cast<std::uint32_t>(measurements.size());
 
   std::memcpy(payload.data() + sizeof(cudaq::nvqlink::RPCHeader),
@@ -237,6 +274,9 @@ build_rpc_payload(const std::vector<std::uint8_t> &measurements) {
 struct Options {
   std::string hololink_ip;
   std::string data_dir;
+  std::string config_file;    // explicit config path (overrides data_dir default)
+  std::string syndromes_file; // explicit syndromes path (overrides data_dir default)
+  std::string function_name;  // RPC function name (overrides default mock_decode)
   std::optional<std::size_t> num_shots;
   bool verify = false;
 
@@ -262,8 +302,16 @@ void print_usage(const char *argv0) {
       << " --hololink <ip> --data-dir <path> [options]\n\n"
       << "Required:\n"
       << "  --hololink <ip>       FPGA or emulator IP address\n"
-      << "  --data-dir <path>     Path to syndrome data directory\n\n"
+      << "  --data-dir <path>     Path to syndrome data directory\n"
+      << "                        (expects config_multi_err_lut.yml and\n"
+      << "                         syndromes_multi_err_lut.txt inside)\n\n"
       << "Optional:\n"
+      << "  --config <path>       Explicit config YAML path (overrides "
+         "--data-dir default)\n"
+      << "  --syndromes <path>    Explicit syndromes file path (overrides "
+         "--data-dir default)\n"
+      << "  --function-name <s>   RPC function name for dispatch "
+         "(default: mock_decode)\n"
       << "  --num-shots <n>       Number of shots to play back (default: all)\n"
       << "  --verify              Capture and verify correction responses "
          "via ILA\n\n"
@@ -292,6 +340,12 @@ Options parse_args(int argc, char **argv) {
       options.hololink_ip = argv[++i];
     } else if (arg == "--data-dir" && i + 1 < argc) {
       options.data_dir = argv[++i];
+    } else if (arg == "--config" && i + 1 < argc) {
+      options.config_file = argv[++i];
+    } else if (arg == "--syndromes" && i + 1 < argc) {
+      options.syndromes_file = argv[++i];
+    } else if (arg == "--function-name" && i + 1 < argc) {
+      options.function_name = argv[++i];
     } else if (arg == "--num-shots" && i + 1 < argc) {
       options.num_shots = std::stoull(argv[++i]);
     } else if (arg == "--verify") {
@@ -706,7 +760,11 @@ VerifyResult verify_captured_responses(
 
 int main(int argc, char **argv) {
   Options options = parse_args(argc, argv);
-  if (options.hololink_ip.empty() || options.data_dir.empty()) {
+  // --data-dir is required unless both --config and --syndromes are given
+  bool has_explicit_files =
+      !options.config_file.empty() && !options.syndromes_file.empty();
+  if (options.hololink_ip.empty() ||
+      (options.data_dir.empty() && !has_explicit_files)) {
     print_usage(argv[0]);
     return 1;
   }
@@ -714,9 +772,13 @@ int main(int argc, char **argv) {
   // ------------------------------------------------------------------
   // Load configuration and syndrome data
   // ------------------------------------------------------------------
-  std::string config_path = options.data_dir + "/config_multi_err_lut.yml";
+  std::string config_path = options.config_file.empty()
+                                ? options.data_dir + "/config_multi_err_lut.yml"
+                                : options.config_file;
   std::string syndromes_path =
-      options.data_dir + "/syndromes_multi_err_lut.txt";
+      options.syndromes_file.empty()
+          ? options.data_dir + "/syndromes_multi_err_lut.txt"
+          : options.syndromes_file;
 
   std::ifstream config_file(config_path);
   if (!config_file.good()) {
@@ -732,7 +794,15 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  auto syndromes = load_syndromes(syndromes_path, syndrome_size);
+  // num_measurements is the number of raw measurement bits per shot (used as
+  // RPC payload size).  Derived from D_sparse (max column index + 1).
+  // Falls back to syndrome_size for backward compat with configs that have
+  // no D matrix (e.g. mock decoder where measurements == syndromes).
+  std::size_t num_measurements = derive_num_measurements(config_content);
+  if (num_measurements == 0)
+    num_measurements = syndrome_size;
+
+  auto syndromes = load_syndromes(syndromes_path, num_measurements);
   if (syndromes.empty()) {
     std::cerr << "No syndrome data loaded from " << syndromes_path << "\n";
     return 1;
@@ -749,10 +819,19 @@ int main(int argc, char **argv) {
   // ------------------------------------------------------------------
   // Build RPC payloads and pad to 64-byte alignment
   // ------------------------------------------------------------------
+  std::uint32_t function_id = options.function_name.empty()
+                                  ? MOCK_DECODE_FUNCTION_ID
+                                  : cudaq::nvqlink::fnv1a_hash(
+                                        options.function_name.c_str());
+  std::cout << "RPC function: "
+            << (options.function_name.empty() ? "mock_decode"
+                                              : options.function_name)
+            << " (id=0x" << std::hex << function_id << std::dec << ")\n";
+
   std::vector<std::vector<std::uint8_t>> windows;
   windows.reserve(num_shots);
   for (std::size_t i = 0; i < num_shots; ++i)
-    windows.push_back(build_rpc_payload(syndromes[i].measurements));
+    windows.push_back(build_rpc_payload(syndromes[i].measurements, function_id));
 
   std::size_t payload_size = windows.front().size();
   std::size_t bytes_per_window = align_up(payload_size, 64);
