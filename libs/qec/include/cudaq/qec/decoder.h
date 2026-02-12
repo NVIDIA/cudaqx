@@ -14,7 +14,6 @@
 #include "sparse_binary_matrix.h"
 #include <future>
 #include <optional>
-#include <variant>
 #include <vector>
 
 namespace cudaq::qec {
