@@ -12,8 +12,8 @@
 #include "cudaq/qec/detector_error_model.h"
 #include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/plugin_loader.h"
-#include "cudaq/runtime/logger/logger.h"
 #include "cudaq/qec/sparse_binary_matrix.h"
+#include "cudaq/runtime/logger/logger.h"
 #include <filesystem>
 #include <limits>
 #include <link.h>
