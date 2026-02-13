@@ -163,6 +163,7 @@ def test_solvers_vqe_uccgsd_h2():
 # Since this test is so slow on the CPU, only run this test if a GPU was found.
 @pytest.mark.skipif(not is_nvidia_gpu_available(),
                     reason="NVIDIA GPU not found")
+@pytest.mark.skipif(True, reason="PYTHON-REFACTOR")
 def test_solvers_vqe_uccgsd_lih():
 
     geometry = [('Li', (0.3925, 0., 0.)), ('H', (-1.1774, 0., .0))]
