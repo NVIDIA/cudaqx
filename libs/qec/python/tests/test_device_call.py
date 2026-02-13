@@ -16,53 +16,49 @@ import cudaq_qec as qec
 
 
 @cudaq.kernel
-def kernel() -> int:
+def kernel():
     # This call will generate different device code
     # depending on the target set in cudaq.
     qec.reset_decoder(0)
-    return 0
 
 
-@pytest.mark.skip(reason="PYTHON-REFACTOR")
 def test_default_sim_target():
     # A default simulator target uses the simulation decoder
     cudaq.reset_target()
-    kernel_code = str(kernel)
+    kernel_code = str(cudaq.translate(kernel,format="qir"))
     print(kernel_code)
     assert "_ZN5cudaq3qec8decoding10simulation13reset_decoderEm" in kernel_code
 
 
-@pytest.mark.skip(reason="PYTHON-REFACTOR")
 def test_quantinuum_target():
     # A Quantinuum target uses the Quantinuum decoder
     cudaq.reset_target()
     cudaq.set_target("quantinuum", machine="Helios-1SC", emulate=True)
-    kernel_code = str(kernel)
+    kernel_code = str(cudaq.translate(kernel,format="qir"))
     print(kernel_code)
     assert "@reset_decoder_ui64" in kernel_code
 
 
-@pytest.mark.skip(reason="PYTHON-REFACTOR")
 def test_target_swap():
     # Swapping targets back and forth generates correct code each time
     cudaq.reset_target()
     cudaq.set_target("quantinuum", machine="Helios-1SC", emulate=True)
-    kernel_code = str(kernel)
+    kernel_code = str(cudaq.translate(kernel,format="qir"))
     print(kernel_code)
     assert "@reset_decoder_ui64" in kernel_code
 
     cudaq.set_target("stim")
-    kernel_code = str(kernel)
+    kernel_code = str(cudaq.translate(kernel,format="qir"))
     print(kernel_code)
     assert "_ZN5cudaq3qec8decoding10simulation13reset_decoderEm" in kernel_code
 
     cudaq.set_target("quantinuum", machine="Helios-1SC", emulate=True)
-    kernel_code = str(kernel)
+    kernel_code = str(cudaq.translate(kernel,format="qir"))
     print(kernel_code)
     assert "@reset_decoder_ui64" in kernel_code
 
     cudaq.reset_target()
     # Reset back to default simulator
-    kernel_code = str(kernel)
+    kernel_code = str(cudaq.translate(kernel,format="qir"))
     print(kernel_code)
     assert "_ZN5cudaq3qec8decoding10simulation13reset_decoderEm" in kernel_code
