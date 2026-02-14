@@ -40,7 +40,6 @@ def test_solvers_upccgsd_exc_list():
     assert parameter_count == ideal_count
 
 
-@pytest.mark.skip(reason="PYTHON-REFACTOR")
 def test_solvers_vqe_upccgsd_h2():
 
     geometry = [('H', (0., 0., 0.)), ('H', (0., 0., .7474))]

@@ -24,7 +24,6 @@ def is_nvidia_gpu_available():
     return False
 
 
-@pytest.mark.skip(reason="PYTHON-REFACTOR")
 def test_solvers_adapt_uccgsd_h2():
     geometry = [('H', (0., 0., 0.)), ('H', (0., 0., .7474))]
     molecule = solvers.create_molecule(geometry, 'sto-3g', 0, 0, casci=True)
