@@ -529,7 +529,7 @@ void bindDecoder(py::module &mod) {
       "get_pcm_for_rounds",
       [](const py::array_t<uint8_t> &H, std::uint32_t num_syndromes_per_round,
          std::uint32_t start_round, std::uint32_t end_round,
-         bool straddle_end_round, bool straddle_start_round) {
+         bool straddle_start_round, bool straddle_end_round) {
         auto tensor_H = pcmToTensor(H);
 
         auto [H_new, first_column, last_column] =
