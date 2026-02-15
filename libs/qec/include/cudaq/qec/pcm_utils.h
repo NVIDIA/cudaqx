@@ -1,5 +1,5 @@
 /****************************************************************-*- C++ -*-****
- * Copyright (c) 2025 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2025 - 2026 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -109,6 +109,14 @@ get_sorted_pcm_column_indices(const cudaqx::tensor<uint8_t> &pcm,
 /// @param num_syndromes_per_round The number of syndromes per round.
 /// @return True if the PCM is sorted, false otherwise.
 bool pcm_is_sorted(const cudaqx::tensor<uint8_t> &pcm,
+                   std::uint32_t num_syndromes_per_round = 0);
+
+/// @brief Check if a PCM is sorted.
+/// @param sparse_pcm The sparse PCM to check (in the same format as
+/// get_sparse_pcm())
+/// @param num_syndromes_per_round The number of syndromes per round.
+/// @return True if the PCM is sorted, false otherwise.
+bool pcm_is_sorted(const std::vector<std::vector<std::uint32_t>> &sparse_pcm,
                    std::uint32_t num_syndromes_per_round = 0);
 
 /// @brief Reorder the columns of a PCM according to the given column order.
