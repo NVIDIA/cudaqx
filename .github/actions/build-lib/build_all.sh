@@ -2,7 +2,7 @@
 
 # Build realtime from cuda-quantum (if CUDAQ_REALTIME_ROOT not set)
 if [ -z "$CUDAQ_REALTIME_ROOT" ]; then
-  CUDAQ_REALTIME_ROOT=/tmp/cuda-quantum/realtime
+  CUDAQ_REALTIME_ROOT=/tmp/cudaq-realtime
   _build_cwd=$(pwd)
   cd /tmp
   git clone --filter=blob:none --no-checkout https://github.com/NVIDIA/cuda-quantum
@@ -10,10 +10,27 @@ if [ -z "$CUDAQ_REALTIME_ROOT" ]; then
   git sparse-checkout init --cone
   git sparse-checkout set realtime
   git checkout b7eed833133c501a1a655905d1f58a175a0aa749 # features/cudaq.realtime
+  git apply <<'PATCH'
+diff --git a/realtime/lib/daemon/CMakeLists.txt b/realtime/lib/daemon/CMakeLists.txt
+index 2fe4b20092..5bd0e3f22f 100644
+--- a/realtime/lib/daemon/CMakeLists.txt
++++ b/realtime/lib/daemon/CMakeLists.txt
+@@ -68,4 +68,9 @@ if(CUDA_FOUND)
+     POSITION_INDEPENDENT_CODE ON
+     ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
+   )
++
++  install(TARGETS cudaq-realtime-dispatch
++    COMPONENT realtime-lib
++    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
++  )
+ endif()
+PATCH
   cd realtime
   mkdir build && cd build
   cmake -G Ninja -DCMAKE_INSTALL_PREFIX="$CUDAQ_REALTIME_ROOT" ..
   ninja
+  ninja install
   cd "$_build_cwd"
 fi
 
