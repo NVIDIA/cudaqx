@@ -72,6 +72,45 @@ Configuration API
 
 The configuration API enables setting up decoders before circuit execution. Decoders are configured using YAML files or programmatically constructed configuration objects.
 
+Configuration Types
+^^^^^^^^^^^^^^^^^^^
+
+.. py:class:: cudaq_qec.trt_decoder_config
+
+   Configuration for TensorRT decoder in real-time decoding system.
+
+   **Attributes:**
+
+   .. py:attribute:: onnx_load_path
+      :type: Optional[str]
+
+      Path to ONNX model file. Mutually exclusive with engine_load_path.
+
+   .. py:attribute:: engine_load_path
+      :type: Optional[str]
+
+      Path to pre-built TensorRT engine file. Mutually exclusive with 
+      onnx_load_path.
+
+   .. py:attribute:: engine_save_path
+      :type: Optional[str]
+
+      Path to save built TensorRT engine for reuse.
+
+   .. py:attribute:: precision
+      :type: Optional[str]
+
+      Inference precision mode: "fp16", "bf16", "int8", "fp8", "tf32", 
+      "noTF32", or "best" (default).
+
+   .. py:attribute:: memory_workspace
+      :type: Optional[int]
+
+      Workspace memory size in bytes (default: 1073741824 = 1GB).
+
+Configuration Functions
+^^^^^^^^^^^^^^^^^^^^^^^^
+
 .. py:function:: cudaq_qec.configure_decoders(config)
 
    Configure decoders from a multi_decoder_config object.
