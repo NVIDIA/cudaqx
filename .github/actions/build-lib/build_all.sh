@@ -1,24 +1,20 @@
 #!/bin/sh
 
-# Download realtime artifacts from GitHub release (if CUDAQ_REALTIME_ROOT not set)
-# REVERT-WITH-CUDAQ-REALTIME-BUILD
+# Build realtime from cuda-quantum (if CUDAQ_REALTIME_ROOT not set)
 if [ -z "$CUDAQ_REALTIME_ROOT" ]; then
-  CUDAQ_REALTIME_ROOT=/tmp/cudaq-realtime
-  mkdir -p $CUDAQ_REALTIME_ROOT
-  mkdir -p $CUDAQ_REALTIME_ROOT/lib
-
-  # Download from GitHub draft release using gh CLI
-  RELEASE_TAG="cudaq-realtime-no-push2"
-  ARCH=$(uname -m | sed 's/aarch64/arm64/' | sed 's/x86_64/x86_64/')
-  
-  gh release download "$RELEASE_TAG" \
-    --pattern "cudaq-realtime-headers.tar.gz" \
-    --pattern "cudaq-realtime-libs-${ARCH}.tar.gz" \
-    --repo NVIDIA/cudaqx \
-    --dir /tmp
-
-  tar xzf /tmp/cudaq-realtime-headers.tar.gz -C $CUDAQ_REALTIME_ROOT
-  tar xzf /tmp/cudaq-realtime-libs-${ARCH}.tar.gz -C $CUDAQ_REALTIME_ROOT/lib
+  CUDAQ_REALTIME_ROOT=/tmp/cuda-quantum/realtime
+  _build_cwd=$(pwd)
+  cd /tmp
+  git clone --filter=blob:none --no-checkout https://github.com/NVIDIA/cuda-quantum
+  cd cuda-quantum
+  git sparse-checkout init --cone
+  git sparse-checkout set realtime
+  git checkout b7eed833133c501a1a655905d1f58a175a0aa749 # features/cudaq.realtime
+  cd realtime
+  mkdir build && cd build
+  cmake -G Ninja -DCMAKE_INSTALL_PREFIX="$CUDAQ_REALTIME_ROOT" ..
+  ninja
+  cd "$_build_cwd"
 fi
 
 cmake -S . -B "$1" \
