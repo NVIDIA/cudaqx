@@ -8,10 +8,10 @@
 
 #include "realtime_decoding.h"
 #include "common/FmtCore.h"
-#include "common/Logger.h"
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/realtime/decoding_config.h"
+#include "cudaq/runtime/logger/logger.h"
 #include <set>
 
 // Optional syndrome capture callback for --save_syndrome feature
@@ -141,6 +141,33 @@ set_syndrome_capture_callback(void (*callback)(const uint8_t *, size_t)) {
 
 void enqueue_syndromes(std::size_t decoder_id, uint8_t *syndromes,
                        std::uint64_t syndrome_length, std::uint64_t tag) {
+  if (decoder_id >= g_decoders.size()) {
+    throw std::invalid_argument(
+        fmt::format("Decoder {} not found", decoder_id));
+  }
+  auto *decoder = g_decoders[decoder_id].get();
+  if (!decoder) {
+    throw std::invalid_argument(
+        fmt::format("Decoder {} not found", decoder_id));
+  }
+  if (syndrome_length == 0) {
+    throw std::invalid_argument("syndrome_length must be greater than 0");
+  }
+  if (!syndromes) {
+    throw std::invalid_argument("syndromes buffer is null");
+  }
+  const auto max_syndromes = decoder->get_num_msyn_per_decode();
+  if (max_syndromes == 0) {
+    throw std::invalid_argument(
+        "Decoder has no measurement syndromes configured");
+  }
+  if (syndrome_length > max_syndromes) {
+    throw std::invalid_argument(
+        fmt::format("syndrome_length ({}) exceeds configured measurement count "
+                    "({})",
+                    syndrome_length, max_syndromes));
+  }
+
   // Invoke syndrome capture callback if registered (for --save_syndrome
   // feature)
   if (g_syndrome_capture_callback) {
@@ -153,11 +180,6 @@ void enqueue_syndromes(std::size_t decoder_id, uint8_t *syndromes,
   for (std::size_t i = 0; i < syndrome_length; i++) {
     syndrome_u8[i] = syndromes[i];
   }
-  if (decoder_id >= g_decoders.size()) {
-    throw std::invalid_argument(
-        fmt::format("Decoder {} not found", decoder_id));
-  }
-  auto *decoder = g_decoders[decoder_id].get();
   std::chrono::duration<double> duration{};
   if (decoder) {
     auto t0 = std::chrono::high_resolution_clock::now();
@@ -191,6 +213,18 @@ void get_corrections(std::size_t decoder_id, uint8_t *corrections,
   if (decoder) {
     auto num_observables = decoder->get_num_observables();
     auto ret = decoder->get_obs_corrections();
+    if (correction_length == 0) {
+      throw std::invalid_argument("correction_length must be greater than 0");
+    }
+    if (!corrections) {
+      throw std::invalid_argument("corrections buffer is null");
+    }
+    if (correction_length != num_observables) {
+      throw std::invalid_argument(
+          fmt::format("correction_length ({}) does not match number of "
+                      "observables ({})",
+                      correction_length, num_observables));
+    }
     for (std::size_t i = 0; i < correction_length; ++i) {
       corrections[i] = ret[i];
     }

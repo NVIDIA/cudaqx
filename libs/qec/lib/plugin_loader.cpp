@@ -7,7 +7,7 @@
  ******************************************************************************/
 
 #include "cudaq/qec/plugin_loader.h"
-#include "common/Logger.h"
+#include "cudaq/runtime/logger/logger.h"
 #include <filesystem>
 #include <iostream>
 

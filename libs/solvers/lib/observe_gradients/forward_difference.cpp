@@ -23,6 +23,8 @@ void forward_difference::calculateGradient(const std::vector<double> &x,
     tmpX[i] += step;
     auto px = expectation(tmpX);
     dx[i] = (px - exp_h) / step;
+    // restore the value to x_i
+    tmpX[i] -= step;
   }
 }
 } // namespace cudaq

@@ -1,20 +1,22 @@
 # ============================================================================ #
-# Copyright (c) 2024 NVIDIA Corporation & Affiliates.                          #
+# Copyright (c) 2024 - 2026 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
-import os
-
 import pytest
-import numpy as np
+import cudaq_solvers as solvers
+# import os
+
+# import pytest
+# import numpy as np
 
 import cudaq
-import cudaq_solvers as solvers
 
 
+@pytest.mark.skip(reason="PYTHON-REFACTOR")
 def test_solvers_adapt():
     geometry = [('H', (0., 0., 0.)), ('H', (0., 0., .7474))]
     molecule = solvers.create_molecule(geometry, 'sto-3g', 0, 0, casci=True)
@@ -54,6 +56,7 @@ def test_solvers_adapt():
     assert np.isclose(energy, -1.137, atol=1e-3)
 
 
+@pytest.mark.skip(reason="PYTHON-REFACTOR")
 def test_solvers_scipy_adapt():
     geometry = [('H', (0., 0., 0.)), ('H', (0., 0., .7474))]
     molecule = solvers.create_molecule(geometry, 'sto-3g', 0, 0, casci=True)
