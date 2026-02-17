@@ -181,16 +181,11 @@ void enqueue_syndromes(std::size_t decoder_id, uint8_t *syndromes,
     syndrome_u8[i] = syndromes[i];
   }
   std::chrono::duration<double> duration{};
-  if (decoder) {
-    auto t0 = std::chrono::high_resolution_clock::now();
-    did_decode =
-        decoder->enqueue_syndrome(syndrome_u8.data(), syndrome_u8.size());
-    auto t1 = std::chrono::high_resolution_clock::now();
-    duration = t1 - t0;
-  } else {
-    throw std::invalid_argument(
-        fmt::format("Decoder {} not found", decoder_id));
-  }
+  auto t0 = std::chrono::high_resolution_clock::now();
+  did_decode =
+      decoder->enqueue_syndrome(syndrome_u8.data(), syndrome_u8.size());
+  auto t1 = std::chrono::high_resolution_clock::now();
+  duration = t1 - t0;
 
   // Consider demoting this to a lower log level.
   // Also consider logging the syndrome (at a lower log level).

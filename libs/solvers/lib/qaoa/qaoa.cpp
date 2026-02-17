@@ -66,7 +66,7 @@ std::size_t get_num_qaoa_parameters(const cudaq::spin_op &problemHamiltonian,
 
 qaoa_result qaoa(const cudaq::spin_op &problemHamiltonian,
                  const cudaq::spin_op &referenceHamiltonian,
-                 const optim::optimizer &optimizer, std::size_t numLayers,
+                 optim::optimizer &optimizer, std::size_t numLayers,
                  const std::vector<double> &initialParameters,
                  const heterogeneous_map options) {
   auto expectedNumParams = get_num_qaoa_parameters(
@@ -103,8 +103,8 @@ qaoa_result qaoa(const cudaq::spin_op &problemHamiltonian,
   };
 
   auto [optVal, optParams, data] =
-      vqe(qaoa_kernel, problemHamiltonian, initialParameters, argsTranslator,
-          options);
+      vqe(qaoa_kernel, problemHamiltonian, optimizer, initialParameters,
+          argsTranslator, options);
   auto counts = cudaq::sample(qaoa_kernel, numQubits, numLayers, optParams,
                               probHCoeffs, probHWords, refHCoeffs, refHWords,
                               full_parameterization, counterdiabatic);
@@ -112,7 +112,7 @@ qaoa_result qaoa(const cudaq::spin_op &problemHamiltonian,
 }
 
 qaoa_result qaoa(const cudaq::spin_op &problemHamiltonian,
-                 const optim::optimizer &optimizer, std::size_t numLayers,
+                 optim::optimizer &optimizer, std::size_t numLayers,
                  const std::vector<double> &initialParameters,
                  const heterogeneous_map options) {
   // Create default transverse field mixing Hamiltonian
