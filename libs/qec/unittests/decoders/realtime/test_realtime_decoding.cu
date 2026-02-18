@@ -38,7 +38,8 @@
 // cudaqx mock decoder
 #include "cudaq/qec/realtime/mock_decode_handler.cuh"
 
-// Shared setup helpers (config parsing, syndrome loading, GPU context, launch wrapper)
+// Shared setup helpers (config parsing, syndrome loading, GPU context, launch
+// wrapper)
 #include "cudaq/qec/realtime/mock_decode_setup.h"
 
 // Helper macro for CUDA error checking
@@ -158,10 +159,10 @@ protected:
     std::string config_content((std::istreambuf_iterator<char>(config_file)),
                                std::istreambuf_iterator<char>());
 
-    syndrome_size_ = cudaq::qec::realtime::parse_scalar(config_content,
-                                                         "syndrome_size");
-    block_size_ = cudaq::qec::realtime::parse_scalar(config_content,
-                                                      "block_size");
+    syndrome_size_ =
+        cudaq::qec::realtime::parse_scalar(config_content, "syndrome_size");
+    block_size_ =
+        cudaq::qec::realtime::parse_scalar(config_content, "block_size");
     ASSERT_GT(syndrome_size_, 0u);
     ASSERT_GT(block_size_, 0u);
 
@@ -240,8 +241,7 @@ protected:
     // Set up function table using library helper
     CUDA_CHECK(
         cudaMalloc(&d_function_entries_, sizeof(cudaq_function_entry_t)));
-    cudaq::qec::realtime::setup_mock_decode_function_table(
-        d_function_entries_);
+    cudaq::qec::realtime::setup_mock_decode_function_table(d_function_entries_);
 
     // Host API wiring
     ASSERT_EQ(cudaq_dispatch_manager_create(&manager_), CUDAQ_OK);
@@ -330,10 +330,10 @@ protected:
   void setup_function_table_graph() {
     // Allocate GraphIOContext on device (dispatch kernel fills it before
     // each fire-and-forget graph launch)
-    CUDA_CHECK(cudaMalloc(&d_graph_io_ctx_,
-                          sizeof(cudaq::nvqlink::GraphIOContext)));
-    CUDA_CHECK(cudaMemset(d_graph_io_ctx_, 0,
-                          sizeof(cudaq::nvqlink::GraphIOContext)));
+    CUDA_CHECK(
+        cudaMalloc(&d_graph_io_ctx_, sizeof(cudaq::nvqlink::GraphIOContext)));
+    CUDA_CHECK(
+        cudaMemset(d_graph_io_ctx_, 0, sizeof(cudaq::nvqlink::GraphIOContext)));
 
     // Create CUDA graph with decoder kernel
     cudaStream_t capture_stream;
@@ -400,8 +400,7 @@ protected:
     cudaq::nvqlink::RPCHeader *header =
         reinterpret_cast<cudaq::nvqlink::RPCHeader *>(slot_data);
     header->magic = cudaq::nvqlink::RPC_MAGIC_REQUEST;
-    header->function_id =
-        cudaq::qec::realtime::MOCK_DECODE_FUNCTION_ID;
+    header->function_id = cudaq::qec::realtime::MOCK_DECODE_FUNCTION_ID;
     header->arg_len = static_cast<std::uint32_t>(measurements.size());
 
     // Write measurement data after header
@@ -409,7 +408,8 @@ protected:
            measurements.size());
   }
 
-  /// @brief Read response from TX buffer (symmetric: dispatch kernel writes to TX).
+  /// @brief Read response from TX buffer (symmetric: dispatch kernel writes to
+  /// TX).
   bool read_rpc_response(std::size_t slot, uint8_t &correction,
                          std::int32_t *status_out = nullptr,
                          std::uint32_t *result_len_out = nullptr) {
@@ -475,7 +475,8 @@ protected:
   // Graph launch support
   cudaGraph_t graph_ = nullptr;
   cudaGraphExec_t graph_exec_ = nullptr;
-  cudaq::nvqlink::GraphIOContext *d_graph_io_ctx_ = nullptr; // IO context for graph
+  cudaq::nvqlink::GraphIOContext *d_graph_io_ctx_ =
+      nullptr; // IO context for graph
 
   // Host API handles
   cudaq_dispatch_manager_t *manager_ = nullptr;
@@ -599,9 +600,8 @@ TEST_F(RealtimeDecodingTest, DispatchKernelAllShotsGraphLaunch) {
   cudaq_dispatch_graph_context *dispatch_ctx = nullptr;
   cudaError_t create_err = cudaq_create_dispatch_graph_regular(
       rx_flags_, tx_flags_, rx_data_, tx_data_, slot_size_, slot_size_,
-      d_function_entries_, func_count_, d_graph_io_ctx_,
-      d_shutdown_flag_, d_stats_, num_slots_, 1, 32, dispatch_stream,
-      &dispatch_ctx);
+      d_function_entries_, func_count_, d_graph_io_ctx_, d_shutdown_flag_,
+      d_stats_, num_slots_, 1, 32, dispatch_stream, &dispatch_ctx);
 
   if (create_err != cudaSuccess) {
     cudaStreamDestroy(dispatch_stream);

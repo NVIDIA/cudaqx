@@ -94,15 +94,14 @@ __device__ auto get_mock_decode_rpc_ptr() { return &mock_decode_rpc; }
 // Graph-Compatible RPC Handler (for CUDAQ_DISPATCH_GRAPH_LAUNCH)
 //==============================================================================
 
-__global__ void mock_decode_graph_kernel(
-    cudaq::nvqlink::GraphIOContext *io_ctx) {
+__global__ void
+mock_decode_graph_kernel(cudaq::nvqlink::GraphIOContext *io_ctx) {
   if (threadIdx.x == 0 && blockIdx.x == 0) {
     if (io_ctx == nullptr || io_ctx->rx_slot == nullptr)
       return;
 
     // Parse RPC header from RX slot (input)
-    auto *header =
-        static_cast<cudaq::nvqlink::RPCHeader *>(io_ctx->rx_slot);
+    auto *header = static_cast<cudaq::nvqlink::RPCHeader *>(io_ctx->rx_slot);
     uint8_t *measurements = reinterpret_cast<uint8_t *>(header + 1);
 
     // TX slot for response (output)
@@ -147,10 +146,11 @@ __global__ void init_mock_decoder_on_gpu(mock_decoder *d_decoder,
   }
 }
 
-cudaError_t setup_mock_decoder_on_gpu(
-    const uint8_t *measurements, const uint8_t *corrections,
-    std::size_t num_entries, std::size_t syndrome_size,
-    MockDecoderGpuResources &resources) {
+cudaError_t setup_mock_decoder_on_gpu(const uint8_t *measurements,
+                                      const uint8_t *corrections,
+                                      std::size_t num_entries,
+                                      std::size_t syndrome_size,
+                                      MockDecoderGpuResources &resources) {
   cudaError_t err;
 
   std::size_t meas_size = num_entries * syndrome_size;
@@ -159,8 +159,8 @@ cudaError_t setup_mock_decoder_on_gpu(
   err = cudaMalloc(&resources.d_lookup_measurements, meas_size);
   if (err != cudaSuccess)
     return err;
-  err = cudaMemcpy(resources.d_lookup_measurements, measurements,
-                   meas_size, cudaMemcpyHostToDevice);
+  err = cudaMemcpy(resources.d_lookup_measurements, measurements, meas_size,
+                   cudaMemcpyHostToDevice);
   if (err != cudaSuccess)
     return err;
 
@@ -168,8 +168,8 @@ cudaError_t setup_mock_decoder_on_gpu(
   err = cudaMalloc(&resources.d_lookup_corrections, num_entries);
   if (err != cudaSuccess)
     return err;
-  err = cudaMemcpy(resources.d_lookup_corrections, corrections,
-                   num_entries, cudaMemcpyHostToDevice);
+  err = cudaMemcpy(resources.d_lookup_corrections, corrections, num_entries,
+                   cudaMemcpyHostToDevice);
   if (err != cudaSuccess)
     return err;
 

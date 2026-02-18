@@ -85,7 +85,7 @@ struct SyndromeEntry {
 /// @param syndrome_size Expected number of measurements per shot
 /// @return Vector of syndrome entries (empty on failure)
 inline std::vector<SyndromeEntry> load_syndromes(const std::string &path,
-                                                  std::size_t syndrome_size) {
+                                                 std::size_t syndrome_size) {
   std::vector<SyndromeEntry> entries;
   std::ifstream file(path);
   if (!file.good())
@@ -183,10 +183,8 @@ inline std::vector<SyndromeEntry> load_syndromes(const std::string &path,
 /// @param syndrome_size Number of measurements per entry
 /// @param[out] resources Device pointers (caller must call cleanup())
 /// @return cudaSuccess on success
-inline cudaError_t
-setup_mock_decoder_from_syndromes(
-    const std::vector<SyndromeEntry> &syndromes,
-    std::size_t syndrome_size,
+inline cudaError_t setup_mock_decoder_from_syndromes(
+    const std::vector<SyndromeEntry> &syndromes, std::size_t syndrome_size,
     cudaq::qec::realtime::MockDecoderGpuResources &resources) {
 
   std::size_t num_entries = syndromes.size();
@@ -202,8 +200,8 @@ setup_mock_decoder_from_syndromes(
   }
 
   return cudaq::qec::realtime::setup_mock_decoder_on_gpu(
-      measurements.data(), corrections.data(),
-      num_entries, syndrome_size, resources);
+      measurements.data(), corrections.data(), num_entries, syndrome_size,
+      resources);
 }
 
 //==============================================================================

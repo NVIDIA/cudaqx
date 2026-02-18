@@ -119,8 +119,8 @@ __device__ auto get_mock_decode_rpc_ptr();
 /// completion by setting the TX flag.
 ///
 /// @param io_ctx Device pointer to GraphIOContext (filled by dispatch kernel)
-__global__ void mock_decode_graph_kernel(
-    cudaq::nvqlink::GraphIOContext *io_ctx);
+__global__ void
+mock_decode_graph_kernel(cudaq::nvqlink::GraphIOContext *io_ctx);
 
 //==============================================================================
 // Mock Decoder Context GPU Setup
@@ -162,10 +162,11 @@ struct MockDecoderGpuResources {
 /// @param syndrome_size Number of measurements per entry
 /// @param[out] resources Device pointers (caller must call cleanup())
 /// @return cudaSuccess on success
-cudaError_t setup_mock_decoder_on_gpu(
-    const uint8_t *measurements, const uint8_t *corrections,
-    std::size_t num_entries, std::size_t syndrome_size,
-    MockDecoderGpuResources &resources);
+cudaError_t setup_mock_decoder_on_gpu(const uint8_t *measurements,
+                                      const uint8_t *corrections,
+                                      std::size_t num_entries,
+                                      std::size_t syndrome_size,
+                                      MockDecoderGpuResources &resources);
 
 //==============================================================================
 // Function Table Initialization
@@ -180,8 +181,8 @@ constexpr std::uint32_t MOCK_DECODE_FUNCTION_ID =
 ///
 /// Must be called as: init_mock_decode_function_table<<<1,1>>>(d_entries);
 /// @param entries Device pointer to pre-allocated cudaq_function_entry_t array
-__global__ void init_mock_decode_function_table(
-    cudaq_function_entry_t *entries);
+__global__ void
+init_mock_decode_function_table(cudaq_function_entry_t *entries);
 
 /// @brief Host-callable wrapper that launches init_mock_decode_function_table
 ///        and synchronizes.
