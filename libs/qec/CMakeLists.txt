@@ -64,16 +64,6 @@ option(CUDAQX_QEC_INSTALL_PYTHON
 # Option to control TRT decoder build (default: ON)
 option(CUDAQ_QEC_BUILD_TRT_DECODER "Build the TensorRT decoder plugin" ON)
 
-# Optional hololink/holoscan-sensor-bridge tools
-option(CUDAQX_QEC_ENABLE_HOLOLINK_TOOLS
-       "Build hololink FPGA playback tools (requires holoscan-sensor-bridge)."
-       OFF)
-
-set(HOLOSCAN_SENSOR_BRIDGE_SOURCE_DIR "" CACHE PATH
-    "Path to holoscan-sensor-bridge source tree (for headers)")
-set(HOLOSCAN_SENSOR_BRIDGE_BUILD_DIR "" CACHE PATH
-    "Path to holoscan-sensor-bridge build tree (for libraries)")
-find_package(CUDAToolkit REQUIRED)
 # Find and configure LLVM, Clang and MLIR
 # ==============================================================================
 # The user can specify the path to LLVM cmake directory using
@@ -314,13 +304,6 @@ if (CUDAQX_QEC_INCLUDE_TESTS)
     add_dependencies(CUDAQXUnitTests CUDAQXQECUnitTests)
   endif()
   add_subdirectory(unittests)
-endif()
-
-# Hololink FPGA tools live under unittests/utils/ but are not tests themselves.
-# When tests are enabled the path is already included via unittests/CMakeLists.txt;
-# this block covers the case where tests are disabled but hololink tools are enabled.
-if (CUDAQX_QEC_ENABLE_HOLOLINK_TOOLS AND NOT CUDAQX_QEC_INCLUDE_TESTS)
-  add_subdirectory(unittests/utils)
 endif()
 
 # External decoder setup

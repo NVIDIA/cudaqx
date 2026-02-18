@@ -198,8 +198,3 @@ add_subdirectory(backend-specific)
 add_subdirectory(realtime)
 add_subdirectory(decoders/pymatching)
 
-# Hololink FPGA playback utilities (requires external hardware; not CI)
-if (CUDAQX_QEC_ENABLE_HOLOLINK_TOOLS)
-  add_subdirectory(utils)
-endif()
-
