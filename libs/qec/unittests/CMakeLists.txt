@@ -147,6 +147,8 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
 
     add_executable(test_realtime_decoding 
       ${CMAKE_CURRENT_SOURCE_DIR}/decoders/realtime/test_realtime_decoding.cu
+      ${CMAKE_CURRENT_SOURCE_DIR}/realtime/mock_decode_handler.cu
+      ${CMAKE_CURRENT_SOURCE_DIR}/realtime/mock_decoder_launch_params.cpp
     )
 
     set_target_properties(test_realtime_decoding PROPERTIES
@@ -158,6 +160,7 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
     target_include_directories(test_realtime_decoding PRIVATE
       ${CUDAToolkit_INCLUDE_DIRS}
       ${CMAKE_CURRENT_SOURCE_DIR}/../include
+      ${CMAKE_CURRENT_SOURCE_DIR}/realtime
       ${CMAKE_SOURCE_DIR}/libs/core/include
       ${CUDAQ_REALTIME_INCLUDE_DIR}
     )

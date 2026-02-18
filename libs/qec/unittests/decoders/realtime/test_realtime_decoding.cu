@@ -35,12 +35,9 @@
 // cuda-quantum kernel types for graph-aware dispatch
 #include "cudaq/nvqlink/daemon/dispatcher/kernel_types.h"
 
-// cudaqx mock decoder
-#include "cudaq/qec/realtime/mock_decode_handler.cuh"
-
-// Shared setup helpers (config parsing, syndrome loading, GPU context, launch
-// wrapper)
-#include "cudaq/qec/realtime/mock_decode_setup.h"
+// cudaqx mock decoder (sources in unittests/realtime/)
+#include "mock_decode_handler.cuh"
+#include "mock_decode_setup.h"
 
 // Helper macro for CUDA error checking
 #define CUDA_CHECK(call)                                                       \

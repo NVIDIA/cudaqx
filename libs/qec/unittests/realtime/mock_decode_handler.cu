@@ -8,8 +8,8 @@
 
 #include <new>
 
+#include "mock_decode_handler.cuh"
 #include "cudaq/nvqlink/daemon/dispatcher/dispatch_kernel_launch.h"
-#include "cudaq/qec/realtime/mock_decode_handler.cuh"
 
 namespace cudaq::qec::realtime {
 

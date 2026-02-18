@@ -29,8 +29,8 @@
 
 #include <cuda_runtime.h>
 
+#include "mock_decode_handler.cuh"
 #include "cudaq/nvqlink/daemon/dispatcher/cudaq_realtime.h"
-#include "cudaq/qec/realtime/mock_decode_handler.cuh"
 
 namespace cudaq::qec::realtime {
 
@@ -169,7 +169,7 @@ inline std::vector<SyndromeEntry> load_syndromes(const std::string &path,
 //==============================================================================
 
 // Forward-declared from mock_decode_handler.cuh -- the actual function is
-// compiled by nvcc and lives in the cudaq-qec-realtime-cudevice library.
+// compiled by nvcc and lives in the test or mock library.
 // We only need the struct and function signature here; callers that include
 // mock_decode_handler.cuh get the full declaration.
 
