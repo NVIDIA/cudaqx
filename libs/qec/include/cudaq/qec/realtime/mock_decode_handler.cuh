@@ -15,6 +15,10 @@
 #include "cudaq/qec/realtime/autonomous_decoder.cuh"
 #include "cudaq/qec/realtime/decoder_context.h"
 
+// cudaq_function_entry_t for function table initialization
+#include "cudaq/nvqlink/daemon/dispatcher/cudaq_realtime.h"
+#include "cudaq/nvqlink/daemon/dispatcher/dispatch_kernel_launch.h"
+
 namespace cudaq::qec::realtime {
 
 //==============================================================================
@@ -84,14 +88,17 @@ inline void set_mock_decoder(mock_decoder *decoder) {
 /// @brief RPC-compatible wrapper for the mock decoder.
 ///
 /// This function matches the DeviceRPCFunction signature expected by the
-/// cuda-quantum dispatch kernel.
+/// cuda-quantum dispatch kernel.  The handler reads measurements from the
+/// input buffer and writes corrections directly to the output buffer.
 ///
-/// @param buffer Input measurements / output corrections buffer
+/// @param input  Input measurements (RX buffer, read-only)
+/// @param output Output corrections (TX buffer, write-only)
 /// @param arg_len Length of input measurement data
 /// @param max_result_len Maximum space available for results
 /// @param result_len Output: actual result length written
 /// @return 0 on success, non-zero on error
-__device__ int mock_decode_rpc(void *buffer, std::uint32_t arg_len,
+__device__ int mock_decode_rpc(const void *input, void *output,
+                               std::uint32_t arg_len,
                                std::uint32_t max_result_len,
                                std::uint32_t *result_len);
 
@@ -103,12 +110,85 @@ __device__ auto get_mock_decode_rpc_ptr();
 // Graph-Compatible RPC Handler (for CUDAQ_DISPATCH_GRAPH_LAUNCH)
 //==============================================================================
 
-/// @brief Graph kernel using pointer indirection pattern.
+/// @brief Graph kernel using GraphIOContext for input/output separation.
 ///
-/// This kernel reads the buffer address from a device pointer, allowing
-/// the launching kernel to update which buffer to process before each launch.
+/// The dispatch kernel fills a GraphIOContext with pointers to the RX slot
+/// (input), TX slot (output), and the TX flag before each fire-and-forget
+/// graph launch.  This kernel reads measurements from the RX slot, decodes,
+/// writes the RPCResponse + corrections to the TX slot, and signals
+/// completion by setting the TX flag.
 ///
-/// @param buffer_ptr Pointer to current RPC buffer address (device pointer)
-__global__ void mock_decode_graph_kernel(void **buffer_ptr);
+/// @param io_ctx Device pointer to GraphIOContext (filled by dispatch kernel)
+__global__ void mock_decode_graph_kernel(
+    cudaq::nvqlink::GraphIOContext *io_ctx);
+
+//==============================================================================
+// Mock Decoder Context GPU Setup
+//==============================================================================
+
+/// @brief GPU resources for mock decoder context.
+///
+/// Holds device pointers allocated during setup. Call cleanup() to free.
+struct MockDecoderGpuResources {
+  uint8_t *d_lookup_measurements = nullptr;
+  uint8_t *d_lookup_corrections = nullptr;
+  mock_decoder_context *d_ctx = nullptr;
+  mock_decoder *d_decoder = nullptr;
+
+  void cleanup() {
+    if (d_lookup_measurements)
+      cudaFree(d_lookup_measurements);
+    if (d_lookup_corrections)
+      cudaFree(d_lookup_corrections);
+    if (d_decoder)
+      cudaFree(d_decoder);
+    if (d_ctx)
+      cudaFree(d_ctx);
+    d_lookup_measurements = nullptr;
+    d_lookup_corrections = nullptr;
+    d_ctx = nullptr;
+    d_decoder = nullptr;
+  }
+};
+
+/// @brief Build lookup tables and upload mock decoder context to the GPU.
+///
+/// After this call, the global device context is set and the dispatch kernel
+/// can invoke mock_decode_rpc.
+///
+/// @param measurements Flat array of measurements (num_entries * syndrome_size)
+/// @param corrections  Array of expected corrections (num_entries)
+/// @param num_entries  Number of lookup entries
+/// @param syndrome_size Number of measurements per entry
+/// @param[out] resources Device pointers (caller must call cleanup())
+/// @return cudaSuccess on success
+cudaError_t setup_mock_decoder_on_gpu(
+    const uint8_t *measurements, const uint8_t *corrections,
+    std::size_t num_entries, std::size_t syndrome_size,
+    MockDecoderGpuResources &resources);
+
+//==============================================================================
+// Function Table Initialization
+//==============================================================================
+
+/// @brief Function ID for mock decoder (FNV-1a hash of "mock_decode").
+constexpr std::uint32_t MOCK_DECODE_FUNCTION_ID =
+    cudaq::nvqlink::fnv1a_hash("mock_decode");
+
+/// @brief Device kernel to initialize a cudaq function table entry for the
+///        mock decoder RPC handler.
+///
+/// Must be called as: init_mock_decode_function_table<<<1,1>>>(d_entries);
+/// @param entries Device pointer to pre-allocated cudaq_function_entry_t array
+__global__ void init_mock_decode_function_table(
+    cudaq_function_entry_t *entries);
+
+/// @brief Host-callable wrapper that launches init_mock_decode_function_table
+///        and synchronizes.
+///
+/// This allows callers compiled by a C++ compiler (not nvcc) to set up the
+/// function table without needing CUDA kernel launch syntax.
+/// @param d_entries Device pointer to pre-allocated cudaq_function_entry_t
+void setup_mock_decode_function_table(cudaq_function_entry_t *d_entries);
 
 } // namespace cudaq::qec::realtime
