@@ -30,7 +30,7 @@
 #include <cuda_runtime.h>
 
 #include "mock_decode_handler.cuh"
-#include "cudaq/nvqlink/daemon/dispatcher/cudaq_realtime.h"
+#include "cudaq/realtime/daemon/dispatcher/cudaq_realtime.h"
 
 namespace cudaq::qec::realtime {
 

@@ -123,7 +123,7 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
   endif()
 
   find_path(CUDAQ_REALTIME_INCLUDE_DIR
-    NAMES cudaq/nvqlink/daemon/dispatcher/cudaq_realtime.h
+    NAMES cudaq/realtime/daemon/dispatcher/cudaq_realtime.h
     PATHS ${_cudaq_realtime_prefixes}
     PATH_SUFFIXES include ../include
   )

@@ -27,13 +27,13 @@
 #include <vector>
 
 // cuda-quantum host API
-#include "cudaq/nvqlink/daemon/dispatcher/cudaq_realtime.h"
+#include "cudaq/realtime/daemon/dispatcher/cudaq_realtime.h"
 
 // cuda-quantum RPC types/hash helper
-#include "cudaq/nvqlink/daemon/dispatcher/dispatch_kernel_launch.h"
+#include "cudaq/realtime/daemon/dispatcher/dispatch_kernel_launch.h"
 
 // cuda-quantum kernel types for graph-aware dispatch
-#include "cudaq/nvqlink/daemon/dispatcher/kernel_types.h"
+#include "cudaq/realtime/daemon/dispatcher/kernel_types.h"
 
 // cudaqx mock decoder (sources in unittests/realtime/)
 #include "mock_decode_handler.cuh"
@@ -212,7 +212,7 @@ protected:
     cudaq::qec::realtime::set_mock_decoder(d_decoder_);
 
     // Allocate ring buffers (with space for RPCHeader)
-    slot_size_ = sizeof(cudaq::nvqlink::RPCHeader) +
+    slot_size_ = sizeof(cudaq::realtime::RPCHeader) +
                  std::max(syndrome_size_, static_cast<std::size_t>(256));
     ASSERT_TRUE(allocate_ring_buffer(num_slots_, slot_size_, &rx_flags_host_,
                                      &rx_flags_, &rx_data_host_, &rx_data_));
@@ -328,9 +328,9 @@ protected:
     // Allocate GraphIOContext on device (dispatch kernel fills it before
     // each fire-and-forget graph launch)
     CUDA_CHECK(
-        cudaMalloc(&d_graph_io_ctx_, sizeof(cudaq::nvqlink::GraphIOContext)));
-    CUDA_CHECK(
-        cudaMemset(d_graph_io_ctx_, 0, sizeof(cudaq::nvqlink::GraphIOContext)));
+        cudaMalloc(&d_graph_io_ctx_, sizeof(cudaq::realtime::GraphIOContext)));
+    CUDA_CHECK(cudaMemset(d_graph_io_ctx_, 0,
+                          sizeof(cudaq::realtime::GraphIOContext)));
 
     // Create CUDA graph with decoder kernel
     cudaStream_t capture_stream;
@@ -394,14 +394,14 @@ protected:
         const_cast<uint8_t *>(rx_data_host_) + slot * slot_size_;
 
     // Write RPCHeader
-    cudaq::nvqlink::RPCHeader *header =
-        reinterpret_cast<cudaq::nvqlink::RPCHeader *>(slot_data);
-    header->magic = cudaq::nvqlink::RPC_MAGIC_REQUEST;
+    cudaq::realtime::RPCHeader *header =
+        reinterpret_cast<cudaq::realtime::RPCHeader *>(slot_data);
+    header->magic = cudaq::realtime::RPC_MAGIC_REQUEST;
     header->function_id = cudaq::qec::realtime::MOCK_DECODE_FUNCTION_ID;
     header->arg_len = static_cast<std::uint32_t>(measurements.size());
 
     // Write measurement data after header
-    memcpy(slot_data + sizeof(cudaq::nvqlink::RPCHeader), measurements.data(),
+    memcpy(slot_data + sizeof(cudaq::realtime::RPCHeader), measurements.data(),
            measurements.size());
   }
 
@@ -415,10 +415,10 @@ protected:
         const_cast<uint8_t *>(tx_data_host_) + slot * slot_size_;
 
     // Read RPCResponse
-    const cudaq::nvqlink::RPCResponse *response =
-        reinterpret_cast<const cudaq::nvqlink::RPCResponse *>(slot_data);
+    const cudaq::realtime::RPCResponse *response =
+        reinterpret_cast<const cudaq::realtime::RPCResponse *>(slot_data);
 
-    if (response->magic != cudaq::nvqlink::RPC_MAGIC_RESPONSE) {
+    if (response->magic != cudaq::realtime::RPC_MAGIC_RESPONSE) {
       return false;
     }
     if (status_out)
@@ -431,7 +431,7 @@ protected:
     }
 
     // Read correction data after response header
-    correction = *(slot_data + sizeof(cudaq::nvqlink::RPCResponse));
+    correction = *(slot_data + sizeof(cudaq::realtime::RPCResponse));
     return true;
   }
 
@@ -472,7 +472,7 @@ protected:
   // Graph launch support
   cudaGraph_t graph_ = nullptr;
   cudaGraphExec_t graph_exec_ = nullptr;
-  cudaq::nvqlink::GraphIOContext *d_graph_io_ctx_ =
+  cudaq::realtime::GraphIOContext *d_graph_io_ctx_ =
       nullptr; // IO context for graph
 
   // Host API handles

@@ -9,7 +9,7 @@
 #include <new>
 
 #include "mock_decode_handler.cuh"
-#include "cudaq/nvqlink/daemon/dispatcher/dispatch_kernel_launch.h"
+#include "cudaq/realtime/daemon/dispatcher/dispatch_kernel_launch.h"
 
 namespace cudaq::qec::realtime {
 
@@ -95,20 +95,20 @@ __device__ auto get_mock_decode_rpc_ptr() { return &mock_decode_rpc; }
 //==============================================================================
 
 __global__ void
-mock_decode_graph_kernel(cudaq::nvqlink::GraphIOContext *io_ctx) {
+mock_decode_graph_kernel(cudaq::realtime::GraphIOContext *io_ctx) {
   if (threadIdx.x == 0 && blockIdx.x == 0) {
     if (io_ctx == nullptr || io_ctx->rx_slot == nullptr)
       return;
 
     // Parse RPC header from RX slot (input)
-    auto *header = static_cast<cudaq::nvqlink::RPCHeader *>(io_ctx->rx_slot);
+    auto *header = static_cast<cudaq::realtime::RPCHeader *>(io_ctx->rx_slot);
     uint8_t *measurements = reinterpret_cast<uint8_t *>(header + 1);
 
     // TX slot for response (output)
     auto *response =
-        reinterpret_cast<cudaq::nvqlink::RPCResponse *>(io_ctx->tx_slot);
+        reinterpret_cast<cudaq::realtime::RPCResponse *>(io_ctx->tx_slot);
     uint8_t *corrections =
-        io_ctx->tx_slot + sizeof(cudaq::nvqlink::RPCResponse);
+        io_ctx->tx_slot + sizeof(cudaq::realtime::RPCResponse);
 
     if (g_mock_decoder != nullptr) {
       const auto &ctx = g_mock_decoder->context();
@@ -116,12 +116,12 @@ mock_decode_graph_kernel(cudaq::nvqlink::GraphIOContext *io_ctx) {
                              ctx.num_observables);
 
       // Write response header to TX slot
-      response->magic = cudaq::nvqlink::RPC_MAGIC_RESPONSE;
+      response->magic = cudaq::realtime::RPC_MAGIC_RESPONSE;
       response->status = 0;
       response->result_len = static_cast<std::uint32_t>(ctx.num_observables);
     } else {
       // Error: decoder not set
-      response->magic = cudaq::nvqlink::RPC_MAGIC_RESPONSE;
+      response->magic = cudaq::realtime::RPC_MAGIC_RESPONSE;
       response->status = -1;
       response->result_len = 0;
     }

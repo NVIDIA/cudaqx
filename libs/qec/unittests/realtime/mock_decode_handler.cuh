@@ -16,8 +16,8 @@
 #include "cudaq/qec/realtime/decoder_context.h"
 
 // cudaq_function_entry_t for function table initialization
-#include "cudaq/nvqlink/daemon/dispatcher/cudaq_realtime.h"
-#include "cudaq/nvqlink/daemon/dispatcher/dispatch_kernel_launch.h"
+#include "cudaq/realtime/daemon/dispatcher/cudaq_realtime.h"
+#include "cudaq/realtime/daemon/dispatcher/dispatch_kernel_launch.h"
 
 namespace cudaq::qec::realtime {
 
@@ -120,7 +120,7 @@ __device__ auto get_mock_decode_rpc_ptr();
 ///
 /// @param io_ctx Device pointer to GraphIOContext (filled by dispatch kernel)
 __global__ void
-mock_decode_graph_kernel(cudaq::nvqlink::GraphIOContext *io_ctx);
+mock_decode_graph_kernel(cudaq::realtime::GraphIOContext *io_ctx);
 
 //==============================================================================
 // Mock Decoder Context GPU Setup
@@ -174,7 +174,7 @@ cudaError_t setup_mock_decoder_on_gpu(const uint8_t *measurements,
 
 /// @brief Function ID for mock decoder (FNV-1a hash of "mock_decode").
 constexpr std::uint32_t MOCK_DECODE_FUNCTION_ID =
-    cudaq::nvqlink::fnv1a_hash("mock_decode");
+    cudaq::realtime::fnv1a_hash("mock_decode");
 
 /// @brief Device kernel to initialize a cudaq function table entry for the
 ///        mock decoder RPC handler.
