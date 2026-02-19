@@ -44,7 +44,7 @@ struct qaoa_result {
 /// @return qaoa_result containing the optimization results
 qaoa_result qaoa(const cudaq::spin_op &problemHamiltonian,
                  const cudaq::spin_op &referenceHamiltonian,
-                 const optim::optimizer &optimizer, std::size_t numLayers,
+                 optim::optimizer &optimizer, std::size_t numLayers,
                  const std::vector<double> &initialParameters,
                  const heterogeneous_map options = {});
 
@@ -62,7 +62,7 @@ qaoa_result qaoa(const cudaq::spin_op &problemHamiltonian,
 ///
 /// @return qaoa_result containing the optimization results
 qaoa_result qaoa(const cudaq::spin_op &problemHamiltonian,
-                 const optim::optimizer &optimizer, std::size_t numLayers,
+                 optim::optimizer &optimizer, std::size_t numLayers,
                  const std::vector<double> &initialParameters,
                  const heterogeneous_map options = {});
 

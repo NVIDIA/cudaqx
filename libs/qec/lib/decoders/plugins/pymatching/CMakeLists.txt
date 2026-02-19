@@ -17,7 +17,12 @@ FetchContent_Declare(
   pymatching
   GIT_REPOSITORY https://github.com/oscarhiggott/PyMatching
   GIT_TAG e27b8c6a5f5ba10fb74d4ebb29822f2df5e12bcd # v2.3.1
-  PATCH_COMMAND sed -i "s/gtest_discover_tests/#gtest_discover_tests/g" CMakeLists.txt
+  # Disable test targets because they cause wheel build issues and GTest issues.
+  PATCH_COMMAND sed -i
+    -e "/^add_executable(pymatching_tests /i if(FALSE)  # skip tests when used as FetchContent"
+    -e "/^target_link_libraries(pymatching_tests /a endif()"
+    -e "s/^gtest_discover_tests/#gtest_discover_tests/g"
+    CMakeLists.txt
 )
 FetchContent_MakeAvailable(pymatching)
 

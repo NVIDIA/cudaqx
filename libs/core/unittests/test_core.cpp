@@ -814,6 +814,21 @@ TEST(HeterogeneousMapTest, RelatedTypes) {
   EXPECT_EQ(map.get<short>("int_key"), 42);
 }
 
+// Python kwargs store int as std::size_t; get<bool> must accept it
+// (RelatedTypesMap<bool>).
+TEST(HeterogeneousMapTest, GetBoolFromSizeT) {
+  cudaqx::heterogeneous_map map;
+  map.insert("flag", std::size_t(1));
+  map.insert("off", std::size_t(0));
+
+  EXPECT_TRUE(map.get<bool>("flag"));
+  EXPECT_FALSE(map.get<bool>("off"));
+  EXPECT_TRUE(map.get<bool>("flag", false));
+  EXPECT_FALSE(map.get<bool>("off", true));
+  EXPECT_FALSE(map.get<bool>("missing", false));
+  EXPECT_TRUE(map.get<bool>("missing", true));
+}
+
 TEST(HeterogeneousMapTest, CharArrayConversion) {
   cudaqx::heterogeneous_map map;
   const char *cstr = "Hello";

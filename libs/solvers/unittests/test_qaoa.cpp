@@ -8,6 +8,7 @@
 
 #include <cmath>
 #include <gtest/gtest.h>
+#include <string>
 
 #include "cudaq.h"
 #include "nvqpp/test_kernels.h"
@@ -123,6 +124,40 @@ TEST(QAOATest, OverloadConsistency) {
 
   // Results should be similar within numerical precision
   EXPECT_NEAR(result1.optimal_value, result2.optimal_value, 1e-6);
+}
+
+// These two negative tests are to verify that qaoa() forwards the user-provided
+// optimizer. ASSERTs: lbfgs requires gradients; qaoa() uses a no-gradient VQE
+// path, so forwarding lbfgs must trigger a runtime_error from vqe().
+TEST(QAOATest, UserOptimizerUserHamiltonianNegative) {
+  cudaq::spin_op problemHam = cudaq::spin::z(0) * cudaq::spin::z(1);
+  cudaq::spin_op mixingHam = cudaq::spin::x(0) + cudaq::spin::x(1);
+  auto opt = cudaq::optim::optimizer::get("lbfgs");
+  std::vector<double> initParams = {0.1, 0.1};
+
+  try {
+    (void)cudaq::solvers::qaoa(problemHam, mixingHam, *opt, 1, initParams);
+    FAIL() << "Expected std::runtime_error";
+  } catch (const std::runtime_error &e) {
+    const std::string msg = e.what();
+    EXPECT_NE(msg.find("requires gradients"), std::string::npos);
+    EXPECT_NE(msg.find("gradient instance not provided"), std::string::npos);
+  }
+}
+
+TEST(QAOATest, UserOptimizerDefaultHamiltonianNegative) {
+  cudaq::spin_op problemHam = cudaq::spin::z(0);
+  auto opt = cudaq::optim::optimizer::get("lbfgs");
+  std::vector<double> initParams = {0.1, 0.1};
+
+  try {
+    (void)cudaq::solvers::qaoa(problemHam, *opt, 1, initParams);
+    FAIL() << "Expected std::runtime_error";
+  } catch (const std::runtime_error &e) {
+    const std::string msg = e.what();
+    EXPECT_NE(msg.find("requires gradients"), std::string::npos);
+    EXPECT_NE(msg.find("gradient instance not provided"), std::string::npos);
+  }
 }
 
 TEST(MaxCutHamiltonianTest, SingleEdge) {
