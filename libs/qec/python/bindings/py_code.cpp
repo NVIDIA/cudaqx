@@ -69,7 +69,16 @@ protected:
   /// Python.
   std::unordered_map<qec::operation, py::object> m_py_operation_encodings;
 
+  // Jitted python kernels are only alive as long as the
+  // `CppPyKernelDecorator` they were compiled from, so we must cache them here
+  std::vector<cudaq::python::CppPyKernelDecorator *> cachedDecorators;
+
 public:
+  ~PyCodeHandle() {
+    for (auto decorator : cachedDecorators)
+      delete decorator;
+  }
+
   /// @brief Constructs a PyCodeHandle from a Python QEC code object
   /// @param registeredCode Python object containing the QEC code definition
   /// @throw std::runtime_error if the Python code lacks required attributes
@@ -122,21 +131,23 @@ public:
       m_py_operation_encodings.emplace(opKeyEnum, kernel);
 
       // Create the kernel interop object
-      cudaq::python::CppPyKernelDecorator kernInterop(kernel);
+      auto kernInterop = new cudaq::python::CppPyKernelDecorator(kernel);
 
       // Make sure we cast the function pointer correctly
       if (opKeyEnum == operation::stabilizer_round) {
-        encoding fptr = kernInterop.getEntryPointFunction<qkernel<
+        encoding fptr = kernInterop->getDirectKernelCall<qkernel<
             std::vector<measure_result>(patch, const std::vector<std::size_t> &,
                                         const std::vector<std::size_t> &)>>();
         operation_encodings.insert({opKeyEnum, std::move(fptr)});
+        cachedDecorators.emplace_back(kernInterop);
         continue;
       }
 
       // FIXME handle other signatures later... this assumes single patch
       // signatures
-      encoding fptr = kernInterop.getEntryPointFunction<qkernel<void(patch)>>();
+      encoding fptr = kernInterop->getDirectKernelCall<qkernel<void(patch)>>();
       operation_encodings.insert({opKeyEnum, std::move(fptr)});
+      cachedDecorators.emplace_back(kernInterop);
     }
   }
 
