@@ -6,14 +6,13 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
-import pytest
-import cudaq_solvers as solvers
-# import os
+import os
 
-# import pytest
-# import numpy as np
+import pytest
+import numpy as np
 
 import cudaq
+import cudaq_solvers as solvers
 
 
 def test_solvers_adapt():
