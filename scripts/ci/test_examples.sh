@@ -1,7 +1,7 @@
 #!/bin/sh
 
 # ============================================================================ #
-# Copyright (c) 2025 NVIDIA Corporation & Affiliates.                          #
+# Copyright (c) 2025 - 2026 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -33,9 +33,6 @@ FAILED_TESTS=()
 skip_python_test() {
     case "$1" in
         *custom_repetition_code_fine_grain_noise.py) return 0 ;;
-        *my_steane_test.py) return 0 ;;
-        *adapt_h2.py) return 0 ;;
-        *uccsd_vqe.py) return 0 ;;
         *) return 1 ;;
     esac
 }
