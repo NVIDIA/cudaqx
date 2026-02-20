@@ -6,7 +6,7 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
-#include "cudaq/qec/realtime/mock_decoder_launch_params.h"
+#include "mock_decoder_launch_params.h"
 
 namespace cudaq::qec::realtime {
 

@@ -1,5 +1,5 @@
 # ============================================================================ #
-# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
+# Copyright (c) 2024 - 2026 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -24,7 +24,7 @@ if(CMAKE_CUDA_COMPILER)
   endif()
   
   find_path(CUDAQ_REALTIME_INCLUDE_DIR
-    NAMES cudaq/nvqlink/daemon/dispatcher/cudaq_realtime.h
+    NAMES cudaq/realtime/daemon/dispatcher/cudaq_realtime.h
     PATHS ${_cudaq_realtime_prefixes}
     PATH_SUFFIXES include ../include
   )
@@ -35,7 +35,6 @@ if(CMAKE_CUDA_COMPILER)
     # Create static device library for device code
     add_library(cudaq-qec-realtime-cudevice STATIC
       gpu_kernels.cu
-      mock_decode_handler.cu
     )
     
     set_target_properties(cudaq-qec-realtime-cudevice PROPERTIES
@@ -79,7 +78,6 @@ endif()
 add_library(cudaq-qec-realtime-decoding SHARED
   realtime_decoding.cpp
   config.cpp
-  mock_decoder_launch_params.cpp
 )
 
 target_compile_options(cudaq-qec-realtime-decoding 

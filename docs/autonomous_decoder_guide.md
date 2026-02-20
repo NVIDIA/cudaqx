@@ -557,8 +557,8 @@ Follow the pattern in `test_realtime_decoding.cu`:
 ## Example: Mock Decoder
 
 For a complete reference implementation, see:
-- **Header**: `libs/qec/include/cudaq/qec/realtime/mock_decode_handler.cuh`
-- **Implementation**: `libs/qec/lib/realtime/mock_decode_handler.cu`
+- **Header**: `libs/qec/unittests/realtime/mock_decode_handler.cuh`
+- **Implementation**: `libs/qec/unittests/realtime/mock_decode_handler.cu`
 - **Context**: `libs/qec/include/cudaq/qec/realtime/decoder_context.h`
 - **Tests**: `libs/qec/unittests/decoders/realtime/test_realtime_decoding.cu`
 

@@ -27,16 +27,17 @@
 #include <vector>
 
 // cuda-quantum host API
-#include "cudaq/nvqlink/daemon/dispatcher/cudaq_realtime.h"
+#include "cudaq/realtime/daemon/dispatcher/cudaq_realtime.h"
 
 // cuda-quantum RPC types/hash helper
-#include "cudaq/nvqlink/daemon/dispatcher/dispatch_kernel_launch.h"
+#include "cudaq/realtime/daemon/dispatcher/dispatch_kernel_launch.h"
 
 // cuda-quantum kernel types for graph-aware dispatch
-#include "cudaq/nvqlink/daemon/dispatcher/kernel_types.h"
+#include "cudaq/realtime/daemon/dispatcher/kernel_types.h"
 
-// cudaqx mock decoder
-#include "cudaq/qec/realtime/mock_decode_handler.cuh"
+// cudaqx mock decoder (sources in unittests/realtime/)
+#include "mock_decode_handler.cuh"
+#include "mock_decode_setup.h"
 
 // Helper macro for CUDA error checking
 #define CUDA_CHECK(call)                                                       \
@@ -46,14 +47,6 @@
   } while (0)
 
 namespace {
-
-//==============================================================================
-// Function ID for mock decoder
-//==============================================================================
-
-// The dispatch kernel uses function_id to find the handler
-constexpr std::uint32_t MOCK_DECODE_FUNCTION_ID =
-    cudaq::nvqlink::fnv1a_hash("mock_decode");
 
 //==============================================================================
 // Hololink-Style Ring Buffer
@@ -113,170 +106,6 @@ void free_ring_buffer(volatile uint64_t *host_flags, uint8_t *host_data) {
   }
 }
 
-//==============================================================================
-// Test Data Loading
-//==============================================================================
-
-uint64_t parse_scalar(const std::string &content,
-                      const std::string &field_name) {
-  std::size_t pos = content.find(field_name + ":");
-  if (pos == std::string::npos)
-    return 0;
-
-  pos = content.find(':', pos);
-  if (pos == std::string::npos)
-    return 0;
-
-  std::size_t end_pos = content.find_first_of("\n[", pos + 1);
-  if (end_pos == std::string::npos)
-    end_pos = content.length();
-
-  std::string value_str = content.substr(pos + 1, end_pos - pos - 1);
-  value_str.erase(0, value_str.find_first_not_of(" \t\n\r"));
-  value_str.erase(value_str.find_last_not_of(" \t\n\r") + 1);
-
-  try {
-    return std::stoull(value_str);
-  } catch (...) {
-    return 0;
-  }
-}
-
-struct SyndromeEntry {
-  std::vector<uint8_t> measurements;
-  uint8_t expected_correction;
-};
-
-std::vector<SyndromeEntry> load_syndromes(const std::string &path,
-                                          std::size_t syndrome_size) {
-  std::vector<SyndromeEntry> entries;
-  std::ifstream file(path);
-  if (!file.good())
-    return entries;
-
-  std::string line;
-  std::vector<uint8_t> current_shot;
-  std::vector<std::vector<uint8_t>> shots;
-  std::vector<uint8_t> corrections;
-  bool reading_shot = false;
-  bool reading_corrections = false;
-
-  while (std::getline(file, line)) {
-    if (line.find("SHOT_START") == 0) {
-      if (reading_shot && !current_shot.empty()) {
-        shots.push_back(current_shot);
-      }
-      current_shot.clear();
-      reading_shot = true;
-      reading_corrections = false;
-      continue;
-    }
-    if (line == "CORRECTIONS_START") {
-      if (reading_shot && !current_shot.empty()) {
-        shots.push_back(current_shot);
-      }
-      current_shot.clear();
-      reading_shot = false;
-      reading_corrections = true;
-      continue;
-    }
-    if (line == "CORRECTIONS_END") {
-      break;
-    }
-    if (line.find("NUM_DATA") == 0 || line.find("NUM_LOGICAL") == 0) {
-      continue;
-    } else if (reading_shot) {
-      line.erase(0, line.find_first_not_of(" \t\n\r"));
-      line.erase(line.find_last_not_of(" \t\n\r") + 1);
-      if (line.empty())
-        continue;
-
-      try {
-        int bit = std::stoi(line);
-        current_shot.push_back(static_cast<uint8_t>(bit));
-      } catch (...) {
-      }
-    } else if (reading_corrections) {
-      line.erase(0, line.find_first_not_of(" \t\n\r"));
-      line.erase(line.find_last_not_of(" \t\n\r") + 1);
-      if (line.empty())
-        continue;
-      try {
-        int bit = std::stoi(line);
-        corrections.push_back(static_cast<uint8_t>(bit));
-      } catch (...) {
-      }
-    }
-  }
-
-  if (reading_shot && !current_shot.empty()) {
-    shots.push_back(current_shot);
-  }
-
-  for (std::size_t i = 0; i < shots.size(); ++i) {
-    if (shots[i].size() < syndrome_size) {
-      shots[i].resize(syndrome_size, 0);
-    } else if (shots[i].size() > syndrome_size) {
-      shots[i].resize(syndrome_size);
-    }
-    SyndromeEntry entry{};
-    entry.measurements = std::move(shots[i]);
-    entry.expected_correction = (i < corrections.size()) ? corrections[i] : 0;
-    entries.push_back(std::move(entry));
-  }
-
-  return entries;
-}
-
-//==============================================================================
-// Kernel to initialize function table
-//==============================================================================
-
-/// @brief Initialize the device function table for dispatch (device call mode).
-__global__ void init_function_table(cudaq_function_entry_t *entries) {
-  if (threadIdx.x == 0 && blockIdx.x == 0) {
-    entries[0].handler.device_fn_ptr =
-        reinterpret_cast<void *>(&cudaq::qec::realtime::mock_decode_rpc);
-    entries[0].function_id = MOCK_DECODE_FUNCTION_ID;
-    entries[0].dispatch_mode = CUDAQ_DISPATCH_DEVICE_CALL;
-    entries[0].reserved[0] = 0;
-    entries[0].reserved[1] = 0;
-    entries[0].reserved[2] = 0;
-
-    // Schema: 1 bit-packed argument (128 bits = 16 bytes), 1 uint8 result
-    entries[0].schema.num_args = 1;
-    entries[0].schema.num_results = 1;
-    entries[0].schema.reserved = 0;
-    entries[0].schema.args[0].type_id = CUDAQ_TYPE_BIT_PACKED;
-    entries[0].schema.args[0].reserved[0] = 0;
-    entries[0].schema.args[0].reserved[1] = 0;
-    entries[0].schema.args[0].reserved[2] = 0;
-    entries[0].schema.args[0].size_bytes = 16;    // 128 bits
-    entries[0].schema.args[0].num_elements = 128; // 128 bits
-    entries[0].schema.results[0].type_id = CUDAQ_TYPE_UINT8;
-    entries[0].schema.results[0].reserved[0] = 0;
-    entries[0].schema.results[0].reserved[1] = 0;
-    entries[0].schema.results[0].reserved[2] = 0;
-    entries[0].schema.results[0].size_bytes = 1;
-    entries[0].schema.results[0].num_elements = 1;
-  }
-}
-
-//==============================================================================
-// Host Launch Wrapper (C-compatible)
-//==============================================================================
-
-extern "C" void launch_dispatch_kernel_wrapper(
-    volatile std::uint64_t *rx_flags, volatile std::uint64_t *tx_flags,
-    cudaq_function_entry_t *function_table, std::size_t func_count,
-    volatile int *shutdown_flag, std::uint64_t *stats, std::size_t num_slots,
-    std::uint32_t num_blocks, std::uint32_t threads_per_block,
-    cudaStream_t stream) {
-  cudaq_launch_dispatch_kernel_regular(
-      rx_flags, tx_flags, function_table, func_count, shutdown_flag, stats,
-      num_slots, num_blocks, threads_per_block, stream);
-}
-
 // Helper function to check if a GPU is available
 bool isGpuAvailable() {
   int deviceCount = 0;
@@ -305,6 +134,9 @@ init_mock_decoder_kernel(cudaq::qec::realtime::mock_decoder *d_decoder,
 
 class RealtimeDecodingTest : public ::testing::Test {
 protected:
+  // Convenience aliases for types from the shared header
+  using SyndromeEntry = cudaq::qec::realtime::SyndromeEntry;
+
   void SetUp() override {
     // Skip all tests if no GPU is available
     if (!isGpuAvailable()) {
@@ -324,14 +156,16 @@ protected:
     std::string config_content((std::istreambuf_iterator<char>(config_file)),
                                std::istreambuf_iterator<char>());
 
-    syndrome_size_ = parse_scalar(config_content, "syndrome_size");
-    block_size_ = parse_scalar(config_content, "block_size");
+    syndrome_size_ =
+        cudaq::qec::realtime::parse_scalar(config_content, "syndrome_size");
+    block_size_ =
+        cudaq::qec::realtime::parse_scalar(config_content, "block_size");
     ASSERT_GT(syndrome_size_, 0u);
     ASSERT_GT(block_size_, 0u);
 
     // Load syndrome test data
-    syndromes_ = load_syndromes(data_dir_ + "/syndromes_multi_err_lut.txt",
-                                syndrome_size_);
+    syndromes_ = cudaq::qec::realtime::load_syndromes(
+        data_dir_ + "/syndromes_multi_err_lut.txt", syndrome_size_);
     ASSERT_FALSE(syndromes_.empty()) << "No syndrome data loaded";
 
     // Build lookup table for mock decoder
@@ -378,7 +212,7 @@ protected:
     cudaq::qec::realtime::set_mock_decoder(d_decoder_);
 
     // Allocate ring buffers (with space for RPCHeader)
-    slot_size_ = sizeof(cudaq::nvqlink::RPCHeader) +
+    slot_size_ = sizeof(cudaq::realtime::RPCHeader) +
                  std::max(syndrome_size_, static_cast<std::size_t>(256));
     ASSERT_TRUE(allocate_ring_buffer(num_slots_, slot_size_, &rx_flags_host_,
                                      &rx_flags_, &rx_data_host_, &rx_data_));
@@ -401,8 +235,10 @@ protected:
     CUDA_CHECK(cudaMalloc(&d_stats_, sizeof(uint64_t)));
     CUDA_CHECK(cudaMemset(d_stats_, 0, sizeof(uint64_t)));
 
-    // Set up function table for dispatch kernel
-    setup_function_table();
+    // Set up function table using library helper
+    CUDA_CHECK(
+        cudaMalloc(&d_function_entries_, sizeof(cudaq_function_entry_t)));
+    cudaq::qec::realtime::setup_mock_decode_function_table(d_function_entries_);
 
     // Host API wiring
     ASSERT_EQ(cudaq_dispatch_manager_create(&manager_), CUDAQ_OK);
@@ -422,12 +258,16 @@ protected:
     cudaq_ringbuffer_t ringbuffer{};
     ringbuffer.rx_flags = rx_flags_;
     ringbuffer.tx_flags = tx_flags_;
+    ringbuffer.rx_data = rx_data_;
+    ringbuffer.tx_data = tx_data_;
+    ringbuffer.rx_stride_sz = slot_size_;
+    ringbuffer.tx_stride_sz = slot_size_;
     ASSERT_EQ(cudaq_dispatcher_set_ringbuffer(dispatcher_, &ringbuffer),
               CUDAQ_OK);
 
     cudaq_function_table_t table{};
     table.entries = d_function_entries_;
-    table.count = func_count_;
+    table.count = 1;
     ASSERT_EQ(cudaq_dispatcher_set_function_table(dispatcher_, &table),
               CUDAQ_OK);
 
@@ -435,8 +275,9 @@ protected:
         cudaq_dispatcher_set_control(dispatcher_, d_shutdown_flag_, d_stats_),
         CUDAQ_OK);
 
-    ASSERT_EQ(cudaq_dispatcher_set_launch_fn(dispatcher_,
-                                             &launch_dispatch_kernel_wrapper),
+    ASSERT_EQ(cudaq_dispatcher_set_launch_fn(
+                  dispatcher_,
+                  &cudaq::qec::realtime::mock_decode_launch_dispatch_kernel),
               CUDAQ_OK);
 
     ASSERT_EQ(cudaq_dispatcher_start(dispatcher_), CUDAQ_OK);
@@ -479,24 +320,17 @@ protected:
       cudaGraphExecDestroy(graph_exec_);
     if (graph_)
       cudaGraphDestroy(graph_);
-    if (d_current_buffer_)
-      cudaFree(d_current_buffer_);
-  }
-
-  void setup_function_table() {
-    CUDA_CHECK(
-        cudaMalloc(&d_function_entries_, sizeof(cudaq_function_entry_t)));
-
-    init_function_table<<<1, 1>>>(d_function_entries_);
-    CUDA_CHECK(cudaDeviceSynchronize());
-
-    func_count_ = 1;
+    if (d_graph_io_ctx_)
+      cudaFree(d_graph_io_ctx_);
   }
 
   void setup_function_table_graph() {
-    // Allocate pointer indirection for graph
-    CUDA_CHECK(cudaMalloc(&d_current_buffer_, sizeof(void *)));
-    CUDA_CHECK(cudaMemset(d_current_buffer_, 0, sizeof(void *)));
+    // Allocate GraphIOContext on device (dispatch kernel fills it before
+    // each fire-and-forget graph launch)
+    CUDA_CHECK(
+        cudaMalloc(&d_graph_io_ctx_, sizeof(cudaq::realtime::GraphIOContext)));
+    CUDA_CHECK(cudaMemset(d_graph_io_ctx_, 0,
+                          sizeof(cudaq::realtime::GraphIOContext)));
 
     // Create CUDA graph with decoder kernel
     cudaStream_t capture_stream;
@@ -505,7 +339,7 @@ protected:
     CUDA_CHECK(
         cudaStreamBeginCapture(capture_stream, cudaStreamCaptureModeGlobal));
     cudaq::qec::realtime::mock_decode_graph_kernel<<<1, 1, 0, capture_stream>>>(
-        d_current_buffer_);
+        d_graph_io_ctx_);
     CUDA_CHECK(cudaStreamEndCapture(capture_stream, &graph_));
 
     // Instantiate for device launch with device launch flag
@@ -523,7 +357,7 @@ protected:
 
     cudaq_function_entry_t host_entry{};
     host_entry.handler.graph_exec = graph_exec_;
-    host_entry.function_id = MOCK_DECODE_FUNCTION_ID;
+    host_entry.function_id = cudaq::qec::realtime::MOCK_DECODE_FUNCTION_ID;
     host_entry.dispatch_mode = CUDAQ_DISPATCH_GRAPH_LAUNCH;
     host_entry.reserved[0] = 0;
     host_entry.reserved[1] = 0;
@@ -560,30 +394,31 @@ protected:
         const_cast<uint8_t *>(rx_data_host_) + slot * slot_size_;
 
     // Write RPCHeader
-    cudaq::nvqlink::RPCHeader *header =
-        reinterpret_cast<cudaq::nvqlink::RPCHeader *>(slot_data);
-    header->magic = cudaq::nvqlink::RPC_MAGIC_REQUEST;
-    header->function_id = MOCK_DECODE_FUNCTION_ID;
+    cudaq::realtime::RPCHeader *header =
+        reinterpret_cast<cudaq::realtime::RPCHeader *>(slot_data);
+    header->magic = cudaq::realtime::RPC_MAGIC_REQUEST;
+    header->function_id = cudaq::qec::realtime::MOCK_DECODE_FUNCTION_ID;
     header->arg_len = static_cast<std::uint32_t>(measurements.size());
 
     // Write measurement data after header
-    memcpy(slot_data + sizeof(cudaq::nvqlink::RPCHeader), measurements.data(),
+    memcpy(slot_data + sizeof(cudaq::realtime::RPCHeader), measurements.data(),
            measurements.size());
   }
 
-  /// @brief Read response from TX buffer.
+  /// @brief Read response from TX buffer (symmetric: dispatch kernel writes to
+  /// TX).
   bool read_rpc_response(std::size_t slot, uint8_t &correction,
                          std::int32_t *status_out = nullptr,
                          std::uint32_t *result_len_out = nullptr) {
     __sync_synchronize();
     const uint8_t *slot_data =
-        const_cast<uint8_t *>(rx_data_host_) + slot * slot_size_;
+        const_cast<uint8_t *>(tx_data_host_) + slot * slot_size_;
 
     // Read RPCResponse
-    const cudaq::nvqlink::RPCResponse *response =
-        reinterpret_cast<const cudaq::nvqlink::RPCResponse *>(slot_data);
+    const cudaq::realtime::RPCResponse *response =
+        reinterpret_cast<const cudaq::realtime::RPCResponse *>(slot_data);
 
-    if (response->magic != cudaq::nvqlink::RPC_MAGIC_RESPONSE) {
+    if (response->magic != cudaq::realtime::RPC_MAGIC_RESPONSE) {
       return false;
     }
     if (status_out)
@@ -596,7 +431,7 @@ protected:
     }
 
     // Read correction data after response header
-    correction = *(slot_data + sizeof(cudaq::nvqlink::RPCResponse));
+    correction = *(slot_data + sizeof(cudaq::realtime::RPCResponse));
     return true;
   }
 
@@ -632,12 +467,13 @@ protected:
 
   // Function table for dispatch kernel
   cudaq_function_entry_t *d_function_entries_ = nullptr;
-  std::size_t func_count_ = 0;
+  std::size_t func_count_ = 1;
 
   // Graph launch support
   cudaGraph_t graph_ = nullptr;
   cudaGraphExec_t graph_exec_ = nullptr;
-  void **d_current_buffer_ = nullptr; // Pointer indirection for graph
+  cudaq::realtime::GraphIOContext *d_graph_io_ctx_ =
+      nullptr; // IO context for graph
 
   // Host API handles
   cudaq_dispatch_manager_t *manager_ = nullptr;
@@ -760,9 +596,9 @@ TEST_F(RealtimeDecodingTest, DispatchKernelAllShotsGraphLaunch) {
   // works
   cudaq_dispatch_graph_context *dispatch_ctx = nullptr;
   cudaError_t create_err = cudaq_create_dispatch_graph_regular(
-      rx_flags_, tx_flags_, d_function_entries_, func_count_, d_current_buffer_,
-      d_shutdown_flag_, d_stats_, num_slots_, 1, 32, dispatch_stream,
-      &dispatch_ctx);
+      rx_flags_, tx_flags_, rx_data_, tx_data_, slot_size_, slot_size_,
+      d_function_entries_, func_count_, d_graph_io_ctx_, d_shutdown_flag_,
+      d_stats_, num_slots_, 1, 32, dispatch_stream, &dispatch_ctx);
 
   if (create_err != cudaSuccess) {
     cudaStreamDestroy(dispatch_stream);

@@ -18,7 +18,6 @@ namespace cudaq::qec::realtime {
 /// This struct holds the launch parameters required for the dispatch kernel,
 /// including dynamic shared memory size and grid/block dimensions.
 /// Different decoders may require different amounts of shared memory
-/// (e.g., Relay BP decoder uses dynamic shared memory for optimal performance).
 struct decoder_launch_config {
   /// Dynamic shared memory size in bytes (0 for no dynamic shared memory)
   std::size_t shared_memory_bytes = 0;
@@ -45,7 +44,8 @@ struct decoder_launch_config {
 /// on the problem parameters.
 ///
 /// Example implementations:
-/// - mock_decoder_launch_params: Returns minimal defaults for testing
+/// - mock_decoder_launch_params (in unittests/realtime): Returns minimal
+/// defaults for testing
 /// - bp_decoder_launch_params: Calculates shared memory for Relay BP
 /// - tensorrt_decoder_launch_params: Configuration for TensorRT graph launch
 class i_decoder_launch_params {
