@@ -38,7 +38,7 @@ private:
   }
 
 public:
-  pymatching(const cudaqx::tensor<uint8_t> &H,
+  pymatching(const cudaq::qec::sparse_binary_matrix &H,
              const cudaqx::heterogeneous_map &params)
       : decoder(H) {
 
@@ -77,29 +77,30 @@ public:
       }
     }
 
-    user_graph = pm::UserGraph(H.shape()[0]);
+    user_graph = pm::UserGraph(H.num_rows());
 
-    auto sparse = cudaq::qec::dense_to_sparse(H);
+    std::vector<std::vector<std::uint32_t>> H_e2d = H.to_nested_csc();
     std::vector<size_t> observables;
     std::size_t col_idx = 0;
-    for (auto &col : sparse) {
+    for (std::size_t col = 0; col < block_size; col++) {
       double weight = 1.0;
       if (col_idx < error_rate_vec.size()) {
         weight = -std::log(error_rate_vec[col_idx] /
                            (1.0 - error_rate_vec[col_idx]));
       }
-      if (col.size() == 2) {
-        edge2col_idx[make_canonical_edge(col[0], col[1])] = col_idx;
-        user_graph.add_or_merge_edge(col[0], col[1], observables, weight, 0.0,
-                                     merge_strategy_enum);
-      } else if (col.size() == 1) {
-        edge2col_idx[make_canonical_edge(col[0], -1)] = col_idx;
-        user_graph.add_or_merge_boundary_edge(col[0], observables, weight, 0.0,
-                                              merge_strategy_enum);
+      if (H_e2d[col].size() == 2) {
+        edge2col_idx[make_canonical_edge(H_e2d[col][0], H_e2d[col][1])] =
+            col_idx;
+        user_graph.add_or_merge_edge(H_e2d[col][0], H_e2d[col][1], observables,
+                                     weight, 0.0, merge_strategy_enum);
+      } else if (H_e2d[col].size() == 1) {
+        edge2col_idx[make_canonical_edge(H_e2d[col][0], -1)] = col_idx;
+        user_graph.add_or_merge_boundary_edge(H_e2d[col][0], observables,
+                                              weight, 0.0, merge_strategy_enum);
       } else {
-        throw std::runtime_error(
-            "Invalid column in H: " + std::to_string(col_idx) + " has " +
-            std::to_string(col.size()) + " ones. Must have 1 or 2 ones.");
+        throw std::runtime_error("Invalid column in H: " + std::to_string(col) +
+                                 " has " + std::to_string(H_e2d[col].size()) +
+                                 " ones. Must have 1 or 2 ones.");
       }
       col_idx++;
     }
@@ -137,7 +138,7 @@ public:
 
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       pymatching, static std::unique_ptr<decoder> create(
-                      const cudaqx::tensor<uint8_t> &H,
+                      const cudaq::qec::sparse_binary_matrix &H,
                       const cudaqx::heterogeneous_map &params) {
         return std::make_unique<pymatching>(H, params);
       })

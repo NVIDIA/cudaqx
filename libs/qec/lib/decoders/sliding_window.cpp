@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2025 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2025 - 2026 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -16,6 +16,8 @@
 namespace cudaq::qec {
 
 void sliding_window::validate_inputs() {
+  uint32_t num_rows = H.num_rows();
+  uint32_t num_cols = H.num_cols();
   if (window_size < 1 || window_size > num_rounds) {
     throw std::invalid_argument(
         fmt::format("sliding_window constructor: window_size ({}) must "
@@ -38,7 +40,7 @@ void sliding_window::validate_inputs() {
     throw std::invalid_argument("sliding_window constructor: "
                                 "num_syndromes_per_round must be non-zero");
   }
-  if (H.shape()[0] % num_syndromes_per_round != 0) {
+  if (num_rows % num_syndromes_per_round != 0) {
     throw std::invalid_argument(
         "sliding_window constructor: Number of rows in H must be divisible "
         "by num_syndromes_per_round");
@@ -57,7 +59,7 @@ void sliding_window::validate_inputs() {
   }
 
   // Enforce that H is already sorted.
-  if (!cudaq::qec::pcm_is_sorted(H, num_syndromes_per_round)) {
+  if (!cudaq::qec::pcm_is_sorted(H.to_dense(), this->num_syndromes_per_round)) {
     throw std::invalid_argument("sliding_window constructor: PCM must be "
                                 "sorted. See cudaq::qec::simplify_pcm.");
   }
@@ -176,9 +178,9 @@ void sliding_window::update_rw_next_read_index() {
     rw_next_read_index -= num_syndromes_per_window;
 }
 
-sliding_window::sliding_window(const cudaqx::tensor<uint8_t> &H,
+sliding_window::sliding_window(const cudaq::qec::sparse_binary_matrix &H,
                                const cudaqx::heterogeneous_map &params)
-    : decoder(H), full_pcm(H) {
+    : decoder(H), full_pcm(H.to_dense()) {
   full_pcm_T = full_pcm.transpose();
   // Fetch parameters from the params map.
   window_size = params.get<std::size_t>("window_size", window_size);
@@ -196,18 +198,21 @@ sliding_window::sliding_window(const cudaqx::tensor<uint8_t> &H,
   inner_decoder_params = params.get<cudaqx::heterogeneous_map>(
       "inner_decoder_params", inner_decoder_params);
 
-  num_rounds = H.shape()[0] / num_syndromes_per_round;
+  num_rounds = H.num_rows() / num_syndromes_per_round;
   num_windows = (num_rounds - window_size) / step_size + 1;
   num_syndromes_per_window = num_syndromes_per_round * window_size;
 
   validate_inputs();
+
+  // FIXME - update downstream code to support sparse matrices.
+  auto H_dense = H.to_dense();
 
   // Create the inner decoders.
   for (std::size_t w = 0; w < num_windows; ++w) {
     std::size_t start_round = w * step_size;
     std::size_t end_round = start_round + window_size - 1;
     auto [H_round, first_column, last_column] = cudaq::qec::get_pcm_for_rounds(
-        H, num_syndromes_per_round, start_round, end_round,
+        H_dense, num_syndromes_per_round, start_round, end_round,
         straddle_start_round, straddle_end_round);
     first_columns.push_back(first_column);
 
@@ -222,6 +227,14 @@ sliding_window::sliding_window(const cudaqx::tensor<uint8_t> &H,
                "first_column = {}, last_column = {}",
                start_round, end_round, H_round.shape()[0], H_round.shape()[1],
                first_column, last_column);
+
+    if (last_column - first_column + 1 != H_round.shape()[1]) {
+      throw std::invalid_argument(
+          fmt::format("last_column - first_column + 1 ({}) must be equal to "
+                      "the number of columns in H_round ({})",
+                      last_column - first_column + 1, H_round.shape()[1]));
+    }
+
     auto inner_decoder =
         decoder::get(inner_decoder_name, H_round, inner_decoder_params_mod);
     inner_decoders.push_back(std::move(inner_decoder));

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2025 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2025 - 2026 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -116,6 +116,17 @@ std::vector<std::uint32_t> get_sorted_pcm_column_indices(
             });
 
   return column_order;
+}
+
+bool pcm_is_sorted(const std::vector<std::vector<std::uint32_t>> &sparse_pcm,
+                   std::uint32_t num_syndromes_per_round) {
+  auto column_indices =
+      get_sorted_pcm_column_indices(sparse_pcm, num_syndromes_per_round);
+  auto num_cols = sparse_pcm.size();
+  for (std::size_t c = 0; c < num_cols; c++)
+    if (column_indices[c] != c)
+      return false;
+  return true;
 }
 
 /// @brief Check if a PCM is sorted.

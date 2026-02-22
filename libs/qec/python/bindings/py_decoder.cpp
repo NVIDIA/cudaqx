@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2022 - 2025 NVIDIA Corporation & Affiliates.                  *
+ * Copyright (c) 2022 - 2026 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -12,6 +12,7 @@
 #include "cudaq/qec/detector_error_model.h"
 #include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/plugin_loader.h"
+#include "cudaq/qec/sparse_binary_matrix.h"
 #include "cudaq/runtime/logger/logger.h"
 #include <filesystem>
 #include <limits>
@@ -31,9 +32,47 @@ using namespace cudaqx;
 
 namespace cudaq::qec {
 
+/// Build sparse_binary_matrix from Python dict with keys layout, num_rows,
+/// num_cols, nested (nested_csc or nested_csr format).
+static sparse_binary_matrix
+sparse_binary_matrix_from_py_dict(const py::dict &d) {
+  if (!d.contains("layout") || !d.contains("num_rows") ||
+      !d.contains("num_cols") || !d.contains("nested"))
+    throw std::runtime_error(
+        "Sparse H dict must have keys: layout, num_rows, num_cols, "
+        "nested. Use layout \"nested_csc\" or \"nested_csr\"; nested "
+        "is a list of lists (column indices per column for csc, row "
+        "indices per row for csr).");
+  std::string layout = d["layout"].cast<std::string>();
+  auto num_rows = static_cast<sparse_binary_matrix::index_type>(
+      d["num_rows"].cast<std::size_t>());
+  auto num_cols = static_cast<sparse_binary_matrix::index_type>(
+      d["num_cols"].cast<std::size_t>());
+  py::list nested_py = d["nested"].cast<py::list>();
+  std::vector<std::vector<sparse_binary_matrix::index_type>> nested;
+  nested.reserve(nested_py.size());
+  for (py::handle item : nested_py) {
+    py::list inner = item.cast<py::list>();
+    std::vector<sparse_binary_matrix::index_type> row;
+    row.reserve(inner.size());
+    for (py::handle v : inner)
+      row.push_back(
+          static_cast<sparse_binary_matrix::index_type>(v.cast<std::size_t>()));
+    nested.push_back(std::move(row));
+  }
+  if (layout == "nested_csc")
+    return sparse_binary_matrix::from_nested_csc(num_rows, num_cols, nested);
+  if (layout == "nested_csr")
+    return sparse_binary_matrix::from_nested_csr(num_rows, num_cols, nested);
+  throw std::runtime_error(
+      "Sparse H dict layout must be \"nested_csc\" or \"nested_csr\".");
+}
+
 class PyDecoder : public decoder {
 public:
-  PyDecoder(const py::array_t<uint8_t> &H) : decoder(toTensor(H)) {}
+  PyDecoder(const py::array_t<uint8_t> &H)
+      : decoder(cudaq::qec::sparse_binary_matrix(
+            toTensor(H), cudaq::qec::sparse_binary_matrix_layout::csr)) {}
 
   decoder_result decode(const std::vector<float_t> &syndrome) override {
     PYBIND11_OVERRIDE_PURE(decoder_result, decoder, decode, syndrome);
@@ -297,11 +336,49 @@ void bindDecoder(py::module &mod) {
 
   qecmod.def(
       "get_decoder",
-      [](const std::string &name, const py::array_t<uint8_t> H,
-         const py::kwargs options)
+      [](const std::string &name, py::object H, const py::kwargs options)
           -> std::variant<py::object, std::unique_ptr<decoder>> {
-        if (PyDecoderRegistry::contains(name))
-          return PyDecoderRegistry::get_decoder(name, H, options);
+        // Use sparse format internally; convert dense input to sparse.
+        cudaq::qec::sparse_binary_matrix H_sparse;
+
+        auto make_sparse_from_dense = [](py::array_t<uint8_t> arr) {
+          py::buffer_info buf = arr.request();
+          if (buf.ndim != 2 || buf.itemsize != sizeof(uint8_t))
+            throw std::runtime_error(
+                "Parity check matrix must be 2-dimensional uint8.");
+          if (buf.strides[0] == buf.itemsize)
+            throw std::runtime_error(
+                "Parity check matrix must be in row-major order.");
+          std::vector<std::size_t> shape = {
+              static_cast<std::size_t>(buf.shape[0]),
+              static_cast<std::size_t>(buf.shape[1])};
+          cudaqx::tensor<uint8_t> tensor_H(shape);
+          tensor_H.borrow(static_cast<uint8_t *>(buf.ptr), shape);
+          return cudaq::qec::sparse_binary_matrix(
+              tensor_H, cudaq::qec::sparse_binary_matrix_layout::csc);
+        };
+
+        if (py::isinstance<py::dict>(H))
+          H_sparse = sparse_binary_matrix_from_py_dict(H.cast<py::dict>());
+        else {
+          py::array_t<uint8_t> arr = H.cast<py::array_t<uint8_t>>();
+          H_sparse = make_sparse_from_dense(arr);
+        }
+
+        // Python-registered decoders expect dense numpy H; convert sparse ->
+        // dense only here.
+        // TODO: Update the Python-registered decoders to accept sparse H.
+        if (PyDecoderRegistry::contains(name)) {
+          cudaqx::tensor<uint8_t> dense_t = H_sparse.to_dense();
+          std::vector<std::size_t> sh = dense_t.shape();
+          py::array_t<uint8_t> H_dense({sh[0], sh[1]});
+          py::buffer_info info = H_dense.request();
+          uint8_t *out = static_cast<uint8_t *>(info.ptr);
+          for (std::size_t r = 0; r < sh[0]; ++r)
+            for (std::size_t c = 0; c < sh[1]; ++c)
+              out[r * sh[1] + c] = dense_t.at({r, c});
+          return PyDecoderRegistry::get_decoder(name, H_dense, options);
+        }
 
         if (name == "tensor_network_decoder") {
           throw std::runtime_error(
@@ -310,39 +387,13 @@ void bindDecoder(py::module &mod) {
               "    pip install cudaq-qec[tensor-network-decoder]\n");
         }
 
-        py::buffer_info buf = H.request();
-
-        if (buf.ndim != 2) {
-          throw std::runtime_error(
-              "Parity check matrix must be 2-dimensional.");
-        }
-
-        if (buf.itemsize != sizeof(uint8_t)) {
-          throw std::runtime_error(
-              "Parity check matrix must be an array of uint8_t.");
-        }
-
-        if (buf.strides[0] == buf.itemsize) {
-          throw std::runtime_error(
-              "Parity check matrix must be in row-major order, but "
-              "column-major order was detected.");
-        }
-
-        // Create a vector of the array dimensions
-        std::vector<std::size_t> shape;
-        for (py::ssize_t d : buf.shape) {
-          shape.push_back(static_cast<std::size_t>(d));
-        }
-
-        // Create a tensor and borrow the NumPy array data
-        cudaqx::tensor<uint8_t> tensor_H(shape);
-        tensor_H.borrow(static_cast<uint8_t *>(buf.ptr), shape);
-
-        return get_decoder(name, tensor_H, hetMapFromKwargs(options));
+        return get_decoder(name, H_sparse, hetMapFromKwargs(options));
       },
-      "Get a decoder by name with a given parity check matrix"
-      "and optional decoder-specific parameters. Note: the parity check matrix "
-      "must be in row-major order.");
+      py::arg("name"), py::arg("H"),
+      "Get a decoder by name. H can be a dense 2D NumPy array (uint8, "
+      "row-major) or a sparse dict: {\"layout\": \"nested_csc\" or "
+      "\"nested_csr\", \"num_rows\": int, \"num_cols\": int, \"nested\": list "
+      "of lists}.");
 
   qecmod.def(
       "get_sorted_pcm_column_indices",
