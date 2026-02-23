@@ -56,6 +56,7 @@ if(CUDAQ_QEC_BUILD_TRT_DECODER AND CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64)|(AMD
   # Find TensorRT for the test
   find_path(TENSORRT_INCLUDE_DIR NvInfer.h
       PATHS
+          ${TENSORRT_ROOT}/include
           /usr/include/x86_64-linux-gnu
           /usr/local/cuda/include
           /usr/local/tensorrt/include
@@ -65,6 +66,7 @@ if(CUDAQ_QEC_BUILD_TRT_DECODER AND CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64)|(AMD
 
   target_include_directories(test_trt_decoder PRIVATE
       ${CUDAToolkit_INCLUDE_DIRS}
+      ${TENSORRT_INCLUDE_DIR}
   )
 
   target_link_libraries(test_trt_decoder PRIVATE GTest::gtest_main cudaq-qec cudaq-qec-trt-decoder cudaq::cudaq)
