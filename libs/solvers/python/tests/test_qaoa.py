@@ -252,3 +252,41 @@ def test_clique_weighted_nodes():
 
     expected_ham = spin.z(0) + 1.5 * spin.z(1) - 2.5
     assert ham == expected_ham
+
+
+def test_qaoa_custom_mixer_forwarded():
+    # to verify the referenceHamiltonian is forwarded to the C++ qaoa()
+    problem_ham = 0.5 * spin.z(0) * spin.z(1)
+    custom_mixer = 0.5 * spin.x(0) + 1.5 * spin.x(1)
+    default_mixer = spin.x(0) + spin.x(1)
+    init_params = [0.1, 0.1]
+
+    # Path 1: custom mixer + cobyla
+    result_custom = solvers.qaoa(problem_ham,
+                                 custom_mixer,
+                                 1,
+                                 init_params,
+                                 optimizer='cobyla')
+
+    # Path 2: explicit default mixer (X0+X1) + cobyla
+    result_explicit_default = solvers.qaoa(problem_ham,
+                                           default_mixer,
+                                           1,
+                                           init_params,
+                                           optimizer='cobyla')
+
+    # Path 3: implicit default mixer + cobyla
+    result_implicit_default = solvers.qaoa(problem_ham,
+                                           1,
+                                           init_params,
+                                           optimizer='cobyla')
+
+    assert np.isclose(result_explicit_default.optimal_value,
+                      result_implicit_default.optimal_value,
+                      atol=1e-3)
+    assert np.isclose(result_custom.optimal_value,
+                      result_implicit_default.optimal_value,
+                      atol=1e-3)
+    assert np.isclose(result_custom.optimal_value,
+                      result_explicit_default.optimal_value,
+                      atol=1e-3)
