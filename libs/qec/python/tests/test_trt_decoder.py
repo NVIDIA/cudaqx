@@ -35,8 +35,12 @@ NUM_TEST_SAMPLES = 200
 NUM_DETECTORS = 24
 NUM_OBSERVABLES = 1
 
-# Path to the ONNX model file for testing (relative to this test file)
-ONNX_MODEL_PATH = "assets/tests/surface_code_decoder.onnx"
+# Resolve ONNX model path relative to the repo root so the test works
+# regardless of the working directory used to invoke pytest.
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+_REPO_ROOT = os.path.normpath(os.path.join(_THIS_DIR, "..", "..", "..", ".."))
+ONNX_MODEL_PATH = os.path.join(_REPO_ROOT, "assets", "tests",
+                               "surface_code_decoder.onnx")
 
 
 # Check if CUDA/GPU is available for TensorRT tests
