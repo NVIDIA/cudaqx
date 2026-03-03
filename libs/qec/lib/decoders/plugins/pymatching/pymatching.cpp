@@ -31,6 +31,8 @@ private:
   // efficient.
   std::map<std::pair<int64_t, int64_t>, size_t> edge2col_idx;
 
+  bool decode_to_observables = false;
+
   // Helper function to make a canonical edge from two nodes.
   std::pair<int64_t, int64_t> make_canonical_edge(int64_t node1,
                                                   int64_t node2) {
@@ -77,10 +79,39 @@ public:
       }
     }
 
+    std::vector<std::vector<size_t>> errs2observables(block_size);
+    if (params.contains("O")) {
+      auto O = params.get<cudaqx::tensor<uint8_t>>("O");
+      if (O.rank() != 2) {
+        throw std::runtime_error(
+            "O must be a 2-dimensional tensor (num_observables x block_size)");
+      }
+      const size_t num_observables = O.shape()[0];
+      if (O.shape()[1] != block_size) {
+        throw std::runtime_error(
+            "O must be of shape (num_observables, block_size); got second "
+            "dimension " +
+            std::to_string(O.shape()[1]) + ", block_size " +
+            std::to_string(block_size));
+      }
+      std::vector<std::vector<uint32_t>> O_sparse;
+      for (size_t i = 0; i < num_observables; i++) {
+        O_sparse.emplace_back();
+        auto *row = &O.at({i, 0});
+        for (size_t j = 0; j < block_size; j++) {
+          if (row[j] > 0) {
+            O_sparse.back().push_back(static_cast<uint32_t>(j));
+            errs2observables[j].push_back(static_cast<uint32_t>(i));
+          }
+        }
+      }
+      this->set_O_sparse(O_sparse);
+      decode_to_observables = true;
+    }
+
     user_graph = pm::UserGraph(H.shape()[0]);
 
     auto sparse = cudaq::qec::dense_to_sparse(H);
-    std::vector<size_t> observables;
     std::size_t col_idx = 0;
     for (auto &col : sparse) {
       double weight = 1.0;
@@ -90,12 +121,14 @@ public:
       }
       if (col.size() == 2) {
         edge2col_idx[make_canonical_edge(col[0], col[1])] = col_idx;
-        user_graph.add_or_merge_edge(col[0], col[1], observables, weight, 0.0,
+        user_graph.add_or_merge_edge(col[0], col[1],
+                                     errs2observables.at(col_idx), weight, 0.0,
                                      merge_strategy_enum);
       } else if (col.size() == 1) {
         edge2col_idx[make_canonical_edge(col[0], -1)] = col_idx;
-        user_graph.add_or_merge_boundary_edge(col[0], observables, weight, 0.0,
-                                              merge_strategy_enum);
+        user_graph.add_or_merge_boundary_edge(col[0],
+                                              errs2observables.at(col_idx),
+                                              weight, 0.0, merge_strategy_enum);
       } else {
         throw std::runtime_error(
             "Invalid column in H: " + std::to_string(col_idx) + " has " +
@@ -119,13 +152,26 @@ public:
     for (size_t i = 0; i < syndrome.size(); i++)
       if (syndrome[i] > 0.5)
         detection_events.push_back(i);
-    pm::decode_detection_events_to_edges(mwpm, detection_events, edges);
-    // Loop over the edge pairs
-    assert(edges.size() % 2 == 0);
-    for (size_t i = 0; i < edges.size(); i += 2) {
-      auto edge = make_canonical_edge(edges.at(i), edges.at(i + 1));
-      auto col_idx = edge2col_idx.at(edge);
-      result.result[col_idx] = 1.0;
+    if (decode_to_observables) {
+      assert(O_sparse.size() == mwpm.flooder.graph.num_observables);
+      pm::total_weight_int weight = 0;
+      std::vector<uint8_t> obs(mwpm.flooder.graph.num_observables, 0);
+      obs.resize(mwpm.flooder.graph.num_observables);
+      pm::decode_detection_events(mwpm, detection_events, obs.data(), weight,
+                                  /*edge_correlations=*/false);
+      result.result.resize(mwpm.flooder.graph.num_observables);
+      for (size_t i = 0; i < mwpm.flooder.graph.num_observables; i++) {
+        result.result[i] = static_cast<float_t>(obs[i]);
+      }
+    } else {
+      pm::decode_detection_events_to_edges(mwpm, detection_events, edges);
+      // Loop over the edge pairs to reconstruct errors.
+      assert(edges.size() % 2 == 0);
+      for (size_t i = 0; i < edges.size(); i += 2) {
+        auto edge = make_canonical_edge(edges.at(i), edges.at(i + 1));
+        auto col_idx = edge2col_idx.at(edge);
+        result.result[col_idx] = 1.0;
+      }
     }
     // An exception is thrown if no matching solution is found, so we can just
     // set converged to true.
