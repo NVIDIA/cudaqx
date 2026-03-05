@@ -399,8 +399,9 @@ protected:
     header->magic = cudaq::realtime::RPC_MAGIC_REQUEST;
     header->function_id = cudaq::qec::realtime::MOCK_DECODE_FUNCTION_ID;
     header->arg_len = static_cast<std::uint32_t>(measurements.size());
+    header->request_id = static_cast<std::uint32_t>(slot);
+    header->ptp_timestamp = 0;
 
-    // Write measurement data after header
     memcpy(slot_data + sizeof(cudaq::realtime::RPCHeader), measurements.data(),
            measurements.size());
   }
