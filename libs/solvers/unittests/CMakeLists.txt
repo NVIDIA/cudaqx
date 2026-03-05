@@ -86,6 +86,3 @@ gtest_discover_tests(test_upccgsd_operator_pool)
 add_executable(test_qaoa test_qaoa.cpp)
 target_link_libraries(test_qaoa PRIVATE GTest::gtest_main cudaq-solvers test-kernels cudaq::cudaq)
 gtest_discover_tests(test_qaoa)
-
-add_executable(test_adapt_mpi test_adapt_mpi.cpp)
-target_link_libraries(test_adapt_mpi PRIVATE cudaq-solvers test-kernels cudaq::cudaq)
