@@ -112,6 +112,43 @@ TEST(MoleculeTester, checkSimple) {
   }
 }
 
+// Verify one_particle_op for separated indices (p=0, q=3).
+// The JW parity Z-chain between p and q should be Z_1 * Z_2.
+TEST(OperatorsTester, checkOneParticleOpSeparatedIndices) {
+  using double_complex = std::complex<double>;
+  using namespace cudaq::spin;
+
+  auto result = cudaq::solvers::one_particle_op(8, 0, 3);
+
+  cudaq::spin_op expected =
+      double_complex(-0.25, 0.0) * x(0) * z(1) * z(2) * x(3) +
+      double_complex(-0.25, 0.0) * y(0) * z(1) * z(2) * y(3) +
+      double_complex(0.0, 0.25) * y(0) * z(1) * z(2) * x(3) +
+      double_complex(0.0, -0.25) * x(0) * z(1) * z(2) * y(3);
+
+  auto residuals = result - expected.canonicalize();
+  for (auto r : residuals)
+    EXPECT_NEAR(std::abs(r.evaluate_coefficient()), 0.0, 1e-4);
+}
+
+// Verify one_particle_op for adjacent indices (p=0, q=1).
+// No parity Z-chain is needed when q == p+1.
+TEST(OperatorsTester, checkOneParticleOpAdjacentIndices) {
+  using double_complex = std::complex<double>;
+  using namespace cudaq::spin;
+
+  auto result = cudaq::solvers::one_particle_op(8, 0, 1);
+
+  cudaq::spin_op expected = double_complex(-0.25, 0.0) * x(0) * x(1) +
+                            double_complex(-0.25, 0.0) * y(0) * y(1) +
+                            double_complex(0.0, 0.25) * y(0) * x(1) +
+                            double_complex(0.0, -0.25) * x(0) * y(1);
+
+  auto residuals = result - expected.canonicalize();
+  for (auto r : residuals)
+    EXPECT_NEAR(std::abs(r.evaluate_coefficient()), 0.0, 1e-4);
+}
+
 TEST(OperatorsTester, checkH2OActiveSpace) {
   std::string contents = R"#(3
 

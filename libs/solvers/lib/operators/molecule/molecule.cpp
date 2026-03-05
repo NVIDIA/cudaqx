@@ -130,10 +130,9 @@ cudaq::spin_op one_particle_op(std::size_t numQubits, std::size_t p,
   for (auto i : cudaq::range((long)p + 1, (long)q))
     z_indices.push_back(i);
 
-  auto parity = spin::z(z_indices.front());
-  for (std::size_t i = 1; i < z_indices.size(); i++) {
-    parity *= spin::z(i);
-  }
+  spin_op_term parity;
+  for (auto idx : z_indices)
+    parity *= spin::z(idx);
 
   cudaq::spin_op ret = m * spin::x(p) * parity * spin::x(q);
 
