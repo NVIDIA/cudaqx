@@ -289,7 +289,7 @@ cudaq::spin_op seeley_richard_love(std::size_t i, std::size_t j,
 
   // Case 4
   else if (i % 2 == 0 and j % 2 == 1 and not parity_set(j).contains(i) and
-           not update_set(i, n_qubits).contains(i)) {
+           not update_set(i, n_qubits).contains(j)) {
     cudaq::spin_op_term x_pad;
     for (auto index : U_diff_a_set(i, j, n_qubits)) {
       x_pad *= cudaq::spin::x(index);
@@ -362,6 +362,15 @@ cudaq::spin_op seeley_richard_love(std::size_t i, std::size_t j,
     for (auto index : set_union(P1_ij_set(i, j), {j})) {
       right_pad_2 *= cudaq::spin::z(index);
     }
+
+    seeley_richard_love_result +=
+        -coef * left_pad_2 * cudaq::spin::y(i) * right_pad_1;
+    seeley_richard_love_result +=
+        -imag_i * coef * left_pad_2 * cudaq::spin::x(i) * right_pad_1;
+    seeley_richard_love_result +=
+        imag_i * coef * left_pad_1 * cudaq::spin::y(i) * right_pad_2;
+    seeley_richard_love_result +=
+        -coef * left_pad_1 * cudaq::spin::x(i) * right_pad_2;
   }
 
   // Case 6
