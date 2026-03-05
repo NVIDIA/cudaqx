@@ -581,6 +581,127 @@ TEST(QECCodeTester, checkCodeCapacityWithCodeObject) {
   }
 }
 
+TEST(QECCodeTester, checkDemSampling) {
+  // Test dem_sampling with per-error-mechanism probabilities
+  {
+    // Create a simple check matrix [3 checks x 5 error mechanisms]
+    cudaqx::tensor<uint8_t> check_matrix({3, 5});
+    std::vector<uint8_t> matrix_data = {
+        1, 0, 1, 0, 0, // check 0 triggered by errors 0, 2
+        0, 1, 1, 0, 0, // check 1 triggered by errors 1, 2
+        0, 0, 0, 1, 1  // check 2 triggered by errors 3, 4
+    };
+    check_matrix.copy(matrix_data.data(), check_matrix.shape());
+
+    int nShots = 10;
+    std::vector<double> error_probs = {0.1, 0.2, 0.15, 0.05, 0.25};
+    unsigned seed = 42;
+
+    auto [checks, errors] =
+        cudaq::qec::dem_sampling(check_matrix, nShots, error_probs, seed);
+
+    // Validate shapes
+    EXPECT_EQ(nShots, checks.shape()[0]);
+    EXPECT_EQ(3, checks.shape()[1]); // 3 checks
+    EXPECT_EQ(nShots, errors.shape()[0]);
+    EXPECT_EQ(5, errors.shape()[1]); // 5 error mechanisms
+
+    // Verify determinism with same seed
+    auto [checks2, errors2] =
+        cudaq::qec::dem_sampling(check_matrix, nShots, error_probs, seed);
+
+    for (size_t i = 0; i < nShots; ++i) {
+      for (size_t j = 0; j < 3; ++j) {
+        EXPECT_EQ(checks.at({i, j}), checks2.at({i, j}));
+      }
+      for (size_t j = 0; j < 5; ++j) {
+        EXPECT_EQ(errors.at({i, j}), errors2.at({i, j}));
+      }
+    }
+
+    // Verify check computation: checks = errors * check_matrix^T (mod 2)
+    for (size_t shot = 0; shot < nShots; ++shot) {
+      for (size_t check = 0; check < 3; ++check) {
+        uint8_t expected = 0;
+        for (size_t err = 0; err < 5; ++err) {
+          expected ^= (errors.at({shot, err}) & check_matrix.at({check, err}));
+        }
+        EXPECT_EQ(expected, checks.at({shot, check}));
+      }
+    }
+  }
+
+  // Test with zero error probabilities
+  {
+    cudaqx::tensor<uint8_t> check_matrix({2, 3});
+    std::vector<uint8_t> matrix_data = {1, 0, 1, 0, 1, 1};
+    check_matrix.copy(matrix_data.data(), check_matrix.shape());
+
+    int nShots = 5;
+    std::vector<double> error_probs = {0.0, 0.0, 0.0};
+
+    auto [checks, errors] =
+        cudaq::qec::dem_sampling(check_matrix, nShots, error_probs);
+
+    // All checks should be 0
+    for (size_t i = 0; i < nShots; ++i) {
+      for (size_t j = 0; j < 2; ++j) {
+        EXPECT_EQ(0, checks.at({i, j}));
+      }
+    }
+
+    // All errors should be 0
+    for (size_t i = 0; i < nShots; ++i) {
+      for (size_t j = 0; j < 3; ++j) {
+        EXPECT_EQ(0, errors.at({i, j}));
+      }
+    }
+  }
+
+  // Test without seed (random)
+  {
+    cudaqx::tensor<uint8_t> check_matrix({2, 4});
+    std::vector<uint8_t> matrix_data = {1, 1, 0, 0, 0, 0, 1, 1};
+    check_matrix.copy(matrix_data.data(), check_matrix.shape());
+
+    int nShots = 8;
+    std::vector<double> error_probs = {0.3, 0.3, 0.3, 0.3};
+
+    auto [checks, errors] =
+        cudaq::qec::dem_sampling(check_matrix, nShots, error_probs);
+
+    // Validate shapes
+    EXPECT_EQ(nShots, checks.shape()[0]);
+    EXPECT_EQ(2, checks.shape()[1]);
+    EXPECT_EQ(nShots, errors.shape()[0]);
+    EXPECT_EQ(4, errors.shape()[1]);
+  }
+
+  // Test error: mismatched probability vector size
+  {
+    cudaqx::tensor<uint8_t> check_matrix({2, 3});
+    std::vector<uint8_t> matrix_data = {1, 0, 1, 0, 1, 1};
+    check_matrix.copy(matrix_data.data(), check_matrix.shape());
+
+    std::vector<double> wrong_size_probs = {0.1, 0.2}; // Should be size 3
+
+    EXPECT_THROW(cudaq::qec::dem_sampling(check_matrix, 10, wrong_size_probs),
+                 std::invalid_argument);
+  }
+
+  // Test error: non-rank-2 matrix
+  {
+    cudaqx::tensor<uint8_t> bad_matrix({5}); // rank-1
+    std::vector<uint8_t> matrix_data = {1, 0, 1, 0, 1};
+    bad_matrix.copy(matrix_data.data(), bad_matrix.shape());
+
+    std::vector<double> error_probs = {0.1, 0.2, 0.3, 0.4, 0.5};
+
+    EXPECT_THROW(cudaq::qec::dem_sampling(bad_matrix, 10, error_probs),
+                 std::invalid_argument);
+  }
+}
+
 TEST(QECCodeTester, checkRepetition) {
   {
     // must provide distance
