@@ -56,7 +56,8 @@ simulator::run(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
   // poolList is split into numRanks chunks, and each chunk can be
   // further parallelized across numQpus.
   // Compute the [H,Oi]
-  std::vector<spin_op> commutators;
+  std::vector<spin_op> localCommutators;
+  std::vector<std::size_t> localCommutatorIndices;
   std::size_t total_elements = pool.size();
   std::size_t elements_per_rank = total_elements / numRanks;
   std::size_t remainder = total_elements % numRanks;
@@ -71,24 +72,24 @@ simulator::run(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
   auto coeff = (!isImaginary) ? std::complex<double>{0.0, 1.0}
                               : std::complex<double>{1.0, 0.0};
 
-  for (auto &op : pool) {
-    auto commutator = H * op - op * H;
+  // Each rank computes commutators only for its chunk [start, end)
+  for (std::size_t globalIdx = start; globalIdx < end; ++globalIdx) {
+    auto commutator = H * pool[globalIdx] - pool[globalIdx] * H;
     commutator.canonicalize().trim();
-    if (commutator.num_terms() > 0)
-      commutators.push_back(coeff * commutator);
+    if (commutator.num_terms() > 0) {
+      localCommutators.push_back(coeff * commutator);
+      localCommutatorIndices.push_back(globalIdx);
+    }
   }
 
-  nlohmann::json initInfo = {{"num-qpus", numQpus},
-                             {"numRanks", numRanks},
-                             {"num-pool-elements", pool.size()},
-                             {"num-elements-per-rank", end - start}};
+  nlohmann::json initInfo = {
+      {"num-qpus", numQpus},
+      {"numRanks", numRanks},
+      {"num-pool-elements", pool.size()},
+      {"num-elements-per-rank", end - start},
+      {"num-local-commutators", localCommutators.size()}};
   if (rank == 0)
     cudaq::info("[adapt] init info: {}", initInfo.dump(4));
-
-  // We'll need to know the local to global index map
-  std::vector<std::size_t> localToGlobalMap(end - start);
-  for (int i = 0; i < end - start; i++)
-    localToGlobalMap[i] = start + i;
 
   // Start of with the initial |psi_n>
   cudaq::state state = get_state(adapt_kernel, numQubits, initialState, thetas,
@@ -106,25 +107,26 @@ simulator::run(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
     }
     step++;
 
-    // Step 1 - compute <psi|[H,Oi]|psi> vector
+    // Step 1 - compute <psi|[H,Oi]|psi> vector for this rank's commutators
     std::vector<double> gradients;
     std::vector<observe_result> results;
-    double gradNorm = 0.0;
     std::vector<async_observe_result> resultHandles;
 
     if (numQpus == 1) {
-      for (std::size_t i = 0; i < commutators.size(); i++) {
+      for (std::size_t i = 0; i < localCommutators.size(); i++) {
         cudaq::info("Compute commutator {}", i);
-        results.emplace_back(observe(prepare_state, commutators[i], state));
+        results.emplace_back(
+            observe(prepare_state, localCommutators[i], state));
       }
     } else {
-      for (std::size_t i = 0, qpuCounter = 0; i < commutators.size(); i++) {
+      for (std::size_t i = 0, qpuCounter = 0; i < localCommutators.size();
+           i++) {
         if (rank == 0)
           cudaq::info("Compute commutator {}", i);
         if (qpuCounter % numQpus == 0)
           qpuCounter = 0;
-        resultHandles.emplace_back(
-            observe_async(qpuCounter++, prepare_state, commutators[i], state));
+        resultHandles.emplace_back(observe_async(qpuCounter++, prepare_state,
+                                                 localCommutators[i], state));
       }
       for (auto &handle : resultHandles)
         results.emplace_back(handle.get());
@@ -135,42 +137,53 @@ simulator::run(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
                    std::back_inserter(gradients),
                    [](auto &&el) { return std::fabs(el.expectation()); });
 
-    // Compute the local gradient norm
-    double norm = 0.0;
+    // Compute global L2 norm: sum local squares, reduce across ranks, sqrt
+    double localNormSq = 0.0;
     for (auto &g : gradients)
-      norm += g * g;
-    norm = std::sqrt(norm);
-
-    // All ranks have a norm, need to reduce that across all
+      localNormSq += g * g;
+    double globalNormSq = localNormSq;
     if (mpi::is_initialized())
-      norm = cudaq::mpi::all_reduce(norm, std::plus<double>());
+      globalNormSq = cudaq::mpi::all_reduce(localNormSq, std::plus<double>());
+    double norm = std::sqrt(globalNormSq);
 
-    auto iter = std::max_element(gradients.begin(), gradients.end());
-    double maxGrad = *iter;
-    auto maxOpIdx = std::distance(gradients.begin(), iter);
+    // Find this rank's local max gradient and its global pool index.
+    // A rank with no local commutators contributes sentinel values.
+    double localMaxGrad = -std::numeric_limits<double>::infinity();
+    int localMaxOpIdx = -1;
+    if (!gradients.empty()) {
+      auto iter = std::max_element(gradients.begin(), gradients.end());
+      localMaxGrad = *iter;
+      localMaxOpIdx = static_cast<int>(
+          localCommutatorIndices[std::distance(gradients.begin(), iter)]);
+    }
+
+    // Determine the global max across all ranks
+    double globalMaxGrad = localMaxGrad;
+    int globalMaxOpIdx = localMaxOpIdx;
 
     if (mpi::is_initialized()) {
-      std::vector<int> allMaxOpIndices(numRanks);
-      std::vector<double> allMaxGrads(numRanks);
-      // Distribute the max gradient from this rank to others
-      cudaq::mpi::all_gather(allMaxGrads, {*iter});
-      // Distribute the corresponding idx from this rank to others,
-      // make sure we map back to global indices
-      cudaq::mpi::all_gather(allMaxOpIndices,
-                             {static_cast<int>(localToGlobalMap[maxOpIdx])});
+      std::vector<double> allLocalMaxGrads(numRanks);
+      std::vector<int> allLocalMaxOpIndices(numRanks);
+      cudaq::mpi::all_gather(allLocalMaxGrads, {localMaxGrad});
+      cudaq::mpi::all_gather(allLocalMaxOpIndices, {localMaxOpIdx});
 
-      // Everyone has the indices, loop over and pick out the
-      // max from all calculations
-      std::size_t cachedIdx = 0;
-      double cachedGrad = 0.0;
-      for (std::size_t i = 0; i < allMaxGrads.size(); i++)
-        if (allMaxGrads[i] > cachedGrad) {
-          cachedGrad = allMaxGrads[i];
-          cachedIdx = allMaxOpIndices[i];
+      globalMaxOpIdx = -1;
+      globalMaxGrad = -std::numeric_limits<double>::infinity();
+      for (std::size_t i = 0; i < allLocalMaxGrads.size(); i++)
+        if (allLocalMaxOpIndices[i] >= 0 &&
+            allLocalMaxGrads[i] > globalMaxGrad) {
+          globalMaxGrad = allLocalMaxGrads[i];
+          globalMaxOpIdx = allLocalMaxOpIndices[i];
         }
-
-      maxOpIdx = cachedIdx;
     }
+
+    if (globalMaxOpIdx < 0) {
+      if (rank == 0)
+        cudaq::warn("[adapt] all commutators [H, O_i] are zero; the operator "
+                    "pool may be incompatible with the Hamiltonian.");
+      break;
+    }
+    auto maxOpIdx = static_cast<std::size_t>(globalMaxOpIdx);
 
     if (rank == 0) {
       cudaq::info("[adapt] index of element with max gradient is {}", maxOpIdx);
