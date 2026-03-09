@@ -9,15 +9,7 @@ if [ -z "$CUDAQ_REALTIME_ROOT" ]; then
   cd cuda-quantum
   git sparse-checkout init --cone
   git sparse-checkout set realtime
-  git checkout 3a0559ec4aaa38f1ffe77f523aafc3e223c0d11c # features/cudaq.realtime
-  # Install DOCA 3.3 headers (needed by dispatch kernel fence calls)
-  UBUNTU_VERSION=$(. /etc/os-release && echo $VERSION_ID)
-  ARCH=$(dpkg --print-architecture)
-  if [ "$ARCH" = "arm64" ]; then DOCA_ARCH="arm64-sbsa"; else DOCA_ARCH="x86_64"; fi
-  wget -qO - https://linux.mellanox.com/public/repo/doca/GPG-KEY-Mellanox.pub | apt-key add -
-  echo "deb https://linux.mellanox.com/public/repo/doca/3.3.0/ubuntu${UBUNTU_VERSION}/${DOCA_ARCH} ./" \
-      > /etc/apt/sources.list.d/doca-3.3.list
-  apt-get update && apt-get install -y --no-install-recommends libdoca-sdk-gpunetio-dev
+  git checkout 3c4faa5b21068dc4e92427e76498d7eeb90272d3 # features/cudaq.realtime
   cd realtime
   mkdir build && cd build
   cmake -G Ninja -DCMAKE_INSTALL_PREFIX="$CUDAQ_REALTIME_ROOT" ..
