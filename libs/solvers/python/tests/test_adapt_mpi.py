@@ -10,39 +10,66 @@
 # Verifies that ADAPT-VQE produces the correct H2 ground-state energy when
 # commutator evaluation is distributed across multiple MPI ranks.
 #
-# Run: mpiexec -np 4 python test_adapt_mpi.py
+# When invoked by pytest, the test launches itself via mpiexec as a subprocess.
+# When invoked by mpiexec, the __name__ == "__main__" block runs the actual
+# MPI computation.
 
-import sys
-import numpy as np
-import cudaq
-import cudaq_solvers as solvers
+import os
+import subprocess
+import shutil
 
-cudaq.mpi.initialize()
-
-geometry = [('H', (0., 0., 0.)), ('H', (0., 0., .7474))]
-molecule = solvers.create_molecule(geometry, 'sto-3g', 0, 0, casci=True)
-operators = solvers.get_operator_pool("spin_complement_gsd",
-                                      num_orbitals=molecule.n_orbitals)
-numElectrons = molecule.n_electrons
+import pytest
 
 
-@cudaq.kernel
-def initState(q: cudaq.qview):
-    for i in range(numElectrons):
-        x(q[i])
+def _mpi_available():
+    return shutil.which("mpiexec") is not None
 
 
-energy, thetas, ops = solvers.adapt_vqe(initState, molecule.hamiltonian,
-                                        operators)
+@pytest.mark.skipif(not _mpi_available(), reason="mpiexec not found")
+@pytest.mark.parametrize("num_ranks", [2, 4])
+def test_adapt_mpi(num_ranks):
+    result = subprocess.run([
+        "mpiexec", "--allow-run-as-root", "-np",
+        str(num_ranks), "python3", __file__
+    ],
+                            capture_output=True,
+                            text=True,
+                            timeout=120)
+    assert result.returncode == 0, \
+        (f"MPI test failed (np={num_ranks}):\n"
+         f"--- stdout ---\n{result.stdout}\n"
+         f"--- stderr ---\n{result.stderr}")
 
-rank = cudaq.mpi.rank()
-num_ranks = cudaq.mpi.num_ranks()
 
-if rank == 0:
-    print(f"[MPI ADAPT] ranks={num_ranks}, energy={energy:.6f}")
-    assert np.isclose(energy, -1.137, atol=1e-3), \
-        f"MPI ADAPT energy {energy} does not match expected -1.137"
-    assert len(ops) > 0, "Expected at least one operator to be selected"
-    print("PASS")
+if __name__ == "__main__":
+    import numpy as np
+    import cudaq
+    import cudaq_solvers as solvers
 
-cudaq.mpi.finalize()
+    cudaq.mpi.initialize()
+
+    geometry = [('H', (0., 0., 0.)), ('H', (0., 0., .7474))]
+    molecule = solvers.create_molecule(geometry, 'sto-3g', 0, 0, casci=True)
+    operators = solvers.get_operator_pool("spin_complement_gsd",
+                                          num_orbitals=molecule.n_orbitals)
+    numElectrons = molecule.n_electrons
+
+    @cudaq.kernel
+    def initState(q: cudaq.qview):
+        for i in range(numElectrons):
+            x(q[i])
+
+    energy, thetas, ops = solvers.adapt_vqe(initState, molecule.hamiltonian,
+                                            operators)
+
+    rank = cudaq.mpi.rank()
+    num_ranks = cudaq.mpi.num_ranks()
+
+    if rank == 0:
+        print(f"[MPI ADAPT] ranks={num_ranks}, energy={energy:.6f}")
+        assert np.isclose(energy, -1.137, atol=1e-3), \
+            f"MPI ADAPT energy {energy} does not match expected -1.137"
+        assert len(ops) > 0, "Expected at least one operator to be selected"
+        print("PASS")
+
+    cudaq.mpi.finalize()

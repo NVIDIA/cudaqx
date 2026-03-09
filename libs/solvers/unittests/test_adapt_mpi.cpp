@@ -10,19 +10,23 @@
 // Verifies that ADAPT-VQE produces the correct H2 ground-state energy when
 // commutator evaluation is distributed across multiple MPI ranks.
 //
-// Run: mpiexec -np 4 ./test_adapt_mpi
+// When run by gtest (ctest), the test launches itself via mpiexec as a
+// subprocess. When invoked with --mpi-worker, the actual MPI computation runs.
 
-#include <cassert>
 #include <cmath>
+#include <cstdlib>
 #include <iostream>
+#include <string>
+
+#include <gtest/gtest.h>
 
 #include "cudaq.h"
 #include "nvqpp/test_kernels.h"
 #include "cudaq/solvers/adapt.h"
 #include "cudaq/solvers/operators.h"
 
-int main(int argc, char **argv) {
-  cudaq::mpi::initialize(argc, argv);
+static int runMpiWorker() {
+  cudaq::mpi::initialize();
 
   auto geometryHH = cudaq::solvers::molecular_geometry{{"H", {0., 0., 0.}},
                                                        {"H", {0., 0., .7474}}};
@@ -41,18 +45,46 @@ int main(int argc, char **argv) {
                                  {"grad_norm_diff_tolerance", 1e-5},
                                  {"threshold_energy", 5e-6}});
 
-  auto rank = cudaq::mpi::rank();
-  auto numRanks = cudaq::mpi::num_ranks();
-
-  if (rank == 0) {
-    std::cout << "[MPI ADAPT] ranks=" << numRanks << ", energy=" << energy
-              << std::endl;
-    assert(std::fabs(energy - (-1.13)) < 1e-2 &&
-           "MPI ADAPT energy does not match expected -1.13");
-    assert(!ops.empty() && "Expected at least one operator to be selected");
-    std::cout << "PASS" << std::endl;
+  int rc = 0;
+  if (cudaq::mpi::rank() == 0) {
+    std::cout << "[MPI ADAPT] ranks=" << cudaq::mpi::num_ranks()
+              << ", energy=" << energy << std::endl;
+    if (std::fabs(energy - (-1.13)) >= 1e-2) {
+      std::cerr << "FAIL: energy " << energy << " != expected -1.13"
+                << std::endl;
+      rc = 1;
+    } else if (ops.empty()) {
+      std::cerr << "FAIL: no operators selected" << std::endl;
+      rc = 1;
+    } else {
+      std::cout << "PASS" << std::endl;
+    }
   }
 
   cudaq::mpi::finalize();
-  return 0;
+  return rc;
+}
+
+class SolversTester : public ::testing::TestWithParam<int> {};
+
+TEST_P(SolversTester, checkSimpleAdaptMpi_H2Sto3g) {
+  int numRanks = GetParam();
+
+  std::string self = ::testing::internal::GetArgvs()[0];
+  std::string cmd = "mpiexec --allow-run-as-root -np " +
+                    std::to_string(numRanks) + " " + self + " --mpi-worker";
+  int rc = std::system(cmd.c_str());
+  EXPECT_EQ(rc, 0) << "mpiexec failed with exit code " << rc;
+}
+
+INSTANTIATE_TEST_SUITE_P(MpiRanks, SolversTester, ::testing::Values(2, 4));
+
+int main(int argc, char **argv) {
+  for (int i = 1; i < argc; i++) {
+    if (std::string(argv[i]) == "--mpi-worker")
+      return runMpiWorker();
+  }
+
+  ::testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
 }
