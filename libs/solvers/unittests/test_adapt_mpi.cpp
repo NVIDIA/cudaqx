@@ -68,6 +68,9 @@ static int runMpiWorker() {
 class SolversTester : public ::testing::TestWithParam<int> {};
 
 TEST_P(SolversTester, checkSimpleAdaptMpi_H2Sto3g) {
+  if (std::system("which mpiexec > /dev/null 2>&1") != 0)
+    GTEST_SKIP() << "mpiexec not found, skipping MPI test";
+
   int numRanks = GetParam();
 
   std::string self = ::testing::internal::GetArgvs()[0];
