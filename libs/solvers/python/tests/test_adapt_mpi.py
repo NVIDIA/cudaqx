@@ -15,23 +15,38 @@
 # MPI computation.
 
 import os
-import subprocess
 import shutil
+import subprocess
 
 import pytest
 
+_MPI_CMD = ["mpiexec", "--allow-run-as-root", "--oversubscribe"]
+
 
 def _mpi_available():
-    return shutil.which("mpiexec") is not None
+    if shutil.which("mpiexec") is None:
+        return False
+    # Probe with 2 ranks to verify multi-rank MPI actually works
+    # (catches missing PML transports, absent cudaq MPI plugin, etc.)
+    try:
+        rc = subprocess.run(_MPI_CMD + [
+            "-np", "2", "python3", "-c",
+            "import cudaq; cudaq.mpi.initialize(); "
+            "cudaq.mpi.finalize()"
+        ],
+                            capture_output=True,
+                            timeout=30)
+        return rc.returncode == 0
+    except subprocess.TimeoutExpired:
+        return False
 
 
-@pytest.mark.skipif(not _mpi_available(), reason="mpiexec not found")
+@pytest.mark.skipif(not _mpi_available(),
+                    reason="mpiexec or cudaq MPI support not available")
 @pytest.mark.parametrize("num_ranks", [2, 4])
 def test_adapt_mpi(num_ranks):
-    result = subprocess.run([
-        "mpiexec", "--allow-run-as-root", "-np",
-        str(num_ranks), "python3", __file__
-    ],
+    result = subprocess.run(_MPI_CMD +
+                            ["-np", str(num_ranks), "python3", __file__],
                             capture_output=True,
                             text=True,
                             timeout=120)
