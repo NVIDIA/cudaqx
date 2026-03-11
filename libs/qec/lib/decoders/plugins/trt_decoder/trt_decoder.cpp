@@ -379,7 +379,7 @@ private:
   size_t output_size_per_sample_ = 0;
 
 public:
-  trt_decoder(const cudaqx::tensor<uint8_t> &H,
+  trt_decoder(const cudaq::qec::sparse_binary_matrix &H,
               const cudaqx::heterogeneous_map &params);
 
   virtual decoder_result decode(const std::vector<float_t> &syndrome) override;
@@ -391,7 +391,7 @@ public:
 
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       trt_decoder, static std::unique_ptr<decoder> create(
-                       const cudaqx::tensor<uint8_t> &H,
+                       const cudaq::qec::sparse_binary_matrix &H,
                        const cudaqx::heterogeneous_map &params) {
         return std::make_unique<trt_decoder>(H, params);
       })
@@ -448,7 +448,7 @@ struct trt_decoder::Impl {
 // trt_decoder method implementations
 // ============================================================================
 
-trt_decoder::trt_decoder(const cudaqx::tensor<uint8_t> &H,
+trt_decoder::trt_decoder(const cudaq::qec::sparse_binary_matrix &H,
                          const cudaqx::heterogeneous_map &params)
     : decoder(H), decoder_ready_(false) {
 
