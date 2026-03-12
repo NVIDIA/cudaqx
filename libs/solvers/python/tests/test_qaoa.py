@@ -255,10 +255,14 @@ def test_clique_weighted_nodes():
 
 
 def test_qaoa_custom_mixer_forwarded():
-    # to verify the referenceHamiltonian is forwarded to the C++ qaoa()
-    problem_ham = 0.5 * spin.z(0) * spin.z(1)
-    custom_mixer = 0.5 * spin.x(0) + 1.5 * spin.x(1)
-    default_mixer = spin.x(0) + spin.x(1)
+    # To verify the referenceHamiltonian is forwarded to the C++ qaoa().
+    # Use a triangle maxcut (3 qubits) so p=1 cannot reach the ground state,
+    # making the result sensitive to the mixer choice.
+    problem_ham = (0.5 * spin.z(0) * spin.z(1) + 0.5 * spin.z(1) * spin.z(2) +
+                   0.5 * spin.z(0) * spin.z(2))
+    # Asymmetric mixer: deliberately different from default X0+X1+X2
+    custom_mixer = spin.y(0) + spin.y(1) + spin.y(2)
+    default_mixer = spin.x(0) + spin.x(1) + spin.x(2)
     init_params = [0.1, 0.1]
 
     # Path 1: custom mixer + cobyla
@@ -268,7 +272,7 @@ def test_qaoa_custom_mixer_forwarded():
                                  init_params,
                                  optimizer='cobyla')
 
-    # Path 2: explicit default mixer (X0+X1) + cobyla
+    # Path 2: explicit default mixer (X0+X1+X2) + cobyla
     result_explicit_default = solvers.qaoa(problem_ham,
                                            default_mixer,
                                            1,
@@ -281,12 +285,13 @@ def test_qaoa_custom_mixer_forwarded():
                                            init_params,
                                            optimizer='cobyla')
 
+    # Explicit default must match implicit default — sanity check.
     assert np.isclose(result_explicit_default.optimal_value,
                       result_implicit_default.optimal_value,
                       atol=1e-3)
-    assert np.isclose(result_custom.optimal_value,
-                      result_implicit_default.optimal_value,
-                      atol=1e-3)
-    assert np.isclose(result_custom.optimal_value,
-                      result_explicit_default.optimal_value,
-                      atol=1e-3)
+
+    # Custom mixer (Y-rotations) must differ from default (X-rotations) —
+    # proves the mixer is not silently dropped.
+    assert not np.isclose(result_custom.optimal_value,
+                          result_implicit_default.optimal_value,
+                          atol=1e-3)

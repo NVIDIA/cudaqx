@@ -90,7 +90,8 @@ def test_adapt_empty_gradients():
 
     @cudaq.kernel
     def initState(q: cudaq.qview):
-        pass
+        x(q[0])
+        x(q[1])
 
     energy, thetas, ops = solvers.adapt_vqe(initState, H, pool)
     # Should return without crashing; no operators selected
