@@ -293,6 +293,10 @@ decoder_result sliding_window::decode(const std::vector<float_t> &syndrome) {
 
 std::vector<decoder_result> sliding_window::decode_batch(
     const std::vector<std::vector<float_t>> &syndromes) {
+  if (syndromes.empty()) {
+    CUDAQ_DBG("Returning empty decoder_result (no syndrome)");
+    return {};
+  }
   if (syndromes[0].size() == this->syndrome_size) {
     CUDAQ_DBG("Decoding whole block");
     // Decode the whole thing, iterating over windows manually.
