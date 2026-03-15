@@ -12,6 +12,7 @@ import pytest
 import numpy as np
 
 import cudaq
+from cudaq import spin
 import cudaq_solvers as solvers
 
 
@@ -79,3 +80,19 @@ def test_solvers_scipy_adapt():
                                             options={'disp': True})
     print(energy)
     assert np.isclose(energy, -1.137, atol=1e-3)
+
+
+def test_adapt_empty_gradients():
+    # adapt_vqe must not crash when all commutators [H, O_i] are zero.
+    # H and pool are all diagonal (Z-only), so [H, O_i] = 0 for each.
+    H = spin.z(0) * spin.z(1)
+    pool = [spin.z(0), spin.z(0) * spin.z(1)]
+
+    @cudaq.kernel
+    def initState(q: cudaq.qview):
+        x(q[0])
+        x(q[1])
+
+    energy, thetas, ops = solvers.adapt_vqe(initState, H, pool)
+    # Should return without crashing; no operators selected
+    assert len(ops) == 0

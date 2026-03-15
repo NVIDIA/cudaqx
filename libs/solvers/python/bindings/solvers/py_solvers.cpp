@@ -1131,16 +1131,14 @@ Notes:
                 "Invalid functional optimizer provided (only "
                 "scipy.optimize.minimize supported).");
           PythonOptimizer opt(func, options);
-          return cudaq::solvers::qaoa(problemHamiltonian, opt, numLayers,
-                                      initialParameters,
+          return cudaq::solvers::qaoa(problemHamiltonian, referenceHamiltonian,
+                                      opt, numLayers, initialParameters,
                                       hetMapFromKwargs(options));
         }
 
         auto optimizerName =
             cudaqx::getValueOr<std::string>(options, "optimizer", "cobyla");
         auto optimizer = cudaq::optim::optimizer::get(optimizerName);
-        auto gradName =
-            cudaqx::getValueOr<std::string>(options, "gradient", "");
 
         return cudaq::solvers::qaoa(problemHamiltonian, referenceHamiltonian,
                                     *optimizer, numLayers, initialParameters,
@@ -1172,8 +1170,6 @@ Notes:
         auto optimizerName =
             cudaqx::getValueOr<std::string>(options, "optimizer", "cobyla");
         auto optimizer = cudaq::optim::optimizer::get(optimizerName);
-        auto gradName =
-            cudaqx::getValueOr<std::string>(options, "gradient", "");
         return cudaq::solvers::qaoa(problemHamiltonian, *optimizer, numLayers,
                                     initialParameters,
                                     hetMapFromKwargs(options));

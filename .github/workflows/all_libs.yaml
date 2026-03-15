@@ -95,6 +95,8 @@ jobs:
       # ========================================================================
       #
       - name: Run tests
+        env:
+          OMPI_MCA_pml: ob1
         run: cmake --build ${{ steps.build.outputs.build-dir }} --target run_tests
 
       # ========================================================================
