@@ -106,23 +106,23 @@ echo "Building MLIR bindings for ${python}" && \
 # ==============================================================================
 
 CUDAQ_PATCH='diff --git a/CMakeLists.txt b/CMakeLists.txt
-index e12aed8871..d2960728e4 100644
+index dc906f615..5d591ea06 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -657,7 +657,7 @@ if(CUDAQ_BUILD_TESTS)
+@@ -682,7 +682,7 @@ if(CUDAQ_BUILD_TESTS)
  endif()
- 
+
  if (CUDAQ_ENABLE_PYTHON)
 -  find_package(Python 3 COMPONENTS Interpreter Development)
 +  find_package(Python 3 COMPONENTS Interpreter Development.Module)
-   
+
    # Apply specific patch to pybind11 for our documentation.
    # Only apply the patch if not already applied.
 diff --git a/python/runtime/cudaq/domains/plugins/CMakeLists.txt b/python/runtime/cudaq/domains/plugins/CMakeLists.txt
-index cf0197f9fd..cceb843bdc 100644
+index 675919e25..7de85b815 100644
 --- a/python/runtime/cudaq/domains/plugins/CMakeLists.txt
 +++ b/python/runtime/cudaq/domains/plugins/CMakeLists.txt
-@@ -27,7 +27,7 @@ else()
+@@ -31,7 +31,7 @@ else()
    endif()
    target_link_libraries(cudaq-pyscf
      PRIVATE
