@@ -112,3 +112,17 @@ jobs:
           LD_LIBRARY_PATH: ${{ env.MPI_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
           OMPI_MCA_pml: ob1
         run: bash scripts/ci/test_examples.sh solvers
+
+      # ========================================================================
+      # Test missing libgfortran detection
+      # ========================================================================
+
+      - name: Test missing libgfortran error message
+        env:
+          PYTHONPATH: ${{ steps.build.outputs.build-dir }}/python
+        run: |
+          apt-get remove -y --purge libgfortran5 gfortran && apt-get autoremove -y
+          output=$(python3 -c "import cudaq_solvers" 2>&1) && exit 1 || true
+          echo "$output"
+          echo "$output" | grep -q "libgfortran5"
+          echo "$output" | grep -q "apt-get install"
