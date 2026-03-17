@@ -7,12 +7,7 @@
 # ============================================================================ #
 
 from .patch import patch
-try:
-    from ._pycudaqx_qec_the_suffix_matters_cudaq_qec import *
-except ImportError as _e:
-    from ._system_dep_check import raise_if_missing_system_dep
-    raise_if_missing_system_dep(_e, "cudaq-qec")
-    raise
+from ._pycudaqx_qec_the_suffix_matters_cudaq_qec import *
 
 __version__ = qecrt.__version__
 code = qecrt.code
