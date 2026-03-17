@@ -12,7 +12,7 @@ requires-python = ">=3.11"
 readme = "README.md"
 license = "Apache-2.0"
 dependencies = [
-  'cuda-quantum-cu13 >= 0.13',
+  'cuda-quantum-cu13 == 0.14.*',
   'fastapi',
   'networkx',
   'pyscf',

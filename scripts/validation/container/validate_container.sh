@@ -11,7 +11,7 @@
 set -e
 
 # Parse command line arguments
-FINAL_IMAGE="ghcr.io/nvidia/private/cuda-quantum:cu12-0.13.0-cudaqx-rc1"
+FINAL_IMAGE="ghcr.io/nvidia/private/cuda-quantum:cu12-0.14.0-cudaqx-rc1"
 CUDA_VERSION="12.6"
 while [[ $# -gt 0 ]]; do
     case $1 in

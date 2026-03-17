@@ -12,7 +12,7 @@ requires-python = ">=3.11"
 readme = "README.md"
 license = "LicenseRef-NVIDIA-Proprietary"
 dependencies = [
-  'cuda-quantum-cu12 >= 0.13',
+  'cuda-quantum-cu12 == 0.14.*',
 ]
 classifiers = [
     'Intended Audience :: Science/Research',
