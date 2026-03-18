@@ -121,7 +121,6 @@ jobs:
         env:
           PYTHONPATH: ${{ steps.build.outputs.build-dir }}/python
         run: |
-          set -eo pipefail
           apt-get remove -y --purge libgfortran5 gfortran && apt-get autoremove -y
 
           # Import must fail when libgfortran is missing
