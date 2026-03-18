@@ -145,7 +145,11 @@ jobs:
           apt-get remove -y --purge libgfortran5 gfortran && apt-get autoremove -y
           check_import_fails "libgfortran" "libgfortran5" "apt-get install"
 
-          # --- Test libquadmath ---
-          apt-get install -y --no-install-recommends libgfortran5
-          apt-get remove -y --purge libquadmath0
-          check_import_fails "libquadmath" "libquadmath0" "apt-get install"
+          # --- Test libquadmath (x86_64 only, does not exist on arm64) ---
+          if [ "$(uname -m)" = "x86_64" ]; then
+            apt-get install -y --no-install-recommends libgfortran5
+            apt-get remove -y --purge libquadmath0
+            check_import_fails "libquadmath" "libquadmath0" "apt-get install"
+          else
+            echo "SKIP: libquadmath (not applicable on $(uname -m))"
+          fi
