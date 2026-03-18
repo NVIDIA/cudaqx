@@ -114,26 +114,47 @@ jobs:
         run: bash scripts/ci/test_examples.sh solvers
 
       # ========================================================================
-      # Test missing libgfortran detection
+      # Test missing system library detection
       # ========================================================================
 
-      - name: Test missing libgfortran error message
+      - name: Test missing system dependency error messages
         env:
           PYTHONPATH: ${{ steps.build.outputs.build-dir }}/python
         run: |
+          check_import_fails() {
+            local label="$1"
+            local grep_pkg="$2"
+            local grep_hint="$3"
+
+            if python3 -c "import cudaq_solvers" 2>/dev/null; then
+              echo "ERROR: [$label] import cudaq_solvers should have failed" >&2
+              return 1
+            fi
+
+            output=$(python3 -c "import cudaq_solvers" 2>&1 || true)
+            echo "$output"
+
+            echo "$output" | grep -q "$grep_pkg" \
+              || { echo "ERROR: [$label] missing '$grep_pkg' in error message" >&2; return 1; }
+            echo "$output" | grep -q "$grep_hint" \
+              || { echo "ERROR: [$label] missing '$grep_hint' in error message" >&2; return 1; }
+            echo "PASS: $label"
+          }
+
+          # --- Test libgfortran ---
           apt-get remove -y --purge libgfortran5 gfortran && apt-get autoremove -y
+          check_import_fails "libgfortran" "libgfortran5" "apt-get install"
 
-          # Import must fail when libgfortran is missing
-          if python3 -c "import cudaq_solvers" 2>/dev/null; then
-            echo "ERROR: import cudaq_solvers should have failed" >&2
-            exit 1
-          fi
+          # --- Test libquadmath ---
+          apt-get install -y --no-install-recommends libgfortran5
+          apt-get remove -y --purge libquadmath0
+          check_import_fails "libquadmath" "libquadmath0" "apt-get install"
 
-          # Capture the error and verify it contains actionable guidance
-          output=$(python3 -c "import cudaq_solvers" 2>&1 || true)
-          echo "$output"
-
-          echo "$output" | grep -q "libgfortran5" \
-            || { echo "ERROR: missing 'libgfortran5' in error message" >&2; exit 1; }
-          echo "$output" | grep -q "apt-get install" \
-            || { echo "ERROR: missing 'apt-get install' in error message" >&2; exit 1; }
+          # --- Test libcudart ---
+          apt-get install -y --no-install-recommends libgfortran5 libquadmath0
+          cudart_files=$(ldconfig -p | grep libcudart.so | awk '{print $NF}')
+          for f in $cudart_files; do mv "$f" "$f.hidden"; done
+          ldconfig
+          check_import_fails "libcudart" "CUDA runtime" "cuda-downloads"
+          for f in $cudart_files; do mv "$f.hidden" "$f"; done
+          ldconfig
