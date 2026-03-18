@@ -149,12 +149,3 @@ jobs:
           apt-get install -y --no-install-recommends libgfortran5
           apt-get remove -y --purge libquadmath0
           check_import_fails "libquadmath" "libquadmath0" "apt-get install"
-
-          # --- Test libcudart ---
-          apt-get install -y --no-install-recommends libgfortran5 libquadmath0
-          cudart_files=$(ldconfig -p | grep libcudart.so | awk '{print $NF}')
-          for f in $cudart_files; do mv "$f" "$f.hidden"; done
-          ldconfig
-          check_import_fails "libcudart" "CUDA runtime" "cuda-downloads"
-          for f in $cudart_files; do mv "$f.hidden" "$f"; done
-          ldconfig

@@ -24,14 +24,6 @@ _KNOWN_SYSTEM_DEPS = {
              "  RHEL/Fedora:    dnf install libquadmath\n"
              "  Conda:          conda install -c conda-forge libgcc-ng"),
     },
-    "libcudart": {
-        "package":
-            "CUDA runtime",
-        "instructions": ("  Install the CUDA toolkit from:\n"
-                         "    https://developer.nvidia.com/cuda-downloads\n"
-                         "  Or via Conda:\n"
-                         "    conda install -c nvidia cuda-cudart"),
-    },
 }
 
 
