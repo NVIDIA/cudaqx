@@ -121,8 +121,20 @@ jobs:
         env:
           PYTHONPATH: ${{ steps.build.outputs.build-dir }}/python
         run: |
+          set -eo pipefail
           apt-get remove -y --purge libgfortran5 gfortran && apt-get autoremove -y
-          output=$(python3 -c "import cudaq_solvers" 2>&1) && exit 1 || true
+
+          # Import must fail when libgfortran is missing
+          if python3 -c "import cudaq_solvers" 2>/dev/null; then
+            echo "ERROR: import cudaq_solvers should have failed" >&2
+            exit 1
+          fi
+
+          # Capture the error and verify it contains actionable guidance
+          output=$(python3 -c "import cudaq_solvers" 2>&1 || true)
           echo "$output"
-          echo "$output" | grep -q "libgfortran5"
-          echo "$output" | grep -q "apt-get install"
+
+          echo "$output" | grep -q "libgfortran5" \
+            || { echo "ERROR: missing 'libgfortran5' in error message" >&2; exit 1; }
+          echo "$output" | grep -q "apt-get install" \
+            || { echo "ERROR: missing 'apt-get install' in error message" >&2; exit 1; }
