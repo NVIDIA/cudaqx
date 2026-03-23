@@ -13,18 +13,73 @@ from transformers import GPT2LMHeadModel, GPT2Config
 from lightning import LightningModule
 from .loss import ExpLogitMatching, GFlowLogitMatching
 
+_device_cache = None
+
 
 def get_device():
     """Determine the appropriate device for tensor operations.
-    
+
+    Probes the CUDA runtime to verify it is healthy.  If the context has
+    been corrupted (e.g. by CUDA-Q initialisation) a single recovery is
+    attempted by forcing PyTorch to re-initialise its CUDA state.  On
+    failure a ``RuntimeError`` with actionable guidance is raised -- GQE
+    requires a working GPU and silent CPU fallback would mask the problem
+    with unacceptable performance.
+
+    The result is cached so the probe only runs once per process.
+
     Returns:
-        str: 'cuda' if GPU available, 'mps' for Apple Silicon, 'cpu' otherwise
+        str: ``'cuda'``, ``'mps'``, or ``'cpu'``
+
+    Raises:
+        RuntimeError: If a CUDA GPU is detected but PyTorch cannot use it.
     """
+    global _device_cache
+    if _device_cache is not None:
+        return _device_cache
+
     if torch.cuda.is_available():
-        return 'cuda'
-    elif torch.backends.mps.is_available():
-        return 'mps'
-    return 'cpu'
+        last_err = None
+        for attempt in range(2):
+            try:
+                t = torch.tensor([1.0], device='cuda')
+                _ = (t + t).item()
+                del t
+                torch.cuda.synchronize()
+                _device_cache = 'cuda'
+                return _device_cache
+            except Exception as e:
+                last_err = e
+                if attempt == 0:
+                    # Drain any pending async CUDA errors, then force
+                    # PyTorch to re-establish the primary CUDA context.
+                    try:
+                        torch.cuda.synchronize()
+                    except Exception:
+                        pass
+                    if hasattr(torch.cuda, '_initialized'):
+                        torch.cuda._initialized = False
+                    try:
+                        torch.cuda.init()
+                    except Exception:
+                        pass
+
+        raise RuntimeError(
+            f"CUDA GPU detected but PyTorch cannot use it: {last_err}\n\n"
+            "This commonly happens when CUDA-Q (or another CUDA library) "
+            "modifies the CUDA context before PyTorch is initialised.\n\n"
+            "Workaround -- initialise PyTorch CUDA before importing cudaq:\n\n"
+            "    import torch\n"
+            "    torch.cuda.init()   # claim the primary CUDA context\n"
+            "    import cudaq         # CUDA-Q inherits the existing context\n"
+        ) from last_err
+
+    if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        _device_cache = 'mps'
+    else:
+        _device_cache = 'cpu'
+
+    return _device_cache
 
 
 class SmallConfig(GPT2Config):
@@ -66,7 +121,8 @@ class Transformer(LightningModule):
             gpt2cfg = SmallConfig(
                 **
                 {k: cfg[k] for k in GPT2Config().to_dict().keys() & cfg.keys()})
-        self.transformer = GPT2LMHeadModel(gpt2cfg).to(get_device())
+        device = get_device()
+        self.transformer = GPT2LMHeadModel(gpt2cfg).to(device)
         self.ngates = cfg.ngates
         self.num_samples = cfg.num_samples
         self.temperature = cfg.temperature
@@ -74,11 +130,11 @@ class Transformer(LightningModule):
         self._starting_idx = torch.zeros(self.num_samples,
                                          1,
                                          dtype=torch.int,
-                                         device=get_device())
+                                         device=device)
         if loss == "exp":
             self.loss = ExpLogitMatching(cfg.energy_offset, self._label)
         else:
-            self.loss = GFlowLogitMatching(cfg.energy_offset, get_device(),
+            self.loss = GFlowLogitMatching(cfg.energy_offset, device,
                                            self._label, self)
         self._cost = cost
 

@@ -274,8 +274,14 @@ def __internal_run_gqe(temperature_scheduler: TemperatureScheduler,
     Returns:
         tuple: (minimum energy found, corresponding operator indices)
     """
-    # Configure Fabric with optional logging
-    fabric_kwargs = {"accelerator": "auto", "devices": 1}
+    # Derive the accelerator from wherever the model actually lives so
+    # Fabric doesn't try to move it to a different device.
+    try:
+        model_dev = next(model.parameters()).device.type
+    except StopIteration:
+        model_dev = "cpu"
+    accelerator = "cpu" if model_dev == "cpu" else "auto"
+    fabric_kwargs = {"accelerator": accelerator, "devices": 1}
     if cfg.use_fabric_logging:
         if cfg.fabric_logger is None:
             raise ValueError(

@@ -8,9 +8,11 @@
 
 import numpy as np
 import pytest
+import torch
 from cudaq import spin
 import cudaq
 from cudaq_solvers.gqe_algorithm.gqe import DefaultScheduler, CosineScheduler, get_default_config
+from cudaq_solvers.gqe_algorithm import transformer as transformer_mod
 import cudaq_solvers as solvers
 
 qubit_count = 2
@@ -179,6 +181,88 @@ def test_solvers_gqe_larger_molecule():
     energy, indices = solvers.gqe(cost, pool, config=cfg)
     assert energy < 0.0
     assert energy > -2.0
+
+
+def test_get_device_returns_usable_device():
+    """get_device() must return a device that PyTorch can actually use,
+    and subsequent calls must return the cached result."""
+    transformer_mod._device_cache = None
+
+    device = transformer_mod.get_device()
+    assert device in ('cuda', 'mps', 'cpu')
+
+    t = torch.tensor([1.0], device=device)
+    assert (t + t).item() == 2.0
+
+    assert transformer_mod.get_device() is device
+
+    transformer_mod._device_cache = None
+
+
+def test_get_device_recovers_from_corrupted_context(monkeypatch):
+    """Simulates CUDA-Q corrupting the CUDA context: the first probe
+    fails with cudaErrorInvalidResourceHandle, the recovery logic resets
+    PyTorch's internal CUDA state, and the second probe succeeds."""
+    transformer_mod._device_cache = None
+
+    probe_attempts = 0
+
+    class _FakeCudaTensor:
+        """Minimal stand-in that satisfies the (t + t).item() probe."""
+
+        def __add__(self, _other):
+            return self
+
+        def item(self):
+            return 2.0
+
+    def _flaky_tensor(*args, **kwargs):
+        nonlocal probe_attempts
+        if kwargs.get('device') == 'cuda':
+            probe_attempts += 1
+            if probe_attempts == 1:
+                raise RuntimeError("simulated cudaErrorInvalidResourceHandle")
+        return _FakeCudaTensor()
+
+    monkeypatch.setattr(torch, 'tensor', _flaky_tensor)
+    monkeypatch.setattr(torch.cuda, 'is_available', lambda: True)
+    monkeypatch.setattr(torch.cuda, 'synchronize', lambda: None)
+    monkeypatch.setattr(torch.cuda, 'init', lambda: None)
+
+    device = transformer_mod.get_device()
+
+    assert device == 'cuda'
+    assert probe_attempts == 2, "expected exactly one failed and one successful probe"
+    transformer_mod._device_cache = None
+
+
+def test_get_device_raises_on_persistent_cuda_failure(monkeypatch):
+    """When CUDA is detected but broken beyond recovery, get_device()
+    must raise RuntimeError with actionable guidance -- not silently
+    fall back to CPU."""
+    transformer_mod._device_cache = None
+
+    probe_attempts = 0
+
+    def _always_fail(*args, **kwargs):
+        nonlocal probe_attempts
+        probe_attempts += 1
+        raise RuntimeError("simulated persistent CUDA failure")
+
+    monkeypatch.setattr(torch, 'tensor', _always_fail)
+    monkeypatch.setattr(torch.cuda, 'is_available', lambda: True)
+    monkeypatch.setattr(torch.cuda, 'synchronize', lambda: None)
+    monkeypatch.setattr(torch.cuda, 'init', lambda: None)
+
+    with pytest.raises(RuntimeError,
+                       match="CUDA GPU detected but PyTorch "
+                       "cannot use it") as exc_info:
+        transformer_mod.get_device()
+
+    assert probe_attempts == 2, "expected two probe attempts before giving up"
+    assert "torch.cuda.init()" in str(exc_info.value), \
+        "error message must include the workaround"
+    transformer_mod._device_cache = None
 
 
 def test_invalid_inputs():
