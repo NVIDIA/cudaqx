@@ -434,13 +434,36 @@ struct trt_decoder::Impl {
   }
 
   ~Impl() {
+    // IMPORTANT: Destroy resources in the correct order.
+
+    // 1. Synchronise the stream so all async work completes
+    if (stream) {
+      cudaStreamSynchronize(stream);
+    }
+
+    // 2. Destroy the CUDA graph executor BEFORE the stream it was captured on
+    executor = TraditionalExecutor{};
+
+    // 3. Destroy TensorRT execution context and engine BEFORE freeing their
+    //    underlying GPU memory
+    context.reset();
+    engine.reset();
+
+    // 4. Free GPU buffers
     if (buffers[input_index]) {
       HANDLE_CUDA_ERROR_NO_THROW(cudaFree(buffers[input_index]));
+      buffers[input_index] = nullptr;
     }
     if (buffers[output_index]) {
       HANDLE_CUDA_ERROR_NO_THROW(cudaFree(buffers[output_index]));
+      buffers[output_index] = nullptr;
     }
-    HANDLE_CUDA_ERROR_NO_THROW(cudaStreamDestroy(stream));
+
+    // 5. Destroy stream last
+    if (stream) {
+      HANDLE_CUDA_ERROR_NO_THROW(cudaStreamDestroy(stream));
+      stream = nullptr;
+    }
   }
 };
 
