@@ -243,7 +243,10 @@ public:
   /// (caller must include realtime/graph_resources.h to interpret it).
   /// Returns nullptr if graph dispatch is not supported.
   /// The decoder retains ownership of the returned pointer.
-  virtual void *capture_decode_graph() { return nullptr; }
+  virtual void *capture_decode_graph(int reserved_sms = 0) {
+    (void)reserved_sms;
+    return nullptr;
+  }
 
   /// @brief Release graph resources previously returned by
   /// capture_decode_graph().
