@@ -1,5 +1,5 @@
 # ============================================================================ #
-# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
+# Copyright (c) 2024 - 2026 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -18,6 +18,7 @@ add_library(${LIBRARY_NAME} SHARED
   experiments.cpp
   pcm_utils.cpp
   plugin_loader.cpp
+  sparse_binary_matrix.cpp
   stabilizer_utils.cpp 
   decoders/lut.cpp
   decoders/sliding_window.cpp
