@@ -17,30 +17,48 @@ set(_cuStabilizer_location
 if(cuStabilizer_VERSION)
   string(APPEND _cuStabilizer_location ", version='${cuStabilizer_VERSION}'")
 endif()
-set(CUDAQ_QEC_CUSTABILIZER_HAS_SPARSE_DEM_APIS FALSE)
+
+# Force a fresh probe each configure invocation.
+unset(CUDAQ_QEC_CUSTABILIZER_HAS_SPARSE_DEM_APIS CACHE)
+unset(CUDAQ_QEC_CUSTABILIZER_HAS_SPARSE_DEM_APIS)
 if(cuStabilizer_FOUND AND CMAKE_CUDA_COMPILER)
   include(CheckCXXSourceCompiles)
   set(CMAKE_REQUIRED_INCLUDES "${cuStabilizer_INCLUDE_DIR}")
   if(CUDAToolkit_INCLUDE_DIRS)
     list(APPEND CMAKE_REQUIRED_INCLUDES ${CUDAToolkit_INCLUDE_DIRS})
   endif()
+  # check_cxx_source_compiles links executables by default. Probe using a
+  # static library target so we only validate header/API availability.
+  set(_cudaqx_prev_try_compile_target_type "${CMAKE_TRY_COMPILE_TARGET_TYPE}")
+  set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
   check_cxx_source_compiles(
     "
     #include <custabilizer.h>
     int main() {
       (void)CUSTABILIZER_STATUS_INSUFFICIENT_SPARSE_STORAGE;
-      auto prepare = &custabilizerSampleProbArraySparsePrepare;
-      auto compute = &custabilizerSampleProbArraySparseCompute;
-      auto spmm = &custabilizerGF2SparseDenseMatrixMultiply;
-      (void)prepare;
-      (void)compute;
-      (void)spmm;
+      using prepare_t = decltype(&custabilizerSampleProbArraySparsePrepare);
+      using compute_t = decltype(&custabilizerSampleProbArraySparseCompute);
+      using spmm_t = decltype(&custabilizerGF2SparseDenseMatrixMultiply);
+      (void)sizeof(prepare_t);
+      (void)sizeof(compute_t);
+      (void)sizeof(spmm_t);
       return 0;
     }
     "
     CUDAQ_QEC_CUSTABILIZER_HAS_SPARSE_DEM_APIS
   )
+  if(DEFINED _cudaqx_prev_try_compile_target_type AND
+     NOT _cudaqx_prev_try_compile_target_type STREQUAL "")
+    set(CMAKE_TRY_COMPILE_TARGET_TYPE "${_cudaqx_prev_try_compile_target_type}")
+  else()
+    unset(CMAKE_TRY_COMPILE_TARGET_TYPE)
+  endif()
+  unset(_cudaqx_prev_try_compile_target_type)
   unset(CMAKE_REQUIRED_INCLUDES)
+endif()
+
+if(NOT DEFINED CUDAQ_QEC_CUSTABILIZER_HAS_SPARSE_DEM_APIS)
+  set(CUDAQ_QEC_CUSTABILIZER_HAS_SPARSE_DEM_APIS FALSE)
 endif()
 
 if(cuStabilizer_FOUND AND CMAKE_CUDA_COMPILER AND

@@ -10,9 +10,7 @@
 FindcuStabilizer
 ----------------
 
-Find the cuStabilizer library (shipped inside cuQuantum).
-
-Uses the same ``CUQUANTUM_INSTALL_PREFIX`` convention as CUDA-Q.
+Find the cuStabilizer library (shipped as a pip wheel: custabilizer-cu12 / cu13).
 
 Imported Targets
 ^^^^^^^^^^^^^^^^
@@ -31,22 +29,14 @@ Hints
 ^^^^^
 
 ``CUSTABILIZER_ROOT``
-  Preferred search prefix.
-``CUQUANTUM_INSTALL_PREFIX``
-  cuQuantum installation prefix (same as CUDA-Q convention).
+  Preferred search prefix (set by CI from ``pip show custabilizer-cuXX``).
 
 #]=======================================================================]
-
-if(NOT CUSTABILIZER_ROOT AND NOT CUQUANTUM_INSTALL_PREFIX)
-  set(CUQUANTUM_INSTALL_PREFIX "$ENV{CUQUANTUM_INSTALL_PREFIX}" CACHE PATH
-    "Path to cuQuantum installation")
-endif()
 
 find_path(cuStabilizer_INCLUDE_DIR
   NAMES custabilizer.h
   HINTS
     ${CUSTABILIZER_ROOT}/include
-    ${CUQUANTUM_INSTALL_PREFIX}/include
 )
 
 find_library(cuStabilizer_LIBRARY
@@ -54,8 +44,6 @@ find_library(cuStabilizer_LIBRARY
   HINTS
     ${CUSTABILIZER_ROOT}/lib64
     ${CUSTABILIZER_ROOT}/lib
-    ${CUQUANTUM_INSTALL_PREFIX}/lib64
-    ${CUQUANTUM_INSTALL_PREFIX}/lib
 )
 
 set(cuStabilizer_VERSION "")
@@ -67,11 +55,11 @@ if(cuStabilizer_INCLUDE_DIR AND EXISTS "${cuStabilizer_INCLUDE_DIR}/custabilizer
   file(STRINGS "${cuStabilizer_INCLUDE_DIR}/custabilizer.h"
        _custab_patch_line REGEX "^#define[ \t]+CUSTABILIZER_PATCH[ \t]+[0-9]+")
   if(_custab_major_line AND _custab_minor_line AND _custab_patch_line)
-    string(REGEX REPLACE "^#define[ \t]+CUSTABILIZER_MAJOR[ \t]+([0-9]+)$" "\\1"
+    string(REGEX REPLACE "^#define[ \t]+CUSTABILIZER_MAJOR[ \t]+([0-9]+).*$" "\\1"
            _custab_major "${_custab_major_line}")
-    string(REGEX REPLACE "^#define[ \t]+CUSTABILIZER_MINOR[ \t]+([0-9]+)$" "\\1"
+    string(REGEX REPLACE "^#define[ \t]+CUSTABILIZER_MINOR[ \t]+([0-9]+).*$" "\\1"
            _custab_minor "${_custab_minor_line}")
-    string(REGEX REPLACE "^#define[ \t]+CUSTABILIZER_PATCH[ \t]+([0-9]+)$" "\\1"
+    string(REGEX REPLACE "^#define[ \t]+CUSTABILIZER_PATCH[ \t]+([0-9]+).*$" "\\1"
            _custab_patch "${_custab_patch_line}")
     set(cuStabilizer_VERSION "${_custab_major}.${_custab_minor}.${_custab_patch}")
   endif()
