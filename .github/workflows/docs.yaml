@@ -60,12 +60,22 @@ jobs:
           apt install -y --no-install-recommends \
             gfortran libblas-dev doxygen
 
+          pip install --upgrade custabilizer-cu12>=0.3.0
           python3 -m pip install IPython breathe enum_tools myst_parser nbsphinx \
             sphinx_copybutton sphinx_inline_tabs sphinx_gallery sphinx_rtd_theme \
             sphinx_reredirects sphinx_toolbox cupy-cuda12x cuquantum-python-cu12
 
       - name: Build docs
         run: |
+          # Resolve cuStabilizer root from the pip wheel.
+          CUSTABILIZER_ROOT=$(python3 -c "
+          import subprocess, pathlib, sys
+          show = subprocess.check_output([sys.executable, '-m', 'pip', 'show', 'custabilizer-cu12'], text=True)
+          loc = [l.split(':',1)[1].strip() for l in show.splitlines() if l.startswith('Location:')][0]
+          root = pathlib.Path(loc) / 'cuquantum'
+          print(root if (root / 'include' / 'custabilizer.h').exists() else '')
+          ")
+
           # Note: TRT decoder is disabled because all docs for the TRT decoder
           # are generated independently of the source code (no Doxygen
           # documentation).
@@ -74,6 +84,7 @@ jobs:
             -DCMAKE_C_COMPILER=gcc-11 \
             -DCMAKE_CXX_COMPILER=g++-11 \
             -DCUDAQ_DIR=/cudaq-install/lib/cmake/cudaq/ \
+            ${CUSTABILIZER_ROOT:+-DCUSTABILIZER_ROOT=$CUSTABILIZER_ROOT} \
             -DCUDAQX_ENABLE_LIBS="all" \
             -DCUDAQX_INCLUDE_DOCS=ON \
             -DCUDAQX_BINDINGS_PYTHON=ON \
