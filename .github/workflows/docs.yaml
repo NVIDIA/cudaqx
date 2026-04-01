@@ -63,7 +63,10 @@ jobs:
           pip install --upgrade custabilizer-cu12>=0.3.0
           python3 -m pip install IPython breathe enum_tools myst_parser nbsphinx \
             sphinx_copybutton sphinx_inline_tabs sphinx_gallery sphinx_rtd_theme \
-            sphinx_reredirects sphinx_toolbox cupy-cuda12x cuquantum-python-cu12
+            sphinx_reredirects sphinx_toolbox cupy-cuda12x cuquantum-python-cu12 custabilizer-cu12>=0.3.0
+          echo "=== cuStabilizer verification ==="
+          pip show custabilizer-cu12 | grep Version
+          find / -name "libcustabilizer.so*" 2>/dev/null || true
 
       - name: Build docs
         run: |
