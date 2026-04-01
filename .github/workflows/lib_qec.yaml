@@ -64,7 +64,7 @@ jobs:
       - name: Install build requirements
         run: |
           apt install -y --no-install-recommends gfortran libblas-dev wget
-          pip install custabilizer-cu${{ steps.config.outputs.cuda_major }}>=0.3.0
+          pip install --upgrade custabilizer-cu${{ steps.config.outputs.cuda_major }}>=0.3.0
 
       - name: Install TensorRT (amd64)
         if: matrix.platform == 'amd64'
