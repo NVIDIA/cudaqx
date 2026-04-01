@@ -82,6 +82,9 @@ CUSTABILIZER_CMAKE_ARG=""
 if [ -n "$CUSTABILIZER_ROOT" ]; then
   echo "Resolved cuStabilizer root: $CUSTABILIZER_ROOT"
   CUSTABILIZER_CMAKE_ARG="-DCUSTABILIZER_ROOT=$CUSTABILIZER_ROOT"
+  # Ensure the resolved path wins over any stale container paths.
+  export LD_LIBRARY_PATH="$CUSTABILIZER_ROOT/lib:$CUSTABILIZER_ROOT/lib64:${LD_LIBRARY_PATH:-}"
+  export CPATH="$CUSTABILIZER_ROOT/include:${CPATH:-}"
 else
   echo "Unable to resolve CUSTABILIZER_ROOT from pip wheel."
 fi

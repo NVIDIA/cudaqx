@@ -64,7 +64,7 @@ jobs:
       - name: Install build requirements
         run: |
           apt install -y --no-install-recommends gfortran libblas-dev wget
-          pip install --upgrade custabilizer-cu${{ steps.config.outputs.cuda_major }}>=0.3.0
+          pip install --upgrade cuquantum-python-cu${{ steps.config.outputs.cuda_major }}>=26.3.0 custabilizer-cu${{ steps.config.outputs.cuda_major }}>=0.3.0
 
       - name: Install TensorRT (amd64)
         if: matrix.platform == 'amd64'
@@ -93,7 +93,21 @@ jobs:
       # ========================================================================
       # Run tests
       # ========================================================================
-      
+
+      - name: Set cuStabilizer build-time paths
+        run: |
+          CUSTAB_ROOT=$(python3 -c "
+          import subprocess, pathlib, sys
+          pkg = 'custabilizer-cu' + '${{ steps.config.outputs.cuda_major }}'
+          show = subprocess.check_output([sys.executable, '-m', 'pip', 'show', pkg], text=True)
+          loc = [l.split(':',1)[1].strip() for l in show.splitlines() if l.startswith('Location:')][0]
+          root = pathlib.Path(loc) / 'cuquantum'
+          print(root if (root / 'lib' / 'libcustabilizer.so.0').exists() else '')
+          ")
+          if [ -n "$CUSTAB_ROOT" ]; then
+            echo "LD_LIBRARY_PATH=$CUSTAB_ROOT/lib:$CUSTAB_ROOT/lib64:${LD_LIBRARY_PATH:-}" >> $GITHUB_ENV
+          fi
+
       - name: Run tests
         run: cmake --build ${{ steps.build.outputs.build-dir }} --target run_tests
 
@@ -107,7 +121,7 @@ jobs:
           # Install the correct torch first.
           cuda_no_dot=$(echo ${{ matrix.cuda_version }} | sed 's/\.//')
           pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu${cuda_no_dot}
-          pip install numpy pytest onnxscript cupy-cuda${{ steps.config.outputs.cuda_major }}x cuquantum-cu${{ steps.config.outputs.cuda_major }} quimb opt_einsum nvidia-cublas cuquantum-python-cu${{ steps.config.outputs.cuda_major }}>=26.03.0 custabilizer-cu${{ steps.config.outputs.cuda_major }}>=0.3.0
+          pip install --upgrade numpy pytest onnxscript cupy-cuda${{ steps.config.outputs.cuda_major }}x cuquantum-cu${{ steps.config.outputs.cuda_major }} quimb opt_einsum nvidia-cublas cuquantum-python-cu${{ steps.config.outputs.cuda_major }}>=26.3.0 custabilizer-cu${{ steps.config.outputs.cuda_major }}>=0.3.0
           echo "=== cuStabilizer verification ==="
           pip show custabilizer-cu${{ steps.config.outputs.cuda_major }} | grep Version
           find / -name "libcustabilizer.so*" 2>/dev/null || true
@@ -176,6 +190,27 @@ jobs:
       - name: Extract build artifacts
         run: |
           tar xzf /tmp/qec-build-artifacts.tar.gz -C /
+
+      - name: Configure
+        id: config
+        run: |
+          cuda_major=$(echo ${{ matrix.cuda_version }} | cut -d . -f1)
+          echo "cuda_major=$cuda_major" >> $GITHUB_OUTPUT
+
+      - name: Install cuStabilizer runtime
+        run: |
+          pip install --upgrade cuquantum-python-cu${{ steps.config.outputs.cuda_major }}>=26.3.0 custabilizer-cu${{ steps.config.outputs.cuda_major }}>=0.3.0
+          echo "=== cuStabilizer verification ==="
+          pip show custabilizer-cu${{ steps.config.outputs.cuda_major }} | grep Version
+          CUSTABILIZER_ROOT=$(python3 -c "
+          import subprocess, pathlib, sys
+          show = subprocess.check_output([sys.executable, '-m', 'pip', 'show', 'custabilizer-cu${{ steps.config.outputs.cuda_major }}'], text=True)
+          loc = [l.split(':',1)[1].strip() for l in show.splitlines() if l.startswith('Location:')][0]
+          root = pathlib.Path(loc) / 'cuquantum'
+          print(root if (root / 'include' / 'custabilizer.h').exists() else '')
+          ")
+          echo "CUSTABILIZER_ROOT=$CUSTABILIZER_ROOT"
+          echo "LD_LIBRARY_PATH=$CUSTABILIZER_ROOT/lib:$CUSTABILIZER_ROOT/lib64:${LD_LIBRARY_PATH:-}" >> $GITHUB_ENV
 
       - name: Run GPU tests
         run: |
