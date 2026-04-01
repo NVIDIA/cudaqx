@@ -29,6 +29,7 @@ cudaqx_add_pymodule(${MODULE_NAME}
   bindings/py_decoder.cpp
   bindings/py_decoding_config.cpp
   bindings/py_decoding.cpp
+  bindings/py_dem_sampling.cpp
   bindings/py_surface_code.cpp
   bindings/py_patch.cpp
 )
@@ -39,6 +40,12 @@ target_link_libraries(${MODULE_NAME}
     cudaq-qec-realtime-decoding
     cudaq::cudaq-python-interop
 )
+
+if(CUDAQ_QEC_HAS_CUSTABILIZER)
+  find_package(CUDAToolkit REQUIRED)
+  target_link_libraries(${MODULE_NAME} PRIVATE CUDA::cudart)
+  target_include_directories(${MODULE_NAME} PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+endif()
 
 set_target_properties(${MODULE_NAME} PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python/cudaq_qec")

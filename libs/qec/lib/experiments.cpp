@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
+ * Copyright (c) 2024 - 2026 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -8,6 +8,8 @@
 
 #include "cudaq/qec/experiments.h"
 #include "device/memory_circuit.h"
+#include "cudaq/qec/dem_sampling.h"
+#include <cmath>
 
 using namespace cudaqx;
 
@@ -81,6 +83,74 @@ sample_code_capacity(const code &code, std::size_t nShots,
                      double error_probability, unsigned seed) {
   return sample_code_capacity(code.get_parity(), nShots, error_probability,
                               seed);
+}
+
+} // namespace cudaq::qec
+
+namespace cudaq::qec::dem_sampler::cpu {
+
+std::tuple<cudaqx::tensor<uint8_t>, cudaqx::tensor<uint8_t>>
+sample_dem(const cudaqx::tensor<uint8_t> &check_matrix, std::size_t numShots,
+           const std::vector<double> &error_probabilities, unsigned seed) {
+  if (check_matrix.rank() != 2)
+    throw std::invalid_argument("check_matrix must be rank-2");
+
+  size_t num_checks = check_matrix.shape()[0];
+  size_t num_error_mechanisms = check_matrix.shape()[1];
+
+  if (error_probabilities.size() != num_error_mechanisms)
+    throw std::invalid_argument(
+        "error_probabilities size must match number of error mechanisms");
+
+  std::mt19937 rng(seed);
+  std::vector<std::bernoulli_distribution> distributions;
+  distributions.reserve(num_error_mechanisms);
+  for (double p : error_probabilities) {
+    if (!std::isfinite(p) || p < 0.0 || p > 1.0)
+      throw std::invalid_argument(
+          "error_probabilities entries must be finite values in [0, 1]");
+    distributions.emplace_back(p);
+  }
+
+  cudaqx::tensor<uint8_t> errors({numShots, num_error_mechanisms});
+  cudaqx::tensor<uint8_t> checks({numShots, num_checks});
+
+  std::vector<uint8_t> error_bits(numShots * num_error_mechanisms);
+  for (size_t shot = 0; shot < numShots; ++shot) {
+    for (size_t err = 0; err < num_error_mechanisms; ++err) {
+      error_bits[shot * num_error_mechanisms + err] = distributions[err](rng);
+    }
+  }
+
+  errors.copy(error_bits.data(), errors.shape());
+  checks = errors.dot(check_matrix.transpose()) % 2;
+
+  return std::make_tuple(checks, errors);
+}
+
+std::tuple<cudaqx::tensor<uint8_t>, cudaqx::tensor<uint8_t>>
+sample_dem(const cudaqx::tensor<uint8_t> &check_matrix, std::size_t numShots,
+           const std::vector<double> &error_probabilities) {
+  return sample_dem(check_matrix, numShots, error_probabilities,
+                    std::random_device()());
+}
+
+} // namespace cudaq::qec::dem_sampler::cpu
+
+namespace cudaq::qec {
+
+std::tuple<cudaqx::tensor<uint8_t>, cudaqx::tensor<uint8_t>>
+dem_sampling(const cudaqx::tensor<uint8_t> &check_matrix, std::size_t nShots,
+             const std::vector<double> &error_probabilities) {
+  return dem_sampler::cpu::sample_dem(check_matrix, nShots,
+                                      error_probabilities);
+}
+
+std::tuple<cudaqx::tensor<uint8_t>, cudaqx::tensor<uint8_t>>
+dem_sampling(const cudaqx::tensor<uint8_t> &check_matrix, std::size_t nShots,
+             const std::vector<double> &error_probabilities, unsigned seed) {
+  return dem_sampler::cpu::sample_dem(check_matrix, nShots, error_probabilities,
+                                      seed);
 }
 
 std::tuple<cudaqx::tensor<uint8_t>, cudaqx::tensor<uint8_t>>

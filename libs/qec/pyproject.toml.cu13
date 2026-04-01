@@ -13,6 +13,7 @@ readme = "README.md"
 license = "LicenseRef-NVIDIA-Proprietary"
 dependencies = [
   'cuda-quantum-cu13 == 0.14.*',
+  'cuquantum-python-cu13>=26.03.0',
 ]
 classifiers = [
     'Intended Audience :: Science/Research',
@@ -49,6 +50,7 @@ ninja.version = ">=1.10"
 [tool.scikit-build.cmake.define]
 CUDAQX_QEC_INCLUDE_TESTS = false
 CUDAQX_QEC_BINDINGS_PYTHON = true
+CUDAQ_QEC_REQUIRE_CUSTABILIZER = true
 
 [tool.setuptools_scm]
 write_to = "_version.py"
@@ -58,15 +60,19 @@ tensor_network_decoder = [
   "quimb",
   "opt_einsum",
   "torch>=2.9.0",
-  "cuquantum-python-cu13==26.01.0"
+  "cuquantum-python-cu13>=26.03.0"
 ]
 trt_decoder = [
   "tensorrt-cu13"
+]
+dem_sampling = [
+  "torch>=2.9.0",
+  "cuquantum-python-cu13>=26.03.0"
 ]
 all = [
   "quimb",
   "opt_einsum",
   "torch>=2.9.0",
-  "cuquantum-python-cu13==26.01.0",
+  "cuquantum-python-cu13>=26.03.0",
   "tensorrt-cu13"
 ]
