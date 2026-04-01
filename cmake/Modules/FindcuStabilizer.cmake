@@ -58,9 +58,29 @@ find_library(cuStabilizer_LIBRARY
     ${CUQUANTUM_INSTALL_PREFIX}/lib
 )
 
+set(cuStabilizer_VERSION "")
+if(cuStabilizer_INCLUDE_DIR AND EXISTS "${cuStabilizer_INCLUDE_DIR}/custabilizer.h")
+  file(STRINGS "${cuStabilizer_INCLUDE_DIR}/custabilizer.h"
+       _custab_major_line REGEX "^#define[ \t]+CUSTABILIZER_MAJOR[ \t]+[0-9]+")
+  file(STRINGS "${cuStabilizer_INCLUDE_DIR}/custabilizer.h"
+       _custab_minor_line REGEX "^#define[ \t]+CUSTABILIZER_MINOR[ \t]+[0-9]+")
+  file(STRINGS "${cuStabilizer_INCLUDE_DIR}/custabilizer.h"
+       _custab_patch_line REGEX "^#define[ \t]+CUSTABILIZER_PATCH[ \t]+[0-9]+")
+  if(_custab_major_line AND _custab_minor_line AND _custab_patch_line)
+    string(REGEX REPLACE "^#define[ \t]+CUSTABILIZER_MAJOR[ \t]+([0-9]+)$" "\\1"
+           _custab_major "${_custab_major_line}")
+    string(REGEX REPLACE "^#define[ \t]+CUSTABILIZER_MINOR[ \t]+([0-9]+)$" "\\1"
+           _custab_minor "${_custab_minor_line}")
+    string(REGEX REPLACE "^#define[ \t]+CUSTABILIZER_PATCH[ \t]+([0-9]+)$" "\\1"
+           _custab_patch "${_custab_patch_line}")
+    set(cuStabilizer_VERSION "${_custab_major}.${_custab_minor}.${_custab_patch}")
+  endif()
+endif()
+
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(cuStabilizer
   REQUIRED_VARS cuStabilizer_INCLUDE_DIR cuStabilizer_LIBRARY
+  VERSION_VAR cuStabilizer_VERSION
 )
 
 if(cuStabilizer_FOUND AND NOT TARGET cuStabilizer::cuStabilizer)

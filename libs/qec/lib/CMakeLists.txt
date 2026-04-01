@@ -10,12 +10,55 @@ set(LIBRARY_NAME cudaq-qec)
 
 add_compile_options(-Wno-attributes) 
 
-# Optional: cuStabilizer GPU DEM sampling support
+# cuStabilizer GPU DEM sampling support (required by default).
 find_package(cuStabilizer QUIET)
+set(_cuStabilizer_location
+    "include='${cuStabilizer_INCLUDE_DIR}', library='${cuStabilizer_LIBRARY}'")
+if(cuStabilizer_VERSION)
+  string(APPEND _cuStabilizer_location ", version='${cuStabilizer_VERSION}'")
+endif()
+set(CUDAQ_QEC_CUSTABILIZER_HAS_SPARSE_DEM_APIS FALSE)
 if(cuStabilizer_FOUND AND CMAKE_CUDA_COMPILER)
-  message(STATUS "cuStabilizer found – GPU DEM sampling enabled")
+  include(CheckCXXSourceCompiles)
+  set(CMAKE_REQUIRED_INCLUDES "${cuStabilizer_INCLUDE_DIR}")
+  if(CUDAToolkit_INCLUDE_DIRS)
+    list(APPEND CMAKE_REQUIRED_INCLUDES ${CUDAToolkit_INCLUDE_DIRS})
+  endif()
+  check_cxx_source_compiles(
+    "
+    #include <custabilizer.h>
+    int main() {
+      (void)CUSTABILIZER_STATUS_INSUFFICIENT_SPARSE_STORAGE;
+      auto prepare = &custabilizerSampleProbArraySparsePrepare;
+      auto compute = &custabilizerSampleProbArraySparseCompute;
+      auto spmm = &custabilizerGF2SparseDenseMatrixMultiply;
+      (void)prepare;
+      (void)compute;
+      (void)spmm;
+      return 0;
+    }
+    "
+    CUDAQ_QEC_CUSTABILIZER_HAS_SPARSE_DEM_APIS
+  )
+  unset(CMAKE_REQUIRED_INCLUDES)
+endif()
+
+if(cuStabilizer_FOUND AND CMAKE_CUDA_COMPILER AND
+   CUDAQ_QEC_CUSTABILIZER_HAS_SPARSE_DEM_APIS)
+  message(STATUS
+          "cuStabilizer found (${_cuStabilizer_location}) - GPU DEM sampling enabled")
   set(CUDAQ_QEC_HAS_CUSTABILIZER TRUE)
   set(CUDAQ_QEC_HAS_CUSTABILIZER TRUE PARENT_SCOPE)
+elseif(cuStabilizer_FOUND AND CMAKE_CUDA_COMPILER)
+  message(WARNING
+    "cuStabilizer found (${_cuStabilizer_location}), but sparse DEM APIs are "
+    "missing. GPU DEM sampling disabled. Required APIs: "
+    "custabilizerSampleProbArraySparsePrepare, "
+    "custabilizerSampleProbArraySparseCompute, "
+    "custabilizerGF2SparseDenseMatrixMultiply."
+  )
+  set(CUDAQ_QEC_HAS_CUSTABILIZER FALSE)
+  set(CUDAQ_QEC_HAS_CUSTABILIZER FALSE PARENT_SCOPE)
 else()
   message(STATUS "cuStabilizer not found or CUDA unavailable – GPU DEM sampling disabled")
   set(CUDAQ_QEC_HAS_CUSTABILIZER FALSE)
@@ -24,7 +67,15 @@ endif()
 
 if(CUDAQ_QEC_REQUIRE_CUSTABILIZER AND NOT CUDAQ_QEC_HAS_CUSTABILIZER)
   message(FATAL_ERROR
-    "CUDAQ_QEC_REQUIRE_CUSTABILIZER is ON, but cuStabilizer/CUDA was not found.")
+    "CUDAQ_QEC_REQUIRE_CUSTABILIZER is ON, but required cuStabilizer/CUDA "
+    "support was not detected.\n"
+    "Detected: cuStabilizer_FOUND='${cuStabilizer_FOUND}', "
+    "${_cuStabilizer_location}, "
+    "cuda_compiler='${CMAKE_CUDA_COMPILER}', "
+    "sparse_dem_apis='${CUDAQ_QEC_CUSTABILIZER_HAS_SPARSE_DEM_APIS}'.\n"
+    "Required APIs: custabilizerSampleProbArraySparsePrepare, "
+    "custabilizerSampleProbArraySparseCompute, "
+    "custabilizerGF2SparseDenseMatrixMultiply.")
 endif()
 
 set(QEC_SOURCES
