@@ -7,8 +7,8 @@
  ******************************************************************************/
 #pragma once
 
-#include <cuda_runtime.h>
 #include <cstdint>
+#include <cuda_runtime.h>
 
 namespace cudaq::qec::dem_sampling_utils {
 

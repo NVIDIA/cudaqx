@@ -10,8 +10,8 @@
 
 #ifdef CUDAQ_QEC_HAS_CUSTABILIZER
 #include "dem_sampling_utils.h"
-#include <custabilizer.h>
 #include <cuda_runtime.h>
+#include <custabilizer.h>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -20,8 +20,7 @@ namespace {
 
 void cuda_check(cudaError_t err, const char *msg) {
   if (err != cudaSuccess)
-    throw std::runtime_error(std::string(msg) + ": " +
-                             cudaGetErrorString(err));
+    throw std::runtime_error(std::string(msg) + ": " + cudaGetErrorString(err));
 }
 
 void custab_check(custabilizerStatus_t s, const char *msg) {
@@ -150,20 +149,16 @@ bool sample_dem(const uint8_t *d_check_matrix, size_t num_checks,
   // A = CSR errors [num_shots × num_error_mechanisms]
   // B = H^T packed [num_error_mechanisms × n_checks_padded/32]
   // C = packed syndromes [num_shots × n_checks_padded/32]
-  auto d_syndromes_packed =
-      device_alloc<uint32_t>(num_shots * check_words);
+  auto d_syndromes_packed = device_alloc<uint32_t>(num_shots * check_words);
 
-  custab_check(
-      custabilizerGF2SparseDenseMatrixMultiply(
-          handle.h,
-          static_cast<uint64_t>(num_shots),
-          static_cast<uint64_t>(n_checks_padded),
-          static_cast<uint64_t>(num_error_mechanisms),
-          nnz, d_col_indices.get(), d_row_offsets.get(),
-          d_ht_packed.get(),
-          0, // beta=0: assign
-          d_syndromes_packed.get(), stream),
-      "GF2SparseDenseMatrixMultiply");
+  custab_check(custabilizerGF2SparseDenseMatrixMultiply(
+                   handle.h, static_cast<uint64_t>(num_shots),
+                   static_cast<uint64_t>(n_checks_padded),
+                   static_cast<uint64_t>(num_error_mechanisms), nnz,
+                   d_col_indices.get(), d_row_offsets.get(), d_ht_packed.get(),
+                   0, // beta=0: assign
+                   d_syndromes_packed.get(), stream),
+               "GF2SparseDenseMatrixMultiply");
 
   // ── 4. Unpack syndromes: bitpacked → uint8 ──────────────────────────────
   unpack_syndromes_gpu(d_syndromes_packed.get(), d_checks_out, num_shots,

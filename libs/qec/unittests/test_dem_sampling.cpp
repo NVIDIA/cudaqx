@@ -57,7 +57,7 @@ TEST(DemSamplingCPU, AllZeroProbabilities) {
   //       | 0 1 1 0 |
   //       | 0 0 0 1 |
   // No errors should ever fire, so errors=0 and checks=0.
-  auto H = make_tensor({1,0,1,0, 0,1,1,0, 0,0,0,1}, 3, 4);
+  auto H = make_tensor({1, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1}, 3, 4);
   std::vector<double> probs(4, 0.0);
 
   auto [checks, errors] =
@@ -84,7 +84,7 @@ TEST(DemSamplingCPU, AllOneProbabilities) {
   //   row 0: 1+0+1+0 = 2 mod 2 = 0
   //   row 1: 1+1+0+1 = 3 mod 2 = 1
   //   row 2: 0+1+1+0 = 2 mod 2 = 0
-  std::vector<uint8_t> H_data = {1,0,1,0, 1,1,0,1, 0,1,1,0};
+  std::vector<uint8_t> H_data = {1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0};
   auto H = make_tensor(H_data, 3, 4);
   std::vector<double> probs(4, 1.0);
 
@@ -106,7 +106,7 @@ TEST(DemSamplingCPU, MixedDeterministicProbs) {
   // Errors = [1, 0, 1] every shot.
   //   check 0: 1*1 + 0*0 + 1*1 = 2 mod 2 = 0
   //   check 1: 0*1 + 1*0 + 1*1 = 1 mod 2 = 1
-  auto H = make_tensor({1,0,1, 0,1,1}, 2, 3);
+  auto H = make_tensor({1, 0, 1, 0, 1, 1}, 2, 3);
   std::vector<double> probs = {1.0, 0.0, 1.0};
 
   auto [checks, errors] =
@@ -123,7 +123,9 @@ TEST(DemSamplingCPU, MixedDeterministicProbs) {
 
 TEST(DemSamplingCPU, IdentityMatrix) {
   // H = I_5 with p=1: syndromes must equal errors (all ones).
-  auto H = make_tensor({1,0,0,0,0, 0,1,0,0,0, 0,0,1,0,0, 0,0,0,1,0, 0,0,0,0,1}, 5, 5);
+  auto H = make_tensor({1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1,
+                        0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1},
+                       5, 5);
   std::vector<double> probs(5, 1.0);
 
   auto [checks, errors] =
@@ -206,7 +208,7 @@ TEST(DemSamplingCPU, SingleRowMatrix) {
 }
 
 TEST(DemSamplingCPU, SingleShot) {
-  auto H = make_tensor({1,1,0, 0,1,1}, 2, 3);
+  auto H = make_tensor({1, 1, 0, 0, 1, 1}, 2, 3);
   std::vector<double> probs = {1.0, 1.0, 0.0};
 
   auto [checks, errors] =
@@ -223,30 +225,30 @@ TEST(DemSamplingCPU, SingleShot) {
 }
 
 TEST(DemSamplingCPU, RejectOutOfRangeProbabilities) {
-  auto H = make_tensor({1,0,1, 0,1,1}, 2, 3);
+  auto H = make_tensor({1, 0, 1, 0, 1, 1}, 2, 3);
 
   std::vector<double> probs_negative = {0.1, -0.2, 0.3};
-  EXPECT_THROW(cudaq::qec::dem_sampler::cpu::sample_dem(H, 16, probs_negative, 1),
-               std::invalid_argument);
+  EXPECT_THROW(
+      cudaq::qec::dem_sampler::cpu::sample_dem(H, 16, probs_negative, 1),
+      std::invalid_argument);
 
   std::vector<double> probs_above_one = {0.1, 1.2, 0.3};
-  EXPECT_THROW(cudaq::qec::dem_sampler::cpu::sample_dem(H, 16, probs_above_one, 1),
-               std::invalid_argument);
+  EXPECT_THROW(
+      cudaq::qec::dem_sampler::cpu::sample_dem(H, 16, probs_above_one, 1),
+      std::invalid_argument);
 
-  std::vector<double> probs_nan = {0.1, std::numeric_limits<double>::quiet_NaN(),
-                                   0.3};
+  std::vector<double> probs_nan = {
+      0.1, std::numeric_limits<double>::quiet_NaN(), 0.3};
   EXPECT_THROW(cudaq::qec::dem_sampler::cpu::sample_dem(H, 16, probs_nan, 1),
                std::invalid_argument);
 }
 
 TEST(DemSamplingCPU, SeedReproducibility) {
-  auto H = make_tensor({1,0,1,0,0, 0,1,1,0,0, 0,0,0,1,1}, 3, 5);
+  auto H = make_tensor({1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1}, 3, 5);
   std::vector<double> probs = {0.1, 0.3, 0.5, 0.7, 0.9};
 
-  auto [c1, e1] =
-      cudaq::qec::dem_sampler::cpu::sample_dem(H, 100, probs, 42);
-  auto [c2, e2] =
-      cudaq::qec::dem_sampler::cpu::sample_dem(H, 100, probs, 42);
+  auto [c1, e1] = cudaq::qec::dem_sampler::cpu::sample_dem(H, 100, probs, 42);
+  auto [c2, e2] = cudaq::qec::dem_sampler::cpu::sample_dem(H, 100, probs, 42);
 
   for (size_t i = 0; i < 100; i++) {
     for (size_t j = 0; j < 3; j++)
@@ -258,12 +260,9 @@ TEST(DemSamplingCPU, SeedReproducibility) {
 
 TEST(DemSamplingCPU, SyndromeConsistency) {
   // Use a fixed, known H and verify syndrome = errors * H^T mod 2 per shot.
-  std::vector<uint8_t> H_data = {
-    1, 0, 1, 0, 0, 1, 0, 0,
-    0, 1, 0, 1, 0, 0, 1, 0,
-    0, 0, 1, 0, 1, 0, 0, 1,
-    1, 1, 0, 0, 0, 0, 1, 1
-  };
+  std::vector<uint8_t> H_data = {1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0,
+                                 1, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0,
+                                 0, 1, 1, 1, 0, 0, 0, 0, 1, 1};
   const size_t num_checks = 4, num_errors = 8, num_shots = 200;
   auto H = make_tensor(H_data, num_checks, num_errors);
   std::vector<double> probs = {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8};
@@ -287,7 +286,7 @@ TEST(DemSamplingCPU, SyndromeConsistency) {
 TEST(DemSamplingCPU, RepetitionCodeParity) {
   // Repetition code: H = [[1,1,0,0], [0,1,1,0], [0,0,1,1]]
   // Single error on qubit 1 (index 1): flips checks 0 and 1.
-  auto H = make_tensor({1,1,0,0, 0,1,1,0, 0,0,1,1}, 3, 4);
+  auto H = make_tensor({1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1}, 3, 4);
   std::vector<double> probs = {0.0, 1.0, 0.0, 0.0};
 
   auto [checks, errors] =
@@ -305,12 +304,11 @@ TEST(DemSamplingCPU, RepetitionCodeParity) {
 }
 
 TEST(DemSamplingCPU, BackwardsCompatibility) {
-  auto H = make_tensor({1,0,1,0,0, 0,1,1,0,0, 0,0,0,1,1}, 3, 5);
+  auto H = make_tensor({1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1}, 3, 5);
   std::vector<double> probs = {0.1, 0.2, 0.15, 0.05, 0.25};
   unsigned seed = 42;
 
-  auto [old_checks, old_errors] =
-      cudaq::qec::dem_sampling(H, 100, probs, seed);
+  auto [old_checks, old_errors] = cudaq::qec::dem_sampling(H, 100, probs, seed);
   auto [new_checks, new_errors] =
       cudaq::qec::dem_sampler::cpu::sample_dem(H, 100, probs, seed);
 
@@ -345,18 +343,19 @@ protected:
     double *d_probs = nullptr;
     size_t num_checks, num_errors, num_shots;
 
-    GpuBuffers(const std::vector<uint8_t> &H,
-               const std::vector<double> &probs,
+    GpuBuffers(const std::vector<uint8_t> &H, const std::vector<double> &probs,
                size_t checks, size_t errors, size_t shots)
         : num_checks(checks), num_errors(errors), num_shots(shots) {
       EXPECT_EQ(cudaMalloc(&d_H, checks * errors), cudaSuccess);
       EXPECT_EQ(cudaMalloc(&d_probs, errors * sizeof(double)), cudaSuccess);
       EXPECT_EQ(cudaMalloc(&d_checks, shots * checks), cudaSuccess);
       EXPECT_EQ(cudaMalloc(&d_errors, shots * errors), cudaSuccess);
-      EXPECT_EQ(cudaMemcpy(d_H, H.data(), checks * errors,
-                           cudaMemcpyHostToDevice), cudaSuccess);
+      EXPECT_EQ(
+          cudaMemcpy(d_H, H.data(), checks * errors, cudaMemcpyHostToDevice),
+          cudaSuccess);
       EXPECT_EQ(cudaMemcpy(d_probs, probs.data(), errors * sizeof(double),
-                           cudaMemcpyHostToDevice), cudaSuccess);
+                           cudaMemcpyHostToDevice),
+                cudaSuccess);
     }
 
     ~GpuBuffers() {
@@ -374,15 +373,17 @@ protected:
 
     std::vector<uint8_t> get_checks() {
       std::vector<uint8_t> out(num_shots * num_checks);
-      EXPECT_EQ(cudaMemcpy(out.data(), d_checks, out.size(),
-                           cudaMemcpyDeviceToHost), cudaSuccess);
+      EXPECT_EQ(
+          cudaMemcpy(out.data(), d_checks, out.size(), cudaMemcpyDeviceToHost),
+          cudaSuccess);
       return out;
     }
 
     std::vector<uint8_t> get_errors() {
       std::vector<uint8_t> out(num_shots * num_errors);
-      EXPECT_EQ(cudaMemcpy(out.data(), d_errors, out.size(),
-                           cudaMemcpyDeviceToHost), cudaSuccess);
+      EXPECT_EQ(
+          cudaMemcpy(out.data(), d_errors, out.size(), cudaMemcpyDeviceToHost),
+          cudaSuccess);
       return out;
     }
 
@@ -393,7 +394,7 @@ protected:
 
 TEST_F(DemSamplingGPU, AllZeroProbabilities) {
   const size_t num_checks = 3, num_errors = 5, num_shots = 10;
-  std::vector<uint8_t> H = {1,0,1,0,0, 0,1,1,0,0, 0,0,0,1,1};
+  std::vector<uint8_t> H = {1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1};
   std::vector<double> probs(num_errors, 0.0);
 
   GpuBuffers buf(H, probs, num_checks, num_errors, num_shots);
@@ -411,7 +412,7 @@ TEST_F(DemSamplingGPU, AllOneProbabilities) {
   //       | 0 1 1 0 |
   // Expected syndromes: [0, 1, 0] (same as CPU test).
   const size_t num_checks = 3, num_errors = 4, num_shots = 5;
-  std::vector<uint8_t> H = {1,0,1,0, 1,1,0,1, 0,1,1,0};
+  std::vector<uint8_t> H = {1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0};
   std::vector<double> probs(num_errors, 1.0);
 
   GpuBuffers buf(H, probs, num_checks, num_errors, num_shots);
@@ -434,7 +435,7 @@ TEST_F(DemSamplingGPU, MixedDeterministicProbs) {
   //       | 0 1 1 |
   // Expected: errors = [1,0,1], checks = [0, 1]
   const size_t num_checks = 2, num_errors = 3, num_shots = 8;
-  std::vector<uint8_t> H = {1,0,1, 0,1,1};
+  std::vector<uint8_t> H = {1, 0, 1, 0, 1, 1};
   std::vector<double> probs = {1.0, 0.0, 1.0};
 
   GpuBuffers buf(H, probs, num_checks, num_errors, num_shots);
@@ -501,7 +502,7 @@ TEST_F(DemSamplingGPU, AllOnesMatrixOddColumns) {
 TEST_F(DemSamplingGPU, RepetitionCodeParity) {
   // H = [[1,1,0,0],[0,1,1,0],[0,0,1,1]], single error on qubit 1.
   const size_t num_checks = 3, num_errors = 4, num_shots = 3;
-  std::vector<uint8_t> H = {1,1,0,0, 0,1,1,0, 0,0,1,1};
+  std::vector<uint8_t> H = {1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1};
   std::vector<double> probs = {0.0, 1.0, 0.0, 0.0};
 
   GpuBuffers buf(H, probs, num_checks, num_errors, num_shots);
@@ -524,12 +525,8 @@ TEST_F(DemSamplingGPU, RepetitionCodeParity) {
 TEST_F(DemSamplingGPU, SyndromeConsistency) {
   // Fixed H, verify syndrome = errors * H^T mod 2 for every shot.
   const size_t num_checks = 4, num_errors = 8, num_shots = 100;
-  std::vector<uint8_t> H = {
-    1, 0, 1, 0, 0, 1, 0, 0,
-    0, 1, 0, 1, 0, 0, 1, 0,
-    0, 0, 1, 0, 1, 0, 0, 1,
-    1, 1, 0, 0, 0, 0, 1, 1
-  };
+  std::vector<uint8_t> H = {1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 1, 0,
+                            0, 0, 1, 0, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1};
   std::vector<double> probs = {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8};
 
   GpuBuffers buf(H, probs, num_checks, num_errors, num_shots);
@@ -550,7 +547,7 @@ TEST_F(DemSamplingGPU, SyndromeConsistency) {
 
 TEST_F(DemSamplingGPU, SeedReproducibility) {
   const size_t num_checks = 3, num_errors = 5, num_shots = 100;
-  std::vector<uint8_t> H = {1,0,1,0,0, 0,1,1,0,0, 0,0,0,1,1};
+  std::vector<uint8_t> H = {1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1};
   std::vector<double> probs = {0.1, 0.3, 0.5, 0.7, 0.9};
 
   GpuBuffers buf1(H, probs, num_checks, num_errors, num_shots);
@@ -570,7 +567,8 @@ TEST_F(DemSamplingGPU, SeedReproducibility) {
 TEST_F(DemSamplingGPU, CpuGpuCrossValidation) {
   // Use deterministic probs (0 and 1) so CPU and GPU must match exactly.
   const size_t num_checks = 3, num_errors = 6, num_shots = 20;
-  std::vector<uint8_t> H_data = {1,0,1,0,0,1, 0,1,0,1,0,0, 1,1,0,0,1,1};
+  std::vector<uint8_t> H_data = {1, 0, 1, 0, 0, 1, 0, 1, 0,
+                                 1, 0, 0, 1, 1, 0, 0, 1, 1};
   std::vector<double> probs = {1.0, 0.0, 1.0, 0.0, 1.0, 0.0};
 
   auto H_tensor = make_tensor(H_data, num_checks, num_errors);
@@ -584,28 +582,28 @@ TEST_F(DemSamplingGPU, CpuGpuCrossValidation) {
 
   for (size_t shot = 0; shot < num_shots; shot++) {
     for (size_t e = 0; e < num_errors; e++)
-      EXPECT_EQ(gpu_errors[shot * num_errors + e],
-                cpu_errors.at({shot, e}))
+      EXPECT_EQ(gpu_errors[shot * num_errors + e], cpu_errors.at({shot, e}))
           << "Shot " << shot << " error " << e;
     for (size_t c = 0; c < num_checks; c++)
-      EXPECT_EQ(gpu_checks[shot * num_checks + c],
-                cpu_checks.at({shot, c}))
+      EXPECT_EQ(gpu_checks[shot * num_checks + c], cpu_checks.at({shot, c}))
           << "Shot " << shot << " check " << c;
   }
 }
 
 TEST_F(DemSamplingGPU, BinaryOutputOnly) {
   const size_t num_checks = 3, num_errors = 5, num_shots = 200;
-  std::vector<uint8_t> H = {1,0,1,0,0, 0,1,1,0,0, 0,0,0,1,1};
+  std::vector<uint8_t> H = {1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1};
   std::vector<double> probs = {0.2, 0.4, 0.6, 0.8, 0.5};
 
   GpuBuffers buf(H, probs, num_checks, num_errors, num_shots);
   ASSERT_TRUE(buf.run(123));
 
   for (auto v : buf.get_checks())
-    EXPECT_TRUE(v == 0 || v == 1) << "Syndrome value must be 0 or 1, got " << (int)v;
+    EXPECT_TRUE(v == 0 || v == 1)
+        << "Syndrome value must be 0 or 1, got " << (int)v;
   for (auto v : buf.get_errors())
-    EXPECT_TRUE(v == 0 || v == 1) << "Error value must be 0 or 1, got " << (int)v;
+    EXPECT_TRUE(v == 0 || v == 1)
+        << "Error value must be 0 or 1, got " << (int)v;
 }
 
 TEST_F(DemSamplingGPU, BitpackBoundary32Columns) {

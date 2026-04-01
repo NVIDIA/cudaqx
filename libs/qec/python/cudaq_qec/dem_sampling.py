@@ -5,7 +5,6 @@
 # This source code and the accompanying materials are made available under     #
 # the terms of the Apache License 2.0 which accompanies this distribution.    #
 # ============================================================================ #
-
 """DEM sampling via the C++ pybind11 binding (GPU with cuStabilizer + CPU fallback).
 
 Public API:
@@ -63,6 +62,5 @@ def dem_sampling(
     """
     from . import _pycudaqx_qec_the_suffix_matters_cudaq_qec as _qecmod
 
-    return _qecmod.qecrt.dem_sampling(
-        check_matrix, num_shots, error_probabilities, seed, backend
-    )
+    return _qecmod.qecrt.dem_sampling(check_matrix, num_shots,
+                                      error_probabilities, seed, backend)

@@ -18,8 +18,8 @@ namespace {
 void check_kernel_launch(const char *kernel_name) {
   cudaError_t err = cudaGetLastError();
   if (err != cudaSuccess)
-    throw std::runtime_error(std::string(kernel_name) + " launch: " +
-                             cudaGetErrorString(err));
+    throw std::runtime_error(std::string(kernel_name) +
+                             " launch: " + cudaGetErrorString(err));
 }
 
 } // namespace
@@ -87,12 +87,13 @@ __global__ void pack_check_matrix_transposed_rowwise_kernel(
     if (check < num_checks) {
       const uint64_t idx =
           static_cast<uint64_t>(check) * num_error_mechanisms + error_mech;
-      packed |= (static_cast<uint32_t>(__ldg(&d_check_matrix[idx]) & 1u) << bit);
+      packed |=
+          (static_cast<uint32_t>(__ldg(&d_check_matrix[idx]) & 1u) << bit);
     }
   }
 
-  d_check_t_packed[static_cast<uint64_t>(error_mech) * checks_words + word_idx] =
-      packed;
+  d_check_t_packed[static_cast<uint64_t>(error_mech) * checks_words +
+                   word_idx] = packed;
 }
 
 void pack_check_matrix_transposed_rowwise(const uint8_t *d_check_matrix,
@@ -116,10 +117,9 @@ void pack_check_matrix_transposed_rowwise(const uint8_t *d_check_matrix,
 }
 
 // ── Syndrome unpacking: [S × words] uint32 → [S × M] uint8 ────────────────
-__global__ void
-unpack_syndromes_kernel(const uint32_t *__restrict__ d_packed,
-                        uint8_t *__restrict__ d_unpacked, uint64_t S,
-                        uint64_t M) {
+__global__ void unpack_syndromes_kernel(const uint32_t *__restrict__ d_packed,
+                                        uint8_t *__restrict__ d_unpacked,
+                                        uint64_t S, uint64_t M) {
   const uint64_t shot = blockIdx.x;
   const uint64_t check =
       static_cast<uint64_t>(blockIdx.y) * blockDim.x + threadIdx.x;

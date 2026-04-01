@@ -7,8 +7,8 @@
  ******************************************************************************/
 #include <algorithm>
 #include <cctype>
-#include <cstdint>
 #include <cmath>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <random>
@@ -19,8 +19,8 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include "cudaq/qec/dem_sampling.h"
 #include "type_casters.h"
+#include "cudaq/qec/dem_sampling.h"
 
 #include "cuda-qx/core/kwargs_utils.h"
 
@@ -81,10 +81,9 @@ py::array_t<double> asNumpyFloat64(py::object obj) {
 enum class DemSamplingBackend { Auto, Cpu, Gpu };
 
 DemSamplingBackend parseBackend(std::string backend) {
-  std::transform(backend.begin(), backend.end(), backend.begin(),
-                 [](unsigned char ch) {
-                   return static_cast<char>(std::tolower(ch));
-                 });
+  std::transform(
+      backend.begin(), backend.end(), backend.begin(),
+      [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
 
   if (backend == "auto")
     return DemSamplingBackend::Auto;
@@ -107,10 +106,10 @@ void validateInputShapes(const py::array_t<uint8_t> &check_matrix_np,
   auto num_mechanisms = static_cast<std::size_t>(h_buf.shape[1]);
   auto num_probs = static_cast<std::size_t>(p_buf.shape[0]);
   if (num_probs != num_mechanisms) {
-    throw std::runtime_error(
-        "dem_sampling: error_probabilities length (" +
-        std::to_string(num_probs) + ") != check_matrix columns (" +
-        std::to_string(num_mechanisms) + ")");
+    throw std::runtime_error("dem_sampling: error_probabilities length (" +
+                             std::to_string(num_probs) +
+                             ") != check_matrix columns (" +
+                             std::to_string(num_mechanisms) + ")");
   }
 }
 
@@ -154,9 +153,8 @@ public:
   ScopedCudaDevice(int target_device, std::string &failure_reason) {
     auto get_device_status = cudaGetDevice(&previous_device);
     if (get_device_status != cudaSuccess) {
-      failure_reason =
-          std::string("cudaGetDevice failed: ") +
-          cudaGetErrorString(get_device_status);
+      failure_reason = std::string("cudaGetDevice failed: ") +
+                       cudaGetErrorString(get_device_status);
       return;
     }
 
@@ -167,9 +165,8 @@ public:
     if (previous_device != active_device) {
       auto set_device_status = cudaSetDevice(active_device);
       if (set_device_status != cudaSuccess) {
-        failure_reason =
-            std::string("cudaSetDevice failed: ") +
-            cudaGetErrorString(set_device_status);
+        failure_reason = std::string("cudaSetDevice failed: ") +
+                         cudaGetErrorString(set_device_status);
         return;
       }
     }
@@ -218,8 +215,8 @@ bool getTorchDeviceIndex(const py::module_ &torch, const py::object &device,
   }
   if (device_index < 0 || device_index >= device_count) {
     failure_reason = "invalid CUDA device index " +
-                     std::to_string(device_index) + " (device_count=" +
-                     std::to_string(device_count) + ")";
+                     std::to_string(device_index) +
+                     " (device_count=" + std::to_string(device_count) + ")";
     return false;
   }
 
@@ -326,19 +323,18 @@ bool tryGpuSampling(const py::array_t<uint8_t> &check_matrix_np,
   }
 
   if (ok) {
-    syndromes_out = py::array_t<uint8_t>(
-        {static_cast<py::ssize_t>(numShots),
-         static_cast<py::ssize_t>(num_checks)});
-    errors_out = py::array_t<uint8_t>(
-        {static_cast<py::ssize_t>(numShots),
-         static_cast<py::ssize_t>(num_mechanisms)});
+    syndromes_out =
+        py::array_t<uint8_t>({static_cast<py::ssize_t>(numShots),
+                              static_cast<py::ssize_t>(num_checks)});
+    errors_out =
+        py::array_t<uint8_t>({static_cast<py::ssize_t>(numShots),
+                              static_cast<py::ssize_t>(num_mechanisms)});
 
     auto copy_syn_status = cudaMemcpy(syndromes_out.mutable_data(), d_syn.get(),
                                       syn_bytes, cudaMemcpyDeviceToHost);
     if (copy_syn_status != cudaSuccess) {
-      failure_reason =
-          std::string("failed to copy syndromes to host: ") +
-          cudaGetErrorString(copy_syn_status);
+      failure_reason = std::string("failed to copy syndromes to host: ") +
+                       cudaGetErrorString(copy_syn_status);
       return false;
     }
 
@@ -355,10 +351,10 @@ bool tryGpuSampling(const py::array_t<uint8_t> &check_matrix_np,
   return ok;
 }
 
-bool tryTorchGpuSampling(py::object check_matrix_obj, py::object error_probs_obj,
-                         std::size_t numShots, unsigned seed,
-                         py::tuple &result_out, std::string &failure_reason,
-                         bool allow_move_to_cuda) {
+bool tryTorchGpuSampling(py::object check_matrix_obj,
+                         py::object error_probs_obj, std::size_t numShots,
+                         unsigned seed, py::tuple &result_out,
+                         std::string &failure_reason, bool allow_move_to_cuda) {
   py::module_ torch;
   try {
     torch = py::module_::import("torch");
@@ -403,8 +399,10 @@ bool tryTorchGpuSampling(py::object check_matrix_obj, py::object error_probs_obj
     return false;
   }
 
-  check_t = check_t.attr("to")("device"_a = device, "dtype"_a = torch.attr("uint8"));
-  probs_t = probs_t.attr("to")("device"_a = device, "dtype"_a = torch.attr("float64"));
+  check_t =
+      check_t.attr("to")("device"_a = device, "dtype"_a = torch.attr("uint8"));
+  probs_t = probs_t.attr("to")("device"_a = device,
+                               "dtype"_a = torch.attr("float64"));
   check_t = check_t.attr("contiguous")();
   probs_t = probs_t.attr("contiguous")();
 
@@ -420,7 +418,8 @@ bool tryTorchGpuSampling(py::object check_matrix_obj, py::object error_probs_obj
     return false;
   }
 
-  auto num_checks = static_cast<std::size_t>(check_shape[0].cast<py::ssize_t>());
+  auto num_checks =
+      static_cast<std::size_t>(check_shape[0].cast<py::ssize_t>());
   auto num_mechanisms =
       static_cast<std::size_t>(check_shape[1].cast<py::ssize_t>());
   auto num_probs = static_cast<std::size_t>(probs_shape[0].cast<py::ssize_t>());
@@ -430,10 +429,8 @@ bool tryTorchGpuSampling(py::object check_matrix_obj, py::object error_probs_obj
     return false;
   }
 
-  bool all_finite = torch.attr("isfinite")(probs_t)
-                        .attr("all")()
-                        .attr("item")()
-                        .cast<bool>();
+  bool all_finite =
+      torch.attr("isfinite")(probs_t).attr("all")().attr("item")().cast<bool>();
   bool any_below_zero =
       probs_t.attr("lt")(0.0).attr("any")().attr("item")().cast<bool>();
   bool any_above_one =
@@ -457,23 +454,23 @@ bool tryTorchGpuSampling(py::object check_matrix_obj, py::object error_probs_obj
                                    failure_reason))
     return false;
 
-  py::object syndromes_t = torch.attr("empty")(
-      py::make_tuple(static_cast<py::ssize_t>(numShots),
-                     static_cast<py::ssize_t>(num_checks)),
-      "dtype"_a = torch.attr("uint8"), "device"_a = device);
+  py::object syndromes_t =
+      torch.attr("empty")(py::make_tuple(static_cast<py::ssize_t>(numShots),
+                                         static_cast<py::ssize_t>(num_checks)),
+                          "dtype"_a = torch.attr("uint8"), "device"_a = device);
   py::object errors_t = torch.attr("empty")(
       py::make_tuple(static_cast<py::ssize_t>(numShots),
                      static_cast<py::ssize_t>(num_mechanisms)),
       "dtype"_a = torch.attr("uint8"), "device"_a = device);
 
-  auto d_H =
-      reinterpret_cast<const uint8_t *>(check_t.attr("data_ptr")().cast<std::uintptr_t>());
-  auto d_probs =
-      reinterpret_cast<const double *>(probs_t.attr("data_ptr")().cast<std::uintptr_t>());
+  auto d_H = reinterpret_cast<const uint8_t *>(
+      check_t.attr("data_ptr")().cast<std::uintptr_t>());
+  auto d_probs = reinterpret_cast<const double *>(
+      probs_t.attr("data_ptr")().cast<std::uintptr_t>());
   auto d_syn = reinterpret_cast<uint8_t *>(
       syndromes_t.attr("data_ptr")().cast<std::uintptr_t>());
-  auto d_err =
-      reinterpret_cast<uint8_t *>(errors_t.attr("data_ptr")().cast<std::uintptr_t>());
+  auto d_err = reinterpret_cast<uint8_t *>(
+      errors_t.attr("data_ptr")().cast<std::uintptr_t>());
 
   bool ok = gpu::sample_dem(d_H, num_checks, num_mechanisms, d_probs, numShots,
                             seed, d_syn, d_err, stream_handle);
@@ -509,9 +506,8 @@ void bindDemSampling(py::module &mod) {
         const auto backend_mode = parseBackend(std::move(backend));
 
         unsigned actual_seed =
-            seed.has_value()
-                ? seed.value()
-                : static_cast<unsigned>(std::random_device{}());
+            seed.has_value() ? seed.value()
+                             : static_cast<unsigned>(std::random_device{}());
 
 #ifdef CUDAQ_QEC_HAS_CUSTABILIZER
         std::string torch_gpu_failure_reason = "not attempted";
@@ -523,8 +519,7 @@ void bindDemSampling(py::module &mod) {
           bool allow_move_to_cuda = backend_mode == DemSamplingBackend::Gpu;
           if (tryTorchGpuSampling(check_matrix_obj, error_probs_obj, numShots,
                                   actual_seed, torch_result,
-                                  torch_gpu_failure_reason,
-                                  allow_move_to_cuda))
+                                  torch_gpu_failure_reason, allow_move_to_cuda))
             return torch_result;
         }
 #endif
@@ -547,7 +542,8 @@ void bindDemSampling(py::module &mod) {
             throw std::runtime_error(
                 "dem_sampling: GPU backend requested but unavailable. "
                 "torch path: " +
-                torch_gpu_failure_reason + "; numpy path: " + gpu_failure_reason);
+                torch_gpu_failure_reason +
+                "; numpy path: " + gpu_failure_reason);
           }
         }
 #elif !defined(CUDAQ_QEC_HAS_CUSTABILIZER)

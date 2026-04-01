@@ -5,7 +5,6 @@
 # This source code and the accompanying materials are made available under     #
 # the terms of the Apache License 2.0 which accompanies this distribution.    #
 # ============================================================================ #
-
 """Tests for cudaq_qec.dem_sampling (GPU with cuStabilizer + CPU fallback)."""
 
 import numpy as np
@@ -36,16 +35,15 @@ def _has_runtime_gpu_backend():
 
 _HAS_RUNTIME_GPU_BACKEND = _has_runtime_gpu_backend()
 
-
 # ---------------------------------------------------------------------------
 # Deterministic tests (numpy input)
 # ---------------------------------------------------------------------------
 
+
 class TestAllZeroProbabilities:
+
     def test_all_zeros(self):
-        H = np.array([[1, 0, 1, 0],
-                       [0, 1, 1, 0],
-                       [0, 0, 0, 1]], dtype=np.uint8)
+        H = np.array([[1, 0, 1, 0], [0, 1, 1, 0], [0, 0, 0, 1]], dtype=np.uint8)
         probs = np.zeros(4)
         syndromes, errors = dem_sampling(H, 10, probs, seed=0)
 
@@ -56,10 +54,9 @@ class TestAllZeroProbabilities:
 
 
 class TestAllOneProbabilities:
+
     def test_all_ones(self):
-        H = np.array([[1, 0, 1, 0],
-                       [1, 1, 0, 1],
-                       [0, 1, 1, 0]], dtype=np.uint8)
+        H = np.array([[1, 0, 1, 0], [1, 1, 0, 1], [0, 1, 1, 0]], dtype=np.uint8)
         probs = np.ones(4)
         syndromes, errors = dem_sampling(H, 5, probs, seed=0)
 
@@ -71,9 +68,9 @@ class TestAllOneProbabilities:
 
 
 class TestMixedDeterministicProbs:
+
     def test_mixed(self):
-        H = np.array([[1, 0, 1],
-                       [0, 1, 1]], dtype=np.uint8)
+        H = np.array([[1, 0, 1], [0, 1, 1]], dtype=np.uint8)
         probs = np.array([1.0, 0.0, 1.0])
         syndromes, errors = dem_sampling(H, 8, probs, seed=42)
 
@@ -86,6 +83,7 @@ class TestMixedDeterministicProbs:
 
 
 class TestIdentityMatrix:
+
     def test_identity_all_ones(self):
         H = np.eye(5, dtype=np.uint8)
         probs = np.ones(5)
@@ -106,6 +104,7 @@ class TestIdentityMatrix:
 
 
 class TestAllOnesMatrix:
+
     def test_even_columns(self):
         H = np.ones((3, 4), dtype=np.uint8)
         probs = np.ones(4)
@@ -124,6 +123,7 @@ class TestAllOnesMatrix:
 
 
 class TestSingleColumnMatrix:
+
     def test_single_column(self):
         H = np.array([[1], [0], [1]], dtype=np.uint8)
         probs = np.array([1.0])
@@ -136,6 +136,7 @@ class TestSingleColumnMatrix:
 
 
 class TestSingleRowMatrix:
+
     def test_single_row(self):
         H = np.array([[1, 1, 0, 1, 0]], dtype=np.uint8)
         probs = np.array([1.0, 0.0, 1.0, 0.0, 1.0])
@@ -148,9 +149,9 @@ class TestSingleRowMatrix:
 
 
 class TestSingleShot:
+
     def test_single_shot(self):
-        H = np.array([[1, 1, 0],
-                       [0, 1, 1]], dtype=np.uint8)
+        H = np.array([[1, 1, 0], [0, 1, 1]], dtype=np.uint8)
         probs = np.array([1.0, 1.0, 0.0])
         syndromes, errors = dem_sampling(H, 1, probs, seed=0)
 
@@ -160,10 +161,9 @@ class TestSingleShot:
 
 
 class TestRepetitionCode:
+
     def test_single_error(self):
-        H = np.array([[1, 1, 0, 0],
-                       [0, 1, 1, 0],
-                       [0, 0, 1, 1]], dtype=np.uint8)
+        H = np.array([[1, 1, 0, 0], [0, 1, 1, 0], [0, 0, 1, 1]], dtype=np.uint8)
         probs = np.array([0.0, 1.0, 0.0, 0.0])
         syndromes, errors = dem_sampling(H, 3, probs, seed=0)
 
@@ -176,13 +176,15 @@ class TestRepetitionCode:
 
 
 class TestSyndromeConsistency:
+
     def test_fixed_matrix(self):
         H = np.array([
             [1, 0, 1, 0, 0, 1, 0, 0],
             [0, 1, 0, 1, 0, 0, 1, 0],
             [0, 0, 1, 0, 1, 0, 0, 1],
             [1, 1, 0, 0, 0, 0, 1, 1],
-        ], dtype=np.uint8)
+        ],
+                     dtype=np.uint8)
         probs = np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8])
         syndromes, errors = dem_sampling(H, 500, probs, seed=7)
 
@@ -191,6 +193,7 @@ class TestSyndromeConsistency:
 
 
 class TestSeedReproducibility:
+
     def test_same_seed(self):
         H = np.eye(5, dtype=np.uint8)
         probs = np.array([0.1, 0.3, 0.5, 0.7, 0.9])
@@ -212,6 +215,7 @@ class TestSeedReproducibility:
 
 
 class TestOutputProperties:
+
     def test_shapes_and_dtypes(self):
         H = np.array([[1, 0, 1], [0, 1, 1]], dtype=np.uint8)
         probs = np.array([0.1, 0.2, 0.3])
@@ -232,6 +236,7 @@ class TestOutputProperties:
 
 
 class TestInputValidation:
+
     def test_non_2d_matrix(self):
         with pytest.raises((ValueError, RuntimeError)):
             dem_sampling(np.zeros(5, dtype=np.uint8), 10, np.zeros(5))
@@ -280,13 +285,15 @@ class TestInputValidation:
             pytest.skip("PyTorch CUDA unavailable")
 
         H = torch_mod.eye(3, dtype=torch_mod.uint8, device="cuda")
-        probs = torch_mod.tensor([0.1, 1.1, 0.3], dtype=torch_mod.float64,
+        probs = torch_mod.tensor([0.1, 1.1, 0.3],
+                                 dtype=torch_mod.float64,
                                  device="cuda")
         with pytest.raises((ValueError, RuntimeError)):
             dem_sampling(H, 10, probs, backend="gpu")
 
 
 class TestBackendSelection:
+
     def test_invalid_backend(self):
         H = np.eye(2, dtype=np.uint8)
         probs = np.array([0.1, 0.2], dtype=np.float64)
@@ -294,8 +301,7 @@ class TestBackendSelection:
             dem_sampling(H, 4, probs, seed=1, backend="not-a-backend")
 
     def test_force_cpu_backend(self):
-        H = np.array([[1, 0, 1],
-                      [0, 1, 1]], dtype=np.uint8)
+        H = np.array([[1, 0, 1], [0, 1, 1]], dtype=np.uint8)
         probs = np.array([1.0, 0.0, 1.0], dtype=np.float64)
         syndromes, errors = dem_sampling(H, 5, probs, seed=11, backend="cpu")
 
@@ -308,8 +314,7 @@ class TestBackendSelection:
     @pytest.mark.skipif(not _HAS_RUNTIME_GPU_BACKEND,
                         reason="GPU backend unavailable in this environment")
     def test_force_gpu_backend(self):
-        H = np.array([[1, 0, 1],
-                      [0, 1, 1]], dtype=np.uint8)
+        H = np.array([[1, 0, 1], [0, 1, 1]], dtype=np.uint8)
         probs = np.array([1.0, 0.0, 1.0], dtype=np.float64)
         syndromes, errors = dem_sampling(H, 5, probs, seed=11, backend="gpu")
 
@@ -333,10 +338,10 @@ except ImportError:
 
 @pytest.mark.skipif(not _HAS_TORCH, reason="PyTorch not installed")
 class TestPyTorchInput:
+
     def test_cpu_tensors(self):
-        H = torch.tensor([[1, 0, 1, 0],
-                          [0, 1, 1, 0],
-                          [0, 0, 0, 1]], dtype=torch.uint8)
+        H = torch.tensor([[1, 0, 1, 0], [0, 1, 1, 0], [0, 0, 0, 1]],
+                         dtype=torch.uint8)
         probs = torch.tensor([1.0, 0.0, 1.0, 0.0], dtype=torch.float64)
         syndromes, errors = dem_sampling(H, 5, probs, seed=42)
 
@@ -351,8 +356,7 @@ class TestPyTorchInput:
 
     def test_matches_numpy_input(self):
         """Verify PyTorch and NumPy inputs produce identical results."""
-        H_np = np.array([[1, 0, 1],
-                         [0, 1, 1]], dtype=np.uint8)
+        H_np = np.array([[1, 0, 1], [0, 1, 1]], dtype=np.uint8)
         probs_np = np.array([0.3, 0.5, 0.7])
 
         H_torch = torch.from_numpy(H_np)
@@ -365,8 +369,7 @@ class TestPyTorchInput:
         np.testing.assert_array_equal(e_np, e_torch)
 
     def test_force_cpu_backend(self):
-        H = torch.tensor([[1, 0, 1],
-                          [0, 1, 1]], dtype=torch.uint8)
+        H = torch.tensor([[1, 0, 1], [0, 1, 1]], dtype=torch.uint8)
         probs = torch.tensor([1.0, 0.0, 1.0], dtype=torch.float64)
         syndromes, errors = dem_sampling(H, 4, probs, seed=7, backend="cpu")
 
@@ -378,9 +381,9 @@ class TestPyTorchInput:
 
     def test_cpu_torch_probs_with_grad(self):
         """CPU path should accept torch tensors that require gradients."""
-        H = torch.tensor([[1, 0, 1],
-                          [0, 1, 1]], dtype=torch.uint8)
-        probs = torch.tensor([1.0, 0.0, 1.0], dtype=torch.float64,
+        H = torch.tensor([[1, 0, 1], [0, 1, 1]], dtype=torch.uint8)
+        probs = torch.tensor([1.0, 0.0, 1.0],
+                             dtype=torch.float64,
                              requires_grad=True)
         syndromes, errors = dem_sampling(H, 4, probs, seed=7, backend="cpu")
 
@@ -393,8 +396,7 @@ class TestPyTorchInput:
     @pytest.mark.skipif(not _HAS_RUNTIME_GPU_BACKEND,
                         reason="GPU backend unavailable in this environment")
     def test_force_gpu_backend(self):
-        H = torch.tensor([[1, 0, 1],
-                          [0, 1, 1]], dtype=torch.uint8)
+        H = torch.tensor([[1, 0, 1], [0, 1, 1]], dtype=torch.uint8)
         probs = torch.tensor([1.0, 0.0, 1.0], dtype=torch.float64)
         syndromes, errors = dem_sampling(H, 4, probs, seed=7, backend="gpu")
 
@@ -408,15 +410,16 @@ class TestPyTorchInput:
         expected_errors = np.array([1, 0, 1], dtype=np.uint8)
         expected_syn = np.array([0, 1], dtype=np.uint8)
         for shot in range(4):
-            np.testing.assert_array_equal(errors[shot].cpu().numpy(), expected_errors)
-            np.testing.assert_array_equal(syndromes[shot].cpu().numpy(), expected_syn)
+            np.testing.assert_array_equal(errors[shot].cpu().numpy(),
+                                          expected_errors)
+            np.testing.assert_array_equal(syndromes[shot].cpu().numpy(),
+                                          expected_syn)
 
     @pytest.mark.skipif(not (_HAS_TORCH and torch.cuda.is_available()),
                         reason="CUDA not available for PyTorch")
     def test_cuda_tensors(self):
         """CUDA tensors should stay on device in torch GPU path."""
-        H = torch.tensor([[1, 0, 1],
-                          [0, 1, 1]], dtype=torch.uint8).cuda()
+        H = torch.tensor([[1, 0, 1], [0, 1, 1]], dtype=torch.uint8).cuda()
         probs = torch.tensor([1.0, 0.0, 1.0], dtype=torch.float64).cuda()
         syndromes, errors = dem_sampling(H, 4, probs, seed=7)
 
@@ -432,19 +435,25 @@ class TestPyTorchInput:
         expected_errors = np.array([1, 0, 1], dtype=np.uint8)
         expected_syn = np.array([0, 1], dtype=np.uint8)
         for shot in range(4):
-            np.testing.assert_array_equal(errors[shot].cpu().numpy(), expected_errors)
-            np.testing.assert_array_equal(syndromes[shot].cpu().numpy(), expected_syn)
+            np.testing.assert_array_equal(errors[shot].cpu().numpy(),
+                                          expected_errors)
+            np.testing.assert_array_equal(syndromes[shot].cpu().numpy(),
+                                          expected_syn)
 
     @pytest.mark.skipif(
-        not (_HAS_RUNTIME_GPU_BACKEND and _HAS_TORCH and torch.cuda.is_available()),
+        not (_HAS_RUNTIME_GPU_BACKEND and _HAS_TORCH and
+             torch.cuda.is_available()),
         reason="GPU backend unavailable for CUDA stream test",
     )
     def test_non_default_cuda_stream(self):
         """GPU path must honor torch's current (non-default) CUDA stream."""
         device = torch.device("cuda")
-        H = torch.tensor([[1, 0, 1],
-                          [0, 1, 1]], dtype=torch.uint8, device=device)
-        probs = torch.tensor([1.0, 0.0, 1.0], dtype=torch.float64, device=device)
+        H = torch.tensor([[1, 0, 1], [0, 1, 1]],
+                         dtype=torch.uint8,
+                         device=device)
+        probs = torch.tensor([1.0, 0.0, 1.0],
+                             dtype=torch.float64,
+                             device=device)
         stream = torch.cuda.Stream(device=device)
 
         with torch.cuda.stream(stream):
@@ -454,8 +463,12 @@ class TestPyTorchInput:
             assert syndromes.device == device
             assert errors.device == device
 
-            expected_errors = torch.tensor([1, 0, 1], dtype=torch.uint8, device=device)
-            expected_syn = torch.tensor([0, 1], dtype=torch.uint8, device=device)
+            expected_errors = torch.tensor([1, 0, 1],
+                                           dtype=torch.uint8,
+                                           device=device)
+            expected_syn = torch.tensor([0, 1],
+                                        dtype=torch.uint8,
+                                        device=device)
             for shot in range(4):
                 assert torch.equal(errors[shot], expected_errors)
                 assert torch.equal(syndromes[shot], expected_syn)
@@ -463,15 +476,19 @@ class TestPyTorchInput:
         stream.synchronize()
 
     @pytest.mark.skipif(
-        not (_HAS_RUNTIME_GPU_BACKEND and _HAS_TORCH and torch.cuda.device_count() > 1),
+        not (_HAS_RUNTIME_GPU_BACKEND and _HAS_TORCH and
+             torch.cuda.device_count() > 1),
         reason="Requires runtime GPU backend and at least two CUDA devices",
     )
     def test_multi_gpu_device_routing(self):
         """GPU path should execute on and return tensors from the input device."""
         device = torch.device("cuda:1")
-        H = torch.tensor([[1, 0, 1],
-                          [0, 1, 1]], dtype=torch.uint8, device=device)
-        probs = torch.tensor([1.0, 0.0, 1.0], dtype=torch.float64, device=device)
+        H = torch.tensor([[1, 0, 1], [0, 1, 1]],
+                         dtype=torch.uint8,
+                         device=device)
+        probs = torch.tensor([1.0, 0.0, 1.0],
+                             dtype=torch.float64,
+                             device=device)
 
         syndromes, errors = dem_sampling(H, 4, probs, seed=7, backend="gpu")
         assert isinstance(syndromes, torch.Tensor)
@@ -479,7 +496,9 @@ class TestPyTorchInput:
         assert syndromes.device == device
         assert errors.device == device
 
-        expected_errors = torch.tensor([1, 0, 1], dtype=torch.uint8, device=device)
+        expected_errors = torch.tensor([1, 0, 1],
+                                       dtype=torch.uint8,
+                                       device=device)
         expected_syn = torch.tensor([0, 1], dtype=torch.uint8, device=device)
         for shot in range(4):
             assert torch.equal(errors[shot], expected_errors)
@@ -492,7 +511,8 @@ class TestPyTorchInput:
             [0, 1, 0, 1, 0, 0, 1, 0],
             [0, 0, 1, 0, 1, 0, 0, 1],
             [1, 1, 0, 0, 0, 0, 1, 1],
-        ], dtype=np.uint8)
+        ],
+                        dtype=np.uint8)
         probs_np = np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8])
 
         H = torch.from_numpy(H_np)
