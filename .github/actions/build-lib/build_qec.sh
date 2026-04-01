@@ -10,7 +10,7 @@ if [ -z "$CUDAQ_REALTIME_ROOT" ]; then
   cd cuda-quantum
   git sparse-checkout init --cone
   git sparse-checkout set realtime
-  git checkout 3c4faa5b21068dc4e92427e76498d7eeb90272d3 # features/cudaq.realtime
+  git checkout 9ce3d2e886c92800ff02665a6f077cffabc86b66 # main
   cd realtime
   mkdir build && cd build
   cmake -G Ninja -DCMAKE_INSTALL_PREFIX="$CUDAQ_REALTIME_ROOT" ..
