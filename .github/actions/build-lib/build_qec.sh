@@ -23,7 +23,7 @@ if [ -z "$CUDAQ_REALTIME_ROOT" ]; then
   # and Holoscan SDK that we actually need.
   CUDA_MAJOR_VERSION=$(nvcc --version | sed -n 's/^.*release \([0-9]\+\).*$/\1/p')
   apt-get update && apt-get install -y --no-install-recommends \
-    ninja-build curl
+    ninja-build curl pkg-config
   # HSB -> find_package(holoscan) -> rapids_logger requires cmake >= 3.30.4;
   # the CI container ships cmake 3.28.
   pip install cmake
