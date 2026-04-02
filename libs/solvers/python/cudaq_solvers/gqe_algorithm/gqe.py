@@ -377,6 +377,9 @@ def gqe(cost, pool, config=None, **kwargs):
 
     # Don't let someone override the vocab_size
     cfg.vocab_size = len(pool)
+    if torch.cuda.is_available():
+        torch.cuda.init()
+        torch.empty(1, device="cuda")
     cudaqTarget = cudaq.get_target()
     numQPUs = cudaqTarget.num_qpus()
     model = Transformer(
