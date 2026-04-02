@@ -214,10 +214,12 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
     # references CUDA-Q quantum runtime symbols. Satisfy them here.
     find_library(_CUDAQ_LIBRARY NAMES cudaq
       PATHS ${CUDAQ_INSTALL_PREFIX} $ENV{CUDAQ_INSTALL_PREFIX}
-      PATH_SUFFIXES lib NO_DEFAULT_PATH)
+            ${CUDAQ_DIR}/.. $ENV{CUDAQ_DIR}/..
+      PATH_SUFFIXES lib)
     find_library(_NVQIR_LIBRARY NAMES nvqir
       PATHS ${CUDAQ_INSTALL_PREFIX} $ENV{CUDAQ_INSTALL_PREFIX}
-      PATH_SUFFIXES lib NO_DEFAULT_PATH)
+            ${CUDAQ_DIR}/.. $ENV{CUDAQ_DIR}/..
+      PATH_SUFFIXES lib)
 
     add_executable(test_realtime_qldpc_graph_decoding
       ${CMAKE_CURRENT_SOURCE_DIR}/realtime/qec_graph_decode_test/test_realtime_qldpc_graph_decoding.cpp
@@ -240,8 +242,8 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
       ${CUDAQ_REALTIME_LIBRARY}
       $<$<BOOL:${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}>:${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}>
       cudaq-qec-realtime-decoding
-      ${_CUDAQ_LIBRARY}
-      ${_NVQIR_LIBRARY}
+      $<$<BOOL:${_CUDAQ_LIBRARY}>:${_CUDAQ_LIBRARY}>
+      $<$<BOOL:${_NVQIR_LIBRARY}>:${_NVQIR_LIBRARY}>
     )
 
     target_link_options(test_realtime_qldpc_graph_decoding PRIVATE

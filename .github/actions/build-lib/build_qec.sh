@@ -17,7 +17,7 @@ if [ -z "$CUDAQ_REALTIME_ROOT" ]; then
   git checkout $CUDAQ_REALTIME_REF
 
   # Install DOCA, Holoscan SDK, libibverbs, and nvcomp (needed for HSB)
-  apt-get update && apt-get install -y --no-install-recommends ninja-build nvcomp
+  apt-get update && apt-get install -y --no-install-recommends ninja-build nvcomp gnupg
   bash realtime/scripts/install_dev_prerequisites.sh
 
   # Build holoscan-sensor-bridge (hololink) FIRST, so cuda-quantum realtime
