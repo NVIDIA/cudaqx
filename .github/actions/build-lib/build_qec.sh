@@ -19,7 +19,37 @@ if [ -z "$CUDAQ_REALTIME_ROOT" ]; then
   cd "$_build_cwd"
 fi
 
-if [ -z "$CUSTABILIZER_ROOT" ] && [ -x "$(command -v python3)" ]; then
+REQUIRE_CUSTABILIZER=${REQUIRE_CUSTABILIZER:-ON}
+REQUIRE_CUSTABILIZER_GPU_TORCH=${REQUIRE_CUSTABILIZER_GPU_TORCH:-ON}
+
+# Enforce: cuStabilizer OFF forces GPU Torch OFF
+if [ "$REQUIRE_CUSTABILIZER" = "OFF" ]; then
+  REQUIRE_CUSTABILIZER_GPU_TORCH="OFF"
+fi
+
+# Install cuStabilizer dependencies if required
+if [ "$REQUIRE_CUSTABILIZER" = "ON" ] && [ -z "$CUSTABILIZER_ROOT" ] && [ -x "$(command -v python3)" ]; then
+  NVCC_BIN=${CUDACXX:-$(command -v nvcc)}
+  CUDA_MAJOR=""
+  if [ -n "$NVCC_BIN" ] && [ -x "$NVCC_BIN" ]; then
+    CUDA_MAJOR=$("$NVCC_BIN" --version | sed -nE 's/.*release ([0-9]+)\..*/\1/p' | head -n 1)
+  fi
+  CUSTAB_PIP="custabilizer-cu${CUDA_MAJOR:-12}"
+  CUQPY_PIP="cuquantum-python-cu${CUDA_MAJOR:-12}"
+  pip install --upgrade "${CUSTAB_PIP}>=0.3.0" "${CUQPY_PIP}>=26.3.0"
+fi
+
+# Install Torch if GPU Torch path is required
+if [ "$REQUIRE_CUSTABILIZER_GPU_TORCH" = "ON" ] && [ -x "$(command -v python3)" ]; then
+  NVCC_BIN=${CUDACXX:-$(command -v nvcc)}
+  if [ -n "$NVCC_BIN" ] && [ -x "$NVCC_BIN" ]; then
+    cuda_version=$("$NVCC_BIN" --version | sed -nE 's/.*release ([0-9]+\.[0-9]+).*/\1/p' | head -n 1)
+    cuda_no_dot=$(echo "$cuda_version" | tr -d '.')
+    pip install torch==2.9.0 --index-url "https://download.pytorch.org/whl/cu${cuda_no_dot}" || true
+  fi
+fi
+
+if [ -z "$CUSTABILIZER_ROOT" ] && [ "$REQUIRE_CUSTABILIZER" = "ON" ] && [ -x "$(command -v python3)" ]; then
   if [ -z "$CUSTABILIZER_PIP_PACKAGE" ]; then
     CUDA_MAJOR=""
     NVCC_BIN=${CUDACXX:-$(command -v nvcc)}
@@ -99,7 +129,7 @@ cmake -S libs/qec -B "$1" \
   ${CUSTABILIZER_CMAKE_ARG:+$CUSTABILIZER_CMAKE_ARG} \
   -DCUDAQX_INCLUDE_TESTS=ON \
   -DCUDAQX_BINDINGS_PYTHON=ON \
-  -DCUDAQ_QEC_REQUIRE_CUSTABILIZER=ON \
+  -DCUDAQ_QEC_REQUIRE_CUSTABILIZER=$REQUIRE_CUSTABILIZER \
   -DCMAKE_INSTALL_PREFIX="$2" \
   -DCUDAQ_REALTIME_ROOT=$CUDAQ_REALTIME_ROOT
 

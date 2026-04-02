@@ -23,6 +23,14 @@ inputs:
     description: 'Install prefix'
     default: '~/.cudaqx'
     required: false
+  require-custabilizer:
+    description: 'Enable cuStabilizer GPU DEM sampling (ON or OFF)'
+    default: 'ON'
+    required: false
+  require-custabilizer-gpu-torch:
+    description: 'Install PyTorch for GPU Torch tensor path (ON or OFF, requires custabilizer ON)'
+    default: 'ON'
+    required: false
 outputs:
   build-dir:
     description: 'Build dir.'
@@ -66,6 +74,8 @@ runs:
       env:
         CCACHE_DIR: /ccache-${{ inputs.lib }}
         GH_TOKEN: ${{ github.token }} # REVERT-WITH-CUDAQ-REALTIME-BUILD
+        REQUIRE_CUSTABILIZER: ${{ inputs.require-custabilizer }}
+        REQUIRE_CUSTABILIZER_GPU_TORCH: ${{ inputs.require-custabilizer-gpu-torch }}
       run: |
         build_dir=build_${{ inputs.lib }}
         .github/actions/build-lib/build_${{ inputs.lib }}.sh $build_dir ${{ inputs.install-prefix }}

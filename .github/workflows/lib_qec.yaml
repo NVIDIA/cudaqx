@@ -12,6 +12,8 @@ jobs:
       matrix:
         platform: ['amd64', 'arm64']
         cuda_version: ['12.6', '13.0']
+        custabilizer: ['ON']
+        custabilizer_gpu_torch: ['ON']
     runs-on: ${{ startsWith(github.repository, 'NVIDIA/cudaqx') && format('linux-{0}-cpu8', matrix.platform) || 'ubuntu-latest' }}
     container: ghcr.io/nvidia/cuda-quantum-devcontainer:${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc11-main
     permissions:
@@ -64,7 +66,6 @@ jobs:
       - name: Install build requirements
         run: |
           apt install -y --no-install-recommends gfortran libblas-dev wget
-          pip install --upgrade cuquantum-python-cu${{ steps.config.outputs.cuda_major }}>=26.3.0 custabilizer-cu${{ steps.config.outputs.cuda_major }}>=0.3.0
 
       - name: Install TensorRT (amd64)
         if: matrix.platform == 'amd64'
@@ -89,6 +90,8 @@ jobs:
           pr-number: ${{ steps.export-pr-info.outputs.pr_number }}
           save-ccache: true
           platform: ${{ matrix.platform }}
+          require-custabilizer: ${{ matrix.custabilizer }}
+          require-custabilizer-gpu-torch: ${{ matrix.custabilizer_gpu_torch }}
 
       # ========================================================================
       # Run tests
@@ -118,9 +121,6 @@ jobs:
       - name: Install python requirements
         shell: bash
         run: |
-          # Install the correct torch first.
-          cuda_no_dot=$(echo ${{ matrix.cuda_version }} | sed 's/\.//')
-          pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu${cuda_no_dot}
           pip install --upgrade numpy pytest onnxscript cupy-cuda${{ steps.config.outputs.cuda_major }}x cuquantum-cu${{ steps.config.outputs.cuda_major }} quimb opt_einsum nvidia-cublas cuquantum-python-cu${{ steps.config.outputs.cuda_major }}>=26.3.0 custabilizer-cu${{ steps.config.outputs.cuda_major }}>=0.3.0
           echo "=== cuStabilizer verification ==="
           pip show custabilizer-cu${{ steps.config.outputs.cuda_major }} | grep Version
