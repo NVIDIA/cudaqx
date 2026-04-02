@@ -250,16 +250,28 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
       "LINKER:--allow-shlib-undefined"
     )
 
+    # Resolve CUDAQ SDK lib dir for RPATH (libnvqir, libcudaq)
+    set(_cudaq_sdk_lib_dir "")
+    if(CUDAQ_INSTALL_PREFIX)
+      set(_cudaq_sdk_lib_dir "${CUDAQ_INSTALL_PREFIX}/lib")
+    elseif(CUDAQ_DIR)
+      get_filename_component(_cudaq_sdk_lib_dir "${CUDAQ_DIR}/../../.." ABSOLUTE)
+      set(_cudaq_sdk_lib_dir "${_cudaq_sdk_lib_dir}/lib")
+    endif()
+
     set_target_properties(test_realtime_qldpc_graph_decoding PROPERTIES
-      BUILD_RPATH "${CUDAQ_REALTIME_LIB_DIR};${CMAKE_BINARY_DIR}/lib/decoder-plugins"
-      INSTALL_RPATH "${CUDAQ_REALTIME_LIB_DIR};${CMAKE_BINARY_DIR}/lib/decoder-plugins"
+      BUILD_RPATH "${CUDAQ_REALTIME_LIB_DIR};${CMAKE_BINARY_DIR}/lib/decoder-plugins;${_cudaq_sdk_lib_dir}"
+      INSTALL_RPATH "${CUDAQ_REALTIME_LIB_DIR};${CMAKE_BINARY_DIR}/lib/decoder-plugins;${_cudaq_sdk_lib_dir}"
     )
 
     add_dependencies(CUDAQXQECUnitTests test_realtime_qldpc_graph_decoding)
-    # Not registered as a ctest: the test dynamically loads the nv-qldpc-decoder
-    # plugin and requires CUDA-Q quantum runtime symbols (libnvqir) at runtime,
-    # neither of which are available in CI. Building the target is sufficient to
-    # verify compilation.
+
+    if(QEC_EXTERNAL_DECODERS OR DEFINED ENV{QEC_EXTERNAL_DECODERS})
+      add_test(NAME test_realtime_qldpc_graph_decoding
+        COMMAND test_realtime_qldpc_graph_decoding)
+      set_tests_properties(test_realtime_qldpc_graph_decoding PROPERTIES
+        LABELS "qec")
+    endif()
 
   else()
     message(WARNING "cuda-quantum realtime dependency not found. "

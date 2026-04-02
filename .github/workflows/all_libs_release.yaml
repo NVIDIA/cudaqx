@@ -90,6 +90,28 @@ jobs:
           echo "cuda_major=$cuda_major" >> $GITHUB_OUTPUT
 
       # ========================================================================
+      # Build cuda-quantum realtime (base library, no Hololink tools)
+      # ========================================================================
+
+      - name: Build cuda-quantum realtime
+        run: |
+          CUDAQ_REALTIME_REPO=https://github.com/NVIDIA/cuda-quantum.git
+          CUDAQ_REALTIME_REF=9ce3d2e886
+          CUDAQ_REALTIME_ROOT=/tmp/cudaq-realtime
+          cd /tmp
+          rm -rf cudaq-realtime-src $CUDAQ_REALTIME_ROOT
+          git clone --filter=blob:none --no-checkout $CUDAQ_REALTIME_REPO cudaq-realtime-src
+          cd cudaq-realtime-src
+          git sparse-checkout init --cone
+          git sparse-checkout set realtime
+          git checkout $CUDAQ_REALTIME_REF
+          cd realtime && mkdir -p build && cd build
+          cmake -G Ninja -DCMAKE_INSTALL_PREFIX=$CUDAQ_REALTIME_ROOT ..
+          ninja && ninja install
+          echo "CUDAQ_REALTIME_ROOT=$CUDAQ_REALTIME_ROOT" >> $GITHUB_ENV
+        shell: bash
+
+      # ========================================================================
       # Build
       # ========================================================================
 
