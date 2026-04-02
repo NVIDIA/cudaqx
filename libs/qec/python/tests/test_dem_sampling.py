@@ -460,8 +460,8 @@ class TestPyTorchInput:
             syndromes, errors = dem_sampling(H, 4, probs, seed=7, backend="gpu")
             assert isinstance(syndromes, torch.Tensor)
             assert isinstance(errors, torch.Tensor)
-            assert syndromes.device == device
-            assert errors.device == device
+            assert syndromes.device.type == "cuda"
+            assert errors.device.type == "cuda"
 
             expected_errors = torch.tensor([1, 0, 1],
                                            dtype=torch.uint8,
@@ -521,3 +521,88 @@ class TestPyTorchInput:
         syndromes, errors = dem_sampling(H, 200, probs, seed=7)
         expected = _compute_syndrome(H_np, errors)
         np.testing.assert_array_equal(syndromes, expected)
+
+
+# ---------------------------------------------------------------------------
+# Edge-case tests
+# ---------------------------------------------------------------------------
+
+
+class TestZeroShots:
+
+    def test_zero_shots_numpy(self):
+        H = np.array([[1, 0, 1], [0, 1, 1]], dtype=np.uint8)
+        probs = np.array([0.1, 0.2, 0.3])
+        syndromes, errors = dem_sampling(H, 0, probs, seed=0)
+
+        assert syndromes.shape == (0, 2)
+        assert errors.shape == (0, 3)
+        assert syndromes.dtype == np.uint8
+        assert errors.dtype == np.uint8
+
+    def test_zero_shots_cpu_backend(self):
+        H = np.array([[1, 0], [0, 1]], dtype=np.uint8)
+        probs = np.array([0.5, 0.5])
+        syndromes, errors = dem_sampling(H, 0, probs, seed=0, backend="cpu")
+
+        assert syndromes.shape == (0, 2)
+        assert errors.shape == (0, 2)
+
+    @pytest.mark.skipif(not _HAS_RUNTIME_GPU_BACKEND,
+                        reason="GPU backend unavailable")
+    def test_zero_shots_gpu_backend(self):
+        H = np.array([[1, 0], [0, 1]], dtype=np.uint8)
+        probs = np.array([0.5, 0.5])
+        syndromes, errors = dem_sampling(H, 0, probs, seed=0, backend="gpu")
+
+        assert syndromes.shape == (0, 2)
+        assert errors.shape == (0, 2)
+
+
+class TestNonBinaryCheckMatrix:
+
+    def test_non_binary_entries_masked(self):
+        """H entries > 1 should be treated as H & 1 (binary)."""
+        H = np.array([[2, 3], [1, 0]], dtype=np.uint8)
+        probs = np.array([1.0, 1.0])
+        syndromes, errors = dem_sampling(H, 4, probs, seed=0, backend="cpu")
+
+        np.testing.assert_array_equal(errors, 1)
+        for shot in range(4):
+            assert syndromes[shot, 0] == 1, "Binarized [0,1]: sum=1 mod 2=1"
+            assert syndromes[shot, 1] == 1, "Binarized [1,0]: sum=1 mod 2=1"
+
+    @pytest.mark.skipif(not _HAS_RUNTIME_GPU_BACKEND,
+                        reason="GPU backend unavailable")
+    def test_non_binary_cpu_gpu_match(self):
+        """CPU and GPU must agree on non-binary H after binarization."""
+        H = np.array([[2, 3], [1, 0]], dtype=np.uint8)
+        probs = np.array([1.0, 1.0])
+
+        syn_cpu, err_cpu = dem_sampling(H, 4, probs, seed=0, backend="cpu")
+        syn_gpu, err_gpu = dem_sampling(H, 4, probs, seed=0, backend="gpu")
+
+        np.testing.assert_array_equal(err_cpu, err_gpu)
+        np.testing.assert_array_equal(syn_cpu, syn_gpu)
+
+
+class TestSeedlessPath:
+
+    def test_seedless_runs(self):
+        """Calling without seed should succeed and produce valid output."""
+        H = np.array([[1, 0, 1], [0, 1, 1]], dtype=np.uint8)
+        probs = np.array([0.3, 0.5, 0.7])
+        syndromes, errors = dem_sampling(H, 50, probs)
+
+        assert syndromes.shape == (50, 2)
+        assert errors.shape == (50, 3)
+        assert set(np.unique(syndromes)).issubset({0, 1})
+        assert set(np.unique(errors)).issubset({0, 1})
+
+    def test_seedless_nondeterministic(self):
+        """Two seedless calls should very likely produce different results."""
+        H = np.eye(10, dtype=np.uint8)
+        probs = np.full(10, 0.5)
+        _, e1 = dem_sampling(H, 500, probs)
+        _, e2 = dem_sampling(H, 500, probs)
+        assert not np.array_equal(e1, e2)

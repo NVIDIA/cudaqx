@@ -29,21 +29,23 @@ void custab_check(custabilizerStatus_t s, const char *msg) {
                              custabilizerGetErrorString(s));
 }
 
-struct CudaDeleter {
+struct StreamCudaDeleter {
+  cudaStream_t stream = nullptr;
   void operator()(void *p) const {
     if (p)
-      cudaFree(p);
+      cudaFreeAsync(p, stream);
   }
 };
 
 template <typename T>
-using DevicePtr = std::unique_ptr<T, CudaDeleter>;
+using DevicePtr = std::unique_ptr<T, StreamCudaDeleter>;
 
 template <typename T>
-DevicePtr<T> device_alloc(size_t count) {
+DevicePtr<T> device_alloc(size_t count, cudaStream_t stream) {
   T *p = nullptr;
-  cuda_check(cudaMalloc(&p, count * sizeof(T)), "cudaMalloc");
-  return DevicePtr<T>(p);
+  cuda_check(cudaMallocAsync(&p, count * sizeof(T), stream),
+             "cudaMallocAsync");
+  return DevicePtr<T>(p, StreamCudaDeleter{stream});
 }
 
 struct HandleRAII {
@@ -88,7 +90,8 @@ bool sample_dem(const uint8_t *d_check_matrix, size_t num_checks,
   uint64_t check_words = n_checks_padded / 32;
 
   // Pack H^T row-wise: [num_error_mechanisms × num_checks] -> [num_err × words]
-  auto d_ht_packed = device_alloc<uint32_t>(num_error_mechanisms * check_words);
+  auto d_ht_packed =
+      device_alloc<uint32_t>(num_error_mechanisms * check_words, stream);
   pack_check_matrix_transposed_rowwise(d_check_matrix, d_ht_packed.get(),
                                        num_checks, num_error_mechanisms,
                                        stream);
@@ -100,15 +103,17 @@ bool sample_dem(const uint8_t *d_check_matrix, size_t num_checks,
                    static_cast<int64_t>(num_error_mechanisms), &ws_size),
                "SparsePrepare");
 
-  auto d_workspace = device_alloc<uint8_t>(ws_size);
+  auto d_workspace = device_alloc<uint8_t>(ws_size, stream);
 
   // Initial capacity estimate: E[nnz] * 1.25 + 1024
-  // We'll read probabilities to host to estimate.
+  // Copy probabilities to host via the caller's stream to respect stream
+  // ordering (the data may have been produced by a kernel on this stream).
   std::vector<double> h_probs(num_error_mechanisms);
-  cuda_check(cudaMemcpy(h_probs.data(), d_error_probabilities,
-                        num_error_mechanisms * sizeof(double),
-                        cudaMemcpyDeviceToHost),
+  cuda_check(cudaMemcpyAsync(h_probs.data(), d_error_probabilities,
+                             num_error_mechanisms * sizeof(double),
+                             cudaMemcpyDeviceToHost, stream),
              "copy probs");
+  cuda_check(cudaStreamSynchronize(stream), "sync probs");
   double sum_p = 0.0;
   for (auto p : h_probs)
     sum_p += p;
@@ -119,8 +124,8 @@ bool sample_dem(const uint8_t *d_check_matrix, size_t num_checks,
   if (capacity < num_shots)
     capacity = num_shots;
 
-  auto d_row_offsets = device_alloc<uint64_t>(num_shots + 1);
-  auto d_col_indices = device_alloc<uint64_t>(capacity);
+  auto d_row_offsets = device_alloc<uint64_t>(num_shots + 1, stream);
+  auto d_col_indices = device_alloc<uint64_t>(capacity, stream);
 
   uint64_t nnz = capacity;
   custabilizerStatus_t status = custabilizerSampleProbArraySparseCompute(
@@ -132,7 +137,7 @@ bool sample_dem(const uint8_t *d_check_matrix, size_t num_checks,
   if (status == CUSTABILIZER_STATUS_INSUFFICIENT_SPARSE_STORAGE) {
     // nnz now contains the required capacity
     capacity = nnz;
-    d_col_indices = device_alloc<uint64_t>(capacity);
+    d_col_indices = device_alloc<uint64_t>(capacity, stream);
     nnz = capacity;
     custab_check(custabilizerSampleProbArraySparseCompute(
                      handle.h, static_cast<int64_t>(num_shots),
@@ -149,7 +154,8 @@ bool sample_dem(const uint8_t *d_check_matrix, size_t num_checks,
   // A = CSR errors [num_shots × num_error_mechanisms]
   // B = H^T packed [num_error_mechanisms × n_checks_padded/32]
   // C = packed syndromes [num_shots × n_checks_padded/32]
-  auto d_syndromes_packed = device_alloc<uint32_t>(num_shots * check_words);
+  auto d_syndromes_packed =
+      device_alloc<uint32_t>(num_shots * check_words, stream);
 
   custab_check(custabilizerGF2SparseDenseMatrixMultiply(
                    handle.h, static_cast<uint64_t>(num_shots),

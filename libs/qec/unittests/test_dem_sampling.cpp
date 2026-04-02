@@ -320,6 +320,54 @@ TEST(DemSamplingCPU, BackwardsCompatibility) {
   }
 }
 
+TEST(DemSamplingCPU, ZeroShots) {
+  auto H = make_tensor({1, 0, 1, 0, 1, 1}, 2, 3);
+  std::vector<double> probs = {0.5, 0.5, 0.5};
+
+  auto [checks, errors] =
+      cudaq::qec::dem_sampler::cpu::sample_dem(H, 0, probs, 42);
+
+  EXPECT_EQ(checks.shape()[0], 0u);
+  EXPECT_EQ(checks.shape()[1], 2u);
+  EXPECT_EQ(errors.shape()[0], 0u);
+  EXPECT_EQ(errors.shape()[1], 3u);
+}
+
+TEST(DemSamplingCPU, NonBinaryCheckMatrixMasked) {
+  // H entries > 1 should be treated as H & 1 (matching GPU behavior).
+  // H = [[2, 3], [1, 0]]  ->  binarized [[0, 1], [1, 0]]
+  // probs = [1, 1]  ->  errors = [1, 1]
+  // syndromes with binarized H: [0^1, 1^0] = [1, 1]
+  auto H = make_tensor({2, 3, 1, 0}, 2, 2);
+  std::vector<double> probs = {1.0, 1.0};
+
+  auto [checks, errors] =
+      cudaq::qec::dem_sampler::cpu::sample_dem(H, 4, probs, 0);
+
+  for (size_t shot = 0; shot < 4; shot++) {
+    EXPECT_EQ(errors.at({shot, 0}), 1);
+    EXPECT_EQ(errors.at({shot, 1}), 1);
+    EXPECT_EQ(checks.at({shot, 0}), 1)
+        << "Binarized row 0: [0,1], sum = 1 mod 2 = 1";
+    EXPECT_EQ(checks.at({shot, 1}), 1)
+        << "Binarized row 1: [1,0], sum = 1 mod 2 = 1";
+  }
+}
+
+TEST(DemSamplingCPU, SeedlessPathRuns) {
+  auto H = make_tensor({1, 0, 1, 0, 1, 1}, 2, 3);
+  std::vector<double> probs = {0.5, 0.5, 0.5};
+
+  auto [checks, errors] =
+      cudaq::qec::dem_sampler::cpu::sample_dem(H, 10, probs);
+
+  EXPECT_EQ(checks.shape()[0], 10u);
+  EXPECT_EQ(errors.shape()[0], 10u);
+  for (size_t shot = 0; shot < 10; shot++)
+    for (size_t c = 0; c < 2; c++)
+      EXPECT_TRUE(checks.at({shot, c}) == 0 || checks.at({shot, c}) == 1);
+}
+
 // =============================================================================
 // GPU tests (guarded by CUDAQ_QEC_HAS_CUSTABILIZER)
 // =============================================================================
@@ -711,6 +759,41 @@ TEST_F(DemSamplingGPU, LargeScaleSyndromeConsistency) {
     auto expected = compute_syndrome(H, shot_err, num_checks, num_errors);
     for (size_t c = 0; c < num_checks; c++)
       EXPECT_EQ(h_checks[shot * num_checks + c], expected[c])
+          << "Shot " << shot << " check " << c;
+  }
+}
+
+TEST_F(DemSamplingGPU, ZeroShots) {
+  const size_t num_checks = 3, num_errors = 5;
+  std::vector<uint8_t> H = {1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1};
+  std::vector<double> probs(num_errors, 0.5);
+
+  // num_shots = 0 should return true immediately with no work
+  ASSERT_TRUE(cudaq::qec::dem_sampler::gpu::sample_dem(
+      nullptr, num_checks, num_errors, nullptr, 0, 42, nullptr, nullptr));
+}
+
+TEST_F(DemSamplingGPU, NonBinaryCheckMatrixCpuGpuMatch) {
+  // H with entries > 1: both paths should agree after binarization.
+  const size_t num_checks = 2, num_errors = 2, num_shots = 4;
+  std::vector<uint8_t> H_data = {2, 3, 1, 0};
+  std::vector<double> probs = {1.0, 1.0};
+
+  auto H_tensor = make_tensor(H_data, num_checks, num_errors);
+  auto [cpu_checks, cpu_errors] =
+      cudaq::qec::dem_sampler::cpu::sample_dem(H_tensor, num_shots, probs, 0);
+
+  GpuBuffers buf(H_data, probs, num_checks, num_errors, num_shots);
+  ASSERT_TRUE(buf.run(0));
+  auto gpu_checks = buf.get_checks();
+  auto gpu_errors = buf.get_errors();
+
+  for (size_t shot = 0; shot < num_shots; shot++) {
+    for (size_t e = 0; e < num_errors; e++)
+      EXPECT_EQ(gpu_errors[shot * num_errors + e], cpu_errors.at({shot, e}))
+          << "Shot " << shot << " error " << e;
+    for (size_t c = 0; c < num_checks; c++)
+      EXPECT_EQ(gpu_checks[shot * num_checks + c], cpu_checks.at({shot, c}))
           << "Shot " << shot << " check " << c;
   }
 }

@@ -15,11 +15,24 @@ namespace cudaq::qec::dem_sampling_utils {
 
 namespace {
 
+constexpr uint64_t kMaxGridDimX = static_cast<uint64_t>(INT32_MAX);
+constexpr uint64_t kMaxGridDimYZ = 65535u;
+
 void check_kernel_launch(const char *kernel_name) {
   cudaError_t err = cudaGetLastError();
   if (err != cudaSuccess)
     throw std::runtime_error(std::string(kernel_name) +
                              " launch: " + cudaGetErrorString(err));
+}
+
+void check_grid_dims(uint64_t grid_x, uint64_t grid_y,
+                     const char *kernel_name) {
+  if (grid_x > kMaxGridDimX || grid_y > kMaxGridDimYZ)
+    throw std::runtime_error(
+        std::string(kernel_name) + ": grid dimensions (" +
+        std::to_string(grid_x) + ", " + std::to_string(grid_y) +
+        ") exceed CUDA limits (" + std::to_string(kMaxGridDimX) + ", " +
+        std::to_string(kMaxGridDimYZ) + ")");
 }
 
 } // namespace
@@ -59,8 +72,10 @@ void pack_check_matrix_rowwise(const uint8_t *d_check_matrix,
 
   uint64_t words = bitpack_words(N);
   dim3 block(256);
-  dim3 grid(static_cast<uint32_t>(M),
-            static_cast<uint32_t>((words + block.x - 1) / block.x));
+  uint64_t grid_x = M;
+  uint64_t grid_y = (words + block.x - 1) / block.x;
+  check_grid_dims(grid_x, grid_y, "pack_check_matrix_rowwise");
+  dim3 grid(static_cast<uint32_t>(grid_x), static_cast<uint32_t>(grid_y));
 
   pack_check_matrix_rowwise_kernel<<<grid, block, 0, stream>>>(
       d_check_matrix, d_check_packed, static_cast<uint32_t>(M),
@@ -106,8 +121,10 @@ void pack_check_matrix_transposed_rowwise(const uint8_t *d_check_matrix,
 
   const uint64_t checks_words = bitpack_words(num_checks);
   dim3 block(256);
-  dim3 grid(static_cast<uint32_t>(num_error_mechanisms),
-            static_cast<uint32_t>((checks_words + block.x - 1) / block.x));
+  uint64_t grid_x = num_error_mechanisms;
+  uint64_t grid_y = (checks_words + block.x - 1) / block.x;
+  check_grid_dims(grid_x, grid_y, "pack_check_matrix_transposed_rowwise");
+  dim3 grid(static_cast<uint32_t>(grid_x), static_cast<uint32_t>(grid_y));
 
   pack_check_matrix_transposed_rowwise_kernel<<<grid, block, 0, stream>>>(
       d_check_matrix, d_check_t_packed, static_cast<uint32_t>(num_checks),
@@ -142,8 +159,10 @@ void unpack_syndromes_gpu(const uint32_t *d_packed, uint8_t *d_unpacked,
     return;
 
   const int threads = 256;
-  dim3 grid(static_cast<uint32_t>(num_shots),
-            static_cast<uint32_t>((num_checks + threads - 1) / threads));
+  uint64_t grid_x = num_shots;
+  uint64_t grid_y = (num_checks + threads - 1) / threads;
+  check_grid_dims(grid_x, grid_y, "unpack_syndromes");
+  dim3 grid(static_cast<uint32_t>(grid_x), static_cast<uint32_t>(grid_y));
 
   unpack_syndromes_kernel<<<grid, threads, 0, stream>>>(d_packed, d_unpacked,
                                                         num_shots, num_checks);
@@ -191,8 +210,10 @@ void csr_to_dense_fused(const uint64_t *d_row_offsets,
 
   const int warps_per_block = 8;
   const int threads_per_block = warps_per_block * 32;
-  const int num_blocks =
-      static_cast<int>((num_shots + warps_per_block - 1) / warps_per_block);
+  uint64_t num_blocks_u64 =
+      (num_shots + warps_per_block - 1) / warps_per_block;
+  check_grid_dims(num_blocks_u64, 1, "csr_to_dense_fused");
+  const int num_blocks = static_cast<int>(num_blocks_u64);
 
   csr_to_dense_fused_kernel<<<num_blocks, threads_per_block, 0, stream>>>(
       d_row_offsets, d_col_indices, num_shots, num_error_mechanisms,

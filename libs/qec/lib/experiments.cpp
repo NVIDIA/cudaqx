@@ -102,15 +102,31 @@ sample_dem(const cudaqx::tensor<uint8_t> &check_matrix, std::size_t numShots,
     throw std::invalid_argument(
         "error_probabilities size must match number of error mechanisms");
 
-  std::mt19937 rng(seed);
-  std::vector<std::bernoulli_distribution> distributions;
-  distributions.reserve(num_error_mechanisms);
   for (double p : error_probabilities) {
     if (!std::isfinite(p) || p < 0.0 || p > 1.0)
       throw std::invalid_argument(
           "error_probabilities entries must be finite values in [0, 1]");
-    distributions.emplace_back(p);
   }
+
+  if (numShots == 0) {
+    cudaqx::tensor<uint8_t> errors({0, num_error_mechanisms});
+    cudaqx::tensor<uint8_t> checks({0, num_checks});
+    return std::make_tuple(checks, errors);
+  }
+
+  std::mt19937 rng(seed);
+  std::vector<std::bernoulli_distribution> distributions;
+  distributions.reserve(num_error_mechanisms);
+  for (double p : error_probabilities)
+    distributions.emplace_back(p);
+
+  cudaqx::tensor<uint8_t> H_binary({num_checks, num_error_mechanisms});
+  std::vector<uint8_t> h_bin(num_checks * num_error_mechanisms);
+  for (size_t i = 0; i < num_checks; ++i)
+    for (size_t j = 0; j < num_error_mechanisms; ++j)
+      h_bin[i * num_error_mechanisms + j] =
+          check_matrix.at({i, j}) & static_cast<uint8_t>(1);
+  H_binary.copy(h_bin.data(), H_binary.shape());
 
   cudaqx::tensor<uint8_t> errors({numShots, num_error_mechanisms});
   cudaqx::tensor<uint8_t> checks({numShots, num_checks});
@@ -123,7 +139,7 @@ sample_dem(const cudaqx::tensor<uint8_t> &check_matrix, std::size_t numShots,
   }
 
   errors.copy(error_bits.data(), errors.shape());
-  checks = errors.dot(check_matrix.transpose()) % 2;
+  checks = errors.dot(H_binary.transpose()) % 2;
 
   return std::make_tuple(checks, errors);
 }

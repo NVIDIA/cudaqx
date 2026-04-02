@@ -143,8 +143,10 @@ using DevicePtr = std::unique_ptr<T, CudaDeleter>;
 template <typename T>
 DevicePtr<T> device_alloc(std::size_t count) {
   T *p = nullptr;
-  if (cudaMalloc(&p, count * sizeof(T)) != cudaSuccess)
+  if (cudaMalloc(&p, count * sizeof(T)) != cudaSuccess) {
+    cudaGetLastError();
     return DevicePtr<T>(nullptr);
+  }
   return DevicePtr<T>(p);
 }
 
@@ -303,6 +305,7 @@ bool tryGpuSampling(const py::array_t<uint8_t> &check_matrix_np,
   if (copy_h_status != cudaSuccess) {
     failure_reason = std::string("failed to copy check_matrix to device: ") +
                      cudaGetErrorString(copy_h_status);
+    cudaGetLastError();
     return false;
   }
   auto copy_p_status =
@@ -310,6 +313,7 @@ bool tryGpuSampling(const py::array_t<uint8_t> &check_matrix_np,
   if (copy_p_status != cudaSuccess) {
     failure_reason = std::string("failed to copy probabilities to device: ") +
                      cudaGetErrorString(copy_p_status);
+    cudaGetLastError();
     return false;
   }
 
@@ -335,6 +339,7 @@ bool tryGpuSampling(const py::array_t<uint8_t> &check_matrix_np,
     if (copy_syn_status != cudaSuccess) {
       failure_reason = std::string("failed to copy syndromes to host: ") +
                        cudaGetErrorString(copy_syn_status);
+      cudaGetLastError();
       return false;
     }
 
@@ -343,6 +348,7 @@ bool tryGpuSampling(const py::array_t<uint8_t> &check_matrix_np,
     if (copy_err_status != cudaSuccess) {
       failure_reason = std::string("failed to copy errors to host: ") +
                        cudaGetErrorString(copy_err_status);
+      cudaGetLastError();
       return false;
     }
   }
@@ -504,6 +510,21 @@ void bindDemSampling(py::module &mod) {
          py::object error_probs_obj, std::optional<unsigned> seed,
          std::string backend) -> py::tuple {
         const auto backend_mode = parseBackend(std::move(backend));
+
+        if (numShots == 0) {
+          auto check_matrix_np = asNumpyUint8(check_matrix_obj);
+          auto error_probs_np = asNumpyFloat64(error_probs_obj);
+          validateInputShapes(check_matrix_np, error_probs_np);
+          py::buffer_info h_buf = check_matrix_np.request();
+          auto num_checks = static_cast<py::ssize_t>(h_buf.shape[0]);
+          auto num_mechanisms = static_cast<py::ssize_t>(h_buf.shape[1]);
+          py::module_ np = py::module_::import("numpy");
+          return py::make_tuple(
+              np.attr("empty")(py::make_tuple(0, num_checks),
+                               "dtype"_a = np.attr("uint8")),
+              np.attr("empty")(py::make_tuple(0, num_mechanisms),
+                               "dtype"_a = np.attr("uint8")));
+        }
 
         unsigned actual_seed =
             seed.has_value() ? seed.value()
