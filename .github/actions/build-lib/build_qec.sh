@@ -16,9 +16,31 @@ if [ -z "$CUDAQ_REALTIME_ROOT" ]; then
   git sparse-checkout set realtime
   git checkout $CUDAQ_REALTIME_REF
 
-  # Install DOCA, Holoscan SDK, libibverbs, and nvcomp (needed for HSB)
-  apt-get update && apt-get install -y --no-install-recommends ninja-build nvcomp gnupg
-  bash realtime/scripts/install_dev_prerequisites.sh
+  # Install build tools and DOCA/Holoscan SDK for HSB.
+  # The cudaqx CI container has Mellanox OFED pre-installed, so we cannot use
+  # install_dev_prerequisites.sh (it installs doca-all which conflicts with
+  # the container's OFED packages). Instead, install only the DOCA dev headers
+  # and Holoscan SDK that we actually need.
+  CUDA_MAJOR_VERSION=$(nvcc --version | sed -n 's/^.*release \([0-9]\+\).*$/\1/p')
+  apt-get update && apt-get install -y --no-install-recommends \
+    ninja-build gnupg curl
+
+  # Add DOCA repo and install only the GPUNetIO dev package (not doca-all)
+  DOCA_VERSION=3.3.0
+  arch=$(uname -m)
+  case "$arch" in aarch64|arm64) arch="arm64-sbsa" ;; esac
+  distro=$(. /etc/os-release && echo ${ID}${VERSION_ID})
+  DOCA_URL="https://linux.mellanox.com/public/repo/doca/$DOCA_VERSION/$distro/$arch/"
+  curl -fsSL https://linux.mellanox.com/public/repo/doca/GPG-KEY-Mellanox.pub \
+    | gpg --dearmor > /etc/apt/trusted.gpg.d/GPG-KEY-Mellanox.pub
+  echo "deb [signed-by=/etc/apt/trusted.gpg.d/GPG-KEY-Mellanox.pub] $DOCA_URL ./" \
+    > /etc/apt/sources.list.d/doca.list
+  apt-get update
+  DEBIAN_FRONTEND=noninteractive apt-get -y install --no-install-recommends \
+    libdoca-sdk-gpunetio-dev
+
+  # Holoscan SDK
+  apt-get install -y --no-install-recommends holoscan-cuda-$CUDA_MAJOR_VERSION
 
   # Build holoscan-sensor-bridge (hololink) FIRST, so cuda-quantum realtime
   # can build the bridge-hololink wrapper library that links against it.
@@ -45,6 +67,15 @@ if [ -z "$CUDAQ_REALTIME_ROOT" ]; then
     echo "Applying patch: $(basename $p)"
     git apply "$p"
   done
+  # Strip operators we don't need to avoid configure failures from missing deps
+  sed -i '/add_subdirectory(audio_packetizer)/d; /add_subdirectory(compute_crc)/d;
+          /add_subdirectory(csi_to_bayer)/d; /add_subdirectory(image_processor)/d;
+          /add_subdirectory(iq_dec)/d; /add_subdirectory(iq_enc)/d;
+          /add_subdirectory(linux_coe_receiver)/d; /add_subdirectory(linux_receiver)/d;
+          /add_subdirectory(packed_format_converter)/d; /add_subdirectory(sub_frame_combiner)/d;
+          /add_subdirectory(udp_transmitter)/d; /add_subdirectory(emulator)/d;
+          /add_subdirectory(sig_gen)/d; /add_subdirectory(sig_viewer)/d' \
+    src/hololink/operators/CMakeLists.txt
   export CUDA_NATIVE_ARCH=80
   cmake -G Ninja -S . -B build \
     -DCMAKE_BUILD_TYPE=Release \
