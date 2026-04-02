@@ -322,7 +322,7 @@ void bindDecoder(py::module &mod) {
               "Parity check matrix must be an array of uint8_t.");
         }
 
-        if (buf.strides[0] == buf.itemsize) {
+        if (buf.strides[0] < buf.strides[buf.ndim - 1]) {
           throw std::runtime_error(
               "Parity check matrix must be in row-major order, but "
               "column-major order was detected.");

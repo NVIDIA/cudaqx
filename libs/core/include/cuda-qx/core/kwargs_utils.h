@@ -105,7 +105,7 @@ template <typename T>
 tensor<T> toTensor(const py::array_t<T> &H, bool perform_pcm_checks = false) {
   py::buffer_info buf = H.request();
 
-  if (buf.ndim >= 1 && buf.strides[0] == buf.itemsize) {
+  if (buf.ndim >= 2 && buf.strides[0] < buf.strides[buf.ndim - 1]) {
     throw std::runtime_error("toTensor: data must be in row-major order, but "
                              "column-major order was detected.");
   }
