@@ -47,7 +47,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.release-number == '0.0.0' && 'main' || format('releases/v{0}', inputs.release-number) }}
+          ref: ${{ inputs.release-number == '0.0.0' && github.ref || format('releases/v{0}', inputs.release-number) }}
           set-safe-directory: true
           lfs: true # download assets file(s) for TRT tests
 
