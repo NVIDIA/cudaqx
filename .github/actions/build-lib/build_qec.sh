@@ -39,8 +39,9 @@ if [ -z "$CUDAQ_REALTIME_ROOT" ]; then
   apt-get update
   apt-get -y install --no-install-recommends libdoca-sdk-gpunetio-dev
 
-  # hololink_core links CUDA::nvrtc
-  CUDA_VER_DASH=$(echo $CUDA_MAJOR_VERSION | sed 's/\./-/')
+  # hololink_core links CUDA::nvrtc -- must match the exact toolkit version
+  CUDA_FULL_VERSION=$(nvcc --version | sed -n 's/^.*release \([0-9]\+\.[0-9]\+\).*$/\1/p')
+  CUDA_VER_DASH=$(echo $CUDA_FULL_VERSION | sed 's/\./-/')
   apt-get install -y cuda-nvrtc-dev-$CUDA_VER_DASH 2>/dev/null || true
 
   # Holoscan SDK (force-install if normal install fails due to missing deps)
