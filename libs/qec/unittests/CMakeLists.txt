@@ -256,10 +256,10 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
     )
 
     add_dependencies(CUDAQXQECUnitTests test_realtime_qldpc_graph_decoding)
-    add_test(NAME test_realtime_qldpc_graph_decoding
-      COMMAND test_realtime_qldpc_graph_decoding)
-    set_tests_properties(test_realtime_qldpc_graph_decoding PROPERTIES
-      LABELS "qec")
+    # Not registered as a ctest: the test dynamically loads the nv-qldpc-decoder
+    # plugin and requires CUDA-Q quantum runtime symbols (libnvqir) at runtime,
+    # neither of which are available in CI. Building the target is sufficient to
+    # verify compilation.
 
   else()
     message(WARNING "cuda-quantum realtime dependency not found. "
