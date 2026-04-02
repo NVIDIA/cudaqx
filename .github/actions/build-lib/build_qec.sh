@@ -45,7 +45,7 @@ if [ "$REQUIRE_CUSTABILIZER_GPU_TORCH" = "ON" ] && [ -x "$(command -v python3)" 
   if [ -n "$NVCC_BIN" ] && [ -x "$NVCC_BIN" ]; then
     cuda_version=$("$NVCC_BIN" --version | sed -nE 's/.*release ([0-9]+\.[0-9]+).*/\1/p' | head -n 1)
     cuda_no_dot=$(echo "$cuda_version" | tr -d '.')
-    pip install torch==2.9.0 --index-url "https://download.pytorch.org/whl/cu${cuda_no_dot}" || true
+    pip install torch --index-url "https://download.pytorch.org/whl/cu${cuda_no_dot}" || true
   fi
 fi
 

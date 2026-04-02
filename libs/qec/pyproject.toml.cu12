@@ -59,20 +59,17 @@ write_to = "_version.py"
 tensor_network_decoder = [
   "quimb",
   "opt_einsum",
-  "torch",
-  "cuquantum-python-cu12>=26.03.0"
+  "cuquantum-python-cu12>=26.3.0"
 ]
 trt_decoder = [
   "tensorrt-cu12"
 ]
 dem_sampling = [
-  "torch",
-  "cuquantum-python-cu12>=26.03.0"
+  "cuquantum-python-cu12>=26.3.0"
 ]
 all = [
   "quimb",
   "opt_einsum",
-  "torch",
-  "cuquantum-python-cu12>=26.03.0",
+  "cuquantum-python-cu12>=26.3.0",
   "tensorrt-cu12; platform_machine == 'x86_64'"
 ]

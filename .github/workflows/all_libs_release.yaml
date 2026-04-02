@@ -134,9 +134,6 @@ jobs:
           LD_LIBRARY_PATH: ${{ env.MPI_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
         shell: bash
         run: |
-          # Install the correct torch first.
-          cuda_no_dot=$(echo ${{ matrix.cuda_version }} | sed 's/\.//')
-          pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu${cuda_no_dot}
           pip install --upgrade numpy pytest onnxscript cupy-cuda${{ steps.config.outputs.cuda_major }}x cuquantum-cu${{ steps.config.outputs.cuda_major }} lightning ml_collections mpi4py transformers quimb opt_einsum nvidia-cublas cuquantum-python-cu${{ steps.config.outputs.cuda_major }}>=26.3.0 custabilizer-cu${{ steps.config.outputs.cuda_major }}>=0.3.0
           echo "=== cuStabilizer verification ==="
           pip show custabilizer-cu${{ steps.config.outputs.cuda_major }} | grep Version
