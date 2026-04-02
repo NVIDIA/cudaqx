@@ -28,11 +28,11 @@ void check_kernel_launch(const char *kernel_name) {
 void check_grid_dims(uint64_t grid_x, uint64_t grid_y,
                      const char *kernel_name) {
   if (grid_x > kMaxGridDimX || grid_y > kMaxGridDimYZ)
-    throw std::runtime_error(
-        std::string(kernel_name) + ": grid dimensions (" +
-        std::to_string(grid_x) + ", " + std::to_string(grid_y) +
-        ") exceed CUDA limits (" + std::to_string(kMaxGridDimX) + ", " +
-        std::to_string(kMaxGridDimYZ) + ")");
+    throw std::runtime_error(std::string(kernel_name) + ": grid dimensions (" +
+                             std::to_string(grid_x) + ", " +
+                             std::to_string(grid_y) + ") exceed CUDA limits (" +
+                             std::to_string(kMaxGridDimX) + ", " +
+                             std::to_string(kMaxGridDimYZ) + ")");
 }
 
 } // namespace
@@ -210,8 +210,7 @@ void csr_to_dense_fused(const uint64_t *d_row_offsets,
 
   const int warps_per_block = 8;
   const int threads_per_block = warps_per_block * 32;
-  uint64_t num_blocks_u64 =
-      (num_shots + warps_per_block - 1) / warps_per_block;
+  uint64_t num_blocks_u64 = (num_shots + warps_per_block - 1) / warps_per_block;
   check_grid_dims(num_blocks_u64, 1, "csr_to_dense_fused");
   const int num_blocks = static_cast<int>(num_blocks_u64);
 

@@ -43,8 +43,7 @@ using DevicePtr = std::unique_ptr<T, StreamCudaDeleter>;
 template <typename T>
 DevicePtr<T> device_alloc(size_t count, cudaStream_t stream) {
   T *p = nullptr;
-  cuda_check(cudaMallocAsync(&p, count * sizeof(T), stream),
-             "cudaMallocAsync");
+  cuda_check(cudaMallocAsync(&p, count * sizeof(T), stream), "cudaMallocAsync");
   return DevicePtr<T>(p, StreamCudaDeleter{stream});
 }
 
