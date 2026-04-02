@@ -220,10 +220,12 @@ if (GPU_ROCE_TRANSCEIVER_LIB AND CUDAQ_REALTIME_INCLUDE_DIR AND
   # references CUDA-Q quantum runtime symbols.
   find_library(_CUDAQ_LIBRARY NAMES cudaq
     PATHS ${CUDAQ_INSTALL_PREFIX} $ENV{CUDAQ_INSTALL_PREFIX}
-    PATH_SUFFIXES lib NO_DEFAULT_PATH)
+          ${CUDAQ_DIR}/.. $ENV{CUDAQ_DIR}/..
+    PATH_SUFFIXES lib)
   find_library(_NVQIR_LIBRARY NAMES nvqir
     PATHS ${CUDAQ_INSTALL_PREFIX} $ENV{CUDAQ_INSTALL_PREFIX}
-    PATH_SUFFIXES lib NO_DEFAULT_PATH)
+          ${CUDAQ_DIR}/.. $ENV{CUDAQ_DIR}/..
+    PATH_SUFFIXES lib)
 
   add_executable(hololink_qldpc_graph_decoder_bridge
     hololink_qldpc_graph_decoder_bridge.cpp
@@ -256,8 +258,8 @@ if (GPU_ROCE_TRANSCEIVER_LIB AND CUDAQ_REALTIME_INCLUDE_DIR AND
       ${HOLOLINK_COMMON_LIB}
       ${CUDAQ_REALTIME_LIBRARY}
       cudaq-qec-realtime-decoding
-      ${_CUDAQ_LIBRARY}
-      ${_NVQIR_LIBRARY}
+      $<$<BOOL:${_CUDAQ_LIBRARY}>:${_CUDAQ_LIBRARY}>
+      $<$<BOOL:${_NVQIR_LIBRARY}>:${_NVQIR_LIBRARY}>
       CUDA::cudart
       CUDA::cuda_driver
       ${DOCA_VERBS_LIB}

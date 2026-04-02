@@ -258,6 +258,7 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
     add_dependencies(CUDAQXQECUnitTests test_realtime_qldpc_graph_decoding)
     gtest_discover_tests(test_realtime_qldpc_graph_decoding
       TEST_PREFIX "test_realtime_qldpc_graph_decoding."
+      DISCOVERY_MODE PRE_TEST
     )
 
   else()
