@@ -60,7 +60,7 @@ jobs:
           apt install -y --no-install-recommends \
             gfortran libblas-dev doxygen
 
-          python3 -m pip install --upgrade IPython breathe enum_tools myst_parser nbsphinx \
+          python3 -m pip install --break-system-packages --upgrade IPython breathe enum_tools myst_parser nbsphinx \
             sphinx_copybutton sphinx_inline_tabs sphinx_gallery sphinx_rtd_theme \
             sphinx_reredirects sphinx_toolbox>=4.1.2 cupy-cuda12x cuquantum-python-cu12>=26.3.0 custabilizer-cu12>=0.3.0
           echo "=== cuStabilizer verification ==="
