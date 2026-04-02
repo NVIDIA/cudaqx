@@ -23,24 +23,33 @@ if [ -z "$CUDAQ_REALTIME_ROOT" ]; then
   # and Holoscan SDK that we actually need.
   CUDA_MAJOR_VERSION=$(nvcc --version | sed -n 's/^.*release \([0-9]\+\).*$/\1/p')
   apt-get update && apt-get install -y --no-install-recommends \
-    ninja-build gnupg curl
+    ninja-build curl
+  # HSB -> find_package(holoscan) -> rapids_logger requires cmake >= 3.30.4;
+  # the CI container ships cmake 3.28.
+  pip install cmake
+  export PATH="$(python3 -c 'import cmake,os;print(os.path.join(os.path.dirname(cmake.__file__),"data","bin"))'):$PATH"
 
   # Add DOCA repo and install only the GPUNetIO dev package (not doca-all)
-  DOCA_VERSION=3.3.0
-  arch=$(uname -m)
-  case "$arch" in aarch64|arm64) arch="arm64-sbsa" ;; esac
-  distro=$(. /etc/os-release && echo ${ID}${VERSION_ID})
-  DOCA_URL="https://linux.mellanox.com/public/repo/doca/$DOCA_VERSION/$distro/$arch/"
-  curl -fsSL https://linux.mellanox.com/public/repo/doca/GPG-KEY-Mellanox.pub \
-    | gpg --dearmor > /etc/apt/trusted.gpg.d/GPG-KEY-Mellanox.pub
-  echo "deb [signed-by=/etc/apt/trusted.gpg.d/GPG-KEY-Mellanox.pub] $DOCA_URL ./" \
+  DOCA_ARCH=$(uname -m)
+  case "$DOCA_ARCH" in aarch64|arm64) DOCA_ARCH="arm64-sbsa" ;; esac
+  DOCA_REPO="https://linux.mellanox.com/public/repo/doca/3.3.0/ubuntu24.04/$DOCA_ARCH"
+  curl -fsSL "$DOCA_REPO/GPG-KEY-Mellanox.pub" -o /usr/share/keyrings/GPG-KEY-Mellanox.pub
+  echo "deb [signed-by=/usr/share/keyrings/GPG-KEY-Mellanox.pub] $DOCA_REPO /" \
     > /etc/apt/sources.list.d/doca.list
   apt-get update
-  DEBIAN_FRONTEND=noninteractive apt-get -y install --no-install-recommends \
-    libdoca-sdk-gpunetio-dev
+  apt-get -y install --no-install-recommends libdoca-sdk-gpunetio-dev
 
-  # Holoscan SDK
-  apt-get install -y --no-install-recommends holoscan-cuda-$CUDA_MAJOR_VERSION
+  # hololink_core links CUDA::nvrtc
+  CUDA_VER_DASH=$(echo $CUDA_MAJOR_VERSION | sed 's/\./-/')
+  apt-get install -y cuda-nvrtc-dev-$CUDA_VER_DASH 2>/dev/null || true
+
+  # Holoscan SDK (force-install if normal install fails due to missing deps)
+  apt-get install -y --no-install-recommends holoscan-cuda-$CUDA_MAJOR_VERSION || {
+    _hsdk_tmp=$(mktemp -d)
+    (cd "$_hsdk_tmp" && apt-get download holoscan holoscan-cuda-$CUDA_MAJOR_VERSION \
+      && dpkg --force-depends -i holoscan*.deb)
+    rm -rf "$_hsdk_tmp"
+  }
 
   # Build holoscan-sensor-bridge (hololink) FIRST, so cuda-quantum realtime
   # can build the bridge-hololink wrapper library that links against it.
