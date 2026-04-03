@@ -25,9 +25,24 @@ if(CMAKE_CUDA_COMPILER)
   
   find_path(CUDAQ_REALTIME_INCLUDE_DIR
     NAMES cudaq/realtime/daemon/dispatcher/cudaq_realtime.h
-    PATHS ${_cudaq_realtime_prefixes}
-    PATH_SUFFIXES include ../include
+    HINTS ${_cudaq_realtime_prefixes}
+    PATH_SUFFIXES include
+    NO_DEFAULT_PATH
   )
+  if(NOT CUDAQ_REALTIME_INCLUDE_DIR)
+    find_path(CUDAQ_REALTIME_INCLUDE_DIR
+      NAMES cudaq/realtime/daemon/dispatcher/cudaq_realtime.h
+      PATHS ${_cudaq_realtime_prefixes}
+      PATH_SUFFIXES include
+    )
+  endif()
+  if(NOT CUDAQ_REALTIME_INCLUDE_DIR)
+    find_path(CUDAQ_REALTIME_INCLUDE_DIR
+      NAMES cudaq/nvqlink/daemon/dispatcher/cudaq_realtime.h
+      HINTS ${_cudaq_realtime_prefixes}
+      PATH_SUFFIXES include ../include
+    )
+  endif()
   
   if(CUDAQ_REALTIME_INCLUDE_DIR)
     message(STATUS "Found cuda-quantum realtime headers at ${CUDAQ_REALTIME_INCLUDE_DIR}")
@@ -112,6 +127,68 @@ install(TARGETS cudaq-qec-realtime-decoding
   COMPONENT qec-lib
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
+
+# ---------------------------------------------------------------------------
+# RealtimePipeline shared library
+# Requires pre-installed cudaq-realtime (set CUDAQ_REALTIME_ROOT)
+# ---------------------------------------------------------------------------
+if(CMAKE_CUDA_COMPILER AND CUDAQ_REALTIME_INCLUDE_DIR)
+    find_library(_CUDAQ_RT_LIB cudaq-realtime
+      PATHS ${_cudaq_realtime_prefixes} PATH_SUFFIXES lib)
+    find_library(_CUDAQ_RT_HD_LIB cudaq-realtime-host-dispatch
+      PATHS ${_cudaq_realtime_prefixes} PATH_SUFFIXES lib)
+
+    if(_CUDAQ_RT_LIB AND _CUDAQ_RT_HD_LIB)
+      message(STATUS "RealtimePipeline: building with CUDAQ_REALTIME_INCLUDE_DIR=${CUDAQ_REALTIME_INCLUDE_DIR}")
+
+      add_library(cudaq-realtime-pipeline SHARED
+        realtime_pipeline.cu
+      )
+
+      get_filename_component(_cuda_bin_pl "${CMAKE_CUDA_COMPILER}" DIRECTORY)
+      get_filename_component(_cuda_root_pl "${_cuda_bin_pl}" DIRECTORY)
+      set(_cuda_cccl_include_pl "${_cuda_root_pl}/include/cccl")
+
+      target_include_directories(cudaq-realtime-pipeline
+        PUBLIC
+          $<BUILD_INTERFACE:${CUDAQX_QEC_INCLUDE_DIR}>
+          $<BUILD_INTERFACE:${CUDAQ_REALTIME_INCLUDE_DIR}>
+          $<BUILD_INTERFACE:${_cuda_cccl_include_pl}>
+          $<INSTALL_INTERFACE:include>
+      )
+
+      target_link_libraries(cudaq-realtime-pipeline
+        PUBLIC CUDA::cudart_static
+        PRIVATE ${_CUDAQ_RT_LIB} ${_CUDAQ_RT_HD_LIB}
+      )
+
+      option(ENABLE_NVTX "Enable NVTX profiling ranges" OFF)
+      if(ENABLE_NVTX)
+        target_compile_definitions(cudaq-realtime-pipeline PRIVATE ENABLE_NVTX)
+        message(STATUS "NVTX profiling enabled for cudaq-realtime-pipeline")
+      endif()
+
+
+      get_filename_component(_CUDAQ_RT_LIB_DIR "${_CUDAQ_RT_LIB}" DIRECTORY)
+      set_target_properties(cudaq-realtime-pipeline PROPERTIES
+        CUDA_SEPARABLE_COMPILATION ON
+        POSITION_INDEPENDENT_CODE ON
+        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
+        BUILD_RPATH "${_CUDAQ_RT_LIB_DIR};${CMAKE_BINARY_DIR}/lib"
+      )
+
+      install(TARGETS cudaq-realtime-pipeline
+        COMPONENT qec-lib
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+      )
+    else()
+      message(STATUS "RealtimePipeline: skipping (cudaq-realtime or cudaq-realtime-host-dispatch not found)")
+    endif()
+else()
+  if(CMAKE_CUDA_COMPILER)
+    message(STATUS "RealtimePipeline: skipping (CUDAQ_REALTIME_INCLUDE_DIR not set)")
+  endif()
+endif()
 
 add_subdirectory(quantinuum)
 add_subdirectory(simulation)

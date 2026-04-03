@@ -16,7 +16,6 @@ jobs:
     container: ghcr.io/nvidia/cuda-quantum-devcontainer:${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc11-main
     permissions:
       actions: write
-      contents: write # REVERT-WITH-CUDAQ-REALTIME-BUILD change back to read
       pull-requests: read
     steps:
       - name: Checkout repository
@@ -173,8 +172,22 @@ jobs:
         run: |
           tar xzf /tmp/qec-build-artifacts.tar.gz -C /
 
+      - name: Install TensorRT (amd64)
+        if: matrix.platform == 'amd64'
+        run: |
+          apt-cache search tensorrt | awk '{print "Package: "$1"\nPin: version *+cuda${{ matrix.cuda_version }}\nPin-Priority: 1001\n"}' | tee /etc/apt/preferences.d/tensorrt-cuda${{ matrix.cuda_version }}.pref > /dev/null
+          apt update
+          apt install -y tensorrt-dev
+
+      - name: Install TensorRT (arm64)
+        if: matrix.platform == 'arm64' && !startsWith(matrix.cuda_version, '12')
+        run: |
+          apt-cache search tensorrt | awk '{print "Package: "$1"\nPin: version *+cuda13.0\nPin-Priority: 1001\n"}' | tee /etc/apt/preferences.d/tensorrt-cuda13.0.pref > /dev/null
+          apt update
+          apt install -y tensorrt-dev
+
       - name: Run GPU tests
         run: |
           cd $GITHUB_WORKSPACE/build_qec
-          ctest --output-on-failure -R "GpuKernelsTest|test_realtime_decoding"
+          ctest --output-on-failure -R "GpuKernelsTest|test_realtime_decoding|test_realtime_pipeline"
 
