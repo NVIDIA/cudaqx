@@ -5,7 +5,7 @@ set -e
 if [ -z "$CUDAQ_REALTIME_ROOT" ]; then
   CUDAQ_REALTIME_ROOT=/tmp/cudaq-realtime
   CUDAQ_REALTIME_REPO=https://github.com/NVIDIA/cuda-quantum.git
-  CUDAQ_REALTIME_REF=9ce3d2e886
+  CUDAQ_REALTIME_REF=$(jq -r '.cudaq_realtime.ref' .cudaq_realtime_version)
   _build_cwd=$(pwd)
 
   cd /tmp
