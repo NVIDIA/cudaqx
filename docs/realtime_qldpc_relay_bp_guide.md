@@ -30,7 +30,7 @@ configurations:
 | Configuration | GPU | ConnectX NIC | FPGA |
 |---|---|---|---|
 | CI unit test | Any CUDA-capable GPU | Not required | Not required |
-| Emulated E2E | Any CUDA-capable GPU | Required (loopback cable) | Not required |
+| Emulated E2E | CUDA GPU with GPUDirect RDMA | Required (loopback cable) | Not required |
 | FPGA E2E | CUDA GPU with GPUDirect RDMA | Required | Required |
 
 Tested platforms: DGX Spark, GB200.
@@ -255,7 +255,8 @@ processes run concurrently:
 
 - ConnectX NIC with a loopback cable connecting both ports (the emulator
   sends RDMA traffic out one port and the bridge receives on the other)
-- `libibverbs` / RDMA-capable network stack
+- Software dependencies (DOCA, Holoscan SDK, etc.) as described in the
+  [cuda-quantum realtime build guide](https://github.com/NVIDIA/cuda-quantum/blob/main/realtime/docs/building.md)
 - All three tools built (bridge, playback, emulator)
 
 ### Running
