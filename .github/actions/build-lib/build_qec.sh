@@ -55,8 +55,7 @@ if [ -z "$CUDAQ_REALTIME_ROOT" ]; then
   # Build holoscan-sensor-bridge (hololink) FIRST, so cuda-quantum realtime
   # can build the bridge-hololink wrapper library that links against it.
   HSB_REPO=https://github.com/nvidia-holoscan/holoscan-sensor-bridge.git
-  HSB_REF=release-2.6.0-EA
-  HSB_PATCHES="/tmp/cudaq-realtime-src/realtime/scripts/hololink-patches"
+  HSB_REF=2.6.0-EA2
   HSB_ROOT=/tmp/holoscan-sensor-bridge
   HSB_BUILD=${HSB_ROOT}/build
 
@@ -73,10 +72,6 @@ if [ -z "$CUDAQ_REALTIME_ROOT" ]; then
   rm -rf holoscan-sensor-bridge
   git clone --depth 1 --branch $HSB_REF $HSB_REPO holoscan-sensor-bridge
   cd holoscan-sensor-bridge
-  for p in "$HSB_PATCHES"/*.patch; do
-    echo "Applying patch: $(basename $p)"
-    git apply "$p"
-  done
   # Strip operators we don't need to avoid configure failures from missing deps
   sed -i '/add_subdirectory(audio_packetizer)/d; /add_subdirectory(compute_crc)/d;
           /add_subdirectory(csi_to_bayer)/d; /add_subdirectory(image_processor)/d;
