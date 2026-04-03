@@ -48,7 +48,6 @@ target_link_libraries(test_qec PRIVATE GTest::gtest_main cudaq-qec cudaq::cudaq-
 add_dependencies(CUDAQXQECUnitTests test_qec)
 gtest_discover_tests(test_qec)
 
-
 # TensorRT decoder test is only built for x86 architectures
 if(CUDAQ_QEC_BUILD_TRT_DECODER AND CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64)|(AMD64|amd64)|(^i.86$)")
   add_executable(test_trt_decoder ./decoders/trt_decoder/test_trt_decoder.cpp)
@@ -145,10 +144,23 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
     PATH_SUFFIXES lib
   )
 
+  # libcudaq-realtime.so has a DT_NEEDED for libcudaq-realtime-host-dispatch.so.
+  # With DT_RUNPATH (CMake default), the executable's RUNPATH is not inherited
+  # by transitive dependencies. Link it directly so the executable's own RUNPATH
+  # resolves it at runtime.
+  find_library(CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY
+    NAMES cudaq-realtime-host-dispatch
+    PATHS ${_cudaq_realtime_prefixes}
+    PATH_SUFFIXES lib
+  )
+
   if(CUDAQ_REALTIME_INCLUDE_DIR AND CUDAQ_REALTIME_LIBRARY AND CUDAQ_REALTIME_DISPATCH_LIBRARY)
     message(STATUS "Found cuda-quantum realtime headers at ${CUDAQ_REALTIME_INCLUDE_DIR}")
     message(STATUS "Found cuda-quantum realtime library at ${CUDAQ_REALTIME_LIBRARY}")
     message(STATUS "Found cuda-quantum realtime dispatch library at ${CUDAQ_REALTIME_DISPATCH_LIBRARY}")
+    if(CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY)
+      message(STATUS "Found cuda-quantum realtime host dispatch library at ${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}")
+    endif()
 
     add_executable(test_realtime_decoding 
       ${CMAKE_CURRENT_SOURCE_DIR}/decoders/realtime/test_realtime_decoding.cu
@@ -180,6 +192,7 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
       cudaq-qec-realtime-cudevice
       ${CUDAQ_REALTIME_LIBRARY}
       ${CUDAQ_REALTIME_DISPATCH_LIBRARY}
+      $<$<BOOL:${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}>:${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}>
     )
 
     # Ensure runtime can locate libcudaq-realtime.so
@@ -193,6 +206,61 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
     gtest_discover_tests(test_realtime_decoding
       TEST_PREFIX "test_realtime_decoding."
     )
+    # ------------------------------------------------------------------
+    # Realtime QLDPC graph decode CI test (CPU-launched CUDA graph + relay BP)
+    # ------------------------------------------------------------------
+
+    # cudaq-qec-realtime-decoding transitively pulls in cudaq-qec, which
+    # references CUDA-Q quantum runtime symbols. Satisfy them here.
+    find_library(_CUDAQ_LIBRARY NAMES cudaq
+      PATHS ${CUDAQ_INSTALL_PREFIX} $ENV{CUDAQ_INSTALL_PREFIX}
+            ${CUDAQ_DIR}/.. $ENV{CUDAQ_DIR}/..
+      PATH_SUFFIXES lib)
+    find_library(_NVQIR_LIBRARY NAMES nvqir
+      PATHS ${CUDAQ_INSTALL_PREFIX} $ENV{CUDAQ_INSTALL_PREFIX}
+            ${CUDAQ_DIR}/.. $ENV{CUDAQ_DIR}/..
+      PATH_SUFFIXES lib)
+
+    add_executable(test_realtime_qldpc_graph_decoding
+      ${CMAKE_CURRENT_SOURCE_DIR}/realtime/qec_graph_decode_test/test_realtime_qldpc_graph_decoding.cpp
+    )
+
+    target_include_directories(test_realtime_qldpc_graph_decoding PRIVATE
+      ${CUDAToolkit_INCLUDE_DIRS}
+      ${CUDAQ_REALTIME_INCLUDE_DIR}
+      ${CMAKE_CURRENT_SOURCE_DIR}/../include
+      ${CMAKE_SOURCE_DIR}/libs/core/include
+    )
+
+    target_compile_definitions(test_realtime_qldpc_graph_decoding PRIVATE
+      TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/realtime/qec_roce_decode_test/data"
+    )
+
+    target_link_libraries(test_realtime_qldpc_graph_decoding PRIVATE
+      GTest::gtest_main
+      CUDA::cudart
+      ${CUDAQ_REALTIME_LIBRARY}
+      $<$<BOOL:${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}>:${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}>
+      cudaq-qec-realtime-decoding
+      $<$<BOOL:${_CUDAQ_LIBRARY}>:${_CUDAQ_LIBRARY}>
+      $<$<BOOL:${_NVQIR_LIBRARY}>:${_NVQIR_LIBRARY}>
+    )
+
+    target_link_options(test_realtime_qldpc_graph_decoding PRIVATE
+      "LINKER:--allow-shlib-undefined"
+    )
+
+    set_target_properties(test_realtime_qldpc_graph_decoding PROPERTIES
+      BUILD_RPATH "${CUDAQ_REALTIME_LIB_DIR};${CMAKE_BINARY_DIR}/lib/decoder-plugins"
+      INSTALL_RPATH "${CUDAQ_REALTIME_LIB_DIR};${CMAKE_BINARY_DIR}/lib/decoder-plugins"
+    )
+
+    add_dependencies(CUDAQXQECUnitTests test_realtime_qldpc_graph_decoding)
+    # Not registered as a ctest: the test dynamically loads the nv-qldpc-decoder
+    # plugin and requires CUDA-Q quantum runtime symbols (libnvqir) at runtime,
+    # neither of which are available in CI. Building the target is sufficient to
+    # verify compilation.
+
   else()
     message(WARNING "cuda-quantum realtime dependency not found. "
                     "Set CUDAQ_REALTIME_ROOT or CUDAQ_INSTALL_PREFIX to enable "
@@ -205,4 +273,10 @@ endif()
 add_subdirectory(backend-specific)
 add_subdirectory(realtime)
 add_subdirectory(decoders/pymatching)
+
+# Hololink bridge tools (FPGA playback + graph-launched QLDPC bridge)
+if(CUDAQX_QEC_ENABLE_HOLOLINK_TOOLS)
+  add_subdirectory(utils)
+endif()
+
 
