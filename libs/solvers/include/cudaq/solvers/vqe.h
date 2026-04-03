@@ -9,6 +9,7 @@
 
 #include "observe_gradient.h"
 #include "optimizer.h"
+#include <utility>
 
 using namespace cudaqx;
 
@@ -64,14 +65,14 @@ static inline vqe_result vqe(QuantumKernel &&kernel, const spin_op &hamiltonian,
           printf("<H> = %.12lf\n", res.expectation());
         data.emplace_back(x, res, observe_execution_type::function);
         gradient.compute(x, dx, res.expectation(), options.get("shots", -1));
-        for (auto datum : gradient.data)
+        for (const auto &datum : gradient.data)
           data.push_back(datum);
 
         return res.expectation();
       },
       options);
 
-  return {groundEnergy, optParams, data};
+  return {groundEnergy, std::move(optParams), std::move(data)};
 }
 
 /// @brief Overloaded VQE function using string-based optimizer and gradient
@@ -110,14 +111,14 @@ static inline vqe_result vqe(QuantumKernel &&kernel, const spin_op &hamiltonian,
           printf("<H> = %.12lf\n", res.expectation());
         data.emplace_back(x, res, observe_execution_type::function);
         gradient->compute(x, dx, res.expectation(), options.get("shots", -1));
-        for (auto datum : gradient->data)
+        for (const auto &datum : gradient->data)
           data.push_back(datum);
 
         return res.expectation();
       },
       options);
 
-  return {groundEnergy, optParams, data};
+  return {groundEnergy, std::move(optParams), std::move(data)};
 }
 
 /// @brief Overloaded VQE function using string-based optimizer selection
@@ -154,7 +155,7 @@ static inline vqe_result vqe(QuantumKernel &&kernel, const spin_op &hamiltonian,
       },
       options);
 
-  return {groundEnergy, optParams, data};
+  return {groundEnergy, std::move(optParams), std::move(data)};
 }
 
 /// @brief Overloaded VQE function using string-based optimizer and provided
@@ -188,14 +189,14 @@ static inline vqe_result vqe(QuantumKernel &&kernel, const spin_op &hamiltonian,
           printf("<H> = %.12lf\n", res.expectation());
         data.emplace_back(x, res, observe_execution_type::function);
         gradient.compute(x, dx, res.expectation(), options.get("shots", -1));
-        for (auto datum : gradient.data)
+        for (const auto &datum : gradient.data)
           data.push_back(datum);
 
         return res.expectation();
       },
       options);
 
-  return {groundEnergy, optParams, data};
+  return {groundEnergy, std::move(optParams), std::move(data)};
 }
 
 /// @brief Overloaded VQE function using provided optimizer and string-based
@@ -230,14 +231,14 @@ static inline vqe_result vqe(QuantumKernel &&kernel, const spin_op &hamiltonian,
           printf("<H> = %.12lf\n", res.expectation());
         data.emplace_back(x, res, observe_execution_type::function);
         gradient->compute(x, dx, res.expectation(), options.get("shots", -1));
-        for (auto datum : gradient->data)
+        for (const auto &datum : gradient->data)
           data.push_back(datum);
 
         return res.expectation();
       },
       options);
 
-  return {groundEnergy, optParams, data};
+  return {groundEnergy, std::move(optParams), std::move(data)};
 }
 
 /// @brief Overloaded VQE function using provided optimizer without gradient
@@ -270,7 +271,7 @@ static inline vqe_result vqe(QuantumKernel &&kernel, const spin_op &hamiltonian,
       },
       options);
 
-  return {groundEnergy, optParams, data};
+  return {groundEnergy, std::move(optParams), std::move(data)};
 }
 
 template <typename QuantumKernel>
@@ -298,7 +299,7 @@ static inline vqe_result vqe(QuantumKernel &&kernel, const spin_op &hamiltonian,
       },
       options);
 
-  return {groundEnergy, optParams, data};
+  return {groundEnergy, std::move(optParams), std::move(data)};
 }
 
 template <typename QuantumKernel, typename ArgTranslator>
@@ -333,7 +334,7 @@ static inline vqe_result vqe(QuantumKernel &&kernel, const spin_op &hamiltonian,
       },
       options);
 
-  return {groundEnergy, optParams, data};
+  return {groundEnergy, std::move(optParams), std::move(data)};
 }
 
 template <typename QuantumKernel, typename ArgTranslator>
@@ -364,7 +365,7 @@ static inline vqe_result vqe(QuantumKernel &&kernel, const spin_op &hamiltonian,
       },
       options);
 
-  return {groundEnergy, optParams, data};
+  return {groundEnergy, std::move(optParams), std::move(data)};
 }
 
 template <typename QuantumKernel, typename ArgTranslator>
@@ -399,7 +400,7 @@ vqe(QuantumKernel &&kernel, const spin_op &hamiltonian,
       },
       options);
 
-  return {groundEnergy, optParams, data};
+  return {groundEnergy, std::move(optParams), std::move(data)};
 }
 
 } // namespace cudaq::solvers

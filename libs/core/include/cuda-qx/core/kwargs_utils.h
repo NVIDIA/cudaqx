@@ -60,7 +60,7 @@ inline heterogeneous_map hetMapFromKwargs(const py::kwargs &kwargs) {
             for (const auto &v : inner_list) {
               inner_vec.push_back(v.cast<double>());
             }
-            vec_vec.push_back(inner_vec);
+            vec_vec.push_back(std::move(inner_vec));
           }
           result.insert(key, std::move(vec_vec));
         } else {
@@ -129,7 +129,7 @@ tensor<T> toTensor(const py::array_t<T> &H, bool perform_pcm_checks = false) {
 
   // Create a tensor and borrow the NumPy array data
   cudaqx::tensor<T> tensor_H(shape);
-  tensor_H.borrow(static_cast<T *>(buf.ptr), shape);
+  tensor_H.borrow(static_cast<T *>(buf.ptr), std::move(shape));
   return tensor_H;
 }
 

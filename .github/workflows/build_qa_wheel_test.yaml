@@ -70,7 +70,9 @@ jobs:
 
           # Fetch the CUDA-QX wheels
           gh run download -R ${{ inputs.wheels_repo }} ${{ inputs.wheels_run_id }} -p 'wheels-py*'
+          gh run download -R ${{ inputs.wheels_repo }} ${{ inputs.wheels_run_id }} -p 'metapackages'
           mv */*.whl .
+          mv metapackages/*.tar.gz .
           ls
         shell: bash
 

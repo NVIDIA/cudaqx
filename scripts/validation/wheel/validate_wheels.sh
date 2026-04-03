@@ -13,21 +13,21 @@
 # gh workflow run "Build Image for QA Wheel Tests" -R <repo name> --ref <branch name>
 
 # Invoke this script, which should reside in Docker test image, like this:
-# docker run -it --rm --name wheels-test --gpus all -w /root <image name> bash -i -c "bash -i validate_wheels.sh"
+# docker run -it --rm --name wheels-test --gpus all -w /root <image name> bash -i -c "bash -i validate_wheels.sh [--cuda-version <cuda version>]"
 
 set -e
 
 # Parse command line arguments
-BLACKWELL_MODE=false
+CUDA_VERSION="12.6.0"
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --blackwell)
-            BLACKWELL_MODE=true
-            shift
+        --cuda-version)
+            CUDA_VERSION=$2
+            shift 2
             ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [--blackwell]"
+            echo "Usage: $0 [--cuda-version <cuda version>]"
             exit 1
             ;;
     esac
@@ -62,6 +62,8 @@ run_python_tests() {
 test_examples() {
     echo "Testing examples ..."
 
+    local num_failures=0
+
     # Loop through Python versions
     for python_version in "${PYTHON_VERSIONS[@]}"; do
         echo "Testing with Python version: ${python_version}"
@@ -70,24 +72,25 @@ test_examples() {
         # (assuming that you do, in fact, accept the ToS).
         conda_name=cudaqx-env-$python_version
         conda create -y -n $conda_name python=$python_version pip
-        conda install -y -n $conda_name -c "nvidia/label/cuda-12" cuda
+        conda install -y -n $conda_name -c "nvidia/label/cuda-${CUDA_VERSION}" cuda
         conda install -y -n $conda_name -c conda-forge mpi4py openmpi">=5.0.3" cxx-compiler
         conda env config vars set -n $conda_name LD_LIBRARY_PATH="$CONDA_PREFIX/envs/$conda_name/lib:$LD_LIBRARY_PATH"
         conda env config vars set -n $conda_name MPI_PATH=$CONDA_PREFIX/envs/$conda_name
         conda activate $conda_name
-        pip install pypiserver
-        pypi-server run -p 8080 /root/wheels &
-        pip install cudaq-qec[tensor_network_decoder] --extra-index-url http://localhost:8080
-        pip install cudaq-solvers[gqe] --extra-index-url http://localhost:8080
+        # Our optional dependencies for TensorRT and PyTorch come from different
+        # optional features. Therefore, the packages must be manually installed.
+        cuda_major=$(echo ${CUDA_VERSION} | cut -d '.' -f 1)
+        cuda_minor=$(echo ${CUDA_VERSION} | cut -d '.' -f 2)
+        cuda_no_dot="${cuda_major}${cuda_minor}"
+        pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu${cuda_no_dot}
+        if [ "$(uname -m)" == "x86_64" ]; then
+          pip install "tensorrt-cu${cuda_major}==10.13.*" "cuda_toolkit[cudart]==${cuda_major}.${cuda_minor}.*"
+          pip install onnxscript
+        fi
+        pip install cudaq-qec[tensor_network_decoder,trt_decoder] --find-links /root/wheels
+        pip install cudaq-solvers[gqe] --find-links /root/wheels
         source $CONDA_PREFIX/lib/python${python_version}/site-packages/distributed_interfaces/activate_custom_mpi.sh
         export OMPI_MCA_opal_cuda_support=true OMPI_MCA_btl='^openib'
-        pkill -f "pypi-server" # kill the temporary pypi-server
-
-        # Install nightly version PyTorch for Blackwell if flag is provided
-        if [ "$BLACKWELL_MODE" = true ]; then
-            echo "Installing nightly version PyTorch for Blackwell mode..."
-            pip install --upgrade --force-reinstall --pre torch --index-url https://download.pytorch.org/whl/nightly/cu128
-        fi
 
         # Needed for tests:
         pip install pytest
@@ -107,6 +110,7 @@ test_examples() {
         # Run Python tests first
         if ! run_python_tests ${python_version}; then
             echo "ERROR: run_python_tests ${python_version} FAILED"
+            num_failures=$((num_failures + 1))
         fi
 
         # Loop through targets
@@ -118,12 +122,22 @@ test_examples() {
                 echo "Testing ${domain} Python examples with Python ${python_version} and target ${target}..."
                 cd examples/${domain}/python
                 shopt -s nullglob # don't throw errors if no Python files exist
-                for f in *.py; do \
-                    echo Testing $f...; \
-                    python3 $f --target ${target}
-                    res=$?
-                    if [ $res -ne 0 ]; then
-                        echo "Python tests failed for ${domain} with Python ${python_version} and target ${target}: $res"
+                for f in *.py; do
+                    echo Testing $f...
+                    if [ "$f" = "gqe_h2.py" ]; then
+                        if ! python3 "$f"; then
+                            echo "Python tests failed for ${domain} with Python ${python_version} (default target)"
+                            num_failures=$((num_failures + 1))
+                        fi
+                        if ! python3 "$f" --mpi; then
+                            echo "Python tests failed for ${domain} with Python ${python_version} using --mpi"
+                            num_failures=$((num_failures + 1))
+                        fi
+                    else
+                        if ! python3 "$f" --target ${target}; then
+                            echo "Python tests failed for ${domain} with Python ${python_version} and target ${target}"
+                            num_failures=$((num_failures + 1))
+                        fi
                     fi
                 done
                 shopt -u nullglob  # reset setting, just for cleanliness
@@ -133,13 +147,12 @@ test_examples() {
 
         conda deactivate
     done
+
+    return $num_failures
 }
 
 # Main execution
 echo "Starting CUDA-Q image validation for ${CURRENT_ARCH}..."
-if [ "$BLACKWELL_MODE" = true ]; then
-    echo "Running in Blackwell mode with PyTorch installation"
-fi
 
 conda init bash
 source activate base

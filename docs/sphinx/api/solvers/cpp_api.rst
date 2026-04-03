@@ -7,6 +7,7 @@ CUDA-Q Solvers C++ API
 .. doxygenclass:: cudaq::solvers::spin_complement_gsd 
 .. doxygenclass:: cudaq::solvers::uccsd 
 .. doxygenclass:: cudaq::solvers::uccgsd 
+
 .. doxygenclass:: cudaq::solvers::qaoa_pool 
 
 .. doxygenfunction:: cudaq::solvers::get_operator_pool 

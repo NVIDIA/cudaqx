@@ -495,8 +495,8 @@ CUDA-QX provides several pre-built operator pools for ADAPT-VQE:
 * **spin_complement_gsd**: Spin-complemented generalized singles and doubles.
     This operator pool combines generalized excitations with enforced spin symmetry. It is 
     more powerful than UCCSD because its generalized operators capture more electron correlation,
-     and it is more reliable than both UCCSD and UCCGSD because its spin-complemented 
-     construction prevents the unphysical "spin-symmetry breaking".
+    and it is more reliable than both UCCSD and UCCGSD because its spin-complemented 
+    construction prevents the unphysical "spin-symmetry breaking".
 * **uccsd**: UCCSD operators. 
     The standard, chemically-inspired ansatz. Excitation Space 
     is Restricted. It only includes single and double excitations 
@@ -585,8 +585,7 @@ CUDA-QX provides several state preparations ansatz for VQE.
         for i in range(numElectrons):
             x(q[i])
         solvers.stateprep.uccgsd(q, thetas, pauliWordsList, coefficientsList)
-
-
+    
 Algorithm Parameters
 ^^^^^^^^^^^^^^^^^^^^^^
 

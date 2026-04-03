@@ -10,4 +10,6 @@ cudaqx_add_device_code(cudaq-solvers
   SOURCES
     uccsd.cpp
     uccgsd.cpp
+    ceo.cpp
+    upccgsd.cpp
 )

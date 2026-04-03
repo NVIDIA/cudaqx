@@ -32,4 +32,11 @@ int configure_decoders_from_file(const char *config_file);
 int configure_decoders_from_str(const char *config_str);
 void finalize_decoders();
 
+/// @brief Set a callback to capture syndrome data as it's enqueued.
+/// Used by --save_syndrome feature to record syndromes to file.
+/// @param callback Function pointer that receives packed syndrome bytes.
+///                 Set to nullptr to disable capture.
+__attribute__((visibility("default"))) void
+set_syndrome_capture_callback(void (*callback)(const uint8_t *, size_t));
+
 } // namespace cudaq::qec::decoding::host

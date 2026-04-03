@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2022 - 2025 NVIDIA Corporation & Affiliates.                  *
+ * Copyright (c) 2022 - 2026 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -12,12 +12,12 @@
 #include <pybind11/operators.h>
 #include <pybind11/stl.h>
 
-#include "common/Logger.h"
+#include "cudaq/runtime/logger/logger.h"
 
+#include "common/DeviceCodeRegistry.h"
 #include "cudaq/python/PythonCppInterop.h"
 #include "cudaq/qec/experiments.h"
 #include "cudaq/qec/version.h"
-#include "cudaq/utils/registry.h"
 
 #include "cuda-qx/core/kwargs_utils.h"
 #include "type_casters.h"
@@ -69,7 +69,16 @@ protected:
   /// Python.
   std::unordered_map<qec::operation, py::object> m_py_operation_encodings;
 
+  // Jitted python kernels are only alive as long as the
+  // `CppPyKernelDecorator` they were compiled from, so we must cache them here
+  std::vector<cudaq::python::CppPyKernelDecorator *> cachedDecorators;
+
 public:
+  ~PyCodeHandle() {
+    for (auto decorator : cachedDecorators)
+      delete decorator;
+  }
+
   /// @brief Constructs a PyCodeHandle from a Python QEC code object
   /// @param registeredCode Python object containing the QEC code definition
   /// @throw std::runtime_error if the Python code lacks required attributes
@@ -122,37 +131,23 @@ public:
       m_py_operation_encodings.emplace(opKeyEnum, kernel);
 
       // Create the kernel interop object
-      cudaq::python::CppPyKernelDecorator opInterop(kernel);
-      opInterop.compile();
-
-      // Get the kernel name
-      auto baseName = kernelHandle.attr("name").cast<std::string>();
-      std::string kernelName = "__nvqpp__mlirgen__" + baseName;
-
-      // Extract teh function pointer, register with qkernel system
-      auto capsule = kernel.attr("extract_c_function_pointer")(kernelName)
-                         .cast<py::capsule>();
-      void *ptr = capsule;
-      cudaq::registry::__cudaq_registerLinkableKernel(ptr, baseName.c_str(),
-                                                      ptr);
+      auto kernInterop = new cudaq::python::CppPyKernelDecorator(kernel);
 
       // Make sure we cast the function pointer correctly
       if (opKeyEnum == operation::stabilizer_round) {
-        auto *casted = reinterpret_cast<std::vector<cudaq::measure_result> (*)(
-            patch, const std::vector<std::size_t> &,
-            const std::vector<std::size_t> &)>(ptr);
-        operation_encodings.insert(
-            {opKeyEnum, cudaq::qkernel<std::vector<cudaq::measure_result>(
-                            patch, const std::vector<std::size_t> &,
-                            const std::vector<std::size_t> &)>(casted)});
+        encoding fptr = kernInterop->getDirectKernelCall<qkernel<
+            std::vector<measure_result>(patch, const std::vector<std::size_t> &,
+                                        const std::vector<std::size_t> &)>>();
+        operation_encodings.insert({opKeyEnum, std::move(fptr)});
+        cachedDecorators.emplace_back(kernInterop);
         continue;
       }
 
       // FIXME handle other signatures later... this assumes single patch
       // signatures
-      auto *casted = reinterpret_cast<void (*)(patch)>(ptr);
-      operation_encodings.insert(
-          {opKeyEnum, cudaq::qkernel<void(patch)>(casted)});
+      encoding fptr = kernInterop->getDirectKernelCall<qkernel<void(patch)>>();
+      operation_encodings.insert({opKeyEnum, std::move(fptr)});
+      cachedDecorators.emplace_back(kernInterop);
     }
   }
 

@@ -463,16 +463,14 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
     cudaq::ExecutionContext ctx_msm_size("msm_size");
     ctx_msm_size.noiseModel = &noise;
     auto &platform = cudaq::get_platform();
-    platform.set_exec_ctx(&ctx_msm_size);
-
-    // Always use numLogical = 1 for the MSM
-    cudaq::qec::qpu::demo_circuit_qpu(
-        /*allow_device_calls=*/false, prep, is_on_Z_basis, numData, numAncx,
-        numAncz, numRounds,
-        /*numLogical=*/1, cnot_schedX_flat, cnot_schedZ_flat, p_spam,
-        /*apply_corrections=*/false);
-
-    platform.reset_exec_ctx();
+    platform.with_execution_context(ctx_msm_size, [&] {
+      // Always use numLogical = 1 for the MSM
+      cudaq::qec::qpu::demo_circuit_qpu(
+          /*allow_device_calls=*/false, prep, is_on_Z_basis, numData, numAncx,
+          numAncz, numRounds,
+          /*numLogical=*/1, cnot_schedX_flat, cnot_schedZ_flat, p_spam,
+          /*apply_corrections=*/false);
+    });
     if (!ctx_msm_size.msm_dimensions.has_value()) {
       throw std::runtime_error("No MSM dimensions found");
     }
@@ -486,14 +484,14 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
     ctx_msm.noiseModel = &noise;
     // Line that help us in preallocation
     ctx_msm.msm_dimensions = ctx_msm_size.msm_dimensions;
-    platform.set_exec_ctx(&ctx_msm);
-    // Always use numLogical = 1 for the MSM
-    cudaq::qec::qpu::demo_circuit_qpu(
-        /*allow_device_calls=*/false, prep, is_on_Z_basis, numData, numAncx,
-        numAncz, numRounds,
-        /*numLogical=*/1, cnot_schedX_flat, cnot_schedZ_flat, p_spam,
-        /*apply_corrections=*/false);
-    platform.reset_exec_ctx();
+    platform.with_execution_context(ctx_msm, [&] {
+      // Always use numLogical = 1 for the MSM
+      cudaq::qec::qpu::demo_circuit_qpu(
+          /*allow_device_calls=*/false, prep, is_on_Z_basis, numData, numAncx,
+          numAncz, numRounds,
+          /*numLogical=*/1, cnot_schedX_flat, cnot_schedZ_flat, p_spam,
+          /*apply_corrections=*/false);
+    });
 
     auto msm_as_strings = ctx_msm.result.sequential_data();
     printf("MSM Dimensions: %ld measurements x %ld error mechanisms\n",

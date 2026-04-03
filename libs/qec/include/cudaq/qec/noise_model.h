@@ -64,7 +64,7 @@ public:
     auto E3 = details::kron(K1, 2, 2, K1, 2, 2);
 
     // Set the ops vector to contain only the Kronecker product
-    ops = {E0, E1, E2, E3};
+    ops = {std::move(E0), std::move(E1), std::move(E2), std::move(E3)};
     this->parameters.push_back(probability);
     noise_type = cudaq::noise_model_type::bit_flip_channel;
     validateCompleteness();

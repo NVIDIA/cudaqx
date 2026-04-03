@@ -15,7 +15,10 @@
 
 #include "cudaq/solvers/adapt.h"
 #include "cudaq/solvers/qaoa.h"
+#include "cudaq/solvers/stateprep/ceo.h"
 #include "cudaq/solvers/stateprep/uccgsd.h"
+#include "cudaq/solvers/stateprep/upccgsd.h"
+
 #include "cudaq/solvers/stateprep/uccsd.h"
 #include "cudaq/solvers/version.h"
 #include "cudaq/solvers/vqe.h"
@@ -172,6 +175,15 @@ void addStatePrepKernels(py::module &mod) {
       "Takes as input the qubits, grouped rotational parameters, grouped Pauli "
       "words, "
       "and grouped coefficients.");
+  cudaq::python::addDeviceKernelInterop<
+      cudaq::qview<>, const std::vector<double> &,
+      const std::vector<std::vector<cudaq::pauli_word>> &,
+      const std::vector<std::vector<double>> &>(
+      mod, "stateprep", "upccgsd",
+      "Unitary Coupled Cluster Generalized Singles and Paired Doubles Ansatz. "
+      "Takes as input the qubits, grouped rotational parameters, grouped Pauli "
+      "words, "
+      "and grouped coefficients.");
   cudaq::python::addDeviceKernelInterop<cudaq::qview<>, double, std::size_t,
                                         std::size_t>(
       mod, "stateprep", "single_excitation",
@@ -204,8 +216,44 @@ void addStatePrepKernels(py::module &mod) {
 
   Args:
       num_qubits (int): Number of spin orbitals (qubits).
-      only_singles (bool): If True, only single excitations.
       only_doubles (bool): If True, only double excitations.
+
+  Returns:
+      Tuple[List[List[PauliWord]], List[List[float]]]: Pauli words and coefficients grouped by excitation.
+  )");
+  stateprep.def("get_upccgsd_pauli_lists",
+                &cudaq::solvers::stateprep::get_upccgsd_pauli_lists,
+                py::arg("num_qubits"), py::arg("only_doubles") = false,
+                R"(
+  Generate UpCCGSD operator pool (Python-style unique singles/doubles) and extract Pauli words and coefficients grouped by excitation.
+
+  Args:
+      num_qubits (int): Number of spin orbitals (qubits).
+      only_doubles (bool): If True, only double excitations.
+
+  Returns:
+      Tuple[List[List[PauliWord]], List[List[float]]]: Pauli words and coefficients grouped by excitation.
+  )");
+
+  // Add CEO state preparation
+  cudaq::python::addDeviceKernelInterop<
+      cudaq::qview<>, const std::vector<double> &,
+      const std::vector<std::vector<cudaq::pauli_word>> &,
+      const std::vector<std::vector<double>> &>(
+      mod, "stateprep", "ceo",
+      "CEO (Coupled Exchange Operator) Ansatz. "
+      "Takes as input the qubits, grouped rotational parameters, grouped Pauli "
+      "words, "
+      "and grouped coefficients.");
+
+  stateprep.def("get_ceo_pauli_lists",
+                &cudaq::solvers::stateprep::get_ceo_pauli_lists,
+                py::arg("num_orbitals"),
+                R"(
+  Generate CEO operator pool (spin-dependent generalized singles/doubles coupled qubit excitation operators) and extract Pauli words and coefficients grouped by excitation.
+
+  Args:
+      num_orbitals (int): Number of spatial orbitals.
 
   Returns:
       Tuple[List[List[PauliWord]], List[List[float]]]: Pauli words and coefficients grouped by excitation.
@@ -953,14 +1001,8 @@ Notes:
          const std::vector<cudaq::spin_op> &pool, py::kwargs options) {
         cudaq::python::CppPyKernelDecorator initialStateKernelWrapper(
             initialStateKernel);
-        initialStateKernelWrapper.compile();
-        auto baseName = initialStateKernel.attr("name").cast<std::string>();
-        std::string kernelName = "__nvqpp__mlirgen__" + baseName;
-        auto fptr =
-            initialStateKernelWrapper
-                .extract_c_function_pointer<cudaq::qvector<> &>(kernelName);
-        auto *p = reinterpret_cast<void *>(fptr);
-        cudaq::registry::__cudaq_registerLinkableKernel(p, baseName.c_str(), p);
+        auto fptr = initialStateKernelWrapper.getDirectKernelCall<
+            cudaq::qkernel<void(cudaq::qvector<> &)>>();
         heterogeneous_map optOptions;
         optOptions.insert("max_iter", getValueOr<int>(options, "max_iter", 30));
         optOptions.insert(
@@ -1089,16 +1131,14 @@ Notes:
                 "Invalid functional optimizer provided (only "
                 "scipy.optimize.minimize supported).");
           PythonOptimizer opt(func, options);
-          return cudaq::solvers::qaoa(problemHamiltonian, opt, numLayers,
-                                      initialParameters,
+          return cudaq::solvers::qaoa(problemHamiltonian, referenceHamiltonian,
+                                      opt, numLayers, initialParameters,
                                       hetMapFromKwargs(options));
         }
 
         auto optimizerName =
             cudaqx::getValueOr<std::string>(options, "optimizer", "cobyla");
         auto optimizer = cudaq::optim::optimizer::get(optimizerName);
-        auto gradName =
-            cudaqx::getValueOr<std::string>(options, "gradient", "");
 
         return cudaq::solvers::qaoa(problemHamiltonian, referenceHamiltonian,
                                     *optimizer, numLayers, initialParameters,
@@ -1130,8 +1170,6 @@ Notes:
         auto optimizerName =
             cudaqx::getValueOr<std::string>(options, "optimizer", "cobyla");
         auto optimizer = cudaq::optim::optimizer::get(optimizerName);
-        auto gradName =
-            cudaqx::getValueOr<std::string>(options, "gradient", "");
         return cudaq::solvers::qaoa(problemHamiltonian, *optimizer, numLayers,
                                     initialParameters,
                                     hetMapFromKwargs(options));

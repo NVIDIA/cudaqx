@@ -6,12 +6,13 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 #include "common/ExecutionContext.h"
-#include "common/Logger.h"
+#include "common/FmtCore.h"
 #include "cudaq/platform.h"
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/detector_error_model.h"
 #include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/plugin_loader.h"
+#include "cudaq/runtime/logger/logger.h"
 #include <filesystem>
 #include <limits>
 #include <link.h>
@@ -528,7 +529,7 @@ void bindDecoder(py::module &mod) {
       "get_pcm_for_rounds",
       [](const py::array_t<uint8_t> &H, std::uint32_t num_syndromes_per_round,
          std::uint32_t start_round, std::uint32_t end_round,
-         bool straddle_end_round, bool straddle_start_round) {
+         bool straddle_start_round, bool straddle_end_round) {
         auto tensor_H = pcmToTensor(H);
 
         auto [H_new, first_column, last_column] =
@@ -759,9 +760,7 @@ void bindDecoder(py::module &mod) {
       [](std::function<void()> kernel, bool verbose = false) {
         cudaq::ExecutionContext ctx_msm_size("msm_size");
         auto &platform = cudaq::get_platform();
-        platform.set_exec_ctx(&ctx_msm_size);
-        kernel();
-        platform.reset_exec_ctx();
+        platform.with_execution_context(ctx_msm_size, kernel);
         if (!ctx_msm_size.msm_dimensions.has_value()) {
           throw std::runtime_error("No MSM dimensions found");
         }
@@ -770,9 +769,7 @@ void bindDecoder(py::module &mod) {
         }
         cudaq::ExecutionContext ctx_msm("msm");
         ctx_msm.msm_dimensions = ctx_msm_size.msm_dimensions;
-        platform.set_exec_ctx(&ctx_msm);
-        kernel();
-        platform.reset_exec_ctx();
+        platform.with_execution_context(ctx_msm, kernel);
 
         auto msm_as_strings = ctx_msm.result.sequential_data();
         if (verbose) {

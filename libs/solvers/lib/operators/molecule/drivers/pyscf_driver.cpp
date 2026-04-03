@@ -14,8 +14,8 @@
 #include "cudaq/solvers/operators/molecule/fermion_compiler.h"
 #include "cudaq/solvers/operators/molecule/molecule_package_driver.h"
 
-#include "common/Logger.h"
 #include "common/RestClient.h"
+#include "cudaq/runtime/logger/logger.h"
 
 #include <filesystem>
 #include <fmt/core.h>

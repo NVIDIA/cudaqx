@@ -1406,12 +1406,13 @@ TEST(PCMUtilsTester, checkShufflePCMColumns) {
   std::size_t n_errs_per_round = 30;
   std::size_t n_syndromes_per_round = 10;
   std::size_t weight = 3;
-  std::mt19937_64 rng(13);
+  std::mt19937_64 rng1(13);
+  std::mt19937_64 rng2(13);
   cudaqx::tensor<uint8_t> pcm = cudaq::qec::generate_random_pcm(
       n_rounds, n_errs_per_round, n_syndromes_per_round, weight,
-      std::move(rng));
+      std::move(rng1));
   pcm = cudaq::qec::sort_pcm_columns(pcm, n_syndromes_per_round);
-  auto pcm_permuted = cudaq::qec::shuffle_pcm_columns(pcm, std::move(rng));
+  auto pcm_permuted = cudaq::qec::shuffle_pcm_columns(pcm, std::move(rng2));
   // Verify that the new PCM is different from the original.
   EXPECT_FALSE(are_pcms_equal(pcm, pcm_permuted));
   // Verify that the resorted permutedPCM is the same as the original.
