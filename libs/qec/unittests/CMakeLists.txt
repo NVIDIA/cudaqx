@@ -248,6 +248,7 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
 
     target_link_options(test_realtime_qldpc_graph_decoding PRIVATE
       "LINKER:--allow-shlib-undefined"
+      "LINKER:--disable-new-dtags"
     )
 
     # Resolve CUDAQ SDK lib dir for RPATH (libnvqir, libcudaq)
