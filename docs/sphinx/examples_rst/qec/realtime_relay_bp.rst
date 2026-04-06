@@ -63,7 +63,7 @@ Source Repositories
      - ``main`` branch (or your feature branch)
    * - **cuda-quantum** (realtime)
      - https://github.com/NVIDIA/cuda-quantum
-     - Commit ``9ce3d2e886``
+     - Commit ``bb21b7a031``
    * - **holoscan-sensor-bridge**
      - https://github.com/nvidia-holoscan/holoscan-sensor-bridge
      - Tag ``2.6.0-EA2``
@@ -120,7 +120,7 @@ If you only need to run the CI unit test, you can build without
    # 1. Build libcudaq-realtime
    git clone https://github.com/NVIDIA/cuda-quantum.git cudaq-realtime-src
    cd cudaq-realtime-src
-   git checkout 9ce3d2e886
+   git checkout bb21b7a031
    cd realtime && mkdir -p build && cd build
    cmake -G Ninja -DCMAKE_INSTALL_PREFIX=/tmp/cudaq-realtime ..
    ninja && ninja install
@@ -148,7 +148,7 @@ To also build the bridge and playback tools for emulated or FPGA testing:
    cd cudaq-realtime-src
    git sparse-checkout init --cone
    git sparse-checkout set realtime
-   git checkout 9ce3d2e886
+   git checkout bb21b7a031
    cd ..
 
    # 2. Build holoscan-sensor-bridge (tag 2.6.0-EA2)
