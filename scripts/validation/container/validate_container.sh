@@ -146,8 +146,14 @@ test_examples() {
                 if ! docker exec ${container_name} bash -c "cd /home/cudaq/cudaqx-examples/${domain}/cpp && \
                     for f in *.cpp; do \
                         echo Compiling and running \$f...; \
-                        nvq++ --enable-mlir -lcudaq-${domain} --target ${target} \$f -o test_prog && \
-                        ./test_prog || exit 1; \
+                        if grep -q '^// Compile and run' \"\$f\"; then \
+                            compile_cmd=\$(grep -A 1 '^// Compile and run' \"\$f\" | tail -n 1 | sed 's|^// *||'); \
+                            \$compile_cmd -o test_prog && \
+                            ./test_prog || exit 1; \
+                        else \
+                            nvq++ --enable-mlir -lcudaq-${domain} --target ${target} \$f -o test_prog && \
+                            ./test_prog || exit 1; \
+                        fi; \
                         rm test_prog; \
                     done"; then
                     echo "C++ tests failed for ${domain} with target ${target}"

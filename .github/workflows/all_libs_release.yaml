@@ -96,7 +96,7 @@ jobs:
       - name: Build cuda-quantum realtime
         run: |
           CUDAQ_REALTIME_REPO=https://github.com/NVIDIA/cuda-quantum.git
-          CUDAQ_REALTIME_REF=9ce3d2e886
+          CUDAQ_REALTIME_REF=$(jq -r '.cudaq_realtime.ref' .cudaq_realtime_version)
           CUDAQ_REALTIME_ROOT=/tmp/cudaq-realtime
           cd /tmp
           rm -rf cudaq-realtime-src $CUDAQ_REALTIME_ROOT
