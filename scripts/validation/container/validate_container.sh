@@ -146,8 +146,8 @@ test_examples() {
                 if ! docker exec ${container_name} bash -c "cd /home/cudaq/cudaqx-examples/${domain}/cpp && \
                     for f in *.cpp; do \
                         echo Compiling and running \$f...; \
-                        if grep -q '^// Compile and run:' \"\$f\"; then \
-                            compile_cmd=\$(grep -A 1 '^// Compile and run:' \"\$f\" | tail -n 1 | sed 's|^// *||'); \
+                        if grep -q '^// Compile and run' \"\$f\"; then \
+                            compile_cmd=\$(grep -A 1 '^// Compile and run' \"\$f\" | tail -n 1 | sed 's|^// *||'); \
                             \$compile_cmd -o test_prog && \
                             ./test_prog || exit 1; \
                         else \
