@@ -410,6 +410,95 @@ Usage:
         // Access stabilizers
         auto stabilizers = code->get_stabilizers();
 
+Surface Code
+^^^^^^^^^^^^
+
+The library provides a **rotated surface code** on a two-dimensional qubit
+layout with **open boundaries** (a single patch). It is a **CSS** code—:math:`X`
+and :math:`Z` errors are handled in separate CSS sectors—encoding **one logical
+qubit** into :math:`d^2` data qubits with code distance :math:`d` in this
+layout (other surface-code families, such as a toric code on periodic
+boundaries, can encode more logical information). Stabilizers have weight four
+in the bulk and weight two on the boundary, following the grid convention
+described in `Towards a Standardized Definition of Quantum Circuits for Quantum
+Error Correction with Rotated Surface Codes
+<https://arxiv.org/abs/2311.10687>`__.
+
+**Key Properties** (distance :math:`d` in this implementation):
+
+* Data qubits: :math:`d^2`
+* Encoded logical qubits: 1
+* Code distance: :math:`d`
+* Stabilizers: :math:`d^2 - 1` total—:math:`(d^2 - 1) / 2` :math:`X`-type and
+  :math:`(d^2 - 1) / 2` :math:`Z`-type. The :code:`patch` type assigns **one
+  ancilla per stabilizer** measurement, so the ancilla count matches the
+  stabilizer count here; other hardware layouts could fold or share ancillas
+  differently.
+
+**Stabilizer Generators** (example: ``distance`` :math:`= 3`)
+
+Data qubits are indexed in row-major order (left to right, top to bottom); the
+leftmost character of each Pauli string is qubit ``0``, matching the rest of this
+document. For :math:`d = 3` there are nine data qubits:
+
+::
+
+   d0  d1  d2
+   d3  d4  d5
+   d6  d7  d8
+
+* X-type (weight 2 on the left and right boundaries, weight 4 in the bulk):
+
+  * ``XIIXIIIII``
+  * ``IXXIXXIII``
+  * ``IIIXXIXXI``
+  * ``IIIIIXIIX``
+
+* Z-type (weight 2 on the top and bottom boundaries, weight 4 in the bulk):
+
+  * ``IZZIIIIII``
+  * ``ZZIZZIIII``
+  * ``IIIIZZIZZ``
+  * ``IIIIIIZZI``
+
+These Pauli words are exactly those used internally for :math:`d=3`;
+:code:`get_stabilizers()` returns the same generators in a canonical sorted order
+(rather than grouped as X-type then Z-type).
+
+For other distances, stabilizer supports are generated from the same rotated
+grid; use :code:`stabilizer_grid` or :code:`get_stabilizers()` to inspect them.
+
+You must pass ``distance`` when constructing the code; there is no default.
+
+The :code:`stabilizer_grid` helper documents how stabilizers and data qubits are
+indexed on the grid and provides helpers to print the layout. In Python use
+:code:`cudaq_qec.stabilizer_grid(distance)`; in C++ see
+:file:`cudaq/qec/codes/surface_code.h`.
+
+Usage:
+
+.. tab:: Python
+
+    .. code-block:: python
+
+        import cudaq_qec as qec
+
+        # Rotated surface code; distance is required
+        code = qec.get_code('surface_code', distance=3)
+
+        stabilizers = code.get_stabilizers()
+        parity = code.get_parity()
+
+.. tab:: C++
+
+    .. code-block:: cpp
+
+        auto code = cudaq::qec::get_code(
+            "surface_code", cudaqx::heterogeneous_map{{"distance", 3}});
+
+        auto stabilizers = code->get_stabilizers();
+        auto parity = code->get_parity();
+
 
 Decoder Framework :code:`cudaq::qec::decoder`
 ----------------------------------------------
@@ -808,6 +897,110 @@ The decoder returns the probability that the logical observable has flipped for 
     that this GPU will not be supported by the Tensor Network Decoder when
     CUDA-Q 0.5.0 is released.
 
+
+Sliding Window Decoder
+^^^^^^^^^^^^^^^^^^^^^^
+
+Sliding-window decoding handles **circuit-level noise** across several syndrome
+rounds by processing syndromes **before the full measurement sequence arrives**,
+which **reduces latency** at the cost of **higher logical error rates** than
+decoding the entire sequence at once.
+
+Whether that tradeoff is worthwhile depends on the **noise model**, **code
+parameters**, and **latency budget**. Since **CUDA-Q 0.5.0**, you can use **any
+CUDA-Q decoder** as the **inner** decoder and tune behavior mainly via **window
+size** and the other settings below. Each round must yield the **same
+number of syndrome measurements**; the decoder assumes **no particular temporal
+structure** of the noise, so you can still vary noise **from round to round** in
+experiments.
+
+Key Steps:
+
+1. **Obtain a detector error matrix and rates**: Pass the parity check matrix
+   ``H`` (for example ``dem.detector_error_matrix``) and ``error_rate_vec`` with
+   one entry per column of ``H`` (for example ``dem.error_rates`` from the same
+   DEM). The matrix must be in the sorted form expected by :code:`pcm_is_sorted`
+   for your ``num_syndromes_per_round``; DEMs from :code:`z_dem_from_memory_circuit`
+   are canonicalized. Hand-built matrices may need :code:`simplify_pcm`.
+2. **Set the schedule and window**: Provide ``num_syndromes_per_round`` (constant
+   every round). Choose ``window_size`` and ``step_size`` so ``window_size`` and
+   ``step_size`` stay within valid bounds and ``num_rounds - window_size`` is
+   divisible by ``step_size``, with ``num_rounds`` inferred from ``H`` and
+   ``num_syndromes_per_round``.
+3. **Pick an inner decoder**: Use ``inner_decoder_name`` and
+   ``inner_decoder_params`` for the decoder that runs inside each window (for
+   example :code:`nv-qldpc-decoder`). Optional ``straddle_start_round`` /
+   ``straddle_end_round`` control cross-round mechanisms at window edges.
+4. **Construct and run**: Call :code:`get_decoder("sliding_window", H, opts)`,
+   then ``decode`` or ``decode_batch``. Partial syndromes leave the decoder in an
+   intermediate state until enough bits arrive; full parameter lists and
+   behavior are in :doc:`/api/qec/python_api` and :doc:`/api/qec/cpp_api`.
+
+Background: `Toward Low-latency Iterative Decoding of QLDPC Codes Under Circuit-Level Noise <https://arxiv.org/abs/2403.18901>`__.
+
+Usage:
+
+.. tab:: Python
+
+    .. code-block:: python
+
+        import cudaq
+        import cudaq_qec as qec
+        import numpy as np
+
+        cudaq.set_target('stim')
+        num_rounds = 5
+        code = qec.get_code('surface_code', distance=num_rounds)
+        noise = cudaq.NoiseModel()
+        noise.add_all_qubit_channel("x", cudaq.Depolarization2(0.001), 1)
+        statePrep = qec.operation.prep0
+        dem = qec.z_dem_from_memory_circuit(code, statePrep, num_rounds, noise)
+        inner_decoder_params = {'use_osd': True, 'max_iterations': 50, 'use_sparsity': True}
+        opts = {
+            'error_rate_vec': np.array(dem.error_rates),
+            'window_size': 1,
+            'num_syndromes_per_round': dem.detector_error_matrix.shape[0] // num_rounds,
+            'inner_decoder_name': 'nv-qldpc-decoder',
+            'inner_decoder_params': inner_decoder_params,
+        }
+        swdec = qec.get_decoder('sliding_window', dem.detector_error_matrix, **opts)
+
+.. tab:: C++
+
+    .. code-block:: cpp
+
+        #include "cudaq/qec/code.h"
+        #include "cudaq/qec/decoder.h"
+        #include "cudaq/qec/experiments.h"
+        #include "common/NoiseModel.h"
+
+        int main() {
+            int num_rounds = 5;
+            auto code = cudaq::qec::get_code(
+                "surface_code", cudaqx::heterogeneous_map{{"distance", num_rounds}});
+            cudaq::noise_model noise;
+            noise.add_all_qubit_channel("x", cudaq::depolarization2(0.001), 1);
+            auto statePrep = cudaq::qec::operation::prep0;
+            auto dem = cudaq::qec::z_dem_from_memory_circuit(*code, statePrep, num_rounds,
+                                                            noise);
+            auto inner_decoder_params = cudaqx::heterogeneous_map{
+                {"use_osd", true}, {"max_iterations", 50}, {"use_sparsity", true}};
+            auto opts = cudaqx::heterogeneous_map{
+                {"error_rate_vec", dem.error_rates},
+                {"window_size", 1},
+                {"num_syndromes_per_round", dem.detector_error_matrix.shape()[0] / num_rounds},
+                {"inner_decoder_name", "nv-qldpc-decoder"},
+                {"inner_decoder_params", inner_decoder_params}};
+            auto swdec = cudaq::qec::get_decoder("sliding_window",
+                                                 dem.detector_error_matrix, opts);
+            return 0;
+        }
+
+Output:
+
+Once a decode step completes, results use the same types as other pre-built
+decoders (:class:`cudaq_qec.Decoder` in Python, :cpp:class:`cudaq::qec::decoder`
+in C++).
 
 Real-Time Decoding
 ------------------
