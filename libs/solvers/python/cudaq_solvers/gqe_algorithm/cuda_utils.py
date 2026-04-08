@@ -1,8 +1,8 @@
 # ============================================================================ #
-# Copyright (c) 2025 - 2026 NVIDIA Corporation & Affiliates.                  #
+# Copyright (c) 2025 - 2026 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
-# This source code and the accompanying materials are made available under   #
+# This source code and the accompanying materials are made available under     #
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 """PyTorch CUDA capability checks and device selection for GQE."""

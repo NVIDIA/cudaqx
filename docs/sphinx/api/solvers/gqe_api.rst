@@ -5,6 +5,12 @@
     GQE uses a transformer model to learn which quantum operators from a pool
     should be applied to minimize a given cost function. Python-only implementation.
 
+    The neural network uses `PyTorch <https://pytorch.org/>`_. If the installed PyTorch build
+    does not ship CUDA kernels for your GPU, use a wheel with **CUDA 12.8 or newer** that
+    supports your architecture (`installation options <https://pytorch.org/get-started/locally/>`_).
+    If the driver exposes a GPU but PyTorch cannot execute CUDA kernels on it, ``gqe()``
+    writes an error to standard error and exits the process with a non-zero status.
+
     The GQE implementation in CUDA-Q Solvers is based on this paper: `K. Nakaji et al. (2024) <https://arxiv.org/abs/2401.09253>`_.
     
     :param cost: Cost function that evaluates operator sequences
