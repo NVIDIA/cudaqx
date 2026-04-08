@@ -33,5 +33,12 @@ The algorithm can efficiently utilize multiple QPUs through MPI for parallel ope
 
    The GQE implementation is a Python-only implementation.
 
+.. note::
 
-   
+   GQE uses `PyTorch <https://pytorch.org/>`_ for the generative model. If your GPU’s
+   compute capability is not included in your installed PyTorch build (for example, newer GPUs
+   versus an older wheel), install a PyTorch wheel with **CUDA 12.8 or newer** that lists your
+   architecture, following `PyTorch’s install guide <https://pytorch.org/get-started/locally/>`_.
+   When the driver exposes a GPU but this PyTorch build cannot run CUDA kernels on it, ``gqe()``
+   writes an error to standard error and exits the process with a non-zero status.
+

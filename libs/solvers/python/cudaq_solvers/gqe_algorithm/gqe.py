@@ -6,6 +6,10 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
+from .cuda_utils import (
+    pytorch_cuda_execution_available,
+    pytorch_cuda_kernel_skip_reason,
+)
 from .transformer import Transformer
 import torch
 import lightning as L
@@ -361,6 +365,10 @@ def gqe(cost, pool, config=None, **kwargs):
         
     Returns:
         tuple: Minimum energy found, corresponding operator indices
+
+    Raises:
+        SystemExit: If a CUDA device is visible but this PyTorch build cannot execute
+            kernels on it (message on stderr; use a CUDA 12.8+ PyTorch wheel for newer GPUs).
     """
     cfg = get_default_config()
 
@@ -378,8 +386,17 @@ def gqe(cost, pool, config=None, **kwargs):
     # Don't let someone override the vocab_size
     cfg.vocab_size = len(pool)
     if torch.cuda.is_available():
-        torch.cuda.init()
-        torch.empty(1, device="cuda")
+        if not pytorch_cuda_execution_available():
+            print(
+                f"({pytorch_cuda_kernel_skip_reason()}). "
+                "Use a PyTorch wheel with CUDA 12.8 or newer that includes new "
+                "architecture, or see https://pytorch.org/get-started/locally/",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        else:
+            torch.cuda.init()
+            torch.empty(1, device="cuda")
     cudaqTarget = cudaq.get_target()
     numQPUs = cudaqTarget.num_qpus()
     model = Transformer(

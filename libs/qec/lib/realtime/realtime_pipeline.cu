@@ -207,10 +207,15 @@ struct realtime_pipeline::Impl {
   cpu_stage_callback cpu_stage;
   completion_callback completion_handler;
 
-  // Owned infrastructure
+  // Owned infrastructure (nullptr when using external ring)
   std::unique_ptr<RingBufferManager> ring;
   void **h_mailbox_bank = nullptr;
   void **d_mailbox_bank = nullptr;
+
+  // Active ring buffer: either a copy of ring->ringbuffer() or the
+  // caller-supplied external ring buffer.
+  cudaq_ringbuffer_t active_rb_{};
+  bool external_ring_ = false;
 
   // Dispatcher state (hidden atomics)
   atomic_int_sys shutdown_flag{0};
@@ -262,8 +267,14 @@ struct realtime_pipeline::Impl {
 
     config = cfg;
 
-    ring = std::make_unique<RingBufferManager>(
-        static_cast<size_t>(cfg.num_slots), cfg.slot_size);
+    if (cfg.external_ringbuffer) {
+      active_rb_ = *static_cast<cudaq_ringbuffer_t *>(cfg.external_ringbuffer);
+      external_ring_ = true;
+    } else {
+      ring = std::make_unique<RingBufferManager>(
+          static_cast<size_t>(cfg.num_slots), cfg.slot_size);
+      active_rb_ = ring->ringbuffer();
+    }
 
     PIPELINE_CUDA_CHECK(cudaHostAlloc(&h_mailbox_bank,
                                       cfg.num_workers * sizeof(void *),
@@ -299,7 +310,14 @@ struct realtime_pipeline::Impl {
 
     // In GPU-only mode, set up per-worker contexts for cudaLaunchHostFunc
     // completion signaling (chains user's post_launch_fn if provided).
+    // GPU-only mode requires atomic tx_flags from RingBufferManager and is
+    // not compatible with external ring buffers.
     if (gpu_only) {
+      if (external_ring_) {
+        throw std::logic_error(
+            "GPU-only mode (no cpu_stage) is not supported with "
+            "external ring buffers; provide a cpu_stage callback");
+      }
       gpu_only_ctxs.resize(nw);
       for (int i = 0; i < nw; ++i) {
         auto &c = gpu_only_ctxs[i];
@@ -341,7 +359,7 @@ struct realtime_pipeline::Impl {
     cudaq_host_dispatch_loop_ctx_t disp_cfg;
     std::memset(&disp_cfg, 0, sizeof(disp_cfg));
 
-    disp_cfg.ringbuffer = ring->ringbuffer();
+    disp_cfg.ringbuffer = active_rb_;
 
     disp_cfg.config.num_slots = static_cast<uint32_t>(config.num_slots);
     disp_cfg.config.slot_size = static_cast<uint32_t>(config.slot_size);
@@ -474,12 +492,12 @@ struct realtime_pipeline::Impl {
 
       int origin_slot = inflight_slot_tags[worker_id];
 
-      uint8_t *slot_host = ring->rx_data_host() +
+      uint8_t *slot_host = active_rb_.rx_data_host +
                            static_cast<size_t>(origin_slot) * config.slot_size;
       uint64_t rx_value = reinterpret_cast<uint64_t>(slot_host);
 
-      ring->tx_flags()[origin_slot].store(rx_value,
-                                          cuda::std::memory_order_release);
+      volatile uint64_t *tf = active_rb_.tx_flags_host;
+      __atomic_store_n(&tf[origin_slot], rx_value, __ATOMIC_RELEASE);
 
       idle_mask.fetch_or(1ULL << worker_id, cuda::std::memory_order_release);
     }
@@ -500,16 +518,24 @@ struct realtime_pipeline::Impl {
       uint64_t nsub = total_submitted.load(std::memory_order_acquire);
       uint64_t ncomp = total_completed.load(std::memory_order_relaxed);
 
-      if (pdone && ncomp >= nsub)
+      // For external ring buffers the FPGA owns the producer side, so
+      // total_submitted is never incremented.  Skip the drain check and
+      // rely on consumer_stop (set by stop_all timeout) instead.
+      if (!external_ring_ && pdone && ncomp >= nsub)
         break;
 
       bool found_any = false;
       for (uint32_t s = 0; s < ns; ++s) {
-        if (!slot_occupied[s])
+        // With an external ring buffer (FPGA source) nobody calls the
+        // ring_buffer_injector, so slot_occupied is never set.  Poll
+        // all slots unconditionally; the tx_flag value distinguishes
+        // idle (0) from in-flight/complete.
+        if (!external_ring_ && !slot_occupied[s])
           continue;
 
         int cuda_error = 0;
-        cudaq_tx_status_t status = ring->poll_tx(s, &cuda_error);
+        cudaq_tx_status_t status =
+            cudaq_host_ringbuffer_poll_tx_flag(&active_rb_, s, &cuda_error);
 
         if (status == CUDAQ_TX_READY) {
           NVTX_PUSH("ConsumerComplete");
@@ -527,7 +553,7 @@ struct realtime_pipeline::Impl {
           // clearing ring buffer flags, with a fence between.
           slot_occupied[s] = 0;
           __sync_synchronize();
-          ring->clear_slot(s);
+          cudaq_host_ringbuffer_clear_slot(&active_rb_, s);
           found_any = true;
           NVTX_POP();
 
@@ -543,7 +569,7 @@ struct realtime_pipeline::Impl {
           total_completed.fetch_add(1, std::memory_order_relaxed);
           slot_occupied[s] = 0;
           __sync_synchronize();
-          ring->clear_slot(s);
+          cudaq_host_ringbuffer_clear_slot(&active_rb_, s);
           found_any = true;
         }
       }
@@ -598,15 +624,15 @@ realtime_pipeline::Stats realtime_pipeline::stats() const {
 
 realtime_pipeline::ring_buffer_bases
 realtime_pipeline::ringbuffer_bases() const {
-  return {impl_->ring->rx_data_host(), impl_->ring->rx_data_dev()};
+  return {impl_->active_rb_.rx_data_host, impl_->active_rb_.rx_data};
 }
 
 void realtime_pipeline::complete_deferred(int slot) {
-  uint8_t *slot_host = impl_->ring->rx_data_host() +
+  uint8_t *slot_host = impl_->active_rb_.rx_data_host +
                        static_cast<size_t>(slot) * impl_->config.slot_size;
   uint64_t rx_value = reinterpret_cast<uint64_t>(slot_host);
-  impl_->ring->tx_flags()[slot].store(rx_value,
-                                      cuda::std::memory_order_release);
+  volatile uint64_t *tf = impl_->active_rb_.tx_flags_host;
+  __atomic_store_n(&tf[slot], rx_value, __ATOMIC_RELEASE);
 }
 
 // ---------------------------------------------------------------------------
@@ -625,6 +651,11 @@ struct ring_buffer_injector::State {
 };
 
 ring_buffer_injector realtime_pipeline::create_injector() {
+  if (impl_->external_ring_) {
+    throw std::logic_error(
+        "create_injector() is not available with an external ring buffer; "
+        "the FPGA/emulator owns the producer side");
+  }
   auto s = std::make_unique<ring_buffer_injector::State>();
   s->ring = impl_->ring.get();
   s->slot_request = &impl_->slot_request;
