@@ -1,5 +1,5 @@
-Relay BP Decoding with HSB RDMA
-================================
+Relay BP Decoding with CUDA-Q Realtime
+========================================
 
 This guide explains how to build, test, and run the nv-qldpc-decoder Relay BP
 decoder using CUDA-Q's realtime host dispatch system.  The decoder runs as a
@@ -63,7 +63,7 @@ Source Repositories
      - ``main`` branch (or your feature branch)
    * - **cuda-quantum** (realtime)
      - https://github.com/NVIDIA/cuda-quantum
-     - Commit ``bb21b7a031``
+     - Branch ``releases/v0.14.1``
    * - **holoscan-sensor-bridge**
      - https://github.com/nvidia-holoscan/holoscan-sensor-bridge
      - Tag ``2.6.0-EA2``
@@ -120,7 +120,7 @@ If you only need to run the CI unit test, you can build without
    # 1. Build libcudaq-realtime
    git clone https://github.com/NVIDIA/cuda-quantum.git cudaq-realtime-src
    cd cudaq-realtime-src
-   git checkout bb21b7a031
+   git checkout releases/v0.14.1
    cd realtime && mkdir -p build && cd build
    cmake -G Ninja -DCMAKE_INSTALL_PREFIX=/tmp/cudaq-realtime ..
    ninja && ninja install
@@ -148,7 +148,7 @@ To also build the bridge and playback tools for emulated or FPGA testing:
    cd cudaq-realtime-src
    git sparse-checkout init --cone
    git sparse-checkout set realtime
-   git checkout bb21b7a031
+   git checkout releases/v0.14.1
    cd ..
 
    # 2. Build holoscan-sensor-bridge (tag 2.6.0-EA2)
