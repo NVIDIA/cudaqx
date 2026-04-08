@@ -120,6 +120,7 @@ test_examples() {
                     for f in *.py; do \
                         echo Testing \$f...; \
                         if [ \"\$f\" = \"gqe_h2.py\" ]; then \
+                            python3 -c \"from cudaq_solvers.gqe_algorithm.cuda_utils import pytorch_cuda_execution_available; import sys; sys.exit(0 if pytorch_cuda_execution_available() else 1)\" || { echo \"Skipping \$f: PyTorch cannot execute CUDA kernels on this GPU.\"; continue; }; \
                             python3 \"\$f\" || exit 1; \
                             python3 \"\$f\" --mpi || exit 1; \
                         else \

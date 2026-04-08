@@ -125,6 +125,12 @@ test_examples() {
                 for f in *.py; do
                     echo Testing $f...
                     if [ "$f" = "gqe_h2.py" ]; then
+                        # This test expects a PyTorch build that can run on the host GPU.
+                        # Skip it (no failure) when the wheel lacks kernels for this device.
+                        if ! python3 -c "from cudaq_solvers.gqe_algorithm.cuda_utils import pytorch_cuda_execution_available; import sys; sys.exit(0 if pytorch_cuda_execution_available() else 1)"; then
+                            echo "Skipping ${f} and ${f} --mpi: PyTorch cannot execute CUDA kernels on this GPU."
+                            continue
+                        fi
                         if ! python3 "$f"; then
                             echo "Python tests failed for ${domain} with Python ${python_version} (default target)"
                             num_failures=$((num_failures + 1))
