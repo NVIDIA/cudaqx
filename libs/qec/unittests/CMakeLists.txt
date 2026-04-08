@@ -360,63 +360,7 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
         /opt/tensorrt/lib
     )
 
-    if(TENSORRT_INCLUDE_DIR AND TENSORRT_LIBRARY AND TENSORRT_ONNX_PARSER_LIBRARY)
-      add_executable(test_realtime_predecoder_w_pymatching
-        ${CMAKE_CURRENT_SOURCE_DIR}/../lib/realtime/test_realtime_predecoder_w_pymatching.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/../lib/realtime/ai_decoder_service.cu
-        ${CMAKE_CURRENT_SOURCE_DIR}/../lib/realtime/ai_predecoder_service.cu
-      )
-
-      set_target_properties(test_realtime_predecoder_w_pymatching PROPERTIES
-        CUDA_SEPARABLE_COMPILATION ON
-        CUDA_RESOLVE_DEVICE_SYMBOLS ON
-        CUDA_STANDARD 17
-        LINKER_LANGUAGE CUDA
-      )
-
-      target_compile_definitions(test_realtime_predecoder_w_pymatching PRIVATE
-        ONNX_MODEL_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../lib/realtime"
-      )
-
-      # libcu++ (cuda/std/atomic) lives in CUDA toolkit under cccl/
-      get_filename_component(_cuda_bin "${CMAKE_CUDA_COMPILER}" DIRECTORY)
-      get_filename_component(_cuda_root "${_cuda_bin}" DIRECTORY)
-      set(_cuda_cccl_include "${_cuda_root}/include/cccl")
-
-      target_include_directories(test_realtime_predecoder_w_pymatching PRIVATE
-        ${_cuda_cccl_include}
-        ${CUDAToolkit_INCLUDE_DIRS}
-        ${TENSORRT_INCLUDE_DIR}
-        ${CMAKE_CURRENT_SOURCE_DIR}/../include
-        ${CMAKE_SOURCE_DIR}/libs/core/include
-        ${CUDAQ_REALTIME_INCLUDE_DIR}
-      )
-
-      target_link_libraries(test_realtime_predecoder_w_pymatching PRIVATE
-        CUDA::cudart
-        ${TENSORRT_LIBRARY}
-        ${TENSORRT_ONNX_PARSER_LIBRARY}
-        ${CUDAQ_REALTIME_LIBRARY}
-        ${CUDAQ_REALTIME_DISPATCH_LIBRARY}
-        ${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}
-        cudaq-realtime-pipeline
-        cudaq-qec
-        cudaq::cudaq
-      )
-      set_target_properties(test_realtime_predecoder_w_pymatching PROPERTIES
-        BUILD_RPATH "${CMAKE_BINARY_DIR}/lib;${CUDAQ_REALTIME_LIB_DIR}"
-        INSTALL_RPATH "${CMAKE_BINARY_DIR}/lib;${CUDAQ_REALTIME_LIB_DIR}"
-      )
-
-      if(ENABLE_NVTX)
-        target_compile_definitions(test_realtime_predecoder_w_pymatching PRIVATE ENABLE_NVTX)
-        message(STATUS "NVTX profiling enabled for test_realtime_predecoder_w_pymatching")
-      endif()
-
-      add_dependencies(CUDAQXQECUnitTests test_realtime_predecoder_w_pymatching)
-    else()
-      message(WARNING "TensorRT or ONNX parser not found. Skipping test_realtime_predecoder_w_pymatching.")
-    endif()
+    # test_realtime_predecoder_w_pymatching is now in unittests/realtime/
     # ------------------------------------------------------------------
     # Realtime QLDPC graph decode CI test (CPU-launched CUDA graph + relay BP)
     # ------------------------------------------------------------------

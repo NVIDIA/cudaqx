@@ -32,6 +32,12 @@ struct pipeline_stage_config {
   int num_slots = 32;
   size_t slot_size = 16384;
   core_pinning cores;
+
+  /// When non-null, the pipeline uses this caller-owned ring buffer
+  /// (cudaq_ringbuffer_t*) instead of allocating its own.  The caller is
+  /// responsible for lifetime.  ring_buffer_injector is unavailable in
+  /// this mode (the FPGA/emulator owns the producer side).
+  void *external_ringbuffer = nullptr;
 };
 
 // ---------------------------------------------------------------------------

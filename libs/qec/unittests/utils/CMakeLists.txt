@@ -302,3 +302,5 @@ else()
                     "hololink_qldpc_graph_decoder_bridge requires DOCA.")
   endif()
 endif()
+
+# hololink_predecoder_bridge is now in unittests/realtime/
