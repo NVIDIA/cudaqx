@@ -417,9 +417,7 @@ The library provides a **rotated surface code** on a two-dimensional qubit
 layout with **open boundaries** (a single patch). It is a **CSS** code—:math:`X`
 and :math:`Z` errors are handled in separate CSS sectors—encoding **one logical
 qubit** into :math:`d^2` data qubits with code distance :math:`d` in this
-layout (other surface-code families, such as a toric code on periodic
-boundaries, can encode more logical information). Stabilizers have weight four
-in the bulk and weight two on the boundary, following the grid convention
+layout. Stabilizers have weight four in the bulk and weight two on the boundary, following the grid convention
 described in `Towards a Standardized Definition of Quantum Circuits for Quantum
 Error Correction with Rotated Surface Codes
 <https://arxiv.org/abs/2311.10687>`__.
@@ -466,14 +464,18 @@ These Pauli words are exactly those used internally for :math:`d=3`;
 (rather than grouped as X-type then Z-type).
 
 For other distances, stabilizer supports are generated from the same rotated
-grid; use :code:`stabilizer_grid` or :code:`get_stabilizers()` to inspect them.
+grid; use :ref:`stabilizer_grid <qec_stabilizer_grid_python>` or
+:code:`get_stabilizers()` to inspect them.
 
 You must pass ``distance`` when constructing the code; there is no default.
 
-The :code:`stabilizer_grid` helper documents how stabilizers and data qubits are
-indexed on the grid and provides helpers to print the layout. In Python use
-:code:`cudaq_qec.stabilizer_grid(distance)`; in C++ see
-:file:`cudaq/qec/codes/surface_code.h`.
+The :ref:`stabilizer_grid <qec_stabilizer_grid_python>` helper documents how
+stabilizers and data qubits are indexed on the grid and provides helpers to
+print the layout. **Python:** :class:`cudaq_qec.stabilizer_grid` — see
+:ref:`qec_stabilizer_grid_python`. **C++:**
+:cpp:class:`cudaq::qec::surface_code::stabilizer_grid` — see
+:ref:`qec_stabilizer_grid_cpp`. The header :file:`cudaq/qec/codes/surface_code.h`
+contains the full declaration.
 
 Usage:
 

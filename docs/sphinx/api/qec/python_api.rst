@@ -3,11 +3,25 @@ CUDA-Q QEC Python API
 
 .. automodule:: cudaq_qec
     :members:
+    :exclude-members: stabilizer_grid
 
 Code
 =============
 
 .. autoclass:: cudaq_qec.Code
+    :members:
+
+Surface code layout
+===================
+
+.. _qec_stabilizer_grid_python:
+
+The rotated surface code exposes a grid helper for stabilizer and data-qubit
+indexing. In Python it is available as :class:`cudaq_qec.stabilizer_grid` (call
+``cudaq_qec.stabilizer_grid(distance)``). The C++ type is
+:cpp:class:`cudaq::qec::surface_code::stabilizer_grid` (:ref:`API <qec_stabilizer_grid_cpp>`).
+
+.. autoclass:: cudaq_qec.stabilizer_grid
     :members:
 
 Detector Error Model
