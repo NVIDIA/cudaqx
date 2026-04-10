@@ -15,6 +15,9 @@
 #include <map>
 #include <vector>
 
+// Enable this to debug decode times.
+#define PERFORM_TIMING 0
+
 namespace cudaq::qec {
 
 /// @brief This is a wrapper around the PyMatching library that implements the
@@ -22,6 +25,7 @@ namespace cudaq::qec {
 class pymatching : public decoder {
 private:
   pm::UserGraph user_graph;
+  pm::Mwpm *mwpm = nullptr;
 
   // Input parameters
   std::vector<double> error_rate_vec;
@@ -38,6 +42,11 @@ private:
                                                   int64_t node2) {
     return std::make_pair(std::min(node1, node2), std::max(node1, node2));
   }
+
+#if PERFORM_TIMING
+  static constexpr size_t NUM_TIMING_STEPS = 4;
+  std::array<double, NUM_TIMING_STEPS> decode_times;
+#endif
 
 public:
   pymatching(const cudaqx::tensor<uint8_t> &H,
@@ -136,6 +145,12 @@ public:
       }
       col_idx++;
     }
+    this->mwpm = decode_to_observables
+                     ? &user_graph.get_mwpm()
+                     : &user_graph.get_mwpm_with_search_graph();
+#if PERFORM_TIMING
+    std::fill(decode_times.begin(), decode_times.end(), 0.0);
+#endif
   }
 
   /// @brief Decode the syndrome using the MWPM decoder.
@@ -144,27 +159,48 @@ public:
   /// @throws std::runtime_error if no matching solution is found, or
   /// std::out_of_range if an edge is not found in the edge2col_idx map.
   virtual decoder_result decode(const std::vector<float_t> &syndrome) {
-    decoder_result result{false, std::vector<float_t>(block_size, 0.0)};
-    auto &mwpm = user_graph.get_mwpm_with_search_graph();
-    std::vector<int64_t> edges;
+#if PERFORM_TIMING
+    auto t0 = std::chrono::high_resolution_clock::now();
+#endif
+    decoder_result result{false, std::vector<float_t>()};
+#if PERFORM_TIMING
+    auto t1 = std::chrono::high_resolution_clock::now();
+#endif
+
     std::vector<uint64_t> detection_events;
     detection_events.reserve(syndrome.size());
     for (size_t i = 0; i < syndrome.size(); i++)
       if (syndrome[i] > 0.5)
         detection_events.push_back(i);
+#if PERFORM_TIMING
+    auto t2 = std::chrono::high_resolution_clock::now();
+#endif
     if (decode_to_observables) {
-      assert(O_sparse.size() == mwpm.flooder.graph.num_observables);
-      pm::total_weight_int weight = 0;
-      std::vector<uint8_t> obs(mwpm.flooder.graph.num_observables, 0);
-      obs.resize(mwpm.flooder.graph.num_observables);
-      pm::decode_detection_events(mwpm, detection_events, obs.data(), weight,
-                                  /*edge_correlations=*/false);
-      result.result.resize(mwpm.flooder.graph.num_observables);
-      for (size_t i = 0; i < mwpm.flooder.graph.num_observables; i++) {
-        result.result[i] = static_cast<float_t>(obs[i]);
+      if (mwpm->flooder.graph.num_observables < 64) {
+        result.result.resize(mwpm->flooder.graph.num_observables);
+        auto res = pm::decode_detection_events_for_up_to_64_observables(
+            *mwpm, detection_events, /*edge_correlations=*/false);
+        for (size_t i = 0; i < mwpm->flooder.graph.num_observables; i++) {
+          result.result[i] =
+              static_cast<float_t>(res.obs_mask & (1 << i) ? 1.0 : 0.0);
+        }
+      } else {
+        result.result.resize(mwpm->flooder.graph.num_observables);
+        assert(O_sparse.size() == mwpm.flooder.graph.num_observables);
+        pm::total_weight_int weight = 0;
+        std::vector<uint8_t> obs(mwpm->flooder.graph.num_observables, 0);
+        obs.resize(mwpm->flooder.graph.num_observables);
+        pm::decode_detection_events(*mwpm, detection_events, obs.data(), weight,
+                                    /*edge_correlations=*/false);
+        result.result.resize(mwpm->flooder.graph.num_observables);
+        for (size_t i = 0; i < mwpm->flooder.graph.num_observables; i++) {
+          result.result[i] = static_cast<float_t>(obs[i]);
+        }
       }
     } else {
-      pm::decode_detection_events_to_edges(mwpm, detection_events, edges);
+      std::vector<int64_t> edges;
+      result.result.resize(block_size);
+      pm::decode_detection_events_to_edges(*mwpm, detection_events, edges);
       // Loop over the edge pairs to reconstruct errors.
       assert(edges.size() % 2 == 0);
       for (size_t i = 0; i < edges.size(); i += 2) {
@@ -176,10 +212,32 @@ public:
     // An exception is thrown if no matching solution is found, so we can just
     // set converged to true.
     result.converged = true;
+#if PERFORM_TIMING
+    auto t3 = std::chrono::high_resolution_clock::now();
+    decode_times[0] +=
+        std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count() /
+        1e6;
+    decode_times[1] +=
+        std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() /
+        1e6;
+    decode_times[2] +=
+        std::chrono::duration_cast<std::chrono::microseconds>(t3 - t2).count() /
+        1e6;
+    decode_times[3] +=
+        std::chrono::duration_cast<std::chrono::microseconds>(t3 - t0).count() /
+        1e6;
+#endif
     return result;
   }
 
-  virtual ~pymatching() {}
+  virtual ~pymatching() {
+#if PERFORM_TIMING
+    for (int i = 0; i < NUM_TIMING_STEPS; i++) {
+      std::cout << "Decode time[" << i << "]: " << decode_times[i] << " seconds"
+                << std::endl;
+    }
+#endif
+  }
 
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       pymatching, static std::unique_ptr<decoder> create(
