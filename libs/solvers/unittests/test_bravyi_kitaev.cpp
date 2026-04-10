@@ -241,3 +241,21 @@ TEST(BravyiKitaev, testSRLCase10) {
   for (auto r : residuals)
     EXPECT_NEAR(std::abs(r.evaluate_coefficient()), 0.0, 1e-4);
 }
+
+// Expected values derived from the OpenFermion reference implementation
+// (Case 5 in Table II of Seeley, Richard, Love, doi:10.1063/1.4768229).
+TEST(BravyiKitaev, testSRLCase5) {
+  using double_complex = std::complex<double>;
+  using namespace cudaq::spin;
+
+  auto result = cudaq::solvers::seeley_richard_love(0, 7, 4.0, 20);
+  cudaq::spin_op expected =
+      double_complex(-1.0, 0.0) * y(0) * x(1) * y(3) * z(5) * z(6) +
+      double_complex(0.0, -1.0) * x(0) * x(1) * y(3) * z(5) * z(6) +
+      double_complex(0.0, 1.0) * y(0) * x(1) * x(3) * z(7) +
+      double_complex(-1.0, 0.0) * x(0) * x(1) * x(3) * z(7);
+
+  auto residuals = result - expected.canonicalize();
+  for (auto r : residuals)
+    EXPECT_NEAR(std::abs(r.evaluate_coefficient()), 0.0, 1e-4);
+}

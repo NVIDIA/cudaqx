@@ -231,6 +231,31 @@ public:
 
   // -- End realtime decoding API --
 
+  // -- Begin realtime graph dispatch API --
+
+  /// @brief Returns true if this decoder supports graph-based realtime
+  /// dispatch via capture_decode_graph().
+  virtual bool supports_graph_dispatch() const { return false; }
+
+  /// @brief Capture a CUDA graph for realtime dispatch.
+  ///
+  /// Returns a pointer to a cudaq::qec::realtime::graph_resources struct
+  /// (caller must include realtime/graph_resources.h to interpret it).
+  /// Returns nullptr if graph dispatch is not supported.
+  /// The decoder retains ownership of the returned pointer.
+  virtual void *capture_decode_graph(int reserved_sms = 0) {
+    (void)reserved_sms;
+    return nullptr;
+  }
+
+  /// @brief Release graph resources previously returned by
+  /// capture_decode_graph().
+  virtual void release_decode_graph(void *graph_resources) {
+    (void)graph_resources;
+  }
+
+  // -- End realtime graph dispatch API --
+
   /// @brief Destructor
   virtual ~decoder() = default;
 

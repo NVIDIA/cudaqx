@@ -364,15 +364,4 @@ add_surface_code_test(
 # End of surface code 3, --target quantinuum --emulate
 #------------------------------------------------------------------------------#
 
-# Disable tests that are known to fail for now. (PYTHON-REFACTOR)
-set_tests_properties(app_examples.py-surface_code-1-test PROPERTIES DISABLED TRUE)
-set_tests_properties(app_examples.surface_code-1-quantinuum-emulate-test-distance-3-in-process PROPERTIES DISABLED TRUE)
-set_tests_properties(app_examples.surface_code-1-quantinuum-emulate-test-distance-5-in-process PROPERTIES DISABLED TRUE)
-set_tests_properties(app_examples.surface_code-2-quantinuum-emulate-test-distance-3-in-process PROPERTIES DISABLED TRUE)
-set_tests_properties(app_examples.surface_code-2-quantinuum-emulate-test-distance-5-in-process PROPERTIES DISABLED TRUE)
-set_tests_properties(app_examples.surface_code-3-quantinuum-emulate-test-in-process-dist-3-prep0-err-0.010 PROPERTIES DISABLED TRUE)
-set_tests_properties(app_examples.surface_code-3-quantinuum-emulate-test-in-process-dist-3-prepp-err-0.010 PROPERTIES DISABLED TRUE)
-set_tests_properties(app_examples.surface_code-3-quantinuum-emulate-test-in-process-dist-5-prep0-err-0.010 PROPERTIES DISABLED TRUE)
-set_tests_properties(app_examples.surface_code-3-quantinuum-emulate-test-in-process-dist-5-prepp-err-0.010 PROPERTIES DISABLED TRUE)
-
 

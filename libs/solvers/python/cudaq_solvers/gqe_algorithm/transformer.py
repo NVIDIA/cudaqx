@@ -11,6 +11,7 @@ from mpi4py import MPI
 from torch.nn import functional as F
 from transformers import GPT2LMHeadModel, GPT2Config
 from lightning import LightningModule
+from .cuda_utils import pytorch_cuda_execution_available
 from .loss import ExpLogitMatching, GFlowLogitMatching
 
 
@@ -18,9 +19,9 @@ def get_device():
     """Determine the appropriate device for tensor operations.
     
     Returns:
-        str: 'cuda' if GPU available, 'mps' for Apple Silicon, 'cpu' otherwise
+        str: 'cuda' if PyTorch can use CUDA on this GPU, 'mps' for Apple Silicon, 'cpu' otherwise
     """
-    if torch.cuda.is_available():
+    if pytorch_cuda_execution_available():
         return 'cuda'
     elif torch.backends.mps.is_available():
         return 'mps'

@@ -115,15 +115,17 @@ mock_decode_graph_kernel(cudaq::realtime::GraphIOContext *io_ctx) {
       g_mock_decoder->decode(measurements, corrections, ctx.num_measurements,
                              ctx.num_observables);
 
-      // Write response header to TX slot
       response->magic = cudaq::realtime::RPC_MAGIC_RESPONSE;
       response->status = 0;
       response->result_len = static_cast<std::uint32_t>(ctx.num_observables);
+      response->request_id = header->request_id;
+      response->ptp_timestamp = header->ptp_timestamp;
     } else {
-      // Error: decoder not set
       response->magic = cudaq::realtime::RPC_MAGIC_RESPONSE;
       response->status = -1;
       response->result_len = 0;
+      response->request_id = header->request_id;
+      response->ptp_timestamp = header->ptp_timestamp;
     }
 
     // Signal completion: write tx_flag so the host/emulator knows the

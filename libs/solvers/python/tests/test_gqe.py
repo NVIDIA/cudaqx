@@ -12,6 +12,16 @@ from cudaq import spin
 import cudaq
 from cudaq_solvers.gqe_algorithm.gqe import DefaultScheduler, CosineScheduler, get_default_config
 import cudaq_solvers as solvers
+from cudaq_solvers.gqe_algorithm.cuda_utils import (
+    pytorch_cuda_execution_available,
+    pytorch_cuda_kernel_skip_reason,
+)
+
+requires_cuda_kernels = pytest.mark.skipif(
+    not pytorch_cuda_execution_available(),
+    reason=pytorch_cuda_kernel_skip_reason() or
+    "PyTorch cannot execute CUDA kernels on this device",
+)
 
 qubit_count = 2
 # Define a simple Hamiltonian: Z₀ + Z₁
@@ -84,6 +94,7 @@ def test_cosine_scheduler():
                       atol=1e-6)  # min at full cycle (cos(2π)=1)
 
 
+@requires_cuda_kernels
 def test_solvers_gqe_basic():
     """Test basic GQE with config"""
     print("Setting up config...")
@@ -109,6 +120,7 @@ def test_solvers_gqe_basic():
     assert energy > -2.0  # Physical bound for simple Z₀ + Z₁ Hamiltonian
 
 
+@requires_cuda_kernels
 def test_solvers_gqe_small_transformer():
     """Test GQE with small transformer config"""
     cfg = get_default_config()
@@ -133,6 +145,7 @@ def test_solvers_gqe_small_transformer():
     assert energy > -2.0
 
 
+@requires_cuda_kernels
 def test_solvers_gqe_with_gflow_loss():
     """Test GQE with GFlow loss function"""
     cfg = get_default_config()
@@ -157,6 +170,7 @@ def test_solvers_gqe_with_gflow_loss():
     assert energy > -2.0
 
 
+@requires_cuda_kernels
 def test_solvers_gqe_larger_molecule():
     """Test GQE with a larger number of gates"""
     cfg = get_default_config()
