@@ -75,22 +75,54 @@ inline heterogeneous_map hetMapFromKwargs(const py::kwargs &kwargs) {
     } else if (py::isinstance<py::array>(value)) {
       py::array np_array = value.cast<py::array>();
       py::buffer_info info = np_array.request();
-      auto insert_vector = [&](auto type_tag) {
-        using T = decltype(type_tag);
-        std::vector<T> vec(static_cast<T *>(info.ptr),
-                           static_cast<T *>(info.ptr) + info.size);
-        result.insert(key, std::move(vec));
-      };
-      if (info.format == py::format_descriptor<double>::format()) {
-        insert_vector(double{});
-      } else if (info.format == py::format_descriptor<float>::format()) {
-        insert_vector(float{});
-      } else if (info.format == py::format_descriptor<int>::format()) {
-        insert_vector(int{});
-      } else if (info.format == py::format_descriptor<uint8_t>::format()) {
-        insert_vector(uint8_t{});
+      if (info.ndim >= 2) {
+        if (info.strides[0] == static_cast<py::ssize_t>(info.itemsize)) {
+          throw std::runtime_error(
+              "Array in kwargs must be in row-major order, but "
+              "column-major order was detected.");
+        }
+        std::vector<std::size_t> shape(static_cast<std::size_t>(info.ndim),
+                                       std::size_t(0));
+        for (py::ssize_t d = 0; d < info.ndim; d++)
+          shape[d] = static_cast<std::size_t>(info.shape[d]);
+
+        auto insert_tensor = [&](auto type_tag) {
+          using T = decltype(type_tag);
+          cudaqx::tensor<T> ten(shape);
+          ten.borrow(static_cast<T *>(info.ptr), shape);
+          result.insert(key, std::move(ten));
+        };
+        if (info.format == py::format_descriptor<double>::format()) {
+          insert_tensor(double{});
+        } else if (info.format == py::format_descriptor<float>::format()) {
+          insert_tensor(float{});
+        } else if (info.format == py::format_descriptor<int>::format()) {
+          insert_tensor(int{});
+        } else if (info.format == py::format_descriptor<uint8_t>::format()) {
+          insert_tensor(uint8_t{});
+        } else {
+          throw std::runtime_error("Unsupported array data type in kwargs.");
+        }
       } else {
-        throw std::runtime_error("Unsupported array data type in kwargs.");
+        // 1D array: keep as flattened vector for backward compatibility
+        // (e.g. error_rate_vec used by decoders).
+        auto insert_vector = [&](auto type_tag) {
+          using T = decltype(type_tag);
+          std::vector<T> vec(static_cast<T *>(info.ptr),
+                             static_cast<T *>(info.ptr) + info.size);
+          result.insert(key, std::move(vec));
+        };
+        if (info.format == py::format_descriptor<double>::format()) {
+          insert_vector(double{});
+        } else if (info.format == py::format_descriptor<float>::format()) {
+          insert_vector(float{});
+        } else if (info.format == py::format_descriptor<int>::format()) {
+          insert_vector(int{});
+        } else if (info.format == py::format_descriptor<uint8_t>::format()) {
+          insert_vector(uint8_t{});
+        } else {
+          throw std::runtime_error("Unsupported array data type in kwargs.");
+        }
       }
     } else {
       throw std::runtime_error(

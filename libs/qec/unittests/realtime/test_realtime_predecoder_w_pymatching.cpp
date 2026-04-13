@@ -258,8 +258,10 @@ int main(int argc, char *argv[]) {
     if (!stim.priors.empty() && stim.priors.size() == stim.H.ncols)
       pm_params.insert("error_rate_vec", stim.priors);
 
-    if (stim.O.loaded())
+    if (stim.O.loaded()) {
       obs_row = stim.O.row_dense(0);
+      pm_params.insert("O", stim.O.to_dense());
+    }
 
     std::cout << "[Setup] Creating " << config.num_decode_workers
               << " PyMatching decoders (full H)...\n";
@@ -473,12 +475,9 @@ int main(int argc, char *argv[]) {
                       decoder_ctx.num_residual_detectors);
           auto result = my_decoder->decode(syndrome_tensor);
           all_converged = result.converged;
-          if (!obs_row.empty() && obs_row.size() == result.result.size()) {
-            int obs_parity = 0;
-            for (size_t e = 0; e < result.result.size(); ++e)
-              if (result.result[e] > 0.5 && obs_row[e])
-                obs_parity ^= 1;
-            total_corrections += obs_parity;
+          if (!obs_row.empty() && !result.result.empty()) {
+            if (result.result[0] > 0.5)
+              total_corrections++;
           } else {
             for (auto v : result.result)
               if (v > 0.5)
