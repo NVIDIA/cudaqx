@@ -47,7 +47,7 @@ Tested platforms: DGX Spark, GB200.
 Software
 ^^^^^^^^
 
-- **CUDA Toolkit**: 12.6 or 13.0
+- **CUDA Toolkit**: 12.6 or later
 - **CUDA-Q SDK**: pre-installed (provides ``libcudaq``, ``libnvqir``, ``nvq++``)
 - **nv-qldpc-decoder plugin**: the proprietary nv-qldpc-decoder shared library
   (``libcudaq-qec-nv-qldpc-decoder.so``).  Required at runtime for all
