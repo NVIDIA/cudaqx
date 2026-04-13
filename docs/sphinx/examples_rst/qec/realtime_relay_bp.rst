@@ -1,6 +1,11 @@
 Relay BP Decoding with CUDA-Q Realtime
 ========================================
 
+.. note::
+
+  The following information is about a C++ demonstration that must be built
+  from source and is not part of any distributed CUDA-Q QEC binaries.
+
 This guide explains how to build, test, and run the nv-qldpc-decoder Relay BP
 decoder using CUDA-Q's realtime host dispatch system.  The decoder runs as a
 CPU-launched CUDA graph (``HOST_LOOP`` dispatch path) and can operate in three
