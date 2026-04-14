@@ -5,8 +5,8 @@ on:
     inputs:
       base_image:
         type: string
-        description: Base image to overlay CUDA-QX files into (e.g. nvcr.io/nvidia/nightly/cuda-quantum:cu12-0.13.0)
-        default: nvcr.io/nvidia/nightly/cuda-quantum:cu12-0.13.0
+        description: Base image to overlay CUDA-QX files into (e.g. nvcr.io/nvidia/nightly/cuda-quantum:cu12-0.14.0)
+        default: nvcr.io/nvidia/nightly/cuda-quantum:cu12-0.14.0
         required: true
       cuda_version:
         type: choice

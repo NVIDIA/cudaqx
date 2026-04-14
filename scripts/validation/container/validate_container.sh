@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ============================================================================ #
-# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
+# Copyright (c) 2024 - 2026 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -11,7 +11,7 @@
 set -e
 
 # Parse command line arguments
-FINAL_IMAGE="ghcr.io/nvidia/private/cuda-quantum:cu12-0.13.0-cudaqx-rc1"
+FINAL_IMAGE="ghcr.io/nvidia/private/cuda-quantum:cu12-0.14.0-cudaqx-rc1"
 CUDA_VERSION="12.6"
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -93,7 +93,7 @@ test_examples() {
     docker exec ${container_name} bash -c "pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu${cuda_no_dot}"
     # Install other required packages
     docker exec ${container_name} bash -c "pip install 'lightning>=2.0.0' 'ml_collections>=0.1.0' 'mpi4py>=3.1.0' 'transformers>=4.30.0'"
-    docker exec ${container_name} bash -c "pip install 'quimb' 'opt_einsum' 'cuquantum-python-cu${cuda_major}==25.09.1'"
+    docker exec ${container_name} bash -c "pip install 'quimb' 'opt_einsum' 'cuquantum-python-cu${cuda_major}==26.01.0'"
     if [ "${CURRENT_ARCH}" == "x86_64" ]; then
         docker exec ${container_name} bash -c "pip install 'stim' 'beliefmatching'"
     fi
@@ -120,6 +120,7 @@ test_examples() {
                     for f in *.py; do \
                         echo Testing \$f...; \
                         if [ \"\$f\" = \"gqe_h2.py\" ]; then \
+                            python3 -c \"from cudaq_solvers.gqe_algorithm.cuda_utils import pytorch_cuda_execution_available; import sys; sys.exit(0 if pytorch_cuda_execution_available() else 1)\" || { echo \"Skipping \$f: PyTorch cannot execute CUDA kernels on this GPU.\"; continue; }; \
                             python3 \"\$f\" || exit 1; \
                             python3 \"\$f\" --mpi || exit 1; \
                         else \
@@ -146,8 +147,14 @@ test_examples() {
                 if ! docker exec ${container_name} bash -c "cd /home/cudaq/cudaqx-examples/${domain}/cpp && \
                     for f in *.cpp; do \
                         echo Compiling and running \$f...; \
-                        nvq++ --enable-mlir -lcudaq-${domain} --target ${target} \$f -o test_prog && \
-                        ./test_prog || exit 1; \
+                        if grep -q '^// Compile and run' \"\$f\"; then \
+                            compile_cmd=\$(grep -A 1 '^// Compile and run' \"\$f\" | tail -n 1 | sed 's|^// *||'); \
+                            \$compile_cmd -o test_prog && \
+                            ./test_prog || exit 1; \
+                        else \
+                            nvq++ --enable-mlir -lcudaq-${domain} --target ${target} \$f -o test_prog && \
+                            ./test_prog || exit 1; \
+                        fi; \
                         rm test_prog; \
                     done"; then
                     echo "C++ tests failed for ${domain} with target ${target}"

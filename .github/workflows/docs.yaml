@@ -66,6 +66,9 @@ jobs:
 
       - name: Build docs
         run: |
+          # Note: TRT decoder is disabled because all docs for the TRT decoder
+          # are generated independently of the source code (no Doxygen
+          # documentation).
           cmake -S . -B "build" \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER=gcc-11 \
@@ -73,7 +76,8 @@ jobs:
             -DCUDAQ_DIR=/cudaq-install/lib/cmake/cudaq/ \
             -DCUDAQX_ENABLE_LIBS="all" \
             -DCUDAQX_INCLUDE_DOCS=ON \
-            -DCUDAQX_BINDINGS_PYTHON=ON
+            -DCUDAQX_BINDINGS_PYTHON=ON \
+            -DCUDAQ_QEC_BUILD_TRT_DECODER=OFF
 
           cmake --build "build" --target docs
 

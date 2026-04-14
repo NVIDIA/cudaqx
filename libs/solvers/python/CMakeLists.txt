@@ -1,5 +1,5 @@
 # ============================================================================ #
-# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
+# Copyright (c) 2024 - 2026 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -43,12 +43,17 @@ target_link_libraries(${MODULE_NAME}
 set_target_properties(${MODULE_NAME} PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python/cudaq_solvers")
 
+set(SHARED_PYTHON_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../core/python)
+
 if (NOT SKBUILD)
   add_custom_target(
     copy_solvers_python_files ALL
     COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${CMAKE_CURRENT_SOURCE_DIR}/cudaq_solvers
             ${CMAKE_BINARY_DIR}/python/cudaq_solvers
+    COMMAND ${CMAKE_COMMAND} -E copy
+            ${SHARED_PYTHON_DIR}/_system_dep_check.py
+            ${CMAKE_BINARY_DIR}/python/cudaq_solvers/_system_dep_check.py
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/cudaq_solvers
     COMMENT "Copying Python files to binary directory"
   )
@@ -83,6 +88,11 @@ endif()
 install(DIRECTORY cudaq_solvers
   COMPONENT solvers-python
   DESTINATION .
+)
+
+install(FILES ${SHARED_PYTHON_DIR}/_system_dep_check.py
+  COMPONENT solvers-python
+  DESTINATION cudaq_solvers/
 )
 
 install(TARGETS ${MODULE_NAME}

@@ -30,6 +30,25 @@ __qpu__ void ansatz(std::vector<double> theta) {
   x<cudaq::ctrl>(q[1], q[0]);
 }
 
+// Uses ry(theta[0]) and rx(theta[1]) on a 2-qubit system.
+__qpu__ void ansatz2Params(std::vector<double> theta) {
+  cudaq::qvector q(2);
+  x(q[0]);
+  ry(theta[0], q[1]);
+  x<cudaq::ctrl>(q[1], q[0]);
+  rx(theta[1], q[0]);
+}
+
+// Uses ry(theta[0]), rx(theta[1]), rz(theta[2]) on a 2-qubit system.
+__qpu__ void ansatz3Params(std::vector<double> theta) {
+  cudaq::qvector q(2);
+  x(q[0]);
+  ry(theta[0], q[1]);
+  x<cudaq::ctrl>(q[1], q[0]);
+  rx(theta[1], q[0]);
+  rz(theta[2], q[1]);
+}
+
 __qpu__ void ansatzNonStdSignature(double theta, int N) {
   cudaq::qvector q(N);
   x(q[0]);

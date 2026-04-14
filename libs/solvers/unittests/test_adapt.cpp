@@ -499,3 +499,18 @@ TEST_F(SolversTester, checkSimpleAdaptGradientUCCSD_BeH2Sto3g) {
   for (std::size_t i = 0; i < thetas.size(); i++)
     printf("%lf -> %s\n", thetas[i], ops[i].to_string().c_str());
 }
+
+// adapt_vqe must not crash when all commutators [H, O_i] are zero.
+TEST_F(SolversTester, checkAdaptEmptyGradients) {
+  // H and pool are all diagonal — they commute, so all [H, O_i] = 0.
+  // Use 2-qubit H so hartreeFock2Electrons (which sets q[0],q[1]) is valid.
+  auto H = cudaq::spin::z(0) * cudaq::spin::z(1);
+  std::vector<cudaq::spin_op> pool = {cudaq::spin::z(0),
+                                      cudaq::spin::z(0) * cudaq::spin::z(1)};
+
+  auto [energy, thetas, ops] = cudaq::solvers::adapt_vqe(
+      hartreeFock2Electrons, H, pool,
+      {{"grad_norm_tolerance", 1e-3}, {"max_iter", 5}});
+  // No operators should be selected since all commutators are zero
+  EXPECT_TRUE(ops.empty());
+}

@@ -1,5 +1,10 @@
 #!/bin/sh
 
+_rt_flag=""
+if [ -n "$CUDAQ_REALTIME_ROOT" ]; then
+  _rt_flag="-DCUDAQ_REALTIME_ROOT=$CUDAQ_REALTIME_ROOT"
+fi
+
 cmake -S . -B "$1" \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_C_COMPILER=gcc-11 \
@@ -10,7 +15,7 @@ cmake -S . -B "$1" \
   -DCUDAQX_ENABLE_LIBS="all" \
   -DCUDAQX_INCLUDE_TESTS=ON \
   -DCUDAQX_BINDINGS_PYTHON=ON \
-  -DCMAKE_INSTALL_PREFIX="$2"
+  -DCMAKE_INSTALL_PREFIX="$2" \
+  $_rt_flag
 
 cmake --build "$1" --target install
-

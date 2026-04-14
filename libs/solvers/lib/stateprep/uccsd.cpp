@@ -31,13 +31,13 @@ get_uccsd_excitations(std::size_t numElectrons, std::size_t numQubits,
       occupiedAlpha.push_back(i * 2);
 
     for (auto i : cudaq::range(n_virtual_alpha))
-      virtualAlpha.push_back(i * 2 + numElectrons + 1);
+      virtualAlpha.push_back(i * 2 + 2 * n_occupied_alpha);
 
     for (auto i : cudaq::range(n_occupied_beta))
       occupiedBeta.push_back(i * 2 + 1);
 
     for (auto i : cudaq::range(n_virtual_beta))
-      virtualBeta.push_back(i * 2 + numElectrons - 1);
+      virtualBeta.push_back(i * 2 + 2 * n_occupied_beta + 1);
   } else if (numElectrons % 2 == 0 && spin == 0) {
     auto numOccupied =
         static_cast<std::size_t>(std::floor((float)numElectrons / 2));
@@ -424,7 +424,7 @@ __qpu__ void uccsd(cudaq::qview<> qubits, const std::vector<double> &thetas,
     counter = 0;
 
     for (std::size_t i = 0; i < numVirtAlpha; i++) {
-      virtualAlpha[counter] = i * 2 + numElectrons + 1;
+      virtualAlpha[counter] = i * 2 + 2 * numOccAlpha;
       counter++;
     }
 
@@ -436,7 +436,7 @@ __qpu__ void uccsd(cudaq::qview<> qubits, const std::vector<double> &thetas,
 
     counter = 0;
     for (std::size_t i = 0; i < numVirtBeta; i++) {
-      virtualBeta[counter] = i * 2 + numElectrons - 1;
+      virtualBeta[counter] = i * 2 + 2 * numOccBeta + 1;
       counter++;
     }
 

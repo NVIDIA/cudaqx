@@ -22,12 +22,11 @@ adapt_kernel(std::size_t numQubits,
   statePrep(q);
 
   auto i = 0;
-  for (std::size_t j = 0; j < trotterOpList.size();) {
+  for (std::size_t j = 0; j < trotterOpList.size(); ++j) {
     auto index = poolIndices[j];
     auto &term = trotterOpList[j];
     exp_pauli(thetas[i] * coefficients[j], q, term);
-    j++;
-    if (index != poolIndices[j]) {
+    if (j + 1 < poolIndices.size() && index != poolIndices[j + 1]) {
       i++;
     }
   }

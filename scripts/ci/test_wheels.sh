@@ -1,7 +1,7 @@
 #!/bin/sh
 
 # ============================================================================ #
-# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
+# Copyright (c) 2024 - 2026 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -147,9 +147,9 @@ for domain in "solvers" "qec"; do
     echo "Testing ${domain} Python examples with Python ${python_version} ..."
     cd examples/${domain}/python
     shopt -s nullglob # don't throw errors if no Python files exist
-    for f in *.py; do \
-        echo Testing $f...; \
-        ${python} $f 
+    for f in *.py; do
+        echo Testing $f...
+        ${python} $f
         res=$?
         if [ $res -ne 0 ]; then
             echo "Python tests failed for ${domain} with Python ${python_version}: $res"

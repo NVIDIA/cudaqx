@@ -13,8 +13,15 @@
 #include <string>
 #include <vector>
 
+// TensorRT 10.12+ headers emit deprecation warnings for internal symbols
+// (IPluginV2, legacy calibrator enums, IAlgorithmSelector, etc.) that are
+// scheduled for removal in a future release.  These warnings originate inside
+// the TensorRT headers themselves and cannot be fixed on our side.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include "NvInfer.h"
 #include "NvOnnxParser.h"
+#pragma GCC diagnostic pop
 
 namespace cudaq::qec::trt_decoder_internal {
 
@@ -47,8 +54,12 @@ build_engine_from_onnx(const std::string &onnx_model_path,
 void save_engine_to_file(nvinfer1::ICudaEngine *engine,
                          const std::string &file_path);
 
-/// @brief Parses and configures precision settings for TensorRT
-/// @param precision The precision string (fp16, bf16, int8, fp8, noTF32, best)
+/// @brief Configures precision-related builder flags for TensorRT.
+///
+/// With strongly-typed networks the ONNX model's types are authoritative.
+/// Only "tf32" / "noTF32" / "best" have any effect; legacy precision strings
+/// ("fp16", "bf16", "int8", "fp8") are accepted but log a warning.
+/// @param precision The precision string (tf32, noTF32, best, or legacy values)
 /// @param config TensorRT builder config instance
 void parse_precision(const std::string &precision,
                      nvinfer1::IBuilderConfig *config);

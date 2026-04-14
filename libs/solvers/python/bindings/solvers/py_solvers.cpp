@@ -1001,14 +1001,8 @@ Notes:
          const std::vector<cudaq::spin_op> &pool, py::kwargs options) {
         cudaq::python::CppPyKernelDecorator initialStateKernelWrapper(
             initialStateKernel);
-        initialStateKernelWrapper.compile();
-        auto baseName = initialStateKernel.attr("name").cast<std::string>();
-        std::string kernelName = "__nvqpp__mlirgen__" + baseName;
-        auto fptr =
-            initialStateKernelWrapper
-                .extract_c_function_pointer<cudaq::qvector<> &>(kernelName);
-        auto *p = reinterpret_cast<void *>(fptr);
-        cudaq::registry::__cudaq_registerLinkableKernel(p, baseName.c_str(), p);
+        auto fptr = initialStateKernelWrapper.getDirectKernelCall<
+            cudaq::qkernel<void(cudaq::qvector<> &)>>();
         heterogeneous_map optOptions;
         optOptions.insert("max_iter", getValueOr<int>(options, "max_iter", 30));
         optOptions.insert(
@@ -1137,16 +1131,14 @@ Notes:
                 "Invalid functional optimizer provided (only "
                 "scipy.optimize.minimize supported).");
           PythonOptimizer opt(func, options);
-          return cudaq::solvers::qaoa(problemHamiltonian, opt, numLayers,
-                                      initialParameters,
+          return cudaq::solvers::qaoa(problemHamiltonian, referenceHamiltonian,
+                                      opt, numLayers, initialParameters,
                                       hetMapFromKwargs(options));
         }
 
         auto optimizerName =
             cudaqx::getValueOr<std::string>(options, "optimizer", "cobyla");
         auto optimizer = cudaq::optim::optimizer::get(optimizerName);
-        auto gradName =
-            cudaqx::getValueOr<std::string>(options, "gradient", "");
 
         return cudaq::solvers::qaoa(problemHamiltonian, referenceHamiltonian,
                                     *optimizer, numLayers, initialParameters,
@@ -1178,8 +1170,6 @@ Notes:
         auto optimizerName =
             cudaqx::getValueOr<std::string>(options, "optimizer", "cobyla");
         auto optimizer = cudaq::optim::optimizer::get(optimizerName);
-        auto gradName =
-            cudaqx::getValueOr<std::string>(options, "gradient", "");
         return cudaq::solvers::qaoa(problemHamiltonian, *optimizer, numLayers,
                                     initialParameters,
                                     hetMapFromKwargs(options));
