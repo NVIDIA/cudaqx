@@ -270,8 +270,8 @@ __qpu__ void custom_memory_circuit_stabs(
 
   // Handle the stabilizer lock-in round (numRounds == 1)
   if (numRounds == 1) {
-    auto combined_syndrome = se_zx_ft(logical, cnot_schedZ_flat,
-                                      cnot_schedX_flat);
+    auto combined_syndrome =
+        se_zx_ft(logical, cnot_schedZ_flat, cnot_schedX_flat);
     if (enqueue_syndromes) {
       cudaq::qec::decoding::enqueue_syndromes(
           /*decoder_id=*/logical_qubit_idx, combined_syndrome);
@@ -284,13 +284,14 @@ __qpu__ void custom_memory_circuit_stabs(
   // implementation!
   // The overlap re-enqueue (last syndrome of prev window) is issued at the
   // end of each window's last round rather than the start of the next window,
-  // because quantum kernels cannot default-construct std::vector<measure_result>.
+  // because quantum kernels cannot default-construct
+  // std::vector<measure_result>.
   std::size_t numWindows = numRounds / decoder_window;
   for (std::size_t window_idx = 0; window_idx < numWindows; window_idx++) {
     for (std::size_t round = window_idx * decoder_window;
          round < (window_idx + 1) * decoder_window; round++) {
-      auto combined_syndrome = se_zx_ft(logical, cnot_schedZ_flat,
-                                        cnot_schedX_flat);
+      auto combined_syndrome =
+          se_zx_ft(logical, cnot_schedZ_flat, cnot_schedX_flat);
       if (enqueue_syndromes) {
         cudaq::qec::decoding::enqueue_syndromes(
             /*decoder_id=*/logical_qubit_idx, combined_syndrome);

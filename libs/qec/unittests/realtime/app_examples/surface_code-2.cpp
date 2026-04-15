@@ -190,8 +190,8 @@ __qpu__ void custom_memory_circuit_stabs(
 
   // Generate syndrome data
   for (std::size_t round = 0; round < numRounds; round++) {
-    auto combined_syndrome = se_zx_ft(logical, cnot_schedZ_flat,
-                                      cnot_schedX_flat);
+    auto combined_syndrome =
+        se_zx_ft(logical, cnot_schedZ_flat, cnot_schedX_flat);
     if (enqueue_syndromes) {
       cudaq::qec::decoding::enqueue_syndromes(
           /*decoder_id=*/logical_qubit_idx, combined_syndrome);
