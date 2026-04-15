@@ -191,6 +191,12 @@ class GasPhaseGenerator(HamiltonianGenerator):
                 "WARN: .[pyscf] WARNING: integrals_casscf is not supported for unrestricted calculations. \
                 Set integrals_casscf to False. HF molecular orbitals are only supported for calculating integrals."
             )
+
+        if (natorb or integrals_natorb) and not MP2:
+            raise RuntimeError(
+                "WARN: .[pyscf] WARNING: natorb or integrals_natorb requires MP2=True. "
+                "Natural orbitals are computed from the MP2 density matrix, "
+                "so MP2 must be enabled when requesting natural orbitals.")
         ########################################################################
 
         mol = gto.M(atom=xyz,
