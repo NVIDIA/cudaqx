@@ -44,6 +44,9 @@ cuda_major=$(echo ${CUDA_VERSION} | cut -d '.' -f 1)
 cuda_minor=$(echo ${CUDA_VERSION} | cut -d '.' -f 2)
 cuda_no_dot="${cuda_major}${cuda_minor}"
 
+# Repository root (this file lives in scripts/validation/container/).
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+
 # Function to run Python tests
 run_python_tests() {
     local container_name=$1
@@ -54,10 +57,15 @@ run_python_tests() {
     docker exec ${container_name} bash -c "\
         python3 -m pip install pytest --user"
 
-    # Clone repository and run tests with specific target
-    docker exec ${container_name} bash -c "\
-        cd /home/cudaq && \
-        python3 -m pytest /home/cudaq/cudaqx_pytests -v"
+    # import cudaq before pytest (see scripts/ci/check_cudaq_import.py for message logic).
+    docker cp "${REPO_ROOT}/scripts/ci/check_cudaq_import.py" "${container_name}:/tmp/check_cudaq_import.py"
+    docker exec "${container_name}" bash -lc "
+    set -e
+    cd /home/cudaq
+    echo '=== CUDA-Q import check (before pytest) ==='
+    python3 /tmp/check_cudaq_import.py
+    python3 -m pytest /home/cudaq/cudaqx_pytests -v
+    "
 
     local test_result=$?
     if [ ${test_result} -ne 0 ]; then

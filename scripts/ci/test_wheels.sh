@@ -89,12 +89,19 @@ fi
 # Install QEC library with tensor network decoder and trt_decoder (requires Python >=3.11)
 echo "Installing QEC library with tensor network decoder and trt_decoder"
 ${python} -m pip install ${FIND_LINKS} --extra-index-url https://pypi.nvidia.com/ "cudaq-qec[all]==${cudaqx_version}"
-# Check if CUDA is available
-if command -v nvidia-smi &> /dev/null && nvidia-smi &> /dev/null; then
-  # CUDA available - run all tests
+
+# Fail fast with targeted hints if CUDA-Q cannot load (see scripts/ci/check_cudaq_import.py).
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+echo "=== CUDA-Q import check (before pytest) ==="
+if ! ${python} "${SCRIPT_DIR}/check_cudaq_import.py"; then
+  exit 1
+fi
+
+# Select QEC tests: TensorRT decoder needs a visible GPU in this environment.
+if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then
   ${python} -m pytest -v -s libs/qec/python/tests/
 else
-  # No CUDA - skip TRT decoder tests
+  echo "No CUDA - skip TRT decoder tests"
   ${python} -m pytest -v -s libs/qec/python/tests/ --ignore=libs/qec/python/tests/test_trt_decoder.py
 fi
 
