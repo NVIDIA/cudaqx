@@ -72,8 +72,7 @@ void rejectTorchCpuTensors(const py::object &check_matrix_obj,
     return;
 
   auto is_cpu = [&](const py::object &obj) {
-    return py::isinstance(obj, Tensor) &&
-           !obj.attr("is_cuda").cast<bool>();
+    return py::isinstance(obj, Tensor) && !obj.attr("is_cuda").cast<bool>();
   };
 
   if (is_cpu(check_matrix_obj) || is_cpu(error_probs_obj)) {
@@ -329,12 +328,10 @@ bool tryGpuSampling(const py::array_t<uint8_t> &check_matrix_np,
     return false;
   }
 
-  syndromes_out =
-      py::array_t<uint8_t>({static_cast<py::ssize_t>(numShots),
-                            static_cast<py::ssize_t>(num_checks)});
-  errors_out =
-      py::array_t<uint8_t>({static_cast<py::ssize_t>(numShots),
-                            static_cast<py::ssize_t>(num_mechanisms)});
+  syndromes_out = py::array_t<uint8_t>({static_cast<py::ssize_t>(numShots),
+                                        static_cast<py::ssize_t>(num_checks)});
+  errors_out = py::array_t<uint8_t>({static_cast<py::ssize_t>(numShots),
+                                     static_cast<py::ssize_t>(num_mechanisms)});
 
   auto copy_syn_status = cudaMemcpy(syndromes_out.mutable_data(), d_syn.get(),
                                     syn_bytes, cudaMemcpyDeviceToHost);

@@ -559,6 +559,7 @@ class TestTorchNotInstalledWarning:
 
         class FakeTensor:
             """Object that looks like a torch tensor but torch is absent."""
+
             def data_ptr(self):
                 return 0
 
