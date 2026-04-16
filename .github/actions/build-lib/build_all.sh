@@ -14,7 +14,7 @@ if [ -z "$CUSTABILIZER_ROOT" ] && [ -x "$(command -v python3)" ]; then
   fi
   CUSTAB_PIP="custabilizer-cu${CUDA_MAJOR:-12}"
   CUQPY_PIP="cuquantum-python-cu${CUDA_MAJOR:-12}"
-  pip install --upgrade "${CUSTAB_PIP}>=0.3.0" "${CUQPY_PIP}>=26.3.0"
+  pip install "${CUSTAB_PIP}>=0.3.0" "${CUQPY_PIP}>=26.3.0"
 fi
 
 if [ -z "$CUSTABILIZER_ROOT" ] && [ -x "$(command -v python3)" ]; then

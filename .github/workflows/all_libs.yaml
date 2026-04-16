@@ -64,7 +64,7 @@ jobs:
       - name: Install build requirements
         run: |
           apt install -y --no-install-recommends gfortran libblas-dev wget
-          pip install --upgrade cuquantum-python-cu${{ steps.config.outputs.cuda_major }}>=26.3.0 custabilizer-cu${{ steps.config.outputs.cuda_major }}>=0.3.0
+          pip install "cuquantum-python-cu${{ steps.config.outputs.cuda_major }}>=26.3.0" "custabilizer-cu${{ steps.config.outputs.cuda_major }}>=0.3.0"
 
       - name: Install TensorRT (amd64)
         if: matrix.platform == 'amd64'
@@ -108,7 +108,7 @@ jobs:
           LD_LIBRARY_PATH: ${{ env.MPI_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
         shell: bash
         run: |
-          pip install --upgrade numpy pytest onnxscript cupy-cuda${{ steps.config.outputs.cuda_major }}x cuquantum-cu${{ steps.config.outputs.cuda_major }} lightning ml_collections mpi4py transformers quimb opt_einsum nvidia-cublas cuquantum-python-cu${{ steps.config.outputs.cuda_major }}>=26.3.0 custabilizer-cu${{ steps.config.outputs.cuda_major }}>=0.3.0
+          pip install numpy pytest onnxscript cupy-cuda${{ steps.config.outputs.cuda_major }}x cuquantum-cu${{ steps.config.outputs.cuda_major }} lightning ml_collections mpi4py transformers quimb opt_einsum nvidia-cublas "cuquantum-python-cu${{ steps.config.outputs.cuda_major }}>=26.3.0" "custabilizer-cu${{ steps.config.outputs.cuda_major }}>=0.3.0"
           echo "=== cuStabilizer verification ==="
           pip show custabilizer-cu${{ steps.config.outputs.cuda_major }} | grep Version
           find / -name "libcustabilizer.so*" 2>/dev/null || true
