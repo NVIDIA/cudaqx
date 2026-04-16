@@ -44,9 +44,6 @@ cuda_major=$(echo ${CUDA_VERSION} | cut -d '.' -f 1)
 cuda_minor=$(echo ${CUDA_VERSION} | cut -d '.' -f 2)
 cuda_no_dot="${cuda_major}${cuda_minor}"
 
-# Repository root (this file lives in scripts/validation/container/).
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-
 # Function to run Python tests
 run_python_tests() {
     local container_name=$1
@@ -57,15 +54,10 @@ run_python_tests() {
     docker exec ${container_name} bash -c "\
         python3 -m pip install pytest --user"
 
-    # import cudaq before pytest (see scripts/ci/check_cudaq_import.py for message logic).
-    docker cp "${REPO_ROOT}/scripts/ci/check_cudaq_import.py" "${container_name}:/tmp/check_cudaq_import.py"
-    docker exec "${container_name}" bash -lc "
-    set -e
-    cd /home/cudaq
-    echo '=== CUDA-Q import check (before pytest) ==='
-    python3 /tmp/check_cudaq_import.py
-    python3 -m pytest /home/cudaq/cudaqx_pytests -v
-    "
+    # Clone repository and run tests with specific target
+    docker exec ${container_name} bash -c "\
+        cd /home/cudaq && \
+        python3 -m pytest /home/cudaq/cudaqx_pytests -v"
 
     local test_result=$?
     if [ ${test_result} -ne 0 ]; then
@@ -104,6 +96,18 @@ test_examples() {
     docker exec ${container_name} bash -c "pip install 'quimb' 'opt_einsum' 'cuquantum-python-cu${cuda_major}==26.01.0'"
     if [ "${CURRENT_ARCH}" == "x86_64" ]; then
         docker exec ${container_name} bash -c "pip install 'stim' 'beliefmatching'"
+    fi
+
+    # CUDA-Q import sanity check (baked into image)
+    if ! docker exec ${container_name} bash -c "\
+        if [ -f /home/cudaq/cudaqx-scripts/validation/check_cudaq_import.py ]; then \
+            echo '=== CUDA-Q import check (before pytest) ==='; \
+            python3 /home/cudaq/cudaqx-scripts/validation/check_cudaq_import.py || exit 1; \
+        fi"; then
+        echo 'CUDA-Q import check failed; aborting validation.'
+        docker stop ${container_name}
+        docker rm ${container_name}
+        return 1
     fi
 
     # Run Python tests first
