@@ -541,6 +541,25 @@ void bindDemSampling(py::module &mod) {
 
         rejectTorchCpuTensors(check_matrix_obj, error_probs_obj);
 
+        bool inputs_are_cuda_tensors = false;
+        try {
+          py::module_ torch = py::module_::import("torch");
+          py::object Tensor = torch.attr("Tensor");
+          if (py::isinstance(check_matrix_obj, Tensor) &&
+              check_matrix_obj.attr("is_cuda").cast<bool>())
+            inputs_are_cuda_tensors = true;
+        } catch (py::error_already_set &) {
+          PyErr_Clear();
+        }
+
+        if (inputs_are_cuda_tensors &&
+            backend_mode == DemSamplingBackend::Gpu) {
+          throw std::runtime_error(
+              "dem_sampling: GPU backend requested but failed. "
+              "torch path: " +
+              torch_gpu_failure_reason);
+        }
+
         auto check_matrix_np = asNumpyUint8(check_matrix_obj);
         auto error_probs_np = asNumpyFloat64(error_probs_obj);
         validateInputShapes(check_matrix_np, error_probs_np);

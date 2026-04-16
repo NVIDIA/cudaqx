@@ -580,10 +580,13 @@ class TestTorchNotInstalledWarning:
 
 class TestRandomObjectRejected:
 
-    def test_list_rejected(self):
-        """Plain lists should be rejected or produce a clear error."""
-        with pytest.raises((TypeError, RuntimeError, ValueError)):
-            dem_sampling([[1, 0], [0, 1]], 4, [0.5, 0.5], seed=0)
+    def test_list_accepted(self):
+        """Plain lists are auto-converted via numpy and should work."""
+        syndromes, errors = dem_sampling([[1, 0], [0, 1]],
+                                         4, [0.5, 0.5],
+                                         seed=0)
+        assert syndromes.shape == (4, 2)
+        assert errors.shape == (4, 2)
 
     def test_string_rejected(self):
         """Strings are not valid inputs."""
