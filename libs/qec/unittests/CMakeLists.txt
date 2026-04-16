@@ -50,10 +50,8 @@ gtest_discover_tests(test_qec)
 
 add_executable(test_dem_sampling test_dem_sampling.cpp)
 target_link_libraries(test_dem_sampling PRIVATE GTest::gtest_main cudaq-qec cudaq::cudaq)
-if(TARGET cuStabilizer::cuStabilizer)
-  target_link_libraries(test_dem_sampling PRIVATE CUDA::cudart)
-  target_include_directories(test_dem_sampling PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
-endif()
+target_link_libraries(test_dem_sampling PRIVATE CUDA::cudart)
+target_include_directories(test_dem_sampling PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
 add_dependencies(CUDAQXQECUnitTests test_dem_sampling)
 gtest_discover_tests(test_dem_sampling)
 

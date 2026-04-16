@@ -12,8 +12,6 @@ jobs:
       matrix:
         platform: ['amd64', 'arm64']
         cuda_version: ['12.6', '13.0']
-        custabilizer: ['ON']
-        custabilizer_gpu_torch: ['ON']
     runs-on: ${{ startsWith(github.repository, 'NVIDIA/cudaqx') && format('linux-{0}-cpu8', matrix.platform) || 'ubuntu-latest' }}
     container: ghcr.io/nvidia/cuda-quantum-devcontainer:${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc11-main
     permissions:
@@ -89,9 +87,6 @@ jobs:
           pr-number: ${{ steps.export-pr-info.outputs.pr_number }}
           save-ccache: true
           platform: ${{ matrix.platform }}
-          require-custabilizer: ${{ matrix.custabilizer }}
-          require-custabilizer-gpu-torch: ${{ matrix.custabilizer_gpu_torch }}
-
       # ========================================================================
       # Run tests
       # ========================================================================

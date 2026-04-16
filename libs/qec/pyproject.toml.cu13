@@ -50,7 +50,6 @@ ninja.version = ">=1.10"
 [tool.scikit-build.cmake.define]
 CUDAQX_QEC_INCLUDE_TESTS = false
 CUDAQX_QEC_BINDINGS_PYTHON = true
-CUDAQ_QEC_REQUIRE_CUSTABILIZER = true
 
 [tool.setuptools_scm]
 write_to = "_version.py"

@@ -60,10 +60,6 @@ ${python} -m pip install openfermion
 ${python} -m pip install openfermionpyscf
 ${python} -m pip install onnxscript # for trt decoder tests
 
-# Now install torch.
-cuda_no_dot=$(echo $cuda_version | sed 's/\.//')
-${python} -m pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu${cuda_no_dot}
-
 FIND_LINKS="--find-links /wheels/ --find-links /metapackages/"
 
 # If special CUDA-Q wheels have been built for this test, install them here.
@@ -95,6 +91,18 @@ if command -v nvidia-smi &> /dev/null && nvidia-smi &> /dev/null; then
   ${python} -m pytest -v -s libs/qec/python/tests/
 else
   # No CUDA - skip TRT decoder tests
+  ${python} -m pytest -v -s libs/qec/python/tests/ --ignore=libs/qec/python/tests/test_trt_decoder.py
+fi
+
+# Install torch for Solvers GQE and to re-test QEC with torch available.
+cuda_no_dot=$(echo $cuda_version | sed 's/\.//')
+${python} -m pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu${cuda_no_dot}
+
+# Re-run QEC tests with torch installed to validate the optional torch CUDA path.
+echo "Re-running QEC tests with PyTorch installed"
+if command -v nvidia-smi &> /dev/null && nvidia-smi &> /dev/null; then
+  ${python} -m pytest -v -s libs/qec/python/tests/
+else
   ${python} -m pytest -v -s libs/qec/python/tests/ --ignore=libs/qec/python/tests/test_trt_decoder.py
 fi
 

@@ -12,16 +12,17 @@ Public API:
         check_matrix, num_shots, error_probabilities, seed=None, backend="auto"
     )
 
-When compiled with cuStabilizer, the function delegates to the GPU sampler.
-Otherwise it falls back to the CPU implementation. Both paths are handled
-transparently by the C++ binding.
+The GPU path uses cuStabilizer for accelerated sampling. The CPU path is
+always available as a fallback.
 
-The check_matrix and error_probabilities arguments accept both NumPy arrays
-and PyTorch tensors, enabling direct integration with AI/ML workflows.
+Inputs are NumPy arrays (primary) or PyTorch CUDA tensors (requires
+user-installed torch via ``pip install torch``). PyTorch CPU tensors are
+not accepted; convert them to NumPy arrays first.
 """
 
 from __future__ import annotations
 
+import warnings
 from typing import Optional, Tuple
 
 __all__ = ["dem_sampling"]
@@ -38,11 +39,11 @@ def dem_sampling(
 
     Args:
         check_matrix: Binary matrix [num_checks x num_error_mechanisms],
-            as a NumPy uint8 array or PyTorch tensor.
+            as a NumPy uint8 array or PyTorch CUDA tensor.
         num_shots: Number of independent Monte-Carlo shots.
         error_probabilities: 1-D array of length num_error_mechanisms with
             independent Bernoulli probabilities for each mechanism.
-            Accepts NumPy float64 array or PyTorch tensor.
+            Accepts NumPy float64 array or PyTorch CUDA tensor.
         seed: Optional RNG seed for reproducibility.
         backend: Backend selection policy:
             - "auto" (default): try GPU, fall back to CPU.
@@ -54,12 +55,25 @@ def dem_sampling(
           syndromes: uint8 array/tensor [num_shots x num_checks]
           errors:    uint8 array/tensor [num_shots x num_error_mechanisms]
 
-    When compiled with cuStabilizer the function uses GPU-accelerated
-    sampling. Otherwise it falls back to the CPU implementation.
-    Both NumPy arrays and PyTorch tensors are accepted as inputs.
-    For PyTorch CUDA tensors on GPU path, outputs are PyTorch CUDA tensors;
-    otherwise outputs are NumPy arrays.
+    The GPU path uses cuStabilizer for accelerated sampling. When PyTorch
+    CUDA tensors are provided, outputs are returned as CUDA tensors.
+    Otherwise, outputs are NumPy arrays.
+
+    PyTorch CPU tensors are not supported. Convert to NumPy first.
+    PyTorch is an optional dependency; install with ``pip install torch``.
     """
+    for obj in (check_matrix, error_probabilities):
+        if hasattr(obj, 'data_ptr'):
+            try:
+                import torch  # noqa: F401
+            except ImportError:
+                warnings.warn(
+                    "Input appears to be a PyTorch tensor but torch is not "
+                    "installed. Install it with: pip install torch",
+                    stacklevel=2,
+                )
+            break
+
     from . import _pycudaqx_qec_the_suffix_matters_cudaq_qec as _qecmod
 
     return _qecmod.qecrt.dem_sampling(check_matrix, num_shots,

@@ -10,7 +10,6 @@
 import numpy as np
 import pytest
 
-import cudaq_qec as qec
 from cudaq_qec.dem_sampling import dem_sampling
 
 
@@ -20,10 +19,7 @@ def _compute_syndrome(H, errors):
 
 
 def _has_runtime_gpu_backend():
-    """True only when GPU backend is both compiled and usable at runtime."""
-    if not getattr(qec.qecrt, "dem_sampling_has_gpu_compiled", False):
-        return False
-
+    """True only when GPU backend is usable at runtime."""
     H = np.array([[1]], dtype=np.uint8)
     probs = np.array([0.0], dtype=np.float64)
     try:
@@ -339,59 +335,19 @@ except ImportError:
 @pytest.mark.skipif(not _HAS_TORCH, reason="PyTorch not installed")
 class TestPyTorchInput:
 
-    def test_cpu_tensors(self):
-        H = torch.tensor([[1, 0, 1, 0], [0, 1, 1, 0], [0, 0, 0, 1]],
-                         dtype=torch.uint8)
-        probs = torch.tensor([1.0, 0.0, 1.0, 0.0], dtype=torch.float64)
-        syndromes, errors = dem_sampling(H, 5, probs, seed=42)
-
-        assert isinstance(syndromes, np.ndarray)
-        assert isinstance(errors, np.ndarray)
-        assert syndromes.shape == (5, 3)
-        assert errors.shape == (5, 4)
-
-        expected_errors = np.array([1, 0, 1, 0], dtype=np.uint8)
-        for shot in range(5):
-            np.testing.assert_array_equal(errors[shot], expected_errors)
-
-    def test_matches_numpy_input(self):
-        """Verify PyTorch and NumPy inputs produce identical results."""
-        H_np = np.array([[1, 0, 1], [0, 1, 1]], dtype=np.uint8)
-        probs_np = np.array([0.3, 0.5, 0.7])
-
-        H_torch = torch.from_numpy(H_np)
-        probs_torch = torch.from_numpy(probs_np)
-
-        s_np, e_np = dem_sampling(H_np, 100, probs_np, seed=99)
-        s_torch, e_torch = dem_sampling(H_torch, 100, probs_torch, seed=99)
-
-        np.testing.assert_array_equal(s_np, s_torch)
-        np.testing.assert_array_equal(e_np, e_torch)
-
-    def test_force_cpu_backend(self):
+    def test_cpu_tensor_rejected(self):
+        """PyTorch CPU tensors should be rejected (no silent conversion)."""
         H = torch.tensor([[1, 0, 1], [0, 1, 1]], dtype=torch.uint8)
         probs = torch.tensor([1.0, 0.0, 1.0], dtype=torch.float64)
-        syndromes, errors = dem_sampling(H, 4, probs, seed=7, backend="cpu")
+        with pytest.raises((RuntimeError, TypeError)):
+            dem_sampling(H, 5, probs, seed=42)
 
-        expected_errors = np.array([1, 0, 1], dtype=np.uint8)
-        expected_syn = np.array([0, 1], dtype=np.uint8)
-        for shot in range(4):
-            np.testing.assert_array_equal(errors[shot], expected_errors)
-            np.testing.assert_array_equal(syndromes[shot], expected_syn)
-
-    def test_cpu_torch_probs_with_grad(self):
-        """CPU path should accept torch tensors that require gradients."""
+    def test_cpu_tensor_with_cpu_backend_rejected(self):
+        """PyTorch CPU tensors with backend='cpu' should also be rejected."""
         H = torch.tensor([[1, 0, 1], [0, 1, 1]], dtype=torch.uint8)
-        probs = torch.tensor([1.0, 0.0, 1.0],
-                             dtype=torch.float64,
-                             requires_grad=True)
-        syndromes, errors = dem_sampling(H, 4, probs, seed=7, backend="cpu")
-
-        expected_errors = np.array([1, 0, 1], dtype=np.uint8)
-        expected_syn = np.array([0, 1], dtype=np.uint8)
-        for shot in range(4):
-            np.testing.assert_array_equal(errors[shot], expected_errors)
-            np.testing.assert_array_equal(syndromes[shot], expected_syn)
+        probs = torch.tensor([1.0, 0.0, 1.0], dtype=torch.float64)
+        with pytest.raises((RuntimeError, TypeError)):
+            dem_sampling(H, 4, probs, seed=7, backend="cpu")
 
     @pytest.mark.skipif(not _HAS_RUNTIME_GPU_BACKEND,
                         reason="GPU backend unavailable in this environment")
@@ -504,24 +460,6 @@ class TestPyTorchInput:
             assert torch.equal(errors[shot], expected_errors)
             assert torch.equal(syndromes[shot], expected_syn)
 
-    def test_syndrome_consistency_torch(self):
-        """Verify syndrome = errors @ H^T mod 2 with PyTorch input."""
-        H_np = np.array([
-            [1, 0, 1, 0, 0, 1, 0, 0],
-            [0, 1, 0, 1, 0, 0, 1, 0],
-            [0, 0, 1, 0, 1, 0, 0, 1],
-            [1, 1, 0, 0, 0, 0, 1, 1],
-        ],
-                        dtype=np.uint8)
-        probs_np = np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8])
-
-        H = torch.from_numpy(H_np)
-        probs = torch.from_numpy(probs_np)
-
-        syndromes, errors = dem_sampling(H, 200, probs, seed=7)
-        expected = _compute_syndrome(H_np, errors)
-        np.testing.assert_array_equal(syndromes, expected)
-
 
 # ---------------------------------------------------------------------------
 # Edge-case tests
@@ -606,3 +544,47 @@ class TestSeedlessPath:
         _, e1 = dem_sampling(H, 500, probs)
         _, e2 = dem_sampling(H, 500, probs)
         assert not np.array_equal(e1, e2)
+
+
+# ---------------------------------------------------------------------------
+# Tests for missing-torch print and invalid types
+# ---------------------------------------------------------------------------
+
+
+class TestTorchNotInstalledWarning:
+
+    def test_warns_install_message(self):
+        """When torch is absent and input has data_ptr, emit install hint."""
+        import sys
+
+        class FakeTensor:
+            """Object that looks like a torch tensor but torch is absent."""
+            def data_ptr(self):
+                return 0
+
+        real_torch = sys.modules.get("torch")
+        sys.modules["torch"] = None  # force ImportError on `import torch`
+        try:
+            with pytest.warns(UserWarning, match="pip install torch"):
+                try:
+                    dem_sampling(FakeTensor(), 1, FakeTensor(), seed=0)
+                except Exception:
+                    pass
+        finally:
+            if real_torch is not None:
+                sys.modules["torch"] = real_torch
+            else:
+                sys.modules.pop("torch", None)
+
+
+class TestRandomObjectRejected:
+
+    def test_list_rejected(self):
+        """Plain lists should be rejected or produce a clear error."""
+        with pytest.raises((TypeError, RuntimeError, ValueError)):
+            dem_sampling([[1, 0], [0, 1]], 4, [0.5, 0.5], seed=0)
+
+    def test_string_rejected(self):
+        """Strings are not valid inputs."""
+        with pytest.raises((TypeError, RuntimeError, ValueError)):
+            dem_sampling("not a matrix", 4, "not probs", seed=0)

@@ -61,11 +61,6 @@ option(CUDAQX_QEC_INSTALL_PYTHON
        "Install python files alongside the library."
        ${CUDAQX_INSTALL_PYTHON})
 
-# Require cuStabilizer + CUDA (with sparse DEM APIs) for QEC builds.
-option(CUDAQ_QEC_REQUIRE_CUSTABILIZER
-       "Fail configuration when cuStabilizer/CUDA or required DEM APIs are unavailable."
-       ON)
-
 # Option to control TRT decoder build (default: ON)
 option(CUDAQ_QEC_BUILD_TRT_DECODER "Build the TensorRT decoder plugin" ON)
 

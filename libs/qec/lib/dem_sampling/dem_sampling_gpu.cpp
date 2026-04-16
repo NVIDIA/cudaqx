@@ -8,7 +8,6 @@
 
 #include "cudaq/qec/dem_sampling.h"
 
-#ifdef CUDAQ_QEC_HAS_CUSTABILIZER
 #include "dem_sampling_utils.h"
 #include <cuda_runtime.h>
 #include <custabilizer.h>
@@ -59,7 +58,6 @@ struct HandleRAII {
 };
 
 } // namespace
-#endif // CUDAQ_QEC_HAS_CUSTABILIZER
 
 namespace cudaq::qec::dem_sampler::gpu {
 
@@ -68,7 +66,6 @@ bool sample_dem(const uint8_t *d_check_matrix, size_t num_checks,
                 const double *d_error_probabilities, size_t num_shots,
                 unsigned seed, uint8_t *d_checks_out, uint8_t *d_errors_out,
                 std::uintptr_t stream_handle) {
-#ifdef CUDAQ_QEC_HAS_CUSTABILIZER
   if (num_checks == 0 || num_error_mechanisms == 0 || num_shots == 0)
     return true;
 
@@ -176,18 +173,6 @@ bool sample_dem(const uint8_t *d_check_matrix, size_t num_checks,
   cuda_check(cudaStreamSynchronize(stream), "sync");
 
   return true;
-#else
-  (void)d_check_matrix;
-  (void)num_checks;
-  (void)num_error_mechanisms;
-  (void)d_error_probabilities;
-  (void)num_shots;
-  (void)seed;
-  (void)d_checks_out;
-  (void)d_errors_out;
-  (void)stream_handle;
-  return false;
-#endif
 }
 
 } // namespace cudaq::qec::dem_sampler::gpu

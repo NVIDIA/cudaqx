@@ -10,91 +10,8 @@ set(LIBRARY_NAME cudaq-qec)
 
 add_compile_options(-Wno-attributes) 
 
-# cuStabilizer GPU DEM sampling support (required by default).
-find_package(cuStabilizer QUIET)
-set(_cuStabilizer_location
-    "include='${cuStabilizer_INCLUDE_DIR}', library='${cuStabilizer_LIBRARY}'")
-if(cuStabilizer_VERSION)
-  string(APPEND _cuStabilizer_location ", version='${cuStabilizer_VERSION}'")
-endif()
-
-# Force a fresh probe each configure invocation.
-unset(CUDAQ_QEC_CUSTABILIZER_HAS_SPARSE_DEM_APIS CACHE)
-unset(CUDAQ_QEC_CUSTABILIZER_HAS_SPARSE_DEM_APIS)
-if(cuStabilizer_FOUND AND CMAKE_CUDA_COMPILER)
-  include(CheckCXXSourceCompiles)
-  set(CMAKE_REQUIRED_INCLUDES "${cuStabilizer_INCLUDE_DIR}")
-  if(CUDAToolkit_INCLUDE_DIRS)
-    list(APPEND CMAKE_REQUIRED_INCLUDES ${CUDAToolkit_INCLUDE_DIRS})
-  endif()
-  # check_cxx_source_compiles links executables by default. Probe using a
-  # static library target so we only validate header/API availability.
-  set(_cudaqx_prev_try_compile_target_type "${CMAKE_TRY_COMPILE_TARGET_TYPE}")
-  set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
-  check_cxx_source_compiles(
-    "
-    #include <custabilizer.h>
-    int main() {
-      (void)CUSTABILIZER_STATUS_INSUFFICIENT_SPARSE_STORAGE;
-      using prepare_t = decltype(&custabilizerSampleProbArraySparsePrepare);
-      using compute_t = decltype(&custabilizerSampleProbArraySparseCompute);
-      using spmm_t = decltype(&custabilizerGF2SparseDenseMatrixMultiply);
-      (void)sizeof(prepare_t);
-      (void)sizeof(compute_t);
-      (void)sizeof(spmm_t);
-      return 0;
-    }
-    "
-    CUDAQ_QEC_CUSTABILIZER_HAS_SPARSE_DEM_APIS
-  )
-  if(DEFINED _cudaqx_prev_try_compile_target_type AND
-     NOT _cudaqx_prev_try_compile_target_type STREQUAL "")
-    set(CMAKE_TRY_COMPILE_TARGET_TYPE "${_cudaqx_prev_try_compile_target_type}")
-  else()
-    unset(CMAKE_TRY_COMPILE_TARGET_TYPE)
-  endif()
-  unset(_cudaqx_prev_try_compile_target_type)
-  unset(CMAKE_REQUIRED_INCLUDES)
-endif()
-
-if(NOT DEFINED CUDAQ_QEC_CUSTABILIZER_HAS_SPARSE_DEM_APIS)
-  set(CUDAQ_QEC_CUSTABILIZER_HAS_SPARSE_DEM_APIS FALSE)
-endif()
-
-if(cuStabilizer_FOUND AND CMAKE_CUDA_COMPILER AND
-   CUDAQ_QEC_CUSTABILIZER_HAS_SPARSE_DEM_APIS)
-  message(STATUS
-          "cuStabilizer found (${_cuStabilizer_location}) - GPU DEM sampling enabled")
-  set(CUDAQ_QEC_HAS_CUSTABILIZER TRUE)
-  set(CUDAQ_QEC_HAS_CUSTABILIZER TRUE PARENT_SCOPE)
-elseif(cuStabilizer_FOUND AND CMAKE_CUDA_COMPILER)
-  message(WARNING
-    "cuStabilizer found (${_cuStabilizer_location}), but sparse DEM APIs are "
-    "missing. GPU DEM sampling disabled. Required APIs: "
-    "custabilizerSampleProbArraySparsePrepare, "
-    "custabilizerSampleProbArraySparseCompute, "
-    "custabilizerGF2SparseDenseMatrixMultiply."
-  )
-  set(CUDAQ_QEC_HAS_CUSTABILIZER FALSE)
-  set(CUDAQ_QEC_HAS_CUSTABILIZER FALSE PARENT_SCOPE)
-else()
-  message(STATUS "cuStabilizer not found or CUDA unavailable – GPU DEM sampling disabled")
-  set(CUDAQ_QEC_HAS_CUSTABILIZER FALSE)
-  set(CUDAQ_QEC_HAS_CUSTABILIZER FALSE PARENT_SCOPE)
-endif()
-
-if(CUDAQ_QEC_REQUIRE_CUSTABILIZER AND NOT CUDAQ_QEC_HAS_CUSTABILIZER)
-  message(FATAL_ERROR
-    "CUDAQ_QEC_REQUIRE_CUSTABILIZER is ON, but required cuStabilizer/CUDA "
-    "support was not detected.\n"
-    "Detected: cuStabilizer_FOUND='${cuStabilizer_FOUND}', "
-    "${_cuStabilizer_location}, "
-    "cuda_compiler='${CMAKE_CUDA_COMPILER}', "
-    "sparse_dem_apis='${CUDAQ_QEC_CUSTABILIZER_HAS_SPARSE_DEM_APIS}'.\n"
-    "Required APIs: custabilizerSampleProbArraySparsePrepare, "
-    "custabilizerSampleProbArraySparseCompute, "
-    "custabilizerGF2SparseDenseMatrixMultiply.")
-endif()
+find_package(cuStabilizer REQUIRED)
+find_package(CUDAToolkit REQUIRED)
 
 set(QEC_SOURCES
   code.cpp
@@ -109,12 +26,10 @@ set(QEC_SOURCES
   version.cpp
 )
 
-if(CUDAQ_QEC_HAS_CUSTABILIZER)
-  list(APPEND QEC_SOURCES
-    dem_sampling/dem_sampling_utils.cu
-    dem_sampling/dem_sampling_gpu.cpp
-  )
-endif()
+list(APPEND QEC_SOURCES
+  dem_sampling/dem_sampling_utils.cu
+  dem_sampling/dem_sampling_gpu.cpp
+)
 
 # FIXME?: This must be a shared library. Trying to build a static one will fail.
 add_library(${LIBRARY_NAME} SHARED ${QEC_SOURCES})
@@ -132,8 +47,6 @@ add_subdirectory(device)
 if (CUDAQX_QEC_USE_FLOAT)
    target_compile_definitions(${LIBRARY_NAME} PUBLIC -DCUDAQX_QEC_FLOAT_TYPE=float)
 endif()
-
-
 
 target_include_directories(${LIBRARY_NAME}
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
@@ -155,17 +68,14 @@ target_link_libraries(${LIBRARY_NAME}
     cudaq::cudaq-common
 )
 
-if(CUDAQ_QEC_HAS_CUSTABILIZER)
-  target_compile_definitions(${LIBRARY_NAME} PUBLIC CUDAQ_QEC_HAS_CUSTABILIZER)
-  target_link_libraries(${LIBRARY_NAME} PRIVATE
-    cuStabilizer::cuStabilizer
-    CUDA::cudart
-  )
-  set_source_files_properties(
-    dem_sampling/dem_sampling_utils.cu
-    PROPERTIES LANGUAGE CUDA
-  )
-endif()
+target_link_libraries(${LIBRARY_NAME} PRIVATE
+  cuStabilizer::cuStabilizer
+  CUDA::cudart
+)
+set_source_files_properties(
+  dem_sampling/dem_sampling_utils.cu
+  PROPERTIES LANGUAGE CUDA
+)
 
 set_target_properties(${LIBRARY_NAME} PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)

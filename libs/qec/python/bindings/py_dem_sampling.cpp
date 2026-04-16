@@ -24,9 +24,7 @@
 
 #include "cuda-qx/core/kwargs_utils.h"
 
-#ifdef CUDAQ_QEC_HAS_CUSTABILIZER
 #include <cuda_runtime.h>
-#endif
 
 namespace py = pybind11;
 using namespace pybind11::literals;
@@ -35,39 +33,16 @@ namespace cudaq::qec::dem_sampler {
 
 namespace {
 
-/// Convert a py::object (numpy array or PyTorch tensor) to a numpy uint8 array.
+/// Convert a py::object to a numpy uint8 array.
 py::array_t<uint8_t> asNumpyUint8(py::object obj) {
   py::module_ np = py::module_::import("numpy");
-  try {
-    py::module_ torch = py::module_::import("torch");
-    if (py::isinstance(obj, torch.attr("Tensor"))) {
-      py::object t = obj.attr("detach")();
-      if (t.attr("is_cuda").cast<bool>())
-        t = t.attr("cpu")();
-      obj = t.attr("numpy")();
-    }
-  } catch (py::error_already_set &) {
-    PyErr_Clear();
-  }
   return np.attr("ascontiguousarray")(obj, "dtype"_a = np.attr("uint8"))
       .cast<py::array_t<uint8_t>>();
 }
 
-/// Convert a py::object (numpy array or PyTorch tensor) to a numpy float64
-/// array.
+/// Convert a py::object to a numpy float64 array.
 py::array_t<double> asNumpyFloat64(py::object obj) {
   py::module_ np = py::module_::import("numpy");
-  try {
-    py::module_ torch = py::module_::import("torch");
-    if (py::isinstance(obj, torch.attr("Tensor"))) {
-      py::object t = obj.attr("detach")();
-      if (t.attr("is_cuda").cast<bool>())
-        t = t.attr("cpu")();
-      obj = t.attr("numpy")();
-    }
-  } catch (py::error_already_set &) {
-    PyErr_Clear();
-  }
   auto arr = np.attr("ascontiguousarray")(obj, "dtype"_a = np.attr("float64"))
                  .cast<py::array_t<double>>();
   py::buffer_info info = arr.request();
@@ -76,6 +51,36 @@ py::array_t<double> asNumpyFloat64(py::object obj) {
         "error_probabilities must be a 1-D array, got ndim=" +
         std::to_string(info.ndim));
   return arr;
+}
+
+/// Throw if either input is a torch CPU tensor (no silent numpy conversion).
+void rejectTorchCpuTensors(const py::object &check_matrix_obj,
+                           const py::object &error_probs_obj) {
+  py::module_ torch;
+  try {
+    torch = py::module_::import("torch");
+  } catch (py::error_already_set &) {
+    PyErr_Clear();
+    return;
+  }
+
+  py::object Tensor = torch.attr("Tensor");
+  bool check_is_torch = py::isinstance(check_matrix_obj, Tensor);
+  bool probs_is_torch = py::isinstance(error_probs_obj, Tensor);
+
+  if (!check_is_torch && !probs_is_torch)
+    return;
+
+  auto is_cpu = [&](const py::object &obj) {
+    return py::isinstance(obj, Tensor) &&
+           !obj.attr("is_cuda").cast<bool>();
+  };
+
+  if (is_cpu(check_matrix_obj) || is_cpu(error_probs_obj)) {
+    throw std::runtime_error(
+        "dem_sampling: PyTorch CPU tensors are not supported. "
+        "Convert to NumPy with .numpy() or use CUDA tensors.");
+  }
 }
 
 enum class DemSamplingBackend { Auto, Cpu, Gpu };
@@ -127,8 +132,6 @@ void validateProbabilityValues(const py::array_t<double> &error_probs_np) {
     }
   }
 }
-
-#ifdef CUDAQ_QEC_HAS_CUSTABILIZER
 
 struct CudaDeleter {
   void operator()(void *p) const {
@@ -326,35 +329,33 @@ bool tryGpuSampling(const py::array_t<uint8_t> &check_matrix_np,
     return false;
   }
 
-  if (ok) {
-    syndromes_out =
-        py::array_t<uint8_t>({static_cast<py::ssize_t>(numShots),
-                              static_cast<py::ssize_t>(num_checks)});
-    errors_out =
-        py::array_t<uint8_t>({static_cast<py::ssize_t>(numShots),
-                              static_cast<py::ssize_t>(num_mechanisms)});
+  syndromes_out =
+      py::array_t<uint8_t>({static_cast<py::ssize_t>(numShots),
+                            static_cast<py::ssize_t>(num_checks)});
+  errors_out =
+      py::array_t<uint8_t>({static_cast<py::ssize_t>(numShots),
+                            static_cast<py::ssize_t>(num_mechanisms)});
 
-    auto copy_syn_status = cudaMemcpy(syndromes_out.mutable_data(), d_syn.get(),
-                                      syn_bytes, cudaMemcpyDeviceToHost);
-    if (copy_syn_status != cudaSuccess) {
-      failure_reason = std::string("failed to copy syndromes to host: ") +
-                       cudaGetErrorString(copy_syn_status);
-      cudaGetLastError();
-      return false;
-    }
+  auto copy_syn_status = cudaMemcpy(syndromes_out.mutable_data(), d_syn.get(),
+                                    syn_bytes, cudaMemcpyDeviceToHost);
+  if (copy_syn_status != cudaSuccess) {
+    failure_reason = std::string("failed to copy syndromes to host: ") +
+                     cudaGetErrorString(copy_syn_status);
+    cudaGetLastError();
+    return false;
+  }
 
-    auto copy_err_status = cudaMemcpy(errors_out.mutable_data(), d_err.get(),
-                                      err_bytes, cudaMemcpyDeviceToHost);
-    if (copy_err_status != cudaSuccess) {
-      failure_reason = std::string("failed to copy errors to host: ") +
-                       cudaGetErrorString(copy_err_status);
-      cudaGetLastError();
-      return false;
-    }
+  auto copy_err_status = cudaMemcpy(errors_out.mutable_data(), d_err.get(),
+                                    err_bytes, cudaMemcpyDeviceToHost);
+  if (copy_err_status != cudaSuccess) {
+    failure_reason = std::string("failed to copy errors to host: ") +
+                     cudaGetErrorString(copy_err_status);
+    cudaGetLastError();
+    return false;
   }
 
   failure_reason.clear();
-  return ok;
+  return true;
 }
 
 bool tryTorchGpuSampling(py::object check_matrix_obj,
@@ -366,6 +367,14 @@ bool tryTorchGpuSampling(py::object check_matrix_obj,
     torch = py::module_::import("torch");
   } catch (py::error_already_set &) {
     PyErr_Clear();
+    py::module_ np = py::module_::import("numpy");
+    bool is_numpy = py::isinstance(check_matrix_obj, np.attr("ndarray"));
+    if (!is_numpy) {
+      PyErr_WarnEx(PyExc_UserWarning,
+                   "[cudaq_qec.dem_sampling] PyTorch is not installed. "
+                   "Install it with: pip install torch",
+                   1);
+    }
     failure_reason = "PyTorch is not available";
     return false;
   }
@@ -489,7 +498,6 @@ bool tryTorchGpuSampling(py::object check_matrix_obj,
   failure_reason.clear();
   return true;
 }
-#endif // CUDAQ_QEC_HAS_CUSTABILIZER
 
 } // namespace
 
@@ -497,12 +505,6 @@ void bindDemSampling(py::module &mod) {
   auto qecmod = py::hasattr(mod, "qecrt")
                     ? mod.attr("qecrt").cast<py::module_>()
                     : mod.def_submodule("qecrt");
-
-#ifdef CUDAQ_QEC_HAS_CUSTABILIZER
-  qecmod.attr("dem_sampling_has_gpu_compiled") = py::bool_(true);
-#else
-  qecmod.attr("dem_sampling_has_gpu_compiled") = py::bool_(false);
-#endif
 
   qecmod.def(
       "dem_sampling",
@@ -530,27 +532,23 @@ void bindDemSampling(py::module &mod) {
             seed.has_value() ? seed.value()
                              : static_cast<unsigned>(std::random_device{}());
 
-#ifdef CUDAQ_QEC_HAS_CUSTABILIZER
         std::string torch_gpu_failure_reason = "not attempted";
         if (backend_mode != DemSamplingBackend::Cpu) {
           py::tuple torch_result;
-          // In "gpu" mode we may move torch CPU tensors to CUDA. In "auto"
-          // mode we preserve existing behavior and only use this path for
-          // CUDA tensors.
           bool allow_move_to_cuda = backend_mode == DemSamplingBackend::Gpu;
           if (tryTorchGpuSampling(check_matrix_obj, error_probs_obj, numShots,
                                   actual_seed, torch_result,
                                   torch_gpu_failure_reason, allow_move_to_cuda))
             return torch_result;
         }
-#endif
+
+        rejectTorchCpuTensors(check_matrix_obj, error_probs_obj);
 
         auto check_matrix_np = asNumpyUint8(check_matrix_obj);
         auto error_probs_np = asNumpyFloat64(error_probs_obj);
         validateInputShapes(check_matrix_np, error_probs_np);
         validateProbabilityValues(error_probs_np);
 
-#ifdef CUDAQ_QEC_HAS_CUSTABILIZER
         if (backend_mode != DemSamplingBackend::Cpu) {
           py::array_t<uint8_t> syndromes_gpu, errors_gpu;
           std::string gpu_failure_reason;
@@ -567,13 +565,6 @@ void bindDemSampling(py::module &mod) {
                 "; numpy path: " + gpu_failure_reason);
           }
         }
-#elif !defined(CUDAQ_QEC_HAS_CUSTABILIZER)
-        if (backend_mode == DemSamplingBackend::Gpu) {
-          throw std::runtime_error(
-              "dem_sampling: GPU backend requested, but this build does not "
-              "include cuStabilizer support.");
-        }
-#endif
 
         auto H = cudaqx::toTensor(check_matrix_np);
 
@@ -599,20 +590,21 @@ void bindDemSampling(py::module &mod) {
           - "cpu": always run the CPU implementation.
           - "gpu": require GPU; raise if unavailable.
 
-        The check_matrix and error_probabilities arguments accept both
-        NumPy arrays and PyTorch tensors.
+        The check_matrix and error_probabilities arguments accept NumPy
+        arrays or PyTorch CUDA tensors (requires user-installed torch).
 
-        If PyTorch CUDA tensors are used on the GPU path, outputs are returned
-        as PyTorch CUDA tensors (device pointers preserved). Otherwise outputs
-        are NumPy arrays.
+        When PyTorch CUDA tensors are provided on the GPU path, outputs are
+        returned as PyTorch CUDA tensors. Otherwise, outputs are NumPy arrays.
+
+        PyTorch CPU tensors are not supported. Convert to NumPy first.
 
         Args:
             check_matrix: Binary check matrix [num_checks x num_error_mechanisms],
-                          as a NumPy uint8 array or PyTorch tensor.
+                          as a NumPy uint8 array or PyTorch CUDA tensor.
             numShots: Number of measurement shots to sample.
             error_probabilities: Per-error-mechanism probabilities
                                  [num_error_mechanisms], as a NumPy float64
-                                 array or PyTorch tensor.
+                                 array or PyTorch CUDA tensor.
             seed: Optional RNG seed for reproducibility.
             backend: "auto", "cpu", or "gpu". Default is "auto".
 

@@ -17,9 +17,7 @@
 #include <random>
 #include <vector>
 
-#ifdef CUDAQ_QEC_HAS_CUSTABILIZER
 #include <cuda_runtime.h>
-#endif
 
 namespace {
 
@@ -369,10 +367,8 @@ TEST(DemSamplingCPU, SeedlessPathRuns) {
 }
 
 // =============================================================================
-// GPU tests (guarded by CUDAQ_QEC_HAS_CUSTABILIZER)
+// GPU tests
 // =============================================================================
-
-#ifdef CUDAQ_QEC_HAS_CUSTABILIZER
 
 class DemSamplingGPU : public ::testing::Test {
 protected:
@@ -797,5 +793,3 @@ TEST_F(DemSamplingGPU, NonBinaryCheckMatrixCpuGpuMatch) {
           << "Shot " << shot << " check " << c;
   }
 }
-
-#endif // CUDAQ_QEC_HAS_CUSTABILIZER
