@@ -1,0 +1,6 @@
+{
+  "cudaq_realtime": {
+    "repository": "NVIDIA/cuda-quantum",
+    "ref": "12dff9c0b6b4d03610a875cef89f2e566c65ffc5"
+  }
+}

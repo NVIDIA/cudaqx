@@ -8,33 +8,20 @@
 
 import numpy as np
 import pytest
-import torch
 from cudaq import spin
 import cudaq
 from cudaq_solvers.gqe_algorithm.gqe import DefaultScheduler, CosineScheduler, get_default_config
 import cudaq_solvers as solvers
+from cudaq_solvers.gqe_algorithm.cuda_utils import (
+    pytorch_cuda_execution_available,
+    pytorch_cuda_kernel_skip_reason,
+)
 
-
-def _torch_cuda_kernel_supported():
-    """Check if the installed PyTorch can execute CUDA kernels on this GPU."""
-    if not torch.cuda.is_available():
-        return False, "CUDA is not available"
-    try:
-        torch.zeros(1, device='cuda')
-        return True, ""
-    except RuntimeError:
-        cap = torch.cuda.get_device_capability()
-        arch = f"sm_{cap[0]}{cap[1]}"
-        if arch in torch.cuda.get_arch_list():
-            raise
-        name = torch.cuda.get_device_name()
-        return False, (f"PyTorch CUDA wheel does not include kernels for "
-                       f"{name} ({arch})")
-
-
-_cuda_supported, _cuda_skip_reason = _torch_cuda_kernel_supported()
-requires_cuda_kernels = pytest.mark.skipif(not _cuda_supported,
-                                           reason=_cuda_skip_reason)
+requires_cuda_kernels = pytest.mark.skipif(
+    not pytorch_cuda_execution_available(),
+    reason=pytorch_cuda_kernel_skip_reason() or
+    "PyTorch cannot execute CUDA kernels on this device",
+)
 
 qubit_count = 2
 # Define a simple Hamiltonian: Z₀ + Z₁

@@ -1,5 +1,5 @@
 # ============================================================================ #
-# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
+# Copyright (c) 2024 - 2026 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -272,6 +272,49 @@ def test_decoding_from_surface_code_dem_from_memory_circuit(
     nLogicalErrorsWithDecoding = np.sum(data_predictions ^ logical_measurements)
     print(f'nLogicalErrorsWithoutDecoding : {nLogicalErrorsWithoutDecoding}')
     print(f'nLogicalErrorsWithDecoding    : {nLogicalErrorsWithDecoding}')
+    assert nLogicalErrorsWithDecoding < nLogicalErrorsWithoutDecoding
+
+
+def test_pymatching_decode_to_observable_surface_code_dem():
+    """Test PyMatching with O (observables) matrix: decoder returns observable
+    flips directly.cpp)."""
+    cudaq.set_random_seed(13)
+    code = qec.get_code('surface_code', distance=5)
+    Lz = code.get_observables_z()
+    p = 0.003
+    noise = cudaq.NoiseModel()
+    noise.add_all_qubit_channel("x", cudaq.Depolarization2(p), 1)
+    statePrep = qec.operation.prep0
+    nRounds = 5
+    nShots = 2000
+
+    syndromes, data = qec.sample_memory_circuit(code, statePrep, nShots,
+                                                nRounds, noise)
+
+    logical_measurements = (Lz @ data.transpose()) % 2
+    logical_measurements = logical_measurements.flatten()
+
+    syndromes = syndromes.reshape((nShots, nRounds, -1))
+    syndromes = syndromes[:, :, :syndromes.shape[2] // 2]
+    syndromes = syndromes.reshape((nShots, -1))
+
+    dem = qec.z_dem_from_memory_circuit(code, statePrep, nRounds, noise)
+
+    decoder = qec.get_decoder(
+        'pymatching',
+        dem.detector_error_matrix,
+        O=dem.observables_flips_matrix,
+        error_rate_vec=np.array(dem.error_rates),
+    )
+
+    dr = decoder.decode_batch(syndromes)
+    # With decode_to_observables=True, each e.result is observable flips
+    # (length num_observables), not error predictions.
+    obs_per_shot = np.array([e.result for e in dr], dtype=np.float64)
+    data_predictions = np.round(obs_per_shot).astype(np.uint8).T
+
+    nLogicalErrorsWithoutDecoding = np.sum(logical_measurements)
+    nLogicalErrorsWithDecoding = np.sum(data_predictions ^ logical_measurements)
     assert nLogicalErrorsWithDecoding < nLogicalErrorsWithoutDecoding
 
 
