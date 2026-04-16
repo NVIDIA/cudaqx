@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2025 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2025 - 2026 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -235,29 +235,25 @@ __qpu__ void spam_error(cudaq::qec::patch logicalQubit, double p_spam_data,
   }
 }
 
+// Combined Z+X stabilizer extraction with a single measurement call.
 __qpu__ std::vector<cudaq::measure_result>
-se_z_ft(cudaq::qec::patch logicalQubit,
-        const std::vector<std::size_t> &cnot_sched) {
-  for (std::size_t i = 0; i < cnot_sched.size(); i += 2) {
-    cudaq::x<cudaq::ctrl>(logicalQubit.data[cnot_sched[i + 1]],
-                          logicalQubit.ancz[cnot_sched[i]]);
-  }
-  auto results = mz(logicalQubit.ancz);
+se_zx_ft(cudaq::qec::patch logicalQubit,
+         const std::vector<std::size_t> &cnot_schedZ,
+         const std::vector<std::size_t> &cnot_schedX) {
+  // Z stabilizer gates
+  for (std::size_t i = 0; i < cnot_schedZ.size(); i += 2)
+    cudaq::x<cudaq::ctrl>(logicalQubit.data[cnot_schedZ[i + 1]],
+                          logicalQubit.ancz[cnot_schedZ[i]]);
+  // X stabilizer gates
+  h(logicalQubit.ancx);
+  for (std::size_t i = 0; i < cnot_schedX.size(); i += 2)
+    cudaq::x<cudaq::ctrl>(logicalQubit.ancx[cnot_schedX[i]],
+                          logicalQubit.data[cnot_schedX[i + 1]]);
+  h(logicalQubit.ancx);
+  // Combined measurement: Z syndromes first, then X
+  auto results = mz(logicalQubit.ancz, logicalQubit.ancx);
   for (std::size_t i = 0; i < logicalQubit.ancz.size(); i++)
     reset(logicalQubit.ancz[i]);
-  return results;
-}
-
-__qpu__ std::vector<cudaq::measure_result>
-se_x_ft(cudaq::qec::patch logicalQubit,
-        const std::vector<std::size_t> &cnot_sched) {
-  h(logicalQubit.ancx);
-  for (std::size_t i = 0; i < cnot_sched.size(); i += 2) {
-    cudaq::x<cudaq::ctrl>(logicalQubit.ancx[cnot_sched[i]],
-                          logicalQubit.data[cnot_sched[i + 1]]);
-  }
-  h(logicalQubit.ancx);
-  auto results = mz(logicalQubit.ancx);
   for (std::size_t i = 0; i < logicalQubit.ancx.size(); i++)
     reset(logicalQubit.ancx[i]);
   return results;
@@ -271,18 +267,11 @@ __qpu__ void custom_memory_circuit_stabs(
     int decoder_window) {
   // Create the logical patch
   patch logical(data, xstab_anc, zstab_anc);
-  std::vector<cudaq::measure_result> combined_syndrome(xstab_anc.size() +
-                                                       zstab_anc.size());
 
   // Handle the stabilizer lock-in round (numRounds == 1)
   if (numRounds == 1) {
-    auto syndrome_z = se_z_ft(logical, cnot_schedZ_flat);
-    auto syndrome_x = se_x_ft(logical, cnot_schedX_flat);
-    int i = 0;
-    for (auto s : syndrome_z)
-      combined_syndrome[i++] = s;
-    for (auto s : syndrome_x)
-      combined_syndrome[i++] = s;
+    auto combined_syndrome =
+        se_zx_ft(logical, cnot_schedZ_flat, cnot_schedX_flat);
     if (enqueue_syndromes) {
       cudaq::qec::decoding::enqueue_syndromes(
           /*decoder_id=*/logical_qubit_idx, combined_syndrome);
@@ -290,30 +279,28 @@ __qpu__ void custom_memory_circuit_stabs(
     return;
   }
 
-  // Process rounds window by window for the main measurement rounds
+  // Process rounds window by window for the main measurement rounds.
   // This is a plain stationary window implementation. Not a sliding window
   // implementation!
-  for (std::size_t window_idx = 0; window_idx < numRounds / decoder_window;
-       window_idx++) {
-    // For window_idx > 0, enqueue the last syndrome from previous window first
-    if (window_idx > 0 && enqueue_syndromes) {
-      cudaq::qec::decoding::enqueue_syndromes(
-          /*decoder_id=*/logical_qubit_idx, combined_syndrome);
-    }
-
-    // Process the current window rounds
+  // The overlap re-enqueue (last syndrome of prev window) is issued at the
+  // end of each window's last round rather than the start of the next window,
+  // because quantum kernels cannot default-construct
+  // std::vector<measure_result>.
+  std::size_t numWindows = numRounds / decoder_window;
+  for (std::size_t window_idx = 0; window_idx < numWindows; window_idx++) {
     for (std::size_t round = window_idx * decoder_window;
          round < (window_idx + 1) * decoder_window; round++) {
-      auto syndrome_z = se_z_ft(logical, cnot_schedZ_flat);
-      auto syndrome_x = se_x_ft(logical, cnot_schedX_flat);
-      int i = 0;
-      for (auto s : syndrome_z)
-        combined_syndrome[i++] = s;
-      for (auto s : syndrome_x)
-        combined_syndrome[i++] = s;
+      auto combined_syndrome =
+          se_zx_ft(logical, cnot_schedZ_flat, cnot_schedX_flat);
       if (enqueue_syndromes) {
         cudaq::qec::decoding::enqueue_syndromes(
             /*decoder_id=*/logical_qubit_idx, combined_syndrome);
+        // Window overlap: re-enqueue last round's syndrome for the next window
+        if (round == (window_idx + 1) * decoder_window - 1 &&
+            window_idx + 1 < numWindows) {
+          cudaq::qec::decoding::enqueue_syndromes(
+              /*decoder_id=*/logical_qubit_idx, combined_syndrome);
+        }
       }
 #if PER_SHOT_DEBUG
       debug_print_syndromes(syndrome_x_int, syndrome_z_int);
