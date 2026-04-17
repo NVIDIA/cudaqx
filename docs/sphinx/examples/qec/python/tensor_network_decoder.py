@@ -14,6 +14,13 @@ if sys.version_info < (3, 11):
     )
     sys.exit(0)
 
+try:
+    import torch  # noqa: F401
+except ImportError:
+    print("Warning: PyTorch is not installed. Skipping this example... "
+          "Install with: pip install torch")
+    sys.exit(0)
+
 # [Begin Documentation]
 """
 Example usage of tensor_network_decoder from cudaq-qec.

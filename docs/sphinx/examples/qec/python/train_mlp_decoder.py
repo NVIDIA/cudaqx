@@ -15,8 +15,14 @@ if platform.machine().lower() in ("arm64", "aarch64"):
     )
     sys.exit(0)
 
+try:
+    import torch
+except ImportError:
+    print("Warning: PyTorch is not installed. Skipping this example... "
+          "Install with: pip install torch")
+    sys.exit(0)
+
 import stim
-import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import TensorDataset, DataLoader
