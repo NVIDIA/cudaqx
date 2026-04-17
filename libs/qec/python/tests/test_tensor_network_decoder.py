@@ -44,9 +44,8 @@ def is_nvidia_gpu_available():
     return False
 
 
-_SKIP_DECODER_MSG = (
-    "PyTorch required for tensor network decoder on CPU "
-    "(install with: pip install torch)")
+_SKIP_DECODER_MSG = ("PyTorch required for tensor network decoder on CPU "
+                     "(install with: pip install torch)")
 _SKIP_DECODER = not _HAS_TORCH and not is_nvidia_gpu_available()
 
 
