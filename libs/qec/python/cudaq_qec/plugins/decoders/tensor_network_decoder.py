@@ -147,6 +147,12 @@ class TensorNetworkDecoder:
             contractor_name = "cutensornet"
             backend = "numpy"
         else:
+            try:
+                import torch  # noqa: F401
+            except ImportError:
+                raise RuntimeError(
+                    "PyTorch is required for the tensor network decoder on "
+                    "CPU. Install it with: pip install torch")
             print("Warning: CUDA is not available. "
                   "Using CPU for tensor network operations.")
             contractor_name = "torch"
