@@ -161,6 +161,11 @@ jobs:
       actions: read
       contents: read
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          set-safe-directory: true
+
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
@@ -209,7 +214,5 @@ jobs:
       - name: Run GPU Python tests
         run: |
           PYTHONPATH="/cudaq-install:$GITHUB_WORKSPACE/build_qec/python" \
-            pytest -v libs/qec/python/tests/test_tensor_network_decoder.py \
-                      libs/qec/python/tests/test_dem_sampling.py \
-                      libs/qec/python/tests/test_trt_decoder.py
+            pytest -v libs/qec/python/tests/
 
