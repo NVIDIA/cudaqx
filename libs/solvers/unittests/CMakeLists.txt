@@ -44,6 +44,16 @@ target_link_libraries(test_molecule PRIVATE GTest::gtest_main cudaq-solvers cuda
 add_dependencies(CUDAQXSolversUnitTests test_molecule)
 gtest_discover_tests(test_molecule)
 
+add_executable(test_block_encoding test_block_encoding.cpp)
+target_link_libraries(test_block_encoding PRIVATE GTest::gtest_main cudaq-solvers cudaq::cudaq)
+add_dependencies(CUDAQXSolversUnitTests test_block_encoding)
+gtest_discover_tests(test_block_encoding)
+
+add_executable(test_quantum_exact_lanczos test_quantum_exact_lanczos.cpp)
+target_link_libraries(test_quantum_exact_lanczos PRIVATE GTest::gtest_main cudaq-solvers cudaq::cudaq)
+add_dependencies(CUDAQXSolversUnitTests test_quantum_exact_lanczos)
+gtest_discover_tests(test_quantum_exact_lanczos)
+
 add_executable(test_bravyi_kitaev test_bravyi_kitaev.cpp)
 target_link_libraries(test_bravyi_kitaev PRIVATE GTest::gtest_main cudaq-solvers cudaq::cudaq)
 add_dependencies(CUDAQXSolversUnitTests test_bravyi_kitaev)
