@@ -13,24 +13,13 @@
 # builds its nanobind-static library target.
 find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
 
-# Use nanobind - try local source from cuda-quantum tpls if available
-if(NOT DEFINED NANOBIND_DIR OR NOT EXISTS "${NANOBIND_DIR}/CMakeLists.txt")
-  if(EXISTS "/workspaces/cuda-quantum/tpls/nanobind/CMakeLists.txt")
-    set(NANOBIND_DIR "/workspaces/cuda-quantum/tpls/nanobind" CACHE PATH "Path to nanobind source directory")
-  endif()
-endif()
-
-if(NOT TARGET nanobind-static)
-  if(DEFINED NANOBIND_DIR AND EXISTS "${NANOBIND_DIR}/CMakeLists.txt")
-    FetchContent_Declare(nanobind SOURCE_DIR "${NANOBIND_DIR}" EXCLUDE_FROM_ALL)
-  else()
-    FetchContent_Declare(
-      nanobind
-      GIT_REPOSITORY https://github.com/wjakob/nanobind
-      GIT_TAG v2.12.0
-      EXCLUDE_FROM_ALL
-    )
-  endif()
+if(NOT COMMAND nanobind_add_module)
+  FetchContent_Declare(
+    nanobind
+    GIT_REPOSITORY https://github.com/wjakob/nanobind
+    GIT_TAG v2.12.0
+    EXCLUDE_FROM_ALL
+  )
   FetchContent_MakeAvailable(nanobind)
 endif()
 
