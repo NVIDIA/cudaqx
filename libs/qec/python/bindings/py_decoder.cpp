@@ -20,14 +20,14 @@
 #include <nanobind/ndarray.h>
 #include <nanobind/stl/complex.h>
 #include <nanobind/stl/function.h>
-#include <nanobind/stl/string.h>
 #include <nanobind/stl/optional.h>
-#include <nanobind/stl/unique_ptr.h>
 #include <nanobind/stl/pair.h>
+#include <nanobind/stl/string.h>
 #include <nanobind/stl/tuple.h>
+#include <nanobind/stl/unique_ptr.h>
 #include <nanobind/stl/variant.h>
-#include <nanobind/trampoline.h>
 #include <nanobind/stl/vector.h>
+#include <nanobind/trampoline.h>
 
 #include "cuda-qx/core/kwargs_utils.h"
 #include "cuda-qx/core/library_utils.h"
@@ -53,9 +53,8 @@ public:
 class PyDecoderRegistry {
 private:
   static std::unordered_map<
-      std::string,
-      std::function<nb::object(const nb::ndarray<nb::numpy, uint8_t> &,
-                               nb::kwargs)>>
+      std::string, std::function<nb::object(
+                       const nb::ndarray<nb::numpy, uint8_t> &, nb::kwargs)>>
       registry;
 
 public:
@@ -84,10 +83,9 @@ public:
   }
 };
 
-std::unordered_map<
-    std::string,
-    std::function<nb::object(const nb::ndarray<nb::numpy, uint8_t> &,
-                             nb::kwargs)>>
+std::unordered_map<std::string,
+                   std::function<nb::object(
+                       const nb::ndarray<nb::numpy, uint8_t> &, nb::kwargs)>>
     PyDecoderRegistry::registry;
 
 void bindDecoder(nb::module_ &mod) {
@@ -95,8 +93,7 @@ void bindDecoder(nb::module_ &mod) {
   // plugin cleanup when the module is garbage-collected.
   static const int sentinel = 0;
   mod.attr("_cleanup") = nb::capsule(
-      &sentinel,
-      [](void *) noexcept { cleanup_plugins(PluginType::DECODER); });
+      &sentinel, [](void *) noexcept { cleanup_plugins(PluginType::DECODER); });
 
   auto qecmod = nb::hasattr(mod, "qecrt")
                     ? nb::cast<nb::module_>(mod.attr("qecrt"))
@@ -296,7 +293,8 @@ void bindDecoder(nb::module_ &mod) {
           nb::module_::import_("cudaq_qec").attr("Decoder");
       // Create new type using Python's type() function
       nb::tuple bases = nb::make_tuple(base_decoder);
-      // __dict__ is a read-only mappingproxy; copy to a real dict for PyType_Type.tp_new
+      // __dict__ is a read-only mappingproxy; copy to a real dict for
+      // PyType_Type.tp_new
       nb::dict namespace_dict;
       namespace_dict.update(decoder_class.attr("__dict__"));
 
@@ -305,13 +303,13 @@ void bindDecoder(nb::module_ &mod) {
 
       // Use Python's type() so the correct metaclass (nanobind's) is resolved
       nb::object type_fn = nb::module_::import_("builtins").attr("type");
-      nb::object new_class = type_fn(decoder_class.attr("__name__"), bases, namespace_dict);
+      nb::object new_class =
+          type_fn(decoder_class.attr("__name__"), bases, namespace_dict);
 
       // Register the new class in the decoder registry
       PyDecoderRegistry::register_decoder(
-          name,
-          [new_class](const nb::ndarray<nb::numpy, uint8_t> &H,
-                      nb::kwargs options) {
+          name, [new_class](const nb::ndarray<nb::numpy, uint8_t> &H,
+                            nb::kwargs options) {
             nb::object instance = new_class(H, **options);
             return instance;
           });
@@ -426,8 +424,7 @@ void bindDecoder(nb::module_ &mod) {
          const std::vector<std::uint32_t> &column_order) {
         auto tensor_H = pcmToTensor(H);
 
-        auto H_new =
-            cudaq::qec::reorder_pcm_columns(tensor_H, column_order);
+        auto H_new = cudaq::qec::reorder_pcm_columns(tensor_H, column_order);
 
         // Construct a new ndarray from H_new (deep copy)
         auto rows = H_new.shape()[0];
@@ -699,9 +696,9 @@ void bindDecoder(nb::module_ &mod) {
         size_t shape_h[2] = {rows, cols};
         int64_t strides_h[2] = {(int64_t)(cols * sizeof(uint8_t)),
                                 (int64_t)sizeof(uint8_t)};
-        auto arr_h = nb::ndarray<nb::numpy, uint8_t>(
-            const_cast<uint8_t *>(H_new.data()), 2, shape_h, nb::none(),
-            strides_h);
+        auto arr_h =
+            nb::ndarray<nb::numpy, uint8_t>(const_cast<uint8_t *>(H_new.data()),
+                                            2, shape_h, nb::none(), strides_h);
         // Construct a new ndarray from weights_new.
         size_t shape_w[1] = {weights_new.size()};
         int64_t strides_w[1] = {(int64_t)sizeof(double)};

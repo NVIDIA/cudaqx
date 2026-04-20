@@ -209,8 +209,7 @@ static nb::object get_python_kernel_or_throw(const code &self, operation op) {
 // Registry to store code factory functions
 class PyCodeRegistry {
 private:
-  static std::unordered_map<std::string,
-                            std::function<nb::object(nb::kwargs)>>
+  static std::unordered_map<std::string, std::function<nb::object(nb::kwargs)>>
       registry;
 
 public:
@@ -309,13 +308,11 @@ void bindCode(nb::module_ &mod) {
             return get_code(name, ops, hetMapFromKwargs(options));
           }
 
-          if (nb::isinstance<cudaq::spin_op_term>(
-                  nb::cast<nb::list>(obj)[0])) {
+          if (nb::isinstance<cudaq::spin_op_term>(nb::cast<nb::list>(obj)[0])) {
             options.attr("pop")("stabilizers");
-            return get_code(
-                name,
-                nb::cast<std::vector<cudaq::spin_op_term>>(obj),
-                hetMapFromKwargs(options));
+            return get_code(name,
+                            nb::cast<std::vector<cudaq::spin_op_term>>(obj),
+                            hetMapFromKwargs(options));
           }
 
           throw std::runtime_error(
@@ -454,11 +451,11 @@ void bindCode(nb::module_ &mod) {
 
     return nb::cpp_function([name](nb::object code_class) -> nb::object {
       // Create new class that inherits from both Code and the original
-      nb::object base_code =
-          nb::module_::import_("cudaq_qec").attr("Code");
+      nb::object base_code = nb::module_::import_("cudaq_qec").attr("Code");
       // Create new type using Python's type() function
       nb::tuple bases = nb::make_tuple(base_code);
-      // __dict__ is a read-only mappingproxy; copy to a real dict for PyType_Type.tp_new
+      // __dict__ is a read-only mappingproxy; copy to a real dict for
+      // PyType_Type.tp_new
       nb::dict namespace_dict;
       namespace_dict.update(code_class.attr("__dict__"));
 
@@ -488,7 +485,8 @@ void bindCode(nb::module_ &mod) {
 
       // Use Python's type() so the correct metaclass (nanobind's) is resolved
       nb::object type_fn = nb::module_::import_("builtins").attr("type");
-      nb::object new_class = type_fn(code_class.attr("__name__"), bases, namespace_dict);
+      nb::object new_class =
+          type_fn(code_class.attr("__name__"), bases, namespace_dict);
 
       // Register the new class in the code registry
       PyCodeRegistry::register_code(name, [new_class](nb::kwargs options) {
@@ -519,8 +517,7 @@ void bindCode(nb::module_ &mod) {
             cudaq::python::copyCUDAQXTensorToPyArray(dataRes));
       },
       "Sample the memory circuit of the code", nb::arg("code"),
-      nb::arg("numShots"), nb::arg("numRounds"),
-      nb::arg("noise") = nb::none());
+      nb::arg("numShots"), nb::arg("numRounds"), nb::arg("noise") = nb::none());
   qecmod.def(
       "sample_memory_circuit",
       [](code &code, operation op, std::size_t numShots, std::size_t numRounds,

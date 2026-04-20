@@ -56,8 +56,7 @@ cudaqx::graph convert_networkx_graph(nb::object nx_graph) {
 
     // Try to get node weight if it exists
     try {
-      nb::dict node_data =
-          nb::cast<nb::dict>(nx_graph.attr("nodes")[node]);
+      nb::dict node_data = nb::cast<nb::dict>(nx_graph.attr("nodes")[node]);
       if (node_data.contains("weight")) {
         double weight = nb::cast<double>(node_data["weight"]);
         g.add_node(node_id, weight);
@@ -81,8 +80,7 @@ cudaqx::graph convert_networkx_graph(nb::object nx_graph) {
 
     // Try to get edge weight if it exists
     try {
-      nb::dict edge_data =
-          nb::cast<nb::dict>(nx_graph.attr("edges")[edge]);
+      nb::dict edge_data = nb::cast<nb::dict>(nx_graph.attr("edges")[edge]);
       if (edge_data.contains("weight")) {
         double weight = nb::cast<double>(edge_data["weight"]);
         g.add_edge(u, v, weight);
@@ -153,14 +151,13 @@ public:
 
     double value = 0.0;
     std::vector<double> parameters(dim);
-    auto result =
-        minimize(nb::cpp_function([&](const std::vector<double> &x) {
-                   std::vector<double> dx(x.size());
-                   value = opt_function(x, dx);
-                   parameters = x;
-                   return value;
-                 }),
-                 initParams, **kwargs);
+    auto result = minimize(nb::cpp_function([&](const std::vector<double> &x) {
+                             std::vector<double> dx(x.size());
+                             value = opt_function(x, dx);
+                             parameters = x;
+                             return value;
+                           }),
+                           initParams, **kwargs);
     return std::make_tuple(value, parameters);
   }
 };
@@ -279,16 +276,15 @@ nb::object tensor_to_numpy(const cudaqx::tensor<T> &tensor_data) {
   std::copy(tensor_data.data(), tensor_data.data() + total_size, data_copy);
 
   std::vector<size_t> nb_shape(shape.begin(), shape.end());
-  nb::capsule owner(data_copy, [](void *p) noexcept {
-    delete[] static_cast<T *>(p);
-  });
+  nb::capsule owner(data_copy,
+                    [](void *p) noexcept { delete[] static_cast<T *>(p); });
 
   // No explicit strides: nanobind computes C-order element strides
   // automatically. Passing byte strides here would be wrong — nanobind
   // multiplies stored strides by itemsize in the buffer protocol, so only
   // element strides must be stored.
-  return nb::cast(
-      nb::ndarray<nb::numpy, T>(data_copy, shape.size(), nb_shape.data(), owner));
+  return nb::cast(nb::ndarray<nb::numpy, T>(data_copy, shape.size(),
+                                            nb_shape.data(), owner));
 }
 
 void bindOperators(nb::module_ &mod) {
@@ -296,12 +292,10 @@ void bindOperators(nb::module_ &mod) {
   mod.def(
       "jordan_wigner",
       [](nb::ndarray<nb::numpy, std::complex<double>> hpq,
-         nb::ndarray<nb::numpy, std::complex<double>> hpqrs,
-         double core_energy, nb::kwargs options) {
-        auto *hpqData =
-            static_cast<std::complex<double> *>(hpq.data());
-        auto *hpqrsData =
-            static_cast<std::complex<double> *>(hpqrs.data());
+         nb::ndarray<nb::numpy, std::complex<double>> hpqrs, double core_energy,
+         nb::kwargs options) {
+        auto *hpqData = static_cast<std::complex<double> *>(hpq.data());
+        auto *hpqrsData = static_cast<std::complex<double> *>(hpqrs.data());
 
         std::vector<std::size_t> hpq_shape, hpqrs_shape;
         for (size_t d = 0; d < hpq.ndim(); d++)
@@ -456,12 +450,10 @@ Notes:
   mod.def(
       "bravyi_kitaev",
       [](nb::ndarray<nb::numpy, std::complex<double>> hpq,
-         nb::ndarray<nb::numpy, std::complex<double>> hpqrs,
-         double core_energy, nb::kwargs options) {
-        auto *hpqData =
-            static_cast<std::complex<double> *>(hpq.data());
-        auto *hpqrsData =
-            static_cast<std::complex<double> *>(hpqrs.data());
+         nb::ndarray<nb::numpy, std::complex<double>> hpqrs, double core_energy,
+         nb::kwargs options) {
+        auto *hpqData = static_cast<std::complex<double> *>(hpq.data());
+        auto *hpqrsData = static_cast<std::complex<double> *>(hpqrs.data());
 
         std::vector<std::size_t> hpq_shape, hpqrs_shape;
         for (size_t d = 0; d < hpq.ndim(); d++)
@@ -1119,12 +1111,10 @@ Notes:
       "The QAOAResult encodes the optimal value, optimal parameters, and final "
       "sampled state as a cudaq.SampleResult.")
       .def(nb::init<>())
-      .def_rw("optimal_value",
-              &cudaq::solvers::qaoa_result::optimal_value)
+      .def_rw("optimal_value", &cudaq::solvers::qaoa_result::optimal_value)
       .def_rw("optimal_parameters",
               &cudaq::solvers::qaoa_result::optimal_parameters)
-      .def_rw("optimal_config",
-              &cudaq::solvers::qaoa_result::optimal_config)
+      .def_rw("optimal_config", &cudaq::solvers::qaoa_result::optimal_config)
       // Add tuple interface
       .def("__len__", [](const cudaq::solvers::qaoa_result &) { return 3; })
       .def("__getitem__",
@@ -1141,12 +1131,11 @@ Notes:
              }
            })
       // Enable iteration protocol
-      .def("__iter__",
-           [](const cudaq::solvers::qaoa_result &r) -> nb::object {
-             return nb::make_tuple(r.optimal_value, r.optimal_parameters,
-                                   r.optimal_config)
-                 .attr("__iter__")();
-           });
+      .def("__iter__", [](const cudaq::solvers::qaoa_result &r) -> nb::object {
+        return nb::make_tuple(r.optimal_value, r.optimal_parameters,
+                              r.optimal_config)
+            .attr("__iter__")();
+      });
 
   // Bind QAOA functions using lambdas
   solvers.def(

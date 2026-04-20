@@ -8,10 +8,10 @@
 #pragma once
 
 #include "common/ObserveResult.h"
+#include "cudaq/qis/pauli_word.h"
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
-#include "cudaq/qis/pauli_word.h"
 
 namespace nb = nanobind;
 

@@ -40,12 +40,10 @@ struct type_caster<cudaq::spin_op> {
     }
   }
 
-  static handle from_cpp(cudaq::spin_op v, rv_policy,
-                         cleanup_list *) noexcept {
+  static handle from_cpp(cudaq::spin_op v, rv_policy, cleanup_list *) noexcept {
     try {
-      nb::object tv_py =
-          nb::module_::import_("cudaq").attr("SpinOperator")(
-              v.get_data_representation());
+      nb::object tv_py = nb::module_::import_("cudaq").attr("SpinOperator")(
+          v.get_data_representation());
       return tv_py.release();
     } catch (...) {
       return handle();
@@ -101,9 +99,8 @@ struct type_caster<cudaq::observe_result> {
   static handle from_cpp(cudaq::observe_result v, rv_policy,
                          cleanup_list *) noexcept {
     try {
-      nb::object tv_py =
-          nb::module_::import_("cudaq").attr("ObserveResult")(
-              v.expectation(), v.get_spin(), v.raw_data());
+      nb::object tv_py = nb::module_::import_("cudaq").attr("ObserveResult")(
+          v.expectation(), v.get_spin(), v.raw_data());
       return tv_py.release();
     } catch (...) {
       return handle();
@@ -166,19 +163,18 @@ struct type_caster<cudaqx::heterogeneous_map> {
           std::copy(vec_val->begin(), vec_val->end(), data_copy);
           size_t shape[] = {n};
           result[key.c_str()] = nb::ndarray<nb::numpy, double>(
-              data_copy, 1, shape,
-              nb::capsule(data_copy,
-                          [](void *p) noexcept { delete[] static_cast<double *>(p); }));
-        } else if (auto *vec_int_val =
-                       std::any_cast<std::vector<int>>(&val)) {
+              data_copy, 1, shape, nb::capsule(data_copy, [](void *p) noexcept {
+                delete[] static_cast<double *>(p);
+              }));
+        } else if (auto *vec_int_val = std::any_cast<std::vector<int>>(&val)) {
           size_t n = vec_int_val->size();
           int *data_copy = new int[n];
           std::copy(vec_int_val->begin(), vec_int_val->end(), data_copy);
           size_t shape[] = {n};
           result[key.c_str()] = nb::ndarray<nb::numpy, int>(
-              data_copy, 1, shape,
-              nb::capsule(data_copy,
-                          [](void *p) noexcept { delete[] static_cast<int *>(p); }));
+              data_copy, 1, shape, nb::capsule(data_copy, [](void *p) noexcept {
+                delete[] static_cast<int *>(p);
+              }));
         } else if (auto *hetMap =
                        std::any_cast<cudaqx::heterogeneous_map>(&val)) {
           // Recursively convert nested heterogeneous_map
@@ -260,10 +256,10 @@ auto copy1DCUDAQXTensorToPyArray(const cudaqx::tensor<T> &tensor) {
   std::memcpy(data_copy, tensor.data(), total_size * sizeof(T));
 
   size_t arr_shape[] = {rows};
-  return nb::ndarray<nb::numpy, T>(
-      data_copy, 1, arr_shape,
-      nb::capsule(data_copy,
-                  [](void *p) noexcept { delete[] static_cast<T *>(p); }));
+  return nb::ndarray<nb::numpy, T>(data_copy, 1, arr_shape,
+                                   nb::capsule(data_copy, [](void *p) noexcept {
+                                     delete[] static_cast<T *>(p);
+                                   }));
 }
 
 } // namespace python
