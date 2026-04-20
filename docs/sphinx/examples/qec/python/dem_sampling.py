@@ -12,8 +12,7 @@ import cudaq_qec as qec
 
 # Define a check matrix for a [3,1] repetition code.
 # Rows = checks (stabilizers), columns = error mechanisms.
-H = np.array([[1, 1, 0],
-              [0, 1, 1]], dtype=np.uint8)
+H = np.array([[1, 1, 0], [0, 1, 1]], dtype=np.uint8)
 
 # Independent error probability for each mechanism.
 error_probs = np.array([0.05, 0.10, 0.05])
@@ -42,7 +41,10 @@ assert np.array_equal(e1, e2)
 print("Reproducibility check passed: same seed -> same output")
 
 # Force a specific backend (cpu or gpu).
-syndromes_cpu, errors_cpu = qec.dem_sampling(
-    H, num_shots, error_probs, seed=42, backend="cpu")
+syndromes_cpu, errors_cpu = qec.dem_sampling(H,
+                                             num_shots,
+                                             error_probs,
+                                             seed=42,
+                                             backend="cpu")
 print(f"\nCPU backend result shapes: syndromes {syndromes_cpu.shape}, "
       f"errors {errors_cpu.shape}")
