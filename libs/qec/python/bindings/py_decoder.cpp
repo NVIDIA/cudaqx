@@ -749,7 +749,7 @@ void bindDecoder(nb::module_ &mod) {
     // List of `init_func` names to call for decoder registration
     // clang-format off
     static const std::vector<std::string> initFuncNames = {
-        "function_enqueue_syndromes._ZN5cudaq3qec8decoding17enqueue_syndromesEmRKSt6vectorINS_14measure_resultESaIS3_EEm.init_func",
+        "function_enqueue_syndromes._ZN5cudaq3qec8decoding17enqueue_syndromesEmRKSt6vectorIbSaIbEEm.init_func",
         "function_get_corrections._ZN5cudaq3qec8decoding15get_correctionsEmmb.init_func",
         "function_reset_decoder._ZN5cudaq3qec8decoding13reset_decoderEm.init_func"};
     // clang-format on

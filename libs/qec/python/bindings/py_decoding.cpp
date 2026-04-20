@@ -64,7 +64,7 @@ void bindDecoding(nb::module_ &mod) {
       R"pbdoc(Reset the decoder with the given ID.)pbdoc");
   qecSubMod.def(
       "enqueue_syndromes",
-      [](std::uint64_t, std::vector<cudaq::measure_result>, std::uint64_t) {},
+      [](std::uint64_t, std::vector<bool>, std::uint64_t) {},
       R"pbdoc(Reset the decoder with the given ID.)pbdoc"
       R"pbdoc(Enqueue a vector of syndrome bit for realtime decoding.
                 Parameters
@@ -87,8 +87,7 @@ void bindDecoding(nb::module_ &mod) {
         cudaq::python::getMangledArgsString<std::uint64_t>());
     cudaq::python::registerDeviceKernel(
         qecModName, "enqueue_syndromes",
-        cudaq::python::getMangledArgsString<std::uint64_t,
-                                            std::vector<cudaq::measure_result>,
+        cudaq::python::getMangledArgsString<std::uint64_t, std::vector<bool>,
                                             std::uint64_t>());
     cudaq::python::registerDeviceKernel(
         qecModName, "get_corrections",
