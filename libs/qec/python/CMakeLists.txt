@@ -6,18 +6,33 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
-# External Dependencies 
+# External Dependencies
 # ==============================================================================
 
-FetchContent_Declare(
-  pybind11
-  GIT_REPOSITORY https://github.com/pybind/pybind11
-  GIT_TAG v2.13
-  EXCLUDE_FROM_ALL
-)
-FetchContent_MakeAvailable(pybind11)
+# Find Python before nanobind so Python_INCLUDE_DIRS is available when nanobind
+# builds its nanobind-static library target.
+find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
 
-find_package(Python COMPONENTS Interpreter)
+# Use nanobind - try local source from cuda-quantum tpls if available
+if(NOT DEFINED NANOBIND_DIR OR NOT EXISTS "${NANOBIND_DIR}/CMakeLists.txt")
+  if(EXISTS "/workspaces/cuda-quantum/tpls/nanobind/CMakeLists.txt")
+    set(NANOBIND_DIR "/workspaces/cuda-quantum/tpls/nanobind" CACHE PATH "Path to nanobind source directory")
+  endif()
+endif()
+
+if(NOT TARGET nanobind-static)
+  if(DEFINED NANOBIND_DIR AND EXISTS "${NANOBIND_DIR}/CMakeLists.txt")
+    FetchContent_Declare(nanobind SOURCE_DIR "${NANOBIND_DIR}" EXCLUDE_FROM_ALL)
+  else()
+    FetchContent_Declare(
+      nanobind
+      GIT_REPOSITORY https://github.com/wjakob/nanobind
+      GIT_TAG v2.12.0
+      EXCLUDE_FROM_ALL
+    )
+  endif()
+  FetchContent_MakeAvailable(nanobind)
+endif()
 
 # ==============================================================================
 
@@ -33,8 +48,8 @@ cudaqx_add_pymodule(${MODULE_NAME}
   bindings/py_patch.cpp
 )
 
-target_link_libraries(${MODULE_NAME} 
-  PRIVATE 
+target_link_libraries(${MODULE_NAME}
+  PRIVATE
     cudaq-qec
     cudaq-qec-realtime-decoding
     cudaq::cudaq-python-interop
@@ -56,7 +71,7 @@ if (NOT SKBUILD)
   add_dependencies(${MODULE_NAME} copy_qec_python_files)
 endif()
 
-# RPATH configuration 
+# RPATH configuration
 # ==============================================================================
 
 if (NOT SKBUILD)
@@ -89,4 +104,3 @@ install(TARGETS ${MODULE_NAME}
   COMPONENT qec-python
   DESTINATION cudaq_qec/
 )
-

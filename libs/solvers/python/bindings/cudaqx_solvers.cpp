@@ -9,10 +9,11 @@
 #include "solvers/py_optim.h"
 #include "solvers/py_solvers.h"
 
-#include <pybind11/stl.h>
-#include <pybind11/stl_bind.h>
+#include <nanobind/nanobind.h>
+#include <nanobind/stl/string.h>
+#include <nanobind/stl/vector.h>
 
-PYBIND11_MODULE(_pycudaqx_solvers_the_suffix_matters_cudaq_solvers, mod) {
+NB_MODULE(_pycudaqx_solvers_the_suffix_matters_cudaq_solvers, mod) {
   mod.doc() = "Python bindings for the CUDA-Q Solver Libraries.";
   cudaq::optim::bindOptim(mod);
   cudaq::solvers::bindSolvers(mod);

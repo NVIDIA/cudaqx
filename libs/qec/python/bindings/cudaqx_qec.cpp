@@ -12,10 +12,11 @@
 #include "py_decoding_config.h"
 #include "py_surface_code.h"
 
-#include <pybind11/stl.h>
-#include <pybind11/stl_bind.h>
+#include <nanobind/nanobind.h>
+#include <nanobind/stl/string.h>
+#include <nanobind/stl/vector.h>
 
-PYBIND11_MODULE(_pycudaqx_qec_the_suffix_matters_cudaq_qec, mod) {
+NB_MODULE(_pycudaqx_qec_the_suffix_matters_cudaq_qec, mod) {
   mod.doc() = "Python bindings for the CUDA-Q QEC Libraries.";
   cudaq::qec::bindCode(mod);
   cudaq::qec::bindDecoder(mod);

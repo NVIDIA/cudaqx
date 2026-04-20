@@ -167,6 +167,6 @@ cudaqx_add_pymodule
 
 #]=======================================================================]
 function(cudaqx_add_pymodule module)
-  pybind11_add_module(${module} ${ARGN})
+  nanobind_add_module(${module} ${ARGN})
   add_dependencies(cudaqx-pymodules ${module})
 endfunction()

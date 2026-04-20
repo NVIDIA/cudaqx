@@ -6,9 +6,10 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 #include <limits>
-#include <pybind11/complex.h>
-#include <pybind11/operators.h>
-#include <pybind11/stl.h>
+#include <nanobind/nanobind.h>
+#include <nanobind/stl/string.h>
+#include <nanobind/stl/tuple.h>
+#include <nanobind/stl/vector.h>
 
 #include "cudaq/solvers/observe_gradient.h"
 #include "cudaq/solvers/optimizer.h"
@@ -16,18 +17,18 @@
 #include "bindings/utils/type_casters.h"
 #include "cuda-qx/core/kwargs_utils.h"
 
-namespace py = pybind11;
+namespace nb = nanobind;
 
 namespace cudaq::optim {
 
-void bindOptim(py::module &mod) {
+void bindOptim(nb::module_ &mod) {
 
   auto optim = mod.def_submodule("optim");
-  py::class_<optimizable_function>(optim, "OptimizableFunction")
-      .def(py::init<>(), R"docstring(
+  nb::class_<optimizable_function>(optim, "OptimizableFunction")
+      .def(nb::init<>(), R"docstring(
         Default constructor for OptimizableFunction.
     )docstring")
-      .def(py::init<const optimizable_function &>(), R"docstring(
+      .def(nb::init<const optimizable_function &>(), R"docstring(
         Copy constructor for OptimizableFunction.
 
         Args:
@@ -71,8 +72,8 @@ void bindOptim(py::module &mod) {
     )docstring");
   optim.def(
       "optimize",
-      [](const py::function &function, std::vector<double> xInit,
-         std::string method, py::kwargs options) {
+      [](const nb::callable &function, std::vector<double> xInit,
+         std::string method, nb::kwargs options) {
         heterogeneous_map optOptions;
         optOptions.insert("initial_parameters", xInit);
 
@@ -87,15 +88,15 @@ void bindOptim(py::module &mod) {
               // Call the function.
               auto ret = function(x);
               // Does it return a tuple?
-              auto isTupleReturn = py::isinstance<py::tuple>(ret);
+              auto isTupleReturn = nb::isinstance<nb::tuple>(ret);
               // If we don't need gradients, and it does, just grab the value
               // and return.
               if (!opt->requiresGradients() && isTupleReturn)
-                return ret.cast<py::tuple>()[0].cast<double>();
+                return nb::cast<double>(nb::cast<nb::tuple>(ret)[0]);
               // If we dont need gradients and it doesn't return tuple, then
               // just pass what we got.
               if (!opt->requiresGradients() && !isTupleReturn)
-                return ret.cast<double>();
+                return nb::cast<double>(ret);
 
               // Throw an error if we need gradients and they weren't provided.
               if (opt->requiresGradients() && !isTupleReturn)
@@ -104,20 +105,20 @@ void bindOptim(py::module &mod) {
                     "(float,list[float]) for gradient-based optimizers");
 
               // If here, we require gradients, and the signature is right.
-              auto tuple = ret.cast<py::tuple>();
+              auto tuple = nb::cast<nb::tuple>(ret);
               auto val = tuple[0];
-              auto gradIn = tuple[1].cast<py::list>();
+              auto gradIn = nb::cast<nb::list>(tuple[1]);
               for (std::size_t i = 0; i < gradIn.size(); i++)
-                grad[i] = gradIn[i].cast<double>();
+                grad[i] = nb::cast<double>(gradIn[i]);
 
-              return val.cast<double>();
+              return nb::cast<double>(val);
             },
             optOptions);
 
         return result;
       },
-      py::arg("function"), py::arg("initial_parameters"),
-      py::arg("method") = "cobyla", R"#(
+      nb::arg("function"), nb::arg("initial_parameters"),
+      nb::arg("method") = "cobyla", nb::arg("**kwargs"), R"#(
 Optimize a given objective function using various optimization methods.
 
 This function performs optimization on a user-provided objective function
