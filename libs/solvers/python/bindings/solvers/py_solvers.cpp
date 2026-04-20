@@ -272,50 +272,23 @@ void addStatePrepKernels(nb::module_ &mod) {
 // Helper function to convert tensor to numpy array
 template <typename T = std::complex<double>>
 nb::object tensor_to_numpy(const cudaqx::tensor<T> &tensor_data) {
-  // Get the dimensions of the tensor
   const auto &shape = tensor_data.shape();
-  std::size_t ndim = shape.size();
-
-  // Allocate new memory and copy the data
   std::size_t total_size = tensor_data.size();
+
   T *data_copy = new T[total_size];
   std::copy(tensor_data.data(), tensor_data.data() + total_size, data_copy);
 
-  // Build shape and strides arrays for nanobind ndarray
-  // We support up to 4D tensors (used for hpq and hpqrs)
-  if (ndim == 2) {
-    size_t nb_shape[2] = {shape[0], shape[1]};
-    int64_t nb_strides[2] = {(int64_t)(shape[1] * sizeof(T)),
-                              (int64_t)sizeof(T)};
-    auto owner = nb::capsule(data_copy, [](void *p) noexcept {
-      delete[] static_cast<T *>(p);
-    });
-    auto arr = nb::ndarray<nb::numpy, T>(data_copy, 2, nb_shape, owner,
-                                         nb_strides);
-    return nb::cast(arr);
-  } else if (ndim == 4) {
-    size_t nb_shape[4] = {shape[0], shape[1], shape[2], shape[3]};
-    int64_t nb_strides[4] = {
-        (int64_t)(shape[1] * shape[2] * shape[3] * sizeof(T)),
-        (int64_t)(shape[2] * shape[3] * sizeof(T)),
-        (int64_t)(shape[3] * sizeof(T)), (int64_t)sizeof(T)};
-    auto owner = nb::capsule(data_copy, [](void *p) noexcept {
-      delete[] static_cast<T *>(p);
-    });
-    auto arr = nb::ndarray<nb::numpy, T>(data_copy, 4, nb_shape, owner,
-                                         nb_strides);
-    return nb::cast(arr);
-  } else {
-    // Fallback: 1D
-    size_t nb_shape[1] = {total_size};
-    int64_t nb_strides[1] = {(int64_t)sizeof(T)};
-    auto owner = nb::capsule(data_copy, [](void *p) noexcept {
-      delete[] static_cast<T *>(p);
-    });
-    auto arr = nb::ndarray<nb::numpy, T>(data_copy, 1, nb_shape, owner,
-                                         nb_strides);
-    return nb::cast(arr);
-  }
+  std::vector<size_t> nb_shape(shape.begin(), shape.end());
+  nb::capsule owner(data_copy, [](void *p) noexcept {
+    delete[] static_cast<T *>(p);
+  });
+
+  // No explicit strides: nanobind computes C-order element strides
+  // automatically. Passing byte strides here would be wrong — nanobind
+  // multiplies stored strides by itemsize in the buffer protocol, so only
+  // element strides must be stored.
+  return nb::cast(
+      nb::ndarray<nb::numpy, T>(data_copy, shape.size(), nb_shape.data(), owner));
 }
 
 void bindOperators(nb::module_ &mod) {
