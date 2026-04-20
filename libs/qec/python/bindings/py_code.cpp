@@ -129,7 +129,7 @@ public:
 
     // For each CUDA-Q kernel, extract the JIT-ed function pointer
     for (auto [opKey, kernelHandle] : opsDict) {
-      nb::object kernel = nb::cast<nb::object>(kernelHandle);
+      nb::object kernel = kernelHandle;
       auto opKeyEnum = nb::cast<qec::operation>(opKey);
 
       // Save the original Python kernel object so that we can return a valid

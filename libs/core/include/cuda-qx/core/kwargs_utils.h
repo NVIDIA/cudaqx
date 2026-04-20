@@ -77,7 +77,7 @@ inline heterogeneous_map hetMapFromKwargs(const nb::kwargs &kwargs) {
     } else if (nb::isinstance<nb::ndarray<>>(value)) {
       nb::ndarray<> np_array = nb::cast<nb::ndarray<>>(value);
       if (np_array.ndim() >= 2) {
-        // stride(0)==1 means column-major for multi-dimensional arrays
+        // nanobind strides are element counts; stride(0)==1 means column-major
         if (np_array.stride(0) == 1) {
           throw std::runtime_error(
               "Array in kwargs must be in row-major order, but "

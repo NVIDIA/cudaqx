@@ -672,12 +672,13 @@ Notes:
                     int spin, int charge, nb::kwargs options) {
     molecule_options inOptions;
     inOptions.type = getValueOr<std::string>(options, "type", "gas_phase");
+    constexpr std::size_t kNotSet = std::numeric_limits<std::size_t>::max();
     std::optional<std::size_t> nele_cas =
-        getValueOr<std::size_t>(options, "nele_cas", -1);
-    inOptions.nele_cas = nele_cas == -1 ? std::nullopt : nele_cas;
+        getValueOr<std::size_t>(options, "nele_cas", kNotSet);
+    inOptions.nele_cas = (nele_cas == kNotSet) ? std::nullopt : nele_cas;
     std::optional<std::size_t> norb_cas =
-        getValueOr<std::size_t>(options, "norb_cas", -1);
-    inOptions.norb_cas = norb_cas == -1 ? std::nullopt : norb_cas;
+        getValueOr<std::size_t>(options, "norb_cas", kNotSet);
+    inOptions.norb_cas = (norb_cas == kNotSet) ? std::nullopt : norb_cas;
     inOptions.symmetry = getValueOr<bool>(options, "symmetry", false);
     inOptions.memory = getValueOr<double>(options, "memory", 4000.);
     inOptions.cycles = getValueOr<std::size_t>(options, "cycles", 100);
