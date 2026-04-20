@@ -84,6 +84,13 @@ Common
 
 .. autofunction:: cudaq_qec.sample_code_capacity
 
+.. _dem_sampling_python_api:
+
+DEM Sampling
+============
+
+.. autofunction:: cudaq_qec.dem_sampling
+
 Parity Check Matrix Utilities
 =============================
 
