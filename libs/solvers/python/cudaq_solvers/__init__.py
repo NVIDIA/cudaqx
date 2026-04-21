@@ -6,8 +6,6 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
-import cudaq
-
 try:
     from ._pycudaqx_solvers_the_suffix_matters_cudaq_solvers import *
     from ._pycudaqx_solvers_the_suffix_matters_cudaq_solvers import __version__

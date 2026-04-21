@@ -18,6 +18,9 @@
 
 NB_MODULE(_pycudaqx_qec_the_suffix_matters_cudaq_qec, mod) {
   mod.doc() = "Python bindings for the CUDA-Q QEC Libraries.";
+  // Ensure cudaq is loaded so its nanobind-registered types are available
+  // before any QEC binding tries to return or consume them.
+  nanobind::module_::import_("cudaq");
   cudaq::qec::bindCode(mod);
   cudaq::qec::bindDecoder(mod);
   cudaq::qec::decoding::config::bindDecodingConfig(mod);

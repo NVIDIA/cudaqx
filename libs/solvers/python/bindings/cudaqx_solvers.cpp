@@ -15,6 +15,10 @@
 
 NB_MODULE(_pycudaqx_solvers_the_suffix_matters_cudaq_solvers, mod) {
   mod.doc() = "Python bindings for the CUDA-Q Solver Libraries.";
+  // Ensure cudaq is loaded so its nanobind-registered types (spin_op,
+  // sum_op<spin_handler>, observe_result, etc.) are available before any
+  // solvers binding tries to return or consume them.
+  nanobind::module_::import_("cudaq");
   cudaq::optim::bindOptim(mod);
   cudaq::solvers::bindSolvers(mod);
 }
