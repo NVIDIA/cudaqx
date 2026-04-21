@@ -98,6 +98,18 @@ test_examples() {
         docker exec ${container_name} bash -c "pip install 'stim' 'beliefmatching'"
     fi
 
+    # CUDA-Q import sanity check (baked into image)
+    if ! docker exec ${container_name} bash -c "\
+        if [ -f /home/cudaq/cudaqx-scripts/validation/check_cudaq_import.py ]; then \
+            echo '=== CUDA-Q import check (before pytest) ==='; \
+            python3 /home/cudaq/cudaqx-scripts/validation/check_cudaq_import.py || exit 1; \
+        fi"; then
+        echo 'CUDA-Q import check failed; aborting validation.'
+        docker stop ${container_name}
+        docker rm ${container_name}
+        return 1
+    fi
+
     # Run Python tests first
     if ! run_python_tests ${container_name} ${target}; then
         echo "Python tests failed, but continuing with other tests."
