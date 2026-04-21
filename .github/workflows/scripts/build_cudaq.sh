@@ -122,7 +122,7 @@ diff --git a/python/runtime/cudaq/domains/plugins/CMakeLists.txt b/python/runtim
 index 3bd2e991..2603e72f 100644
 --- a/python/runtime/cudaq/domains/plugins/CMakeLists.txt
 +++ b/python/runtime/cudaq/domains/plugins/CMakeLists.txt
-@@ -33,7 +33,7 @@ else()
+@@ -33,6 +33,6 @@ else()
    endif()
    target_link_libraries(cudaq-pyscf
      PRIVATE
@@ -134,7 +134,7 @@ diff --git a/python/runtime/interop/CMakeLists.txt b/python/runtime/interop/CMak
 index c20b2d83..dcc7bfdf 100644
 --- a/python/runtime/interop/CMakeLists.txt
 +++ b/python/runtime/interop/CMakeLists.txt
-@@ -14,7 +14,7 @@ target_include_directories(cudaq-python-interop PRIVATE
+@@ -14,6 +14,6 @@ target_include_directories(cudaq-python-interop PRIVATE
  if (SKBUILD)
    target_link_libraries(cudaq-python-interop PRIVATE nanobind-static Python::Module cudaq)
  else()
