@@ -100,15 +100,15 @@ index dc906f615..5d591ea06 100644
    # Apply specific patch to pybind11 for our documentation.
    # Only apply the patch if not already applied.
 diff --git a/python/runtime/cudaq/domains/plugins/CMakeLists.txt b/python/runtime/cudaq/domains/plugins/CMakeLists.txt
-index 3bd2e991..2603e72f 100644
+index 675919e25..7de85b815 100644
 --- a/python/runtime/cudaq/domains/plugins/CMakeLists.txt
 +++ b/python/runtime/cudaq/domains/plugins/CMakeLists.txt
-@@ -33,7 +33,7 @@ else()
+@@ -31,7 +31,7 @@ else()
    endif()
    target_link_libraries(cudaq-pyscf
      PRIVATE
--      nanobind-static Python::Python
-+      nanobind-static Python::Module
+-      Python::Python pybind11::pybind11
++      Python::Module pybind11::pybind11
        cudaq-chemistry cudaq-operator cudaq cudaq-py-utils cudaq-platform-default)
  endif()
 '
