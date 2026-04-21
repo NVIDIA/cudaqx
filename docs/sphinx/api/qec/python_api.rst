@@ -3,7 +3,6 @@ CUDA-Q QEC Python API
 
 .. automodule:: cudaq_qec
     :members:
-    :exclude-members: stabilizer_grid
 
 Code
 =============
