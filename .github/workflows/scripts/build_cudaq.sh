@@ -130,6 +130,18 @@ index 3bd2e991..2603e72f 100644
 +      nanobind-static Python::Module
        cudaq-chemistry cudaq-operator cudaq cudaq-py-utils cudaq-platform-default)
  endif()
+diff --git a/python/runtime/interop/CMakeLists.txt b/python/runtime/interop/CMakeLists.txt
+index c20b2d83..dcc7bfdf 100644
+--- a/python/runtime/interop/CMakeLists.txt
++++ b/python/runtime/interop/CMakeLists.txt
+@@ -14,7 +14,7 @@ target_include_directories(cudaq-python-interop PRIVATE
+ if (SKBUILD)
+   target_link_libraries(cudaq-python-interop PRIVATE nanobind-static Python::Module cudaq)
+ else()
+-  target_link_libraries(cudaq-python-interop PRIVATE nanobind-static Python::Python cudaq)
++  target_link_libraries(cudaq-python-interop PRIVATE nanobind-static Python::Module cudaq)
+ endif()
+ install (FILES PythonCppInterop.h PythonCppInteropDecls.h DESTINATION include/cudaq/python/)
 '
 
 echo "$CUDAQ_PATCH" | git apply --verbose
