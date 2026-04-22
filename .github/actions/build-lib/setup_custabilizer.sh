@@ -3,12 +3,6 @@
 # export CUSTABILIZER_ROOT + LD_LIBRARY_PATH so cmake and the runtime linker
 # can find the library.  Must be *sourced*, not executed.
 
-if [ "${BASH_SOURCE[0]:-$0}" = "$0" ] 2>/dev/null; then
-  echo "ERROR: this script must be sourced, not executed." >&2
-  echo "Usage: . $(basename "$0")" >&2
-  exit 1
-fi
-
 if [ -z "$CUSTABILIZER_ROOT" ] && [ -x "$(command -v python3)" ]; then
   NVCC_BIN=${CUDACXX:-$(command -v nvcc)}
   CUDA_MAJOR=""
