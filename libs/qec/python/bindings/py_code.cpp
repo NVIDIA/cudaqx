@@ -6,11 +6,13 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 #include <limits>
-#include <pybind11/complex.h>
-#include <pybind11/functional.h>
-#include <pybind11/numpy.h>
-#include <pybind11/operators.h>
-#include <pybind11/stl.h>
+#include <nanobind/nanobind.h>
+#include <nanobind/ndarray.h>
+#include <nanobind/stl/optional.h>
+#include <nanobind/stl/string.h>
+#include <nanobind/stl/unique_ptr.h>
+#include <nanobind/stl/vector.h>
+#include <nanobind/trampoline.h>
 
 #include "cudaq/runtime/logger/logger.h"
 
@@ -22,36 +24,39 @@
 #include "cuda-qx/core/kwargs_utils.h"
 #include "type_casters.h"
 
-namespace py = pybind11;
+namespace nb = nanobind;
 using namespace cudaqx;
 
 namespace cudaq::qec {
 
 class PyCode : public qec::code {
+public:
+  NB_TRAMPOLINE(qec::code, 6);
+
 protected:
   // Trampoline methods for pure virtual functions
   std::size_t get_num_data_qubits() const override {
-    PYBIND11_OVERRIDE_PURE(std::size_t, qec::code, get_num_data_qubits);
+    NB_OVERRIDE_PURE(get_num_data_qubits);
   }
 
   std::size_t get_num_ancilla_qubits() const override {
-    PYBIND11_OVERRIDE_PURE(std::size_t, qec::code, get_num_ancilla_qubits);
+    NB_OVERRIDE_PURE(get_num_ancilla_qubits);
   }
 
   std::size_t get_num_ancilla_x_qubits() const override {
-    PYBIND11_OVERRIDE_PURE(std::size_t, qec::code, get_num_ancilla_x_qubits);
+    NB_OVERRIDE_PURE(get_num_ancilla_x_qubits);
   }
 
   std::size_t get_num_ancilla_z_qubits() const override {
-    PYBIND11_OVERRIDE_PURE(std::size_t, qec::code, get_num_ancilla_z_qubits);
+    NB_OVERRIDE_PURE(get_num_ancilla_z_qubits);
   }
 
   std::size_t get_num_x_stabilizers() const override {
-    PYBIND11_OVERRIDE_PURE(std::size_t, qec::code, get_num_x_stabilizers);
+    NB_OVERRIDE_PURE(get_num_x_stabilizers);
   }
 
   std::size_t get_num_z_stabilizers() const override {
-    PYBIND11_OVERRIDE_PURE(std::size_t, qec::code, get_num_z_stabilizers);
+    NB_OVERRIDE_PURE(get_num_z_stabilizers);
   }
 };
 
@@ -63,14 +68,14 @@ protected:
 class PyCodeHandle : public qec::code {
 protected:
   /// @brief Python object representing the registered QEC code
-  py::object pyCode;
+  nb::object pyCode;
 
   /// @brief Keep the original Python kernels so that we can hand them back to
   /// Python.
-  std::unordered_map<qec::operation, py::object> m_py_operation_encodings;
+  std::unordered_map<qec::operation, nb::object> m_py_operation_encodings;
 
   // Jitted python kernels are only alive as long as the
-  // `CppPyKernelDecorator` they were compiled from, so we must cache them here
+  // CppPyKernelDecorator they were compiled from, so we must cache them here
   std::vector<cudaq::python::CppPyKernelDecorator *> cachedDecorators;
 
 public:
@@ -87,44 +92,45 @@ public:
   /// - Validating the presence of required attributes
   /// - Converting Python stabilizers to C++ representation
   /// - Processing operation encodings and registering CUDA-Q kernels
-  PyCodeHandle(py::object registeredCode) : pyCode(registeredCode) {
-    if (!py::hasattr(registeredCode, "stabilizers"))
+  PyCodeHandle(nb::object registeredCode) : pyCode(registeredCode) {
+    if (!nb::hasattr(registeredCode, "stabilizers"))
       throw std::runtime_error(
           "Invalid Python QEC Code. Must have self.stabilizers = "
           "[cudaq.SpinOperator(...)] (qec.Stabilizers(...)). Please provide "
           "the stabilizers.");
-    if (!py::hasattr(registeredCode, "pauli_observables"))
+    if (!nb::hasattr(registeredCode, "pauli_observables"))
       throw std::runtime_error(
           "Invalid Python QEC Code. Must have self.pauli_observables = "
           "[cudaq.SpinOperator(...)]. Please provide the observables.");
-    if (!py::hasattr(registeredCode, "operation_encodings"))
+    if (!nb::hasattr(registeredCode, "operation_encodings"))
       throw std::runtime_error(
           "Invalid Python QEC Code. Must have self.operation_encodings = "
           "{...}. Please provide the CUDA-Q kernels for the operation "
           "encodings.");
 
-    if (py::hasattr(registeredCode, "pauli_observables")) {
-      auto obs_terms = registeredCode.attr("pauli_observables")
-                           .cast<std::vector<cudaq::spin_op_term>>();
+    if (nb::hasattr(registeredCode, "pauli_observables")) {
+      auto obs_terms = nb::cast<std::vector<cudaq::spin_op_term>>(
+          registeredCode.attr("pauli_observables"));
       m_pauli_observables.reserve(obs_terms.size());
       for (auto &&term : obs_terms)
         m_pauli_observables.emplace_back(std::move(term));
     }
     // Get the stabilizers. First convert to spin_op_term's and then convert to
     // spin_op's.
-    auto stab_terms = registeredCode.attr("stabilizers")
-                          .cast<std::vector<cudaq::spin_op_term>>();
+    auto stab_terms = nb::cast<std::vector<cudaq::spin_op_term>>(
+        registeredCode.attr("stabilizers"));
     m_stabilizers.reserve(stab_terms.size());
     for (auto &term : stab_terms)
       m_stabilizers.emplace_back(std::move(term));
 
     // Get the CUDA-Q kernels for the operation encodings
-    auto opsDict = registeredCode.attr("operation_encodings").cast<py::dict>();
+    auto opsDict =
+        nb::cast<nb::dict>(registeredCode.attr("operation_encodings"));
 
     // For each CUDA-Q kernel, extract the JIT-ed function pointer
-    for (auto &[opKey, kernelHandle] : opsDict) {
-      py::object kernel = py::cast<py::object>(kernelHandle);
-      auto opKeyEnum = opKey.cast<qec::operation>();
+    for (auto [opKey, kernelHandle] : opsDict) {
+      nb::object kernel = nb::borrow<nb::object>(kernelHandle);
+      auto opKeyEnum = nb::cast<qec::operation>(opKey);
 
       // Save the original Python kernel object so that we can return a valid
       // CUDA-Q kernel back to Python later.
@@ -152,7 +158,7 @@ public:
   }
 
   /// @brief Expose read-only access to stored Python kernels.
-  const std::unordered_map<qec::operation, py::object> &
+  const std::unordered_map<qec::operation, nb::object> &
   get_py_operation_encodings() const {
     return m_py_operation_encodings;
   }
@@ -160,32 +166,32 @@ public:
 protected:
   // Trampoline methods for pure virtual functions
   std::size_t get_num_data_qubits() const override {
-    return pyCode.attr("get_num_data_qubits")().cast<std::size_t>();
+    return nb::cast<std::size_t>(pyCode.attr("get_num_data_qubits")());
   }
 
   std::size_t get_num_ancilla_qubits() const override {
-    return pyCode.attr("get_num_ancilla_qubits")().cast<std::size_t>();
+    return nb::cast<std::size_t>(pyCode.attr("get_num_ancilla_qubits")());
   }
 
   std::size_t get_num_ancilla_x_qubits() const override {
-    return pyCode.attr("get_num_ancilla_x_qubits")().cast<std::size_t>();
+    return nb::cast<std::size_t>(pyCode.attr("get_num_ancilla_x_qubits")());
   }
 
   std::size_t get_num_ancilla_z_qubits() const override {
-    return pyCode.attr("get_num_ancilla_z_qubits")().cast<std::size_t>();
+    return nb::cast<std::size_t>(pyCode.attr("get_num_ancilla_z_qubits")());
   }
 
   std::size_t get_num_x_stabilizers() const override {
-    return pyCode.attr("get_num_x_stabilizers")().cast<std::size_t>();
+    return nb::cast<std::size_t>(pyCode.attr("get_num_x_stabilizers")());
   }
 
   std::size_t get_num_z_stabilizers() const override {
-    return pyCode.attr("get_num_z_stabilizers")().cast<std::size_t>();
+    return nb::cast<std::size_t>(pyCode.attr("get_num_z_stabilizers")());
   }
 };
 
 namespace {
-static py::object get_python_kernel_or_throw(const code &self, operation op) {
+static nb::object get_python_kernel_or_throw(const code &self, operation op) {
   auto *pyHandle = dynamic_cast<const PyCodeHandle *>(&self);
   if (!pyHandle)
     throw std::runtime_error("This code was not registered from Python; no "
@@ -203,7 +209,7 @@ static py::object get_python_kernel_or_throw(const code &self, operation op) {
 // Registry to store code factory functions
 class PyCodeRegistry {
 private:
-  static std::unordered_map<std::string, std::function<py::object(py::kwargs)>>
+  static std::unordered_map<std::string, std::function<nb::object(nb::kwargs)>>
       registry;
 
 public:
@@ -216,12 +222,12 @@ public:
   }
 
   static void register_code(const std::string &name,
-                            std::function<py::object(py::kwargs)> factory) {
+                            std::function<nb::object(nb::kwargs)> factory) {
     cudaq::info("Registering Pythonic QEC Code with name {}", name);
     registry[name] = factory;
   }
 
-  static py::object get_code(const std::string &name, py::kwargs options) {
+  static nb::object get_code(const std::string &name, nb::kwargs options) {
     auto it = registry.find(name);
     if (it == registry.end()) {
       throw std::runtime_error("Unknown code: " + name);
@@ -236,31 +242,31 @@ public:
   }
 };
 
-std::unordered_map<std::string, std::function<py::object(py::kwargs)>>
+std::unordered_map<std::string, std::function<nb::object(nb::kwargs)>>
     PyCodeRegistry::registry;
 
-void bindCode(py::module &mod) {
+void bindCode(nb::module_ &mod) {
 
-  auto qecmod = py::hasattr(mod, "qecrt")
-                    ? mod.attr("qecrt").cast<py::module_>()
+  auto qecmod = nb::hasattr(mod, "qecrt")
+                    ? nb::cast<nb::module_>(mod.attr("qecrt"))
                     : mod.def_submodule("qecrt");
 
-  py::class_<qec::two_qubit_depolarization, cudaq::kraus_channel>(
+  nb::class_<qec::two_qubit_depolarization, cudaq::kraus_channel>(
       qecmod, "TwoQubitDepolarization",
       R"#(Models the decoherence of the each qubit independently in a two-qubit operation into a mixture "
       of the computational basis states, `|0>` and `|1>`.)#")
-      .def(py::init<double>(), py::arg("probability"),
+      .def(nb::init<double>(), nb::arg("probability"),
            "Initialize the `TwoQubitDepolarizationChannel` with the provided "
            "`probability`.");
 
-  py::class_<qec::two_qubit_bitflip, cudaq::kraus_channel>(
+  nb::class_<qec::two_qubit_bitflip, cudaq::kraus_channel>(
       qecmod, "TwoQubitBitFlip",
       R"#(Models independent bit flip errors after a two-qubit operation.)#")
-      .def(py::init<double>(), py::arg("probability"),
+      .def(nb::init<double>(), nb::arg("probability"),
            "Initialize the `TwoQubitBitFlip` with the provided "
            "`probability`.");
 
-  py::enum_<operation>(
+  nb::enum_<operation>(
       qecmod, "operation",
       "Enumeration of quantum operations for state preparation")
       .value("prep0", operation::prep0, "Prepare qubit in |0⟩ state")
@@ -280,21 +286,21 @@ void bindCode(py::module &mod) {
 
   qecmod.def(
       "get_code",
-      [](const std::string &name, py::kwargs options) -> std::unique_ptr<code> {
+      [](const std::string &name, nb::kwargs options) -> std::unique_ptr<code> {
         if (PyCodeRegistry::contains(name))
           return std::make_unique<PyCodeHandle>(
               PyCodeRegistry::get_code(name, options));
 
         if (options.contains("stabilizers")) {
           auto obj = options["stabilizers"];
-          if (!py::isinstance<py::list>(obj))
+          if (!nb::isinstance<nb::list>(obj))
             throw std::runtime_error(
                 "invalid stabilizers passed to get_code, must be a list of "
                 "string pauli words or list of cudaq.SpinOperator.");
 
-          if (py::isinstance<py::str>(obj.cast<py::list>()[0])) {
+          if (nb::isinstance<nb::str>(nb::cast<nb::list>(obj)[0])) {
             options.attr("pop")("stabilizers");
-            auto words = obj.cast<std::vector<std::string>>();
+            auto words = nb::cast<std::vector<std::string>>(obj);
             std::vector<cudaq::spin_op_term> ops;
             for (auto &os : words)
               ops.emplace_back(cudaq::spin_op::from_word(os));
@@ -302,9 +308,10 @@ void bindCode(py::module &mod) {
             return get_code(name, ops, hetMapFromKwargs(options));
           }
 
-          if (py::isinstance<cudaq::spin_op_term>(obj[0])) {
+          if (nb::isinstance<cudaq::spin_op_term>(nb::cast<nb::list>(obj)[0])) {
             options.attr("pop")("stabilizers");
-            return get_code(name, obj.cast<std::vector<cudaq::spin_op_term>>(),
+            return get_code(name,
+                            nb::cast<std::vector<cudaq::spin_op_term>>(obj),
                             hetMapFromKwargs(options));
           }
 
@@ -328,9 +335,9 @@ void bindCode(py::module &mod) {
       "Get a list of all available quantum error correction codes (C++ and "
       "Python).");
 
-  py::class_<code, PyCode>(qecmod, "Code",
+  nb::class_<code, PyCode>(qecmod, "Code",
                            "Represents a quantum error correction code")
-      .def(py::init<>())
+      .def(nb::init<>())
       .def(
           "get_parity",
           [](code &code) {
@@ -374,17 +381,17 @@ void bindCode(py::module &mod) {
           "Get the Pauli Z observables of the code")
       .def("get_stabilizers", &code::get_stabilizers,
            "Get the stabilizer generators of the code")
-      .def("contains_operation", &code::contains_operation, py::arg("op"),
+      .def("contains_operation", &code::contains_operation, nb::arg("op"),
            "Return true if this code contains the given operation encoding")
       .def(
           "get_operation_one_qubit",
-          [](const code &self, operation op) -> py::object {
+          [](const code &self, operation op) -> nb::object {
             if (!self.contains_operation(op))
               throw std::runtime_error(
                   "No encoding registered for requested op.");
             return get_python_kernel_or_throw(self, op);
           },
-          py::arg("op"),
+          nb::arg("op"),
           R"pbdoc(
               Get a CUDA-Q Python kernel for a one-qubit logical operation.
 
@@ -393,13 +400,13 @@ void bindCode(py::module &mod) {
             )pbdoc")
       .def(
           "get_operation_two_qubit",
-          [](const code &self, operation op) -> py::object {
+          [](const code &self, operation op) -> nb::object {
             if (!self.contains_operation(op))
               throw std::runtime_error(
                   "No encoding registered for requested op.");
             return get_python_kernel_or_throw(self, op);
           },
-          py::arg("op"),
+          nb::arg("op"),
           R"pbdoc(
               Get a CUDA-Q Python kernel for a two-qubit logical operation.
 
@@ -408,7 +415,7 @@ void bindCode(py::module &mod) {
             )pbdoc")
       .def(
           "get_stabilizer_round",
-          [](const code &self) -> py::object {
+          [](const code &self) -> nb::object {
             if (!self.contains_operation(operation::stabilizer_round))
               throw std::runtime_error(
                   "No stabilizer_round encoding is registered.");
@@ -442,47 +449,48 @@ void bindCode(py::module &mod) {
       throw std::runtime_error("Invalid Python QEC Code name. " + name +
                                " is already used in the C++ Code registry.");
 
-    return py::cpp_function([name](py::object code_class) -> py::object {
+    return nb::cpp_function([name](nb::object code_class) -> nb::object {
       // Create new class that inherits from both Code and the original
-      class py::object base_code = py::module::import("cudaq_qec").attr("Code");
+      nb::object base_code = nb::module_::import_("cudaq_qec").attr("Code");
       // Create new type using Python's type() function
-      py::tuple bases = py::make_tuple(base_code);
-      py::dict namespace_dict = code_class.attr("__dict__");
+      nb::tuple bases = nb::make_tuple(base_code);
+      // __dict__ is a read-only mappingproxy; copy to a real dict for
+      // PyType_Type.tp_new
+      nb::dict namespace_dict;
+      namespace_dict.update(code_class.attr("__dict__"));
 
-      if (!py::hasattr(code_class, "get_num_data_qubits"))
+      if (!nb::hasattr(code_class, "get_num_data_qubits"))
         throw std::runtime_error(
             "Code class must implement get_num_data_qubits method");
 
-      if (!py::hasattr(code_class, "get_num_ancilla_qubits"))
+      if (!nb::hasattr(code_class, "get_num_ancilla_qubits"))
         throw std::runtime_error(
             "Code class must implement get_num_ancilla_qubits method");
 
-      if (!py::hasattr(code_class, "get_num_ancilla_x_qubits"))
+      if (!nb::hasattr(code_class, "get_num_ancilla_x_qubits"))
         throw std::runtime_error(
             "Code class must implement get_num_ancilla_x_qubits method");
 
-      if (!py::hasattr(code_class, "get_num_ancilla_z_qubits"))
+      if (!nb::hasattr(code_class, "get_num_ancilla_z_qubits"))
         throw std::runtime_error(
             "Code class must implement get_num_ancilla_z_qubits method");
 
-      if (!py::hasattr(code_class, "get_num_x_stabilizers"))
+      if (!nb::hasattr(code_class, "get_num_x_stabilizers"))
         throw std::runtime_error(
             "Code class must implement get_num_x_stabilizers method");
 
-      if (!py::hasattr(code_class, "get_num_z_stabilizers"))
+      if (!nb::hasattr(code_class, "get_num_z_stabilizers"))
         throw std::runtime_error(
             "Code class must implement get_num_z_stabilizers method");
 
-      py::object new_class =
-          py::reinterpret_steal<py::object>(PyType_Type.tp_new(
-              &PyType_Type,
-              py::make_tuple(code_class.attr("__name__"), bases, namespace_dict)
-                  .ptr(),
-              nullptr));
+      // Use Python's type() so the correct metaclass (nanobind's) is resolved
+      nb::object type_fn = nb::module_::import_("builtins").attr("type");
+      nb::object new_class =
+          type_fn(code_class.attr("__name__"), bases, namespace_dict);
 
       // Register the new class in the code registry
-      PyCodeRegistry::register_code(name, [new_class](py::kwargs options) {
-        py::object instance = new_class(**options);
+      PyCodeRegistry::register_code(name, [new_class](nb::kwargs options) {
+        nb::object instance = new_class(**options);
         return instance;
       });
       return new_class;
@@ -495,8 +503,8 @@ void bindCode(py::module &mod) {
         auto data = generate_random_bit_flips(numBits, error_probability);
         return cudaq::python::copy1DCUDAQXTensorToPyArray(data);
       },
-      "Generate a rank-1 tensor for random bits", py::arg("numBits"),
-      py::arg("error_probability"));
+      "Generate a rank-1 tensor for random bits", nb::arg("numBits"),
+      nb::arg("error_probability"));
   qecmod.def(
       "sample_memory_circuit",
       [](code &code, std::size_t numShots, std::size_t numRounds,
@@ -504,13 +512,12 @@ void bindCode(py::module &mod) {
         auto [synd, dataRes] =
             noise ? sample_memory_circuit(code, numShots, numRounds, *noise)
                   : sample_memory_circuit(code, numShots, numRounds);
-        return py::make_tuple(
+        return nb::make_tuple(
             cudaq::python::copyCUDAQXTensorToPyArray(synd),
             cudaq::python::copyCUDAQXTensorToPyArray(dataRes));
       },
-      "Sample the memory circuit of the code", py::arg("code"),
-      py::arg("numShots"), py::arg("numRounds"),
-      py::arg("noise") = std::nullopt);
+      "Sample the memory circuit of the code", nb::arg("code"),
+      nb::arg("numShots"), nb::arg("numRounds"), nb::arg("noise") = nb::none());
   qecmod.def(
       "sample_memory_circuit",
       [](code &code, operation op, std::size_t numShots, std::size_t numRounds,
@@ -518,14 +525,14 @@ void bindCode(py::module &mod) {
         auto [synd, dataRes] =
             noise ? sample_memory_circuit(code, op, numShots, numRounds, *noise)
                   : sample_memory_circuit(code, op, numShots, numRounds);
-        return py::make_tuple(
+        return nb::make_tuple(
             cudaq::python::copyCUDAQXTensorToPyArray(synd),
             cudaq::python::copyCUDAQXTensorToPyArray(dataRes));
       },
       "Sample the memory circuit of the code with a specific initial "
       "operation",
-      py::arg("code"), py::arg("op"), py::arg("numShots"), py::arg("numRounds"),
-      py::arg("noise") = std::nullopt);
+      nb::arg("code"), nb::arg("op"), nb::arg("numShots"), nb::arg("numRounds"),
+      nb::arg("noise") = nb::none());
 
   qecmod.def(
       "dem_from_memory_circuit",
@@ -550,8 +557,8 @@ void bindCode(py::module &mod) {
         Returns:
             A detector error model.
       )pbdoc",
-      py::arg("code"), py::arg("op"), py::arg("numRounds"),
-      py::arg("noise") = std::nullopt);
+      nb::arg("code"), nb::arg("op"), nb::arg("numRounds"),
+      nb::arg("noise") = nb::none());
 
   qecmod.def(
       "x_dem_from_memory_circuit",
@@ -576,8 +583,8 @@ void bindCode(py::module &mod) {
         Returns:
             A detector error model.
       )pbdoc",
-      py::arg("code"), py::arg("op"), py::arg("numRounds"),
-      py::arg("noise") = std::nullopt);
+      nb::arg("code"), nb::arg("op"), nb::arg("numRounds"),
+      nb::arg("noise") = nb::none());
 
   qecmod.def(
       "z_dem_from_memory_circuit",
@@ -602,8 +609,8 @@ void bindCode(py::module &mod) {
         Returns:
             A detector error model.
       )pbdoc",
-      py::arg("code"), py::arg("op"), py::arg("numRounds"),
-      py::arg("noise") = std::nullopt);
+      nb::arg("code"), nb::arg("op"), nb::arg("numRounds"),
+      nb::arg("noise") = nb::none());
 
   qecmod.def(
       "sample_code_capacity",
@@ -612,39 +619,39 @@ void bindCode(py::module &mod) {
         if (seed.has_value()) {
           auto [syndromes, dataRes] =
               sample_code_capacity(code, numShots, errorProb, seed.value());
-          return py::make_tuple(
+          return nb::make_tuple(
               cudaq::python::copyCUDAQXTensorToPyArray(syndromes),
               cudaq::python::copyCUDAQXTensorToPyArray(dataRes));
         }
 
         auto [syndromes, dataRes] =
             sample_code_capacity(code, numShots, errorProb);
-        return py::make_tuple(
+        return nb::make_tuple(
             cudaq::python::copyCUDAQXTensorToPyArray(syndromes),
             cudaq::python::copyCUDAQXTensorToPyArray(dataRes));
       },
-      "Sample syndrome measurements with code capacity noise.", py::arg("code"),
-      py::arg("numShots"), py::arg("errorProb"), py::arg("seed") = py::none());
+      "Sample syndrome measurements with code capacity noise.", nb::arg("code"),
+      nb::arg("numShots"), nb::arg("errorProb"), nb::arg("seed") = nb::none());
   qecmod.def(
       "sample_code_capacity",
-      [](const py::array_t<uint8_t> H, std::size_t numShots, double errorProb,
-         std::optional<std::size_t> seed = std::nullopt) {
+      [](const nb::ndarray<nb::numpy, uint8_t> H, std::size_t numShots,
+         double errorProb, std::optional<std::size_t> seed = std::nullopt) {
         if (seed.has_value()) {
           auto [syndromes, dataRes] = sample_code_capacity(
               toTensor(H), numShots, errorProb, seed.value());
-          return py::make_tuple(
+          return nb::make_tuple(
               cudaq::python::copyCUDAQXTensorToPyArray(syndromes),
               cudaq::python::copyCUDAQXTensorToPyArray(dataRes));
         }
 
         auto [syndromes, dataRes] =
             sample_code_capacity(toTensor(H), numShots, errorProb);
-        return py::make_tuple(
+        return nb::make_tuple(
             cudaq::python::copyCUDAQXTensorToPyArray(syndromes),
             cudaq::python::copyCUDAQXTensorToPyArray(dataRes));
       },
-      "Sample syndrome measurements with code capacity noise.", py::arg("H"),
-      py::arg("numShots"), py::arg("errorProb"), py::arg("seed") = py::none());
+      "Sample syndrome measurements with code capacity noise.", nb::arg("H"),
+      nb::arg("numShots"), nb::arg("errorProb"), nb::arg("seed") = nb::none());
 
   std::stringstream ss;
   ss << "CUDA-Q QEC " << cudaq::qec::getVersion() << " ("

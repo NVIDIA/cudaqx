@@ -119,17 +119,29 @@ index dc906f615..5d591ea06 100644
    # Apply specific patch to pybind11 for our documentation.
    # Only apply the patch if not already applied.
 diff --git a/python/runtime/cudaq/domains/plugins/CMakeLists.txt b/python/runtime/cudaq/domains/plugins/CMakeLists.txt
-index 675919e25..7de85b815 100644
+index 3bd2e991..2603e72f 100644
 --- a/python/runtime/cudaq/domains/plugins/CMakeLists.txt
 +++ b/python/runtime/cudaq/domains/plugins/CMakeLists.txt
-@@ -31,7 +31,7 @@ else()
+@@ -33,6 +33,6 @@ else()
    endif()
    target_link_libraries(cudaq-pyscf
      PRIVATE
--      Python::Python pybind11::pybind11
-+      Python::Module pybind11::pybind11
+-      nanobind-static Python::Python
++      nanobind-static Python::Module
        cudaq-chemistry cudaq-operator cudaq cudaq-py-utils cudaq-platform-default)
  endif()
+diff --git a/python/runtime/interop/CMakeLists.txt b/python/runtime/interop/CMakeLists.txt
+index c20b2d83..dcc7bfdf 100644
+--- a/python/runtime/interop/CMakeLists.txt
++++ b/python/runtime/interop/CMakeLists.txt
+@@ -14,6 +14,6 @@ target_include_directories(cudaq-python-interop PRIVATE
+ if (SKBUILD)
+   target_link_libraries(cudaq-python-interop PRIVATE nanobind-static Python::Module cudaq)
+ else()
+-  target_link_libraries(cudaq-python-interop PRIVATE nanobind-static Python::Python cudaq)
++  target_link_libraries(cudaq-python-interop PRIVATE nanobind-static Python::Module cudaq)
+ endif()
+ install (FILES PythonCppInterop.h PythonCppInteropDecls.h DESTINATION include/cudaq/python/)
 '
 
 echo "$CUDAQ_PATCH" | git apply --verbose

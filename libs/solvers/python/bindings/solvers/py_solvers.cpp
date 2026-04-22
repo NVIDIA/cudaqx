@@ -6,10 +6,16 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 #include <limits>
-#include <pybind11/complex.h>
-#include <pybind11/numpy.h>
-#include <pybind11/operators.h>
-#include <pybind11/stl.h>
+#include <nanobind/nanobind.h>
+#include <nanobind/ndarray.h>
+#include <nanobind/stl/complex.h>
+#include <nanobind/stl/function.h>
+#include <nanobind/stl/optional.h>
+#include <nanobind/stl/pair.h>
+#include <nanobind/stl/string.h>
+#include <nanobind/stl/tuple.h>
+#include <nanobind/stl/unordered_map.h>
+#include <nanobind/stl/vector.h>
 
 #include "cudaq/python/PythonCppInterop.h"
 
@@ -32,56 +38,56 @@
 #include "bindings/utils/type_casters.h"
 #include "cuda-qx/core/kwargs_utils.h"
 
-namespace py = pybind11;
+namespace nb = nanobind;
 
 using namespace cudaqx;
 
 namespace cudaq::solvers {
 
-cudaqx::graph convert_networkx_graph(py::object nx_graph) {
+cudaqx::graph convert_networkx_graph(nb::object nx_graph) {
   cudaqx::graph g;
 
   // Get nodes from NetworkX graph
-  py::list nodes = nx_graph.attr("nodes")();
+  nb::list nodes(nx_graph.attr("nodes")());
 
   // Add nodes and their weights if present
   for (const auto &node : nodes) {
-    int node_id = py::cast<int>(node);
+    int node_id = nb::cast<int>(node);
 
     // Try to get node weight if it exists
     try {
-      py::dict node_data = nx_graph.attr("nodes")[node].cast<py::dict>();
+      nb::dict node_data = nb::cast<nb::dict>(nx_graph.attr("nodes")[node]);
       if (node_data.contains("weight")) {
-        double weight = py::cast<double>(node_data["weight"]);
+        double weight = nb::cast<double>(node_data["weight"]);
         g.add_node(node_id, weight);
       } else {
         g.add_node(node_id);
       }
-    } catch (const py::error_already_set &) {
+    } catch (...) {
       // If no node attributes, add with default weight
       g.add_node(node_id);
     }
   }
 
   // Get edges from NetworkX graph
-  py::list edges = nx_graph.attr("edges")();
+  nb::list edges(nx_graph.attr("edges")());
 
   // Add edges and their weights if present
   for (const auto &edge : edges) {
-    py::tuple edge_tuple = edge.cast<py::tuple>();
-    int u = py::cast<int>(edge_tuple[0]);
-    int v = py::cast<int>(edge_tuple[1]);
+    nb::tuple edge_tuple(edge);
+    int u = nb::cast<int>(edge_tuple[0]);
+    int v = nb::cast<int>(edge_tuple[1]);
 
     // Try to get edge weight if it exists
     try {
-      py::dict edge_data = nx_graph.attr("edges")[edge].cast<py::dict>();
+      nb::dict edge_data = nb::cast<nb::dict>(nx_graph.attr("edges")[edge]);
       if (edge_data.contains("weight")) {
-        double weight = py::cast<double>(edge_data["weight"]);
+        double weight = nb::cast<double>(edge_data["weight"]);
         g.add_edge(u, v, weight);
       } else {
         g.add_edge(u, v);
       }
-    } catch (const py::error_already_set &) {
+    } catch (...) {
       // If no edge attributes, add with default weight
       g.add_edge(u, v);
     }
@@ -91,16 +97,16 @@ cudaqx::graph convert_networkx_graph(py::object nx_graph) {
 }
 
 /// @class PythonOptimizer
-/// @brief A Pybind wrapper around SciPy's function optimization.
+/// @brief A nanobind wrapper around SciPy's function optimization.
 ///
 /// This class provides an interface to use SciPy's optimization functions
-/// within a C++ environment using Pybind11. It inherits from the
+/// within a C++ environment using nanobind. It inherits from the
 /// `optim::optimizer` class and overrides its methods to utilize SciPy's
 /// optimization capabilities.
 class PythonOptimizer : public optim::optimizer {
 private:
-  py::function minimize;
-  py::kwargs kwargs;
+  nb::callable minimize;
+  nb::kwargs kwargs;
   std::vector<double> initParams;
 
 public:
@@ -111,7 +117,7 @@ public:
   /// scipy.optimize.minimize)
   /// @param kw Keyword arguments to pass to the optimization function
   /// @param init Initial parameters for optimization (optional)
-  PythonOptimizer(py::function optCallback, py::kwargs kw,
+  PythonOptimizer(nb::callable optCallback, nb::kwargs kw,
                   const std::vector<double> init = {})
       : minimize(optCallback), kwargs(kw), initParams(init) {}
 
@@ -145,7 +151,7 @@ public:
 
     double value = 0.0;
     std::vector<double> parameters(dim);
-    auto result = minimize(py::cpp_function([&](const std::vector<double> &x) {
+    auto result = minimize(nb::cpp_function([&](const std::vector<double> &x) {
                              std::vector<double> dx(x.size());
                              value = opt_function(x, dx);
                              parameters = x;
@@ -156,7 +162,7 @@ public:
   }
 };
 
-void addStatePrepKernels(py::module &mod) {
+void addStatePrepKernels(nb::module_ &mod) {
   cudaq::python::addDeviceKernelInterop<
       cudaq::qview<>, const std::vector<double> &, std::size_t, std::size_t>(
       mod, "stateprep", "uccsd",
@@ -192,11 +198,11 @@ void addStatePrepKernels(py::module &mod) {
                                         std::size_t, std::size_t, std::size_t>(
       mod, "stateprep", "double_excitation",
       "Perform a double fermionic excitation.");
-  auto stateprep = mod.attr("stateprep").cast<py::module_>();
+  auto stateprep = nb::cast<nb::module_>(mod.attr("stateprep"));
   stateprep.def("get_num_uccsd_parameters",
                 &cudaq::solvers::stateprep::get_num_uccsd_parameters,
-                py::arg("num_electrons"), py::arg("num_qubits"),
-                py::arg("spin") = 0,
+                nb::arg("num_electrons"), nb::arg("num_qubits"),
+                nb::arg("spin") = 0,
                 "Calculate the number of UCCSD parameters\n\n"
                 "Args:\n"
                 "    num_electrons (int): Number of electrons\n"
@@ -209,8 +215,8 @@ void addStatePrepKernels(py::module &mod) {
 
   stateprep.def("get_uccgsd_pauli_lists",
                 &cudaq::solvers::stateprep::get_uccgsd_pauli_lists,
-                py::arg("num_qubits"), py::arg("only_singles") = false,
-                py::arg("only_doubles") = false,
+                nb::arg("num_qubits"), nb::arg("only_singles") = false,
+                nb::arg("only_doubles") = false,
                 R"(
   Generate UCCGSD operator pool (Python-style unique singles/doubles) and extract Pauli words and coefficients grouped by excitation.
 
@@ -223,7 +229,7 @@ void addStatePrepKernels(py::module &mod) {
   )");
   stateprep.def("get_upccgsd_pauli_lists",
                 &cudaq::solvers::stateprep::get_upccgsd_pauli_lists,
-                py::arg("num_qubits"), py::arg("only_doubles") = false,
+                nb::arg("num_qubits"), nb::arg("only_doubles") = false,
                 R"(
   Generate UpCCGSD operator pool (Python-style unique singles/doubles) and extract Pauli words and coefficients grouped by excitation.
 
@@ -248,7 +254,7 @@ void addStatePrepKernels(py::module &mod) {
 
   stateprep.def("get_ceo_pauli_lists",
                 &cudaq::solvers::stateprep::get_ceo_pauli_lists,
-                py::arg("num_orbitals"),
+                nb::arg("num_orbitals"),
                 R"(
   Generate CEO operator pool (spin-dependent generalized singles/doubles coupled qubit excitation operators) and extract Pauli words and coefficients grouped by excitation.
 
@@ -262,44 +268,50 @@ void addStatePrepKernels(py::module &mod) {
 
 // Helper function to convert tensor to numpy array
 template <typename T = std::complex<double>>
-py::array_t<T> tensor_to_numpy(const cudaqx::tensor<T> &tensor_data) {
-  // Get the dimensions of the tensor
+nb::object tensor_to_numpy(const cudaqx::tensor<T> &tensor_data) {
   const auto &shape = tensor_data.shape();
+  std::size_t total_size = tensor_data.size();
 
-  // Create numpy array with appropriate shape
-  py::array_t<T> numpy_array(shape);
+  T *data_copy = new T[total_size];
+  std::copy(tensor_data.data(), tensor_data.data() + total_size, data_copy);
 
-  // Get raw pointer to numpy array data
-  auto buf = numpy_array.request();
-  T *ptr = static_cast<T *>(buf.ptr);
+  std::vector<size_t> nb_shape(shape.begin(), shape.end());
+  nb::capsule owner(data_copy,
+                    [](void *p) noexcept { delete[] static_cast<T *>(p); });
 
-  // Copy data from tensor to numpy array
-  std::copy(tensor_data.data(), tensor_data.data() + tensor_data.size(), ptr);
-
-  return numpy_array;
+  // No explicit strides: nanobind computes C-order element strides
+  // automatically. Passing byte strides here would be wrong — nanobind
+  // multiplies stored strides by itemsize in the buffer protocol, so only
+  // element strides must be stored.
+  return nb::cast(nb::ndarray<nb::numpy, T>(data_copy, shape.size(),
+                                            nb_shape.data(), owner));
 }
 
-void bindOperators(py::module &mod) {
+void bindOperators(nb::module_ &mod) {
 
   mod.def(
       "jordan_wigner",
-      [](py::buffer hpq, py::buffer hpqrs, double core_energy = 0.0,
-         py::kwargs options) {
-        auto hpqInfo = hpq.request();
-        auto hpqrsInfo = hpqrs.request();
-        auto *hpqData = reinterpret_cast<std::complex<double> *>(hpqInfo.ptr);
-        auto *hpqrsData =
-            reinterpret_cast<std::complex<double> *>(hpqrsInfo.ptr);
+      [](nb::ndarray<nb::numpy, std::complex<double>> hpq,
+         nb::ndarray<nb::numpy, std::complex<double>> hpqrs, double core_energy,
+         nb::kwargs options) {
+        auto *hpqData = static_cast<std::complex<double> *>(hpq.data());
+        auto *hpqrsData = static_cast<std::complex<double> *>(hpqrs.data());
+
+        std::vector<std::size_t> hpq_shape, hpqrs_shape;
+        for (size_t d = 0; d < hpq.ndim(); d++)
+          hpq_shape.push_back(hpq.shape(d));
+        for (size_t d = 0; d < hpqrs.ndim(); d++)
+          hpqrs_shape.push_back(hpqrs.shape(d));
 
         cudaqx::tensor hpqT, hpqrsT;
-        hpqT.borrow(hpqData, {hpqInfo.shape.begin(), hpqInfo.shape.end()});
-        hpqrsT.borrow(hpqrsData,
-                      {hpqrsInfo.shape.begin(), hpqrsInfo.shape.end()});
+        hpqT.borrow(hpqData, hpq_shape);
+        hpqrsT.borrow(hpqrsData, hpqrs_shape);
 
         return fermion_compiler::get("jordan_wigner")
             ->generate(core_energy, hpqT, hpqrsT, hetMapFromKwargs(options));
       },
-      py::arg("hpq"), py::arg("hpqrs"), py::arg("core_energy") = 0.0,
+      nb::arg("hpq"), nb::arg("hpqrs"), nb::arg("core_energy") = 0.0,
+      nb::arg("**kwargs"),
       R"#(
 Perform the Jordan-Wigner transformation on fermionic operators.
 
@@ -353,28 +365,30 @@ Notes:
 
   mod.def(
       "jordan_wigner",
-      [](py::buffer buffer, double core_energy = 0.0, py::kwargs options) {
-        auto info = buffer.request();
-        auto *data = reinterpret_cast<std::complex<double> *>(info.ptr);
+      [](nb::ndarray<nb::numpy, std::complex<double>> buffer,
+         double core_energy, nb::kwargs options) {
+        auto *data = static_cast<std::complex<double> *>(buffer.data());
         std::size_t size = 1;
-        for (auto &s : info.shape)
-          size *= s;
-        std::vector<std::complex<double>> vec(data, data + size);
-        if (info.shape.size() == 2) {
-          std::size_t dim = info.shape[0];
+        std::vector<std::size_t> shape_vec;
+        for (size_t d = 0; d < buffer.ndim(); d++) {
+          shape_vec.push_back(buffer.shape(d));
+          size *= buffer.shape(d);
+        }
+        if (buffer.ndim() == 2) {
+          std::size_t dim = buffer.shape(0);
           cudaqx::tensor hpq, hpqrs({dim, dim, dim, dim});
-          hpq.borrow(data, {info.shape.begin(), info.shape.end()});
+          hpq.borrow(data, shape_vec);
           return fermion_compiler::get("jordan_wigner")
               ->generate(core_energy, hpq, hpqrs, hetMapFromKwargs(options));
         }
 
-        std::size_t dim = info.shape[0];
+        std::size_t dim = buffer.shape(0);
         cudaqx::tensor hpq({dim, dim}), hpqrs;
-        hpqrs.borrow(data, {info.shape.begin(), info.shape.end()});
+        hpqrs.borrow(data, shape_vec);
         return fermion_compiler::get("jordan_wigner")
             ->generate(core_energy, hpq, hpqrs, hetMapFromKwargs(options));
       },
-      py::arg("hpq"), py::arg("core_energy") = 0.0,
+      nb::arg("hpq"), nb::arg("core_energy") = 0.0, nb::arg("**kwargs"),
       R"#(
 Perform the Jordan-Wigner transformation on fermionic operators.
 
@@ -423,7 +437,7 @@ Examples:
 Notes:
 ------
 - The input array must be contiguous and in row-major order.
-- This function automatically detects whether the input represents one-body or 
+- This function automatically detects whether the input represents one-body or
   two-body integrals based on its shape.
 - For one-body integrals input, a zero-initialized two-body tensor is used internally.
 - For two-body integrals input, a zero-initialized one-body tensor is used internally.
@@ -435,23 +449,27 @@ Notes:
 
   mod.def(
       "bravyi_kitaev",
-      [](py::buffer hpq, py::buffer hpqrs, double core_energy = 0.0,
-         py::kwargs options) {
-        auto hpqInfo = hpq.request();
-        auto hpqrsInfo = hpqrs.request();
-        auto *hpqData = reinterpret_cast<std::complex<double> *>(hpqInfo.ptr);
-        auto *hpqrsData =
-            reinterpret_cast<std::complex<double> *>(hpqrsInfo.ptr);
+      [](nb::ndarray<nb::numpy, std::complex<double>> hpq,
+         nb::ndarray<nb::numpy, std::complex<double>> hpqrs, double core_energy,
+         nb::kwargs options) {
+        auto *hpqData = static_cast<std::complex<double> *>(hpq.data());
+        auto *hpqrsData = static_cast<std::complex<double> *>(hpqrs.data());
+
+        std::vector<std::size_t> hpq_shape, hpqrs_shape;
+        for (size_t d = 0; d < hpq.ndim(); d++)
+          hpq_shape.push_back(hpq.shape(d));
+        for (size_t d = 0; d < hpqrs.ndim(); d++)
+          hpqrs_shape.push_back(hpqrs.shape(d));
 
         cudaqx::tensor hpqT, hpqrsT;
-        hpqT.borrow(hpqData, {hpqInfo.shape.begin(), hpqInfo.shape.end()});
-        hpqrsT.borrow(hpqrsData,
-                      {hpqrsInfo.shape.begin(), hpqrsInfo.shape.end()});
+        hpqT.borrow(hpqData, hpq_shape);
+        hpqrsT.borrow(hpqrsData, hpqrs_shape);
 
         return fermion_compiler::get("bravyi_kitaev")
             ->generate(core_energy, hpqT, hpqrsT, hetMapFromKwargs(options));
       },
-      py::arg("hpq"), py::arg("hpqrs"), py::arg("core_energy") = 0.0,
+      nb::arg("hpq"), nb::arg("hpqrs"), nb::arg("core_energy") = 0.0,
+      nb::arg("**kwargs"),
       R"#(
 Perform the Bravyi-Kitaev transformation on fermionic operators.
 
@@ -505,28 +523,30 @@ Notes:
 
   mod.def(
       "bravyi_kitaev",
-      [](py::buffer buffer, double core_energy = 0.0, py::kwargs options) {
-        auto info = buffer.request();
-        auto *data = reinterpret_cast<std::complex<double> *>(info.ptr);
+      [](nb::ndarray<nb::numpy, std::complex<double>> buffer,
+         double core_energy, nb::kwargs options) {
+        auto *data = static_cast<std::complex<double> *>(buffer.data());
         std::size_t size = 1;
-        for (auto &s : info.shape)
-          size *= s;
-        std::vector<std::complex<double>> vec(data, data + size);
-        if (info.shape.size() == 2) {
-          std::size_t dim = info.shape[0];
+        std::vector<std::size_t> shape_vec;
+        for (size_t d = 0; d < buffer.ndim(); d++) {
+          shape_vec.push_back(buffer.shape(d));
+          size *= buffer.shape(d);
+        }
+        if (buffer.ndim() == 2) {
+          std::size_t dim = buffer.shape(0);
           cudaqx::tensor hpq, hpqrs({dim, dim, dim, dim});
-          hpq.borrow(data, {info.shape.begin(), info.shape.end()});
+          hpq.borrow(data, shape_vec);
           return fermion_compiler::get("bravyi_kitaev")
               ->generate(core_energy, hpq, hpqrs, hetMapFromKwargs(options));
         }
 
-        std::size_t dim = info.shape[0];
+        std::size_t dim = buffer.shape(0);
         cudaqx::tensor hpq({dim, dim}), hpqrs;
-        hpqrs.borrow(data, {info.shape.begin(), info.shape.end()});
+        hpqrs.borrow(data, shape_vec);
         return fermion_compiler::get("bravyi_kitaev")
             ->generate(core_energy, hpq, hpqrs, hetMapFromKwargs(options));
       },
-      py::arg("hpq"), py::arg("core_energy") = 0.0,
+      nb::arg("hpq"), nb::arg("core_energy") = 0.0, nb::arg("**kwargs"),
       R"#(
 Perform the Bravyi-Kitaev transformation on fermionic operators.
 
@@ -575,7 +595,7 @@ Examples:
 Notes:
 ------
 - The input array must be contiguous and in row-major order.
-- This function automatically detects whether the input represents one-body or 
+- This function automatically detects whether the input represents one-body or
   two-body integrals based on its shape.
 - For one-body integrals input, a zero-initialized two-body tensor is used internally.
 - For two-body integrals input, a zero-initialized one-body tensor is used internally.
@@ -585,48 +605,48 @@ Notes:
   further manipulated using CUDA Quantum operations.
 )#");
 
-  py::class_<molecular_hamiltonian>(mod, "MolecularHamiltonian")
-      .def_readonly("energies", &molecular_hamiltonian::energies,
-                    R"#(
+  nb::class_<molecular_hamiltonian>(mod, "MolecularHamiltonian")
+      .def_ro("energies", &molecular_hamiltonian::energies,
+              R"#(
         Dictionary of energies from classical computation.
         )#")
-      .def_readonly("hamiltonian", &molecular_hamiltonian::hamiltonian,
-                    R"#(
+      .def_ro("hamiltonian", &molecular_hamiltonian::hamiltonian,
+              R"#(
         :class:`cudaq.SpinOperator`: The qubit representation of the molecular Hamiltonian.
-        
+
         This is the full electronic Hamiltonian of the molecule, transformed into
         qubit operators using a specific mapping (e.g., Jordan-Wigner).
         )#")
-      .def_readonly("n_electrons", &molecular_hamiltonian::n_electrons,
-                    R"#(
+      .def_ro("n_electrons", &molecular_hamiltonian::n_electrons,
+              R"#(
         int: The number of electrons in the molecule.
-        
+
         This represents the total number of electrons in the molecular system,
         which is crucial for determining the filling of orbitals and the overall
         electronic structure.
         )#")
-      .def_readonly("n_orbitals", &molecular_hamiltonian::n_orbitals,
-                    R"#(
+      .def_ro("n_orbitals", &molecular_hamiltonian::n_orbitals,
+              R"#(
         int: The number of molecular orbitals.
-        
-        This is the total number of molecular orbitals considered in the 
+
+        This is the total number of molecular orbitals considered in the
         calculation, which determines the size of the Hamiltonian and the
         complexity of the quantum simulation.
         )#")
-      .def_property_readonly(
+      .def_prop_ro(
           "hpq",
           [](const molecular_hamiltonian &self) {
             return tensor_to_numpy(self.hpq);
           },
           R"#(
         numpy.ndarray: One-electron integrals.
-        
-        A 2D complex array of shape (n_orbitals, n_orbitals), where n_orbitals is the 
+
+        A 2D complex array of shape (n_orbitals, n_orbitals), where n_orbitals is the
         number of spin molecular orbitals, representing
         the one-electron integrals in the molecular orbital basis. These
         include kinetic energy and electron-nuclear attraction terms.
         )#")
-      .def_property_readonly(
+      .def_prop_ro(
           "hpqrs",
           [](const molecular_hamiltonian &self) {
             return tensor_to_numpy(self.hpqrs);
@@ -634,22 +654,23 @@ Notes:
           R"#(
         numpy.ndarray: Two-electron integrals.
 
-        A 4D complex array of shape (n_orbitals, n_orbitals, n_orbitals, n_orbitals), 
-        where n_orbitals is the number of spin molecular orbitals, 
+        A 4D complex array of shape (n_orbitals, n_orbitals, n_orbitals, n_orbitals),
+        where n_orbitals is the number of spin molecular orbitals,
         representing the two-electron integrals in the molecular orbital basis.
         These describe electron-electron interactions.
         )#");
 
   auto creator = [](molecular_geometry &molGeom, const std::string basis,
-                    int spin, int charge, py::kwargs options) {
+                    int spin, int charge, nb::kwargs options) {
     molecule_options inOptions;
     inOptions.type = getValueOr<std::string>(options, "type", "gas_phase");
+    constexpr std::size_t kNotSet = std::numeric_limits<std::size_t>::max();
     std::optional<std::size_t> nele_cas =
-        getValueOr<std::size_t>(options, "nele_cas", -1);
-    inOptions.nele_cas = nele_cas == -1 ? std::nullopt : nele_cas;
+        getValueOr<std::size_t>(options, "nele_cas", kNotSet);
+    inOptions.nele_cas = (nele_cas == kNotSet) ? std::nullopt : nele_cas;
     std::optional<std::size_t> norb_cas =
-        getValueOr<std::size_t>(options, "norb_cas", -1);
-    inOptions.norb_cas = norb_cas == -1 ? std::nullopt : norb_cas;
+        getValueOr<std::size_t>(options, "norb_cas", kNotSet);
+    inOptions.norb_cas = (norb_cas == kNotSet) ? std::nullopt : norb_cas;
     inOptions.symmetry = getValueOr<bool>(options, "symmetry", false);
     inOptions.memory = getValueOr<double>(options, "memory", 4000.);
     inOptions.cycles = getValueOr<std::size_t>(options, "cycles", 100);
@@ -672,8 +693,8 @@ Notes:
     // accidentally use the wrong Python environment for any child processes
     // that may be spawned.
     inOptions.python_path = []() {
-      auto sys = py::module::import("sys");
-      return sys.attr("executable").cast<std::string>();
+      auto sys = nb::module_::import_("sys");
+      return nb::cast<std::string>(sys.attr("executable"));
     }();
 
     if (inOptions.verbose)
@@ -683,30 +704,31 @@ Notes:
 
   mod.def(
       "create_molecule",
-      [&](py::list geometry, const std::string basis, int spin, int charge,
-          py::kwargs options) {
+      [&](nb::list geometry, const std::string basis, int spin, int charge,
+          nb::kwargs options) {
         std::vector<atom> atoms;
         for (auto el : geometry) {
-          if (!py::isinstance<py::tuple>(el))
+          if (!nb::isinstance<nb::tuple>(el))
             throw std::runtime_error(
                 "geometry must be a list of tuples ('NAME', (X, Y, Z))");
-          auto casted = el.cast<py::tuple>();
-          if (!py::isinstance<py::tuple>(casted[1]))
+          auto casted = nb::cast<nb::tuple>(el);
+          if (!nb::isinstance<nb::tuple>(casted[1]))
             throw std::runtime_error(
                 "geometry must be a list of tuples ('NAME', (X, Y, Z))");
 
-          auto name = casted[0].cast<std::string>();
-          auto coords = casted[1].cast<py::tuple>();
+          auto name = nb::cast<std::string>(casted[0]);
+          auto coords = nb::cast<nb::tuple>(casted[1]);
           atoms.push_back(
               atom{name,
-                   {coords[0].cast<double>(), coords[1].cast<double>(),
-                    coords[2].cast<double>()}});
+                   {nb::cast<double>(coords[0]), nb::cast<double>(coords[1]),
+                    nb::cast<double>(coords[2])}});
         }
         molecular_geometry molGeom(atoms);
 
         return creator(molGeom, basis, spin, charge, options);
       },
-      py::arg("geometry"), py::arg("basis"), py::arg("spin"), py::arg("charge"),
+      nb::arg("geometry"), nb::arg("basis"), nb::arg("spin"), nb::arg("charge"),
+      nb::arg("**kwargs"),
       R"#(Create a molecular hamiltonian from an XYZ file and additional parameters.
 
 This function generates a molecular hamiltonian based on the geometry specified in an XYZ file
@@ -743,16 +765,17 @@ RuntimeError
   mod.def(
       "create_molecule",
       [&](const std::string &xyz_file, const std::string basis, int spin,
-          int charge, py::kwargs options) {
+          int charge, nb::kwargs options) {
         auto geom = molecular_geometry::from_xyz(xyz_file);
         return creator(geom, basis, spin, charge, options);
       },
-      py::arg("xyz_file"), py::arg("basis"), py::arg("spin"), py::arg("charge"),
+      nb::arg("xyz_file"), nb::arg("basis"), nb::arg("spin"), nb::arg("charge"),
+      nb::arg("**kwargs"),
       R"#(Create a molecular hamiltonian from an XYZ file and additional parameters.)#");
 
   mod.def(
       "get_operator_pool",
-      [](const std::string &name, py::kwargs config) {
+      [](const std::string &name, nb::kwargs config) {
         return operator_pool::get(name)->generate(hetMapFromKwargs(config));
       },
       R"#(Get and generate an operator pool based on the specified name and configuration.
@@ -795,14 +818,14 @@ operator pool. Only integer and list configuration values are currently supporte
 )#");
 }
 
-void bindSolvers(py::module &mod) {
+void bindSolvers(nb::module_ &mod) {
 
   addStatePrepKernels(mod);
 
   auto solvers = mod; //.def_submodule("solvers");
   bindOperators(solvers);
 
-  py::enum_<observe_execution_type>(
+  nb::enum_<observe_execution_type>(
       solvers, "ObserveExecutionType",
       R"#(An enumeration representing different types of execution in an optimization process.
 
@@ -851,22 +874,22 @@ at a given point in the parameter space.)#")
 
 This involves calculating the partial derivatives of the objective)#");
 
-  py::class_<observe_iteration>(
+  nb::class_<observe_iteration>(
       solvers, "ObserveIteration",
       R"#(A class representing a single iteration of an optimization process.
 
 This class encapsulates the state of an optimization iteration, including
 the current parameter values, the result of the objective function evaluation,
 and the type of iteration)#")
-      .def_readonly(
+      .def_ro(
           "parameters", &observe_iteration::parameters,
-          R"#(The current values of the optimization parameters at this iteration. 
+          R"#(The current values of the optimization parameters at this iteration.
 These represent the point in the parameter space being evaluated.)#")
-      .def_readonly(
+      .def_ro(
           "result", &observe_iteration::result,
           R"#(The value of the objective function evaluated at the current parameters.
 For minimization problems, lower values indicate better solutions.)#")
-      .def_readonly(
+      .def_ro(
           "type", &observe_iteration::type,
           R"#(A string indicating the type or purpose of this iteration. Common types might include:
 - 'function': A standard function evaluation
@@ -875,8 +898,8 @@ The exact set of possible types may depend on the specific optimization algorith
 
   solvers.def(
       "vqe",
-      [](const py::function &kernel, cudaq::spin_op op,
-         std::vector<double> initial_parameters, py::kwargs options) {
+      [](const nb::callable &kernel, cudaq::spin_op op,
+         std::vector<double> initial_parameters, nb::kwargs options) {
         heterogeneous_map optOptions;
         optOptions.insert("shots",
                           cudaqx::getValueOr<int>(options, "shots", -1));
@@ -884,7 +907,7 @@ The exact set of possible types may depend on the specific optimization algorith
           optOptions.insert(
               "max_iterations",
               cudaqx::getValueOr<int>(options, "max_iterations", -1));
-        // in case the privded optimizer is not a scipy one
+        // in case the provided optimizer is not a scipy one
         optOptions.insert("tol", getValueOr<double>(options, "tol", 1e-12));
 
         optOptions.insert("verbose",
@@ -892,9 +915,9 @@ The exact set of possible types may depend on the specific optimization algorith
 
         // Handle the case where the user has provided a SciPy optimizer
         if (options.contains("optimizer") &&
-            py::isinstance<py::function>(options["optimizer"])) {
-          auto func = options["optimizer"].cast<py::function>();
-          if (func.attr("__name__").cast<std::string>() != "minimize")
+            nb::isinstance<nb::callable>(options["optimizer"])) {
+          auto func = nb::cast<nb::callable>(options["optimizer"]);
+          if (nb::cast<std::string>(func.attr("__name__")) != "minimize")
             throw std::runtime_error(
                 "Invalid functional optimizer provided (only "
                 "scipy.optimize.minimize supported).");
@@ -902,7 +925,7 @@ The exact set of possible types may depend on the specific optimization algorith
           auto result =
               cudaq::solvers::vqe([&](std::vector<double> x) { kernel(x); }, op,
                                   opt, initial_parameters, optOptions);
-          return py::make_tuple(result.energy, result.optimal_parameters,
+          return nb::make_tuple(result.energy, result.optimal_parameters,
                                 result.iteration_data);
         }
 
@@ -914,7 +937,7 @@ The exact set of possible types may depend on the specific optimization algorith
         if (!optimizer->requiresGradients()) {
           auto result = cudaq::solvers::vqe(kernelWrapper, op, *optimizer,
                                             initial_parameters, optOptions);
-          return py::make_tuple(result.energy, result.optimal_parameters,
+          return nb::make_tuple(result.energy, result.optimal_parameters,
                                 result.iteration_data);
         }
 
@@ -926,10 +949,11 @@ The exact set of possible types may depend on the specific optimization algorith
         auto result = cudaq::solvers::vqe(kernelWrapper, op, *optimizer.get(),
                                           *gradient.get(), initial_parameters,
                                           optOptions);
-        return py::make_tuple(result.energy, result.optimal_parameters,
+        return nb::make_tuple(result.energy, result.optimal_parameters,
                               result.iteration_data);
       },
-      py::arg("kernel"), py::arg("spin_op"), py::arg("initial_parameters"), R"#(
+      nb::arg("kernel"), nb::arg("spin_op"), nb::arg("initial_parameters"),
+      nb::arg("**kwargs"), R"#(
 Execute the Variational Quantum Eigensolver (VQE) algorithm.
 
 This function implements the VQE algorithm, a hybrid quantum-classical algorithm
@@ -977,7 +1001,7 @@ Examples:
 ...     pass
 >>> hamiltonian = cudaq.SpinOperator(...)  # Define your Hamiltonian
 >>> initial_params = [0.1, 0.2, 0.3]
->>> energy, opt_params, iterations = vqe(ansatz, hamiltonian, initial_params, 
+>>> energy, opt_params, iterations = vqe(ansatz, hamiltonian, initial_params,
 ...                                      optimizer='cobyla', shots=1000)
 >>> print(f"Ground state energy: {energy}")
 >>> print(f"Optimal parameters: {opt_params}")
@@ -997,8 +1021,8 @@ Notes:
 
   solvers.def(
       "adapt_vqe",
-      [](py::object initialStateKernel, cudaq::spin_op op,
-         const std::vector<cudaq::spin_op> &pool, py::kwargs options) {
+      [](nb::object initialStateKernel, cudaq::spin_op op,
+         const std::vector<cudaq::spin_op> &pool, nb::kwargs options) {
         cudaq::python::CppPyKernelDecorator initialStateKernelWrapper(
             initialStateKernel);
         auto fptr = initialStateKernelWrapper.getDirectKernelCall<
@@ -1026,9 +1050,9 @@ Notes:
 
         // Handle the case where the user has provided a SciPy optimizer
         if (options.contains("optimizer") &&
-            py::isinstance<py::function>(options["optimizer"])) {
-          auto func = options["optimizer"].cast<py::function>();
-          if (func.attr("__name__").cast<std::string>() != "minimize")
+            nb::isinstance<nb::callable>(options["optimizer"])) {
+          auto func = nb::cast<nb::callable>(options["optimizer"]);
+          if (nb::cast<std::string>(func.attr("__name__")) != "minimize")
             throw std::runtime_error(
                 "Invalid functional optimizer provided (only "
                 "scipy.optimize.minimize supported).");
@@ -1058,7 +1082,7 @@ Notes:
     Keyword Args:
         optimizer (str): Optional name of the optimizer to use. Defaults to cobyla.
         gradient (str): Optional name of the gradient method to use. Defaults to empty.
-    
+
     Options Dictionary:
         The following keys are supported in the options dictionary:
         - max_iter (int): Maximum number of iterations. Default: 30
@@ -1082,36 +1106,35 @@ Notes:
   )");
 
   // Bind the qaoa_result struct
-  py::class_<cudaq::solvers::qaoa_result>(
+  nb::class_<cudaq::solvers::qaoa_result>(
       solvers, "QAOAResult",
       "The QAOAResult encodes the optimal value, optimal parameters, and final "
       "sampled state as a cudaq.SampleResult.")
-      .def(py::init<>())
-      .def_readwrite("optimal_value",
-                     &cudaq::solvers::qaoa_result::optimal_value)
-      .def_readwrite("optimal_parameters",
-                     &cudaq::solvers::qaoa_result::optimal_parameters)
-      .def_readwrite("optimal_config",
-                     &cudaq::solvers::qaoa_result::optimal_config)
+      .def(nb::init<>())
+      .def_rw("optimal_value", &cudaq::solvers::qaoa_result::optimal_value)
+      .def_rw("optimal_parameters",
+              &cudaq::solvers::qaoa_result::optimal_parameters)
+      .def_rw("optimal_config", &cudaq::solvers::qaoa_result::optimal_config)
       // Add tuple interface
       .def("__len__", [](const cudaq::solvers::qaoa_result &) { return 3; })
       .def("__getitem__",
-           [](const cudaq::solvers::qaoa_result &r, size_t i) {
+           [](const cudaq::solvers::qaoa_result &r, size_t i) -> nb::object {
              switch (i) {
              case 0:
-               return py::cast(r.optimal_value);
+               return nb::cast(r.optimal_value);
              case 1:
-               return py::cast(r.optimal_parameters);
+               return nb::cast(r.optimal_parameters);
              case 2:
-               return py::cast(r.optimal_config);
+               return nb::cast(r.optimal_config);
              default:
-               throw py::index_error();
+               throw nb::index_error();
              }
            })
       // Enable iteration protocol
-      .def("__iter__", [](const cudaq::solvers::qaoa_result &r) -> py::object {
-        return py::iter(py::make_tuple(r.optimal_value, r.optimal_parameters,
-                                       r.optimal_config));
+      .def("__iter__", [](const cudaq::solvers::qaoa_result &r) -> nb::object {
+        return nb::make_tuple(r.optimal_value, r.optimal_parameters,
+                              r.optimal_config)
+            .attr("__iter__")();
       });
 
   // Bind QAOA functions using lambdas
@@ -1119,14 +1142,14 @@ Notes:
       "qaoa",
       [](const cudaq::spin_op &problemHamiltonian,
          const cudaq::spin_op &referenceHamiltonian, std::size_t numLayers,
-         const std::vector<double> &initialParameters, py::kwargs options) {
+         const std::vector<double> &initialParameters, nb::kwargs options) {
         if (initialParameters.empty())
           throw std::runtime_error("qaoa initial parameters empty.");
         // Handle the case where the user has provided a SciPy optimizer
         if (options.contains("optimizer") &&
-            py::isinstance<py::function>(options["optimizer"])) {
-          auto func = options["optimizer"].cast<py::function>();
-          if (func.attr("__name__").cast<std::string>() != "minimize")
+            nb::isinstance<nb::callable>(options["optimizer"])) {
+          auto func = nb::cast<nb::callable>(options["optimizer"]);
+          if (nb::cast<std::string>(func.attr("__name__")) != "minimize")
             throw std::runtime_error(
                 "Invalid functional optimizer provided (only "
                 "scipy.optimize.minimize supported).");
@@ -1144,20 +1167,20 @@ Notes:
                                     *optimizer, numLayers, initialParameters,
                                     hetMapFromKwargs(options));
       },
-      py::arg("problemHamiltonian"), py::arg("referenceHamiltonian"),
-      py::arg("numLayers"), py::arg("initialParameters"));
+      nb::arg("problemHamiltonian"), nb::arg("referenceHamiltonian"),
+      nb::arg("numLayers"), nb::arg("initialParameters"), nb::arg("**kwargs"));
 
   solvers.def(
       "qaoa",
       [](const cudaq::spin_op &problemHamiltonian, std::size_t numLayers,
-         const std::vector<double> &initialParameters, py::kwargs options) {
+         const std::vector<double> &initialParameters, nb::kwargs options) {
         if (initialParameters.empty())
           throw std::runtime_error("qaoa initial parameters empty.");
         // Handle the case where the user has provided a SciPy optimizer
         if (options.contains("optimizer") &&
-            py::isinstance<py::function>(options["optimizer"])) {
-          auto func = options["optimizer"].cast<py::function>();
-          if (func.attr("__name__").cast<std::string>() != "minimize")
+            nb::isinstance<nb::callable>(options["optimizer"])) {
+          auto func = nb::cast<nb::callable>(options["optimizer"]);
+          if (nb::cast<std::string>(func.attr("__name__")) != "minimize")
             throw std::runtime_error(
                 "Invalid functional optimizer provided (only "
                 "scipy.optimize.minimize supported).");
@@ -1174,13 +1197,13 @@ Notes:
                                     initialParameters,
                                     hetMapFromKwargs(options));
       },
-      py::arg("problemHamiltonian"), py::arg("numLayers"),
-      py::arg("initialParameters"));
+      nb::arg("problemHamiltonian"), nb::arg("numLayers"),
+      nb::arg("initialParameters"), nb::arg("**kwargs"));
 
   solvers.def(
       "get_num_qaoa_parameters",
       [](const cudaq::spin_op &problemHamiltonian, std::size_t numLayers,
-         py::kwargs options) {
+         nb::kwargs options) {
         return cudaq::solvers::get_num_qaoa_parameters(
             problemHamiltonian, numLayers, hetMapFromKwargs(options));
       },
@@ -1188,26 +1211,26 @@ Notes:
 
   solvers.def(
       "get_maxcut_hamiltonian",
-      [](py::object nx_graph) {
+      [](nb::object nx_graph) {
         // Convert NetworkX graph to our internal representation
         cudaqx::graph g = convert_networkx_graph(nx_graph);
 
         // Generate and return the Hamiltonian
         return cudaq::solvers::get_maxcut_hamiltonian(g);
       },
-      "Generate MaxCut Hamiltonian from a NetworkX graph", py::arg("graph"));
+      "Generate MaxCut Hamiltonian from a NetworkX graph", nb::arg("graph"));
 
   solvers.def(
       "get_clique_hamiltonian",
-      [](py::object nx_graph, double penalty = 4.0) {
+      [](nb::object nx_graph, double penalty = 4.0) {
         // Convert NetworkX graph to our internal representation
         cudaqx::graph g = convert_networkx_graph(nx_graph);
 
         // Generate and return the Hamiltonian
         return cudaq::solvers::get_clique_hamiltonian(g, penalty);
       },
-      "Generate Clique Hamiltonian from a NetworkX graph", py::arg("graph"),
-      py::arg("penalty") = 4.0);
+      "Generate Clique Hamiltonian from a NetworkX graph", nb::arg("graph"),
+      nb::arg("penalty") = 4.0);
 
   std::stringstream ss;
   ss << "CUDA-Q Solvers " << cudaq::solvers::getVersion() << " ("

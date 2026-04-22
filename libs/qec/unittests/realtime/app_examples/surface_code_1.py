@@ -92,7 +92,7 @@ def save_dem_to_file(dem, dem_filename, numSyndromesPerRound, num_logical):
 def load_dem_from_file(dem_filename: str, dem: qec.DetectorErrorModel,
                        num_logical: int) -> None:
     print(f"load_dem_from_file: Loading dem from file: {dem_filename}")
-    with open(dem_filename, 'rb') as f:
+    with open(dem_filename, 'r') as f:
         dem_str = f.read()
 
     multi_cfg = qec.multi_decoder_config.from_yaml_str(dem_str)

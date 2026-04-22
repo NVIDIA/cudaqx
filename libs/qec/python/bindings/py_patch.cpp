@@ -9,31 +9,31 @@
 #include "py_patch.h"
 
 #include "cudaq/qec/patch.h"
-#include <pybind11/pybind11.h>
+#include <nanobind/nanobind.h>
 
-namespace py = pybind11;
+namespace nb = nanobind;
 
 namespace cudaq::qec {
-void bindPatch(py::module &mod) {
-  auto qecmod = py::hasattr(mod, "qecrt")
-                    ? mod.attr("qecrt").cast<py::module_>()
+void bindPatch(nb::module_ &mod) {
+  auto qecmod = nb::hasattr(mod, "qecrt")
+                    ? nb::cast<nb::module_>(mod.attr("qecrt"))
                     : mod.def_submodule("qecrt");
 
   mod.doc() = "Python bindings for CUDA-Q QEC patch";
 
-  py::class_<cudaq::qec::patch>(
+  nb::class_<cudaq::qec::patch>(
       qecmod, "patch",
       "Represents a logical qubit patch for quantum error correction.\n"
       "Fields are cudaq.qview objects:\n"
       " - data : data-qubit view\n"
       " - ancx : X-stabilizer ancilla view\n"
       " - ancz : Z-stabilizer ancilla view")
-      .def_readwrite("data", &cudaq::qec::patch::data,
-                     "View of the data qubits in the patch")
-      .def_readwrite("ancx", &cudaq::qec::patch::data,
-                     "View of the ancilla qubits for X stabilizers")
-      .def_readwrite("ancz", &cudaq::qec::patch::data,
-                     "View of the ancilla qubits for Z stabilizers")
+      .def_rw("data", &cudaq::qec::patch::data,
+              "View of the data qubits in the patch")
+      .def_rw("ancx", &cudaq::qec::patch::data,
+              "View of the ancilla qubits for X stabilizers")
+      .def_rw("ancz", &cudaq::qec::patch::data,
+              "View of the ancilla qubits for Z stabilizers")
       .def("__repr__", [](const cudaq::qec::patch &p) {
         std::string s = "<cudaq.qec.patch";
         try {
