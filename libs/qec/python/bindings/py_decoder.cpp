@@ -333,7 +333,7 @@ void bindDecoder(nb::module_ &mod) {
               "Parity check matrix must be 2-dimensional.");
         }
 
-        if (sizeof(uint8_t) != sizeof(uint8_t)) {
+        if (H.itemsize() != sizeof(uint8_t)) {
           throw std::runtime_error(
               "Parity check matrix must be an array of uint8_t.");
         }
