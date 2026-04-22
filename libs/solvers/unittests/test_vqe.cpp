@@ -91,3 +91,96 @@ TEST(SolversVQETester, checkAPI) {
     EXPECT_TRUE(result.energy > -2.0 && result.energy < -1.5);
   }
 }
+
+TEST(SolversVQETester, checkCentralDifference2Params) {
+  // VQE with central_difference gradient and 2 parameters.
+  using namespace cudaq::spin;
+  cudaq::spin_op h = 5.907 - 2.1433 * x(0) * x(1) - 2.1433 * y(0) * y(1) +
+                     .21829 * z(0) - 6.125 * z(1);
+
+  auto lbfgs = cudaq::optim::optimizer::get("lbfgs");
+  auto gradient =
+      cudaq::observe_gradient::get("central_difference", ansatz2Params, h);
+  auto [energy, params, data] =
+      cudaq::solvers::vqe(ansatz2Params, h, *lbfgs, *gradient, {0.0, 0.0});
+  // The H2 ground state energy is -1.748. With correct gradients and a
+  // 2-parameter ansatz, L-BFGS should converge to this value.
+  EXPECT_NEAR(energy, -1.748, 1e-3);
+}
+
+TEST(SolversVQETester, checkParameterShift2Params) {
+  // VQE with parameter_shift gradient and 2 parameters.
+  using namespace cudaq::spin;
+  cudaq::spin_op h = 5.907 - 2.1433 * x(0) * x(1) - 2.1433 * y(0) * y(1) +
+                     .21829 * z(0) - 6.125 * z(1);
+
+  auto lbfgs = cudaq::optim::optimizer::get("lbfgs");
+  auto gradient =
+      cudaq::observe_gradient::get("parameter_shift", ansatz2Params, h);
+  auto [energy, params, data] =
+      cudaq::solvers::vqe(ansatz2Params, h, *lbfgs, *gradient, {0.0, 0.0});
+  // The H2 ground state energy is -1.748. With correct gradients and a
+  // 2-parameter ansatz, L-BFGS should converge to this value.
+  EXPECT_NEAR(energy, -1.748, 1e-3);
+}
+
+TEST(SolversVQETester, checkForwardDifference2Params) {
+  // VQE with forward_difference gradient and 2 parameters.
+  using namespace cudaq::spin;
+  cudaq::spin_op h = 5.907 - 2.1433 * x(0) * x(1) - 2.1433 * y(0) * y(1) +
+                     .21829 * z(0) - 6.125 * z(1);
+
+  auto lbfgs = cudaq::optim::optimizer::get("lbfgs");
+  auto gradient =
+      cudaq::observe_gradient::get("forward_difference", ansatz2Params, h);
+  auto [energy, params, data] =
+      cudaq::solvers::vqe(ansatz2Params, h, *lbfgs, *gradient, {0.0, 0.0});
+  // The H2 ground state energy is -1.748. With correct gradients and a
+  // 2-parameter ansatz, L-BFGS should converge to this value.
+  EXPECT_NEAR(energy, -1.748, 1e-3);
+}
+
+TEST(SolversVQETester, checkCentralDifference3Params) {
+  using namespace cudaq::spin;
+  cudaq::spin_op h = 5.907 - 2.1433 * x(0) * x(1) - 2.1433 * y(0) * y(1) +
+                     .21829 * z(0) - 6.125 * z(1);
+
+  auto lbfgs = cudaq::optim::optimizer::get("lbfgs");
+  auto gradient =
+      cudaq::observe_gradient::get("central_difference", ansatz3Params, h);
+  auto [energy, params, data] =
+      cudaq::solvers::vqe(ansatz3Params, h, *lbfgs, *gradient, {0.0, 0.0, 0.0});
+  // Same H2 ground state. 3 parameters give the ansatz more freedom, but
+  // the optimizer still must find E = -1.748 with correct gradients.
+  EXPECT_NEAR(energy, -1.748, 1e-3);
+}
+
+TEST(SolversVQETester, checkParameterShift3Params) {
+  using namespace cudaq::spin;
+  cudaq::spin_op h = 5.907 - 2.1433 * x(0) * x(1) - 2.1433 * y(0) * y(1) +
+                     .21829 * z(0) - 6.125 * z(1);
+
+  auto lbfgs = cudaq::optim::optimizer::get("lbfgs");
+  auto gradient =
+      cudaq::observe_gradient::get("parameter_shift", ansatz3Params, h);
+  auto [energy, params, data] =
+      cudaq::solvers::vqe(ansatz3Params, h, *lbfgs, *gradient, {0.0, 0.0, 0.0});
+  // Same H2 ground state. 3 parameters give the ansatz more freedom, but
+  // the optimizer still must find E = -1.748 with correct gradients.
+  EXPECT_NEAR(energy, -1.748, 1e-3);
+}
+
+TEST(SolversVQETester, checkForwardDifference3Params) {
+  using namespace cudaq::spin;
+  cudaq::spin_op h = 5.907 - 2.1433 * x(0) * x(1) - 2.1433 * y(0) * y(1) +
+                     .21829 * z(0) - 6.125 * z(1);
+
+  auto lbfgs = cudaq::optim::optimizer::get("lbfgs");
+  auto gradient =
+      cudaq::observe_gradient::get("forward_difference", ansatz3Params, h);
+  auto [energy, params, data] =
+      cudaq::solvers::vqe(ansatz3Params, h, *lbfgs, *gradient, {0.0, 0.0, 0.0});
+  // Same H2 ground state. 3 parameters give the ansatz more freedom, but
+  // the optimizer still must find E = -1.748 with correct gradients.
+  EXPECT_NEAR(energy, -1.748, 1e-3);
+}

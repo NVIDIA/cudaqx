@@ -1,7 +1,7 @@
 #!/bin/sh
 
 # ============================================================================ #
-# Copyright (c) 2022 - 2025 NVIDIA Corporation & Affiliates.                   #
+# Copyright (c) 2022 - 2026 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -106,30 +106,43 @@ echo "Building MLIR bindings for ${python}" && \
 # ==============================================================================
 
 CUDAQ_PATCH='diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 737001b56..195b2f44f 100644
+index dc906f615..5d591ea06 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -559,7 +559,7 @@ if(CUDAQ_BUILD_TESTS)
+@@ -682,7 +682,7 @@ if(CUDAQ_BUILD_TESTS)
  endif()
- 
+
  if (CUDAQ_ENABLE_PYTHON)
 -  find_package(Python 3 COMPONENTS Interpreter Development)
 +  find_package(Python 3 COMPONENTS Interpreter Development.Module)
-   
+
    # Apply specific patch to pybind11 for our documentation.
    # Only apply the patch if not already applied.
 diff --git a/python/runtime/cudaq/domains/plugins/CMakeLists.txt b/python/runtime/cudaq/domains/plugins/CMakeLists.txt
-index 7b7541d..2261334 100644
+index 3bd2e991..2603e72f 100644
 --- a/python/runtime/cudaq/domains/plugins/CMakeLists.txt
 +++ b/python/runtime/cudaq/domains/plugins/CMakeLists.txt
-@@ -17,6 +17,6 @@ if (SKBUILD)
-     if (NOT Python_FOUND)
-       message(FATAL_ERROR "find_package(Python) not run?")
-     endif()
--    target_link_libraries(cudaq-pyscf PRIVATE Python::Python pybind11::pybind11 cudaq-chemistry cudaq-operator cudaq cudaq-py-utils)
-+    target_link_libraries(cudaq-pyscf PRIVATE Python::Module pybind11::pybind11 cudaq-chemistry cudaq-operator cudaq cudaq-py-utils)
+@@ -33,6 +33,6 @@ else()
+   endif()
+   target_link_libraries(cudaq-pyscf
+     PRIVATE
+-      nanobind-static Python::Python
++      nanobind-static Python::Module
+       cudaq-chemistry cudaq-operator cudaq cudaq-py-utils cudaq-platform-default)
  endif()
- install(TARGETS cudaq-pyscf DESTINATION lib/plugins)'
+diff --git a/python/runtime/interop/CMakeLists.txt b/python/runtime/interop/CMakeLists.txt
+index c20b2d83..dcc7bfdf 100644
+--- a/python/runtime/interop/CMakeLists.txt
++++ b/python/runtime/interop/CMakeLists.txt
+@@ -14,6 +14,6 @@ target_include_directories(cudaq-python-interop PRIVATE
+ if (SKBUILD)
+   target_link_libraries(cudaq-python-interop PRIVATE nanobind-static Python::Module cudaq)
+ else()
+-  target_link_libraries(cudaq-python-interop PRIVATE nanobind-static Python::Python cudaq)
++  target_link_libraries(cudaq-python-interop PRIVATE nanobind-static Python::Module cudaq)
+ endif()
+ install (FILES PythonCppInterop.h PythonCppInteropDecls.h DESTINATION include/cudaq/python/)
+'
 
 echo "$CUDAQ_PATCH" | git apply --verbose
 

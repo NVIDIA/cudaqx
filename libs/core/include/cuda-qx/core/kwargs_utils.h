@@ -9,10 +9,12 @@
 
 #include "cuda-qx/core/heterogeneous_map.h"
 #include "cuda-qx/core/tensor.h"
-#include "pybind11/numpy.h"
-#include "pybind11/pybind11.h"
+#include <nanobind/nanobind.h>
+#include <nanobind/ndarray.h>
+#include <nanobind/stl/string.h>
+#include <nanobind/stl/vector.h>
 
-namespace py = pybind11;
+namespace nb = nanobind;
 
 namespace cudaqx {
 
@@ -20,45 +22,45 @@ namespace cudaqx {
 /// key string from the provided options `kwargs` `dict`. Return the `orVal`
 /// if the key is not in the `dict`.
 template <typename T>
-T getValueOr(py::kwargs &options, const std::string &key, const T &orVal) {
+T getValueOr(nb::kwargs &options, const std::string &key, const T &orVal) {
   if (options.contains(key))
     for (auto item : options)
-      if (item.first.cast<std::string>() == key)
-        return item.second.cast<T>();
+      if (nb::cast<std::string>(item.first) == key)
+        return nb::cast<T>(item.second);
 
   return orVal;
 }
 
-inline heterogeneous_map hetMapFromKwargs(const py::kwargs &kwargs) {
+inline heterogeneous_map hetMapFromKwargs(const nb::kwargs &kwargs) {
   cudaqx::heterogeneous_map result;
 
   for (const auto &item : kwargs) {
-    std::string key = py::cast<std::string>(item.first);
-    auto value = item.second;
+    std::string key = nb::cast<std::string>(item.first);
+    nb::handle value = item.second;
 
-    if (py::isinstance<py::bool_>(value)) {
-      result.insert(key, value.cast<bool>());
-    } else if (py::isinstance<py::int_>(value)) {
-      result.insert(key, value.cast<std::size_t>());
-    } else if (py::isinstance<py::float_>(value)) {
-      result.insert(key, value.cast<double>());
-    } else if (py::isinstance<py::str>(value)) {
-      result.insert(key, value.cast<std::string>());
-    } else if (py::isinstance<py::dict>(value)) {
+    if (nb::isinstance<nb::bool_>(value)) {
+      result.insert(key, nb::cast<bool>(value));
+    } else if (nb::isinstance<nb::int_>(value)) {
+      result.insert(key, nb::cast<std::size_t>(value));
+    } else if (nb::isinstance<nb::float_>(value)) {
+      result.insert(key, nb::cast<double>(value));
+    } else if (nb::isinstance<nb::str>(value)) {
+      result.insert(key, nb::cast<std::string>(value));
+    } else if (nb::isinstance<nb::dict>(value)) {
       // Recursively convert nested dictionary
-      result.insert(key, hetMapFromKwargs(value.cast<py::dict>()));
-    } else if (py::isinstance<py::list>(value)) {
+      result.insert(key, hetMapFromKwargs(nb::cast<nb::kwargs>(value)));
+    } else if (nb::isinstance<nb::list>(value)) {
       // Handle Python lists
-      py::list py_list = value.cast<py::list>();
+      nb::list py_list = nb::cast<nb::list>(value);
       if (py_list.size() > 0) {
         // Check if it's a nested list (list of lists)
-        if (py::isinstance<py::list>(py_list[0])) {
+        if (nb::isinstance<nb::list>(py_list[0])) {
           std::vector<std::vector<double>> vec_vec;
           for (const auto &item : py_list) {
-            py::list inner_list = item.cast<py::list>();
+            nb::list inner_list = nb::cast<nb::list>(item);
             std::vector<double> inner_vec;
             for (const auto &v : inner_list) {
-              inner_vec.push_back(v.cast<double>());
+              inner_vec.push_back(nb::cast<double>(v));
             }
             vec_vec.push_back(std::move(inner_vec));
           }
@@ -67,30 +69,64 @@ inline heterogeneous_map hetMapFromKwargs(const py::kwargs &kwargs) {
           // Single-level list - try to convert to vector<double>
           std::vector<double> vec;
           for (const auto &item : py_list) {
-            vec.push_back(item.cast<double>());
+            vec.push_back(nb::cast<double>(item));
           }
           result.insert(key, std::move(vec));
         }
       }
-    } else if (py::isinstance<py::array>(value)) {
-      py::array np_array = value.cast<py::array>();
-      py::buffer_info info = np_array.request();
-      auto insert_vector = [&](auto type_tag) {
-        using T = decltype(type_tag);
-        std::vector<T> vec(static_cast<T *>(info.ptr),
-                           static_cast<T *>(info.ptr) + info.size);
-        result.insert(key, std::move(vec));
-      };
-      if (info.format == py::format_descriptor<double>::format()) {
-        insert_vector(double{});
-      } else if (info.format == py::format_descriptor<float>::format()) {
-        insert_vector(float{});
-      } else if (info.format == py::format_descriptor<int>::format()) {
-        insert_vector(int{});
-      } else if (info.format == py::format_descriptor<uint8_t>::format()) {
-        insert_vector(uint8_t{});
+    } else if (nb::isinstance<nb::ndarray<>>(value)) {
+      nb::ndarray<> np_array = nb::cast<nb::ndarray<>>(value);
+      if (np_array.ndim() >= 2) {
+        // nanobind strides are element counts; stride(0)==1 means column-major
+        if (np_array.stride(0) == 1) {
+          throw std::runtime_error(
+              "Array in kwargs must be in row-major order, but "
+              "column-major order was detected.");
+        }
+        std::vector<std::size_t> shape;
+        shape.reserve(np_array.ndim());
+        for (std::size_t d = 0; d < np_array.ndim(); d++)
+          shape.push_back(np_array.shape(d));
+
+        auto dtype = np_array.dtype();
+        auto insert_tensor = [&](auto type_tag) {
+          using T = decltype(type_tag);
+          cudaqx::tensor<T> ten(shape);
+          ten.borrow(static_cast<T *>(np_array.data()), shape);
+          result.insert(key, std::move(ten));
+        };
+        if (dtype == nb::dtype<double>()) {
+          insert_tensor(double{});
+        } else if (dtype == nb::dtype<float>()) {
+          insert_tensor(float{});
+        } else if (dtype == nb::dtype<int>()) {
+          insert_tensor(int{});
+        } else if (dtype == nb::dtype<uint8_t>()) {
+          insert_tensor(uint8_t{});
+        } else {
+          throw std::runtime_error("Unsupported array data type in kwargs.");
+        }
       } else {
-        throw std::runtime_error("Unsupported array data type in kwargs.");
+        // 1D array: keep as flattened vector for backward compatibility
+        // (e.g. error_rate_vec used by decoders).
+        auto dtype = np_array.dtype();
+        auto insert_vector = [&](auto type_tag) {
+          using T = decltype(type_tag);
+          T *ptr = static_cast<T *>(np_array.data());
+          std::vector<T> vec(ptr, ptr + np_array.size());
+          result.insert(key, std::move(vec));
+        };
+        if (dtype == nb::dtype<double>()) {
+          insert_vector(double{});
+        } else if (dtype == nb::dtype<float>()) {
+          insert_vector(float{});
+        } else if (dtype == nb::dtype<int>()) {
+          insert_vector(int{});
+        } else if (dtype == nb::dtype<uint8_t>()) {
+          insert_vector(uint8_t{});
+        } else {
+          throw std::runtime_error("Unsupported array data type in kwargs.");
+        }
       }
     } else {
       throw std::runtime_error(
@@ -102,41 +138,41 @@ inline heterogeneous_map hetMapFromKwargs(const py::kwargs &kwargs) {
 }
 
 template <typename T>
-tensor<T> toTensor(const py::array_t<T> &H, bool perform_pcm_checks = false) {
-  py::buffer_info buf = H.request();
-
-  if (buf.ndim >= 1 && buf.strides[0] == buf.itemsize) {
+tensor<T> toTensor(const nb::ndarray<nb::numpy, T> &H,
+                   bool perform_pcm_checks = false) {
+  if (H.ndim() >= 1 && H.stride(0) == 1) {
     throw std::runtime_error("toTensor: data must be in row-major order, but "
                              "column-major order was detected.");
   }
 
   if (perform_pcm_checks) {
-    if (buf.itemsize != sizeof(uint8_t)) {
+    if (H.itemsize() != sizeof(uint8_t)) {
       throw std::runtime_error(
           "Parity check matrix must be an array of uint8_t.");
     }
 
-    if (buf.ndim != 2) {
+    if (H.ndim() != 2) {
       throw std::runtime_error("Parity check matrix must be 2-dimensional.");
     }
   }
 
   // Create a vector of the array dimensions
   std::vector<std::size_t> shape;
-  for (py::ssize_t d : buf.shape) {
-    shape.push_back(static_cast<std::size_t>(d));
+  shape.reserve(H.ndim());
+  for (std::size_t d = 0; d < H.ndim(); d++) {
+    shape.push_back(H.shape(d));
   }
 
   // Create a tensor and borrow the NumPy array data
   cudaqx::tensor<T> tensor_H(shape);
-  tensor_H.borrow(static_cast<T *>(buf.ptr), std::move(shape));
+  tensor_H.borrow(static_cast<T *>(H.data()), std::move(shape));
   return tensor_H;
 }
 
-/// @brief Convert a py::array_t<uint8_t> to a tensor<uint8_t>. This is the same
+/// @brief Convert a nb::ndarray<nb::numpy, T> to a tensor<T>. This is the same
 /// as toTensor, but with additional checks.
 template <typename T>
-tensor<T> pcmToTensor(const py::array_t<T> &H) {
+tensor<T> pcmToTensor(const nb::ndarray<nb::numpy, T> &H) {
   return toTensor(H, /*perform_pcm_checks=*/true);
 }
 

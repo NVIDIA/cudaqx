@@ -1,12 +1,12 @@
 # ============================================================================ #
-# Copyright (c) 2025 NVIDIA Corporation & Affiliates.                          #
+# Copyright (c) 2025 - 2026 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
-ARG base_image=ghcr.io/nvidia/cuda-quantum-devdeps:ext-amd64-cu12.6-gcc11-main
+ARG base_image=ghcr.io/nvidia/cuda-quantum-devcontainer:amd64-cu12.6-gcc11-main
 FROM $base_image
 
 ARG cuda_version=12.6

@@ -1,23 +1,27 @@
 # ============================================================================ #
-# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
+# Copyright (c) 2024 - 2026 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
-# External Dependencies 
+# External Dependencies
 # ==============================================================================
 
-FetchContent_Declare(
-  pybind11
-  GIT_REPOSITORY https://github.com/pybind/pybind11
-  GIT_TAG v2.13
-  EXCLUDE_FROM_ALL
-)
-FetchContent_MakeAvailable(pybind11)
+# Find Python before nanobind so Python_INCLUDE_DIRS is available when nanobind
+# builds its nanobind-static library target.
+find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
 
-find_package(Python COMPONENTS Interpreter REQUIRED)
+if(NOT COMMAND nanobind_add_module)
+  FetchContent_Declare(
+    nanobind
+    GIT_REPOSITORY https://github.com/wjakob/nanobind
+    GIT_TAG v2.12.0
+    EXCLUDE_FROM_ALL
+  )
+  FetchContent_MakeAvailable(nanobind)
+endif()
 
 # ==============================================================================
 
@@ -33,8 +37,8 @@ target_include_directories(${MODULE_NAME} PRIVATE .)
 
 # TODO - Remove dependency on cudaq::cudaq in order to avoid automatic linking
 # of a specific simulator like libnvqir-qpp.so.
-target_link_libraries(${MODULE_NAME} 
-  PRIVATE 
+target_link_libraries(${MODULE_NAME}
+  PRIVATE
     cudaq-solvers
     cudaq::cudaq
     cudaq::cudaq-python-interop
@@ -43,12 +47,17 @@ target_link_libraries(${MODULE_NAME}
 set_target_properties(${MODULE_NAME} PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/python/cudaq_solvers")
 
+set(SHARED_PYTHON_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../core/python)
+
 if (NOT SKBUILD)
   add_custom_target(
     copy_solvers_python_files ALL
     COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${CMAKE_CURRENT_SOURCE_DIR}/cudaq_solvers
             ${CMAKE_BINARY_DIR}/python/cudaq_solvers
+    COMMAND ${CMAKE_COMMAND} -E copy
+            ${SHARED_PYTHON_DIR}/_system_dep_check.py
+            ${CMAKE_BINARY_DIR}/python/cudaq_solvers/_system_dep_check.py
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/cudaq_solvers
     COMMENT "Copying Python files to binary directory"
   )
@@ -56,7 +65,7 @@ if (NOT SKBUILD)
   add_dependencies(${MODULE_NAME} copy_solvers_python_files)
 endif()
 
-# RPATH configuration 
+# RPATH configuration
 # ==============================================================================
 
 if (NOT SKBUILD)
@@ -77,7 +86,7 @@ else()
   )
 endif()
 
-# Install 
+# Install
 # ==============================================================================
 
 install(DIRECTORY cudaq_solvers
@@ -85,8 +94,12 @@ install(DIRECTORY cudaq_solvers
   DESTINATION .
 )
 
-install(TARGETS ${MODULE_NAME}
+install(FILES ${SHARED_PYTHON_DIR}/_system_dep_check.py
   COMPONENT solvers-python
   DESTINATION cudaq_solvers/
 )
 
+install(TARGETS ${MODULE_NAME}
+  COMPONENT solvers-python
+  DESTINATION cudaq_solvers/
+)

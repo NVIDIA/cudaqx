@@ -7,13 +7,13 @@
  ******************************************************************************/
 
 #include "common/ExtraPayloadProvider.h"
-#include "common/Logger.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Base64.h"
 #include "llvm/Support/YAMLTraits.h"
 #include "llvm/Support/raw_ostream.h"
 #include "realtime_decoding.h"
 #include "cudaq/qec/realtime/decoding_config.h"
+#include "cudaq/runtime/logger/logger.h"
 #include <filesystem>
 #include <fstream>
 #include <type_traits>

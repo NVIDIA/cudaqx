@@ -1,5 +1,5 @@
 /****************************************************************-*- C++ -*-****
- * Copyright (c) 2024 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2024 - 2026 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -17,6 +17,12 @@ namespace cudaqx {
 template <typename T>
 struct RelatedTypesMap {
   using types = std::tuple<>;
+};
+
+/// @brief Specialization of RelatedTypesMap for bool
+template <>
+struct RelatedTypesMap<bool> {
+  using types = std::tuple<int, long, std::size_t>;
 };
 
 /// @brief Specialization of RelatedTypesMap for int

@@ -1,5 +1,5 @@
 # ============================================================================ #
-# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
+# Copyright (c) 2024 - 2026 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -182,3 +182,70 @@ def test_uccsd_loops():
     assert '01000010' in counts
     assert '10000001' in counts
     assert '11000000' in counts
+
+
+def test_uccsd_open_shell_h3():
+    # H3 linear chain: 3 electrons, doublet (spin=1).
+    # Exercises the spin>0 code path of UCCSD.
+    # A correct UCCSD ansatz must capture correlation energy, producing
+    # a VQE energy lower than the Hartree-Fock energy and close to FCI.
+    geometry = [('H', (0., 0., 0.)), ('H', (0., 0., 1.0)), ('H', (0., 0., 2.0))]
+    molecule = solvers.create_molecule(geometry,
+                                       'sto-3g',
+                                       1,
+                                       0,
+                                       casci=True,
+                                       verbose=True)
+
+    numQubits = molecule.n_orbitals * 2
+    numElectrons = molecule.n_electrons
+    spin = 1
+
+    assert numElectrons == 3, f"Expected 3 electrons, got {numElectrons}"
+    assert numQubits == 6, f"Expected 6 qubits, got {numQubits}"
+
+    hf_energy = molecule.energies['hf_energy']
+    fci_energy = molecule.energies['fci_energy']
+    print(f"HF  energy: {hf_energy:.8f}")
+    print(f"FCI energy: {fci_energy:.8f}")
+
+    # FCI must be lower than HF (sanity check on the reference values)
+    assert fci_energy < hf_energy - 1e-6
+
+    parameter_count = solvers.stateprep.get_num_uccsd_parameters(
+        numElectrons, numQubits, spin)
+
+    @cudaq.kernel
+    def ansatz(thetas: list[float]):
+        q = cudaq.qvector(numQubits)
+        # Prepare reference state: occupy first numElectrons qubits
+        # In interleaved ordering this gives alpha_0, beta_0, alpha_1
+        for i in range(numElectrons):
+            x(q[i])
+        solvers.stateprep.uccsd(q, thetas, numElectrons, spin)
+
+    ansatz.compile()
+
+    x0 = np.zeros(parameter_count)
+
+    energy, params, all_data = solvers.vqe(ansatz,
+                                           molecule.hamiltonian,
+                                           x0,
+                                           optimizer=minimize,
+                                           method='COBYLA',
+                                           tol=1e-5,
+                                           options={
+                                               'disp': True,
+                                               'maxiter': 500
+                                           })
+    print(f"VQE energy: {energy:.8f}")
+
+    # UCCSD must improve upon Hartree-Fock by capturing correlation energy
+    assert energy < hf_energy - 0.001, \
+        (f"VQE+UCCSD on open-shell H3 failed to improve upon HF: "
+         f"VQE={energy:.6f}, HF={hf_energy:.6f}")
+
+    # UCCSD energy should be close to the exact (FCI) answer
+    assert np.isclose(energy, fci_energy, atol=0.05), \
+        (f"VQE+UCCSD energy not close to FCI: "
+         f"VQE={energy:.6f}, FCI={fci_energy:.6f}")

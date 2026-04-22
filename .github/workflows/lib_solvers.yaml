@@ -13,7 +13,7 @@ jobs:
         platform: ['amd64', 'arm64']
         cuda_version: ['12.6', '13.0']
     runs-on: ${{ startsWith(github.repository, 'NVIDIA/cudaqx') && format('linux-{0}-cpu8', matrix.platform) || 'ubuntu-latest' }}
-    container: ghcr.io/nvidia/cuda-quantum-devdeps:ext-${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc11-main
+    container: ghcr.io/nvidia/cuda-quantum-devcontainer:${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc11-main
     permissions:
       actions: write
       contents: read
@@ -112,3 +112,44 @@ jobs:
           LD_LIBRARY_PATH: ${{ env.MPI_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
           OMPI_MCA_pml: ob1
         run: bash scripts/ci/test_examples.sh solvers
+
+      # ========================================================================
+      # Test missing system library detection
+      # ========================================================================
+
+      - name: Test missing system dependency error messages
+        env:
+          PYTHONPATH: ${{ steps.build.outputs.build-dir }}/python
+        run: |
+          check_import_fails() {
+            local label="$1"
+            local grep_pkg="$2"
+            local grep_hint="$3"
+
+            if python3 -c "import cudaq_solvers" 2>/dev/null; then
+              echo "ERROR: [$label] import cudaq_solvers should have failed" >&2
+              return 1
+            fi
+
+            output=$(python3 -c "import cudaq_solvers" 2>&1 || true)
+            echo "$output"
+
+            echo "$output" | grep -q "$grep_pkg" \
+              || { echo "ERROR: [$label] missing '$grep_pkg' in error message" >&2; return 1; }
+            echo "$output" | grep -q "$grep_hint" \
+              || { echo "ERROR: [$label] missing '$grep_hint' in error message" >&2; return 1; }
+            echo "PASS: $label"
+          }
+
+          # --- Test libgfortran ---
+          apt-get remove -y --purge libgfortran5 gfortran && apt-get autoremove -y
+          check_import_fails "libgfortran" "libgfortran5" "apt-get install"
+
+          # --- Test libquadmath (x86_64 only, does not exist on arm64) ---
+          if [ "$(uname -m)" = "x86_64" ]; then
+            apt-get install -y --no-install-recommends libgfortran5
+            apt-get remove -y --purge libquadmath0
+            check_import_fails "libquadmath" "libquadmath0" "apt-get install"
+          else
+            echo "SKIP: libquadmath (not applicable on $(uname -m))"
+          fi

@@ -57,6 +57,10 @@ runs:
         restore-keys: |
           ${{ steps.ccache-key.outputs.main }}
 
+    - name: Install GitHub CLI
+      run: bash .github/workflows/scripts/install_git_cli.sh
+      shell: bash
+
     - name: Build library
       id: build-lib
       env:

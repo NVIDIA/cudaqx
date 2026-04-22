@@ -16,6 +16,8 @@ Code
 .. doxygenclass:: cudaq::qec::steane::steane
     :members:
 
+.. _qec_stabilizer_grid_cpp:
+
 .. doxygenclass:: cudaq::qec::surface_code::stabilizer_grid
     :members:
 
@@ -67,6 +69,8 @@ Real-Time Decoding
 ==================
 
 .. include:: cpp_realtime_decoding_api.rst
+
+.. include:: realtime_pipeline_api.rst
 
 .. _parity_check_matrix_utilities:
 

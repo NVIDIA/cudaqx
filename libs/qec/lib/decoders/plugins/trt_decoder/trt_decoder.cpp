@@ -1,14 +1,14 @@
 /*******************************************************************************
- * Copyright (c) 2025 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2025 - 2026 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
-#include "common/Logger.h"
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/trt_decoder_internal.h"
+#include "cudaq/runtime/logger/logger.h"
 #include <algorithm>
 #include <cassert>
 #include <fstream>
@@ -98,17 +98,25 @@ public:
 static Logger gLogger;
 
 /// @brief TensorRT-based decoder for quantum error correction
-/// This decoder leverages NVIDIA TensorRT for accelerated inference
+/// This decoder leverages NVIDIA TensorRT for accelerated inference.
+///
+/// The network is built with strong typing
+/// (NetworkDefinitionCreationFlag::kSTRONGLY_TYPED), so TensorRT preserves the
+/// data types defined in the ONNX model exactly.  I/O tensor data types
+/// (float32, uint8) are automatically detected from the engine and host-side
+/// double values are converted to/from the engine's native types transparently.
 ///
 /// Constructor parameters:
 /// - "onnx_load_path": Path to ONNX model file (will build TensorRT engine)
 /// - "engine_load_path": Path to pre-built TensorRT engine file (loads
-/// directly)
+///   directly)
 /// - "engine_save_path": Path to save built TensorRT engine (optional)
-/// - "precision": Precision mode for inference (optional, default: "best")
-///   Options: "fp16", "bf16", "int8", "fp8", "noTF32", "best"
+/// - "precision": (optional, default: "best")  Accepted values: "tf32",
+///   "noTF32", "best".  Legacy values "fp16", "bf16", "int8", "fp8" are
+///   accepted but ignored with strongly-typed networks -- export the ONNX
+///   model in the desired precision instead.
 /// - "memory_workspace": Memory workspace size in bytes (optional, default:
-/// 1GB)
+///   1GB)
 ///
 /// Note: Only one of onnx_load_path or engine_load_path should be specified,
 /// not both.
@@ -205,20 +213,15 @@ CaptureResult try_capture_cuda_graph(nvinfer1::IExecutionContext *context,
                                      void *output_buffer, int input_index,
                                      int output_index,
                                      nvinfer1::ICudaEngine *engine,
-                                     size_t input_size) {
+                                     size_t input_byte_size) {
   CaptureResult result;
 
   try {
-    // Generate dummy input data (values don't matter for capture, just shape)
-    std::vector<float> dummy_input(input_size, 0.0f);
-
-    // Copy dummy data to GPU
-    cudaError_t err =
-        cudaMemcpy(input_buffer, dummy_input.data(), input_size * sizeof(float),
-                   cudaMemcpyHostToDevice);
+    // Zero-fill the GPU input buffer (values don't matter for capture)
+    cudaError_t err = cudaMemset(input_buffer, 0, input_byte_size);
     if (err != cudaSuccess) {
-      result.error_message =
-          "Failed to copy dummy data: " + std::string(cudaGetErrorString(err));
+      result.error_message = "Failed to zero-fill input buffer: " +
+                             std::string(cudaGetErrorString(err));
       return result;
     }
 
@@ -302,6 +305,57 @@ bool supports_cuda_graphs(const nvinfer1::ICudaEngine *engine) {
 
   return true;
 }
+
+size_t dataTypeSize(nvinfer1::DataType dtype) {
+  switch (dtype) {
+  case nvinfer1::DataType::kFLOAT:
+    return sizeof(float);
+  case nvinfer1::DataType::kHALF:
+    return 2;
+  case nvinfer1::DataType::kINT8:
+    return 1;
+  case nvinfer1::DataType::kINT32:
+    return sizeof(int32_t);
+  case nvinfer1::DataType::kBOOL:
+    return 1;
+  case nvinfer1::DataType::kUINT8:
+    return sizeof(uint8_t);
+  case nvinfer1::DataType::kFP8:
+    return 1;
+  case nvinfer1::DataType::kBF16:
+    return 2;
+  case nvinfer1::DataType::kINT64:
+    return sizeof(int64_t);
+  default:
+    return sizeof(float);
+  }
+}
+
+const char *dataTypeName(nvinfer1::DataType dtype) {
+  switch (dtype) {
+  case nvinfer1::DataType::kFLOAT:
+    return "float32";
+  case nvinfer1::DataType::kHALF:
+    return "float16";
+  case nvinfer1::DataType::kINT8:
+    return "int8";
+  case nvinfer1::DataType::kINT32:
+    return "int32";
+  case nvinfer1::DataType::kBOOL:
+    return "bool";
+  case nvinfer1::DataType::kUINT8:
+    return "uint8";
+  case nvinfer1::DataType::kFP8:
+    return "fp8";
+  case nvinfer1::DataType::kBF16:
+    return "bfloat16";
+  case nvinfer1::DataType::kINT64:
+    return "int64";
+  default:
+    return "unknown";
+  }
+}
+
 } // anonymous namespace
 
 // ============================================================================
@@ -358,6 +412,10 @@ struct trt_decoder::Impl {
   int output_index = 0;
   int input_size = 0;
   int output_size = 0;
+  nvinfer1::DataType input_dtype = nvinfer1::DataType::kFLOAT;
+  nvinfer1::DataType output_dtype = nvinfer1::DataType::kFLOAT;
+  size_t input_elem_size = sizeof(float);
+  size_t output_elem_size = sizeof(float);
   void *buffers[2] = {nullptr, nullptr};
   cudaStream_t stream;
 
@@ -376,13 +434,36 @@ struct trt_decoder::Impl {
   }
 
   ~Impl() {
+    // IMPORTANT: Destroy resources in the correct order.
+
+    // 1. Synchronise the stream so all async work completes
+    if (stream) {
+      cudaStreamSynchronize(stream);
+    }
+
+    // 2. Destroy the CUDA graph executor BEFORE the stream it was captured on
+    executor = TraditionalExecutor{};
+
+    // 3. Destroy TensorRT execution context and engine BEFORE freeing their
+    //    underlying GPU memory
+    context.reset();
+    engine.reset();
+
+    // 4. Free GPU buffers
     if (buffers[input_index]) {
       HANDLE_CUDA_ERROR_NO_THROW(cudaFree(buffers[input_index]));
+      buffers[input_index] = nullptr;
     }
     if (buffers[output_index]) {
       HANDLE_CUDA_ERROR_NO_THROW(cudaFree(buffers[output_index]));
+      buffers[output_index] = nullptr;
     }
-    HANDLE_CUDA_ERROR_NO_THROW(cudaStreamDestroy(stream));
+
+    // 5. Destroy stream last
+    if (stream) {
+      HANDLE_CUDA_ERROR_NO_THROW(cudaStreamDestroy(stream));
+      stream = nullptr;
+    }
   }
 };
 
@@ -463,8 +544,34 @@ trt_decoder::trt_decoder(const cudaqx::tensor<uint8_t> &H,
       throw std::runtime_error("Failed to identify input/output tensors");
     }
 
-    auto inputDims = impl_->engine->getTensorShape(
-        impl_->engine->getIOTensorName(impl_->input_index));
+    const char *inputTensorName =
+        impl_->engine->getIOTensorName(impl_->input_index);
+    const char *outputTensorName =
+        impl_->engine->getIOTensorName(impl_->output_index);
+
+    impl_->input_dtype = impl_->engine->getTensorDataType(inputTensorName);
+    impl_->output_dtype = impl_->engine->getTensorDataType(outputTensorName);
+    impl_->input_elem_size = dataTypeSize(impl_->input_dtype);
+    impl_->output_elem_size = dataTypeSize(impl_->output_dtype);
+
+    CUDAQ_INFO("TensorRT engine I/O data types: input={}, output={}",
+               dataTypeName(impl_->input_dtype),
+               dataTypeName(impl_->output_dtype));
+
+    if (impl_->input_dtype != nvinfer1::DataType::kFLOAT &&
+        impl_->input_dtype != nvinfer1::DataType::kUINT8) {
+      throw std::runtime_error("Unsupported input tensor data type: " +
+                               std::string(dataTypeName(impl_->input_dtype)) +
+                               ". Supported types: float32, uint8");
+    }
+    if (impl_->output_dtype != nvinfer1::DataType::kFLOAT &&
+        impl_->output_dtype != nvinfer1::DataType::kUINT8) {
+      throw std::runtime_error("Unsupported output tensor data type: " +
+                               std::string(dataTypeName(impl_->output_dtype)) +
+                               ". Supported types: float32, uint8");
+    }
+
+    auto inputDims = impl_->engine->getTensorShape(inputTensorName);
 
     // Extract batch size from first dimension
     // If first dimension is -1, it's dynamic (not supported for batching)
@@ -481,8 +588,7 @@ trt_decoder::trt_decoder(const cudaqx::tensor<uint8_t> &H,
 
     syndrome_size_per_sample_ = impl_->input_size / model_batch_size_;
 
-    auto outputDims = impl_->engine->getTensorShape(
-        impl_->engine->getIOTensorName(impl_->output_index));
+    auto outputDims = impl_->engine->getTensorShape(outputTensorName);
     impl_->output_size = 1;
     for (int j = 0; j < outputDims.nbDims; ++j)
       impl_->output_size *= outputDims.d[j];
@@ -494,11 +600,11 @@ trt_decoder::trt_decoder(const cudaqx::tensor<uint8_t> &H,
                model_batch_size_, syndrome_size_per_sample_,
                output_size_per_sample_);
 
-    // Allocate GPU buffers
+    // Allocate GPU buffers (sized according to engine I/O data types)
     HANDLE_CUDA_ERROR(cudaMalloc(&impl_->buffers[impl_->input_index],
-                                 impl_->input_size * sizeof(float)));
+                                 impl_->input_size * impl_->input_elem_size));
     HANDLE_CUDA_ERROR(cudaMalloc(&impl_->buffers[impl_->output_index],
-                                 impl_->output_size * sizeof(float)));
+                                 impl_->output_size * impl_->output_elem_size));
 
     // Create CUDA stream
     HANDLE_CUDA_ERROR(cudaStreamCreate(&impl_->stream));
@@ -529,7 +635,8 @@ trt_decoder::trt_decoder(const cudaqx::tensor<uint8_t> &H,
           impl_->context.get(), impl_->stream,
           impl_->buffers[impl_->input_index],
           impl_->buffers[impl_->output_index], impl_->input_index,
-          impl_->output_index, impl_->engine.get(), impl_->input_size);
+          impl_->output_index, impl_->engine.get(),
+          impl_->input_size * impl_->input_elem_size);
 
       if (capture_result.success) {
         impl_->executor =
@@ -643,45 +750,51 @@ trt_decoder::decode_batch(const std::vector<std::vector<float_t>> &syndromes) {
     for (size_t batch_start = 0; batch_start < syndromes.size();
          batch_start += model_batch_size_) {
 
-      // Prepare input buffer with current batch
-      std::vector<float> input_host(impl_->input_size);
-      for (size_t batch_idx = 0; batch_idx < model_batch_size_; ++batch_idx) {
-        const auto &syndrome = syndromes[batch_start + batch_idx];
-        for (size_t i = 0; i < syndrome_size_per_sample_; ++i) {
-          input_host[batch_idx * syndrome_size_per_sample_ + i] =
-              static_cast<float>(syndrome[i]);
+      // Prepare input and copy to GPU (type dispatched from engine metadata)
+      auto copy_input = [&](auto type_tag) {
+        using T = decltype(type_tag);
+        std::vector<T> input_host(impl_->input_size);
+        for (size_t batch_idx = 0; batch_idx < model_batch_size_; ++batch_idx) {
+          const auto &syndrome = syndromes[batch_start + batch_idx];
+          for (size_t i = 0; i < syndrome_size_per_sample_; ++i)
+            input_host[batch_idx * syndrome_size_per_sample_ + i] =
+                static_cast<T>(syndrome[i]);
         }
-      }
-
-      // Copy input to GPU
-      HANDLE_CUDA_ERROR(cudaMemcpy(
-          impl_->buffers[impl_->input_index], input_host.data(),
-          impl_->input_size * sizeof(float), cudaMemcpyHostToDevice));
+        HANDLE_CUDA_ERROR(
+            cudaMemcpy(impl_->buffers[impl_->input_index], input_host.data(),
+                       impl_->input_size * sizeof(T), cudaMemcpyHostToDevice));
+      };
+      if (impl_->input_dtype == nvinfer1::DataType::kUINT8)
+        copy_input(uint8_t{});
+      else
+        copy_input(float{});
 
       // Execute inference
       impl_->execute_inference();
 
-      // Copy output back from GPU
-      std::vector<float> output_host(impl_->output_size);
-      HANDLE_CUDA_ERROR(cudaMemcpy(
-          output_host.data(), impl_->buffers[impl_->output_index],
-          impl_->output_size * sizeof(float), cudaMemcpyDeviceToHost));
-
-      // Extract results for each syndrome in the batch
-      for (size_t batch_idx = 0; batch_idx < model_batch_size_; ++batch_idx) {
-        decoder_result result;
-        result.converged = true;
-        result.result.resize(output_size_per_sample_);
-
-        // Extract output for this batch index
-        std::transform(
-            output_host.begin() + batch_idx * output_size_per_sample_,
-            output_host.begin() + (batch_idx + 1) * output_size_per_sample_,
-            result.result.begin(),
-            [](float val) { return static_cast<float_t>(val); });
-
-        results.push_back(std::move(result));
-      }
+      // Copy output from GPU and extract results (type dispatched)
+      auto extract_output = [&](auto type_tag) {
+        using T = decltype(type_tag);
+        std::vector<T> output_host(impl_->output_size);
+        HANDLE_CUDA_ERROR(
+            cudaMemcpy(output_host.data(), impl_->buffers[impl_->output_index],
+                       impl_->output_size * sizeof(T), cudaMemcpyDeviceToHost));
+        for (size_t batch_idx = 0; batch_idx < model_batch_size_; ++batch_idx) {
+          decoder_result result;
+          result.converged = true;
+          result.result.resize(output_size_per_sample_);
+          std::transform(
+              output_host.begin() + batch_idx * output_size_per_sample_,
+              output_host.begin() + (batch_idx + 1) * output_size_per_sample_,
+              result.result.begin(),
+              [](T val) { return static_cast<float_t>(val); });
+          results.push_back(std::move(result));
+        }
+      };
+      if (impl_->output_dtype == nvinfer1::DataType::kUINT8)
+        extract_output(uint8_t{});
+      else
+        extract_output(float{});
     }
 
   } catch (const std::exception &e) {
@@ -715,65 +828,6 @@ CUDAQ_REGISTER_TYPE(trt_decoder)
 
 namespace cudaq::qec::trt_decoder_internal {
 
-// Hardware platform detection class
-class HardwarePlatform {
-private:
-  bool has_fp16_ = false;
-  bool has_int8_ = false;
-  bool has_bf16_ = false;
-  bool has_tf32_ = false;
-  bool has_fp8_ = false;
-  ;
-
-public:
-  HardwarePlatform() {
-    int device;
-    HANDLE_CUDA_ERROR(cudaGetDevice(&device));
-
-    cudaDeviceProp prop;
-    HANDLE_CUDA_ERROR(cudaGetDeviceProperties(&prop, device));
-
-    // ---- FP16 ----
-    if (prop.major > 6 || (prop.major == 6 && prop.minor >= 0))
-      has_fp16_ = true;
-    else if (prop.major == 5 && prop.minor == 3)
-      has_fp16_ = false;
-
-    // ---- INT8 ----
-    if (prop.major > 6 || (prop.major == 6 && prop.minor >= 1))
-      has_int8_ = true;
-    else
-      has_int8_ = false;
-
-    // ---- BF16 ----
-    // BF16 support is available on compute capability >= 8.0 (Ampere and later)
-    if (prop.major >= 8) {
-      has_bf16_ = true;
-    }
-
-    // ---- TF32 ----
-    // TF32 support is available on compute capability >= 8.0 (Ampere and later)
-    if (prop.major >= 8) {
-      has_tf32_ = true;
-    }
-
-    // ---- FP8 ----
-    // FP8 support is available on compute capability >= 9.0 (Hopper and later)
-    if (prop.major >= 9) {
-      has_fp8_ = true;
-    }
-  }
-
-  // Getter methods for device capabilities
-  bool device_has_fp16() const { return has_fp16_; }
-  bool device_has_int8() const { return has_int8_; }
-  bool device_has_bf16() const { return has_bf16_; }
-  bool device_has_tf32() const { return has_tf32_; }
-  bool device_has_fp8() const { return has_fp8_; }
-};
-
-// Free function to build TensorRT engine from ONNX model
-
 // Utility: load binary files (ONNX models or TensorRT engines)
 std::vector<char> load_file(const std::string &filename) {
   std::ifstream file(filename, std::ios::binary | std::ios::ate);
@@ -805,59 +859,22 @@ void validate_trt_decoder_parameters(const cudaqx::heterogeneous_map &params) {
   }
 }
 
-// Implementation of the helper function to parse and configure precision
-// settings
 void parse_precision(const std::string &precision,
                      nvinfer1::IBuilderConfig *config) {
-  // Create hardware platform detector
-  HardwarePlatform platform;
-
-  if (precision == "fp16") {
-    if (platform.device_has_fp16()) {
-      config->setFlag(nvinfer1::BuilderFlag::kFP16);
-    } else {
-      CUDAQ_WARN("Warning: FP16 requested but not supported on this platform, "
-                 "using FP32");
-    }
-  } else if (precision == "bf16") {
-    if (platform.device_has_bf16()) {
-      config->setFlag(nvinfer1::BuilderFlag::kBF16);
-    } else {
-      CUDAQ_WARN("Warning: BF16 requested but not supported on this platform, "
-                 "using FP32");
-    }
-  } else if (precision == "int8") {
-    if (platform.device_has_int8()) {
-      config->setFlag(nvinfer1::BuilderFlag::kINT8);
-    } else {
-      CUDAQ_WARN("Warning: INT8 requested but not supported on this platform, "
-                 "using FP32");
-    }
-  } else if (precision == "fp8") {
-    if (platform.device_has_fp8()) {
-      config->setFlag(nvinfer1::BuilderFlag::kFP8);
-    } else {
-      CUDAQ_WARN("Warning: FP8 requested but not supported on this platform, "
-                 "using FP32");
-    }
-  } else if (precision == "tf32") {
-    if (platform.device_has_tf32()) {
-      config->setFlag(nvinfer1::BuilderFlag::kTF32);
-    } else {
-      CUDAQ_WARN("Warning: TF32 requested but not supported on this platform, "
-                 "using FP32");
-    }
+  if (precision == "tf32") {
+    config->setFlag(nvinfer1::BuilderFlag::kTF32);
   } else if (precision == "noTF32") {
-    config->setFlag(nvinfer1::BuilderFlag::kDISABLE_TIMING_CACHE);
-    // Note: This disables timing cache, not TF32 directly
-    // TF32 is controlled by the kTF32 flag, which is enabled by default in
-    // newer TensorRT versions
+    config->clearFlag(nvinfer1::BuilderFlag::kTF32);
   } else if (precision == "best") {
-    // Let TensorRT choose the best precision automatically
-    // This is the default behavior, no additional flags needed
+    // With strongly-typed networks the ONNX model's native types are used.
+  } else if (precision == "fp16" || precision == "bf16" ||
+             precision == "int8" || precision == "fp8") {
+    CUDAQ_WARN("Precision '{}' is ignored when building strongly-typed "
+               "networks. TensorRT uses the data types defined in the ONNX "
+               "model. To use {}, export the model with the desired types.",
+               precision, precision);
   } else {
-    CUDAQ_WARN("Warning: Unknown precision '{}', using default (best)",
-               precision);
+    CUDAQ_WARN("Unknown precision '{}', using default (best)", precision);
   }
 }
 
@@ -872,8 +889,10 @@ build_engine_from_onnx(const std::string &onnx_model_path,
     throw std::runtime_error("Failed to create TensorRT builder");
   }
 
-  auto network = std::unique_ptr<nvinfer1::INetworkDefinition>(
-      builder->createNetworkV2(0U));
+  auto network =
+      std::unique_ptr<nvinfer1::INetworkDefinition>(builder->createNetworkV2(
+          1U << static_cast<uint32_t>(
+              nvinfer1::NetworkDefinitionCreationFlag::kSTRONGLY_TYPED)));
   if (!network) {
     throw std::runtime_error("Failed to create TensorRT network");
   }

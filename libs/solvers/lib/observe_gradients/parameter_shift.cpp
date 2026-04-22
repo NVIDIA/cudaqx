@@ -26,6 +26,8 @@ void parameter_shift::calculateGradient(const std::vector<double> &x,
     tmpX[i] -= 2 * shiftScalar * M_PI;
     auto mx = expectation(tmpX);
     dx[i] = (px - mx) / 2.;
+    // restore the value to x_i
+    tmpX[i] += shiftScalar * M_PI;
   }
 }
 } // namespace cudaq

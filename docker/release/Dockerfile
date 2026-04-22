@@ -49,6 +49,12 @@ COPY docs/sphinx/examples /home/cudaq/cudaqx-examples
 COPY libs/qec/python/tests /home/cudaq/cudaqx_pytests/qec
 COPY libs/solvers/python/tests /home/cudaq/cudaqx_pytests/solvers
 
+# Bake in CUDA-Q import check helper (used by QA validation scripts)
+RUN mkdir -p /home/cudaq/cudaqx-scripts/validation
+COPY scripts/validation/container/check_cudaq_import.py \
+     /home/cudaq/cudaqx-scripts/validation/check_cudaq_import.py
+RUN chown -R cudaq:cudaq /home/cudaq/cudaqx-scripts
+
 # Set permissions after copy (important)
 RUN chown -R cudaq /home/cudaq && chgrp -R cudaq /home/cudaq
 

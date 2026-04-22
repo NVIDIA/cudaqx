@@ -100,6 +100,12 @@
         - `clip_value` (float): Value to clip the BP messages to. Should be a
           non-negative value (defaults to 0.0, which disables clipping). Introduced in
           0.4.0.
+        - `repeatable` (bool): Whether to make the BP algorithm (and Relay BP
+          algorithm if enabled) bit-for-bit repeatable. Defaults to False. You
+          must set `clip_value` to a non-zero value to use this option. Setting
+          this option to True makes it run approximately 5-10% slower, but you
+          are guaranteed to get repeatable results, which is often useful for
+          both timing and detailed syndrome analysis. Introduced in 0.6.0.
         - `bp_method` (int): Core BP algorithm to use (defaults to 0). Introduced in 0.4.0,
           expanded in 0.5.0:
 
@@ -137,6 +143,11 @@
             - "NConv": Stop after N convergences (requires `stop_nconv` parameter)
           - `stop_nconv` (int): Number of convergences to wait for before stopping
             (required only when `stopping_criterion="NConv"`)
+
+          .. note::
+             Starting in version 0.6.0, convergence during the ``pre_iter`` phase counts as a
+             successful convergence towards the stopping criteria. Prior to 0.6.0, convergence
+             during pre-iterations did not count.
         - `bp_seed` (int): Seed for random number generation used in `bp_method=3` (disordered
           memory BP). Optional parameter, defaults to 42 if not provided. Introduced in 0.5.0.
         - `opt_results` (heterogeneous_map): Optional results to return. This field can be

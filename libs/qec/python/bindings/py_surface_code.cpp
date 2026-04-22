@@ -8,8 +8,9 @@
 
 #include "py_surface_code.h"
 
-#include <pybind11/pybind11.h>
-#include <pybind11/stl.h>
+#include <nanobind/nanobind.h>
+#include <nanobind/stl/string.h>
+#include <nanobind/stl/vector.h>
 
 // Disable this warning: "annotate" attribute directive ignored [-Wattributes]
 // These warnings occur because GCC does not understand the __qpu__ attribute.
@@ -18,15 +19,15 @@
 #include "cudaq/qec/codes/surface_code.h"
 #pragma GCC diagnostic pop
 
-namespace py = pybind11;
+namespace nb = nanobind;
 
 namespace cudaq::qec::surface_code {
-static py::dict
+static nb::dict
 map_vec2d_to_py_tuple_dict(const std::map<vec2d, std::size_t> &m) {
-  py::dict d;
+  nb::dict d;
   for (const auto &kv : m) {
     const auto &k = kv.first;
-    d[py::make_tuple(k.row, k.col)] = kv.second;
+    d[nb::make_tuple(k.row, k.col)] = kv.second;
   }
   return d;
 }
@@ -40,21 +41,21 @@ std::string capture_print(Fn &&fn) {
   return oss.str();
 }
 
-void bindSurfaceCode(py::module &mod) {
-  auto qecmod = py::hasattr(mod, "qecrt")
-                    ? mod.attr("qecrt").cast<py::module_>()
+void bindSurfaceCode(nb::module_ &mod) {
+  auto qecmod = nb::hasattr(mod, "qecrt")
+                    ? nb::cast<nb::module_>(mod.attr("qecrt"))
                     : mod.def_submodule("qecrt");
 
-  py::enum_<surface_role>(qecmod, "surface_role", py::arithmetic())
+  nb::enum_<surface_role>(qecmod, "surface_role")
       .value("amx", surface_role::amx)
       .value("amz", surface_role::amz)
       .value("empty", surface_role::empty)
       .export_values();
 
-  py::class_<vec2d>(qecmod, "vec2d")
-      .def(py::init<int, int>(), py::arg("row"), py::arg("col"))
-      .def_readwrite("row", &vec2d::row)
-      .def_readwrite("col", &vec2d::col)
+  nb::class_<vec2d>(qecmod, "vec2d")
+      .def(nb::init<int, int>(), nb::arg("row"), nb::arg("col"))
+      .def_rw("row", &vec2d::row)
+      .def_rw("col", &vec2d::col)
       .def("__repr__",
            [](const vec2d &v) {
              return "Vec2D(row=" + std::to_string(v.row) +
@@ -64,32 +65,29 @@ void bindSurfaceCode(py::module &mod) {
       .def("__sub__", [](const vec2d &a, const vec2d &b) { return a - b; })
       .def("__eq__", [](const vec2d &a, const vec2d &b) { return a == b; });
 
-  py::class_<stabilizer_grid>(qecmod, "stabilizer_grid")
-      .def(py::init<>())
-      .def(py::init<std::uint32_t>(), py::arg("distance"))
-      .def_readonly("distance", &stabilizer_grid::distance)
-      .def_readonly("grid_length", &stabilizer_grid::grid_length)
-      .def_readonly("roles", &stabilizer_grid::roles)
-      .def_readonly("x_stab_coords", &stabilizer_grid::x_stab_coords)
-      .def_readonly("z_stab_coords", &stabilizer_grid::z_stab_coords)
-      .def_readonly("data_coords", &stabilizer_grid::data_coords)
-      .def_readonly("x_stabilizers", &stabilizer_grid::x_stabilizers)
-      .def_readonly("z_stabilizers", &stabilizer_grid::z_stabilizers)
-      .def_property_readonly("x_stab_indices",
-                             [](const stabilizer_grid &g) {
-                               return map_vec2d_to_py_tuple_dict(
-                                   g.x_stab_indices);
-                             })
-      .def_property_readonly("z_stab_indices",
-                             [](const stabilizer_grid &g) {
-                               return map_vec2d_to_py_tuple_dict(
-                                   g.z_stab_indices);
-                             })
-      .def_property_readonly("data_indices",
-                             [](const stabilizer_grid &g) {
-                               return map_vec2d_to_py_tuple_dict(
-                                   g.data_indices);
-                             })
+  nb::class_<stabilizer_grid>(qecmod, "stabilizer_grid")
+      .def(nb::init<>())
+      .def(nb::init<std::uint32_t>(), nb::arg("distance"))
+      .def_ro("distance", &stabilizer_grid::distance)
+      .def_ro("grid_length", &stabilizer_grid::grid_length)
+      .def_ro("roles", &stabilizer_grid::roles)
+      .def_ro("x_stab_coords", &stabilizer_grid::x_stab_coords)
+      .def_ro("z_stab_coords", &stabilizer_grid::z_stab_coords)
+      .def_ro("data_coords", &stabilizer_grid::data_coords)
+      .def_ro("x_stabilizers", &stabilizer_grid::x_stabilizers)
+      .def_ro("z_stabilizers", &stabilizer_grid::z_stabilizers)
+      .def_prop_ro("x_stab_indices",
+                   [](const stabilizer_grid &g) {
+                     return map_vec2d_to_py_tuple_dict(g.x_stab_indices);
+                   })
+      .def_prop_ro("z_stab_indices",
+                   [](const stabilizer_grid &g) {
+                     return map_vec2d_to_py_tuple_dict(g.z_stab_indices);
+                   })
+      .def_prop_ro("data_indices",
+                   [](const stabilizer_grid &g) {
+                     return map_vec2d_to_py_tuple_dict(g.data_indices);
+                   })
       .def("format_stabilizer_grid",
            [](const stabilizer_grid &g) {
              return capture_print([&] { g.print_stabilizer_grid(); });

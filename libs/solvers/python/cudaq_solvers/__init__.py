@@ -6,8 +6,13 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
-from ._pycudaqx_solvers_the_suffix_matters_cudaq_solvers import *
-from ._pycudaqx_solvers_the_suffix_matters_cudaq_solvers import __version__
+try:
+    from ._pycudaqx_solvers_the_suffix_matters_cudaq_solvers import *
+    from ._pycudaqx_solvers_the_suffix_matters_cudaq_solvers import __version__
+except ImportError as _e:
+    from ._system_dep_check import raise_if_missing_system_dep
+    raise_if_missing_system_dep(_e, "cudaq-solvers")
+    raise
 try:
     from .gqe_algorithm.gqe import gqe
 except ImportError:
