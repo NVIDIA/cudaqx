@@ -15,9 +15,11 @@
 #include <string>
 #include <vector>
 
-#include <pybind11/numpy.h>
-#include <pybind11/pybind11.h>
-#include <pybind11/stl.h>
+#include <nanobind/nanobind.h>
+#include <nanobind/ndarray.h>
+#include <nanobind/stl/optional.h>
+#include <nanobind/stl/string.h>
+#include <nanobind/stl/vector.h>
 
 #include "type_casters.h"
 #include "cudaq/qec/dem_sampling.h"
@@ -26,53 +28,54 @@
 
 #include <cuda_runtime.h>
 
-namespace py = pybind11;
-using namespace pybind11::literals;
+namespace nb = nanobind;
+using namespace nanobind::literals;
 
 namespace cudaq::qec::dem_sampler {
 
 namespace {
 
-/// Convert a py::object to a numpy uint8 array.
-py::array_t<uint8_t> asNumpyUint8(py::object obj) {
-  py::module_ np = py::module_::import("numpy");
-  return np.attr("ascontiguousarray")(obj, "dtype"_a = np.attr("uint8"))
-      .cast<py::array_t<uint8_t>>();
+/// Convert an nb::object to a contiguous numpy uint8 ndarray.
+nb::ndarray<nb::numpy, uint8_t> asNumpyUint8(nb::object obj) {
+  nb::module_ np = nb::module_::import_("numpy");
+  return nb::cast<nb::ndarray<nb::numpy, uint8_t>>(
+      np.attr("ascontiguousarray")(obj, "dtype"_a = np.attr("uint8")));
 }
 
-/// Convert a py::object to a numpy float64 array.
-py::array_t<double> asNumpyFloat64(py::object obj) {
-  py::module_ np = py::module_::import("numpy");
-  auto arr = np.attr("ascontiguousarray")(obj, "dtype"_a = np.attr("float64"))
-                 .cast<py::array_t<double>>();
-  py::buffer_info info = arr.request();
-  if (info.ndim != 1)
+/// Convert an nb::object to a contiguous numpy float64 ndarray.
+nb::ndarray<nb::numpy, double> asNumpyFloat64(nb::object obj) {
+  nb::module_ np = nb::module_::import_("numpy");
+  auto arr = nb::cast<nb::ndarray<nb::numpy, double>>(
+      np.attr("ascontiguousarray")(obj, "dtype"_a = np.attr("float64")));
+  if (arr.ndim() != 1)
     throw std::runtime_error(
         "error_probabilities must be a 1-D array, got ndim=" +
-        std::to_string(info.ndim));
+        std::to_string(arr.ndim()));
   return arr;
 }
 
 /// Throw if either input is a torch CPU tensor (no silent numpy conversion).
-void rejectTorchCpuTensors(const py::object &check_matrix_obj,
-                           const py::object &error_probs_obj) {
-  py::module_ torch;
+void rejectTorchCpuTensors(const nb::object &check_matrix_obj,
+                           const nb::object &error_probs_obj) {
+  nb::object torch_obj;
   try {
-    torch = py::module_::import("torch");
-  } catch (py::error_already_set &) {
+    torch_obj = nb::module_::import_("torch");
+  } catch (nb::python_error &) {
     PyErr_Clear();
     return;
   }
+  nb::module_ torch = nb::cast<nb::module_>(torch_obj);
 
-  py::object Tensor = torch.attr("Tensor");
-  bool check_is_torch = py::isinstance(check_matrix_obj, Tensor);
-  bool probs_is_torch = py::isinstance(error_probs_obj, Tensor);
+  nb::object Tensor = torch.attr("Tensor");
+  bool check_is_torch = nb::isinstance(check_matrix_obj, Tensor);
+  bool probs_is_torch = nb::isinstance(error_probs_obj, Tensor);
 
   if (!check_is_torch && !probs_is_torch)
     return;
 
-  auto is_cpu = [&](const py::object &obj) {
-    return py::isinstance(obj, Tensor) && !obj.attr("is_cuda").cast<bool>();
+  auto is_cpu = [&](const nb::object &obj) {
+    return nb::isinstance(obj, Tensor) &&
+           !nb::cast<bool>(obj.attr("is_cuda"));
   };
 
   if (is_cpu(check_matrix_obj) || is_cpu(error_probs_obj)) {
@@ -100,15 +103,13 @@ DemSamplingBackend parseBackend(std::string backend) {
                            "'. Expected one of: auto, cpu, gpu.");
 }
 
-void validateInputShapes(const py::array_t<uint8_t> &check_matrix_np,
-                         const py::array_t<double> &error_probs_np) {
-  py::buffer_info h_buf = check_matrix_np.request();
-  if (h_buf.ndim != 2)
+void validateInputShapes(const nb::ndarray<nb::numpy, uint8_t> &check_matrix_np,
+                         const nb::ndarray<nb::numpy, double> &error_probs_np) {
+  if (check_matrix_np.ndim() != 2)
     throw std::runtime_error("check_matrix must be rank-2");
 
-  py::buffer_info p_buf = error_probs_np.request();
-  auto num_mechanisms = static_cast<std::size_t>(h_buf.shape[1]);
-  auto num_probs = static_cast<std::size_t>(p_buf.shape[0]);
+  auto num_mechanisms = static_cast<std::size_t>(check_matrix_np.shape(1));
+  auto num_probs = static_cast<std::size_t>(error_probs_np.shape(0));
   if (num_probs != num_mechanisms) {
     throw std::runtime_error("dem_sampling: error_probabilities length (" +
                              std::to_string(num_probs) +
@@ -117,10 +118,10 @@ void validateInputShapes(const py::array_t<uint8_t> &check_matrix_np,
   }
 }
 
-void validateProbabilityValues(const py::array_t<double> &error_probs_np) {
-  py::buffer_info p_buf = error_probs_np.request();
-  auto *probs = static_cast<const double *>(p_buf.ptr);
-  auto count = static_cast<std::size_t>(p_buf.shape[0]);
+void validateProbabilityValues(
+    const nb::ndarray<nb::numpy, double> &error_probs_np) {
+  auto *probs = static_cast<const double *>(error_probs_np.data());
+  auto count = static_cast<std::size_t>(error_probs_np.shape(0));
 
   for (std::size_t i = 0; i < count; ++i) {
     const double p = probs[i];
@@ -191,16 +192,16 @@ private:
   bool is_active = false;
 };
 
-bool getTorchDeviceIndex(const py::module_ &torch, const py::object &device,
+bool getTorchDeviceIndex(const nb::module_ &torch, const nb::object &device,
                          int &device_index, std::string &failure_reason) {
-  if (!py::isinstance(device, torch.attr("device"))) {
+  if (!nb::isinstance(device, torch.attr("device"))) {
     failure_reason = "torch device object is invalid";
     return false;
   }
 
-  py::object index_obj = device.attr("index");
+  nb::object index_obj = device.attr("index");
   if (!index_obj.is_none()) {
-    device_index = index_obj.cast<int>();
+    device_index = nb::cast<int>(index_obj);
   } else {
     auto get_device_status = cudaGetDevice(&device_index);
     if (get_device_status != cudaSuccess) {
@@ -227,15 +228,15 @@ bool getTorchDeviceIndex(const py::module_ &torch, const py::object &device,
   return true;
 }
 
-bool getTorchCurrentStreamHandle(const py::module_ &torch,
-                                 const py::object &device,
+bool getTorchCurrentStreamHandle(const nb::module_ &torch,
+                                 const nb::object &device,
                                  std::uintptr_t &stream_handle,
                                  std::string &failure_reason) {
   try {
-    py::object stream_obj = torch.attr("cuda").attr("current_stream")(device);
-    stream_handle = stream_obj.attr("cuda_stream").cast<std::uintptr_t>();
+    nb::object stream_obj = torch.attr("cuda").attr("current_stream")(device);
+    stream_handle = nb::cast<std::uintptr_t>(stream_obj.attr("cuda_stream"));
     return true;
-  } catch (py::error_already_set &e) {
+  } catch (nb::python_error &e) {
     failure_reason =
         std::string("failed to query torch CUDA stream: ") + e.what();
     PyErr_Clear();
@@ -243,11 +244,10 @@ bool getTorchCurrentStreamHandle(const py::module_ &torch,
   }
 }
 
-bool tryGpuSampling(const py::array_t<uint8_t> &check_matrix_np,
-                    const py::array_t<double> &error_probs_np,
+bool tryGpuSampling(const nb::ndarray<nb::numpy, uint8_t> &check_matrix_np,
+                    const nb::ndarray<nb::numpy, double> &error_probs_np,
                     std::size_t numShots, unsigned seed,
-                    py::array_t<uint8_t> &syndromes_out,
-                    py::array_t<uint8_t> &errors_out,
+                    nb::object &syndromes_out, nb::object &errors_out,
                     std::string &failure_reason) {
   int device_count = 0;
   auto device_count_status = cudaGetDeviceCount(&device_count);
@@ -261,16 +261,14 @@ bool tryGpuSampling(const py::array_t<uint8_t> &check_matrix_np,
     return false;
   }
 
-  py::buffer_info h_buf = check_matrix_np.request();
-  if (h_buf.ndim != 2) {
+  if (check_matrix_np.ndim() != 2) {
     failure_reason = "check_matrix must be rank-2";
     return false;
   }
-  auto num_checks = static_cast<std::size_t>(h_buf.shape[0]);
-  auto num_mechanisms = static_cast<std::size_t>(h_buf.shape[1]);
+  auto num_checks = static_cast<std::size_t>(check_matrix_np.shape(0));
+  auto num_mechanisms = static_cast<std::size_t>(check_matrix_np.shape(1));
 
-  py::buffer_info p_buf = error_probs_np.request();
-  auto num_probs = static_cast<std::size_t>(p_buf.shape[0]);
+  auto num_probs = static_cast<std::size_t>(error_probs_np.shape(0));
   if (num_probs != num_mechanisms) {
     failure_reason = "error_probabilities length mismatch";
     return false;
@@ -302,16 +300,16 @@ bool tryGpuSampling(const py::array_t<uint8_t> &check_matrix_np,
     return false;
   }
 
-  auto copy_h_status =
-      cudaMemcpy(d_H.get(), h_buf.ptr, h_bytes, cudaMemcpyHostToDevice);
+  auto copy_h_status = cudaMemcpy(d_H.get(), check_matrix_np.data(), h_bytes,
+                                  cudaMemcpyHostToDevice);
   if (copy_h_status != cudaSuccess) {
     failure_reason = std::string("failed to copy check_matrix to device: ") +
                      cudaGetErrorString(copy_h_status);
     cudaGetLastError();
     return false;
   }
-  auto copy_p_status =
-      cudaMemcpy(d_probs.get(), p_buf.ptr, p_bytes, cudaMemcpyHostToDevice);
+  auto copy_p_status = cudaMemcpy(d_probs.get(), error_probs_np.data(),
+                                  p_bytes, cudaMemcpyHostToDevice);
   if (copy_p_status != cudaSuccess) {
     failure_reason = std::string("failed to copy probabilities to device: ") +
                      cudaGetErrorString(copy_p_status);
@@ -328,44 +326,58 @@ bool tryGpuSampling(const py::array_t<uint8_t> &check_matrix_np,
     return false;
   }
 
-  syndromes_out = py::array_t<uint8_t>({static_cast<py::ssize_t>(numShots),
-                                        static_cast<py::ssize_t>(num_checks)});
-  errors_out = py::array_t<uint8_t>({static_cast<py::ssize_t>(numShots),
-                                     static_cast<py::ssize_t>(num_mechanisms)});
+  auto *syn_data = new uint8_t[numShots * num_checks];
+  auto *err_data = new uint8_t[numShots * num_mechanisms];
 
-  auto copy_syn_status = cudaMemcpy(syndromes_out.mutable_data(), d_syn.get(),
-                                    syn_bytes, cudaMemcpyDeviceToHost);
+  auto copy_syn_status =
+      cudaMemcpy(syn_data, d_syn.get(), syn_bytes, cudaMemcpyDeviceToHost);
   if (copy_syn_status != cudaSuccess) {
+    delete[] syn_data;
+    delete[] err_data;
     failure_reason = std::string("failed to copy syndromes to host: ") +
                      cudaGetErrorString(copy_syn_status);
     cudaGetLastError();
     return false;
   }
 
-  auto copy_err_status = cudaMemcpy(errors_out.mutable_data(), d_err.get(),
-                                    err_bytes, cudaMemcpyDeviceToHost);
+  auto copy_err_status =
+      cudaMemcpy(err_data, d_err.get(), err_bytes, cudaMemcpyDeviceToHost);
   if (copy_err_status != cudaSuccess) {
+    delete[] syn_data;
+    delete[] err_data;
     failure_reason = std::string("failed to copy errors to host: ") +
                      cudaGetErrorString(copy_err_status);
     cudaGetLastError();
     return false;
   }
 
+  size_t syn_shape[2] = {numShots, num_checks};
+  syndromes_out = nb::cast(nb::ndarray<nb::numpy, uint8_t>(
+      syn_data, 2, syn_shape,
+      nb::capsule(syn_data,
+                  [](void *p) noexcept { delete[] static_cast<uint8_t *>(p); })));
+
+  size_t err_shape[2] = {numShots, num_mechanisms};
+  errors_out = nb::cast(nb::ndarray<nb::numpy, uint8_t>(
+      err_data, 2, err_shape,
+      nb::capsule(err_data,
+                  [](void *p) noexcept { delete[] static_cast<uint8_t *>(p); })));
+
   failure_reason.clear();
   return true;
 }
 
-bool tryTorchGpuSampling(py::object check_matrix_obj,
-                         py::object error_probs_obj, std::size_t numShots,
-                         unsigned seed, py::tuple &result_out,
+bool tryTorchGpuSampling(nb::object check_matrix_obj,
+                         nb::object error_probs_obj, std::size_t numShots,
+                         unsigned seed, nb::tuple &result_out,
                          std::string &failure_reason, bool allow_move_to_cuda) {
-  py::module_ torch;
+  nb::object torch_obj;
   try {
-    torch = py::module_::import("torch");
-  } catch (py::error_already_set &) {
+    torch_obj = nb::module_::import_("torch");
+  } catch (nb::python_error &) {
     PyErr_Clear();
-    py::module_ np = py::module_::import("numpy");
-    bool is_numpy = py::isinstance(check_matrix_obj, np.attr("ndarray"));
+    nb::module_ np = nb::module_::import_("numpy");
+    bool is_numpy = nb::isinstance(check_matrix_obj, np.attr("ndarray"));
     if (!is_numpy) {
       PyErr_WarnEx(PyExc_UserWarning,
                    "[cudaq_qec.dem_sampling] PyTorch is not installed. "
@@ -375,20 +387,21 @@ bool tryTorchGpuSampling(py::object check_matrix_obj,
     failure_reason = "PyTorch is not available";
     return false;
   }
+  nb::module_ torch = nb::cast<nb::module_>(torch_obj);
 
-  if (!py::isinstance(check_matrix_obj, torch.attr("Tensor")) ||
-      !py::isinstance(error_probs_obj, torch.attr("Tensor"))) {
+  if (!nb::isinstance(check_matrix_obj, torch.attr("Tensor")) ||
+      !nb::isinstance(error_probs_obj, torch.attr("Tensor"))) {
     failure_reason = "inputs are not both torch.Tensor";
     return false;
   }
 
-  py::object check_t = check_matrix_obj;
-  py::object probs_t = error_probs_obj;
+  nb::object check_t = check_matrix_obj;
+  nb::object probs_t = error_probs_obj;
 
-  bool check_is_cuda = check_t.attr("is_cuda").cast<bool>();
-  bool probs_is_cuda = probs_t.attr("is_cuda").cast<bool>();
+  bool check_is_cuda = nb::cast<bool>(check_t.attr("is_cuda"));
+  bool probs_is_cuda = nb::cast<bool>(probs_t.attr("is_cuda"));
 
-  py::object device;
+  nb::object device;
   if (check_is_cuda) {
     device = check_t.attr("device");
   } else if (probs_is_cuda) {
@@ -418,23 +431,24 @@ bool tryTorchGpuSampling(py::object check_matrix_obj,
   check_t = check_t.attr("contiguous")();
   probs_t = probs_t.attr("contiguous")();
 
-  auto check_shape = check_t.attr("shape").cast<py::tuple>();
+  auto check_shape = nb::cast<nb::tuple>(check_t.attr("shape"));
   if (check_shape.size() != 2) {
     failure_reason = "check_matrix must be rank-2";
     return false;
   }
 
-  auto probs_shape = probs_t.attr("shape").cast<py::tuple>();
+  auto probs_shape = nb::cast<nb::tuple>(probs_t.attr("shape"));
   if (probs_shape.size() != 1) {
     failure_reason = "error_probabilities must be rank-1";
     return false;
   }
 
   auto num_checks =
-      static_cast<std::size_t>(check_shape[0].cast<py::ssize_t>());
+      static_cast<std::size_t>(nb::cast<int64_t>(check_shape[0]));
   auto num_mechanisms =
-      static_cast<std::size_t>(check_shape[1].cast<py::ssize_t>());
-  auto num_probs = static_cast<std::size_t>(probs_shape[0].cast<py::ssize_t>());
+      static_cast<std::size_t>(nb::cast<int64_t>(check_shape[1]));
+  auto num_probs =
+      static_cast<std::size_t>(nb::cast<int64_t>(probs_shape[0]));
 
   if (num_probs != num_mechanisms) {
     failure_reason = "error_probabilities length mismatch";
@@ -442,17 +456,17 @@ bool tryTorchGpuSampling(py::object check_matrix_obj,
   }
 
   bool all_finite =
-      torch.attr("isfinite")(probs_t).attr("all")().attr("item")().cast<bool>();
+      nb::cast<bool>(torch.attr("isfinite")(probs_t).attr("all")().attr("item")());
   bool any_below_zero =
-      probs_t.attr("lt")(0.0).attr("any")().attr("item")().cast<bool>();
+      nb::cast<bool>(probs_t.attr("lt")(0.0).attr("any")().attr("item")());
   bool any_above_one =
-      probs_t.attr("gt")(1.0).attr("any")().attr("item")().cast<bool>();
+      nb::cast<bool>(probs_t.attr("gt")(1.0).attr("any")().attr("item")());
   if (!all_finite || any_below_zero || any_above_one) {
     failure_reason = "error_probabilities must be finite values in [0, 1]";
     return false;
   }
 
-  py::object actual_device = check_t.attr("device");
+  nb::object actual_device = check_t.attr("device");
   int target_device = -1;
   if (!getTorchDeviceIndex(torch, actual_device, target_device, failure_reason))
     return false;
@@ -466,23 +480,23 @@ bool tryTorchGpuSampling(py::object check_matrix_obj,
                                    failure_reason))
     return false;
 
-  py::object syndromes_t =
-      torch.attr("empty")(py::make_tuple(static_cast<py::ssize_t>(numShots),
-                                         static_cast<py::ssize_t>(num_checks)),
-                          "dtype"_a = torch.attr("uint8"), "device"_a = device);
-  py::object errors_t = torch.attr("empty")(
-      py::make_tuple(static_cast<py::ssize_t>(numShots),
-                     static_cast<py::ssize_t>(num_mechanisms)),
+  nb::object syndromes_t = torch.attr("empty")(
+      nb::make_tuple(static_cast<int64_t>(numShots),
+                     static_cast<int64_t>(num_checks)),
+      "dtype"_a = torch.attr("uint8"), "device"_a = device);
+  nb::object errors_t = torch.attr("empty")(
+      nb::make_tuple(static_cast<int64_t>(numShots),
+                     static_cast<int64_t>(num_mechanisms)),
       "dtype"_a = torch.attr("uint8"), "device"_a = device);
 
   auto d_H = reinterpret_cast<const uint8_t *>(
-      check_t.attr("data_ptr")().cast<std::uintptr_t>());
+      nb::cast<std::uintptr_t>(check_t.attr("data_ptr")()));
   auto d_probs = reinterpret_cast<const double *>(
-      probs_t.attr("data_ptr")().cast<std::uintptr_t>());
+      nb::cast<std::uintptr_t>(probs_t.attr("data_ptr")()));
   auto d_syn = reinterpret_cast<uint8_t *>(
-      syndromes_t.attr("data_ptr")().cast<std::uintptr_t>());
+      nb::cast<std::uintptr_t>(syndromes_t.attr("data_ptr")()));
   auto d_err = reinterpret_cast<uint8_t *>(
-      errors_t.attr("data_ptr")().cast<std::uintptr_t>());
+      nb::cast<std::uintptr_t>(errors_t.attr("data_ptr")()));
 
   bool ok = gpu::sample_dem(d_H, num_checks, num_mechanisms, d_probs, numShots,
                             seed, d_syn, d_err, stream_handle);
@@ -491,37 +505,36 @@ bool tryTorchGpuSampling(py::object check_matrix_obj,
     return false;
   }
 
-  result_out = py::make_tuple(syndromes_t, errors_t);
+  result_out = nb::make_tuple(syndromes_t, errors_t);
   failure_reason.clear();
   return true;
 }
 
 } // namespace
 
-void bindDemSampling(py::module &mod) {
-  auto qecmod = py::hasattr(mod, "qecrt")
-                    ? mod.attr("qecrt").cast<py::module_>()
+void bindDemSampling(nb::module_ &mod) {
+  auto qecmod = nb::hasattr(mod, "qecrt")
+                    ? nb::cast<nb::module_>(mod.attr("qecrt"))
                     : mod.def_submodule("qecrt");
 
   qecmod.def(
       "dem_sampling",
-      [](py::object check_matrix_obj, std::size_t numShots,
-         py::object error_probs_obj, std::optional<unsigned> seed,
-         std::string backend) -> py::tuple {
+      [](nb::object check_matrix_obj, std::size_t numShots,
+         nb::object error_probs_obj, std::optional<unsigned> seed,
+         std::string backend) -> nb::tuple {
         const auto backend_mode = parseBackend(std::move(backend));
 
         if (numShots == 0) {
           auto check_matrix_np = asNumpyUint8(check_matrix_obj);
           auto error_probs_np = asNumpyFloat64(error_probs_obj);
           validateInputShapes(check_matrix_np, error_probs_np);
-          py::buffer_info h_buf = check_matrix_np.request();
-          auto num_checks = static_cast<py::ssize_t>(h_buf.shape[0]);
-          auto num_mechanisms = static_cast<py::ssize_t>(h_buf.shape[1]);
-          py::module_ np = py::module_::import("numpy");
-          return py::make_tuple(
-              np.attr("empty")(py::make_tuple(0, num_checks),
+          auto num_checks = static_cast<int64_t>(check_matrix_np.shape(0));
+          auto num_mechanisms = static_cast<int64_t>(check_matrix_np.shape(1));
+          nb::module_ np = nb::module_::import_("numpy");
+          return nb::make_tuple(
+              np.attr("empty")(nb::make_tuple(0, num_checks),
                                "dtype"_a = np.attr("uint8")),
-              np.attr("empty")(py::make_tuple(0, num_mechanisms),
+              np.attr("empty")(nb::make_tuple(0, num_mechanisms),
                                "dtype"_a = np.attr("uint8")));
         }
 
@@ -531,7 +544,7 @@ void bindDemSampling(py::module &mod) {
 
         std::string torch_gpu_failure_reason = "not attempted";
         if (backend_mode != DemSamplingBackend::Cpu) {
-          py::tuple torch_result;
+          nb::tuple torch_result;
           bool allow_move_to_cuda = backend_mode == DemSamplingBackend::Gpu;
           if (tryTorchGpuSampling(check_matrix_obj, error_probs_obj, numShots,
                                   actual_seed, torch_result,
@@ -543,12 +556,12 @@ void bindDemSampling(py::module &mod) {
 
         bool inputs_are_cuda_tensors = false;
         try {
-          py::module_ torch = py::module_::import("torch");
-          py::object Tensor = torch.attr("Tensor");
-          if (py::isinstance(check_matrix_obj, Tensor) &&
-              check_matrix_obj.attr("is_cuda").cast<bool>())
+          nb::module_ torch = nb::module_::import_("torch");
+          nb::object Tensor = torch.attr("Tensor");
+          if (nb::isinstance(check_matrix_obj, Tensor) &&
+              nb::cast<bool>(check_matrix_obj.attr("is_cuda")))
             inputs_are_cuda_tensors = true;
-        } catch (py::error_already_set &) {
+        } catch (nb::python_error &) {
           PyErr_Clear();
         }
 
@@ -566,12 +579,12 @@ void bindDemSampling(py::module &mod) {
         validateProbabilityValues(error_probs_np);
 
         if (backend_mode != DemSamplingBackend::Cpu) {
-          py::array_t<uint8_t> syndromes_gpu, errors_gpu;
+          nb::object syndromes_gpu, errors_gpu;
           std::string gpu_failure_reason;
           if (tryGpuSampling(check_matrix_np, error_probs_np, numShots,
                              actual_seed, syndromes_gpu, errors_gpu,
                              gpu_failure_reason))
-            return py::make_tuple(syndromes_gpu, errors_gpu);
+            return nb::make_tuple(syndromes_gpu, errors_gpu);
 
           if (backend_mode == DemSamplingBackend::Gpu) {
             throw std::runtime_error(
@@ -584,15 +597,14 @@ void bindDemSampling(py::module &mod) {
 
         auto H = cudaqx::toTensor(check_matrix_np);
 
-        py::buffer_info p_buf = error_probs_np.request();
-        std::vector<double> probs(static_cast<double *>(p_buf.ptr),
-                                  static_cast<double *>(p_buf.ptr) +
-                                      p_buf.shape[0]);
+        auto *probs_ptr = static_cast<const double *>(error_probs_np.data());
+        std::vector<double> probs(probs_ptr,
+                                  probs_ptr + error_probs_np.shape(0));
 
         auto [syndromes, errors] =
             cpu::sample_dem(H, numShots, probs, actual_seed);
 
-        return py::make_tuple(
+        return nb::make_tuple(
             cudaq::python::copyCUDAQXTensorToPyArray(syndromes),
             cudaq::python::copyCUDAQXTensorToPyArray(errors));
       },
@@ -628,9 +640,9 @@ void bindDemSampling(py::module &mod) {
             A tuple (syndromes, errors) with shapes [numShots x num_checks]
             and [numShots x num_error_mechanisms].
       )pbdoc",
-      py::arg("check_matrix"), py::arg("numShots"),
-      py::arg("error_probabilities"), py::arg("seed") = py::none(),
-      py::arg("backend") = "auto");
+      nb::arg("check_matrix"), nb::arg("numShots"),
+      nb::arg("error_probabilities"), nb::arg("seed") = nb::none(),
+      nb::arg("backend") = "auto");
 }
 
 } // namespace cudaq::qec::dem_sampler
