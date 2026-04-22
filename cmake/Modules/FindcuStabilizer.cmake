@@ -29,9 +29,16 @@ Hints
 ^^^^^
 
 ``CUSTABILIZER_ROOT``
-  Preferred search prefix (set by CI from ``pip show custabilizer-cuXX``).
+  Preferred search prefix.  Accepted as a CMake variable (``-DCUSTABILIZER_ROOT=...``)
+  or an environment variable.
 
 #]=======================================================================]
+
+cmake_policy(SET CMP0144 NEW)
+
+if(NOT CUSTABILIZER_ROOT AND DEFINED ENV{CUSTABILIZER_ROOT})
+  set(CUSTABILIZER_ROOT "$ENV{CUSTABILIZER_ROOT}")
+endif()
 
 find_path(cuStabilizer_INCLUDE_DIR
   NAMES custabilizer.h
