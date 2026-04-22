@@ -237,12 +237,10 @@ auto copyCUDAQXTensorToPyArray(const cudaqx::tensor<T> &tensor) {
   std::memcpy(data_copy, tensor.data(), total_size * sizeof(T));
 
   size_t arr_shape[] = {rows, cols};
-  int64_t arr_strides[] = {(int64_t)(cols * sizeof(T)), (int64_t)sizeof(T)};
-  return nb::ndarray<nb::numpy, T>(
-      data_copy, 2, arr_shape,
-      nb::capsule(data_copy,
-                  [](void *p) noexcept { delete[] static_cast<T *>(p); }),
-      arr_strides);
+  return nb::ndarray<nb::numpy, T>(data_copy, 2, arr_shape,
+                                   nb::capsule(data_copy, [](void *p) noexcept {
+                                     delete[] static_cast<T *>(p);
+                                   }));
 }
 
 template <typename T>

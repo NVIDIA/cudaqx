@@ -209,10 +209,8 @@ void bindDecoder(nb::module_ &mod) {
             auto rows = t.shape()[0];
             auto cols = t.shape()[1];
             size_t shape[2] = {rows, cols};
-            int64_t strides[2] = {(int64_t)(cols * sizeof(uint8_t)),
-                                  (int64_t)sizeof(uint8_t)};
             auto arr = nb::ndarray<nb::numpy, uint8_t>(
-                const_cast<uint8_t *>(t.data()), 2, shape, nb::none(), strides);
+                const_cast<uint8_t *>(t.data()), 2, shape, nb::none());
             return nb::cast(arr).attr("copy")();
           },
           [](detector_error_model &self,
@@ -246,10 +244,8 @@ void bindDecoder(nb::module_ &mod) {
             auto rows = t.shape()[0];
             auto cols = t.shape()[1];
             size_t shape[2] = {rows, cols};
-            int64_t strides[2] = {(int64_t)(cols * sizeof(uint8_t)),
-                                  (int64_t)sizeof(uint8_t)};
             auto arr = nb::ndarray<nb::numpy, uint8_t>(
-                const_cast<uint8_t *>(t.data()), 2, shape, nb::none(), strides);
+                const_cast<uint8_t *>(t.data()), 2, shape, nb::none());
             return nb::cast(arr).attr("copy")();
           },
           [](detector_error_model &self,
@@ -430,10 +426,8 @@ void bindDecoder(nb::module_ &mod) {
         auto rows = H_new.shape()[0];
         auto cols = H_new.shape()[1];
         size_t shape[2] = {rows, cols};
-        int64_t strides[2] = {(int64_t)(cols * sizeof(uint8_t)),
-                              (int64_t)sizeof(uint8_t)};
         auto arr = nb::ndarray<nb::numpy, uint8_t>(
-            const_cast<uint8_t *>(H_new.data()), 2, shape, nb::none(), strides);
+            const_cast<uint8_t *>(H_new.data()), 2, shape, nb::none());
         return nb::cast(arr).attr("copy")();
       },
       R"pbdoc(
@@ -467,10 +461,8 @@ void bindDecoder(nb::module_ &mod) {
         auto rows = H_new.shape()[0];
         auto cols = H_new.shape()[1];
         size_t shape[2] = {rows, cols};
-        int64_t strides[2] = {(int64_t)(cols * sizeof(uint8_t)),
-                              (int64_t)sizeof(uint8_t)};
         auto arr = nb::ndarray<nb::numpy, uint8_t>(
-            const_cast<uint8_t *>(H_new.data()), 2, shape, nb::none(), strides);
+            const_cast<uint8_t *>(H_new.data()), 2, shape, nb::none());
         return nb::cast(arr).attr("copy")();
       },
       R"pbdoc(
@@ -523,10 +515,8 @@ void bindDecoder(nb::module_ &mod) {
         auto rows = H_new.shape()[0];
         auto cols = H_new.shape()[1];
         size_t shape[2] = {rows, cols};
-        int64_t strides[2] = {(int64_t)(cols * sizeof(uint8_t)),
-                              (int64_t)sizeof(uint8_t)};
         auto arr = nb::ndarray<nb::numpy, uint8_t>(
-            const_cast<uint8_t *>(H_new.data()), 2, shape, nb::none(), strides);
+            const_cast<uint8_t *>(H_new.data()), 2, shape, nb::none());
         return nb::cast(arr).attr("copy")();
       },
       R"pbdoc(
@@ -569,10 +559,8 @@ void bindDecoder(nb::module_ &mod) {
         auto rows = H_new.shape()[0];
         auto cols = H_new.shape()[1];
         size_t shape[2] = {rows, cols};
-        int64_t strides[2] = {(int64_t)(cols * sizeof(uint8_t)),
-                              (int64_t)sizeof(uint8_t)};
         auto arr = nb::ndarray<nb::numpy, uint8_t>(
-            const_cast<uint8_t *>(H_new.data()), 2, shape, nb::none(), strides);
+            const_cast<uint8_t *>(H_new.data()), 2, shape, nb::none());
         return nb::make_tuple(nb::cast(arr).attr("copy")(), first_column,
                               last_column);
       },
@@ -616,10 +604,8 @@ void bindDecoder(nb::module_ &mod) {
         auto rows = H_new.shape()[0];
         auto cols = H_new.shape()[1];
         size_t shape[2] = {rows, cols};
-        int64_t strides[2] = {(int64_t)(cols * sizeof(uint8_t)),
-                              (int64_t)sizeof(uint8_t)};
         auto arr = nb::ndarray<nb::numpy, uint8_t>(
-            const_cast<uint8_t *>(H_new.data()), 2, shape, nb::none(), strides);
+            const_cast<uint8_t *>(H_new.data()), 2, shape, nb::none());
         return nb::make_tuple(nb::cast(arr).attr("copy")(), column_list);
       },
       R"pbdoc(
@@ -656,10 +642,8 @@ void bindDecoder(nb::module_ &mod) {
         auto rows = H_new.shape()[0];
         auto cols = H_new.shape()[1];
         size_t shape[2] = {rows, cols};
-        int64_t strides[2] = {(int64_t)(cols * sizeof(uint8_t)),
-                              (int64_t)sizeof(uint8_t)};
         auto arr = nb::ndarray<nb::numpy, uint8_t>(
-            const_cast<uint8_t *>(H_new.data()), 2, shape, nb::none(), strides);
+            const_cast<uint8_t *>(H_new.data()), 2, shape, nb::none());
         return nb::cast(arr).attr("copy")();
       },
       R"pbdoc(
@@ -694,16 +678,12 @@ void bindDecoder(nb::module_ &mod) {
         auto rows = H_new.shape()[0];
         auto cols = H_new.shape()[1];
         size_t shape_h[2] = {rows, cols};
-        int64_t strides_h[2] = {(int64_t)(cols * sizeof(uint8_t)),
-                                (int64_t)sizeof(uint8_t)};
-        auto arr_h =
-            nb::ndarray<nb::numpy, uint8_t>(const_cast<uint8_t *>(H_new.data()),
-                                            2, shape_h, nb::none(), strides_h);
+        auto arr_h = nb::ndarray<nb::numpy, uint8_t>(
+            const_cast<uint8_t *>(H_new.data()), 2, shape_h, nb::none());
         // Construct a new ndarray from weights_new.
         size_t shape_w[1] = {weights_new.size()};
-        int64_t strides_w[1] = {(int64_t)sizeof(double)};
-        auto arr_w = nb::ndarray<nb::numpy, double>(
-            weights_new.data(), 1, shape_w, nb::none(), strides_w);
+        auto arr_w = nb::ndarray<nb::numpy, double>(weights_new.data(), 1,
+                                                    shape_w, nb::none());
         return nb::make_tuple(nb::cast(arr_h).attr("copy")(),
                               nb::cast(arr_w).attr("copy")());
       },

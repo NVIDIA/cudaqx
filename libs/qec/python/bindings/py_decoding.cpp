@@ -20,23 +20,6 @@ namespace nb = nanobind;
 
 namespace cudaq::qec::decoding {
 
-// Convert a Python iterable of bool/int/measure_result into
-// std::vector<cudaq::measure_result>
-static std::vector<cudaq::measure_result>
-to_measure_result_vector(const nb::handle &iterable) {
-  std::vector<cudaq::measure_result> results;
-  for (const auto &item : iterable) {
-    if (nb::isinstance<cudaq::measure_result>(item)) {
-      results.emplace_back(nb::cast<cudaq::measure_result>(item));
-      continue;
-    }
-
-    bool b = nb::cast<bool>(item);
-    results.emplace_back(cudaq::measure_result{b});
-  }
-  return results;
-}
-
 void bindDecoding(nb::module_ &mod) {
   auto qecmod = nb::hasattr(mod, "qecrt")
                     ? nb::cast<nb::module_>(mod.attr("qecrt"))
