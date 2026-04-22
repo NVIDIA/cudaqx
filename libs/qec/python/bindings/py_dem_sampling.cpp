@@ -74,8 +74,7 @@ void rejectTorchCpuTensors(const nb::object &check_matrix_obj,
     return;
 
   auto is_cpu = [&](const nb::object &obj) {
-    return nb::isinstance(obj, Tensor) &&
-           !nb::cast<bool>(obj.attr("is_cuda"));
+    return nb::isinstance(obj, Tensor) && !nb::cast<bool>(obj.attr("is_cuda"));
   };
 
   if (is_cpu(check_matrix_obj) || is_cpu(error_probs_obj)) {
@@ -308,8 +307,8 @@ bool tryGpuSampling(const nb::ndarray<nb::numpy, uint8_t> &check_matrix_np,
     cudaGetLastError();
     return false;
   }
-  auto copy_p_status = cudaMemcpy(d_probs.get(), error_probs_np.data(),
-                                  p_bytes, cudaMemcpyHostToDevice);
+  auto copy_p_status = cudaMemcpy(d_probs.get(), error_probs_np.data(), p_bytes,
+                                  cudaMemcpyHostToDevice);
   if (copy_p_status != cudaSuccess) {
     failure_reason = std::string("failed to copy probabilities to device: ") +
                      cudaGetErrorString(copy_p_status);
@@ -353,15 +352,15 @@ bool tryGpuSampling(const nb::ndarray<nb::numpy, uint8_t> &check_matrix_np,
 
   size_t syn_shape[2] = {numShots, num_checks};
   syndromes_out = nb::cast(nb::ndarray<nb::numpy, uint8_t>(
-      syn_data, 2, syn_shape,
-      nb::capsule(syn_data,
-                  [](void *p) noexcept { delete[] static_cast<uint8_t *>(p); })));
+      syn_data, 2, syn_shape, nb::capsule(syn_data, [](void *p) noexcept {
+        delete[] static_cast<uint8_t *>(p);
+      })));
 
   size_t err_shape[2] = {numShots, num_mechanisms};
   errors_out = nb::cast(nb::ndarray<nb::numpy, uint8_t>(
-      err_data, 2, err_shape,
-      nb::capsule(err_data,
-                  [](void *p) noexcept { delete[] static_cast<uint8_t *>(p); })));
+      err_data, 2, err_shape, nb::capsule(err_data, [](void *p) noexcept {
+        delete[] static_cast<uint8_t *>(p);
+      })));
 
   failure_reason.clear();
   return true;
@@ -443,20 +442,18 @@ bool tryTorchGpuSampling(nb::object check_matrix_obj,
     return false;
   }
 
-  auto num_checks =
-      static_cast<std::size_t>(nb::cast<int64_t>(check_shape[0]));
+  auto num_checks = static_cast<std::size_t>(nb::cast<int64_t>(check_shape[0]));
   auto num_mechanisms =
       static_cast<std::size_t>(nb::cast<int64_t>(check_shape[1]));
-  auto num_probs =
-      static_cast<std::size_t>(nb::cast<int64_t>(probs_shape[0]));
+  auto num_probs = static_cast<std::size_t>(nb::cast<int64_t>(probs_shape[0]));
 
   if (num_probs != num_mechanisms) {
     failure_reason = "error_probabilities length mismatch";
     return false;
   }
 
-  bool all_finite =
-      nb::cast<bool>(torch.attr("isfinite")(probs_t).attr("all")().attr("item")());
+  bool all_finite = nb::cast<bool>(
+      torch.attr("isfinite")(probs_t).attr("all")().attr("item")());
   bool any_below_zero =
       nb::cast<bool>(probs_t.attr("lt")(0.0).attr("any")().attr("item")());
   bool any_above_one =
@@ -480,14 +477,14 @@ bool tryTorchGpuSampling(nb::object check_matrix_obj,
                                    failure_reason))
     return false;
 
-  nb::object syndromes_t = torch.attr("empty")(
-      nb::make_tuple(static_cast<int64_t>(numShots),
-                     static_cast<int64_t>(num_checks)),
-      "dtype"_a = torch.attr("uint8"), "device"_a = device);
-  nb::object errors_t = torch.attr("empty")(
-      nb::make_tuple(static_cast<int64_t>(numShots),
-                     static_cast<int64_t>(num_mechanisms)),
-      "dtype"_a = torch.attr("uint8"), "device"_a = device);
+  nb::object syndromes_t =
+      torch.attr("empty")(nb::make_tuple(static_cast<int64_t>(numShots),
+                                         static_cast<int64_t>(num_checks)),
+                          "dtype"_a = torch.attr("uint8"), "device"_a = device);
+  nb::object errors_t =
+      torch.attr("empty")(nb::make_tuple(static_cast<int64_t>(numShots),
+                                         static_cast<int64_t>(num_mechanisms)),
+                          "dtype"_a = torch.attr("uint8"), "device"_a = device);
 
   auto d_H = reinterpret_cast<const uint8_t *>(
       nb::cast<std::uintptr_t>(check_t.attr("data_ptr")()));
