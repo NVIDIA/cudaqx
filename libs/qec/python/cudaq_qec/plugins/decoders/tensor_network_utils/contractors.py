@@ -5,19 +5,15 @@
 # This source code and the accompanying materials are made available under     #
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
-from __future__ import annotations
-
-from typing import Any, Callable, Optional, Union, TYPE_CHECKING
+from typing import Any, Callable, Optional, Union
 import numpy.typing as npt
 from dataclasses import dataclass, field
 from typing import Callable, ClassVar
 
 import opt_einsum as oe
+import torch
 from cuquantum import tensornet as cutn
 from quimb.tensor import TensorNetwork
-
-if TYPE_CHECKING:
-    import torch
 
 
 def einsum_torch(subscripts: str,
@@ -39,7 +35,6 @@ def einsum_torch(subscripts: str,
     Returns:
         torch.Tensor: The contracted tensor.
     """
-    import torch
     return torch.einsum(subscripts, *tensors)
 
 

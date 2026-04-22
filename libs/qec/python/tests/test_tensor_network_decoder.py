@@ -27,12 +27,6 @@ if sys.version_info >= (3, 11):
 pytestmark = pytest.mark.skipif(sys.version_info < (3, 11),
                                 reason="Requires Python >= 3.11")
 
-try:
-    import torch
-    _HAS_TORCH = True
-except ImportError:
-    _HAS_TORCH = False
-
 
 def is_nvidia_gpu_available():
     import cupy
@@ -44,11 +38,6 @@ def is_nvidia_gpu_available():
     return False
 
 
-_SKIP_DECODER_MSG = ("PyTorch required for tensor network decoder on CPU "
-                     "(install with: pip install torch)")
-_SKIP_DECODER = not _HAS_TORCH and not is_nvidia_gpu_available()
-
-
 def make_simple_code():
     # [[1, 1, 0], [0, 1, 1]] parity check, 1 logical, depolarizing noise
     H = np.array([[1, 1, 0], [0, 1, 1]])
@@ -57,7 +46,6 @@ def make_simple_code():
     return H, logical, noise
 
 
-@pytest.mark.skipif(_SKIP_DECODER, reason=_SKIP_DECODER_MSG)
 def test_decoder_init_and_attributes():
     H, logical, noise = make_simple_code()
     decoder = qec.get_decoder("tensor_network_decoder",
@@ -81,7 +69,6 @@ def test_decoder_init_and_attributes():
     assert decoder._dtype == "float32"
 
 
-@pytest.mark.skipif(_SKIP_DECODER, reason=_SKIP_DECODER_MSG)
 def test_decoder_replace_logical_observable():
     H, logical, noise = make_simple_code()
     import cudaq_qec as qec
@@ -106,7 +93,6 @@ def test_decoder_replace_logical_observable():
     assert decoder.logical_tags == new_logical_tags
 
 
-@pytest.mark.skipif(_SKIP_DECODER, reason=_SKIP_DECODER_MSG)
 def test_decoder_replace_logical_observable_shape_error():
     H, logical, noise = make_simple_code()
     import cudaq_qec as qec
@@ -130,7 +116,6 @@ def test_decoder_replace_logical_observable_shape_error():
             logical_tags=new_logical_tags)
 
 
-@pytest.mark.skipif(_SKIP_DECODER, reason=_SKIP_DECODER_MSG)
 def test_decoder_flip_syndromes():
     H, logical, noise = make_simple_code()
     decoder = qec.get_decoder("tensor_network_decoder",
@@ -149,7 +134,6 @@ def test_decoder_flip_syndromes():
         np.testing.assert_array_equal(t.data, np.array([1.0, 1.0]))
 
 
-@pytest.mark.skipif(_SKIP_DECODER, reason=_SKIP_DECODER_MSG)
 def test_decoder_decode_single():
     H, logical, noise = make_simple_code()
     decoder = qec.get_decoder("tensor_network_decoder",
@@ -164,7 +148,6 @@ def test_decoder_decode_single():
     assert 0.0 <= res.result[0] <= 1.0
 
 
-@pytest.mark.skipif(_SKIP_DECODER, reason=_SKIP_DECODER_MSG)
 def test_decoder_decode_batch():
     H, logical, noise = make_simple_code()
     decoder = qec.get_decoder("tensor_network_decoder",
@@ -181,7 +164,6 @@ def test_decoder_decode_batch():
         for r in res)
 
 
-@pytest.mark.skipif(_SKIP_DECODER, reason=_SKIP_DECODER_MSG)
 def test_decoder_set_contractor_invalid():
     H, logical, noise = make_simple_code()
     decoder = qec.get_decoder("tensor_network_decoder",
@@ -196,7 +178,6 @@ def test_decoder_set_contractor_invalid():
         decoder._set_contractor("numpy", "cpu", "not_a_backend")
 
 
-@pytest.mark.skipif(_SKIP_DECODER, reason=_SKIP_DECODER_MSG)
 def test_TensorNetworkDecoder_optimize_path_all_variants():
     import cotengra
     from cuquantum import tensornet as cutn
@@ -237,7 +218,6 @@ def test_TensorNetworkDecoder_optimize_path_all_variants():
     assert isinstance(info3, PathInfo)
 
 
-@pytest.mark.skipif(_SKIP_DECODER, reason=_SKIP_DECODER_MSG)
 def test_decoder_batch_vs_single_and_expected_results_with_contractors():
     np.random.seed(42)
     n_checks = 5
