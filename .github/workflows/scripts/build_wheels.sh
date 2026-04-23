@@ -142,6 +142,27 @@ export CUDAQX_QEC_VERSION=$wheels_version
 export CUDAQX_SOLVERS_VERSION=$wheels_version
 
 # ==============================================================================
+# cuStabilizer / cuQuantum SDK location
+# ==============================================================================
+# `python -m build` runs the configure inside an isolated venv whose
+# Python_EXECUTABLE has no cuquantum-python wheel installed, so the Python
+# probe in cmake/Modules/FindcuStabilizer.cmake cannot find the library on its
+# own.  Resolve the wheel's install prefix from the *outer* interpreter (where
+# the workflow already pip-installed cuquantum-python-cuXX) and export
+# CUQUANTUM_ROOT so the isolated build env's CMake invocation picks it up.
+if [ -z "$CUQUANTUM_ROOT" ]; then
+  CUQUANTUM_ROOT=$($python -m pip show "custabilizer-cu${cuda_version}" 2>/dev/null \
+                   | sed -nE 's|^Location: (.*)|\1/cuquantum|p')
+fi
+if [ -z "$CUQUANTUM_ROOT" ] || [ ! -f "$CUQUANTUM_ROOT/include/custabilizer.h" ]; then
+  echo "ERROR: could not locate cuStabilizer headers via custabilizer-cu${cuda_version}." >&2
+  echo "       Make sure cuquantum-python-cu${cuda_version} is installed for $python." >&2
+  exit 1
+fi
+export CUQUANTUM_ROOT
+echo "Using CUQUANTUM_ROOT=$CUQUANTUM_ROOT"
+
+# ==============================================================================
 # QEC library
 # ==============================================================================
 
