@@ -6,6 +6,16 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
+def _ensure_cuda_runtime_loaded():
+    """Ensure CUDA runtime libraries are in the process before loading native extensions."""
+    try:
+        import cudaq
+    except ImportError:
+        pass
+
+_ensure_cuda_runtime_loaded()
+del _ensure_cuda_runtime_loaded
+
 from .patch import patch
 try:
     from ._pycudaqx_qec_the_suffix_matters_cudaq_qec import *
@@ -18,6 +28,10 @@ except ImportError as exc:
             "package for your CUDA wheel (for example, "
             "'cuquantum-python-cu12>=26.03.0' or "
             "'cuquantum-python-cu13>=26.03.0').") from exc
+    if "libcudart" in err:
+        raise ImportError(
+            f"{err}. Ensure 'nvidia-cuda-runtime-cuXX' is installed "
+            "alongside 'cuda-quantum-cuXX'.") from exc
     raise
 
 __version__ = qecrt.__version__
