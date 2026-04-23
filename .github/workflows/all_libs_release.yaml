@@ -46,7 +46,9 @@ jobs:
           apt update && apt install -y --no-install-recommends zip unzip patchelf git-lfs
           cuda_major=$(echo ${{ matrix.cuda_version }} | cut -d . -f1)
           echo "cuda_major=$cuda_major" >> $GITHUB_OUTPUT
-          pip install "cuquantum-python-cu${cuda_major}>=26.3.0" "custabilizer-cu${cuda_major}>=0.3.0"
+          # custabilizer-cuXX is pulled in transitively by cuquantum-python-cuXX;
+          # it provides the headers/library that FindcuStabilizer.cmake locates.
+          pip install "cuquantum-python-cu${cuda_major}>=26.3.0"
 
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -156,6 +158,7 @@ jobs:
           LD_LIBRARY_PATH: ${{ env.MPI_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
         shell: bash
         run: |
+          # Install the correct torch first.
           cuda_no_dot=$(echo ${{ matrix.cuda_version }} | sed 's/\.//')
           pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu${cuda_no_dot}
           pip install numpy pytest onnxscript cupy-cuda${{ steps.config.outputs.cuda_major }}x cuquantum-cu${{ steps.config.outputs.cuda_major }} lightning ml_collections mpi4py transformers quimb opt_einsum nvidia-cublas "cuquantum-python-cu${{ steps.config.outputs.cuda_major }}>=26.3.0"
@@ -166,25 +169,13 @@ jobs:
               pip install stim beliefmatching
           fi
 
-      - name: Set cuStabilizer runtime paths
-        run: |
-          CUSTAB_ROOT=$(python3 -c "
-          import subprocess, pathlib, sys
-          pkg = 'custabilizer-cu' + '${{ steps.config.outputs.cuda_major }}'
-          show = subprocess.check_output([sys.executable, '-m', 'pip', 'show', pkg], text=True)
-          loc = [l.split(':',1)[1].strip() for l in show.splitlines() if l.startswith('Location:')][0]
-          root = pathlib.Path(loc) / 'cuquantum'
-          print(root if (root / 'lib' / 'libcustabilizer.so.0').exists() else '')
-          ")
-          if [ -n "$CUSTAB_ROOT" ]; then
-            echo "LD_LIBRARY_PATH=$CUSTAB_ROOT/lib:$CUSTAB_ROOT/lib64:${{ env.MPI_PATH }}/lib:${LD_LIBRARY_PATH:-}" >> $GITHUB_ENV
-          fi
-
       - name: Run Python tests
         env:
+          LD_LIBRARY_PATH: ${{ env.MPI_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
           OMPI_MCA_pml: ob1
         run: |
           if [[ -n "${{ env.QEC_EXTERNAL_DECODERS }}" ]]; then
+            # Verify that external decoder is available if applicable
             export PYTHONPATH="/usr/local/cudaq:$HOME/.cudaqx"
             python3 -c "import cudaq_qec as qec; print(qec.__version__); d = qec.get_decoder('nv-qldpc-decoder', qec.get_code('steane').get_parity()); print(d.get_version())"
           fi
@@ -197,6 +188,7 @@ jobs:
  
       - name: Run example tests
         env:
+          LD_LIBRARY_PATH: ${{ env.MPI_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
           OMPI_MCA_pml: ob1
         run: |
           ln -s /usr/local/cudaq /cudaq-install

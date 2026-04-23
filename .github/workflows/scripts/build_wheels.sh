@@ -163,6 +163,7 @@ LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$(pwd)/_skbuild/lib:$tensorrt_path/lib" \
 $python -m auditwheel -v repair dist/*.whl $CUDAQ_EXCLUDE_LIST \
   --wheel-dir /wheels \
   --exclude libcudart.so.${cuda_version} \
+  --exclude libcustabilizer.so.0 \
   --exclude libnvinfer.so.10 \
   --exclude libnvonnxparser.so.10 \
   --exclude libcudaq-qec.so \

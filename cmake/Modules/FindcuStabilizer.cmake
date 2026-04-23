@@ -24,6 +24,10 @@ Result Variables
 ``cuStabilizer_FOUND``
 ``cuStabilizer_INCLUDE_DIR``
 ``cuStabilizer_LIBRARY``
+``cuStabilizer_LIBRARY_DIR``
+  Directory containing the cuStabilizer shared library.  Useful for adding to
+  ``BUILD_RPATH`` / ``INSTALL_RPATH`` on consuming targets so the loader can
+  find ``libcustabilizer.so`` at runtime.
 
 Hints
 ^^^^^
@@ -32,12 +36,60 @@ Hints
   Preferred search prefix.  Accepted as a CMake variable (``-DCUSTABILIZER_ROOT=...``)
   or an environment variable.
 
+If ``CUSTABILIZER_ROOT`` is not provided, this module will additionally probe the
+active Python environment for the ``custabilizer-cuXX`` / ``cuquantum-cuXX`` pip
+wheels, which ship the headers and library under
+``<site-packages>/cuquantum/{include,lib}``.
+
 #]=======================================================================]
 
 cmake_policy(SET CMP0144 NEW)
 
 if(NOT CUSTABILIZER_ROOT AND DEFINED ENV{CUSTABILIZER_ROOT})
   set(CUSTABILIZER_ROOT "$ENV{CUSTABILIZER_ROOT}")
+endif()
+
+# If no explicit root was given, try to discover the wheel layout from the
+# active Python interpreter.  The custabilizer-cuXX / cuquantum-cuXX wheels
+# install headers at  <site-packages>/cuquantum/include/custabilizer.h
+# and the shared lib at <site-packages>/cuquantum/lib/libcustabilizer.so.0.
+if(NOT CUSTABILIZER_ROOT)
+  # Use whatever Python the user has on their PATH (or the one already located
+  # by the parent project) without forcing a hard dependency.
+  if(NOT Python3_EXECUTABLE AND NOT Python_EXECUTABLE)
+    find_package(Python3 QUIET COMPONENTS Interpreter)
+  endif()
+  set(_custab_py "${Python3_EXECUTABLE}")
+  if(NOT _custab_py)
+    set(_custab_py "${Python_EXECUTABLE}")
+  endif()
+
+  if(_custab_py)
+    execute_process(
+      COMMAND "${_custab_py}" -c [==[
+import importlib.util, pathlib, sys
+for pkg in ('custabilizer', 'cuquantum'):
+    spec = importlib.util.find_spec(pkg)
+    if not spec or not spec.origin:
+        continue
+    root = pathlib.Path(spec.origin).parent
+    if (root / 'include' / 'custabilizer.h').exists():
+        sys.stdout.write(str(root))
+        sys.exit(0)
+sys.exit(1)
+]==]
+      OUTPUT_VARIABLE _custab_py_root
+      ERROR_QUIET
+      RESULT_VARIABLE _custab_py_rc
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    if(_custab_py_rc EQUAL 0 AND _custab_py_root)
+      set(CUSTABILIZER_ROOT "${_custab_py_root}")
+      if(NOT cuStabilizer_FIND_QUIETLY)
+        message(STATUS "FindcuStabilizer: discovered Python wheel at ${CUSTABILIZER_ROOT}")
+      endif()
+    endif()
+  endif()
 endif()
 
 find_path(cuStabilizer_INCLUDE_DIR
@@ -78,6 +130,10 @@ find_package_handle_standard_args(cuStabilizer
   VERSION_VAR cuStabilizer_VERSION
 )
 
+if(cuStabilizer_LIBRARY)
+  get_filename_component(cuStabilizer_LIBRARY_DIR "${cuStabilizer_LIBRARY}" DIRECTORY)
+endif()
+
 if(cuStabilizer_FOUND AND NOT TARGET cuStabilizer::cuStabilizer)
   add_library(cuStabilizer::cuStabilizer INTERFACE IMPORTED GLOBAL)
   set_target_properties(cuStabilizer::cuStabilizer PROPERTIES
@@ -86,6 +142,11 @@ if(cuStabilizer_FOUND AND NOT TARGET cuStabilizer::cuStabilizer)
   if(cuStabilizer_LIBRARY)
     set_target_properties(cuStabilizer::cuStabilizer PROPERTIES
       INTERFACE_LINK_LIBRARIES "${cuStabilizer_LIBRARY}"
+    )
+  endif()
+  if(cuStabilizer_LIBRARY_DIR)
+    set_target_properties(cuStabilizer::cuStabilizer PROPERTIES
+      INTERFACE_LINK_DIRECTORIES "${cuStabilizer_LIBRARY_DIR}"
     )
   endif()
 endif()
