@@ -28,8 +28,12 @@ if(NOT cuStabilizer_FOUND)
     "cuQuantum SDK pip wheels. Install it into the Python environment used "
     "for this build with:\n"
     "    pip install cuquantum-python-cu${_cuda_major}\n"
-    "(or set -DCUSTABILIZER_ROOT=/path/to/custabilizer to point at an "
-    "existing system install).")
+    "If the wheel is installed but discovery still fails (e.g. because the "
+    "build runs in an isolated venv such as `python -m build`), point CMake "
+    "at the install prefix explicitly via either of:\n"
+    "    -DCUQUANTUM_ROOT=<site-packages>/cuquantum\n"
+    "    -DCUSTABILIZER_ROOT=/path/to/custabilizer\n"
+    "(both are also honored as environment variables).")
 endif()
 
 set(QEC_SOURCES

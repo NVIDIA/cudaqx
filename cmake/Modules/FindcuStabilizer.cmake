@@ -36,9 +36,15 @@ Hints
   Preferred search prefix.  Accepted as a CMake variable (``-DCUSTABILIZER_ROOT=...``)
   or an environment variable.
 
-If ``CUSTABILIZER_ROOT`` is not provided, this module will additionally probe the
-active Python environment for the ``custabilizer-cuXX`` / ``cuquantum-cuXX`` pip
-wheels, which ship the headers and library under
+``CUQUANTUM_ROOT``
+  Standard cuQuantum SDK install prefix (CMake variable or environment
+  variable).  Used as a fallback when ``CUSTABILIZER_ROOT`` is not set.  The
+  cuquantum-python pip wheels expose this naturally as
+  ``<site-packages>/cuquantum``.
+
+If neither variable is provided, this module will additionally probe the
+active Python environment for the ``custabilizer-cuXX`` / ``cuquantum-cuXX``
+pip wheels, which ship the headers and library under
 ``<site-packages>/cuquantum/{include,lib}``.
 
 #]=======================================================================]
@@ -49,10 +55,28 @@ if(NOT CUSTABILIZER_ROOT AND DEFINED ENV{CUSTABILIZER_ROOT})
   set(CUSTABILIZER_ROOT "$ENV{CUSTABILIZER_ROOT}")
 endif()
 
-# If no explicit root was given, try to discover the wheel layout from the
-# active Python interpreter.  The custabilizer-cuXX / cuquantum-cuXX wheels
-# install headers at  <site-packages>/cuquantum/include/custabilizer.h
-# and the shared lib at <site-packages>/cuquantum/lib/libcustabilizer.so.0.
+# Fall back to the standard cuQuantum SDK env var.  This handles the common
+# case of a system-wide cuQuantum install (CUQUANTUM_ROOT=/opt/nvidia/cuquantum)
+# as well as the cuquantum-python pip wheel layout, where downstream tooling
+# already exports CUQUANTUM_ROOT=<site-packages>/cuquantum.  In particular, this
+# is what lets us discover the library when scikit-build runs the configure in
+# an isolated build venv whose Python_EXECUTABLE has no cuquantum-python wheel
+# installed (e.g. `python -m build`), but the outer environment does.
+if(NOT CUSTABILIZER_ROOT)
+  if(CUQUANTUM_ROOT)
+    set(CUSTABILIZER_ROOT "${CUQUANTUM_ROOT}")
+  elseif(DEFINED ENV{CUQUANTUM_ROOT})
+    set(CUSTABILIZER_ROOT "$ENV{CUQUANTUM_ROOT}")
+  endif()
+  if(CUSTABILIZER_ROOT AND NOT cuStabilizer_FIND_QUIETLY)
+    message(STATUS "FindcuStabilizer: using CUQUANTUM_ROOT=${CUSTABILIZER_ROOT}")
+  endif()
+endif()
+
+# If still no root was found, try to discover the wheel layout from the active
+# Python interpreter.  The custabilizer-cuXX / cuquantum-cuXX wheels install
+# headers at  <site-packages>/cuquantum/include/custabilizer.h and the shared
+# lib at <site-packages>/cuquantum/lib/libcustabilizer.so.0.
 if(NOT CUSTABILIZER_ROOT)
   # Use whatever Python the user has on their PATH (or the one already located
   # by the parent project) without forcing a hard dependency.
