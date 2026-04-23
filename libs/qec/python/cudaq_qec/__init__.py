@@ -6,12 +6,14 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
+
 def _ensure_cuda_runtime_loaded():
     """Ensure CUDA runtime libraries are in the process before loading native extensions."""
     try:
         import cudaq
     except ImportError:
         pass
+
 
 _ensure_cuda_runtime_loaded()
 del _ensure_cuda_runtime_loaded
