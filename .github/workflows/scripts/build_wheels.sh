@@ -142,6 +142,29 @@ export CUDAQX_QEC_VERSION=$wheels_version
 export CUDAQX_SOLVERS_VERSION=$wheels_version
 
 # ==============================================================================
+# cuStabilizer / cuQuantum SDK location
+# ==============================================================================
+# Install the cuquantum-python pip wheel into the outer interpreter (it bundles
+# the cuStabilizer headers and library).  `python -m build` later spawns an
+# isolated venv whose Python_EXECUTABLE has no cuquantum-python wheel
+# installed, so the Python probe in cmake/Modules/FindcuStabilizer.cmake cannot
+# find the library on its own.  Resolve the wheel's install prefix here and
+# export CUQUANTUM_ROOT so the isolated build env's CMake invocation picks it
+# up.  Honors a pre-set CUQUANTUM_ROOT (e.g. for system installs).
+if [ -z "$CUQUANTUM_ROOT" ]; then
+  $python -m pip install --upgrade "cuquantum-python-cu${cuda_version}>=26.3.0"
+  CUQUANTUM_ROOT=$($python -m pip show "custabilizer-cu${cuda_version}" 2>/dev/null \
+                   | sed -nE 's|^Location: (.*)|\1/cuquantum|p')
+fi
+if [ -z "$CUQUANTUM_ROOT" ] || [ ! -f "$CUQUANTUM_ROOT/include/custabilizer.h" ]; then
+  echo "ERROR: could not locate cuStabilizer headers via custabilizer-cu${cuda_version}." >&2
+  echo "       Make sure cuquantum-python-cu${cuda_version} is installed for $python." >&2
+  exit 1
+fi
+export CUQUANTUM_ROOT
+echo "Using CUQUANTUM_ROOT=$CUQUANTUM_ROOT"
+
+# ==============================================================================
 # QEC library
 # ==============================================================================
 
@@ -163,6 +186,7 @@ LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$(pwd)/_skbuild/lib:$tensorrt_path/lib" \
 $python -m auditwheel -v repair dist/*.whl $CUDAQ_EXCLUDE_LIST \
   --wheel-dir /wheels \
   --exclude libcudart.so.${cuda_version} \
+  --exclude libcustabilizer.so.0 \
   --exclude libnvinfer.so.10 \
   --exclude libnvonnxparser.so.10 \
   --exclude libcudaq-qec.so \

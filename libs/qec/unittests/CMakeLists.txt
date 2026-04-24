@@ -48,6 +48,14 @@ target_link_libraries(test_qec PRIVATE GTest::gtest_main cudaq-qec cudaq::cudaq-
 add_dependencies(CUDAQXQECUnitTests test_qec)
 gtest_discover_tests(test_qec)
 
+add_executable(test_dem_sampling test_dem_sampling.cpp)
+target_link_libraries(test_dem_sampling PRIVATE GTest::gtest_main cudaq-qec cudaq::cudaq)
+target_link_libraries(test_dem_sampling PRIVATE CUDA::cudart)
+target_include_directories(test_dem_sampling PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+add_dependencies(CUDAQXQECUnitTests test_dem_sampling)
+gtest_discover_tests(test_dem_sampling)
+
+
 # TensorRT decoder test is only built for x86 architectures
 if(CUDAQ_QEC_BUILD_TRT_DECODER AND CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64)|(AMD64|amd64)|(^i.86$)")
   add_executable(test_trt_decoder ./decoders/trt_decoder/test_trt_decoder.cpp)

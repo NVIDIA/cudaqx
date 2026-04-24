@@ -6,8 +6,35 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
+
+def _ensure_cuda_runtime_loaded():
+    """Ensure CUDA runtime libraries are in the process before loading native extensions."""
+    try:
+        import cudaq
+    except ImportError:
+        pass
+
+
+_ensure_cuda_runtime_loaded()
+del _ensure_cuda_runtime_loaded
+
 from .patch import patch
-from ._pycudaqx_qec_the_suffix_matters_cudaq_qec import *
+try:
+    from ._pycudaqx_qec_the_suffix_matters_cudaq_qec import *
+except ImportError as exc:
+    err = str(exc)
+    if "libcustabilizer" in err or "cuStabilizer" in err:
+        raise ImportError(
+            "Failed to load cudaq_qec native extension because cuStabilizer "
+            "runtime libraries are missing. Install the matching cuQuantum "
+            "package for your CUDA wheel (for example, "
+            "'cuquantum-python-cu12>=26.03.0' or "
+            "'cuquantum-python-cu13>=26.03.0').") from exc
+    if "libcudart" in err:
+        raise ImportError(
+            f"{err}. Ensure 'nvidia-cuda-runtime-cuXX' is installed "
+            "alongside 'cuda-quantum-cuXX'.") from exc
+    raise
 
 __version__ = qecrt.__version__
 code = qecrt.code
@@ -56,6 +83,8 @@ configure_decoders = qecrt.config.configure_decoders
 
 stabilizer_grid = qecrt.stabilizer_grid
 role_to_str = qecrt.role_to_str
+
+from .dem_sampling import dem_sampling
 
 from .plugins import decoders, codes
 import pkgutil, importlib, traceback

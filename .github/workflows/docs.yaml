@@ -62,7 +62,8 @@ jobs:
 
           python3 -m pip install IPython breathe enum_tools myst_parser nbsphinx \
             sphinx_copybutton sphinx_inline_tabs sphinx_gallery sphinx_rtd_theme \
-            sphinx_reredirects sphinx_toolbox cupy-cuda12x cuquantum-python-cu12
+            sphinx_reredirects "sphinx<9" sphinx_toolbox \
+            cupy-cuda12x "cuquantum-python-cu12>=26.3.0"
 
       - name: Build docs
         run: |
@@ -103,4 +104,3 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-

@@ -10,6 +10,7 @@
 #include "py_decoder.h"
 #include "py_decoding.h"
 #include "py_decoding_config.h"
+#include "py_dem_sampling.h"
 #include "py_surface_code.h"
 
 #include <nanobind/nanobind.h>
@@ -25,6 +26,7 @@ NB_MODULE(_pycudaqx_qec_the_suffix_matters_cudaq_qec, mod) {
   cudaq::qec::bindDecoder(mod);
   cudaq::qec::decoding::config::bindDecodingConfig(mod);
   cudaq::qec::decoding::bindDecoding(mod);
+  cudaq::qec::dem_sampler::bindDemSampling(mod);
   cudaq::qec::surface_code::bindSurfaceCode(mod);
   // Suppress nanobind's reference-leak warnings.
   //

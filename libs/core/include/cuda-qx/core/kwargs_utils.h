@@ -140,9 +140,14 @@ inline heterogeneous_map hetMapFromKwargs(const nb::kwargs &kwargs) {
 template <typename T>
 tensor<T> toTensor(const nb::ndarray<nb::numpy, T> &H,
                    bool perform_pcm_checks = false) {
-  if (H.ndim() >= 1 && H.stride(0) == 1) {
-    throw std::runtime_error("toTensor: data must be in row-major order, but "
-                             "column-major order was detected.");
+  std::size_t expected_stride = 1;
+  for (int i = static_cast<int>(H.ndim()) - 1; i >= 0; --i) {
+    if (H.shape(i) > 1 &&
+        static_cast<std::size_t>(H.stride(i)) != expected_stride) {
+      throw std::runtime_error("toTensor: data must be in row-major order, but "
+                               "column-major order was detected.");
+    }
+    expected_stride *= H.shape(i);
   }
 
   if (perform_pcm_checks) {

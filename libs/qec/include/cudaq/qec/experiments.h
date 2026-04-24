@@ -9,6 +9,8 @@
 
 #include "cudaq/qec/code.h"
 #include "cudaq/qec/detector_error_model.h"
+#include <tuple>
+#include <vector>
 
 namespace cudaq::qec {
 
@@ -60,6 +62,25 @@ sample_code_capacity(const code &code, std::size_t numShots,
 std::tuple<cudaqx::tensor<uint8_t>, cudaqx::tensor<uint8_t>>
 sample_code_capacity(const code &code, std::size_t numShots,
                      double error_probability);
+
+/// @brief Sample a detector error model on CPU (legacy API).
+/// @param check_matrix Binary matrix [num_checks x num_error_mechanisms]
+/// @param numShots Number of independent Monte-Carlo shots
+/// @param error_probabilities Per-error-mechanism Bernoulli probabilities
+/// @return Tuple of (checks, errors)
+std::tuple<cudaqx::tensor<uint8_t>, cudaqx::tensor<uint8_t>>
+dem_sampling(const cudaqx::tensor<uint8_t> &check_matrix, std::size_t numShots,
+             const std::vector<double> &error_probabilities);
+
+/// @brief Sample a detector error model on CPU (legacy API, seeded).
+/// @param check_matrix Binary matrix [num_checks x num_error_mechanisms]
+/// @param numShots Number of independent Monte-Carlo shots
+/// @param error_probabilities Per-error-mechanism Bernoulli probabilities
+/// @param seed RNG seed for reproducibility
+/// @return Tuple of (checks, errors)
+std::tuple<cudaqx::tensor<uint8_t>, cudaqx::tensor<uint8_t>>
+dem_sampling(const cudaqx::tensor<uint8_t> &check_matrix, std::size_t numShots,
+             const std::vector<double> &error_probabilities, unsigned seed);
 
 /// @brief Sample syndrome measurements with circuit-level noise
 /// @param statePrep Initial state preparation operation

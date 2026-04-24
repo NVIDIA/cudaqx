@@ -1,5 +1,7 @@
 #!/bin/sh
 
+. "$(dirname "$0")/setup_custabilizer.sh"
+
 _rt_flag=""
 if [ -n "$CUDAQ_REALTIME_ROOT" ]; then
   _rt_flag="-DCUDAQ_REALTIME_ROOT=$CUDAQ_REALTIME_ROOT"

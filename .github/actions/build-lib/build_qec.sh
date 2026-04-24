@@ -1,6 +1,8 @@
 #!/bin/sh
 set -e
 
+. "$(dirname "$0")/setup_custabilizer.sh"
+
 # Build cuda-quantum realtime library + hololink tools (if CUDAQ_REALTIME_ROOT not set)
 if [ -z "$CUDAQ_REALTIME_ROOT" ]; then
   CUDAQ_REALTIME_ROOT=/tmp/cudaq-realtime

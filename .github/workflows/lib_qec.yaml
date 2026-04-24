@@ -87,11 +87,10 @@ jobs:
           pr-number: ${{ steps.export-pr-info.outputs.pr_number }}
           save-ccache: true
           platform: ${{ matrix.platform }}
-
       # ========================================================================
       # Run tests
       # ========================================================================
-      
+
       - name: Run tests
         run: cmake --build ${{ steps.build.outputs.build-dir }} --target run_tests
 
@@ -105,7 +104,7 @@ jobs:
           # Install the correct torch first.
           cuda_no_dot=$(echo ${{ matrix.cuda_version }} | sed 's/\.//')
           pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu${cuda_no_dot}
-          pip install numpy pytest onnxscript cupy-cuda${{ steps.config.outputs.cuda_major }}x cuquantum-cu${{ steps.config.outputs.cuda_major }} quimb opt_einsum nvidia-cublas cuquantum-python-cu${{ steps.config.outputs.cuda_major }}==26.03.1
+          pip install numpy pytest onnxscript cupy-cuda${{ steps.config.outputs.cuda_major }}x cuquantum-cu${{ steps.config.outputs.cuda_major }} quimb opt_einsum nvidia-cublas "cuquantum-python-cu${{ steps.config.outputs.cuda_major }}>=26.3.0"
           # The following tests are needed for docs/sphinx/examples/qec/python/tensor_network_decoder.py.
           if [ "$(uname -m)" == "x86_64" ]; then
               # Stim is not currently available on manylinux ARM wheels, so only
@@ -172,6 +171,16 @@ jobs:
         run: |
           tar xzf /tmp/qec-build-artifacts.tar.gz -C /
 
+      - name: Configure
+        id: config
+        run: |
+          cuda_major=$(echo ${{ matrix.cuda_version }} | cut -d . -f1)
+          echo "cuda_major=$cuda_major" >> $GITHUB_OUTPUT
+
+      - name: Install cuStabilizer runtime
+        run: |
+          pip install --upgrade "cuquantum-python-cu${{ steps.config.outputs.cuda_major }}>=26.3.0"
+
       - name: Install TensorRT (amd64)
         if: matrix.platform == 'amd64'
         run: |
@@ -189,5 +198,5 @@ jobs:
       - name: Run GPU tests
         run: |
           cd $GITHUB_WORKSPACE/build_qec
-          ctest --output-on-failure -R "GpuKernelsTest|test_realtime_decoding|test_realtime_pipeline"
+          ctest --output-on-failure -R "GpuKernelsTest|test_realtime_decoding|test_realtime_pipeline|DemSamplingGPU"
 
