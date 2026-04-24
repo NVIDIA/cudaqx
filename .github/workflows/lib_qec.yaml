@@ -161,6 +161,12 @@ jobs:
       actions: read
       contents: read
     steps:
+      - name: Install git for LFS
+        shell: bash
+        run: |
+          apt update
+          apt install -y --no-install-recommends git git-lfs
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
