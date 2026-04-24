@@ -57,7 +57,7 @@ gtest_discover_tests(test_dem_sampling)
 
 
 # TensorRT decoder test is only built for x86 architectures
-if(CUDAQ_QEC_BUILD_TRT_DECODER AND CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64)|(AMD64|amd64)|(^i.86$)")
+if(CUDAQ_QEC_TRT_DECODER_ENABLED AND CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64)|(AMD64|amd64)|(^i.86$)")
   add_executable(test_trt_decoder ./decoders/trt_decoder/test_trt_decoder.cpp)
 
   # Find TensorRT for the test

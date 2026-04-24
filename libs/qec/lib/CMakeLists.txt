@@ -60,8 +60,16 @@ add_library(${LIBRARY_NAME} SHARED ${QEC_SOURCES})
 add_subdirectory(decoders/plugins/example)
 add_subdirectory(decoders/plugins/pymatching)
 
-if(CUDAQ_QEC_BUILD_TRT_DECODER)
+# The TRT decoder plugin honors the tri-state `CUDAQ_QEC_BUILD_TRT_DECODER`
+# cache variable (AUTO/ON/OFF) declared in the parent CMakeLists.txt.  Skip
+# descending entirely when the user explicitly opted out; otherwise let the
+# subdirectory handle dependency detection and publish the result via the
+# `CUDAQ_QEC_TRT_DECODER_ENABLED` cache variable.
+if(NOT CUDAQ_QEC_BUILD_TRT_DECODER STREQUAL "OFF")
   add_subdirectory(decoders/plugins/trt_decoder)
+else()
+  set(CUDAQ_QEC_TRT_DECODER_ENABLED FALSE CACHE INTERNAL
+      "Whether the TRT decoder plugin is being built")
 endif()
 
 add_subdirectory(codes)

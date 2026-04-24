@@ -61,8 +61,15 @@ option(CUDAQX_QEC_INSTALL_PYTHON
        "Install python files alongside the library."
        ${CUDAQX_INSTALL_PYTHON})
 
-# Option to control TRT decoder build (default: ON)
-option(CUDAQ_QEC_BUILD_TRT_DECODER "Build the TensorRT decoder plugin" ON)
+# TRT decoder plugin: tri-state (ON, OFF, AUTO).
+#   AUTO (default): build the plugin if TensorRT is detected; otherwise skip
+#                   it silently (with a STATUS message).
+#   ON           : require TensorRT; configure fails if it cannot be found.
+#   OFF          : do not build the plugin and do not search for TensorRT.
+set(CUDAQ_QEC_BUILD_TRT_DECODER "AUTO" CACHE STRING
+    "Build the TensorRT decoder plugin (ON, OFF, AUTO)")
+set_property(CACHE CUDAQ_QEC_BUILD_TRT_DECODER
+             PROPERTY STRINGS "AUTO" "ON" "OFF")
 
 # Find and configure LLVM, Clang and MLIR
 # ==============================================================================
