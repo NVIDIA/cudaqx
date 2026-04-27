@@ -42,7 +42,13 @@ class PyDecoder : public decoder {
 public:
   NB_TRAMPOLINE(decoder, 1);
 
-  PyDecoder(const nb::ndarray<nb::numpy, uint8_t> &H) : decoder(toTensor(H)) {}
+  PyDecoder(const nb::ndarray<nb::numpy, uint8_t> &H)
+      : decoder([&H]() {
+          auto borrow = toTensor(H);
+          cudaqx::tensor<uint8_t> owned(borrow.shape());
+          owned.copy(borrow.data(), borrow.shape());
+          return owned;
+        }()) {}
 
   decoder_result decode(const std::vector<float_t> &syndrome) override {
     NB_OVERRIDE_PURE(decode, syndrome);
@@ -350,9 +356,10 @@ void bindDecoder(nb::module_ &mod) {
           shape.push_back(static_cast<std::size_t>(H.shape(d)));
         }
 
-        // Create a tensor and borrow the NumPy array data
+        // Make sure that we own the data within the decoder
+        // as the input array may go out of scope.
         cudaqx::tensor<uint8_t> tensor_H(shape);
-        tensor_H.borrow(static_cast<uint8_t *>(H.data()), shape);
+        tensor_H.copy(static_cast<uint8_t *>(H.data()), shape);
 
         return get_decoder(name, tensor_H, hetMapFromKwargs(options));
       },

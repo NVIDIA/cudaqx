@@ -282,3 +282,46 @@ def test_N2_UR_as():
     from scipy.linalg import eigh
     minE = eigh(molecule.hamiltonian.to_matrix(), eigvals_only=True)[0]
     assert np.isclose(minE, -108.9436, atol=1e-4)
+
+
+# These `*_without_mp2*` tests call the generator directly (bypassing the REST
+# transport) so that the exception type and message are preserved. This can then
+# distinguish the RuntimeError with a clear message from the
+# UnboundLocalError about 'natorbs' later.
+from cudaq_solvers.tools.molecule.pyscf.generators.gas_phase_generator import (
+    GasPhaseGenerator,)
+
+
+def test_natorb_without_mp2():
+    # Without the fix, this runs HF then crashes with UnboundLocalError on
+    # 'natorbs' in the CASCI path. With the fix, RuntimeError is raised early.
+    gen = GasPhaseGenerator()
+    h2 = "H 0.0 0.0 0.0; H 0.0 0.0 0.7474"
+    with pytest.raises(RuntimeError, match="natorb.*requires MP2=True"):
+        gen.get_spin_hamiltonian(h2,
+                                 spin=0,
+                                 charge=0,
+                                 basis='sto-3g',
+                                 nele_cas=2,
+                                 norb_cas=2,
+                                 casci=True,
+                                 natorb=True,
+                                 MP2=False)
+
+
+def test_integrals_natorb_without_mp2():
+    # integrals_natorb also requires MP2 for the same reason: natural
+    # orbitals used for computing active-space integrals come from MP2.
+    gen = GasPhaseGenerator()
+    h2 = "H 0.0 0.0 0.0; H 0.0 0.0 0.7474"
+    with pytest.raises(RuntimeError,
+                       match="integrals_natorb.*requires MP2=True"):
+        gen.get_spin_hamiltonian(h2,
+                                 spin=0,
+                                 charge=0,
+                                 basis='sto-3g',
+                                 nele_cas=2,
+                                 norb_cas=2,
+                                 casci=True,
+                                 integrals_natorb=True,
+                                 MP2=False)
