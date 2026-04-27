@@ -5,7 +5,9 @@
 # This source code and the accompanying materials are made available under     #
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
-from typing import Any, Optional, Union
+from __future__ import annotations
+
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
@@ -22,8 +24,8 @@ from .tensor_network_factory import (
 
 def factorized_noise_model(
         error_indices: list[str],
-        error_probabilities: Union[list[float], np.ndarray],
-        tensors_tags: Optional[list[str]] = None) -> TensorNetwork:
+        error_probabilities: list[float] | np.ndarray,
+        tensors_tags: list[str] | None = None) -> TensorNetwork:
     """
     Construct a factorized (product state) noise model as a tensor network.
 
@@ -69,7 +71,7 @@ def factorized_noise_model(
 def error_pairs_noise_model(
         error_index_pairs: list[tuple[str, str]],
         error_probabilities: list[np.ndarray],
-        tensors_tags: Optional[list[str]] = None) -> TensorNetwork:
+        tensors_tags: list[str] | None = None) -> TensorNetwork:
     """
     Construct a noise model as a tensor network for correlated error pairs.
 
@@ -151,10 +153,10 @@ class NMOptimizer(TensorNetworkDecoder):
         noise_model: list[float],
         syndrome_data: npt.NDArray[Any],
         observable_flips: npt.NDArray[Any],
-        check_inds: Optional[list[str]] = None,
-        error_inds: Optional[list[str]] = None,
-        logical_inds: Optional[list[str]] = None,
-        logical_tags: Optional[list[str]] = None,
+        check_inds: list[str] | None = None,
+        error_inds: list[str] | None = None,
+        logical_inds: list[str] | None = None,
+        logical_tags: list[str] | None = None,
         dtype: str = "float32",
         device: str = "cuda",
     ) -> None:

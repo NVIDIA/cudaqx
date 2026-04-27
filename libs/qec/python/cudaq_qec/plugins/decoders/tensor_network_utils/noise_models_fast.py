@@ -24,7 +24,7 @@ and the repeated ``quimb`` bookkeeping disappear.
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
@@ -111,7 +111,7 @@ class NMOptimizerCompiled(NMOptimizer):
                  *args,
                  compile: bool = False,
                  execute: str = "codegen",
-                 compile_mode: Optional[str] = None,
+                 compile_mode: str | None = None,
                  dynamic_syndromes: bool = True,
                  **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -121,7 +121,7 @@ class NMOptimizerCompiled(NMOptimizer):
         self._execute_mode = execute
         self._torch_compile_mode = compile_mode
         self._dynamic_syndromes = dynamic_syndromes
-        self._compiled_predict: Optional[Any] = None
+        self._compiled_predict: Any | None = None
         self._snapshot_arrays_and_eq()
 
     # -- internal layout caches ------------------------------------------------
@@ -330,7 +330,7 @@ class NMOptimizerCompiled(NMOptimizer):
         syn_pos_set = set(syndrome_positions)
 
         # state[pos] = (var_name, is_dynamic, concrete_value_or_None)
-        state: list[tuple[str, bool, Optional[torch.Tensor]]] = []
+        state: list[tuple[str, bool, torch.Tensor | None]] = []
         for pos in range(n):
             if pos in noise_pos_set:
                 k = noise_pos_ordered.index(pos)

@@ -10,6 +10,7 @@ import sys
 import pytest
 
 import numpy as np
+import torch
 import cudaq_qec as qec
 
 if sys.version_info >= (3, 11):
@@ -29,13 +30,7 @@ pytestmark = pytest.mark.skipif(sys.version_info < (3, 11),
 
 
 def is_nvidia_gpu_available():
-    import cupy
-    try:
-        return cupy.cuda.is_available()
-    except cupy.cuda.runtime.CUDARuntimeError:
-        # The nvidia-smi command is not found, indicating no NVIDIA GPU drivers
-        return False
-    return False
+    return torch.cuda.is_available()
 
 
 def make_simple_code():
@@ -183,7 +178,6 @@ def test_TensorNetworkDecoder_optimize_path_all_variants():
     from cuquantum import tensornet as cutn
     from opt_einsum.contract import PathInfo
     from cuquantum.tensornet.configuration import OptimizerInfo
-    import cupy
 
     # Simple code setup
     H = np.array([[1, 1, 0], [0, 1, 1]], dtype=np.uint8)
@@ -232,7 +226,6 @@ def test_decoder_batch_vs_single_and_expected_results_with_contractors():
     noise = np.random.uniform(0.01, 0.2, size=n_errors).tolist()
 
     import cudaq_qec as qec
-    import cupy
     import logging
     from cudaq_qec.plugins.decoders.tensor_network_decoder import TensorNetworkDecoder
 
@@ -454,7 +447,6 @@ def test_optimize_path_numpy_variants():
     from quimb.tensor import TensorNetwork, Tensor
     from cuquantum import tensornet as cutn
     from opt_einsum.contract import PathInfo
-    import cupy
 
     tn = TensorNetwork([
         Tensor(np.ones((2, 2)), inds=("a", "b")),
