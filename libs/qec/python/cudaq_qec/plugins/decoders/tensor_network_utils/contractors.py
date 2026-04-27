@@ -61,6 +61,33 @@ def contractor(subscripts: str,
     return oe.contract(subscripts, *tensors, optimize=optimize)
 
 
+def oe_torch_contractor(subscripts: str,
+                        tensors: list[torch.Tensor],
+                        optimize: str = "auto",
+                        slicing: tuple = tuple(),
+                        device_id: int = 0) -> Any:
+    """
+    Perform einsum contraction using opt_einsum with the torch backend.
+
+    Combines opt_einsum's contraction-path optimisation with torch's execution
+    engine, giving autograd support and GPU acceleration in a single call.
+
+    Args:
+        subscripts (str): The einsum subscripts.
+        tensors (list[torch.Tensor]): list of torch tensors to contract.
+        optimize (str, optional): Optimization strategy passed to
+            ``opt_einsum.contract``. Defaults to "auto".
+        slicing (tuple, optional): Not supported in this implementation.
+            Defaults to empty tuple.
+        device_id (int, optional): Device ID (unused — device follows the
+            input tensors). Defaults to 0.
+
+    Returns:
+        torch.Tensor: The contracted tensor.
+    """
+    return oe.contract(subscripts, *tensors, optimize=optimize, backend="torch")
+
+
 def cutn_contractor(subscripts: str,
                     tensors: list[Union[torch.Tensor, npt.NDArray]],
                     optimize: Optional[Any] = None,
@@ -86,6 +113,47 @@ def cutn_contractor(subscripts: str,
         optimize=cutn.OptimizerOptions(path=optimize, slicing=slicing),
         options={'device_id': device_id},
     )
+
+
+_oe_expr_cache: dict[tuple, Any] = {}
+
+
+def oe_torch_compiled_contractor(subscripts: str,
+                                 tensors: list[torch.Tensor],
+                                 optimize: str = "auto",
+                                 slicing: tuple = tuple(),
+                                 device_id: int = 0) -> Any:
+    """
+    Perform einsum contraction using a cached ``opt_einsum.contract_expression``
+    with the torch backend.
+
+    On the first call for a given ``(subscripts, shapes, optimize)``
+    combination, builds and caches a :class:`opt_einsum.ContractExpression`.
+    Subsequent calls with the same key skip path search entirely and only
+    execute the pairwise tensor contractions via torch.
+
+    Args:
+        subscripts (str): The einsum subscripts.
+        tensors (list[torch.Tensor]): list of torch tensors to contract.
+        optimize (str, optional): Optimization strategy passed to
+            ``opt_einsum.contract_expression``. Defaults to "auto".
+        slicing (tuple, optional): Not supported in this implementation.
+            Defaults to empty tuple.
+        device_id (int, optional): Device ID (unused — device follows the
+            input tensors). Defaults to 0.
+
+    Returns:
+        torch.Tensor: The contracted tensor.
+    """
+    shapes = tuple(t.shape for t in tensors)
+    key = (subscripts, shapes, str(optimize))
+    if key not in _oe_expr_cache:
+        _oe_expr_cache[key] = oe.contract_expression(
+            subscripts,
+            *shapes,
+            optimize=optimize,
+        )
+    return _oe_expr_cache[key](*tensors, backend="torch")
 
 
 def optimize_path(optimize: Any, output_inds: tuple[str, ...],
@@ -133,6 +201,10 @@ class ContractorConfig:
     _allowed_configs: ClassVar[tuple[tuple[str, str, str], ...]] = (
         ("numpy", "numpy", "cpu"),
         ("torch", "torch", "cpu"),
+        ("oe_torch", "torch", "cpu"),
+        ("oe_torch", "torch", "cuda"),
+        ("oe_torch_compiled", "torch", "cpu"),
+        ("oe_torch_compiled", "torch", "cuda"),
         ("cutensornet", "numpy", "cuda"),
         ("cutensornet", "torch", "cuda"),
     )
@@ -140,6 +212,8 @@ class ContractorConfig:
     _contractors: ClassVar[dict[str, Callable]] = {
         "numpy": contractor,
         "torch": contractor,
+        "oe_torch": oe_torch_contractor,
+        "oe_torch_compiled": oe_torch_compiled_contractor,
         "cutensornet": cutn_contractor,
     }
 
