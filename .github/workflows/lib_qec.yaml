@@ -161,6 +161,18 @@ jobs:
       actions: read
       contents: read
     steps:
+      - name: Install git for LFS
+        shell: bash
+        run: |
+          apt update
+          apt install -y --no-install-recommends git git-lfs
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          set-safe-directory: true
+          lfs: true # download assets file(s) for TRT tests
+
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
@@ -195,8 +207,19 @@ jobs:
           apt update
           apt install -y tensorrt-dev
 
-      - name: Run GPU tests
+      - name: Install Python GPU test requirements
+        run: |
+          cuda_no_dot=$(echo ${{ matrix.cuda_version }} | sed 's/\.//')
+          pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu${cuda_no_dot}
+          pip install numpy pytest cupy-cuda${{ steps.config.outputs.cuda_major }}x cuquantum-cu${{ steps.config.outputs.cuda_major }} quimb opt_einsum nvidia-cublas "cuquantum-python-cu${{ steps.config.outputs.cuda_major }}>=26.3.0" "custabilizer-cu${{ steps.config.outputs.cuda_major }}>=0.3.0"
+
+      - name: Run GPU C++ tests
         run: |
           cd $GITHUB_WORKSPACE/build_qec
-          ctest --output-on-failure -R "GpuKernelsTest|test_realtime_decoding|test_realtime_pipeline|DemSamplingGPU"
+          ctest --output-on-failure -R "GpuKernelsTest|test_realtime_decoding|test_realtime_pipeline|DemSamplingGPU|TRTDecoder"
+
+      - name: Run GPU Python tests
+        run: |
+          PYTHONPATH="/cudaq-install:$GITHUB_WORKSPACE/build_qec/python" \
+            pytest -v libs/qec/python/tests/
 
