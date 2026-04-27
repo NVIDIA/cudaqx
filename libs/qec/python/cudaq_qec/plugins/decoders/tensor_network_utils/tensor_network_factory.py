@@ -5,11 +5,10 @@
 # This source code and the accompanying materials are made available under     #
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
+from __future__ import annotations
 
 import numpy as np
 import numpy.typing as npt
-from __future__ import annotations
-
 from typing import Any
 from quimb import oset
 from quimb.tensor import Tensor, TensorNetwork
