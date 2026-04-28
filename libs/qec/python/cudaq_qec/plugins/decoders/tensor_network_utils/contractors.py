@@ -12,7 +12,6 @@ from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
 import opt_einsum as oe
-from torch import Tensor
 from quimb.tensor import TensorNetwork
 
 
@@ -32,28 +31,6 @@ def contractor(subscripts: str,
         Any: The contracted tensor.
     """
     return oe.contract(subscripts, *tensors, optimize=optimize)
-
-
-def oe_torch_contractor(subscripts: str,
-                        tensors: list[Tensor],
-                        optimize: str = "auto",
-                        **_: Any) -> Any:
-    """
-    Perform einsum contraction using opt_einsum with the torch backend.
-
-    Combines opt_einsum's contraction-path optimisation with torch's execution
-    engine, giving autograd support and GPU acceleration in a single call.
-
-    Args:
-        subscripts (str): The einsum subscripts.
-        tensors (list[Tensor]): list of torch tensors to contract.
-        optimize (str, optional): Optimization strategy passed to
-            ``opt_einsum.contract``. Defaults to "auto".
-
-    Returns:
-        Tensor: The contracted tensor.
-    """
-    return oe.contract(subscripts, *tensors, optimize=optimize, backend="torch")
 
 
 def cutn_contractor(subscripts: str,
@@ -82,42 +59,6 @@ def cutn_contractor(subscripts: str,
         optimize=cutn.OptimizerOptions(path=optimize, slicing=slicing),
         options={'device_id': device_id},
     )
-
-
-_oe_expr_cache: dict[tuple, Any] = {}
-
-
-def oe_torch_compiled_contractor(subscripts: str,
-                                 tensors: list[Tensor],
-                                 optimize: str = "auto",
-                                 **_: Any) -> Any:
-    """
-    Perform einsum contraction using a cached ``opt_einsum.contract_expression``
-    with the torch backend.
-
-    On the first call for a given ``(subscripts, shapes, optimize)``
-    combination, builds and caches a :class:`opt_einsum.ContractExpression`.
-    Subsequent calls with the same key skip path search entirely and only
-    execute the pairwise tensor contractions via torch.
-
-    Args:
-        subscripts (str): The einsum subscripts.
-        tensors (list[Tensor]): list of torch tensors to contract.
-        optimize (str, optional): Optimization strategy passed to
-            ``opt_einsum.contract_expression``. Defaults to "auto".
-
-    Returns:
-        Tensor: The contracted tensor.
-    """
-    shapes = tuple(t.shape for t in tensors)
-    key = (subscripts, shapes, str(optimize))
-    if key not in _oe_expr_cache:
-        _oe_expr_cache[key] = oe.contract_expression(
-            subscripts,
-            *shapes,
-            optimize=optimize,
-        )
-    return _oe_expr_cache[key](*tensors, backend="torch")
 
 
 def optimize_path(optimize: Any, output_inds: tuple[str, ...],
@@ -179,8 +120,6 @@ class ContractorConfig:
     _contractors: ClassVar[dict[str, Callable]] = {
         "numpy": contractor,
         "torch": contractor,
-        "oe_torch": oe_torch_contractor,
-        "oe_torch_compiled": oe_torch_compiled_contractor,
         "cutensornet": cutn_contractor,
     }
 
