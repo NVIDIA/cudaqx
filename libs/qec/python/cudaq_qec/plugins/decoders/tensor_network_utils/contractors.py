@@ -11,6 +11,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
+import opt_einsum as oe
+from torch import Tensor
 from quimb.tensor import TensorNetwork
 
 
@@ -29,12 +31,11 @@ def contractor(subscripts: str,
     Returns:
         Any: The contracted tensor.
     """
-    import opt_einsum as oe
     return oe.contract(subscripts, *tensors, optimize=optimize)
 
 
 def oe_torch_contractor(subscripts: str,
-                        tensors: list[torch.Tensor],
+                        tensors: list[Tensor],
                         optimize: str = "auto",
                         **_: Any) -> Any:
     """
@@ -45,14 +46,13 @@ def oe_torch_contractor(subscripts: str,
 
     Args:
         subscripts (str): The einsum subscripts.
-        tensors (list[torch.Tensor]): list of torch tensors to contract.
+        tensors (list[Tensor]): list of torch tensors to contract.
         optimize (str, optional): Optimization strategy passed to
             ``opt_einsum.contract``. Defaults to "auto".
 
     Returns:
-        torch.Tensor: The contracted tensor.
+        Tensor: The contracted tensor.
     """
-    import opt_einsum as oe
     return oe.contract(subscripts, *tensors, optimize=optimize, backend="torch")
 
 
@@ -88,7 +88,7 @@ _oe_expr_cache: dict[tuple, Any] = {}
 
 
 def oe_torch_compiled_contractor(subscripts: str,
-                                 tensors: list[torch.Tensor],
+                                 tensors: list[Tensor],
                                  optimize: str = "auto",
                                  **_: Any) -> Any:
     """
@@ -102,14 +102,13 @@ def oe_torch_compiled_contractor(subscripts: str,
 
     Args:
         subscripts (str): The einsum subscripts.
-        tensors (list[torch.Tensor]): list of torch tensors to contract.
+        tensors (list[Tensor]): list of torch tensors to contract.
         optimize (str, optional): Optimization strategy passed to
             ``opt_einsum.contract_expression``. Defaults to "auto".
 
     Returns:
-        torch.Tensor: The contracted tensor.
+        Tensor: The contracted tensor.
     """
-    import opt_einsum as oe
     shapes = tuple(t.shape for t in tensors)
     key = (subscripts, shapes, str(optimize))
     if key not in _oe_expr_cache:
@@ -137,8 +136,11 @@ def optimize_path(optimize: Any, output_inds: tuple[str, ...],
     Returns:
         tuple[Any, Any]: The contraction path and optimizer info.
     """
-    from cuquantum import tensornet as cutn
-    if isinstance(optimize, cutn.OptimizerOptions) or optimize is None:
+    use_cutn = optimize is None or (
+        type(optimize).__module__.startswith("cuquantum") and
+        type(optimize).__name__ == "OptimizerOptions")
+    if use_cutn:
+        from cuquantum import tensornet as cutn
         path, info = cutn.contract_path(
             tn.get_equation(output_inds=output_inds),
             *tn.arrays,
@@ -146,7 +148,6 @@ def optimize_path(optimize: Any, output_inds: tuple[str, ...],
         )
         return path, info
 
-    # If optimize is a custom path optimizer
     ci = tn.contraction_info(output_inds=output_inds, optimize=optimize)
     return ci.path, ci
 
