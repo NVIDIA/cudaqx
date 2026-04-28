@@ -13,11 +13,6 @@ import numpy as np
 from quimb import oset
 from quimb.tensor import TensorNetwork, Tensor
 
-from .tensor_network_factory import (
-    tensor_network_from_syndrome_batch,
-    prepare_syndrome_data_batch,
-)
-
 
 def factorized_noise_model(
         error_indices: list[str],

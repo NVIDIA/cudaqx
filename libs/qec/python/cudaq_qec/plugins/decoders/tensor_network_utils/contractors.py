@@ -109,10 +109,6 @@ class ContractorConfig:
     _allowed_configs: ClassVar[tuple[tuple[str, str, str], ...]] = (
         ("numpy", "numpy", "cpu"),
         ("torch", "torch", "cpu"),
-        ("oe_torch", "torch", "cpu"),
-        ("oe_torch", "torch", "cuda"),
-        ("oe_torch_compiled", "torch", "cpu"),
-        ("oe_torch_compiled", "torch", "cuda"),
         ("cutensornet", "numpy", "cuda"),
         ("cutensornet", "torch", "cuda"),
     )
