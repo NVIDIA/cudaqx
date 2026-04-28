@@ -33,6 +33,11 @@ on:
         type: string
         description: Docker tag to use for published image (e.g. ghcr.io/nvidia/cudaqx:latest-pub, defaults to private repo if blank)
         required: false
+      push:
+        type: boolean
+        description: Whether to push the built image. Set to `false` to build & load only. Default is true.
+        required: false
+        default: true
 
 jobs:
   build-combined-img:
@@ -104,4 +109,5 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
           tags: ${{ inputs.pub_tag || format('ghcr.io/nvidia/private/cuda-quantum:{0}-cudaqx', env.tag) }}
           platforms: linux/amd64,linux/arm64
-          push: true
+          push: ${{ inputs.push }}
+          load: ${{ !inputs.push }}
