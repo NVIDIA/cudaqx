@@ -44,7 +44,9 @@ class ai_predecoder_service : public ai_decoder_service {
 public:
   ai_predecoder_service(const std::string &engine_path,
                         void **device_mailbox_slot, int queue_depth = 1,
-                        const std::string &engine_save_path = "");
+                        const std::string &engine_save_path = "",
+                        network_typing_override typing_override =
+                            network_typing_override::automatic);
 
   /// Create a passthrough (identity copy) instance for testing without TRT.
   static std::unique_ptr<ai_predecoder_service>

@@ -82,8 +82,10 @@ allocate_predecoder_buffers(atomic_int_sys *&h_ready_flags, void **&h_ring_ptrs,
 ai_predecoder_service::ai_predecoder_service(
     const std::string &path, void **mailbox,
     int /* queue_depth (ignored; always 1) */,
-    const std::string &engine_save_path)
-    : ai_decoder_service(path, mailbox, engine_save_path), queue_depth_(1) {
+    const std::string &engine_save_path,
+    network_typing_override typing_override)
+    : ai_decoder_service(path, mailbox, engine_save_path, typing_override),
+      queue_depth_(1) {
   allocate_predecoder_buffers(
       h_ready_flags_, h_ring_ptrs_, h_predecoder_outputs_, d_ready_flags_,
       d_ring_ptrs_, d_predecoder_outputs_, get_output_size());

@@ -65,6 +65,7 @@ int main(int argc, char *argv[]) {
   size_t page_size = 0;
   unsigned num_pages = 128;
   std::string data_dir;
+  network_typing_override typing_override = network_typing_override::automatic;
 
   for (int i = 1; i < argc; i++) {
     std::string arg = argv[i];
@@ -86,12 +87,20 @@ int main(int argc, char *argv[]) {
       num_pages = std::stoul(arg.substr(12));
     else if (arg.find("--data-dir=") == 0)
       data_dir = arg.substr(11);
-    else if (arg == "--help" || arg == "-h") {
+    else if (arg.find("--typing=") == 0) {
+      try {
+        typing_override = parse_network_typing(arg.substr(9));
+      } catch (const std::exception &e) {
+        std::cerr << "ERROR: " << e.what() << "\n";
+        return 1;
+      }
+    } else if (arg == "--help" || arg == "-h") {
       std::cout
           << "Usage: " << argv[0] << " [options]\n\n"
           << "Hololink predecoder + PyMatching bridge.\n\n"
           << "Decoder options:\n"
-          << "  --config=NAME         d7|d13|d13_r104|d21|d31 (default: d7)\n\n"
+          << "  --config=NAME         d7|d13|d13_r104|d21|d31 (default: d7)\n"
+          << "  --typing=MODE         auto|weak|strong (default: auto)\n\n"
           << "Correctness:\n"
           << "  --data-dir=PATH       Test data dir with observables.bin for\n"
           << "                        ground-truth verification\n\n"
@@ -159,7 +168,7 @@ int main(int argc, char *argv[]) {
     BRIDGE_CUDA_CHECK(cudaStreamCreate(&predecoder_streams[i]));
     std::string save_path = (need_save && i == 0) ? engine_file : "";
     auto pd = std::make_unique<ai_predecoder_service>(
-        model_path, d_mailbox_bank + i, 1, save_path);
+        model_path, d_mailbox_bank + i, 1, save_path, typing_override);
     cudaStream_t cap;
     BRIDGE_CUDA_CHECK(cudaStreamCreate(&cap));
     pd->capture_graph(cap, false);
@@ -172,10 +181,9 @@ int main(int argc, char *argv[]) {
   const size_t slot_size =
       round_up_pow2(CUDAQ_RPC_HEADER_SIZE + model_input_bytes);
 
-  const size_t model_elem_size =
-      (model_output_bytes == model_input_bytes + 1) ? 1 : sizeof(int32_t);
-  const size_t num_input_detectors = model_input_bytes / model_elem_size;
-  const size_t num_output_elements = model_output_bytes / model_elem_size;
+  // Trust the engine: use the actual tensor volumes reported by TRT.
+  const size_t num_input_detectors = predecoders[0]->get_input_num_elements();
+  const size_t num_output_elements = predecoders[0]->get_output_num_elements();
   const int residual_detectors = static_cast<int>(num_output_elements) - 1;
 
   std::cout << "  Input detectors: " << num_input_detectors

@@ -85,25 +85,43 @@ __global__ void gateway_output_kernel(void **mailbox_slot_ptr,
 // Helpers
 // =============================================================================
 
-static size_t trt_dtype_size(nvinfer1::DataType dtype) {
+// Size of a TRT DataType in bits.  Sub-byte dtypes (INT4, FP4) are
+// returned as 4; callers that need a byte count should ceil-divide by 8.
+static int trt_dtype_bits(nvinfer1::DataType dtype) {
   switch (dtype) {
   case nvinfer1::DataType::kFLOAT:
-    return 4;
+    return 32;
   case nvinfer1::DataType::kHALF:
-    return 2;
-  case nvinfer1::DataType::kINT8:
-    return 1;
-  case nvinfer1::DataType::kUINT8:
-    return 1;
-  case nvinfer1::DataType::kINT32:
-    return 4;
-  case nvinfer1::DataType::kINT64:
+    return 16;
+  case nvinfer1::DataType::kBF16:
+    return 16;
+  case nvinfer1::DataType::kFP8:
     return 8;
+  case nvinfer1::DataType::kINT8:
+    return 8;
+  case nvinfer1::DataType::kUINT8:
+    return 8;
+  case nvinfer1::DataType::kINT32:
+    return 32;
+  case nvinfer1::DataType::kINT64:
+    return 64;
   case nvinfer1::DataType::kBOOL:
-    return 1;
-  default:
+    return 8;
+  case nvinfer1::DataType::kINT4:
     return 4;
+#if NV_TENSORRT_VERSION >= NV_TENSORRT_VERSION_INT(10, 8, 0)
+  case nvinfer1::DataType::kFP4:
+    return 4;
+#endif
+  default:
+    return 32;
   }
+}
+
+// Packed storage size in bytes for @p volume elements of @p dtype.
+// Handles sub-byte dtypes correctly (volume*bits rounded up to a byte).
+static size_t trt_tensor_bytes(nvinfer1::DataType dtype, size_t volume) {
+  return (volume * static_cast<size_t>(trt_dtype_bits(dtype)) + 7) / 8;
 }
 
 static size_t tensor_volume(const nvinfer1::Dims &d) {
@@ -128,11 +146,12 @@ void ai_decoder_service::Logger::log(Severity severity,
 
 ai_decoder_service::ai_decoder_service(const std::string &model_path,
                                        void **device_mailbox_slot,
-                                       const std::string &engine_save_path)
+                                       const std::string &engine_save_path,
+                                       network_typing_override typing_override)
     : device_mailbox_slot_(device_mailbox_slot) {
   std::string ext = model_path.substr(model_path.find_last_of('.'));
   if (ext == ".onnx") {
-    build_engine_from_onnx(model_path, engine_save_path);
+    build_engine_from_onnx(model_path, engine_save_path, typing_override);
   } else {
     load_engine(model_path);
   }
@@ -181,24 +200,144 @@ void ai_decoder_service::load_engine(const std::string &path) {
   context_.reset(engine_->createExecutionContext());
 }
 
+// Scan a parsed TRT network for quantization signals.  Populates the
+// returned @c onnx_quant_info based on (1) the dtypes of every
+// QuantizeLayer/DequantizeLayer output tensor and (2) the declared
+// dtypes of the network's primary input tensors.
+static onnx_quant_info
+scan_network_for_quant_info(const nvinfer1::INetworkDefinition &network) {
+  onnx_quant_info info{};
+
+  for (int i = 0; i < network.getNbLayers(); ++i) {
+    const auto *layer = network.getLayer(i);
+    auto lt = layer->getType();
+    if (lt != nvinfer1::LayerType::kQUANTIZE &&
+        lt != nvinfer1::LayerType::kDEQUANTIZE)
+      continue;
+    for (int o = 0; o < layer->getNbOutputs(); ++o) {
+      auto dt = layer->getOutput(o)->getType();
+      switch (dt) {
+      case nvinfer1::DataType::kFP8:
+        info.has_fp8 = true;
+        break;
+#if NV_TENSORRT_VERSION >= NV_TENSORRT_VERSION_INT(10, 8, 0)
+      case nvinfer1::DataType::kFP4:
+        info.has_fp4 = true;
+        break;
+#endif
+      case nvinfer1::DataType::kINT8:
+      case nvinfer1::DataType::kINT4:
+        info.has_int8 = true;
+        break;
+      default:
+        break;
+      }
+    }
+  }
+
+  for (int i = 0; i < network.getNbInputs(); ++i) {
+    auto dt = network.getInput(i)->getType();
+    if (dt == nvinfer1::DataType::kBF16)
+      info.has_explicit_bf16 = true;
+    else if (dt == nvinfer1::DataType::kHALF)
+      info.has_explicit_fp16 = true;
+  }
+
+  return info;
+}
+
+onnx_quant_info inspect_onnx(const std::string &onnx_path) {
+  auto builder = std::unique_ptr<nvinfer1::IBuilder>(
+      nvinfer1::createInferBuilder(ai_decoder_service::gLogger));
+  if (!builder)
+    return {};
+  auto network = std::unique_ptr<nvinfer1::INetworkDefinition>(
+      builder->createNetworkV2(0));
+  if (!network)
+    return {};
+  auto parser = std::unique_ptr<nvonnxparser::IParser>(
+      nvonnxparser::createParser(*network, ai_decoder_service::gLogger));
+  if (!parser || !parser->parseFromFile(
+                     onnx_path.c_str(),
+                     static_cast<int>(nvinfer1::ILogger::Severity::kERROR))) {
+    return {};
+  }
+  return scan_network_for_quant_info(*network);
+}
+
+network_typing_override parse_network_typing(const std::string &value) {
+  if (value == "auto" || value == "automatic")
+    return network_typing_override::automatic;
+  if (value == "weak" || value == "weakly_typed" || value == "weakly-typed")
+    return network_typing_override::weakly_typed;
+  if (value == "strong" || value == "strongly_typed" ||
+      value == "strongly-typed")
+    return network_typing_override::strongly_typed;
+  throw std::invalid_argument("Invalid network-typing mode: '" + value +
+                              "' (expected auto|weak|strong)");
+}
+
 void ai_decoder_service::build_engine_from_onnx(
-    const std::string &onnx_path, const std::string &engine_save_path) {
+    const std::string &onnx_path, const std::string &engine_save_path,
+    network_typing_override typing_override) {
   runtime_.reset(nvinfer1::createInferRuntime(gLogger));
 
   auto builder = std::unique_ptr<nvinfer1::IBuilder>(
       nvinfer1::createInferBuilder(gLogger));
+
+  // ---------------------------------------------------------------------
+  // Resolve network typing mode.  Auto-detect inspects the ONNX: any
+  // quantized op (FP8 / NVFP4 / INT8) or explicit BF16 IO forces
+  // strongly-typed; otherwise fall back to weakly-typed + FP16 hint.
+  // ---------------------------------------------------------------------
+  bool strongly_typed = false;
+  switch (typing_override) {
+  case network_typing_override::automatic:
+    quant_info_ = inspect_onnx(onnx_path);
+    strongly_typed = quant_info_.requires_strongly_typed();
+    std::printf("[TensorRT] Auto-detected ONNX quant signals: "
+                "fp8=%d fp4=%d int8=%d bf16=%d fp16=%d -> %s\n",
+                quant_info_.has_fp8, quant_info_.has_fp4, quant_info_.has_int8,
+                quant_info_.has_explicit_bf16, quant_info_.has_explicit_fp16,
+                strongly_typed ? "strongly-typed" : "weakly-typed");
+    break;
+  case network_typing_override::weakly_typed:
+    strongly_typed = false;
+    std::printf("[TensorRT] Network typing forced to weakly-typed\n");
+    break;
+  case network_typing_override::strongly_typed:
+    strongly_typed = true;
+    std::printf("[TensorRT] Network typing forced to strongly-typed\n");
+    break;
+  }
+
+  using NetFlag = nvinfer1::NetworkDefinitionCreationFlag;
+  uint32_t net_flags = 0;
+  if (strongly_typed)
+    net_flags |= 1U << static_cast<uint32_t>(NetFlag::kSTRONGLY_TYPED);
+
   auto network = std::unique_ptr<nvinfer1::INetworkDefinition>(
-      builder->createNetworkV2(0));
+      builder->createNetworkV2(net_flags));
   auto config =
       std::unique_ptr<nvinfer1::IBuilderConfig>(builder->createBuilderConfig());
 
-  // Enable FP16 optimization for Grace Blackwell / Hopper
-  if (builder->platformHasFastFp16()) {
-    config->setFlag(nvinfer1::BuilderFlag::kFP16);
-    std::printf("[TensorRT] FP16 precision enabled.\n");
-  } else {
-    std::printf("[TensorRT] Warning: Platform does not support fast FP16. "
-                "Using FP32.\n");
+  // Precision hints only apply to weakly-typed networks.  A strongly-typed
+  // network ignores BuilderFlag::kFP16/kBF16/kFP8/kINT8 and builds per
+  // the dtypes declared in the ONNX.
+  if (!strongly_typed) {
+    // platformHasFastFp16 and BuilderFlag::kFP16 are deprecated in TRT
+    // 10.x in favor of strongly-typed networks; the hint is still
+    // supported and is what we want for unquantized FP32/FP16 ONNX.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    if (builder->platformHasFastFp16()) {
+      config->setFlag(nvinfer1::BuilderFlag::kFP16);
+      std::printf("[TensorRT] FP16 precision enabled (weakly-typed).\n");
+    } else {
+      std::printf("[TensorRT] Warning: Platform does not support fast FP16. "
+                  "Using FP32.\n");
+    }
+#pragma GCC diagnostic pop
   }
 
   auto parser = std::unique_ptr<nvonnxparser::IParser>(
@@ -209,6 +348,11 @@ void ai_decoder_service::build_engine_from_onnx(
           static_cast<int>(nvinfer1::ILogger::Severity::kWARNING))) {
     throw std::runtime_error("Failed to parse ONNX file: " + onnx_path);
   }
+
+  // If we got here via weakly_typed override (not automatic), populate
+  // quant_info_ post-parse so get_quant_info() still reflects reality.
+  if (typing_override != network_typing_override::automatic)
+    quant_info_ = scan_network_for_quant_info(*network);
 
   bool has_dynamic = false;
   for (int i = 0; i < network->getNbInputs(); ++i) {
@@ -281,22 +425,25 @@ void ai_decoder_service::setup_bindings() {
     auto mode = engine_->getTensorIOMode(name);
     auto dims = engine_->getTensorShape(name);
     auto dtype = engine_->getTensorDataType(name);
-    size_t size_bytes = tensor_volume(dims) * trt_dtype_size(dtype);
+    size_t volume = tensor_volume(dims);
+    size_t size_bytes = trt_tensor_bytes(dtype, volume);
 
     bool is_input = (mode == nvinfer1::TensorIOMode::kINPUT);
 
-    std::printf("[TensorRT] Binding %d: \"%s\" %s, dtype=%d, elem_size=%zu, "
+    std::printf("[TensorRT] Binding %d: \"%s\" %s, dtype=%d, elem_bits=%d, "
                 "volume=%zu, %zu bytes\n",
                 i, name, is_input ? "INPUT" : "OUTPUT", static_cast<int>(dtype),
-                trt_dtype_size(dtype), tensor_volume(dims), size_bytes);
+                trt_dtype_bits(dtype), volume, size_bytes);
 
     tensor_binding binding{name, nullptr, size_bytes, is_input};
 
     if (is_input && !found_input) {
       input_size_ = size_bytes;
+      input_num_elements_ = volume;
       found_input = true;
     } else if (!is_input && !found_output) {
       output_size_ = size_bytes;
+      output_num_elements_ = volume;
       found_output = true;
     }
 

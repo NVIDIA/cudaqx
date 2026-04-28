@@ -67,6 +67,8 @@ int main(int argc, char *argv[]) {
   StreamingConfig scfg;
 
   int num_gpus = 1;
+  network_typing_override typing_override = network_typing_override::automatic;
+  std::string onnx_override;
 
   // Scan for named flags (can appear anywhere)
   for (int i = 1; i < argc; ++i) {
@@ -74,6 +76,15 @@ int main(int argc, char *argv[]) {
       scfg.data_dir = argv[i + 1];
     } else if (std::string(argv[i]) == "--num-gpus" && i + 1 < argc) {
       num_gpus = std::stoi(argv[i + 1]);
+    } else if (std::string(argv[i]) == "--typing" && i + 1 < argc) {
+      try {
+        typing_override = parse_network_typing(argv[i + 1]);
+      } catch (const std::exception &e) {
+        std::cerr << "ERROR: " << e.what() << "\n";
+        return 1;
+      }
+    } else if (std::string(argv[i]) == "--onnx" && i + 1 < argc) {
+      onnx_override = argv[i + 1];
     }
   }
   // Multi-GPU dispatch is not yet supported: the host dispatcher thread
@@ -136,8 +147,18 @@ int main(int argc, char *argv[]) {
   CUDA_CHECK(cudaSetDevice(0));
 
   // --- Model path ---
+  // --onnx=PATH overrides the preset's ONNX filename; the cached engine
+  // path is derived from the ONNX path by replacing .onnx with .engine.
   std::string engine_file = config.engine_path();
   std::string onnx_file = config.onnx_path();
+  if (!onnx_override.empty()) {
+    onnx_file = onnx_override;
+    engine_file = onnx_override;
+    auto dot = engine_file.rfind(".onnx");
+    if (dot != std::string::npos)
+      engine_file = engine_file.substr(0, dot) + ".engine";
+    std::cout << "[Setup] ONNX override: " << onnx_file << "\n";
+  }
   std::string model_path;
 
   std::ifstream engine_probe(engine_file, std::ios::binary);
@@ -176,7 +197,7 @@ int main(int argc, char *argv[]) {
 
     std::string save_path = (need_save && i == 0) ? engine_file : "";
     auto pd = std::make_unique<ai_predecoder_service>(
-        model_path, d_mailbox_bank + i, 1, save_path);
+        model_path, d_mailbox_bank + i, 1, save_path, typing_override);
 
     cudaStream_t capture_stream;
     CUDA_CHECK(cudaStreamCreate(&capture_stream));
@@ -196,18 +217,25 @@ int main(int argc, char *argv[]) {
   const size_t slot_size =
       round_up_pow2(CUDAQ_RPC_HEADER_SIZE + model_input_bytes);
 
-  // Detect element size: uint8 models have output = input + 1 byte (one
-  // extra logical prediction element); int32 models have output = input + 4.
-  const size_t model_elem_size =
-      (model_output_bytes == model_input_bytes + 1) ? 1 : sizeof(int32_t);
-  const size_t num_input_detectors = model_input_bytes / model_elem_size;
-  const size_t num_output_elements = model_output_bytes / model_elem_size;
+  // Trust the engine: use the actual tensor volumes reported by TRT.
+  // This works uniformly across FP16/FP8/INT32/uint8 IO dtypes, whereas
+  // the old heuristic "output == input + 1 ? uint8 : int32" misidentifies
+  // FP16 IO as int32 and halves the detector count.
+  const size_t num_input_detectors = predecoders[0]->get_input_num_elements();
+  const size_t num_output_elements = predecoders[0]->get_output_num_elements();
+  const size_t input_elem_bytes =
+      (num_input_detectors > 0)
+          ? (model_input_bytes + num_input_detectors - 1) / num_input_detectors
+          : 0;
 
-  std::cout << "[Setup] Model I/O element size: " << model_elem_size
-            << " bytes (" << (model_elem_size == 1 ? "uint8" : "int32")
-            << ")\n";
+  std::cout << "[Setup] Model I/O: " << num_input_detectors
+            << " input elements ("
+            << (model_input_bytes * 8 /
+                std::max<size_t>(num_input_detectors, 1))
+            << " bits each), " << num_output_elements << " output elements\n";
   std::cout << "[Setup] Input detectors: " << num_input_detectors
-            << ", Output elements: " << num_output_elements << "\n";
+            << ", Output elements: " << num_output_elements
+            << ", input_elem_bytes=" << input_elem_bytes << "\n";
 
   const int residual_detectors = static_cast<int>(num_output_elements) - 1;
 

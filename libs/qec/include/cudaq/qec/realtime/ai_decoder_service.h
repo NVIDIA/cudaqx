@@ -25,6 +25,54 @@
 
 namespace cudaq::qec::realtime::experimental {
 
+/// @brief Override the network-typing mode used when compiling an ONNX.
+/// @details In TensorRT, the @em network-typing choice is made at
+/// @c createNetworkV2() time and cannot be changed later:
+/// - @c weakly_typed : TRT's optimizer selects per-layer precision
+///   guided by @c BuilderFlag hints (e.g. @c kFP16). Appropriate for
+///   plain FP32/FP16 ONNX where we want TRT to optimize.
+/// - @c strongly_typed : TRT honors the dtypes declared in the ONNX
+///   verbatim, including every Q/DQ node. Required for quantized
+///   ONNX (FP8, NVFP4, INT8) and for explicit mixed-precision ONNX.
+/// - @c automatic : inspect the ONNX and pick the correct mode.
+enum class network_typing_override {
+  automatic,
+  weakly_typed,
+  strongly_typed,
+};
+
+/// @brief Quantization signals discovered in an ONNX model.
+/// @details Populated by @c inspect_onnx. A @c true field means the
+/// ONNX contains at least one Q/DQ or explicit-dtype tensor of that
+/// kind; mixed-precision models will have multiple fields @c true.
+struct onnx_quant_info {
+  bool has_fp8 = false;           ///< FP8 Q/DQ present.
+  bool has_fp4 = false;           ///< NVFP4 Q/DQ present.
+  bool has_int8 = false;          ///< INT8 Q/DQ present.
+  bool has_explicit_bf16 = false; ///< BF16 tensors declared in ONNX.
+  bool has_explicit_fp16 = false; ///< FP16 tensors declared in ONNX.
+
+  /// @brief Whether TRT must be configured with a strongly-typed network
+  /// to build a correct engine from this ONNX.
+  bool requires_strongly_typed() const {
+    return has_fp8 || has_fp4 || has_int8 || has_explicit_bf16;
+  }
+};
+
+/// @brief Inspect an ONNX model and report the quantization/precision
+/// signals TRT will see during engine build.
+/// @details Performs a one-off TRT parse into a throwaway weakly-typed
+/// network and walks the resulting layer list plus input tensor types.
+/// Returns all-@c false on parse failure rather than throwing; callers
+/// that care can check the file themselves or pass an explicit override.
+onnx_quant_info inspect_onnx(const std::string &onnx_path);
+
+/// @brief Convert a string CLI value to @c network_typing_override.
+/// @returns @c network_typing_override::automatic for @c "auto" /
+/// @c "automatic", @c weakly_typed for @c "weak", @c strongly_typed
+/// for @c "strong".  Throws @c std::invalid_argument otherwise.
+network_typing_override parse_network_typing(const std::string &value);
+
 class ai_decoder_service {
 public:
   class Logger : public nvinfer1::ILogger {
@@ -38,8 +86,14 @@ public:
   /// mailbox bank
   /// @param engine_save_path If non-empty and model_path is .onnx, save the
   ///        built engine to this path for fast reloading on subsequent runs
+  /// @param typing_override Override the network-typing mode used when
+  ///        compiling an ONNX. @c automatic (default) inspects the ONNX
+  ///        and picks strongly-typed for any quantized (FP8/NVFP4/INT8)
+  ///        or explicitly-BF16 model, weakly-typed otherwise.
   ai_decoder_service(const std::string &model_path, void **device_mailbox_slot,
-                     const std::string &engine_save_path = "");
+                     const std::string &engine_save_path = "",
+                     network_typing_override typing_override =
+                         network_typing_override::automatic);
 
   /// Create a passthrough (identity copy) instance for testing without TRT.
   static std::unique_ptr<ai_decoder_service>
@@ -59,6 +113,20 @@ public:
   /// @brief Size of the primary output tensor in bytes (forwarded to CPU)
   size_t get_output_size() const { return output_size_; }
 
+  /// @brief Logical element count (detector count) of the primary input
+  /// tensor.  Computed from the engine's tensor volume; independent of
+  /// the IO dtype so FP16 / INT32 / FP8 inputs all report the same
+  /// detector count for a given model.  Zero for passthrough instances.
+  size_t get_input_num_elements() const { return input_num_elements_; }
+
+  /// @brief Logical element count of the primary output tensor.
+  size_t get_output_num_elements() const { return output_num_elements_; }
+
+  /// @brief Quantization / precision signals discovered at build time.
+  /// @details All-@c false for engines loaded from a pre-built plan
+  /// (the plan is opaque to us), or for passthrough instances.
+  const onnx_quant_info &get_quant_info() const { return quant_info_; }
+
   void *get_trt_input_ptr() const { return d_trt_input_; }
 
 protected:
@@ -68,7 +136,8 @@ protected:
 
   void load_engine(const std::string &path);
   void build_engine_from_onnx(const std::string &onnx_path,
-                              const std::string &engine_save_path = "");
+                              const std::string &engine_save_path,
+                              network_typing_override typing_override);
   void setup_bindings();
   void allocate_resources();
 
@@ -93,6 +162,10 @@ protected:
 
   size_t input_size_ = 0;
   size_t output_size_ = 0;
+  size_t input_num_elements_ = 0;
+  size_t output_num_elements_ = 0;
+
+  onnx_quant_info quant_info_;
 };
 
 } // namespace cudaq::qec::realtime::experimental
