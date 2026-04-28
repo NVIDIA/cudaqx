@@ -62,6 +62,9 @@ SPACING=""
 CONTROL_PORT=8193
 NUM_SHOTS=""
 
+# Pipeline config overrides (passed through to bridge binary)
+BRIDGE_OVERRIDES=()
+
 # ============================================================================
 # Argument Parsing
 # ============================================================================
@@ -102,6 +105,15 @@ Run options:
   --spacing N            Inter-shot spacing in microseconds
   --control-port N       Emulator UDP control port (default: 8193)
 
+Pipeline config overrides (applied after --config preset):
+  --distance=N           QEC code distance
+  --num-rounds=N         Syndrome measurement rounds
+  --onnx-filename=FILE   ONNX model filename
+  --num-predecoders=N    Parallel TRT instances
+  --num-workers=N        Pipeline GPU workers
+  --num-decode-workers=N PyMatching threads
+  --label=NAME           Config label for reports
+
   --help, -h             Show this help
 
 BRAM constraints (RAM_DEPTH=512):
@@ -132,6 +144,8 @@ while [[ $# -gt 0 ]]; do
         --num-shots)        NUM_SHOTS="$2"; shift ;;
         --spacing)          SPACING="$2"; shift ;;
         --control-port)     CONTROL_PORT="$2"; shift ;;
+        --distance=*|--num-rounds=*|--onnx-filename=*|--num-predecoders=*|--num-workers=*|--num-decode-workers=*|--label=*)
+            BRIDGE_OVERRIDES+=("$1") ;;
         --help|-h)          print_usage; exit 0 ;;
         *)
             echo "ERROR: Unknown option: $1" >&2
@@ -573,6 +587,7 @@ run_emulated() {
         --timeout="$TIMEOUT" \
         --page-size="$PAGE_SIZE" \
         --num-pages="$NUM_PAGES" \
+        "${BRIDGE_OVERRIDES[@]}" \
         > >(tee "$bridge_log") 2>&1 &
     local bridge_pid=$!
     PIDS_TO_KILL+=("$bridge_pid")
@@ -654,6 +669,7 @@ run_fpga() {
         --timeout="$TIMEOUT" \
         --page-size="$PAGE_SIZE" \
         --num-pages="$NUM_PAGES" \
+        "${BRIDGE_OVERRIDES[@]}" \
         > >(tee "$bridge_log") 2>&1 &
     local bridge_pid=$!
     PIDS_TO_KILL+=("$bridge_pid")

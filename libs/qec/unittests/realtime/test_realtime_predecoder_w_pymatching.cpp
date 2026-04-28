@@ -93,29 +93,30 @@ int main(int argc, char *argv[]) {
   if (argc > 3 && std::isdigit(argv[3][0]))
     scfg.duration_s = std::stoi(argv[3]);
 
-  PipelineConfig config;
-  if (config_name == "d7") {
-    config = PipelineConfig::d7_r7();
-  } else if (config_name == "d13") {
-    config = PipelineConfig::d13_r13();
-  } else if (config_name == "d13_r104") {
-    config = PipelineConfig::d13_r104();
-  } else if (config_name == "d21") {
-    config = PipelineConfig::d21_r21();
-  } else if (config_name == "d31") {
-    config = PipelineConfig::d31_r31();
-  } else {
+  auto config_opt = PipelineConfig::from_name(config_name);
+  if (!config_opt) {
     std::cerr << "Usage: " << argv[0]
-              << " [d7|d13|d13_r104|d21|d31] [rate_us] [duration_s]\n"
+              << " [d7|d13|d13_r104|d21|d21_r42|d31] [rate_us] [duration_s]\n"
               << "  d7       - distance 7, 7 rounds (default)\n"
               << "  d13      - distance 13, 13 rounds\n"
               << "  d13_r104 - distance 13, 104 rounds\n"
               << "  d21      - distance 21, 21 rounds\n"
+              << "  d21_r42  - distance 21, 42 rounds\n"
               << "  d31      - distance 31, 31 rounds\n"
               << "  rate_us    - inter-arrival time in us (0 = open-loop)\n"
-              << "  duration_s - test duration in seconds (default: 5)\n";
+              << "  duration_s - test duration in seconds (default: 5)\n"
+              << "\nOverride flags (applied after preset):\n"
+              << "  --distance=N          QEC code distance\n"
+              << "  --num-rounds=N        Syndrome measurement rounds\n"
+              << "  --onnx-filename=FILE  ONNX model filename\n"
+              << "  --num-predecoders=N   Parallel TRT instances\n"
+              << "  --num-workers=N       Pipeline GPU workers\n"
+              << "  --num-decode-workers=N  PyMatching threads\n"
+              << "  --label=NAME          Config label for reports\n";
     return 1;
   }
+  PipelineConfig config = *config_opt;
+  config.apply_cli_overrides(argc, argv);
 
   int device_count = 0;
   CUDA_CHECK(cudaGetDeviceCount(&device_count));

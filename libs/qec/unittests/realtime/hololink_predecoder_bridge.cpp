@@ -102,26 +102,26 @@ int main(int argc, char *argv[]) {
           << "  --gpu=N               GPU device ID (default: 0)\n"
           << "  --timeout=N           Timeout in seconds (default: 60)\n"
           << "  --page-size=N         Ring buffer slot size (default: auto)\n"
-          << "  --num-pages=N         Ring buffer slots (default: 128)\n";
+          << "  --num-pages=N         Ring buffer slots (default: 128)\n\n"
+          << "Config overrides (applied after --config preset):\n"
+          << "  --distance=N          QEC code distance\n"
+          << "  --num-rounds=N        Syndrome measurement rounds\n"
+          << "  --onnx-filename=FILE  ONNX model filename\n"
+          << "  --num-predecoders=N   Parallel TRT instances\n"
+          << "  --num-workers=N       Pipeline GPU workers\n"
+          << "  --num-decode-workers=N  PyMatching threads\n"
+          << "  --label=NAME          Config label for reports\n";
       return 0;
     }
   }
 
-  PipelineConfig pcfg;
-  if (config_name == "d7")
-    pcfg = PipelineConfig::d7_r7();
-  else if (config_name == "d13")
-    pcfg = PipelineConfig::d13_r13();
-  else if (config_name == "d13_r104")
-    pcfg = PipelineConfig::d13_r104();
-  else if (config_name == "d21")
-    pcfg = PipelineConfig::d21_r21();
-  else if (config_name == "d31")
-    pcfg = PipelineConfig::d31_r31();
-  else {
+  auto pcfg_opt = PipelineConfig::from_name(config_name);
+  if (!pcfg_opt) {
     std::cerr << "ERROR: Unknown config: " << config_name << std::endl;
     return 1;
   }
+  PipelineConfig pcfg = *pcfg_opt;
+  pcfg.apply_cli_overrides(argc, argv);
 
   std::cout << "=== Hololink Predecoder + PyMatching Bridge ===" << std::endl;
   std::cout << "  Config: " << pcfg.label << std::endl;

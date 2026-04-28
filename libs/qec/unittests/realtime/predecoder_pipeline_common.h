@@ -23,6 +23,7 @@
 #include <cstring>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <queue>
 #include <string>
 #include <vector>
@@ -141,6 +142,33 @@ struct PipelineConfig {
     return {"d31_r31_Z", 31, 31, "model1_d31_r31_unified_Z_batch1.onnx",
             16,          16, 32};
   }
+
+  /// @brief Construct a PipelineConfig from a JSON string.
+  ///
+  /// Required fields: distance, num_rounds, onnx_filename, num_predecoders,
+  /// num_workers, num_decode_workers.  Optional: label (defaults to "custom").
+  ///
+  /// @param json_str JSON object as a string.
+  /// @return Populated PipelineConfig.
+  /// @throws std::runtime_error if parsing fails or required fields are
+  /// missing.
+  static PipelineConfig from_json(const std::string &json_str);
+
+  /// @brief Apply command-line overrides to this config.
+  ///
+  /// Scans argv for --distance=, --num-rounds=, --onnx-filename=,
+  /// --num-predecoders=, --num-workers=, --num-decode-workers=, and
+  /// --label= flags.  Any flag found overrides the corresponding field.
+  /// Unknown flags are silently ignored (handled by the caller).
+  ///
+  /// @param argc Argument count.
+  /// @param argv Argument vector.
+  void apply_cli_overrides(int argc, char *argv[]);
+
+  /// @brief Select a named preset config.
+  /// @param name One of: d7, d13, d13_r104, d21, d21_r42, d31.
+  /// @return The matching config, or std::nullopt if name is unrecognized.
+  static std::optional<PipelineConfig> from_name(const std::string &name);
 };
 
 /// @brief Round a value up to the next power of two.
