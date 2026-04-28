@@ -65,6 +65,7 @@ int main(int argc, char *argv[]) {
   size_t page_size = 0;
   unsigned num_pages = 128;
   std::string data_dir;
+  bool print_graph_resources = false;
 
   for (int i = 1; i < argc; i++) {
     std::string arg = argv[i];
@@ -86,6 +87,8 @@ int main(int argc, char *argv[]) {
       num_pages = std::stoul(arg.substr(12));
     else if (arg.find("--data-dir=") == 0)
       data_dir = arg.substr(11);
+    else if (arg == "--print-graph-resources")
+      print_graph_resources = true;
     else if (arg == "--help" || arg == "-h") {
       std::cout
           << "Usage: " << argv[0] << " [options]\n\n"
@@ -102,7 +105,9 @@ int main(int argc, char *argv[]) {
           << "  --gpu=N               GPU device ID (default: 0)\n"
           << "  --timeout=N           Timeout in seconds (default: 60)\n"
           << "  --page-size=N         Ring buffer slot size (default: auto)\n"
-          << "  --num-pages=N         Ring buffer slots (default: 128)\n";
+          << "  --num-pages=N         Ring buffer slots (default: 128)\n"
+          << "  --print-graph-resources  Print predecoder CUDA graph resource "
+             "usage\n";
       return 0;
     }
   }
@@ -162,9 +167,22 @@ int main(int argc, char *argv[]) {
         model_path, d_mailbox_bank + i, 1, save_path);
     cudaStream_t cap;
     BRIDGE_CUDA_CHECK(cudaStreamCreate(&cap));
-    pd->capture_graph(cap, false);
+    // Do not retain the captured graph: the bridge must not invoke
+    // CUDA driver-API graph introspection (cuGraphKernelNodeGetParams,
+    // cuFuncGetAttribute, ...), because those calls perturb the primary
+    // context in ways that break DOCA/Hololink GPU-RoCE on the FPGA
+    // bridge path.  Use the benchmark (test_realtime_predecoder_w_pymatching)
+    // with --print-graph-resources for graph inspection.
+    pd->capture_graph(cap, false, /*save_graph=*/false);
     BRIDGE_CUDA_CHECK(cudaStreamDestroy(cap));
     predecoders.push_back(std::move(pd));
+  }
+  if (print_graph_resources) {
+    std::cerr << "[WARN] --print-graph-resources is not supported by the "
+                 "FPGA bridge (driver-API graph introspection breaks DOCA "
+                 "GPU-RoCE). Use the software benchmark to inspect graph "
+                 "resources."
+              << std::endl;
   }
 
   const size_t model_input_bytes = predecoders[0]->get_input_size();

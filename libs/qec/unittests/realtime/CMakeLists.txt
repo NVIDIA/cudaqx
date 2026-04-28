@@ -26,6 +26,7 @@ if(TENSORRT_INCLUDE_DIR AND TENSORRT_LIBRARY AND TENSORRT_ONNX_PARSER_LIBRARY
     predecoder_pipeline_common.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/realtime/ai_decoder_service.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/realtime/ai_predecoder_service.cu
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/realtime/graph_resources.cu
   )
 
   set_target_properties(test_realtime_predecoder_w_pymatching PROPERTIES
@@ -51,6 +52,7 @@ if(TENSORRT_INCLUDE_DIR AND TENSORRT_LIBRARY AND TENSORRT_ONNX_PARSER_LIBRARY
 
   target_link_libraries(test_realtime_predecoder_w_pymatching PRIVATE
     CUDA::cudart
+    CUDA::cuda_driver
     ${TENSORRT_LIBRARY}
     ${TENSORRT_ONNX_PARSER_LIBRARY}
     ${CUDAQ_REALTIME_LIBRARY}
@@ -143,7 +145,6 @@ if (GPU_ROCE_TRANSCEIVER_LIB AND CUDAQ_REALTIME_INCLUDE_DIR AND
     $<$<BOOL:${_CUDAQ_LIBRARY}>:${_CUDAQ_LIBRARY}>
     $<$<BOOL:${_NVQIR_LIBRARY}>:${_NVQIR_LIBRARY}>
     CUDA::cudart
-    CUDA::cuda_driver
     ${DOCA_VERBS_LIB}
     ${DOCA_GPUNETIO_LIB}
     ${DOCA_COMMON_LIB}

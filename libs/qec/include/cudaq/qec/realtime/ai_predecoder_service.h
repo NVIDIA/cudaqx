@@ -54,9 +54,18 @@ public:
 
   virtual ~ai_predecoder_service();
 
-  void capture_graph(cudaStream_t stream, bool device_launch);
+  /// @param stream CUDA stream to use for capture and warm-up inference.
+  /// @param device_launch If true, instantiate the graph for device launch.
+  /// @param save_graph If true, retain a clone of the captured CUDA graph
+  ///        template so it can be inspected later via
+  ///        get_captured_graph() (e.g. by the free functions in
+  ///        cudaq/qec/realtime/graph_resources.h).  Default is false; the
+  ///        service otherwise destroys the template immediately after
+  ///        instantiation.
+  void capture_graph(cudaStream_t stream, bool device_launch,
+                     bool save_graph = false);
   void capture_graph(cudaStream_t stream) override {
-    capture_graph(stream, true);
+    capture_graph(stream, true, false);
   }
 
   bool poll_next_job(pre_decoder_job &out_job);
@@ -78,6 +87,13 @@ public:
 
   void **get_host_ring_ptrs() const { return h_ring_ptrs_; }
 
+  /// @brief Return the retained clone of the captured graph template.
+  /// @details Non-null only when capture_graph() was called with
+  /// save_graph=true.  Ownership stays with this service; callers must
+  /// NOT destroy the returned handle.  Intended for opt-in introspection
+  /// (e.g. cudaq::qec::realtime::experimental::collect_graph_resources).
+  cudaGraph_t get_captured_graph() const { return captured_graph_; }
+
 private:
   /// Passthrough constructor (delegates to base passthrough constructor).
   ai_predecoder_service(void **device_mailbox_slot, int queue_depth,
@@ -92,6 +108,12 @@ private:
   cuda::atomic<int, cuda::thread_scope_system> *d_ready_flags_ = nullptr;
   void **d_ring_ptrs_ = nullptr;
   void *d_predecoder_outputs_ = nullptr;
+
+  /// Optional clone of the captured cudaGraph_t template, retained only
+  /// when capture_graph() was called with save_graph=true.  Destroyed in
+  /// the destructor.  The instantiated graph_exec_ lives on the base
+  /// class ai_decoder_service.
+  cudaGraph_t captured_graph_ = nullptr;
 };
 
 } // namespace cudaq::qec::realtime::experimental

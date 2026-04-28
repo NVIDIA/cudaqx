@@ -8,7 +8,6 @@
 
 #include "cudaq/qec/realtime/ai_predecoder_service.h"
 #include "cudaq/qec/realtime/nvtx_helpers.h"
-#include <cstdlib>
 #include <cuda/atomic>
 #include <stdexcept>
 #include <string>
@@ -123,10 +122,14 @@ ai_predecoder_service::~ai_predecoder_service() {
     cudaFreeHost(h_predecoder_outputs_);
     h_predecoder_outputs_ = nullptr;
   }
+  if (captured_graph_) {
+    cudaGraphDestroy(captured_graph_);
+    captured_graph_ = nullptr;
+  }
 }
 
 void ai_predecoder_service::capture_graph(cudaStream_t stream,
-                                          bool device_launch) {
+                                          bool device_launch, bool save_graph) {
   bool has_trt = (context_ != nullptr);
 
   if (has_trt) {
@@ -160,6 +163,18 @@ void ai_predecoder_service::capture_graph(cudaStream_t stream,
       static_cast<atomic_int_sys *>(d_ready_flags_));
 
   SERVICE_CUDA_CHECK(cudaStreamEndCapture(stream, &graph));
+
+  // Optionally retain a clone of the captured graph template for opt-in
+  // introspection (see cudaq/qec/realtime/graph_resources.h).  This
+  // service otherwise destroys the template immediately after
+  // instantiation -- the graph_exec_ is all that's needed at runtime.
+  if (save_graph) {
+    if (captured_graph_) {
+      cudaGraphDestroy(captured_graph_);
+      captured_graph_ = nullptr;
+    }
+    SERVICE_CUDA_CHECK(cudaGraphClone(&captured_graph_, graph));
+  }
 
   if (device_launch) {
     cudaError_t inst_err = cudaGraphInstantiateWithFlags(

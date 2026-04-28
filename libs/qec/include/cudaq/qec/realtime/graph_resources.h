@@ -8,24 +8,53 @@
 
 #pragma once
 
-#include <cstdint>
 #include <cuda_runtime.h>
+#include <iosfwd>
+#include <string>
+#include <vector>
 
-namespace cudaq::qec::realtime {
+namespace cudaq::qec::realtime::experimental {
 
-/// Resources returned by decoder::capture_decode_graph().
-///
-/// The decoder plugin captures a CUDA graph internally and populates this
-/// struct.  The host dispatcher (libcudaq-realtime-host-dispatch) uses
-/// graph_exec / stream to launch the graph, and writes per-slot I/O
-/// addresses into h_mailbox before each launch.  function_id is used by
-/// the host dispatcher to route RPC requests to the correct graph worker.
-struct graph_resources {
-  cudaGraphExec_t graph_exec = nullptr;
-  cudaStream_t stream = nullptr;
-  void **d_mailbox = nullptr; ///< device-mapped pinned pointer
-  void **h_mailbox = nullptr; ///< host pointer to same pinned memory
-  uint32_t function_id = 0;
+/// @brief Per-kernel resource usage captured from a CUDA graph.
+struct kernel_resource_info {
+  std::string name; ///< Kernel symbol name (demangled if available).
+  dim3 grid_dim;    ///< Grid dimensions from the graph node.
+  dim3 block_dim;   ///< Block dimensions from the graph node.
+  std::size_t static_shmem = 0;  ///< Static shared memory per block (bytes).
+  std::size_t dynamic_shmem = 0; ///< Dynamic shared memory per block (bytes).
+  std::size_t local_mem = 0;     ///< Local memory per thread (bytes).
+  std::size_t const_mem = 0; ///< Constant memory used by the kernel (bytes).
+  int num_regs = 0;          ///< Registers per thread.
+  int max_threads_per_block = 0; ///< Hardware max threads for this kernel.
 };
 
-} // namespace cudaq::qec::realtime
+/// @brief Aggregate resource usage for a CUDA graph.
+struct graph_resource_info {
+  std::size_t total_nodes = 0;
+  std::size_t kernel_nodes = 0;
+  std::size_t memcpy_nodes = 0;
+  std::size_t host_nodes = 0;
+  std::size_t other_nodes = 0;
+  std::vector<kernel_resource_info> kernels;
+};
+
+/// @brief Walk a captured CUDA graph and return per-kernel resource usage.
+/// @param graph  A captured (not-yet-destroyed) CUDA graph handle.
+/// @returns An empty graph_resource_info if @p graph is null or traversal
+///          fails, otherwise populated aggregate + per-kernel info.
+///
+/// @warning This routine uses the CUDA driver API
+/// (@c cuGraphKernelNodeGetParams, @c cuFuncGetAttribute, @c cuFuncGetName)
+/// to introspect kernels launched by external libraries such as TensorRT.
+/// Those calls perturb the primary CUDA context state and can interfere
+/// with DOCA / GPU-RoCE setup on the FPGA bridge path.  Callers that
+/// share a CUDA context with DOCA-based transports must NOT invoke this
+/// function.
+graph_resource_info collect_graph_resources(cudaGraph_t graph);
+
+/// @brief Pretty-print graph resource usage to an output stream.
+/// @param os   Output stream (e.g. @c std::cout).
+/// @param info Collected info from @c collect_graph_resources.
+void print_graph_resources(std::ostream &os, const graph_resource_info &info);
+
+} // namespace cudaq::qec::realtime::experimental

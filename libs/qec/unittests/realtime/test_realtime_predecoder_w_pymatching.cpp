@@ -32,6 +32,7 @@
 #include <unistd.h>
 
 #include "cudaq/qec/realtime/ai_decoder_service.h"
+#include "cudaq/qec/realtime/graph_resources.h"
 #include "cudaq/realtime/daemon/dispatcher/host_dispatcher.h"
 
 #define CUDA_CHECK(call)                                                       \
@@ -67,6 +68,7 @@ int main(int argc, char *argv[]) {
   StreamingConfig scfg;
 
   int num_gpus = 1;
+  bool print_graph_resources = false;
 
   // Scan for named flags (can appear anywhere)
   for (int i = 1; i < argc; ++i) {
@@ -74,6 +76,8 @@ int main(int argc, char *argv[]) {
       scfg.data_dir = argv[i + 1];
     } else if (std::string(argv[i]) == "--num-gpus" && i + 1 < argc) {
       num_gpus = std::stoi(argv[i + 1]);
+    } else if (std::string(argv[i]) == "--print-graph-resources") {
+      print_graph_resources = true;
     }
   }
   // Multi-GPU dispatch is not yet supported: the host dispatcher thread
@@ -180,12 +184,22 @@ int main(int argc, char *argv[]) {
 
     cudaStream_t capture_stream;
     CUDA_CHECK(cudaStreamCreate(&capture_stream));
-    pd->capture_graph(capture_stream, false);
+    // Only retain the captured-graph clone on predecoder 0 when resource
+    // inspection is requested; skipping it on the others avoids cloning
+    // the graph on every worker.
+    pd->capture_graph(capture_stream, false,
+                      /*save_graph=*/print_graph_resources && i == 0);
     CUDA_CHECK(cudaStreamDestroy(capture_stream));
 
     std::cout << "[Setup] Predecoder " << i << " (GPU " << gpu
               << "): input_size=" << pd->get_input_size()
               << " output_size=" << pd->get_output_size() << "\n";
+    if (print_graph_resources && i == 0) {
+      auto info = cudaq::qec::realtime::experimental::collect_graph_resources(
+          pd->get_captured_graph());
+      cudaq::qec::realtime::experimental::print_graph_resources(std::cout,
+                                                                info);
+    }
     predecoders.push_back(std::move(pd));
   }
   CUDA_CHECK(cudaSetDevice(0));
