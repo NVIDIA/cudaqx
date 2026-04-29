@@ -176,9 +176,7 @@ include_directories(SYSTEM
 link_directories(${LLVM_BUILD_LIBRARY_DIR})
 add_definitions(${LLVM_DEFINITIONS})
 
-# FIXME for now, we only use library mode
-set(CUDAQ_LIBRARY_MODE ON)
-find_package(CUDAQ REQUIRED)
+cudaqx_import_cudaq_targets()
 
 # Top-level targets
 # ==============================================================================
