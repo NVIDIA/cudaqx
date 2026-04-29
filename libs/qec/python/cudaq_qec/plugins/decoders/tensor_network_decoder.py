@@ -478,8 +478,9 @@ class TensorNetworkDecoder:
         """Optimize the contraction path of the tensor network.
 
         Args:
-            optimize (Optional[cutn.OptimizerOptions], optional): The optimization options to use. 
-                If None or cuquantum.tensornet.OptimizerOptions, we use cuquantum.tensornet.
+            optimize (cuquantum.tensornet.OptimizerOptions | None, optional):
+                The optimization options to use.
+                If None or ``cuquantum.tensornet.OptimizerOptions``, we use cuquantum.tensornet.
                 Else, Quimb interface at 
                 https://quimb.readthedocs.io/en/latest/autoapi/quimb/tensor/tensor_core/index.html#quimb.tensor.tensor_core.TensorNetwork.contraction_info
             batch_size (int, optional): The batch size for the optimization. Defaults to -1, which means no batching.

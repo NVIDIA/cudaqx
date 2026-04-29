@@ -10,7 +10,9 @@ import sys
 import pytest
 
 import numpy as np
-import torch
+
+torch = pytest.importorskip(
+    "torch", reason="torch not installed; skipping TN decoder tests")
 import cudaq_qec as qec
 
 if sys.version_info >= (3, 11):
@@ -21,8 +23,7 @@ if sys.version_info >= (3, 11):
         prepare_syndrome_data_batch, tensor_network_from_syndrome_batch,
         tensor_network_from_logical_observable)
     from cudaq_qec.plugins.decoders.tensor_network_utils.contractors import (
-        optimize_path, cutn_contractor, ContractorConfig, contractor,
-        cutn_contractor)
+        optimize_path, cutn_contractor, ContractorConfig, contractor)
     from cudaq_qec.plugins.decoders.tensor_network_utils.noise_models import factorized_noise_model, error_pairs_noise_model
 
 pytestmark = pytest.mark.skipif(sys.version_info < (3, 11),
