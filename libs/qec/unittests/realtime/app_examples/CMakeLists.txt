@@ -18,6 +18,7 @@
 #------------------------------------------------------------------------------#
 # Surface code 1, fully local, regular Stim simulator
 add_executable(surface_code-1-local)
+set_target_properties(surface_code-1-local PROPERTIES LINKER_LANGUAGE CXX)
 
 cudaqx_add_device_code(surface_code-1-local
   SOURCES
@@ -90,6 +91,7 @@ add_test(
 #------------------------------------------------------------------------------#
 # Surface code 1, --target quantinuum --emulate
 add_executable(surface_code-1-quantinuum-emulate)
+set_target_properties(surface_code-1-quantinuum-emulate PROPERTIES LINKER_LANGUAGE CXX)
 
 add_dependencies(surface_code-1-quantinuum-emulate surface_code-1-local)
 
@@ -148,6 +150,7 @@ add_test(
 #------------------------------------------------------------------------------#
 # Surface code 2, fully local, regular Stim simulator
 add_executable(surface_code-2-local)
+set_target_properties(surface_code-2-local PROPERTIES LINKER_LANGUAGE CXX)
 
 cudaqx_add_device_code(surface_code-2-local
   SOURCES
@@ -198,6 +201,7 @@ add_test(
 #------------------------------------------------------------------------------#
 # Surface code 2, --target quantinuum --emulate
 add_executable(surface_code-2-quantinuum-emulate)
+set_target_properties(surface_code-2-quantinuum-emulate PROPERTIES LINKER_LANGUAGE CXX)
 
 add_dependencies(surface_code-2-quantinuum-emulate surface_code-2-local)
 
@@ -277,6 +281,7 @@ endmacro()
 #------------------------------------------------------------------------------#
 # Surface code 3, fully local, regular Stim simulator
 add_executable(surface_code-3-local)
+set_target_properties(surface_code-3-local PROPERTIES LINKER_LANGUAGE CXX)
 
 cudaqx_add_device_code(surface_code-3-local
   SOURCES
@@ -317,6 +322,7 @@ add_surface_code_test(
 #------------------------------------------------------------------------------#
 # Surface code 3, --target quantinuum --emulate
 add_executable(surface_code-3-quantinuum-emulate)
+set_target_properties(surface_code-3-quantinuum-emulate PROPERTIES LINKER_LANGUAGE CXX)
 
 add_dependencies(surface_code-3-quantinuum-emulate surface_code-3-local)
 
