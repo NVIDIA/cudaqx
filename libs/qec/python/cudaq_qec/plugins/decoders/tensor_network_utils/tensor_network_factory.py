@@ -5,10 +5,11 @@
 # This source code and the accompanying materials are made available under     #
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
+from __future__ import annotations
 
 import numpy as np
 import numpy.typing as npt
-from typing import Any, Optional
+from typing import Any
 from quimb import oset
 from quimb.tensor import Tensor, TensorNetwork
 
@@ -17,7 +18,7 @@ def tensor_network_from_parity_check(
     parity_check_matrix: npt.NDArray[Any],
     row_inds: list[str],
     col_inds: list[str],
-    tags: Optional[list[str]] = None,
+    tags: list[str] | None = None,
 ) -> TensorNetwork:
     r"""Build a sparse tensor-network representation of a parity-check matrix.
 
@@ -131,7 +132,7 @@ def tensor_network_from_syndrome_batch(
     detection_events: npt.NDArray[Any],
     syndrome_inds: list[str],
     batch_index: str = "batch_index",
-    tags: Optional[list[str]] = None,
+    tags: list[str] | None = None,
 ) -> TensorNetwork:
     """Build a tensor network from a batch of syndromes.
 
@@ -179,7 +180,7 @@ def tensor_network_from_logical_observable(
     logical: npt.NDArray[Any],
     logical_inds: list[str],
     logical_obs_inds: list[str],
-    logical_tags: Optional[list[str]] = None,
+    logical_tags: list[str] | None = None,
 ) -> TensorNetwork:
     """Build a tensor network for logical observables.
 

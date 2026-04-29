@@ -87,20 +87,20 @@ role_to_str = qecrt.role_to_str
 from .dem_sampling import dem_sampling
 
 from .plugins import decoders, codes
-import pkgutil, importlib, traceback
+import pkgutil, importlib
 
 
 def iter_namespace(ns_pkg):
     return pkgutil.iter_modules(ns_pkg.__path__, ns_pkg.__name__ + ".")
 
 
-for finder, name, ispkg in iter_namespace(plugins.decoders):
+for finder, name, ispkg in iter_namespace(decoders):
     try:
         importlib.import_module(name)
     except (ModuleNotFoundError, ImportError) as e:
         pass
 
-for finder, name, ispkg in iter_namespace(plugins.codes):
+for finder, name, ispkg in iter_namespace(codes):
     try:
         importlib.import_module(name)
     except (ModuleNotFoundError, ImportError) as e:
