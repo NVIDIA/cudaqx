@@ -536,3 +536,17 @@ class TensorNetworkDecoder:
             dtype=to_backend_dtype(self._dtype,
                                    like=self.contractor_config.backend),
         ))
+
+
+# Re-export the noise learner so callers can use the same module path
+# as :class:`TensorNetworkDecoder`.  Imported at the bottom because
+# :mod:`noise_models` subclasses :class:`TensorNetworkDecoder`.
+from .tensor_network_utils.noise_models import (  # noqa: E402
+    NMOptimizer, make_compiled_step,
+)
+
+__all__ = [
+    "TensorNetworkDecoder",
+    "NMOptimizer",
+    "make_compiled_step",
+]

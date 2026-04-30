@@ -899,6 +899,27 @@ The decoder returns the probability that the logical observable has flipped for 
     that this GPU will not be supported by the Tensor Network Decoder when
     CUDA-Q 0.5.0 is released.
 
+Learning the Noise Model from Data
+""""""""""""""""""""""""""""""""""
+
+When the true per-error noise rates are unknown (typical of real hardware),
+the Tensor Network Decoder ships with ``NMOptimizer``, a differentiable
+extension that **fits the noise model directly from observed syndromes and
+logical-flip outcomes**.  Noise probabilities are held as PyTorch tensors
+with ``requires_grad=True``; backpropagating through the tensor-network
+contraction yields gradients that any ``torch.optim`` optimizer (Adam, SGD,
+etc.) can update.  Starting from a uniform initial prior and a few hundred
+Adam steps is usually enough to recover the per-error rates and beat a
+static-uniform baseline on a held-out batch.
+
+This is offline -- training happens once on a representative syndrome
+dataset, and the learned probabilities can then be used as a standard
+static noise model for batch decoding.  See
+:ref:`tensor_network_decoder_api_python` for the ``NMOptimizer`` API and
+the *Learning Noise Models with NMOptimizer* example in
+:doc:`../../examples_rst/qec/decoders` for a runnable end-to-end demo on a
+Stim repetition-code circuit.
+
 
 Sliding Window Decoder
 ^^^^^^^^^^^^^^^^^^^^^^

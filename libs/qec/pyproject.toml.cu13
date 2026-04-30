@@ -58,6 +58,7 @@ write_to = "_version.py"
 tensor_network_decoder = [
   "quimb",
   "opt_einsum",
+  "cotengra",
   "torch>=2.9.0",
   "cuquantum-python-cu13>=26.3.0"
 ]
@@ -67,6 +68,7 @@ trt_decoder = [
 all = [
   "quimb",
   "opt_einsum",
+  "cotengra",
   "torch>=2.9.0",
   "cuquantum-python-cu13>=26.3.0",
   "tensorrt-cu13"
