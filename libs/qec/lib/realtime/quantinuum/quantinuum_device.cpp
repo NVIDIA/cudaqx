@@ -16,10 +16,9 @@
 
 namespace cudaq::qec::decoding {
 
-__qpu__ void
-enqueue_syndromes(std::uint64_t decoder_id,
-                  const std::vector<cudaq::measure_result> &syndromes,
-                  std::uint64_t tag) {
+__qpu__ void enqueue_syndromes(std::uint64_t decoder_id,
+                               const std::vector<bool> &syndromes,
+                               std::uint64_t tag) {
   uint64_t syndrome_size = syndromes.size();
   uint64_t syndrome = cudaq::to_integer(syndromes);
   cudaq::device_call(enqueue_syndromes_ui64, decoder_id, syndrome_size,

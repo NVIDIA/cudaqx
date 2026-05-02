@@ -29,10 +29,9 @@ namespace cudaq::qec::decoding {
 /// @param syndromes The syndromes to enqueue.
 /// @param tag The tag to use for the syndrome (currently useful for logging
 /// only)
-__qpu__ void
-enqueue_syndromes(std::uint64_t decoder_id,
-                  const std::vector<cudaq::measure_result> &syndromes,
-                  std::uint64_t tag = 0);
+__qpu__ void enqueue_syndromes(std::uint64_t decoder_id,
+                               const std::vector<bool> &syndromes,
+                               std::uint64_t tag = 0);
 
 /// @brief Get the corrections for a given decoder.
 /// @param decoder_id The ID of the decoder to use.

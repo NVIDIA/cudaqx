@@ -19,9 +19,9 @@
 // exact signature (other than converting vectors to spans), there will be no
 // errors or warnings, other than bad crashes.
 extern "C" __attribute__((visibility("default"))) void
-simulation_enqueue_syndromes(
-    std::uint64_t decoder_id,
-    const std::vector<cudaq::measure_result> &syndromes, std::uint64_t tag);
+simulation_enqueue_syndromes(std::uint64_t decoder_id,
+                             const std::vector<bool> &syndromes,
+                             std::uint64_t tag);
 
 extern "C" __attribute__((visibility("default"))) void
 simulation_get_corrections(std::uint64_t decoder_id,
@@ -29,10 +29,9 @@ simulation_get_corrections(std::uint64_t decoder_id,
 
 namespace cudaq::qec::decoding {
 
-__qpu__ void
-enqueue_syndromes(std::uint64_t decoder_id,
-                  const std::vector<cudaq::measure_result> &syndromes,
-                  std::uint64_t tag) {
+__qpu__ void enqueue_syndromes(std::uint64_t decoder_id,
+                               const std::vector<bool> &syndromes,
+                               std::uint64_t tag) {
   cudaq::device_call(simulation_enqueue_syndromes, decoder_id, syndromes, tag);
 }
 

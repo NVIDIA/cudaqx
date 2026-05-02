@@ -205,7 +205,8 @@ __qpu__ void custom_memory_circuit_stabs(
       combined_syndrome[i++] = s;
     if (enqueue_syndromes) {
       cudaq::qec::decoding::enqueue_syndromes(
-          /*decoder_id=*/logical_qubit_idx, combined_syndrome);
+          /*decoder_id=*/logical_qubit_idx,
+          cudaq::to_bools(combined_syndrome));
     }
 #if PER_SHOT_DEBUG
     debug_print_syndromes(syndrome_x_int, syndrome_z_int);
@@ -321,7 +322,7 @@ demo_circuit_qpu(bool allow_device_calls,
       ret <<= numData;
     auto subData = data.slice(i * numData, numData);
     auto subMeas = mz(subData);
-    ret |= cudaq::to_integer(subMeas);
+    ret |= cudaq::to_integer(cudaq::to_bools(subMeas));
   }
   // The remaining bits are allocated to the number of corrections.
   ret |= num_corrections << (numData * numLogical);
