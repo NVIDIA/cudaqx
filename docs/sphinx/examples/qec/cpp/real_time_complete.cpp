@@ -112,7 +112,7 @@ __qpu__ int64_t qec_circuit() {
   // 3 rounds of syndrome measurement
   for (int round = 0; round < 3; ++round) {
     auto syndromes = measure_stabilizers(logical);
-    cudaq::qec::decoding::enqueue_syndromes(0, cudaq::to_bools(syndromes));
+    cudaq::qec::decoding::enqueue_syndromes(0, syndromes);
   }
 
   // Get corrections and apply them (single logical observable)

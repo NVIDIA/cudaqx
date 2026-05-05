@@ -246,12 +246,11 @@ __qpu__ void custom_memory_circuit_stabs(
     if (enqueue_syndromes) {
       // Enqueue Z-stabilizer results to the X-error decoder
       cudaq::qec::decoding::enqueue_syndromes(
-          /*decoder_id=*/2 * logical_qubit_idx, cudaq::to_bools(syndrome_z));
+          /*decoder_id=*/2 * logical_qubit_idx, syndrome_z);
 
       // Enqueue X-stabilizer results to the Z-error decoder
       cudaq::qec::decoding::enqueue_syndromes(
-          /*decoder_id=*/2 * logical_qubit_idx + 1,
-          cudaq::to_bools(syndrome_x));
+          /*decoder_id=*/2 * logical_qubit_idx + 1, syndrome_x);
     }
 
     if (do_errors_after_non_last_rounds && round < numRounds - 1) {

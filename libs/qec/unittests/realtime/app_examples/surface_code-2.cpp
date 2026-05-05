@@ -205,8 +205,7 @@ __qpu__ void custom_memory_circuit_stabs(
       combined_syndrome[i++] = s;
     if (enqueue_syndromes) {
       cudaq::qec::decoding::enqueue_syndromes(
-          /*decoder_id=*/logical_qubit_idx,
-          cudaq::to_bools(combined_syndrome));
+          /*decoder_id=*/logical_qubit_idx, combined_syndrome);
     }
 #if PER_SHOT_DEBUG
     debug_print_syndromes(syndrome_x_int, syndrome_z_int);

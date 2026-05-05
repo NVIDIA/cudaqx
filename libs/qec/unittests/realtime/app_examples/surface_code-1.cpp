@@ -285,8 +285,7 @@ __qpu__ void custom_memory_circuit_stabs(
       combined_syndrome[i++] = s;
     if (enqueue_syndromes) {
       cudaq::qec::decoding::enqueue_syndromes(
-          /*decoder_id=*/logical_qubit_idx,
-          cudaq::to_bools(combined_syndrome));
+          /*decoder_id=*/logical_qubit_idx, combined_syndrome);
     }
     return;
   }
@@ -299,8 +298,7 @@ __qpu__ void custom_memory_circuit_stabs(
     // For window_idx > 0, enqueue the last syndrome from previous window first
     if (window_idx > 0 && enqueue_syndromes) {
       cudaq::qec::decoding::enqueue_syndromes(
-          /*decoder_id=*/logical_qubit_idx,
-          cudaq::to_bools(combined_syndrome));
+          /*decoder_id=*/logical_qubit_idx, combined_syndrome);
     }
 
     // Process the current window rounds
@@ -315,8 +313,7 @@ __qpu__ void custom_memory_circuit_stabs(
         combined_syndrome[i++] = s;
       if (enqueue_syndromes) {
         cudaq::qec::decoding::enqueue_syndromes(
-            /*decoder_id=*/logical_qubit_idx,
-            cudaq::to_bools(combined_syndrome));
+            /*decoder_id=*/logical_qubit_idx, combined_syndrome);
       }
 #if PER_SHOT_DEBUG
       debug_print_syndromes(syndrome_x_int, syndrome_z_int);
@@ -784,9 +781,10 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
         size_t end_idx =
             std::min(start_idx + syndrome_bits_per_round, all_syndromes.size());
 
-        // Replay path: raw syndrome bits read from a saved file. Pass them
-        // straight through to enqueue_syndromes (which now takes
-        // vector<bool>); there is no measurement-event identity to preserve.
+        // Replay path: raw syndrome bits read from a saved file. Use the
+        // test-only `enqueue_syndromes_test` API since these bits have no
+        // measurement-event identity to preserve and the production
+        // `enqueue_syndromes(vector<measure_result>&)` is the wrong shape.
         std::vector<bool> syndrome_round;
         for (size_t i = start_idx; i < end_idx; i++) {
           syndrome_round.push_back(static_cast<bool>(all_syndromes[i]));
@@ -794,7 +792,8 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
 
         // Enqueue this round for all logical qubits
         for (size_t logical_idx = 0; logical_idx < numLogical; logical_idx++) {
-          cudaq::qec::decoding::enqueue_syndromes(logical_idx, syndrome_round);
+          cudaq::qec::decoding::enqueue_syndromes_test(logical_idx,
+                                                       syndrome_round);
         }
       }
 

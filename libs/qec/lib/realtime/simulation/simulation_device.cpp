@@ -29,9 +29,19 @@ simulation_get_corrections(std::uint64_t decoder_id,
 
 namespace cudaq::qec::decoding {
 
-__qpu__ void enqueue_syndromes(std::uint64_t decoder_id,
-                               const std::vector<bool> &syndromes,
-                               std::uint64_t tag) {
+__qpu__ void
+enqueue_syndromes(std::uint64_t decoder_id,
+                  const std::vector<cudaq::measure_result> &syndromes,
+                  std::uint64_t tag) {
+  // The host trampoline takes a bit-typed span (see WARNING above), so
+  // discriminate the handles before crossing the boundary.
+  cudaq::device_call(simulation_enqueue_syndromes, decoder_id,
+                     cudaq::to_bools(syndromes), tag);
+}
+
+__qpu__ void enqueue_syndromes_test(std::uint64_t decoder_id,
+                                    const std::vector<bool> &syndromes,
+                                    std::uint64_t tag) {
   cudaq::device_call(simulation_enqueue_syndromes, decoder_id, syndromes, tag);
 }
 
