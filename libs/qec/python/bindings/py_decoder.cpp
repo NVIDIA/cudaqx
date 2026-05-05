@@ -726,10 +726,18 @@ void bindDecoder(nb::module_ &mod) {
                       (error_msg ? std::string(error_msg) : "unknown error.")));
     }
 
-    // List of `init_func` names to call for decoder registration
+    // List of `init_func` names to call for decoder registration.
+    //
+    // The `enqueue_syndromes` mangled string encodes the public API's
+    // parameter type. Under CUDA-Q alias `using measure_result =
+    // measure_handle;`, C++ mangling resolves the typedef to its underlying
+    // type, so `INS_14measure_handleESaIS3_EE` is the inner-vector mangling for
+    // `std::vector<cudaq::measure_handle>`. If CUDA-Q ever renames the
+    // underlying handle type or changes the alias direction, this string must
+    // be re-derived from `nm` on the per-target device .o.
     // clang-format off
     static const std::vector<std::string> initFuncNames = {
-        "function_enqueue_syndromes._ZN5cudaq3qec8decoding17enqueue_syndromesEmRKSt6vectorIbSaIbEEm.init_func",
+        "function_enqueue_syndromes._ZN5cudaq3qec8decoding17enqueue_syndromesEmRKSt6vectorINS_14measure_handleESaIS3_EEm.init_func",
         "function_get_corrections._ZN5cudaq3qec8decoding15get_correctionsEmmb.init_func",
         "function_reset_decoder._ZN5cudaq3qec8decoding13reset_decoderEm.init_func"};
     // clang-format on
