@@ -61,8 +61,8 @@ jobs:
         platform: ['amd64', 'arm64']
         cuda_version: ['12.6', '13.0']
         toolchain:
-          - cc: gcc-11
-            cxx: g++-11
+          - cc: gcc-12
+            cxx: g++-12
             build-type: Release
 
     steps:

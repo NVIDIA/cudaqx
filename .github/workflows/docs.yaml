@@ -72,8 +72,8 @@ jobs:
           # documentation).
           cmake -S . -B "build" \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_C_COMPILER=gcc-11 \
-            -DCMAKE_CXX_COMPILER=g++-11 \
+            -DCMAKE_C_COMPILER=gcc-12 \
+            -DCMAKE_CXX_COMPILER=g++-12 \
             -DCUDAQ_DIR=/cudaq-install/lib/cmake/cudaq/ \
             -DCUDAQX_ENABLE_LIBS="all" \
             -DCUDAQX_INCLUDE_DOCS=ON \

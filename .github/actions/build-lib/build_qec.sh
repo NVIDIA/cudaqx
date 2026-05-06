@@ -115,8 +115,8 @@ HSB_BUILD=${HSB_ROOT}/build
 
 cmake -S libs/qec -B "$1" \
   -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_C_COMPILER=gcc-11 \
-  -DCMAKE_CXX_COMPILER=g++-11 \
+  -DCMAKE_C_COMPILER=gcc-12 \
+  -DCMAKE_CXX_COMPILER=g++-12 \
   -DCMAKE_C_COMPILER_LAUNCHER=ccache \
   -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
   -DCUDAQ_DIR=/cudaq-install/lib/cmake/cudaq/ \
