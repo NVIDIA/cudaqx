@@ -185,7 +185,8 @@ def spam_error(logical_qubit: patch, p_spam_data: float, p_spam_ancx: float,
 
 
 @cudaq.kernel
-def se_z_ft(logical_qubit: patch, cnot_sched: List[int]) -> List[bool]:
+def se_z_ft(logical_qubit: patch,
+            cnot_sched: List[int]) -> List[cudaq.measure_handle]:
     for i in range(0, len(cnot_sched), 2):
         cx(logical_qubit.data[cnot_sched[i + 1]],
            logical_qubit.ancz[cnot_sched[i]])
@@ -196,7 +197,8 @@ def se_z_ft(logical_qubit: patch, cnot_sched: List[int]) -> List[bool]:
 
 
 @cudaq.kernel
-def se_x_ft(logical_qubit: patch, cnot_sched: List[int]) -> List[bool]:
+def se_x_ft(logical_qubit: patch,
+            cnot_sched: List[int]) -> List[cudaq.measure_handle]:
     h(logical_qubit.ancx)
     for i in range(0, len(cnot_sched), 2):
         cx(logical_qubit.ancx[cnot_sched[i]],
@@ -225,7 +227,13 @@ def custom_memory_circuit_stabs(
 ) -> None:
     # Create the logical patch
     logical = patch(data, xstab_anc, zstab_anc)
-    combined_syndrome = [False for i in range(len(xstab_anc) + len(zstab_anc))]
+    # Mirror the C++ idiom `std::vector<measure_result>(N)`: pre-allocate a
+    # list of unbound `measure_handle`s, each slot is overwritten with a real
+    # handle from `se_z_ft`/`se_x_ft` before any discrimination occurs.
+    combined_syndrome = [
+        cudaq.measure_handle()
+        for i in range(len(xstab_anc) + len(zstab_anc))
+    ]
     # Handle the stabilizer lock-in round (numRounds == 1)
     if num_rounds == 1:
         syndrome_z = se_z_ft(logical, cnot_schedZ_flat)
