@@ -1,5 +1,6 @@
 #!/bin/sh
 
+export FC=gfortran
 cmake -S libs/solvers -B "$1" \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_C_COMPILER=gcc-12 \
