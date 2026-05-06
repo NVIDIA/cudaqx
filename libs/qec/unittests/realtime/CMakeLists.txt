@@ -6,7 +6,8 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
-add_subdirectory(app_examples)
+# FIXME - these fail to compile with CUDA-Q w/ LLVM
+#add_subdirectory(app_examples)
 
 # =========================================================================== #
 # test_realtime_predecoder_w_pymatching
