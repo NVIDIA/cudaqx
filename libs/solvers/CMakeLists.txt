@@ -80,6 +80,12 @@ option(CUDAQX_SOLVERS_INSTALL_PYTHON
 # using `LLVM_VERSION_MAJOR`, e.g. "-LLVM_VERSION_MAJOR=16".  Note that this
 # version variable is set to the latest LLVM version by default, and setting it
 # to an older version might break the project.
+if(NOT LLVM_VERSION_MAJOR)
+  set(LLVM_VERSION_MAJOR 22)
+endif()
+if(NOT LLVM_VERSION_MINOR)
+  set(LLVM_VERSION_MINOR 1)
+endif()
 find_package(LLVM ${LLVM_VERSION_MAJOR}.${LLVM_VERSION_MINOR} CONFIG QUIET)
 
 if(NOT LLVM_DIR)
