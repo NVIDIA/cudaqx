@@ -8,7 +8,7 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
-IMAGE_NAME=ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-amd64-cu12.6-gcc11-main
+IMAGE_NAME=ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-amd64-cu12.6-gcc12-main
 
 CONTAINER_NAME=cudaqx_wheel_builder
 CONTAINER_STATUS=$(docker container inspect -f '{{.State.Status}}' $CONTAINER_NAME 2>/dev/null)

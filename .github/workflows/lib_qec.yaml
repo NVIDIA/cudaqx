@@ -13,7 +13,7 @@ jobs:
         platform: ['amd64', 'arm64']
         cuda_version: ['12.6', '13.0']
     runs-on: ${{ startsWith(github.repository, 'NVIDIA/cudaqx') && format('linux-{0}-cpu8', matrix.platform) || 'ubuntu-latest' }}
-    container: ghcr.io/nvidia/cuda-quantum-devcontainer:${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc11-main
+    container: ghcr.io/nvidia/cuda-quantum-devcontainer:${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc12-main
     permissions:
       actions: write
       pull-requests: read
@@ -154,7 +154,7 @@ jobs:
         cuda_version: ['12.6', '13.0']
     runs-on: ${{ startsWith(github.repository, 'NVIDIA/cudaqx') && format('linux-{0}-gpu-a100-latest-1', matrix.platform) || 'ubuntu-latest' }}
     container:
-      image: ghcr.io/nvidia/cuda-quantum-devcontainer:${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc11-main
+      image: ghcr.io/nvidia/cuda-quantum-devcontainer:${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc12-main
       env:
         NVIDIA_VISIBLE_DEVICES: ${{ env.NVIDIA_VISIBLE_DEVICES }}
     permissions:
