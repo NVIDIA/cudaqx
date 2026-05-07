@@ -7,7 +7,6 @@ if [ -n "$CUDAQ_REALTIME_ROOT" ]; then
   _rt_flag="-DCUDAQ_REALTIME_ROOT=$CUDAQ_REALTIME_ROOT"
 fi
 
-export FC=gfortran
 cmake -S . -B "$1" \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_C_COMPILER=gcc-12 \
