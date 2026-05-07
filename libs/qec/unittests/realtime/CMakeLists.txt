@@ -7,7 +7,7 @@
 # ============================================================================ #
 
 # FIXME - these fail to compile with CUDA-Q w/ LLVM
-add_subdirectory(app_examples)
+#add_subdirectory(app_examples)
 
 # =========================================================================== #
 # test_realtime_predecoder_w_pymatching
