@@ -13,11 +13,11 @@ description: >-
   surface code, Steane code, repetition code, detector error model, DEM,
   dem_sampling, sliding window, predecoder, real-time decoding, Helios, or
   Quantinuum.
-version: "0.1.0"
+version: "0.2.0"
 author: "CUDA-QX"
-license: "Apache License 2.0"
-compatibility: "Linux x86_64/aarch64, Python 3.10+, C++ 20"
-tags: [cuda-qx, cudaq-qec, quantum-error-correction, decoders, surface-code, real-time-decoding, dem-sampling, nvidia]
+license: "LicenseRef-NVIDIA-Proprietary"
+compatibility: "Python 3.11+, C++ 20, Linux x86_64/aarch64"
+tags: [cuda-qx, cudaq-qec, qec, quantum-error-correction, decoders, surface-code, real-time-decoding, dem-sampling, nvidia]
 tools: [Read, Glob, Grep, Bash]
 metadata:
   author: "CUDA-QX"
@@ -218,3 +218,8 @@ runs but reports the wrong logical error rate.
 5. If the symptom is "LER looks wrong", go to the
    **Troubleshooting** section in `REFERENCE.md`. The first three
    causes there account for roughly 90% of cases.
+
+## Additional resources
+
+- Benchmark / eval prompts: [benchmark.md](benchmark.md)
+- Scoring helper: `.claude/skills/scripts/score_benchmark.py --skill qec --responses responses.json`
