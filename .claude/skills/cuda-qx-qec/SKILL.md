@@ -44,27 +44,47 @@ the **Source of Truth** table.
 
 ## How to read this skill
 
-1. Read the **Conventions** section. It is short and prevents the
-   most common silent-correctness mistakes.
-2. Find your task in the **Workflow Index**.
-3. Open the matching workflow in `REFERENCE.md` and follow it.
-4. Walk the **Self-Check Protocol** in `REFERENCE.md` before declaring done.
+1. **First three actions** below: run `_shared/scripts/preflight.sh`,
+   `import_smoke.py`, `pick_workflow.py`. They surface common blockers
+   (missing decoder extras, stale install, ABI mismatch) before you spend
+   tokens guessing.
+2. Read the **Conventions** section. It is short and prevents the most
+   common silent-correctness mistakes.
+3. Find your task in the **Workflow Index** and open the matching file
+   under `references/`.
+4. Walk the **Self-Check Protocol** in `references/triage.md` before
+   declaring done.
 
-If you only have time for one workflow, read **W2: Circuit-Level Memory
-Experiment** in `REFERENCE.md`. With the conventions, it covers roughly 80%
-of QEC tasks: build a code, decode under noise, measure the logical error
-rate.
+If you only have time for one file, read `references/decode.md`. The
+"Circuit-Level Memory Experiment" section there, plus the conventions,
+covers roughly 80% of QEC tasks: build a code, decode under noise,
+measure the logical error rate.
 
 ## Audience
 
-AI coding agents and developers operating `cudaq_qec` from a checkout of this
-repo. Pip-only users (`pip install cudaq-qec`) get the same Python API but
-cannot read the template files referenced below; they should consult the
-published docs at <https://nvidia.github.io/cudaqx/> instead.
+AI coding agents and developers operating `cudaq_qec` from a checkout of
+this repo. Pip-only users (`pip install cudaq-qec`) get the same Python
+API but cannot read the template files referenced below; they should
+consult the published docs at <https://nvidia.github.io/cudaqx/>
+instead.
 
 The artifact is `SKILL.md` (uppercase) inside `.claude/skills/cuda-qx-qec/`.
-People sometimes call it "skills.md"; it is the same file. The companion
-file is `REFERENCE.md` in the same directory.
+Companion files live in `references/` (see Workflow Index below).
+
+## First three actions (always, before anything else)
+
+```bash
+bash   .claude/skills/_shared/scripts/preflight.sh    --json > /tmp/preflight.json
+python .claude/skills/_shared/scripts/import_smoke.py --json > /tmp/import_smoke.json
+python .claude/skills/_shared/scripts/pick_workflow.py \
+    --intent <pick from list below> \
+    --preflight /tmp/preflight.json \
+    --imports   /tmp/import_smoke.json
+```
+
+QEC-skill intents: `qec-decode`, `qec-custom`, `qec-realtime`,
+`qec-debug`. `pick_workflow.py` returns the next reference file to read
+and the commands to run. Do that, then come back here for conventions.
 
 ## Standard imports
 
@@ -122,23 +142,17 @@ authoritative.
 
 ## Workflow Index
 
-Match the user's intent to a workflow, then open its full description in
-`REFERENCE.md`.
+| If the user wants to                                                | Read                       | `pick_workflow.py` intent |
+|---------------------------------------------------------------------|----------------------------|---------------------------|
+| Decode (code-capacity, circuit-level, pick a decoder)               | `references/decode.md`     | `qec-decode`              |
+| Define a new code or decoder (Python or C++)                        | `references/extend.md`     | `qec-custom`              |
+| Sliding window, real-time in-kernel, DEM sampling, predecoder       | `references/realtime.md`   | `qec-realtime`            |
+| Diagnose "LER looks wrong" / decoder gotchas / install failures     | `references/triage.md`     | `qec-debug`               |
 
-| If the user wants to                                                | Use                  |
-|----------------------------------------------------------------------|----------------------|
-| Decode random bit-flips on a parity-check matrix                     | **W1: Code-Capacity**|
-| Run a memory experiment with circuit noise and measure LER           | **W2: Circuit-Level**|
-| Define a new code in Python or C++                                   | **W3: Custom Code**  |
-| Define a new decoder in Python or C++                                | **W4: Custom Decoder**|
-| Decode many syndrome rounds with a latency budget                    | **W5: Sliding Window**|
-| Decode in-kernel during execution (Stim, Quantinuum emulate, Helios) | **W6: Real-Time**    |
-| Sample errors and syndromes directly from a DEM (CPU/GPU)            | **W7: DEM Sampling** |
-| Wire a predecoder in front of a main decoder (PyMatching, FPGA)      | **W8: Predecoder**   |
-
-Cross-cutting topics in `REFERENCE.md`: **Decoder Selection** decision tree,
-**`nv-qldpc-decoder` parameters**, **Noise Model Patterns**, **Self-Check
-Protocol**, and **Troubleshooting**.
+`triage.md` is also where the **Self-Check Protocol**, the
+**`nv-qldpc-decoder` parameters** table, and the **Noise Model Patterns**
+live. Read it any time the workflow runs but produces suspicious
+numbers.
 
 ## Installation and environment
 
@@ -207,19 +221,24 @@ runs but reports the wrong logical error rate.
 
 ## When stuck
 
-1. Read the matching workflow's template file end-to-end before generating
-   new code. Every workflow in `REFERENCE.md` points at one.
-2. Grep `libs/qec/python/cudaq_qec/__init__.py` for the suspected API name.
-3. Read the C++ header in `libs/qec/include/cudaq/qec/` for the canonical
+1. Re-run the **First three actions**. Decoder extras (`tensor-network-decoder`,
+   `trt-decoder`, `gqe`) often appear missing only on first use.
+2. Read the matching workflow's template file end-to-end before generating
+   new code. Every workflow in `references/` points at one.
+3. Grep `libs/qec/python/cudaq_qec/__init__.py` for the suspected API name.
+4. Read the C++ header in `libs/qec/include/cudaq/qec/` for the canonical
    signature.
-4. Reproduce with `nShots=10` and an explicit `p=0` run. The decoder
+5. Reproduce with `nShots=10` and an explicit `p=0` run. The decoder
    should report zero LER without noise; this catches structural bugs
    before noise-related ones.
-5. If the symptom is "LER looks wrong", go to the
-   **Troubleshooting** section in `REFERENCE.md`. The first three
-   causes there account for roughly 90% of cases.
+6. If the symptom is "LER looks wrong", open
+   `references/triage.md` → "Troubleshooting: 'LER looks wrong'". The
+   first three causes account for roughly 90% of cases.
 
 ## Additional resources
 
-- Benchmark / eval prompts: [benchmark.md](benchmark.md)
-- Scoring helper: `.claude/skills/scripts/score_benchmark.py --skill qec --responses responses.json`
+- Workflow references: `references/decode.md`, `references/extend.md`,
+  `references/realtime.md`, `references/triage.md`
+- Shared diagnostic scripts: `.claude/skills/_shared/scripts/`
+- Shared repo map (incl. build/docs paths): `.claude/skills/_shared/repo_map.md`
+- Build/wheel/docs questions: `.claude/skills/cuda-qx-build/SKILL.md`
