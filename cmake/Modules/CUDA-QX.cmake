@@ -194,27 +194,6 @@ function(cudaqx_import_cudaq_targets)
     include("${CUDAQ_CMAKE_DIR}/CUDAQTargets.cmake")
   endif()
 
-  # CUDA-Q built with GCC 12 baked `--param=evrp-mode=legacy` into the
-  # PUBLIC compile options of `cudaq-common` (see runtime/common/CMakeLists.txt
-  # in CUDA-Q). That flag was removed in GCC 13, so it leaks into consumers
-  # like cudaqx and breaks the build. Scrub it from the imported targets'
-  # INTERFACE_COMPILE_OPTIONS so we don't propagate it to our own targets.
-  foreach(_cudaq_target IN ITEMS
-      cudaq::cudaq
-      cudaq::cudaq-common
-      cudaq::cudaq-operator
-      cudaq::cudaq-em-default
-      cudaq::cudaq-platform-default)
-    if(TARGET ${_cudaq_target})
-      get_target_property(_iface_opts ${_cudaq_target} INTERFACE_COMPILE_OPTIONS)
-      if(_iface_opts)
-        list(REMOVE_ITEM _iface_opts "--param=evrp-mode=legacy")
-        set_target_properties(${_cudaq_target} PROPERTIES
-          INTERFACE_COMPILE_OPTIONS "${_iface_opts}")
-      endif()
-    endif()
-  endforeach()
-
   set(__base_nvtarget_name "custatevec")
   find_library(CUDAQ_CUSVSIM_PATH NAMES cusvsim-fp32 HINTS ${CUDAQ_LIBRARY_DIR})
   if (CUDAQ_CUSVSIM_PATH)
