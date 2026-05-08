@@ -58,12 +58,12 @@ def parse_detector_error_model(detector_error_model):
 
 def main():
     circuit = stim.Circuit.generated("surface_code:rotated_memory_z",
-                                    rounds=3,
-                                    distance=3,
-                                    after_clifford_depolarization=0.001,
-                                    after_reset_flip_probability=0.01,
-                                    before_measure_flip_probability=0.01,
-                                    before_round_data_depolarization=0.01)
+                                     rounds=3,
+                                     distance=3,
+                                     after_clifford_depolarization=0.001,
+                                     after_reset_flip_probability=0.01,
+                                     before_measure_flip_probability=0.01,
+                                     before_round_data_depolarization=0.01)
 
     detector_error_model = circuit.detector_error_model(decompose_errors=True)
 
@@ -79,8 +79,8 @@ def main():
 
     num_shots = 5
     sampler = circuit.compile_detector_sampler()
-    detection_events, observable_flips = sampler.sample(num_shots,
-                                                        separate_observables=True)
+    detection_events, observable_flips = sampler.sample(
+        num_shots, separate_observables=True)
 
     res = decoder.decode_batch(detection_events)
 
