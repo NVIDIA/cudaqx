@@ -246,12 +246,12 @@ FetchContent_Declare(
   EXCLUDE_FROM_ALL
 )
 
-# We need version 3.11.1 because that is what CUDA-Q uses. If CUDA-Q updates,
-# then we need to remember to update.
+# We need version 3.12.0 because that is what CUDA-Q uses (since #4416). If
+# CUDA-Q updates, then we need to remember to update.
 FetchContent_Declare(
   json
   GIT_REPOSITORY https://github.com/nlohmann/json
-  GIT_TAG v3.11.1
+  GIT_TAG v3.12.0
   EXCLUDE_FROM_ALL
 )
 
