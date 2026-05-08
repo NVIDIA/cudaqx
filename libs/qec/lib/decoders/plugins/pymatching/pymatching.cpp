@@ -186,7 +186,7 @@ public:
         }
       } else {
         result.result.resize(mwpm->flooder.graph.num_observables);
-        assert(O_sparse.size() == mwpm.flooder.graph.num_observables);
+        assert(O_sparse.size() == mwpm->flooder.graph.num_observables);
         pm::total_weight_int weight = 0;
         std::vector<uint8_t> obs(mwpm->flooder.graph.num_observables, 0);
         obs.resize(mwpm->flooder.graph.num_observables);
