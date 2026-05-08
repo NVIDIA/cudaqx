@@ -1,5 +1,5 @@
 # ============================================================================ #
-# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
+# Copyright (c) 2024 - 2026 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -110,6 +110,135 @@ function(cudaqx_add_device_code LIBRARY_NAME)
 
   add_dependencies(${LIBRARY_NAME} ${custom_targets})
   target_sources(${LIBRARY_NAME} PRIVATE ${object_files})
+endfunction()
+
+#[=======================================================================[.rst:
+_cudaqx_import_nvqir_target
+---------------------------
+
+Private helper used by ``cudaqx_import_cudaq_targets`` to recreate CUDA-Q's
+NVQIR backend imported targets without loading ``CUDAQConfig.cmake``.
+
+#]=======================================================================]
+function(_cudaqx_import_nvqir_target target_name library_name)
+  if(NOT TARGET ${target_name})
+    add_library(${target_name} SHARED IMPORTED)
+    set_target_properties(${target_name} PROPERTIES
+      IMPORTED_LOCATION "${CUDAQ_LIBRARY_DIR}/${library_name}${CMAKE_SHARED_LIBRARY_SUFFIX}"
+      IMPORTED_SONAME "${library_name}${CMAKE_SHARED_LIBRARY_SUFFIX}"
+      IMPORTED_LINK_INTERFACE_LIBRARIES "cudaq::cudaq-platform-default;cudaq::cudaq-em-default")
+  endif()
+endfunction()
+
+#[=======================================================================[.rst:
+cudaqx_import_cudaq_targets
+---------------------------
+
+Import the CUDA-Q CMake targets used by CUDA-QX without loading
+``CUDAQConfig.cmake``. This avoids enabling the custom CUDAQ CMake language
+while still providing imported targets such as ``cudaq::cudaq``,
+``cudaq::cudaq-common``, and ``cudaq::cudaq-stim-target``.
+
+The caller must provide ``CUDAQ_DIR`` pointing to the CUDA-Q CMake package
+directory, e.g. ``<cudaq-prefix>/lib/cmake/cudaq``.
+
+Example usage:
+  .. code-block:: cmake
+
+    # Configure with:
+    #   -DCUDAQ_DIR=<cudaq-prefix>/lib/cmake/cudaq
+    cudaqx_import_cudaq_targets()
+
+#]=======================================================================]
+function(cudaqx_import_cudaq_targets)
+  if (NOT CUDAQ_DIR)
+    message(FATAL_ERROR
+      "CUDAQ_DIR must point to the CUDA-Q CMake package directory, e.g. "
+      "<cudaq-prefix>/lib/cmake/cudaq.")
+  endif()
+
+  set(CUDAQ_CMAKE_DIR "${CUDAQ_DIR}")
+  get_filename_component(_cudaq_parent_dir "${CUDAQ_CMAKE_DIR}" DIRECTORY)
+  get_filename_component(CUDAQ_LIBRARY_DIR "${_cudaq_parent_dir}" DIRECTORY)
+  get_filename_component(CUDAQ_INSTALL_DIR "${CUDAQ_LIBRARY_DIR}" DIRECTORY)
+  set(CUDAQ_INCLUDE_DIR "${CUDAQ_INSTALL_DIR}/include")
+
+  include(CMakeFindDependencyMacro)
+  set(NVQIR_DIR "${_cudaq_parent_dir}/nvqir")
+
+  foreach(_cudaq_pkg IN ITEMS
+      CUDAQCommon
+      CUDAQEmDefault
+      CUDAQEnsmallen
+      CUDAQLogger
+      CUDAQMlirRuntime
+      CUDAQNlopt
+      CUDAQOperator
+      CUDAQPlatformDefault
+      CUDAQPythonInterop)
+    set(${_cudaq_pkg}_DIR "${CUDAQ_CMAKE_DIR}")
+  endforeach()
+
+  find_package(NVQIR REQUIRED CONFIG)
+  find_package(CUDAQOperator REQUIRED CONFIG)
+  find_package(CUDAQCommon REQUIRED CONFIG)
+  find_package(CUDAQNlopt REQUIRED CONFIG)
+  find_package(CUDAQEnsmallen REQUIRED CONFIG)
+  find_package(CUDAQEmDefault REQUIRED CONFIG)
+  find_package(CUDAQPlatformDefault REQUIRED CONFIG)
+  find_package(CUDAQPythonInterop CONFIG)
+
+  # Import the CUDA-Q library target without loading CUDAQConfig.cmake, which
+  # enables the CUDAQ CMake language in current CUDA-Q installs.
+  if(NOT TARGET cudaq::cudaq)
+    include("${CUDAQ_CMAKE_DIR}/CUDAQTargets.cmake")
+  endif()
+
+  set(__base_nvtarget_name "custatevec")
+  find_library(CUDAQ_CUSVSIM_PATH NAMES cusvsim-fp32 HINTS ${CUDAQ_LIBRARY_DIR})
+  if (CUDAQ_CUSVSIM_PATH)
+    set(__base_nvtarget_name "cusvsim")
+  endif()
+
+  _cudaqx_import_nvqir_target(cudaq::cudaq-default-target "libnvqir-${__base_nvtarget_name}-fp64")
+  _cudaqx_import_nvqir_target(cudaq::cudaq-nvidia-target "libnvqir-${__base_nvtarget_name}-fp32")
+  _cudaqx_import_nvqir_target(cudaq::cudaq-nvidia-fp64-target "libnvqir-${__base_nvtarget_name}-fp64")
+  _cudaqx_import_nvqir_target(cudaq::cudaq-nvidia-mgpu-target "libnvqir-mgpu-fp32")
+  _cudaqx_import_nvqir_target(cudaq::cudaq-nvidia-mgpu-fp64-target "libnvqir-mgpu-fp64")
+  _cudaqx_import_nvqir_target(cudaq::cudaq-qpp-cpu-target "libnvqir-qpp")
+  _cudaqx_import_nvqir_target(cudaq::cudaq-qpp-density-matrix-cpu-target "libnvqir-dm")
+  _cudaqx_import_nvqir_target(cudaq::cudaq-stim-target "libnvqir-stim")
+
+  if(NOT COMMAND cudaq_set_target)
+    function(cudaq_set_target TARGETNAME)
+      message(STATUS "CUDA Quantum Target = ${TARGETNAME}")
+      target_link_libraries(cudaq::cudaq INTERFACE cudaq::cudaq-${TARGETNAME}-target)
+    endfunction()
+  endif()
+
+  set(__tmp_cudaq_target "qpp-cpu")
+  find_program(NVIDIA_SMI "nvidia-smi")
+  if(NVIDIA_SMI)
+    execute_process(COMMAND bash -c "nvidia-smi --list-gpus | wc -l"
+                    OUTPUT_VARIABLE NGPUS OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if (${NGPUS} GREATER_EQUAL 1)
+      message(STATUS "Number of NVIDIA GPUs detected: ${NGPUS}")
+      set(__tmp_cudaq_target "nvidia")
+    endif()
+  endif()
+
+  set(CUDAQ_TARGET ${__tmp_cudaq_target} CACHE STRING
+      "The CUDA Quantum target to compile for and execute on. Defaults to `${__tmp_cudaq_target}`")
+  cudaq_set_target(${CUDAQ_TARGET})
+
+  foreach(_cudaq_var IN ITEMS
+      CUDAQ_CMAKE_DIR
+      CUDAQ_INCLUDE_DIR
+      CUDAQ_INSTALL_DIR
+      CUDAQ_LIBRARY_DIR
+      CUDAQPythonInterop_DIR)
+    set(${_cudaq_var} "${${_cudaq_var}}" PARENT_SCOPE)
+  endforeach()
 endfunction()
 
 #[=======================================================================[.rst:

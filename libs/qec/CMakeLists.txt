@@ -237,10 +237,11 @@ endif()
 # ==============================================================================
 
 if (CUDAQX_QEC_STANDALONE_BUILD)
-  # FIXME for now, we only use library mode
-  set(CUDAQ_LIBRARY_MODE ON)
-  find_package(CUDAQ REQUIRED)
+  cudaqx_import_cudaq_targets()
 
+  if (CUDAQX_QEC_BINDINGS_PYTHON)
+    find_package(CUDAQPythonInterop CONFIG)
+  endif()
   # FIXME
   add_subdirectory(../core core_build)
 endif()
