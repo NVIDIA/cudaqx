@@ -6,7 +6,6 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
-# FIXME - these fail to compile with CUDA-Q w/ LLVM
 add_subdirectory(app_examples)
 
 # =========================================================================== #
