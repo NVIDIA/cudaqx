@@ -28,7 +28,7 @@ if [ -z "$CUDAQ_REALTIME_ROOT" ]; then
     ninja-build curl pkg-config
   # HSB -> find_package(holoscan) -> rapids_logger requires cmake >= 3.30.4;
   # the CI container ships cmake 3.28.
-  pip install cmake
+  pip install 'cmake<4'
   export PATH="$(python3 -c 'import cmake,os;print(os.path.join(os.path.dirname(cmake.__file__),"data","bin"))'):$PATH"
 
   # Add DOCA repo and install only the GPUNetIO dev package (not doca-all)
