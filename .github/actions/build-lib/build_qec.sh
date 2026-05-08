@@ -113,6 +113,9 @@ fi
 HSB_ROOT=/tmp/holoscan-sensor-bridge
 HSB_BUILD=${HSB_ROOT}/build
 
+echo "cmake --version"
+cmake --version
+
 cmake -S libs/qec -B "$1" \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_C_COMPILER=gcc-12 \
