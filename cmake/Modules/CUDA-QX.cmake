@@ -296,6 +296,6 @@ cudaqx_add_pymodule
 
 #]=======================================================================]
 function(cudaqx_add_pymodule module)
-  nanobind_add_module(${module} ${ARGN})
+  nanobind_add_module(${module} NB_DOMAIN cudaq ${ARGN})
   add_dependencies(cudaqx-pymodules ${module})
 endfunction()
