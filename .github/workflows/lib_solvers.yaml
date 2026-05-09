@@ -81,8 +81,6 @@ jobs:
       # ========================================================================
       
       - name: Run tests
-        env:
-          CUDAQ_LOG_LEVEL: info
         run: cmake --build ${{ steps.build.outputs.build-dir }} --target run_tests
 
       # ========================================================================

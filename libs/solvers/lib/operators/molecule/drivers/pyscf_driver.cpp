@@ -46,17 +46,17 @@ public:
   CUDAQ_EXTENSION_CREATOR_FUNCTION(MoleculePackageDriver, RESTPySCFDriver)
 
   bool is_available() const override {
-    cudaq::info("[pyscf] is_available: GET localhost:8000/status");
+    cudaq::warn("[pyscf] is_available: GET localhost:8000/status");
     cudaq::RestClient client;
     std::map<std::string, std::string> headers;
     try {
       auto res = client.get("localhost:8000/", "status", headers);
-      cudaq::info("[pyscf] is_available: GET returned {}", res.dump());
+      cudaq::warn("[pyscf] is_available: GET returned {}", res.dump());
       if (res.contains("status") &&
           res["status"].get<std::string>() == "available")
         return true;
     } catch (std::exception &e) {
-      cudaq::info("[pyscf] is_available: GET threw '{}'", e.what());
+      cudaq::warn("[pyscf] is_available: GET threw '{}'", e.what());
       return false;
     }
     return true;
@@ -74,9 +74,9 @@ public:
     if (!python_path.empty())
       argString = python_path + " " + argString;
     int a0, a1;
-    cudaq::info("[pyscf] make_available: launching '{}'", argString);
+    cudaq::warn("[pyscf] make_available: launching '{}'", argString);
     auto [ret, msg] = cudaqx::launchProcess(argString.c_str());
-    cudaq::info("[pyscf] make_available: launchProcess returned pid={}", ret);
+    cudaq::warn("[pyscf] make_available: launchProcess returned pid={}", ret);
     if (ret == -1)
       return nullptr;
 
@@ -101,18 +101,18 @@ public:
       try {
         metadata = client.get("localhost:8000/", "status", headers);
         if (metadata.count("status")) {
-          cudaq::info("[pyscf] make_available: server up after {}ms", ticker);
+          cudaq::warn("[pyscf] make_available: server up after {}ms", ticker);
           break;
         }
       } catch (std::exception &e) {
         if (ticker % 5000 == 0)
-          cudaq::info("[pyscf] make_available: still waiting at {}ms ('{}')",
+          cudaq::warn("[pyscf] make_available: still waiting at {}ms ('{}')",
                       ticker, e.what());
         continue;
       }
 
       if (ticker > 5000) {
-        cudaq::info(
+        cudaq::warn(
             "[pyscf] make_available: timed out after 5000ms of polling");
         return nullptr;
       }
@@ -135,7 +135,7 @@ public:
           fmt::format("{} {:f} {:f} {:f}; ", atom.name, atom.coordinates[0],
                       atom.coordinates[1], atom.coordinates[2]);
 
-    cudaq::info("[pyscf] createMolecule: begin xyz='{}' basis={} spin={} "
+    cudaq::warn("[pyscf] createMolecule: begin xyz='{}' basis={} spin={} "
                 "charge={} casci={} ccsd={}",
                 xyzFileStr, basis, spin, charge, options.casci, options.ccsd);
 
@@ -166,11 +166,11 @@ public:
 
     std::map<std::string, std::string> headers{
         {"Content-Type", "application/json"}};
-    cudaq::info(
+    cudaq::warn(
         "[pyscf] createMolecule: POST localhost:8000/create_molecule begin");
     auto metadata = client.post("localhost:8000/", "create_molecule", payload,
                                 headers, true);
-    cudaq::info("[pyscf] createMolecule: POST returned, parsing response");
+    cudaq::warn("[pyscf] createMolecule: POST returned, parsing response");
 
     // Get the energy, num orbitals, and num qubits
     std::unordered_map<std::string, double> energies;
@@ -206,7 +206,7 @@ public:
     auto transform = fermion_compiler::get(options.fermion_to_spin);
     auto spinHamiltonian = transform->generate(energy, hpq, hpqrs);
 
-    cudaq::info("[pyscf] createMolecule: done numQubits={} numElectrons={}",
+    cudaq::warn("[pyscf] createMolecule: done numQubits={} numElectrons={}",
                 numQubits, num_electrons);
 
     // Return the molecular hamiltonian
