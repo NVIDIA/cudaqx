@@ -132,7 +132,7 @@ if $devdeps; then
   PLAT_STR="--plat manylinux_2_34_x86_64"
 else
   # We need to use a newer toolchain because CUDA-QX libraries rely on c++20
-  source /opt/rh/gcc-toolset-11/enable
+  source /opt/rh/gcc-toolset-12/enable
 fi
 
 export CC=gcc
@@ -173,7 +173,7 @@ cp pyproject.toml.cu${cuda_version} pyproject.toml
 
 SKBUILD_CMAKE_ARGS="-DCUDAQ_DIR=$cudaq_prefix/lib/cmake/cudaq;-DTENSORRT_ROOT=$tensorrt_path"
 if ! $devdeps; then
-  SKBUILD_CMAKE_ARGS+=";-DCMAKE_CXX_COMPILER_EXTERNAL_TOOLCHAIN=/opt/rh/gcc-toolset-11/root/usr/lib/gcc/${ARCH}-redhat-linux/11/"
+  SKBUILD_CMAKE_ARGS+=";-DCMAKE_CXX_COMPILER_EXTERNAL_TOOLCHAIN=/opt/rh/gcc-toolset-12/root/usr/lib/gcc/${ARCH}-redhat-linux/12/"
 fi
 SKBUILD_CMAKE_ARGS+=";-DCMAKE_BUILD_TYPE=$build_type"
 export SKBUILD_CMAKE_ARGS
@@ -202,7 +202,7 @@ cp pyproject.toml.cu${cuda_version} pyproject.toml
 
 SKBUILD_CMAKE_ARGS="-DCUDAQ_DIR=$cudaq_prefix/lib/cmake/cudaq"
 if ! $devdeps; then
-  SKBUILD_CMAKE_ARGS+=";-DCMAKE_CXX_COMPILER_EXTERNAL_TOOLCHAIN=/opt/rh/gcc-toolset-11/root/usr/lib/gcc/${ARCH}-redhat-linux/11/;"
+  SKBUILD_CMAKE_ARGS+=";-DCMAKE_CXX_COMPILER_EXTERNAL_TOOLCHAIN=/opt/rh/gcc-toolset-12/root/usr/lib/gcc/${ARCH}-redhat-linux/12/;"
 fi
 SKBUILD_CMAKE_ARGS+=";-DCMAKE_BUILD_TYPE=$build_type" \
 export SKBUILD_CMAKE_ARGS

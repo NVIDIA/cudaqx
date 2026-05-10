@@ -18,7 +18,7 @@ cd /cuda-quantum
 export CUDA_VERSION=12.6
 
 # We need to use a newer toolchain because CUDA-QX libraries rely on c++20
-source /opt/rh/gcc-toolset-11/enable
+source /opt/rh/gcc-toolset-12/enable
 
 export CC=gcc
 export CXX=g++
