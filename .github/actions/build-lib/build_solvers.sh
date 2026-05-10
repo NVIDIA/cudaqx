@@ -11,5 +11,5 @@ cmake -S libs/solvers -B "$1" \
   -DCUDAQX_BINDINGS_PYTHON=ON \
   -DCMAKE_INSTALL_PREFIX="$2"
 
-cmake --build "$1" --target install
+cmake --build "$1" --target install -j
 

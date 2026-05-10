@@ -131,4 +131,4 @@ cmake -S libs/qec -B "$1" \
   -DHOLOSCAN_SENSOR_BRIDGE_SOURCE_DIR=$HSB_ROOT \
   -DHOLOSCAN_SENSOR_BRIDGE_BUILD_DIR=$HSB_BUILD
 
-cmake --build "$1" --target install
+cmake --build "$1" --target install -j
