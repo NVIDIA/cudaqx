@@ -105,6 +105,13 @@ void bindDecoder(nb::module_ &mod) {
                     ? nb::cast<nb::module_>(mod.attr("qecrt"))
                     : mod.def_submodule("qecrt");
 
+  // Workaround for nanobind v2.9.2: `def_rw` on a `std::optional<T>` field
+  // does not implicitly allow Python `None` for the setter (that behavior was
+  // added in v2.12.0 via PR #1262). Passing this annotation makes the setter
+  // accept None and store `std::nullopt`. Remove once nanobind is bumped to
+  // >=2.12.0.
+  const auto setter_accepts_none = nb::for_setter(nb::arg("value").none());
+
   nb::class_<decoder_result>(qecmod, "DecoderResult", R"pbdoc(
     A class representing the results of a quantum error correction decoding operation.
 
@@ -128,7 +135,8 @@ void bindDecoder(nb::module_ &mod) {
         the original quantum state. The format depends on the specific decoder
         implementation.
     )pbdoc")
-      .def_rw("opt_results", &decoder_result::opt_results, R"pbdoc(
+      .def_rw("opt_results", &decoder_result::opt_results, setter_accepts_none,
+              R"pbdoc(
         Optional additional results from the decoder stored in a heterogeneous map.
 
         This field may be empty if no additional results are available.
