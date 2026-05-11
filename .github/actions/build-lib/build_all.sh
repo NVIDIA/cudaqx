@@ -20,4 +20,4 @@ cmake -S . -B "$1" \
   -DCMAKE_INSTALL_PREFIX="$2" \
   $_rt_flag
 
-cmake --build "$1" --target install -j
+cmake --build "$1" --target install -j 4
