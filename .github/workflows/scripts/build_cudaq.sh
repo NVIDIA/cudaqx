@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # ============================================================================ #
 # Copyright (c) 2022 - 2026 NVIDIA Corporation & Affiliates.                   #
@@ -11,6 +11,8 @@
 # ==============================================================================
 # Handling options
 # ==============================================================================
+
+set -eo pipefail
 
 show_help() {
     echo "Usage: $0 [options]"
@@ -99,7 +101,7 @@ echo "Building MLIR bindings for ${python}" && \
     Python3_EXECUTABLE="$(which ${python})" \
     LLVM_PROJECTS='clang;mlir;python-bindings' \
     LLVM_CMAKE_CACHE=/cmake/caches/LLVM.cmake LLVM_SOURCE=/llvm-project \
-    bash /scripts/build_llvm.sh -c Release -v 
+    bash scripts/build_llvm.sh -c Release -v
 
 # ==============================================================================
 # Building CUDA-Q
