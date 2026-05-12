@@ -193,19 +193,24 @@ jobs:
         run: |
           pip install --upgrade "cuquantum-python-cu${{ steps.config.outputs.cuda_major }}>=26.3.0"
 
-      - name: Install TensorRT (amd64)
+      - name: Install TensorRT (C++, amd64)
         if: matrix.platform == 'amd64'
         run: |
           apt-cache search tensorrt | awk '{print "Package: "$1"\nPin: version *+cuda${{ matrix.cuda_version }}\nPin-Priority: 1001\n"}' | tee /etc/apt/preferences.d/tensorrt-cuda${{ matrix.cuda_version }}.pref > /dev/null
           apt update
           apt install -y tensorrt-dev
 
-      - name: Install TensorRT (arm64)
+      - name: Install TensorRT (C++, arm64)
         if: matrix.platform == 'arm64' && !startsWith(matrix.cuda_version, '12')
         run: |
           apt-cache search tensorrt | awk '{print "Package: "$1"\nPin: version *+cuda13.0\nPin-Priority: 1001\n"}' | tee /etc/apt/preferences.d/tensorrt-cuda13.0.pref > /dev/null
           apt update
           apt install -y tensorrt-dev
+
+      - name: Install TensorRT (Python)
+        if: matrix.platform != 'arm64' || !startsWith(matrix.cuda_version, '12')
+        run: |
+          pip install "tensorrt-cu${{ steps.config.outputs.cuda_major }}==10.13.*" "cuda_toolkit[cudart]==${{ matrix.cuda_version }}.*"
 
       - name: Install Python GPU test requirements
         run: |
@@ -222,4 +227,3 @@ jobs:
         run: |
           PYTHONPATH="/cudaq-install:$GITHUB_WORKSPACE/build_qec/python" \
             pytest -v libs/qec/python/tests/
-
