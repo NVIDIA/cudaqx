@@ -34,31 +34,92 @@ import subprocess
 import sys
 from typing import Any
 
-
 PROBES: list[dict[str, Any]] = [
     # name              code to run                                            fix string when missing                       feature group
-    {"name": "cudaq",         "code": "import cudaq; print(cudaq.__file__)",            "fix": "pip install cuda-quantum-cu12  # or -cu13",           "group": "core"},
-    {"name": "cudaq_qec",     "code": "import cudaq_qec; print(cudaq_qec.__file__)",    "fix": "pip install cudaq-qec        # picks cu12/cu13",      "group": "core"},
-    {"name": "cudaq_solvers", "code": "import cudaq_solvers; print(cudaq_solvers.__file__)", "fix": "pip install cudaq-solvers", "group": "core"},
+    {
+        "name": "cudaq",
+        "code": "import cudaq; print(cudaq.__file__)",
+        "fix": "pip install cuda-quantum-cu12  # or -cu13",
+        "group": "core"
+    },
+    {
+        "name": "cudaq_qec",
+        "code": "import cudaq_qec; print(cudaq_qec.__file__)",
+        "fix": "pip install cudaq-qec        # picks cu12/cu13",
+        "group": "core"
+    },
+    {
+        "name": "cudaq_solvers",
+        "code": "import cudaq_solvers; print(cudaq_solvers.__file__)",
+        "fix": "pip install cudaq-solvers",
+        "group": "core"
+    },
 
     # QEC extras
-    {"name": "quimb",          "code": "import quimb",                "fix": "pip install 'cudaq-qec[tensor-network-decoder]'", "group": "qec-tensor-network"},
-    {"name": "cuquantum",      "code": "import cuquantum",            "fix": "pip install 'cuquantum-python-cu12>=26.03.0'    # or -cu13",          "group": "qec-tensor-network"},
-    {"name": "tensorrt",       "code": "import tensorrt",             "fix": "pip install 'cudaq-qec[trt-decoder]'             # or pip install tensorrt-cu12", "group": "qec-trt"},
-    {"name": "nv-qldpc-decoder",
-        "code": "import cudaq_qec as qec; import numpy as np; "
-                "qec.get_decoder('nv-qldpc-decoder', np.zeros((2,2), dtype=np.uint8))",
+    {
+        "name": "quimb",
+        "code": "import quimb",
+        "fix": "pip install 'cudaq-qec[tensor-network-decoder]'",
+        "group": "qec-tensor-network"
+    },
+    {
+        "name": "cuquantum",
+        "code": "import cuquantum",
+        "fix": "pip install 'cuquantum-python-cu12>=26.03.0'    # or -cu13",
+        "group": "qec-tensor-network"
+    },
+    {
+        "name":
+            "tensorrt",
+        "code":
+            "import tensorrt",
+        "fix":
+            "pip install 'cudaq-qec[trt-decoder]'             # or pip install tensorrt-cu12",
+        "group":
+            "qec-trt"
+    },
+    {
+        "name": "nv-qldpc-decoder",
+        "code":
+            "import cudaq_qec as qec; import numpy as np; "
+            "qec.get_decoder('nv-qldpc-decoder', np.zeros((2,2), dtype=np.uint8))",
         "fix": "Closed-source plugin from NVIDIA; see libs/qec/README.md",
-        "group": "qec-nv-qldpc"},
+        "group": "qec-nv-qldpc"
+    },
 
     # Solvers extras
-    {"name": "torch",          "code": "import torch; print(torch.cuda.is_available())", "fix": "pip install 'cudaq-solvers[gqe]'", "group": "solvers-gqe"},
-    {"name": "lightning",      "code": "import lightning",            "fix": "pip install 'cudaq-solvers[gqe]'",                "group": "solvers-gqe"},
-    {"name": "mpi4py",         "code": "import mpi4py",               "fix": "pip install 'cudaq-solvers[gqe]'",                "group": "solvers-gqe"},
-    {"name": "transformers",   "code": "import transformers",         "fix": "pip install 'cudaq-solvers[gqe]'",                "group": "solvers-gqe"},
+    {
+        "name": "torch",
+        "code": "import torch; print(torch.cuda.is_available())",
+        "fix": "pip install 'cudaq-solvers[gqe]'",
+        "group": "solvers-gqe"
+    },
+    {
+        "name": "lightning",
+        "code": "import lightning",
+        "fix": "pip install 'cudaq-solvers[gqe]'",
+        "group": "solvers-gqe"
+    },
+    {
+        "name": "mpi4py",
+        "code": "import mpi4py",
+        "fix": "pip install 'cudaq-solvers[gqe]'",
+        "group": "solvers-gqe"
+    },
+    {
+        "name": "transformers",
+        "code": "import transformers",
+        "fix": "pip install 'cudaq-solvers[gqe]'",
+        "group": "solvers-gqe"
+    },
 
     # Chemistry
-    {"name": "openfermionpyscf", "code": "import openfermionpyscf",   "fix": "pip install openfermion openfermionpyscf",        "group": "solvers-chemistry"},
+    {
+        "name": "openfermionpyscf",
+        "code": "import openfermionpyscf",
+        "fix": "pip install openfermion openfermionpyscf",
+        "group": "solvers-chemistry"
+    },
 ]
 
 
@@ -87,7 +148,9 @@ def _run(code: str, timeout: float = 25.0) -> tuple[int, str, str]:
     try:
         r = subprocess.run(
             [sys.executable, "-c", code],
-            capture_output=True, text=True, timeout=timeout,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
         )
         return r.returncode, r.stdout, r.stderr
     except subprocess.TimeoutExpired:
@@ -120,13 +183,18 @@ def _probe(spec: dict[str, Any]) -> dict[str, Any]:
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description=__doc__,
-                                formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--json", action="store_true", help="Emit JSON instead of text.")
-    p.add_argument("--feature", action="append", default=None,
+    p = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--json",
+                   action="store_true",
+                   help="Emit JSON instead of text.")
+    p.add_argument("--feature",
+                   action="append",
+                   default=None,
                    help="Probe only the named feature group (repeatable). "
-                        "Groups: core, qec-tensor-network, qec-trt, qec-nv-qldpc, "
-                        "solvers-gqe, solvers-chemistry.")
+                   "Groups: core, qec-tensor-network, qec-trt, qec-nv-qldpc, "
+                   "solvers-gqe, solvers-chemistry.")
     args = p.parse_args()
 
     probes = PROBES
@@ -145,15 +213,21 @@ def main() -> int:
             g["status"] = "broken"
 
     summary = {
-        "python_executable": sys.executable,
-        "pip_available": shutil.which("pip") is not None,
-        "groups": groups,
-        "probes": results,
-        "blockers": [
-            {"name": r["name"], "group": r["group"], "status": r["status"],
-             "fix": r["fix"], "hint": r["hint"]}
-            for r in results if r["status"] != "ok"
-        ],
+        "python_executable":
+            sys.executable,
+        "pip_available":
+            shutil.which("pip") is not None,
+        "groups":
+            groups,
+        "probes":
+            results,
+        "blockers": [{
+            "name": r["name"],
+            "group": r["group"],
+            "status": r["status"],
+            "fix": r["fix"],
+            "hint": r["hint"]
+        } for r in results if r["status"] != "ok"],
     }
 
     if args.json:

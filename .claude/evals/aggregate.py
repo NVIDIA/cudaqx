@@ -113,9 +113,8 @@ def _benchmark(configs: dict[str, dict[str, dict]]) -> dict[str, Any]:
             cfg_out[grader] = {
                 "scenarios_total": len(scenarios),
                 "scenarios_considered": len(considered),
-                "pass_rate": (
-                    sum(considered) / len(considered) if considered else 0.0
-                ),
+                "pass_rate":
+                    (sum(considered) / len(considered) if considered else 0.0),
                 "raw": payload,
             }
         bench["configurations"][cfg_name] = cfg_out
@@ -140,25 +139,35 @@ def _agreement(configs: dict[str, dict[str, dict]]) -> dict[str, Any]:
 
     grader_verdicts: dict[str, list[bool | None]] = {}
     for grader, payload in target.items():
-        verdicts = [_grader_pass(grader, s) for s in payload.get("scenarios", [])]
+        verdicts = [
+            _grader_pass(grader, s) for s in payload.get("scenarios", [])
+        ]
         grader_verdicts[grader] = verdicts
 
     pairs: dict[str, dict[str, Any]] = {}
     for a, b in combinations(grader_verdicts, 2):
-        pairs[f"{a} ↔ {b}"] = _cohen_kappa(grader_verdicts[a], grader_verdicts[b])
+        pairs[f"{a} ↔ {b}"] = _cohen_kappa(grader_verdicts[a],
+                                           grader_verdicts[b])
     return {
-        "configuration": "with_skill" if "with_skill" in configs else next(iter(configs)),
-        "pairwise_kappa": pairs,
+        "configuration":
+            "with_skill" if "with_skill" in configs else next(iter(configs)),
+        "pairwise_kappa":
+            pairs,
     }
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description=__doc__,
-                                formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("iteration_dir", type=Path,
+    p = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("iteration_dir",
+                   type=Path,
                    help="Path to the iteration directory.")
-    p.add_argument("--out", type=Path, default=None,
-                   help="Output benchmark.json path. Default: <iteration>/benchmark.json")
+    p.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="Output benchmark.json path. Default: <iteration>/benchmark.json")
     args = p.parse_args()
 
     if not args.iteration_dir.is_dir():
@@ -190,8 +199,11 @@ def main() -> int:
             print(f"  {g:<14} {d:+.0%}")
     if bench["inter_grader_agreement"].get("pairwise_kappa"):
         print()
-        print(f"Inter-grader Cohen's κ ({bench['inter_grader_agreement']['configuration']}):")
-        for pair, k in bench["inter_grader_agreement"]["pairwise_kappa"].items():
+        print(
+            f"Inter-grader Cohen's κ ({bench['inter_grader_agreement']['configuration']}):"
+        )
+        for pair, k in bench["inter_grader_agreement"]["pairwise_kappa"].items(
+        ):
             kv = k.get("kappa")
             ks = "n/a" if kv is None else f"{kv:+.2f}"
             print(f"  {pair:<32}  κ = {ks}  (n={k['n']})")

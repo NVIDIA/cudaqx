@@ -68,14 +68,11 @@ def _resolve_assertions_path(skill: str, override: Path | None) -> Path:
     if skill not in SKILL_DIRS:
         raise SystemExit(
             f"Unknown skill alias '{skill}'. Known: {sorted(SKILL_DIRS)}. "
-            f"Pass --assertions <path> to score an unmapped skill."
-        )
+            f"Pass --assertions <path> to score an unmapped skill.")
     candidate = ASSERTIONS_DIR / f"{SKILL_DIRS[skill]}.json"
     if not candidate.exists():
-        raise SystemExit(
-            f"Could not find assertions at {candidate}. "
-            f"Pass --assertions <path> explicitly."
-        )
+        raise SystemExit(f"Could not find assertions at {candidate}. "
+                         f"Pass --assertions <path> explicitly.")
     return candidate
 
 
@@ -85,12 +82,12 @@ def _load_assertions(path: Path) -> dict:
     missing = required - data.keys()
     if missing:
         raise SystemExit(
-            f"Assertions at {path} missing required keys: {sorted(missing)}"
-        )
+            f"Assertions at {path} missing required keys: {sorted(missing)}")
     return data
 
 
-def score_scenario(scenario_id: str, spec: dict, response: str) -> ScenarioScore:
+def score_scenario(scenario_id: str, spec: dict,
+                   response: str) -> ScenarioScore:
     text = response.lower()
     must = [s.lower() for s in spec.get("must_include", [])]
     must_not = [s.lower() for s in spec.get("must_not_include", [])]
@@ -99,11 +96,15 @@ def score_scenario(scenario_id: str, spec: dict, response: str) -> ScenarioScore
     s.purity_max = max(len(must_not), 1)
 
     s.coverage = sum(1 for m in must if m in text)
-    s.missing = [m for m in spec.get("must_include", []) if m.lower() not in text]
+    s.missing = [
+        m for m in spec.get("must_include", []) if m.lower() not in text
+    ]
 
     bad = sum(1 for m in must_not if m in text)
     s.purity = s.purity_max - bad
-    s.forbidden = [m for m in spec.get("must_not_include", []) if m.lower() in text]
+    s.forbidden = [
+        m for m in spec.get("must_not_include", []) if m.lower() in text
+    ]
     return s
 
 
@@ -112,8 +113,7 @@ def score_activation(spec: dict, response: str, marker: str) -> bool:
     return activated == bool(spec["should_activate"])
 
 
-def grade(skill: str, responses: dict[str, str],
-          assertions_path: Path) -> dict:
+def grade(skill: str, responses: dict[str, str], assertions_path: Path) -> dict:
     """Run the grader and return a grading.json-shaped dict.
 
     Pure function; does not write anywhere. ``main()`` handles I/O.
@@ -142,9 +142,8 @@ def grade(skill: str, responses: dict[str, str],
     activation_correct = sum(1 for a in activations if a["passed"])
     pass_rate = (
         sum(1 for s in scenarios
-            if s.coverage == s.coverage_max and s.purity == s.purity_max)
-        / max(len(scenarios), 1)
-    )
+            if s.coverage == s.coverage_max and s.purity == s.purity_max) /
+        max(len(scenarios), 1))
 
     return {
         "grader": "programmatic",
@@ -159,20 +158,24 @@ def grade(skill: str, responses: dict[str, str],
         "scenario_pass_rate": pass_rate,
         "total": coverage + purity + activation_correct,
         "total_max": coverage_max + purity_max + len(activations),
-        "scenarios": [
-            {
-                "id": s.id,
-                "coverage": s.coverage,
-                "coverage_max": s.coverage_max,
-                "purity": s.purity,
-                "purity_max": s.purity_max,
-                "missing": s.missing,
-                "forbidden": s.forbidden,
-                "passed": (s.coverage == s.coverage_max
-                           and s.purity == s.purity_max),
-            }
-            for s in scenarios
-        ],
+        "scenarios": [{
+            "id":
+                s.id,
+            "coverage":
+                s.coverage,
+            "coverage_max":
+                s.coverage_max,
+            "purity":
+                s.purity,
+            "purity_max":
+                s.purity_max,
+            "missing":
+                s.missing,
+            "forbidden":
+                s.forbidden,
+            "passed": (s.coverage == s.coverage_max and
+                       s.purity == s.purity_max),
+        } for s in scenarios],
         "activations": activations,
     }
 
@@ -180,9 +183,12 @@ def grade(skill: str, responses: dict[str, str],
 def _print_summary(result: dict) -> None:
     print(f"Skill: {result['skill']}  ({result['assertions_path']})")
     print(f"  Scenario pass rate: {result['scenario_pass_rate']:.0%}")
-    print(f"  Coverage:           {result['coverage']}/{result['coverage_max']}")
+    print(
+        f"  Coverage:           {result['coverage']}/{result['coverage_max']}")
     print(f"  Purity:             {result['purity']}/{result['purity_max']}")
-    print(f"  Activation:         {result['activation_correct']}/{result['activation_total']}")
+    print(
+        f"  Activation:         {result['activation_correct']}/{result['activation_total']}"
+    )
     print(f"  Total:              {result['total']}/{result['total_max']}")
     for s in result["scenarios"]:
         if s["missing"] or s["forbidden"]:
@@ -196,18 +202,27 @@ def _print_summary(result: dict) -> None:
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description=__doc__,
-                                formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--skill", required=True,
+    p = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--skill",
+                   required=True,
                    help=f"Skill alias. Known: {sorted(SKILL_DIRS)}.")
-    p.add_argument("--responses", type=Path, required=True,
+    p.add_argument("--responses",
+                   type=Path,
+                   required=True,
                    help="JSON file mapping prompt id -> agent response.")
-    p.add_argument("--assertions", type=Path, default=None,
+    p.add_argument("--assertions",
+                   type=Path,
+                   default=None,
                    help="Path to assertions json. Auto-resolved by --skill.")
-    p.add_argument("--out", type=Path, default=None,
+    p.add_argument("--out",
+                   type=Path,
+                   default=None,
                    help="Output path for grading.programmatic.json. "
-                        "Defaults to <responses dir>/grading.programmatic.json.")
-    p.add_argument("--quiet", action="store_true",
+                   "Defaults to <responses dir>/grading.programmatic.json.")
+    p.add_argument("--quiet",
+                   action="store_true",
                    help="Skip the human-readable summary.")
     args = p.parse_args()
 

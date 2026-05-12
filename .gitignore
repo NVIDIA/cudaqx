@@ -119,3 +119,6 @@ libs/*/pyproject.toml
 
 # This file is cloned from the qec dir; do not commit after cloning.
 libs/solvers/python/metapackages/setup.py
+
+# Skill evaluation runtime artifacts (per-iteration responses, gradings, reports)
+.claude/evals/workspaces/

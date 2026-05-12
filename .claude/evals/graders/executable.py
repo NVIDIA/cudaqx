@@ -72,7 +72,8 @@ def _resolve_assertions(skill: str, override: Path | None) -> Path:
     if override is not None:
         return override
     if skill not in SKILL_DIRS:
-        raise SystemExit(f"Unknown skill alias '{skill}'. Known: {sorted(SKILL_DIRS)}")
+        raise SystemExit(
+            f"Unknown skill alias '{skill}'. Known: {sorted(SKILL_DIRS)}")
     p = ASSERTIONS_DIR / f"{SKILL_DIRS[skill]}.json"
     if not p.exists():
         raise SystemExit(f"Assertions not found at {p}")
@@ -80,9 +81,12 @@ def _resolve_assertions(skill: str, override: Path | None) -> Path:
 
 
 _FENCE_PATTERNS = {
-    "first_python_block": re.compile(r"```(?:python|py)\s*\n(.*?)\n```", re.DOTALL),
-    "first_bash_block":   re.compile(r"```(?:bash|sh|shell)\s*\n(.*?)\n```", re.DOTALL),
-    "all_python_blocks":  re.compile(r"```(?:python|py)\s*\n(.*?)\n```", re.DOTALL),
+    "first_python_block":
+        re.compile(r"```(?:python|py)\s*\n(.*?)\n```", re.DOTALL),
+    "first_bash_block":
+        re.compile(r"```(?:bash|sh|shell)\s*\n(.*?)\n```", re.DOTALL),
+    "all_python_blocks":
+        re.compile(r"```(?:python|py)\s*\n(.*?)\n```", re.DOTALL),
 }
 
 
@@ -108,30 +112,45 @@ def _module_present(mod: str) -> bool:
 def _run_scenario(scenario_id: str, spec: dict, response: str) -> dict:
     rules = spec.get("executable")
     if not rules:
-        return {"id": scenario_id, "status": "skipped",
-                "reason": "no executable block in assertions"}
+        return {
+            "id": scenario_id,
+            "status": "skipped",
+            "reason": "no executable block in assertions"
+        }
 
     # Skip if a required module is missing (saves time + noise).
     for needed in rules.get("skip_if_missing", []):
         if not _module_present(needed):
-            return {"id": scenario_id, "status": "skipped",
-                    "reason": f"required module '{needed}' not installed"}
+            return {
+                "id": scenario_id,
+                "status": "skipped",
+                "reason": f"required module '{needed}' not installed"
+            }
 
     extractor = rules.get("code_extractor", "first_python_block")
     code = _extract_code(response, extractor)
     if code is None:
-        return {"id": scenario_id, "status": "no_code",
-                "reason": f"no `{extractor}` block found in response"}
+        return {
+            "id": scenario_id,
+            "status": "no_code",
+            "reason": f"no `{extractor}` block found in response"
+        }
 
-    interp = rules.get("interpreter", "python3" if "python" in extractor else "bash")
+    interp = rules.get("interpreter",
+                       "python3" if "python" in extractor else "bash")
     preamble = rules.get("preamble", "")
     harness = rules.get("harness", "{code}")
-    program = harness.format(code=preamble + code) if "{code}" in harness else preamble + code
+    program = harness.format(code=preamble +
+                             code) if "{code}" in harness else preamble + code
     timeout_s = float(rules.get("timeout_s", 30))
 
-    cmd = [interp, "-c", program] if interp != "bash" else ["bash", "-c", program]
+    cmd = [interp, "-c", program
+          ] if interp != "bash" else ["bash", "-c", program]
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s)
+        r = subprocess.run(cmd,
+                           capture_output=True,
+                           text=True,
+                           timeout=timeout_s)
         rc, out, err, timed_out = r.returncode, r.stdout, r.stderr, False
     except subprocess.TimeoutExpired:
         rc, out, err, timed_out = 124, "", f"timeout after {timeout_s}s", True
@@ -167,7 +186,9 @@ def grade(skill: str, responses: dict, assertions_path: Path) -> dict:
     for sid, spec in bench["scenarios"].items():
         scenarios.append(_run_scenario(sid, spec, responses.get(sid, "")))
 
-    counted = [s for s in scenarios if s["status"] in {"passed", "failed", "no_code"}]
+    counted = [
+        s for s in scenarios if s["status"] in {"passed", "failed", "no_code"}
+    ]
     passed = sum(1 for s in scenarios if s["status"] == "passed")
     failed = sum(1 for s in scenarios if s["status"] == "failed")
     no_code = sum(1 for s in scenarios if s["status"] == "no_code")
@@ -188,9 +209,11 @@ def grade(skill: str, responses: dict, assertions_path: Path) -> dict:
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description=__doc__,
-                                formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--skill", required=True,
+    p = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--skill",
+                   required=True,
                    help=f"Skill alias. Known: {sorted(SKILL_DIRS)}")
     p.add_argument("--responses", type=Path, required=True)
     p.add_argument("--assertions", type=Path, default=None)
@@ -216,10 +239,14 @@ def main() -> int:
         print(f"  Failed:      {result['failed']}")
         print(f"  No code:     {result['no_code']}")
         print(f"  Skipped:     {result['skipped']}")
-        print(f"  Pass rate:   {result['scenario_pass_rate']:.0%} (over passed+failed+no_code)")
+        print(
+            f"  Pass rate:   {result['scenario_pass_rate']:.0%} (over passed+failed+no_code)"
+        )
         for s in result["scenarios"]:
             if s["status"] == "failed":
-                print(f"  [{s['id']}] FAILED  exit={s['exit_code']}/{s['expected_exit']}")
+                print(
+                    f"  [{s['id']}] FAILED  exit={s['exit_code']}/{s['expected_exit']}"
+                )
                 print(f"    stderr_tail: {s['stderr_tail'][:200]}")
         print(f"  Wrote: {out}")
     return 0

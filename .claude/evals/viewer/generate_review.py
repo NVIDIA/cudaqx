@@ -40,8 +40,7 @@ def _find_skill(iter_dir: Path, configs: dict[str, dict[str, dict]]) -> str:
                 return sk
     raise SystemExit(
         "Could not infer skill. Add a skill.txt file containing the skill "
-        "alias (e.g. 'qec') to the iteration directory."
-    )
+        "alias (e.g. 'qec') to the iteration directory.")
 
 
 def _load_iteration(iter_dir: Path) -> dict[str, dict]:
@@ -52,14 +51,20 @@ def _load_iteration(iter_dir: Path) -> dict[str, dict]:
             continue
         responses_path = cfg / "responses.json"
         timing_path = cfg / "timing.json"
-        responses = json.loads(responses_path.read_text()) if responses_path.exists() else {}
-        timing = json.loads(timing_path.read_text()) if timing_path.exists() else {}
+        responses = json.loads(
+            responses_path.read_text()) if responses_path.exists() else {}
+        timing = json.loads(
+            timing_path.read_text()) if timing_path.exists() else {}
         gradings: dict[str, dict] = {}
         for path in sorted(cfg.glob("grading.*.json")):
             grader = path.stem.split(".", 1)[1]
             gradings[grader] = json.loads(path.read_text())
         if responses or gradings:
-            out[cfg.name] = {"responses": responses, "gradings": gradings, "timing": timing}
+            out[cfg.name] = {
+                "responses": responses,
+                "gradings": gradings,
+                "timing": timing
+            }
     return out
 
 
@@ -73,7 +78,11 @@ def _grader_verdict_html(grader: str, scenario: dict) -> str:
         return f'<span class="pill {cls}">cov {cov} · pur {pur}</span>'
     if grader == "executable":
         st = scenario.get("status", "?")
-        cls = {"passed": "ok", "failed": "fail", "no_code": "warn"}.get(st, "skip")
+        cls = {
+            "passed": "ok",
+            "failed": "fail",
+            "no_code": "warn"
+        }.get(st, "skip")
         extra = f" exit={scenario.get('exit_code')}" if "exit_code" in scenario else ""
         return f'<span class="pill {cls}">{st}{extra}</span>'
     if grader == "judge":
@@ -82,9 +91,10 @@ def _grader_verdict_html(grader: str, scenario: dict) -> str:
             return f'<span class="pill skip">{st or "?"}</span>'
         total = scenario.get("total", 0)
         cls = "ok" if total >= 6 else ("warn" if total >= 4 else "fail")
-        return (f'<span class="pill {cls}">{total}/8 ' 
-                f'(c{scenario["correctness"]} s{scenario["specificity"]} '
-                f'cv{scenario["coverage"]} h{scenario["hallucinations"]})</span>')
+        return (
+            f'<span class="pill {cls}">{total}/8 '
+            f'(c{scenario["correctness"]} s{scenario["specificity"]} '
+            f'cv{scenario["coverage"]} h{scenario["hallucinations"]})</span>')
     return f'<span class="pill skip">{grader}</span>'
 
 
@@ -162,21 +172,26 @@ def _render(iter_name: str, skill: str, configs: dict[str, dict],
         parts.append(f"<div class='scenario'>")
         parts.append(f"<h3>{html.escape(sid)} — "
                      f"{html.escape(entry.get('name') or '')}</h3>")
-        parts.append(f"<div class='prompt'>{html.escape(entry['prompt'])}</div>")
+        parts.append(
+            f"<div class='prompt'>{html.escape(entry['prompt'])}</div>")
         for cfg_name, cfg in configs.items():
             response = cfg["responses"].get(sid, "")
             parts.append("<div class='config-block'>")
-            parts.append(f"<span class='config-name'>{html.escape(cfg_name)}</span>")
+            parts.append(
+                f"<span class='config-name'>{html.escape(cfg_name)}</span>")
             for g in grader_names:
                 payload = cfg["gradings"].get(g, {})
                 # Find this scenario in the grading payload's scenarios list.
                 hit = next(
-                    (s for s in payload.get("scenarios", []) if s.get("id") == sid),
+                    (s for s in payload.get("scenarios", [])
+                     if s.get("id") == sid),
                     None,
                 )
                 if hit:
-                    parts.append(f"<br>{html.escape(g)}: {_grader_verdict_html(g, hit)}")
-            parts.append(f"<pre>{html.escape(response or '(no response)')}</pre>")
+                    parts.append(
+                        f"<br>{html.escape(g)}: {_grader_verdict_html(g, hit)}")
+            parts.append(
+                f"<pre>{html.escape(response or '(no response)')}</pre>")
             parts.append("</div>")
         # Answer key (collapsed-style, plain).
         must = spec.get("must_include", [])
@@ -194,10 +209,13 @@ def _render(iter_name: str, skill: str, configs: dict[str, dict],
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description=__doc__,
-                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("iteration_dir", type=Path)
-    p.add_argument("--out", type=Path, default=None,
+    p.add_argument("--out",
+                   type=Path,
+                   default=None,
                    help="Output HTML path. Default: <iteration>/report.html")
     args = p.parse_args()
 
@@ -208,13 +226,21 @@ def main() -> int:
     if not configs:
         raise SystemExit("No responses or grading files found.")
 
-    skill = _find_skill(args.iteration_dir, {n: c["gradings"] for n, c in configs.items()})
-    full = {"solvers": "cuda-qx-solvers", "qec": "cuda-qx-qec",
-            "build": "cuda-qx-build"}.get(skill, skill)
-    prompts = json.loads((PROMPTS_DIR / f"{full}.evals.json").read_text())["evals"]
-    assertions = json.loads((EVALS_ROOT / "assertions" / f"{full}.json").read_text())
+    skill = _find_skill(args.iteration_dir, {
+        n: c["gradings"] for n, c in configs.items()
+    })
+    full = {
+        "solvers": "cuda-qx-solvers",
+        "qec": "cuda-qx-qec",
+        "build": "cuda-qx-build"
+    }.get(skill, skill)
+    prompts = json.loads(
+        (PROMPTS_DIR / f"{full}.evals.json").read_text())["evals"]
+    assertions = json.loads(
+        (EVALS_ROOT / "assertions" / f"{full}.json").read_text())
 
-    html_text = _render(args.iteration_dir.name, full, configs, prompts, assertions)
+    html_text = _render(args.iteration_dir.name, full, configs, prompts,
+                        assertions)
     out = args.out or args.iteration_dir / "report.html"
     out.write_text(html_text)
     print(f"Wrote {out}")

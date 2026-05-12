@@ -78,14 +78,11 @@ SKILL_DIRS = {
 def _prompts_path(skill: str) -> Path:
     if skill not in SKILL_DIRS:
         raise SystemExit(
-            f"Unknown skill alias '{skill}'. Known: {sorted(SKILL_DIRS)}"
-        )
+            f"Unknown skill alias '{skill}'. Known: {sorted(SKILL_DIRS)}")
     candidate = PROMPTS_DIR / f"{SKILL_DIRS[skill]}.evals.json"
     if not candidate.exists():
-        raise SystemExit(
-            f"Could not find prompts at {candidate}. "
-            f"Did you move/rename the prompts file?"
-        )
+        raise SystemExit(f"Could not find prompts at {candidate}. "
+                         f"Did you move/rename the prompts file?")
     return candidate
 
 
@@ -137,7 +134,8 @@ def cmd_aggregate(args: argparse.Namespace) -> int:
             continue
         cfg_record: dict = {}
         for grading in sorted(cfg_dir.glob("grading.*.json")):
-            grader_name = grading.stem.split(".", 1)[1]  # grading.programmatic -> programmatic
+            grader_name = grading.stem.split(
+                ".", 1)[1]  # grading.programmatic -> programmatic
             cfg_record[grader_name] = json.loads(grading.read_text())
         if cfg_record:
             out["configurations"][cfg_dir.name] = cfg_record
@@ -152,12 +150,17 @@ def cmd_aggregate(args: argparse.Namespace) -> int:
             b = cfgs["without_skill"][grader]
             deltas[grader] = {
                 "scenario_pass_rate":
-                    w.get("scenario_pass_rate", 0) - b.get("scenario_pass_rate", 0),
-                "coverage": w.get("coverage", 0) - b.get("coverage", 0),
-                "purity": w.get("purity", 0) - b.get("purity", 0),
+                    w.get("scenario_pass_rate", 0) -
+                    b.get("scenario_pass_rate", 0),
+                "coverage":
+                    w.get("coverage", 0) - b.get("coverage", 0),
+                "purity":
+                    w.get("purity", 0) - b.get("purity", 0),
                 "activation_correct":
-                    w.get("activation_correct", 0) - b.get("activation_correct", 0),
-                "total": w.get("total", 0) - b.get("total", 0),
+                    w.get("activation_correct", 0) -
+                    b.get("activation_correct", 0),
+                "total":
+                    w.get("total", 0) - b.get("total", 0),
             }
         out["delta"] = deltas
 
@@ -179,18 +182,20 @@ def main() -> int:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     pp = sub.add_parser("prompts", help="Dump prompts for a skill.")
-    pp.add_argument("--skill", required=True,
+    pp.add_argument("--skill",
+                    required=True,
                     help=f"One of: {sorted(SKILL_DIRS)}")
-    pp.add_argument("--kind", choices=["scenario", "activation", "all"],
+    pp.add_argument("--kind",
+                    choices=["scenario", "activation", "all"],
                     default="all")
     pp.add_argument("--format", choices=["jsonl", "json"], default="jsonl")
     pp.set_defaults(func=cmd_prompts)
 
     pa = sub.add_parser(
         "aggregate",
-        help="Combine grading.*.json files across an iteration directory."
-    )
-    pa.add_argument("iteration_dir", type=Path,
+        help="Combine grading.*.json files across an iteration directory.")
+    pa.add_argument("iteration_dir",
+                    type=Path,
                     help="Path to iteration-N/ directory.")
     pa.set_defaults(func=cmd_aggregate)
 

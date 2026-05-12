@@ -66,9 +66,11 @@ SKILL_DIRS = {
 }
 
 
-def _resolve_skill_files(skill: str, ass_override: Path | None) -> tuple[Path, Path]:
+def _resolve_skill_files(skill: str,
+                         ass_override: Path | None) -> tuple[Path, Path]:
     if skill not in SKILL_DIRS:
-        raise SystemExit(f"Unknown skill alias '{skill}'. Known: {sorted(SKILL_DIRS)}")
+        raise SystemExit(
+            f"Unknown skill alias '{skill}'. Known: {sorted(SKILL_DIRS)}")
     full = SKILL_DIRS[skill]
     a = ass_override or (ASSERTIONS_DIR / f"{full}.json")
     p = PROMPTS_DIR / f"{full}.evals.json"
@@ -113,7 +115,6 @@ must_include: {must_include}
 must_not_include: {must_not_include}
 """
 
-
 # ---------------------------------------------------------------------------
 # Backends
 # ---------------------------------------------------------------------------
@@ -131,7 +132,10 @@ def _backend_openai(model: str) -> Callable[[str], str] | None:
     def call(prompt: str) -> str:
         resp = client.chat.completions.create(
             model=model,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{
+                "role": "user",
+                "content": prompt
+            }],
             temperature=0,
         )
         return resp.choices[0].message.content or ""
@@ -153,7 +157,10 @@ def _backend_anthropic(model: str) -> Callable[[str], str] | None:
             model=model,
             max_tokens=400,
             temperature=0,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{
+                "role": "user",
+                "content": prompt
+            }],
         )
         text = ""
         for block in resp.content:
@@ -186,7 +193,8 @@ def _parse_judge_reply(text: str) -> dict[str, Any] | None:
         except (TypeError, ValueError):
             d[k] = 0
     d.setdefault("justification", "")
-    d["total"] = sum(d[k] for k in ("correctness", "specificity", "coverage", "hallucinations"))
+    d["total"] = sum(d[k] for k in ("correctness", "specificity", "coverage",
+                                    "hallucinations"))
     return d
 
 
@@ -199,11 +207,12 @@ def grade(skill: str, prompts: list[dict], assertions: dict,
         spec = assertions["scenarios"].get(sid)
         if not spec:
             continue
-        rendered = (RUBRIC
-                    .replace("{prompt}", entry["prompt"])
-                    .replace("{response}", responses.get(sid, "(no response)"))
-                    .replace("{must_include}", json.dumps(spec.get("must_include", [])))
-                    .replace("{must_not_include}", json.dumps(spec.get("must_not_include", []))))
+        rendered = (RUBRIC.replace("{prompt}", entry["prompt"]).replace(
+            "{response}", responses.get(sid, "(no response)")).replace(
+                "{must_include}",
+                json.dumps(spec.get("must_include", []))).replace(
+                    "{must_not_include}",
+                    json.dumps(spec.get("must_not_include", []))))
 
         record = {"id": sid, "model": model}
         if call is None:
@@ -230,8 +239,8 @@ def grade(skill: str, prompts: list[dict], assertions: dict,
         scored.append(record)
 
     have_scores = [r for r in scored if r["status"] == "scored"]
-    avg = (sum(r["total"] for r in have_scores) / (len(have_scores) * 8)
-           if have_scores else 0.0)
+    avg = (sum(r["total"] for r in have_scores) /
+           (len(have_scores) * 8) if have_scores else 0.0)
 
     return {
         "grader": "judge",
@@ -245,19 +254,26 @@ def grade(skill: str, prompts: list[dict], assertions: dict,
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description=__doc__,
-                                formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--skill", required=True, help=f"One of: {sorted(SKILL_DIRS)}")
+    p = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--skill",
+                   required=True,
+                   help=f"One of: {sorted(SKILL_DIRS)}")
     p.add_argument("--responses", type=Path, required=True)
     p.add_argument("--assertions", type=Path, default=None)
     p.add_argument("--backend", choices=sorted(BACKENDS), default="anthropic")
-    p.add_argument("--model", default="claude-opus-4-5",
-                   help="Pin a specific model. Recorded in the output for reproducibility.")
+    p.add_argument(
+        "--model",
+        default="claude-opus-4-5",
+        help="Pin a specific model. Recorded in the output for reproducibility."
+    )
     p.add_argument("--out", type=Path, default=None)
     p.add_argument("--quiet", action="store_true")
     args = p.parse_args()
 
-    prompts_path, assertions_path = _resolve_skill_files(args.skill, args.assertions)
+    prompts_path, assertions_path = _resolve_skill_files(
+        args.skill, args.assertions)
     if not args.responses.exists():
         raise SystemExit(f"Responses file not found: {args.responses}")
     responses = json.loads(args.responses.read_text())
@@ -274,8 +290,12 @@ def main() -> int:
 
     if not args.quiet:
         print(f"Skill: {result['skill']}  judge={args.backend}/{args.model}")
-        print(f"  Scored: {result['scenarios_scored']}/{result['scenarios_total']}")
-        print(f"  Avg normalized score (0-1): {result['average_normalized_score']:.2f}")
+        print(
+            f"  Scored: {result['scenarios_scored']}/{result['scenarios_total']}"
+        )
+        print(
+            f"  Avg normalized score (0-1): {result['average_normalized_score']:.2f}"
+        )
         if result["scenarios_scored"] == 0:
             print("  (no scenarios scored — check 'reason' fields in the JSON)")
         print(f"  Wrote: {out}")

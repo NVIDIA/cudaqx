@@ -36,8 +36,10 @@ from typing import Any
 INTENT_TABLE: dict[str, dict[str, Any]] = {
     # cuda-qx-build intents
     "build": {
-        "skill": "cuda-qx-build",
-        "reference": ".claude/skills/cuda-qx-build/references/build.md",
+        "skill":
+            "cuda-qx-build",
+        "reference":
+            ".claude/skills/cuda-qx-build/references/build.md",
         "commands": [
             "mkdir -p build && cd build",
             "cmake -G Ninja -S .. "
@@ -48,14 +50,18 @@ INTENT_TABLE: dict[str, dict[str, Any]] = {
             "ninja install",
             "ctest",
         ],
-        "verify": "python3 -c 'import cudaq_qec, cudaq_solvers; print(cudaq_qec, cudaq_solvers)'",
+        "verify":
+            "python3 -c 'import cudaq_qec, cudaq_solvers; print(cudaq_qec, cudaq_solvers)'",
         "required_features": ["core"],
     },
     "build-wheels": {
-        "skill": "cuda-qx-build",
-        "reference": ".claude/skills/cuda-qx-build/references/wheels.md",
+        "skill":
+            "cuda-qx-build",
+        "reference":
+            ".claude/skills/cuda-qx-build/references/wheels.md",
         "commands": ["scripts/build_wheels.sh"],
-        "verify": "ls wheels/ | grep -E 'cudaq_(qec|solvers)_cu1[23].*manylinux'",
+        "verify":
+            "ls wheels/ | grep -E 'cudaq_(qec|solvers)_cu1[23].*manylinux'",
         "required_features": [],
     },
     "build-docs": {
@@ -149,13 +155,16 @@ INTENT_TABLE: dict[str, dict[str, Any]] = {
         "required_features": ["core"],
     },
     "gqe": {
-        "skill": "cuda-qx-solvers",
-        "reference": ".claude/skills/cuda-qx-solvers/references/gqe.md",
+        "skill":
+            "cuda-qx-solvers",
+        "reference":
+            ".claude/skills/cuda-qx-solvers/references/gqe.md",
         "commands": [
             "python3 -c \"import torch; print('cuda available:', torch.cuda.is_available())\"",
             "python3 -c \"from cudaq_solvers.gqe_algorithm.gqe import get_default_config; print(get_default_config())\"",
         ],
-        "verify": "min_energy decreases across iterations; no sys.exit(1) on import",
+        "verify":
+            "min_energy decreases across iterations; no sys.exit(1) on import",
         "required_features": ["core", "solvers-gqe"],
     },
     "chemistry": {
@@ -186,31 +195,42 @@ def _rule_blockers(preflight: dict, imports: dict, intent: str) -> list[dict]:
             blockers.append({
                 "kind": "abi_mismatch",
                 "detail": w,
-                "fix": "Reinstall both with the same -cuXX suffix. "
-                       "E.g. pip install cuda-quantum-cu12 cudaq-qec-cu12 cudaq-solvers-cu12",
+                "fix":
+                    "Reinstall both with the same -cuXX suffix. "
+                    "E.g. pip install cuda-quantum-cu12 cudaq-qec-cu12 cudaq-solvers-cu12",
             })
 
     # gfortran missing: blocks any optimizer-using workflow.
-    if intent in {"vqe", "qaoa", "chemistry"} and not preflight.get("toolchain", {}).get("gfortran"):
+    if intent in {"vqe", "qaoa", "chemistry"
+                 } and not preflight.get("toolchain", {}).get("gfortran"):
         blockers.append({
-            "kind": "gfortran_missing",
-            "detail": "gfortran not on PATH; cobyla/lbfgs will crash at runtime",
-            "fix": "sudo apt install -y libgfortran5 gfortran libblas-dev",
+            "kind":
+                "gfortran_missing",
+            "detail":
+                "gfortran not on PATH; cobyla/lbfgs will crash at runtime",
+            "fix":
+                "sudo apt install -y libgfortran5 gfortran libblas-dev",
         })
 
     # Build intents need cmake/ninja.
     if intent.startswith("build") and intent != "build-docs":
         if not preflight.get("toolchain", {}).get("cmake"):
             blockers.append({
-                "kind": "missing_tool",
-                "detail": "cmake not on PATH",
-                "fix": "Install CMake >= 3.28 (apt install cmake / brew install cmake)",
+                "kind":
+                    "missing_tool",
+                "detail":
+                    "cmake not on PATH",
+                "fix":
+                    "Install CMake >= 3.28 (apt install cmake / brew install cmake)",
             })
         if not preflight.get("toolchain", {}).get("ninja"):
             blockers.append({
-                "kind": "missing_tool",
-                "detail": "ninja not on PATH",
-                "fix": "Install Ninja >= 1.10 (apt install ninja-build / pip install ninja)",
+                "kind":
+                    "missing_tool",
+                "detail":
+                    "ninja not on PATH",
+                "fix":
+                    "Install Ninja >= 1.10 (apt install ninja-build / pip install ninja)",
             })
 
     # Wheel build needs docker (rule of thumb).
@@ -218,25 +238,35 @@ def _rule_blockers(preflight: dict, imports: dict, intent: str) -> list[dict]:
         # We can't easily detect docker in preflight (didn't probe it).
         # Add a soft hint instead of a hard blocker.
         blockers.append({
-            "kind": "info",
-            "detail": "Wheel build runs inside the cudaqx_wheel_builder container",
-            "fix": "Ensure `docker` is on PATH; scripts/build_wheels.sh handles the rest",
+            "kind":
+                "info",
+            "detail":
+                "Wheel build runs inside the cudaqx_wheel_builder container",
+            "fix":
+                "Ensure `docker` is on PATH; scripts/build_wheels.sh handles the rest",
         })
 
     # Docs build needs PYTHONPATH to include the install prefix and a built install.
     if intent == "build-docs":
         if not preflight.get("build_state", {}).get("cudaqx_prefix_exists"):
             blockers.append({
-                "kind": "no_install",
-                "detail": "$CUDAQX_INSTALL_PREFIX does not exist; docs autodoc imports will fail",
-                "fix": "Run intent=build first (cmake + ninja install), then retry docs",
+                "kind":
+                    "no_install",
+                "detail":
+                    "$CUDAQX_INSTALL_PREFIX does not exist; docs autodoc imports will fail",
+                "fix":
+                    "Run intent=build first (cmake + ninja install), then retry docs",
             })
 
     # GQE feature gating.
     if intent == "gqe":
-        gqe_status = imports.get("groups", {}).get("solvers-gqe", {}).get("status")
+        gqe_status = imports.get("groups", {}).get("solvers-gqe",
+                                                   {}).get("status")
         if gqe_status == "broken":
-            broken = [b for b in imports.get("blockers", []) if b["group"] == "solvers-gqe"]
+            broken = [
+                b for b in imports.get("blockers", [])
+                if b["group"] == "solvers-gqe"
+            ]
             for b in broken:
                 blockers.append({
                     "kind": "missing_extra",
@@ -244,19 +274,25 @@ def _rule_blockers(preflight: dict, imports: dict, intent: str) -> list[dict]:
                     "fix": b["fix"],
                 })
         # Torch + GPU SM mismatch (best-effort).
-        torch_ver = (preflight.get("pip_packages", {}).get("torch") or {}).get("version")
+        torch_ver = (preflight.get("pip_packages", {}).get("torch") or
+                     {}).get("version")
         if torch_ver and not preflight.get("gpu", {}).get("count", 0):
             blockers.append({
-                "kind": "info",
-                "detail": "torch installed but no GPU visible; GQE will run on CPU and be slow.",
-                "fix": "If you have a GPU but nvidia-smi fails, fix the driver before training.",
+                "kind":
+                    "info",
+                "detail":
+                    "torch installed but no GPU visible; GQE will run on CPU and be slow.",
+                "fix":
+                    "If you have a GPU but nvidia-smi fails, fix the driver before training.",
             })
 
     # Core imports must work.
     if "core" in needed_features:
         core_status = imports.get("groups", {}).get("core", {}).get("status")
         if core_status == "broken":
-            broken = [b for b in imports.get("blockers", []) if b["group"] == "core"]
+            broken = [
+                b for b in imports.get("blockers", []) if b["group"] == "core"
+            ]
             for b in broken:
                 blockers.append({
                     "kind": "missing_core",
@@ -284,19 +320,25 @@ def main() -> int:
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("--intent", required=True,
+    p.add_argument("--intent",
+                   required=True,
                    help=f"User intent. Known: {sorted(INTENT_TABLE)}")
-    p.add_argument("--preflight", type=Path, default=None,
-                   help="Path to preflight.sh --json output. Optional but recommended.")
-    p.add_argument("--imports", type=Path, default=None,
-                   help="Path to import_smoke.py --json output. Optional but recommended.")
+    p.add_argument(
+        "--preflight",
+        type=Path,
+        default=None,
+        help="Path to preflight.sh --json output. Optional but recommended.")
+    p.add_argument(
+        "--imports",
+        type=Path,
+        default=None,
+        help="Path to import_smoke.py --json output. Optional but recommended.")
     p.add_argument("--format", choices=["json", "text"], default="json")
     args = p.parse_args()
 
     if args.intent not in INTENT_TABLE:
         sys.stderr.write(
-            f"Unknown intent '{args.intent}'. Known: {sorted(INTENT_TABLE)}\n"
-        )
+            f"Unknown intent '{args.intent}'. Known: {sorted(INTENT_TABLE)}\n")
         return 2
 
     preflight = json.loads(args.preflight.read_text()) if args.preflight else {}
