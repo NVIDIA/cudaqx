@@ -231,8 +231,7 @@ def custom_memory_circuit_stabs(
     # list of unbound `measure_handle`s, each slot is overwritten with a real
     # handle from `se_z_ft`/`se_x_ft` before any discrimination occurs.
     combined_syndrome = [
-        cudaq.measure_handle()
-        for i in range(len(xstab_anc) + len(zstab_anc))
+        cudaq.measure_handle() for i in range(len(xstab_anc) + len(zstab_anc))
     ]
     # Handle the stabilizer lock-in round (numRounds == 1)
     if num_rounds == 1:
