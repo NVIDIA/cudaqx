@@ -937,7 +937,8 @@ class TestTRTDecoderBatchValidation:
 
         results = decoder.decode_batch(syndromes)
 
-        assert len(results) == len(syndromes), f"Expected {len(syndromes)} results, got {len(results)}"
+        assert len(results) == len(
+            syndromes), f"Expected {len(syndromes)} results, got {len(results)}"
         for i, result in enumerate(results):
             assert result.converged, f"Result {i} did not converge"
             assert len(result.result) == syndrome_size, \
