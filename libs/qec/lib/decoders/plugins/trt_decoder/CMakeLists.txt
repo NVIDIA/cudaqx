@@ -51,8 +51,55 @@ find_library(TENSORRT_ONNX_LIBRARY nvonnxparser
     NO_DEFAULT_PATH
 )
 
-# Only build the module if TensorRT is found
+# Resolve the tri-state `CUDAQ_QEC_BUILD_TRT_DECODER` option (AUTO / ON / OFF)
+# against the dependency-detection results above:
+#   AUTO -> enable the plugin iff TensorRT was found (silent skip otherwise).
+#   ON   -> enable the plugin and hard-fail if TensorRT was not found.
+#   OFF  -> the parent CMakeLists.txt does not descend here, but handle it
+#           defensively in case this subdirectory is added directly.
+# The outcome is published via the `CUDAQ_QEC_TRT_DECODER_ENABLED` cache
+# variable so that other parts of the build (e.g. the unit-tests) can react.
 if(TENSORRT_INCLUDE_DIR AND TENSORRT_LIBRARY AND TENSORRT_ONNX_LIBRARY)
+    set(_trt_found TRUE)
+else()
+    set(_trt_found FALSE)
+endif()
+
+if(CUDAQ_QEC_BUILD_TRT_DECODER STREQUAL "AUTO")
+    set(_trt_enabled ${_trt_found})
+    if(NOT _trt_found)
+        message(STATUS
+            "TensorRT not found; auto-disabling the ${MODULE_NAME} plugin.\n"
+            "  TENSORRT_INCLUDE_DIR : ${TENSORRT_INCLUDE_DIR}\n"
+            "  TENSORRT_LIBRARY     : ${TENSORRT_LIBRARY}\n"
+            "  TENSORRT_ONNX_LIBRARY: ${TENSORRT_ONNX_LIBRARY}\n"
+            "Set -DTENSORRT_ROOT=<path> to enable it, or pass "
+            "-DCUDAQ_QEC_BUILD_TRT_DECODER=OFF to silence this message.")
+    endif()
+elseif(CUDAQ_QEC_BUILD_TRT_DECODER STREQUAL "ON")
+    if(NOT _trt_found)
+        message(FATAL_ERROR
+            "CUDAQ_QEC_BUILD_TRT_DECODER=ON but TensorRT could not be found.\n"
+            "  TENSORRT_INCLUDE_DIR : ${TENSORRT_INCLUDE_DIR}\n"
+            "  TENSORRT_LIBRARY     : ${TENSORRT_LIBRARY}\n"
+            "  TENSORRT_ONNX_LIBRARY: ${TENSORRT_ONNX_LIBRARY}\n"
+            "Set -DTENSORRT_ROOT=<path> to point at a TensorRT install, "
+            "or pass -DCUDAQ_QEC_BUILD_TRT_DECODER=AUTO to fall back to "
+            "auto-detection (default), or =OFF to disable the plugin.")
+    endif()
+    set(_trt_enabled TRUE)
+elseif(CUDAQ_QEC_BUILD_TRT_DECODER STREQUAL "OFF")
+    set(_trt_enabled FALSE)
+else()
+    message(FATAL_ERROR
+        "Invalid value for CUDAQ_QEC_BUILD_TRT_DECODER: "
+        "'${CUDAQ_QEC_BUILD_TRT_DECODER}'. Expected one of: AUTO, ON, OFF.")
+endif()
+
+set(CUDAQ_QEC_TRT_DECODER_ENABLED ${_trt_enabled} CACHE INTERNAL
+    "Whether the TRT decoder plugin is being built")
+
+if(CUDAQ_QEC_TRT_DECODER_ENABLED)
     message(STATUS "TensorRT found: ${TENSORRT_INCLUDE_DIR}")
     message(STATUS "TensorRT library: ${TENSORRT_LIBRARY}")
     message(STATUS "TensorRT ONNX parser: ${TENSORRT_ONNX_LIBRARY}")
@@ -132,12 +179,6 @@ if(TENSORRT_INCLUDE_DIR AND TENSORRT_LIBRARY AND TENSORRT_ONNX_LIBRARY)
       COMPONENT qec-lib-plugins
       LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/decoder-plugins
     )
-
-else()
-    message(WARNING "TensorRT not found. Skipping ${MODULE_NAME} build.")
-    message(WARNING "TENSORRT_INCLUDE_DIR: ${TENSORRT_INCLUDE_DIR}")
-    message(WARNING "TENSORRT_LIBRARY: ${TENSORRT_LIBRARY}")
-    message(WARNING "TENSORRT_ONNX_LIBRARY: ${TENSORRT_ONNX_LIBRARY}")
 endif()
 
 

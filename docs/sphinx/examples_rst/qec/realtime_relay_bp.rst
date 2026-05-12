@@ -51,7 +51,51 @@ Software
 - **CUDA-Q SDK**: pre-installed (provides ``libcudaq``, ``libnvqir``, ``nvq++``)
 - **nv-qldpc-decoder plugin**: the proprietary nv-qldpc-decoder shared library
   (``libcudaq-qec-nv-qldpc-decoder.so``).  Required at runtime for all
-  three configurations.
+  three configurations -- see *Obtaining the nv-qldpc-decoder plugin* below
+  for how to install it.
+
+Obtaining the nv-qldpc-decoder plugin
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The ``libcudaq-qec-nv-qldpc-decoder.so`` plugin is closed-source and is not
+built from this repository.  It must be obtained as a pre-built binary.
+
+.. important::
+
+   The ``cudaq-qec`` PyPI wheel ships a version of this plugin that does
+   **not** support the realtime graph-dispatch path used by these tests.
+   The wheel build pipeline does not enable ``CUDAQ_REALTIME_ROOT``, so the
+   graph-dispatch overrides are compiled out.  Using the wheel's plugin
+   causes the bridge tool to abort with::
+
+      ERROR: nv-qldpc-decoder does not support graph dispatch
+
+   Use the version from the ``ghcr.io/nvidia/cudaqx`` container instead, as
+   shown below.
+
+Extract the plugin from the container without running it:
+
+.. code-block:: bash
+
+   IMAGE=ghcr.io/nvidia/cudaqx:cu13-latest    # or cu12-latest
+
+   docker pull "$IMAGE"
+   CID=$(docker create "$IMAGE")
+   docker cp "$CID:/opt/nvidia/cudaq/lib/decoder-plugins/libcudaq-qec-nv-qldpc-decoder.so" .
+   docker rm "$CID"
+
+``docker pull`` automatically selects the correct image variant for the host
+CPU architecture (``amd64`` or ``arm64``) -- no manual override is needed.
+
+The runtime plugin loader searches for decoder plugins in the
+``decoder-plugins/`` subdirectory next to ``libcudaq-qec.so``.  For a source
+build of cudaqx, that path is ``<cudaqx-build>/lib/decoder-plugins/``:
+
+.. code-block:: bash
+
+   mkdir -p <cudaqx-build>/lib/decoder-plugins
+   cp libcudaq-qec-nv-qldpc-decoder.so \
+      <cudaqx-build>/lib/decoder-plugins/
 
 Source Repositories
 ^^^^^^^^^^^^^^^^^^^
@@ -244,9 +288,8 @@ Running
 
    cd cudaqx/build
 
-   # The nv-qldpc-decoder plugin must be discoverable at runtime.
-   # Set QEC_EXTERNAL_DECODERS if the plugin is not in the default search path:
-   export QEC_EXTERNAL_DECODERS=/path/to/libcudaq-qec-nv-qldpc-decoder.so
+   # The nv-qldpc-decoder plugin must be in <cudaqx-build>/lib/decoder-plugins/
+   # before running -- see "Obtaining the nv-qldpc-decoder plugin" above.
 
    ./libs/qec/unittests/test_realtime_qldpc_graph_decoding
 

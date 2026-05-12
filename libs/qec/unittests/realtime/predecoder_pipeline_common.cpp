@@ -16,6 +16,55 @@
 
 #include <fstream>
 #include <iostream>
+#include <stdexcept>
+
+// =============================================================================
+// PipelineConfig::from_name
+// =============================================================================
+
+std::optional<PipelineConfig>
+PipelineConfig::from_name(const std::string &name) {
+  if (name == "d7")
+    return d7_r7();
+  if (name == "d13")
+    return d13_r13();
+  if (name == "d13_r104")
+    return d13_r104();
+  if (name == "d21")
+    return d21_r21();
+  if (name == "d21_r42")
+    return d21_r42();
+  if (name == "d31")
+    return d31_r31();
+  return std::nullopt;
+}
+
+// =============================================================================
+// PipelineConfig::apply_cli_overrides
+// =============================================================================
+
+void PipelineConfig::apply_cli_overrides(int argc, char *argv[]) {
+  for (int i = 1; i < argc; ++i) {
+    std::string arg = argv[i];
+    auto val_of = [&](const std::string &prefix) -> std::string {
+      return arg.substr(prefix.size());
+    };
+    if (arg.find("--distance=") == 0)
+      distance = std::stoi(val_of("--distance="));
+    else if (arg.find("--num-rounds=") == 0)
+      num_rounds = std::stoi(val_of("--num-rounds="));
+    else if (arg.find("--onnx-filename=") == 0)
+      onnx_filename = val_of("--onnx-filename=");
+    else if (arg.find("--num-predecoders=") == 0)
+      num_predecoders = std::stoi(val_of("--num-predecoders="));
+    else if (arg.find("--num-workers=") == 0)
+      num_workers = std::stoi(val_of("--num-workers="));
+    else if (arg.find("--num-decode-workers=") == 0)
+      num_decode_workers = std::stoi(val_of("--num-decode-workers="));
+    else if (arg.find("--label=") == 0)
+      label = val_of("--label=");
+  }
+}
 
 // =============================================================================
 // Pre-launch DMA copy callback

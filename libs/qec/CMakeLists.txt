@@ -61,8 +61,15 @@ option(CUDAQX_QEC_INSTALL_PYTHON
        "Install python files alongside the library."
        ${CUDAQX_INSTALL_PYTHON})
 
-# Option to control TRT decoder build (default: ON)
-option(CUDAQ_QEC_BUILD_TRT_DECODER "Build the TensorRT decoder plugin" ON)
+# TRT decoder plugin: tri-state (ON, OFF, AUTO).
+#   AUTO (default): build the plugin if TensorRT is detected; otherwise skip
+#                   it silently (with a STATUS message).
+#   ON           : require TensorRT; configure fails if it cannot be found.
+#   OFF          : do not build the plugin and do not search for TensorRT.
+set(CUDAQ_QEC_BUILD_TRT_DECODER "AUTO" CACHE STRING
+    "Build the TensorRT decoder plugin (ON, OFF, AUTO)")
+set_property(CACHE CUDAQ_QEC_BUILD_TRT_DECODER
+             PROPERTY STRINGS "AUTO" "ON" "OFF")
 
 # Find and configure LLVM, Clang and MLIR
 # ==============================================================================
@@ -72,7 +79,13 @@ option(CUDAQ_QEC_BUILD_TRT_DECODER "Build the TensorRT decoder plugin" ON)
 # using `LLVM_VERSION_MAJOR`, e.g. "-LLVM_VERSION_MAJOR=16".  Note that this
 # version variable is set to the latest LLVM version by default, and setting it
 # to an older version might break the project.
-find_package(LLVM ${LLVM_VERSION_MAJOR} CONFIG QUIET)
+if(NOT LLVM_VERSION_MAJOR)
+  set(LLVM_VERSION_MAJOR 22)
+endif()
+if(NOT LLVM_VERSION_MINOR)
+  set(LLVM_VERSION_MINOR 1)
+endif()
+find_package(LLVM ${LLVM_VERSION_MAJOR}.${LLVM_VERSION_MINOR} CONFIG QUIET)
 
 if(NOT LLVM_DIR)
   message(STATUS "LLVM_DIR not found, will try with llvm-config executable.")
@@ -133,7 +146,7 @@ if(NOT LLVM_DIR)
       "Could not find suitable llvm-config(-${LLVM_VERSION_MAJOR}).\
       \nTry providing valid -DLLVM_DIR=/path/to/llvm/lib/cmake/llvm.")
   else()
-    find_package(LLVM ${LLVM_VERSION_MAJOR} REQUIRED CONFIG
+    find_package(LLVM ${LLVM_VERSION_MAJOR}.${LLVM_VERSION_MINOR} REQUIRED CONFIG
       HINTS ${LLVM_CONFIG_CMAKE_DIR} NO_DEFAULT_PATH)
   endif()
 endif()
@@ -230,10 +243,11 @@ endif()
 # ==============================================================================
 
 if (CUDAQX_QEC_STANDALONE_BUILD)
-  # FIXME for now, we only use library mode
-  set(CUDAQ_LIBRARY_MODE ON)
-  find_package(CUDAQ REQUIRED)
+  cudaqx_import_cudaq_targets()
 
+  if (CUDAQX_QEC_BINDINGS_PYTHON)
+    find_package(CUDAQPythonInterop CONFIG)
+  endif()
   # FIXME
   add_subdirectory(../core core_build)
 endif()

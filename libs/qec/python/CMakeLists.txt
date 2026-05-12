@@ -17,7 +17,7 @@ if(NOT COMMAND nanobind_add_module)
   FetchContent_Declare(
     nanobind
     GIT_REPOSITORY https://github.com/wjakob/nanobind
-    GIT_TAG v2.12.0
+    GIT_TAG v2.9.2
     EXCLUDE_FROM_ALL
   )
   FetchContent_MakeAvailable(nanobind)

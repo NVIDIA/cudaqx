@@ -88,9 +88,13 @@ test_examples() {
         return 1
     fi
 
+    echo "Container configs of ${container_name} shown below:"
+    docker inspect ${container_name}
+
     num_failures=0
 
     docker exec ${container_name} bash -c "pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu${cuda_no_dot}"
+    docker exec ${container_name} bash -c "pip install onnxscript"
     # Install other required packages
     docker exec ${container_name} bash -c "pip install 'lightning>=2.0.0' 'ml_collections>=0.1.0' 'mpi4py>=3.1.0' 'transformers>=4.30.0'"
     docker exec ${container_name} bash -c "pip install 'quimb' 'opt_einsum' 'cuquantum-python-cu${cuda_major}==26.03.1'"

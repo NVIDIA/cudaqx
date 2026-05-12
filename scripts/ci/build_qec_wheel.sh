@@ -24,12 +24,12 @@ git config --global --add safe.directory /cuda-qx
 cd /cuda-qx/libs/qec
 
 # We need to use a newer toolchain because CUDA-QX libraries rely on c++20
-source /opt/rh/gcc-toolset-11/enable
+source /opt/rh/gcc-toolset-12/enable
 
 export CC=gcc
 export CXX=g++
 
-SKBUILD_CMAKE_ARGS="-DCUDAQ_DIR=$HOME/.cudaq/lib/cmake/cudaq;-DCMAKE_CXX_COMPILER_EXTERNAL_TOOLCHAIN=/opt/rh/gcc-toolset-11/root/usr/lib/gcc/x86_64-redhat-linux/11/" \
+SKBUILD_CMAKE_ARGS="-DCUDAQ_DIR=$HOME/.cudaq/lib/cmake/cudaq;-DCMAKE_CXX_COMPILER_EXTERNAL_TOOLCHAIN=/opt/rh/gcc-toolset-12/root/usr/lib/gcc/x86_64-redhat-linux/12/" \
 $python -m build --wheel
 
 LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$(pwd)/_skbuild/lib" \

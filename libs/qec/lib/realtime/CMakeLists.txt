@@ -6,7 +6,7 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
-find_package(LLVM 16.0.6 EXACT REQUIRED CONFIG)
+find_package(LLVM 22.1.4 EXACT REQUIRED CONFIG)
 
 # Enable CUDA for device code
 if(CMAKE_CUDA_COMPILER)

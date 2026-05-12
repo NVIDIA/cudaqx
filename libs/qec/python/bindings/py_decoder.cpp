@@ -42,7 +42,13 @@ class PyDecoder : public decoder {
 public:
   NB_TRAMPOLINE(decoder, 1);
 
-  PyDecoder(const nb::ndarray<nb::numpy, uint8_t> &H) : decoder(toTensor(H)) {}
+  PyDecoder(const nb::ndarray<nb::numpy, uint8_t> &H)
+      : decoder([&H]() {
+          auto borrow = toTensor(H);
+          cudaqx::tensor<uint8_t> owned(borrow.shape());
+          owned.copy(borrow.data(), borrow.shape());
+          return owned;
+        }()) {}
 
   decoder_result decode(const std::vector<float_t> &syndrome) override {
     NB_OVERRIDE_PURE(decode, syndrome);
@@ -99,6 +105,13 @@ void bindDecoder(nb::module_ &mod) {
                     ? nb::cast<nb::module_>(mod.attr("qecrt"))
                     : mod.def_submodule("qecrt");
 
+  // Workaround for nanobind v2.9.2: `def_rw` on a `std::optional<T>` field
+  // does not implicitly allow Python `None` for the setter (that behavior was
+  // added in v2.12.0 via PR #1262). Passing this annotation makes the setter
+  // accept None and store `std::nullopt`. Remove once nanobind is bumped to
+  // >=2.12.0.
+  const auto setter_accepts_none = nb::for_setter(nb::arg("value").none());
+
   nb::class_<decoder_result>(qecmod, "DecoderResult", R"pbdoc(
     A class representing the results of a quantum error correction decoding operation.
 
@@ -122,7 +135,8 @@ void bindDecoder(nb::module_ &mod) {
         the original quantum state. The format depends on the specific decoder
         implementation.
     )pbdoc")
-      .def_rw("opt_results", &decoder_result::opt_results, R"pbdoc(
+      .def_rw("opt_results", &decoder_result::opt_results, setter_accepts_none,
+              R"pbdoc(
         Optional additional results from the decoder stored in a heterogeneous map.
 
         This field may be empty if no additional results are available.
@@ -350,9 +364,10 @@ void bindDecoder(nb::module_ &mod) {
           shape.push_back(static_cast<std::size_t>(H.shape(d)));
         }
 
-        // Create a tensor and borrow the NumPy array data
+        // Make sure that we own the data within the decoder
+        // as the input array may go out of scope.
         cudaqx::tensor<uint8_t> tensor_H(shape);
-        tensor_H.borrow(static_cast<uint8_t *>(H.data()), shape);
+        tensor_H.copy(static_cast<uint8_t *>(H.data()), shape);
 
         return get_decoder(name, tensor_H, hetMapFromKwargs(options));
       },

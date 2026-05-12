@@ -28,7 +28,7 @@ if [ -z "$CUDAQ_REALTIME_ROOT" ]; then
     ninja-build curl pkg-config
   # HSB -> find_package(holoscan) -> rapids_logger requires cmake >= 3.30.4;
   # the CI container ships cmake 3.28.
-  pip install cmake
+  pip install 'cmake<4'
   export PATH="$(python3 -c 'import cmake,os;print(os.path.join(os.path.dirname(cmake.__file__),"data","bin"))'):$PATH"
 
   # Add DOCA repo and install only the GPUNetIO dev package (not doca-all)
@@ -115,8 +115,8 @@ HSB_BUILD=${HSB_ROOT}/build
 
 cmake -S libs/qec -B "$1" \
   -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_C_COMPILER=gcc-11 \
-  -DCMAKE_CXX_COMPILER=g++-11 \
+  -DCMAKE_C_COMPILER=gcc-12 \
+  -DCMAKE_CXX_COMPILER=g++-12 \
   -DCMAKE_C_COMPILER_LAUNCHER=ccache \
   -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
   -DCUDAQ_DIR=/cudaq-install/lib/cmake/cudaq/ \
@@ -128,4 +128,4 @@ cmake -S libs/qec -B "$1" \
   -DHOLOSCAN_SENSOR_BRIDGE_SOURCE_DIR=$HSB_ROOT \
   -DHOLOSCAN_SENSOR_BRIDGE_BUILD_DIR=$HSB_BUILD
 
-cmake --build "$1" --target install
+cmake --build "$1" --target install -j 4

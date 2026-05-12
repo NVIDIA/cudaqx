@@ -169,28 +169,38 @@ class GasPhaseGenerator(HamiltonianGenerator):
 
         if (nele_cas is None) and (norb_cas is not None):
             raise RuntimeError(
-                "WARN: nele_cas is None and norb_cas is not None. nele_cas and norb_cas should be either both None\
-                        or have values")
+                "WARN: nele_cas is None and norb_cas is not None."
+                " nele_cas and norb_cas should be either both None"
+                " or have values")
 
         if (nele_cas is not None) and (norb_cas is None):
             raise RuntimeError(
-                "WARN: nele_cas is not None and norb_cas is None. nele_cas and norb_cas should be either both None\
-                        or have values")
+                "WARN: nele_cas is not None and norb_cas is None."
+                " nele_cas and norb_cas should be either both None"
+                " or have values")
 
         ########################################################################
         # To add
 
         if UR and integrals_natorb:
             raise RuntimeError(
-                "WARN: .[pyscf] WARNING: integrals_natorb is not supported for unrestricted calculations. \
-                Set integrals_natorb to False. HF molecular orbitals are only supported for calculating integrals."
-            )
+                "WARN: .[pyscf] WARNING: integrals_natorb is not"
+                " supported for unrestricted calculations."
+                " Set integrals_natorb to False. HF molecular orbitals"
+                " are only supported for calculating integrals.")
 
         if UR and integrals_casscf:
             raise RuntimeError(
-                "WARN: .[pyscf] WARNING: integrals_casscf is not supported for unrestricted calculations. \
-                Set integrals_casscf to False. HF molecular orbitals are only supported for calculating integrals."
-            )
+                "WARN: .[pyscf] WARNING: integrals_casscf is not"
+                " supported for unrestricted calculations."
+                " Set integrals_casscf to False. HF molecular orbitals"
+                " are only supported for calculating integrals.")
+
+        if (natorb or integrals_natorb) and not MP2:
+            raise RuntimeError(
+                "WARN: .[pyscf] WARNING: natorb or integrals_natorb requires MP2=True. "
+                "Natural orbitals are computed from the MP2 density matrix, "
+                "so MP2 must be enabled when requesting natural orbitals.")
         ########################################################################
 
         mol = gto.M(atom=xyz,

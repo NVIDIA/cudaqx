@@ -77,6 +77,72 @@ else()
 endif()
 
 # =========================================================================== #
+# test_trt_decoder_composite
+# =========================================================================== #
+# Software-only demo: composite TensorRT decoder plugin with PyMatching as the
+# global decoder.  Uses the same Stim-exported detector, observable, H, O, and
+# priors files as test_realtime_predecoder_w_pymatching, but exercises the
+# trt_decoder plugin's built-in [pre_L, residual] -> global_decoder composition.
+
+if(TENSORRT_INCLUDE_DIR AND TENSORRT_LIBRARY AND TENSORRT_ONNX_PARSER_LIBRARY
+   AND CUDAQ_REALTIME_INCLUDE_DIR
+   AND TARGET cudaq-qec-trt-decoder)
+
+  get_filename_component(_cuda_bin_trt_comp "${CMAKE_CUDA_COMPILER}" DIRECTORY)
+  get_filename_component(_cuda_root_trt_comp "${_cuda_bin_trt_comp}" DIRECTORY)
+  set(_cuda_cccl_include_trt_comp "${_cuda_root_trt_comp}/include/cccl")
+
+  add_executable(test_trt_decoder_composite
+    test_trt_decoder_composite.cpp
+    predecoder_pipeline_common.cpp
+  )
+
+  set_target_properties(test_trt_decoder_composite PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON
+  )
+
+  target_compile_definitions(test_trt_decoder_composite PRIVATE
+    ONNX_MODEL_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../lib/realtime"
+  )
+
+  target_include_directories(test_trt_decoder_composite PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${_cuda_cccl_include_trt_comp}
+    ${CUDAToolkit_INCLUDE_DIRS}
+    ${TENSORRT_INCLUDE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    ${CMAKE_SOURCE_DIR}/libs/core/include
+    ${CUDAQ_REALTIME_INCLUDE_DIR}
+  )
+
+  target_link_libraries(test_trt_decoder_composite PRIVATE
+    CUDA::cudart
+    cudaq-qec
+    cudaq-qec-trt-decoder
+    cudaq::cudaq
+  )
+
+  if(TARGET cudaq-qec-pymatching)
+    target_link_libraries(test_trt_decoder_composite PRIVATE cudaq-qec-pymatching)
+  endif()
+
+  get_filename_component(_cudaq_rt_lib_dir_trt_comp "${CUDAQ_REALTIME_LIBRARY}" DIRECTORY)
+  set_target_properties(test_trt_decoder_composite PROPERTIES
+    BUILD_RPATH "${CMAKE_BINARY_DIR}/lib;${CMAKE_BINARY_DIR}/lib/decoder-plugins;${_cudaq_rt_lib_dir_trt_comp}"
+    INSTALL_RPATH "${CMAKE_BINARY_DIR}/lib;${CMAKE_BINARY_DIR}/lib/decoder-plugins;${_cudaq_rt_lib_dir_trt_comp}"
+  )
+
+  if(ENABLE_NVTX)
+    target_compile_definitions(test_trt_decoder_composite PRIVATE ENABLE_NVTX)
+  endif()
+
+else()
+  message(WARNING "TensorRT or cudaq-qec-trt-decoder not found. "
+                  "Skipping test_trt_decoder_composite.")
+endif()
+
+# =========================================================================== #
 # hololink_predecoder_bridge
 # =========================================================================== #
 # FPGA bridge: Hololink RDMA -> realtime_pipeline with AI predecoder +

@@ -28,7 +28,7 @@ endif()
 # Project setup
 # ==============================================================================
 
-add_compile_options(-Wno-attributes) 
+add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:-Wno-attributes>)
 
 # Check if core is built as a standalone project.
 if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
@@ -80,7 +80,13 @@ option(CUDAQX_SOLVERS_INSTALL_PYTHON
 # using `LLVM_VERSION_MAJOR`, e.g. "-LLVM_VERSION_MAJOR=16".  Note that this
 # version variable is set to the latest LLVM version by default, and setting it
 # to an older version might break the project.
-find_package(LLVM ${LLVM_VERSION_MAJOR} CONFIG QUIET)
+if(NOT LLVM_VERSION_MAJOR)
+  set(LLVM_VERSION_MAJOR 22)
+endif()
+if(NOT LLVM_VERSION_MINOR)
+  set(LLVM_VERSION_MINOR 1)
+endif()
+find_package(LLVM ${LLVM_VERSION_MAJOR}.${LLVM_VERSION_MINOR} CONFIG QUIET)
 
 if(NOT LLVM_DIR)
   message(STATUS "LLVM_DIR not found, will try with llvm-config executable.")
@@ -141,7 +147,7 @@ if(NOT LLVM_DIR)
       "Could not find suitable llvm-config(-${LLVM_VERSION_MAJOR}).\
       \nTry providing valid -DLLVM_DIR=/path/to/llvm/lib/cmake/llvm.")
   else()
-    find_package(LLVM ${LLVM_VERSION_MAJOR} REQUIRED CONFIG
+    find_package(LLVM ${LLVM_VERSION_MAJOR}.${LLVM_VERSION_MINOR} REQUIRED CONFIG
       HINTS ${LLVM_CONFIG_CMAKE_DIR} NO_DEFAULT_PATH)
   endif()
 endif()
@@ -246,21 +252,23 @@ FetchContent_Declare(
   EXCLUDE_FROM_ALL
 )
 
-# We need version 3.11.1 because that is what CUDA-Q uses. If CUDA-Q updates,
-# then we need to remember to update.
+# We need version 3.12.0 because that is what CUDA-Q uses (since #4416). If
+# CUDA-Q updates, then we need to remember to update.
 FetchContent_Declare(
   json
   GIT_REPOSITORY https://github.com/nlohmann/json
-  GIT_TAG v3.11.1
+  GIT_TAG v3.12.0
   EXCLUDE_FROM_ALL
 )
 
 FetchContent_MakeAvailable(cppitertools json)
 
 if (CUDAQX_SOLVERS_STANDALONE_BUILD)
-  # FIXME for now, we only use library mode
-  set(CUDAQ_LIBRARY_MODE ON)
-  find_package(CUDAQ REQUIRED)
+  cudaqx_import_cudaq_targets()
+
+  if (CUDAQX_SOLVERS_BINDINGS_PYTHON)
+    find_package(CUDAQPythonInterop CONFIG)
+  endif()
 
   # FIXME
   add_subdirectory(../core core_build)
