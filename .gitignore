@@ -122,3 +122,8 @@ libs/solvers/python/metapackages/setup.py
 
 # Skill evaluation runtime artifacts (per-iteration responses, gradings, reports)
 .agents/evals/workspaces/
+
+# Generated per-agent skill mirrors. Canonical content lives in .agents/skills/.
+# Run `bash scripts/sync_agents_skills.sh` after clone to populate these.
+/.claude/skills/
+/.cursor/skills/

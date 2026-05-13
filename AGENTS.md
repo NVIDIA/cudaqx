@@ -18,10 +18,17 @@ the actual skill content is identical across locations.
 
 The canonical content lives at **`.agents/skills/`** — the open
 AGENTS.md convention that Codex (and other tools) discover natively. The
-`.claude/skills/` and `.cursor/skills/` trees are generated mirrors (a
-`.GENERATED` sentinel file is dropped at the root of each) maintained
-by `scripts/sync_agents_skills.sh`. Always edit `.agents/skills/`; the
-CI check fails if any mirror falls out of sync.
+`.claude/skills/` and `.cursor/skills/` trees are **generated locally**
+and gitignored, so only the canonical copy is tracked. Run the sync
+once after cloning to populate them:
+
+```bash
+bash scripts/sync_agents_skills.sh
+```
+
+After that, edit `.agents/skills/` and re-run the sync whenever you
+change a skill — `.claude/skills/` and `.cursor/skills/` are
+regenerated each time.
 
 To add a fourth agent (Copilot, Gemini, Windsurf, etc.), append one
 entry to `TARGETS` in `scripts/sync_agents_skills.sh`. No skill
@@ -52,13 +59,7 @@ protocol. Start there.
 
 1. Edit files under `.agents/skills/<name>/`.
 2. Run `bash scripts/sync_agents_skills.sh` to regenerate the
-   `.claude/skills/` and `.cursor/skills/` mirrors.
-3. Commit all updated directories in the same commit.
-
-To verify nothing has drifted:
-
-```bash
-bash scripts/sync_agents_skills.sh --check
-```
-
-A non-zero exit means a mirror is stale. Re-run without `--check`.
+   local `.claude/skills/` and `.cursor/skills/` mirrors so your
+   active agent picks up the change immediately.
+3. Commit only the changes under `.agents/skills/` — the mirrors
+   are gitignored.

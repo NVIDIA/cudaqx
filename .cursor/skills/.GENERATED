@@ -1,6 +1,0 @@
-This directory is a generated mirror of .agents/skills for Cursor.
-
-DO NOT EDIT FILES HERE. Edit the corresponding file under .agents/skills
-and re-run scripts/sync_agents_skills.sh.
-
-A CI check fails the build if this directory ever drifts out of sync.
