@@ -922,21 +922,27 @@ class TestTRTDecoderBatchValidation:
                 except Exception:
                     pass  # tmp_path cleanup will handle it
 
-    def test_decode_batch_non_integral_multiple_should_fail(
+    def test_decode_batch_accepts_non_integral_multiple(
             self, decoder_with_batch_size):
-        """Test that decode_batch fails when syndrome count is not an integral multiple of batch size."""
+        """Test that decode_batch accepts a final partial batch."""
         decoder, batch_size, syndrome_size, _ = decoder_with_batch_size
 
         if batch_size == 1:
-            pytest.skip("All counts work for batch_size=1")
+            pytest.skip("All counts are integral multiples for batch_size=1")
 
         # Create syndromes (batch_size + 1) - not a multiple
         syndromes = [[float(i + j)
                       for i in range(syndrome_size)]
                      for j in range(batch_size + 1)]
 
-        with pytest.raises(RuntimeError, match="integral multiple"):
-            decoder.decode_batch(syndromes)
+        results = decoder.decode_batch(syndromes)
+
+        assert len(results) == len(
+            syndromes), f"Expected {len(syndromes)} results, got {len(results)}"
+        for i, result in enumerate(results):
+            assert result.converged, f"Result {i} did not converge"
+            assert len(result.result) == syndrome_size, \
+                f"Result {i} has wrong output size: {len(result.result)}"
 
     def test_decode_batch_syndrome_size_mismatch(self, decoder_with_batch_size):
         """Test that decode_batch validates individual syndrome sizes."""
