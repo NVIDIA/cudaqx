@@ -38,6 +38,6 @@ public:
   CUDAQ_EXTENSION_CREATOR_FUNCTION(operator_pool, uccgsd)
 };
 /// @brief Register the uccgsd extension type with the CUDA-Q framework
-CUDAQ_REGISTER_TYPE(uccgsd)
+CUDAQ_EXT_PT_REGISTER_TYPE(uccgsd)
 
 } // namespace cudaq::solvers

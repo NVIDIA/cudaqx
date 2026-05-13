@@ -86,6 +86,6 @@ public:
       })
 };
 
-CUDAQ_REGISTER_TYPE(single_error_lut_example)
+CUDAQ_EXT_PT_REGISTER_TYPE(single_error_lut_example)
 
 } // namespace cudaq::qec

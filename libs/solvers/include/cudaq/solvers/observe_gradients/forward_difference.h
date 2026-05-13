@@ -30,5 +30,5 @@ public:
         return std::make_unique<forward_difference>(functor, op);
       })
 };
-CUDAQ_REGISTER_TYPE(forward_difference)
+CUDAQ_EXT_PT_REGISTER_TYPE(forward_difference)
 } // namespace cudaq

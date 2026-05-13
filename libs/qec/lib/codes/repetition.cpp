@@ -55,6 +55,6 @@ repetition::repetition(const heterogeneous_map &options) : code() {
 }
 
 /// @brief Register the repetition code type
-CUDAQ_REGISTER_TYPE(repetition)
+CUDAQ_EXT_PT_REGISTER_TYPE(repetition)
 
 } // namespace cudaq::qec::repetition

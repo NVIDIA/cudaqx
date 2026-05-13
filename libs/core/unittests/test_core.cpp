@@ -42,7 +42,7 @@ public:
 };
 
 // Extensions must register themselves
-CUDAQ_REGISTER_TYPE(RepeatBackOne)
+CUDAQ_EXT_PT_REGISTER_TYPE(RepeatBackOne)
 
 class RepeatBackTwo : public MyExtensionPoint {
 public:
@@ -51,7 +51,7 @@ public:
   }
   CUDAQ_EXTENSION_CREATOR_FUNCTION(MyExtensionPoint, RepeatBackTwo)
 };
-CUDAQ_REGISTER_TYPE(RepeatBackTwo)
+CUDAQ_EXT_PT_REGISTER_TYPE(RepeatBackTwo)
 
 } // namespace cudaqx::testing
 
@@ -112,7 +112,7 @@ public:
       })
 };
 
-CUDAQ_REGISTER_TYPE(RepeatBackOneWithArgs)
+CUDAQ_EXT_PT_REGISTER_TYPE(RepeatBackOneWithArgs)
 
 class RepeatBackTwoWithArgs : public MyExtensionPointWithArgs {
 public:
@@ -128,7 +128,7 @@ public:
       })
 };
 
-CUDAQ_REGISTER_TYPE(RepeatBackTwoWithArgs)
+CUDAQ_EXT_PT_REGISTER_TYPE(RepeatBackTwoWithArgs)
 
 } // namespace cudaqx::testing
 

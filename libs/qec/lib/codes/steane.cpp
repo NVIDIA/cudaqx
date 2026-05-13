@@ -37,6 +37,6 @@ steane::steane(const heterogeneous_map &options) : code() {
 }
 
 /// @brief Register the Steane code type
-CUDAQ_REGISTER_TYPE(steane)
+CUDAQ_EXT_PT_REGISTER_TYPE(steane)
 
 } // namespace cudaq::qec::steane

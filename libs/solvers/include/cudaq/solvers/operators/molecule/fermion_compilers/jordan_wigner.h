@@ -20,5 +20,5 @@ public:
 
   CUDAQ_EXTENSION_CREATOR_FUNCTION(fermion_compiler, jordan_wigner)
 };
-CUDAQ_REGISTER_TYPE(jordan_wigner)
+CUDAQ_EXT_PT_REGISTER_TYPE(jordan_wigner)
 } // namespace cudaq::solvers

@@ -32,5 +32,5 @@ public:
 
   CUDAQ_EXTENSION_CREATOR_FUNCTION(optimizer, lbfgs)
 };
-CUDAQ_REGISTER_TYPE(lbfgs)
+CUDAQ_EXT_PT_REGISTER_TYPE(lbfgs)
 } // namespace cudaq::optim

@@ -247,6 +247,6 @@ public:
       })
 };
 
-CUDAQ_REGISTER_TYPE(pymatching)
+CUDAQ_EXT_PT_REGISTER_TYPE(pymatching)
 
 } // namespace cudaq::qec

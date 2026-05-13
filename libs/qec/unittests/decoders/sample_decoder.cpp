@@ -41,6 +41,6 @@ public:
       })
 };
 
-CUDAQ_REGISTER_TYPE(sample_decoder)
+CUDAQ_EXT_PT_REGISTER_TYPE(sample_decoder)
 
 } // namespace cudaq::qec

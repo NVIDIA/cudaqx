@@ -182,7 +182,7 @@ To implement a new quantum error correcting code:
            }
        )
 
-       CUDAQ_REGISTER_TYPE(my_code)
+       CUDAQ_EXT_PT_REGISTER_TYPE(my_code)
 
 Example: Steane Code
 ^^^^^^^^^^^^^^^^^^^^^
@@ -581,7 +581,7 @@ To implement a new decoder:
         }
     )
 
-    CUDAQ_REGISTER_TYPE(my_decoder)
+    CUDAQ_EXT_PT_REGISTER_TYPE(my_decoder)
 
 Example: Lookup Table Decoder
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

@@ -30,5 +30,5 @@ public:
         return std::make_unique<parameter_shift>(functor, op);
       })
 };
-CUDAQ_REGISTER_TYPE(parameter_shift)
+CUDAQ_EXT_PT_REGISTER_TYPE(parameter_shift)
 } // namespace cudaq
