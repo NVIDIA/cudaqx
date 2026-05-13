@@ -58,10 +58,10 @@ namespace cudaqx {
 /// @endcode
 ///
 /// 3. Register your extensions:
-///    Use the CUDAQ_REGISTER_TYPE macro to register each extension.
+///    Use the CUDAQ_EXT_PT_REGISTER_TYPE macro to register each extension.
 ///
 /// @code
-/// CUDAQ_REGISTER_TYPE(RepeatBackOne)
+/// CUDAQ_EXT_PT_REGISTER_TYPE(RepeatBackOne)
 /// @endcode
 ///
 /// 4. Use your extensions:
@@ -181,7 +181,7 @@ public:
 
 /// @brief Macro for registering an extension type.
 /// @param TYPE The class to be registered as an extension.
-#define CUDAQ_REGISTER_TYPE(TYPE)                                              \
+#define CUDAQ_EXT_PT_REGISTER_TYPE(TYPE)                                       \
   const bool TYPE::registered_ = TYPE::register_type();                        \
   /* We must ALSO provide a destructor to clean up the registry so that when a \
    * dlcose happens, the parent registry no longer holds references to code    \

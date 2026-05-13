@@ -41,5 +41,5 @@ public:
 };
 /// @brief Register the spin_complement_gsd extension type with the CUDA-Q
 /// framework
-CUDAQ_REGISTER_TYPE(spin_complement_gsd)
+CUDAQ_EXT_PT_REGISTER_TYPE(spin_complement_gsd)
 } // namespace cudaq::solvers

@@ -42,6 +42,6 @@ public:
 };
 
 /// @brief Register the upccgsd extension type with the CUDA-Q framework
-CUDAQ_REGISTER_TYPE(upccgsd)
+CUDAQ_EXT_PT_REGISTER_TYPE(upccgsd)
 
 } // namespace cudaq::solvers

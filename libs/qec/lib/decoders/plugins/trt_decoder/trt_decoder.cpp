@@ -1070,7 +1070,7 @@ void trt_decoder::check_cuda() {
   }
 }
 
-CUDAQ_REGISTER_TYPE(trt_decoder)
+CUDAQ_EXT_PT_REGISTER_TYPE(trt_decoder)
 
 } // namespace cudaq::qec
 

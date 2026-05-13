@@ -59,7 +59,7 @@ enum class operation {
 /// the fault tolerant logical operation implementations)
 /// 4. Register the operations in your constructor using the
 /// operation_encodings map on the base class
-/// 5. Register your new code type using CUDAQ_REGISTER_TYPE
+/// 5. Register your new code type using CUDAQ_EXT_PT_REGISTER_TYPE
 ///
 /// Example implementation:
 /// @code{.cpp}
@@ -92,7 +92,7 @@ enum class operation {
 ///   )
 /// };
 ///
-/// CUDAQ_REGISTER_TYPE(my_code)
+/// CUDAQ_EXT_PT_REGISTER_TYPE(my_code)
 /// @endcode
 /// @brief Supported quantum operations for error correcting codes
 class code : public cudaqx::extension_point<code, const heterogeneous_map &> {
