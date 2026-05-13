@@ -11,8 +11,6 @@
 #include "optimizer.h"
 #include <utility>
 
-using namespace cudaqx;
-
 namespace cudaq::solvers {
 
 /// @brief A vqe_result encapsulates all the data produced
@@ -47,7 +45,7 @@ static inline vqe_result vqe(QuantumKernel &&kernel, const spin_op &hamiltonian,
                              optim::optimizer &optimizer,
                              observe_gradient &gradient,
                              const std::vector<double> &initial_parameters,
-                             heterogeneous_map options = heterogeneous_map()) {
+                             cudaqx::heterogeneous_map options = cudaqx::heterogeneous_map()) {
   if (!optimizer.requiresGradients())
     throw std::runtime_error("[vqe] provided optimizer does not require "
                              "gradients, yet gradient instance provided.");
@@ -83,13 +81,13 @@ static inline vqe_result vqe(QuantumKernel &&kernel, const spin_op &hamiltonian,
                              const std::string &optName,
                              const std::string &gradName,
                              const std::vector<double> &initial_parameters,
-                             heterogeneous_map options = heterogeneous_map()) {
+                             cudaqx::heterogeneous_map options = cudaqx::heterogeneous_map()) {
 
   if (!cudaq::optim::optimizer::is_registered(optName))
     throw std::runtime_error("provided optimizer is not valid.");
 
   if (!cudaq::observe_gradient::is_registered(gradName))
-    throw std::runtime_error("provided optimizer is not valid.");
+    throw std::runtime_error("provided gradient strategy is not valid.");
 
   auto optimizer = cudaq::optim::optimizer::get(optName);
   auto gradient = cudaq::observe_gradient::get(gradName, kernel, hamiltonian);
@@ -128,7 +126,7 @@ template <typename QuantumKernel>
 static inline vqe_result vqe(QuantumKernel &&kernel, const spin_op &hamiltonian,
                              const std::string &optName,
                              const std::vector<double> &initial_parameters,
-                             heterogeneous_map options = heterogeneous_map()) {
+                             cudaqx::heterogeneous_map options = cudaqx::heterogeneous_map()) {
 
   if (!cudaq::optim::optimizer::is_registered(optName))
     throw std::runtime_error("provided optimizer is not valid.");
@@ -166,7 +164,7 @@ static inline vqe_result vqe(QuantumKernel &&kernel, const spin_op &hamiltonian,
                              const std::string &optName,
                              observe_gradient &gradient,
                              const std::vector<double> &initial_parameters,
-                             heterogeneous_map options = heterogeneous_map()) {
+                             cudaqx::heterogeneous_map options = cudaqx::heterogeneous_map()) {
 
   if (!cudaq::optim::optimizer::is_registered(optName))
     throw std::runtime_error("provided optimizer is not valid.");
@@ -207,10 +205,10 @@ static inline vqe_result vqe(QuantumKernel &&kernel, const spin_op &hamiltonian,
                              optim::optimizer &optimizer,
                              const std::string &gradName,
                              const std::vector<double> &initial_parameters,
-                             heterogeneous_map options = heterogeneous_map()) {
+                             cudaqx::heterogeneous_map options = cudaqx::heterogeneous_map()) {
 
   if (!cudaq::observe_gradient::is_registered(gradName))
-    throw std::runtime_error("provided optimizer is not valid.");
+    throw std::runtime_error("provided gradient strategy is not valid.");
 
   auto gradient = cudaq::observe_gradient::get(gradName, kernel, hamiltonian);
 
@@ -247,11 +245,11 @@ template <typename QuantumKernel>
 static inline vqe_result vqe(QuantumKernel &&kernel, const spin_op &hamiltonian,
                              optim::optimizer &optimizer,
                              const std::vector<double> &initial_parameters,
-                             heterogeneous_map options = heterogeneous_map()) {
+                             cudaqx::heterogeneous_map options = cudaqx::heterogeneous_map()) {
 
   if (optimizer.requiresGradients())
-    throw std::runtime_error("[vqe] provided optimizer does not require "
-                             "gradients, yet gradient instance provided.");
+    throw std::runtime_error("[vqe] provided optimizer requires "
+                             "gradients, yet no gradient instance provided.");
 
   options.insert("initial_parameters", initial_parameters);
 
@@ -278,7 +276,7 @@ template <typename QuantumKernel>
   requires std::invocable<QuantumKernel, std::vector<double>>
 static inline vqe_result vqe(QuantumKernel &&kernel, const spin_op &hamiltonian,
                              const std::vector<double> &initial_parameters,
-                             heterogeneous_map options = heterogeneous_map()) {
+                             cudaqx::heterogeneous_map options = cudaqx::heterogeneous_map()) {
 
   auto optimizer = optim::optimizer::get("cobyla");
   options.insert("initial_parameters", initial_parameters);
@@ -307,7 +305,7 @@ static inline vqe_result vqe(QuantumKernel &&kernel, const spin_op &hamiltonian,
                              optim::optimizer &optimizer,
                              const std::vector<double> &initial_parameters,
                              ArgTranslator &&translator,
-                             heterogeneous_map options = heterogeneous_map()) {
+                             cudaqx::heterogeneous_map options = cudaqx::heterogeneous_map()) {
 
   if (optimizer.requiresGradients())
     throw std::runtime_error("[vqe] provided optimizer requires "
@@ -341,7 +339,7 @@ template <typename QuantumKernel, typename ArgTranslator>
 static inline vqe_result vqe(QuantumKernel &&kernel, const spin_op &hamiltonian,
                              const std::vector<double> &initial_parameters,
                              ArgTranslator &&translator,
-                             heterogeneous_map options = heterogeneous_map()) {
+                             cudaqx::heterogeneous_map options = cudaqx::heterogeneous_map()) {
 
   auto optimizer = optim::optimizer::get("cobyla");
   options.insert("initial_parameters", initial_parameters);
@@ -373,7 +371,7 @@ static inline vqe_result
 vqe(QuantumKernel &&kernel, const spin_op &hamiltonian,
     optim::optimizer &optimizer, observe_gradient &gradient,
     const std::vector<double> &initial_parameters, ArgTranslator &&translator,
-    heterogeneous_map options = heterogeneous_map()) {
+    cudaqx::heterogeneous_map options = cudaqx::heterogeneous_map()) {
 
   if (!optimizer.requiresGradients())
     throw std::runtime_error("[vqe] provided optimizer does not require "
