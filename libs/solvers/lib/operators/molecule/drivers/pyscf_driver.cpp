@@ -191,6 +191,6 @@ public:
                                  num_electrons,   numOrb, energies};
   }
 };
-CUDAQ_REGISTER_TYPE(RESTPySCFDriver)
+CUDAQ_EXT_PT_REGISTER_TYPE(RESTPySCFDriver)
 
 } // namespace cudaq::solvers

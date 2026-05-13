@@ -44,6 +44,6 @@ public:
 };
 
 /// @brief Register the simulator type with the CUDA-Q framework
-CUDAQ_REGISTER_TYPE(simulator)
+CUDAQ_EXT_PT_REGISTER_TYPE(simulator)
 
 } // namespace cudaq::solvers::adapt

@@ -482,6 +482,6 @@ std::size_t sliding_window::get_num_syndromes_per_round() const {
   return num_syndromes_per_round;
 }
 
-CUDAQ_REGISTER_TYPE(sliding_window)
+CUDAQ_EXT_PT_REGISTER_TYPE(sliding_window)
 
 } // namespace cudaq::qec

@@ -39,6 +39,6 @@ public:
 };
 
 /// @brief Register the qaoa_pool extension type with the CUDA-Q framework
-CUDAQ_REGISTER_TYPE(qaoa_pool)
+CUDAQ_EXT_PT_REGISTER_TYPE(qaoa_pool)
 
 } // namespace cudaq::solvers

@@ -44,6 +44,6 @@ public:
   CUDAQ_EXTENSION_CREATOR_FUNCTION(operator_pool, ceo)
 };
 /// @brief Register the ceo extension type with the CUDA-Q framework
-CUDAQ_REGISTER_TYPE(ceo)
+CUDAQ_EXT_PT_REGISTER_TYPE(ceo)
 
 } // namespace cudaq::solvers

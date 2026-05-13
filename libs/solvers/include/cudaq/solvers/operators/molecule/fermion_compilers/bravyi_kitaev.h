@@ -25,5 +25,5 @@ public:
 
   CUDAQ_EXTENSION_CREATOR_FUNCTION(fermion_compiler, bravyi_kitaev)
 };
-CUDAQ_REGISTER_TYPE(bravyi_kitaev)
+CUDAQ_EXT_PT_REGISTER_TYPE(bravyi_kitaev)
 } // namespace cudaq::solvers

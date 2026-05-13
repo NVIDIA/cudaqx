@@ -239,7 +239,7 @@ public:
       })
 };
 
-CUDAQ_REGISTER_TYPE(multi_error_lut)
+CUDAQ_EXT_PT_REGISTER_TYPE(multi_error_lut)
 
 class single_error_lut : public multi_error_lut {
 public:
@@ -257,6 +257,6 @@ public:
       })
 };
 
-CUDAQ_REGISTER_TYPE(single_error_lut)
+CUDAQ_EXT_PT_REGISTER_TYPE(single_error_lut)
 
 } // namespace cudaq::qec

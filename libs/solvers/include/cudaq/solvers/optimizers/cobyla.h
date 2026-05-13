@@ -33,6 +33,6 @@ public:
   CUDAQ_EXTENSION_CREATOR_FUNCTION(optimizer, cobyla);
 };
 
-CUDAQ_REGISTER_TYPE(cobyla)
+CUDAQ_EXT_PT_REGISTER_TYPE(cobyla)
 
 } // namespace cudaq::optim
