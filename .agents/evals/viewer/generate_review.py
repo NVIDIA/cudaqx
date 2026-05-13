@@ -8,9 +8,9 @@ the verdict from every grader that was run.
 
 Usage::
 
-    python .claude/evals/viewer/generate_review.py \\
-        .claude/evals/workspaces/2026-05-07-iter-1 \\
-        --out .claude/evals/workspaces/2026-05-07-iter-1/report.html
+    python .agents/evals/viewer/generate_review.py \\
+        .agents/evals/workspaces/2026-05-07-iter-1 \\
+        --out .agents/evals/workspaces/2026-05-07-iter-1/report.html
 """
 
 from __future__ import annotations

@@ -1,14 +1,14 @@
 # CUDA-QX skill evaluation harness
 
 This tree is **not** a skill. It evaluates the skills under
-`.claude/skills/`. Nothing in this tree is referenced from any `SKILL.md`
+`.agents/skills/`. Nothing in this tree is referenced from any `SKILL.md`
 or any reference file, so an agent loading a CUDA-QX skill will not see
 the prompts, assertions, runners, or graders that live here.
 
 ## Layout
 
 ```
-.claude/evals/
+.agents/evals/
 ├── prompts/           <skill>.evals.json           ← user-facing prompts only
 ├── assertions/        <skill>.json                 ← THE answer key (substring rules)
 ├── runners/
@@ -38,34 +38,34 @@ folder, is the cheapest way to enforce that.
 3. Smoke-test:
 
    ```bash
-   python .claude/evals/runners/runner.py prompts --skill <alias>
+   python .agents/evals/runners/runner.py prompts --skill <alias>
    ```
 
 ## End-to-end loop (per iteration)
 
 ```bash
-WORKSPACE=.claude/evals/workspaces/$(date +%Y-%m-%d)-iter-1
+WORKSPACE=.agents/evals/workspaces/$(date +%Y-%m-%d)-iter-1
 
 # 1. Dump prompts for your evaluator to consume.
-python .claude/evals/runners/runner.py prompts --skill qec --kind all > $WORKSPACE/qec.prompts.jsonl
+python .agents/evals/runners/runner.py prompts --skill qec --kind all > $WORKSPACE/qec.prompts.jsonl
 
 # 2. Your evaluator runs the agent (with and without the skill loaded) and
 #    writes responses.json + timing.json into:
 #       $WORKSPACE/with_skill/    and    $WORKSPACE/without_skill/
 
 # 3. Grade. Each grader is independent; run as many as you have.
-python .claude/evals/graders/programmatic.py --skill qec --responses $WORKSPACE/with_skill/responses.json
-python .claude/evals/graders/programmatic.py --skill qec --responses $WORKSPACE/without_skill/responses.json
+python .agents/evals/graders/programmatic.py --skill qec --responses $WORKSPACE/with_skill/responses.json
+python .agents/evals/graders/programmatic.py --skill qec --responses $WORKSPACE/without_skill/responses.json
 # (executable.py and judge.py optional; same calling convention.)
 
 # 4. Aggregate per-iteration. Computes deltas between configurations.
-python .claude/evals/runners/runner.py aggregate $WORKSPACE
+python .agents/evals/runners/runner.py aggregate $WORKSPACE
 
 # 5. Cross-grader agreement (Cohen's κ between programmatic / judge / etc).
-python .claude/evals/aggregate.py $WORKSPACE
+python .agents/evals/aggregate.py $WORKSPACE
 
 # 6. Render the HTML viewer for human review.
-python .claude/evals/viewer/generate_review.py $WORKSPACE --out $WORKSPACE/report.html
+python .agents/evals/viewer/generate_review.py $WORKSPACE --out $WORKSPACE/report.html
 ```
 
 ## Why three graders

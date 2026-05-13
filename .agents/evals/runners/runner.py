@@ -42,14 +42,14 @@ Layout convention
         ...
       benchmark.json                     <- aggregate wrote this
 
-Workspaces live under ``.claude/evals/workspaces/`` (gitignored). They sit
+Workspaces live under ``.agents/evals/workspaces/`` (gitignored). They sit
 outside the skills tree so the agent under test never sees them.
 
 Note: scoring used to live inside this runner. It now lives in the graders
-under ``.claude/evals/graders/`` (one binary per strategy). To grade a
+under ``.agents/evals/graders/`` (one binary per strategy). To grade a
 ``responses.json``, invoke a grader directly, e.g.::
 
-    python .claude/evals/graders/programmatic.py --skill qec \
+    python .agents/evals/graders/programmatic.py --skill qec \
         --responses workspace/iteration-1/with_skill/responses.json
 """
 
@@ -61,7 +61,7 @@ import sys
 from pathlib import Path
 
 # Repo-relative roots, resolved from this file. The runner lives at
-# .claude/evals/runners/runner.py.
+# .agents/evals/runners/runner.py.
 EVALS_ROOT = Path(__file__).resolve().parents[1]
 PROMPTS_DIR = EVALS_ROOT / "prompts"
 GRADERS_DIR = EVALS_ROOT / "graders"

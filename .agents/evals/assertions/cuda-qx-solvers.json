@@ -1,6 +1,6 @@
 {
   "skill_name": "cuda-qx-solvers",
-  "_note": "Answer key. NEVER read this file from inside SKILL.md or any references/*.md. The agent under test must not see this content. Loaded by .claude/evals/graders/programmatic.py (and judge.py) only.",
+  "_note": "Answer key. NEVER read this file from inside SKILL.md or any references/*.md. The agent under test must not see this content. Loaded by .agents/evals/graders/programmatic.py (and judge.py) only.",
   "activation_marker": "cuda-qx-solvers",
   "scenarios": {
     "S1": {

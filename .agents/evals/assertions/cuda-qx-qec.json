@@ -1,6 +1,6 @@
 {
   "skill_name": "cuda-qx-qec",
-  "_note": "Answer key. NEVER read this file from inside SKILL.md or any references/*.md. Loaded by .claude/evals/graders/ only.",
+  "_note": "Answer key. NEVER read this file from inside SKILL.md or any references/*.md. Loaded by .agents/evals/graders/ only.",
   "activation_marker": "cuda-qx-qec",
   "scenarios": {
     "S1": {

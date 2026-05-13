@@ -4,7 +4,7 @@
 Run AFTER you have grading.*.json files in each configuration directory
 of an iteration::
 
-    python .claude/evals/aggregate.py .claude/evals/workspaces/<iter>/
+    python .agents/evals/aggregate.py .agents/evals/workspaces/<iter>/
 
 Two outputs:
 

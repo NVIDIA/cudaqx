@@ -7,7 +7,7 @@
 This is the single report covering the eval framework, what was measured,
 what we found, what got fixed in this round, and what to do next. Per-
 iteration artifacts (`responses.json`, `grading.*.json`, `benchmark.json`,
-`report.html`) live under `.claude/evals/workspaces/<iter>/`.
+`report.html`) live under `.agents/evals/workspaces/<iter>/`.
 
 ---
 
@@ -121,7 +121,7 @@ Every "failure" the with-skill QEC agent shows in iter 2 is one of these:
 
 Four of five are pure substring brittleness — the same five that iter 1
 flagged. They will flip to `pass` the moment the judge grader is wired up
-(no agent re-runs needed, just `python .claude/evals/graders/judge.py` on
+(no agent re-runs needed, just `python .agents/evals/graders/judge.py` on
 the existing `responses.json`).
 
 The fifth (`S13`, the new docs prompt) is a **real** content gap: the QEC
@@ -137,7 +137,7 @@ This is not a phrasing artifact — it's structural:
 
 * On in-scope prompts (e.g. "Build a Steane memory experiment"), the
   with-skill agent emits the marker (`cuda-qx-qec`); the baseline cannot,
-  because the skill name lives in `.claude/skills/cuda-qx-qec/` which it
+  because the skill name lives in `.agents/skills/cuda-qx-qec/` which it
   was forbidden to read.
 * On out-of-scope prompts (e.g. "Open the cudaq_qec docs offline" — the new
   `A11`), the with-skill agent correctly *withholds* the marker and
@@ -257,23 +257,23 @@ cd /workspaces/cuda-qx-g
 source .venv/bin/activate
 
 # inspect the latest results
-ls .claude/evals/workspaces/2026-05-07-qec-iter2/
-ls .claude/evals/workspaces/2026-05-07-solvers-iter1/
-python -m http.server -d .claude/evals/workspaces/2026-05-07-qec-iter2 8001
+ls .agents/evals/workspaces/2026-05-07-qec-iter2/
+ls .agents/evals/workspaces/2026-05-07-solvers-iter1/
+python -m http.server -d .agents/evals/workspaces/2026-05-07-qec-iter2 8001
 # open http://localhost:8001/report.html
 
 # add a new prompt to a skill and re-grade only:
-$EDITOR .claude/evals/prompts/cuda-qx-qec.evals.json
-$EDITOR .claude/evals/assertions/cuda-qx-qec.json
-python .claude/evals/graders/programmatic.py --skill qec \
-  --responses .claude/evals/workspaces/2026-05-07-qec-iter2/with_skill/responses.json
-python .claude/evals/aggregate.py .claude/evals/workspaces/2026-05-07-qec-iter2
+$EDITOR .agents/evals/prompts/cuda-qx-qec.evals.json
+$EDITOR .agents/evals/assertions/cuda-qx-qec.json
+python .agents/evals/graders/programmatic.py --skill qec \
+  --responses .agents/evals/workspaces/2026-05-07-qec-iter2/with_skill/responses.json
+python .agents/evals/aggregate.py .agents/evals/workspaces/2026-05-07-qec-iter2
 
 # new iteration from scratch (any skill):
-WS=.claude/evals/workspaces/2026-05-08-build-iter1
+WS=.agents/evals/workspaces/2026-05-08-build-iter1
 mkdir -p $WS/{with_skill,without_skill}
 echo build > $WS/skill.txt
-python .claude/evals/runners/runner.py prompts --skill build --kind all --format json > $WS/prompts.json
+python .agents/evals/runners/runner.py prompts --skill build --kind all --format json > $WS/prompts.json
 # launch two subagents (one with skill access, one without), each writes
 # responses.json + timing.json into its directory.
 # then grade + aggregate + render as above.
@@ -288,11 +288,11 @@ validated by re-running just the grader, no agent tokens spent.
 
 | Path | What it is |
 |---|---|
-| `.claude/evals/REPORT.md` | This report (canonical) |
-| `.claude/evals/README.md` | Pipeline reference |
-| `.claude/evals/workspaces/2026-05-07-qec-iter1/` | First QEC run (22 prompts), original surfacing of venv + docs gaps |
-| `.claude/evals/workspaces/2026-05-07-qec-iter2/` | Re-run after venv fix + docs prompts (24 prompts) |
-| `.claude/evals/workspaces/2026-05-07-solvers-iter1/` | First solvers run (24 prompts) |
-| `.claude/skills/_shared/scripts/preflight.sh` | Venv-discovery patch lives here |
-| `.claude/evals/prompts/cuda-qx-{qec,solvers}.evals.json` | Includes new `S13` + `A11` |
-| `.claude/evals/assertions/cuda-qx-{qec,solvers}.json` | Answer key for `S13` + `A11` |
+| `.agents/evals/REPORT.md` | This report (canonical) |
+| `.agents/evals/README.md` | Pipeline reference |
+| `.agents/evals/workspaces/2026-05-07-qec-iter1/` | First QEC run (22 prompts), original surfacing of venv + docs gaps |
+| `.agents/evals/workspaces/2026-05-07-qec-iter2/` | Re-run after venv fix + docs prompts (24 prompts) |
+| `.agents/evals/workspaces/2026-05-07-solvers-iter1/` | First solvers run (24 prompts) |
+| `.agents/skills/_shared/scripts/preflight.sh` | Venv-discovery patch lives here |
+| `.agents/evals/prompts/cuda-qx-{qec,solvers}.evals.json` | Includes new `S13` + `A11` |
+| `.agents/evals/assertions/cuda-qx-{qec,solvers}.json` | Answer key for `S13` + `A11` |
