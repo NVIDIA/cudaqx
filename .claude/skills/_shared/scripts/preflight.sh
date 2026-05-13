@@ -19,10 +19,18 @@ set -u
 JSON=0
 [[ "${1:-}" == "--json" ]] && JSON=1
 
-# Locate repo root (the dir that contains scripts/doctor.sh).
+# Locate repo root. Prefer `git rev-parse` so moving this script up or down
+# a directory level does not silently break path arithmetic. Fall back to the
+# legacy 4-levels-up relative path when not in a git checkout (e.g. extracted
+# tarball, or running outside the repo).
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# .claude/skills/_shared/scripts/ -> repo root is 4 levels up.
-REPO_ROOT="$(cd "$HERE/../../../.." && pwd)"
+if command -v git >/dev/null 2>&1 \
+    && REPO_ROOT="$(git -C "$HERE" rev-parse --show-toplevel 2>/dev/null)" \
+    && [[ -n "$REPO_ROOT" ]]; then
+  :
+else
+  REPO_ROOT="$(cd "$HERE/../../../.." && pwd)"
+fi
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -46,7 +54,9 @@ OS_KERNEL="$(uname -srm 2>/dev/null || echo unknown)"
 OS_ID=""
 OS_VERSION=""
 if [[ -f /etc/os-release ]]; then
+  # shellcheck source=/dev/null
   OS_ID="$(. /etc/os-release && echo "${ID:-}")"
+  # shellcheck source=/dev/null
   OS_VERSION="$(. /etc/os-release && echo "${VERSION_ID:-}")"
 fi
 CPU_COUNT="$(nproc 2>/dev/null || echo 0)"
@@ -194,8 +204,13 @@ BUILD_DIR_EXISTS=false
 
 SUBMODULES_JSON='[]'
 if [[ -f "$REPO_ROOT/.gitmodules" ]] && command -v git >/dev/null 2>&1; then
+  # Note: must use `python3 -c` rather than `python3 - <<HEREDOC` here,
+  # because the heredoc redirect would override the piped stdin from
+  # git submodule status and the script would never see any submodule
+  # lines (silently emits '[]' regardless). Currently no submodules in
+  # this repo, so the bug was latent until a future submodule lands.
   SUBMODULES_JSON=$(cd "$REPO_ROOT" && git submodule status 2>/dev/null \
-    | python3 - <<'PY'
+    | python3 -c '
 import json, sys
 out = []
 for line in sys.stdin:
@@ -211,8 +226,7 @@ for line in sys.stdin:
             "initialized": initialized,
         })
 print(json.dumps(out))
-PY
-  )
+')
 fi
 
 # ---------------------------------------------------------------------------

@@ -213,6 +213,7 @@ def grade(skill: str, responses: dict, assertions_path: Path) -> dict:
     skipped = sum(1 for s in scenarios if s["status"] == "skipped")
 
     return {
+        "schema_version": "1",
         "grader": "executable",
         "skill": skill,
         "assertions_path": str(assertions_path),

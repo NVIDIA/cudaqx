@@ -150,6 +150,7 @@ def grade(skill: str, responses: dict[str, str], assertions_path: Path) -> dict:
         max(len(scenarios), 1))
 
     return {
+        "schema_version": "1",
         "grader": "programmatic",
         "skill": skill,
         "assertions_path": str(assertions_path),

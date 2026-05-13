@@ -247,6 +247,7 @@ def grade(skill: str, prompts: list[dict], assertions: dict,
            (len(have_scores) * 8) if have_scores else 0.0)
 
     return {
+        "schema_version": "1",
         "grader": "judge",
         "skill": skill,
         "model": model,

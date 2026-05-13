@@ -81,12 +81,21 @@ fi
 # Configure (only on first run, unless --reconfigure)
 if [[ ! -d "$BUILD" || $RECONFIGURE -eq 1 ]]; then
   echo "Configuring $LIB ($BUILD_TYPE) ..."
+  if [[ $DO_TESTS -eq 1 ]]; then
+    TESTS_FLAG="-DCUDAQX_INCLUDE_TESTS=ON"
+  else
+    TESTS_FLAG="-DCUDAQX_INCLUDE_TESTS=OFF"
+  fi
+  if [[ $NO_PYTHON -eq 1 ]]; then
+    PYTHON_FLAG="-DCUDAQX_BINDINGS_PYTHON=OFF"
+  else
+    PYTHON_FLAG="-DCUDAQX_BINDINGS_PYTHON=ON"
+  fi
   cmake -G Ninja -S "$SRC" -B "$BUILD" \
     -DCUDAQ_DIR="$CUDAQ_DIR_VAL" \
     -DCMAKE_INSTALL_PREFIX="$CUDAQX_INSTALL_PREFIX_VAL" \
     -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
-    $( [[ $DO_TESTS -eq 1 ]] && echo "-DCUDAQX_INCLUDE_TESTS=ON" || echo "-DCUDAQX_INCLUDE_TESTS=OFF" ) \
-    $( [[ $NO_PYTHON -eq 1 ]] && echo "-DCUDAQX_BINDINGS_PYTHON=OFF" || echo "-DCUDAQX_BINDINGS_PYTHON=ON" )
+    "$TESTS_FLAG" "$PYTHON_FLAG"
 fi
 
 echo "Building $LIB ..."

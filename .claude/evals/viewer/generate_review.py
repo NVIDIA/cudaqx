@@ -25,6 +25,25 @@ from typing import Any
 EVALS_ROOT = Path(__file__).resolve().parents[1]
 PROMPTS_DIR = EVALS_ROOT / "prompts"
 
+# Keep in sync with aggregate.py::GRADING_SCHEMA_VERSION. Duplicated rather
+# than imported so the viewer stays standalone.
+GRADING_SCHEMA_VERSION = "1"
+
+
+def _check_schema(path: Path, payload: dict) -> None:
+    """Warn (don't fail) when a grading file was produced under a different
+    schema. The viewer is best-effort: it'll still render what it can."""
+    found = payload.get("schema_version")
+    if found is None:
+        sys.stderr.write(
+            f"warning: {path} has no schema_version field "
+            f"(expected {GRADING_SCHEMA_VERSION!r}). Some columns may be blank.\n"
+        )
+    elif found != GRADING_SCHEMA_VERSION:
+        sys.stderr.write(f"warning: {path} schema_version={found!r}, "
+                         f"expected {GRADING_SCHEMA_VERSION!r}.\n")
+
+
 # Skill discovery: each iteration directory carries a `skill.txt` or, failing
 # that, we try to pull it from the first grading file.
 
@@ -58,7 +77,9 @@ def _load_iteration(iter_dir: Path) -> dict[str, dict]:
         gradings: dict[str, dict] = {}
         for path in sorted(cfg.glob("grading.*.json")):
             grader = path.stem.split(".", 1)[1]
-            gradings[grader] = json.loads(path.read_text())
+            payload = json.loads(path.read_text())
+            _check_schema(path, payload)
+            gradings[grader] = payload
         if responses or gradings:
             out[cfg.name] = {
                 "responses": responses,

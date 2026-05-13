@@ -86,6 +86,31 @@ def _cohen_kappa(a: list[bool | None], b: list[bool | None]) -> dict[str, Any]:
     }
 
 
+# Bump GRADING_SCHEMA_VERSION whenever the on-disk grading.*.json shape
+# changes incompatibly. Readers below only warn on mismatch (older
+# workspaces remain partially readable); add migration logic here when
+# you bump.
+GRADING_SCHEMA_VERSION = "1"
+
+
+def _check_schema(path: Path, payload: dict) -> None:
+    """Warn (don't fail) if a grading file was produced by a different schema.
+
+    Keeps the loop resilient: an old workspace with no version field still
+    aggregates, just with a one-line note pointing at the producer.
+    """
+    found = payload.get("schema_version")
+    if found is None:
+        sys.stderr.write(
+            f"warning: {path} has no schema_version field "
+            f"(expected {GRADING_SCHEMA_VERSION!r}); produced by an older "
+            f"grader. Some fields may be missing.\n")
+    elif found != GRADING_SCHEMA_VERSION:
+        sys.stderr.write(
+            f"warning: {path} schema_version={found!r}, expected "
+            f"{GRADING_SCHEMA_VERSION!r}. Aggregation may misread fields.\n")
+
+
 def _load_iteration(iter_dir: Path) -> dict[str, dict[str, dict]]:
     """Return {config_name: {grader_name: grading_dict}}."""
     out: dict[str, dict[str, dict]] = {}
@@ -95,7 +120,9 @@ def _load_iteration(iter_dir: Path) -> dict[str, dict[str, dict]]:
         cfg_record: dict[str, dict] = {}
         for path in sorted(cfg.glob("grading.*.json")):
             grader = path.stem.split(".", 1)[1]
-            cfg_record[grader] = json.loads(path.read_text())
+            payload = json.loads(path.read_text())
+            _check_schema(path, payload)
+            cfg_record[grader] = payload
         if cfg_record:
             out[cfg.name] = cfg_record
     return out
