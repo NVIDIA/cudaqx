@@ -70,7 +70,7 @@ def qec_circuit() -> int:
         for i in range(3):
             x(data[i])
 
-    return cudaq.to_integer(mz(data))
+    return cudaq.to_integer(cudaq.to_bools(mz(data)))
 
 
 # [End QEC Circuit]
