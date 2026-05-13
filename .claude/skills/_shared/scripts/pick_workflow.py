@@ -212,8 +212,10 @@ def _rule_blockers(preflight: dict, imports: dict, intent: str) -> list[dict]:
                 "sudo apt install -y libgfortran5 gfortran libblas-dev",
         })
 
-    # Build intents need cmake/ninja.
-    if intent.startswith("build") and intent != "build-docs":
+    # Build intents need cmake/ninja. build-docs is included because the
+    # docs target is wired through the top-level CMake, so build_docs.sh
+    # also invokes cmake + ninja.
+    if intent.startswith("build"):
         if not preflight.get("toolchain", {}).get("cmake"):
             blockers.append({
                 "kind":

@@ -213,8 +213,9 @@ python3 -m pytest -v libs/solvers/python/tests \
 1. Re-run the **First three actions**. The state of the world may have
    changed since you started.
 2. Read the matching reference file end-to-end (it's short).
-3. Run `scripts/doctor.sh` (the underlying tool that `preflight.sh`
-   wraps) to capture a full snapshot for a bug report.
+3. Run `scripts/doctor.sh` for a human-readable environment snapshot
+   suitable for a bug report. (`preflight.sh --json` is the structured
+   superset used by the agent workflow.)
 4. Try a clean build: `bash scripts/clean.sh && <rebuild>`.
 5. Reproduce inside the published dev container — it pins the exact
    toolchain and removes "works locally" ambiguity.

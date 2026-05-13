@@ -51,7 +51,6 @@ Output
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import re
 import subprocess
@@ -102,10 +101,26 @@ def _extract_code(response: str, mode: str) -> str | None:
     return matches[0]
 
 
-def _module_present(mod: str) -> bool:
+def _module_present_in(interp: str, mod: str) -> bool:
+    """Check whether ``mod`` is importable from the interpreter that will run
+    the test, not from the grader's own interpreter.
+
+    The grader and the test code often run under different Python interpreters
+    (e.g. grader in system python, test code in a project venv). Checking
+    presence in the grader's interpreter produces false skips when the venv
+    has the module but the grader doesn't, or vice versa.
+    """
+    if interp == "bash":
+        return True
+    probe = (f"import importlib.util, sys; "
+             f"sys.exit(0 if importlib.util.find_spec({mod!r}) is not None "
+             f"else 1)")
     try:
-        return importlib.util.find_spec(mod) is not None
-    except (ImportError, ValueError):
+        r = subprocess.run([interp, "-c", probe],
+                           capture_output=True,
+                           timeout=10)
+        return r.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError):
         return False
 
 
@@ -118,16 +133,22 @@ def _run_scenario(scenario_id: str, spec: dict, response: str) -> dict:
             "reason": "no executable block in assertions"
         }
 
-    # Skip if a required module is missing (saves time + noise).
+    extractor = rules.get("code_extractor", "first_python_block")
+    interp = rules.get("interpreter",
+                       "python3" if "python" in extractor else "bash")
+
+    # Skip if a required module is missing in the *target* interpreter.
     for needed in rules.get("skip_if_missing", []):
-        if not _module_present(needed):
+        if not _module_present_in(interp, needed):
             return {
-                "id": scenario_id,
-                "status": "skipped",
-                "reason": f"required module '{needed}' not installed"
+                "id":
+                    scenario_id,
+                "status":
+                    "skipped",
+                "reason":
+                    f"required module '{needed}' not installed in {interp}"
             }
 
-    extractor = rules.get("code_extractor", "first_python_block")
     code = _extract_code(response, extractor)
     if code is None:
         return {
@@ -135,9 +156,6 @@ def _run_scenario(scenario_id: str, spec: dict, response: str) -> dict:
             "status": "no_code",
             "reason": f"no `{extractor}` block found in response"
         }
-
-    interp = rules.get("interpreter",
-                       "python3" if "python" in extractor else "bash")
     preamble = rules.get("preamble", "")
     harness = rules.get("harness", "{code}")
     program = harness.format(code=preamble +

@@ -92,8 +92,12 @@ def score_scenario(scenario_id: str, spec: dict,
     must = [s.lower() for s in spec.get("must_include", [])]
     must_not = [s.lower() for s in spec.get("must_not_include", [])]
     s = ScenarioScore(id=scenario_id)
-    s.coverage_max = max(len(must), 1)
-    s.purity_max = max(len(must_not), 1)
+    # Use the true list length, not max(..., 1). The previous floor-of-1
+    # made empty-must_include scenarios unpassable (coverage stayed 0 while
+    # coverage_max was 1) and gave empty-must_not_include scenarios a free
+    # +1 (purity = 1 - 0 against purity_max = 1).
+    s.coverage_max = len(must)
+    s.purity_max = len(must_not)
 
     s.coverage = sum(1 for m in must if m in text)
     s.missing = [

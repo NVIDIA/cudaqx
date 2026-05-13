@@ -80,9 +80,13 @@ PROBES: list[dict[str, Any]] = [
     },
     {
         "name": "nv-qldpc-decoder",
-        "code":
-            "import cudaq_qec as qec; import numpy as np; "
-            "qec.get_decoder('nv-qldpc-decoder', np.zeros((2,2), dtype=np.uint8))",
+        # Use a small, non-degenerate parity-check matrix. A 2x2 zero matrix
+        # can be rejected by the decoder itself, which would falsely report
+        # "missing" when the plugin is actually registered. A 2x4 rank-2
+        # matrix is well-formed and any registered BP/OSD decoder will accept it.
+        "code": "import cudaq_qec as qec; import numpy as np; "
+                "H = np.array([[1,0,1,0],[0,1,1,0]], dtype=np.uint8); "
+                "qec.get_decoder('nv-qldpc-decoder', H)",
         "fix": "Closed-source plugin from NVIDIA; see libs/qec/README.md",
         "group": "qec-nv-qldpc"
     },

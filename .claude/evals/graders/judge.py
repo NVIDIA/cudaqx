@@ -25,7 +25,7 @@ Two backends are supported out of the box:
 * ``openai`` — uses ``OPENAI_API_KEY`` and the ``openai`` Python SDK
   (``pip install openai``). ``--model gpt-5`` etc.
 * ``anthropic`` — uses ``ANTHROPIC_API_KEY`` and ``anthropic``
-  (``pip install anthropic``). ``--model claude-opus-4-5`` etc.
+  (``pip install anthropic``). ``--model claude-opus-4-7`` etc.
 
 If the relevant package or env var is missing, the grader records every
 scenario as ``status: not_configured`` and exits 0. This way the eval
@@ -153,9 +153,13 @@ def _backend_anthropic(model: str) -> Callable[[str], str] | None:
     client = anthropic.Anthropic()
 
     def call(prompt: str) -> str:
+        # 1024 tokens leaves room for a verbose justification + the JSON
+        # block. The previous 400-token ceiling sometimes truncated the
+        # closing brace, which then failed _parse_judge_reply with a
+        # parse_error and lost the scenario from the κ computation.
         resp = client.messages.create(
             model=model,
-            max_tokens=400,
+            max_tokens=1024,
             temperature=0,
             messages=[{
                 "role": "user",
@@ -265,7 +269,7 @@ def main() -> int:
     p.add_argument("--backend", choices=sorted(BACKENDS), default="anthropic")
     p.add_argument(
         "--model",
-        default="claude-opus-4-5",
+        default="claude-opus-4-7",
         help="Pin a specific model. Recorded in the output for reproducibility."
     )
     p.add_argument("--out", type=Path, default=None)

@@ -49,8 +49,10 @@ ls -la $HOME/.cudaq/  2>/dev/null | head
 ls -la $HOME/.cudaqx/ 2>/dev/null | head
 ```
 
-`scripts/doctor.sh --json` prints the same snapshot in JSON for
-machine-readable consumption (used by `_shared/scripts/preflight.sh`).
+`scripts/doctor.sh --json` prints a JSON snapshot for machine-readable
+consumption. For agent workflows prefer `_shared/scripts/preflight.sh
+--json`, which is a superset (adds GPU/CPU detail, venv discovery,
+submodules, and build state).
 
 ## The five most common findings
 

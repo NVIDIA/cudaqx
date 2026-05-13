@@ -5,9 +5,10 @@
 # in --json mode) is consumed by `pick_workflow.py` to deterministically
 # pick the next reference file and the next commands to run.
 #
-# Wraps and extends `scripts/doctor.sh` (the existing repo-root tool):
-# preflight surfaces *more* (GPU count, CPU count, venv detection, submodule
-# status, build state) and *structures* the output as JSON.
+# Supersedes `scripts/doctor.sh` (the existing repo-root tool): preflight
+# re-implements the same checks and adds GPU count, CPU count, venv
+# detection, submodule status, build state, and structured JSON output.
+# `doctor.sh` is kept around for the human-readable troubleshooting flow.
 #
 # Usage:
 #   preflight.sh           # human-readable

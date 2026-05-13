@@ -44,17 +44,11 @@ _pip_pkg() {
 }
 
 _kv() {
-  if [[ $JSON -eq 1 ]]; then
-    printf '  "%s": %s,\n' "$1" "$(printf '%s' "$2" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().strip()))')"
-  else
-    printf '  %-30s %s\n' "$1:" "$2"
-  fi
+  # Text mode only. JSON output is emitted in one shot at the end via Python.
+  printf '  %-30s %s\n' "$1:" "$2"
 }
 
 _section() {
-  if [[ $JSON -eq 1 ]]; then
-    return 0
-  fi
   echo ""
   echo "=== $1 ==="
 }
@@ -115,7 +109,67 @@ done
 # Print ---------------------------------------------------------------------
 
 if [[ $JSON -eq 1 ]]; then
-  echo "{"
+  # Hand all gathered values to Python so it can emit valid JSON.
+  # (The previous hand-rolled printf approach left trailing commas and
+  # could not safely escape values containing quotes.)
+  export CMAKE_VER NINJA_VER GCC_VER CLANG_VER DOXYGEN_VER
+  export PYTHON_VER PIP_VER
+  export NVIDIA_SMI_HEAD NVCC_VER
+  export PIP_CUDAQ PIP_QEC PIP_SOLVERS PIP_CUQUANTUM PIP_TENSORRT PIP_TORCH
+  export CUDAQ_PREFIX_OK CUDAQX_PREFIX_OK
+  export IMPORT_CUDAQ IMPORT_QEC IMPORT_SOLVERS
+  export SUFFIX_WARN CUDAQ_SUFFIX
+
+  python3 - <<'PY'
+import json, os
+
+def env(k, default=""):
+    return os.environ.get(k, default).strip()
+
+sanity = {}
+if env("SUFFIX_WARN"):
+    sanity["abi_mismatch_warning"] = env("SUFFIX_WARN")
+elif env("CUDAQ_SUFFIX"):
+    sanity["cuda_suffix_consistency"] = f"ok ({env('CUDAQ_SUFFIX')})"
+
+out = {
+    "build_toolchain": {
+        "cmake":   env("CMAKE_VER")   or "MISSING",
+        "ninja":   env("NINJA_VER")   or "MISSING",
+        "gcc":     env("GCC_VER")     or "MISSING",
+        "clang":   env("CLANG_VER")   or "not present",
+        "doxygen": env("DOXYGEN_VER") or "not present",
+    },
+    "python": {
+        "python3": env("PYTHON_VER") or "MISSING",
+        "pip":     env("PIP_VER")    or "MISSING",
+    },
+    "gpu_cuda": {
+        "nvidia_smi": env("NVIDIA_SMI_HEAD") or "not present",
+        "nvcc":       env("NVCC_VER")        or "not present",
+    },
+    "pip_packages": {
+        "cuda-quantum":     env("PIP_CUDAQ")     or "not installed",
+        "cudaq-qec":        env("PIP_QEC")       or "not installed",
+        "cudaq-solvers":    env("PIP_SOLVERS")   or "not installed",
+        "cuquantum-python": env("PIP_CUQUANTUM") or "not installed",
+        "tensorrt":         env("PIP_TENSORRT") or "not installed",
+        "torch":            env("PIP_TORCH")    or "not installed",
+    },
+    "install_prefixes": {
+        "CUDAQ_INSTALL_PREFIX":  env("CUDAQ_PREFIX_OK"),
+        "CUDAQX_INSTALL_PREFIX": env("CUDAQX_PREFIX_OK"),
+    },
+    "imports": {
+        "cudaq":         env("IMPORT_CUDAQ"),
+        "cudaq_qec":     env("IMPORT_QEC"),
+        "cudaq_solvers": env("IMPORT_SOLVERS"),
+    },
+    "sanity": sanity,
+}
+print(json.dumps(out, indent=2))
+PY
+  exit 0
 fi
 
 _section "Build toolchain"
@@ -155,11 +209,4 @@ if [[ -n "$SUFFIX_WARN" ]]; then
   _kv "WARNING: ABI mismatch" "$SUFFIX_WARN"
 elif [[ -n "$CUDAQ_SUFFIX" ]]; then
   _kv "CUDA suffix consistency" "ok ($CUDAQ_SUFFIX)"
-fi
-
-if [[ $JSON -eq 1 ]]; then
-  # Close JSON, stripping the trailing comma from the last printed pair.
-  # Cheap fix: append a sentinel key.
-  echo "  \"_end\": true"
-  echo "}"
 fi
