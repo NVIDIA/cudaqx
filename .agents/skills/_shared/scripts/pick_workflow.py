@@ -77,13 +77,16 @@ INTENT_TABLE: dict[str, dict[str, Any]] = {
         "required_features": ["core"],
     },
     "debug-import": {
-        "skill": "cuda-qx-build",
-        "reference": ".agents/skills/cuda-qx-build/references/install-triage.md",
+        "skill":
+            "cuda-qx-build",
+        "reference":
+            ".agents/skills/cuda-qx-build/references/install-triage.md",
         "commands": [
             "bash scripts/doctor.sh",
             "pip list | grep -E 'cuda-quantum|cudaq-(qec|solvers)|cuquantum|tensorrt|torch'",
         ],
-        "verify": "python3 -c 'import cudaq, cudaq_qec, cudaq_solvers'",
+        "verify":
+            "python3 -c 'import cudaq, cudaq_qec, cudaq_solvers'",
         "required_features": [],
     },
 
@@ -100,67 +103,85 @@ INTENT_TABLE: dict[str, dict[str, Any]] = {
         "required_features": ["core"],
     },
     "qec-custom": {
-        "skill": "cuda-qx-qec-extending",
-        "reference": ".agents/skills/cuda-qx-qec-extending/references/code-python.md",
+        "skill":
+            "cuda-qx-qec-extending",
+        "reference":
+            ".agents/skills/cuda-qx-qec-extending/references/code-python.md",
         "commands": [
             "ls libs/qec/include/cudaq/qec/codes/",
             "ls libs/qec/python/cudaq_qec/plugins/decoders/",
         ],
-        "verify": "python3 -c 'import cudaq_qec as qec; "
-                  "print(qec.get_code(\"my_code\").get_stabilizers())'",
+        "verify":
+            "python3 -c 'import cudaq_qec as qec; "
+            "print(qec.get_code(\"my_code\").get_stabilizers())'",
         "required_features": ["core"],
     },
     "qec-realtime": {
-        "skill": "cuda-qx-qec-realtime",
-        "reference": ".agents/skills/cuda-qx-qec-realtime/references/in-kernel.md",
+        "skill":
+            "cuda-qx-qec-realtime",
+        "reference":
+            ".agents/skills/cuda-qx-qec-realtime/references/in-kernel.md",
         "commands": [
             "echo 'Phase 1: build DEM; Phase 2: write config.yaml; "
             "Phase 3: configure_decoders_from_file BEFORE cudaq.run; "
             "Phase 4: in-kernel reset/enqueue/get_corrections; finalize at end'",
         ],
-        "verify": "CUDAQ_QEC_DEBUG_DECODER=1 python3 your_script.py "
-                  "2>&1 | grep 'Initializing realtime decoding library'",
+        "verify":
+            "CUDAQ_QEC_DEBUG_DECODER=1 python3 your_script.py "
+            "2>&1 | grep 'Initializing realtime decoding library'",
         "required_features": ["core"],
     },
     "qec-ai-decoder": {
-        "skill": "cuda-qx-qec-ai-decoders",
-        "reference": ".agents/skills/cuda-qx-qec-ai-decoders/references/training.md",
+        "skill":
+            "cuda-qx-qec-ai-decoders",
+        "reference":
+            ".agents/skills/cuda-qx-qec-ai-decoders/references/training.md",
         "commands": [
             "python3 -c \"import torch, tensorrt; print(torch.__version__, tensorrt.__version__)\"",
         ],
-        "verify": "trt_decoder loaded; test-set LER matches PyTorch within sampling noise",
+        "verify":
+            "trt_decoder loaded; test-set LER matches PyTorch within sampling noise",
         "required_features": ["core", "qec-trt-decoder"],
     },
     "qec-debug": {
-        "skill": "cuda-qx-qec-decode",
-        "reference": ".agents/skills/cuda-qx-qec-decode/references/decode-triage.md",
+        "skill":
+            "cuda-qx-qec-decode",
+        "reference":
+            ".agents/skills/cuda-qx-qec-decode/references/decode-triage.md",
         "commands": [
             "echo '90% of \"LER looks wrong\" cases are: "
             "(1) didnt slice X-stab half, (2) decoded against code.get_parity instead of dem.detector_error_matrix, "
             "(3) different noise object passed to sample vs DEM helper'",
         ],
-        "verify": "python3 your_script.py  # at p=0, LER should be 0",
+        "verify":
+            "python3 your_script.py  # at p=0, LER should be 0",
         "required_features": ["core"],
     },
 
     # Solvers family intents (each dispatches to its own skill)
     "vqe": {
-        "skill": "cuda-qx-solvers-algorithms",
-        "reference": ".agents/skills/cuda-qx-solvers-algorithms/references/vqe.md",
+        "skill":
+            "cuda-qx-solvers-algorithms",
+        "reference":
+            ".agents/skills/cuda-qx-solvers-algorithms/references/vqe.md",
         "commands": [
             "python3 -c \"import cudaq_solvers as solvers; print(solvers.vqe.__doc__)\"",
         ],
-        "verify": "energy < hf_energy after the run",
+        "verify":
+            "energy < hf_energy after the run",
         "required_features": ["core"],
     },
     "qaoa": {
-        "skill": "cuda-qx-solvers-algorithms",
-        "reference": ".agents/skills/cuda-qx-solvers-algorithms/references/qaoa.md",
+        "skill":
+            "cuda-qx-solvers-algorithms",
+        "reference":
+            ".agents/skills/cuda-qx-solvers-algorithms/references/qaoa.md",
         "commands": [
             "python3 -c \"import cudaq_solvers as solvers; "
             "print('use cobyla; lbfgs needs gradients QAOA does not auto-wire')\"",
         ],
-        "verify": "QAOAResult unpack: optval, optp, config = result",
+        "verify":
+            "QAOAResult unpack: optval, optp, config = result",
         "required_features": ["core"],
     },
     "gqe": {
@@ -177,13 +198,16 @@ INTENT_TABLE: dict[str, dict[str, Any]] = {
         "required_features": ["core", "solvers-gqe"],
     },
     "chemistry": {
-        "skill": "cuda-qx-solvers-chemistry",
-        "reference": ".agents/skills/cuda-qx-solvers-chemistry/references/molecule-building.md",
+        "skill":
+            "cuda-qx-solvers-chemistry",
+        "reference":
+            ".agents/skills/cuda-qx-solvers-chemistry/references/molecule-building.md",
         "commands": [
             "export OMP_NUM_THREADS=1   # reproducible PySCF coefficients",
             "lsof -n -i :8000 || true   # verify no stale cudaq-pyscf server",
         ],
-        "verify": "mol.energies['hf_energy'] is finite",
+        "verify":
+            "mol.energies['hf_energy'] is finite",
         "required_features": ["core"],
     },
 }

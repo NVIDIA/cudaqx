@@ -48,15 +48,18 @@ defined in `decoder.h`.
 
 ## Build glue
 
-1. Create `libs/qec/lib/decoders/my_decoder/` with `my_decoder.cpp`,
-   `my_decoder.h` (and a `CMakeLists.txt`).
-2. Add an `add_subdirectory(my_decoder)` to
-   `libs/qec/lib/decoders/CMakeLists.txt`.
+1. Drop `my_decoder.cpp` (and any private headers) directly into
+   `libs/qec/lib/decoders/` alongside the existing decoder sources
+   (or add a subdir under `libs/qec/lib/decoders/plugins/` if you
+   prefer the plugin layout — see `libs/qec/lib/decoders/plugins/example/`).
+2. Wire the source into `libs/qec/lib/CMakeLists.txt` next to the
+   other built-in decoders.
 3. If your decoder needs an external dependency (e.g. LAPACK, CUDA),
-   declare it in your subdirectory's CMakeLists.
-4. Add the public header to the install set in
-   `libs/qec/include/cudaq/qec/decoders/CMakeLists.txt` if you want
-   downstream users to `#include` it.
+   declare it in `libs/qec/lib/CMakeLists.txt` next to your `add_library`.
+4. Place any public headers under `libs/qec/include/cudaq/qec/` and
+   add them to that include directory's CMake install set (see
+   `libs/qec/CMakeLists.txt`) if downstream users should `#include`
+   them.
 5. Rebuild: `ninja install` in `build/`.
 6. Verify with `ctest -R my_decoder`.
 

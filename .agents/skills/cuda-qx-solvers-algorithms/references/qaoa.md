@@ -1,9 +1,9 @@
 # QAOA: graphs, MaxCut, QUBO, mixers
 
 How to bootstrap a QAOA workflow on a graph problem and the recurring
-configuration mistakes. For VQE/ADAPT see `vqe.md`; for chemistry inputs
-see the related skill `cuda-qx-solvers-chemistry`
-(`references/molecule-building.md`).
+configuration mistakes. For VQE/ADAPT see `vqe.md`; for chemistry
+inputs see the related skill `cuda-qx-solvers-chemistry`
+(`cuda-qx-solvers-chemistry/references/molecule-building.md`).
 
 ## Two overloads
 

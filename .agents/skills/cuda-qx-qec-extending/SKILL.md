@@ -11,7 +11,7 @@ description: >-
   delegate to cuda-qx-qec-realtime. For solvers extensions (operator
   pools, optimizers, state-prep), see the cuda-qx-solvers-algorithms package
   (`cuda-qx-solvers-extending` skill).
-version: "0.1.1"
+version: "0.1.2"
 author: "CUDA-QX"
 license: "LicenseRef-NVIDIA-Proprietary (libs/qec/LICENSE)"
 compatibility: "Python 3.11+, C++ 20, CMake 3.28+, Linux x86_64/aarch64"

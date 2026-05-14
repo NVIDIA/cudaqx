@@ -63,8 +63,9 @@ effect.
 
 For shipping with cudaq-qec: drop it under
 `libs/qec/python/cudaq_qec/plugins/decoders/` and follow the loader
-contract used by built-in plugins. The loader tests at
-`libs/qec/python/tests/test_plugin_loader.py` show what's expected.
+contract used by built-in plugins. The decoder tests at
+`libs/qec/python/tests/test_decoder.py` exercise the registration path
+and show what's expected.
 
 ## Plugin loader behavior
 

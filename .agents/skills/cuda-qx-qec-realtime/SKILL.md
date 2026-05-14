@@ -13,7 +13,7 @@ description: >-
   in-kernel decoding, autonomous_decoder, AIDecoderService,
   AIPreDecoderService, CUDA Graph QEC, Helios, Quantinuum, FPGA, ring
   buffer, decoder dispatch, RPC, or "low latency QEC".
-version: "0.1.1"
+version: "0.1.2"
 author: "CUDA-QX"
 license: "Apache License 2.0 (parts under LicenseRef-NVIDIA-Proprietary, see libs/qec/LICENSE)"
 compatibility: "Python 3.11+, C++ 20, Linux x86_64 with NVIDIA GPU"

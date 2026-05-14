@@ -10,7 +10,7 @@ description: >-
   construction, PySCF, basis sets, active spaces, operator pools — use
   `cuda-qx-solvers-chemistry`); writing a new operator pool / optimizer
   (use `cuda-qx-solvers-extending`).
-version: "0.3.2"
+version: "0.3.3"
 author: "CUDA-QX"
 license: "Apache License 2.0"
 compatibility: "Python 3.11+, C++ 20, Linux x86_64/aarch64"

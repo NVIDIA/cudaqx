@@ -76,7 +76,7 @@ If `lsof` isn't installed: `ss -ltnp | grep 8000` works the same.
 The server is normally not configured directly — `create_molecule`
 options become HTTP request fields. The exceptions:
 
-| Need | Knob |
+| Need | Parameter |
 |---|---|
 | Use a different port | currently hard-coded to 8000 in `pyscf_driver.cpp`; would need a code change |
 | Use a Python other than `sys.executable` | the server child uses `sys.executable` from the calling process, so activate the right venv before importing `cudaq_solvers` |

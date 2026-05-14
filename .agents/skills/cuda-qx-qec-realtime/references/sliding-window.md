@@ -101,6 +101,6 @@ sw = qec.get_decoder("sliding_window", H,
 
 - Component docs: `docs/sphinx/components/qec/introduction.rst`
   "Sliding Window Decoder" section.
-- Source: `libs/qec/lib/decoders/sliding_window/`.
+- Source: `libs/qec/lib/decoders/sliding_window.cpp`, `libs/qec/lib/decoders/sliding_window.h`.
 - For real-time eligible incremental decoders, see
   `cuda-qx-qec-realtime/references/autonomous-decoder.md`.

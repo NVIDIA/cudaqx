@@ -13,7 +13,7 @@ description: >-
   chemistry, molecule, create_molecule, PySCF, basis set, geometry,
   active space, CAS, MP2, HF, FCI, CCSD, jordan_wigner, bravyi_kitaev,
   operator pool, fermion-to-qubit mapping, or molecular Hamiltonian.
-version: "0.2.1"
+version: "0.2.2"
 author: "CUDA-QX"
 license: "Apache License 2.0"
 compatibility: "Python 3.11+, Linux x86_64/aarch64, PySCF (auto-installed)"

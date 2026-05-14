@@ -4,8 +4,8 @@ How to optimize a parameterized ansatz against a Hamiltonian (VQE), and
 how to grow that ansatz iteratively from a pool (ADAPT-VQE). For
 chemistry inputs (molecule, operator pools, fermion mapping) see the
 related skill `cuda-qx-solvers-chemistry` (start with
-`references/molecule-building.md`). For QAOA see `qaoa.md`. For GQE
-see `gqe.md`.
+`cuda-qx-solvers-chemistry/references/molecule-building.md`). For
+QAOA see `qaoa.md`. For GQE see `gqe.md`.
 
 ## VQE
 

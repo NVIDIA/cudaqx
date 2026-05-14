@@ -79,7 +79,7 @@ The kernel type aliases are in `code.h`:
    `surface_code.cpp` is added; mimic exactly).
 2. Header lives under `libs/qec/include/cudaq/qec/codes/my_code.h`.
 3. If you want a Python binding, extend
-   `libs/qec/python/bindings/py_codes.cpp` to expose your class.
+   `libs/qec/python/bindings/py_code.cpp` to expose your class.
 4. Rebuild: `ninja install` inside the `build/` directory.
 5. Run the C++ test: `ctest -R my_code`.
 
