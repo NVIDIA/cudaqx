@@ -40,9 +40,11 @@ from pathlib import Path
 # assertions file and as the ``skill`` field in the grading output. Add a new
 # entry here when introducing a new skill.
 SKILL_DIRS = {
-    "solvers": "cuda-qx-solvers",
-    "qec": "cuda-qx-qec",
+    "solvers": "cuda-qx-solvers-algorithms",
+    "qec": "cuda-qx-qec-decode",
     "build": "cuda-qx-build",
+    "qec-realtime": "cuda-qx-qec-realtime",
+    "chemistry": "cuda-qx-solvers-chemistry",
 }
 
 # Repo-relative location of the assertions tree. Resolved relative to this

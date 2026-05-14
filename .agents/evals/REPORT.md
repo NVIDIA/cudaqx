@@ -1,7 +1,7 @@
 # CUDA-QX skill evaluation — consolidated report
 
 **Updated:** 2026-05-07
-**Scope:** `cuda-qx-qec` (iter 1 → iter 2) and `cuda-qx-solvers` (iter 1).
+**Scope:** `cuda-qx-qec-decode` (iter 1 → iter 2) and `cuda-qx-solvers-algorithms` (iter 1).
 `cuda-qx-build` not yet measured.
 
 This is the single report covering the eval framework, what was measured,
@@ -75,7 +75,7 @@ Programmatic grader, with-skill vs without-skill, on identical 24-prompt
 suites (13 scenarios `S1`–`S13`, 11 activations `A1`–`A11`). Composite
 = coverage + purity + activation, max varies per skill.
 
-### `cuda-qx-qec` — iter 1 → iter 2
+### `cuda-qx-qec-decode` — iter 1 → iter 2
 
 ```
                           iter 1 (22 prompts)              iter 2 (24 prompts)
@@ -91,7 +91,7 @@ composite                 61/68    29/68   +47 pts        60/73    58/73    +3 p
 the without-skill agent happened to read `libs/qec/` source verbatim,
 matching exact substrings the with-skill agent paraphrased. See section 4.
 
-### `cuda-qx-solvers` — iter 1 (first run)
+### `cuda-qx-solvers-algorithms` — iter 1 (first run)
 
 ```
                           with     without   Δ
@@ -136,8 +136,8 @@ Both skills score 11/11 on activation in iter 2. Both baselines score 5/11.
 This is not a phrasing artifact — it's structural:
 
 * On in-scope prompts (e.g. "Build a Steane memory experiment"), the
-  with-skill agent emits the marker (`cuda-qx-qec`); the baseline cannot,
-  because the skill name lives in `.agents/skills/cuda-qx-qec/` which it
+  with-skill agent emits the marker (`cuda-qx-qec-decode`); the baseline cannot,
+  because the skill name lives in `.agents/skills/cuda-qx-qec-decode/` which it
   was forbidden to read.
 * On out-of-scope prompts (e.g. "Open the cudaq_qec docs offline" — the new
   `A11`), the with-skill agent correctly *withholds* the marker and
@@ -210,7 +210,7 @@ Outcome:
   recipe ending in a working `python -m http.server -d build/docs/sphinx 8080`.
 * QEC `A11`: passes (correctly redirects without naming the skill).
 * QEC `S13`: fails on `http.server` only — agent suggested `file://` URLs.
-  Real content gap; one-sentence fix in `references/triage.md`.
+  Real content gap; one-sentence fix in `references/decode-triage.md`.
 
 ---
 
@@ -220,8 +220,8 @@ Outcome:
 |---|---|---|
 | Judge grader | `not_configured` for all 26 scenarios scored | `pip install anthropic && export ANTHROPIC_API_KEY=...` then re-run `judge.py` on the saved `responses.json` (zero new tokens from agents) |
 | Executable grader | All 26 scenarios `skipped` (no `executable` rules in any assertions file) | Add 2–3 high-leverage rules (`S5` Steane shape, `S6` `@qec.code` decorator, `S11` `qec.operation` enum). Schema documented at top of `executable.py`. |
-| 4 brittle QEC assertions (`S1`, `S3`, `S5`, `S12`) | False-fails as documented in section 4 | One-line edits in `cuda-qx-qec.json` (regex alternatives instead of literal substrings). |
-| QEC `references/triage.md` | Missing one-line note on `python -m http.server` for docs | Surgical edit; flips `S13`. |
+| 4 brittle QEC assertions (`S1`, `S3`, `S5`, `S12`) | False-fails as documented in section 4 | One-line edits in `cuda-qx-qec-decode.json` (regex alternatives instead of literal substrings). |
+| QEC `references/decode-triage.md` | Missing one-line note on `python -m http.server` for docs | Surgical edit; flips `S13`. |
 | `cuda-qx-build` skill | Never evaluated end-to-end | Same recipe, `--skill build`; ~24 prompts × 2 subagents. |
 | Cohen's κ | `n/a` everywhere because judge has 0 scenarios scored | Falls out of #1 above. |
 
@@ -231,11 +231,11 @@ Outcome:
 
 In rough cost order, cheapest first:
 
-1. **Patch the 4 brittle assertions** in `cuda-qx-qec.json` (regex alternatives
+1. **Patch the 4 brittle assertions** in `cuda-qx-qec-decode.json` (regex alternatives
    for `C-order`, `RuntimeError`, the shape variants, `X errors`/`Z errors`).
    Re-run `programmatic.py` on the existing `responses.json`. Zero tokens.
    Expected with-skill scenario pass rate: 11/13 on the existing data.
-2. **Add the `http.server` sentence** to `cuda-qx-qec` `references/triage.md`.
+2. **Add the `http.server` sentence** to `cuda-qx-qec-decode` `references/decode-triage.md`.
    Doesn't change scoring this iteration, but makes `S13` flip the next
    time a fresh agent runs.
 3. **Wire the judge grader** (export an API key, run `judge.py` on the
@@ -263,8 +263,8 @@ python -m http.server -d .agents/evals/workspaces/2026-05-07-qec-iter2 8001
 # open http://localhost:8001/report.html
 
 # add a new prompt to a skill and re-grade only:
-$EDITOR .agents/evals/prompts/cuda-qx-qec.evals.json
-$EDITOR .agents/evals/assertions/cuda-qx-qec.json
+$EDITOR .agents/evals/prompts/cuda-qx-qec-decode.evals.json
+$EDITOR .agents/evals/assertions/cuda-qx-qec-decode.json
 python .agents/evals/graders/programmatic.py --skill qec \
   --responses .agents/evals/workspaces/2026-05-07-qec-iter2/with_skill/responses.json
 python .agents/evals/aggregate.py .agents/evals/workspaces/2026-05-07-qec-iter2

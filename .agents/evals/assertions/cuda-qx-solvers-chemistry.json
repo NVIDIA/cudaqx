@@ -1,0 +1,82 @@
+{
+  "skill_name": "cuda-qx-solvers-chemistry",
+  "_note": "Answer key. NEVER read this file from inside SKILL.md or any references/*.md. Loaded by .agents/evals/graders/ only.",
+  "activation_marker": "cuda-qx-solvers-chemistry",
+  "scenarios": {
+    "S1": {
+      "must_include": ["Ångström", "Bohr"],
+      "must_not_include": ["geometry unit is Bohr by default"]
+    },
+    "S2": {
+      "must_include": ["spin=2", "charge=0", "2S", "unpaired"],
+      "must_not_include": ["spin=1 for triplet"]
+    },
+    "S3": {
+      "must_include": ["MP2=True", "natorb requires MP2"],
+      "must_not_include": ["set natorb=False to fix"]
+    },
+    "S4": {
+      "must_include": ["12 qubits", "2 * norb_cas", "num_qubits = 2 * num_orbitals"],
+      "must_not_include": ["6 qubits", "num_qubits = num_orbitals"],
+      "executable": {
+        "code_extractor": "first_python_block",
+        "interpreter": "python3",
+        "preamble": "# Active-space parameters from the prompt\nnele_cas = 6\nnorb_cas = 6\n",
+        "harness": "{code}\n# Agent's snippet must compute num_qubits = 12 via 2 * num_orbitals\ntry:\n    ok = int(num_qubits) == 12\nexcept NameError:\n    ok = False\nprint('QUBITS_OK' if ok else 'QUBITS_WRONG')\n",
+        "expected_stdout_substr": "QUBITS_OK",
+        "expected_exit": 0,
+        "timeout_s": 10,
+        "skip_if_missing": []
+      }
+    },
+    "S5": {
+      "must_include": ["num_orbitals", "uccgsd takes num_orbitals", "num_qubits = 2 * num_orbitals"],
+      "must_not_include": ["uccgsd takes num_qubits"]
+    },
+    "S6": {
+      "must_include": ["fci_energy", "casci=True with no CAS"],
+      "must_not_include": ["R-CASCI when no active space"]
+    },
+    "S7": {
+      "must_include": ["core_energy", "nuclear_energy", "identity"],
+      "must_not_include": ["this is a CUDA-QX bug"]
+    },
+    "S8": {
+      "must_include": ["jordan_wigner", "default", "Bravyi-Kitaev"],
+      "must_not_include": ["always use Bravyi-Kitaev"]
+    },
+    "S9": {
+      "must_include": ["ccsd=True", "R-CCSD", "energies"],
+      "must_not_include": ["VQE has no classical baseline"]
+    },
+    "S10": {
+      "must_include": ["localhost:8000", "lsof", "cudaq-pyscf"],
+      "must_not_include": ["reinstall CUDA-Q", "change basis"]
+    },
+    "S11": {
+      "must_include": ["OMP_NUM_THREADS=1", "PySCF", "multithread"],
+      "must_not_include": ["this is a CUDA-QX bug", "fermion mapping bug"]
+    },
+    "S12": {
+      "must_include": ["CASCI", "CASSCF", "bond breaking", "single-reference"],
+      "must_not_include": ["CCSD handles bond-breaking correctly"]
+    },
+    "S13": {
+      "must_include": ["build_docs.sh", "http.server", "cuda-qx-build"],
+      "must_not_include": ["this skill builds the docs"]
+    }
+  },
+  "activation": {
+    "A1": {"should_activate": true},
+    "A2": {"should_activate": true},
+    "A3": {"should_activate": true},
+    "A4": {"should_activate": true},
+    "A5": {"should_activate": true},
+    "A6": {"should_activate": false},
+    "A7": {"should_activate": false},
+    "A8": {"should_activate": false},
+    "A9": {"should_activate": false},
+    "A10": {"should_activate": true},
+    "A11": {"should_activate": false}
+  }
+}

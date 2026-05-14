@@ -78,7 +78,7 @@ INTENT_TABLE: dict[str, dict[str, Any]] = {
     },
     "debug-import": {
         "skill": "cuda-qx-build",
-        "reference": ".agents/skills/cuda-qx-build/references/triage.md",
+        "reference": ".agents/skills/cuda-qx-build/references/install-triage.md",
         "commands": [
             "bash scripts/doctor.sh",
             "pip list | grep -E 'cuda-quantum|cudaq-(qec|solvers)|cuquantum|tensorrt|torch'",
@@ -87,10 +87,10 @@ INTENT_TABLE: dict[str, dict[str, Any]] = {
         "required_features": [],
     },
 
-    # cuda-qx-qec intents
+    # QEC family intents (each dispatches to its own skill)
     "qec-decode": {
-        "skill": "cuda-qx-qec",
-        "reference": ".agents/skills/cuda-qx-qec/references/decode.md",
+        "skill": "cuda-qx-qec-decode",
+        "reference": ".agents/skills/cuda-qx-qec-decode/references/decode.md",
         "commands": [
             "python3 -c \"import cudaq_qec as qec; "
             "code = qec.get_code('steane'); print(code.get_parity_z().shape)\"",
@@ -100,8 +100,8 @@ INTENT_TABLE: dict[str, dict[str, Any]] = {
         "required_features": ["core"],
     },
     "qec-custom": {
-        "skill": "cuda-qx-qec",
-        "reference": ".agents/skills/cuda-qx-qec/references/extend.md",
+        "skill": "cuda-qx-qec-extending",
+        "reference": ".agents/skills/cuda-qx-qec-extending/references/code-python.md",
         "commands": [
             "ls libs/qec/include/cudaq/qec/codes/",
             "ls libs/qec/python/cudaq_qec/plugins/decoders/",
@@ -111,8 +111,8 @@ INTENT_TABLE: dict[str, dict[str, Any]] = {
         "required_features": ["core"],
     },
     "qec-realtime": {
-        "skill": "cuda-qx-qec",
-        "reference": ".agents/skills/cuda-qx-qec/references/realtime.md",
+        "skill": "cuda-qx-qec-realtime",
+        "reference": ".agents/skills/cuda-qx-qec-realtime/references/in-kernel.md",
         "commands": [
             "echo 'Phase 1: build DEM; Phase 2: write config.yaml; "
             "Phase 3: configure_decoders_from_file BEFORE cudaq.run; "
@@ -122,9 +122,18 @@ INTENT_TABLE: dict[str, dict[str, Any]] = {
                   "2>&1 | grep 'Initializing realtime decoding library'",
         "required_features": ["core"],
     },
+    "qec-ai-decoder": {
+        "skill": "cuda-qx-qec-ai-decoders",
+        "reference": ".agents/skills/cuda-qx-qec-ai-decoders/references/training.md",
+        "commands": [
+            "python3 -c \"import torch, tensorrt; print(torch.__version__, tensorrt.__version__)\"",
+        ],
+        "verify": "trt_decoder loaded; test-set LER matches PyTorch within sampling noise",
+        "required_features": ["core", "qec-trt-decoder"],
+    },
     "qec-debug": {
-        "skill": "cuda-qx-qec",
-        "reference": ".agents/skills/cuda-qx-qec/references/triage.md",
+        "skill": "cuda-qx-qec-decode",
+        "reference": ".agents/skills/cuda-qx-qec-decode/references/decode-triage.md",
         "commands": [
             "echo '90% of \"LER looks wrong\" cases are: "
             "(1) didnt slice X-stab half, (2) decoded against code.get_parity instead of dem.detector_error_matrix, "
@@ -134,10 +143,10 @@ INTENT_TABLE: dict[str, dict[str, Any]] = {
         "required_features": ["core"],
     },
 
-    # cuda-qx-solvers intents
+    # Solvers family intents (each dispatches to its own skill)
     "vqe": {
-        "skill": "cuda-qx-solvers",
-        "reference": ".agents/skills/cuda-qx-solvers/references/vqe.md",
+        "skill": "cuda-qx-solvers-algorithms",
+        "reference": ".agents/skills/cuda-qx-solvers-algorithms/references/vqe.md",
         "commands": [
             "python3 -c \"import cudaq_solvers as solvers; print(solvers.vqe.__doc__)\"",
         ],
@@ -145,8 +154,8 @@ INTENT_TABLE: dict[str, dict[str, Any]] = {
         "required_features": ["core"],
     },
     "qaoa": {
-        "skill": "cuda-qx-solvers",
-        "reference": ".agents/skills/cuda-qx-solvers/references/qaoa.md",
+        "skill": "cuda-qx-solvers-algorithms",
+        "reference": ".agents/skills/cuda-qx-solvers-algorithms/references/qaoa.md",
         "commands": [
             "python3 -c \"import cudaq_solvers as solvers; "
             "print('use cobyla; lbfgs needs gradients QAOA does not auto-wire')\"",
@@ -156,9 +165,9 @@ INTENT_TABLE: dict[str, dict[str, Any]] = {
     },
     "gqe": {
         "skill":
-            "cuda-qx-solvers",
+            "cuda-qx-solvers-algorithms",
         "reference":
-            ".agents/skills/cuda-qx-solvers/references/gqe.md",
+            ".agents/skills/cuda-qx-solvers-algorithms/references/gqe.md",
         "commands": [
             "python3 -c \"import torch; print('cuda available:', torch.cuda.is_available())\"",
             "python3 -c \"from cudaq_solvers.gqe_algorithm.gqe import get_default_config; print(get_default_config())\"",
@@ -168,8 +177,8 @@ INTENT_TABLE: dict[str, dict[str, Any]] = {
         "required_features": ["core", "solvers-gqe"],
     },
     "chemistry": {
-        "skill": "cuda-qx-solvers",
-        "reference": ".agents/skills/cuda-qx-solvers/references/chemistry.md",
+        "skill": "cuda-qx-solvers-chemistry",
+        "reference": ".agents/skills/cuda-qx-solvers-chemistry/references/molecule-building.md",
         "commands": [
             "export OMP_NUM_THREADS=1   # reproducible PySCF coefficients",
             "lsof -n -i :8000 || true   # verify no stale cudaq-pyscf server",

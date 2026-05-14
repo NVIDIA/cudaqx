@@ -1,0 +1,97 @@
+{
+  "skill_name": "cuda-qx-qec-realtime",
+  "_note": "Prompts only. Assertions live in assertions.json so the agent under test never reads the answer key.",
+  "evals": [
+    {
+      "id": "S1",
+      "name": "four-phase-recipe",
+      "prompt": "I want to run real-time decoding on a 3-qubit repetition code in simulation. What are the steps from DEM to in-kernel correction?",
+      "files": []
+    },
+    {
+      "id": "S2",
+      "name": "configure-before-run",
+      "prompt": "I called cudaq.run first and then qec.configure_decoders_from_file('config.yaml'). The decoder returns all zeros. Why?",
+      "files": []
+    },
+    {
+      "id": "S3",
+      "name": "block-syndrome-size",
+      "prompt": "What should I set for decoder_config.block_size and decoder_config.syndrome_size given a DEM with detector_error_matrix of shape (60, 200)?",
+      "files": []
+    },
+    {
+      "id": "S4",
+      "name": "d-sparse-rounds",
+      "prompt": "How do I compute the value to pass into generate_timelike_sparse_detector_matrix? My memory experiment uses num_rounds=10.",
+      "files": []
+    },
+    {
+      "id": "S5",
+      "name": "realtime-eligible-decoders",
+      "prompt": "Can I use tensor_network_decoder for in-kernel real-time decoding?",
+      "files": []
+    },
+    {
+      "id": "S6",
+      "name": "in-kernel-api-location",
+      "prompt": "I cannot find reset_decoder in cudaq_qec.__init__.py. Where is it defined and how do I call it?",
+      "files": []
+    },
+    {
+      "id": "S7",
+      "name": "finalize-decoders",
+      "prompt": "My second cudaq.run in the same Python process fails with a strange GPU resource error. The first run worked fine. What did I forget?",
+      "files": []
+    },
+    {
+      "id": "S8",
+      "name": "decoder-id-mismatch",
+      "prompt": "I have two logical qubits in my circuit and my corrections are getting applied to the wrong one. What controls the routing?",
+      "files": []
+    },
+    {
+      "id": "S9",
+      "name": "sliding-window-pcm-sorted",
+      "prompt": "qec.get_decoder('sliding_window', H, ...) errors with something about PCM sort order. H came from my own construction, not from a DEM. What now?",
+      "files": []
+    },
+    {
+      "id": "S10",
+      "name": "quantinuum-emulator-first",
+      "prompt": "I want to deploy real-time decoding on Quantinuum Helios hardware. What should I run before submitting to the actual machine?",
+      "files": []
+    },
+    {
+      "id": "S11",
+      "name": "autonomous-decoder-context",
+      "prompt": "I want to write a GPU-resident decoder that runs entirely on the device with no CPU involvement. What's the base class and what file do I read first?",
+      "files": []
+    },
+    {
+      "id": "S12",
+      "name": "predecoder-pipeline-d-T",
+      "prompt": "Which surface code distance / round count combinations does the hybrid AI predecoder + PyMatching pipeline ship with out of the box?",
+      "files": []
+    },
+    {
+      "id": "S13",
+      "name": "debug-decoder-logging",
+      "prompt": "I'm submitting real-time decoding to Quantinuum and the corrections look wrong. How do I see what the host is uploading to the decoder?",
+      "files": []
+    }
+  ],
+  "activation": [
+    {"id": "A1", "prompt": "Set up in-kernel decoding on a surface code"},
+    {"id": "A2", "prompt": "Deploy a decoder to Quantinuum Helios"},
+    {"id": "A3", "prompt": "Write an autonomous_decoder GPU decoder"},
+    {"id": "A4", "prompt": "Configure decoder_config and multi_decoder_config"},
+    {"id": "A5", "prompt": "Run code-capacity noise on Steane"},
+    {"id": "A6", "prompt": "Train an MLP decoder on Stim data"},
+    {"id": "A7", "prompt": "Compute H2 ground state with VQE"},
+    {"id": "A8", "prompt": "Wire the hybrid predecoder + MWPM pipeline"},
+    {"id": "A9", "prompt": "What's the sliding_window inner_decoder_params dict?"},
+    {"id": "A10", "prompt": "Add a new pybind11 decoder plugin"},
+    {"id": "A11", "prompt": "Install cudaq-qec from pip"}
+  ]
+}

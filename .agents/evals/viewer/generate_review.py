@@ -251,8 +251,8 @@ def main() -> int:
         n: c["gradings"] for n, c in configs.items()
     })
     full = {
-        "solvers": "cuda-qx-solvers",
-        "qec": "cuda-qx-qec",
+        "solvers": "cuda-qx-solvers-algorithms",
+        "qec": "cuda-qx-qec-decode",
         "build": "cuda-qx-build"
     }.get(skill, skill)
     prompts = json.loads(

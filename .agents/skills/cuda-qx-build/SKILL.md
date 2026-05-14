@@ -12,18 +12,18 @@ description: >-
   "missing libgfortran during build", "ImportError after pip install",
   "rebuild only the QEC library", or "regenerate the docs". Do NOT use this
   skill for runtime API questions (operator pools, decoders, real-time
-  decoding) — those go to cuda-qx-solvers / cuda-qx-qec.
-version: "0.1.0"
+  decoding) — those go to cuda-qx-solvers-algorithms / cuda-qx-qec-decode.
+version: "0.1.3"
 author: "CUDA-QX"
 license: "Apache License 2.0"
 compatibility: "Python 3.11+, C++ 20, Linux x86_64/aarch64"
 tags: [cuda-qx, build, cmake, ninja, wheels, manylinux, docs, sphinx, doxygen, container, dev-container]
 tools: [Read, Glob, Grep, Bash]
 metadata:
+  repo: [qec, solvers]
   author: "CUDA-QX"
   domain: "build-and-packaging"
   languages: [bash, cmake, python, dockerfile]
-  tags: [cuda-qx, build, wheels, docs, container]
 ---
 
 # CUDA-QX Build Skill
@@ -33,9 +33,32 @@ docs, container validation. The skill is task-driven: identify the user's
 *build* intent, follow the matching workflow, then walk the **Self-Check
 Protocol** before reporting done.
 
-The runtime API skills (`cuda-qx-qec`, `cuda-qx-solvers`) deliberately do not
+The runtime API skills (`cuda-qx-qec-decode`, `cuda-qx-solvers-algorithms`) deliberately do not
 overlap with this skill. If the user is asking about an algorithm or decoder
-behavior, hand them off there.
+behavior, delegate to them there.
+
+## Inputs
+
+Caller provides:
+
+- A source checkout of cudaqx (or a target dir for clone).
+- Build intent: `build` (in-tree dev) / `build-wheels` / `build-docs` /
+  `debug-import`.
+- CUDA ABI choice if relevant: `cu12` or `cu13`.
+- CMake / Ninja / Python toolchain installed (or a request to install).
+
+## Outputs
+
+This skill produces:
+
+- Compiled artifacts at `$CUDAQX_INSTALL_PREFIX` (default `$HOME/.cudaqx`).
+- Passing `ctest` and `pytest` runs (when `CUDAQX_INCLUDE_TESTS=ON`).
+- Built wheel files under `dist/` for wheel intents.
+- Rendered docs at `build/docs/sphinx/` for docs intents.
+- A doctor-script environment dump on failure.
+
+Does NOT produce: runtime API answers (→ domain skills); fixes to
+algorithm bugs (→ domain skills).
 
 ## How to read this skill
 
@@ -46,7 +69,7 @@ behavior, hand them off there.
 2. Read **Conventions**. They prevent the most common silent breakage.
 3. Find your task in the **Workflow Index** and open the matching file
    under `references/`.
-4. Walk the **Self-Check** in `references/triage.md` before declaring done.
+4. Walk the **Self-Check** in `references/install-triage.md` before declaring done.
 
 If you only have time for one file, read `references/build.md`. That plus
 the conventions covers the bulk of "I just want to build and run my
@@ -58,8 +81,15 @@ AI coding agents and developers building CUDA-QX from a clone of this repo.
 End-user pip installs (`pip install cudaq-qec`, `pip install cudaq-solvers`)
 do not need this skill — they need the runtime skills.
 
-The artifact is `SKILL.md` inside `.agents/skills/cuda-qx-build/`. Companion
-files live in `references/` (see Workflow Index below).
+The artifact is `SKILL.md` inside `.agents/skills/cuda-qx-build/`
+(mirrored to `.claude/skills/` and `.cursor/skills/`). Companion files
+live in `references/` (see Workflow Index below).
+
+If the user is new to CUDA-QX and hasn't decided between pip / Docker /
+source, delegate to **`cuda-qx-quickstart`** first; come back here once
+they're committed to a source build. For PR workflow and DCO sign-off,
+delegate to **`cuda-qx-contributing`**. For testing and CI specifics,
+delegate to **`cuda-qx-testing-ci`**.
 
 ## First three actions (always, before anything else)
 
@@ -119,9 +149,9 @@ A glance map of build-relevant paths. Full repo map at
 | Build, install, run examples, reset between branches         | `references/build.md`         | `build`                   |
 | Build wheels (manylinux), test wheels, validate releases     | `references/wheels.md`        | `build-wheels`            |
 | Build the docs and serve them offline (Sphinx + Breathe)     | `references/docs.md`          | `build-docs`              |
-| Diagnose ImportError, version mismatch, stale install        | `references/triage.md`        | `debug-import`            |
+| Diagnose ImportError, version mismatch, stale install        | `references/install-triage.md`        | `debug-import`            |
 
-`triage.md` carries the cross-cutting reference tables (CUDA 12 vs 13,
+`install-triage.md` carries the cross-cutting reference tables (CUDA 12 vs 13,
 the troubleshooting matrix, the Self-Check Protocol). Read it any time
 the build "succeeds" but the install behaves strangely.
 
@@ -226,9 +256,16 @@ python3 -m pytest -v libs/solvers/python/tests \
 ## Additional resources
 
 - Workflow references: `references/build.md`, `references/wheels.md`,
-  `references/docs.md`, `references/triage.md`
+  `references/docs.md`, `references/install-triage.md`
 - Shared diagnostic scripts: `.agents/skills/_shared/scripts/`
 - Shared repo map: `.agents/skills/_shared/repo_map.md`
-- Runtime API skills:
-  - `.agents/skills/cuda-qx-qec/SKILL.md`
-  - `.agents/skills/cuda-qx-solvers/SKILL.md`
+
+### Related skills
+
+- **`cuda-qx-quickstart`** — onboarding, pip vs Docker vs source.
+- **`cuda-qx-qec-decode`** — runtime QEC API.
+- **`cuda-qx-solvers-algorithms`** — runtime solvers API.
+- **`cuda-qx-contributing`** — DCO sign-off, PR workflow, formatting.
+- **`cuda-qx-testing-ci`** — pytest, ctest, CI subsets, validation scripts.
+- **`cuda-qx-skills-authoring`** — editing skill content, sync script,
+  evals.

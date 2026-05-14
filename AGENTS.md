@@ -36,15 +36,109 @@ content needs to be duplicated by hand.
 
 ## Available skills
 
-| Skill              | What it covers                                                              |
-|--------------------|------------------------------------------------------------------------------|
-| `cuda-qx-build`    | cmake / ninja / wheels / docs / dev container / release validation          |
-| `cuda-qx-qec`      | decoders, codes (Steane / surface / repetition), DEMs, real-time decoding   |
-| `cuda-qx-solvers`  | VQE, ADAPT-VQE, QAOA, GQE, molecular Hamiltonians, PySCF chemistry          |
+Skills are grouped by domain:
+
+- **Cross-cutting** — apply to both libraries or to the repo as a whole.
+- **QEC family** — sub-domains of `cuda-qx-qec-decode`. All carry the `cuda-qx-qec-*` prefix.
+- **Solvers family** — sub-domains of `cuda-qx-solvers-algorithms`. All carry the `cuda-qx-solvers-*` prefix.
+
+The filesystem is flat (every skill lives at `.agents/skills/<name>/SKILL.md`)
+because that's what each agent's discovery expects; the hierarchy is expressed
+in names, not in folder nesting.
+
+### Cross-cutting
+
+| Skill                       | What it covers                                                                       |
+|-----------------------------|--------------------------------------------------------------------------------------|
+| `cuda-qx-quickstart`        | onboarding, first example, pip vs Docker vs source, concept glossary                 |
+| `cuda-qx-build`             | cmake / ninja / wheels / docs / dev container / release validation                   |
+| `cuda-qx-benchmarking`      | LER sweeps, pseudo-thresholds, solver energy comparisons, reproducibility            |
+| `cuda-qx-profiling-perf`    | NVTX, `nsys`, `ncu`, PyTorch profiler, CUDA Graphs                                   |
+| `cuda-qx-contributing`      | DCO sign-off, PR workflow, formatting (clang-format, yapf), issue reporting          |
+| `cuda-qx-testing-ci`        | pytest, GoogleTest, ctest, CI subsets, container / wheel validation                  |
+| `cuda-qx-skills-authoring`  | meta-skill: editing the .agents/skills/ tree, sync, evals, target agents             |
+
+### QEC family
+
+| Skill                       | What it covers                                                                       |
+|-----------------------------|--------------------------------------------------------------------------------------|
+| `cuda-qx-qec-decode`               | decoders, codes (Steane / surface / repetition), DEMs, real-time decoding            |
+| `cuda-qx-qec-realtime`      | in-kernel API, autonomous_decoder, AI predecoder pipeline, Quantinuum Helios         |
+| `cuda-qx-qec-ai-decoders`   | train neural decoders, ONNX export, TensorRT engine, `trt_decoder` + hybrid deployment |
+| `cuda-qx-qec-extending`     | add a new QEC code or decoder (Python or C++)                                        |
+
+### Solvers family
+
+| Skill                          | What it covers                                                                       |
+|--------------------------------|--------------------------------------------------------------------------------------|
+| `cuda-qx-solvers-algorithms`              | VQE, ADAPT-VQE, QAOA, GQE algorithm dispatch                                         |
+| `cuda-qx-solvers-chemistry`    | PySCF, basis sets, active spaces, fermion-to-qubit, operator pools, baselines        |
+| `cuda-qx-solvers-extending`    | add a new operator pool, optimizer, state-prep kernel, or gradient method            |
 
 Each `SKILL.md` carries its own activation triggers in the YAML
 frontmatter, a workflow index, conventions to follow, and a self-check
 protocol. Start there.
+
+## Skills as context boundaries
+
+Each skill is designed as a **context boundary**: it has explicit
+inputs (what a caller must provide), explicit outputs (what it
+produces), and stays on its own concerns. Cross-skill content is
+delegated by reference, not embedded inline. This makes skills safe
+to invoke as **sub-agents** with isolated context windows.
+
+### What this means for orchestration
+
+1. **One skill per dispatch.** The orchestrator picks one skill based
+   on the user's intent, loads only that skill's `SKILL.md` + the
+   relevant `references/` file. Cross-cutting concerns (build,
+   benchmarking) are separate dispatches.
+
+2. **Read each skill's `## Inputs` and `## Outputs` sections.** They
+   define the contract. If the work needs inputs the skill doesn't
+   take, dispatch a different skill first to produce them.
+
+3. **Don't dump raw notes between skills.** When you finish one skill
+   and start another, pass only the curated output (e.g., a
+   `MolecularHamiltonian` object from `cuda-qx-solvers-chemistry`
+   → `cuda-qx-solvers-algorithms`), not the full transcript.
+
+### Sub-agent invocation (Claude Code Agent tool)
+
+For workflows where multiple skills participate, prefer dispatching
+sub-agents (Claude Code's `Agent` tool with a custom `subagent_type`
+per skill) over loading multiple skills into the main context. Each
+sub-agent:
+
+- Loads only its skill into a fresh context window.
+- Reads only the relevant `references/<workflow>.md`.
+- Returns a concise summary to the orchestrator (not its working
+  notes).
+
+Example: a "benchmark this new decoder" request becomes:
+
+```
+1. Dispatch cuda-qx-qec-extending  -> returns: registered plugin name
+2. Dispatch cuda-qx-qec-decode            -> returns: shots + DEM
+3. Dispatch cuda-qx-benchmarking   -> returns: comparison table + plots
+```
+
+The main agent only sees the three summaries, not the 1000+ lines of
+skill content that produced them.
+
+### Personas and entry points
+
+| Persona | Start here |
+|---------|-----------|
+| Student / first-time user | `cuda-qx-quickstart` |
+| QEC researcher | `cuda-qx-qec-decode` → `cuda-qx-qec-realtime` / `cuda-qx-qec-ai-decoders` |
+| Quantum chemist / VQE practitioner | `cuda-qx-solvers-chemistry` → `cuda-qx-solvers-algorithms` |
+| Hardware / real-time engineer | `cuda-qx-qec-realtime` → `cuda-qx-profiling-perf` |
+| Algorithm researcher (any) | domain skill → `cuda-qx-benchmarking` |
+| QEC plugin author (codes / decoders) | `cuda-qx-qec-extending` |
+| Solvers plugin author (pools / optimizers) | `cuda-qx-solvers-extending` |
+| External contributor | `cuda-qx-contributing` → `cuda-qx-testing-ci` |
+| Skill author / maintainer | `cuda-qx-skills-authoring` |
 
 ## Shared resources
 

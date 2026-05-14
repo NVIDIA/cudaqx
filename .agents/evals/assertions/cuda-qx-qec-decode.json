@@ -1,0 +1,102 @@
+{
+  "skill_name": "cuda-qx-qec-decode",
+  "_note": "Answer key. NEVER read this file from inside SKILL.md or any references/*.md. Loaded by .agents/evals/graders/ only.",
+  "activation_marker": "cuda-qx-qec-decode",
+  "scenarios": {
+    "S1": {
+      "must_include": ["C-order"],
+      "must_not_include": ["F-order is supported"],
+      "executable": {
+        "code_extractor": "first_python_block",
+        "interpreter": "python3",
+        "preamble": "import numpy as np\nH = np.zeros((3, 5), dtype=np.uint8, order='F')\nassert H.flags['F_CONTIGUOUS'], 'precondition failed: H must start F-ordered'\n",
+        "harness": "{code}\nimport numpy as np\n# Probe any numpy array variable in locals() that is now C-contiguous\nresult = any(getattr(v, 'flags', None) is not None and v.flags.get('C_CONTIGUOUS', False) for v in list(locals().values()) if isinstance(v, np.ndarray))\nprint('C_CONTIGUOUS_FOUND' if result else 'NO_C_ORDER_ARRAY')\n",
+        "expected_stdout_substr": "C_CONTIGUOUS_FOUND",
+        "expected_exit": 0,
+        "timeout_s": 15,
+        "skip_if_missing": ["numpy"]
+      }
+    },
+    "S2": {
+      "must_include": ["cuquantum-python", "26.03.0"],
+      "must_not_include": ["uninstall cudaq_qec"]
+    },
+    "S3": {
+      "must_include": ["backend=\"gpu\"", "RuntimeError", "auto", "cpu"],
+      "must_not_include": ["silently falls back when gpu requested"]
+    },
+    "S4": {
+      "must_include": ["NumPy"],
+      "must_not_include": ["yes, supported"]
+    },
+    "S5": {
+      "must_include": ["(40, 6)", "numShots * numRounds"],
+      "must_not_include": ["(10, 4, 6)"]
+    },
+    "S6": {
+      "must_include": [
+        "stabilizers",
+        "pauli_observables",
+        "operation_encodings",
+        "get_num_data_qubits",
+        "get_num_ancilla_qubits"
+      ],
+      "must_not_include": ["only stabilizers are required"]
+    },
+    "S7": {
+      "must_include": [
+        "sliding_window",
+        "window_size",
+        "step_size",
+        "num_syndromes_per_round",
+        "inner_decoder_name",
+        "error_rate_vec"
+      ],
+      "must_not_include": ["sliding_window does not require an inner decoder"]
+    },
+    "S8": {
+      "must_include": [
+        "use_osd",
+        "bp_method",
+        "proc_float",
+        "error_rate_vec",
+        "max_iterations",
+        "default to None"
+      ],
+      "must_not_include": ["all fields are required"]
+    },
+    "S9": {
+      "must_include": ["tensor_network_decoder", "quimb", "cuquantum-python"],
+      "must_not_include": ["quimb is included by default"]
+    },
+    "S10": {
+      "must_include": ["LicenseRef-NVIDIA-Proprietary", "libs/qec/pyproject.toml"],
+      "must_not_include": ["yes, both are Apache 2.0"]
+    },
+    "S11": {
+      "must_include": ["prep0", "prep1", "prepp", "prepm", "stabilizer_round", "cx", "cz", "h", "s"],
+      "must_not_include": ["swap", "measure_x"]
+    },
+    "S12": {
+      "must_include": ["X errors", "Z errors", "DetectorErrorModel", "detector_error_matrix"],
+      "must_not_include": ["they are aliases"]
+    },
+    "S13": {
+      "must_include": ["build_docs.sh", "http.server", "cuda-qx-build"],
+      "must_not_include": ["this skill builds the docs"]
+    }
+  },
+  "activation": {
+    "A1": {"should_activate": true},
+    "A2": {"should_activate": true},
+    "A3": {"should_activate": true},
+    "A4": {"should_activate": true},
+    "A5": {"should_activate": false},
+    "A6": {"should_activate": false},
+    "A7": {"should_activate": false},
+    "A8": {"should_activate": true},
+    "A9": {"should_activate": false},
+    "A10": {"should_activate": true},
+    "A11": {"should_activate": false}
+  }
+}

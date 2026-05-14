@@ -2,7 +2,7 @@
 
 How to configure, build, install, run examples, and reset between branches.
 For wheels see `wheels.md`; for docs see `docs.md`; for "something is
-broken" see `triage.md`.
+broken" see `install-triage.md`.
 
 ## Top-level CMake options
 

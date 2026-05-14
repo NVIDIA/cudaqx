@@ -69,9 +69,11 @@ GRADERS_DIR = EVALS_ROOT / "graders"
 # Map of cli alias -> full skill name. Mirrors graders/programmatic.py;
 # kept duplicated rather than imported so each tool can run standalone.
 SKILL_DIRS = {
-    "solvers": "cuda-qx-solvers",
-    "qec": "cuda-qx-qec",
+    "solvers": "cuda-qx-solvers-algorithms",
+    "qec": "cuda-qx-qec-decode",
     "build": "cuda-qx-build",
+    "qec-realtime": "cuda-qx-qec-realtime",
+    "chemistry": "cuda-qx-solvers-chemistry",
 }
 
 

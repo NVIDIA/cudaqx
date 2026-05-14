@@ -60,8 +60,8 @@ ASSERTIONS_DIR = EVALS_ROOT / "assertions"
 PROMPTS_DIR = EVALS_ROOT / "prompts"
 
 SKILL_DIRS = {
-    "solvers": "cuda-qx-solvers",
-    "qec": "cuda-qx-qec",
+    "solvers": "cuda-qx-solvers-algorithms",
+    "qec": "cuda-qx-qec-decode",
     "build": "cuda-qx-build",
 }
 

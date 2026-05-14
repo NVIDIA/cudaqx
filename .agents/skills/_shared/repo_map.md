@@ -1,6 +1,6 @@
 # CUDA-QX Repo Map
 
-This file is shared across the `cuda-qx-qec`, `cuda-qx-solvers`, and
+This file is shared across the `cuda-qx-qec-decode`, `cuda-qx-solvers-algorithms`, and
 `cuda-qx-build` skills. It lives in `.agents/skills/_shared/` (the
 underscore signals "not a skill"): it has no frontmatter, no triggers,
 and is read on demand by the skills that point to it.
@@ -21,10 +21,10 @@ or globbing the whole tree.
 | `libs/solvers/`                    | Solvers library (sources, headers, Python bindings, tests)        |
 | `libs/qec/python/metapackages/`    | `cudaq-qec` metapackage (delegates to cu12/cu13 wheels)           |
 | `libs/solvers/python/metapackages/`| `cudaq-solvers` metapackage                                       |
-| `examples/qec/`                    | Standalone Python and C++ example programs (QEC)                  |
-| `examples/solvers/`                | Standalone Python and C++ example programs (solvers)              |
 | `docs/`                            | Doxygen + Sphinx + Breathe docs source                            |
-| `docs/sphinx/examples/`            | Curated, doc-rendered examples                                    |
+| `docs/sphinx/examples/qec/`        | QEC example programs — `python/` and `cpp/` subdirs               |
+| `docs/sphinx/examples/solvers/`    | Solvers example programs — `python/` and `cpp/` subdirs           |
+| `docs/sphinx/examples_rst/`        | Long-form, doc-rendered example walkthroughs                      |
 | `scripts/`                         | Build, test, format, validation scripts                           |
 | `docker/build_env/`                | Dev / wheel-build Dockerfiles                                     |
 | `docker/release/`                  | Release Dockerfiles (NVIDIA-published containers)                 |

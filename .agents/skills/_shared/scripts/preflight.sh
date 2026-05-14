@@ -204,11 +204,9 @@ BUILD_DIR_EXISTS=false
 
 SUBMODULES_JSON='[]'
 if [[ -f "$REPO_ROOT/.gitmodules" ]] && command -v git >/dev/null 2>&1; then
-  # Note: must use `python3 -c` rather than `python3 - <<HEREDOC` here,
-  # because the heredoc redirect would override the piped stdin from
-  # git submodule status and the script would never see any submodule
-  # lines (silently emits '[]' regardless). Currently no submodules in
-  # this repo, so the bug was latent until a future submodule lands.
+  # `python3 -c` (not `python3 - <<HEREDOC`) so the piped stdin from
+  # `git submodule status` reaches Python. A heredoc would shadow stdin
+  # and we'd silently emit '[]' regardless of submodule state.
   SUBMODULES_JSON=$(cd "$REPO_ROOT" && git submodule status 2>/dev/null \
     | python3 -c '
 import json, sys

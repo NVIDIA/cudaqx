@@ -1,0 +1,97 @@
+{
+  "skill_name": "cuda-qx-solvers-algorithms",
+  "_note": "Prompts only. Assertions (must_include / must_not_include / should_activate) live in assertions.json so the agent under test never reads the answer key. Loaded by scripts/score_benchmark.py at scoring time, not by the skill itself.",
+  "evals": [
+    {
+      "id": "S1",
+      "name": "reproducibility-omp-threads",
+      "prompt": "My H2 Hamiltonian coefficients have different signs every time I run solvers.create_molecule, but the eigenvalues match. Why?",
+      "files": []
+    },
+    {
+      "id": "S2",
+      "name": "hung-pyscf-server",
+      "prompt": "My second solvers.create_molecule call hangs forever. What's going on?",
+      "files": []
+    },
+    {
+      "id": "S3",
+      "name": "active-space-natural-orbitals",
+      "prompt": "How do I run an active-space N2 calculation with natural orbitals?",
+      "files": []
+    },
+    {
+      "id": "S4",
+      "name": "qaoa-lbfgs-failure",
+      "prompt": "Why does solvers.qaoa(..., optimizer='lbfgs') fail with a gradient error?",
+      "files": []
+    },
+    {
+      "id": "S5",
+      "name": "adapt-vs-vqe-option-keys",
+      "prompt": "I set max_iterations=50 on adapt_vqe but it still stops after 30. Bug?",
+      "files": []
+    },
+    {
+      "id": "S6",
+      "name": "gqe-multi-gpu-setup",
+      "prompt": "How do I run GQE on H2 across multiple GPUs?",
+      "files": []
+    },
+    {
+      "id": "S7",
+      "name": "operator-pool-kwargs",
+      "prompt": "How do I generate UCCSD vs UCCGSD operator pools? What kwargs does each take?",
+      "files": []
+    },
+    {
+      "id": "S8",
+      "name": "scipy-optimizer-forwarding",
+      "prompt": "Can I use any SciPy optimizer with solvers.vqe? What kwargs are forwarded?",
+      "files": []
+    },
+    {
+      "id": "S9",
+      "name": "maxcut-on-networkx-graph",
+      "prompt": "I want to solve MaxCut on a weighted graph with QAOA in CUDA-QX. What's the minimum code?",
+      "files": []
+    },
+    {
+      "id": "S10",
+      "name": "libgfortran-missing",
+      "prompt": "I installed cudaq-solvers but optimizer calls crash on Linux. What's missing?",
+      "files": []
+    },
+    {
+      "id": "S11",
+      "name": "solvers-optim-optimize-signature",
+      "prompt": "What does solvers.optim.optimize expect from my objective function?",
+      "files": []
+    },
+    {
+      "id": "S12",
+      "name": "adapt-dynamic-start",
+      "prompt": "What does dynamic_start mean in adapt_vqe?",
+      "files": []
+    },
+    {
+      "id": "S13",
+      "name": "docs-offline-handoff",
+      "prompt": "How do I build the cudaq_solvers API documentation locally and serve it for offline browsing?",
+      "files": []
+    }
+  ],
+  "activation": [
+    {"id": "A1", "prompt": "Run VQE on H2 in CUDA-QX"},
+    {"id": "A2", "prompt": "Bootstrap a QAOA MaxCut script"},
+    {"id": "A3", "prompt": "Configure GQE for H4"},
+    {"id": "A4", "prompt": "How do I install CUDA-Q itself?"},
+    {"id": "A5", "prompt": "What's the best decoder for surface codes?"},
+    {"id": "A6", "prompt": "Write a Bell state kernel"},
+    {"id": "A7", "prompt": "Generate a molecular Hamiltonian for LiH"},
+    {"id": "A8", "prompt": "Convert hpq/hpqrs to qubit operators"},
+    {"id": "A9", "prompt": "Why is my CUDA-Q nvidia target slow?"},
+    {"id": "A10", "prompt": "Use ADAPT-VQE with custom optimizer pools"},
+    {"id": "A11", "prompt": "Render and open the cudaq_solvers docs offline"}
+  ]
+}

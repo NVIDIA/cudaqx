@@ -1,0 +1,97 @@
+{
+  "skill_name": "cuda-qx-solvers-chemistry",
+  "_note": "Prompts only. Assertions live in assertions.json so the agent under test never reads the answer key.",
+  "evals": [
+    {
+      "id": "S1",
+      "name": "geometry-units",
+      "prompt": "I passed a geometry list to solvers.create_molecule and the HF energy looks completely wrong vs literature. What unit does the geometry expect?",
+      "files": []
+    },
+    {
+      "id": "S2",
+      "name": "spin-charge-electron-count",
+      "prompt": "For a neutral O atom in a triplet ground state, what spin and charge do I pass to create_molecule?",
+      "files": []
+    },
+    {
+      "id": "S3",
+      "name": "natorb-requires-mp2",
+      "prompt": "solvers.create_molecule(geom, 'sto-3g', natorb=True) raises RuntimeError. Fix?",
+      "files": []
+    },
+    {
+      "id": "S4",
+      "name": "active-space-qubit-count",
+      "prompt": "I set nele_cas=6, norb_cas=6. How many qubits will the resulting Hamiltonian act on under Jordan-Wigner?",
+      "files": []
+    },
+    {
+      "id": "S5",
+      "name": "uccsd-vs-uccgsd-kwargs",
+      "prompt": "I'm switching from UCCSD to UCCGSD operator pool. solvers.get_operator_pool('uccgsd', num_qubits=8) returns an empty list. Why?",
+      "files": []
+    },
+    {
+      "id": "S6",
+      "name": "fci-vs-casci-key",
+      "prompt": "I set casci=True with no active space. Where does the FCI energy appear in mol.energies?",
+      "files": []
+    },
+    {
+      "id": "S7",
+      "name": "core-energy-offset",
+      "prompt": "My VQE energy is off from FCI by a constant ~12 Ha that doesn't depend on parameters. What did I forget?",
+      "files": []
+    },
+    {
+      "id": "S8",
+      "name": "jordan-wigner-vs-bravyi-kitaev",
+      "prompt": "Should I use Jordan-Wigner or Bravyi-Kitaev for VQE on a 10-qubit system?",
+      "files": []
+    },
+    {
+      "id": "S9",
+      "name": "ccsd-as-baseline",
+      "prompt": "I want to validate my VQE result for H2O. What classical baseline should I compute and how?",
+      "files": []
+    },
+    {
+      "id": "S10",
+      "name": "stale-pyscf-server",
+      "prompt": "My second create_molecule call hangs forever after a previous run crashed. What do I check?",
+      "files": []
+    },
+    {
+      "id": "S11",
+      "name": "omp-threads-sign-flips",
+      "prompt": "Why do my Hamiltonian coefficient signs flip across runs of the same H2 setup, while the energy stays the same?",
+      "files": []
+    },
+    {
+      "id": "S12",
+      "name": "bond-breaking-method-choice",
+      "prompt": "I want to plot the H2 dissociation curve from 0.5 to 3.0 Angstrom. Should I use CCSD or CASCI as the baseline?",
+      "files": []
+    },
+    {
+      "id": "S13",
+      "name": "docs-offline-handoff",
+      "prompt": "How do I build the cudaq_solvers chemistry API documentation locally and read it offline?",
+      "files": []
+    }
+  ],
+  "activation": [
+    {"id": "A1", "prompt": "Build an H2O molecule with cc-pVDZ basis"},
+    {"id": "A2", "prompt": "Choose an active space for N2"},
+    {"id": "A3", "prompt": "Map fermionic operators to qubits"},
+    {"id": "A4", "prompt": "Compute the FCI energy for LiH"},
+    {"id": "A5", "prompt": "Pick an operator pool for ADAPT-VQE"},
+    {"id": "A6", "prompt": "Run VQE with cobyla optimizer"},
+    {"id": "A7", "prompt": "Train a neural decoder on Stim data"},
+    {"id": "A8", "prompt": "Configure GQE for H2"},
+    {"id": "A9", "prompt": "Set up real-time decoding on Quantinuum"},
+    {"id": "A10", "prompt": "Compute classical baselines for VQE validation"},
+    {"id": "A11", "prompt": "Render and open the cudaq_solvers docs offline"}
+  ]
+}

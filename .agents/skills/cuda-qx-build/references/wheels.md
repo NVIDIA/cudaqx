@@ -72,7 +72,14 @@ script:
    `test_trt_decoder.py` if no GPU.
 6. Verifies `pip list` shows `cudaq-qec-cuXX` (matches CUDA major).
 7. Same for solvers, then with `[gqe]`.
-8. Runs all `examples/qec/python/*.py` and `examples/solvers/python/*.py`.
+8. Runs example Python scripts. The actual source files live at
+   `docs/sphinx/examples/qec/python/*.py` and
+   `docs/sphinx/examples/solvers/python/*.py`. (Note: `scripts/ci/test_examples.sh`
+   iterates over a bare `examples/` prefix — it expects a build-time
+   staging step to copy the docs examples there. If you see "no such
+   file or directory" running it directly from a fresh checkout, the
+   staging hasn't run yet; invoke it from the wheel-test container or
+   first copy `docs/sphinx/examples/` to `examples/`.)
 
 **Self-check**: every pytest run completes; package suffixes match the
 expected `cudaq-qec-cu<major>` / `cudaq-solvers-cu<major>`.
