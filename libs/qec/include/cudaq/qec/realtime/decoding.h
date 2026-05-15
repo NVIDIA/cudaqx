@@ -34,6 +34,19 @@ enqueue_syndromes(std::uint64_t decoder_id,
                   const std::vector<cudaq::measure_result> &syndromes,
                   std::uint64_t tag = 0);
 
+/// @brief Test-only entry point for enqueueing pre-discriminated syndrome
+/// bits (e.g., raw syndromes replayed from a saved file). Production code
+/// must use `enqueue_syndromes`. This entry point exists because raw bits
+/// read from disk have no measurement-event identity to preserve, so the
+/// `vector<measure_result>` API is the wrong shape for them.
+/// @param decoder_id The ID of the decoder to use.
+/// @param syndromes Pre-discriminated syndrome bits.
+/// @param tag The tag to use for the syndrome (currently useful for logging
+/// only)
+__qpu__ void enqueue_syndromes_test(std::uint64_t decoder_id,
+                                    const std::vector<bool> &syndromes,
+                                    std::uint64_t tag = 0);
+
 /// @brief Get the corrections for a given decoder.
 /// @param decoder_id The ID of the decoder to use.
 /// @param return_size The number of bits to return (in bits). This is expected

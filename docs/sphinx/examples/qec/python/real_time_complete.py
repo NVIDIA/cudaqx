@@ -31,7 +31,7 @@ def prep0(logical: qec.patch):
 
 # Measure ZZ stabilizers for 3-qubit repetition code
 @cudaq.kernel
-def measure_stabilizers(logical: qec.patch) -> list[bool]:
+def measure_stabilizers(logical: qec.patch) -> list[cudaq.measure_handle]:
     for i in range(logical.ancz.size()):
         reset(logical.ancz[i])
 
@@ -70,7 +70,7 @@ def qec_circuit() -> int:
         for i in range(3):
             x(data[i])
 
-    return cudaq.to_integer(mz(data))
+    return cudaq.to_integer(cudaq.to_bools(mz(data)))
 
 
 # [End QEC Circuit]
