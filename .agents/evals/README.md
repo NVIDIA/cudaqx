@@ -1,26 +1,29 @@
-# CUDA-QX skill evaluation harness
+# CUDA-Q Libraries skill evaluation harness
 
 This tree is **not** a skill. It evaluates the skills under
 `.agents/skills/`. Nothing in this tree is referenced from any `SKILL.md`
-or any reference file, so an agent loading a CUDA-QX skill will not see
+or any reference file, so an agent loading a CUDA-Q Libraries skill will not see
 the prompts, assertions, runners, or graders that live here.
 
 ## Layout
 
 ```
 .agents/evals/
-├── prompts/           <skill>.evals.json           ← user-facing prompts only
-├── assertions/        <skill>.json                 ← THE answer key (substring rules)
+├── prompts/                <skill>.evals.json    ← user-facing prompts only (13 suites)
+├── assertions/             <skill>.json          ← THE answer key (substring rules)
 ├── runners/
-│   └── runner.py                                   ← prompt dump + iteration aggregate
+│   └── runner.py                                 ← prompt dump + iteration aggregate
 ├── graders/
-│   ├── programmatic.py                             ← substring + activation grader
-│   ├── executable.py                               ← runs code blocks in a sandbox
-│   └── judge.py                                    ← LLM-as-judge (BYO client)
+│   ├── programmatic.py                           ← substring + activation grader
+│   ├── executable.py                             ← runs code blocks in a sandbox
+│   └── judge.py                                  ← LLM-as-judge (BYO client)
 ├── viewer/
-│   └── generate_review.py                          ← HTML report
-├── aggregate.py                                    ← cross-grader agreement (Cohen's κ)
-├── workspaces/                                     ← per-iteration outputs (gitignored)
+│   └── generate_review.py                        ← HTML report
+├── lint_descriptions.py                          ← static description-overlap linter (CI gate)
+├── activation_matrix.py                          ← cross-skill activation matrix (CI gate)
+├── activation_corpus.json                        ← owner-tagged prompts for the matrix
+├── aggregate.py                                  ← cross-grader agreement (Cohen's κ)
+├── workspaces/                                   ← per-iteration outputs (gitignored)
 └── README.md
 ```
 
@@ -35,11 +38,40 @@ folder, is the cheapest way to enforce that.
    grader (each grader is standalone and carries its own copy of the map).
 2. Drop `<skill>.evals.json` into `prompts/` and `<skill>.json` into
    `assertions/`. Both files use the same `Sxx`/`Axx` ids.
-3. Smoke-test:
+3. Add at least one owner-tagged prompt for the new skill to
+   `activation_corpus.json` so the activation matrix covers it.
+4. Smoke-test:
 
    ```bash
    python .agents/evals/runners/runner.py prompts --skill <alias>
+   python .agents/evals/lint_descriptions.py
+   python .agents/evals/activation_matrix.py
    ```
+
+## Cheap CI gates
+
+Two zero-cost regression checks run before any LLM-based grading:
+
+```bash
+# 1. Description-overlap linter. Hard-fails when two skills share a
+#    literal trigger token (function name, script name, camelCase class)
+#    without a "Do NOT use ... use cudaq-other-skill" carve-out in at
+#    least one direction. Catches the activation contamination class we
+#    fixed during the audit (sibling skills both claiming `trt_decoder`,
+#    `AIDecoderService`, `test_examples.sh`, ...).
+python .agents/evals/lint_descriptions.py            # exits 2 on overlap
+
+# 2. Activation matrix. Loads activation_corpus.json (owner-tagged
+#    prompts), scores each prompt against every skill's positive
+#    description with token-overlap, flags any *leak* (a non-allowed
+#    skill predicted to activate alongside the owner). Misses (owner
+#    not predicted to fire) are reported but don't fail by default,
+#    because the heuristic can't paraphrase ("8ms" vs "high latency");
+#    use `--strict` to fail on misses too.
+python .agents/evals/activation_matrix.py            # exits 2 on leak
+```
+
+Run both before opening a PR that touches any `SKILL.md` `description`.
 
 ## End-to-end loop (per iteration)
 

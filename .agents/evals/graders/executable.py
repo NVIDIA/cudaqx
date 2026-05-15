@@ -61,11 +61,19 @@ EVALS_ROOT = Path(__file__).resolve().parents[1]
 ASSERTIONS_DIR = EVALS_ROOT / "assertions"
 
 SKILL_DIRS = {
-    "solvers": "cuda-qx-solvers-algorithms",
-    "qec": "cuda-qx-qec-decode",
-    "build": "cuda-qx-build",
-    "qec-realtime": "cuda-qx-qec-realtime",
-    "chemistry": "cuda-qx-solvers-chemistry",
+    "solvers": "cudaq-solvers-algorithms",
+    "qec": "cudaq-qec-decode",
+    "build": "cudaq-build",
+    "qec-realtime": "cudaq-qec-realtime",
+    "chemistry": "cudaq-solvers-chemistry",
+    "benchmarking": "cudaq-benchmarking",
+    "contributing": "cudaq-contributing",
+    "profiling": "cudaq-profiling-perf",
+    "qec-ai": "cudaq-qec-ai-decoders",
+    "qec-extending": "cudaq-qec-extending",
+    "quickstart": "cudaq-quickstart",
+    "skills-authoring": "cudaq-skills-authoring",
+    "solvers-extending": "cudaq-solvers-extending",
 }
 
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Eval runner for CUDA-QX skills.
+"""Eval runner for CUDA-Q Libraries skills.
 
 Orchestrator between an evaluator (a human or a sub-agent driver) and the
 grading layer. The runner does NOT call any LLM and does NOT do any grading
@@ -69,11 +69,19 @@ GRADERS_DIR = EVALS_ROOT / "graders"
 # Map of cli alias -> full skill name. Mirrors graders/programmatic.py;
 # kept duplicated rather than imported so each tool can run standalone.
 SKILL_DIRS = {
-    "solvers": "cuda-qx-solvers-algorithms",
-    "qec": "cuda-qx-qec-decode",
-    "build": "cuda-qx-build",
-    "qec-realtime": "cuda-qx-qec-realtime",
-    "chemistry": "cuda-qx-solvers-chemistry",
+    "solvers": "cudaq-solvers-algorithms",
+    "qec": "cudaq-qec-decode",
+    "build": "cudaq-build",
+    "qec-realtime": "cudaq-qec-realtime",
+    "chemistry": "cudaq-solvers-chemistry",
+    "benchmarking": "cudaq-benchmarking",
+    "contributing": "cudaq-contributing",
+    "profiling": "cudaq-profiling-perf",
+    "qec-ai": "cudaq-qec-ai-decoders",
+    "qec-extending": "cudaq-qec-extending",
+    "quickstart": "cudaq-quickstart",
+    "skills-authoring": "cudaq-skills-authoring",
+    "solvers-extending": "cudaq-solvers-extending",
 }
 
 

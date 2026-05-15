@@ -1,8 +1,8 @@
-# CUDA-QX skill evaluation — consolidated report
+# CUDA-Q Libraries skill evaluation — consolidated report
 
 **Updated:** 2026-05-07
-**Scope:** `cuda-qx-qec-decode` (iter 1 → iter 2) and `cuda-qx-solvers-algorithms` (iter 1).
-`cuda-qx-build` not yet measured.
+**Scope:** `cudaq-qec-decode` (iter 1 → iter 2) and `cudaq-solvers-algorithms` (iter 1).
+`cudaq-build` not yet measured.
 
 This is the single report covering the eval framework, what was measured,
 what we found, what got fixed in this round, and what to do next. Per-
@@ -21,13 +21,13 @@ iteration artifacts (`responses.json`, `grading.*.json`, `benchmark.json`,
   semantically-equivalent rewordings ("C-contiguous" vs "C-order") miss the
   literal substrings. This is the core motivation for the judge grader.
 * **The +55-pt activation gap on both skills is structural:** the baseline
-  agent literally cannot emit `cuda-qx-{qec,solvers}` because the skill
+  agent literally cannot emit `cudaq-{qec,solvers}` because the skill
   name lives behind the firewall it can't read. The test catches this
   intentionally.
 * **Both iter-1 follow-ups landed:** `preflight.sh` now discovers repo-local
   virtualenvs (and warns when one exists but isn't activated); QEC and
   solvers each got a docs scenario + activation prompt that exercises the
-  cross-skill handoff to `cuda-qx-build`.
+  cross-skill handoff to `cudaq-build`.
 
 ---
 
@@ -75,7 +75,7 @@ Programmatic grader, with-skill vs without-skill, on identical 24-prompt
 suites (13 scenarios `S1`–`S13`, 11 activations `A1`–`A11`). Composite
 = coverage + purity + activation, max varies per skill.
 
-### `cuda-qx-qec-decode` — iter 1 → iter 2
+### `cudaq-qec-decode` — iter 1 → iter 2
 
 ```
                           iter 1 (22 prompts)              iter 2 (24 prompts)
@@ -91,7 +91,7 @@ composite                 61/68    29/68   +47 pts        60/73    58/73    +3 p
 the without-skill agent happened to read `libs/qec/` source verbatim,
 matching exact substrings the with-skill agent paraphrased. See section 4.
 
-### `cuda-qx-solvers-algorithms` — iter 1 (first run)
+### `cudaq-solvers-algorithms` — iter 1 (first run)
 
 ```
                           with     without   Δ
@@ -136,12 +136,12 @@ Both skills score 11/11 on activation in iter 2. Both baselines score 5/11.
 This is not a phrasing artifact — it's structural:
 
 * On in-scope prompts (e.g. "Build a Steane memory experiment"), the
-  with-skill agent emits the marker (`cuda-qx-qec-decode`); the baseline cannot,
-  because the skill name lives in `.agents/skills/cuda-qx-qec-decode/` which it
+  with-skill agent emits the marker (`cudaq-qec-decode`); the baseline cannot,
+  because the skill name lives in `.agents/skills/cudaq-qec-decode/` which it
   was forbidden to read.
 * On out-of-scope prompts (e.g. "Open the cudaq_qec docs offline" — the new
   `A11`), the with-skill agent correctly *withholds* the marker and
-  redirects to `cuda-qx-build`. The baseline accidentally passes by being
+  redirects to `cudaq-build`. The baseline accidentally passes by being
   unable to emit the marker in the first place.
 
 That asymmetry is exactly the activation behaviour we want and the test
@@ -190,7 +190,7 @@ TEST 1 — venv ACTIVE                       TEST 2 — system python
 ### 6.2 Docs-task coverage — QEC + solvers
 
 Iter 1 also flagged that QEC/solvers had zero docs prompts, leaving the
-cross-skill handoff to `cuda-qx-build` untested. Added one scenario + one
+cross-skill handoff to `cudaq-build` untested. Added one scenario + one
 activation per skill:
 
 | Skill   | `S13` (scenario)                                                 | `A11` (activation)                                                  |
@@ -198,11 +198,11 @@ activation per skill:
 | qec     | "build the cudaq_qec API documentation locally and read it offline" | "Open the rendered HTML of the cudaq_qec docs in a browser offline" |
 | solvers | "build the cudaq_solvers API documentation locally and serve offline" | "Render and open the cudaq_solvers docs offline"                     |
 
-Each `S13` asserts `must_include = ["build_docs.sh", "http.server", "cuda-qx-build"]`
+Each `S13` asserts `must_include = ["build_docs.sh", "http.server", "cudaq-build"]`
 — the agent must (a) name the script, (b) suggest serving (not `file://`),
 (c) hand off to the build skill. Each `A11` asserts `should_activate: false`
 — the response must NOT contain the runtime skill's name, because docs
-build is explicitly delegated to `cuda-qx-build`.
+build is explicitly delegated to `cudaq-build`.
 
 Outcome:
 
@@ -220,9 +220,9 @@ Outcome:
 |---|---|---|
 | Judge grader | `not_configured` for all 26 scenarios scored | `pip install anthropic && export ANTHROPIC_API_KEY=...` then re-run `judge.py` on the saved `responses.json` (zero new tokens from agents) |
 | Executable grader | All 26 scenarios `skipped` (no `executable` rules in any assertions file) | Add 2–3 high-leverage rules (`S5` Steane shape, `S6` `@qec.code` decorator, `S11` `qec.operation` enum). Schema documented at top of `executable.py`. |
-| 4 brittle QEC assertions (`S1`, `S3`, `S5`, `S12`) | False-fails as documented in section 4 | One-line edits in `cuda-qx-qec-decode.json` (regex alternatives instead of literal substrings). |
+| 4 brittle QEC assertions (`S1`, `S3`, `S5`, `S12`) | False-fails as documented in section 4 | One-line edits in `cudaq-qec-decode.json` (regex alternatives instead of literal substrings). |
 | QEC `references/decode-triage.md` | Missing one-line note on `python -m http.server` for docs | Surgical edit; flips `S13`. |
-| `cuda-qx-build` skill | Never evaluated end-to-end | Same recipe, `--skill build`; ~24 prompts × 2 subagents. |
+| `cudaq-build` skill | Never evaluated end-to-end | Same recipe, `--skill build`; ~24 prompts × 2 subagents. |
 | Cohen's κ | `n/a` everywhere because judge has 0 scenarios scored | Falls out of #1 above. |
 
 ---
@@ -231,11 +231,11 @@ Outcome:
 
 In rough cost order, cheapest first:
 
-1. **Patch the 4 brittle assertions** in `cuda-qx-qec-decode.json` (regex alternatives
+1. **Patch the 4 brittle assertions** in `cudaq-qec-decode.json` (regex alternatives
    for `C-order`, `RuntimeError`, the shape variants, `X errors`/`Z errors`).
    Re-run `programmatic.py` on the existing `responses.json`. Zero tokens.
    Expected with-skill scenario pass rate: 11/13 on the existing data.
-2. **Add the `http.server` sentence** to `cuda-qx-qec-decode` `references/decode-triage.md`.
+2. **Add the `http.server` sentence** to `cudaq-qec-decode` `references/decode-triage.md`.
    Doesn't change scoring this iteration, but makes `S13` flip the next
    time a fresh agent runs.
 3. **Wire the judge grader** (export an API key, run `judge.py` on the
@@ -263,8 +263,8 @@ python -m http.server -d .agents/evals/workspaces/2026-05-07-qec-iter2 8001
 # open http://localhost:8001/report.html
 
 # add a new prompt to a skill and re-grade only:
-$EDITOR .agents/evals/prompts/cuda-qx-qec-decode.evals.json
-$EDITOR .agents/evals/assertions/cuda-qx-qec-decode.json
+$EDITOR .agents/evals/prompts/cudaq-qec-decode.evals.json
+$EDITOR .agents/evals/assertions/cudaq-qec-decode.json
 python .agents/evals/graders/programmatic.py --skill qec \
   --responses .agents/evals/workspaces/2026-05-07-qec-iter2/with_skill/responses.json
 python .agents/evals/aggregate.py .agents/evals/workspaces/2026-05-07-qec-iter2
@@ -294,5 +294,5 @@ validated by re-running just the grader, no agent tokens spent.
 | `.agents/evals/workspaces/2026-05-07-qec-iter2/` | Re-run after venv fix + docs prompts (24 prompts) |
 | `.agents/evals/workspaces/2026-05-07-solvers-iter1/` | First solvers run (24 prompts) |
 | `.agents/skills/_shared/scripts/preflight.sh` | Venv-discovery patch lives here |
-| `.agents/evals/prompts/cuda-qx-{qec,solvers}.evals.json` | Includes new `S13` + `A11` |
-| `.agents/evals/assertions/cuda-qx-{qec,solvers}.json` | Answer key for `S13` + `A11` |
+| `.agents/evals/prompts/cudaq-{qec,solvers}.evals.json` | Includes new `S13` + `A11` |
+| `.agents/evals/assertions/cudaq-{qec,solvers}.json` | Answer key for `S13` + `A11` |

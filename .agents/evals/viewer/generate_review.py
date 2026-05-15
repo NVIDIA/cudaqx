@@ -143,7 +143,7 @@ def _render(iter_name: str, skill: str, configs: dict[str, dict],
             prompts: list[dict], assertions: dict) -> str:
     parts: list[str] = [
         f"<!doctype html><html><head><meta charset='utf-8'>",
-        f"<title>CUDA-QX eval: {html.escape(iter_name)} ({skill})</title>",
+        f"<title>CUDA-Q Libraries eval: {html.escape(iter_name)} ({skill})</title>",
         f"<style>{CSS}</style></head><body>",
         f"<h1>{html.escape(skill)} — iteration {html.escape(iter_name)}</h1>",
     ]
@@ -251,9 +251,9 @@ def main() -> int:
         n: c["gradings"] for n, c in configs.items()
     })
     full = {
-        "solvers": "cuda-qx-solvers-algorithms",
-        "qec": "cuda-qx-qec-decode",
-        "build": "cuda-qx-build"
+        "solvers": "cudaq-solvers-algorithms",
+        "qec": "cudaq-qec-decode",
+        "build": "cudaq-build"
     }.get(skill, skill)
     prompts = json.loads(
         (PROMPTS_DIR / f"{full}.evals.json").read_text())["evals"]

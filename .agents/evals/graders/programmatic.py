@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Programmatic grader: substring + activation checks for CUDA-QX skills.
+"""Programmatic grader: substring + activation checks for CUDA-Q Libraries skills.
 
 A coarse but useful first-pass grader. Reads agent responses, applies the
 ``must_include`` / ``must_not_include`` substring rules from the skill's
@@ -12,7 +12,7 @@ Usage::
     programmatic.py --skill qec     --responses responses.json
     programmatic.py --skill build   --responses responses.json
     programmatic.py --skill <name>  --responses responses.json \\
-                    --assertions /path/to/cuda-qx-name.json
+                    --assertions /path/to/cudaq-name.json
 
 The responses file is JSON: ``{"S1": "agent reply", "A1": "...", ...}``. Keys
 are ``S1`` ... ``S12`` for scenarios and ``A1`` ... ``A10`` for activation
@@ -40,11 +40,19 @@ from pathlib import Path
 # assertions file and as the ``skill`` field in the grading output. Add a new
 # entry here when introducing a new skill.
 SKILL_DIRS = {
-    "solvers": "cuda-qx-solvers-algorithms",
-    "qec": "cuda-qx-qec-decode",
-    "build": "cuda-qx-build",
-    "qec-realtime": "cuda-qx-qec-realtime",
-    "chemistry": "cuda-qx-solvers-chemistry",
+    "solvers": "cudaq-solvers-algorithms",
+    "qec": "cudaq-qec-decode",
+    "build": "cudaq-build",
+    "qec-realtime": "cudaq-qec-realtime",
+    "chemistry": "cudaq-solvers-chemistry",
+    "benchmarking": "cudaq-benchmarking",
+    "contributing": "cudaq-contributing",
+    "profiling": "cudaq-profiling-perf",
+    "qec-ai": "cudaq-qec-ai-decoders",
+    "qec-extending": "cudaq-qec-extending",
+    "quickstart": "cudaq-quickstart",
+    "skills-authoring": "cudaq-skills-authoring",
+    "solvers-extending": "cudaq-solvers-extending",
 }
 
 # Repo-relative location of the assertions tree. Resolved relative to this

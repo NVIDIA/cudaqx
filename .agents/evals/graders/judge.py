@@ -60,9 +60,19 @@ ASSERTIONS_DIR = EVALS_ROOT / "assertions"
 PROMPTS_DIR = EVALS_ROOT / "prompts"
 
 SKILL_DIRS = {
-    "solvers": "cuda-qx-solvers-algorithms",
-    "qec": "cuda-qx-qec-decode",
-    "build": "cuda-qx-build",
+    "solvers": "cudaq-solvers-algorithms",
+    "qec": "cudaq-qec-decode",
+    "build": "cudaq-build",
+    "qec-realtime": "cudaq-qec-realtime",
+    "chemistry": "cudaq-solvers-chemistry",
+    "benchmarking": "cudaq-benchmarking",
+    "contributing": "cudaq-contributing",
+    "profiling": "cudaq-profiling-perf",
+    "qec-ai": "cudaq-qec-ai-decoders",
+    "qec-extending": "cudaq-qec-extending",
+    "quickstart": "cudaq-quickstart",
+    "skills-authoring": "cudaq-skills-authoring",
+    "solvers-extending": "cudaq-solvers-extending",
 }
 
 
@@ -83,7 +93,7 @@ def _resolve_skill_files(skill: str,
 # Rubric prompt
 # ---------------------------------------------------------------------------
 
-RUBRIC = """You are a precise evaluator scoring an AI agent's answer to a CUDA-QX
+RUBRIC = """You are a precise evaluator scoring an AI agent's answer to a CUDA-Q Libraries
 question. Score the answer on four 0-2 dimensions and return STRICT JSON.
 
 Dimensions

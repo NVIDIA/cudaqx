@@ -1,6 +1,6 @@
 # Agent Instructions
 
-This repository ships skills for AI coding agents that work with CUDA-QX.
+This repository ships skills for AI coding agents that work with CUDA-Q Libraries.
 The skills cover building/packaging the libraries, quantum error correction
 (QEC) workflows, and solver (VQE / ADAPT-VQE / QAOA / GQE) workflows.
 
@@ -18,17 +18,16 @@ the actual skill content is identical across locations.
 
 The canonical content lives at **`.agents/skills/`** — the open
 AGENTS.md convention that Codex (and other tools) discover natively. The
-`.claude/skills/` and `.cursor/skills/` trees are **generated locally**
-and gitignored, so only the canonical copy is tracked. Run the sync
-once after cloning to populate them:
+`.claude/skills/` and `.cursor/skills/` trees are generated mirrors and
+tracked so a fresh clone is immediately usable by Claude Code and Cursor.
+Run the sync after editing canonical content:
 
 ```bash
 bash scripts/sync_agents_skills.sh
 ```
 
-After that, edit `.agents/skills/` and re-run the sync whenever you
-change a skill — `.claude/skills/` and `.cursor/skills/` are
-regenerated each time.
+Edit `.agents/skills/` and re-run the sync whenever you change a skill —
+`.claude/skills/` and `.cursor/skills/` are regenerated each time.
 
 To add a fourth agent (Copilot, Gemini, Windsurf, etc.), append one
 entry to `TARGETS` in `scripts/sync_agents_skills.sh`. No skill
@@ -39,8 +38,8 @@ content needs to be duplicated by hand.
 Skills are grouped by domain:
 
 - **Cross-cutting** — apply to both libraries or to the repo as a whole.
-- **QEC family** — sub-domains of `cuda-qx-qec-decode`. All carry the `cuda-qx-qec-*` prefix.
-- **Solvers family** — sub-domains of `cuda-qx-solvers-algorithms`. All carry the `cuda-qx-solvers-*` prefix.
+- **QEC family** — sub-domains of `cudaq-qec-decode`. All carry the `cudaq-qec-*` prefix.
+- **Solvers family** — sub-domains of `cudaq-solvers-algorithms`. All carry the `cudaq-solvers-*` prefix.
 
 The filesystem is flat (every skill lives at `.agents/skills/<name>/SKILL.md`)
 because that's what each agent's discovery expects; the hierarchy is expressed
@@ -50,30 +49,29 @@ in names, not in folder nesting.
 
 | Skill                       | What it covers                                                                       |
 |-----------------------------|--------------------------------------------------------------------------------------|
-| `cuda-qx-quickstart`        | onboarding, first example, pip vs Docker vs source, concept glossary                 |
-| `cuda-qx-build`             | cmake / ninja / wheels / docs / dev container / release validation                   |
-| `cuda-qx-benchmarking`      | LER sweeps, pseudo-thresholds, solver energy comparisons, reproducibility            |
-| `cuda-qx-profiling-perf`    | NVTX, `nsys`, `ncu`, PyTorch profiler, CUDA Graphs                                   |
-| `cuda-qx-contributing`      | DCO sign-off, PR workflow, formatting (clang-format, yapf), issue reporting          |
-| `cuda-qx-testing-ci`        | pytest, GoogleTest, ctest, CI subsets, container / wheel validation                  |
-| `cuda-qx-skills-authoring`  | meta-skill: editing the .agents/skills/ tree, sync, evals, target agents             |
+| `cudaq-quickstart`        | onboarding, first example, pip vs Docker vs source, concept glossary                 |
+| `cudaq-build`             | cmake / ninja / wheels / docs / dev container / release validation                   |
+| `cudaq-benchmarking`      | LER sweeps, pseudo-thresholds, solver energy comparisons, reproducibility            |
+| `cudaq-profiling-perf`    | NVTX, `nsys`, `ncu`, PyTorch profiler, CUDA Graphs                                   |
+| `cudaq-contributing`      | DCO sign-off, PR workflow, formatting (clang-format, yapf), issue reporting, pytest/GoogleTest/ctest, CI subsets, container/wheel validation |
+| `cudaq-skills-authoring`  | meta-skill: editing the .agents/skills/ tree, sync, evals, target agents             |
 
 ### QEC family
 
 | Skill                       | What it covers                                                                       |
 |-----------------------------|--------------------------------------------------------------------------------------|
-| `cuda-qx-qec-decode`               | decoders, codes (Steane / surface / repetition), DEMs, real-time decoding            |
-| `cuda-qx-qec-realtime`      | in-kernel API, autonomous_decoder, AI predecoder pipeline, Quantinuum Helios         |
-| `cuda-qx-qec-ai-decoders`   | train neural decoders, ONNX export, TensorRT engine, `trt_decoder` + hybrid deployment |
-| `cuda-qx-qec-extending`     | add a new QEC code or decoder (Python or C++)                                        |
+| `cudaq-qec-decode`               | decoders, codes (Steane / surface / repetition), DEMs, real-time decoding            |
+| `cudaq-qec-realtime`      | in-kernel API, autonomous_decoder, AI predecoder pipeline, Quantinuum Helios         |
+| `cudaq-qec-ai-decoders`   | train neural decoders, ONNX export, TensorRT engine, `trt_decoder` + hybrid deployment |
+| `cudaq-qec-extending`     | add a new QEC code or decoder (Python or C++)                                        |
 
 ### Solvers family
 
 | Skill                          | What it covers                                                                       |
 |--------------------------------|--------------------------------------------------------------------------------------|
-| `cuda-qx-solvers-algorithms`              | VQE, ADAPT-VQE, QAOA, GQE algorithm dispatch                                         |
-| `cuda-qx-solvers-chemistry`    | PySCF, basis sets, active spaces, fermion-to-qubit, operator pools, baselines        |
-| `cuda-qx-solvers-extending`    | add a new operator pool, optimizer, state-prep kernel, or gradient method            |
+| `cudaq-solvers-algorithms`              | VQE, ADAPT-VQE, QAOA, GQE algorithm dispatch                                         |
+| `cudaq-solvers-chemistry`    | PySCF, basis sets, active spaces, fermion-to-qubit, operator pools, baselines        |
+| `cudaq-solvers-extending`    | add a new operator pool, optimizer, state-prep kernel, or gradient method            |
 
 Each `SKILL.md` carries its own activation triggers in the YAML
 frontmatter, a workflow index, conventions to follow, and a self-check
@@ -100,8 +98,8 @@ to invoke as **sub-agents** with isolated context windows.
 
 3. **Don't dump raw notes between skills.** When you finish one skill
    and start another, pass only the curated output (e.g., a
-   `MolecularHamiltonian` object from `cuda-qx-solvers-chemistry`
-   → `cuda-qx-solvers-algorithms`), not the full transcript.
+   `MolecularHamiltonian` object from `cudaq-solvers-chemistry`
+   → `cudaq-solvers-algorithms`), not the full transcript.
 
 ### Sub-agent invocation (Claude Code Agent tool)
 
@@ -118,9 +116,9 @@ sub-agent:
 Example: a "benchmark this new decoder" request becomes:
 
 ```
-1. Dispatch cuda-qx-qec-extending  -> returns: registered plugin name
-2. Dispatch cuda-qx-qec-decode            -> returns: shots + DEM
-3. Dispatch cuda-qx-benchmarking   -> returns: comparison table + plots
+1. Dispatch cudaq-qec-extending  -> returns: registered plugin name
+2. Dispatch cudaq-qec-decode            -> returns: shots + DEM
+3. Dispatch cudaq-benchmarking   -> returns: comparison table + plots
 ```
 
 The main agent only sees the three summaries, not the 1000+ lines of
@@ -130,15 +128,15 @@ skill content that produced them.
 
 | Persona | Start here |
 |---------|-----------|
-| Student / first-time user | `cuda-qx-quickstart` |
-| QEC researcher | `cuda-qx-qec-decode` → `cuda-qx-qec-realtime` / `cuda-qx-qec-ai-decoders` |
-| Quantum chemist / VQE practitioner | `cuda-qx-solvers-chemistry` → `cuda-qx-solvers-algorithms` |
-| Hardware / real-time engineer | `cuda-qx-qec-realtime` → `cuda-qx-profiling-perf` |
-| Algorithm researcher (any) | domain skill → `cuda-qx-benchmarking` |
-| QEC plugin author (codes / decoders) | `cuda-qx-qec-extending` |
-| Solvers plugin author (pools / optimizers) | `cuda-qx-solvers-extending` |
-| External contributor | `cuda-qx-contributing` → `cuda-qx-testing-ci` |
-| Skill author / maintainer | `cuda-qx-skills-authoring` |
+| Student / first-time user | `cudaq-quickstart` |
+| QEC researcher | `cudaq-qec-decode` → `cudaq-qec-realtime` / `cudaq-qec-ai-decoders` |
+| Quantum chemist / VQE practitioner | `cudaq-solvers-chemistry` → `cudaq-solvers-algorithms` |
+| Hardware / real-time engineer | `cudaq-qec-realtime` → `cudaq-profiling-perf` |
+| Algorithm researcher (any) | domain skill → `cudaq-benchmarking` |
+| QEC plugin author (codes / decoders) | `cudaq-qec-extending` |
+| Solvers plugin author (pools / optimizers) | `cudaq-solvers-extending` |
+| External contributor | `cudaq-contributing` |
+| Skill author / maintainer | `cudaq-skills-authoring` |
 
 ## Shared resources
 
@@ -153,7 +151,6 @@ skill content that produced them.
 
 1. Edit files under `.agents/skills/<name>/`.
 2. Run `bash scripts/sync_agents_skills.sh` to regenerate the
-   local `.claude/skills/` and `.cursor/skills/` mirrors so your
-   active agent picks up the change immediately.
-3. Commit only the changes under `.agents/skills/` — the mirrors
-   are gitignored.
+   `.claude/skills/` and `.cursor/skills/` mirrors.
+3. Commit the canonical `.agents/skills/` changes and the regenerated
+   mirrors together so users do not need to run sync manually after clone.
