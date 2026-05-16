@@ -742,9 +742,14 @@ void bindDecoder(nb::module_ &mod) {
     // `std::vector<cudaq::measure_handle>`. If CUDA-Q ever renames the
     // underlying handle type or changes the alias direction, this string must
     // be re-derived from `nm` on the per-target device .o.
+    //
+    // `enqueue_syndromes_test` is the bool-typed counterpart and stays bound
+    // to `INS_t6vectorIbSaIbEE`; the Python frontend hands it pre-discriminated
+    // bits via `cudaq.to_bools(...)`.
     // clang-format off
     static const std::vector<std::string> initFuncNames = {
         "function_enqueue_syndromes._ZN5cudaq3qec8decoding17enqueue_syndromesEmRKSt6vectorINS_14measure_handleESaIS3_EEm.init_func",
+        "function_enqueue_syndromes_test._ZN5cudaq3qec8decoding22enqueue_syndromes_testEmRKSt6vectorIbSaIbEEm.init_func",
         "function_get_corrections._ZN5cudaq3qec8decoding15get_correctionsEmmb.init_func",
         "function_reset_decoder._ZN5cudaq3qec8decoding13reset_decoderEm.init_func"};
     // clang-format on

@@ -55,6 +55,22 @@ void bindDecoding(nb::module_ &mod) {
                 - syndromes: A vector of syndrome bits (0 or 1).
                 - tag: An optional tag for the enqueue operation.
                         )pbdoc");
+  // Mirrors the C++ `enqueue_syndromes_test(uint64_t, vector<bool>, uint64_t)`
+  // entry point. The Python device kernel must pre-discriminate any
+  // `list[measure_handle]` via `cudaq.to_bools(...)` before the call. Used by
+  // app examples that already own bool-typed syndrome bits (file replay or
+  // explicit kernel-side discrimination) where the production
+  // `enqueue_syndromes(vector<measure_result>)` shape is the wrong fit.
+  qecSubMod.def(
+      "enqueue_syndromes_test",
+      [](std::uint64_t, std::vector<bool>, std::uint64_t) {},
+      R"pbdoc(Test-only entry point for enqueueing pre-discriminated syndrome
+              bits. Production code should use `enqueue_syndromes` instead.
+                Parameters
+                - decoder_id: The ID of the decoder.
+                - syndromes: A vector of syndrome bits (0 or 1).
+                - tag: An optional tag for the enqueue operation.
+                        )pbdoc");
   qecSubMod.def(
       "get_corrections", [](std::uint64_t, std::uint64_t, bool) {},
       R"pbdoc(Get the corrections from the decoder.
@@ -70,6 +86,10 @@ void bindDecoding(nb::module_ &mod) {
         cudaq::python::getMangledArgsString<std::uint64_t>());
     cudaq::python::registerDeviceKernel(
         qecModName, "enqueue_syndromes",
+        cudaq::python::getMangledArgsString<std::uint64_t, std::vector<bool>,
+                                            std::uint64_t>());
+    cudaq::python::registerDeviceKernel(
+        qecModName, "enqueue_syndromes_test",
         cudaq::python::getMangledArgsString<std::uint64_t, std::vector<bool>,
                                             std::uint64_t>());
     cudaq::python::registerDeviceKernel(
