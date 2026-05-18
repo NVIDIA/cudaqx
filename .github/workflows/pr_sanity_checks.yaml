@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  LLVM_VERSION: 16
+  LLVM_VERSION: 22
 
 jobs:
   check-changes:
