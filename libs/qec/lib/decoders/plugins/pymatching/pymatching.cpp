@@ -6,14 +6,16 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
-#include "pymatching/sparse_blossom/driver/mwpm_decoding.h"
-#include "pymatching/sparse_blossom/driver/user_graph.h"
-#include "cudaq/qec/decoder.h"
-#include "cudaq/qec/pcm_utils.h"
 #include <algorithm>
 #include <cassert>
 #include <map>
 #include <vector>
+
+#include "cudaq/qec/decoder.h"
+#include "cudaq/qec/pcm_utils.h"
+
+#include "pymatching/sparse_blossom/driver/mwpm_decoding.h"
+#include "pymatching/sparse_blossom/driver/user_graph.h"
 
 // Enable this to debug decode times.
 #define PERFORM_TIMING 0
