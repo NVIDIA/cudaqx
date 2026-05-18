@@ -110,7 +110,7 @@ echo "Building MLIR bindings for ${python}" && \
 CUDAQ_PATCH='diff --git a/CMakeLists.txt b/CMakeLists.txt
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -709,8 +709,8 @@ if(CUDAQ_BUILD_TESTS)
+@@ -696,9 +696,9 @@ if(CUDAQ_BUILD_TESTS)
  endif()
 
  if (CUDAQ_ENABLE_PYTHON)
@@ -119,12 +119,13 @@ CUDAQ_PATCH='diff --git a/CMakeLists.txt b/CMakeLists.txt
 +  find_package(Python 3 COMPONENTS Interpreter Development.Module)
 +  find_package(Python3 COMPONENTS Interpreter Development.Module)
 
-   # Apply specific patch to pybind11 for our documentation.
-   # Only apply the patch if not already applied.
+   add_subdirectory(tpls/nanobind)
+
+   add_subdirectory(python)
 diff --git a/python/runtime/cudaq/domains/plugins/CMakeLists.txt b/python/runtime/cudaq/domains/plugins/CMakeLists.txt
 --- a/python/runtime/cudaq/domains/plugins/CMakeLists.txt
 +++ b/python/runtime/cudaq/domains/plugins/CMakeLists.txt
-@@ -33,7 +33,7 @@ if (SKBUILD)
+@@ -33,6 +33,6 @@ if (SKBUILD)
  else()
    target_link_libraries(cudaq-pyscf
      PRIVATE
@@ -139,4 +140,3 @@ echo "$CUDAQ_PATCH" | git apply --verbose
 $python -m venv --system-site-packages .venv
 source .venv/bin/activate
 CUDAQ_BUILD_TESTS=FALSE bash scripts/build_cudaq.sh -v ${cudaq_ninja_jobs_arg}
-
