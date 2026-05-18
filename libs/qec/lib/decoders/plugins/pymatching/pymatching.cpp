@@ -144,7 +144,8 @@ public:
       } else {
         throw std::runtime_error(
             "Invalid column in H: " + std::to_string(col_idx) + " has " +
-            std::to_string(H_e2d[col].size()) + " ones. Must have 1 or 2 ones.");
+            std::to_string(H_e2d[col].size()) +
+            " ones. Must have 1 or 2 ones.");
       }
       col_idx++;
     }

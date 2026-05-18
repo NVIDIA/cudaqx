@@ -41,7 +41,7 @@ public:
 
   /// Virtual destructor needed when deleting an instance of a derived class
   /// via a pointer to the base class.
-  virtual ~MoleculePackageDriver() {};
+  virtual ~MoleculePackageDriver(){};
 };
 
 } // namespace cudaq::solvers

@@ -42,7 +42,8 @@ namespace cudaq::qec {
 
 /// Build sparse_binary_matrix from Python dict with keys layout, num_rows,
 /// num_cols, nested (nested_csc or nested_csr format).
-static sparse_binary_matrix sparse_binary_matrix_from_py_dict(const nb::dict &d) {
+static sparse_binary_matrix
+sparse_binary_matrix_from_py_dict(const nb::dict &d) {
   if (!d.contains("layout") || !d.contains("num_rows") ||
       !d.contains("num_cols") || !d.contains("nested"))
     throw std::runtime_error(
@@ -382,8 +383,7 @@ void bindDecoder(nb::module_ &mod) {
             };
 
         if (nb::isinstance<nb::dict>(H))
-          H_sparse =
-              sparse_binary_matrix_from_py_dict(nb::cast<nb::dict>(H));
+          H_sparse = sparse_binary_matrix_from_py_dict(nb::cast<nb::dict>(H));
         else
           H_sparse = make_sparse_from_dense(
               nb::cast<nb::ndarray<nb::numpy, uint8_t>>(H));
@@ -397,8 +397,8 @@ void bindDecoder(nb::module_ &mod) {
               const_cast<uint8_t *>(dense_t.data()), 2, shape, nb::none());
           nb::object dense_owned = nb::cast(arr).attr("copy")();
           return PyDecoderRegistry::get_decoder(
-              name,
-              nb::cast<nb::ndarray<nb::numpy, uint8_t>>(dense_owned), options);
+              name, nb::cast<nb::ndarray<nb::numpy, uint8_t>>(dense_owned),
+              options);
         }
 
         if (name == "tensor_network_decoder") {
