@@ -7,9 +7,11 @@
  ******************************************************************************/
 
 #include "cudaq/qec/pcm_utils.h"
+#include "cudaq/qec/sparse_binary_matrix.h"
 #include <cassert>
 #include <cstring>
 #include <random>
+#include <unordered_set>
 
 namespace cudaq::qec {
 
@@ -148,6 +150,26 @@ bool pcm_is_sorted(const cudaqx::tensor<uint8_t> &pcm,
   return true;
 }
 
+std::vector<std::vector<std::uint32_t>>
+dense_to_sparse(const cudaqx::tensor<uint8_t> &pcm) {
+  if (pcm.rank() != 2) {
+    throw std::invalid_argument("dense_to_sparse: PCM must be a 2D tensor");
+  }
+
+  auto num_rows = pcm.shape()[0];
+  auto num_cols = pcm.shape()[1];
+
+  std::vector<std::vector<std::uint32_t>> row_indices(num_cols);
+  for (std::size_t r = 0; r < num_rows; r++) {
+    auto *row = &pcm.at({r, 0});
+    for (std::size_t c = 0; c < num_cols; c++)
+      if (row[c])
+        row_indices[c].push_back(static_cast<std::uint32_t>(r));
+  }
+
+  return row_indices;
+}
+
 /// @brief Return a sparse representation of the PCM.
 /// @return A vector of vectors that sparsely represents the PCM. The size of
 /// the outer vector is the number of columns in the PCM, and the i-th element
@@ -155,23 +177,7 @@ bool pcm_is_sorted(const cudaqx::tensor<uint8_t> &pcm,
 /// i-th column of the PCM.
 std::vector<std::vector<std::uint32_t>>
 get_sparse_pcm(const cudaqx::tensor<uint8_t> &pcm) {
-  if (pcm.rank() != 2) {
-    throw std::invalid_argument("get_sparse_pcm: PCM must be a 2D tensor");
-  }
-
-  auto num_rows = pcm.shape()[0];
-  auto num_cols = pcm.shape()[1];
-
-  // Form a sparse representation of the PCM.
-  std::vector<std::vector<std::uint32_t>> row_indices(num_cols);
-  for (std::size_t r = 0; r < num_rows; r++) {
-    auto *row = &pcm.at({r, 0});
-    for (std::size_t c = 0; c < num_cols; c++)
-      if (row[c])
-        row_indices[c].push_back(r);
-  }
-
-  return row_indices;
+  return dense_to_sparse(pcm);
 }
 
 /// @brief Return a vector of column indices that would sort the pcm columns
@@ -425,6 +431,47 @@ cudaqx::tensor<uint8_t> generate_random_pcm(std::size_t n_rounds,
   }
 
   return pcm;
+}
+
+sparse_binary_matrix
+generate_random_pcm_sparse(std::size_t n_rounds, std::size_t n_errs_per_round,
+                           std::size_t n_syndromes_per_round, int weight,
+                           std::mt19937_64 &&rng) {
+  std::size_t n_cols = n_rounds * n_errs_per_round;
+  std::size_t n_rows = n_rounds * n_syndromes_per_round;
+
+  std::uniform_int_distribution<> dis(0, 1);
+
+  std::vector<std::vector<sparse_binary_matrix::index_type>> nested(n_cols);
+  std::vector<std::unordered_set<std::size_t>> col_used(n_cols);
+
+  for (std::size_t r = 0; r < n_rounds; ++r) {
+    for (std::size_t c = 0; c < n_errs_per_round; ++c) {
+      auto c_ix = r * n_errs_per_round + c;
+      bool all_errors_in_this_round = dis(rng) ? true : false;
+      if (r == n_rounds - 1)
+        all_errors_in_this_round = true;
+      std::size_t row_max = all_errors_in_this_round
+                                ? n_syndromes_per_round
+                                : 2 * n_syndromes_per_round;
+      std::uniform_int_distribution<> row_dis(0, row_max - 1);
+      for (int i = 0; i < weight; ++i) {
+        std::size_t row_ix = row_dis(rng);
+        std::size_t global_row = r * n_syndromes_per_round + row_ix;
+        while (col_used[c_ix].find(global_row) != col_used[c_ix].end()) {
+          row_ix = row_dis(rng);
+          global_row = r * n_syndromes_per_round + row_ix;
+        }
+        col_used[c_ix].insert(global_row);
+        nested[c_ix].push_back(
+            static_cast<sparse_binary_matrix::index_type>(global_row));
+      }
+    }
+  }
+
+  return sparse_binary_matrix::from_nested_csc(
+      static_cast<sparse_binary_matrix::index_type>(n_rows),
+      static_cast<sparse_binary_matrix::index_type>(n_cols), nested);
 }
 
 /// @brief Randomly permute the columns of a PCM.

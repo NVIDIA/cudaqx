@@ -257,6 +257,22 @@ def test_gen_random_pcm():
     assert pcm.shape == (100, 200)
 
 
+def test_generate_random_pcm_sparse_matches_dense():
+    """Sparse generator matches dense generate_random_pcm for the same RNG seed."""
+    seed = 99
+    weight = 3
+    pcm_d = qec.generate_random_pcm(4, 5, 3, weight, seed=seed)
+    sp = qec.generate_random_pcm_sparse(4, 5, 3, weight, seed=seed)
+    assert sp["layout"] == "nested_csc"
+    assert sp["num_rows"] == pcm_d.shape[0]
+    assert sp["num_cols"] == pcm_d.shape[1]
+    pcm_s = np.zeros((sp["num_rows"], sp["num_cols"]), dtype=np.uint8)
+    for j, rows in enumerate(sp["nested"]):
+        for ri in rows:
+            pcm_s[int(ri), j] = 1
+    assert np.array_equal(pcm_d, pcm_s)
+
+
 def test_get_pcm_for_rounds():
     pcm = qec.generate_random_pcm(n_rounds=10,
                                   n_errs_per_round=20,

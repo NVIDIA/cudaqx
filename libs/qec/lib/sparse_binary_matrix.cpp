@@ -7,7 +7,6 @@
  ******************************************************************************/
 
 #include "cudaq/qec/sparse_binary_matrix.h"
-#include <cassert>
 #include <cstring>
 #include <limits>
 #include <stdexcept>
@@ -26,8 +25,32 @@ sparse_binary_matrix
 sparse_binary_matrix::from_csc(index_type num_rows, index_type num_cols,
                                std::vector<index_type> col_ptrs,
                                std::vector<index_type> row_indices) {
-  assert(col_ptrs.size() == static_cast<std::size_t>(num_cols) + 1);
-  assert(col_ptrs.back() == row_indices.size());
+  const auto expected_ptr = static_cast<std::size_t>(num_cols) + 1;
+  if (col_ptrs.size() != expected_ptr) {
+    throw std::invalid_argument(
+        "sparse_binary_matrix::from_csc: col_ptrs must have size num_cols + 1");
+  }
+  if (col_ptrs.front() != 0U) {
+    throw std::invalid_argument(
+        "sparse_binary_matrix::from_csc: col_ptrs[0] must be zero");
+  }
+  for (index_type j = 1; j <= num_cols; ++j) {
+    if (col_ptrs[j - 1] > col_ptrs[j]) {
+      throw std::invalid_argument(
+          "sparse_binary_matrix::from_csc: col_ptrs must be non-decreasing");
+    }
+  }
+  if (col_ptrs.back() != static_cast<index_type>(row_indices.size())) {
+    throw std::invalid_argument(
+        "sparse_binary_matrix::from_csc: last col_ptr must equal nnz "
+        "(row_indices.size())");
+  }
+  for (index_type idx : row_indices) {
+    if (idx >= num_rows) {
+      throw std::invalid_argument(
+          "sparse_binary_matrix::from_csc: row index out of range");
+    }
+  }
   return sparse_binary_matrix(sparse_binary_matrix_layout::csc, num_rows,
                               num_cols, std::move(col_ptrs),
                               std::move(row_indices));
@@ -37,8 +60,32 @@ sparse_binary_matrix
 sparse_binary_matrix::from_csr(index_type num_rows, index_type num_cols,
                                std::vector<index_type> row_ptrs,
                                std::vector<index_type> col_indices) {
-  assert(row_ptrs.size() == static_cast<std::size_t>(num_rows) + 1);
-  assert(row_ptrs.back() == col_indices.size());
+  const auto expected_ptr = static_cast<std::size_t>(num_rows) + 1;
+  if (row_ptrs.size() != expected_ptr) {
+    throw std::invalid_argument(
+        "sparse_binary_matrix::from_csr: row_ptrs must have size num_rows + 1");
+  }
+  if (row_ptrs.front() != 0U) {
+    throw std::invalid_argument(
+        "sparse_binary_matrix::from_csr: row_ptrs[0] must be zero");
+  }
+  for (index_type i = 1; i <= num_rows; ++i) {
+    if (row_ptrs[i - 1] > row_ptrs[i]) {
+      throw std::invalid_argument(
+          "sparse_binary_matrix::from_csr: row_ptrs must be non-decreasing");
+    }
+  }
+  if (row_ptrs.back() != static_cast<index_type>(col_indices.size())) {
+    throw std::invalid_argument(
+        "sparse_binary_matrix::from_csr: last row_ptr must equal nnz "
+        "(col_indices.size())");
+  }
+  for (index_type idx : col_indices) {
+    if (idx >= num_cols) {
+      throw std::invalid_argument(
+          "sparse_binary_matrix::from_csr: column index out of range");
+    }
+  }
   return sparse_binary_matrix(sparse_binary_matrix_layout::csr, num_rows,
                               num_cols, std::move(row_ptrs),
                               std::move(col_indices));
@@ -49,17 +96,21 @@ sparse_binary_matrix sparse_binary_matrix::from_nested_csc(
     const std::vector<std::vector<index_type>> &nested) {
   if (nested.size() != static_cast<std::size_t>(num_cols)) {
     throw std::invalid_argument(
-        "sparse_pcm::from_nested_csc: nested.size() must equal num_cols");
+        "sparse_binary_matrix::from_nested_csc: nested.size() must equal "
+        "num_cols");
   }
   std::vector<index_type> col_ptrs(num_cols + 1);
   col_ptrs[0] = 0;
+  std::size_t nnz_accum = 0;
+  for (const auto &col : nested)
+    nnz_accum += col.size();
   std::vector<index_type> row_indices;
-  row_indices.reserve(nested.size() * 2);
+  row_indices.reserve(nnz_accum);
   for (index_type j = 0; j < num_cols; ++j) {
     for (index_type r : nested[j]) {
       if (r >= num_rows) {
         throw std::invalid_argument(
-            "sparse_pcm::from_nested_csc: row index out of range");
+            "sparse_binary_matrix::from_nested_csc: row index out of range");
       }
       row_indices.push_back(r);
     }
@@ -75,17 +126,21 @@ sparse_binary_matrix sparse_binary_matrix::from_nested_csr(
     const std::vector<std::vector<index_type>> &nested) {
   if (nested.size() != static_cast<std::size_t>(num_rows)) {
     throw std::invalid_argument(
-        "sparse_pcm::from_nested_csr: nested.size() must equal num_rows");
+        "sparse_binary_matrix::from_nested_csr: nested.size() must equal "
+        "num_rows");
   }
   std::vector<index_type> row_ptrs(num_rows + 1);
   row_ptrs[0] = 0;
+  std::size_t nnz_accum = 0;
+  for (const auto &rw : nested)
+    nnz_accum += rw.size();
   std::vector<index_type> col_indices;
-  col_indices.reserve(nested.size() * 2);
+  col_indices.reserve(nnz_accum);
   for (index_type i = 0; i < num_rows; ++i) {
     for (index_type c : nested[i]) {
       if (c >= num_cols) {
         throw std::invalid_argument(
-            "sparse_pcm::from_nested_csr: column index out of range");
+            "sparse_binary_matrix::from_nested_csr: column index out of range");
       }
       col_indices.push_back(c);
     }
@@ -101,7 +156,7 @@ sparse_binary_matrix::sparse_binary_matrix(
     sparse_binary_matrix_layout layout) {
   if (dense.rank() != 2) {
     throw std::invalid_argument(
-        "sparse_pcm: dense PCM tensor must have rank 2");
+        "sparse_binary_matrix: dense PCM tensor must have rank 2");
   }
   const std::size_t nrows = dense.shape()[0];
   const std::size_t ncols = dense.shape()[1];
@@ -110,40 +165,65 @@ sparse_binary_matrix::sparse_binary_matrix(
       ncols >
           static_cast<std::size_t>(std::numeric_limits<index_type>::max())) {
     throw std::invalid_argument(
-        "sparse_pcm: dense PCM dimensions exceed index_type range");
+        "sparse_binary_matrix: dense PCM dimensions exceed index_type range");
   }
   num_rows_ = static_cast<index_type>(nrows);
   num_cols_ = static_cast<index_type>(ncols);
   layout_ = layout;
 
   if (layout_ == sparse_binary_matrix_layout::csc) {
-    std::vector<index_type> row_indices;
-    // row_indices.reserve(nrows * ncols / 2);
+    std::vector<index_type> col_nnz(num_cols_, 0);
+    for (index_type r = 0; r < num_rows_; ++r) {
+      const auto *row_ptr =
+          &dense.at({static_cast<std::size_t>(r), static_cast<std::size_t>(0)});
+      for (index_type c = 0; c < num_cols_; ++c)
+        if (row_ptr[c])
+          ++col_nnz[c];
+    }
     ptr_.resize(num_cols_ + 1);
     ptr_[0] = 0;
-    for (index_type c = 0; c < num_cols_; ++c) {
-      for (index_type r = 0; r < num_rows_; ++r) {
-        if (dense.at(
-                {static_cast<std::size_t>(r), static_cast<std::size_t>(c)}))
-          row_indices.push_back(r);
-      }
-      ptr_[c + 1] = static_cast<index_type>(row_indices.size());
-    }
-    indices_ = std::move(row_indices);
-  } else {
-    std::vector<index_type> col_indices;
-    // col_indices.reserve(nrows * ncols / 2);
-    ptr_.resize(num_rows_ + 1);
-    ptr_[0] = 0;
+    for (index_type c = 0; c < num_cols_; ++c)
+      ptr_[c + 1] = ptr_[c] + col_nnz[c];
+    indices_.resize(ptr_.back());
+    std::fill(col_nnz.begin(), col_nnz.end(), 0);
     for (index_type r = 0; r < num_rows_; ++r) {
+      const auto *row_ptr =
+          &dense.at({static_cast<std::size_t>(r), static_cast<std::size_t>(0)});
       for (index_type c = 0; c < num_cols_; ++c) {
-        if (dense.at(
-                {static_cast<std::size_t>(r), static_cast<std::size_t>(c)}))
-          col_indices.push_back(c);
+        if (row_ptr[c]) {
+          index_type slot = ptr_[c] + col_nnz[c];
+          indices_[slot] = r;
+          ++col_nnz[c];
+        }
       }
-      ptr_[r + 1] = static_cast<index_type>(col_indices.size());
     }
-    indices_ = std::move(col_indices);
+    return;
+  }
+
+  std::vector<index_type> row_nnz(num_rows_, 0);
+  for (index_type r = 0; r < num_rows_; ++r) {
+    const auto *row_ptr =
+        &dense.at({static_cast<std::size_t>(r), static_cast<std::size_t>(0)});
+    for (index_type c = 0; c < num_cols_; ++c)
+      if (row_ptr[c])
+        ++row_nnz[r];
+  }
+  ptr_.resize(num_rows_ + 1);
+  ptr_[0] = 0;
+  for (index_type r = 0; r < num_rows_; ++r)
+    ptr_[r + 1] = ptr_[r] + row_nnz[r];
+  indices_.resize(ptr_.back());
+  std::fill(row_nnz.begin(), row_nnz.end(), 0);
+  for (index_type r = 0; r < num_rows_; ++r) {
+    const auto *row_ptr =
+        &dense.at({static_cast<std::size_t>(r), static_cast<std::size_t>(0)});
+    for (index_type c = 0; c < num_cols_; ++c) {
+      if (row_ptr[c]) {
+        index_type slot = ptr_[r] + row_nnz[r];
+        indices_[slot] = c;
+        ++row_nnz[r];
+      }
+    }
   }
 }
 

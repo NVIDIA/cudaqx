@@ -18,7 +18,9 @@ namespace cudaq::qec {
 enum class sparse_binary_matrix_layout { csc, csr };
 
 /// @brief Sparse parity-check matrix in either CSC or CSR form.
-/// Index types are uint32_t; non-zero values are always 1 and are not stored.
+/// Index types are uint32_t (max ~4×10^9 per dimension and for nnz).
+/// Matrices larger than that cannot be represented without changing \c
+/// index_type.
 class sparse_binary_matrix {
 public:
   using index_type = std::uint32_t;

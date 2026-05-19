@@ -48,9 +48,9 @@ sparse_binary_matrix_from_py_dict(const nb::dict &d) {
       !d.contains("num_cols") || !d.contains("nested"))
     throw std::runtime_error(
         "Sparse H dict must have keys: layout, num_rows, num_cols, "
-        "nested. Use layout \"nested_csc\" or \"nested_csr\"; nested "
-        "is a list of lists (column indices per column for csc, row "
-        "indices per row for csr).");
+        "nested. Use layout \"nested_csc\": nested has one list per COLUMN "
+        "with ROW indices where that column has a one; \"nested_csr\": one "
+        "list per ROW with COLUMN indices for that row.");
   std::string layout = nb::cast<std::string>(d["layout"]);
   auto num_rows = static_cast<sparse_binary_matrix::index_type>(
       nb::cast<std::size_t>(d["num_rows"]));
@@ -411,10 +411,23 @@ void bindDecoder(nb::module_ &mod) {
         return get_decoder(name, H_sparse, hetMapFromKwargs(options));
       },
       nb::arg("name"), nb::arg("H"),
-      "Get a decoder by name. H can be a dense 2D NumPy array (uint8, "
-      "row-major) or a sparse dict: {\"layout\": \"nested_csc\" or "
-      "\"nested_csr\", \"num_rows\": int, \"num_cols\": int, \"nested\": list "
-      "of lists}.");
+      R"pbdoc(
+        Get a decoder by name.
+
+        ``H`` may be:
+
+        - A dense 2D NumPy ``uint8`` array in row-major order: a full dense
+          ``cudaqx::tensor`` is built first, then converted to CSC sparse storage.
+          For large PCMs this can allocate as much memory as ``rows * cols``.
+        - A sparse dict with keys ``layout``, ``num_rows``, ``num_cols``, ``nested``:
+          builds ``sparse_binary_matrix`` directly (no dense tensor for ``H``),
+          allowing native C++ decoders like ``pymatching`` to be constructed
+          from very large parity-check matrices.
+
+        For Python-registered decoders (``cudaq.qec.decoder`` decorator), sparse
+        ``H`` is still expanded with ``to_dense()`` before invoking the Python
+        factory—only built-in/native decoders skip the full dense PCM allocation.
+      )pbdoc");
 
   qecmod.def(
       "get_sorted_pcm_column_indices",
@@ -597,6 +610,41 @@ void bindDecoder(nb::module_ &mod) {
       )pbdoc",
       nb::arg("n_rounds"), nb::arg("n_errs_per_round"),
       nb::arg("n_syndromes_per_round"), nb::arg("weight"), nb::arg("seed") = 0);
+
+  qecmod.def(
+      "generate_random_pcm_sparse",
+      [](std::uint32_t n_rounds, std::uint32_t n_errs_per_round,
+         std::uint32_t n_syndromes_per_round, std::uint32_t weight,
+         std::uint32_t seed) -> nb::dict {
+        std::mt19937_64 rng(seed);
+        if (seed == 0)
+          rng = std::mt19937_64(std::random_device()());
+
+        cudaq::qec::sparse_binary_matrix sparse =
+            cudaq::qec::generate_random_pcm_sparse(
+                n_rounds, n_errs_per_round, n_syndromes_per_round,
+                static_cast<int>(weight), std::move(rng));
+        nb::dict out;
+        out["layout"] = "nested_csc";
+        out["num_rows"] = sparse.num_rows();
+        out["num_cols"] = sparse.num_cols();
+        auto nested_py = nb::list();
+        for (auto &col : sparse.to_nested_csc()) {
+          nb::list col_py;
+          for (auto r : col)
+            col_py.append(static_cast<std::size_t>(r));
+          nested_py.append(col_py);
+        }
+        out["nested"] = nested_py;
+        return out;
+      },
+      nb::arg("n_rounds"), nb::arg("n_errs_per_round"),
+      nb::arg("n_syndromes_per_round"), nb::arg("weight"), nb::arg("seed") = 0,
+      R"pbdoc(
+        Same random PCM distribution as :func:`generate_random_pcm`, but
+        builds ``sparse_binary_matrix`` in CSC form without allocating a dense
+        ``rows x cols`` tensor (helps with large PCMs where dense allocation fails).
+      )pbdoc");
 
   qecmod.def(
       "get_pcm_for_rounds",

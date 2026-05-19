@@ -380,5 +380,35 @@ TEST(SparseBinaryMatrix, FromNestedCsr_InvalidSizeThrows) {
                std::invalid_argument);
 }
 
+TEST(SparseBinaryMatrix, GenerateRandomPcmSparseMatchesDenseSmall) {
+  std::size_t seed = 77;
+  int weight = 3;
+  auto dense = cudaq::qec::generate_random_pcm(/*n_rounds=*/4, /*n_errs=*/5,
+                                               /*syn_per_round=*/3, weight,
+                                               std::mt19937_64(seed));
+  auto sparse = cudaq::qec::generate_random_pcm_sparse(4, 5, 3, weight,
+                                                       std::mt19937_64(seed));
+  ASSERT_TRUE(dense_pcm_equal(dense, sparse.to_dense()));
+}
+
+TEST(SparseBinaryMatrix, FromCsc_InvalidMonotonePtrThrows) {
+  sparse_binary_matrix::index_type nr = 2, nc = 2;
+  std::vector<sparse_binary_matrix::index_type> bad_ptrs = {0, 3, 1};
+  std::vector<sparse_binary_matrix::index_type> row_indices{};
+  EXPECT_THROW(sparse_binary_matrix::from_csc(nr, nc, std::move(bad_ptrs),
+                                              std::move(row_indices)),
+               std::invalid_argument);
+}
+
+TEST(SparseBinaryMatrix, FromCsc_IndexOutOfRangeThrows) {
+  sparse_binary_matrix::index_type nr = 2, nc = 2;
+  std::vector<sparse_binary_matrix::index_type> col_ptrs = {0, 1, 1};
+  std::vector<sparse_binary_matrix::index_type> row_indices = {
+      99}; // >= num_rows
+  EXPECT_THROW(sparse_binary_matrix::from_csc(nr, nc, std::move(col_ptrs),
+                                              std::move(row_indices)),
+               std::invalid_argument);
+}
+
 } // namespace
 } // namespace cudaq::qec

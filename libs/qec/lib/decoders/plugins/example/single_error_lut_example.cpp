@@ -29,16 +29,13 @@ public:
     // Build a lookup table for an error on each possible qubit
     std::vector<std::vector<std::uint32_t>> H_e2d = H.to_nested_csc();
 
-    // For each qubit with a possible error, calculate an error signature.
+    // For each error mechanism (column qErr), syndrome = column qErr of H over
+    // GF(2). Nested CSC gives row indices with a 1 in that column (same pattern
+    // as multi_error_lut::toggleSynForError from all-zero).
     for (std::size_t qErr = 0; qErr < block_size; qErr++) {
       std::string err_sig(syndrome_size, '0');
-      for (std::size_t r = 0; r < syndrome_size; r++) {
-        bool syndrome = 0;
-        // Toggle syndrome on every "1" entry in the row.
-        for (std::uint32_t c : H_e2d[qErr])
-          syndrome ^= 1;
-        err_sig[r] = syndrome ? '1' : '0';
-      }
+      for (std::uint32_t r : H_e2d[qErr])
+        err_sig[r] = '1';
       // printf("Adding err_sig=%s for qErr=%lu\n", err_sig.c_str(), qErr);
       single_qubit_err_signatures.insert({err_sig, qErr});
     }

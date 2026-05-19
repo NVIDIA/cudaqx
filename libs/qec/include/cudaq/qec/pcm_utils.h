@@ -8,6 +8,7 @@
 #pragma once
 
 #include "cuda-qx/core/tensor.h"
+#include "sparse_binary_matrix.h"
 #include <limits>
 #include <random>
 
@@ -185,6 +186,14 @@ cudaqx::tensor<uint8_t> generate_random_pcm(std::size_t n_rounds,
                                             std::size_t n_errs_per_round,
                                             std::size_t n_syndromes_per_round,
                                             int weight, std::mt19937_64 &&rng);
+
+/// @brief Same distribution as generate_random_pcm, but constructs a CSC
+/// sparse_binary_matrix directly without allocating a dense rank-2 tensor.
+/// Intended for large PCMs where dense allocation fails (#379 style sizes).
+sparse_binary_matrix
+generate_random_pcm_sparse(std::size_t n_rounds, std::size_t n_errs_per_round,
+                           std::size_t n_syndromes_per_round, int weight,
+                           std::mt19937_64 &&rng);
 
 /// @brief Randomly permute the columns of a PCM.
 /// @param pcm The PCM to permute.

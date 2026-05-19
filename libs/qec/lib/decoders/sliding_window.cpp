@@ -59,7 +59,8 @@ void sliding_window::validate_inputs() {
   }
 
   // Enforce that H is already sorted.
-  if (!cudaq::qec::pcm_is_sorted(H.to_dense(), this->num_syndromes_per_round)) {
+  if (!cudaq::qec::pcm_is_sorted(H.to_nested_csc(),
+                                 this->num_syndromes_per_round)) {
     throw std::invalid_argument("sliding_window constructor: PCM must be "
                                 "sorted. See cudaq::qec::simplify_pcm.");
   }
@@ -204,7 +205,9 @@ sliding_window::sliding_window(const cudaq::qec::sparse_binary_matrix &H,
 
   validate_inputs();
 
-  // FIXME - update downstream code to support sparse matrices.
+  // FIXME: inner decoders still use dense sub-PCMs from get_pcm_for_rounds;
+  // H.to_dense() materializes the full PCM. Refactor slicing to operate on
+  // sparse_binary_matrix directly to eliminate O(rows × cols) memory here.
   auto H_dense = H.to_dense();
 
   // Create the inner decoders.

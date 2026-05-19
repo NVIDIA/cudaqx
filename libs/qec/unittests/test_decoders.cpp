@@ -128,6 +128,39 @@ TEST(SampleDecoder, checkAPI) {
       ASSERT_EQ(x, 0.0f);
 }
 
+TEST(DecoderPlugins, SingleErrorLutExample_DecodesSingletonColumnSyndromes) {
+  using cudaq::qec::float_t;
+
+  constexpr std::size_t block_size = 3;
+  constexpr std::size_t syndrome_size = 2;
+  // | 1 1 0 |
+  // | 0 1 1 | — single-bit columns are weight-1 syndrome patterns.
+  std::vector<uint8_t> H_vec = {1, 1, 0, // row 0
+                                0, 1, 1};
+  cudaqx::tensor<uint8_t> H;
+  H.copy(H_vec.data(), {syndrome_size, block_size});
+  cudaqx::heterogeneous_map params;
+  auto d = cudaq::qec::decoder::get("single_error_lut_example", H, params);
+
+  std::vector<float_t> syndrome0 = {1.0f, 0.0f}; // column 0
+  auto r0 = d->decode(syndrome0);
+  ASSERT_TRUE(r0.converged);
+  EXPECT_FLOAT_EQ(r0.result[0], 1.0f);
+  EXPECT_FLOAT_EQ(r0.result[1], 0.0f);
+  EXPECT_FLOAT_EQ(r0.result[2], 0.0f);
+
+  std::vector<float_t> syndrome2 = {0.0f, 1.0f}; // column 2
+  auto r2 = d->decode(syndrome2);
+  ASSERT_TRUE(r2.converged);
+  EXPECT_FLOAT_EQ(r2.result[0], 0.0f);
+  EXPECT_FLOAT_EQ(r2.result[1], 0.0f);
+  EXPECT_FLOAT_EQ(r2.result[2], 1.0f);
+
+  std::vector<float_t> zero(syndrome_size, 0.0f);
+  auto rz = d->decode(zero);
+  ASSERT_TRUE(rz.converged);
+}
+
 TEST(SteaneLutDecoder, checkAPI) {
   using cudaq::qec::float_t;
 

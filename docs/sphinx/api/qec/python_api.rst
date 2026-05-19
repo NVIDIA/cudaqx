@@ -88,6 +88,7 @@ Parity Check Matrix Utilities
 =============================
 
 .. autofunction:: cudaq_qec.generate_random_pcm
+.. autofunction:: cudaq_qec.generate_random_pcm_sparse
 .. autofunction:: cudaq_qec.generate_timelike_sparse_detector_matrix
 .. autofunction:: cudaq_qec.get_pcm_for_rounds
 .. autofunction:: cudaq_qec.get_sorted_pcm_column_indices
