@@ -321,7 +321,7 @@ demo_circuit_qpu(bool allow_device_calls,
       ret <<= numData;
     auto subData = data.slice(i * numData, numData);
     auto subMeas = mz(subData);
-    ret |= cudaq::to_integer(subMeas);
+    ret |= cudaq::to_integer(cudaq::to_bools(subMeas));
   }
   // The remaining bits are allocated to the number of corrections.
   ret |= num_corrections << (numData * numLogical);

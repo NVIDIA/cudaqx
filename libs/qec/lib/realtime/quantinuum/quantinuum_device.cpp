@@ -21,6 +21,16 @@ enqueue_syndromes(std::uint64_t decoder_id,
                   const std::vector<cudaq::measure_result> &syndromes,
                   std::uint64_t tag) {
   uint64_t syndrome_size = syndromes.size();
+  // Discriminate first, then bit-pack into the `uint64` wire format.
+  uint64_t syndrome = cudaq::to_integer(cudaq::to_bools(syndromes));
+  cudaq::device_call(enqueue_syndromes_ui64, decoder_id, syndrome_size,
+                     syndrome, tag);
+}
+
+__qpu__ void enqueue_syndromes_test(std::uint64_t decoder_id,
+                                    const std::vector<bool> &syndromes,
+                                    std::uint64_t tag) {
+  uint64_t syndrome_size = syndromes.size();
   uint64_t syndrome = cudaq::to_integer(syndromes);
   cudaq::device_call(enqueue_syndromes_ui64, decoder_id, syndrome_size,
                      syndrome, tag);

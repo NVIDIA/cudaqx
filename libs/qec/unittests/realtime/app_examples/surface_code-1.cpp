@@ -432,7 +432,7 @@ demo_circuit_qpu(bool allow_device_calls,
       ret <<= numData;
     auto subData = data.slice(i * numData, numData);
     auto subMeas = mz(subData);
-    ret |= cudaq::to_integer(subMeas);
+    ret |= cudaq::to_integer(cudaq::to_bools(subMeas));
   }
   // The remaining bits are allocated to the number of corrections.
   ret |= num_corrections << (numData * numLogical);
@@ -781,15 +781,19 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
         size_t end_idx =
             std::min(start_idx + syndrome_bits_per_round, all_syndromes.size());
 
-        // Convert this round's syndromes to measure_result vector
-        std::vector<cudaq::measure_result> syndrome_round;
+        // Replay path: raw syndrome bits read from a saved file. Use the
+        // test-only `enqueue_syndromes_test` API since these bits have no
+        // measurement-event identity to preserve and the production
+        // `enqueue_syndromes(vector<measure_result>&)` is the wrong shape.
+        std::vector<bool> syndrome_round;
         for (size_t i = start_idx; i < end_idx; i++) {
-          syndrome_round.push_back(cudaq::measure_result(all_syndromes[i]));
+          syndrome_round.push_back(static_cast<bool>(all_syndromes[i]));
         }
 
         // Enqueue this round for all logical qubits
         for (size_t logical_idx = 0; logical_idx < numLogical; logical_idx++) {
-          cudaq::qec::decoding::enqueue_syndromes(logical_idx, syndrome_round);
+          cudaq::qec::decoding::enqueue_syndromes_test(logical_idx,
+                                                       syndrome_round);
         }
       }
 

@@ -1,5 +1,5 @@
 # ============================================================================ #
-# Copyright (c) 2025 NVIDIA Corporation & Affiliates.                          #
+# Copyright (c) 2025 - 2026 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -185,7 +185,8 @@ def spam_error(logical_qubit: patch, p_spam_data: float, p_spam_ancx: float,
 
 
 @cudaq.kernel
-def se_z_ft(logical_qubit: patch, cnot_sched: List[int]) -> List[bool]:
+def se_z_ft(logical_qubit: patch,
+            cnot_sched: List[int]) -> List[cudaq.measure_handle]:
     for i in range(0, len(cnot_sched), 2):
         cx(logical_qubit.data[cnot_sched[i + 1]],
            logical_qubit.ancz[cnot_sched[i]])
@@ -196,7 +197,8 @@ def se_z_ft(logical_qubit: patch, cnot_sched: List[int]) -> List[bool]:
 
 
 @cudaq.kernel
-def se_x_ft(logical_qubit: patch, cnot_sched: List[int]) -> List[bool]:
+def se_x_ft(logical_qubit: patch,
+            cnot_sched: List[int]) -> List[cudaq.measure_handle]:
     h(logical_qubit.ancx)
     for i in range(0, len(cnot_sched), 2):
         cx(logical_qubit.ancx[cnot_sched[i]],
@@ -225,6 +227,10 @@ def custom_memory_circuit_stabs(
 ) -> None:
     # Create the logical patch
     logical = patch(data, xstab_anc, zstab_anc)
+    # Mirror the C++ idiom `std::vector<measure_result>(N)`: pre-allocate a
+    # list of unbound `measure_handle`s, each slot is overwritten with a real
+    # handle from `se_z_ft`/`se_x_ft` before any discrimination occurs.
+    # Can't use `measure_handle`: https://github.com/NVIDIA/cuda-quantum/issues/4527
     combined_syndrome = [False for i in range(len(xstab_anc) + len(zstab_anc))]
     # Handle the stabilizer lock-in round (numRounds == 1)
     if num_rounds == 1:
@@ -232,13 +238,13 @@ def custom_memory_circuit_stabs(
         syndrome_x = se_x_ft(logical, cnot_schedX_flat)
         i = 0
         for s in syndrome_z:
-            combined_syndrome[i] = s
+            combined_syndrome[i] = bool(s)
             i += 1
         for s in syndrome_x:
-            combined_syndrome[i] = s
+            combined_syndrome[i] = bool(s)
             i += 1
         if enqueue_synd:
-            qec.enqueue_syndromes(logical_qubit_idx, combined_syndrome, 0)
+            qec.enqueue_syndromes_test(logical_qubit_idx, combined_syndrome, 0)
         return
 
     # Process rounds window by window for the main measurement rounds
@@ -247,7 +253,7 @@ def custom_memory_circuit_stabs(
     for window_idx in range(num_rounds // decoder_window):
         # For window_idx > 0, enqueue the last syndrome from previous window first
         if window_idx > 0 and enqueue_synd:
-            qec.enqueue_syndromes(logical_qubit_idx, combined_syndrome, 0)
+            qec.enqueue_syndromes_test(logical_qubit_idx, combined_syndrome, 0)
 
         # Process the current window rounds
         for round_idx in range(window_idx * decoder_window,
@@ -256,14 +262,15 @@ def custom_memory_circuit_stabs(
             syndrome_x = se_x_ft(logical, cnot_schedX_flat)
             i = 0
             for s in syndrome_z:
-                combined_syndrome[i] = s
+                combined_syndrome[i] = bool(s)
                 i += 1
             for s in syndrome_x:
-                combined_syndrome[i] = s
+                combined_syndrome[i] = bool(s)
                 i += 1
 
             if enqueue_synd:
-                qec.enqueue_syndromes(logical_qubit_idx, combined_syndrome, 0)
+                qec.enqueue_syndromes_test(logical_qubit_idx, combined_syndrome,
+                                           0)
 
             if do_errors_after_non_last_rounds and round_idx < (
                     window_idx + 1) * decoder_window - 1:
@@ -388,7 +395,7 @@ def demo_circuit_qpu(
             ret = ret << num_data
         sub_data = data[i * num_data:(i + 1) * num_data]
         sub_meas = mz(sub_data)
-        ret |= cudaq.to_integer(sub_meas)
+        ret |= cudaq.to_integer(cudaq.to_bools(sub_meas))
 
     # The remaining bits are allocated to the number of corrections.
     ret = ret | (num_corrections << (num_data * num_logical))

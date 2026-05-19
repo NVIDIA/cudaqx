@@ -29,13 +29,6 @@ void bindDecodingConfig(nb::module_ &mod) {
   auto mod_cfg =
       qecmod.def_submodule("config", "Realtime decoding configuration");
 
-  // Workaround for nanobind v2.9.2: `def_rw` on a `std::optional<T>` field
-  // does not implicitly allow Python `None` for the setter (that behavior was
-  // added in v2.12.0 via PR #1262). Passing this annotation makes the setter
-  // accept None and store `std::nullopt`. Remove once nanobind is bumped to
-  // >=2.12.0.
-  const auto setter_accepts_none = nb::for_setter(nb::arg("value").none());
-
   // srelay_bp_config
   nb::class_<config::srelay_bp_config>(mod_cfg, "srelay_bp_config",
                                        "Relay-BP decoder configuration.")
@@ -48,11 +41,10 @@ void bindDecodingConfig(nb::module_ &mod) {
                 srelay_bp_config(srelay_bp_config::from_heterogeneous_map(map));
           },
           nb::arg("map"))
-      .def_rw("pre_iter", &srelay_bp_config::pre_iter, setter_accepts_none)
-      .def_rw("num_sets", &srelay_bp_config::num_sets, setter_accepts_none)
-      .def_rw("stopping_criterion", &srelay_bp_config::stopping_criterion,
-              setter_accepts_none)
-      .def_rw("stop_nconv", &srelay_bp_config::stop_nconv, setter_accepts_none)
+      .def_rw("pre_iter", &srelay_bp_config::pre_iter)
+      .def_rw("num_sets", &srelay_bp_config::num_sets)
+      .def_rw("stopping_criterion", &srelay_bp_config::stopping_criterion)
+      .def_rw("stop_nconv", &srelay_bp_config::stop_nconv)
       .def("to_heterogeneous_map", &srelay_bp_config::to_heterogeneous_map,
            nb::rv_policy::move)
       .def_static("from_heterogeneous_map",
@@ -70,45 +62,27 @@ void bindDecodingConfig(nb::module_ &mod) {
                 nv_qldpc_decoder_config::from_heterogeneous_map(map));
           },
           nb::arg("map"))
-      .def_rw("use_sparsity", &nv_qldpc_decoder_config::use_sparsity,
-              setter_accepts_none)
-      .def_rw("error_rate", &nv_qldpc_decoder_config::error_rate,
-              setter_accepts_none)
-      .def_rw("error_rate_vec", &nv_qldpc_decoder_config::error_rate_vec,
-              setter_accepts_none)
-      .def_rw("max_iterations", &nv_qldpc_decoder_config::max_iterations,
-              setter_accepts_none)
-      .def_rw("n_threads", &nv_qldpc_decoder_config::n_threads,
-              setter_accepts_none)
-      .def_rw("use_osd", &nv_qldpc_decoder_config::use_osd, setter_accepts_none)
-      .def_rw("osd_method", &nv_qldpc_decoder_config::osd_method,
-              setter_accepts_none)
-      .def_rw("osd_order", &nv_qldpc_decoder_config::osd_order,
-              setter_accepts_none)
-      .def_rw("bp_batch_size", &nv_qldpc_decoder_config::bp_batch_size,
-              setter_accepts_none)
-      .def_rw("osd_batch_size", &nv_qldpc_decoder_config::osd_batch_size,
-              setter_accepts_none)
-      .def_rw("iter_per_check", &nv_qldpc_decoder_config::iter_per_check,
-              setter_accepts_none)
-      .def_rw("clip_value", &nv_qldpc_decoder_config::clip_value,
-              setter_accepts_none)
-      .def_rw("bp_method", &nv_qldpc_decoder_config::bp_method,
-              setter_accepts_none)
-      .def_rw("scale_factor", &nv_qldpc_decoder_config::scale_factor,
-              setter_accepts_none)
-      .def_rw("proc_float", &nv_qldpc_decoder_config::proc_float,
-              setter_accepts_none)
-      .def_rw("gamma0", &nv_qldpc_decoder_config::gamma0, setter_accepts_none)
-      .def_rw("gamma_dist", &nv_qldpc_decoder_config::gamma_dist,
-              setter_accepts_none)
-      .def_rw("explicit_gammas", &nv_qldpc_decoder_config::explicit_gammas,
-              setter_accepts_none)
-      .def_rw("srelay_config", &nv_qldpc_decoder_config::srelay_config,
-              setter_accepts_none)
-      .def_rw("bp_seed", &nv_qldpc_decoder_config::bp_seed, setter_accepts_none)
-      .def_rw("composition", &nv_qldpc_decoder_config::composition,
-              setter_accepts_none)
+      .def_rw("use_sparsity", &nv_qldpc_decoder_config::use_sparsity)
+      .def_rw("error_rate", &nv_qldpc_decoder_config::error_rate)
+      .def_rw("error_rate_vec", &nv_qldpc_decoder_config::error_rate_vec)
+      .def_rw("max_iterations", &nv_qldpc_decoder_config::max_iterations)
+      .def_rw("n_threads", &nv_qldpc_decoder_config::n_threads)
+      .def_rw("use_osd", &nv_qldpc_decoder_config::use_osd)
+      .def_rw("osd_method", &nv_qldpc_decoder_config::osd_method)
+      .def_rw("osd_order", &nv_qldpc_decoder_config::osd_order)
+      .def_rw("bp_batch_size", &nv_qldpc_decoder_config::bp_batch_size)
+      .def_rw("osd_batch_size", &nv_qldpc_decoder_config::osd_batch_size)
+      .def_rw("iter_per_check", &nv_qldpc_decoder_config::iter_per_check)
+      .def_rw("clip_value", &nv_qldpc_decoder_config::clip_value)
+      .def_rw("bp_method", &nv_qldpc_decoder_config::bp_method)
+      .def_rw("scale_factor", &nv_qldpc_decoder_config::scale_factor)
+      .def_rw("proc_float", &nv_qldpc_decoder_config::proc_float)
+      .def_rw("gamma0", &nv_qldpc_decoder_config::gamma0)
+      .def_rw("gamma_dist", &nv_qldpc_decoder_config::gamma_dist)
+      .def_rw("explicit_gammas", &nv_qldpc_decoder_config::explicit_gammas)
+      .def_rw("srelay_config", &nv_qldpc_decoder_config::srelay_config)
+      .def_rw("bp_seed", &nv_qldpc_decoder_config::bp_seed)
+      .def_rw("composition", &nv_qldpc_decoder_config::composition)
       .def("to_heterogeneous_map",
            &nv_qldpc_decoder_config::to_heterogeneous_map, nb::rv_policy::move)
       .def_static("from_heterogeneous_map",
@@ -127,8 +101,7 @@ void bindDecodingConfig(nb::module_ &mod) {
                 multi_error_lut_config::from_heterogeneous_map(map));
           },
           nb::arg("map"))
-      .def_rw("lut_error_depth", &multi_error_lut_config::lut_error_depth,
-              setter_accepts_none)
+      .def_rw("lut_error_depth", &multi_error_lut_config::lut_error_depth)
       .def("to_heterogeneous_map",
            &multi_error_lut_config::to_heterogeneous_map, nb::rv_policy::move)
       .def_static("from_heterogeneous_map",
@@ -147,15 +120,11 @@ void bindDecodingConfig(nb::module_ &mod) {
                 trt_decoder_config::from_heterogeneous_map(map));
           },
           nb::arg("map"))
-      .def_rw("onnx_load_path", &trt_decoder_config::onnx_load_path,
-              setter_accepts_none)
-      .def_rw("engine_load_path", &trt_decoder_config::engine_load_path,
-              setter_accepts_none)
-      .def_rw("engine_save_path", &trt_decoder_config::engine_save_path,
-              setter_accepts_none)
-      .def_rw("precision", &trt_decoder_config::precision, setter_accepts_none)
-      .def_rw("memory_workspace", &trt_decoder_config::memory_workspace,
-              setter_accepts_none)
+      .def_rw("onnx_load_path", &trt_decoder_config::onnx_load_path)
+      .def_rw("engine_load_path", &trt_decoder_config::engine_load_path)
+      .def_rw("engine_save_path", &trt_decoder_config::engine_save_path)
+      .def_rw("precision", &trt_decoder_config::precision)
+      .def_rw("memory_workspace", &trt_decoder_config::memory_workspace)
       .def("to_heterogeneous_map", &trt_decoder_config::to_heterogeneous_map,
            nb::rv_policy::move)
       .def_static("from_heterogeneous_map",
@@ -192,28 +161,21 @@ void bindDecodingConfig(nb::module_ &mod) {
                 sliding_window_config::from_heterogeneous_map(map));
           },
           nb::arg("map"))
-      .def_rw("window_size", &sliding_window_config::window_size,
-              setter_accepts_none)
-      .def_rw("step_size", &sliding_window_config::step_size,
-              setter_accepts_none)
+      .def_rw("window_size", &sliding_window_config::window_size)
+      .def_rw("step_size", &sliding_window_config::step_size)
       .def_rw("num_syndromes_per_round",
-              &sliding_window_config::num_syndromes_per_round,
-              setter_accepts_none)
+              &sliding_window_config::num_syndromes_per_round)
       .def_rw("straddle_start_round",
-              &sliding_window_config::straddle_start_round, setter_accepts_none)
-      .def_rw("straddle_end_round", &sliding_window_config::straddle_end_round,
-              setter_accepts_none)
+              &sliding_window_config::straddle_start_round)
+      .def_rw("straddle_end_round", &sliding_window_config::straddle_end_round)
       .def_rw("error_rate_vec", &sliding_window_config::error_rate_vec)
       .def_rw("inner_decoder_name", &sliding_window_config::inner_decoder_name)
       .def_rw("single_error_lut_params",
-              &sliding_window_config::single_error_lut_params,
-              setter_accepts_none)
+              &sliding_window_config::single_error_lut_params)
       .def_rw("multi_error_lut_params",
-              &sliding_window_config::multi_error_lut_params,
-              setter_accepts_none)
+              &sliding_window_config::multi_error_lut_params)
       .def_rw("nv_qldpc_decoder_params",
-              &sliding_window_config::nv_qldpc_decoder_params,
-              setter_accepts_none)
+              &sliding_window_config::nv_qldpc_decoder_params)
       .def("to_heterogeneous_map", &sliding_window_config::to_heterogeneous_map,
            nb::rv_policy::move)
       .def_static("from_heterogeneous_map",

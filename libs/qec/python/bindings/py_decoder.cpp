@@ -105,13 +105,6 @@ void bindDecoder(nb::module_ &mod) {
                     ? nb::cast<nb::module_>(mod.attr("qecrt"))
                     : mod.def_submodule("qecrt");
 
-  // Workaround for nanobind v2.9.2: `def_rw` on a `std::optional<T>` field
-  // does not implicitly allow Python `None` for the setter (that behavior was
-  // added in v2.12.0 via PR #1262). Passing this annotation makes the setter
-  // accept None and store `std::nullopt`. Remove once nanobind is bumped to
-  // >=2.12.0.
-  const auto setter_accepts_none = nb::for_setter(nb::arg("value").none());
-
   nb::class_<decoder_result>(qecmod, "DecoderResult", R"pbdoc(
     A class representing the results of a quantum error correction decoding operation.
 
@@ -135,8 +128,7 @@ void bindDecoder(nb::module_ &mod) {
         the original quantum state. The format depends on the specific decoder
         implementation.
     )pbdoc")
-      .def_rw("opt_results", &decoder_result::opt_results, setter_accepts_none,
-              R"pbdoc(
+      .def_rw("opt_results", &decoder_result::opt_results, R"pbdoc(
         Optional additional results from the decoder stored in a heterogeneous map.
 
         This field may be empty if no additional results are available.
@@ -741,10 +733,23 @@ void bindDecoder(nb::module_ &mod) {
                       (error_msg ? std::string(error_msg) : "unknown error.")));
     }
 
-    // List of `init_func` names to call for decoder registration
+    // List of `init_func` names to call for decoder registration.
+    //
+    // The `enqueue_syndromes` mangled string encodes the public API's
+    // parameter type. Under CUDA-Q alias `using measure_result =
+    // measure_handle;`, C++ mangling resolves the typedef to its underlying
+    // type, so `INS_14measure_handleESaIS3_EE` is the inner-vector mangling for
+    // `std::vector<cudaq::measure_handle>`. If CUDA-Q ever renames the
+    // underlying handle type or changes the alias direction, this string must
+    // be re-derived from `nm` on the per-target device .o.
+    //
+    // `enqueue_syndromes_test` is the bool-typed counterpart and stays bound
+    // to `INS_t6vectorIbSaIbEE`; the Python frontend hands it pre-discriminated
+    // bits via `cudaq.to_bools(...)`.
     // clang-format off
     static const std::vector<std::string> initFuncNames = {
-        "function_enqueue_syndromes._ZN5cudaq3qec8decoding17enqueue_syndromesEmRKSt6vectorIbSaIbEEm.init_func",
+        "function_enqueue_syndromes._ZN5cudaq3qec8decoding17enqueue_syndromesEmRKSt6vectorINS_14measure_handleESaIS3_EEm.init_func",
+        "function_enqueue_syndromes_test._ZN5cudaq3qec8decoding22enqueue_syndromes_testEmRKSt6vectorIbSaIbEEm.init_func",
         "function_get_corrections._ZN5cudaq3qec8decoding15get_correctionsEmmb.init_func",
         "function_reset_decoder._ZN5cudaq3qec8decoding13reset_decoderEm.init_func"};
     // clang-format on

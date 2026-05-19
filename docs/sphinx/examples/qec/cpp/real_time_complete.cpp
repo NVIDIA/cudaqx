@@ -122,7 +122,7 @@ __qpu__ int64_t qec_circuit() {
       cudaq::x(data[i]);
   }
 
-  return cudaq::to_integer(mz(data));
+  return cudaq::to_integer(cudaq::to_bools(mz(data)));
 }
 // [End QEC Circuit]
 
