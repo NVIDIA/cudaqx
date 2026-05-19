@@ -20,9 +20,8 @@ namespace {
 /// the total nnz must fit in that type (std::vector::size may exceed it).
 inline void throw_if_nnz_exceeds_index_range(std::size_t nnz,
                                              const char *context) {
-  if (nnz >
-      static_cast<std::size_t>(
-          std::numeric_limits<sparse_binary_matrix::index_type>::max()))
+  if (nnz > static_cast<std::size_t>(
+                std::numeric_limits<sparse_binary_matrix::index_type>::max()))
     throw std::invalid_argument(std::string(context) +
                                 ": nnz exceeds index_type (uint32_t) range");
 }
