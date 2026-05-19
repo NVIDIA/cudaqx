@@ -5,10 +5,9 @@
  * This source code and the accompanying materials are made available under    *
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
-#include <functional>
 #include <filesystem>
+#include <functional>
 #include <limits>
-#include <unordered_map>
 #include <link.h>
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
@@ -22,6 +21,7 @@
 #include <nanobind/stl/variant.h>
 #include <nanobind/stl/vector.h>
 #include <nanobind/trampoline.h>
+#include <unordered_map>
 
 #include "cudaq/platform.h"
 #include "cudaq/qec/decoder.h"
@@ -102,15 +102,14 @@ public:
 // Registry to store decoder factory functions
 class PyDecoderRegistry {
 private:
-  static std::unordered_map<
-      std::string,
-      std::function<nb::object(nb::object, nb::kwargs)>>
+  static std::unordered_map<std::string,
+                            std::function<nb::object(nb::object, nb::kwargs)>>
       registry;
 
 public:
-  static void register_decoder(
-      const std::string &name,
-      std::function<nb::object(nb::object, nb::kwargs)> factory) {
+  static void
+  register_decoder(const std::string &name,
+                   std::function<nb::object(nb::object, nb::kwargs)> factory) {
     cudaq::info("Registering Pythonic Decoder with name {}", name);
     registry[name] = factory;
   }
@@ -357,8 +356,7 @@ void bindDecoder(nb::module_ &mod) {
 
       // Register the new class in the decoder registry
       PyDecoderRegistry::register_decoder(
-          name,
-          [new_class](nb::object H, nb::kwargs options) {
+          name, [new_class](nb::object H, nb::kwargs options) {
             nb::object instance = new_class(H, **options);
             return instance;
           });

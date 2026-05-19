@@ -191,7 +191,8 @@ get_pcm_for_rounds(const sparse_binary_matrix &pcm,
 ///
 /// If \f$\texttt{rows} \times \texttt{cols}\f$ exceeds an internal dense limit
 /// (currently 400 million entries), throws \c std::invalid_argument; use
-/// \c generate_random_pcm_sparse for matrices that large without a dense allocation.
+/// \c generate_random_pcm_sparse for matrices that large without a dense
+/// allocation.
 /// @param n_rounds The number of rounds in the PCM.
 /// @param n_errs_per_round The number of errors per round in the PCM.
 /// @param n_syndromes_per_round The number of syndromes per round in the PCM.

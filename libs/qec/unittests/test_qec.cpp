@@ -1276,9 +1276,9 @@ bool are_pcms_equal(const cudaqx::tensor<uint8_t> &a,
 TEST(PCMUtilsTester, GetPcmForRoundsSparseMatchesDenseTensor) {
   std::mt19937_64 rng(42);
   auto pcm_raw = cudaq::qec::generate_random_pcm(
-      /*n_rounds=*/4, /*n_errs=*/5, /*n_synd=*/3, /*weight=*/2,
-      std::move(rng));
-  auto pcm = cudaq::qec::sort_pcm_columns(pcm_raw, /*num_syndromes_per_round=*/3);
+      /*n_rounds=*/4, /*n_errs=*/5, /*n_synd=*/3, /*weight=*/2, std::move(rng));
+  auto pcm =
+      cudaq::qec::sort_pcm_columns(pcm_raw, /*num_syndromes_per_round=*/3);
   cudaq::qec::sparse_binary_matrix pcm_sparse(pcm);
 
   constexpr std::uint32_t kSp = 3;

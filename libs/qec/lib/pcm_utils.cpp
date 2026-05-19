@@ -10,9 +10,9 @@
 #include "cudaq/qec/sparse_binary_matrix.h"
 #include <cassert>
 #include <cstring>
-#include <stdexcept>
 #include <limits>
 #include <random>
+#include <stdexcept>
 #include <string>
 #include <unordered_set>
 
@@ -24,8 +24,7 @@ namespace {
 void select_pcm_columns_for_round_range(
     const std::vector<std::vector<std::uint32_t>> &row_indices,
     std::uint32_t num_syndromes_per_round, std::uint32_t start_round,
-    std::uint32_t end_round, bool straddle_start_round,
-    bool straddle_end_round,
+    std::uint32_t end_round, bool straddle_start_round, bool straddle_end_round,
     std::vector<std::uint32_t> &columns_in_range_out,
     std::uint32_t &first_column, std::uint32_t &last_column) {
   columns_in_range_out.clear();
@@ -394,8 +393,8 @@ get_pcm_for_rounds(const cudaqx::tensor<uint8_t> &pcm,
   std::uint32_t first_column = 0, last_column = 0;
   select_pcm_columns_for_round_range(
       row_indices, num_syndromes_per_round, start_round, end_round,
-      straddle_start_round, straddle_end_round, columns_in_range,
-      first_column, last_column);
+      straddle_start_round, straddle_end_round, columns_in_range, first_column,
+      last_column);
 
   return std::make_tuple(reorder_pcm_columns(pcm, columns_in_range,
                                              first_row_to_keep,
@@ -421,8 +420,7 @@ get_pcm_for_rounds(const sparse_binary_matrix &pcm,
   auto first_row_to_keep =
       static_cast<std::uint32_t>(start_round * num_syndromes_per_round);
   auto last_row_to_keep =
-      static_cast<std::uint32_t>((end_round + 1) * num_syndromes_per_round -
-                                 1);
+      static_cast<std::uint32_t>((end_round + 1) * num_syndromes_per_round - 1);
 
   if (first_row_to_keep >= pcm.num_rows()) {
     throw std::invalid_argument(
@@ -440,21 +438,20 @@ get_pcm_for_rounds(const sparse_binary_matrix &pcm,
   std::uint32_t first_column = 0, last_column = 0;
   select_pcm_columns_for_round_range(
       row_indices, num_syndromes_per_round, start_round, end_round,
-      straddle_start_round, straddle_end_round, columns_in_range,
-      first_column, last_column);
+      straddle_start_round, straddle_end_round, columns_in_range, first_column,
+      last_column);
 
   const std::uint32_t num_rows_to_copy =
       last_row_to_keep - first_row_to_keep + 1;
-  cudaqx::tensor<uint8_t> dense_sub(
-      std::vector<std::size_t>{static_cast<std::size_t>(num_rows_to_copy),
-                               columns_in_range.size()});
+  cudaqx::tensor<uint8_t> dense_sub(std::vector<std::size_t>{
+      static_cast<std::size_t>(num_rows_to_copy), columns_in_range.size()});
 
   for (std::size_t out_c = 0; out_c < columns_in_range.size(); ++out_c) {
     auto orig_col = columns_in_range[out_c];
     for (auto row : row_indices[orig_col]) {
       if (row >= first_row_to_keep && row <= last_row_to_keep)
-        dense_sub.at({static_cast<std::size_t>(row - first_row_to_keep),
-                      out_c}) = 1;
+        dense_sub.at(
+            {static_cast<std::size_t>(row - first_row_to_keep), out_c}) = 1;
     }
   }
 
