@@ -10,8 +10,50 @@
 #include "cudaq/qec/sparse_binary_matrix.h"
 #include <cassert>
 #include <cstring>
+#include <stdexcept>
+#include <limits>
 #include <random>
+#include <string>
 #include <unordered_set>
+
+namespace {
+
+/// Select PCM column indices with any nonzero in rows belonging to rounds
+/// [start_round, end_round], honoring straddle flags (same logic as dense
+/// \c get_pcm_for_rounds).
+void select_pcm_columns_for_round_range(
+    const std::vector<std::vector<std::uint32_t>> &row_indices,
+    std::uint32_t num_syndromes_per_round, std::uint32_t start_round,
+    std::uint32_t end_round, bool straddle_start_round,
+    bool straddle_end_round,
+    std::vector<std::uint32_t> &columns_in_range_out,
+    std::uint32_t &first_column, std::uint32_t &last_column) {
+  columns_in_range_out.clear();
+  for (std::size_t c = 0; c < row_indices.size(); c++) {
+    const auto &rows_for_this_column = row_indices[c];
+    if (rows_for_this_column.size() == 0)
+      continue;
+    auto first_round = rows_for_this_column.front() / num_syndromes_per_round;
+    auto last_round = rows_for_this_column.back() / num_syndromes_per_round;
+    if (first_round >= start_round && last_round <= end_round)
+      columns_in_range_out.push_back(static_cast<std::uint32_t>(c));
+    else if (straddle_start_round && first_round <= start_round &&
+             last_round >= start_round)
+      columns_in_range_out.push_back(static_cast<std::uint32_t>(c));
+    else if (straddle_end_round && first_round <= end_round &&
+             last_round >= end_round)
+      columns_in_range_out.push_back(static_cast<std::uint32_t>(c));
+  }
+
+  first_column = std::numeric_limits<std::uint32_t>::max();
+  last_column = std::numeric_limits<std::uint32_t>::min();
+  for (auto c : columns_in_range_out) {
+    first_column = std::min(first_column, c);
+    last_column = std::max(last_column, c);
+  }
+}
+
+} // namespace
 
 namespace cudaq::qec {
 
@@ -348,45 +390,75 @@ get_pcm_for_rounds(const cudaqx::tensor<uint8_t> &pcm,
 
   // Get a sparse representation of the PCM.
   auto row_indices = get_sparse_pcm(pcm);
-
-  // Get the columns that have any non-zero data in the range [start_round,
-  // end_round]. Use straddle_start_round and straddle_end_round accordingly.
   std::vector<std::uint32_t> columns_in_range;
-  for (std::size_t c = 0; c < row_indices.size(); c++) {
-    auto &rows_for_this_column = row_indices[c];
-    if (rows_for_this_column.size() == 0)
-      continue;
-    auto first_round = rows_for_this_column.front() / num_syndromes_per_round;
-    auto last_round = rows_for_this_column.back() / num_syndromes_per_round;
-    // If the first_round/last_round is fully within the range [start_round,
-    // end_round], then we include this column.
-    if (first_round >= start_round && last_round <= end_round)
-      columns_in_range.push_back(c);
-    // If it straddles the start_round, then we only include it if
-    // straddle_start_round is true.
-    else if (straddle_start_round && first_round <= start_round &&
-             last_round >= start_round)
-      columns_in_range.push_back(c);
-    // If it straddles the end_round, then we only include it if
-    // straddle_end_round is true.
-    else if (straddle_end_round && first_round <= end_round &&
-             last_round >= end_round)
-      columns_in_range.push_back(c);
-  }
-
-  // Traverse columns_in_range to find the first and last columns that were
-  // included.
-  uint32_t first_column = std::numeric_limits<uint32_t>::max();
-  uint32_t last_column = std::numeric_limits<uint32_t>::min();
-  for (auto c : columns_in_range) {
-    first_column = std::min(first_column, c);
-    last_column = std::max(last_column, c);
-  }
+  std::uint32_t first_column = 0, last_column = 0;
+  select_pcm_columns_for_round_range(
+      row_indices, num_syndromes_per_round, start_round, end_round,
+      straddle_start_round, straddle_end_round, columns_in_range,
+      first_column, last_column);
 
   return std::make_tuple(reorder_pcm_columns(pcm, columns_in_range,
                                              first_row_to_keep,
                                              last_row_to_keep),
                          first_column, last_column);
+}
+
+std::tuple<cudaqx::tensor<uint8_t>, std::uint32_t, std::uint32_t>
+get_pcm_for_rounds(const sparse_binary_matrix &pcm,
+                   std::uint32_t num_syndromes_per_round,
+                   std::uint32_t start_round, std::uint32_t end_round,
+                   bool straddle_start_round, bool straddle_end_round) {
+  if (num_syndromes_per_round == 0) {
+    throw std::invalid_argument(
+        "get_pcm_for_rounds: num_syndromes_per_round must be greater than 0");
+  }
+  if (num_syndromes_per_round > pcm.num_rows()) {
+    throw std::invalid_argument(
+        "get_pcm_for_rounds: num_syndromes_per_round must be less than the "
+        "number of rows in PCM");
+  }
+
+  auto first_row_to_keep =
+      static_cast<std::uint32_t>(start_round * num_syndromes_per_round);
+  auto last_row_to_keep =
+      static_cast<std::uint32_t>((end_round + 1) * num_syndromes_per_round -
+                                 1);
+
+  if (first_row_to_keep >= pcm.num_rows()) {
+    throw std::invalid_argument(
+        "get_pcm_for_rounds: first_row_to_keep is greater than the number of "
+        "rows in PCM");
+  }
+  if (last_row_to_keep >= pcm.num_rows()) {
+    throw std::invalid_argument(
+        "get_pcm_for_rounds: last_row_to_keep is greater than the number of "
+        "rows in PCM");
+  }
+
+  auto row_indices = pcm.to_csc().to_nested_csc();
+  std::vector<std::uint32_t> columns_in_range;
+  std::uint32_t first_column = 0, last_column = 0;
+  select_pcm_columns_for_round_range(
+      row_indices, num_syndromes_per_round, start_round, end_round,
+      straddle_start_round, straddle_end_round, columns_in_range,
+      first_column, last_column);
+
+  const std::uint32_t num_rows_to_copy =
+      last_row_to_keep - first_row_to_keep + 1;
+  cudaqx::tensor<uint8_t> dense_sub(
+      std::vector<std::size_t>{static_cast<std::size_t>(num_rows_to_copy),
+                               columns_in_range.size()});
+
+  for (std::size_t out_c = 0; out_c < columns_in_range.size(); ++out_c) {
+    auto orig_col = columns_in_range[out_c];
+    for (auto row : row_indices[orig_col]) {
+      if (row >= first_row_to_keep && row <= last_row_to_keep)
+        dense_sub.at({static_cast<std::size_t>(row - first_row_to_keep),
+                      out_c}) = 1;
+    }
+  }
+
+  return std::make_tuple(std::move(dense_sub), first_column, last_column);
 }
 
 /// @brief Generate a random PCM with the given parameters.
@@ -403,6 +475,18 @@ cudaqx::tensor<uint8_t> generate_random_pcm(std::size_t n_rounds,
                                             int weight, std::mt19937_64 &&rng) {
   std::size_t n_cols = n_rounds * n_errs_per_round;
   std::size_t n_rows = n_rounds * n_syndromes_per_round;
+  constexpr std::size_t kMaxDensePcmElements =
+      static_cast<std::size_t>(400u) * 1024u * 1024u;
+  const std::size_t n_elems = n_rows * n_cols;
+  if (n_elems > kMaxDensePcmElements) {
+    throw std::invalid_argument(
+        std::string("generate_random_pcm: PCM size (") +
+        std::to_string(n_rows) + " × " + std::to_string(n_cols) + " = " +
+        std::to_string(n_elems) +
+        " elements) exceeds the dense allocation limit for this API; use "
+        "cudaq::qec::generate_random_pcm_sparse(...) instead.");
+  }
+
   cudaqx::tensor<uint8_t> pcm(std::vector<std::size_t>{n_rows, n_cols});
 
   // Generate a random bit (either a 0 or 1) for each element of the PCM.

@@ -16,6 +16,7 @@ not require a GPU to use, but some components are GPU-accelerated.
 - Common decoders for surface codes and other topological codes
 - Real-time decoding capabilities for quantum feedback
 - Integration with CUDA-Q quantum program execution
+- Sparse `sparse_binary_matrix` / Python sparse-dict PCM representations to avoid allocating a dense `rows × cols` parity-check tensor where possible (large DEM-sized PCMs; see GitHub `#379`; `generate_random_pcm_sparse` for random-matrix demos without a dense tensor).
 
 ## Optional Dependencies
 

@@ -174,7 +174,24 @@ get_pcm_for_rounds(const cudaqx::tensor<uint8_t> &pcm,
                    bool straddle_start_round = false,
                    bool straddle_end_round = false);
 
+/// @brief Same semantics as the overload taking a dense tensor \p pcm, but
+/// reads from \p pcm as ``sparse_binary_matrix`` so the full dense PCM is not
+/// required (only the returned sub-matrix is dense). Parameter meanings match
+/// the dense overload.
+/// @return A tuple with the new PCM with the columns in the range [start_round,
+/// end_round], the first column included, and the last column included.
+std::tuple<cudaqx::tensor<uint8_t>, std::uint32_t, std::uint32_t>
+get_pcm_for_rounds(const sparse_binary_matrix &pcm,
+                   std::uint32_t num_syndromes_per_round,
+                   std::uint32_t start_round, std::uint32_t end_round,
+                   bool straddle_start_round = false,
+                   bool straddle_end_round = false);
+
 /// @brief Generate a random PCM with the given parameters.
+///
+/// If \f$\texttt{rows} \times \texttt{cols}\f$ exceeds an internal dense limit
+/// (currently 400 million entries), throws \c std::invalid_argument; use
+/// \c generate_random_pcm_sparse for matrices that large without a dense allocation.
 /// @param n_rounds The number of rounds in the PCM.
 /// @param n_errs_per_round The number of errors per round in the PCM.
 /// @param n_syndromes_per_round The number of syndromes per round in the PCM.

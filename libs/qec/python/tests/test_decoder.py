@@ -240,6 +240,17 @@ def test_sort_pcm_columns_invalid_input():
         qec.get_sorted_pcm_column_indices(H_invalid)
 
 
+def test_generate_random_pcm_rejects_too_large_dense_allocation():
+    """Dense random PCM rejects sizes above the dense API limit (~400e6 entries)."""
+    with pytest.raises((ValueError, RuntimeError), match="generate_random_pcm"):
+        qec.generate_random_pcm(
+            n_rounds=1,
+            n_errs_per_round=25000,
+            n_syndromes_per_round=20000,
+            weight=1,
+            seed=1)
+
+
 def test_gen_random_pcm():
     pcm = qec.generate_random_pcm(n_rounds=10,
                                   n_errs_per_round=20,
@@ -566,14 +577,13 @@ def test_get_decoder_sparse_from_scipy():
 
 
 def test_get_decoder_sparse_python_registered_decoder():
-    """Python-registered decoder (e.g. example_byod) receives dense H when given sparse."""
-    # When we pass sparse dict, backend converts to sparse_binary_matrix then for
-    # Python registry builds H_dense from to_dense() and passes to the Python
-    # factory. So the Python decoder still gets a numpy array (dense).
+    """Python BYOD factories receive sparse dict unchanged (no dense to_dense bridge)."""
     H_dense = create_test_matrix()
     H_sparse = dense_to_nested_csc(H_dense)
     decoder = qec.get_decoder("example_byod", H_sparse)
-    # Decoder works; internal contract is that Python decoders get dense array
+    assert hasattr(decoder, "H")
+    assert isinstance(decoder.H, dict)
+    assert decoder.H["layout"] == "nested_csc"
     result = decoder.decode(create_test_syndrome())
     assert result.converged is True
     # example_byod returns result length = num_rows

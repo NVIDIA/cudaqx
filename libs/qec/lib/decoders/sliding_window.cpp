@@ -181,8 +181,7 @@ void sliding_window::update_rw_next_read_index() {
 
 sliding_window::sliding_window(const cudaq::qec::sparse_binary_matrix &H,
                                const cudaqx::heterogeneous_map &params)
-    : decoder(H), full_pcm(H.to_dense()) {
-  full_pcm_T = full_pcm.transpose();
+    : decoder(H), h_nested_csc_(H.to_csc().to_nested_csc()) {
   // Fetch parameters from the params map.
   window_size = params.get<std::size_t>("window_size", window_size);
   step_size = params.get<std::size_t>("step_size", step_size);
@@ -205,17 +204,12 @@ sliding_window::sliding_window(const cudaq::qec::sparse_binary_matrix &H,
 
   validate_inputs();
 
-  // FIXME: inner decoders still use dense sub-PCMs from get_pcm_for_rounds;
-  // H.to_dense() materializes the full PCM. Refactor slicing to operate on
-  // sparse_binary_matrix directly to eliminate O(rows × cols) memory here.
-  auto H_dense = H.to_dense();
-
   // Create the inner decoders.
   for (std::size_t w = 0; w < num_windows; ++w) {
     std::size_t start_round = w * step_size;
     std::size_t end_round = start_round + window_size - 1;
     auto [H_round, first_column, last_column] = cudaq::qec::get_pcm_for_rounds(
-        H_dense, num_syndromes_per_round, start_round, end_round,
+        H, num_syndromes_per_round, start_round, end_round,
         straddle_start_round, straddle_end_round);
     first_columns.push_back(first_column);
 
@@ -444,15 +438,15 @@ void sliding_window::decode_window() {
     for (std::size_t s = 0; s < this->rolling_window.size(); ++s) {
       for (std::size_t c = 0; c < num_to_commit; ++c) {
         if (rw_results[s].result[c + this_window_first_column]) {
-          // This bit is a 1, so we need to modify the syndrome measurements
-          // for the next window to account for this already-accounted-for
-          // error. We do this by flipping the bit in the syndrome
-          // measurements if the corresponding entry in the PCM is a 1.
-          auto *pcm_col = &full_pcm_T.at({c + this_window_first_column, 0});
-          for (auto r = syndrome_start_next_window;
-               r <= syndrome_end_next_window; ++r) {
-            syndrome_mods[s][r] =
-                syndrome_mods[s][r] ^ static_cast<bool>(pcm_col[r]);
+          // Flip next-round syndrome bits where PCM has a 1 in this column,
+          // using CSC without materializing dense H or its transpose.
+          const auto pcm_col_ix =
+              static_cast<std::size_t>(c + this_window_first_column);
+          const auto &rows_with_one = h_nested_csc_.at(pcm_col_ix);
+          for (auto r : rows_with_one) {
+            if (r >= syndrome_start_next_window &&
+                r <= syndrome_end_next_window)
+              syndrome_mods[s][r] = syndrome_mods[s][r] ^ true;
           }
         }
       }

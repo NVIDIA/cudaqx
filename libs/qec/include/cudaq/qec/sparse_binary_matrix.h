@@ -18,6 +18,12 @@ namespace cudaq::qec {
 enum class sparse_binary_matrix_layout { csc, csr };
 
 /// @brief Sparse parity-check matrix in either CSC or CSR form.
+///
+/// Each column's row-index list (CSC) or each row's column-index list (CSR)
+/// should list each logical index at most once; duplicated indices within the
+/// same column (same row for CSR) are non-canonical and may not behave like
+/// separate GF(2) entries elsewhere in the codebase.
+///
 /// Index types are uint32_t (max ~4×10^9 per dimension and for nnz).
 /// Matrices larger than that cannot be represented without changing \c
 /// index_type.

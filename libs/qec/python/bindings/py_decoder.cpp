@@ -5,8 +5,10 @@
  * This source code and the accompanying materials are made available under    *
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
+#include <functional>
 #include <filesystem>
 #include <limits>
+#include <unordered_map>
 #include <link.h>
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
@@ -89,6 +91,9 @@ public:
               owned, cudaq::qec::sparse_binary_matrix_layout::csr);
         }()) {}
 
+  PyDecoder(const nb::dict &d)
+      : decoder(sparse_binary_matrix_from_py_dict(d)) {}
+
   decoder_result decode(const std::vector<float_t> &syndrome) override {
     NB_OVERRIDE_PURE(decode, syndrome);
   }
@@ -98,22 +103,19 @@ public:
 class PyDecoderRegistry {
 private:
   static std::unordered_map<
-      std::string, std::function<nb::object(
-                       const nb::ndarray<nb::numpy, uint8_t> &, nb::kwargs)>>
+      std::string,
+      std::function<nb::object(nb::object, nb::kwargs)>>
       registry;
 
 public:
   static void register_decoder(
       const std::string &name,
-      std::function<nb::object(const nb::ndarray<nb::numpy, uint8_t> &,
-                               nb::kwargs)>
-          factory) {
+      std::function<nb::object(nb::object, nb::kwargs)> factory) {
     cudaq::info("Registering Pythonic Decoder with name {}", name);
     registry[name] = factory;
   }
 
-  static nb::object get_decoder(const std::string &name,
-                                const nb::ndarray<nb::numpy, uint8_t> &H,
+  static nb::object get_decoder(const std::string &name, nb::object H,
                                 nb::kwargs options) {
     auto it = registry.find(name);
     if (it == registry.end()) {
@@ -129,8 +131,7 @@ public:
 };
 
 std::unordered_map<std::string,
-                   std::function<nb::object(
-                       const nb::ndarray<nb::numpy, uint8_t> &, nb::kwargs)>>
+                   std::function<nb::object(nb::object, nb::kwargs)>>
     PyDecoderRegistry::registry;
 
 void bindDecoder(nb::module_ &mod) {
@@ -208,6 +209,13 @@ void bindDecoder(nb::module_ &mod) {
   nb::class_<decoder, PyDecoder>(
       qecmod, "Decoder", "Represents a decoder for quantum error correction")
       .def(nb::init<const nb::ndarray<nb::numpy, uint8_t> &>())
+      .def(nb::init<const nb::dict &>(),
+           R"pbdoc(
+        Construct from sparse dict ``H`` with keys ``layout``, ``num_rows``,
+        ``num_cols``, and ``nested``. For bring-your-own-decoder classes that
+        receive the same sparse dict in ``cudaq.Decoder.__init__(self, H)`` as
+        was passed to ``get_decoder``.
+      )pbdoc")
       .def(
           "decode",
           [](decoder &decoder, const std::vector<float_t> &syndrome) {
@@ -349,8 +357,8 @@ void bindDecoder(nb::module_ &mod) {
 
       // Register the new class in the decoder registry
       PyDecoderRegistry::register_decoder(
-          name, [new_class](const nb::ndarray<nb::numpy, uint8_t> &H,
-                            nb::kwargs options) {
+          name,
+          [new_class](nb::object H, nb::kwargs options) {
             nb::object instance = new_class(H, **options);
             return instance;
           });
@@ -362,6 +370,10 @@ void bindDecoder(nb::module_ &mod) {
       "get_decoder",
       [](const std::string &name, nb::object H, const nb::kwargs options)
           -> std::variant<nb::object, std::unique_ptr<decoder>> {
+        if (PyDecoderRegistry::contains(name)) {
+          return PyDecoderRegistry::get_decoder(name, H, options);
+        }
+
         cudaq::qec::sparse_binary_matrix H_sparse;
 
         auto make_sparse_from_dense =
@@ -388,19 +400,6 @@ void bindDecoder(nb::module_ &mod) {
           H_sparse = make_sparse_from_dense(
               nb::cast<nb::ndarray<nb::numpy, uint8_t>>(H));
 
-        if (PyDecoderRegistry::contains(name)) {
-          cudaqx::tensor<uint8_t> dense_t = H_sparse.to_dense();
-          auto rows = dense_t.shape()[0];
-          auto cols = dense_t.shape()[1];
-          size_t shape[2] = {rows, cols};
-          auto arr = nb::ndarray<nb::numpy, uint8_t>(
-              const_cast<uint8_t *>(dense_t.data()), 2, shape, nb::none());
-          nb::object dense_owned = nb::cast(arr).attr("copy")();
-          return PyDecoderRegistry::get_decoder(
-              name, nb::cast<nb::ndarray<nb::numpy, uint8_t>>(dense_owned),
-              options);
-        }
-
         if (name == "tensor_network_decoder") {
           throw std::runtime_error(
               "Decoder 'tensor_network_decoder' is not available. "
@@ -424,9 +423,11 @@ void bindDecoder(nb::module_ &mod) {
           allowing native C++ decoders like ``pymatching`` to be constructed
           from very large parity-check matrices.
 
-        For Python-registered decoders (``cudaq.qec.decoder`` decorator), sparse
-        ``H`` is still expanded with ``to_dense()`` before invoking the Python
-        factory—only built-in/native decoders skip the full dense PCM allocation.
+        For Python-registered decoders (``cudaq.qec.decoder`` decorator), ``H``
+        is passed through to ``__init__`` unchanged (NumPy array or sparse dict).
+        Call ``Decoder.__init__(self, H)`` so nanobind can store the PCM in CSC
+        form when ``H`` is a dict without building a dense ``rows × cols``
+        allocation.
       )pbdoc");
 
   qecmod.def(
@@ -593,6 +594,10 @@ void bindDecoder(nb::module_ &mod) {
 
         This function creates a random parity check matrix for quantum error correction
         with specified parameters controlling the structure and randomness.
+
+        If ``n_rounds * n_syndromes_per_round * n_rounds * n_errs_per_round`` is
+        larger than the internal dense limit (see C++ API), this raises
+        ``ValueError`` / ``RuntimeError``; use :func:`generate_random_pcm_sparse`.
 
         Args:
             n_rounds: Number of measurement rounds in the error correction protocol
