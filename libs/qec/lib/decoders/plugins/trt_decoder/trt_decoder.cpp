@@ -768,6 +768,8 @@ trt_decoder::trt_decoder(const cudaq::qec::sparse_binary_matrix &H,
     }
 
     if (params.contains("O")) {
+      // Observables O remain a dense tensor (num_observables x block_size);
+      // typical problem sizes are modest vs H.
       auto O = params.get<cudaqx::tensor<uint8_t>>("O");
       if (O.rank() != 2) {
         throw std::runtime_error(

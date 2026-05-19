@@ -10,8 +10,23 @@
 #include <cstring>
 #include <limits>
 #include <stdexcept>
+#include <string>
 
 namespace cudaq::qec {
+
+namespace {
+
+/// CSC/CSR pointers and per-column/per-row runs use \c index_type (uint32_t);
+/// the total nnz must fit in that type (std::vector::size may exceed it).
+inline void throw_if_nnz_exceeds_index_range(std::size_t nnz,
+                                             const char *context) {
+  if (nnz > static_cast<std::size_t>(
+                std::numeric_limits<sparse_binary_matrix::index_type>::max()))
+    throw std::invalid_argument(std::string(context) +
+                                ": nnz exceeds index_type (uint32_t) range");
+}
+
+} // namespace
 
 sparse_binary_matrix::sparse_binary_matrix(sparse_binary_matrix_layout layout,
                                            index_type num_rows,
@@ -40,7 +55,10 @@ sparse_binary_matrix::from_csc(index_type num_rows, index_type num_cols,
           "sparse_binary_matrix::from_csc: col_ptrs must be non-decreasing");
     }
   }
-  if (col_ptrs.back() != static_cast<index_type>(row_indices.size())) {
+  throw_if_nnz_exceeds_index_range(row_indices.size(),
+                                   "sparse_binary_matrix::from_csc");
+  const auto nnz = static_cast<index_type>(row_indices.size());
+  if (col_ptrs.back() != nnz) {
     throw std::invalid_argument(
         "sparse_binary_matrix::from_csc: last col_ptr must equal nnz "
         "(row_indices.size())");
@@ -75,7 +93,10 @@ sparse_binary_matrix::from_csr(index_type num_rows, index_type num_cols,
           "sparse_binary_matrix::from_csr: row_ptrs must be non-decreasing");
     }
   }
-  if (row_ptrs.back() != static_cast<index_type>(col_indices.size())) {
+  throw_if_nnz_exceeds_index_range(col_indices.size(),
+                                   "sparse_binary_matrix::from_csr");
+  const auto nnz = static_cast<index_type>(col_indices.size());
+  if (row_ptrs.back() != nnz) {
     throw std::invalid_argument(
         "sparse_binary_matrix::from_csr: last row_ptr must equal nnz "
         "(col_indices.size())");
@@ -104,6 +125,8 @@ sparse_binary_matrix sparse_binary_matrix::from_nested_csc(
   std::size_t nnz_accum = 0;
   for (const auto &col : nested)
     nnz_accum += col.size();
+  throw_if_nnz_exceeds_index_range(nnz_accum,
+                                   "sparse_binary_matrix::from_nested_csc");
   std::vector<index_type> row_indices;
   row_indices.reserve(nnz_accum);
   for (index_type j = 0; j < num_cols; ++j) {
@@ -134,6 +157,8 @@ sparse_binary_matrix sparse_binary_matrix::from_nested_csr(
   std::size_t nnz_accum = 0;
   for (const auto &rw : nested)
     nnz_accum += rw.size();
+  throw_if_nnz_exceeds_index_range(nnz_accum,
+                                   "sparse_binary_matrix::from_nested_csr");
   std::vector<index_type> col_indices;
   col_indices.reserve(nnz_accum);
   for (index_type i = 0; i < num_rows; ++i) {
@@ -180,6 +205,11 @@ sparse_binary_matrix::sparse_binary_matrix(
         if (row_ptr[c])
           ++col_nnz[c];
     }
+    std::size_t total_nnz = 0;
+    for (index_type c = 0; c < num_cols_; ++c)
+      total_nnz += static_cast<std::size_t>(col_nnz[c]);
+    throw_if_nnz_exceeds_index_range(total_nnz,
+                                     "sparse_binary_matrix(dense,to CSC)");
     ptr_.resize(num_cols_ + 1);
     ptr_[0] = 0;
     for (index_type c = 0; c < num_cols_; ++c)
@@ -208,6 +238,11 @@ sparse_binary_matrix::sparse_binary_matrix(
       if (row_ptr[c])
         ++row_nnz[r];
   }
+  std::size_t total_nnz = 0;
+  for (index_type r = 0; r < num_rows_; ++r)
+    total_nnz += static_cast<std::size_t>(row_nnz[r]);
+  throw_if_nnz_exceeds_index_range(total_nnz,
+                                   "sparse_binary_matrix(dense,to CSR)");
   ptr_.resize(num_rows_ + 1);
   ptr_[0] = 0;
   for (index_type r = 0; r < num_rows_; ++r)

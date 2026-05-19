@@ -92,6 +92,8 @@ public:
 
     std::vector<std::vector<size_t>> errs2observables(block_size);
     if (params.contains("O")) {
+      // Observables O stay dense here (num_observables x block_size): small
+      // compared to a potentially huge sparse PCM H.
       auto O = params.get<cudaqx::tensor<uint8_t>>("O");
       if (O.rank() != 2) {
         throw std::runtime_error(

@@ -18,6 +18,11 @@ not require a GPU to use, but some components are GPU-accelerated.
 - Integration with CUDA-Q quantum program execution
 - Sparse `sparse_binary_matrix` / Python sparse-dict PCM representations to avoid allocating a dense `rows × cols` parity-check tensor where possible (large DEM-sized PCMs; see GitHub `#379`; `generate_random_pcm_sparse` for random-matrix demos without a dense tensor).
 
+## PCM and matrix size notes (for PR / release text)
+
+- Dense `generate_random_pcm` **throws** if `rows * cols` exceeds the current fixed limit (~400 million elements); use `generate_random_pcm_sparse` for larger random PCMs instead (**behavior change** for previously “too large to allocate” failures).
+- Parity check `H` is generally a `sparse_binary_matrix` (or Python sparse dict). Optional **observables** `O` in PyMatching / TensorRT decoders remain a modest-sized dense `cudaqx::tensor` parameter (`num_observables × block_size`); that API asymmetry is intentional for now.
+
 ## Optional Dependencies
 
 Some decoders require additional dependencies to operate. You can install them with

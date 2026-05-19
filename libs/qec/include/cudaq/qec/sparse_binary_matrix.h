@@ -19,10 +19,13 @@ enum class sparse_binary_matrix_layout { csc, csr };
 
 /// @brief Sparse parity-check matrix in either CSC or CSR form.
 ///
-/// Each column's row-index list (CSC) or each row's column-index list (CSR)
-/// should list each logical index at most once; duplicated indices within the
-/// same column (same row for CSR) are non-canonical and may not behave like
-/// separate GF(2) entries elsewhere in the codebase.
+/// **Input lists:** \c from_csc / \c from_csr / \c from_nested_* store index
+/// runs exactly as given. Indices within one CSC column (one CSR row) need not
+/// be sorted. Duplicate indices in the same column or row are accepted but are
+/// non-canonical: they are not merged as in a minimal GF(2) representation, so
+/// algorithms that assume at-most-one entry per position should canonicalize
+/// first. The total number of stored indices (\c nnz) must fit in \c
+/// index_type (see also \c num_nnz()).
 ///
 /// Index types are uint32_t (max ~4×10^9 per dimension and for nnz).
 /// Matrices larger than that cannot be represented without changing \c
@@ -67,6 +70,11 @@ public:
   /// Any non-zero entry is treated as 1.
   /// @param dense Dense parity-check matrix; must have rank 2.
   /// @param layout Storage layout for the sparse representation (default CSC).
+  ///
+  /// @note This constructor is intentionally not \c explicit so call sites can
+  /// still pass a rank-2 dense \c cudaqx::tensor PCM to \c decoder::get and
+  /// similar APIs that take \c sparse_binary_matrix (implicit conversion).
+  /// Callers may still write \c sparse_binary_matrix(H, layout) explicitly.
   sparse_binary_matrix(
       const cudaqx::tensor<std::uint8_t> &dense,
       sparse_binary_matrix_layout layout = sparse_binary_matrix_layout::csc);
