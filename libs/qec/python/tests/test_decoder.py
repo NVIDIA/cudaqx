@@ -243,12 +243,11 @@ def test_sort_pcm_columns_invalid_input():
 def test_generate_random_pcm_rejects_too_large_dense_allocation():
     """Dense random PCM rejects sizes above the dense API limit (~400e6 entries)."""
     with pytest.raises((ValueError, RuntimeError), match="generate_random_pcm"):
-        qec.generate_random_pcm(
-            n_rounds=1,
-            n_errs_per_round=25000,
-            n_syndromes_per_round=20000,
-            weight=1,
-            seed=1)
+        qec.generate_random_pcm(n_rounds=1,
+                                n_errs_per_round=25000,
+                                n_syndromes_per_round=20000,
+                                weight=1,
+                                seed=1)
 
 
 def test_gen_random_pcm():
