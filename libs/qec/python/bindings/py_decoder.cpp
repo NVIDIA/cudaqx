@@ -366,7 +366,7 @@ void bindDecoder(nb::module_ &mod) {
 
   qecmod.def(
       "get_decoder",
-      [](const std::string &name, nb::object H, const nb::kwargs options)
+      [](const std::string &name, nb::object H, nb::kwargs options)
           -> std::variant<nb::object, std::unique_ptr<decoder>> {
         if (PyDecoderRegistry::contains(name)) {
           return PyDecoderRegistry::get_decoder(name, H, options);
@@ -407,7 +407,6 @@ void bindDecoder(nb::module_ &mod) {
 
         return get_decoder(name, H_sparse, hetMapFromKwargs(options));
       },
-      nb::arg("name"), nb::arg("H"),
       R"pbdoc(
         Get a decoder by name.
 
