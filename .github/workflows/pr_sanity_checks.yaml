@@ -13,6 +13,9 @@ concurrency:
 env:
   LLVM_VERSION: 22
 
+permissions:
+  contents: read
+
 jobs:
   check-changes:
     name: Check changes
