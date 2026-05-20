@@ -106,6 +106,17 @@ for finder, name, ispkg in iter_namespace(codes):
     except (ModuleNotFoundError, ImportError) as e:
         pass
 
+# Surface the TN noise learner at the top level when its optional
+# dependencies (torch, quimb, opt_einsum) are installed; mirrors the
+# silent-skip pattern used by the plugin loaders above.
+try:
+    from .plugins.decoders.tensor_network_utils.nm_optimizer import (
+        NMOptimizer,
+        make_compiled_step,
+    )
+except (ModuleNotFoundError, ImportError):
+    pass
+
 import cudaq
 from .loader import qec_set_target_callback
 

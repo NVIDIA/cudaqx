@@ -16,19 +16,16 @@ import warnings
 
 import numpy as np
 import pytest
+import cudaq_qec as qec
 
 torch = pytest.importorskip(
     "torch", reason="torch not installed; skipping TN noise-learning tests")
 
-import cudaq_qec as qec  # noqa: E402
-
 if sys.version_info >= (3, 11):
-    from cudaq_qec.plugins.decoders.tensor_network_utils.noise_models import (
+    from cudaq_qec.plugins.decoders.tensor_network_utils.nm_optimizer import (
         NMOptimizer,
-        _PRIOR_EPS_BY_DTYPE,
-        _remap_eq_to_ascii,
-        _validate_and_clamp_priors,
         make_compiled_step,
+        remap_eq_to_ascii,
     )
 
 pytestmark = pytest.mark.skipif(sys.version_info < (3, 11),
@@ -136,17 +133,6 @@ def test_construction_basic(device):
     assert np.all((np_probs >= 0.0) & (np_probs <= 1.0))
 
 
-def test_public_reexport_from_tensor_network_decoder_module():
-    """``NMOptimizer`` is re-exported from the TN decoder plugin module."""
-    from cudaq_qec.plugins.decoders import tensor_network_decoder as tnd
-    from cudaq_qec.plugins.decoders.tensor_network_utils import (noise_models as
-                                                                 nl)
-    assert tnd.NMOptimizer is nl.NMOptimizer
-    assert tnd.make_compiled_step is nl.make_compiled_step
-    assert "NMOptimizer" in tnd.__all__
-    assert "make_compiled_step" in tnd.__all__
-
-
 @pytest.mark.parametrize("device", _device_params())
 def test_invalid_execute_mode_rejected(device):
     H, logical, priors = _simple_repetition_code()
@@ -163,6 +149,26 @@ def test_invalid_execute_mode_rejected(device):
                   flips,
                   device=device,
                   execute="bogus")
+
+
+@pytest.mark.parametrize("device", _device_params())
+def test_invalid_dtype_rejected(device):
+    """Unsupported dtypes must be rejected at the constructor boundary,
+    before any contraction setup runs."""
+    H, logical, priors = _simple_repetition_code()
+    syn, flips = _sample_synthetic_dataset(H,
+                                           logical,
+                                           priors,
+                                           num_shots=4,
+                                           rng=np.random.default_rng(2))
+    with pytest.raises(ValueError, match="Invalid dtype"):
+        _make_opt(H,
+                  logical,
+                  priors,
+                  syn,
+                  flips,
+                  device=device,
+                  dtype="float16")
 
 
 # -- forward pass / gradient -------------------------------------------------
@@ -360,7 +366,9 @@ def test_boundary_priors_clamped_with_warning(device, dtype):
                                            logical, [0.1, 0.2, 0.3],
                                            num_shots=8,
                                            rng=np.random.default_rng(20))
-    eps = _PRIOR_EPS_BY_DTYPE[dtype]
+    # Mirrors the dtype-eps table inside NMOptimizer.  Hardcoded so the
+    # test pins the boundary contract independently of the implementation.
+    eps = 1e-12 if dtype == "float64" else 1e-6
     with pytest.warns(UserWarning, match=r"Clamped \d+/\d+"):
         opt = _make_opt(H,
                         logical,
@@ -403,16 +411,17 @@ def test_in_range_priors_no_warning():
         _make_opt(H, logical, priors, syn, flips, device="cpu")
 
 
-def test_validate_and_clamp_priors_helper():
-    """Unit-test the helper directly: shape, unknown-dtype rejection, idempotence."""
+def test_non_1d_noise_model_rejected():
+    """A 2-D ``noise_model`` is rejected at the constructor boundary."""
+    H, logical, priors = _simple_repetition_code()
+    syn, flips = _sample_synthetic_dataset(H,
+                                           logical,
+                                           priors,
+                                           num_shots=4,
+                                           rng=np.random.default_rng(23))
+    bad = np.full((2, 3), 0.5)
     with pytest.raises(ValueError, match="must be 1-D"):
-        _validate_and_clamp_priors(np.zeros((2, 3)) + 0.5, "float64")
-    with pytest.raises(ValueError, match="Unsupported dtype"):
-        _validate_and_clamp_priors([0.1, 0.5, 0.9], "float128_unknown")
-    out = _validate_and_clamp_priors([0.1, 0.5, 0.9], "float64")
-    assert out == [0.1, 0.5, 0.9]
-    out = _validate_and_clamp_priors(out, "float64")
-    assert out == [0.1, 0.5, 0.9]
+        _make_opt(H, logical, bad, syn, flips, device="cpu")
 
 
 # -- current_syndrome_args ---------------------------------------------------
@@ -570,6 +579,36 @@ def test_update_dataset_shape_change_rebuilds_and_decodes(
     assert torch.allclose(loss, ref_loss, atol=1e-8, rtol=1e-8)
 
 
+@pytest.mark.parametrize("device", _device_params())
+def test_update_dataset_enforce_shape_mismatch_raises(device):
+    """``enforce_shape=True`` (default) must reject a syndrome batch whose
+    per-tensor shape differs from the construction-time batch.  The
+    permissive path is already covered by
+    :func:`test_update_dataset_shape_change_rebuilds_and_decodes`."""
+    rng = np.random.default_rng(78)
+    H, logical = _nondegenerate_code()
+    init_priors = [0.1, 0.15, 0.25]
+    syn1, flips1 = _sample_synthetic_dataset(H,
+                                             logical,
+                                             init_priors,
+                                             num_shots=16,
+                                             rng=rng)
+    opt = _make_opt(H,
+                    logical,
+                    init_priors,
+                    syn1,
+                    flips1,
+                    device=device,
+                    dtype="float64")
+    syn2, flips2 = _sample_synthetic_dataset(H,
+                                             logical,
+                                             init_priors,
+                                             num_shots=33,
+                                             rng=rng)
+    with pytest.raises(AssertionError, match="Shape mismatch"):
+        opt.update_dataset(syn2, flips2)
+
+
 # -- optimize_path -----------------------------------------------------------
 
 
@@ -630,12 +669,12 @@ def test_optimize_path_with_cotengra(device):
     np.testing.assert_allclose(before, after, atol=1e-10, rtol=1e-10)
 
 
-# -- _remap_eq_to_ascii -------------------------------------------------------
+# -- remap_eq_to_ascii -------------------------------------------------------
 
 
 def test_remap_eq_to_ascii_simple():
     eq = "ab,bc->ac"
-    out = _remap_eq_to_ascii(eq)
+    out = remap_eq_to_ascii(eq)
     # ASCII input is returned unchanged via the ``isascii()`` fast path.
     assert out == "ab,bc->ac"
 
@@ -643,7 +682,7 @@ def test_remap_eq_to_ascii_simple():
 def test_remap_eq_to_ascii_unicode_labels():
     """Synthetic equation with non-ASCII labels is remapped to a-zA-Z."""
     eq = "\u0391\u0392,\u0392\u0393->\u0391\u0393"  # greek letters
-    out = _remap_eq_to_ascii(eq)
+    out = remap_eq_to_ascii(eq)
     assert "\u0391" not in out and "\u0392" not in out and "\u0393" not in out
     assert "->" in out
     lhs, rhs = out.split("->")
@@ -656,7 +695,7 @@ def test_remap_eq_to_ascii_too_many_labels():
     chars = [chr(0x4E00 + i) for i in range(53)]  # 53 distinct CJK chars
     eq = "".join(chars) + "->" + chars[0]
     with pytest.raises(ValueError, match="more than 52"):
-        _remap_eq_to_ascii(eq)
+        remap_eq_to_ascii(eq)
 
 
 # -- logical_error_rate ------------------------------------------------------

@@ -40,10 +40,7 @@ import stim
 from beliefmatching.belief_matching import detector_error_model_to_check_matrices
 
 import cudaq_qec as qec
-from cudaq_qec.plugins.decoders.tensor_network_decoder import (
-    NMOptimizer,
-    make_compiled_step,
-)
+from cudaq_qec import NMOptimizer, make_compiled_step
 
 
 def parse_detector_error_model(dem):
