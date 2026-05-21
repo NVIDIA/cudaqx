@@ -2,10 +2,8 @@ name: Nightly tests
 
 on:
   schedule:
-    # Nightly run. GitHub Actions schedules use UTC.
-    - cron: '30 8 * * *'
+    - cron: '30 8 * * *' # Runs at 8:30am UTC
   workflow_dispatch:
-  pull_request:
 
 jobs:
   source:
