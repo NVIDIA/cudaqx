@@ -1,0 +1,20 @@
+name: Nightly tests
+
+on:
+  schedule:
+    # Nightly run. GitHub Actions schedules use UTC.
+    - cron: '30 8 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source:
+    name: Build from source
+    uses: ./.github/workflows/build_wheels.yaml
+    with:
+      build_type: Release
+      cudaq_wheels: Custom
+    secrets: inherit

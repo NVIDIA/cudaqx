@@ -1,5 +1,8 @@
 name: Build wheels
 
+env:
+  DEFAULT_CUDAQX_VERSION: &default_cudaqx_version '0.14.99'
+
 on:
   workflow_dispatch:
     inputs:
@@ -14,6 +17,7 @@ on:
       version:
         type: string
         description: Version number to create wheels with (e.g. 0.2.0). Defaults to 0.14.99 if unspecified
+        default: *default_cudaqx_version
         required: false
       cudaq_wheels:
         type: choice
@@ -35,6 +39,32 @@ on:
       artifacts_from_run:
         type: string
         description: Optional argument to take artifacts from a prior run of this workflow; facilitates rerunning a failed workflow without re-building the artifacts.
+        required: false
+  workflow_call:
+    inputs:
+      build_type:
+        type: string
+        default: 'Release'
+        required: false
+      version:
+        type: string
+        default: *default_cudaqx_version
+        required: false
+      cudaq_wheels:
+        type: string
+        default: 'Custom'
+        required: false
+      assets_repo:
+        type: string
+        default: ''
+        required: false
+      assets_tag:
+        type: string
+        default: ''
+        required: false
+      artifacts_from_run:
+        type: string
+        default: ''
         required: false
 
 concurrency:
@@ -129,7 +159,7 @@ jobs:
           bash .github/workflows/scripts/install_git_cli.sh
           if [[ -n "${{ inputs.assets_repo }}" ]] && [[ -n "${{ inputs.assets_tag }}" ]]; then
             # Fetch the assets into this directory
-            gh release download -R ${{ inputs.assets_repo }} ${{ inputs.assets_tag }}
+            gh release download -R "${{ inputs.assets_repo }}" "${{ inputs.assets_tag }}"
             ls
           fi
 
@@ -167,7 +197,7 @@ jobs:
               --build-type ${{ inputs.build_type }} \
               --python-version ${{ matrix.python }} \
               --tensorrt-path /trt_download/TensorRT-${{ steps.config.outputs.tensorrt_version }} \
-              --version ${{ inputs.version || '0.14.99' }}
+              --version ${{ inputs.version || env.DEFAULT_CUDAQX_VERSION }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -199,7 +229,7 @@ jobs:
       - name: Build CUDA-QX Meta Packages
         shell: bash
         run: |
-          bash scripts/ci/build_metapackages.sh ${{ inputs.version || '0.14.99' }}
+          bash scripts/ci/build_metapackages.sh ${{ inputs.version || env.DEFAULT_CUDAQX_VERSION }}
           find libs -name dist | xargs ls -la
           mkdir -p /metapackages
           mv libs/{qec,solvers}/python/metapackages/dist/* /metapackages/
@@ -340,6 +370,7 @@ jobs:
           github-token: ${{ inputs.artifacts_from_run && secrets.WORKFLOW_TOKEN || github.token }}
   
       - name: Test wheels
+        shell: bash
         run: |
           # If using Custom CUDA-Q wheels, then /cudaq-wheels will exist.
           # Otherwise, the directory will not exist, and that is ok.
@@ -355,8 +386,8 @@ jobs:
              ${{ matrix.python }} \
              ${{ matrix.platform }} \
              ${{ matrix.cuda_version }} \
-             ${{ inputs.cudaq_wheels == 'Custom' && '0.14.99' || 'SKIP' }} \
-             ${{ inputs.version || '0.14.99' }}
+             ${{ inputs.cudaq_wheels == 'Custom' && env.DEFAULT_CUDAQX_VERSION || 'SKIP' }} \
+             ${{ inputs.version || env.DEFAULT_CUDAQX_VERSION }}
   
   test-wheels-gpu:
     name: Test CUDA-QX wheels (GPU)
@@ -456,6 +487,7 @@ jobs:
           github-token: ${{ inputs.artifacts_from_run && secrets.WORKFLOW_TOKEN || github.token }}
   
       - name: Test wheels
+        shell: bash
         run: |
           # If using Custom CUDA-Q wheels, then /cudaq-wheels will exist.
           # Otherwise, the directory will not exist, and that is ok.
@@ -471,8 +503,8 @@ jobs:
              ${{ matrix.python }} \
              ${{ matrix.runner.arch }} \
              ${{ matrix.cuda_version }} \
-             ${{ inputs.cudaq_wheels == 'Custom' && '0.14.99' || 'SKIP' }} \
-             ${{ inputs.version || '0.14.99' }}
+             ${{ inputs.cudaq_wheels == 'Custom' && env.DEFAULT_CUDAQX_VERSION || 'SKIP' }} \
+             ${{ inputs.version || env.DEFAULT_CUDAQX_VERSION }}
 
       # - name: Upload any core files
       #   if: success() || failure()
