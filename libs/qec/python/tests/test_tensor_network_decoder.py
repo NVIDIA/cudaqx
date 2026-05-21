@@ -140,7 +140,7 @@ def test_decoder_decode_single():
     res = decoder.decode(syndrome)
     assert hasattr(res, "converged")
     assert hasattr(res, "result")
-    assert isinstance(res.result, list)
+    assert isinstance(res.result, np.ndarray)
     assert 0.0 <= res.result[0] <= 1.0
 
 
@@ -152,12 +152,14 @@ def test_decoder_decode_batch():
                               noise_model=noise)
     batch = np.array([[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
     res = decoder.decode_batch(batch)
-    print([r.result for r in res])
-    assert isinstance(res, list)
-    assert all(hasattr(r, "converged") and hasattr(r, "result") for r in res)
-    assert all(
-        isinstance(r.result, list) and 0.0 <= np.round(r.result[0]) <= 1.0
-        for r in res)
+    print(res.result)
+    assert isinstance(res, qec.BatchDecoderResult)
+    assert isinstance(res.result, np.ndarray)
+    assert res.result.shape == (3, 1)
+    assert res.converged.shape == (3,)
+    assert np.all(res.converged)
+    assert np.all((0.0 <= np.round(res.result[:, 0])) &
+                  (np.round(res.result[:, 0]) <= 1.0))
 
 
 def test_decoder_set_contractor_invalid():
@@ -291,20 +293,19 @@ def test_decoder_batch_vs_single_and_expected_results_with_contractors():
         # Decode the batch
         try:
             res_batch = decoder.decode_batch(batch)
-            assert isinstance(res_batch, list)
-            assert all(isinstance(r, qec.DecoderResult) for r in res_batch)
-            assert all(r.converged for r in res_batch)
+            assert isinstance(res_batch, qec.BatchDecoderResult)
+            assert np.all(res_batch.converged)
         except Exception as e:
             logging.error(f"Test failed due to: {e}")
             pytest.fail(f"Operation failed: {e}")
 
         if dtype == "float32":
-            batch_results = [np.float32(r.result[0]) for r in res_batch]
+            batch_results = res_batch.result[:, 0].astype(np.float32)
             expected_cast = np.array(expected, dtype=np.float32)
             rtol = 1e-5
             atol = 1e-5
         else:
-            batch_results = [np.float64(r.result[0]) for r in res_batch]
+            batch_results = res_batch.result[:, 0].astype(np.float64)
             expected_cast = np.array(expected, dtype=np.float64)
             rtol = 1e-5
             atol = 1e-5
