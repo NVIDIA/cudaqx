@@ -8,6 +8,7 @@
 
 #include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/sparse_binary_matrix.h"
+#include <algorithm>
 #include <cassert>
 #include <cstring>
 #include <limits>
@@ -433,7 +434,12 @@ get_pcm_for_rounds(const sparse_binary_matrix &pcm,
         "rows in PCM");
   }
 
-  auto row_indices = pcm.to_csc().to_nested_csc();
+  // Canonicalize the PCM on entry so per-column row lists are sorted (and
+  // GF(2)-merged). select_pcm_columns_for_round_range reads .front() and
+  // .back() of each column to compute first/last round — those are
+  // min/max only on sorted-per-column input. The sparse_binary_matrix
+  // contract does not require sorted input, so we enforce it here.
+  auto row_indices = canonicalize_pcm(pcm).to_nested_csc();
   std::vector<std::uint32_t> columns_in_range;
   std::uint32_t first_column = 0, last_column = 0;
   select_pcm_columns_for_round_range(
@@ -446,6 +452,9 @@ get_pcm_for_rounds(const sparse_binary_matrix &pcm,
   cudaqx::tensor<uint8_t> dense_sub(std::vector<std::size_t>{
       static_cast<std::size_t>(num_rows_to_copy), columns_in_range.size()});
 
+  // After canonicalize_pcm above, row_indices has at most one occurrence of
+  // each row per column, so direct assignment is equivalent to XOR-flip and
+  // simpler.
   for (std::size_t out_c = 0; out_c < columns_in_range.size(); ++out_c) {
     auto orig_col = columns_in_range[out_c];
     for (auto row : row_indices[orig_col]) {
@@ -470,18 +479,32 @@ cudaqx::tensor<uint8_t> generate_random_pcm(std::size_t n_rounds,
                                             std::size_t n_errs_per_round,
                                             std::size_t n_syndromes_per_round,
                                             int weight, std::mt19937_64 &&rng) {
+  // Reject negative weight up front: the inner per-column loop uses
+  // `for (std::size_t i = 0; i < weight; ++i)`, which after the usual
+  // arithmetic conversions treats a negative `weight` as a huge unsigned
+  // bound and would either spin or hit the rejection-sampling inner loop
+  // forever. Also reject weight > n_syndromes_per_round because the last
+  // round's row_max is n_syndromes_per_round; an oversized weight would
+  // exhaust available rows and the rejection loop would never terminate.
+  if (weight < 0 || static_cast<std::size_t>(weight) > n_syndromes_per_round) {
+    throw std::invalid_argument(
+        "generate_random_pcm: weight must be in [0, n_syndromes_per_round]; "
+        "got weight=" +
+        std::to_string(weight) +
+        ", n_syndromes_per_round=" + std::to_string(n_syndromes_per_round));
+  }
   std::size_t n_cols = n_rounds * n_errs_per_round;
   std::size_t n_rows = n_rounds * n_syndromes_per_round;
-  constexpr std::size_t kMaxDensePcmElements =
-      static_cast<std::size_t>(400u) * 1024u * 1024u;
   const std::size_t n_elems = n_rows * n_cols;
-  if (n_elems > kMaxDensePcmElements) {
+  if (n_elems > k_max_dense_pcm_elements) {
     throw std::invalid_argument(
         std::string("generate_random_pcm: PCM size (") +
         std::to_string(n_rows) + " × " + std::to_string(n_cols) + " = " +
         std::to_string(n_elems) +
-        " elements) exceeds the dense allocation limit for this API; use "
-        "cudaq::qec::generate_random_pcm_sparse(...) instead.");
+        " elements) exceeds the dense allocation limit (" +
+        std::to_string(k_max_dense_pcm_elements) +
+        ") for this API; use cudaq::qec::generate_random_pcm_sparse(...) "
+        "instead.");
   }
 
   cudaqx::tensor<uint8_t> pcm(std::vector<std::size_t>{n_rows, n_cols});
@@ -518,6 +541,16 @@ sparse_binary_matrix
 generate_random_pcm_sparse(std::size_t n_rounds, std::size_t n_errs_per_round,
                            std::size_t n_syndromes_per_round, int weight,
                            std::mt19937_64 &&rng) {
+  // Symmetric guard to generate_random_pcm. Without rejecting weight<0 the
+  // inner `for (int i = 0; i < weight; ++i)` silently produces an empty
+  // column rather than erroring; the precondition makes it explicit.
+  if (weight < 0 || static_cast<std::size_t>(weight) > n_syndromes_per_round) {
+    throw std::invalid_argument(
+        "generate_random_pcm_sparse: weight must be in [0, "
+        "n_syndromes_per_round]; got weight=" +
+        std::to_string(weight) +
+        ", n_syndromes_per_round=" + std::to_string(n_syndromes_per_round));
+  }
   std::size_t n_cols = n_rounds * n_errs_per_round;
   std::size_t n_rows = n_rounds * n_syndromes_per_round;
 
@@ -550,9 +583,48 @@ generate_random_pcm_sparse(std::size_t n_rounds, std::size_t n_errs_per_round,
     }
   }
 
+  // Rejection sampling pushes rows in draw order, so each column ends up
+  // unsorted. Downstream pcm_utils consumers (get_sorted_pcm_column_indices,
+  // select_pcm_columns_for_round_range, pcm_is_sorted) treat the first/last
+  // element of a column's row list as the min/max row to derive first/last
+  // round — that's only correct on sorted-per-column input. Sort here so
+  // callers building decoders directly from this generator (sliding_window,
+  // get_pcm_for_rounds, etc.) get correct round assignments without an extra
+  // canonicalize step.
+  for (auto &col : nested)
+    std::sort(col.begin(), col.end());
+
   return sparse_binary_matrix::from_nested_csc(
       static_cast<sparse_binary_matrix::index_type>(n_rows),
       static_cast<sparse_binary_matrix::index_type>(n_cols), nested);
+}
+
+sparse_binary_matrix canonicalize_pcm(const sparse_binary_matrix &pcm) {
+  // Work in the input layout to preserve it on the output. Sort each
+  // column's (CSC) or row's (CSR) index list, then collapse equal-run-length
+  // groups under GF(2): an index appearing k times survives iff k is odd.
+  using index_type = sparse_binary_matrix::index_type;
+  const bool is_csc = pcm.layout() == sparse_binary_matrix_layout::csc;
+  auto nested = is_csc ? pcm.to_nested_csc() : pcm.to_nested_csr();
+  for (auto &group : nested) {
+    std::sort(group.begin(), group.end());
+    auto write = group.begin();
+    for (auto read = group.begin(); read != group.end();) {
+      const index_type val = *read;
+      auto run_end = read;
+      while (run_end != group.end() && *run_end == val)
+        ++run_end;
+      if (((run_end - read) & 1) != 0) {
+        *write++ = val;
+      }
+      read = run_end;
+    }
+    group.erase(write, group.end());
+  }
+  return is_csc ? sparse_binary_matrix::from_nested_csc(pcm.num_rows(),
+                                                        pcm.num_cols(), nested)
+                : sparse_binary_matrix::from_nested_csr(pcm.num_rows(),
+                                                        pcm.num_cols(), nested);
 }
 
 /// @brief Randomly permute the columns of a PCM.

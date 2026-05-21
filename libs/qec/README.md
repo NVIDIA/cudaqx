@@ -20,8 +20,9 @@ not require a GPU to use, but some components are GPU-accelerated.
 
 ## PCM and matrix size notes (for PR / release text)
 
-- Dense `generate_random_pcm` **throws** if `rows * cols` exceeds the current fixed limit (~400 million elements); use `generate_random_pcm_sparse` for larger random PCMs instead (**behavior change** for previously “too large to allocate” failures).
+- Dense `generate_random_pcm` **throws** if `rows * cols` exceeds `cudaq::qec::k_max_dense_pcm_elements` (currently ~400 million elements); use `generate_random_pcm_sparse` for larger random PCMs instead (**behavior change** for previously "too large to allocate" failures).
 - Parity check `H` is generally a `sparse_binary_matrix` (or Python sparse dict). Optional **observables** `O` in PyMatching / TensorRT decoders remain a modest-sized dense `cudaqx::tensor` parameter (`num_observables × block_size`); that API asymmetry is intentional for now.
+- **Non-canonical sparse PCMs**: `sparse_binary_matrix::from_csc` / `from_csr` / `from_nested_*` accept duplicate indices within a column (CSC) or row (CSR) — this is legitimate output from DEM decompositions where `1 + 1 = 0` under GF(2). Consumers that dispatch on per-column nnz count (e.g. PyMatching) call `cudaq::qec::canonicalize_pcm(H)` internally to collapse duplicates under GF(2) parity before reading the column structure. If you write a new decoder that assumes uniqueness, call `canonicalize_pcm` on entry.
 
 ## Optional Dependencies
 

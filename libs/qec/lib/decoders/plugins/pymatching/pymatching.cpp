@@ -124,7 +124,13 @@ public:
 
     user_graph = pm::UserGraph(H.num_rows());
 
-    std::vector<std::vector<std::uint32_t>> H_e2d = H.to_nested_csc();
+    // PyMatching dispatches on per-column nnz count (size ∈ {1, 2}); the
+    // sparse_binary_matrix contract accepts non-canonical input (duplicate
+    // indices within a column legitimately arise from DEM decompositions).
+    // Apply GF(2) canonicalization here so duplicates collapse correctly
+    // (k occurrences → 1 iff k odd) before edge dispatch.
+    std::vector<std::vector<std::uint32_t>> H_e2d =
+        canonicalize_pcm(H).to_nested_csc();
     std::size_t col_idx = 0;
     for (std::size_t col = 0; col < block_size; col++) {
       double weight = 1.0;

@@ -589,5 +589,42 @@ def test_get_decoder_sparse_python_registered_decoder():
     assert len(result.result) == H_dense.shape[0]
 
 
+def test_pymatching_accepts_non_canonical_sparse_input():
+    """PyMatching dispatches on per-column nnz count, so it canonicalizes the
+    incoming sparse PCM (GF(2)-merge). A column with row 0 listed three times
+    must collapse to a single boundary edge instead of raising 'Invalid column'."""
+    # 2x3 PCM. Column 0 has row 0 listed 3 times (GF(2)-merges to {0} →
+    # boundary edge). Columns 1 and 2 are normal edges.
+    sparse_dict = {
+        "layout": "nested_csc",
+        "num_rows": 2,
+        "num_cols": 3,
+        "nested": [[0, 0, 0], [0, 1], [1]],
+    }
+    decoder = qec.get_decoder("pymatching", sparse_dict)
+    assert decoder is not None
+    # Decode a syndrome whose only flipped detector is row 0; either col 0 or
+    # col 1 is a valid explanation. We just verify decode succeeds.
+    result = decoder.decode([1.0, 0.0])
+    assert result.converged is True
+
+
+def test_generate_random_pcm_signed_weight_rejects_negative():
+    """Python `weight=-1` surfaces the C++ guard's message, not nanobind's
+    'incompatible function arguments'."""
+    with pytest.raises((ValueError, RuntimeError), match="weight"):
+        qec.generate_random_pcm(n_rounds=2,
+                                n_errs_per_round=3,
+                                n_syndromes_per_round=4,
+                                weight=-1,
+                                seed=1)
+    with pytest.raises((ValueError, RuntimeError), match="weight"):
+        qec.generate_random_pcm_sparse(n_rounds=2,
+                                       n_errs_per_round=3,
+                                       n_syndromes_per_round=4,
+                                       weight=-1,
+                                       seed=1)
+
+
 if __name__ == "__main__":
     pytest.main()

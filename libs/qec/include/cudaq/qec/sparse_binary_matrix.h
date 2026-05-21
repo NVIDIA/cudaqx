@@ -22,10 +22,14 @@ enum class sparse_binary_matrix_layout { csc, csr };
 /// **Input lists:** \c from_csc / \c from_csr / \c from_nested_* store index
 /// runs exactly as given. Indices within one CSC column (one CSR row) need not
 /// be sorted. Duplicate indices in the same column or row are accepted but are
-/// non-canonical: they are not merged as in a minimal GF(2) representation, so
-/// algorithms that assume at-most-one entry per position should canonicalize
-/// first. The total number of stored indices (\c nnz) must fit in \c
-/// index_type (see also \c num_nnz()).
+/// non-canonical: they are not merged as in a minimal GF(2) representation.
+/// The pcm_utils helpers and decoder plugins that need uniqueness or sorted
+/// per-column indices (PyMatching, sliding_window, get_pcm_for_rounds, ...)
+/// call \c cudaq::qec::canonicalize_pcm on entry, so callers can pass the
+/// output of \c from_nested_* or \c generate_random_pcm_sparse directly. New
+/// consumers that rely on the front()/back() of a column being min/max row
+/// must do the same. The total number of stored indices (\c nnz) must fit in
+/// \c index_type (see also \c num_nnz()).
 ///
 /// Index types are uint32_t (max ~4×10^9 per dimension and for nnz).
 /// Matrices larger than that cannot be represented without changing \c

@@ -87,8 +87,12 @@ public:
           auto borrow = toTensor(H);
           cudaqx::tensor<uint8_t> owned(borrow.shape());
           owned.copy(borrow.data(), borrow.shape());
+          // Match the layout used by get_decoder(ndarray) (see
+          // make_sparse_from_dense below) so downstream `to_nested_csc()`
+          // calls in C++ consumers are no-ops rather than implicit CSR→CSC
+          // transposes.
           return cudaq::qec::sparse_binary_matrix(
-              owned, cudaq::qec::sparse_binary_matrix_layout::csr);
+              owned, cudaq::qec::sparse_binary_matrix_layout::csc);
         }()) {}
 
   PyDecoder(const nb::dict &d)
@@ -568,9 +572,12 @@ void bindDecoder(nb::module_ &mod) {
 
   qecmod.def(
       "generate_random_pcm",
+      // `weight` is bound as a signed int (matching C++ signature) so the
+      // C++ guard reports "weight must be >= 0" with its own message instead
+      // of nanobind rejecting at the marshalling boundary with a less
+      // informative "incompatible function arguments" error.
       [](std::uint32_t n_rounds, std::uint32_t n_errs_per_round,
-         std::uint32_t n_syndromes_per_round, std::uint32_t weight,
-         std::uint32_t seed) {
+         std::uint32_t n_syndromes_per_round, int weight, std::uint32_t seed) {
         std::mt19937_64 rng(seed);
         if (seed == 0)
           rng = std::mt19937_64(std::random_device()());
@@ -615,17 +622,18 @@ void bindDecoder(nb::module_ &mod) {
 
   qecmod.def(
       "generate_random_pcm_sparse",
+      // Signed `weight` for the same reason as generate_random_pcm above.
       [](std::uint32_t n_rounds, std::uint32_t n_errs_per_round,
-         std::uint32_t n_syndromes_per_round, std::uint32_t weight,
+         std::uint32_t n_syndromes_per_round, int weight,
          std::uint32_t seed) -> nb::dict {
         std::mt19937_64 rng(seed);
         if (seed == 0)
           rng = std::mt19937_64(std::random_device()());
 
         cudaq::qec::sparse_binary_matrix sparse =
-            cudaq::qec::generate_random_pcm_sparse(
-                n_rounds, n_errs_per_round, n_syndromes_per_round,
-                static_cast<int>(weight), std::move(rng));
+            cudaq::qec::generate_random_pcm_sparse(n_rounds, n_errs_per_round,
+                                                   n_syndromes_per_round,
+                                                   weight, std::move(rng));
         nb::dict out;
         out["layout"] = "nested_csc";
         out["num_rows"] = sparse.num_rows();

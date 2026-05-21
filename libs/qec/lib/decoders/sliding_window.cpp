@@ -58,8 +58,13 @@ void sliding_window::validate_inputs() {
         "sliding_window constructor: error_rate_vec must be non-empty");
   }
 
-  // Enforce that H is already sorted.
-  if (!cudaq::qec::pcm_is_sorted(H.to_nested_csc(),
+  // Enforce that H is already in topological column order. Reuse the
+  // canonicalized h_nested_csc_ that the constructor already materialized —
+  // both to avoid the redundant H.to_nested_csc() materialization and to
+  // make pcm_is_sorted's per-column .front()/.back() reads correct (they
+  // are min/max only on sorted-per-column input, which canonicalization
+  // guarantees).
+  if (!cudaq::qec::pcm_is_sorted(h_nested_csc_,
                                  this->num_syndromes_per_round)) {
     throw std::invalid_argument("sliding_window constructor: PCM must be "
                                 "sorted. See cudaq::qec::simplify_pcm.");
@@ -181,7 +186,11 @@ void sliding_window::update_rw_next_read_index() {
 
 sliding_window::sliding_window(const cudaq::qec::sparse_binary_matrix &H,
                                const cudaqx::heterogeneous_map &params)
-    : decoder(H), h_nested_csc_(H.to_csc().to_nested_csc()) {
+    // GF(2)-canonicalize on entry so back-substitution and per-column .front()
+    // / .back() reads see sorted-unique indices, regardless of whether the
+    // caller supplied a sorted/unique sparse_binary_matrix (the contract says
+    // they need not).
+    : decoder(H), h_nested_csc_(canonicalize_pcm(H).to_nested_csc()) {
   // Fetch parameters from the params map.
   window_size = params.get<std::size_t>("window_size", window_size);
   step_size = params.get<std::size_t>("step_size", step_size);

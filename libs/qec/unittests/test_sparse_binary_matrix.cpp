@@ -410,5 +410,124 @@ TEST(SparseBinaryMatrix, FromCsc_IndexOutOfRangeThrows) {
                std::invalid_argument);
 }
 
+// -----------------------------------------------------------------------------
+// canonicalize_pcm (GF(2) merge)
+// -----------------------------------------------------------------------------
+
+TEST(SparseBinaryMatrix, CanonicalizePcm_NoOpOnAlreadyCanonical) {
+  // Column 0: {0,1}, column 1: {1,2}. No duplicates → output identical.
+  std::vector<std::vector<index_type>> nested = {{0, 1}, {1, 2}};
+  auto sp = sparse_binary_matrix::from_nested_csc(3, 2, nested);
+  auto canon = cudaq::qec::canonicalize_pcm(sp);
+  EXPECT_TRUE(dense_pcm_equal(sp.to_dense(), canon.to_dense()));
+  EXPECT_EQ(canon.num_nnz(), 4u);
+}
+
+TEST(SparseBinaryMatrix, CanonicalizePcm_EvenCountDropsEntry) {
+  // Column 0 has row 1 listed twice; GF(2) merge → drop both.
+  std::vector<std::vector<index_type>> nested = {{1, 1}, {0}};
+  auto sp = sparse_binary_matrix::from_nested_csc(3, 2, nested);
+  auto canon = cudaq::qec::canonicalize_pcm(sp);
+  EXPECT_EQ(canon.num_nnz(), 1u);
+  auto canon_nested = canon.to_nested_csc();
+  EXPECT_TRUE(canon_nested[0].empty());
+  EXPECT_EQ(canon_nested[1], (std::vector<index_type>{0}));
+}
+
+TEST(SparseBinaryMatrix, CanonicalizePcm_OddCountKeepsOne) {
+  // Row 2 listed three times in column 0 → odd count → one entry survives.
+  std::vector<std::vector<index_type>> nested = {{2, 2, 2}, {}};
+  auto sp = sparse_binary_matrix::from_nested_csc(3, 2, nested);
+  auto canon = cudaq::qec::canonicalize_pcm(sp);
+  auto canon_nested = canon.to_nested_csc();
+  EXPECT_EQ(canon_nested[0], (std::vector<index_type>{2}));
+}
+
+TEST(SparseBinaryMatrix, CanonicalizePcm_SortsAscending) {
+  // Unsorted, no duplicates → output sorted, same nnz.
+  std::vector<std::vector<index_type>> nested = {{2, 0, 1}};
+  auto sp = sparse_binary_matrix::from_nested_csc(3, 1, nested);
+  auto canon = cudaq::qec::canonicalize_pcm(sp);
+  EXPECT_EQ(canon.to_nested_csc()[0], (std::vector<index_type>{0, 1, 2}));
+}
+
+TEST(SparseBinaryMatrix, CanonicalizePcm_Idempotent) {
+  std::vector<std::vector<index_type>> nested = {{2, 0, 2, 1, 1, 1}};
+  auto sp = sparse_binary_matrix::from_nested_csc(3, 1, nested);
+  auto once = cudaq::qec::canonicalize_pcm(sp);
+  auto twice = cudaq::qec::canonicalize_pcm(once);
+  EXPECT_TRUE(dense_pcm_equal(once.to_dense(), twice.to_dense()));
+  EXPECT_EQ(once.num_nnz(), twice.num_nnz());
+}
+
+TEST(SparseBinaryMatrix, GenerateRandomPcmSparse_ProducesSortedColumns) {
+  // Rejection-sampling order is random; the generator must sort each column
+  // before returning so downstream pcm_utils consumers (which read .front() /
+  // .back() as min/max row) get the right round assignments.
+  auto sp = cudaq::qec::generate_random_pcm_sparse(/*n_rounds=*/4,
+                                                   /*n_errs_per_round=*/8,
+                                                   /*syn_per_round=*/5,
+                                                   /*weight=*/3,
+                                                   std::mt19937_64(31415));
+  auto nested = sp.to_nested_csc();
+  for (std::size_t j = 0; j < nested.size(); ++j) {
+    EXPECT_TRUE(std::is_sorted(nested[j].begin(), nested[j].end()))
+        << "column " << j << " is not sorted";
+  }
+}
+
+TEST(SparseBinaryMatrix, GenerateRandomPcmSparse_WeightZeroIsEmpty) {
+  // weight == 0 is in the documented [0, n_syndromes_per_round] range and
+  // produces an all-zero PCM (the per-column loop runs zero times).
+  auto sp =
+      cudaq::qec::generate_random_pcm_sparse(/*n_rounds=*/3,
+                                             /*n_errs_per_round=*/4,
+                                             /*syn_per_round=*/5,
+                                             /*weight=*/0, std::mt19937_64(0));
+  EXPECT_EQ(sp.num_rows(), 15u);
+  EXPECT_EQ(sp.num_cols(), 12u);
+  EXPECT_EQ(sp.num_nnz(), 0u);
+}
+
+TEST(SparseBinaryMatrix, GenerateRandomPcm_WeightZeroIsEmpty) {
+  // Dense path: same corner case.
+  auto dense = cudaq::qec::generate_random_pcm(3, 4, 5, /*weight=*/0,
+                                               std::mt19937_64(0));
+  ASSERT_EQ(dense.shape()[0], 15u);
+  ASSERT_EQ(dense.shape()[1], 12u);
+  for (std::size_t r = 0; r < dense.shape()[0]; ++r)
+    for (std::size_t c = 0; c < dense.shape()[1]; ++c)
+      EXPECT_EQ(dense.at({r, c}), 0u);
+}
+
+TEST(SparseBinaryMatrix, GetPcmForRoundsSparse_GF2Duplicates) {
+  // 4 rows / 2 rounds × 2 syndromes-per-round.
+  // Column 0 has row 1 listed twice → GF(2)-cancels to empty (matches the
+  // dense overload, which drops empty columns).
+  // Column 1 has row 0 once → survives.
+  // After canonicalization on entry, only the surviving column appears in
+  // the sub-block.
+  std::vector<std::vector<index_type>> nested = {{1, 1}, {0}};
+  auto sp = sparse_binary_matrix::from_nested_csc(4, 2, nested);
+  auto [sub, first_col, last_col] = cudaq::qec::get_pcm_for_rounds(
+      sp, /*num_syndromes_per_round=*/2, /*start_round=*/0, /*end_round=*/0,
+      /*straddle_start_round=*/true, /*straddle_end_round=*/true);
+  ASSERT_EQ(sub.shape()[0], 2u);
+  ASSERT_EQ(sub.shape()[1], 1u);
+  EXPECT_EQ(sub.at({0, 0}), 1u); // row 0 of surviving column
+  EXPECT_EQ(sub.at({1, 0}), 0u);
+  EXPECT_EQ(first_col, 1u);
+  EXPECT_EQ(last_col, 1u);
+}
+
+TEST(SparseBinaryMatrix, CanonicalizePcm_PreservesCsrLayout) {
+  std::vector<std::vector<index_type>> nested_csr = {{0, 0, 1}, {1, 2}};
+  auto sp = sparse_binary_matrix::from_nested_csr(2, 3, nested_csr);
+  auto canon = cudaq::qec::canonicalize_pcm(sp);
+  EXPECT_EQ(canon.layout(), sparse_binary_matrix_layout::csr);
+  EXPECT_EQ(canon.to_nested_csr()[0], (std::vector<index_type>{1}));
+  EXPECT_EQ(canon.to_nested_csr()[1], (std::vector<index_type>{1, 2}));
+}
+
 } // namespace
 } // namespace cudaq::qec

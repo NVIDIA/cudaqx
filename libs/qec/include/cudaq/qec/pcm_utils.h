@@ -187,12 +187,19 @@ get_pcm_for_rounds(const sparse_binary_matrix &pcm,
                    bool straddle_start_round = false,
                    bool straddle_end_round = false);
 
+/// @brief Upper bound on \f$\texttt{rows} \times \texttt{cols}\f$ for the
+/// dense \c generate_random_pcm path. Above this, the call throws and the
+/// caller should switch to \c generate_random_pcm_sparse. Exposed as a named
+/// symbol so tests and users can reference it without grepping the source.
+inline constexpr std::size_t k_max_dense_pcm_elements =
+    static_cast<std::size_t>(400u) * 1024u * 1024u;
+
 /// @brief Generate a random PCM with the given parameters.
 ///
-/// If \f$\texttt{rows} \times \texttt{cols}\f$ exceeds an internal dense limit
-/// (currently 400 million entries), throws \c std::invalid_argument; use
-/// \c generate_random_pcm_sparse for matrices that large without a dense
-/// allocation.
+/// If \f$\texttt{rows} \times \texttt{cols}\f$ exceeds \c
+/// k_max_dense_pcm_elements (currently ~419 million entries), throws \c
+/// std::invalid_argument; use \c generate_random_pcm_sparse for matrices that
+/// large without a dense allocation.
 /// @param n_rounds The number of rounds in the PCM.
 /// @param n_errs_per_round The number of errors per round in the PCM.
 /// @param n_syndromes_per_round The number of syndromes per round in the PCM.
@@ -212,6 +219,20 @@ sparse_binary_matrix
 generate_random_pcm_sparse(std::size_t n_rounds, std::size_t n_errs_per_round,
                            std::size_t n_syndromes_per_round, int weight,
                            std::mt19937_64 &&rng);
+
+/// @brief Return a GF(2)-canonical copy of \p pcm: each column (CSC) or row
+/// (CSR) has its indices sorted ascending, and duplicate indices are XOR-
+/// merged — an index that appears \p k times is kept iff \p k is odd. The
+/// output has the same layout as the input and is idempotent under further
+/// \c canonicalize_pcm calls.
+///
+/// Use this before passing a PCM built from a DEM decomposition (or any other
+/// source that may legitimately emit duplicate indices within a column/row)
+/// to consumers like PyMatching that dispatch on per-column nnz count and
+/// assume at-most-one entry per row per column. \c sparse_binary_matrix
+/// itself accepts duplicates at construction (see its header) so a separate
+/// call is required to canonicalize.
+sparse_binary_matrix canonicalize_pcm(const sparse_binary_matrix &pcm);
 
 /// @brief Randomly permute the columns of a PCM.
 /// @param pcm The PCM to permute.
