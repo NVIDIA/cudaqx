@@ -126,6 +126,43 @@ TEST(QAOATest, OverloadConsistency) {
   EXPECT_NEAR(result1.optimal_value, result2.optimal_value, 1e-6);
 }
 
+TEST(QAOATest, FullParamIdentityMixerCounterdiabatic) {
+  cudaq::spin_op problemHam =
+      1.0 * z(0) * z(1) + 0.7 * z(1) * z(2) + 0.4 * z(0) * z(2);
+  cudaq::spin_op mixingHam = 0.8 * x(0) + 1.1 * y(1) + 0.6 * x(2);
+  cudaq::spin_op mixingHamWithId =
+      mixingHam + 2.0 * cudaq::spin_op::from_word("III");
+
+  std::size_t numLayers = 2;
+  cudaqx::heterogeneous_map options = {{"full_parameterization", true},
+                                       {"counterdiabatic", true}};
+  auto expectedParams = cudaq::solvers::get_num_qaoa_parameters(
+      problemHam, mixingHam, numLayers, options);
+  auto expectedParamsWithId = cudaq::solvers::get_num_qaoa_parameters(
+      problemHam, mixingHamWithId, numLayers, options);
+  ASSERT_EQ(expectedParams, expectedParamsWithId);
+  options.insert("max_iterations", static_cast<int>(expectedParams + 2));
+
+  std::vector<double> initParams(expectedParams);
+  for (std::size_t i = 0; i < initParams.size(); ++i)
+    initParams[i] = 0.07 * static_cast<double>(i + 1);
+
+  auto opt = cudaq::optim::optimizer::get("cobyla");
+  auto result = cudaq::solvers::qaoa(problemHam, mixingHam, *opt, numLayers,
+                                     initParams, options);
+
+  auto optWithId = cudaq::optim::optimizer::get("cobyla");
+  auto resultWithId = cudaq::solvers::qaoa(
+      problemHam, mixingHamWithId, *optWithId, numLayers, initParams, options);
+
+  // Identity mixer terms should also be ignored through the normal optimizer.
+  // ASSERT checks the counter contract; EXPECTs check COBYLA sees equivalent
+  // objective paths and preserves the accepted parameter-vector size.
+  EXPECT_NEAR(result.optimal_value, resultWithId.optimal_value, 1e-4);
+  EXPECT_EQ(result.optimal_parameters.size(), expectedParams);
+  EXPECT_EQ(resultWithId.optimal_parameters.size(), expectedParamsWithId);
+}
+
 // These two negative tests are to verify that qaoa() forwards the user-provided
 // optimizer. ASSERTs: lbfgs requires gradients; qaoa() uses a no-gradient VQE
 // path, so forwarding lbfgs must trigger a runtime_error from vqe().
