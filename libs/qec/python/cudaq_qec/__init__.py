@@ -48,6 +48,7 @@ get_code = qecrt.get_code
 get_available_codes = qecrt.get_available_codes
 get_decoder = qecrt.get_decoder
 DecoderResult = qecrt.DecoderResult
+BatchDecoderResult = qecrt.BatchDecoderResult
 DetectorErrorModel = qecrt.DetectorErrorModel
 generate_random_bit_flips = qecrt.generate_random_bit_flips
 sample_memory_circuit = qecrt.sample_memory_circuit
