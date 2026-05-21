@@ -295,3 +295,37 @@ def test_qaoa_custom_mixer_forwarded():
     assert not np.isclose(result_custom.optimal_value,
                           result_implicit_default.optimal_value,
                           atol=1e-3)
+
+
+def test_qaoa_full_param_identity_mixer_counterdiabatic():
+    # Identity in the mixer should be physically invisible. This covers the
+    # full-parameterization path where identity terms must not consume angles or
+    # shift the observable counterdiabatic RY rotations.
+    problem_ham = (1.0 * spin.z(0) * spin.z(1) + 0.7 * spin.z(1) * spin.z(2) +
+                   0.4 * spin.z(0) * spin.z(2))
+
+    mixer_no_id = (0.8 * spin.x(0) + 1.1 * spin.y(1) + 0.6 * spin.x(2))
+
+    mixer_with_id = mixer_no_id + 2.0  # adds 2.0 * I
+
+    n_layers = 2
+    nonid_ref_terms = 3
+    n_params = n_layers * (problem_ham.term_count + nonid_ref_terms +
+                           problem_ham.qubit_count)
+
+    # Use distinct values so an off-by-one index shift cannot be hidden.
+    init_params = np.linspace(0.07, 0.91, n_params).tolist()
+
+    opts = {
+        "full_parameterization": True,
+        "counterdiabatic": True,
+        "max_iterations": n_params + 2,
+    }
+
+    r_no = solvers.qaoa(problem_ham, mixer_no_id, n_layers, init_params, **opts)
+    r_with = solvers.qaoa(problem_ham, mixer_with_id, n_layers, init_params,
+                          **opts)
+
+    # Identity in the reference Hamiltonian is only a global phase,
+    # so it should not change the objective.
+    assert np.isclose(r_no.optimal_value, r_with.optimal_value, atol=1e-4)

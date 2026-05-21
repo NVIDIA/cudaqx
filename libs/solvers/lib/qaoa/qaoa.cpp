@@ -92,6 +92,8 @@ qaoa_result qaoa(const cudaq::spin_op &problemHamiltonian,
   }
 
   for (const auto &o : referenceHamiltonian) {
+    if (o.is_identity())
+      continue;
     refHWords.emplace_back(o.get_pauli_word(numQubits));
     refHCoeffs.push_back(o.evaluate_coefficient().real());
   }
