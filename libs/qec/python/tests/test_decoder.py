@@ -69,6 +69,14 @@ def test_decoder_api():
     assert all(isinstance(r, qec.DecoderResult) for r in iterated)
     np.testing.assert_array_equal(iterated[1].result, result.result[1])
 
+    # Empty batch: shape (0, 0); per-shot width is undefined without input.
+    empty_result = decoder.decode_batch([])
+    assert isinstance(empty_result, qec.BatchDecoderResult)
+    assert empty_result.result.shape == (0, 0)
+    assert empty_result.converged.shape == (0,)
+    assert len(empty_result) == 0
+    assert len(empty_result.opt_results) == 0
+
     # Test decode_async
     decoder = qec.get_decoder('example_byod', H)
     result_async = decoder.decode_async(create_test_syndrome())
@@ -180,6 +188,30 @@ def test_python_decoder_batch_preserves_opt_results():
     assert batch_result.opt_results[0]["syndrome_weight"] == 0
     assert batch_result.opt_results[1]["syndrome_weight"] == H.shape[0]
     assert batch_result[1].opt_results["tag"] == "python"
+
+
+def test_python_decoder_batch_override_must_return_batch_decoder_result():
+
+    @qec.decoder("python_bad_batch_byod")
+    class PythonBadBatchDecoder:
+
+        def __init__(self, H, **kwargs):
+            qec.Decoder.__init__(self, H)
+            self.H = H
+
+        def decode(self, syndrome):
+            res = qec.DecoderResult()
+            res.converged = True
+            res.result = np.zeros(self.H.shape[1], dtype=np.float64)
+            return res
+
+        def decode_batch(self, syndromes):
+            # Pre-batch return shape; the decorator should reject this.
+            return [self.decode(s) for s in syndromes]
+
+    decoder = qec.get_decoder("python_bad_batch_byod", H)
+    with pytest.raises(TypeError, match="must return a BatchDecoderResult"):
+        decoder.decode_batch([np.zeros(H.shape[0]), np.ones(H.shape[0])])
 
 
 def test_decoder_plugin_initialization():

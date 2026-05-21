@@ -214,11 +214,13 @@ nb::object decoderResultToNumpy(const std::vector<float_t> &result) {
       nb::ndarray<nb::numpy, float_t>(raw_data, 1, shape, std::move(owner)));
 }
 
-nb::object decoderResultsToNumpy(const std::vector<decoder_result> &results,
-                                 std::size_t block_size) {
+nb::object decoderResultsToNumpy(const std::vector<decoder_result> &results) {
   const auto num_results = results.size();
-  const auto result_size =
-      num_results == 0 ? block_size : results.front().result.size();
+  // Empty batch yields shape (0, 0). The per-shot width is unknown without
+  // running a decode (and depends on decoder mode — e.g. decode_to_observables
+  // produces num_observables-wide rows, not block_size-wide). Callers should
+  // not rely on result.shape[1] when the batch is empty.
+  const auto result_size = num_results == 0 ? 0 : results.front().result.size();
 
   for (const auto &result : results) {
     if (result.result.size() != result_size) {
@@ -276,10 +278,9 @@ decoderResultsOptResultsToList(const std::vector<decoder_result> &results) {
 }
 
 batch_decoder_result
-makeBatchDecoderResult(const std::vector<decoder_result> &results,
-                       std::size_t block_size) {
+makeBatchDecoderResult(const std::vector<decoder_result> &results) {
   return batch_decoder_result{
-      decoderResultsToNumpy(results, block_size),
+      decoderResultsToNumpy(results),
       decoderResultsConvergedToNumpy(results),
       decoderResultsOptResultsToList(results),
       results.size(),
@@ -396,6 +397,11 @@ void bindDecoder(nb::module_ &mod) {
     `np.ascontiguousarray`), copying when the input doesn't already satisfy
     those invariants. Wrong rank (e.g. 1-D `result`) is rejected with
     TypeError.
+
+    An empty batch (zero syndromes) yields `result.shape == (0, 0)` and
+    `converged.shape == (0,)`. The per-shot width is unknown without running
+    a decode and depends on decoder mode, so `result.shape[1]` is only
+    meaningful when the batch is non-empty.
 
     Access patterns, fastest to slowest:
 
@@ -520,7 +526,7 @@ void bindDecoder(nb::module_ &mod) {
           [](decoder &decoder,
              const std::vector<std::vector<float_t>> &syndrome) {
             auto results = decoder.decode_batch(syndrome);
-            return makeBatchDecoderResult(results, decoder.get_block_size());
+            return makeBatchDecoderResult(results);
           },
           "Decode multiple syndromes and return the results",
           nb::arg("syndrome"))

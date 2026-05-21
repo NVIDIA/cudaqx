@@ -39,8 +39,42 @@ except ImportError as exc:
 __version__ = qecrt.__version__
 code = qecrt.code
 Code = qecrt.Code
-decoder = qecrt.decoder
+_native_decoder = qecrt.decoder
 Decoder = qecrt.Decoder
+
+
+def decoder(name):
+    """Register a Python class as a decoder plugin under `name`.
+
+    Wraps the native registration decorator so that any user-defined
+    `decode_batch` override is checked at runtime to return a
+    BatchDecoderResult. Returning a list[DecoderResult] (the pre-batch API)
+    is no longer supported.
+    """
+    native = _native_decoder(name)
+
+    def wrap(cls):
+        if "decode_batch" in cls.__dict__:
+            original = cls.decode_batch
+            cls_name = cls.__name__
+
+            def checked_decode_batch(self, *args, **kwargs):
+                result = original(self, *args, **kwargs)
+                if not isinstance(result, qecrt.BatchDecoderResult):
+                    raise TypeError(
+                        f"{cls_name}.decode_batch must return a "
+                        f"BatchDecoderResult; got "
+                        f"{type(result).__name__}. See BatchDecoderResult "
+                        f"in the cudaq_qec docs for the supported "
+                        f"construction surface.")
+                return result
+
+            cls.decode_batch = checked_decode_batch
+        return native(cls)
+
+    return wrap
+
+
 TwoQubitDepolarization = qecrt.TwoQubitDepolarization
 TwoQubitBitFlip = qecrt.TwoQubitBitFlip
 operation = qecrt.operation
