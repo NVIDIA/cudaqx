@@ -121,22 +121,6 @@ jobs:
       # Build
       # ========================================================================
 
-      - name: Debug CUDA-Q paths
-        shell: bash
-        run: |
-          set -euxo pipefail
-          uname -m
-          env | sort | grep -E 'CUDAQ|CMAKE|PATH' || true
-          if [[ -d /cudaq-install/lib/cmake/cudaq ]]; then
-            ls -la /cudaq-install/lib/cmake/cudaq
-          else
-            echo "/cudaq-install/lib/cmake/cudaq is missing"
-          fi
-          find /cudaq-install \( -iname '*nlopt*' -o -iname '*Nlopt*' \) -print || true
-          find /usr/local -path '*/lib/cmake/cudaq' -type d -print
-          find /usr/local \( -name 'CUDAQConfig.cmake' -o -name 'CUDAQNloptConfig.cmake' \) -print || true
-          find / -name 'CUDAQNloptConfig.cmake' 2>/dev/null || true
-
       - name: Build
         id: build
         uses: ./.github/actions/build-lib
@@ -145,6 +129,7 @@ jobs:
           cuda_version: ${{ matrix.cuda_version }}
           platform: ${{ matrix.runner.arch }}
           install-prefix: /usr/local/cudaq
+          cudaq-prefix: /usr/local/cudaq
 
       - name: Save build artifacts
         run: |
