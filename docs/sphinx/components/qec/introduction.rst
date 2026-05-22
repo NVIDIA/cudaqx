@@ -1355,3 +1355,51 @@ Additional Noise Models
       noise.add_all_qubit_channel(
           "x", cudaq::depolarization2(/*probability*/ 0.01),
           /*numControls*/ 1);
+
+DEM Sampling
+^^^^^^^^^^^^
+
+The ``dem_sampling`` function samples errors and syndromes from a detector error
+model (DEM). Given a binary check matrix :math:`H` of shape
+``[num_checks x num_error_mechanisms]`` and a vector of per-mechanism Bernoulli
+probabilities, it generates random error vectors and computes
+:math:`\text{syndromes} = \text{errors} \cdot H^T \pmod{2}`.
+
+In Python, the ``backend`` parameter (``"auto"``, ``"gpu"``, or ``"cpu"``)
+controls whether sampling runs on the GPU via cuStabilizer or on the CPU. The
+function accepts NumPy arrays and PyTorch CUDA tensors. In C++ the CPU and GPU
+paths live in separate namespaces (``cudaq::qec::dem_sampler::cpu`` and
+``cudaq::qec::dem_sampler::gpu``).
+
+.. tab:: Python
+
+    .. code-block:: python
+
+        import cudaq_qec as qec
+        import numpy as np
+
+        H = np.array([[1, 1, 0],
+                      [0, 1, 1]], dtype=np.uint8)
+        error_probs = np.array([0.05, 0.10, 0.05])
+
+        # backend="auto": GPU when available, else CPU
+        syndromes, errors = qec.dem_sampling(
+            H, num_shots=1000, error_probabilities=error_probs, seed=42)
+        # syndromes: uint8 [1000 x 2], errors: uint8 [1000 x 3]
+
+.. tab:: C++
+
+    .. literalinclude:: ../../examples/qec/cpp/dem_sampling.cpp
+       :language: cpp
+       :start-after: [Begin Documentation]
+
+    Compile and run with
+
+    .. code-block:: bash
+
+       nvq++ --enable-mlir -lcudaq-qec dem_sampling.cpp -o dem_sampling
+       ./dem_sampling
+
+For a complete walkthrough including GPU acceleration, input type handling, and
+backend selection details, see the
+:doc:`DEM Sampling example </examples_rst/qec/dem_sampling>`.
