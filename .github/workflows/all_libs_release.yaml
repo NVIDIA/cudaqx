@@ -129,6 +129,7 @@ jobs:
           cuda_version: ${{ matrix.cuda_version }}
           platform: ${{ matrix.runner.arch }}
           install-prefix: /usr/local/cudaq
+          cudaq-prefix: /usr/local/cudaq
 
       - name: Save build artifacts
         run: |
@@ -193,4 +194,3 @@ jobs:
         run: |
           ln -s /usr/local/cudaq /cudaq-install
           bash scripts/ci/test_examples.sh all 
-

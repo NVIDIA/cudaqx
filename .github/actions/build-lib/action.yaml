@@ -1,4 +1,5 @@
 name: Build a CUDAQX library
+description: Configure, build, and optionally cache a CUDA-QX library
 
 inputs:
   lib:
@@ -21,7 +22,11 @@ inputs:
     required: true
   install-prefix:
     description: 'Install prefix'
-    default: '~/.cudaqx'
+    default: '$HOME/.cudaqx'
+    required: false
+  cudaq-prefix:
+    description: 'CUDA-Q install prefix'
+    default: '/cudaq-install'
     required: false
 outputs:
   build-dir:
@@ -67,7 +72,7 @@ runs:
         CCACHE_DIR: /ccache-${{ inputs.lib }}
       run: |
         build_dir=build_${{ inputs.lib }}
-        .github/actions/build-lib/build_${{ inputs.lib }}.sh $build_dir ${{ inputs.install-prefix }}
+        .github/actions/build-lib/build_${{ inputs.lib }}.sh "$build_dir" "${{ inputs.install-prefix }}" "${{ inputs.cudaq-prefix }}"
         echo "build_dir=$build_dir" >> $GITHUB_OUTPUT
       shell: bash
 
@@ -90,4 +95,3 @@ runs:
       with:
         path: /ccache-${{ inputs.lib }}
         key: ${{ steps.ccache-key.outputs.main }}${{ steps.ccache-key.outputs.pr }}
-
