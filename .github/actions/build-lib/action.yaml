@@ -22,7 +22,7 @@ inputs:
     required: true
   install-prefix:
     description: 'Install prefix'
-    default: '~/.cudaqx'
+    default: '$HOME/.cudaqx'
     required: false
   cudaq-prefix:
     description: 'CUDA-Q install prefix'
