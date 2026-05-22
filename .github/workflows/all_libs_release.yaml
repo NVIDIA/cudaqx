@@ -121,6 +121,18 @@ jobs:
       # Build
       # ========================================================================
 
+      - name: Debug CUDA-Q install
+        shell: bash
+        run: |
+          set -euxo pipefail
+          uname -m
+          if [[ -d /cudaq-install/lib/cmake/cudaq ]]; then
+            ls -la /cudaq-install/lib/cmake/cudaq
+          else
+            echo "/cudaq-install/lib/cmake/cudaq is missing"
+          fi
+          find /cudaq-install \( -iname '*nlopt*' -o -iname '*Nlopt*' \) -print || true
+
       - name: Build
         id: build
         uses: ./.github/actions/build-lib
@@ -193,4 +205,3 @@ jobs:
         run: |
           ln -s /usr/local/cudaq /cudaq-install
           bash scripts/ci/test_examples.sh all 
-
