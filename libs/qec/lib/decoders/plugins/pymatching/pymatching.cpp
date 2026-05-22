@@ -92,8 +92,6 @@ public:
 
     std::vector<std::vector<size_t>> errs2observables(block_size);
     if (params.contains("O")) {
-      // Observables O stay dense here (num_observables x block_size): small
-      // compared to a potentially huge sparse PCM H.
       auto O = params.get<cudaqx::tensor<uint8_t>>("O");
       if (O.rank() != 2) {
         throw std::runtime_error(
@@ -124,11 +122,8 @@ public:
 
     user_graph = pm::UserGraph(H.num_rows());
 
-    // PyMatching dispatches on per-column nnz count (size ∈ {1, 2}); the
-    // sparse_binary_matrix contract accepts non-canonical input (duplicate
-    // indices within a column legitimately arise from DEM decompositions).
-    // Apply GF(2) canonicalization here so duplicates collapse correctly
-    // (k occurrences → 1 iff k odd) before edge dispatch.
+    // PyMatching dispatches on per-column nnz ∈ {1, 2}; canonicalize so
+    // GF(2)-duplicates from DEM decompositions collapse first.
     std::vector<std::vector<std::uint32_t>> H_e2d =
         canonicalize_pcm(H).to_nested_csc();
     std::size_t col_idx = 0;

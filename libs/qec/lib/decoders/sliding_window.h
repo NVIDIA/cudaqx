@@ -49,10 +49,6 @@ private:
   std::size_t num_rounds_since_last_decode = 0;
   std::vector<std::unique_ptr<decoder>> inner_decoders;
   std::vector<std::size_t> first_columns;
-  /// Full PCM in nested CSC (\p nested[j] = row indices for column \p j) for
-  /// syndrome back-substitution without materializing dense \f$H\f$ /
-  /// \f$H^T\f$.
-  std::vector<std::vector<std::uint32_t>> h_nested_csc_;
 
   // Enum type for timing data.
   enum WindowProcTimes {

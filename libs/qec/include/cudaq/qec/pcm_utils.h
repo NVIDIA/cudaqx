@@ -178,6 +178,23 @@ get_pcm_for_rounds(const cudaqx::tensor<uint8_t> &pcm,
 /// reads from \p pcm as ``sparse_binary_matrix`` so the full dense PCM is not
 /// required (only the returned sub-matrix is dense). Parameter meanings match
 /// the dense overload.
+///
+/// @param pcm_is_canonical If true, the caller asserts \p pcm has
+/// sorted-unique per-group indices (i.e. is the output of \c canonicalize_pcm
+/// or was constructed canonically). In that case the per-call
+/// canonicalization step is skipped — useful for callers like
+/// \c sliding_window that canonicalize once at construction and then call
+/// this function in a per-window loop on the same matrix. Default \c false
+/// preserves the original "canonicalize on entry" behavior.
+///
+/// @warning When \p pcm_is_canonical is \c true the precondition is *not*
+/// checked. select_pcm_columns_for_round_range reads \c .front() / \c .back()
+/// of each CSC column to derive first/last round; those are only the true
+/// min/max row if the column list is sorted-unique. Passing a non-canonical
+/// PCM with this flag (e.g. a raw DEM decomposition, a hand-built sparse
+/// matrix with duplicate or unsorted indices, or a canonical CSR that the
+/// caller forgot to re-canonicalize after conversion) silently produces
+/// wrong round assignments. If unsure, leave the flag \c false.
 /// @return A tuple with the new PCM with the columns in the range [start_round,
 /// end_round], the first column included, and the last column included.
 std::tuple<cudaqx::tensor<uint8_t>, std::uint32_t, std::uint32_t>
@@ -185,7 +202,8 @@ get_pcm_for_rounds(const sparse_binary_matrix &pcm,
                    std::uint32_t num_syndromes_per_round,
                    std::uint32_t start_round, std::uint32_t end_round,
                    bool straddle_start_round = false,
-                   bool straddle_end_round = false);
+                   bool straddle_end_round = false,
+                   bool pcm_is_canonical = false);
 
 /// @brief Upper bound on \f$\texttt{rows} \times \texttt{cols}\f$ for the
 /// dense \c generate_random_pcm path. Above this, the call throws and the
@@ -214,7 +232,8 @@ cudaqx::tensor<uint8_t> generate_random_pcm(std::size_t n_rounds,
 
 /// @brief Same distribution as generate_random_pcm, but constructs a CSC
 /// sparse_binary_matrix directly without allocating a dense rank-2 tensor.
-/// Intended for large PCMs where dense allocation fails (#379 style sizes).
+/// Intended for large PCMs whose dense form would exceed
+/// k_max_dense_pcm_elements.
 sparse_binary_matrix
 generate_random_pcm_sparse(std::size_t n_rounds, std::size_t n_errs_per_round,
                            std::size_t n_syndromes_per_round, int weight,

@@ -136,9 +136,9 @@ public:
   decoder() = delete;
 
   /// @brief Constructor
-  /// @param H Decoder's parity check matrix represented as a sparse binary
-  /// matrix.
-  decoder(const cudaq::qec::sparse_binary_matrix &H);
+  /// @param H Decoder's parity check matrix. Taken by value so rvalue
+  /// arguments are moved into the base member.
+  decoder(cudaq::qec::sparse_binary_matrix H);
 
   /// @brief Decode a single syndrome
   /// @param syndrome A vector of syndrome measurements where the floating point

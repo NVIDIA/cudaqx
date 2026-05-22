@@ -49,7 +49,8 @@ sparse_binary_matrix::from_csc(index_type num_rows, index_type num_cols,
     throw std::invalid_argument(
         "sparse_binary_matrix::from_csc: col_ptrs[0] must be zero");
   }
-  for (index_type j = 1; j <= num_cols; ++j) {
+  // size_t guards j from wrapping when num_cols == UINT32_MAX.
+  for (std::size_t j = 1; j <= num_cols; ++j) {
     if (col_ptrs[j - 1] > col_ptrs[j]) {
       throw std::invalid_argument(
           "sparse_binary_matrix::from_csc: col_ptrs must be non-decreasing");
@@ -87,7 +88,7 @@ sparse_binary_matrix::from_csr(index_type num_rows, index_type num_cols,
     throw std::invalid_argument(
         "sparse_binary_matrix::from_csr: row_ptrs[0] must be zero");
   }
-  for (index_type i = 1; i <= num_rows; ++i) {
+  for (std::size_t i = 1; i <= num_rows; ++i) { // see from_csc re: size_t.
     if (row_ptrs[i - 1] > row_ptrs[i]) {
       throw std::invalid_argument(
           "sparse_binary_matrix::from_csr: row_ptrs must be non-decreasing");
@@ -196,33 +197,33 @@ sparse_binary_matrix::sparse_binary_matrix(
   num_cols_ = static_cast<index_type>(ncols);
   layout_ = layout;
 
+  // size_t loops + `static_cast<size_t>(dim) + 1` ptr sizing avoid UINT32_MAX
+  // wraparound; see from_csc.
   if (layout_ == sparse_binary_matrix_layout::csc) {
     std::vector<index_type> col_nnz(num_cols_, 0);
-    for (index_type r = 0; r < num_rows_; ++r) {
-      const auto *row_ptr =
-          &dense.at({static_cast<std::size_t>(r), static_cast<std::size_t>(0)});
-      for (index_type c = 0; c < num_cols_; ++c)
+    for (std::size_t r = 0; r < num_rows_; ++r) {
+      const auto *row_ptr = &dense.at({r, std::size_t{0}});
+      for (std::size_t c = 0; c < num_cols_; ++c)
         if (row_ptr[c])
           ++col_nnz[c];
     }
     std::size_t total_nnz = 0;
-    for (index_type c = 0; c < num_cols_; ++c)
+    for (std::size_t c = 0; c < num_cols_; ++c)
       total_nnz += static_cast<std::size_t>(col_nnz[c]);
     throw_if_nnz_exceeds_index_range(total_nnz,
                                      "sparse_binary_matrix(dense,to CSC)");
-    ptr_.resize(num_cols_ + 1);
+    ptr_.resize(static_cast<std::size_t>(num_cols_) + 1);
     ptr_[0] = 0;
-    for (index_type c = 0; c < num_cols_; ++c)
+    for (std::size_t c = 0; c < num_cols_; ++c)
       ptr_[c + 1] = ptr_[c] + col_nnz[c];
     indices_.resize(ptr_.back());
     std::fill(col_nnz.begin(), col_nnz.end(), 0);
-    for (index_type r = 0; r < num_rows_; ++r) {
-      const auto *row_ptr =
-          &dense.at({static_cast<std::size_t>(r), static_cast<std::size_t>(0)});
-      for (index_type c = 0; c < num_cols_; ++c) {
+    for (std::size_t r = 0; r < num_rows_; ++r) {
+      const auto *row_ptr = &dense.at({r, std::size_t{0}});
+      for (std::size_t c = 0; c < num_cols_; ++c) {
         if (row_ptr[c]) {
           index_type slot = ptr_[c] + col_nnz[c];
-          indices_[slot] = r;
+          indices_[slot] = static_cast<index_type>(r);
           ++col_nnz[c];
         }
       }
@@ -231,31 +232,29 @@ sparse_binary_matrix::sparse_binary_matrix(
   }
 
   std::vector<index_type> row_nnz(num_rows_, 0);
-  for (index_type r = 0; r < num_rows_; ++r) {
-    const auto *row_ptr =
-        &dense.at({static_cast<std::size_t>(r), static_cast<std::size_t>(0)});
-    for (index_type c = 0; c < num_cols_; ++c)
+  for (std::size_t r = 0; r < num_rows_; ++r) {
+    const auto *row_ptr = &dense.at({r, std::size_t{0}});
+    for (std::size_t c = 0; c < num_cols_; ++c)
       if (row_ptr[c])
         ++row_nnz[r];
   }
   std::size_t total_nnz = 0;
-  for (index_type r = 0; r < num_rows_; ++r)
+  for (std::size_t r = 0; r < num_rows_; ++r)
     total_nnz += static_cast<std::size_t>(row_nnz[r]);
   throw_if_nnz_exceeds_index_range(total_nnz,
                                    "sparse_binary_matrix(dense,to CSR)");
-  ptr_.resize(num_rows_ + 1);
+  ptr_.resize(static_cast<std::size_t>(num_rows_) + 1);
   ptr_[0] = 0;
-  for (index_type r = 0; r < num_rows_; ++r)
+  for (std::size_t r = 0; r < num_rows_; ++r)
     ptr_[r + 1] = ptr_[r] + row_nnz[r];
   indices_.resize(ptr_.back());
   std::fill(row_nnz.begin(), row_nnz.end(), 0);
-  for (index_type r = 0; r < num_rows_; ++r) {
-    const auto *row_ptr =
-        &dense.at({static_cast<std::size_t>(r), static_cast<std::size_t>(0)});
-    for (index_type c = 0; c < num_cols_; ++c) {
+  for (std::size_t r = 0; r < num_rows_; ++r) {
+    const auto *row_ptr = &dense.at({r, std::size_t{0}});
+    for (std::size_t c = 0; c < num_cols_; ++c) {
       if (row_ptr[c]) {
         index_type slot = ptr_[r] + row_nnz[r];
-        indices_[slot] = c;
+        indices_[slot] = static_cast<index_type>(c);
         ++row_nnz[r];
       }
     }
@@ -267,27 +266,27 @@ sparse_binary_matrix sparse_binary_matrix::to_csc() const {
     return sparse_binary_matrix(sparse_binary_matrix_layout::csc, num_rows_,
                                 num_cols_, ptr_, indices_);
   }
-  // CSR -> CSC: for each column j, gather row indices i where (i,j) is stored
-  // In CSR, row i has col indices in indices_[row_ptrs[i] .. row_ptrs[i+1]-1]
+  // CSR -> CSC. size_t outer + `static_cast<size_t>(dim) + 1` ptr sizing avoid
+  // UINT32_MAX wraparound; inner p-loop stays index_type (nnz-bounded).
   std::vector<index_type> col_nnz(num_cols_, 0);
-  for (index_type i = 0; i < num_rows_; ++i) {
+  for (std::size_t i = 0; i < num_rows_; ++i) {
     for (index_type p = ptr_[i]; p < ptr_[i + 1]; ++p) {
       index_type j = indices_[p];
       ++col_nnz[j];
     }
   }
-  std::vector<index_type> col_ptrs(num_cols_ + 1);
+  std::vector<index_type> col_ptrs(static_cast<std::size_t>(num_cols_) + 1);
   col_ptrs[0] = 0;
-  for (index_type j = 0; j < num_cols_; ++j) {
+  for (std::size_t j = 0; j < num_cols_; ++j) {
     col_ptrs[j + 1] = col_ptrs[j] + col_nnz[j];
   }
   std::fill(col_nnz.begin(), col_nnz.end(), 0);
   std::vector<index_type> row_indices(indices_.size());
-  for (index_type i = 0; i < num_rows_; ++i) {
+  for (std::size_t i = 0; i < num_rows_; ++i) {
     for (index_type p = ptr_[i]; p < ptr_[i + 1]; ++p) {
       index_type j = indices_[p];
       index_type q = col_ptrs[j] + col_nnz[j];
-      row_indices[q] = i;
+      row_indices[q] = static_cast<index_type>(i);
       ++col_nnz[j];
     }
   }
@@ -301,27 +300,26 @@ sparse_binary_matrix sparse_binary_matrix::to_csr() const {
     return sparse_binary_matrix(sparse_binary_matrix_layout::csr, num_rows_,
                                 num_cols_, ptr_, indices_);
   }
-  // CSC -> CSR: for each row i, gather column indices j where (i,j) is stored
-  // In CSC, col j has row indices in indices_[col_ptrs[j] .. col_ptrs[j+1]-1]
+  // CSC -> CSR; see to_csc re: size_t.
   std::vector<index_type> row_nnz(num_rows_, 0);
-  for (index_type j = 0; j < num_cols_; ++j) {
+  for (std::size_t j = 0; j < num_cols_; ++j) {
     for (index_type p = ptr_[j]; p < ptr_[j + 1]; ++p) {
       index_type i = indices_[p];
       ++row_nnz[i];
     }
   }
-  std::vector<index_type> row_ptrs(num_rows_ + 1);
+  std::vector<index_type> row_ptrs(static_cast<std::size_t>(num_rows_) + 1);
   row_ptrs[0] = 0;
-  for (index_type i = 0; i < num_rows_; ++i) {
+  for (std::size_t i = 0; i < num_rows_; ++i) {
     row_ptrs[i + 1] = row_ptrs[i] + row_nnz[i];
   }
   std::fill(row_nnz.begin(), row_nnz.end(), 0);
   std::vector<index_type> col_indices(indices_.size());
-  for (index_type j = 0; j < num_cols_; ++j) {
+  for (std::size_t j = 0; j < num_cols_; ++j) {
     for (index_type p = ptr_[j]; p < ptr_[j + 1]; ++p) {
       index_type i = indices_[p];
       index_type q = row_ptrs[i] + row_nnz[i];
-      col_indices[q] = j;
+      col_indices[q] = static_cast<index_type>(j);
       ++row_nnz[i];
     }
   }
@@ -337,14 +335,14 @@ cudaqx::tensor<std::uint8_t> sparse_binary_matrix::to_dense() const {
     std::memset(&dense.at({r, 0}), 0, num_cols_ * sizeof(std::uint8_t));
   }
   if (layout_ == sparse_binary_matrix_layout::csc) {
-    for (index_type j = 0; j < num_cols_; ++j) {
+    for (std::size_t j = 0; j < num_cols_; ++j) {
       for (index_type p = ptr_[j]; p < ptr_[j + 1]; ++p) {
         index_type i = indices_[p];
         dense.at({i, j}) = 1;
       }
     }
   } else {
-    for (index_type i = 0; i < num_rows_; ++i) {
+    for (std::size_t i = 0; i < num_rows_; ++i) {
       for (index_type p = ptr_[i]; p < ptr_[i + 1]; ++p) {
         index_type j = indices_[p];
         dense.at({i, j}) = 1;
@@ -358,14 +356,14 @@ std::vector<std::vector<sparse_binary_matrix::index_type>>
 sparse_binary_matrix::to_nested_csc() const {
   std::vector<std::vector<index_type>> out(num_cols_);
   if (layout_ == sparse_binary_matrix_layout::csc) {
-    for (index_type j = 0; j < num_cols_; ++j) {
+    for (std::size_t j = 0; j < num_cols_; ++j) {
       out[j].assign(indices_.begin() + ptr_[j], indices_.begin() + ptr_[j + 1]);
     }
   } else {
-    for (index_type i = 0; i < num_rows_; ++i) {
+    for (std::size_t i = 0; i < num_rows_; ++i) {
       for (index_type p = ptr_[i]; p < ptr_[i + 1]; ++p) {
         index_type j = indices_[p];
-        out[j].push_back(i);
+        out[j].push_back(static_cast<index_type>(i));
       }
     }
   }
@@ -376,14 +374,14 @@ std::vector<std::vector<sparse_binary_matrix::index_type>>
 sparse_binary_matrix::to_nested_csr() const {
   std::vector<std::vector<index_type>> out(num_rows_);
   if (layout_ == sparse_binary_matrix_layout::csr) {
-    for (index_type i = 0; i < num_rows_; ++i) {
+    for (std::size_t i = 0; i < num_rows_; ++i) {
       out[i].assign(indices_.begin() + ptr_[i], indices_.begin() + ptr_[i + 1]);
     }
   } else {
-    for (index_type j = 0; j < num_cols_; ++j) {
+    for (std::size_t j = 0; j < num_cols_; ++j) {
       for (index_type p = ptr_[j]; p < ptr_[j + 1]; ++p) {
         index_type i = indices_[p];
-        out[i].push_back(j);
+        out[i].push_back(static_cast<index_type>(j));
       }
     }
   }

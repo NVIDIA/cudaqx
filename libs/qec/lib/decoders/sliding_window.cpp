@@ -17,7 +17,6 @@ namespace cudaq::qec {
 
 void sliding_window::validate_inputs() {
   uint32_t num_rows = H.num_rows();
-  uint32_t num_cols = H.num_cols();
   if (window_size < 1 || window_size > num_rounds) {
     throw std::invalid_argument(
         fmt::format("sliding_window constructor: window_size ({}) must "
@@ -58,13 +57,8 @@ void sliding_window::validate_inputs() {
         "sliding_window constructor: error_rate_vec must be non-empty");
   }
 
-  // Enforce that H is already in topological column order. Reuse the
-  // canonicalized h_nested_csc_ that the constructor already materialized —
-  // both to avoid the redundant H.to_nested_csc() materialization and to
-  // make pcm_is_sorted's per-column .front()/.back() reads correct (they
-  // are min/max only on sorted-per-column input, which canonicalization
-  // guarantees).
-  if (!cudaq::qec::pcm_is_sorted(h_nested_csc_,
+  // Enforce topological column order. Ctor-time materialization only.
+  if (!cudaq::qec::pcm_is_sorted(this->H.to_nested_csc(),
                                  this->num_syndromes_per_round)) {
     throw std::invalid_argument("sliding_window constructor: PCM must be "
                                 "sorted. See cudaq::qec::simplify_pcm.");
@@ -186,11 +180,9 @@ void sliding_window::update_rw_next_read_index() {
 
 sliding_window::sliding_window(const cudaq::qec::sparse_binary_matrix &H,
                                const cudaqx::heterogeneous_map &params)
-    // GF(2)-canonicalize on entry so back-substitution and per-column .front()
-    // / .back() reads see sorted-unique indices, regardless of whether the
-    // caller supplied a sorted/unique sparse_binary_matrix (the contract says
-    // they need not).
-    : decoder(H), h_nested_csc_(canonicalize_pcm(H).to_nested_csc()) {
+    // Canonical CSC is the steady-state contract for decode_window's column
+    // slices and for validate_inputs's per-column .front()/.back() reads.
+    : decoder(canonicalize_pcm(H).to_csc()) {
   // Fetch parameters from the params map.
   window_size = params.get<std::size_t>("window_size", window_size);
   step_size = params.get<std::size_t>("step_size", step_size);
@@ -207,19 +199,25 @@ sliding_window::sliding_window(const cudaq::qec::sparse_binary_matrix &H,
   inner_decoder_params = params.get<cudaqx::heterogeneous_map>(
       "inner_decoder_params", inner_decoder_params);
 
+  // Guard the H.num_rows() / num_syndromes_per_round below.
+  if (num_syndromes_per_round == 0)
+    throw std::invalid_argument("sliding_window constructor: "
+                                "num_syndromes_per_round must be non-zero");
+
   num_rounds = H.num_rows() / num_syndromes_per_round;
   num_windows = (num_rounds - window_size) / step_size + 1;
   num_syndromes_per_window = num_syndromes_per_round * window_size;
 
   validate_inputs();
 
-  // Create the inner decoders.
+  // this->H is canonical CSC (ctor init list), so skip the per-call
+  // canonicalize in get_pcm_for_rounds.
   for (std::size_t w = 0; w < num_windows; ++w) {
     std::size_t start_round = w * step_size;
     std::size_t end_round = start_round + window_size - 1;
     auto [H_round, first_column, last_column] = cudaq::qec::get_pcm_for_rounds(
-        H, num_syndromes_per_round, start_round, end_round,
-        straddle_start_round, straddle_end_round);
+        this->H, num_syndromes_per_round, start_round, end_round,
+        straddle_start_round, straddle_end_round, /*pcm_is_canonical=*/true);
     first_columns.push_back(first_column);
 
     // Slice the error vector to only include the current window.
@@ -439,20 +437,19 @@ void sliding_window::decode_window() {
             window_results[s][c];
       }
     }
-    // We are committing to some errors that would affect the next round's
-    // syndrome measurements. Therefore, we need to modify some of the
-    // syndrome measurements for the next round to "back out" the errors
-    // that we already know about (or more specifically, the errors we think
-    // we've already accounted for).
+    // Back out committed errors from the next window's syndrome by flipping
+    // the rows where the corresponding H columns have a 1. Read directly off
+    // the canonical CSC arrays.
+    const auto &h_ptr = this->H.ptr();
+    const auto &h_indices = this->H.indices();
     for (std::size_t s = 0; s < this->rolling_window.size(); ++s) {
       for (std::size_t c = 0; c < num_to_commit; ++c) {
         if (rw_results[s].result[c + this_window_first_column]) {
-          // Flip next-round syndrome bits where PCM has a 1 in this column,
-          // using CSC without materializing dense H or its transpose.
+          // Flip next-round syndrome bits where PCM has a 1 in this column.
           const auto pcm_col_ix =
               static_cast<std::size_t>(c + this_window_first_column);
-          const auto &rows_with_one = h_nested_csc_.at(pcm_col_ix);
-          for (auto r : rows_with_one) {
+          for (auto p = h_ptr[pcm_col_ix]; p < h_ptr[pcm_col_ix + 1]; ++p) {
+            const auto r = h_indices[p];
             if (r >= syndrome_start_next_window &&
                 r <= syndrome_end_next_window)
               syndrome_mods[s][r] = syndrome_mods[s][r] ^ true;

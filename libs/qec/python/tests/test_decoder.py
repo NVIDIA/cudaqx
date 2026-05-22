@@ -424,7 +424,6 @@ def scipy_sparse_to_nested_csc(sp):
     nested = []
     for j in range(num_cols):
         start, end = sp.indptr[j], sp.indptr[j + 1]
-        # scipy allows any dtype; we treat non-zero as 1
         nested.append(sp.indices[start:end].tolist())
     return {
         "layout": "nested_csc",
@@ -461,7 +460,6 @@ def test_get_decoder_sparse_nested_csc():
     result = decoder.decode(syndrome)
     assert hasattr(result, "converged")
     assert hasattr(result, "result")
-    # example_byod returns result length = num_rows (syndrome size)
     assert len(result.result) == H_dense.shape[0]
 
 
@@ -476,7 +474,6 @@ def test_get_decoder_sparse_nested_csr():
     result = decoder.decode(syndrome)
     assert hasattr(result, "converged")
     assert hasattr(result, "result")
-    # example_byod returns result length = num_rows (syndrome size)
     assert len(result.result) == H_dense.shape[0]
 
 
@@ -496,7 +493,6 @@ def test_get_decoder_sparse_vs_dense_same_results():
     assert len(r_dense.result) == len(r_sparse.result)
     assert all(0 <= x <= 1 for x in r_dense.result)
     assert all(0 <= x <= 1 for x in r_sparse.result)
-    # example_byod may be non-deterministic; same H and syndrome can yield different floats
 
 
 def test_get_decoder_sparse_nested_csr_same_as_csc():
@@ -514,7 +510,6 @@ def test_get_decoder_sparse_nested_csr_same_as_csc():
     assert len(r_csc.result) == len(r_csr.result) == H_dense.shape[0]
     assert all(0 <= x <= 1 for x in r_csc.result)
     assert all(0 <= x <= 1 for x in r_csr.result)
-    # example_byod may be non-deterministic; CSC vs CSR path can yield different floats
 
 
 def test_get_decoder_sparse_pymatching():
@@ -562,7 +557,6 @@ def test_get_decoder_sparse_from_scipy():
     """get_decoder accepts sparse H built from scipy.sparse (converted to our dict)."""
     scipy_sparse = pytest.importorskip("scipy.sparse")
     np.random.seed(42)
-    # Build a small binary matrix via scipy.sparse (e.g. random sparse)
     H_dense = np.random.randint(0, 2, (6, 12)).astype(np.uint8)
     H_scipy = scipy_sparse.csr_matrix(H_dense)
     H_sparse_dict = scipy_sparse_to_nested_csc(H_scipy)
@@ -585,16 +579,12 @@ def test_get_decoder_sparse_python_registered_decoder():
     assert decoder.H["layout"] == "nested_csc"
     result = decoder.decode(create_test_syndrome())
     assert result.converged is True
-    # example_byod returns result length = num_rows
     assert len(result.result) == H_dense.shape[0]
 
 
 def test_pymatching_accepts_non_canonical_sparse_input():
-    """PyMatching dispatches on per-column nnz count, so it canonicalizes the
-    incoming sparse PCM (GF(2)-merge). A column with row 0 listed three times
-    must collapse to a single boundary edge instead of raising 'Invalid column'."""
-    # 2x3 PCM. Column 0 has row 0 listed 3 times (GF(2)-merges to {0} →
-    # boundary edge). Columns 1 and 2 are normal edges.
+    """PyMatching must canonicalize GF(2)-duplicate inputs internally."""
+    # Column 0 has row 0 listed 3 times; canonicalizes to a single boundary edge.
     sparse_dict = {
         "layout": "nested_csc",
         "num_rows": 2,
@@ -603,15 +593,12 @@ def test_pymatching_accepts_non_canonical_sparse_input():
     }
     decoder = qec.get_decoder("pymatching", sparse_dict)
     assert decoder is not None
-    # Decode a syndrome whose only flipped detector is row 0; either col 0 or
-    # col 1 is a valid explanation. We just verify decode succeeds.
     result = decoder.decode([1.0, 0.0])
     assert result.converged is True
 
 
 def test_generate_random_pcm_signed_weight_rejects_negative():
-    """Python `weight=-1` surfaces the C++ guard's message, not nanobind's
-    'incompatible function arguments'."""
+    """`weight=-1` surfaces the C++ guard, not nanobind's marshalling error."""
     with pytest.raises((ValueError, RuntimeError), match="weight"):
         qec.generate_random_pcm(n_rounds=2,
                                 n_errs_per_round=3,

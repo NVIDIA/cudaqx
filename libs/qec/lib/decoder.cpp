@@ -72,10 +72,11 @@ struct decoder::rt_impl {
 
 void decoder::rt_impl_deleter::operator()(rt_impl *p) const { delete p; }
 
-decoder::decoder(const cudaq::qec::sparse_binary_matrix &H)
-    : H(H), pimpl(std::unique_ptr<rt_impl, rt_impl_deleter>(new rt_impl())) {
-  syndrome_size = H.num_rows();
-  block_size = H.num_cols();
+decoder::decoder(cudaq::qec::sparse_binary_matrix H)
+    : H(std::move(H)),
+      pimpl(std::unique_ptr<rt_impl, rt_impl_deleter>(new rt_impl())) {
+  syndrome_size = this->H.num_rows();
+  block_size = this->H.num_cols();
   reset_decoder();
   pimpl->persistent_detector_buffer.resize(this->syndrome_size);
   pimpl->persistent_soft_detector_buffer.resize(this->syndrome_size);

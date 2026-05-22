@@ -87,10 +87,8 @@ public:
           auto borrow = toTensor(H);
           cudaqx::tensor<uint8_t> owned(borrow.shape());
           owned.copy(borrow.data(), borrow.shape());
-          // Match the layout used by get_decoder(ndarray) (see
-          // make_sparse_from_dense below) so downstream `to_nested_csc()`
-          // calls in C++ consumers are no-ops rather than implicit CSR→CSC
-          // transposes.
+          // Force CSC to match get_decoder(ndarray); avoids CSR→CSC transposes
+          // in downstream to_nested_csc() calls.
           return cudaq::qec::sparse_binary_matrix(
               owned, cudaq::qec::sparse_binary_matrix_layout::csc);
         }()) {}
@@ -572,10 +570,8 @@ void bindDecoder(nb::module_ &mod) {
 
   qecmod.def(
       "generate_random_pcm",
-      // `weight` is bound as a signed int (matching C++ signature) so the
-      // C++ guard reports "weight must be >= 0" with its own message instead
-      // of nanobind rejecting at the marshalling boundary with a less
-      // informative "incompatible function arguments" error.
+      // Signed `weight` so the C++ guard reports negatives instead of nanobind
+      // rejecting at the marshalling boundary.
       [](std::uint32_t n_rounds, std::uint32_t n_errs_per_round,
          std::uint32_t n_syndromes_per_round, int weight, std::uint32_t seed) {
         std::mt19937_64 rng(seed);

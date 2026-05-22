@@ -7,6 +7,7 @@
  ******************************************************************************/
 
 #include "cudaq/qec/decoder.h"
+#include "cudaq/qec/pcm_utils.h"
 #include <cassert>
 #include <map>
 #include <vector>
@@ -26,12 +27,11 @@ public:
       : decoder(H) {
     // Decoder-specific constructor arguments can be placed in `params`.
 
-    // Build a lookup table for an error on each possible qubit
-    std::vector<std::vector<std::uint32_t>> H_e2d = H.to_nested_csc();
+    // The loop below sets err_sig[r] = '1' (not XOR-toggle), so canonicalize
+    // to drop GF(2)-duplicate row indices first.
+    std::vector<std::vector<std::uint32_t>> H_e2d =
+        cudaq::qec::canonicalize_pcm(H).to_nested_csc();
 
-    // For each error mechanism (column qErr), syndrome = column qErr of H over
-    // GF(2). Nested CSC gives row indices with a 1 in that column (same pattern
-    // as multi_error_lut::toggleSynForError from all-zero).
     for (std::size_t qErr = 0; qErr < block_size; qErr++) {
       std::string err_sig(syndrome_size, '0');
       for (std::uint32_t r : H_e2d[qErr])

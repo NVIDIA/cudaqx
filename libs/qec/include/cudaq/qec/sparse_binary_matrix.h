@@ -19,21 +19,13 @@ enum class sparse_binary_matrix_layout { csc, csr };
 
 /// @brief Sparse parity-check matrix in either CSC or CSR form.
 ///
-/// **Input lists:** \c from_csc / \c from_csr / \c from_nested_* store index
-/// runs exactly as given. Indices within one CSC column (one CSR row) need not
-/// be sorted. Duplicate indices in the same column or row are accepted but are
-/// non-canonical: they are not merged as in a minimal GF(2) representation.
-/// The pcm_utils helpers and decoder plugins that need uniqueness or sorted
-/// per-column indices (PyMatching, sliding_window, get_pcm_for_rounds, ...)
-/// call \c cudaq::qec::canonicalize_pcm on entry, so callers can pass the
-/// output of \c from_nested_* or \c generate_random_pcm_sparse directly. New
-/// consumers that rely on the front()/back() of a column being min/max row
-/// must do the same. The total number of stored indices (\c nnz) must fit in
-/// \c index_type (see also \c num_nnz()).
+/// Input index lists are stored as given: not required to be sorted or
+/// GF(2)-unique. Consumers needing sorted-unique per-group indices must call
+/// \c cudaq::qec::canonicalize_pcm on entry (the in-tree decoders that need
+/// it — PyMatching, sliding_window, get_pcm_for_rounds — already do).
 ///
-/// Index types are uint32_t (max ~4×10^9 per dimension and for nnz).
-/// Matrices larger than that cannot be represented without changing \c
-/// index_type.
+/// \c index_type is \c uint32_t, so each dimension and \c nnz must fit in
+/// \c ~4×10^9.
 class sparse_binary_matrix {
 public:
   using index_type = std::uint32_t;
@@ -70,39 +62,24 @@ public:
   from_nested_csr(index_type num_rows, index_type num_cols,
                   const std::vector<std::vector<index_type>> &nested);
 
-  /// @brief Construct a sparse PCM from a dense PCM tensor (rows x columns).
-  /// Any non-zero entry is treated as 1.
-  /// @param dense Dense parity-check matrix; must have rank 2.
-  /// @param layout Storage layout for the sparse representation (default CSC).
-  ///
-  /// @note This constructor is intentionally not \c explicit so call sites can
-  /// still pass a rank-2 dense \c cudaqx::tensor PCM to \c decoder::get and
-  /// similar APIs that take \c sparse_binary_matrix (implicit conversion).
-  /// Callers may still write \c sparse_binary_matrix(H, layout) explicitly.
+  /// @brief Construct from a rank-2 dense PCM (any non-zero treated as 1).
+  /// Intentionally not \c explicit so call sites that take
+  /// \c sparse_binary_matrix accept a dense \c cudaqx::tensor unchanged.
   sparse_binary_matrix(
       const cudaqx::tensor<std::uint8_t> &dense,
       sparse_binary_matrix_layout layout = sparse_binary_matrix_layout::csc);
 
-  // Default constructor
   sparse_binary_matrix() = default;
-
-  // Copy constructor
   sparse_binary_matrix(const sparse_binary_matrix &) = default;
-
-  // Move constructor
   sparse_binary_matrix(sparse_binary_matrix &&) noexcept = default;
-
-  // Copy assignment operator
   sparse_binary_matrix &operator=(const sparse_binary_matrix &) = default;
-
-  // Move assignment operator
   sparse_binary_matrix &operator=(sparse_binary_matrix &&) noexcept = default;
 
   sparse_binary_matrix_layout layout() const { return layout_; }
   index_type num_rows() const { return num_rows_; }
   index_type num_cols() const { return num_cols_; }
   index_type num_nnz() const {
-    return indices_.empty() ? 0 : static_cast<index_type>(indices_.size());
+    return static_cast<index_type>(indices_.size());
   }
 
   /// @brief For CSC: ptr has length num_cols+1; for CSR: ptr has length
