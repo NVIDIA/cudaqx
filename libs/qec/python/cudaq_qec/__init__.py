@@ -18,6 +18,8 @@ def _ensure_cuda_runtime_loaded():
 _ensure_cuda_runtime_loaded()
 del _ensure_cuda_runtime_loaded
 
+import functools
+
 from .patch import patch
 try:
     from ._pycudaqx_qec_the_suffix_matters_cudaq_qec import *
@@ -58,6 +60,7 @@ def decoder(name):
             original = cls.decode_batch
             cls_name = cls.__name__
 
+            @functools.wraps(original)
             def checked_decode_batch(self, *args, **kwargs):
                 result = original(self, *args, **kwargs)
                 if not isinstance(result, qecrt.BatchDecoderResult):

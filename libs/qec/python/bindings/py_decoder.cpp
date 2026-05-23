@@ -198,19 +198,29 @@ batchSliceToBatchDecoderResult(const batch_decoder_result &batch,
                               nb::len(converged));
 }
 
+// Wrap a heap-allocated buffer (owned via unique_ptr) in a NumPy ndarray that
+// will free the buffer when garbage-collected. The unique_ptr argument keeps
+// the buffer alive until ownership is transferred to the capsule; if any step
+// inside this function throws, the buffer is freed by the unique_ptr
+// destructor on unwind.
+template <typename T, std::size_t Rank>
+nb::object makeOwnedNdarray(std::unique_ptr<T[]> data,
+                            const std::size_t (&shape)[Rank]) {
+  auto *raw_data = data.get();
+  nb::capsule owner(raw_data,
+                    [](void *p) noexcept { delete[] static_cast<T *>(p); });
+  data.release();
+  return nb::cast(
+      nb::ndarray<nb::numpy, T>(raw_data, Rank, shape, std::move(owner)));
+}
+
 nb::object decoderResultToNumpy(const std::vector<float_t> &result) {
   const auto num_elements = result.size();
   auto data = std::make_unique<float_t[]>(num_elements);
-
   std::copy(result.begin(), result.end(), data.get());
 
   size_t shape[1] = {num_elements};
-  auto *raw_data = data.get();
-  nb::capsule owner(
-      raw_data, [](void *p) noexcept { delete[] static_cast<float_t *>(p); });
-  data.release();
-  return nb::cast(
-      nb::ndarray<nb::numpy, float_t>(raw_data, 1, shape, std::move(owner)));
+  return makeOwnedNdarray<float_t>(std::move(data), shape);
 }
 
 nb::object decoderResultsToNumpy(const std::vector<decoder_result> &results) {
@@ -238,29 +248,18 @@ nb::object decoderResultsToNumpy(const std::vector<decoder_result> &results) {
   }
 
   size_t shape[2] = {num_results, result_size};
-  auto *raw_data = data.get();
-  nb::capsule owner(
-      raw_data, [](void *p) noexcept { delete[] static_cast<float_t *>(p); });
-  data.release();
-  return nb::cast(
-      nb::ndarray<nb::numpy, float_t>(raw_data, 2, shape, std::move(owner)));
+  return makeOwnedNdarray<float_t>(std::move(data), shape);
 }
 
 nb::object
 decoderResultsConvergedToNumpy(const std::vector<decoder_result> &results) {
   const auto num_results = results.size();
   auto data = std::make_unique<bool[]>(num_results);
-
   for (std::size_t i = 0; i < num_results; ++i)
     data[i] = results[i].converged;
 
   size_t shape[1] = {num_results};
-  auto *raw_data = data.get();
-  nb::capsule owner(raw_data,
-                    [](void *p) noexcept { delete[] static_cast<bool *>(p); });
-  data.release();
-  return nb::cast(
-      nb::ndarray<nb::numpy, bool>(raw_data, 1, shape, std::move(owner)));
+  return makeOwnedNdarray<bool>(std::move(data), shape);
 }
 
 nb::list
