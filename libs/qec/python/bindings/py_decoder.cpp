@@ -36,7 +36,6 @@
 #include <algorithm>
 
 namespace nb = nanobind;
-using namespace nanobind::literals;
 using namespace cudaqx;
 
 namespace cudaq::qec {
@@ -135,9 +134,9 @@ struct batch_decoder_result {
                                  ? np.attr("float32")
                                  : np.attr("float64");
     this->result = np.attr("ascontiguousarray")(nb::cast(result_arr),
-                                                "dtype"_a = float_dtype);
+                                                nb::arg("dtype") = float_dtype);
     this->converged = np.attr("ascontiguousarray")(
-        nb::cast(converged_arr), "dtype"_a = np.attr("bool_"));
+        nb::cast(converged_arr), nb::arg("dtype") = np.attr("bool_"));
   }
 
   // Trusted internal constructor: callers guarantee shape/dtype invariants.
