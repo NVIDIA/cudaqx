@@ -283,6 +283,9 @@ function(cudaqx_set_target TARGETNAME)
   # Add the additional target-specific library
   target_link_libraries(cudaq_${TARGETNAME} INTERFACE cudaq::cudaq-${TARGETNAME}-target)
 
+  # The target is built with the toolchain's compiler, therefore running in library mode.
+  target_compile_definitions(cudaq_${TARGETNAME} INTERFACE CUDAQ_LIBRARY_MODE)
+
   # Create an alias target to make it easier to use
   add_library(cudaq::cudaq_${TARGETNAME} ALIAS cudaq_${TARGETNAME})
 endfunction()
