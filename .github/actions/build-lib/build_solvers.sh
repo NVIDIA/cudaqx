@@ -1,14 +1,18 @@
 #!/bin/sh
 
-cmake -S libs/solvers -B "$1" \
+build_dir=$1
+install_prefix=$2
+cudaq_prefix=$3
+
+cmake -S libs/solvers -B "$build_dir" \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_C_COMPILER=gcc-12 \
   -DCMAKE_CXX_COMPILER=g++-12 \
   -DCMAKE_C_COMPILER_LAUNCHER=ccache \
   -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-  -DCUDAQ_DIR=/cudaq-install/lib/cmake/cudaq/ \
+  -DCUDAQ_DIR="$cudaq_prefix/lib/cmake/cudaq/" \
   -DCUDAQX_INCLUDE_TESTS=ON \
   -DCUDAQX_BINDINGS_PYTHON=ON \
-  -DCMAKE_INSTALL_PREFIX="$2"
+  -DCMAKE_INSTALL_PREFIX="$install_prefix"
 
-cmake --build "$1" --target install -j 4
+cmake --build "$build_dir" --target install -j 4
