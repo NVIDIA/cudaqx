@@ -1,0 +1,15 @@
+name: Nightly tests
+
+on:
+  schedule:
+    - cron: '30 8 * * *' # Runs at 8:30am UTC
+  workflow_dispatch:
+
+jobs:
+  source:
+    name: Build from source
+    uses: ./.github/workflows/build_wheels.yaml
+    with:
+      build_type: Release
+      cudaq_wheels: Custom
+    secrets: inherit
