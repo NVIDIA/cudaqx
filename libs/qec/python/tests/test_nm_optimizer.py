@@ -669,6 +669,154 @@ def test_optimize_path_with_cotengra(device):
     np.testing.assert_allclose(before, after, atol=1e-10, rtol=1e-10)
 
 
+def test_optimize_path_with_cutn_optimizer_options():
+    """``OptimizerOptions`` routes through cuTensorNet's path finder and
+    the resulting path is consumed correctly by the opt_einsum-backed
+    executor."""
+    if not _gpu_available():
+        pytest.skip("No GPU available; cuTensorNet path finder requires CUDA.")
+    cutn_cfg = pytest.importorskip("cuquantum.tensornet.configuration")
+    OptimizerOptions = cutn_cfg.OptimizerOptions
+    SlicerOptions = cutn_cfg.SlicerOptions
+    from cuquantum.tensornet.configuration import OptimizerInfo
+
+    rng = np.random.default_rng(90)
+    H, logical = _nondegenerate_code()
+    priors = [0.1, 0.15, 0.25]
+    syn, flips = _sample_synthetic_dataset(H,
+                                           logical,
+                                           priors,
+                                           num_shots=24,
+                                           rng=rng)
+    opt = _make_opt(H,
+                    logical,
+                    priors,
+                    syn,
+                    flips,
+                    device="cuda",
+                    dtype="float64")
+    with torch.no_grad():
+        before = opt.decoder_prediction().detach().cpu().numpy()
+    info = opt.optimize_path(optimize=OptimizerOptions(slicing=SlicerOptions(
+        disable_slicing=True)))
+    assert isinstance(info, OptimizerInfo)
+    assert info.num_slices == 1
+    # cuTensorNet returns the path as a list of ``(int, int)`` pairs.
+    assert isinstance(opt.path_batch, (list, tuple)) and len(opt.path_batch) > 0
+    assert all(
+        isinstance(step, tuple) and len(step) == 2 for step in opt.path_batch)
+    with torch.no_grad():
+        after = opt.decoder_prediction().detach().cpu().numpy()
+    np.testing.assert_allclose(before, after, atol=1e-10, rtol=1e-10)
+
+
+def test_optimize_path_with_cutn_sliced_forward_matches_unsliced():
+    """A cuTensorNet-sliced path (forced via ``min_slices``) executes
+    through NMOptimizer's batch-slicing wrapper and produces the same
+    forward output as the unsliced path."""
+    if not _gpu_available():
+        pytest.skip("No GPU available; cuTensorNet path finder requires CUDA.")
+    cutn_cfg = pytest.importorskip("cuquantum.tensornet.configuration")
+    OptimizerOptions = cutn_cfg.OptimizerOptions
+    SlicerOptions = cutn_cfg.SlicerOptions
+
+    rng = np.random.default_rng(91)
+    H, logical = _nondegenerate_code()
+    priors = [0.1, 0.15, 0.25]
+    syn, flips = _sample_synthetic_dataset(H,
+                                           logical,
+                                           priors,
+                                           num_shots=24,
+                                           rng=rng)
+    opt = _make_opt(H,
+                    logical,
+                    priors,
+                    syn,
+                    flips,
+                    device="cuda",
+                    dtype="float64")
+    with torch.no_grad():
+        ref = opt.decoder_prediction().detach().cpu().numpy()
+
+    # ``min_slices=4`` forces at least four slices on the batch_index
+    # mode; the wrapper splits, contracts, and concatenates the result.
+    forced = OptimizerOptions(slicing=SlicerOptions(min_slices=4))
+    info = opt.optimize_path(optimize=forced)
+    assert info.num_slices >= 4
+    assert opt.batch_slices == info.num_slices
+
+    with torch.no_grad():
+        sliced = opt.decoder_prediction().detach().cpu().numpy()
+    np.testing.assert_allclose(sliced, ref, atol=1e-10, rtol=1e-10)
+
+
+def test_optimize_path_with_cutn_sliced_gradients_flow():
+    """Gradients on the noise priors are non-zero after a sliced
+    contraction; ``torch.cat`` preserves the autograd graph."""
+    if not _gpu_available():
+        pytest.skip("No GPU available; cuTensorNet path finder requires CUDA.")
+    cutn_cfg = pytest.importorskip("cuquantum.tensornet.configuration")
+    OptimizerOptions = cutn_cfg.OptimizerOptions
+    SlicerOptions = cutn_cfg.SlicerOptions
+
+    rng = np.random.default_rng(92)
+    H, logical = _nondegenerate_code()
+    priors = [0.1, 0.15, 0.25]
+    syn, flips = _sample_synthetic_dataset(H,
+                                           logical,
+                                           priors,
+                                           num_shots=24,
+                                           rng=rng)
+    opt = _make_opt(H,
+                    logical,
+                    priors,
+                    syn,
+                    flips,
+                    device="cuda",
+                    dtype="float64")
+    opt.optimize_path(optimize=OptimizerOptions(slicing=SlicerOptions(
+        min_slices=4)))
+    assert opt.batch_slices >= 4
+
+    loss = opt.loss_fn(from_logits=False)(opt._noise_probs, opt._syndrome_tuple)
+    loss.backward()
+    grad = opt._noise_probs.grad
+    assert grad is not None
+    assert torch.isfinite(grad).all()
+    assert grad.abs().sum().item() > 0.0
+
+
+def test_optimize_path_with_cutn_sliced_rejects_static_codegen():
+    """Sliced paths require ``dynamic_syndromes=True`` because static
+    codegen bakes per-batch syndromes into the closure."""
+    if not _gpu_available():
+        pytest.skip("No GPU available; cuTensorNet path finder requires CUDA.")
+    cutn_cfg = pytest.importorskip("cuquantum.tensornet.configuration")
+    OptimizerOptions = cutn_cfg.OptimizerOptions
+    SlicerOptions = cutn_cfg.SlicerOptions
+
+    rng = np.random.default_rng(93)
+    H, logical = _nondegenerate_code()
+    priors = [0.1, 0.15, 0.25]
+    syn, flips = _sample_synthetic_dataset(H,
+                                           logical,
+                                           priors,
+                                           num_shots=24,
+                                           rng=rng)
+    opt = _make_opt(H,
+                    logical,
+                    priors,
+                    syn,
+                    flips,
+                    device="cuda",
+                    dtype="float64",
+                    execute="codegen",
+                    dynamic_syndromes=False)
+    forced = OptimizerOptions(slicing=SlicerOptions(min_slices=2))
+    with pytest.raises(NotImplementedError, match="dynamic_syndromes"):
+        opt.optimize_path(optimize=forced)
+
+
 # -- remap_eq_to_ascii -------------------------------------------------------
 
 
