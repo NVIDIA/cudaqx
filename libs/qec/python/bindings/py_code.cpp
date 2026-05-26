@@ -538,6 +538,10 @@ void bindCode(nb::module_ &mod) {
       "dem_from_memory_circuit",
       [](code &code, operation op, std::size_t numRounds,
          std::optional<cudaq::noise_model> noise = std::nullopt) {
+        if (!noise)
+          throw std::runtime_error(
+              "dem_from_memory_circuit requires a noise model; noise=None is "
+              "not supported.");
         return dem_from_memory_circuit(code, op, numRounds, *noise);
       },
       R"pbdoc(
@@ -546,7 +550,7 @@ void bindCode(nb::module_ &mod) {
         This function generates a detector error model from a memory circuit.
         The memory circuit is specified by the code, the initial state preparation
         operation, and the number of stabilizer measurement rounds. The noise
-        model is optional and defaults to no noise.
+        model is required.
 
         Args:
             code: The code to generate the detector error model for.
@@ -564,6 +568,10 @@ void bindCode(nb::module_ &mod) {
       "x_dem_from_memory_circuit",
       [](code &code, operation op, std::size_t numRounds,
          std::optional<cudaq::noise_model> noise = std::nullopt) {
+        if (!noise)
+          throw std::runtime_error(
+              "x_dem_from_memory_circuit requires a noise model; noise=None "
+              "is not supported.");
         return x_dem_from_memory_circuit(code, op, numRounds, *noise);
       },
       R"pbdoc(
@@ -572,7 +580,7 @@ void bindCode(nb::module_ &mod) {
         This function generates a detector error model from a memory circuit in
         the X basis. The memory circuit is specified by the code, the initial
         state preparation operation, and the number of stabilizer measurement
-        rounds. The noise model is optional and defaults to no noise.
+        rounds. The noise model is required.
 
         Args:
             code: The code to generate the detector error model for.
@@ -590,6 +598,10 @@ void bindCode(nb::module_ &mod) {
       "z_dem_from_memory_circuit",
       [](code &code, operation op, std::size_t numRounds,
          std::optional<cudaq::noise_model> noise = std::nullopt) {
+        if (!noise)
+          throw std::runtime_error(
+              "z_dem_from_memory_circuit requires a noise model; noise=None "
+              "is not supported.");
         return z_dem_from_memory_circuit(code, op, numRounds, *noise);
       },
       R"pbdoc(
@@ -598,7 +610,7 @@ void bindCode(nb::module_ &mod) {
         This function generates a detector error model from a memory circuit in
         the Z basis. The memory circuit is specified by the code, the initial
         state preparation operation, and the number of stabilizer measurement
-        rounds. The noise model is optional and defaults to no noise.
+        rounds. The noise model is required.
 
         Args:
             code: The code to generate the detector error model for.
