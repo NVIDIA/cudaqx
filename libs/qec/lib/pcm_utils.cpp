@@ -34,7 +34,7 @@ void validate_random_pcm_sparse_params(std::size_t n_rounds,
   }
   // Reject products that wouldn't fit in index_type before they can wrap.
   constexpr auto kMaxDim = static_cast<std::size_t>(
-      std::numeric_limits<sparse_binary_matrix::index_type>::max());
+      std::numeric_limits<cudaq::qec::sparse_binary_matrix::index_type>::max());
   if (n_rounds != 0 && (n_errs_per_round > kMaxDim / n_rounds ||
                         n_syndromes_per_round > kMaxDim / n_rounds)) {
     throw std::invalid_argument(
