@@ -480,7 +480,7 @@ void decoder::reset_decoder() {
 }
 
 std::unique_ptr<decoder> get_decoder(const std::string &name,
-                                     const sparse_binary_matrix &H,
+                                     const cudaq::qec::sparse_binary_matrix &H,
                                      const cudaqx::heterogeneous_map options) {
   return decoder::get(name, H, options);
 }

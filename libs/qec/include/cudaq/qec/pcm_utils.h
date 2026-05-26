@@ -114,7 +114,7 @@ bool pcm_is_sorted(const cudaqx::tensor<uint8_t> &pcm,
 
 /// @brief Check if a PCM is sorted.
 /// @param sparse_pcm The sparse PCM to check (in the same format as
-/// get_sparse_pcm())
+/// dense_to_sparse())
 /// @param num_syndromes_per_round The number of syndromes per round.
 /// @return True if the PCM is sorted, false otherwise.
 bool pcm_is_sorted(const std::vector<std::vector<std::uint32_t>> &sparse_pcm,
@@ -180,21 +180,21 @@ get_pcm_for_rounds(const cudaqx::tensor<uint8_t> &pcm,
 /// the dense overload.
 ///
 /// @param pcm_is_canonical If true, the caller asserts \p pcm has
-/// sorted-unique per-group indices (i.e. is the output of \c canonicalize_pcm
+/// sorted-unique per-group indices (i.e. is the output of `canonicalize_pcm`
 /// or was constructed canonically). In that case the per-call
 /// canonicalization step is skipped — useful for callers like
-/// \c sliding_window that canonicalize once at construction and then call
-/// this function in a per-window loop on the same matrix. Default \c false
+/// `sliding_window` that canonicalize once at construction and then call
+/// this function in a per-window loop on the same matrix. Default `false`
 /// preserves the original "canonicalize on entry" behavior.
 ///
-/// @warning When \p pcm_is_canonical is \c true the precondition is *not*
-/// checked. select_pcm_columns_for_round_range reads \c .front() / \c .back()
+/// @warning When \p pcm_is_canonical is `true` the precondition is *not*
+/// checked. `select_pcm_columns_for_round_range` reads `.front()` / `.back()`
 /// of each CSC column to derive first/last round; those are only the true
 /// min/max row if the column list is sorted-unique. Passing a non-canonical
 /// PCM with this flag (e.g. a raw DEM decomposition, a hand-built sparse
 /// matrix with duplicate or unsorted indices, or a canonical CSR that the
 /// caller forgot to re-canonicalize after conversion) silently produces
-/// wrong round assignments. If unsure, leave the flag \c false.
+/// wrong round assignments. If unsure, leave the flag `false`.
 /// @return A tuple with the new PCM with the columns in the range [start_round,
 /// end_round], the first column included, and the last column included.
 std::tuple<cudaqx::tensor<uint8_t>, std::uint32_t, std::uint32_t>
@@ -206,18 +206,21 @@ get_pcm_for_rounds(const sparse_binary_matrix &pcm,
                    bool pcm_is_canonical = false);
 
 /// @brief Upper bound on \f$\texttt{rows} \times \texttt{cols}\f$ for the
-/// dense \c generate_random_pcm path. Above this, the call throws and the
-/// caller should switch to \c generate_random_pcm_sparse. Exposed as a named
+/// dense `generate_random_pcm` path. Above this, the call throws and the
+/// caller should switch to `generate_random_pcm_sparse`. Exposed as a named
 /// symbol so tests and users can reference it without grepping the source.
 inline constexpr std::size_t k_max_dense_pcm_elements =
     static_cast<std::size_t>(400u) * 1024u * 1024u;
 
 /// @brief Generate a random PCM with the given parameters.
 ///
-/// If \f$\texttt{rows} \times \texttt{cols}\f$ exceeds \c
-/// k_max_dense_pcm_elements (currently ~419 million entries), throws \c
-/// std::invalid_argument; use \c generate_random_pcm_sparse for matrices that
-/// large without a dense allocation.
+/// The PCM has shape `(n_rounds * n_syndromes_per_round) × (n_rounds *
+/// n_errs_per_round)`. If the product
+/// \f$n\_rounds^2 \times n\_syndromes\_per\_round \times n\_errs\_per\_round\f$
+/// exceeds `k_max_dense_pcm_elements`
+/// (\f$400 \times 1024 \times 1024 \approx 4.19 \times 10^8\f$ entries),
+/// throws `std::invalid_argument`; use `generate_random_pcm_sparse` for
+/// matrices that large without a dense allocation.
 /// @param n_rounds The number of rounds in the PCM.
 /// @param n_errs_per_round The number of errors per round in the PCM.
 /// @param n_syndromes_per_round The number of syndromes per round in the PCM.
@@ -243,12 +246,12 @@ generate_random_pcm_sparse(std::size_t n_rounds, std::size_t n_errs_per_round,
 /// (CSR) has its indices sorted ascending, and duplicate indices are XOR-
 /// merged — an index that appears \p k times is kept iff \p k is odd. The
 /// output has the same layout as the input and is idempotent under further
-/// \c canonicalize_pcm calls.
+/// `canonicalize_pcm` calls.
 ///
 /// Use this before passing a PCM built from a DEM decomposition (or any other
 /// source that may legitimately emit duplicate indices within a column/row)
 /// to consumers like PyMatching that dispatch on per-column nnz count and
-/// assume at-most-one entry per row per column. \c sparse_binary_matrix
+/// assume at-most-one entry per row per column. `sparse_binary_matrix`
 /// itself accepts duplicates at construction (see its header) so a separate
 /// call is required to canonicalize.
 sparse_binary_matrix canonicalize_pcm(const sparse_binary_matrix &pcm);

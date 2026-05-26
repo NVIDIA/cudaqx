@@ -6,16 +6,14 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
+#include "pymatching/sparse_blossom/driver/mwpm_decoding.h"
+#include "pymatching/sparse_blossom/driver/user_graph.h"
+#include "cudaq/qec/decoder.h"
+#include "cudaq/qec/pcm_utils.h"
 #include <algorithm>
 #include <cassert>
 #include <map>
 #include <vector>
-
-#include "cudaq/qec/decoder.h"
-#include "cudaq/qec/pcm_utils.h"
-
-#include "pymatching/sparse_blossom/driver/mwpm_decoding.h"
-#include "pymatching/sparse_blossom/driver/user_graph.h"
 
 // Enable this to debug decode times.
 #define PERFORM_TIMING 0
@@ -126,31 +124,26 @@ public:
     // GF(2)-duplicates from DEM decompositions collapse first.
     std::vector<std::vector<std::uint32_t>> H_e2d =
         canonicalize_pcm(H).to_nested_csc();
-    std::size_t col_idx = 0;
     for (std::size_t col = 0; col < block_size; col++) {
       double weight = 1.0;
-      if (col_idx < error_rate_vec.size()) {
-        weight = -std::log(error_rate_vec[col_idx] /
-                           (1.0 - error_rate_vec[col_idx]));
+      if (col < error_rate_vec.size()) {
+        weight = -std::log(error_rate_vec[col] / (1.0 - error_rate_vec[col]));
       }
       if (H_e2d[col].size() == 2) {
-        edge2col_idx[make_canonical_edge(H_e2d[col][0], H_e2d[col][1])] =
-            col_idx;
+        edge2col_idx[make_canonical_edge(H_e2d[col][0], H_e2d[col][1])] = col;
         user_graph.add_or_merge_edge(H_e2d[col][0], H_e2d[col][1],
-                                     errs2observables.at(col_idx), weight, 0.0,
+                                     errs2observables.at(col), weight, 0.0,
                                      merge_strategy_enum);
       } else if (H_e2d[col].size() == 1) {
-        edge2col_idx[make_canonical_edge(H_e2d[col][0], -1)] = col_idx;
+        edge2col_idx[make_canonical_edge(H_e2d[col][0], -1)] = col;
         user_graph.add_or_merge_boundary_edge(H_e2d[col][0],
-                                              errs2observables.at(col_idx),
-                                              weight, 0.0, merge_strategy_enum);
+                                              errs2observables.at(col), weight,
+                                              0.0, merge_strategy_enum);
       } else {
-        throw std::runtime_error(
-            "Invalid column in H: " + std::to_string(col_idx) + " has " +
-            std::to_string(H_e2d[col].size()) +
-            " ones. Must have 1 or 2 ones.");
+        throw std::runtime_error("Invalid column in H: " + std::to_string(col) +
+                                 " has " + std::to_string(H_e2d[col].size()) +
+                                 " ones. Must have 1 or 2 ones.");
       }
-      col_idx++;
     }
     this->mwpm = decode_to_observables
                      ? &user_graph.get_mwpm()

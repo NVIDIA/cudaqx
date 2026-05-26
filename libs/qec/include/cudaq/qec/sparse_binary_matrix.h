@@ -13,19 +13,20 @@
 
 namespace cudaq::qec {
 
-/// @brief Storage layout for the sparse PCM: column-major (CSC) or row-major
-/// (CSR). All non-zero entries are assumed to be 1; values are not stored.
+/// @brief Storage layout for the sparse PCM: Compressed Sparse Column (CSC)
+/// or Compressed Sparse Row (CSR). All non-zero entries are assumed to be 1;
+/// values are not stored.
 enum class sparse_binary_matrix_layout { csc, csr };
 
 /// @brief Sparse parity-check matrix in either CSC or CSR form.
 ///
 /// Input index lists are stored as given: not required to be sorted or
 /// GF(2)-unique. Consumers needing sorted-unique per-group indices must call
-/// \c cudaq::qec::canonicalize_pcm on entry (the in-tree decoders that need
+/// `cudaq::qec::canonicalize_pcm` on entry (the in-tree decoders that need
 /// it — PyMatching, sliding_window, get_pcm_for_rounds — already do).
 ///
-/// \c index_type is \c uint32_t, so each dimension and \c nnz must fit in
-/// \c ~4×10^9.
+/// `index_type` is `uint32_t`, so each dimension and `nnz` must fit in
+/// `~4×10^9`.
 class sparse_binary_matrix {
 public:
   using index_type = std::uint32_t;
@@ -63,8 +64,8 @@ public:
                   const std::vector<std::vector<index_type>> &nested);
 
   /// @brief Construct from a rank-2 dense PCM (any non-zero treated as 1).
-  /// Intentionally not \c explicit so call sites that take
-  /// \c sparse_binary_matrix accept a dense \c cudaqx::tensor unchanged.
+  /// Intentionally not `explicit` so call sites that take
+  /// `sparse_binary_matrix` accept a dense `cudaqx::tensor` unchanged.
   sparse_binary_matrix(
       const cudaqx::tensor<std::uint8_t> &dense,
       sparse_binary_matrix_layout layout = sparse_binary_matrix_layout::csc);

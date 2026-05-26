@@ -18,9 +18,69 @@
 
 namespace {
 
+/// Validate parameters for generate_random_pcm_sparse: weight bounds and
+/// index_type overflow on the product dimensions. Throws std::invalid_argument
+/// on violation.
+void validate_random_pcm_sparse_params(std::size_t n_rounds,
+                                       std::size_t n_errs_per_round,
+                                       std::size_t n_syndromes_per_round,
+                                       int weight) {
+  if (weight < 0 || static_cast<std::size_t>(weight) > n_syndromes_per_round) {
+    throw std::invalid_argument(
+        "generate_random_pcm_sparse: weight must be in [0, "
+        "n_syndromes_per_round]; got weight=" +
+        std::to_string(weight) +
+        ", n_syndromes_per_round=" + std::to_string(n_syndromes_per_round));
+  }
+  // Reject products that wouldn't fit in index_type before they can wrap.
+  constexpr auto kMaxDim = static_cast<std::size_t>(
+      std::numeric_limits<sparse_binary_matrix::index_type>::max());
+  if (n_rounds != 0 && (n_errs_per_round > kMaxDim / n_rounds ||
+                        n_syndromes_per_round > kMaxDim / n_rounds)) {
+    throw std::invalid_argument(
+        "generate_random_pcm_sparse: n_rounds * n_errs_per_round and "
+        "n_rounds * n_syndromes_per_round must each fit in "
+        "sparse_binary_matrix::index_type (uint32_t); got n_rounds=" +
+        std::to_string(n_rounds) +
+        ", n_errs_per_round=" + std::to_string(n_errs_per_round) +
+        ", n_syndromes_per_round=" + std::to_string(n_syndromes_per_round));
+  }
+}
+
+/// Validate the round-related parameters shared by both get_pcm_for_rounds
+/// overloads. Throws std::invalid_argument on violation.
+void validate_pcm_for_rounds_params(std::uint32_t num_syndromes_per_round,
+                                    std::uint32_t start_round,
+                                    std::uint32_t end_round,
+                                    std::size_t num_rows) {
+  if (num_syndromes_per_round == 0) {
+    throw std::invalid_argument(
+        "get_pcm_for_rounds: num_syndromes_per_round must be greater than 0");
+  }
+  if (num_syndromes_per_round > num_rows) {
+    throw std::invalid_argument(
+        "get_pcm_for_rounds: num_syndromes_per_round must be less than the "
+        "number of rows in PCM");
+  }
+  const std::size_t first_row_to_keep =
+      static_cast<std::size_t>(start_round) * num_syndromes_per_round;
+  const std::size_t last_row_to_keep =
+      static_cast<std::size_t>(end_round + 1) * num_syndromes_per_round - 1;
+  if (first_row_to_keep >= num_rows) {
+    throw std::invalid_argument(
+        "get_pcm_for_rounds: first_row_to_keep is greater than the number of "
+        "rows in PCM");
+  }
+  if (last_row_to_keep >= num_rows) {
+    throw std::invalid_argument(
+        "get_pcm_for_rounds: last_row_to_keep is greater than the number of "
+        "rows in PCM");
+  }
+}
+
 /// Select PCM column indices with any nonzero in rows belonging to rounds
 /// [start_round, end_round], honoring straddle flags (same logic as dense
-/// \c get_pcm_for_rounds).
+/// `get_pcm_for_rounds`).
 void select_pcm_columns_for_round_range(
     const std::vector<std::vector<std::uint32_t>> &row_indices,
     std::uint32_t num_syndromes_per_round, std::uint32_t start_round,
@@ -29,26 +89,29 @@ void select_pcm_columns_for_round_range(
     std::uint32_t &first_column, std::uint32_t &last_column) {
   columns_in_range_out.clear();
   for (std::size_t c = 0; c < row_indices.size(); c++) {
-    const auto &rows_for_this_column = row_indices[c];
-    if (rows_for_this_column.size() == 0)
+    const auto &col = row_indices[c];
+    if (col.empty())
       continue;
-    auto first_round = rows_for_this_column.front() / num_syndromes_per_round;
-    auto last_round = rows_for_this_column.back() / num_syndromes_per_round;
-    if (first_round >= start_round && last_round <= end_round)
-      columns_in_range_out.push_back(static_cast<std::uint32_t>(c));
-    else if (straddle_start_round && first_round <= start_round &&
-             last_round >= start_round)
-      columns_in_range_out.push_back(static_cast<std::uint32_t>(c));
-    else if (straddle_end_round && first_round <= end_round &&
-             last_round >= end_round)
+    auto first_round = col.front() / num_syndromes_per_round;
+    auto last_round = col.back() / num_syndromes_per_round;
+    if (last_round < start_round || first_round > end_round)
+      continue;
+
+    const bool fully_inside =
+        first_round >= start_round && last_round <= end_round;
+    if (fully_inside ||
+        (straddle_start_round && first_round <= start_round &&
+         last_round >= start_round) ||
+        (straddle_end_round && first_round <= end_round &&
+         last_round >= end_round))
       columns_in_range_out.push_back(static_cast<std::uint32_t>(c));
   }
 
   first_column = std::numeric_limits<std::uint32_t>::max();
-  last_column = std::numeric_limits<std::uint32_t>::min();
-  for (auto c : columns_in_range_out) {
-    first_column = std::min(first_column, c);
-    last_column = std::max(last_column, c);
+  last_column = 0;
+  if (!columns_in_range_out.empty()) {
+    first_column = columns_in_range_out.front();
+    last_column = columns_in_range_out.back();
   }
 }
 
@@ -211,16 +274,6 @@ dense_to_sparse(const cudaqx::tensor<uint8_t> &pcm) {
   return row_indices;
 }
 
-/// @brief Return a sparse representation of the PCM.
-/// @return A vector of vectors that sparsely represents the PCM. The size of
-/// the outer vector is the number of columns in the PCM, and the i-th element
-/// contains an inner vector of the row indices of the non-zero elements in the
-/// i-th column of the PCM.
-std::vector<std::vector<std::uint32_t>>
-get_sparse_pcm(const cudaqx::tensor<uint8_t> &pcm) {
-  return dense_to_sparse(pcm);
-}
-
 /// @brief Return a vector of column indices that would sort the pcm columns
 /// in topological order.
 std::vector<std::uint32_t>
@@ -231,7 +284,7 @@ get_sorted_pcm_column_indices(const cudaqx::tensor<uint8_t> &pcm,
         "get_sorted_pcm_column_indices: PCM must be a 2D tensor");
   }
 
-  auto row_indices = get_sparse_pcm(pcm);
+  auto row_indices = dense_to_sparse(pcm);
 
   return get_sorted_pcm_column_indices(row_indices, num_syndromes_per_round);
 }
@@ -309,7 +362,7 @@ std::pair<cudaqx::tensor<uint8_t>, std::vector<double>>
 simplify_pcm(const cudaqx::tensor<uint8_t> &pcm,
              const std::vector<double> &weights,
              std::uint32_t num_syndromes_per_round) {
-  auto row_indices = get_sparse_pcm(pcm);
+  auto row_indices = dense_to_sparse(pcm);
   auto column_order =
       get_sorted_pcm_column_indices(pcm, num_syndromes_per_round);
   // March through the columns in topological order, and combine the probability
@@ -362,33 +415,13 @@ get_pcm_for_rounds(const cudaqx::tensor<uint8_t> &pcm,
                    std::uint32_t num_syndromes_per_round,
                    std::uint32_t start_round, std::uint32_t end_round,
                    bool straddle_start_round, bool straddle_end_round) {
-  if (num_syndromes_per_round == 0) {
-    throw std::invalid_argument(
-        "get_pcm_for_rounds: num_syndromes_per_round must be greater than 0");
-  }
-  if (num_syndromes_per_round > pcm.shape()[0]) {
-    throw std::invalid_argument(
-        "get_pcm_for_rounds: num_syndromes_per_round must be less than the "
-        "number of rows in PCM");
-  }
-
-  // Trim down to the right rows
+  validate_pcm_for_rounds_params(num_syndromes_per_round, start_round,
+                                 end_round, pcm.shape()[0]);
   auto first_row_to_keep = start_round * num_syndromes_per_round;
   auto last_row_to_keep = (end_round + 1) * num_syndromes_per_round - 1;
 
-  if (first_row_to_keep >= pcm.shape()[0]) {
-    throw std::invalid_argument(
-        "get_pcm_for_rounds: first_row_to_keep is greater than the number of "
-        "rows in PCM");
-  }
-  if (last_row_to_keep >= pcm.shape()[0]) {
-    throw std::invalid_argument(
-        "get_pcm_for_rounds: last_row_to_keep is greater than the number of "
-        "rows in PCM");
-  }
-
   // Get a sparse representation of the PCM.
-  auto row_indices = get_sparse_pcm(pcm);
+  auto row_indices = dense_to_sparse(pcm);
   std::vector<std::uint32_t> columns_in_range;
   std::uint32_t first_column = 0, last_column = 0;
   select_pcm_columns_for_round_range(
@@ -408,31 +441,12 @@ get_pcm_for_rounds(const sparse_binary_matrix &pcm,
                    std::uint32_t start_round, std::uint32_t end_round,
                    bool straddle_start_round, bool straddle_end_round,
                    bool pcm_is_canonical) {
-  if (num_syndromes_per_round == 0) {
-    throw std::invalid_argument(
-        "get_pcm_for_rounds: num_syndromes_per_round must be greater than 0");
-  }
-  if (num_syndromes_per_round > pcm.num_rows()) {
-    throw std::invalid_argument(
-        "get_pcm_for_rounds: num_syndromes_per_round must be less than the "
-        "number of rows in PCM");
-  }
-
+  validate_pcm_for_rounds_params(num_syndromes_per_round, start_round,
+                                 end_round, pcm.num_rows());
   auto first_row_to_keep =
       static_cast<std::uint32_t>(start_round * num_syndromes_per_round);
   auto last_row_to_keep =
       static_cast<std::uint32_t>((end_round + 1) * num_syndromes_per_round - 1);
-
-  if (first_row_to_keep >= pcm.num_rows()) {
-    throw std::invalid_argument(
-        "get_pcm_for_rounds: first_row_to_keep is greater than the number of "
-        "rows in PCM");
-  }
-  if (last_row_to_keep >= pcm.num_rows()) {
-    throw std::invalid_argument(
-        "get_pcm_for_rounds: last_row_to_keep is greater than the number of "
-        "rows in PCM");
-  }
 
   // select_pcm_columns_for_round_range reads .front()/.back() as min/max row,
   // which requires sorted-per-column input. Canonicalize unless the caller
@@ -535,26 +549,8 @@ sparse_binary_matrix
 generate_random_pcm_sparse(std::size_t n_rounds, std::size_t n_errs_per_round,
                            std::size_t n_syndromes_per_round, int weight,
                            std::mt19937_64 &&rng) {
-  if (weight < 0 || static_cast<std::size_t>(weight) > n_syndromes_per_round) {
-    throw std::invalid_argument(
-        "generate_random_pcm_sparse: weight must be in [0, "
-        "n_syndromes_per_round]; got weight=" +
-        std::to_string(weight) +
-        ", n_syndromes_per_round=" + std::to_string(n_syndromes_per_round));
-  }
-  // Reject products that wouldn't fit in index_type before they can wrap.
-  constexpr auto kMaxDim = static_cast<std::size_t>(
-      std::numeric_limits<sparse_binary_matrix::index_type>::max());
-  if (n_rounds != 0 && (n_errs_per_round > kMaxDim / n_rounds ||
-                        n_syndromes_per_round > kMaxDim / n_rounds)) {
-    throw std::invalid_argument(
-        "generate_random_pcm_sparse: n_rounds * n_errs_per_round and "
-        "n_rounds * n_syndromes_per_round must each fit in "
-        "sparse_binary_matrix::index_type (uint32_t); got n_rounds=" +
-        std::to_string(n_rounds) +
-        ", n_errs_per_round=" + std::to_string(n_errs_per_round) +
-        ", n_syndromes_per_round=" + std::to_string(n_syndromes_per_round));
-  }
+  validate_random_pcm_sparse_params(n_rounds, n_errs_per_round,
+                                    n_syndromes_per_round, weight);
   std::size_t n_cols = n_rounds * n_errs_per_round;
   std::size_t n_rows = n_rounds * n_syndromes_per_round;
 

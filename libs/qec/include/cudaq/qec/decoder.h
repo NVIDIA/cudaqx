@@ -425,6 +425,6 @@ inline void convert_vec_hard_to_soft(const std::vector<std::vector<t_hard>> &in,
 }
 
 std::unique_ptr<decoder>
-get_decoder(const std::string &name, const sparse_binary_matrix &H,
+get_decoder(const std::string &name, const cudaq::qec::sparse_binary_matrix &H,
             const cudaqx::heterogeneous_map options = {});
 } // namespace cudaq::qec

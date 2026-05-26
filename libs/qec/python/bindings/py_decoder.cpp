@@ -5,6 +5,18 @@
  * This source code and the accompanying materials are made available under    *
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
+#include "common/ExecutionContext.h"
+#include "common/FmtCore.h"
+#include "cuda-qx/core/kwargs_utils.h"
+#include "cuda-qx/core/library_utils.h"
+#include "type_casters.h"
+#include "cudaq/platform.h"
+#include "cudaq/qec/decoder.h"
+#include "cudaq/qec/detector_error_model.h"
+#include "cudaq/qec/pcm_utils.h"
+#include "cudaq/qec/plugin_loader.h"
+#include "cudaq/qec/sparse_binary_matrix.h"
+#include "cudaq/runtime/logger/logger.h"
 #include <filesystem>
 #include <functional>
 #include <limits>
@@ -22,20 +34,6 @@
 #include <nanobind/stl/vector.h>
 #include <nanobind/trampoline.h>
 #include <unordered_map>
-
-#include "cudaq/platform.h"
-#include "cudaq/qec/decoder.h"
-#include "cudaq/qec/detector_error_model.h"
-#include "cudaq/qec/pcm_utils.h"
-#include "cudaq/qec/plugin_loader.h"
-#include "cudaq/qec/sparse_binary_matrix.h"
-#include "cudaq/runtime/logger/logger.h"
-
-#include "common/ExecutionContext.h"
-#include "common/FmtCore.h"
-#include "cuda-qx/core/kwargs_utils.h"
-#include "cuda-qx/core/library_utils.h"
-#include "type_casters.h"
 
 namespace nb = nanobind;
 using namespace cudaqx;

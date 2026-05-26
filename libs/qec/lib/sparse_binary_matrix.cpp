@@ -16,7 +16,7 @@ namespace cudaq::qec {
 
 namespace {
 
-/// CSC/CSR pointers and per-column/per-row runs use \c index_type (uint32_t);
+/// CSC/CSR pointers and per-column/per-row runs use `index_type` (uint32_t);
 /// the total nnz must fit in that type (std::vector::size may exceed it).
 inline void throw_if_nnz_exceeds_index_range(std::size_t nnz,
                                              const char *context) {
