@@ -9,7 +9,6 @@
 #include "cudaq/qec/detector_error_model.h"
 #include "cudaq/qec/pcm_utils.h"
 #include "cudaq/runtime/logger/logger.h"
-#include <algorithm>
 
 namespace cudaq::qec {
 
