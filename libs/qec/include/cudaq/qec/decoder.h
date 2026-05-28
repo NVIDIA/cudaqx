@@ -427,4 +427,26 @@ inline void convert_vec_hard_to_soft(const std::vector<std::vector<t_hard>> &in,
 std::unique_ptr<decoder>
 get_decoder(const std::string &name, const cudaqx::tensor<uint8_t> &H,
             const cudaqx::heterogeneous_map options = {});
+
+/// @brief Creator function for a decoder constructed from a Stim DEM string.
+using stim_dem_decoder_creator = std::function<std::unique_ptr<decoder>(
+    const std::string &, const cudaqx::heterogeneous_map &)>;
+
+/// @brief Register a Stim-DEM-string creator for the named decoder. Plugins
+/// that natively consume Stim DEMs (e.g. Chromobius) call this to opt into
+/// the \p get_decoder_from_stim_dem path; without a registration the factory
+/// falls back to parsing the DEM and using the existing H-based path.
+void register_stim_dem_decoder_creator(const std::string &name,
+                                       stim_dem_decoder_creator creator);
+
+/// @brief Construct a decoder by name from a Stim detector error model text.
+/// Uses a registered Stim-DEM creator if present; otherwise parses the DEM,
+/// extracts H, observables, and per-error rates, and constructs via the
+/// existing H-based path. The extracted observables matrix and error-rate
+/// vector are inserted into \p options under keys \c "O" and
+/// \c "error_rate_vec" respectively (existing entries are not overwritten).
+std::unique_ptr<decoder>
+get_decoder_from_stim_dem(const std::string &name,
+                          const std::string &stim_dem_text,
+                          const cudaqx::heterogeneous_map options = {});
 } // namespace cudaq::qec

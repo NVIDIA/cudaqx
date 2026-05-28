@@ -368,6 +368,32 @@ void bindDecoder(nb::module_ &mod) {
       "must be in row-major order.");
 
   qecmod.def(
+      "get_decoder_from_stim_dem",
+      [](const std::string &name, const std::string &dem_text,
+         const nb::kwargs options) -> std::unique_ptr<decoder> {
+        return get_decoder_from_stim_dem(name, dem_text,
+                                         hetMapFromKwargs(options));
+      },
+      R"pbdoc(
+        Construct a decoder by name from a Stim detector error model string.
+
+        If the named decoder has registered a Stim-DEM-string creator
+        (e.g. Chromobius), it is used directly. Otherwise the DEM is parsed
+        and the existing parity-check-matrix path is used, with the
+        observables matrix and per-error rates injected into the options
+        under keys ``O`` and ``error_rate_vec`` respectively.
+
+        Args:
+            name: Identifier of the registered decoder plugin.
+            dem_text: Stim detector error model text.
+            **options: Decoder-specific parameters.
+
+        Returns:
+            A decoder instance constructed from the Stim DEM.
+      )pbdoc",
+      nb::arg("name"), nb::arg("dem_text"));
+
+  qecmod.def(
       "get_sorted_pcm_column_indices",
       [](const nb::ndarray<nb::numpy, uint8_t> &H,
          std::uint32_t num_syndromes_per_round) {
