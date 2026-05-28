@@ -40,7 +40,6 @@ jobs:
           base: ${{ fromJSON(steps.get-pr-info.outputs.pr-info).base.sha }}
           filters: |
             build-cudaq:
-              - '.github/workflows/cudaq_cache.yaml'
               - '.github/actions/get-cudaq-build/**'
               - '.github/actions/get-cudaq-version/**'
               - '.github/workflows/scripts/build_cudaq.sh'
