@@ -768,3 +768,54 @@ TEST(DecoderRegistryTest, SingleParameterRegistryDirect) {
   // works This test passes if no exceptions are thrown, proving the
   // single-parameter registry is instantiated
 }
+
+TEST(StimDemDecoderFactory, ConstructsLutDecoderFromStimDemText) {
+  const std::string dem_text = R"(error(0.1) D0 L0
+error(0.1) D1 L0
+error(0.05) D0 D1
+)";
+
+  auto d = cudaq::qec::get_decoder_from_stim_dem("single_error_lut", dem_text);
+  ASSERT_NE(d, nullptr);
+  EXPECT_EQ(d->get_syndrome_size(), 2u);
+  EXPECT_EQ(d->get_block_size(), 3u);
+
+  std::vector<cudaq::qec::float_t> syndrome = {1.0, 0.0};
+  auto result = d->decode(syndrome);
+  EXPECT_EQ(result.result.size(), 3u);
+}
+
+TEST(StimDemDecoderFactory, ThrowsOnMalformedStimDem) {
+  EXPECT_THROW(cudaq::qec::get_decoder_from_stim_dem("single_error_lut",
+                                                     "not a valid DEM"),
+               std::exception);
+}
+
+TEST(StimDemDecoderFactory, ThrowsOnUnknownDecoderName) {
+  const std::string dem_text = "error(0.1) D0\n";
+  EXPECT_THROW(
+      cudaq::qec::get_decoder_from_stim_dem("__no_such_decoder__", dem_text),
+      std::runtime_error);
+}
+
+TEST(StimDemDecoderFactory, RegisteredCreatorIsUsed) {
+  // static: the registry outlives this test, so the lambda must not capture
+  // a stack reference.
+  static bool registered_creator_was_called = false;
+  registered_creator_was_called = false;
+  cudaq::qec::register_stim_dem_decoder_creator(
+      "__stim_dem_test_decoder__",
+      [](const std::string &dem_text, const cudaqx::heterogeneous_map &)
+          -> std::unique_ptr<cudaq::qec::decoder> {
+        registered_creator_was_called = true;
+        EXPECT_EQ(dem_text, "passthrough");
+        cudaqx::tensor<uint8_t> H({2u, 2u});
+        cudaqx::heterogeneous_map empty;
+        return cudaq::qec::decoder::get("single_error_lut", H, empty);
+      });
+
+  auto d = cudaq::qec::get_decoder_from_stim_dem("__stim_dem_test_decoder__",
+                                                 "passthrough");
+  EXPECT_TRUE(registered_creator_was_called);
+  ASSERT_NE(d, nullptr);
+}

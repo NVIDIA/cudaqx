@@ -767,6 +767,18 @@ void bindDecoder(nb::module_ &mod) {
       )pbdoc");
 
   qecmod.def(
+      "get_decoder_from_stim_dem",
+      [](const std::string &name, const std::string &dem_text,
+         const nb::kwargs options) -> std::unique_ptr<decoder> {
+        return get_decoder_from_stim_dem(name, dem_text,
+                                         hetMapFromKwargs(options));
+      },
+      "Construct a decoder by name from a Stim detector error model string. "
+      "Observables and per-error rates from the DEM are injected into options "
+      "under keys \"O\" and \"error_rate_vec\" when no registered Stim-DEM "
+      "creator is found.");
+
+  qecmod.def(
       "get_sorted_pcm_column_indices",
       [](const nb::ndarray<nb::numpy, uint8_t> &H,
          std::uint32_t num_syndromes_per_round) {

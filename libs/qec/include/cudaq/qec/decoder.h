@@ -427,4 +427,21 @@ inline void convert_vec_hard_to_soft(const std::vector<std::vector<t_hard>> &in,
 std::unique_ptr<decoder>
 get_decoder(const std::string &name, const cudaq::qec::sparse_binary_matrix &H,
             const cudaqx::heterogeneous_map options = {});
+
+/// @brief Creator function for a decoder constructed from a Stim DEM string.
+using stim_dem_decoder_creator = std::function<std::unique_ptr<decoder>(
+    const std::string &, const cudaqx::heterogeneous_map &)>;
+
+/// @brief Register a Stim-DEM-string creator for the named decoder.
+void register_stim_dem_decoder_creator(const std::string &name,
+                                       stim_dem_decoder_creator creator);
+
+/// @brief Construct a decoder by name from a Stim detector error model text.
+/// When no registered creator is found, the DEM is parsed and observables /
+/// error rates are injected into \p options under keys \c "O" and
+/// \c "error_rate_vec".
+std::unique_ptr<decoder>
+get_decoder_from_stim_dem(const std::string &name,
+                          const std::string &stim_dem_text,
+                          const cudaqx::heterogeneous_map options = {});
 } // namespace cudaq::qec

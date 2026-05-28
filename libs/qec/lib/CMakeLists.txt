@@ -39,12 +39,13 @@ endif()
 set(QEC_SOURCES
   code.cpp
   decoder.cpp
+  decoder_stim_dem.cpp
   detector_error_model.cpp
   experiments.cpp
   pcm_utils.cpp
   plugin_loader.cpp
   sparse_binary_matrix.cpp
-  stabilizer_utils.cpp 
+  stabilizer_utils.cpp
   decoders/lut.cpp
   decoders/sliding_window.cpp
   version.cpp
@@ -60,6 +61,16 @@ add_library(${LIBRARY_NAME} SHARED ${QEC_SOURCES})
 
 add_subdirectory(decoders/plugins/example)
 add_subdirectory(decoders/plugins/pymatching)
+
+# Exclude libstim symbols from libqec's exports (cf. CUDA-Q #3045).
+if(NOT TARGET libstim)
+  message(FATAL_ERROR
+    "libstim target not available; required by cudaq-qec for Stim DEM parsing.")
+endif()
+target_link_libraries(${LIBRARY_NAME} PRIVATE libstim)
+target_link_options(${LIBRARY_NAME} PRIVATE
+  $<$<CXX_COMPILER_ID:GNU>:-Wl,--exclude-libs,ALL>
+)
 
 # The TRT decoder plugin honors the tri-state `CUDAQ_QEC_BUILD_TRT_DECODER`
 # cache variable (AUTO/ON/OFF) declared in the parent CMakeLists.txt.  Skip
