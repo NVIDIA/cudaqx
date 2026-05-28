@@ -16,6 +16,7 @@ jobs:
     container: ghcr.io/nvidia/cuda-quantum-devcontainer:${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc12-main
     permissions:
       actions: write
+      contents: read
       pull-requests: read
     steps:
       - name: Checkout repository
