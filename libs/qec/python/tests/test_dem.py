@@ -189,10 +189,10 @@ def _stim_dem_to_arrays(stim_dem):
             h_cols.append(h_col)
             o_cols.append(o_col)
             rates.append(prob)
-    H = np.stack(h_cols, axis=1) if h_cols else np.zeros((n_dets, 0),
-                                                         dtype=np.uint8)
-    O = np.stack(o_cols, axis=1) if o_cols else np.zeros((n_obs, 0),
-                                                         dtype=np.uint8)
+    H = np.stack(h_cols, axis=1) if h_cols else np.zeros(
+        (n_dets, 0), dtype=np.uint8)
+    O = np.stack(o_cols, axis=1) if o_cols else np.zeros(
+        (n_obs, 0), dtype=np.uint8)
     return H, O, np.asarray(rates, dtype=np.float64)
 
 
@@ -229,8 +229,8 @@ def test_z_dem_from_memory_circuit_against_stim_oracle():
     """Compare cudaq-qec's Steane Z-DEM against Stim's independent DEM."""
     stim_mod = pytest.importorskip(
         "stim",
-        reason="stim not installed; skipping Stim oracle cross-check for Steane Z-DEM"
-    )
+        reason=
+        "stim not installed; skipping Stim oracle cross-check for Steane Z-DEM")
 
     code = qec.get_code('steane')
     p = 0.01
@@ -267,10 +267,10 @@ def test_z_dem_from_memory_circuit_against_stim_oracle():
 
     # The small tolerance covers different grouping of Pauli outcomes.
     for k in cudaq_keys:
-        assert np.isclose(cudaq_terms[k], stim_terms[k], atol=1e-4,
-                          rtol=1e-3), (
-                              f"probability mismatch at {k}: "
-                              f"cudaq={cudaq_terms[k]}, stim={stim_terms[k]}")
+        assert np.isclose(
+            cudaq_terms[k], stim_terms[k], atol=1e-4,
+            rtol=1e-3), (f"probability mismatch at {k}: "
+                         f"cudaq={cudaq_terms[k]}, stim={stim_terms[k]}")
 
 
 def test_x_dem_from_memory_circuit():
@@ -486,8 +486,7 @@ def test_pymatching_decodes_stim_surface_code_dem():
     """Decode a Stim surface-code DEM through cudaq-qec's PyMatching plugin."""
     stim_mod = pytest.importorskip(
         "stim",
-        reason="stim not installed; skipping Stim-based PyMatching decode test"
-    )
+        reason="stim not installed; skipping Stim-based PyMatching decode test")
 
     distance = 5
     n_rounds = 5
@@ -533,8 +532,8 @@ def test_pymatching_decodes_stim_surface_code_dem():
     data_predictions = np.round(obs_per_shot).astype(np.uint8).flatten()
 
     n_errors_without_decoding = int(np.sum(logical_measurements))
-    n_errors_with_decoding = int(
-        np.sum(data_predictions ^ logical_measurements))
+    n_errors_with_decoding = int(np.sum(data_predictions ^
+                                        logical_measurements))
     assert n_errors_with_decoding < n_errors_without_decoding, (
         f"PyMatching did not reduce logical errors: "
         f"with_decoding={n_errors_with_decoding}, "
