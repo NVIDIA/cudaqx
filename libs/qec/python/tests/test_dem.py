@@ -66,6 +66,27 @@ def set_target():
     cudaq.reset_target()
 
 
+@pytest.mark.parametrize(
+    "dem_fn",
+    [
+        qec.dem_from_memory_circuit,
+        qec.x_dem_from_memory_circuit,
+        qec.z_dem_from_memory_circuit,
+    ],
+)
+def test_dem_from_memory_circuit_requires_noise_model(dem_fn):
+    # DEM generation needs noise mechanisms, so omitted/None noise must fail
+    # before the binding dereferences an empty optional noise model.
+    code = qec.get_code('steane')
+    statePrep = qec.operation.prep0
+
+    with pytest.raises(RuntimeError, match="requires a noise model"):
+        dem_fn(code, statePrep, 1)
+
+    with pytest.raises(RuntimeError, match="requires a noise model"):
+        dem_fn(code, statePrep, 1, None)
+
+
 def test_dem_from_memory_circuit():
     code = qec.get_code('steane')
     p = 0.01
