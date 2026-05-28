@@ -231,11 +231,14 @@ nb::object decoderResultsToNumpy(const std::vector<decoder_result> &results) {
   // not rely on result.shape[1] when the batch is empty.
   const auto result_size = num_results == 0 ? 0 : results.front().result.size();
 
-  for (const auto &result : results) {
-    if (result.result.size() != result_size) {
-      throw std::runtime_error(
+  for (std::size_t i = 0; i < results.size(); ++i) {
+    const auto actual_size = results[i].result.size();
+    if (actual_size != result_size) {
+      throw std::runtime_error(fmt::format(
           "Cannot return decode_batch results as a NumPy array because result "
-          "vectors have inconsistent sizes.");
+          "vectors have inconsistent sizes: expected row width {}, but row {} "
+          "has width {}.",
+          result_size, i, actual_size));
     }
   }
 
