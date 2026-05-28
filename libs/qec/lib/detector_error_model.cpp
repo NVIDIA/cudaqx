@@ -9,6 +9,7 @@
 #include "cudaq/qec/detector_error_model.h"
 #include "cudaq/qec/pcm_utils.h"
 #include "cudaq/runtime/logger/logger.h"
+#include <algorithm>
 
 namespace cudaq::qec {
 
@@ -65,13 +66,46 @@ void detector_error_model::canonicalize_for_rounds(
   auto row_indices = dense_to_sparse(detector_error_matrix);
   auto column_order =
       get_sorted_pcm_column_indices(row_indices, num_syndromes_per_round);
+  const std::size_t num_obs = this->num_observables();
+
+  auto observables_match = [&](std::uint32_t lhs, std::uint32_t rhs) {
+    for (std::size_t r = 0; r < num_obs; r++) {
+      if (this->observables_flips_matrix.at({r, lhs}) !=
+          this->observables_flips_matrix.at({r, rhs}))
+        return false;
+    }
+    return true;
+  };
+
+  auto observables_less = [&](std::uint32_t lhs, std::uint32_t rhs) {
+    for (std::size_t r = 0; r < num_obs; r++) {
+      auto lhs_obs = this->observables_flips_matrix.at({r, lhs});
+      auto rhs_obs = this->observables_flips_matrix.at({r, rhs});
+      if (lhs_obs != rhs_obs)
+        return lhs_obs < rhs_obs;
+    }
+    return lhs < rhs;
+  };
+
+  // Keep the PCM/topological ordering from get_sorted_pcm_column_indices, but
+  // sort equal-syndrome groups by observable signature so merge-compatible DEM
+  // columns are adjacent.
+  for (auto group_begin = column_order.begin();
+       group_begin != column_order.end();) {
+    auto group_end = group_begin + 1;
+    while (group_end != column_order.end() &&
+           row_indices[*group_end] == row_indices[*group_begin])
+      ++group_end;
+    std::sort(group_begin, group_end, observables_less);
+    group_begin = group_end;
+  }
+
   std::vector<std::uint32_t> final_column_order;
   // March through the columns in topological order, and combine the probability
   // weight vectors if the columns have the same row indices.
   std::vector<std::vector<std::uint32_t>> new_row_indices;
   std::vector<double> new_weights;
   std::vector<std::size_t> new_error_ids;
-  const std::size_t num_obs = this->num_observables();
   const auto num_cols = column_order.size();
   bool has_error_ids =
       error_ids.has_value() && error_ids->size() == error_rates.size();
@@ -101,10 +135,12 @@ void detector_error_model::canonicalize_for_rounds(
         new_error_ids.push_back(error_ids->at(column_index));
     } else {
       auto &prev_row_indices = new_row_indices.back();
-      if (prev_row_indices == curr_row_indices) {
-        // The current column has the same row indices as the previous column
-        // (i.e. has the same syndrome signature) so we update the error_rates
-        // and do NOT add the duplicate column.
+      auto previous_column = final_column_order.back();
+      if (prev_row_indices == curr_row_indices &&
+          observables_match(previous_column, column_index)) {
+        // The current column has the same syndrome and observable signatures
+        // as the previous column, so update the error rate and do NOT add a
+        // duplicate column.
         auto prev_weight = new_weights.back();
         auto prev_error_id = has_error_ids
                                  ? new_error_ids.back()
@@ -124,27 +160,17 @@ void detector_error_model::canonicalize_for_rounds(
         if (has_error_ids)
           new_error_ids.back() =
               std::min(prev_error_id, error_ids->at(column_index));
-        // Verify that the observables are the same for the duplicate column.
-        auto previous_column = column_order[c - 1];
-        bool match = true;
-        for (std::size_t r = 0; r < num_obs; r++) {
-          if (this->observables_flips_matrix.at({r, previous_column}) !=
-              this->observables_flips_matrix.at({r, column_index})) {
-            match = false;
-            break;
-          }
-        }
-        if (!match) {
+      } else {
+        // Either the syndrome differs, or the same syndrome has a different
+        // observable flip. In both cases this is a distinct error mechanism.
+        if (prev_row_indices == curr_row_indices) {
           cudaq::info(
               "detector_error_model::canonicalize_for_rounds: identical "
               "syndromes exist in detector_error_matrix but have different "
-              "observables in observables_flips_matrix (columns {} and {})",
-              previous_column, column_index);
+              "observables in observables_flips_matrix; keeping column {} as a "
+              "distinct error mechanism (previous column {})",
+              column_index, previous_column);
         }
-      } else {
-        // The current column has different row indices than the previous
-        // column. So we add the current column to the new PCM, and update the
-        // error_rates.
         new_row_indices.push_back(curr_row_indices);
         new_weights.push_back(error_rates[column_index]);
         final_column_order.push_back(column_index);
