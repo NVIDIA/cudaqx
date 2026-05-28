@@ -58,6 +58,144 @@ def mat_to_str(mat):
     return s
 
 
+# Stim-oracle helpers. Keep stim imports inside tests so arm64 CI can skip.
+
+
+def _build_steane_z_memory_stim_circuit(stim_mod, p, n_rounds):
+    # Mirrors Steane prep0 and stabilizer schedules in steane_device.cpp.
+    # Qubits: data 0..6, ancx 7..9, ancz 10..12.
+    stab_supports = [
+        [0, 1, 2, 3],
+        [1, 2, 4, 5],
+        [2, 3, 5, 6],
+    ]
+    prep0_cx_pairs = [(0, 1), (4, 5), (6, 3), (6, 5), (4, 2), (0, 3), (4, 1),
+                      (3, 2)]
+
+    c = stim_mod.Circuit()
+    c.append("R", list(range(13)))
+    c.append("H", [0, 4, 6])
+    for ctrl, tgt in prep0_cx_pairs:
+        c.append("CX", [ctrl, tgt])
+        c.append("DEPOLARIZE2", [ctrl, tgt], p)
+
+    for r in range(n_rounds):
+        c.append("H", [7, 8, 9])
+        for xi, support in enumerate(stab_supports):
+            for di in support:
+                c.append("CX", [7 + xi, di])
+                c.append("DEPOLARIZE2", [7 + xi, di], p)
+        c.append("H", [7, 8, 9])
+
+        for zi, support in enumerate(stab_supports):
+            for di in support:
+                c.append("CX", [di, 10 + zi])
+                c.append("DEPOLARIZE2", [di, 10 + zi], p)
+
+        # cudaq-qec measures ancz first, then ancx.
+        c.append("M", [10, 11, 12, 7, 8, 9])
+        c.append("R", [7, 8, 9, 10, 11, 12])
+
+        # Z-DEM keeps ancz detectors only; later rounds compare to prior ancz.
+        if r == 0:
+            for zi in range(3):
+                c.append("DETECTOR", [stim_mod.target_rec(-6 + zi)])
+        else:
+            for zi in range(3):
+                c.append("DETECTOR", [
+                    stim_mod.target_rec(-6 + zi),
+                    stim_mod.target_rec(-12 + zi),
+                ])
+
+    c.append("M", [0, 1, 2, 3, 4, 5, 6])
+    # Z_L = Z_4 Z_5 Z_6.
+    c.append("OBSERVABLE_INCLUDE",
+             [stim_mod.target_rec(i) for i in (-3, -2, -1)], 0)
+    return c
+
+
+def _independent_merge(p, q):
+    # P(A xor B) for independent events.
+    return p + q - 2.0 * p * q
+
+
+def _stim_dem_to_multiset(stim_dem):
+    # Match cudaq-qec canonicalize_for_rounds by dropping no-syndrome errors.
+    bucket = {}
+    for inst in stim_dem.flattened():
+        if inst.type != "error":
+            continue
+        prob = inst.args_copy()[0]
+        det_set = []
+        obs_set = []
+        for tgt in inst.targets_copy():
+            if tgt.is_relative_detector_id():
+                det_set.append(tgt.val)
+            elif tgt.is_logical_observable_id():
+                obs_set.append(tgt.val)
+        if not det_set:
+            continue
+        key = (tuple(sorted(det_set)), tuple(sorted(obs_set)))
+        if key in bucket:
+            bucket[key] = _independent_merge(bucket[key], prob)
+        else:
+            bucket[key] = prob
+    return bucket
+
+
+def _cudaq_dem_to_multiset(dem):
+    # Same keying as _stim_dem_to_multiset: (detectors, observables) -> prob.
+    H = np.asarray(dem.detector_error_matrix)
+    O = np.asarray(dem.observables_flips_matrix)
+    rates = np.asarray(dem.error_rates)
+    bucket = {}
+    for c in range(H.shape[1]):
+        key = (tuple(np.flatnonzero(H[:, c]).tolist()),
+               tuple(np.flatnonzero(O[:, c]).tolist()))
+        prob = float(rates[c])
+        if key in bucket:
+            bucket[key] = _independent_merge(bucket[key], prob)
+        else:
+            bucket[key] = prob
+    return bucket
+
+
+def _stim_dem_to_arrays(stim_dem):
+    # Split decomposed Stim errors into graphlike H/O columns for PyMatching.
+    n_dets = stim_dem.num_detectors
+    n_obs = stim_dem.num_observables
+    h_cols, o_cols, rates = [], [], []
+    for inst in stim_dem.flattened():
+        if inst.type != "error":
+            continue
+        prob = inst.args_copy()[0]
+        components = [[]]
+        for tgt in inst.targets_copy():
+            if tgt.is_separator():
+                components.append([])
+            else:
+                components[-1].append(tgt)
+        for comp in components:
+            h_col = np.zeros(n_dets, dtype=np.uint8)
+            o_col = np.zeros(n_obs, dtype=np.uint8)
+            for tgt in comp:
+                if tgt.is_relative_detector_id():
+                    h_col[tgt.val] = 1
+                elif tgt.is_logical_observable_id():
+                    o_col[tgt.val] = 1
+            # Matching cannot use a purely-logical component with no syndrome.
+            if h_col.sum() == 0:
+                continue
+            h_cols.append(h_col)
+            o_cols.append(o_col)
+            rates.append(prob)
+    H = np.stack(h_cols, axis=1) if h_cols else np.zeros((n_dets, 0),
+                                                         dtype=np.uint8)
+    O = np.stack(o_cols, axis=1) if o_cols else np.zeros((n_obs, 0),
+                                                         dtype=np.uint8)
+    return H, O, np.asarray(rates, dtype=np.float64)
+
+
 # Use the fixture to set the target
 @pytest.fixture(scope="module", autouse=True)
 def set_target():
@@ -87,48 +225,52 @@ def test_dem_from_memory_circuit_requires_noise_model(dem_fn):
         dem_fn(code, statePrep, 1, None)
 
 
-def test_dem_from_memory_circuit():
+def test_z_dem_from_memory_circuit_against_stim_oracle():
+    """Compare cudaq-qec's Steane Z-DEM against Stim's independent DEM."""
+    stim_mod = pytest.importorskip(
+        "stim",
+        reason="stim not installed; skipping Stim oracle cross-check for Steane Z-DEM"
+    )
+
     code = qec.get_code('steane')
     p = 0.01
+    n_rounds = 2
     noise = cudaq.NoiseModel()
     noise.add_all_qubit_channel("x", cudaq.Depolarization2(p), 1)
-    statePrep = qec.operation.prep0
-    nRounds = 2
+    cudaq_dem = qec.z_dem_from_memory_circuit(code, qec.operation.prep0,
+                                              n_rounds, noise)
 
-    dem = qec.z_dem_from_memory_circuit(code, statePrep, nRounds, noise)
-    expected_detector_error_matrix = """
-1111...1..............
-.1.111..111...........
-..11.11..1.1111.......
-.......111.1.1.1111...
-..........1.11..1.111.
-..............1..11.11
-"""
-    # Uncomment the following line to get a string representation of the DEM
-    # that you can compare to expected_detector_error_matrix.
-    # print(mat_to_str(dem.detector_error_matrix), end='')
-    assert '\n' + mat_to_str(
-        dem.detector_error_matrix) == expected_detector_error_matrix
+    stim_circuit = _build_steane_z_memory_stim_circuit(stim_mod, p, n_rounds)
+    stim_dem = stim_circuit.detector_error_model(decompose_errors=False)
 
-    # Uncomment the following line to get a string representation of the error
-    # rates that you can compare to expected_error_rates.
-    # print(np.round(dem.error_rates, 4))
+    # Basic shape must agree before comparing signatures.
+    assert cudaq_dem.detector_error_matrix.shape[0] == stim_dem.num_detectors, (
+        f"num_detectors mismatch: cudaq="
+        f"{cudaq_dem.detector_error_matrix.shape[0]}, "
+        f"stim={stim_dem.num_detectors}")
+    assert cudaq_dem.observables_flips_matrix.shape[
+        0] == stim_dem.num_observables, (
+            f"num_observables mismatch: cudaq="
+            f"{cudaq_dem.observables_flips_matrix.shape[0]}, "
+            f"stim={stim_dem.num_observables}")
 
-    # The following error rates were captured from the above print statement and
-    # are considered "truth" data now.
-    expected_error_rates = [
-        0.0183, 0.0235, 0.0158, 0.0209, 0.0310, 0.0235, 0.0183, 0.0106, 0.0053,
-        0.0053, 0.0106, 0.0053, 0.0053, 0.0053, 0.0106, 0.0235, 0.0158, 0.0158,
-        0.0183, 0.0335, 0.0209, 0.0434
-    ]
-    assert np.allclose(dem.error_rates, expected_error_rates, atol=1e-4)
+    cudaq_terms = _cudaq_dem_to_multiset(cudaq_dem)
+    stim_terms = _stim_dem_to_multiset(stim_dem)
 
-    expected_observables_flips_matrix = '1....11.....1......111\n'
-    # Uncomment the following line to get a string representation of the
-    # observables flips matrix that you can compare to
-    # expected_observables_flips_matrix.
-    assert mat_to_str(
-        dem.observables_flips_matrix) == expected_observables_flips_matrix
+    # Catch regression of same-syndrome/different-observable merging.
+    cudaq_keys = set(cudaq_terms)
+    stim_keys = set(stim_terms)
+    assert cudaq_keys == stim_keys, (
+        f"DEM key sets differ. cudaq-only keys: "
+        f"{sorted(cudaq_keys - stim_keys)}; "
+        f"stim-only keys: {sorted(stim_keys - cudaq_keys)}")
+
+    # The small tolerance covers different grouping of Pauli outcomes.
+    for k in cudaq_keys:
+        assert np.isclose(cudaq_terms[k], stim_terms[k], atol=1e-4,
+                          rtol=1e-3), (
+                              f"probability mismatch at {k}: "
+                              f"cudaq={cudaq_terms[k]}, stim={stim_terms[k]}")
 
 
 def test_x_dem_from_memory_circuit():
@@ -296,8 +438,7 @@ def test_decoding_from_surface_code_dem_from_memory_circuit(
 
 
 def test_pymatching_decode_to_observable_surface_code_dem():
-    """Test PyMatching with O (observables) matrix: decoder returns observable
-    flips directly.cpp)."""
+    """Test PyMatching with O matrix on cudaq-qec's generated surface-code DEM."""
     cudaq.set_random_seed(13)
     code = qec.get_code('surface_code', distance=5)
     Lz = code.get_observables_z()
@@ -320,22 +461,84 @@ def test_pymatching_decode_to_observable_surface_code_dem():
 
     dem = qec.z_dem_from_memory_circuit(code, statePrep, nRounds, noise)
 
+    # Correct canonicalization preserves parallel matching edges; merge them
+    # inside PyMatching instead of dropping DEM columns upstream.
     decoder = qec.get_decoder(
         'pymatching',
         dem.detector_error_matrix,
         O=dem.observables_flips_matrix,
         error_rate_vec=np.array(dem.error_rates),
+        merge_strategy='independent',
     )
 
     dr = decoder.decode_batch(syndromes)
-    # With decode_to_observables=True, each row is observable flips
-    # (length num_observables), not error predictions.
+    # With O provided, PyMatching returns observable-flip predictions directly,
+    # one row per shot.
     obs_per_shot = np.asarray(dr.result, dtype=np.float64)
     data_predictions = np.round(obs_per_shot).astype(np.uint8).T
 
     nLogicalErrorsWithoutDecoding = np.sum(logical_measurements)
     nLogicalErrorsWithDecoding = np.sum(data_predictions ^ logical_measurements)
     assert nLogicalErrorsWithDecoding < nLogicalErrorsWithoutDecoding
+
+
+def test_pymatching_decodes_stim_surface_code_dem():
+    """Decode a Stim surface-code DEM through cudaq-qec's PyMatching plugin."""
+    stim_mod = pytest.importorskip(
+        "stim",
+        reason="stim not installed; skipping Stim-based PyMatching decode test"
+    )
+
+    distance = 5
+    n_rounds = 5
+    p = 0.003
+    n_shots = 2000
+
+    circuit = stim_mod.Circuit.generated(
+        "surface_code:rotated_memory_z",
+        distance=distance,
+        rounds=n_rounds,
+        after_clifford_depolarization=p,
+        after_reset_flip_probability=p,
+        before_measure_flip_probability=p,
+        before_round_data_depolarization=p,
+    )
+    # Matching plugin expects graphlike columns (1 or 2 detectors).
+    stim_dem = circuit.detector_error_model(decompose_errors=True)
+
+    H, O, rates = _stim_dem_to_arrays(stim_dem)
+
+    # Sample syndromes and true observable flips from the same Stim circuit.
+    sampler = circuit.compile_detector_sampler(seed=13)
+    syndromes_bool, obs_bool = sampler.sample(shots=n_shots,
+                                              separate_observables=True)
+    syndromes = syndromes_bool.astype(np.uint8)
+    logical_measurements = obs_bool.astype(np.uint8).flatten()
+
+    # Surface-code DEMs have parallel edges; let PyMatching merge them.
+    try:
+        decoder = qec.get_decoder(
+            'pymatching',
+            H,
+            O=O,
+            error_rate_vec=rates,
+            merge_strategy='independent',
+        )
+    except Exception as e:
+        pytest.skip(f'pymatching decoder unavailable in this build: {e}')
+
+    dr = decoder.decode_batch(syndromes)
+    # With O provided, the decoder returns predicted observable flips.
+    obs_per_shot = np.asarray(dr.result, dtype=np.float64)
+    data_predictions = np.round(obs_per_shot).astype(np.uint8).flatten()
+
+    n_errors_without_decoding = int(np.sum(logical_measurements))
+    n_errors_with_decoding = int(
+        np.sum(data_predictions ^ logical_measurements))
+    assert n_errors_with_decoding < n_errors_without_decoding, (
+        f"PyMatching did not reduce logical errors: "
+        f"with_decoding={n_errors_with_decoding}, "
+        f"without_decoding={n_errors_without_decoding}")
 
 
 def test_pcm_extend_to_n_rounds():
