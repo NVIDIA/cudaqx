@@ -7,7 +7,7 @@ on:
 
 jobs:
   source:
-    name: Build from source
+    name: Build and test wheels
     uses: ./.github/workflows/build_wheels.yaml
     with:
       build_type: Release
