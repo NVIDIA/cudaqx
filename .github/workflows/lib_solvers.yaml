@@ -7,6 +7,14 @@ on:
         type: string
         default: ''
         required: false
+      cudaq_repo:
+        type: string
+        default: ''
+        required: false
+      cudaq_ref:
+        type: string
+        default: ''
+        required: false
 
 jobs:
   build-and-test:
@@ -41,6 +49,9 @@ jobs:
       - name: Get required CUDAQ version
         id: get-cudaq-version
         uses: ./.github/actions/get-cudaq-version
+        with:
+          repo: ${{ inputs.cudaq_repo }}
+          ref: ${{ inputs.cudaq_ref }}
 
       - name: Get CUDAQ build
         uses: ./.github/actions/get-cudaq-build
