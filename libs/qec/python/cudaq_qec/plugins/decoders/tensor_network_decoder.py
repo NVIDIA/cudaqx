@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 import cudaq_qec as qec
+import numpy as np
 
 import numpy.typing as npt
 from quimb.tensor import TensorNetwork
@@ -416,15 +417,17 @@ class TensorNetworkDecoder:
     def decode_batch(
         self,
         syndrome_batch: npt.NDArray[Any],
-    ) -> list["qec.DecoderResult"]:
+    ) -> "qec.BatchDecoderResult":
         """Decode a batch of detection events.
 
         Args:
             syndrome_batch (np.ndarray): A numpy array of shape (batch_size, syndrome_length) where each row is a detection event.
 
         Returns:
-            list[qec.DecoderResult]: list of results for each detection event in the batch.
-                The probabilities that the logical observable flipped for each syndrome.
+            qec.BatchDecoderResult: batched results for each detection event in
+                the batch. The `result` field has shape (batch_size, 1) and
+                contains the probabilities that the logical observable flipped
+                for each syndrome.
         """
 
         assert hasattr(self, "noise_model")
@@ -459,16 +462,20 @@ class TensorNetworkDecoder:
             device_id=self.contractor_config.device_id,
         )
 
-        res = []
+        probabilities = []
         for r in range(syndrome_batch.shape[0]):
-            res.append(qec.DecoderResult())
-            res[r].converged = True
-            res[r].result = [
+            probabilities.append(
                 float(contraction_value[r, 1] /
-                      (contraction_value[r, 1] + contraction_value[r, 0]))
-            ]
+                      (contraction_value[r, 1] + contraction_value[r, 0])))
 
-        return res
+        # Python `decode_batch` override: construct a BatchDecoderResult
+        # directly, bypassing the native decoder aggregation path. This is
+        # the only sanctioned caller of the BatchDecoderResult constructor;
+        # see its docstring for the supported construction surface.
+        return qec.BatchDecoderResult(
+            np.asarray(probabilities, dtype=np.float64).reshape((-1, 1)),
+            np.ones(syndrome_batch.shape[0], dtype=bool),
+        )
 
     def optimize_path(
         self,
