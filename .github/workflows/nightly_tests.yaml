@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  # source:
+  # wheels:
   #   name: Build and test wheels
   #   uses: ./.github/workflows/build_wheels.yaml
   #   with:
@@ -97,6 +97,16 @@ jobs:
     name: Solvers against CUDA-Q main
     needs: [resolve-cudaq-main, build-cudaq-main]
     uses: ./.github/workflows/lib_solvers.yaml
+    with:
+      cudaq_repo: ${{ needs.resolve-cudaq-main.outputs.repo }}
+      cudaq_ref: ${{ needs.resolve-cudaq-main.outputs.ref }}
+      cache_key_suffix: nightly-cudaq-main
+    secrets: inherit
+
+  cudaq-main-docs:
+    name: Docs against CUDA-Q main
+    needs: [resolve-cudaq-main, build-cudaq-main]
+    uses: ./.github/workflows/docs.yaml
     with:
       cudaq_repo: ${{ needs.resolve-cudaq-main.outputs.repo }}
       cudaq_ref: ${{ needs.resolve-cudaq-main.outputs.ref }}

@@ -146,6 +146,8 @@ jobs:
       !failure() && !cancelled() &&
       needs.check-changes.outputs.build-docs == 'true'
     uses: ./.github/workflows/docs.yaml
+    with:
+      cache_key_suffix: ${{ needs.check-changes.outputs.cache-key-suffix }}
 
   build-all:
     name: All libs
