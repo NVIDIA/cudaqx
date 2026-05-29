@@ -27,6 +27,7 @@ import torch
 from quimb.tensor import TensorNetwork
 
 from ..tensor_network_decoder import TensorNetworkDecoder
+from .contractors import optimize_path as _optimize_path_dispatch
 from .tensor_network_factory import (
     tensor_network_from_syndrome_batch,
     prepare_syndrome_data_batch,
@@ -224,12 +225,17 @@ class NMOptimizer(TensorNetworkDecoder):
         execute: Literal["codegen", "unrolled", "opt_einsum"] = "codegen",
         compile_mode: str | None = None,
         dynamic_syndromes: bool = True,
+        precontract_noise: bool = False,
     ) -> None:
         if execute not in ("unrolled", "opt_einsum", "codegen"):
             raise ValueError(f"Invalid execute mode: {execute!r}")
         if dtype not in _SUPPORTED_DTYPES:
             raise ValueError(f"Invalid dtype {dtype!r}; expected one of "
                              f"{list(_SUPPORTED_DTYPES)}.")
+        if precontract_noise and execute != "opt_einsum":
+            raise ValueError(
+                "precontract_noise=True requires execute='opt_einsum'; "
+                f"got {execute!r}")
 
         # Sanitise once so the base TN tensors and ``self._noise_probs``
         # see identical values (see :func:`_validate_and_clamp_priors`).
@@ -307,8 +313,10 @@ class NMOptimizer(TensorNetworkDecoder):
         self._execute_mode = execute
         self._torch_compile_mode = compile_mode
         self._dynamic_syndromes = dynamic_syndromes
+        self._precontract_noise = precontract_noise
         self._compiled_predict: Any | None = None
         self._syndrome_tuple: tuple[torch.Tensor, ...] = ()
+        self.batch_slices: int = 1
         self._snapshot_arrays_and_eq()
         self._suspend_loss_rebuild = False
 
@@ -445,6 +453,8 @@ class NMOptimizer(TensorNetworkDecoder):
                 if self.path_batch not in (None, "auto") else "auto",
             )
             self._path_steps = None
+            if self._precontract_noise:
+                self._build_reduced_tn_state()
         else:
             self._oe_expr = None
             # Flatten the path into ``[(eq, idxs, sorted_desc), ...]``;
@@ -469,14 +479,46 @@ class NMOptimizer(TensorNetworkDecoder):
 
     def _compile_predict(self) -> None:
         """Build ``self._predict_fn`` for the configured execute mode."""
-        builders = {
-            "opt_einsum": self._build_predict_opt_einsum,
-            "unrolled": self._build_predict_unrolled,
-            "codegen": self._build_predict_codegen,
-        }
-        self._predict_fn = builders[self._execute_mode]()
+        if self._precontract_noise:
+            base_predict = self._build_predict_reduced()
+        else:
+            builders = {
+                "opt_einsum": self._build_predict_opt_einsum,
+                "unrolled": self._build_predict_unrolled,
+                "codegen": self._build_predict_codegen,
+            }
+            base_predict = builders[self._execute_mode]()
+        if self.batch_slices > 1:
+            base_predict = self._wrap_predict_batch_sliced(base_predict)
+        self._predict_fn = base_predict
         self._compiled_predict = self._maybe_torch_compile(self._predict_fn,
                                                            kind="predict")
+
+    def _wrap_predict_batch_sliced(self, base_predict_fn):
+        """Wrap a predict function so it iterates over batch-axis chunks.
+
+        Syndrome tensors are shape ``(2, batch)``; we split along axis 1
+        into ``self.batch_slices`` chunks, call ``base_predict_fn`` per
+        chunk, then concatenate the per-chunk ``(chunk_batch, 2)``
+        outputs along dim 0.  ``torch.cat`` is differentiable so the
+        autograd graph through ``noise_probs`` is preserved.
+        """
+        n_slices = self.batch_slices
+
+        def _sliced_predict(
+            noise_probs: torch.Tensor,
+            syndrome_tuple: tuple[torch.Tensor, ...],
+        ) -> torch.Tensor:
+            split = [
+                torch.tensor_split(t, n_slices, dim=1) for t in syndrome_tuple
+            ]
+            outs = []
+            for s in range(n_slices):
+                chunk = tuple(split[k][s] for k in range(len(split)))
+                outs.append(base_predict_fn(noise_probs, chunk))
+            return torch.cat(outs, dim=0)
+
+        return _sliced_predict
 
     def _build_predict_opt_einsum(self):
         """opt_einsum-backed predict: reuse the cached contract expression."""
@@ -499,6 +541,210 @@ class NMOptimizer(TensorNetworkDecoder):
                 arrays[pos] = noise_stacked[k]
             # Torch backend is auto-selected from the tensor type;
             # avoids the per-call ``backend=`` dispatch.
+            out = oe_expr(*arrays)
+            return out / out.sum(dim=1, keepdim=True)
+
+        return _predict
+
+    def _build_reduced_tn_state(self) -> None:
+        """Build the reduced TN topology + per-error einsum specs.
+
+        Equivalent of :meth:`TensorNetworkDecoder.init_noise_model`
+        ``contract=True``, but deferred: the per-error noise-into-checks
+        contractions become differentiable :func:`torch.einsum` calls
+        invoked per step, so the noise priors stay leaves of the
+        autograd graph while the main contraction runs on the
+        ``contract_noise_model=True`` topology.
+        """
+        import cotengra as ctg
+
+        error_inds_set = set(self.error_inds)
+
+        survivor_lookup: dict = {}
+        doomed_lookup: dict = {}
+        for opt_pos, t in enumerate(self._tensors_ref):
+            key = (tuple(t.inds), frozenset(t.tags))
+            if any(ind in error_inds_set for ind in t.inds):
+                doomed_lookup[key] = opt_pos
+            else:
+                survivor_lookup[key] = opt_pos
+
+        reduced_tn = self.full_tn.copy()
+        recipes: list[dict[str, Any]] = []
+        merged_id_to_recipe_idx: dict[int, int] = {}
+
+        for error_idx, error_ind in enumerate(self.error_inds):
+            doomed = [t for t in reduced_tn.tensors if error_ind in t.inds]
+            check_ts = [t for t in doomed if 'NOISE' not in t.tags]
+            check_opt_positions = [
+                doomed_lookup[(tuple(ct.inds), frozenset(ct.tags))]
+                for ct in check_ts
+            ]
+            ids_before = {id(t) for t in reduced_tn.tensors}
+            reduced_tn.contract_ind(error_ind)
+            new_ts = [t for t in reduced_tn.tensors if id(t) not in ids_before]
+            assert len(new_ts) == 1
+            new_t = new_ts[0]
+            merged_id_to_recipe_idx[id(new_t)] = error_idx
+
+            # Quimb's index order on the merged tensor -- the einsum
+            # output must match it so axes align in reduced_tn.
+            quimb_out_inds = tuple(new_t.inds)
+            mapping = {error_ind: 'e'}
+            next_code = ord('a')
+            for ind in quimb_out_inds:
+                while chr(next_code) == 'e':
+                    next_code += 1
+                mapping[ind] = chr(next_code)
+                next_code += 1
+            noise_str = mapping[error_ind]
+            check_strs = [
+                "".join(mapping[i] for i in ct.inds) for ct in check_ts
+            ]
+            out_str = "".join(mapping[i] for i in quimb_out_inds)
+            # Canonical order: ordered_check_opt_positions[axis] is the
+            # opt-array position of the check tensor whose non-error
+            # index is quimb_out_inds[axis].  This lets us batch every
+            # error in a signature class through a single torch.einsum.
+            ordered_check_opt_positions: list[int] = [None] * len(
+                check_ts)  # type: ignore
+            for ct, ct_pos in zip(check_ts, check_opt_positions):
+                non_e = next(i for i in ct.inds if i != error_ind)
+                ordered_check_opt_positions[quimb_out_inds.index(
+                    non_e)] = ct_pos
+            recipes.append({
+                'eq': ",".join([noise_str] + check_strs) + "->" + out_str,
+                'check_opt_positions': check_opt_positions,
+                'ordered_check_opt_positions': ordered_check_opt_positions,
+                'k': len(check_ts),
+            })
+
+        reduced_eq = reduced_tn.get_equation(
+            output_inds=("batch_index", self.logical_obs_inds[0]))
+        reduced_shapes = tuple(t.shape for t in reduced_tn.tensors)
+
+        reduced_static: dict[int, torch.Tensor] = {}
+        reduced_syndrome: list[tuple[int, int]] = []
+        reduced_recipes: dict[int, int] = {}
+        syn_pos_to_idx = {
+            p: i for i, (p, _) in enumerate(self._syndrome_positions)
+        }
+        for pos, t in enumerate(reduced_tn.tensors):
+            if id(t) in merged_id_to_recipe_idx:
+                reduced_recipes[pos] = merged_id_to_recipe_idx[id(t)]
+                continue
+            key = (tuple(t.inds), frozenset(t.tags))
+            opt_pos = survivor_lookup[key]
+            if opt_pos in self._static_arrays:
+                reduced_static[pos] = self._static_arrays[opt_pos]
+            elif opt_pos in syn_pos_to_idx:
+                reduced_syndrome.append((pos, syn_pos_to_idx[opt_pos]))
+            else:
+                raise AssertionError(
+                    f"reduced_tn tensor at pos {pos} maps to opt_pos {opt_pos} "
+                    "which isn't classified as static or syndrome")
+
+        # Cotengra rather than opt_einsum's ``auto``: ``auto`` falls
+        # back to ``greedy`` on 200+-tensor networks, which isn't
+        # memory-aware and picks paths torch.einsum can't execute at
+        # large batch.
+        hyper = ctg.HyperOptimizer(max_repeats=8, parallel=False)
+        reduced_path, _info = oe.contract_path(reduced_eq,
+                                               *reduced_shapes,
+                                               shapes=True,
+                                               optimize=hyper)
+        reduced_oe_expr = oe.contract_expression(reduced_eq,
+                                                 *reduced_shapes,
+                                                 optimize=reduced_path)
+
+        # Group errors by signature (number of checks) so each class
+        # runs through one batched torch.einsum instead of one per error.
+        from collections import defaultdict
+        recipe_to_reduced_pos = {ri: cp for cp, ri in reduced_recipes.items()}
+        groups_by_k: dict[int, list[int]] = defaultdict(list)
+        for ri, r in enumerate(recipes):
+            groups_by_k[r['k']].append(ri)
+
+        batched_groups: list[dict[str, Any]] = []
+        device = self.torch_device
+        for k, error_indices in sorted(groups_by_k.items()):
+            # 'n' = batched-error dim, 'e' = contracted error index,
+            # 'a'..'z' (skipping 'e' and 'n') = output axes.
+            out_letters: list[str] = []
+            next_code = ord('a')
+            for _ in range(k):
+                while chr(next_code) in ('e', 'n'):
+                    next_code += 1
+                out_letters.append(chr(next_code))
+                next_code += 1
+            out_str = "".join(out_letters)
+            check_strs = [f"n{c}e" for c in out_letters]
+            eq = "ne," + ",".join(check_strs) + "->n" + out_str if k > 0 \
+                else "ne->ne"
+
+            stacked_checks = []
+            for axis in range(k):
+                axis_arrays = [
+                    self._static_arrays[recipes[ri]
+                                        ['ordered_check_opt_positions'][axis]]
+                    for ri in error_indices
+                ]
+                stacked_checks.append(torch.stack(axis_arrays, dim=0))
+
+            reduced_positions = [
+                recipe_to_reduced_pos[ri] for ri in error_indices
+            ]
+            error_indices_t = torch.tensor(error_indices,
+                                           dtype=torch.long,
+                                           device=device)
+
+            batched_groups.append({
+                'k': k,
+                'eq': eq,
+                'error_indices_t': error_indices_t,
+                'stacked_checks': stacked_checks,
+                'reduced_positions': reduced_positions,
+            })
+
+        self._reduced_tn = reduced_tn
+        self._per_error_einsums = recipes
+        self._batched_einsum_groups = batched_groups
+        self._reduced_static_positions = reduced_static
+        self._reduced_syndrome_positions = reduced_syndrome
+        self._reduced_recipe_positions = reduced_recipes
+        self._reduced_eq = reduced_eq
+        self._reduced_oe_expr = reduced_oe_expr
+        self._reduced_n_tensors = len(reduced_tn.tensors)
+
+    def _build_predict_reduced(self):
+        """Predict using the reduced TN + per-step batched noise precontraction.
+
+        See :meth:`_build_reduced_tn_state`.
+        """
+        static_positions = self._reduced_static_positions
+        syndrome_positions = self._reduced_syndrome_positions
+        batched_groups = self._batched_einsum_groups
+        oe_expr = self._reduced_oe_expr
+        n = self._reduced_n_tensors
+
+        def _predict(noise_probs: torch.Tensor,
+                     syndrome_tuple: tuple[torch.Tensor, ...]) -> torch.Tensor:
+            noise_stacked = torch.stack((1.0 - noise_probs, noise_probs),
+                                        dim=-1)
+            arrays: list[torch.Tensor] = [None] * n  # type: ignore
+            for pos, arr in static_positions.items():
+                arrays[pos] = arr
+            for pos, syn_idx in syndrome_positions:
+                arrays[pos] = syndrome_tuple[syn_idx]
+            for group in batched_groups:
+                noise_batch = noise_stacked[group['error_indices_t']]
+                if group['k'] == 0:
+                    out_batch = noise_batch
+                else:
+                    out_batch = torch.einsum(group['eq'], noise_batch,
+                                             *group['stacked_checks'])
+                for i, pos in enumerate(group['reduced_positions']):
+                    arrays[pos] = out_batch[i]
             out = oe_expr(*arrays)
             return out / out.sum(dim=1, keepdim=True)
 
@@ -592,7 +838,13 @@ class NMOptimizer(TensorNetworkDecoder):
         Two variants are produced: one accepting logits (sigmoid applied
         inside) and one accepting probabilities directly.
         """
-        if self._execute_mode == "codegen":
+        # The fused codegen loss bakes obs_idx_true/false as closure
+        # constants over the full batch; under batch-slicing predict is
+        # already chunked-and-concatenated, so wrapped CE composes
+        # correctly while fused CE would not.
+        use_codegen_loss = (self._execute_mode == "codegen" and
+                            self.batch_slices == 1)
+        if use_codegen_loss:
             logits_fn, probs_fn = self._build_loss_codegen()
         else:
             logits_fn, probs_fn = self._build_loss_wrapped()
@@ -1096,6 +1348,7 @@ class NMOptimizer(TensorNetworkDecoder):
         if shape_changed:
             self.path_batch = None
             self.slicing_batch = tuple()
+            self.batch_slices = 1
             try:
                 self._snapshot_arrays_and_eq()
             finally:
@@ -1137,27 +1390,103 @@ class NMOptimizer(TensorNetworkDecoder):
         self._batch_size = int(new_syndrome_data.shape[0])
         self._update_data(syndrome_arrays, new_observable_flips, enforce_shape)
 
-    def optimize_path(self, optimize: Any = None, batch_size: int = -1) -> Any:
-        """Cache a contraction path via quimb and rebuild the JIT.
+    def optimize_path(self,
+                      optimize: Any = None,
+                      batch_size: int = -1,
+                      network_options: Any = None) -> Any:
+        """Cache a contraction path and rebuild the JIT.
 
-        Always routes through :meth:`TensorNetwork.contraction_info` so
-        the resulting path is compatible with :mod:`opt_einsum` and
-        manual unrolling -- unlike :meth:`TensorNetworkDecoder.optimize_path`,
-        which defaults to a cuTensorNet-only path.
+        Dispatches on the type of ``optimize``:
+
+        * ``None`` (default) or any string / :mod:`opt_einsum`
+          :class:`PathOptimizer` / :class:`cotengra.HyperOptimizer` --
+          route through quimb's :meth:`TensorNetwork.contraction_info`.
+          ``None`` is treated as ``"auto"``.  This is the CPU-safe
+          default and does not require :mod:`cuquantum`.
+        * :class:`cuquantum.tensornet.OptimizerOptions` -- route
+          through :func:`cuquantum.tensornet.contract_path` to use
+          cuTensorNet's hyper-optimiser.  Useful on large networks
+          where opt_einsum's heuristics underperform.
+
+        The path -- whether from cuTensorNet or quimb -- is a list of
+        ``(int, int)`` pairs and is consumed directly by
+        :mod:`opt_einsum` in the executor rebuild, so all three
+        execute modes (``opt_einsum`` / ``unrolled`` / ``codegen``)
+        work unchanged.
+
+        .. note::
+
+            cuTensorNet may return a *sliced* path on memory-pressured
+            networks.  The torch-backed executors used by
+            :class:`NMOptimizer` cannot honour slice descriptors, so a
+            sliced result raises :class:`NotImplementedError`.  Pass
+            ``OptimizerOptions(slicing=SlicerOptions(disable_slicing=True))``
+            to force an unsliced path, or fall back to ``optimize="auto"``.
 
         ``batch_size`` is part of the parent ``TensorNetworkDecoder``
         signature (which rebuilds its TN around a fake batch); on the
         optimiser the syndrome TN is already batched at construction
         and resized in :meth:`update_dataset`, so this argument is
         ignored.  Kept for Liskov substitution with the parent.
+
+        Example (cuTensorNet path finder)::
+
+            from cuquantum.tensornet.configuration import (
+                OptimizerOptions, SlicerOptions, NetworkOptions)
+            opt.optimize_path(
+                optimize=OptimizerOptions(
+                    slicing=SlicerOptions(disable_slicing=True)),
+                network_options=NetworkOptions(memory_limit='8GiB'))
+
+        ``network_options`` is forwarded to
+        :func:`cuquantum.tensornet.contract_path` as ``options=``.
         """
         del batch_size
-        info = self.full_tn.contraction_info(
-            output_inds=("batch_index", self.logical_obs_inds[0]),
-            optimize=optimize if optimize is not None else "auto",
-        )
-        self.path_batch = info.path
-        self.slicing_batch = tuple()
+
+        use_cutn = (optimize is not None and
+                    type(optimize).__module__.startswith("cuquantum") and
+                    type(optimize).__name__ == "OptimizerOptions")
+
+        output_inds = ("batch_index", self.logical_obs_inds[0])
+        batch_slices = 1
+        if use_cutn:
+            path, info = _optimize_path_dispatch(
+                optimize,
+                output_inds,
+                self.full_tn,
+                network_options=network_options)
+            num_slices = getattr(info, "num_slices", 1)
+            if num_slices > 1:
+                sliced_modes = getattr(info, "sliced_modes", ())
+                non_batch = [
+                    m for m in sliced_modes
+                    if (m[0] if isinstance(m, tuple) else m) != "batch_index"
+                ]
+                if non_batch:
+                    raise NotImplementedError(
+                        "NMOptimizer's batch-dim slicing executor only "
+                        "supports slicing the 'batch_index' mode; "
+                        f"cuTensorNet sliced additional modes: "
+                        f"{non_batch}.  Pass OptimizerOptions(slicing="
+                        "SlicerOptions(disable_slicing=True)) to "
+                        "suppress slicing.")
+                if not self._dynamic_syndromes:
+                    raise NotImplementedError(
+                        "Sliced contraction paths require "
+                        "dynamic_syndromes=True; rebuild NMOptimizer "
+                        "with dynamic_syndromes=True.")
+                batch_slices = num_slices
+        else:
+            info = self.full_tn.contraction_info(
+                output_inds=output_inds,
+                optimize=optimize if optimize is not None else "auto",
+            )
+            path = info.path
+
+        self.path_batch = path
+        self.slicing_batch = getattr(info, "sliced_modes",
+                                     tuple()) if use_cutn else tuple()
+        self.batch_slices = batch_slices
         self._snapshot_arrays_and_eq()
         return info
 
