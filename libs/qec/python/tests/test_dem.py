@@ -570,5 +570,35 @@ def test_pcm_extend_to_n_rounds():
     assert np.allclose(H15_new_error_rates, dem15.error_rates, atol=1e-6)
 
 
+def test_canonicalize_keeps_duplicate_syndromes_with_different_observables():
+    # Same syndrome but different observable flips are distinct mechanisms.
+    dem = qec.DetectorErrorModel()
+    dem.detector_error_matrix = np.array([[1, 1]], dtype=np.uint8)
+    dem.observables_flips_matrix = np.array([[0, 1]], dtype=np.uint8)
+    dem.error_rates = [0.1, 0.2]
+
+    dem.canonicalize_for_rounds(1)
+
+    assert dem.detector_error_matrix.shape[1] == 2
+    assert dem.observables_flips_matrix.shape[1] == 2
+    assert np.array_equal(dem.observables_flips_matrix,
+                          np.array([[0, 1]], dtype=np.uint8))
+
+
+def test_canonicalize_merges_duplicate_syndromes_with_same_observables():
+    # Same syndrome and same observable flip can be represented by one column.
+    dem = qec.DetectorErrorModel()
+    dem.detector_error_matrix = np.array([[1, 1]], dtype=np.uint8)
+    dem.observables_flips_matrix = np.array([[1, 1]], dtype=np.uint8)
+    dem.error_rates = [0.1, 0.2]
+
+    dem.canonicalize_for_rounds(1)
+
+    assert dem.detector_error_matrix.shape[1] == 1
+    assert dem.observables_flips_matrix.shape[1] == 1
+    assert np.array_equal(dem.observables_flips_matrix,
+                          np.array([[1]], dtype=np.uint8))
+
+
 if __name__ == "__main__":
     pytest.main()
