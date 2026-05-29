@@ -68,6 +68,7 @@ jobs:
 
       - name: Install build requirements
         run: |
+          apt update
           apt install -y --no-install-recommends gfortran libblas-dev
 
       - name: Build
