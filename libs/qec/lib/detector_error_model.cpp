@@ -76,29 +76,6 @@ void detector_error_model::canonicalize_for_rounds(
     return true;
   };
 
-  auto observables_less = [&](std::uint32_t lhs, std::uint32_t rhs) {
-    for (std::size_t r = 0; r < num_obs; r++) {
-      auto lhs_obs = this->observables_flips_matrix.at({r, lhs});
-      auto rhs_obs = this->observables_flips_matrix.at({r, rhs});
-      if (lhs_obs != rhs_obs)
-        return lhs_obs < rhs_obs;
-    }
-    return lhs < rhs;
-  };
-
-  // Keep the PCM/topological ordering from get_sorted_pcm_column_indices, but
-  // sort equal-syndrome groups by observable signature so merge-compatible DEM
-  // columns are adjacent.
-  for (auto group_begin = column_order.begin();
-       group_begin != column_order.end();) {
-    auto group_end = group_begin + 1;
-    while (group_end != column_order.end() &&
-           row_indices[*group_end] == row_indices[*group_begin])
-      ++group_end;
-    std::sort(group_begin, group_end, observables_less);
-    group_begin = group_end;
-  }
-
   std::vector<std::uint32_t> final_column_order;
   // March through the columns in topological order, and combine the probability
   // weight vectors if the columns have the same row indices.
@@ -163,7 +140,7 @@ void detector_error_model::canonicalize_for_rounds(
         // Either the syndrome differs, or the same syndrome has a different
         // observable flip. In both cases this is a distinct error mechanism.
         if (prev_row_indices == curr_row_indices) {
-          cudaq::info(
+          cudaq::warn(
               "detector_error_model::canonicalize_for_rounds: identical "
               "syndromes exist in detector_error_matrix but have different "
               "observables in observables_flips_matrix; keeping column {} as a "
