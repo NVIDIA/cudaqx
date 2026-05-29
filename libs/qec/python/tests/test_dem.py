@@ -181,8 +181,8 @@ def test_decoding_from_dem_from_memory_circuit():
     syndromes = syndromes.reshape((nShots, -1))
     decoder = qec.get_decoder('single_error_lut', dem.detector_error_matrix)
     dr = decoder.decode_batch(syndromes)
-    error_predictions = np.array([e.result for e in dr], dtype=np.uint8)
-    dr_converged = np.array([e.converged for e in dr], dtype=np.uint8)
+    error_predictions = np.asarray(dr.result, dtype=np.uint8)
+    dr_converged = np.asarray(dr.converged, dtype=np.uint8)
 
     data_predictions = (dem.observables_flips_matrix @ error_predictions.T) % 2
     print(f'data_predictions.shape: {data_predictions.shape}')
@@ -270,12 +270,11 @@ def test_decoding_from_surface_code_dem_from_memory_circuit(
     print(f'decoder_name: {decoder_name}')
 
     dr = decoder.decode_batch(syndromes)
-    error_predictions = np.array([e.result for e in dr], dtype=np.uint8)
-    dr_converged = np.array([e.converged for e in dr], dtype=np.uint8)
+    error_predictions = np.asarray(dr.result, dtype=np.uint8)
+    dr_converged = np.asarray(dr.converged, dtype=np.uint8)
     if decoder_name == "tensor_network_decoder":
         # Tensor network decoder returns the observable flips, not the error predictions.
-        data_predictions = np.array([np.round(e.result) for e in dr],
-                                    dtype=np.uint8).T
+        data_predictions = np.round(dr.result).astype(np.uint8).T
     else:
         data_predictions = (
             dem.observables_flips_matrix @ error_predictions.T) % 2
@@ -329,9 +328,9 @@ def test_pymatching_decode_to_observable_surface_code_dem():
     )
 
     dr = decoder.decode_batch(syndromes)
-    # With decode_to_observables=True, each e.result is observable flips
+    # With decode_to_observables=True, each row is observable flips
     # (length num_observables), not error predictions.
-    obs_per_shot = np.array([e.result for e in dr], dtype=np.float64)
+    obs_per_shot = np.asarray(dr.result, dtype=np.float64)
     data_predictions = np.round(obs_per_shot).astype(np.uint8).T
 
     nLogicalErrorsWithoutDecoding = np.sum(logical_measurements)

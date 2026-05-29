@@ -70,19 +70,15 @@ def test_sliding_window_1(decoder_name, batched, num_rounds, num_windows):
     if batched:
         full_results = full_decoder.decode_batch(syndromes)
         sw_results = sw_as_full_decoder.decode_batch(syndromes)
-        num_mismatches = 0
-        for r1, r2 in zip(full_results, sw_results):
-            if r1.result != r2.result:
-                num_mismatches += 1
+        num_mismatches = np.count_nonzero(
+            np.any(full_results.result != sw_results.result, axis=1))
         assert num_mismatches == 0
 
     else:
-        full_results = []
-        sw_results = []
         num_mismatches = 0
         for syndrome in syndromes:
             r1 = full_decoder.decode(syndrome)
             r2 = sw_as_full_decoder.decode(syndrome)
-            if r1.result != r2.result:
+            if not np.array_equal(r1.result, r2.result):
                 num_mismatches += 1
         assert num_mismatches == 0
