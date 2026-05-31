@@ -59,6 +59,7 @@ add_library(${LIBRARY_NAME} SHARED ${QEC_SOURCES})
 
 add_subdirectory(decoders/plugins/example)
 add_subdirectory(decoders/plugins/pymatching)
+add_subdirectory(decoders/plugins/chromobius)
 
 # The TRT decoder plugin honors the tri-state `CUDAQ_QEC_BUILD_TRT_DECODER`
 # cache variable (AUTO/ON/OFF) declared in the parent CMakeLists.txt.  Skip
