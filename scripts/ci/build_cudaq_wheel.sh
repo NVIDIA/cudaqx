@@ -111,6 +111,19 @@ diff --git a/python/runtime/cudaq/domains/plugins/CMakeLists.txt b/python/runtim
 +      nanobind-static Python3::Module
        cudaq-chemistry cudaq-operator cudaq cudaq-py-utils cudaq-platform-default)
  endif()
+
+diff --git a/runtime/common/CMakeLists.txt b/runtime/common/CMakeLists.txt
+--- a/runtime/common/CMakeLists.txt
++++ b/runtime/common/CMakeLists.txt
+@@ -80,7 +80,7 @@ if(OPENSSL_FOUND)
+   if(APPLE)
+     target_link_libraries(${LIBRARY_NAME} PRIVATE cpr::cpr ZLIB::ZLIB)
+   else()
+-    target_link_libraries(${LIBRARY_NAME} PRIVATE cpr::cpr -Wl,--start-group ZLIB::ZLIB)
++    target_link_libraries(${LIBRARY_NAME} PRIVATE cpr::cpr dl -Wl,--start-group ZLIB::ZLIB)
+   endif()
+   target_compile_definitions(${LIBRARY_NAME} PRIVATE -DCUDAQ_RESTCLIENT_AVAILABLE)
+   # Override the global flat_namespace for this library. cudaq-common doesn'\''t need
 '
 
 echo "$CUDAQ_PATCH" | git apply --verbose
