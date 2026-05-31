@@ -25,9 +25,16 @@
  *       --data-dir DIR [--max-samples=N] [--onnx-path=FILE]
  *       [--engine-save-path=FILE] [--batch-size=N] [--warmup=N]
  *       [--no-cuda-graph] [--no-raw-diagnostics]
+ *
+ *   test_trt_decoder_composite --data-dir DIR --config-yaml FILE
+ *       [--decoder-id=N] [--max-samples=N] [--warmup=N]
+ *       [--no-raw-diagnostics]
  ******************************************************************************/
 
 #include "predecoder_pipeline_common.h"
+#include "../../lib/realtime/realtime_decoding.h"
+#include "cudaq/qec/pcm_utils.h"
+#include "cudaq/qec/realtime/decoding_config.h"
 
 #include <algorithm>
 #include <chrono>
@@ -36,6 +43,8 @@
 #include <iomanip>
 #include <iostream>
 #include <numeric>
+#include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -48,8 +57,10 @@ using hrclock = std::chrono::high_resolution_clock;
 
 struct DemoConfig {
   std::string data_dir;
+  std::string config_yaml_path;
   std::string onnx_path;
   std::string engine_save_path;
+  int64_t decoder_id = -1;
   int max_samples = 0;
   int warmup_count = 20;
   size_t batch_size = 1;
@@ -99,6 +110,9 @@ void print_usage(const char *argv0) {
          "detectors/observables/H/O\n"
       << "  --max-samples=N            Limit samples decoded (0 = all)\n"
       << "  --warmup=N                 Samples excluded from latency stats\n"
+      << "  --config-yaml=FILE         Build composite decoder from YAML "
+         "config\n"
+      << "  --decoder-id=N             Decoder ID to select from YAML config\n"
       << "  --onnx-path=FILE           Override full ONNX path\n"
       << "  --engine-save-path=FILE    Where the built TRT engine is saved\n"
       << "  --batch-size=N             TRT dynamic batch profile size (default "
@@ -127,6 +141,14 @@ DemoConfig parse_demo_config(int argc, char *argv[]) {
       cfg.warmup_count = std::stoi(value_after_equals(arg, "--warmup="));
     } else if (arg == "--warmup" && i + 1 < argc) {
       cfg.warmup_count = std::stoi(argv[++i]);
+    } else if (starts_with(arg, "--config-yaml=")) {
+      cfg.config_yaml_path = value_after_equals(arg, "--config-yaml=");
+    } else if (arg == "--config-yaml" && i + 1 < argc) {
+      cfg.config_yaml_path = argv[++i];
+    } else if (starts_with(arg, "--decoder-id=")) {
+      cfg.decoder_id = std::stoll(value_after_equals(arg, "--decoder-id="));
+    } else if (arg == "--decoder-id" && i + 1 < argc) {
+      cfg.decoder_id = std::stoll(argv[++i]);
     } else if (starts_with(arg, "--onnx-path=")) {
       cfg.onnx_path = value_after_equals(arg, "--onnx-path=");
     } else if (arg == "--onnx-path" && i + 1 < argc) {
@@ -150,6 +172,59 @@ DemoConfig parse_demo_config(int argc, char *argv[]) {
     }
   }
   return cfg;
+}
+
+std::string read_text_file(const std::string &path) {
+  std::ifstream in(path);
+  if (!in.good())
+    throw std::runtime_error("Failed to open " + path);
+  std::ostringstream buffer;
+  buffer << in.rdbuf();
+  return buffer.str();
+}
+
+size_t sparse_vec_nnz(const std::vector<int64_t> &sparse) {
+  return static_cast<size_t>(std::count_if(sparse.begin(), sparse.end(),
+                                           [](int64_t v) { return v >= 0; }));
+}
+
+size_t sparse_vec_rows(const std::vector<int64_t> &sparse) {
+  return static_cast<size_t>(std::count(sparse.begin(), sparse.end(), -1));
+}
+
+template <typename T>
+void copy_param_if_present(const cudaqx::heterogeneous_map &src,
+                           cudaqx::heterogeneous_map &dst,
+                           const std::string &key) {
+  if (src.contains(key))
+    dst.insert(key, src.get<T>(key));
+}
+
+bool build_raw_trt_params(const cudaqx::heterogeneous_map &trt_params,
+                          cudaqx::heterogeneous_map &raw_params) {
+  bool has_model_source = false;
+  if (trt_params.contains("engine_load_path")) {
+    raw_params.insert("engine_load_path",
+                      trt_params.get<std::string>("engine_load_path"));
+    has_model_source = true;
+  } else if (trt_params.contains("engine_save_path") &&
+             file_exists(trt_params.get<std::string>("engine_save_path"))) {
+    raw_params.insert("engine_load_path",
+                      trt_params.get<std::string>("engine_save_path"));
+    has_model_source = true;
+  } else if (trt_params.contains("onnx_load_path")) {
+    raw_params.insert("onnx_load_path",
+                      trt_params.get<std::string>("onnx_load_path"));
+    copy_param_if_present<std::string>(trt_params, raw_params,
+                                       "engine_save_path");
+    has_model_source = true;
+  }
+
+  copy_param_if_present<size_t>(trt_params, raw_params, "batch_size");
+  copy_param_if_present<bool>(trt_params, raw_params, "use_cuda_graph");
+  copy_param_if_present<size_t>(trt_params, raw_params, "memory_workspace");
+  copy_param_if_present<std::string>(trt_params, raw_params, "precision");
+  return has_model_source;
 }
 
 std::vector<cudaq::qec::float_t> sample_to_syndrome(const TestData &data,
@@ -203,6 +278,23 @@ struct RawDiagnostics {
   int64_t total_residual_nonzero = 0;
   int64_t total_pre_l = 0;
   int64_t total_pymatch_frame = 0;
+};
+
+struct DecoderSetup {
+  std::unique_ptr<cudaq::qec::decoder> decoder;
+  cudaqx::tensor<uint8_t> H;
+  cudaqx::heterogeneous_map trt_params;
+  std::string label;
+  std::string init_mode;
+  std::string config_yaml_path;
+  std::string onnx_path;
+  std::string engine_save_path;
+  size_t H_rows = 0;
+  size_t H_cols = 0;
+  size_t H_nnz = 0;
+  size_t O_rows = 0;
+  size_t O_cols = 0;
+  size_t O_nnz = 0;
 };
 
 CompositeStats run_composite_decoder(cudaq::qec::decoder &decoder,
@@ -259,6 +351,122 @@ CompositeStats run_composite_decoder(cudaq::qec::decoder &decoder,
           wall_end - wall_start)
           .count();
   return stats;
+}
+
+const cudaq::qec::decoding::config::decoder_config &select_yaml_decoder(
+    const cudaq::qec::decoding::config::multi_decoder_config &config,
+    int64_t decoder_id) {
+  if (decoder_id >= 0) {
+    auto it = std::find_if(config.decoders.begin(), config.decoders.end(),
+                           [&](const auto &decoder_config) {
+                             return decoder_config.id == decoder_id;
+                           });
+    if (it == config.decoders.end())
+      throw std::runtime_error("Decoder ID " + std::to_string(decoder_id) +
+                               " not found in YAML config.");
+    return *it;
+  }
+
+  if (config.decoders.size() != 1)
+    throw std::runtime_error("YAML config contains " +
+                             std::to_string(config.decoders.size()) +
+                             " decoders; pass --decoder-id to select one.");
+  return config.decoders.front();
+}
+
+DecoderSetup create_decoder_from_yaml(const DemoConfig &demo_cfg) {
+  using cudaq::qec::decoding::config::multi_decoder_config;
+
+  auto config = multi_decoder_config::from_yaml_str(
+      read_text_file(demo_cfg.config_yaml_path));
+  const auto &decoder_config = select_yaml_decoder(config, demo_cfg.decoder_id);
+  if (decoder_config.type != "trt_decoder") {
+    throw std::runtime_error("YAML decoder type must be trt_decoder, got '" +
+                             decoder_config.type + "'.");
+  }
+
+  DecoderSetup setup;
+  setup.label = "yaml decoder " + std::to_string(decoder_config.id);
+  setup.init_mode = "YAML config";
+  setup.config_yaml_path = demo_cfg.config_yaml_path;
+  setup.H_rows = static_cast<size_t>(decoder_config.syndrome_size);
+  setup.H_cols = static_cast<size_t>(decoder_config.block_size);
+  setup.H_nnz = sparse_vec_nnz(decoder_config.H_sparse);
+  setup.O_rows = sparse_vec_rows(decoder_config.O_sparse);
+  setup.O_cols = static_cast<size_t>(decoder_config.block_size);
+  setup.O_nnz = sparse_vec_nnz(decoder_config.O_sparse);
+
+  setup.H = cudaq::qec::pcm_from_sparse_vec(decoder_config.H_sparse,
+                                            decoder_config.syndrome_size,
+                                            decoder_config.block_size);
+  setup.trt_params =
+      cudaq::qec::decoding::host::prepare_decoder_params(decoder_config);
+  if (setup.trt_params.contains("onnx_load_path"))
+    setup.onnx_path = setup.trt_params.get<std::string>("onnx_load_path");
+  if (setup.trt_params.contains("engine_save_path"))
+    setup.engine_save_path =
+        setup.trt_params.get<std::string>("engine_save_path");
+  if (setup.trt_params.contains("engine_load_path") &&
+      setup.engine_save_path.empty())
+    setup.engine_save_path =
+        setup.trt_params.get<std::string>("engine_load_path");
+
+  setup.decoder =
+      cudaq::qec::decoder::get(decoder_config.type, setup.H, setup.trt_params);
+  return setup;
+}
+
+DecoderSetup create_decoder_from_cli(const PipelineConfig &config,
+                                     const DemoConfig &demo_cfg,
+                                     const StimData &stim) {
+  std::string onnx_path =
+      demo_cfg.onnx_path.empty() ? config.onnx_path() : demo_cfg.onnx_path;
+  std::string engine_save_path = demo_cfg.engine_save_path.empty()
+                                     ? replace_extension(onnx_path, ".engine")
+                                     : demo_cfg.engine_save_path;
+
+  if (!file_exists(onnx_path))
+    throw std::runtime_error("ONNX file not found: " + onnx_path);
+
+  auto H = stim.H.to_dense();
+  auto O = stim.O.to_dense();
+
+  cudaqx::heterogeneous_map pm_params;
+  pm_params.insert("merge_strategy", std::string("smallest_weight"));
+  pm_params.insert("O", O);
+  if (!stim.priors.empty()) {
+    if (stim.priors.size() != stim.H.ncols) {
+      throw std::runtime_error(
+          "priors.bin has " + std::to_string(stim.priors.size()) +
+          " entries, but H has " + std::to_string(stim.H.ncols) + " columns.");
+    }
+    pm_params.insert("error_rate_vec", stim.priors);
+  }
+
+  DecoderSetup setup;
+  setup.H = H;
+  setup.label = config.label;
+  setup.init_mode = "manual CLI args";
+  setup.onnx_path = onnx_path;
+  setup.engine_save_path = engine_save_path;
+  setup.H_rows = stim.H.nrows;
+  setup.H_cols = stim.H.ncols;
+  setup.H_nnz = stim.H.nnz;
+  setup.O_rows = stim.O.nrows;
+  setup.O_cols = stim.O.ncols;
+  setup.O_nnz = stim.O.nnz;
+
+  setup.trt_params.insert("onnx_load_path", onnx_path);
+  setup.trt_params.insert("engine_save_path", engine_save_path);
+  setup.trt_params.insert("batch_size", demo_cfg.batch_size);
+  setup.trt_params.insert("use_cuda_graph", demo_cfg.use_cuda_graph);
+  setup.trt_params.insert("global_decoder", std::string("pymatching"));
+  setup.trt_params.insert("global_decoder_params", pm_params);
+  setup.trt_params.insert("O", O);
+
+  setup.decoder =
+      cudaq::qec::decoder::get("trt_decoder", setup.H, setup.trt_params);
+  return setup;
 }
 
 RawDiagnostics run_raw_diagnostics(cudaq::qec::decoder &raw_decoder,
@@ -337,17 +545,6 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  std::string onnx_path =
-      demo_cfg.onnx_path.empty() ? config.onnx_path() : demo_cfg.onnx_path;
-  std::string engine_save_path = demo_cfg.engine_save_path.empty()
-                                     ? replace_extension(onnx_path, ".engine")
-                                     : demo_cfg.engine_save_path;
-
-  if (!file_exists(onnx_path)) {
-    std::cerr << "ERROR: ONNX file not found: " << onnx_path << "\n";
-    return 1;
-  }
-
   TestData test_data = load_test_data(demo_cfg.data_dir);
   if (!test_data.loaded()) {
     std::cerr << "ERROR: failed to load detector/observable test data from "
@@ -355,74 +552,76 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  StimData stim = load_stim_data(demo_cfg.data_dir);
-  if (!stim.H.loaded()) {
-    std::cerr << "ERROR: H_csr.bin is required in " << demo_cfg.data_dir
-              << "\n";
-    return 1;
-  }
-  if (!stim.O.loaded()) {
-    std::cerr << "ERROR: O_csr.bin is required in " << demo_cfg.data_dir
-              << "\n";
-    return 1;
-  }
-  if (stim.O.nrows == 0) {
-    std::cerr << "ERROR: O_csr.bin contains zero observables.\n";
-    return 1;
-  }
-  if (test_data.num_observables < stim.O.nrows) {
-    std::cerr << "ERROR: observables.bin has " << test_data.num_observables
-              << " observable column(s), but O_csr.bin has " << stim.O.nrows
-              << " row(s).\n";
-    return 1;
-  }
-
-  auto H = stim.H.to_dense();
-  auto O = stim.O.to_dense();
-
-  cudaqx::heterogeneous_map pm_params;
-  pm_params.insert("merge_strategy", std::string("smallest_weight"));
-  pm_params.insert("O", O);
-  if (!stim.priors.empty()) {
-    if (stim.priors.size() != stim.H.ncols) {
-      std::cerr << "ERROR: priors.bin has " << stim.priors.size()
-                << " entries, but H has " << stim.H.ncols << " columns.\n";
+  const bool use_yaml_config = !demo_cfg.config_yaml_path.empty();
+  std::optional<StimData> stim;
+  if (!use_yaml_config) {
+    stim = load_stim_data(demo_cfg.data_dir);
+    if (!stim->H.loaded()) {
+      std::cerr << "ERROR: H_csr.bin is required in " << demo_cfg.data_dir
+                << "\n";
       return 1;
     }
-    pm_params.insert("error_rate_vec", stim.priors);
+    if (!stim->O.loaded()) {
+      std::cerr << "ERROR: O_csr.bin is required in " << demo_cfg.data_dir
+                << "\n";
+      return 1;
+    }
+    if (stim->O.nrows == 0) {
+      std::cerr << "ERROR: O_csr.bin contains zero observables.\n";
+      return 1;
+    }
   }
 
-  cudaqx::heterogeneous_map trt_params;
-  trt_params.insert("onnx_load_path", onnx_path);
-  trt_params.insert("engine_save_path", engine_save_path);
-  trt_params.insert("batch_size", demo_cfg.batch_size);
-  trt_params.insert("use_cuda_graph", demo_cfg.use_cuda_graph);
-  trt_params.insert("global_decoder", std::string("pymatching"));
-  trt_params.insert("global_decoder_params", pm_params);
-  trt_params.insert("O", O);
-
-  std::cout << "--- Initializing Composite TensorRT Decoder (" << config.label
-            << ") ---\n";
-  std::cout << "[Setup] ONNX:        " << onnx_path << "\n";
-  std::cout << "[Setup] Engine save: " << engine_save_path << "\n";
-  std::cout << "[Setup] Data dir:    " << demo_cfg.data_dir << "\n";
-  std::cout << "[Setup] H:           " << stim.H.nrows << " x " << stim.H.ncols
-            << " (" << stim.H.nnz << " nnz)\n";
-  std::cout << "[Setup] O:           " << stim.O.nrows << " x " << stim.O.ncols
-            << " (" << stim.O.nnz << " nnz)\n";
-  std::cout << "[Setup] Samples:     " << test_data.num_samples
-            << ", detectors/sample=" << test_data.num_detectors
-            << ", observables/sample=" << test_data.num_observables << "\n";
-  std::cout << "[Setup] PyMatching:  merge_strategy=smallest_weight"
-            << (stim.priors.empty() ? ", no priors\n" : ", priors loaded\n");
-
-  std::unique_ptr<cudaq::qec::decoder> composite_decoder;
+  DecoderSetup setup;
   try {
-    composite_decoder = cudaq::qec::decoder::get("trt_decoder", H, trt_params);
+    std::cout << "--- Initializing Composite TensorRT Decoder ("
+              << (use_yaml_config ? demo_cfg.config_yaml_path : config.label)
+              << ") ---\n";
+    setup = use_yaml_config ? create_decoder_from_yaml(demo_cfg)
+                            : create_decoder_from_cli(config, demo_cfg, *stim);
   } catch (const std::exception &e) {
     std::cerr << "ERROR: failed to create composite trt_decoder: " << e.what()
               << "\n";
     return 1;
+  }
+
+  if (setup.O_rows == 0) {
+    std::cerr << "ERROR: observable matrix contains zero observables.\n";
+    return 1;
+  }
+  if (test_data.num_detectors != setup.H_rows) {
+    std::cerr << "ERROR: detectors.bin has " << test_data.num_detectors
+              << " detectors, but decoder H has " << setup.H_rows << " rows.\n";
+    return 1;
+  }
+  if (test_data.num_observables < setup.O_rows) {
+    std::cerr << "ERROR: observables.bin has " << test_data.num_observables
+              << " observable column(s), but decoder O has " << setup.O_rows
+              << " row(s).\n";
+    return 1;
+  }
+
+  std::cout << "[Setup] Init mode:   " << setup.init_mode << "\n";
+  if (!setup.config_yaml_path.empty())
+    std::cout << "[Setup] YAML:        " << setup.config_yaml_path << "\n";
+  if (!setup.onnx_path.empty())
+    std::cout << "[Setup] ONNX:        " << setup.onnx_path << "\n";
+  if (!setup.engine_save_path.empty())
+    std::cout << "[Setup] Engine:      " << setup.engine_save_path << "\n";
+  std::cout << "[Setup] Data dir:    " << demo_cfg.data_dir << "\n";
+  std::cout << "[Setup] H:           " << setup.H_rows << " x " << setup.H_cols
+            << " (" << setup.H_nnz << " nnz)\n";
+  std::cout << "[Setup] O:           " << setup.O_rows << " x " << setup.O_cols
+            << " (" << setup.O_nnz << " nnz)\n";
+  std::cout << "[Setup] Samples:     " << test_data.num_samples
+            << ", detectors/sample=" << test_data.num_detectors
+            << ", observables/sample=" << test_data.num_observables << "\n";
+  std::cout << "[Setup] PyMatching:  ";
+  if (use_yaml_config) {
+    std::cout << "from YAML global_decoder_params\n";
+  } else {
+    std::cout << "merge_strategy=smallest_weight"
+              << (stim->priors.empty() ? ", no priors\n" : ", priors loaded\n");
   }
 
   const int available_samples = static_cast<int>(test_data.num_samples);
@@ -437,30 +636,31 @@ int main(int argc, char *argv[]) {
   std::cout << "[Run] Decoding " << n_samples
             << " sample(s) through composite TRT+PyMatching decoder...\n";
 
-  CompositeStats stats = run_composite_decoder(*composite_decoder, test_data,
-                                               n_samples, stim.O.nrows);
+  CompositeStats stats =
+      run_composite_decoder(*setup.decoder, test_data, n_samples, setup.O_rows);
 
   RawDiagnostics raw_stats;
   if (demo_cfg.raw_diagnostics) {
     cudaqx::heterogeneous_map raw_params;
-    if (file_exists(engine_save_path)) {
-      raw_params.insert("engine_load_path", engine_save_path);
+    if (!build_raw_trt_params(setup.trt_params, raw_params)) {
+      std::cerr << "[WARN] Raw TRT diagnostics skipped: no raw TRT model "
+                   "source is available.\n";
     } else {
-      std::cerr << "[WARN] Engine file was not found after composite init; "
-                   "raw diagnostics will rebuild from ONNX.\n";
-      raw_params.insert("onnx_load_path", onnx_path);
-      raw_params.insert("engine_save_path", engine_save_path);
-    }
-    raw_params.insert("batch_size", demo_cfg.batch_size);
-    raw_params.insert("use_cuda_graph", demo_cfg.use_cuda_graph);
+      if (setup.trt_params.contains("engine_save_path") &&
+          !file_exists(setup.trt_params.get<std::string>("engine_save_path"))) {
+        std::cerr << "[WARN] Engine file was not found after composite init; "
+                     "raw diagnostics will rebuild from ONNX.\n";
+      }
 
-    try {
-      auto raw_decoder = cudaq::qec::decoder::get("trt_decoder", H, raw_params);
-      raw_stats =
-          run_raw_diagnostics(*raw_decoder, test_data, stats.first_obs_pred,
-                              n_samples, stim.O.nrows, stim.H.nrows);
-    } catch (const std::exception &e) {
-      std::cerr << "[WARN] Raw TRT diagnostics skipped: " << e.what() << "\n";
+      try {
+        auto raw_decoder =
+            cudaq::qec::decoder::get("trt_decoder", setup.H, raw_params);
+        raw_stats =
+            run_raw_diagnostics(*raw_decoder, test_data, stats.first_obs_pred,
+                                n_samples, setup.O_rows, setup.H_rows);
+      } catch (const std::exception &e) {
+        std::cerr << "[WARN] Raw TRT diagnostics skipped: " << e.what() << "\n";
+      }
     }
   }
 
@@ -495,7 +695,7 @@ int main(int argc, char *argv[]) {
   std::cout << std::fixed;
   std::cout
       << "\n================================================================\n";
-  std::cout << "  Composite TRT Decoder Benchmark: " << config.label << "\n";
+  std::cout << "  Composite TRT Decoder Benchmark: " << setup.label << "\n";
   std::cout
       << "================================================================\n";
   std::cout << "  Submitted:          " << n_samples << "\n";
@@ -549,7 +749,7 @@ int main(int argc, char *argv[]) {
         static_cast<double>(raw_stats.total_residual_nonzero) /
         static_cast<double>(raw_stats.decoded);
     double input_density = avg_input_nz / test_data.num_detectors;
-    double residual_density = avg_residual_nz / stim.H.nrows;
+    double residual_density = avg_residual_nz / setup.H_rows;
     double reduction =
         input_density > 0.0 ? (1.0 - residual_density / input_density) : 0.0;
 
@@ -575,7 +775,7 @@ int main(int argc, char *argv[]) {
               << input_density << ")\n";
     std::cout << std::setprecision(1);
     std::cout << "    Residual density: " << avg_residual_nz << " / "
-              << stim.H.nrows << "  (" << std::setprecision(4)
+              << setup.H_rows << "  (" << std::setprecision(4)
               << residual_density << ")\n";
     std::cout << std::setprecision(1);
     std::cout << "    Reduction: " << reduction * 100.0 << "%\n";

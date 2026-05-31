@@ -12,6 +12,7 @@
 #include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/realtime/decoding_config.h"
 #include "cudaq/runtime/logger/logger.h"
+#include <algorithm>
 #include <set>
 
 // Optional syndrome capture callback for --save_syndrome feature
@@ -41,6 +42,35 @@ static std::vector<uint8_t> pack_syndrome_bits(const uint8_t *syndromes,
 }
 
 namespace cudaq::qec::decoding::host {
+
+cudaqx::heterogeneous_map prepare_decoder_params(
+    const cudaq::qec::decoding::config::decoder_config &decoder_config) {
+  auto params = decoder_config.decoder_custom_args_to_heterogeneous_map();
+  if (decoder_config.type != "trt_decoder" || decoder_config.O_sparse.empty())
+    return params;
+
+  const auto num_observables = std::count(decoder_config.O_sparse.begin(),
+                                          decoder_config.O_sparse.end(), -1);
+  if (num_observables == 0)
+    return params;
+
+  auto O = cudaq::qec::pcm_from_sparse_vec(
+      decoder_config.O_sparse, num_observables, decoder_config.block_size);
+  params.insert("O", O);
+
+  if (params.contains("global_decoder") &&
+      params.get<std::string>("global_decoder") == "pymatching") {
+    cudaqx::heterogeneous_map global_decoder_params;
+    if (params.contains("global_decoder_params")) {
+      global_decoder_params =
+          params.get<cudaqx::heterogeneous_map>("global_decoder_params");
+    }
+    global_decoder_params.insert("O", O);
+    params.insert("global_decoder_params", global_decoder_params);
+  }
+
+  return params;
+}
 
 int configure_decoders(
     cudaq::qec::decoding::config::multi_decoder_config &config) {
@@ -87,8 +117,7 @@ int configure_decoders(
                                                  decoder_config.syndrome_size,
                                                  decoder_config.block_size);
       auto new_decoder = cudaq::qec::get_decoder(
-          decoder_config.type, pcm,
-          decoder_config.decoder_custom_args_to_heterogeneous_map());
+          decoder_config.type, pcm, prepare_decoder_params(decoder_config));
       new_decoder->set_decoder_id(decoder_config.id);
       // Count the number of -1's in the O_sparse vector. That is the number of
       // rows (observables) in the observable matrix.
