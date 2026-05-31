@@ -1,4 +1,5 @@
 name: Get CUDAQ version
+description: Read the pinned CUDA-Q repository and ref from .cudaq_version
 
 outputs:
   repo:
@@ -30,8 +31,8 @@ runs:
       run: |
         repo=$(jq -r '.cudaq.repository' .cudaq_version)
         ref=$(jq -r '.cudaq.ref' .cudaq_version)
+        echo "Using CUDA-Q version: ${repo}@${ref}"
         echo "repo=$repo" >> $GITHUB_OUTPUT
         echo "ref=$ref" >> $GITHUB_OUTPUT
       shell: bash
-
 
