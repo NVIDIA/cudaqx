@@ -1,0 +1,38 @@
+{
+  "skill_name": "cudaq-qec-extending",
+  "_note": "Prompts only. Assertions live in assertions.json so the agent under test never reads the answer key.",
+  "evals": [
+    {
+      "id": "S1",
+      "name": "qec-code-class-attrs",
+      "prompt": "What attributes must my @qec.code class expose?",
+      "files": []
+    },
+    {
+      "id": "S2",
+      "name": "register-pymatching-variant",
+      "prompt": "How do I register a custom pymatching variant as a plugin in cudaq_qec?",
+      "files": []
+    },
+    {
+      "id": "S3",
+      "name": "extending-file-layout",
+      "prompt": "Where in libs/qec/ does my new code/decoder plugin go?",
+      "files": []
+    }
+  ],
+  "activation": [
+    {
+      "id": "A1",
+      "prompt": "Subclass code and register a custom Steane variant"
+    },
+    {
+      "id": "A2",
+      "prompt": "Run a code-capacity threshold sweep for my decoder"
+    },
+    {
+      "id": "A3",
+      "prompt": "Implement the plugin_loader hook for a custom decoder"
+    }
+  ]
+}

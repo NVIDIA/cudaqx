@@ -1,0 +1,38 @@
+{
+  "skill_name": "cudaq-solvers-extending",
+  "_note": "Prompts only. Assertions live in assertions.json so the agent under test never reads the answer key.",
+  "evals": [
+    {
+      "id": "S1",
+      "name": "new-operator-pool-plugin",
+      "prompt": "How do I write a new operator pool plugin for cudaq_solvers, e.g. a UCCGSD variant?",
+      "files": []
+    },
+    {
+      "id": "S2",
+      "name": "register-cpp-optimizer",
+      "prompt": "What's the C++ macro for registering a new optimizer plugin in cudaq_solvers?",
+      "files": []
+    },
+    {
+      "id": "S3",
+      "name": "custom-state-prep-kernel",
+      "prompt": "How do I add a custom state-prep / ansatz kernel as a plugin?",
+      "files": []
+    }
+  ],
+  "activation": [
+    {
+      "id": "A1",
+      "prompt": "Register a custom UCCGSD-style operator pool plugin in cudaq_solvers"
+    },
+    {
+      "id": "A2",
+      "prompt": "Run ADAPT-VQE on H2 with the default UCCSD pool"
+    },
+    {
+      "id": "A3",
+      "prompt": "Subclass the Optimizer base class and add it to the registry"
+    }
+  ]
+}
