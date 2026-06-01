@@ -40,6 +40,18 @@ using namespace cudaqx;
 
 namespace cudaq::qec {
 
+/// Range-checked narrow from std::size_t to sparse_binary_matrix::index_type;
+/// unchecked static_cast would silently truncate 64-bit Python ints.
+static sparse_binary_matrix::index_type
+checked_narrow_to_index_type(std::size_t value, const char *field_name) {
+  if (value > std::numeric_limits<sparse_binary_matrix::index_type>::max())
+    throw std::runtime_error(
+        std::string(field_name) +
+        " exceeds sparse_binary_matrix index_type (uint32_t) range; got " +
+        std::to_string(value));
+  return static_cast<sparse_binary_matrix::index_type>(value);
+}
+
 /// Build sparse_binary_matrix from Python dict with keys layout, num_rows,
 /// num_cols, nested (nested_csc or nested_csr format).
 static sparse_binary_matrix
@@ -52,10 +64,10 @@ sparse_binary_matrix_from_py_dict(const nb::dict &d) {
         "with ROW indices where that column has a one; \"nested_csr\": one "
         "list per ROW with COLUMN indices for that row.");
   std::string layout = nb::cast<std::string>(d["layout"]);
-  auto num_rows = static_cast<sparse_binary_matrix::index_type>(
-      nb::cast<std::size_t>(d["num_rows"]));
-  auto num_cols = static_cast<sparse_binary_matrix::index_type>(
-      nb::cast<std::size_t>(d["num_cols"]));
+  auto num_rows = checked_narrow_to_index_type(
+      nb::cast<std::size_t>(d["num_rows"]), "num_rows");
+  auto num_cols = checked_narrow_to_index_type(
+      nb::cast<std::size_t>(d["num_cols"]), "num_cols");
   nb::list nested_py = nb::cast<nb::list>(d["nested"]);
   std::vector<std::vector<sparse_binary_matrix::index_type>> nested;
   nested.reserve(nested_py.size());
@@ -64,8 +76,8 @@ sparse_binary_matrix_from_py_dict(const nb::dict &d) {
     std::vector<sparse_binary_matrix::index_type> row;
     row.reserve(inner.size());
     for (size_t j = 0; j < inner.size(); ++j)
-      row.push_back(static_cast<sparse_binary_matrix::index_type>(
-          nb::cast<std::size_t>(inner[j])));
+      row.push_back(checked_narrow_to_index_type(
+          nb::cast<std::size_t>(inner[j]), "nested entry"));
     nested.push_back(std::move(row));
   }
   if (layout == "nested_csc")
@@ -376,18 +388,7 @@ void bindDecoder(nb::module_ &mod) {
 
         auto make_sparse_from_dense =
             [](const nb::ndarray<nb::numpy, uint8_t> &arr) {
-              if (arr.ndim() != 2 || arr.itemsize() != sizeof(uint8_t))
-                throw std::runtime_error(
-                    "Parity check matrix must be 2-dimensional uint8.");
-              if (arr.stride(0) == (int64_t)sizeof(uint8_t))
-                throw std::runtime_error(
-                    "Parity check matrix must be in row-major order, but "
-                    "column-major order was detected.");
-              std::vector<std::size_t> shape;
-              for (size_t d = 0; d < arr.ndim(); d++)
-                shape.push_back(static_cast<std::size_t>(arr.shape(d)));
-              cudaqx::tensor<uint8_t> tensor_H(shape);
-              tensor_H.copy(static_cast<uint8_t *>(arr.data()), shape);
+              auto tensor_H = cudaqx::pcmToTensor(arr);
               return cudaq::qec::sparse_binary_matrix(
                   tensor_H, cudaq::qec::sparse_binary_matrix_layout::csc);
             };

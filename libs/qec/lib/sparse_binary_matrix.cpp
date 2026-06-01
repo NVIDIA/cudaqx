@@ -197,6 +197,16 @@ sparse_binary_matrix::sparse_binary_matrix(
   num_cols_ = static_cast<index_type>(ncols);
   layout_ = layout;
 
+  // Degenerate shape: skip the loops below — `&dense.at({r, 0})` is OOB
+  // when num_cols_ == 0.
+  if (num_rows_ == 0 || num_cols_ == 0) {
+    const std::size_t num_groups = (layout_ == sparse_binary_matrix_layout::csc)
+                                       ? static_cast<std::size_t>(num_cols_)
+                                       : static_cast<std::size_t>(num_rows_);
+    ptr_.assign(num_groups + 1, 0);
+    return;
+  }
+
   // size_t loops + `static_cast<size_t>(dim) + 1` ptr sizing avoid UINT32_MAX
   // wraparound; see from_csc.
   if (layout_ == sparse_binary_matrix_layout::csc) {
@@ -331,6 +341,9 @@ sparse_binary_matrix sparse_binary_matrix::to_csr() const {
 cudaqx::tensor<std::uint8_t> sparse_binary_matrix::to_dense() const {
   cudaqx::tensor<std::uint8_t> dense(
       std::vector<std::size_t>{num_rows_, num_cols_});
+  // `&dense.at({r, 0})` is OOB when num_cols_ == 0.
+  if (num_cols_ == 0)
+    return dense;
   for (std::size_t r = 0; r < num_rows_; ++r) {
     std::memset(&dense.at({r, 0}), 0, num_cols_ * sizeof(std::uint8_t));
   }
