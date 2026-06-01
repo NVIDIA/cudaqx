@@ -89,10 +89,10 @@ cd /cuda-quantum
 CUDAQ_PATCH='diff --git a/CMakeLists.txt b/CMakeLists.txt
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -696,9 +696,9 @@ if(CUDAQ_BUILD_TESTS)
+@@ -774,8 +774,8 @@ if(CUDAQ_BUILD_TESTS)
  endif()
 
- if (CUDAQ_ENABLE_PYTHON)
+ if("python" IN_LIST CUDAQ_ENABLE_PROJECTS)
 -  find_package(Python 3 COMPONENTS Interpreter Development)
 -  find_package(Python3 COMPONENTS Interpreter Development)
 +  find_package(Python 3 COMPONENTS Interpreter Development.Module)
@@ -100,11 +100,10 @@ CUDAQ_PATCH='diff --git a/CMakeLists.txt b/CMakeLists.txt
 
    add_subdirectory(tpls/nanobind)
 
-   add_subdirectory(python)
 diff --git a/python/runtime/cudaq/domains/plugins/CMakeLists.txt b/python/runtime/cudaq/domains/plugins/CMakeLists.txt
 --- a/python/runtime/cudaq/domains/plugins/CMakeLists.txt
 +++ b/python/runtime/cudaq/domains/plugins/CMakeLists.txt
-@@ -33,6 +33,6 @@ if (SKBUILD)
+@@ -33,7 +33,7 @@ if (SKBUILD)
  else()
    target_link_libraries(cudaq-pyscf
      PRIVATE
