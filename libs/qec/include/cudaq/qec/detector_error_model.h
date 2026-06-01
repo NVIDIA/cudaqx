@@ -9,6 +9,7 @@
 
 #include "cuda-qx/core/tensor.h"
 #include <optional>
+#include <string>
 
 namespace cudaq::qec {
 
@@ -64,5 +65,12 @@ struct detector_error_model {
   /// process.
   void canonicalize_for_rounds(uint32_t num_syndromes_per_round);
 };
+
+/// @brief Parse a Stim detector error model text into a
+/// \p cudaq::qec::detector_error_model. Each \c error instruction in the DEM
+/// becomes a single column in \p detector_error_matrix and
+/// \p observables_flips_matrix; suggested decomposition separators are
+/// folded into the same column.
+detector_error_model dem_from_stim_text(const std::string &dem_text);
 
 } // namespace cudaq::qec

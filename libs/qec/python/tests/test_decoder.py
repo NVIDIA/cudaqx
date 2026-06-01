@@ -752,5 +752,40 @@ def test_generate_random_pcm_signed_weight_rejects_negative():
                                        seed=1)
 
 
+def test_get_decoder_from_stim_dem():
+    # 2 detectors, 1 observable, 3 errors. Matches the C++
+    # StimDemDecoderFactory.ConstructsLutDecoderFromStimDemText DEM so the
+    # truth-data assertions stay in sync across language bindings.
+    dem_text = ("error(0.1) D0 L0\n"
+                "error(0.1) D1 L0\n"
+                "error(0.05) D0 D1\n")
+
+    decoder = qec.get_decoder_from_stim_dem("single_error_lut", dem_text)
+    assert decoder is not None
+    assert decoder.get_syndrome_size() == 2
+    assert decoder.get_block_size() == 3
+
+    cases = [
+        ([0.0, 0.0], [0.0, 0.0, 0.0]),
+        ([1.0, 0.0], [1.0, 0.0, 0.0]),
+        ([0.0, 1.0], [0.0, 1.0, 0.0]),
+        ([1.0, 1.0], [0.0, 0.0, 1.0]),
+    ]
+    for syndrome, expected in cases:
+        result = decoder.decode(syndrome)
+        assert result.converged is True, f"syndrome {syndrome}"
+        assert list(result.result) == expected, f"syndrome {syndrome}"
+
+
+def test_get_decoder_from_stim_dem_rejects_malformed_text():
+    with pytest.raises(Exception):
+        qec.get_decoder_from_stim_dem("single_error_lut", "not a valid DEM")
+
+
+def test_get_decoder_from_stim_dem_rejects_unknown_decoder():
+    with pytest.raises(RuntimeError):
+        qec.get_decoder_from_stim_dem("__no_such_decoder__", "error(0.1) D0\n")
+
+
 if __name__ == "__main__":
     pytest.main()

@@ -62,14 +62,13 @@ add_library(${LIBRARY_NAME} SHARED ${QEC_SOURCES})
 add_subdirectory(decoders/plugins/example)
 add_subdirectory(decoders/plugins/pymatching)
 
-# Exclude libstim symbols from libqec's exports (cf. CUDA-Q #3045).
 if(NOT TARGET libstim)
   message(FATAL_ERROR
     "libstim target not available; required by cudaq-qec for Stim DEM parsing.")
 endif()
 target_link_libraries(${LIBRARY_NAME} PRIVATE libstim)
 target_link_options(${LIBRARY_NAME} PRIVATE
-  $<$<CXX_COMPILER_ID:GNU>:-Wl,--exclude-libs,ALL>
+  $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>>:-Wl,--exclude-libs,libstim.a>
 )
 
 # The TRT decoder plugin honors the tri-state `CUDAQ_QEC_BUILD_TRT_DECODER`

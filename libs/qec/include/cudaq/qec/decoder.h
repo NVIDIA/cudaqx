@@ -12,8 +12,11 @@
 #include "cuda-qx/core/heterogeneous_map.h"
 #include "cuda-qx/core/tensor.h"
 #include "sparse_binary_matrix.h"
+#include <functional>
 #include <future>
+#include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace cudaq::qec {
@@ -433,13 +436,25 @@ using stim_dem_decoder_creator = std::function<std::unique_ptr<decoder>(
     const std::string &, const cudaqx::heterogeneous_map &)>;
 
 /// @brief Register a Stim-DEM-string creator for the named decoder.
+/// @see get_decoder_from_stim_dem
 void register_stim_dem_decoder_creator(const std::string &name,
                                        stim_dem_decoder_creator creator);
 
+/// @brief Unregister a previously registered Stim-DEM-string creator. No-op if
+/// \p name has no registered creator.
+/// @see register_stim_dem_decoder_creator
+void unregister_stim_dem_decoder_creator(const std::string &name);
+
 /// @brief Construct a decoder by name from a Stim detector error model text.
-/// When no registered creator is found, the DEM is parsed and observables /
-/// error rates are injected into \p options under keys \c "O" and
-/// \c "error_rate_vec".
+///
+/// When a Stim-DEM creator is registered for \p name it is used directly.
+/// Otherwise the DEM is parsed and forwarded to the existing H-based path
+/// after injecting two derived entries into \p options if they are not
+/// already present:
+///   - \c "O" : \c cudaqx::tensor<uint8_t> observables_flips_matrix
+///   - \c "error_rate_vec" : \c std::vector<double> per-error probabilities
+/// User-supplied values for either key win over the DEM-derived ones.
+/// @see register_stim_dem_decoder_creator
 std::unique_ptr<decoder>
 get_decoder_from_stim_dem(const std::string &name,
                           const std::string &stim_dem_text,

@@ -780,9 +780,26 @@ error(0.05) D0 D1
   EXPECT_EQ(d->get_syndrome_size(), 2u);
   EXPECT_EQ(d->get_block_size(), 3u);
 
-  std::vector<cudaq::qec::float_t> syndrome = {1.0, 0.0};
-  auto result = d->decode(syndrome);
-  EXPECT_EQ(result.result.size(), 3u);
+  struct Case {
+    std::vector<cudaq::qec::float_t> syndrome;
+    std::vector<cudaq::qec::float_t> expected;
+  };
+  const std::vector<Case> cases = {
+      {{0.0, 0.0}, {0.0, 0.0, 0.0}},
+      {{1.0, 0.0}, {1.0, 0.0, 0.0}},
+      {{0.0, 1.0}, {0.0, 1.0, 0.0}},
+      {{1.0, 1.0}, {0.0, 0.0, 1.0}},
+  };
+  for (const auto &c : cases) {
+    auto result = d->decode(c.syndrome);
+    EXPECT_TRUE(result.converged)
+        << "syndrome {" << c.syndrome[0] << ", " << c.syndrome[1] << "}";
+    ASSERT_EQ(result.result.size(), 3u);
+    for (std::size_t i = 0; i < 3u; ++i)
+      EXPECT_FLOAT_EQ(result.result[i], c.expected[i])
+          << "error " << i << " for syndrome {" << c.syndrome[0] << ", "
+          << c.syndrome[1] << "}";
+  }
 }
 
 TEST(StimDemDecoderFactory, ThrowsOnMalformedStimDem) {
@@ -818,4 +835,83 @@ TEST(StimDemDecoderFactory, RegisteredCreatorIsUsed) {
                                                  "passthrough");
   EXPECT_TRUE(registered_creator_was_called);
   ASSERT_NE(d, nullptr);
+  cudaq::qec::unregister_stim_dem_decoder_creator("__stim_dem_test_decoder__");
+}
+
+TEST(StimDemDecoderFactory, RepeatedDetectorOrObservableTargetsXorFold) {
+  const std::string dem_text = R"(error(0.1) D0 D0
+error(0.1) L0 L0
+)";
+
+  auto dem = cudaq::qec::dem_from_stim_text(dem_text);
+  ASSERT_EQ(dem.num_detectors(), 1u);
+  ASSERT_EQ(dem.num_observables(), 1u);
+  ASSERT_EQ(dem.num_error_mechanisms(), 2u);
+  EXPECT_EQ(dem.detector_error_matrix.at({0u, 0u}), 0u)
+      << "duplicate D0 in error 0 should XOR-cancel to 0";
+  EXPECT_EQ(dem.observables_flips_matrix.at({0u, 1u}), 0u)
+      << "duplicate L0 in error 1 should XOR-cancel to 0";
+}
+
+TEST(StimDemDecoderFactory, ThrowsOnProbabilityOutOfRange) {
+  const std::string dem_text = "error(1.5) D0\n";
+  EXPECT_THROW(
+      cudaq::qec::get_decoder_from_stim_dem("single_error_lut", dem_text),
+      std::runtime_error);
+}
+
+TEST(StimDemDecoderFactory, RegisteredCreatorTakesPrecedenceOverFallback) {
+  static bool creator_was_called = false;
+  creator_was_called = false;
+  cudaq::qec::register_stim_dem_decoder_creator(
+      "single_error_lut",
+      [](const std::string &, const cudaqx::heterogeneous_map &)
+          -> std::unique_ptr<cudaq::qec::decoder> {
+        creator_was_called = true;
+        cudaqx::tensor<uint8_t> H({2u, 2u});
+        cudaqx::heterogeneous_map empty;
+        return cudaq::qec::decoder::get("single_error_lut", H, empty);
+      });
+
+  const std::string dem_text = "error(0.1) D0 L0\n";
+  auto d = cudaq::qec::get_decoder_from_stim_dem("single_error_lut", dem_text);
+  EXPECT_TRUE(creator_was_called);
+  ASSERT_NE(d, nullptr);
+  cudaq::qec::unregister_stim_dem_decoder_creator("single_error_lut");
+}
+
+TEST(StimDemDecoderFactory, UserOptionsAreNotOverwritten) {
+  const std::string dem_text = R"(error(0.1) D0 L0
+error(0.1) D1 L0
+error(0.05) D0 D1
+)";
+  cudaqx::heterogeneous_map opts;
+  opts.insert("error_rate_vec", std::vector<double>{0.5}); // wrong size
+  EXPECT_THROW(
+      cudaq::qec::get_decoder_from_stim_dem("single_error_lut", dem_text, opts),
+      std::runtime_error);
+}
+
+TEST(StimDemDecoderFactory, RegisteredCreatorReceivesUserOptionsVerbatim) {
+  static std::vector<double> observed_rates;
+  observed_rates.clear();
+  cudaq::qec::register_stim_dem_decoder_creator(
+      "__stim_dem_echo__",
+      [](const std::string &, const cudaqx::heterogeneous_map &opts)
+          -> std::unique_ptr<cudaq::qec::decoder> {
+        if (opts.contains("error_rate_vec"))
+          observed_rates = opts.get<std::vector<double>>("error_rate_vec");
+        cudaqx::tensor<uint8_t> H({2u, 2u});
+        cudaqx::heterogeneous_map empty;
+        return cudaq::qec::decoder::get("single_error_lut", H, empty);
+      });
+
+  const std::vector<double> user_rates = {0.42, 0.13, 0.07};
+  cudaqx::heterogeneous_map opts;
+  opts.insert("error_rate_vec", user_rates);
+  auto d = cudaq::qec::get_decoder_from_stim_dem("__stim_dem_echo__",
+                                                 "error(0.5) D0\n", opts);
+  ASSERT_NE(d, nullptr);
+  EXPECT_EQ(observed_rates, user_rates);
+  cudaq::qec::unregister_stim_dem_decoder_creator("__stim_dem_echo__");
 }

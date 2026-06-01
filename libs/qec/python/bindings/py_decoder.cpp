@@ -769,14 +769,46 @@ void bindDecoder(nb::module_ &mod) {
   qecmod.def(
       "get_decoder_from_stim_dem",
       [](const std::string &name, const std::string &dem_text,
-         const nb::kwargs options) -> std::unique_ptr<decoder> {
+         nb::kwargs options)
+          -> std::variant<nb::object, std::unique_ptr<decoder>> {
+        if (PyDecoderRegistry::contains(name)) {
+          auto dem = dem_from_stim_text(dem_text);
+
+          if (!options.contains("O")) {
+            const auto &O = dem.observables_flips_matrix;
+            size_t shape[2] = {O.shape()[0], O.shape()[1]};
+            auto O_arr = nb::ndarray<nb::numpy, uint8_t>(
+                const_cast<uint8_t *>(O.data()), 2, shape, nb::none());
+            options["O"] = nb::cast(O_arr).attr("copy")();
+          }
+          if (!options.contains("error_rate_vec")) {
+            const auto &rates = dem.error_rates;
+            size_t rates_shape[1] = {rates.size()};
+            auto rates_arr = nb::ndarray<nb::numpy, double>(
+                const_cast<double *>(rates.data()), 1, rates_shape, nb::none());
+            options["error_rate_vec"] = nb::cast(rates_arr).attr("copy")();
+          }
+
+          const auto &H = dem.detector_error_matrix;
+          size_t H_shape[2] = {H.shape()[0], H.shape()[1]};
+          auto H_arr = nb::ndarray<nb::numpy, uint8_t>(
+              const_cast<uint8_t *>(H.data()), 2, H_shape, nb::none());
+          nb::object H_obj = nb::cast(H_arr).attr("copy")();
+          return PyDecoderRegistry::get_decoder(
+              name, nb::cast<nb::ndarray<nb::numpy, uint8_t>>(H_obj), options);
+        }
+
         return get_decoder_from_stim_dem(name, dem_text,
                                          hetMapFromKwargs(options));
       },
       "Construct a decoder by name from a Stim detector error model string. "
       "Observables and per-error rates from the DEM are injected into options "
       "under keys \"O\" and \"error_rate_vec\" when no registered Stim-DEM "
-      "creator is found.");
+      "creator is found. User-supplied values for either key win over the "
+      "DEM-derived ones. Python decoders registered via @qec.decoder receive "
+      "the parsed H and O as numpy.ndarray and error_rate_vec as a 1-D "
+      "numpy.ndarray of float64; to register a native DEM consumer, use the "
+      "C++ register_stim_dem_decoder_creator API.");
 
   qecmod.def(
       "get_sorted_pcm_column_indices",
