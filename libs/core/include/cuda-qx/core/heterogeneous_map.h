@@ -30,12 +30,7 @@ private:
   /// @return true if castable, false otherwise
   template <typename T>
   bool isCastable(const std::any &t) const {
-    try {
-      std::any_cast<T>(t);
-    } catch (...) {
-      return false;
-    }
-    return true;
+    return std::any_cast<T>(&t) != nullptr;
   }
 
 public:
@@ -122,8 +117,6 @@ public:
     throw std::runtime_error(
         "heterogeneous_map::get() error - Invalid type or key (" + keyStr +
         ").");
-
-    return T();
   }
 
   /// @brief Get a value from the map, search for the value
@@ -149,8 +142,6 @@ public:
 
     throw std::runtime_error(
         "heterogeneous_map::get(keys) error - Invalid keys (" + keyStr + ").");
-
-    return T();
   }
 
   template <typename T>
