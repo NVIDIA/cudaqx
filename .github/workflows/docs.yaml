@@ -70,7 +70,6 @@ jobs:
 
       - name: Install requirements
         run: |
-          apt update
           apt install -y --no-install-recommends \
             gfortran libblas-dev doxygen
 

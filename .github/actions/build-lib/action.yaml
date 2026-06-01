@@ -40,7 +40,7 @@ runs:
     - name: Install requirements
       run: |
         apt update
-        apt install -y --no-install-recommends ccache jq
+        apt install -y --no-install-recommends ccache
       shell: bash
 
     - name: Compilation cache key

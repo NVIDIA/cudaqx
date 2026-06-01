@@ -43,7 +43,7 @@ jobs:
       - name: Install dependencies
         id: deps
         run: |
-          apt update && apt install -y --no-install-recommends zip unzip patchelf git-lfs jq
+          apt update && apt install -y --no-install-recommends zip unzip patchelf git-lfs
           cuda_major=$(echo ${{ matrix.cuda_version }} | cut -d . -f1)
           echo "cuda_major=$cuda_major" >> $GITHUB_OUTPUT
           # custabilizer-cuXX is pulled in transitively by cuquantum-python-cuXX;
