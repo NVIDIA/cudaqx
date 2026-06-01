@@ -8,8 +8,8 @@ inputs:
   cuda_version:
     description: 'CUDA version to build against. (e.g, 12.6)'
     required: true
-  pr-number:
-    description: 'Unique pull request identifier.'
+  cache-key-suffix:
+    description: 'Unique identifier to append to cache keys.'
     default: ''
     required: false
   save-ccache:
@@ -40,15 +40,15 @@ runs:
     - name: Install requirements
       run: |
         apt update
-        apt install -y --no-install-recommends ccache
+        apt install -y --no-install-recommends ccache jq
       shell: bash
 
     - name: Compilation cache key
       id: ccache-key
       run: |
         echo "main=ccache-${{ inputs.lib }}-cu${{ inputs.cuda_version }}-gcc12-${{ inputs.platform }}" >> $GITHUB_OUTPUT
-        if [[ -n "${{ inputs.pr-number }}" ]]; then
-          echo "pr=-pr${{ inputs.pr-number }}" >> $GITHUB_OUTPUT
+        if [[ -n "${{ inputs.cache-key-suffix }}" ]]; then
+          echo "suffix=-${{ inputs.cache-key-suffix }}" >> $GITHUB_OUTPUT
         fi
       shell: bash
 
@@ -58,7 +58,7 @@ runs:
       with:
         fail-on-cache-miss: false
         path: /ccache-${{ inputs.lib }}
-        key: ${{ steps.ccache-key.outputs.main }}${{ steps.ccache-key.outputs.pr }}
+        key: ${{ steps.ccache-key.outputs.main }}${{ steps.ccache-key.outputs.suffix }}
         restore-keys: |
           ${{ steps.ccache-key.outputs.main }}
 
@@ -84,7 +84,7 @@ runs:
       run: |
         bash .github/workflows/scripts/install_git_cli.sh
         gh cache delete \
-          ${{ steps.ccache-key.outputs.main }}${{ steps.ccache-key.outputs.pr }} \
+          ${{ steps.ccache-key.outputs.main }}${{ steps.ccache-key.outputs.suffix }} \
           --repo ${{ github.repository }}
       shell: bash
 
@@ -94,4 +94,4 @@ runs:
       continue-on-error: true
       with:
         path: /ccache-${{ inputs.lib }}
-        key: ${{ steps.ccache-key.outputs.main }}${{ steps.ccache-key.outputs.pr }}
+        key: ${{ steps.ccache-key.outputs.main }}${{ steps.ccache-key.outputs.suffix }}
