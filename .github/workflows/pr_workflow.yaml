@@ -14,6 +14,7 @@ jobs:
     name: Check changes
     runs-on: ubuntu-latest
     outputs:
+      check-cudaq-patch: ${{ steps.filter.outputs.check-cudaq-patch }}
       build-cudaq: ${{ steps.filter.outputs.build-cudaq }}
       build-docs: ${{ steps.filter.outputs.build-docs }}
       build-all: ${{ steps.filter.outputs.build-all }}
@@ -39,11 +40,18 @@ jobs:
         with:
           base: ${{ fromJSON(steps.get-pr-info.outputs.pr-info).base.sha }}
           filters: |
+            check-cudaq-patch:
+              - '.cudaq_version'
+              - '.github/actions/get-cudaq-version/**'
+              - '.github/workflows/pr_workflow.yaml'
+              - '.github/workflows/scripts/build_cudaq.sh'
+              - '.github/workflows/scripts/check_cudaq_patch.sh'
+              - 'scripts/ci/build_cudaq_wheel.sh'
             build-cudaq:
+              - '.cudaq_version'
               - '.github/actions/get-cudaq-build/**'
               - '.github/actions/get-cudaq-version/**'
               - '.github/workflows/scripts/build_cudaq.sh'
-              - '.cudaq_version'
             build-docs:
               - '.github/workflows/docs.yaml'
               - 'docs/**'
@@ -90,6 +98,25 @@ jobs:
               - 'docs/sphinx/examples/qec/**'
             build-examples-solvers:
               - 'docs/sphinx/examples/solvers/**'
+
+  check-cudaq-patch:
+    name: Check CUDAQ patch
+    needs: [check-changes]
+    if: needs.check-changes.outputs.check-cudaq-patch == 'true'
+    runs-on: linux-amd64-cpu4
+    steps:
+      - name: Get code
+        uses: actions/checkout@v4
+        with:
+          set-safe-directory: true
+
+      - name: Install jq
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends jq
+
+      - name: Verify CUDAQ patch applies
+        run: bash .github/workflows/scripts/check_cudaq_patch.sh
 
   build-cudaq:
     name: Build CUDAQ
@@ -184,6 +211,7 @@ jobs:
     name: Verify PR
     if: ${{ always() }}
     needs:
+      - check-cudaq-patch
       - build-cudaq
       - build-all
       - build-qec
@@ -206,10 +234,11 @@ jobs:
             fi
           }
 
-          check_result "build-cudaq"   "${{needs.build-cudaq.result}}"
-          check_result "build-all"     "${{needs.build-all.result}}"
-          check_result "build-qec"     "${{needs.build-qec.result}}"
-          check_result "build-solvers" "${{needs.build-solvers.result}}"
+          check_result "check-cudaq-patch" "${{ needs.check-cudaq-patch.result }}"
+          check_result "build-cudaq"       "${{ needs.build-cudaq.result }}"
+          check_result "build-all"         "${{ needs.build-all.result }}"
+          check_result "build-qec"         "${{ needs.build-qec.result }}"
+          check_result "build-solvers"     "${{ needs.build-solvers.result }}"
 
           if [[ "$status" != "success" ]]; then
             exit 1
