@@ -282,6 +282,16 @@ protected:
   std::vector<std::vector<uint32_t>> D_sparse;
 };
 
+/// @brief Convert a single soft probability to a hard 0/1 decision.
+/// @param in Soft probability input in range [0.0, 1.0]
+/// @param thresh Values >= thresh return true; all others return false.
+template <typename t_soft,
+          typename std::enable_if<std::is_floating_point<t_soft>::value,
+                                  int>::type = 0>
+constexpr inline bool convert_soft_to_hard(t_soft in, t_soft thresh = 0.5) {
+  return in >= thresh;
+}
+
 /// @brief Convert a vector of soft probabilities to a vector of hard
 /// probabilities.
 /// @param in Soft probability input vector in range [0.0, 1.0]
@@ -298,7 +308,7 @@ inline void convert_vec_soft_to_hard(const std::vector<t_soft> &in,
                                      t_soft thresh = 0.5) {
   out.resize(in.size());
   for (std::size_t i = 0; i < in.size(); i++)
-    out[i] = static_cast<t_hard>(in[i] >= thresh ? 1 : 0);
+    out[i] = static_cast<t_hard>(convert_soft_to_hard(in[i], thresh));
 }
 
 /// @brief Convert a vector of soft probabilities to a tensor<uint8_t> of hard
@@ -326,7 +336,7 @@ inline void convert_vec_soft_to_tensor_hard(const std::vector<t_soft> &in,
         "Vector to tensor conversion requires tensor dim == vector length");
   auto raw_ptr = out.data();
   for (size_t i = 0; i < in.size(); ++i)
-    raw_ptr[i] = static_cast<t_hard>(in[i] >= thresh ? 1 : 0);
+    raw_ptr[i] = static_cast<t_hard>(convert_soft_to_hard(in[i], thresh));
 }
 
 /// @brief Convert a vector of hard probabilities to a vector of soft
@@ -392,7 +402,7 @@ inline void convert_vec_soft_to_hard(const std::vector<std::vector<t_soft>> &in,
     auto &out_row = out[row_index++];
     out_row.resize(r.size());
     for (std::size_t c = 0; c < r.size(); c++)
-      out_row[c] = static_cast<t_hard>(r[c] >= thresh ? 1 : 0);
+      out_row[c] = static_cast<t_hard>(convert_soft_to_hard(r[c], thresh));
   }
 }
 
