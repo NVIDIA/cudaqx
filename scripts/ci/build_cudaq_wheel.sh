@@ -120,7 +120,7 @@ diff --git a/runtime/common/CMakeLists.txt b/runtime/common/CMakeLists.txt
      target_link_libraries(${LIBRARY_NAME} PRIVATE cpr::cpr ZLIB::ZLIB)
    else()
 -    target_link_libraries(${LIBRARY_NAME} PRIVATE cpr::cpr -Wl,--start-group ZLIB::ZLIB)
-+    target_link_libraries(${LIBRARY_NAME} PRIVATE cpr::cpr dl -Wl,--start-group ZLIB::ZLIB)
++    target_link_libraries(${LIBRARY_NAME} PRIVATE cpr::cpr -Wl,--start-group ZLIB::ZLIB ${CMAKE_DL_LIBS})
    endif()
    target_compile_definitions(${LIBRARY_NAME} PRIVATE -DCUDAQ_RESTCLIENT_AVAILABLE)
    # Override the global flat_namespace for this library. cudaq-common doesn'\''t need
