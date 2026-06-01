@@ -147,7 +147,7 @@ jobs:
           retention-days: 1
 
   # ==========================================================================
-  # GPU Tests - Run on GPU runners (uses build artifacts from pr-build)
+  # GPU Tests - Run on GPU runners (uses build artifacts from build-and-test)
   # ==========================================================================
   gpu-test:
     name: GPU tests

@@ -60,7 +60,7 @@ runs:
       run: |
         repo=$(jq -r '.cudaq.repository' .cudaq_version)
         ref=$(jq -r '.cudaq.ref' .cudaq_version)
-        echo "Using CUDA-Q version: $repo@$ref"
+        echo "Using CUDA-Q version: ${repo}@${ref}"
         echo "repo=$repo" >> $GITHUB_OUTPUT
         echo "ref=$ref" >> $GITHUB_OUTPUT
       shell: bash
