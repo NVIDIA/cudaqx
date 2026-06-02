@@ -17,6 +17,7 @@
 #include "cudaq/qec/plugin_loader.h"
 #include "cudaq/qec/sparse_binary_matrix.h"
 #include "cudaq/runtime/logger/logger.h"
+#include <algorithm>
 #include <filesystem>
 #include <functional>
 #include <limits>
@@ -35,7 +36,6 @@
 #include <nanobind/stl/vector.h>
 #include <nanobind/trampoline.h>
 #include <unordered_map>
-#include <algorithm>
 
 namespace nb = nanobind;
 using namespace cudaqx;
