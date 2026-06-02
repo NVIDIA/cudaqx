@@ -96,6 +96,12 @@ void detector_error_model::canonicalize_for_rounds(
         "or the detector_error_matrix  was computed incorrectly.");
   }
 
+  // Cap the number of "same syndrome, different observable" warnings emitted
+  // per invocation. Short-distance codes can have many such mechanisms, and
+  // logging every one of them would spam the console.
+  constexpr std::size_t max_same_syndrome_diff_obs_warnings = 10;
+  std::size_t num_same_syndrome_diff_obs = 0;
+
   for (std::size_t c = 0; c < num_cols; c++) {
     auto column_index = column_order[c];
     auto &curr_row_indices = row_indices[column_index];
@@ -140,12 +146,14 @@ void detector_error_model::canonicalize_for_rounds(
         // Either the syndrome differs, or the same syndrome has a different
         // observable flip. In both cases this is a distinct error mechanism.
         if (prev_row_indices == curr_row_indices) {
-          cudaq::warn(
-              "detector_error_model::canonicalize_for_rounds: identical "
-              "syndromes exist in detector_error_matrix but have different "
-              "observables in observables_flips_matrix; keeping column {} as a "
-              "distinct error mechanism (previous column {})",
-              column_index, previous_column);
+          if (num_same_syndrome_diff_obs < max_same_syndrome_diff_obs_warnings)
+            cudaq::warn(
+                "detector_error_model::canonicalize_for_rounds: identical "
+                "syndromes exist in detector_error_matrix but have different "
+                "observables in observables_flips_matrix; keeping column {} as "
+                "a distinct error mechanism (previous column {})",
+                column_index, previous_column);
+          num_same_syndrome_diff_obs++;
         }
         new_row_indices.push_back(curr_row_indices);
         new_weights.push_back(error_rates[column_index]);
@@ -155,6 +163,16 @@ void detector_error_model::canonicalize_for_rounds(
       }
     }
   }
+
+  // Emit a single summary if we suppressed any per-column warnings above.
+  if (num_same_syndrome_diff_obs > max_same_syndrome_diff_obs_warnings)
+    cudaq::warn(
+        "detector_error_model::canonicalize_for_rounds: found {} columns with "
+        "identical syndromes but different observables; suppressed {} "
+        "additional warnings (only the first {} were shown).",
+        num_same_syndrome_diff_obs,
+        num_same_syndrome_diff_obs - max_same_syndrome_diff_obs_warnings,
+        max_same_syndrome_diff_obs_warnings);
 
   std::swap(this->error_rates, new_weights);
   if (has_error_ids)
