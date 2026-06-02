@@ -339,6 +339,22 @@ makeBatchDecoderResult(const std::vector<decoder_result> &results) {
   };
 }
 
+// Wrap a borrowed cudaqx buffer in a NumPy array and force a Python-side copy,
+// so the returned object owns its data.
+nb::object toPyArray(const cudaqx::tensor<uint8_t> &t) {
+  size_t shape[2] = {t.shape()[0], t.shape()[1]};
+  auto arr = nb::ndarray<nb::numpy, uint8_t>(const_cast<uint8_t *>(t.data()), 2,
+                                             shape, nb::none());
+  return nb::cast(arr).attr("copy")();
+}
+
+nb::object toPyArray(const std::vector<double> &v) {
+  size_t shape[1] = {v.size()};
+  auto arr = nb::ndarray<nb::numpy, double>(const_cast<double *>(v.data()), 1,
+                                            shape, nb::none());
+  return nb::cast(arr).attr("copy")();
+}
+
 } // namespace
 
 void bindDecoder(nb::module_ &mod) {
@@ -774,26 +790,16 @@ void bindDecoder(nb::module_ &mod) {
         if (PyDecoderRegistry::contains(name)) {
           auto dem = dem_from_stim_text(dem_text);
 
-          if (!options.contains("O")) {
-            const auto &O = dem.observables_flips_matrix;
-            size_t shape[2] = {O.shape()[0], O.shape()[1]};
-            auto O_arr = nb::ndarray<nb::numpy, uint8_t>(
-                const_cast<uint8_t *>(O.data()), 2, shape, nb::none());
-            options["O"] = nb::cast(O_arr).attr("copy")();
-          }
-          if (!options.contains("error_rate_vec")) {
-            const auto &rates = dem.error_rates;
-            size_t rates_shape[1] = {rates.size()};
-            auto rates_arr = nb::ndarray<nb::numpy, double>(
-                const_cast<double *>(rates.data()), 1, rates_shape, nb::none());
-            options["error_rate_vec"] = nb::cast(rates_arr).attr("copy")();
-          }
+          // Keep in sync with the C++ fallback in decoder_stim_dem.cpp.
+          auto defaults = dem_defaults_for_missing_keys(
+              [&](const std::string &key) { return options.contains(key); },
+              dem);
+          if (defaults.O)
+            options["O"] = toPyArray(*defaults.O);
+          if (defaults.error_rate_vec)
+            options["error_rate_vec"] = toPyArray(*defaults.error_rate_vec);
 
-          const auto &H = dem.detector_error_matrix;
-          size_t H_shape[2] = {H.shape()[0], H.shape()[1]};
-          auto H_arr = nb::ndarray<nb::numpy, uint8_t>(
-              const_cast<uint8_t *>(H.data()), 2, H_shape, nb::none());
-          nb::object H_obj = nb::cast(H_arr).attr("copy")();
+          nb::object H_obj = toPyArray(dem.detector_error_matrix);
           return PyDecoderRegistry::get_decoder(
               name, nb::cast<nb::ndarray<nb::numpy, uint8_t>>(H_obj), options);
         }

@@ -35,7 +35,9 @@ find_package(CUDAToolkit REQUIRED)
 add_compile_options(-Wno-attributes) 
 
 add_executable(test_decoders test_decoders.cpp decoders/sample_decoder.cpp)
-target_link_libraries(test_decoders PRIVATE GTest::gtest_main cudaq-qec cudaq-qec-realtime-decoding cudaq::cudaq)
+# Direct libstim link for StimDemTargetCategoriesAreExhaustive;
+# cudaq-qec hides stim symbols via --exclude-libs.
+target_link_libraries(test_decoders PRIVATE GTest::gtest_main cudaq-qec cudaq-qec-realtime-decoding cudaq::cudaq libstim)
 add_dependencies(CUDAQXQECUnitTests test_decoders)
 gtest_discover_tests(test_decoders)
 

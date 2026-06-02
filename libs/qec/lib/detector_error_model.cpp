@@ -15,7 +15,14 @@
 namespace cudaq::qec {
 
 detector_error_model dem_from_stim_text(const std::string &dem_text) {
-  stim::DetectorErrorModel dem(dem_text);
+  auto dem = [&dem_text]() {
+    try {
+      return stim::DetectorErrorModel(dem_text);
+    } catch (const std::exception &e) {
+      throw std::runtime_error(std::string("Stim DEM parse failed: ") +
+                               e.what());
+    }
+  }();
   const std::size_t num_detectors =
       static_cast<std::size_t>(dem.count_detectors());
   const std::size_t num_observables =
@@ -46,6 +53,15 @@ detector_error_model dem_from_stim_text(const std::string &dem_text) {
         dets.push_back(static_cast<std::size_t>(target.val()));
       } else if (target.is_observable_id()) {
         obs.push_back(static_cast<std::size_t>(target.val()));
+      } else {
+        // Forward-compat tripwire; unreachable today (stim's three
+        // DemTarget categories are exhaustive -- pinned by
+        // StimDemTargetCategoriesAreExhaustive).
+        throw std::runtime_error(
+            "Stim DEM error instruction (index " +
+            std::to_string(instruction_index) +
+            ") contains an unsupported target kind; only D* (detector) and "
+            "L* (observable) targets are supported by the fallback parser");
       }
     }
     detector_hits.push_back(std::move(dets));
@@ -55,6 +71,11 @@ detector_error_model dem_from_stim_text(const std::string &dem_text) {
   });
 
   const std::size_t num_errors = rates.size();
+  // Reject zero-column H at the boundary instead of letting decoders
+  // crash with block_size == 0.
+  if (num_errors == 0)
+    throw std::runtime_error(
+        "Stim DEM contains no error mechanisms after flattening");
   detector_error_model result;
   result.detector_error_matrix =
       cudaqx::tensor<uint8_t>({num_detectors, num_errors});

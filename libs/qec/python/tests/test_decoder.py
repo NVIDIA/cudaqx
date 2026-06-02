@@ -778,13 +778,25 @@ def test_get_decoder_from_stim_dem():
 
 
 def test_get_decoder_from_stim_dem_rejects_malformed_text():
-    with pytest.raises(Exception):
+    with pytest.raises(RuntimeError):
         qec.get_decoder_from_stim_dem("single_error_lut", "not a valid DEM")
 
 
 def test_get_decoder_from_stim_dem_rejects_unknown_decoder():
+    with pytest.raises(RuntimeError, match="__no_such_decoder__"):
+        qec.get_decoder_from_stim_dem("__no_such_decoder__",
+                                      "error(0.1) D0 L0\n")
+
+
+def test_get_decoder_from_stim_dem_user_O_wins_over_dem_derived():
+    # Wrong-shape user O trips PyMatching's validation; silent overwrite
+    # by the DEM-derived O would suppress the throw.
+    dem_text = ("error(0.1) D0 L0\n"
+                "error(0.1) D1 L0\n"
+                "error(0.05) D0 D1\n")
+    bad_O = np.zeros((1, 4), dtype=np.uint8)
     with pytest.raises(RuntimeError):
-        qec.get_decoder_from_stim_dem("__no_such_decoder__", "error(0.1) D0\n")
+        qec.get_decoder_from_stim_dem("pymatching", dem_text, O=bad_O)
 
 
 if __name__ == "__main__":

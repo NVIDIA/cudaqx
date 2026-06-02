@@ -84,6 +84,7 @@ operation = qecrt.operation
 get_code = qecrt.get_code
 get_available_codes = qecrt.get_available_codes
 get_decoder = qecrt.get_decoder
+get_decoder_from_stim_dem = qecrt.get_decoder_from_stim_dem
 DecoderResult = qecrt.DecoderResult
 BatchDecoderResult = qecrt.BatchDecoderResult
 DetectorErrorModel = qecrt.DetectorErrorModel

@@ -6,7 +6,9 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
+#include "stim.h"
 #include "cudaq/qec/decoder.h"
+#include "cudaq/qec/detector_error_model.h"
 #include "cudaq/qec/pcm_utils.h"
 #include <cmath>
 #include <future>
@@ -802,24 +804,16 @@ error(0.05) D0 D1
   }
 }
 
-TEST(StimDemDecoderFactory, ThrowsOnMalformedStimDem) {
-  EXPECT_THROW(cudaq::qec::get_decoder_from_stim_dem("single_error_lut",
-                                                     "not a valid DEM"),
-               std::exception);
-}
-
-TEST(StimDemDecoderFactory, ThrowsOnUnknownDecoderName) {
-  const std::string dem_text = "error(0.1) D0\n";
-  EXPECT_THROW(
-      cudaq::qec::get_decoder_from_stim_dem("__no_such_decoder__", dem_text),
-      std::runtime_error);
-}
-
 TEST(StimDemDecoderFactory, RegisteredCreatorIsUsed) {
-  // static: the registry outlives this test, so the lambda must not capture
-  // a stack reference.
+  // static: the registry outlives this test, so the lambda must not
+  // capture a stack reference.
   static bool registered_creator_was_called = false;
   registered_creator_was_called = false;
+  // RAII guard: restore the registry slot on any exit path.
+  struct CreatorGuard {
+    const char *name;
+    ~CreatorGuard() { cudaq::qec::unregister_stim_dem_decoder_creator(name); }
+  } guard{"__stim_dem_test_decoder__"};
   cudaq::qec::register_stim_dem_decoder_creator(
       "__stim_dem_test_decoder__",
       [](const std::string &dem_text, const cudaqx::heterogeneous_map &)
@@ -835,7 +829,6 @@ TEST(StimDemDecoderFactory, RegisteredCreatorIsUsed) {
                                                  "passthrough");
   EXPECT_TRUE(registered_creator_was_called);
   ASSERT_NE(d, nullptr);
-  cudaq::qec::unregister_stim_dem_decoder_creator("__stim_dem_test_decoder__");
 }
 
 TEST(StimDemDecoderFactory, RepeatedDetectorOrObservableTargetsXorFold) {
@@ -860,9 +853,59 @@ TEST(StimDemDecoderFactory, ThrowsOnProbabilityOutOfRange) {
       std::runtime_error);
 }
 
+TEST(StimDemDecoderFactory, ThrowsOnMalformedStimDem) {
+  EXPECT_THROW(cudaq::qec::get_decoder_from_stim_dem("single_error_lut",
+                                                     "not a valid DEM"),
+               std::runtime_error);
+}
+
+TEST(StimDemDecoderFactory, ThrowsOnUnknownDecoderName) {
+  const std::string dem_text = "error(0.1) D0 L0\n";
+  EXPECT_THROW(
+      cudaq::qec::get_decoder_from_stim_dem("__no_such_decoder__", dem_text),
+      std::runtime_error);
+}
+
+TEST(StimDemDecoderFactory, ThrowsOnEmptyErrorMechanisms) {
+  // A bare detector(...) line parses but yields zero error mechanisms.
+  const std::string dem_text = "detector(0, 0, 0)\n";
+  EXPECT_THROW(
+      cudaq::qec::get_decoder_from_stim_dem("single_error_lut", dem_text),
+      std::runtime_error);
+}
+
+TEST(StimDemDecoderFactory, StimDemTargetCategoriesAreExhaustive) {
+  // Pins the invariant that keeps the defensive throw in
+  // dem_from_stim_text unreachable. Fires first if stim's encoding
+  // changes.
+  const std::vector<stim::DemTarget> samples = {
+      stim::DemTarget::separator(),
+      stim::DemTarget::relative_detector_id(0),
+      stim::DemTarget::relative_detector_id(42),
+      stim::DemTarget::observable_id(0),
+      stim::DemTarget::observable_id(7),
+  };
+  for (const auto &t : samples) {
+    const int kinds = static_cast<int>(t.is_separator()) +
+                      static_cast<int>(t.is_relative_detector_id()) +
+                      static_cast<int>(t.is_observable_id());
+    EXPECT_EQ(kinds, 1) << "DemTarget " << t.str() << " matched " << kinds
+                        << " predicates; expected exactly 1";
+  }
+}
+
 TEST(StimDemDecoderFactory, RegisteredCreatorTakesPrecedenceOverFallback) {
+  // Real decoder name on purpose: pins creator-over-fallback for an
+  // existing decoder (a sentinel name would just retest
+  // RegisteredCreatorIsUsed). Mutates the real "single_error_lut" slot;
+  // safe only because gtest runs tests serially in a binary. If this
+  // suite is ever parallelized, register against a sentinel name instead.
   static bool creator_was_called = false;
   creator_was_called = false;
+  struct CreatorGuard {
+    const char *name;
+    ~CreatorGuard() { cudaq::qec::unregister_stim_dem_decoder_creator(name); }
+  } guard{"single_error_lut"};
   cudaq::qec::register_stim_dem_decoder_creator(
       "single_error_lut",
       [](const std::string &, const cudaqx::heterogeneous_map &)
@@ -877,7 +920,6 @@ TEST(StimDemDecoderFactory, RegisteredCreatorTakesPrecedenceOverFallback) {
   auto d = cudaq::qec::get_decoder_from_stim_dem("single_error_lut", dem_text);
   EXPECT_TRUE(creator_was_called);
   ASSERT_NE(d, nullptr);
-  cudaq::qec::unregister_stim_dem_decoder_creator("single_error_lut");
 }
 
 TEST(StimDemDecoderFactory, UserOptionsAreNotOverwritten) {
@@ -892,9 +934,47 @@ error(0.05) D0 D1
       std::runtime_error);
 }
 
+TEST(StimDemDecoderFactory, UserSuppliedObservablesAreNotOverwritten) {
+  // Symmetric with UserOptionsAreNotOverwritten but for "O", via an
+  // echo creator (decoder-validation-independent).
+  static std::vector<std::size_t> observed_O_shape;
+  observed_O_shape.clear();
+  struct CreatorGuard {
+    const char *name;
+    ~CreatorGuard() { cudaq::qec::unregister_stim_dem_decoder_creator(name); }
+  } guard{"__stim_dem_echo_O__"};
+  cudaq::qec::register_stim_dem_decoder_creator(
+      "__stim_dem_echo_O__",
+      [](const std::string &, const cudaqx::heterogeneous_map &opts)
+          -> std::unique_ptr<cudaq::qec::decoder> {
+        if (opts.contains("O")) {
+          auto O = opts.get<cudaqx::tensor<uint8_t>>("O");
+          observed_O_shape = O.shape();
+        }
+        cudaqx::tensor<uint8_t> H({2u, 2u});
+        cudaqx::heterogeneous_map empty;
+        return cudaq::qec::decoder::get("single_error_lut", H, empty);
+      });
+
+  // Distinctive shape; a match proves the user's O reached the creator.
+  cudaqx::tensor<uint8_t> user_O({7u, 11u});
+  cudaqx::heterogeneous_map opts;
+  opts.insert("O", user_O);
+  auto d = cudaq::qec::get_decoder_from_stim_dem("__stim_dem_echo_O__",
+                                                 "error(0.1) D0 L0\n", opts);
+  ASSERT_NE(d, nullptr);
+  ASSERT_EQ(observed_O_shape.size(), 2u);
+  EXPECT_EQ(observed_O_shape[0], 7u);
+  EXPECT_EQ(observed_O_shape[1], 11u);
+}
+
 TEST(StimDemDecoderFactory, RegisteredCreatorReceivesUserOptionsVerbatim) {
   static std::vector<double> observed_rates;
   observed_rates.clear();
+  struct CreatorGuard {
+    const char *name;
+    ~CreatorGuard() { cudaq::qec::unregister_stim_dem_decoder_creator(name); }
+  } guard{"__stim_dem_echo__"};
   cudaq::qec::register_stim_dem_decoder_creator(
       "__stim_dem_echo__",
       [](const std::string &, const cudaqx::heterogeneous_map &opts)
@@ -913,5 +993,4 @@ TEST(StimDemDecoderFactory, RegisteredCreatorReceivesUserOptionsVerbatim) {
                                                  "error(0.5) D0\n", opts);
   ASSERT_NE(d, nullptr);
   EXPECT_EQ(observed_rates, user_rates);
-  cudaq::qec::unregister_stim_dem_decoder_creator("__stim_dem_echo__");
 }
