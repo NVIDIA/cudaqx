@@ -2,11 +2,7 @@ name: Documentation
 
 on:
   workflow_call:
-
   workflow_dispatch:
-    branches:
-      - main
-
   push:
     branches:
       - main

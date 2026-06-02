@@ -2,9 +2,6 @@ name: CUDAQ cache
 
 on:
   workflow_dispatch:
-    branches:
-      - main
-
   push:
     branches:
       - main
@@ -56,4 +53,3 @@ jobs:
           save-build: true
           save-ccache: true
           platform: ${{ matrix.platform }}-cu${{ steps.config.outputs.cuda_major }}
-

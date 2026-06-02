@@ -10,17 +10,17 @@ cudaq_prefix=$3
 # Build cuda-quantum realtime library + hololink tools (if CUDAQ_REALTIME_ROOT not set)
 if [ -z "$CUDAQ_REALTIME_ROOT" ]; then
   CUDAQ_REALTIME_ROOT=/tmp/cudaq-realtime
-  CUDAQ_REALTIME_REPO=https://github.com/NVIDIA/cuda-quantum.git
-  CUDAQ_REALTIME_REF=$(jq -r '.cudaq_realtime.ref' .cudaq_realtime_version)
+  CUDAQ_REPO=$(jq -r '.cudaq.repository' .cudaq_version)
+  CUDAQ_REF=$(jq -r '.cudaq.ref' .cudaq_version)
   _build_cwd=$(pwd)
 
   cd /tmp
   rm -rf cudaq-realtime-src $CUDAQ_REALTIME_ROOT
-  git clone --filter=blob:none --no-checkout $CUDAQ_REALTIME_REPO cudaq-realtime-src
+  git clone --filter=blob:none --no-checkout https://github.com/${CUDAQ_REPO}.git cudaq-realtime-src
   cd cudaq-realtime-src
   git sparse-checkout init --cone
   git sparse-checkout set realtime
-  git checkout $CUDAQ_REALTIME_REF
+  git checkout $CUDAQ_REF
 
   # Install build tools and DOCA/Holoscan SDK for HSB.
   # The cudaqx CI container has Mellanox OFED pre-installed, so we cannot use
