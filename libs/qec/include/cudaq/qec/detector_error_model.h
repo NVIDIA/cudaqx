@@ -75,8 +75,9 @@ struct detector_error_model {
 /// @note Lossy: only detector/observable flips and error probabilities
 /// are extracted. Annotations (`detector`, `logical_observable`),
 /// suggested-decomposition separators, and \p error_ids are dropped.
-/// Decoders that need the full DEM (e.g. Chromobius) must consume the
-/// raw string via `register_stim_dem_decoder_creator`.
+/// Decoders that need full DEM metadata (e.g. Chromobius detector
+/// color/basis) require the planned \p detector_coords extension on
+/// \p detector_error_model; tracked as a follow-up.
 detector_error_model dem_from_stim_text(const std::string &dem_text);
 
 } // namespace cudaq::qec

@@ -808,13 +808,12 @@ void bindDecoder(nb::module_ &mod) {
                                          hetMapFromKwargs(options));
       },
       "Construct a decoder by name from a Stim detector error model string. "
-      "Observables and per-error rates from the DEM are injected into options "
-      "under keys \"O\" and \"error_rate_vec\" when no registered Stim-DEM "
-      "creator is found. User-supplied values for either key win over the "
+      "Thin wrapper over dem_from_stim_text: observables and per-error rates "
+      "from the DEM are injected into options under keys \"O\" and "
+      "\"error_rate_vec\". User-supplied values for either key win over the "
       "DEM-derived ones. Python decoders registered via @qec.decoder receive "
       "the parsed H and O as numpy.ndarray and error_rate_vec as a 1-D "
-      "numpy.ndarray of float64; to register a native DEM consumer, use the "
-      "C++ register_stim_dem_decoder_creator API.");
+      "numpy.ndarray of float64.");
 
   qecmod.def(
       "get_sorted_pcm_column_indices",

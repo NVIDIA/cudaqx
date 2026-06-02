@@ -445,37 +445,21 @@ dem_default_values dem_defaults_for_missing_keys(
     const std::function<bool(const std::string &)> &contains_user_key,
     const detector_error_model &dem);
 
-/// @brief Creator function for a decoder constructed from a Stim DEM string.
-using stim_dem_decoder_creator = std::function<std::unique_ptr<decoder>(
-    const std::string &, const cudaqx::heterogeneous_map &)>;
-
-/// @brief Register a Stim-DEM-string creator for the named decoder.
-/// @param name Decoder name; same name used by `get_decoder_from_stim_dem`.
-/// @param creator Builds a decoder from the raw DEM string + options. Takes
-///   precedence over the H/O fallback; must not re-enter the registry (the
-///   factory copies it out before invoking).
-/// @see get_decoder_from_stim_dem
-void register_stim_dem_decoder_creator(const std::string &name,
-                                       stim_dem_decoder_creator creator);
-
-/// @brief Unregister a previously registered Stim-DEM-string creator. No-op if
-/// \p name has no registered creator.
-/// @see register_stim_dem_decoder_creator
-void unregister_stim_dem_decoder_creator(const std::string &name);
-
 /// @brief Construct a decoder by name from a Stim detector error model text.
 ///
-/// When a Stim-DEM creator is registered for \p name it is used directly.
-/// Otherwise the DEM is parsed and forwarded to the existing H-based path
-/// after injecting two derived entries into \p options if they are not
-/// already present:
+/// Thin wrapper over \c dem_from_stim_text: parses the DEM and forwards to
+/// the existing H-based \c decoder::get after injecting two derived entries
+/// into \p options if they are not already present:
 ///   - `"O"` : `cudaqx::tensor<uint8_t>` observables_flips_matrix
 ///   - `"error_rate_vec"` : `std::vector<double>` per-error probabilities
 /// User-supplied values for either key win over the DEM-derived ones.
 ///
-/// @note Decoders that need full DEM metadata (e.g. Chromobius) must
-/// register a Stim-DEM creator; the fallback only extracts H/O/rates.
-/// @see register_stim_dem_decoder_creator
+/// @note Lossy: detector annotations, decomposition separators, and
+/// `error_ids` are dropped. Sufficient for matching-style / H-based
+/// decoders (LUT, NV, sliding_window, TRT, PyMatching). Decoders that
+/// need full DEM metadata (e.g. Chromobius detector color/basis) require
+/// the planned \c detector_coords extension on
+/// \c cudaq::qec::detector_error_model; tracked as a follow-up.
 std::unique_ptr<decoder>
 get_decoder_from_stim_dem(const std::string &name,
                           const std::string &stim_dem_text,
