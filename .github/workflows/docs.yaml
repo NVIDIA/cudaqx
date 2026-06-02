@@ -3,6 +3,10 @@ name: Documentation
 on:
   workflow_call:
     inputs:
+      deploy_docs:
+        type: boolean
+        default: false
+        required: false
       cache_key_suffix:
         type: string
         default: ''
@@ -16,6 +20,12 @@ on:
         default: ''
         required: false
   workflow_dispatch:
+    inputs:
+      deploy_docs:
+        description: 'Deploy docs to GitHub Pages. Deployment only runs on main.'
+        type: boolean
+        default: true
+        required: false
   push:
     branches:
       - main
@@ -107,7 +117,10 @@ jobs:
     name: Deploy latest docs
     if: |
       github.ref == 'refs/heads/main' &&
-      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      (
+        github.event_name == 'push' ||
+        inputs.deploy_docs == true
+      )
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
