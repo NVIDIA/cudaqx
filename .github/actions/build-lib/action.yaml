@@ -28,6 +28,14 @@ inputs:
     description: 'CUDA-Q install prefix'
     default: '/cudaq-install'
     required: false
+  cudaq-repo:
+    description: "Optional source repository override for the QEC library's realtime CUDA-Q build."
+    default: ''
+    required: false
+  cudaq-ref:
+    description: "Optional source ref override for the QEC library's realtime CUDA-Q build."
+    default: ''
+    required: false
 outputs:
   build-dir:
     description: 'Build dir.'
@@ -70,6 +78,8 @@ runs:
       id: build-lib
       env:
         CCACHE_DIR: /ccache-${{ inputs.lib }}
+        CUDAQ_REPO: ${{ inputs.cudaq-repo }}
+        CUDAQ_REF: ${{ inputs.cudaq-ref }}
       run: |
         build_dir=build_${{ inputs.lib }}
         .github/actions/build-lib/build_${{ inputs.lib }}.sh "$build_dir" "${{ inputs.install-prefix }}" "${{ inputs.cudaq-prefix }}"

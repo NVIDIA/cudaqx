@@ -93,6 +93,8 @@ jobs:
           cache-key-suffix: ${{ inputs.cache_key_suffix }}
           save-ccache: true
           platform: ${{ matrix.platform }}
+          cudaq-repo: ${{ steps.get-cudaq-version.outputs.repo }}
+          cudaq-ref: ${{ steps.get-cudaq-version.outputs.ref }}
       # ========================================================================
       # Run tests
       # ========================================================================
