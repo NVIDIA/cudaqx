@@ -16,6 +16,7 @@ jobs:
     container: ghcr.io/nvidia/cuda-quantum-devcontainer:${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc12-main
     permissions:
       actions: write
+      contents: read
       pull-requests: read
     steps:
       - name: Checkout repository
@@ -221,7 +222,7 @@ jobs:
       - name: Run GPU C++ tests
         run: |
           cd $GITHUB_WORKSPACE/build_qec
-          ctest --output-on-failure -R "GpuKernelsTest|test_realtime_decoding|test_realtime_pipeline|DemSamplingGPU|TRTDecoder"
+          ctest --output-on-failure -R "GpuKernelsTest|test_realtime_decoding|test_realtime_pipeline|test_ai_decoder_quantized_onnx|DemSamplingGPU|TRTDecoder"
 
       - name: Run GPU Python tests
         run: |
