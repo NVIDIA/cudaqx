@@ -21,6 +21,7 @@ jobs:
       build-solvers: ${{ steps.filter.outputs.build-solvers }}
       build-examples-qec: ${{ steps.filter.outputs.build-examples-qec }}
       build-examples-solvers: ${{ steps.filter.outputs.build-examples-solvers }}
+      build-wheels: ${{ steps.filter.outputs.build-wheels }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -42,7 +43,6 @@ jobs:
             build-cudaq:
               - '.github/actions/get-cudaq-build/**'
               - '.github/actions/get-cudaq-version/**'
-              - '.github/workflows/scripts/build_cudaq.sh'
               - '.cudaq_version'
             build-docs:
               - '.github/workflows/docs.yaml'
@@ -90,6 +90,21 @@ jobs:
               - 'docs/sphinx/examples/qec/**'
             build-examples-solvers:
               - 'docs/sphinx/examples/solvers/**'
+            build-wheels:
+              - '.github/actions/get-cudaq-wheels/**'
+              - '.github/workflows/build_wheels.yaml'
+              - '.github/workflows/scripts/build_cudaq.sh'
+              - '.github/workflows/scripts/build_wheels.sh'
+              - 'scripts/ci/build_metapackages.sh'
+              - 'scripts/ci/test_wheels.sh'
+              - 'libs/qec/pyproject.toml.cu*'
+              - 'libs/qec/python/metapackages/MANIFEST.in'
+              - 'libs/qec/python/metapackages/pyproject.toml'
+              - 'libs/qec/python/metapackages/setup.py'
+              - 'libs/solvers/pyproject.toml.cu*'
+              - 'libs/solvers/python/metapackages/MANIFEST.in'
+              - 'libs/solvers/python/metapackages/pyproject.toml'
+              - '.cudaq_version'
 
   build-cudaq:
     name: Build CUDAQ
@@ -179,6 +194,19 @@ jobs:
       )
     uses: ./.github/workflows/lib_solvers.yaml
 
+  build-wheels:
+    name: Wheels
+    needs: [check-changes]
+    if: |
+      !failure() && !cancelled() &&
+      needs.check-changes.outputs.build-wheels == 'true'
+    uses: ./.github/workflows/build_wheels.yaml
+    with:
+      build_type: Release
+      cudaq_wheels: Custom
+    secrets:
+      CUDAQ_ACCESS_TOKEN: ${{ secrets.CUDAQ_ACCESS_TOKEN }}
+
   # This job is used for branch protection checks.
   verify:
     name: Verify PR
@@ -188,6 +216,7 @@ jobs:
       - build-all
       - build-qec
       - build-solvers
+      - build-wheels
     runs-on: ubuntu-latest
     steps:
       - name: Check results
@@ -210,6 +239,7 @@ jobs:
           check_result "build-all"     "${{needs.build-all.result}}"
           check_result "build-qec"     "${{needs.build-qec.result}}"
           check_result "build-solvers" "${{needs.build-solvers.result}}"
+          check_result "build-wheels"  "${{needs.build-wheels.result}}"
 
           if [[ "$status" != "success" ]]; then
             exit 1
