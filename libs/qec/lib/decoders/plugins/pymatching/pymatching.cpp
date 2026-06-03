@@ -9,7 +9,6 @@
 #include "pymatching/sparse_blossom/driver/mwpm_decoding.h"
 #include "pymatching/sparse_blossom/driver/user_graph.h"
 #include "cudaq/qec/decoder.h"
-#include "cudaq/qec/pcm_utils.h"
 #include <algorithm>
 #include <cassert>
 #include <map>
@@ -120,29 +119,52 @@ public:
 
     user_graph = pm::UserGraph(H.num_rows());
 
-    // PyMatching dispatches on per-column nnz ∈ {1, 2}; canonicalize so
-    // GF(2)-duplicates from DEM decompositions collapse first.
-    std::vector<std::vector<std::uint32_t>> H_e2d =
-        canonicalize_pcm(H).to_nested_csc();
+    // PyMatching dispatches on per-column nnz ∈ {1, 2}. We deliberately do NOT
+    // canonicalize H as a whole here: that would couple this wrapper to the
+    // column-level semantics of a shared utility and risk silently reordering
+    // or dropping the caller's columns. Instead we iterate the caller's
+    // columns in their original order and GF(2)-reduce the row indices *within*
+    // each column. This guarantees by construction that result index `col`
+    // always maps back to the caller's column `col`.
+    std::vector<std::vector<std::uint32_t>> H_e2d = H.to_nested_csc();
+    std::vector<std::uint32_t> rows;
+    std::vector<std::uint32_t> reduced;
     for (std::size_t col = 0; col < block_size; col++) {
       double weight = 1.0;
       if (col < error_rate_vec.size()) {
         weight = -std::log(error_rate_vec[col] / (1.0 - error_rate_vec[col]));
       }
-      if (H_e2d[col].size() == 2) {
-        edge2col_idx[make_canonical_edge(H_e2d[col][0], H_e2d[col][1])] = col;
-        user_graph.add_or_merge_edge(H_e2d[col][0], H_e2d[col][1],
+
+      // Collapse GF(2)-duplicate row indices within this column only (handles
+      // non-canonical / DEM-style inputs) without touching column order: sort,
+      // then keep a row index iff it appears an odd number of times.
+      rows.assign(H_e2d[col].begin(), H_e2d[col].end());
+      std::sort(rows.begin(), rows.end());
+      reduced.clear();
+      for (std::size_t i = 0; i < rows.size();) {
+        std::size_t run_end = i;
+        while (run_end < rows.size() && rows[run_end] == rows[i])
+          ++run_end;
+        if (((run_end - i) & 1) != 0)
+          reduced.push_back(rows[i]);
+        i = run_end;
+      }
+
+      if (reduced.size() == 2) {
+        edge2col_idx[make_canonical_edge(reduced[0], reduced[1])] = col;
+        user_graph.add_or_merge_edge(reduced[0], reduced[1],
                                      errs2observables.at(col), weight, 0.0,
                                      merge_strategy_enum);
-      } else if (H_e2d[col].size() == 1) {
-        edge2col_idx[make_canonical_edge(H_e2d[col][0], -1)] = col;
-        user_graph.add_or_merge_boundary_edge(H_e2d[col][0],
+      } else if (reduced.size() == 1) {
+        edge2col_idx[make_canonical_edge(reduced[0], -1)] = col;
+        user_graph.add_or_merge_boundary_edge(reduced[0],
                                               errs2observables.at(col), weight,
                                               0.0, merge_strategy_enum);
       } else {
-        throw std::runtime_error("Invalid column in H: " + std::to_string(col) +
-                                 " has " + std::to_string(H_e2d[col].size()) +
-                                 " ones. Must have 1 or 2 ones.");
+        throw std::runtime_error(
+            "Invalid column in H: " + std::to_string(col) + " reduces to " +
+            std::to_string(reduced.size()) +
+            " ones after GF(2) canonicalization. Must have 1 or 2 ones.");
       }
     }
     this->mwpm = decode_to_observables

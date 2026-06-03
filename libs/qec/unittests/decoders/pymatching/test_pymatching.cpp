@@ -83,3 +83,26 @@ TEST(PyMatchingDecoder, checkBoundaryEdges) {
   EXPECT_EQ(result.result[1], 0.0);
   EXPECT_EQ(result.result[2], 1.0);
 }
+
+TEST(PyMatchingDecoder, acceptsNonCanonicalSparseInputInOriginalColumnOrder) {
+  using cudaq::qec::float_t;
+  using index_type = cudaq::qec::sparse_binary_matrix::index_type;
+
+  // Column 0 has row 0 listed three times; canonicalization reduces it to the
+  // boundary edge at row 0 without changing the caller-visible column order.
+  std::vector<std::vector<index_type>> nested = {{0, 0, 0}, {0, 1}, {1}};
+  auto H = cudaq::qec::sparse_binary_matrix::from_nested_csc(
+      /*num_rows=*/2, /*num_cols=*/3, nested);
+
+  cudaqx::heterogeneous_map custom_args;
+  auto d = cudaq::qec::decoder::get("pymatching", H, custom_args);
+
+  std::vector<float_t> syndrome = {1, 0};
+  auto result = d->decode(syndrome);
+
+  ASSERT_TRUE(result.converged);
+  ASSERT_EQ(result.result.size(), 3u);
+  EXPECT_EQ(result.result[0], 1.0);
+  EXPECT_EQ(result.result[1], 0.0);
+  EXPECT_EQ(result.result[2], 0.0);
+}
