@@ -777,6 +777,23 @@ def test_get_decoder_from_stim_dem():
         assert list(result.result) == expected, f"syndrome {syndrome}"
 
 
+def test_dem_from_stim_text_explicit_parse_then_get_decoder():
+    dem_text = ("error(0.1) D0 L0\n"
+                "error(0.1) D1 L0\n"
+                "error(0.05) D0 D1\n")
+
+    dem = qec.dem_from_stim_text(dem_text)
+    assert isinstance(dem, qec.DetectorErrorModel)
+    assert dem.num_detectors() == 2
+    assert dem.num_error_mechanisms() == 3
+    assert dem.num_observables() == 1
+    assert dem.detector_error_matrix.shape == (2, 3)
+
+    decoder = qec.get_decoder("single_error_lut", dem.detector_error_matrix)
+    assert decoder.get_syndrome_size() == 2
+    assert decoder.get_block_size() == 3
+
+
 def test_get_decoder_from_stim_dem_rejects_malformed_text():
     with pytest.raises(RuntimeError):
         qec.get_decoder_from_stim_dem("single_error_lut", "not a valid DEM")

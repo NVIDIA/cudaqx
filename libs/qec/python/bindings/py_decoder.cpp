@@ -699,6 +699,11 @@ void bindDecoder(nb::module_ &mod) {
           )pbdoc",
            nb::arg("num_syndromes_per_round"));
 
+  qecmod.def(
+      "dem_from_stim_text", &dem_from_stim_text,
+      "Parse a Stim detector error model string into a DetectorErrorModel.",
+      nb::arg("dem_text"));
+
   // Expose decorator function that handles inheritance
   qecmod.def("decoder", [&](const std::string &name) {
     return nb::cpp_function([name](nb::object decoder_class) -> nb::object {
