@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2022 - 2025 NVIDIA Corporation & Affiliates.                  *
+ * Copyright (c) 2022 - 2026 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -7,13 +7,19 @@
  ******************************************************************************/
 #include "common/ExecutionContext.h"
 #include "common/FmtCore.h"
+#include "cuda-qx/core/kwargs_utils.h"
+#include "cuda-qx/core/library_utils.h"
+#include "type_casters.h"
 #include "cudaq/platform.h"
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/detector_error_model.h"
 #include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/plugin_loader.h"
+#include "cudaq/qec/sparse_binary_matrix.h"
 #include "cudaq/runtime/logger/logger.h"
+#include <algorithm>
 #include <filesystem>
+#include <functional>
 #include <limits>
 #include <link.h>
 #include <memory>
@@ -29,16 +35,60 @@
 #include <nanobind/stl/variant.h>
 #include <nanobind/stl/vector.h>
 #include <nanobind/trampoline.h>
-
-#include "cuda-qx/core/kwargs_utils.h"
-#include "cuda-qx/core/library_utils.h"
-#include "type_casters.h"
-#include <algorithm>
+#include <unordered_map>
 
 namespace nb = nanobind;
 using namespace cudaqx;
 
 namespace cudaq::qec {
+
+/// Range-checked narrow from std::size_t to sparse_binary_matrix::index_type;
+/// unchecked static_cast would silently truncate 64-bit Python ints.
+static sparse_binary_matrix::index_type
+checked_narrow_to_index_type(std::size_t value, const char *field_name) {
+  if (value > std::numeric_limits<sparse_binary_matrix::index_type>::max())
+    throw std::runtime_error(
+        std::string(field_name) +
+        " exceeds sparse_binary_matrix index_type (uint32_t) range; got " +
+        std::to_string(value));
+  return static_cast<sparse_binary_matrix::index_type>(value);
+}
+
+/// Build sparse_binary_matrix from Python dict with keys layout, num_rows,
+/// num_cols, nested (nested_csc or nested_csr format).
+static sparse_binary_matrix
+sparse_binary_matrix_from_py_dict(const nb::dict &d) {
+  if (!d.contains("layout") || !d.contains("num_rows") ||
+      !d.contains("num_cols") || !d.contains("nested"))
+    throw std::runtime_error(
+        "Sparse H dict must have keys: layout, num_rows, num_cols, "
+        "nested. Use layout \"nested_csc\": nested has one list per COLUMN "
+        "with ROW indices where that column has a one; \"nested_csr\": one "
+        "list per ROW with COLUMN indices for that row.");
+  std::string layout = nb::cast<std::string>(d["layout"]);
+  auto num_rows = checked_narrow_to_index_type(
+      nb::cast<std::size_t>(d["num_rows"]), "num_rows");
+  auto num_cols = checked_narrow_to_index_type(
+      nb::cast<std::size_t>(d["num_cols"]), "num_cols");
+  nb::list nested_py = nb::cast<nb::list>(d["nested"]);
+  std::vector<std::vector<sparse_binary_matrix::index_type>> nested;
+  nested.reserve(nested_py.size());
+  for (size_t i = 0; i < nested_py.size(); ++i) {
+    nb::list inner = nb::cast<nb::list>(nested_py[i]);
+    std::vector<sparse_binary_matrix::index_type> row;
+    row.reserve(inner.size());
+    for (size_t j = 0; j < inner.size(); ++j)
+      row.push_back(checked_narrow_to_index_type(
+          nb::cast<std::size_t>(inner[j]), "nested entry"));
+    nested.push_back(std::move(row));
+  }
+  if (layout == "nested_csc")
+    return sparse_binary_matrix::from_nested_csc(num_rows, num_cols, nested);
+  if (layout == "nested_csr")
+    return sparse_binary_matrix::from_nested_csr(num_rows, num_cols, nested);
+  throw std::runtime_error(
+      "Sparse H dict layout must be \"nested_csc\" or \"nested_csr\".");
+}
 
 class PyDecoder : public decoder {
 public:
@@ -49,8 +99,14 @@ public:
           auto borrow = toTensor(H);
           cudaqx::tensor<uint8_t> owned(borrow.shape());
           owned.copy(borrow.data(), borrow.shape());
-          return owned;
+          // Force CSC to match get_decoder(ndarray); avoids CSR→CSC transposes
+          // in downstream to_nested_csc() calls.
+          return cudaq::qec::sparse_binary_matrix(
+              owned, cudaq::qec::sparse_binary_matrix_layout::csc);
         }()) {}
+
+  PyDecoder(const nb::dict &d)
+      : decoder(sparse_binary_matrix_from_py_dict(d)) {}
 
   decoder_result decode(const std::vector<float_t> &syndrome) override {
     NB_OVERRIDE_PURE(decode, syndrome);
@@ -60,23 +116,19 @@ public:
 // Registry to store decoder factory functions
 class PyDecoderRegistry {
 private:
-  static std::unordered_map<
-      std::string, std::function<nb::object(
-                       const nb::ndarray<nb::numpy, uint8_t> &, nb::kwargs)>>
+  static std::unordered_map<std::string,
+                            std::function<nb::object(nb::object, nb::kwargs)>>
       registry;
 
 public:
-  static void register_decoder(
-      const std::string &name,
-      std::function<nb::object(const nb::ndarray<nb::numpy, uint8_t> &,
-                               nb::kwargs)>
-          factory) {
+  static void
+  register_decoder(const std::string &name,
+                   std::function<nb::object(nb::object, nb::kwargs)> factory) {
     cudaq::info("Registering Pythonic Decoder with name {}", name);
     registry[name] = factory;
   }
 
-  static nb::object get_decoder(const std::string &name,
-                                const nb::ndarray<nb::numpy, uint8_t> &H,
+  static nb::object get_decoder(const std::string &name, nb::object H,
                                 nb::kwargs options) {
     auto it = registry.find(name);
     if (it == registry.end()) {
@@ -92,8 +144,7 @@ public:
 };
 
 std::unordered_map<std::string,
-                   std::function<nb::object(
-                       const nb::ndarray<nb::numpy, uint8_t> &, nb::kwargs)>>
+                   std::function<nb::object(nb::object, nb::kwargs)>>
     PyDecoderRegistry::registry;
 
 namespace {
@@ -506,6 +557,13 @@ void bindDecoder(nb::module_ &mod) {
   nb::class_<decoder, PyDecoder>(
       qecmod, "Decoder", "Represents a decoder for quantum error correction")
       .def(nb::init<const nb::ndarray<nb::numpy, uint8_t> &>())
+      .def(nb::init<const nb::dict &>(),
+           R"pbdoc(
+        Construct from sparse dict ``H`` with keys ``layout``, ``num_rows``,
+        ``num_cols``, and ``nested``. For bring-your-own-decoder classes that
+        receive the same sparse dict in ``cudaq.Decoder.__init__(self, H)`` as
+        was passed to ``get_decoder``.
+      )pbdoc")
       .def(
           "decode",
           [](decoder &decoder, const std::vector<float_t> &syndrome) {
@@ -648,8 +706,7 @@ void bindDecoder(nb::module_ &mod) {
 
       // Register the new class in the decoder registry
       PyDecoderRegistry::register_decoder(
-          name, [new_class](const nb::ndarray<nb::numpy, uint8_t> &H,
-                            nb::kwargs options) {
+          name, [new_class](nb::object H, nb::kwargs options) {
             nb::object instance = new_class(H, **options);
             return instance;
           });
@@ -659,11 +716,26 @@ void bindDecoder(nb::module_ &mod) {
 
   qecmod.def(
       "get_decoder",
-      [](const std::string &name, const nb::ndarray<nb::numpy, uint8_t> H,
-         const nb::kwargs options)
+      [](const std::string &name, nb::object H, nb::kwargs options)
           -> std::variant<nb::object, std::unique_ptr<decoder>> {
-        if (PyDecoderRegistry::contains(name))
+        if (PyDecoderRegistry::contains(name)) {
           return PyDecoderRegistry::get_decoder(name, H, options);
+        }
+
+        cudaq::qec::sparse_binary_matrix H_sparse;
+
+        auto make_sparse_from_dense =
+            [](const nb::ndarray<nb::numpy, uint8_t> &arr) {
+              auto tensor_H = cudaqx::pcmToTensor(arr);
+              return cudaq::qec::sparse_binary_matrix(
+                  tensor_H, cudaq::qec::sparse_binary_matrix_layout::csc);
+            };
+
+        if (nb::isinstance<nb::dict>(H))
+          H_sparse = sparse_binary_matrix_from_py_dict(nb::cast<nb::dict>(H));
+        else
+          H_sparse = make_sparse_from_dense(
+              nb::cast<nb::ndarray<nb::numpy, uint8_t>>(H));
 
         if (name == "tensor_network_decoder") {
           throw std::runtime_error(
@@ -672,38 +744,27 @@ void bindDecoder(nb::module_ &mod) {
               "    pip install cudaq-qec[tensor-network-decoder]\n");
         }
 
-        if (H.ndim() != 2) {
-          throw std::runtime_error(
-              "Parity check matrix must be 2-dimensional.");
-        }
-
-        if (H.itemsize() != sizeof(uint8_t)) {
-          throw std::runtime_error(
-              "Parity check matrix must be an array of uint8_t.");
-        }
-
-        if (H.stride(0) == (int64_t)sizeof(uint8_t)) {
-          throw std::runtime_error(
-              "Parity check matrix must be in row-major order, but "
-              "column-major order was detected.");
-        }
-
-        // Create a vector of the array dimensions
-        std::vector<std::size_t> shape;
-        for (size_t d = 0; d < H.ndim(); d++) {
-          shape.push_back(static_cast<std::size_t>(H.shape(d)));
-        }
-
-        // Make sure that we own the data within the decoder
-        // as the input array may go out of scope.
-        cudaqx::tensor<uint8_t> tensor_H(shape);
-        tensor_H.copy(static_cast<uint8_t *>(H.data()), shape);
-
-        return get_decoder(name, tensor_H, hetMapFromKwargs(options));
+        return get_decoder(name, H_sparse, hetMapFromKwargs(options));
       },
-      "Get a decoder by name with a given parity check matrix"
-      "and optional decoder-specific parameters. Note: the parity check matrix "
-      "must be in row-major order.");
+      R"pbdoc(
+        Get a decoder by name.
+
+        ``H`` may be:
+
+        - A dense 2D NumPy ``uint8`` array in row-major order: a full dense
+          ``cudaqx::tensor`` is built first, then converted to CSC sparse storage.
+          For large PCMs this can allocate as much memory as ``rows * cols``.
+        - A sparse dict with keys ``layout``, ``num_rows``, ``num_cols``, ``nested``:
+          builds ``sparse_binary_matrix`` directly (no dense tensor for ``H``),
+          allowing native C++ decoders like ``pymatching`` to be constructed
+          from very large parity-check matrices.
+
+        For Python-registered decoders (``cudaq.qec.decoder`` decorator), ``H``
+        is passed through to ``__init__`` unchanged (NumPy array or sparse dict).
+        Call ``Decoder.__init__(self, H)`` so nanobind can store the PCM in CSC
+        form when ``H`` is a dict without building a dense ``rows × cols``
+        allocation.
+      )pbdoc");
 
   qecmod.def(
       "get_sorted_pcm_column_indices",
@@ -846,9 +907,10 @@ void bindDecoder(nb::module_ &mod) {
 
   qecmod.def(
       "generate_random_pcm",
+      // Signed `weight` so the C++ guard reports negatives instead of nanobind
+      // rejecting at the marshalling boundary.
       [](std::uint32_t n_rounds, std::uint32_t n_errs_per_round,
-         std::uint32_t n_syndromes_per_round, std::uint32_t weight,
-         std::uint32_t seed) {
+         std::uint32_t n_syndromes_per_round, int weight, std::uint32_t seed) {
         std::mt19937_64 rng(seed);
         if (seed == 0)
           rng = std::mt19937_64(std::random_device()());
@@ -870,6 +932,10 @@ void bindDecoder(nb::module_ &mod) {
         This function creates a random parity check matrix for quantum error correction
         with specified parameters controlling the structure and randomness.
 
+        If ``n_rounds * n_syndromes_per_round * n_rounds * n_errs_per_round`` is
+        larger than the internal dense limit (see C++ API), this raises
+        ``ValueError`` / ``RuntimeError``; use :func:`generate_random_pcm_sparse`.
+
         Args:
             n_rounds: Number of measurement rounds in the error correction protocol
             n_errs_per_round: Number of error mechanisms per round
@@ -886,6 +952,42 @@ void bindDecoder(nb::module_ &mod) {
       )pbdoc",
       nb::arg("n_rounds"), nb::arg("n_errs_per_round"),
       nb::arg("n_syndromes_per_round"), nb::arg("weight"), nb::arg("seed") = 0);
+
+  qecmod.def(
+      "generate_random_pcm_sparse",
+      // Signed `weight` for the same reason as generate_random_pcm above.
+      [](std::uint32_t n_rounds, std::uint32_t n_errs_per_round,
+         std::uint32_t n_syndromes_per_round, int weight,
+         std::uint32_t seed) -> nb::dict {
+        std::mt19937_64 rng(seed);
+        if (seed == 0)
+          rng = std::mt19937_64(std::random_device()());
+
+        cudaq::qec::sparse_binary_matrix sparse =
+            cudaq::qec::generate_random_pcm_sparse(n_rounds, n_errs_per_round,
+                                                   n_syndromes_per_round,
+                                                   weight, std::move(rng));
+        nb::dict out;
+        out["layout"] = "nested_csc";
+        out["num_rows"] = sparse.num_rows();
+        out["num_cols"] = sparse.num_cols();
+        auto nested_py = nb::list();
+        for (auto &col : sparse.to_nested_csc()) {
+          nb::list col_py;
+          for (auto r : col)
+            col_py.append(static_cast<std::size_t>(r));
+          nested_py.append(col_py);
+        }
+        out["nested"] = nested_py;
+        return out;
+      },
+      nb::arg("n_rounds"), nb::arg("n_errs_per_round"),
+      nb::arg("n_syndromes_per_round"), nb::arg("weight"), nb::arg("seed") = 0,
+      R"pbdoc(
+        Same random PCM distribution as :func:`generate_random_pcm`, but
+        builds ``sparse_binary_matrix`` in CSC form without allocating a dense
+        ``rows x cols`` tensor (helps with large PCMs where dense allocation fails).
+      )pbdoc");
 
   qecmod.def(
       "get_pcm_for_rounds",

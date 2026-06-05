@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2022 - 2025 NVIDIA Corporation & Affiliates.                  *
+ * Copyright (c) 2022 - 2026 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -104,7 +104,8 @@ TEST(SampleDecoder, checkAPI) {
   std::size_t block_size = 10;
   std::size_t syndrome_size = 4;
   cudaqx::tensor<uint8_t> H({syndrome_size, block_size});
-  auto d = cudaq::qec::decoder::get("sample_decoder", H);
+  auto H_sparse = cudaq::qec::sparse_binary_matrix(H);
+  auto d = cudaq::qec::decoder::get("sample_decoder", H_sparse);
   std::vector<float_t> syndromes(syndrome_size);
   auto dec_result = d->decode(syndromes);
   ASSERT_EQ(dec_result.result.size(), block_size);
@@ -125,6 +126,39 @@ TEST(SampleDecoder, checkAPI) {
   for (auto &m : dec_results)
     for (auto x : m.result)
       ASSERT_EQ(x, 0.0f);
+}
+
+TEST(DecoderPlugins, SingleErrorLutExample_DecodesSingletonColumnSyndromes) {
+  using cudaq::qec::float_t;
+
+  constexpr std::size_t block_size = 3;
+  constexpr std::size_t syndrome_size = 2;
+  // | 1 1 0 |
+  // | 0 1 1 | — single-bit columns are weight-1 syndrome patterns.
+  std::vector<uint8_t> H_vec = {1, 1, 0, // row 0
+                                0, 1, 1};
+  cudaqx::tensor<uint8_t> H;
+  H.copy(H_vec.data(), {syndrome_size, block_size});
+  cudaqx::heterogeneous_map params;
+  auto d = cudaq::qec::decoder::get("single_error_lut_example", H, params);
+
+  std::vector<float_t> syndrome0 = {1.0f, 0.0f}; // column 0
+  auto r0 = d->decode(syndrome0);
+  ASSERT_TRUE(r0.converged);
+  EXPECT_FLOAT_EQ(r0.result[0], 1.0f);
+  EXPECT_FLOAT_EQ(r0.result[1], 0.0f);
+  EXPECT_FLOAT_EQ(r0.result[2], 0.0f);
+
+  std::vector<float_t> syndrome2 = {0.0f, 1.0f}; // column 2
+  auto r2 = d->decode(syndrome2);
+  ASSERT_TRUE(r2.converged);
+  EXPECT_FLOAT_EQ(r2.result[0], 0.0f);
+  EXPECT_FLOAT_EQ(r2.result[1], 0.0f);
+  EXPECT_FLOAT_EQ(r2.result[2], 1.0f);
+
+  std::vector<float_t> zero(syndrome_size, 0.0f);
+  auto rz = d->decode(zero);
+  ASSERT_TRUE(rz.converged);
 }
 
 TEST(SteaneLutDecoder, checkAPI) {
@@ -651,7 +685,8 @@ TEST(DecoderTest, GetBlockSizeAndSyndromeSize) {
   }
 
   // Create a decoder instance
-  auto decoder = cudaq::qec::decoder::get("sample_decoder", H);
+  auto H_sparse = cudaq::qec::sparse_binary_matrix(H);
+  auto decoder = cudaq::qec::decoder::get("sample_decoder", H_sparse);
   ASSERT_NE(decoder, nullptr);
 
   // Test get_block_size() returns the correct block size
@@ -665,7 +700,8 @@ TEST(DecoderTest, GetBlockSizeAndSyndromeSize) {
   std::size_t new_syndrome_size = 12;
   cudaqx::tensor<uint8_t> H2({new_syndrome_size, new_block_size});
 
-  auto decoder2 = cudaq::qec::decoder::get("sample_decoder", H2);
+  auto H_sparse2 = cudaq::qec::sparse_binary_matrix(H2);
+  auto decoder2 = cudaq::qec::decoder::get("sample_decoder", H_sparse2);
   ASSERT_NE(decoder2, nullptr);
 
   EXPECT_EQ(decoder2->get_block_size(), new_block_size);
@@ -689,6 +725,8 @@ TEST(DecoderRegistryTest, SingleParameterRegistryDirect) {
     }
   }
 
+  auto H_sparse = cudaq::qec::sparse_binary_matrix(H);
+
   // Test that the single-parameter registry exists and can be accessed
   // This directly tests line 18: INSTANTIATE_REGISTRY(cudaq::qec::decoder,
   // const cudaqx::tensor<uint8_t> &)
@@ -698,7 +736,8 @@ TEST(DecoderRegistryTest, SingleParameterRegistryDirect) {
     // registry
     auto single_param_decoder = cudaqx::extension_point<
         cudaq::qec::decoder,
-        const cudaqx::tensor<uint8_t> &>::get("sample_decoder", H);
+        const cudaq::qec::sparse_binary_matrix &>::get("sample_decoder",
+                                                       H_sparse);
 
     ASSERT_NE(single_param_decoder, nullptr);
 
@@ -722,7 +761,8 @@ TEST(DecoderRegistryTest, SingleParameterRegistryDirect) {
   // Test that we can check if extensions are registered in the single-parameter
   // registry
   auto registered_single = cudaqx::extension_point<
-      cudaq::qec::decoder, const cudaqx::tensor<uint8_t> &>::get_registered();
+      cudaq::qec::decoder,
+      const cudaq::qec::sparse_binary_matrix &>::get_registered();
 
   // The registry should exist (even if empty), proving line 18 instantiation
   // works This test passes if no exceptions are thrown, proving the

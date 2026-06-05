@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2025 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2025 - 2026 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -31,33 +31,6 @@ std::size_t detector_error_model::num_observables() const {
   if (shape.size() == 2)
     return shape[0];
   return 0;
-}
-
-/// @brief Return a sparse representation of the PCM.
-/// @param pcm The PCM to convert to a sparse representation.
-/// @return A vector of vectors that sparsely represents the PCM. The size of
-/// the outer vector is the number of columns in the PCM, and the i-th element
-/// contains an inner vector of the row indices of the non-zero elements in the
-/// i-th column of the PCM.
-std::vector<std::vector<std::uint32_t>>
-dense_to_sparse(const cudaqx::tensor<uint8_t> &pcm) {
-  if (pcm.rank() != 2) {
-    throw std::invalid_argument("dense_to_sparse: PCM must be a 2D tensor");
-  }
-
-  auto num_rows = pcm.shape()[0];
-  auto num_cols = pcm.shape()[1];
-
-  // Form a sparse representation of the PCM.
-  std::vector<std::vector<std::uint32_t>> row_indices(num_cols);
-  for (std::size_t r = 0; r < num_rows; r++) {
-    auto *row = &pcm.at({r, 0});
-    for (std::size_t c = 0; c < num_cols; c++)
-      if (row[c])
-        row_indices[c].push_back(r);
-  }
-
-  return row_indices;
 }
 
 void detector_error_model::canonicalize_for_rounds(
