@@ -423,6 +423,20 @@ TEST(SparseBinaryMatrix, ValidateSortedUniqueIndicesRejectsDuplicateCsc) {
                std::invalid_argument);
 }
 
+TEST(SparseBinaryMatrix, ValidateSortedUniqueIndicesRejectsDuplicateCsr) {
+  std::vector<std::vector<index_type>> nested = {{0, 0}, {1}};
+  auto sp = sparse_binary_matrix::from_nested_csr(2, 2, nested);
+  EXPECT_THROW(sp.validate_sorted_unique_indices("test"),
+               std::invalid_argument);
+}
+
+TEST(SparseBinaryMatrix, ValidateSortedUniqueIndicesRejectsUnsortedCsc) {
+  std::vector<std::vector<index_type>> nested = {{2, 0}, {1}};
+  auto sp = sparse_binary_matrix::from_nested_csc(3, 2, nested);
+  EXPECT_THROW(sp.validate_sorted_unique_indices("test"),
+               std::invalid_argument);
+}
+
 TEST(SparseBinaryMatrix, ValidateSortedUniqueIndicesRejectsUnsortedCsr) {
   std::vector<std::vector<index_type>> nested = {{2, 0}, {1}};
   auto sp = sparse_binary_matrix::from_nested_csr(2, 3, nested);
