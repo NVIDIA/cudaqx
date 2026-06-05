@@ -724,19 +724,16 @@ def test_get_decoder_sparse_python_registered_decoder():
     assert len(result.result) == H_dense.shape[0]
 
 
-def test_pymatching_accepts_non_canonical_sparse_input():
-    """PyMatching must canonicalize GF(2)-duplicate inputs internally."""
-    # Column 0 has row 0 listed 3 times; canonicalizes to a single boundary edge.
+def test_pymatching_rejects_duplicate_sparse_input():
+    """PyMatching requires duplicate-free sparse inputs."""
     sparse_dict = {
         "layout": "nested_csc",
         "num_rows": 2,
         "num_cols": 3,
         "nested": [[0, 0, 0], [0, 1], [1]],
     }
-    decoder = qec.get_decoder("pymatching", sparse_dict)
-    assert decoder is not None
-    result = decoder.decode([1.0, 0.0])
-    assert result.converged is True
+    with pytest.raises(ValueError, match="strictly increasing"):
+        qec.get_decoder("pymatching", sparse_dict)
 
 
 def test_generate_random_pcm_signed_weight_rejects_negative():

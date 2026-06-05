@@ -410,6 +410,26 @@ TEST(SparseBinaryMatrix, FromCsc_IndexOutOfRangeThrows) {
                std::invalid_argument);
 }
 
+TEST(SparseBinaryMatrix, ValidateSortedUniqueIndicesAcceptsCanonicalCsc) {
+  std::vector<std::vector<index_type>> nested = {{0, 2}, {}, {1}};
+  auto sp = sparse_binary_matrix::from_nested_csc(3, 3, nested);
+  EXPECT_NO_THROW(sp.validate_sorted_unique_indices("test"));
+}
+
+TEST(SparseBinaryMatrix, ValidateSortedUniqueIndicesRejectsDuplicateCsc) {
+  std::vector<std::vector<index_type>> nested = {{0, 0}, {1}};
+  auto sp = sparse_binary_matrix::from_nested_csc(2, 2, nested);
+  EXPECT_THROW(sp.validate_sorted_unique_indices("test"),
+               std::invalid_argument);
+}
+
+TEST(SparseBinaryMatrix, ValidateSortedUniqueIndicesRejectsUnsortedCsr) {
+  std::vector<std::vector<index_type>> nested = {{2, 0}, {1}};
+  auto sp = sparse_binary_matrix::from_nested_csr(2, 3, nested);
+  EXPECT_THROW(sp.validate_sorted_unique_indices("test"),
+               std::invalid_argument);
+}
+
 // -----------------------------------------------------------------------------
 // canonicalize_pcm (GF(2) merge)
 // -----------------------------------------------------------------------------

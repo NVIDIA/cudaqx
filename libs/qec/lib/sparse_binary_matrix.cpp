@@ -7,6 +7,7 @@
  ******************************************************************************/
 
 #include "cudaq/qec/sparse_binary_matrix.h"
+#include <algorithm>
 #include <cstring>
 #include <limits>
 #include <stdexcept>
@@ -35,6 +36,55 @@ sparse_binary_matrix::sparse_binary_matrix(sparse_binary_matrix_layout layout,
                                            std::vector<index_type> indices)
     : layout_(layout), num_rows_(num_rows), num_cols_(num_cols),
       ptr_(std::move(ptr)), indices_(std::move(indices)) {}
+
+void sparse_binary_matrix::validate_sorted_unique_indices(
+    const char *context) const {
+  const std::string where =
+      context == nullptr ? "sparse_binary_matrix" : context;
+  const bool is_csc = layout_ == sparse_binary_matrix_layout::csc;
+  const std::size_t num_groups = is_csc ? static_cast<std::size_t>(num_cols_)
+                                        : static_cast<std::size_t>(num_rows_);
+  const auto index_bound = is_csc ? num_rows_ : num_cols_;
+
+  if (num_groups == 0 && ptr_.empty() && indices_.empty())
+    return;
+
+  if (ptr_.size() != num_groups + 1) {
+    throw std::invalid_argument(where +
+                                ": sparse pointer array has invalid size");
+  }
+  if (!ptr_.empty() && ptr_.front() != 0U) {
+    throw std::invalid_argument(where +
+                                ": sparse pointer array must start at zero");
+  }
+  if (!ptr_.empty() &&
+      static_cast<std::size_t>(ptr_.back()) != indices_.size()) {
+    throw std::invalid_argument(where +
+                                ": sparse pointer array must end at nnz");
+  }
+
+  const char *group_name = is_csc ? "column" : "row";
+  for (std::size_t group = 0; group < num_groups; ++group) {
+    const std::size_t begin = ptr_[group];
+    const std::size_t end = ptr_[group + 1];
+    if (begin > end || end > indices_.size()) {
+      throw std::invalid_argument(where +
+                                  ": sparse pointer array is not monotonic");
+    }
+    for (std::size_t p = begin; p < end; ++p) {
+      const index_type idx = indices_[p];
+      if (idx >= index_bound) {
+        throw std::invalid_argument(where + ": sparse index out of range");
+      }
+      if (p > begin && indices_[p - 1] >= idx) {
+        throw std::invalid_argument(
+            where +
+            ": sparse indices must be strictly increasing within each " +
+            group_name);
+      }
+    }
+  }
+}
 
 sparse_binary_matrix
 sparse_binary_matrix::from_csc(index_type num_rows, index_type num_cols,

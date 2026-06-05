@@ -248,12 +248,10 @@ generate_random_pcm_sparse(std::size_t n_rounds, std::size_t n_errs_per_round,
 /// output has the same layout as the input and is idempotent under further
 /// `canonicalize_pcm` calls.
 ///
-/// Use this before passing a PCM built from a DEM decomposition (or any other
-/// source that may legitimately emit duplicate indices within a column/row)
-/// to consumers like PyMatching that dispatch on per-column nnz count and
-/// assume at-most-one entry per row per column. `sparse_binary_matrix`
-/// itself accepts duplicates at construction (see its header) so a separate
-/// call is required to canonicalize.
+/// Use this when a PCM source, such as a DEM decomposition, may legitimately
+/// emit duplicate indices within a column/row and the caller wants to apply
+/// GF(2) duplicate-collapse semantics before passing the matrix to consumers
+/// that require at-most-one entry per row per column.
 sparse_binary_matrix canonicalize_pcm(const sparse_binary_matrix &pcm);
 
 /// @brief Randomly permute the columns of a PCM.

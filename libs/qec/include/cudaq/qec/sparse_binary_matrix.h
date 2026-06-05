@@ -21,9 +21,9 @@ enum class sparse_binary_matrix_layout { csc, csr };
 /// @brief Sparse parity-check matrix in either CSC or CSR form.
 ///
 /// Input index lists are stored as given: not required to be sorted or
-/// GF(2)-unique. Consumers needing sorted-unique per-group indices must call
-/// `cudaq::qec::canonicalize_pcm` on entry (the in-tree decoders that need
-/// it — PyMatching, sliding_window, get_pcm_for_rounds — already do).
+/// GF(2)-unique. Consumers that require cuSPARSE-style compressed groups can
+/// call `validate_sorted_unique_indices`; consumers that need GF(2)-collapsed
+/// per-group indices can call `cudaq::qec::canonicalize_pcm` on entry.
 ///
 /// `index_type` is `uint32_t`, so each dimension and `nnz` must fit in
 /// `~4×10^9`.
@@ -88,6 +88,11 @@ public:
   const std::vector<index_type> &ptr() const { return ptr_; }
   /// @brief For CSC: row indices; for CSR: column indices.
   const std::vector<index_type> &indices() const { return indices_; }
+
+  /// @brief Throw if each compressed column/row does not have strictly
+  /// increasing indices. This rejects duplicate entries in the stored layout.
+  void validate_sorted_unique_indices(
+      const char *context = "sparse_binary_matrix") const;
 
   /// @brief Return a copy of this matrix in CSC layout. No-op if already CSC.
   sparse_binary_matrix to_csc() const;
