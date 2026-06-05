@@ -777,6 +777,23 @@ def test_get_decoder_from_stim_dem():
         assert list(result.result) == expected, f"syndrome {syndrome}"
 
 
+def test_get_decoder_accepts_stim_dem_string():
+    # get_decoder dispatches on the second argument: a str is treated as a Stim
+    # DEM, an ndarray as a parity-check matrix.
+    dem_text = ("error(0.1) D0 L0\n"
+                "error(0.1) D1 L0\n"
+                "error(0.05) D0 D1\n")
+
+    decoder = qec.get_decoder("single_error_lut", dem_text)
+    assert decoder is not None
+    assert decoder.get_syndrome_size() == 2
+    assert decoder.get_block_size() == 3
+
+    result = decoder.decode([1.0, 1.0])
+    assert result.converged is True
+    assert list(result.result) == [0.0, 0.0, 1.0]
+
+
 def test_dem_from_stim_text_explicit_parse_then_get_decoder():
     dem_text = ("error(0.1) D0 L0\n"
                 "error(0.1) D1 L0\n"

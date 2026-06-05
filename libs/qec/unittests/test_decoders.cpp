@@ -804,6 +804,37 @@ error(0.05) D0 D1
   }
 }
 
+TEST(StimDemDecoderFactory, UnifiedGetDecoderAcceptsStimDemString) {
+  // get_decoder and decoder::get accept a Stim DEM string directly via
+  // decoder_init, matching the (deprecated) get_decoder_from_stim_dem path.
+  const std::string dem_text = R"(error(0.1) D0 L0
+error(0.1) D1 L0
+error(0.05) D0 D1
+)";
+
+  auto check = [&](std::unique_ptr<cudaq::qec::decoder> d) {
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(d->get_syndrome_size(), 2u);
+    EXPECT_EQ(d->get_block_size(), 3u);
+    auto result = d->decode(std::vector<cudaq::qec::float_t>{1.0, 1.0});
+    EXPECT_TRUE(result.converged);
+    ASSERT_EQ(result.result.size(), 3u);
+    EXPECT_FLOAT_EQ(result.result[2], 1.0);
+  };
+  check(cudaq::qec::get_decoder("single_error_lut", dem_text));
+  check(cudaq::qec::decoder::get("single_error_lut", dem_text));
+}
+
+TEST(StimDemDecoderFactory, UnifiedGetDecoderStillAcceptsParityCheckMatrix) {
+  // Dense tensor inputs still convert to sparse PCM storage unchanged.
+  cudaqx::tensor<uint8_t> H({2, 3});
+  H.copy(std::vector<uint8_t>{1, 0, 1, 0, 1, 1}.data(), {2, 3});
+  auto d = cudaq::qec::get_decoder("single_error_lut", H);
+  ASSERT_NE(d, nullptr);
+  EXPECT_EQ(d->get_syndrome_size(), 2u);
+  EXPECT_EQ(d->get_block_size(), 3u);
+}
+
 TEST(StimDemDecoderFactory, RepeatedDetectorOrObservableTargetsXorFold) {
   const std::string dem_text = R"(error(0.1) D0 D0
 error(0.1) L0 L0
