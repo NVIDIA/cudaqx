@@ -112,3 +112,41 @@ jobs:
       cudaq_ref: ${{ needs.resolve-cudaq-main.outputs.ref }}
       cache_key_suffix: nightly-cudaq-main
     secrets: inherit
+
+  cleanup-nightly-cache:
+    name: Cleanup stale nightly cache
+    if: ${{ always() }}
+    needs:
+      - wheels
+      - resolve-cudaq-main
+      - build-cudaq-main
+      - cudaq-main-all-libs
+      - cudaq-main-qec
+      - cudaq-main-solvers
+      - cudaq-main-docs
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Delete stale nightly CUDA-Q caches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CURRENT_CUDAQ_REF: ${{ needs.resolve-cudaq-main.outputs.ref }}
+        shell: bash
+        run: |
+          if [[ -z "$CURRENT_CUDAQ_REF" ]]; then
+            echo "No CUDA-Q ref resolved; skipping cache cleanup."
+            exit 0
+          fi
+
+          # Fetch the list of cache keys
+          cache_keys=$(gh cache list --repo ${{ github.repository }} --limit 1000 | cut -f 2)
+
+          for key in $cache_keys
+          do
+            if [[ $key =~ nightly-cudaq-main ]] && [[ ! $key =~ $CURRENT_CUDAQ_REF ]]; then
+              gh cache delete $key --repo ${{ github.repository }}
+              echo "Deleted cache entry: $key"
+            fi
+          done
