@@ -557,7 +557,7 @@ void log_config(const char *config_str, bool from_file) {
   }();
 
   if (dump_config) {
-    if (cudaq::details::should_log(cudaq::details::LogLevel::info)) {
+    if (cudaq::detail::should_log(cudaq::detail::LogLevel::info)) {
       CUDAQ_INFO(
           "Initializing realtime decoding library with config string: {}",
           config_str);

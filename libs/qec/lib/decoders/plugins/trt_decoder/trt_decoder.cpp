@@ -915,7 +915,7 @@ std::vector<decoder_result> trt_decoder::decode_batch_impl(
     size_t total_input_nonzero = 0;
     size_t total_residual_nonzero = 0;
     const bool log_residual_counts =
-        cudaq::details::should_log(cudaq::details::LogLevel::info);
+        cudaq::detail::should_log(cudaq::detail::LogLevel::info);
 
     for (size_t batch_start = 0; batch_start < syndromes.size();
          batch_start += model_batch_size_) {
