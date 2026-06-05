@@ -31,17 +31,17 @@ using float_t = double;
 #endif
 
 /// @brief Construction input for a decoder: either an explicit parity-check
-/// matrix (\c cudaq::qec::sparse_binary_matrix) or a Stim detector error model string
-/// (\c std::string_view).
+/// matrix (`cudaq::qec::sparse_binary_matrix`) or a Stim detector error model
+/// string (`std::string_view`).
 ///
 /// Parity-check-matrix-based decoders (LUT, sliding_window, TRT, PyMatching,
 /// nv-qldpc, ...) accept either alternative: a DEM string is parsed into a
-/// parity-check matrix via \c dem_from_stim_text. Decoders that require the raw
+/// parity-check matrix via `dem_from_stim_text`. Decoders that require the raw
 /// DEM (e.g. Chromobius, which needs detector color/basis annotations) require
 /// the string alternative and reject a bare matrix.
 ///
 /// @note The string alternative is non-owning. The referenced buffer must stay
-/// alive for the duration of the \c get_decoder / \c decoder::get call;
+/// alive for the duration of the `get_decoder` / `decoder::get` call;
 /// decoders parse it during construction and do not retain the view.
 using decoder_init =
     std::variant<cudaq::qec::sparse_binary_matrix, std::string_view>;
@@ -164,16 +164,16 @@ public:
   /// @brief Decode a single syndrome
   /// @param syndrome A vector of syndrome measurements where the floating point
   /// value is the probability that the syndrome measurement is a |1>. The
-  /// length of the syndrome vector should be equal to \p syndrome_size.
-  /// @returns Vector of length \p block_size with soft probabilities of errors
+  /// length of the syndrome vector should be equal to `syndrome_size`.
+  /// @returns Vector of length `block_size` with soft probabilities of errors
   /// in each index.
   virtual decoder_result decode(const std::vector<float_t> &syndrome) = 0;
 
   /// @brief Decode a single syndrome
   /// @param syndrome An order-1 tensor of syndrome measurements where a 1 bit
   /// represents that the syndrome measurement is a |1>. The
-  /// length of the syndrome vector should be equal to \p syndrome_size.
-  /// @returns Vector of length \p block_size of errors in each index.
+  /// length of the syndrome vector should be equal to `syndrome_size`.
+  /// @returns Vector of length `block_size` of errors in each index.
   virtual decoder_result decode(const cudaqx::tensor<uint8_t> &syndrome);
 
   /// @brief Decode a single syndrome
@@ -196,7 +196,7 @@ public:
   /// @brief Construct a registered decoder by name.
   /// @param name The registered decoder name.
   /// @param init Either a parity-check matrix or a Stim DEM string (see
-  /// \c decoder_init). The variant is forwarded to the decoder's creator, so
+  /// `decoder_init`). The variant is forwarded to the decoder's creator, so
   /// parity-check-matrix-based decoders and DEM-native decoders (Chromobius)
   /// share a single entry point.
   /// @param param_map Optional decoder-specific parameters.
@@ -206,19 +206,22 @@ public:
 
   static std::unique_ptr<decoder>
   get(const std::string &name, const cudaq::qec::sparse_binary_matrix &H,
-      const cudaqx::heterogeneous_map &param_map = cudaqx::heterogeneous_map()) {
+      const cudaqx::heterogeneous_map &param_map =
+          cudaqx::heterogeneous_map()) {
     return get(name, decoder_init{H}, param_map);
   }
 
   static std::unique_ptr<decoder>
   get(const std::string &name, const cudaqx::tensor<uint8_t> &H,
-      const cudaqx::heterogeneous_map &param_map = cudaqx::heterogeneous_map()) {
+      const cudaqx::heterogeneous_map &param_map =
+          cudaqx::heterogeneous_map()) {
     return get(name, cudaq::qec::sparse_binary_matrix(H), param_map);
   }
 
   static std::unique_ptr<decoder>
   get(const std::string &name, std::string_view stim_dem_text,
-      const cudaqx::heterogeneous_map &param_map = cudaqx::heterogeneous_map()) {
+      const cudaqx::heterogeneous_map &param_map =
+          cudaqx::heterogeneous_map()) {
     return get(name, decoder_init{stim_dem_text}, param_map);
   }
 
@@ -503,26 +506,27 @@ dem_default_values dem_defaults_for_missing_keys(
     const std::function<bool(const std::string &)> &contains_user_key,
     const detector_error_model &dem);
 
-/// @brief Extract the Stim DEM text from a \c decoder_init, throwing if it holds
-/// a parity-check matrix instead. Use this in the create() function of decoders
-/// that require a raw DEM (e.g. Chromobius), which cannot be reconstructed from
-/// a bare parity-check matrix.
+/// @brief Extract the Stim DEM text from a `decoder_init`, throwing if it
+/// holds a parity-check matrix instead. Use this in the create() function of
+/// decoders that require a raw DEM (e.g. Chromobius), which cannot be
+/// reconstructed from a bare parity-check matrix.
 std::string_view require_dem_text(const decoder_init &init);
 
-/// @brief Build a parity-check-matrix-based decoder from a \c decoder_init.
+/// @brief Build a parity-check-matrix-based decoder from a `decoder_init`.
 ///
-/// If \p init holds a sparse matrix, it is used directly as the parity-check matrix.
-/// If it holds a Stim DEM string, it is parsed via \c dem_from_stim_text and the
-/// derived observables (`"O"`) and per-error rates (`"error_rate_vec"`) are
-/// injected into \p params unless the user already supplied them (user values
-/// win). This is the shared implementation behind the create() function of every
-/// parity-check-matrix-based decoder, giving them DEM-string support for free.
+/// If `init` holds a sparse matrix, it is used directly as the parity-check
+/// matrix. If it holds a Stim DEM string, it is parsed via
+/// `dem_from_stim_text` and the derived observables (`"O"`) and per-error
+/// rates (`"error_rate_vec"`) are injected into `params` unless the user
+/// already supplied them (user values win). This is the shared implementation
+/// behind the create() function of every parity-check-matrix-based decoder,
+/// giving them DEM-string support for free.
 ///
 /// @note The DEM parse is lossy: detector annotations, decomposition
 /// separators, and `error_ids` are dropped. Sufficient for matching-style /
 /// parity-check-matrix decoders (LUT, NV, sliding_window, TRT, PyMatching).
 /// Decoders that need full DEM metadata (e.g. Chromobius detector color/basis)
-/// must consume the string directly via \c require_dem_text.
+/// must consume the string directly via `require_dem_text`.
 template <typename DecoderT>
 std::unique_ptr<decoder>
 make_pcm_decoder(const decoder_init &init,
@@ -545,8 +549,8 @@ make_pcm_decoder(const decoder_init &init,
 
 /// @brief Construct a decoder by name from a Stim detector error model string.
 ///
-/// @deprecated Prefer \c get_decoder, which now accepts a Stim DEM string
-/// directly via \c decoder_init. Retained as a thin convenience alias.
+/// @deprecated Prefer `get_decoder`, which now accepts a Stim DEM string
+/// directly via `decoder_init`. Retained as a thin convenience alias.
 std::unique_ptr<decoder>
 get_decoder_from_stim_dem(const std::string &name,
                           const std::string &stim_dem_text,

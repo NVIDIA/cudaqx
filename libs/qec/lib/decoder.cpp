@@ -19,8 +19,7 @@
 
 INSTANTIATE_REGISTRY(cudaq::qec::decoder,
                      const cudaq::qec::sparse_binary_matrix &)
-INSTANTIATE_REGISTRY(cudaq::qec::decoder,
-                     const cudaq::qec::decoder_init &,
+INSTANTIATE_REGISTRY(cudaq::qec::decoder, const cudaq::qec::decoder_init &,
                      const cudaqx::heterogeneous_map &)
 
 // Include decoder implementations AFTER registry instantiation

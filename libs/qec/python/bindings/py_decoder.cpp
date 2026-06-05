@@ -790,9 +790,9 @@ void bindDecoder(nb::module_ &mod) {
   // Shared implementation for constructing a decoder from a Stim DEM string,
   // used by both the get_decoder(str) overload and the (deprecated)
   // get_decoder_from_stim_dem entry point.
-  auto get_decoder_from_dem_text =
-      [](const std::string &name, const std::string &dem_text,
-         nb::kwargs options)
+  auto get_decoder_from_dem_text = [](const std::string &name,
+                                      const std::string &dem_text,
+                                      nb::kwargs options)
       -> std::variant<nb::object, std::unique_ptr<decoder>> {
     if (PyDecoderRegistry::contains(name)) {
       auto dem = dem_from_stim_text(dem_text);
