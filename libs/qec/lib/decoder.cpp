@@ -253,8 +253,7 @@ void decoder::set_D_sparse(const std::vector<int64_t> &D_sparse_vec_in) {
 bool decoder::enqueue_syndrome(const uint8_t *syndrome,
                                std::size_t syndrome_length) {
   if (pimpl->msyn_buffer_index + syndrome_length > pimpl->msyn_buffer.size()) {
-    // CUDAQ_WARN("Syndrome buffer overflow. Syndrome will be ignored.");
-    printf("Syndrome buffer overflow. Syndrome will be ignored.\n");
+    cudaq::info("Syndrome buffer overflow. Syndrome will be ignored.");
     return false;
   }
 

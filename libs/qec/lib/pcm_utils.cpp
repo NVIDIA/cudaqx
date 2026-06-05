@@ -402,6 +402,10 @@ cudaqx::tensor<uint8_t> generate_random_pcm(std::size_t n_rounds,
       std::size_t row_max = all_errors_in_this_round
                                 ? n_syndromes_per_round
                                 : 2 * n_syndromes_per_round;
+      if (static_cast<std::size_t>(weight) > row_max) {
+        throw std::invalid_argument(
+            "generate_random_pcm: weight exceeds available rows per column");
+      }
       std::uniform_int_distribution<> row_dis(0, row_max - 1);
       for (std::size_t i = 0; i < weight; ++i) {
         auto row_ix = row_dis(rng);
