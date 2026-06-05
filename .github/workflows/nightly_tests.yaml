@@ -114,7 +114,7 @@ jobs:
     secrets: inherit
 
   cleanup-nightly-cache:
-    name: Cleanup stale nightly cache
+    name: Clean up nightly cache
     if: ${{ always() }}
     needs:
       - wheels
@@ -129,7 +129,7 @@ jobs:
       actions: write
       contents: read
     steps:
-      - name: Delete stale nightly CUDA-Q caches
+      - name: Delete nightly cache entries
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
