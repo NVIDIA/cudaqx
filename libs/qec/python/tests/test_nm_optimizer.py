@@ -385,6 +385,35 @@ def test_boundary_priors_clamped_with_warning(device, dtype):
     assert torch.isfinite(loss)
 
 
+@pytest.mark.skipif(not _gpu_available(), reason="CUDA not available")
+def test_boundary_priors_finite_with_tf32_matmul_enabled():
+    """Regression: global TF32 matmul must not make boundary-prior loss NaN."""
+    old_precision = torch.get_float32_matmul_precision()
+    try:
+        # Mirror solver imports that enable TF32 process-wide during full
+        # pytest collection; the QEC test must be self-contained.
+        torch.set_float32_matmul_precision("high")
+        H, logical, _ = _simple_repetition_code()
+        boundary_priors = [0.0, 0.5, 1.0]
+        syn, flips = _sample_synthetic_dataset(H,
+                                               logical, [0.1, 0.2, 0.3],
+                                               num_shots=8,
+                                               rng=np.random.default_rng(20))
+        with pytest.warns(UserWarning, match=r"Clamped \d+/\d+"):
+            opt = _make_opt(H,
+                            logical,
+                            boundary_priors,
+                            syn,
+                            flips,
+                            device="cuda",
+                            dtype="float32")
+
+        loss = opt.cross_entropy_loss()
+        assert torch.isfinite(loss)
+    finally:
+        torch.set_float32_matmul_precision(old_precision)
+
+
 @pytest.mark.parametrize("device", _device_params())
 def test_non_finite_priors_raise(device):
     """Non-finite priors are caller bugs, not stability concerns - raise."""
