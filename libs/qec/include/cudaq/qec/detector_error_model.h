@@ -76,8 +76,8 @@ struct detector_error_model {
 /// are extracted. Annotations (`detector`, `logical_observable`),
 /// suggested-decomposition separators, and `error_ids` are dropped.
 /// Decoders that need full DEM metadata (e.g. Chromobius detector
-/// color/basis) require the planned `detector_coords` extension on
-/// `detector_error_model`; tracked as a follow-up.
+/// color/basis) should consume the raw Stim DEM string via `decoder_init`
+/// and `require_dem_text` instead of this lossy representation.
 detector_error_model dem_from_stim_text(const std::string &dem_text);
 
 } // namespace cudaq::qec

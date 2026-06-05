@@ -806,12 +806,10 @@ void bindDecoder(nb::module_ &mod) {
         options["error_rate_vec"] = toPyArray(*defaults.error_rate_vec);
 
       nb::object H_obj = toPyArray(dem.detector_error_matrix);
-      return PyDecoderRegistry::get_decoder(
-          name, nb::cast<nb::ndarray<nb::numpy, uint8_t>>(H_obj), options);
+      return PyDecoderRegistry::get_decoder(name, H_obj, options);
     }
 
-    return get_decoder(name, decoder_init{std::string_view{dem_text}},
-                       hetMapFromKwargs(options));
+    return get_decoder(name, decoder_init{dem_text}, hetMapFromKwargs(options));
   };
 
   // Unified entry point: get_decoder also accepts a Stim DEM string. nanobind

@@ -32,7 +32,7 @@ using float_t = double;
 
 /// @brief Construction input for a decoder: either an explicit parity-check
 /// matrix (`cudaq::qec::sparse_binary_matrix`) or a Stim detector error model
-/// string (`std::string_view`).
+/// string (`std::string`).
 ///
 /// Parity-check-matrix-based decoders (LUT, sliding_window, TRT, PyMatching,
 /// nv-qldpc, ...) accept either alternative: a DEM string is parsed into a
@@ -40,11 +40,11 @@ using float_t = double;
 /// DEM (e.g. Chromobius, which needs detector color/basis annotations) require
 /// the string alternative and reject a bare matrix.
 ///
-/// @note The string alternative is non-owning. The referenced buffer must stay
-/// alive for the duration of the `get_decoder` / `decoder::get` call;
-/// decoders parse it during construction and do not retain the view.
+/// @note The factory input owns the DEM text. Public overloads accept
+/// `std::string`, `const char *`, and `std::string_view` and copy into this
+/// variant before dispatching to decoder plugins.
 using decoder_init =
-    std::variant<cudaq::qec::sparse_binary_matrix, std::string_view>;
+    std::variant<cudaq::qec::sparse_binary_matrix, std::string>;
 
 /// @brief Validates that all keys in a heterogeneous map are found in a list of
 /// acceptable types
@@ -219,10 +219,24 @@ public:
   }
 
   static std::unique_ptr<decoder>
-  get(const std::string &name, std::string_view stim_dem_text,
+  get(const std::string &name, const std::string &stim_dem_text,
       const cudaqx::heterogeneous_map &param_map =
           cudaqx::heterogeneous_map()) {
     return get(name, decoder_init{stim_dem_text}, param_map);
+  }
+
+  static std::unique_ptr<decoder>
+  get(const std::string &name, const char *stim_dem_text,
+      const cudaqx::heterogeneous_map &param_map =
+          cudaqx::heterogeneous_map()) {
+    return get(name, decoder_init{std::string{stim_dem_text}}, param_map);
+  }
+
+  static std::unique_ptr<decoder>
+  get(const std::string &name, std::string_view stim_dem_text,
+      const cudaqx::heterogeneous_map &param_map =
+          cudaqx::heterogeneous_map()) {
+    return get(name, decoder_init{std::string{stim_dem_text}}, param_map);
   }
 
   std::size_t get_block_size() { return block_size; }
@@ -489,9 +503,21 @@ get_decoder(const std::string &name, const cudaqx::tensor<uint8_t> &H,
 }
 
 inline std::unique_ptr<decoder>
-get_decoder(const std::string &name, std::string_view stim_dem_text,
+get_decoder(const std::string &name, const std::string &stim_dem_text,
             const cudaqx::heterogeneous_map options = {}) {
   return get_decoder(name, decoder_init{stim_dem_text}, options);
+}
+
+inline std::unique_ptr<decoder>
+get_decoder(const std::string &name, const char *stim_dem_text,
+            const cudaqx::heterogeneous_map options = {}) {
+  return get_decoder(name, decoder_init{std::string{stim_dem_text}}, options);
+}
+
+inline std::unique_ptr<decoder>
+get_decoder(const std::string &name, std::string_view stim_dem_text,
+            const cudaqx::heterogeneous_map options = {}) {
+  return get_decoder(name, decoder_init{std::string{stim_dem_text}}, options);
 }
 
 /// @brief DEM-derived defaults; pointers alias into the source `dem`.
@@ -534,8 +560,7 @@ make_pcm_decoder(const decoder_init &init,
   if (const auto *H = std::get_if<cudaq::qec::sparse_binary_matrix>(&init))
     return std::make_unique<DecoderT>(*H, params);
 
-  const auto dem =
-      dem_from_stim_text(std::string(std::get<std::string_view>(init)));
+  const auto dem = dem_from_stim_text(std::get<std::string>(init));
   cudaqx::heterogeneous_map merged = params;
   const auto defaults = dem_defaults_for_missing_keys(
       [&](const std::string &key) { return merged.contains(key); }, dem);
