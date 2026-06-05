@@ -70,7 +70,7 @@ jobs:
           token: ${{ secrets.CUDAQ_ACCESS_TOKEN }}
           cache-key-suffix: nightly-cudaq-main
           save-build: true
-          save-ccache: true
+          save-ccache: false
           platform: ${{ matrix.platform }}-cu${{ steps.config.outputs.cuda_major }}
 
   cudaq-main-all-libs:
@@ -132,20 +132,14 @@ jobs:
       - name: Delete stale nightly CUDA-Q caches
         env:
           GH_TOKEN: ${{ github.token }}
-          CURRENT_CUDAQ_REF: ${{ needs.resolve-cudaq-main.outputs.ref }}
         shell: bash
         run: |
-          if [[ -z "$CURRENT_CUDAQ_REF" ]]; then
-            echo "No CUDA-Q ref resolved; skipping cache cleanup."
-            exit 0
-          fi
-
           # Fetch the list of cache keys
           cache_keys=$(gh cache list --repo ${{ github.repository }} --limit 1000 | cut -f 2)
 
           for key in $cache_keys
           do
-            if [[ $key =~ nightly-cudaq-main ]] && [[ ! $key =~ $CURRENT_CUDAQ_REF ]]; then
+            if [[ $key =~ nightly-cudaq-main ]]; then
               gh cache delete $key --repo ${{ github.repository }}
               echo "Deleted cache entry: $key"
             fi
