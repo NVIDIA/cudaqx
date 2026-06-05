@@ -46,13 +46,13 @@ _SUPPORTED_DTYPES: tuple[str, ...] = ("float32", "float64")
 def _validate_and_clamp_priors(noise_model: Any, dtype: str) -> list[float]:
     """Validate noise priors and clamp them into ``[eps, 1 - eps]``.
 
-    The fused cross-entropy reduction in
-    :meth:`NMOptimizer.cross_entropy_loss` has no ``log`` guard, so a
-    prior of exactly ``0.0`` or ``1.0`` makes the contraction emit a
-    zero whose log is ``-inf`` and whose gradient is ``NaN``; training
-    silently diverges.  Stim DEMs occasionally emit ``p=1.0``
-    (deterministic detectors) or ``p<1e-15`` (underflow), so we
-    intercept here rather than force every caller to clamp.
+    The cross-entropy reduction floors log inputs so roundoff-induced
+    zero or negative values do not create non-finite losses.  Priors at
+    exactly ``0.0`` or ``1.0`` are still clamped because they can
+    saturate loss terms and make gradients uninformative.  Stim DEMs
+    occasionally emit ``p=1.0`` (deterministic detectors) or ``p<1e-15``
+    (underflow), so we intercept here rather than force every caller to
+    clamp.
 
     Behaviour mirrors :class:`torch.nn.BCELoss`-style stable wrappers:
 
@@ -92,13 +92,18 @@ def _validate_and_clamp_priors(noise_model: Any, dtype: str) -> list[float]:
         warnings.warn(
             f"Clamped {int(out_of_range.sum())}/{len(arr)} NMOptimizer "
             f"priors into [{eps}, {1.0 - eps}] for numerical stability; "
-            f"values at or outside the (0, 1) boundary produce -inf "
-            f"cross-entropy loss and NaN gradients in the fused codegen.",
+            f"values at or outside the (0, 1) boundary can saturate "
+            f"cross-entropy terms and make gradients uninformative.",
             UserWarning,
             stacklevel=3,
         )
         arr = np.clip(arr, eps, 1.0 - eps)
     return arr.tolist()
+
+
+def _clamp_log_input(x: torch.Tensor) -> torch.Tensor:
+    """Floor log inputs after roundoff-induced non-positive values."""
+    return x.clamp_min(torch.finfo(x.dtype).tiny)
 
 
 def remap_eq_to_ascii(eq: str) -> str:
@@ -158,8 +163,9 @@ class NMOptimizer(TensorNetworkDecoder):
 
         Priors are clamped into ``[eps, 1 - eps]`` only at construction;
         an unconstrained optimiser step on :attr:`noise_params` can push
-        them past the boundary, after which :meth:`cross_entropy_loss`
-        returns ``NaN`` gradients.  Prefer logit-space training via
+        them outside the probability interval.  The loss is floored for
+        finiteness, but probability-space training can then saturate or
+        optimise invalid probabilities.  Prefer logit-space training via
         :func:`make_compiled_step` (shown below), or clamp the tensor
         under :func:`torch.no_grad` after each step.
 
@@ -370,9 +376,10 @@ class NMOptimizer(TensorNetworkDecoder):
         """Trainable noise probabilities, ready for ``torch.optim``.
 
         Clamped to ``[eps, 1 - eps]`` only at construction; an
-        unconstrained step can push past the boundary and produce
-        ``NaN`` gradients on the next :meth:`cross_entropy_loss`.
-        See the class warning for safe training patterns.
+        unconstrained step can push outside the probability interval.
+        The next :meth:`cross_entropy_loss` remains finite, but training
+        can saturate or optimise invalid probabilities.  See the class
+        warning for safe training patterns.
         """
         return [self._noise_probs]
 
@@ -665,24 +672,24 @@ class NMOptimizer(TensorNetworkDecoder):
 
             def _loss_from_probs(noise_probs, syndromes):
                 p = predict_fn(noise_probs, syndromes)
-                return (-torch.log(p[obs_t, 1]).sum() -
-                        torch.log(p[obs_f, 0]).sum())
+                return (-torch.log(_clamp_log_input(p[obs_t, 1])).sum() -
+                        torch.log(_clamp_log_input(p[obs_f, 0])).sum())
 
             def _loss_from_logits(logits, syndromes):
                 p = predict_fn(torch.sigmoid(logits), syndromes)
-                return (-torch.log(p[obs_t, 1]).sum() -
-                        torch.log(p[obs_f, 0]).sum())
+                return (-torch.log(_clamp_log_input(p[obs_t, 1])).sum() -
+                        torch.log(_clamp_log_input(p[obs_f, 0])).sum())
         else:
 
             def _loss_from_probs(noise_probs, syndromes=()):
                 p = predict_fn(noise_probs, ())
-                return (-torch.log(p[obs_t, 1]).sum() -
-                        torch.log(p[obs_f, 0]).sum())
+                return (-torch.log(_clamp_log_input(p[obs_t, 1])).sum() -
+                        torch.log(_clamp_log_input(p[obs_f, 0])).sum())
 
             def _loss_from_logits(logits, syndromes=()):
                 p = predict_fn(torch.sigmoid(logits), ())
-                return (-torch.log(p[obs_t, 1]).sum() -
-                        torch.log(p[obs_f, 0]).sum())
+                return (-torch.log(_clamp_log_input(p[obs_t, 1])).sum() -
+                        torch.log(_clamp_log_input(p[obs_f, 0])).sum())
 
         return _loss_from_logits, _loss_from_probs
 
@@ -947,8 +954,10 @@ class NMOptimizer(TensorNetworkDecoder):
                 normed = final_value / final_value.sum(dim=1, keepdim=True)
                 # Compute the loss eagerly; we can't fold it because
                 # autograd needs a path back to noise_probs.
-                ce = (-torch.log(normed[obs_idx_true, 1]).sum() -
-                      torch.log(normed[obs_idx_false, 0]).sum())
+                ce = (
+                    -torch.log(_clamp_log_input(normed[obs_idx_true, 1])).sum()
+                    -
+                    torch.log(_clamp_log_input(normed[obs_idx_false, 0])).sum())
             closure_vars["_LOSS"] = ce
             body.append("    return _LOSS + 0.0 * noise_probs.sum()")
             runtime_lines = []
@@ -972,9 +981,11 @@ class NMOptimizer(TensorNetworkDecoder):
             body.append(f"    _out = {final_name}")
             body.append("    _z0 = _out[:, 0]")
             body.append("    _z1 = _out[:, 1]")
-            body.append("    return (torch.log(_z0 + _z1).sum() "
-                        "- torch.log(_z1[_OBS_T]).sum() "
-                        "- torch.log(_z0[_OBS_F]).sum())")
+            body.append("    _eps = torch.finfo(_z0.dtype).tiny")
+            body.append(
+                "    return (torch.log((_z0 + _z1).clamp_min(_eps)).sum() "
+                "- torch.log(_z1[_OBS_T].clamp_min(_eps)).sum() "
+                "- torch.log(_z0[_OBS_F].clamp_min(_eps)).sum())")
 
         return cls._compile_codegen_source(body, closure_vars, n_folded,
                                            len(runtime_lines), "loss")
@@ -1002,9 +1013,9 @@ class NMOptimizer(TensorNetworkDecoder):
         """Cross-entropy loss over the syndrome batch.
 
         Returns a differentiable scalar; call ``.backward()`` to obtain
-        gradients w.r.t. :attr:`noise_params`.  The fused codegen omits
-        the ``log`` guard, so a prior at ``0`` or ``1`` yields ``NaN``
-        gradients — see :attr:`noise_params` for safe training patterns.
+        gradients w.r.t. :attr:`noise_params`.  Log inputs are floored to
+        avoid non-finite values from roundoff; use the safe training
+        patterns in :attr:`noise_params` to keep probabilities in range.
         """
         return self._compiled_loss_from_probs(self._noise_probs,
                                               self._syndrome_tuple)

@@ -96,6 +96,7 @@ z_dem_from_memory_circuit = qecrt.z_dem_from_memory_circuit
 
 dump_pcm = qecrt.dump_pcm
 generate_random_pcm = qecrt.generate_random_pcm
+generate_random_pcm_sparse = qecrt.generate_random_pcm_sparse
 get_pcm_for_rounds = qecrt.get_pcm_for_rounds
 get_sorted_pcm_column_indices = qecrt.get_sorted_pcm_column_indices
 pcm_is_sorted = qecrt.pcm_is_sorted

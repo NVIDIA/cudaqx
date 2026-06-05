@@ -1,5 +1,5 @@
 /****************************************************************-*- C++ -*-****
- * Copyright (c) 2025 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2025 - 2026 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -8,6 +8,7 @@
 #pragma once
 
 #include "cuda-qx/core/tensor.h"
+#include "sparse_binary_matrix.h"
 #include <limits>
 #include <random>
 
@@ -111,6 +112,14 @@ get_sorted_pcm_column_indices(const cudaqx::tensor<uint8_t> &pcm,
 bool pcm_is_sorted(const cudaqx::tensor<uint8_t> &pcm,
                    std::uint32_t num_syndromes_per_round = 0);
 
+/// @brief Check if a PCM is sorted.
+/// @param sparse_pcm The sparse PCM to check (in the same format as
+/// dense_to_sparse())
+/// @param num_syndromes_per_round The number of syndromes per round.
+/// @return True if the PCM is sorted, false otherwise.
+bool pcm_is_sorted(const std::vector<std::vector<std::uint32_t>> &sparse_pcm,
+                   std::uint32_t num_syndromes_per_round = 0);
+
 /// @brief Reorder the columns of a PCM according to the given column order.
 /// Note: this may return a subset of the columns in the original PCM if the
 /// \p column_order does not contain all of the columns in the original PCM.
@@ -165,7 +174,53 @@ get_pcm_for_rounds(const cudaqx::tensor<uint8_t> &pcm,
                    bool straddle_start_round = false,
                    bool straddle_end_round = false);
 
+/// @brief Same semantics as the overload taking a dense tensor \p pcm, but
+/// reads from \p pcm as ``sparse_binary_matrix`` so the full dense PCM is not
+/// required (only the returned sub-matrix is dense). Parameter meanings match
+/// the dense overload.
+///
+/// @param pcm_is_canonical If true, the caller asserts \p pcm has
+/// sorted-unique per-group indices (i.e. is the output of `canonicalize_pcm`
+/// or was constructed canonically). In that case the per-call
+/// canonicalization step is skipped — useful for callers like
+/// `sliding_window` that canonicalize once at construction and then call
+/// this function in a per-window loop on the same matrix. Default `false`
+/// preserves the original "canonicalize on entry" behavior.
+///
+/// @warning When \p pcm_is_canonical is `true` the precondition is *not*
+/// checked. `select_pcm_columns_for_round_range` reads `.front()` / `.back()`
+/// of each CSC column to derive first/last round; those are only the true
+/// min/max row if the column list is sorted-unique. Passing a non-canonical
+/// PCM with this flag (e.g. a raw DEM decomposition, a hand-built sparse
+/// matrix with duplicate or unsorted indices, or a canonical CSR that the
+/// caller forgot to re-canonicalize after conversion) silently produces
+/// wrong round assignments. If unsure, leave the flag `false`.
+/// @return A tuple with the new PCM with the columns in the range [start_round,
+/// end_round], the first column included, and the last column included.
+std::tuple<cudaqx::tensor<uint8_t>, std::uint32_t, std::uint32_t>
+get_pcm_for_rounds(const sparse_binary_matrix &pcm,
+                   std::uint32_t num_syndromes_per_round,
+                   std::uint32_t start_round, std::uint32_t end_round,
+                   bool straddle_start_round = false,
+                   bool straddle_end_round = false,
+                   bool pcm_is_canonical = false);
+
+/// @brief Upper bound on \f$\texttt{rows} \times \texttt{cols}\f$ for the
+/// dense `generate_random_pcm` path. Above this, the call throws and the
+/// caller should switch to `generate_random_pcm_sparse`. Exposed as a named
+/// symbol so tests and users can reference it without grepping the source.
+inline constexpr std::size_t k_max_dense_pcm_elements =
+    static_cast<std::size_t>(400u) * 1024u * 1024u;
+
 /// @brief Generate a random PCM with the given parameters.
+///
+/// The PCM has shape `(n_rounds * n_syndromes_per_round) × (n_rounds *
+/// n_errs_per_round)`. If the product
+/// \f$n\_rounds^2 \times n\_syndromes\_per\_round \times n\_errs\_per\_round\f$
+/// exceeds `k_max_dense_pcm_elements`
+/// (\f$400 \times 1024 \times 1024 \approx 4.19 \times 10^8\f$ entries),
+/// throws `std::invalid_argument`; use `generate_random_pcm_sparse` for
+/// matrices that large without a dense allocation.
 /// @param n_rounds The number of rounds in the PCM.
 /// @param n_errs_per_round The number of errors per round in the PCM.
 /// @param n_syndromes_per_round The number of syndromes per round in the PCM.
@@ -177,6 +232,27 @@ cudaqx::tensor<uint8_t> generate_random_pcm(std::size_t n_rounds,
                                             std::size_t n_errs_per_round,
                                             std::size_t n_syndromes_per_round,
                                             int weight, std::mt19937_64 &&rng);
+
+/// @brief Same distribution as generate_random_pcm, but constructs a CSC
+/// sparse_binary_matrix directly without allocating a dense rank-2 tensor.
+/// Intended for large PCMs whose dense form would exceed
+/// k_max_dense_pcm_elements.
+sparse_binary_matrix
+generate_random_pcm_sparse(std::size_t n_rounds, std::size_t n_errs_per_round,
+                           std::size_t n_syndromes_per_round, int weight,
+                           std::mt19937_64 &&rng);
+
+/// @brief Return a GF(2)-canonical copy of \p pcm: each column (CSC) or row
+/// (CSR) has its indices sorted ascending, and duplicate indices are XOR-
+/// merged — an index that appears \p k times is kept iff \p k is odd. The
+/// output has the same layout as the input and is idempotent under further
+/// `canonicalize_pcm` calls.
+///
+/// Use this when a PCM source, such as a DEM decomposition, may legitimately
+/// emit duplicate indices within a column/row and the caller wants to apply
+/// GF(2) duplicate-collapse semantics before passing the matrix to consumers
+/// that require at-most-one entry per row per column.
+sparse_binary_matrix canonicalize_pcm(const sparse_binary_matrix &pcm);
 
 /// @brief Randomly permute the columns of a PCM.
 /// @param pcm The PCM to permute.

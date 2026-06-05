@@ -246,9 +246,9 @@ TEST_F(TRTDecoderTest, ValidateAgainstPyTorchModel) {
 
     // Assert each individual test case
     EXPECT_LT(error, TOLERANCE)
-        << "Test case " << i << " failed: "
-        << "TRT output (" << trt_output << ") differs from PyTorch output ("
-        << expected_output << ") by " << error;
+        << "Test case " << i << " failed: " << "TRT output (" << trt_output
+        << ") differs from PyTorch output (" << expected_output << ") by "
+        << error;
   }
 
   // Print summary statistics

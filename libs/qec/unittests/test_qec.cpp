@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
+#include <random>
 #include <unistd.h>
 
 #include "cudaq/qec/codes/surface_code.h"
@@ -1270,6 +1271,29 @@ bool are_pcms_equal(const cudaqx::tensor<uint8_t> &a,
       if (a.at({r, c}) != b.at({r, c}))
         return false;
   return true;
+}
+
+TEST(PCMUtilsTester, GetPcmForRoundsSparseMatchesDenseTensor) {
+  std::mt19937_64 rng(42);
+  auto pcm_raw = cudaq::qec::generate_random_pcm(
+      /*n_rounds=*/4, /*n_errs=*/5, /*n_synd=*/3, /*weight=*/2, std::move(rng));
+  auto pcm =
+      cudaq::qec::sort_pcm_columns(pcm_raw, /*num_syndromes_per_round=*/3);
+  cudaq::qec::sparse_binary_matrix pcm_sparse(pcm);
+
+  constexpr std::uint32_t kSp = 3;
+  for (bool straddle_start : {false, true}) {
+    for (bool straddle_end : {false, true}) {
+      auto [d_dense, fc_d, lc_d] = cudaq::qec::get_pcm_for_rounds(
+          pcm, kSp,
+          /*start_round=*/1, /*end_round=*/2, straddle_start, straddle_end);
+      auto [d_sparse, fc_s, lc_s] = cudaq::qec::get_pcm_for_rounds(
+          pcm_sparse, kSp, 1, 2, straddle_start, straddle_end);
+      EXPECT_TRUE(are_pcms_equal(d_dense, d_sparse));
+      EXPECT_EQ(fc_d, fc_s);
+      EXPECT_EQ(lc_d, lc_s);
+    }
+  }
 }
 
 void check_pcm_equality(const cudaqx::tensor<uint8_t> &a,
