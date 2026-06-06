@@ -7,7 +7,7 @@
  ******************************************************************************/
 // [Begin Documentation]
 // Compile and run with:
-// nvq++ --target=stim -lcudaq-qec circuit_level_noise.cpp -o circuit_level_noise
+// nvq++ --target=stim -lcudaq-qec circuit_level_noise.cpp
 // ./a.out
 
 #include "cudaq.h"
