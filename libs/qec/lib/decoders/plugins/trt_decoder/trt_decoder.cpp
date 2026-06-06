@@ -928,13 +928,16 @@ std::vector<decoder_result> trt_decoder::decode_batch_impl(
       std::vector<IoType> input_host(impl_->input_size);
       for (size_t batch_idx = 0; batch_idx < actual_batch; ++batch_idx) {
         const auto &syndrome = syndromes[batch_start + batch_idx];
-        for (size_t i = 0; i < syndrome_size_per_sample_; ++i) {
-          if constexpr (std::is_same_v<IoType, float>) {
+        if constexpr (std::is_same_v<IoType, float>) {
+          for (size_t i = 0; i < syndrome_size_per_sample_; ++i) {
             input_host[batch_idx * syndrome_size_per_sample_ + i] =
                 static_cast<IoType>(syndrome[i]);
-          } else {
+          }
+        } else {
+          for (size_t i = 0; i < syndrome_size_per_sample_; ++i) {
             input_host[batch_idx * syndrome_size_per_sample_ + i] =
-                static_cast<IoType>(syndrome[i] >= 0.5f ? 1 : 0);
+                static_cast<IoType>(
+                    cudaq::qec::convert_soft_to_hard(syndrome[i]));
           }
         }
       }
