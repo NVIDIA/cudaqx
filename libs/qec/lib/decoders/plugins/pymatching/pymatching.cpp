@@ -176,7 +176,7 @@ public:
     std::vector<uint64_t> detection_events;
     detection_events.reserve(syndrome.size());
     for (size_t i = 0; i < syndrome.size(); i++)
-      if (syndrome[i] > 0.5)
+      if (cudaq::qec::convert_soft_to_hard(syndrome[i]))
         detection_events.push_back(i);
 #if PERFORM_TIMING
     auto t2 = std::chrono::high_resolution_clock::now();
