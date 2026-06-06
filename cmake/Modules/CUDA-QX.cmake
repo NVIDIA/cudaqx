@@ -53,7 +53,6 @@ Example usage:
       ${CMAKE_CURRENT_SOURCE_DIR}/file1.cpp
       ${CMAKE_CURRENT_SOURCE_DIR}/file2.cpp
     COMPILER_FLAGS
-      --enable-mlir
       -v
     DEPENDS_ON
       SomeOtherTarget
@@ -94,7 +93,7 @@ function(cudaqx_add_device_code LIBRARY_NAME)
     add_custom_command(
       OUTPUT ${output_file}
       COMMAND ${COMPILER}
-        ${ARGS_COMPILER_FLAGS} -c -fPIC --enable-mlir
+        ${ARGS_COMPILER_FLAGS} -c -fPIC
         ${CMAKE_CURRENT_SOURCE_DIR}/${source} -o ${baseName}
         "$<$<BOOL:${prop}>:-I $<JOIN:${prop}, -I >>"
       DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${source} ${ARGS_DEPENDS_ON}

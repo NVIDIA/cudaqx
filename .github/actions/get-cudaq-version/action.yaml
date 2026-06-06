@@ -1,19 +1,47 @@
 name: Get CUDAQ version
-description: Read the pinned CUDA-Q repository and ref from .cudaq_version
+description: Output the desired CUDA-Q source repository and ref.
+
+inputs:
+  repo:
+    description: 'Optional CUDAQ repository override.'
+    default: ''
+    required: false
+  ref:
+    description: 'Optional CUDAQ ref override.'
+    default: ''
+    required: false
 
 outputs:
   repo:
     description: 'CUDAQ repository'
-    value: ${{ steps.get-cudaq-version.outputs.repo }}
+    value: ${{ steps.cudaq-version-override.outputs.repo || steps.get-cudaq-version.outputs.repo }}
   ref:
     description: 'The branch, tag or SHA to checkout'
-    value: ${{ steps.get-cudaq-version.outputs.ref }}
+    value: ${{ steps.cudaq-version-override.outputs.ref || steps.get-cudaq-version.outputs.ref }}
 
 runs:
   using: "composite"
   steps:
 
+    - name: Use CUDAQ workflow input override
+      id: cudaq-version-override
+      if: ${{ inputs.repo || inputs.ref }}
+      run: |
+        repo="${{ inputs.repo }}"
+        ref="${{ inputs.ref }}"
+
+        if [[ -z "$repo" || -z "$ref" ]]; then
+          echo "Both CUDA-Q repo and ref overrides must be provided together."
+          exit 1
+        fi
+
+        echo "Using CUDA-Q version: $repo@$ref"
+        echo "repo=$repo" >> $GITHUB_OUTPUT
+        echo "ref=$ref" >> $GITHUB_OUTPUT
+      shell: bash
+
     - name: Install jq
+      if: ${{ !inputs.repo && !inputs.ref }}
       run: |
         if [ ! -x "$(command -v jq)" ]; then
           if [ -x "$(command -v apt-get)" ]; then
@@ -28,6 +56,7 @@ runs:
 
     - name: Get required CUDAQ version
       id: get-cudaq-version
+      if: ${{ !inputs.repo && !inputs.ref }}
       run: |
         repo=$(jq -r '.cudaq.repository' .cudaq_version)
         ref=$(jq -r '.cudaq.ref' .cudaq_version)
@@ -35,4 +64,3 @@ runs:
         echo "repo=$repo" >> $GITHUB_OUTPUT
         echo "ref=$ref" >> $GITHUB_OUTPUT
       shell: bash
-

@@ -2,11 +2,23 @@ name: QEC lib
 
 on:
   workflow_call:
+    inputs:
+      cache_key_suffix:
+        type: string
+        default: ''
+        required: false
+      cudaq_repo:
+        type: string
+        default: ''
+        required: false
+      cudaq_ref:
+        type: string
+        default: ''
+        required: false
 
 jobs:
-  pr-build:
+  build-and-test:
     name: Build and test
-    if: startsWith(github.ref, 'refs/heads/pull-request/')
     strategy:
       fail-fast: false
       matrix:
@@ -24,17 +36,6 @@ jobs:
         with:
           set-safe-directory: true
 
-      - name: Lookup PR info
-        id: get-pr-info
-        env:
-          GH_TOKEN: ${{ github.token }}
-        uses: nv-gha-runners/get-pr-info@main
-
-      - name: Export PR info
-        id: export-pr-info
-        run: |
-          echo "pr_number=${{ fromJSON(steps.get-pr-info.outputs.pr-info).number }}" >> $GITHUB_OUTPUT
-
       - name: Configure
         id: config
         run: |
@@ -48,6 +49,9 @@ jobs:
       - name: Get required CUDAQ version
         id: get-cudaq-version
         uses: ./.github/actions/get-cudaq-version
+        with:
+          repo: ${{ inputs.cudaq_repo }}
+          ref: ${{ inputs.cudaq_ref }}
 
       - name: Get CUDAQ build
         uses: ./.github/actions/get-cudaq-build
@@ -55,7 +59,7 @@ jobs:
           repo: ${{ steps.get-cudaq-version.outputs.repo }}
           ref: ${{ steps.get-cudaq-version.outputs.ref }}
           token: ${{ secrets.CUDAQ_ACCESS_TOKEN }}
-          pr-number: ${{ steps.export-pr-info.outputs.pr_number }}
+          cache-key-suffix: ${{ inputs.cache_key_suffix }}
           platform: ${{ matrix.platform }}-cu${{ steps.config.outputs.cuda_major }}
 
       # ========================================================================
@@ -63,20 +67,21 @@ jobs:
       # ========================================================================
       - name: Install build requirements
         run: |
-          apt install -y --no-install-recommends gfortran libblas-dev wget
+          apt update
+          apt install -y --no-install-recommends gfortran libblas-dev wget jq
 
       - name: Install TensorRT (amd64)
         if: matrix.platform == 'amd64'
         run: |
-          apt-cache search tensorrt | awk '{print "Package: "$1"\nPin: version *+cuda${{ matrix.cuda_version }}\nPin-Priority: 1001\n"}' | tee /etc/apt/preferences.d/tensorrt-cuda${{ matrix.cuda_version }}.pref > /dev/null
           apt update
+          apt-cache search tensorrt | awk '{print "Package: "$1"\nPin: version *+cuda${{ matrix.cuda_version }}\nPin-Priority: 1001\n"}' | tee /etc/apt/preferences.d/tensorrt-cuda${{ matrix.cuda_version }}.pref > /dev/null
           apt install -y tensorrt-dev
 
       - name: Install TensorRT (arm64)
         if: matrix.platform == 'arm64' && !startsWith(matrix.cuda_version, '12')
         run: |
-          apt-cache search tensorrt | awk '{print "Package: "$1"\nPin: version *+cuda13.0\nPin-Priority: 1001\n"}' | tee /etc/apt/preferences.d/tensorrt-cuda13.0.pref > /dev/null
           apt update
+          apt-cache search tensorrt | awk '{print "Package: "$1"\nPin: version *+cuda13.0\nPin-Priority: 1001\n"}' | tee /etc/apt/preferences.d/tensorrt-cuda13.0.pref > /dev/null
           apt install -y tensorrt-dev
 
       - name: Build
@@ -85,9 +90,11 @@ jobs:
         with:
           lib: "qec"
           cuda_version: ${{ matrix.cuda_version }}
-          pr-number: ${{ steps.export-pr-info.outputs.pr_number }}
+          cache-key-suffix: ${{ inputs.cache_key_suffix }}
           save-ccache: true
           platform: ${{ matrix.platform }}
+          cudaq-repo: ${{ steps.get-cudaq-version.outputs.repo }}
+          cudaq-ref: ${{ steps.get-cudaq-version.outputs.ref }}
       # ========================================================================
       # Run tests
       # ========================================================================
@@ -142,12 +149,11 @@ jobs:
           retention-days: 1
 
   # ==========================================================================
-  # GPU Tests - Run on GPU runners (uses build artifacts from pr-build)
+  # GPU Tests - Run on GPU runners (uses build artifacts from build-and-test)
   # ==========================================================================
-  pr-build-gpu:
+  gpu-test:
     name: GPU tests
-    needs: pr-build
-    if: startsWith(github.ref, 'refs/heads/pull-request/')
+    needs: build-and-test
     strategy:
       fail-fast: false
       matrix:
@@ -197,15 +203,15 @@ jobs:
       - name: Install TensorRT (C++, amd64)
         if: matrix.platform == 'amd64'
         run: |
-          apt-cache search tensorrt | awk '{print "Package: "$1"\nPin: version *+cuda${{ matrix.cuda_version }}\nPin-Priority: 1001\n"}' | tee /etc/apt/preferences.d/tensorrt-cuda${{ matrix.cuda_version }}.pref > /dev/null
           apt update
+          apt-cache search tensorrt | awk '{print "Package: "$1"\nPin: version *+cuda${{ matrix.cuda_version }}\nPin-Priority: 1001\n"}' | tee /etc/apt/preferences.d/tensorrt-cuda${{ matrix.cuda_version }}.pref > /dev/null
           apt install -y tensorrt-dev
 
       - name: Install TensorRT (C++, arm64)
         if: matrix.platform == 'arm64' && !startsWith(matrix.cuda_version, '12')
         run: |
-          apt-cache search tensorrt | awk '{print "Package: "$1"\nPin: version *+cuda13.0\nPin-Priority: 1001\n"}' | tee /etc/apt/preferences.d/tensorrt-cuda13.0.pref > /dev/null
           apt update
+          apt-cache search tensorrt | awk '{print "Package: "$1"\nPin: version *+cuda13.0\nPin-Priority: 1001\n"}' | tee /etc/apt/preferences.d/tensorrt-cuda13.0.pref > /dev/null
           apt install -y tensorrt-dev
 
       - name: Install TensorRT (Python)

@@ -8,8 +8,8 @@ inputs:
   cuda_version:
     description: 'CUDA version to build against. (e.g, 12.6)'
     required: true
-  pr-number:
-    description: 'Unique pull request identifier.'
+  cache-key-suffix:
+    description: 'Unique identifier to append to cache keys.'
     default: ''
     required: false
   save-ccache:
@@ -27,6 +27,14 @@ inputs:
   cudaq-prefix:
     description: 'CUDA-Q install prefix'
     default: '/cudaq-install'
+    required: false
+  cudaq-repo:
+    description: "Optional source repository override for the QEC library's realtime CUDA-Q build."
+    default: ''
+    required: false
+  cudaq-ref:
+    description: "Optional source ref override for the QEC library's realtime CUDA-Q build."
+    default: ''
     required: false
 outputs:
   build-dir:
@@ -47,8 +55,8 @@ runs:
       id: ccache-key
       run: |
         echo "main=ccache-${{ inputs.lib }}-cu${{ inputs.cuda_version }}-gcc12-${{ inputs.platform }}" >> $GITHUB_OUTPUT
-        if [[ -n "${{ inputs.pr-number }}" ]]; then
-          echo "pr=-pr${{ inputs.pr-number }}" >> $GITHUB_OUTPUT
+        if [[ -n "${{ inputs.cache-key-suffix }}" ]]; then
+          echo "suffix=-${{ inputs.cache-key-suffix }}" >> $GITHUB_OUTPUT
         fi
       shell: bash
 
@@ -58,7 +66,7 @@ runs:
       with:
         fail-on-cache-miss: false
         path: /ccache-${{ inputs.lib }}
-        key: ${{ steps.ccache-key.outputs.main }}${{ steps.ccache-key.outputs.pr }}
+        key: ${{ steps.ccache-key.outputs.main }}${{ steps.ccache-key.outputs.suffix }}
         restore-keys: |
           ${{ steps.ccache-key.outputs.main }}
 
@@ -70,6 +78,8 @@ runs:
       id: build-lib
       env:
         CCACHE_DIR: /ccache-${{ inputs.lib }}
+        CUDAQ_REPO: ${{ inputs.cudaq-repo }}
+        CUDAQ_REF: ${{ inputs.cudaq-ref }}
       run: |
         build_dir=build_${{ inputs.lib }}
         .github/actions/build-lib/build_${{ inputs.lib }}.sh "$build_dir" "${{ inputs.install-prefix }}" "${{ inputs.cudaq-prefix }}"
@@ -84,7 +94,7 @@ runs:
       run: |
         bash .github/workflows/scripts/install_git_cli.sh
         gh cache delete \
-          ${{ steps.ccache-key.outputs.main }}${{ steps.ccache-key.outputs.pr }} \
+          ${{ steps.ccache-key.outputs.main }}${{ steps.ccache-key.outputs.suffix }} \
           --repo ${{ github.repository }}
       shell: bash
 
@@ -94,4 +104,4 @@ runs:
       continue-on-error: true
       with:
         path: /ccache-${{ inputs.lib }}
-        key: ${{ steps.ccache-key.outputs.main }}${{ steps.ccache-key.outputs.pr }}
+        key: ${{ steps.ccache-key.outputs.main }}${{ steps.ccache-key.outputs.suffix }}

@@ -2,7 +2,30 @@ name: Documentation
 
 on:
   workflow_call:
+    inputs:
+      deploy_docs:
+        type: boolean
+        default: false
+        required: false
+      cache_key_suffix:
+        type: string
+        default: ''
+        required: false
+      cudaq_repo:
+        type: string
+        default: ''
+        required: false
+      cudaq_ref:
+        type: string
+        default: ''
+        required: false
   workflow_dispatch:
+    inputs:
+      deploy_docs:
+        description: 'Deploy docs to GitHub Pages. Deployment only runs on main.'
+        type: boolean
+        default: true
+        required: false
   push:
     branches:
       - main
@@ -38,6 +61,9 @@ jobs:
       - name: Get required CUDAQ version
         id: get-cudaq-version
         uses: ./.github/actions/get-cudaq-version
+        with:
+          repo: ${{ inputs.cudaq_repo }}
+          ref: ${{ inputs.cudaq_ref }}
 
       - name: Get CUDAQ build
         uses: ./.github/actions/get-cudaq-build
@@ -45,6 +71,7 @@ jobs:
           repo: ${{ steps.get-cudaq-version.outputs.repo }}
           ref: ${{ steps.get-cudaq-version.outputs.ref }}
           token: ${{ secrets.CUDAQ_ACCESS_TOKEN }}
+          cache-key-suffix: ${{ inputs.cache_key_suffix }}
           platform: 'amd64-cu12' # Just choose one platform for docs
 
       # ========================================================================
@@ -53,6 +80,7 @@ jobs:
 
       - name: Install requirements
         run: |
+          apt update
           apt install -y --no-install-recommends \
             gfortran libblas-dev doxygen
 
@@ -87,7 +115,12 @@ jobs:
 
   deploy:
     name: Deploy latest docs
-    if: github.ref == 'refs/heads/main'
+    if: |
+      github.ref == 'refs/heads/main' &&
+      (
+        github.event_name == 'push' ||
+        inputs.deploy_docs == true
+      )
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
