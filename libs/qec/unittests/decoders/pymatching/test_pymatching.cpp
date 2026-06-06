@@ -82,6 +82,12 @@ TEST(PyMatchingDecoder, checkBoundaryEdges) {
   EXPECT_EQ(result.result[0], 0.0);
   EXPECT_EQ(result.result[1], 0.0);
   EXPECT_EQ(result.result[2], 1.0);
+
+  syndrome = {0.5, 0, 0};
+  result = d->decode(syndrome);
+  EXPECT_EQ(result.result[0], 1.0);
+  EXPECT_EQ(result.result[1], 0.0);
+  EXPECT_EQ(result.result[2], 0.0);
 }
 
 TEST(PyMatchingDecoder, rejectsDuplicateSparseInput) {

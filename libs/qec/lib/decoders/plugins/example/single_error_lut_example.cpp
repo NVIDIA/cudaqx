@@ -50,7 +50,7 @@ public:
     assert(syndrome_str.length() == syndrome_size);
     bool anyErrors = false;
     for (std::size_t i = 0; i < syndrome_size; i++) {
-      if (syndrome[i] >= 0.5) {
+      if (cudaq::qec::convert_soft_to_hard(syndrome[i])) {
         syndrome_str[i] = '1';
         anyErrors = true;
       }
