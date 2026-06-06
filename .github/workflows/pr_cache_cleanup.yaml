@@ -18,7 +18,7 @@ jobs:
           pr_number=$(echo ${{ github.event.ref }} | sed 's/.*\///')
 
           # Fetch the list of cache keys
-          cache_keys=$(gh cache list --repo ${{ github.repository }} | cut -f 2)
+          cache_keys=$(gh cache list --repo ${{ github.repository }} --limit 1000 | cut -f 2)
 
           for key in $cache_keys
           do
