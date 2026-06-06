@@ -37,5 +37,5 @@ Here we demonstrate how to use the CUDA-Q Solvers library to execute the ADAPT-V
 
    .. code:: bash
 
-       nvq++ --enable-mlir -lcudaq-solvers adapt_h2.cpp -o adapt_h2
+       nvq++ -lcudaq-solvers adapt_h2.cpp -o adapt_h2
       ./adapt_h2

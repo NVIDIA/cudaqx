@@ -11,7 +11,7 @@
 #include "cudaq/solvers/qaoa.h"
 
 // Compile and run with
-// nvq++ --enable-mlir -lcudaq-solvers molecular_docking_qaoa.cpp
+// nvq++ -lcudaq-solvers molecular_docking_qaoa.cpp
 // ./a.out
 
 int main() {

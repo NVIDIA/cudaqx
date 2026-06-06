@@ -168,7 +168,7 @@ test_examples() {
                             \$compile_cmd -o test_prog && \
                             ./test_prog || exit 1; \
                         else \
-                            nvq++ --enable-mlir -lcudaq-${domain} --target ${target} \$f -o test_prog && \
+                            nvq++ -lcudaq-${domain} --target ${target} \$f -o test_prog && \
                             ./test_prog || exit 1; \
                         fi; \
                         rm test_prog; \
