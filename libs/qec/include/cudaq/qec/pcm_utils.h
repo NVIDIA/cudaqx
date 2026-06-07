@@ -205,22 +205,10 @@ get_pcm_for_rounds(const sparse_binary_matrix &pcm,
                    bool straddle_end_round = false,
                    bool pcm_is_canonical = false);
 
-/// @brief Upper bound on \f$\texttt{rows} \times \texttt{cols}\f$ for the
-/// dense `generate_random_pcm` path. Above this, the call throws and the
-/// caller should switch to `generate_random_pcm_sparse`. Exposed as a named
-/// symbol so tests and users can reference it without grepping the source.
-inline constexpr std::size_t k_max_dense_pcm_elements =
-    static_cast<std::size_t>(400u) * 1024u * 1024u;
-
 /// @brief Generate a random PCM with the given parameters.
 ///
 /// The PCM has shape `(n_rounds * n_syndromes_per_round) × (n_rounds *
-/// n_errs_per_round)`. If the product
-/// \f$n\_rounds^2 \times n\_syndromes\_per\_round \times n\_errs\_per\_round\f$
-/// exceeds `k_max_dense_pcm_elements`
-/// (\f$400 \times 1024 \times 1024 \approx 4.19 \times 10^8\f$ entries),
-/// throws `std::invalid_argument`; use `generate_random_pcm_sparse` for
-/// matrices that large without a dense allocation.
+/// n_errs_per_round)`.
 /// @param n_rounds The number of rounds in the PCM.
 /// @param n_errs_per_round The number of errors per round in the PCM.
 /// @param n_syndromes_per_round The number of syndromes per round in the PCM.

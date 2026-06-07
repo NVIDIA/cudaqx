@@ -511,34 +511,9 @@ cudaqx::tensor<uint8_t> generate_random_pcm(std::size_t n_rounds,
         std::to_string(weight) +
         ", n_syndromes_per_round=" + std::to_string(n_syndromes_per_round));
   }
-  // Overflow-safe cap check in (a > limit / b) form; otherwise size_t wrap
-  // could bypass the cap.
-  auto exceeds_cap = [](std::size_t a, std::size_t b) {
-    return a != 0 && b > k_max_dense_pcm_elements / a;
-  };
-  if (exceeds_cap(n_rounds, n_errs_per_round) ||
-      exceeds_cap(n_rounds, n_syndromes_per_round)) {
-    throw std::invalid_argument(
-        std::string("generate_random_pcm: n_rounds * n_errs_per_round and "
-                    "n_rounds * n_syndromes_per_round must each fit within "
-                    "the dense allocation limit (") +
-        std::to_string(k_max_dense_pcm_elements) +
-        "); got n_rounds=" + std::to_string(n_rounds) +
-        ", n_errs_per_round=" + std::to_string(n_errs_per_round) +
-        ", n_syndromes_per_round=" + std::to_string(n_syndromes_per_round) +
-        ". Use cudaq::qec::generate_random_pcm_sparse(...) instead.");
-  }
+
   std::size_t n_cols = n_rounds * n_errs_per_round;
   std::size_t n_rows = n_rounds * n_syndromes_per_round;
-  if (exceeds_cap(n_rows, n_cols)) {
-    throw std::invalid_argument(
-        std::string("generate_random_pcm: PCM size (") +
-        std::to_string(n_rows) + " × " + std::to_string(n_cols) +
-        " elements) exceeds the dense allocation limit (" +
-        std::to_string(k_max_dense_pcm_elements) +
-        ") for this API; use cudaq::qec::generate_random_pcm_sparse(...) "
-        "instead.");
-  }
 
   cudaqx::tensor<uint8_t> pcm(std::vector<std::size_t>{n_rows, n_cols});
 

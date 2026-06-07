@@ -942,10 +942,6 @@ void bindDecoder(nb::module_ &mod) {
         This function creates a random parity check matrix for quantum error correction
         with specified parameters controlling the structure and randomness.
 
-        If ``n_rounds * n_syndromes_per_round * n_rounds * n_errs_per_round`` is
-        larger than the internal dense limit (see C++ API), this raises
-        ``ValueError`` / ``RuntimeError``.
-
         Args:
             n_rounds: Number of measurement rounds in the error correction protocol
             n_errs_per_round: Number of error mechanisms per round
