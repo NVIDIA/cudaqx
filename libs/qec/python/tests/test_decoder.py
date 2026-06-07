@@ -379,7 +379,6 @@ def test_sort_pcm_columns_invalid_input():
         qec.get_sorted_pcm_column_indices(H_invalid)
 
 
-
 def test_gen_random_pcm():
     pcm = qec.generate_random_pcm(n_rounds=10,
                                   n_errs_per_round=20,
@@ -395,8 +394,6 @@ def test_gen_random_pcm():
     qec.dump_pcm(pcm)
     print('')
     assert pcm.shape == (100, 200)
-
-
 
 
 def test_get_pcm_for_rounds():
@@ -552,7 +549,8 @@ def test_get_decoder_sparse_vs_dense_same_results():
     syndrome = np.random.random(8).tolist()
 
     dec_dense = qec.get_decoder("example_byod", H_dense)
-    dec_sparse = qec.get_decoder("example_byod", scipy_sparse.csc_matrix(H_dense))
+    dec_sparse = qec.get_decoder("example_byod",
+                                 scipy_sparse.csc_matrix(H_dense))
 
     r_dense = dec_dense.decode(syndrome)
     r_sparse = dec_sparse.decode(syndrome)
@@ -633,9 +631,9 @@ def test_get_decoder_scipy_csr_csc_same_result():
     syndrome = np.zeros(H_dense.shape[0], dtype=np.uint8)
 
     dec_csr = qec.get_decoder("single_error_lut_example",
-                               scipy_sparse.csr_matrix(H_dense))
+                              scipy_sparse.csr_matrix(H_dense))
     dec_csc = qec.get_decoder("single_error_lut_example",
-                               scipy_sparse.csc_matrix(H_dense))
+                              scipy_sparse.csc_matrix(H_dense))
     dec_dense = qec.get_decoder("single_error_lut_example", H_dense)
 
     res_csr = dec_csr.decode(syndrome)
@@ -672,6 +670,7 @@ def test_get_decoder_scipy_python_registered_decoder():
 
     @qec.decoder("_test_scipy_byod")
     class _ScipyByod:
+
         def __init__(self, H, **kwargs):
             qec.Decoder.__init__(self, H)
             self.H = H
