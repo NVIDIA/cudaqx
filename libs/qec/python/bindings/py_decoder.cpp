@@ -106,19 +106,21 @@ class PyDecoder : public decoder {
 public:
   NB_TRAMPOLINE(decoder, 1);
 
-  PyDecoder(const nb::ndarray<nb::numpy, uint8_t> &H)
-      : decoder([&H]() {
+  /// @brief Construct from a scipy sparse matrix (CSR, CSC, COO, ...) or a
+  ///        dense numpy array of any numeric dtype.
+  PyDecoder(nb::object mat)
+      : decoder([&mat]() -> cudaq::qec::sparse_binary_matrix {
+          if (nb::hasattr(mat, "indptr") && nb::hasattr(mat, "indices"))
+            return sparse_binary_matrix_from_scipy(mat);
+          // Dense numpy array of any dtype
+          auto H = nb::cast<nb::ndarray<nb::numpy, uint8_t>>(
+              mat.attr("astype")("uint8"));
           auto borrow = toTensor(H);
           cudaqx::tensor<uint8_t> owned(borrow.shape());
           owned.copy(borrow.data(), borrow.shape());
-          // Force CSC to match get_decoder(ndarray); avoids CSR→CSC transposes
-          // in downstream to_nested_csc() calls.
           return cudaq::qec::sparse_binary_matrix(
               owned, cudaq::qec::sparse_binary_matrix_layout::csc);
         }()) {}
-
-  /// @brief Construct from any scipy sparse matrix (CSR, CSC, COO, ...)
-  PyDecoder(nb::object mat) : decoder(sparse_binary_matrix_from_scipy(mat)) {}
 
   decoder_result decode(const std::vector<float_t> &syndrome) override {
     NB_OVERRIDE_PURE(decode, syndrome);
@@ -568,7 +570,6 @@ void bindDecoder(nb::module_ &mod) {
 
   nb::class_<decoder, PyDecoder>(
       qecmod, "Decoder", "Represents a decoder for quantum error correction")
-      .def(nb::init<const nb::ndarray<nb::numpy, uint8_t> &>())
       .def(nb::init<nb::object>(),
            R"pbdoc(
         Construct from a scipy sparse matrix (CSR, CSC, COO or any other
