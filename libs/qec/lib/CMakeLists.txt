@@ -1,5 +1,5 @@
 # ============================================================================ #
-# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
+# Copyright (c) 2024 - 2026 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -7,6 +7,8 @@
 # ============================================================================ #
 
 set(LIBRARY_NAME cudaq-qec)
+
+include(FetchContent)
 
 add_compile_options(-Wno-attributes) 
 
@@ -43,7 +45,8 @@ set(QEC_SOURCES
   experiments.cpp
   pcm_utils.cpp
   plugin_loader.cpp
-  stabilizer_utils.cpp 
+  sparse_binary_matrix.cpp
+  stabilizer_utils.cpp
   decoders/lut.cpp
   decoders/sliding_window.cpp
   version.cpp
@@ -56,6 +59,28 @@ list(APPEND QEC_SOURCES
 
 # FIXME?: This must be a shared library. Trying to build a static one will fail.
 add_library(${LIBRARY_NAME} SHARED ${QEC_SOURCES})
+
+if(NOT TARGET libstim)
+  FetchContent_Declare(
+    stim
+    GIT_REPOSITORY https://github.com/quantumlib/Stim.git
+    GIT_TAG v1.15.0
+    EXCLUDE_FROM_ALL
+  )
+  FetchContent_MakeAvailable(stim)
+endif()
+
+if(NOT TARGET libstim)
+  message(FATAL_ERROR
+    "Stim FetchContent did not provide the libstim target.")
+endif()
+set_target_properties(${LIBRARY_NAME} PROPERTIES
+  VISIBILITY_INLINES_HIDDEN ON
+)
+target_link_libraries(${LIBRARY_NAME} PRIVATE libstim)
+target_link_options(${LIBRARY_NAME} PRIVATE
+  $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>>:-Wl,--exclude-libs,libstim.a>
+)
 
 add_subdirectory(decoders/plugins/example)
 add_subdirectory(decoders/plugins/pymatching)

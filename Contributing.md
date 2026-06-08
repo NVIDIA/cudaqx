@@ -85,16 +85,6 @@ this section is the authoritative source.
   required.
 - If public docs were not created for a user-visible change, **report and track
   that they still need to be written.**
-- **Docs for new features go in a separate PR, held until release.** Our
-  published documentation site updates immediately when changes land on the
-  default branch, so user-facing docs that describe a feature must not be
-  merged before the feature is actually available in a release. The
-  recommended flow is:
-  1. Merge the code change (with Doxygen / API reference updates only).
-  2. Open a follow-up PR that adds the user-facing docs (guides, tutorials,
-     release notes, examples).
-  3. Keep that docs PR in Draft / on hold and merge it at release time so
-     the published site and the released bits go live together.
 
 ### Code style
 

@@ -1285,7 +1285,7 @@ Example of running a memory experiment:
     .. code-block:: cpp
 
         // Compile and run with:
-        // nvq++ --enable-mlir --target=stim -lcudaq-qec example.cpp
+        // nvq++ --target=stim -lcudaq-qec example.cpp
         // ./a.out
 
         #include "cudaq.h"

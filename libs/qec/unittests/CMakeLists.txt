@@ -35,7 +35,7 @@ find_package(CUDAToolkit REQUIRED)
 add_compile_options(-Wno-attributes) 
 
 add_executable(test_decoders test_decoders.cpp decoders/sample_decoder.cpp)
-target_link_libraries(test_decoders PRIVATE GTest::gtest_main cudaq-qec cudaq-qec-realtime-decoding cudaq::cudaq)
+target_link_libraries(test_decoders PRIVATE GTest::gtest_main cudaq-qec cudaq-qec-realtime-decoding cudaq::cudaq libstim)
 add_dependencies(CUDAQXQECUnitTests test_decoders)
 gtest_discover_tests(test_decoders)
 
@@ -56,6 +56,11 @@ target_include_directories(test_dem_sampling PRIVATE ${CUDAToolkit_INCLUDE_DIRS}
 add_dependencies(CUDAQXQECUnitTests test_dem_sampling)
 gtest_discover_tests(test_dem_sampling)
 
+add_executable(test_sparse_binary_matrix test_sparse_binary_matrix.cpp)
+target_link_libraries(test_sparse_binary_matrix PRIVATE GTest::gtest_main cudaq-qec
+                                               cudaq::cudaq)
+add_dependencies(CUDAQXQECUnitTests test_sparse_binary_matrix)
+gtest_discover_tests(test_sparse_binary_matrix)
 
 # TensorRT decoder test is only built for x86 architectures
 if(CUDAQ_QEC_TRT_DECODER_ENABLED AND CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64)|(AMD64|amd64)|(^i.86$)")
@@ -504,4 +509,3 @@ add_subdirectory(decoders/pymatching)
 if(CUDAQX_QEC_ENABLE_HOLOLINK_TOOLS)
   add_subdirectory(utils)
 endif()
-

@@ -1,12 +1,14 @@
 /*******************************************************************************
- * Copyright (c) 2022 - 2025 NVIDIA Corporation & Affiliates.                  *
+ * Copyright (c) 2022 - 2026 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
+#include "stim.h"
 #include "cudaq/qec/decoder.h"
+#include "cudaq/qec/detector_error_model.h"
 #include "cudaq/qec/pcm_utils.h"
 #include <cmath>
 #include <future>
@@ -56,6 +58,14 @@ TEST(DecoderUtils, CovertSoftToHard) {
   for (int i = 0; i < out.size(); i++)
     ASSERT_EQ(out[i], expected_out[i]);
 
+  std::vector<float> boundary_in = {0.499f, 0.5f, 0.501f};
+  std::vector<uint8_t> boundary_out;
+  std::vector<uint8_t> expected_boundary_out = {0, 1, 1};
+  cudaq::qec::convert_vec_soft_to_hard(boundary_in, boundary_out);
+  ASSERT_EQ(boundary_out.size(), expected_boundary_out.size());
+  for (int i = 0; i < boundary_out.size(); i++)
+    ASSERT_EQ(boundary_out[i], expected_boundary_out[i]);
+
   std::vector<std::vector<double>> in2 = {{0.6, 0.4}, {0.7, 0.8}};
   std::vector<std::vector<int>> out2;
   std::vector<std::vector<int>> expected_out2 = {{1, 0}, {1, 1}};
@@ -65,6 +75,27 @@ TEST(DecoderUtils, CovertSoftToHard) {
     for (int c = 0; c < out2.size(); c++)
       ASSERT_EQ(out2[r][c], expected_out2[r][c]);
   }
+}
+
+TEST(DecoderUtils, ConvertSoftToHardScalar) {
+  // Default threshold (0.5): the canonical >= contract.
+  EXPECT_TRUE(cudaq::qec::convert_soft_to_hard(0.6f));
+  EXPECT_FALSE(cudaq::qec::convert_soft_to_hard(0.4f));
+  EXPECT_TRUE(cudaq::qec::convert_soft_to_hard(0.5f));
+  EXPECT_FALSE(cudaq::qec::convert_soft_to_hard(0.499f));
+  EXPECT_TRUE(cudaq::qec::convert_soft_to_hard(0.501f));
+
+  // Double-precision input.
+  EXPECT_TRUE(cudaq::qec::convert_soft_to_hard(0.5));
+  EXPECT_FALSE(cudaq::qec::convert_soft_to_hard(0.499));
+
+  // Custom threshold.
+  EXPECT_TRUE(cudaq::qec::convert_soft_to_hard(0.4f, 0.4f));
+  EXPECT_FALSE(cudaq::qec::convert_soft_to_hard(0.3f, 0.4f));
+
+  // Usable in a constant-expression context.
+  static_assert(cudaq::qec::convert_soft_to_hard(0.5f));
+  static_assert(!cudaq::qec::convert_soft_to_hard(0.49f));
 }
 
 TEST(DecoderUtils, ConvertVecSoftToTensorHard) {
@@ -104,7 +135,8 @@ TEST(SampleDecoder, checkAPI) {
   std::size_t block_size = 10;
   std::size_t syndrome_size = 4;
   cudaqx::tensor<uint8_t> H({syndrome_size, block_size});
-  auto d = cudaq::qec::decoder::get("sample_decoder", H);
+  auto H_sparse = cudaq::qec::sparse_binary_matrix(H);
+  auto d = cudaq::qec::decoder::get("sample_decoder", H_sparse);
   std::vector<float_t> syndromes(syndrome_size);
   auto dec_result = d->decode(syndromes);
   ASSERT_EQ(dec_result.result.size(), block_size);
@@ -125,6 +157,39 @@ TEST(SampleDecoder, checkAPI) {
   for (auto &m : dec_results)
     for (auto x : m.result)
       ASSERT_EQ(x, 0.0f);
+}
+
+TEST(DecoderPlugins, SingleErrorLutExample_DecodesSingletonColumnSyndromes) {
+  using cudaq::qec::float_t;
+
+  constexpr std::size_t block_size = 3;
+  constexpr std::size_t syndrome_size = 2;
+  // | 1 1 0 |
+  // | 0 1 1 | — single-bit columns are weight-1 syndrome patterns.
+  std::vector<uint8_t> H_vec = {1, 1, 0, // row 0
+                                0, 1, 1};
+  cudaqx::tensor<uint8_t> H;
+  H.copy(H_vec.data(), {syndrome_size, block_size});
+  cudaqx::heterogeneous_map params;
+  auto d = cudaq::qec::decoder::get("single_error_lut_example", H, params);
+
+  std::vector<float_t> syndrome0 = {1.0f, 0.0f}; // column 0
+  auto r0 = d->decode(syndrome0);
+  ASSERT_TRUE(r0.converged);
+  EXPECT_FLOAT_EQ(r0.result[0], 1.0f);
+  EXPECT_FLOAT_EQ(r0.result[1], 0.0f);
+  EXPECT_FLOAT_EQ(r0.result[2], 0.0f);
+
+  std::vector<float_t> syndrome2 = {0.0f, 1.0f}; // column 2
+  auto r2 = d->decode(syndrome2);
+  ASSERT_TRUE(r2.converged);
+  EXPECT_FLOAT_EQ(r2.result[0], 0.0f);
+  EXPECT_FLOAT_EQ(r2.result[1], 0.0f);
+  EXPECT_FLOAT_EQ(r2.result[2], 1.0f);
+
+  std::vector<float_t> zero(syndrome_size, 0.0f);
+  auto rz = d->decode(zero);
+  ASSERT_TRUE(rz.converged);
 }
 
 TEST(SteaneLutDecoder, checkAPI) {
@@ -182,6 +247,12 @@ TEST(SteaneLutDecoder, checkAPI) {
   }
   ASSERT_TRUE(convergeTrueFound);
   ASSERT_FALSE(convergeFalseFound);
+
+  std::vector<float_t> boundary_syndrome = {0.5, 0.0, 0.5};
+  auto boundary_result = d->decode(boundary_syndrome);
+  ASSERT_TRUE(boundary_result.converged);
+  ASSERT_EQ(boundary_result.result.size(), block_size);
+  EXPECT_EQ(boundary_result.result[4], 1.0);
 
   // Test opt_results functionality
   // Test case 1: Invalid result type
@@ -636,7 +707,7 @@ TEST(DecoderResultTest, EqualityOperatorConvergedAndResult) {
   EXPECT_FALSE(result1 != result2);
 }
 
-TEST(DecoderTest, GetBlockSizeAndSyndromeSize) {
+TEST(DecoderTest, GetWithoutOptionsSetsBlockAndSyndromeSize) {
   std::size_t block_size = 15;
   std::size_t syndrome_size = 8;
 
@@ -651,7 +722,8 @@ TEST(DecoderTest, GetBlockSizeAndSyndromeSize) {
   }
 
   // Create a decoder instance
-  auto decoder = cudaq::qec::decoder::get("sample_decoder", H);
+  auto H_sparse = cudaq::qec::sparse_binary_matrix(H);
+  auto decoder = cudaq::qec::decoder::get("sample_decoder", H_sparse);
   ASSERT_NE(decoder, nullptr);
 
   // Test get_block_size() returns the correct block size
@@ -665,66 +737,144 @@ TEST(DecoderTest, GetBlockSizeAndSyndromeSize) {
   std::size_t new_syndrome_size = 12;
   cudaqx::tensor<uint8_t> H2({new_syndrome_size, new_block_size});
 
-  auto decoder2 = cudaq::qec::decoder::get("sample_decoder", H2);
+  auto H_sparse2 = cudaq::qec::sparse_binary_matrix(H2);
+  auto decoder2 = cudaq::qec::decoder::get("sample_decoder", H_sparse2);
   ASSERT_NE(decoder2, nullptr);
 
   EXPECT_EQ(decoder2->get_block_size(), new_block_size);
   EXPECT_EQ(decoder2->get_syndrome_size(), new_syndrome_size);
 }
 
-TEST(DecoderRegistryTest, SingleParameterRegistryDirect) {
-  // Test the single-parameter registry instantiation (line 18 in decoder.cpp)
-  // This directly tests the registry for decoder constructors that only take
-  // tensor<uint8_t> by accessing the single-parameter extension_point registry
-  // directly
+TEST(StimDemGetDecoder, ConstructsLutDecoderFromStimDemText) {
+  const std::string dem_text = R"(error(0.1) D0 L0
+error(0.1) D1 L0
+error(0.05) D0 D1
+)";
 
-  std::size_t block_size = 8;
-  std::size_t syndrome_size = 4;
-  cudaqx::tensor<uint8_t> H({syndrome_size, block_size});
+  auto d = cudaq::qec::get_decoder("single_error_lut", dem_text);
+  ASSERT_NE(d, nullptr);
+  EXPECT_EQ(d->get_syndrome_size(), 2u);
+  EXPECT_EQ(d->get_block_size(), 3u);
 
-  // Initialize with some test data to ensure it's a valid matrix
-  for (std::size_t i = 0; i < syndrome_size; ++i) {
-    for (std::size_t j = 0; j < block_size; ++j) {
-      H.at({i, j}) = (i + j) % 2;
-    }
+  struct Case {
+    std::vector<cudaq::qec::float_t> syndrome;
+    std::vector<cudaq::qec::float_t> expected;
+  };
+  const std::vector<Case> cases = {
+      {{0.0, 0.0}, {0.0, 0.0, 0.0}},
+      {{1.0, 0.0}, {1.0, 0.0, 0.0}},
+      {{0.0, 1.0}, {0.0, 1.0, 0.0}},
+      {{1.0, 1.0}, {0.0, 0.0, 1.0}},
+  };
+  for (const auto &c : cases) {
+    auto result = d->decode(c.syndrome);
+    EXPECT_TRUE(result.converged)
+        << "syndrome {" << c.syndrome[0] << ", " << c.syndrome[1] << "}";
+    ASSERT_EQ(result.result.size(), 3u);
+    for (std::size_t i = 0; i < 3u; ++i)
+      EXPECT_FLOAT_EQ(result.result[i], c.expected[i])
+          << "error " << i << " for syndrome {" << c.syndrome[0] << ", "
+          << c.syndrome[1] << "}";
   }
+}
 
-  // Test that the single-parameter registry exists and can be accessed
-  // This directly tests line 18: INSTANTIATE_REGISTRY(cudaq::qec::decoder,
-  // const cudaqx::tensor<uint8_t> &)
-  try {
-    // Create a decoder using the single-parameter extension_point directly
-    // This bypasses decoder::get and directly uses the single-parameter
-    // registry
-    auto single_param_decoder = cudaqx::extension_point<
-        cudaq::qec::decoder,
-        const cudaqx::tensor<uint8_t> &>::get("sample_decoder", H);
+TEST(StimDemGetDecoder, StaticDecoderGetAcceptsStimDemString) {
+  const std::string dem_text = R"(error(0.1) D0 L0
+error(0.1) D1 L0
+error(0.05) D0 D1
+)";
 
-    ASSERT_NE(single_param_decoder, nullptr);
+  auto d = cudaq::qec::decoder::get("single_error_lut", dem_text);
+  ASSERT_NE(d, nullptr);
+  EXPECT_EQ(d->get_syndrome_size(), 2u);
+  EXPECT_EQ(d->get_block_size(), 3u);
+  auto result = d->decode(std::vector<cudaq::qec::float_t>{1.0, 1.0});
+  EXPECT_TRUE(result.converged);
+  ASSERT_EQ(result.result.size(), 3u);
+  EXPECT_FLOAT_EQ(result.result[2], 1.0);
+}
 
-    // Verify the decoder works correctly
-    EXPECT_EQ(single_param_decoder->get_block_size(), block_size);
-    EXPECT_EQ(single_param_decoder->get_syndrome_size(), syndrome_size);
+TEST(StimDemGetDecoder, StillAcceptsParityCheckMatrix) {
+  cudaqx::tensor<uint8_t> H({2, 3});
+  H.copy(std::vector<uint8_t>{1, 0, 1, 0, 1, 1}.data(), {2, 3});
+  auto d = cudaq::qec::get_decoder("single_error_lut", H);
+  ASSERT_NE(d, nullptr);
+  EXPECT_EQ(d->get_syndrome_size(), 2u);
+  EXPECT_EQ(d->get_block_size(), 3u);
+}
 
-    // Test with a syndrome decode to ensure functionality
-    std::vector<cudaq::qec::float_t> syndrome(syndrome_size, 0.0f);
-    auto result = single_param_decoder->decode(syndrome);
-    EXPECT_EQ(result.result.size(), block_size);
+TEST(StimDemGetDecoder, RepeatedDetectorOrObservableTargetsXorFold) {
+  const std::string dem_text = R"(error(0.1) D0 D0
+error(0.1) L0 L0
+)";
 
-  } catch (const std::runtime_error &e) {
-    // This is expected if "sample_decoder" is not registered in the
-    // single-parameter registry The test still passes because it verifies that
-    // line 18 creates a functional registry
-    EXPECT_TRUE(std::string(e.what()).find("Cannot find extension with name") !=
-                std::string::npos);
+  auto dem = cudaq::qec::dem_from_stim_text(dem_text);
+  ASSERT_EQ(dem.num_detectors(), 1u);
+  ASSERT_EQ(dem.num_observables(), 1u);
+  ASSERT_EQ(dem.num_error_mechanisms(), 2u);
+  EXPECT_EQ(dem.detector_error_matrix.at({0u, 0u}), 0u)
+      << "duplicate D0 in error 0 should XOR-cancel to 0";
+  EXPECT_EQ(dem.observables_flips_matrix.at({0u, 1u}), 0u)
+      << "duplicate L0 in error 1 should XOR-cancel to 0";
+}
+
+TEST(StimDemGetDecoder, DemWithoutObservablesDoesNotAddODefault) {
+  auto dem = cudaq::qec::dem_from_stim_text("error(0.1) D0\n");
+  auto defaults = cudaq::qec::details::dem_defaults_for_missing_keys(
+      [](const std::string &) { return false; }, dem);
+
+  EXPECT_EQ(defaults.O, nullptr);
+  ASSERT_NE(defaults.error_rate_vec, nullptr);
+  EXPECT_EQ(defaults.error_rate_vec->size(), 1u);
+}
+
+TEST(StimDemGetDecoder, ThrowsOnProbabilityOutOfRange) {
+  const std::string dem_text = "error(1.5) D0\n";
+  EXPECT_THROW(cudaq::qec::get_decoder("single_error_lut", dem_text),
+               std::runtime_error);
+}
+
+TEST(StimDemGetDecoder, ThrowsOnMalformedStimDem) {
+  EXPECT_THROW(cudaq::qec::get_decoder("single_error_lut", "not a valid DEM"),
+               std::runtime_error);
+}
+
+TEST(StimDemGetDecoder, ThrowsOnUnknownDecoderName) {
+  const std::string dem_text = "error(0.1) D0 L0\n";
+  EXPECT_THROW(cudaq::qec::get_decoder("__no_such_decoder__", dem_text),
+               std::runtime_error);
+}
+
+TEST(StimDemGetDecoder, ThrowsOnEmptyErrorMechanisms) {
+  const std::string dem_text = "detector(0, 0, 0)\n";
+  EXPECT_THROW(cudaq::qec::get_decoder("single_error_lut", dem_text),
+               std::runtime_error);
+}
+
+TEST(StimDemGetDecoder, StimDemTargetCategoriesAreExhaustive) {
+  const std::vector<stim::DemTarget> samples = {
+      stim::DemTarget::separator(),
+      stim::DemTarget::relative_detector_id(0),
+      stim::DemTarget::relative_detector_id(42),
+      stim::DemTarget::observable_id(0),
+      stim::DemTarget::observable_id(7),
+  };
+  for (const auto &t : samples) {
+    const int kinds = static_cast<int>(t.is_separator()) +
+                      static_cast<int>(t.is_relative_detector_id()) +
+                      static_cast<int>(t.is_observable_id());
+    EXPECT_EQ(kinds, 1) << "DemTarget " << t.str() << " matched " << kinds
+                        << " predicates; expected exactly 1";
   }
+}
 
-  // Test that we can check if extensions are registered in the single-parameter
-  // registry
-  auto registered_single = cudaqx::extension_point<
-      cudaq::qec::decoder, const cudaqx::tensor<uint8_t> &>::get_registered();
-
-  // The registry should exist (even if empty), proving line 18 instantiation
-  // works This test passes if no exceptions are thrown, proving the
-  // single-parameter registry is instantiated
+TEST(StimDemGetDecoder, UserOptionsAreNotOverwritten) {
+  const std::string dem_text = R"(error(0.1) D0 L0
+error(0.1) D1 L0
+error(0.05) D0 D1
+)";
+  cudaqx::heterogeneous_map opts;
+  opts.insert("error_rate_vec", std::vector<double>{0.5});
+  EXPECT_THROW(cudaq::qec::get_decoder("single_error_lut", dem_text, opts),
+               std::runtime_error);
 }

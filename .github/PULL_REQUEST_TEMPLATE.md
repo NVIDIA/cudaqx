@@ -48,9 +48,6 @@ through and explain.
 - [ ] Public-facing APIs have Doxygen docs.
 - [ ] User-visible behavior changes have public docs, or a follow-up is
       tracked.
-- [ ] User-facing docs for new features are in a **separate PR** held until
-      release (the docs site publishes immediately on merge to the default
-      branch, so feature docs must not land before the feature ships).
 
 ### Code style
 - [ ] Naming follows the existing convention (`snake_case` vs `camelCase`) for

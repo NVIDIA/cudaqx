@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2022 - 2025 NVIDIA Corporation & Affiliates.                  *
+ * Copyright (c) 2022 - 2026 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -17,8 +17,7 @@
 #include <filesystem>
 #include <vector>
 
-INSTANTIATE_REGISTRY(cudaq::qec::decoder, const cudaqx::tensor<uint8_t> &)
-INSTANTIATE_REGISTRY(cudaq::qec::decoder, const cudaqx::tensor<uint8_t> &,
+INSTANTIATE_REGISTRY(cudaq::qec::decoder, const cudaq::qec::decoder_init &,
                      const cudaqx::heterogeneous_map &)
 
 // Include decoder implementations AFTER registry instantiation
@@ -70,12 +69,11 @@ struct decoder::rt_impl {
 
 void decoder::rt_impl_deleter::operator()(rt_impl *p) const { delete p; }
 
-decoder::decoder(const cudaqx::tensor<uint8_t> &H)
-    : H(H), pimpl(std::unique_ptr<rt_impl, rt_impl_deleter>(new rt_impl())) {
-  const auto H_shape = H.shape();
-  assert(H_shape.size() == 2 && "H tensor must be of rank 2");
-  syndrome_size = H_shape[0];
-  block_size = H_shape[1];
+decoder::decoder(cudaq::qec::sparse_binary_matrix H)
+    : H(std::move(H)),
+      pimpl(std::unique_ptr<rt_impl, rt_impl_deleter>(new rt_impl())) {
+  syndrome_size = this->H.num_rows();
+  block_size = this->H.num_cols();
   reset_decoder();
   pimpl->persistent_detector_buffer.resize(this->syndrome_size);
   pimpl->persistent_soft_detector_buffer.resize(this->syndrome_size);
@@ -130,7 +128,7 @@ decoder::decode_async(const std::vector<float_t> &syndrome) {
 }
 
 std::unique_ptr<decoder>
-decoder::get(const std::string &name, const cudaqx::tensor<uint8_t> &H,
+decoder::get(const std::string &name, const decoder_init &init,
              const cudaqx::heterogeneous_map &param_map) {
   auto [mutex, registry] = get_registry();
   std::lock_guard<std::recursive_mutex> lock(mutex);
@@ -140,8 +138,23 @@ decoder::get(const std::string &name, const cudaqx::tensor<uint8_t> &H,
         "invalid decoder requested: " + name +
         ". Run with CUDAQ_LOG_LEVEL=info (environment variable) to see "
         "additional plugin diagnostics at startup.");
-  return iter->second(H, param_map);
+  return iter->second(init, param_map);
 }
+
+namespace details {
+
+dem_default_values dem_defaults_for_missing_keys(
+    const std::function<bool(const std::string &)> &contains_user_key,
+    const detector_error_model &dem) {
+  dem_default_values out;
+  if (!contains_user_key("O") && dem.num_observables() > 0)
+    out.O = &dem.observables_flips_matrix;
+  if (!contains_user_key("error_rate_vec"))
+    out.error_rate_vec = &dem.error_rates;
+  return out;
+}
+
+} // namespace details
 
 static uint32_t calculate_num_msyn_per_decode(
     const std::vector<std::vector<uint32_t>> &D_sparse) {
@@ -286,7 +299,7 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
     std::chrono::duration<double> log_dur1, log_dur2, log_dur3;
 
     const bool log_due_to_log_level =
-        cudaq::details::should_log(cudaq::details::LogLevel::info);
+        cudaq::detail::should_log(cudaq::detail::LogLevel::info);
     const bool should_log = pimpl->should_log || log_due_to_log_level;
 
     if (should_log) {
@@ -422,7 +435,7 @@ void decoder::clear_corrections() {
   pimpl->corrections.clear();
   pimpl->corrections.resize(O_sparse.size());
   const bool log_due_to_log_level =
-      cudaq::details::should_log(cudaq::details::LogLevel::info);
+      cudaq::detail::should_log(cudaq::detail::LogLevel::info);
   const bool should_log = pimpl->should_log || log_due_to_log_level;
   if (should_log) {
     pimpl->log_counter++;
@@ -438,7 +451,7 @@ void decoder::clear_corrections() {
 
 const uint8_t *decoder::get_obs_corrections() const {
   const bool log_due_to_log_level =
-      cudaq::details::should_log(cudaq::details::LogLevel::info);
+      cudaq::detail::should_log(cudaq::detail::LogLevel::info);
   const bool should_log = pimpl->should_log || log_due_to_log_level;
   if (should_log) {
     pimpl->log_counter++;
@@ -464,7 +477,7 @@ void decoder::reset_decoder() {
   pimpl->corrections.clear();
   pimpl->corrections.resize(O_sparse.size());
   const bool log_due_to_log_level =
-      cudaq::details::should_log(cudaq::details::LogLevel::info);
+      cudaq::detail::should_log(cudaq::detail::LogLevel::info);
   const bool should_log = pimpl->should_log || log_due_to_log_level;
   if (should_log) {
     pimpl->log_counter++;
@@ -479,9 +492,9 @@ void decoder::reset_decoder() {
 }
 
 std::unique_ptr<decoder> get_decoder(const std::string &name,
-                                     const cudaqx::tensor<uint8_t> &H,
+                                     const decoder_init &init,
                                      const cudaqx::heterogeneous_map options) {
-  return decoder::get(name, H, options);
+  return decoder::get(name, init, options);
 }
 
 // Constructor function for auto-loading plugins

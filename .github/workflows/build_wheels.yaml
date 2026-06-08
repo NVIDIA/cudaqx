@@ -61,9 +61,14 @@ on:
         type: string
         default: ''
         required: false
+    secrets:
+      CUDAQ_ACCESS_TOKEN:
+        required: false
+      WORKFLOW_TOKEN:
+        required: false
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-build-wheels-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -78,7 +83,9 @@ jobs:
     container:
       image: ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc12-main
       options: --ulimit nofile=1048576:1048576
-    permissions: write-all
+    permissions:
+      actions: write
+      contents: read
     strategy:
       fail-fast: false
       matrix:

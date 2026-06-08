@@ -9,7 +9,6 @@
 #include "pymatching/sparse_blossom/driver/mwpm_decoding.h"
 #include "pymatching/sparse_blossom/driver/user_graph.h"
 #include "cudaq/qec/decoder.h"
-#include "cudaq/qec/pcm_utils.h"
 #include <algorithm>
 #include <cassert>
 #include <map>
@@ -49,7 +48,7 @@ private:
 #endif
 
 public:
-  pymatching(const cudaqx::tensor<uint8_t> &H,
+  pymatching(const cudaq::qec::sparse_binary_matrix &H,
              const cudaqx::heterogeneous_map &params)
       : decoder(H) {
 
@@ -118,32 +117,39 @@ public:
       decode_to_observables = true;
     }
 
-    user_graph = pm::UserGraph(H.shape()[0]);
+    user_graph = pm::UserGraph(H.num_rows());
 
-    auto sparse = cudaq::qec::dense_to_sparse(H);
-    std::size_t col_idx = 0;
-    for (auto &col : sparse) {
+    H.validate_sorted_unique_indices("pymatching");
+
+    // PyMatching dispatches on per-column nnz in {1, 2}. We deliberately do
+    // NOT canonicalize H as a whole here: that would couple this wrapper to the
+    // column-level semantics of a shared utility and risk silently reordering
+    // or dropping the caller's columns. Instead we iterate the caller's columns
+    // in their original order. This guarantees by construction that result
+    // index `col` always maps back to the caller's column `col`.
+    std::vector<std::vector<std::uint32_t>> H_e2d = H.to_nested_csc();
+    for (std::size_t col = 0; col < block_size; col++) {
       double weight = 1.0;
-      if (col_idx < error_rate_vec.size()) {
-        weight = -std::log(error_rate_vec[col_idx] /
-                           (1.0 - error_rate_vec[col_idx]));
+      if (col < error_rate_vec.size()) {
+        weight = -std::log(error_rate_vec[col] / (1.0 - error_rate_vec[col]));
       }
-      if (col.size() == 2) {
-        edge2col_idx[make_canonical_edge(col[0], col[1])] = col_idx;
-        user_graph.add_or_merge_edge(col[0], col[1],
-                                     errs2observables.at(col_idx), weight, 0.0,
+
+      const auto &col_rows = H_e2d[col];
+      if (col_rows.size() == 2) {
+        edge2col_idx[make_canonical_edge(col_rows[0], col_rows[1])] = col;
+        user_graph.add_or_merge_edge(col_rows[0], col_rows[1],
+                                     errs2observables.at(col), weight, 0.0,
                                      merge_strategy_enum);
-      } else if (col.size() == 1) {
-        edge2col_idx[make_canonical_edge(col[0], -1)] = col_idx;
-        user_graph.add_or_merge_boundary_edge(col[0],
-                                              errs2observables.at(col_idx),
-                                              weight, 0.0, merge_strategy_enum);
+      } else if (col_rows.size() == 1) {
+        edge2col_idx[make_canonical_edge(col_rows[0], -1)] = col;
+        user_graph.add_or_merge_boundary_edge(col_rows[0],
+                                              errs2observables.at(col), weight,
+                                              0.0, merge_strategy_enum);
       } else {
-        throw std::runtime_error(
-            "Invalid column in H: " + std::to_string(col_idx) + " has " +
-            std::to_string(col.size()) + " ones. Must have 1 or 2 ones.");
+        throw std::runtime_error("Invalid column in H: " + std::to_string(col) +
+                                 " has " + std::to_string(col_rows.size()) +
+                                 " ones. Must have 1 or 2 ones.");
       }
-      col_idx++;
     }
     this->mwpm = decode_to_observables
                      ? &user_graph.get_mwpm()
@@ -170,7 +176,7 @@ public:
     std::vector<uint64_t> detection_events;
     detection_events.reserve(syndrome.size());
     for (size_t i = 0; i < syndrome.size(); i++)
-      if (syndrome[i] > 0.5)
+      if (cudaq::qec::convert_soft_to_hard(syndrome[i]))
         detection_events.push_back(i);
 #if PERFORM_TIMING
     auto t2 = std::chrono::high_resolution_clock::now();
@@ -241,9 +247,9 @@ public:
 
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       pymatching, static std::unique_ptr<decoder> create(
-                      const cudaqx::tensor<uint8_t> &H,
+                      const cudaq::qec::decoder_init &init,
                       const cudaqx::heterogeneous_map &params) {
-        return std::make_unique<pymatching>(H, params);
+        return cudaq::qec::make_pcm_decoder<pymatching>(init, params);
       })
 };
 
