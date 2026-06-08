@@ -113,23 +113,24 @@ jobs:
         with:
           path: build/docs/build/
 
-  deploy:
-    name: Deploy latest docs
-    if: |
-      github.ref == 'refs/heads/main' &&
-      (
-        github.event_name == 'push' ||
-        inputs.deploy_docs == true
-      )
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
-    needs: build
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+  # Disable for now, re-enable closer to release.
+  # deploy:
+  #   name: Deploy latest docs
+  #   if: |
+  #     github.ref == 'refs/heads/main' &&
+  #     (
+  #       github.event_name == 'push' ||
+  #       inputs.deploy_docs == true
+  #     )
+  #   environment:
+  #     name: github-pages
+  #     url: ${{ steps.deployment.outputs.page_url }}
+  #   runs-on: ubuntu-latest
+  #   permissions:
+  #     pages: write
+  #     id-token: write
+  #   needs: build
+  #   steps:
+  #     - name: Deploy to GitHub Pages
+  #       id: deployment
+  #       uses: actions/deploy-pages@v4
