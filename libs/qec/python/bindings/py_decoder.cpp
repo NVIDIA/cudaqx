@@ -788,7 +788,7 @@ void bindDecoder(nb::module_ &mod) {
     if (PyDecoderRegistry::contains(name)) {
       auto dem = dem_from_stim_text(dem_text);
 
-      auto defaults = dem_defaults_for_missing_keys(
+      auto defaults = details::dem_defaults_for_missing_keys(
           [&](const std::string &key) { return options.contains(key); }, dem);
       if (defaults.O)
         options["O"] = copyToPyArray(*defaults.O);
@@ -849,10 +849,11 @@ void bindDecoder(nb::module_ &mod) {
           raw DEM text via ``decoder_init``; Python-registered decoders receive
           the DEM-derived PCM plus ``O`` and ``error_rate_vec`` defaults.
 
-        For Python-registered decoders (``cudaq.qec.decoder`` decorator), ``H``
-        is passed through to ``__init__`` unchanged (NumPy array or sparse dict).
-        Call ``Decoder.__init__(self, H)`` so nanobind can store the PCM in CSC
-        form when ``H`` is a dict without building a dense ``rows x cols``
+        For Python-registered decoders (``cudaq.qec.decoder`` decorator),
+        NumPy array and sparse dict inputs are passed through to ``__init__``
+        unchanged. DEM string inputs are parsed first as described above. Call
+        ``Decoder.__init__(self, H)`` so nanobind can store the PCM in CSC form
+        when ``H`` is a dict without building a dense ``rows x cols``
         allocation.
       )pbdoc");
 

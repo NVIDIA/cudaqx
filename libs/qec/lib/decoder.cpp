@@ -141,6 +141,21 @@ decoder::get(const std::string &name, const decoder_init &init,
   return iter->second(init, param_map);
 }
 
+namespace details {
+
+dem_default_values dem_defaults_for_missing_keys(
+    const std::function<bool(const std::string &)> &contains_user_key,
+    const detector_error_model &dem) {
+  dem_default_values out;
+  if (!contains_user_key("O") && dem.num_observables() > 0)
+    out.O = &dem.observables_flips_matrix;
+  if (!contains_user_key("error_rate_vec"))
+    out.error_rate_vec = &dem.error_rates;
+  return out;
+}
+
+} // namespace details
+
 static uint32_t calculate_num_msyn_per_decode(
     const std::vector<std::vector<uint32_t>> &D_sparse) {
   uint32_t max_col = 0;

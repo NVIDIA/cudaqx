@@ -41,7 +41,6 @@ endif()
 set(QEC_SOURCES
   code.cpp
   decoder.cpp
-  decoder_stim_dem.cpp
   detector_error_model.cpp
   experiments.cpp
   pcm_utils.cpp

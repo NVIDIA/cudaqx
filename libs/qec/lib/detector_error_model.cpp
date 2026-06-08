@@ -12,6 +12,12 @@
 
 #include "stim.h"
 
+#include <exception>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
+
 namespace cudaq::qec {
 
 detector_error_model dem_from_stim_text(const std::string &dem_text) {

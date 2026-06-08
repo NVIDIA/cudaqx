@@ -8,8 +8,11 @@
 #pragma once
 
 #include "cuda-qx/core/tensor.h"
+#include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace cudaq::qec {
 

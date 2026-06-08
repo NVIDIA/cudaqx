@@ -820,7 +820,7 @@ error(0.1) L0 L0
 
 TEST(StimDemGetDecoder, DemWithoutObservablesDoesNotAddODefault) {
   auto dem = cudaq::qec::dem_from_stim_text("error(0.1) D0\n");
-  auto defaults = cudaq::qec::dem_defaults_for_missing_keys(
+  auto defaults = cudaq::qec::details::dem_defaults_for_missing_keys(
       [](const std::string &) { return false; }, dem);
 
   EXPECT_EQ(defaults.O, nullptr);

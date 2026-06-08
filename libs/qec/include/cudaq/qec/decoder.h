@@ -13,12 +13,14 @@
 #include "cuda-qx/core/tensor.h"
 #include "sparse_binary_matrix.h"
 #include "cudaq/qec/detector_error_model.h"
+#include <algorithm>
 #include <functional>
 #include <future>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <variant>
 #include <vector>
 
@@ -31,8 +33,7 @@ using float_t = double;
 #endif
 
 /// Decoder construction input: either a parity-check matrix or raw Stim DEM
-/// text. PCM-based decoders can accept both; DEM-native decoders can require
-/// the string alternative via `require_dem_text`.
+/// text.
 using decoder_init = std::variant<sparse_binary_matrix, std::string>;
 
 /// @brief Validates that all keys in a heterogeneous map are found in a list of
@@ -516,6 +517,7 @@ get_decoder(const std::string &name, std::string_view stim_dem_text,
   return get_decoder(name, decoder_init{std::string{stim_dem_text}}, options);
 }
 
+namespace details {
 /// DEM-derived defaults; pointers alias into the source `dem`.
 struct dem_default_values {
   const cudaqx::tensor<uint8_t> *O = nullptr;
@@ -526,9 +528,7 @@ struct dem_default_values {
 dem_default_values dem_defaults_for_missing_keys(
     const std::function<bool(const std::string &)> &contains_user_key,
     const detector_error_model &dem);
-
-/// Extract raw Stim DEM text for DEM-native decoders.
-std::string_view require_dem_text(const decoder_init &init);
+} // namespace details
 
 /// Build a PCM-based decoder. If `init` holds DEM text, it is parsed into a PCM
 /// and DEM-derived `"O"` / `"error_rate_vec"` defaults are added when absent.
@@ -541,7 +541,7 @@ make_pcm_decoder(const decoder_init &init,
 
   const auto dem = dem_from_stim_text(std::get<std::string>(init));
   cudaqx::heterogeneous_map merged = params;
-  const auto defaults = dem_defaults_for_missing_keys(
+  const auto defaults = details::dem_defaults_for_missing_keys(
       [&](const std::string &key) { return merged.contains(key); }, dem);
   if (defaults.O)
     merged.insert("O", *defaults.O);
