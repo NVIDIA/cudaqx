@@ -339,16 +339,14 @@ makeBatchDecoderResult(const std::vector<decoder_result> &results) {
   };
 }
 
-// Wrap a borrowed cudaqx buffer in a NumPy array and force a Python-side copy,
-// so the returned object owns its data.
-nb::object toPyArray(const cudaqx::tensor<uint8_t> &t) {
+nb::object copyToPyArray(const cudaqx::tensor<uint8_t> &t) {
   size_t shape[2] = {t.shape()[0], t.shape()[1]};
   auto arr = nb::ndarray<nb::numpy, uint8_t>(const_cast<uint8_t *>(t.data()), 2,
                                              shape, nb::none());
   return nb::cast(arr).attr("copy")();
 }
 
-nb::object toPyArray(const std::vector<double> &v) {
+nb::object copyToPyArray(const std::vector<double> &v) {
   size_t shape[1] = {v.size()};
   auto arr = nb::ndarray<nb::numpy, double>(const_cast<double *>(v.data()), 1,
                                             shape, nb::none());
@@ -735,9 +733,6 @@ void bindDecoder(nb::module_ &mod) {
     });
   });
 
-  // Shared implementation for constructing a decoder from a Stim DEM string,
-  // used by both get_decoder overload paths and the (deprecated)
-  // get_decoder_from_stim_dem entry point.
   auto get_decoder_from_dem_text = [](const std::string &name,
                                       const std::string &dem_text,
                                       nb::kwargs options)
@@ -745,15 +740,14 @@ void bindDecoder(nb::module_ &mod) {
     if (PyDecoderRegistry::contains(name)) {
       auto dem = dem_from_stim_text(dem_text);
 
-      // Keep in sync with make_pcm_decoder in decoder.h.
       auto defaults = dem_defaults_for_missing_keys(
           [&](const std::string &key) { return options.contains(key); }, dem);
       if (defaults.O)
-        options["O"] = toPyArray(*defaults.O);
+        options["O"] = copyToPyArray(*defaults.O);
       if (defaults.error_rate_vec)
-        options["error_rate_vec"] = toPyArray(*defaults.error_rate_vec);
+        options["error_rate_vec"] = copyToPyArray(*defaults.error_rate_vec);
 
-      nb::object H_obj = toPyArray(dem.detector_error_matrix);
+      nb::object H_obj = copyToPyArray(dem.detector_error_matrix);
       return PyDecoderRegistry::get_decoder(name, H_obj, options);
     }
 
@@ -824,7 +818,7 @@ void bindDecoder(nb::module_ &mod) {
   qecmod.def(
       "get_decoder_from_stim_dem", get_decoder_from_dem_text,
       "Deprecated: prefer get_decoder, which now accepts a Stim detector error "
-      "model string directly. Retained as a thin alias.");
+      "model string directly.");
 
   qecmod.def(
       "get_sorted_pcm_column_indices",

@@ -37,8 +37,6 @@ std::unique_ptr<decoder>
 get_decoder_from_stim_dem(const std::string &name,
                           const std::string &stim_dem_text,
                           const cudaqx::heterogeneous_map &options) {
-  // Retained for backward compatibility: get_decoder now accepts a Stim DEM
-  // string directly via decoder_init.
   return get_decoder(name, decoder_init{stim_dem_text}, options);
 }
 

@@ -30,21 +30,10 @@ using float_t = CUDAQX_QEC_FLOAT_TYPE;
 using float_t = double;
 #endif
 
-/// @brief Construction input for a decoder: either an explicit parity-check
-/// matrix (`cudaq::qec::sparse_binary_matrix`) or a Stim detector error model
-/// string (`std::string`).
-///
-/// Parity-check-matrix-based decoders (LUT, sliding_window, TRT, PyMatching,
-/// nv-qldpc, ...) accept either alternative: a DEM string is parsed into a
-/// parity-check matrix via `dem_from_stim_text`. Decoders that require the raw
-/// DEM (e.g. Chromobius, which needs detector color/basis annotations) require
-/// the string alternative and reject a bare matrix.
-///
-/// @note The factory input owns the DEM text. Public overloads accept
-/// `std::string`, `const char *`, and `std::string_view` and copy into this
-/// variant before dispatching to decoder plugins.
-using decoder_init =
-    std::variant<cudaq::qec::sparse_binary_matrix, std::string>;
+/// Decoder construction input: either a parity-check matrix or raw Stim DEM
+/// text. PCM-based decoders can accept both; DEM-native decoders can require
+/// the string alternative via `require_dem_text`.
+using decoder_init = std::variant<sparse_binary_matrix, std::string>;
 
 /// @brief Validates that all keys in a heterogeneous map are found in a list of
 /// acceptable types
@@ -195,10 +184,7 @@ public:
 
   /// @brief Construct a registered decoder by name.
   /// @param name The registered decoder name.
-  /// @param init Either a parity-check matrix or a Stim DEM string (see
-  /// `decoder_init`). The variant is forwarded to the decoder's creator, so
-  /// parity-check-matrix-based decoders and DEM-native decoders (Chromobius)
-  /// share a single entry point.
+  /// @param init A parity-check matrix or raw Stim DEM string.
   /// @param param_map Optional decoder-specific parameters.
   static std::unique_ptr<decoder>
   get(const std::string &name, const decoder_init &init,
@@ -530,39 +516,22 @@ get_decoder(const std::string &name, std::string_view stim_dem_text,
   return get_decoder(name, decoder_init{std::string{stim_dem_text}}, options);
 }
 
-/// @brief DEM-derived defaults; pointers alias into the source `dem`.
+/// DEM-derived defaults; pointers alias into the source `dem`.
 struct dem_default_values {
   const cudaqx::tensor<uint8_t> *O = nullptr;
   const std::vector<double> *error_rate_vec = nullptr;
 };
 
-/// @brief Return DEM defaults for any key not already supplied by the user.
-/// Shared by `make_pcm_decoder` and the Python binding.
+/// Return DEM defaults for keys not already supplied by the user.
 dem_default_values dem_defaults_for_missing_keys(
     const std::function<bool(const std::string &)> &contains_user_key,
     const detector_error_model &dem);
 
-/// @brief Extract the Stim DEM text from a `decoder_init`, throwing if it
-/// holds a parity-check matrix instead. Use this in the create() function of
-/// decoders that require a raw DEM (e.g. Chromobius), which cannot be
-/// reconstructed from a bare parity-check matrix.
+/// Extract raw Stim DEM text for DEM-native decoders.
 std::string_view require_dem_text(const decoder_init &init);
 
-/// @brief Build a parity-check-matrix-based decoder from a `decoder_init`.
-///
-/// If `init` holds a sparse matrix, it is used directly as the parity-check
-/// matrix. If it holds a Stim DEM string, it is parsed via
-/// `dem_from_stim_text` and the derived observables (`"O"`) and per-error
-/// rates (`"error_rate_vec"`) are injected into `params` unless the user
-/// already supplied them (user values win). This is the shared implementation
-/// behind the create() function of every parity-check-matrix-based decoder,
-/// giving them DEM-string support for free.
-///
-/// @note The DEM parse is lossy: detector annotations, decomposition
-/// separators, and `error_ids` are dropped. Sufficient for matching-style /
-/// parity-check-matrix decoders (LUT, NV, sliding_window, TRT, PyMatching).
-/// Decoders that need full DEM metadata (e.g. Chromobius detector color/basis)
-/// must consume the string directly via `require_dem_text`.
+/// Build a PCM-based decoder. If `init` holds DEM text, it is parsed into a PCM
+/// and DEM-derived `"O"` / `"error_rate_vec"` defaults are added when absent.
 template <typename DecoderT>
 std::unique_ptr<decoder>
 make_pcm_decoder(const decoder_init &init,
@@ -582,10 +551,8 @@ make_pcm_decoder(const decoder_init &init,
       cudaq::qec::sparse_binary_matrix(dem.detector_error_matrix), merged);
 }
 
-/// @brief Construct a decoder by name from a Stim detector error model string.
-///
 /// @deprecated Prefer `get_decoder`, which now accepts a Stim DEM string
-/// directly via `decoder_init`. Retained as a thin convenience alias.
+/// directly.
 std::unique_ptr<decoder>
 get_decoder_from_stim_dem(const std::string &name,
                           const std::string &stim_dem_text,

@@ -779,8 +779,6 @@ error(0.05) D0 D1
 }
 
 TEST(StimDemDecoderFactory, UnifiedGetDecoderAcceptsStimDemString) {
-  // get_decoder and decoder::get accept a Stim DEM string directly via
-  // decoder_init, matching the (deprecated) get_decoder_from_stim_dem path.
   const std::string dem_text = R"(error(0.1) D0 L0
 error(0.1) D1 L0
 error(0.05) D0 D1
@@ -800,7 +798,6 @@ error(0.05) D0 D1
 }
 
 TEST(StimDemDecoderFactory, UnifiedGetDecoderStillAcceptsParityCheckMatrix) {
-  // Dense tensor inputs still convert to sparse PCM storage unchanged.
   cudaqx::tensor<uint8_t> H({2, 3});
   H.copy(std::vector<uint8_t>{1, 0, 1, 0, 1, 1}.data(), {2, 3});
   auto d = cudaq::qec::get_decoder("single_error_lut", H);
@@ -845,7 +842,6 @@ TEST(StimDemDecoderFactory, ThrowsOnUnknownDecoderName) {
 }
 
 TEST(StimDemDecoderFactory, ThrowsOnEmptyErrorMechanisms) {
-  // A bare detector(...) line parses but yields zero error mechanisms.
   const std::string dem_text = "detector(0, 0, 0)\n";
   EXPECT_THROW(
       cudaq::qec::get_decoder_from_stim_dem("single_error_lut", dem_text),
@@ -853,9 +849,6 @@ TEST(StimDemDecoderFactory, ThrowsOnEmptyErrorMechanisms) {
 }
 
 TEST(StimDemDecoderFactory, StimDemTargetCategoriesAreExhaustive) {
-  // Pins the invariant that keeps the defensive throw in
-  // dem_from_stim_text unreachable. Fires first if stim's encoding
-  // changes.
   const std::vector<stim::DemTarget> samples = {
       stim::DemTarget::separator(),
       stim::DemTarget::relative_detector_id(0),
@@ -878,7 +871,7 @@ error(0.1) D1 L0
 error(0.05) D0 D1
 )";
   cudaqx::heterogeneous_map opts;
-  opts.insert("error_rate_vec", std::vector<double>{0.5}); // wrong size
+  opts.insert("error_rate_vec", std::vector<double>{0.5});
   EXPECT_THROW(
       cudaq::qec::get_decoder_from_stim_dem("single_error_lut", dem_text, opts),
       std::runtime_error);

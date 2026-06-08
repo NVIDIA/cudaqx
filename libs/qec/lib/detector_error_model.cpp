@@ -34,7 +34,7 @@ detector_error_model dem_from_stim_text(const std::string &dem_text) {
   std::size_t instruction_index = 0;
 
   dem.iter_flatten_error_instructions([&](const stim::DemInstruction &inst) {
-    if (inst.arg_data.size() == 0)
+    if (inst.arg_data.empty())
       throw std::runtime_error(
           "Stim DEM error instruction missing probability argument (index " +
           std::to_string(instruction_index) + ")");
@@ -54,9 +54,6 @@ detector_error_model dem_from_stim_text(const std::string &dem_text) {
       } else if (target.is_observable_id()) {
         obs.push_back(static_cast<std::size_t>(target.val()));
       } else {
-        // Forward-compat tripwire; unreachable today (stim's three
-        // DemTarget categories are exhaustive -- pinned by
-        // StimDemTargetCategoriesAreExhaustive).
         throw std::runtime_error(
             "Stim DEM error instruction (index " +
             std::to_string(instruction_index) +
@@ -71,8 +68,6 @@ detector_error_model dem_from_stim_text(const std::string &dem_text) {
   });
 
   const std::size_t num_errors = rates.size();
-  // Reject zero-column H at the boundary instead of letting decoders
-  // crash with block_size == 0.
   if (num_errors == 0)
     throw std::runtime_error(
         "Stim DEM contains no error mechanisms after flattening");

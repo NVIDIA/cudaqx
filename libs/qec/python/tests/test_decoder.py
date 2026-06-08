@@ -763,9 +763,6 @@ def test_generate_random_pcm_signed_weight_rejects_negative():
 
 
 def test_get_decoder_from_stim_dem():
-    # 2 detectors, 1 observable, 3 errors. Matches the C++
-    # StimDemDecoderFactory.ConstructsLutDecoderFromStimDemText DEM so the
-    # truth-data assertions stay in sync across language bindings.
     dem_text = ("error(0.1) D0 L0\n"
                 "error(0.1) D1 L0\n"
                 "error(0.05) D0 D1\n")
@@ -788,8 +785,6 @@ def test_get_decoder_from_stim_dem():
 
 
 def test_get_decoder_accepts_stim_dem_string():
-    # get_decoder dispatches on the second argument: a str is treated as a Stim
-    # DEM, an ndarray as a parity-check matrix.
     dem_text = ("error(0.1) D0 L0\n"
                 "error(0.1) D1 L0\n"
                 "error(0.05) D0 D1\n")
@@ -833,8 +828,6 @@ def test_get_decoder_from_stim_dem_rejects_unknown_decoder():
 
 
 def test_get_decoder_from_stim_dem_user_O_wins_over_dem_derived():
-    # Wrong-shape user O trips PyMatching's validation; silent overwrite
-    # by the DEM-derived O would suppress the throw.
     dem_text = ("error(0.1) D0 L0\n"
                 "error(0.1) D1 L0\n"
                 "error(0.05) D0 D1\n")

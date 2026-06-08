@@ -62,7 +62,6 @@ add_library(${LIBRARY_NAME} SHARED ${QEC_SOURCES})
 add_subdirectory(decoders/plugins/example)
 add_subdirectory(decoders/plugins/pymatching)
 
-# libstim comes from the parent build (CUDA-Q).
 if(NOT TARGET libstim)
   message(FATAL_ERROR
     "libstim target not available; required by cudaq-qec for Stim DEM parsing.")

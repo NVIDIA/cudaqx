@@ -66,18 +66,8 @@ struct detector_error_model {
   void canonicalize_for_rounds(uint32_t num_syndromes_per_round);
 };
 
-/// @brief Parse a Stim detector error model text into a
-/// `cudaq::qec::detector_error_model`. Each `error` instruction in the DEM
-/// becomes a single column in `detector_error_matrix` and
-/// `observables_flips_matrix`; suggested decomposition separators are
-/// folded into the same column.
-///
-/// @note Lossy: only detector/observable flips and error probabilities
-/// are extracted. Annotations (`detector`, `logical_observable`),
-/// suggested-decomposition separators, and `error_ids` are dropped.
-/// Decoders that need full DEM metadata (e.g. Chromobius detector
-/// color/basis) should consume the raw Stim DEM string via `decoder_init`
-/// and `require_dem_text` instead of this lossy representation.
+/// Parse Stim DEM text into detector/observable flip matrices and error rates.
+/// This is lossy; DEM-native decoders should consume raw DEM text instead.
 detector_error_model dem_from_stim_text(const std::string &dem_text);
 
 } // namespace cudaq::qec
