@@ -551,10 +551,4 @@ make_pcm_decoder(const decoder_init &init,
       cudaq::qec::sparse_binary_matrix(dem.detector_error_matrix), merged);
 }
 
-/// @deprecated Prefer `get_decoder`, which now accepts a Stim DEM string
-/// directly.
-std::unique_ptr<decoder>
-get_decoder_from_stim_dem(const std::string &name,
-                          const std::string &stim_dem_text,
-                          const cudaqx::heterogeneous_map &options = {});
 } // namespace cudaq::qec

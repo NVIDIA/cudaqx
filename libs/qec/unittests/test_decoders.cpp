@@ -745,13 +745,13 @@ TEST(DecoderTest, GetBlockSizeAndSyndromeSize) {
   EXPECT_EQ(decoder2->get_syndrome_size(), new_syndrome_size);
 }
 
-TEST(StimDemDecoderFactory, ConstructsLutDecoderFromStimDemText) {
+TEST(StimDemGetDecoder, ConstructsLutDecoderFromStimDemText) {
   const std::string dem_text = R"(error(0.1) D0 L0
 error(0.1) D1 L0
 error(0.05) D0 D1
 )";
 
-  auto d = cudaq::qec::get_decoder_from_stim_dem("single_error_lut", dem_text);
+  auto d = cudaq::qec::get_decoder("single_error_lut", dem_text);
   ASSERT_NE(d, nullptr);
   EXPECT_EQ(d->get_syndrome_size(), 2u);
   EXPECT_EQ(d->get_block_size(), 3u);
@@ -778,26 +778,23 @@ error(0.05) D0 D1
   }
 }
 
-TEST(StimDemDecoderFactory, UnifiedGetDecoderAcceptsStimDemString) {
+TEST(StimDemGetDecoder, StaticDecoderGetAcceptsStimDemString) {
   const std::string dem_text = R"(error(0.1) D0 L0
 error(0.1) D1 L0
 error(0.05) D0 D1
 )";
 
-  auto check = [&](std::unique_ptr<cudaq::qec::decoder> d) {
-    ASSERT_NE(d, nullptr);
-    EXPECT_EQ(d->get_syndrome_size(), 2u);
-    EXPECT_EQ(d->get_block_size(), 3u);
-    auto result = d->decode(std::vector<cudaq::qec::float_t>{1.0, 1.0});
-    EXPECT_TRUE(result.converged);
-    ASSERT_EQ(result.result.size(), 3u);
-    EXPECT_FLOAT_EQ(result.result[2], 1.0);
-  };
-  check(cudaq::qec::get_decoder("single_error_lut", dem_text));
-  check(cudaq::qec::decoder::get("single_error_lut", dem_text));
+  auto d = cudaq::qec::decoder::get("single_error_lut", dem_text);
+  ASSERT_NE(d, nullptr);
+  EXPECT_EQ(d->get_syndrome_size(), 2u);
+  EXPECT_EQ(d->get_block_size(), 3u);
+  auto result = d->decode(std::vector<cudaq::qec::float_t>{1.0, 1.0});
+  EXPECT_TRUE(result.converged);
+  ASSERT_EQ(result.result.size(), 3u);
+  EXPECT_FLOAT_EQ(result.result[2], 1.0);
 }
 
-TEST(StimDemDecoderFactory, UnifiedGetDecoderStillAcceptsParityCheckMatrix) {
+TEST(StimDemGetDecoder, StillAcceptsParityCheckMatrix) {
   cudaqx::tensor<uint8_t> H({2, 3});
   H.copy(std::vector<uint8_t>{1, 0, 1, 0, 1, 1}.data(), {2, 3});
   auto d = cudaq::qec::get_decoder("single_error_lut", H);
@@ -806,7 +803,7 @@ TEST(StimDemDecoderFactory, UnifiedGetDecoderStillAcceptsParityCheckMatrix) {
   EXPECT_EQ(d->get_block_size(), 3u);
 }
 
-TEST(StimDemDecoderFactory, RepeatedDetectorOrObservableTargetsXorFold) {
+TEST(StimDemGetDecoder, RepeatedDetectorOrObservableTargetsXorFold) {
   const std::string dem_text = R"(error(0.1) D0 D0
 error(0.1) L0 L0
 )";
@@ -821,34 +818,40 @@ error(0.1) L0 L0
       << "duplicate L0 in error 1 should XOR-cancel to 0";
 }
 
-TEST(StimDemDecoderFactory, ThrowsOnProbabilityOutOfRange) {
-  const std::string dem_text = "error(1.5) D0\n";
-  EXPECT_THROW(
-      cudaq::qec::get_decoder_from_stim_dem("single_error_lut", dem_text),
-      std::runtime_error);
+TEST(StimDemGetDecoder, DemWithoutObservablesDoesNotAddODefault) {
+  auto dem = cudaq::qec::dem_from_stim_text("error(0.1) D0\n");
+  auto defaults = cudaq::qec::dem_defaults_for_missing_keys(
+      [](const std::string &) { return false; }, dem);
+
+  EXPECT_EQ(defaults.O, nullptr);
+  ASSERT_NE(defaults.error_rate_vec, nullptr);
+  EXPECT_EQ(defaults.error_rate_vec->size(), 1u);
 }
 
-TEST(StimDemDecoderFactory, ThrowsOnMalformedStimDem) {
-  EXPECT_THROW(cudaq::qec::get_decoder_from_stim_dem("single_error_lut",
-                                                     "not a valid DEM"),
+TEST(StimDemGetDecoder, ThrowsOnProbabilityOutOfRange) {
+  const std::string dem_text = "error(1.5) D0\n";
+  EXPECT_THROW(cudaq::qec::get_decoder("single_error_lut", dem_text),
                std::runtime_error);
 }
 
-TEST(StimDemDecoderFactory, ThrowsOnUnknownDecoderName) {
+TEST(StimDemGetDecoder, ThrowsOnMalformedStimDem) {
+  EXPECT_THROW(cudaq::qec::get_decoder("single_error_lut", "not a valid DEM"),
+               std::runtime_error);
+}
+
+TEST(StimDemGetDecoder, ThrowsOnUnknownDecoderName) {
   const std::string dem_text = "error(0.1) D0 L0\n";
-  EXPECT_THROW(
-      cudaq::qec::get_decoder_from_stim_dem("__no_such_decoder__", dem_text),
-      std::runtime_error);
+  EXPECT_THROW(cudaq::qec::get_decoder("__no_such_decoder__", dem_text),
+               std::runtime_error);
 }
 
-TEST(StimDemDecoderFactory, ThrowsOnEmptyErrorMechanisms) {
+TEST(StimDemGetDecoder, ThrowsOnEmptyErrorMechanisms) {
   const std::string dem_text = "detector(0, 0, 0)\n";
-  EXPECT_THROW(
-      cudaq::qec::get_decoder_from_stim_dem("single_error_lut", dem_text),
-      std::runtime_error);
+  EXPECT_THROW(cudaq::qec::get_decoder("single_error_lut", dem_text),
+               std::runtime_error);
 }
 
-TEST(StimDemDecoderFactory, StimDemTargetCategoriesAreExhaustive) {
+TEST(StimDemGetDecoder, StimDemTargetCategoriesAreExhaustive) {
   const std::vector<stim::DemTarget> samples = {
       stim::DemTarget::separator(),
       stim::DemTarget::relative_detector_id(0),
@@ -865,14 +868,13 @@ TEST(StimDemDecoderFactory, StimDemTargetCategoriesAreExhaustive) {
   }
 }
 
-TEST(StimDemDecoderFactory, UserOptionsAreNotOverwritten) {
+TEST(StimDemGetDecoder, UserOptionsAreNotOverwritten) {
   const std::string dem_text = R"(error(0.1) D0 L0
 error(0.1) D1 L0
 error(0.05) D0 D1
 )";
   cudaqx::heterogeneous_map opts;
   opts.insert("error_rate_vec", std::vector<double>{0.5});
-  EXPECT_THROW(
-      cudaq::qec::get_decoder_from_stim_dem("single_error_lut", dem_text, opts),
-      std::runtime_error);
+  EXPECT_THROW(cudaq::qec::get_decoder("single_error_lut", dem_text, opts),
+               std::runtime_error);
 }

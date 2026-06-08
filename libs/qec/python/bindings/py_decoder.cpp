@@ -816,11 +816,6 @@ void bindDecoder(nb::module_ &mod) {
       )pbdoc");
 
   qecmod.def(
-      "get_decoder_from_stim_dem", get_decoder_from_dem_text,
-      "Deprecated: prefer get_decoder, which now accepts a Stim detector error "
-      "model string directly.");
-
-  qecmod.def(
       "get_sorted_pcm_column_indices",
       [](const nb::ndarray<nb::numpy, uint8_t> &H,
          std::uint32_t num_syndromes_per_round) {

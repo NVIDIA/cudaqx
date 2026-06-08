@@ -17,7 +17,7 @@ dem_default_values dem_defaults_for_missing_keys(
     const std::function<bool(const std::string &)> &contains_user_key,
     const detector_error_model &dem) {
   dem_default_values out;
-  if (!contains_user_key("O"))
+  if (!contains_user_key("O") && dem.num_observables() > 0)
     out.O = &dem.observables_flips_matrix;
   if (!contains_user_key("error_rate_vec"))
     out.error_rate_vec = &dem.error_rates;
@@ -31,13 +31,6 @@ std::string_view require_dem_text(const decoder_init &init) {
       "This decoder requires a Stim detector error model string; a "
       "parity-check matrix cannot be used to reconstruct the detector "
       "annotations it needs.");
-}
-
-std::unique_ptr<decoder>
-get_decoder_from_stim_dem(const std::string &name,
-                          const std::string &stim_dem_text,
-                          const cudaqx::heterogeneous_map &options) {
-  return get_decoder(name, decoder_init{stim_dem_text}, options);
 }
 
 } // namespace cudaq::qec
