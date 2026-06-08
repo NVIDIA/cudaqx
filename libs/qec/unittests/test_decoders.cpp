@@ -707,7 +707,7 @@ TEST(DecoderResultTest, EqualityOperatorConvergedAndResult) {
   EXPECT_FALSE(result1 != result2);
 }
 
-TEST(DecoderTest, GetBlockSizeAndSyndromeSize) {
+TEST(DecoderTest, GetWithoutOptionsSetsBlockAndSyndromeSize) {
   std::size_t block_size = 15;
   std::size_t syndrome_size = 8;
 

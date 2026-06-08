@@ -74,6 +74,9 @@ if(NOT TARGET libstim)
   message(FATAL_ERROR
     "Stim FetchContent did not provide the libstim target.")
 endif()
+set_target_properties(${LIBRARY_NAME} PROPERTIES
+  VISIBILITY_INLINES_HIDDEN ON
+)
 target_link_libraries(${LIBRARY_NAME} PRIVATE libstim)
 target_link_options(${LIBRARY_NAME} PRIVATE
   $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>>:-Wl,--exclude-libs,libstim.a>
