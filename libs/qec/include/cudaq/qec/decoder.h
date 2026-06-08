@@ -518,6 +518,7 @@ get_decoder(const std::string &name, std::string_view stim_dem_text,
 }
 
 namespace details {
+// Declared here because `make_pcm_decoder` is a header-defined template.
 /// DEM-derived defaults; pointers alias into the source `dem`.
 struct dem_default_values {
   const cudaqx::tensor<uint8_t> *O = nullptr;
@@ -530,8 +531,8 @@ dem_default_values dem_defaults_for_missing_keys(
     const detector_error_model &dem);
 } // namespace details
 
-/// Build a PCM-based decoder. If `init` holds DEM text, it is parsed into a PCM
-/// and DEM-derived `"O"` / `"error_rate_vec"` defaults are added when absent.
+/// If `init` holds DEM text, parse it and inject `"O"` / `"error_rate_vec"`
+/// defaults when absent.
 template <typename DecoderT>
 std::unique_ptr<decoder>
 make_pcm_decoder(const decoder_init &init,
