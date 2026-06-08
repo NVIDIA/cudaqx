@@ -29,11 +29,18 @@ def test_decoder_initialization():
     assert hasattr(decoder, 'decode')
 
 
-def test_decoder_initialization_with_error():
-    # We do not support column-major order (Fortran order)
-    H_bad = np.zeros((10, 20), dtype=np.uint8, order='F')
-    with pytest.raises(RuntimeError) as e:
-        decoder = qec.get_decoder('single_error_lut_example', H_bad)
+def test_decoder_initialization_with_fortran_order():
+    # Fortran-order (column-major) arrays are now handled via stride-aware
+    # scanning and should work correctly.
+    H_f = np.eye(10, 20, dtype=np.uint8, order='F')
+    H_c = np.ascontiguousarray(H_f)
+    decoder_f = qec.get_decoder('single_error_lut_example', H_f)
+    decoder_c = qec.get_decoder('single_error_lut_example', H_c)
+    syndrome = np.zeros(H_f.shape[0], dtype=np.uint8)
+    r_f = decoder_f.decode(syndrome)
+    r_c = decoder_c.decode(syndrome)
+    assert r_f.converged == r_c.converged
+    assert list(r_f.result) == list(r_c.result)
 
 
 def test_decoder_api():
