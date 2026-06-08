@@ -41,9 +41,8 @@ def parse_csr_mat(j, dims, mat_name):
     # Create a data array of ones.
     data = np.ones(indptr[-1], dtype=np.uint8)
 
-    # Build the CSR matrix and return it as a dense numpy array.
-    csr = csr_matrix((data, indices, indptr), shape=dims, dtype=np.uint8)
-    return csr.toarray()
+    # Build and return the sparse matrix directly — no dense allocation.
+    return csr_matrix((data, indices, indptr), shape=dims, dtype=np.uint8)
 
 
 def parse_H_csr(j, dims):
@@ -57,7 +56,7 @@ def parse_obs_csr(j, dims):
     """
     Parse a CSR-style observable matrix from an input file in JSON format"
     """
-    return parse_csr_mat(j, dims, "obs_mat")
+    return parse_csr_mat(j, dims, "obs_mat").toarray()
 
 
 ### Main decoder loop ###
