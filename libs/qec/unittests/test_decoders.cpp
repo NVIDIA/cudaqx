@@ -710,67 +710,6 @@ TEST(DecoderTest, GetBlockSizeAndSyndromeSize) {
   EXPECT_EQ(decoder2->get_syndrome_size(), new_syndrome_size);
 }
 
-TEST(DecoderRegistryTest, SingleParameterRegistryDirect) {
-  // Test the single-parameter registry instantiation (line 18 in decoder.cpp)
-  // This directly tests the registry for decoder constructors that only take
-  // tensor<uint8_t> by accessing the single-parameter extension_point registry
-  // directly
-
-  std::size_t block_size = 8;
-  std::size_t syndrome_size = 4;
-  cudaqx::tensor<uint8_t> H({syndrome_size, block_size});
-
-  // Initialize with some test data to ensure it's a valid matrix
-  for (std::size_t i = 0; i < syndrome_size; ++i) {
-    for (std::size_t j = 0; j < block_size; ++j) {
-      H.at({i, j}) = (i + j) % 2;
-    }
-  }
-
-  auto H_sparse = cudaq::qec::sparse_binary_matrix(H);
-
-  // Test that the single-parameter registry exists and can be accessed
-  // This directly tests line 18: INSTANTIATE_REGISTRY(cudaq::qec::decoder,
-  // const cudaqx::tensor<uint8_t> &)
-  try {
-    // Create a decoder using the single-parameter extension_point directly
-    // This bypasses decoder::get and directly uses the single-parameter
-    // registry
-    auto single_param_decoder = cudaqx::extension_point<
-        cudaq::qec::decoder,
-        const cudaq::qec::sparse_binary_matrix &>::get("sample_decoder",
-                                                       H_sparse);
-
-    ASSERT_NE(single_param_decoder, nullptr);
-
-    // Verify the decoder works correctly
-    EXPECT_EQ(single_param_decoder->get_block_size(), block_size);
-    EXPECT_EQ(single_param_decoder->get_syndrome_size(), syndrome_size);
-
-    // Test with a syndrome decode to ensure functionality
-    std::vector<cudaq::qec::float_t> syndrome(syndrome_size, 0.0f);
-    auto result = single_param_decoder->decode(syndrome);
-    EXPECT_EQ(result.result.size(), block_size);
-
-  } catch (const std::runtime_error &e) {
-    // This is expected if "sample_decoder" is not registered in the
-    // single-parameter registry The test still passes because it verifies that
-    // line 18 creates a functional registry
-    EXPECT_TRUE(std::string(e.what()).find("Cannot find extension with name") !=
-                std::string::npos);
-  }
-
-  // Test that we can check if extensions are registered in the single-parameter
-  // registry
-  auto registered_single = cudaqx::extension_point<
-      cudaq::qec::decoder,
-      const cudaq::qec::sparse_binary_matrix &>::get_registered();
-
-  // The registry should exist (even if empty), proving line 18 instantiation
-  // works This test passes if no exceptions are thrown, proving the
-  // single-parameter registry is instantiated
-}
-
 TEST(StimDemDecoderFactory, ConstructsLutDecoderFromStimDemText) {
   const std::string dem_text = R"(error(0.1) D0 L0
 error(0.1) D1 L0

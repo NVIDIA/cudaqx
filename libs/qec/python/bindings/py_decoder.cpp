@@ -735,10 +735,41 @@ void bindDecoder(nb::module_ &mod) {
     });
   });
 
+  // Shared implementation for constructing a decoder from a Stim DEM string,
+  // used by both get_decoder overload paths and the (deprecated)
+  // get_decoder_from_stim_dem entry point.
+  auto get_decoder_from_dem_text = [](const std::string &name,
+                                      const std::string &dem_text,
+                                      nb::kwargs options)
+      -> std::variant<nb::object, std::unique_ptr<decoder>> {
+    if (PyDecoderRegistry::contains(name)) {
+      auto dem = dem_from_stim_text(dem_text);
+
+      // Keep in sync with make_pcm_decoder in decoder.h.
+      auto defaults = dem_defaults_for_missing_keys(
+          [&](const std::string &key) { return options.contains(key); }, dem);
+      if (defaults.O)
+        options["O"] = toPyArray(*defaults.O);
+      if (defaults.error_rate_vec)
+        options["error_rate_vec"] = toPyArray(*defaults.error_rate_vec);
+
+      nb::object H_obj = toPyArray(dem.detector_error_matrix);
+      return PyDecoderRegistry::get_decoder(name, H_obj, options);
+    }
+
+    return get_decoder(name, decoder_init{dem_text}, hetMapFromKwargs(options));
+  };
+
   qecmod.def(
       "get_decoder",
-      [](const std::string &name, nb::object H, nb::kwargs options)
+      [get_decoder_from_dem_text](const std::string &name, nb::object H,
+                                  nb::kwargs options)
           -> std::variant<nb::object, std::unique_ptr<decoder>> {
+        if (nb::isinstance<nb::str>(H)) {
+          return get_decoder_from_dem_text(name, nb::cast<std::string>(H),
+                                           options);
+        }
+
         if (PyDecoderRegistry::contains(name)) {
           return PyDecoderRegistry::get_decoder(name, H, options);
         }
@@ -779,49 +810,16 @@ void bindDecoder(nb::module_ &mod) {
           builds ``sparse_binary_matrix`` directly (no dense tensor for ``H``),
           allowing native C++ decoders like ``pymatching`` to be constructed
           from very large parity-check matrices.
+        - A Stim detector error model string: native C++ decoders receive the
+          raw DEM text via ``decoder_init``; Python-registered decoders receive
+          the DEM-derived PCM plus ``O`` and ``error_rate_vec`` defaults.
 
         For Python-registered decoders (``cudaq.qec.decoder`` decorator), ``H``
         is passed through to ``__init__`` unchanged (NumPy array or sparse dict).
         Call ``Decoder.__init__(self, H)`` so nanobind can store the PCM in CSC
-        form when ``H`` is a dict without building a dense ``rows × cols``
+        form when ``H`` is a dict without building a dense ``rows x cols``
         allocation.
       )pbdoc");
-
-  // Shared implementation for constructing a decoder from a Stim DEM string,
-  // used by both the get_decoder(str) overload and the (deprecated)
-  // get_decoder_from_stim_dem entry point.
-  auto get_decoder_from_dem_text = [](const std::string &name,
-                                      const std::string &dem_text,
-                                      nb::kwargs options)
-      -> std::variant<nb::object, std::unique_ptr<decoder>> {
-    if (PyDecoderRegistry::contains(name)) {
-      auto dem = dem_from_stim_text(dem_text);
-
-      // Keep in sync with make_pcm_decoder in decoder.h.
-      auto defaults = dem_defaults_for_missing_keys(
-          [&](const std::string &key) { return options.contains(key); }, dem);
-      if (defaults.O)
-        options["O"] = toPyArray(*defaults.O);
-      if (defaults.error_rate_vec)
-        options["error_rate_vec"] = toPyArray(*defaults.error_rate_vec);
-
-      nb::object H_obj = toPyArray(dem.detector_error_matrix);
-      return PyDecoderRegistry::get_decoder(name, H_obj, options);
-    }
-
-    return get_decoder(name, decoder_init{dem_text}, hetMapFromKwargs(options));
-  };
-
-  // Unified entry point: get_decoder also accepts a Stim DEM string. nanobind
-  // resolves this overload when the second argument is a str rather than a
-  // numpy array.
-  qecmod.def(
-      "get_decoder", get_decoder_from_dem_text,
-      "Construct a decoder by name from a Stim detector error model string. "
-      "Parity-check-matrix decoders parse the DEM into H (observables and "
-      "per-error rates are injected into options under keys \"O\" and "
-      "\"error_rate_vec\"; user-supplied values win). Decoders that need the "
-      "raw DEM (e.g. Chromobius) consume the string directly.");
 
   qecmod.def(
       "get_decoder_from_stim_dem", get_decoder_from_dem_text,
