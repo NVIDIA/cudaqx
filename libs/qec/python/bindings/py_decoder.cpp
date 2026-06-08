@@ -407,6 +407,20 @@ makeBatchDecoderResult(const std::vector<decoder_result> &results) {
   };
 }
 
+nb::object copyToPyArray(const cudaqx::tensor<uint8_t> &t) {
+  size_t shape[2] = {t.shape()[0], t.shape()[1]};
+  auto arr = nb::ndarray<nb::numpy, uint8_t>(const_cast<uint8_t *>(t.data()), 2,
+                                             shape, nb::none());
+  return nb::cast(arr).attr("copy")();
+}
+
+nb::object copyToPyArray(const std::vector<double> &v) {
+  size_t shape[1] = {v.size()};
+  auto arr = nb::ndarray<nb::numpy, double>(const_cast<double *>(v.data()), 1,
+                                            shape, nb::none());
+  return nb::cast(arr).attr("copy")();
+}
+
 } // namespace
 
 void bindDecoder(nb::module_ &mod) {
@@ -750,6 +764,11 @@ void bindDecoder(nb::module_ &mod) {
           )pbdoc",
            nb::arg("num_syndromes_per_round"));
 
+  qecmod.def(
+      "dem_from_stim_text", &dem_from_stim_text,
+      "Parse a Stim detector error model string into a DetectorErrorModel.",
+      nb::arg("dem_text"));
+
   // Expose decorator function that handles inheritance
   qecmod.def("decoder", [&](const std::string &name) {
     return nb::cpp_function([name](nb::object decoder_class) -> nb::object {
@@ -781,10 +800,37 @@ void bindDecoder(nb::module_ &mod) {
     });
   });
 
+  auto get_decoder_from_dem_text = [](const std::string &name,
+                                      const std::string &dem_text,
+                                      nb::kwargs options)
+      -> std::variant<nb::object, std::unique_ptr<decoder>> {
+    if (PyDecoderRegistry::contains(name)) {
+      auto dem = dem_from_stim_text(dem_text);
+
+      auto defaults = details::dem_defaults_for_missing_keys(
+          [&](const std::string &key) { return options.contains(key); }, dem);
+      if (defaults.O)
+        options["O"] = copyToPyArray(*defaults.O);
+      if (defaults.error_rate_vec)
+        options["error_rate_vec"] = copyToPyArray(*defaults.error_rate_vec);
+
+      nb::object H_obj = copyToPyArray(dem.detector_error_matrix);
+      return PyDecoderRegistry::get_decoder(name, H_obj, options);
+    }
+
+    return get_decoder(name, decoder_init{dem_text}, hetMapFromKwargs(options));
+  };
+
   qecmod.def(
       "get_decoder",
-      [](const std::string &name, nb::object H, nb::kwargs options)
+      [get_decoder_from_dem_text](const std::string &name, nb::object H,
+                                  nb::kwargs options)
           -> std::variant<nb::object, std::unique_ptr<decoder>> {
+        if (nb::isinstance<nb::str>(H)) {
+          return get_decoder_from_dem_text(name, nb::cast<std::string>(H),
+                                           options);
+        }
+
         if (PyDecoderRegistry::contains(name)) {
           return PyDecoderRegistry::get_decoder(name, H, options);
         }
@@ -819,11 +865,15 @@ void bindDecoder(nb::module_ &mod) {
         - A dense 2D NumPy ``uint8`` array in row-major order: a full dense
           ``cudaqx::tensor`` is built first, then converted to CSC sparse storage.
           For large PCMs this can allocate as much memory as ``rows * cols``.
+        - A Stim detector error model string: native C++ decoders receive the
+          raw DEM text via ``decoder_init``; Python-registered decoders receive
+          the DEM-derived PCM plus ``O`` and ``error_rate_vec`` defaults.
 
         For Python-registered decoders (``cudaq.qec.decoder`` decorator), ``H``
         is passed through to ``__init__`` unchanged (NumPy array or scipy sparse
-        matrix).  Call ``Decoder.__init__(self, H)`` so nanobind can store the
-        PCM internally without building a dense ``rows x cols`` allocation.
+        matrix). DEM string inputs are parsed first as described above. Call
+        ``Decoder.__init__(self, H)`` so nanobind can store the PCM internally
+        without building a dense ``rows x cols`` allocation.
       )pbdoc");
 
   qecmod.def(

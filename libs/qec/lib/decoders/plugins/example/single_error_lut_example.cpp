@@ -77,9 +77,10 @@ public:
 
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       single_error_lut_example, static std::unique_ptr<decoder> create(
-                                    const cudaq::qec::sparse_binary_matrix &H,
+                                    const cudaq::qec::decoder_init &init,
                                     const cudaqx::heterogeneous_map &params) {
-        return std::make_unique<single_error_lut_example>(H, params);
+        return cudaq::qec::make_pcm_decoder<single_error_lut_example>(init,
+                                                                      params);
       })
 };
 

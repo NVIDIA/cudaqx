@@ -775,5 +775,71 @@ def test_generate_random_pcm_signed_weight_rejects_negative():
                                 seed=1)
 
 
+def test_get_decoder_accepts_stim_dem_string():
+    dem_text = ("error(0.1) D0 L0\n"
+                "error(0.1) D1 L0\n"
+                "error(0.05) D0 D1\n")
+
+    decoder = qec.get_decoder("single_error_lut", dem_text)
+    assert decoder is not None
+    assert decoder.get_syndrome_size() == 2
+    assert decoder.get_block_size() == 3
+
+    cases = [
+        ([0.0, 0.0], [0.0, 0.0, 0.0]),
+        ([1.0, 0.0], [1.0, 0.0, 0.0]),
+        ([0.0, 1.0], [0.0, 1.0, 0.0]),
+        ([1.0, 1.0], [0.0, 0.0, 1.0]),
+    ]
+    for syndrome, expected in cases:
+        result = decoder.decode(syndrome)
+        assert result.converged is True, f"syndrome {syndrome}"
+        assert list(result.result) == expected, f"syndrome {syndrome}"
+
+
+def test_dem_from_stim_text_explicit_parse_then_get_decoder():
+    dem_text = ("error(0.1) D0 L0\n"
+                "error(0.1) D1 L0\n"
+                "error(0.05) D0 D1\n")
+
+    dem = qec.dem_from_stim_text(dem_text)
+    assert isinstance(dem, qec.DetectorErrorModel)
+    assert dem.num_detectors() == 2
+    assert dem.num_error_mechanisms() == 3
+    assert dem.num_observables() == 1
+    assert dem.detector_error_matrix.shape == (2, 3)
+
+    decoder = qec.get_decoder("single_error_lut", dem.detector_error_matrix)
+    assert decoder.get_syndrome_size() == 2
+    assert decoder.get_block_size() == 3
+
+
+def test_get_decoder_rejects_malformed_stim_dem_text():
+    with pytest.raises(RuntimeError):
+        qec.get_decoder("single_error_lut", "not a valid DEM")
+
+
+def test_get_decoder_rejects_unknown_decoder_for_stim_dem_text():
+    with pytest.raises(RuntimeError, match="__no_such_decoder__"):
+        qec.get_decoder("__no_such_decoder__", "error(0.1) D0 L0\n")
+
+
+def test_get_decoder_user_O_wins_over_dem_derived():
+    dem_text = ("error(0.1) D0 L0\n"
+                "error(0.1) D1 L0\n"
+                "error(0.05) D0 D1\n")
+    bad_O = np.zeros((1, 4), dtype=np.uint8)
+    with pytest.raises(RuntimeError):
+        qec.get_decoder("pymatching", dem_text, O=bad_O)
+
+
+def test_get_decoder_stim_dem_without_observables_returns_errors():
+    decoder = qec.get_decoder("pymatching", "error(0.1) D0\n")
+
+    result = decoder.decode([1.0])
+    assert result.converged is True
+    assert list(result.result) == [1.0]
+
+
 if __name__ == "__main__":
     pytest.main()

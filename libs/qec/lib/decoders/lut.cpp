@@ -228,9 +228,9 @@ public:
 
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       multi_error_lut, static std::unique_ptr<decoder> create(
-                           const cudaq::qec::sparse_binary_matrix &H,
+                           const cudaq::qec::decoder_init &init,
                            const cudaqx::heterogeneous_map &params) {
-        return std::make_unique<multi_error_lut>(H, params);
+        return cudaq::qec::make_pcm_decoder<multi_error_lut>(init, params);
       })
 };
 
@@ -246,9 +246,9 @@ public:
 
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       single_error_lut, static std::unique_ptr<decoder> create(
-                            const cudaq::qec::sparse_binary_matrix &H,
+                            const cudaq::qec::decoder_init &init,
                             const cudaqx::heterogeneous_map &params) {
-        return std::make_unique<single_error_lut>(H, params);
+        return cudaq::qec::make_pcm_decoder<single_error_lut>(init, params);
       })
 };
 

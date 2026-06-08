@@ -35,7 +35,7 @@ find_package(CUDAToolkit REQUIRED)
 add_compile_options(-Wno-attributes) 
 
 add_executable(test_decoders test_decoders.cpp decoders/sample_decoder.cpp)
-target_link_libraries(test_decoders PRIVATE GTest::gtest_main cudaq-qec cudaq-qec-realtime-decoding cudaq::cudaq)
+target_link_libraries(test_decoders PRIVATE GTest::gtest_main cudaq-qec cudaq-qec-realtime-decoding cudaq::cudaq libstim)
 add_dependencies(CUDAQXQECUnitTests test_decoders)
 gtest_discover_tests(test_decoders)
 
@@ -509,4 +509,3 @@ add_subdirectory(decoders/pymatching)
 if(CUDAQX_QEC_ENABLE_HOLOLINK_TOOLS)
   add_subdirectory(utils)
 endif()
-
