@@ -630,6 +630,62 @@ def test_get_decoder_scipy_csc_direct():
     assert len(result.result) == H_dense.shape[1]
 
 
+def test_get_decoder_scipy_coo_direct():
+    """get_decoder accepts a scipy COO matrix, which has no indptr/indices."""
+    scipy_sparse = pytest.importorskip("scipy.sparse")
+    np.random.seed(0)
+    H_dense = np.random.randint(0, 2, (6, 12)).astype(np.uint8)
+    H_coo = scipy_sparse.coo_matrix(H_dense)
+    # COO format does not expose indptr; detection must rely on tocsr().
+    assert not hasattr(H_coo, "indptr")
+    decoder = qec.get_decoder("single_error_lut_example", H_coo)
+    assert decoder is not None
+    syndrome = np.zeros(H_dense.shape[0], dtype=np.uint8)
+    result = decoder.decode(syndrome)
+    assert result is not None
+    assert len(result.result) == H_dense.shape[1]
+
+
+def test_get_decoder_scipy_coo_same_result_as_dense():
+    """A decoder built from a scipy COO matrix matches the dense build."""
+    scipy_sparse = pytest.importorskip("scipy.sparse")
+    np.random.seed(7)
+    H_dense = np.random.randint(0, 2, (8, 16)).astype(np.uint8)
+    syndrome = np.zeros(H_dense.shape[0], dtype=np.uint8)
+
+    dec_coo = qec.get_decoder("single_error_lut_example",
+                              scipy_sparse.coo_matrix(H_dense))
+    dec_dense = qec.get_decoder("single_error_lut_example", H_dense)
+
+    res_coo = dec_coo.decode(syndrome)
+    res_dense = dec_dense.decode(syndrome)
+    np.testing.assert_array_equal(res_coo.result, res_dense.result)
+
+
+def test_get_decoder_scipy_explicit_zeros_dropped():
+    """Explicitly-stored zeros in a scipy matrix are not treated as PCM ones."""
+    scipy_sparse = pytest.importorskip("scipy.sparse")
+    H_dense = np.array([[1, 0, 1], [0, 1, 0]], dtype=np.uint8)
+
+    # Build a CSR matrix that structurally stores a zero at (0, 1): the data
+    # array carries an explicit 0 whose position would otherwise look like a
+    # nonzero PCM entry if indptr/indices were copied verbatim.
+    data = np.array([1, 0, 1, 1], dtype=np.uint8)
+    indices = np.array([0, 1, 2, 1])
+    indptr = np.array([0, 3, 4])
+    H_explicit = scipy_sparse.csr_matrix((data, indices, indptr), shape=(2, 3))
+    assert H_explicit.nnz == 4  # the explicit zero is stored
+    np.testing.assert_array_equal(H_explicit.toarray(), H_dense)
+
+    syndrome = np.zeros(H_dense.shape[0], dtype=np.uint8)
+    dec_explicit = qec.get_decoder("single_error_lut_example", H_explicit)
+    dec_dense = qec.get_decoder("single_error_lut_example", H_dense)
+
+    res_explicit = dec_explicit.decode(syndrome)
+    res_dense = dec_dense.decode(syndrome)
+    np.testing.assert_array_equal(res_explicit.result, res_dense.result)
+
+
 def test_get_decoder_scipy_csr_csc_same_result():
     """Decoders built from scipy CSR and CSC of the same matrix produce identical results."""
     scipy_sparse = pytest.importorskip("scipy.sparse")

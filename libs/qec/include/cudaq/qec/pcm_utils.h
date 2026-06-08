@@ -223,8 +223,8 @@ cudaqx::tensor<uint8_t> generate_random_pcm(std::size_t n_rounds,
 
 /// @brief Same distribution as generate_random_pcm, but constructs a CSC
 /// sparse_binary_matrix directly without allocating a dense rank-2 tensor.
-/// Intended for large PCMs whose dense form would exceed
-/// k_max_dense_pcm_elements.
+/// Intended for large PCMs whose dense form would be impractical or impossible
+/// to allocate.
 sparse_binary_matrix
 generate_random_pcm_sparse(std::size_t n_rounds, std::size_t n_errs_per_round,
                            std::size_t n_syndromes_per_round, int weight,

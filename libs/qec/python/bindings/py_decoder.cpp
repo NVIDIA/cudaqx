@@ -60,6 +60,12 @@ checked_narrow_to_index_type(std::size_t value, const char *field_name) {
 static sparse_binary_matrix sparse_binary_matrix_from_scipy(nb::object mat) {
   // Normalize to CSR so that indptr == row_offsets, indices == col_indices.
   nb::object csr = mat.attr("tocsr")();
+  // Drop explicitly-stored zeros: we only copy indptr/indices below, so a
+  // structural zero would otherwise be treated as a nonzero PCM entry.
+  // tocsr() returns the same object when mat is already CSR, so copy first to
+  // avoid mutating the caller's matrix.
+  csr = csr.attr("copy")();
+  csr.attr("eliminate_zeros")();
   nb::tuple shape_t = nb::cast<nb::tuple>(csr.attr("shape"));
   auto num_rows = checked_narrow_to_index_type(
       nb::cast<std::size_t>(shape_t[0]), "num_rows");
@@ -158,16 +164,16 @@ public:
   ///        dense numpy array of any numeric dtype.
   PyDecoder(nb::object mat)
       : decoder([&mat]() -> cudaq::qec::sparse_binary_matrix {
-          if (nb::hasattr(mat, "indptr") && nb::hasattr(mat, "indices"))
+          // Any scipy sparse format exposes tocsr(); detect via that rather
+          // than indptr/indices, which COO and some other formats lack.
+          if (nb::hasattr(mat, "tocsr"))
             return sparse_binary_matrix_from_scipy(mat);
-          // Dense numpy array of any dtype
-          auto H = nb::cast<nb::ndarray<nb::numpy, uint8_t>>(
-              mat.attr("astype")("uint8"));
-          auto borrow = toTensor(H);
-          cudaqx::tensor<uint8_t> owned(borrow.shape());
-          owned.copy(borrow.data(), borrow.shape());
-          return cudaq::qec::sparse_binary_matrix(
-              owned, cudaq::qec::sparse_binary_matrix_layout::csc);
+          // Dense numpy array of any dtype: build sparse storage directly so
+          // qec.Decoder.__init__(self, H) has the same memory behavior as
+          // native get_decoder(..., H) (no intermediate dense tensor copy).
+          return make_sparse_from_dense(
+              nb::cast<nb::ndarray<nb::numpy, uint8_t>>(
+                  mat.attr("astype")("uint8")));
         }()) {}
 
   decoder_result decode(const std::vector<float_t> &syndrome) override {
@@ -785,7 +791,9 @@ void bindDecoder(nb::module_ &mod) {
 
         cudaq::qec::sparse_binary_matrix H_sparse;
 
-        if (nb::hasattr(H, "indptr") && nb::hasattr(H, "indices"))
+        // Any scipy sparse format exposes tocsr(); detect via that rather than
+        // indptr/indices, which COO and some other formats do not expose.
+        if (nb::hasattr(H, "tocsr"))
           H_sparse = sparse_binary_matrix_from_scipy(nb::cast<nb::object>(H));
         else
           H_sparse = make_sparse_from_dense(
