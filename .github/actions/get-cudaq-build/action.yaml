@@ -12,8 +12,8 @@ inputs:
     description: 'CUDAQ repository access token.'
     default: ''
     required: false
-  pr-number:
-    description: 'Unique pull request identifier.'
+  cache-key-suffix:
+    description: 'Unique identifier to append to cache keys.'
     default: ''
     required: false
   save-build:
@@ -54,8 +54,8 @@ runs:
       run: |
         hash=${{ hashFiles(format('{0}', env.to_hash)) }}
         echo "main=cudaq-${{ inputs.platform }}-${{ inputs.ref }}-$hash" >> $GITHUB_OUTPUT
-        if [[ -n "${{ inputs.pr-number }}" ]]; then
-          echo "pr=-pr${{ inputs.pr-number }}" >> $GITHUB_OUTPUT
+        if [[ -n "${{ inputs.cache-key-suffix }}" ]]; then
+          echo "suffix=-${{ inputs.cache-key-suffix }}" >> $GITHUB_OUTPUT
         fi
       shell: bash --noprofile --norc -euo pipefail {0}
 
@@ -65,7 +65,7 @@ runs:
       with:
         fail-on-cache-miss: false
         path: /cudaq-install
-        key: ${{ steps.cudaq-build-key.outputs.main }}${{ steps.cudaq-build-key.outputs.pr }}
+        key: ${{ steps.cudaq-build-key.outputs.main }}${{ steps.cudaq-build-key.outputs.suffix }}
         restore-keys: ${{ steps.cudaq-build-key.outputs.main }}
         lookup-only: ${{ inputs.lookup-only }}
 
@@ -167,4 +167,4 @@ runs:
       uses: actions/cache/save@v4
       with:
         path: /cudaq-install
-        key: ${{ steps.cudaq-build-key.outputs.main }}${{ steps.cudaq-build-key.outputs.pr }}
+        key: ${{ steps.cudaq-build-key.outputs.main }}${{ steps.cudaq-build-key.outputs.suffix }}

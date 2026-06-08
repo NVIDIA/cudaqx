@@ -12,7 +12,7 @@
 #include "cudaq/solvers/vqe.h"
 
 // Compile and run with
-// nvq++ --enable-mlir -lcudaq-solvers uccsd_vqe.cpp -o uccsd_vqe
+// nvq++ -lcudaq-solvers uccsd_vqe.cpp -o uccsd_vqe
 // ./uccsd_vqe
 
 int main() {

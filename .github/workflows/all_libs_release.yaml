@@ -18,7 +18,7 @@ on:
         required: false
 
 jobs:
-  pr-build:
+  build-and-test:
     name: Build and test
     strategy:
       fail-fast: false

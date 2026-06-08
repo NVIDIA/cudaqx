@@ -265,6 +265,16 @@ def test_decoder_plugin_result_structure():
     assert isinstance(result.result, np.ndarray)
 
 
+def test_single_error_lut_example_uses_canonical_threshold():
+    H = np.array([[0, 1]], dtype=np.uint8)
+    decoder = qec.get_decoder('single_error_lut_example', H)
+    result = decoder.decode([0.5])
+
+    # For this H, syndrome "1" maps to a correction on qubit 1.
+    assert result.converged is True
+    assert np.array_equal(result.result, [0.0, 1.0])
+
+
 def test_decoder_result_values():
     decoder = qec.get_decoder('example_byod', H)
     result = decoder.decode(create_test_syndrome())

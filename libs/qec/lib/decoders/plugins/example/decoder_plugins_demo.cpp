@@ -9,7 +9,7 @@
 // This example shows how to use decoders from decoder plugins
 //
 // Compile and run with
-// nvq++ --enable-mlir -lcudaq-qec decoder_plugins_demo.cpp -o
+// nvq++ -lcudaq-qec decoder_plugins_demo.cpp -o
 // decoder_plugins_demo
 // ./decoder_plugins_demo
 

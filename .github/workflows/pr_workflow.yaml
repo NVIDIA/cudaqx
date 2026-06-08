@@ -21,6 +21,7 @@ jobs:
       build-solvers: ${{ steps.filter.outputs.build-solvers }}
       build-examples-qec: ${{ steps.filter.outputs.build-examples-qec }}
       build-examples-solvers: ${{ steps.filter.outputs.build-examples-solvers }}
+      pr-number: ${{ steps.export-pr-info.outputs.pr_number }}
       build-wheels: ${{ steps.filter.outputs.build-wheels }}
     steps:
       - name: Checkout repository
@@ -33,6 +34,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         uses: nv-gha-runners/get-pr-info@main
+
+      - name: Export PR info
+        id: export-pr-info
+        run: |
+          echo "pr_number=${{ fromJSON(steps.get-pr-info.outputs.pr-info).number }}" >> $GITHUB_OUTPUT
 
       - name: Check what needs testing
         uses: dorny/paths-filter@v3
@@ -127,12 +133,6 @@ jobs:
         with:
           set-safe-directory: true
 
-      - name: Lookup PR info
-        id: get-pr-info
-        env:
-          GH_TOKEN: ${{ github.token }}
-        uses: nv-gha-runners/get-pr-info@main
-
       - name: Configure
         id: config
         run: |
@@ -149,7 +149,7 @@ jobs:
           repo: ${{ steps.get-cudaq-version.outputs.repo }}
           ref: ${{ steps.get-cudaq-version.outputs.ref }}
           token: ${{ secrets.CUDAQ_ACCESS_TOKEN }}
-          pr-number: ${{ fromJSON(steps.get-pr-info.outputs.pr-info).number }}
+          cache-key-suffix: pr${{ needs.check-changes.outputs.pr-number }}
           save-build: true
           save-ccache: false
           platform: ${{ matrix.platform }}-cu${{ steps.config.outputs.cuda_major }}
@@ -161,6 +161,8 @@ jobs:
       !failure() && !cancelled() &&
       needs.check-changes.outputs.build-docs == 'true'
     uses: ./.github/workflows/docs.yaml
+    with:
+      cache_key_suffix: pr${{ needs.check-changes.outputs.pr-number }}
 
   build-all:
     name: All libs
@@ -169,6 +171,8 @@ jobs:
       !failure() && !cancelled() &&
       (needs.check-changes.outputs.build-all == 'true' || needs.check-changes.outputs.build-cudaq == 'true')
     uses: ./.github/workflows/all_libs.yaml
+    with:
+      cache_key_suffix: pr${{ needs.check-changes.outputs.pr-number }}
 
   build-qec:
     name: QEC
@@ -181,6 +185,8 @@ jobs:
         needs.check-changes.outputs.build-examples-qec == 'true'
       )
     uses: ./.github/workflows/lib_qec.yaml
+    with:
+      cache_key_suffix: pr${{ needs.check-changes.outputs.pr-number }}
 
   build-solvers:
     name: Solvers
@@ -193,6 +199,8 @@ jobs:
         needs.check-changes.outputs.build-examples-solvers == 'true'
       )
     uses: ./.github/workflows/lib_solvers.yaml
+    with:
+      cache_key_suffix: pr${{ needs.check-changes.outputs.pr-number }}
 
   build-wheels:
     name: Wheels
