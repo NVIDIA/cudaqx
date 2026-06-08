@@ -90,6 +90,54 @@ sparse_binary_matrix_from_py_dict(const nb::dict &d) {
       "Sparse H dict layout must be \"nested_csc\" or \"nested_csr\".");
 }
 
+/// Convert a dense 2-D NumPy uint8 array to sparse_binary_matrix without
+/// any intermediate dense tensor allocation.  Strides are read directly so
+/// both C-contiguous (row-major) and Fortran-contiguous (column-major) arrays
+/// are handled efficiently: the inner loop always traverses contiguous memory.
+static sparse_binary_matrix
+make_sparse_from_dense(const nb::ndarray<nb::numpy, uint8_t> &arr) {
+  if (arr.ndim() != 2)
+    throw std::invalid_argument("H must be a 2-D uint8 array");
+  const std::size_t num_rows = arr.shape(0);
+  const std::size_t num_cols = arr.shape(1);
+  const std::ptrdiff_t rs = arr.stride(0); // bytes per row step
+  const std::ptrdiff_t cs = arr.stride(1); // bytes per col step
+  const uint8_t *base = static_cast<const uint8_t *>(arr.data());
+
+  using index_t = sparse_binary_matrix::index_type;
+  std::vector<index_t> ptr, idx;
+
+  // C-order: inner loop over columns is sequential → build CSR.
+  // F-order: inner loop over rows is sequential → build CSC.
+  if (cs <= rs) {
+    ptr.reserve(num_rows + 1);
+    ptr.push_back(0);
+    for (std::size_t i = 0; i < num_rows; ++i) {
+      for (std::size_t j = 0; j < num_cols; ++j) {
+        if (base[i * rs + j * cs])
+          idx.push_back(static_cast<index_t>(j));
+      }
+      ptr.push_back(static_cast<index_t>(idx.size()));
+    }
+    return sparse_binary_matrix::from_csr(static_cast<index_t>(num_rows),
+                                          static_cast<index_t>(num_cols),
+                                          std::move(ptr), std::move(idx));
+  } else {
+    ptr.reserve(num_cols + 1);
+    ptr.push_back(0);
+    for (std::size_t j = 0; j < num_cols; ++j) {
+      for (std::size_t i = 0; i < num_rows; ++i) {
+        if (base[i * rs + j * cs])
+          idx.push_back(static_cast<index_t>(i));
+      }
+      ptr.push_back(static_cast<index_t>(idx.size()));
+    }
+    return sparse_binary_matrix::from_csc(static_cast<index_t>(num_rows),
+                                          static_cast<index_t>(num_cols),
+                                          std::move(ptr), std::move(idx));
+  }
+}
+
 class PyDecoder : public decoder {
 public:
   NB_TRAMPOLINE(decoder, 1);
@@ -723,13 +771,6 @@ void bindDecoder(nb::module_ &mod) {
         }
 
         cudaq::qec::sparse_binary_matrix H_sparse;
-
-        auto make_sparse_from_dense =
-            [](const nb::ndarray<nb::numpy, uint8_t> &arr) {
-              auto tensor_H = cudaqx::pcmToTensor(arr);
-              return cudaq::qec::sparse_binary_matrix(
-                  tensor_H, cudaq::qec::sparse_binary_matrix_layout::csc);
-            };
 
         if (nb::isinstance<nb::dict>(H))
           H_sparse = sparse_binary_matrix_from_py_dict(nb::cast<nb::dict>(H));
