@@ -44,7 +44,7 @@ jobs:
         uses: dorny/paths-filter@v3
         id: filter
         with:
-          base: ${{ fromJSON(steps.get-pr-info.outputs.pr-info).base.sha }}
+          base: ${{ fromJSON(steps.get-pr-info.outputs.pr-info).base.ref }}
           filters: |
             build-cudaq:
               - '.github/actions/get-cudaq-build/**'
@@ -138,7 +138,6 @@ jobs:
         run: |
           cuda_major=`echo ${{ matrix.cuda_version }} | cut -d . -f1`
           echo "cuda_major=$cuda_major" >> $GITHUB_OUTPUT
-          echo "no op"
 
       - name: Get required CUDAQ version
         id: get-cudaq-version
