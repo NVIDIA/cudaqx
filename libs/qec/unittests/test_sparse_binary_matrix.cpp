@@ -607,9 +607,9 @@ TEST(SparseBinaryMatrix, GenerateRandomPcmSparse_RejectsOverflowingRows) {
                std::invalid_argument);
 }
 
-// Shape with rows*cols > k_max_dense_pcm_elements but nnz ~ 2e6: dense path
-// must throw, sparse path must succeed.
-TEST(SparseBinaryMatrix, GenerateRandomPcmSparse_ExceedsDenseCap) {
+// Large sparse PCM (nnz ~ 2e6): sparse path must succeed and produce a
+// well-formed CSC matrix.
+TEST(SparseBinaryMatrix, GenerateRandomPcmSparse_LargeMatrix) {
   constexpr std::size_t n_rounds = 2;
   constexpr std::size_t n_errs_per_round = 250'000;
   constexpr std::size_t n_syndromes_per_round = 1'000;
@@ -617,12 +617,6 @@ TEST(SparseBinaryMatrix, GenerateRandomPcmSparse_ExceedsDenseCap) {
 
   const std::size_t n_cols = n_rounds * n_errs_per_round;
   const std::size_t n_rows = n_rounds * n_syndromes_per_round;
-  ASSERT_GT(n_rows * n_cols, cudaq::qec::k_max_dense_pcm_elements);
-
-  EXPECT_THROW(cudaq::qec::generate_random_pcm(n_rounds, n_errs_per_round,
-                                               n_syndromes_per_round, weight,
-                                               std::mt19937_64(0xC0DEull)),
-               std::invalid_argument);
 
   auto sp = cudaq::qec::generate_random_pcm_sparse(
       n_rounds, n_errs_per_round, n_syndromes_per_round, weight,

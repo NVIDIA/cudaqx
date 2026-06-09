@@ -644,6 +644,10 @@ CUDA-Q QEC supports implementing decoders in Python using the :code:`@qec.decode
     @qec.decoder("my_decoder")
     class MyDecoder:
         def __init__(self, H, **kwargs):
+            # H is a scipy.sparse matrix or a dense numpy uint8 array,
+            # mirroring whatever was passed to qec.get_decoder().
+            # Pass it unchanged to Decoder.__init__ so the C++ base class
+            # stores a compact sparse representation without a dense allocation.
             qec.Decoder.__init__(self, H)
             self.H = H
             # Initialize with optional kwargs

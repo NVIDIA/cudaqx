@@ -9,6 +9,16 @@ The relationship between errors and syndromes is captured mathematically by the 
 stabilizer measurement, while each column represents a possible error. When we multiply an error pattern by this matrix, we get the syndrome 
 that would result from those errors.
 
+.. note::
+   **scipy.sparse interop** — :func:`cudaq_qec.get_decoder` and
+   :class:`cudaq_qec.Decoder` accept a ``scipy.sparse`` matrix (CSR, CSC,
+   COO, or any other ``scipy.sparse`` format) as the parity-check matrix
+   ``H``.  This is the preferred form for large PCMs because no dense
+   ``rows x cols`` allocation is made — the matrix is normalised to CSR
+   internally.  Dense NumPy ``uint8`` arrays remain supported.
+   ``scipy`` is an optional dependency; if it is not installed, pass a dense
+   NumPy array instead.
+
 Detector Error Model
 +++++++++++++++++++++
 

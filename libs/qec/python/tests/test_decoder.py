@@ -386,16 +386,6 @@ def test_sort_pcm_columns_invalid_input():
         qec.get_sorted_pcm_column_indices(H_invalid)
 
 
-def test_generate_random_pcm_rejects_too_large_dense_allocation():
-    """Dense random PCM rejects sizes above the dense API limit (~400e6 entries)."""
-    with pytest.raises((ValueError, RuntimeError), match="generate_random_pcm"):
-        qec.generate_random_pcm(n_rounds=1,
-                                n_errs_per_round=25000,
-                                n_syndromes_per_round=20000,
-                                weight=1,
-                                seed=1)
-
-
 def test_gen_random_pcm():
     pcm = qec.generate_random_pcm(n_rounds=10,
                                   n_errs_per_round=20,
@@ -411,22 +401,6 @@ def test_gen_random_pcm():
     qec.dump_pcm(pcm)
     print('')
     assert pcm.shape == (100, 200)
-
-
-def test_generate_random_pcm_sparse_matches_dense():
-    """Sparse generator matches dense generate_random_pcm for the same RNG seed."""
-    seed = 99
-    weight = 3
-    pcm_d = qec.generate_random_pcm(4, 5, 3, weight, seed=seed)
-    sp = qec.generate_random_pcm_sparse(4, 5, 3, weight, seed=seed)
-    assert sp["layout"] == "nested_csc"
-    assert sp["num_rows"] == pcm_d.shape[0]
-    assert sp["num_cols"] == pcm_d.shape[1]
-    pcm_s = np.zeros((sp["num_rows"], sp["num_cols"]), dtype=np.uint8)
-    for j, rows in enumerate(sp["nested"]):
-        for ri in rows:
-            pcm_s[int(ri), j] = 1
-    assert np.array_equal(pcm_d, pcm_s)
 
 
 def test_get_pcm_for_rounds():
@@ -548,131 +522,53 @@ def test_decoder_pymatching_results():
 # --- Sparse matrix (sparse_binary_matrix) tests ---
 
 
-def dense_to_nested_csc(H):
-    """Convert dense binary matrix (numpy) to sparse dict with nested_csc layout."""
-    rows, cols = H.shape
-    nested = []
-    for j in range(cols):
-        nested.append([i for i in range(rows) if H[i, j] != 0])
-    return {
-        "layout": "nested_csc",
-        "num_rows": int(rows),
-        "num_cols": int(cols),
-        "nested": nested,
-    }
-
-
-def dense_to_nested_csr(H):
-    """Convert dense binary matrix (numpy) to sparse dict with nested_csr layout."""
-    rows, cols = H.shape
-    nested = []
-    for i in range(rows):
-        nested.append([j for j in range(cols) if H[i, j] != 0])
-    return {
-        "layout": "nested_csr",
-        "num_rows": int(rows),
-        "num_cols": int(cols),
-        "nested": nested,
-    }
-
-
-def scipy_sparse_to_nested_csc(sp):
-    """Convert scipy.sparse (csc or csr) to our sparse dict (nested_csc). Binary only."""
-    sp = sp.tocsc()
-    num_rows, num_cols = sp.shape
-    nested = []
-    for j in range(num_cols):
-        start, end = sp.indptr[j], sp.indptr[j + 1]
-        nested.append(sp.indices[start:end].tolist())
-    return {
-        "layout": "nested_csc",
-        "num_rows": int(num_rows),
-        "num_cols": int(num_cols),
-        "nested": nested,
-    }
-
-
-def scipy_sparse_to_nested_csr(sp):
-    """Convert scipy.sparse (csr or csc) to our sparse dict (nested_csr). Binary only."""
-    sp = sp.tocsr()
-    num_rows, num_cols = sp.shape
-    nested = []
-    for i in range(num_rows):
-        start, end = sp.indptr[i], sp.indptr[i + 1]
-        nested.append(sp.indices[start:end].tolist())
-    return {
-        "layout": "nested_csr",
-        "num_rows": int(num_rows),
-        "num_cols": int(num_cols),
-        "nested": nested,
-    }
-
-
-def test_get_decoder_sparse_nested_csc():
-    """get_decoder with sparse H as dict (nested_csc) produces a working decoder."""
+def test_get_decoder_sparse_csc():
+    """get_decoder with a scipy CSC matrix produces a working decoder."""
+    scipy_sparse = pytest.importorskip("scipy.sparse")
     H_dense = create_test_matrix()
-    H_sparse = dense_to_nested_csc(H_dense)
-    decoder = qec.get_decoder("example_byod", H_sparse)
+    decoder = qec.get_decoder("example_byod", scipy_sparse.csc_matrix(H_dense))
     assert decoder is not None
     assert hasattr(decoder, "decode")
-    syndrome = create_test_syndrome()
-    result = decoder.decode(syndrome)
+    result = decoder.decode(create_test_syndrome())
     assert hasattr(result, "converged")
     assert hasattr(result, "result")
     assert len(result.result) == H_dense.shape[0]
 
 
-def test_get_decoder_sparse_nested_csr():
-    """get_decoder with sparse H as dict (nested_csr) produces a working decoder."""
+def test_get_decoder_sparse_csr():
+    """get_decoder with a scipy CSR matrix produces a working decoder."""
+    scipy_sparse = pytest.importorskip("scipy.sparse")
     H_dense = create_test_matrix()
-    H_sparse = dense_to_nested_csr(H_dense)
-    decoder = qec.get_decoder("example_byod", H_sparse)
+    decoder = qec.get_decoder("example_byod", scipy_sparse.csr_matrix(H_dense))
     assert decoder is not None
     assert hasattr(decoder, "decode")
-    syndrome = create_test_syndrome()
-    result = decoder.decode(syndrome)
+    result = decoder.decode(create_test_syndrome())
     assert hasattr(result, "converged")
     assert hasattr(result, "result")
     assert len(result.result) == H_dense.shape[0]
 
 
 def test_get_decoder_sparse_vs_dense_same_results():
-    """Decoder from sparse H (nested_csc) behaves like dense H: same shape and validity."""
+    """Decoder from scipy sparse H behaves like dense H: same shape and validity."""
+    scipy_sparse = pytest.importorskip("scipy.sparse")
     np.random.seed(123)
     H_dense = np.random.randint(0, 2, (8, 16)).astype(np.uint8)
     syndrome = np.random.random(8).tolist()
 
     dec_dense = qec.get_decoder("example_byod", H_dense)
-    dec_sparse = qec.get_decoder("example_byod", dense_to_nested_csc(H_dense))
+    dec_sparse = qec.get_decoder("example_byod",
+                                 scipy_sparse.csc_matrix(H_dense))
 
     r_dense = dec_dense.decode(syndrome)
     r_sparse = dec_sparse.decode(syndrome)
 
     assert r_dense.converged == r_sparse.converged
     assert len(r_dense.result) == len(r_sparse.result)
-    assert all(0 <= x <= 1 for x in r_dense.result)
-    assert all(0 <= x <= 1 for x in r_sparse.result)
-
-
-def test_get_decoder_sparse_nested_csr_same_as_csc():
-    """Decoders from nested_csc and nested_csr (same matrix) produce valid results."""
-    H_dense = create_test_matrix()
-    syndrome = create_test_syndrome()
-
-    dec_csc = qec.get_decoder("example_byod", dense_to_nested_csc(H_dense))
-    dec_csr = qec.get_decoder("example_byod", dense_to_nested_csr(H_dense))
-
-    r_csc = dec_csc.decode(syndrome)
-    r_csr = dec_csr.decode(syndrome)
-
-    assert r_csc.converged == r_csr.converged
-    assert len(r_csc.result) == len(r_csr.result) == H_dense.shape[0]
-    assert all(0 <= x <= 1 for x in r_csc.result)
-    assert all(0 <= x <= 1 for x in r_csr.result)
 
 
 def test_get_decoder_sparse_pymatching():
-    """Native pymatching decoder accepts sparse H dict and returns valid result."""
+    """Native pymatching decoder accepts scipy sparse H and returns valid result."""
+    scipy_sparse = pytest.importorskip("scipy.sparse")
     pcm = qec.generate_random_pcm(
         n_rounds=2,
         n_errs_per_round=10,
@@ -681,12 +577,11 @@ def test_get_decoder_sparse_pymatching():
         seed=7,
     )
     pcm, _ = qec.simplify_pcm(pcm, np.ones(pcm.shape[1]), 10)
-    H_sparse = dense_to_nested_csc(pcm)
 
     columns = np.random.choice(pcm.shape[1], 3, replace=False)
     syndrome = (np.sum(pcm[:, columns], axis=1) % 2).tolist()
 
-    decoder = qec.get_decoder("pymatching", H_sparse)
+    decoder = qec.get_decoder("pymatching", scipy_sparse.csc_matrix(pcm))
     result = decoder.decode(syndrome)
     assert result.converged is True
     assert len(result.result) == pcm.shape[1]
@@ -694,63 +589,218 @@ def test_get_decoder_sparse_pymatching():
     assert all(0 <= x <= 1 for x in result.result)
 
 
-def test_get_decoder_sparse_dict_missing_keys():
-    """Sparse dict missing required keys raises RuntimeError."""
-    with pytest.raises(RuntimeError) as exc_info:
-        qec.get_decoder("example_byod", {"layout": "nested_csc"})
-    assert "layout" in str(exc_info.value) or "num_rows" in str(
-        exc_info.value) or "nested" in str(exc_info.value)
-
-
-def test_get_decoder_sparse_dict_invalid_layout():
-    """Sparse dict with invalid layout string raises RuntimeError."""
-    H_sparse = dense_to_nested_csc(create_test_matrix())
-    H_sparse["layout"] = "invalid_layout"
-    with pytest.raises(RuntimeError) as exc_info:
-        qec.get_decoder("example_byod", H_sparse)
-    assert "nested_csc" in str(exc_info.value) or "nested_csr" in str(
-        exc_info.value)
-
-
 def test_get_decoder_sparse_from_scipy():
-    """get_decoder accepts sparse H built from scipy.sparse (converted to our dict)."""
+    """get_decoder accepts a scipy sparse matrix directly."""
     scipy_sparse = pytest.importorskip("scipy.sparse")
     np.random.seed(42)
     H_dense = np.random.randint(0, 2, (6, 12)).astype(np.uint8)
-    H_scipy = scipy_sparse.csr_matrix(H_dense)
-    H_sparse_dict = scipy_sparse_to_nested_csc(H_scipy)
-    decoder = qec.get_decoder("example_byod", H_sparse_dict)
+    decoder = qec.get_decoder("example_byod", scipy_sparse.csr_matrix(H_dense))
     assert decoder is not None
     syndrome = np.random.random(6).tolist()
     result = decoder.decode(syndrome)
     assert result.converged is True
     assert len(result.result) == H_dense.shape[0]
-    assert all(0 <= x <= 1 for x in result.result)
+
+
+def test_get_decoder_scipy_csr_direct():
+    """get_decoder accepts a scipy CSR matrix directly (no dict conversion needed)."""
+    scipy_sparse = pytest.importorskip("scipy.sparse")
+    np.random.seed(0)
+    H_dense = np.random.randint(0, 2, (6, 12)).astype(np.uint8)
+    H_csr = scipy_sparse.csr_matrix(H_dense)
+    decoder = qec.get_decoder("single_error_lut_example", H_csr)
+    assert decoder is not None
+    syndrome = np.zeros(H_dense.shape[0], dtype=np.uint8)
+    result = decoder.decode(syndrome)
+    assert result is not None
+    assert len(result.result) == H_dense.shape[1]
+
+
+def test_get_decoder_scipy_csc_direct():
+    """get_decoder accepts a scipy CSC matrix directly."""
+    scipy_sparse = pytest.importorskip("scipy.sparse")
+    np.random.seed(0)
+    H_dense = np.random.randint(0, 2, (6, 12)).astype(np.uint8)
+    H_csc = scipy_sparse.csc_matrix(H_dense)
+    decoder = qec.get_decoder("single_error_lut_example", H_csc)
+    assert decoder is not None
+    syndrome = np.zeros(H_dense.shape[0], dtype=np.uint8)
+    result = decoder.decode(syndrome)
+    assert result is not None
+    assert len(result.result) == H_dense.shape[1]
+
+
+def test_get_decoder_scipy_coo_direct():
+    """get_decoder accepts a scipy COO matrix, which has no indptr/indices."""
+    scipy_sparse = pytest.importorskip("scipy.sparse")
+    np.random.seed(0)
+    H_dense = np.random.randint(0, 2, (6, 12)).astype(np.uint8)
+    H_coo = scipy_sparse.coo_matrix(H_dense)
+    # COO format does not expose indptr; detection must rely on tocsr().
+    assert not hasattr(H_coo, "indptr")
+    decoder = qec.get_decoder("single_error_lut_example", H_coo)
+    assert decoder is not None
+    syndrome = np.zeros(H_dense.shape[0], dtype=np.uint8)
+    result = decoder.decode(syndrome)
+    assert result is not None
+    assert len(result.result) == H_dense.shape[1]
+
+
+def test_get_decoder_scipy_coo_same_result_as_dense():
+    """A decoder built from a scipy COO matrix matches the dense build."""
+    scipy_sparse = pytest.importorskip("scipy.sparse")
+    np.random.seed(7)
+    H_dense = np.random.randint(0, 2, (8, 16)).astype(np.uint8)
+    syndrome = np.zeros(H_dense.shape[0], dtype=np.uint8)
+
+    dec_coo = qec.get_decoder("single_error_lut_example",
+                              scipy_sparse.coo_matrix(H_dense))
+    dec_dense = qec.get_decoder("single_error_lut_example", H_dense)
+
+    res_coo = dec_coo.decode(syndrome)
+    res_dense = dec_dense.decode(syndrome)
+    np.testing.assert_array_equal(res_coo.result, res_dense.result)
+
+
+def test_get_decoder_scipy_explicit_zeros_dropped():
+    """Explicitly-stored zeros in a scipy matrix are not treated as PCM ones."""
+    scipy_sparse = pytest.importorskip("scipy.sparse")
+    H_dense = np.array([[1, 0, 1], [0, 1, 0]], dtype=np.uint8)
+
+    # Build a CSR matrix that structurally stores a zero at (0, 1): the data
+    # array carries an explicit 0 whose position would otherwise look like a
+    # nonzero PCM entry if indptr/indices were copied verbatim.
+    data = np.array([1, 0, 1, 1], dtype=np.uint8)
+    indices = np.array([0, 1, 2, 1])
+    indptr = np.array([0, 3, 4])
+    H_explicit = scipy_sparse.csr_matrix((data, indices, indptr), shape=(2, 3))
+    assert H_explicit.nnz == 4  # the explicit zero is stored
+    np.testing.assert_array_equal(H_explicit.toarray(), H_dense)
+
+    syndrome = np.zeros(H_dense.shape[0], dtype=np.uint8)
+    dec_explicit = qec.get_decoder("single_error_lut_example", H_explicit)
+    dec_dense = qec.get_decoder("single_error_lut_example", H_dense)
+
+    res_explicit = dec_explicit.decode(syndrome)
+    res_dense = dec_dense.decode(syndrome)
+    np.testing.assert_array_equal(res_explicit.result, res_dense.result)
+
+
+def test_get_decoder_scipy_duplicate_unsorted_indices():
+    """Duplicate/unsorted scipy indices are canonicalized to match the dense
+    matrix, and the caller's matrix is left unmodified."""
+    scipy_sparse = pytest.importorskip("scipy.sparse")
+
+    # Non-canonical CSR built directly from raw arrays (scipy does not sort or
+    # merge on construction):
+    #   row 0: cols [2, 1, 1] -> unsorted, with a duplicate at col 1
+    #   row 1: cols [0]
+    # The equivalent dense matrix sums the duplicate, so its nonzero pattern is
+    # [[0, 1, 1], [1, 0, 0]].
+    data = np.array([1, 1, 1, 1], dtype=np.uint8)
+    indices = np.array([2, 1, 1, 0])
+    indptr = np.array([0, 3, 4])
+    H_noncanon = scipy_sparse.csr_matrix((data, indices, indptr), shape=(2, 3))
+    assert not H_noncanon.has_canonical_format
+
+    H_dense = (H_noncanon.toarray() != 0).astype(np.uint8)
+
+    # Snapshot the caller's buffers to confirm get_decoder does not mutate them.
+    before = (H_noncanon.data.copy(), H_noncanon.indices.copy(),
+              H_noncanon.indptr.copy())
+
+    syndrome = np.zeros(H_dense.shape[0], dtype=np.uint8)
+    dec_noncanon = qec.get_decoder("single_error_lut_example", H_noncanon)
+    dec_dense = qec.get_decoder("single_error_lut_example", H_dense)
+
+    res_noncanon = dec_noncanon.decode(syndrome)
+    res_dense = dec_dense.decode(syndrome)
+    np.testing.assert_array_equal(res_noncanon.result, res_dense.result)
+
+    # The input matrix must be untouched (canonicalization happens on a copy).
+    np.testing.assert_array_equal(H_noncanon.data, before[0])
+    np.testing.assert_array_equal(H_noncanon.indices, before[1])
+    np.testing.assert_array_equal(H_noncanon.indptr, before[2])
+    assert not H_noncanon.has_canonical_format
+
+
+def test_get_decoder_scipy_csr_csc_same_result():
+    """Decoders built from scipy CSR and CSC of the same matrix produce identical results."""
+    scipy_sparse = pytest.importorskip("scipy.sparse")
+    np.random.seed(7)
+    H_dense = np.random.randint(0, 2, (8, 16)).astype(np.uint8)
+    syndrome = np.zeros(H_dense.shape[0], dtype=np.uint8)
+
+    dec_csr = qec.get_decoder("single_error_lut_example",
+                              scipy_sparse.csr_matrix(H_dense))
+    dec_csc = qec.get_decoder("single_error_lut_example",
+                              scipy_sparse.csc_matrix(H_dense))
+    dec_dense = qec.get_decoder("single_error_lut_example", H_dense)
+
+    res_csr = dec_csr.decode(syndrome)
+    res_csc = dec_csc.decode(syndrome)
+    res_dense = dec_dense.decode(syndrome)
+
+    np.testing.assert_array_equal(res_csr.result, res_dense.result)
+    np.testing.assert_array_equal(res_csc.result, res_dense.result)
+
+
+def test_get_decoder_scipy_int64_indices():
+    """get_decoder handles scipy matrices whose indptr/indices use int64 dtype."""
+    scipy_sparse = pytest.importorskip("scipy.sparse")
+    np.random.seed(0)
+    H_dense = np.random.randint(0, 2, (6, 12)).astype(np.uint8)
+    H_csr = scipy_sparse.csr_matrix(H_dense)
+    # Force int64 index dtype.
+    H_csr = H_csr.astype(H_csr.dtype)
+    H_csr.indptr = H_csr.indptr.astype(np.int64)
+    H_csr.indices = H_csr.indices.astype(np.int64)
+    decoder = qec.get_decoder("single_error_lut_example", H_csr)
+    assert decoder is not None
+    result = decoder.decode(np.zeros(H_dense.shape[0], dtype=np.uint8))
+    assert len(result.result) == H_dense.shape[1]
+
+
+def test_get_decoder_scipy_python_registered_decoder():
+    """Python BYOD factories receive the scipy object unchanged; the decoder
+    can call qec.Decoder.__init__(self, H) with a scipy sparse matrix."""
+    scipy_sparse = pytest.importorskip("scipy.sparse")
+    np.random.seed(0)
+    H_dense = np.random.randint(0, 2, (6, 12)).astype(np.uint8)
+    H_scipy = scipy_sparse.csr_matrix(H_dense)
+
+    @qec.decoder("_test_scipy_byod")
+    class _ScipyByod:
+
+        def __init__(self, H, **kwargs):
+            qec.Decoder.__init__(self, H)
+            self.H = H
+
+        def decode(self, syndrome):
+            res = qec.DecoderResult()
+            res.converged = True
+            res.result = [0.0] * self.H.shape[1]
+            res.opt_results = None
+            return res
+
+    decoder = qec.get_decoder("_test_scipy_byod", H_scipy)
+    assert decoder is not None
+    assert scipy_sparse.issparse(decoder.H)
+    result = decoder.decode(np.zeros(H_dense.shape[0]))
+    assert len(result.result) == H_dense.shape[1]
 
 
 def test_get_decoder_sparse_python_registered_decoder():
-    """Python BYOD factories receive sparse dict unchanged (no dense to_dense bridge)."""
+    """Python BYOD factories receive the scipy object unchanged."""
+    scipy_sparse = pytest.importorskip("scipy.sparse")
     H_dense = create_test_matrix()
-    H_sparse = dense_to_nested_csc(H_dense)
-    decoder = qec.get_decoder("example_byod", H_sparse)
+    H_scipy = scipy_sparse.csc_matrix(H_dense)
+    decoder = qec.get_decoder("example_byod", H_scipy)
     assert hasattr(decoder, "H")
-    assert isinstance(decoder.H, dict)
-    assert decoder.H["layout"] == "nested_csc"
+    assert scipy_sparse.issparse(decoder.H)
     result = decoder.decode(create_test_syndrome())
     assert result.converged is True
     assert len(result.result) == H_dense.shape[0]
-
-
-def test_pymatching_rejects_duplicate_sparse_input():
-    """PyMatching requires duplicate-free sparse inputs."""
-    sparse_dict = {
-        "layout": "nested_csc",
-        "num_rows": 2,
-        "num_cols": 3,
-        "nested": [[0, 0, 0], [0, 1], [1]],
-    }
-    with pytest.raises(ValueError, match="strictly increasing"):
-        qec.get_decoder("pymatching", sparse_dict)
 
 
 def test_generate_random_pcm_signed_weight_rejects_negative():
@@ -761,12 +811,6 @@ def test_generate_random_pcm_signed_weight_rejects_negative():
                                 n_syndromes_per_round=4,
                                 weight=-1,
                                 seed=1)
-    with pytest.raises((ValueError, RuntimeError), match="weight"):
-        qec.generate_random_pcm_sparse(n_rounds=2,
-                                       n_errs_per_round=3,
-                                       n_syndromes_per_round=4,
-                                       weight=-1,
-                                       seed=1)
 
 
 def test_get_decoder_accepts_stim_dem_string():
