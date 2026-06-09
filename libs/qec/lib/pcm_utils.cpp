@@ -465,7 +465,7 @@ get_pcm_for_rounds(const sparse_binary_matrix &pcm,
   // which requires sorted-per-column input. Canonicalize unless the caller
   // opts out via \p pcm_is_canonical.
   auto row_indices = pcm_is_canonical ? pcm.to_nested_csc()
-                                      : canonicalize_pcm(pcm).to_nested_csc();
+                                      : pcm.canonicalize().to_nested_csc();
   std::vector<std::uint32_t> columns_in_range;
   std::uint32_t first_column = 0, last_column = 0;
   select_pcm_columns_for_round_range(
@@ -628,60 +628,6 @@ generate_random_pcm_sparse(std::size_t n_rounds, std::size_t n_errs_per_round,
   return sparse_binary_matrix::from_nested_csc(
       static_cast<sparse_binary_matrix::index_type>(n_rows),
       static_cast<sparse_binary_matrix::index_type>(n_cols), nested);
-}
-
-sparse_binary_matrix canonicalize_pcm(const sparse_binary_matrix &pcm) {
-  // Sort each per-group index list, then GF(2)-collapse equal-value runs
-  // (keep one iff the run length is odd).
-  using index_type = sparse_binary_matrix::index_type;
-  const auto &in_ptr = pcm.ptr();
-  const auto &in_idx = pcm.indices();
-  const bool is_csc = pcm.layout() == sparse_binary_matrix_layout::csc;
-  // num_groups from dims (not in_ptr.size()) so default-constructed pcm
-  // still produces a num_groups+1 ptr vector.
-  const std::size_t num_groups = is_csc
-                                     ? static_cast<std::size_t>(pcm.num_cols())
-                                     : static_cast<std::size_t>(pcm.num_rows());
-
-  std::vector<index_type> new_ptr(num_groups + 1, 0);
-  std::vector<index_type> new_idx;
-  new_idx.reserve(in_idx.size());
-
-  std::vector<index_type> scratch;
-  const bool ptr_is_valid = in_ptr.size() == num_groups + 1;
-  if (ptr_is_valid) {
-    std::size_t max_group_size = 0;
-    for (std::size_t g = 0; g < num_groups; ++g)
-      max_group_size =
-          std::max<std::size_t>(max_group_size, in_ptr[g + 1] - in_ptr[g]);
-    scratch.reserve(max_group_size);
-  }
-
-  for (std::size_t g = 0; g < num_groups && ptr_is_valid; ++g) {
-    const auto begin = in_ptr[g];
-    const auto end = in_ptr[g + 1];
-    scratch.assign(in_idx.begin() + begin, in_idx.begin() + end);
-    std::sort(scratch.begin(), scratch.end());
-    auto read = scratch.begin();
-    while (read != scratch.end()) {
-      const index_type val = *read;
-      auto run_end = read;
-      while (run_end != scratch.end() && *run_end == val)
-        ++run_end;
-      if (((run_end - read) & 1) != 0)
-        new_idx.push_back(val);
-      read = run_end;
-    }
-    new_ptr[g + 1] = static_cast<index_type>(new_idx.size());
-  }
-  new_idx.shrink_to_fit();
-
-  return is_csc ? sparse_binary_matrix::from_csc(pcm.num_rows(), pcm.num_cols(),
-                                                 std::move(new_ptr),
-                                                 std::move(new_idx))
-                : sparse_binary_matrix::from_csr(pcm.num_rows(), pcm.num_cols(),
-                                                 std::move(new_ptr),
-                                                 std::move(new_idx));
 }
 
 /// @brief Randomly permute the columns of a PCM.

@@ -117,7 +117,7 @@ public:
       }
     }
 
-    // No canonicalize_pcm: toggleSynForError XORs per row index, so duplicate
+    // No canonicalize: toggleSynForError XORs per row index, so duplicate
     // indices in a column GF(2)-cancel naturally.
     std::vector<std::vector<std::uint32_t>> H_e2d = H.to_nested_csc();
     auto toggleSynForError = [&H_e2d](std::string &err_sig, std::size_t qErr) {

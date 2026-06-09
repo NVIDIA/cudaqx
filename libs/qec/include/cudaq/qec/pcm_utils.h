@@ -180,7 +180,8 @@ get_pcm_for_rounds(const cudaqx::tensor<uint8_t> &pcm,
 /// the dense overload.
 ///
 /// @param pcm_is_canonical If true, the caller asserts \p pcm has
-/// sorted-unique per-group indices (i.e. is the output of `canonicalize_pcm`
+/// sorted-unique per-group indices (i.e. is the output of
+/// `sparse_binary_matrix::canonicalize`
 /// or was constructed canonically). In that case the per-call
 /// canonicalization step is skipped — useful for callers like
 /// `sliding_window` that canonicalize once at construction and then call
@@ -229,18 +230,6 @@ sparse_binary_matrix
 generate_random_pcm_sparse(std::size_t n_rounds, std::size_t n_errs_per_round,
                            std::size_t n_syndromes_per_round, int weight,
                            std::mt19937_64 &&rng);
-
-/// @brief Return a GF(2)-canonical copy of \p pcm: each column (CSC) or row
-/// (CSR) has its indices sorted ascending, and duplicate indices are XOR-
-/// merged — an index that appears \p k times is kept iff \p k is odd. The
-/// output has the same layout as the input and is idempotent under further
-/// `canonicalize_pcm` calls.
-///
-/// Use this when a PCM source, such as a DEM decomposition, may legitimately
-/// emit duplicate indices within a column/row and the caller wants to apply
-/// GF(2) duplicate-collapse semantics before passing the matrix to consumers
-/// that require at-most-one entry per row per column.
-sparse_binary_matrix canonicalize_pcm(const sparse_binary_matrix &pcm);
 
 /// @brief Randomly permute the columns of a PCM.
 /// @param pcm The PCM to permute.
