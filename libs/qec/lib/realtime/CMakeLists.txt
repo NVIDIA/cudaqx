@@ -53,6 +53,7 @@ if(CMAKE_CUDA_COMPILER)
     )
     if(CUDAQ_REALTIME_LIBRARY)
       message(STATUS "Found cuda-quantum realtime library at ${CUDAQ_REALTIME_LIBRARY}")
+      get_filename_component(_CUDAQ_REALTIME_LIB_DIR "${CUDAQ_REALTIME_LIBRARY}" DIRECTORY)
     endif()
     
     # Create static device library for device code
@@ -140,6 +141,13 @@ target_link_libraries(cudaq-qec-realtime-decoding
 
 set_target_properties(cudaq-qec-realtime-decoding PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+
+if(_CUDAQ_REALTIME_LIB_DIR)
+  set_target_properties(cudaq-qec-realtime-decoding PROPERTIES
+    BUILD_RPATH "${_CUDAQ_REALTIME_LIB_DIR};${CMAKE_BINARY_DIR}/lib"
+    INSTALL_RPATH "${_CUDAQ_REALTIME_LIB_DIR};${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}"
+  )
+endif()
 
 
 install(TARGETS cudaq-qec-realtime-decoding
