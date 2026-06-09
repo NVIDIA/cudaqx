@@ -34,7 +34,7 @@ if(CUDAQ_REALTIME_ROOT AND CUDAQ_REALTIME_INCLUDE_DIR)
   target_include_directories(test_pymatching_realtime PRIVATE
     ${CUDAQ_REALTIME_INCLUDE_DIR}
     ${CUDAToolkit_INCLUDE_DIRS}
-    ${CMAKE_SOURCE_DIR}/libs/qec/lib/realtime
+    ${CUDAQX_QEC_SOURCE_DIR}/lib/realtime
   )
   target_compile_definitions(test_pymatching_realtime PRIVATE
     CUDAQ_REALTIME_ROOT)
@@ -47,7 +47,7 @@ if(CUDAQ_REALTIME_ROOT AND CUDAQ_REALTIME_INCLUDE_DIR)
   set_target_properties(test_pymatching_realtime PROPERTIES
     BUILD_RPATH "${CMAKE_BINARY_DIR}/lib;${CMAKE_BINARY_DIR}/lib/decoder-plugins"
   )
-  add_dependencies(CUDAQXQECUnitTests test_pymatching_realtime
-                   cudaq-qec-pymatching)
+  add_dependencies(test_pymatching_realtime cudaq-qec-pymatching)
+  add_dependencies(CUDAQXQECUnitTests test_pymatching_realtime)
   gtest_discover_tests(test_pymatching_realtime)
 endif()

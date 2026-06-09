@@ -88,9 +88,9 @@ bool wait_for_response(cudaq::qec::realtime::qec_realtime_session &session,
   auto *resp =
       reinterpret_cast<const cudaq::realtime::RPCResponse *>(tx_slot_host);
   for (int waited = 0; waited < timeout_ms; ++waited) {
-    auto *magic = const_cast<std::uint32_t *>(&resp->magic);
-    if (__atomic_load_n(magic, __ATOMIC_ACQUIRE) ==
-        cudaq::realtime::RPC_MAGIC_RESPONSE)
+    std::uint32_t magic = 0;
+    __atomic_load(&resp->magic, &magic, __ATOMIC_ACQUIRE);
+    if (magic == cudaq::realtime::RPC_MAGIC_RESPONSE)
       return true;
     usleep(200);
   }
