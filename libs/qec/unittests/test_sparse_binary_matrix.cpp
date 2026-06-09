@@ -448,7 +448,7 @@ TEST(SparseBinaryMatrix, ValidateSortedUniqueIndicesRejectsUnsortedCsr) {
 // sparse_binary_matrix::canonicalize (GF(2) merge)
 // -----------------------------------------------------------------------------
 
-TEST(SparseBinaryMatrix, CanonicalizePcm_NoOpOnAlreadyCanonical) {
+TEST(SparseBinaryMatrix, Canonicalize_NoOpOnAlreadyCanonical) {
   // Column 0: {0,1}, column 1: {1,2}. No duplicates → output identical.
   std::vector<std::vector<index_type>> nested = {{0, 1}, {1, 2}};
   auto sp = sparse_binary_matrix::from_nested_csc(3, 2, nested);
@@ -457,7 +457,7 @@ TEST(SparseBinaryMatrix, CanonicalizePcm_NoOpOnAlreadyCanonical) {
   EXPECT_EQ(canon.num_nnz(), 4u);
 }
 
-TEST(SparseBinaryMatrix, CanonicalizePcm_EvenCountDropsEntry) {
+TEST(SparseBinaryMatrix, Canonicalize_EvenCountDropsEntry) {
   // Column 0 has row 1 listed twice; GF(2) merge → drop both.
   std::vector<std::vector<index_type>> nested = {{1, 1}, {0}};
   auto sp = sparse_binary_matrix::from_nested_csc(3, 2, nested);
@@ -468,7 +468,7 @@ TEST(SparseBinaryMatrix, CanonicalizePcm_EvenCountDropsEntry) {
   EXPECT_EQ(canon_nested[1], (std::vector<index_type>{0}));
 }
 
-TEST(SparseBinaryMatrix, CanonicalizePcm_OddCountKeepsOne) {
+TEST(SparseBinaryMatrix, Canonicalize_OddCountKeepsOne) {
   // Row 2 listed three times in column 0 → odd count → one entry survives.
   std::vector<std::vector<index_type>> nested = {{2, 2, 2}, {}};
   auto sp = sparse_binary_matrix::from_nested_csc(3, 2, nested);
@@ -477,7 +477,7 @@ TEST(SparseBinaryMatrix, CanonicalizePcm_OddCountKeepsOne) {
   EXPECT_EQ(canon_nested[0], (std::vector<index_type>{2}));
 }
 
-TEST(SparseBinaryMatrix, CanonicalizePcm_SortsAscending) {
+TEST(SparseBinaryMatrix, Canonicalize_SortsAscending) {
   // Unsorted, no duplicates → output sorted, same nnz.
   std::vector<std::vector<index_type>> nested = {{2, 0, 1}};
   auto sp = sparse_binary_matrix::from_nested_csc(3, 1, nested);
@@ -485,7 +485,7 @@ TEST(SparseBinaryMatrix, CanonicalizePcm_SortsAscending) {
   EXPECT_EQ(canon.to_nested_csc()[0], (std::vector<index_type>{0, 1, 2}));
 }
 
-TEST(SparseBinaryMatrix, CanonicalizePcm_Idempotent) {
+TEST(SparseBinaryMatrix, Canonicalize_Idempotent) {
   std::vector<std::vector<index_type>> nested = {{2, 0, 2, 1, 1, 1}};
   auto sp = sparse_binary_matrix::from_nested_csc(3, 1, nested);
   auto once = sp.canonicalize();
@@ -575,7 +575,7 @@ TEST(SparseBinaryMatrix,
   }
 }
 
-TEST(SparseBinaryMatrix, CanonicalizePcm_PreservesCsrLayout) {
+TEST(SparseBinaryMatrix, Canonicalize_PreservesCsrLayout) {
   std::vector<std::vector<index_type>> nested_csr = {{0, 0, 1}, {1, 2}};
   auto sp = sparse_binary_matrix::from_nested_csr(2, 3, nested_csr);
   auto canon = sp.canonicalize();

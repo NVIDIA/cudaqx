@@ -98,6 +98,11 @@ public:
   /// indices sorted ascending, and duplicate indices are XOR-merged. An index
   /// that appears k times is kept iff k is odd. The output has the same layout
   /// as the input and is idempotent under further `canonicalize` calls.
+  ///
+  /// Use this when a PCM source, such as a DEM decomposition, may emit
+  /// duplicate indices within a compressed group and the caller wants GF(2)
+  /// duplicate-collapse semantics before passing the matrix to consumers that
+  /// require at most one entry per row/column.
   sparse_binary_matrix canonicalize() const;
 
   /// @brief Return a copy of this matrix in CSC layout. No-op if already CSC.
