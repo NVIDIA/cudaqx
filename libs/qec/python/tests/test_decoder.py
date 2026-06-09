@@ -262,6 +262,21 @@ def test_decoder_plugin_initialization_with_int16_vec():
     assert "Unsupported array data type" in repr(e)
 
 
+def test_decoder_kwargs_accept_lists_and_2d_arrays():
+    decoder = qec.get_decoder(
+        'single_error_lut_example',
+        H,
+        flat_values=[0.1, 0.2, 0.3],
+        nested_values=[[0.1, 0.2], [0.3, 0.4]],
+        matrix_float32=np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32),
+        matrix_float64=np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float64),
+        matrix_int32=np.array([[1, 2], [3, 4]], dtype=np.int32),
+        matrix_uint8=np.array([[1, 0], [0, 1]], dtype=np.uint8),
+    )
+    assert decoder is not None
+    assert hasattr(decoder, 'decode')
+
+
 def test_decoder_plugin_result_structure():
     decoder = qec.get_decoder('single_error_lut_example', H)
     result = decoder.decode(create_test_syndrome())

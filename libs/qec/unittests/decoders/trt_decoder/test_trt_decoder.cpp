@@ -26,6 +26,13 @@ static bool gpu_available() {
   return cudaGetDeviceCount(&count) == cudaSuccess && count > 0;
 }
 
+namespace {
+class TestTrtLogger : public nvinfer1::ILogger {
+public:
+  void log(Severity, const char *) noexcept override {}
+};
+} // namespace
+
 // Path to ONNX test asset. Set by CMake (absolute path) so the test finds it
 // regardless of the executable's run directory.
 static std::string get_onnx_asset_path() {
@@ -142,6 +149,36 @@ TEST_F(TRTDecoderTest, LoadFile_NonExistentFile) {
       std::runtime_error);
 }
 
+TEST_F(TRTDecoderTest, SaveEngineRejectsNullEngine) {
+  EXPECT_THROW(cudaq::qec::trt_decoder_internal::save_engine_to_file(
+                   nullptr, "unused.engine"),
+               std::runtime_error);
+}
+
+TEST_F(TRTDecoderTest, ParsePrecisionAcceptsSupportedAndLegacyValues) {
+  TestTrtLogger logger;
+  auto builder =
+      std::unique_ptr<nvinfer1::IBuilder>(nvinfer1::createInferBuilder(logger));
+  if (!builder)
+    GTEST_SKIP() << "TensorRT builder unavailable";
+
+  auto config =
+      std::unique_ptr<nvinfer1::IBuilderConfig>(builder->createBuilderConfig());
+  if (!config)
+    GTEST_SKIP() << "TensorRT builder config unavailable";
+
+  EXPECT_NO_THROW(
+      cudaq::qec::trt_decoder_internal::parse_precision("tf32", config.get()));
+  EXPECT_NO_THROW(cudaq::qec::trt_decoder_internal::parse_precision(
+      "noTF32", config.get()));
+  EXPECT_NO_THROW(
+      cudaq::qec::trt_decoder_internal::parse_precision("best", config.get()));
+  EXPECT_NO_THROW(
+      cudaq::qec::trt_decoder_internal::parse_precision("fp16", config.get()));
+  EXPECT_NO_THROW(cudaq::qec::trt_decoder_internal::parse_precision(
+      "unknown_precision", config.get()));
+}
+
 // Test parameter validation edge cases
 TEST_F(TRTDecoderTest, ValidateParameters_EdgeCases) {
   // Test with whitespace-only strings
@@ -246,9 +283,9 @@ TEST_F(TRTDecoderTest, ValidateAgainstPyTorchModel) {
 
     // Assert each individual test case
     EXPECT_LT(error, TOLERANCE)
-        << "Test case " << i << " failed: " << "TRT output (" << trt_output
-        << ") differs from PyTorch output (" << expected_output << ") by "
-        << error;
+        << "Test case " << i << " failed: "
+        << "TRT output (" << trt_output << ") differs from PyTorch output ("
+        << expected_output << ") by " << error;
   }
 
   // Print summary statistics

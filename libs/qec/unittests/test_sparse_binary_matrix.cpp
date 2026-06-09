@@ -494,6 +494,14 @@ TEST(SparseBinaryMatrix, Canonicalize_Idempotent) {
   EXPECT_EQ(once.num_nnz(), twice.num_nnz());
 }
 
+TEST(SparseBinaryMatrix, CanonicalizePcm_DefaultConstructedIsEmpty) {
+  sparse_binary_matrix sp;
+  auto canon = cudaq::qec::canonicalize_pcm(sp);
+  EXPECT_EQ(canon.num_rows(), 0u);
+  EXPECT_EQ(canon.num_cols(), 0u);
+  EXPECT_EQ(canon.num_nnz(), 0u);
+}
+
 TEST(SparseBinaryMatrix, GenerateRandomPcmSparse_ProducesSortedColumns) {
   // Generator must sort per column for downstream .front()/.back() min/max.
   auto sp = cudaq::qec::generate_random_pcm_sparse(/*n_rounds=*/4,

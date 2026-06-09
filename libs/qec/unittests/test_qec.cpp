@@ -13,6 +13,7 @@
 #include <random>
 #include <unistd.h>
 
+#include "cuda-qx/core/library_utils.h"
 #include "cudaq/qec/codes/surface_code.h"
 #include "cudaq/qec/experiments.h"
 #include "cudaq/qec/pcm_utils.h"
@@ -590,6 +591,9 @@ TEST(QECCodeTester, checkRepetition) {
   auto repetition = cudaq::qec::get_code(
       "repetition", cudaqx::heterogeneous_map{{"distance", 9}});
 
+  EXPECT_EQ(repetition->get_num_x_stabilizers(), 0u);
+  EXPECT_EQ(repetition->get_num_z_stabilizers(), 8u);
+
   {
     auto stabilizers = repetition->get_stabilizers();
 
@@ -671,6 +675,11 @@ TEST(QECCodeTester, checkRepetition) {
 
     EXPECT_TRUE(sum == 0);
   }
+}
+
+TEST(QECNoiseModelTester, ConstructsTwoQubitBitflipChannel) {
+  // Direct construction covers the inline Kraus construction path.
+  EXPECT_NO_THROW({ cudaq::qec::two_qubit_bitflip channel(0.05); });
 }
 
 TEST(QECCodeTester, checkSurfaceCode) {
@@ -1494,6 +1503,72 @@ TEST(PCMUtilsTester, checkPCMToSparseVec) {
       n_rounds * n_errs_per_round);
   // Verify that the original and the from-string PCM are the same
   check_pcm_equality(pcm, pcm_from_vec, true);
+}
+
+TEST(PCMUtilsTester, DetectorMatrixAndExtendUtilityPaths) {
+  auto detector_without_first =
+      cudaq::qec::generate_timelike_sparse_detector_matrix(
+          /*num_syndromes_per_round=*/2, /*num_rounds=*/3,
+          /*include_first_round=*/false);
+  EXPECT_EQ(detector_without_first,
+            (std::vector<int64_t>{0, 2, -1, 1, 3, -1, 2, 4, -1, 3, 5, -1}));
+
+  auto detector_with_custom_first =
+      cudaq::qec::generate_timelike_sparse_detector_matrix(
+          /*num_syndromes_per_round=*/2, /*num_rounds=*/3,
+          std::vector<int64_t>{0, -1, 1, -1});
+  EXPECT_EQ(detector_with_custom_first.front(), 0);
+  EXPECT_EQ(detector_with_custom_first.back(), -1);
+
+  // Two identical sorted rounds give pcm_extend_to_n_rounds a repeat pattern to
+  // detect and extend.
+  cudaqx::tensor<uint8_t> pcm({4, 4});
+  std::vector<uint8_t> data = {
+      1, 0, 0, 0, //
+      0, 1, 0, 0, //
+      0, 0, 1, 0, //
+      0, 0, 0, 1, //
+  };
+  pcm.copy(data.data(), {4, 4});
+  ASSERT_TRUE(cudaq::qec::pcm_is_sorted(pcm, /*num_syndromes_per_round=*/2));
+
+  auto [extended, columns] =
+      cudaq::qec::pcm_extend_to_n_rounds(pcm, 2, /*n_rounds=*/4);
+  EXPECT_EQ(extended.shape()[0], 8u);
+  EXPECT_GE(extended.shape()[1], pcm.shape()[1]);
+  EXPECT_FALSE(columns.empty());
+}
+
+TEST(PluginLoaderTester, LoadPluginsCoversSuccessAndFailure) {
+  namespace fs = std::filesystem;
+  const fs::path tmp_dir =
+      fs::temp_directory_path() /
+      ("cudaq_qec_plugin_loader_" + std::to_string(getpid()));
+  fs::create_directories(tmp_dir);
+
+  const fs::path bad_plugin = tmp_dir / "bad_plugin.so";
+  {
+    std::ofstream out(bad_plugin);
+    out << "not an ELF shared object";
+  }
+
+  const fs::path libm = "/lib/x86_64-linux-gnu/libm.so.6";
+  if (!fs::exists(libm)) {
+    fs::remove_all(tmp_dir);
+    GTEST_SKIP() << "libm.so.6 not found for plugin loader dlopen smoke test";
+  }
+  const fs::path good_plugin = tmp_dir / "good_plugin.so";
+  fs::create_symlink(libm, good_plugin);
+
+  cudaq::qec::load_plugins(tmp_dir.string(), cudaq::qec::PluginType::DECODER);
+  cudaq::qec::cleanup_plugins(cudaq::qec::PluginType::DECODER);
+  fs::remove_all(tmp_dir);
+}
+
+TEST(LibraryUtilsTester, FindsQecLibraryPath) {
+  auto path = cudaqx::__internal__::getCUDAQXLibraryPath(
+      cudaqx::__internal__::CUDAQXLibraryType::QEC);
+  EXPECT_NE(path.find("libcudaq-qec"), std::string::npos);
 }
 
 // Test detector_error_model methods
