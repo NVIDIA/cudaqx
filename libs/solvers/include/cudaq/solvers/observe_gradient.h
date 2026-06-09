@@ -62,10 +62,10 @@ protected:
         "auto_gradient_kernel_calc_" + std::to_string(batchIdx);
     auto result = cudaq::detail::runObservation(
         [&]() { quantumFunction(x); }, const_cast<spin_op &>(op), platform,
-        shots, kernelName, 0, nullptr, batchIdx, numRequiredExpectations);
-    data.emplace_back(x, result.value(), observe_execution_type::gradient);
+        shots, kernelName, 0, batchIdx, numRequiredExpectations);
+    data.emplace_back(x, result, observe_execution_type::gradient);
     batchIdx++;
-    return result.value().expectation();
+    return result.expectation();
   }
 
   /// @brief Compute the gradient at the given multi-dimensional point.
