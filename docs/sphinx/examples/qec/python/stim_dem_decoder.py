@@ -25,8 +25,8 @@ print("observables:", dem.num_observables())
 syndromes = np.array([[0, 0], [1, 0], [0, 1], [1, 1]], dtype=np.uint8)
 results = decoder.decode_batch(syndromes)
 error_predictions = np.array([r.result for r in results], dtype=np.uint8)
-observable_predictions = (dem.observables_flips_matrix @
-                          error_predictions.T) % 2
+observable_predictions = (
+    dem.observables_flips_matrix @ error_predictions.T) % 2
 
 for syndrome, error, observable in zip(syndromes, error_predictions,
                                        observable_predictions.T):
