@@ -110,8 +110,7 @@ void release_slot(cudaq::qec::realtime::qec_realtime_session &session,
 
 const cudaq::realtime::RPCResponse *
 checked_response(cudaq::qec::realtime::qec_realtime_session &session,
-                 std::uint32_t slot, std::uint32_t request_id,
-                 const char *fn) {
+                 std::uint32_t slot, std::uint32_t request_id, const char *fn) {
   auto *resp = reinterpret_cast<const cudaq::realtime::RPCResponse *>(
       session.tx_data_host() + slot * session.slot_size());
   if (resp->request_id != request_id) {
@@ -223,9 +222,9 @@ void get_corrections(cudaq::qec::realtime::qec_realtime_session &session,
         "rpc_producer::get_corrections: malformed result_len");
   }
 
-  const std::uint8_t *bits =
-      session.tx_data_host() + slot * session.slot_size() +
-      sizeof(cudaq::realtime::RPCResponse);
+  const std::uint8_t *bits = session.tx_data_host() +
+                             slot * session.slot_size() +
+                             sizeof(cudaq::realtime::RPCResponse);
   for (std::uint64_t i = 0; i < correction_length; ++i)
     corrections[i] = (bits[i >> 3] >> (i & 7)) & 0x1u;
   release_slot(session, slot);

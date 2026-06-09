@@ -6,9 +6,9 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
-#include "cudaq/qec/decoder.h"
 #include "qec_realtime_session.h"
 #include "rpc_producer.h"
+#include "cudaq/qec/decoder.h"
 
 #include <gtest/gtest.h>
 
@@ -21,9 +21,9 @@ namespace {
 
 using DecoderVec = std::vector<std::unique_ptr<cudaq::qec::decoder>>;
 
-DecoderVec
-make_pymatching_decoders(const std::vector<std::uint8_t> &h_vec,
-                         std::size_t syndrome_size, std::size_t block_size) {
+DecoderVec make_pymatching_decoders(const std::vector<std::uint8_t> &h_vec,
+                                    std::size_t syndrome_size,
+                                    std::size_t block_size) {
   cudaqx::tensor<std::uint8_t> h;
   h.copy(h_vec.data(), {syndrome_size, block_size});
 
@@ -69,8 +69,8 @@ read_corrections(cudaq::qec::realtime::qec_realtime_session &session,
   return corrections;
 }
 
-void run_case(const std::vector<std::uint8_t> &h_vec,
-              std::size_t syndrome_size, std::size_t block_size,
+void run_case(const std::vector<std::uint8_t> &h_vec, std::size_t syndrome_size,
+              std::size_t block_size,
               const std::vector<std::pair<std::vector<std::uint8_t>,
                                           std::vector<std::uint8_t>>> &cases) {
   auto decoders = make_pymatching_decoders(h_vec, syndrome_size, block_size);
@@ -91,9 +91,7 @@ void run_case(const std::vector<std::uint8_t> &h_vec,
 
 TEST(PyMatchingRealtime, CheckRegularEdges) {
   run_case(/*H=*/{1, 0, 1, 1, 0, 1}, /*syndrome_size=*/3, /*block_size=*/2,
-           {{{1, 1, 0}, {1, 0}},
-            {{0, 1, 1}, {0, 1}},
-            {{1, 0, 1}, {1, 1}}});
+           {{{1, 1, 0}, {1, 0}}, {{0, 1, 1}, {0, 1}}, {{1, 0, 1}, {1, 1}}});
 }
 
 TEST(PyMatchingRealtime, CheckBoundaryEdges) {

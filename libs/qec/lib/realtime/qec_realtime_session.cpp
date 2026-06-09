@@ -28,7 +28,8 @@ cudaq::qec::decoder *get_decoder_or_throw(std::int64_t decoder_id) {
   if (!g_active_decoders || decoder_id < 0 ||
       static_cast<std::size_t>(decoder_id) >= g_active_decoders->size() ||
       !(*g_active_decoders)[static_cast<std::size_t>(decoder_id)])
-    throw std::runtime_error("invalid decoder_id " + std::to_string(decoder_id));
+    throw std::runtime_error("invalid decoder_id " +
+                             std::to_string(decoder_id));
   return (*g_active_decoders)[static_cast<std::size_t>(decoder_id)].get();
 }
 
@@ -66,8 +67,7 @@ void enqueue_syndromes_host(void *slot_host, std::size_t slot_size) {
       write_response(slot_host, -4);
       return;
     }
-    const auto num_syndromes =
-        static_cast<std::uint64_t>(body->num_syndromes);
+    const auto num_syndromes = static_cast<std::uint64_t>(body->num_syndromes);
     const std::size_t expected_arg_len =
         rpc::align_to_8(sizeof(rpc::EnqueueRequestPayload) +
                         rpc::bit_packed_bytes(num_syndromes));
@@ -78,8 +78,7 @@ void enqueue_syndromes_host(void *slot_host, std::size_t slot_size) {
     }
 
     auto *decoder = get_decoder_or_throw(body->decoder_id);
-    const std::uint8_t *bits =
-        reinterpret_cast<const std::uint8_t *>(body + 1);
+    const std::uint8_t *bits = reinterpret_cast<const std::uint8_t *>(body + 1);
     std::vector<std::uint8_t> syndromes(num_syndromes, 0);
     for (std::uint64_t bit = 0; bit < num_syndromes; ++bit)
       syndromes[bit] = (bits[bit >> 3] >> (bit & 7)) & 0x1u;
@@ -199,8 +198,8 @@ void qec_realtime_session::allocate_ring_buffer() {
   for (auto &decoder : decoders_) {
     if (!decoder)
       continue;
-    max_syndromes =
-        std::max<std::size_t>(max_syndromes, decoder->get_num_msyn_per_decode());
+    max_syndromes = std::max<std::size_t>(max_syndromes,
+                                          decoder->get_num_msyn_per_decode());
     max_observables =
         std::max<std::size_t>(max_observables, decoder->get_num_observables());
   }
@@ -215,11 +214,10 @@ void qec_realtime_session::allocate_ring_buffer() {
   const std::size_t get_response_bytes =
       sizeof(cudaq::realtime::RPCResponse) +
       rpc::align_to_8(rpc::bit_packed_bytes(max_observables));
-  const std::size_t reset_bytes = sizeof(cudaq::realtime::RPCHeader) +
-                                  sizeof(rpc::ResetRequestPayload);
-  slot_size_ =
-      std::max({enqueue_bytes, get_request_bytes, get_response_bytes,
-                reset_bytes, std::size_t{64}});
+  const std::size_t reset_bytes =
+      sizeof(cudaq::realtime::RPCHeader) + sizeof(rpc::ResetRequestPayload);
+  slot_size_ = std::max({enqueue_bytes, get_request_bytes, get_response_bytes,
+                         reset_bytes, std::size_t{64}});
 
   rx_flags_.assign(num_slots_, 0);
   tx_flags_.assign(num_slots_, 0);
