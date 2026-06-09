@@ -686,6 +686,44 @@ def test_get_decoder_scipy_explicit_zeros_dropped():
     np.testing.assert_array_equal(res_explicit.result, res_dense.result)
 
 
+def test_get_decoder_scipy_duplicate_unsorted_indices():
+    """Duplicate/unsorted scipy indices are canonicalized to match the dense
+    matrix, and the caller's matrix is left unmodified."""
+    scipy_sparse = pytest.importorskip("scipy.sparse")
+
+    # Non-canonical CSR built directly from raw arrays (scipy does not sort or
+    # merge on construction):
+    #   row 0: cols [2, 1, 1] -> unsorted, with a duplicate at col 1
+    #   row 1: cols [0]
+    # The equivalent dense matrix sums the duplicate, so its nonzero pattern is
+    # [[0, 1, 1], [1, 0, 0]].
+    data = np.array([1, 1, 1, 1], dtype=np.uint8)
+    indices = np.array([2, 1, 1, 0])
+    indptr = np.array([0, 3, 4])
+    H_noncanon = scipy_sparse.csr_matrix((data, indices, indptr), shape=(2, 3))
+    assert not H_noncanon.has_canonical_format
+
+    H_dense = (H_noncanon.toarray() != 0).astype(np.uint8)
+
+    # Snapshot the caller's buffers to confirm get_decoder does not mutate them.
+    before = (H_noncanon.data.copy(), H_noncanon.indices.copy(),
+              H_noncanon.indptr.copy())
+
+    syndrome = np.zeros(H_dense.shape[0], dtype=np.uint8)
+    dec_noncanon = qec.get_decoder("single_error_lut_example", H_noncanon)
+    dec_dense = qec.get_decoder("single_error_lut_example", H_dense)
+
+    res_noncanon = dec_noncanon.decode(syndrome)
+    res_dense = dec_dense.decode(syndrome)
+    np.testing.assert_array_equal(res_noncanon.result, res_dense.result)
+
+    # The input matrix must be untouched (canonicalization happens on a copy).
+    np.testing.assert_array_equal(H_noncanon.data, before[0])
+    np.testing.assert_array_equal(H_noncanon.indices, before[1])
+    np.testing.assert_array_equal(H_noncanon.indptr, before[2])
+    assert not H_noncanon.has_canonical_format
+
+
 def test_get_decoder_scipy_csr_csc_same_result():
     """Decoders built from scipy CSR and CSC of the same matrix produce identical results."""
     scipy_sparse = pytest.importorskip("scipy.sparse")

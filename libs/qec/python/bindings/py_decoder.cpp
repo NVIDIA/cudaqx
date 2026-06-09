@@ -60,12 +60,11 @@ checked_narrow_to_index_type(std::size_t value, const char *field_name) {
 static sparse_binary_matrix sparse_binary_matrix_from_scipy(nb::object mat) {
   // Normalize to CSR so that indptr == row_offsets, indices == col_indices.
   nb::object csr = mat.attr("tocsr")();
-  // Drop explicitly-stored zeros: we only copy indptr/indices below, so a
-  // structural zero would otherwise be treated as a nonzero PCM entry.
-  // tocsr() returns the same object when mat is already CSR, so copy first to
-  // avoid mutating the caller's matrix.
+  // Avoid mutating the caller's matrix and clean it up for our internal use.
   csr = csr.attr("copy")();
+  csr.attr("sum_duplicates")();
   csr.attr("eliminate_zeros")();
+  csr.attr("sort_indices")();
   nb::tuple shape_t = nb::cast<nb::tuple>(csr.attr("shape"));
   auto num_rows = checked_narrow_to_index_type(
       nb::cast<std::size_t>(shape_t[0]), "num_rows");
@@ -171,9 +170,12 @@ public:
           // Dense numpy array of any dtype: build sparse storage directly so
           // qec.Decoder.__init__(self, H) has the same memory behavior as
           // native get_decoder(..., H) (no intermediate dense tensor copy).
+          // copy=False makes astype a no-op when the input is already uint8;
+          // make_sparse_from_dense reads strides directly, so a non-contiguous
+          // uint8 input is also handled without a copy.
           return make_sparse_from_dense(
               nb::cast<nb::ndarray<nb::numpy, uint8_t>>(
-                  mat.attr("astype")("uint8")));
+                  mat.attr("astype")("uint8", nb::arg("copy") = false)));
         }()) {}
 
   decoder_result decode(const std::vector<float_t> &syndrome) override {
