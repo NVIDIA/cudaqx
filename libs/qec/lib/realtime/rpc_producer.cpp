@@ -88,8 +88,9 @@ bool wait_for_response(cudaq::qec::realtime::qec_realtime_session &session,
   auto *resp =
       reinterpret_cast<const cudaq::realtime::RPCResponse *>(tx_slot_host);
   for (int waited = 0; waited < timeout_ms; ++waited) {
-    __sync_synchronize();
-    if (resp->magic == cudaq::realtime::RPC_MAGIC_RESPONSE)
+    auto *magic = const_cast<std::uint32_t *>(&resp->magic);
+    if (__atomic_load_n(magic, __ATOMIC_ACQUIRE) ==
+        cudaq::realtime::RPC_MAGIC_RESPONSE)
       return true;
     usleep(200);
   }
@@ -98,6 +99,9 @@ bool wait_for_response(cudaq::qec::realtime::qec_realtime_session &session,
 
 void release_slot(cudaq::qec::realtime::qec_realtime_session &session,
                   std::uint32_t slot) {
+  // rx_flags[slot] is cleared by cudaq_host_dispatcher_loop after it consumes
+  // the request.  The producer only clears the TX side after reading the
+  // response, making the slot reusable when acquire_slot sees both flags zero.
   std::memset(session.tx_data_host() + slot * session.slot_size(), 0,
               session.slot_size());
   __sync_synchronize();
@@ -150,7 +154,7 @@ void enqueue_syndromes(cudaq::qec::realtime::qec_realtime_session &session,
       bits[i >> 3] |= static_cast<std::uint8_t>(1u << (i & 7));
   }
 
-  const std::uint32_t request_id = static_cast<std::uint32_t>(counter);
+  const std::uint32_t request_id = next_request_id();
   const std::uint32_t slot = acquire_slot(session, kAcquireSlotTimeoutMs);
   if (slot == UINT32_MAX)
     throw dispatcher_unresponsive_error(

@@ -38,11 +38,12 @@ void write_response(void *slot_host, std::int32_t status,
   auto *response = static_cast<cudaq::realtime::RPCResponse *>(slot_host);
   const std::uint32_t request_id = header->request_id;
   const std::uint64_t ptp_timestamp = header->ptp_timestamp;
-  response->magic = cudaq::realtime::RPC_MAGIC_RESPONSE;
   response->status = status;
   response->result_len = result_len;
   response->request_id = request_id;
   response->ptp_timestamp = ptp_timestamp;
+  __atomic_store_n(&response->magic, cudaq::realtime::RPC_MAGIC_RESPONSE,
+                   __ATOMIC_RELEASE);
 }
 
 std::uint8_t *response_body(void *slot_host) {
@@ -165,8 +166,8 @@ void qec_realtime_session::initialize() {
   try {
     allocate_ring_buffer();
     populate_function_table();
-    start_host_loop();
     g_active_decoders = &decoders_;
+    start_host_loop();
     initialized_ = true;
   } catch (...) {
     finalize();
