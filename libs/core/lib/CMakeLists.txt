@@ -26,8 +26,7 @@ target_link_libraries(cudaqx-core
 )
 
 install(DIRECTORY ${CUDAQX_CORE_INCLUDE_DIR}/cuda-qx
-  DESTINATION "${CUDAQ_INCLUDE_DIR}"
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
   COMPONENT cudaqx-core
   FILES_MATCHING PATTERN "*.h"
 )
-
