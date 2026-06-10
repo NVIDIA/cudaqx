@@ -247,9 +247,9 @@ public:
 
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       pymatching, static std::unique_ptr<decoder> create(
-                      const cudaq::qec::sparse_binary_matrix &H,
+                      const cudaq::qec::decoder_init &init,
                       const cudaqx::heterogeneous_map &params) {
-        return std::make_unique<pymatching>(H, params);
+        return cudaq::qec::make_pcm_decoder<pymatching>(init, params);
       })
 };
 

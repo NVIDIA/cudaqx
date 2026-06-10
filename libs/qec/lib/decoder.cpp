@@ -17,10 +17,7 @@
 #include <filesystem>
 #include <vector>
 
-INSTANTIATE_REGISTRY(cudaq::qec::decoder,
-                     const cudaq::qec::sparse_binary_matrix &)
-INSTANTIATE_REGISTRY(cudaq::qec::decoder,
-                     const cudaq::qec::sparse_binary_matrix &,
+INSTANTIATE_REGISTRY(cudaq::qec::decoder, const cudaq::qec::decoder_init &,
                      const cudaqx::heterogeneous_map &)
 
 // Include decoder implementations AFTER registry instantiation
@@ -131,7 +128,7 @@ decoder::decode_async(const std::vector<float_t> &syndrome) {
 }
 
 std::unique_ptr<decoder>
-decoder::get(const std::string &name, const cudaq::qec::sparse_binary_matrix &H,
+decoder::get(const std::string &name, const decoder_init &init,
              const cudaqx::heterogeneous_map &param_map) {
   auto [mutex, registry] = get_registry();
   std::lock_guard<std::recursive_mutex> lock(mutex);
@@ -141,8 +138,23 @@ decoder::get(const std::string &name, const cudaq::qec::sparse_binary_matrix &H,
         "invalid decoder requested: " + name +
         ". Run with CUDAQ_LOG_LEVEL=info (environment variable) to see "
         "additional plugin diagnostics at startup.");
-  return iter->second(H, param_map);
+  return iter->second(init, param_map);
 }
+
+namespace details {
+
+dem_default_values dem_defaults_for_missing_keys(
+    const std::function<bool(const std::string &)> &contains_user_key,
+    const detector_error_model &dem) {
+  dem_default_values out;
+  if (!contains_user_key("O") && dem.num_observables() > 0)
+    out.O = &dem.observables_flips_matrix;
+  if (!contains_user_key("error_rate_vec"))
+    out.error_rate_vec = &dem.error_rates;
+  return out;
+}
+
+} // namespace details
 
 static uint32_t calculate_num_msyn_per_decode(
     const std::vector<std::vector<uint32_t>> &D_sparse) {
@@ -480,9 +492,9 @@ void decoder::reset_decoder() {
 }
 
 std::unique_ptr<decoder> get_decoder(const std::string &name,
-                                     const cudaq::qec::sparse_binary_matrix &H,
+                                     const decoder_init &init,
                                      const cudaqx::heterogeneous_map options) {
-  return decoder::get(name, H, options);
+  return decoder::get(name, init, options);
 }
 
 // Constructor function for auto-loading plugins

@@ -6,7 +6,9 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
+#include "stim.h"
 #include "cudaq/qec/decoder.h"
+#include "cudaq/qec/detector_error_model.h"
 #include "cudaq/qec/pcm_utils.h"
 #include <cmath>
 #include <future>
@@ -705,7 +707,7 @@ TEST(DecoderResultTest, EqualityOperatorConvergedAndResult) {
   EXPECT_FALSE(result1 != result2);
 }
 
-TEST(DecoderTest, GetBlockSizeAndSyndromeSize) {
+TEST(DecoderTest, GetWithoutOptionsSetsBlockAndSyndromeSize) {
   std::size_t block_size = 15;
   std::size_t syndrome_size = 8;
 
@@ -743,63 +745,136 @@ TEST(DecoderTest, GetBlockSizeAndSyndromeSize) {
   EXPECT_EQ(decoder2->get_syndrome_size(), new_syndrome_size);
 }
 
-TEST(DecoderRegistryTest, SingleParameterRegistryDirect) {
-  // Test the single-parameter registry instantiation (line 18 in decoder.cpp)
-  // This directly tests the registry for decoder constructors that only take
-  // tensor<uint8_t> by accessing the single-parameter extension_point registry
-  // directly
+TEST(StimDemGetDecoder, ConstructsLutDecoderFromStimDemText) {
+  const std::string dem_text = R"(error(0.1) D0 L0
+error(0.1) D1 L0
+error(0.05) D0 D1
+)";
 
-  std::size_t block_size = 8;
-  std::size_t syndrome_size = 4;
-  cudaqx::tensor<uint8_t> H({syndrome_size, block_size});
+  auto d = cudaq::qec::get_decoder("single_error_lut", dem_text);
+  ASSERT_NE(d, nullptr);
+  EXPECT_EQ(d->get_syndrome_size(), 2u);
+  EXPECT_EQ(d->get_block_size(), 3u);
 
-  // Initialize with some test data to ensure it's a valid matrix
-  for (std::size_t i = 0; i < syndrome_size; ++i) {
-    for (std::size_t j = 0; j < block_size; ++j) {
-      H.at({i, j}) = (i + j) % 2;
-    }
+  struct Case {
+    std::vector<cudaq::qec::float_t> syndrome;
+    std::vector<cudaq::qec::float_t> expected;
+  };
+  const std::vector<Case> cases = {
+      {{0.0, 0.0}, {0.0, 0.0, 0.0}},
+      {{1.0, 0.0}, {1.0, 0.0, 0.0}},
+      {{0.0, 1.0}, {0.0, 1.0, 0.0}},
+      {{1.0, 1.0}, {0.0, 0.0, 1.0}},
+  };
+  for (const auto &c : cases) {
+    auto result = d->decode(c.syndrome);
+    EXPECT_TRUE(result.converged)
+        << "syndrome {" << c.syndrome[0] << ", " << c.syndrome[1] << "}";
+    ASSERT_EQ(result.result.size(), 3u);
+    for (std::size_t i = 0; i < 3u; ++i)
+      EXPECT_FLOAT_EQ(result.result[i], c.expected[i])
+          << "error " << i << " for syndrome {" << c.syndrome[0] << ", "
+          << c.syndrome[1] << "}";
   }
+}
 
-  auto H_sparse = cudaq::qec::sparse_binary_matrix(H);
+TEST(StimDemGetDecoder, StaticDecoderGetAcceptsStimDemString) {
+  const std::string dem_text = R"(error(0.1) D0 L0
+error(0.1) D1 L0
+error(0.05) D0 D1
+)";
 
-  // Test that the single-parameter registry exists and can be accessed
-  // This directly tests line 18: INSTANTIATE_REGISTRY(cudaq::qec::decoder,
-  // const cudaqx::tensor<uint8_t> &)
-  try {
-    // Create a decoder using the single-parameter extension_point directly
-    // This bypasses decoder::get and directly uses the single-parameter
-    // registry
-    auto single_param_decoder = cudaqx::extension_point<
-        cudaq::qec::decoder,
-        const cudaq::qec::sparse_binary_matrix &>::get("sample_decoder",
-                                                       H_sparse);
+  auto d = cudaq::qec::decoder::get("single_error_lut", dem_text);
+  ASSERT_NE(d, nullptr);
+  EXPECT_EQ(d->get_syndrome_size(), 2u);
+  EXPECT_EQ(d->get_block_size(), 3u);
+  auto result = d->decode(std::vector<cudaq::qec::float_t>{1.0, 1.0});
+  EXPECT_TRUE(result.converged);
+  ASSERT_EQ(result.result.size(), 3u);
+  EXPECT_FLOAT_EQ(result.result[2], 1.0);
+}
 
-    ASSERT_NE(single_param_decoder, nullptr);
+TEST(StimDemGetDecoder, StillAcceptsParityCheckMatrix) {
+  cudaqx::tensor<uint8_t> H({2, 3});
+  H.copy(std::vector<uint8_t>{1, 0, 1, 0, 1, 1}.data(), {2, 3});
+  auto d = cudaq::qec::get_decoder("single_error_lut", H);
+  ASSERT_NE(d, nullptr);
+  EXPECT_EQ(d->get_syndrome_size(), 2u);
+  EXPECT_EQ(d->get_block_size(), 3u);
+}
 
-    // Verify the decoder works correctly
-    EXPECT_EQ(single_param_decoder->get_block_size(), block_size);
-    EXPECT_EQ(single_param_decoder->get_syndrome_size(), syndrome_size);
+TEST(StimDemGetDecoder, RepeatedDetectorOrObservableTargetsXorFold) {
+  const std::string dem_text = R"(error(0.1) D0 D0
+error(0.1) L0 L0
+)";
 
-    // Test with a syndrome decode to ensure functionality
-    std::vector<cudaq::qec::float_t> syndrome(syndrome_size, 0.0f);
-    auto result = single_param_decoder->decode(syndrome);
-    EXPECT_EQ(result.result.size(), block_size);
+  auto dem = cudaq::qec::dem_from_stim_text(dem_text);
+  ASSERT_EQ(dem.num_detectors(), 1u);
+  ASSERT_EQ(dem.num_observables(), 1u);
+  ASSERT_EQ(dem.num_error_mechanisms(), 2u);
+  EXPECT_EQ(dem.detector_error_matrix.at({0u, 0u}), 0u)
+      << "duplicate D0 in error 0 should XOR-cancel to 0";
+  EXPECT_EQ(dem.observables_flips_matrix.at({0u, 1u}), 0u)
+      << "duplicate L0 in error 1 should XOR-cancel to 0";
+}
 
-  } catch (const std::runtime_error &e) {
-    // This is expected if "sample_decoder" is not registered in the
-    // single-parameter registry The test still passes because it verifies that
-    // line 18 creates a functional registry
-    EXPECT_TRUE(std::string(e.what()).find("Cannot find extension with name") !=
-                std::string::npos);
+TEST(StimDemGetDecoder, DemWithoutObservablesDoesNotAddODefault) {
+  auto dem = cudaq::qec::dem_from_stim_text("error(0.1) D0\n");
+  auto defaults = cudaq::qec::details::dem_defaults_for_missing_keys(
+      [](const std::string &) { return false; }, dem);
+
+  EXPECT_EQ(defaults.O, nullptr);
+  ASSERT_NE(defaults.error_rate_vec, nullptr);
+  EXPECT_EQ(defaults.error_rate_vec->size(), 1u);
+}
+
+TEST(StimDemGetDecoder, ThrowsOnProbabilityOutOfRange) {
+  const std::string dem_text = "error(1.5) D0\n";
+  EXPECT_THROW(cudaq::qec::get_decoder("single_error_lut", dem_text),
+               std::runtime_error);
+}
+
+TEST(StimDemGetDecoder, ThrowsOnMalformedStimDem) {
+  EXPECT_THROW(cudaq::qec::get_decoder("single_error_lut", "not a valid DEM"),
+               std::runtime_error);
+}
+
+TEST(StimDemGetDecoder, ThrowsOnUnknownDecoderName) {
+  const std::string dem_text = "error(0.1) D0 L0\n";
+  EXPECT_THROW(cudaq::qec::get_decoder("__no_such_decoder__", dem_text),
+               std::runtime_error);
+}
+
+TEST(StimDemGetDecoder, ThrowsOnEmptyErrorMechanisms) {
+  const std::string dem_text = "detector(0, 0, 0)\n";
+  EXPECT_THROW(cudaq::qec::get_decoder("single_error_lut", dem_text),
+               std::runtime_error);
+}
+
+TEST(StimDemGetDecoder, StimDemTargetCategoriesAreExhaustive) {
+  const std::vector<stim::DemTarget> samples = {
+      stim::DemTarget::separator(),
+      stim::DemTarget::relative_detector_id(0),
+      stim::DemTarget::relative_detector_id(42),
+      stim::DemTarget::observable_id(0),
+      stim::DemTarget::observable_id(7),
+  };
+  for (const auto &t : samples) {
+    const int kinds = static_cast<int>(t.is_separator()) +
+                      static_cast<int>(t.is_relative_detector_id()) +
+                      static_cast<int>(t.is_observable_id());
+    EXPECT_EQ(kinds, 1) << "DemTarget " << t.str() << " matched " << kinds
+                        << " predicates; expected exactly 1";
   }
+}
 
-  // Test that we can check if extensions are registered in the single-parameter
-  // registry
-  auto registered_single = cudaqx::extension_point<
-      cudaq::qec::decoder,
-      const cudaq::qec::sparse_binary_matrix &>::get_registered();
-
-  // The registry should exist (even if empty), proving line 18 instantiation
-  // works This test passes if no exceptions are thrown, proving the
-  // single-parameter registry is instantiated
+TEST(StimDemGetDecoder, UserOptionsAreNotOverwritten) {
+  const std::string dem_text = R"(error(0.1) D0 L0
+error(0.1) D1 L0
+error(0.05) D0 D1
+)";
+  cudaqx::heterogeneous_map opts;
+  opts.insert("error_rate_vec", std::vector<double>{0.5});
+  EXPECT_THROW(cudaq::qec::get_decoder("single_error_lut", dem_text, opts),
+               std::runtime_error);
 }

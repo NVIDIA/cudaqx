@@ -142,9 +142,9 @@ public:
   // Plugin registration macros
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       sliding_window, static std::unique_ptr<decoder> create(
-                          const cudaq::qec::sparse_binary_matrix &H,
+                          const cudaq::qec::decoder_init &init,
                           const cudaqx::heterogeneous_map &params) {
-        return std::make_unique<sliding_window>(H, params);
+        return cudaq::qec::make_pcm_decoder<sliding_window>(init, params);
       })
 };
 
