@@ -63,13 +63,8 @@ void validate_random_pcm_sparse_params(std::size_t n_rounds,
 }
 
 std::vector<std::vector<cudaq::qec::sparse_binary_matrix::index_type>>
-to_sorted_unique_nested_csr(const cudaq::qec::sparse_binary_matrix &pcm) {
-  auto rows = pcm.to_nested_csr();
-  for (auto &row : rows) {
-    std::sort(row.begin(), row.end());
-    row.erase(std::unique(row.begin(), row.end()), row.end());
-  }
-  return rows;
+to_canonical_nested_csr(const cudaq::qec::sparse_binary_matrix &pcm) {
+  return pcm.canonicalize().to_nested_csr();
 }
 
 struct reorder_pcm_columns_bounds {
@@ -918,7 +913,7 @@ std::string pcm_to_sparse_string(const cudaqx::tensor<uint8_t> &pcm) {
 }
 
 std::string pcm_to_sparse_string(const sparse_binary_matrix &pcm) {
-  auto rows = to_sorted_unique_nested_csr(pcm);
+  auto rows = to_canonical_nested_csr(pcm);
   std::stringstream ss;
   for (const auto &row : rows) {
     for (auto col : row)
@@ -946,7 +941,7 @@ pcm_to_sparse_vec(const cudaqx::tensor<uint8_t> &pcm) {
 }
 
 std::vector<std::int64_t> pcm_to_sparse_vec(const sparse_binary_matrix &pcm) {
-  auto rows = to_sorted_unique_nested_csr(pcm);
+  auto rows = to_canonical_nested_csr(pcm);
   std::vector<std::int64_t> sparse_vec;
   sparse_vec.reserve(static_cast<std::size_t>(pcm.num_nnz()) + rows.size());
   for (const auto &row : rows) {

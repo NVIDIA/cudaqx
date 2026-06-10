@@ -29,6 +29,8 @@ dense_to_sparse(const cudaqx::tensor<uint8_t> &pcm);
 std::string pcm_to_sparse_string(const cudaqx::tensor<uint8_t> &pcm);
 
 /// @brief Sparse overload of pcm_to_sparse_string.
+/// Duplicate stored entries are canonicalized with GF(2) cancellation before
+/// serialization.
 std::string pcm_to_sparse_string(const sparse_binary_matrix &pcm);
 
 /// @brief Return a PCM from a sparse representation.
@@ -57,6 +59,8 @@ pcm_from_sparse_vec(const std::vector<std::int64_t> &sparse_vec,
 std::vector<std::int64_t> pcm_to_sparse_vec(const cudaqx::tensor<uint8_t> &pcm);
 
 /// @brief Sparse overload of pcm_to_sparse_vec.
+/// Duplicate stored entries are canonicalized with GF(2) cancellation before
+/// serialization.
 std::vector<std::int64_t> pcm_to_sparse_vec(const sparse_binary_matrix &pcm);
 
 /// @brief Generate a sparse detector matrix for a given number of syndromes per
