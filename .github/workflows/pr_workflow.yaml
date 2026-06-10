@@ -44,7 +44,7 @@ jobs:
         uses: dorny/paths-filter@v3
         id: filter
         with:
-          base: ${{ fromJSON(steps.get-pr-info.outputs.pr-info).base.sha }}
+          base: ${{ fromJSON(steps.get-pr-info.outputs.pr-info).base.ref }}
           filters: |
             build-cudaq:
               - '.github/actions/get-cudaq-build/**'
