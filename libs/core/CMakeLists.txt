@@ -37,6 +37,7 @@ option(CUDAQX_CORE_INCLUDE_TESTS
 # ==============================================================================
 
 include(FetchContent)
+include(GNUInstallDirs)
 
 FetchContent_Declare(
   xtl
@@ -70,4 +71,3 @@ if (CUDAQX_CORE_INCLUDE_TESTS)
   add_custom_target(CUDAQXCoreUnitTests)
   add_subdirectory(unittests)
 endif()
-

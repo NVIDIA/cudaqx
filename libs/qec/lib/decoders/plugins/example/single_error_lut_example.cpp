@@ -7,7 +7,6 @@
  ******************************************************************************/
 
 #include "cudaq/qec/decoder.h"
-#include "cudaq/qec/pcm_utils.h"
 #include <cassert>
 #include <map>
 #include <vector>
@@ -30,7 +29,7 @@ public:
     // The loop below sets err_sig[r] = '1' (not XOR-toggle), so canonicalize
     // to drop GF(2)-duplicate row indices first.
     std::vector<std::vector<std::uint32_t>> H_e2d =
-        cudaq::qec::canonicalize_pcm(H).to_nested_csc();
+        H.canonicalize().to_nested_csc();
 
     for (std::size_t qErr = 0; qErr < block_size; qErr++) {
       std::string err_sig(syndrome_size, '0');
