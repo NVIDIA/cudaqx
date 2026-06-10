@@ -444,7 +444,19 @@ def test_reorder_pcm_columns_scipy_sparse():
                                                column_order)
 
     assert scipy_sparse.issparse(sparse_reordered)
+    assert scipy_sparse.isspmatrix_csc(sparse_reordered)
     assert np.array_equal(sparse_reordered.toarray(), dense_reordered)
+
+
+def test_reorder_pcm_columns_scipy_sparse_zero_nnz_result():
+    scipy_sparse = pytest.importorskip("scipy.sparse")
+    H = scipy_sparse.csr_matrix((3, 4), dtype=np.uint8)
+
+    sparse_reordered = qec.reorder_pcm_columns(H, [2, 0])
+
+    assert scipy_sparse.isspmatrix_csc(sparse_reordered)
+    assert sparse_reordered.shape == (3, 2)
+    assert sparse_reordered.nnz == 0
 
 
 def test_shuffle_pcm_columns_scipy_sparse():
@@ -456,6 +468,7 @@ def test_shuffle_pcm_columns_scipy_sparse():
                                               seed=13)
 
     assert scipy_sparse.issparse(sparse_shuffled)
+    assert scipy_sparse.isspmatrix_csc(sparse_shuffled)
     assert np.array_equal(sparse_shuffled.toarray(), dense_shuffled)
 
 

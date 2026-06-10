@@ -72,6 +72,54 @@ to_sorted_unique_nested_csr(const cudaq::qec::sparse_binary_matrix &pcm) {
   return rows;
 }
 
+struct reorder_pcm_columns_bounds {
+  std::uint32_t row_end;
+  std::size_t num_rows_to_copy;
+};
+
+reorder_pcm_columns_bounds
+validate_reorder_pcm_columns_rows(std::size_t num_rows, std::uint32_t row_begin,
+                                  std::uint32_t row_end) {
+  if (row_begin > row_end) {
+    throw std::invalid_argument(
+        "reorder_pcm_columns: row_begin must be less than or equal to row_end");
+  }
+
+  if (num_rows == 0) {
+    if (row_begin != 0) {
+      throw std::invalid_argument(
+          "reorder_pcm_columns: row_begin is greater than the number of rows "
+          "in PCM");
+    }
+    return {0, 0};
+  }
+
+  if (static_cast<std::size_t>(row_begin) >= num_rows) {
+    throw std::invalid_argument(
+        "reorder_pcm_columns: row_begin is greater than the number of rows in "
+        "PCM");
+  }
+
+  constexpr auto max_row = std::numeric_limits<std::uint32_t>::max();
+  const auto last_row = num_rows - 1 > max_row
+                            ? max_row
+                            : static_cast<std::uint32_t>(num_rows - 1);
+  const auto clamped_row_end = std::min(row_end, last_row);
+  return {clamped_row_end,
+          static_cast<std::size_t>(clamped_row_end - row_begin + 1)};
+}
+
+void validate_reorder_pcm_columns_column_order(
+    const std::vector<std::uint32_t> &column_order, std::size_t num_cols) {
+  for (auto c : column_order) {
+    if (static_cast<std::size_t>(c) >= num_cols) {
+      throw std::invalid_argument(
+          "reorder_pcm_columns: column_order contains a column index that is "
+          "greater than the number of columns in PCM");
+    }
+  }
+}
+
 /// Validate the round-related parameters shared by both get_pcm_for_rounds
 /// overloads. Throws std::invalid_argument on violation.
 void validate_pcm_for_rounds_params(std::uint32_t num_syndromes_per_round,
@@ -332,34 +380,24 @@ reorder_pcm_columns(const cudaqx::tensor<uint8_t> &pcm,
   if (pcm.rank() != 2) {
     throw std::invalid_argument("reorder_pcm_columns: PCM must be a 2D tensor");
   }
-  if (row_begin > row_end) {
-    throw std::invalid_argument(
-        "reorder_pcm_columns: row_begin must be less than or equal to row_end");
-  }
 
   auto num_rows = pcm.shape()[0];
   auto num_cols = pcm.shape()[1];
   auto new_num_cols = column_order.size();
+  const auto bounds =
+      validate_reorder_pcm_columns_rows(num_rows, row_begin, row_end);
+  validate_reorder_pcm_columns_column_order(column_order, num_cols);
 
-  // Clamp row_end to the last row in the PCM.
-  row_end = std::min(row_end, static_cast<uint32_t>(num_rows - 1));
-  auto num_rows_to_copy = row_end - row_begin + 1;
-
-  for (auto c : column_order) {
-    if (c >= num_cols) {
-      throw std::invalid_argument(
-          "reorder_pcm_columns: column_order contains a column index that is "
-          "greater than the number of columns in PCM");
-    }
-  }
+  if (bounds.num_rows_to_copy == 0)
+    return cudaqx::tensor<uint8_t>(std::vector<std::size_t>{0, new_num_cols});
 
   auto transposed_pcm = pcm.transpose();
   cudaqx::tensor<uint8_t> new_pcm_t(
-      std::vector<std::size_t>{new_num_cols, num_rows_to_copy});
+      std::vector<std::size_t>{new_num_cols, bounds.num_rows_to_copy});
   for (std::size_t c = 0; c < new_num_cols; c++) {
     auto *orig_col = &transposed_pcm.at({column_order[c], row_begin});
     auto *new_col = &new_pcm_t.at({c, 0});
-    std::memcpy(new_col, orig_col, num_rows_to_copy * sizeof(uint8_t));
+    std::memcpy(new_col, orig_col, bounds.num_rows_to_copy * sizeof(uint8_t));
   }
 
   return new_pcm_t.transpose();
@@ -369,11 +407,6 @@ sparse_binary_matrix
 reorder_pcm_columns(const sparse_binary_matrix &pcm,
                     const std::vector<std::uint32_t> &column_order,
                     uint32_t row_begin, uint32_t row_end) {
-  if (row_begin > row_end) {
-    throw std::invalid_argument(
-        "reorder_pcm_columns: row_begin must be less than or equal to row_end");
-  }
-
   using index_type = sparse_binary_matrix::index_type;
   const index_type num_rows = pcm.num_rows();
   const index_type num_cols = pcm.num_cols();
@@ -383,33 +416,18 @@ reorder_pcm_columns(const sparse_binary_matrix &pcm,
         "reorder_pcm_columns: output column count exceeds index_type range");
   }
 
-  for (auto c : column_order) {
-    if (c >= num_cols) {
-      throw std::invalid_argument(
-          "reorder_pcm_columns: column_order contains a column index that is "
-          "greater than the number of columns in PCM");
-    }
-  }
+  const auto bounds =
+      validate_reorder_pcm_columns_rows(num_rows, row_begin, row_end);
+  validate_reorder_pcm_columns_column_order(column_order, num_cols);
 
-  if (num_rows == 0) {
-    if (row_begin != 0) {
-      throw std::invalid_argument(
-          "reorder_pcm_columns: row_begin is greater than the number of rows "
-          "in PCM");
-    }
+  if (bounds.num_rows_to_copy == 0) {
     return sparse_binary_matrix::from_nested_csc(
         0, static_cast<index_type>(column_order.size()),
         std::vector<std::vector<index_type>>(column_order.size()));
   }
 
-  if (row_begin >= num_rows) {
-    throw std::invalid_argument(
-        "reorder_pcm_columns: row_begin is greater than the number of rows in "
-        "PCM");
-  }
-  row_end = std::min(row_end, static_cast<uint32_t>(num_rows - 1));
   const auto num_rows_to_copy =
-      static_cast<index_type>(row_end - row_begin + 1);
+      static_cast<index_type>(bounds.num_rows_to_copy);
 
   auto csc = pcm.to_csc();
   const auto &ptr = csc.ptr();
@@ -419,7 +437,7 @@ reorder_pcm_columns(const sparse_binary_matrix &pcm,
     const auto orig_c = column_order[out_c];
     for (auto p = ptr[orig_c]; p < ptr[orig_c + 1]; ++p) {
       const auto row = idx[p];
-      if (row >= row_begin && row <= row_end)
+      if (row >= row_begin && row <= bounds.row_end)
         nested[out_c].push_back(static_cast<index_type>(row - row_begin));
     }
   }

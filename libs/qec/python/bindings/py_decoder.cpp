@@ -157,10 +157,13 @@ make_sparse_from_dense(const nb::ndarray<nb::numpy, uint8_t> &arr) {
 
 template <typename T>
 static nb::ndarray<nb::numpy, T> vector_to_numpy_1d(std::vector<T> values) {
+  const size_t logical_size = values.size();
   auto *owned = new std::vector<T>(std::move(values));
+  if (owned->empty())
+    owned->resize(1);
   nb::capsule owner(
       owned, [](void *p) noexcept { delete static_cast<std::vector<T> *>(p); });
-  size_t shape[1] = {owned->size()};
+  size_t shape[1] = {logical_size};
   return nb::ndarray<nb::numpy, T>(owned->data(), 1, shape, owner);
 }
 
