@@ -77,12 +77,27 @@ if(CUDAQ_QEC_TRT_DECODER_ENABLED AND CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64)|(A
       NO_DEFAULT_PATH
   )
 
+  # test_trt_decoder.cpp calls TensorRT APIs directly (nvinfer1::createInferBuilder,
+  # nvinfer1::ILogger), so the test must link libnvinfer itself. Relying on the
+  # transitive dependency through cudaq-qec-trt-decoder fails at link time with
+  # "DSO missing from command line".
+  find_library(TENSORRT_LIBRARY nvinfer
+      PATHS
+          ${TENSORRT_ROOT}/lib
+          /usr/lib/x86_64-linux-gnu
+          /usr/lib/aarch64-linux-gnu
+          /usr/local/cuda/lib64
+          /usr/local/tensorrt/lib
+          /opt/tensorrt/lib
+      NO_DEFAULT_PATH
+  )
+
   target_include_directories(test_trt_decoder PRIVATE
       ${CUDAToolkit_INCLUDE_DIRS}
       ${TENSORRT_INCLUDE_DIR}
   )
 
-  target_link_libraries(test_trt_decoder PRIVATE GTest::gtest_main cudaq-qec cudaq-qec-trt-decoder cudaq::cudaq CUDA::cudart)
+  target_link_libraries(test_trt_decoder PRIVATE GTest::gtest_main cudaq-qec cudaq-qec-trt-decoder cudaq::cudaq CUDA::cudart ${TENSORRT_LIBRARY})
   # Path to ONNX test asset at repo root (absolute so test finds it regardless of CWD)
   target_compile_definitions(test_trt_decoder PRIVATE
     TRT_TEST_ONNX_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../../../assets/tests/surface_code_decoder.onnx")
