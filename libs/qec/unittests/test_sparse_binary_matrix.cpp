@@ -496,7 +496,7 @@ TEST(SparseBinaryMatrix, Canonicalize_Idempotent) {
 
 TEST(SparseBinaryMatrix, CanonicalizePcm_DefaultConstructedIsEmpty) {
   sparse_binary_matrix sp;
-  auto canon = cudaq::qec::canonicalize_pcm(sp);
+  auto canon = sp.canonicalize();
   EXPECT_EQ(canon.num_rows(), 0u);
   EXPECT_EQ(canon.num_cols(), 0u);
   EXPECT_EQ(canon.num_nnz(), 0u);
