@@ -23,7 +23,8 @@ if sys.version_info >= (3, 11):
         prepare_syndrome_data_batch, tensor_network_from_syndrome_batch,
         tensor_network_from_logical_observable)
     from cudaq_qec.plugins.decoders.tensor_network_utils.contractors import (
-        optimize_path, cutn_contractor, ContractorConfig, contractor)
+        optimize_path, cutn_contractor, ContractorConfig, contractor,
+        oe_torch_contractor, oe_torch_compiled_contractor)
     from cudaq_qec.plugins.decoders.tensor_network_utils.noise_models import factorized_noise_model, error_pairs_noise_model
 
 pytestmark = pytest.mark.skipif(sys.version_info < (3, 11),
@@ -528,40 +529,28 @@ def test_error_pairs_noise_model_default_tags():
         assert "NOISE" in t.tags
 
 
-def test_valid_numpy_cpu():
-    cfg = ContractorConfig("numpy", "numpy", "cpu")
-    assert cfg.contractor_name == "numpy"
-    assert cfg.backend == "numpy"
-    assert cfg.device == "cpu"
+@pytest.mark.parametrize(
+    "contractor_name, backend, device, expected_contractor",
+    [
+        ("numpy", "numpy", "cpu", contractor),
+        ("torch", "torch", "cpu", contractor),
+        ("torch", "torch", "cuda:0", contractor),
+        ("oe_torch", "torch", "cpu", oe_torch_contractor),
+        ("oe_torch", "torch", "cuda:0", oe_torch_contractor),
+        ("oe_torch_compiled", "torch", "cpu", oe_torch_compiled_contractor),
+        ("oe_torch_compiled", "torch", "cuda:0", oe_torch_compiled_contractor),
+        ("cutensornet", "numpy", "cuda", cutn_contractor),
+        ("cutensornet", "torch", "cuda", cutn_contractor),
+    ],
+)
+def test_valid_contractor_config(contractor_name, backend, device,
+                                 expected_contractor):
+    cfg = ContractorConfig(contractor_name, backend, device)
+    assert cfg.contractor_name == contractor_name
+    assert cfg.backend == backend
+    assert cfg.device == device
     assert cfg.device_id == 0
-    assert cfg.contractor is contractor
-
-
-def test_valid_torch_cpu():
-    cfg = ContractorConfig("torch", "torch", "cpu")
-    assert cfg.contractor_name == "torch"
-    assert cfg.backend == "torch"
-    assert cfg.device == "cpu"
-    assert cfg.device_id == 0
-    assert cfg.contractor is contractor
-
-
-def test_valid_cutensornet_numpy_cuda():
-    cfg = ContractorConfig("cutensornet", "numpy", "cuda")
-    assert cfg.contractor_name == "cutensornet"
-    assert cfg.backend == "numpy"
-    assert cfg.device == "cuda"
-    assert cfg.device_id == 0
-    assert cfg.contractor is cutn_contractor
-
-
-def test_valid_cutensornet_torch_cuda():
-    cfg = ContractorConfig("cutensornet", "torch", "cuda")
-    assert cfg.contractor_name == "cutensornet"
-    assert cfg.backend == "torch"
-    assert cfg.device == "cuda"
-    assert cfg.device_id == 0
-    assert cfg.contractor is cutn_contractor
+    assert cfg.contractor is expected_contractor
 
 
 def test_cuda_device_id_parsing():

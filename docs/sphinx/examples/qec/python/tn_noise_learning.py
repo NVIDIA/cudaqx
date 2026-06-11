@@ -68,6 +68,7 @@ def main():
     H, L, true_priors = parse_detector_error_model(dem)
     true_probs = np.array(true_priors)
     n_checks, n_errors = H.shape
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
     print(f"DEM: {n_checks} checks, {n_errors} errors")
     print(f"True priors:  mean={true_probs.mean():.4e}  "
@@ -81,11 +82,17 @@ def main():
     obs_flips = obs_flips.ravel().astype(bool)
 
     uniform = float(true_probs.mean())
+    # precontract_noise=True is the recommended reduced-topology path
+    # for larger detector-error models.  Set precontract_noise=False
+    # only when explicitly checking the full tensor-network contraction.
     opt = NMOptimizer(H,
                       L, [uniform] * n_errors,
                       det_events,
                       obs_flips,
-                      dtype="float64")
+                      dtype="float64",
+                      device=device,
+                      execute="opt_einsum",
+                      precontract_noise=True)
 
     # Optimize in logit space — numerically stabler than raw probs.
     def _to_logits(p):

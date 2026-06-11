@@ -22,8 +22,11 @@ torch = pytest.importorskip(
     "torch", reason="torch not installed; skipping TN noise-learning tests")
 
 if sys.version_info >= (3, 11):
+    import cudaq_qec.plugins.decoders.tensor_network_utils.nm_optimizer as nmopt
     from cudaq_qec.plugins.decoders.tensor_network_utils.nm_optimizer import (
         NMOptimizer,
+        _einsum_torch,
+        _normalize_prediction,
         make_compiled_step,
         remap_eq_to_ascii,
     )
@@ -44,7 +47,7 @@ def _device_params():
     return out
 
 
-_EXECUTE_MODES = ("codegen", "unrolled", "opt_einsum")
+_EXECUTE_MODES = ("opt_einsum", "unrolled", "codegen")
 
 # -- fixtures / helpers -------------------------------------------------------
 
@@ -101,8 +104,8 @@ def _make_opt(H, logical, priors, syn, flips, **kwargs):
 def _naive_cross_entropy(opt: "NMOptimizer") -> torch.Tensor:
     """Reference cross-entropy: predict, then ``-log p`` per shot.
 
-    Mirrors the pre-fusion implementation; used to verify the codegen
-    loss in :func:`test_fused_loss_matches_naive`.
+    Used to verify :meth:`NMOptimizer.cross_entropy_loss` across
+    execution modes.
     """
     preds = opt.decoder_prediction()
     obs_t = opt.obs_idx_true
@@ -115,7 +118,7 @@ def _naive_cross_entropy(opt: "NMOptimizer") -> torch.Tensor:
 
 
 @pytest.mark.parametrize("device", _device_params())
-def test_construction_basic(device):
+def test_construction_basic(device, capsys):
     H, logical, priors = _simple_repetition_code()
     syn, flips = _sample_synthetic_dataset(H,
                                            logical,
@@ -123,6 +126,12 @@ def test_construction_basic(device):
                                            num_shots=8,
                                            rng=np.random.default_rng(0))
     opt = _make_opt(H, logical, priors, syn, flips, device=device)
+    captured = capsys.readouterr()
+    assert "cutensornet" not in captured.out
+    assert "CUDA is not available" not in captured.out
+    assert opt.contractor_config.contractor_name == "oe_torch_compiled"
+    assert opt.contractor_config.backend == "torch"
+    assert opt.contractor_config.device == device
     assert opt._batch_size == 8
     assert opt._noise_probs.requires_grad
     assert len(opt.noise_params) == 1
@@ -149,6 +158,24 @@ def test_invalid_execute_mode_rejected(device):
                   flips,
                   device=device,
                   execute="bogus")
+
+
+@pytest.mark.parametrize("device", _device_params())
+def test_invalid_precontract_noise_rejected(device):
+    H, logical, priors = _simple_repetition_code()
+    syn, flips = _sample_synthetic_dataset(H,
+                                           logical,
+                                           priors,
+                                           num_shots=4,
+                                           rng=np.random.default_rng(24))
+    with pytest.raises(ValueError, match="precontract_noise must be"):
+        _make_opt(H,
+                  logical,
+                  priors,
+                  syn,
+                  flips,
+                  device=device,
+                  precontract_noise="bad")
 
 
 @pytest.mark.parametrize("device", _device_params())
@@ -197,8 +224,7 @@ def test_gradient_flows(device, execute):
 
     Uses :func:`_nondegenerate_code` plus mismatched init priors so the
     loss surface has a non-trivial gradient.  Parametrized over every
-    ``execute`` mode so unrolled and opt_einsum paths can't silently
-    regress on the autograd graph.
+    execution mode so benchmark paths cannot silently regress.
     """
     rng = np.random.default_rng(3)
     H, logical = _nondegenerate_code()
@@ -230,12 +256,7 @@ def test_gradient_flows(device, execute):
 @pytest.mark.parametrize("device", _device_params())
 @pytest.mark.parametrize("execute", _EXECUTE_MODES)
 def test_fused_loss_matches_naive(device, execute):
-    """``cross_entropy_loss`` == predict + manual CE in every execute mode.
-
-    Codegen mode fuses the CE reduction into the contraction graph;
-    unrolled/opt_einsum wrap ``predict_fn``.  All three must agree with
-    the naive reference up to fp64 round-off.
-    """
+    """``cross_entropy_loss`` == predict + manual CE in every execute mode."""
     rng = np.random.default_rng(11)
     H, logical = _nondegenerate_code()
     init_priors = [0.2, 0.3, 0.4]
@@ -260,7 +281,7 @@ def test_fused_loss_matches_naive(device, execute):
 
 @pytest.mark.parametrize("device", _device_params())
 def test_fused_loss_matches_naive_static_codegen(device):
-    """Static codegen (``dynamic_syndromes=False``) numerical correctness."""
+    """Static codegen numerical correctness."""
     rng = np.random.default_rng(13)
     H, logical = _nondegenerate_code()
     init_priors = [0.2, 0.3, 0.4]
@@ -298,9 +319,6 @@ def test_fused_loss_matches_naive_static_codegen(device):
 def test_loss_fn_from_logits_and_probs(device, execute):
     """``loss_fn(from_logits=True)`` matches ``loss_fn(from_logits=False) o sigmoid``,
     and both agree with ``cross_entropy_loss`` on the optimiser's own probs.
-
-    Parametrized over execute modes so the logit-vs-probs equivalence is
-    validated on every supported backend.
     """
     rng = np.random.default_rng(12)
     H, logical = _nondegenerate_code()
@@ -327,6 +345,144 @@ def test_loss_fn_from_logits_and_probs(device, execute):
         v_self = opt.cross_entropy_loss()
     assert torch.allclose(v_probs, v_logits, atol=1e-8, rtol=1e-8)
     assert torch.allclose(v_probs, v_self, atol=1e-8, rtol=1e-8)
+
+
+@pytest.mark.parametrize("device", _device_params())
+@pytest.mark.parametrize("execute", _EXECUTE_MODES)
+def test_precontract_noise_matches_full(device, execute):
+    rng = np.random.default_rng(25)
+    H, logical = _nondegenerate_code()
+    priors = [0.2, 0.3, 0.4]
+    syn, flips = _sample_synthetic_dataset(H,
+                                           logical, [0.1, 0.15, 0.25],
+                                           num_shots=24,
+                                           rng=rng)
+    full = _make_opt(H,
+                     logical,
+                     priors,
+                     syn,
+                     flips,
+                     device=device,
+                     dtype="float64")
+    reduced = _make_opt(H,
+                        logical,
+                        priors,
+                        syn,
+                        flips,
+                        device=device,
+                        dtype="float64",
+                        execute=execute,
+                        precontract_noise=True)
+    with torch.no_grad():
+        p_full = full.decoder_prediction()
+        p_reduced = reduced.decoder_prediction()
+        loss_full = full.cross_entropy_loss()
+        loss_reduced = reduced.cross_entropy_loss()
+    assert torch.allclose(p_full, p_reduced, atol=1e-7, rtol=1e-7)
+    assert torch.allclose(loss_full, loss_reduced, atol=1e-7, rtol=1e-7)
+
+    reduced.noise_params[0].grad = None
+    loss = reduced.cross_entropy_loss()
+    loss.backward()
+    grad = reduced.noise_params[0].grad
+    assert grad is not None
+    assert torch.isfinite(grad).all()
+    assert torch.any(grad != 0.0)
+
+
+@pytest.mark.parametrize("device", _device_params())
+def test_precontract_noise_auto_uses_reduced_for_large_problem(
+        device, monkeypatch):
+    monkeypatch.setattr(nmopt, "_AUTO_PRECONTRACT_NUM_CHECKS_THRESHOLD", 1)
+    monkeypatch.setattr(nmopt, "_AUTO_PRECONTRACT_NUM_ERRORS_THRESHOLD", 1)
+    H, logical, priors = _simple_repetition_code()
+    syn, flips = _sample_synthetic_dataset(H,
+                                           logical,
+                                           priors,
+                                           num_shots=4,
+                                           rng=np.random.default_rng(26))
+    opt = _make_opt(H,
+                    logical,
+                    priors,
+                    syn,
+                    flips,
+                    device=device,
+                    precontract_noise="auto")
+    assert opt._precontract_noise is True
+    with torch.no_grad():
+        pred = opt.decoder_prediction()
+    assert pred.shape == (4, 2)
+
+
+@pytest.mark.parametrize("device", _device_params())
+def test_reduced_microbatch_loss_matches_full_loss(device, monkeypatch):
+    monkeypatch.setattr(nmopt, "_AUTO_PRECONTRACT_NUM_CHECKS_THRESHOLD", 1)
+    monkeypatch.setattr(nmopt, "_AUTO_PRECONTRACT_NUM_ERRORS_THRESHOLD", 1)
+    monkeypatch.setattr(nmopt, "_AUTO_REDUCED_LOSS_MICROBATCH_SIZE", 1)
+    rng = np.random.default_rng(27)
+    H, logical = _nondegenerate_code()
+    priors = [0.2, 0.3, 0.4]
+    syn, flips = _sample_synthetic_dataset(H,
+                                           logical, [0.1, 0.15, 0.25],
+                                           num_shots=8,
+                                           rng=rng)
+    full = _make_opt(H,
+                     logical,
+                     priors,
+                     syn,
+                     flips,
+                     device=device,
+                     dtype="float64",
+                     precontract_noise=False)
+    reduced = _make_opt(H,
+                        logical,
+                        priors,
+                        syn,
+                        flips,
+                        device=device,
+                        dtype="float64",
+                        precontract_noise="auto")
+    assert reduced._precontract_noise is True
+    assert reduced._loss_microbatch_size == 1
+    with torch.no_grad():
+        loss_full = full.cross_entropy_loss()
+        loss_reduced = reduced.cross_entropy_loss()
+    assert torch.allclose(loss_full, loss_reduced, atol=1e-7, rtol=1e-7)
+
+
+@pytest.mark.parametrize("device", _device_params())
+def test_reduced_microbatch_prediction_matches_full(device, monkeypatch):
+    monkeypatch.setattr(nmopt, "_AUTO_PRECONTRACT_NUM_CHECKS_THRESHOLD", 1)
+    monkeypatch.setattr(nmopt, "_AUTO_PRECONTRACT_NUM_ERRORS_THRESHOLD", 1)
+    monkeypatch.setattr(nmopt, "_AUTO_REDUCED_PREDICTION_MICROBATCH_SIZE", 2)
+    rng = np.random.default_rng(28)
+    H, logical = _nondegenerate_code()
+    priors = [0.2, 0.3, 0.4]
+    syn, flips = _sample_synthetic_dataset(H,
+                                           logical, [0.1, 0.15, 0.25],
+                                           num_shots=8,
+                                           rng=rng)
+    full = _make_opt(H,
+                     logical,
+                     priors,
+                     syn,
+                     flips,
+                     device=device,
+                     dtype="float64",
+                     precontract_noise=False)
+    reduced = _make_opt(H,
+                        logical,
+                        priors,
+                        syn,
+                        flips,
+                        device=device,
+                        dtype="float64",
+                        precontract_noise="auto")
+    assert reduced._prediction_microbatch_size == 2
+    with torch.no_grad():
+        pred_full = full.decoder_prediction()
+        pred_reduced = reduced.decoder_prediction()
+    assert torch.allclose(pred_full, pred_reduced, atol=1e-7, rtol=1e-7)
 
 
 # -- numerical guards --------------------------------------------------------
@@ -457,8 +613,8 @@ def test_non_1d_noise_model_rejected():
 
 
 @pytest.mark.parametrize("device", _device_params())
-def test_current_syndrome_args_dynamic_returns_live_tuple(device):
-    """Dynamic mode: returns the live syndrome tuple."""
+def test_current_syndrome_args_returns_live_tuple(device):
+    """Returns the live syndrome tuple used by ``loss_fn``."""
     rng = np.random.default_rng(101)
     H, logical, priors = _simple_repetition_code()
     syn, flips = _sample_synthetic_dataset(H,
@@ -466,14 +622,7 @@ def test_current_syndrome_args_dynamic_returns_live_tuple(device):
                                            priors,
                                            num_shots=12,
                                            rng=rng)
-    opt = _make_opt(H,
-                    logical,
-                    priors,
-                    syn,
-                    flips,
-                    device=device,
-                    execute="codegen",
-                    dynamic_syndromes=True)
+    opt = _make_opt(H, logical, priors, syn, flips, device=device)
     args = opt.current_syndrome_args()
     assert args is opt._syndrome_tuple
     assert len(args) > 0
@@ -482,8 +631,8 @@ def test_current_syndrome_args_dynamic_returns_live_tuple(device):
 
 
 @pytest.mark.parametrize("device", _device_params())
-def test_current_syndrome_args_static_returns_empty(device):
-    """Static codegen mode: returns ``()`` (syndromes are closure-baked)."""
+def test_current_syndrome_args_static_codegen_returns_empty(device):
+    """Static codegen returns ``()`` because syndromes are closure-baked."""
     rng = np.random.default_rng(102)
     H, logical, priors = _simple_repetition_code()
     syn, flips = _sample_synthetic_dataset(H,
@@ -508,8 +657,8 @@ def test_current_syndrome_args_static_returns_empty(device):
 
 
 @pytest.mark.parametrize("device", _device_params())
-def test_update_dataset_dynamic_keeps_predict_fn(device):
-    """Dynamic mode: predict function identity unchanged across swaps."""
+def test_update_dataset_same_shape_keeps_predict_fn(device):
+    """Same-shape swaps refresh data without rebuilding the predict function."""
     rng = np.random.default_rng(5)
     H, logical, priors = _simple_repetition_code()
     syn1, flips1 = _sample_synthetic_dataset(H,
@@ -517,13 +666,7 @@ def test_update_dataset_dynamic_keeps_predict_fn(device):
                                              priors,
                                              num_shots=10,
                                              rng=rng)
-    opt = _make_opt(H,
-                    logical,
-                    priors,
-                    syn1,
-                    flips1,
-                    device=device,
-                    dynamic_syndromes=True)
+    opt = _make_opt(H, logical, priors, syn1, flips1, device=device)
     fn_before = opt._predict_fn
     syn2, flips2 = _sample_synthetic_dataset(H,
                                              logical,
@@ -535,8 +678,8 @@ def test_update_dataset_dynamic_keeps_predict_fn(device):
 
 
 @pytest.mark.parametrize("device", _device_params())
-def test_update_dataset_static_rebuilds_predict_fn(device):
-    """Static mode: predict function is re-codegened on swap."""
+def test_update_dataset_static_codegen_rebuilds_predict_fn(device):
+    """Static codegen rebuilds when same-shape syndrome values change."""
     rng = np.random.default_rng(6)
     H, logical, priors = _simple_repetition_code()
     syn1, flips1 = _sample_synthetic_dataset(H,
@@ -550,6 +693,7 @@ def test_update_dataset_static_rebuilds_predict_fn(device):
                     syn1,
                     flips1,
                     device=device,
+                    execute="codegen",
                     dynamic_syndromes=False)
     fn_before = opt._predict_fn
     syn2, flips2 = _sample_synthetic_dataset(H,
@@ -582,6 +726,7 @@ def test_update_dataset_shape_change_rebuilds_and_decodes(
                     flips1,
                     device=device,
                     dtype="float64",
+                    execute="codegen",
                     dynamic_syndromes=dynamic_syndromes)
     syn2, flips2 = _sample_synthetic_dataset(H,
                                              logical,
@@ -602,6 +747,7 @@ def test_update_dataset_shape_change_rebuilds_and_decodes(
                     flips2,
                     device=device,
                     dtype="float64",
+                    execute="codegen",
                     dynamic_syndromes=dynamic_syndromes)
     with torch.no_grad():
         ref_loss = ref.cross_entropy_loss()
@@ -704,13 +850,12 @@ def test_optimize_path_with_cotengra(device):
 def test_remap_eq_to_ascii_simple():
     eq = "ab,bc->ac"
     out = remap_eq_to_ascii(eq)
-    # ASCII input is returned unchanged via the ``isascii()`` fast path.
     assert out == "ab,bc->ac"
 
 
 def test_remap_eq_to_ascii_unicode_labels():
     """Synthetic equation with non-ASCII labels is remapped to a-zA-Z."""
-    eq = "\u0391\u0392,\u0392\u0393->\u0391\u0393"  # greek letters
+    eq = "\u0391\u0392,\u0392\u0393->\u0391\u0393"
     out = remap_eq_to_ascii(eq)
     assert "\u0391" not in out and "\u0392" not in out and "\u0393" not in out
     assert "->" in out
@@ -720,11 +865,48 @@ def test_remap_eq_to_ascii_unicode_labels():
 
 
 def test_remap_eq_to_ascii_too_many_labels():
-    """Equations with > 52 distinct labels raise."""
-    chars = [chr(0x4E00 + i) for i in range(53)]  # 53 distinct CJK chars
+    """Equations with more than 52 distinct labels raise."""
+    chars = [chr(0x4E00 + i) for i in range(53)]
     eq = "".join(chars) + "->" + chars[0]
     with pytest.raises(ValueError, match="more than 52"):
         remap_eq_to_ascii(eq)
+
+
+def test_einsum_torch_handles_more_than_52_pairwise_labels():
+    """High-rank pairwise steps bypass torch.einsum's label limit."""
+    chars = [chr(0x4E00 + i) for i in range(54)]
+    lhs_a = "".join(chars[:53])
+    lhs_b = chars[52] + chars[53]
+    rhs = "".join(chars[:52]) + chars[53]
+    eq = f"{lhs_a},{lhs_b}->{rhs}"
+    a = torch.ones((1,) * 53, dtype=torch.float64)
+    b = torch.full((1, 1), 2.0, dtype=torch.float64)
+    out = _einsum_torch(eq, a, b)
+    assert out.shape == (1,) * 53
+    assert torch.allclose(out, torch.full((1,) * 53, 2.0))
+
+
+def test_normalize_prediction_handles_bad_weights():
+    """Raw weights with roundoff pathologies still produce finite probs."""
+    weights = torch.tensor(
+        [
+            [float("nan"), 1.0],
+            [-1.0, -2.0],
+            [float("inf"), 1.0],
+            [float("nan"), float("nan")],
+            [float("inf"), float("inf")],
+            [0.25, 0.75],
+        ],
+        dtype=torch.float32,
+    )
+    probs = _normalize_prediction(weights)
+    assert torch.isfinite(probs).all()
+    assert (probs > 0).all()
+    assert (probs <= 1).all()
+    assert torch.allclose(probs[1], torch.tensor([0.5, 0.5]))
+    assert torch.allclose(probs[3], torch.tensor([0.5, 0.5]))
+    assert torch.allclose(probs[4], torch.tensor([0.5, 0.5]))
+    assert torch.allclose(probs[5], torch.tensor([0.25, 0.75]))
 
 
 # -- logical_error_rate ------------------------------------------------------
@@ -876,8 +1058,7 @@ def test_recovers_true_priors_within_tol(device):
                     syn,
                     flips,
                     device=device,
-                    dtype="float64",
-                    execute="codegen")
+                    dtype="float64")
     init_p = opt.noise_params[0].detach()
     logits = torch.logit(init_p).clone().requires_grad_(True)
     torch_opt = torch.optim.Adam([logits], lr=0.05)
@@ -888,6 +1069,50 @@ def test_recovers_true_priors_within_tol(device):
     np.testing.assert_allclose(fitted,
                                np.asarray(true_priors, dtype=np.float64),
                                atol=0.02)
+
+
+class _QuadraticOptimizer:
+
+    def loss_fn(self, from_logits=True):
+        return lambda logits, syndrome_args: (logits**2).sum()
+
+    def current_syndrome_args(self):
+        return ()
+
+
+class _NanStepOptimizer(torch.optim.Optimizer):
+
+    def __init__(self, params):
+        super().__init__(params, defaults={})
+
+    def step(self, closure=None):
+        for group in self.param_groups:
+            for param in group["params"]:
+                with torch.no_grad():
+                    param.fill_(float("nan"))
+
+
+def test_make_compiled_step_backtracks_large_loss_increase():
+    logits = torch.tensor([1.0], requires_grad=True)
+    torch_opt = torch.optim.SGD([logits], lr=10.0)
+    step_fn = make_compiled_step(_QuadraticOptimizer(),
+                                 logits,
+                                 torch_opt,
+                                 max_backtracks=5)
+    before = float((logits**2).sum().detach())
+    step_loss = step_fn()
+    after = float((logits**2).sum().detach())
+    assert torch.isfinite(step_loss)
+    assert after < before
+    assert torch_opt.param_groups[0]["lr"] < 10.0
+
+
+def test_make_compiled_step_rejects_nonfinite_logits_after_step():
+    logits = torch.tensor([1.0], requires_grad=True)
+    step_fn = make_compiled_step(_QuadraticOptimizer(), logits,
+                                 _NanStepOptimizer([logits]))
+    with pytest.raises(RuntimeError, match="Non-finite.*logits"):
+        step_fn()
 
 
 if __name__ == "__main__":
