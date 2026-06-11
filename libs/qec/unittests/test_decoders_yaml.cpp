@@ -10,6 +10,7 @@
 #include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/realtime/decoding_config.h"
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -37,6 +38,13 @@ private:
   std::optional<std::string> oldValue;
 };
 } // namespace
+
+namespace cudaq::qec::decoding::simulation {
+void enqueue_syndromes(std::uint64_t decoder_id, uint8_t *syndromes,
+                       std::uint64_t syndrome_length, std::uint64_t tag);
+void get_corrections(std::uint64_t decoder_id, uint8_t *corrections,
+                     std::uint64_t correction_length, bool reset);
+} // namespace cudaq::qec::decoding::simulation
 
 /// Helper function to test that a decoder configuration can be serialized to
 /// and from YAML.
@@ -438,4 +446,40 @@ TEST(DecoderConfigTest, ConfigureFromFileWithDebugLogging) {
   EXPECT_EQ(configure_decoders_from_file(path.c_str()), 0);
   finalize_decoders();
   std::filesystem::remove(path);
+}
+
+TEST(DecoderConfigTest, ConfigureFromMissingFileReturnsError) {
+  using namespace cudaq::qec::decoding::config;
+
+  // Missing config files should return the documented nonzero status instead
+  // of attempting to parse an empty or invalid YAML payload.
+  const auto missing_path =
+      std::filesystem::temp_directory_path() / "cudaq_qec_missing_decoders.yaml";
+  std::filesystem::remove(missing_path);
+  EXPECT_EQ(configure_decoders_from_file(missing_path.c_str()), 1);
+}
+
+TEST(DecoderConfigTest, SimulationHostPointerWrappersForwardToHostRuntime) {
+  using namespace cudaq::qec::decoding::config;
+
+  // The simulation namespace pointer overloads are host trampolines; configure a
+  // simple decoder and verify enqueue/get_corrections reaches the host state.
+  multi_decoder_config multi_config;
+  auto config = create_test_empty_decoder_config(0);
+  cudaqx::tensor<uint8_t> O({1, config.block_size});
+  O.at({0, 0}) = 1;
+  config.O_sparse = cudaq::qec::pcm_to_sparse_vec(O);
+  multi_config.decoders.push_back(config);
+  ASSERT_EQ(configure_decoders(multi_config), 0);
+
+  std::vector<uint8_t> syndromes(config.syndrome_size * 2, 0);
+  syndromes[0] = 1;
+  cudaq::qec::decoding::simulation::enqueue_syndromes(
+      /*decoder_id=*/0, syndromes.data(), syndromes.size(), /*tag=*/17);
+
+  std::vector<uint8_t> corrections(1, 0xff);
+  cudaq::qec::decoding::simulation::get_corrections(
+      /*decoder_id=*/0, corrections.data(), corrections.size(), /*reset=*/true);
+  EXPECT_EQ(corrections, (std::vector<uint8_t>{0}));
+  finalize_decoders();
 }

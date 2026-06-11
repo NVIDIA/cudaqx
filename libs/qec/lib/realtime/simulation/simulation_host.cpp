@@ -31,19 +31,22 @@ simulation_get_corrections(std::uint64_t decoder_id, boolean_span corrections,
                                               corrections.length, reset);
 }
 
-void enqueue_syndromes(std::uint64_t decoder_id, uint8_t *syndromes,
-                       std::uint64_t syndrome_length, std::uint64_t tag) {
+__attribute__((visibility("default"))) void
+enqueue_syndromes(std::uint64_t decoder_id, uint8_t *syndromes,
+                  std::uint64_t syndrome_length, std::uint64_t tag) {
   cudaq::qec::decoding::host::enqueue_syndromes(decoder_id, syndromes,
                                                 syndrome_length, tag);
 }
 
-void get_corrections(std::uint64_t decoder_id, uint8_t *corrections,
-                     std::uint64_t correction_length, bool reset) {
+__attribute__((visibility("default"))) void
+get_corrections(std::uint64_t decoder_id, uint8_t *corrections,
+                std::uint64_t correction_length, bool reset) {
   cudaq::qec::decoding::host::get_corrections(decoder_id, corrections,
                                               correction_length, reset);
 }
 
-void reset_decoder(std::uint64_t decoder_id) {
+__attribute__((visibility("default"))) void
+reset_decoder(std::uint64_t decoder_id) {
   cudaq::qec::decoding::host::reset_decoder(decoder_id);
 }
 

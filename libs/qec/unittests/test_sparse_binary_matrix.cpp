@@ -9,6 +9,7 @@
 #include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/sparse_binary_matrix.h"
 #include <gtest/gtest.h>
+#include <limits>
 #include <random>
 #include <stdexcept>
 
@@ -654,6 +655,104 @@ TEST(SparseBinaryMatrix, GenerateRandomPcmSparse_LargeMatrix) {
   EXPECT_EQ(canon.num_nnz(), sp.num_nnz());
   EXPECT_EQ(canon.ptr(), sp.ptr());
   EXPECT_EQ(canon.indices(), sp.indices());
+}
+
+TEST(SparseBinaryMatrix, EmptyDefaultMatrixValidatesAsCanonical) {
+  // Default-constructed sparse matrices are valid empty matrices; validation
+  // should return before requiring a pointer array.
+  sparse_binary_matrix sp;
+  EXPECT_NO_THROW(sp.validate_sorted_unique_indices("empty"));
+}
+
+TEST(SparseBinaryMatrix, DegenerateCsrDenseConstructorInitializesPointers) {
+  // A CSR matrix with zero columns still needs one row pointer per row plus the
+  // trailing sentinel, and to_dense must preserve the degenerate shape.
+  cudaqx::tensor<std::uint8_t> dense({2, 0});
+  sparse_binary_matrix sp(dense, sparse_binary_matrix_layout::csr);
+  EXPECT_EQ(sp.layout(), sparse_binary_matrix_layout::csr);
+  EXPECT_EQ(sp.ptr(), (std::vector<index_type>{0, 0, 0}));
+  auto back = sp.to_dense();
+  EXPECT_EQ(back.shape()[0], 2u);
+  EXPECT_EQ(back.shape()[1], 0u);
+}
+
+TEST(SparseBinaryMatrix, ToCsrOnCsrReturnsEquivalentCopy) {
+  // Calling to_csr() on an already-CSR matrix should use the direct copy path;
+  // the copied structure must retain both layout and sparse storage.
+  std::vector<std::vector<index_type>> nested = {{0, 2}, {1}};
+  auto csr = sparse_binary_matrix::from_nested_csr(2, 3, nested);
+  auto csr_copy = csr.to_csr();
+  EXPECT_EQ(csr_copy.layout(), sparse_binary_matrix_layout::csr);
+  EXPECT_EQ(csr_copy.ptr(), csr.ptr());
+  EXPECT_EQ(csr_copy.indices(), csr.indices());
+}
+
+TEST(SparseBinaryMatrix, PcmIsSortedRejectsOutOfOrderSparseColumns) {
+  // Column 0 starts in a later round than column 1, so sorted order would swap
+  // them and pcm_is_sorted must report false.
+  std::vector<std::vector<std::uint32_t>> sparse_pcm = {{2}, {0}};
+  EXPECT_FALSE(cudaq::qec::pcm_is_sorted(sparse_pcm,
+                                         /*num_syndromes_per_round=*/2));
+}
+
+TEST(SparseBinaryMatrix, GenerateRandomPcmWeightZeroWithNoSyndromes) {
+  // With zero syndromes per round and zero weight, both dense and sparse
+  // generators skip row sampling and produce empty-row matrices.
+  auto dense = cudaq::qec::generate_random_pcm(/*n_rounds=*/3,
+                                               /*n_errs_per_round=*/4,
+                                               /*n_syndromes_per_round=*/0,
+                                               /*weight=*/0,
+                                               std::mt19937_64(0));
+  EXPECT_EQ(dense.shape()[0], 0u);
+  EXPECT_EQ(dense.shape()[1], 12u);
+
+  auto sparse =
+      cudaq::qec::generate_random_pcm_sparse(/*n_rounds=*/3,
+                                             /*n_errs_per_round=*/4,
+                                             /*n_syndromes_per_round=*/0,
+                                             /*weight=*/0, std::mt19937_64(0));
+  EXPECT_EQ(sparse.num_rows(), 0u);
+  EXPECT_EQ(sparse.num_cols(), 12u);
+  EXPECT_EQ(sparse.num_nnz(), 0u);
+}
+
+TEST(SparseBinaryMatrix, GenerateRandomPcmSparseRejectsInvalidWeight) {
+  // Weight cannot exceed the number of syndromes per round; the validation
+  // should fail before allocation or random sampling.
+  EXPECT_THROW(cudaq::qec::generate_random_pcm_sparse(
+                   /*n_rounds=*/1, /*n_errs_per_round=*/2,
+                   /*n_syndromes_per_round=*/1, /*weight=*/2,
+                   std::mt19937_64(0)),
+               std::invalid_argument);
+}
+
+TEST(SparseBinaryMatrix, GenerateRandomPcmSparseRejectsOverflowingNnz) {
+  // Dimensions may fit uint32_t while nnz = n_cols * weight does not; this must
+  // be rejected before building the nested sparse representation.
+  constexpr std::size_t kMaxIndex =
+      std::numeric_limits<index_type>::max();
+  EXPECT_THROW(cudaq::qec::generate_random_pcm_sparse(
+                   /*n_rounds=*/1, /*n_errs_per_round=*/kMaxIndex,
+                   /*n_syndromes_per_round=*/2, /*weight=*/2,
+                   std::mt19937_64(0)),
+               std::invalid_argument);
+}
+
+TEST(SparseBinaryMatrix, GenerateRandomPcmRejectsOverflowingDenseDimensions) {
+  // Dense generation must reject size_t multiplication overflow before it tries
+  // to allocate the tensor backing store.
+  constexpr std::size_t kTooLarge =
+      std::numeric_limits<std::size_t>::max() / 2 + 1;
+  EXPECT_THROW(cudaq::qec::generate_random_pcm(
+                   /*n_rounds=*/kTooLarge, /*n_errs_per_round=*/2,
+                   /*n_syndromes_per_round=*/1, /*weight=*/0,
+                   std::mt19937_64(0)),
+               std::invalid_argument);
+  EXPECT_THROW(cudaq::qec::generate_random_pcm(
+                   /*n_rounds=*/1, /*n_errs_per_round=*/kTooLarge,
+                   /*n_syndromes_per_round=*/3, /*weight=*/0,
+                   std::mt19937_64(0)),
+               std::invalid_argument);
 }
 
 } // namespace

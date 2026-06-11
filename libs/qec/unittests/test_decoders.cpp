@@ -998,3 +998,46 @@ error(0.05) D0 D1
   EXPECT_THROW(cudaq::qec::get_decoder("single_error_lut", dem_text, opts),
                std::runtime_error);
 }
+
+TEST(StimDemGetDecoder, SeparatorTargetsAreIgnoredByFallbackParser) {
+  // The fallback parser must skip Stim's '^' separator while retaining both
+  // detector targets and the observable target in the same error mechanism.
+  const std::string dem_text = "error(0.25) D0 ^ D1 L0\n";
+  auto dem = cudaq::qec::dem_from_stim_text(dem_text);
+  ASSERT_EQ(dem.num_error_mechanisms(), 1u);
+  ASSERT_EQ(dem.num_detectors(), 2u);
+  ASSERT_EQ(dem.num_observables(), 1u);
+  EXPECT_EQ(dem.detector_error_matrix.at({0, 0}), 1u);
+  EXPECT_EQ(dem.detector_error_matrix.at({1, 0}), 1u);
+  EXPECT_EQ(dem.observables_flips_matrix.at({0, 0}), 1u);
+}
+
+TEST(SlidingWindowDecoder, BaseStreamingCopiesFirstRoundDetectors) {
+  // A first-round detector matrix starts with single-syndrome rows; the base
+  // enqueue path should decode after one streamed round using a direct copy.
+  constexpr std::size_t n_rounds = 3;
+  constexpr std::size_t n_errs_per_round = 3;
+  constexpr std::size_t n_syndromes_per_round = 2;
+  auto pcm = cudaq::qec::generate_random_pcm(
+      n_rounds, n_errs_per_round, n_syndromes_per_round, /*weight=*/1,
+      std::mt19937_64(20260611));
+  pcm = cudaq::qec::sort_pcm_columns(pcm, n_syndromes_per_round);
+
+  cudaqx::heterogeneous_map params;
+  params.insert("window_size", std::size_t{2});
+  params.insert("step_size", std::size_t{1});
+  params.insert("num_syndromes_per_round", n_syndromes_per_round);
+  params.insert("error_rate_vec", std::vector<double>(pcm.shape()[1], 0.1));
+  params.insert("inner_decoder_name", std::string("single_error_lut"));
+  params.insert("inner_decoder_params", cudaqx::heterogeneous_map{});
+
+  auto decoder = cudaq::qec::decoder::get("sliding_window", pcm, params);
+  ASSERT_NE(decoder, nullptr);
+  decoder->set_O_sparse(std::vector<std::vector<uint32_t>>{{0}});
+  decoder->set_D_sparse(std::vector<std::vector<uint32_t>>{{0}, {1}});
+
+  std::vector<uint8_t> first_round = {1, 0};
+  EXPECT_FALSE(decoder->enqueue_syndrome(first_round))
+      << "First-round detector copy runs, but the sliding window is not full "
+         "yet so no final correction is committed.";
+}
