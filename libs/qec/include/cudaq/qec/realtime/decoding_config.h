@@ -54,6 +54,11 @@ struct nv_qldpc_decoder_config {
   std::optional<srelay_bp_config> srelay_config;
   std::optional<int> bp_seed;
   std::optional<int> composition;
+  // When set with a positive clip_value, forces the plugin's fixed-point
+  // arithmetic path so corrections are reproducible across runs and across
+  // hardware revisions. Required for the dispatcher-contract test which
+  // compares decoded corrections against a recorded fixture byte-by-byte.
+  std::optional<bool> repeatable;
 
   bool operator==(const nv_qldpc_decoder_config &) const = default;
   // opt_results is currently not supported for real-time decoding.

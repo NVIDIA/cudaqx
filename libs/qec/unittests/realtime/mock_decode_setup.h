@@ -122,6 +122,8 @@ inline std::vector<SyndromeEntry> load_syndromes(const std::string &path,
     }
     if (line.find("NUM_DATA") == 0 || line.find("NUM_LOGICAL") == 0) {
       continue;
+    } else if (line.find("ROUND_START") == 0) {
+      continue;
     } else if (reading_shot) {
       line.erase(0, line.find_first_not_of(" \t\n\r"));
       line.erase(line.find_last_not_of(" \t\n\r") + 1);

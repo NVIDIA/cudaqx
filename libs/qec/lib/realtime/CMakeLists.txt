@@ -46,6 +46,15 @@ if(CMAKE_CUDA_COMPILER)
   
   if(CUDAQ_REALTIME_INCLUDE_DIR)
     message(STATUS "Found cuda-quantum realtime headers at ${CUDAQ_REALTIME_INCLUDE_DIR}")
+    find_library(CUDAQ_REALTIME_LIBRARY
+      NAMES cudaq-realtime
+      PATHS ${_cudaq_realtime_prefixes}
+      PATH_SUFFIXES lib
+    )
+    if(CUDAQ_REALTIME_LIBRARY)
+      message(STATUS "Found cuda-quantum realtime library at ${CUDAQ_REALTIME_LIBRARY}")
+      get_filename_component(_CUDAQ_REALTIME_LIB_DIR "${CUDAQ_REALTIME_LIBRARY}" DIRECTORY)
+    endif()
     
     # Create static device library for device code
     add_library(cudaq-qec-realtime-cudevice STATIC
@@ -89,10 +98,25 @@ if(CMAKE_CUDA_COMPILER)
   endif()
 endif()
 
+set(CUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE "" CACHE FILEPATH
+    "Path to prebuilt proprietary realtime cudevice archive")
+if(CUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE)
+  if(NOT EXISTS "${CUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE}")
+    message(FATAL_ERROR
+      "CUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE does not exist: "
+      "${CUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE}")
+  endif()
+  add_library(cudaq-qec-realtime-cudevice-proprietary STATIC IMPORTED GLOBAL)
+  set_target_properties(cudaq-qec-realtime-cudevice-proprietary PROPERTIES
+    IMPORTED_LOCATION "${CUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE}")
+endif()
+
 # Shared library for host-side API
 add_library(cudaq-qec-realtime-decoding SHARED
   realtime_decoding.cpp
   config.cpp
+  qec_realtime_session.cpp
+  rpc_producer.cpp
 )
 
 target_compile_options(cudaq-qec-realtime-decoding 
@@ -104,9 +128,17 @@ target_include_directories(cudaq-qec-realtime-decoding
     $<BUILD_INTERFACE:${LLVM_INCLUDE_DIRS}>
     $<INSTALL_INTERFACE:${CUDAQ_INCLUDE_DIR}>
     $<INSTALL_INTERFACE:include>
+  PRIVATE
+    $<$<BOOL:${CUDAQ_REALTIME_INCLUDE_DIR}>:${CUDAQ_REALTIME_INCLUDE_DIR}>
+    ${CUDAToolkit_INCLUDE_DIRS}
 )
 
-target_link_options(cudaq-qec-realtime-decoding PUBLIC
+if(CUDAQ_REALTIME_INCLUDE_DIR)
+  target_compile_definitions(cudaq-qec-realtime-decoding PRIVATE
+    CUDAQ_REALTIME_ROOT)
+endif()
+
+target_link_options(cudaq-qec-realtime-decoding PRIVATE
   $<$<CXX_COMPILER_ID:GNU>:-Wl,--exclude-libs,ALL>
 )
 
@@ -117,10 +149,18 @@ target_link_libraries(cudaq-qec-realtime-decoding
   PRIVATE
     cudaq::cudaq-common
     LLVMSupport
+    $<$<BOOL:${CUDAQ_REALTIME_LIBRARY}>:${CUDAQ_REALTIME_LIBRARY}>
 )
 
 set_target_properties(cudaq-qec-realtime-decoding PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+
+if(_CUDAQ_REALTIME_LIB_DIR)
+  set_target_properties(cudaq-qec-realtime-decoding PROPERTIES
+    BUILD_RPATH "${_CUDAQ_REALTIME_LIB_DIR};${CMAKE_BINARY_DIR}/lib"
+    INSTALL_RPATH "${_CUDAQ_REALTIME_LIB_DIR};${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}"
+  )
+endif()
 
 
 install(TARGETS cudaq-qec-realtime-decoding

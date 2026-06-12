@@ -46,7 +46,7 @@ static int g_syndromes_per_shot = 0;
 void save_dem_to_file(const cudaq::qec::detector_error_model &dem,
                       std::string dem_filename, uint64_t numSyndromesPerRound,
                       uint64_t numLogical, const std::string &decoder_type,
-                      int sw_window_size, int sw_step_size) {
+                      int sw_window_size, int sw_step_size, bool use_relay_bp) {
   cudaq::qec::decoding::config::multi_decoder_config multi_config;
   for (uint64_t i = 0; i < numLogical; i++) {
     // We actually send 1 additional round in this example, so add 1.
@@ -74,27 +74,25 @@ void save_dem_to_file(const cudaq::qec::detector_error_model &dem,
       nv_config.error_rate_vec = dem.error_rates;
       nv_config.max_iterations = 50;
 
-      // BP Relay required settings
-      // Uncomment for BP Relay specific cases
-      // nv_config.bp_method = 3;   // min-sum+dmem (required for relay)
-      // nv_config.composition = 1; // Enable sequential relay
-      // nv_config.gamma0 = 0.0;    // Initial gamma value
-      // Relay configuration
-      // nv_config.srelay_config =
-      //    cudaq::qec::decoding::config::srelay_bp_config();
-      // nv_config.srelay_config->pre_iter = 5;  // Pre-iterations before relay
-      // nv_config.srelay_config->num_sets = 10; // Number of relay sets
-      // nv_config.srelay_config->stopping_criterion =
-      //    "All";                               // "All", "FirstConv", or
-      //    "NConv"
-      // nv_config.srelay_config->stop_nconv = 1; // For NConv criterion
-      // Gamma distribution for relay legs
-      // nv_config.gamma_dist = {0.1, 0.2};
-
-      // OSD post-processor
-      nv_config.use_osd = true;
-      nv_config.osd_order = 60;
-      nv_config.osd_method = 3;
+      if (use_relay_bp) {
+        nv_config.bp_method = 3;   // min-sum+dmem (required for relay)
+        nv_config.composition = 1; // Enable sequential relay
+        nv_config.gamma0 = 0.0;    // Initial gamma value
+        nv_config.clip_value = 200.0;
+        nv_config.repeatable = true;
+        nv_config.srelay_config =
+            cudaq::qec::decoding::config::srelay_bp_config();
+        nv_config.srelay_config->pre_iter = 5;
+        nv_config.srelay_config->num_sets = 10;
+        nv_config.srelay_config->stopping_criterion = "All";
+        nv_config.srelay_config->stop_nconv = 1;
+        nv_config.gamma_dist = {0.1, 0.2};
+      } else {
+        // OSD post-processor
+        nv_config.use_osd = true;
+        nv_config.osd_order = 60;
+        nv_config.osd_method = 3;
+      }
     } else if (decoder_type == "multi_error_lut") {
       // Original multi_error_lut configuration
       cudaq::qec::decoding::config::multi_error_lut_config lut_config;
@@ -448,7 +446,8 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
                        const std::string &decoder_type, int sw_window_size,
                        int sw_step_size, bool save_syndrome = false,
                        bool load_syndrome = false,
-                       std::string syndrome_filename = "") {
+                       std::string syndrome_filename = "",
+                       bool use_relay_bp = false) {
   if (!code.contains_operation(statePrep))
     throw std::runtime_error(
         "sample_memory_circuit_error - requested state prep kernel not found.");
@@ -605,7 +604,8 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
 
     if (save_dem) {
       save_dem_to_file(dem, dem_filename, numSyndromesPerRound, numLogical,
-                       decoder_type, sw_window_size, sw_step_size);
+                       decoder_type, sw_window_size, sw_step_size,
+                       use_relay_bp);
       return;
     }
   }
@@ -667,6 +667,8 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
             int shot_num = g_syndrome_count / g_syndromes_per_shot;
             g_syndrome_output_file << "SHOT_START " << shot_num << "\n";
           }
+
+          g_syndrome_output_file << "ROUND_START " << g_syndrome_count << "\n";
 
           // Unpack syndrome data - each byte contains 8 bits (packed format)
           for (size_t i = 0; i < len; i++) {
@@ -737,6 +739,8 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
       } else if (line.find("SHOT_START") == 0) {
         saved_syndromes.emplace_back();
         reading_syndromes = true;
+      } else if (line.find("ROUND_START") == 0) {
+        continue;
       } else if (reading_syndromes) {
         try {
           int bit = std::stoi(line);
@@ -918,6 +922,8 @@ void show_help() {
          "replay.\n");
   printf("  --load_syndrome <string> Load and replay syndrome data from a "
          "file.\n");
+  printf("  --use-relay-bp      For --decoder_type nv-qldpc-decoder: select "
+         "Relay BP instead of the default BP + OSD block.\n");
   printf("  --help              Show this help message\n");
 }
 
@@ -941,6 +947,7 @@ int main(int argc, char **argv) {
   bool save_syndrome = false;
   bool load_syndrome = false;
   std::string syndrome_filename;
+  bool use_relay_bp = false;
 
   // Parse the command line arguments
   for (int i = 1; i < argc; i++) {
@@ -991,6 +998,8 @@ int main(int argc, char **argv) {
       load_syndrome = true;
       syndrome_filename = argv[i + 1];
       i++;
+    } else if (arg == "--use-relay-bp") {
+      use_relay_bp = true;
     } else {
       printf("Unknown argument: %s\n", arg.c_str());
       show_help();
@@ -1084,7 +1093,7 @@ int main(int argc, char **argv) {
                     num_shots, num_rounds, num_logical, dem_filename, save_dem,
                     load_dem, decoder_window, decoder_type, sw_window_size,
                     sw_step_size, save_syndrome, load_syndrome,
-                    syndrome_filename);
+                    syndrome_filename, use_relay_bp);
 
   // Ensure clean shutdown
   cudaq::qec::decoding::config::finalize_decoders();

@@ -111,6 +111,7 @@ nv_qldpc_decoder_config::to_heterogeneous_map() const {
   INSERT_ARG(explicit_gammas);
   INSERT_ARG(bp_seed);
   INSERT_ARG(composition);
+  INSERT_ARG(repeatable);
   // srelay_config needs to be converted to heterogeneous_map for decoder
   // compatibility
   if (srelay_config.has_value()) {
@@ -143,6 +144,7 @@ nv_qldpc_decoder_config nv_qldpc_decoder_config::from_heterogeneous_map(
   GET_ARG(explicit_gammas);
   GET_ARG(bp_seed);
   GET_ARG(composition);
+  GET_ARG(repeatable);
   // Special handling for srelay_config - it might be stored as a nested
   // heterogeneous_map
   if (map.contains("srelay_config")) {
@@ -323,6 +325,7 @@ struct MappingTraits<cudaq::qec::decoding::config::nv_qldpc_decoder_config> {
     io.mapOptional("bp_seed", config.bp_seed);
     io.mapOptional("srelay_config", config.srelay_config);
     io.mapOptional("composition", config.composition);
+    io.mapOptional("repeatable", config.repeatable);
   }
 };
 
