@@ -115,10 +115,9 @@ void maybe_init_realtime_session() {
     g_realtime_session.reset();
     (void)set_mode_fn(0);
     g_realtime_session_owns_shared_ring_mode = false;
-    throw std::runtime_error(
-        "CUDAQ_QEC_REALTIME_MODE=inproc_rpc requested but "
-        "qec_realtime_session::initialize() threw: " +
-        what);
+    throw std::runtime_error("CUDAQ_QEC_REALTIME_MODE=inproc_rpc requested but "
+                             "qec_realtime_session::initialize() threw: " +
+                             what);
   }
 }
 
