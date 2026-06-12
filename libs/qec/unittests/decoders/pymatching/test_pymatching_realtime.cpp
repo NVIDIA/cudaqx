@@ -126,3 +126,36 @@ TEST(PyMatchingRealtime, ResetDecoderClearsCorrections) {
 
   session.finalize();
 }
+
+TEST(PyMatchingRealtime, RejectsOversizedSyndromeRequest) {
+  // Single decoder per session (the supported configuration).  The ring slot
+  // has headroom beyond the decoder's per-decode window -- it is also sized for
+  // the response payload and a 64-byte floor -- so an oversized enqueue can
+  // still fit the slot, pass the slot-size check, and reach the new per-decoder
+  // length guard.  Without that guard enqueue_syndrome would overflow the
+  // decoder's accumulation buffer, silently drop the data (it returns false),
+  // and the handler would still ACK success.
+  auto decoders = make_pymatching_decoders(/*H=*/{1, 0, 0, 0, 1, 0, 0, 0, 1},
+                                           /*syndrome_size=*/3,
+                                           /*block_size=*/3);
+  cudaq::qec::realtime::qec_realtime_session session(decoders);
+  session.initialize();
+
+  const std::uint64_t capacity = decoders[0]->get_num_msyn_per_decode();
+  const std::uint64_t oversized = capacity + 1;
+  std::vector<std::uint8_t> oversized_syndrome(oversized, 0);
+  EXPECT_THROW(cudaq::qec::decoding::rpc_producer::enqueue_syndromes(
+                   session, /*decoder_id=*/0, oversized_syndrome.data(),
+                   oversized_syndrome.size(), /*counter=*/1,
+                   /*syndrome_mapping_id=*/0),
+               std::runtime_error);
+
+  // A correctly-sized request to the same decoder is still accepted (confirms
+  // the guard rejected only the oversized one and released the slot).
+  std::vector<std::uint8_t> ok_syndrome(capacity, 0);
+  EXPECT_NO_THROW(cudaq::qec::decoding::rpc_producer::enqueue_syndromes(
+      session, /*decoder_id=*/0, ok_syndrome.data(), ok_syndrome.size(),
+      /*counter=*/2, /*syndrome_mapping_id=*/0));
+
+  session.finalize();
+}

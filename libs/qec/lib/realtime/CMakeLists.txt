@@ -55,6 +55,19 @@ if(CMAKE_CUDA_COMPILER)
       message(STATUS "Found cuda-quantum realtime library at ${CUDAQ_REALTIME_LIBRARY}")
       get_filename_component(_CUDAQ_REALTIME_LIB_DIR "${CUDAQ_REALTIME_LIBRARY}" DIRECTORY)
     endif()
+
+    # The host-side dispatch loop (cudaq_host_dispatcher_loop), used by
+    # qec_realtime_session, lives in libcudaq-realtime-host-dispatch -- separate
+    # from libcudaq-realtime.  Locate it so cudaq-qec-realtime-decoding can link
+    # it (mirrors the cudaq-realtime-pipeline target below).
+    find_library(CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY
+      NAMES cudaq-realtime-host-dispatch
+      PATHS ${_cudaq_realtime_prefixes}
+      PATH_SUFFIXES lib
+    )
+    if(CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY)
+      message(STATUS "Found cuda-quantum realtime host dispatch library at ${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}")
+    endif()
     
     # Create static device library for device code
     add_library(cudaq-qec-realtime-cudevice STATIC
@@ -137,6 +150,7 @@ target_link_libraries(cudaq-qec-realtime-decoding
     cudaq::cudaq-common
     LLVMSupport
     $<$<BOOL:${CUDAQ_REALTIME_LIBRARY}>:${CUDAQ_REALTIME_LIBRARY}>
+    $<$<BOOL:${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}>:${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}>
 )
 
 set_target_properties(cudaq-qec-realtime-decoding PROPERTIES

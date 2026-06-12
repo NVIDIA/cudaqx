@@ -14,6 +14,7 @@
 #include "cudaq/runtime/logger/logger.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstring>
 #include <stdexcept>
 #include <string>
@@ -22,15 +23,22 @@ namespace cudaq::qec::realtime {
 namespace {
 
 using Decoders = std::vector<std::unique_ptr<cudaq::qec::decoder>>;
-Decoders *g_active_decoders = nullptr;
+
+// The HOST_CALL handlers below are plain C function pointers with no
+// user-context argument, so the active decoder table must be reachable from a
+// process-global.  It is published/cleared by initialize()/finalize() and read
+// concurrently by the host dispatcher thread, hence the atomic.  Only one
+// session may be live at a time (enforced in initialize()).
+std::atomic<Decoders *> g_active_decoders{nullptr};
 
 cudaq::qec::decoder *get_decoder_or_throw(std::int64_t decoder_id) {
-  if (!g_active_decoders || decoder_id < 0 ||
-      static_cast<std::size_t>(decoder_id) >= g_active_decoders->size() ||
-      !(*g_active_decoders)[static_cast<std::size_t>(decoder_id)])
+  Decoders *decoders = g_active_decoders.load(std::memory_order_acquire);
+  if (!decoders || decoder_id < 0 ||
+      static_cast<std::size_t>(decoder_id) >= decoders->size() ||
+      !(*decoders)[static_cast<std::size_t>(decoder_id)])
     throw std::runtime_error("invalid decoder_id " +
                              std::to_string(decoder_id));
-  return (*g_active_decoders)[static_cast<std::size_t>(decoder_id)].get();
+  return (*decoders)[static_cast<std::size_t>(decoder_id)].get();
 }
 
 void write_response(void *slot_host, std::int32_t status,
@@ -78,11 +86,23 @@ void enqueue_syndromes_host(void *slot_host, std::size_t slot_size) {
     }
 
     auto *decoder = get_decoder_or_throw(body->decoder_id);
+    // Reject requests larger than this decoder's per-decode window.  The slot
+    // is sized for the largest decoder in the session, so an oversized request
+    // for a smaller decoder can still fit the slot; without this guard it would
+    // overflow the decoder's accumulation buffer and be silently dropped by
+    // enqueue_syndrome (which returns false) while we ACK success.
+    if (num_syndromes > decoder->get_num_msyn_per_decode()) {
+      write_response(slot_host, -4);
+      return;
+    }
     const std::uint8_t *bits = reinterpret_cast<const std::uint8_t *>(body + 1);
     std::vector<std::uint8_t> syndromes(num_syndromes, 0);
     for (std::uint64_t bit = 0; bit < num_syndromes; ++bit)
       syndromes[bit] = (bits[bit >> 3] >> (bit & 7)) & 0x1u;
 
+    // enqueue_syndrome's bool return means "a decode was triggered", not
+    // success, so it is intentionally not treated as an error here; the
+    // oversize guard above is what rejects malformed lengths.
     (void)decoder->enqueue_syndrome(syndromes.data(), syndromes.size());
     write_response(slot_host, 0);
   } catch (...) {
@@ -162,10 +182,20 @@ qec_realtime_session::~qec_realtime_session() { finalize(); }
 void qec_realtime_session::initialize() {
   if (initialized_)
     return;
+  // Reject a second concurrent session.  With a single process-global decoder
+  // table, a second initialize() would hijack decoder-id resolution for the
+  // first session's host loop.  Claim the global atomically up front; the only
+  // alternative (threading session context through the host handler path) would
+  // require a cuda-quantum dispatcher API change.
+  Decoders *expected = nullptr;
+  if (!g_active_decoders.compare_exchange_strong(expected, &decoders_,
+                                                 std::memory_order_acq_rel))
+    throw std::runtime_error(
+        "qec_realtime_session: another HOST_CALL session is already active; "
+        "concurrent sessions are not supported");
   try {
     allocate_ring_buffer();
     populate_function_table();
-    g_active_decoders = &decoders_;
     start_host_loop();
     initialized_ = true;
   } catch (...) {
@@ -178,8 +208,11 @@ void qec_realtime_session::finalize() {
   const bool was_initialized = initialized_;
   initialized_ = false;
   stop_host_loop();
-  if (g_active_decoders == &decoders_)
-    g_active_decoders = nullptr;
+  // Release the global only if this session owns it (no-op for a session that
+  // never acquired it, e.g. one rejected because another was already active).
+  Decoders *self = &decoders_;
+  g_active_decoders.compare_exchange_strong(self, nullptr,
+                                            std::memory_order_acq_rel);
   function_table_.clear();
   rx_flags_.clear();
   tx_flags_.clear();

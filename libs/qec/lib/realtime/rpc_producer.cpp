@@ -25,6 +25,11 @@ namespace {
 std::atomic<std::uint32_t> g_request_id_counter{1};
 std::atomic<std::uint32_t> g_next_slot_hint{0};
 
+// Producer-owned "busy" sentinel written into tx_flags while a slot is held.
+// The host loop runs with skip_tx_markers=1 and never reads/writes tx_flags, so
+// the producer repurposes it as an ownership token (any non-zero value works).
+constexpr std::uint64_t kSlotBusyMarker = ~std::uint64_t{0};
+
 std::uint32_t next_request_id() {
   return g_request_id_counter.fetch_add(1, std::memory_order_relaxed);
 }
@@ -40,7 +45,19 @@ std::uint32_t acquire_slot(cudaq::qec::realtime::qec_realtime_session &session,
     for (std::uint32_t s = 0; s < session.num_slots(); ++s) {
       const std::uint32_t slot =
           static_cast<std::uint32_t>((start + s) % session.num_slots());
-      if (rx[slot] == 0 && tx[slot] == 0) {
+      // A slot is free only when no request is in flight (rx == 0).  Claim it
+      // by atomically flipping tx_flags 0 -> BUSY: this reserves the TX
+      // response buffer for the entire acquire..release_slot window rather than
+      // only until the host loop clears rx_flags, and the CAS makes the claim
+      // safe against concurrent producers.  tx == 0 only happens after
+      // release_slot (which runs after the host loop consumed the request and
+      // cleared rx), so rx is already 0 at a successful claim.
+      if (rx[slot] != 0)
+        continue;
+      std::uint64_t expected = 0;
+      if (__atomic_compare_exchange_n(&tx[slot], &expected, kSlotBusyMarker,
+                                      false, __ATOMIC_ACQ_REL,
+                                      __ATOMIC_RELAXED)) {
         g_next_slot_hint.store(
             static_cast<std::uint32_t>((slot + 1) % session.num_slots()),
             std::memory_order_relaxed);
@@ -100,8 +117,10 @@ bool wait_for_response(cudaq::qec::realtime::qec_realtime_session &session,
 void release_slot(cudaq::qec::realtime::qec_realtime_session &session,
                   std::uint32_t slot) {
   // rx_flags[slot] is cleared by cudaq_host_dispatcher_loop after it consumes
-  // the request.  The producer only clears the TX side after reading the
-  // response, making the slot reusable when acquire_slot sees both flags zero.
+  // the request.  acquire_slot set tx_flags[slot] to the BUSY token to reserve
+  // the response buffer; clear it here (after reading the response) to return
+  // the slot to the pool.  Order the TX data wipe before the token release so a
+  // re-acquiring producer never observes stale response bytes.
   std::memset(session.tx_data_host() + slot * session.slot_size(), 0,
               session.slot_size());
   __sync_synchronize();
