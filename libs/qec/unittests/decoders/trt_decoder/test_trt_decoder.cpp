@@ -677,8 +677,7 @@ TEST_F(TRTDecoderTest, CompositeGlobalDecoderCombinesLogicalFrame) {
     GTEST_SKIP() << "Failed to create composite TRT decoder: " << e.what();
   }
 
-  auto results = trt_decoder->decode_batch({{1.0, 1.0, 0.0},
-                                            {0.0, 1.0, 0.0}});
+  auto results = trt_decoder->decode_batch({{1.0, 1.0, 0.0}, {0.0, 1.0, 0.0}});
   ASSERT_EQ(results.size(), 2u);
   ASSERT_EQ(results[0].result.size(), 1u);
   ASSERT_EQ(results[1].result.size(), 1u);

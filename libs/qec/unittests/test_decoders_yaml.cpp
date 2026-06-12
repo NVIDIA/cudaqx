@@ -453,8 +453,8 @@ TEST(DecoderConfigTest, ConfigureFromMissingFileReturnsError) {
 
   // Missing config files should return the documented nonzero status instead
   // of attempting to parse an empty or invalid YAML payload.
-  const auto missing_path =
-      std::filesystem::temp_directory_path() / "cudaq_qec_missing_decoders.yaml";
+  const auto missing_path = std::filesystem::temp_directory_path() /
+                            "cudaq_qec_missing_decoders.yaml";
   std::filesystem::remove(missing_path);
   EXPECT_EQ(configure_decoders_from_file(missing_path.c_str()), 1);
 }
@@ -462,8 +462,8 @@ TEST(DecoderConfigTest, ConfigureFromMissingFileReturnsError) {
 TEST(DecoderConfigTest, SimulationHostPointerWrappersForwardToHostRuntime) {
   using namespace cudaq::qec::decoding::config;
 
-  // The simulation namespace pointer overloads are host trampolines; configure a
-  // simple decoder and verify enqueue/get_corrections reaches the host state.
+  // The simulation namespace pointer overloads are host trampolines; configure
+  // a simple decoder and verify enqueue/get_corrections reaches the host state.
   multi_decoder_config multi_config;
   auto config = create_test_empty_decoder_config(0);
   cudaqx::tensor<uint8_t> O({1, config.block_size});

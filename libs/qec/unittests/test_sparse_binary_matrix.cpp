@@ -698,11 +698,11 @@ TEST(SparseBinaryMatrix, PcmIsSortedRejectsOutOfOrderSparseColumns) {
 TEST(SparseBinaryMatrix, GenerateRandomPcmWeightZeroWithNoSyndromes) {
   // With zero syndromes per round and zero weight, both dense and sparse
   // generators skip row sampling and produce empty-row matrices.
-  auto dense = cudaq::qec::generate_random_pcm(/*n_rounds=*/3,
-                                               /*n_errs_per_round=*/4,
-                                               /*n_syndromes_per_round=*/0,
-                                               /*weight=*/0,
-                                               std::mt19937_64(0));
+  auto dense =
+      cudaq::qec::generate_random_pcm(/*n_rounds=*/3,
+                                      /*n_errs_per_round=*/4,
+                                      /*n_syndromes_per_round=*/0,
+                                      /*weight=*/0, std::mt19937_64(0));
   EXPECT_EQ(dense.shape()[0], 0u);
   EXPECT_EQ(dense.shape()[1], 12u);
 
@@ -729,8 +729,7 @@ TEST(SparseBinaryMatrix, GenerateRandomPcmSparseRejectsInvalidWeight) {
 TEST(SparseBinaryMatrix, GenerateRandomPcmSparseRejectsOverflowingNnz) {
   // Dimensions may fit uint32_t while nnz = n_cols * weight does not; this must
   // be rejected before building the nested sparse representation.
-  constexpr std::size_t kMaxIndex =
-      std::numeric_limits<index_type>::max();
+  constexpr std::size_t kMaxIndex = std::numeric_limits<index_type>::max();
   EXPECT_THROW(cudaq::qec::generate_random_pcm_sparse(
                    /*n_rounds=*/1, /*n_errs_per_round=*/kMaxIndex,
                    /*n_syndromes_per_round=*/2, /*weight=*/2,

@@ -19,7 +19,8 @@ def make_identity_model(output_path, name, elem_type, shape):
     output_info = helper.make_tensor_value_info("output", elem_type, shape)
     identity = helper.make_node("Identity", ["input"], ["output"])
     graph = helper.make_graph([identity], name, [input_info], [output_info])
-    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 19)])
+    model = helper.make_model(graph,
+                              opset_imports=[helper.make_opsetid("", 19)])
     model.ir_version = 10
     onnx.checker.check_model(model)
     onnx.save(model, output_path)
