@@ -65,8 +65,21 @@ struct detector_error_model {
 
   /// Put the detector_error_matrix into canonical form, where the rows and
   /// columns are ordered in a way that is amenable to the round-based decoding
-  /// process.
-  void canonicalize_for_rounds(uint32_t num_syndromes_per_round);
+  /// process. Columns sharing the same detector AND observable signature are
+  /// merged, with their rates composed so the resulting model matches the
+  /// input model. By default, zero-syndrome columns that still flip an
+  /// observable (undetectable logical errors) are retained so the model's
+  /// observable-flip probability is preserved. Set @p
+  /// remove_zero_syndrome_errors to true to drop all columns with no detector
+  /// signature, which is appropriate when the canonicalized DEM is consumed
+  /// only for round-based decoding (where such columns carry no syndrome).
+  ///
+  /// @note Canonicalization does not preserve cross-column exclusivity
+  /// structure. Each output column is given a fresh unique error id and is
+  /// treated as independent of every other column; any `error_ids` correlation
+  /// present in the input model is discarded.
+  void canonicalize_for_rounds(uint32_t num_syndromes_per_round,
+                               bool remove_zero_syndrome_errors = false);
 };
 
 /// Parse Stim DEM text into detector/observable flip matrices and error rates.

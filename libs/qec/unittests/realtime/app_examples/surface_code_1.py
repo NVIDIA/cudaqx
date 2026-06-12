@@ -550,7 +550,8 @@ def demo_circuit_host(code_obj: qec.code,
         print("obs_matrix:", obs_matrix)
         dem.observables_flips_matrix = (obs_matrix @ msm_obs) % 2
         print("numSyndromesPerRound:", numSyndromesPerRound)
-        dem.canonicalize_for_rounds(numSyndromesPerRound)
+        dem.canonicalize_for_rounds(numSyndromesPerRound,
+                                    remove_zero_syndrome_errors=True)
 
         print("dem.detector_error_matrix:")
         print(dem.detector_error_matrix)
