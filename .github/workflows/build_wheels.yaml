@@ -36,6 +36,10 @@ on:
         type: string
         description: Optional argument to take artifacts from a prior run of this workflow; facilitates rerunning a failed workflow without re-building the artifacts.
         required: false
+      cache_key_suffix:
+        type: string
+        description: Optional suffix to append to CUDA-Q wheel cache keys.
+        required: false
   workflow_call:
     inputs:
       build_type:
@@ -58,6 +62,10 @@ on:
         default: ''
         required: false
       artifacts_from_run:
+        type: string
+        default: ''
+        required: false
+      cache_key_suffix:
         type: string
         default: ''
         required: false
@@ -283,6 +291,7 @@ jobs:
           repo: ${{ steps.get-cudaq-version.outputs.repo }}
           ref: ${{ steps.get-cudaq-version.outputs.ref }}
           token: ${{ secrets.CUDAQ_ACCESS_TOKEN }}
+          cache-key-suffix: ${{ inputs.cache_key_suffix }}
           save-build: true
           platform: ${{ matrix.platform }}
 
