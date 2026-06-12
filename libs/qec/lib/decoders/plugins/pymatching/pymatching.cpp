@@ -28,7 +28,16 @@ private:
 
   // Input parameters
   std::vector<double> error_rate_vec;
-  pm::MERGE_STRATEGY merge_strategy_enum = pm::MERGE_STRATEGY::DISALLOW;
+  // Default to INDEPENDENT, matching upstream PyMatching's
+  // Matching.from_detector_error_model. A faithful DEM can legitimately contain
+  // multiple mechanisms that map to the same matching edge (e.g. two errors
+  // with the same single-detector syndrome but different observable flips); a
+  // matching graph cannot represent parallel edges, so they must be combined.
+  // INDEPENDENT combines their probabilities as independent error sources
+  // (keeping the first edge's observables), which is the standard matching
+  // approximation. Use merge_strategy="disallow" to instead reject parallel
+  // edges.
+  pm::MERGE_STRATEGY merge_strategy_enum = pm::MERGE_STRATEGY::INDEPENDENT;
 
   // Map of edge pairs to column indices. This does not seem particularly
   // efficient.
