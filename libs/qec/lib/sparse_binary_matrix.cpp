@@ -86,6 +86,56 @@ void sparse_binary_matrix::validate_sorted_unique_indices(
   }
 }
 
+sparse_binary_matrix sparse_binary_matrix::canonicalize() const {
+  // Sort each per-group index list, then GF(2)-collapse equal-value runs
+  // (keep one iff the run length is odd).
+  const bool is_csc = layout_ == sparse_binary_matrix_layout::csc;
+  // num_groups from dims (not ptr_.size()) so default-constructed matrices
+  // still produce a num_groups+1 ptr vector.
+  const std::size_t num_groups = is_csc ? static_cast<std::size_t>(num_cols_)
+                                        : static_cast<std::size_t>(num_rows_);
+
+  std::vector<index_type> new_ptr(num_groups + 1, 0);
+  std::vector<index_type> new_idx;
+  new_idx.reserve(indices_.size());
+
+  std::vector<index_type> scratch;
+  const bool ptr_is_valid = ptr_.size() == num_groups + 1;
+  if (ptr_is_valid) {
+    std::size_t max_group_size = 0;
+    for (std::size_t g = 0; g < num_groups; ++g)
+      max_group_size =
+          std::max<std::size_t>(max_group_size, ptr_[g + 1] - ptr_[g]);
+    scratch.reserve(max_group_size);
+  }
+
+  for (std::size_t g = 0; g < num_groups && ptr_is_valid; ++g) {
+    const auto begin = ptr_[g];
+    const auto end = ptr_[g + 1];
+    scratch.assign(indices_.begin() + begin, indices_.begin() + end);
+    std::sort(scratch.begin(), scratch.end());
+    auto read = scratch.begin();
+    while (read != scratch.end()) {
+      const index_type val = *read;
+      auto run_end = read;
+      while (run_end != scratch.end() && *run_end == val)
+        ++run_end;
+      if (((run_end - read) & 1) != 0)
+        new_idx.push_back(val);
+      read = run_end;
+    }
+    new_ptr[g + 1] = static_cast<index_type>(new_idx.size());
+  }
+  new_idx.shrink_to_fit();
+
+  return is_csc ? sparse_binary_matrix::from_csc(num_rows_, num_cols_,
+                                                 std::move(new_ptr),
+                                                 std::move(new_idx))
+                : sparse_binary_matrix::from_csr(num_rows_, num_cols_,
+                                                 std::move(new_ptr),
+                                                 std::move(new_idx));
+}
+
 sparse_binary_matrix
 sparse_binary_matrix::from_csc(index_type num_rows, index_type num_cols,
                                std::vector<index_type> col_ptrs,

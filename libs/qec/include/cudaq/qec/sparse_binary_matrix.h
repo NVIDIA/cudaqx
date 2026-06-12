@@ -23,7 +23,7 @@ enum class sparse_binary_matrix_layout { csc, csr };
 /// Input index lists are stored as given: not required to be sorted or
 /// GF(2)-unique. Consumers that require cuSPARSE-style compressed groups can
 /// call `validate_sorted_unique_indices`; consumers that need GF(2)-collapsed
-/// per-group indices can call `cudaq::qec::canonicalize_pcm` on entry.
+/// per-group indices can call `canonicalize` on entry.
 ///
 /// `index_type` is `uint32_t`, so each dimension and `nnz` must fit in
 /// `~4×10^9`.
@@ -93,6 +93,17 @@ public:
   /// increasing indices. This rejects duplicate entries in the stored layout.
   void validate_sorted_unique_indices(
       const char *context = "sparse_binary_matrix") const;
+
+  /// @brief Return a GF(2)-canonical copy: each compressed column/row has its
+  /// indices sorted ascending, and duplicate indices are XOR-merged. An index
+  /// that appears k times is kept iff k is odd. The output has the same layout
+  /// as the input and is idempotent under further `canonicalize` calls.
+  ///
+  /// Use this when a PCM source, such as a DEM decomposition, may emit
+  /// duplicate indices within a compressed group and the caller wants GF(2)
+  /// duplicate-collapse semantics before passing the matrix to consumers that
+  /// require at most one entry per row/column.
+  sparse_binary_matrix canonicalize() const;
 
   /// @brief Return a copy of this matrix in CSC layout. No-op if already CSC.
   sparse_binary_matrix to_csc() const;

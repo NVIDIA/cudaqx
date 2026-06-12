@@ -70,7 +70,7 @@ struct detector_error_model {
 };
 
 /// Parse Stim DEM text into detector/observable flip matrices and error rates.
-/// This is lossy; DEM-native decoders should consume raw DEM text instead.
+/// DEM-native decoders should consume raw DEM text instead.
 detector_error_model dem_from_stim_text(const std::string &dem_text);
 
 } // namespace cudaq::qec

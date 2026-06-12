@@ -445,51 +445,51 @@ TEST(SparseBinaryMatrix, ValidateSortedUniqueIndicesRejectsUnsortedCsr) {
 }
 
 // -----------------------------------------------------------------------------
-// canonicalize_pcm (GF(2) merge)
+// sparse_binary_matrix::canonicalize (GF(2) merge)
 // -----------------------------------------------------------------------------
 
-TEST(SparseBinaryMatrix, CanonicalizePcm_NoOpOnAlreadyCanonical) {
+TEST(SparseBinaryMatrix, Canonicalize_NoOpOnAlreadyCanonical) {
   // Column 0: {0,1}, column 1: {1,2}. No duplicates → output identical.
   std::vector<std::vector<index_type>> nested = {{0, 1}, {1, 2}};
   auto sp = sparse_binary_matrix::from_nested_csc(3, 2, nested);
-  auto canon = cudaq::qec::canonicalize_pcm(sp);
+  auto canon = sp.canonicalize();
   EXPECT_TRUE(dense_pcm_equal(sp.to_dense(), canon.to_dense()));
   EXPECT_EQ(canon.num_nnz(), 4u);
 }
 
-TEST(SparseBinaryMatrix, CanonicalizePcm_EvenCountDropsEntry) {
+TEST(SparseBinaryMatrix, Canonicalize_EvenCountDropsEntry) {
   // Column 0 has row 1 listed twice; GF(2) merge → drop both.
   std::vector<std::vector<index_type>> nested = {{1, 1}, {0}};
   auto sp = sparse_binary_matrix::from_nested_csc(3, 2, nested);
-  auto canon = cudaq::qec::canonicalize_pcm(sp);
+  auto canon = sp.canonicalize();
   EXPECT_EQ(canon.num_nnz(), 1u);
   auto canon_nested = canon.to_nested_csc();
   EXPECT_TRUE(canon_nested[0].empty());
   EXPECT_EQ(canon_nested[1], (std::vector<index_type>{0}));
 }
 
-TEST(SparseBinaryMatrix, CanonicalizePcm_OddCountKeepsOne) {
+TEST(SparseBinaryMatrix, Canonicalize_OddCountKeepsOne) {
   // Row 2 listed three times in column 0 → odd count → one entry survives.
   std::vector<std::vector<index_type>> nested = {{2, 2, 2}, {}};
   auto sp = sparse_binary_matrix::from_nested_csc(3, 2, nested);
-  auto canon = cudaq::qec::canonicalize_pcm(sp);
+  auto canon = sp.canonicalize();
   auto canon_nested = canon.to_nested_csc();
   EXPECT_EQ(canon_nested[0], (std::vector<index_type>{2}));
 }
 
-TEST(SparseBinaryMatrix, CanonicalizePcm_SortsAscending) {
+TEST(SparseBinaryMatrix, Canonicalize_SortsAscending) {
   // Unsorted, no duplicates → output sorted, same nnz.
   std::vector<std::vector<index_type>> nested = {{2, 0, 1}};
   auto sp = sparse_binary_matrix::from_nested_csc(3, 1, nested);
-  auto canon = cudaq::qec::canonicalize_pcm(sp);
+  auto canon = sp.canonicalize();
   EXPECT_EQ(canon.to_nested_csc()[0], (std::vector<index_type>{0, 1, 2}));
 }
 
-TEST(SparseBinaryMatrix, CanonicalizePcm_Idempotent) {
+TEST(SparseBinaryMatrix, Canonicalize_Idempotent) {
   std::vector<std::vector<index_type>> nested = {{2, 0, 2, 1, 1, 1}};
   auto sp = sparse_binary_matrix::from_nested_csc(3, 1, nested);
-  auto once = cudaq::qec::canonicalize_pcm(sp);
-  auto twice = cudaq::qec::canonicalize_pcm(once);
+  auto once = sp.canonicalize();
+  auto twice = once.canonicalize();
   EXPECT_TRUE(dense_pcm_equal(once.to_dense(), twice.to_dense()));
   EXPECT_EQ(once.num_nnz(), twice.num_nnz());
 }
@@ -557,8 +557,7 @@ TEST(SparseBinaryMatrix,
                                                /*weight=*/2, std::move(rng));
   auto sorted =
       cudaq::qec::sort_pcm_columns(dense, /*num_syndromes_per_round=*/3);
-  auto canonical =
-      cudaq::qec::canonicalize_pcm(sparse_binary_matrix(sorted)).to_csc();
+  auto canonical = sparse_binary_matrix(sorted).canonicalize().to_csc();
 
   constexpr std::uint32_t kSp = 3;
   for (bool straddle_start : {false, true}) {
@@ -576,10 +575,10 @@ TEST(SparseBinaryMatrix,
   }
 }
 
-TEST(SparseBinaryMatrix, CanonicalizePcm_PreservesCsrLayout) {
+TEST(SparseBinaryMatrix, Canonicalize_PreservesCsrLayout) {
   std::vector<std::vector<index_type>> nested_csr = {{0, 0, 1}, {1, 2}};
   auto sp = sparse_binary_matrix::from_nested_csr(2, 3, nested_csr);
-  auto canon = cudaq::qec::canonicalize_pcm(sp);
+  auto canon = sp.canonicalize();
   EXPECT_EQ(canon.layout(), sparse_binary_matrix_layout::csr);
   EXPECT_EQ(canon.to_nested_csr()[0], (std::vector<index_type>{1}));
   EXPECT_EQ(canon.to_nested_csr()[1], (std::vector<index_type>{1, 2}));
@@ -640,8 +639,8 @@ TEST(SparseBinaryMatrix, GenerateRandomPcmSparse_LargeMatrix) {
       ASSERT_LT(idx[p], static_cast<index_type>(n_rows));
   }
 
-  // canonicalize_pcm must be a content-preserving no-op on canonical input.
-  auto canon = cudaq::qec::canonicalize_pcm(sp);
+  // canonicalize must be a content-preserving no-op on canonical input.
+  auto canon = sp.canonicalize();
   EXPECT_EQ(canon.num_rows(), sp.num_rows());
   EXPECT_EQ(canon.num_cols(), sp.num_cols());
   EXPECT_EQ(canon.num_nnz(), sp.num_nnz());
