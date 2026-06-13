@@ -29,6 +29,10 @@ canonical form that's organized by measurement rounds, making it suitable for mu
 
 For a complete example of using the surface code with DEM to generate parity check matrices and perform decoding, see the :doc:`circuit level noise example <circuit_level_noise>`.
 
+If a Stim detector error model is already available as text, the same decoder
+entry point can consume that text directly. See :doc:`Decoding From Stim DEM Text <stim_dem_decoder>`
+for a C++ and Python example.
+
 Generating a Multi-Round Parity Check Matrix
 ++++++++++++++++++++++++++++++++++++++++++++
 

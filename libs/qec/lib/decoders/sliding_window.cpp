@@ -182,7 +182,7 @@ sliding_window::sliding_window(const cudaq::qec::sparse_binary_matrix &H,
                                const cudaqx::heterogeneous_map &params)
     // Canonical CSC is the steady-state contract for decode_window's column
     // slices and for validate_inputs's per-column .front()/.back() reads.
-    : decoder(canonicalize_pcm(H).to_csc()) {
+    : decoder(H.canonicalize().to_csc()) {
   // Fetch parameters from the params map.
   window_size = params.get<std::size_t>("window_size", window_size);
   step_size = params.get<std::size_t>("step_size", step_size);
