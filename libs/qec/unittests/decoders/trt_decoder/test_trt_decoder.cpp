@@ -184,17 +184,33 @@ TEST_F(TRTDecoderTest, SaveEngineRejectsNullEngine) {
 }
 
 TEST_F(TRTDecoderTest, ParsePrecisionAcceptsSupportedAndLegacyValues) {
+  // Skip without a usable GPU: createInferBuilder initializes CUDA, and on
+  // failure TRT 10.7 (CUDA 12.6) throws nvinfer1::APIUsageError while TRT 10.14
+  // (CUDA 13.0) returns nullptr. Guarding like the other GPU tests yields the
+  // same outcome (skip) on both toolkits instead of aborting on 12.6.
+  if (!gpu_available())
+    GTEST_SKIP() << "No CUDA GPU available";
+
   TestTrtLogger logger;
-  auto builder =
-      std::unique_ptr<nvinfer1::IBuilder>(nvinfer1::createInferBuilder(logger));
+
+  // Defensive against the throwing variant: catch init failures rather than
+  // relying solely on a nullptr return, so the test never terminates the process.
+  std::unique_ptr<nvinfer1::IBuilder> builder;
+  std::unique_ptr<nvinfer1::IBuilderConfig> config;
+  try {
+    builder.reset(nvinfer1::createInferBuilder(logger));
+    if (builder)
+      config.reset(builder->createBuilderConfig());
+  } catch (const std::exception &e) {
+    GTEST_SKIP() << "TensorRT initialization failed: " << e.what();
+  }
   if (!builder)
     GTEST_SKIP() << "TensorRT builder unavailable";
-
-  auto config =
-      std::unique_ptr<nvinfer1::IBuilderConfig>(builder->createBuilderConfig());
   if (!config)
     GTEST_SKIP() << "TensorRT builder config unavailable";
 
+  // parse_precision must accept current ("tf32", "best"), legacy/ignored
+  // ("noTF32", "fp16") and unknown values without throwing.
   EXPECT_NO_THROW(
       cudaq::qec::trt_decoder_internal::parse_precision("tf32", config.get()));
   EXPECT_NO_THROW(cudaq::qec::trt_decoder_internal::parse_precision(
