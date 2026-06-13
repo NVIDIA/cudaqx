@@ -194,7 +194,8 @@ TEST_F(TRTDecoderTest, ParsePrecisionAcceptsSupportedAndLegacyValues) {
   TestTrtLogger logger;
 
   // Defensive against the throwing variant: catch init failures rather than
-  // relying solely on a nullptr return, so the test never terminates the process.
+  // relying solely on a nullptr return, so the test never terminates the
+  // process.
   std::unique_ptr<nvinfer1::IBuilder> builder;
   std::unique_ptr<nvinfer1::IBuilderConfig> config;
   try {
