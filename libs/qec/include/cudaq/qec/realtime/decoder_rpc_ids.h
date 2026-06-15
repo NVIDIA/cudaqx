@@ -1,0 +1,71 @@
+/****************************************************************-*- C++ -*-****
+ * Copyright (c) 2024 - 2026 NVIDIA Corporation & Affiliates.                  *
+ * All rights reserved.                                                        *
+ *                                                                             *
+ * This source code and the accompanying materials are made available under    *
+ * the terms of the Apache License 2.0 which accompanies this distribution.    *
+ ******************************************************************************/
+
+#pragma once
+
+#include "cudaq/realtime/daemon/dispatcher/dispatch_kernel_launch.h"
+
+#include <cstddef>
+#include <cstdint>
+
+namespace cudaq::qec::decoding::rpc {
+
+constexpr std::uint32_t kEnqueueSyndromesFunctionId =
+    cudaq::realtime::fnv1a_hash("enqueue_syndromes");
+constexpr std::uint32_t kGetCorrectionsFunctionId =
+    cudaq::realtime::fnv1a_hash("get_corrections");
+constexpr std::uint32_t kResetDecoderFunctionId =
+    cudaq::realtime::fnv1a_hash("reset_decoder");
+
+static_assert(kEnqueueSyndromesFunctionId == 0x7ED8BE82u,
+              "enqueue_syndromes function_id must match "
+              "decoder_server_runtime.md");
+static_assert(kGetCorrectionsFunctionId == 0x882D5BA1u,
+              "get_corrections function_id must match "
+              "decoder_server_runtime.md");
+static_assert(kResetDecoderFunctionId == 0x977A59CFu,
+              "reset_decoder function_id must match "
+              "decoder_server_runtime.md");
+
+struct __attribute__((packed)) EnqueueRequestPayload {
+  std::int64_t decoder_id;          ///< arg0
+  std::int64_t counter;             ///< arg1
+  std::int64_t syndrome_mapping_id; ///< arg2
+  std::int64_t num_syndromes;       ///< arg3 (# syndrome bits following)
+  // Trailing: ceil(num_syndromes/8) bit-packed bytes + 0..7 zero pad.
+};
+static_assert(sizeof(EnqueueRequestPayload) == 32,
+              "EnqueueRequestPayload must be exactly 32 bytes per "
+              "decoder_server_runtime.md#enqueue_syndromes");
+
+struct __attribute__((packed)) GetCorrectionsRequestPayload {
+  std::int64_t decoder_id;  ///< arg0
+  std::int64_t return_size; ///< arg1 (# correction bits to fetch)
+  std::uint8_t reset;       ///< arg2 (0 = keep state, 1 = reset after read)
+  std::uint8_t _pad[7];     ///< zero pad to 8-byte multiple
+};
+static_assert(sizeof(GetCorrectionsRequestPayload) == 24,
+              "GetCorrectionsRequestPayload must be exactly 24 bytes per "
+              "decoder_server_runtime.md#get_corrections");
+
+struct __attribute__((packed)) ResetRequestPayload {
+  std::int64_t decoder_id; ///< arg0
+};
+static_assert(sizeof(ResetRequestPayload) == 8,
+              "ResetRequestPayload must be exactly 8 bytes per "
+              "decoder_server_runtime.md#reset_decoder");
+
+constexpr std::size_t bit_packed_bytes(std::size_t num_bits) {
+  return (num_bits + 7) / 8;
+}
+
+constexpr std::size_t align_to_8(std::size_t bytes) {
+  return (bytes + 7) & ~static_cast<std::size_t>(7);
+}
+
+} // namespace cudaq::qec::decoding::rpc
