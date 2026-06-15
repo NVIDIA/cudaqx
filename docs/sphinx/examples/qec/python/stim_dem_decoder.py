@@ -13,14 +13,17 @@ dem_text = """\
 error(0.1) D0 L0
 error(0.1) D1 L0
 error(0.05) D0 D1
+error(0.02) D0 ^ D1
 """
 
 decoder = qec.get_decoder("single_error_lut", dem_text)
 dem = qec.dem_from_stim_text(dem_text)
+dem_decomposed = qec.dem_from_stim_text(dem_text, decompose_errors=True)
 
 print("detectors:", dem.num_detectors())
 print("error mechanisms:", dem.num_error_mechanisms())
 print("observables:", dem.num_observables())
+print("error mechanisms (decomposed):", dem_decomposed.num_error_mechanisms())
 
 syndromes = np.array([[0, 0], [1, 0], [0, 1], [1, 1]], dtype=np.uint8)
 results = decoder.decode_batch(syndromes)

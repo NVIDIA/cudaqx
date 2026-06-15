@@ -22,14 +22,17 @@ int main() {
   const std::string dem_text = R"(error(0.1) D0 L0
 error(0.1) D1 L0
 error(0.05) D0 D1
+error(0.02) D0 ^ D1
 )";
 
   auto decoder = cudaq::qec::get_decoder("single_error_lut", dem_text);
   auto dem = cudaq::qec::dem_from_stim_text(dem_text);
+  auto dem_decomposed = cudaq::qec::dem_from_stim_text(dem_text, /*decompose_errors=*/true);
 
   std::cout << "detectors: " << dem.num_detectors() << "\n";
   std::cout << "error mechanisms: " << dem.num_error_mechanisms() << "\n";
   std::cout << "observables: " << dem.num_observables() << "\n";
+  std::cout << "error mechanisms (decomposed): " << dem_decomposed.num_error_mechanisms() << "\n";
 
   const std::vector<std::vector<cudaq::qec::float_t>> syndromes = {
       {0.0, 0.0}, {1.0, 0.0}, {0.0, 1.0}, {1.0, 1.0}};
