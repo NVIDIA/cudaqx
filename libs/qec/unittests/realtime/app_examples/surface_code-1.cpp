@@ -100,6 +100,11 @@ void save_dem_to_file(const cudaq::qec::detector_error_model &dem,
       cudaq::qec::decoding::config::multi_error_lut_config lut_config;
       lut_config.lut_error_depth = 2;
       config.decoder_custom_args = lut_config;
+    } else if (decoder_type == "pymatching") {
+      cudaq::qec::decoding::config::pymatching_config pymatching_config;
+      pymatching_config.error_rate_vec = dem.error_rates;
+      pymatching_config.merge_strategy = "smallest_weight";
+      config.decoder_custom_args = pymatching_config;
     } else if (decoder_type == "sliding_window") {
       // Sliding window configuration
       cudaq::qec::decoding::config::sliding_window_config sw_config;
@@ -148,7 +153,14 @@ void load_dem_from_file(const std::string &dem_filename,
   }
   auto decoder_config = config.decoders[0];
 
-  if (decoder_config.type == "sliding_window") {
+  if (decoder_config.type == "pymatching") {
+    auto pymatching_config =
+        std::get<cudaq::qec::decoding::config::pymatching_config>(
+            decoder_config.decoder_custom_args);
+    if (pymatching_config.error_rate_vec.has_value()) {
+      dem.error_rates = pymatching_config.error_rate_vec.value();
+    }
+  } else if (decoder_config.type == "sliding_window") {
     auto sw_config =
         std::get<cudaq::qec::decoding::config::sliding_window_config>(
             decoder_config.decoder_custom_args);
@@ -907,7 +919,8 @@ void show_help() {
   printf("  --decoder_window <int>  Number of rounds to use for the decoder "
          "window. Default: distance\n");
   printf("  --decoder_type <string> Decoder type: 'multi_error_lut', "
-         "'nv-qldpc-decoder', or 'sliding_window'. Default: multi_error_lut\n");
+         "'pymatching', 'nv-qldpc-decoder', or 'sliding_window'. Default: "
+         "multi_error_lut\n");
   printf("  --sw_window_size <int>  Sliding window size (only for "
          "sliding_window decoder). Default: decoder_window\n");
   printf("  --sw_step_size <int>    Sliding window step size. Default: 1\n");
@@ -1026,10 +1039,10 @@ int main(int argc, char **argv) {
     sw_window_size = decoder_window;
 
   // Validate decoder type
-  if (decoder_type != "multi_error_lut" && decoder_type != "sliding_window" &&
-      decoder_type != "nv-qldpc-decoder") {
+  if (decoder_type != "multi_error_lut" && decoder_type != "pymatching" &&
+      decoder_type != "sliding_window" && decoder_type != "nv-qldpc-decoder") {
     printf("Error: --decoder_type must be 'multi_error_lut', "
-           "'nv-qldpc-decoder', or 'sliding_window'\n");
+           "'pymatching', 'nv-qldpc-decoder', or 'sliding_window'\n");
     return 1;
   }
 

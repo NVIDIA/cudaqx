@@ -38,6 +38,10 @@ target_link_libraries(surface_code-1-local
     cudaq::cudaq cudaq::cudaq-common cudaq-mlir-runtime
     nvqir nvqir-stim)
 
+if(TARGET cudaq-qec-pymatching)
+  add_dependencies(surface_code-1-local cudaq-qec-pymatching)
+endif()
+
 add_test(
   NAME app_examples.surface_code-1-local-test-distance-3
   COMMAND
@@ -59,6 +63,18 @@ add_test(
       3 40 40 NULL 12 6
       ${CMAKE_BINARY_DIR}/lib
       sliding_window 6 1
+  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+)
+
+add_test(
+  NAME app_examples.surface_code-1-local-test-distance-3-pymatching
+  COMMAND
+    bash "${CMAKE_CURRENT_SOURCE_DIR}/surface_code-1-test.sh"
+      ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-local
+      ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-local
+      3 40 40 NULL 12 6
+      ${CMAKE_BINARY_DIR}/lib
+      pymatching
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
 
@@ -369,5 +385,3 @@ add_surface_code_test(
 
 # End of surface code 3, --target quantinuum --emulate
 #------------------------------------------------------------------------------#
-
-
