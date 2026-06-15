@@ -48,8 +48,8 @@ void expect_corrections(cudaq::qec::realtime::qec_realtime_session &session,
                         std::span<const std::uint8_t> expected,
                         std::uint64_t counter, bool reset_on_read = true) {
   cudaq::qec::decoding::rpc_producer::enqueue_syndromes(
-      session, /*decoder_id=*/0, syndrome.data(), syndrome.size(), counter,
-      /*syndrome_mapping_id=*/0);
+      session, /*decoder_id=*/0, syndrome.data(), syndrome.size(),
+      /*tag=*/counter);
 
   std::vector<std::uint8_t> corrections(expected.size(), 0xCC);
   cudaq::qec::decoding::rpc_producer::get_corrections(
@@ -146,8 +146,7 @@ TEST(PyMatchingRealtime, RejectsOversizedSyndromeRequest) {
   std::vector<std::uint8_t> oversized_syndrome(oversized, 0);
   EXPECT_THROW(cudaq::qec::decoding::rpc_producer::enqueue_syndromes(
                    session, /*decoder_id=*/0, oversized_syndrome.data(),
-                   oversized_syndrome.size(), /*counter=*/1,
-                   /*syndrome_mapping_id=*/0),
+                   oversized_syndrome.size(), /*tag=*/1),
                std::runtime_error);
 
   // A correctly-sized request to the same decoder is still accepted (confirms
@@ -155,7 +154,7 @@ TEST(PyMatchingRealtime, RejectsOversizedSyndromeRequest) {
   std::vector<std::uint8_t> ok_syndrome(capacity, 0);
   EXPECT_NO_THROW(cudaq::qec::decoding::rpc_producer::enqueue_syndromes(
       session, /*decoder_id=*/0, ok_syndrome.data(), ok_syndrome.size(),
-      /*counter=*/2, /*syndrome_mapping_id=*/0));
+      /*tag=*/2));
 
   session.finalize();
 }

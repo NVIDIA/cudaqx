@@ -16,36 +16,42 @@
 #include "cudaq/runtime/logger/logger.h"
 
 #include <algorithm>
+#include <atomic>
+#include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
 #include <stdexcept>
 #include <string>
+
 namespace cudaq::qec::realtime {
 
 namespace {
 
+using Decoders = std::vector<std::unique_ptr<cudaq::qec::decoder>>;
+
+//==============================================================================
+// DEVICE-mode helpers
+//==============================================================================
+
 // Resolves a host-side C-ABI shim `cudaqx_qec_realtime_dispatch_populate_*`
 // at runtime via dlsym(RTLD_DEFAULT, ...).  These shims are defined in
 // libcudaq-qec-realtime-cudevice.a and only enter the process when the final
-// executable (or .so consumer) absorbs that static archive -- typically via
-// the `qec_realtime_app_link_options()` CMake helper.  Resolving by name
-// rather than by direct symbol reference keeps libcudaq-qec-realtime-decoding
-// .so free of unresolved C-ABI symbols, so it can be safely dlopen'd from
-// consumers that do NOT link the cudevice archive (notably the Python
-// extension `_pycudaqx_qec_the_suffix_matters_cudaq_qec.so`).  Any such
-// consumer that tries to actually USE the inproc_rpc path will land here,
-// not find the symbol, and surface a clean runtime_error with actionable
-// linker guidance -- which the caller (maybe_init_realtime_session()) then
-// propagates per the spec's fail-fast contract.
+// executable absorbs that static archive (typically via the
+// `qec_realtime_app_link_options()` CMake helper).  Resolving by name rather
+// than by direct symbol reference keeps libcudaq-qec-realtime-decoding.so free
+// of unresolved C-ABI symbols, so it can be safely dlopen'd from consumers that
+// do NOT link the cudevice archive (notably the Python extension).  Any such
+// consumer that tries to actually USE the device dispatch path lands here, does
+// not find the symbol, and surfaces a clean runtime_error with actionable
+// linker guidance.
 using populate_device_entry_fn = void (*)(void *);
 populate_device_entry_fn resolve_populate_shim(const char *symbol_name) {
   void *sym = ::dlsym(RTLD_DEFAULT, symbol_name);
   return reinterpret_cast<populate_device_entry_fn>(sym);
 }
 
-// Mirrors the test's allocate_ring_buffer() helper -- pinned mapped flags +
-// pinned mapped data, with the device pointer obtained via UVA so the GPU
-// dispatcher can read the same backing.
+// Pinned mapped flags + pinned mapped data, with the device pointer obtained
+// via UVA so the GPU dispatcher can read the same backing.
 bool allocate_pinned_mapped(std::size_t bytes, void **host_out,
                             void **device_out) {
   void *h = nullptr;
@@ -62,7 +68,174 @@ bool allocate_pinned_mapped(std::size_t bytes, void **host_out,
   return true;
 }
 
+//==============================================================================
+// HOST-mode helpers (two-ring CUDAQ_DISPATCH_HOST_CALL handlers)
+//==============================================================================
+
+// The HOST_CALL handlers below are plain C function pointers with no
+// user-context argument, so the active decoder table must be reachable from a
+// process-global.  It is published/cleared by a HOST-mode initialize()/
+// finalize() and read concurrently by the host dispatcher thread, hence the
+// atomic.  Only one HOST-mode session may be live at a time (enforced in
+// initialize()).
+std::atomic<Decoders *> g_active_decoders{nullptr};
+
+cudaq::qec::decoder *get_decoder_or_throw(std::int64_t decoder_id) {
+  Decoders *decoders = g_active_decoders.load(std::memory_order_acquire);
+  if (!decoders || decoder_id < 0 ||
+      static_cast<std::size_t>(decoder_id) >= decoders->size() ||
+      !(*decoders)[static_cast<std::size_t>(decoder_id)])
+    throw std::runtime_error("invalid decoder_id " +
+                             std::to_string(decoder_id));
+  return (*decoders)[static_cast<std::size_t>(decoder_id)].get();
+}
+
+// Two-ring response writer: the request stays in `rx_slot` (read-only); the
+// response is written into the distinct `tx_slot`.  The preserved header fields
+// (request_id, ptp_timestamp) must be echoed explicitly from rx to tx.  The
+// caller (cudaq_host_dispatcher_loop::handle_host_call) publishes tx_flags
+// AFTER the handler returns; the handler only needs to write the response body
+// + header and release-store the magic.
+void write_response(void *tx_slot, const void *rx_slot, std::int32_t status,
+                    std::uint32_t result_len = 0) {
+  const auto *request = static_cast<const cudaq::realtime::RPCHeader *>(rx_slot);
+  auto *response = static_cast<cudaq::realtime::RPCResponse *>(tx_slot);
+  response->status = status;
+  response->result_len = result_len;
+  response->request_id = request->request_id;
+  response->ptp_timestamp = request->ptp_timestamp;
+  __atomic_store_n(&response->magic, cudaq::realtime::RPC_MAGIC_RESPONSE,
+                   __ATOMIC_RELEASE);
+}
+
+std::uint8_t *response_body(void *tx_slot) {
+  return static_cast<std::uint8_t *>(tx_slot) +
+         sizeof(cudaq::realtime::RPCResponse);
+}
+
+void enqueue_syndromes_host(const void *rx_slot, void *tx_slot,
+                            std::size_t slot_size) {
+  namespace rpc = cudaq::qec::decoding::rpc;
+  try {
+    const auto *header =
+        static_cast<const cudaq::realtime::RPCHeader *>(rx_slot);
+    if (header->arg_len < sizeof(rpc::EnqueueRequestPayload)) {
+      write_response(tx_slot, rx_slot, -1);
+      return;
+    }
+    const auto *body = reinterpret_cast<const rpc::EnqueueRequestPayload *>(
+        static_cast<const std::uint8_t *>(rx_slot) +
+        sizeof(cudaq::realtime::RPCHeader));
+    if (body->num_syndromes < 0 || body->syndrome_mapping_id != 0) {
+      write_response(tx_slot, rx_slot, -4);
+      return;
+    }
+    const auto num_syndromes = static_cast<std::uint64_t>(body->num_syndromes);
+    const std::size_t expected_arg_len =
+        rpc::align_to_8(sizeof(rpc::EnqueueRequestPayload) +
+                        rpc::bit_packed_bytes(num_syndromes));
+    if (header->arg_len != expected_arg_len ||
+        sizeof(cudaq::realtime::RPCHeader) + expected_arg_len > slot_size) {
+      write_response(tx_slot, rx_slot, -4);
+      return;
+    }
+
+    auto *decoder = get_decoder_or_throw(body->decoder_id);
+    // Reject requests larger than this decoder's per-decode window.  The slot
+    // is sized for the largest decoder in the session, so an oversized request
+    // for a smaller decoder can still fit the slot; without this guard it would
+    // overflow the decoder's accumulation buffer and be silently dropped by
+    // enqueue_syndrome (which returns false) while we ACK success.
+    if (num_syndromes > decoder->get_num_msyn_per_decode()) {
+      write_response(tx_slot, rx_slot, -4);
+      return;
+    }
+    const std::uint8_t *bits = reinterpret_cast<const std::uint8_t *>(body + 1);
+    std::vector<std::uint8_t> syndromes(num_syndromes, 0);
+    for (std::uint64_t bit = 0; bit < num_syndromes; ++bit)
+      syndromes[bit] = (bits[bit >> 3] >> (bit & 7)) & 0x1u;
+
+    // enqueue_syndrome's bool return means "a decode was triggered", not
+    // success, so it is intentionally not treated as an error here; the
+    // oversize guard above is what rejects malformed lengths.
+    (void)decoder->enqueue_syndrome(syndromes.data(), syndromes.size());
+    write_response(tx_slot, rx_slot, 0);
+  } catch (...) {
+    write_response(tx_slot, rx_slot, -2);
+  }
+}
+
+void get_corrections_host(const void *rx_slot, void *tx_slot,
+                          std::size_t slot_size) {
+  namespace rpc = cudaq::qec::decoding::rpc;
+  try {
+    const auto *header =
+        static_cast<const cudaq::realtime::RPCHeader *>(rx_slot);
+    if (header->arg_len != sizeof(rpc::GetCorrectionsRequestPayload)) {
+      write_response(tx_slot, rx_slot, -1);
+      return;
+    }
+    const auto *body =
+        reinterpret_cast<const rpc::GetCorrectionsRequestPayload *>(
+            static_cast<const std::uint8_t *>(rx_slot) +
+            sizeof(cudaq::realtime::RPCHeader));
+    if (body->return_size < 0) {
+      write_response(tx_slot, rx_slot, -4);
+      return;
+    }
+
+    auto *decoder = get_decoder_or_throw(body->decoder_id);
+    const auto return_size = static_cast<std::uint64_t>(body->return_size);
+    if (return_size > decoder->get_num_observables()) {
+      write_response(tx_slot, rx_slot, -4);
+      return;
+    }
+    const std::size_t result_len =
+        rpc::align_to_8(rpc::bit_packed_bytes(return_size));
+    if (sizeof(cudaq::realtime::RPCResponse) + result_len > slot_size) {
+      write_response(tx_slot, rx_slot, -5);
+      return;
+    }
+
+    std::uint8_t *out = response_body(tx_slot);
+    std::memset(out, 0, result_len);
+    const std::uint8_t *corrections = decoder->get_obs_corrections();
+    for (std::uint64_t i = 0; i < return_size; ++i) {
+      if (corrections[i] & 0x1u)
+        out[i >> 3] |= static_cast<std::uint8_t>(1u << (i & 7));
+    }
+    if (body->reset != 0)
+      decoder->clear_corrections();
+    write_response(tx_slot, rx_slot, 0, static_cast<std::uint32_t>(result_len));
+  } catch (...) {
+    write_response(tx_slot, rx_slot, -2);
+  }
+}
+
+void reset_decoder_host(const void *rx_slot, void *tx_slot, std::size_t) {
+  namespace rpc = cudaq::qec::decoding::rpc;
+  try {
+    const auto *header =
+        static_cast<const cudaq::realtime::RPCHeader *>(rx_slot);
+    if (header->arg_len != sizeof(rpc::ResetRequestPayload)) {
+      write_response(tx_slot, rx_slot, -1);
+      return;
+    }
+    const auto *body = reinterpret_cast<const rpc::ResetRequestPayload *>(
+        static_cast<const std::uint8_t *>(rx_slot) +
+        sizeof(cudaq::realtime::RPCHeader));
+    get_decoder_or_throw(body->decoder_id)->reset_decoder();
+    write_response(tx_slot, rx_slot, 0);
+  } catch (...) {
+    write_response(tx_slot, rx_slot, -2);
+  }
+}
+
 } // namespace
+
+//==============================================================================
+// ctor / dtor
+//==============================================================================
 
 qec_realtime_session::qec_realtime_session(
     std::vector<std::unique_ptr<cudaq::qec::decoder>> &decoders,
@@ -70,20 +243,51 @@ qec_realtime_session::qec_realtime_session(
     : decoders_(decoders), device_launch_fn_(device_launch_fn) {}
 
 qec_realtime_session::~qec_realtime_session() {
-  // Best-effort teardown.  If a derived consumer forgot to call finalize()
-  // explicitly while g_decoders was still alive, we still try to bring the
-  // dispatchers down (release_decode_graph may dereference dangling decoder
-  // pointers, but we have no safer choice in a destructor).
-  //
-  // We call finalize() unconditionally rather than gating on initialized_
-  // because a throw from initialize() (e.g. a stream-create failure inside
-  // start_host_loop after start_device_loop already spun up the persistent
-  // DEVICE_LOOP) would otherwise leave `initialized_` false and leak the
-  // dispatcher kernel + pinned ring buffers.  finalize() is null-safe at
-  // every step (each resource has its own non-null guard), so calling it
-  // from a never-fully-initialized or already-finalized session is a no-op
-  // beyond the trace message.
+  // Best-effort teardown.  finalize() is null-safe at every step (each resource
+  // has its own guard), so calling it from a never-fully-initialized or
+  // already-finalized session is a no-op beyond the trace message.
   finalize();
+}
+
+//==============================================================================
+// classify_mode()
+//==============================================================================
+
+void qec_realtime_session::classify_mode() {
+  bool any_graph = false;
+  bool any_host = false;
+  std::size_t non_null = 0;
+  for (auto &decoder : decoders_) {
+    if (!decoder)
+      continue;
+    ++non_null;
+    if (decoder->supports_graph_dispatch())
+      any_graph = true;
+    else
+      any_host = true;
+  }
+
+  if (non_null == 0)
+    throw std::runtime_error(
+        "qec_realtime_session::initialize: no (non-null) decoders to serve");
+
+  if (any_graph && any_host)
+    throw std::runtime_error(
+        "qec_realtime_session::initialize: mixed decoder set -- some decoders "
+        "support graph dispatch (DEVICE mode) and some do not (HOST mode).  A "
+        "single session must be homogeneous: the host loop resolves a slot to "
+        "a function table entry by function_id alone, so a GRAPH_LAUNCH and a "
+        "HOST_CALL enqueue sharing kEnqueueSyndromesFunctionId would collide.  "
+        "Use one decoder per session (or a homogeneous decoder set).");
+
+  device_mode_ = any_graph;
+
+  if (device_mode_ && !device_launch_fn_)
+    throw std::runtime_error(
+        "qec_realtime_session::initialize: DEVICE mode requires a non-null "
+        "device_launch_fn (typically &cudaq_launch_dispatch_kernel_regular "
+        "from libcudaq-realtime-dispatch), but the session was constructed "
+        "without one.");
 }
 
 //==============================================================================
@@ -94,80 +298,56 @@ void qec_realtime_session::initialize() {
   if (initialized_)
     return;
 
-  // Be tolerant of being called before any CUDA setup -- callers in
-  // production may have already done this; the contract test does it
-  // before constructing the session.  Either way, the cudaHostAlloc calls
-  // below require cudaDeviceMapHost on the active device.
-  {
+  classify_mode();
+
+  if (device_mode_) {
+    // Be tolerant of being called before any CUDA setup.  The pinned
+    // allocations below require cudaDeviceMapHost on the active device.
     cudaError_t flags_err = cudaSetDeviceFlags(cudaDeviceMapHost);
     if (flags_err != cudaSuccess && flags_err != cudaErrorSetOnActiveProcess)
       throw std::runtime_error(
           std::string("qec_realtime_session::initialize: "
                       "cudaSetDeviceFlags(cudaDeviceMapHost) failed: ") +
           cudaGetErrorString(flags_err));
+  } else {
+    // HOST mode: claim the process-global decoder table up front.  With a
+    // single global, a second HOST-mode initialize() would hijack decoder-id
+    // resolution for the first session's host loop.
+    Decoders *expected = nullptr;
+    if (!g_active_decoders.compare_exchange_strong(expected, &decoders_,
+                                                   std::memory_order_acq_rel))
+      throw std::runtime_error(
+          "qec_realtime_session::initialize: another HOST_CALL session is "
+          "already active; concurrent HOST-mode sessions are not supported");
   }
 
-  // Everything below acquires resources -- pinned host memory, the
-  // persistent DEVICE_LOOP kernel, the HOST_LOOP worker thread, captured
-  // CUDA graphs -- so it must be transactional.  If any step throws after
-  // we've started the device dispatcher kernel, we must tear it (and any
-  // upstream resources) back down before propagating the exception;
-  // otherwise the dispatcher kernel runs forever and the pinned ring
-  // buffer leaks.  finalize() is null-safe at every step, so we can call
-  // it from a half-built session.
+  // Everything below acquires resources, so it must be transactional.
+  // finalize() is null-safe at every step, so we can roll a half-built session
+  // back from any throw.
   try {
-    capture_decoder_graphs();
+    if (device_mode_)
+      capture_decoder_graphs();
     allocate_ring_buffer();
     populate_function_table();
-
-    // NOTE: The caller (the final executable -- the contract test, the
-    // surface_code-1-local binary, etc.) is required to call
-    // `cudaq_dispatch_kernel_set_shared_ring_mode(1)` BEFORE invoking
-    // initialize().  We cannot call it from here because that function
-    // lives in libcudaq-realtime-dispatch.a (static archive, hidden
-    // visibility), which is linked only into the final exe -- not into
-    // this shared library.  Calling it from here would cause an
-    // unresolved-symbol error at exe link time.  See the constructor's
-    // `device_launch_fn` argument for the same architectural reason
-    // applied to the dispatch launch function pointer.
-
-    // Ring buffer struct.  Two separate physical backings for RX and TX
-    // (the Hololink-aligned `rx_data != tx_data` configuration).  Both
-    // backings are still shared between the device dispatcher (DEVICE_CALL
-    // get_corrections + reset_decoder) and the host monitor (GRAPH_LAUNCH
-    // per-decoder enqueue) via `shared_ring_mode=1`; the device kernel
-    // skips RX slots whose function_id targets a GRAPH_LAUNCH entry so
-    // the host monitor can pick them up.
-    std::memset(&ringbuffer_, 0, sizeof(ringbuffer_));
-    ringbuffer_.rx_flags = rx_flags_dev_;
-    ringbuffer_.tx_flags = tx_flags_dev_;
-    ringbuffer_.rx_data = rx_data_dev_;
-    ringbuffer_.tx_data = tx_data_dev_;
-    ringbuffer_.rx_stride_sz = slot_size_;
-    ringbuffer_.tx_stride_sz = slot_size_;
-    ringbuffer_.rx_flags_host = rx_flags_host_;
-    ringbuffer_.tx_flags_host = tx_flags_host_;
-    ringbuffer_.rx_data_host = rx_data_host_;
-    ringbuffer_.tx_data_host = tx_data_host_;
-
-    start_device_loop();
+    if (device_mode_)
+      start_device_loop();
     start_host_loop();
+    initialized_ = true;
   } catch (...) {
-    // RAII-safe rollback: tear down anything start_device_loop()/
-    // start_host_loop()/the allocators may have brought up before the
-    // throw.  finalize() ignores its own initialized_ flag so it works
-    // from a partial state too.  We rethrow after rollback so the
-    // caller still sees the original error.
     CUDAQ_WARN("qec_realtime_session::initialize: rolling back partial "
                "initialization after exception");
     finalize();
     throw;
   }
 
-  initialized_ = true;
-  CUDAQ_INFO("qec_realtime_session: initialized "
-             "(num_decoders_with_graph={}, num_slots={}, slot_size={})",
-             num_decoders_with_graph_, num_slots_, slot_size_);
+  if (device_mode_)
+    CUDAQ_INFO("qec_realtime_session: initialized DEVICE mode "
+               "(num_decoders_with_graph={}, num_slots={}, slot_size={})",
+               num_decoders_with_graph_, num_slots_, slot_size_);
+  else
+    CUDAQ_INFO("qec_realtime_session: initialized HOST mode "
+               "(num_slots={}, slot_size={})",
+               num_slots_, slot_size_);
 }
 
 //==============================================================================
@@ -175,62 +355,43 @@ void qec_realtime_session::initialize() {
 //==============================================================================
 
 void qec_realtime_session::finalize() {
-  // finalize() is called from three places:
-  //   1. realtime_decoding.cpp's finalize_decoders(), after a successful
-  //      initialize() -- the steady-state shutdown path.
-  //   2. ~qec_realtime_session(), as a best-effort backstop for callers
-  //      that forgot (1).
-  //   3. initialize() itself, on any throw during the resource-acquisition
-  //      phase, to roll partial state back before rethrowing.
-  // Cases (1) and (2) imply initialized_ is true; case (3) implies it is
-  // not.  Every step below is null-safe (each resource has its own guard),
-  // so the only thing the initialized_ flag governs is whether we log the
-  // closing INFO message and whether we re-run.  The was_initialized
-  // capture lets a second call (e.g. caller's finalize() followed by the
-  // destructor's backstop) become a no-op.
   const bool was_initialized = initialized_;
   if (was_initialized)
     initialized_ = false;
   // Note: we intentionally do NOT early-return on !was_initialized; the
-  // initialize() rollback path depends on running through all the cleanup
-  // steps below.
+  // initialize() rollback path depends on running through the cleanup below.
 
   stop_loops();
 
-  // NOTE: The caller is responsible for restoring
-  // `cudaq_dispatch_kernel_set_shared_ring_mode(0)` if it wants follow-up
-  // sessions in the same process to start with shared_ring_mode unset.
-  // We cannot call it from here for the same reason explained in
-  // initialize() above.
+  if (device_mode_) {
+    // After stop_loops() the host monitor thread is joined and the persistent
+    // device kernel has been signalled to exit, but in-flight worker-stream
+    // graph launches submitted before the join can still be running.
+    // cudaDeviceSynchronize() drains all outstanding work, so the subsequent
+    // release_decode_graph() can't free buffers a still-running enqueue graph
+    // dereferences.  finalize() is cold-path so the sync cost is irrelevant.
+    cudaDeviceSynchronize();
 
-  // After stop_loops() returns the host monitor thread is joined and the
-  // persistent device kernel has been signalled to exit, but in-flight
-  // worker-stream graph launches submitted before the join can still be
-  // running.  stop_loops() destroys those streams via cudaStreamDestroy,
-  // which per the CUDA spec does NOT block on pending work -- it returns
-  // immediately and reclaims the stream asynchronously once its work
-  // completes.  Without an explicit fence here, a still-running enqueue
-  // graph (per_round_dispatch.cuh) can dereference the per-decoder
-  // mailbox / d_msyn_buffer / bp_decoder_context buffers AFTER the next
-  // step (release_decode_graph) has freed them.  cudaDeviceSynchronize()
-  // drains all outstanding work on the current device, closing that race.
-  // finalize() is cold-path so the sync cost is irrelevant.
-  cudaDeviceSynchronize();
-
-  // Release captured graphs in index order.  Safe to call before
-  // decoders_.clear() because the production caller
-  // (`finalize_decoders()` in realtime_decoding.cpp) is required to invoke
-  // session->finalize() BEFORE clearing g_decoders.
-  for (std::size_t i = 0; i < captured_graphs_.size(); ++i) {
-    if (captured_graphs_[i] && i < decoders_.size() && decoders_[i])
-      decoders_[i]->release_decode_graph(captured_graphs_[i]);
+    for (std::size_t i = 0; i < captured_graphs_.size(); ++i) {
+      if (captured_graphs_[i] && i < decoders_.size() && decoders_[i])
+        decoders_[i]->release_decode_graph(captured_graphs_[i]);
+    }
   }
   captured_graphs_.clear();
   num_decoders_with_graph_ = 0;
 
-  // Free pinned + device memory.
+  // Release the HOST-mode global if this session owns it (no-op otherwise).
+  Decoders *self = &decoders_;
+  g_active_decoders.compare_exchange_strong(self, nullptr,
+                                            std::memory_order_acq_rel);
+
+  // Free the function table with the allocator that matches the mode it was
+  // built with.
   if (function_table_host_) {
-    cudaFreeHost(function_table_host_);
+    if (device_mode_)
+      cudaFreeHost(function_table_host_);
+    else
+      std::free(function_table_host_);
     function_table_host_ = nullptr;
     function_table_dev_ = nullptr;
   }
@@ -243,58 +404,63 @@ void qec_realtime_session::finalize() {
     device_stats_dev_ = nullptr;
   }
 
-  if (tx_flags_host_) {
-    cudaFreeHost(const_cast<std::uint64_t *>(tx_flags_host_));
-    tx_flags_host_ = nullptr;
-    tx_flags_dev_ = nullptr;
-  }
-  if (rx_flags_host_) {
-    cudaFreeHost(const_cast<std::uint64_t *>(rx_flags_host_));
-    rx_flags_host_ = nullptr;
-    rx_flags_dev_ = nullptr;
-  }
-  if (tx_data_host_) {
-    cudaFreeHost(tx_data_host_);
-    tx_data_host_ = nullptr;
-    tx_data_dev_ = nullptr;
-  }
-  if (rx_data_host_) {
-    cudaFreeHost(rx_data_host_);
-    rx_data_host_ = nullptr;
-    rx_data_dev_ = nullptr;
-  }
+  // Free the ring.  DEVICE mode allocated pinned-mapped backings; HOST mode
+  // allocated plain host memory with _dev aliasing _host (free _host only).
+  auto free_ring_u64 = [&](volatile std::uint64_t *&host,
+                           volatile std::uint64_t *&dev) {
+    if (host) {
+      if (device_mode_)
+        cudaFreeHost(const_cast<std::uint64_t *>(host));
+      else
+        std::free(const_cast<std::uint64_t *>(host));
+    }
+    host = nullptr;
+    dev = nullptr;
+  };
+  auto free_ring_u8 = [&](std::uint8_t *&host, std::uint8_t *&dev) {
+    if (host) {
+      if (device_mode_)
+        cudaFreeHost(host);
+      else
+        std::free(host);
+    }
+    host = nullptr;
+    dev = nullptr;
+  };
+  free_ring_u64(tx_flags_host_, tx_flags_dev_);
+  free_ring_u64(rx_flags_host_, rx_flags_dev_);
+  free_ring_u8(tx_data_host_, tx_data_dev_);
+  free_ring_u8(rx_data_host_, rx_data_dev_);
+
   if (shutdown_flag_host_) {
     cudaFreeHost(shutdown_flag_host_);
     shutdown_flag_host_ = nullptr;
     shutdown_flag_dev_ = nullptr;
   }
 
+  std::memset(&ringbuffer_, 0, sizeof(ringbuffer_));
+  std::memset(&host_ctx_, 0, sizeof(host_ctx_));
+
   if (was_initialized)
     CUDAQ_INFO("qec_realtime_session: finalized");
 }
 
 //==============================================================================
-// capture_decoder_graphs()
+// capture_decoder_graphs()  [DEVICE mode]
 //==============================================================================
 
 void qec_realtime_session::capture_decoder_graphs() {
   captured_graphs_.assign(decoders_.size(), nullptr);
   num_decoders_with_graph_ = 0;
 
-  // Surface the dispatch-capacity limit up front with a clear message rather
-  // than letting the N-th registration throw deep inside the plugin's
-  // capture_decode_graph() / register_decoder_state() (decoder_rpc_dispatch.
-  // cu).  kMaxDispatchedDecoders sizes the device-side g_decoder_state_table[]
-  // (see decoder_rpc_ids.h).
+  // kMaxDispatchedDecoders sizes the device-side g_decoder_state_table[].
   if (decoders_.size() > cudaq::qec::decoding::rpc::kMaxDispatchedDecoders)
     throw std::runtime_error(
         "qec_realtime_session::initialize: requested " +
         std::to_string(decoders_.size()) +
         " decoders but the realtime dispatch supports at most " +
         std::to_string(cudaq::qec::decoding::rpc::kMaxDispatchedDecoders) +
-        " (kMaxDispatchedDecoders, the device-side decoder state-table size). "
-        "Reduce the decoder count, or bump kMaxDispatchedDecoders in "
-        "decoder_rpc_ids.h and grow the device table to match.");
+        " (kMaxDispatchedDecoders).");
 
   for (std::size_t i = 0; i < decoders_.size(); ++i) {
     auto *dec = decoders_[i].get();
@@ -303,19 +469,9 @@ void qec_realtime_session::capture_decoder_graphs() {
     if (!dec->supports_graph_dispatch())
       throw std::runtime_error(
           "qec_realtime_session::initialize: decoder " + std::to_string(i) +
-          " does not support graph dispatch.  The inproc_rpc realtime mode "
-          "requires every realized decoder to provide a per-round capture "
-          "(see decoder::supports_graph_dispatch / capture_decode_graph).  "
-          "Use the default host mode for this decoder type.");
+          " does not support graph dispatch in DEVICE mode.");
 
-    // reserved_sms = 0 is intentional and final for the inproc_rpc desktop /
-    // CI path.  This path does not run the HSB persistent kernels, so the
-    // decode graph need not reserve SMs for them (the dispatch loop and the
-    // decode kernel run on separate streams).  The earlier 0->1 bump
-    // (bbeee0bc) was the cause of the A100/cu12.6 timeout on test 166
-    // (`app_examples.surface_code-1-local-test-distance-3-inproc-rpc`);
-    // reverting to 0 cleared it.  Revisit only if this graph is ever run
-    // alongside HSB persistent kernels on the same device.
+    // reserved_sms = 0 is intentional for the inproc_rpc desktop / CI path.
     void *raw = dec->capture_decode_graph(/*reserved_sms=*/0);
     if (!raw)
       throw std::runtime_error("qec_realtime_session::initialize: decoder " +
@@ -329,162 +485,188 @@ void qec_realtime_session::capture_decoder_graphs() {
           "qec_realtime_session::initialize: decoder " + std::to_string(i) +
           " produced incomplete graph_resources (graph_exec / function_id)");
 
-    // Per decoder_server_runtime.md all N enqueue_syndromes graphs share a
-    // single canonical function_id; the host monitor disambiguates per-
-    // decoder via the routing_key sub-filter (routing_key == decoder_id).
-    // Cross-check the plugin handed us the spec-mandated fid.
+    // All N enqueue_syndromes graphs share a single canonical function_id; the
+    // host monitor disambiguates per-decoder via routing_key == decoder_id.
     if (gres->function_id !=
         cudaq::qec::decoding::rpc::kEnqueueSyndromesFunctionId)
       throw std::runtime_error(
           "qec_realtime_session::initialize: decoder " + std::to_string(i) +
-          " published a non-canonical enqueue function_id 0x" +
-          std::to_string(gres->function_id) +
-          " (expected kEnqueueSyndromesFunctionId 0x" +
-          std::to_string(
-              cudaq::qec::decoding::rpc::kEnqueueSyndromesFunctionId) +
-          " per decoder_server_runtime.md).");
+          " published a non-canonical enqueue function_id");
 
     ++num_decoders_with_graph_;
   }
 
   if (num_decoders_with_graph_ == 0)
     throw std::runtime_error(
-        "qec_realtime_session::initialize: no decoders to capture graphs "
-        "for (decoders_.size()=" +
-        std::to_string(decoders_.size()) + ")");
+        "qec_realtime_session::initialize: no decoders to capture graphs for");
 }
 
 //==============================================================================
-// allocate_ring_buffer()
+// allocate_ring_buffer()  [branches on device_mode_]
 //==============================================================================
 
 void qec_realtime_session::allocate_ring_buffer() {
-  // Slot size: largest body across the trio, over all captured decoders,
-  // using the wire format from proposals/decoder_server_runtime.md:
-  //   enqueue_syndromes request:
-  //     RPCHeader(24) + EnqueueRequestPayload(32)
-  //                   + bit_packed_bytes(num_measurements)
-  //                   + 0..7 zero pad   (whole arg block is 8-byte aligned)
-  //   enqueue_syndromes response:
-  //     RPCResponse(24); result_len = 0 (no body)
-  //   get_corrections request:
-  //     RPCHeader(24) + GetCorrectionsRequestPayload(24); already 8-aligned
-  //   get_corrections response:
-  //     RPCResponse(24) + bit_packed_bytes(num_observables)
-  //                     + 0..7 zero pad
-  //   reset_decoder request:
-  //     RPCHeader(24) + ResetRequestPayload(8); already 8-aligned
-  //   reset_decoder response:
-  //     RPCResponse(24); result_len = 0
-  std::size_t max_measurements_per_round = 0;
-  std::size_t max_num_observables = 0;
+  namespace rpc = cudaq::qec::decoding::rpc;
+  using cudaq::realtime::RPCHeader;
+  using cudaq::realtime::RPCResponse;
+
+  // Slot size: largest body across the RPC trio, over all served decoders.
+  std::size_t max_measurements = 0;
+  std::size_t max_observables = 0;
   for (std::size_t i = 0; i < decoders_.size(); ++i) {
     auto *dec = decoders_[i].get();
-    if (!dec || !captured_graphs_[i])
+    if (!dec)
       continue;
-    max_measurements_per_round = std::max<std::size_t>(
-        max_measurements_per_round, dec->get_num_msyn_per_decode());
-    max_num_observables =
-        std::max<std::size_t>(max_num_observables, dec->get_num_observables());
+    // DEVICE mode only sizes for decoders that captured a graph.
+    if (device_mode_ && !captured_graphs_[i])
+      continue;
+    max_measurements = std::max<std::size_t>(max_measurements,
+                                             dec->get_num_msyn_per_decode());
+    max_observables =
+        std::max<std::size_t>(max_observables, dec->get_num_observables());
   }
 
-  using namespace cudaq::realtime;
-  using cudaq::qec::decoding::rpc::align_to_8;
-  using cudaq::qec::decoding::rpc::bit_packed_bytes;
-  using cudaq::qec::decoding::rpc::EnqueueRequestPayload;
-  using cudaq::qec::decoding::rpc::GetCorrectionsRequestPayload;
-  using cudaq::qec::decoding::rpc::ResetRequestPayload;
-
-  const std::size_t enqueue_body =
+  const std::size_t enqueue_req =
       sizeof(RPCHeader) +
-      align_to_8(sizeof(EnqueueRequestPayload) +
-                 bit_packed_bytes(max_measurements_per_round));
-  const std::size_t get_corr_body =
-      sizeof(RPCHeader) + sizeof(GetCorrectionsRequestPayload);
-  const std::size_t reset_body =
-      sizeof(RPCHeader) + sizeof(ResetRequestPayload);
-  // Empty-body ACK still needs 24 bytes for the RPCResponse header.
+      rpc::align_to_8(sizeof(rpc::EnqueueRequestPayload) +
+                      rpc::bit_packed_bytes(max_measurements));
+  const std::size_t get_req =
+      sizeof(RPCHeader) + sizeof(rpc::GetCorrectionsRequestPayload);
+  const std::size_t reset_req =
+      sizeof(RPCHeader) + sizeof(rpc::ResetRequestPayload);
   const std::size_t enqueue_resp = sizeof(RPCResponse);
-  const std::size_t get_corr_resp =
-      sizeof(RPCResponse) + align_to_8(bit_packed_bytes(max_num_observables));
+  const std::size_t get_resp =
+      sizeof(RPCResponse) + rpc::align_to_8(rpc::bit_packed_bytes(max_observables));
   const std::size_t reset_resp = sizeof(RPCResponse);
 
-  slot_size_ = std::max({enqueue_body, get_corr_body, reset_body, enqueue_resp,
-                         get_corr_resp, reset_resp});
-  // Round up to 256-byte alignment (also keeps slot stride deterministic
-  // across decoder geometries).
-  constexpr std::size_t kSlotAlignment = 256;
-  slot_size_ = (slot_size_ + (kSlotAlignment - 1)) & ~(kSlotAlignment - 1);
+  slot_size_ = std::max({enqueue_req, get_req, reset_req, enqueue_resp,
+                         get_resp, reset_resp, std::size_t{64}});
 
-  // num_slots_ keeps its default unless an env-var override later wants to
-  // bump it.  Eight is enough for the contract test and surface_code-1.
+  if (device_mode_) {
+    // Round up to 256-byte alignment (keeps slot stride deterministic).
+    constexpr std::size_t kSlotAlignment = 256;
+    slot_size_ = (slot_size_ + (kSlotAlignment - 1)) & ~(kSlotAlignment - 1);
 
-  // Allocate flags + shared data backing.
-  {
-    void *h = nullptr;
-    void *d = nullptr;
-    if (!allocate_pinned_mapped(num_slots_ * sizeof(std::uint64_t), &h, &d))
-      throw std::runtime_error(
-          "qec_realtime_session::initialize: failed to allocate rx_flags");
-    rx_flags_host_ = static_cast<volatile std::uint64_t *>(h);
-    rx_flags_dev_ = static_cast<volatile std::uint64_t *>(d);
+    auto alloc_u64 = [&](volatile std::uint64_t *&host,
+                         volatile std::uint64_t *&dev, const char *what) {
+      void *h = nullptr;
+      void *d = nullptr;
+      if (!allocate_pinned_mapped(num_slots_ * sizeof(std::uint64_t), &h, &d))
+        throw std::runtime_error(
+            std::string("qec_realtime_session::initialize: failed to allocate ") +
+            what);
+      host = static_cast<volatile std::uint64_t *>(h);
+      dev = static_cast<volatile std::uint64_t *>(d);
+    };
+    auto alloc_u8 = [&](std::uint8_t *&host, std::uint8_t *&dev,
+                        const char *what) {
+      void *h = nullptr;
+      void *d = nullptr;
+      if (!allocate_pinned_mapped(num_slots_ * slot_size_, &h, &d))
+        throw std::runtime_error(
+            std::string("qec_realtime_session::initialize: failed to allocate ") +
+            what);
+      host = static_cast<std::uint8_t *>(h);
+      dev = static_cast<std::uint8_t *>(d);
+    };
+    alloc_u64(rx_flags_host_, rx_flags_dev_, "rx_flags");
+    alloc_u64(tx_flags_host_, tx_flags_dev_, "tx_flags");
+    alloc_u8(rx_data_host_, rx_data_dev_, "RX ring data");
+    alloc_u8(tx_data_host_, tx_data_dev_, "TX ring data");
+
+    {
+      void *h = nullptr;
+      void *d = nullptr;
+      if (!allocate_pinned_mapped(sizeof(int), &h, &d))
+        throw std::runtime_error("qec_realtime_session::initialize: failed to "
+                                 "allocate shutdown flag");
+      shutdown_flag_host_ = static_cast<int *>(h);
+      *shutdown_flag_host_ = 0;
+      shutdown_flag_dev_ = static_cast<int *>(d);
+    }
+  } else {
+    // HOST mode: plain host memory; the device-visible pointers alias the host
+    // backings (no GPU required at runtime).  The host loop reads only the
+    // *_host views; the producer's address-as-flag publish uses rx_data_dev()
+    // (== rx_data_host_ here), which the host loop dereferences as host memory.
+    auto alloc_u64 = [&](volatile std::uint64_t *&host,
+                         volatile std::uint64_t *&dev, const char *what) {
+      void *p = std::calloc(num_slots_, sizeof(std::uint64_t));
+      if (!p)
+        throw std::runtime_error(
+            std::string("qec_realtime_session::initialize: failed to allocate ") +
+            what);
+      host = static_cast<volatile std::uint64_t *>(p);
+      dev = host;
+    };
+    auto alloc_u8 = [&](std::uint8_t *&host, std::uint8_t *&dev,
+                        const char *what) {
+      void *p = std::calloc(num_slots_, slot_size_);
+      if (!p)
+        throw std::runtime_error(
+            std::string("qec_realtime_session::initialize: failed to allocate ") +
+            what);
+      host = static_cast<std::uint8_t *>(p);
+      dev = host;
+    };
+    alloc_u64(rx_flags_host_, rx_flags_dev_, "rx_flags");
+    alloc_u64(tx_flags_host_, tx_flags_dev_, "tx_flags");
+    alloc_u8(rx_data_host_, rx_data_dev_, "RX ring data");
+    alloc_u8(tx_data_host_, tx_data_dev_, "TX ring data");
   }
-  {
-    void *h = nullptr;
-    void *d = nullptr;
-    if (!allocate_pinned_mapped(num_slots_ * sizeof(std::uint64_t), &h, &d))
-      throw std::runtime_error(
-          "qec_realtime_session::initialize: failed to allocate tx_flags");
-    tx_flags_host_ = static_cast<volatile std::uint64_t *>(h);
-    tx_flags_dev_ = static_cast<volatile std::uint64_t *>(d);
-  }
-  // Two separate pinned-mapped data backings -- one for RX requests, one
-  // for TX responses.  Both rings have the same slot stride and slot
-  // count, but live at different physical addresses.  Matches the
-  // Hololink configuration where the producer/RX-transport writes one
-  // ring and the dispatcher/TX-transport reads the other.  Under
-  // `shared_ring_mode=1` the device kernel and the host monitor still
-  // share both rings (each can see incoming RX slots and write outgoing
-  // TX slots), but the rings themselves are now physically distinct.
-  {
-    void *h = nullptr;
-    void *d = nullptr;
-    if (!allocate_pinned_mapped(num_slots_ * slot_size_, &h, &d))
-      throw std::runtime_error(
-          "qec_realtime_session::initialize: failed to allocate RX ring data");
-    rx_data_host_ = static_cast<std::uint8_t *>(h);
-    rx_data_dev_ = static_cast<std::uint8_t *>(d);
-  }
-  {
-    void *h = nullptr;
-    void *d = nullptr;
-    if (!allocate_pinned_mapped(num_slots_ * slot_size_, &h, &d))
-      throw std::runtime_error(
-          "qec_realtime_session::initialize: failed to allocate TX ring data");
-    tx_data_host_ = static_cast<std::uint8_t *>(h);
-    tx_data_dev_ = static_cast<std::uint8_t *>(d);
-  }
-  {
-    void *h = nullptr;
-    void *d = nullptr;
-    if (!allocate_pinned_mapped(sizeof(int), &h, &d))
-      throw std::runtime_error(
-          "qec_realtime_session::initialize: failed to allocate shutdown flag");
-    shutdown_flag_host_ = static_cast<int *>(h);
-    *shutdown_flag_host_ = 0;
-    shutdown_flag_dev_ = static_cast<int *>(d);
-  }
+
+  std::memset(&ringbuffer_, 0, sizeof(ringbuffer_));
+  ringbuffer_.rx_flags = rx_flags_dev_;
+  ringbuffer_.tx_flags = tx_flags_dev_;
+  ringbuffer_.rx_data = rx_data_dev_;
+  ringbuffer_.tx_data = tx_data_dev_;
+  ringbuffer_.rx_stride_sz = slot_size_;
+  ringbuffer_.tx_stride_sz = slot_size_;
+  ringbuffer_.rx_flags_host = rx_flags_host_;
+  ringbuffer_.tx_flags_host = tx_flags_host_;
+  ringbuffer_.rx_data_host = rx_data_host_;
+  ringbuffer_.tx_data_host = tx_data_host_;
 }
 
 //==============================================================================
-// populate_function_table()
+// populate_function_table()  [branches on device_mode_]
 //==============================================================================
 
 void qec_realtime_session::populate_function_table() {
-  // N GRAPH_LAUNCH entries (one per captured decoder) + 2 DEVICE_CALL
-  // entries (get_corrections, reset_decoder).  The DEVICE_CALL entries
-  // share a single fid each across all decoders (decoder_id is in the
-  // request payload).
+  namespace rpc = cudaq::qec::decoding::rpc;
+
+  if (!device_mode_) {
+    // HOST mode: 3 HOST_CALL entries (enqueue, get_corrections, reset).  Plain
+    // host allocation -- host_fn pointers are host code addresses; _dev aliases
+    // _host.  decoder_id routing happens inside each handler via the payload.
+    function_table_count_ = 3;
+    void *p = std::calloc(function_table_count_, sizeof(cudaq_function_entry_t));
+    if (!p)
+      throw std::runtime_error("qec_realtime_session::initialize: failed to "
+                               "allocate function table");
+    function_table_host_ = static_cast<cudaq_function_entry_t *>(p);
+    function_table_dev_ = function_table_host_;
+
+    function_table_host_[0].handler.host_fn = enqueue_syndromes_host;
+    function_table_host_[0].function_id = rpc::kEnqueueSyndromesFunctionId;
+    function_table_host_[0].dispatch_mode = CUDAQ_DISPATCH_HOST_CALL;
+
+    function_table_host_[1].handler.host_fn = get_corrections_host;
+    function_table_host_[1].function_id = rpc::kGetCorrectionsFunctionId;
+    function_table_host_[1].dispatch_mode = CUDAQ_DISPATCH_HOST_CALL;
+
+    function_table_host_[2].handler.host_fn = reset_decoder_host;
+    function_table_host_[2].function_id = rpc::kResetDecoderFunctionId;
+    function_table_host_[2].dispatch_mode = CUDAQ_DISPATCH_HOST_CALL;
+
+    get_corrections_fn_id_ = rpc::kGetCorrectionsFunctionId;
+    reset_decoder_fn_id_ = rpc::kResetDecoderFunctionId;
+    return;
+  }
+
+  // DEVICE mode: N GRAPH_LAUNCH entries (one per captured decoder) + 2
+  // DEVICE_CALL entries (get_corrections, reset_decoder).  Pinned-mapped so the
+  // device dispatcher kernel reads the same backing.
   function_table_count_ = num_decoders_with_graph_ + 2;
 
   void *h = nullptr;
@@ -496,13 +678,9 @@ void qec_realtime_session::populate_function_table() {
   function_table_host_ = static_cast<cudaq_function_entry_t *>(h);
   function_table_dev_ = static_cast<cudaq_function_entry_t *>(d);
 
-  // [0..N-1] GRAPH_LAUNCH per-decoder enqueue.  Per decoder_server_runtime.md
-  // all enqueue entries SHARE function_id == kEnqueueSyndromesFunctionId; the
-  // host monitor disambiguates them via routing_key = source decoder_id
-  // (matched against arg0 of the request payload).  We pack only the
-  // non-null decoders into the front of the table; the index inside the
-  // table is not load-bearing (the dispatcher routes by
-  // (function_id, routing_key), and routing_key carries the decoder_id).
+  // [0..N-1] GRAPH_LAUNCH per-decoder enqueue.  All share
+  // kEnqueueSyndromesFunctionId; the host monitor disambiguates via
+  // routing_key = source decoder_id (matched against arg0 of the request).
   std::size_t slot = 0;
   for (std::size_t i = 0; i < decoders_.size(); ++i) {
     if (!captured_graphs_[i])
@@ -511,35 +689,23 @@ void qec_realtime_session::populate_function_table() {
         captured_graphs_[i]);
     auto &entry = function_table_host_[slot++];
     entry.handler.graph_exec = gres->graph_exec;
-    entry.function_id = cudaq::qec::decoding::rpc::kEnqueueSyndromesFunctionId;
+    entry.function_id = rpc::kEnqueueSyndromesFunctionId;
     entry.dispatch_mode = CUDAQ_DISPATCH_GRAPH_LAUNCH;
     entry.routing_key = static_cast<std::uint64_t>(i);
   }
 
-  // [N] DEVICE_CALL get_corrections.  function_id is unique per DEVICE_CALL
-  // handler, so routing_key stays 0 (the spec-aligned default; the host
-  // monitor doesn't apply the sub-filter to DEVICE_CALL entries anyway).
-  //
-  // The populate_* shims live in libcudaq-qec-realtime-cudevice.a and only
-  // become visible to dlsym() after the final binary has absorbed that
-  // archive (see qec_realtime_app_link_options() in
-  // unittests/realtime/app_examples/CMakeLists.txt).  Resolve by name so
-  // consumers that did NOT link the archive -- e.g. the Python ext
-  // _pycudaqx_qec_the_suffix_matters_cudaq_qec.so -- can still load
-  // libcudaq-qec-realtime-decoding.so without an undefined-symbol error;
-  // they only hit this code path if they actually opted into inproc_rpc,
-  // in which case the runtime_error below is the spec-mandated fail-fast.
-  get_corrections_fn_id_ = cudaq::qec::decoding::rpc::kGetCorrectionsFunctionId;
+  // [N] DEVICE_CALL get_corrections.  Resolved by name from the cudevice
+  // archive so consumers that did not link it can still load this .so.
+  get_corrections_fn_id_ = rpc::kGetCorrectionsFunctionId;
   auto populate_get_corrections = resolve_populate_shim(
       "cudaqx_qec_realtime_dispatch_populate_get_corrections_device_entry");
   if (!populate_get_corrections)
     throw std::runtime_error(
         "qec_realtime_session::initialize: "
         "cudaqx_qec_realtime_dispatch_populate_get_corrections_device_entry "
-        "not found via dlsym(RTLD_DEFAULT, ...).  The final binary must "
-        "link libcudaq-qec-realtime-cudevice.a (or the static parts of "
-        "decoder_rpc_dispatch.cu via qec_realtime_app_link_options()) to "
-        "make this DEVICE_CALL handler resolvable at runtime.");
+        "not found via dlsym(RTLD_DEFAULT, ...).  The final binary must link "
+        "libcudaq-qec-realtime-cudevice.a (or the static parts of "
+        "decoder_rpc_dispatch.cu via qec_realtime_app_link_options()).");
   populate_get_corrections(&function_table_host_[slot]);
   function_table_host_[slot].function_id = get_corrections_fn_id_;
   function_table_host_[slot].routing_key = 0;
@@ -552,17 +718,16 @@ void qec_realtime_session::populate_function_table() {
   ++slot;
 
   // [N+1] DEVICE_CALL reset_decoder.  Same dlsym contract as above.
-  reset_decoder_fn_id_ = cudaq::qec::decoding::rpc::kResetDecoderFunctionId;
+  reset_decoder_fn_id_ = rpc::kResetDecoderFunctionId;
   auto populate_reset_decoder = resolve_populate_shim(
       "cudaqx_qec_realtime_dispatch_populate_reset_decoder_device_entry");
   if (!populate_reset_decoder)
     throw std::runtime_error(
         "qec_realtime_session::initialize: "
         "cudaqx_qec_realtime_dispatch_populate_reset_decoder_device_entry "
-        "not found via dlsym(RTLD_DEFAULT, ...).  The final binary must "
-        "link libcudaq-qec-realtime-cudevice.a (or the static parts of "
-        "decoder_rpc_dispatch.cu via qec_realtime_app_link_options()) to "
-        "make this DEVICE_CALL handler resolvable at runtime.");
+        "not found via dlsym(RTLD_DEFAULT, ...).  The final binary must link "
+        "libcudaq-qec-realtime-cudevice.a (or the static parts of "
+        "decoder_rpc_dispatch.cu via qec_realtime_app_link_options()).");
   populate_reset_decoder(&function_table_host_[slot]);
   function_table_host_[slot].function_id = reset_decoder_fn_id_;
   function_table_host_[slot].routing_key = 0;
@@ -576,7 +741,7 @@ void qec_realtime_session::populate_function_table() {
 }
 
 //==============================================================================
-// start_device_loop()
+// start_device_loop()  [DEVICE mode]
 //==============================================================================
 
 void qec_realtime_session::start_device_loop() {
@@ -622,23 +787,14 @@ void qec_realtime_session::start_device_loop() {
   if (cudaMalloc(&device_stats_dev_, sizeof(std::uint64_t)) != cudaSuccess ||
       cudaMemset(device_stats_dev_, 0, sizeof(std::uint64_t)) != cudaSuccess)
     throw std::runtime_error(
-        "qec_realtime_session::initialize: device_stats_dev allocation "
-        "failed");
+        "qec_realtime_session::initialize: device_stats_dev allocation failed");
 
-  // The device API takes `volatile int *`; our plain int* converts
-  // implicitly (qualification add) and the device kernel does volatile reads.
   if (cudaq_dispatcher_set_control(device_dispatcher_, shutdown_flag_dev_,
                                    device_stats_dev_) != CUDAQ_OK)
     throw std::runtime_error(
         "qec_realtime_session::initialize: cudaq_dispatcher_set_control "
         "failed");
 
-  if (!device_launch_fn_)
-    throw std::runtime_error(
-        "qec_realtime_session::initialize: device_launch_fn is null "
-        "(constructor required a non-null cudaq_dispatch_launch_fn_t -- "
-        "typically &cudaq_launch_dispatch_kernel_regular from libcudaq-"
-        "realtime-dispatch)");
   if (cudaq_dispatcher_set_launch_fn(device_dispatcher_, device_launch_fn_) !=
       CUDAQ_OK)
     throw std::runtime_error(
@@ -652,44 +808,57 @@ void qec_realtime_session::start_device_loop() {
 }
 
 //==============================================================================
-// start_host_loop()
+// start_host_loop()  [branches on device_mode_]
 //==============================================================================
 
 void qec_realtime_session::start_host_loop() {
-  // host_workers_ is consumed by libcudaq-realtime's cudaq_host_dispatch_-
-  // loop_ctx_t and MUST be packed (one entry per active worker; the host
-  // dispatcher iterates 0..num_decoders_with_graph_-1).
+  if (!device_mode_) {
+    // HOST mode: inline HOST_CALL handlers, no graph worker pool.
+    std::memset(&host_ctx_, 0, sizeof(host_ctx_));
+    host_ctx_.ringbuffer = ringbuffer_;
+    host_ctx_.config.num_slots = static_cast<std::uint32_t>(num_slots_);
+    host_ctx_.config.slot_size = static_cast<std::uint32_t>(slot_size_);
+    host_ctx_.config.dispatch_path = CUDAQ_DISPATCH_PATH_HOST;
+    host_ctx_.config.dispatch_mode = CUDAQ_DISPATCH_HOST_CALL;
+    host_ctx_.config.skip_tx_markers = 1;
+    // shared_ring_mode lets the loop scan the whole ring for a non-zero
+    // rx_flag instead of sitting on a single advancing cursor.  The producer's
+    // acquire_slot() reuses the first free slot (slot 0 for serialized
+    // round-trips), so without ring-scanning the loop's cursor would advance
+    // past the reused slot and deadlock.  There is no second dispatcher here;
+    // we only want the scan behavior.
+    host_ctx_.config.shared_ring_mode = 1;
+    host_ctx_.function_table.entries = function_table_host_;
+    host_ctx_.function_table.count =
+        static_cast<std::uint32_t>(function_table_count_);
+    host_ctx_.shutdown_flag = &shutdown_flag_;
+    host_ctx_.stats_counter = &host_stats_counter_;
+    host_ctx_.skip_stream_sweep = true;
+    shutdown_flag_ = 0;
+
+    host_loop_thread_ =
+        std::thread([this]() { cudaq_host_dispatcher_loop(&host_ctx_); });
+    return;
+  }
+
+  // DEVICE mode: one graph worker per captured decoder.
   host_workers_.assign(num_decoders_with_graph_,
                        cudaq_host_dispatch_worker_t{});
-
-  // host_worker_streams_ is consumed by rpc_producer::enqueue_syndromes
-  // for the post-ACK cudaStreamSynchronize, and it indexes by the
-  // *source* decoder_id (i.e. the index into decoders_) -- not by the
-  // packed worker slot, because callers pass decoder_id, not slot.  Size
-  // it to decoders_.size() with nullptr placeholders for null or non-
-  // graph-capable decoders.  Sparse indexing avoids a silent stream-sync
-  // skip if/when decoder_ids stop being contiguous from 0.
+  // host_worker_streams_ is indexed by *source* decoder_id (sparse), not packed
+  // worker slot, because callers pass decoder_id.
   host_worker_streams_.assign(decoders_.size(),
                               static_cast<cudaStream_t>(nullptr));
 
-  // h_mailbox_bank for the host dispatcher: the host_dispatcher.h public
-  // ctx exposes a SINGLE mailbox bank per ctx, populated by the plugin's
-  // graph capture.  Demo 1's scope is N==1 (one nv-qldpc-decoder per
-  // multi_decoder_config in surface_code-1-local), so the single-bank
-  // limitation is fine -- the lone worker dispatches every enqueue RPC.
-  //
-  // When the project grows multi-decoder fanout in a follow-up MR, this
-  // session will need to either (a) run one cudaq_host_dispatch_loop_ctx_t
-  // per decoder (each with its own h_mailbox_bank) on its own thread, or
-  // (b) wait for libcudaq-realtime to grow per-worker mailbox storage.
+  // The host_dispatcher.h public ctx exposes a SINGLE mailbox bank per ctx.
+  // Demo 1's scope is one decoder per session, so the single-bank limitation
+  // is fine -- the lone worker dispatches every enqueue RPC.
   if (num_decoders_with_graph_ > 1)
     throw std::runtime_error(
-        "qec_realtime_session::initialize: multi-decoder host dispatch is "
-        "not yet supported (num_decoders_with_graph=" +
+        "qec_realtime_session::initialize: multi-decoder host dispatch is not "
+        "yet supported (num_decoders_with_graph=" +
         std::to_string(num_decoders_with_graph_) +
-        ").  libcudaq-realtime's host dispatcher exposes a single "
-        "h_mailbox_bank per loop ctx; Demo 1 is scoped to one decoder.  "
-        "See multi-decoder follow-up.");
+        ").  libcudaq-realtime's host dispatcher exposes a single h_mailbox_"
+        "bank per loop ctx; Demo 1 is scoped to one decoder.");
 
   void **mailbox_bank = nullptr;
 
@@ -707,18 +876,11 @@ void qec_realtime_session::start_host_loop() {
           "worker " +
           std::to_string(slot) + " (decoder_id=" + std::to_string(i) +
           ") failed");
-    // host_workers_ is packed (slot index), host_worker_streams_ is
-    // sparse (source decoder index).  See start_host_loop()'s leading
-    // comment for the rationale.
     host_worker_streams_[i] = stream;
 
     auto &w = host_workers_[slot];
     w.graph_exec = gres->graph_exec;
     w.stream = stream;
-    // Every worker advertises the canonical enqueue function_id; the
-    // host monitor distinguishes them by routing_key (= source decoder
-    // index `i`) per proposals/cudaq_realtime_host_api.bs
-    // #host-path-graph-routing-key.
     w.function_id = cudaq::qec::decoding::rpc::kEnqueueSyndromesFunctionId;
     w.routing_key = static_cast<std::uint64_t>(i);
     w.pre_launch_fn = nullptr;
@@ -731,8 +893,6 @@ void qec_realtime_session::start_host_loop() {
     ++slot;
   }
 
-  // idle_mask covers all workers; live_dispatched starts at zero.
-  // inflight_slot_tags is one int per worker.
   host_idle_mask_storage_ = new std::uint64_t(
       num_decoders_with_graph_ < 64
           ? ((std::uint64_t{1} << num_decoders_with_graph_) - 1)
@@ -742,14 +902,8 @@ void qec_realtime_session::start_host_loop() {
   for (std::size_t i = 0; i < num_decoders_with_graph_; ++i)
     host_inflight_slot_tags_[i] = -1;
 
-  // Allocate the per-worker GraphIOContext array (pinned-mapped so both
-  // CPU monitor and GPU graph see the same backing).  Under the two-ring
-  // wire format the host monitor populates entry `worker_id` with rx_slot
-  // / tx_slot / tx_flag / tx_flag_value before each `cudaGraphLaunch`,
-  // and stashes the device address of that entry into
-  // `h_mailbox_bank[worker_id]`; the captured graph reads its kernel-arg
-  // mailbox to get the GraphIOContext pointer.
-  // See [host_api.bs Routing-Key Sub-filter / GraphIOContext sections].
+  // Per-worker GraphIOContext array (pinned-mapped so both CPU monitor and GPU
+  // graph see the same backing).
   {
     void *h = nullptr;
     void *d = nullptr;
@@ -757,8 +911,8 @@ void qec_realtime_session::start_host_loop() {
         num_decoders_with_graph_ * sizeof(cudaq::realtime::GraphIOContext);
     if (!allocate_pinned_mapped(bytes, &h, &d))
       throw std::runtime_error(
-          "qec_realtime_session::start_host_loop: failed to allocate "
-          "per-worker GraphIOContext array");
+          "qec_realtime_session::start_host_loop: failed to allocate per-worker "
+          "GraphIOContext array");
     std::memset(h, 0, bytes);
     io_ctxs_host_ = static_cast<cudaq::realtime::GraphIOContext *>(h);
     io_ctxs_dev_ = static_cast<cudaq::realtime::GraphIOContext *>(d);
@@ -776,20 +930,11 @@ void qec_realtime_session::start_host_loop() {
   host_ctx_.workers = host_workers_.data();
   host_ctx_.num_workers = host_workers_.size();
   host_ctx_.h_mailbox_bank = mailbox_bank;
-  // host_ctx_.shutdown_flag is void* (the host dispatcher reinterprets it as
-  // cuda::std::atomic<int>); a plain int* assigns without a cast.
   host_ctx_.shutdown_flag = shutdown_flag_host_;
   host_ctx_.stats_counter = &host_stats_counter_;
   host_ctx_.live_dispatched = host_live_dispatched_storage_;
   host_ctx_.idle_mask = host_idle_mask_storage_;
   host_ctx_.inflight_slot_tags = host_inflight_slot_tags_;
-  // Wire the per-worker GraphIOContext mailbox arrays.  Under the two-ring
-  // wire format the host monitor (cudaq-realtime/lib/daemon/dispatcher/
-  // host_dispatcher.cu::launch_graph_worker) populates io_ctxs_host_[w]
-  // with rx_slot=ringbuffer.rx_data+slot*stride, tx_slot=ringbuffer.
-  // tx_data+slot*stride, tx_flag=&ringbuffer.tx_flags[slot],
-  // tx_flag_value=(uint64_t)tx_slot, and stashes the device address
-  // io_ctxs_dev_ + w*sizeof(GraphIOContext) into h_mailbox_bank[w].
   host_ctx_.io_ctxs_host = io_ctxs_host_;
   host_ctx_.io_ctxs_dev = io_ctxs_dev_;
   host_ctx_.skip_stream_sweep = false;
@@ -803,16 +948,18 @@ void qec_realtime_session::start_host_loop() {
 //==============================================================================
 
 void qec_realtime_session::stop_loops() {
-  if (shutdown_flag_host_) {
-    // Release store paired with the host dispatcher's acquire load
-    // (host_dispatcher.cu: as_atomic_int(...)->load(memory_order_acquire)),
-    // so the flip can't be hoisted out of its polling loop.  The trailing
-    // full fence additionally publishes the write to the persistent DEVICE
-    // dispatcher kernel, which polls the same pinned-mapped flag through a
-    // volatile int* (atomic<int> and int are layout-compatible).
-    __atomic_store_n(shutdown_flag_host_, 1, __ATOMIC_RELEASE);
+  // Signal shutdown to whichever flag the active host loop polls (and, in
+  // DEVICE mode, the persistent device kernel which shares the pinned flag).
+  if (device_mode_) {
+    if (shutdown_flag_host_) {
+      __atomic_store_n(shutdown_flag_host_, 1, __ATOMIC_RELEASE);
+      __sync_synchronize();
+    }
+  } else {
+    __atomic_store_n(&shutdown_flag_, 1, __ATOMIC_RELEASE);
     __sync_synchronize();
   }
+
   if (host_loop_thread_.joinable())
     host_loop_thread_.join();
 
