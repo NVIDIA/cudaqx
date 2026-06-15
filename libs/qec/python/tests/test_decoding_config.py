@@ -1,5 +1,5 @@
 # ============================================================================ #
-# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
+# Copyright (c) 2024 - 2026 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -479,27 +479,72 @@ def test_configure_valid_decoders():
     assert ret == 0
 
 
-def test_configure_valid_pymatching_decoder():
-    pm = qec.pymatching_config()
-    pm.error_rate_vec = [0.1, 0.1, 0.1]
-    pm.merge_strategy = "smallest_weight"
-
+def make_pymatching_multi_decoder_config(pm, h_sparse=None):
     dc = qec.decoder_config()
     dc.id = 0
     dc.type = "pymatching"
     dc.block_size = 3
     dc.syndrome_size = 3
-    dc.H_sparse = [0, -1, 1, -1, 2, -1]
+    dc.H_sparse = h_sparse if h_sparse is not None else [0, -1, 1, -1, 2, -1]
     dc.O_sparse = [0, -1, 1, -1, 2, -1]
     dc.D_sparse = [0, -1, 1, -1, 2, -1]
     dc.set_decoder_custom_args(pm)
 
     mdc = qec.multi_decoder_config()
     mdc.decoders = [dc]
-    ret = qec.configure_decoders(mdc)
-    qec.finalize_decoders()
+    return mdc
+
+
+def configure_pymatching_status(pm, h_sparse=None):
+    try:
+        return qec.configure_decoders(
+            make_pymatching_multi_decoder_config(pm, h_sparse))
+    finally:
+        qec.finalize_decoders()
+
+
+def test_configure_valid_pymatching_decoder():
+    pm = qec.pymatching_config()
+    pm.error_rate_vec = [0.1, 0.1, 0.1]
+    pm.merge_strategy = "smallest_weight"
+
+    ret = configure_pymatching_status(pm)
     assert isinstance(ret, int)
     assert ret == 0
+
+
+@pytest.mark.parametrize(
+    "error_rate_vec",
+    ([0.1, 0.1], [0.0, 0.1, 0.1], [0.1, 0.6, 0.1]),
+)
+def test_configure_invalid_pymatching_error_rate_vec(error_rate_vec):
+    pm = qec.pymatching_config()
+    pm.error_rate_vec = error_rate_vec
+    pm.merge_strategy = "smallest_weight"
+
+    ret = configure_pymatching_status(pm)
+    assert isinstance(ret, int)
+    assert ret != 0
+
+
+def test_configure_invalid_pymatching_merge_strategy():
+    pm = qec.pymatching_config()
+    pm.error_rate_vec = [0.1, 0.1, 0.1]
+    pm.merge_strategy = "not-a-strategy"
+
+    ret = configure_pymatching_status(pm)
+    assert isinstance(ret, int)
+    assert ret != 0
+
+
+def test_configure_invalid_pymatching_non_graphlike_h_sparse():
+    pm = qec.pymatching_config()
+    pm.error_rate_vec = [0.1, 0.1, 0.1]
+    pm.merge_strategy = "smallest_weight"
+
+    ret = configure_pymatching_status(pm, h_sparse=[0, -1, 0, -1, 0, -1])
+    assert isinstance(ret, int)
+    assert ret != 0
 
 
 def test_configure_invalid_decoders():

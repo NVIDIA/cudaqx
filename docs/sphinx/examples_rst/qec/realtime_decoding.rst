@@ -118,6 +118,8 @@ For PyMatching, the user can specify per-error prior probabilities and the edge
 merge strategy. The real-time path configures PyMatching as a standard decoder
 with ``type: pymatching``; ``O_sparse`` remains the observable matrix used by the
 base decoder to accumulate logical corrections returned by ``get_corrections``.
+Vanilla PyMatching requires graphlike detector error models, where every
+``H_sparse`` column has one or two detector entries.
 For belief propagation decoders, the user sets iteration limits and convergence criteria. 
 The configuration API provides type-safe structures for each decoder, ensuring that all required parameters are included.
 
