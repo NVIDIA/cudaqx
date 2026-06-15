@@ -12,6 +12,7 @@ jobs:
     with:
       build_type: Release
       cudaq_wheels: Custom
+      cache_key_suffix: nightly
     secrets: inherit
 
   resolve-cudaq-main:
@@ -68,7 +69,7 @@ jobs:
           repo: ${{ needs.resolve-cudaq-main.outputs.repo }}
           ref: ${{ needs.resolve-cudaq-main.outputs.ref }}
           token: ${{ secrets.CUDAQ_ACCESS_TOKEN }}
-          cache-key-suffix: nightly-cudaq-main
+          cache-key-suffix: nightly
           save-build: true
           save-ccache: false
           platform: ${{ matrix.platform }}-cu${{ steps.config.outputs.cuda_major }}
@@ -80,7 +81,7 @@ jobs:
     with:
       cudaq_repo: ${{ needs.resolve-cudaq-main.outputs.repo }}
       cudaq_ref: ${{ needs.resolve-cudaq-main.outputs.ref }}
-      cache_key_suffix: nightly-cudaq-main
+      cache_key_suffix: nightly
     secrets: inherit
 
   cudaq-main-qec:
@@ -90,7 +91,7 @@ jobs:
     with:
       cudaq_repo: ${{ needs.resolve-cudaq-main.outputs.repo }}
       cudaq_ref: ${{ needs.resolve-cudaq-main.outputs.ref }}
-      cache_key_suffix: nightly-cudaq-main
+      cache_key_suffix: nightly
     secrets: inherit
 
   cudaq-main-solvers:
@@ -100,7 +101,7 @@ jobs:
     with:
       cudaq_repo: ${{ needs.resolve-cudaq-main.outputs.repo }}
       cudaq_ref: ${{ needs.resolve-cudaq-main.outputs.ref }}
-      cache_key_suffix: nightly-cudaq-main
+      cache_key_suffix: nightly
     secrets: inherit
 
   cudaq-main-docs:
@@ -110,7 +111,7 @@ jobs:
     with:
       cudaq_repo: ${{ needs.resolve-cudaq-main.outputs.repo }}
       cudaq_ref: ${{ needs.resolve-cudaq-main.outputs.ref }}
-      cache_key_suffix: nightly-cudaq-main
+      cache_key_suffix: nightly
     secrets: inherit
 
   cleanup-nightly-cache:
@@ -139,7 +140,7 @@ jobs:
 
           for key in $cache_keys
           do
-            if [[ $key =~ nightly-cudaq-main ]]; then
+            if [[ $key =~ -nightly$ ]]; then
               gh cache delete $key --repo ${{ github.repository }}
               echo "Deleted cache entry: $key"
             fi

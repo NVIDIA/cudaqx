@@ -22,7 +22,7 @@ jobs:
 
           for key in $cache_keys
           do
-            if [[ $key =~ pr$pr_number ]]; then
+            if [[ $key =~ -pr${pr_number}$ ]]; then
               gh cache delete $key --repo ${{ github.repository }}
               echo "Deleted cache entry: $key"
             fi
