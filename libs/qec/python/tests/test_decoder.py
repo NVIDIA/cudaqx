@@ -927,18 +927,17 @@ def test_dem_from_stim_text_decompose_errors():
     # Also confirm that the default matches explicit False.
     assert qec.dem_from_stim_text(dem_text).num_error_mechanisms() == 3
 
-    explicit_H_no = np.array([[1, 0, 1],
-                          [1, 0, 1],
-                          [0, 1, 1],
-                          [0, 0, 1]], dtype=np.uint8)
-    explicit_O_no = np.array([[1, 0, 0],
-                          [0, 1, 0]], dtype=np.uint8)
+    explicit_H_no = np.array([[1, 0, 1], [1, 0, 1], [0, 1, 1], [0, 0, 1]],
+                             dtype=np.uint8)
+    explicit_O_no = np.array([[1, 0, 0], [0, 1, 0]], dtype=np.uint8)
 
     np.testing.assert_array_equal(
         np.array(dem_no.detector_error_matrix, dtype=np.uint8), explicit_H_no)
     np.testing.assert_array_equal(
-        np.array(dem_no.observables_flips_matrix, dtype=np.uint8), explicit_O_no)
-    np.testing.assert_allclose(dem_no.error_rates, [0.05, 0.03, 0.1], atol=1e-12)
+        np.array(dem_no.observables_flips_matrix, dtype=np.uint8),
+        explicit_O_no)
+    np.testing.assert_allclose(dem_no.error_rates, [0.05, 0.03, 0.1],
+                               atol=1e-12)
 
     # ── decompose_errors=True
     dem_yes = qec.dem_from_stim_text(dem_text, decompose_errors=True)
@@ -946,18 +945,18 @@ def test_dem_from_stim_text_decompose_errors():
     assert dem_yes.num_observables() == 2
     assert dem_yes.num_error_mechanisms() == 4  # instruction 3 splits into 2
 
-    explicit_H_yes = np.array([[1, 0, 1, 0],
-                           [1, 0, 0, 1],
-                           [0, 1, 1, 0],
-                           [0, 0, 0, 1]], dtype=np.uint8)
-    explicit_O_yes = np.array([[1, 0, 0, 0],
-                           [0, 1, 0, 0]], dtype=np.uint8)
+    explicit_H_yes = np.array(
+        [[1, 0, 1, 0], [1, 0, 0, 1], [0, 1, 1, 0], [0, 0, 0, 1]],
+        dtype=np.uint8)
+    explicit_O_yes = np.array([[1, 0, 0, 0], [0, 1, 0, 0]], dtype=np.uint8)
 
     np.testing.assert_array_equal(
         np.array(dem_yes.detector_error_matrix, dtype=np.uint8), explicit_H_yes)
     np.testing.assert_array_equal(
-        np.array(dem_yes.observables_flips_matrix, dtype=np.uint8), explicit_O_yes)
-    np.testing.assert_allclose(dem_yes.error_rates, [0.05, 0.03, 0.1, 0.1], atol=1e-12)
+        np.array(dem_yes.observables_flips_matrix, dtype=np.uint8),
+        explicit_O_yes)
+    np.testing.assert_allclose(dem_yes.error_rates, [0.05, 0.03, 0.1, 0.1],
+                               atol=1e-12)
 
 
 def test_dem_from_stim_text_decompose_errors_edge_cases():
@@ -965,12 +964,12 @@ def test_dem_from_stim_text_decompose_errors_edge_cases():
 
     # 1. No '^' in DEM — decompose_errors=True must be a no-op.
     dem_text = "error(0.1) D0 D1 L0\nerror(0.2) D1 D2\n"
-    no  = qec.dem_from_stim_text(dem_text, decompose_errors=False)
+    no = qec.dem_from_stim_text(dem_text, decompose_errors=False)
     yes = qec.dem_from_stim_text(dem_text, decompose_errors=True)
-    np.testing.assert_array_equal(
-        A(no.detector_error_matrix), A(yes.detector_error_matrix))
-    np.testing.assert_array_equal(
-        A(no.observables_flips_matrix), A(yes.observables_flips_matrix))
+    np.testing.assert_array_equal(A(no.detector_error_matrix),
+                                  A(yes.detector_error_matrix))
+    np.testing.assert_array_equal(A(no.observables_flips_matrix),
+                                  A(yes.observables_flips_matrix))
     np.testing.assert_allclose(no.error_rates, yes.error_rates, atol=1e-12)
 
     # 2. Observable flips split across components — each L stays with its '^' segment.
@@ -978,15 +977,18 @@ def test_dem_from_stim_text_decompose_errors_edge_cases():
     dem_text = "error(0.1) D0 L0 ^ D1 L1\n"
     dem = qec.dem_from_stim_text(dem_text, decompose_errors=True)
     assert dem.num_error_mechanisms() == 2
-    np.testing.assert_array_equal(A(dem.detector_error_matrix),      A([[1, 0], [0, 1]]))
-    np.testing.assert_array_equal(A(dem.observables_flips_matrix),   A([[1, 0], [0, 1]]))
+    np.testing.assert_array_equal(A(dem.detector_error_matrix),
+                                  A([[1, 0], [0, 1]]))
+    np.testing.assert_array_equal(A(dem.observables_flips_matrix),
+                                  A([[1, 0], [0, 1]]))
 
     # 3. Repeated detector within one component XOR-cancels to 0.
     # error(0.1) D0 D0 ^ D1  →  col0: D0 appears twice → cancels; col1: D1
     dem_text = "error(0.1) D0 D0 ^ D1\n"
     dem = qec.dem_from_stim_text(dem_text, decompose_errors=True)
     assert dem.num_error_mechanisms() == 2
-    np.testing.assert_array_equal(A(dem.detector_error_matrix), A([[0, 0], [0, 1]]))
+    np.testing.assert_array_equal(A(dem.detector_error_matrix),
+                                  A([[0, 0], [0, 1]]))
 
 
 def test_get_decoder_rejects_malformed_stim_dem_text():
