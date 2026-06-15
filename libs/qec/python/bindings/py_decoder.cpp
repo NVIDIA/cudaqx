@@ -816,8 +816,14 @@ void bindDecoder(nb::module_ &mod) {
 
   qecmod.def(
       "dem_from_stim_text", &dem_from_stim_text,
-      "Parse a Stim detector error model string into a DetectorErrorModel.",
-      nb::arg("dem_text"));
+      R"pbdoc(
+        Parse a Stim detector error model string into a DetectorErrorModel.
+
+        Args:
+            dem_text: A Stim detector error model string.
+            decompose_errors: If error mechanism separated by ``^`` are decomposed
+      )pbdoc",
+      nb::arg("dem_text"), nb::arg("decompose_errors") = false);
 
   // Expose decorator function that handles inheritance
   qecmod.def("decoder", [&](const std::string &name) {

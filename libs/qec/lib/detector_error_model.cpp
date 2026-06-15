@@ -21,7 +21,8 @@
 
 namespace cudaq::qec {
 
-detector_error_model dem_from_stim_text(const std::string &dem_text) {
+detector_error_model dem_from_stim_text(const std::string &dem_text,
+                                        bool decompose_errors) {
   auto dem = [&dem_text]() {
     try {
       return stim::DetectorErrorModel(dem_text);
@@ -51,11 +52,10 @@ detector_error_model dem_from_stim_text(const std::string &dem_text) {
                                std::to_string(prob) +
                                " out of range [0, 1] at instruction index " +
                                std::to_string(instruction_index));
+
     std::vector<std::size_t> dets;
     std::vector<std::size_t> obs;
-    for (const auto &target : inst.target_data) {
-      if (target.is_separator())
-        continue;
+    auto push_target = [&](const stim::DemTarget &target) {
       if (target.is_relative_detector_id()) {
         dets.push_back(static_cast<std::size_t>(target.val()));
       } else if (target.is_observable_id()) {
@@ -67,10 +67,38 @@ detector_error_model dem_from_stim_text(const std::string &dem_text) {
             ") contains an unsupported target kind; only D* (detector) and "
             "L* (observable) targets are supported by the fallback parser");
       }
+    };
+
+    if (decompose_errors) {
+      // Each segment delimited by '^' in the DEM text becomes its own column.
+      auto flush = [&]() {
+        if (!dets.empty() || !obs.empty()) {
+          detector_hits.push_back(dets);
+          observable_hits.push_back(obs);
+          rates.push_back(prob);
+          dets.clear();
+          obs.clear();
+        }
+      };
+      for (const auto &target : inst.target_data) {
+        if (target.is_separator()) {
+          flush();
+        } else {
+          push_target(target);
+        }
+      }
+      flush();
+    } else {
+      // Ignore '^' separators; all targets become a single column.
+      for (const auto &target : inst.target_data) {
+        if (target.is_separator())
+          continue;
+        push_target(target);
+      }
+      detector_hits.push_back(std::move(dets));
+      observable_hits.push_back(std::move(obs));
+      rates.push_back(prob);
     }
-    detector_hits.push_back(std::move(dets));
-    observable_hits.push_back(std::move(obs));
-    rates.push_back(prob);
     ++instruction_index;
   });
 
