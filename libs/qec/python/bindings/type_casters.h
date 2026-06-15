@@ -194,6 +194,10 @@ struct type_caster<cudaqx::heterogeneous_map> {
                        cudaq::qec::decoding::config::single_error_lut_config>(
                        &val)) {
           result[key.c_str()] = nb::cast(single_cfg->to_heterogeneous_map());
+        } else if (auto *pymatching_cfg = std::any_cast<
+                       cudaq::qec::decoding::config::pymatching_config>(&val)) {
+          result[key.c_str()] =
+              nb::cast(pymatching_cfg->to_heterogeneous_map());
         } else if (auto *sw_cfg = std::any_cast<
                        cudaq::qec::decoding::config::sliding_window_config>(
                        &val)) {

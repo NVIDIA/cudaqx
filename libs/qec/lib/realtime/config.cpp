@@ -188,6 +188,24 @@ single_error_lut_config single_error_lut_config::from_heterogeneous_map(
   return config;
 }
 
+// ------ pymatching_config ------
+cudaqx::heterogeneous_map pymatching_config::to_heterogeneous_map() const {
+  cudaqx::heterogeneous_map config_map;
+
+  INSERT_ARG(error_rate_vec);
+  INSERT_ARG(merge_strategy);
+
+  return config_map;
+}
+
+pymatching_config pymatching_config::from_heterogeneous_map(
+    const cudaqx::heterogeneous_map &map) {
+  pymatching_config config;
+  GET_ARG(error_rate_vec);
+  GET_ARG(merge_strategy);
+  return config;
+}
+
 // ------ trt_decoder_config ------
 cudaqx::heterogeneous_map trt_decoder_config::to_heterogeneous_map() const {
   cudaqx::heterogeneous_map config_map;
@@ -343,6 +361,15 @@ struct MappingTraits<cudaq::qec::decoding::config::single_error_lut_config> {
 };
 
 template <>
+struct MappingTraits<cudaq::qec::decoding::config::pymatching_config> {
+  static void mapping(IO &io,
+                      cudaq::qec::decoding::config::pymatching_config &config) {
+    io.mapOptional("error_rate_vec", config.error_rate_vec);
+    io.mapOptional("merge_strategy", config.merge_strategy);
+  }
+};
+
+template <>
 struct MappingTraits<cudaq::qec::decoding::config::trt_decoder_config> {
   static void
   mapping(IO &io, cudaq::qec::decoding::config::trt_decoder_config &config) {
@@ -461,6 +488,9 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
     } else if (config.type == "sliding_window") {
       INIT_AND_MAP_DECODER_CUSTOM_ARGS(
           cudaq::qec::decoding::config::sliding_window_config);
+    } else if (config.type == "pymatching") {
+      INIT_AND_MAP_DECODER_CUSTOM_ARGS(
+          cudaq::qec::decoding::config::pymatching_config);
     }
   }
 };

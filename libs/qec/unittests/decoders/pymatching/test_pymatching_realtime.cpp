@@ -9,12 +9,14 @@
 #include "qec_realtime_session.h"
 #include "rpc_producer.h"
 #include "cudaq/qec/decoder.h"
+#include "cudaq/qec/realtime/decoding_config.h"
 
 #include <gtest/gtest.h>
 
 #include <cstdint>
 #include <memory>
 #include <span>
+#include <variant>
 #include <vector>
 
 namespace {
@@ -158,4 +160,34 @@ TEST(PyMatchingRealtime, RejectsOversizedSyndromeRequest) {
       /*counter=*/2, /*syndrome_mapping_id=*/0));
 
   session.finalize();
+}
+
+TEST(PyMatchingRealtime, ConfiguresViaRealtimeDecoderConfig) {
+  namespace config = cudaq::qec::decoding::config;
+
+  config::decoder_config decoder_config;
+  decoder_config.id = 0;
+  decoder_config.type = "pymatching";
+  decoder_config.block_size = 3;
+  decoder_config.syndrome_size = 3;
+  decoder_config.H_sparse = {0, -1, 1, -1, 2, -1};
+  decoder_config.O_sparse = {0, -1, 1, -1, 2, -1};
+  decoder_config.D_sparse = {0, -1, 1, -1, 2, -1};
+
+  decoder_config.decoder_custom_args = config::pymatching_config();
+  auto &pymatching_config =
+      std::get<config::pymatching_config>(decoder_config.decoder_custom_args);
+  pymatching_config.error_rate_vec = std::vector<double>{0.1, 0.1, 0.1};
+  pymatching_config.merge_strategy = "smallest_weight";
+
+  config::multi_decoder_config multi_config;
+  multi_config.decoders.push_back(decoder_config);
+
+  const auto yaml_str = multi_config.to_yaml_str(200);
+  auto multi_config_from_yaml =
+      config::multi_decoder_config::from_yaml_str(yaml_str);
+  EXPECT_EQ(multi_config_from_yaml, multi_config);
+
+  EXPECT_EQ(config::configure_decoders(multi_config), 0);
+  config::finalize_decoders();
 }
