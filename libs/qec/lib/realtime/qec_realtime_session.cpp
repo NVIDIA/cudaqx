@@ -98,7 +98,8 @@ cudaq::qec::decoder *get_decoder_or_throw(std::int64_t decoder_id) {
 // + header and release-store the magic.
 void write_response(void *tx_slot, const void *rx_slot, std::int32_t status,
                     std::uint32_t result_len = 0) {
-  const auto *request = static_cast<const cudaq::realtime::RPCHeader *>(rx_slot);
+  const auto *request =
+      static_cast<const cudaq::realtime::RPCHeader *>(rx_slot);
   auto *response = static_cast<cudaq::realtime::RPCResponse *>(tx_slot);
   response->status = status;
   response->result_len = result_len;
@@ -520,8 +521,8 @@ void qec_realtime_session::allocate_ring_buffer() {
     // DEVICE mode only sizes for decoders that captured a graph.
     if (device_mode_ && !captured_graphs_[i])
       continue;
-    max_measurements = std::max<std::size_t>(max_measurements,
-                                             dec->get_num_msyn_per_decode());
+    max_measurements =
+        std::max<std::size_t>(max_measurements, dec->get_num_msyn_per_decode());
     max_observables =
         std::max<std::size_t>(max_observables, dec->get_num_observables());
   }
@@ -536,7 +537,8 @@ void qec_realtime_session::allocate_ring_buffer() {
       sizeof(RPCHeader) + sizeof(rpc::ResetRequestPayload);
   const std::size_t enqueue_resp = sizeof(RPCResponse);
   const std::size_t get_resp =
-      sizeof(RPCResponse) + rpc::align_to_8(rpc::bit_packed_bytes(max_observables));
+      sizeof(RPCResponse) +
+      rpc::align_to_8(rpc::bit_packed_bytes(max_observables));
   const std::size_t reset_resp = sizeof(RPCResponse);
 
   slot_size_ = std::max({enqueue_req, get_req, reset_req, enqueue_resp,
@@ -553,7 +555,8 @@ void qec_realtime_session::allocate_ring_buffer() {
       void *d = nullptr;
       if (!allocate_pinned_mapped(num_slots_ * sizeof(std::uint64_t), &h, &d))
         throw std::runtime_error(
-            std::string("qec_realtime_session::initialize: failed to allocate ") +
+            std::string(
+                "qec_realtime_session::initialize: failed to allocate ") +
             what);
       host = static_cast<volatile std::uint64_t *>(h);
       dev = static_cast<volatile std::uint64_t *>(d);
@@ -564,7 +567,8 @@ void qec_realtime_session::allocate_ring_buffer() {
       void *d = nullptr;
       if (!allocate_pinned_mapped(num_slots_ * slot_size_, &h, &d))
         throw std::runtime_error(
-            std::string("qec_realtime_session::initialize: failed to allocate ") +
+            std::string(
+                "qec_realtime_session::initialize: failed to allocate ") +
             what);
       host = static_cast<std::uint8_t *>(h);
       dev = static_cast<std::uint8_t *>(d);
@@ -594,7 +598,8 @@ void qec_realtime_session::allocate_ring_buffer() {
       void *p = std::calloc(num_slots_, sizeof(std::uint64_t));
       if (!p)
         throw std::runtime_error(
-            std::string("qec_realtime_session::initialize: failed to allocate ") +
+            std::string(
+                "qec_realtime_session::initialize: failed to allocate ") +
             what);
       host = static_cast<volatile std::uint64_t *>(p);
       dev = host;
@@ -604,7 +609,8 @@ void qec_realtime_session::allocate_ring_buffer() {
       void *p = std::calloc(num_slots_, slot_size_);
       if (!p)
         throw std::runtime_error(
-            std::string("qec_realtime_session::initialize: failed to allocate ") +
+            std::string(
+                "qec_realtime_session::initialize: failed to allocate ") +
             what);
       host = static_cast<std::uint8_t *>(p);
       dev = host;
@@ -640,7 +646,8 @@ void qec_realtime_session::populate_function_table() {
     // host allocation -- host_fn pointers are host code addresses; _dev aliases
     // _host.  decoder_id routing happens inside each handler via the payload.
     function_table_count_ = 3;
-    void *p = std::calloc(function_table_count_, sizeof(cudaq_function_entry_t));
+    void *p =
+        std::calloc(function_table_count_, sizeof(cudaq_function_entry_t));
     if (!p)
       throw std::runtime_error("qec_realtime_session::initialize: failed to "
                                "allocate function table");
@@ -910,9 +917,9 @@ void qec_realtime_session::start_host_loop() {
     const std::size_t bytes =
         num_decoders_with_graph_ * sizeof(cudaq::realtime::GraphIOContext);
     if (!allocate_pinned_mapped(bytes, &h, &d))
-      throw std::runtime_error(
-          "qec_realtime_session::start_host_loop: failed to allocate per-worker "
-          "GraphIOContext array");
+      throw std::runtime_error("qec_realtime_session::start_host_loop: failed "
+                               "to allocate per-worker "
+                               "GraphIOContext array");
     std::memset(h, 0, bytes);
     io_ctxs_host_ = static_cast<cudaq::realtime::GraphIOContext *>(h);
     io_ctxs_dev_ = static_cast<cudaq::realtime::GraphIOContext *>(d);

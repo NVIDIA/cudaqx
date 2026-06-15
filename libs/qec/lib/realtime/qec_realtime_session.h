@@ -25,7 +25,8 @@ namespace cudaq::qec::realtime {
 /// @brief Per-process realtime decoding session, dual-mode.
 ///
 /// A session is **homogeneous**: at `initialize()` it inspects the decoders and
-/// runs one of two dispatch modes, chosen by `decoder::supports_graph_dispatch()`:
+/// runs one of two dispatch modes, chosen by
+/// `decoder::supports_graph_dispatch()`:
 ///
 ///   - DEVICE mode (every decoder supports graph dispatch -- e.g. the Relay BP
 ///     GPU decoder).  This is the per-round `GRAPH_LAUNCH` enqueue + shared
@@ -72,7 +73,7 @@ public:
   ///                 DEVICE mode) `capture_decode_graph()` /
   ///                 `release_decode_graph()`.
   /// @param device_launch_fn Function pointer passed to
-  ///                 `cudaq_dispatcher_set_launch_fn` in DEVICE mode.  Typically
+  ///                 `cudaq_dispatcher_set_launch_fn` in DEVICE mode. Typically
   ///                 `&cudaq_launch_dispatch_kernel_regular` from libcudaq-
   ///                 realtime-dispatch.  Passed in (rather than referenced
   ///                 directly) so this shared library stays free of references
@@ -208,7 +209,8 @@ private:
   cudaq_host_dispatch_loop_ctx_t host_ctx_{};
   std::thread host_loop_thread_;
   std::uint64_t host_stats_counter_ = 0;
-  // Plain (non-pinned) shutdown flag for HOST mode (no device kernel shares it).
+  // Plain (non-pinned) shutdown flag for HOST mode (no device kernel shares
+  // it).
   int shutdown_flag_ = 0;
 
   // ---- DEVICE-mode HOST_LOOP graph workers ----
