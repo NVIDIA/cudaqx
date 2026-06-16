@@ -27,8 +27,14 @@ if(CUDAQ_INSTALL_PREFIX)
 endif()
 find_library(_APP_CUDAQ_REALTIME_DISPATCH_LIB cudaq-realtime-dispatch
   PATHS ${_app_cudaq_realtime_prefixes} PATH_SUFFIXES lib)
+if(NOT CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY)
+  find_library(CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY
+    NAMES cudaq-device-call-runtime
+    PATHS ${_app_cudaq_realtime_prefixes}
+    PATH_SUFFIXES lib)
+endif()
 
-function(qec_realtime_app_link_options _tgt)
+function(qec_realtime_app_common_link_options _tgt)
   target_link_options(${_tgt} PRIVATE
     "LINKER:--allow-shlib-undefined"
     "LINKER:--export-dynamic"
@@ -37,6 +43,10 @@ function(qec_realtime_app_link_options _tgt)
     target_link_libraries(${_tgt} PRIVATE
       ${_APP_CUDAQ_REALTIME_DISPATCH_LIB})
   endif()
+endfunction()
+
+function(qec_realtime_app_link_options _tgt)
+  qec_realtime_app_common_link_options(${_tgt})
   if(TARGET cudaq-qec-realtime-cudevice-proprietary)
     target_link_libraries(${_tgt} PRIVATE
       CUDA::cudart
@@ -114,6 +124,85 @@ add_test(
       sliding_window 6 1
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
+
+if(CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY
+   AND TARGET cudaq-qec-realtime-decoding-host-dispatch
+   AND TARGET cudaq-qec-pymatching)
+  add_executable(surface_code-1-host-dispatch)
+  set_target_properties(surface_code-1-host-dispatch PROPERTIES
+    LINKER_LANGUAGE CXX)
+
+  add_dependencies(surface_code-1-host-dispatch surface_code-1-local)
+
+  cudaqx_add_device_code(surface_code-1-host-dispatch
+    SOURCES
+      surface_code-1.cpp
+    COMPILER_FLAGS
+      --target stim
+      -frealtime-lowering
+      -DCUDAQ_QEC_ENABLE_HOST_DISPATCH_DEVICE_CALLS=1
+      -DCUDAQ_QEC_ENABLE_PYMATCHING_DECODER_TYPE=1
+    DEPENDS_ON
+      # Must wait for the local executable to be built because it has the same
+      # surface_code-1.cpp file, and the nvq++ compiler will use the same
+      # filename prefix (surface_code-1) for intermediate files.
+      surface_code-1-local
+  )
+
+  target_link_directories(surface_code-1-host-dispatch
+    PRIVATE ${CUDAQ_INSTALL_DIR}/lib)
+
+  target_link_libraries(surface_code-1-host-dispatch
+    PRIVATE
+      cudaq-qec
+      cudaq-qec-pymatching
+      cudaq-qec-realtime-decoding
+      cudaq-qec-realtime-decoding-host-dispatch
+      ${CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY}
+      cudaq::cudaq cudaq::cudaq-common cudaq-mlir-runtime
+      nvqir nvqir-stim)
+  qec_realtime_app_common_link_options(surface_code-1-host-dispatch)
+
+  set(_surface_code_host_dispatch_rpath
+    "${CMAKE_BINARY_DIR}/lib"
+    "${CMAKE_BINARY_DIR}/lib/decoder-plugins")
+  if(_APP_CUDAQ_REALTIME_DISPATCH_LIB)
+    get_filename_component(_app_cudaq_realtime_dispatch_lib_dir
+      "${_APP_CUDAQ_REALTIME_DISPATCH_LIB}" DIRECTORY)
+    list(APPEND _surface_code_host_dispatch_rpath
+      "${_app_cudaq_realtime_dispatch_lib_dir}")
+  endif()
+  if(CUDAQ_INSTALL_DIR)
+    list(APPEND _surface_code_host_dispatch_rpath "${CUDAQ_INSTALL_DIR}/lib")
+  endif()
+  set_target_properties(surface_code-1-host-dispatch PROPERTIES
+    BUILD_RPATH "${_surface_code_host_dispatch_rpath}")
+
+  add_dependencies(surface_code-1-host-dispatch
+    cudaq-qec-pymatching
+    cudaq-qec-realtime-decoding-host-dispatch)
+
+  add_test(
+    NAME app_examples.surface_code-1-host-dispatch-test-distance-3-pymatching
+    COMMAND
+      bash "${CMAKE_CURRENT_SOURCE_DIR}/surface_code-1-test.sh"
+        ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-host-dispatch
+        ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-host-dispatch
+        3 40 40 NULL 12 6
+        ${CMAKE_BINARY_DIR}/lib
+        pymatching
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+  )
+  set_tests_properties(
+    app_examples.surface_code-1-host-dispatch-test-distance-3-pymatching
+    PROPERTIES ENVIRONMENT
+      "EXTRA_CLI_ARGS=--use-host-dispatch-device-calls")
+else()
+  message(STATUS "Skipping surface_code-1-host-dispatch PyMatching app test "
+                 "(requires cudaq-device-call-runtime, "
+                 "cudaq-qec-realtime-decoding-host-dispatch, and "
+                 "cudaq-qec-pymatching).")
+endif()
 
 # This must be disabled for now because the multi_error_lut decoder is not
 # powerful enough to pass this test. The nv-qldpc-decoder can pass this test,

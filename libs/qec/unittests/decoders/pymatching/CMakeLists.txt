@@ -51,3 +51,93 @@ if(CUDAQ_REALTIME_ROOT AND CUDAQ_REALTIME_INCLUDE_DIR)
   add_dependencies(CUDAQXQECUnitTests test_pymatching_realtime)
   gtest_discover_tests(test_pymatching_realtime)
 endif()
+
+set(_pymatching_cudaq_realtime_prefixes "")
+if(CUDAQ_REALTIME_ROOT)
+  list(APPEND _pymatching_cudaq_realtime_prefixes "${CUDAQ_REALTIME_ROOT}")
+  list(APPEND _pymatching_cudaq_realtime_prefixes "${CUDAQ_REALTIME_ROOT}/build")
+endif()
+if(CUDAQ_INSTALL_PREFIX)
+  list(APPEND _pymatching_cudaq_realtime_prefixes "${CUDAQ_INSTALL_PREFIX}")
+endif()
+if(CUDAQ_INSTALL_DIR)
+  list(APPEND _pymatching_cudaq_realtime_prefixes "${CUDAQ_INSTALL_DIR}")
+endif()
+
+if(NOT CUDAQ_DEVICE_CALL_INCLUDE_DIR)
+  find_path(CUDAQ_DEVICE_CALL_INCLUDE_DIR
+    NAMES cudaq_internal/device_call/DeviceCallService.h
+    HINTS ${_pymatching_cudaq_realtime_prefixes}
+    PATH_SUFFIXES include runtime/internal/device_call/include
+  )
+endif()
+
+if(NOT CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY)
+  find_library(CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY
+    NAMES cudaq-device-call-runtime
+    PATHS ${_pymatching_cudaq_realtime_prefixes}
+    PATH_SUFFIXES lib
+  )
+endif()
+
+if(CUDAQ_REALTIME_INCLUDE_DIR
+   AND CUDAQ_DEVICE_CALL_INCLUDE_DIR
+   AND CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY
+   AND TARGET cudaq-qec-realtime-decoding-host-dispatch
+   AND TARGET cudaq-qec-pymatching)
+  add_executable(test_pymatching_qpu_device_call)
+  set_target_properties(test_pymatching_qpu_device_call PROPERTIES
+    LINKER_LANGUAGE CXX
+  )
+
+  cudaqx_add_device_code(test_pymatching_qpu_device_call
+    SOURCES
+      test_pymatching_qpu_device_call.cpp
+    COMPILER_FLAGS
+      --target qpp-cpu
+      -frealtime-lowering
+  )
+
+  target_link_directories(test_pymatching_qpu_device_call
+    PRIVATE ${CUDAQ_INSTALL_DIR}/lib)
+
+  target_link_libraries(test_pymatching_qpu_device_call PRIVATE
+    GTest::gtest_main
+    cudaq-qec
+    cudaq-qec-pymatching
+    cudaq-qec-realtime-decoding
+    cudaq-qec-realtime-decoding-host-dispatch
+    ${CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY}
+    cudaq::cudaq cudaq::cudaq-common cudaq-mlir-runtime
+    nvqir nvqir-qpp)
+
+  set(_pymatching_qpu_device_call_rpath
+    "${CMAKE_BINARY_DIR}/lib"
+    "${CMAKE_BINARY_DIR}/lib/decoder-plugins"
+  )
+  if(CUDAQ_REALTIME_LIBRARY)
+    get_filename_component(_pymatching_qpu_realtime_lib_dir
+      "${CUDAQ_REALTIME_LIBRARY}" DIRECTORY)
+    list(APPEND _pymatching_qpu_device_call_rpath
+      "${_pymatching_qpu_realtime_lib_dir}")
+  endif()
+  if(CUDAQ_INSTALL_DIR)
+    list(APPEND _pymatching_qpu_device_call_rpath
+      "${CUDAQ_INSTALL_DIR}/lib")
+  endif()
+
+  set_target_properties(test_pymatching_qpu_device_call PROPERTIES
+    BUILD_RPATH "${_pymatching_qpu_device_call_rpath}"
+  )
+
+  add_dependencies(test_pymatching_qpu_device_call
+    cudaq-qec-pymatching
+    cudaq-qec-realtime-decoding-host-dispatch)
+  add_dependencies(CUDAQXQECUnitTests test_pymatching_qpu_device_call)
+  gtest_discover_tests(test_pymatching_qpu_device_call)
+else()
+  message(STATUS "Skipping test_pymatching_qpu_device_call "
+                 "(requires realtime/device_call dependencies, "
+                 "cudaq-qec-realtime-decoding-host-dispatch, and "
+                 "cudaq-qec-pymatching).")
+endif()

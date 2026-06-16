@@ -246,3 +246,39 @@ endif()
 
 add_subdirectory(quantinuum)
 add_subdirectory(simulation)
+
+set(_cudaq_device_call_prefixes "")
+if(CUDAQ_REALTIME_ROOT)
+  list(APPEND _cudaq_device_call_prefixes "${CUDAQ_REALTIME_ROOT}")
+  list(APPEND _cudaq_device_call_prefixes "${CUDAQ_REALTIME_ROOT}/build")
+endif()
+if(CUDAQ_INSTALL_PREFIX)
+  list(APPEND _cudaq_device_call_prefixes "${CUDAQ_INSTALL_PREFIX}")
+endif()
+if(CUDAQ_INSTALL_DIR)
+  list(APPEND _cudaq_device_call_prefixes "${CUDAQ_INSTALL_DIR}")
+endif()
+
+if(CUDAQ_REALTIME_INCLUDE_DIR AND NOT CUDAQ_DEVICE_CALL_INCLUDE_DIR)
+  find_path(CUDAQ_DEVICE_CALL_INCLUDE_DIR
+    NAMES cudaq_internal/device_call/DeviceCallService.h
+    HINTS ${_cudaq_device_call_prefixes}
+    PATH_SUFFIXES include runtime/internal/device_call/include
+  )
+  if(CUDAQ_DEVICE_CALL_INCLUDE_DIR)
+    message(STATUS "Found cuda-quantum device_call headers at ${CUDAQ_DEVICE_CALL_INCLUDE_DIR}")
+  endif()
+endif()
+
+if(CUDAQ_REALTIME_INCLUDE_DIR AND NOT CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY)
+  find_library(CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY
+    NAMES cudaq-device-call-runtime
+    PATHS ${_cudaq_device_call_prefixes}
+    PATH_SUFFIXES lib
+  )
+  if(CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY)
+    message(STATUS "Found cuda-quantum device_call runtime library at ${CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY}")
+  endif()
+endif()
+
+add_subdirectory(host_dispatch)

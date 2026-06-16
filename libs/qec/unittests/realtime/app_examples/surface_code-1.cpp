@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2025 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2025 - 2026 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -38,6 +38,14 @@ static int g_syndromes_per_shot = 0;
 // set this to 1 if you are submitting to hardware.
 #ifndef PER_SHOT_DEBUG
 #define PER_SHOT_DEBUG 0
+#endif
+
+#ifndef CUDAQ_QEC_ENABLE_HOST_DISPATCH_DEVICE_CALLS
+#define CUDAQ_QEC_ENABLE_HOST_DISPATCH_DEVICE_CALLS 0
+#endif
+
+#ifndef CUDAQ_QEC_ENABLE_PYMATCHING_DECODER_TYPE
+#define CUDAQ_QEC_ENABLE_PYMATCHING_DECODER_TYPE 0
 #endif
 
 // Uncomment this to manually inject errors.
@@ -114,6 +122,13 @@ void save_dem_to_file(const cudaq::qec::detector_error_model &dem,
       lut_config.lut_error_depth = 2;
       sw_config.multi_error_lut_params = lut_config;
       config.decoder_custom_args = sw_config;
+#if CUDAQ_QEC_ENABLE_PYMATCHING_DECODER_TYPE
+    } else if (decoder_type == "pymatching") {
+      cudaq::qec::decoding::config::pymatching_config pm_config;
+      pm_config.error_rate_vec = dem.error_rates;
+      pm_config.merge_strategy = "smallest_weight";
+      config.decoder_custom_args = pm_config;
+#endif
     }
 
     multi_config.decoders.push_back(config);
@@ -910,8 +925,14 @@ void show_help() {
          "distance\n");
   printf("  --decoder_window <int>  Number of rounds to use for the decoder "
          "window. Default: distance\n");
+#if CUDAQ_QEC_ENABLE_PYMATCHING_DECODER_TYPE
+  printf("  --decoder_type <string> Decoder type: 'multi_error_lut', "
+         "'nv-qldpc-decoder', 'sliding_window', or 'pymatching'. Default: "
+         "multi_error_lut\n");
+#else
   printf("  --decoder_type <string> Decoder type: 'multi_error_lut', "
          "'nv-qldpc-decoder', or 'sliding_window'. Default: multi_error_lut\n");
+#endif
   printf("  --sw_window_size <int>  Sliding window size (only for "
          "sliding_window decoder). Default: decoder_window\n");
   printf("  --sw_step_size <int>    Sliding window step size. Default: 1\n");
@@ -924,6 +945,10 @@ void show_help() {
          "file.\n");
   printf("  --use-relay-bp      For --decoder_type nv-qldpc-decoder: select "
          "Relay BP instead of the default BP + OSD block.\n");
+#if CUDAQ_QEC_ENABLE_HOST_DISPATCH_DEVICE_CALLS
+  printf("  --use-host-dispatch-device-calls  Route QPU device_call through "
+         "the CUDA-Q host-dispatch channel.\n");
+#endif
   printf("  --help              Show this help message\n");
 }
 
@@ -948,6 +973,9 @@ int main(int argc, char **argv) {
   bool load_syndrome = false;
   std::string syndrome_filename;
   bool use_relay_bp = false;
+#if CUDAQ_QEC_ENABLE_HOST_DISPATCH_DEVICE_CALLS
+  bool use_host_dispatch_device_calls = false;
+#endif
 
   // Parse the command line arguments
   for (int i = 1; i < argc; i++) {
@@ -1000,6 +1028,10 @@ int main(int argc, char **argv) {
       i++;
     } else if (arg == "--use-relay-bp") {
       use_relay_bp = true;
+#if CUDAQ_QEC_ENABLE_HOST_DISPATCH_DEVICE_CALLS
+    } else if (arg == "--use-host-dispatch-device-calls") {
+      use_host_dispatch_device_calls = true;
+#endif
     } else {
       printf("Unknown argument: %s\n", arg.c_str());
       show_help();
@@ -1036,9 +1068,18 @@ int main(int argc, char **argv) {
 
   // Validate decoder type
   if (decoder_type != "multi_error_lut" && decoder_type != "sliding_window" &&
-      decoder_type != "nv-qldpc-decoder") {
+      decoder_type != "nv-qldpc-decoder"
+#if CUDAQ_QEC_ENABLE_PYMATCHING_DECODER_TYPE
+      && decoder_type != "pymatching"
+#endif
+  ) {
+#if CUDAQ_QEC_ENABLE_PYMATCHING_DECODER_TYPE
+    printf("Error: --decoder_type must be 'multi_error_lut', "
+           "'nv-qldpc-decoder', 'sliding_window', or 'pymatching'\n");
+#else
     printf("Error: --decoder_type must be 'multi_error_lut', "
            "'nv-qldpc-decoder', or 'sliding_window'\n");
+#endif
     return 1;
   }
 
@@ -1086,6 +1127,28 @@ int main(int argc, char **argv) {
   printf("Running with p_spam = %f, distance = %d, num_shots = %d, num_rounds "
          "= %d, decoder_window = %d\n",
          p_spam, distance, num_shots, num_rounds, decoder_window);
+
+#if CUDAQ_QEC_ENABLE_HOST_DISPATCH_DEVICE_CALLS
+  struct RealtimeGuard {
+    bool initialized = false;
+    ~RealtimeGuard() {
+      if (initialized)
+        cudaq::realtime::finalize();
+    }
+  } realtime_guard;
+
+  char realtime_program[] = "surface_code-1-host-dispatch";
+  char realtime_channel[] = "--cudaq-device-call=host-dispatch";
+  char realtime_slots[] = "--cudaq-device-call-slots=8";
+  char realtime_slot_size[] = "--cudaq-device-call-slot-size=256";
+  char *realtime_argv[] = {realtime_program, realtime_channel, realtime_slots,
+                           realtime_slot_size};
+  if (use_host_dispatch_device_calls) {
+    cudaq::realtime::initialize(4, realtime_argv);
+    realtime_guard.initialized = true;
+  }
+#endif
+
   auto code = cudaq::qec::get_code(
       "surface_code", cudaqx::heterogeneous_map{{"distance", distance}});
 
