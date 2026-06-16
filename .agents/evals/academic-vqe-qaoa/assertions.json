@@ -1,0 +1,60 @@
+{
+  "INSTALL01": {
+    "must_include": [
+      "Brev",
+      "CPU",
+      "pip install cudaq-solvers",
+      "import cudaq_solvers",
+      "libgfortran"
+    ],
+    "must_not_include": [
+      "pip install cudaq-solvers[gqe]",
+      "install qec first",
+      "Ising"
+    ]
+  },
+  "VQE01": {
+    "must_include": [
+      "cudaq.kernel",
+      "spin",
+      "solvers.vqe",
+      "optimizer",
+      "gradient",
+      "parameter_shift"
+    ],
+    "must_not_include": [
+      "solvers.qaoa",
+      "GQE",
+      "Ising"
+    ]
+  },
+  "QAOA01": {
+    "must_include": [
+      "networkx",
+      "get_maxcut_hamiltonian",
+      "get_num_qaoa_parameters",
+      "solvers.qaoa",
+      "cobyla",
+      "most_probable"
+    ],
+    "must_not_include": [
+      "empty initial parameters are fine",
+      "optimizer='lbfgs'",
+      "optimizer=\"lbfgs\"",
+      "Ising"
+    ]
+  },
+  "QAOA02": {
+    "must_include": [
+      "lbfgs",
+      "requires gradients",
+      "cobyla",
+      "jac"
+    ],
+    "must_not_include": [
+      "silently falls back",
+      "empty initial parameters are fine",
+      "Ising"
+    ]
+  }
+}

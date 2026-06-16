@@ -1,0 +1,22 @@
+[
+  {
+    "id": "INSTALL01",
+    "name": "install-and-smoke-test",
+    "prompt": "I am new to CUDA-QX Solvers. What should I install and how do I quickly check that I can run VQE or QAOA examples?"
+  },
+  {
+    "id": "VQE01",
+    "name": "minimal-vqe",
+    "prompt": "Show me a minimal CUDA-Q Solvers VQE example with a small ansatz, a SpinOperator Hamiltonian, and the right optimizer and gradient settings."
+  },
+  {
+    "id": "QAOA01",
+    "name": "minimal-qaoa-maxcut",
+    "prompt": "Show me the simplest QAOA MaxCut workflow in CUDA-Q Solvers using a small weighted NetworkX graph."
+  },
+  {
+    "id": "QAOA02",
+    "name": "qaoa-lbfgs-pitfall",
+    "prompt": "Why does solvers.qaoa(..., optimizer='lbfgs') fail with a gradient error, and what should a beginner use instead?"
+  }
+]
