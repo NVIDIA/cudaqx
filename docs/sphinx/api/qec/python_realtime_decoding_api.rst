@@ -75,6 +75,30 @@ The configuration API enables setting up decoders before circuit execution. Deco
 Configuration Types
 ^^^^^^^^^^^^^^^^^^^
 
+.. py:class:: cudaq_qec.pymatching_config
+
+   Configuration for the PyMatching decoder in the real-time decoding system.
+   Use this with ``decoder_config.type = "pymatching"``.
+   Set ``decoder_config.type`` before passing this object to
+   ``decoder_config.set_decoder_custom_args``.
+   The decoder input matrix must be graphlike: each ``H_sparse`` column can
+   contain only one or two detector entries.
+
+   **Attributes:**
+
+   .. py:attribute:: error_rate_vec
+      :type: Optional[List[float]]
+
+      Per-error prior probabilities. When provided, the length must match the
+      decoder ``block_size`` and each value must be in the range ``(0, 0.5]``.
+
+   .. py:attribute:: merge_strategy
+      :type: Optional[str]
+
+      PyMatching edge merge strategy. Supported values are ``"disallow"``,
+      ``"independent"``, ``"smallest_weight"``, ``"keep_original"``, and
+      ``"replace"``.
+
 .. py:class:: cudaq_qec.trt_decoder_config
 
    Configuration for TensorRT decoder in real-time decoding system.

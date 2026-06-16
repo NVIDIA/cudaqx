@@ -1,5 +1,5 @@
 # ============================================================================ #
-# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
+# Copyright (c) 2024 - 2026 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -166,6 +166,13 @@ FIELDS_MULTI_ERROR_LUT = {
     "lut_error_depth": (int, 1, 3),
 }
 
+# pymatching_config tests
+
+FIELDS_PYMATCHING = {
+    "error_rate_vec": (list, [0.1, 0.2, 0.3], [0.2, 0.1, 0.2]),
+    "merge_strategy": (str, "smallest_weight", "disallow"),
+}
+
 # trt_decoder_config tests
 
 FIELDS_TRT_DECODER = {
@@ -181,6 +188,33 @@ def test_multi_error_lut_config_defaults_are_none():
     m = qec.multi_error_lut_config()
     for name in FIELDS_MULTI_ERROR_LUT:
         assert getattr(m, name) is None, f"Expected {name} to default to None"
+
+
+def test_pymatching_config_defaults_are_none():
+    pm = qec.pymatching_config()
+    for name in FIELDS_PYMATCHING:
+        assert getattr(pm, name) is None, f"Expected {name} to default to None"
+
+
+@pytest.mark.parametrize("name, meta", list(FIELDS_PYMATCHING.items()))
+def test_pymatching_config_set_and_get_each_optional(name, meta):
+    pm = qec.pymatching_config()
+
+    py_type, sample_val, alt_val = meta
+
+    assert getattr(pm, name) is None
+
+    setattr(pm, name, sample_val)
+    got = getattr(pm, name)
+    assert isinstance(got, py_type)
+    assert got == sample_val
+
+    setattr(pm, name, alt_val)
+    got2 = getattr(pm, name)
+    assert got2 == alt_val
+
+    setattr(pm, name, None)
+    assert getattr(pm, name) is None
 
 
 def test_configure_valid_multi_error_lut_decoders():
@@ -271,6 +305,34 @@ def test_trt_decoder_config_yaml_roundtrip():
     assert trt2.engine_load_path == "/path/to/engine.trt"
     assert trt2.precision == "fp16"
     assert trt2.memory_workspace == 1073741824
+
+
+def test_pymatching_config_yaml_roundtrip():
+    pm = qec.pymatching_config()
+    pm.error_rate_vec = [0.1, 0.2, 0.3]
+    pm.merge_strategy = "smallest_weight"
+
+    dc = qec.decoder_config()
+    dc.id = 0
+    dc.type = "pymatching"
+    dc.block_size = 3
+    dc.syndrome_size = 3
+    dc.H_sparse = [0, -1, 1, -1, 2, -1]
+    dc.O_sparse = [0, -1, 1, -1, 2, -1]
+    dc.D_sparse = [0, -1, 1, -1, 2, -1]
+    dc.set_decoder_custom_args(pm)
+
+    yaml_text = dc.to_yaml_str()
+    assert isinstance(yaml_text, str) and "pymatching" in yaml_text
+
+    dc2 = qec.decoder_config.from_yaml_str(yaml_text)
+    assert dc2 is not None
+    assert dc2.type == "pymatching"
+
+    pm2 = dc2.decoder_custom_args
+    assert pm2 is not None
+    assert pm2.error_rate_vec == [0.1, 0.2, 0.3]
+    assert pm2.merge_strategy == "smallest_weight"
 
 
 # decoder_config tests
@@ -415,6 +477,74 @@ def test_configure_valid_decoders():
     qec.finalize_decoders()
     assert isinstance(ret, int)
     assert ret == 0
+
+
+def make_pymatching_multi_decoder_config(pm, h_sparse=None):
+    dc = qec.decoder_config()
+    dc.id = 0
+    dc.type = "pymatching"
+    dc.block_size = 3
+    dc.syndrome_size = 3
+    dc.H_sparse = h_sparse if h_sparse is not None else [0, -1, 1, -1, 2, -1]
+    dc.O_sparse = [0, -1, 1, -1, 2, -1]
+    dc.D_sparse = [0, -1, 1, -1, 2, -1]
+    dc.set_decoder_custom_args(pm)
+
+    mdc = qec.multi_decoder_config()
+    mdc.decoders = [dc]
+    return mdc
+
+
+def configure_pymatching_status(pm, h_sparse=None):
+    try:
+        return qec.configure_decoders(
+            make_pymatching_multi_decoder_config(pm, h_sparse))
+    finally:
+        qec.finalize_decoders()
+
+
+def test_configure_valid_pymatching_decoder():
+    pm = qec.pymatching_config()
+    pm.error_rate_vec = [0.1, 0.1, 0.1]
+    pm.merge_strategy = "smallest_weight"
+
+    ret = configure_pymatching_status(pm)
+    assert isinstance(ret, int)
+    assert ret == 0
+
+
+@pytest.mark.parametrize(
+    "error_rate_vec",
+    ([0.1, 0.1], [0.0, 0.1, 0.1], [0.1, 0.6, 0.1]),
+)
+def test_configure_invalid_pymatching_error_rate_vec(error_rate_vec):
+    pm = qec.pymatching_config()
+    pm.error_rate_vec = error_rate_vec
+    pm.merge_strategy = "smallest_weight"
+
+    ret = configure_pymatching_status(pm)
+    assert isinstance(ret, int)
+    assert ret != 0
+
+
+def test_configure_invalid_pymatching_merge_strategy():
+    pm = qec.pymatching_config()
+    pm.error_rate_vec = [0.1, 0.1, 0.1]
+    pm.merge_strategy = "not-a-strategy"
+
+    ret = configure_pymatching_status(pm)
+    assert isinstance(ret, int)
+    assert ret != 0
+
+
+def test_configure_invalid_pymatching_non_graphlike_h_sparse():
+    pm = qec.pymatching_config()
+    pm.error_rate_vec = [0.1, 0.1, 0.1]
+    pm.merge_strategy = "smallest_weight"
+
+    ret = configure_pymatching_status(pm, h_sparse=[0, -1, 0, -1, 0, -1])
+    assert isinstance(ret, int)
+    assert ret != 0
 
 
 def test_configure_invalid_decoders():
