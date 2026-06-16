@@ -80,30 +80,41 @@ void maybe_init_realtime_session() {
     return;
   }
 
-  if (!any_decoder_supports_graph_dispatch())
-    throw std::runtime_error(
-        "CUDAQ_QEC_REALTIME_MODE=inproc_rpc requested but no decoder "
-        "supports graph dispatch. Either pick a graph-capable decoder "
-        "(e.g. nv-qldpc-decoder with --use-relay-bp) or unset "
-        "CUDAQ_QEC_REALTIME_MODE.");
+  // Pick DEVICE vs HOST dispatch the same way qec_realtime_session does at
+  // initialize(): any graph-capable decoder => DEVICE mode (per-round
+  // GRAPH_LAUNCH enqueue + DEVICE_CALL get/reset, driven by the device dispatch
+  // kernel); otherwise HOST mode -- CPU decoders such as pymatching run all
+  // three RPCs inline on the CPU host loop.  A mixed (graph + non-graph) set is
+  // rejected by qec_realtime_session::initialize() below.
+  const bool device_mode = any_decoder_supports_graph_dispatch();
 
-  auto launch_fn = resolve_launch_dispatch_kernel_regular();
-  auto set_mode_fn = resolve_set_shared_ring_mode();
-  if (!launch_fn || !set_mode_fn)
-    throw std::runtime_error(
-        "CUDAQ_QEC_REALTIME_MODE=inproc_rpc requested but "
-        "cudaq_launch_dispatch_kernel_regular and/or "
-        "cudaq_dispatch_kernel_set_shared_ring_mode could not be resolved "
-        "via dlsym(RTLD_DEFAULT, ...). The host executable must absorb "
-        "libcudaq-realtime-dispatch.a and link with --export-dynamic.");
+  cudaq_dispatch_launch_fn_t launch_fn = nullptr;
+  if (device_mode) {
+    // DEVICE mode needs the dispatch-kernel launch helper and the device-side
+    // shared-ring-mode setter, both resolved from libcudaq-realtime-dispatch.a
+    // (absorbed into the final executable).  HOST mode uses neither.
+    launch_fn = resolve_launch_dispatch_kernel_regular();
+    auto set_mode_fn = resolve_set_shared_ring_mode();
+    if (!launch_fn || !set_mode_fn)
+      throw std::runtime_error(
+          "CUDAQ_QEC_REALTIME_MODE=inproc_rpc requested with a graph-capable "
+          "decoder but cudaq_launch_dispatch_kernel_regular and/or "
+          "cudaq_dispatch_kernel_set_shared_ring_mode could not be resolved "
+          "via dlsym(RTLD_DEFAULT, ...). The host executable must absorb "
+          "libcudaq-realtime-dispatch.a and link with --export-dynamic.");
 
-  cudaError_t rc = set_mode_fn(1);
-  if (rc != cudaSuccess)
-    throw std::runtime_error(
-        "CUDAQ_QEC_REALTIME_MODE=inproc_rpc requested but "
-        "cudaq_dispatch_kernel_set_shared_ring_mode(1) failed with rc=" +
-        std::to_string(rc));
-  g_realtime_session_owns_shared_ring_mode = true;
+    cudaError_t rc = set_mode_fn(1);
+    if (rc != cudaSuccess)
+      throw std::runtime_error(
+          "CUDAQ_QEC_REALTIME_MODE=inproc_rpc requested but "
+          "cudaq_dispatch_kernel_set_shared_ring_mode(1) failed with rc=" +
+          std::to_string(rc));
+    g_realtime_session_owns_shared_ring_mode = true;
+  } else {
+    CUDAQ_INFO("CUDAQ_QEC_REALTIME_MODE=inproc_rpc with CPU (non-graph) "
+               "decoder(s); using HOST dispatch mode (no device kernel / no "
+               "device shared-ring setup).");
+  }
 
   try {
     g_realtime_session =
@@ -113,8 +124,11 @@ void maybe_init_realtime_session() {
   } catch (const std::exception &e) {
     const std::string what = e.what();
     g_realtime_session.reset();
-    (void)set_mode_fn(0);
-    g_realtime_session_owns_shared_ring_mode = false;
+    if (g_realtime_session_owns_shared_ring_mode) {
+      if (auto set_mode_fn = resolve_set_shared_ring_mode())
+        (void)set_mode_fn(0);
+      g_realtime_session_owns_shared_ring_mode = false;
+    }
     throw std::runtime_error("CUDAQ_QEC_REALTIME_MODE=inproc_rpc requested but "
                              "qec_realtime_session::initialize() threw: " +
                              what);
@@ -200,6 +214,26 @@ int configure_decoders(
     CUDAQ_WARN("Minimum decoder ID is less than 0: {}", min_decoder_id);
     return 3;
   }
+
+#ifdef CUDAQ_REALTIME_ROOT
+  // inproc_rpc DEVICE sessions allocate pinned, device-mapped ring buffers
+  // (cudaHostAlloc(cudaHostAllocMapped) + cudaHostGetDevicePointer).
+  // cudaSetDeviceFlags(cudaDeviceMapHost) only takes effect BEFORE the device's
+  // CUDA context is created, and the per-decoder dry-run below
+  // (new_decoder->decode(...)) can create that context for GPU decoders -- so
+  // set the flag here, before any decoder is realized, rather than (only) later
+  // in qec_realtime_session::initialize().  Best-effort: if a context already
+  // exists this returns cudaErrorSetOnActiveProcess, which is harmless (mapped
+  // host allocation still works via UVA regardless of this device-wide flag),
+  // and HOST-mode CPU sessions do not use mapped memory at all.
+  if (realtime_mode_inproc_rpc_requested()) {
+    cudaError_t flags_err = cudaSetDeviceFlags(cudaDeviceMapHost);
+    if (flags_err != cudaSuccess && flags_err != cudaErrorSetOnActiveProcess)
+      CUDAQ_WARN("cudaSetDeviceFlags(cudaDeviceMapHost) returned '{}' before "
+                 "decoder init; continuing (mapped alloc works via UVA).",
+                 cudaGetErrorString(flags_err));
+  }
+#endif
 
   // Create the decoders based on the decoder configs.
   try {

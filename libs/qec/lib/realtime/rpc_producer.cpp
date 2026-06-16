@@ -38,6 +38,34 @@ std::uint32_t next_request_id() {
   return g_request_id_counter.fetch_add(1, std::memory_order_relaxed);
 }
 
+// Enforces the single-producer contract documented in rpc_producer.h.  The
+// producer path is single-producer by design -- the sole caller is the single-
+// threaded QEC decode loop.  acquire_slot() selects a free slot without an
+// atomic reservation, so two concurrent producers could pick the same slot and
+// corrupt each other's RPC.  Rather than pay for full multi-producer support
+// (CAS slot-claim / per-producer arena), we DETECT a contract violation and
+// fail loudly.  This is a real throw, NOT assert(): release builds compile
+// assert() out, so an assert would enforce nothing in production.
+std::atomic<bool> g_producer_active{false};
+
+struct single_producer_guard {
+  single_producer_guard() {
+    bool expected = false;
+    if (!g_producer_active.compare_exchange_strong(expected, true,
+                                                   std::memory_order_acquire))
+      throw std::runtime_error(
+          "rpc_producer: concurrent producer detected. This RPC path is "
+          "single-producer (the single-threaded QEC decode loop); serialize "
+          "calls or add multi-producer support (CAS slot-claim / per-producer "
+          "arena).");
+  }
+  ~single_producer_guard() {
+    g_producer_active.store(false, std::memory_order_release);
+  }
+  single_producer_guard(const single_producer_guard &) = delete;
+  single_producer_guard &operator=(const single_producer_guard &) = delete;
+};
+
 // Bounded spin for a free slot.  Slot is free when both rx_flags[i] and
 // tx_flags[i] are zero.  Returns UINT32_MAX on timeout.
 //
@@ -184,6 +212,7 @@ void require_initialized(cudaq::qec::realtime::qec_realtime_session &session,
 void enqueue_syndromes(cudaq::qec::realtime::qec_realtime_session &session,
                        std::size_t decoder_id, const std::uint8_t *syndromes,
                        std::uint64_t num_syndromes, std::uint64_t tag) {
+  single_producer_guard producer_guard;
   require_initialized(session, "enqueue_syndromes");
 
   if (syndromes == nullptr && num_syndromes > 0)
@@ -278,6 +307,7 @@ void enqueue_syndromes(cudaq::qec::realtime::qec_realtime_session &session,
 void get_corrections(cudaq::qec::realtime::qec_realtime_session &session,
                      std::size_t decoder_id, std::uint8_t *corrections,
                      std::uint64_t correction_length, std::uint64_t reset) {
+  single_producer_guard producer_guard;
   require_initialized(session, "get_corrections");
 
   if (corrections == nullptr && correction_length > 0)
@@ -358,6 +388,7 @@ void get_corrections(cudaq::qec::realtime::qec_realtime_session &session,
 
 void reset_decoder(cudaq::qec::realtime::qec_realtime_session &session,
                    std::size_t decoder_id) {
+  single_producer_guard producer_guard;
   require_initialized(session, "reset_decoder");
 
   cudaq::qec::decoding::rpc::ResetRequestPayload payload{};

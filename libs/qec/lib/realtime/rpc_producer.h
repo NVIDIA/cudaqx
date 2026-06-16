@@ -79,11 +79,15 @@ struct dispatcher_unresponsive_error : std::runtime_error {
 // error -- e.g. by logging then rethrowing.
 //
 // THREAD-SAFETY:
-// All three functions are currently SINGLE-PRODUCER -- the production
-// caller in realtime_decoding.cpp::enqueue_syndromes / get_corrections /
-// reset_decoder is invoked from the QEC main loop, which is single-
-// threaded by construction.  No additional synchronization (mutex, omp
-// critical, etc.) is in place; the invariant is purely structural.
+// All three functions are SINGLE-PRODUCER -- this is a hard contract, not
+// merely an assumption.  The production caller in realtime_decoding.cpp::
+// enqueue_syndromes / get_corrections / reset_decoder is invoked from the QEC
+// main loop, which is single-threaded by construction.  The contract is now
+// ENFORCED at runtime: each function holds a single_producer_guard that throws
+// if a second producer is active concurrently (an always-on check -- a real
+// throw, not assert(), so it stays active in release builds).  Full multi-
+// producer support (CAS slot-claim or a per-producer arena) remains a
+// deliberate follow-up.
 //
 // acquire_slot() in rpc_producer.cpp scans for a free slot (rx_flags ==
 // tx_flags == 0) but does NOT atomically claim it on return.  That's

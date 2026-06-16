@@ -931,7 +931,12 @@ void qec_realtime_session::start_host_loop() {
   host_ctx_.config.slot_size = static_cast<std::uint32_t>(slot_size_);
   host_ctx_.config.shared_ring_mode = 1;
   host_ctx_.config.skip_tx_markers = 1;
-  host_ctx_.function_table.entries = function_table_dev_;
+  // The host loop dereferences these entries on the CPU, so it must use the
+  // host view of the (pinned-mapped) table.  Under UVA the host and device
+  // addresses are equal, but the host pointer is the correct/portable choice;
+  // the device dispatcher separately receives function_table_dev_ via
+  // cudaq_dispatcher_set_function_table().
+  host_ctx_.function_table.entries = function_table_host_;
   host_ctx_.function_table.count =
       static_cast<std::uint32_t>(function_table_count_);
   host_ctx_.workers = host_workers_.data();
