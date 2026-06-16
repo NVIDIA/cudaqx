@@ -7,6 +7,7 @@
  ******************************************************************************/
 
 #include "qec_realtime_session.h"
+#include "realtime_decoding.h"
 #include "rpc_producer.h"
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/realtime/decoding_config.h"
@@ -189,5 +190,22 @@ TEST(PyMatchingRealtime, ConfiguresViaRealtimeDecoderConfig) {
   EXPECT_EQ(multi_config_from_yaml, multi_config);
 
   EXPECT_EQ(config::configure_decoders(multi_config), 0);
+
+  std::vector<std::uint8_t> syndrome{0, 1, 0};
+  EXPECT_NO_THROW(cudaq::qec::decoding::host::enqueue_syndromes(
+      /*decoder_id=*/0, syndrome.data(), syndrome.size(), /*tag=*/1));
+
+  std::vector<std::uint8_t> corrections(3, 0xCC);
+  EXPECT_NO_THROW(cudaq::qec::decoding::host::get_corrections(
+      /*decoder_id=*/0, corrections.data(), corrections.size(),
+      /*reset=*/true));
+  EXPECT_EQ(corrections, (std::vector<std::uint8_t>{0, 1, 0}));
+
+  corrections.assign(3, 0xCC);
+  EXPECT_NO_THROW(cudaq::qec::decoding::host::get_corrections(
+      /*decoder_id=*/0, corrections.data(), corrections.size(),
+      /*reset=*/false));
+  EXPECT_EQ(corrections, (std::vector<std::uint8_t>{0, 0, 0}));
+
   config::finalize_decoders();
 }
