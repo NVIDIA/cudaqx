@@ -48,11 +48,7 @@ _PRIOR_EPS_BY_DTYPE: dict[str, float] = {
 _SUPPORTED_DTYPES: tuple[str, ...] = ("float32", "float64")
 _PATH_CACHE_MAXSIZE = 16
 _path_cache: dict[tuple[str, tuple[tuple[int, ...], ...]], tuple[Any, Any]] = {}
-_AUTO_PRECONTRACT_INTERMEDIATE_THRESHOLD = 2_147_483_647
-_AUTO_PRECONTRACT_NUM_CHECKS_THRESHOLD = 128
-_AUTO_PRECONTRACT_NUM_ERRORS_THRESHOLD = 512
-_AUTO_REDUCED_LOSS_MICROBATCH_SIZE = 1
-_AUTO_REDUCED_PREDICTION_MICROBATCH_SIZE = 1
+_TORCH_CONTRACTION_MAX_INTERMEDIATE_ELEMENTS = 2_147_483_647
 
 
 def _validate_and_clamp_priors(noise_model: Any, dtype: str) -> list[float]:
@@ -728,40 +724,22 @@ class NMOptimizer(TensorNetworkDecoder):
 
         shapes = tuple(t.shape for t in tensors)
         if self._precontract_noise_auto:
-            large_problem = (len(
-                self.check_inds) >= _AUTO_PRECONTRACT_NUM_CHECKS_THRESHOLD or
-                             len(self.error_inds)
-                             >= _AUTO_PRECONTRACT_NUM_ERRORS_THRESHOLD)
-            if large_problem:
-                self._precontract_noise = True
-            else:
-                optimize, info = _select_default_torch_path(
-                    self._eq_batch,
-                    shapes,
-                    tn=self.full_tn,
-                    output_inds=("batch_index", self.logical_obs_inds[0]),
-                )
-                self._precontract_noise = (
-                    _path_largest_intermediate(info)
-                    > _AUTO_PRECONTRACT_INTERMEDIATE_THRESHOLD)
+            optimize, info = _select_default_torch_path(
+                self._eq_batch,
+                shapes,
+                tn=self.full_tn,
+                output_inds=("batch_index", self.logical_obs_inds[0]),
+            )
+            self._precontract_noise = (
+                _path_largest_intermediate(info)
+                > _TORCH_CONTRACTION_MAX_INTERMEDIATE_ELEMENTS)
             if not self._precontract_noise:
                 self.path_batch = optimize
 
         if self._precontract_noise:
             self._oe_expr = None
             self._build_reduced_tn_state()
-            use_microbatch = (len(
-                self.check_inds) >= _AUTO_PRECONTRACT_NUM_CHECKS_THRESHOLD or
-                              len(self.error_inds)
-                              >= _AUTO_PRECONTRACT_NUM_ERRORS_THRESHOLD)
-            self._loss_microbatch_size = (_AUTO_REDUCED_LOSS_MICROBATCH_SIZE
-                                          if use_microbatch else 0)
-            self._prediction_microbatch_size = (
-                _AUTO_REDUCED_PREDICTION_MICROBATCH_SIZE
-                if use_microbatch else 0)
         elif self._execute_mode == "opt_einsum":
-            self._loss_microbatch_size = 0
-            self._prediction_microbatch_size = 0
             optimize = self.path_batch
             if optimize in (None, "auto"):
                 optimize, _info = _select_default_torch_path(
@@ -779,8 +757,6 @@ class NMOptimizer(TensorNetworkDecoder):
             self._path_steps = None
         else:
             self._oe_expr = None
-            self._loss_microbatch_size = 0
-            self._prediction_microbatch_size = 0
             optimize = self.path_batch
             if optimize in (None, "auto"):
                 optimize, _info = _select_default_torch_path(
@@ -1322,46 +1298,7 @@ class NMOptimizer(TensorNetworkDecoder):
         """opt_einsum / unrolled loss: wrap CE around ``self._predict_fn``."""
         obs_t = self.obs_idx_true
         obs_f = self.obs_idx_false
-        obs_all = self._observable_flips
         predict_fn = self._predict_fn
-        microbatch_size = getattr(self, "_loss_microbatch_size", 0)
-
-        if self._precontract_noise and microbatch_size > 0:
-            batch_size = self._batch_size
-            chunks: list[tuple[int, int, torch.Tensor, torch.Tensor]] = []
-            for start in range(0, batch_size, microbatch_size):
-                end = min(start + microbatch_size, batch_size)
-                obs_chunk = obs_all[start:end]
-                chunks.append((start, end, torch.where(obs_chunk)[0],
-                               torch.where(~obs_chunk)[0]))
-
-            def _slice_syndromes(syndromes, start, end):
-                return tuple(s[:, start:end] for s in syndromes)
-
-            def _ce_from_prediction(p, obs_t_local, obs_f_local):
-                return (-torch.log(_clamp_log_input(p[obs_t_local, 1])).sum() -
-                        torch.log(_clamp_log_input(p[obs_f_local, 0])).sum())
-
-            def _loss_from_probs(noise_probs, syndromes):
-                total = noise_probs.new_zeros(())
-                for start, end, obs_t_local, obs_f_local in chunks:
-                    p = predict_fn(noise_probs,
-                                   _slice_syndromes(syndromes, start, end))
-                    total = total + _ce_from_prediction(p, obs_t_local,
-                                                        obs_f_local)
-                return total
-
-            def _loss_from_logits(logits, syndromes):
-                noise_probs = torch.sigmoid(logits)
-                total = noise_probs.new_zeros(())
-                for start, end, obs_t_local, obs_f_local in chunks:
-                    p = predict_fn(noise_probs,
-                                   _slice_syndromes(syndromes, start, end))
-                    total = total + _ce_from_prediction(p, obs_t_local,
-                                                        obs_f_local)
-                return total
-
-            return _loss_from_logits, _loss_from_probs
 
         if (self._execute_mode != "codegen" or self._dynamic_syndromes or
                 self._precontract_noise):
@@ -1718,15 +1655,6 @@ class NMOptimizer(TensorNetworkDecoder):
 
     def decoder_prediction(self) -> torch.Tensor:
         """Run the forward pass; returns ``(shots, 2)`` predictions."""
-        microbatch_size = getattr(self, "_prediction_microbatch_size", 0)
-        if microbatch_size > 0 and self._batch_size > microbatch_size:
-            chunks = []
-            for start in range(0, self._batch_size, microbatch_size):
-                end = min(start + microbatch_size, self._batch_size)
-                syndromes = tuple(s[:, start:end] for s in self._syndrome_tuple)
-                chunks.append(
-                    self._compiled_predict(self._noise_probs, syndromes))
-            return torch.cat(chunks, dim=0)
         return self._compiled_predict(self._noise_probs, self._syndrome_tuple)
 
     def cross_entropy_loss(self) -> torch.Tensor:

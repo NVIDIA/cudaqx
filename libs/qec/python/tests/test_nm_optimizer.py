@@ -391,10 +391,10 @@ def test_precontract_noise_matches_full(device, execute):
 
 
 @pytest.mark.parametrize("device", _device_params())
-def test_precontract_noise_auto_uses_reduced_for_large_problem(
+def test_precontract_noise_auto_uses_reduced_for_large_intermediate(
         device, monkeypatch):
-    monkeypatch.setattr(nmopt, "_AUTO_PRECONTRACT_NUM_CHECKS_THRESHOLD", 1)
-    monkeypatch.setattr(nmopt, "_AUTO_PRECONTRACT_NUM_ERRORS_THRESHOLD", 1)
+    monkeypatch.setattr(nmopt, "_TORCH_CONTRACTION_MAX_INTERMEDIATE_ELEMENTS",
+                        -1)
     H, logical, priors = _simple_repetition_code()
     syn, flips = _sample_synthetic_dataset(H,
                                            logical,
@@ -412,77 +412,6 @@ def test_precontract_noise_auto_uses_reduced_for_large_problem(
     with torch.no_grad():
         pred = opt.decoder_prediction()
     assert pred.shape == (4, 2)
-
-
-@pytest.mark.parametrize("device", _device_params())
-def test_reduced_microbatch_loss_matches_full_loss(device, monkeypatch):
-    monkeypatch.setattr(nmopt, "_AUTO_PRECONTRACT_NUM_CHECKS_THRESHOLD", 1)
-    monkeypatch.setattr(nmopt, "_AUTO_PRECONTRACT_NUM_ERRORS_THRESHOLD", 1)
-    monkeypatch.setattr(nmopt, "_AUTO_REDUCED_LOSS_MICROBATCH_SIZE", 1)
-    rng = np.random.default_rng(27)
-    H, logical = _nondegenerate_code()
-    priors = [0.2, 0.3, 0.4]
-    syn, flips = _sample_synthetic_dataset(H,
-                                           logical, [0.1, 0.15, 0.25],
-                                           num_shots=8,
-                                           rng=rng)
-    full = _make_opt(H,
-                     logical,
-                     priors,
-                     syn,
-                     flips,
-                     device=device,
-                     dtype="float64",
-                     precontract_noise=False)
-    reduced = _make_opt(H,
-                        logical,
-                        priors,
-                        syn,
-                        flips,
-                        device=device,
-                        dtype="float64",
-                        precontract_noise="auto")
-    assert reduced._precontract_noise is True
-    assert reduced._loss_microbatch_size == 1
-    with torch.no_grad():
-        loss_full = full.cross_entropy_loss()
-        loss_reduced = reduced.cross_entropy_loss()
-    assert torch.allclose(loss_full, loss_reduced, atol=1e-7, rtol=1e-7)
-
-
-@pytest.mark.parametrize("device", _device_params())
-def test_reduced_microbatch_prediction_matches_full(device, monkeypatch):
-    monkeypatch.setattr(nmopt, "_AUTO_PRECONTRACT_NUM_CHECKS_THRESHOLD", 1)
-    monkeypatch.setattr(nmopt, "_AUTO_PRECONTRACT_NUM_ERRORS_THRESHOLD", 1)
-    monkeypatch.setattr(nmopt, "_AUTO_REDUCED_PREDICTION_MICROBATCH_SIZE", 2)
-    rng = np.random.default_rng(28)
-    H, logical = _nondegenerate_code()
-    priors = [0.2, 0.3, 0.4]
-    syn, flips = _sample_synthetic_dataset(H,
-                                           logical, [0.1, 0.15, 0.25],
-                                           num_shots=8,
-                                           rng=rng)
-    full = _make_opt(H,
-                     logical,
-                     priors,
-                     syn,
-                     flips,
-                     device=device,
-                     dtype="float64",
-                     precontract_noise=False)
-    reduced = _make_opt(H,
-                        logical,
-                        priors,
-                        syn,
-                        flips,
-                        device=device,
-                        dtype="float64",
-                        precontract_noise="auto")
-    assert reduced._prediction_microbatch_size == 2
-    with torch.no_grad():
-        pred_full = full.decoder_prediction()
-        pred_reduced = reduced.decoder_prediction()
-    assert torch.allclose(pred_full, pred_reduced, atol=1e-7, rtol=1e-7)
 
 
 # -- numerical guards --------------------------------------------------------
@@ -883,7 +812,7 @@ def test_einsum_torch_handles_more_than_52_pairwise_labels():
     b = torch.full((1, 1), 2.0, dtype=torch.float64)
     out = _einsum_torch(eq, a, b)
     assert out.shape == (1,) * 53
-    assert torch.allclose(out, torch.full((1,) * 53, 2.0))
+    assert torch.allclose(out, torch.full_like(out, 2.0))
 
 
 def test_normalize_prediction_handles_bad_weights():
