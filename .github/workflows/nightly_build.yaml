@@ -1,0 +1,116 @@
+name: Nightly Combined Image and Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Git branch or tag to build All-libs from'
+        required: true
+        default: 'main'
+      base-image:
+        description: 'CUDA-Quantum image to layer onto'
+        required: false
+        default: 'nvcr.io/nvidia/nightly/cuda-quantum:cu12-latest'
+  schedule:
+    - cron: '0 3 * * *'   # 3 AM UTC
+
+env:
+  RELEASE_WORKFLOW: "All libs (Release)"
+  COMBINED_WORKFLOW: "Build Combined Docker Images"
+  COMBINED_TAG: "test-temp"
+
+jobs:
+  all-libs:
+    name: Run All-libs build (with optional docker-files ZIP)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    outputs:
+      run_id: ${{ steps.dispatch.outputs.run_id }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub CR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.PACKAGE_TOKEN || github.token }}
+
+      - name: (Optional) Discover docker-files-*.zip asset
+        id: find_docker
+        run: |
+          ASSET=$(gh api repos/${GITHUB_REPOSITORY}/releases \
+            --jq '.[] 
+                   | select(.draft==true) 
+                   | .assets[] 
+                   | select(.name | test("^docker-files-[0-9]+\\.zip$")) 
+                   | .name' \
+            | sort -t- -k3 -n \
+            | tail -n1)
+          if [ -n "$ASSET" ]; then
+            echo "asset_name=$ASSET" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Dispatch All-libs workflow
+        id: dispatch
+        run: |
+          CMD="gh workflow run \"${{ env.RELEASE_WORKFLOW }}\" \
+            --ref \"${{ github.event.inputs.branch }}\""
+          if [ -n "${{ steps.find_docker.outputs.asset_name }}" ]; then
+            CMD="$CMD --field assets_tag=\"${{ steps.find_docker.outputs.asset_name }}\""
+          fi
+          eval $CMD
+          RID=$(gh run list \
+            --workflow "${{ env.RELEASE_WORKFLOW }}" \
+            --branch "${{ github.event.inputs.branch }}" \
+            --limit 1 --json databaseId \
+            --jq '.[0].databaseId')
+          echo "run_id=$RID" >> $GITHUB_OUTPUT
+
+      - name: Wait for All-libs to finish
+        run: gh run watch ${{ steps.dispatch.outputs.run_id }}
+
+  build-combined:
+    name: Run Combined-image workflow
+    needs: all-libs
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    outputs:
+      run_id: ${{ steps.dispatch.outputs.run_id }}
+      image_tag: ${{ env.COMBINED_TAG }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub CR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.PACKAGE_TOKEN || github.token }}
+
+      - name: Dispatch Combined workflow
+        id: dispatch
+        run: |
+          CMD="gh workflow run \"${{ env.COMBINED_WORKFLOW }}\" \
+            --ref \"${{ github.event.inputs.branch }}\" \
+            --field base_image=\"${{ github.event.inputs.base-image }}\" \
+            --field artifacts_from_run=\"${{ needs.all-libs.outputs.run_id }}\" \
+            --field push=false"
+
+          eval $CMD
+
+          CID=$(gh run list \
+            --workflow "${{ env.COMBINED_WORKFLOW }}" \
+            --branch "${{ github.event.inputs.branch }}" \
+            --limit 1 --json databaseId \
+            --jq '.[0].databaseId')
+          echo "run_id=$CID" >> $GITHUB_OUTPUT
+
+      - name: Wait for Combined to finish
+        run: gh run watch ${{ steps.dispatch.outputs.run_id }}
