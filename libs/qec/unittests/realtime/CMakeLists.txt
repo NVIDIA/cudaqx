@@ -144,6 +144,98 @@ else()
 endif()
 
 # =========================================================================== #
+# test_trt_decoder_host_call_rpc
+# =========================================================================== #
+# Producer-driven HOST_CALL in-process RPC test for the composite trt_decoder
+# plugin with PyMatching as its global decoder. The tiny ONNX is generated at
+# build time so the test exercises real TensorRT parsing/execution without
+# committing a binary fixture.
+
+if(TENSORRT_INCLUDE_DIR AND TENSORRT_LIBRARY AND TENSORRT_ONNX_PARSER_LIBRARY
+   AND CUDAQ_REALTIME_INCLUDE_DIR
+   AND CUDAQ_REALTIME_LIBRARY
+   AND CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY
+   AND TARGET cudaq-qec-trt-decoder
+   AND TARGET cudaq-qec-pymatching)
+  find_package(Python3 COMPONENTS Interpreter QUIET)
+  set(_trt_host_call_rpc_python_deps_available FALSE)
+  if(Python3_FOUND)
+    execute_process(
+      COMMAND ${Python3_EXECUTABLE} -c "import onnx"
+      RESULT_VARIABLE _trt_host_call_rpc_python_deps_result
+      OUTPUT_QUIET
+      ERROR_QUIET)
+    if(_trt_host_call_rpc_python_deps_result EQUAL 0)
+      set(_trt_host_call_rpc_python_deps_available TRUE)
+    endif()
+  endif()
+
+  if(_trt_host_call_rpc_python_deps_available)
+    set(_trt_host_call_rpc_onnx
+      "${CMAKE_CURRENT_BINARY_DIR}/trt_host_call_rpc_predecoder.onnx")
+    set(_trt_host_call_rpc_generator
+      "${CMAKE_CURRENT_SOURCE_DIR}/generate_trt_split_predecoder_onnx.py")
+
+    add_custom_command(
+      OUTPUT "${_trt_host_call_rpc_onnx}"
+      COMMAND ${Python3_EXECUTABLE} "${_trt_host_call_rpc_generator}"
+              --num-detectors 2
+              --num-observables 1
+              --out "${_trt_host_call_rpc_onnx}"
+      DEPENDS "${_trt_host_call_rpc_generator}"
+      VERBATIM)
+    add_custom_target(generate_trt_host_call_rpc_onnx
+      DEPENDS "${_trt_host_call_rpc_onnx}")
+
+    add_executable(test_trt_decoder_host_call_rpc
+      test_trt_decoder_host_call_rpc.cpp)
+
+    target_compile_definitions(test_trt_decoder_host_call_rpc PRIVATE
+      CUDAQ_REALTIME_ROOT
+      TRT_HOST_CALL_RPC_ONNX_PATH="${_trt_host_call_rpc_onnx}")
+
+    target_include_directories(test_trt_decoder_host_call_rpc PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/realtime
+      ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+      ${CMAKE_SOURCE_DIR}/libs/core/include
+      ${CUDAQ_REALTIME_INCLUDE_DIR}
+      ${CUDAToolkit_INCLUDE_DIRS}
+    )
+
+    target_link_libraries(test_trt_decoder_host_call_rpc PRIVATE
+      GTest::gtest_main
+      CUDA::cudart
+      cudaq-qec
+      cudaq-qec-realtime-decoding
+      cudaq-qec-trt-decoder
+      cudaq-qec-pymatching
+      cudaq::cudaq
+    )
+
+    get_filename_component(_cudaq_rt_lib_dir_host_rpc
+      "${CUDAQ_REALTIME_LIBRARY}" DIRECTORY)
+    set_target_properties(test_trt_decoder_host_call_rpc PROPERTIES
+      BUILD_RPATH "${CMAKE_BINARY_DIR}/lib;${CMAKE_BINARY_DIR}/lib/decoder-plugins;${_cudaq_rt_lib_dir_host_rpc}"
+      INSTALL_RPATH "${CMAKE_BINARY_DIR}/lib;${CMAKE_BINARY_DIR}/lib/decoder-plugins;${_cudaq_rt_lib_dir_host_rpc}"
+    )
+
+    add_dependencies(test_trt_decoder_host_call_rpc
+      generate_trt_host_call_rpc_onnx
+      cudaq-qec-trt-decoder
+      cudaq-qec-pymatching)
+    add_dependencies(CUDAQXQECUnitTests test_trt_decoder_host_call_rpc)
+    gtest_discover_tests(test_trt_decoder_host_call_rpc)
+  else()
+    message(WARNING "Python onnx package not found. "
+                    "Skipping test_trt_decoder_host_call_rpc.")
+  endif()
+else()
+  message(WARNING "TensorRT, cudaq realtime HOST_CALL, or decoder plugin "
+                  "dependencies not found. Skipping "
+                  "test_trt_decoder_host_call_rpc.")
+endif()
+
+# =========================================================================== #
 # hololink_predecoder_bridge
 # =========================================================================== #
 # FPGA bridge: Hololink RDMA -> realtime_pipeline with AI predecoder +
