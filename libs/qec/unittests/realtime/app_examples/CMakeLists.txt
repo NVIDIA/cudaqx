@@ -115,6 +115,62 @@ add_test(
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
 
+if(TENSORRT_INCLUDE_DIR AND TENSORRT_LIBRARY AND TENSORRT_ONNX_PARSER_LIBRARY
+   AND TARGET cudaq-qec-trt-decoder AND TARGET cudaq-qec-pymatching)
+  find_package(Python3 COMPONENTS Interpreter QUIET)
+  set(_surface_code_trt_python_deps_available FALSE)
+  if(Python3_FOUND)
+    execute_process(
+      COMMAND ${Python3_EXECUTABLE} -c "import onnx, yaml"
+      RESULT_VARIABLE _surface_code_trt_python_deps_result
+      OUTPUT_QUIET
+      ERROR_QUIET)
+    if(_surface_code_trt_python_deps_result EQUAL 0)
+      set(_surface_code_trt_python_deps_available TRUE)
+    endif()
+  endif()
+
+  if(_surface_code_trt_python_deps_available)
+    add_dependencies(surface_code-1-local
+      cudaq-qec-trt-decoder
+      cudaq-qec-pymatching)
+
+    add_test(
+      NAME app_examples.surface_code-1-local-test-distance-3-trt
+      COMMAND
+        bash "${CMAKE_CURRENT_SOURCE_DIR}/surface_code-1-test.sh"
+          ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-local
+          ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-local
+          3 40 40 NULL 12 6
+          ${CMAKE_BINARY_DIR}/lib
+          trt_decoder
+      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+
+    if(CUDAQ_REALTIME_INCLUDE_DIR
+       AND CUDAQ_REALTIME_LIBRARY
+       AND CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY)
+      add_test(
+        NAME app_examples.surface_code-1-local-test-distance-3-trt-inproc-rpc
+        COMMAND
+          bash "${CMAKE_CURRENT_SOURCE_DIR}/surface_code-1-test.sh"
+            ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-local
+            ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-local
+            3 40 40 NULL 12 6
+            ${CMAKE_BINARY_DIR}/lib
+            trt_decoder
+            6
+            1
+            inproc_rpc
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+      )
+    endif()
+  else()
+    message(WARNING "Python onnx or yaml package not found. "
+                    "Skipping surface_code-1 trt_decoder app test.")
+  endif()
+endif()
+
 # This must be disabled for now because the multi_error_lut decoder is not
 # powerful enough to pass this test. The nv-qldpc-decoder can pass this test,
 # but that is not available on the GitHub repo.
@@ -427,5 +483,4 @@ add_surface_code_test(
 
 # End of surface code 3, --target quantinuum --emulate
 #------------------------------------------------------------------------------#
-
 
