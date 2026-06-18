@@ -717,6 +717,8 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
             g_syndrome_output_file << "SHOT_START " << shot_num << "\n";
           }
 
+          g_syndrome_output_file << "ROUND_START " << g_syndrome_count << "\n";
+
           // Unpack syndrome data - each byte contains 8 bits (packed format)
           int bits_written = 0;
           for (size_t i = 0; i < len; i++) {
