@@ -49,13 +49,19 @@ __device__ void preprocess_detector(std::size_t detector_idx,
 /// For observable at row `observable_idx`:
 ///   1. Read soft decisions at column positions from O matrix row
 ///   2. Threshold each value (>= thresh -> 1, else 0)
-///   3. XOR the hard decisions to compute correction
+///   3. XOR the hard decisions to compute this window's correction
+///   4. XOR-accumulate that correction into corrections[observable_idx]
+///
+/// XOR-accumulate semantics mirror the legacy CPU contract where every
+/// full-window decode XORs that window's observable bits into a per-shot
+/// corrections buffer. Callers are responsible for zeroing `corrections` at
+/// shot boundaries.
 ///
 /// @param observable_idx Index of the observable to compute
 /// @param soft_decisions Input soft decisions from decoder
 /// @param O_row_ptr CSR row pointers for O matrix
 /// @param O_col_idx CSR column indices for O matrix
-/// @param corrections Output corrections array
+/// @param corrections In/out per-shot accumulator
 /// @param num_observables Total number of observables
 /// @param thresh Soft-to-hard threshold (default 0.5)
 __device__ void postprocess_observable(
@@ -82,11 +88,12 @@ __device__ void preprocess_all(const uint8_t *__restrict__ measurements,
 /// @brief Postprocess all observables using grid-stride loop.
 ///
 /// All threads in the grid participate, each handling a subset of observables.
+/// Calls postprocess_observable per observable with XOR-accumulate semantics.
 ///
 /// @param soft_decisions Input soft decoder output
 /// @param O_row_ptr CSR row pointers for O matrix (size: num_observables + 1)
 /// @param O_col_idx CSR column indices for O matrix
-/// @param corrections Output observable corrections
+/// @param corrections In/out per-shot accumulator
 /// @param num_observables Number of observables (rows in O matrix)
 /// @param thresh Threshold for soft-to-hard conversion (default 0.5)
 __device__ void postprocess_all(const float_t *__restrict__ soft_decisions,

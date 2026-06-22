@@ -15,6 +15,9 @@
 
 namespace cudaq::qec::decoding::rpc {
 
+// The QEC multi-handler accumulator pattern is fixed by
+// proposals/decoder_server_runtime.md.  All producers and consumers must use
+// these canonical function IDs and payload shapes.
 constexpr std::uint32_t kEnqueueSyndromesFunctionId =
     cudaq::realtime::fnv1a_hash("enqueue_syndromes");
 constexpr std::uint32_t kGetCorrectionsFunctionId =
@@ -60,12 +63,26 @@ static_assert(sizeof(ResetRequestPayload) == 8,
               "ResetRequestPayload must be exactly 8 bytes per "
               "decoder_server_runtime.md#reset_decoder");
 
-constexpr std::size_t bit_packed_bytes(std::size_t num_bits) {
+#ifdef __CUDACC__
+#define CUDAQX_RPC_HD __host__ __device__
+#else
+#define CUDAQX_RPC_HD
+#endif
+
+CUDAQX_RPC_HD constexpr std::size_t bit_packed_bytes(std::size_t num_bits) {
   return (num_bits + 7) / 8;
 }
 
-constexpr std::size_t align_to_8(std::size_t bytes) {
+CUDAQX_RPC_HD constexpr std::size_t align_to_8(std::size_t bytes) {
   return (bytes + 7) & ~static_cast<std::size_t>(7);
 }
+
+#undef CUDAQX_RPC_HD
+
+// Maximum number of decoders the realtime dispatch can register at once.  GPU
+// dispatch implementations use it to size their device-side state tables; host
+// session code uses it for early range checks without depending on private GPU
+// dispatch headers.
+inline constexpr std::size_t kMaxDispatchedDecoders = 32;
 
 } // namespace cudaq::qec::decoding::rpc

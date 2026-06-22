@@ -118,6 +118,11 @@ fi
 HSB_ROOT=/tmp/holoscan-sensor-bridge
 HSB_BUILD=${HSB_ROOT}/build
 
+_prop_archive_flag=""
+if [ -n "$CUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE" ]; then
+  _prop_archive_flag="-DCUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE=$CUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE"
+fi
+
 cmake -S libs/qec -B "$build_dir" \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_C_COMPILER=gcc-12 \
@@ -131,6 +136,7 @@ cmake -S libs/qec -B "$build_dir" \
   -DCUDAQ_REALTIME_ROOT=$CUDAQ_REALTIME_ROOT \
   -DCUDAQX_QEC_ENABLE_HOLOLINK_TOOLS=ON \
   -DHOLOSCAN_SENSOR_BRIDGE_SOURCE_DIR=$HSB_ROOT \
-  -DHOLOSCAN_SENSOR_BRIDGE_BUILD_DIR=$HSB_BUILD
+  -DHOLOSCAN_SENSOR_BRIDGE_BUILD_DIR=$HSB_BUILD \
+  $_prop_archive_flag
 
 cmake --build "$build_dir" --target install -j 4
