@@ -8,7 +8,11 @@
 #pragma once
 
 #include "cuda-qx/core/tensor.h"
+#include <cstddef>
+#include <cstdint>
 #include <optional>
+#include <string>
+#include <vector>
 
 namespace cudaq::qec {
 
@@ -18,9 +22,9 @@ namespace cudaq::qec {
 /// decoder to help make predictions about observables flips.
 ///
 /// Shared size parameters among the matrix types.
-/// - \p detector_error_matrix: num_detectors x num_error_mechanisms [d, e]
-/// - \p error_rates: num_error_mechanisms
-/// - \p observables_flips_matrix: num_observables x num_error_mechanisms [k, e]
+/// - `detector_error_matrix`: num_detectors x num_error_mechanisms [d, e]
+/// - `error_rates`: num_error_mechanisms
+/// - `observables_flips_matrix`: num_observables x num_error_mechanisms [k, e]
 ///
 /// @note The C++ API for this class may change in the future. The Python API is
 /// more likely to be backwards compatible.
@@ -32,7 +36,7 @@ struct detector_error_model {
   cudaqx::tensor<uint8_t> detector_error_matrix;
 
   /// The list of weights has length equal to the number of columns of
-  /// \p detector_error_matrix, which assigns a likelihood to each error
+  /// `detector_error_matrix`, which assigns a likelihood to each error
   /// mechanism.
   std::vector<double> error_rates;
 
@@ -64,5 +68,9 @@ struct detector_error_model {
   /// process.
   void canonicalize_for_rounds(uint32_t num_syndromes_per_round);
 };
+
+/// Parse Stim DEM text into detector/observable flip matrices and error rates.
+/// DEM-native decoders should consume raw DEM text instead.
+detector_error_model dem_from_stim_text(const std::string &dem_text);
 
 } // namespace cudaq::qec

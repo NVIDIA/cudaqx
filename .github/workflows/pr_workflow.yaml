@@ -21,6 +21,8 @@ jobs:
       build-solvers: ${{ steps.filter.outputs.build-solvers }}
       build-examples-qec: ${{ steps.filter.outputs.build-examples-qec }}
       build-examples-solvers: ${{ steps.filter.outputs.build-examples-solvers }}
+      pr-number: ${{ steps.export-pr-info.outputs.pr_number }}
+      build-wheels: ${{ steps.filter.outputs.build-wheels }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -33,16 +35,20 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         uses: nv-gha-runners/get-pr-info@main
 
+      - name: Export PR info
+        id: export-pr-info
+        run: |
+          echo "pr_number=${{ fromJSON(steps.get-pr-info.outputs.pr-info).number }}" >> $GITHUB_OUTPUT
+
       - name: Check what needs testing
         uses: dorny/paths-filter@v3
         id: filter
         with:
-          base: ${{ fromJSON(steps.get-pr-info.outputs.pr-info).base.sha }}
+          base: ${{ fromJSON(steps.get-pr-info.outputs.pr-info).base.ref }}
           filters: |
             build-cudaq:
-              - '.github/workflows/cudaq_bump.yml'
               - '.github/actions/get-cudaq-build/**'
-              - '.github/workflows/scripts/build_cudaq.sh'
+              - '.github/actions/get-cudaq-version/**'
               - '.cudaq_version'
             build-docs:
               - '.github/workflows/docs.yaml'
@@ -53,13 +59,14 @@ jobs:
             build-all:
               - '.github/actions/build-lib/action.yaml'
               - '.github/actions/build-lib/build_all.sh'
-              - '.github/actions/build-lib/build_all.yaml'
+              - '.github/actions/build-lib/setup_custabilizer.sh'
               - '.github/workflows/all_libs.yaml'
               - 'cmake/Modules/**'
               - '**/CMakeLists.txt'
             build-qec:
               - '.github/actions/build-lib/action.yaml'
               - '.github/actions/build-lib/build_qec.sh'
+              - '.github/actions/build-lib/setup_custabilizer.sh'
               - '.github/workflows/lib_qec.yaml'
               - 'cmake/Modules/**'
               - 'libs/core/**/*.cpp'
@@ -89,6 +96,21 @@ jobs:
               - 'docs/sphinx/examples/qec/**'
             build-examples-solvers:
               - 'docs/sphinx/examples/solvers/**'
+            build-wheels:
+              - '.github/actions/get-cudaq-wheels/**'
+              - '.github/workflows/build_wheels.yaml'
+              - '.github/workflows/scripts/build_cudaq.sh'
+              - '.github/workflows/scripts/build_wheels.sh'
+              - 'scripts/ci/build_metapackages.sh'
+              - 'scripts/ci/test_wheels.sh'
+              - 'libs/qec/pyproject.toml.cu*'
+              - 'libs/qec/python/metapackages/MANIFEST.in'
+              - 'libs/qec/python/metapackages/pyproject.toml'
+              - 'libs/qec/python/metapackages/setup.py'
+              - 'libs/solvers/pyproject.toml.cu*'
+              - 'libs/solvers/python/metapackages/MANIFEST.in'
+              - 'libs/solvers/python/metapackages/pyproject.toml'
+              - '.cudaq_version'
 
   build-cudaq:
     name: Build CUDAQ
@@ -111,12 +133,6 @@ jobs:
         with:
           set-safe-directory: true
 
-      - name: Lookup PR info
-        id: get-pr-info
-        env:
-          GH_TOKEN: ${{ github.token }}
-        uses: nv-gha-runners/get-pr-info@main
-
       - name: Configure
         id: config
         run: |
@@ -133,7 +149,7 @@ jobs:
           repo: ${{ steps.get-cudaq-version.outputs.repo }}
           ref: ${{ steps.get-cudaq-version.outputs.ref }}
           token: ${{ secrets.CUDAQ_ACCESS_TOKEN }}
-          pr-number: ${{ fromJSON(steps.get-pr-info.outputs.pr-info).number }}
+          cache-key-suffix: pr${{ needs.check-changes.outputs.pr-number }}
           save-build: true
           save-ccache: false
           platform: ${{ matrix.platform }}-cu${{ steps.config.outputs.cuda_major }}
@@ -145,6 +161,8 @@ jobs:
       !failure() && !cancelled() &&
       needs.check-changes.outputs.build-docs == 'true'
     uses: ./.github/workflows/docs.yaml
+    with:
+      cache_key_suffix: pr${{ needs.check-changes.outputs.pr-number }}
 
   build-all:
     name: All libs
@@ -153,6 +171,8 @@ jobs:
       !failure() && !cancelled() &&
       (needs.check-changes.outputs.build-all == 'true' || needs.check-changes.outputs.build-cudaq == 'true')
     uses: ./.github/workflows/all_libs.yaml
+    with:
+      cache_key_suffix: pr${{ needs.check-changes.outputs.pr-number }}
 
   build-qec:
     name: QEC
@@ -165,6 +185,8 @@ jobs:
         needs.check-changes.outputs.build-examples-qec == 'true'
       )
     uses: ./.github/workflows/lib_qec.yaml
+    with:
+      cache_key_suffix: pr${{ needs.check-changes.outputs.pr-number }}
 
   build-solvers:
     name: Solvers
@@ -177,6 +199,22 @@ jobs:
         needs.check-changes.outputs.build-examples-solvers == 'true'
       )
     uses: ./.github/workflows/lib_solvers.yaml
+    with:
+      cache_key_suffix: pr${{ needs.check-changes.outputs.pr-number }}
+
+  build-wheels:
+    name: Wheels
+    needs: [check-changes]
+    if: |
+      !failure() && !cancelled() &&
+      needs.check-changes.outputs.build-wheels == 'true'
+    uses: ./.github/workflows/build_wheels.yaml
+    with:
+      build_type: Release
+      cudaq_wheels: Custom
+      cache_key_suffix: pr${{ needs.check-changes.outputs.pr-number }}
+    secrets:
+      CUDAQ_ACCESS_TOKEN: ${{ secrets.CUDAQ_ACCESS_TOKEN }}
 
   # This job is used for branch protection checks.
   verify:
@@ -187,6 +225,7 @@ jobs:
       - build-all
       - build-qec
       - build-solvers
+      - build-wheels
     runs-on: ubuntu-latest
     steps:
       - name: Check results
@@ -209,6 +248,7 @@ jobs:
           check_result "build-all"     "${{needs.build-all.result}}"
           check_result "build-qec"     "${{needs.build-qec.result}}"
           check_result "build-solvers" "${{needs.build-solvers.result}}"
+          check_result "build-wheels"  "${{needs.build-wheels.result}}"
 
           if [[ "$status" != "success" ]]; then
             exit 1

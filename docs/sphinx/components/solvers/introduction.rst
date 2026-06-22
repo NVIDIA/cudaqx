@@ -398,7 +398,7 @@ Basic Usage
         #include "cudaq/solvers/operators.h"
 
         // compile with 
-        // nvq++ adaptEx.cpp --enable-mlir -lcudaq-solvers
+        // nvq++ adaptEx.cpp -lcudaq-solvers
         // ./a.out 
 
         int main() {

@@ -1,5 +1,5 @@
 /****************************************************************-*- C++ -*-****
- * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
+ * Copyright (c) 2024 - 2026 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -129,6 +129,25 @@ void bindDecodingConfig(nb::module_ &mod) {
            nb::rv_policy::move)
       .def_static("from_heterogeneous_map",
                   &trt_decoder_config::from_heterogeneous_map, nb::arg("map"));
+
+  // pymatching_config
+  nb::class_<config::pymatching_config>(mod_cfg, "pymatching_config",
+                                        "PyMatching decoder configuration.")
+      .def(nb::init<>())
+      .def(
+          "__init__",
+          [](config::pymatching_config &self,
+             const cudaqx::heterogeneous_map &map) {
+            new (&self) pymatching_config(
+                pymatching_config::from_heterogeneous_map(map));
+          },
+          nb::arg("map"))
+      .def_rw("error_rate_vec", &pymatching_config::error_rate_vec)
+      .def_rw("merge_strategy", &pymatching_config::merge_strategy)
+      .def("to_heterogeneous_map", &pymatching_config::to_heterogeneous_map,
+           nb::rv_policy::move)
+      .def_static("from_heterogeneous_map",
+                  &pymatching_config::from_heterogeneous_map, nb::arg("map"));
 
   // single_error_lut_config
   nb::class_<config::single_error_lut_config>(

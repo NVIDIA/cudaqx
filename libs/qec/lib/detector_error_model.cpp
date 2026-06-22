@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2025 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2025 - 2026 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -10,7 +10,97 @@
 #include "cudaq/qec/pcm_utils.h"
 #include "cudaq/runtime/logger/logger.h"
 
+#include "stim.h"
+
+#include <exception>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
+
 namespace cudaq::qec {
+
+detector_error_model dem_from_stim_text(const std::string &dem_text) {
+  auto dem = [&dem_text]() {
+    try {
+      return stim::DetectorErrorModel(dem_text);
+    } catch (const std::exception &e) {
+      throw std::runtime_error(std::string("Stim DEM parse failed: ") +
+                               e.what());
+    }
+  }();
+  const std::size_t num_detectors =
+      static_cast<std::size_t>(dem.count_detectors());
+  const std::size_t num_observables =
+      static_cast<std::size_t>(dem.count_observables());
+
+  std::vector<std::vector<std::size_t>> detector_hits;
+  std::vector<std::vector<std::size_t>> observable_hits;
+  std::vector<double> rates;
+  std::size_t instruction_index = 0;
+
+  dem.iter_flatten_error_instructions([&](const stim::DemInstruction &inst) {
+    if (inst.arg_data.empty())
+      throw std::runtime_error(
+          "Stim DEM error instruction missing probability argument (index " +
+          std::to_string(instruction_index) + ")");
+    const double prob = inst.arg_data[0];
+    if (!(prob >= 0.0 && prob <= 1.0))
+      throw std::runtime_error("Stim DEM error probability " +
+                               std::to_string(prob) +
+                               " out of range [0, 1] at instruction index " +
+                               std::to_string(instruction_index));
+    std::vector<std::size_t> dets;
+    std::vector<std::size_t> obs;
+    for (const auto &target : inst.target_data) {
+      if (target.is_separator())
+        continue;
+      if (target.is_relative_detector_id()) {
+        dets.push_back(static_cast<std::size_t>(target.val()));
+      } else if (target.is_observable_id()) {
+        obs.push_back(static_cast<std::size_t>(target.val()));
+      } else {
+        throw std::runtime_error(
+            "Stim DEM error instruction (index " +
+            std::to_string(instruction_index) +
+            ") contains an unsupported target kind; only D* (detector) and "
+            "L* (observable) targets are supported by the fallback parser");
+      }
+    }
+    detector_hits.push_back(std::move(dets));
+    observable_hits.push_back(std::move(obs));
+    rates.push_back(prob);
+    ++instruction_index;
+  });
+
+  const std::size_t num_errors = rates.size();
+  if (num_errors == 0)
+    throw std::runtime_error(
+        "Stim DEM contains no error mechanisms after flattening");
+  detector_error_model result;
+  result.detector_error_matrix =
+      cudaqx::tensor<uint8_t>({num_detectors, num_errors});
+  result.observables_flips_matrix =
+      cudaqx::tensor<uint8_t>({num_observables, num_errors});
+  result.error_rates = std::move(rates);
+
+  for (std::size_t err = 0; err < num_errors; ++err) {
+    for (auto det : detector_hits[err]) {
+      if (det >= num_detectors)
+        throw std::runtime_error(
+            "Stim DEM detector id out of range while extracting H");
+      result.detector_error_matrix.at({det, err}) ^= 1;
+    }
+    for (auto ob : observable_hits[err]) {
+      if (ob >= num_observables)
+        throw std::runtime_error(
+            "Stim DEM observable id out of range while extracting O");
+      result.observables_flips_matrix.at({ob, err}) ^= 1;
+    }
+  }
+
+  return result;
+}
 
 std::size_t detector_error_model::num_detectors() const {
   auto shape = detector_error_matrix.shape();
@@ -31,33 +121,6 @@ std::size_t detector_error_model::num_observables() const {
   if (shape.size() == 2)
     return shape[0];
   return 0;
-}
-
-/// @brief Return a sparse representation of the PCM.
-/// @param pcm The PCM to convert to a sparse representation.
-/// @return A vector of vectors that sparsely represents the PCM. The size of
-/// the outer vector is the number of columns in the PCM, and the i-th element
-/// contains an inner vector of the row indices of the non-zero elements in the
-/// i-th column of the PCM.
-std::vector<std::vector<std::uint32_t>>
-dense_to_sparse(const cudaqx::tensor<uint8_t> &pcm) {
-  if (pcm.rank() != 2) {
-    throw std::invalid_argument("dense_to_sparse: PCM must be a 2D tensor");
-  }
-
-  auto num_rows = pcm.shape()[0];
-  auto num_cols = pcm.shape()[1];
-
-  // Form a sparse representation of the PCM.
-  std::vector<std::vector<std::uint32_t>> row_indices(num_cols);
-  for (std::size_t r = 0; r < num_rows; r++) {
-    auto *row = &pcm.at({r, 0});
-    for (std::size_t c = 0; c < num_cols; c++)
-      if (row[c])
-        row_indices[c].push_back(r);
-  }
-
-  return row_indices;
 }
 
 void detector_error_model::canonicalize_for_rounds(

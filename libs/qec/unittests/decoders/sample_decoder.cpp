@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2022 - 2024 NVIDIA Corporation & Affiliates.                  *
+ * Copyright (c) 2022 - 2026 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -14,10 +14,10 @@ using namespace cudaqx;
 namespace cudaq::qec {
 
 /// @brief This is a sample (dummy) decoder that demonstrates how to build a
-/// bare bones custom decoder based on the `cudaqx::qec::decoder` interface.
+/// bare bones custom decoder based on the `cudaq::qec::decoder` interface.
 class sample_decoder : public decoder {
 public:
-  sample_decoder(const cudaqx::tensor<uint8_t> &H,
+  sample_decoder(const cudaq::qec::sparse_binary_matrix &H,
                  const cudaqx::heterogeneous_map &params)
       : decoder(H) {
     // Decoder-specific constructor arguments can be placed in `params`.
@@ -35,9 +35,9 @@ public:
 
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       sample_decoder, static std::unique_ptr<decoder> create(
-                          const cudaqx::tensor<uint8_t> &H,
+                          const cudaq::qec::decoder_init &init,
                           const cudaqx::heterogeneous_map &params) {
-        return std::make_unique<sample_decoder>(H, params);
+        return cudaq::qec::make_pcm_decoder<sample_decoder>(init, params);
       })
 };
 

@@ -36,9 +36,47 @@ on:
         type: string
         description: Optional argument to take artifacts from a prior run of this workflow; facilitates rerunning a failed workflow without re-building the artifacts.
         required: false
+      cache_key_suffix:
+        type: string
+        description: Optional suffix to append to CUDA-Q wheel cache keys.
+        required: false
+  workflow_call:
+    inputs:
+      build_type:
+        type: string
+        default: 'Release'
+        required: false
+      version:
+        type: string
+        required: false
+      cudaq_wheels:
+        type: string
+        default: 'Custom'
+        required: false
+      assets_repo:
+        type: string
+        default: ''
+        required: false
+      assets_tag:
+        type: string
+        default: ''
+        required: false
+      artifacts_from_run:
+        type: string
+        default: ''
+        required: false
+      cache_key_suffix:
+        type: string
+        default: ''
+        required: false
+    secrets:
+      CUDAQ_ACCESS_TOKEN:
+        required: false
+      WORKFLOW_TOKEN:
+        required: false
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-build-wheels-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -53,7 +91,9 @@ jobs:
     container:
       image: ghcr.io/nvidia/cuda-quantum-devdeps:manylinux-${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc12-main
       options: --ulimit nofile=1048576:1048576
-    permissions: write-all
+    permissions:
+      actions: write
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -129,7 +169,7 @@ jobs:
           bash .github/workflows/scripts/install_git_cli.sh
           if [[ -n "${{ inputs.assets_repo }}" ]] && [[ -n "${{ inputs.assets_tag }}" ]]; then
             # Fetch the assets into this directory
-            gh release download -R ${{ inputs.assets_repo }} ${{ inputs.assets_tag }}
+            gh release download -R "${{ inputs.assets_repo }}" "${{ inputs.assets_tag }}"
             ls
           fi
 
@@ -251,6 +291,7 @@ jobs:
           repo: ${{ steps.get-cudaq-version.outputs.repo }}
           ref: ${{ steps.get-cudaq-version.outputs.ref }}
           token: ${{ secrets.CUDAQ_ACCESS_TOKEN }}
+          cache-key-suffix: ${{ inputs.cache_key_suffix }}
           save-build: true
           platform: ${{ matrix.platform }}
 
@@ -340,6 +381,7 @@ jobs:
           github-token: ${{ inputs.artifacts_from_run && secrets.WORKFLOW_TOKEN || github.token }}
   
       - name: Test wheels
+        shell: bash
         run: |
           # If using Custom CUDA-Q wheels, then /cudaq-wheels will exist.
           # Otherwise, the directory will not exist, and that is ok.
@@ -456,6 +498,7 @@ jobs:
           github-token: ${{ inputs.artifacts_from_run && secrets.WORKFLOW_TOKEN || github.token }}
   
       - name: Test wheels
+        shell: bash
         run: |
           # If using Custom CUDA-Q wheels, then /cudaq-wheels will exist.
           # Otherwise, the directory will not exist, and that is ok.

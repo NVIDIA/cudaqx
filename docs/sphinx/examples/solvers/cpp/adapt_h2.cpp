@@ -11,7 +11,7 @@
 #include "cudaq/solvers/operators.h"
 
 // Compile and run with
-// nvq++ --enable-mlir -lcudaq-solvers adapt_h2.cpp -o adapt_ex
+// nvq++ -lcudaq-solvers adapt_h2.cpp -o adapt_ex
 // ./adapt_ex
 
 int main() {

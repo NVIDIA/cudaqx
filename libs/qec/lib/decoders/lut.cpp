@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2022 - 2025 NVIDIA Corporation & Affiliates.                  *
+ * Copyright (c) 2022 - 2026 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -48,7 +48,7 @@ private:
   bool decoding_time = false;
 
 public:
-  multi_error_lut(const cudaqx::tensor<uint8_t> &H,
+  multi_error_lut(const cudaq::qec::sparse_binary_matrix &H,
                   const cudaqx::heterogeneous_map &params)
       : decoder(H) {
     if (params.contains("lut_error_depth")) {
@@ -117,14 +117,9 @@ public:
       }
     }
 
-    // For each error e, build a list of detectors that are set if the error
-    // occurs.
-    std::vector<std::vector<std::size_t>> H_e2d(block_size);
-    for (std::size_t c = 0; c < block_size; c++)
-      for (std::size_t r = 0; r < syndrome_size; r++)
-        if (H.at({r, c}) != 0)
-          H_e2d[c].push_back(r);
-
+    // No canonicalize: toggleSynForError XORs per row index, so duplicate
+    // indices in a column GF(2)-cancel naturally.
+    std::vector<std::vector<std::uint32_t>> H_e2d = H.to_nested_csc();
     auto toggleSynForError = [&H_e2d](std::string &err_sig, std::size_t qErr) {
       for (std::size_t r : H_e2d[qErr])
         err_sig[r] = err_sig[r] == '1' ? '0' : '1';
@@ -177,7 +172,7 @@ public:
     assert(syndrome_str.length() == syndrome_size);
     bool anyErrors = false;
     for (std::size_t i = 0; i < syndrome_size; i++) {
-      if (syndrome[i] >= 0.5) {
+      if (cudaq::qec::convert_soft_to_hard(syndrome[i])) {
         syndrome_str[i] = '1';
         anyErrors = true;
         syndrome_weight++;
@@ -233,9 +228,9 @@ public:
 
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       multi_error_lut, static std::unique_ptr<decoder> create(
-                           const cudaqx::tensor<uint8_t> &H,
+                           const cudaq::qec::decoder_init &init,
                            const cudaqx::heterogeneous_map &params) {
-        return std::make_unique<multi_error_lut>(H, params);
+        return cudaq::qec::make_pcm_decoder<multi_error_lut>(init, params);
       })
 };
 
@@ -243,7 +238,7 @@ CUDAQ_EXT_PT_REGISTER_TYPE(multi_error_lut)
 
 class single_error_lut : public multi_error_lut {
 public:
-  single_error_lut(const cudaqx::tensor<uint8_t> &H,
+  single_error_lut(const cudaq::qec::sparse_binary_matrix &H,
                    const cudaqx::heterogeneous_map &params)
       : multi_error_lut(H, params) {}
 
@@ -251,9 +246,9 @@ public:
 
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       single_error_lut, static std::unique_ptr<decoder> create(
-                            const cudaqx::tensor<uint8_t> &H,
+                            const cudaq::qec::decoder_init &init,
                             const cudaqx::heterogeneous_map &params) {
-        return std::make_unique<single_error_lut>(H, params);
+        return cudaq::qec::make_pcm_decoder<single_error_lut>(init, params);
       })
 };
 

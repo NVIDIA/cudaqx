@@ -1,5 +1,5 @@
 # ============================================================================ #
-# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
+# Copyright (c) 2024 - 2026 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -17,6 +17,8 @@ def _ensure_cuda_runtime_loaded():
 
 _ensure_cuda_runtime_loaded()
 del _ensure_cuda_runtime_loaded
+
+import functools
 
 from .patch import patch
 try:
@@ -39,15 +41,52 @@ except ImportError as exc:
 __version__ = qecrt.__version__
 code = qecrt.code
 Code = qecrt.Code
-decoder = qecrt.decoder
+_native_decoder = qecrt.decoder
 Decoder = qecrt.Decoder
+
+
+def decoder(name):
+    """Register a Python class as a decoder plugin under `name`.
+
+    Wraps the native registration decorator so that any user-defined
+    `decode_batch` override is checked at runtime to return a
+    BatchDecoderResult. Returning a list[DecoderResult] (the pre-batch API)
+    is no longer supported.
+    """
+    native = _native_decoder(name)
+
+    def wrap(cls):
+        if "decode_batch" in cls.__dict__:
+            original = cls.decode_batch
+            cls_name = cls.__name__
+
+            @functools.wraps(original)
+            def checked_decode_batch(self, *args, **kwargs):
+                result = original(self, *args, **kwargs)
+                if not isinstance(result, qecrt.BatchDecoderResult):
+                    raise TypeError(
+                        f"{cls_name}.decode_batch must return a "
+                        f"BatchDecoderResult; got "
+                        f"{type(result).__name__}. See BatchDecoderResult "
+                        f"in the cudaq_qec docs for the supported "
+                        f"construction surface.")
+                return result
+
+            cls.decode_batch = checked_decode_batch
+        return native(cls)
+
+    return wrap
+
+
 TwoQubitDepolarization = qecrt.TwoQubitDepolarization
 TwoQubitBitFlip = qecrt.TwoQubitBitFlip
 operation = qecrt.operation
 get_code = qecrt.get_code
 get_available_codes = qecrt.get_available_codes
 get_decoder = qecrt.get_decoder
+dem_from_stim_text = qecrt.dem_from_stim_text
 DecoderResult = qecrt.DecoderResult
+BatchDecoderResult = qecrt.BatchDecoderResult
 DetectorErrorModel = qecrt.DetectorErrorModel
 generate_random_bit_flips = qecrt.generate_random_bit_flips
 sample_memory_circuit = qecrt.sample_memory_circuit
@@ -76,6 +115,7 @@ decoder_config = qecrt.config.decoder_config
 nv_qldpc_decoder_config = qecrt.config.nv_qldpc_decoder_config
 multi_error_lut_config = qecrt.config.multi_error_lut_config
 trt_decoder_config = qecrt.config.trt_decoder_config
+pymatching_config = qecrt.config.pymatching_config
 configure_decoders_from_file = qecrt.config.configure_decoders_from_file
 configure_decoders_from_str = qecrt.config.configure_decoders_from_str
 finalize_decoders = qecrt.config.finalize_decoders
@@ -105,6 +145,17 @@ for finder, name, ispkg in iter_namespace(codes):
         importlib.import_module(name)
     except (ModuleNotFoundError, ImportError) as e:
         pass
+
+# Surface the TN noise learner at the top level when its optional
+# dependencies (torch, quimb, opt_einsum) are installed; mirrors the
+# silent-skip pattern used by the plugin loaders above.
+try:
+    from .plugins.decoders.tensor_network_utils.nm_optimizer import (
+        NMOptimizer,
+        make_compiled_step,
+    )
+except (ModuleNotFoundError, ImportError):
+    pass
 
 import cudaq
 from .loader import qec_set_target_callback

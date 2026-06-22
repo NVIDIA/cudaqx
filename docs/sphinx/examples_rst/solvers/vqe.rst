@@ -38,7 +38,7 @@ CUDA-Q Solvers provides a high-level interface for running VQE simulations. Here
 
    .. code-block:: bash
 
-      nvq++ --enable-mlir -lcudaq-solvers uccsd_vqe.cpp -o uccsd_vqe
+      nvq++ -lcudaq-solvers uccsd_vqe.cpp -o uccsd_vqe
       ./uccsd_vqe
 
 Code Explanation

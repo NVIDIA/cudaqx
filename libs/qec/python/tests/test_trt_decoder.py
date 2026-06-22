@@ -544,7 +544,7 @@ class TestTRTDecoderInference(TestTRTDecoderSetup):
         assert hasattr(result, 'converged')
         assert hasattr(result, 'result')
         assert isinstance(result.converged, bool)
-        assert isinstance(result.result, list)
+        assert isinstance(result.result, np.ndarray)
         assert len(result.result) > 0
 
     def test_decoder_batch_processing(self):
@@ -557,15 +557,17 @@ class TestTRTDecoderInference(TestTRTDecoderSetup):
         results = self.decoder.decode_batch(syndromes)
 
         assert len(results) == len(syndromes)
+        assert isinstance(results, qec.BatchDecoderResult)
+        assert results.result.shape[0] == len(syndromes)
+        assert results.converged.shape == (len(syndromes),)
 
         # Check each result
         TOLERANCE = 1e-4
-        for i, (result, expected) in enumerate(zip(results, expected_outputs)):
-            assert hasattr(result, 'converged')
-            assert hasattr(result, 'result')
-            assert len(result.result) > 0
+        for i, expected in enumerate(expected_outputs):
+            assert results.converged[i]
+            assert results.result.shape[1] > 0
 
-            error = abs(result.result[0] - expected)
+            error = abs(results.result[i, 0] - expected)
             assert error < TOLERANCE, f"Batch test case {i} failed with error {error}"
 
 
@@ -939,10 +941,9 @@ class TestTRTDecoderBatchValidation:
 
         assert len(results) == len(
             syndromes), f"Expected {len(syndromes)} results, got {len(results)}"
-        for i, result in enumerate(results):
-            assert result.converged, f"Result {i} did not converge"
-            assert len(result.result) == syndrome_size, \
-                f"Result {i} has wrong output size: {len(result.result)}"
+        assert results.result.shape == (len(syndromes), syndrome_size)
+        for i, converged in enumerate(results.converged):
+            assert converged, f"Result {i} did not converge"
 
     def test_decode_batch_syndrome_size_mismatch(self, decoder_with_batch_size):
         """Test that decode_batch validates individual syndrome sizes."""
@@ -1000,10 +1001,9 @@ class TestTRTDecoderBatchValidation:
             ) == count, f"Expected {count} results, got {len(results)}"
 
             # Verify all results are valid
-            for i, result in enumerate(results):
-                assert result.converged, f"Result {i} did not converge"
-                assert len(result.result) == syndrome_size, \
-                    f"Result {i} has wrong output size: {len(result.result)}"
+            assert results.result.shape == (count, syndrome_size)
+            for i, converged in enumerate(results.converged):
+                assert converged, f"Result {i} did not converge"
 
     def test_decode_zero_padding_for_batch_gt_1(self, decoder_with_batch_size):
         """Test that decode() zero-pads correctly for batch_size > 1 models."""
@@ -1024,16 +1024,16 @@ class TestTRTDecoderBatchValidation:
         result_batch = decoder.decode_batch(manual_batch)
 
         # Results should be identical
-        assert result_decode.converged == result_batch[0].converged, \
+        assert result_decode.converged == result_batch.converged[0], \
             "Convergence status should match"
 
-        assert len(result_decode.result) == len(result_batch[0].result), \
+        assert len(result_decode.result) == len(result_batch.result[0]), \
             "Output sizes should match"
 
         # Compare results (should be very close)
         np.testing.assert_allclose(
             result_decode.result,
-            result_batch[0].result,
+            result_batch.result[0],
             rtol=1e-5,
             atol=1e-7,
             err_msg=

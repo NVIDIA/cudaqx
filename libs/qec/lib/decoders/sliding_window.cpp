@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2025 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2025 - 2026 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -16,6 +16,7 @@
 namespace cudaq::qec {
 
 void sliding_window::validate_inputs() {
+  uint32_t num_rows = H.num_rows();
   if (window_size < 1 || window_size > num_rounds) {
     throw std::invalid_argument(
         fmt::format("sliding_window constructor: window_size ({}) must "
@@ -38,7 +39,7 @@ void sliding_window::validate_inputs() {
     throw std::invalid_argument("sliding_window constructor: "
                                 "num_syndromes_per_round must be non-zero");
   }
-  if (H.shape()[0] % num_syndromes_per_round != 0) {
+  if (num_rows % num_syndromes_per_round != 0) {
     throw std::invalid_argument(
         "sliding_window constructor: Number of rows in H must be divisible "
         "by num_syndromes_per_round");
@@ -56,8 +57,9 @@ void sliding_window::validate_inputs() {
         "sliding_window constructor: error_rate_vec must be non-empty");
   }
 
-  // Enforce that H is already sorted.
-  if (!cudaq::qec::pcm_is_sorted(H, num_syndromes_per_round)) {
+  // Enforce topological column order. Ctor-time materialization only.
+  if (!cudaq::qec::pcm_is_sorted(this->H.to_nested_csc(),
+                                 this->num_syndromes_per_round)) {
     throw std::invalid_argument("sliding_window constructor: PCM must be "
                                 "sorted. See cudaq::qec::simplify_pcm.");
   }
@@ -176,10 +178,11 @@ void sliding_window::update_rw_next_read_index() {
     rw_next_read_index -= num_syndromes_per_window;
 }
 
-sliding_window::sliding_window(const cudaqx::tensor<uint8_t> &H,
+sliding_window::sliding_window(const cudaq::qec::sparse_binary_matrix &H,
                                const cudaqx::heterogeneous_map &params)
-    : decoder(H), full_pcm(H) {
-  full_pcm_T = full_pcm.transpose();
+    // Canonical CSC is the steady-state contract for decode_window's column
+    // slices and for validate_inputs's per-column .front()/.back() reads.
+    : decoder(H.canonicalize().to_csc()) {
   // Fetch parameters from the params map.
   window_size = params.get<std::size_t>("window_size", window_size);
   step_size = params.get<std::size_t>("step_size", step_size);
@@ -196,19 +199,25 @@ sliding_window::sliding_window(const cudaqx::tensor<uint8_t> &H,
   inner_decoder_params = params.get<cudaqx::heterogeneous_map>(
       "inner_decoder_params", inner_decoder_params);
 
-  num_rounds = H.shape()[0] / num_syndromes_per_round;
+  // Guard the H.num_rows() / num_syndromes_per_round below.
+  if (num_syndromes_per_round == 0)
+    throw std::invalid_argument("sliding_window constructor: "
+                                "num_syndromes_per_round must be non-zero");
+
+  num_rounds = H.num_rows() / num_syndromes_per_round;
   num_windows = (num_rounds - window_size) / step_size + 1;
   num_syndromes_per_window = num_syndromes_per_round * window_size;
 
   validate_inputs();
 
-  // Create the inner decoders.
+  // this->H is canonical CSC (ctor init list), so skip the per-call
+  // canonicalize in get_pcm_for_rounds.
   for (std::size_t w = 0; w < num_windows; ++w) {
     std::size_t start_round = w * step_size;
     std::size_t end_round = start_round + window_size - 1;
     auto [H_round, first_column, last_column] = cudaq::qec::get_pcm_for_rounds(
-        H, num_syndromes_per_round, start_round, end_round,
-        straddle_start_round, straddle_end_round);
+        this->H, num_syndromes_per_round, start_round, end_round,
+        straddle_start_round, straddle_end_round, /*pcm_is_canonical=*/true);
     first_columns.push_back(first_column);
 
     // Slice the error vector to only include the current window.
@@ -222,6 +231,14 @@ sliding_window::sliding_window(const cudaqx::tensor<uint8_t> &H,
                "first_column = {}, last_column = {}",
                start_round, end_round, H_round.shape()[0], H_round.shape()[1],
                first_column, last_column);
+
+    if (last_column - first_column + 1 != H_round.shape()[1]) {
+      throw std::invalid_argument(
+          fmt::format("last_column - first_column + 1 ({}) must be equal to "
+                      "the number of columns in H_round ({})",
+                      last_column - first_column + 1, H_round.shape()[1]));
+    }
+
     auto inner_decoder =
         decoder::get(inner_decoder_name, H_round, inner_decoder_params_mod);
     inner_decoders.push_back(std::move(inner_decoder));
@@ -420,23 +437,22 @@ void sliding_window::decode_window() {
             window_results[s][c];
       }
     }
-    // We are committing to some errors that would affect the next round's
-    // syndrome measurements. Therefore, we need to modify some of the
-    // syndrome measurements for the next round to "back out" the errors
-    // that we already know about (or more specifically, the errors we think
-    // we've already accounted for).
+    // Back out committed errors from the next window's syndrome by flipping
+    // the rows where the corresponding H columns have a 1. Read directly off
+    // the canonical CSC arrays.
+    const auto &h_ptr = this->H.ptr();
+    const auto &h_indices = this->H.indices();
     for (std::size_t s = 0; s < this->rolling_window.size(); ++s) {
       for (std::size_t c = 0; c < num_to_commit; ++c) {
         if (rw_results[s].result[c + this_window_first_column]) {
-          // This bit is a 1, so we need to modify the syndrome measurements
-          // for the next window to account for this already-accounted-for
-          // error. We do this by flipping the bit in the syndrome
-          // measurements if the corresponding entry in the PCM is a 1.
-          auto *pcm_col = &full_pcm_T.at({c + this_window_first_column, 0});
-          for (auto r = syndrome_start_next_window;
-               r <= syndrome_end_next_window; ++r) {
-            syndrome_mods[s][r] =
-                syndrome_mods[s][r] ^ static_cast<bool>(pcm_col[r]);
+          // Flip next-round syndrome bits where PCM has a 1 in this column.
+          const auto pcm_col_ix =
+              static_cast<std::size_t>(c + this_window_first_column);
+          for (auto p = h_ptr[pcm_col_ix]; p < h_ptr[pcm_col_ix + 1]; ++p) {
+            const auto r = h_indices[p];
+            if (r >= syndrome_start_next_window &&
+                r <= syndrome_end_next_window)
+              syndrome_mods[s][r] = syndrome_mods[s][r] ^ true;
           }
         }
       }

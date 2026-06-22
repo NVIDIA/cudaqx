@@ -43,7 +43,7 @@ run_cpp_test() {
     echo "Compiling and running C++ example: $file"
     echo "-----------------------------------------"
     
-    nvq++ --enable-mlir $lib_flag \
+    nvq++ $lib_flag \
         -I"$CUDAQX_INCLUDE" -L"$CUDAQX_LIB" -Wl,-rpath,"$CUDAQX_LIB" \
         "$file"
     

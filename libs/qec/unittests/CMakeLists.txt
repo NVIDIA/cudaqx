@@ -35,7 +35,7 @@ find_package(CUDAToolkit REQUIRED)
 add_compile_options(-Wno-attributes) 
 
 add_executable(test_decoders test_decoders.cpp decoders/sample_decoder.cpp)
-target_link_libraries(test_decoders PRIVATE GTest::gtest_main cudaq-qec cudaq-qec-realtime-decoding cudaq::cudaq)
+target_link_libraries(test_decoders PRIVATE GTest::gtest_main cudaq-qec cudaq-qec-realtime-decoding cudaq::cudaq libstim)
 add_dependencies(CUDAQXQECUnitTests test_decoders)
 gtest_discover_tests(test_decoders)
 
@@ -56,6 +56,11 @@ target_include_directories(test_dem_sampling PRIVATE ${CUDAToolkit_INCLUDE_DIRS}
 add_dependencies(CUDAQXQECUnitTests test_dem_sampling)
 gtest_discover_tests(test_dem_sampling)
 
+add_executable(test_sparse_binary_matrix test_sparse_binary_matrix.cpp)
+target_link_libraries(test_sparse_binary_matrix PRIVATE GTest::gtest_main cudaq-qec
+                                               cudaq::cudaq)
+add_dependencies(CUDAQXQECUnitTests test_sparse_binary_matrix)
+gtest_discover_tests(test_sparse_binary_matrix)
 
 # TensorRT decoder test is only built for x86 architectures
 if(CUDAQ_QEC_TRT_DECODER_ENABLED AND CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64)|(AMD64|amd64)|(^i.86$)")
@@ -334,6 +339,55 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
       gtest_discover_tests(test_realtime_pipeline
         TEST_PREFIX "test_realtime_pipeline."
       )
+
+      set(_ai_decoder_int8_onnx
+        "${CMAKE_CURRENT_SOURCE_DIR}/realtime/data/qdq_int8.onnx")
+      set(_ai_decoder_fp8_onnx
+        "${CMAKE_CURRENT_SOURCE_DIR}/realtime/data/qdq_fp8.onnx")
+
+      add_executable(test_ai_decoder_quantized_onnx
+        ${CMAKE_CURRENT_SOURCE_DIR}/../lib/realtime/ai_decoder_service.cu
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_ai_decoder_quantized_onnx.cpp
+      )
+
+      set_target_properties(test_ai_decoder_quantized_onnx PROPERTIES
+        CUDA_SEPARABLE_COMPILATION ON
+        CUDA_RESOLVE_DEVICE_SYMBOLS ON
+        CUDA_STANDARD 17
+        LINKER_LANGUAGE CUDA
+      )
+
+        target_compile_definitions(test_ai_decoder_quantized_onnx PRIVATE
+          INT8_QDQ_ONNX_PATH="${_ai_decoder_int8_onnx}"
+          FP8_QDQ_ONNX_PATH="${_ai_decoder_fp8_onnx}"
+        )
+
+        target_include_directories(test_ai_decoder_quantized_onnx PRIVATE
+          ${_cuda_cccl_include_pipe}
+          ${CUDAToolkit_INCLUDE_DIRS}
+          ${TENSORRT_INCLUDE_DIR_FOR_PIPELINE}
+          ${CMAKE_CURRENT_SOURCE_DIR}/../include
+          ${CMAKE_SOURCE_DIR}/libs/core/include
+          ${CUDAQ_REALTIME_INCLUDE_DIR}
+        )
+
+        target_link_libraries(test_ai_decoder_quantized_onnx PRIVATE
+          GTest::gtest_main
+          CUDA::cudart
+          ${TENSORRT_LIBRARY_FOR_PIPELINE}
+          ${TENSORRT_ONNX_PARSER_FOR_PIPELINE}
+          ${CUDAQ_REALTIME_LIBRARY}
+          ${CUDAQ_REALTIME_DISPATCH_LIBRARY}
+          ${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}
+          cudaq-realtime-pipeline
+        )
+        set_target_properties(test_ai_decoder_quantized_onnx PROPERTIES
+          BUILD_RPATH "${CUDAQ_REALTIME_LIB_DIR};${CMAKE_BINARY_DIR}/lib"
+          INSTALL_RPATH "${CUDAQ_REALTIME_LIB_DIR};${CMAKE_BINARY_DIR}/lib"
+        )
+        add_dependencies(CUDAQXQECUnitTests test_ai_decoder_quantized_onnx)
+        gtest_discover_tests(test_ai_decoder_quantized_onnx
+          TEST_PREFIX "test_ai_decoder_quantized_onnx.")
     else()
       message(WARNING "TensorRT not found. Skipping test_realtime_pipeline (needs NvInfer.h + TRT libs for compile/link).")
     endif()
@@ -387,6 +441,14 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
 
     add_executable(test_realtime_qldpc_graph_decoding
       ${CMAKE_CURRENT_SOURCE_DIR}/realtime/qec_graph_decode_test/test_realtime_qldpc_graph_decoding.cpp
+      ${CMAKE_CURRENT_SOURCE_DIR}/realtime/qec_graph_decode_test/qldpc_config_loader.cpp
+    )
+
+    set_target_properties(test_realtime_qldpc_graph_decoding PROPERTIES
+      CUDA_SEPARABLE_COMPILATION ON
+      CUDA_RESOLVE_DEVICE_SYMBOLS ON
+      CUDA_STANDARD 17
+      LINKER_LANGUAGE CUDA
     )
 
     target_include_directories(test_realtime_qldpc_graph_decoding PRIVATE
@@ -394,18 +456,22 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
       ${CUDAQ_REALTIME_INCLUDE_DIR}
       ${CMAKE_CURRENT_SOURCE_DIR}/../include
       ${CMAKE_SOURCE_DIR}/libs/core/include
+      ${CMAKE_CURRENT_SOURCE_DIR}/../lib/realtime
     )
 
     target_compile_definitions(test_realtime_qldpc_graph_decoding PRIVATE
       TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/realtime/qec_roce_decode_test/data"
+      CUDAQ_REALTIME_ROOT
     )
 
     target_link_libraries(test_realtime_qldpc_graph_decoding PRIVATE
       GTest::gtest_main
       CUDA::cudart
       ${CUDAQ_REALTIME_LIBRARY}
+      ${CUDAQ_REALTIME_DISPATCH_LIBRARY}
       $<$<BOOL:${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}>:${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}>
       cudaq-qec-realtime-decoding
+      $<$<TARGET_EXISTS:cudaq-qec-realtime-cudevice-proprietary>:$<LINK_LIBRARY:WHOLE_ARCHIVE,cudaq-qec-realtime-cudevice-proprietary>>
       $<$<BOOL:${_CUDAQ_LIBRARY}>:${_CUDAQ_LIBRARY}>
       $<$<BOOL:${_NVQIR_LIBRARY}>:${_NVQIR_LIBRARY}>
     )
@@ -413,6 +479,7 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
     target_link_options(test_realtime_qldpc_graph_decoding PRIVATE
       "LINKER:--allow-shlib-undefined"
       "LINKER:--disable-new-dtags"
+      "LINKER:--export-dynamic"
     )
 
     # Resolve CUDAQ SDK lib dir for RPATH (libnvqir, libcudaq)
@@ -425,13 +492,14 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
     endif()
 
     set_target_properties(test_realtime_qldpc_graph_decoding PROPERTIES
-      BUILD_RPATH "${CUDAQ_REALTIME_LIB_DIR};${CMAKE_BINARY_DIR}/lib/decoder-plugins;${_cudaq_sdk_lib_dir}"
-      INSTALL_RPATH "${CUDAQ_REALTIME_LIB_DIR};${CMAKE_BINARY_DIR}/lib/decoder-plugins;${_cudaq_sdk_lib_dir}"
+      BUILD_RPATH "${CUDAQ_REALTIME_LIB_DIR};${CMAKE_BINARY_DIR}/lib;${CMAKE_BINARY_DIR}/lib/decoder-plugins;${_cudaq_sdk_lib_dir}"
+      INSTALL_RPATH "${CUDAQ_REALTIME_LIB_DIR};${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR};${CMAKE_BINARY_DIR}/lib/decoder-plugins;${_cudaq_sdk_lib_dir}"
     )
 
     add_dependencies(CUDAQXQECUnitTests test_realtime_qldpc_graph_decoding)
 
-    if(QEC_EXTERNAL_DECODERS OR DEFINED ENV{QEC_EXTERNAL_DECODERS})
+    if((QEC_EXTERNAL_DECODERS OR DEFINED ENV{QEC_EXTERNAL_DECODERS})
+       AND TARGET cudaq-qec-realtime-cudevice-proprietary)
       add_test(NAME test_realtime_qldpc_graph_decoding
         COMMAND test_realtime_qldpc_graph_decoding)
       set_tests_properties(test_realtime_qldpc_graph_decoding PROPERTIES
@@ -455,5 +523,3 @@ add_subdirectory(decoders/pymatching)
 if(CUDAQX_QEC_ENABLE_HOLOLINK_TOOLS)
   add_subdirectory(utils)
 endif()
-
-

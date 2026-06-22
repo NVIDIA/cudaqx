@@ -114,10 +114,55 @@ The helper function ``pcm_to_sparse_vec`` is used to convert the dense binary ma
 
 Each decoder type has its own configuration structure with specific parameters. 
 For lookup table decoders, the user specifies how many simultaneous errors to consider. 
+For PyMatching, the user can specify per-error prior probabilities and the edge
+merge strategy. The real-time path configures PyMatching as a standard decoder
+with ``type: pymatching``; ``O_sparse`` remains the observable matrix used by the
+base decoder to accumulate logical corrections returned by ``get_corrections``.
+Vanilla PyMatching requires graphlike detector error models, where every
+``H_sparse`` column has one or two detector entries.
 For belief propagation decoders, the user sets iteration limits and convergence criteria. 
 The configuration API provides type-safe structures for each decoder, ensuring that all required parameters are included.
 
 The configuration is then saved to a YAML file for reuse. The YAML format is human-readable, making it easy to inspect, modify, and share configurations across different execution environments.
+
+For example, a PyMatching real-time decoder can be configured programmatically:
+
+.. code-block:: python
+
+   config = qec.decoder_config()
+   config.id = 0
+   config.type = "pymatching"
+   config.block_size = dem.num_error_mechanisms()
+   config.syndrome_size = dem.num_detectors()
+   config.H_sparse = qec.pcm_to_sparse_vec(dem.detector_error_matrix)
+   config.O_sparse = qec.pcm_to_sparse_vec(dem.observables_flips_matrix)
+   config.D_sparse = qec.generate_timelike_sparse_detector_matrix(
+       num_syndromes_per_round, num_rounds, include_first_round=False)
+
+   pm_config = qec.pymatching_config()
+   pm_config.error_rate_vec = list(dem.error_rates)
+   pm_config.merge_strategy = "smallest_weight"
+   config.set_decoder_custom_args(pm_config)
+
+   multi_config = qec.multi_decoder_config()
+   multi_config.decoders = [config]
+
+This produces YAML with a ``pymatching`` decoder and PyMatching-specific custom
+arguments:
+
+.. code-block:: yaml
+
+   decoders:
+     - id: 0
+       type: pymatching
+       block_size: 3
+       syndrome_size: 3
+       H_sparse: [ 0, -1, 1, -1, 2, -1 ]
+       O_sparse: [ 0, -1, 1, -1, 2, -1 ]
+       D_sparse: [ 0, -1, 1, -1, 2, -1 ]
+       decoder_custom_args:
+         error_rate_vec: [ 0.1, 0.1, 0.1 ]
+         merge_strategy: smallest_weight
 
 Here is how to create and save a decoder configuration:
 
@@ -146,7 +191,7 @@ The configuration loading process performs several important operations:
 
 1. **YAML Parsing**: The configuration file is parsed and validated to ensure all required fields are present and properly formatted. This includes checking matrix dimensions, decoder parameters, and metadata.
 
-2. **Decoder Instantiation**: Based on the decoder type specified in the configuration (e.g., ``multi_error_lut``, ``nv-qldpc-decoder``), the appropriate decoder implementation is instantiated and allocated resources on the GPU or CPU.
+2. **Decoder Instantiation**: Based on the decoder type specified in the configuration (e.g., ``multi_error_lut``, ``pymatching``, ``nv-qldpc-decoder``), the appropriate decoder implementation is instantiated and allocated resources on the GPU or CPU.
 
 3. **Matrix Initialization**: The sparse matrices (H_sparse, O_sparse, D_sparse) are loaded into the decoder's internal data structures. For GPU-based decoders, this includes transferring data to device memory.
 
@@ -580,4 +625,3 @@ See Also
 * :doc:`/api/qec/cpp_api` - C++ API Reference (includes Real-Time Decoding)
 * :doc:`/api/qec/python_api` - Python API Reference (includes Real-Time Decoding)
 * Example source code: ``libs/qec/unittests/realtime/app_examples/``
-

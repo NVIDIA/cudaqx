@@ -1,5 +1,5 @@
 /****************************************************************-*- C++ -*-****
- * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
+ * Copyright (c) 2024 - 2026 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -11,8 +11,17 @@
 #include "cuda-qx/core/extension_point.h"
 #include "cuda-qx/core/heterogeneous_map.h"
 #include "cuda-qx/core/tensor.h"
+#include "sparse_binary_matrix.h"
+#include "cudaq/qec/detector_error_model.h"
+#include <algorithm>
+#include <functional>
 #include <future>
+#include <memory>
 #include <optional>
+#include <string>
+#include <string_view>
+#include <tuple>
+#include <variant>
 #include <vector>
 
 namespace cudaq::qec {
@@ -22,6 +31,10 @@ using float_t = CUDAQX_QEC_FLOAT_TYPE;
 #else
 using float_t = double;
 #endif
+
+/// Decoder construction input: either a parity-check matrix or raw Stim DEM
+/// text.
+using decoder_init = std::variant<sparse_binary_matrix, std::string>;
 
 /// @brief Validates that all keys in a heterogeneous map are found in a list of
 /// acceptable types
@@ -121,7 +134,7 @@ public:
 /// arbitrary constructor parameters that can be unique to each specific
 /// decoder.
 class decoder
-    : public cudaqx::extension_point<decoder, const cudaqx::tensor<uint8_t> &,
+    : public cudaqx::extension_point<decoder, const decoder_init &,
                                      const cudaqx::heterogeneous_map &> {
 private:
   struct rt_impl;
@@ -134,25 +147,23 @@ public:
   decoder() = delete;
 
   /// @brief Constructor
-  /// @param H Decoder's parity check matrix represented as a tensor. The tensor
-  /// is required be rank 2 and must be of dimensions \p syndrome_size x
-  /// \p block_size.
-  /// will use the same \p H.
-  decoder(const cudaqx::tensor<uint8_t> &H);
+  /// @param H Decoder's parity check matrix. Taken by value so rvalue
+  /// arguments are moved into the base member.
+  decoder(cudaq::qec::sparse_binary_matrix H);
 
   /// @brief Decode a single syndrome
   /// @param syndrome A vector of syndrome measurements where the floating point
   /// value is the probability that the syndrome measurement is a |1>. The
-  /// length of the syndrome vector should be equal to \p syndrome_size.
-  /// @returns Vector of length \p block_size with soft probabilities of errors
+  /// length of the syndrome vector should be equal to `syndrome_size`.
+  /// @returns Vector of length `block_size` with soft probabilities of errors
   /// in each index.
   virtual decoder_result decode(const std::vector<float_t> &syndrome) = 0;
 
   /// @brief Decode a single syndrome
   /// @param syndrome An order-1 tensor of syndrome measurements where a 1 bit
   /// represents that the syndrome measurement is a |1>. The
-  /// length of the syndrome vector should be equal to \p syndrome_size.
-  /// @returns Vector of length \p block_size of errors in each index.
+  /// length of the syndrome vector should be equal to `syndrome_size`.
+  /// @returns Vector of length `block_size` of errors in each index.
   virtual decoder_result decode(const cudaqx::tensor<uint8_t> &syndrome);
 
   /// @brief Decode a single syndrome
@@ -172,10 +183,48 @@ public:
   virtual std::vector<decoder_result>
   decode_batch(const std::vector<std::vector<float_t>> &syndrome);
 
-  /// @brief This `get` overload supports default values.
+  /// @brief Construct a registered decoder by name.
+  /// @param name The registered decoder name.
+  /// @param init A parity-check matrix or raw Stim DEM string.
+  /// @param param_map Optional decoder-specific parameters.
+  static std::unique_ptr<decoder>
+  get(const std::string &name, const decoder_init &init,
+      const cudaqx::heterogeneous_map &param_map = cudaqx::heterogeneous_map());
+
+  static std::unique_ptr<decoder>
+  get(const std::string &name, const cudaq::qec::sparse_binary_matrix &H,
+      const cudaqx::heterogeneous_map &param_map =
+          cudaqx::heterogeneous_map()) {
+    return get(name, decoder_init{H}, param_map);
+  }
+
   static std::unique_ptr<decoder>
   get(const std::string &name, const cudaqx::tensor<uint8_t> &H,
-      const cudaqx::heterogeneous_map &param_map = cudaqx::heterogeneous_map());
+      const cudaqx::heterogeneous_map &param_map =
+          cudaqx::heterogeneous_map()) {
+    return get(name, cudaq::qec::sparse_binary_matrix(H), param_map);
+  }
+
+  static std::unique_ptr<decoder>
+  get(const std::string &name, const std::string &stim_dem_text,
+      const cudaqx::heterogeneous_map &param_map =
+          cudaqx::heterogeneous_map()) {
+    return get(name, decoder_init{stim_dem_text}, param_map);
+  }
+
+  static std::unique_ptr<decoder>
+  get(const std::string &name, const char *stim_dem_text,
+      const cudaqx::heterogeneous_map &param_map =
+          cudaqx::heterogeneous_map()) {
+    return get(name, decoder_init{std::string{stim_dem_text}}, param_map);
+  }
+
+  static std::unique_ptr<decoder>
+  get(const std::string &name, std::string_view stim_dem_text,
+      const cudaqx::heterogeneous_map &param_map =
+          cudaqx::heterogeneous_map()) {
+    return get(name, decoder_init{std::string{stim_dem_text}}, param_map);
+  }
 
   std::size_t get_block_size() { return block_size; }
   std::size_t get_syndrome_size() { return syndrome_size; }
@@ -273,7 +322,7 @@ protected:
   std::size_t syndrome_size = 0;
 
   /// @brief The decoder's parity check matrix
-  cudaqx::tensor<uint8_t> H;
+  sparse_binary_matrix H;
 
   /// @brief The decoder's observable matrix in sparse format
   std::vector<std::vector<uint32_t>> O_sparse;
@@ -281,6 +330,16 @@ protected:
   /// @brief The decoder's D matrix in sparse format
   std::vector<std::vector<uint32_t>> D_sparse;
 };
+
+/// @brief Convert a single soft probability to a hard 0/1 decision.
+/// @param in Soft probability input in range [0.0, 1.0]
+/// @param thresh Values >= thresh return true; all others return false.
+template <typename t_soft,
+          typename std::enable_if<std::is_floating_point<t_soft>::value,
+                                  int>::type = 0>
+constexpr inline bool convert_soft_to_hard(t_soft in, t_soft thresh = 0.5) {
+  return in >= thresh;
+}
 
 /// @brief Convert a vector of soft probabilities to a vector of hard
 /// probabilities.
@@ -298,7 +357,7 @@ inline void convert_vec_soft_to_hard(const std::vector<t_soft> &in,
                                      t_soft thresh = 0.5) {
   out.resize(in.size());
   for (std::size_t i = 0; i < in.size(); i++)
-    out[i] = static_cast<t_hard>(in[i] >= thresh ? 1 : 0);
+    out[i] = static_cast<t_hard>(convert_soft_to_hard(in[i], thresh));
 }
 
 /// @brief Convert a vector of soft probabilities to a tensor<uint8_t> of hard
@@ -326,7 +385,7 @@ inline void convert_vec_soft_to_tensor_hard(const std::vector<t_soft> &in,
         "Vector to tensor conversion requires tensor dim == vector length");
   auto raw_ptr = out.data();
   for (size_t i = 0; i < in.size(); ++i)
-    raw_ptr[i] = static_cast<t_hard>(in[i] >= thresh ? 1 : 0);
+    raw_ptr[i] = static_cast<t_hard>(convert_soft_to_hard(in[i], thresh));
 }
 
 /// @brief Convert a vector of hard probabilities to a vector of soft
@@ -392,7 +451,7 @@ inline void convert_vec_soft_to_hard(const std::vector<std::vector<t_soft>> &in,
     auto &out_row = out[row_index++];
     out_row.resize(r.size());
     for (std::size_t c = 0; c < r.size(); c++)
-      out_row[c] = static_cast<t_hard>(r[c] >= thresh ? 1 : 0);
+      out_row[c] = static_cast<t_hard>(convert_soft_to_hard(r[c], thresh));
   }
 }
 
@@ -425,6 +484,72 @@ inline void convert_vec_hard_to_soft(const std::vector<std::vector<t_hard>> &in,
 }
 
 std::unique_ptr<decoder>
-get_decoder(const std::string &name, const cudaqx::tensor<uint8_t> &H,
+get_decoder(const std::string &name, const decoder_init &init,
             const cudaqx::heterogeneous_map options = {});
+
+inline std::unique_ptr<decoder>
+get_decoder(const std::string &name, const cudaq::qec::sparse_binary_matrix &H,
+            const cudaqx::heterogeneous_map options = {}) {
+  return get_decoder(name, decoder_init{H}, options);
+}
+
+inline std::unique_ptr<decoder>
+get_decoder(const std::string &name, const cudaqx::tensor<uint8_t> &H,
+            const cudaqx::heterogeneous_map options = {}) {
+  return get_decoder(name, cudaq::qec::sparse_binary_matrix(H), options);
+}
+
+inline std::unique_ptr<decoder>
+get_decoder(const std::string &name, const std::string &stim_dem_text,
+            const cudaqx::heterogeneous_map options = {}) {
+  return get_decoder(name, decoder_init{stim_dem_text}, options);
+}
+
+inline std::unique_ptr<decoder>
+get_decoder(const std::string &name, const char *stim_dem_text,
+            const cudaqx::heterogeneous_map options = {}) {
+  return get_decoder(name, decoder_init{std::string{stim_dem_text}}, options);
+}
+
+inline std::unique_ptr<decoder>
+get_decoder(const std::string &name, std::string_view stim_dem_text,
+            const cudaqx::heterogeneous_map options = {}) {
+  return get_decoder(name, decoder_init{std::string{stim_dem_text}}, options);
+}
+
+namespace details {
+// Declared here because `make_pcm_decoder` is a header-defined template.
+/// DEM-derived defaults; pointers alias into the source `dem`.
+struct dem_default_values {
+  const cudaqx::tensor<uint8_t> *O = nullptr;
+  const std::vector<double> *error_rate_vec = nullptr;
+};
+
+/// Return DEM defaults for keys not already supplied by the user.
+dem_default_values dem_defaults_for_missing_keys(
+    const std::function<bool(const std::string &)> &contains_user_key,
+    const detector_error_model &dem);
+} // namespace details
+
+/// If `init` holds DEM text, parse it and inject `"O"` / `"error_rate_vec"`
+/// defaults when absent.
+template <typename DecoderT>
+std::unique_ptr<decoder>
+make_pcm_decoder(const decoder_init &init,
+                 const cudaqx::heterogeneous_map &params) {
+  if (const auto *H = std::get_if<cudaq::qec::sparse_binary_matrix>(&init))
+    return std::make_unique<DecoderT>(*H, params);
+
+  const auto dem = dem_from_stim_text(std::get<std::string>(init));
+  cudaqx::heterogeneous_map merged = params;
+  const auto defaults = details::dem_defaults_for_missing_keys(
+      [&](const std::string &key) { return merged.contains(key); }, dem);
+  if (defaults.O)
+    merged.insert("O", *defaults.O);
+  if (defaults.error_rate_vec)
+    merged.insert("error_rate_vec", *defaults.error_rate_vec);
+  return std::make_unique<DecoderT>(
+      cudaq::qec::sparse_binary_matrix(dem.detector_error_matrix), merged);
+}
+
 } // namespace cudaq::qec

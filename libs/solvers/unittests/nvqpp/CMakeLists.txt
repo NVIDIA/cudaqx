@@ -7,5 +7,5 @@
 # ============================================================================ #
 include_directories(${CUDAQX_SOLVERS_INCLUDE_DIR})
 set(CMAKE_CXX_COMPILER "${CUDAQ_INSTALL_DIR}/bin/nvq++")
-set(CMAKE_CXX_COMPILE_OBJECT "<CMAKE_CXX_COMPILER> --enable-mlir -fPIC <DEFINES> <INCLUDES> -o <OBJECT> -c <SOURCE>")
+set(CMAKE_CXX_COMPILE_OBJECT "<CMAKE_CXX_COMPILER> -fPIC <DEFINES> <INCLUDES> -o <OBJECT> -c <SOURCE>")
 add_library(test-kernels SHARED test_kernels.cpp)
