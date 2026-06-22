@@ -22,7 +22,7 @@ on:
   workflow_dispatch:
     inputs:
       deploy_docs:
-        description: 'Deploy docs to GitHub Pages. Deployment only runs on main.'
+        description: 'Deploy docs to GitHub Pages. Deployment only runs on main or docs_update.'
         type: boolean
         default: true
         required: false
@@ -116,7 +116,10 @@ jobs:
   deploy:
     name: Deploy latest docs
     if: |
-      github.ref == 'refs/heads/main' &&
+      (
+        github.ref == 'refs/heads/main' ||
+        github.ref == 'refs/heads/docs_update'
+      ) &&
       (
         github.event_name == 'push' ||
         inputs.deploy_docs == true
