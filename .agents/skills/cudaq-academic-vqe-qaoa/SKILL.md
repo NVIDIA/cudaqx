@@ -1,6 +1,6 @@
 ---
 name: cudaq-academic-vqe-qaoa
-description: Academic workshop workflow for CUDA-QX Solvers. Use when the user asks for beginner-friendly CUDA-Q Solvers installation, VQE examples, QAOA examples, MaxCut with QAOA, or before/after skill metrics for VQE/QAOA agent responses. Do not use for QEC, GQE, ADAPT-VQE, Ising-specific material, advanced chemistry active-space setup, custom operator pools, or CUDA-QX source-build debugging.
+description: Academic workshop workflow for CUDA-QX Solvers. Use when the user asks for beginner-friendly CUDA-Q Solvers installation, VQE examples, QAOA examples, MaxCut with QAOA, a first ADAPT-VQE example, or a first GQE (generative / GPT-style eigensolver) example. Do not use for QEC, Ising-specific material, advanced chemistry active-space setup, custom operator pools, or CUDA-QX source-build debugging.
 ---
 
 # CUDA-QX Academic VQE/QAOA
@@ -15,8 +15,22 @@ teachable, and grounded in repo APIs.
 2. Load exactly one reference file unless the user asks for comparison.
 3. Answer with a minimal runnable path first, then mention the source files for
    users who want to inspect the implementation.
-4. When evaluating before/after behavior, use the metrics reference and the
-   deterministic evaluator.
+4. When evaluating before/after behavior, use the deterministic evaluator in
+   `.agents/evals/academic-vqe-qaoa/`.
+
+## Recognizing the problem
+
+If the user describes a problem in domain terms (without naming an algorithm),
+first map it to a quantum problem class, then route below:
+
+| User describes... | Problem class | Map to |
+| --- | --- | --- |
+| Splitting / partitioning / grouping a set where pairwise costs matter (dividing delivery stops, clustering, team assignment) | Graph partition → **MaxCut** | QAOA (`references/qaoa.md`) |
+| Finding the lowest-energy / most stable configuration of a molecule | Ground state | VQE / ADAPT-VQE (`references/vqe.md`, `references/adapt.md`) |
+| Any other "best discrete choice among many options" problem | Custom Hamiltonian | QAOA (`references/qaoa.md`) |
+
+Do not assume every optimization problem is MaxCut. If the problem does not fit
+a class above, say so rather than forcing a fit.
 
 ## Intent Routing
 
@@ -25,7 +39,8 @@ teachable, and grounded in repo APIs.
 | Install or smoke test CUDA-QX Solvers | `references/install.md` |
 | Build a first VQE example | `references/vqe.md` |
 | Build a first QAOA or MaxCut example | `references/qaoa.md` |
-| Compare with-skill vs without-skill answers | `references/metrics.md` |
+| Build a first ADAPT-VQE example | `references/adapt.md` |
+| Build a first GQE (GPT-style eigensolver) example | `references/gqe.md` |
 
 ## Response Contract
 
@@ -54,13 +69,21 @@ For QAOA questions, include:
 - non-empty initial parameters
 - `optimizer="cobyla"` as the beginner-safe default
 
-For evaluation questions, report:
+For ADAPT-VQE questions, include:
 
-- pass rate against deterministic assertions
-- required concept coverage
-- forbidden concept hits
-- context files loaded
-- runtime when available
+- `solvers.create_molecule`
+- `solvers.get_operator_pool`
+- a named pool such as `spin_complement_gsd` with `num_orbitals=`
+- a `@cudaq.kernel` `initState` that prepares Hartree-Fock
+- the unpacked return `energy, thetas, ops = solvers.adapt_vqe(...)`
+
+For GQE questions, include:
+
+- `pip install cudaq-solvers[gqe]` as the required extra
+- the ImportError fallback note (bare `cudaq-solvers` is not enough)
+- `from cudaq_solvers.gqe_algorithm.gqe import get_default_config`
+- a `cost(sampled_ops, **kwargs)` callback signature
+- the unpacked return `energy, indices = solvers.gqe(cost, pool, config=cfg)`
 
 ## Source Of Truth
 

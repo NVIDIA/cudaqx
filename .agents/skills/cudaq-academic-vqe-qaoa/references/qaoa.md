@@ -40,11 +40,16 @@ print("Parameters:", optimal_parameters)
 - Use a NetworkX graph for MaxCut.
 - Use `solvers.get_maxcut_hamiltonian(graph)`.
 - Use `solvers.get_num_qaoa_parameters(...)` instead of guessing parameter
-  count.
+  count. For standard MaxCut QAOA this returns `2 * num_layers` (one γ and
+  one β per layer).
 - Use non-empty initial parameters.
 - Use `optimizer="cobyla"` as the safe beginner default.
 - `QAOAResult` can be tuple-unpacked as
-  `(optimal_value, optimal_parameters, sample_result)`.
+  `(optimal_value, optimal_parameters, sample_result)`, or accessed by
+  attribute: `result.optimal_value`, `result.optimal_parameters`,
+  `result.optimal_config` (the latter is the `cudaq.SampleResult` produced
+  by the final shot — call `.most_probable()` on it to get the MaxCut
+  bitstring).
 - QAOA minimizes the Hamiltonian. For MaxCut, print `-optimal_value` as the
   cut value.
 

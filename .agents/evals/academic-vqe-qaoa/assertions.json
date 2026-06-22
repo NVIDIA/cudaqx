@@ -1,60 +1,102 @@
 {
-  "INSTALL01": {
+  "P1": {
     "must_include": [
-      "Brev",
-      "CPU",
-      "pip install cudaq-solvers",
-      "import cudaq_solvers",
-      "libgfortran"
-    ],
-    "must_not_include": [
-      "pip install cudaq-solvers[gqe]",
-      "install qec first",
-      "Ising"
-    ]
-  },
-  "VQE01": {
-    "must_include": [
-      "cudaq.kernel",
-      "spin",
-      "solvers.vqe",
-      "optimizer",
-      "gradient",
-      "parameter_shift"
-    ],
-    "must_not_include": [
-      "solvers.qaoa",
-      "GQE",
-      "Ising"
-    ]
-  },
-  "QAOA01": {
-    "must_include": [
-      "networkx",
-      "get_maxcut_hamiltonian",
-      "get_num_qaoa_parameters",
-      "solvers.qaoa",
       "cobyla",
-      "most_probable"
-    ],
-    "must_not_include": [
-      "empty initial parameters are fine",
-      "optimizer='lbfgs'",
-      "optimizer=\"lbfgs\"",
-      "Ising"
-    ]
-  },
-  "QAOA02": {
-    "must_include": [
-      "lbfgs",
       "requires gradients",
-      "cobyla",
+      "scipy",
+      "L-BFGS-B",
       "jac"
     ],
     "must_not_include": [
-      "silently falls back",
+      "qaoa(..., gradient=",
+      "gradient='parameter_shift'",
+      "Ising"
+    ]
+  },
+  "P2": {
+    "must_include": [
+      "empty",
+      "get_num_qaoa_parameters",
+      "2 * num_layers"
+    ],
+    "must_not_include": [
+      "defaults to zeros",
       "empty initial parameters are fine",
       "Ising"
+    ]
+  },
+  "P3": {
+    "must_include": [
+      "optimal_config",
+      "most_probable",
+      "sample_result"
+    ],
+    "must_not_include": [
+      "optimal_state",
+      "argmax",
+      "state vector"
+    ]
+  },
+  "P4": {
+    "must_include": [
+      "solvers.create_molecule",
+      "get_operator_pool",
+      "spin_complement_gsd",
+      "num_orbitals",
+      "adapt_vqe",
+      "@cudaq.kernel"
+    ],
+    "must_not_include": [
+      "from cudaq.solvers import",
+      "Ising"
+    ]
+  },
+  "P5": {
+    "must_include": [
+      "cudaq-solvers[gqe]",
+      "get_default_config",
+      "sampled_ops",
+      "solvers.gqe"
+    ],
+    "must_not_include": [
+      "pip install cudaq-solvers ",
+      "from cudaq import gqe"
+    ]
+  },
+  "P6": {
+    "must_include": [
+      "libgfortran",
+      "apt",
+      "cobyla"
+    ],
+    "must_not_include": [
+      "reinstall cudaq-solvers",
+      "downgrade"
+    ]
+  },
+  "P7": {
+    "must_include": [
+      "MaxCut",
+      "solvers.get_maxcut_hamiltonian",
+      "solvers.qaoa",
+      "cudaq_solvers"
+    ],
+    "must_not_include": [
+      "from qiskit",
+      "QuantumCircuit",
+      "ortools"
+    ]
+  },
+  "P8": {
+    "must_include": [
+      "solvers.vqe",
+      "@cudaq.kernel",
+      "cudaq_solvers",
+      "ground"
+    ],
+    "must_not_include": [
+      "from qiskit",
+      "QuantumCircuit"
     ]
   }
 }

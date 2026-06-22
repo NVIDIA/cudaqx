@@ -80,6 +80,16 @@ def score_record(prompt_id: str, record: dict[str, Any],
     if not isinstance(context_files, list):
         context_files = []
 
+    raw_tokens = record.get("tokens")
+    if isinstance(raw_tokens, dict):
+        numeric = [v for v in raw_tokens.values()
+                   if isinstance(v, (int, float))]
+        token_total = int(sum(numeric)) if numeric else None
+    elif isinstance(raw_tokens, (int, float)):
+        token_total = int(raw_tokens)
+    else:
+        token_total = None
+
     return {
         "id": prompt_id,
         "passed": not missing and not forbidden,
@@ -89,6 +99,7 @@ def score_record(prompt_id: str, record: dict[str, Any],
         "forbidden": forbidden,
         "context_files": len(context_files),
         "duration_ms": record.get("duration_ms"),
+        "tokens": token_total,
     }
 
 
@@ -125,6 +136,7 @@ def summarize(run: dict[str, Any], assertions: dict[str,
         "forbidden_hits": forbidden_hits,
         "context_files": sum(s["context_files"] for s in scores),
         "duration_ms": sum_known("duration_ms"),
+        "tokens_total": sum_known("tokens"),
         "scores": scores,
     }
 
@@ -160,11 +172,14 @@ def main() -> int:
         return 0
 
     for summary in summaries:
+        tok = summary.get("tokens_total")
+        tok_str = f"tokens={tok} " if tok is not None else ""
         print(f"[{summary['agent']}:{summary['config']}] "
               f"pass_rate={summary['pass_rate']:.0%} "
               f"coverage={summary['coverage']}/{summary['coverage_max']} "
               f"forbidden={summary['forbidden_hits']} "
-              f"context_files={summary['context_files']}")
+              f"context_files={summary['context_files']} "
+              f"{tok_str}".rstrip())
         for score in summary["scores"]:
             if not score["passed"]:
                 print(f"  - {score['id']}: missing={score['missing']} "
