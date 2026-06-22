@@ -95,7 +95,7 @@
         :param batch_size: (int, optional) Batch size for optimization (default: -1, no batching)
         :returns: Optimizer info object
 
-.. class:: cudaq_qec.plugins.decoders.tensor_network_decoder.NMOptimizer
+.. class:: cudaq_qec.NMOptimizer
 
     Differentiable noise-model optimizer built on top of :class:`TensorNetworkDecoder`.
 
@@ -110,15 +110,19 @@
     PyTorch must also be installed.
 
     .. note::
-      Quick-start example (logit-space training; the loss has no ``log``
-      guard, so direct probability training requires per-step clamping
-      into ``[eps, 1 - eps]``)::
+
+       ``NMOptimizer`` uses torch-backed contractions so gradients can flow
+       through the tensor-network contraction.  cuTensorNet acceleration is
+       supported by :class:`TensorNetworkDecoder` for decoding, but is not
+       used by ``NMOptimizer``.
+
+    .. note::
+      Quick-start example (logit-space training; direct probability
+      training can saturate if an optimizer step leaves ``[0, 1]``)::
 
         import numpy as np
         import torch
-        from cudaq_qec.plugins.decoders.tensor_network_decoder import (
-            NMOptimizer, make_compiled_step,
-        )
+        from cudaq_qec import NMOptimizer, make_compiled_step
 
         H = np.array([[1, 1, 0], [0, 1, 1]], dtype=np.float64)
         logical = np.array([[1, 0, 1]], dtype=np.float64)
@@ -172,7 +176,7 @@
 
     .. attribute:: noise_params
 
-        ``list[torch.Tensor]`` — the learnable noise-probability tensors; pass
+        ``list[torch.Tensor]`` -- the learnable noise-probability tensors; pass
         directly to a ``torch.optim`` optimizer.
 
     .. attribute:: torch_device
@@ -258,7 +262,7 @@
                               before patching in place.  A batch-size change
                               triggers a full rebuild regardless.
 
-.. function:: cudaq_qec.plugins.decoders.tensor_network_decoder.make_compiled_step(optimizer, logits, torch_optimizer)
+.. function:: cudaq_qec.make_compiled_step(optimizer, logits, torch_optimizer)
 
     Build a no-arg callable that runs one Adam step and returns the loss.
 

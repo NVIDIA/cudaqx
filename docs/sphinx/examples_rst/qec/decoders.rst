@@ -153,7 +153,7 @@ See Also:
 Learning Noise Models with NMOptimizer
 +++++++++++++++++++++++++++++++++++++++
 
-:class:`~cudaq_qec.plugins.decoders.tensor_network_decoder.NMOptimizer` extends
+:class:`~cudaq_qec.NMOptimizer` extends
 the Tensor Network Decoder with differentiable noise probabilities.  Given a
 batch of observed syndromes and logical-flip outcomes, it fits per-error noise
 rates by backpropagating through the tensor-network contraction using PyTorch.
@@ -164,10 +164,10 @@ probability), samples syndromes from Stim, and trains
 :class:`NMOptimizer` from a uniform initial prior with 300 Adam steps in
 logit space.  It then compares the **logical error rate (LER)** of the
 learned noise model against a static uniform-prior baseline on a 20k-shot
-held-out batch — demonstrating that fitting per-error rates from data
+held-out batch -- demonstrating that fitting per-error rates from data
 decodes meaningfully better than assuming uniform noise:
 
-.. literalinclude:: ../../examples/qec/python/noise_learning.py
+.. literalinclude:: ../../examples/qec/python/tn_noise_learning.py
     :language: python
     :start-after: [Begin Documentation]
 

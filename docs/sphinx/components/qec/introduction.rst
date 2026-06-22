@@ -912,9 +912,9 @@ extension that **fits the noise model directly from observed syndromes and
 logical-flip outcomes**.  Noise probabilities are held as PyTorch tensors
 with ``requires_grad=True``; backpropagating through the tensor-network
 contraction yields gradients that any ``torch.optim`` optimizer (Adam, SGD,
-etc.) can update.  Starting from a uniform initial prior and a few hundred
-Adam steps is usually enough to recover the per-error rates and beat a
-static-uniform baseline on a held-out batch.
+etc.) can update.  Starting from a uniform initial prior, Adam optimization
+can learn non-uniform per-error rates and improve over a static-uniform
+baseline on a held-out batch.
 
 This is offline -- training happens once on a representative syndrome
 dataset, and the learned probabilities can then be used as a standard
