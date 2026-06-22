@@ -12,7 +12,20 @@
 #include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/realtime/decoding_config.h"
 #include "cudaq/runtime/logger/logger.h"
+#include <cstdlib>
+#include <cstring>
+#include <dlfcn.h>
 #include <set>
+#include <stdexcept>
+
+#ifdef CUDAQ_REALTIME_ROOT
+#include "qec_realtime_session.h"
+#include "rpc_producer.h"
+#else
+namespace cudaq::qec::realtime {
+class qec_realtime_session {};
+} // namespace cudaq::qec::realtime
+#endif
 
 // Optional syndrome capture callback for --save_syndrome feature
 namespace {
@@ -21,6 +34,130 @@ SyndromeCaptureCallback g_syndrome_capture_callback = nullptr;
 } // namespace
 
 std::vector<std::unique_ptr<cudaq::qec::decoder>> g_decoders;
+std::unique_ptr<cudaq::qec::realtime::qec_realtime_session> g_realtime_session;
+
+namespace {
+
+bool g_realtime_session_owns_shared_ring_mode = false;
+
+#ifdef CUDAQ_REALTIME_ROOT
+inline cudaq_dispatch_launch_fn_t resolve_launch_dispatch_kernel_regular() {
+  return reinterpret_cast<cudaq_dispatch_launch_fn_t>(
+      ::dlsym(RTLD_DEFAULT, "cudaq_launch_dispatch_kernel_regular"));
+}
+
+using set_shared_ring_mode_fn_t = cudaError_t (*)(uint32_t);
+inline set_shared_ring_mode_fn_t resolve_set_shared_ring_mode() {
+  return reinterpret_cast<set_shared_ring_mode_fn_t>(
+      ::dlsym(RTLD_DEFAULT, "cudaq_dispatch_kernel_set_shared_ring_mode"));
+}
+#endif
+
+bool realtime_mode_inproc_rpc_requested() {
+  const char *env = std::getenv("CUDAQ_QEC_REALTIME_MODE");
+  if (!env || env[0] == '\0')
+    return false;
+  return std::strcmp(env, "inproc_rpc") == 0;
+}
+
+bool any_decoder_supports_graph_dispatch() {
+  for (const auto &dec : g_decoders) {
+    if (dec && dec->supports_graph_dispatch())
+      return true;
+  }
+  return false;
+}
+
+} // namespace
+
+#ifdef CUDAQ_REALTIME_ROOT
+namespace {
+
+void maybe_init_realtime_session() {
+  if (!realtime_mode_inproc_rpc_requested()) {
+    CUDAQ_INFO("CUDAQ_QEC_REALTIME_MODE not set to inproc_rpc; using "
+               "legacy direct-call decoding path.");
+    return;
+  }
+
+  // Pick DEVICE vs HOST dispatch the same way qec_realtime_session does at
+  // initialize(): any graph-capable decoder => DEVICE mode (per-round
+  // GRAPH_LAUNCH enqueue + DEVICE_CALL get/reset, driven by the device dispatch
+  // kernel); otherwise HOST mode -- CPU decoders such as pymatching run all
+  // three RPCs inline on the CPU host loop.  A mixed (graph + non-graph) set is
+  // rejected by qec_realtime_session::initialize() below.
+  const bool device_mode = any_decoder_supports_graph_dispatch();
+
+  cudaq_dispatch_launch_fn_t launch_fn = nullptr;
+  if (device_mode) {
+    // DEVICE mode needs the dispatch-kernel launch helper and the device-side
+    // shared-ring-mode setter, both resolved from libcudaq-realtime-dispatch.a
+    // (absorbed into the final executable).  HOST mode uses neither.
+    launch_fn = resolve_launch_dispatch_kernel_regular();
+    auto set_mode_fn = resolve_set_shared_ring_mode();
+    if (!launch_fn || !set_mode_fn)
+      throw std::runtime_error(
+          "CUDAQ_QEC_REALTIME_MODE=inproc_rpc requested with a graph-capable "
+          "decoder but cudaq_launch_dispatch_kernel_regular and/or "
+          "cudaq_dispatch_kernel_set_shared_ring_mode could not be resolved "
+          "via dlsym(RTLD_DEFAULT, ...). The host executable must absorb "
+          "libcudaq-realtime-dispatch.a and link with --export-dynamic.");
+
+    cudaError_t rc = set_mode_fn(1);
+    if (rc != cudaSuccess)
+      throw std::runtime_error(
+          "CUDAQ_QEC_REALTIME_MODE=inproc_rpc requested but "
+          "cudaq_dispatch_kernel_set_shared_ring_mode(1) failed with rc=" +
+          std::to_string(rc));
+    g_realtime_session_owns_shared_ring_mode = true;
+  } else {
+    CUDAQ_INFO("CUDAQ_QEC_REALTIME_MODE=inproc_rpc with CPU (non-graph) "
+               "decoder(s); using HOST dispatch mode (no device kernel / no "
+               "device shared-ring setup).");
+  }
+
+  try {
+    g_realtime_session =
+        std::make_unique<cudaq::qec::realtime::qec_realtime_session>(g_decoders,
+                                                                     launch_fn);
+    g_realtime_session->initialize();
+  } catch (const std::exception &e) {
+    const std::string what = e.what();
+    g_realtime_session.reset();
+    if (g_realtime_session_owns_shared_ring_mode) {
+      if (auto set_mode_fn = resolve_set_shared_ring_mode())
+        (void)set_mode_fn(0);
+      g_realtime_session_owns_shared_ring_mode = false;
+    }
+    throw std::runtime_error("CUDAQ_QEC_REALTIME_MODE=inproc_rpc requested but "
+                             "qec_realtime_session::initialize() threw: " +
+                             what);
+  }
+}
+
+void maybe_finalize_realtime_session() {
+  if (g_realtime_session) {
+    try {
+      g_realtime_session->finalize();
+    } catch (const std::exception &e) {
+      CUDAQ_WARN("qec_realtime_session::finalize threw: {}", e.what());
+    }
+    g_realtime_session.reset();
+  }
+  if (g_realtime_session_owns_shared_ring_mode) {
+    if (auto set_mode_fn = resolve_set_shared_ring_mode())
+      (void)set_mode_fn(0);
+  }
+  g_realtime_session_owns_shared_ring_mode = false;
+}
+
+} // namespace
+#else
+namespace {
+void maybe_init_realtime_session() {}
+void maybe_finalize_realtime_session() {}
+} // namespace
+#endif
 
 // Helper to pack syndrome bits into bytes (8 bits per byte, MSB first for
 // readability)
@@ -41,6 +178,10 @@ static std::vector<uint8_t> pack_syndrome_bits(const uint8_t *syndromes,
 }
 
 namespace cudaq::qec::decoding::host {
+
+cudaq::qec::realtime::qec_realtime_session *get_realtime_session() {
+  return g_realtime_session.get();
+}
 
 int configure_decoders(
     cudaq::qec::decoding::config::multi_decoder_config &config) {
@@ -73,6 +214,26 @@ int configure_decoders(
     CUDAQ_WARN("Minimum decoder ID is less than 0: {}", min_decoder_id);
     return 3;
   }
+
+#ifdef CUDAQ_REALTIME_ROOT
+  // inproc_rpc DEVICE sessions allocate pinned, device-mapped ring buffers
+  // (cudaHostAlloc(cudaHostAllocMapped) + cudaHostGetDevicePointer).
+  // cudaSetDeviceFlags(cudaDeviceMapHost) only takes effect BEFORE the device's
+  // CUDA context is created, and the per-decoder dry-run below
+  // (new_decoder->decode(...)) can create that context for GPU decoders -- so
+  // set the flag here, before any decoder is realized, rather than (only) later
+  // in qec_realtime_session::initialize().  Best-effort: if a context already
+  // exists this returns cudaErrorSetOnActiveProcess, which is harmless (mapped
+  // host allocation still works via UVA regardless of this device-wide flag),
+  // and HOST-mode CPU sessions do not use mapped memory at all.
+  if (realtime_mode_inproc_rpc_requested()) {
+    cudaError_t flags_err = cudaSetDeviceFlags(cudaDeviceMapHost);
+    if (flags_err != cudaSuccess && flags_err != cudaErrorSetOnActiveProcess)
+      CUDAQ_WARN("cudaSetDeviceFlags(cudaDeviceMapHost) returned '{}' before "
+                 "decoder init; continuing (mapped alloc works via UVA).",
+                 cudaGetErrorString(flags_err));
+  }
+#endif
 
   // Create the decoders based on the decoder configs.
   try {
@@ -126,11 +287,14 @@ int configure_decoders(
     CUDAQ_WARN("Error initializing decoders: {}", e.what());
     return 4;
   }
+
+  maybe_init_realtime_session();
   return 0;
 }
 
 void finalize_decoders() {
   CUDAQ_INFO("Finalizing the realtime decoding library.");
+  maybe_finalize_realtime_session();
   g_decoders.clear();
 }
 
@@ -175,6 +339,21 @@ void enqueue_syndromes(std::size_t decoder_id, uint8_t *syndromes,
     g_syndrome_capture_callback(packed_syndrome.data(), packed_syndrome.size());
   }
 
+#ifdef CUDAQ_REALTIME_ROOT
+  if (g_realtime_session) {
+    try {
+      cudaq::qec::decoding::rpc_producer::enqueue_syndromes(
+          *g_realtime_session, decoder_id, syndromes, syndrome_length, tag);
+    } catch (
+        const cudaq::qec::decoding::rpc_producer::dispatcher_unresponsive_error
+            &) {
+      maybe_finalize_realtime_session();
+      throw;
+    }
+    return;
+  }
+#endif
+
   std::vector<uint8_t> syndrome_u8(syndrome_length);
   bool did_decode = false;
   for (std::size_t i = 0; i < syndrome_length; i++) {
@@ -205,31 +384,46 @@ void get_corrections(std::size_t decoder_id, uint8_t *corrections,
         fmt::format("Decoder {} not found", decoder_id));
   }
   auto *decoder = g_decoders[decoder_id].get();
-  if (decoder) {
-    auto num_observables = decoder->get_num_observables();
-    auto ret = decoder->get_obs_corrections();
-    if (correction_length == 0) {
-      throw std::invalid_argument("correction_length must be greater than 0");
-    }
-    if (!corrections) {
-      throw std::invalid_argument("corrections buffer is null");
-    }
-    if (correction_length != num_observables) {
-      throw std::invalid_argument(
-          fmt::format("correction_length ({}) does not match number of "
-                      "observables ({})",
-                      correction_length, num_observables));
-    }
-    for (std::size_t i = 0; i < correction_length; ++i) {
-      corrections[i] = ret[i];
-    }
-    if (reset)
-      decoder->clear_corrections();
-  } else {
+  if (!decoder) {
     throw std::invalid_argument(
         fmt::format("Decoder {} not found", decoder_id));
   }
-  return;
+  const auto num_observables = decoder->get_num_observables();
+  if (correction_length == 0) {
+    throw std::invalid_argument("correction_length must be greater than 0");
+  }
+  if (!corrections) {
+    throw std::invalid_argument("corrections buffer is null");
+  }
+  if (correction_length != num_observables) {
+    throw std::invalid_argument(
+        fmt::format("correction_length ({}) does not match number of "
+                    "observables ({})",
+                    correction_length, num_observables));
+  }
+
+#ifdef CUDAQ_REALTIME_ROOT
+  if (g_realtime_session) {
+    try {
+      cudaq::qec::decoding::rpc_producer::get_corrections(
+          *g_realtime_session, decoder_id, corrections, correction_length,
+          reset ? 1u : 0u);
+    } catch (
+        const cudaq::qec::decoding::rpc_producer::dispatcher_unresponsive_error
+            &) {
+      maybe_finalize_realtime_session();
+      throw;
+    }
+    return;
+  }
+#endif
+
+  auto ret = decoder->get_obs_corrections();
+  for (std::size_t i = 0; i < correction_length; ++i) {
+    corrections[i] = ret[i];
+  }
+  if (reset)
+    decoder->clear_corrections();
 }
 
 void reset_decoder(std::size_t decoder_id) {
@@ -239,12 +433,27 @@ void reset_decoder(std::size_t decoder_id) {
         fmt::format("Decoder {} not found", decoder_id));
   }
   auto *decoder = g_decoders[decoder_id].get();
-  if (decoder) {
-    decoder->reset_decoder();
-  } else {
+  if (!decoder) {
     throw std::invalid_argument(
         fmt::format("Decoder {} not found", decoder_id));
   }
+
+#ifdef CUDAQ_REALTIME_ROOT
+  if (g_realtime_session) {
+    try {
+      cudaq::qec::decoding::rpc_producer::reset_decoder(*g_realtime_session,
+                                                        decoder_id);
+    } catch (
+        const cudaq::qec::decoding::rpc_producer::dispatcher_unresponsive_error
+            &) {
+      maybe_finalize_realtime_session();
+      throw;
+    }
+    return;
+  }
+#endif
+
+  decoder->reset_decoder();
 }
 
 } // namespace cudaq::qec::decoding::host

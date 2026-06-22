@@ -10,6 +10,10 @@ _rt_flag=""
 if [ -n "$CUDAQ_REALTIME_ROOT" ]; then
   _rt_flag="-DCUDAQ_REALTIME_ROOT=$CUDAQ_REALTIME_ROOT"
 fi
+_prop_archive_flag=""
+if [ -n "$CUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE" ]; then
+  _prop_archive_flag="-DCUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE=$CUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE"
+fi
 
 cmake -S . -B "$build_dir" \
   -DCMAKE_BUILD_TYPE=Release \
@@ -22,6 +26,7 @@ cmake -S . -B "$build_dir" \
   -DCUDAQX_INCLUDE_TESTS=ON \
   -DCUDAQX_BINDINGS_PYTHON=ON \
   -DCMAKE_INSTALL_PREFIX="$install_prefix" \
-  $_rt_flag
+  $_rt_flag \
+  $_prop_archive_flag
 
 cmake --build "$build_dir" --target install -j 4

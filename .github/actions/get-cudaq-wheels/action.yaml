@@ -12,8 +12,8 @@ inputs:
     description: 'CUDAQ repository access token.'
     default: ''
     required: false
-  pr-number:
-    description: 'Unique pull request identifier.'
+  cache-key-suffix:
+    description: 'Unique identifier to append to cache keys.'
     default: ''
     required: false
   save-build:
@@ -53,8 +53,9 @@ runs:
       run: |
         hash=${{ hashFiles(format('{0}', env.to_hash)) }}
         echo "main=cudaq-wheels-${{ inputs.platform }}-cu${{ inputs.cuda_version }}-${{ inputs.ref }}-$hash" >> $GITHUB_OUTPUT
-        if [[ -n "${{ inputs.pr-number }}" ]]; then
-          echo "pr=-pr${{ inputs.pr-number }}" >> $GITHUB_OUTPUT
+        suffix="${{ inputs.cache-key-suffix }}"
+        if [[ -n "$suffix" ]]; then
+          echo "suffix=-$suffix" >> $GITHUB_OUTPUT
         fi
         sudo mkdir /cudaq-wheels && sudo chmod 777 /cudaq-wheels
       shell: bash --noprofile --norc -euo pipefail {0}
@@ -65,7 +66,7 @@ runs:
       with:
         fail-on-cache-miss: false
         path: /cudaq-wheels
-        key: ${{ steps.cudaq-wheels-key.outputs.main }}${{ steps.cudaq-wheels-key.outputs.pr }}
+        key: ${{ steps.cudaq-wheels-key.outputs.main }}${{ steps.cudaq-wheels-key.outputs.suffix }}
         restore-keys: ${{ steps.cudaq-wheels-key.outputs.main }}
         lookup-only: ${{ inputs.lookup-only }}
 
@@ -155,4 +156,4 @@ runs:
       uses: actions/cache/save@v4
       with:
         path: /cudaq-wheels
-        key: ${{ steps.cudaq-wheels-key.outputs.main }}${{ steps.cudaq-wheels-key.outputs.pr }}
+        key: ${{ steps.cudaq-wheels-key.outputs.main }}${{ steps.cudaq-wheels-key.outputs.suffix }}

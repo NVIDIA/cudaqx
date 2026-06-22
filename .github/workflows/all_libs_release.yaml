@@ -85,7 +85,10 @@ jobs:
             # Extract the decoder that needs to be embedded in the release
             mkdir -p tmp
             tar -C tmp -xzvf nv-qldpc-decoder-${{ matrix.runner.arch }}_ubuntu24.04_cuda${{ matrix.cuda_version }}_release.tar.gz
+            test -f tmp/libcudaq-qec-nv-qldpc-decoder.so
+            test -f tmp/libcudaq-qec-realtime-cudevice-proprietary.a
             echo "QEC_EXTERNAL_DECODERS=$(pwd)/tmp/libcudaq-qec-nv-qldpc-decoder.so" >> $GITHUB_ENV
+            echo "CUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE=$(pwd)/tmp/libcudaq-qec-realtime-cudevice-proprietary.a" >> $GITHUB_ENV
           fi
         shell: bash
 
