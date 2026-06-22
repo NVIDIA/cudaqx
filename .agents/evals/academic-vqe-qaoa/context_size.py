@@ -49,7 +49,7 @@ ROUTE = {
     "P4": ("adapt", "references/adapt.md"),
     "P5": ("gqe", "references/gqe.md"),
     "P6": ("install", "references/install.md"),
-    "P7": ("qaoa", "references/qaoa.md"),   # MaxCut via recognition table
+    "P7": ("qaoa", "references/qaoa.md"),  # MaxCut via recognition table
     "P8": ("vqe", "references/vqe.md"),
 }
 
@@ -74,9 +74,7 @@ NO_SKILL_SOURCES = {
         "docs/sphinx/examples/solvers/python/gqe_h2.py",
         "libs/solvers/python/tests/test_gqe.py",
     ],
-    "install": [
-        "docs/sphinx/quickstart/installation.rst",
-    ],
+    "install": ["docs/sphinx/quickstart/installation.rst",],
 }
 
 
@@ -115,7 +113,9 @@ def measure(prompt_id: str, prompt_text: str) -> dict:
         "reference": ref,
         "with_skill_tokens": with_skill,
         "with_skill_breakdown": {
-            "SKILL.md": skill_tok, ref: ref_tok, "prompt": prompt_tok,
+            "SKILL.md": skill_tok,
+            ref: ref_tok,
+            "prompt": prompt_tok,
         },
         "no_skill_tokens": no_skill_tok,
         "no_skill_files": no_skill_files,
@@ -135,16 +135,23 @@ def response_tokens(files: list[Path]) -> int:
         print(f"{t:>7}  {f.name}")
     if counts:
         print("-" * 30)
-        print(f"{round(sum(counts) / len(counts)):>7}  mean ({len(counts)} files)")
+        print(
+            f"{round(sum(counts) / len(counts)):>7}  mean ({len(counts)} files)"
+        )
     return 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--json", action="store_true",
+    parser.add_argument("--json",
+                        action="store_true",
                         help="Emit machine-readable JSON.")
-    parser.add_argument("--response-tokens", nargs="+", type=Path, default=None,
-                        help="Tokenize response text file(s) and report counts.")
+    parser.add_argument(
+        "--response-tokens",
+        nargs="+",
+        type=Path,
+        default=None,
+        help="Tokenize response text file(s) and report counts.")
     args = parser.parse_args()
 
     if args.response_tokens:
@@ -157,7 +164,9 @@ def main() -> int:
         print(json.dumps(rows, indent=2))
         return 0
 
-    print(f"Tokenizer: cl100k_base   SKILL.md = {count_tokens(SKILL_MD)} tokens\n")
+    print(
+        f"Tokenizer: cl100k_base   SKILL.md = {count_tokens(SKILL_MD)} tokens\n"
+    )
     print(f"{'id':<4}{'route':<9}{'with skill':>11}{'no skill':>10}{'ratio':>8}"
           f"   reference")
     print("-" * 70)

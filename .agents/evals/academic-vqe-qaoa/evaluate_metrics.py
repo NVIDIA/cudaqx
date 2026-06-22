@@ -82,8 +82,9 @@ def score_record(prompt_id: str, record: dict[str, Any],
 
     raw_tokens = record.get("tokens")
     if isinstance(raw_tokens, dict):
-        numeric = [v for v in raw_tokens.values()
-                   if isinstance(v, (int, float))]
+        numeric = [
+            v for v in raw_tokens.values() if isinstance(v, (int, float))
+        ]
         token_total = int(sum(numeric)) if numeric else None
     elif isinstance(raw_tokens, (int, float)):
         token_total = int(raw_tokens)

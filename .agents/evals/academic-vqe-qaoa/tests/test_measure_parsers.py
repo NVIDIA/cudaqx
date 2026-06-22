@@ -12,10 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from measure_tokens import (  # noqa: E402
-    parse_claude_json,
-    parse_codex_jsonl,
-    parse_cursor_json,
-    record_meter,
+    parse_claude_json, parse_codex_jsonl, parse_cursor_json, record_meter,
 )
 
 
@@ -24,8 +21,11 @@ def test_claude_real_usage():
         "result": "answer text",
         "session_id": "s1",
         "total_cost_usd": 0.0079825,
-        "usage": {"input_tokens": 3, "output_tokens": 6,
-                  "cache_read_input_tokens": 15635},
+        "usage": {
+            "input_tokens": 3,
+            "output_tokens": 6,
+            "cache_read_input_tokens": 15635
+        },
     })
     text, usage, cost = parse_claude_json(sample)
     assert text == "answer text"
@@ -61,8 +61,13 @@ def test_codex_token_count_event_fallback():
 
 def test_cursor_with_usage():
     sample = json.dumps({
-        "result": "hi", "chatId": "abc", "model": "gpt-5",
-        "usage": {"input_tokens": 10, "output_tokens": 4},
+        "result": "hi",
+        "chatId": "abc",
+        "model": "gpt-5",
+        "usage": {
+            "input_tokens": 10,
+            "output_tokens": 4
+        },
     })
     text, usage, _ = parse_cursor_json(sample)
     assert text == "hi"
@@ -76,8 +81,10 @@ def test_cursor_without_usage_is_unavailable():
 
 
 def test_record_meter_totals_and_source():
-    rec = record_meter("P5", "claude",
-                        ("txt", {"input_tokens": 100, "output_tokens": 50}, 0.01))
+    rec = record_meter("P5", "claude", ("txt", {
+        "input_tokens": 100,
+        "output_tokens": 50
+    }, 0.01))
     assert rec["tokens"] == 150
     assert rec["tokens_source"] == "meter"
     assert rec["cost_usd"] == 0.01

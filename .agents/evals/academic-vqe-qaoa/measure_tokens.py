@@ -134,8 +134,8 @@ PARSERS = {
 }
 
 
-def build_command(runtime: str, binary: str, prompt: str,
-                  model: Optional[str], extra: list[str]) -> list[str]:
+def build_command(runtime: str, binary: str, prompt: str, model: Optional[str],
+                  extra: list[str]) -> list[str]:
     if runtime == "claude":
         cmd = [binary, "-p", prompt, "--output-format", "json"]
         if model:
@@ -232,7 +232,10 @@ def record_manual(pid: str, prompt: str) -> dict[str, Any]:
         "id": pid,
         "response": response,
         "tokens": in_tok + out_tok,
-        "usage": {"input_tokens": in_tok, "output_tokens": out_tok},
+        "usage": {
+            "input_tokens": in_tok,
+            "output_tokens": out_tok
+        },
         "tokens_source": "manual",
         "runtime": "manual",
     }
@@ -242,7 +245,8 @@ def record_meter(pid: str, runtime: str, parsed: Parsed) -> dict[str, Any]:
     text, usage, cost = parsed
     total = None
     if usage is not None:
-        total = int(usage.get("input_tokens", 0) + usage.get("output_tokens", 0))
+        total = int(
+            usage.get("input_tokens", 0) + usage.get("output_tokens", 0))
     rec: dict[str, Any] = {
         "id": pid,
         "response": text,
@@ -268,8 +272,11 @@ def selftest() -> int:
         "result": "Hello from Claude.",
         "session_id": "s1",
         "total_cost_usd": 0.0079825,
-        "usage": {"input_tokens": 3, "output_tokens": 6,
-                  "cache_read_input_tokens": 15635},
+        "usage": {
+            "input_tokens": 3,
+            "output_tokens": 6,
+            "cache_read_input_tokens": 15635
+        },
     })
     codex_sample = "\n".join([
         '{"type":"thread.started","thread_id":"t"}',
@@ -281,23 +288,32 @@ def selftest() -> int:
         '"reasoning_output_tokens":0}}',
     ])
     cursor_sample = json.dumps({
-        "result": "Hello!", "chatId": "abc", "model": "gpt-5",
-        "usage": {"input_tokens": 10, "output_tokens": 4},
+        "result": "Hello!",
+        "chatId": "abc",
+        "model": "gpt-5",
+        "usage": {
+            "input_tokens": 10,
+            "output_tokens": 4
+        },
     })
     cursor_no_usage = json.dumps({"result": "Hi", "chatId": "x", "model": "m"})
 
     checks = []
     t, u, c = parse_claude_json(claude_sample)
     checks.append((t == "Hello from Claude." and u == {
-        "input_tokens": 3, "output_tokens": 6} and c == 0.0079825,
-        "claude"))
+        "input_tokens": 3,
+        "output_tokens": 6
+    } and c == 0.0079825, "claude"))
     t, u, c = parse_codex_jsonl(codex_sample)
     checks.append((t == "Repo contains docs." and u == {
-        "input_tokens": 24763, "output_tokens": 122} and c is None,
-        "codex"))
+        "input_tokens": 24763,
+        "output_tokens": 122
+    } and c is None, "codex"))
     t, u, c = parse_cursor_json(cursor_sample)
     checks.append((t == "Hello!" and u == {
-        "input_tokens": 10, "output_tokens": 4}, "cursor"))
+        "input_tokens": 10,
+        "output_tokens": 4
+    }, "cursor"))
     t, u, c = parse_cursor_json(cursor_no_usage)
     checks.append((t == "Hi" and u is None, "cursor-no-usage"))
 
@@ -311,23 +327,33 @@ def selftest() -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--selftest", action="store_true",
+    parser.add_argument("--selftest",
+                        action="store_true",
                         help="Verify parsers on sample payloads and exit.")
-    parser.add_argument("--prompt-ids", default=None,
+    parser.add_argument("--prompt-ids",
+                        default=None,
                         help="Comma-separated prompt ids (default: ask).")
-    parser.add_argument("--config", default=None,
+    parser.add_argument("--config",
+                        default=None,
                         help="with_skill or without_skill (label only).")
-    parser.add_argument("--runtime", default="auto",
+    parser.add_argument("--runtime",
+                        default="auto",
                         choices=["auto", "claude", "codex", "cursor", "manual"])
     parser.add_argument("--model", default=None, help="Model id (optional).")
     parser.add_argument("--agent", default=None, help="Agent label override.")
-    parser.add_argument("--out", type=Path, default=None,
+    parser.add_argument("--out",
+                        type=Path,
+                        default=None,
                         help="Output run-JSON path.")
-    parser.add_argument("--timeout", type=int, default=600,
+    parser.add_argument("--timeout",
+                        type=int,
+                        default=600,
                         help="Per-prompt CLI timeout (seconds).")
-    parser.add_argument("--extra-args", default="",
+    parser.add_argument("--extra-args",
+                        default="",
                         help="Extra args appended to the CLI invocation.")
-    parser.add_argument("--dry-run", action="store_true",
+    parser.add_argument("--dry-run",
+                        action="store_true",
                         help="Print the CLI command(s) without running.")
     args = parser.parse_args()
 
@@ -342,11 +368,13 @@ def main() -> int:
         label = {"claude": "claude-code"}.get(runtime, runtime)
         if runtime != "manual" and binary is None:
             if args.dry_run:
-                binary = next(bins[0] for bins, key, _ in RUNTIMES
+                binary = next(bins[0]
+                              for bins, key, _ in RUNTIMES
                               if key == runtime)  # candidate name for preview
             else:
-                raise SystemExit(f"runtime '{runtime}' requested but its CLI is "
-                                 f"not on PATH")
+                raise SystemExit(
+                    f"runtime '{runtime}' requested but its CLI is "
+                    f"not on PATH")
 
     prompts = load_prompts()
     print(f"Runtime: {runtime}" + (f" ({binary})" if binary else ""))
@@ -387,8 +415,8 @@ def main() -> int:
         rec = record_meter(pid, runtime, parsed)
         src = rec["tokens_source"]
         tok = rec["tokens"]
-        print(f"  tokens={tok} ({src})"
-              + (f", cost_usd={rec['cost_usd']}" if "cost_usd" in rec else ""))
+        print(f"  tokens={tok} ({src})" +
+              (f", cost_usd={rec['cost_usd']}" if "cost_usd" in rec else ""))
         responses.append(rec)
 
     if args.dry_run or not responses:
@@ -396,8 +424,12 @@ def main() -> int:
             print("No responses recorded; nothing written.")
         return 0
 
-    payload = {"agent": agent, "config": config, "model": args.model or "",
-               "responses": responses}
+    payload = {
+        "agent": agent,
+        "config": config,
+        "model": args.model or "",
+        "responses": responses
+    }
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(payload, indent=2))
     print(f"\nWrote {len(responses)} response(s) to {out}")
