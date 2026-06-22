@@ -111,6 +111,32 @@ def _naive_cross_entropy(opt: "NMOptimizer") -> torch.Tensor:
             torch.log(preds[obs_f, 0]).sum())
 
 
+def _full_network_prediction(opt: "NMOptimizer") -> torch.Tensor:
+    arrays = []
+    noise_ids = {id(t) for t in opt.noise_model.tensors}
+    noise_stacked = torch.stack(
+        (1.0 - opt.noise_params[0], opt.noise_params[0]), dim=-1)
+    noise_pos_by_error = {
+        id(t): k for k, t in enumerate(opt.noise_model.tensors)
+    }
+    for tensor in opt.full_tn.tensors:
+        if id(tensor) in noise_ids:
+            arrays.append(noise_stacked[noise_pos_by_error[id(tensor)]])
+        elif isinstance(tensor.data, torch.Tensor):
+            arrays.append(tensor.data.detach().to(
+                device=opt.torch_device, dtype=opt.noise_params[0].dtype))
+        else:
+            arrays.append(
+                torch.as_tensor(np.asarray(tensor.data),
+                                dtype=opt.noise_params[0].dtype,
+                                device=opt.torch_device))
+    out = torch.einsum(
+        opt.full_tn.get_equation(output_inds=("batch_index",
+                                              opt.logical_obs_inds[0])),
+        *arrays)
+    return out / out.sum(dim=1, keepdim=True)
+
+
 # -- construction ------------------------------------------------------------
 
 
@@ -123,6 +149,8 @@ def test_construction_basic(device):
                                            num_shots=8,
                                            rng=np.random.default_rng(0))
     opt = _make_opt(H, logical, priors, syn, flips, device=device)
+    assert opt.contractor_config.contractor_name == "oe_torch_compiled"
+    assert opt.contractor_config.backend == "torch"
     assert opt._batch_size == 8
     assert opt._noise_probs.requires_grad
     assert len(opt.noise_params) == 1
@@ -327,6 +355,74 @@ def test_loss_fn_from_logits_and_probs(device, execute):
         v_self = opt.cross_entropy_loss()
     assert torch.allclose(v_probs, v_logits, atol=1e-8, rtol=1e-8)
     assert torch.allclose(v_probs, v_self, atol=1e-8, rtol=1e-8)
+
+
+@pytest.mark.parametrize("device", _device_params())
+@pytest.mark.parametrize("execute", _EXECUTE_MODES)
+def test_reduced_path_matches_full_network_reference(device, execute):
+    rng = np.random.default_rng(26)
+    H, logical = _nondegenerate_code()
+    init_priors = [0.2, 0.3, 0.4]
+    syn, flips = _sample_synthetic_dataset(H,
+                                           logical, [0.1, 0.15, 0.25],
+                                           num_shots=24,
+                                           rng=rng)
+    opt = _make_opt(H,
+                    logical,
+                    init_priors,
+                    syn,
+                    flips,
+                    device=device,
+                    dtype="float64",
+                    execute=execute)
+    with torch.no_grad():
+        p_full = _full_network_prediction(opt)
+        p_reduced = opt.decoder_prediction()
+        loss_full = (-torch.log(p_full[opt.obs_idx_true, 1]).sum() -
+                     torch.log(p_full[opt.obs_idx_false, 0]).sum())
+        loss_reduced = opt.cross_entropy_loss()
+    assert torch.allclose(p_full, p_reduced, atol=1e-7, rtol=1e-7)
+    assert torch.allclose(loss_full, loss_reduced, atol=1e-7, rtol=1e-7)
+
+    opt.noise_params[0].grad = None
+    loss = opt.cross_entropy_loss()
+    loss.backward()
+    grad = opt.noise_params[0].grad
+    assert grad is not None
+    assert torch.isfinite(grad).all()
+    assert torch.any(grad != 0.0)
+
+
+@pytest.mark.parametrize("device", _device_params())
+def test_reduced_path_matches_full_network_reference_static_codegen(device):
+    rng = np.random.default_rng(27)
+    H, logical = _nondegenerate_code()
+    init_priors = [0.2, 0.3, 0.4]
+    syn, flips = _sample_synthetic_dataset(H,
+                                           logical, [0.1, 0.15, 0.25],
+                                           num_shots=24,
+                                           rng=rng)
+    opt = _make_opt(H,
+                    logical,
+                    init_priors,
+                    syn,
+                    flips,
+                    device=device,
+                    dtype="float64",
+                    execute="codegen",
+                    dynamic_syndromes=False)
+    with torch.no_grad():
+        full = _full_network_prediction(opt)
+        assert torch.allclose(full,
+                              opt.decoder_prediction(),
+                              atol=1e-7,
+                              rtol=1e-7)
+        loss_full = (-torch.log(full[opt.obs_idx_true, 1]).sum() -
+                     torch.log(full[opt.obs_idx_false, 0]).sum())
+        assert torch.allclose(loss_full,
+                              opt.cross_entropy_loss(),
+                              atol=1e-7,
+                              rtol=1e-7)
 
 
 # -- numerical guards --------------------------------------------------------
