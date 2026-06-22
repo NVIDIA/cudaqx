@@ -924,18 +924,20 @@ TEST(StimDemGetDecoder, StillAcceptsParityCheckMatrix) {
 }
 
 TEST(StimDemGetDecoder, RepeatedDetectorOrObservableTargetsXorFold) {
-  const std::string dem_text = R"(error(0.1) D0 D0
-error(0.1) L0 L0
+  const std::string dem_text = R"(error(0.1) D0 D0 D1
+error(0.1) L0 L0 D2
 )";
 
   auto dem = cudaq::qec::dem_from_stim_text(dem_text);
-  ASSERT_EQ(dem.num_detectors(), 1u);
+  ASSERT_EQ(dem.num_detectors(), 3u);
   ASSERT_EQ(dem.num_observables(), 1u);
   ASSERT_EQ(dem.num_error_mechanisms(), 2u);
   EXPECT_EQ(dem.detector_error_matrix.at({0u, 0u}), 0u)
       << "duplicate D0 in error 0 should XOR-cancel to 0";
+  EXPECT_EQ(dem.detector_error_matrix.at({1u, 0u}), 1u) << "D1 survives";
   EXPECT_EQ(dem.observables_flips_matrix.at({0u, 1u}), 0u)
       << "duplicate L0 in error 1 should XOR-cancel to 0";
+  EXPECT_EQ(dem.detector_error_matrix.at({2u, 1u}), 1u) << "D2 survives";
 }
 
 TEST(StimDemGetDecoder, DemWithoutObservablesDoesNotAddODefault) {
@@ -997,6 +999,89 @@ error(0.05) D0 D1
   opts.insert("error_rate_vec", std::vector<double>{0.5});
   EXPECT_THROW(cudaq::qec::get_decoder("single_error_lut", dem_text, opts),
                std::runtime_error);
+}
+
+TEST(StimDemGetDecoder, SeparatorTargetsAreIgnoredByFallbackParser) {
+  // The fallback parser must skip Stim's '^' separator while retaining both
+  // detector targets and the observable target in the same error mechanism.
+  const std::string dem_text = "error(0.25) D0 ^ D1 L0\n";
+  auto dem = cudaq::qec::dem_from_stim_text(dem_text);
+  ASSERT_EQ(dem.num_error_mechanisms(), 1u);
+  ASSERT_EQ(dem.num_detectors(), 2u);
+  ASSERT_EQ(dem.num_observables(), 1u);
+  EXPECT_EQ(dem.detector_error_matrix.at({0, 0}), 1u);
+  EXPECT_EQ(dem.detector_error_matrix.at({1, 0}), 1u);
+  EXPECT_EQ(dem.observables_flips_matrix.at({0, 0}), 1u);
+}
+
+TEST(StimDemGetDecoder, DecomposeErrorsFalseIgnoresCaret) {
+  auto dem = cudaq::qec::dem_from_stim_text(
+      "error(0.1) D0 D2 ^ D1 D3\nerror(0.2) D0 D2 D1 D3\n");
+  ASSERT_EQ(dem.num_error_mechanisms(), 2u);
+  std::size_t expected_num_detectors = 4u;
+  for (std::size_t r = 0; r < expected_num_detectors; ++r) {
+    EXPECT_EQ(dem.detector_error_matrix.at({r, 0u}), 1u) << "D" << r;
+    EXPECT_EQ(dem.detector_error_matrix.at({r, 1u}), 1u) << "D" << r;
+  }
+  EXPECT_FALSE(dem.error_ids.has_value());
+}
+
+TEST(StimDemGetDecoder, DemFromStimTextErrorIds) {
+  const std::string dem_text = "error(0.05) D0 D1 L0\n"
+                               "error(0.03) D2 L1\n"
+                               "error(0.1) D0 D2 ^ D1 D3\n";
+
+  auto dem_no = cudaq::qec::dem_from_stim_text(dem_text);
+  EXPECT_FALSE(dem_no.error_ids.has_value());
+
+  auto dem_yes =
+      cudaq::qec::dem_from_stim_text(dem_text, /*use_decomp_suggestions=*/true);
+  ASSERT_TRUE(dem_yes.error_ids.has_value());
+  ASSERT_EQ(dem_yes.error_ids->size(), 4u);
+  EXPECT_EQ((*dem_yes.error_ids)[0], 0u);
+  EXPECT_EQ((*dem_yes.error_ids)[1], 1u);
+  EXPECT_EQ((*dem_yes.error_ids)[2], 2u);
+  EXPECT_EQ((*dem_yes.error_ids)[3], 2u);
+  ASSERT_EQ(dem_yes.error_rates.size(), 3u);
+  EXPECT_DOUBLE_EQ(dem_yes.error_rates[0], 0.05);
+  EXPECT_DOUBLE_EQ(dem_yes.error_rates[1], 0.03);
+  EXPECT_DOUBLE_EQ(dem_yes.error_rates[2], 0.1);
+}
+
+// Verify true: each ^ component becomes a separate column; observables and
+// error_ids follow the split.
+TEST(StimDemGetDecoder, DecomposeErrorsTrueSplitsCaretComponents) {
+  auto dem = cudaq::qec::dem_from_stim_text("error(0.1) D0 L0 ^ D1\n",
+                                            /*use_decomp_suggestions=*/true);
+  ASSERT_EQ(dem.num_error_mechanisms(), 2u);
+  ASSERT_EQ(dem.num_detectors(), 2u);
+  ASSERT_EQ(dem.num_observables(), 1u);
+
+  // Expected result:
+  //      E0 E1
+  // D0 [[1, 0],
+  // D1  [0, 1]]
+  // L0 [[1, 0]]
+  EXPECT_EQ(dem.detector_error_matrix.at({0u, 0u}), 1u);
+  EXPECT_EQ(dem.detector_error_matrix.at({0u, 1u}), 0u);
+  EXPECT_EQ(dem.detector_error_matrix.at({1u, 0u}), 0u);
+  EXPECT_EQ(dem.detector_error_matrix.at({1u, 1u}), 1u);
+  EXPECT_EQ(dem.observables_flips_matrix.at({0u, 0u}), 1u);
+  EXPECT_EQ(dem.observables_flips_matrix.at({0u, 1u}), 0u);
+
+  // error_ids maps both columns back to error mechanism 0.
+  ASSERT_TRUE(dem.error_ids.has_value());
+  EXPECT_EQ((*dem.error_ids)[0], 0u);
+  EXPECT_EQ((*dem.error_ids)[1], 0u);
+}
+
+TEST(StimDemGetDecoder, DecomposeErrorsXorCancelled) {
+  auto dem = cudaq::qec::dem_from_stim_text("error(0.1) D0 D0 ^ D1\n",
+                                            /*use_decomp_suggestions=*/true);
+  ASSERT_EQ(dem.num_error_mechanisms(), 1u)
+      << "empty component after XOR cancellation must be dropped";
+  EXPECT_EQ(dem.detector_error_matrix.at({0u, 0u}), 0u) << "D0 cancelled";
+  EXPECT_EQ(dem.detector_error_matrix.at({1u, 0u}), 1u) << "D1 survives";
 }
 
 // ---------------------------------------------------------------------------
@@ -1079,19 +1164,6 @@ TEST(EnqueueSyndrome, ObsFrameSizeMismatchThrows) {
                std::runtime_error);
 }
 
-TEST(StimDemGetDecoder, SeparatorTargetsAreIgnoredByFallbackParser) {
-  // The fallback parser must skip Stim's '^' separator while retaining both
-  // detector targets and the observable target in the same error mechanism.
-  const std::string dem_text = "error(0.25) D0 ^ D1 L0\n";
-  auto dem = cudaq::qec::dem_from_stim_text(dem_text);
-  ASSERT_EQ(dem.num_error_mechanisms(), 1u);
-  ASSERT_EQ(dem.num_detectors(), 2u);
-  ASSERT_EQ(dem.num_observables(), 1u);
-  EXPECT_EQ(dem.detector_error_matrix.at({0, 0}), 1u);
-  EXPECT_EQ(dem.detector_error_matrix.at({1, 0}), 1u);
-  EXPECT_EQ(dem.observables_flips_matrix.at({0, 0}), 1u);
-}
-
 TEST(SlidingWindowDecoder, BaseStreamingCopiesFirstRoundDetectors) {
   // A first-round detector matrix starts with single-syndrome rows; the base
   // enqueue path should decode after one streamed round using a direct copy.
@@ -1121,3 +1193,4 @@ TEST(SlidingWindowDecoder, BaseStreamingCopiesFirstRoundDetectors) {
       << "First-round detector copy runs, but the sliding window is not full "
          "yet so no final correction is committed.";
 }
+

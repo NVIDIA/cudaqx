@@ -913,13 +913,13 @@ def test_dem_from_stim_text_explicit_parse_then_get_decoder():
     assert decoder.get_block_size() == 3
 
 
-def test_dem_from_stim_text_decompose_errors():
+def test_dem_from_stim_text_use_decomp_suggestions():
     dem_text = ("error(0.05) D0 D1 L0\n"
                 "error(0.03) D2 L1\n"
                 "error(0.1) D0 D2 ^ D1 D3\n")
 
-    # ── decompose_errors=False
-    dem_no = qec.dem_from_stim_text(dem_text, decompose_errors=False)
+    # ── use_decomp_suggestions=False
+    dem_no = qec.dem_from_stim_text(dem_text, use_decomp_suggestions=False)
     assert dem_no.num_detectors() == 4
     assert dem_no.num_observables() == 2
     assert dem_no.num_error_mechanisms() == 3
@@ -939,8 +939,8 @@ def test_dem_from_stim_text_decompose_errors():
     np.testing.assert_allclose(dem_no.error_rates, [0.05, 0.03, 0.1],
                                atol=1e-12)
 
-    # ── decompose_errors=True
-    dem_yes = qec.dem_from_stim_text(dem_text, decompose_errors=True)
+    # ── use_decomp_suggestions=True
+    dem_yes = qec.dem_from_stim_text(dem_text, use_decomp_suggestions=True)
     assert dem_yes.num_detectors() == 4
     assert dem_yes.num_observables() == 2
     assert dem_yes.num_error_mechanisms() == 4  # instruction 3 splits into 2
@@ -955,17 +955,19 @@ def test_dem_from_stim_text_decompose_errors():
     np.testing.assert_array_equal(
         np.array(dem_yes.observables_flips_matrix, dtype=np.uint8),
         explicit_O_yes)
-    np.testing.assert_allclose(dem_yes.error_rates, [0.05, 0.03, 0.1, 0.1],
+    # error_rates: one entry per source instruction (physical error rate).
+    # Use error_rates[error_ids[i]] to get the rate for column i.
+    np.testing.assert_allclose(dem_yes.error_rates, [0.05, 0.03, 0.1],
                                atol=1e-12)
 
 
-def test_dem_from_stim_text_decompose_errors_edge_cases():
+def test_dem_from_stim_text_use_decomp_suggestions_edge_cases():
     A = lambda d: np.array(d, dtype=np.uint8)
 
-    # 1. No '^' in DEM — decompose_errors=True must be a no-op.
+    # 1. No '^' in DEM — use_decomp_suggestions=True must be a no-op.
     dem_text = "error(0.1) D0 D1 L0\nerror(0.2) D1 D2\n"
-    no = qec.dem_from_stim_text(dem_text, decompose_errors=False)
-    yes = qec.dem_from_stim_text(dem_text, decompose_errors=True)
+    no = qec.dem_from_stim_text(dem_text, use_decomp_suggestions=False)
+    yes = qec.dem_from_stim_text(dem_text, use_decomp_suggestions=True)
     np.testing.assert_array_equal(A(no.detector_error_matrix),
                                   A(yes.detector_error_matrix))
     np.testing.assert_array_equal(A(no.observables_flips_matrix),
@@ -975,7 +977,7 @@ def test_dem_from_stim_text_decompose_errors_edge_cases():
     # 2. Observable flips split across components — each L stays with its '^' segment.
     # error(0.1) D0 L0 ^ D1 L1  →  col0: D0+L0, col1: D1+L1
     dem_text = "error(0.1) D0 L0 ^ D1 L1\n"
-    dem = qec.dem_from_stim_text(dem_text, decompose_errors=True)
+    dem = qec.dem_from_stim_text(dem_text, use_decomp_suggestions=True)
     assert dem.num_error_mechanisms() == 2
     np.testing.assert_array_equal(A(dem.detector_error_matrix),
                                   A([[1, 0], [0, 1]]))
@@ -983,12 +985,31 @@ def test_dem_from_stim_text_decompose_errors_edge_cases():
                                   A([[1, 0], [0, 1]]))
 
     # 3. Repeated detector within one component XOR-cancels to 0.
-    # error(0.1) D0 D0 ^ D1  →  col0: D0 appears twice → cancels; col1: D1
+    # error(0.1) D0 D0 ^ D1  →  component 0 has no net detectors after
+    # cancellation so it is dropped entirely; only D1 remains as one column.
     dem_text = "error(0.1) D0 D0 ^ D1\n"
-    dem = qec.dem_from_stim_text(dem_text, decompose_errors=True)
-    assert dem.num_error_mechanisms() == 2
-    np.testing.assert_array_equal(A(dem.detector_error_matrix),
-                                  A([[0, 0], [0, 1]]))
+    dem = qec.dem_from_stim_text(dem_text, use_decomp_suggestions=True)
+    assert dem.num_error_mechanisms() == 1
+    np.testing.assert_array_equal(A(dem.detector_error_matrix), A([[0], [1]]))
+
+
+def test_dem_from_stim_text_error_ids():
+    dem_text = ("error(0.05) D0 D1 L0\n"
+                "error(0.03) D2 L1\n"
+                "error(0.1) D0 D2 ^ D1 D3\n")
+
+    dem_no = qec.dem_from_stim_text(dem_text, use_decomp_suggestions=False)
+    assert dem_no.error_ids is None, \
+        "error_ids should not be set when use_decomp_suggestions=False"
+
+    dem_yes = qec.dem_from_stim_text(dem_text, use_decomp_suggestions=True)
+    assert dem_yes.error_ids is not None, \
+        "error_ids should be set when use_decomp_suggestions=True"
+    assert list(dem_yes.error_ids) == [0, 1, 2, 2], \
+        "columns from the same instruction must share an error_id"
+    # error_rates: one per source instruction; use error_rates[error_ids[i]] for column i.
+    np.testing.assert_allclose(dem_yes.error_rates, [0.05, 0.03, 0.1],
+                               atol=1e-12)
 
 
 def test_get_decoder_rejects_malformed_stim_dem_text():

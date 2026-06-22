@@ -23,8 +23,10 @@ namespace cudaq::qec {
 ///
 /// Shared size parameters among the matrix types.
 /// - `detector_error_matrix`: num_detectors x num_error_mechanisms [d, e]
-/// - `error_rates`: num_error_mechanisms
 /// - `observables_flips_matrix`: num_observables x num_error_mechanisms [k, e]
+/// - `error_rates`: num_physical_error_mechanisms (≤ num_error_mechanisms)
+/// - `error_ids` (optional): num_error_mechanisms — maps column i to its
+///   corresponding physical error mechanismin `error_rates`
 ///
 /// @note The C++ API for this class may change in the future. The Python API is
 /// more likely to be backwards compatible.
@@ -35,9 +37,10 @@ struct detector_error_model {
   /// i is triggered by error mechanism j, and 0 otherwise.
   cudaqx::tensor<uint8_t> detector_error_matrix;
 
-  /// The list of weights has length equal to the number of columns of
-  /// `detector_error_matrix`, which assigns a likelihood to each error
-  /// mechanism.
+  /// One entry per distinct physical error mechanism. When `error_ids` is not
+  /// set, this equals one entry per column of `detector_error_matrix`. When
+  /// `error_ids` is set, this equals one entry per distinct physical error
+  /// mechanism. Use `error_rates[error_ids[i]]` for the rate of column i.
   std::vector<double> error_rates;
 
   /// The observables flips matrix is a specific kind of circuit-level parity-
@@ -82,13 +85,16 @@ struct detector_error_model {
                                bool remove_zero_syndrome_errors = false);
 };
 
-/// Parse Stim DEM text into detector/observable flip matrices and error rates.
-/// DEM-native decoders should consume raw DEM text instead.
-/// If @p decompose_errors is true, error mechanisms that carry an explicit
-/// graphlike decomposition (components separated by '^' in the DEM text) are
-/// expanded into one column per component; otherwise the '^' separators are
-/// ignored and each error instruction produces a single column.
+/// Parse the Stim DEM string @p dem_text into detector/observable flip
+/// matrices and error rates. DEM-native decoders should consume raw DEM text
+/// instead. By default (@p use_decomp_suggestions = false) the '^' separators
+/// are ignored and each error instruction produces a single column. If
+/// @p use_decomp_suggestions is true, error mechanisms that carry an explicit
+/// graphlike decomposition (components separated by '^') are expanded into one
+/// column per component; @p error_ids is then populated so that columns sharing
+/// an ID originate from the same instruction and carry correlated (not
+/// independent) error rates.
 detector_error_model dem_from_stim_text(const std::string &dem_text,
-                                        bool decompose_errors = false);
+                                        bool use_decomp_suggestions = false);
 
 } // namespace cudaq::qec

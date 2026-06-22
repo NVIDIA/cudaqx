@@ -22,7 +22,7 @@
 namespace cudaq::qec {
 
 detector_error_model dem_from_stim_text(const std::string &dem_text,
-                                        bool decompose_errors) {
+                                        bool use_decomp_suggestions) {
   auto dem = [&dem_text]() {
     try {
       return stim::DetectorErrorModel(dem_text);
@@ -38,7 +38,8 @@ detector_error_model dem_from_stim_text(const std::string &dem_text,
 
   std::vector<std::vector<std::size_t>> detector_hits;
   std::vector<std::vector<std::size_t>> observable_hits;
-  std::vector<double> rates;
+  std::vector<double> error_rates;
+  std::vector<std::size_t> error_ids;
   std::size_t instruction_index = 0;
 
   dem.iter_flatten_error_instructions([&](const stim::DemInstruction &inst) {
@@ -53,13 +54,22 @@ detector_error_model dem_from_stim_text(const std::string &dem_text,
                                " out of range [0, 1] at instruction index " +
                                std::to_string(instruction_index));
 
-    std::vector<std::size_t> dets;
-    std::vector<std::size_t> obs;
+    std::set<std::size_t> dets_parity;
+    std::set<std::size_t> obs_parity;
+    bool new_col =
+        true; // true until this instruction produces its first column
+
+    auto toggle = [](std::set<std::size_t> &s, std::size_t v) {
+      if (!s.erase(v)) {
+        s.insert(v);
+      }
+    };
+
     auto push_target = [&](const stim::DemTarget &target) {
       if (target.is_relative_detector_id()) {
-        dets.push_back(static_cast<std::size_t>(target.val()));
+        toggle(dets_parity, static_cast<std::size_t>(target.val()));
       } else if (target.is_observable_id()) {
-        obs.push_back(static_cast<std::size_t>(target.val()));
+        toggle(obs_parity, static_cast<std::size_t>(target.val()));
       } else {
         throw std::runtime_error(
             "Stim DEM error instruction (index " +
@@ -69,51 +79,48 @@ detector_error_model dem_from_stim_text(const std::string &dem_text,
       }
     };
 
-    if (decompose_errors) {
-      // Each segment delimited by '^' in the DEM text becomes its own column.
-      auto flush = [&]() {
-        if (!dets.empty() || !obs.empty()) {
-          detector_hits.push_back(dets);
-          observable_hits.push_back(obs);
-          rates.push_back(prob);
-          dets.clear();
-          obs.clear();
+    auto flush = [&]() {
+      if (!dets_parity.empty() || !obs_parity.empty()) {
+        detector_hits.push_back({dets_parity.begin(), dets_parity.end()});
+        observable_hits.push_back({obs_parity.begin(), obs_parity.end()});
+        if (new_col) {
+          error_rates.push_back(prob);
+          new_col = false;
         }
-      };
-      for (const auto &target : inst.target_data) {
-        if (target.is_separator()) {
+        error_ids.push_back(error_rates.size() - 1);
+        dets_parity.clear();
+        obs_parity.clear();
+      }
+    };
+
+    for (const auto &target : inst.target_data) {
+      if (target.is_separator()) {
+        if (use_decomp_suggestions) {
           flush();
-        } else {
-          push_target(target);
         }
+        continue;
       }
-      flush();
-    } else {
-      // Ignore '^' separators; all targets become a single column.
-      for (const auto &target : inst.target_data) {
-        if (target.is_separator())
-          continue;
-        push_target(target);
-      }
-      detector_hits.push_back(std::move(dets));
-      observable_hits.push_back(std::move(obs));
-      rates.push_back(prob);
+      push_target(target);
     }
+    flush();
     ++instruction_index;
   });
 
-  const std::size_t num_errors = rates.size();
-  if (num_errors == 0)
+  const std::size_t num_cols = detector_hits.size();
+  if (num_cols == 0)
     throw std::runtime_error(
         "Stim DEM contains no error mechanisms after flattening");
   detector_error_model result;
   result.detector_error_matrix =
-      cudaqx::tensor<uint8_t>({num_detectors, num_errors});
+      cudaqx::tensor<uint8_t>({num_detectors, num_cols});
   result.observables_flips_matrix =
-      cudaqx::tensor<uint8_t>({num_observables, num_errors});
-  result.error_rates = std::move(rates);
+      cudaqx::tensor<uint8_t>({num_observables, num_cols});
+  result.error_rates = std::move(error_rates);
+  if (use_decomp_suggestions) {
+    result.error_ids = std::move(error_ids);
+  }
 
-  for (std::size_t err = 0; err < num_errors; ++err) {
+  for (std::size_t err = 0; err < num_cols; ++err) {
     for (auto det : detector_hits[err]) {
       if (det >= num_detectors)
         throw std::runtime_error(

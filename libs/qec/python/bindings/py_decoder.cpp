@@ -746,8 +746,10 @@ void bindDecoder(nb::module_ &mod) {
           )pbdoc")
       .def_rw("error_rates", &detector_error_model::error_rates,
               R"pbdoc(
-      The list of weights has length equal to the number of columns of the
-      detector error matrix, which assigns a likelihood to each error mechanism.
+      One entry per distinct physical error mechanism. When ``error_ids`` 
+      is not set, this equals one entry per column of ``detector_error_matrix``. When ``error_ids`` is set,
+      this equals one entry per distinct physical error mechanism. Use
+      ``error_rates[error_ids[i]]`` for the rate of column i.
     )pbdoc")
       .def_rw("error_ids", &detector_error_model::error_ids, R"pbdoc(
        Error mechanism ID. From a probability perspective, each error mechanism
@@ -820,9 +822,9 @@ void bindDecoder(nb::module_ &mod) {
 
         Args:
             dem_text: A Stim detector error model string.
-            decompose_errors: If error mechanism separated by ``^`` are decomposed
+            use_decomp_suggestions: If error mechanism separated by ``^`` are decomposed
       )pbdoc",
-             nb::arg("dem_text"), nb::arg("decompose_errors") = false);
+             nb::arg("dem_text"), nb::arg("use_decomp_suggestions") = false);
 
   // Expose decorator function that handles inheritance
   qecmod.def("decoder", [&](const std::string &name) {
