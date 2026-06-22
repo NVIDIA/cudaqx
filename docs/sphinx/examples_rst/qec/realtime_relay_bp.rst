@@ -109,7 +109,7 @@ Source Repositories
      - Version
    * - **cudaqx**
      - https://github.com/NVIDIA/cudaqx
-     - ``main`` branch (or your feature branch)
+     - ``releases/v0.6.0`` branch (or your feature branch)
    * - **cuda-quantum** (realtime)
      - https://github.com/NVIDIA/cuda-quantum
      - Branch ``releases/v0.14.1``
