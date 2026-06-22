@@ -15,6 +15,39 @@
 #    build/libs/qec/unittests/realtime/app_examples/qir-*.ll
 #------------------------------------------------------------------------------#
 
+# Resolve cudaq-realtime dispatch for app examples that opt into
+# CUDAQ_QEC_REALTIME_MODE=inproc_rpc.
+set(_app_cudaq_realtime_prefixes "")
+if(CUDAQ_REALTIME_ROOT)
+  list(APPEND _app_cudaq_realtime_prefixes "${CUDAQ_REALTIME_ROOT}")
+  list(APPEND _app_cudaq_realtime_prefixes "${CUDAQ_REALTIME_ROOT}/build")
+endif()
+if(CUDAQ_INSTALL_PREFIX)
+  list(APPEND _app_cudaq_realtime_prefixes "${CUDAQ_INSTALL_PREFIX}")
+endif()
+find_library(_APP_CUDAQ_REALTIME_DISPATCH_LIB cudaq-realtime-dispatch
+  PATHS ${_app_cudaq_realtime_prefixes} PATH_SUFFIXES lib)
+
+function(qec_realtime_app_link_options _tgt)
+  target_link_options(${_tgt} PRIVATE
+    "LINKER:--allow-shlib-undefined"
+    "LINKER:--export-dynamic"
+  )
+  if(_APP_CUDAQ_REALTIME_DISPATCH_LIB)
+    target_link_libraries(${_tgt} PRIVATE
+      ${_APP_CUDAQ_REALTIME_DISPATCH_LIB})
+  endif()
+  if(TARGET cudaq-qec-realtime-cudevice-proprietary)
+    target_link_libraries(${_tgt} PRIVATE
+      CUDA::cudart
+      $<LINK_LIBRARY:WHOLE_ARCHIVE,cudaq-qec-realtime-cudevice-proprietary>)
+    set_property(TARGET ${_tgt} PROPERTY CUDA_SEPARABLE_COMPILATION ON)
+    set_property(TARGET ${_tgt} PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+    set_property(TARGET ${_tgt} PROPERTY CUDA_STANDARD 17)
+    set_property(TARGET ${_tgt} PROPERTY LINKER_LANGUAGE CUDA)
+  endif()
+endfunction()
+
 #------------------------------------------------------------------------------#
 # Surface code 1, fully local, regular Stim simulator
 add_executable(surface_code-1-local)
@@ -37,6 +70,7 @@ target_link_libraries(surface_code-1-local
     cudaq-qec-realtime-decoding-simulation
     cudaq::cudaq cudaq::cudaq-common cudaq-mlir-runtime
     nvqir nvqir-stim)
+qec_realtime_app_link_options(surface_code-1-local)
 
 add_test(
   NAME app_examples.surface_code-1-local-test-distance-3
@@ -48,6 +82,25 @@ add_test(
       ${CMAKE_BINARY_DIR}/lib
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
+
+if(_APP_CUDAQ_REALTIME_DISPATCH_LIB
+   AND TARGET cudaq-qec-realtime-cudevice-proprietary)
+  add_test(
+    NAME app_examples.surface_code-1-local-test-distance-3-inproc-rpc
+    COMMAND
+      bash "${CMAKE_CURRENT_SOURCE_DIR}/surface_code-1-test.sh"
+        ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-local
+        ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-local
+        3 60 40 NULL 12 6
+        ${CMAKE_BINARY_DIR}/lib
+        nv-qldpc-decoder
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+  )
+  set_tests_properties(
+    app_examples.surface_code-1-local-test-distance-3-inproc-rpc
+    PROPERTIES ENVIRONMENT
+      "CUDAQ_QEC_REALTIME_MODE=inproc_rpc;EXTRA_CLI_ARGS=--use-relay-bp")
+endif()
 
 # Test with sliding_window decoder
 add_test(
@@ -120,6 +173,7 @@ target_link_libraries(surface_code-1-quantinuum-emulate
     cudaq-qec-realtime-decoding-quantinuum
     cudaq::cudaq cudaq::cudaq-common cudaq-mlir-runtime cudaq-rest-qpu
     nvqir nvqir-stim)
+qec_realtime_app_link_options(surface_code-1-quantinuum-emulate)
 
 add_test(
   NAME app_examples.surface_code-1-quantinuum-emulate-test-distance-3-in-process
@@ -169,6 +223,7 @@ target_link_libraries(surface_code-2-local
     cudaq-qec-realtime-decoding-simulation
     cudaq::cudaq cudaq::cudaq-common cudaq-mlir-runtime
     nvqir nvqir-stim)
+qec_realtime_app_link_options(surface_code-2-local)
 
 add_test(
   NAME app_examples.surface_code-2-local-test-distance-3
@@ -230,6 +285,7 @@ target_link_libraries(surface_code-2-quantinuum-emulate
     cudaq-qec-realtime-decoding-quantinuum
     cudaq::cudaq cudaq::cudaq-common cudaq-mlir-runtime cudaq-rest-qpu
     nvqir nvqir-stim)
+qec_realtime_app_link_options(surface_code-2-quantinuum-emulate)
 
 add_test(
   NAME app_examples.surface_code-2-quantinuum-emulate-test-distance-3-in-process
@@ -300,6 +356,7 @@ target_link_libraries(surface_code-3-local
     cudaq-qec-realtime-decoding-simulation
     cudaq::cudaq cudaq::cudaq-common cudaq-mlir-runtime
     nvqir nvqir-stim)
+qec_realtime_app_link_options(surface_code-3-local)
 
 # --- Local tests ---
 add_surface_code_test(
@@ -351,6 +408,7 @@ target_link_libraries(surface_code-3-quantinuum-emulate
     cudaq-qec-realtime-decoding-quantinuum
     cudaq::cudaq cudaq::cudaq-common cudaq-mlir-runtime cudaq-rest-qpu
     nvqir nvqir-stim)
+qec_realtime_app_link_options(surface_code-3-quantinuum-emulate)
 
 
     # --- Quantinuum emulate (in-process) ---

@@ -212,6 +212,7 @@ jobs:
     with:
       build_type: Release
       cudaq_wheels: Custom
+      cache_key_suffix: pr${{ needs.check-changes.outputs.pr-number }}
     secrets:
       CUDAQ_ACCESS_TOKEN: ${{ secrets.CUDAQ_ACCESS_TOKEN }}
 

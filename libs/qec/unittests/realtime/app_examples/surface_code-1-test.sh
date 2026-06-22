@@ -43,6 +43,7 @@ LIB_DIR=$9
 DECODER_TYPE=${10:-multi_error_lut}
 SW_WINDOW_SIZE=${11:-$DECODER_WINDOW}
 SW_STEP_SIZE=${12:-1}
+EXTRA_CLI_ARGS=${EXTRA_CLI_ARGS:-}
 
 export CUDAQ_DEFAULT_SIMULATOR=stim
 
@@ -59,7 +60,7 @@ FULL_SUFFIX=$timestamp-$RNG_SUFFIX
 CONFIG_FILE=config-${FULL_SUFFIX}.yml
 
 # Generate the config file using the first executable.
-$EXE_PATH1 --distance $DISTANCE --num_rounds $NUM_ROUNDS --num_shots $NUM_SHOTS --save_dem $CONFIG_FILE --decoder_window $DECODER_WINDOW --decoder_type $DECODER_TYPE --sw_window_size $SW_WINDOW_SIZE --sw_step_size $SW_STEP_SIZE | tee save_dem-$FULL_SUFFIX.log
+$EXE_PATH1 --distance $DISTANCE --num_rounds $NUM_ROUNDS --num_shots $NUM_SHOTS --save_dem $CONFIG_FILE --decoder_window $DECODER_WINDOW --decoder_type $DECODER_TYPE --sw_window_size $SW_WINDOW_SIZE --sw_step_size $SW_STEP_SIZE $EXTRA_CLI_ARGS | tee save_dem-$FULL_SUFFIX.log
 
 export CUDAQ_DUMP_JIT_IR=${CUDAQ_DUMP_JIT_IR:-0}
 
@@ -75,8 +76,8 @@ export CUDAQ_DUMP_JIT_IR=${CUDAQ_DUMP_JIT_IR:-0}
 
 
 # Use the config file using the second executable.
-echo Running $EXE_PATH2 --distance $DISTANCE --num_shots $NUM_SHOTS --load_dem $CONFIG_FILE --num_rounds $NUM_ROUNDS --decoder_window $DECODER_WINDOW --decoder_type $DECODER_TYPE --sw_window_size $SW_WINDOW_SIZE --sw_step_size $SW_STEP_SIZE
-$EXE_PATH2 --distance $DISTANCE --num_shots $NUM_SHOTS --load_dem $CONFIG_FILE --num_rounds $NUM_ROUNDS --decoder_window $DECODER_WINDOW --decoder_type $DECODER_TYPE --sw_window_size $SW_WINDOW_SIZE --sw_step_size $SW_STEP_SIZE |& tee load_dem-$FULL_SUFFIX.log
+echo Running $EXE_PATH2 --distance $DISTANCE --num_shots $NUM_SHOTS --load_dem $CONFIG_FILE --num_rounds $NUM_ROUNDS --decoder_window $DECODER_WINDOW --decoder_type $DECODER_TYPE --sw_window_size $SW_WINDOW_SIZE --sw_step_size $SW_STEP_SIZE $EXTRA_CLI_ARGS
+$EXE_PATH2 --distance $DISTANCE --num_shots $NUM_SHOTS --load_dem $CONFIG_FILE --num_rounds $NUM_ROUNDS --decoder_window $DECODER_WINDOW --decoder_type $DECODER_TYPE --sw_window_size $SW_WINDOW_SIZE --sw_step_size $SW_STEP_SIZE $EXTRA_CLI_ARGS |& tee load_dem-$FULL_SUFFIX.log
 
 # If CUDAQ_DUMP_JIT_IR is "1", then extract the QIR from the
 # load_dem-$FULL_SUFFIX.log file and place it in qir-$FULL_SUFFIX.ll.
