@@ -1,5 +1,5 @@
 /****************************************************************-*- C++ -*-****
- * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
+ * Copyright (c) 2024 - 2026 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -54,6 +54,11 @@ struct nv_qldpc_decoder_config {
   std::optional<srelay_bp_config> srelay_config;
   std::optional<int> bp_seed;
   std::optional<int> composition;
+  // When set with a positive clip_value, forces the plugin's fixed-point
+  // arithmetic path so corrections are reproducible across runs and across
+  // hardware revisions. Required for the dispatcher-contract test which
+  // compares decoded corrections against a recorded fixture byte-by-byte.
+  std::optional<bool> repeatable;
 
   bool operator==(const nv_qldpc_decoder_config &) const = default;
   // opt_results is currently not supported for real-time decoding.
@@ -86,6 +91,19 @@ struct single_error_lut_config {
   to_heterogeneous_map() const;
 
   __attribute__((visibility("default"))) static single_error_lut_config
+  from_heterogeneous_map(const cudaqx::heterogeneous_map &map);
+};
+
+struct pymatching_config {
+  std::optional<std::vector<double>> error_rate_vec;
+  std::optional<std::string> merge_strategy;
+
+  bool operator==(const pymatching_config &) const = default;
+
+  __attribute__((visibility("default"))) cudaqx::heterogeneous_map
+  to_heterogeneous_map() const;
+
+  __attribute__((visibility("default"))) static pymatching_config
   from_heterogeneous_map(const cudaqx::heterogeneous_map &map);
 };
 
@@ -140,7 +158,7 @@ struct decoder_config {
   std::vector<std::int64_t> D_sparse;
   std::variant<single_error_lut_config, multi_error_lut_config,
                nv_qldpc_decoder_config, sliding_window_config,
-               trt_decoder_config>
+               trt_decoder_config, pymatching_config>
       decoder_custom_args;
 
   bool operator==(const decoder_config &) const = default;
@@ -166,6 +184,9 @@ struct decoder_config {
                    decoder_custom_args)) {
       return std::get<trt_decoder_config>(decoder_custom_args)
           .to_heterogeneous_map();
+    } else if (std::holds_alternative<pymatching_config>(decoder_custom_args)) {
+      return std::get<pymatching_config>(decoder_custom_args)
+          .to_heterogeneous_map();
     }
     return cudaqx::heterogeneous_map();
   }
@@ -185,6 +206,8 @@ struct decoder_config {
       decoder_custom_args = sliding_window_config::from_heterogeneous_map(map);
     } else if (type == "trt_decoder") {
       decoder_custom_args = trt_decoder_config::from_heterogeneous_map(map);
+    } else if (type == "pymatching") {
+      decoder_custom_args = pymatching_config::from_heterogeneous_map(map);
     }
   }
 

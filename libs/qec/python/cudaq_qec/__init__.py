@@ -1,5 +1,5 @@
 # ============================================================================ #
-# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
+# Copyright (c) 2024 - 2026 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -84,6 +84,7 @@ operation = qecrt.operation
 get_code = qecrt.get_code
 get_available_codes = qecrt.get_available_codes
 get_decoder = qecrt.get_decoder
+dem_from_stim_text = qecrt.dem_from_stim_text
 DecoderResult = qecrt.DecoderResult
 BatchDecoderResult = qecrt.BatchDecoderResult
 DetectorErrorModel = qecrt.DetectorErrorModel
@@ -96,7 +97,6 @@ z_dem_from_memory_circuit = qecrt.z_dem_from_memory_circuit
 
 dump_pcm = qecrt.dump_pcm
 generate_random_pcm = qecrt.generate_random_pcm
-generate_random_pcm_sparse = qecrt.generate_random_pcm_sparse
 get_pcm_for_rounds = qecrt.get_pcm_for_rounds
 get_sorted_pcm_column_indices = qecrt.get_sorted_pcm_column_indices
 pcm_is_sorted = qecrt.pcm_is_sorted
@@ -115,6 +115,7 @@ decoder_config = qecrt.config.decoder_config
 nv_qldpc_decoder_config = qecrt.config.nv_qldpc_decoder_config
 multi_error_lut_config = qecrt.config.multi_error_lut_config
 trt_decoder_config = qecrt.config.trt_decoder_config
+pymatching_config = qecrt.config.pymatching_config
 configure_decoders_from_file = qecrt.config.configure_decoders_from_file
 configure_decoders_from_str = qecrt.config.configure_decoders_from_str
 finalize_decoders = qecrt.config.finalize_decoders

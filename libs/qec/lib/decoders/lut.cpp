@@ -117,7 +117,7 @@ public:
       }
     }
 
-    // No canonicalize_pcm: toggleSynForError XORs per row index, so duplicate
+    // No canonicalize: toggleSynForError XORs per row index, so duplicate
     // indices in a column GF(2)-cancel naturally.
     std::vector<std::vector<std::uint32_t>> H_e2d = H.to_nested_csc();
     auto toggleSynForError = [&H_e2d](std::string &err_sig, std::size_t qErr) {
@@ -172,7 +172,7 @@ public:
     assert(syndrome_str.length() == syndrome_size);
     bool anyErrors = false;
     for (std::size_t i = 0; i < syndrome_size; i++) {
-      if (syndrome[i] >= 0.5) {
+      if (cudaq::qec::convert_soft_to_hard(syndrome[i])) {
         syndrome_str[i] = '1';
         anyErrors = true;
         syndrome_weight++;
@@ -228,9 +228,9 @@ public:
 
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       multi_error_lut, static std::unique_ptr<decoder> create(
-                           const cudaq::qec::sparse_binary_matrix &H,
+                           const cudaq::qec::decoder_init &init,
                            const cudaqx::heterogeneous_map &params) {
-        return std::make_unique<multi_error_lut>(H, params);
+        return cudaq::qec::make_pcm_decoder<multi_error_lut>(init, params);
       })
 };
 
@@ -246,9 +246,9 @@ public:
 
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       single_error_lut, static std::unique_ptr<decoder> create(
-                            const cudaq::qec::sparse_binary_matrix &H,
+                            const cudaq::qec::decoder_init &init,
                             const cudaqx::heterogeneous_map &params) {
-        return std::make_unique<single_error_lut>(H, params);
+        return cudaq::qec::make_pcm_decoder<single_error_lut>(init, params);
       })
 };
 

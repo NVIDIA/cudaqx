@@ -17,6 +17,7 @@ FetchContent_Declare(
   pymatching
   GIT_REPOSITORY https://github.com/oscarhiggott/PyMatching
   GIT_TAG e27b8c6a5f5ba10fb74d4ebb29822f2df5e12bcd # v2.3.1
+  EXCLUDE_FROM_ALL
   # Disable test targets because they cause wheel build issues and GTest issues.
   PATCH_COMMAND sed -i
     -e "/^add_executable(pymatching_tests /i if(FALSE)  # skip tests when used as FetchContent"

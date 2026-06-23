@@ -9,6 +9,16 @@ The relationship between errors and syndromes is captured mathematically by the 
 stabilizer measurement, while each column represents a possible error. When we multiply an error pattern by this matrix, we get the syndrome 
 that would result from those errors.
 
+.. note::
+   **scipy.sparse interop** — :func:`cudaq_qec.get_decoder` and
+   :class:`cudaq_qec.Decoder` accept a ``scipy.sparse`` matrix (CSR, CSC,
+   COO, or any other ``scipy.sparse`` format) as the parity-check matrix
+   ``H``.  This is the preferred form for large PCMs because no dense
+   ``rows x cols`` allocation is made — the matrix is normalised to CSR
+   internally.  Dense NumPy ``uint8`` arrays remain supported.
+   ``scipy`` is an optional dependency; if it is not installed, pass a dense
+   NumPy array instead.
+
 Detector Error Model
 +++++++++++++++++++++
 
@@ -18,6 +28,10 @@ The DEM can be generated from a QEC circuit and noise model using functions like
 canonical form that's organized by measurement rounds, making it suitable for multi-round decoding.
 
 For a complete example of using the surface code with DEM to generate parity check matrices and perform decoding, see the :doc:`circuit level noise example <circuit_level_noise>`.
+
+If a Stim detector error model is already available as text, the same decoder
+entry point can consume that text directly. See :doc:`Decoding From Stim DEM Text <stim_dem_decoder>`
+for a C++ and Python example.
 
 Generating a Multi-Round Parity Check Matrix
 ++++++++++++++++++++++++++++++++++++++++++++

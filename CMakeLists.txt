@@ -24,6 +24,10 @@ project(CUDAQX
   VERSION 0.0.0
   LANGUAGES C CXX)
 
+# Do not let vendored dependencies add their own install rules to CUDA-QX
+# packages. CUDA-QX installs only its public artifacts.
+set(FMT_INSTALL OFF CACHE BOOL "Generate the fmt install target." FORCE)
+
 set(CUDAQX_ALL_LIBS "qec;solvers")
 set(CUDAQX_ENABLE_LIBS "all" CACHE STRING
   "Semicolon-separated list of libs to build (${CUDAQX_ALL_LIBS}), or \"all\".")

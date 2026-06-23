@@ -9,6 +9,7 @@ Examples that illustrate how to use CUDA-QX for application development are avai
 
       Code-Capacity QEC <code_capacity_noise.rst>
       Circuit-Level QEC <circuit_level_noise.rst>
+      Decoding From Stim DEM Text <stim_dem_decoder.rst>
       Decoders <decoders.rst>
       Real-Time Decoding <realtime_decoding.rst>
       AI Predecoder with CUDA-Q Realtime <realtime_predecoder_pymatching.rst>

@@ -144,6 +144,11 @@ std::vector<SyndromeEntry> load_syndromes(const std::string &path,
       }
       current_entry = SyndromeEntry{};
       reading_shot = true;
+    } else if (line.find("ROUND_START") == 0) {
+      // Per-callback round marker introduced for the per-round dispatch
+      // demo.  This loader concatenates per-shot bits and ignores round
+      // boundaries -- skip ROUND_START silently.
+      continue;
     } else if (reading_shot) {
       // Trim whitespace
       line.erase(0, line.find_first_not_of(" \t\n\r"));
@@ -308,6 +313,7 @@ TEST_F(GpuKernelsTest, PostprocessObservableBasic) {
   CUDA_CHECK(cudaMalloc(&d_O_row_ptr, O_row_ptr_.size() * sizeof(uint32_t)));
   CUDA_CHECK(cudaMalloc(&d_O_col_idx, O_col_idx_.size() * sizeof(uint32_t)));
   CUDA_CHECK(cudaMalloc(&d_corrections, num_observables_));
+  CUDA_CHECK(cudaMemset(d_corrections, 0, num_observables_));
 
   // Copy data to device
   CUDA_CHECK(cudaMemcpy(d_soft_decisions, soft_decisions.data(),

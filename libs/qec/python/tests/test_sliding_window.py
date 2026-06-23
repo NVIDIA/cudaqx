@@ -46,20 +46,15 @@ def test_sliding_window_1(decoder_name, batched, num_rounds, num_windows):
         col = np.random.randint(0, dem.detector_error_matrix.shape[1])
         syndromes[shot, :] = dem.detector_error_matrix[:, col].T
 
-    # Compare the full decoder against the sliding window decoder (configured as
-    # a single full-size window). For column-space decoders (single_error_lut)
-    # the corrections must be identical; for matching decoders (pymatching),
-    # same-H/different-O degeneracy makes the exact error column non-unique, so
-    # we instead require each correction to reproduce the input syndrome.
-    if decoder_name == "pymatching":
-        # canonicalize_for_rounds keeps same-syndrome/different-observable
-        # columns distinct; these are parallel edges in the matching graph that
-        # PyMatching's default 'disallow' strategy rejects, so merge them.
-        full_decoder = qec.get_decoder(decoder_name,
-                                       dem.detector_error_matrix,
-                                       merge_strategy="independent")
-    else:
-        full_decoder = qec.get_decoder(decoder_name, dem.detector_error_matrix)
+    # First compare the results of the full decoder to the sliding window
+    # decoder using an inner decoder of the full window size. The results should
+    # be the same. The full decoder must use the same merge_strategy as the
+    # sliding window's inner decoder (below): a faithful DEM can contain
+    # parallel matching edges, and the two decoders only agree if they combine
+    # those edges identically.
+    full_decoder = qec.get_decoder(decoder_name,
+                                   dem.detector_error_matrix,
+                                   merge_strategy='smallest_weight')
     num_syndromes_per_round = dem.detector_error_matrix.shape[0] // num_rounds
 
     sw_as_full_decoder = qec.get_decoder(
@@ -77,69 +72,18 @@ def test_sliding_window_1(decoder_name, batched, num_rounds, num_windows):
             'merge_strategy': 'smallest_weight'
         })
 
-    # H maps an error (column space) to the syndrome it produces (mod 2).
-    H = np.asarray(dem.detector_error_matrix, dtype=np.int64)
-    # pymatching is a graph/matching decoder: for degenerate same-H/different-O
-    # groups it cannot return a unique column, so validate by syndrome
-    # reproduction rather than exact column equality.
-    check_syndrome_only = decoder_name == "pymatching"
-
     if batched:
         full_results = full_decoder.decode_batch(syndromes)
         sw_results = sw_as_full_decoder.decode_batch(syndromes)
-        if check_syndrome_only:
-            full_e = np.asarray(full_results.result, dtype=np.int64)
-            sw_e = np.asarray(sw_results.result, dtype=np.int64)
-            target = syndromes.astype(np.int64)
-            # ASSERT: every correction (full and windowed) explains the observed
-            # syndrome, i.e. (H @ e) % 2 == syndrome for all shots.
-            assert np.array_equal((full_e @ H.T) % 2, target)
-            assert np.array_equal((sw_e @ H.T) % 2, target)
-        else:
-            # ASSERT: column-space decoders produce identical corrections.
-            num_mismatches = np.count_nonzero(
-                np.any(full_results.result != sw_results.result, axis=1))
-            assert num_mismatches == 0
+        num_mismatches = np.count_nonzero(
+            np.any(full_results.result != sw_results.result, axis=1))
+        assert num_mismatches == 0
 
     else:
         num_mismatches = 0
         for syndrome in syndromes:
             r1 = full_decoder.decode(syndrome)
             r2 = sw_as_full_decoder.decode(syndrome)
-            if check_syndrome_only:
-                # A correction is valid if it reproduces the observed syndrome
-                # via H (mod 2); count a mismatch if either decoder fails to.
-                target = np.asarray(syndrome, dtype=np.int64)
-                e1 = np.asarray(r1.result, dtype=np.int64)
-                e2 = np.asarray(r2.result, dtype=np.int64)
-                if not (np.array_equal((H @ e1) % 2, target) and np.array_equal(
-                    (H @ e2) % 2, target)):
-                    num_mismatches += 1
-            elif not np.array_equal(r1.result, r2.result):
+            if not np.array_equal(r1.result, r2.result):
                 num_mismatches += 1
         assert num_mismatches == 0
-
-
-def test_pymatching_parallel_edges_use_observable_faults():
-    # Same detector syndrome with different observable flips represents
-    # distinct logical fault mechanisms. H-only PyMatching cannot distinguish
-    # them, so the observable-aware path must preserve O and merge parallel
-    # graph edges inside PyMatching rather than dropping DEM columns.
-    H = np.array([[1, 1]], dtype=np.uint8)
-    O = np.array([[1, 0], [0, 1]], dtype=np.uint8)
-    error_rates = np.array([0.1, 0.2], dtype=np.float64)
-
-    with pytest.raises(ValueError, match="Parallel edges not permitted"):
-        qec.get_decoder("pymatching", H)
-
-    decoder = qec.get_decoder("pymatching",
-                              H,
-                              O=O,
-                              error_rate_vec=error_rates,
-                              merge_strategy="independent")
-    result = decoder.decode_batch(np.array([[1]], dtype=np.uint8))
-
-    assert isinstance(result, qec.BatchDecoderResult)
-    assert result.result.shape[0] == 1
-    assert result.result.shape[1] > 0
-    assert result.converged.tolist() == [True]

@@ -26,7 +26,7 @@ Key features of QAOA:
 
    .. code-block:: bash
 
-      nvq++ --enable-mlir -lcudaq-solvers molecular_docking_qaoa.cpp -o molecular_docking_qaoa
+      nvq++ -lcudaq-solvers molecular_docking_qaoa.cpp -o molecular_docking_qaoa
       ./molecular_docking_qaoa
 
 CUDA-Q Solvers Implementation

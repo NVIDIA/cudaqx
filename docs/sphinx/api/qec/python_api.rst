@@ -32,6 +32,7 @@ Detector Error Model
 .. autofunction:: cudaq_qec.dem_from_memory_circuit
 .. autofunction:: cudaq_qec.x_dem_from_memory_circuit
 .. autofunction:: cudaq_qec.z_dem_from_memory_circuit
+.. autofunction:: cudaq_qec.dem_from_stim_text
 
 Decoder Interfaces
 ==================

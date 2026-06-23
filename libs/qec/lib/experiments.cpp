@@ -458,7 +458,10 @@ cudaq::qec::detector_error_model dem_from_memory_circuit(
   // dem.detector_error_matrix.dump_bits();
   // printf("dem.observables_flips_matrix Before canonicalization:\n");
   // dem.observables_flips_matrix.dump_bits();
-  dem.canonicalize_for_rounds(numReturnSynPerRound);
+  // This DEM is returned for round-based decoding, so drop zero-syndrome
+  // columns (no detector signature) that a decoder cannot act on.
+  dem.canonicalize_for_rounds(numReturnSynPerRound,
+                              /*remove_zero_syndrome_errors=*/true);
   // printf("dem.detector_error_matrix After canonicalization:\n");
   // dem.detector_error_matrix.dump_bits();
   // printf("dem.observables_flips_matrix After canonicalization:\n");
