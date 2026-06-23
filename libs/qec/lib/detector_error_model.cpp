@@ -13,6 +13,7 @@
 #include "stim.h"
 
 #include <exception>
+#include <map>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -124,19 +125,13 @@ std::size_t detector_error_model::num_observables() const {
 }
 
 void detector_error_model::canonicalize_for_rounds(
-    uint32_t num_syndromes_per_round) {
+    uint32_t num_syndromes_per_round, bool remove_zero_syndrome_errors) {
   auto row_indices = dense_to_sparse(detector_error_matrix);
   auto column_order =
       get_sorted_pcm_column_indices(row_indices, num_syndromes_per_round);
-  std::vector<std::uint32_t> final_column_order;
-  // March through the columns in topological order, and combine the probability
-  // weight vectors if the columns have the same row indices.
-  std::vector<std::vector<std::uint32_t>> new_row_indices;
-  std::vector<double> new_weights;
-  std::vector<std::size_t> new_error_ids;
   const std::size_t num_obs = this->num_observables();
   const auto num_cols = column_order.size();
-  bool has_error_ids =
+  const bool has_error_ids =
       error_ids.has_value() && error_ids->size() == error_rates.size();
 
   if (row_indices.size() > error_rates.size()) {
@@ -149,72 +144,116 @@ void detector_error_model::canonicalize_for_rounds(
         "or the detector_error_matrix  was computed incorrectly.");
   }
 
+  // March through the columns in topological order and merge columns that share
+  // the SAME full signature: identical detector rows AND identical observable
+  // rows. Columns that differ in either are distinct error mechanisms and are
+  // kept separate (merging on detectors alone would relabel observable-flip
+  // probability mass). The merge key is therefore (detector rows, observable
+  // rows); because the sort above only orders by detector rows, columns with
+  // the same detectors but different observables can be interleaved, so we
+  // group by key explicitly rather than relying on adjacency.
+  using signature_t =
+      std::pair<std::vector<std::uint32_t>, std::vector<std::uint32_t>>;
+  std::map<signature_t, std::size_t> sig_to_out;
+  std::vector<std::uint32_t> final_column_order;
+  // For each retained output column, accumulate probability mass grouped by the
+  // exclusive-set it belongs to. Within one exclusive set (same error id) the
+  // alternatives are mutually exclusive, so their rates add. Across exclusive
+  // sets the mechanisms are independent, so they are combined with the XOR rule
+  // P(A xor B) = P(A) + P(B) - 2 P(A) P(B). When error ids are absent every
+  // column is treated as its own independent mechanism (keyed by its original
+  // column index), reproducing the all-XOR behavior.
+  std::vector<std::map<std::size_t, double>> out_exclusive;
+
+  // Track the first observable signature seen for each detector signature so we
+  // can flag columns that share a syndrome but flip a different observable.
+  // These are kept as distinct mechanisms (above), but they are worth
+  // surfacing: they often indicate an ambiguous/degenerate decoding situation.
+  // Cap the per-invocation warnings since short-distance codes can have many
+  // such mechanisms, and emit a single summary for the remainder.
+  constexpr std::size_t max_same_syndrome_diff_obs_warnings = 10;
+  std::size_t num_same_syndrome_diff_obs = 0;
+  std::map<std::vector<std::uint32_t>,
+           std::pair<std::vector<std::uint32_t>, std::uint32_t>>
+      first_obs_for_detector;
+
   for (std::size_t c = 0; c < num_cols; c++) {
-    auto column_index = column_order[c];
-    auto &curr_row_indices = row_indices[column_index];
-    // If the column has no non-zero elements, or a weight of 0, then we skip
-    // it.
-    if (curr_row_indices.size() == 0 || error_rates[column_index] == 0)
+    const auto column_index = column_order[c];
+    const auto &curr_row_indices = row_indices[column_index];
+    const double rate = error_rates[column_index];
+
+    // Build the observable-flip signature for this column.
+    std::vector<std::uint32_t> obs_indices;
+    for (std::size_t r = 0; r < num_obs; r++)
+      if (this->observables_flips_matrix.at({r, column_index}))
+        obs_indices.push_back(static_cast<std::uint32_t>(r));
+
+    // Skip columns that carry no information: zero probability, or no detector
+    // signature AND no observable flip. A column with no detectors but a
+    // nonzero observable flip is a genuine (undetectable) logical error and is
+    // retained by default so the model's observable-flip mass is preserved.
+    // Such a column has no syndrome for a round-based decoder to act on, so
+    // callers that only consume the detector matrix for decoding can drop all
+    // zero-syndrome columns via remove_zero_syndrome_errors.
+    const bool zero_syndrome = curr_row_indices.empty();
+    if (rate == 0.0 || (zero_syndrome && obs_indices.empty()) ||
+        (remove_zero_syndrome_errors && zero_syndrome))
       continue;
-    if (new_row_indices.empty()) {
-      new_row_indices.push_back(curr_row_indices);
-      new_weights.push_back(error_rates[column_index]);
+
+    signature_t sig{curr_row_indices, obs_indices};
+    auto [it, inserted] = sig_to_out.try_emplace(sig, out_exclusive.size());
+    if (inserted) {
+      out_exclusive.emplace_back();
       final_column_order.push_back(column_index);
-      if (has_error_ids)
-        new_error_ids.push_back(error_ids->at(column_index));
-    } else {
-      auto &prev_row_indices = new_row_indices.back();
-      if (prev_row_indices == curr_row_indices) {
-        // The current column has the same row indices as the previous column
-        // (i.e. has the same syndrome signature) so we update the error_rates
-        // and do NOT add the duplicate column.
-        auto prev_weight = new_weights.back();
-        auto prev_error_id = has_error_ids
-                                 ? new_error_ids.back()
-                                 : std::numeric_limits<std::size_t>::max();
-        auto curr_weight = error_rates[column_index];
-        bool same_error_id =
-            has_error_ids && prev_error_id == error_ids->at(column_index);
-        double scale_factor = same_error_id ? 0.0 : 1.0;
-        // The new weight is the probability that exactly ONE of the two errors
-        // occurs. This is given by the formula: P(A xor B) = P(A) + P(B) - 2 *
-        // P(A and B). If the errors originate from the same error mechanism,
-        // then P(A and B) = 0.
-        auto new_weight = prev_weight + curr_weight -
-                          scale_factor * 2.0 * prev_weight * curr_weight;
-        new_weights.back() = new_weight;
-        // Arbitrarily choose to keep the smaller error ID.
-        if (has_error_ids)
-          new_error_ids.back() =
-              std::min(prev_error_id, error_ids->at(column_index));
-        // Verify that the observables are the same for the duplicate column.
-        auto previous_column = column_order[c - 1];
-        bool match = true;
-        for (std::size_t r = 0; r < num_obs; r++) {
-          if (this->observables_flips_matrix.at({r, previous_column}) !=
-              this->observables_flips_matrix.at({r, column_index})) {
-            match = false;
-            break;
-          }
-        }
-        if (!match) {
-          cudaq::info(
+
+      // A new full signature. If this detector syndrome was already seen with a
+      // different observable signature, this is a "same syndrome, different
+      // observable" mechanism; flag it (capped).
+      auto [dit, first_seen] = first_obs_for_detector.try_emplace(
+          curr_row_indices, obs_indices, column_index);
+      if (!first_seen && dit->second.first != obs_indices) {
+        if (num_same_syndrome_diff_obs < max_same_syndrome_diff_obs_warnings)
+          cudaq::warn(
               "detector_error_model::canonicalize_for_rounds: identical "
               "syndromes exist in detector_error_matrix but have different "
-              "observables in observables_flips_matrix (columns {} and {})",
-              previous_column, column_index);
-        }
-      } else {
-        // The current column has different row indices than the previous
-        // column. So we add the current column to the new PCM, and update the
-        // error_rates.
-        new_row_indices.push_back(curr_row_indices);
-        new_weights.push_back(error_rates[column_index]);
-        final_column_order.push_back(column_index);
-        if (has_error_ids)
-          new_error_ids.push_back(error_ids->at(column_index));
+              "observables in observables_flips_matrix; keeping column {} as a "
+              "distinct error mechanism (previous column {})",
+              column_index, dit->second.second);
+        num_same_syndrome_diff_obs++;
       }
     }
+    const std::size_t exclusive_key =
+        has_error_ids ? error_ids->at(column_index) : column_index;
+    out_exclusive[it->second][exclusive_key] += rate;
+  }
+
+  // Emit a single summary if we suppressed any per-column warnings above.
+  if (num_same_syndrome_diff_obs > max_same_syndrome_diff_obs_warnings)
+    cudaq::warn(
+        "detector_error_model::canonicalize_for_rounds: found {} columns with "
+        "identical syndromes but different observables; suppressed {} "
+        "additional warnings (only the first {} were shown).",
+        num_same_syndrome_diff_obs,
+        num_same_syndrome_diff_obs - max_same_syndrome_diff_obs_warnings,
+        max_same_syndrome_diff_obs_warnings);
+
+  std::vector<double> new_weights;
+  std::vector<std::size_t> new_error_ids;
+  new_weights.reserve(out_exclusive.size());
+  for (std::size_t i = 0; i < out_exclusive.size(); i++) {
+    double weight = 0.0;
+    for (const auto &[id, p] : out_exclusive[i])
+      weight = weight + p - 2.0 * weight * p;
+    new_weights.push_back(weight);
+    // Assign each output column a fresh unique id. Canonicalization does not
+    // preserve any cross-column exclusivity structure: if a source mechanism's
+    // mutually-exclusive outcomes land in different signature columns, that
+    // relationship is no longer recoverable from the ids, so we do not pretend
+    // it is. Unique ids simply mark every canonicalized column as an
+    // independent mechanism, which is the relation the merged rates were
+    // composed under.
+    if (has_error_ids)
+      new_error_ids.push_back(i);
   }
 
   std::swap(this->error_rates, new_weights);

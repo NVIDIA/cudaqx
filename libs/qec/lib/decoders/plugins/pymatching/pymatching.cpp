@@ -28,7 +28,14 @@ private:
 
   // Input parameters
   std::vector<double> error_rate_vec;
+  // Default to DISALLOW for the H-only path so that decode() returns an error
+  // vector cleanly indexed by the original H columns. When an O matrix is
+  // provided (decode_to_observables), we switch to INDEPENDENT to match
+  // upstream PyMatching's from_detector_error_model, which always merges
+  // parallel edges under the independence assumption. The user can override
+  // either default via merge_strategy="..." in the params.
   pm::MERGE_STRATEGY merge_strategy_enum = pm::MERGE_STRATEGY::DISALLOW;
+  bool merge_strategy_explicit = false;
 
   // Map of edge pairs to column indices. This does not seem particularly
   // efficient.
@@ -85,6 +92,7 @@ public:
             "merge_strategy must be one of: disallow, independent, "
             "smallest_weight, keep_original, replace");
       }
+      merge_strategy_explicit = true;
     }
 
     std::vector<std::vector<size_t>> errs2observables(block_size);
@@ -115,6 +123,8 @@ public:
       }
       this->set_O_sparse(O_sparse);
       decode_to_observables = true;
+      if (!merge_strategy_explicit)
+        merge_strategy_enum = pm::MERGE_STRATEGY::INDEPENDENT;
     }
 
     user_graph = pm::UserGraph(H.num_rows());
