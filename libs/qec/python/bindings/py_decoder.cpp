@@ -762,9 +762,24 @@ void bindDecoder(nb::module_ &mod) {
       .def("canonicalize_for_rounds",
            &detector_error_model::canonicalize_for_rounds,
            R"pbdoc(
-            Canonicalize the detector error model for a given number of rounds
+            Canonicalize the detector error model for a given number of rounds.
+
+            Columns sharing the same detector and observable signature are
+            merged, with rates composed to match the input model. By default,
+            zero-syndrome columns that still flip an observable (undetectable
+            logical errors) are retained so the model's observable-flip
+            probability is preserved. Set ``remove_zero_syndrome_errors=True``
+            to drop all columns with no detector signature, which is
+            appropriate when the canonicalized DEM is consumed only for
+            round-based decoding.
+
+            Canonicalization does not preserve cross-column exclusivity
+            structure: each output column is given a fresh unique error id and
+            treated as independent of every other column, so any ``error_ids``
+            correlation in the input model is discarded.
           )pbdoc",
-           nb::arg("num_syndromes_per_round"));
+           nb::arg("num_syndromes_per_round"),
+           nb::arg("remove_zero_syndrome_errors") = false);
 
   qecmod.def(
       "dem_from_stim_text", &dem_from_stim_text,
