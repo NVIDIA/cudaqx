@@ -51,6 +51,95 @@ static int g_syndromes_per_shot = 0;
 // Uncomment this to manually inject errors.
 // #define MANUALLY_INJECT_ERRORS
 
+#if CUDAQ_QEC_ENABLE_HOST_DISPATCH_DEVICE_CALLS &&                             \
+    CUDAQ_QEC_ENABLE_PYMATCHING_DECODER_TYPE
+namespace {
+
+__qpu__ std::vector<bool>
+pymatching_host_dispatch_decode_syndrome(std::vector<bool> syndrome) {
+  cudaq::qec::decoding::enqueue_syndromes_test(/*decoder_id=*/0, syndrome,
+                                               /*tag=*/1);
+  return cudaq::qec::decoding::get_corrections(/*decoder_id=*/0,
+                                               /*return_size=*/3,
+                                               /*reset=*/true);
+}
+
+__qpu__ std::vector<bool> pymatching_host_dispatch_read_corrections() {
+  return cudaq::qec::decoding::get_corrections(/*decoder_id=*/0,
+                                               /*return_size=*/3,
+                                               /*reset=*/false);
+}
+
+cudaq::qec::decoding::config::multi_decoder_config
+make_pymatching_host_dispatch_smoke_config() {
+  namespace config = cudaq::qec::decoding::config;
+
+  config::decoder_config decoder_config;
+  decoder_config.id = 0;
+  decoder_config.type = "pymatching";
+  decoder_config.block_size = 3;
+  decoder_config.syndrome_size = 3;
+  decoder_config.H_sparse = {0, -1, 1, -1, 2, -1};
+  decoder_config.O_sparse = {0, -1, 1, -1, 2, -1};
+  decoder_config.D_sparse = {0, -1, 1, -1, 2, -1};
+
+  decoder_config.decoder_custom_args = config::pymatching_config();
+  auto &pymatching_config =
+      std::get<config::pymatching_config>(decoder_config.decoder_custom_args);
+  pymatching_config.error_rate_vec = std::vector<double>{0.1, 0.1, 0.1};
+  pymatching_config.merge_strategy = "smallest_weight";
+
+  config::multi_decoder_config multi_config;
+  multi_config.decoders.push_back(decoder_config);
+  return multi_config;
+}
+
+int run_pymatching_host_dispatch_smoke() {
+  namespace config = cudaq::qec::decoding::config;
+
+  auto decoder_config = make_pymatching_host_dispatch_smoke_config();
+  if (const auto ret = config::configure_decoders(decoder_config); ret != 0) {
+    std::printf("configure_decoders failed: %d\n", ret);
+    return ret;
+  }
+  struct DecoderConfigGuard {
+    ~DecoderConfigGuard() { cudaq::qec::decoding::config::finalize_decoders(); }
+  } decoder_guard;
+
+  char program[] = "surface_code-1-host-dispatch";
+  char channel[] = "--cudaq-device-call=host-dispatch";
+  char slots[] = "--cudaq-device-call-slots=4";
+  char slot_size[] = "--cudaq-device-call-slot-size=256";
+  char *argv[] = {program, channel, slots, slot_size};
+  cudaq::realtime::initialize(4, argv);
+  struct RealtimeGuard {
+    ~RealtimeGuard() { cudaq::realtime::finalize(); }
+  } realtime_guard;
+
+  const auto decoded_runs =
+      cudaq::run(1, pymatching_host_dispatch_decode_syndrome,
+                 std::vector<bool>{false, true, false});
+  const std::vector<bool> expected_decoded{false, true, false};
+  if (decoded_runs.size() != 1 || decoded_runs.front() != expected_decoded) {
+    std::printf("decoded correction mismatch\n");
+    return 1;
+  }
+
+  const auto reset_runs =
+      cudaq::run(1, pymatching_host_dispatch_read_corrections);
+  const std::vector<bool> expected_reset{false, false, false};
+  if (reset_runs.size() != 1 || reset_runs.front() != expected_reset) {
+    std::printf("reset correction mismatch\n");
+    return 1;
+  }
+
+  std::printf("PyMatching host-dispatch device_call smoke test passed\n");
+  return 0;
+}
+
+} // namespace
+#endif
+
 void save_dem_to_file(const cudaq::qec::detector_error_model &dem,
                       std::string dem_filename, uint64_t numSyndromesPerRound,
                       uint64_t numLogical, const std::string &decoder_type,
@@ -949,6 +1038,10 @@ void show_help() {
 #if CUDAQ_QEC_ENABLE_HOST_DISPATCH_DEVICE_CALLS
   printf("  --use-host-dispatch-device-calls  Route QPU device_call through "
          "the CUDA-Q host-dispatch channel.\n");
+#if CUDAQ_QEC_ENABLE_PYMATCHING_DECODER_TYPE
+  printf("  --pymatching-host-dispatch-smoke  Run a graphlike PyMatching "
+         "host-dispatch smoke test.\n");
+#endif
 #endif
   printf("  --help              Show this help message\n");
 }
@@ -976,6 +1069,9 @@ int main(int argc, char **argv) {
   bool use_relay_bp = false;
 #if CUDAQ_QEC_ENABLE_HOST_DISPATCH_DEVICE_CALLS
   bool use_host_dispatch_device_calls = false;
+#if CUDAQ_QEC_ENABLE_PYMATCHING_DECODER_TYPE
+  bool run_pymatching_host_dispatch_smoke_test = false;
+#endif
 #endif
 
   // Parse the command line arguments
@@ -1032,6 +1128,10 @@ int main(int argc, char **argv) {
 #if CUDAQ_QEC_ENABLE_HOST_DISPATCH_DEVICE_CALLS
     } else if (arg == "--use-host-dispatch-device-calls") {
       use_host_dispatch_device_calls = true;
+#if CUDAQ_QEC_ENABLE_PYMATCHING_DECODER_TYPE
+    } else if (arg == "--pymatching-host-dispatch-smoke") {
+      run_pymatching_host_dispatch_smoke_test = true;
+#endif
 #endif
     } else {
       printf("Unknown argument: %s\n", arg.c_str());
@@ -1039,6 +1139,13 @@ int main(int argc, char **argv) {
       return 1;
     }
   }
+
+#if CUDAQ_QEC_ENABLE_HOST_DISPATCH_DEVICE_CALLS &&                             \
+    CUDAQ_QEC_ENABLE_PYMATCHING_DECODER_TYPE
+  if (run_pymatching_host_dispatch_smoke_test) {
+    return run_pymatching_host_dispatch_smoke();
+  }
+#endif
 
   if (!load_dem && !save_dem && !load_syndrome) {
     printf("Neither --save_dem nor --load_dem nor --load_syndrome was "

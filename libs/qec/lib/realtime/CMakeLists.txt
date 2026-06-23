@@ -22,6 +22,9 @@ if(CMAKE_CUDA_COMPILER)
   if(CUDAQ_INSTALL_PREFIX)
     list(APPEND _cudaq_realtime_prefixes "${CUDAQ_INSTALL_PREFIX}")
   endif()
+  if(CUDAQ_INSTALL_DIR)
+    list(APPEND _cudaq_realtime_prefixes "${CUDAQ_INSTALL_DIR}")
+  endif()
   
   find_path(CUDAQ_REALTIME_INCLUDE_DIR
     NAMES cudaq/realtime/daemon/dispatcher/cudaq_realtime.h
@@ -270,14 +273,56 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND NOT CUDAQ_DEVICE_CALL_INCLUDE_DIR)
   endif()
 endif()
 
-if(CUDAQ_REALTIME_INCLUDE_DIR AND NOT CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY)
-  find_library(CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY
-    NAMES cudaq-device-call-runtime
-    PATHS ${_cudaq_device_call_prefixes}
-    PATH_SUFFIXES lib
-  )
+if(CUDAQ_REALTIME_INCLUDE_DIR AND NOT CUDAQ_DEVICE_CALL_INCLUDE_DIR)
+  foreach(_device_call_headers_target IN ITEMS
+      cudaq::cudaq-device-call-runtime-headers
+      cudaq-device-call-runtime-headers
+      cudaq::cudaq-device-call-runtime
+      cudaq-device-call-runtime)
+    if(TARGET ${_device_call_headers_target})
+      get_target_property(_device_call_include_dirs
+        ${_device_call_headers_target} INTERFACE_INCLUDE_DIRECTORIES)
+      foreach(_device_call_include_dir IN LISTS _device_call_include_dirs)
+        if(_device_call_include_dir MATCHES "^\\$<BUILD_INTERFACE:(.*)>$")
+          set(_device_call_include_dir "${CMAKE_MATCH_1}")
+        elseif(_device_call_include_dir MATCHES "^\\$<INSTALL_INTERFACE:(.*)>$"
+               AND CUDAQ_INSTALL_DIR)
+          set(_device_call_include_dir
+            "${CUDAQ_INSTALL_DIR}/${CMAKE_MATCH_1}")
+        endif()
+        if(EXISTS "${_device_call_include_dir}/cudaq_internal/device_call/DeviceCallService.h")
+          set(CUDAQ_DEVICE_CALL_INCLUDE_DIR "${_device_call_include_dir}")
+          message(STATUS "Found cuda-quantum device_call headers from target ${_device_call_headers_target} at ${CUDAQ_DEVICE_CALL_INCLUDE_DIR}")
+          break()
+        endif()
+      endforeach()
+    endif()
+    if(CUDAQ_DEVICE_CALL_INCLUDE_DIR)
+      break()
+    endif()
+  endforeach()
+endif()
+
+set(CUDAQ_DEVICE_CALL_RUNTIME_LINK "")
+if(TARGET cudaq::cudaq-device-call-runtime)
+  set(CUDAQ_DEVICE_CALL_RUNTIME_LINK cudaq::cudaq-device-call-runtime)
+  message(STATUS "Found cuda-quantum device_call runtime target cudaq::cudaq-device-call-runtime")
+elseif(TARGET cudaq-device-call-runtime)
+  set(CUDAQ_DEVICE_CALL_RUNTIME_LINK cudaq-device-call-runtime)
+  message(STATUS "Found cuda-quantum device_call runtime target cudaq-device-call-runtime")
+else()
+  if(CUDAQ_REALTIME_INCLUDE_DIR AND NOT CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY)
+    find_library(CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY
+      NAMES cudaq-device-call-runtime
+      PATHS ${_cudaq_device_call_prefixes}
+      PATH_SUFFIXES lib
+    )
+    if(CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY)
+      message(STATUS "Found cuda-quantum device_call runtime library at ${CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY}")
+    endif()
+  endif()
   if(CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY)
-    message(STATUS "Found cuda-quantum device_call runtime library at ${CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY}")
+    set(CUDAQ_DEVICE_CALL_RUNTIME_LINK ${CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY})
   endif()
 endif()
 

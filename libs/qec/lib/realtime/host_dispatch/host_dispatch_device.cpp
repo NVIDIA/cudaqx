@@ -11,16 +11,28 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <vector>
 
-extern "C" std::uint64_t qec_enqueue_syndromes_ui64(std::uint64_t decoder_id,
-                                                    std::uint64_t syndrome_size,
-                                                    std::uint64_t syndrome,
-                                                    std::uint64_t tag);
-extern "C" std::uint64_t qec_get_corrections_ui64(std::uint64_t decoder_id,
-                                                  std::uint64_t return_size,
-                                                  std::uint64_t reset);
-extern "C" std::uint64_t qec_reset_decoder_ui64(std::uint64_t decoder_id);
+extern "C" std::uint64_t
+qec_enqueue_syndromes_ui64([[maybe_unused]] std::uint64_t decoder_id,
+                           [[maybe_unused]] std::uint64_t syndrome_size,
+                           [[maybe_unused]] std::uint64_t syndrome,
+                           [[maybe_unused]] std::uint64_t tag) {
+  std::abort();
+}
+
+extern "C" std::uint64_t
+qec_get_corrections_ui64([[maybe_unused]] std::uint64_t decoder_id,
+                         [[maybe_unused]] std::uint64_t return_size,
+                         [[maybe_unused]] std::uint64_t reset) {
+  std::abort();
+}
+
+extern "C" std::uint64_t
+qec_reset_decoder_ui64([[maybe_unused]] std::uint64_t decoder_id) {
+  std::abort();
+}
 
 namespace cudaq::qec::decoding {
 

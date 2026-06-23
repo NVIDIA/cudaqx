@@ -7,7 +7,7 @@
 # ============================================================================ #
 
 if(NOT CUDAQ_REALTIME_INCLUDE_DIR OR NOT CUDAQ_DEVICE_CALL_INCLUDE_DIR
-   OR NOT CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY)
+   OR NOT CUDAQ_DEVICE_CALL_RUNTIME_LINK)
   message(WARNING "cuda-quantum realtime/device_call headers or runtime not found. "
                   "Skipping cudaq-qec-realtime-decoding-host-dispatch.")
   return()
@@ -47,7 +47,8 @@ target_link_libraries(cudaq-qec-realtime-decoding-host-dispatch
     cudaq-qec-realtime-decoding
   PRIVATE
     cudaq::cudaq-common
-    ${CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY}
+    CUDA::cudart
+    ${CUDAQ_DEVICE_CALL_RUNTIME_LINK}
     $<$<BOOL:${CUDAQ_REALTIME_LIBRARY}>:${CUDAQ_REALTIME_LIBRARY}>
     $<$<BOOL:${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}>:${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}>
 )

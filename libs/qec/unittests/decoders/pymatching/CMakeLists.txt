@@ -29,7 +29,9 @@ target_link_libraries(test_pymatching PRIVATE GTest::gtest_main cudaq-qec cudaq:
 add_dependencies(CUDAQXQECUnitTests test_pymatching)
 gtest_discover_tests(test_pymatching)
 
-if(CUDAQ_REALTIME_ROOT AND CUDAQ_REALTIME_INCLUDE_DIR)
+if(CUDAQ_REALTIME_INCLUDE_DIR
+   AND TARGET cudaq-qec-realtime-decoding
+   AND TARGET cudaq-qec-pymatching)
   add_executable(test_pymatching_realtime test_pymatching_realtime.cpp)
   target_include_directories(test_pymatching_realtime PRIVATE
     ${CUDAQ_REALTIME_INCLUDE_DIR}
@@ -50,6 +52,10 @@ if(CUDAQ_REALTIME_ROOT AND CUDAQ_REALTIME_INCLUDE_DIR)
   add_dependencies(test_pymatching_realtime cudaq-qec-pymatching)
   add_dependencies(CUDAQXQECUnitTests test_pymatching_realtime)
   gtest_discover_tests(test_pymatching_realtime)
+else()
+  message(STATUS "Skipping test_pymatching_realtime "
+                 "(requires realtime headers, "
+                 "cudaq-qec-realtime-decoding, and cudaq-qec-pymatching).")
 endif()
 
 set(_pymatching_cudaq_realtime_prefixes "")
@@ -72,17 +78,26 @@ if(NOT CUDAQ_DEVICE_CALL_INCLUDE_DIR)
   )
 endif()
 
-if(NOT CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY)
-  find_library(CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY
-    NAMES cudaq-device-call-runtime
-    PATHS ${_pymatching_cudaq_realtime_prefixes}
-    PATH_SUFFIXES lib
-  )
+set(_pymatching_device_call_runtime_link "")
+if(TARGET cudaq::cudaq-device-call-runtime)
+  set(_pymatching_device_call_runtime_link cudaq::cudaq-device-call-runtime)
+elseif(TARGET cudaq-device-call-runtime)
+  set(_pymatching_device_call_runtime_link cudaq-device-call-runtime)
+else()
+  if(NOT CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY)
+    find_library(CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY
+      NAMES cudaq-device-call-runtime
+      PATHS ${_pymatching_cudaq_realtime_prefixes}
+      PATH_SUFFIXES lib
+    )
+  endif()
+  if(CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY)
+    set(_pymatching_device_call_runtime_link ${CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY})
+  endif()
 endif()
 
 if(CUDAQ_REALTIME_INCLUDE_DIR
-   AND CUDAQ_DEVICE_CALL_INCLUDE_DIR
-   AND CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY
+   AND _pymatching_device_call_runtime_link
    AND TARGET cudaq-qec-realtime-decoding-host-dispatch
    AND TARGET cudaq-qec-pymatching)
   add_executable(test_pymatching_qpu_device_call)
@@ -101,13 +116,18 @@ if(CUDAQ_REALTIME_INCLUDE_DIR
   target_link_directories(test_pymatching_qpu_device_call
     PRIVATE ${CUDAQ_INSTALL_DIR}/lib)
 
+  if(UNIX AND NOT APPLE)
+    target_link_options(test_pymatching_qpu_device_call PRIVATE
+      "LINKER:--no-as-needed")
+  endif()
+
   target_link_libraries(test_pymatching_qpu_device_call PRIVATE
     GTest::gtest_main
     cudaq-qec
     cudaq-qec-pymatching
     cudaq-qec-realtime-decoding
     cudaq-qec-realtime-decoding-host-dispatch
-    ${CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY}
+    ${_pymatching_device_call_runtime_link}
     cudaq::cudaq cudaq::cudaq-common cudaq-mlir-runtime
     nvqir nvqir-qpp)
 
@@ -137,7 +157,7 @@ if(CUDAQ_REALTIME_INCLUDE_DIR
   gtest_discover_tests(test_pymatching_qpu_device_call)
 else()
   message(STATUS "Skipping test_pymatching_qpu_device_call "
-                 "(requires realtime/device_call dependencies, "
+                 "(requires realtime headers, cudaq-device-call-runtime, "
                  "cudaq-qec-realtime-decoding-host-dispatch, and "
                  "cudaq-qec-pymatching).")
 endif()

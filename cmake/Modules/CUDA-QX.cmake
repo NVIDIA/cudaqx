@@ -187,6 +187,16 @@ function(cudaqx_import_cudaq_targets)
   find_package(CUDAQPlatformDefault REQUIRED CONFIG)
   find_package(CUDAQPythonInterop CONFIG)
 
+  # Realtime-enabled CUDA-Q installs export device_call targets that reference
+  # cudaq::cudaq-realtime. Since CUDA-QX intentionally imports CUDA-Q targets
+  # without loading CUDAQConfig.cmake, preload the sibling realtime package when
+  # it is present so CUDAQTargets.cmake does not fail on the missing target.
+  if(NOT TARGET cudaq::cudaq-realtime)
+    find_package(cudaq-realtime CONFIG QUIET
+      PATHS "${_cudaq_parent_dir}/cudaq-realtime"
+      NO_DEFAULT_PATH)
+  endif()
+
   # Import the CUDA-Q library target without loading CUDAQConfig.cmake, which
   # enables the CUDAQ CMake language in current CUDA-Q installs.
   if(NOT TARGET cudaq::cudaq)
