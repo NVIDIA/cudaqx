@@ -21,17 +21,12 @@ if sys.version_info < (3, 11):
 
 # [Begin Documentation]
 """
-Online noise learning with NMOptimizer on a Stim surface-code DEM.
+Online noise learning with NMOptimizer from a Stim detector error model.
 
-This example demonstrates how to use NMOptimizer to fit per-error noise
-probabilities from syndrome data sampled from a Stim detector error model.
-The optimizer is initialized away from the DEM priors, then each training
-iteration resamples a fresh syndrome batch and tracks cross-entropy, prior
-recovery, and logical error-rate dynamics.
-
-For a low-noise code, LER is a noisy metric; representative experiments often
-need 10k-30k shots per iteration.  The default below is smaller so the example
-stays quick to run.
+This example demonstrates how to fit per-error noise probabilities using
+fresh syndrome batches sampled from a Stim detector error model.  The optimizer
+starts from uniform priors, resamples training data each iteration, and then
+compares held-out logical error rate for uniform, learned, and true DEM priors.
 
 Requirements:
     pip install cudaq-qec[tensor-network-decoder] stim beliefmatching
@@ -44,11 +39,13 @@ from beliefmatching.belief_matching import detector_error_model_to_check_matrice
 
 from cudaq_qec import NMOptimizer, make_compiled_step
 
-BATCH_SHOTS = 1000
-ITERS = 20
+TRAIN_SHOTS = 5000
+EVAL_SHOTS = 20000
+ITERS = 100
 LR = 1e-2
 DTYPE = "float64"
 DEVICE = "cuda:0" if torch.cuda.is_available() else "cpu"
+EXECUTE = "codegen"
 
 
 def parse_detector_error_model(dem):
@@ -61,9 +58,15 @@ def parse_detector_error_model(dem):
     return H, L, priors
 
 
-def sample_batch(circuit, shots):
-    det_events, obs_flips = circuit.compile_detector_sampler().sample(
-        shots, separate_observables=True)
+def make_sampler(circuit, seed):
+    try:
+        return circuit.compile_detector_sampler(seed=seed)
+    except TypeError:
+        return circuit.compile_detector_sampler()
+
+
+def sample_batch(sampler, shots):
+    det_events, obs_flips = sampler.sample(shots, separate_observables=True)
     return det_events.astype(float), obs_flips.ravel().astype(bool)
 
 
@@ -72,21 +75,25 @@ def probs_to_logits(probs):
     return np.log(probs / (1.0 - probs))
 
 
-def logical_error_rate(opt, probs):
-    original = opt.noise_params[0]
-    try:
-        opt._noise_probs = probs
-        return opt.logical_error_rate()
-    finally:
-        opt._noise_probs = original
+def evaluate_ler(H, L, priors, det_events, obs_flips):
+    opt = NMOptimizer(H,
+                      L,
+                      priors.tolist(),
+                      det_events,
+                      obs_flips,
+                      dtype=DTYPE,
+                      device=DEVICE,
+                      execute=EXECUTE)
+    return opt.logical_error_rate()
 
 
 def main():
     circuit = stim.Circuit.generated(
-        "surface_code:rotated_memory_z",
-        rounds=3,
+        "repetition_code:memory",
+        rounds=5,
         distance=3,
-        before_round_data_depolarization=0.005,
+        before_round_data_depolarization=0.05,
+        before_measure_flip_probability=0.005,
     )
     dem = circuit.detector_error_model(decompose_errors=True)
     H, L, true_priors = parse_detector_error_model(dem)
@@ -95,9 +102,11 @@ def main():
     print(f"DEM: {n_checks} checks, {n_errors} errors")
     print(f"True priors:  mean={true_priors.mean():.4e}  "
           f"min={true_priors.min():.4e}  max={true_priors.max():.4e}")
-    print(f"Device: {DEVICE}")
+    print(f"Device: {DEVICE}, execute={EXECUTE}")
 
-    det_events, obs_flips = sample_batch(circuit, BATCH_SHOTS)
+    train_sampler = make_sampler(circuit, seed=1234)
+    det_events, obs_flips = sample_batch(train_sampler, TRAIN_SHOTS)
+
     uniform = np.full(n_errors, true_priors.mean(), dtype=np.float64)
     opt = NMOptimizer(H,
                       L,
@@ -106,44 +115,50 @@ def main():
                       obs_flips,
                       dtype=DTYPE,
                       device=DEVICE,
-                      execute="codegen")
+                      execute=EXECUTE)
 
     logits = torch.tensor(probs_to_logits(uniform),
                           dtype=getattr(torch, DTYPE),
                           device=opt.torch_device,
                           requires_grad=True)
-    uniform_probs = torch.tensor(uniform,
-                                 dtype=getattr(torch, DTYPE),
-                                 device=opt.torch_device)
-    true_probs = torch.tensor(true_priors,
-                              dtype=getattr(torch, DTYPE),
-                              device=opt.torch_device)
     adam = torch.optim.Adam([logits], lr=LR)
     step_fn = make_compiled_step(opt, logits, adam)
 
-    print(
-        "iter | loss       | learned LER | uniform LER | true-prior LER | prior MAE"
-    )
-    for it in range(1, ITERS + 1):
-        if it > 1:
-            det_events, obs_flips = sample_batch(circuit, BATCH_SHOTS)
+    losses = []
+    mae_history = []
+    true_probs = torch.tensor(true_priors,
+                              dtype=getattr(torch, DTYPE),
+                              device=opt.torch_device)
+    for it in range(ITERS):
+        if it > 0:
+            det_events, obs_flips = sample_batch(train_sampler, TRAIN_SHOTS)
             opt.update_dataset(det_events, obs_flips)
-
         loss = step_fn()
         learned_probs = torch.sigmoid(logits)
-        prior_mae = float(
-            torch.mean(torch.abs(learned_probs - true_probs)).detach().cpu())
-        ler_learned = logical_error_rate(opt, learned_probs)
-        ler_uniform = logical_error_rate(opt, uniform_probs)
-        ler_true = logical_error_rate(opt, true_probs)
-
-        print(f"{it:4d} | {float(loss.detach().cpu()):.4e} | "
-              f"{ler_learned:.4f}      | {ler_uniform:.4f}     | "
-              f"{ler_true:.4f}         | {prior_mae:.4e}")
+        losses.append(float(loss.detach().cpu()))
+        mae_history.append(
+            float(
+                torch.mean(torch.abs(learned_probs -
+                                     true_probs)).detach().cpu()))
 
     learned = torch.sigmoid(logits).detach().cpu().numpy()
+
+    print(f"Loss:      {losses[0]:.4e} -> {losses[-1]:.4e} "
+          f"({ITERS} online Adam steps, {TRAIN_SHOTS} shots/step)")
+    print(f"Prior MAE: {mae_history[0]:.4e} -> {mae_history[-1]:.4e}")
     print(f"Learned priors: mean={learned.mean():.4e}  "
           f"min={learned.min():.4e}  max={learned.max():.4e}")
+
+    eval_sampler = make_sampler(circuit, seed=4321)
+    eval_events, eval_flips = sample_batch(eval_sampler, EVAL_SHOTS)
+    ler_uniform = evaluate_ler(H, L, uniform, eval_events, eval_flips)
+    ler_learned = evaluate_ler(H, L, learned, eval_events, eval_flips)
+    ler_true = evaluate_ler(H, L, true_priors, eval_events, eval_flips)
+
+    print(f"Held-out LER (uniform priors): {ler_uniform:.4f}")
+    print(f"Held-out LER (learned priors): {ler_learned:.4f}")
+    print(f"Held-out LER (true DEM priors): {ler_true:.4f}")
+    print(f"Absolute LER improvement: {ler_uniform - ler_learned:+.4f}")
 
 
 if __name__ == "__main__":
