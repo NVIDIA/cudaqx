@@ -356,6 +356,24 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
                              pimpl->persistent_soft_detector_buffer);
     auto decoded_result = decode(pimpl->persistent_soft_detector_buffer);
 
+    if (pimpl->is_sliding_window) {
+      // Keep the latest round so the next enqueue forms an adjacent timelike
+      // detector with it instead of starting from an empty buffer.
+      const auto num_syndromes = pimpl->num_syndromes_per_round;
+      if (pimpl->msyn_buffer.size() >= 2 * num_syndromes) {
+        if (pimpl->current_round >= 2) {
+          std::copy(pimpl->msyn_buffer.begin() + num_syndromes,
+                    pimpl->msyn_buffer.begin() + 2 * num_syndromes,
+                    pimpl->msyn_buffer.begin());
+        }
+        pimpl->msyn_buffer_index = num_syndromes;
+        pimpl->current_round = 1;
+      } else {
+        pimpl->msyn_buffer_index = 0;
+        pimpl->current_round = 0;
+      }
+    }
+
     // If we didn't get a decoded result, just return
     if (pimpl->is_sliding_window) {
       if (decoded_result.result.size() == 0) {
@@ -421,8 +439,10 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
     }
     did_decode = true;
     // Prepare for more data.
-    pimpl->msyn_buffer_index = 0;
-    pimpl->current_round = 0;
+    if (!pimpl->is_sliding_window) {
+      pimpl->msyn_buffer_index = 0;
+      pimpl->current_round = 0;
+    }
   }
   return did_decode;
 }

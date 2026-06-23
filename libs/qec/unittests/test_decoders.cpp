@@ -7,6 +7,7 @@
  ******************************************************************************/
 
 #include "stim.h"
+#include "../lib/decoders/sliding_window.h"
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/detector_error_model.h"
 #include "cudaq/qec/pcm_utils.h"
@@ -37,6 +38,38 @@ private:
   std::string name;
   std::optional<std::string> oldValue;
 };
+
+class recording_sliding_window_decoder : public cudaq::qec::sliding_window {
+public:
+  using cudaq::qec::sliding_window::sliding_window;
+
+  std::vector<std::vector<cudaq::qec::float_t>> detector_history;
+
+  cudaq::qec::decoder_result
+  decode(const std::vector<cudaq::qec::float_t> &syndrome) override {
+    detector_history.push_back(syndrome);
+    return {true,
+            std::vector<cudaq::qec::float_t>(this->get_block_size(), 0.0)};
+  }
+};
+
+std::unique_ptr<recording_sliding_window_decoder>
+make_recording_sliding_window_decoder(std::size_t num_syndromes_per_round) {
+  cudaqx::tensor<uint8_t> H({num_syndromes_per_round, 1});
+  H.at({0, 0}) = 1;
+
+  cudaqx::heterogeneous_map params;
+  params.insert("window_size", std::size_t{1});
+  params.insert("step_size", std::size_t{1});
+  params.insert("num_syndromes_per_round", num_syndromes_per_round);
+  params.insert("error_rate_vec", std::vector<cudaq::qec::float_t>{0.1});
+  params.insert("inner_decoder_name", std::string{"sample_decoder"});
+  params.insert("inner_decoder_params", cudaqx::heterogeneous_map{});
+
+  return std::make_unique<recording_sliding_window_decoder>(
+      cudaq::qec::sparse_binary_matrix(H), params);
+}
+
 } // namespace
 
 TEST(DecoderUtils, CovertHardToSoft) {
@@ -224,6 +257,49 @@ TEST(SampleDecoder, RealtimeApiAndDefaultGraphHooks) {
 
   // Longer input than the configured measurement buffer is rejected.
   EXPECT_FALSE(decoder->enqueue_syndrome(msyn.data(), msyn.size() + 1));
+}
+
+TEST(SlidingWindowDecoder, EnqueueKeepsRollingState) {
+  auto decoder = make_recording_sliding_window_decoder(2);
+  decoder->set_D_sparse(std::vector<std::vector<uint32_t>>{{0, 2}, {1, 3}});
+  decoder->set_O_sparse(std::vector<std::vector<uint32_t>>{});
+
+  // The realtime sliding-window path should decode every adjacent pair:
+  // rounds {0,1}, {1,1}, {1,0} produce {1,0} and then {0,1}.
+  EXPECT_FALSE(decoder->enqueue_syndrome(std::vector<uint8_t>{0, 1}));
+  EXPECT_TRUE(decoder->enqueue_syndrome(std::vector<uint8_t>{1, 1}));
+  ASSERT_EQ(decoder->detector_history.size(), 1);
+  EXPECT_EQ(decoder->detector_history[0],
+            (std::vector<cudaq::qec::float_t>{1.0, 0.0}));
+
+  EXPECT_TRUE(decoder->enqueue_syndrome(std::vector<uint8_t>{1, 0}));
+  ASSERT_EQ(decoder->detector_history.size(), 2);
+  EXPECT_EQ(decoder->detector_history[1],
+            (std::vector<cudaq::qec::float_t>{0.0, 1.0}));
+}
+
+TEST(SlidingWindowDecoder, EnqueueHandlesFirstRoundDetector) {
+  auto decoder = make_recording_sliding_window_decoder(2);
+  decoder->set_D_sparse(
+      std::vector<std::vector<uint32_t>>{{0}, {1}, {0, 2}, {1, 3}});
+  decoder->set_O_sparse(std::vector<std::vector<uint32_t>>{});
+
+  // Cover the first-round detector path: first decode copies s0 directly, then
+  // later decodes must roll forward as s0^s1 and s1^s2.
+  EXPECT_TRUE(decoder->enqueue_syndrome(std::vector<uint8_t>{1, 0}));
+  ASSERT_EQ(decoder->detector_history.size(), 1);
+  EXPECT_EQ(decoder->detector_history[0],
+            (std::vector<cudaq::qec::float_t>{1.0, 0.0}));
+
+  EXPECT_TRUE(decoder->enqueue_syndrome(std::vector<uint8_t>{1, 1}));
+  ASSERT_EQ(decoder->detector_history.size(), 2);
+  EXPECT_EQ(decoder->detector_history[1],
+            (std::vector<cudaq::qec::float_t>{0.0, 1.0}));
+
+  EXPECT_TRUE(decoder->enqueue_syndrome(std::vector<uint8_t>{0, 1}));
+  ASSERT_EQ(decoder->detector_history.size(), 3);
+  EXPECT_EQ(decoder->detector_history[2],
+            (std::vector<cudaq::qec::float_t>{1.0, 0.0}));
 }
 
 TEST(DecoderPlugins, SingleErrorLutExample_DecodesSingletonColumnSyndromes) {
