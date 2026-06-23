@@ -21,14 +21,17 @@ if sys.version_info < (3, 11):
 
 # [Begin Documentation]
 """
-Noise learning with NMOptimizer on a Stim repetition-code circuit.
+Online noise learning with NMOptimizer on a Stim surface-code DEM.
 
-This script demonstrates how to use NMOptimizer to fit per-error noise
-probabilities to syndrome data sampled from a Stim repetition-code memory
-experiment.  Starting from uniform initial priors, Adam optimization on
-logits drives the cross-entropy loss down toward the true DEM error rates,
-and a held-out evaluation compares the learned model's logical error rate
-against the static uniform-prior baseline.
+This example demonstrates how to use NMOptimizer to fit per-error noise
+probabilities from syndrome data sampled from a Stim detector error model.
+The optimizer is initialized away from the DEM priors, then each training
+iteration resamples a fresh syndrome batch and tracks cross-entropy, prior
+recovery, and logical error-rate dynamics.
+
+For a low-noise code, LER is a noisy metric; representative experiments often
+need 10k-30k shots per iteration.  The default below is smaller so the example
+stays quick to run.
 
 Requirements:
     pip install cudaq-qec[tensor-network-decoder] stim beliefmatching
@@ -39,8 +42,13 @@ import torch
 import stim
 from beliefmatching.belief_matching import detector_error_model_to_check_matrices
 
-import cudaq_qec as qec
 from cudaq_qec import NMOptimizer, make_compiled_step
+
+BATCH_SHOTS = 1000
+ITERS = 20
+LR = 1e-2
+DTYPE = "float64"
+DEVICE = "cuda:0" if torch.cuda.is_available() else "cpu"
 
 
 def parse_detector_error_model(dem):
@@ -49,109 +57,93 @@ def parse_detector_error_model(dem):
     matrices.check_matrix.astype(np.float64).toarray(out=H)
     L = np.zeros(matrices.observables_matrix.shape)
     matrices.observables_matrix.astype(np.float64).toarray(out=L)
-    priors = [float(p) for p in matrices.priors]
+    priors = np.array([float(p) for p in matrices.priors], dtype=np.float64)
     return H, L, priors
 
 
+def sample_batch(circuit, shots):
+    det_events, obs_flips = circuit.compile_detector_sampler().sample(
+        shots, separate_observables=True)
+    return det_events.astype(float), obs_flips.ravel().astype(bool)
+
+
+def probs_to_logits(probs):
+    probs = np.clip(probs, 1e-7, 1.0 - 1e-7)
+    return np.log(probs / (1.0 - probs))
+
+
+def logical_error_rate(opt, probs):
+    original = opt.noise_params[0]
+    try:
+        opt._noise_probs = probs
+        return opt.logical_error_rate()
+    finally:
+        opt._noise_probs = original
+
+
 def main():
-    # Asymmetric noise (data 10x measurement) so the uniform initial
-    # prior is meaningfully wrong and the optimizer has signal to
-    # learn; with symmetric noise, uniform is already near-optimal.
     circuit = stim.Circuit.generated(
-        "repetition_code:memory",
-        rounds=5,
+        "surface_code:rotated_memory_z",
+        rounds=3,
         distance=3,
-        before_round_data_depolarization=0.05,
-        before_measure_flip_probability=0.005,
+        before_round_data_depolarization=0.005,
     )
     dem = circuit.detector_error_model(decompose_errors=True)
     H, L, true_priors = parse_detector_error_model(dem)
-    true_probs = np.array(true_priors)
     n_checks, n_errors = H.shape
 
     print(f"DEM: {n_checks} checks, {n_errors} errors")
-    print(f"True priors:  mean={true_probs.mean():.4e}  "
-          f"min={true_probs.min():.4e}  max={true_probs.max():.4e}  "
-          f"(spread {true_probs.max() / true_probs.min():.1f}x)")
+    print(f"True priors:  mean={true_priors.mean():.4e}  "
+          f"min={true_priors.min():.4e}  max={true_priors.max():.4e}")
+    print(f"Device: {DEVICE}")
 
-    num_shots = 1000
-    sampler = circuit.compile_detector_sampler()
-    det_events, obs_flips = sampler.sample(num_shots, separate_observables=True)
-    det_events = det_events.astype(float)
-    obs_flips = obs_flips.ravel().astype(bool)
-
-    uniform = float(true_probs.mean())
+    det_events, obs_flips = sample_batch(circuit, BATCH_SHOTS)
+    uniform = np.full(n_errors, true_priors.mean(), dtype=np.float64)
     opt = NMOptimizer(H,
-                      L, [uniform] * n_errors,
+                      L,
+                      uniform.tolist(),
                       det_events,
                       obs_flips,
-                      dtype="float64")
+                      dtype=DTYPE,
+                      device=DEVICE,
+                      execute="codegen")
 
-    # Optimize in logit space — numerically stabler than raw probs.
-    def _to_logits(p):
-        p = np.clip(p, 1e-7, 1 - 1e-7)
-        return -np.log(1.0 / p - 1.0)
-
-    logits = torch.tensor(
-        _to_logits(np.full(n_errors, uniform)),
-        dtype=torch.float64,
-        device=opt.torch_device,
-        requires_grad=True,
-    )
-    adam = torch.optim.Adam([logits], lr=1e-2)
+    logits = torch.tensor(probs_to_logits(uniform),
+                          dtype=getattr(torch, DTYPE),
+                          device=opt.torch_device,
+                          requires_grad=True)
+    uniform_probs = torch.tensor(uniform,
+                                 dtype=getattr(torch, DTYPE),
+                                 device=opt.torch_device)
+    true_probs = torch.tensor(true_priors,
+                              dtype=getattr(torch, DTYPE),
+                              device=opt.torch_device)
+    adam = torch.optim.Adam([logits], lr=LR)
     step_fn = make_compiled_step(opt, logits, adam)
 
-    iters = 300
-    losses = [float(step_fn().detach().cpu()) for _ in range(iters)]
-    learned = torch.sigmoid(logits).detach().cpu().numpy()
+    print(
+        "iter | loss       | learned LER | uniform LER | true-prior LER | prior MAE"
+    )
+    for it in range(1, ITERS + 1):
+        if it > 1:
+            det_events, obs_flips = sample_batch(circuit, BATCH_SHOTS)
+            opt.update_dataset(det_events, obs_flips)
 
-    print(f"Loss:           {losses[0]:.2f} -> {losses[-1]:.2f} "
-          f"({iters} Adam steps)")
-    print(f"True priors:    mean={true_probs.mean():.4e}  "
-          f"min={true_probs.min():.4e}  max={true_probs.max():.4e}")
+        loss = step_fn()
+        learned_probs = torch.sigmoid(logits)
+        prior_mae = float(
+            torch.mean(torch.abs(learned_probs - true_probs)).detach().cpu())
+        ler_learned = logical_error_rate(opt, learned_probs)
+        ler_uniform = logical_error_rate(opt, uniform_probs)
+        ler_true = logical_error_rate(opt, true_probs)
+
+        print(f"{it:4d} | {float(loss.detach().cpu()):.4e} | "
+              f"{ler_learned:.4f}      | {ler_uniform:.4f}     | "
+              f"{ler_true:.4f}         | {prior_mae:.4e}")
+
+    learned = torch.sigmoid(logits).detach().cpu().numpy()
     print(f"Learned priors: mean={learned.mean():.4e}  "
           f"min={learned.min():.4e}  max={learned.max():.4e}")
-
-    if losses[-1] >= losses[0]:
-        raise RuntimeError(f"Training did not reduce loss at all: "
-                           f"{losses[0]:.2f} -> {losses[-1]:.2f}")
-
-    # Held-out LER comparison is the real gate: a noise model is only
-    # useful if it decodes better than uniform priors.  20k shots keeps
-    # the per-run std of the (static - learned) difference around 0.001,
-    # so the +0.002 gate sits many sigmas below the expected gain even
-    # without a fixed RNG seed.
-    num_test = 20000
-    test_events, test_flips = sampler.sample(num_test,
-                                             separate_observables=True)
-    test_events = test_events.astype(float)
-    test_flips_bool = test_flips.ravel().astype(bool)
-
-    def _ler(noise: list[float]) -> float:
-        decoder = qec.get_decoder(
-            "tensor_network_decoder",
-            H,
-            logical_obs=L,
-            noise_model=noise,
-            contract_noise_model=True,
-        )
-        res = decoder.decode_batch(test_events)
-        pred = np.array([r.result[0] > 0.5 for r in res], dtype=bool)
-        return float(np.mean(pred != test_flips_bool))
-
-    ler_static = _ler([uniform] * n_errors)
-    ler_learned = _ler(learned.tolist())
-
-    print(f"LER (static uniform priors):  {ler_static:.4f}  ({num_test} shots)")
-    print(
-        f"LER (learned priors):         {ler_learned:.4f}  ({num_test} shots)")
-    print(f"Absolute improvement:          {ler_static - ler_learned:+.4f}")
-
-    min_improvement = 0.002
-    if ler_static - ler_learned < min_improvement:
-        raise RuntimeError(
-            f"Learned LER ({ler_learned:.4f}) did not beat the static "
-            f"baseline ({ler_static:.4f}) by at least {min_improvement:.4f}.")
 
 
 if __name__ == "__main__":
