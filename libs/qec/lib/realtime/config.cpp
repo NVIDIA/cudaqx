@@ -190,6 +190,31 @@ single_error_lut_config single_error_lut_config::from_heterogeneous_map(
   return config;
 }
 
+cudaqx::heterogeneous_map global_decoder_config_to_heterogeneous_map(
+    const global_decoder_config &global_decoder_params) {
+  if (std::holds_alternative<std::monostate>(global_decoder_params)) {
+    return cudaqx::heterogeneous_map();
+  }
+
+  if (std::holds_alternative<pymatching_config>(global_decoder_params)) {
+    return std::get<pymatching_config>(global_decoder_params)
+        .to_heterogeneous_map();
+  }
+
+  throw std::runtime_error("Unsupported global decoder parameters.");
+}
+
+global_decoder_config global_decoder_config_from_heterogeneous_map(
+    const cudaqx::heterogeneous_map &map,
+    const std::optional<std::string> &global_decoder) {
+  if (global_decoder.has_value() && global_decoder.value() != "pymatching") {
+    throw std::runtime_error(
+        "global_decoder_params currently supports only pymatching.");
+  }
+
+  return pymatching_config::from_heterogeneous_map(map);
+}
+
 // ------ pymatching_config ------
 cudaqx::heterogeneous_map pymatching_config::to_heterogeneous_map() const {
   cudaqx::heterogeneous_map config_map;
@@ -217,6 +242,27 @@ cudaqx::heterogeneous_map trt_decoder_config::to_heterogeneous_map() const {
   INSERT_ARG(engine_save_path);
   INSERT_ARG(precision);
   INSERT_ARG(memory_workspace);
+  INSERT_ARG(batch_size);
+  INSERT_ARG(use_cuda_graph);
+  INSERT_ARG(global_decoder);
+  if (!std::holds_alternative<std::monostate>(global_decoder_params)) {
+    if (!global_decoder.has_value()) {
+      throw std::runtime_error(
+          "global_decoder_params present but global_decoder is not set.");
+    }
+    if (global_decoder.value() != "pymatching") {
+      throw std::runtime_error(
+          "global_decoder_params currently supports only pymatching.");
+    }
+    config_map.insert(
+        "global_decoder_params",
+        global_decoder_config_to_heterogeneous_map(global_decoder_params));
+  }
+  // Note: when global_decoder_params is monostate we intentionally emit
+  // nothing, even if global_decoder is set. Inventing an empty params map here
+  // would round-trip back as a default pymatching_config, mutating the config.
+  // Any runtime need for an empty params map is handled in
+  // prepare_decoder_params (realtime_decoding.cpp), not in serialization.
 
   return config_map;
 }
@@ -229,6 +275,32 @@ trt_decoder_config trt_decoder_config::from_heterogeneous_map(
   GET_ARG(engine_save_path);
   GET_ARG(precision);
   GET_ARG(memory_workspace);
+  GET_ARG(batch_size);
+  GET_ARG(use_cuda_graph);
+  GET_ARG(global_decoder);
+  if (map.contains("global_decoder_params")) {
+    if (!config.global_decoder.has_value())
+      throw std::runtime_error(
+          "global_decoder_params present but global_decoder is not set.");
+    if (config.global_decoder.value() != "pymatching")
+      throw std::runtime_error(
+          "global_decoder_params currently supports only pymatching.");
+    try {
+      config.global_decoder_params =
+          map.get<global_decoder_config>("global_decoder_params");
+    } catch (...) {
+      try {
+        config.global_decoder_params =
+            map.get<pymatching_config>("global_decoder_params");
+      } catch (...) {
+        auto nested_map =
+            map.get<cudaqx::heterogeneous_map>("global_decoder_params");
+        config.global_decoder_params =
+            global_decoder_config_from_heterogeneous_map(nested_map,
+                                                         config.global_decoder);
+      }
+    }
+  }
 
   return config;
 }
@@ -364,6 +436,30 @@ struct MappingTraits<cudaq::qec::decoding::config::single_error_lut_config> {
 };
 
 template <>
+struct MappingTraits<cudaq::qec::decoding::config::global_decoder_config> {
+  static void
+  mapping(IO &io, cudaq::qec::decoding::config::global_decoder_config &config) {
+    using namespace cudaq::qec::decoding::config;
+
+    if (io.outputting()) {
+      if (std::holds_alternative<std::monostate>(config)) {
+        return;
+      }
+
+      auto &params = std::get<pymatching_config>(config);
+      io.mapOptional("merge_strategy", params.merge_strategy);
+      io.mapOptional("error_rate_vec", params.error_rate_vec);
+      return;
+    }
+
+    pymatching_config params;
+    io.mapOptional("merge_strategy", params.merge_strategy);
+    io.mapOptional("error_rate_vec", params.error_rate_vec);
+    config = std::move(params);
+  }
+};
+
+template <>
 struct MappingTraits<cudaq::qec::decoding::config::pymatching_config> {
   static void mapping(IO &io,
                       cudaq::qec::decoding::config::pymatching_config &config) {
@@ -381,6 +477,26 @@ struct MappingTraits<cudaq::qec::decoding::config::trt_decoder_config> {
     io.mapOptional("engine_save_path", config.engine_save_path);
     io.mapOptional("precision", config.precision);
     io.mapOptional("memory_workspace", config.memory_workspace);
+    io.mapOptional("batch_size", config.batch_size);
+    io.mapOptional("use_cuda_graph", config.use_cuda_graph);
+    io.mapOptional("global_decoder", config.global_decoder);
+    // Emit global_decoder_params only when it actually holds params. Mapping it
+    // unconditionally on output writes an empty `global_decoder_params: {}` for
+    // the monostate case, which deserializes back into a default
+    // pymatching_config -- mutating a monostate config across a YAML
+    // round-trip. On input we always map it: an absent key leaves the variant
+    // at its monostate default (mapOptional skips the nested mapping), and a
+    // present key is parsed into pymatching_config.
+    if (!io.outputting() ||
+        !std::holds_alternative<std::monostate>(config.global_decoder_params))
+      io.mapOptional("global_decoder_params", config.global_decoder_params);
+
+    if (!std::holds_alternative<std::monostate>(config.global_decoder_params) &&
+        config.global_decoder.has_value() &&
+        config.global_decoder.value() != "pymatching") {
+      throw std::runtime_error(
+          "global_decoder_params currently supports only pymatching.");
+    }
   }
 };
 
