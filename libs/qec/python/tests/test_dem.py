@@ -96,13 +96,16 @@ def test_dem_from_memory_circuit():
     nRounds = 2
 
     dem = qec.z_dem_from_memory_circuit(code, statePrep, nRounds, noise)
+    # Mechanisms that share a detector syndrome but flip a different observable
+    # are kept as distinct columns (they are not merged), so the same detector
+    # column pattern can appear more than once with a distinct observable row.
     expected_detector_error_matrix = """
-1111...1..............
-.1.111..111...........
-..11.11..1.1111.......
-.......111.1.1.1111...
-..........1.11..1.111.
-..............1..11.11
+11111.....1.................
+..1.1111...111..............
+...11..111..1.1111..........
+..........111.1.1.1111......
+.............1.11..1.11111..
+.................1..11..1111
 """
     # Uncomment the following line to get a string representation of the DEM
     # that you can compare to expected_detector_error_matrix.
@@ -117,13 +120,14 @@ def test_dem_from_memory_circuit():
     # The following error rates were captured from the above print statement and
     # are considered "truth" data now.
     expected_error_rates = [
-        0.0183, 0.0235, 0.0158, 0.0209, 0.0310, 0.0235, 0.0183, 0.0106, 0.0053,
-        0.0053, 0.0106, 0.0053, 0.0053, 0.0053, 0.0106, 0.0235, 0.0158, 0.0158,
-        0.0183, 0.0335, 0.0209, 0.0434
+        0.0053, 0.0132, 0.0235, 0.0158, 0.0210, 0.0235, 0.0080, 0.0235, 0.0132,
+        0.0053, 0.0106, 0.0053, 0.0053, 0.0106, 0.0053, 0.0053, 0.0053, 0.0106,
+        0.0235, 0.0158, 0.0158, 0.0184, 0.0080, 0.0260, 0.0158, 0.0053, 0.0184,
+        0.0261
     ]
     assert np.allclose(dem.error_rates, expected_error_rates, atol=1e-4)
 
-    expected_observables_flips_matrix = '1....11.....1......111\n'
+    expected_observables_flips_matrix = '1.....111......1......1.1.1.\n'
     # Uncomment the following line to get a string representation of the
     # observables flips matrix that you can compare to
     # expected_observables_flips_matrix.

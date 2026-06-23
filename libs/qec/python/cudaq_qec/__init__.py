@@ -1,5 +1,5 @@
 # ============================================================================ #
-# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
+# Copyright (c) 2024 - 2026 NVIDIA Corporation & Affiliates.                   #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -115,6 +115,7 @@ decoder_config = qecrt.config.decoder_config
 nv_qldpc_decoder_config = qecrt.config.nv_qldpc_decoder_config
 multi_error_lut_config = qecrt.config.multi_error_lut_config
 trt_decoder_config = qecrt.config.trt_decoder_config
+pymatching_config = qecrt.config.pymatching_config
 configure_decoders_from_file = qecrt.config.configure_decoders_from_file
 configure_decoders_from_str = qecrt.config.configure_decoders_from_str
 finalize_decoders = qecrt.config.finalize_decoders
