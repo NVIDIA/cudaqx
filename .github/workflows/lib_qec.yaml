@@ -60,6 +60,8 @@ jobs:
           ref: ${{ steps.get-cudaq-version.outputs.ref }}
           token: ${{ secrets.CUDAQ_ACCESS_TOKEN }}
           cache-key-suffix: ${{ inputs.cache_key_suffix }}
+          realtime-mode: base
+          save-build: true
           platform: ${{ matrix.platform }}-cu${{ steps.config.outputs.cuda_major }}
 
       # ========================================================================
