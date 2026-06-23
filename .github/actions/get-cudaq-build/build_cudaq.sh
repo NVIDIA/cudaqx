@@ -27,4 +27,9 @@ export CUDAQ_WERROR=${CUDAQ_WERROR:-OFF}
 # CUDAQ_INSTALL_PREFIX / CUQUANTUM_INSTALL_PREFIX / CUTENSOR_INSTALL_PREFIX /
 # CCACHE_DIR are expected to be set by the calling action (see action.yaml).
 
-cd cudaq && bash scripts/build_cudaq.sh -v -c "$BUILD_TYPE"
+cd cudaq
+if [[ -n "${CUDAQ_REALTIME_DIR:-}" ]]; then
+  bash scripts/build_cudaq.sh -v -c "$BUILD_TYPE" -- "-DCUDAQ_REALTIME_DIR=${CUDAQ_REALTIME_DIR}"
+else
+  bash scripts/build_cudaq.sh -v -c "$BUILD_TYPE"
+fi
