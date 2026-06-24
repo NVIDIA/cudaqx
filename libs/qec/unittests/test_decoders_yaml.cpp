@@ -10,7 +10,41 @@
 #include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/realtime/decoding_config.h"
 #include <cmath>
+#include <cstdint>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <gtest/gtest.h>
+#include <optional>
+
+namespace {
+class ScopedEnv {
+public:
+  ScopedEnv(const char *name, const char *value) : name(name) {
+    if (const char *old = std::getenv(name))
+      oldValue = old;
+    setenv(name, value, 1);
+  }
+
+  ~ScopedEnv() {
+    if (oldValue.has_value())
+      setenv(name.c_str(), oldValue->c_str(), 1);
+    else
+      unsetenv(name.c_str());
+  }
+
+private:
+  std::string name;
+  std::optional<std::string> oldValue;
+};
+} // namespace
+
+namespace cudaq::qec::decoding::simulation {
+void enqueue_syndromes(std::uint64_t decoder_id, uint8_t *syndromes,
+                       std::uint64_t syndrome_length, std::uint64_t tag);
+void get_corrections(std::uint64_t decoder_id, uint8_t *corrections,
+                     std::uint64_t correction_length, bool reset);
+} // namespace cudaq::qec::decoding::simulation
 
 /// Helper function to test that a decoder configuration can be serialized to
 /// and from YAML.
@@ -237,4 +271,215 @@ TEST(DecoderYAMLTest, SlidingWindowDecoder) {
 
   test_decoder_yaml_roundtrip(multi_config);
   test_decoder_creation(multi_config);
+}
+
+TEST(DecoderConfigMapTest, SRelayNvQldpcAndTrtRoundTrip) {
+  using namespace cudaq::qec::decoding::config;
+
+  srelay_bp_config relay;
+  relay.pre_iter = 3;
+  relay.num_sets = 5;
+  relay.stopping_criterion = "NConv";
+  relay.stop_nconv = 2;
+
+  auto relay_map = relay.to_heterogeneous_map();
+  auto relay_from_map = srelay_bp_config::from_heterogeneous_map(relay_map);
+  EXPECT_EQ(relay_from_map, relay);
+
+  nv_qldpc_decoder_config nv;
+  nv.use_sparsity = true;
+  nv.error_rate = 0.02;
+  nv.error_rate_vec = std::vector<double>{0.1, 0.2, 0.3};
+  nv.max_iterations = 8;
+  nv.n_threads = 4;
+  nv.use_osd = true;
+  nv.osd_method = 1;
+  nv.osd_order = 2;
+  nv.bp_batch_size = 16;
+  nv.osd_batch_size = 8;
+  nv.iter_per_check = 3;
+  nv.clip_value = 9.5;
+  nv.bp_method = 2;
+  nv.scale_factor = 0.75;
+  nv.proc_float = "fp64";
+  nv.gamma0 = 0.4;
+  nv.gamma_dist = std::vector<double>{0.1, 0.2};
+  nv.explicit_gammas = std::vector<std::vector<double>>{{0.1, 0.2}, {0.3, 0.4}};
+  nv.srelay_config = relay;
+  nv.bp_seed = 13;
+  nv.composition = 1;
+
+  auto nv_map = nv.to_heterogeneous_map();
+  auto nv_from_map = nv_qldpc_decoder_config::from_heterogeneous_map(nv_map);
+  EXPECT_EQ(nv_from_map, nv);
+
+  cudaqx::heterogeneous_map nested_relay_map;
+  nested_relay_map.insert("pre_iter", std::size_t{7});
+  nested_relay_map.insert("num_sets", std::size_t{9});
+  nested_relay_map.insert("stopping_criterion", std::string("RelErr"));
+  nested_relay_map.insert("stop_nconv", std::size_t{4});
+  cudaqx::heterogeneous_map nv_with_nested_relay;
+  nv_with_nested_relay.insert("srelay_config", nested_relay_map);
+  auto nv_from_nested =
+      nv_qldpc_decoder_config::from_heterogeneous_map(nv_with_nested_relay);
+  ASSERT_TRUE(nv_from_nested.srelay_config.has_value());
+  EXPECT_EQ(nv_from_nested.srelay_config->pre_iter, std::size_t{7});
+  EXPECT_EQ(nv_from_nested.srelay_config->num_sets, std::size_t{9});
+
+  trt_decoder_config trt;
+  trt.onnx_load_path = "/tmp/model.onnx";
+  trt.engine_save_path = "/tmp/model.engine";
+  trt.precision = "noTF32";
+  trt.memory_workspace = std::size_t{4096};
+  auto trt_map = trt.to_heterogeneous_map();
+  auto trt_from_map = trt_decoder_config::from_heterogeneous_map(trt_map);
+  EXPECT_EQ(trt_from_map, trt);
+}
+
+TEST(DecoderConfigMapTest, DecoderCustomArgsCoversNvQldpcAndTrtVariants) {
+  using namespace cudaq::qec::decoding::config;
+
+  decoder_config nv_decoder;
+  nv_decoder.type = "nv-qldpc-decoder";
+  nv_qldpc_decoder_config nv_args;
+  nv_args.max_iterations = 11;
+  nv_args.error_rate_vec = std::vector<double>{0.1, 0.1};
+  nv_decoder.decoder_custom_args = nv_args;
+  auto nv_map = nv_decoder.decoder_custom_args_to_heterogeneous_map();
+  EXPECT_TRUE(nv_map.contains("max_iterations"));
+  EXPECT_EQ(nv_map.get<int>("max_iterations"), 11);
+
+  decoder_config trt_decoder;
+  trt_decoder.type = "trt_decoder";
+  trt_decoder_config trt_args;
+  trt_args.engine_load_path = "/tmp/model.engine";
+  trt_args.precision = "tf32";
+  trt_decoder.decoder_custom_args = trt_args;
+  auto trt_map = trt_decoder.decoder_custom_args_to_heterogeneous_map();
+  EXPECT_TRUE(trt_map.contains("engine_load_path"));
+  EXPECT_EQ(trt_map.get<std::string>("engine_load_path"), "/tmp/model.engine");
+}
+
+TEST(DecoderYAMLTest, TrtDecoderConfigRoundTripWithoutInstantiation) {
+  using namespace cudaq::qec::decoding::config;
+
+  multi_decoder_config multi_config;
+  decoder_config config = create_test_empty_decoder_config(0);
+  config.type = "trt_decoder";
+  trt_decoder_config trt_config;
+  trt_config.engine_load_path = "/tmp/prebuilt.engine";
+  trt_config.engine_save_path = "/tmp/saved.engine";
+  trt_config.precision = "best";
+  trt_config.memory_workspace = std::size_t{1 << 20};
+  config.decoder_custom_args = trt_config;
+  multi_config.decoders.push_back(config);
+
+  test_decoder_yaml_roundtrip(multi_config);
+}
+
+TEST(DecoderYAMLTest, SlidingWindowInnerDecoderVariantRoundTrips) {
+  using namespace cudaq::qec::decoding::config;
+
+  auto check_roundtrip = [](sliding_window_config sw_config) {
+    multi_decoder_config multi_config;
+    decoder_config config = create_test_empty_decoder_config(0);
+    config.type = "sliding_window";
+    config.block_size = 6;
+    config.syndrome_size = 4;
+    cudaqx::tensor<uint8_t> H({config.syndrome_size, config.block_size});
+    cudaqx::tensor<uint8_t> O({1, config.block_size});
+    config.H_sparse = cudaq::qec::pcm_to_sparse_vec(H);
+    config.O_sparse = cudaq::qec::pcm_to_sparse_vec(O);
+    config.D_sparse = cudaq::qec::generate_timelike_sparse_detector_matrix(
+        config.syndrome_size, 2, /*include_first_round=*/false);
+    config.decoder_custom_args = sw_config;
+    multi_config.decoders.push_back(config);
+    test_decoder_yaml_roundtrip(multi_config);
+  };
+
+  sliding_window_config single_lut_sw;
+  single_lut_sw.window_size = std::size_t{1};
+  single_lut_sw.step_size = std::size_t{1};
+  single_lut_sw.num_syndromes_per_round = std::size_t{2};
+  single_lut_sw.error_rate_vec = std::vector<double>(6, 0.1);
+  single_lut_sw.inner_decoder_name = "single_error_lut";
+  single_lut_sw.single_error_lut_params = single_error_lut_config();
+  check_roundtrip(single_lut_sw);
+
+  sliding_window_config nv_sw = single_lut_sw;
+  nv_sw.inner_decoder_name = "nv-qldpc-decoder";
+  nv_sw.single_error_lut_params.reset();
+  nv_sw.nv_qldpc_decoder_params = nv_qldpc_decoder_config();
+  nv_sw.nv_qldpc_decoder_params->max_iterations = 5;
+  nv_sw.nv_qldpc_decoder_params->error_rate_vec = std::vector<double>(6, 0.1);
+  check_roundtrip(nv_sw);
+}
+
+TEST(DecoderConfigTest, ConfigureRejectsDuplicateAndNegativeIds) {
+  using namespace cudaq::qec::decoding::config;
+
+  multi_decoder_config duplicate_ids;
+  duplicate_ids.decoders.push_back(create_test_empty_decoder_config(0));
+  duplicate_ids.decoders.push_back(create_test_empty_decoder_config(0));
+  EXPECT_EQ(configure_decoders(duplicate_ids), 1);
+
+  multi_decoder_config negative_id;
+  negative_id.decoders.push_back(create_test_empty_decoder_config(-1));
+  negative_id.decoders.push_back(create_test_empty_decoder_config(0));
+  EXPECT_EQ(configure_decoders(negative_id), 3);
+}
+
+TEST(DecoderConfigTest, ConfigureFromFileWithDebugLogging) {
+  using namespace cudaq::qec::decoding::config;
+
+  ScopedEnv debugEnv("CUDAQ_QEC_DEBUG_DECODER", "1");
+
+  multi_decoder_config multi_config;
+  multi_config.decoders.push_back(create_test_empty_decoder_config(0));
+  const auto path =
+      std::filesystem::temp_directory_path() / "cudaq_qec_decoders.yaml";
+  {
+    std::ofstream out(path);
+    out << multi_config.to_yaml_str(200);
+  }
+
+  EXPECT_EQ(configure_decoders_from_file(path.c_str()), 0);
+  finalize_decoders();
+  std::filesystem::remove(path);
+}
+
+TEST(DecoderConfigTest, ConfigureFromMissingFileReturnsError) {
+  using namespace cudaq::qec::decoding::config;
+
+  // Missing config files should return the documented nonzero status instead
+  // of attempting to parse an empty or invalid YAML payload.
+  const auto missing_path = std::filesystem::temp_directory_path() /
+                            "cudaq_qec_missing_decoders.yaml";
+  std::filesystem::remove(missing_path);
+  EXPECT_EQ(configure_decoders_from_file(missing_path.c_str()), 1);
+}
+
+TEST(DecoderConfigTest, SimulationHostPointerWrappersForwardToHostRuntime) {
+  using namespace cudaq::qec::decoding::config;
+
+  // The simulation namespace pointer overloads are host trampolines; configure
+  // a simple decoder and verify enqueue/get_corrections reaches the host state.
+  multi_decoder_config multi_config;
+  auto config = create_test_empty_decoder_config(0);
+  cudaqx::tensor<uint8_t> O({1, config.block_size});
+  O.at({0, 0}) = 1;
+  config.O_sparse = cudaq::qec::pcm_to_sparse_vec(O);
+  multi_config.decoders.push_back(config);
+  ASSERT_EQ(configure_decoders(multi_config), 0);
+
+  std::vector<uint8_t> syndromes(config.syndrome_size * 2, 0);
+  syndromes[0] = 1;
+  cudaq::qec::decoding::simulation::enqueue_syndromes(
+      /*decoder_id=*/0, syndromes.data(), syndromes.size(), /*tag=*/17);
+
+  std::vector<uint8_t> corrections(1, 0xff);
+  cudaq::qec::decoding::simulation::get_corrections(
+      /*decoder_id=*/0, corrections.data(), corrections.size(), /*reset=*/true);
+  EXPECT_EQ(corrections, (std::vector<uint8_t>{0}));
+  finalize_decoders();
 }

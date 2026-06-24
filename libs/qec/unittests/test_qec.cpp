@@ -13,6 +13,7 @@
 #include <random>
 #include <unistd.h>
 
+#include "cuda-qx/core/library_utils.h"
 #include "cudaq/qec/codes/surface_code.h"
 #include "cudaq/qec/experiments.h"
 #include "cudaq/qec/pcm_utils.h"
@@ -590,6 +591,9 @@ TEST(QECCodeTester, checkRepetition) {
   auto repetition = cudaq::qec::get_code(
       "repetition", cudaqx::heterogeneous_map{{"distance", 9}});
 
+  EXPECT_EQ(repetition->get_num_x_stabilizers(), 0u);
+  EXPECT_EQ(repetition->get_num_z_stabilizers(), 8u);
+
   {
     auto stabilizers = repetition->get_stabilizers();
 
@@ -671,6 +675,11 @@ TEST(QECCodeTester, checkRepetition) {
 
     EXPECT_TRUE(sum == 0);
   }
+}
+
+TEST(QECNoiseModelTester, ConstructsTwoQubitBitflipChannel) {
+  // Direct construction covers the inline Kraus construction path.
+  EXPECT_NO_THROW({ cudaq::qec::two_qubit_bitflip channel(0.05); });
 }
 
 TEST(QECCodeTester, checkSurfaceCode) {
@@ -1496,6 +1505,72 @@ TEST(PCMUtilsTester, checkPCMToSparseVec) {
   check_pcm_equality(pcm, pcm_from_vec, true);
 }
 
+TEST(PCMUtilsTester, DetectorMatrixAndExtendUtilityPaths) {
+  auto detector_without_first =
+      cudaq::qec::generate_timelike_sparse_detector_matrix(
+          /*num_syndromes_per_round=*/2, /*num_rounds=*/3,
+          /*include_first_round=*/false);
+  EXPECT_EQ(detector_without_first,
+            (std::vector<int64_t>{0, 2, -1, 1, 3, -1, 2, 4, -1, 3, 5, -1}));
+
+  auto detector_with_custom_first =
+      cudaq::qec::generate_timelike_sparse_detector_matrix(
+          /*num_syndromes_per_round=*/2, /*num_rounds=*/3,
+          std::vector<int64_t>{0, -1, 1, -1});
+  EXPECT_EQ(detector_with_custom_first.front(), 0);
+  EXPECT_EQ(detector_with_custom_first.back(), -1);
+
+  // Two identical sorted rounds give pcm_extend_to_n_rounds a repeat pattern to
+  // detect and extend.
+  cudaqx::tensor<uint8_t> pcm({4, 4});
+  std::vector<uint8_t> data = {
+      1, 0, 0, 0, //
+      0, 1, 0, 0, //
+      0, 0, 1, 0, //
+      0, 0, 0, 1, //
+  };
+  pcm.copy(data.data(), {4, 4});
+  ASSERT_TRUE(cudaq::qec::pcm_is_sorted(pcm, /*num_syndromes_per_round=*/2));
+
+  auto [extended, columns] =
+      cudaq::qec::pcm_extend_to_n_rounds(pcm, 2, /*n_rounds=*/4);
+  EXPECT_EQ(extended.shape()[0], 8u);
+  EXPECT_GE(extended.shape()[1], pcm.shape()[1]);
+  EXPECT_FALSE(columns.empty());
+}
+
+TEST(PluginLoaderTester, LoadPluginsCoversSuccessAndFailure) {
+  namespace fs = std::filesystem;
+  const fs::path tmp_dir =
+      fs::temp_directory_path() /
+      ("cudaq_qec_plugin_loader_" + std::to_string(getpid()));
+  fs::create_directories(tmp_dir);
+
+  const fs::path bad_plugin = tmp_dir / "bad_plugin.so";
+  {
+    std::ofstream out(bad_plugin);
+    out << "not an ELF shared object";
+  }
+
+  const fs::path libm = "/lib/x86_64-linux-gnu/libm.so.6";
+  if (!fs::exists(libm)) {
+    fs::remove_all(tmp_dir);
+    GTEST_SKIP() << "libm.so.6 not found for plugin loader dlopen smoke test";
+  }
+  const fs::path good_plugin = tmp_dir / "good_plugin.so";
+  fs::create_symlink(libm, good_plugin);
+
+  cudaq::qec::load_plugins(tmp_dir.string(), cudaq::qec::PluginType::DECODER);
+  cudaq::qec::cleanup_plugins(cudaq::qec::PluginType::DECODER);
+  fs::remove_all(tmp_dir);
+}
+
+TEST(LibraryUtilsTester, FindsQecLibraryPath) {
+  auto path = cudaqx::__internal__::getCUDAQXLibraryPath(
+      cudaqx::__internal__::CUDAQXLibraryType::QEC);
+  EXPECT_NE(path.find("libcudaq-qec"), std::string::npos);
+}
+
 // Test detector_error_model methods
 TEST(DetectorErrorModelTest, NumDetectors) {
   cudaq::qec::detector_error_model dem;
@@ -1751,6 +1826,96 @@ TEST(DetectorErrorModelTest, CanonicalizeWithMismatchedErrorIds) {
 
   // Verify the function completed successfully
   EXPECT_LT(dem.num_error_mechanisms(), 3); // Should have merged some columns
+}
+
+// Sum the probability mass of columns that flip observable 0.
+static double
+observable0_flip_mass(const cudaq::qec::detector_error_model &dem) {
+  double mass = 0.0;
+  for (std::size_t c = 0; c < dem.num_error_mechanisms(); c++)
+    if (dem.observables_flips_matrix.at({0, c}))
+      mass += dem.error_rates[c];
+  return mass;
+}
+
+// Columns with the same detector signature but DIFFERENT observable flips must
+// not be merged, otherwise observable-flip probability mass is relabeled.
+TEST(DetectorErrorModelTest, CanonicalizeObservableAwareMerge) {
+  cudaq::qec::detector_error_model dem;
+  // Two columns, identical single-detector syndrome.
+  dem.detector_error_matrix = cudaqx::tensor<uint8_t>({1, 2});
+  dem.detector_error_matrix.at({0, 0}) = 1;
+  dem.detector_error_matrix.at({0, 1}) = 1;
+  // Column 0 flips the observable, column 1 does not.
+  dem.observables_flips_matrix = cudaqx::tensor<uint8_t>({1, 2});
+  dem.observables_flips_matrix.at({0, 0}) = 1;
+  dem.observables_flips_matrix.at({0, 1}) = 0;
+  dem.error_rates = {0.2, 0.3};
+
+  dem.canonicalize_for_rounds(1);
+
+  // The two columns differ in observable, so they remain distinct.
+  EXPECT_EQ(dem.num_error_mechanisms(), 2);
+  // The observable-flip mass is preserved at 0.2 (neither merged to 0.38
+  // nor dropped to 0.0).
+  EXPECT_NEAR(observable0_flip_mass(dem), 0.2, 1e-12);
+}
+
+// A zero-syndrome column that flips an observable is an undetectable logical
+// error. It is kept by default and dropped only when
+// remove_zero_syndrome_errors is requested.
+TEST(DetectorErrorModelTest, CanonicalizeZeroSyndromeObservable) {
+  auto make = []() {
+    cudaq::qec::detector_error_model dem;
+    dem.detector_error_matrix = cudaqx::tensor<uint8_t>({1, 2});
+    dem.detector_error_matrix.at({0, 0}) = 1; // normal column
+    dem.detector_error_matrix.at({0, 1}) = 0; // no detector signature
+    dem.observables_flips_matrix = cudaqx::tensor<uint8_t>({1, 2});
+    dem.observables_flips_matrix.at({0, 0}) = 0;
+    dem.observables_flips_matrix.at({0, 1}) = 1; // flips the observable
+    dem.error_rates = {0.1, 0.01};
+    return dem;
+  };
+
+  // Default: the zero-syndrome observable-flipping column is retained.
+  auto dem_keep = make();
+  dem_keep.canonicalize_for_rounds(1);
+  EXPECT_EQ(dem_keep.num_error_mechanisms(), 2);
+  EXPECT_NEAR(observable0_flip_mass(dem_keep), 0.01, 1e-12);
+
+  // With removal requested: it is dropped (useless for round-based decoding).
+  auto dem_drop = make();
+  dem_drop.canonicalize_for_rounds(1, /*remove_zero_syndrome_errors=*/true);
+  EXPECT_EQ(dem_drop.num_error_mechanisms(), 1);
+  EXPECT_NEAR(observable0_flip_mass(dem_drop), 0.0, 1e-12);
+}
+
+// Rate composition must be independent of input column order. Two exclusive
+// alternatives of one mechanism (same id) plus an independent mechanism
+// (different id), all on the same syndrome, must compose to
+// P = (0.1 + 0.1)(1 - 0.2) + (1 - 0.1 - 0.1)(0.2) = 0.32 regardless of order.
+TEST(DetectorErrorModelTest, CanonicalizeOrderIndependentComposition) {
+  auto run = [](const std::vector<double> &rates,
+                const std::vector<std::size_t> &ids) {
+    cudaq::qec::detector_error_model dem;
+    const std::size_t n = rates.size();
+    dem.detector_error_matrix = cudaqx::tensor<uint8_t>({1, n});
+    for (std::size_t c = 0; c < n; c++)
+      dem.detector_error_matrix.at({0, c}) =
+          1; // shared single-detector syndrome
+    dem.observables_flips_matrix = cudaqx::tensor<uint8_t>({1, n});
+    dem.error_rates = rates;
+    dem.error_ids = ids;
+    dem.canonicalize_for_rounds(1);
+    EXPECT_EQ(dem.num_error_mechanisms(), 1u);
+    return dem.error_rates[0];
+  };
+
+  // A(0.1,id0), B(0.2,id1), C(0.1,id0) in two different column orders.
+  double abc = run({0.1, 0.2, 0.1}, {0, 1, 0});
+  double acb = run({0.1, 0.1, 0.2}, {0, 0, 1});
+  EXPECT_NEAR(abc, 0.32, 1e-12);
+  EXPECT_NEAR(acb, 0.32, 1e-12);
 }
 
 TEST(PluginLoaderTester, checkCleanupPluginsEdgeCases) {

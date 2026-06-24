@@ -40,7 +40,12 @@ add_dependencies(CUDAQXQECUnitTests test_decoders)
 gtest_discover_tests(test_decoders)
 
 add_executable(test_decoders_yaml test_decoders_yaml.cpp decoders/sample_decoder.cpp)
-target_link_libraries(test_decoders_yaml PRIVATE GTest::gtest_main cudaq-qec cudaq-qec-realtime-decoding cudaq::cudaq)
+target_link_libraries(test_decoders_yaml PRIVATE
+  GTest::gtest_main
+  cudaq-qec
+  cudaq-qec-realtime-decoding
+  cudaq-qec-realtime-decoding-simulation
+  cudaq::cudaq)
 add_dependencies(CUDAQXQECUnitTests test_decoders_yaml)
 gtest_discover_tests(test_decoders_yaml)
 
@@ -77,12 +82,58 @@ if(CUDAQ_QEC_TRT_DECODER_ENABLED AND CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64)|(A
       NO_DEFAULT_PATH
   )
 
+  # test_trt_decoder.cpp calls TensorRT APIs directly (nvinfer1::createInferBuilder,
+  # nvinfer1::ILogger), so the test must link libnvinfer itself. Relying on the
+  # transitive dependency through cudaq-qec-trt-decoder fails at link time with
+  # "DSO missing from command line".
+  find_library(TENSORRT_LIBRARY nvinfer
+      PATHS
+          ${TENSORRT_ROOT}/lib
+          /usr/lib/x86_64-linux-gnu
+          /usr/lib/aarch64-linux-gnu
+          /usr/local/cuda/lib64
+          /usr/local/tensorrt/lib
+          /opt/tensorrt/lib
+      NO_DEFAULT_PATH
+  )
+
   target_include_directories(test_trt_decoder PRIVATE
       ${CUDAToolkit_INCLUDE_DIRS}
       ${TENSORRT_INCLUDE_DIR}
   )
 
-  target_link_libraries(test_trt_decoder PRIVATE GTest::gtest_main cudaq-qec cudaq-qec-trt-decoder cudaq::cudaq CUDA::cudart)
+  target_link_libraries(test_trt_decoder PRIVATE GTest::gtest_main cudaq-qec cudaq-qec-trt-decoder cudaq::cudaq CUDA::cudart ${TENSORRT_LIBRARY})
+
+  find_package(Python COMPONENTS Interpreter QUIET)
+  if(Python_Interpreter_FOUND)
+    execute_process(
+      COMMAND ${Python_EXECUTABLE} -c "import onnx"
+      RESULT_VARIABLE _trt_onnx_python_result
+      OUTPUT_QUIET
+      ERROR_QUIET)
+    if(_trt_onnx_python_result EQUAL 0)
+      set(_trt_generated_onnx_dir "${CMAKE_CURRENT_BINARY_DIR}/trt_decoder_onnx")
+      set(_trt_dynamic_identity_onnx "${_trt_generated_onnx_dir}/trt_dynamic_identity.onnx")
+      set(_trt_uint8_identity_onnx "${_trt_generated_onnx_dir}/trt_uint8_identity.onnx")
+      add_custom_command(
+        OUTPUT "${_trt_dynamic_identity_onnx}" "${_trt_uint8_identity_onnx}"
+        COMMAND ${Python_EXECUTABLE}
+          "${CMAKE_CURRENT_SOURCE_DIR}/decoders/trt_decoder/generate_trt_decoder_onnx.py"
+          --out-dir "${_trt_generated_onnx_dir}"
+        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/decoders/trt_decoder/generate_trt_decoder_onnx.py"
+        COMMENT "Generating TensorRT decoder ONNX test fixtures")
+      add_custom_target(generate_trt_decoder_onnx
+        DEPENDS "${_trt_dynamic_identity_onnx}" "${_trt_uint8_identity_onnx}")
+      add_dependencies(test_trt_decoder generate_trt_decoder_onnx)
+      target_compile_definitions(test_trt_decoder PRIVATE
+        TRT_TEST_DYNAMIC_ONNX_PATH="${_trt_dynamic_identity_onnx}"
+        TRT_TEST_UINT8_ONNX_PATH="${_trt_uint8_identity_onnx}")
+    else()
+      message(WARNING "Python package onnx not found. "
+                      "Skipping generated TensorRT decoder ONNX fixtures.")
+    endif()
+  endif()
+
   # Path to ONNX test asset at repo root (absolute so test finds it regardless of CWD)
   target_compile_definitions(test_trt_decoder PRIVATE
     TRT_TEST_ONNX_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../../../assets/tests/surface_code_decoder.onnx")
