@@ -115,19 +115,27 @@ if(CUDAQ_QEC_TRT_DECODER_ENABLED AND CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64)|(A
       set(_trt_generated_onnx_dir "${CMAKE_CURRENT_BINARY_DIR}/trt_decoder_onnx")
       set(_trt_dynamic_identity_onnx "${_trt_generated_onnx_dir}/trt_dynamic_identity.onnx")
       set(_trt_uint8_identity_onnx "${_trt_generated_onnx_dir}/trt_uint8_identity.onnx")
+      set(_trt_uint8_to_float_onnx "${_trt_generated_onnx_dir}/trt_uint8_to_float.onnx")
       add_custom_command(
-        OUTPUT "${_trt_dynamic_identity_onnx}" "${_trt_uint8_identity_onnx}"
+        OUTPUT
+          "${_trt_dynamic_identity_onnx}"
+          "${_trt_uint8_identity_onnx}"
+          "${_trt_uint8_to_float_onnx}"
         COMMAND ${Python_EXECUTABLE}
           "${CMAKE_CURRENT_SOURCE_DIR}/decoders/trt_decoder/generate_trt_decoder_onnx.py"
           --out-dir "${_trt_generated_onnx_dir}"
         DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/decoders/trt_decoder/generate_trt_decoder_onnx.py"
         COMMENT "Generating TensorRT decoder ONNX test fixtures")
       add_custom_target(generate_trt_decoder_onnx
-        DEPENDS "${_trt_dynamic_identity_onnx}" "${_trt_uint8_identity_onnx}")
+        DEPENDS
+          "${_trt_dynamic_identity_onnx}"
+          "${_trt_uint8_identity_onnx}"
+          "${_trt_uint8_to_float_onnx}")
       add_dependencies(test_trt_decoder generate_trt_decoder_onnx)
       target_compile_definitions(test_trt_decoder PRIVATE
         TRT_TEST_DYNAMIC_ONNX_PATH="${_trt_dynamic_identity_onnx}"
-        TRT_TEST_UINT8_ONNX_PATH="${_trt_uint8_identity_onnx}")
+        TRT_TEST_UINT8_ONNX_PATH="${_trt_uint8_identity_onnx}"
+        TRT_TEST_UINT8_TO_FLOAT_ONNX_PATH="${_trt_uint8_to_float_onnx}")
     else()
       message(WARNING "Python package onnx not found. "
                       "Skipping generated TensorRT decoder ONNX fixtures.")
