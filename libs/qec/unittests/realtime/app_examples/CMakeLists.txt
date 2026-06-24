@@ -208,6 +208,9 @@ if(_app_device_call_runtime_link
         --pymatching-host-dispatch-smoke
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
   )
+  set_tests_properties(
+    app_examples.surface_code-1-host-dispatch-pymatching-smoke
+    PROPERTIES ENVIRONMENT "CUDAQ_DEFAULT_SIMULATOR=stim")
 
 else()
   message(STATUS "Skipping surface_code-1-host-dispatch PyMatching app test "
@@ -248,6 +251,14 @@ add_executable(surface_code-1-quantinuum-emulate)
 set_target_properties(surface_code-1-quantinuum-emulate PROPERTIES LINKER_LANGUAGE CXX)
 
 add_dependencies(surface_code-1-quantinuum-emulate surface_code-1-local)
+set(_surface_code_1_quantinuum_device_deps surface_code-1-local)
+if(TARGET surface_code-1-host-dispatch)
+  # These targets compile the same surface_code-1.cpp source. nvq++ uses the
+  # same intermediate file prefix for each, so serialize their device-code
+  # helper targets to avoid races.
+  list(APPEND _surface_code_1_quantinuum_device_deps
+    surface_code-1-host-dispatch)
+endif()
 
 cudaqx_add_device_code(surface_code-1-quantinuum-emulate
   SOURCES
@@ -255,12 +266,12 @@ cudaqx_add_device_code(surface_code-1-quantinuum-emulate
   COMPILER_FLAGS
     --target quantinuum --emulate --quantinuum-machine Helios-Fake -DMANUALLY_INJECT_ERRORS=1 
   DEPENDS_ON
-    # Must wait for the local executable to be built because it has the same
-    # surface_code-1.cpp file, and the nvq++ compiler will use the same filename
-    # prefix (surface_code-1) for intermediate files. They will stomp on each
-    # other if you don't add this.
-    surface_code-1-local
+    # Must wait for other executables built from the same surface_code-1.cpp
+    # file because nvq++ uses the same filename prefix (surface_code-1) for
+    # intermediate files. They will stomp on each other if you don't add this.
+    ${_surface_code_1_quantinuum_device_deps}
 )
+unset(_surface_code_1_quantinuum_device_deps)
 
 target_link_directories(surface_code-1-quantinuum-emulate
   PRIVATE ${CUDAQ_INSTALL_DIR}/lib)

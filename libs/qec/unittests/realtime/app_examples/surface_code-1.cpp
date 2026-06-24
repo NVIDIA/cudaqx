@@ -19,6 +19,7 @@
 #include <common/CustomOp.h>
 #include <common/ExecutionContext.h>
 #include <common/NoiseModel.h>
+#include <cstdint>
 #include <fstream>
 #include <mutex>
 #include <sstream>
@@ -55,19 +56,31 @@ static int g_syndromes_per_shot = 0;
     CUDAQ_QEC_ENABLE_PYMATCHING_DECODER_TYPE
 namespace {
 
-__qpu__ std::vector<bool>
-pymatching_host_dispatch_decode_syndrome(std::vector<bool> syndrome) {
-  cudaq::qec::decoding::enqueue_syndromes_test(/*decoder_id=*/0, syndrome,
-                                               /*tag=*/1);
-  return cudaq::qec::decoding::get_corrections(/*decoder_id=*/0,
-                                               /*return_size=*/3,
-                                               /*reset=*/true);
+extern "C" std::uint64_t qec_enqueue_syndromes_ui64(std::uint64_t decoder_id,
+                                                    std::uint64_t syndrome_size,
+                                                    std::uint64_t syndrome,
+                                                    std::uint64_t tag);
+extern "C" std::uint64_t qec_get_corrections_ui64(std::uint64_t decoder_id,
+                                                  std::uint64_t return_size,
+                                                  std::uint64_t reset);
+
+__qpu__ std::int64_t
+pymatching_host_dispatch_decode_syndrome(std::uint64_t syndrome) {
+  (void)cudaq::device_call(0, qec_enqueue_syndromes_ui64,
+                           /*decoder_id=*/std::uint64_t{0},
+                           /*syndrome_size=*/std::uint64_t{3}, syndrome,
+                           /*tag=*/std::uint64_t{1});
+  return cudaq::device_call(0, qec_get_corrections_ui64,
+                            /*decoder_id=*/std::uint64_t{0},
+                            /*return_size=*/std::uint64_t{3},
+                            /*reset=*/std::uint64_t{1});
 }
 
-__qpu__ std::vector<bool> pymatching_host_dispatch_read_corrections() {
-  return cudaq::qec::decoding::get_corrections(/*decoder_id=*/0,
-                                               /*return_size=*/3,
-                                               /*reset=*/false);
+__qpu__ std::int64_t pymatching_host_dispatch_read_corrections() {
+  return cudaq::device_call(0, qec_get_corrections_ui64,
+                            /*decoder_id=*/std::uint64_t{0},
+                            /*return_size=*/std::uint64_t{3},
+                            /*reset=*/std::uint64_t{0});
 }
 
 cudaq::qec::decoding::config::multi_decoder_config
@@ -118,17 +131,15 @@ int run_pymatching_host_dispatch_smoke() {
 
   const auto decoded_runs =
       cudaq::run(1, pymatching_host_dispatch_decode_syndrome,
-                 std::vector<bool>{false, true, false});
-  const std::vector<bool> expected_decoded{false, true, false};
-  if (decoded_runs.size() != 1 || decoded_runs.front() != expected_decoded) {
+                 /*syndrome=*/std::uint64_t{0b010});
+  if (decoded_runs.size() != 1 || decoded_runs.front() != 0b010) {
     std::printf("decoded correction mismatch\n");
     return 1;
   }
 
   const auto reset_runs =
       cudaq::run(1, pymatching_host_dispatch_read_corrections);
-  const std::vector<bool> expected_reset{false, false, false};
-  if (reset_runs.size() != 1 || reset_runs.front() != expected_reset) {
+  if (reset_runs.size() != 1 || reset_runs.front() != 0) {
     std::printf("reset correction mismatch\n");
     return 1;
   }
