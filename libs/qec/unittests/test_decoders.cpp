@@ -232,7 +232,7 @@ TEST(DecoderPlugins, SingleErrorLutExample_DecodesSingletonColumnSyndromes) {
   constexpr std::size_t block_size = 3;
   constexpr std::size_t syndrome_size = 2;
   // | 1 1 0 |
-  // | 0 1 1 | — single-bit columns are weight-1 syndrome patterns.
+  // | 0 1 1 | - single-bit columns are weight-1 syndrome patterns.
   std::vector<uint8_t> H_vec = {1, 1, 0, // row 0
                                 0, 1, 1};
   cudaqx::tensor<uint8_t> H;
@@ -996,6 +996,86 @@ error(0.05) D0 D1
   cudaqx::heterogeneous_map opts;
   opts.insert("error_rate_vec", std::vector<double>{0.5});
   EXPECT_THROW(cudaq::qec::get_decoder("single_error_lut", dem_text, opts),
+               std::runtime_error);
+}
+
+// ---------------------------------------------------------------------------
+// Tests for enqueue_syndrome decode_result_type routing
+// ---------------------------------------------------------------------------
+
+// Verify that enqueue_syndrome uses decode() output directly as corrections
+// when get_result_type() == decode_to_obs, bypassing the O_sparse projection.
+TEST(EnqueueSyndrome, ObsFrameDecoderUsesResultDirectly) {
+  // H: 2 syndrome measurements, 4 physical errors
+  cudaqx::tensor<uint8_t> H_tensor({2, 4});
+  H_tensor.at({0, 0}) = 1;
+  H_tensor.at({1, 1}) = 1;
+  cudaqx::heterogeneous_map params;
+  params.insert("decode_to_obs", true);
+  auto dec = cudaq::qec::decoder::get("sample_decoder", H_tensor, params);
+
+  // D_sparse maps the two enqueued syndrome bits directly to two detector bits.
+  dec->set_D_sparse(std::vector<std::vector<uint32_t>>{{0}, {1}});
+  // Two observables; cols 0/1 are within block_size=4 for validation only.
+  dec->set_O_sparse(std::vector<std::vector<uint32_t>>{{0}, {1}});
+
+  bool did_decode = dec->enqueue_syndrome(std::vector<uint8_t>{1, 0});
+  EXPECT_TRUE(did_decode);
+
+  const uint8_t *corr = dec->get_obs_corrections();
+  EXPECT_EQ(corr[0], 1u);
+  EXPECT_EQ(corr[1], 0u);
+}
+
+// Verify that corrections XOR-accumulate correctly across multiple shots and
+// that clear_corrections() resets them between shots.
+TEST(EnqueueSyndrome, ObsFrameMultiShotAccumulation) {
+  cudaqx::tensor<uint8_t> H_tensor({2, 4});
+  H_tensor.at({0, 0}) = 1;
+  H_tensor.at({1, 1}) = 1;
+  cudaqx::heterogeneous_map params;
+  params.insert("decode_to_obs", true);
+  auto dec = cudaq::qec::decoder::get("sample_decoder", H_tensor, params);
+
+  dec->set_D_sparse(std::vector<std::vector<uint32_t>>{{0}, {1}});
+  dec->set_O_sparse(std::vector<std::vector<uint32_t>>{{0}, {1}});
+
+  // Shot 1: obs[0]=1, obs[1]=0 -> corrections become [1, 0]
+  EXPECT_TRUE(dec->enqueue_syndrome(std::vector<uint8_t>{1, 0}));
+  const uint8_t *corr = dec->get_obs_corrections();
+  EXPECT_EQ(corr[0], 1u);
+  EXPECT_EQ(corr[1], 0u);
+
+  // Shot 2 (no reset): obs[0]=1, obs[1]=1 -> corrections XOR to [0, 1]
+  EXPECT_TRUE(dec->enqueue_syndrome(std::vector<uint8_t>{1, 1}));
+  corr = dec->get_obs_corrections();
+  EXPECT_EQ(corr[0], 0u);
+  EXPECT_EQ(corr[1], 1u);
+
+  // After clear, corrections reset to [0, 0]
+  dec->clear_corrections();
+  corr = dec->get_obs_corrections();
+  EXPECT_EQ(corr[0], 0u);
+  EXPECT_EQ(corr[1], 0u);
+}
+
+// Verify that a result size mismatch against num_observables throws for
+// decode_to_obs decoders.
+TEST(EnqueueSyndrome, ObsFrameSizeMismatchThrows) {
+  cudaqx::tensor<uint8_t> H_tensor({3, 4});
+  H_tensor.at({0, 0}) = 1;
+  H_tensor.at({1, 1}) = 1;
+  H_tensor.at({2, 2}) = 1;
+  cudaqx::heterogeneous_map params;
+  params.insert("decode_to_obs", true);
+  auto dec = cudaq::qec::decoder::get("sample_decoder", H_tensor, params);
+
+  dec->set_D_sparse(std::vector<std::vector<uint32_t>>{{0}, {1}, {2}});
+  dec->set_O_sparse(
+      std::vector<std::vector<uint32_t>>{{0}, {1}}); // 2 observables
+
+  // sample_decoder returns all three detector bits in decode_to_obs mode.
+  EXPECT_THROW(dec->enqueue_syndrome(std::vector<uint8_t>{1, 0, 1}),
                std::runtime_error);
 }
 
