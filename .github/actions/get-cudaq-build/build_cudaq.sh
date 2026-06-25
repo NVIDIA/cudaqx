@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 
 # ============================================================================ #
 # Copyright (c) 2022 - 2026 NVIDIA Corporation & Affiliates.                   #
@@ -10,7 +11,8 @@
 
 # Thin wrapper that delegates to cudaq/scripts/build_cudaq.sh. Translates the
 # positional-args contract used by .github/actions/get-cudaq-build/action.yaml
-# into the env-var + flag interface expected by upstream.
+# into the env-var + flag interface expected by upstream, and enables realtime
+# as a CUDA-Q source-tree project.
 BUILD_TYPE=${1:-"Release"}
 LAUNCHER=${2:-""}  # accepted for backward compat; upstream auto-detects ccache via PATH
 CC=${3:-"gcc"}
@@ -28,8 +30,8 @@ export CUDAQ_WERROR=${CUDAQ_WERROR:-OFF}
 # CCACHE_DIR are expected to be set by the calling action (see action.yaml).
 
 cd cudaq
-if [[ -n "${CUDAQ_REALTIME_DIR:-}" ]]; then
-  bash scripts/build_cudaq.sh -v -c "$BUILD_TYPE" -- "-DCUDAQ_REALTIME_DIR=${CUDAQ_REALTIME_DIR}"
-else
-  bash scripts/build_cudaq.sh -v -c "$BUILD_TYPE"
-fi
+bash scripts/build_cudaq.sh -v -c "$BUILD_TYPE" -- \
+  "-DCUDAQ_ENABLE_PROJECTS=cudaq;runtime;python;realtime" \
+  -DCUDAQ_REALTIME_BUILD_TESTS=OFF \
+  -DCUDAQ_REALTIME_BUILD_EXAMPLES=OFF \
+  -DCUDAQ_REALTIME_ENABLE_HOLOLINK_TOOLS=OFF

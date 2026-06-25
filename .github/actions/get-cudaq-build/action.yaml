@@ -28,10 +28,6 @@ inputs:
     description: 'Check if a cache entry exists without downloading the cache'
     default: 'false'
     required: false
-  realtime-mode:
-    description: 'CUDA-Q realtime support to build into the CUDA-Q install. Supported values: none, base.'
-    default: 'none'
-    required: false
   platform:
     description: 'Platform ({amd64,arm64}-cu{12,13})'
     default: ''
@@ -48,17 +44,6 @@ runs:
     # Try to restore from cache
     # ==========================================================================
 
-    - name: Validate realtime mode
-      run: |
-        case "${{ inputs.realtime-mode }}" in
-          none|base) ;;
-          *)
-            echo "::error::Unsupported realtime-mode '${{ inputs.realtime-mode }}'. Supported values: none, base."
-            exit 1
-            ;;
-        esac
-      shell: bash --noprofile --norc -euo pipefail {0}
-
     - name: Create CUDAQ build cache key
       id: cudaq-build-key
       env:
@@ -68,7 +53,7 @@ runs:
           .cudaq_version
       run: |
         hash=${{ hashFiles(format('{0}', env.to_hash)) }}
-        echo "main=cudaq-${{ inputs.platform }}-${{ inputs.ref }}-rt-${{ inputs.realtime-mode }}-$hash" >> $GITHUB_OUTPUT
+        echo "main=cudaq-${{ inputs.platform }}-${{ inputs.ref }}-$hash" >> $GITHUB_OUTPUT
         if [[ -n "${{ inputs.cache-key-suffix }}" ]]; then
           echo "suffix=-${{ inputs.cache-key-suffix }}" >> $GITHUB_OUTPUT
         fi
@@ -141,26 +126,6 @@ runs:
           apt install -y --no-install-recommends ccache
       shell: bash --noprofile --norc -euo pipefail {0}
 
-    - name: Build standalone CUDAQ realtime
-      if: steps.check-cache.outputs.valid == 'false' && inputs.lookup-only == 'false' && inputs.realtime-mode == 'base'
-      run: |
-        start=$(date +%s)
-        export CC=gcc-12
-        export CXX=g++-12
-        cmake -G Ninja -S cudaq/realtime -B cudaq/realtime/build \
-          -DCMAKE_BUILD_TYPE=Release \
-          -DCMAKE_INSTALL_PREFIX=/cudaq-install \
-          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-          -DCMAKE_CUDA_COMPILER_LAUNCHER=ccache \
-          -DCUDAQ_REALTIME_BUILD_TESTS=OFF \
-          -DCUDAQ_REALTIME_BUILD_EXAMPLES=OFF \
-          -DCUDAQ_REALTIME_ENABLE_HOLOLINK_TOOLS=OFF
-        cmake --build cudaq/realtime/build --target install -j 4
-        end=$(date +%s)
-        echo "Standalone realtime build seconds: $((end - start))"
-      shell: bash --noprofile --norc -euo pipefail {0}
-
     - name: Build CUDAQ
       if: steps.check-cache.outputs.valid == 'false' && inputs.lookup-only == 'false'
       env:
@@ -169,30 +134,7 @@ runs:
         CUQUANTUM_INSTALL_PREFIX: /cudaq-install
         CUTENSOR_INSTALL_PREFIX: /cudaq-install
         CUDAQ_INSTALL_PREFIX: /cudaq-install
-      run: |
-        start=$(date +%s)
-        if [[ "${{ inputs.realtime-mode }}" == "base" ]]; then
-          export CUDAQ_REALTIME_DIR=/cudaq-install
-        fi
-        bash ${{ env.cudaq-build-script }} Release ccache gcc-12 g++-12
-        end=$(date +%s)
-        echo "CUDA-Q build seconds: $((end - start))"
-      shell: bash --noprofile --norc -euo pipefail {0}
-
-    - name: Verify CUDAQ realtime artifacts
-      if: inputs.lookup-only == 'false' && inputs.realtime-mode == 'base'
-      run: |
-        for artifact in \
-          /cudaq-install/lib/libcudaq-realtime.so \
-          /cudaq-install/lib/libcudaq-realtime-host-dispatch.a \
-          /cudaq-install/lib/libcudaq-device-call-runtime.so \
-          /cudaq-install/lib/cmake/cudaq-realtime/cudaq-realtime-config.cmake
-        do
-          test -f "$artifact" || {
-            echo "::error::Missing required realtime artifact: $artifact"
-            exit 1
-          }
-        done
+      run: bash ${{ env.cudaq-build-script }} Release ccache gcc-12 g++-12
       shell: bash --noprofile --norc -euo pipefail {0}
 
     # ==========================================================================
