@@ -107,11 +107,24 @@ struct pymatching_config {
   from_heterogeneous_map(const cudaqx::heterogeneous_map &map);
 };
 
-// The realtime trt_decoder config currently models only PyMatching as a global
-// decoder. Other global decoder plugins may be constructed through lower-level
-// APIs when their parameters are supplied directly, but they are not serialized
-// by this config variant yet.
-using global_decoder_config = std::variant<std::monostate, pymatching_config>;
+struct chromobius_config {
+  std::optional<bool> drop_mobius_errors_involving_remnant_errors;
+  std::optional<bool> ignore_decomposition_failures;
+  std::optional<bool> include_coords_in_mobius_dem;
+  std::optional<bool> return_weight;
+  std::optional<bool> write_mobius_match_to_stderr;
+
+  bool operator==(const chromobius_config &) const = default;
+
+  __attribute__((visibility("default"))) cudaqx::heterogeneous_map
+  to_heterogeneous_map() const;
+
+  __attribute__((visibility("default"))) static chromobius_config
+  from_heterogeneous_map(const cudaqx::heterogeneous_map &map);
+};
+
+using global_decoder_config =
+    std::variant<std::monostate, pymatching_config, chromobius_config>;
 
 struct trt_decoder_config {
   std::optional<std::string> onnx_load_path;
@@ -168,7 +181,7 @@ struct decoder_config {
   std::vector<std::int64_t> D_sparse;
   std::variant<single_error_lut_config, multi_error_lut_config,
                nv_qldpc_decoder_config, sliding_window_config,
-               trt_decoder_config, pymatching_config>
+               trt_decoder_config, pymatching_config, chromobius_config>
       decoder_custom_args;
 
   bool operator==(const decoder_config &) const = default;
@@ -197,6 +210,9 @@ struct decoder_config {
     } else if (std::holds_alternative<pymatching_config>(decoder_custom_args)) {
       return std::get<pymatching_config>(decoder_custom_args)
           .to_heterogeneous_map();
+    } else if (std::holds_alternative<chromobius_config>(decoder_custom_args)) {
+      return std::get<chromobius_config>(decoder_custom_args)
+          .to_heterogeneous_map();
     }
     return cudaqx::heterogeneous_map();
   }
@@ -218,6 +234,8 @@ struct decoder_config {
       decoder_custom_args = trt_decoder_config::from_heterogeneous_map(map);
     } else if (type == "pymatching") {
       decoder_custom_args = pymatching_config::from_heterogeneous_map(map);
+    } else if (type == "chromobius") {
+      decoder_custom_args = chromobius_config::from_heterogeneous_map(map);
     }
   }
 
