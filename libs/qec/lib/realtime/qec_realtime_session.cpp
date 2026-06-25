@@ -713,7 +713,8 @@ void qec_realtime_session::populate_function_table() {
     shim(&function_table_host_[slot]);
     function_table_host_[slot].function_id = function_id;
     function_table_host_[slot].routing_key = 0;
-    if (function_table_host_[slot].dispatch_mode != CUDAQ_DISPATCH_DEVICE_CALL ||
+    if (function_table_host_[slot].dispatch_mode !=
+            CUDAQ_DISPATCH_DEVICE_CALL ||
         !function_table_host_[slot].handler.device_fn_ptr)
       throw std::runtime_error(
           std::string("qec_realtime_session::initialize: ") + symbol +

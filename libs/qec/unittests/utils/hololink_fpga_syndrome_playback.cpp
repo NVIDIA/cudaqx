@@ -13,9 +13,9 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <memory>
 #include <optional>
-#include <map>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -199,8 +199,8 @@ std::vector<SyndromeEntry> load_syndromes(const std::string &path,
     return entries;
 
   std::string line;
-  std::vector<std::uint8_t> current_shot;             // flat (all rounds)
-  std::vector<std::uint8_t> current_round;            // bits since ROUND_START
+  std::vector<std::uint8_t> current_shot;  // flat (all rounds)
+  std::vector<std::uint8_t> current_round; // bits since ROUND_START
   std::vector<std::vector<std::uint8_t>> current_rounds; // rounds of this shot
   std::vector<std::vector<std::uint8_t>> shots;
   std::vector<std::vector<std::vector<std::uint8_t>>> shots_rounds;
@@ -322,7 +322,8 @@ build_rpc_payload(const std::vector<std::uint8_t> &measurements,
 /// scheduler (decoder_server_runtime.md#enqueue_syndromes):
 ///   [RPCHeader (fid=enqueue, arg_len)][EnqueueRequestPayload (32B)]
 ///   [ceil(n/8) LSB-first bit-packed syndrome bytes + 0..7 zero pad].
-/// One input byte (0/1) per syndrome bit.  ptp_timestamp left 0 (FPGA fills it).
+/// One input byte (0/1) per syndrome bit.  ptp_timestamp left 0 (FPGA fills
+/// it).
 std::vector<std::uint8_t>
 build_enqueue_frame(const std::vector<std::uint8_t> &round_bits,
                     std::uint32_t request_id, std::int64_t decoder_id,
@@ -332,8 +333,8 @@ build_enqueue_frame(const std::vector<std::uint8_t> &round_bits,
   const std::size_t packed = rpc::bit_packed_bytes(n);
   const std::size_t arg_len =
       rpc::align_to_8(sizeof(rpc::EnqueueRequestPayload) + packed);
-  std::vector<std::uint8_t> payload(sizeof(cudaq::realtime::RPCHeader) + arg_len,
-                                    0);
+  std::vector<std::uint8_t> payload(
+      sizeof(cudaq::realtime::RPCHeader) + arg_len, 0);
   auto *header = reinterpret_cast<cudaq::realtime::RPCHeader *>(payload.data());
   header->magic = cudaq::realtime::RPC_MAGIC_REQUEST;
   header->function_id = rpc::kEnqueueSyndromesFunctionId;
@@ -359,13 +360,14 @@ build_enqueue_frame(const std::vector<std::uint8_t> &round_bits,
 /// Build a `get_corrections` RPC frame (decoder_server_runtime.md):
 ///   [RPCHeader (fid=get_corrections, arg_len=24)]
 ///   [GetCorrectionsRequestPayload{decoder_id, return_size, reset}].
-std::vector<std::uint8_t>
-build_get_corrections_frame(std::uint32_t request_id, std::int64_t decoder_id,
-                            std::int64_t return_size, std::uint8_t reset) {
+std::vector<std::uint8_t> build_get_corrections_frame(std::uint32_t request_id,
+                                                      std::int64_t decoder_id,
+                                                      std::int64_t return_size,
+                                                      std::uint8_t reset) {
   namespace rpc = cudaq::qec::decoding::rpc;
   const std::size_t arg_len = sizeof(rpc::GetCorrectionsRequestPayload);
-  std::vector<std::uint8_t> payload(sizeof(cudaq::realtime::RPCHeader) + arg_len,
-                                    0);
+  std::vector<std::uint8_t> payload(
+      sizeof(cudaq::realtime::RPCHeader) + arg_len, 0);
   auto *header = reinterpret_cast<cudaq::realtime::RPCHeader *>(payload.data());
   header->magic = cudaq::realtime::RPC_MAGIC_REQUEST;
   header->function_id = rpc::kGetCorrectionsFunctionId;
@@ -828,10 +830,10 @@ int64_t ptp_delta_ns(PtpTimestamp send, PtpTimestamp recv) {
 }
 
 struct LatencySample {
-  uint32_t request_id;       ///< echoed request_id of the frame
-  uint32_t shot;             ///< request_id / frames_per_shot (per-round)
-  uint32_t local;            ///< frame index within the shot (per-round); else 0
-  bool is_corr;              ///< true = get_corrections frame, false = enqueue ACK
+  uint32_t request_id; ///< echoed request_id of the frame
+  uint32_t shot;       ///< request_id / frames_per_shot (per-round)
+  uint32_t local;      ///< frame index within the shot (per-round); else 0
+  bool is_corr;        ///< true = get_corrections frame, false = enqueue ACK
   uint32_t send_sec, send_nsec;
   uint32_t recv_sec, recv_nsec;
   int64_t delta_ns;
@@ -971,16 +973,15 @@ VerifyResult verify_captured_responses(
     // Per-round get_corrections returns bit-packed observables (LSB-first);
     // compare observable bit 0 to the expected logical correction.  The
     // shot-based path compares the raw correction byte as before.
-    std::uint8_t got =
-        per_round ? static_cast<std::uint8_t>(correction_byte & 0x1u)
-                  : correction_byte;
+    std::uint8_t got = per_round
+                           ? static_cast<std::uint8_t>(correction_byte & 0x1u)
+                           : correction_byte;
     std::uint8_t expected = syndromes[shot_index].expected_correction;
     if (got == expected) {
       result.responses_matched++;
     } else {
       std::cout << "  Sample " << i << " request_id=" << resp.request_id
-                << " shot=" << shot_index
-                << ": got=" << static_cast<int>(got)
+                << " shot=" << shot_index << ": got=" << static_cast<int>(got)
                 << " expected=" << static_cast<int>(expected) << " [FAIL]\n";
       result.correction_errors++;
     }
@@ -1001,18 +1002,18 @@ VerifyResult verify_captured_responses(
     std::cout << "\n";
   }
 
-  // DIAGNOSTIC: per-request_id census -- report duplicated (count>1) and dropped
-  // (count==0) frames with their (shot, local-frame) and ring slot, to confirm
-  // a slot-aliasing race between the scheduler's flag clear and the Hololink RX
-  // kernel refilling reused slots.
+  // DIAGNOSTIC: per-request_id census -- report duplicated (count>1) and
+  // dropped (count==0) frames with their (shot, local-frame) and ring slot, to
+  // confirm a slot-aliasing race between the scheduler's flag clear and the
+  // Hololink RX kernel refilling reused slots.
   if (per_round && frames_per_shot) {
     const std::uint32_t total_frames =
         static_cast<std::uint32_t>(num_expected * frames_per_shot);
     auto describe = [&](std::uint32_t rid) {
       const std::uint32_t local = rid % frames_per_shot;
       const std::uint32_t shot = rid / frames_per_shot;
-      const char *kind = (local + 1 == frames_per_shot) ? "get_corrections"
-                                                         : "enqueue";
+      const char *kind =
+          (local + 1 == frames_per_shot) ? "get_corrections" : "enqueue";
       std::cout << "    rid=" << rid << " (shot=" << shot << " local=" << local
                 << " " << kind << " slot%128=" << (rid % 128) << ")";
     };
@@ -1114,8 +1115,9 @@ int main(int argc, char **argv) {
   // `rounds` enqueue_syndromes frames + 1 get_corrections frame.  rounds is the
   // number of ROUND_START slices in the syndrome file (1 if unstructured).
   const std::size_t rounds =
-      options.per_round ? std::max<std::size_t>(1, syndromes.front().per_round.size())
-                        : 0;
+      options.per_round
+          ? std::max<std::size_t>(1, syndromes.front().per_round.size())
+          : 0;
   const std::size_t frames_per_shot = options.per_round ? rounds + 1 : 1;
   // Single logical observable for the surface-code fixture; the verifier checks
   // observable bit 0 against the expected correction.
@@ -1166,7 +1168,8 @@ int main(int argc, char **argv) {
   // surface_code run, and hardware >120 would need multi-load chunking.
   if (options.per_round) {
     const std::size_t per_shot_cycles = frames_per_shot * cycles_per_window;
-    const std::size_t max_shots = RAM_DEPTH / std::max<std::size_t>(1, per_shot_cycles);
+    const std::size_t max_shots =
+        RAM_DEPTH / std::max<std::size_t>(1, per_shot_cycles);
     if (max_shots == 0) {
       std::cerr << "A single shot's " << frames_per_shot << " frames x "
                 << cycles_per_window << " cycles exceed the " << RAM_DEPTH
@@ -1174,8 +1177,9 @@ int main(int argc, char **argv) {
       return 1;
     }
     if (num_shots > max_shots) {
-      std::cout << "WARNING: per-round playback is BRAM-limited to " << max_shots
-                << " shots (requested " << num_shots << "); truncating.\n";
+      std::cout << "WARNING: per-round playback is BRAM-limited to "
+                << max_shots << " shots (requested " << num_shots
+                << "); truncating.\n";
       num_shots = max_shots;
       windows.resize(num_shots * frames_per_shot);
     }
@@ -1188,7 +1192,8 @@ int main(int argc, char **argv) {
               << " cycles = " << (num_windows * cycles_per_window) << " > "
               << RAM_DEPTH << " depth.  Reduce --num-shots"
               << (options.per_round ? " (per-round multiplies frames by "
-                                      "rounds+1)" : "")
+                                      "rounds+1)"
+                                    : "")
               << ".\n";
     return 1;
   }
@@ -1402,8 +1407,7 @@ int main(int argc, char **argv) {
     // In per-round mode the response frames split into enqueue ACKs
     // (result_len==0) and get_corrections frames (result_len>0); only the
     // latter carry corrections.
-    const std::size_t corrections_returned =
-        vr.rpc_responses - vr.enqueue_acks;
+    const std::size_t corrections_returned = vr.rpc_responses - vr.enqueue_acks;
     std::cout << "\n=== Verification Summary ===\n"
               << "  ILA samples captured:   " << actual_samples << "\n"
               << "  tvalid=0 (idle):        " << vr.tvalid_zero << "\n"

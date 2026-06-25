@@ -94,7 +94,8 @@ std::uint32_t acquire_slot(cudaq::qec::realtime::qec_realtime_session &session,
   const std::size_t n = session.num_slots();
   if (rx == nullptr || tx == nullptr || n == 0)
     return UINT32_MAX;
-  const std::uint32_t s = static_cast<std::uint32_t>(session.producer_cursor() % n);
+  const std::uint32_t s =
+      static_cast<std::uint32_t>(session.producer_cursor() % n);
   for (int waited = 0; waited < timeout_ms; ++waited) {
     if (rx[s] == 0 && tx[s] == 0) {
       session.set_producer_cursor((s + 1u) % n);

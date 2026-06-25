@@ -18,7 +18,8 @@
 ///   FPGA --RDMA--> Hololink RX kernel --writes rx_flags--> scheduler graph
 ///   scheduler graph --DEVICE_CALL append/get/reset; fires decode on a full
 ///     window (CUDAQ_DISPATCH_STATUS_TRIGGER_GRAPH); tail-self-relaunches-->
-///   scheduler writes RPCResponse + tx_flags --> Hololink TX kernel --RDMA--> FPGA
+///   scheduler writes RPCResponse + tx_flags --> Hololink TX kernel --RDMA-->
+///   FPGA
 ///
 /// Flow:
 ///   1. Parse --config (Relay BP YAML) + generic bridge args.
@@ -172,7 +173,8 @@ int main(int argc, char *argv[]) {
   // pair on one thread, with no RDMA timeouts).  A 1:1 slot<->WQE mapping
   // (num_pages <= WQE_NUM) is the only safe configuration.  We clamp rather
   // than abort so a stale/oversized --num-pages can't silently corrupt data.
-  constexpr unsigned kHsbWqeNum = 64; // == HSB WQE_NUM (gpu_roce_transceiver_common.hpp)
+  constexpr unsigned kHsbWqeNum =
+      64; // == HSB WQE_NUM (gpu_roce_transceiver_common.hpp)
   if (config.num_pages > kHsbWqeNum) {
     std::cerr << "WARNING: --num-pages=" << config.num_pages
               << " exceeds the HSB transceiver's WQE depth (" << kHsbWqeNum
@@ -431,8 +433,8 @@ int main(int argc, char *argv[]) {
   // script greps (extract_hex for QP/Buffer, extract_decimal for RKey) so the
   // playback tool can point the FPGA/emulator SIF at our GPU ring, and signal
   // readiness AFTER the scheduler + RX/TX kernels are live.
-  std::cout << "QP Number: 0x" << std::hex << hololink_get_qp_number(transceiver)
-            << std::dec << "\n";
+  std::cout << "QP Number: 0x" << std::hex
+            << hololink_get_qp_number(transceiver) << std::dec << "\n";
   std::cout << "RKey: " << hololink_get_rkey(transceiver) << "\n";
   std::cout << "Buffer Addr: 0x" << std::hex
             << hololink_get_buffer_addr(transceiver) << std::dec << "\n";
