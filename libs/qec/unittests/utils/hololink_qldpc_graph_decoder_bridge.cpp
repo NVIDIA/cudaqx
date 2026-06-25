@@ -161,6 +161,28 @@ int main(int argc, char *argv[]) {
       reserved_sms = std::stoi(arg.substr(15));
   }
 
+  // Guard: clamp num_pages to the HSB receive/send work-queue depth.
+  //
+  // The Hololink gpu_roce_transceiver (HSB 2.6.0-EA2) posts WQE_NUM=64
+  // receive/send WQEs and runs one kernel thread per WQE.  When the ring is
+  // deeper than that, a single thread services multiple ring slots (slot t and
+  // t+64 share one WQE / CQ position), and the free-running RX/TX kernels race
+  // on that shared resource -- empirically a duplicated frame W plus a dropped
+  // frame W+64 (verified on the emulator: every failure was an exact (W, W+64)
+  // pair on one thread, with no RDMA timeouts).  A 1:1 slot<->WQE mapping
+  // (num_pages <= WQE_NUM) is the only safe configuration.  We clamp rather
+  // than abort so a stale/oversized --num-pages can't silently corrupt data.
+  constexpr unsigned kHsbWqeNum = 64; // == HSB WQE_NUM (gpu_roce_transceiver_common.hpp)
+  if (config.num_pages > kHsbWqeNum) {
+    std::cerr << "WARNING: --num-pages=" << config.num_pages
+              << " exceeds the HSB transceiver's WQE depth (" << kHsbWqeNum
+              << "); clamping to " << kHsbWqeNum
+              << " (a deeper ring multiplexes >1 slot per WQE and races the "
+                 "RX/TX kernels -> duplicate/drop)."
+              << std::endl;
+    config.num_pages = kHsbWqeNum;
+  }
+
   std::cout << "=== Hololink QLDPC Relay-BP Bridge (device-graph scheduler) ==="
             << std::endl;
 
@@ -350,9 +372,15 @@ int main(int argc, char *argv[]) {
   BRIDGE_CUDA_CHECK(cudaMemset(d_stats, 0, sizeof(uint64_t)));
 
   // -- Launch the device-graph scheduler on the DOCA ring ---------------------
-  // shared_ring_mode: current_slot resets to 0 on each self-relaunch, so the
-  // scheduler must scan the ring for the next pending slot.
-  BRIDGE_CUDA_CHECK(cudaq_dispatch_kernel_set_shared_ring_mode(1));
+  // Strict-FIFO consumption: shared_ring_mode is OFF.  This scheduler is the
+  // SOLE consumer of the DOCA RX ring (no peer dispatcher), and the Hololink RX
+  // kernel fills slots strictly in order (window N -> slot N % num_pages).  The
+  // persistent cursor in dispatch_kernel_with_graph keeps current_slot across
+  // the tail self-relaunch, so the scheduler waits at the next slot in order
+  // rather than rescanning from 0 -- which is what avoids the slot-reuse race
+  // (out-of-order grab + flag-clear vs. refill) that shared_ring scanning
+  // introduced here.
+  BRIDGE_CUDA_CHECK(cudaq_dispatch_kernel_set_shared_ring_mode(0));
 
   cudaStream_t sched_stream = nullptr;
   BRIDGE_CUDA_CHECK(cudaStreamCreate(&sched_stream));

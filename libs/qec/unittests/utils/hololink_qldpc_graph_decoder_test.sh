@@ -71,7 +71,13 @@ GPU_ID=0
 TIMEOUT=60
 NUM_SHOTS=""
 PAGE_SIZE=384
-NUM_PAGES=128
+# Ring depth (num_pages) is intentionally NOT configurable: stock HSB
+# (gpu_roce_transceiver, 2.6.0-EA2) posts WQE_NUM=64 receive/send WQEs and one
+# thread per WQE, so a ring deeper than 64 makes a single thread service
+# multiple slots (slot t and t+64 share a WQE) and races the RX/TX kernels --
+# observed as a duplicated frame W + dropped frame W+64.  The bridge and
+# playback both default num_pages=64 (1:1 slot<->WQE), which is the only safe
+# configuration; the bridge also guards/clamps to 64.
 SPACING=""
 CONTROL_PORT=8193
 
@@ -128,7 +134,6 @@ Run options:
   --no-verify            Skip correction verification
   --num-shots N          Limit number of shots
   --page-size N          Ring buffer slot size in bytes (default: 384)
-  --num-pages N          Number of ring buffer slots (default: 128)
   --spacing N            Inter-shot spacing in microseconds (default: 10)
   --control-port N       UDP control port for emulator (default: 8193)
 
@@ -164,7 +169,6 @@ while [[ $# -gt 0 ]]; do
         --timeout)          TIMEOUT="$2"; shift ;;
         --num-shots)        NUM_SHOTS="$2"; shift ;;
         --page-size)        PAGE_SIZE="$2"; shift ;;
-        --num-pages)        NUM_PAGES="$2"; shift ;;
         --spacing)          SPACING="$2"; shift ;;
         --control-port)     CONTROL_PORT="$2"; shift ;;
         --help|-h)          print_usage; exit 0 ;;
@@ -279,6 +283,33 @@ setup_port() {
     fi
 
     _info "  Done: $iface is up at $ip"
+}
+
+# Pre-seed a PERMANENT neighbor entry for a real FPGA on the bridge interface.
+# The bridge's QP connect resolves the FPGA's L2 (MAC) address via
+# ibv_create_ah, which consults the kernel neighbor table.  In FPGA mode the
+# setup never primed that table, so the in-call ARP resolution timed out
+# (ibv_ah ret=110 -> "Failed to get remote MAC" -> QP connect failure) even
+# though the link is up.  Ping to force ARP resolution, read the FPGA's MAC,
+# and pin it `nud permanent` so the connect resolves immediately.  Unlike the
+# emulate path (loopback -> both ends share one local MAC), the FPGA's MAC must
+# be learned from the wire.
+_seed_fpga_neighbor() {
+    local iface="$1" fpga_ip="$2"
+    ping -c 3 -W 1 -I "$iface" "$fpga_ip" >/dev/null 2>&1 || true
+    local mac
+    mac=$(ip neigh show "$fpga_ip" dev "$iface" 2>/dev/null \
+          | awk '{for (i = 1; i <= NF; i++) if ($i == "lladdr") print $(i + 1)}' \
+          | head -1)
+    if [[ -n "$mac" ]]; then
+        sudo ip neigh replace "$fpga_ip" lladdr "$mac" nud permanent dev "$iface"
+        _info "  Static ARP: $fpga_ip -> $mac on $iface"
+    else
+        _err "  Could not resolve FPGA MAC for $fpga_ip on $iface."
+        _err "  Check the FPGA is cabled to this NIC, powered, and reachable"
+        _err "  (ping $fpga_ip); otherwise the bridge QP connect will time out"
+        _err "  with 'Failed to get remote MAC'."
+    fi
 }
 
 _add_static_arp() {
@@ -416,6 +447,14 @@ do_setup_network() {
         _info "Bridge interface: $iface_bridge"
         setup_port "$iface_bridge" "$BRIDGE_IP" "$MTU"
         BRIDGE_DEVICE=$(netdev_to_ib "$iface_bridge")
+
+        # Wait for the bridge device's IPv4 RoCE v2 GID (same as emulate mode).
+        wait_for_roce_v2_gid "$BRIDGE_DEVICE" "$BRIDGE_IP" 15 || true
+
+        # Pre-seed the FPGA's neighbor entry so the bridge QP connect can
+        # resolve its MAC immediately (avoids the ibv_ah timeout / "Failed to
+        # get remote MAC").
+        _seed_fpga_neighbor "$iface_bridge" "$FPGA_IP"
     fi
 }
 
@@ -771,7 +810,6 @@ run_emulated() {
         --config="$CONFIG_FILE" \
         --timeout="$TIMEOUT" \
         --page-size="$PAGE_SIZE" \
-        --num-pages="$NUM_PAGES" \
         > >(tee "$bridge_log") 2>&1 &
     local bridge_pid=$!
     PIDS_TO_KILL+=("$bridge_pid")
@@ -811,7 +849,6 @@ run_emulated() {
         --rkey "$bridge_rkey"
         --buffer-addr "$bridge_addr"
         --page-size "$PAGE_SIZE"
-        --num-pages "$NUM_PAGES"
     )
     if $VERIFY; then
         playback_args+=(--verify)
@@ -856,7 +893,6 @@ run_fpga() {
         --config="$CONFIG_FILE" \
         --timeout="$TIMEOUT" \
         --page-size="$PAGE_SIZE" \
-        --num-pages="$NUM_PAGES" \
         > >(tee "$bridge_log") 2>&1 &
     local bridge_pid=$!
     PIDS_TO_KILL+=("$bridge_pid")
@@ -893,7 +929,6 @@ run_fpga() {
         --rkey "$bridge_rkey"
         --buffer-addr "$bridge_addr"
         --page-size "$PAGE_SIZE"
-        --num-pages "$NUM_PAGES"
     )
     if $VERIFY; then
         playback_args+=(--verify)

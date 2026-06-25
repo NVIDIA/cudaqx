@@ -140,6 +140,15 @@ public:
   std::size_t num_slots() const { return num_slots_; }
   std::size_t slot_size() const { return slot_size_; }
 
+  /// @brief Monotonic producer cursor (rpc_producer ring discipline).
+  /// The single serialized producer advances this each RPC so it walks the
+  /// ring in lockstep with the strict-FIFO consumer (device-graph scheduler or
+  /// host loop, both with shared-ring scanning OFF) instead of reusing slot 0.
+  /// Reset to 0 by initialize().  Single-producer today; a future multi-
+  /// producer design would make the advance an atomic fetch-add.
+  std::size_t producer_cursor() const { return producer_cursor_; }
+  void set_producer_cursor(std::size_t slot) { producer_cursor_ = slot; }
+
   /// @brief (DEVICE mode) CUDA stream backing the HOST_LOOP worker for the
   /// decoder at index `decoder_id`.  Returns nullptr in HOST mode, out of
   /// range, or for a decoder that did not capture a graph.
@@ -192,6 +201,9 @@ private:
   static constexpr std::size_t kDefaultNumSlots = 8;
   std::size_t num_slots_ = kDefaultNumSlots;
   std::size_t slot_size_ = 0;
+  // Monotonic producer ring cursor (see producer_cursor()).  Reset in
+  // initialize().
+  std::size_t producer_cursor_ = 0;
   volatile std::uint64_t *rx_flags_host_ = nullptr;
   volatile std::uint64_t *rx_flags_dev_ = nullptr;
   volatile std::uint64_t *tx_flags_host_ = nullptr;

@@ -15,6 +15,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <map>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -827,7 +828,10 @@ int64_t ptp_delta_ns(PtpTimestamp send, PtpTimestamp recv) {
 }
 
 struct LatencySample {
-  uint32_t msg_id;
+  uint32_t request_id;       ///< echoed request_id of the frame
+  uint32_t shot;             ///< request_id / frames_per_shot (per-round)
+  uint32_t local;            ///< frame index within the shot (per-round); else 0
+  bool is_corr;              ///< true = get_corrections frame, false = enqueue ACK
   uint32_t send_sec, send_nsec;
   uint32_t recv_sec, recv_nsec;
   int64_t delta_ns;
@@ -843,7 +847,6 @@ struct VerifyResult {
   std::size_t responses_matched = 0;
   std::size_t header_errors = 0;
   std::size_t correction_errors = 0;
-  std::size_t rpc_requests = 0;
   std::size_t rpc_responses = 0;
   std::size_t non_rpc_frames = 0;
   std::size_t tvalid_zero = 0;
@@ -868,6 +871,11 @@ VerifyResult verify_captured_responses(
   VerifyResult result;
   result.total_samples = samples.size();
   std::set<std::uint32_t> shots_seen;
+  // DIAGNOSTIC census: count how many RPC responses carry each request_id, so a
+  // duplicate-processed frame (count==2) and a dropped frame (count==0) are
+  // identified exactly -- and we can check whether they alias the same ring
+  // slot (rid % num_pages).
+  std::map<std::uint32_t, int> rid_count;
 
   for (std::size_t i = 0; i < samples.size(); ++i) {
     const auto &sample = samples[i];
@@ -888,33 +896,69 @@ VerifyResult verify_captured_responses(
     std::uint8_t correction_byte =
         data_bytes[sizeof(cudaq::realtime::RPCResponse)];
 
-    if (resp.magic == cudaq::realtime::RPC_MAGIC_REQUEST) {
-      result.rpc_requests++;
-      continue;
-    }
+    // The ILA captures the FPGA-bound (TX) response path only, so every RPC
+    // frame here carries RPC_MAGIC_RESPONSE; anything else is a non-RPC frame
+    // (e.g. a continuation beat of a multi-beat AXI transfer).
     if (resp.magic != cudaq::realtime::RPC_MAGIC_RESPONSE) {
       result.non_rpc_frames++;
       continue;
     }
     result.rpc_responses++;
+    if (per_round)
+      rid_count[resp.request_id]++;
 
     if (resp.status != 0) {
       result.header_errors++;
       continue;
     }
 
+    // Frame identity (per-round): shot, local frame index within the shot, and
+    // whether this is the get_corrections frame (result_len>0) vs an enqueue
+    // ACK (result_len==0).
+    const std::size_t frames = frames_per_shot ? frames_per_shot : 1;
+    const std::uint32_t shot_index =
+        per_round ? static_cast<std::uint32_t>(resp.request_id / frames)
+                  : resp.request_id;
+    const std::uint32_t local =
+        per_round ? static_cast<std::uint32_t>(resp.request_id % frames) : 0;
+    const bool is_corr = (!per_round) || (resp.result_len != 0);
+
+    // PTP round-trip latency for EVERY response -- enqueue ACKs AND
+    // get_corrections.  The FPGA injects a send timestamp into every playback
+    // frame and the ILA captures a recv timestamp for every captured sample,
+    // so all frames carry valid PTP.  Recorded here (before the ACK skip
+    // below) so the CSV has one row per captured frame, not just one per shot.
+    {
+      uint64_t send_raw = extract_echoed_ptp_timestamp(resp);
+      uint64_t recv_raw = extract_ila_ptp_timestamp(sample);
+      if (send_raw != 0 && recv_raw != 0) {
+        auto send_ts = decode_ptp(send_raw);
+        auto recv_ts = decode_ptp(recv_raw);
+        int64_t delta = ptp_delta_ns(send_ts, recv_ts);
+        result.latency_samples.push_back({resp.request_id, shot_index, local,
+                                          is_corr, send_ts.sec, send_ts.nsec,
+                                          recv_ts.sec, recv_ts.nsec, delta});
+      }
+    }
+
     // Per-round: enqueue_syndromes responses are empty ACKs (result_len==0);
-    // only get_corrections responses (result_len>0) carry corrections.  Map the
-    // request_id back to a shot via the per-shot frame stride.
+    // only get_corrections responses (result_len>0) carry corrections.
     if (per_round && resp.result_len == 0) {
       result.enqueue_acks++;
+      // DIAGNOSTIC: an empty response at the get_corrections frame position
+      // (local index == rounds) would be a get_corrections that came back
+      // result_len==0 (the old 99/100 anomaly).  Dump what we know about it.
+      const std::size_t rounds = frames ? frames - 1 : 0;
+      if (local == rounds) {
+        std::cout << "  [ANOMALY] sample " << i << ": result_len==0 at "
+                  << "get_corrections position; request_id=" << resp.request_id
+                  << " shot=" << shot_index << " status=" << resp.status
+                  << " magic=0x" << std::hex << resp.magic << std::dec
+                  << " corr_byte=" << static_cast<int>(correction_byte) << "\n";
+      }
       continue;
     }
 
-    std::uint32_t shot_index =
-        per_round ? (frames_per_shot ? resp.request_id / frames_per_shot
-                                     : resp.request_id)
-                  : resp.request_id;
     if (shot_index >= syndromes.size()) {
       std::cout << "  Sample " << i << ": request_id=" << resp.request_id
                 << " -> shot=" << shot_index
@@ -941,24 +985,51 @@ VerifyResult verify_captured_responses(
       result.correction_errors++;
     }
 
-    // PTP round-trip latency: send timestamp from response header,
-    // receive timestamp from ILA bits [584:521].
-    uint64_t send_raw = extract_echoed_ptp_timestamp(resp);
-    uint64_t recv_raw = extract_ila_ptp_timestamp(sample);
-    if (send_raw != 0 && recv_raw != 0) {
-      auto send_ts = decode_ptp(send_raw);
-      auto recv_ts = decode_ptp(recv_raw);
-      int64_t delta = ptp_delta_ns(send_ts, recv_ts);
-      result.latency_samples.push_back({shot_index, send_ts.sec, send_ts.nsec,
-                                        recv_ts.sec, recv_ts.nsec, delta});
-    }
-
     shots_seen.insert(shot_index);
   }
 
   result.unique_shots_verified = shots_seen.size();
   std::cout << "  Unique shots verified:  " << shots_seen.size() << " of "
             << num_expected << "\n";
+
+  // DIAGNOSTIC: list any shots that never produced a get_corrections response.
+  if (shots_seen.size() < num_expected) {
+    std::cout << "  [ANOMALY] missing shots (no correction response):";
+    for (std::uint32_t s = 0; s < num_expected; ++s)
+      if (!shots_seen.count(s))
+        std::cout << " " << s;
+    std::cout << "\n";
+  }
+
+  // DIAGNOSTIC: per-request_id census -- report duplicated (count>1) and dropped
+  // (count==0) frames with their (shot, local-frame) and ring slot, to confirm
+  // a slot-aliasing race between the scheduler's flag clear and the Hololink RX
+  // kernel refilling reused slots.
+  if (per_round && frames_per_shot) {
+    const std::uint32_t total_frames =
+        static_cast<std::uint32_t>(num_expected * frames_per_shot);
+    auto describe = [&](std::uint32_t rid) {
+      const std::uint32_t local = rid % frames_per_shot;
+      const std::uint32_t shot = rid / frames_per_shot;
+      const char *kind = (local + 1 == frames_per_shot) ? "get_corrections"
+                                                         : "enqueue";
+      std::cout << "    rid=" << rid << " (shot=" << shot << " local=" << local
+                << " " << kind << " slot%128=" << (rid % 128) << ")";
+    };
+    bool any = false;
+    for (std::uint32_t rid = 0; rid < total_frames; ++rid) {
+      int c = rid_count.count(rid) ? rid_count[rid] : 0;
+      if (c != 1) {
+        if (!any) {
+          std::cout << "  [ANOMALY] request_id census (expected each seen "
+                       "exactly once):\n";
+          any = true;
+        }
+        describe(rid);
+        std::cout << " seen " << c << " times\n";
+      }
+    }
+  }
 
   return result;
 }
@@ -1328,13 +1399,19 @@ int main(int argc, char **argv) {
     auto vr = verify_captured_responses(samples, syndromes, num_shots,
                                         options.per_round, frames_per_shot);
 
+    // In per-round mode the response frames split into enqueue ACKs
+    // (result_len==0) and get_corrections frames (result_len>0); only the
+    // latter carry corrections.
+    const std::size_t corrections_returned =
+        vr.rpc_responses - vr.enqueue_acks;
     std::cout << "\n=== Verification Summary ===\n"
               << "  ILA samples captured:   " << actual_samples << "\n"
               << "  tvalid=0 (idle):        " << vr.tvalid_zero << "\n"
-              << "  RPC requests (syndromes): " << vr.rpc_requests << "\n"
-              << "  RPC responses (corrections): " << vr.rpc_responses << "\n"
-              << "  Enqueue ACKs (per-round): " << vr.enqueue_acks << "\n"
-              << "  Non-RPC frames:         " << vr.non_rpc_frames << "\n"
+              << "  RPC response frames:    " << vr.rpc_responses << "\n";
+    if (options.per_round)
+      std::cout << "  Enqueue ACKs:           " << vr.enqueue_acks << "\n"
+                << "  get_corrections frames: " << corrections_returned << "\n";
+    std::cout << "  Non-RPC frames:         " << vr.non_rpc_frames << "\n"
               << "  Unique shots verified:  " << vr.unique_shots_verified
               << "\n"
               << "  Corrections matched:    " << vr.responses_matched << "\n"
@@ -1357,28 +1434,37 @@ int main(int argc, char **argv) {
       // Print first 5 samples for diagnostic
       for (std::size_t k = 0; k < 5 && k < vr.latency_samples.size(); ++k) {
         auto &s = vr.latency_samples[k];
-        std::cout << "  Msg " << std::setw(3) << s.msg_id
+        std::cout << "  rid " << std::setw(3) << s.request_id << " (shot "
+                  << s.shot << " local " << s.local << " "
+                  << (s.is_corr ? "get_corrections" : "enqueue") << ")"
                   << ": send={sec=" << s.send_sec << ", nsec=" << s.send_nsec
                   << "} recv={sec=" << s.recv_sec << ", nsec=" << s.recv_nsec
                   << "} delta=" << s.delta_ns << " ns\n";
       }
 
       std::cout << "\n=== PTP Round-Trip Latency ===\n"
-                << "  Samples:  " << vr.latency_samples.size() << "\n"
+                << "  Samples:  " << vr.latency_samples.size()
+                << " (all captured frames)\n"
                 << "  Min:      " << lat_min << " ns\n"
                 << "  Max:      " << lat_max << " ns\n"
                 << "  Avg:      " << std::fixed << std::setprecision(1)
                 << lat_avg << " ns\n";
 
+      // One row per captured frame.  `kind` is enqueue|get_corrections;
+      // `local` is the frame index within its shot (per-round).
       const std::string csv_path = "ptp_latency.csv";
       std::ofstream csv(csv_path);
       if (csv.is_open()) {
-        csv << "shot,send_sec,send_nsec,recv_sec,recv_nsec,delta_ns\n";
+        csv << "request_id,shot,local,kind,send_sec,send_nsec,recv_sec,"
+               "recv_nsec,delta_ns\n";
         for (auto &s : vr.latency_samples)
-          csv << s.msg_id << "," << s.send_sec << "," << s.send_nsec << ","
-              << s.recv_sec << "," << s.recv_nsec << "," << s.delta_ns << "\n";
+          csv << s.request_id << "," << s.shot << "," << s.local << ","
+              << (s.is_corr ? "get_corrections" : "enqueue") << ","
+              << s.send_sec << "," << s.send_nsec << "," << s.recv_sec << ","
+              << s.recv_nsec << "," << s.delta_ns << "\n";
         csv.close();
-        std::cout << "  CSV written: " << csv_path << "\n";
+        std::cout << "  CSV written: " << csv_path << " ("
+                  << vr.latency_samples.size() << " rows)\n";
       }
     } else {
       std::cout << "\n  PTP latency: no valid timestamps found\n";

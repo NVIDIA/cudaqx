@@ -301,6 +301,10 @@ void qec_realtime_session::initialize() {
 
   classify_mode();
 
+  // Reset the monotonic producer cursor so it starts in lockstep with the
+  // strict-FIFO consumer (both begin at slot 0).
+  producer_cursor_ = 0;
+
   if (device_mode_) {
     // Be tolerant of being called before any CUDA setup.  The pinned
     // allocations below require cudaDeviceMapHost on the active device.
@@ -769,9 +773,12 @@ void qec_realtime_session::start_device_loop() {
     throw std::runtime_error(
         "qec_realtime_session::initialize: device_stats_dev allocation failed");
 
-  // current_slot resets to 0 on each self-relaunch, so the scheduler must scan
-  // the ring for the next pending slot rather than ride a monotonic cursor.
-  if (cudaq_dispatch_kernel_set_shared_ring_mode(1) != cudaSuccess)
+  // Strict-FIFO: the scheduler is the sole consumer, and the dispatch kernel
+  // now persists its RX cursor across the tail self-relaunch, so it advances
+  // monotonically in lockstep with the monotonic rpc_producer.  Force
+  // shared-ring scanning OFF (defensive against a stale value from a prior run
+  // in this process).
+  if (cudaq_dispatch_kernel_set_shared_ring_mode(0) != cudaSuccess)
     throw std::runtime_error("qec_realtime_session::initialize: "
                              "cudaq_dispatch_kernel_set_shared_ring_mode "
                              "failed");
@@ -820,13 +827,12 @@ void qec_realtime_session::start_host_loop() {
   host_ctx_.config.dispatch_path = CUDAQ_DISPATCH_PATH_HOST;
   host_ctx_.config.dispatch_mode = CUDAQ_DISPATCH_HOST_CALL;
   host_ctx_.config.skip_tx_markers = 1;
-  // shared_ring_mode lets the loop scan the whole ring for a non-zero rx_flag
-  // instead of sitting on a single advancing cursor.  The producer's
-  // acquire_slot() reuses the first free slot (slot 0 for serialized
-  // round-trips), so without ring-scanning the loop's cursor would advance
-  // past the reused slot and deadlock.  There is no second dispatcher here; we
-  // only want the scan behavior.
-  host_ctx_.config.shared_ring_mode = 1;
+  // Strict-FIFO: the host loop is the sole consumer and its current_slot
+  // already advances monotonically; with shared-ring scanning OFF it simply
+  // waits at current_slot for the next frame.  The rpc_producer now advances
+  // its slot monotonically too (see producer_cursor()), so producer and
+  // consumer walk the ring in lockstep -- no scan needed.
+  host_ctx_.config.shared_ring_mode = 0;
   host_ctx_.function_table.entries = function_table_host_;
   host_ctx_.function_table.count =
       static_cast<std::uint32_t>(function_table_count_);
