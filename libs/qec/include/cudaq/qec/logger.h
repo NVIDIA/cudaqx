@@ -23,8 +23,8 @@
 /// @brief QEC logging interface used by runtime and plugin code.
 /// @details
 /// Declares log levels, forwarding configuration, and lightweight templated
-/// formatting helpers used by logging macros (`CUDAQX_INFO`, `CUDAQX_WARN`,
-/// `CUDAQX_ERROR`, `CUDAQX_DBG`) and direct
+/// formatting helpers used by logging macros (`CUDA_QEC_INFO`, `CUDA_QEC_WARN`,
+/// `CUDA_QEC_ERROR`, `CUDA_QEC_DBG`) and direct
 /// `cudaq::qec::info/warn/error/debug` calls.
 
 namespace cudaq::qec {
@@ -167,7 +167,7 @@ void log(const std::string_view message, Args &&...args) {
 
 // The following macros avoid the unnecessary processing cost of argument
 // evaluation and string formation until after the log level check is done.
-#define CUDAQX_LOG_IMPL(LEVEL, msg, ...)                                       \
+#define CUDA_QEC_LOG_IMPL(LEVEL, msg, ...)                                     \
   do {                                                                         \
     if (::cudaq::qec::detail::should_log(                                      \
             ::cudaq::qec::detail::LogLevel::LEVEL)) {                          \
@@ -177,7 +177,7 @@ void log(const std::string_view message, Args &&...args) {
     }                                                                          \
   } while (false)
 
-#define CUDAQX_ERROR_IMPL(msg, ...)                                            \
+#define CUDA_QEC_ERROR_IMPL(msg, ...)                                          \
   do {                                                                         \
     ::cudaq::qec::detail::logMessage(::cudaq::qec::detail::LogLevel::error,    \
                                      msg, __FILE__,                            \
@@ -186,35 +186,35 @@ void log(const std::string_view message, Args &&...args) {
         ::cudaq::qec::detail::formatMessage(msg __VA_OPT__(, ) __VA_ARGS__));  \
   } while (false)
 
-#define CUDAQX_ERROR(...) CUDAQX_ERROR_IMPL(__VA_ARGS__)
-#define CUDAQX_WARN(...) CUDAQX_LOG_IMPL(warn, __VA_ARGS__)
-#define CUDAQX_INFO(...) CUDAQX_LOG_IMPL(info, __VA_ARGS__)
+#define CUDA_QEC_ERROR(...) CUDA_QEC_ERROR_IMPL(__VA_ARGS__)
+#define CUDA_QEC_WARN(...) CUDA_QEC_LOG_IMPL(warn, __VA_ARGS__)
+#define CUDA_QEC_INFO(...) CUDA_QEC_LOG_IMPL(info, __VA_ARGS__)
 
 #ifdef CUDAQ_DEBUG
-#define CUDAQX_DBG(...) CUDAQX_LOG_IMPL(debug, __VA_ARGS__)
+#define CUDA_QEC_DBG(...) CUDA_QEC_LOG_IMPL(debug, __VA_ARGS__)
 #else
-#define CUDAQX_DBG(...)
+#define CUDA_QEC_DBG(...)
 #endif
 
 // Backward-compatible aliases for existing QEC callsites. If runtime logger
 // macros are already present in this translation unit, do not redefine them.
 #ifndef CUDAQ_LOG_IMPL
 #define CUDAQ_LOG_IMPL(LEVEL, msg, ...)                                        \
-  CUDAQX_LOG_IMPL(LEVEL, msg __VA_OPT__(, ) __VA_ARGS__)
+  CUDA_QEC_LOG_IMPL(LEVEL, msg __VA_OPT__(, ) __VA_ARGS__)
 #endif
 #ifndef CUDAQ_ERROR_IMPL
 #define CUDAQ_ERROR_IMPL(msg, ...)                                             \
-  CUDAQX_ERROR_IMPL(msg __VA_OPT__(, ) __VA_ARGS__)
+  CUDA_QEC_ERROR_IMPL(msg __VA_OPT__(, ) __VA_ARGS__)
 #endif
 #ifndef CUDAQ_ERROR
-#define CUDAQ_ERROR(...) CUDAQX_ERROR(__VA_ARGS__)
+#define CUDAQ_ERROR(...) CUDA_QEC_ERROR(__VA_ARGS__)
 #endif
 #ifndef CUDAQ_WARN
-#define CUDAQ_WARN(...) CUDAQX_WARN(__VA_ARGS__)
+#define CUDAQ_WARN(...) CUDA_QEC_WARN(__VA_ARGS__)
 #endif
 #ifndef CUDAQ_INFO
-#define CUDAQ_INFO(...) CUDAQX_INFO(__VA_ARGS__)
+#define CUDAQ_INFO(...) CUDA_QEC_INFO(__VA_ARGS__)
 #endif
 #ifndef CUDAQ_DBG
-#define CUDAQ_DBG(...) CUDAQX_DBG(__VA_ARGS__)
+#define CUDAQ_DBG(...) CUDA_QEC_DBG(__VA_ARGS__)
 #endif

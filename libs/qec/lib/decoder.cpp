@@ -266,7 +266,7 @@ void decoder::set_D_sparse(const std::vector<int64_t> &D_sparse_vec_in) {
 bool decoder::enqueue_syndrome(const uint8_t *syndrome,
                                std::size_t syndrome_length) {
   if (pimpl->msyn_buffer_index + syndrome_length > pimpl->msyn_buffer.size()) {
-    // CUDAQX_WARN("Syndrome buffer overflow. Syndrome will be ignored.");
+    // CUDA_QEC_WARN("Syndrome buffer overflow. Syndrome will be ignored.");
     printf("Syndrome buffer overflow. Syndrome will be ignored.\n");
     return false;
   }
@@ -459,7 +459,7 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
           log_dur1.count() * 1e6, log_dur2.count() * 1e6,
           log_dur3.count() * 1e6);
       if (log_due_to_log_level)
-        CUDAQX_INFO("{}", s);
+        CUDA_QEC_INFO("{}", s);
       else
         printf("%s\n", s.c_str());
     }
@@ -487,7 +487,7 @@ void decoder::clear_corrections() {
         fmt::format("[DecoderStats][{}] Counter:{} clear_corrections called",
                     static_cast<const void *>(this), pimpl->log_counter);
     if (log_due_to_log_level)
-      CUDAQX_INFO("{}", s);
+      CUDA_QEC_INFO("{}", s);
     else
       printf("%s\n", s.c_str());
   }
@@ -503,7 +503,7 @@ const uint8_t *decoder::get_obs_corrections() const {
         fmt::format("[DecoderStats][{}] Counter:{} get_obs_corrections called",
                     static_cast<const void *>(this), pimpl->log_counter);
     if (log_due_to_log_level)
-      CUDAQX_INFO("{}", s);
+      CUDA_QEC_INFO("{}", s);
     else
       printf("%s\n", s.c_str());
   }
@@ -529,7 +529,7 @@ void decoder::reset_decoder() {
         fmt::format("[DecoderStats][{}] Counter:{} reset_decoder called",
                     static_cast<const void *>(this), pimpl->log_counter);
     if (log_due_to_log_level)
-      CUDAQX_INFO("{}", s);
+      CUDA_QEC_INFO("{}", s);
     else
       printf("%s\n", s.c_str());
   }

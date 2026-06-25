@@ -40,14 +40,14 @@ TEST(Logger, UserSettableLogLevelControlsVisibility) {
   cudaq::qec::detail::setLogLevel(cudaq::qec::detail::LogLevel::warn);
 
   testing::internal::CaptureStdout();
-  CUDAQX_INFO("hidden message");
+  CUDA_QEC_INFO("hidden message");
   cudaq::qec::detail::flushLogs();
   const std::string hidden = testing::internal::GetCapturedStdout();
   EXPECT_TRUE(hidden.empty());
 
   cudaq::qec::detail::setLogLevel(cudaq::qec::detail::LogLevel::info);
   testing::internal::CaptureStdout();
-  CUDAQX_INFO("visible message");
+  CUDA_QEC_INFO("visible message");
   cudaq::qec::detail::flushLogs();
   const std::string visible = testing::internal::GetCapturedStdout();
   EXPECT_NE(visible.find("visible message"), std::string::npos);
@@ -60,7 +60,7 @@ TEST(Logger, InfoLogsIncludeTimestampAndSourceLocation) {
   cudaq::qec::detail::setLogLevel(cudaq::qec::detail::LogLevel::trace);
 
   testing::internal::CaptureStdout();
-  CUDAQX_INFO("metadata message {}", 7);
+  CUDA_QEC_INFO("metadata message {}", 7);
   cudaq::qec::detail::flushLogs();
   const std::string out = testing::internal::GetCapturedStdout();
 
@@ -81,7 +81,7 @@ TEST(Logger, HiddenLevelMessagesAreNotFormed) {
     return 42;
   };
 
-  CUDAQX_INFO("hidden {}", expensiveValue());
+  CUDA_QEC_INFO("hidden {}", expensiveValue());
   EXPECT_EQ(evalCount.load(std::memory_order_relaxed), 0);
 } // end - TEST(Logger, HiddenLevelMessagesAreNotFormed)
 
@@ -95,7 +95,7 @@ TEST(Logger, SuppressedInfoPathStaysFast) {
   constexpr int iterations = 200000;
   const auto start = std::chrono::steady_clock::now();
   for (int i = 0; i < iterations; ++i)
-    CUDAQX_INFO("suppressed-path {}", i);
+    CUDA_QEC_INFO("suppressed-path {}", i);
   const auto end = std::chrono::steady_clock::now();
 
   const auto elapsedUs =
@@ -129,7 +129,7 @@ TEST(Logger, ForwarderReceivesRecordsWhenEnabled) {
   // contention), so send a short burst and assert that at least one expected
   // record arrives instead of requiring a single specific one.
   for (int i = 0; i < 32; ++i)
-    CUDAQX_INFO("forwarded {}", i);
+    CUDA_QEC_INFO("forwarded {}", i);
   cudaq::qec::detail::flushLogs();
 
   std::unique_lock<std::mutex> lock(mutex);
@@ -167,8 +167,8 @@ TEST(Logger, ForwarderEnabledSuppressesStdoutAndStderr) {
   // Keep stdout/stderr assertions deterministic by allowing occasional dropped
   // records while still requiring both message types to be observed.
   for (int i = 0; i < 32; ++i) {
-    CUDAQX_INFO("forwarded-info");
-    CUDAQX_WARN("forwarded-warn");
+    CUDA_QEC_INFO("forwarded-info");
+    CUDA_QEC_WARN("forwarded-warn");
   }
   cudaq::qec::detail::flushLogs();
   const std::string out = testing::internal::GetCapturedStdout();
@@ -198,14 +198,14 @@ TEST(Logger, DisabledForwarderUsesStdoutAndStderrByLevel) {
 
   testing::internal::CaptureStdout();
   testing::internal::CaptureStderr();
-  CUDAQX_INFO("stdout-info");
+  CUDA_QEC_INFO("stdout-info");
 #ifdef CUDAQ_DEBUG
-  CUDAQX_DBG("stdout-debug");
+  CUDA_QEC_DBG("stdout-debug");
 #endif
-  CUDAQX_WARN("stderr-warn");
-  // CUDAQX_ERROR logs and then throws by design; assert the throw explicitly so
-  // this sink-routing test does not fail from an uncaught exception.
-  EXPECT_THROW(CUDAQX_ERROR("stderr-error"), std::runtime_error);
+  CUDA_QEC_WARN("stderr-warn");
+  // CUDA_QEC_ERROR logs and then throws by design; assert the throw explicitly
+  // so this sink-routing test does not fail from an uncaught exception.
+  EXPECT_THROW(CUDA_QEC_ERROR("stderr-error"), std::runtime_error);
   const std::string out = testing::internal::GetCapturedStdout();
   const std::string err = testing::internal::GetCapturedStderr();
 
@@ -228,8 +228,8 @@ TEST(Logger, DefaultSetForwarderWritesToStdoutAndStderr) {
   // The default forwarder also uses the same non-blocking enqueue path; use a
   // burst and check for some successful enqueues instead of an exact count.
   for (int i = 0; i < 32; ++i) {
-    CUDAQX_INFO("default-forwarder-info");
-    CUDAQX_WARN("default-forwarder-warn");
+    CUDA_QEC_INFO("default-forwarder-info");
+    CUDA_QEC_WARN("default-forwarder-warn");
   }
   cudaq::qec::detail::flushLogs();
   // Capturing stdout/stderr is flaky here because the default forwarder emits
@@ -256,7 +256,7 @@ TEST(Logger, SaturatedForwarderQueueDropsWithoutBlockingProducer) {
       .dropPolicy = cudaq::qec::detail::ForwardDropPolicy::dropNewest});
 
   for (int i = 0; i < 256; ++i)
-    CUDAQX_INFO("queue-load {}", i);
+    CUDA_QEC_INFO("queue-load {}", i);
 
   const auto stats = cudaq::qec::detail::getForwarderStats();
   EXPECT_GT(stats.enqueuedRecords, 0u);
@@ -273,7 +273,7 @@ TEST(Logger, DisabledForwarderDoesNotEnqueueRecords) {
   cudaq::qec::detail::setLogLevel(cudaq::qec::detail::LogLevel::info);
 
   const auto before = cudaq::qec::detail::getForwarderStats();
-  CUDAQX_INFO("no-forwarder");
+  CUDA_QEC_INFO("no-forwarder");
   cudaq::qec::detail::flushLogs();
   const auto after = cudaq::qec::detail::getForwarderStats();
 

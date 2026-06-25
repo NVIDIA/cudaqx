@@ -335,20 +335,20 @@ void qec_realtime_session::initialize() {
     start_host_loop();
     initialized_ = true;
   } catch (...) {
-    CUDAQX_WARN("qec_realtime_session::initialize: rolling back partial "
-                "initialization after exception");
+    CUDA_QEC_WARN("qec_realtime_session::initialize: rolling back partial "
+                  "initialization after exception");
     finalize();
     throw;
   }
 
   if (device_mode_)
-    CUDAQX_INFO("qec_realtime_session: initialized DEVICE mode "
-                "(num_decoders_with_graph={}, num_slots={}, slot_size={})",
-                num_decoders_with_graph_, num_slots_, slot_size_);
+    CUDA_QEC_INFO("qec_realtime_session: initialized DEVICE mode "
+                  "(num_decoders_with_graph={}, num_slots={}, slot_size={})",
+                  num_decoders_with_graph_, num_slots_, slot_size_);
   else
-    CUDAQX_INFO("qec_realtime_session: initialized HOST mode "
-                "(num_slots={}, slot_size={})",
-                num_slots_, slot_size_);
+    CUDA_QEC_INFO("qec_realtime_session: initialized HOST mode "
+                  "(num_slots={}, slot_size={})",
+                  num_slots_, slot_size_);
 }
 
 //==============================================================================
@@ -443,7 +443,7 @@ void qec_realtime_session::finalize() {
   std::memset(&host_ctx_, 0, sizeof(host_ctx_));
 
   if (was_initialized)
-    CUDAQX_INFO("qec_realtime_session: finalized");
+    CUDA_QEC_INFO("qec_realtime_session: finalized");
 }
 
 //==============================================================================
