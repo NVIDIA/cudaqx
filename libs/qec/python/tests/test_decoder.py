@@ -955,9 +955,8 @@ def test_dem_from_stim_text_use_decomp_suggestions():
     np.testing.assert_array_equal(
         np.array(dem_yes.observables_flips_matrix, dtype=np.uint8),
         explicit_O_yes)
-    # error_rates: one entry per source instruction (physical error rate).
-    # Use error_rates[error_ids[i]] to get the rate for column i.
-    np.testing.assert_allclose(dem_yes.error_rates, [0.05, 0.03, 0.1],
+    # Each decomposed component inherits the parent instruction's probability.
+    np.testing.assert_allclose(dem_yes.error_rates, [0.05, 0.03, 0.1, 0.1],
                                atol=1e-12)
 
 
@@ -991,25 +990,6 @@ def test_dem_from_stim_text_use_decomp_suggestions_edge_cases():
     dem = qec.dem_from_stim_text(dem_text, use_decomp_suggestions=True)
     assert dem.num_error_mechanisms() == 1
     np.testing.assert_array_equal(A(dem.detector_error_matrix), A([[0], [1]]))
-
-
-def test_dem_from_stim_text_error_ids():
-    dem_text = ("error(0.05) D0 D1 L0\n"
-                "error(0.03) D2 L1\n"
-                "error(0.1) D0 D2 ^ D1 D3\n")
-
-    dem_no = qec.dem_from_stim_text(dem_text, use_decomp_suggestions=False)
-    assert dem_no.error_ids is None, \
-        "error_ids should not be set when use_decomp_suggestions=False"
-
-    dem_yes = qec.dem_from_stim_text(dem_text, use_decomp_suggestions=True)
-    assert dem_yes.error_ids is not None, \
-        "error_ids should be set when use_decomp_suggestions=True"
-    assert list(dem_yes.error_ids) == [0, 1, 2, 2], \
-        "columns from the same instruction must share an error_id"
-    # error_rates: one per source instruction; use error_rates[error_ids[i]] for column i.
-    np.testing.assert_allclose(dem_yes.error_rates, [0.05, 0.03, 0.1],
-                               atol=1e-12)
 
 
 def test_get_decoder_rejects_malformed_stim_dem_text():

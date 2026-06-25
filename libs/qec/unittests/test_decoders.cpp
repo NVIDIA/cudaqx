@@ -1036,20 +1036,16 @@ TEST(StimDemGetDecoder, DemFromStimTextErrorIds) {
 
   auto dem_yes =
       cudaq::qec::dem_from_stim_text(dem_text, /*use_decomp_suggestions=*/true);
-  ASSERT_TRUE(dem_yes.error_ids.has_value());
-  ASSERT_EQ(dem_yes.error_ids->size(), 4u);
-  EXPECT_EQ((*dem_yes.error_ids)[0], 0u);
-  EXPECT_EQ((*dem_yes.error_ids)[1], 1u);
-  EXPECT_EQ((*dem_yes.error_ids)[2], 2u);
-  EXPECT_EQ((*dem_yes.error_ids)[3], 2u);
-  ASSERT_EQ(dem_yes.error_rates.size(), 3u);
+  EXPECT_FALSE(dem_yes.error_ids.has_value());
+  ASSERT_EQ(dem_yes.error_rates.size(), 4u);
   EXPECT_DOUBLE_EQ(dem_yes.error_rates[0], 0.05);
   EXPECT_DOUBLE_EQ(dem_yes.error_rates[1], 0.03);
   EXPECT_DOUBLE_EQ(dem_yes.error_rates[2], 0.1);
+  EXPECT_DOUBLE_EQ(dem_yes.error_rates[3], 0.1);
 }
 
-// Verify true: each ^ component becomes a separate column; observables and
-// error_ids follow the split.
+// Verify true: each ^ component becomes a separate column; each component
+// inherits the parent instruction's probability; error_ids is nullopt.
 TEST(StimDemGetDecoder, DecomposeErrorsTrueSplitsCaretComponents) {
   auto dem = cudaq::qec::dem_from_stim_text("error(0.1) D0 L0 ^ D1\n",
                                             /*use_decomp_suggestions=*/true);
@@ -1069,10 +1065,11 @@ TEST(StimDemGetDecoder, DecomposeErrorsTrueSplitsCaretComponents) {
   EXPECT_EQ(dem.observables_flips_matrix.at({0u, 0u}), 1u);
   EXPECT_EQ(dem.observables_flips_matrix.at({0u, 1u}), 0u);
 
-  // error_ids maps both columns back to error mechanism 0.
-  ASSERT_TRUE(dem.error_ids.has_value());
-  EXPECT_EQ((*dem.error_ids)[0], 0u);
-  EXPECT_EQ((*dem.error_ids)[1], 0u);
+  // Each component gets the parent probability; error_ids is always nullopt.
+  EXPECT_FALSE(dem.error_ids.has_value());
+  ASSERT_EQ(dem.error_rates.size(), 2u);
+  EXPECT_DOUBLE_EQ(dem.error_rates[0], 0.1);
+  EXPECT_DOUBLE_EQ(dem.error_rates[1], 0.1);
 }
 
 TEST(StimDemGetDecoder, DecomposeErrorsXorCancelled) {
@@ -1193,4 +1190,3 @@ TEST(SlidingWindowDecoder, BaseStreamingCopiesFirstRoundDetectors) {
       << "First-round detector copy runs, but the sliding window is not full "
          "yet so no final correction is committed.";
 }
-

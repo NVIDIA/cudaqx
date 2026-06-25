@@ -39,7 +39,6 @@ detector_error_model dem_from_stim_text(const std::string &dem_text,
   std::vector<std::vector<std::size_t>> detector_hits;
   std::vector<std::vector<std::size_t>> observable_hits;
   std::vector<double> error_rates;
-  std::vector<std::size_t> error_ids;
   std::size_t instruction_index = 0;
 
   dem.iter_flatten_error_instructions([&](const stim::DemInstruction &inst) {
@@ -56,8 +55,6 @@ detector_error_model dem_from_stim_text(const std::string &dem_text,
 
     std::set<std::size_t> dets_parity;
     std::set<std::size_t> obs_parity;
-    bool new_col =
-        true; // true until this instruction produces its first column
 
     auto toggle = [](std::set<std::size_t> &s, std::size_t v) {
       if (!s.erase(v)) {
@@ -83,11 +80,7 @@ detector_error_model dem_from_stim_text(const std::string &dem_text,
       if (!dets_parity.empty() || !obs_parity.empty()) {
         detector_hits.push_back({dets_parity.begin(), dets_parity.end()});
         observable_hits.push_back({obs_parity.begin(), obs_parity.end()});
-        if (new_col) {
-          error_rates.push_back(prob);
-          new_col = false;
-        }
-        error_ids.push_back(error_rates.size() - 1);
+        error_rates.push_back(prob);
         dets_parity.clear();
         obs_parity.clear();
       }
@@ -116,9 +109,6 @@ detector_error_model dem_from_stim_text(const std::string &dem_text,
   result.observables_flips_matrix =
       cudaqx::tensor<uint8_t>({num_observables, num_cols});
   result.error_rates = std::move(error_rates);
-  if (use_decomp_suggestions) {
-    result.error_ids = std::move(error_ids);
-  }
 
   for (std::size_t err = 0; err < num_cols; ++err) {
     for (auto det : detector_hits[err]) {
