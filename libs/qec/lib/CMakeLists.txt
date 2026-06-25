@@ -43,6 +43,7 @@ set(QEC_SOURCES
   decoder.cpp
   detector_error_model.cpp
   experiments.cpp
+  logger.cpp
   pcm_utils.cpp
   plugin_loader.cpp
   sparse_binary_matrix.cpp
