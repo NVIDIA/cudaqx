@@ -782,6 +782,7 @@ trt_decoder::trt_decoder(const cudaq::qec::sparse_binary_matrix &H,
       }
       decode_to_observables_ = true;
       num_observables_ = O.shape()[0];
+      set_result_type(decode_result_type::decode_to_obs);
 
       // The TRT model output must encode [pre_L (num_observables_ entries),
       // residual_dets (rest)]. Validate sizing where we can.

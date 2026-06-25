@@ -262,6 +262,21 @@ def test_decoder_plugin_initialization_with_int16_vec():
     assert "Unsupported array data type" in repr(e)
 
 
+def test_decoder_kwargs_accept_lists_and_2d_arrays():
+    decoder = qec.get_decoder(
+        'single_error_lut_example',
+        H,
+        flat_values=[0.1, 0.2, 0.3],
+        nested_values=[[0.1, 0.2], [0.3, 0.4]],
+        matrix_float32=np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32),
+        matrix_float64=np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float64),
+        matrix_int32=np.array([[1, 2], [3, 4]], dtype=np.int32),
+        matrix_uint8=np.array([[1, 0], [0, 1]], dtype=np.uint8),
+    )
+    assert decoder is not None
+    assert hasattr(decoder, 'decode')
+
+
 def test_decoder_plugin_result_structure():
     decoder = qec.get_decoder('single_error_lut_example', H)
     result = decoder.decode(create_test_syndrome())
@@ -432,6 +447,52 @@ def test_shuffle_pcm_columns():
 
     # They should be equal after sorting
     assert np.array_equal(qec.sort_pcm_columns(shuffled_pcm), sorted_pcm)
+
+
+def test_reorder_pcm_columns_scipy_sparse():
+    scipy_sparse = pytest.importorskip("scipy.sparse")
+    H = np.array([[1, 0, 1, 0], [0, 1, 0, 1], [0, 0, 1, 0]], dtype=np.uint8)
+    column_order = [2, 0]
+
+    dense_reordered = qec.reorder_pcm_columns(H, column_order)
+    sparse_reordered = qec.reorder_pcm_columns(scipy_sparse.csr_matrix(H),
+                                               column_order)
+
+    assert scipy_sparse.issparse(sparse_reordered)
+    assert scipy_sparse.isspmatrix_csc(sparse_reordered)
+    assert np.array_equal(sparse_reordered.toarray(), dense_reordered)
+
+
+def test_reorder_pcm_columns_scipy_sparse_zero_nnz_result():
+    scipy_sparse = pytest.importorskip("scipy.sparse")
+    H = scipy_sparse.csr_matrix((3, 4), dtype=np.uint8)
+
+    sparse_reordered = qec.reorder_pcm_columns(H, [2, 0])
+
+    assert scipy_sparse.isspmatrix_csc(sparse_reordered)
+    assert sparse_reordered.shape == (3, 2)
+    assert sparse_reordered.nnz == 0
+
+
+def test_shuffle_pcm_columns_scipy_sparse():
+    scipy_sparse = pytest.importorskip("scipy.sparse")
+    H = np.array([[1, 0, 1, 0], [0, 1, 0, 1], [0, 0, 1, 0]], dtype=np.uint8)
+
+    dense_shuffled = qec.shuffle_pcm_columns(H, seed=13)
+    sparse_shuffled = qec.shuffle_pcm_columns(scipy_sparse.csc_matrix(H),
+                                              seed=13)
+
+    assert scipy_sparse.issparse(sparse_shuffled)
+    assert scipy_sparse.isspmatrix_csc(sparse_shuffled)
+    assert np.array_equal(sparse_shuffled.toarray(), dense_shuffled)
+
+
+def test_pcm_to_sparse_vec_scipy_sparse():
+    scipy_sparse = pytest.importorskip("scipy.sparse")
+    H = np.array([[1, 0, 1, 0], [0, 1, 0, 1], [0, 0, 1, 0]], dtype=np.uint8)
+
+    sparse_vec = qec.pcm_to_sparse_vec(scipy_sparse.csr_matrix(H))
+    assert sparse_vec == qec.pcm_to_sparse_vec(H)
 
 
 def test_simplify_pcm():

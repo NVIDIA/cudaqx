@@ -12,6 +12,7 @@
 #include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/realtime/decoding_config.h"
 #include "cudaq/runtime/logger/logger.h"
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
@@ -179,6 +180,57 @@ static std::vector<uint8_t> pack_syndrome_bits(const uint8_t *syndromes,
 
 namespace cudaq::qec::decoding::host {
 
+cudaqx::heterogeneous_map prepare_decoder_params(
+    const cudaq::qec::decoding::config::decoder_config &decoder_config) {
+  auto params = decoder_config.decoder_custom_args_to_heterogeneous_map();
+  if (decoder_config.type != "trt_decoder")
+    return params;
+
+  // batch_size > 1 has no effect on the realtime path: enqueue_syndrome decodes
+  // one syndrome per call, so the trt_decoder zero-pads the batch and discards
+  // all but slot 0. Warn rather than reject -- the result is correct, just
+  // wasteful. (Offline decode_batch users set batch_size via a raw params map,
+  // not this realtime config path.)
+  if (params.contains("batch_size") &&
+      params.get<std::size_t>("batch_size") > 1)
+    CUDAQ_WARN(
+        "trt_decoder batch_size > 1 has no effect on the realtime decode path "
+        "(one syndrome is decoded per call); the extra batch slots are "
+        "zero-padded and discarded. Use batch_size = 1 for realtime.");
+
+  // The trt_decoder plugin attaches a pymatching global decoder only when both
+  // "global_decoder" and "global_decoder_params" are present. Serialization no
+  // longer emits an empty params map for the monostate (no-params) case, so
+  // synthesize one here -- before the O_sparse early return -- so that a global
+  // decoder running on residual detectors without an O matrix still attaches.
+  const bool has_pymatching_global =
+      params.contains("global_decoder") &&
+      params.get<std::string>("global_decoder") == "pymatching";
+  if (has_pymatching_global && !params.contains("global_decoder_params"))
+    params.insert("global_decoder_params", cudaqx::heterogeneous_map());
+
+  if (decoder_config.O_sparse.empty())
+    return params;
+
+  const auto num_observables = std::count(decoder_config.O_sparse.begin(),
+                                          decoder_config.O_sparse.end(), -1);
+  if (num_observables == 0)
+    return params;
+
+  auto O = cudaq::qec::pcm_from_sparse_vec(
+      decoder_config.O_sparse, num_observables, decoder_config.block_size);
+  params.insert("O", O);
+
+  if (has_pymatching_global) {
+    auto global_decoder_params =
+        params.get<cudaqx::heterogeneous_map>("global_decoder_params");
+    global_decoder_params.insert("O", O);
+    params.insert("global_decoder_params", global_decoder_params);
+  }
+
+  return params;
+}
+
 cudaq::qec::realtime::qec_realtime_session *get_realtime_session() {
   return g_realtime_session.get();
 }
@@ -248,8 +300,7 @@ int configure_decoders(
                                                  decoder_config.syndrome_size,
                                                  decoder_config.block_size);
       auto new_decoder = cudaq::qec::get_decoder(
-          decoder_config.type, pcm,
-          decoder_config.decoder_custom_args_to_heterogeneous_map());
+          decoder_config.type, pcm, prepare_decoder_params(decoder_config));
       new_decoder->set_decoder_id(decoder_config.id);
       // Count the number of -1's in the O_sparse vector. That is the number of
       // rows (observables) in the observable matrix.

@@ -107,12 +107,22 @@ struct pymatching_config {
   from_heterogeneous_map(const cudaqx::heterogeneous_map &map);
 };
 
+// The realtime trt_decoder config currently models only PyMatching as a global
+// decoder. Other global decoder plugins may be constructed through lower-level
+// APIs when their parameters are supplied directly, but they are not serialized
+// by this config variant yet.
+using global_decoder_config = std::variant<std::monostate, pymatching_config>;
+
 struct trt_decoder_config {
   std::optional<std::string> onnx_load_path;
   std::optional<std::string> engine_load_path;
   std::optional<std::string> engine_save_path;
   std::optional<std::string> precision;
   std::optional<std::size_t> memory_workspace;
+  std::optional<std::size_t> batch_size;
+  std::optional<bool> use_cuda_graph;
+  std::optional<std::string> global_decoder;
+  global_decoder_config global_decoder_params;
 
   bool operator==(const trt_decoder_config &) const = default;
 

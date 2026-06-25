@@ -119,6 +119,7 @@ if(TENSORRT_INCLUDE_DIR AND TENSORRT_LIBRARY AND TENSORRT_ONNX_PARSER_LIBRARY
   target_link_libraries(test_trt_decoder_composite PRIVATE
     CUDA::cudart
     cudaq-qec
+    cudaq-qec-realtime-decoding
     cudaq-qec-trt-decoder
     cudaq::cudaq
   )

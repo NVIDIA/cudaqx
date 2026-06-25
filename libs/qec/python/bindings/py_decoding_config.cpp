@@ -29,6 +29,9 @@ void bindDecodingConfig(nb::module_ &mod) {
   auto mod_cfg =
       qecmod.def_submodule("config", "Realtime decoding configuration");
 
+  // Allow Python None to clear std::optional<T> fields.
+  const auto setter_accepts_none = nb::for_setter(nb::arg("value").none());
+
   // srelay_bp_config
   nb::class_<config::srelay_bp_config>(mod_cfg, "srelay_bp_config",
                                        "Relay-BP decoder configuration.")
@@ -120,11 +123,38 @@ void bindDecodingConfig(nb::module_ &mod) {
                 trt_decoder_config::from_heterogeneous_map(map));
           },
           nb::arg("map"))
-      .def_rw("onnx_load_path", &trt_decoder_config::onnx_load_path)
-      .def_rw("engine_load_path", &trt_decoder_config::engine_load_path)
-      .def_rw("engine_save_path", &trt_decoder_config::engine_save_path)
-      .def_rw("precision", &trt_decoder_config::precision)
-      .def_rw("memory_workspace", &trt_decoder_config::memory_workspace)
+      .def_rw("onnx_load_path", &trt_decoder_config::onnx_load_path,
+              setter_accepts_none)
+      .def_rw("engine_load_path", &trt_decoder_config::engine_load_path,
+              setter_accepts_none)
+      .def_rw("engine_save_path", &trt_decoder_config::engine_save_path,
+              setter_accepts_none)
+      .def_rw("precision", &trt_decoder_config::precision, setter_accepts_none)
+      .def_rw("memory_workspace", &trt_decoder_config::memory_workspace,
+              setter_accepts_none)
+      .def_rw("batch_size", &trt_decoder_config::batch_size,
+              setter_accepts_none)
+      .def_rw("use_cuda_graph", &trt_decoder_config::use_cuda_graph,
+              setter_accepts_none)
+      .def_rw("global_decoder", &trt_decoder_config::global_decoder,
+              setter_accepts_none)
+      .def_prop_rw(
+          "global_decoder_params",
+          [](const trt_decoder_config &self)
+              -> std::optional<pymatching_config> {
+            if (std::holds_alternative<pymatching_config>(
+                    self.global_decoder_params)) {
+              return std::get<pymatching_config>(self.global_decoder_params);
+            }
+            return std::nullopt;
+          },
+          [](trt_decoder_config &self, std::optional<pymatching_config> value) {
+            if (value.has_value()) {
+              self.global_decoder_params = value.value();
+            } else {
+              self.global_decoder_params = std::monostate();
+            }
+          })
       .def("to_heterogeneous_map", &trt_decoder_config::to_heterogeneous_map,
            nb::rv_policy::move)
       .def_static("from_heterogeneous_map",
