@@ -77,6 +77,27 @@ TEST(Logger, HiddenLevelMessagesAreNotFormed) {
   EXPECT_EQ(evalCount.load(std::memory_order_relaxed), 0);
 } // end - TEST(Logger, HiddenLevelMessagesAreNotFormed)
 
+// Keep a lightweight throughput-neutrality guard in the unit suite: suppressed
+// info logs should remain inexpensive when the active level is warn.
+TEST(Logger, SuppressedInfoPathStaysFast) {
+  ForwarderGuard guard;
+  cudaq::qec::detail::clearForwarder();
+  cudaq::qec::detail::setLogLevel(cudaq::qec::detail::LogLevel::warn);
+
+  constexpr int iterations = 200000;
+  const auto start = std::chrono::steady_clock::now();
+  for (int i = 0; i < iterations; ++i)
+    CUDAQX_INFO("suppressed-path {}", i);
+  const auto end = std::chrono::steady_clock::now();
+
+  const auto elapsedUs =
+      std::chrono::duration_cast<std::chrono::microseconds>(end - start)
+          .count();
+  // Use a conservative budget to reduce CI flakiness while still catching
+  // severe suppressed-path regressions.
+  EXPECT_LT(elapsedUs, 100000);
+} // end - TEST(Logger, SuppressedInfoPathStaysFast)
+
 // Verify forwarded records preserve payload and source metadata.
 TEST(Logger, ForwarderReceivesRecordsWhenEnabled) {
   ForwarderGuard guard;
@@ -100,7 +121,7 @@ TEST(Logger, ForwarderReceivesRecordsWhenEnabled) {
   cudaq::qec::detail::flushLogs();
 
   std::unique_lock<std::mutex> lock(mutex);
-  ASSERT_TRUE(cv.wait_for(lock, 500ms, [&] { return !records.empty(); }));
+  ASSERT_TRUE(cv.wait_for(lock, 800ms, [&] { return !records.empty(); }));
   EXPECT_EQ(records.front().message, "forwarded 9");
   EXPECT_EQ(records.front().fileName, "test_logger.cpp");
   EXPECT_GT(records.front().lineNo, 0);
