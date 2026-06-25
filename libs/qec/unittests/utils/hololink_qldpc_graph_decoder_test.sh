@@ -50,6 +50,15 @@ CUDA_QUANTUM_DIR="/workspaces/cuda-quantum"
 CUDA_QX_DIR="/workspaces/cudaqx"
 DATA_DIR=""  # auto-detected if empty
 
+# Proprietary device-graph artifacts built in the cuda-qx (decode_server1) tree:
+#   - cudevice archive: enqueue/get/reset DEVICE_CALL handlers + register/
+#     populate shims (WHOLE_ARCHIVE-linked + device-linked into the bridge).
+#   - nv-qldpc plugin .so (dlopen'd; capture_decode_graph builds the decode).
+# Override the parent dir with --cuda-qx-priv-dir or each path individually.
+CUDA_QX_PRIV_DIR="/workspaces/cuda-qx"
+PROPRIETARY_ARCHIVE="${CUDA_QX_PRIV_DIR}/build/lib/libcudaq-qec-realtime-cudevice-proprietary.a"
+NV_QLDPC_PLUGIN="${CUDA_QX_PRIV_DIR}/build/lib/decoder-plugins/libcudaq-qec-nv-qldpc-decoder.so"
+
 # Network defaults
 IB_DEVICE=""           # auto-detect
 BRIDGE_IP="10.0.0.1"
@@ -94,8 +103,15 @@ Build options:
                          (default: /workspaces/holoscan-sensor-bridge)
   --cuda-quantum-dir DIR cuda-quantum source directory
                          (default: /workspaces/cuda-quantum)
-  --cuda-qx-dir DIR      cuda-qx source directory
-                         (default: /workspaces/cuda-qx)
+  --cuda-qx-dir DIR      cudaqx (public) source dir that builds the bridge +
+                         playback (default: /workspaces/cudaqx)
+  --cuda-qx-priv-dir DIR cuda-qx (proprietary, decode_server1) tree that
+                         provides the cudevice archive + nv-qldpc plugin
+                         (default: /workspaces/cuda-qx); sets the two paths below
+  --proprietary-archive PATH  Prebuilt libcudaq-qec-realtime-cudevice-proprietary.a
+                         (enqueue/get/reset DEVICE_CALL handlers; WHOLE_ARCHIVE-
+                         linked into the bridge)
+  --nv-qldpc-plugin PATH      Prebuilt libcudaq-qec-nv-qldpc-decoder.so (dlopen'd)
   --jobs N               Parallel build jobs (default: nproc)
 
 Network options:
@@ -130,6 +146,13 @@ while [[ $# -gt 0 ]]; do
         --hsb-dir)          HSB_DIR="$2"; shift ;;
         --cuda-quantum-dir) CUDA_QUANTUM_DIR="$2"; shift ;;
         --cuda-qx-dir)      CUDA_QX_DIR="$2"; shift ;;
+        --cuda-qx-priv-dir)
+            CUDA_QX_PRIV_DIR="$2"
+            PROPRIETARY_ARCHIVE="${CUDA_QX_PRIV_DIR}/build/lib/libcudaq-qec-realtime-cudevice-proprietary.a"
+            NV_QLDPC_PLUGIN="${CUDA_QX_PRIV_DIR}/build/lib/decoder-plugins/libcudaq-qec-nv-qldpc-decoder.so"
+            shift ;;
+        --proprietary-archive) PROPRIETARY_ARCHIVE="$2"; shift ;;
+        --nv-qldpc-plugin)  NV_QLDPC_PLUGIN="$2"; shift ;;
         --jobs)             JOBS="$2"; shift ;;
         --device)           IB_DEVICE="$2"; shift ;;
         --bridge-ip)        BRIDGE_IP="$2"; shift ;;
@@ -272,6 +295,51 @@ _add_static_arp() {
     _info "  Static ARP: $remote_ip -> $mac on $local_iface"
 }
 
+# Convert an IPv4 address to the trailing groups of its IPv4-mapped RoCE v2
+# GID, e.g. 10.0.0.1 -> "ffff:0a00:0001".
+ipv4_to_gid_suffix() {
+    local o1 o2 o3 o4
+    IFS='.' read -r o1 o2 o3 o4 <<< "$1"
+    printf "ffff:%02x%02x:%02x%02x" "$o1" "$o2" "$o3" "$o4"
+}
+
+# Poll until the IPv4-mapped RoCE v2 GID for $ip appears on $ib_dev port 1.
+# The gpu_roce_transceiver requires this specific GID (subnet_prefix==0,
+# interface_id low32==0xFFFF0000); it only exists while the netdev has the
+# IPv4 address AND is up, and it populates asynchronously -- so a blind sleep
+# races the bridge's hololink_start GID lookup.
+wait_for_roce_v2_gid() {
+    local ib_dev="$1" ip="$2" timeout_s="${3:-15}"
+    local suffix gids_dir types_dir elapsed=0
+    suffix=$(ipv4_to_gid_suffix "$ip")
+    gids_dir="/sys/class/infiniband/${ib_dev}/ports/1/gids"
+    types_dir="/sys/class/infiniband/${ib_dev}/ports/1/gid_attrs/types"
+    if [[ ! -d "$gids_dir" ]]; then
+        _info "  (no GID sysfs for $ib_dev; skipping GID wait)"
+        return 0
+    fi
+    while (( elapsed < timeout_s * 10 )); do
+        local g idx gid t
+        for g in "$gids_dir"/*; do
+            idx=$(basename "$g")
+            gid=$(cat "$g" 2>/dev/null)
+            if [[ "$gid" == *":${suffix}" ]]; then
+                t=$(cat "${types_dir}/${idx}" 2>/dev/null)
+                if [[ "$t" == *"RoCE v2"* ]]; then
+                    _info "  RoCE v2 GID ready: ${ib_dev}[${idx}] ${gid}"
+                    return 0
+                fi
+            fi
+        done
+        sleep 0.1
+        elapsed=$((elapsed + 1))
+    done
+    _err "Timed out waiting for IPv4 RoCE v2 GID (${suffix}) on ${ib_dev}."
+    _err "The bridge's hololink_start will fail GID lookup.  Verify ${ip} is"
+    _err "assigned to the bridge netdev and the interface is up."
+    return 1
+}
+
 do_setup_network() {
     _log "Setting up ConnectX network"
 
@@ -329,8 +397,9 @@ do_setup_network() {
             _add_static_arp "$iface2" "$BRIDGE_IP" "$iface1"
         fi
 
-        _info "Waiting 2s for GID tables to populate..."
-        sleep 2
+        # Wait for the bridge device's IPv4 RoCE v2 GID before proceeding so the
+        # bridge's hololink_start GID lookup can't race GID-table population.
+        wait_for_roce_v2_gid "$BRIDGE_DEVICE" "$BRIDGE_IP" 15 || true
     else
         local iface_bridge
         if [[ -n "$IB_DEVICE" ]]; then
@@ -507,6 +576,21 @@ do_build() {
         return 1
     fi
 
+    # The device-graph scheduler bridge needs the proprietary cudevice archive
+    # (enqueue/get/reset DEVICE_CALL handlers + register/populate shims) built
+    # in the cuda-qx (decode_server1) tree, plus the nv-qldpc plugin .so.  These
+    # are produced outside this script; verify they exist and wire them in.
+    if [[ ! -f "$PROPRIETARY_ARCHIVE" ]]; then
+        _err "Proprietary cudevice archive not found: $PROPRIETARY_ARCHIVE"
+        _err "Build it in cuda-qx (decode_server1): target cudaq-qec-realtime-cudevice-proprietary"
+        _err "or pass --proprietary-archive PATH."
+        return 1
+    fi
+    if [[ ! -f "$NV_QLDPC_PLUGIN" ]]; then
+        _err "nv-qldpc plugin not found: $NV_QLDPC_PLUGIN (build it in cuda-qx)."
+        return 1
+    fi
+
     # Clear stale cmake cache entries (find_library caches NOTFOUND permanently)
     rm -f "$cuda_qx_build/CMakeCache.txt"
 
@@ -516,6 +600,8 @@ do_build() {
         -DCMAKE_CUDA_COMPILER="$cuda_compiler" \
         -DCUDAToolkit_ROOT="$cuda_toolkit_root" \
         -DCUDAQX_QEC_ENABLE_HOLOLINK_TOOLS=ON \
+        -DCUDAQ_QEC_BUILD_TRT_DECODER=OFF \
+        -DCUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE="$PROPRIETARY_ARCHIVE" \
         -DHOLOSCAN_SENSOR_BRIDGE_SOURCE_DIR="$HSB_DIR" \
         -DHOLOSCAN_SENSOR_BRIDGE_BUILD_DIR="$hsb_build" \
         -DGPU_ROCE_TRANSCEIVER_LIB="$hsb_gpu_roce_lib" \
@@ -526,7 +612,15 @@ do_build() {
         -DCUDAQ_REALTIME_HOST_DISPATCH_LIBRARY="${cq_build}/lib/libcudaq-realtime-host-dispatch.a" \
         -DCUDAQ_REALTIME_BRIDGE_HOLOLINK_LIBRARY="${cq_build}/lib/libcudaq-realtime-bridge-hololink.so" \
         -DCUDAQ_INSTALL_PREFIX="${CUDAQ_INSTALL_PREFIX:-/usr/local/cudaq}" \
+        -DCUDAQ_DIR="${CUDAQ_INSTALL_PREFIX:-/usr/local/cudaq}/lib/cmake/cudaq" \
         2>&1 | tail -5
+
+    # The plugin loader searches relative to libcudaq-qec.so; symlink the
+    # cuda-qx-built nv-qldpc plugin into the cudaqx decoder-plugins dir.
+    mkdir -p "$cuda_qx_build/lib/decoder-plugins"
+    ln -sf "$NV_QLDPC_PLUGIN" \
+        "$cuda_qx_build/lib/decoder-plugins/$(basename "$NV_QLDPC_PLUGIN")"
+
     cmake --build "$cuda_qx_build" -j "$JOBS" \
         --target hololink_qldpc_graph_decoder_bridge \
                  hololink_fpga_syndrome_playback \
@@ -708,6 +802,7 @@ run_emulated() {
     _log "Starting syndrome playback (control-port=$CONTROL_PORT)"
     local playback_args=(
         --hololink "$EMULATOR_IP"
+        --per-round
         --control-port "$CONTROL_PORT"
         --config "$CONFIG_FILE"
         --syndromes "$SYNDROMES_FILE"
@@ -790,6 +885,7 @@ run_fpga() {
     _log "Starting syndrome playback (fpga=$FPGA_IP)"
     local playback_args=(
         --hololink "$FPGA_IP"
+        --per-round
         --config "$CONFIG_FILE"
         --syndromes "$SYNDROMES_FILE"
         --function-name nv_qldpc_decode
