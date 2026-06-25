@@ -14,7 +14,7 @@
 #include <nanobind/stl/vector.h>
 #include <nanobind/trampoline.h>
 
-#include "cudaq/runtime/logger/logger.h"
+#include "cudaq/qec/logger.h"
 
 #include "common/DeviceCodeRegistry.h"
 #include "cudaq/python/PythonCppInterop.h"
@@ -223,7 +223,7 @@ public:
 
   static void register_code(const std::string &name,
                             std::function<nb::object(nb::kwargs)> factory) {
-    cudaq::info("Registering Pythonic QEC Code with name {}", name);
+    cudaq::qec::info("Registering Pythonic QEC Code with name {}", name);
     registry[name] = factory;
   }
 
