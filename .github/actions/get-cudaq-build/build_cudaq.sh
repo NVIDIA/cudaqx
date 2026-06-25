@@ -29,6 +29,10 @@ export CUDAQ_WERROR=${CUDAQ_WERROR:-OFF}
 # CUDAQ_INSTALL_PREFIX / CUQUANTUM_INSTALL_PREFIX / CUTENSOR_INSTALL_PREFIX /
 # CCACHE_DIR are expected to be set by the calling action (see action.yaml).
 
+# CUDA 12.6 nvcc in CI cannot parse GCC AVX512 BF16 intrinsic headers.
+cuda_bf16_header_guards="-D_AVX512BF16INTRIN_H_INCLUDED -D_AVX512BF16VLINTRIN_H_INCLUDED -D_AVXNECONVERTINTRIN_H_INCLUDED"
+export CUDAFLAGS="${CUDAFLAGS:--allow-unsupported-compiler} $cuda_bf16_header_guards"
+
 cd cudaq
 bash scripts/build_cudaq.sh -v -c "$BUILD_TYPE" -- \
   "-DCUDAQ_ENABLE_PROJECTS=cudaq;runtime;python;realtime" \
