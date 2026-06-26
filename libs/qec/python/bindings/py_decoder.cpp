@@ -746,10 +746,8 @@ void bindDecoder(nb::module_ &mod) {
           )pbdoc")
       .def_rw("error_rates", &detector_error_model::error_rates,
               R"pbdoc(
-      One entry per distinct physical error mechanism. When ``error_ids`` 
-      is not set, this equals one entry per column of ``detector_error_matrix``. When ``error_ids`` is set,
-      this equals one entry per distinct physical error mechanism. Use
-      ``error_rates[error_ids[i]]`` for the rate of column i.
+      The list of weights has length equal to the number of columns of the
+      detector error matrix, which assigns a likelihood to each error mechanism.
     )pbdoc")
       .def_rw("error_ids", &detector_error_model::error_ids, R"pbdoc(
        Error mechanism ID. From a probability perspective, each error mechanism
