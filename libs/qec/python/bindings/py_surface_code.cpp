@@ -52,6 +52,15 @@ void bindSurfaceCode(nb::module_ &mod) {
       .value("empty", surface_role::empty)
       .export_values();
 
+  nb::enum_<sc_orientation>(qecmod, "sc_orientation")
+      .value("XV", sc_orientation::XV)
+      .value("XH", sc_orientation::XH)
+      .value("ZV", sc_orientation::ZV)
+      .value("ZH", sc_orientation::ZH)
+      .export_values();
+
+  qecmod.def("parse_orientation", &parse_orientation, nb::arg("orientation"));
+
   nb::class_<vec2d>(qecmod, "vec2d")
       .def(nb::init<int, int>(), nb::arg("row"), nb::arg("col"))
       .def_rw("row", &vec2d::row)
@@ -67,8 +76,18 @@ void bindSurfaceCode(nb::module_ &mod) {
 
   nb::class_<stabilizer_grid>(qecmod, "stabilizer_grid")
       .def(nb::init<>())
-      .def(nb::init<std::uint32_t>(), nb::arg("distance"))
+      .def(nb::init<std::uint32_t, sc_orientation>(), nb::arg("distance"),
+           nb::arg("orientation") = sc_orientation::XV)
+      .def(
+          "__init__",
+          [](stabilizer_grid &self, std::uint32_t distance,
+             const std::string &orientation) {
+            new (&self)
+                stabilizer_grid(distance, parse_orientation(orientation));
+          },
+          nb::arg("distance"), nb::arg("orientation"))
       .def_ro("distance", &stabilizer_grid::distance)
+      .def_ro("orientation", &stabilizer_grid::orientation)
       .def_ro("grid_length", &stabilizer_grid::grid_length)
       .def_ro("roles", &stabilizer_grid::roles)
       .def_ro("x_stab_coords", &stabilizer_grid::x_stab_coords)

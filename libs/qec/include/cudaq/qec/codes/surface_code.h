@@ -9,6 +9,7 @@
 
 #include "cudaq/qec/code.h"
 #include "cudaq/qec/patch.h"
+#include <string>
 
 using namespace cudaqx;
 
@@ -17,6 +18,33 @@ namespace cudaq::qec::surface_code {
 /// @brief enumerates the role of a grid site in the surface codes stabilizer
 /// grid
 enum surface_role { amx, amz, empty };
+
+/// @brief Surface-code orientation: controls which Pauli type (X or Z) occupies
+/// the bulk interior and which boundaries are X-type vs Z-type.
+///
+/// Within cudaqx: XV and ZH put X-type stabilizers on left/right boundaries;
+/// XH and ZV put them on top/bottom.
+///
+/// WARNING — do NOT map these to Ising by name string. Ising has two naming
+/// layers: a `code_rotation` parameter (aliases O1=XV, O2=XH, O3=ZV, O4=ZH) and
+/// a derived `logical_direction` whose second character is the inverse of
+/// rotated_type. These cudaqx enum names coincide with Ising's
+/// logical_direction STRING but NOT with its physical geometry. To match an
+/// Ising-trained model, map by stabilizer geometry, never by name: Ising's
+/// pretrained d13 model uses code_rotation O1 (=XV), which corresponds to
+/// cudaqx sc_orientation::ZH — not
+/// ::XV and not ::XH. Confirm via stabilizer supports + logical-operator
+/// commutation.
+///
+/// Observable convention: get_spin_op_observables() always returns X obs along
+/// the top row and Z obs along the left column, regardless of orientation (the
+/// valid logical pair for XV/ZH). It is intentionally NOT updated to track
+/// per-orientation logical operators. See get_spin_op_observables() for
+/// details.
+enum class sc_orientation { XV, XH, ZV, ZH };
+
+/// @brief Parse a surface-code orientation string (XV, XH, ZV, or ZH).
+sc_orientation parse_orientation(const std::string &s);
 
 /// @brief describes the 2d coordinate on the stabilizer grid
 struct vec2d {
@@ -98,6 +126,9 @@ public:
   /// determines the number of data qubits per dimension
   uint32_t distance = 0;
 
+  /// @brief Orientation used to assign stabilizer roles.
+  sc_orientation orientation = sc_orientation::XV;
+
   /// @brief length of the stabilizer grid
   /// for distance = d data qubits,
   /// the stabilizer grid has length d+1
@@ -138,7 +169,8 @@ public:
   std::vector<std::vector<size_t>> z_stabilizers;
 
   /// @brief Construct the grid from the code's distance
-  stabilizer_grid(uint32_t distance);
+  stabilizer_grid(uint32_t distance,
+                  sc_orientation orientation = sc_orientation::XV);
   /// @brief Empty constructor
   stabilizer_grid();
 
@@ -164,6 +196,11 @@ public:
   std::vector<cudaq::spin_op_term> get_spin_op_stabilizers() const;
 
   /// @brief Get the observables as a vector of cudaq::spin_op_terms
+  ///
+  /// @note This is intentionally NOT updated to match Ising's per-orientation
+  /// logical operator convention. The existing X=top-row / Z=left-column
+  /// behavior is preserved as-is across all orientations. Reconciliation with
+  /// Ising's convention is deferred.
   std::vector<cudaq::spin_op_term> get_spin_op_observables() const;
 };
 
