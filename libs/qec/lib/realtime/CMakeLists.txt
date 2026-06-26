@@ -19,6 +19,9 @@ if(CMAKE_CUDA_COMPILER)
     list(APPEND _cudaq_realtime_prefixes "${CUDAQ_REALTIME_ROOT}")
     list(APPEND _cudaq_realtime_prefixes "${CUDAQ_REALTIME_ROOT}/build")
   endif()
+  if(CUDAQ_INSTALL_DIR)
+    list(APPEND _cudaq_realtime_prefixes "${CUDAQ_INSTALL_DIR}")
+  endif()
   if(CUDAQ_INSTALL_PREFIX)
     list(APPEND _cudaq_realtime_prefixes "${CUDAQ_INSTALL_PREFIX}")
   endif()
@@ -68,6 +71,52 @@ if(CMAKE_CUDA_COMPILER)
     if(CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY)
       message(STATUS "Found cuda-quantum realtime host dispatch library at ${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}")
     endif()
+
+    # CUDA-Q lowered `cudaq::device_call` host-dispatch integration needs the
+    # internal DeviceCallService plugin API, which is available only from a
+    # realtime/device-call-enabled CUDA-Q build.
+    find_path(CUDAQ_DEVICE_CALL_INCLUDE_DIR
+      NAMES cudaq_internal/device_call/DeviceCallService.h
+      HINTS ${_cudaq_realtime_prefixes}
+      PATH_SUFFIXES include
+      NO_DEFAULT_PATH
+    )
+    if(NOT CUDAQ_DEVICE_CALL_INCLUDE_DIR)
+      find_path(CUDAQ_DEVICE_CALL_INCLUDE_DIR
+        NAMES cudaq_internal/device_call/DeviceCallService.h
+        PATHS ${_cudaq_realtime_prefixes}
+        PATH_SUFFIXES include
+      )
+    endif()
+    if(CUDAQ_DEVICE_CALL_INCLUDE_DIR)
+      message(STATUS "Found cuda-quantum device_call headers at ${CUDAQ_DEVICE_CALL_INCLUDE_DIR}")
+    else()
+      message(STATUS "cuda-quantum device_call headers not found. "
+                     "QEC lowered device_call host-dispatch service will not be built.")
+    endif()
+
+    find_library(CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY
+      NAMES cudaq-device-call-runtime
+      HINTS ${_cudaq_realtime_prefixes}
+      PATH_SUFFIXES lib
+      NO_DEFAULT_PATH
+    )
+    if(NOT CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY)
+      find_library(CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY
+        NAMES cudaq-device-call-runtime
+        PATHS ${_cudaq_realtime_prefixes}
+        PATH_SUFFIXES lib
+      )
+    endif()
+    if(CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY)
+      message(STATUS "Found cuda-quantum device_call runtime library at ${CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY}")
+      get_filename_component(_CUDAQ_DEVICE_CALL_RUNTIME_LIB_DIR
+        "${CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY}" DIRECTORY)
+    else()
+      message(STATUS "cuda-quantum device_call runtime library not found. "
+                     "QEC lowered device_call host-dispatch service will not be built.")
+    endif()
+
     
     # Create static device library for device code
     add_library(cudaq-qec-realtime-cudevice STATIC
@@ -246,3 +295,7 @@ endif()
 
 add_subdirectory(quantinuum)
 add_subdirectory(simulation)
+if(CUDAQ_REALTIME_INCLUDE_DIR AND CUDAQ_DEVICE_CALL_INCLUDE_DIR AND
+   CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY)
+  add_subdirectory(device_call)
+endif()
