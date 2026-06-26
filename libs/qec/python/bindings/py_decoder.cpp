@@ -155,6 +155,39 @@ make_sparse_from_dense(const nb::ndarray<nb::numpy, uint8_t> &arr) {
   }
 }
 
+template <typename T>
+static nb::ndarray<nb::numpy, T> vector_to_numpy_1d(std::vector<T> values) {
+  const size_t logical_size = values.size();
+  auto *owned = new std::vector<T>(std::move(values));
+  if (owned->empty())
+    owned->resize(1);
+  nb::capsule owner(
+      owned, [](void *p) noexcept { delete static_cast<std::vector<T> *>(p); });
+  size_t shape[1] = {logical_size};
+  return nb::ndarray<nb::numpy, T>(owned->data(), 1, shape, owner);
+}
+
+static std::vector<std::int64_t>
+to_int64_vector(const std::vector<sparse_binary_matrix::index_type> &values) {
+  std::vector<std::int64_t> out;
+  out.reserve(values.size());
+  for (auto value : values)
+    out.push_back(static_cast<std::int64_t>(value));
+  return out;
+}
+
+static nb::object
+sparse_binary_matrix_to_scipy_csc(const sparse_binary_matrix &matrix) {
+  auto csc = matrix.to_csc();
+  std::vector<std::uint8_t> data(csc.num_nnz(), 1);
+  auto scipy_sparse = nb::module_::import_("scipy.sparse");
+  return scipy_sparse.attr("csc_matrix")(
+      nb::make_tuple(vector_to_numpy_1d(std::move(data)),
+                     vector_to_numpy_1d(to_int64_vector(csc.indices())),
+                     vector_to_numpy_1d(to_int64_vector(csc.ptr()))),
+      nb::arg("shape") = nb::make_tuple(csc.num_rows(), csc.num_cols()));
+}
+
 class PyDecoder : public decoder {
 public:
   NB_TRAMPOLINE(decoder, 1);
@@ -762,9 +795,24 @@ void bindDecoder(nb::module_ &mod) {
       .def("canonicalize_for_rounds",
            &detector_error_model::canonicalize_for_rounds,
            R"pbdoc(
-            Canonicalize the detector error model for a given number of rounds
+            Canonicalize the detector error model for a given number of rounds.
+
+            Columns sharing the same detector and observable signature are
+            merged, with rates composed to match the input model. By default,
+            zero-syndrome columns that still flip an observable (undetectable
+            logical errors) are retained so the model's observable-flip
+            probability is preserved. Set ``remove_zero_syndrome_errors=True``
+            to drop all columns with no detector signature, which is
+            appropriate when the canonicalized DEM is consumed only for
+            round-based decoding.
+
+            Canonicalization does not preserve cross-column exclusivity
+            structure: each output column is given a fresh unique error id and
+            treated as independent of every other column, so any ``error_ids``
+            correlation in the input model is discarded.
           )pbdoc",
-           nb::arg("num_syndromes_per_round"));
+           nb::arg("num_syndromes_per_round"),
+           nb::arg("remove_zero_syndrome_errors") = false);
 
   qecmod.def(
       "dem_from_stim_text", &dem_from_stim_text,
@@ -934,10 +982,16 @@ void bindDecoder(nb::module_ &mod) {
 
   qecmod.def(
       "reorder_pcm_columns",
-      [](const nb::ndarray<nb::numpy, uint8_t> &H,
-         const std::vector<std::uint32_t> &column_order) {
-        auto tensor_H = pcmToTensor(H);
+      [](nb::object H,
+         const std::vector<std::uint32_t> &column_order) -> nb::object {
+        if (nb::hasattr(H, "tocsr")) {
+          auto H_sparse = sparse_binary_matrix_from_scipy(H);
+          auto H_new = cudaq::qec::reorder_pcm_columns(H_sparse, column_order);
+          return sparse_binary_matrix_to_scipy_csc(H_new);
+        }
 
+        auto tensor_H =
+            pcmToTensor(nb::cast<nb::ndarray<nb::numpy, uint8_t>>(H));
         auto H_new = cudaq::qec::reorder_pcm_columns(tensor_H, column_order);
 
         // Construct a new ndarray from H_new (deep copy)
@@ -955,11 +1009,11 @@ void bindDecoder(nb::module_ &mod) {
         the given column order.
 
         Args:
-            H: A NumPy array representing the parity check matrix
+            H: A NumPy array or scipy sparse matrix
             column_order: A NumPy array containing the column order
 
         Returns:
-            A NumPy array containing the reordered parity check matrix
+            A NumPy array, or a scipy CSC matrix when H is scipy sparse.
 
         See Also:
             :cpp:func:`cudaq::qec::reorder_pcm_columns`: The underlying C++
@@ -1150,12 +1204,20 @@ void bindDecoder(nb::module_ &mod) {
 
   qecmod.def(
       "shuffle_pcm_columns",
-      [](const nb::ndarray<nb::numpy, uint8_t> &H, std::uint32_t seed) {
-        auto tensor_H = pcmToTensor(H);
+      [](nb::object H, std::uint32_t seed) -> nb::object {
         std::mt19937_64 rng(seed);
         if (seed == 0)
           rng = std::mt19937_64(std::random_device()());
 
+        if (nb::hasattr(H, "tocsr")) {
+          auto H_sparse = sparse_binary_matrix_from_scipy(H);
+          auto H_new =
+              cudaq::qec::shuffle_pcm_columns(H_sparse, std::move(rng));
+          return sparse_binary_matrix_to_scipy_csc(H_new);
+        }
+
+        auto tensor_H =
+            pcmToTensor(nb::cast<nb::ndarray<nb::numpy, uint8_t>>(H));
         auto H_new = cudaq::qec::shuffle_pcm_columns(tensor_H, std::move(rng));
         // Construct a new ndarray from H_new (deep copy)
         auto rows = H_new.shape()[0];
@@ -1171,11 +1233,11 @@ void bindDecoder(nb::module_ &mod) {
         This function shuffles the columns of a parity check matrix.
 
         Args:
-            H: A NumPy array representing the parity check matrix
+            H: A NumPy array or scipy sparse matrix
             seed: Random seed for reproducibility (0 for random seed)
 
         Returns:
-            A NumPy array containing the shuffled parity check matrix
+            A NumPy array, or a scipy CSC matrix when H is scipy sparse.
 
         See Also:
             :cpp:func:`cudaq::qec::shuffle_pcm_columns`: The underlying C++
@@ -1380,12 +1442,21 @@ void bindDecoder(nb::module_ &mod) {
 
   qecmod.def(
       "pcm_to_sparse_vec",
-      [](const nb::ndarray<nb::numpy, uint8_t> &pcm) {
-        auto tensor_pcm = pcmToTensor(pcm);
+      [](nb::object pcm) {
+        if (nb::hasattr(pcm, "tocsr")) {
+          return cudaq::qec::pcm_to_sparse_vec(
+              sparse_binary_matrix_from_scipy(pcm));
+        }
+
+        auto tensor_pcm =
+            pcmToTensor(nb::cast<nb::ndarray<nb::numpy, uint8_t>>(pcm));
         return cudaq::qec::pcm_to_sparse_vec(tensor_pcm);
       },
       R"pbdoc(
         Return a sparse representation of the PCM.
+
+        Args:
+            pcm: A NumPy array or scipy sparse matrix.
       )pbdoc",
       nb::arg("pcm"));
 }

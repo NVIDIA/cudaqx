@@ -28,4 +28,6 @@ decoders:
         stopping_criterion: All
         stop_nconv:      1
       composition:     1
+      clip_value:      200.0
+      repeatable:      true
 ...

@@ -13,11 +13,26 @@
 
 // Note: none of these are intended to be user-facing functions.
 
+namespace cudaq::qec::realtime {
+class qec_realtime_session;
+} // namespace cudaq::qec::realtime
+
 namespace cudaq::qec::decoding::host {
+
+/// @brief Accessor for the per-process realtime session. Returns nullptr
+/// unless CUDAQ_QEC_REALTIME_MODE=inproc_rpc has initialized the shared-ring
+/// dispatch session.
+__attribute__((visibility("default")))
+cudaq::qec::realtime::qec_realtime_session *
+get_realtime_session();
 
 __attribute__((visibility("default"))) void
 enqueue_syndromes(std::size_t decoder_id, uint8_t *syndromes,
                   std::uint64_t syndrome_length, std::uint64_t tag);
+
+__attribute__((visibility("default"))) cudaqx::heterogeneous_map
+prepare_decoder_params(
+    const cudaq::qec::decoding::config::decoder_config &decoder_config);
 
 __attribute__((visibility("default"))) void
 get_corrections(std::size_t decoder_id, uint8_t *corrections,

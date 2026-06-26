@@ -16,18 +16,25 @@ namespace cudaq::qec {
 /// @brief This is a sample (dummy) decoder that demonstrates how to build a
 /// bare bones custom decoder based on the `cudaq::qec::decoder` interface.
 class sample_decoder : public decoder {
+private:
+  bool decode_to_obs = false;
+
 public:
   sample_decoder(const cudaq::qec::sparse_binary_matrix &H,
                  const cudaqx::heterogeneous_map &params)
       : decoder(H) {
     // Decoder-specific constructor arguments can be placed in `params`.
+    decode_to_obs = params.get<bool>("decode_to_obs", decode_to_obs);
+    if (decode_to_obs)
+      set_result_type(decode_result_type::decode_to_obs);
   }
 
   virtual decoder_result decode(const std::vector<float_t> &syndrome) {
     // This is a simple decoder that simply results
     decoder_result result;
     result.converged = true;
-    result.result = std::vector<float_t>(block_size, 0.0f);
+    result.result =
+        decode_to_obs ? syndrome : std::vector<float_t>(block_size, 0.0f);
     return result;
   }
 

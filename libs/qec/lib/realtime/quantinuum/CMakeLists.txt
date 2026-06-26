@@ -25,7 +25,10 @@ target_include_directories(cudaq-qec-realtime-decoding-quantinuum
     $<INSTALL_INTERFACE:include>
 )
 
-target_link_options(cudaq-qec-realtime-decoding-quantinuum PUBLIC
+# PRIVATE, not PUBLIC: PUBLIC propagates --exclude-libs,ALL to every consumer,
+# including test executables that absorb libcudaq-realtime-dispatch.a and
+# dlsym() its CUDAQ_REALTIME_DISPATCH_API symbols at runtime.
+target_link_options(cudaq-qec-realtime-decoding-quantinuum PRIVATE
   $<$<CXX_COMPILER_ID:GNU>:-Wl,--exclude-libs,ALL>
 )
 

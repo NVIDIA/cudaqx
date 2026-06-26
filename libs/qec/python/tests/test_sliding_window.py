@@ -48,8 +48,13 @@ def test_sliding_window_1(decoder_name, batched, num_rounds, num_windows):
 
     # First compare the results of the full decoder to the sliding window
     # decoder using an inner decoder of the full window size. The results should
-    # be the same.
-    full_decoder = qec.get_decoder(decoder_name, dem.detector_error_matrix)
+    # be the same. The full decoder must use the same merge_strategy as the
+    # sliding window's inner decoder (below): a faithful DEM can contain
+    # parallel matching edges, and the two decoders only agree if they combine
+    # those edges identically.
+    full_decoder = qec.get_decoder(decoder_name,
+                                   dem.detector_error_matrix,
+                                   merge_strategy='smallest_weight')
     num_syndromes_per_round = dem.detector_error_matrix.shape[0] // num_rounds
 
     sw_as_full_decoder = qec.get_decoder(

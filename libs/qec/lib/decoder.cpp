@@ -292,6 +292,7 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
     std::vector<uint32_t> log_msyn;
     std::vector<uint32_t> log_detectors;
     std::vector<uint32_t> log_errors;
+    std::vector<uint32_t> log_observables;
     std::vector<uint8_t> log_observable_corrections;
     // The four time points are used to measure the duration of each of 3 steps.
     std::chrono::time_point<std::chrono::high_resolution_clock> log_t0, log_t1,
@@ -305,6 +306,7 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
     if (should_log) {
       log_t0 = std::chrono::high_resolution_clock::now();
       log_errors.reserve(syndrome_length);
+      log_observables.reserve(O_sparse.size());
       log_observable_corrections.resize(O_sparse.size());
     }
 
@@ -362,36 +364,76 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
         return false;
       }
     }
-    if ((!pimpl->is_sliding_window &&
-         decoded_result.result.size() != block_size) ||
-        (pimpl->is_sliding_window && !decoded_result.result.empty() &&
-         decoded_result.result.size() != block_size)) {
-      throw std::runtime_error(
-          fmt::format("Decoder result size ({}) does not match block_size ({})",
-                      decoded_result.result.size(), block_size));
-    }
-
-    if (should_log) {
-      log_t2 = std::chrono::high_resolution_clock::now();
-      for (std::size_t e = 0, E = decoded_result.result.size(); e < E; e++)
-        if (decoded_result.result[e])
-          log_errors.push_back(e);
-    }
     // Process the results.
     // TODO - should this interrogate the decoded_result.converged flag?
-    auto num_observables = O_sparse.size();
-    // For each observable
-    for (std::size_t i = 0; i < num_observables; i++) {
-      // For each error that flips this observable
-      for (auto col : O_sparse[i]) {
-        // If the decoder predicted that this error occurred
-        if (decoded_result.result[col]) {
-          // Flip the correction for this observable
-          pimpl->corrections[i] ^= 1;
+    const auto result_type = get_result_type();
+    const auto num_observables = get_num_observables();
+    const char *result_type_str = nullptr;
+    const char *result_type_name = nullptr;
+    std::size_t expected_result_size = 0;
+    switch (result_type) {
+    case decode_result_type::decode_to_errs:
+      result_type_str = "errs";
+      result_type_name = "decode_to_errs";
+      expected_result_size = block_size;
+      break;
+    case decode_result_type::decode_to_obs:
+      result_type_str = "obs";
+      result_type_name = "decode_to_obs";
+      expected_result_size = num_observables;
+      break;
+    }
+    if (!result_type_name)
+      throw std::runtime_error(
+          fmt::format("Unsupported decoder result type ({})",
+                      static_cast<int>(result_type)));
+    if ((!pimpl->is_sliding_window &&
+         decoded_result.result.size() != expected_result_size) ||
+        (pimpl->is_sliding_window && !decoded_result.result.empty() &&
+         decoded_result.result.size() != expected_result_size)) {
+      throw std::runtime_error(fmt::format(
+          "Decoder result size ({}) does not match expected size ({}) for "
+          "result type {}",
+          decoded_result.result.size(), expected_result_size,
+          result_type_name));
+    }
+
+    // Flip an observable correction and mirror it into the per-call log so the
+    // logged flips stay faithful to the applied corrections.
+    auto flip_correction = [&](std::size_t i) {
+      pimpl->corrections[i] ^= 1;
+      if (should_log)
+        log_observable_corrections[i] ^= 1;
+    };
+
+    if (should_log)
+      log_t2 = std::chrono::high_resolution_clock::now();
+
+    switch (result_type) {
+    case decode_result_type::decode_to_obs:
+      // Observable-frame path: decoder already projected to observables via its
+      // internal "O" matrix; use the result directly.
+      for (std::size_t i = 0; i < num_observables; i++)
+        if (decoded_result.result[i]) {
           if (should_log)
-            log_observable_corrections[i] ^= 1;
+            log_observables.push_back(i);
+          flip_correction(i);
         }
-      }
+      break;
+    case decode_result_type::decode_to_errs:
+      // Error-frame path: decoder returns a block-sized error vector; project
+      // to observables via O_sparse.
+      if (should_log)
+        for (std::size_t e = 0, E = decoded_result.result.size(); e < E; e++)
+          if (decoded_result.result[e])
+            log_errors.push_back(e);
+      // For each observable, flip its correction once for each predicted error
+      // that flips it (net parity over O_sparse[i]).
+      for (std::size_t i = 0; i < num_observables; i++)
+        for (auto col : O_sparse[i])
+          if (decoded_result.result[col])
+            flip_correction(i);
+      break;
     }
     if (should_log) {
       log_t3 = std::chrono::high_resolution_clock::now();
@@ -401,13 +443,15 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
       pimpl->log_counter++;
       auto s = fmt::format(
           "[DecoderStats][{}] Counter:{} DecoderId:{} InputMsyn:{} "
-          "InputDetectors:{} Converged:{} Errors:{} "
+          "InputDetectors:{} Converged:{} ResultType:{} Errors:{} "
+          "Observables:{} "
           "ObservableCorrectionsThisCall:{} ObservableCorrectionsTotal:{} "
           "Dur1:{:.1f}us Dur2:{:.1f}us Dur3:{:.1f}us",
           static_cast<const void *>(this), pimpl->log_counter,
           pimpl->decoder_id, fmt::join(log_msyn, ","),
           fmt::join(log_detectors, ","), decoded_result.converged ? 1 : 0,
-          fmt::join(log_errors, ","),
+          result_type_str, fmt::join(log_errors, ","),
+          fmt::join(log_observables, ","),
           fmt::join(log_observable_corrections, ","),
           fmt::join(std::vector<uint8_t>(pimpl->corrections.begin(),
                                          pimpl->corrections.end()),

@@ -52,7 +52,7 @@ __device__ void postprocess_observable(
     }
   }
 
-  corrections[observable_idx] = result;
+  corrections[observable_idx] ^= result;
 }
 
 __device__ void preprocess_all(const uint8_t *__restrict__ measurements,

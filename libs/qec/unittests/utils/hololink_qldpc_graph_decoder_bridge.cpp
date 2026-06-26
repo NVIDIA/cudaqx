@@ -165,6 +165,13 @@ int main(int argc, char *argv[]) {
   std::cout << "  Graph captured: function_id=0x" << std::hex
             << graph_res->function_id << std::dec << std::endl;
 
+  std::cerr << "ERROR: capture_decode_graph() now returns a per-round graph; "
+               "this bridge still expects full-window request/response "
+               "semantics and has not been migrated yet."
+            << std::endl;
+  decoder->release_decode_graph(raw_res);
+  return 1;
+
   // ---- Configure HOST_LOOP bridge ----
   cudaq_function_entry_t entry{};
   entry.handler.graph_exec = graph_res->graph_exec;
