@@ -12,6 +12,7 @@ jobs:
     with:
       build_type: Release
       cudaq_wheels: Custom
+      cache_key_suffix: nightly
     secrets: inherit
 
   resolve-cudaq-main:
