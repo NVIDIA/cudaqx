@@ -805,6 +805,180 @@ TEST(QECCodeTester, checkSurfaceCodeOrientationAlgebra) {
   }
 }
 
+namespace {
+
+// Recover the integer support (indices of non-identity Paulis) of a single
+// spin_op_term pauli word, e.g. "XIXII" -> {0, 2}.
+std::vector<std::size_t> support_of(const cudaq::spin_op_term &term) {
+  std::vector<std::size_t> support;
+  const std::string word = term.get_pauli_word();
+  for (std::size_t i = 0; i < word.size(); ++i)
+    if (word[i] != 'I')
+      support.push_back(i);
+  return support;
+}
+
+} // namespace
+
+// Pin the EXACT role grid of every orientation at d=3 so permuting the
+// orientation labels (or regressing the boundary logic) fails. The grids are
+// derived by tracing generate_grid_roles()/role_for_parity(); the XV grid
+// matches checkSurfaceCodeXVPreservesLegacyLayout. Boundary summary: XV/ZH put
+// amx on left/right and amz on top/bottom; XH/ZV put amx on top/bottom and amz
+// on left/right (XV vs ZH and XH vs ZV differ in the bulk checkerboard).
+TEST(QECCodeTester, checkSurfaceCodeAllOrientationGeometries) {
+  // ---- XV ----
+  {
+    SCOPED_TRACE("XV");
+    stabilizer_grid grid(3, sc_orientation::XV);
+    const auto role_at = [&grid](std::size_t row, std::size_t col) {
+      return grid.roles[row * grid.grid_length + col];
+    };
+    EXPECT_EQ(surface_role::empty, role_at(0, 0));
+    EXPECT_EQ(surface_role::empty, role_at(0, 1));
+    EXPECT_EQ(surface_role::amz, role_at(0, 2));
+    EXPECT_EQ(surface_role::empty, role_at(0, 3));
+
+    EXPECT_EQ(surface_role::amx, role_at(1, 0));
+    EXPECT_EQ(surface_role::amz, role_at(1, 1));
+    EXPECT_EQ(surface_role::amx, role_at(1, 2));
+    EXPECT_EQ(surface_role::empty, role_at(1, 3));
+
+    EXPECT_EQ(surface_role::empty, role_at(2, 0));
+    EXPECT_EQ(surface_role::amx, role_at(2, 1));
+    EXPECT_EQ(surface_role::amz, role_at(2, 2));
+    EXPECT_EQ(surface_role::amx, role_at(2, 3));
+
+    EXPECT_EQ(surface_role::empty, role_at(3, 0));
+    EXPECT_EQ(surface_role::amz, role_at(3, 1));
+    EXPECT_EQ(surface_role::empty, role_at(3, 2));
+    EXPECT_EQ(surface_role::empty, role_at(3, 3));
+  }
+
+  // ---- XH ----
+  {
+    SCOPED_TRACE("XH");
+    stabilizer_grid grid(3, sc_orientation::XH);
+    const auto role_at = [&grid](std::size_t row, std::size_t col) {
+      return grid.roles[row * grid.grid_length + col];
+    };
+    EXPECT_EQ(surface_role::empty, role_at(0, 0));
+    EXPECT_EQ(surface_role::amx, role_at(0, 1));
+    EXPECT_EQ(surface_role::empty, role_at(0, 2));
+    EXPECT_EQ(surface_role::empty, role_at(0, 3));
+
+    EXPECT_EQ(surface_role::empty, role_at(1, 0));
+    EXPECT_EQ(surface_role::amz, role_at(1, 1));
+    EXPECT_EQ(surface_role::amx, role_at(1, 2));
+    EXPECT_EQ(surface_role::amz, role_at(1, 3));
+
+    EXPECT_EQ(surface_role::amz, role_at(2, 0));
+    EXPECT_EQ(surface_role::amx, role_at(2, 1));
+    EXPECT_EQ(surface_role::amz, role_at(2, 2));
+    EXPECT_EQ(surface_role::empty, role_at(2, 3));
+
+    EXPECT_EQ(surface_role::empty, role_at(3, 0));
+    EXPECT_EQ(surface_role::empty, role_at(3, 1));
+    EXPECT_EQ(surface_role::amx, role_at(3, 2));
+    EXPECT_EQ(surface_role::empty, role_at(3, 3));
+  }
+
+  // ---- ZV ----
+  {
+    SCOPED_TRACE("ZV");
+    stabilizer_grid grid(3, sc_orientation::ZV);
+    const auto role_at = [&grid](std::size_t row, std::size_t col) {
+      return grid.roles[row * grid.grid_length + col];
+    };
+    EXPECT_EQ(surface_role::empty, role_at(0, 0));
+    EXPECT_EQ(surface_role::empty, role_at(0, 1));
+    EXPECT_EQ(surface_role::amx, role_at(0, 2));
+    EXPECT_EQ(surface_role::empty, role_at(0, 3));
+
+    EXPECT_EQ(surface_role::amz, role_at(1, 0));
+    EXPECT_EQ(surface_role::amx, role_at(1, 1));
+    EXPECT_EQ(surface_role::amz, role_at(1, 2));
+    EXPECT_EQ(surface_role::empty, role_at(1, 3));
+
+    EXPECT_EQ(surface_role::empty, role_at(2, 0));
+    EXPECT_EQ(surface_role::amz, role_at(2, 1));
+    EXPECT_EQ(surface_role::amx, role_at(2, 2));
+    EXPECT_EQ(surface_role::amz, role_at(2, 3));
+
+    EXPECT_EQ(surface_role::empty, role_at(3, 0));
+    EXPECT_EQ(surface_role::amx, role_at(3, 1));
+    EXPECT_EQ(surface_role::empty, role_at(3, 2));
+    EXPECT_EQ(surface_role::empty, role_at(3, 3));
+  }
+
+  // ---- ZH ----
+  {
+    SCOPED_TRACE("ZH");
+    stabilizer_grid grid(3, sc_orientation::ZH);
+    const auto role_at = [&grid](std::size_t row, std::size_t col) {
+      return grid.roles[row * grid.grid_length + col];
+    };
+    EXPECT_EQ(surface_role::empty, role_at(0, 0));
+    EXPECT_EQ(surface_role::amz, role_at(0, 1));
+    EXPECT_EQ(surface_role::empty, role_at(0, 2));
+    EXPECT_EQ(surface_role::empty, role_at(0, 3));
+
+    EXPECT_EQ(surface_role::empty, role_at(1, 0));
+    EXPECT_EQ(surface_role::amx, role_at(1, 1));
+    EXPECT_EQ(surface_role::amz, role_at(1, 2));
+    EXPECT_EQ(surface_role::amx, role_at(1, 3));
+
+    EXPECT_EQ(surface_role::amx, role_at(2, 0));
+    EXPECT_EQ(surface_role::amz, role_at(2, 1));
+    EXPECT_EQ(surface_role::amx, role_at(2, 2));
+    EXPECT_EQ(surface_role::empty, role_at(2, 3));
+
+    EXPECT_EQ(surface_role::empty, role_at(3, 0));
+    EXPECT_EQ(surface_role::empty, role_at(3, 1));
+    EXPECT_EQ(surface_role::amz, role_at(3, 2));
+    EXPECT_EQ(surface_role::empty, role_at(3, 3));
+  }
+}
+
+// After making get_spin_op_observables() orientation-aware, every orientation
+// must yield a VALID logical pair: the X observable commutes with all Z
+// stabilizers, the Z observable commutes with all X stabilizers, and the two
+// observables anticommute. This also pins which physical support each
+// orientation uses (top row vs left column).
+TEST(QECCodeTester, checkSurfaceCodeObservablesPerOrientation) {
+  for (auto orientation : {sc_orientation::XV, sc_orientation::XH,
+                           sc_orientation::ZV, sc_orientation::ZH}) {
+    SCOPED_TRACE(static_cast<int>(orientation));
+    constexpr std::uint32_t distance = 3;
+    stabilizer_grid grid(distance, orientation);
+
+    const auto observables = grid.get_spin_op_observables();
+    ASSERT_EQ(2u, observables.size());
+    // get_spin_op_observables() emits the X observable first, then Z.
+    const auto logical_x = support_of(observables[0]);
+    const auto logical_z = support_of(observables[1]);
+
+    // Pin the expected physical support for each orientation.
+    const auto top_row = top_row_logical_x(distance);
+    const auto left_column = left_column_logical_z(distance);
+    if (uses_horizontal_x_logical(orientation)) {
+      EXPECT_EQ(top_row, logical_x);
+      EXPECT_EQ(left_column, logical_z);
+    } else {
+      EXPECT_EQ(left_column, logical_x);
+      EXPECT_EQ(top_row, logical_z);
+    }
+
+    // Valid logical pair: X obs commutes with all Z stabs, Z obs commutes with
+    // all X stabs, and the two observables anticommute.
+    for (const auto &z_stabilizer : grid.z_stabilizers)
+      EXPECT_EQ(0, overlap_parity(logical_x, z_stabilizer));
+    for (const auto &x_stabilizer : grid.x_stabilizers)
+      EXPECT_EQ(0, overlap_parity(logical_z, x_stabilizer));
+    EXPECT_EQ(1, overlap_parity(logical_x, logical_z));
+  }
+}
+
 TEST(QECCodeTester, checkSurfaceCode) {
   {
     // must provide distance

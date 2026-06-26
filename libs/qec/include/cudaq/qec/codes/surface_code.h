@@ -36,11 +36,10 @@ enum surface_role { amx, amz, empty };
 /// ::XV and not ::XH. Confirm via stabilizer supports + logical-operator
 /// commutation.
 ///
-/// Observable convention: get_spin_op_observables() always returns X obs along
-/// the top row and Z obs along the left column, regardless of orientation (the
-/// valid logical pair for XV/ZH). It is intentionally NOT updated to track
-/// per-orientation logical operators. See get_spin_op_observables() for
-/// details.
+/// Observable convention: get_spin_op_observables() returns the valid logical
+/// pair for the grid's orientation. XV/ZH use X obs along the top row and Z obs
+/// along the left column; XH/ZV swap them (X along the left column, Z along the
+/// top row). See get_spin_op_observables() for details.
 enum class sc_orientation { XV, XH, ZV, ZH };
 
 /// @brief Parse a surface-code orientation string (XV, XH, ZV, or ZH).
@@ -197,10 +196,12 @@ public:
 
   /// @brief Get the observables as a vector of cudaq::spin_op_terms
   ///
-  /// @note This is intentionally NOT updated to match Ising's per-orientation
-  /// logical operator convention. The existing X=top-row / Z=left-column
-  /// behavior is preserved as-is across all orientations. Reconciliation with
-  /// Ising's convention is deferred.
+  /// @note Returns the correct logical pair for the grid's orientation. For XV
+  /// and ZH the X observable runs along the top row of data qubits and the Z
+  /// observable along the left column; for XH and ZV the assignment is swapped
+  /// (X along the left column, Z along the top row) to match their boundary
+  /// types. The returned X/Z observables commute with the stabilizers and
+  /// anticommute with each other for every orientation.
   std::vector<cudaq::spin_op_term> get_spin_op_observables() const;
 };
 

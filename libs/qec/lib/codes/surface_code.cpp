@@ -379,20 +379,40 @@ stabilizer_grid::get_spin_op_stabilizers() const {
 std::vector<cudaq::spin_op_term>
 stabilizer_grid::get_spin_op_observables() const {
   std::vector<cudaq::spin_op_term> spin_op_obs;
-  // Intentionally preserve the historical convention for every orientation:
-  // X obs runs along top row of data qubits.
-  std::string xobs(data_coords.size(), 'I');
-  for (size_t i = 0; i < distance; ++i) {
-    xobs[i] = 'X';
-  }
-  spin_op_obs.emplace_back(cudaq::spin_op::from_word(xobs));
 
-  // Z obs runs along left col of data qubits.
-  std::string zobs(data_coords.size(), 'I');
-  for (size_t i = 0; i < data_coords.size(); i += distance) {
-    zobs[i] = 'Z';
+  // The valid logical pair depends on orientation. For XV and ZH, the X logical
+  // runs along the top row of data qubits and the Z logical along the left
+  // column. For XH and ZV the boundary types are swapped, so the assignment is
+  // exchanged: X logical along the left column, Z logical along the top row.
+  // Picking the wrong pair yields operators that do not commute with the
+  // stabilizers.
+  const bool x_logical_on_top_row =
+      orientation == sc_orientation::XV || orientation == sc_orientation::ZH;
+
+  // Support that runs along the top row of data qubits.
+  std::string top_row_obs(data_coords.size(), 'I');
+  // Support that runs along the left column of data qubits.
+  std::string left_col_obs(data_coords.size(), 'I');
+
+  if (x_logical_on_top_row) {
+    // X obs runs along top row of data qubits.
+    for (size_t i = 0; i < distance; ++i)
+      top_row_obs[i] = 'X';
+    // Z obs runs along left col of data qubits.
+    for (size_t i = 0; i < data_coords.size(); i += distance)
+      left_col_obs[i] = 'Z';
+    spin_op_obs.emplace_back(cudaq::spin_op::from_word(top_row_obs));
+    spin_op_obs.emplace_back(cudaq::spin_op::from_word(left_col_obs));
+  } else {
+    // X obs runs along left col of data qubits.
+    for (size_t i = 0; i < data_coords.size(); i += distance)
+      left_col_obs[i] = 'X';
+    // Z obs runs along top row of data qubits.
+    for (size_t i = 0; i < distance; ++i)
+      top_row_obs[i] = 'Z';
+    spin_op_obs.emplace_back(cudaq::spin_op::from_word(left_col_obs));
+    spin_op_obs.emplace_back(cudaq::spin_op::from_word(top_row_obs));
   }
-  spin_op_obs.emplace_back(cudaq::spin_op::from_word(zobs));
 
   return spin_op_obs;
 }
