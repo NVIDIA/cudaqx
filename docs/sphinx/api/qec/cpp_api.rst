@@ -94,6 +94,41 @@ Parity Check Matrix Utilities
 .. doxygenfunction:: cudaq::qec::simplify_pcm(const cudaqx::tensor<uint8_t> &, const std::vector<double> &, std::uint32_t);
 .. doxygenfunction:: cudaq::qec::sort_pcm_columns(const cudaqx::tensor<uint8_t> &, std::uint32_t);
 
+Logger
+=============
+
+The QEC logger API currently lives in ``cudaq::qec::detail`` and is used by
+the ``CUDA_QEC_*`` macros exposed in ``cudaq/qec/logger.h``.
+
+.. doxygenenum:: cudaq::qec::detail::LogLevel
+.. doxygenenum:: cudaq::qec::detail::ForwardDropPolicy
+
+.. doxygenstruct:: cudaq::qec::detail::ForwardedLogRecord
+    :members:
+
+.. doxygenstruct:: cudaq::qec::detail::ForwarderConfig
+    :members:
+
+.. doxygenstruct:: cudaq::qec::detail::ForwarderStats
+    :members:
+
+.. doxygenfunction:: cudaq::qec::detail::should_log
+.. doxygenfunction:: cudaq::qec::detail::setForwarder(ForwarderConfig)
+.. doxygenfunction:: cudaq::qec::detail::setForwarder()
+.. doxygenfunction:: cudaq::qec::detail::clearForwarder()
+.. doxygenfunction:: cudaq::qec::detail::isForwarderEnabled()
+.. doxygenfunction:: cudaq::qec::detail::getForwarderMessageCapacity()
+.. doxygenfunction:: cudaq::qec::detail::getForwarderStats()
+.. doxygenfunction:: cudaq::qec::detail::setLogLevel
+.. doxygenfunction:: cudaq::qec::detail::getLogLevel
+.. doxygenfunction:: cudaq::qec::detail::flushLogs()
+.. doxygenfunction:: cudaq::qec::detail::trace
+.. doxygenfunction:: cudaq::qec::detail::info
+.. doxygenfunction:: cudaq::qec::detail::debug
+.. doxygenfunction:: cudaq::qec::detail::warn
+.. doxygenfunction:: cudaq::qec::detail::error
+.. doxygenfunction:: cudaq::qec::detail::pathToFileName
+
 Common
 =============
 
