@@ -42,7 +42,7 @@ runs:
     - name: Create CUDAQ wheel cache key
       id: cudaq-wheels-key
       env:
-        # These are the files that, when changed, require a new CUDA-Q wheel build.
+        # This are a list of files that when changed should require a new cudaq build
         to_hash: |
           .github/actions/get-cudaq-wheels/**
           .cudaq_version
@@ -60,9 +60,13 @@ runs:
         fail-on-cache-miss: false
         path: /cudaq-wheels
         key: ${{ steps.cudaq-wheels-key.outputs.main }}
+        restore-keys: ${{ steps.cudaq-wheels-key.outputs.main }}
         lookup-only: ${{ inputs.lookup-only }}
 
-    - name: Check if cache was restored
+    # The restore action could find a partial match using the `restore-keys`. In such cases
+    # it would still report `cache-hit` as false, but would load the cache from the partial
+    # one. Thus, we need to check whether the cache is valid by other means.
+    - name: Check if cache is valid
       id: check-cache
       run: |
         if [[ "${{ steps.restore-cudaq-wheels.outputs.cache-matched-key }}" == "" ]]; then
