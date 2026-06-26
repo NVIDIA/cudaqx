@@ -9,6 +9,7 @@
 #include "trt_test_data.h"
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/trt_decoder_internal.h"
+#include "cudaq/qec/scoped_cuda_device.h"
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -739,3 +740,110 @@ TEST_F(TRTDecoderTest, CompositeGlobalDecoderCombinesLogicalFrame) {
 // require actual TensorRT/CUDA initialization which is not available in the
 // test environment. Only parameter validation and utility function tests are
 // enabled above.
+
+TEST_F(TRTDecoderTest, CudaDeviceId_OutOfRangeThrows) {
+  if (!gpu_available()) GTEST_SKIP() << "No CUDA GPU available";
+  std::string onnx_path = get_onnx_asset_path();
+  if (!std::filesystem::exists(onnx_path))
+    GTEST_SKIP() << "ONNX model not found: " << onnx_path;
+  int count = 0;
+  cudaGetDeviceCount(&count);
+  cudaqx::tensor<uint8_t> H_small({1, 1});
+  cudaqx::heterogeneous_map params;
+  params.insert("onnx_load_path", onnx_path);
+  params.insert("cuda_device_id", count); // one past the last valid device
+  EXPECT_THROW(
+      { cudaq::qec::decoder::get("trt_decoder", H_small, params); },
+      std::runtime_error);
+}
+
+TEST_F(TRTDecoderTest, CudaDeviceId_DecodeAsyncOnGpu1) {
+  if (!gpu_available()) GTEST_SKIP() << "No CUDA GPU available";
+  int count = 0;
+  cudaGetDeviceCount(&count);
+  if (count < 2) GTEST_SKIP() << "needs >= 2 GPUs to prove non-default pinning";
+  std::string onnx_path = get_onnx_asset_path();
+  if (!std::filesystem::exists(onnx_path))
+    GTEST_SKIP() << "ONNX model not found: " << onnx_path;
+
+  cudaSetDevice(0); // calling thread stays on the default device
+
+  std::size_t num_detectors = NUM_DETECTORS;
+  cudaqx::tensor<uint8_t> H_mat({num_detectors, num_detectors});
+  for (std::size_t i = 0; i < num_detectors; ++i)
+    H_mat.at({i, i}) = 1;
+
+  cudaqx::heterogeneous_map params;
+  params.insert("onnx_load_path", onnx_path);
+  params.insert("cuda_device_id", 1); // engine/buffers must land on GPU 1
+
+  std::unique_ptr<cudaq::qec::decoder> d;
+  ASSERT_NO_THROW({ d = cudaq::qec::decoder::get("trt_decoder", H_mat, params); });
+
+  // decode_async spawns a fresh thread (defaults to GPU 0). If trt did NOT
+  // re-assert the device, the decode would run on GPU 0 while the engine lives
+  // on GPU 1 -> error/garbage. A correct result proves the per-decode guard.
+  std::vector<cudaq::qec::float_t> syndrome(TEST_INPUTS[0].begin(),
+                                            TEST_INPUTS[0].end());
+  auto fut = d->decode_async(syndrome);
+  cudaq::qec::decoder_result res;
+  ASSERT_NO_THROW({ res = fut.get(); });
+  ASSERT_FALSE(res.result.empty());
+  float trt_output = res.result[0];
+  float expected_output = TEST_OUTPUTS[0][0];
+  float error = std::abs(trt_output - expected_output);
+  EXPECT_LT(error, 1e-4f)
+      << "GPU-1 decode differs from expected: got " << trt_output
+      << ", expected " << expected_output;
+}
+
+TEST(ScopedCudaDevice, NegativeIsNoop) {
+  if (!gpu_available()) GTEST_SKIP() << "No CUDA GPU available";
+  int before = -1;
+  cudaGetDevice(&before);
+  { cudaq::qec::ScopedCudaDevice guard(-1); }
+  int after = -1;
+  cudaGetDevice(&after);
+  EXPECT_EQ(before, after);
+}
+
+TEST(ScopedCudaDevice, SetsAndRestores) {
+  if (!gpu_available()) GTEST_SKIP() << "No CUDA GPU available";
+  int count = 0;
+  cudaGetDeviceCount(&count);
+  if (count < 2) GTEST_SKIP() << "needs >= 2 GPUs";
+  cudaSetDevice(0);
+  {
+    cudaq::qec::ScopedCudaDevice guard(1);
+    int cur = -1;
+    cudaGetDevice(&cur);
+    EXPECT_EQ(cur, 1);
+  }
+  int restored = -1;
+  cudaGetDevice(&restored);
+  EXPECT_EQ(restored, 0);
+}
+
+TEST(ScopedCudaDevice, AllocLandsOnTarget) {
+  if (!gpu_available()) GTEST_SKIP() << "No CUDA GPU available";
+  int count = 0;
+  cudaGetDeviceCount(&count);
+  if (count < 2) GTEST_SKIP() << "needs >= 2 GPUs";
+  cudaSetDevice(0);
+  void *p = nullptr;
+  {
+    cudaq::qec::ScopedCudaDevice guard(1);
+    ASSERT_EQ(cudaMalloc(&p, 1024), cudaSuccess);
+  }
+  cudaPointerAttributes attr{};
+  ASSERT_EQ(cudaPointerGetAttributes(&attr, p), cudaSuccess);
+  EXPECT_EQ(attr.device, 1);
+  cudaFree(p);
+}
+
+TEST(ScopedCudaDevice, OutOfRangeThrows) {
+  if (!gpu_available()) GTEST_SKIP() << "No CUDA GPU available";
+  int count = 0;
+  cudaGetDeviceCount(&count);
+  EXPECT_THROW({ cudaq::qec::ScopedCudaDevice guard(count); }, std::runtime_error);
+}

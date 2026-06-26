@@ -226,6 +226,16 @@ TEST(SampleDecoder, RealtimeApiAndDefaultGraphHooks) {
   EXPECT_FALSE(decoder->enqueue_syndrome(msyn.data(), msyn.size() + 1));
 }
 
+TEST(SampleDecoder, AcceptsNumaNodeId) {
+  std::size_t block_size = 10, syndrome_size = 5;
+  cudaqx::tensor<uint8_t> H({syndrome_size, block_size});
+  auto H_sparse = cudaq::qec::sparse_binary_matrix(H);
+  cudaqx::heterogeneous_map params;
+  params.insert("numa_node_id", 0); // node 0 always exists
+  auto d = cudaq::qec::decoder::get("sample_decoder", H_sparse, params);
+  ASSERT_NE(d, nullptr);
+}
+
 TEST(DecoderPlugins, SingleErrorLutExample_DecodesSingletonColumnSyndromes) {
   using cudaq::qec::float_t;
 
@@ -951,6 +961,16 @@ TEST(StimDemGetDecoder, DemWithoutObservablesDoesNotAddODefault) {
 TEST(StimDemGetDecoder, ThrowsOnProbabilityOutOfRange) {
   const std::string dem_text = "error(1.5) D0\n";
   EXPECT_THROW(cudaq::qec::get_decoder("single_error_lut", dem_text),
+               std::runtime_error);
+}
+
+TEST(CudaDeviceId, OutOfRangeThrowsForAnyDecoder) {
+  // A device id beyond the available devices is rejected during construction
+  // for any decoder, including CPU ones.
+  cudaqx::tensor<uint8_t> H({2, 3});
+  cudaqx::heterogeneous_map params;
+  params.insert("cuda_device_id", 999999);
+  EXPECT_THROW(cudaq::qec::decoder::get("multi_error_lut", H, params),
                std::runtime_error);
 }
 

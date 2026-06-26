@@ -9,7 +9,9 @@
 #include "cudaq/qec/decoder.h"
 #include "common/FmtCore.h"
 #include "cuda-qx/core/library_utils.h"
+#include "cudaq/qec/device_affinity.h"
 #include "cudaq/qec/plugin_loader.h"
+#include "cudaq/qec/scoped_cuda_device.h"
 #include "cudaq/qec/version.h"
 #include "cudaq/runtime/logger/logger.h"
 #include <cassert>
@@ -138,6 +140,8 @@ decoder::get(const std::string &name, const decoder_init &init,
         "invalid decoder requested: " + name +
         ". Run with CUDAQ_LOG_LEVEL=info (environment variable) to see "
         "additional plugin diagnostics at startup.");
+  ScopedCudaDevice device_guard(read_cuda_device_id(param_map));
+  ScopedNumaNode numa_guard(read_numa_node_id(param_map));
   return iter->second(init, param_map);
 }
 

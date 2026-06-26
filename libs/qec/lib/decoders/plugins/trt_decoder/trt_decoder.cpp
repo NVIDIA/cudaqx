@@ -7,7 +7,9 @@
  ******************************************************************************/
 
 #include "cudaq/qec/decoder.h"
+#include "cudaq/qec/device_affinity.h"
 #include "cudaq/qec/trt_decoder_internal.h"
+#include "cudaq/qec/scoped_cuda_device.h"
 #include "cudaq/runtime/logger/logger.h"
 #include <algorithm>
 #include <cassert>
@@ -401,6 +403,9 @@ private:
   // True when decoder is fully configured and ready for inference
   bool decoder_ready_ = false;
 
+  // Target CUDA device for this decoder's resources/decodes. -1 = current.
+  int cuda_device_id_ = -1;
+
   // Batch dimension from TensorRT model (first dimension of input tensor)
   size_t model_batch_size_ = 1;
 
@@ -543,6 +548,8 @@ trt_decoder::trt_decoder(const cudaq::qec::sparse_binary_matrix &H,
     : decoder(H), decoder_ready_(false) {
 
   impl_ = std::make_unique<Impl>();
+
+  cuda_device_id_ = cudaq::qec::read_cuda_device_id(params);
 
   try {
     // Validate parameters
@@ -928,6 +935,9 @@ size_t trt_decoder::failure_result_size() const {
 template <typename IoType>
 std::vector<decoder_result> trt_decoder::decode_batch_impl(
     const std::vector<std::vector<float_t>> &syndromes) const {
+  // All decode entry points (decode, decode_batch, decode_async) funnel here,
+  // so the device is re-asserted for inference regardless of the calling thread.
+  cudaq::qec::ScopedCudaDevice device_guard(cuda_device_id_);
   std::vector<decoder_result> results;
   results.reserve(syndromes.size());
 
