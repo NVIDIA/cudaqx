@@ -35,14 +35,23 @@ struct QueuedLogRecord {
   std::size_t messageLen = 0;
 };
 
+/// @brief Install/replace forwarder configuration and start worker.
 void set(ForwarderConfig config);
+/// @brief Disable forwarding and stop worker thread.
 void clear();
+/// @brief Return true when forwarding is active.
 bool isEnabled();
+/// @brief Reset forwarding counters for a fresh configuration epoch.
 void resetStats();
+/// @brief Return current forwarding counters.
 ForwarderStats stats();
+/// @brief Block until queue drains (or forwarding is disabled).
 void flush();
+/// @brief Enqueue one fixed-size record on producer path.
 void enqueue(QueuedLogRecord record);
+/// @brief Return active producer-side forwarded message capacity.
 std::size_t messageCapacity();
+/// @brief Increment truncation counter (format/packing helper hook).
 void noteTruncation();
 
 } // namespace cudaq::qec::detail::forwarder_internal

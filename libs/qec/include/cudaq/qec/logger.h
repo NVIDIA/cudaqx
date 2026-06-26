@@ -27,7 +27,9 @@
 /// Declares log levels, forwarding configuration, and lightweight templated
 /// formatting helpers used by logging macros (`CUDA_QEC_INFO`, `CUDA_QEC_WARN`,
 /// `CUDA_QEC_ERROR`, `CUDA_QEC_DBG`) and direct
-/// `cudaq::qec::info/warn/error/debug` calls.
+/// `cudaq::qec::info/warn/error/debug` calls. When forwarding is enabled, the
+/// producer path uses bounded fixed-size buffers, supports configurable message
+/// capacity, and tracks truncation and drop statistics.
 
 namespace cudaq::qec {
 
@@ -37,8 +39,11 @@ namespace detail {
 // in logger.cpp.
 /// @brief Severity levels supported by the QEC logger.
 enum class LogLevel { trace, debug, info, warn, error };
+/// @brief Default forwarded message payload capacity in bytes.
 inline constexpr std::size_t kRealtimeForwarderDefaultMessageCapacity = 512;
+/// @brief Upper bound for forwarded message payload capacity in bytes.
 inline constexpr std::size_t kRealtimeForwarderMaxMessageCapacity = 4096;
+/// @brief Suffix appended to forwarded messages when truncation occurs.
 inline constexpr std::string_view kRealtimeTruncationSuffix = " ...[truncated]";
 
 /// @brief Log payload forwarded to an optional background callback.
@@ -56,17 +61,26 @@ enum class ForwardDropPolicy { dropNewest, dropOldest };
 
 /// @brief Runtime configuration for asynchronous forwarding.
 struct ForwarderConfig {
+  /// @brief Callback executed on the forwarder worker thread.
   std::function<void(const ForwardedLogRecord &)> callback;
+  /// @brief Bounded queue capacity (records), clamped to at least 1.
   std::size_t queueCapacity = 1024;
+  /// @brief Max forwarded message bytes copied on producer path.
+  /// @details Values are clamped to [1, kRealtimeForwarderMaxMessageCapacity].
   std::size_t messageCapacity = kRealtimeForwarderDefaultMessageCapacity;
+  /// @brief Overflow policy when the forwarder queue is saturated.
   ForwardDropPolicy dropPolicy = ForwardDropPolicy::dropNewest;
 };
 
 /// @brief Runtime counters for asynchronous forwarding behavior.
 struct ForwarderStats {
+  /// @brief Records successfully enqueued to the forwarder queue.
   std::uint64_t enqueuedRecords = 0;
+  /// @brief Records dropped due to queue saturation/overflow policy.
   std::uint64_t droppedRecords = 0;
+  /// @brief Records whose message payload was truncated to fit capacity.
   std::uint64_t truncatedRecords = 0;
+  /// @brief Callback invocations that threw exceptions.
   std::uint64_t forwardFailures = 0;
 };
 
@@ -84,7 +98,8 @@ bool isForwarderEnabled();
 std::size_t getForwarderMessageCapacity();
 /// @brief Return a snapshot of forwarding counters.
 ForwarderStats getForwarderStats();
-/// @brief Record that a forwarded message was truncated at format time.
+/// @brief Internal helper to record forwarder truncation events.
+/// @details Primarily used by templated formatting helpers.
 void recordForwarderMessageTruncation();
 /// @brief Emit a preformatted trace message.
 void trace(const std::string_view msg);
@@ -132,6 +147,8 @@ std::string formatMessage(const std::string_view message, Args &&...args) {
 }
 
 /// @brief Format and emit a message for the provided log level.
+/// @details If the forwarder is enabled, this path uses bounded formatting into
+/// fixed storage and may truncate with `kRealtimeTruncationSuffix`.
 template <typename... Args>
 void logMessage(LogLevel logLevel, const std::string_view message,
                 const char *fileName, int lineNo, Args &&...args) {
@@ -193,8 +210,8 @@ void debug(const std::string_view, Args &&...) {}
 #endif
 
 /// @brief Log a message with timestamp.
-// Note 1: This will always log the message regardless of the logging level.
-// Note 2: File and line info is not included in the log line.
+/// @details This helper always emits regardless of log level.
+/// File and line metadata are still attached by the backend emit path.
 template <typename... Args>
 void log(const std::string_view message, Args &&...args) {
   if (detail::isForwarderEnabled()) {
