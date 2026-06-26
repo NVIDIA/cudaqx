@@ -14,6 +14,7 @@
 #include "realtime_decoding.h"
 #include "cudaq/qec/realtime/decoding_config.h"
 #include "cudaq/runtime/logger/logger.h"
+#include <any>
 #include <filesystem>
 #include <fstream>
 #include <type_traits>
@@ -192,27 +193,114 @@ single_error_lut_config single_error_lut_config::from_heterogeneous_map(
 
 cudaqx::heterogeneous_map global_decoder_config_to_heterogeneous_map(
     const global_decoder_config &global_decoder_params) {
-  if (std::holds_alternative<std::monostate>(global_decoder_params)) {
-    return cudaqx::heterogeneous_map();
-  }
-
-  if (std::holds_alternative<pymatching_config>(global_decoder_params)) {
-    return std::get<pymatching_config>(global_decoder_params)
-        .to_heterogeneous_map();
-  }
-
-  throw std::runtime_error("Unsupported global decoder parameters.");
+  return std::visit(
+      [](const auto &params) -> cudaqx::heterogeneous_map {
+        using config_t = std::decay_t<decltype(params)>;
+        if constexpr (std::is_same_v<config_t, std::monostate>) {
+          return cudaqx::heterogeneous_map();
+        } else {
+          return params.to_heterogeneous_map();
+        }
+      },
+      global_decoder_params);
 }
 
 global_decoder_config global_decoder_config_from_heterogeneous_map(
     const cudaqx::heterogeneous_map &map,
     const std::optional<std::string> &global_decoder) {
-  if (global_decoder.has_value() && global_decoder.value() != "pymatching") {
+  if (!global_decoder.has_value()) {
     throw std::runtime_error(
-        "global_decoder_params currently supports only pymatching.");
+        "global_decoder_params present but global_decoder is not set.");
   }
 
-  return pymatching_config::from_heterogeneous_map(map);
+  if (global_decoder.value() == "pymatching") {
+    return pymatching_config::from_heterogeneous_map(map);
+  }
+
+  if (global_decoder.value() == "chromobius") {
+    return chromobius_config::from_heterogeneous_map(map);
+  }
+
+  throw std::runtime_error(
+      "global_decoder_params does not support global_decoder '" +
+      global_decoder.value() + "'.");
+}
+
+global_decoder_config default_global_decoder_params(
+    const std::optional<std::string> &global_decoder) {
+  if (!global_decoder.has_value())
+    return std::monostate{};
+
+  if (global_decoder.value() == "pymatching")
+    return pymatching_config{};
+
+  if (global_decoder.value() == "chromobius")
+    return chromobius_config{};
+
+  return std::monostate{};
+}
+
+void validate_global_decoder_params(
+    const global_decoder_config &global_decoder_params,
+    const std::optional<std::string> &global_decoder);
+
+global_decoder_config global_decoder_config_from_value(
+    const std::any &val, const std::optional<std::string> &global_decoder) {
+  if (!global_decoder.has_value()) {
+    throw std::runtime_error(
+        "global_decoder_params present but global_decoder is not set.");
+  }
+
+  if (auto *global_cfg = std::any_cast<global_decoder_config>(&val)) {
+    validate_global_decoder_params(*global_cfg, global_decoder);
+    return *global_cfg;
+  }
+
+  if (auto *nested_map = std::any_cast<cudaqx::heterogeneous_map>(&val)) {
+    return global_decoder_config_from_heterogeneous_map(*nested_map,
+                                                        global_decoder);
+  }
+
+  global_decoder_config parsed_params;
+  if (auto *pymatching_cfg = std::any_cast<pymatching_config>(&val)) {
+    parsed_params = *pymatching_cfg;
+  } else if (auto *chromobius_cfg = std::any_cast<chromobius_config>(&val)) {
+    parsed_params = *chromobius_cfg;
+  } else {
+    throw std::runtime_error(
+        "global_decoder_params has an unsupported value type for "
+        "global_decoder '" +
+        global_decoder.value() + "'.");
+  }
+
+  validate_global_decoder_params(parsed_params, global_decoder);
+  return parsed_params;
+}
+
+void validate_global_decoder_params(
+    const global_decoder_config &global_decoder_params,
+    const std::optional<std::string> &global_decoder) {
+  if (std::holds_alternative<std::monostate>(global_decoder_params))
+    return;
+
+  if (!global_decoder.has_value()) {
+    throw std::runtime_error(
+        "global_decoder_params present but global_decoder is not set.");
+  }
+
+  if (global_decoder.value() == "pymatching" &&
+      std::holds_alternative<pymatching_config>(global_decoder_params)) {
+    return;
+  }
+
+  if (global_decoder.value() == "chromobius" &&
+      std::holds_alternative<chromobius_config>(global_decoder_params)) {
+    return;
+  }
+
+  throw std::runtime_error(
+      "global_decoder_params type does not match global_decoder '" +
+      global_decoder.value() + "'.");
 }
 
 // ------ pymatching_config ------
@@ -233,6 +321,30 @@ pymatching_config pymatching_config::from_heterogeneous_map(
   return config;
 }
 
+// ------ chromobius_config ------
+cudaqx::heterogeneous_map chromobius_config::to_heterogeneous_map() const {
+  cudaqx::heterogeneous_map config_map;
+
+  INSERT_ARG(drop_mobius_errors_involving_remnant_errors);
+  INSERT_ARG(ignore_decomposition_failures);
+  INSERT_ARG(include_coords_in_mobius_dem);
+  INSERT_ARG(return_weight);
+  INSERT_ARG(write_mobius_match_to_stderr);
+
+  return config_map;
+}
+
+chromobius_config chromobius_config::from_heterogeneous_map(
+    const cudaqx::heterogeneous_map &map) {
+  chromobius_config config;
+  GET_ARG(drop_mobius_errors_involving_remnant_errors);
+  GET_ARG(ignore_decomposition_failures);
+  GET_ARG(include_coords_in_mobius_dem);
+  GET_ARG(return_weight);
+  GET_ARG(write_mobius_match_to_stderr);
+  return config;
+}
+
 // ------ trt_decoder_config ------
 cudaqx::heterogeneous_map trt_decoder_config::to_heterogeneous_map() const {
   cudaqx::heterogeneous_map config_map;
@@ -245,24 +357,18 @@ cudaqx::heterogeneous_map trt_decoder_config::to_heterogeneous_map() const {
   INSERT_ARG(batch_size);
   INSERT_ARG(use_cuda_graph);
   INSERT_ARG(global_decoder);
-  if (!std::holds_alternative<std::monostate>(global_decoder_params)) {
-    if (!global_decoder.has_value()) {
-      throw std::runtime_error(
-          "global_decoder_params present but global_decoder is not set.");
-    }
-    if (global_decoder.value() != "pymatching") {
-      throw std::runtime_error(
-          "global_decoder_params currently supports only pymatching.");
-    }
-    config_map.insert(
-        "global_decoder_params",
-        global_decoder_config_to_heterogeneous_map(global_decoder_params));
+  auto effective_global_decoder_params = global_decoder_params;
+  if (std::holds_alternative<std::monostate>(effective_global_decoder_params))
+    effective_global_decoder_params =
+        default_global_decoder_params(global_decoder);
+  if (!std::holds_alternative<std::monostate>(
+          effective_global_decoder_params)) {
+    validate_global_decoder_params(effective_global_decoder_params,
+                                   global_decoder);
+    config_map.insert("global_decoder_params",
+                      global_decoder_config_to_heterogeneous_map(
+                          effective_global_decoder_params));
   }
-  // Note: when global_decoder_params is monostate we intentionally emit
-  // nothing, even if global_decoder is set. Inventing an empty params map here
-  // would round-trip back as a default pymatching_config, mutating the config.
-  // Any runtime need for an empty params map is handled in
-  // prepare_decoder_params (realtime_decoding.cpp), not in serialization.
 
   return config_map;
 }
@@ -279,27 +385,16 @@ trt_decoder_config trt_decoder_config::from_heterogeneous_map(
   GET_ARG(use_cuda_graph);
   GET_ARG(global_decoder);
   if (map.contains("global_decoder_params")) {
-    if (!config.global_decoder.has_value())
-      throw std::runtime_error(
-          "global_decoder_params present but global_decoder is not set.");
-    if (config.global_decoder.value() != "pymatching")
-      throw std::runtime_error(
-          "global_decoder_params currently supports only pymatching.");
-    try {
-      config.global_decoder_params =
-          map.get<global_decoder_config>("global_decoder_params");
-    } catch (...) {
-      try {
+    for (const auto &[key, val] : map) {
+      if (key == "global_decoder_params") {
         config.global_decoder_params =
-            map.get<pymatching_config>("global_decoder_params");
-      } catch (...) {
-        auto nested_map =
-            map.get<cudaqx::heterogeneous_map>("global_decoder_params");
-        config.global_decoder_params =
-            global_decoder_config_from_heterogeneous_map(nested_map,
-                                                         config.global_decoder);
+            global_decoder_config_from_value(val, config.global_decoder);
+        break;
       }
     }
+  } else {
+    config.global_decoder_params =
+        default_global_decoder_params(config.global_decoder);
   }
 
   return config;
@@ -446,16 +541,32 @@ struct MappingTraits<cudaq::qec::decoding::config::global_decoder_config> {
         return;
       }
 
-      auto &params = std::get<pymatching_config>(config);
-      io.mapOptional("merge_strategy", params.merge_strategy);
-      io.mapOptional("error_rate_vec", params.error_rate_vec);
+      if (std::holds_alternative<pymatching_config>(config)) {
+        auto &params = std::get<pymatching_config>(config);
+        io.mapOptional("merge_strategy", params.merge_strategy);
+        io.mapOptional("error_rate_vec", params.error_rate_vec);
+        return;
+      }
+
+      auto &params = std::get<chromobius_config>(config);
+      io.mapOptional("drop_mobius_errors_involving_remnant_errors",
+                     params.drop_mobius_errors_involving_remnant_errors);
+      io.mapOptional("ignore_decomposition_failures",
+                     params.ignore_decomposition_failures);
+      io.mapOptional("include_coords_in_mobius_dem",
+                     params.include_coords_in_mobius_dem);
+      io.mapOptional("return_weight", params.return_weight);
+      io.mapOptional("write_mobius_match_to_stderr",
+                     params.write_mobius_match_to_stderr);
       return;
     }
 
-    pymatching_config params;
-    io.mapOptional("merge_strategy", params.merge_strategy);
-    io.mapOptional("error_rate_vec", params.error_rate_vec);
-    config = std::move(params);
+    // Input cannot be decoded safely here because the variant type depends on
+    // the parent trt_decoder_config.global_decoder value. The TRT mapping
+    // below dispatches with that context.
+    throw std::runtime_error(
+        "global_decoder_config YAML input requires trt_decoder_config "
+        "global_decoder context.");
   }
 };
 
@@ -465,6 +576,22 @@ struct MappingTraits<cudaq::qec::decoding::config::pymatching_config> {
                       cudaq::qec::decoding::config::pymatching_config &config) {
     io.mapOptional("error_rate_vec", config.error_rate_vec);
     io.mapOptional("merge_strategy", config.merge_strategy);
+  }
+};
+
+template <>
+struct MappingTraits<cudaq::qec::decoding::config::chromobius_config> {
+  static void mapping(IO &io,
+                      cudaq::qec::decoding::config::chromobius_config &config) {
+    io.mapOptional("drop_mobius_errors_involving_remnant_errors",
+                   config.drop_mobius_errors_involving_remnant_errors);
+    io.mapOptional("ignore_decomposition_failures",
+                   config.ignore_decomposition_failures);
+    io.mapOptional("include_coords_in_mobius_dem",
+                   config.include_coords_in_mobius_dem);
+    io.mapOptional("return_weight", config.return_weight);
+    io.mapOptional("write_mobius_match_to_stderr",
+                   config.write_mobius_match_to_stderr);
   }
 };
 
@@ -480,22 +607,70 @@ struct MappingTraits<cudaq::qec::decoding::config::trt_decoder_config> {
     io.mapOptional("batch_size", config.batch_size);
     io.mapOptional("use_cuda_graph", config.use_cuda_graph);
     io.mapOptional("global_decoder", config.global_decoder);
-    // Emit global_decoder_params only when it actually holds params. Mapping it
-    // unconditionally on output writes an empty `global_decoder_params: {}` for
-    // the monostate case, which deserializes back into a default
-    // pymatching_config -- mutating a monostate config across a YAML
-    // round-trip. On input we always map it: an absent key leaves the variant
-    // at its monostate default (mapOptional skips the nested mapping), and a
-    // present key is parsed into pymatching_config.
-    if (!io.outputting() ||
-        !std::holds_alternative<std::monostate>(config.global_decoder_params))
-      io.mapOptional("global_decoder_params", config.global_decoder_params);
 
-    if (!std::holds_alternative<std::monostate>(config.global_decoder_params) &&
-        config.global_decoder.has_value() &&
-        config.global_decoder.value() != "pymatching") {
-      throw std::runtime_error(
-          "global_decoder_params currently supports only pymatching.");
+    if (io.outputting()) {
+      auto global_decoder_params = config.global_decoder_params;
+      if (std::holds_alternative<std::monostate>(global_decoder_params)) {
+        global_decoder_params =
+            cudaq::qec::decoding::config::default_global_decoder_params(
+                config.global_decoder);
+      }
+      if (std::holds_alternative<std::monostate>(global_decoder_params)) {
+        return;
+      }
+
+      cudaq::qec::decoding::config::validate_global_decoder_params(
+          global_decoder_params, config.global_decoder);
+      if (config.global_decoder.value() == "pymatching") {
+        io.mapOptional(
+            "global_decoder_params",
+            std::get<cudaq::qec::decoding::config::pymatching_config>(
+                global_decoder_params));
+      } else if (config.global_decoder.value() == "chromobius") {
+        io.mapOptional(
+            "global_decoder_params",
+            std::get<cudaq::qec::decoding::config::chromobius_config>(
+                global_decoder_params));
+      }
+      return;
+    }
+
+    if (config.global_decoder.has_value() &&
+        config.global_decoder.value() == "pymatching") {
+      std::optional<cudaq::qec::decoding::config::pymatching_config> params;
+      io.mapOptional("global_decoder_params", params);
+      if (params.has_value())
+        config.global_decoder_params = std::move(params.value());
+      else
+        config.global_decoder_params =
+            cudaq::qec::decoding::config::default_global_decoder_params(
+                config.global_decoder);
+    } else if (config.global_decoder.has_value() &&
+               config.global_decoder.value() == "chromobius") {
+      std::optional<cudaq::qec::decoding::config::chromobius_config> params;
+      io.mapOptional("global_decoder_params", params);
+      if (params.has_value())
+        config.global_decoder_params = std::move(params.value());
+      else
+        config.global_decoder_params =
+            cudaq::qec::decoding::config::default_global_decoder_params(
+                config.global_decoder);
+    } else {
+      // Use a throwaway value only to detect whether the key was present. Do
+      // not assign it to config.global_decoder_params: without a supported
+      // global_decoder name, there is no safe variant type to parse into.
+      std::optional<cudaq::qec::decoding::config::pymatching_config> params;
+      io.mapOptional("global_decoder_params", params);
+      if (params.has_value()) {
+        if (config.global_decoder.has_value()) {
+          throw std::runtime_error(
+              "global_decoder_params does not support global_decoder '" +
+              config.global_decoder.value() + "'.");
+        } else {
+          throw std::runtime_error(
+              "global_decoder_params present but global_decoder is not set.");
+        }
+      }
     }
   }
 };

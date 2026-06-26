@@ -441,6 +441,10 @@ public:
 private:
   void check_cuda();
 
+  /// Size to use for failed placeholder results. This preserves the
+  /// decode_batch contract even when inference fails before producing output.
+  size_t failure_result_size() const;
+
   /// Typed decode_batch: IoType matches the engine's I/O dtype
   /// (currently float or uint8_t).
   template <typename IoType>
@@ -859,6 +863,12 @@ decoder_result trt_decoder::decode(const std::vector<float_t> &syndrome) {
     }
 
     auto results = decode_batch(padded_batch);
+    if (results.empty()) {
+      decoder_result result;
+      result.converged = false;
+      result.result.resize(failure_result_size(), 0.0f);
+      return result;
+    }
 
     // Return only the first result (the real syndrome)
     return results[0];
@@ -866,6 +876,12 @@ decoder_result trt_decoder::decode(const std::vector<float_t> &syndrome) {
 
   // For batch_size == 1, directly delegate to decode_batch
   auto results = decode_batch({syndrome});
+  if (results.empty()) {
+    decoder_result result;
+    result.converged = false;
+    result.result.resize(failure_result_size(), 0.0f);
+    return result;
+  }
   return results[0];
 }
 
@@ -907,6 +923,14 @@ trt_decoder::decode_batch(const std::vector<std::vector<float_t>> &syndromes) {
   if (impl_->input_dtype == nvinfer1::DataType::kUINT8)
     return decode_batch_impl<uint8_t>(syndromes);
   return decode_batch_impl<float>(syndromes);
+}
+
+size_t trt_decoder::failure_result_size() const {
+  if (decode_to_observables_)
+    return num_observables_;
+  if (global_decoder_)
+    return global_decoder_->get_block_size();
+  return output_size_per_sample_;
 }
 
 template <typename IoType>
@@ -1056,6 +1080,12 @@ std::vector<decoder_result> trt_decoder::decode_batch_impl(
     // Mark all results as unconverged
     for (auto &result : results) {
       result.converged = false;
+    }
+    while (results.size() < syndromes.size()) {
+      decoder_result result;
+      result.converged = false;
+      result.result.resize(failure_result_size(), 0.0f);
+      results.push_back(std::move(result));
     }
   }
 
