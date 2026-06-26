@@ -251,14 +251,12 @@ TEST(Logger, ForwarderTruncationIsCountedAndAnnotated) {
   cudaq::qec::detail::setLogLevel(cudaq::qec::detail::LogLevel::info);
 
   std::mutex mutex;
-  std::condition_variable cv;
   std::vector<cudaq::qec::detail::ForwardedLogRecord> records;
   cudaq::qec::detail::setForwarder(cudaq::qec::detail::ForwarderConfig{
       .callback =
           [&](const cudaq::qec::detail::ForwardedLogRecord &record) {
             std::lock_guard<std::mutex> lock(mutex);
             records.push_back(record);
-            cv.notify_all();
           },
       .queueCapacity = 64,
       .messageCapacity = 32,
@@ -268,8 +266,8 @@ TEST(Logger, ForwarderTruncationIsCountedAndAnnotated) {
   CUDA_QEC_INFO("0123456789abcdefghijklmnopqrstuvwxyz");
   cudaq::qec::detail::flushLogs();
 
-  std::unique_lock<std::mutex> lock(mutex);
-  ASSERT_TRUE(cv.wait_for(lock, 2s, [&] { return records.size() == 1; }));
+  std::lock_guard<std::mutex> lock(mutex);
+  ASSERT_EQ(records.size(), 1u);
   EXPECT_EQ(records.front().message.size(), 32u);
   EXPECT_NE(records.front().message.find("[truncated]"), std::string::npos);
 

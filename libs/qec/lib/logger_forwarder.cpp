@@ -108,7 +108,11 @@ public:
 
   void flush() {
     std::unique_lock<std::mutex> lock(mWaitMutex);
-    mCv.wait(lock, [&] { return isQueueEmpty() || !mEnabled.load(); });
+    mCv.wait(lock, [&] {
+      return ((!mEnabled.load()) ||
+              (isQueueEmpty() &&
+               mInFlightCallbacks.load(std::memory_order_acquire) == 0));
+    });
   }
 
   void enqueue(QueuedLogRecord record) {
@@ -244,8 +248,14 @@ private:
   void runWorker() {
     while (true) {
       emitDropWarningIfPending();
+      // Mark callback slot in-flight before dequeue attempt so flush() cannot
+      // observe (queue empty && inFlight == 0) in the tiny window between a
+      // successful dequeue and callback start.
+      mInFlightCallbacks.fetch_add(1, std::memory_order_acq_rel);
       QueuedLogRecord queuedRecord;
       if (!tryDequeueOne(queuedRecord)) {
+        mInFlightCallbacks.fetch_sub(1, std::memory_order_acq_rel);
+        mCv.notify_all();
         std::unique_lock<std::mutex> lock(mWaitMutex);
         mCv.wait(lock, [&] {
           return mStop.load(std::memory_order_acquire) || !isQueueEmpty();
@@ -271,6 +281,7 @@ private:
       } catch (...) {
         mForwardFailures.fetch_add(1, std::memory_order_relaxed);
       }
+      mInFlightCallbacks.fetch_sub(1, std::memory_order_acq_rel);
 
       emitDropWarningIfPending();
       mCv.notify_all();
@@ -292,6 +303,7 @@ private:
   std::atomic<std::uint64_t> mDroppedRecords{0};
   std::atomic<std::uint64_t> mTruncatedRecords{0};
   std::atomic<std::uint64_t> mForwardFailures{0};
+  std::atomic<std::uint64_t> mInFlightCallbacks{0};
   std::atomic<std::uint64_t> mActiveProducers{0};
   std::atomic<bool> mDropWarningPending{false};
   std::atomic<bool> mDropWarningEmitted{false};
