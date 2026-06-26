@@ -198,15 +198,18 @@ cudaqx::heterogeneous_map prepare_decoder_params(
         "(one syndrome is decoded per call); the extra batch slots are "
         "zero-padded and discarded. Use batch_size = 1 for realtime.");
 
-  // The trt_decoder plugin attaches a pymatching global decoder only when both
-  // "global_decoder" and "global_decoder_params" are present. Serialization no
-  // longer emits an empty params map for the monostate (no-params) case, so
-  // synthesize one here -- before the O_sparse early return -- so that a global
-  // decoder running on residual detectors without an O matrix still attaches.
-  const bool has_pymatching_global =
+  // The trt_decoder plugin attaches a global decoder only when both
+  // "global_decoder" and "global_decoder_params" are present. Most config
+  // paths materialize defaults for known global decoders, but callers can still
+  // provide a hand-built map with only "global_decoder"; synthesize params here
+  // before the O_sparse early return so that decoder still attaches.
+  const bool has_global_decoder =
       params.contains("global_decoder") &&
+      !params.get<std::string>("global_decoder").empty();
+  const bool has_pymatching_global =
+      has_global_decoder &&
       params.get<std::string>("global_decoder") == "pymatching";
-  if (has_pymatching_global && !params.contains("global_decoder_params"))
+  if (has_global_decoder && !params.contains("global_decoder_params"))
     params.insert("global_decoder_params", cudaqx::heterogeneous_map());
 
   if (decoder_config.O_sparse.empty())
@@ -221,6 +224,9 @@ cudaqx::heterogeneous_map prepare_decoder_params(
       decoder_config.O_sparse, num_observables, decoder_config.block_size);
   params.insert("O", O);
 
+  // PyMatching consumes the observable matrix through its params; other global
+  // decoders receive only the top-level O until they define a matching
+  // contract.
   if (has_pymatching_global) {
     auto global_decoder_params =
         params.get<cudaqx::heterogeneous_map>("global_decoder_params");

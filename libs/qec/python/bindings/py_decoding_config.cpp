@@ -140,21 +140,33 @@ void bindDecodingConfig(nb::module_ &mod) {
               setter_accepts_none)
       .def_prop_rw(
           "global_decoder_params",
-          [](const trt_decoder_config &self)
-              -> std::optional<pymatching_config> {
+          [](const trt_decoder_config &self) -> nb::object {
             if (std::holds_alternative<pymatching_config>(
                     self.global_decoder_params)) {
-              return std::get<pymatching_config>(self.global_decoder_params);
+              return nb::cast(
+                  std::get<pymatching_config>(self.global_decoder_params));
             }
-            return std::nullopt;
+            if (std::holds_alternative<chromobius_config>(
+                    self.global_decoder_params)) {
+              return nb::cast(
+                  std::get<chromobius_config>(self.global_decoder_params));
+            }
+            return nb::none();
           },
-          [](trt_decoder_config &self, std::optional<pymatching_config> value) {
-            if (value.has_value()) {
-              self.global_decoder_params = value.value();
-            } else {
+          [](trt_decoder_config &self, nb::object value) {
+            if (value.is_none()) {
               self.global_decoder_params = std::monostate();
+            } else if (nb::isinstance<pymatching_config>(value)) {
+              self.global_decoder_params = nb::cast<pymatching_config>(value);
+            } else if (nb::isinstance<chromobius_config>(value)) {
+              self.global_decoder_params = nb::cast<chromobius_config>(value);
+            } else {
+              throw nb::type_error(
+                  "global_decoder_params must be pymatching_config, "
+                  "chromobius_config, or None.");
             }
-          })
+          },
+          setter_accepts_none)
       .def("to_heterogeneous_map", &trt_decoder_config::to_heterogeneous_map,
            nb::rv_policy::move)
       .def_static("from_heterogeneous_map",
@@ -178,6 +190,37 @@ void bindDecodingConfig(nb::module_ &mod) {
            nb::rv_policy::move)
       .def_static("from_heterogeneous_map",
                   &pymatching_config::from_heterogeneous_map, nb::arg("map"));
+
+  // chromobius_config
+  nb::class_<config::chromobius_config>(mod_cfg, "chromobius_config",
+                                        "Chromobius decoder configuration.")
+      .def(nb::init<>())
+      .def(
+          "__init__",
+          [](config::chromobius_config &self,
+             const cudaqx::heterogeneous_map &map) {
+            new (&self) chromobius_config(
+                chromobius_config::from_heterogeneous_map(map));
+          },
+          nb::arg("map"))
+      .def_rw("drop_mobius_errors_involving_remnant_errors",
+              &chromobius_config::drop_mobius_errors_involving_remnant_errors,
+              setter_accepts_none)
+      .def_rw("ignore_decomposition_failures",
+              &chromobius_config::ignore_decomposition_failures,
+              setter_accepts_none)
+      .def_rw("include_coords_in_mobius_dem",
+              &chromobius_config::include_coords_in_mobius_dem,
+              setter_accepts_none)
+      .def_rw("return_weight", &chromobius_config::return_weight,
+              setter_accepts_none)
+      .def_rw("write_mobius_match_to_stderr",
+              &chromobius_config::write_mobius_match_to_stderr,
+              setter_accepts_none)
+      .def("to_heterogeneous_map", &chromobius_config::to_heterogeneous_map,
+           nb::rv_policy::move)
+      .def_static("from_heterogeneous_map",
+                  &chromobius_config::from_heterogeneous_map, nb::arg("map"));
 
   // single_error_lut_config
   nb::class_<config::single_error_lut_config>(
