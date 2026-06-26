@@ -442,29 +442,37 @@ def test_pymatching_config_yaml_roundtrip():
     assert pm2.merge_strategy == "smallest_weight"
 
 
-def test_chromobius_config_yaml_roundtrip():
+def test_trt_decoder_chromobius_global_config_yaml_roundtrip():
     chromobius = qec.chromobius_config()
     chromobius.ignore_decomposition_failures = True
     chromobius.return_weight = False
 
+    trt = qec.trt_decoder_config()
+    trt.global_decoder = "chromobius"
+    trt.global_decoder_params = chromobius
+
     dc = qec.decoder_config()
     dc.id = 0
-    dc.type = "chromobius"
+    dc.type = "trt_decoder"
     dc.block_size = 3
     dc.syndrome_size = 3
     dc.H_sparse = [0, -1, 1, -1, 2, -1]
     dc.O_sparse = [0, -1, 1, -1, 2, -1]
     dc.D_sparse = [0, -1, 1, -1, 2, -1]
-    dc.set_decoder_custom_args(chromobius)
+    dc.set_decoder_custom_args(trt)
 
     yaml_text = dc.to_yaml_str()
     assert isinstance(yaml_text, str) and "chromobius" in yaml_text
 
     dc2 = qec.decoder_config.from_yaml_str(yaml_text)
     assert dc2 is not None
-    assert dc2.type == "chromobius"
+    assert dc2.type == "trt_decoder"
 
-    chromobius2 = dc2.decoder_custom_args
+    trt2 = dc2.decoder_custom_args
+    assert trt2 is not None
+    assert trt2.global_decoder == "chromobius"
+
+    chromobius2 = trt2.global_decoder_params
     assert chromobius2 is not None
     assert chromobius2.ignore_decomposition_failures is True
     assert chromobius2.return_weight is False

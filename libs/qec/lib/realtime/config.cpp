@@ -256,26 +256,25 @@ global_decoder_config global_decoder_config_from_value(
     return *global_cfg;
   }
 
-  if (global_decoder.value() == "pymatching") {
-    if (auto *pymatching_cfg = std::any_cast<pymatching_config>(&val))
-      return *pymatching_cfg;
-    if (auto *nested_map = std::any_cast<cudaqx::heterogeneous_map>(&val))
-      return pymatching_config::from_heterogeneous_map(*nested_map);
-  } else if (global_decoder.value() == "chromobius") {
-    if (auto *chromobius_cfg = std::any_cast<chromobius_config>(&val))
-      return *chromobius_cfg;
-    if (auto *nested_map = std::any_cast<cudaqx::heterogeneous_map>(&val))
-      return chromobius_config::from_heterogeneous_map(*nested_map);
+  if (auto *nested_map = std::any_cast<cudaqx::heterogeneous_map>(&val)) {
+    return global_decoder_config_from_heterogeneous_map(*nested_map,
+                                                        global_decoder);
+  }
+
+  global_decoder_config parsed_params;
+  if (auto *pymatching_cfg = std::any_cast<pymatching_config>(&val)) {
+    parsed_params = *pymatching_cfg;
+  } else if (auto *chromobius_cfg = std::any_cast<chromobius_config>(&val)) {
+    parsed_params = *chromobius_cfg;
   } else {
     throw std::runtime_error(
-        "global_decoder_params does not support global_decoder '" +
+        "global_decoder_params has an unsupported value type for "
+        "global_decoder '" +
         global_decoder.value() + "'.");
   }
 
-  throw std::runtime_error(
-      "global_decoder_params has an unsupported value type for "
-      "global_decoder '" +
-      global_decoder.value() + "'.");
+  validate_global_decoder_params(parsed_params, global_decoder);
+  return parsed_params;
 }
 
 void validate_global_decoder_params(
@@ -786,9 +785,6 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
     } else if (config.type == "pymatching") {
       INIT_AND_MAP_DECODER_CUSTOM_ARGS(
           cudaq::qec::decoding::config::pymatching_config);
-    } else if (config.type == "chromobius") {
-      INIT_AND_MAP_DECODER_CUSTOM_ARGS(
-          cudaq::qec::decoding::config::chromobius_config);
     }
   }
 };
