@@ -1,21 +1,13 @@
 # ============================================================================ #
-# Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
+# Copyright (c) 2026 NVIDIA Corporation & Affiliates.                          #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
-# External Dependencies 
+# External Dependencies
 # ==============================================================================
-
-FetchContent_Declare(
-  googletest
-  GIT_REPOSITORY https://github.com/google/googletest.git
-  GIT_TAG v1.17.0
-  EXCLUDE_FROM_ALL
-)
-FetchContent_MakeAvailable(googletest)
 
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 
@@ -30,9 +22,20 @@ endif()
 include(GoogleTest)
 
 # ==============================================================================
+add_compile_options(-Wno-attributes)
 
-add_executable(test_core test_core.cpp)
-target_link_libraries(test_core PRIVATE GTest::gtest_main cudaqx-core)
-add_dependencies(CUDAQXCoreUnitTests test_core)
-gtest_discover_tests(test_core)
+add_executable(test_chromobius test_chromobius.cpp)
+target_link_libraries(test_chromobius PRIVATE GTest::gtest_main cudaq-qec cudaq::cudaq)
+add_dependencies(test_chromobius cudaq-qec-chromobius)
+add_dependencies(CUDAQXQECUnitTests test_chromobius)
+gtest_discover_tests(test_chromobius)
 
+# Correctness test using reference data copied from upstream Chromobius.
+add_executable(test_chromobius_correctness test_chromobius_correctness.cpp)
+target_compile_definitions(test_chromobius_correctness PRIVATE
+  CHROMOBIUS_REFERENCE_DATA_DIR="${CMAKE_CURRENT_LIST_DIR}/../../../test_data/chromobius")
+target_link_libraries(test_chromobius_correctness PRIVATE
+  GTest::gtest_main cudaq-qec cudaq::cudaq)
+add_dependencies(test_chromobius_correctness cudaq-qec-chromobius)
+add_dependencies(CUDAQXQECUnitTests test_chromobius_correctness)
+gtest_discover_tests(test_chromobius_correctness)
