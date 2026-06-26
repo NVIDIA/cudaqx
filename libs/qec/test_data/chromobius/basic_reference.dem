@@ -1,0 +1,8 @@
+# Reference case from quantumlib/chromobius:
+# src/chromobius/commands/main_predict.test.cc, TEST(main_predict, basic).
+error(0.1) D0 L0
+error(0.1) D0 D1 L1
+error(0.1) D1 L2
+detector(0, 0, 0, 0) D0
+detector(0, 0, 0, 1) D1
+

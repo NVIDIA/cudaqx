@@ -1,0 +1,9 @@
+# Reference predictions from quantumlib/chromobius:
+# src/chromobius/commands/main_predict.test.cc, TEST(main_predict, basic).
+#
+# Columns: name syndrome_bits expected_observable_bits
+# syndrome_bits are ordered D0..Dn. expected_observable_bits are ordered L0..Lm.
+empty 00 000
+d0 10 100
+d1 01 001
+d0_d1 11 010

@@ -665,6 +665,39 @@ TEST_F(TRTDecoderTest, Uint8IdentityModelBinarizesInputAndOutput) {
   EXPECT_FLOAT_EQ(result.result[2], 1.0);
 }
 
+TEST_F(TRTDecoderTest, BatchFailureKeepsResultCount) {
+  // A post-initialisation failure in decode_batch should preserve one result
+  // per input syndrome so decode() never indexes an empty result vector.
+  if (!gpu_available())
+    GTEST_SKIP() << "No CUDA GPU available";
+  auto onnx_path = get_dynamic_onnx_asset_path();
+  if (!onnx_path || !std::filesystem::exists(*onnx_path))
+    GTEST_SKIP() << "Generated dynamic ONNX fixture is unavailable";
+
+  cudaqx::heterogeneous_map params;
+  params.insert("onnx_load_path", *onnx_path);
+  params.insert("batch_size", std::size_t{1});
+  params.insert("use_cuda_graph", false);
+  params.insert("global_decoder", std::string("single_error_lut"));
+  params.insert("global_decoder_params", cudaqx::heterogeneous_map{});
+
+  std::unique_ptr<decoder> trt_decoder;
+  try {
+    trt_decoder = decoder::get("trt_decoder", make_identity_h(2), params);
+  } catch (const std::exception &e) {
+    GTEST_SKIP() << "Failed to create mismatch TRT decoder: " << e.what();
+  }
+
+  auto results = trt_decoder->decode_batch({{1.0, 0.0, 1.0}});
+
+  // The mismatched global decoder forces an exception before any result is
+  // pushed; the fixed path must still return one placeholder for the input.
+  ASSERT_EQ(results.size(), 1u);
+  // The placeholder must be marked failed so callers can distinguish it from a
+  // successful decode without touching out-of-range elements.
+  EXPECT_FALSE(results[0].converged);
+}
+
 TEST_F(TRTDecoderTest, CompositeGlobalDecoderCombinesLogicalFrame) {
   // TRT emits [pre_L, residual syndrome]; the optional global decoder decodes
   // the residual part and XORs it with pre_L to form the final observable.
