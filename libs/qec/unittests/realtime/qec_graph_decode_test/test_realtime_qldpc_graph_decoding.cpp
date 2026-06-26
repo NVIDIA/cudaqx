@@ -225,6 +225,20 @@ protected:
     cudaGetDeviceCount(&device_count);
     if (device_count == 0)
       GTEST_SKIP() << "No CUDA devices available";
+
+    // The self-relaunching device-graph scheduler this test drives uses
+    // device-side graph launch, which requires compute capability 9.0+
+    // (Hopper). Skip on older GPUs (e.g. A100/sm_80 CI runners), matching the
+    // cuda-quantum dispatch-kernel tests.
+    int device = 0;
+    cudaGetDevice(&device);
+    cudaDeviceProp prop{};
+    cudaGetDeviceProperties(&prop, device);
+    if (prop.major < 9)
+      GTEST_SKIP() << "Graph device launch requires compute capability 9.0+, "
+                      "found "
+                   << prop.major << "." << prop.minor;
+
     cudaError_t flags_err = cudaSetDeviceFlags(cudaDeviceMapHost);
     ASSERT_TRUE(flags_err == cudaSuccess ||
                 flags_err == cudaErrorSetOnActiveProcess);
