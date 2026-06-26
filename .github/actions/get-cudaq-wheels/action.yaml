@@ -12,10 +12,6 @@ inputs:
     description: 'CUDAQ repository access token.'
     default: ''
     required: false
-  cache-key-suffix:
-    description: 'Unique identifier to append to cache keys.'
-    default: ''
-    required: false
   save-build:
     description: 'Indicates whether to save the build'
     default: 'false'
@@ -46,18 +42,15 @@ runs:
     - name: Create CUDAQ wheel cache key
       id: cudaq-wheels-key
       env:
-        # This are a list of files that when changed should require a new cudaq build
+        # These are the files that, when changed, require a new CUDA-Q wheel build.
         to_hash: |
           .github/actions/get-cudaq-wheels/**
           .cudaq_version
       run: |
         hash=${{ hashFiles(format('{0}', env.to_hash)) }}
         echo "main=cudaq-wheels-${{ inputs.platform }}-cu${{ inputs.cuda_version }}-${{ inputs.ref }}-$hash" >> $GITHUB_OUTPUT
-        suffix="${{ inputs.cache-key-suffix }}"
-        if [[ -n "$suffix" ]]; then
-          echo "suffix=-$suffix" >> $GITHUB_OUTPUT
-        fi
-        sudo mkdir /cudaq-wheels && sudo chmod 777 /cudaq-wheels
+        sudo mkdir -p /cudaq-wheels
+        sudo chown "$(id -u):$(id -g)" /cudaq-wheels
       shell: bash --noprofile --norc -euo pipefail {0}
 
     - name: Try to restoring CUDAQ wheels from cache
@@ -66,14 +59,10 @@ runs:
       with:
         fail-on-cache-miss: false
         path: /cudaq-wheels
-        key: ${{ steps.cudaq-wheels-key.outputs.main }}${{ steps.cudaq-wheels-key.outputs.suffix }}
-        restore-keys: ${{ steps.cudaq-wheels-key.outputs.main }}
+        key: ${{ steps.cudaq-wheels-key.outputs.main }}
         lookup-only: ${{ inputs.lookup-only }}
 
-    # The restore action could find a partial match using the `restore-keys`. In such cases
-    # it would still report `cache-hit` as false, but would load the cache from the partial
-    # one. Thus, we need to check whether the cache is valid by other means.
-    - name: Check if cache is valid
+    - name: Check if cache was restored
       id: check-cache
       run: |
         if [[ "${{ steps.restore-cudaq-wheels.outputs.cache-matched-key }}" == "" ]]; then
@@ -88,6 +77,7 @@ runs:
     # ==========================================================================
 
     - name: Login to GitHub CR
+      if: steps.check-cache.outputs.valid == 'false' && inputs.lookup-only == 'false'
       uses: docker/login-action@v3
       with:
         registry: ghcr.io
@@ -104,17 +94,20 @@ runs:
         set-safe-directory: true
 
     - name: Set up context for buildx
+      if: steps.check-cache.outputs.valid == 'false' && inputs.lookup-only == 'false'
       run: |
         docker context create builder_context
       shell: bash --noprofile --norc -euo pipefail {0}
 
     - name: Set up buildx runner
+      if: steps.check-cache.outputs.valid == 'false' && inputs.lookup-only == 'false'
       uses: docker/setup-buildx-action@v3
       with:
         endpoint: builder_context
         driver-opts: network=host
 
     - name: Build 3.11 wheel
+      if: steps.check-cache.outputs.valid == 'false' && inputs.lookup-only == 'false'
       uses: docker/build-push-action@v5
       with:
         context: cudaq
@@ -126,6 +119,7 @@ runs:
         outputs: /cudaq-wheels
 
     - name: Build 3.12 wheel
+      if: steps.check-cache.outputs.valid == 'false' && inputs.lookup-only == 'false'
       uses: docker/build-push-action@v5
       with:
         context: cudaq
@@ -137,6 +131,7 @@ runs:
         outputs: /cudaq-wheels
 
     - name: Build 3.13 wheel
+      if: steps.check-cache.outputs.valid == 'false' && inputs.lookup-only == 'false'
       uses: docker/build-push-action@v5
       with:
         context: cudaq
@@ -156,4 +151,4 @@ runs:
       uses: actions/cache/save@v4
       with:
         path: /cudaq-wheels
-        key: ${{ steps.cudaq-wheels-key.outputs.main }}${{ steps.cudaq-wheels-key.outputs.suffix }}
+        key: ${{ steps.cudaq-wheels-key.outputs.main }}
