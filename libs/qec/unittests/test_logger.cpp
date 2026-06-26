@@ -7,7 +7,6 @@
  ******************************************************************************/
 #include "cudaq/qec/logger.h"
 
-#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -122,25 +121,17 @@ TEST(Logger, ForwarderReceivesRecordsWhenEnabled) {
             records.push_back(record);
             cv.notify_all();
           },
-      .queueCapacity = 16,
+      .queueCapacity = 64,
       .dropPolicy = cudaq::qec::detail::ForwardDropPolicy::dropNewest});
 
-  // Forwarding enqueue is intentionally best-effort (try_lock + drop on
-  // contention), so send a short burst and assert that at least one expected
-  // record arrives instead of requiring a single specific one.
-  for (int i = 0; i < 32; ++i)
-    CUDA_QEC_INFO("forwarded {}", i);
+  CUDA_QEC_INFO("forwarded {}", 7);
   cudaq::qec::detail::flushLogs();
 
   std::unique_lock<std::mutex> lock(mutex);
-  ASSERT_TRUE(cv.wait_for(lock, 2s, [&] { return !records.empty(); }));
+  ASSERT_TRUE(cv.wait_for(lock, 2s, [&] { return records.size() == 1; }));
   EXPECT_EQ(records.front().fileName, "test_logger.cpp");
   EXPECT_GT(records.front().lineNo, 0);
-  const bool hasForwarded =
-      std::any_of(records.begin(), records.end(), [](const auto &record) {
-        return record.message.rfind("forwarded ", 0) == 0;
-      });
-  EXPECT_TRUE(hasForwarded);
+  EXPECT_EQ(records.front().message, "forwarded 7");
 } // end - TEST(Logger, ForwarderReceivesRecordsWhenEnabled)
 
 // Ensure enabling a forwarder suppresses direct stdout/stderr emission.
@@ -159,35 +150,23 @@ TEST(Logger, ForwarderEnabledSuppressesStdoutAndStderr) {
             records.push_back(record);
             cv.notify_all();
           },
-      .queueCapacity = 16,
+      .queueCapacity = 64,
       .dropPolicy = cudaq::qec::detail::ForwardDropPolicy::dropNewest});
 
   testing::internal::CaptureStdout();
   testing::internal::CaptureStderr();
-  // Keep stdout/stderr assertions deterministic by allowing occasional dropped
-  // records while still requiring both message types to be observed.
-  for (int i = 0; i < 32; ++i) {
-    CUDA_QEC_INFO("forwarded-info");
-    CUDA_QEC_WARN("forwarded-warn");
-  }
+  CUDA_QEC_INFO("forwarded-info");
+  CUDA_QEC_WARN("forwarded-warn");
   cudaq::qec::detail::flushLogs();
   const std::string out = testing::internal::GetCapturedStdout();
   const std::string err = testing::internal::GetCapturedStderr();
 
   std::unique_lock<std::mutex> lock(mutex);
-  ASSERT_TRUE(cv.wait_for(lock, 2s, [&] { return !records.empty(); }));
+  ASSERT_TRUE(cv.wait_for(lock, 2s, [&] { return records.size() == 2; }));
   EXPECT_TRUE(out.empty());
   EXPECT_TRUE(err.empty());
-  const bool hasInfo =
-      std::any_of(records.begin(), records.end(), [](const auto &record) {
-        return record.message == "forwarded-info";
-      });
-  const bool hasWarn =
-      std::any_of(records.begin(), records.end(), [](const auto &record) {
-        return record.message == "forwarded-warn";
-      });
-  EXPECT_TRUE(hasInfo);
-  EXPECT_TRUE(hasWarn);
+  EXPECT_EQ(records[0].message, "forwarded-info");
+  EXPECT_EQ(records[1].message, "forwarded-warn");
 } // end - TEST(Logger, ForwarderEnabledSuppressesStdoutAndStderr)
 
 // Confirm default sink routing when no forwarder is installed.
@@ -225,17 +204,13 @@ TEST(Logger, DefaultSetForwarderWritesToStdoutAndStderr) {
   cudaq::qec::detail::setForwarder();
 
   ASSERT_TRUE(cudaq::qec::detail::isForwarderEnabled());
-  // The default forwarder also uses the same non-blocking enqueue path; use a
-  // burst and check for some successful enqueues instead of an exact count.
-  for (int i = 0; i < 32; ++i) {
-    CUDA_QEC_INFO("default-forwarder-info");
-    CUDA_QEC_WARN("default-forwarder-warn");
-  }
+  CUDA_QEC_INFO("default-forwarder-info");
+  CUDA_QEC_WARN("default-forwarder-warn");
   cudaq::qec::detail::flushLogs();
-  // Capturing stdout/stderr is flaky here because the default forwarder emits
-  // from a background worker thread; queue/accounting assertions are stable.
   const auto stats = cudaq::qec::detail::getForwarderStats();
-  EXPECT_GT(stats.enqueuedRecords, 0u);
+  EXPECT_EQ(stats.enqueuedRecords, 2u);
+  EXPECT_EQ(stats.droppedRecords, 0u);
+  EXPECT_EQ(stats.truncatedRecords, 0u);
   EXPECT_EQ(stats.forwardFailures, 0u);
 } // end - TEST(Logger, DefaultSetForwarderWritesToStdoutAndStderr)
 
@@ -255,6 +230,7 @@ TEST(Logger, SaturatedForwarderQueueDropsWithoutBlockingProducer) {
       .queueCapacity = 1,
       .dropPolicy = cudaq::qec::detail::ForwardDropPolicy::dropNewest});
 
+  testing::internal::CaptureStderr();
   for (int i = 0; i < 256; ++i)
     CUDA_QEC_INFO("queue-load {}", i);
 
@@ -264,7 +240,43 @@ TEST(Logger, SaturatedForwarderQueueDropsWithoutBlockingProducer) {
 
   releaseCallback.store(true, std::memory_order_relaxed);
   cudaq::qec::detail::flushLogs();
+  const std::string dropWarning = testing::internal::GetCapturedStderr();
+  EXPECT_NE(dropWarning.find("forwarder dropped log records"),
+            std::string::npos);
 } // end - TEST(Logger, SaturatedForwarderQueueDropsWithoutBlockingProducer)
+
+TEST(Logger, ForwarderTruncationIsCountedAndAnnotated) {
+  ForwarderGuard guard;
+  cudaq::qec::detail::clearForwarder();
+  cudaq::qec::detail::setLogLevel(cudaq::qec::detail::LogLevel::info);
+
+  std::mutex mutex;
+  std::condition_variable cv;
+  std::vector<cudaq::qec::detail::ForwardedLogRecord> records;
+  cudaq::qec::detail::setForwarder(cudaq::qec::detail::ForwarderConfig{
+      .callback =
+          [&](const cudaq::qec::detail::ForwardedLogRecord &record) {
+            std::lock_guard<std::mutex> lock(mutex);
+            records.push_back(record);
+            cv.notify_all();
+          },
+      .queueCapacity = 64,
+      .messageCapacity = 32,
+      .dropPolicy = cudaq::qec::detail::ForwardDropPolicy::dropNewest});
+
+  ASSERT_EQ(cudaq::qec::detail::getForwarderMessageCapacity(), 32u);
+  CUDA_QEC_INFO("0123456789abcdefghijklmnopqrstuvwxyz");
+  cudaq::qec::detail::flushLogs();
+
+  std::unique_lock<std::mutex> lock(mutex);
+  ASSERT_TRUE(cv.wait_for(lock, 2s, [&] { return records.size() == 1; }));
+  EXPECT_EQ(records.front().message.size(), 32u);
+  EXPECT_NE(records.front().message.find("[truncated]"), std::string::npos);
+
+  const auto stats = cudaq::qec::detail::getForwarderStats();
+  EXPECT_EQ(stats.truncatedRecords, 1u);
+  EXPECT_EQ(stats.droppedRecords, 0u);
+} // end - TEST(Logger, ForwarderTruncationIsCountedAndAnnotated)
 
 // Ensure no queue accounting changes when forwarding is disabled.
 TEST(Logger, DisabledForwarderDoesNotEnqueueRecords) {

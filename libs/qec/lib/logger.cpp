@@ -7,6 +7,8 @@
  ******************************************************************************/
 
 #include "cudaq/qec/logger.h"
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <cctype>
 #include <chrono>
@@ -14,12 +16,13 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <ctime>
 #include <iomanip>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <sstream>
-#include <vector>
 
 /// @file
 /// @brief QEC logger implementation.
@@ -114,6 +117,38 @@ std::string composeLine(const LogLevel level, const std::string_view message,
   return out.str();
 }
 
+std::string_view pathToFileNameView(const std::string_view fullFilePath) {
+  const auto pos = fullFilePath.find_last_of("/\\");
+  if (pos == std::string_view::npos)
+    return fullFilePath;
+  return fullFilePath.substr(pos + 1);
+}
+
+template <std::size_t N>
+std::size_t copyToFixed(std::array<char, N> &dest, const std::string_view src,
+                        std::size_t cap, bool *truncated = nullptr) {
+  static_assert(N > 0);
+  cap = std::min(cap, N - 1);
+  const std::size_t copied = std::min(src.size(), cap);
+  if (copied > 0)
+    std::memcpy(dest.data(), src.data(), copied);
+  dest[copied] = '\0';
+  if (truncated)
+    *truncated = src.size() > copied;
+  return copied;
+}
+
+struct QueuedLogRecord {
+  LogLevel level = LogLevel::info;
+  std::uint64_t timestampNs = 0;
+  int lineNo = 0;
+  std::thread::id threadId;
+  std::array<char, 128> fileName{};
+  std::size_t fileNameLen = 0;
+  std::array<char, detail::kRealtimeForwarderMaxMessageCapacity> message{};
+  std::size_t messageLen = 0;
+};
+
 class AsyncForwarder {
 public:
   // Default-construct the forwarder with forwarding disabled.
@@ -124,37 +159,47 @@ public:
   // Install callback + queue configuration and start worker thread.
   void set(ForwarderConfig config) {
     clear();
-    {
-      std::lock_guard<std::mutex> lock(mMutex);
-      mConfig = std::move(config);
-      if (!mConfig.callback)
-        return;
-      if (mConfig.queueCapacity == 0)
-        mConfig.queueCapacity = 1;
-      mQueue.assign(mConfig.queueCapacity, ForwardedLogRecord{});
-      mHead = 0;
-      mSize = 0;
-      mStop = false;
-      mEnabled.store(true, std::memory_order_release);
-      mWorker = std::thread([this] { runWorker(); });
-    }
+    mConfig = std::move(config);
+    if (!mConfig.callback)
+      return;
+    if (mConfig.queueCapacity == 0)
+      mConfig.queueCapacity = 1;
+    if (mConfig.messageCapacity == 0)
+      mConfig.messageCapacity = 1;
+    mConfig.messageCapacity =
+        std::min(mConfig.messageCapacity, kRealtimeForwarderMaxMessageCapacity);
+    mMessageCapacity.store(mConfig.messageCapacity, std::memory_order_relaxed);
+
+    mCapacity = roundUpToPow2(mConfig.queueCapacity);
+    mRing = std::make_unique<RingSlot[]>(mCapacity);
+    for (std::size_t i = 0; i < mCapacity; ++i)
+      mRing[i].sequence.store(i, std::memory_order_relaxed);
+
+    mMask = mCapacity - 1;
+    mEnqueuePos.store(0, std::memory_order_relaxed);
+    mDequeuePos.store(0, std::memory_order_relaxed);
+    mStop.store(false, std::memory_order_relaxed);
+    mEnabled.store(true, std::memory_order_release);
+    mWorker = std::thread([this] { runWorker(); });
   } // end - set()
 
   // Stop worker thread and reset forwarding state.
   void clear() {
     mEnabled.store(false, std::memory_order_release);
-    {
-      std::lock_guard<std::mutex> lock(mMutex);
-      mStop = true;
-    }
+    while (mActiveProducers.load(std::memory_order_acquire) != 0)
+      std::this_thread::yield();
+    mStop.store(true, std::memory_order_release);
     mCv.notify_all();
     if (mWorker.joinable())
       mWorker.join();
-    std::lock_guard<std::mutex> lock(mMutex);
-    mQueue.clear();
-    mHead = 0;
-    mSize = 0;
-    mStop = false;
+    mRing.reset();
+    mCapacity = 0;
+    mMask = 0;
+    mEnqueuePos.store(0, std::memory_order_relaxed);
+    mDequeuePos.store(0, std::memory_order_relaxed);
+    mStop.store(false, std::memory_order_relaxed);
+    mMessageCapacity.store(kRealtimeForwarderDefaultMessageCapacity,
+                           std::memory_order_relaxed);
     mConfig = {};
   } // end - clear()
 
@@ -166,6 +211,7 @@ public:
     ForwarderStats stats;
     stats.enqueuedRecords = mEnqueuedRecords.load(std::memory_order_relaxed);
     stats.droppedRecords = mDroppedRecords.load(std::memory_order_relaxed);
+    stats.truncatedRecords = mTruncatedRecords.load(std::memory_order_relaxed);
     stats.forwardFailures = mForwardFailures.load(std::memory_order_relaxed);
     return stats;
   }
@@ -174,69 +220,181 @@ public:
   void resetStats() {
     mEnqueuedRecords.store(0, std::memory_order_relaxed);
     mDroppedRecords.store(0, std::memory_order_relaxed);
+    mTruncatedRecords.store(0, std::memory_order_relaxed);
     mForwardFailures.store(0, std::memory_order_relaxed);
+    mDropWarningPending.store(false, std::memory_order_relaxed);
+    mDropWarningEmitted.store(false, std::memory_order_relaxed);
+  }
+
+  std::size_t messageCapacity() const {
+    return mMessageCapacity.load(std::memory_order_relaxed);
+  }
+
+  void noteTruncation() {
+    mTruncatedRecords.fetch_add(1, std::memory_order_relaxed);
   }
 
   // Wait until queue drains, used in tests and explicit flush.
   void flush() {
-    std::unique_lock<std::mutex> lock(mMutex);
-    mCv.wait(lock, [&] { return mSize == 0 || !mEnabled.load(); });
+    std::unique_lock<std::mutex> lock(mWaitMutex);
+    mCv.wait(lock, [&] { return isQueueEmpty() || !mEnabled.load(); });
   }
 
-  // Best-effort non-blocking enqueue; drops when lock/queue is unavailable.
-  void tryEnqueue(ForwardedLogRecord record) {
+  // Producer path: enqueue into ring buffer, drop only when saturated.
+  void tryEnqueue(QueuedLogRecord record) {
     if (!isEnabled())
       return;
-    if (!mMutex.try_lock()) {
-      mDroppedRecords.fetch_add(1, std::memory_order_relaxed);
-      return;
-    }
-    std::unique_lock<std::mutex> lock(mMutex, std::adopt_lock);
-    if (!mEnabled.load(std::memory_order_relaxed) || !mConfig.callback)
+    ProducerGuard producerGuard(mActiveProducers);
+    if (!isEnabled() || !mConfig.callback || !mRing)
       return;
 
-    if (mQueue.empty()) {
-      mDroppedRecords.fetch_add(1, std::memory_order_relaxed);
-      return;
-    }
-
-    if (mSize == mQueue.size()) {
-      if (mConfig.dropPolicy == ForwardDropPolicy::dropNewest) {
-        mDroppedRecords.fetch_add(1, std::memory_order_relaxed);
+    while (true) {
+      if (tryEnqueueOne(record)) {
+        mEnqueuedRecords.fetch_add(1, std::memory_order_relaxed);
+        mCv.notify_one();
         return;
       }
-      // Drop oldest.
-      mQueue[mHead] = std::move(record);
-      mHead = (mHead + 1) % mQueue.size();
-      mDroppedRecords.fetch_add(1, std::memory_order_relaxed);
-      mEnqueuedRecords.fetch_add(1, std::memory_order_relaxed);
-      lock.unlock();
-      mCv.notify_one();
-      return;
-    } // end - if(mSize == mQueue.size())
 
-    const std::size_t tail = (mHead + mSize) % mQueue.size();
-    mQueue[tail] = std::move(record);
-    ++mSize;
-    mEnqueuedRecords.fetch_add(1, std::memory_order_relaxed);
-    lock.unlock();
-    mCv.notify_one();
+      if (mConfig.dropPolicy == ForwardDropPolicy::dropOldest) {
+        QueuedLogRecord ignored;
+        if (tryDequeueOne(ignored)) {
+          notifyDrop();
+          continue;
+        }
+      }
+
+      notifyDrop();
+      return;
+    }
   } // end - tryEnqueue()
 
 private:
+  struct RingSlot {
+    std::atomic<std::size_t> sequence{0};
+    QueuedLogRecord record;
+  };
+
+  struct ProducerGuard {
+    explicit ProducerGuard(std::atomic<std::uint64_t> &counterRef)
+        : counter(counterRef) {
+      counter.fetch_add(1, std::memory_order_acq_rel);
+    }
+    ~ProducerGuard() { counter.fetch_sub(1, std::memory_order_acq_rel); }
+    std::atomic<std::uint64_t> &counter;
+  };
+
+  static std::size_t roundUpToPow2(std::size_t value) {
+    // This queue uses `index = position & (capacity - 1)` and per-slot sequence
+    // arithmetic (Vyukov-style ring). That mapping is equivalent to modulo only
+    // for power-of-two capacities; non-power-of-two sizes break slot mapping
+    // and can corrupt full/empty detection.
+    std::size_t rounded = 2;
+    while (rounded < value)
+      rounded <<= 1;
+    return rounded;
+  }
+
+  bool tryEnqueueOne(QueuedLogRecord &record) {
+    std::size_t pos = mEnqueuePos.load(std::memory_order_relaxed);
+    while (true) {
+      RingSlot &slot = mRing[pos & mMask];
+      const std::size_t sequence =
+          slot.sequence.load(std::memory_order_acquire);
+      const std::intptr_t dif = static_cast<std::intptr_t>(sequence) -
+                                static_cast<std::intptr_t>(pos);
+
+      if (dif == 0) {
+        if (mEnqueuePos.compare_exchange_weak(pos, pos + 1,
+                                              std::memory_order_relaxed))
+          break;
+        continue;
+      }
+      if (dif < 0)
+        return false;
+      pos = mEnqueuePos.load(std::memory_order_relaxed);
+    }
+
+    RingSlot &slot = mRing[pos & mMask];
+    slot.record = std::move(record);
+    slot.sequence.store(pos + 1, std::memory_order_release);
+    return true;
+  }
+
+  bool tryDequeueOne(QueuedLogRecord &record) {
+    std::size_t pos = mDequeuePos.load(std::memory_order_relaxed);
+    while (true) {
+      RingSlot &slot = mRing[pos & mMask];
+      const std::size_t sequence =
+          slot.sequence.load(std::memory_order_acquire);
+      const std::intptr_t dif = static_cast<std::intptr_t>(sequence) -
+                                static_cast<std::intptr_t>(pos + 1);
+
+      if (dif == 0) {
+        if (mDequeuePos.compare_exchange_weak(pos, pos + 1,
+                                              std::memory_order_relaxed))
+          break;
+        continue;
+      }
+      if (dif < 0)
+        return false;
+      pos = mDequeuePos.load(std::memory_order_relaxed);
+    }
+
+    RingSlot &slot = mRing[pos & mMask];
+    record = std::move(slot.record);
+    slot.sequence.store(pos + mCapacity, std::memory_order_release);
+    return true;
+  }
+
+  bool isQueueEmpty() const {
+    return mEnqueuePos.load(std::memory_order_acquire) ==
+           mDequeuePos.load(std::memory_order_acquire);
+  }
+
+  // Emit a one-time diagnostic when forwarding drops are first observed.
+  void notifyDrop() {
+    mDroppedRecords.fetch_add(1, std::memory_order_relaxed);
+    mDropWarningPending.store(true, std::memory_order_relaxed);
+    mCv.notify_one();
+  }
+
+  void emitDropWarningIfPending() {
+    if (!mDropWarningPending.exchange(false, std::memory_order_relaxed))
+      return;
+    bool expected = false;
+    if (!mDropWarningEmitted.compare_exchange_strong(expected, true,
+                                                     std::memory_order_relaxed))
+      return;
+    std::fputs("[cudaq::qec::logger] forwarder dropped log records "
+               "(queue full); increase ForwarderConfig::queueCapacity or "
+               "reduce callback latency.\n",
+               stderr);
+  }
+
   // Consume queued records and invoke callback on background thread.
   void runWorker() {
     while (true) {
-      ForwardedLogRecord record;
-      {
-        std::unique_lock<std::mutex> lock(mMutex);
-        mCv.wait(lock, [&] { return mStop || mSize > 0; });
-        if (mStop && mSize == 0)
+      emitDropWarningIfPending();
+      QueuedLogRecord queuedRecord;
+      if (!tryDequeueOne(queuedRecord)) {
+        std::unique_lock<std::mutex> lock(mWaitMutex);
+        mCv.wait(lock, [&] {
+          return mStop.load(std::memory_order_acquire) || !isQueueEmpty();
+        });
+        if (mStop.load(std::memory_order_acquire) && isQueueEmpty())
           return;
-        record = std::move(mQueue[mHead]);
-        mHead = (mHead + 1) % mQueue.size();
-        --mSize;
+        continue;
       }
+
+      ForwardedLogRecord record;
+      record.level = queuedRecord.level;
+      record.timestampNs = queuedRecord.timestampNs;
+      record.fileName.assign(queuedRecord.fileName.data(),
+                             queuedRecord.fileNameLen);
+      record.lineNo = queuedRecord.lineNo;
+      record.message.assign(queuedRecord.message.data(),
+                            queuedRecord.messageLen);
+      record.threadId = queuedRecord.threadId;
 
       try {
         if (mConfig.callback)
@@ -245,22 +403,31 @@ private:
         mForwardFailures.fetch_add(1, std::memory_order_relaxed);
       }
 
+      emitDropWarningIfPending();
       mCv.notify_all();
     } // end - while(true)
   } // end - runWorker()
 
-  mutable std::mutex mMutex;
-  std::condition_variable mCv;
+  std::condition_variable_any mCv;
+  mutable std::mutex mWaitMutex;
   ForwarderConfig mConfig;
-  std::vector<ForwardedLogRecord> mQueue;
-  std::size_t mHead = 0;
-  std::size_t mSize = 0;
-  bool mStop = false;
+  std::unique_ptr<RingSlot[]> mRing;
+  std::size_t mCapacity = 0;
+  std::size_t mMask = 0;
+  std::atomic<std::size_t> mEnqueuePos{0};
+  std::atomic<std::size_t> mDequeuePos{0};
+  std::atomic<bool> mStop{false};
   std::thread mWorker;
   std::atomic<bool> mEnabled{false};
   std::atomic<std::uint64_t> mEnqueuedRecords{0};
   std::atomic<std::uint64_t> mDroppedRecords{0};
+  std::atomic<std::uint64_t> mTruncatedRecords{0};
   std::atomic<std::uint64_t> mForwardFailures{0};
+  std::atomic<std::uint64_t> mActiveProducers{0};
+  std::atomic<bool> mDropWarningPending{false};
+  std::atomic<bool> mDropWarningEmitted{false};
+  std::atomic<std::size_t> mMessageCapacity{
+      kRealtimeForwarderDefaultMessageCapacity};
 };
 
 // Return singleton forwarder shared by all logger call sites.
@@ -283,12 +450,27 @@ void initializeLogLevelFromEnv() {
 void emit(const LogLevel level, const std::string_view rawMessage,
           const char *fileName, const int lineNo) {
   if (forwarder().isEnabled()) {
-    ForwardedLogRecord record;
+    QueuedLogRecord record;
+    const std::size_t messageCap = forwarder().messageCapacity();
     record.level = level;
     record.timestampNs = nowNs();
-    record.fileName = pathToFileName(fileName);
+    record.fileNameLen =
+        copyToFixed(record.fileName, pathToFileNameView(fileName),
+                    record.fileName.size() - 1);
     record.lineNo = lineNo;
-    record.message = std::string(rawMessage);
+    bool truncated = false;
+    record.messageLen =
+        copyToFixed(record.message, rawMessage, messageCap, &truncated);
+    if (truncated) {
+      forwarder().noteTruncation();
+      if (record.messageLen >= kRealtimeTruncationSuffix.size()) {
+        const std::size_t start =
+            record.messageLen - kRealtimeTruncationSuffix.size();
+        std::copy(kRealtimeTruncationSuffix.begin(),
+                  kRealtimeTruncationSuffix.end(),
+                  record.message.begin() + start);
+      }
+    }
     record.threadId = std::this_thread::get_id();
     forwarder().tryEnqueue(std::move(record));
     return;
@@ -345,6 +527,12 @@ void clearForwarder() { forwarder().clear(); }
 // Public API: report whether forwarding callback is active.
 bool isForwarderEnabled() { return forwarder().isEnabled(); }
 
+std::size_t getForwarderMessageCapacity() {
+  return forwarder().messageCapacity();
+}
+
+void recordForwarderMessageTruncation() { forwarder().noteTruncation(); }
+
 // Public API: return forwarding counters snapshot.
 ForwarderStats getForwarderStats() { return forwarder().stats(); }
 
@@ -398,9 +586,19 @@ void logMessageFormatted(LogLevel logLevel, std::string formattedMessage,
   emit(logLevel, formattedMessage, fileName, lineNo);
 }
 
+void logMessageView(LogLevel logLevel, std::string_view formattedMessage,
+                    const char *fileName, int lineNo) {
+  emit(logLevel, formattedMessage, fileName, lineNo);
+}
+
 // Entry point for timestamped log helper after message formatting.
 void logWithTimestampFormatted(std::string formattedMessage,
                                const char *fileName, int lineNo) {
+  emit(LogLevel::info, formattedMessage, fileName, lineNo);
+}
+
+void logWithTimestampView(std::string_view formattedMessage,
+                          const char *fileName, int lineNo) {
   emit(LogLevel::info, formattedMessage, fileName, lineNo);
 }
 

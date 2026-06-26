@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <fmt/format.h>
@@ -35,6 +37,9 @@ namespace detail {
 // in logger.cpp.
 /// @brief Severity levels supported by the QEC logger.
 enum class LogLevel { trace, debug, info, warn, error };
+inline constexpr std::size_t kRealtimeForwarderDefaultMessageCapacity = 512;
+inline constexpr std::size_t kRealtimeForwarderMaxMessageCapacity = 4096;
+inline constexpr std::string_view kRealtimeTruncationSuffix = " ...[truncated]";
 
 /// @brief Log payload forwarded to an optional background callback.
 struct ForwardedLogRecord {
@@ -53,6 +58,7 @@ enum class ForwardDropPolicy { dropNewest, dropOldest };
 struct ForwarderConfig {
   std::function<void(const ForwardedLogRecord &)> callback;
   std::size_t queueCapacity = 1024;
+  std::size_t messageCapacity = kRealtimeForwarderDefaultMessageCapacity;
   ForwardDropPolicy dropPolicy = ForwardDropPolicy::dropNewest;
 };
 
@@ -60,6 +66,7 @@ struct ForwarderConfig {
 struct ForwarderStats {
   std::uint64_t enqueuedRecords = 0;
   std::uint64_t droppedRecords = 0;
+  std::uint64_t truncatedRecords = 0;
   std::uint64_t forwardFailures = 0;
 };
 
@@ -73,8 +80,12 @@ void setForwarder();
 void clearForwarder();
 /// @brief Return true when forwarding is enabled.
 bool isForwarderEnabled();
+/// @brief Return active forwarded-message capacity in bytes.
+std::size_t getForwarderMessageCapacity();
 /// @brief Return a snapshot of forwarding counters.
 ForwarderStats getForwarderStats();
+/// @brief Record that a forwarded message was truncated at format time.
+void recordForwarderMessageTruncation();
 /// @brief Emit a preformatted trace message.
 void trace(const std::string_view msg);
 /// @brief Emit a preformatted info message.
@@ -104,9 +115,15 @@ void flushLogs();
 /// @brief Emit a formatted message with file and line metadata.
 void logMessageFormatted(LogLevel logLevel, std::string formattedMessage,
                          const char *fileName, int lineNo);
+/// @brief Emit a preformatted view with file and line metadata.
+void logMessageView(LogLevel logLevel, std::string_view formattedMessage,
+                    const char *fileName, int lineNo);
 /// @brief Emit a formatted timestamped message with file and line metadata.
 void logWithTimestampFormatted(std::string formattedMessage,
                                const char *fileName, int lineNo);
+/// @brief Emit a preformatted timestamped message view.
+void logWithTimestampView(std::string_view formattedMessage,
+                          const char *fileName, int lineNo);
 
 /// @brief Format a message and arguments using `fmt`.
 template <typename... Args>
@@ -118,6 +135,26 @@ std::string formatMessage(const std::string_view message, Args &&...args) {
 template <typename... Args>
 void logMessage(LogLevel logLevel, const std::string_view message,
                 const char *fileName, int lineNo, Args &&...args) {
+  if (isForwarderEnabled()) {
+    std::array<char, kRealtimeForwarderMaxMessageCapacity> buffer{};
+    const std::size_t cap =
+        std::min(getForwarderMessageCapacity(), buffer.size() - 1);
+    auto result = fmt::vformat_to_n(buffer.data(), cap, message,
+                                    fmt::make_format_args(args...));
+    auto used = std::min<std::size_t>(result.size, cap);
+    if (result.size > cap) {
+      recordForwarderMessageTruncation();
+      if (used >= kRealtimeTruncationSuffix.size()) {
+        const std::size_t start = used - kRealtimeTruncationSuffix.size();
+        std::copy(kRealtimeTruncationSuffix.begin(),
+                  kRealtimeTruncationSuffix.end(), buffer.begin() + start);
+      }
+    }
+    buffer[used] = '\0';
+    logMessageView(logLevel, std::string_view(buffer.data(), used), fileName,
+                   lineNo);
+    return;
+  }
   logMessageFormatted(logLevel,
                       formatMessage(message, std::forward<Args>(args)...),
                       fileName, lineNo);
@@ -158,6 +195,28 @@ void debug(const std::string_view, Args &&...) {}
 // Note 2: File and line info is not included in the log line.
 template <typename... Args>
 void log(const std::string_view message, Args &&...args) {
+  if (detail::isForwarderEnabled()) {
+    std::array<char, detail::kRealtimeForwarderMaxMessageCapacity> buffer{};
+    const std::size_t cap =
+        std::min(detail::getForwarderMessageCapacity(), buffer.size() - 1);
+    auto result = fmt::vformat_to_n(buffer.data(), cap, message,
+                                    fmt::make_format_args(args...));
+    auto used = std::min<std::size_t>(result.size, cap);
+    if (result.size > cap) {
+      detail::recordForwarderMessageTruncation();
+      if (used >= detail::kRealtimeTruncationSuffix.size()) {
+        const std::size_t start =
+            used - detail::kRealtimeTruncationSuffix.size();
+        std::copy(detail::kRealtimeTruncationSuffix.begin(),
+                  detail::kRealtimeTruncationSuffix.end(),
+                  buffer.begin() + start);
+      }
+    }
+    buffer[used] = '\0';
+    detail::logWithTimestampView(std::string_view(buffer.data(), used),
+                                 __builtin_FILE(), __builtin_LINE());
+    return;
+  }
   detail::logWithTimestampFormatted(
       detail::formatMessage(message, std::forward<Args>(args)...),
       __builtin_FILE(), __builtin_LINE());
