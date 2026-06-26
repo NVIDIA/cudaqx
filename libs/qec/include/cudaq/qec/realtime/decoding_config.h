@@ -107,11 +107,24 @@ struct pymatching_config {
   from_heterogeneous_map(const cudaqx::heterogeneous_map &map);
 };
 
-// The realtime trt_decoder config currently models only PyMatching as a global
-// decoder. Other global decoder plugins may be constructed through lower-level
-// APIs when their parameters are supplied directly, but they are not serialized
-// by this config variant yet.
-using global_decoder_config = std::variant<std::monostate, pymatching_config>;
+struct chromobius_config {
+  std::optional<bool> drop_mobius_errors_involving_remnant_errors;
+  std::optional<bool> ignore_decomposition_failures;
+  std::optional<bool> include_coords_in_mobius_dem;
+  std::optional<bool> return_weight;
+  std::optional<bool> write_mobius_match_to_stderr;
+
+  bool operator==(const chromobius_config &) const = default;
+
+  __attribute__((visibility("default"))) cudaqx::heterogeneous_map
+  to_heterogeneous_map() const;
+
+  __attribute__((visibility("default"))) static chromobius_config
+  from_heterogeneous_map(const cudaqx::heterogeneous_map &map);
+};
+
+using global_decoder_config =
+    std::variant<std::monostate, pymatching_config, chromobius_config>;
 
 struct trt_decoder_config {
   std::optional<std::string> onnx_load_path;

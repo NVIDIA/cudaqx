@@ -201,9 +201,16 @@ struct type_caster<cudaqx::heterogeneous_map> {
             // Omit the key for monostate, matching
             // trt_decoder_config::to_heterogeneous_map(): an unset global
             // decoder serializes as absent, not as a null value.
-          } else {
+          } else if (std::holds_alternative<
+                         cudaq::qec::decoding::config::pymatching_config>(
+                         *global_cfg)) {
             result[key.c_str()] = nb::cast(
                 std::get<cudaq::qec::decoding::config::pymatching_config>(
+                    *global_cfg)
+                    .to_heterogeneous_map());
+          } else {
+            result[key.c_str()] = nb::cast(
+                std::get<cudaq::qec::decoding::config::chromobius_config>(
                     *global_cfg)
                     .to_heterogeneous_map());
           }
@@ -211,6 +218,10 @@ struct type_caster<cudaqx::heterogeneous_map> {
                        cudaq::qec::decoding::config::pymatching_config>(&val)) {
           result[key.c_str()] =
               nb::cast(pymatching_cfg->to_heterogeneous_map());
+        } else if (auto *chromobius_cfg = std::any_cast<
+                       cudaq::qec::decoding::config::chromobius_config>(&val)) {
+          result[key.c_str()] =
+              nb::cast(chromobius_cfg->to_heterogeneous_map());
         } else if (auto *sw_cfg = std::any_cast<
                        cudaq::qec::decoding::config::sliding_window_config>(
                        &val)) {
