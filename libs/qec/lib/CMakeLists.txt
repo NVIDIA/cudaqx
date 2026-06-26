@@ -44,6 +44,7 @@ set(QEC_SOURCES
   detector_error_model.cpp
   experiments.cpp
   logger.cpp
+  logger_forwarder.cpp
   pcm_utils.cpp
   plugin_loader.cpp
   sparse_binary_matrix.cpp

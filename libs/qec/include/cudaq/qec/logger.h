@@ -135,6 +135,8 @@ std::string formatMessage(const std::string_view message, Args &&...args) {
 template <typename... Args>
 void logMessage(LogLevel logLevel, const std::string_view message,
                 const char *fileName, int lineNo, Args &&...args) {
+  if (!should_log(logLevel))
+    return;
   if (isForwarderEnabled()) {
     std::array<char, kRealtimeForwarderMaxMessageCapacity> buffer{};
     const std::size_t cap =
