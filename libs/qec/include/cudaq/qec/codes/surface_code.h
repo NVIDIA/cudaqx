@@ -22,24 +22,18 @@ enum surface_role { amx, amz, empty };
 /// @brief Surface-code orientation: controls which Pauli type (X or Z) occupies
 /// the bulk interior and which boundaries are X-type vs Z-type.
 ///
-/// Within cudaqx: XV and ZH put X-type stabilizers on left/right boundaries;
-/// XH and ZV put them on top/bottom.
-///
-/// WARNING — do NOT map these to Ising by name string. Ising has two naming
-/// layers: a `code_rotation` parameter (aliases O1=XV, O2=XH, O3=ZV, O4=ZH) and
-/// a derived `logical_direction` whose second character is the inverse of
-/// rotated_type. These cudaqx enum names coincide with Ising's
-/// logical_direction STRING but NOT with its physical geometry. To match an
-/// Ising-trained model, map by stabilizer geometry, never by name: Ising's
-/// pretrained d13 model uses code_rotation O1 (=XV), which corresponds to
-/// cudaqx sc_orientation::ZH — not
-/// ::XV and not ::XH. Confirm via stabilizer supports + logical-operator
-/// commutation.
+/// Names follow Ising's `code_rotation` convention (first character = bulk
+/// syndrome type, second character = rotated_type), so a given name denotes the
+/// SAME physical stabilizer layout in cudaqx and Ising — an Ising-trained model
+/// can be matched by name. By geometry: XV and ZH place X-type stabilizers on
+/// the left/right boundaries (Z on top/bottom); XH and ZV place X-type on
+/// top/bottom (Z on left/right). XV vs ZH (and XH vs ZV) differ in the bulk X/Z
+/// checkerboard.
 ///
 /// Observable convention: get_spin_op_observables() returns the valid logical
-/// pair for the grid's orientation. XV/ZH use X obs along the top row and Z obs
-/// along the left column; XH/ZV swap them (X along the left column, Z along the
-/// top row). See get_spin_op_observables() for details.
+/// pair for the orientation. XV/ZH use X obs along the top row and Z obs along
+/// the left column; XH/ZV swap them (X along the left column, Z along the top
+/// row). See get_spin_op_observables() for details.
 enum class sc_orientation { XV, XH, ZV, ZH };
 
 /// @brief Parse a surface-code orientation string (XV, XH, ZV, or ZH).
@@ -125,8 +119,9 @@ public:
   /// determines the number of data qubits per dimension
   uint32_t distance = 0;
 
-  /// @brief Orientation used to assign stabilizer roles.
-  sc_orientation orientation = sc_orientation::XV;
+  /// @brief Orientation used to assign stabilizer roles. The default ZH is the
+  /// legacy fixed surface-code layout, named per Ising's code_rotation.
+  sc_orientation orientation = sc_orientation::ZH;
 
   /// @brief length of the stabilizer grid
   /// for distance = d data qubits,
@@ -169,7 +164,7 @@ public:
 
   /// @brief Construct the grid from the code's distance
   stabilizer_grid(uint32_t distance,
-                  sc_orientation orientation = sc_orientation::XV);
+                  sc_orientation orientation = sc_orientation::ZH);
   /// @brief Empty constructor
   stabilizer_grid();
 

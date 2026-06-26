@@ -77,7 +77,7 @@ void bindSurfaceCode(nb::module_ &mod) {
   nb::class_<stabilizer_grid>(qecmod, "stabilizer_grid")
       .def(nb::init<>())
       .def(nb::init<std::uint32_t, sc_orientation>(), nb::arg("distance"),
-           nb::arg("orientation") = sc_orientation::XV)
+           nb::arg("orientation") = sc_orientation::ZH)
       .def(
           "__init__",
           [](stabilizer_grid &self, std::uint32_t distance,

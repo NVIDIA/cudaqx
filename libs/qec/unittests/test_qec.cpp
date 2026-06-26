@@ -770,8 +770,10 @@ TEST(QECCodeTester, checkSurfaceCodeOrientationParser) {
   EXPECT_EQ(sc_orientation::XH, surface->grid.orientation);
 }
 
-TEST(QECCodeTester, checkSurfaceCodeXVPreservesLegacyLayout) {
-  stabilizer_grid grid(3, sc_orientation::XV);
+TEST(QECCodeTester, checkSurfaceCodeDefaultPreservesLegacyLayout) {
+  // The default orientation (ZH under Ising naming) is the original fixed
+  // surface-code layout.
+  stabilizer_grid grid(3);
   const auto role_at = [&grid](std::size_t row, std::size_t col) {
     return grid.roles[row * grid.grid_length + col];
   };
@@ -821,11 +823,12 @@ std::vector<std::size_t> support_of(const cudaq::spin_op_term &term) {
 } // namespace
 
 // Pin the EXACT role grid of every orientation at d=3 so permuting the
-// orientation labels (or regressing the boundary logic) fails. The grids are
-// derived by tracing generate_grid_roles()/role_for_parity(); the XV grid
-// matches checkSurfaceCodeXVPreservesLegacyLayout. Boundary summary: XV/ZH put
-// amx on left/right and amz on top/bottom; XH/ZV put amx on top/bottom and amz
-// on left/right (XV vs ZH and XH vs ZV differ in the bulk checkerboard).
+// orientation labels (or regressing the boundary logic) fails. Grids derived by
+// tracing generate_grid_roles()/role_for_parity() and cross-checked against
+// Ising's code_rotation stabilizers; the ZH grid is the legacy default layout
+// (see checkSurfaceCodeDefaultPreservesLegacyLayout). Boundary summary: XV/ZH
+// put amx on left/right and amz on top/bottom; XH/ZV put amx on top/bottom and
+// amz on left/right (XV vs ZH and XH vs ZV differ in the bulk checkerboard).
 TEST(QECCodeTester, checkSurfaceCodeAllOrientationGeometries) {
   // ---- XV ----
   {
@@ -835,23 +838,23 @@ TEST(QECCodeTester, checkSurfaceCodeAllOrientationGeometries) {
       return grid.roles[row * grid.grid_length + col];
     };
     EXPECT_EQ(surface_role::empty, role_at(0, 0));
-    EXPECT_EQ(surface_role::empty, role_at(0, 1));
-    EXPECT_EQ(surface_role::amz, role_at(0, 2));
+    EXPECT_EQ(surface_role::amz, role_at(0, 1));
+    EXPECT_EQ(surface_role::empty, role_at(0, 2));
     EXPECT_EQ(surface_role::empty, role_at(0, 3));
 
-    EXPECT_EQ(surface_role::amx, role_at(1, 0));
-    EXPECT_EQ(surface_role::amz, role_at(1, 1));
-    EXPECT_EQ(surface_role::amx, role_at(1, 2));
-    EXPECT_EQ(surface_role::empty, role_at(1, 3));
+    EXPECT_EQ(surface_role::empty, role_at(1, 0));
+    EXPECT_EQ(surface_role::amx, role_at(1, 1));
+    EXPECT_EQ(surface_role::amz, role_at(1, 2));
+    EXPECT_EQ(surface_role::amx, role_at(1, 3));
 
-    EXPECT_EQ(surface_role::empty, role_at(2, 0));
-    EXPECT_EQ(surface_role::amx, role_at(2, 1));
-    EXPECT_EQ(surface_role::amz, role_at(2, 2));
-    EXPECT_EQ(surface_role::amx, role_at(2, 3));
+    EXPECT_EQ(surface_role::amx, role_at(2, 0));
+    EXPECT_EQ(surface_role::amz, role_at(2, 1));
+    EXPECT_EQ(surface_role::amx, role_at(2, 2));
+    EXPECT_EQ(surface_role::empty, role_at(2, 3));
 
     EXPECT_EQ(surface_role::empty, role_at(3, 0));
-    EXPECT_EQ(surface_role::amz, role_at(3, 1));
-    EXPECT_EQ(surface_role::empty, role_at(3, 2));
+    EXPECT_EQ(surface_role::empty, role_at(3, 1));
+    EXPECT_EQ(surface_role::amz, role_at(3, 2));
     EXPECT_EQ(surface_role::empty, role_at(3, 3));
   }
 
@@ -859,34 +862,6 @@ TEST(QECCodeTester, checkSurfaceCodeAllOrientationGeometries) {
   {
     SCOPED_TRACE("XH");
     stabilizer_grid grid(3, sc_orientation::XH);
-    const auto role_at = [&grid](std::size_t row, std::size_t col) {
-      return grid.roles[row * grid.grid_length + col];
-    };
-    EXPECT_EQ(surface_role::empty, role_at(0, 0));
-    EXPECT_EQ(surface_role::amx, role_at(0, 1));
-    EXPECT_EQ(surface_role::empty, role_at(0, 2));
-    EXPECT_EQ(surface_role::empty, role_at(0, 3));
-
-    EXPECT_EQ(surface_role::empty, role_at(1, 0));
-    EXPECT_EQ(surface_role::amz, role_at(1, 1));
-    EXPECT_EQ(surface_role::amx, role_at(1, 2));
-    EXPECT_EQ(surface_role::amz, role_at(1, 3));
-
-    EXPECT_EQ(surface_role::amz, role_at(2, 0));
-    EXPECT_EQ(surface_role::amx, role_at(2, 1));
-    EXPECT_EQ(surface_role::amz, role_at(2, 2));
-    EXPECT_EQ(surface_role::empty, role_at(2, 3));
-
-    EXPECT_EQ(surface_role::empty, role_at(3, 0));
-    EXPECT_EQ(surface_role::empty, role_at(3, 1));
-    EXPECT_EQ(surface_role::amx, role_at(3, 2));
-    EXPECT_EQ(surface_role::empty, role_at(3, 3));
-  }
-
-  // ---- ZV ----
-  {
-    SCOPED_TRACE("ZV");
-    stabilizer_grid grid(3, sc_orientation::ZV);
     const auto role_at = [&grid](std::size_t row, std::size_t col) {
       return grid.roles[row * grid.grid_length + col];
     };
@@ -911,7 +886,35 @@ TEST(QECCodeTester, checkSurfaceCodeAllOrientationGeometries) {
     EXPECT_EQ(surface_role::empty, role_at(3, 3));
   }
 
-  // ---- ZH ----
+  // ---- ZV ----
+  {
+    SCOPED_TRACE("ZV");
+    stabilizer_grid grid(3, sc_orientation::ZV);
+    const auto role_at = [&grid](std::size_t row, std::size_t col) {
+      return grid.roles[row * grid.grid_length + col];
+    };
+    EXPECT_EQ(surface_role::empty, role_at(0, 0));
+    EXPECT_EQ(surface_role::amx, role_at(0, 1));
+    EXPECT_EQ(surface_role::empty, role_at(0, 2));
+    EXPECT_EQ(surface_role::empty, role_at(0, 3));
+
+    EXPECT_EQ(surface_role::empty, role_at(1, 0));
+    EXPECT_EQ(surface_role::amz, role_at(1, 1));
+    EXPECT_EQ(surface_role::amx, role_at(1, 2));
+    EXPECT_EQ(surface_role::amz, role_at(1, 3));
+
+    EXPECT_EQ(surface_role::amz, role_at(2, 0));
+    EXPECT_EQ(surface_role::amx, role_at(2, 1));
+    EXPECT_EQ(surface_role::amz, role_at(2, 2));
+    EXPECT_EQ(surface_role::empty, role_at(2, 3));
+
+    EXPECT_EQ(surface_role::empty, role_at(3, 0));
+    EXPECT_EQ(surface_role::empty, role_at(3, 1));
+    EXPECT_EQ(surface_role::amx, role_at(3, 2));
+    EXPECT_EQ(surface_role::empty, role_at(3, 3));
+  }
+
+  // ---- ZH (legacy default layout) ----
   {
     SCOPED_TRACE("ZH");
     stabilizer_grid grid(3, sc_orientation::ZH);
@@ -919,23 +922,23 @@ TEST(QECCodeTester, checkSurfaceCodeAllOrientationGeometries) {
       return grid.roles[row * grid.grid_length + col];
     };
     EXPECT_EQ(surface_role::empty, role_at(0, 0));
-    EXPECT_EQ(surface_role::amz, role_at(0, 1));
-    EXPECT_EQ(surface_role::empty, role_at(0, 2));
+    EXPECT_EQ(surface_role::empty, role_at(0, 1));
+    EXPECT_EQ(surface_role::amz, role_at(0, 2));
     EXPECT_EQ(surface_role::empty, role_at(0, 3));
 
-    EXPECT_EQ(surface_role::empty, role_at(1, 0));
-    EXPECT_EQ(surface_role::amx, role_at(1, 1));
-    EXPECT_EQ(surface_role::amz, role_at(1, 2));
-    EXPECT_EQ(surface_role::amx, role_at(1, 3));
+    EXPECT_EQ(surface_role::amx, role_at(1, 0));
+    EXPECT_EQ(surface_role::amz, role_at(1, 1));
+    EXPECT_EQ(surface_role::amx, role_at(1, 2));
+    EXPECT_EQ(surface_role::empty, role_at(1, 3));
 
-    EXPECT_EQ(surface_role::amx, role_at(2, 0));
-    EXPECT_EQ(surface_role::amz, role_at(2, 1));
-    EXPECT_EQ(surface_role::amx, role_at(2, 2));
-    EXPECT_EQ(surface_role::empty, role_at(2, 3));
+    EXPECT_EQ(surface_role::empty, role_at(2, 0));
+    EXPECT_EQ(surface_role::amx, role_at(2, 1));
+    EXPECT_EQ(surface_role::amz, role_at(2, 2));
+    EXPECT_EQ(surface_role::amx, role_at(2, 3));
 
     EXPECT_EQ(surface_role::empty, role_at(3, 0));
-    EXPECT_EQ(surface_role::empty, role_at(3, 1));
-    EXPECT_EQ(surface_role::amz, role_at(3, 2));
+    EXPECT_EQ(surface_role::amz, role_at(3, 1));
+    EXPECT_EQ(surface_role::empty, role_at(3, 2));
     EXPECT_EQ(surface_role::empty, role_at(3, 3));
   }
 }

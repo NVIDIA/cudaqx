@@ -31,11 +31,13 @@ surface_role role_for_parity(sc_orientation orientation, bool odd_parity) {
   switch (orientation) {
   case sc_orientation::XV:
   case sc_orientation::XH:
-    // Legacy XV has Z on even stabilizer-grid parity and X on odd parity.
-    return odd_parity ? surface_role::amx : surface_role::amz;
+    // First bulk syndrome type X (Ising code_rotation X*): X on even
+    // stabilizer-grid parity, Z on odd.
+    return odd_parity ? surface_role::amz : surface_role::amx;
   case sc_orientation::ZV:
   case sc_orientation::ZH:
-    return odd_parity ? surface_role::amz : surface_role::amx;
+    // First bulk syndrome type Z: Z on even parity, X on odd.
+    return odd_parity ? surface_role::amx : surface_role::amz;
   }
   throw std::runtime_error("Unhandled surface-code orientation.");
 }
@@ -100,7 +102,7 @@ void stabilizer_grid::generate_grid_roles() {
   }
 
   const bool horizontal_boundaries_use_even_parity =
-      orientation == sc_orientation::XV || orientation == sc_orientation::ZV;
+      orientation == sc_orientation::XH || orientation == sc_orientation::ZH;
 
   // set top/bottom boundaries for weight 2 stabs
   for (size_t row = 0; row < grid_length; row += grid_length - 1) {
@@ -424,7 +426,7 @@ surface_code::surface_code(const heterogeneous_map &options) : code() {
         "qec::get_code(..., options) options map.");
   distance = options.get<std::size_t>("distance");
   grid = stabilizer_grid(distance, parse_orientation(options.get<std::string>(
-                                       "orientation", "XV")));
+                                       "orientation", "ZH")));
 
   m_stabilizers = grid.get_spin_op_stabilizers();
   m_pauli_observables = grid.get_spin_op_observables();
