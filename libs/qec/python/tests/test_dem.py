@@ -100,12 +100,12 @@ def test_dem_from_memory_circuit():
     # are kept as distinct columns (they are not merged), so the same detector
     # column pattern can appear more than once with a distinct observable row.
     expected_detector_error_matrix = """
-11111.....1.................
-..1.1111...111..............
-...11..111..1.1111..........
-..........111.1.1.1111......
-.............1.11..1.11111..
-.................1..11..1111
+11111......11111111111111111......................................
+..1.11111...11..1111.111....111111111111111111....................
+...11..1111..11..1.1.11111.....111...11111....1111111111..........
+...........1111...111.11.1111....11....1.111..1..1..11..1111......
+...............111111..1...1.111111.....11.111.111...111.1.11111..
+.....................1111111.......11111111111....111111..11..1111
 """
     # Uncomment the following line to get a string representation of the DEM
     # that you can compare to expected_detector_error_matrix.
@@ -120,14 +120,19 @@ def test_dem_from_memory_circuit():
     # The following error rates were captured from the above print statement and
     # are considered "truth" data now.
     expected_error_rates = [
-        0.0053, 0.0132, 0.0235, 0.0158, 0.0210, 0.0235, 0.0080, 0.0235, 0.0132,
-        0.0053, 0.0106, 0.0053, 0.0053, 0.0106, 0.0053, 0.0053, 0.0053, 0.0106,
-        0.0235, 0.0158, 0.0158, 0.0184, 0.0080, 0.0260, 0.0158, 0.0053, 0.0184,
-        0.0261
+        0.0119, 0.0053, 0.0145, 0.0086, 0.0100, 0.0229, 0.0047, 0.0013, 0.0165,
+        0.0100, 0.0093, 0.0073, 0.0040, 0.0027, 0.0047, 0.0013, 0.0027, 0.0013,
+        0.0027, 0.0020, 0.0007, 0.0020, 0.0013, 0.0020, 0.0007, 0.0020, 0.0020,
+        0.0007, 0.0040, 0.0020, 0.0020, 0.0007, 0.0047, 0.0007, 0.0040, 0.0027,
+        0.0007, 0.0007, 0.0007, 0.0007, 0.0020, 0.0013, 0.0007, 0.0007, 0.0027,
+        0.0007, 0.0007, 0.0040, 0.0013, 0.0013, 0.0027, 0.0053, 0.0027, 0.0047,
+        0.0027, 0.0007, 0.0267, 0.0100, 0.0067, 0.0093, 0.0248, 0.0053, 0.0100,
+        0.0027, 0.0305, 0.0093
     ]
     assert np.allclose(dem.error_rates, expected_error_rates, atol=1e-4)
 
-    expected_observables_flips_matrix = '1.....111......1......1.1.1.\n'
+    expected_observables_flips_matrix = (
+        '.1....1.1.1...................1.1...1.1.1....1..1..1..1......1.1.1\n')
     # Uncomment the following line to get a string representation of the
     # observables flips matrix that you can compare to
     # expected_observables_flips_matrix.
@@ -173,16 +178,15 @@ def test_decoding_from_dem_from_memory_circuit():
     nShots = 200
 
     dem = qec.dem_from_memory_circuit(code, statePrep, nRounds, noise)
-    # Sample the memory circuit with errors
-    syndromes, data = qec.sample_memory_circuit(code, statePrep, nShots,
-                                                nRounds, noise)
+    syndromes, sampled_errors = qec.dem_sampling(
+        dem.detector_error_matrix, nShots, dem.error_rates)
+    syndromes = np.asarray(syndromes, dtype=np.uint8)
+    sampled_errors = np.asarray(sampled_errors, dtype=np.uint8)
 
-    logical_measurements = (Lz @ data.transpose()) % 2
-    # only one logical qubit, so do not need the second axis
-    logical_measurements = logical_measurements.flatten()
+    logical_measurements = (
+        (dem.observables_flips_matrix @ sampled_errors.T) % 2
+    ).flatten().astype(np.uint8)
 
-    # Use nShots for the first dimension and whatever is left for the second
-    syndromes = syndromes.reshape((nShots, -1))
     decoder = qec.get_decoder('single_error_lut', dem.detector_error_matrix)
     dr = decoder.decode_batch(syndromes)
     error_predictions = np.asarray(dr.result, dtype=np.uint8)
@@ -217,7 +221,6 @@ def test_decoding_from_surface_code_dem_from_memory_circuit(
 
     cudaq.set_random_seed(13)
     code = qec.get_code('surface_code', distance=5)
-    Lz = code.get_observables_z()
     p = error_rate
     noise = cudaq.NoiseModel()
     noise.add_all_qubit_channel("x", cudaq.Depolarization2(p), 1)
@@ -225,23 +228,18 @@ def test_decoding_from_surface_code_dem_from_memory_circuit(
     nRounds = 5
     nShots = 2000
 
-    # Sample the memory circuit with errors
-    syndromes, data = qec.sample_memory_circuit(code, statePrep, nShots,
-                                                nRounds, noise)
+    dem = qec.dem_from_memory_circuit(code, statePrep, nRounds, noise)
+    syndromes, sampled_errors = qec.dem_sampling(
+        dem.detector_error_matrix, nShots, dem.error_rates)
+    syndromes = np.asarray(syndromes, dtype=np.uint8)
+    sampled_errors = np.asarray(sampled_errors, dtype=np.uint8)
 
-    logical_measurements = (Lz @ data.transpose()) % 2
-    # only one logical qubit, so do not need the second axis
-    logical_measurements = logical_measurements.flatten()
+    logical_measurements = (
+        (dem.observables_flips_matrix @ sampled_errors.T) % 2
+    ).flatten().astype(np.uint8)
 
-    # Reshape and drop the X stabilizers, keeping just the Z stabilizers (since this is prep0)
-    syndromes = syndromes.reshape((nShots, nRounds, -1))
-    syndromes = syndromes[:, :, :syndromes.shape[2] // 2]
-    # Now flatten to two dimensions again
-    syndromes = syndromes.reshape((nShots, -1))
-    # Sum syndromes across the second dimension
     num_syn_triggered_per_shot = np.sum(syndromes, axis=1)
 
-    dem = qec.z_dem_from_memory_circuit(code, statePrep, nRounds, noise)
     try:
         if decoder_name == "tensor_network_decoder":
             # Print the shape of the matrices
@@ -304,7 +302,6 @@ def test_pymatching_decode_to_observable_surface_code_dem():
     flips directly.cpp)."""
     cudaq.set_random_seed(13)
     code = qec.get_code('surface_code', distance=5)
-    Lz = code.get_observables_z()
     p = 0.003
     noise = cudaq.NoiseModel()
     noise.add_all_qubit_channel("x", cudaq.Depolarization2(p), 1)
@@ -312,18 +309,27 @@ def test_pymatching_decode_to_observable_surface_code_dem():
     nRounds = 5
     nShots = 2000
 
-    syndromes, data = qec.sample_memory_circuit(code, statePrep, nShots,
-                                                nRounds, noise)
+    dem = qec.z_dem_from_memory_circuit(code, statePrep, nRounds, noise,
+                                            decompose_errors=True)
 
-    logical_measurements = (Lz @ data.transpose()) % 2
-    logical_measurements = logical_measurements.flatten()
+    # Verify decomposition: every column of the detector error matrix must have
+    # weight ≤ 2 (graph-like) so that PyMatching can accept it.
+    H = np.asarray(dem.detector_error_matrix)
+    max_col_weight = int(H.sum(axis=0).max())
+    assert max_col_weight <= 2, (
+        f"decompose_errors=True should yield max column weight 2, got {max_col_weight}"
+    )
 
-    syndromes = syndromes.reshape((nShots, nRounds, -1))
-    syndromes = syndromes[:, :, :syndromes.shape[2] // 2]
-    syndromes = syndromes.reshape((nShots, -1))
+    syndromes, sampled_errors = qec.dem_sampling(
+        dem.detector_error_matrix, nShots, dem.error_rates)
+    syndromes = np.asarray(syndromes, dtype=np.uint8)
+    sampled_errors = np.asarray(sampled_errors, dtype=np.uint8)
 
-    dem = qec.z_dem_from_memory_circuit(code, statePrep, nRounds, noise)
+    logical_measurements = (
+        (dem.observables_flips_matrix @ sampled_errors.T) % 2
+    ).flatten().astype(np.uint8)
 
+    # Decode syndromes using the graph-like decomposed DEM with PyMatching.
     decoder = qec.get_decoder(
         'pymatching',
         dem.detector_error_matrix,

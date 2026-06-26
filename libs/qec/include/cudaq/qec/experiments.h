@@ -128,30 +128,39 @@ sample_memory_circuit(const code &code, std::size_t numShots,
 /// @param statePrep Initial state preparation operation
 /// @param numRounds Number of stabilizer measurement rounds
 /// @param noise Noise model to apply
+/// @param decompose_errors If true, hyperedge error mechanisms are decomposed
+///        into pairs of two-detector edges by Stim before returning.
 /// @return Detector error model
 cudaq::qec::detector_error_model
 dem_from_memory_circuit(const code &code, operation statePrep,
-                        std::size_t numRounds, cudaq::noise_model &noise);
+                        std::size_t numRounds, cudaq::noise_model &noise,
+                        bool decompose_errors = false);
 
 /// @brief Given a memory circuit setup, generate a DEM for X stabilizers.
 /// @param code QEC Code to sample
 /// @param statePrep Initial state preparation operation
 /// @param numRounds Number of stabilizer measurement rounds
 /// @param noise Noise model to apply
+/// @param decompose_errors If true, hyperedge error mechanisms are decomposed
+///        into pairs of two-detector edges by Stim before returning.
 /// @return Detector error model
 detector_error_model x_dem_from_memory_circuit(const code &code,
                                                operation statePrep,
                                                std::size_t numRounds,
-                                               cudaq::noise_model &noise);
+                                               cudaq::noise_model &noise,
+                                               bool decompose_errors = false);
 
 /// @brief Given a memory circuit setup, generate a DEM for Z stabilizers.
 /// @param code QEC Code to sample
 /// @param statePrep Initial state preparation operation
 /// @param numRounds Number of stabilizer measurement rounds
 /// @param noise Noise model to apply
+/// @param decompose_errors If true, hyperedge error mechanisms are decomposed
+///        into pairs of two-detector edges by Stim before returning.
 /// @return Detector error model
 detector_error_model z_dem_from_memory_circuit(const code &code,
                                                operation statePrep,
                                                std::size_t numRounds,
-                                               cudaq::noise_model &noise);
+                                               cudaq::noise_model &noise,
+                                               bool decompose_errors = false);
 } // namespace cudaq::qec

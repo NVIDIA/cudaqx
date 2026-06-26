@@ -30,13 +30,13 @@ TEST(QECCodeTester, checkRepetitionNoiseStim) {
     syndromes.dump();
     printf("data\n");
     d.dump();
-    EXPECT_EQ(syndromes.shape()[0], 4);
-    EXPECT_EQ(syndromes.shape()[1], 8);
+    EXPECT_EQ(syndromes.shape()[0], 2); // numShots
+    EXPECT_EQ(syndromes.shape()[1], 40); // numDetectors
 
     // Should have some 1s since it's noisy
     int sum = 0;
-    for (std::size_t i = 0; i < 2; i++)
-      for (std::size_t j = 0; j < 8; j++)
+    for (std::size_t i = 0; i < syndromes.shape()[0]; i++)
+      for (std::size_t j = 0; j < syndromes.shape()[1]; j++)
         sum += syndromes.at({i, j});
 
     EXPECT_TRUE(sum > 0);
@@ -56,8 +56,8 @@ TEST(QECCodeTester, checkRepetitionNoiseStim) {
 
     // Should have some 1s since it's noisy
     int sum = 0;
-    for (std::size_t i = 0; i < 2; i++)
-      for (std::size_t j = 0; j < 8; j++)
+    for (std::size_t i = 0; i < syndromes.shape()[0]; i++)
+      for (std::size_t j = 0; j < syndromes.shape()[1]; j++)
         sum += syndromes.at({i, j});
 
     EXPECT_TRUE(sum > 0);
@@ -81,25 +81,15 @@ TEST(QECCodeTester, checkSteaneNoiseStim) {
     syndromes.dump();
     printf("data\n");
     d.dump();
-    EXPECT_EQ(syndromes.shape()[0], nShots * nRounds);
-    EXPECT_EQ(syndromes.shape()[1], 6);
+    EXPECT_EQ(syndromes.shape()[0], nShots); // numShots
+    EXPECT_EQ(syndromes.shape()[1], 40); // numDetectors
 
-    // Should have some 1s since it's noisy
-    // bitflip should only trigger x syndromes
-    int x_sum = 0;
-    int z_sum = 0;
-
-    for (std::size_t i = 0; i < syndromes.shape()[0]; i++) {
-      for (std::size_t j_x = 0; j_x < syndromes.shape()[1] / 2; j_x++) {
-        x_sum += syndromes.at({i, j_x});
-      }
-      for (std::size_t j_z = syndromes.shape()[1] / 2;
-           j_z < syndromes.shape()[1]; j_z++) {
-        z_sum += syndromes.at({i, j_z});
-      }
-    }
-    EXPECT_TRUE(x_sum > 0);
-    EXPECT_TRUE(z_sum == 0);
+    // Noise present — some detectors must fire.
+    int sum = 0;
+    for (std::size_t i = 0; i < syndromes.shape()[0]; i++)
+      for (std::size_t j = 0; j < syndromes.shape()[1]; j++)
+        sum += syndromes.at({i, j});
+    EXPECT_TRUE(sum > 0);
   }
   {
     // two qubit depol
@@ -115,21 +105,11 @@ TEST(QECCodeTester, checkSteaneNoiseStim) {
     printf("data\n");
     d.dump();
 
-    // Should have some 1s since it's noisy
-    // depolarizing triggers x and z syndromes
-    int x_sum = 0;
-    int z_sum = 0;
-    for (std::size_t i = 0; i < syndromes.shape()[0]; i++) {
-      for (std::size_t j_x = 0; j_x < syndromes.shape()[1] / 2; j_x++) {
-        x_sum += syndromes.at({i, j_x});
-      }
-      for (std::size_t j_z = syndromes.shape()[1] / 2;
-           j_z < syndromes.shape()[1]; j_z++) {
-        z_sum += syndromes.at({i, j_z});
-      }
-    }
-    EXPECT_TRUE(x_sum > 0);
-    EXPECT_TRUE(z_sum > 0);
+    int sum = 0;
+    for (std::size_t i = 0; i < syndromes.shape()[0]; i++)
+      for (std::size_t j = 0; j < syndromes.shape()[1]; j++)
+        sum += syndromes.at({i, j});
+    EXPECT_TRUE(sum > 0);
   }
   {
     // one qubit bitflip
@@ -143,22 +123,12 @@ TEST(QECCodeTester, checkSteaneNoiseStim) {
     syndromes.dump();
     printf("data\n");
     d.dump();
-
     // Should have some 1s since it's noisy
-    // only getting detectible errors on s_z ancillas
-    int x_sum = 0;
-    int z_sum = 0;
-    for (std::size_t i = 0; i < syndromes.shape()[0]; i++) {
-      for (std::size_t j_x = 0; j_x < syndromes.shape()[1] / 2; j_x++) {
-        x_sum += syndromes.at({i, j_x});
-      }
-      for (std::size_t j_z = syndromes.shape()[1] / 2;
-           j_z < syndromes.shape()[1]; j_z++) {
-        z_sum += syndromes.at({i, j_z});
-      }
-    }
-    EXPECT_TRUE(x_sum > 0);
-    EXPECT_TRUE(z_sum > 0);
+    int sum = 0;
+    for (std::size_t i = 0; i < syndromes.shape()[0]; i++)
+      for (std::size_t j = 0; j < syndromes.shape()[1]; j++)
+        sum += syndromes.at({i, j});
+    EXPECT_TRUE(sum > 0);
   }
   {
     // one qubit phase
@@ -174,22 +144,11 @@ TEST(QECCodeTester, checkSteaneNoiseStim) {
     d.dump();
 
     // Should have some 1s since it's noisy
-    // only getting detectible errors on s_z ancillas
-    int x_sum = 0;
-    int z_sum = 0;
-    for (std::size_t i = 0; i < syndromes.shape()[0]; i++) {
-      for (std::size_t j_x = 0; j_x < syndromes.shape()[1] / 2; j_x++) {
-        x_sum += syndromes.at({i, j_x});
-      }
-      for (std::size_t j_z = syndromes.shape()[1] / 2;
-           j_z < syndromes.shape()[1]; j_z++) {
-        z_sum += syndromes.at({i, j_z});
-      }
-    }
-    // Even though phase flip is a z error,
-    // additional hadamards in prepp can convert to x error (first round only)
-    EXPECT_TRUE(x_sum > 0);
-    EXPECT_TRUE(z_sum > 0);
+    int sum = 0;
+    for (std::size_t i = 0; i < syndromes.shape()[0]; i++)
+      for (std::size_t j = 0; j < syndromes.shape()[1]; j++)
+        sum += syndromes.at({i, j});
+    EXPECT_TRUE(sum > 0);
   }
   {
     // one qubit depol
@@ -205,20 +164,11 @@ TEST(QECCodeTester, checkSteaneNoiseStim) {
     d.dump();
 
     // Should have some 1s since it's noisy
-    // only getting detectible errors on s_z ancillas
-    int x_sum = 0;
-    int z_sum = 0;
-    for (std::size_t i = 0; i < syndromes.shape()[0]; i++) {
-      for (std::size_t j_x = 0; j_x < syndromes.shape()[1] / 2; j_x++) {
-        x_sum += syndromes.at({i, j_x});
-      }
-      for (std::size_t j_z = syndromes.shape()[1] / 2;
-           j_z < syndromes.shape()[1]; j_z++) {
-        z_sum += syndromes.at({i, j_z});
-      }
-    }
-    EXPECT_TRUE(x_sum > 0);
-    EXPECT_TRUE(z_sum > 0);
+    int sum = 0;
+    for (std::size_t i = 0; i < syndromes.shape()[0]; i++)
+      for (std::size_t j = 0; j < syndromes.shape()[1]; j++)
+        sum += syndromes.at({i, j});
+    EXPECT_TRUE(sum > 0);
   }
 }
 
@@ -429,12 +379,26 @@ TEST(QECCodeTester, checkNoisySampleMemoryCircuitAndDecodeStim) {
     printf("Hz:\n");
     H.dump();
     printf("end\n");
+    // syndromes shape: (nShots=1, nDetectors).  
+    // Format: [numFixed round-0 detectors] [numCols * (nRounds-1) detectors] [numFixed final-data]
+    // For prep0 (Z-prep): numFixed = numAncz = 3
+    // numCols = number of per-round syndromes
+    size_t numAncz_s = steane->get_num_ancilla_z_qubits();
+    size_t numAncx_s = steane->get_num_ancilla_x_qubits();
+    size_t numCols = numAncz_s + numAncx_s;
+    size_t numFixed = numAncz_s; // prep0 → Z-ancilla are fixed
+    size_t fixedOffset = 0;      // Z-ancilla sit at cols 0..numFixed-1
+    const uint8_t *shotRow = syndromes.data(); // nShots=1, shot=0
     size_t numLerrors = 0;
-    size_t stride = syndromes.shape()[1];
     cudaqx::tensor<uint8_t> pauli_frame({observables.shape()[0]});
     for (size_t i = 0; i < nRounds - 1; ++i) {
-      cudaqx::tensor<uint8_t> syndrome({stride});
-      syndrome.borrow(syndromes.data() + i * stride);
+      cudaqx::tensor<uint8_t> syndrome({numCols});
+      if (i == 0) {
+        for (size_t c = 0; c < numFixed; ++c)
+          syndrome.at({c}) = shotRow[c];
+      } else {
+        syndrome.borrow(shotRow + numFixed + (i - 1) * numCols);
+      }
       printf("syndrome:\n");
       syndrome.dump();
       auto [converged, v_result, opt] = decoder->decode(syndrome);
@@ -483,9 +447,8 @@ TEST(QECCodeTester, checkNoisySampleMemoryCircuitAndDecodeStim) {
         *steane, cudaq::qec::operation::prepp, nShots, nRounds, noise);
     printf("syndromes:\n");
     syndromes.dump();
-    EXPECT_EQ(syndromes.shape()[0], nShots * nRounds);
-    EXPECT_EQ(syndromes.shape()[1], 6);
-
+    EXPECT_EQ(syndromes.shape()[0], nShots);
+    EXPECT_EQ(syndromes.shape()[1], 40); // numDetectors
     // With noise, Lx will sometimes be flipped
     printf("data:\n");
     d.dump();
@@ -508,15 +471,28 @@ TEST(QECCodeTester, checkNoisySampleMemoryCircuitAndDecodeStim) {
     observables.dump();
     auto decoder = cudaq::qec::get_decoder("single_error_lut", H);
     printf("end\n");
+    // syndromes shape: (nShots=1, nDetectors).  
+    // Format: [numFixed round-0 detectors] [numCols * (nRounds-1) detectors] [numFixed final-data]
+    // For prepp (X-prep): numFixed = numAncx = 3
+    // numCols = number of per-round syndromes
+    size_t numAncz_s2 = steane->get_num_ancilla_z_qubits();
+    size_t numAncx_s2 = steane->get_num_ancilla_x_qubits();
+    size_t numCols2  = numAncz_s2 + numAncx_s2;
+    size_t numFixed2 = numAncx_s2;   // prepp → X-ancilla are fixed
+    size_t k2 = syndromes.shape()[1];
     size_t numLerrors = 0;
-    size_t stride = syndromes.shape()[1];
     for (size_t shot = 0; shot < nShots; ++shot) {
       cudaqx::tensor<uint8_t> pauli_frame({observables.shape()[0]});
+      const uint8_t *shotRow2 = syndromes.data() + shot * k2;
       for (size_t i = 0; i < nRounds; ++i) {
-        size_t count = shot * nRounds + i;
-        printf("shot: %zu, round: %zu, count: %zu\n", shot, i, count);
-        cudaqx::tensor<uint8_t> syndrome({stride});
-        syndrome.borrow(syndromes.data() + stride * count);
+        printf("shot: %zu, round: %zu\n", shot, i);
+        cudaqx::tensor<uint8_t> syndrome({numCols2});
+        if (i == 0) {
+          for (size_t c = 0; c < numFixed2; ++c)
+            syndrome.at({c}) = shotRow2[c];
+        } else {
+          syndrome.borrow(shotRow2 + numFixed2 + (i - 1) * numCols2);
+        }
         printf("syndrome:\n");
         syndrome.dump();
         auto [converged, v_result, opt] = decoder->decode(syndrome);

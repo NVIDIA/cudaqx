@@ -53,19 +53,23 @@ def test_code_stabilizers():
 
 def test_sample_memory_circuit():
     steane = qec.get_code("steane")
+    nShots, nRounds = 10, 4
+    # Shape: (nShots, k) where k = 2*numAncz + (nRounds-1)*numCols
+    # For Steane: numAncz=3, numCols=6, nRounds=4 → k = 2*3 + 3*6 = 24
+    nDetectors = 24
 
     syndromes, dataResults = qec.sample_memory_circuit(steane,
-                                                       numShots=10,
-                                                       numRounds=4)
+                                                       numShots=nShots,
+                                                       numRounds=nRounds)
     assert isinstance(syndromes, np.ndarray)
-    assert syndromes.shape == (40, 6)
+    assert syndromes.shape == (nShots, nDetectors)
     print(syndromes)
 
     syndromes_with_op, dataResults = qec.sample_memory_circuit(
-        steane, qec.operation.prep1, 10, 4)
+        steane, qec.operation.prep1, nShots, nRounds)
     assert isinstance(syndromes_with_op, np.ndarray)
     print(syndromes_with_op)
-    assert syndromes_with_op.shape == (40, 6)
+    assert syndromes_with_op.shape == (nShots, nDetectors)
 
 
 def test_custom_steane_code():
@@ -94,12 +98,14 @@ def test_noisy_simulation():
                                 qec.TwoQubitDepolarization(.1),
                                 num_controls=1)
     steane = qec.get_code("steane")
+    nShots, nRounds = 10, 4
+    nDetectors = 24
     syndromes, dataResults = qec.sample_memory_circuit(steane,
-                                                       numShots=10,
-                                                       numRounds=4,
+                                                       numShots=nShots,
+                                                       numRounds=nRounds,
                                                        noise=noise)
     assert isinstance(syndromes, np.ndarray)
-    assert syndromes.shape == (40, 6)
+    assert syndromes.shape == (nShots, nDetectors)
     print(syndromes)
     assert np.any(syndromes)
     cudaq.reset_target()
@@ -111,7 +117,7 @@ def test_python_code():
                                                        numShots=10,
                                                        numRounds=4)
     assert isinstance(syndromes, np.ndarray)
-    assert syndromes.shape == (40, 6)
+    assert syndromes.shape == (numShots, 40)
     print(syndromes)
     assert not np.any(syndromes)
 

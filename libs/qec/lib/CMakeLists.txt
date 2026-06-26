@@ -123,6 +123,7 @@ target_link_libraries(${LIBRARY_NAME}
     cudaq::cudaq-operator
   PRIVATE
     cudaq::cudaq-common
+    cudaq::cudaq-mlir-runtime
 )
 
 target_link_libraries(${LIBRARY_NAME} PRIVATE
