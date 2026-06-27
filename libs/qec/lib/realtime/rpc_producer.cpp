@@ -66,18 +66,26 @@ struct single_producer_guard {
   single_producer_guard &operator=(const single_producer_guard &) = delete;
 };
 
-// Bounded spin for a free slot.  Slot is free when both rx_flags[i] and
-// tx_flags[i] are zero.  Returns UINT32_MAX on timeout.
+// Bounded spin for the NEXT slot in monotonic ring order.  Returns
+// UINT32_MAX on timeout.
+//
+// Ring discipline: the producer walks slots monotonically
+// (session.producer_cursor(), advanced mod num_slots each acquire) rather
+// than picking the lowest free slot.  This keeps it in lockstep with the
+// strict-FIFO consumer (the device-graph scheduler / host loop, both with
+// shared-ring scanning OFF), which waits at exactly its own monotonically-
+// advancing cursor.  The cursor is reset to 0 by
+// qec_realtime_session::initialize(), matching the consumer's reset, so both
+// start at slot 0.  Back-pressure is preserved: we wait until the chosen slot
+// is free (rx_flags[s]==0 AND tx_flags[s]==0 -- request consumed by the
+// dispatcher and response consumed by release_slot()).
 //
 // THREAD-SAFETY ASSUMPTION (single producer):
-// This scan finds a free slot and returns it without atomically claiming
-// it.  That's correct under the current single-producer invariant
-// documented in rpc_producer.h: the QEC main loop is the only RPC
-// producer and is single-threaded by construction, so the chosen slot is
-// always written before the next call to acquire_slot().  If a second
-// producer thread is ever introduced, two callers can pick the same slot
-// here -- the fix is a CAS-based atomic claim of rx_flags[s] from 0 to a
-// sentinel "in-progress" value, rolling back to 0 if the claim loses;
+// We read-modify-write producer_cursor() non-atomically, which is correct
+// under the single-producer invariant documented in rpc_producer.h (the QEC
+// main loop is the only producer, single-threaded by construction).  A future
+// multi-producer design would make the cursor advance an atomic fetch-add
+// (the natural multi-producer ring head) and add a CAS claim of the slot;
 // this is deferred to a follow-up MR.
 std::uint32_t acquire_slot(cudaq::qec::realtime::qec_realtime_session &session,
                            int timeout_ms) {
@@ -86,14 +94,12 @@ std::uint32_t acquire_slot(cudaq::qec::realtime::qec_realtime_session &session,
   const std::size_t n = session.num_slots();
   if (rx == nullptr || tx == nullptr || n == 0)
     return UINT32_MAX;
-  // Two-ring back-pressure: the slot is reusable only after both the RX
-  // request has been consumed (rx_flags[s] cleared by the dispatcher) AND
-  // the TX response has been consumed (tx_flags[s] cleared by the
-  // producer at release_slot()).  See [host_api.bs back-pressure].
+  const std::uint32_t s =
+      static_cast<std::uint32_t>(session.producer_cursor() % n);
   for (int waited = 0; waited < timeout_ms; ++waited) {
-    for (std::uint32_t s = 0; s < n; ++s) {
-      if (rx[s] == 0 && tx[s] == 0)
-        return s;
+    if (rx[s] == 0 && tx[s] == 0) {
+      session.set_producer_cursor((s + 1u) % n);
+      return s;
     }
     // 1 ms granularity matches the test's spin cadence.  The shared ring
     // is host-pinned + UVA-mapped, so the producer's view of rx/tx flags

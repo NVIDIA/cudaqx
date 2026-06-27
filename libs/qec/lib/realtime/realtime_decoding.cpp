@@ -104,11 +104,17 @@ void maybe_init_realtime_session() {
           "via dlsym(RTLD_DEFAULT, ...). The host executable must absorb "
           "libcudaq-realtime-dispatch.a and link with --export-dynamic.");
 
-    cudaError_t rc = set_mode_fn(1);
+    // Strict-FIFO: force shared-ring scanning OFF.  The device-graph scheduler
+    // persists its RX cursor across self-relaunch and the rpc_producer advances
+    // monotonically, so consumer and producer walk the ring in lockstep -- no
+    // scan.  We force 0 (rather than rely on the default) to clear any stale
+    // value left in this process, and restore 0 on finalize via the ownership
+    // flag below.
+    cudaError_t rc = set_mode_fn(0);
     if (rc != cudaSuccess)
       throw std::runtime_error(
           "CUDAQ_QEC_REALTIME_MODE=inproc_rpc requested but "
-          "cudaq_dispatch_kernel_set_shared_ring_mode(1) failed with rc=" +
+          "cudaq_dispatch_kernel_set_shared_ring_mode(0) failed with rc=" +
           std::to_string(rc));
     g_realtime_session_owns_shared_ring_mode = true;
   } else {
