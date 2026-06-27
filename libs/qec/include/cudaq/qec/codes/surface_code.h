@@ -22,13 +22,11 @@ enum surface_role { amx, amz, empty };
 /// @brief Surface-code orientation: controls which Pauli type (X or Z) occupies
 /// the bulk interior and which boundaries are X-type vs Z-type.
 ///
-/// Names follow Ising's `code_rotation` convention (first character = bulk
-/// syndrome type, second character = rotated_type), so a given name denotes the
-/// SAME physical stabilizer layout in cudaqx and Ising — an Ising-trained model
-/// can be matched by name. By geometry: XV and ZH place X-type stabilizers on
-/// the left/right boundaries (Z on top/bottom); XH and ZV place X-type on
-/// top/bottom (Z on left/right). XV vs ZH (and XH vs ZV) differ in the bulk X/Z
-/// checkerboard.
+/// Geometry names follow Ising's `code_rotation` convention (first character =
+/// bulk syndrome type, second character = rotated_type). By geometry: XV and ZH
+/// place X-type stabilizers on the left/right boundaries (Z on top/bottom); XH
+/// and ZV place X-type on top/bottom (Z on left/right). XV vs ZH (and XH vs ZV)
+/// differ in the bulk X/Z checkerboard.
 ///
 /// Observable convention: get_spin_op_observables() returns the valid logical
 /// pair for the orientation. XV/ZH use X obs along the top row and Z obs along
