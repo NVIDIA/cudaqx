@@ -7,6 +7,7 @@
  ******************************************************************************/
 
 #include "cudaq/qec/decoder.h"
+#include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/trt_decoder_internal.h"
 #include "cudaq/runtime/logger/logger.h"
 #include <algorithm>
@@ -786,6 +787,13 @@ trt_decoder::trt_decoder(const cudaq::qec::sparse_binary_matrix &H,
       }
       decode_to_observables_ = true;
       num_observables_ = O.shape()[0];
+      // Keep the base decoder's observable matrix in sync with constructor O.
+      // TRT only needs num_observables_ locally because the model emits the
+      // observable prefix directly, while realtime enqueue state and nested
+      // global decoders still carry their own O copies. This duplicate plumbing
+      // is intentional for now; a follow-up can make O ownership less
+      // redundant.
+      set_O_sparse(cudaq::qec::pcm_to_sparse_vec(O));
       set_result_type(decode_result_type::decode_to_obs);
 
       // The TRT model output must encode [pre_L (num_observables_ entries),
