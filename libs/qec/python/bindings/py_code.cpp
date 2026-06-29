@@ -144,12 +144,13 @@ public:
         // The kernel must return list[cudaq.measure_handle]; a list[bool]
         // return discriminates measurements to bits and drops the record
         // indices that cudaq.detector needs. Validate the lowered return type.
-        nb::object retTyObj =
-            nb::hasattr(kernel, "return_type") ? kernel.attr("return_type")
-                                               : nb::none();
+        nb::object retTyObj = nb::hasattr(kernel, "return_type")
+                                  ? kernel.attr("return_type")
+                                  : nb::none();
         bool returnsHandleVector = false;
         if (!retTyObj.is_none()) {
-          nb::object cc = nb::module_::import_("cudaq.mlir.dialects").attr("cc");
+          nb::object cc =
+              nb::module_::import_("cudaq.mlir.dialects").attr("cc");
           nb::object stdvecTy = cc.attr("StdvecType");
           if (nb::cast<bool>(stdvecTy.attr("isinstance")(retTyObj))) {
             nb::object eleTy = stdvecTy.attr("getElementType")(retTyObj);
