@@ -7,6 +7,7 @@
  ******************************************************************************/
 
 #include "cudaq/qec/decoder.h"
+#include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/trt_decoder_internal.h"
 #include "cudaq/runtime/logger/logger.h"
 #include <algorithm>
@@ -444,9 +445,9 @@ private:
   /// decode_batch contract even when inference fails before producing output.
   size_t failure_result_size() const;
 
-  /// Typed decode_batch: IoType matches the engine's I/O dtype
-  /// (currently float or uint8_t).
-  template <typename IoType>
+  /// Typed decode_batch: input and output dtypes are selected independently
+  /// from the TensorRT engine metadata (currently float or uint8_t).
+  template <typename InputType, typename OutputType>
   std::vector<decoder_result>
   decode_batch_impl(const std::vector<std::vector<float_t>> &syndromes) const;
 };
@@ -786,6 +787,13 @@ trt_decoder::trt_decoder(const cudaq::qec::sparse_binary_matrix &H,
       }
       decode_to_observables_ = true;
       num_observables_ = O.shape()[0];
+      // Keep the base decoder's observable matrix in sync with constructor O.
+      // TRT only needs num_observables_ locally because the model emits the
+      // observable prefix directly, while realtime enqueue state and nested
+      // global decoders still carry their own O copies. This duplicate plumbing
+      // is intentional for now; a follow-up can make O ownership less
+      // redundant.
+      set_O_sparse(cudaq::qec::pcm_to_sparse_vec(O));
       set_result_type(decode_result_type::decode_to_obs);
 
       // The TRT model output must encode [pre_L (num_observables_ entries),
@@ -911,10 +919,15 @@ trt_decoder::decode_batch(const std::vector<std::vector<float_t>> &syndromes) {
     return results;
   }
 
-  // Dispatch on the actual engine input dtype (uint8 or float).
-  if (impl_->input_dtype == nvinfer1::DataType::kUINT8)
-    return decode_batch_impl<uint8_t>(syndromes);
-  return decode_batch_impl<float>(syndromes);
+  // Dispatch on the actual engine I/O dtypes independently.
+  if (impl_->input_dtype == nvinfer1::DataType::kUINT8) {
+    if (impl_->output_dtype == nvinfer1::DataType::kUINT8)
+      return decode_batch_impl<uint8_t, uint8_t>(syndromes);
+    return decode_batch_impl<uint8_t, float>(syndromes);
+  }
+  if (impl_->output_dtype == nvinfer1::DataType::kUINT8)
+    return decode_batch_impl<float, uint8_t>(syndromes);
+  return decode_batch_impl<float, float>(syndromes);
 }
 
 size_t trt_decoder::failure_result_size() const {
@@ -925,7 +938,7 @@ size_t trt_decoder::failure_result_size() const {
   return output_size_per_sample_;
 }
 
-template <typename IoType>
+template <typename InputType, typename OutputType>
 std::vector<decoder_result> trt_decoder::decode_batch_impl(
     const std::vector<std::vector<float_t>> &syndromes) const {
   std::vector<decoder_result> results;
@@ -950,18 +963,18 @@ std::vector<decoder_result> trt_decoder::decode_batch_impl(
 
       // Prepare input batch. For float input we preserve soft (raw) values;
       // for uint8 we binarize to 0/1.
-      std::vector<IoType> input_host(impl_->input_size);
+      std::vector<InputType> input_host(impl_->input_size);
       for (size_t batch_idx = 0; batch_idx < actual_batch; ++batch_idx) {
         const auto &syndrome = syndromes[batch_start + batch_idx];
-        if constexpr (std::is_same_v<IoType, float>) {
+        if constexpr (std::is_same_v<InputType, float>) {
           for (size_t i = 0; i < syndrome_size_per_sample_; ++i) {
             input_host[batch_idx * syndrome_size_per_sample_ + i] =
-                static_cast<IoType>(syndrome[i]);
+                static_cast<InputType>(syndrome[i]);
           }
         } else {
           for (size_t i = 0; i < syndrome_size_per_sample_; ++i) {
             input_host[batch_idx * syndrome_size_per_sample_ + i] =
-                static_cast<IoType>(
+                static_cast<InputType>(
                     cudaq::qec::convert_soft_to_hard(syndrome[i]));
           }
         }
@@ -969,14 +982,14 @@ std::vector<decoder_result> trt_decoder::decode_batch_impl(
 
       HANDLE_CUDA_ERROR(cudaMemcpy(
           impl_->buffers[impl_->input_index], input_host.data(),
-          impl_->input_size * sizeof(IoType), cudaMemcpyHostToDevice));
+          impl_->input_size * sizeof(InputType), cudaMemcpyHostToDevice));
 
       impl_->execute_inference(actual_batch);
 
-      std::vector<IoType> output_host(impl_->output_size);
+      std::vector<OutputType> output_host(impl_->output_size);
       HANDLE_CUDA_ERROR(cudaMemcpy(
           output_host.data(), impl_->buffers[impl_->output_index],
-          impl_->output_size * sizeof(IoType), cudaMemcpyDeviceToHost));
+          impl_->output_size * sizeof(OutputType), cudaMemcpyDeviceToHost));
 
       if (log_residual_counts) {
         const size_t input_elems = actual_batch * syndrome_size_per_sample_;
@@ -985,8 +998,9 @@ std::vector<decoder_result> trt_decoder::decode_batch_impl(
             total_input_nonzero++;
         // Count non-zero entries in just the residual portion of the output.
         for (size_t batch_idx = 0; batch_idx < actual_batch; ++batch_idx) {
-          const IoType *row = output_host.data() +
-                              batch_idx * output_size_per_sample_ + pre_L_size;
+          const OutputType *row = output_host.data() +
+                                  batch_idx * output_size_per_sample_ +
+                                  pre_L_size;
           for (size_t i = 0; i < residual_size; ++i)
             if (trt_io_nonzero(row[i]))
               total_residual_nonzero++;
@@ -1008,8 +1022,9 @@ std::vector<decoder_result> trt_decoder::decode_batch_impl(
         std::vector<std::vector<float_t>> residual_soft(
             actual_batch, std::vector<float_t>(global_syndrome_size, 0.0f));
         for (size_t batch_idx = 0; batch_idx < actual_batch; ++batch_idx) {
-          const IoType *res = output_host.data() +
-                              batch_idx * output_size_per_sample_ + pre_L_size;
+          const OutputType *res = output_host.data() +
+                                  batch_idx * output_size_per_sample_ +
+                                  pre_L_size;
           float_t *out = residual_soft[batch_idx].data();
           for (size_t i = 0; i < global_syndrome_size; ++i)
             out[i] = trt_io_to_binary(res[i]);
@@ -1024,7 +1039,7 @@ std::vector<decoder_result> trt_decoder::decode_batch_impl(
             decoder_result combined;
             combined.converged = global_results[batch_idx].converged;
             combined.result.resize(num_observables_, 0.0f);
-            const IoType *pre_L_row =
+            const OutputType *pre_L_row =
                 output_host.data() + batch_idx * output_size_per_sample_;
             const std::vector<float_t> &g = global_results[batch_idx].result;
             for (size_t k = 0; k < num_observables_; ++k) {
@@ -1047,10 +1062,10 @@ std::vector<decoder_result> trt_decoder::decode_batch_impl(
           decoder_result result;
           result.converged = true;
           result.result.resize(out_per_sample);
-          const IoType *row =
+          const OutputType *row =
               output_host.data() + batch_idx * output_size_per_sample_;
           for (size_t i = 0; i < out_per_sample; ++i) {
-            if constexpr (std::is_same_v<IoType, float>) {
+            if constexpr (std::is_same_v<OutputType, float>) {
               result.result[i] = static_cast<float_t>(row[i]);
             } else {
               result.result[i] = trt_io_to_binary(row[i]);
@@ -1085,9 +1100,17 @@ std::vector<decoder_result> trt_decoder::decode_batch_impl(
 }
 
 // Explicit instantiations for the supported single-output engine I/O dtypes.
-template std::vector<decoder_result> trt_decoder::decode_batch_impl<float>(
+template std::vector<decoder_result>
+trt_decoder::decode_batch_impl<float, float>(
     const std::vector<std::vector<float_t>> &) const;
-template std::vector<decoder_result> trt_decoder::decode_batch_impl<uint8_t>(
+template std::vector<decoder_result>
+trt_decoder::decode_batch_impl<float, uint8_t>(
+    const std::vector<std::vector<float_t>> &) const;
+template std::vector<decoder_result>
+trt_decoder::decode_batch_impl<uint8_t, float>(
+    const std::vector<std::vector<float_t>> &) const;
+template std::vector<decoder_result>
+trt_decoder::decode_batch_impl<uint8_t, uint8_t>(
     const std::vector<std::vector<float_t>> &) const;
 
 trt_decoder::~trt_decoder() = default;
