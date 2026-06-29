@@ -59,6 +59,14 @@ std::optional<std::string> get_uint8_onnx_asset_path() {
   return std::nullopt;
 #endif
 }
+
+std::optional<std::string> get_uint8_to_float_onnx_asset_path() {
+#ifdef TRT_TEST_UINT8_TO_FLOAT_ONNX_PATH
+  return std::string(TRT_TEST_UINT8_TO_FLOAT_ONNX_PATH);
+#else
+  return std::nullopt;
+#endif
+}
 } // namespace
 
 // Path to ONNX test asset. Set by CMake (absolute path) so the test finds it
@@ -659,6 +667,39 @@ TEST_F(TRTDecoderTest, Uint8IdentityModelBinarizesInputAndOutput) {
 
   auto result = trt_decoder->decode({0.49, 0.5, 0.75});
   ASSERT_TRUE(result.converged);
+  ASSERT_EQ(result.result.size(), 3u);
+  EXPECT_FLOAT_EQ(result.result[0], 0.0);
+  EXPECT_FLOAT_EQ(result.result[1], 1.0);
+  EXPECT_FLOAT_EQ(result.result[2], 1.0);
+}
+
+TEST_F(TRTDecoderTest, MixedDtypeCopiesOutput) {
+  // Mixed UINT8 input and FLOAT output should use the engine output dtype when
+  // copying and interpreting output, not the input dtype selected for dispatch.
+  if (!gpu_available())
+    GTEST_SKIP() << "No CUDA GPU available";
+  auto onnx_path = get_uint8_to_float_onnx_asset_path();
+  if (!onnx_path || !std::filesystem::exists(*onnx_path))
+    GTEST_SKIP() << "Generated uint8-to-float ONNX fixture is unavailable";
+
+  cudaqx::heterogeneous_map params;
+  params.insert("onnx_load_path", *onnx_path);
+  params.insert("use_cuda_graph", false);
+
+  std::unique_ptr<decoder> trt_decoder;
+  try {
+    trt_decoder = decoder::get("trt_decoder", make_identity_h(3), params);
+  } catch (const std::exception &e) {
+    GTEST_SKIP() << "Failed to create uint8-to-float TRT decoder: " << e.what();
+  }
+
+  auto result = trt_decoder->decode({0.49, 0.5, 0.75});
+
+  // The Cast model should execute successfully; failure here means the mixed
+  // dtype path did not produce a usable decoder result.
+  ASSERT_TRUE(result.converged);
+  // The output has three float elements; a shorter result would show that the
+  // output buffer cardinality was not preserved.
   ASSERT_EQ(result.result.size(), 3u);
   EXPECT_FLOAT_EQ(result.result[0], 0.0);
   EXPECT_FLOAT_EQ(result.result[1], 1.0);

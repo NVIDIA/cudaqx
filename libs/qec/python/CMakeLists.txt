@@ -43,6 +43,7 @@ target_link_libraries(${MODULE_NAME}
     cudaq-qec
     cudaq-qec-realtime-decoding
     cudaq::cudaq-python-interop
+    cudaq::cudaq-mlir-runtime
 )
 
 find_package(CUDAToolkit REQUIRED)
