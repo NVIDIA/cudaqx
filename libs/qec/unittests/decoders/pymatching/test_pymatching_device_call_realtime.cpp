@@ -23,20 +23,45 @@ namespace {
 
 namespace config = cudaq::qec::decoding::config;
 
+constexpr std::uint64_t kDecoderId = 0;
+constexpr std::uint64_t kBlockSize = 3;
+constexpr std::uint64_t kSyndromeSize = 3;
+constexpr std::uint64_t kSyndromeTag = 1;
+constexpr std::uint64_t kRunShots = 1;
+constexpr std::size_t kActiveSyndromeIndex = 1;
+constexpr std::size_t kSparseEntriesPerRow = 2;
+constexpr std::int64_t kSparseRowEnd = -1;
+constexpr double kUniformErrorRate = 0.1;
+constexpr std::int64_t kExpectedPackedCorrection = std::int64_t{1}
+                                                   << kActiveSyndromeIndex;
+
+std::vector<std::int64_t> make_identity_sparse_matrix() {
+  std::vector<std::int64_t> sparse_matrix;
+  sparse_matrix.reserve(kSparseEntriesPerRow * kSyndromeSize);
+  for (std::uint64_t column = {}; column < kSyndromeSize; ++column) {
+    sparse_matrix.push_back(static_cast<std::int64_t>(column));
+    sparse_matrix.push_back(kSparseRowEnd);
+  }
+  return sparse_matrix;
+}
+
 config::multi_decoder_config make_config() {
   config::decoder_config decoder_config;
-  decoder_config.id = 0;
+  decoder_config.id = kDecoderId;
   decoder_config.type = "pymatching";
-  decoder_config.block_size = 3;
-  decoder_config.syndrome_size = 3;
-  decoder_config.H_sparse = {0, -1, 1, -1, 2, -1};
-  decoder_config.O_sparse = {0, -1, 1, -1, 2, -1};
-  decoder_config.D_sparse = {0, -1, 1, -1, 2, -1};
+  decoder_config.block_size = kBlockSize;
+  decoder_config.syndrome_size = kSyndromeSize;
+
+  const auto identity_sparse_matrix = make_identity_sparse_matrix();
+  decoder_config.H_sparse = identity_sparse_matrix;
+  decoder_config.O_sparse = identity_sparse_matrix;
+  decoder_config.D_sparse = identity_sparse_matrix;
 
   decoder_config.decoder_custom_args = config::pymatching_config();
   auto &pymatching_config =
       std::get<config::pymatching_config>(decoder_config.decoder_custom_args);
-  pymatching_config.error_rate_vec = std::vector<double>{0.1, 0.1, 0.1};
+  pymatching_config.error_rate_vec =
+      std::vector<double>(kBlockSize, kUniformErrorRate);
   pymatching_config.merge_strategy = "smallest_weight";
 
   config::multi_decoder_config multi_config;
@@ -61,16 +86,16 @@ struct RealtimeGuard {
 };
 
 __qpu__ std::int64_t pymatching_device_call_kernel() {
-  cudaq::qec::decoding::reset_decoder(/*decoder_id=*/0);
+  cudaq::qec::decoding::reset_decoder(/*decoder_id=*/kDecoderId);
 
-  std::vector<bool> syndrome(3);
-  syndrome[1] = true;
+  std::vector<bool> syndrome(kSyndromeSize);
+  syndrome[kActiveSyndromeIndex] = true;
   cudaq::qec::decoding::enqueue_syndromes_test(
-      /*decoder_id=*/0, syndrome, /*tag=*/1);
+      /*decoder_id=*/kDecoderId, syndrome, /*tag=*/kSyndromeTag);
 
   auto corrections = cudaq::qec::decoding::get_corrections(
-      /*decoder_id=*/0, /*return_size=*/3, /*reset=*/true);
-  std::int64_t packed = 0;
+      /*decoder_id=*/kDecoderId, /*return_size=*/kBlockSize, /*reset=*/true);
+  std::int64_t packed = {};
   for (std::size_t i = 0; i < corrections.size(); ++i)
     if (corrections[i])
       packed |= (std::int64_t{1} << i);
@@ -95,16 +120,15 @@ int main(int argc, char **argv) {
     cudaq::realtime::initialize(argc, argv);
     RealtimeGuard realtime_guard{true};
 
-    const auto results = cudaq::run(1, pymatching_device_call_kernel);
-    if (results.size() != 1) {
+    const auto results = cudaq::run(kRunShots, pymatching_device_call_kernel);
+    if (results.size() != kRunShots) {
       std::cerr << "expected one result, got " << results.size() << "\n";
       return 1;
     }
 
-    constexpr std::int64_t expected = 0b010;
-    if (results[0] != expected) {
-      std::cerr << "expected correction " << expected << ", got " << results[0]
-                << "\n";
+    if (results[0] != kExpectedPackedCorrection) {
+      std::cerr << "expected correction " << kExpectedPackedCorrection
+                << ", got " << results[0] << "\n";
       return 1;
     }
 

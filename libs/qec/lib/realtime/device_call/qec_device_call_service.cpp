@@ -14,6 +14,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <vector>
 
 namespace {
@@ -22,31 +23,166 @@ using cudaq_internal::device_call::DeviceCallHostDispatchTable;
 using cudaq_internal::device_call::DeviceCallService;
 using cudaq_internal::device_call::DeviceCallServicePluginInfo;
 
-constexpr std::uint32_t kEnqueueSyndromesUi64FnId =
-    cudaq::realtime::fnv1a_hash("enqueue_syndromes_ui64");
-constexpr std::uint32_t kGetCorrectionsUi64FnId =
-    cudaq::realtime::fnv1a_hash("get_corrections_ui64");
-constexpr std::uint32_t kResetDecoderUi64FnId =
-    cudaq::realtime::fnv1a_hash("reset_decoder_ui64");
+constexpr std::uint32_t kEnqueueSyndromesFnId =
+    cudaq::realtime::fnv1a_hash("simulation_enqueue_syndromes");
+constexpr std::uint32_t kGetCorrectionsFnId =
+    cudaq::realtime::fnv1a_hash("simulation_get_corrections");
+// reset_decoder has C++ linkage in the simulation wrapper, so match the
+// mangled callee symbol emitted by CUDA-Q's realtime lowering.
+constexpr std::uint32_t kResetDecoderFnId = cudaq::realtime::fnv1a_hash(
+    "_ZN5cudaq3qec8decoding10simulation13reset_decoderEm");
 
-template <std::size_t NumArgs>
-bool read_u64_args(const void *rx_slot, std::size_t slot_size,
-                   std::array<std::uint64_t, NumArgs> &args) {
+constexpr std::int32_t kStatusSuccess = 0;
+constexpr std::int32_t kStatusInvalidRequest = -1;
+constexpr std::int32_t kStatusHandlerException = -2;
+constexpr std::int32_t kStatusResultBufferTooSmall = -5;
+
+constexpr std::uint32_t kHostDispatchDeviceId = 0;
+constexpr std::uint32_t kScalarElementCount = 1;
+
+constexpr std::uint8_t kNoResults = 0;
+constexpr std::uint8_t kSingleResult = 1;
+
+constexpr std::uint8_t kEnqueueDecoderIdArg = 0;
+constexpr std::uint8_t kEnqueueSyndromesArg = 1;
+constexpr std::uint8_t kEnqueueTagArg = 2;
+constexpr std::uint8_t kEnqueueArgCount = 3;
+
+constexpr std::uint8_t kGetCorrectionsDecoderIdArg = 0;
+constexpr std::uint8_t kGetCorrectionsOutputArg = 1;
+constexpr std::uint8_t kGetCorrectionsResetArg = 2;
+constexpr std::uint8_t kGetCorrectionsArgCount = 3;
+
+constexpr std::uint8_t kResetDecoderIdArg = 0;
+constexpr std::uint8_t kResetDecoderArgCount = 1;
+
+constexpr std::uint8_t kCorrectionsResult = 0;
+
+constexpr std::uint8_t kScalarU8Size = sizeof(std::uint8_t);
+constexpr std::uint8_t kScalarU64Size = sizeof(std::uint64_t);
+
+struct ByteSpan {
+  const std::uint8_t *data = nullptr;
+  std::uint64_t size = 0;
+};
+
+struct EnqueueSyndromesRequest {
+  std::uint64_t decoder_id = 0;
+  ByteSpan syndromes;
+  std::uint64_t tag = 0;
+};
+
+struct GetCorrectionsRequest {
+  std::uint64_t decoder_id = 0;
+  std::uint64_t correction_length = 0;
+  bool reset = false;
+};
+
+enum DeviceCallEntryIndex : std::size_t {
+  kEnqueueSyndromesEntry,
+  kGetCorrectionsEntry,
+  kResetDecoderEntry,
+  kDeviceCallEntryCount
+};
+
+bool align_offset(std::size_t &offset, std::size_t alignment,
+                  std::size_t arg_len) {
+  if (alignment <= 1)
+    return offset <= arg_len;
+  const auto addend = alignment - 1;
+  if (offset > std::numeric_limits<std::size_t>::max() - addend)
+    return false;
+  offset = (offset + addend) & ~addend;
+  return offset <= arg_len;
+}
+
+template <typename T>
+bool read_scalar(const std::uint8_t *payload, std::size_t arg_len,
+                 std::size_t &offset, T &value) {
+  if (!align_offset(offset, alignof(T), arg_len) ||
+      sizeof(T) > arg_len - offset)
+    return false;
+  std::memcpy(&value, payload + offset, sizeof(T));
+  offset += sizeof(T);
+  return true;
+}
+
+bool read_stdvec_i1(const std::uint8_t *payload, std::size_t arg_len,
+                    std::size_t &offset, ByteSpan &span) {
+  // CUDA-Q realtime lowering serializes stdvec<i1> as a uint64 length followed
+  // by one byte per bool element.
+  std::uint64_t length = 0;
+  if (!read_scalar(payload, arg_len, offset, length))
+    return false;
+  if (length > static_cast<std::uint64_t>(arg_len - offset))
+    return false;
+  span = {payload + offset, length};
+  offset += static_cast<std::size_t>(length);
+  return true;
+}
+
+bool read_request_payload(const void *rx_slot, std::size_t slot_size,
+                          const cudaq::realtime::RPCHeader *&request,
+                          const std::uint8_t *&payload, std::size_t &arg_len) {
   if (!rx_slot || slot_size < sizeof(cudaq::realtime::RPCHeader))
     return false;
 
-  const auto *request =
-      static_cast<const cudaq::realtime::RPCHeader *>(rx_slot);
-  const std::size_t arg_len = NumArgs * sizeof(std::uint64_t);
-  if (request->magic != cudaq::realtime::RPC_MAGIC_REQUEST ||
-      request->arg_len != arg_len ||
-      sizeof(cudaq::realtime::RPCHeader) + arg_len > slot_size)
+  request = static_cast<const cudaq::realtime::RPCHeader *>(rx_slot);
+  if (request->magic != cudaq::realtime::RPC_MAGIC_REQUEST)
     return false;
 
-  const auto *body = static_cast<const std::uint8_t *>(rx_slot) +
-                     sizeof(cudaq::realtime::RPCHeader);
-  std::memcpy(args.data(), body, arg_len);
+  arg_len = request->arg_len;
+  if (arg_len > slot_size - sizeof(cudaq::realtime::RPCHeader))
+    return false;
+
+  payload = static_cast<const std::uint8_t *>(rx_slot) +
+            sizeof(cudaq::realtime::RPCHeader);
   return true;
+}
+
+bool read_enqueue_syndromes_request(const void *rx_slot, std::size_t slot_size,
+                                    EnqueueSyndromesRequest &out) {
+  const cudaq::realtime::RPCHeader *request = nullptr;
+  const std::uint8_t *payload = nullptr;
+  std::size_t arg_len = 0;
+  if (!read_request_payload(rx_slot, slot_size, request, payload, arg_len))
+    return false;
+
+  std::size_t offset = 0;
+  return read_scalar(payload, arg_len, offset, out.decoder_id) &&
+         read_stdvec_i1(payload, arg_len, offset, out.syndromes) &&
+         read_scalar(payload, arg_len, offset, out.tag) && offset == arg_len;
+}
+
+bool read_get_corrections_request(const void *rx_slot, std::size_t slot_size,
+                                  GetCorrectionsRequest &out) {
+  const cudaq::realtime::RPCHeader *request = nullptr;
+  const std::uint8_t *payload = nullptr;
+  std::size_t arg_len = 0;
+  if (!read_request_payload(rx_slot, slot_size, request, payload, arg_len))
+    return false;
+
+  std::size_t offset = 0;
+  std::uint8_t reset = 0;
+  if (!read_scalar(payload, arg_len, offset, out.decoder_id) ||
+      !read_scalar(payload, arg_len, offset, out.correction_length) ||
+      !read_scalar(payload, arg_len, offset, reset) || offset != arg_len)
+    return false;
+
+  out.reset = reset != 0;
+  return true;
+}
+
+bool read_reset_decoder_request(const void *rx_slot, std::size_t slot_size,
+                                std::uint64_t &decoder_id) {
+  const cudaq::realtime::RPCHeader *request = nullptr;
+  const std::uint8_t *payload = nullptr;
+  std::size_t arg_len = 0;
+  if (!read_request_payload(rx_slot, slot_size, request, payload, arg_len))
+    return false;
+
+  std::size_t offset = 0;
+  return read_scalar(payload, arg_len, offset, decoder_id) && offset == arg_len;
 }
 
 void write_response(void *tx_slot, const void *rx_slot, std::int32_t status,
@@ -62,101 +198,109 @@ void write_response(void *tx_slot, const void *rx_slot, std::int32_t status,
                    __ATOMIC_RELEASE);
 }
 
-void enqueue_syndromes_ui64_host(const void *rx_slot, void *tx_slot,
-                                 std::size_t slot_size) {
+void simulation_enqueue_syndromes_host(const void *rx_slot, void *tx_slot,
+                                       std::size_t slot_size) {
   try {
-    std::array<std::uint64_t, 4> args{};
-    if (!tx_slot || !read_u64_args(rx_slot, slot_size, args)) {
+    EnqueueSyndromesRequest request;
+    if (!tx_slot ||
+        !read_enqueue_syndromes_request(rx_slot, slot_size, request)) {
       if (tx_slot && rx_slot)
-        write_response(tx_slot, rx_slot, -1);
+        write_response(tx_slot, rx_slot, kStatusInvalidRequest);
       return;
     }
 
-    const auto decoder_id = static_cast<std::size_t>(args[0]);
-    const auto syndrome_size = args[1];
-    if (syndrome_size > 64) {
-      write_response(tx_slot, rx_slot, -3);
-      return;
-    }
-
-    std::vector<std::uint8_t> syndrome(syndrome_size);
-    for (std::uint64_t i = 0; i < syndrome_size; ++i)
-      syndrome[i] = (args[2] >> i) & 1;
-
-    cudaq::qec::decoding::host::enqueue_syndromes(decoder_id, syndrome.data(),
-                                                  syndrome.size(), args[3]);
-    write_response(tx_slot, rx_slot, 0);
+    std::vector<std::uint8_t> syndrome(request.syndromes.data,
+                                       request.syndromes.data +
+                                           request.syndromes.size);
+    cudaq::qec::decoding::host::enqueue_syndromes(
+        static_cast<std::size_t>(request.decoder_id), syndrome.data(),
+        syndrome.size(), request.tag);
+    write_response(tx_slot, rx_slot, kStatusSuccess);
   } catch (...) {
     if (tx_slot && rx_slot)
-      write_response(tx_slot, rx_slot, -2);
+      write_response(tx_slot, rx_slot, kStatusHandlerException);
   }
 }
 
-void get_corrections_ui64_host(const void *rx_slot, void *tx_slot,
-                               std::size_t slot_size) {
+void simulation_get_corrections_host(const void *rx_slot, void *tx_slot,
+                                     std::size_t slot_size) {
   try {
-    std::array<std::uint64_t, 3> args{};
-    if (!tx_slot || !read_u64_args(rx_slot, slot_size, args)) {
+    GetCorrectionsRequest request;
+    if (!tx_slot ||
+        !read_get_corrections_request(rx_slot, slot_size, request)) {
       if (tx_slot && rx_slot)
-        write_response(tx_slot, rx_slot, -1);
+        write_response(tx_slot, rx_slot, kStatusInvalidRequest);
       return;
     }
 
-    constexpr std::uint32_t result_len = sizeof(std::uint64_t);
-    const auto return_size = args[1];
-    if (return_size > 64) {
-      write_response(tx_slot, rx_slot, -3);
+    if (request.correction_length >
+        static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max())) {
+      write_response(tx_slot, rx_slot, kStatusResultBufferTooSmall);
       return;
     }
 
+    const auto result_len =
+        static_cast<std::uint32_t>(request.correction_length);
     if (sizeof(cudaq::realtime::RPCResponse) + result_len > slot_size) {
-      write_response(tx_slot, rx_slot, -5);
+      write_response(tx_slot, rx_slot, kStatusResultBufferTooSmall);
       return;
     }
 
-    const auto decoder_id = static_cast<std::size_t>(args[0]);
-    std::vector<std::uint8_t> corrections(return_size);
-    cudaq::qec::decoding::host::get_corrections(decoder_id, corrections.data(),
-                                                corrections.size(),
-                                                static_cast<bool>(args[2]));
+    std::vector<std::uint8_t> corrections(request.correction_length);
+    cudaq::qec::decoding::host::get_corrections(
+        static_cast<std::size_t>(request.decoder_id), corrections.data(),
+        corrections.size(), request.reset);
 
-    std::uint64_t correction = 0;
-    for (std::uint64_t i = 0; i < return_size; ++i)
-      correction |= static_cast<std::uint64_t>(corrections[i]) << i;
     auto *result = static_cast<std::uint8_t *>(tx_slot) +
                    sizeof(cudaq::realtime::RPCResponse);
-    std::memcpy(result, &correction, result_len);
-    write_response(tx_slot, rx_slot, 0, result_len);
+    if (result_len != 0)
+      std::memcpy(result, corrections.data(), result_len);
+    write_response(tx_slot, rx_slot, kStatusSuccess, result_len);
   } catch (...) {
     if (tx_slot && rx_slot)
-      write_response(tx_slot, rx_slot, -2);
+      write_response(tx_slot, rx_slot, kStatusHandlerException);
   }
 }
 
-void reset_decoder_ui64_host(const void *rx_slot, void *tx_slot,
-                             std::size_t slot_size) {
+void simulation_reset_decoder_host(const void *rx_slot, void *tx_slot,
+                                   std::size_t slot_size) {
   try {
-    std::array<std::uint64_t, 1> args{};
-    if (!tx_slot || !read_u64_args(rx_slot, slot_size, args)) {
+    std::uint64_t decoder_id = 0;
+    if (!tx_slot ||
+        !read_reset_decoder_request(rx_slot, slot_size, decoder_id)) {
       if (tx_slot && rx_slot)
-        write_response(tx_slot, rx_slot, -1);
+        write_response(tx_slot, rx_slot, kStatusInvalidRequest);
       return;
     }
 
     cudaq::qec::decoding::host::reset_decoder(
-        static_cast<std::size_t>(args[0]));
-    write_response(tx_slot, rx_slot, 0);
+        static_cast<std::size_t>(decoder_id));
+    write_response(tx_slot, rx_slot, kStatusSuccess);
   } catch (...) {
     if (tx_slot && rx_slot)
-      write_response(tx_slot, rx_slot, -2);
+      write_response(tx_slot, rx_slot, kStatusHandlerException);
   }
 }
 
-void set_u64(cudaq_type_desc_t &desc) {
+void set_scalar(cudaq_type_desc_t &desc, std::uint8_t type_id,
+                std::uint32_t size_bytes) {
   desc = {};
-  desc.type_id = CUDAQ_TYPE_INT64;
-  desc.size_bytes = sizeof(std::uint64_t);
-  desc.num_elements = 1;
+  desc.type_id = type_id;
+  desc.size_bytes = size_bytes;
+  desc.num_elements = kScalarElementCount;
+}
+
+void set_u64(cudaq_type_desc_t &desc) {
+  set_scalar(desc, CUDAQ_TYPE_INT64, kScalarU64Size);
+}
+
+void set_u8(cudaq_type_desc_t &desc) {
+  set_scalar(desc, CUDAQ_TYPE_UINT8, kScalarU8Size);
+}
+
+void set_array_u8(cudaq_type_desc_t &desc) {
+  desc = {};
+  desc.type_id = CUDAQ_TYPE_ARRAY_UINT8;
 }
 
 void configure_entry(cudaq_function_entry_t &entry, std::uint32_t function_id,
@@ -168,20 +312,33 @@ void configure_entry(cudaq_function_entry_t &entry, std::uint32_t function_id,
   entry.dispatch_mode = CUDAQ_DISPATCH_HOST_CALL;
   entry.schema.num_args = num_args;
   entry.schema.num_results = num_results;
-  for (std::uint8_t i = 0; i < num_args; ++i)
-    set_u64(entry.schema.args[i]);
-  for (std::uint8_t i = 0; i < num_results; ++i)
-    set_u64(entry.schema.results[i]);
 }
 
-std::array<cudaq_function_entry_t, 3> make_entries() {
-  std::array<cudaq_function_entry_t, 3> entries{};
-  configure_entry(entries[0], kEnqueueSyndromesUi64FnId,
-                  enqueue_syndromes_ui64_host, 4, 0);
-  configure_entry(entries[1], kGetCorrectionsUi64FnId,
-                  get_corrections_ui64_host, 3, 1);
-  configure_entry(entries[2], kResetDecoderUi64FnId, reset_decoder_ui64_host, 1,
-                  0);
+std::array<cudaq_function_entry_t, kDeviceCallEntryCount> make_entries() {
+  std::array<cudaq_function_entry_t, kDeviceCallEntryCount> entries{};
+
+  auto &enqueue_entry = entries[kEnqueueSyndromesEntry];
+  configure_entry(enqueue_entry, kEnqueueSyndromesFnId,
+                  simulation_enqueue_syndromes_host, kEnqueueArgCount,
+                  kNoResults);
+  set_u64(enqueue_entry.schema.args[kEnqueueDecoderIdArg]);
+  set_array_u8(enqueue_entry.schema.args[kEnqueueSyndromesArg]);
+  set_u64(enqueue_entry.schema.args[kEnqueueTagArg]);
+
+  auto &get_entry = entries[kGetCorrectionsEntry];
+  configure_entry(get_entry, kGetCorrectionsFnId,
+                  simulation_get_corrections_host, kGetCorrectionsArgCount,
+                  kSingleResult);
+  set_u64(get_entry.schema.args[kGetCorrectionsDecoderIdArg]);
+  set_array_u8(get_entry.schema.args[kGetCorrectionsOutputArg]);
+  set_u8(get_entry.schema.args[kGetCorrectionsResetArg]);
+  set_array_u8(get_entry.schema.results[kCorrectionsResult]);
+
+  auto &reset_entry = entries[kResetDecoderEntry];
+  configure_entry(reset_entry, kResetDecoderFnId, simulation_reset_decoder_host,
+                  kResetDecoderArgCount, kNoResults);
+  set_u64(reset_entry.schema.args[kResetDecoderIdArg]);
+
   return entries;
 }
 
@@ -191,9 +348,9 @@ public:
     static auto entries = make_entries();
     table.entries = entries.data();
     table.count = entries.size();
-    table.deviceId = 0;
+    table.deviceId = kHostDispatchDeviceId;
     table.mailbox = nullptr;
-    return 0;
+    return kStatusSuccess;
   }
 };
 

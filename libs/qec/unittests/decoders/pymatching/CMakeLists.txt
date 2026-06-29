@@ -76,7 +76,7 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-device-call)
   target_link_libraries(test_pymatching_device_call_realtime PRIVATE
     cudaq-qec
     cudaq-qec-realtime-decoding
-    cudaq-qec-realtime-decoding-quantinuum
+    cudaq-qec-realtime-decoding-simulation
     cudaq-qec-realtime-device-call
     cudaq::cudaq cudaq::cudaq-common cudaq-mlir-runtime
     nvqir nvqir-qpp
