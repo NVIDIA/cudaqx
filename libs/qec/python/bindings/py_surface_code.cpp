@@ -135,7 +135,8 @@ void bindSurfaceCode(nb::module_ &mod) {
       .def("get_spin_op_stabilizers", &stabilizer_grid::get_spin_op_stabilizers,
            "Return the stabilizers as a list of cudaq::spin_op_term")
       .def("get_spin_op_observables", &stabilizer_grid::get_spin_op_observables,
-           "Return the logical observables as a list of cudaq::spin_op_term");
+           "Return the logical observables as [X, Z] cudaq::spin_op_term "
+           "entries");
 
   qecmod.def("role_to_str", [](surface_role r) {
     switch (r) {

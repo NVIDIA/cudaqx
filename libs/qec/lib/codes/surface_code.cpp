@@ -31,12 +31,14 @@ surface_role role_for_parity(sc_orientation orientation, bool odd_parity) {
   switch (orientation) {
   case sc_orientation::XV:
   case sc_orientation::XH:
-    // First bulk syndrome type X (Ising code_rotation X*): X on even
-    // stabilizer-grid parity, Z on odd.
+    // The first orientation character controls the bulk checkerboard. The H/V
+    // character controls boundary placement only, so XV and XH share this bulk
+    // assignment.
     return odd_parity ? surface_role::amz : surface_role::amx;
   case sc_orientation::ZV:
   case sc_orientation::ZH:
-    // First bulk syndrome type Z: Z on even parity, X on odd.
+    // Likewise, ZV and ZH share a bulk assignment with Z on even parity and X
+    // on odd parity.
     return odd_parity ? surface_role::amx : surface_role::amz;
   }
   throw std::runtime_error("Unhandled surface-code orientation.");
@@ -96,21 +98,28 @@ void stabilizer_grid::generate_grid_roles() {
   for (size_t row = 1; row < grid_length - 1; ++row) {
     for (size_t col = 1; col < grid_length - 1; ++col) {
       size_t idx = row * grid_length + col;
-      bool parity = (row + col) % 2;
-      roles[idx] = role_for_parity(orientation, parity);
+      const bool is_odd_parity = (row + col) % 2;
+      roles[idx] = role_for_parity(orientation, is_odd_parity);
     }
   }
 
   const bool horizontal_boundaries_use_even_parity =
       orientation == sc_orientation::XH || orientation == sc_orientation::ZH;
 
+  // Boundary sites alternate around the perimeter. The top/bottom and
+  // left/right edges therefore occupy complementary parities. Since
+  // is_odd_parity is false for even parity, the top/bottom predicate is
+  // intentionally the inverse of horizontal_boundaries_use_even_parity.
+  // The left/right predicate selects the opposite edge parity class: when
+  // top/bottom uses even parity, == selects odd sites, and vice versa.
+
   // set top/bottom boundaries for weight 2 stabs
   for (size_t row = 0; row < grid_length; row += grid_length - 1) {
     for (size_t col = 1; col < grid_length - 1; ++col) {
       size_t idx = row * grid_length + col;
-      bool parity = (row + col) % 2;
-      if (parity != horizontal_boundaries_use_even_parity)
-        roles[idx] = role_for_parity(orientation, parity);
+      const bool is_odd_parity = (row + col) % 2;
+      if (is_odd_parity != horizontal_boundaries_use_even_parity)
+        roles[idx] = role_for_parity(orientation, is_odd_parity);
     }
   }
 
@@ -118,9 +127,9 @@ void stabilizer_grid::generate_grid_roles() {
   for (size_t row = 1; row < grid_length - 1; ++row) {
     for (size_t col = 0; col < grid_length; col += grid_length - 1) {
       size_t idx = row * grid_length + col;
-      bool parity = (row + col) % 2;
-      if (parity == horizontal_boundaries_use_even_parity)
-        roles[idx] = role_for_parity(orientation, parity);
+      const bool is_odd_parity = (row + col) % 2;
+      if (is_odd_parity == horizontal_boundaries_use_even_parity)
+        roles[idx] = role_for_parity(orientation, is_odd_parity);
     }
   }
 }

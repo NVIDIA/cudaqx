@@ -67,6 +67,9 @@ bool operator<(const vec2d &lhs, const vec2d &rhs);
 ///
 /// Each entry on the grid can be an X stabilizer, Z stabilizer,
 /// or empty, as is needed on the edges.
+/// The diagrams below show the default ZH orientation, which preserves the
+/// original fixed surface-code layout. Other orientations assign X/Z roles
+/// according to sc_orientation.
 /// The grid length of 4 corresponds to a distance 3 surface code, which results
 /// in:
 /// ```
@@ -188,6 +191,9 @@ public:
   std::vector<cudaq::spin_op_term> get_spin_op_stabilizers() const;
 
   /// @brief Get the observables as a vector of cudaq::spin_op_terms
+  ///
+  /// @return The X logical observable first, followed by the Z logical
+  /// observable.
   ///
   /// @note Returns the correct logical pair for the grid's orientation. For XV
   /// and ZH the X observable runs along the top row of data qubits and the Z

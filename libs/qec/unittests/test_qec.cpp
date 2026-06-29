@@ -45,14 +45,14 @@ int overlap_parity(const std::vector<std::size_t> &a,
   return parity;
 }
 
-std::vector<std::size_t> top_row_logical_x(std::uint32_t distance) {
+std::vector<std::size_t> top_row_support(std::uint32_t distance) {
   std::vector<std::size_t> support;
   for (std::size_t i = 0; i < distance; ++i)
     support.push_back(i);
   return support;
 }
 
-std::vector<std::size_t> left_column_logical_z(std::uint32_t distance) {
+std::vector<std::size_t> left_column_support(std::uint32_t distance) {
   std::vector<std::size_t> support;
   for (std::size_t i = 0; i < distance * distance; i += distance)
     support.push_back(i);
@@ -70,8 +70,8 @@ void expect_surface_code_algebra(sc_orientation orientation) {
   EXPECT_EQ(expected_stabilizer_count, grid.x_stabilizers.size());
   EXPECT_EQ(expected_stabilizer_count, grid.z_stabilizers.size());
 
-  const auto top_row = top_row_logical_x(distance);
-  const auto left_column = left_column_logical_z(distance);
+  const auto top_row = top_row_support(distance);
+  const auto left_column = left_column_support(distance);
   const auto logical_x =
       uses_horizontal_x_logical(orientation) ? top_row : left_column;
   const auto logical_z =
@@ -962,8 +962,8 @@ TEST(QECCodeTester, checkSurfaceCodeObservablesPerOrientation) {
     const auto logical_z = support_of(observables[1]);
 
     // Pin the expected physical support for each orientation.
-    const auto top_row = top_row_logical_x(distance);
-    const auto left_column = left_column_logical_z(distance);
+    const auto top_row = top_row_support(distance);
+    const auto left_column = left_column_support(distance);
     if (uses_horizontal_x_logical(orientation)) {
       EXPECT_EQ(top_row, logical_x);
       EXPECT_EQ(left_column, logical_z);
