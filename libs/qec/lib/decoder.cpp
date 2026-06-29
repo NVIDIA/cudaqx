@@ -11,13 +11,141 @@
 #include "cuda-qx/core/library_utils.h"
 #include "cudaq/qec/device_affinity.h"
 #include "cudaq/qec/plugin_loader.h"
-#include "cudaq/qec/scoped_cuda_device.h"
 #include "cudaq/qec/version.h"
 #include "cudaq/runtime/logger/logger.h"
 #include <cassert>
+#include <cuda_runtime.h>
 #include <dlfcn.h>
 #include <filesystem>
 #include <vector>
+#if defined(__linux__)
+#include <fstream>
+#include <linux/mempolicy.h>
+#include <sched.h>
+#include <sstream>
+#include <sys/syscall.h>
+#include <unistd.h>
+#endif
+
+namespace {
+
+// RAII: sets the calling thread's CUDA current device, restores on destruction.
+// target < 0 = no-op. Throws std::runtime_error if target is out of range.
+struct CudaDeviceGuard {
+  int prev_ = -1;
+  bool active_ = false;
+
+  explicit CudaDeviceGuard(int target) {
+    if (target < 0)
+      return;
+    int count = 0;
+    if (cudaGetDeviceCount(&count) != cudaSuccess || target >= count)
+      throw std::runtime_error(
+          "cuda_device_id " + std::to_string(target) +
+          " out of range (device_count=" + std::to_string(count) + ")");
+    cudaGetDevice(&prev_);
+    if (prev_ != target) {
+      cudaSetDevice(target);
+      active_ = true;
+    }
+  }
+  ~CudaDeviceGuard() {
+    if (active_)
+      cudaSetDevice(prev_);
+  }
+  CudaDeviceGuard(const CudaDeviceGuard &) = delete;
+  CudaDeviceGuard &operator=(const CudaDeviceGuard &) = delete;
+};
+
+#if defined(__linux__)
+// Parse /sys/devices/system/node/node<N>/cpulist e.g. "0-7,16-23".
+// Returns false if the file is missing or empty.
+static bool build_node_cpuset(int node, cpu_set_t &out) {
+  std::ifstream f("/sys/devices/system/node/node" + std::to_string(node) +
+                  "/cpulist");
+  if (!f.is_open())
+    return false;
+  std::string list;
+  std::getline(f, list);
+  if (list.empty())
+    return false;
+  std::stringstream ss(list);
+  std::string range;
+  bool any = false;
+  while (std::getline(ss, range, ',')) {
+    auto dash = range.find('-');
+    int lo = std::stoi(range.substr(0, dash));
+    int hi =
+        (dash == std::string::npos) ? lo : std::stoi(range.substr(dash + 1));
+    for (int c = lo; c <= hi; ++c) {
+      if (c < CPU_SETSIZE) { // guard against OOB on >1024-CPU machines
+        CPU_SET(c, &out);
+        any = true;
+      }
+    }
+  }
+  return any;
+}
+
+// RAII: binds the calling thread's CPU affinity and memory policy to a NUMA
+// node, restores on destruction. node < 0 = no-op.
+// Uses raw Linux syscalls -- no libnuma dependency.
+struct NumaGuard {
+  bool mempol_set_ = false;
+  bool affinity_set_ = false;
+  bool has_prev_affinity_ = false;
+  cpu_set_t prev_set_{};
+
+  explicit NumaGuard(int node) {
+    if (node < 0)
+      return;
+    CPU_ZERO(&prev_set_);
+    if (sched_getaffinity(0, sizeof(prev_set_), &prev_set_) == 0)
+      has_prev_affinity_ = true;
+
+    cpu_set_t node_set;
+    CPU_ZERO(&node_set);
+    // Only pin CPU affinity when we can restore it; avoids permanent pinning
+    // if sched_getaffinity failed (e.g., container with locked cpuset).
+    if (has_prev_affinity_ && build_node_cpuset(node, node_set)) {
+      if (sched_setaffinity(0, sizeof(node_set), &node_set) == 0)
+        affinity_set_ = true;
+    }
+
+    if (node < static_cast<int>(sizeof(unsigned long) * 8)) {
+      unsigned long nodemask = 1UL << node;
+      if (syscall(SYS_set_mempolicy, MPOL_BIND, &nodemask,
+                  static_cast<unsigned long>(sizeof(nodemask) * 8)) == 0)
+        mempol_set_ = true;
+    }
+  }
+
+  ~NumaGuard() {
+    if (mempol_set_)
+      syscall(SYS_set_mempolicy, MPOL_DEFAULT, nullptr, 0UL);
+    if (affinity_set_)
+      sched_setaffinity(0, sizeof(prev_set_), &prev_set_);
+  }
+
+  NumaGuard(const NumaGuard &) = delete;
+  NumaGuard &operator=(const NumaGuard &) = delete;
+};
+#else
+struct NumaGuard {
+  explicit NumaGuard(int node) {
+    if (node < 0)
+      return;
+    static bool warned = false;
+    if (!warned) {
+      std::cerr << "[cudaq-qec] numa_node_id ignored: NUMA binding is only "
+                   "supported on Linux.\n";
+      warned = true;
+    }
+  }
+};
+#endif
+
+} // anonymous namespace
 
 INSTANTIATE_REGISTRY(cudaq::qec::decoder, const cudaq::qec::decoder_init &,
                      const cudaqx::heterogeneous_map &)
@@ -89,6 +217,11 @@ decoder::decoder(cudaq::qec::sparse_binary_matrix H)
     pimpl->should_log = ch[0] == '1' || ch[0] == 'y' || ch[0] == 'Y';
 }
 
+void decoder::set_hardware_params(const cudaqx::heterogeneous_map &params) {
+  cuda_device_id_ = cudaq::qec::read_cuda_device_id(params);
+  numa_node_id_ = cudaq::qec::read_numa_node_id(params);
+}
+
 // Provide a trivial implementation of for tensor<uint8_t> decode call. Child
 // classes should override this if they never want to pass through floats.
 decoder_result decoder::decode(const cudaqx::tensor<uint8_t> &syndrome) {
@@ -109,6 +242,10 @@ decoder_result decoder::decode(const cudaqx::tensor<uint8_t> &syndrome) {
 // should override this if they can do it more efficiently than this.
 std::vector<decoder_result>
 decoder::decode_batch(const std::vector<std::vector<float_t>> &syndrome) {
+  // Apply affinity once for the whole batch (not per-syndrome) to avoid
+  // repeated syscall overhead on the hot path.
+  CudaDeviceGuard dev(cuda_device_id_);
+  NumaGuard numa(numa_node_id_);
   std::vector<decoder_result> result;
   result.reserve(syndrome.size());
   for (auto &s : syndrome)
@@ -125,8 +262,15 @@ std::string decoder::get_version() const {
 
 std::future<decoder_result>
 decoder::decode_async(const std::vector<float_t> &syndrome) {
-  return std::async(std::launch::async,
-                    [this, syndrome] { return this->decode(syndrome); });
+  // Capture by value: avoids a data race if the decoder is destroyed before
+  // the future resolves.
+  const int cuda_id = cuda_device_id_;
+  const int numa_id = numa_node_id_;
+  return std::async(std::launch::async, [this, syndrome, cuda_id, numa_id] {
+    CudaDeviceGuard dev(cuda_id);
+    NumaGuard numa(numa_id);
+    return this->decode(syndrome);
+  });
 }
 
 std::unique_ptr<decoder>
@@ -140,9 +284,14 @@ decoder::get(const std::string &name, const decoder_init &init,
         "invalid decoder requested: " + name +
         ". Run with CUDAQ_LOG_LEVEL=info (environment variable) to see "
         "additional plugin diagnostics at startup.");
-  ScopedCudaDevice device_guard(read_cuda_device_id(param_map));
-  ScopedNumaNode numa_guard(read_numa_node_id(param_map));
-  return iter->second(init, param_map);
+  // Guards during construction so allocations land on the right hardware.
+  // Restored before this function returns; decode-time affinity is re-applied
+  // per call in decode_batch() and decode_async().
+  CudaDeviceGuard ctor_dev(cudaq::qec::read_cuda_device_id(param_map));
+  NumaGuard ctor_numa(cudaq::qec::read_numa_node_id(param_map));
+  auto d = iter->second(init, param_map);
+  d->set_hardware_params(param_map);
+  return d;
 }
 
 namespace details {

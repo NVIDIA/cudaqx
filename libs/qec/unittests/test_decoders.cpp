@@ -12,6 +12,7 @@
 #include "cudaq/qec/pcm_utils.h"
 #include <cmath>
 #include <cstdlib>
+#include <cuda_runtime.h>
 #include <future>
 #include <gtest/gtest.h>
 #include <optional>
@@ -972,6 +973,33 @@ TEST(CudaDeviceId, OutOfRangeThrowsForAnyDecoder) {
   params.insert("cuda_device_id", 999999);
   EXPECT_THROW(cudaq::qec::decoder::get("multi_error_lut", H, params),
                std::runtime_error);
+}
+
+TEST(CudaDeviceId, DecodeAsyncRestoresCallerDevice) {
+  // Verify decoder::get() does not corrupt the calling thread's current device.
+  int count = 0;
+  cudaGetDeviceCount(&count);
+  if (count < 2)
+    GTEST_SKIP() << "needs >= 2 GPUs";
+
+  cudaSetDevice(0); // caller stays on device 0
+  cudaqx::tensor<uint8_t> H({2, 3});
+  cudaqx::heterogeneous_map params;
+  params.insert("cuda_device_id", 1); // decoder assigned to device 1
+
+  // multi_error_lut is a CPU decoder -- it does nothing on device 1 itself,
+  // but the base class guard must still set device 1 in the async thread
+  // and then restore device 0 on the calling thread after get().
+  auto d = cudaq::qec::decoder::get("multi_error_lut", H, params);
+
+  std::vector<cudaq::qec::float_t> syn = {0.1f, 0.1f};
+  auto fut = d->decode_async(syn);
+  fut.get(); // wait for completion
+
+  int restored = -1;
+  cudaGetDevice(&restored);
+  EXPECT_EQ(restored, 0)
+      << "calling thread device not restored after decode_async";
 }
 
 TEST(StimDemGetDecoder, ThrowsOnMalformedStimDem) {

@@ -245,6 +245,11 @@ public:
   std::size_t get_block_size() { return block_size; }
   std::size_t get_syndrome_size() { return syndrome_size; }
 
+  /// @brief Store hardware affinity parameters read from the constructor params
+  /// map. Called by decoder::get() after the plugin constructor returns.
+  /// Not intended for direct use by plugin authors.
+  void set_hardware_params(const cudaqx::heterogeneous_map &params);
+
   // -- Begin realtime decoding API --
 
   // Note: all of the current realtime decoding API is designed to be used with
@@ -356,6 +361,11 @@ protected:
 
   /// @brief The decoder's D matrix in sparse format
   std::vector<std::vector<uint32_t>> D_sparse;
+
+  /// Target CUDA device for this decoder. -1 = inherit caller's device (no-op).
+  int cuda_device_id_ = -1;
+  /// Target NUMA node for this decoder. -1 = no binding.
+  int numa_node_id_ = -1;
 
 private:
   decode_result_type result_type_ = decode_result_type::decode_to_errs;
