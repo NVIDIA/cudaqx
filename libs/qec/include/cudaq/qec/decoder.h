@@ -144,6 +144,22 @@ private:
   std::unique_ptr<rt_impl, rt_impl_deleter> pimpl;
 
 public:
+  /// @brief Indicates whether decode() returns a full error frame (length
+  /// block_size) or an already-projected observable frame (length
+  /// num_observables). Decoders that accept an "O" observable matrix in their
+  /// constructor params should call set_result_type(decode_to_obs); all others
+  /// default to decode_to_errs.
+  ///
+  /// Note: even in decode_to_obs mode, set_O_sparse() must still be called so
+  /// that enqueue_syndrome() knows num_observables and can size the corrections
+  /// buffer correctly.
+  enum decode_result_type {
+    decode_to_errs, ///< result.size() == block_size; enqueue_syndrome projects
+                    ///< via O_sparse
+    decode_to_obs,  ///< result.size() == num_observables; enqueue_syndrome uses
+                    ///< result directly; set_O_sparse() still required
+  };
+
   decoder() = delete;
 
   /// @brief Constructor
@@ -234,6 +250,12 @@ public:
   // Note: all of the current realtime decoding API is designed to be used with
   // hard syndromes.
 
+  /// @brief Returns the type of result produced by decode().
+  /// Defaults to decode_to_errs. Decoders that project to observables
+  /// internally (i.e., constructed with an "O" param) should call
+  /// set_result_type(decode_to_obs) in their constructor.
+  decode_result_type get_result_type() const { return result_type_; }
+
   /// @brief Get the number of measurement syndromes per decode call. This
   /// depends on D_sparse, so you must have called set_D_sparse() first.
   uint32_t get_num_msyn_per_decode() const;
@@ -315,6 +337,11 @@ public:
   virtual std::string get_version() const;
 
 protected:
+  /// @brief Sets the result type. Call in the constructor when an "O"
+  /// observable matrix is detected in the decoder params. Must be called
+  /// before the first enqueue_syndrome().
+  void set_result_type(decode_result_type type) { result_type_ = type; }
+
   /// @brief For a classical `[n,k]` code, this is `n`.
   std::size_t block_size = 0;
 
@@ -329,6 +356,9 @@ protected:
 
   /// @brief The decoder's D matrix in sparse format
   std::vector<std::vector<uint32_t>> D_sparse;
+
+private:
+  decode_result_type result_type_ = decode_result_type::decode_to_errs;
 };
 
 /// @brief Convert a single soft probability to a hard 0/1 decision.

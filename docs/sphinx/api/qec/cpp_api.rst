@@ -33,7 +33,7 @@ Detector Error Model
 .. doxygenfunction:: cudaq::qec::dem_from_memory_circuit(const code &, operation, std::size_t, cudaq::noise_model &)
 .. doxygenfunction:: cudaq::qec::x_dem_from_memory_circuit(const code &, operation, std::size_t, cudaq::noise_model &)
 .. doxygenfunction:: cudaq::qec::z_dem_from_memory_circuit(const code &, operation, std::size_t, cudaq::noise_model &)
-.. doxygenfunction:: cudaq::qec::dem_from_stim_text(const std::string &)
+.. doxygenfunction:: cudaq::qec::dem_from_stim_text(const std::string &, bool)
 
 Decoder Interfaces
 ==================

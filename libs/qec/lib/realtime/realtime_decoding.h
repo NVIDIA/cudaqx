@@ -30,6 +30,10 @@ __attribute__((visibility("default"))) void
 enqueue_syndromes(std::size_t decoder_id, uint8_t *syndromes,
                   std::uint64_t syndrome_length, std::uint64_t tag);
 
+__attribute__((visibility("default"))) cudaqx::heterogeneous_map
+prepare_decoder_params(
+    const cudaq::qec::decoding::config::decoder_config &decoder_config);
+
 __attribute__((visibility("default"))) void
 get_corrections(std::size_t decoder_id, uint8_t *corrections,
                 std::uint64_t correction_length, bool reset);

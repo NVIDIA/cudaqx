@@ -555,6 +555,84 @@ TEST(SparseBinaryMatrix, GetPcmForRoundsSparse_GF2Duplicates) {
   EXPECT_EQ(last_col, 1u);
 }
 
+TEST(SparseBinaryMatrix, SparseReorderCanCropRows) {
+  std::vector<std::vector<index_type>> nested = {{0, 2, 3}, {1}, {2}};
+  auto sp = sparse_binary_matrix::from_nested_csc(4, 3, nested);
+  auto reordered = cudaq::qec::reorder_pcm_columns(
+      sp, std::vector<std::uint32_t>{2, 0}, /*row_begin=*/1,
+      /*row_end=*/2);
+
+  EXPECT_EQ(reordered.layout(), sparse_binary_matrix_layout::csc);
+  EXPECT_EQ(reordered.num_rows(), 2u);
+  EXPECT_EQ(reordered.num_cols(), 2u);
+  auto out = reordered.to_nested_csc();
+  EXPECT_EQ(out[0], (std::vector<index_type>{1}));
+  EXPECT_EQ(out[1], (std::vector<index_type>{1}));
+}
+
+TEST(SparseBinaryMatrix, SparseReorderMatchesDense) {
+  std::vector<std::uint8_t> data = {1, 0, 1, 0, 1, 0, 0, 1, 0, 1,
+                                    0, 1, 0, 0, 1, 1, 1, 0, 0, 0};
+  auto dense = cudaqx::tensor<std::uint8_t>({4, 5});
+  dense.copy(data.data(), {4, 5});
+  auto sparse = sparse_binary_matrix(dense, sparse_binary_matrix_layout::csr);
+  std::vector<std::uint32_t> column_order = {4, 2, 0, 3};
+
+  auto dense_reordered =
+      cudaq::qec::reorder_pcm_columns(dense, column_order, /*row_begin=*/1,
+                                      /*row_end=*/3);
+  auto sparse_reordered =
+      cudaq::qec::reorder_pcm_columns(sparse, column_order, /*row_begin=*/1,
+                                      /*row_end=*/3);
+
+  EXPECT_TRUE(dense_pcm_equal(dense_reordered, sparse_reordered.to_dense()));
+}
+
+TEST(SparseBinaryMatrix, SparseShufflePreservesShapeAndNnz) {
+  auto sp = cudaq::qec::generate_random_pcm_sparse(
+      /*n_rounds=*/2, /*n_errs_per_round=*/4,
+      /*n_syndromes_per_round=*/3, /*weight=*/2, std::mt19937_64(7));
+  auto shuffled = cudaq::qec::shuffle_pcm_columns(sp, std::mt19937_64(11));
+  EXPECT_EQ(shuffled.num_rows(), sp.num_rows());
+  EXPECT_EQ(shuffled.num_cols(), sp.num_cols());
+  EXPECT_EQ(shuffled.num_nnz(), sp.num_nnz());
+}
+
+TEST(SparseBinaryMatrix, SparseShuffleMatchesDense) {
+  auto dense = cudaq::qec::generate_random_pcm(
+      /*n_rounds=*/3, /*n_errs_per_round=*/6,
+      /*n_syndromes_per_round=*/4, /*weight=*/2, std::mt19937_64(17));
+  auto sparse = sparse_binary_matrix(dense, sparse_binary_matrix_layout::csc);
+
+  auto dense_shuffled =
+      cudaq::qec::shuffle_pcm_columns(dense, std::mt19937_64(23));
+  auto sparse_shuffled =
+      cudaq::qec::shuffle_pcm_columns(sparse, std::mt19937_64(23));
+
+  EXPECT_TRUE(dense_pcm_equal(dense_shuffled, sparse_shuffled.to_dense()));
+}
+
+TEST(SparseBinaryMatrix, SparseSerializationMatchesDenseSerialization) {
+  std::vector<std::uint8_t> data = {1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0};
+  auto dense = cudaqx::tensor<std::uint8_t>({3, 4});
+  dense.copy(data.data(), {3, 4});
+  auto sparse = sparse_binary_matrix(dense);
+
+  EXPECT_EQ(cudaq::qec::pcm_to_sparse_string(dense),
+            cudaq::qec::pcm_to_sparse_string(sparse));
+  EXPECT_EQ(cudaq::qec::pcm_to_sparse_vec(dense),
+            cudaq::qec::pcm_to_sparse_vec(sparse));
+}
+
+TEST(SparseBinaryMatrix, SparseSerializationCanonicalizesStoredEntries) {
+  auto sp = sparse_binary_matrix::from_nested_csr(
+      2, 4, std::vector<std::vector<index_type>>{{2, 1, 1}, {3, 0, 3}});
+
+  EXPECT_EQ(cudaq::qec::pcm_to_sparse_string(sp), "2,-1,0,-1");
+  EXPECT_EQ(cudaq::qec::pcm_to_sparse_vec(sp),
+            (std::vector<std::int64_t>{2, -1, 0, -1}));
+}
+
 TEST(SparseBinaryMatrix,
      GetPcmForRoundsSparse_CanonicalSkipMatchesCanonicalize) {
   // On canonical input, the pcm_is_canonical=true skip path must match the

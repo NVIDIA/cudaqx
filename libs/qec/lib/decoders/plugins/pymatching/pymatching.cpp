@@ -122,6 +122,7 @@ public:
         }
       }
       this->set_O_sparse(O_sparse);
+      this->set_result_type(decode_result_type::decode_to_obs);
       decode_to_observables = true;
       if (!merge_strategy_explicit)
         merge_strategy_enum = pm::MERGE_STRATEGY::INDEPENDENT;

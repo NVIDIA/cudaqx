@@ -232,7 +232,7 @@ TEST(DecoderPlugins, SingleErrorLutExample_DecodesSingletonColumnSyndromes) {
   constexpr std::size_t block_size = 3;
   constexpr std::size_t syndrome_size = 2;
   // | 1 1 0 |
-  // | 0 1 1 | — single-bit columns are weight-1 syndrome patterns.
+  // | 0 1 1 | - single-bit columns are weight-1 syndrome patterns.
   std::vector<uint8_t> H_vec = {1, 1, 0, // row 0
                                 0, 1, 1};
   cudaqx::tensor<uint8_t> H;
@@ -924,18 +924,20 @@ TEST(StimDemGetDecoder, StillAcceptsParityCheckMatrix) {
 }
 
 TEST(StimDemGetDecoder, RepeatedDetectorOrObservableTargetsXorFold) {
-  const std::string dem_text = R"(error(0.1) D0 D0
-error(0.1) L0 L0
+  const std::string dem_text = R"(error(0.1) D0 D0 D1
+error(0.1) L0 L0 D2
 )";
 
   auto dem = cudaq::qec::dem_from_stim_text(dem_text);
-  ASSERT_EQ(dem.num_detectors(), 1u);
+  ASSERT_EQ(dem.num_detectors(), 3u);
   ASSERT_EQ(dem.num_observables(), 1u);
   ASSERT_EQ(dem.num_error_mechanisms(), 2u);
   EXPECT_EQ(dem.detector_error_matrix.at({0u, 0u}), 0u)
       << "duplicate D0 in error 0 should XOR-cancel to 0";
+  EXPECT_EQ(dem.detector_error_matrix.at({1u, 0u}), 1u) << "D1 survives";
   EXPECT_EQ(dem.observables_flips_matrix.at({0u, 1u}), 0u)
       << "duplicate L0 in error 1 should XOR-cancel to 0";
+  EXPECT_EQ(dem.detector_error_matrix.at({2u, 1u}), 1u) << "D2 survives";
 }
 
 TEST(StimDemGetDecoder, DemWithoutObservablesDoesNotAddODefault) {
@@ -1010,6 +1012,153 @@ TEST(StimDemGetDecoder, SeparatorTargetsAreIgnoredByFallbackParser) {
   EXPECT_EQ(dem.detector_error_matrix.at({0, 0}), 1u);
   EXPECT_EQ(dem.detector_error_matrix.at({1, 0}), 1u);
   EXPECT_EQ(dem.observables_flips_matrix.at({0, 0}), 1u);
+}
+
+TEST(StimDemGetDecoder, DecomposeErrorsFalseIgnoresCaret) {
+  auto dem = cudaq::qec::dem_from_stim_text(
+      "error(0.1) D0 D2 ^ D1 D3\nerror(0.2) D0 D2 D1 D3\n");
+  ASSERT_EQ(dem.num_error_mechanisms(), 2u);
+  std::size_t expected_num_detectors = 4u;
+  for (std::size_t r = 0; r < expected_num_detectors; ++r) {
+    EXPECT_EQ(dem.detector_error_matrix.at({r, 0u}), 1u) << "D" << r;
+    EXPECT_EQ(dem.detector_error_matrix.at({r, 1u}), 1u) << "D" << r;
+  }
+  EXPECT_FALSE(dem.error_ids.has_value());
+}
+
+TEST(StimDemGetDecoder, DemFromStimTextErrorIds) {
+  const std::string dem_text = "error(0.05) D0 D1 L0\n"
+                               "error(0.03) D2 L1\n"
+                               "error(0.1) D0 D2 ^ D1 D3\n";
+
+  auto dem_no = cudaq::qec::dem_from_stim_text(dem_text);
+  EXPECT_FALSE(dem_no.error_ids.has_value());
+
+  auto dem_yes =
+      cudaq::qec::dem_from_stim_text(dem_text, /*use_decomp_suggestions=*/true);
+  EXPECT_FALSE(dem_yes.error_ids.has_value());
+  ASSERT_EQ(dem_yes.error_rates.size(), 4u);
+  EXPECT_DOUBLE_EQ(dem_yes.error_rates[0], 0.05);
+  EXPECT_DOUBLE_EQ(dem_yes.error_rates[1], 0.03);
+  EXPECT_DOUBLE_EQ(dem_yes.error_rates[2], 0.1);
+  EXPECT_DOUBLE_EQ(dem_yes.error_rates[3], 0.1);
+}
+
+// Verify true: each ^ component becomes a separate column; each component
+// inherits the parent instruction's probability; error_ids is nullopt.
+TEST(StimDemGetDecoder, DecomposeErrorsTrueSplitsCaretComponents) {
+  auto dem = cudaq::qec::dem_from_stim_text("error(0.1) D0 L0 ^ D1\n",
+                                            /*use_decomp_suggestions=*/true);
+  ASSERT_EQ(dem.num_error_mechanisms(), 2u);
+  ASSERT_EQ(dem.num_detectors(), 2u);
+  ASSERT_EQ(dem.num_observables(), 1u);
+
+  // Expected result:
+  //      E0 E1
+  // D0 [[1, 0],
+  // D1  [0, 1]]
+  // L0 [[1, 0]]
+  EXPECT_EQ(dem.detector_error_matrix.at({0u, 0u}), 1u);
+  EXPECT_EQ(dem.detector_error_matrix.at({0u, 1u}), 0u);
+  EXPECT_EQ(dem.detector_error_matrix.at({1u, 0u}), 0u);
+  EXPECT_EQ(dem.detector_error_matrix.at({1u, 1u}), 1u);
+  EXPECT_EQ(dem.observables_flips_matrix.at({0u, 0u}), 1u);
+  EXPECT_EQ(dem.observables_flips_matrix.at({0u, 1u}), 0u);
+
+  // Each component gets the parent probability; error_ids is always nullopt.
+  EXPECT_FALSE(dem.error_ids.has_value());
+  ASSERT_EQ(dem.error_rates.size(), 2u);
+  EXPECT_DOUBLE_EQ(dem.error_rates[0], 0.1);
+  EXPECT_DOUBLE_EQ(dem.error_rates[1], 0.1);
+}
+
+TEST(StimDemGetDecoder, DecomposeErrorsXorCancelled) {
+  auto dem = cudaq::qec::dem_from_stim_text("error(0.1) D0 D0 ^ D1\n",
+                                            /*use_decomp_suggestions=*/true);
+  ASSERT_EQ(dem.num_error_mechanisms(), 1u)
+      << "empty component after XOR cancellation must be dropped";
+  EXPECT_EQ(dem.detector_error_matrix.at({0u, 0u}), 0u) << "D0 cancelled";
+  EXPECT_EQ(dem.detector_error_matrix.at({1u, 0u}), 1u) << "D1 survives";
+}
+
+// ---------------------------------------------------------------------------
+// Tests for enqueue_syndrome decode_result_type routing
+// ---------------------------------------------------------------------------
+
+// Verify that enqueue_syndrome uses decode() output directly as corrections
+// when get_result_type() == decode_to_obs, bypassing the O_sparse projection.
+TEST(EnqueueSyndrome, ObsFrameDecoderUsesResultDirectly) {
+  // H: 2 syndrome measurements, 4 physical errors
+  cudaqx::tensor<uint8_t> H_tensor({2, 4});
+  H_tensor.at({0, 0}) = 1;
+  H_tensor.at({1, 1}) = 1;
+  cudaqx::heterogeneous_map params;
+  params.insert("decode_to_obs", true);
+  auto dec = cudaq::qec::decoder::get("sample_decoder", H_tensor, params);
+
+  // D_sparse maps the two enqueued syndrome bits directly to two detector bits.
+  dec->set_D_sparse(std::vector<std::vector<uint32_t>>{{0}, {1}});
+  // Two observables; cols 0/1 are within block_size=4 for validation only.
+  dec->set_O_sparse(std::vector<std::vector<uint32_t>>{{0}, {1}});
+
+  bool did_decode = dec->enqueue_syndrome(std::vector<uint8_t>{1, 0});
+  EXPECT_TRUE(did_decode);
+
+  const uint8_t *corr = dec->get_obs_corrections();
+  EXPECT_EQ(corr[0], 1u);
+  EXPECT_EQ(corr[1], 0u);
+}
+
+// Verify that corrections XOR-accumulate correctly across multiple shots and
+// that clear_corrections() resets them between shots.
+TEST(EnqueueSyndrome, ObsFrameMultiShotAccumulation) {
+  cudaqx::tensor<uint8_t> H_tensor({2, 4});
+  H_tensor.at({0, 0}) = 1;
+  H_tensor.at({1, 1}) = 1;
+  cudaqx::heterogeneous_map params;
+  params.insert("decode_to_obs", true);
+  auto dec = cudaq::qec::decoder::get("sample_decoder", H_tensor, params);
+
+  dec->set_D_sparse(std::vector<std::vector<uint32_t>>{{0}, {1}});
+  dec->set_O_sparse(std::vector<std::vector<uint32_t>>{{0}, {1}});
+
+  // Shot 1: obs[0]=1, obs[1]=0 -> corrections become [1, 0]
+  EXPECT_TRUE(dec->enqueue_syndrome(std::vector<uint8_t>{1, 0}));
+  const uint8_t *corr = dec->get_obs_corrections();
+  EXPECT_EQ(corr[0], 1u);
+  EXPECT_EQ(corr[1], 0u);
+
+  // Shot 2 (no reset): obs[0]=1, obs[1]=1 -> corrections XOR to [0, 1]
+  EXPECT_TRUE(dec->enqueue_syndrome(std::vector<uint8_t>{1, 1}));
+  corr = dec->get_obs_corrections();
+  EXPECT_EQ(corr[0], 0u);
+  EXPECT_EQ(corr[1], 1u);
+
+  // After clear, corrections reset to [0, 0]
+  dec->clear_corrections();
+  corr = dec->get_obs_corrections();
+  EXPECT_EQ(corr[0], 0u);
+  EXPECT_EQ(corr[1], 0u);
+}
+
+// Verify that a result size mismatch against num_observables throws for
+// decode_to_obs decoders.
+TEST(EnqueueSyndrome, ObsFrameSizeMismatchThrows) {
+  cudaqx::tensor<uint8_t> H_tensor({3, 4});
+  H_tensor.at({0, 0}) = 1;
+  H_tensor.at({1, 1}) = 1;
+  H_tensor.at({2, 2}) = 1;
+  cudaqx::heterogeneous_map params;
+  params.insert("decode_to_obs", true);
+  auto dec = cudaq::qec::decoder::get("sample_decoder", H_tensor, params);
+
+  dec->set_D_sparse(std::vector<std::vector<uint32_t>>{{0}, {1}, {2}});
+  dec->set_O_sparse(
+      std::vector<std::vector<uint32_t>>{{0}, {1}}); // 2 observables
+
+  // sample_decoder returns all three detector bits in decode_to_obs mode.
+  EXPECT_THROW(dec->enqueue_syndrome(std::vector<uint8_t>{1, 0, 1}),
+               std::runtime_error);
 }
 
 TEST(SlidingWindowDecoder, BaseStreamingCopiesFirstRoundDetectors) {
