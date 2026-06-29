@@ -29,9 +29,13 @@ struct QueuedLogRecord {
   std::uint64_t timestampNs = 0;
   int lineNo = 0;
   std::thread::id threadId;
-  std::array<char, 128> fileName{};
+  // The character buffers are intentionally left uninitialized: only the first
+  // `fileNameLen`/`messageLen` bytes are ever written (and read back), so
+  // zero-filling the full capacity on every record would waste cycles on the
+  // producer hot path.
+  std::array<char, 128> fileName;
   std::size_t fileNameLen = 0;
-  std::array<char, kRealtimeForwarderMaxMessageCapacity> message{};
+  std::array<char, kRealtimeForwarderMaxMessageCapacity> message;
   std::size_t messageLen = 0;
 };
 

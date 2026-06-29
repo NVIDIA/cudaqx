@@ -7,6 +7,7 @@
  ******************************************************************************/
 #include "cudaq/qec/logger.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -244,6 +245,49 @@ TEST(Logger, SaturatedForwarderQueueDropsWithoutBlockingProducer) {
   EXPECT_NE(dropWarning.find("forwarder dropped log records"),
             std::string::npos);
 } // end - TEST(Logger, SaturatedForwarderQueueDropsWithoutBlockingProducer)
+
+// dropOldest must evict the oldest queued record (counting it as the single
+// lost record) while always admitting the newest, and must never block the
+// producer or drop the incoming record on the eviction race.
+TEST(Logger, DropOldestEvictsOldestAndCountsOnlyLostRecords) {
+  ForwarderGuard guard;
+  cudaq::qec::detail::clearForwarder();
+  cudaq::qec::detail::setLogLevel(cudaq::qec::detail::LogLevel::info);
+
+  std::atomic<bool> releaseCallback{false};
+  std::mutex mutex;
+  std::vector<std::string> delivered;
+  cudaq::qec::detail::setForwarder(cudaq::qec::detail::ForwarderConfig{
+      .callback =
+          [&](const cudaq::qec::detail::ForwardedLogRecord &record) {
+            while (!releaseCallback.load(std::memory_order_relaxed))
+              std::this_thread::sleep_for(1ms);
+            std::lock_guard<std::mutex> lock(mutex);
+            delivered.push_back(record.message);
+          },
+      .queueCapacity = 4,
+      .dropPolicy = cudaq::qec::detail::ForwardDropPolicy::dropOldest});
+
+  testing::internal::CaptureStderr();
+  constexpr int kSends = 256;
+  for (int i = 0; i < kSends; ++i)
+    CUDA_QEC_INFO("evt {}", i);
+
+  const auto stats = cudaq::qec::detail::getForwarderStats();
+  // Every record is admitted (after evicting if needed) in dropOldest mode.
+  EXPECT_EQ(stats.enqueuedRecords, static_cast<std::uint64_t>(kSends));
+  // A blocked consumer guarantees the queue saturates and old records evict.
+  EXPECT_GT(stats.droppedRecords, 0u);
+
+  releaseCallback.store(true, std::memory_order_relaxed);
+  cudaq::qec::detail::flushLogs();
+  static_cast<void>(testing::internal::GetCapturedStderr());
+
+  std::lock_guard<std::mutex> lock(mutex);
+  // dropOldest retains the newest record, so the final send must survive.
+  EXPECT_NE(std::find(delivered.begin(), delivered.end(), "evt 255"),
+            delivered.end());
+} // end - TEST(Logger, DropOldestEvictsOldestAndCountsOnlyLostRecords)
 
 TEST(Logger, ForwarderTruncationIsCountedAndAnnotated) {
   ForwarderGuard guard;

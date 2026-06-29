@@ -105,13 +105,17 @@ std::string formatTimestamp(const Clock::time_point tp) {
   return out.str();
 }
 
-// Build one final text log line with timestamp/source metadata.
+// Build one final text log line with timestamp/source metadata. The
+// `[file:line]` segment is omitted when no filename is supplied (empty or
+// null), allowing source-free log lines via the `log()` helper.
 std::string composeLine(const LogLevel level, const std::string_view message,
                         const char *fileName, const int lineNo,
                         const Clock::time_point ts) {
   std::ostringstream out;
-  out << '[' << formatTimestamp(ts) << "] [" << logLevelName(level) << "] ["
-      << pathToFileName(fileName) << ':' << lineNo << "] " << message;
+  out << '[' << formatTimestamp(ts) << "] [" << logLevelName(level) << "] ";
+  if (fileName != nullptr && fileName[0] != '\0')
+    out << '[' << pathToFileName(fileName) << ':' << lineNo << "] ";
+  out << message;
   return out.str();
 }
 
@@ -282,9 +286,11 @@ void logMessageFormatted(LogLevel logLevel, std::string formattedMessage,
   emit(logLevel, formattedMessage, fileName, lineNo);
 }
 
-void logMessageView(LogLevel logLevel, std::string_view formattedMessage,
-                    const char *fileName, int lineNo) {
-  emit(logLevel, formattedMessage, fileName, lineNo);
+void logMessageBuffer(LogLevel logLevel, const char *formattedMessage,
+                      std::size_t messageLen, const char *fileName,
+                      int lineNo) {
+  emit(logLevel, std::string_view(formattedMessage, messageLen), fileName,
+       lineNo);
 }
 
 void logWithTimestampFormatted(std::string formattedMessage,
@@ -292,9 +298,11 @@ void logWithTimestampFormatted(std::string formattedMessage,
   emit(LogLevel::info, formattedMessage, fileName, lineNo);
 }
 
-void logWithTimestampView(std::string_view formattedMessage,
-                          const char *fileName, int lineNo) {
-  emit(LogLevel::info, formattedMessage, fileName, lineNo);
+void logWithTimestampBuffer(const char *formattedMessage,
+                            std::size_t messageLen, const char *fileName,
+                            int lineNo) {
+  emit(LogLevel::info, std::string_view(formattedMessage, messageLen), fileName,
+       lineNo);
 }
 
 } // namespace cudaq::qec::detail

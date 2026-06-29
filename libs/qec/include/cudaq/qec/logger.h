@@ -130,15 +130,18 @@ void flushLogs();
 /// @brief Emit a formatted message with file and line metadata.
 void logMessageFormatted(LogLevel logLevel, std::string formattedMessage,
                          const char *fileName, int lineNo);
-/// @brief Emit a preformatted view with file and line metadata.
-void logMessageView(LogLevel logLevel, std::string_view formattedMessage,
-                    const char *fileName, int lineNo);
+/// @brief Emit a preformatted character buffer with explicit length.
+/// @details The implementation must consume/copy the buffer during the call.
+void logMessageBuffer(LogLevel logLevel, const char *formattedMessage,
+                      std::size_t messageLen, const char *fileName, int lineNo);
 /// @brief Emit a formatted timestamped message with file and line metadata.
 void logWithTimestampFormatted(std::string formattedMessage,
                                const char *fileName, int lineNo);
-/// @brief Emit a preformatted timestamped message view.
-void logWithTimestampView(std::string_view formattedMessage,
-                          const char *fileName, int lineNo);
+/// @brief Emit a preformatted timestamped buffer with explicit length.
+/// @details The implementation must consume/copy the buffer during the call.
+void logWithTimestampBuffer(const char *formattedMessage,
+                            std::size_t messageLen, const char *fileName,
+                            int lineNo);
 
 /// @brief Format a message and arguments using `fmt`.
 template <typename... Args>
@@ -155,7 +158,10 @@ void logMessage(LogLevel logLevel, const std::string_view message,
   if (!should_log(logLevel))
     return;
   if (isForwarderEnabled()) {
-    std::array<char, kRealtimeForwarderMaxMessageCapacity> buffer{};
+    // Intentionally left uninitialized: `fmt` writes `used` bytes and we
+    // explicitly NUL-terminate at `buffer[used]`, so zero-filling the full
+    // capacity on every call would be wasted work on the hot path.
+    std::array<char, kRealtimeForwarderMaxMessageCapacity> buffer;
     const std::size_t cap =
         std::min(getForwarderMessageCapacity(), buffer.size() - 1);
     auto result = fmt::vformat_to_n(buffer.data(), cap, message,
@@ -170,8 +176,7 @@ void logMessage(LogLevel logLevel, const std::string_view message,
       }
     }
     buffer[used] = '\0';
-    logMessageView(logLevel, std::string_view(buffer.data(), used), fileName,
-                   lineNo);
+    logMessageBuffer(logLevel, buffer.data(), used, fileName, lineNo);
     return;
   }
   logMessageFormatted(logLevel,
@@ -209,13 +214,15 @@ template <typename... Args>
 void debug(const std::string_view, Args &&...) {}
 #endif
 
-/// @brief Log a message with timestamp.
-/// @details This helper always emits regardless of log level.
-/// File and line metadata are still attached by the backend emit path.
+/// @brief Log a message with timestamp but without file/line metadata.
+/// @details This helper always emits regardless of log level. The
+/// `[file:line]` segment is intentionally omitted from the output; use the
+/// `CUDA_QEC_*` macros instead if source location is required.
 template <typename... Args>
 void log(const std::string_view message, Args &&...args) {
   if (detail::isForwarderEnabled()) {
-    std::array<char, detail::kRealtimeForwarderMaxMessageCapacity> buffer{};
+    // Intentionally left uninitialized; see logMessage() for rationale.
+    std::array<char, detail::kRealtimeForwarderMaxMessageCapacity> buffer;
     const std::size_t cap =
         std::min(detail::getForwarderMessageCapacity(), buffer.size() - 1);
     auto result = fmt::vformat_to_n(buffer.data(), cap, message,
@@ -232,13 +239,12 @@ void log(const std::string_view message, Args &&...args) {
       }
     }
     buffer[used] = '\0';
-    detail::logWithTimestampView(std::string_view(buffer.data(), used),
-                                 __builtin_FILE(), __builtin_LINE());
+    // Pass an empty filename so composeLine omits the [file:line] segment.
+    detail::logWithTimestampBuffer(buffer.data(), used, "", 0);
     return;
   }
   detail::logWithTimestampFormatted(
-      detail::formatMessage(message, std::forward<Args>(args)...),
-      __builtin_FILE(), __builtin_LINE());
+      detail::formatMessage(message, std::forward<Args>(args)...), "", 0);
 }
 
 } // namespace cudaq::qec

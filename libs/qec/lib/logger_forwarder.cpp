@@ -129,14 +129,22 @@ public:
         return;
       }
 
+      // The queue is full. dropOldest evicts the oldest record to admit the
+      // incoming one; the evicted record is the genuinely lost message, so it
+      // is the only thing counted as a drop here. If the eviction fails because
+      // a consumer already drained the slot, the queue is no longer full, so we
+      // simply retry the enqueue without counting a drop (the incoming record
+      // is not lost). This keeps droppedRecords equal to the number of records
+      // actually discarded, and ensures the dropNewest fallthrough below counts
+      // only the incoming record it drops.
       if (mConfig.dropPolicy == ForwardDropPolicy::dropOldest) {
         QueuedLogRecord ignored;
-        if (tryDequeueOne(ignored)) {
+        if (tryDequeueOne(ignored))
           notifyDrop();
-          continue;
-        }
+        continue;
       }
 
+      // dropNewest: the incoming record is the one we lose.
       notifyDrop();
       return;
     }
