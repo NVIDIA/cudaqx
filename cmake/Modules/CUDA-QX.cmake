@@ -125,7 +125,7 @@ function(_cudaqx_import_nvqir_target target_name library_name)
     set_target_properties(${target_name} PROPERTIES
       IMPORTED_LOCATION "${CUDAQ_LIBRARY_DIR}/${library_name}${CMAKE_SHARED_LIBRARY_SUFFIX}"
       IMPORTED_SONAME "${library_name}${CMAKE_SHARED_LIBRARY_SUFFIX}"
-      IMPORTED_LINK_INTERFACE_LIBRARIES "cudaq::cudaq-platform-default;cudaq::cudaq-em-default")
+      IMPORTED_LINK_INTERFACE_LIBRARIES "cudaq::cudaq-platform-default;cudaq::cudaq-em-default;cudaq::cudaq-mlir-runtime")
   endif()
 endfunction()
 
