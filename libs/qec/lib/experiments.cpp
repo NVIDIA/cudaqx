@@ -218,7 +218,8 @@ sample_memory_circuit(const code &code, operation statePrep,
   const std::size_t numCols = numAncx + numAncz;
 
   // Obtain the Measurement-to-Detector (M2D) sparse matrix.
-  // m2d.rows[d] = set of chronological measurement indices whose XOR = detector d.
+  // m2d.rows[d] = set of chronological measurement indices whose XOR = detector
+  // d.
   cudaq::M2DSparseMatrix m2d;
   cudaq::detail::runDemFromKernel(
       cudaq::getKernelName(memory_circuit), cudaq::get_platform(), &noise,
@@ -232,11 +233,12 @@ sample_memory_circuit(const code &code, operation statePrep,
   cudaq::sample_options opts{
       .shots = numShots, .noise = noise, .explicit_measurements = true};
   auto result = cudaq::sample(opts, memory_circuit, stabRound, prep, numData,
-                              numAncx, numAncz, numRounds, xVec, zVec,
-                              obs_flat, num_obs, !is_z_prep);
+                              numAncx, numAncz, numRounds, xVec, zVec, obs_flat,
+                              num_obs, !is_z_prep);
 
-  // mzTable[shot, meas_idx] = raw 0/1 outcome; shape (numShots, numMeasPerShot).
-  // Measurement layout per shot: numRounds*numCols ancilla, then numData qubits.
+  // mzTable[shot, meas_idx] = raw 0/1 outcome; shape (numShots,
+  // numMeasPerShot). Measurement layout per shot: numRounds*numCols ancilla,
+  // then numData qubits.
   cudaqx::tensor<uint8_t> mzTable(result.sequential_data());
 
   // Data results: tail numData measurements of each shot.
@@ -288,10 +290,11 @@ sample_memory_circuit(const code &code, std::size_t numShots,
 namespace details {
 /// @brief Given a memory circuit setup, generate a DEM. This is the main driver
 /// function that all of the function overloads invoke.
-cudaq::qec::detector_error_model dem_from_memory_circuit(
-    const code &code, operation statePrep, std::size_t numRounds,
-    cudaq::noise_model &noise, bool keep_x_stabilizers,
-    bool keep_z_stabilizers, bool decompose_errors) {
+cudaq::qec::detector_error_model
+dem_from_memory_circuit(const code &code, operation statePrep,
+                        std::size_t numRounds, cudaq::noise_model &noise,
+                        bool keep_x_stabilizers, bool keep_z_stabilizers,
+                        bool decompose_errors) {
   if (!keep_x_stabilizers && !keep_z_stabilizers)
     throw std::runtime_error("dem_from_memory_circuit error - no stabilizers "
                              "to keep.");
@@ -314,7 +317,8 @@ cudaq::qec::detector_error_model dem_from_memory_circuit(
   auto numData = code.get_num_data_qubits();
   auto numAncx = code.get_num_ancilla_x_qubits();
   auto numAncz = code.get_num_ancilla_z_qubits();
-  bool is_z_prep = statePrep == operation::prep0 || statePrep == operation::prep1;
+  bool is_z_prep =
+      statePrep == operation::prep0 || statePrep == operation::prep1;
   std::vector<std::size_t> xVec(parity_x.data(),
                                 parity_x.data() + parity_x.size());
   std::vector<std::size_t> zVec(parity_z.data(),
@@ -328,10 +332,9 @@ cudaq::qec::detector_error_model dem_from_memory_circuit(
 
   cudaq::dem_options dem_opts;
   dem_opts.decompose_errors = decompose_errors;
-  auto dem_text =
-      cudaq::dem_from_kernel(memory_circuit, &noise, dem_opts, stabRound, prep,
-                             numData, numAncx, numAncz, numRounds, xVec, zVec,
-                             obs_flat, num_obs, !is_z_prep);
+  auto dem_text = cudaq::dem_from_kernel(
+      memory_circuit, &noise, dem_opts, stabRound, prep, numData, numAncx,
+      numAncz, numRounds, xVec, zVec, obs_flat, num_obs, !is_z_prep);
   auto dem = cudaq::qec::dem_from_stim_text(dem_text, decompose_errors);
 
   const auto numXStabs = code.get_num_x_stabilizers();
@@ -354,8 +357,8 @@ cudaq::qec::detector_error_model dem_from_memory_circuit(
         numRounds * numReturnSynPerRound, numNoiseMechs});
 
     for (std::size_t round = 0; round < numRounds; ++round) {
-      const auto src_row_begin = static_cast<std::uint32_t>(
-          round * numSyndromesPerRound + rowOffset);
+      const auto src_row_begin =
+          static_cast<std::uint32_t>(round * numSyndromesPerRound + rowOffset);
       const auto src_row_end =
           src_row_begin + static_cast<std::uint32_t>(numReturnSynPerRound) - 1;
       auto round_block = cudaq::qec::reorder_pcm_columns(

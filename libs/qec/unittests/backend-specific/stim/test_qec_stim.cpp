@@ -82,7 +82,7 @@ TEST(QECCodeTester, checkSteaneNoiseStim) {
     printf("data\n");
     d.dump();
     EXPECT_EQ(syndromes.shape()[0], nShots); // numShots
-    EXPECT_EQ(syndromes.shape()[1], 18); // numDetectors
+    EXPECT_EQ(syndromes.shape()[1], 18);     // numDetectors
 
     // Noise present — some detectors must fire.
     int sum = 0;
@@ -379,10 +379,10 @@ TEST(QECCodeTester, checkNoisySampleMemoryCircuitAndDecodeStim) {
     printf("Hz:\n");
     H.dump();
     printf("end\n");
-    // syndromes shape: (nShots=1, nDetectors).  
-    // Format: [numFixed round-0 detectors] [numCols * (nRounds-1) detectors] [numFixed final-data]
-    // For prep0 (Z-prep): numFixed = numAncz = 3
-    // numCols = number of per-round syndromes
+    // syndromes shape: (nShots=1, nDetectors).
+    // Format: [numFixed round-0 detectors] [numCols * (nRounds-1) detectors]
+    // [numFixed final-data] For prep0 (Z-prep): numFixed = numAncz = 3 numCols
+    // = number of per-round syndromes
     size_t numAncz_s = steane->get_num_ancilla_z_qubits();
     size_t numAncx_s = steane->get_num_ancilla_x_qubits();
     size_t numCols = numAncz_s + numAncx_s;
@@ -471,14 +471,14 @@ TEST(QECCodeTester, checkNoisySampleMemoryCircuitAndDecodeStim) {
     observables.dump();
     auto decoder = cudaq::qec::get_decoder("single_error_lut", H);
     printf("end\n");
-    // syndromes shape: (nShots=1, nDetectors).  
-    // Format: [numFixed round-0 detectors] [numCols * (nRounds-1) detectors] [numFixed final-data]
-    // For prepp (X-prep): numFixed = numAncx = 3
-    // numCols = number of per-round syndromes
+    // syndromes shape: (nShots=1, nDetectors).
+    // Format: [numFixed round-0 detectors] [numCols * (nRounds-1) detectors]
+    // [numFixed final-data] For prepp (X-prep): numFixed = numAncx = 3 numCols
+    // = number of per-round syndromes
     size_t numAncz_s2 = steane->get_num_ancilla_z_qubits();
     size_t numAncx_s2 = steane->get_num_ancilla_x_qubits();
-    size_t numCols2  = numAncz_s2 + numAncx_s2;
-    size_t numFixed2 = numAncx_s2;   // prepp → X-ancilla are fixed
+    size_t numCols2 = numAncz_s2 + numAncx_s2;
+    size_t numFixed2 = numAncx_s2; // prepp → X-ancilla are fixed
     size_t k2 = syndromes.shape()[1];
     size_t numLerrors = 0;
     for (size_t shot = 0; shot < nShots; ++shot) {

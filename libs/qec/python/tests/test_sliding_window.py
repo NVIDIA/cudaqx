@@ -33,7 +33,11 @@ def test_sliding_window_1(decoder_name, batched, num_rounds, num_windows):
     statePrep = qec.operation.prep0
     nShots = 1000
 
-    dem = qec.z_dem_from_memory_circuit(code, statePrep, num_rounds, noise, decompose_errors=True)
+    dem = qec.z_dem_from_memory_circuit(code,
+                                        statePrep,
+                                        num_rounds,
+                                        noise,
+                                        decompose_errors=True)
     num_syndromes_per_round = dem.detector_error_matrix.shape[0] // num_rounds
 
     # Inject only one error per shot. This will keep the number of mismatches

@@ -305,7 +305,10 @@ def test_pymatching_decode_to_observable_surface_code_dem():
     nRounds = 5
     nShots = 2000
 
-    dem = qec.dem_from_memory_circuit(code, statePrep, nRounds, noise,
+    dem = qec.dem_from_memory_circuit(code,
+                                      statePrep,
+                                      nRounds,
+                                      noise,
                                       decompose_errors=True)
 
     # Verify decomposition: every column of the detector error matrix must have
@@ -333,7 +336,7 @@ def test_pymatching_decode_to_observable_surface_code_dem():
     # With decode_to_observables=True, each row is observable flips
     # (length num_observables), not error predictions.
     obs_per_shot = np.asarray(dr.result, dtype=np.float64)
-    # The decoder must return one row per shot and at least one observable per shot. 
+    # The decoder must return one row per shot and at least one observable per shot.
     # Otherwise the XOR/sum below is trivially zero
     assert obs_per_shot.shape == (nShots, dem.observables_flips_matrix.shape[0])
     assert obs_per_shot.shape[1] > 0

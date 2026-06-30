@@ -28,10 +28,13 @@ __qpu__ void memory_circuit(const code::stabilizer_round &stabilizer_round,
   // Prepare the initial state fault tolerantly
   statePrep({data, xstab_anc, zstab_anc});
 
-  // Z-measurement before any operations always yields 0...0, so first syndromes are partially non-deterministic
+  // Z-measurement before any operations always yields 0...0, so first syndromes
+  // are partially non-deterministic
   auto final_syndrome = stabilizer_round(logical, x_stabilizers, z_stabilizers);
-  int num_fixed_measurements = measure_in_x_basis ? xstab_anc.size() : zstab_anc.size();
-  int fixed_offset = measure_in_x_basis ? final_syndrome.size() - num_fixed_measurements : 0;
+  int num_fixed_measurements =
+      measure_in_x_basis ? xstab_anc.size() : zstab_anc.size();
+  int fixed_offset =
+      measure_in_x_basis ? final_syndrome.size() - num_fixed_measurements : 0;
   for (std::size_t i = 0; i < num_fixed_measurements; ++i) {
     cudaq::detector(final_syndrome[fixed_offset + i]);
   }
@@ -64,8 +67,8 @@ __qpu__ void memory_circuit(const code::stabilizer_round &stabilizer_round,
     cudaq::logical_observable(obs_support);
   }
 
-  // For each syndrome, connect output from final syndrome round to each qubit in
-  // the support of that stabilizer.
+  // For each syndrome, connect output from final syndrome round to each qubit
+  // in the support of that stabilizer.
   const std::vector<size_t> &stabilizers =
       measure_in_x_basis ? x_stabilizers : z_stabilizers;
 
