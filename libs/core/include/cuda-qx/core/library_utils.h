@@ -20,7 +20,7 @@
 
 namespace cudaqx::__internal__ {
 
-enum class CUDAQXLibraryType { Solvers, QEC };
+enum class CUDAQXLibraryType { Solvers, QEC, QECDecoders };
 
 /// @brief Structure to hold CUDAQX library data.
 struct CUDAQXLibraryData {
@@ -70,6 +70,8 @@ inline static std::string getCUDAQXLibraryPath(const CUDAQXLibraryType lib) {
     switch (lib) {
     case CUDAQXLibraryType::QEC:
       return "/libcudaq-qec.";
+    case CUDAQXLibraryType::QECDecoders:
+      return "/libcudaq-qec-decoders.";
     case CUDAQXLibraryType::Solvers:
       return "/libcudaq-solvers.";
     }
