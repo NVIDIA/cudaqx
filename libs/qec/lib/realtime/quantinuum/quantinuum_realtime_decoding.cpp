@@ -1,42 +1,23 @@
 /*******************************************************************************
- * Copyright (c) 2025 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2026 NVIDIA Corporation & Affiliates.                         *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
+#include "cudaq/qec/environment.h"
 #include "cudaq/qec/logger.h"
 
 #include "quantinuum_decoding.h"
 #include "../realtime_decoding.h"
-#include <algorithm>
-#include <cctype>
-#include <cstdlib>
 #include <dlfcn.h>
-#include <string>
-
-namespace {
-/// \brief Minimal replacement for cudaq::getEnvBool.
-///
-/// Returns \p default_value when the variable is unset; otherwise interprets
-/// "1"/"true"/"yes"/"on" (case insensitive) as true and anything else as
-/// false. Avoids a dependency on cudaq-common for this single test-only flag.
-bool get_env_bool(const char *name, bool default_value) {
-  const char *value = std::getenv(name);
-  if (!value)
-    return default_value;
-  std::string lowered(value);
-  std::transform(lowered.begin(), lowered.end(), lowered.begin(),
-                 [](unsigned char c) { return std::tolower(c); });
-  return lowered == "1" || lowered == "true" || lowered == "yes" ||
-         lowered == "on";
-}
-} // namespace
+#include <vector>
 
 // Get an environment variable to determine if we should use the simulated
 // implementation or the real implementation, using call_once.
-static bool z_use_private_impl = get_env_bool("CUDAQ_QTM_PRIVATE_IMPL", false);
+static bool z_use_private_impl =
+    cudaq::qec::get_env_bool("CUDAQ_QTM_PRIVATE_IMPL", false);
 
 // This class dynamically loads a private library for special test
 // configurations. It is not needed for normal usage.
