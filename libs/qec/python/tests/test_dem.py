@@ -170,7 +170,7 @@ def test_decoding_from_dem_from_memory_circuit():
     cudaq.set_random_seed(13)
     code = qec.get_code('steane')
     Lz = code.get_observables_z()
-    p = 0.001
+    p = 0.01
     noise = cudaq.NoiseModel()
     noise.add_all_qubit_channel("x", cudaq.Depolarization2(p), 1)
     statePrep = qec.operation.prep0
@@ -178,14 +178,11 @@ def test_decoding_from_dem_from_memory_circuit():
     nShots = 200
 
     dem = qec.dem_from_memory_circuit(code, statePrep, nRounds, noise)
-    syndromes, sampled_errors = qec.dem_sampling(
-        dem.detector_error_matrix, nShots, dem.error_rates)
+    syndromes, data = qec.sample_memory_circuit(code, statePrep, nShots,
+                                                nRounds, noise)
     syndromes = np.asarray(syndromes, dtype=np.uint8)
-    sampled_errors = np.asarray(sampled_errors, dtype=np.uint8)
-
-    logical_measurements = (
-        (dem.observables_flips_matrix @ sampled_errors.T) % 2
-    ).flatten().astype(np.uint8)
+    logical_measurements = ((Lz @ data.transpose()) % 2).flatten().astype(
+        np.uint8)
 
     decoder = qec.get_decoder('single_error_lut', dem.detector_error_matrix)
     dr = decoder.decode_batch(syndromes)
@@ -221,6 +218,7 @@ def test_decoding_from_surface_code_dem_from_memory_circuit(
 
     cudaq.set_random_seed(13)
     code = qec.get_code('surface_code', distance=5)
+    Lz = code.get_observables_z()
     p = error_rate
     noise = cudaq.NoiseModel()
     noise.add_all_qubit_channel("x", cudaq.Depolarization2(p), 1)
@@ -229,14 +227,11 @@ def test_decoding_from_surface_code_dem_from_memory_circuit(
     nShots = 2000
 
     dem = qec.dem_from_memory_circuit(code, statePrep, nRounds, noise)
-    syndromes, sampled_errors = qec.dem_sampling(
-        dem.detector_error_matrix, nShots, dem.error_rates)
+    syndromes, data = qec.sample_memory_circuit(code, statePrep, nShots,
+                                                nRounds, noise)
     syndromes = np.asarray(syndromes, dtype=np.uint8)
-    sampled_errors = np.asarray(sampled_errors, dtype=np.uint8)
-
-    logical_measurements = (
-        (dem.observables_flips_matrix @ sampled_errors.T) % 2
-    ).flatten().astype(np.uint8)
+    logical_measurements = ((Lz @ data.transpose()) % 2).flatten().astype(
+        np.uint8)
 
     num_syn_triggered_per_shot = np.sum(syndromes, axis=1)
 
@@ -302,6 +297,7 @@ def test_pymatching_decode_to_observable_surface_code_dem():
     flips directly.cpp)."""
     cudaq.set_random_seed(13)
     code = qec.get_code('surface_code', distance=5)
+    Lz = code.get_observables_z()
     p = 0.003
     noise = cudaq.NoiseModel()
     noise.add_all_qubit_channel("x", cudaq.Depolarization2(p), 1)
@@ -309,8 +305,8 @@ def test_pymatching_decode_to_observable_surface_code_dem():
     nRounds = 5
     nShots = 2000
 
-    dem = qec.z_dem_from_memory_circuit(code, statePrep, nRounds, noise,
-                                            decompose_errors=True)
+    dem = qec.dem_from_memory_circuit(code, statePrep, nRounds, noise,
+                                      decompose_errors=True)
 
     # Verify decomposition: every column of the detector error matrix must have
     # weight ≤ 2 (graph-like) so that PyMatching can accept it.
@@ -320,14 +316,10 @@ def test_pymatching_decode_to_observable_surface_code_dem():
         f"decompose_errors=True should yield max column weight 2, got {max_col_weight}"
     )
 
-    syndromes, sampled_errors = qec.dem_sampling(
-        dem.detector_error_matrix, nShots, dem.error_rates)
+    syndromes, data = qec.sample_memory_circuit(code, statePrep, nShots,
+                                                nRounds, noise)
     syndromes = np.asarray(syndromes, dtype=np.uint8)
-    sampled_errors = np.asarray(sampled_errors, dtype=np.uint8)
-
-    logical_measurements = (
-        (dem.observables_flips_matrix @ sampled_errors.T) % 2
-    ).flatten().astype(np.uint8)
+    logical_measurements = ((Lz @ data.T) % 2).flatten().astype(np.uint8)
 
     # Decode syndromes using the graph-like decomposed DEM with PyMatching.
     decoder = qec.get_decoder(
@@ -341,10 +333,15 @@ def test_pymatching_decode_to_observable_surface_code_dem():
     # With decode_to_observables=True, each row is observable flips
     # (length num_observables), not error predictions.
     obs_per_shot = np.asarray(dr.result, dtype=np.float64)
+    # The decoder must return one row per shot and at least one observable per shot. 
+    # Otherwise the XOR/sum below is trivially zero
+    assert obs_per_shot.shape == (nShots, dem.observables_flips_matrix.shape[0])
+    assert obs_per_shot.shape[1] > 0
     data_predictions = np.round(obs_per_shot).astype(np.uint8).T
 
     nLogicalErrorsWithoutDecoding = np.sum(logical_measurements)
     nLogicalErrorsWithDecoding = np.sum(data_predictions ^ logical_measurements)
+    print(nLogicalErrorsWithoutDecoding, nLogicalErrorsWithDecoding)
     assert nLogicalErrorsWithDecoding < nLogicalErrorsWithoutDecoding
 
 

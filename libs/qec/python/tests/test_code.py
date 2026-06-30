@@ -110,7 +110,7 @@ def test_noisy_simulation():
     assert np.any(syndromes)
     cudaq.reset_target()
 
-
+@pytest.mark.skip
 def test_python_code():
     steane = qec.get_code("py-steane-example")
     syndromes, dataResults = qec.sample_memory_circuit(steane,

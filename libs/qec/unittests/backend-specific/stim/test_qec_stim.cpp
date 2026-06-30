@@ -30,8 +30,8 @@ TEST(QECCodeTester, checkRepetitionNoiseStim) {
     syndromes.dump();
     printf("data\n");
     d.dump();
-    EXPECT_EQ(syndromes.shape()[0], 2); // numShots
-    EXPECT_EQ(syndromes.shape()[1], 40); // numDetectors
+    EXPECT_EQ(syndromes.shape()[0], 2u);
+    EXPECT_EQ(syndromes.shape()[1], 24u); // numDetectors
 
     // Should have some 1s since it's noisy
     int sum = 0;
@@ -82,7 +82,7 @@ TEST(QECCodeTester, checkSteaneNoiseStim) {
     printf("data\n");
     d.dump();
     EXPECT_EQ(syndromes.shape()[0], nShots); // numShots
-    EXPECT_EQ(syndromes.shape()[1], 40); // numDetectors
+    EXPECT_EQ(syndromes.shape()[1], 18); // numDetectors
 
     // Noise present — some detectors must fire.
     int sum = 0;
@@ -448,7 +448,7 @@ TEST(QECCodeTester, checkNoisySampleMemoryCircuitAndDecodeStim) {
     printf("syndromes:\n");
     syndromes.dump();
     EXPECT_EQ(syndromes.shape()[0], nShots);
-    EXPECT_EQ(syndromes.shape()[1], 40); // numDetectors
+    EXPECT_EQ(syndromes.shape()[1], 24u); // numDetectors
     // With noise, Lx will sometimes be flipped
     printf("data:\n");
     d.dump();
@@ -560,30 +560,30 @@ TEST(QECCodeTester, checkDemFromMemoryCircuit) {
 
   // clang-format off
   std::vector<std::string> expected_dem_str = {
-      "1.......................", 
-      ".1......................",
-      "..1.....................", 
-      "...1....................",
-      "....1...................", 
-      ".....1..................",
-      "1.....1.................", 
-      ".1.....1................",
-      "..1.....1...............", 
-      "...1.....1..............",
-      "....1.....1.............", 
-      ".....1.....1............",
-      "......1.....1...........", 
-      ".......1.....1..........",
-      "........1.....1.........", 
-      ".........1.....1........",
-      "..........1.....1.......", 
-      "...........1.....1......",
-      "............1.....1.....", 
-      ".............1.....1....",
-      "..............1.....1...", 
-      "...............1.....1..",
-      "................1.....1.", 
-      ".................1.....1"};
+      "1..............................",
+      ".1.............................",
+      "..1............................",
+      "1..1...........................",
+      ".1..1..........................",
+      "..1..1.........................",
+      "......11.......................",
+      "........11.....................",
+      "..........11...................",
+      "...1........1..................",
+      "....1........1.................",
+      ".....1........1................",
+      ".......1.......1...............",
+      ".........1......1..............",
+      "...........1.....1.............",
+      "............1.....1............",
+      ".............1.....1...........",
+      "..............1.....1..........",
+      "...............1.....1.........",
+      "................1.....1........",
+      ".................1.....1.......",
+      "..................1.....1111...",
+      "...................1.....11.11.",
+      "....................1.....111.1"};
   // clang-format on
   check_matrix_bits("detector_error_matrix", dem.detector_error_matrix,
                     expected_dem_str);
@@ -596,8 +596,8 @@ TEST(QECCodeTester, checkDemFromMemoryCircuit) {
   // printf("}\n");
 
   // Check error rates
-  ASSERT_EQ(dem.error_rates.size(), 24);
-  std::vector<double> expected_error_rates(24, 0.01);
+  ASSERT_EQ(dem.error_rates.size(), 31);
+  std::vector<double> expected_error_rates(31, 0.01);
   for (std::size_t i = 0; i < dem.error_rates.size(); i++) {
     EXPECT_FLOAT_EQ(dem.error_rates[i], expected_error_rates[i])
         << "i: " << i << ", error_rates[i]: " << dem.error_rates[i]
@@ -610,7 +610,7 @@ TEST(QECCodeTester, checkDemFromMemoryCircuit) {
 
   // Check observables flips matrix
   std::vector<std::string> expected_observables_flips_matrix_str = {
-      "........................"};
+      "............................111"};
   check_matrix_bits("observables_flips_matrix", dem.observables_flips_matrix,
                     expected_observables_flips_matrix_str);
 }
