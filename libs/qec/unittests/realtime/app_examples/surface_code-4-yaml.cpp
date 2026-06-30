@@ -345,31 +345,53 @@ void load_dem_from_file(const std::string &dem_filename,
            numLogical, config.decoders.size());
     exit(1);
   }
-  auto decoder_config = config.decoders[0];
+  // Validate EVERY decoder config, mirroring the runtime's per-patch loop in
+  // demo_circuit_qpu: configs are duplicated one-per-logical-qubit at
+  // generation and the runtime requests one correction from each decoder, so
+  // each decoder must carry exactly ONE observable and all decoders must share
+  // the same detector/measurement geometry. Checking only decoders[0] (or
+  // comparing its observable count to numLogical) misses a divergent decoder
+  // and mishandles num_logical > 1.
+  auto span_of = [](const std::vector<std::int64_t> &sparse) {
+    std::int64_t m = -1;
+    for (auto v : sparse)
+      if (v > m)
+        m = v;
+    return static_cast<uint64_t>(m + 1);
+  };
+  const auto &d0 = config.decoders[0];
+  const uint64_t span0 = span_of(d0.D_sparse);
+  for (size_t k = 0; k < config.decoders.size(); ++k) {
+    const auto &dc = config.decoders[k];
+    const size_t nobs = std::count(dc.O_sparse.begin(), dc.O_sparse.end(), -1);
+    if (nobs != 1) {
+      printf("ERROR: loaded config decoder %zu has %zu observables; expected 1 "
+             "(one observable per single-patch surface-code decoder)\n",
+             k, nobs);
+      exit(1);
+    }
+    if (dc.syndrome_size != d0.syndrome_size || span_of(dc.D_sparse) != span0) {
+      printf("ERROR: loaded config decoder %zu geometry (detectors %lu, "
+             "measurement span %lu) differs from decoder 0 (detectors %lu, "
+             "span %lu); duplicated decoders must be identical\n",
+             k, (unsigned long)dc.syndrome_size, span_of(dc.D_sparse),
+             (unsigned long)d0.syndrome_size, span0);
+      exit(1);
+    }
+  }
 
+  auto decoder_config = d0;
   dem.detector_error_matrix = cudaq::qec::pcm_from_sparse_vec(
       decoder_config.H_sparse, decoder_config.syndrome_size,
       decoder_config.block_size);
-  // Count how many rows there are in the O_sparse by counting the number of
-  // -1s.
   size_t num_observables = std::count(decoder_config.O_sparse.begin(),
                                       decoder_config.O_sparse.end(), -1);
-  if (num_observables != numLogical) {
-    printf("ERROR: loaded config observable count [%zu] != numLogical [%lu]\n",
-           num_observables, numLogical);
-    exit(1);
-  }
   dem.observables_flips_matrix = cudaq::qec::pcm_from_sparse_vec(
       decoder_config.O_sparse, num_observables, decoder_config.block_size);
-
   // The runtime decodes once the enqueued measurement buffer is full; that span
   // is max(D_sparse)+1. Surface it so the caller can bind the config to this
   // experiment's geometry (see the load_dem check in demo_circuit_host).
-  std::int64_t maxMeas = -1;
-  for (auto v : decoder_config.D_sparse)
-    if (v > maxMeas)
-      maxMeas = v;
-  measSpan = static_cast<uint64_t>(maxMeas + 1);
+  measSpan = span0;
 
   printf("Loaded %s config from file: %s\n", decoder_config.type.c_str(),
          dem_filename.c_str());
@@ -658,8 +680,10 @@ demo_circuit_qpu(bool allow_device_calls,
   // asking for corrections. The decoder's boundary detectors XOR these data
   // bits against the final-round Z-ancilla measurements.
   //
-  // Note: this only works up to 64 bits, so a single logical qubit with
-  // distance 7.
+  // Note: the result packs numLogical * numData data bits plus the correction
+  // count into one 64-bit value, so num_logical * distance^2 must stay under 64
+  // (enforced in main()). That permits several independent patches at small
+  // distances but only one logical qubit at distance 7 (49 < 64 < 98).
   std::uint64_t ret = 0;
   for (int i = 0; i < numLogical; i++) {
     if (i > 0)
@@ -1009,20 +1033,16 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
 
   if (load_syndrome) {
     // Syndrome replay mode
-    if (syndrome_filename.empty()) {
-      printf("Error: --load_syndrome requires a filename argument\n");
-      return;
-    }
+    if (syndrome_filename.empty())
+      throw std::runtime_error("--load_syndrome requires a filename argument");
 
     printf("\n=== Syndrome Replay Mode ===\n");
     printf("Loading syndromes from: %s\n", syndrome_filename.c_str());
 
     std::ifstream syndrome_file(syndrome_filename);
-    if (!syndrome_file) {
-      printf("Error: Could not open syndrome file: %s\n",
-             syndrome_filename.c_str());
-      return;
-    }
+    if (!syndrome_file)
+      throw std::runtime_error("Could not open syndrome file: " +
+                               syndrome_filename);
 
     // Read header and syndrome data. Each shot is stored as a list of rounds,
     // and each round keeps its own bit count (the final DATA round has numData
@@ -1036,6 +1056,8 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
     std::string line;
 
     bool reading_syndromes = false;
+    bool saw_corrections_start = false;
+    bool saw_corrections_end = false;
     while (std::getline(syndrome_file, line)) {
       if (line.find("NUM_DATA") == 0) {
         std::istringstream iss(line);
@@ -1046,8 +1068,10 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
         std::string tag;
         iss >> tag >> file_numLogical;
       } else if (line.find("CORRECTIONS_START") == 0) {
+        saw_corrections_start = true;
         while (std::getline(syndrome_file, line)) {
           if (line.find("CORRECTIONS_END") == 0) {
+            saw_corrections_end = true;
             break;
           }
           uint8_t correction_bit = static_cast<uint8_t>(std::stoi(line));
@@ -1059,9 +1083,10 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
         saved_shots.emplace_back();
         reading_syndromes = true;
       } else if (line.find("ROUND_START") == 0) {
-        // Start a new round. Each round is read greedily until the next marker,
-        // so replay round-trips any per-round bit width; the bit-count token on
-        // the ROUND_START line (when present) is informational only.
+        // Start a new round, read greedily until the next marker. The resulting
+        // per-shot round count and widths are validated against the known
+        // geometry after parsing (see the structural-completeness check below),
+        // which is what catches a truncated/corrupt capture.
         if (!saved_shots.empty())
           saved_shots.back().emplace_back();
         continue;
@@ -1077,12 +1102,53 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
 
     printf("Read %zu shots with syndromes\n", saved_shots.size());
 
-    // Validate metadata
-    if (file_numData != numData || file_numLogical != numLogical) {
-      printf("Error: File parameters (numData=%zu, numLogical=%zu) don't match "
-             "current (numData=%zu, numLogical=%zu)\n",
-             file_numData, file_numLogical, numData, numLogical);
-      return;
+    // Require a STRUCTURALLY COMPLETE capture so a truncated/corrupt file fails
+    // loudly instead of silently "passing" with no verification. The file is
+    // app-generated, so the realistic corruption is truncation; validate it
+    // against the known geometry (num_rounds, numSyndromesPerRound, numData).
+    if (saved_shots.empty())
+      throw std::runtime_error(
+          "no shots parsed from syndrome file (empty or corrupt): " +
+          syndrome_filename);
+    if (!saw_corrections_start || !saw_corrections_end)
+      throw std::runtime_error(
+          "syndrome file is missing the CORRECTIONS_START/CORRECTIONS_END "
+          "footer (truncated or incomplete capture): " +
+          syndrome_filename);
+    if (file_numData != numData || file_numLogical != numLogical)
+      throw std::runtime_error(
+          "syndrome file parameters (numData=" + std::to_string(file_numData) +
+          ", numLogical=" + std::to_string(file_numLogical) +
+          ") do not match this run (numData=" + std::to_string(numData) +
+          ", numLogical=" + std::to_string(numLogical) + ")");
+    if (saved_corrections.size() != saved_shots.size())
+      throw std::runtime_error(
+          "syndrome file has " + std::to_string(saved_corrections.size()) +
+          " corrections for " + std::to_string(saved_shots.size()) +
+          " shots; expected exactly one correction per shot (truncated "
+          "capture)");
+    // Each shot must be the full enqueue stream: num_rounds syndrome rounds of
+    // numSyndromesPerRound bits + one final data round of numData bits.
+    const std::size_t expectedRounds = static_cast<std::size_t>(numRounds) + 1;
+    for (std::size_t s = 0; s < saved_shots.size(); ++s) {
+      const auto &rounds = saved_shots[s];
+      if (rounds.size() != expectedRounds)
+        throw std::runtime_error(
+            "syndrome file shot " + std::to_string(s) + " has " +
+            std::to_string(rounds.size()) + " rounds; expected " +
+            std::to_string(expectedRounds) +
+            " (num_rounds+1); truncated or wrong-geometry capture");
+      for (std::size_t r = 0; r < rounds.size(); ++r) {
+        const std::size_t expectedBits = (r + 1 == expectedRounds)
+                                             ? static_cast<std::size_t>(numData)
+                                             : numSyndromesPerRound;
+        if (rounds[r].size() != expectedBits)
+          throw std::runtime_error(
+              "syndrome file shot " + std::to_string(s) + " round " +
+              std::to_string(r) + " has " + std::to_string(rounds[r].size()) +
+              " bits; expected " + std::to_string(expectedBits) +
+              " (truncated or corrupt capture)");
+      }
     }
 
     syndrome_file.close();
@@ -1152,9 +1218,13 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
     if (!saved_corrections.empty()) {
       printf("Correction verification: %d matched, %d mismatched\n",
              corrections_matched, corrections_mismatched);
-      if (corrections_mismatched == 0) {
-        printf("SUCCESS: All corrections match!\n");
-      }
+      if (corrections_mismatched != 0)
+        throw std::runtime_error(
+            "replay correction mismatch: " +
+            std::to_string(corrections_mismatched) + " of " +
+            std::to_string(corrections_matched + corrections_mismatched) +
+            " shots differ from the captured run");
+      printf("SUCCESS: All corrections match!\n");
     }
     return;
 
@@ -1423,7 +1493,7 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  // NIT: --ising_bundle is only consumed by the trt+Ising generation path
+  // --ising_bundle is only consumed by the trt+Ising generation path
   // (--save_dem --decoder_type trt_decoder). Warn rather than silently ignore
   // it on any other path so a stray bundle argument is visible.
   if (!ising_bundle.empty() && !(save_dem && decoder_type == "trt_decoder")) {
@@ -1439,10 +1509,11 @@ int main(int argc, char **argv) {
   printf("Running with p_spam = %f, distance = %d, num_shots = %d, num_rounds "
          "= %d\n",
          p_spam, distance, num_shots, num_rounds);
-  // Use the orientation the Ising predecoder was trained at (code_rotation XV);
-  // this aligns the geometry and observable basis. Matching the model's full
-  // detector structure (prep/boundary detectors, X-then-Z order) is a separate
-  // follow-up.
+  // Build the code at the orientation the Ising predecoder was trained at
+  // (code_rotation XV), which aligns the geometry and observable basis. The
+  // DEM-generation kernel (dem_gen_circuit) emits the model's full detector
+  // structure -- prep singles + data-derived boundary detectors, X-then-Z
+  // order -- to match it.
   try {
     auto code = cudaq::qec::get_code(
         "surface_code",
