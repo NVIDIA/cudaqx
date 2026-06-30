@@ -881,7 +881,7 @@ void log_config(const char *config_str, bool from_file) {
   }();
 
   if (dump_config) {
-    if (cudaq::qec::detail::should_log(cudaq::qec::detail::LogLevel::info)) {
+    if (cudaq::qec::detail::should_log(cudaq::qec::detail::log_level::info)) {
       CUDA_QEC_INFO(
           "Initializing realtime decoding library with config string: {}",
           config_str);

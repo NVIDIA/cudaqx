@@ -300,7 +300,7 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
     std::chrono::duration<double> log_dur1, log_dur2, log_dur3;
 
     const bool log_due_to_log_level =
-        cudaq::qec::detail::should_log(cudaq::qec::detail::LogLevel::info);
+        cudaq::qec::detail::should_log(cudaq::qec::detail::log_level::info);
     const bool should_log = pimpl->should_log || log_due_to_log_level;
 
     if (should_log) {
@@ -479,7 +479,7 @@ void decoder::clear_corrections() {
   pimpl->corrections.clear();
   pimpl->corrections.resize(O_sparse.size());
   const bool log_due_to_log_level =
-      cudaq::qec::detail::should_log(cudaq::qec::detail::LogLevel::info);
+      cudaq::qec::detail::should_log(cudaq::qec::detail::log_level::info);
   const bool should_log = pimpl->should_log || log_due_to_log_level;
   if (should_log) {
     pimpl->log_counter++;
@@ -495,7 +495,7 @@ void decoder::clear_corrections() {
 
 const uint8_t *decoder::get_obs_corrections() const {
   const bool log_due_to_log_level =
-      cudaq::qec::detail::should_log(cudaq::qec::detail::LogLevel::info);
+      cudaq::qec::detail::should_log(cudaq::qec::detail::log_level::info);
   const bool should_log = pimpl->should_log || log_due_to_log_level;
   if (should_log) {
     pimpl->log_counter++;
@@ -521,7 +521,7 @@ void decoder::reset_decoder() {
   pimpl->corrections.clear();
   pimpl->corrections.resize(O_sparse.size());
   const bool log_due_to_log_level =
-      cudaq::qec::detail::should_log(cudaq::qec::detail::LogLevel::info);
+      cudaq::qec::detail::should_log(cudaq::qec::detail::log_level::info);
   const bool should_log = pimpl->should_log || log_due_to_log_level;
   if (should_log) {
     pimpl->log_counter++;

@@ -24,38 +24,38 @@ namespace cudaq::qec::detail::forwarder_internal {
 /// @brief Fixed-size queue record used by the forwarder ring buffer.
 /// @details Uses bounded arrays so producer-side enqueue can avoid heap
 /// allocation when forwarding is enabled.
-struct QueuedLogRecord {
-  LogLevel level = LogLevel::info;
-  std::uint64_t timestampNs = 0;
-  int lineNo = 0;
-  std::thread::id threadId;
+struct queued_log_record {
+  log_level level = log_level::info;
+  std::uint64_t timestamp_ns = 0;
+  int line_no = 0;
+  std::thread::id thread_id;
   // The character buffers are intentionally left uninitialized: only the first
-  // `fileNameLen`/`messageLen` bytes are ever written (and read back), so
+  // `file_name_len`/`message_len` bytes are ever written (and read back), so
   // zero-filling the full capacity on every record would waste cycles on the
   // producer hot path.
-  std::array<char, 128> fileName;
-  std::size_t fileNameLen = 0;
-  std::array<char, kRealtimeForwarderMaxMessageCapacity> message;
-  std::size_t messageLen = 0;
+  std::array<char, 128> file_name;
+  std::size_t file_name_len = 0;
+  std::array<char, realtime_forwarder_max_message_capacity> message;
+  std::size_t message_len = 0;
 };
 
 /// @brief Install/replace forwarder configuration and start worker.
-void set(ForwarderConfig config);
+void set(forwarder_config config);
 /// @brief Disable forwarding and stop worker thread.
 void clear();
 /// @brief Return true when forwarding is active.
-bool isEnabled();
+bool is_enabled();
 /// @brief Reset forwarding counters for a fresh configuration epoch.
-void resetStats();
+void reset_stats();
 /// @brief Return current forwarding counters.
-ForwarderStats stats();
+forwarder_stats stats();
 /// @brief Block until queue drains (or forwarding is disabled).
 void flush();
 /// @brief Enqueue one fixed-size record on producer path.
-void enqueue(QueuedLogRecord record);
+void enqueue(queued_log_record record);
 /// @brief Return active producer-side forwarded message capacity.
-std::size_t messageCapacity();
+std::size_t message_capacity();
 /// @brief Increment truncation counter (format/packing helper hook).
-void noteTruncation();
+void note_truncation();
 
 } // namespace cudaq::qec::detail::forwarder_internal
