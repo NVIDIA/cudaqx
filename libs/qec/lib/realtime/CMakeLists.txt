@@ -158,9 +158,8 @@ target_link_options(cudaq-qec-realtime-decoding PRIVATE
 target_link_libraries(cudaq-qec-realtime-decoding
   PUBLIC 
     cudaqx-core
-    cudaq-qec
+    cudaq-qec-decoders
   PRIVATE
-    cudaq::cudaq-common
     LLVMSupport
     $<$<BOOL:${CUDAQ_REALTIME_LIBRARY}>:${CUDAQ_REALTIME_LIBRARY}>
     $<$<BOOL:${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}>:${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}>

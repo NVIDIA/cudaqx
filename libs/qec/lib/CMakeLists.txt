@@ -41,9 +41,11 @@ endif()
 
 set(DECODERS_SOURCES
   decoder.cpp
+  decoder_config_payload.cpp
   detector_error_model.cpp
   logger.cpp
   logger_forwarder.cpp
+  pcm_utils.cpp
   plugin_loader.cpp
   sparse_binary_matrix.cpp
   decoders/lut.cpp
@@ -53,8 +55,8 @@ set(DECODERS_SOURCES
 
 set(QEC_SOURCES
   code.cpp
+  decoder_config_payload_provider.cpp
   experiments.cpp
-  pcm_utils.cpp
   stabilizer_utils.cpp
 )
 
