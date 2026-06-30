@@ -88,6 +88,17 @@ void expect_surface_code_algebra(sc_orientation orientation) {
     EXPECT_EQ(0, overlap_parity(z_stabilizer, logical_x));
 }
 
+// Recover the integer support (indices of non-identity Paulis) of a single
+// spin_op_term pauli word, e.g. "XIXII" -> {0, 2}.
+std::vector<std::size_t> support_of(const cudaq::spin_op_term &term) {
+  std::vector<std::size_t> support;
+  const std::string word = term.get_pauli_word();
+  for (std::size_t i = 0; i < word.size(); ++i)
+    if (word[i] != 'I')
+      support.push_back(i);
+  return support;
+}
+
 } // namespace
 
 TEST(StabilizerTester, checkConstructFromSpinOps) {
@@ -806,21 +817,6 @@ TEST(QECCodeTester, checkSurfaceCodeOrientationAlgebra) {
     expect_surface_code_algebra(orientation);
   }
 }
-
-namespace {
-
-// Recover the integer support (indices of non-identity Paulis) of a single
-// spin_op_term pauli word, e.g. "XIXII" -> {0, 2}.
-std::vector<std::size_t> support_of(const cudaq::spin_op_term &term) {
-  std::vector<std::size_t> support;
-  const std::string word = term.get_pauli_word();
-  for (std::size_t i = 0; i < word.size(); ++i)
-    if (word[i] != 'I')
-      support.push_back(i);
-  return support;
-}
-
-} // namespace
 
 // Pin the EXACT role grid of every orientation at d=3 so permuting the
 // orientation labels (or regressing the boundary logic) fails. Grids derived by
