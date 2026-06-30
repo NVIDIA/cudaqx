@@ -66,7 +66,7 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-device-call)
     SOURCES
       test_pymatching_device_call_realtime.cpp
     COMPILER_FLAGS
-      --target qpp-cpu
+      --target stim
       -frealtime-lowering
   )
 
@@ -79,7 +79,7 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-device-call)
     cudaq-qec-realtime-decoding
     cudaq-qec-realtime-decoding-simulation
     cudaq::cudaq cudaq::cudaq-common cudaq-mlir-runtime
-    nvqir nvqir-qpp
+    nvqir nvqir-stim
   )
 
   set_target_properties(test_pymatching_device_call_realtime PROPERTIES
