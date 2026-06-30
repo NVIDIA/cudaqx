@@ -9,6 +9,7 @@ import pytest
 import numpy as np
 import cudaq
 import cudaq_qec as qec
+from cudaq_qec import patch
 
 
 def test_get_code():
@@ -116,35 +117,58 @@ def test_python_code():
     assert not np.any(syndromes)
 
 
-def test_stabilizer_round_invalid_annotation():
-    # A stabilizer_round kernel must return list[cudaq.measure_handle]. A
-    # list[bool] annotation drops the measurement handles, so code
-    # registration must reject it rather than silently miscompile.
-    from cudaq_qec import patch
+# stabilizer_round kernels with invalid (non list[cudaq.measure_handle])
+# return annotations. The bodies are minimal; only the annotation matters.
+@cudaq.kernel
+def _stab_list_bool(q: patch, xs: list[int], zs: list[int]) -> list[bool]:
+    return mz([*q.ancx, *q.ancz])
 
-    @cudaq.kernel
-    def bad_stabilizer(logicalQubit: patch, x_stabilizers: list[int],
-                       z_stabilizers: list[int]) -> list[bool]:
-        h(logicalQubit.ancx)
-        results = mz([*logicalQubit.ancx, *logicalQubit.ancz])
-        reset(logicalQubit.ancx)
-        reset(logicalQubit.ancz)
-        return results
 
-    @qec.code('py-bad-stabilizer-return')
-    class BadStabilizerReturnCode:
+@cudaq.kernel
+def _stab_bool(q: patch, xs: list[int], zs: list[int]) -> bool:
+    return mz(q.ancx[0])
+
+
+@cudaq.kernel
+def _stab_int(q: patch, xs: list[int], zs: list[int]) -> int:
+    return cudaq.to_integer(cudaq.to_bools(mz([*q.ancx, *q.ancz])))
+
+
+@cudaq.kernel
+def _stab_void(q: patch, xs: list[int], zs: list[int]):
+    mz([*q.ancx, *q.ancz])
+
+
+@cudaq.kernel
+def _stab_none(q: patch, xs: list[int], zs: list[int]) -> None:
+    mz([*q.ancx, *q.ancz])
+
+
+@pytest.mark.parametrize("kernel,name", [
+    (_stab_list_bool, 'py-bad-stab-list-bool'),
+    (_stab_bool, 'py-bad-stab-bool'),
+    (_stab_int, 'py-bad-stab-int'),
+    (_stab_void, 'py-bad-stab-void'),
+    (_stab_none, 'py-bad-stab-none'),
+])
+def test_stabilizer_round_invalid_annotation(kernel, name):
+    # A stabilizer_round must return list[cudaq.measure_handle]; any other
+    # annotation drops the measurement handles, so registration must reject it.
+    @qec.code(name)
+    class BadCode:
 
         def __init__(self, **kwargs):
             qec.Code.__init__(self, **kwargs)
             self.stabilizers = [
-                cudaq.SpinOperator.from_word(word) for word in [
+                cudaq.SpinOperator.from_word(w) for w in [
                     "XXXXIII", "IXXIXXI", "IIXXIXX", "ZZZZIII", "IZZIZZI",
                     "IIZZIZZ"
                 ]
             ]
-            self.operation_encodings = {
-                qec.operation.stabilizer_round: bad_stabilizer
-            }
+            self.pauli_observables = [
+                cudaq.SpinOperator.from_word(p) for p in ["IIIIXXX", "IIIIZZZ"]
+            ]
+            self.operation_encodings = {qec.operation.stabilizer_round: kernel}
 
         def get_num_data_qubits(self):
             return 7
@@ -164,8 +188,8 @@ def test_stabilizer_round_invalid_annotation():
         def get_num_z_stabilizers(self):
             return 3
 
-    with pytest.raises(RuntimeError):
-        qec.get_code('py-bad-stabilizer-return')
+    with pytest.raises(RuntimeError, match="list\\[cudaq.measure_handle\\]"):
+        qec.get_code(name)
 
 
 def test_invalid_code():
