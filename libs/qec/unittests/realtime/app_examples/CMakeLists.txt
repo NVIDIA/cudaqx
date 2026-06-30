@@ -72,6 +72,103 @@ target_link_libraries(surface_code-1-local
     nvqir nvqir-stim)
 qec_realtime_app_link_options(surface_code-1-local)
 
+#------------------------------------------------------------------------------#
+# Surface code 4: YAML-switchable realtime decoders (pymatching / trt+pymatching
+# / nv-qldpc relay-bp). Built like surface_code-1-local; the decoder is selected
+# at realtime from the loaded YAML config (--yaml).
+add_executable(surface_code-4-yaml)
+set_target_properties(surface_code-4-yaml PROPERTIES LINKER_LANGUAGE CXX)
+
+cudaqx_add_device_code(surface_code-4-yaml
+  SOURCES
+    surface_code-4-yaml.cpp
+  COMPILER_FLAGS
+    --target stim
+)
+
+target_link_directories(surface_code-4-yaml
+  PRIVATE ${CUDAQ_INSTALL_DIR}/lib)
+
+target_link_libraries(surface_code-4-yaml
+  PRIVATE
+    cudaq-qec
+    cudaq-qec-realtime-decoding
+    cudaq-qec-realtime-decoding-simulation
+    cudaq::cudaq cudaq::cudaq-common cudaq-mlir-runtime
+    nvqir nvqir-stim)
+qec_realtime_app_link_options(surface_code-4-yaml)
+
+if(TARGET cudaq-qec-pymatching)
+  add_dependencies(surface_code-4-yaml cudaq-qec-pymatching)
+endif()
+if(TARGET cudaq-qec-trt-decoder)
+  add_dependencies(surface_code-4-yaml cudaq-qec-trt-decoder)
+endif()
+
+# Surface-code-4 YAML tests follow the surface_code-3 app-example pattern:
+# exercise both d=3 and d=5 for each decoder entry. All entries run through the
+# realtime inproc RPC mode; relay-BP is registered only when the private
+# cudevice/archive and external decoder plugin are configured.
+find_package(Python COMPONENTS Interpreter QUIET)
+set(_SC4_TRY_TRT_TEST FALSE)
+if(Python_Interpreter_FOUND)
+  execute_process(
+    COMMAND ${Python_EXECUTABLE} -c "import onnx"
+    RESULT_VARIABLE _sc4_onnx_python_result
+    OUTPUT_QUIET
+    ERROR_QUIET)
+  if(_sc4_onnx_python_result EQUAL 0)
+    set(_SC4_TRY_TRT_TEST TRUE)
+  endif()
+endif()
+
+function(add_surface_code_4_yaml_test test_suffix distance num_rounds
+         decoder_window decoder_type num_shots onnx_path)
+  set(_sc4_env "CUDAQ_QEC_REALTIME_MODE=inproc_rpc")
+  if(Python_Interpreter_FOUND)
+    list(APPEND _sc4_env "PYTHON=${Python_EXECUTABLE}")
+  endif()
+
+  add_test(
+    NAME app_examples.surface_code-4-yaml-${test_suffix}
+    COMMAND
+      bash "${CMAKE_CURRENT_SOURCE_DIR}/surface_code-4-yaml-test.sh"
+        ${CMAKE_CURRENT_BINARY_DIR}/surface_code-4-yaml
+        ${distance} ${num_rounds} ${decoder_window}
+        ${decoder_type} ${num_shots} "${onnx_path}" ${ARGN}
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+  )
+  set_tests_properties(
+    app_examples.surface_code-4-yaml-${test_suffix}
+    PROPERTIES ENVIRONMENT "${_sc4_env}")
+endfunction()
+
+function(add_surface_code_4_yaml_decoder_cases label decoder_type onnx_path)
+  add_surface_code_4_yaml_test(${label}-d3 3 6 3
+    ${decoder_type} 200 "${onnx_path}" ${ARGN})
+  add_surface_code_4_yaml_test(${label}-d5 5 10 5
+    ${decoder_type} 200 "${onnx_path}" ${ARGN})
+endfunction()
+
+add_surface_code_4_yaml_decoder_cases(pymatching pymatching "")
+
+# TensorRT predecoder + PyMatching global decoder. The shell driver generates a
+# tiny ONNX model sized for each test case: output [pre_L=0, residual], so TRT
+# preserves the syndrome and PyMatching performs the correction.
+if(TARGET cudaq-qec-trt-decoder AND _SC4_TRY_TRT_TEST)
+  add_surface_code_4_yaml_decoder_cases(trt-pymatching trt_decoder AUTO)
+endif()
+
+# nv-qldpc relay-BP requires both the external nv-qldpc decoder plugin and the
+# proprietary cudevice archive. Match the other realtime graph/inproc tests:
+# register only when those dependencies are configured; do not runtime-skip.
+if(_APP_CUDAQ_REALTIME_DISPATCH_LIB
+   AND TARGET cudaq-qec-realtime-cudevice-proprietary
+   AND (QEC_EXTERNAL_DECODERS OR DEFINED ENV{QEC_EXTERNAL_DECODERS}))
+  add_surface_code_4_yaml_decoder_cases(relay-bp nv-qldpc-decoder ""
+    --use-relay-bp)
+endif()
+
 add_test(
   NAME app_examples.surface_code-1-local-test-distance-3
   COMMAND
@@ -427,5 +524,3 @@ add_surface_code_test(
 
 # End of surface code 3, --target quantinuum --emulate
 #------------------------------------------------------------------------------#
-
-
