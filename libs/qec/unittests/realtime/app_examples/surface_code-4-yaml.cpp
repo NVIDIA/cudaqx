@@ -144,6 +144,44 @@ static std::vector<std::int64_t> read_D_sparse_txt(const std::string &path,
   return D;
 }
 
+// Read the Ising bundle's metadata.txt (key=value lines) and enforce that it
+// matches THIS experiment: basis Z, code_rotation XV, and the same distance /
+// n_rounds. This is the semantic guard the dimensional checks cannot provide --
+// a dimension-compatible X-basis bundle would otherwise be accepted with wrong
+// observable semantics.
+static void enforce_ising_metadata(const std::string &bundle, int distance,
+                                   std::size_t numRounds) {
+  std::ifstream f(bundle + "/metadata.txt");
+  if (!f)
+    throw std::runtime_error("Ising bundle missing metadata.txt: " + bundle +
+                             "/metadata.txt");
+  std::vector<std::pair<std::string, std::string>> kv;
+  std::string line;
+  while (std::getline(f, line)) {
+    while (!line.empty() && (line.back() == '\r' || line.back() == ' '))
+      line.pop_back();
+    auto eq = line.find('=');
+    if (eq != std::string::npos)
+      kv.emplace_back(line.substr(0, eq), line.substr(eq + 1));
+  }
+  auto require = [&](const std::string &key, const std::string &want) {
+    for (const auto &p : kv)
+      if (p.first == key) {
+        if (p.second != want)
+          throw std::runtime_error("Ising bundle " + bundle +
+                                   ": metadata.txt " + key + "='" + p.second +
+                                   "' != required '" + want + "'");
+        return;
+      }
+    throw std::runtime_error("Ising bundle " + bundle +
+                             ": metadata.txt missing key '" + key + "'");
+  };
+  require("basis", "Z");
+  require("code_rotation", "XV");
+  require("distance", std::to_string(distance));
+  require("n_rounds", std::to_string(numRounds));
+}
+
 // Flatten cudaqx's m2d into the -1-terminated sparse detector matrix, in
 // cudaqx detector order (D_sparse[i] == m2d.rows[i]). This is the
 // self-consistent D for the cudaqx-native decoders (pymatching / nv-qldpc),
@@ -167,7 +205,8 @@ void save_dem_to_file(const cudaq::qec::detector_error_model &dem,
                       uint64_t numLogical, const std::string &decoder_type,
                       bool use_relay_bp, const std::string &onnx_path,
                       const cudaq::M2DSparseMatrix &m2d,
-                      const std::string &ising_bundle) {
+                      const std::string &ising_bundle, int distance,
+                      std::size_t numRounds) {
   (void)numSyndromesPerRound;
   cudaq::qec::decoding::config::multi_decoder_config multi_config;
   for (uint64_t i = 0; i < numLogical; i++) {
@@ -234,6 +273,9 @@ void save_dem_to_file(const cudaq::qec::detector_error_model &dem,
       pm_config.merge_strategy = "smallest_weight";
 
       if (!ising_bundle.empty()) {
+        // Enforce the bundle's semantics match this experiment (basis Z,
+        // code_rotation XV, same d / n_rounds) before trusting its matrices.
+        enforce_ising_metadata(ising_bundle, distance, numRounds);
         // trt+Ising path: carry the REAL Ising d/T/Z model. H/O/priors come
         // from the Ising bundle (Ising detector order); D_sparse (D_sparse.txt)
         // expresses each Ising detector as a parity over the cudaqx live
@@ -288,7 +330,7 @@ void save_dem_to_file(const cudaq::qec::detector_error_model &dem,
 
 void load_dem_from_file(const std::string &dem_filename,
                         cudaq::qec::detector_error_model &dem,
-                        uint64_t numLogical) {
+                        uint64_t numLogical, uint64_t &measSpan) {
   printf("load_dem_from_file: Loading dem from file: %s\n",
          dem_filename.c_str());
   // Read dem_filename into a std::string
@@ -312,15 +354,34 @@ void load_dem_from_file(const std::string &dem_filename,
   // -1s.
   size_t num_observables = std::count(decoder_config.O_sparse.begin(),
                                       decoder_config.O_sparse.end(), -1);
+  if (num_observables != numLogical) {
+    printf("ERROR: loaded config observable count [%zu] != numLogical [%lu]\n",
+           num_observables, numLogical);
+    exit(1);
+  }
   dem.observables_flips_matrix = cudaq::qec::pcm_from_sparse_vec(
       decoder_config.O_sparse, num_observables, decoder_config.block_size);
+
+  // The runtime decodes once the enqueued measurement buffer is full; that span
+  // is max(D_sparse)+1. Surface it so the caller can bind the config to this
+  // experiment's geometry (see the load_dem check in demo_circuit_host).
+  std::int64_t maxMeas = -1;
+  for (auto v : decoder_config.D_sparse)
+    if (v > maxMeas)
+      maxMeas = v;
+  measSpan = static_cast<uint64_t>(maxMeas + 1);
+
   printf("Loaded %s config from file: %s\n", decoder_config.type.c_str(),
          dem_filename.c_str());
 
   // Now configure the decoders. The decoder type is read from the YAML and is
   // authoritative; the runtime enqueues the full syndrome stream described by
   // the loaded detector error model.
-  cudaq::qec::decoding::config::configure_decoders(config);
+  int rc = cudaq::qec::decoding::config::configure_decoders(config);
+  if (rc != 0) {
+    printf("ERROR: configure_decoders failed (status %d)\n", rc);
+    exit(1);
+  }
 }
 
 std::vector<size_t> get_stab_cnot_schedule(char stab_type, int distance) {
@@ -745,18 +806,36 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
   // First get the DEM.
   cudaq::qec::detector_error_model dem;
   if (load_dem) {
-    load_dem_from_file(dem_filename, dem, numLogical);
+    uint64_t measSpan = 0;
+    load_dem_from_file(dem_filename, dem, numLogical, measSpan);
     const auto numDetectors = dem.detector_error_matrix.shape()[0];
     const auto fullSyndromesPerRound = numAncx + numAncz;
-    // The volume's detector count packs into exactly num_rounds full rounds
-    // (relies on numAncx == numAncz; see the round-count note below).
-    if (numDetectors ==
-        static_cast<std::size_t>(numRounds) * fullSyndromesPerRound) {
-      numSyndromesPerRound = fullSyndromesPerRound;
-    } else {
+    // Bind the loaded config to THIS experiment's geometry. The detector count
+    // and the measurement-buffer span (max(D_sparse)+1) together UNIQUELY pin
+    // (distance, num_rounds): detector count = T*(d^2-1) and span =
+    // T*(d^2-1)+d^2, so matching both forces d^2 to agree -> same d, same T.
+    // The detector count alone is NOT unique (d5/T5 and d3/T15 both give 120),
+    // so a dimension-compatible YAML would load and then silently mis-decode.
+    const auto expectedDetectors =
+        static_cast<std::size_t>(numRounds) * fullSyndromesPerRound;
+    const auto expectedSpan = expectedDetectors + numData;
+    if (numDetectors != expectedDetectors)
       throw std::runtime_error(
-          "Loaded DEM detector count does not match num_rounds");
-    }
+          "Loaded DEM detector count (" + std::to_string(numDetectors) +
+          ") does not match this experiment (d=" + std::to_string(distance) +
+          ", num_rounds=" + std::to_string(numRounds) + " -> expected " +
+          std::to_string(expectedDetectors) + ")");
+    if (measSpan != expectedSpan)
+      throw std::runtime_error(
+          "Loaded config measurement-buffer span max(D_sparse)+1 (" +
+          std::to_string(measSpan) +
+          ") does not match this experiment's enqueued bits (expected " +
+          std::to_string(expectedSpan) +
+          " = num_rounds*(numAncx+numAncz)+numData for d=" +
+          std::to_string(distance) +
+          ", num_rounds=" + std::to_string(numRounds) +
+          "); the YAML was generated for a different geometry");
+    numSyndromesPerRound = fullSyndromesPerRound;
   } else {
     if (p_spam == 0.0) {
       printf("p_spam is 0.0, cannot generate the DEM\n");
@@ -810,8 +889,8 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
 
     if (save_dem) {
       save_dem_to_file(dem, dem_filename, numSyndromesPerRound, numLogical,
-                       decoder_type, use_relay_bp, onnx_path, m2d,
-                       ising_bundle);
+                       decoder_type, use_relay_bp, onnx_path, m2d, ising_bundle,
+                       distance, numRounds);
       return;
     }
   }
@@ -1287,6 +1366,13 @@ int main(int argc, char **argv) {
     return 1;
   }
 
+  // Reject geometries the rotated surface-code kernel cannot build (it aborts
+  // inside the kernel otherwise): the distance must be an odd integer >= 3.
+  if (distance < 3 || distance % 2 == 0) {
+    printf("Error: distance must be an odd integer >= 3 (got %d).\n", distance);
+    return 1;
+  }
+
   // Set defaults if not specified
   if (num_rounds == -1)
     num_rounds = distance;
@@ -1313,18 +1399,29 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  // Validate that num_rounds >= distance
-  if (num_rounds < distance || num_rounds % distance != 0) {
-    printf("Error: num_rounds (%d) must be at least equal to distance (%d) and "
-           "a multiple of distance\n",
-           num_rounds, distance);
-    printf("Measuring fewer rounds than the distance doesn't provide enough "
-           "information for decoding.\n");
+  // The example decodes ONE volume of num_rounds rounds (no sliding windows),
+  // so there is no window-divisibility constraint: any num_rounds >= 1 is a
+  // representable memory experiment (e.g. d5/T6). num_rounds < distance is
+  // decodable but not fault-tolerant, so warn rather than reject -- the API
+  // should be able to express it.
+  if (num_rounds < 1) {
+    printf("Error: num_rounds (%d) must be >= 1\n", num_rounds);
     return 1;
   }
+  if (num_rounds < distance)
+    printf("Warning: num_rounds (%d) < distance (%d): decodable but not "
+           "fault-tolerant (fewer rounds than the code distance).\n",
+           num_rounds, distance);
 
-  // This example decodes ONE volume of num_rounds rounds (no sliding windows),
-  // so there is no decoder-window knob or window-divisibility constraint.
+  // Syndrome replay feeds saved syndromes through a configured decoder, which
+  // only exists under --yaml. Replaying without --yaml would call
+  // reset_decoder() on an unconfigured decoder ("Decoder 0 not found"), so
+  // require it.
+  if (load_syndrome && !yaml_mode) {
+    printf("Error: --load_syndrome requires --yaml (the decoder to replay "
+           "through is configured from the loaded config).\n");
+    return 1;
+  }
 
   // NIT: --ising_bundle is only consumed by the trt+Ising generation path
   // (--save_dem --decoder_type trt_decoder). Warn rather than silently ignore
@@ -1346,15 +1443,25 @@ int main(int argc, char **argv) {
   // this aligns the geometry and observable basis. Matching the model's full
   // detector structure (prep/boundary detectors, X-then-Z order) is a separate
   // follow-up.
-  auto code = cudaq::qec::get_code(
-      "surface_code",
-      cudaqx::heterogeneous_map{{"distance", distance},
-                                {"orientation", std::string("XV")}});
+  try {
+    auto code = cudaq::qec::get_code(
+        "surface_code",
+        cudaqx::heterogeneous_map{{"distance", distance},
+                                  {"orientation", std::string("XV")}});
 
-  demo_circuit_host(*code, distance, p_spam, cudaq::qec::operation::prep0,
-                    num_shots, num_rounds, num_logical, dem_filename, save_dem,
-                    load_dem, decoder_type, save_syndrome, load_syndrome,
-                    syndrome_filename, use_relay_bp, onnx_path, ising_bundle);
+    demo_circuit_host(*code, distance, p_spam, cudaq::qec::operation::prep0,
+                      num_shots, num_rounds, num_logical, dem_filename,
+                      save_dem, load_dem, decoder_type, save_syndrome,
+                      load_syndrome, syndrome_filename, use_relay_bp, onnx_path,
+                      ising_bundle);
+  } catch (const std::exception &e) {
+    // Geometry/config validation failures (a YAML or Ising bundle that does not
+    // match this experiment) surface here as a clean error rather than an
+    // uncaught-exception abort.
+    printf("Error: %s\n", e.what());
+    cudaq::qec::decoding::config::finalize_decoders();
+    return 1;
+  }
 
   // Ensure clean shutdown
   cudaq::qec::decoding::config::finalize_decoders();

@@ -42,7 +42,8 @@ set -euo pipefail
 # Expected args:
 #  $1 exe            Path to the surface_code-4-yaml executable
 #  $2 distance       Surface code distance (D)
-#  $3 num_rounds     Number of measurement rounds (R, >=D, multiple of D)
+#  $3 num_rounds     Number of measurement rounds (R >= 1; R < D is decodable
+#                    but not fault-tolerant -- no multiple-of-D constraint)
 #  $4 decoder_type   Decoder to generate (optional, defaults to pymatching)
 #  $5 num_shots      Number of shots (optional, defaults to 200)
 #  $6 onnx_path      ONNX path for trt_decoder, or AUTO to generate one
