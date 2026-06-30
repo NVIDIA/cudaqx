@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2025 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2025 - 2026 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -8,7 +8,7 @@
 
 // clang-format off
 // Compile and run:
-// nvq++ --target=stim -lcudaq-qec -lcudaq-qec-realtime-decoding -lcudaq-qec-realtime-decoding-simulation real_time_complete.cpp
+// nvq++ --target=stim -lcudaq-qec -lcudaq-qec-decoders -lcudaq-qec-realtime-decoding -lcudaq-qec-realtime-decoding-simulation real_time_complete.cpp
 // NOTE: This must be on one line for the CI system to parse it correctly.
 // clang-format on
 

@@ -38,5 +38,5 @@ text string.
 
    .. code-block:: bash
 
-      nvq++ -lcudaq-qec stim_dem_decoder.cpp -o stim_dem_decoder
+      nvq++ -lcudaq-qec -lcudaq-qec-decoders stim_dem_decoder.cpp -o stim_dem_decoder
       ./stim_dem_decoder
