@@ -49,7 +49,7 @@ constexpr std::uint8_t kEnqueueTagArg = 2;
 constexpr std::uint8_t kEnqueueArgCount = 3;
 
 constexpr std::uint8_t kGetCorrectionsDecoderIdArg = 0;
-constexpr std::uint8_t kGetCorrectionsOutputArg = 1;
+constexpr std::uint8_t kGetCorrectionsLengthArg = 1;
 constexpr std::uint8_t kGetCorrectionsResetArg = 2;
 constexpr std::uint8_t kGetCorrectionsArgCount = 3;
 
@@ -336,7 +336,7 @@ std::array<cudaq_function_entry_t, kDeviceCallEntryCount> make_entries() {
                   simulation_get_corrections_host, kGetCorrectionsArgCount,
                   kSingleResult);
   set_u64(get_entry.schema.args[kGetCorrectionsDecoderIdArg]);
-  set_array_u8(get_entry.schema.args[kGetCorrectionsOutputArg]);
+  set_u64(get_entry.schema.args[kGetCorrectionsLengthArg]);
   set_u8(get_entry.schema.args[kGetCorrectionsResetArg]);
   set_array_u8(get_entry.schema.results[kCorrectionsResult]);
 

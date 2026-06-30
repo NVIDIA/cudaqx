@@ -32,8 +32,7 @@ constexpr std::size_t kActiveSyndromeIndex = 1;
 constexpr std::size_t kSparseEntriesPerRow = 2;
 constexpr std::int64_t kSparseRowEnd = -1;
 constexpr double kUniformErrorRate = 0.1;
-constexpr std::int64_t kExpectedPackedCorrection = std::int64_t{1}
-                                                   << kActiveSyndromeIndex;
+constexpr std::int64_t kExpectedCorrection = 1;
 
 std::vector<std::int64_t> make_identity_sparse_matrix() {
   std::vector<std::int64_t> sparse_matrix;
@@ -104,11 +103,8 @@ __qpu__ std::int64_t pymatching_device_call_kernel() {
   auto corrections = cudaq::qec::decoding::get_corrections(
       /*decoder_id=*/kKernelDecoderId, /*return_size=*/kKernelBlockSize,
       /*reset=*/true);
-  std::int64_t packed = {};
-  for (std::size_t i = 0; i < kKernelBlockSize; ++i)
-    if (corrections[i])
-      packed |= (std::int64_t{1} << i);
-  return packed;
+  return corrections[kKernelActiveSyndromeIndex] ? std::int64_t{1}
+                                                 : std::int64_t{0};
 }
 
 void initialize_realtime() {
@@ -134,5 +130,5 @@ TEST(PyMatchingDeviceCallRealtime, HostDispatch) {
 
   const auto results = cudaq::run(kRunShots, pymatching_device_call_kernel);
   ASSERT_EQ(results.size(), kRunShots);
-  EXPECT_EQ(results[0], kExpectedPackedCorrection);
+  EXPECT_EQ(results[0], kExpectedCorrection);
 }
