@@ -74,10 +74,10 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-device-call)
     PRIVATE ${CUDAQ_INSTALL_DIR}/lib)
 
   target_link_libraries(test_pymatching_device_call_realtime PRIVATE
+    GTest::gtest_main
     cudaq-qec
     cudaq-qec-realtime-decoding
     cudaq-qec-realtime-decoding-simulation
-    cudaq-qec-realtime-device-call
     cudaq::cudaq cudaq::cudaq-common cudaq-mlir-runtime
     nvqir nvqir-qpp
   )
@@ -89,11 +89,7 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-device-call)
 
   add_dependencies(test_pymatching_device_call_realtime cudaq-qec-pymatching)
   add_dependencies(CUDAQXQECUnitTests test_pymatching_device_call_realtime)
-  add_test(
-    NAME decoders.pymatching.device_call_host_dispatch
-    COMMAND test_pymatching_device_call_realtime
+  gtest_discover_tests(test_pymatching_device_call_realtime
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-  )
-  set_tests_properties(decoders.pymatching.device_call_host_dispatch
     PROPERTIES ENVIRONMENT "CUDAQ_DEVICE_CALL_CHANNEL=host_dispatch")
 endif()

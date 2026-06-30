@@ -10,10 +10,10 @@
 #include "cudaq/qec/realtime/decoding.h"
 #include "cudaq/qec/realtime/decoding_config.h"
 #include "cudaq/realtime.h"
+#include <gtest/gtest.h>
 
+#include <cstddef>
 #include <cstdint>
-#include <exception>
-#include <iostream>
 #include <variant>
 #include <vector>
 
@@ -86,55 +86,53 @@ struct RealtimeGuard {
 };
 
 __qpu__ std::int64_t pymatching_device_call_kernel() {
-  cudaq::qec::decoding::reset_decoder(/*decoder_id=*/kDecoderId);
+  constexpr std::uint64_t kKernelDecoderId = 0;
+  constexpr std::uint64_t kKernelBlockSize = 3;
+  constexpr std::uint64_t kKernelSyndromeSize = 3;
+  constexpr std::uint64_t kKernelSyndromeTag = 1;
+  constexpr std::size_t kKernelActiveSyndromeIndex = 1;
 
-  std::vector<bool> syndrome(kSyndromeSize);
-  syndrome[kActiveSyndromeIndex] = true;
+  cudaq::qec::decoding::reset_decoder(/*decoder_id=*/kKernelDecoderId);
+
+  std::vector<bool> syndrome(kKernelSyndromeSize);
+  for (std::size_t i = 0; i < kKernelSyndromeSize; ++i)
+    syndrome[i] = false;
+  syndrome[kKernelActiveSyndromeIndex] = true;
   cudaq::qec::decoding::enqueue_syndromes_test(
-      /*decoder_id=*/kDecoderId, syndrome, /*tag=*/kSyndromeTag);
+      /*decoder_id=*/kKernelDecoderId, syndrome, /*tag=*/kKernelSyndromeTag);
 
   auto corrections = cudaq::qec::decoding::get_corrections(
-      /*decoder_id=*/kDecoderId, /*return_size=*/kBlockSize, /*reset=*/true);
+      /*decoder_id=*/kKernelDecoderId, /*return_size=*/kKernelBlockSize,
+      /*reset=*/true);
   std::int64_t packed = {};
-  for (std::size_t i = 0; i < corrections.size(); ++i)
+  for (std::size_t i = 0; i < kKernelBlockSize; ++i)
     if (corrections[i])
       packed |= (std::int64_t{1} << i);
   return packed;
 }
 
+void initialize_realtime() {
+  int argc = 1;
+  char program[] = "test_pymatching_device_call_realtime";
+  char *argv[] = {program, nullptr};
+  cudaq::realtime::initialize(argc, argv);
+}
+
 } // namespace
 
-int main(int argc, char **argv) {
-  try {
-    // Keep the service library loaded so CUDA-Q can discover its
-    // cudaqGetDeviceCallServicePluginInfo symbol via dlsym(RTLD_DEFAULT).
-    cudaqx_qec_realtime_device_call_service_force_link();
+TEST(PyMatchingDeviceCallRealtime, HostDispatch) {
+  // Keep the service library loaded so CUDA-Q can discover its
+  // cudaqGetDeviceCallServicePluginInfo symbol via dlsym(RTLD_DEFAULT).
+  cudaqx_qec_realtime_device_call_service_force_link();
 
-    auto decoder_config = make_config();
-    if (config::configure_decoders(decoder_config) != 0) {
-      std::cerr << "failed to configure PyMatching decoder\n";
-      return 1;
-    }
-    DecoderGuard decoder_guard{true};
+  auto decoder_config = make_config();
+  ASSERT_EQ(config::configure_decoders(decoder_config), 0);
+  DecoderGuard decoder_guard{true};
 
-    cudaq::realtime::initialize(argc, argv);
-    RealtimeGuard realtime_guard{true};
+  initialize_realtime();
+  RealtimeGuard realtime_guard{true};
 
-    const auto results = cudaq::run(kRunShots, pymatching_device_call_kernel);
-    if (results.size() != kRunShots) {
-      std::cerr << "expected one result, got " << results.size() << "\n";
-      return 1;
-    }
-
-    if (results[0] != kExpectedPackedCorrection) {
-      std::cerr << "expected correction " << kExpectedPackedCorrection
-                << ", got " << results[0] << "\n";
-      return 1;
-    }
-
-    return 0;
-  } catch (const std::exception &ex) {
-    std::cerr << ex.what() << "\n";
-    return 1;
-  }
+  const auto results = cudaq::run(kRunShots, pymatching_device_call_kernel);
+  ASSERT_EQ(results.size(), kRunShots);
+  EXPECT_EQ(results[0], kExpectedPackedCorrection);
 }

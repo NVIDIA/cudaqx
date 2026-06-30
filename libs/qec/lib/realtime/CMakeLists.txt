@@ -26,32 +26,55 @@ if(CMAKE_CUDA_COMPILER)
     list(APPEND _cudaq_realtime_prefixes "${CUDAQ_INSTALL_PREFIX}")
   endif()
   
-  find_path(CUDAQ_REALTIME_INCLUDE_DIR
+  macro(cudaq_qec_find_realtime_path output_var)
+    cmake_parse_arguments(ARG "" "" "NAMES;PATH_SUFFIXES" ${ARGN})
+    find_path(${output_var}
+      NAMES ${ARG_NAMES}
+      HINTS ${_cudaq_realtime_prefixes}
+      PATH_SUFFIXES ${ARG_PATH_SUFFIXES}
+      NO_DEFAULT_PATH
+    )
+    if(NOT DEFINED ${output_var} OR NOT "${${output_var}}")
+      find_path(${output_var}
+        NAMES ${ARG_NAMES}
+        PATHS ${_cudaq_realtime_prefixes}
+        PATH_SUFFIXES ${ARG_PATH_SUFFIXES}
+      )
+    endif()
+  endmacro()
+
+  macro(cudaq_qec_find_realtime_library output_var)
+    cmake_parse_arguments(ARG "" "" "NAMES;PATH_SUFFIXES" ${ARGN})
+    find_library(${output_var}
+      NAMES ${ARG_NAMES}
+      HINTS ${_cudaq_realtime_prefixes}
+      PATH_SUFFIXES ${ARG_PATH_SUFFIXES}
+      NO_DEFAULT_PATH
+    )
+    if(NOT DEFINED ${output_var} OR NOT "${${output_var}}")
+      find_library(${output_var}
+        NAMES ${ARG_NAMES}
+        PATHS ${_cudaq_realtime_prefixes}
+        PATH_SUFFIXES ${ARG_PATH_SUFFIXES}
+      )
+    endif()
+  endmacro()
+
+  cudaq_qec_find_realtime_path(CUDAQ_REALTIME_INCLUDE_DIR
     NAMES cudaq/realtime/daemon/dispatcher/cudaq_realtime.h
-    HINTS ${_cudaq_realtime_prefixes}
     PATH_SUFFIXES include
-    NO_DEFAULT_PATH
   )
   if(NOT CUDAQ_REALTIME_INCLUDE_DIR)
-    find_path(CUDAQ_REALTIME_INCLUDE_DIR
-      NAMES cudaq/realtime/daemon/dispatcher/cudaq_realtime.h
-      PATHS ${_cudaq_realtime_prefixes}
-      PATH_SUFFIXES include
-    )
-  endif()
-  if(NOT CUDAQ_REALTIME_INCLUDE_DIR)
-    find_path(CUDAQ_REALTIME_INCLUDE_DIR
+    cudaq_qec_find_realtime_path(CUDAQ_REALTIME_INCLUDE_DIR
       NAMES cudaq/nvqlink/daemon/dispatcher/cudaq_realtime.h
-      HINTS ${_cudaq_realtime_prefixes}
       PATH_SUFFIXES include ../include
     )
   endif()
   
   if(CUDAQ_REALTIME_INCLUDE_DIR)
     message(STATUS "Found cuda-quantum realtime headers at ${CUDAQ_REALTIME_INCLUDE_DIR}")
-    find_library(CUDAQ_REALTIME_LIBRARY
+    cudaq_qec_find_realtime_library(CUDAQ_REALTIME_LIBRARY
       NAMES cudaq-realtime
-      PATHS ${_cudaq_realtime_prefixes}
       PATH_SUFFIXES lib
     )
     if(CUDAQ_REALTIME_LIBRARY)
@@ -63,9 +86,8 @@ if(CMAKE_CUDA_COMPILER)
     # qec_realtime_session, lives in libcudaq-realtime-host-dispatch -- separate
     # from libcudaq-realtime.  Locate it so cudaq-qec-realtime-decoding can link
     # it (mirrors the cudaq-realtime-pipeline target below).
-    find_library(CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY
+    cudaq_qec_find_realtime_library(CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY
       NAMES cudaq-realtime-host-dispatch
-      PATHS ${_cudaq_realtime_prefixes}
       PATH_SUFFIXES lib
     )
     if(CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY)
@@ -73,21 +95,12 @@ if(CMAKE_CUDA_COMPILER)
     endif()
 
     # CUDA-Q lowered `cudaq::device_call` host-dispatch integration needs the
-    # internal DeviceCallService plugin API, which is available only from a
-    # realtime/device-call-enabled CUDA-Q build.
-    find_path(CUDAQ_DEVICE_CALL_INCLUDE_DIR
+    # DeviceCallService provider API from a realtime/device-call-enabled CUDA-Q
+    # build.
+    cudaq_qec_find_realtime_path(CUDAQ_DEVICE_CALL_INCLUDE_DIR
       NAMES cudaq_internal/device_call/DeviceCallService.h
-      HINTS ${_cudaq_realtime_prefixes}
       PATH_SUFFIXES include
-      NO_DEFAULT_PATH
     )
-    if(NOT CUDAQ_DEVICE_CALL_INCLUDE_DIR)
-      find_path(CUDAQ_DEVICE_CALL_INCLUDE_DIR
-        NAMES cudaq_internal/device_call/DeviceCallService.h
-        PATHS ${_cudaq_realtime_prefixes}
-        PATH_SUFFIXES include
-      )
-    endif()
     if(CUDAQ_DEVICE_CALL_INCLUDE_DIR)
       message(STATUS "Found cuda-quantum device_call headers at ${CUDAQ_DEVICE_CALL_INCLUDE_DIR}")
     else()
@@ -95,19 +108,10 @@ if(CMAKE_CUDA_COMPILER)
                      "QEC lowered device_call host-dispatch service will not be built.")
     endif()
 
-    find_library(CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY
+    cudaq_qec_find_realtime_library(CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY
       NAMES cudaq-device-call-runtime
-      HINTS ${_cudaq_realtime_prefixes}
       PATH_SUFFIXES lib
-      NO_DEFAULT_PATH
     )
-    if(NOT CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY)
-      find_library(CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY
-        NAMES cudaq-device-call-runtime
-        PATHS ${_cudaq_realtime_prefixes}
-        PATH_SUFFIXES lib
-      )
-    endif()
     if(CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY)
       message(STATUS "Found cuda-quantum device_call runtime library at ${CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY}")
       get_filename_component(_CUDAQ_DEVICE_CALL_RUNTIME_LIB_DIR
@@ -115,6 +119,11 @@ if(CMAKE_CUDA_COMPILER)
     else()
       message(STATUS "cuda-quantum device_call runtime library not found. "
                      "QEC lowered device_call host-dispatch service will not be built.")
+    endif()
+
+    set(CUDAQ_QEC_DEVICE_CALL_SERVICE_AVAILABLE FALSE)
+    if(CUDAQ_DEVICE_CALL_INCLUDE_DIR AND CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY)
+      set(CUDAQ_QEC_DEVICE_CALL_SERVICE_AVAILABLE TRUE)
     endif()
 
     
@@ -174,12 +183,25 @@ if(CUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE)
 endif()
 
 # Shared library for host-side API
-add_library(cudaq-qec-realtime-decoding SHARED
+set(_qec_realtime_decoding_sources
   realtime_decoding.cpp
   config.cpp
   qec_realtime_session.cpp
   rpc_producer.cpp
 )
+if(CUDAQ_QEC_DEVICE_CALL_SERVICE_AVAILABLE)
+  list(APPEND _qec_realtime_decoding_sources
+    device_call/qec_device_call_service.cpp)
+endif()
+
+add_library(cudaq-qec-realtime-decoding SHARED
+  ${_qec_realtime_decoding_sources}
+)
+if(CUDAQ_QEC_DEVICE_CALL_SERVICE_AVAILABLE)
+  add_library(cudaq-qec-realtime-device-call INTERFACE)
+  target_link_libraries(cudaq-qec-realtime-device-call INTERFACE
+    cudaq-qec-realtime-decoding)
+endif()
 
 target_compile_options(cudaq-qec-realtime-decoding 
   PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden)
@@ -192,6 +214,7 @@ target_include_directories(cudaq-qec-realtime-decoding
     $<INSTALL_INTERFACE:include>
   PRIVATE
     $<$<BOOL:${CUDAQ_REALTIME_INCLUDE_DIR}>:${CUDAQ_REALTIME_INCLUDE_DIR}>
+    $<$<BOOL:${CUDAQ_DEVICE_CALL_INCLUDE_DIR}>:${CUDAQ_DEVICE_CALL_INCLUDE_DIR}>
     ${CUDAToolkit_INCLUDE_DIRS}
 )
 
@@ -213,17 +236,27 @@ target_link_libraries(cudaq-qec-realtime-decoding
     LLVMSupport
     $<$<BOOL:${CUDAQ_REALTIME_LIBRARY}>:${CUDAQ_REALTIME_LIBRARY}>
     $<$<BOOL:${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}>:${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}>
+    $<$<BOOL:${CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY}>:${CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY}>
 )
 
-set_target_properties(cudaq-qec-realtime-decoding PROPERTIES
-  LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-
+set(_qec_realtime_decoding_build_rpath "${CMAKE_BINARY_DIR}/lib")
+set(_qec_realtime_decoding_install_rpath
+  "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
 if(_CUDAQ_REALTIME_LIB_DIR)
-  set_target_properties(cudaq-qec-realtime-decoding PROPERTIES
-    BUILD_RPATH "${_CUDAQ_REALTIME_LIB_DIR};${CMAKE_BINARY_DIR}/lib"
-    INSTALL_RPATH "${_CUDAQ_REALTIME_LIB_DIR};${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}"
-  )
+  list(APPEND _qec_realtime_decoding_build_rpath "${_CUDAQ_REALTIME_LIB_DIR}")
+  list(APPEND _qec_realtime_decoding_install_rpath "${_CUDAQ_REALTIME_LIB_DIR}")
 endif()
+if(_CUDAQ_DEVICE_CALL_RUNTIME_LIB_DIR)
+  list(APPEND _qec_realtime_decoding_build_rpath
+    "${_CUDAQ_DEVICE_CALL_RUNTIME_LIB_DIR}")
+  list(APPEND _qec_realtime_decoding_install_rpath
+    "${_CUDAQ_DEVICE_CALL_RUNTIME_LIB_DIR}")
+endif()
+set_target_properties(cudaq-qec-realtime-decoding PROPERTIES
+  LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
+  BUILD_RPATH "${_qec_realtime_decoding_build_rpath}"
+  INSTALL_RPATH "${_qec_realtime_decoding_install_rpath}"
+)
 
 
 install(TARGETS cudaq-qec-realtime-decoding
@@ -236,10 +269,14 @@ install(TARGETS cudaq-qec-realtime-decoding
 # Requires pre-installed cudaq-realtime (set CUDAQ_REALTIME_ROOT)
 # ---------------------------------------------------------------------------
 if(CMAKE_CUDA_COMPILER AND CUDAQ_REALTIME_INCLUDE_DIR)
-    find_library(_CUDAQ_RT_LIB cudaq-realtime
-      PATHS ${_cudaq_realtime_prefixes} PATH_SUFFIXES lib)
-    find_library(_CUDAQ_RT_HD_LIB cudaq-realtime-host-dispatch
-      PATHS ${_cudaq_realtime_prefixes} PATH_SUFFIXES lib)
+    cudaq_qec_find_realtime_library(_CUDAQ_RT_LIB
+      NAMES cudaq-realtime
+      PATH_SUFFIXES lib
+    )
+    cudaq_qec_find_realtime_library(_CUDAQ_RT_HD_LIB
+      NAMES cudaq-realtime-host-dispatch
+      PATH_SUFFIXES lib
+    )
 
     if(_CUDAQ_RT_LIB AND _CUDAQ_RT_HD_LIB)
       message(STATUS "RealtimePipeline: building with CUDAQ_REALTIME_INCLUDE_DIR=${CUDAQ_REALTIME_INCLUDE_DIR}")
@@ -295,7 +332,3 @@ endif()
 
 add_subdirectory(quantinuum)
 add_subdirectory(simulation)
-if(CUDAQ_REALTIME_INCLUDE_DIR AND CUDAQ_DEVICE_CALL_INCLUDE_DIR AND
-   CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY)
-  add_subdirectory(device_call)
-endif()

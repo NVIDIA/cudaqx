@@ -15,7 +15,6 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
-#include <vector>
 
 namespace {
 
@@ -35,6 +34,7 @@ constexpr std::uint32_t kResetDecoderFnId = cudaq::realtime::fnv1a_hash(
 constexpr std::int32_t kStatusSuccess = 0;
 constexpr std::int32_t kStatusInvalidRequest = -1;
 constexpr std::int32_t kStatusHandlerException = -2;
+constexpr std::int32_t kStatusPayloadTooLarge = -3;
 constexpr std::int32_t kStatusResultBufferTooSmall = -5;
 
 constexpr std::uint32_t kHostDispatchDeviceId = 0;
@@ -60,6 +60,7 @@ constexpr std::uint8_t kCorrectionsResult = 0;
 
 constexpr std::uint8_t kScalarU8Size = sizeof(std::uint8_t);
 constexpr std::uint8_t kScalarU64Size = sizeof(std::uint64_t);
+constexpr std::size_t kMaxRealtimeVectorLength = 64;
 
 struct ByteSpan {
   const std::uint8_t *data = nullptr;
@@ -209,12 +210,18 @@ void simulation_enqueue_syndromes_host(const void *rx_slot, void *tx_slot,
       return;
     }
 
-    std::vector<std::uint8_t> syndrome(request.syndromes.data,
-                                       request.syndromes.data +
-                                           request.syndromes.size);
+    if (request.syndromes.size > kMaxRealtimeVectorLength) {
+      write_response(tx_slot, rx_slot, kStatusPayloadTooLarge);
+      return;
+    }
+
+    std::array<std::uint8_t, kMaxRealtimeVectorLength> syndrome{};
+    if (request.syndromes.size != 0)
+      std::memcpy(syndrome.data(), request.syndromes.data,
+                  request.syndromes.size);
     cudaq::qec::decoding::host::enqueue_syndromes(
         static_cast<std::size_t>(request.decoder_id), syndrome.data(),
-        syndrome.size(), request.tag);
+        static_cast<std::size_t>(request.syndromes.size), request.tag);
     write_response(tx_slot, rx_slot, kStatusSuccess);
   } catch (...) {
     if (tx_slot && rx_slot)
@@ -233,9 +240,8 @@ void simulation_get_corrections_host(const void *rx_slot, void *tx_slot,
       return;
     }
 
-    if (request.correction_length >
-        static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max())) {
-      write_response(tx_slot, rx_slot, kStatusResultBufferTooSmall);
+    if (request.correction_length > kMaxRealtimeVectorLength) {
+      write_response(tx_slot, rx_slot, kStatusPayloadTooLarge);
       return;
     }
 
@@ -246,10 +252,10 @@ void simulation_get_corrections_host(const void *rx_slot, void *tx_slot,
       return;
     }
 
-    std::vector<std::uint8_t> corrections(request.correction_length);
+    std::array<std::uint8_t, kMaxRealtimeVectorLength> corrections{};
     cudaq::qec::decoding::host::get_corrections(
         static_cast<std::size_t>(request.decoder_id), corrections.data(),
-        corrections.size(), request.reset);
+        static_cast<std::size_t>(request.correction_length), request.reset);
 
     auto *result = static_cast<std::uint8_t *>(tx_slot) +
                    sizeof(cudaq::realtime::RPCResponse);
