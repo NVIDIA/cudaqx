@@ -264,6 +264,11 @@ to prototype and develop new codes.
       :start-after: [Begin Documentation2]
       :end-before: [End Documentation2]
 
+   .. note::
+
+      The kernel registered for :code:`stabilizer_round` must be annotated to
+      return :code:`list[cudaq.measure_handle]`. 
+
 3. **Implement the Code Class**:
 
    Create a class decorated with :code:`@qec.code` that implements the required interface:
