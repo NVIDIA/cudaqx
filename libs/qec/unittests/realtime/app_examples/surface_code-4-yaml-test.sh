@@ -15,10 +15,27 @@
 #                         NOT passed here -- the app rejects --yaml +
 #                         --decoder_type).
 #
-# The driver is decoder-agnostic. For trt_decoder, pass an ONNX path as arg 7
+# The example decodes ONE volume of num_rounds rounds (no sliding windows).
+#
+# The driver is decoder-agnostic. For trt_decoder, pass an ONNX path as arg 6
 # or pass AUTO to generate a small [pre_L=0, residual=identity] model sized for
-# the requested distance/window. Additional app args (for example
-# --use-relay-bp) may follow arg 7.
+# the requested distance/num_rounds. Additional app args (for example
+# --use-relay-bp) may follow arg 6.
+#
+# trt+Ising external-bundle path (NOT exercised by the AUTO ctest, which uses an
+# identity predecoder): to run the example against a REAL Ising d/T/Z predecoder,
+#   (i)  in the Ising repo, generate a bundle:
+#          python generate_test_data.py --distance D --n-rounds T --basis Z \
+#              --code-rotation O1     # writes H_csr.bin/O_csr.bin/priors.bin
+#   (ii) generate D_sparse.txt aligning Ising detectors to the cudaqx live
+#        buffer (run the app once with --save_dem to print cnot_schedX/Z, then):
+#          python gen_dsparse.py D T Z XV sched.txt <bundle>/D_sparse.txt \
+#              --ising-repo /path/to/ising/code
+#   (iii) run the example:
+#          surface_code-4-yaml --save_dem cfg.yml --decoder_type trt_decoder \
+#              --onnx_path predecoder_memory_dD_TT_Z.onnx \
+#              --ising_bundle <bundle> --distance D --num_rounds T ...
+#          surface_code-4-yaml --yaml cfg.yml --distance D --num_rounds T ...
 
 set -euo pipefail
 
@@ -26,28 +43,26 @@ set -euo pipefail
 #  $1 exe            Path to the surface_code-4-yaml executable
 #  $2 distance       Surface code distance (D)
 #  $3 num_rounds     Number of measurement rounds (R, >=D, multiple of D)
-#  $4 decoder_window Decoder window size (W, >=D, multiple of D, <=R)
-#  $5 decoder_type   Decoder to generate (optional, defaults to pymatching)
-#  $6 num_shots      Number of shots (optional, defaults to 200)
-#  $7 onnx_path      ONNX path for trt_decoder, or AUTO to generate one
-#  $8... extra args  Extra app args to pass to generation/realtime phases
+#  $4 decoder_type   Decoder to generate (optional, defaults to pymatching)
+#  $5 num_shots      Number of shots (optional, defaults to 200)
+#  $6 onnx_path      ONNX path for trt_decoder, or AUTO to generate one
+#  $7... extra args  Extra app args to pass to generation/realtime phases
 
-if [[ $# -lt 4 ]]; then
-  echo "Error: Expected at least 4 arguments (got $#)"
-  echo "Usage: $0 <exe> <distance> <num_rounds> <decoder_window> [decoder_type=pymatching] [num_shots=200]"
+if [[ $# -lt 3 ]]; then
+  echo "Error: Expected at least 3 arguments (got $#)"
+  echo "Usage: $0 <exe> <distance> <num_rounds> [decoder_type=pymatching] [num_shots=200]"
   exit 1
 fi
 
 EXE=$1
 DISTANCE=$2
 NUM_ROUNDS=$3
-DECODER_WINDOW=$4
-DECODER_TYPE=${5:-pymatching}
-NUM_SHOTS=${6:-200}
-ONNX_PATH=${7:-}
+DECODER_TYPE=${4:-pymatching}
+NUM_SHOTS=${5:-200}
+ONNX_PATH=${6:-}
 EXTRA_APP_ARGS=()
-if [[ $# -ge 8 ]]; then
-  EXTRA_APP_ARGS=("${@:8}")
+if [[ $# -ge 7 ]]; then
+  EXTRA_APP_ARGS=("${@:7}")
 fi
 
 export CUDAQ_DEFAULT_SIMULATOR=stim
@@ -77,7 +92,7 @@ REALTIME_LOG=$WORKDIR/realtime.log
 
 if [[ "$DECODER_TYPE" == "trt_decoder" && "$ONNX_PATH" == "AUTO" ]]; then
   ONNX_PATH=$WORKDIR/trt_identity_predecoder.onnx
-  SYNDROME_SIZE=$(((DISTANCE * DISTANCE - 1) * DECODER_WINDOW))
+  SYNDROME_SIZE=$(((DISTANCE * DISTANCE - 1) * NUM_ROUNDS))
   PYTHON_BIN=${PYTHON:-python3}
   "$PYTHON_BIN" - "$ONNX_PATH" "$SYNDROME_SIZE" <<'PY'
 import sys
@@ -113,7 +128,6 @@ echo "surface_code-4-yaml test"
 echo "  exe            = $EXE"
 echo "  distance       = $DISTANCE"
 echo "  num_rounds     = $NUM_ROUNDS"
-echo "  decoder_window = $DECODER_WINDOW"
 echo "  decoder_type   = $DECODER_TYPE"
 echo "  num_shots      = $NUM_SHOTS"
 echo "  realtime mode  = $CUDAQ_QEC_REALTIME_MODE"
@@ -136,7 +150,6 @@ echo "=== Phase 1: generate config (--save_dem, --decoder_type $DECODER_TYPE) ==
 GEN_ARGS=(
   --distance "$DISTANCE" \
   --num_rounds "$NUM_ROUNDS" \
-  --decoder_window "$DECODER_WINDOW" \
   --num_shots "$NUM_SHOTS" \
   --p_spam "$P_SPAM" \
   --decoder_type "$DECODER_TYPE" \
@@ -169,7 +182,6 @@ set +e
 REALTIME_ARGS=(
   --distance "$DISTANCE" \
   --num_rounds "$NUM_ROUNDS" \
-  --decoder_window "$DECODER_WINDOW" \
   --num_shots "$NUM_SHOTS" \
   --p_spam "$P_SPAM" \
   --yaml "$CONFIG_FILE"

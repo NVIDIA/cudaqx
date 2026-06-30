@@ -123,7 +123,7 @@ if(Python_Interpreter_FOUND)
 endif()
 
 function(add_surface_code_4_yaml_test test_suffix distance num_rounds
-         decoder_window decoder_type num_shots onnx_path)
+         decoder_type num_shots onnx_path)
   set(_sc4_env "CUDAQ_QEC_REALTIME_MODE=inproc_rpc")
   if(Python_Interpreter_FOUND)
     list(APPEND _sc4_env "PYTHON=${Python_EXECUTABLE}")
@@ -134,7 +134,7 @@ function(add_surface_code_4_yaml_test test_suffix distance num_rounds
     COMMAND
       bash "${CMAKE_CURRENT_SOURCE_DIR}/surface_code-4-yaml-test.sh"
         ${CMAKE_CURRENT_BINARY_DIR}/surface_code-4-yaml
-        ${distance} ${num_rounds} ${decoder_window}
+        ${distance} ${num_rounds}
         ${decoder_type} ${num_shots} "${onnx_path}" ${ARGN}
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
   )
@@ -143,10 +143,12 @@ function(add_surface_code_4_yaml_test test_suffix distance num_rounds
     PROPERTIES ENVIRONMENT "${_sc4_env}")
 endfunction()
 
+# This example decodes ONE volume of num_rounds rounds (no sliding windows), so
+# each case runs num_rounds == distance rounds.
 function(add_surface_code_4_yaml_decoder_cases label decoder_type onnx_path)
-  add_surface_code_4_yaml_test(${label}-d3 3 6 3
+  add_surface_code_4_yaml_test(${label}-d3 3 3
     ${decoder_type} 200 "${onnx_path}" ${ARGN})
-  add_surface_code_4_yaml_test(${label}-d5 5 10 5
+  add_surface_code_4_yaml_test(${label}-d5 5 5
     ${decoder_type} 200 "${onnx_path}" ${ARGN})
 endfunction()
 
