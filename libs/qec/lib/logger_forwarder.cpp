@@ -284,8 +284,11 @@ private:
       record.threadId = queuedRecord.threadId;
 
       try {
+        // `record` is a per-iteration local discarded after this call, so it
+        // is safe to hand ownership to the callback via rvalue. A consumer may
+        // move out of it (e.g. to re-queue) instead of copying its strings.
         if (mConfig.callback)
-          mConfig.callback(record);
+          mConfig.callback(std::move(record));
       } catch (...) {
         mForwardFailures.fetch_add(1, std::memory_order_relaxed);
       }

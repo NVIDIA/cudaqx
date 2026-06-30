@@ -62,7 +62,12 @@ enum class ForwardDropPolicy { dropNewest, dropOldest };
 /// @brief Runtime configuration for asynchronous forwarding.
 struct ForwarderConfig {
   /// @brief Callback executed on the forwarder worker thread.
-  std::function<void(const ForwardedLogRecord &)> callback;
+  /// @details The record is passed as an rvalue: the worker owns a fresh,
+  /// per-record instance that is discarded after the callback returns, so a
+  /// callback may move out of it (e.g. `std::move(record)` to re-queue it) to
+  /// avoid copying the heap-allocated `fileName`/`message` strings. Read-only
+  /// callbacks taking `const ForwardedLogRecord &` remain valid.
+  std::function<void(ForwardedLogRecord &&)> callback;
   /// @brief Bounded queue capacity (records), clamped to at least 1.
   std::size_t queueCapacity = 1024;
   /// @brief Max forwarded message bytes copied on producer path.
