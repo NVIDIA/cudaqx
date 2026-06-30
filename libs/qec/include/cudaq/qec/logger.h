@@ -222,11 +222,6 @@ template <typename... Args>
 void debug(const std::string_view, Args &&...) {}
 #endif
 
-// Internal helper macro; undefine to avoid leaking it (and colliding with the
-// CUDA-Q runtime logger's identically named macro) into translation units that
-// include both headers.
-#undef CUDA_QEC_LOGGER_DEDUCTION_STRUCT
-
 /// @brief Log a message with timestamp but without file/line metadata.
 /// @details This helper always emits regardless of log level. The
 /// `[file:line]` segment is intentionally omitted from the output; use the
@@ -291,27 +286,4 @@ void log(const std::string_view message, Args &&...args) {
 #define CUDA_QEC_DBG(...) CUDA_QEC_LOG_IMPL(debug, __VA_ARGS__)
 #else
 #define CUDA_QEC_DBG(...)
-#endif
-
-// Backward-compatible aliases for existing QEC callsites. If runtime logger
-// macros are already present in this translation unit, do not redefine them.
-#ifndef CUDAQ_LOG_IMPL
-#define CUDAQ_LOG_IMPL(LEVEL, msg, ...)                                        \
-  CUDA_QEC_LOG_IMPL(LEVEL, msg __VA_OPT__(, ) __VA_ARGS__)
-#endif
-#ifndef CUDAQ_ERROR_IMPL
-#define CUDAQ_ERROR_IMPL(msg, ...)                                             \
-  CUDA_QEC_ERROR_IMPL(msg __VA_OPT__(, ) __VA_ARGS__)
-#endif
-#ifndef CUDAQ_ERROR
-#define CUDAQ_ERROR(...) CUDA_QEC_ERROR(__VA_ARGS__)
-#endif
-#ifndef CUDAQ_WARN
-#define CUDAQ_WARN(...) CUDA_QEC_WARN(__VA_ARGS__)
-#endif
-#ifndef CUDAQ_INFO
-#define CUDAQ_INFO(...) CUDA_QEC_INFO(__VA_ARGS__)
-#endif
-#ifndef CUDAQ_DBG
-#define CUDAQ_DBG(...) CUDA_QEC_DBG(__VA_ARGS__)
 #endif
