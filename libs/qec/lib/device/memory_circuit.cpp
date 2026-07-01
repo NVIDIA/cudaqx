@@ -25,7 +25,7 @@ __qpu__ void memory_circuit(const code::stabilizer_round &stabilizer_round,
   // Create the logical patch
   patch logical(data, xstab_anc, zstab_anc);
 
-  // Prepare the initial state fault tolerantly
+  // Prepare the initial state
   statePrep({data, xstab_anc, zstab_anc});
 
   // Z-measurement before any operations always yields 0...0, so first syndromes
