@@ -325,9 +325,10 @@ void ai_decoder_service::build_engine_from_onnx(
   // network ignores BuilderFlag::kFP16/kBF16/kFP8/kINT8 and builds per
   // the dtypes declared in the ONNX.
   if (!strongly_typed) {
-    // platformHasFastFp16 and BuilderFlag::kFP16 are deprecated in TRT
-    // 10.x in favor of strongly-typed networks; the hint is still
-    // supported and is what we want for unquantized FP32/FP16 ONNX.
+    // platformHasFastFp16 and BuilderFlag::kFP16 were deprecated in TRT
+    // 10.x and removed in TRT 11.x in favor of strongly-typed networks.
+    // For TRT < 11, the hint is still useful for unquantized FP32/FP16 ONNX.
+#if NV_TENSORRT_MAJOR < 11
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     if (builder->platformHasFastFp16()) {
@@ -338,6 +339,7 @@ void ai_decoder_service::build_engine_from_onnx(
                   "Using FP32.\n");
     }
 #pragma GCC diagnostic pop
+#endif
   }
 
   auto parser = std::unique_ptr<nvonnxparser::IParser>(

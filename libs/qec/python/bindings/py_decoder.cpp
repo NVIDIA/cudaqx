@@ -6,20 +6,20 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 #include "common/ExecutionContext.h"
-#include "common/FmtCore.h"
 #include "cuda-qx/core/kwargs_utils.h"
 #include "cuda-qx/core/library_utils.h"
 #include "type_casters.h"
 #include "cudaq/platform.h"
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/detector_error_model.h"
+#include "cudaq/qec/logger.h"
 #include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/plugin_loader.h"
 #include "cudaq/qec/sparse_binary_matrix.h"
-#include "cudaq/runtime/logger/logger.h"
 #include <algorithm>
 #include <cstring>
 #include <filesystem>
+#include <fmt/core.h>
 #include <functional>
 #include <limits>
 #include <link.h>
@@ -227,7 +227,7 @@ public:
   static void
   register_decoder(const std::string &name,
                    std::function<nb::object(nb::object, nb::kwargs)> factory) {
-    cudaq::info("Registering Pythonic Decoder with name {}", name);
+    cudaq::qec::info("Registering Pythonic Decoder with name {}", name);
     registry[name] = factory;
   }
 
