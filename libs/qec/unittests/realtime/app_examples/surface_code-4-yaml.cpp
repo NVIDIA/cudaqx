@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2025 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2026 NVIDIA Corporation & Affiliates.                         *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -74,9 +74,7 @@ static int g_data_bits = 0;
 // that: it takes Ising's detector->measurement map and translates each
 // measurement index from Ising's buffer order into cudaqx's buffer order
 // (X-ancilla and data identity, Z-ancilla permuted), so every D row reproduces
-// one of cudaqx's own detector bits, now in Ising's detector order. This was
-// validated detector-by-detector against cudaqx's captured m2d (all 336 rows
-// match one cudaqx detector, bijectively).
+// one of cudaqx's own detector bits, now in Ising's detector order.
 // ---------------------------------------------------------------------------
 
 // Read a binary-CSR file (rows:u32, cols:u32, nnz:u32, indptr[(rows+1)*i32],
@@ -147,8 +145,7 @@ static std::vector<std::int64_t> read_D_sparse_txt(const std::string &path,
 // Read the Ising bundle's metadata.txt (key=value lines) and enforce that it
 // matches THIS experiment: basis Z, code_rotation XV, and the same distance /
 // n_rounds. This is the semantic guard the dimensional checks cannot provide --
-// a dimension-compatible X-basis bundle would otherwise be accepted with wrong
-// observable semantics.
+// so the bundle's basis and orientation match the experiment.
 static void enforce_ising_metadata(const std::string &bundle, int distance,
                                    std::size_t numRounds) {
   std::ifstream f(bundle + "/metadata.txt");
@@ -276,11 +273,11 @@ void save_dem_to_file(const cudaq::qec::detector_error_model &dem,
         // Enforce the bundle's semantics match this experiment (basis Z,
         // code_rotation XV, same d / n_rounds) before trusting its matrices.
         enforce_ising_metadata(ising_bundle, distance, numRounds);
-        // trt+Ising path: carry the REAL Ising d/T/Z model. H/O/priors come
-        // from the Ising bundle (Ising detector order); D_sparse (D_sparse.txt)
+        // trt+Ising path: carry the Ising d/T/Z model. H/O/priors come from
+        // the Ising bundle (Ising detector order); D_sparse (D_sparse.txt)
         // expresses each Ising detector as a parity over the cudaqx live
-        // measurement buffer, so the live 385-bit stream feeds Ising's
-        // detectors in Ising's row order.
+        // measurement buffer, so the live stream feeds Ising's detectors in
+        // Ising's row order.
         std::uint32_t hRows = 0, hCols = 0, oRows = 0, oCols = 0;
         config.H_sparse = read_csr_bin_to_sparse_vec(
             ising_bundle + "/H_csr.bin", hRows, hCols);
@@ -407,8 +404,8 @@ void load_dem_from_file(const std::string &dem_filename,
 }
 
 std::vector<size_t> get_stab_cnot_schedule(char stab_type, int distance) {
-  // The Ising surface-code predecoder is trained at code_rotation XV, so build
-  // the stabilizer CNOT schedule from an XV-oriented grid to match it.
+  // Build the stabilizer CNOT schedule from an XV-oriented grid (the
+  // predecoder's training orientation).
   cudaq::qec::surface_code::stabilizer_grid grid(
       distance, cudaq::qec::surface_code::sc_orientation::XV);
   if (stab_type != 'X' && stab_type != 'Z') {
@@ -539,10 +536,8 @@ measure_syndrome_round(cudaq::qec::patch logicalQubit,
                        const std::vector<std::size_t> &cnot_schedX_flat,
                        const std::vector<std::size_t> &cnot_schedZ_flat,
                        std::vector<cudaq::measure_result> &combined_syndrome) {
-  // Measure X-ancillas then Z-ancillas (combined layout [X..., Z...]), matching
-  // Ising's MemoryCircuit round order (MRX then MRZ) so the detector layout
-  // lines up with the trained predecoder. The shared helper keeps the DEM and
-  // the live enqueue path on the same ordering.
+  // Measure X-ancillas then Z-ancillas (combined layout [X..., Z...]). The
+  // shared helper keeps the DEM and the live enqueue path on the same ordering.
   auto syndrome_x = se_x_ft(logicalQubit, cnot_schedX_flat);
   auto syndrome_z = se_z_ft(logicalQubit, cnot_schedZ_flat);
   int i = 0;
@@ -720,11 +715,15 @@ demo_circuit_qpu(bool allow_device_calls,
   return ret;
 }
 
-// DEM-generation kernel: a Clifford, detector-annotated mirror of the runtime
-// syndrome extraction. It reuses the same measure_syndrome_round helper as the
-// runtime enqueue path, but declares detectors instead of enqueueing
-// syndromes. The detector layout matches the Ising MemoryCircuit (basis Z, XV)
-// detector-by-detector:
+// DEM-generation kernel. The example uses two kernels that share one syndrome-
+// extraction helper (measure_syndrome_round): dem_gen_circuit (this one) is
+// sampled by dem_from_kernel to build the DEM, so it is a pure detector-
+// annotated circuit with no decoder calls; demo_circuit_qpu runs the live
+// experiment and makes the decoder RPC calls (enqueue_syndromes /
+// get_corrections). The two kernels need to stay in lockstep on the measurement
+// schedule (same rounds, X-then-Z order, spam-then-measure placement).
+//
+// dem_gen_circuit declares detectors; the layout is basis Z, orientation XV:
 //   - Block 0 (numAncz prep singles): one single-term detector per round-0
 //     Z-ancilla (deterministic after prep0 |0>_L).
 //   - Blocks 1+2 (paired): `pairedRounds` rounds, each pairing this round's
@@ -834,12 +833,9 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
     load_dem_from_file(dem_filename, dem, numLogical, measSpan);
     const auto numDetectors = dem.detector_error_matrix.shape()[0];
     const auto fullSyndromesPerRound = numAncx + numAncz;
-    // Bind the loaded config to THIS experiment's geometry. The detector count
-    // and the measurement-buffer span (max(D_sparse)+1) together UNIQUELY pin
-    // (distance, num_rounds): detector count = T*(d^2-1) and span =
-    // T*(d^2-1)+d^2, so matching both forces d^2 to agree -> same d, same T.
-    // The detector count alone is NOT unique (d5/T5 and d3/T15 both give 120),
-    // so a dimension-compatible YAML would load and then silently mis-decode.
+    // Bind the loaded config to this experiment's geometry: the detector count
+    // and the measurement-buffer span (max(D_sparse)+1) must both match the
+    // distance and num_rounds being run.
     const auto expectedDetectors =
         static_cast<std::size_t>(numRounds) * fullSyndromesPerRound;
     const auto expectedSpan = expectedDetectors + numData;
@@ -875,11 +871,11 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
 
     // Z-stabilizer data-qubit supports, aligned to the Z-ancilla measurement
     // order (support[s] <-> Z-ancilla[s]). Used to build the boundary
-    // detectors, matching Ising's MemoryCircuit (basis Z).
+    // detectors (basis Z).
     std::vector<std::size_t> z_supports_flat, z_supports_offsets;
     get_stab_data_supports('Z', distance, z_supports_flat, z_supports_offsets);
 
-    // The DEM is laid out to mirror Ising's MemoryCircuit detector structure:
+    // The DEM detector layout is:
     //   numAncz prep singles + pairedRounds * (numAncx + numAncz) paired
     //   + numAncz boundary.
     // This example decodes ONE volume of num_rounds rounds. Ising's n_rounds
@@ -1317,10 +1313,11 @@ void show_help() {
   printf("  --use-relay-bp      For --decoder_type nv-qldpc-decoder: select "
          "Relay BP instead of the default BP + OSD block.\n");
   printf("  --ising_bundle <dir> Ising d/T/Z bundle directory "
-         "(generate_test_data.py output H_csr.bin/O_csr.bin/priors.bin plus "
-         "the generated D_sparse.txt). With --save_dem --decoder_type "
-         "trt_decoder the config carries the real Ising H/O/priors and an "
-         "Ising-ordered D_sparse over the cudaqx live buffer.\n");
+         "(H_csr.bin/O_csr.bin/priors.bin/metadata.txt plus D_sparse.txt; "
+         "generated locally, not shipped -- run without it to print the "
+         "generation recipe). With --save_dem --decoder_type trt_decoder the "
+         "config carries the Ising H/O/priors and an Ising-ordered D_sparse "
+         "over the cudaqx live buffer.\n");
   printf("  --help              Show this help message\n");
 }
 
@@ -1342,7 +1339,7 @@ int main(int argc, char **argv) {
   std::string onnx_path;
   // Optional Ising d/T/Z bundle dir (generate_test_data.py output + the
   // generated D_sparse.txt). When set with --save_dem --decoder_type
-  // trt_decoder, the trt config carries the real Ising H/O/priors (Ising
+  // trt_decoder, the trt config carries the Ising H/O/priors (Ising
   // detector order) and an Ising-ordered D_sparse over the cudaqx live buffer.
   std::string ising_bundle;
 
@@ -1501,6 +1498,35 @@ int main(int argc, char **argv) {
            "--decoder_type trt_decoder; ignoring it on this path.\n");
   }
 
+  // The trt+Ising path needs an external predecoder bundle that is generated
+  // locally and not shipped with this repository. If the bundle is absent (no
+  // metadata.txt), stop with the exact generation recipe rather than failing
+  // deeper in.
+  if (save_dem && decoder_type == "trt_decoder" && !ising_bundle.empty()) {
+    if (!std::ifstream(ising_bundle + "/metadata.txt")) {
+      printf(
+          "This example's trt+Ising path requires the Ising predecoder bundle, "
+          "which is generated locally and not shipped in this repository.\n"
+          "  '%s/metadata.txt' was not found.\n"
+          "Generate it from the Ising decoding project "
+          "(https://github.com/NVIDIA/Ising-Decoding) into '%s':\n"
+          "  1. python generate_test_data.py --distance %d --n-rounds %d "
+          "--basis Z --code-rotation XV --output-dir %s\n"
+          "  2. surface_code-4-yaml --save_dem cfg.yml --decoder_type "
+          "pymatching --distance %d --num_rounds %d > sched.txt\n"
+          "     python gen_dsparse_from_memory_circuit.py %d %d Z XV sched.txt "
+          "%s/D_sparse.txt --ising-repo /path/to/ising/code\n"
+          "  3. export the ONNX predecoder predecoder_memory_d%d_T%d_Z.onnx "
+          "and "
+          "pass it via --onnx_path.\n"
+          "Then re-run with --ising_bundle %s.\n",
+          ising_bundle.c_str(), ising_bundle.c_str(), distance, num_rounds,
+          ising_bundle.c_str(), distance, num_rounds, distance, num_rounds,
+          ising_bundle.c_str(), distance, num_rounds, ising_bundle.c_str());
+      return 1;
+    }
+  }
+
   if (num_logical * distance * distance >= 64) {
     printf("num_logical * distance * distance >= 64 is not supported.\n");
     return 1;
@@ -1509,11 +1535,10 @@ int main(int argc, char **argv) {
   printf("Running with p_spam = %f, distance = %d, num_shots = %d, num_rounds "
          "= %d\n",
          p_spam, distance, num_shots, num_rounds);
-  // Build the code at the orientation the Ising predecoder was trained at
-  // (code_rotation XV), which aligns the geometry and observable basis. The
-  // DEM-generation kernel (dem_gen_circuit) emits the model's full detector
-  // structure -- prep singles + data-derived boundary detectors, X-then-Z
-  // order -- to match it.
+  // Build the code at code_rotation XV (the predecoder's training orientation),
+  // which sets the geometry and observable basis. The DEM-generation kernel
+  // (dem_gen_circuit) emits the full detector structure -- prep singles +
+  // data-derived boundary detectors, X-then-Z order.
   try {
     auto code = cudaq::qec::get_code(
         "surface_code",

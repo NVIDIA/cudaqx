@@ -7,32 +7,33 @@
 # ============================================================================ #
 """Generate D_sparse.txt for the trt+Ising path of surface_code-4-yaml.
 
-The trt+Ising config in surface_code-4-yaml carries the REAL Ising d/T/Z model
-(H_csr.bin/O_csr.bin/priors.bin from the Ising repo's generate_test_data.py, in
-Ising detector order) but reads the cudaqx live measurement buffer. D_sparse.txt
+The Ising decoding project (https://github.com/NVIDIA/Ising-Decoding) provides a
+pretrained surface-code predecoder, and its generate_test_data.py exports a
+bundle of H_csr.bin/O_csr.bin/priors.bin in Ising detector order. Because
+surface_code-4-yaml reads the cudaqx live measurement buffer, D_sparse.txt
 bridges the two: one row per Ising detector, whose entries are cudaqx live-buffer
-measurement indices, so each row reproduces one cudaqx detector bit -- emitted in
-Ising's detector row order. With it, the cudaqx live measurement stream (385 bits
-for d7/T7) feeds Ising's H/O/priors correctly.
+measurement indices, so each row reproduces one cudaqx detector bit in Ising's
+detector row order. The cudaqx live measurement stream then feeds Ising's
+H/O/priors.
 
 Recipe (see surface_code-4-yaml-test.sh header for the full flow):
   1. In the Ising repo: generate_test_data.py --distance D --n-rounds T \
-       --basis Z --code-rotation O1   -> H_csr.bin/O_csr.bin/priors.bin bundle
+       --basis Z --code-rotation XV   -> H_csr.bin/O_csr.bin/priors.bin bundle
   2. Run surface_code-4-yaml --save_dem ... once; it prints cnot_schedX_flat /
      cnot_schedZ_flat lines. Save that stdout to a sched.txt.
-  3. python gen_dsparse.py D T Z XV sched.txt <bundle>/D_sparse.txt \
-       --ising-repo /path/to/ising/code
+  3. python gen_dsparse_from_memory_circuit.py D T Z XV sched.txt \
+       <bundle>/D_sparse.txt --ising-repo /path/to/ising/code
   4. Run surface_code-4-yaml --ising_bundle <bundle> ...
 
-Geometry fact (validated): cudaqx surface_code orientation XV == Ising
-code_rotation-string "XV" (first_bulk X, rotated_type V) under IDENTITY data and
-X-ancilla mapping; only the Z-ancillas are permuted. This script derives that
-Z-ancilla permutation by matching cudaqx Z-stabilizer supports to Ising hz rows,
-then translates Ising's detector->measurement map into the cudaqx buffer order.
+Geometry: cudaqx surface_code orientation XV corresponds to Ising code_rotation
+"XV" (first_bulk X, rotated_type V) under an identity data- and X-ancilla
+mapping; only the Z-ancillas are permuted. This script derives that Z-ancilla
+permutation by matching cudaqx Z-stabilizer supports to Ising hz rows, then
+translates Ising's detector->measurement map into the cudaqx buffer order.
 
 Usage:
-  gen_dsparse.py <distance> <n_rounds> <basis> <code_rotation> \
-      <sched.txt> <out D_sparse.txt> [--ising-repo PATH]
+  gen_dsparse_from_memory_circuit.py <distance> <n_rounds> <basis> \
+      <code_rotation> <sched.txt> <out D_sparse.txt> [--ising-repo PATH]
 
 Positional arguments:
   distance       Surface code distance D.

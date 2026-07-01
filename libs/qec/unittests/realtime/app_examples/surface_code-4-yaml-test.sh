@@ -23,19 +23,27 @@
 # --use-relay-bp) may follow arg 6.
 #
 # trt+Ising external-bundle path (NOT exercised by the AUTO ctest, which uses an
-# identity predecoder): to run the example against a REAL Ising d/T/Z predecoder,
-#   (i)  in the Ising repo, generate a bundle:
-#          python generate_test_data.py --distance D --n-rounds T --basis Z \
-#              --code-rotation O1     # writes H_csr.bin/O_csr.bin/priors.bin
-#   (ii) generate D_sparse.txt aligning Ising detectors to the cudaqx live
-#        buffer (run the app once with --save_dem to print cnot_schedX/Z, then):
-#          python gen_dsparse.py D T Z XV sched.txt <bundle>/D_sparse.txt \
-#              --ising-repo /path/to/ising/code
-#   (iii) run the example:
-#          surface_code-4-yaml --save_dem cfg.yml --decoder_type trt_decoder \
-#              --onnx_path predecoder_memory_dD_TT_Z.onnx \
-#              --ising_bundle <bundle> --distance D --num_rounds T ...
-#          surface_code-4-yaml --yaml cfg.yml --distance D --num_rounds T ...
+# identity predecoder): to run the example against an Ising d/T/Z predecoder, you
+# need the predecoder bundle (H_csr.bin/O_csr.bin/priors.bin/metadata.txt +
+# D_sparse.txt) and the ONNX model, neither of which ships in this repository.
+# Generate them locally from the Ising decoding project
+# (https://github.com/NVIDIA/Ising-Decoding):
+#   (i)   bundle matrices (writes H_csr.bin/O_csr.bin/priors.bin/metadata.txt
+#         into <bundle>):
+#           python generate_test_data.py --distance D --n-rounds T --basis Z \
+#               --code-rotation XV --output-dir <bundle>
+#   (ii)  D_sparse.txt aligning Ising detectors to the cudaqx live buffer (run
+#         the app once with --save_dem to print cnot_schedX/Z, then translate):
+#           surface_code-4-yaml --save_dem cfg.yml --decoder_type pymatching \
+#               --distance D --num_rounds T > sched.txt
+#           python gen_dsparse_from_memory_circuit.py D T Z XV sched.txt \
+#               <bundle>/D_sparse.txt --ising-repo /path/to/ising/code
+#   (iii) export the ONNX predecoder predecoder_memory_dD_TT_Z.onnx.
+#   (iv)  run the example (pass <bundle> to --ising_bundle):
+#           surface_code-4-yaml --save_dem cfg.yml --decoder_type trt_decoder \
+#               --onnx_path predecoder_memory_dD_TT_Z.onnx \
+#               --ising_bundle <bundle> --distance D --num_rounds T ...
+#           surface_code-4-yaml --yaml cfg.yml --distance D --num_rounds T ...
 
 set -euo pipefail
 
