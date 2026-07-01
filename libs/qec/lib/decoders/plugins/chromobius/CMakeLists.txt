@@ -15,17 +15,6 @@ set(MODULE_NAME "cudaq-qec-chromobius")
 
 include(FetchContent)
 
-FetchContent_Declare(
-  chromobius
-  GIT_REPOSITORY https://github.com/quantumlib/chromobius.git
-  GIT_TAG efae0325e4a8fc13be981434d38e499aa06b989f # v1.1.1
-)
-
-FetchContent_GetProperties(chromobius)
-if(NOT chromobius_POPULATED)
-  FetchContent_Populate(chromobius)
-endif()
-
 if(NOT TARGET libpymatching)
   message(FATAL_ERROR
     "Chromobius decoder plugin requires the libpymatching target. "
@@ -37,32 +26,13 @@ if(NOT TARGET libstim)
     "Chromobius decoder plugin requires the libstim target provided by PyMatching.")
 endif()
 
-file(STRINGS
-  ${chromobius_SOURCE_DIR}/file_lists/source_files_no_main
-  CHROMOBIUS_SOURCE_FILES
+FetchContent_Declare(
+  chromobius
+  GIT_REPOSITORY https://github.com/quantumlib/chromobius.git
+  GIT_TAG efae0325e4a8fc13be981434d38e499aa06b989f # v1.1.1
+  EXCLUDE_FROM_ALL  # don't add chromobius's own executables/tests to ALL
 )
-list(TRANSFORM CHROMOBIUS_SOURCE_FILES
-  PREPEND "${chromobius_SOURCE_DIR}/"
-)
-
-set(CHROMOBIUS_STATIC_TARGET cudaq-qec-chromobius-static)
-add_library(${CHROMOBIUS_STATIC_TARGET} STATIC ${CHROMOBIUS_SOURCE_FILES})
-set_target_properties(${CHROMOBIUS_STATIC_TARGET} PROPERTIES
-  POSITION_INDEPENDENT_CODE ON
-)
-target_include_directories(${CHROMOBIUS_STATIC_TARGET}
-  PUBLIC
-    ${chromobius_SOURCE_DIR}/src
-)
-target_link_libraries(${CHROMOBIUS_STATIC_TARGET}
-  PRIVATE
-    libstim
-    libpymatching
-)
-target_compile_options(${CHROMOBIUS_STATIC_TARGET}
-  PRIVATE
-    $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-O3 -Wall -Wpedantic -fno-strict-aliasing>
-)
+FetchContent_MakeAvailable(chromobius)
 
 project(${MODULE_NAME})
 
@@ -94,7 +64,7 @@ target_link_libraries(${MODULE_NAME}
   PRIVATE
     cudaq::cudaq-common
     cudaq-qec
-    ${CHROMOBIUS_STATIC_TARGET}
+    libchromobius
     libstim
     libpymatching
 )

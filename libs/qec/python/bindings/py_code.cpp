@@ -141,6 +141,29 @@ public:
 
       // Make sure we cast the function pointer correctly
       if (opKeyEnum == operation::stabilizer_round) {
+        // The kernel must return list[cudaq.measure_handle]; a list[bool]
+        // return discriminates measurements to bits and drops the record
+        // indices that cudaq.detector needs. Validate the lowered return type.
+        nb::object retTyObj = nb::hasattr(kernel, "return_type")
+                                  ? kernel.attr("return_type")
+                                  : nb::none();
+        bool returnsHandleVector = false;
+        if (!retTyObj.is_none()) {
+          nb::object cc =
+              nb::module_::import_("cudaq.mlir.dialects").attr("cc");
+          nb::object stdvecTy = cc.attr("StdvecType");
+          if (nb::cast<bool>(stdvecTy.attr("isinstance")(retTyObj))) {
+            nb::object eleTy = stdvecTy.attr("getElementType")(retTyObj);
+            returnsHandleVector = nb::cast<bool>(
+                cc.attr("MeasureHandleType").attr("isinstance")(eleTy));
+          }
+        }
+        if (!returnsHandleVector)
+          throw std::runtime_error(
+              "Invalid stabilizer_round kernel: it must return "
+              "list[cudaq.measure_handle]. Change the kernel's return "
+              "annotation to '-> list[cudaq.measure_handle]'.");
+
         encoding fptr = kernInterop->getDirectKernelCall<qkernel<
             std::vector<measure_result>(patch, const std::vector<std::size_t> &,
                                         const std::vector<std::size_t> &)>>();
