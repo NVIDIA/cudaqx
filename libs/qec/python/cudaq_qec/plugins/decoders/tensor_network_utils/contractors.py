@@ -7,11 +7,13 @@
 # ============================================================================ #
 from __future__ import annotations
 
+from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
 import opt_einsum as oe
+import torch
 from quimb.tensor import TensorNetwork
 
 
@@ -31,6 +33,40 @@ def contractor(subscripts: str,
         Any: The contracted tensor.
     """
     return oe.contract(subscripts, *tensors, optimize=optimize)
+
+
+def oe_torch_contractor(subscripts: str,
+                        tensors: list[torch.Tensor],
+                        optimize: str = "auto",
+                        **_: Any) -> Any:
+    """Perform einsum contraction using opt_einsum with torch tensors.
+
+    Execution follows the input tensor device, so CUDA tensors stay on
+    CUDA while still preserving torch autograd.
+    """
+    return oe.contract(subscripts, *tensors, optimize=optimize, backend="torch")
+
+
+_OE_EXPR_CACHE_MAXSIZE = 32
+_oe_expr_cache: OrderedDict[tuple, Any] = OrderedDict()
+
+
+def oe_torch_compiled_contractor(subscripts: str,
+                                 tensors: list[torch.Tensor],
+                                 optimize: str = "auto",
+                                 **_: Any) -> Any:
+    """Perform einsum contraction with a cached opt_einsum expression."""
+    shapes = tuple(t.shape for t in tensors)
+    key = (subscripts, shapes, str(optimize))
+    if key in _oe_expr_cache:
+        _oe_expr_cache.move_to_end(key)
+    else:
+        if len(_oe_expr_cache) >= _OE_EXPR_CACHE_MAXSIZE:
+            _oe_expr_cache.popitem(last=False)
+        _oe_expr_cache[key] = oe.contract_expression(subscripts,
+                                                     *shapes,
+                                                     optimize=optimize)
+    return _oe_expr_cache[key](*tensors, backend="torch")
 
 
 def cutn_contractor(subscripts: str,
@@ -109,6 +145,11 @@ class ContractorConfig:
     _allowed_configs: ClassVar[tuple[tuple[str, str, str], ...]] = (
         ("numpy", "numpy", "cpu"),
         ("torch", "torch", "cpu"),
+        ("torch", "torch", "cuda"),
+        ("oe_torch", "torch", "cpu"),
+        ("oe_torch", "torch", "cuda"),
+        ("oe_torch_compiled", "torch", "cpu"),
+        ("oe_torch_compiled", "torch", "cuda"),
         ("cutensornet", "numpy", "cuda"),
         ("cutensornet", "torch", "cuda"),
     )
@@ -116,6 +157,8 @@ class ContractorConfig:
     _contractors: ClassVar[dict[str, Callable]] = {
         "numpy": contractor,
         "torch": contractor,
+        "oe_torch": oe_torch_contractor,
+        "oe_torch_compiled": oe_torch_compiled_contractor,
         "cutensornet": cutn_contractor,
     }
 
