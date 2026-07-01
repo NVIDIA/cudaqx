@@ -92,16 +92,20 @@ decoder_pool::decoder_pool(std::vector<pool_decoder_spec> specs) {
 
 decoder_pool::~decoder_pool() = default; // worker dtors stop + join
 
+std::future<std::vector<decoder_result>>
+decoder_pool::submit(int id, std::vector<std::vector<float_t>> syndromes) {
+  auto it = by_id_.find(id);
+  if (it == by_id_.end())
+    throw std::runtime_error("decoder_pool::submit: no decoder with id " +
+                             std::to_string(id));
+  return it->second->submit(std::move(syndromes));
+}
+
 std::unordered_map<int, std::vector<decoder_result>> decoder_pool::decode_all(
     const std::unordered_map<int, std::vector<std::vector<float_t>>> &work) {
   std::unordered_map<int, std::future<std::vector<decoder_result>>> futures;
-  for (const auto &[id, syndromes] : work) {
-    auto it = by_id_.find(id);
-    if (it == by_id_.end())
-      throw std::runtime_error("decoder_pool::decode_all: no decoder with id " +
-                               std::to_string(id));
-    futures.emplace(id, it->second->submit(syndromes));
-  }
+  for (const auto &[id, syndromes] : work)
+    futures.emplace(id, submit(id, syndromes)); // copies chunk into the worker
   std::unordered_map<int, std::vector<decoder_result>> results;
   for (auto &[id, fut] : futures)
     results.emplace(id, fut.get()); // rethrows any worker exception

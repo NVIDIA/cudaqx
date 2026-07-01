@@ -8,6 +8,7 @@
 #pragma once
 
 #include "cudaq/qec/decoder.h"
+#include <future>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -40,6 +41,15 @@ public:
   /// no matching decoder, or rethrows a worker's decode exception.
   std::unordered_map<int, std::vector<decoder_result>> decode_all(
       const std::unordered_map<int, std::vector<std::vector<float_t>>> &work);
+
+  /// @brief Non-blocking streaming submit: enqueue `syndromes` on `id`'s pinned
+  /// worker and return immediately with a future for that chunk's results.
+  /// Submit chunks over time and consume the futures as they resolve to stream
+  /// per id, concurrently; a size-1 chunk streams a single syndrome. Throws if
+  /// `id` has no matching decoder; the future rethrows a worker decode
+  /// exception.
+  std::future<std::vector<decoder_result>>
+  submit(int id, std::vector<std::vector<float_t>> syndromes);
 
 private:
   struct worker;

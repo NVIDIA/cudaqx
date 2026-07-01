@@ -108,6 +108,65 @@ TEST(DecoderPool, NvQldpcRunsOnDistinctGpusWhenAvailable) {
   EXPECT_TRUE(res[1][0].converged);
 }
 
+// Streaming: submit returns immediately without waiting on any decode, so a
+// caller can keep several chunks in flight per id at once and drain the
+// futures as they resolve.
+TEST(DecoderPool, StreamsChunksPerIdConcurrently) {
+  using cudaq::qec::float_t;
+  std::vector<cudaq::qec::pool_decoder_spec> specs;
+  specs.push_back({7, "multi_error_lut", makeH(), {}});
+  specs.push_back({9, "multi_error_lut", makeH(), {}});
+  cudaq::qec::decoder_pool pool(std::move(specs));
+
+  std::vector<
+      std::pair<int, std::future<std::vector<cudaq::qec::decoder_result>>>>
+      in_flight;
+  for (int round = 0; round < 4; ++round) {
+    in_flight.emplace_back(7, pool.submit(7, {{0.1f, 0.1f}, {0.2f, 0.2f}}));
+    in_flight.emplace_back(9, pool.submit(9, {{0.3f, 0.3f}}));
+  }
+
+  std::unordered_map<int, size_t> counts;
+  for (auto &[id, fut] : in_flight)
+    counts[id] += fut.get().size();
+  EXPECT_EQ(counts[7], 8u);
+  EXPECT_EQ(counts[9], 4u);
+}
+
+// Placement across streamed chunks: the worker binds its GPU once at
+// construction, so every chunk it decodes over time (not just the first)
+// must land on that same device.
+TEST(DecoderPool, StreamingKeepsWorkerPinnedAcrossChunks) {
+  using cudaq::qec::float_t;
+  int n = 0;
+  cudaGetDeviceCount(&n);
+  if (n < 2)
+    GTEST_SKIP() << "needs >= 2 GPUs";
+  cudaSetDevice(0);
+  std::vector<cudaq::qec::pool_decoder_spec> specs;
+  cudaqx::heterogeneous_map o0;
+  o0.insert("cuda_device_id", 0);
+  cudaqx::heterogeneous_map o1;
+  o1.insert("cuda_device_id", 1);
+  specs.push_back({0, "device_probe_decoder", makeH(), o0});
+  specs.push_back({1, "device_probe_decoder", makeH(), o1});
+  cudaq::qec::decoder_pool pool(std::move(specs));
+
+  std::vector<
+      std::pair<int, std::future<std::vector<cudaq::qec::decoder_result>>>>
+      in_flight;
+  for (int round = 0; round < 4; ++round) {
+    in_flight.emplace_back(0, pool.submit(0, {{0.1f, 0.1f}}));
+    in_flight.emplace_back(1, pool.submit(1, {{0.1f, 0.1f}}));
+  }
+
+  for (auto &[id, fut] : in_flight) {
+    auto r = fut.get();
+    ASSERT_EQ(r.size(), 1u);
+    EXPECT_EQ(static_cast<int>(r[0].result[0]), id);
+  }
+}
+
 // Placement at construction time: each worker's decoder allocates GPU memory
 // in its constructor (like production GPU decoders), and the construct-time
 // device guard must already have it on the right device before any decode.
