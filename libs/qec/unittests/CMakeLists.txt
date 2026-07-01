@@ -51,7 +51,10 @@ add_dependencies(CUDAQXQECUnitTests test_decoders_yaml)
 gtest_discover_tests(test_decoders_yaml)
 
 add_executable(test_device_affinity test_device_affinity.cpp)
-target_link_libraries(test_device_affinity PRIVATE GTest::gtest_main cudaq-qec cudaq::cudaq)
+target_link_libraries(test_device_affinity PRIVATE GTest::gtest_main cudaq-qec cudaq::cudaq CUDA::cudart)
+target_include_directories(test_device_affinity PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../lib
+  ${CUDAToolkit_INCLUDE_DIRS})
 add_dependencies(CUDAQXQECUnitTests test_device_affinity)
 gtest_discover_tests(test_device_affinity)
 

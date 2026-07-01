@@ -13,6 +13,7 @@
 #include "cuda-qx/core/tensor.h"
 #include "sparse_binary_matrix.h"
 #include "cudaq/qec/detector_error_model.h"
+#include "cudaq/qec/device_affinity.h"
 #include <algorithm>
 #include <functional>
 #include <future>
@@ -250,6 +251,19 @@ public:
   /// Not intended for direct use by plugin authors.
   void set_hardware_params(const cudaqx::heterogeneous_map &params);
 
+  /// @brief Target NUMA node for this decoder (-1 = no binding).
+  int numa_node_id() const { return numa_node_id_; }
+
+  /// @brief Target CUDA device for this decoder (-1 = inherit caller's device).
+  int cuda_device_id() const { return cuda_device_id_; }
+
+  /// @brief Persistently bind the CALLING thread to this decoder's NUMA node
+  /// (and CUDA device). Call once from the thread that will own decode()/
+  /// enqueue for this decoder (e.g. a realtime worker). No restore.
+  /// @return the node bound to, or -1 if nothing was applied. Warns if a node
+  /// was requested (>= 0) but could not be honored.
+  int bind_current_thread();
+
   // -- Begin realtime decoding API --
 
   // Note: all of the current realtime decoding API is designed to be used with
@@ -366,6 +380,13 @@ protected:
   int cuda_device_id_ = -1;
   /// Target NUMA node for this decoder. -1 = no binding.
   int numa_node_id_ = -1;
+  /// Set once bind_current_thread() has pinned the owning thread, so the
+  /// synchronous decode_batch() guard can skip its redundant set/restore.
+  bool bound_persistently_ = false;
+  /// NUMA memory-policy mode for this decoder (default soft PREFERRED).
+  cudaq::qec::mempolicy_mode mempolicy_ = cudaq::qec::mempolicy_mode::preferred;
+  /// Explicit CPU cores for this decoder's owning thread (empty = use node cpuset).
+  std::vector<int> cpu_affinity_;
 
 private:
   decode_result_type result_type_ = decode_result_type::decode_to_errs;

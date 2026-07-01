@@ -11,6 +11,7 @@
 #include "cuda-qx/core/heterogeneous_map.h"
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace cudaq::qec {
 
@@ -38,5 +39,31 @@ inline int read_cuda_device_id(const cudaqx::heterogeneous_map &params) {
 inline int read_numa_node_id(const cudaqx::heterogeneous_map &params) {
   return detail::read_pin_key(params, "numa_node_id");
 }
+
+/// @brief Public NUMA memory-policy selector. preferred = soft; bind = strict.
+enum class mempolicy_mode { preferred, bind };
+
+/// @brief Read "mempolicy": "bind"->bind, "preferred"/absent->preferred, else throw.
+inline mempolicy_mode read_mempolicy(const cudaqx::heterogeneous_map &params) {
+  if (!params.contains("mempolicy"))
+    return mempolicy_mode::preferred;
+  const std::string v = params.get<std::string>("mempolicy");
+  if (v == "bind")
+    return mempolicy_mode::bind;
+  if (v == "preferred")
+    return mempolicy_mode::preferred;
+  throw std::runtime_error("mempolicy must be \"preferred\" or \"bind\" (got \"" + v + "\")");
+}
+
+/// @brief Read "cpu_affinity": a list of CPU core ids. Absent -> empty (no override).
+inline std::vector<int> read_cpu_affinity(const cudaqx::heterogeneous_map &params) {
+  if (!params.contains("cpu_affinity"))
+    return {};
+  return params.get<std::vector<int>>("cpu_affinity");
+}
+
+/// @brief NUMA node local to a CUDA device (via PCIe locality), or -1 if the
+/// device id is negative or the topology can't be resolved. Defined in decoder.cpp.
+int numa_node_for_cuda_device(int cuda_device_id);
 
 } // namespace cudaq::qec

@@ -14,11 +14,14 @@
 #include "cudaq/qec/version.h"
 #include "cudaq/runtime/logger/logger.h"
 #include <cassert>
+#include <cctype>
+#include <cstring>
 #include <cuda_runtime.h>
 #include <dlfcn.h>
 #include <filesystem>
 #include <vector>
 #if defined(__linux__)
+#include <cerrno>
 #include <fstream>
 #include <linux/mempolicy.h>
 #include <sched.h>
@@ -26,8 +29,16 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 #endif
+#include "hardware_affinity.h"
 
 namespace {
+
+inline cudaq::qec::detail_affinity::mempolicy_mode
+to_affinity_mode(cudaq::qec::mempolicy_mode m) {
+  return m == cudaq::qec::mempolicy_mode::bind
+             ? cudaq::qec::detail_affinity::mempolicy_mode::bind
+             : cudaq::qec::detail_affinity::mempolicy_mode::preferred;
+}
 
 // RAII: sets the calling thread's CUDA current device, restores on destruction.
 // target < 0 = no-op. Throws std::runtime_error if target is out of range.
@@ -43,9 +54,12 @@ struct CudaDeviceGuard {
       throw std::runtime_error(
           "cuda_device_id " + std::to_string(target) +
           " out of range (device_count=" + std::to_string(count) + ")");
-    cudaGetDevice(&prev_);
+    if (cudaGetDevice(&prev_) != cudaSuccess) { prev_ = -1; return; } // can't safely switch
     if (prev_ != target) {
-      cudaSetDevice(target);
+      cudaError_t e = cudaSetDevice(target);
+      if (e != cudaSuccess)
+        throw std::runtime_error("CudaDeviceGuard: cudaSetDevice(" + std::to_string(target) +
+            ") failed: " + cudaGetErrorString(e));
       active_ = true;
     }
   }
@@ -58,73 +72,38 @@ struct CudaDeviceGuard {
 };
 
 #if defined(__linux__)
-// Parse /sys/devices/system/node/node<N>/cpulist e.g. "0-7,16-23".
-// Returns false if the file is missing or empty.
-static bool build_node_cpuset(int node, cpu_set_t &out) {
-  std::ifstream f("/sys/devices/system/node/node" + std::to_string(node) +
-                  "/cpulist");
-  if (!f.is_open())
-    return false;
-  std::string list;
-  std::getline(f, list);
-  if (list.empty())
-    return false;
-  std::stringstream ss(list);
-  std::string range;
-  bool any = false;
-  while (std::getline(ss, range, ',')) {
-    auto dash = range.find('-');
-    int lo = std::stoi(range.substr(0, dash));
-    int hi =
-        (dash == std::string::npos) ? lo : std::stoi(range.substr(dash + 1));
-    for (int c = lo; c <= hi; ++c) {
-      if (c < CPU_SETSIZE) { // guard against OOB on >1024-CPU machines
-        CPU_SET(c, &out);
-        any = true;
-      }
-    }
-  }
-  return any;
-}
-
-// RAII: binds the calling thread's CPU affinity and memory policy to a NUMA
-// node, restores on destruction. node < 0 = no-op.
-// Uses raw Linux syscalls -- no libnuma dependency.
+// RAII: binds the calling thread to a NUMA node and restores on destruction.
+// node < 0 = no-op. Uses the shared persistent-bind primitive for the set half
+// and remembers prior affinity for the restore.
 struct NumaGuard {
-  bool mempol_set_ = false;
   bool affinity_set_ = false;
   bool has_prev_affinity_ = false;
+  bool mempol_set_ = false;
   cpu_set_t prev_set_{};
 
-  explicit NumaGuard(int node) {
+  explicit NumaGuard(int node, cudaq::qec::detail_affinity::mempolicy_mode mode =
+                                    cudaq::qec::detail_affinity::mempolicy_mode::preferred) {
     if (node < 0)
       return;
     CPU_ZERO(&prev_set_);
-    if (sched_getaffinity(0, sizeof(prev_set_), &prev_set_) == 0)
-      has_prev_affinity_ = true;
-
-    cpu_set_t node_set;
-    CPU_ZERO(&node_set);
-    // Only pin CPU affinity when we can restore it; avoids permanent pinning
-    // if sched_getaffinity failed (e.g., container with locked cpuset).
-    if (has_prev_affinity_ && build_node_cpuset(node, node_set)) {
-      if (sched_setaffinity(0, sizeof(node_set), &node_set) == 0)
-        affinity_set_ = true;
-    }
-
-    if (node < static_cast<int>(sizeof(unsigned long) * 8)) {
-      unsigned long nodemask = 1UL << node;
-      if (syscall(SYS_set_mempolicy, MPOL_BIND, &nodemask,
-                  static_cast<unsigned long>(sizeof(nodemask) * 8)) == 0)
-        mempol_set_ = true;
-    }
+    has_prev_affinity_ =
+        (sched_getaffinity(0, sizeof(prev_set_), &prev_set_) == 0);
+    affinity_set_ = has_prev_affinity_;
+    mempol_set_ = (node < static_cast<int>(sizeof(unsigned long) * 8));
+    cudaq::qec::detail_affinity::bind_this_thread_to_numa_node(node, mode);
   }
 
   ~NumaGuard() {
     if (mempol_set_)
-      syscall(SYS_set_mempolicy, MPOL_DEFAULT, nullptr, 0UL);
-    if (affinity_set_)
-      sched_setaffinity(0, sizeof(prev_set_), &prev_set_);
+      if (syscall(SYS_set_mempolicy, MPOL_DEFAULT, nullptr, 0UL) != 0)
+        cudaq::qec::detail_affinity::affinity_warn(
+            "NumaGuard restore: failed to reset thread mempolicy: " +
+            std::string(std::strerror(errno)) + "; thread may remain bound");
+    if (affinity_set_ && has_prev_affinity_)
+      if (sched_setaffinity(0, sizeof(prev_set_), &prev_set_) != 0)
+        cudaq::qec::detail_affinity::affinity_warn(
+            "NumaGuard restore: failed to reset thread affinity: " +
+            std::string(std::strerror(errno)) + "; thread may remain pinned");
   }
 
   NumaGuard(const NumaGuard &) = delete;
@@ -132,7 +111,9 @@ struct NumaGuard {
 };
 #else
 struct NumaGuard {
-  explicit NumaGuard(int node) {
+  explicit NumaGuard(int node, cudaq::qec::detail_affinity::mempolicy_mode mode =
+                                    cudaq::qec::detail_affinity::mempolicy_mode::preferred) {
+    (void)mode;
     if (node < 0)
       return;
     static bool warned = false;
@@ -217,9 +198,88 @@ decoder::decoder(cudaq::qec::sparse_binary_matrix H)
     pimpl->should_log = ch[0] == '1' || ch[0] == 'y' || ch[0] == 'Y';
 }
 
+int numa_node_for_cuda_device(int cuda_device_id) {
+  if (cuda_device_id < 0)
+    return -1;
+#if defined(__linux__)
+  char busid[32] = {0};
+  if (cudaDeviceGetPCIBusId(busid, sizeof(busid), cuda_device_id) != cudaSuccess) {
+    cudaq::qec::detail_affinity::affinity_info(
+        "numa_node_id auto-derive for cuda_device_id " +
+        std::to_string(cuda_device_id) +
+        " could not read the PCI bus id; NUMA binding skipped");
+    return -1;
+  }
+  for (char *c = busid; *c; ++c)
+    *c = static_cast<char>(std::tolower(static_cast<unsigned char>(*c)));
+  std::ifstream f(std::string("/sys/bus/pci/devices/") + busid + "/numa_node");
+  int node = -1;
+  if (!f.is_open() || !(f >> node) || node < 0) {
+    cudaq::qec::detail_affinity::affinity_info(
+        "numa_node_id auto-derive for cuda_device_id " +
+        std::to_string(cuda_device_id) +
+        " resolved to no node (single-node host or unresolved topology); "
+        "NUMA binding skipped");
+    return -1;
+  }
+  return node;
+#else
+  return -1;
+#endif
+}
+
 void decoder::set_hardware_params(const cudaqx::heterogeneous_map &params) {
   cuda_device_id_ = cudaq::qec::read_cuda_device_id(params);
   numa_node_id_ = cudaq::qec::read_numa_node_id(params);
+  mempolicy_ = cudaq::qec::read_mempolicy(params);
+  cpu_affinity_ = cudaq::qec::read_cpu_affinity(params);
+  // Soft-derive: user pinned a GPU but not a node -> use the GPU's node (or -1 if unresolved).
+  if (numa_node_id_ < 0 && cuda_device_id_ >= 0)
+    numa_node_id_ = numa_node_for_cuda_device(cuda_device_id_);
+}
+
+int decoder::bind_current_thread() {
+  if (cuda_device_id_ >= 0) {
+    // Persistent set on this thread (CudaDeviceGuard restores on scope exit, so
+    // set directly here and let it stick).
+    int count = 0;
+    if (cudaGetDeviceCount(&count) != cudaSuccess || cuda_device_id_ >= count)
+      throw std::runtime_error("cuda_device_id " + std::to_string(cuda_device_id_) +
+          " out of range or CUDA unavailable in bind_current_thread");
+    cudaError_t e = cudaSetDevice(cuda_device_id_);
+    if (e != cudaSuccess)
+      throw std::runtime_error("bind_current_thread: cudaSetDevice(" +
+          std::to_string(cuda_device_id_) + ") failed: " + cudaGetErrorString(e));
+  }
+  cudaq::qec::detail_affinity::bind_this_thread_to_numa_node(
+      numa_node_id_, to_affinity_mode(mempolicy_));
+  bound_persistently_ = true;
+  if (numa_node_id_ >= 0) {
+    // Best-effort confirmation: warn if the calling thread is not actually
+    // running on the requested node's CPUs (e.g. locked cpuset in a container).
+#if defined(__linux__)
+    cpu_set_t want, have;
+    CPU_ZERO(&want);
+    CPU_ZERO(&have);
+    if (cudaq::qec::detail_affinity::build_node_cpuset(numa_node_id_, want) &&
+        sched_getaffinity(0, sizeof(have), &have) == 0) {
+      bool on_node = false;
+      for (int c = 0; c < CPU_SETSIZE; ++c)
+        if (CPU_ISSET(c, &have) && CPU_ISSET(c, &want)) {
+          on_node = true;
+          break;
+        }
+      if (!on_node)
+        cudaq::qec::detail_affinity::affinity_warn(
+            "bind_current_thread: numa_node_id " +
+            std::to_string(numa_node_id_) +
+            " requested but the calling thread could not be pinned to it");
+    }
+#endif
+  }
+  if (!cpu_affinity_.empty())
+    cudaq::qec::detail_affinity::set_thread_cpu_affinity(cpu_affinity_);
+  return numa_node_id_;
 }
 
 // Provide a trivial implementation of for tensor<uint8_t> decode call. Child
@@ -244,8 +304,11 @@ std::vector<decoder_result>
 decoder::decode_batch(const std::vector<std::vector<float_t>> &syndrome) {
   // Apply affinity once for the whole batch (not per-syndrome) to avoid
   // repeated syscall overhead on the hot path.
-  CudaDeviceGuard dev(cuda_device_id_);
-  NumaGuard numa(numa_node_id_);
+  // If the caller already bound this thread via bind_current_thread(), the
+  // per-call guards are redundant set/restore syscalls — skip them.
+  CudaDeviceGuard dev(bound_persistently_ ? -1 : cuda_device_id_);
+  NumaGuard numa(bound_persistently_ ? -1 : numa_node_id_,
+                to_affinity_mode(mempolicy_));
   std::vector<decoder_result> result;
   result.reserve(syndrome.size());
   for (auto &s : syndrome)
@@ -266,9 +329,11 @@ decoder::decode_async(const std::vector<float_t> &syndrome) {
   // the future resolves.
   const int cuda_id = cuda_device_id_;
   const int numa_id = numa_node_id_;
-  return std::async(std::launch::async, [this, syndrome, cuda_id, numa_id] {
+  const cudaq::qec::mempolicy_mode mempolicy = mempolicy_;
+  return std::async(std::launch::async, [this, syndrome, cuda_id, numa_id,
+                                         mempolicy] {
     CudaDeviceGuard dev(cuda_id);
-    NumaGuard numa(numa_id);
+    NumaGuard numa(numa_id, to_affinity_mode(mempolicy));
     return this->decode(syndrome);
   });
 }
@@ -287,8 +352,12 @@ decoder::get(const std::string &name, const decoder_init &init,
   // Guards during construction so allocations land on the right hardware.
   // Restored before this function returns; decode-time affinity is re-applied
   // per call in decode_batch() and decode_async().
-  CudaDeviceGuard ctor_dev(cudaq::qec::read_cuda_device_id(param_map));
-  NumaGuard ctor_numa(cudaq::qec::read_numa_node_id(param_map));
+  const int dev = cudaq::qec::read_cuda_device_id(param_map);
+  int node = cudaq::qec::read_numa_node_id(param_map);
+  if (node < 0 && dev >= 0)
+    node = numa_node_for_cuda_device(dev);
+  CudaDeviceGuard ctor_dev(dev);
+  NumaGuard ctor_numa(node); // preferred mode at construction
   auto d = iter->second(init, param_map);
   d->set_hardware_params(param_map);
   return d;
