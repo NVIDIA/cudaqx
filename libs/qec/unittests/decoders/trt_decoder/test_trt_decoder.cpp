@@ -8,6 +8,7 @@
 
 #include "trt_test_data.h"
 #include "cudaq/qec/decoder.h"
+#include "cudaq/qec/decoder_pool.h"
 #include "cudaq/qec/trt_decoder_internal.h"
 #include <chrono>
 #include <cmath>
@@ -797,4 +798,90 @@ TEST_F(TRTDecoderTest, CudaDeviceId_DecodeAsyncOnGpu1) {
   float error = std::abs(trt_output - expected_output);
   EXPECT_LT(error, 1e-4f) << "GPU-1 decode differs from expected: got "
                           << trt_output << ", expected " << expected_output;
+}
+
+// Composition check: two real trt decoders, each configured for a separate GPU,
+// run concurrently through the pool and both converge to the correct output.
+// This exercises a heavy production decoder end-to-end (not a probe). The
+// precise per-worker device placement is asserted by the eager-probe pool test;
+// here the value is that a real decoder composes with the pool and stays
+// correct.
+TEST_F(TRTDecoderTest, PoolRunsTwoTrtDecodersConcurrently) {
+  if (!gpu_available())
+    GTEST_SKIP() << "No CUDA GPU available";
+  int count = 0;
+  cudaGetDeviceCount(&count);
+  if (count < 2)
+    GTEST_SKIP() << "needs >= 2 GPUs";
+  std::string onnx_path = get_onnx_asset_path();
+  if (!std::filesystem::exists(onnx_path))
+    GTEST_SKIP() << "ONNX model not found: " << onnx_path;
+
+  cudaSetDevice(0); // calling thread stays on the default device
+
+  std::size_t num_detectors = NUM_DETECTORS;
+  cudaqx::tensor<uint8_t> H_mat({num_detectors, num_detectors});
+  for (std::size_t i = 0; i < num_detectors; ++i)
+    H_mat.at({i, i}) = 1;
+
+  cudaqx::heterogeneous_map params0;
+  params0.insert("onnx_load_path", onnx_path);
+  params0.insert("cuda_device_id", 0);
+  cudaqx::heterogeneous_map params1;
+  params1.insert("onnx_load_path", onnx_path);
+  params1.insert("cuda_device_id", 1);
+
+  std::vector<cudaq::qec::pool_decoder_spec> specs;
+  specs.push_back({0, "trt_decoder", H_mat, params0});
+  specs.push_back({1, "trt_decoder", H_mat, params1});
+
+  // Informational only: engine memory landing on each assigned GPU is
+  // reported for a human to see, but deltas are noisy so we don't assert.
+  auto free_bytes = [](int device) -> std::size_t {
+    int prev = 0;
+    cudaGetDevice(&prev);
+    cudaSetDevice(device);
+    std::size_t free = 0, total = 0;
+    cudaMemGetInfo(&free, &total);
+    cudaSetDevice(prev);
+    return free;
+  };
+  std::size_t free0_before = free_bytes(0);
+  std::size_t free1_before = free_bytes(1);
+
+  std::unique_ptr<cudaq::qec::decoder_pool> pool;
+  try {
+    pool = std::make_unique<cudaq::qec::decoder_pool>(std::move(specs));
+  } catch (const std::exception &e) {
+    GTEST_SKIP() << "TRT construction failed: " << e.what();
+  }
+
+  std::size_t free0_after = free_bytes(0);
+  std::size_t free1_after = free_bytes(1);
+  std::cout << "GPU 0 free-memory drop: "
+            << (free0_before - free0_after) / (1024 * 1024) << " MiB\n";
+  std::cout << "GPU 1 free-memory drop: "
+            << (free1_before - free1_after) / (1024 * 1024) << " MiB\n";
+
+  std::vector<cudaq::qec::float_t> syndrome(TEST_INPUTS[0].begin(),
+                                            TEST_INPUTS[0].end());
+  std::unordered_map<int, std::vector<std::vector<cudaq::qec::float_t>>> work;
+  work[0] = {syndrome};
+  work[1] = {syndrome};
+  auto res = pool->decode_all(work);
+
+  ASSERT_FALSE(res[0].empty());
+  ASSERT_FALSE(res[1].empty());
+  EXPECT_TRUE(res[0][0].converged);
+  EXPECT_TRUE(res[1][0].converged);
+  ASSERT_FALSE(res[0][0].result.empty());
+  ASSERT_FALSE(res[1][0].result.empty());
+
+  float expected_output = TEST_OUTPUTS[0][0];
+  EXPECT_LT(std::abs(res[0][0].result[0] - expected_output), 1e-4f)
+      << "GPU-0 pool decode differs from expected: got " << res[0][0].result[0]
+      << ", expected " << expected_output;
+  EXPECT_LT(std::abs(res[1][0].result[0] - expected_output), 1e-4f)
+      << "GPU-1 pool decode differs from expected: got " << res[1][0].result[0]
+      << ", expected " << expected_output;
 }

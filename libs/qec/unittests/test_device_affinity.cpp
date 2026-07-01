@@ -74,7 +74,9 @@ TEST(HardwareAffinity, NumaNode64ThrowsOnMempolicyBind) {
 }
 TEST(HardwareAffinity, CpuAffinityPinsToExactCores) {
   namespace da = cudaq::qec::detail_affinity;
-  cpu_set_t saved; CPU_ZERO(&saved); sched_getaffinity(0, sizeof(saved), &saved);
+  cpu_set_t saved;
+  CPU_ZERO(&saved);
+  sched_getaffinity(0, sizeof(saved), &saved);
   da::set_thread_cpu_affinity({0, 2});
   auto cpus = da::current_thread_cpuset();
   EXPECT_EQ(cpus, (std::vector<int>{0, 2}));
@@ -82,33 +84,49 @@ TEST(HardwareAffinity, CpuAffinityPinsToExactCores) {
 }
 TEST(HardwareAffinity, CpuAffinityEmptyIsNoop) {
   namespace da = cudaq::qec::detail_affinity;
-  cpu_set_t before; CPU_ZERO(&before); sched_getaffinity(0, sizeof(before), &before);
+  cpu_set_t before;
+  CPU_ZERO(&before);
+  sched_getaffinity(0, sizeof(before), &before);
   da::set_thread_cpu_affinity({});
-  cpu_set_t after; CPU_ZERO(&after); sched_getaffinity(0, sizeof(after), &after);
+  cpu_set_t after;
+  CPU_ZERO(&after);
+  sched_getaffinity(0, sizeof(after), &after);
   EXPECT_TRUE(CPU_EQUAL(&before, &after));
 }
 TEST(HardwareAffinity, CpuAffinityOutOfRangeCoreThrows) {
   namespace da = cudaq::qec::detail_affinity;
-  EXPECT_THROW(da::set_thread_cpu_affinity({CPU_SETSIZE}), std::invalid_argument);
+  EXPECT_THROW(da::set_thread_cpu_affinity({CPU_SETSIZE}),
+               std::invalid_argument);
   EXPECT_THROW(da::set_thread_cpu_affinity({-1}), std::invalid_argument);
 }
 TEST(HardwareAffinity, BindThreadPinsAffinityToNodeCpus) {
   namespace da = cudaq::qec::detail_affinity;
-  cpu_set_t node0; CPU_ZERO(&node0);
-  if (!da::build_node_cpuset(0, node0)) GTEST_SKIP() << "no node0 cpulist";
-  cpu_set_t saved; CPU_ZERO(&saved); sched_getaffinity(0, sizeof(saved), &saved);
+  cpu_set_t node0;
+  CPU_ZERO(&node0);
+  if (!da::build_node_cpuset(0, node0))
+    GTEST_SKIP() << "no node0 cpulist";
+  cpu_set_t saved;
+  CPU_ZERO(&saved);
+  sched_getaffinity(0, sizeof(saved), &saved);
   da::bind_this_thread_to_numa_node(0);
-  cpu_set_t have; CPU_ZERO(&have); sched_getaffinity(0, sizeof(have), &have);
+  cpu_set_t have;
+  CPU_ZERO(&have);
+  sched_getaffinity(0, sizeof(have), &have);
   for (int c = 0; c < CPU_SETSIZE; ++c)
-    if (CPU_ISSET(c, &have)) EXPECT_TRUE(CPU_ISSET(c, &node0)) << "cpu " << c << " not on node 0";
+    if (CPU_ISSET(c, &have))
+      EXPECT_TRUE(CPU_ISSET(c, &node0)) << "cpu " << c << " not on node 0";
   sched_setaffinity(0, sizeof(saved), &saved);
   syscall(SYS_set_mempolicy, MPOL_DEFAULT, nullptr, 0UL);
 }
 TEST(HardwareAffinity, NegativeNodeIsNoop) {
   namespace da = cudaq::qec::detail_affinity;
-  cpu_set_t before; CPU_ZERO(&before); sched_getaffinity(0, sizeof(before), &before);
+  cpu_set_t before;
+  CPU_ZERO(&before);
+  sched_getaffinity(0, sizeof(before), &before);
   da::bind_this_thread_to_numa_node(-1);
-  cpu_set_t after; CPU_ZERO(&after); sched_getaffinity(0, sizeof(after), &after);
+  cpu_set_t after;
+  CPU_ZERO(&after);
+  sched_getaffinity(0, sizeof(after), &after);
   EXPECT_TRUE(CPU_EQUAL(&before, &after));
   EXPECT_EQ(da::current_thread_mempolicy_mode(), MPOL_DEFAULT);
 }
@@ -117,18 +135,22 @@ TEST(HardwareAffinity, BindRegionSetsPolicyOnBuffer) {
   const size_t bytes = 4096;
   void *p = std::calloc(1, bytes);
   ASSERT_NE(p, nullptr);
-  da::bind_region_to_numa_node(p, bytes, 0);            // preferred, node 0
+  da::bind_region_to_numa_node(p, bytes, 0); // preferred, node 0
   int mode = -1;
-  long rc = syscall(SYS_get_mempolicy, &mode, nullptr, 0UL, p, 1UL /*MPOL_F_ADDR*/);
+  long rc =
+      syscall(SYS_get_mempolicy, &mode, nullptr, 0UL, p, 1UL /*MPOL_F_ADDR*/);
   if (rc == 0)
     EXPECT_TRUE(mode == MPOL_PREFERRED || mode == MPOL_DEFAULT)
-        << "region policy after preferred-bind should be PREFERRED (or DEFAULT if unsupported)";
-  da::bind_region_to_numa_node(p, bytes, -1);           // negative node -> no-op, no crash
+        << "region policy after preferred-bind should be PREFERRED (or DEFAULT "
+           "if unsupported)";
+  da::bind_region_to_numa_node(p, bytes,
+                               -1); // negative node -> no-op, no crash
   std::free(p);
 }
 TEST(HardwareAffinity, BindRegionNode64Throws) {
   namespace da = cudaq::qec::detail_affinity;
-  void *p = std::calloc(1, 4096); ASSERT_NE(p, nullptr);
+  void *p = std::calloc(1, 4096);
+  ASSERT_NE(p, nullptr);
   EXPECT_THROW(da::bind_region_to_numa_node(p, 4096, 64), std::runtime_error);
   std::free(p);
 }

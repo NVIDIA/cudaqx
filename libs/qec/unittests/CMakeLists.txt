@@ -40,6 +40,12 @@ target_include_directories(test_decoders PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
 add_dependencies(CUDAQXQECUnitTests test_decoders)
 gtest_discover_tests(test_decoders)
 
+add_executable(test_decoder_pool test_decoder_pool.cpp decoders/sample_decoder.cpp)
+target_link_libraries(test_decoder_pool PRIVATE GTest::gtest_main cudaq-qec cudaq::cudaq libstim CUDA::cudart)
+target_include_directories(test_decoder_pool PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+add_dependencies(CUDAQXQECUnitTests test_decoder_pool)
+gtest_discover_tests(test_decoder_pool)
+
 add_executable(test_decoders_yaml test_decoders_yaml.cpp decoders/sample_decoder.cpp)
 target_link_libraries(test_decoders_yaml PRIVATE
   GTest::gtest_main

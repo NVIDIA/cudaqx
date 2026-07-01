@@ -19,6 +19,7 @@
 #include <cuda_runtime.h>
 #include <dlfcn.h>
 #include <filesystem>
+#include <thread>
 #include <vector>
 #if defined(__linux__)
 #include <cerrno>
@@ -54,12 +55,16 @@ struct CudaDeviceGuard {
       throw std::runtime_error(
           "cuda_device_id " + std::to_string(target) +
           " out of range (device_count=" + std::to_string(count) + ")");
-    if (cudaGetDevice(&prev_) != cudaSuccess) { prev_ = -1; return; } // can't safely switch
+    if (cudaGetDevice(&prev_) != cudaSuccess) {
+      prev_ = -1;
+      return;
+    } // can't safely switch
     if (prev_ != target) {
       cudaError_t e = cudaSetDevice(target);
       if (e != cudaSuccess)
-        throw std::runtime_error("CudaDeviceGuard: cudaSetDevice(" + std::to_string(target) +
-            ") failed: " + cudaGetErrorString(e));
+        throw std::runtime_error("CudaDeviceGuard: cudaSetDevice(" +
+                                 std::to_string(target) +
+                                 ") failed: " + cudaGetErrorString(e));
       active_ = true;
     }
   }
@@ -81,8 +86,9 @@ struct NumaGuard {
   bool mempol_set_ = false;
   cpu_set_t prev_set_{};
 
-  explicit NumaGuard(int node, cudaq::qec::detail_affinity::mempolicy_mode mode =
-                                    cudaq::qec::detail_affinity::mempolicy_mode::preferred) {
+  explicit NumaGuard(
+      int node, cudaq::qec::detail_affinity::mempolicy_mode mode =
+                    cudaq::qec::detail_affinity::mempolicy_mode::preferred) {
     if (node < 0)
       return;
     CPU_ZERO(&prev_set_);
@@ -111,8 +117,9 @@ struct NumaGuard {
 };
 #else
 struct NumaGuard {
-  explicit NumaGuard(int node, cudaq::qec::detail_affinity::mempolicy_mode mode =
-                                    cudaq::qec::detail_affinity::mempolicy_mode::preferred) {
+  explicit NumaGuard(
+      int node, cudaq::qec::detail_affinity::mempolicy_mode mode =
+                    cudaq::qec::detail_affinity::mempolicy_mode::preferred) {
     (void)mode;
     if (node < 0)
       return;
@@ -203,7 +210,8 @@ int numa_node_for_cuda_device(int cuda_device_id) {
     return -1;
 #if defined(__linux__)
   char busid[32] = {0};
-  if (cudaDeviceGetPCIBusId(busid, sizeof(busid), cuda_device_id) != cudaSuccess) {
+  if (cudaDeviceGetPCIBusId(busid, sizeof(busid), cuda_device_id) !=
+      cudaSuccess) {
     cudaq::qec::detail_affinity::affinity_info(
         "numa_node_id auto-derive for cuda_device_id " +
         std::to_string(cuda_device_id) +
@@ -233,7 +241,8 @@ void decoder::set_hardware_params(const cudaqx::heterogeneous_map &params) {
   numa_node_id_ = cudaq::qec::read_numa_node_id(params);
   mempolicy_ = cudaq::qec::read_mempolicy(params);
   cpu_affinity_ = cudaq::qec::read_cpu_affinity(params);
-  // Soft-derive: user pinned a GPU but not a node -> use the GPU's node (or -1 if unresolved).
+  // Soft-derive: user pinned a GPU but not a node -> use the GPU's node (or -1
+  // if unresolved).
   if (numa_node_id_ < 0 && cuda_device_id_ >= 0)
     numa_node_id_ = numa_node_for_cuda_device(cuda_device_id_);
 }
@@ -244,12 +253,14 @@ int decoder::bind_current_thread() {
     // set directly here and let it stick).
     int count = 0;
     if (cudaGetDeviceCount(&count) != cudaSuccess || cuda_device_id_ >= count)
-      throw std::runtime_error("cuda_device_id " + std::to_string(cuda_device_id_) +
+      throw std::runtime_error(
+          "cuda_device_id " + std::to_string(cuda_device_id_) +
           " out of range or CUDA unavailable in bind_current_thread");
     cudaError_t e = cudaSetDevice(cuda_device_id_);
     if (e != cudaSuccess)
       throw std::runtime_error("bind_current_thread: cudaSetDevice(" +
-          std::to_string(cuda_device_id_) + ") failed: " + cudaGetErrorString(e));
+                               std::to_string(cuda_device_id_) +
+                               ") failed: " + cudaGetErrorString(e));
   }
   cudaq::qec::detail_affinity::bind_this_thread_to_numa_node(
       numa_node_id_, to_affinity_mode(mempolicy_));
@@ -282,9 +293,42 @@ int decoder::bind_current_thread() {
   return numa_node_id_;
 }
 
+decoder_result
+decoder::decode_on_pinned_thread(const std::vector<float_t> &syndrome) {
+  decoder_result result;
+  std::exception_ptr err;
+  std::thread worker([&] {
+    try {
+      bind_current_thread();
+      result = decode(syndrome);
+    } catch (...) {
+      err = std::current_exception();
+    }
+  });
+  worker.join();
+  if (err)
+    std::rethrow_exception(err); // surface an OOB-device throw to the caller
+  return result;
+}
+
+void decoder::warn_if_device_mismatch() {
+  if (cuda_device_id_ < 0 || device_mismatch_warned_)
+    return;
+  int current = -1;
+  if (cudaGetDevice(&current) == cudaSuccess && current != cuda_device_id_) {
+    cudaq::qec::detail_affinity::affinity_warn(
+        "decoder pinned to cuda_device_id " + std::to_string(cuda_device_id_) +
+        " but decoding on current device " + std::to_string(current) +
+        "; call bind_current_thread() on this thread, or use "
+        "decode_batch/decode_async");
+    device_mismatch_warned_ = true;
+  }
+}
+
 // Provide a trivial implementation of for tensor<uint8_t> decode call. Child
 // classes should override this if they never want to pass through floats.
 decoder_result decoder::decode(const cudaqx::tensor<uint8_t> &syndrome) {
+  warn_if_device_mismatch();
   // Check tensor is of order-1
   // If order >1, we could check that other modes are of dim = 1 such that
   // n x 1, or 1 x n tensors are still valid.
@@ -308,7 +352,7 @@ decoder::decode_batch(const std::vector<std::vector<float_t>> &syndrome) {
   // per-call guards are redundant set/restore syscalls — skip them.
   CudaDeviceGuard dev(bound_persistently_ ? -1 : cuda_device_id_);
   NumaGuard numa(bound_persistently_ ? -1 : numa_node_id_,
-                to_affinity_mode(mempolicy_));
+                 to_affinity_mode(mempolicy_));
   std::vector<decoder_result> result;
   result.reserve(syndrome.size());
   for (auto &s : syndrome)
@@ -330,12 +374,12 @@ decoder::decode_async(const std::vector<float_t> &syndrome) {
   const int cuda_id = cuda_device_id_;
   const int numa_id = numa_node_id_;
   const cudaq::qec::mempolicy_mode mempolicy = mempolicy_;
-  return std::async(std::launch::async, [this, syndrome, cuda_id, numa_id,
-                                         mempolicy] {
-    CudaDeviceGuard dev(cuda_id);
-    NumaGuard numa(numa_id, to_affinity_mode(mempolicy));
-    return this->decode(syndrome);
-  });
+  return std::async(std::launch::async,
+                    [this, syndrome, cuda_id, numa_id, mempolicy] {
+                      CudaDeviceGuard dev(cuda_id);
+                      NumaGuard numa(numa_id, to_affinity_mode(mempolicy));
+                      return this->decode(syndrome);
+                    });
 }
 
 std::unique_ptr<decoder>
@@ -578,6 +622,7 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
     // Send the data to the decoder.
     convert_vec_hard_to_soft(pimpl->persistent_detector_buffer,
                              pimpl->persistent_soft_detector_buffer);
+    warn_if_device_mismatch();
     auto decoded_result = decode(pimpl->persistent_soft_detector_buffer);
 
     // If we didn't get a decoded result, just return

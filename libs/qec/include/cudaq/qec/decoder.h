@@ -264,6 +264,12 @@ public:
   /// was requested (>= 0) but could not be honored.
   int bind_current_thread();
 
+  /// @brief Run decode(syndrome) on a fresh worker thread bound (via
+  /// bind_current_thread) to this decoder's CUDA device / NUMA node, and return
+  /// the result. Convenience for a one-off pinned decode; for sustained
+  /// throughput drive decode on a long-lived bound thread instead.
+  decoder_result decode_on_pinned_thread(const std::vector<float_t> &syndrome);
+
   // -- Begin realtime decoding API --
 
   // Note: all of the current realtime decoding API is designed to be used with
@@ -385,11 +391,19 @@ protected:
   bool bound_persistently_ = false;
   /// NUMA memory-policy mode for this decoder (default soft PREFERRED).
   cudaq::qec::mempolicy_mode mempolicy_ = cudaq::qec::mempolicy_mode::preferred;
-  /// Explicit CPU cores for this decoder's owning thread (empty = use node cpuset).
+  /// Explicit CPU cores for this decoder's owning thread (empty = use node
+  /// cpuset).
   std::vector<int> cpu_affinity_;
+  /// Set once the current-device mismatch warning has fired, so it prints at
+  /// most once per decoder instance.
+  bool device_mismatch_warned_ = false;
 
 private:
   decode_result_type result_type_ = decode_result_type::decode_to_errs;
+
+  /// Warn (once) if this decoder has an explicit cuda_device_id and the
+  /// calling thread's current CUDA device does not match it.
+  void warn_if_device_mismatch();
 };
 
 /// @brief Convert a single soft probability to a hard 0/1 decision.
