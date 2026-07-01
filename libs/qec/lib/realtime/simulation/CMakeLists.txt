@@ -40,7 +40,9 @@ target_link_libraries(cudaq-qec-realtime-decoding-simulation
 )
 
 set_target_properties(cudaq-qec-realtime-decoding-simulation PROPERTIES
-  LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+  LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
+  BUILD_RPATH "$ORIGIN"
+  INSTALL_RPATH "$ORIGIN")
 
 
 install(TARGETS cudaq-qec-realtime-decoding-simulation
