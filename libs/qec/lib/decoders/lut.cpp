@@ -7,7 +7,7 @@
  ******************************************************************************/
 
 #include "cudaq/qec/decoder.h"
-#include "cudaq/runtime/logger/logger.h"
+#include "cudaq/qec/logger.h"
 #include <algorithm>
 #include <cassert>
 #include <map>
@@ -149,11 +149,12 @@ public:
         if (it != error_signatures.end()) {
           // Syndrome already found, so we have ambiguous errors. Defer to the
           // one that was previously added, so don't add it again.
-          CUDAQ_INFO("Ambiguous error signature: err_sig={} for error_list={}",
-                     err_sig, error_list);
+          CUDA_QEC_INFO(
+              "Ambiguous error signature: err_sig={} for error_list={}",
+              err_sig, error_list);
         } else {
-          CUDAQ_INFO("Adding err_sig={} for error_list={}", err_sig,
-                     error_list);
+          CUDA_QEC_INFO("Adding err_sig={} for error_list={}", err_sig,
+                        error_list);
           error_signatures.insert(
               {std::move(err_sig), lut_entry{std::move(error_list), p}});
         }
