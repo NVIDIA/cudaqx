@@ -89,7 +89,7 @@ if(NOT TARGET libstim)
 endif()
 set_target_properties(${LIBRARY_NAME} PROPERTIES
   VISIBILITY_INLINES_HIDDEN ON
-)
+  LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 target_link_libraries(${DECODERS_LIBRARY_NAME} PRIVATE libstim)
 target_link_options(${DECODERS_LIBRARY_NAME} PRIVATE
   $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>>:-Wl,--exclude-libs,libstim.a>
@@ -166,9 +166,6 @@ set_source_files_properties(
   dem_sampling/dem_sampling_utils.cu
   PROPERTIES LANGUAGE CUDA
 )
-
-set_target_properties(${LIBRARY_NAME} PROPERTIES
-  LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 # RPATH configuration 
 # ==============================================================================
