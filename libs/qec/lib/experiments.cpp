@@ -175,10 +175,96 @@ dem_sampling(const cudaqx::tensor<uint8_t> &check_matrix, std::size_t nShots,
                                       seed);
 }
 
+namespace details {
+
+/// @brief A contiguous range [start, start + length) of detector-ordered
+/// values: rows for a DEM's detector_error_matrix, or per-shot columns for a
+/// sample_memory_circuit syndrome tensor.
+struct detector_range {
+  std::size_t start;
+  std::size_t length;
+};
+
+std::size_t total_length(const std::vector<detector_range> &ranges) {
+  std::size_t total = 0;
+  for (const auto &r : ranges)
+    total += r.length;
+  return total;
+}
+
+/// @brief Compute the detector-ordered ranges that correspond to the
+/// requested stabilizer type(s) for a memory-circuit experiment.
+///
+/// Detector values produced by `memory_circuit` are laid out as: `numFixed`
+/// boundary values (only the stabilizer type matching the state prep/
+/// measurement basis, since that is the only type whose round-0 syndrome is
+/// deterministic and the only type whose last round can be reconstructed
+/// from the final data measurement), then `numRounds - 1` interior rounds
+/// each containing a full [Z][X] block, then another `numFixed` boundary
+/// values. This is shared by `dem_from_memory_circuit` (which slices rows of
+/// a detector_error_matrix) and `sample_memory_circuit` (which slices
+/// columns of a syndrome tensor), so both stay in sync with a single
+/// definition of the layout.
+std::vector<detector_range>
+stabilizer_detector_ranges(std::size_t numRounds, std::size_t numZStabs,
+                           std::size_t numXStabs, bool is_z_prep,
+                           bool keep_x_stabilizers, bool keep_z_stabilizers,
+                           std::size_t numTotalDetectors) {
+  if (!keep_x_stabilizers && !keep_z_stabilizers)
+    throw std::runtime_error(
+        "stabilizer_detector_ranges error - no stabilizers to keep.");
+
+  const std::size_t numSyndromesPerRound = numZStabs + numXStabs;
+
+  // Round-to-round detector values are laid out as [Z][X]. Keep a contiguous
+  // sub-range of that layout: skip past the Z values when only X is wanted,
+  // and keep however many values belong to the requested type(s).
+  const std::size_t offset = keep_z_stabilizers ? 0 : numZStabs;
+  const std::size_t numReturnSynPerRound =
+      (keep_z_stabilizers ? numZStabs : 0) +
+      (keep_x_stabilizers ? numXStabs : 0);
+
+  const std::size_t numFixed = is_z_prep ? numZStabs : numXStabs;
+  const bool keep_fixed =
+      (is_z_prep && keep_z_stabilizers) || (!is_z_prep && keep_x_stabilizers);
+  const std::size_t numBoundaryDets = keep_fixed ? numFixed : 0;
+  const std::size_t numInteriorRounds = numRounds > 0 ? numRounds - 1 : 0;
+
+  if (2 * numFixed + numInteriorRounds * numSyndromesPerRound !=
+      numTotalDetectors)
+    throw std::runtime_error("stabilizer_detector_ranges error - unexpected "
+                             "number of detector values.");
+
+  std::vector<detector_range> ranges;
+
+  // Initial boundary detectors: the first `numFixed` values.
+  if (numBoundaryDets > 0)
+    ranges.push_back({0, numBoundaryDets});
+
+  // Interior round-to-round transitions, each sliced down to the requested
+  // stabilizer type(s).
+  for (std::size_t round = 0; round < numInteriorRounds; ++round)
+    ranges.push_back({numFixed + round * numSyndromesPerRound + offset,
+                      numReturnSynPerRound});
+
+  // Final boundary detectors: the last `numFixed` values.
+  if (numBoundaryDets > 0)
+    ranges.push_back({numTotalDetectors - numFixed, numBoundaryDets});
+
+  return ranges;
+}
+
+/// @brief Given a memory circuit setup, sample syndrome and data qubit
+/// measurements. This is the main driver function that all of the
+/// sample_memory_circuit overloads invoke.
 std::tuple<cudaqx::tensor<uint8_t>, cudaqx::tensor<uint8_t>>
 sample_memory_circuit(const code &code, operation statePrep,
                       std::size_t numShots, std::size_t numRounds,
-                      cudaq::noise_model &noise) {
+                      cudaq::noise_model &noise, bool keep_x_stabilizers,
+                      bool keep_z_stabilizers) {
+  if (!keep_x_stabilizers && !keep_z_stabilizers)
+    throw std::runtime_error(
+        "sample_memory_circuit error - no stabilizers to keep.");
   if (!code.contains_operation(statePrep))
     throw std::runtime_error(
         "sample_memory_circuit_error - requested state prep kernel not found.");
@@ -204,6 +290,8 @@ sample_memory_circuit(const code &code, operation statePrep,
   auto numData = code.get_num_data_qubits();
   auto numAncx = code.get_num_ancilla_x_qubits();
   auto numAncz = code.get_num_ancilla_z_qubits();
+  auto numXStabs = code.get_num_x_stabilizers();
+  auto numZStabs = code.get_num_z_stabilizers();
 
   std::vector<std::size_t> xVec(parity_x.data(),
                                 parity_x.data() + parity_x.size());
@@ -261,7 +349,63 @@ sample_memory_circuit(const code &code, operation statePrep,
     }
   }
 
+  if (!keep_x_stabilizers || !keep_z_stabilizers) {
+    auto ranges =
+        stabilizer_detector_ranges(numRounds, numZStabs, numXStabs, is_z_prep,
+                                   keep_x_stabilizers, keep_z_stabilizers, k);
+    // Build a new [numShots, total_length(ranges)] tensor by copying the
+    // requested column ranges out of syndromeTensor, per shot, to restrict it
+    // to the requested stabilizer type(s).
+    const auto numOutCols = total_length(ranges);
+    cudaqx::tensor<uint8_t> selectedSyndromes({numShots, numOutCols});
+    // No columns to keep (e.g. a single-round experiment where the requested
+    // stabilizer type has no detectors at all): nothing to copy, and indexing
+    // column 0 of a zero-column tensor below would be out of bounds.
+    if (numOutCols > 0) {
+      for (std::size_t shot = 0; shot < numShots; ++shot) {
+        const auto *src_row = &syndromeTensor.at({shot, 0});
+        auto *dst_row = &selectedSyndromes.at({shot, 0});
+        std::size_t col = 0;
+        for (const auto &r : ranges) {
+          std::memcpy(dst_row + col, src_row + r.start,
+                      r.length * sizeof(uint8_t));
+          col += r.length;
+        }
+      }
+    }
+    syndromeTensor = std::move(selectedSyndromes);
+  }
+
   return std::make_tuple(syndromeTensor, dataResults);
+}
+} // namespace details
+
+std::tuple<cudaqx::tensor<uint8_t>, cudaqx::tensor<uint8_t>>
+sample_memory_circuit(const code &code, operation statePrep,
+                      std::size_t numShots, std::size_t numRounds,
+                      cudaq::noise_model &noise) {
+  return details::sample_memory_circuit(code, statePrep, numShots, numRounds,
+                                        noise, /*keep_x_stabilizers=*/true,
+                                        /*keep_z_stabilizers=*/true);
+}
+
+// For CSS codes, may want to partition x vs z decoding.
+std::tuple<cudaqx::tensor<uint8_t>, cudaqx::tensor<uint8_t>>
+x_sample_memory_circuit(const code &code, operation statePrep,
+                        std::size_t numShots, std::size_t numRounds,
+                        cudaq::noise_model &noise) {
+  return details::sample_memory_circuit(code, statePrep, numShots, numRounds,
+                                        noise, /*keep_x_stabilizers=*/true,
+                                        /*keep_z_stabilizers=*/false);
+}
+
+std::tuple<cudaqx::tensor<uint8_t>, cudaqx::tensor<uint8_t>>
+z_sample_memory_circuit(const code &code, operation statePrep,
+                        std::size_t numShots, std::size_t numRounds,
+                        cudaq::noise_model &noise) {
+  return details::sample_memory_circuit(code, statePrep, numShots, numRounds,
+                                        noise, /*keep_x_stabilizers=*/false,
+                                        /*keep_z_stabilizers=*/true);
 }
 
 std::tuple<cudaqx::tensor<uint8_t>, cudaqx::tensor<uint8_t>>
@@ -336,68 +480,31 @@ dem_from_memory_circuit(const code &code, operation statePrep,
 
   const auto numXStabs = code.get_num_x_stabilizers();
   const auto numZStabs = code.get_num_z_stabilizers();
-  const auto numSyndromesPerRound = numXStabs + numZStabs;
+  const auto numDetectors = dem.detector_error_matrix.shape()[0];
 
-  // Round-to-round detector values are laid out
-  // as [Z][X]. Keep a contiguous sub-range of that layout: skip
-  // past the Z values when only X is wanted, and keep however many values
-  // belong to the requested type(s).
-  const std::size_t offset = keep_z_stabilizers ? 0 : numZStabs;
+  auto ranges = stabilizer_detector_ranges(numRounds, numZStabs, numXStabs,
+                                           is_z_prep, keep_x_stabilizers,
+                                           keep_z_stabilizers, numDetectors);
+
+  // Build a new [total_length(ranges), numCols] tensor by copying the
+  // requested row ranges out of the DEM's detector_error_matrix, to restrict
+  // it to the requested stabilizer type(s).
+  const auto numCols = dem.detector_error_matrix.shape()[1];
+  cudaqx::tensor<uint8_t> selectedRows({total_length(ranges), numCols});
+  {
+    auto *dst_data = selectedRows.data();
+    const auto *src_data = dem.detector_error_matrix.data();
+    for (const auto &r : ranges) {
+      std::memcpy(dst_data, src_data + r.start * numCols,
+                  r.length * numCols * sizeof(uint8_t));
+      dst_data += r.length * numCols;
+    }
+  }
+  dem.detector_error_matrix = std::move(selectedRows);
+
   const std::size_t numReturnSynPerRound =
       (keep_z_stabilizers ? numZStabs : 0) +
       (keep_x_stabilizers ? numXStabs : 0);
-
-  const auto numErrorMechs = dem.num_error_mechanisms();
-  const auto numDetectors = dem.detector_error_matrix.shape()[0];
-
-  // The very first and very last groups of detector values
-  // ("boundary" detectors) only contain the stabilizer type that
-  // matches the prep/measurement basis (`numFixed` values each), since that is
-  // the only type whose round-0 syndrome is deterministic and the only type
-  // whose last round can be reconstructed from the final data measurement.
-  // Only the `numRounds - 1` round-to-round detector values contain a
-  // full [Z][X] block. Slice the two boundary groups and the
-  // interior transitions as separate, contiguous segments.
-  const auto numFixed = is_z_prep ? numZStabs : numXStabs;
-  const bool keep_fixed =
-      (is_z_prep && keep_z_stabilizers) || (!is_z_prep && keep_x_stabilizers);
-  const auto numBoundaryDets = keep_fixed ? numFixed : 0;
-  const auto numInteriorRounds = numRounds > 0 ? numRounds - 1 : 0;
-
-  if (2 * numFixed + numInteriorRounds * numSyndromesPerRound != numDetectors)
-    throw std::runtime_error("dem_from_memory_circuit error - unexpected "
-                             "number of detector values.");
-
-  const auto *src = dem.detector_error_matrix.data();
-  cudaqx::tensor<uint8_t> sliced(std::vector<std::size_t>{
-      2 * numBoundaryDets + numInteriorRounds * numReturnSynPerRound,
-      numErrorMechs});
-  auto *dst = sliced.data();
-
-  // Copy `numDets` consecutive detector values starting at `srcStart` from
-  // `src` into the next unwritten values of `sliced`.
-  auto copyRows = [&](std::size_t srcStart, std::size_t numDets) {
-    std::memcpy(dst, src + srcStart * numErrorMechs,
-                numDets * numErrorMechs * sizeof(uint8_t));
-    dst += numDets * numErrorMechs;
-  };
-
-  // Initial boundary detectors: the first `numFixed` values of the raw DEM.
-  if (numBoundaryDets > 0)
-    copyRows(0, numBoundaryDets);
-
-  // Interior round-to-round transitions: values [numFixed, numFixed +
-  // numInteriorRounds * numSyndromesPerRound), each sliced down to the
-  // requested stabilizer type(s).
-  for (std::size_t round = 0; round < numInteriorRounds; ++round)
-    copyRows(numFixed + round * numSyndromesPerRound + offset,
-             numReturnSynPerRound);
-
-  // Final boundary detectors: the last `numFixed` rows of the raw DEM.
-  if (numBoundaryDets > 0)
-    copyRows(numDetectors - numFixed, numBoundaryDets);
-
-  dem.detector_error_matrix = std::move(sliced);
   dem.canonicalize_for_rounds(numReturnSynPerRound,
                               /*remove_zero_syndrome_errors=*/true);
 

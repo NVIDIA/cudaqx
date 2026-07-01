@@ -31,9 +31,9 @@ __qpu__ void memory_circuit(const code::stabilizer_round &stabilizer_round,
   // Z-measurement before any operations always yields 0...0, so first syndromes
   // are partially non-deterministic
   auto final_syndrome = stabilizer_round(logical, x_stabilizers, z_stabilizers);
-  int num_fixed_measurements =
+  std::size_t num_fixed_measurements =
       measure_in_x_basis ? xstab_anc.size() : zstab_anc.size();
-  int fixed_offset =
+  std::size_t fixed_offset =
       measure_in_x_basis ? final_syndrome.size() - num_fixed_measurements : 0;
   for (std::size_t i = 0; i < num_fixed_measurements; ++i) {
     cudaq::detector(final_syndrome[fixed_offset + i]);

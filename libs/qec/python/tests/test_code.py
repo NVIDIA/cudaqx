@@ -118,7 +118,7 @@ def test_python_code():
                                                        numShots=10,
                                                        numRounds=4)
     assert isinstance(syndromes, np.ndarray)
-    assert syndromes.shape == (numShots, 40)
+    assert syndromes.shape == (10, 40)
     print(syndromes)
     assert not np.any(syndromes)
 

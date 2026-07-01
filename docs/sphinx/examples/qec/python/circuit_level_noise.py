@@ -41,9 +41,9 @@ dem = qec.z_dem_from_memory_circuit(surface_code, statePrep, nRounds, noise)
 # For large runs, set verbose to False to suppress output
 verbose = nShots <= 10
 
-# Sample the surface code memory circuit with noise on each cx gate
-syndromes, data = qec.sample_memory_circuit(surface_code, statePrep, nShots,
-                                            nRounds, noise)
+# Sample the surface code memory circuit with noise on each cx gate.
+syndromes, data = qec.z_sample_memory_circuit(surface_code, statePrep, nShots,
+                                              nRounds, noise)
 
 if verbose:
     print("From sample function:\n")
@@ -60,18 +60,6 @@ logical_measurements = (Lz @ data.transpose()) % 2
 logical_measurements = logical_measurements.flatten()
 if verbose:
     print("LMz:\n", logical_measurements)
-
-# Drop the X stabilizers, matching the output layout of z_dem_from_memory_circuit.
-numZStabs = surface_code.get_num_z_stabilizers()
-numXStabs = surface_code.get_num_x_stabilizers()
-numSyndromesPerRound = numZStabs + numXStabs
-totalCols = syndromes.shape[1]
-z_chunks = [syndromes[:, :numZStabs]]
-for i in range(nRounds - 1):
-    start = numZStabs + i * numSyndromesPerRound
-    z_chunks.append(syndromes[:, start:start + numZStabs])
-z_chunks.append(syndromes[:, totalCols - numZStabs:totalCols])
-syndromes = np.concatenate(z_chunks, axis=1)
 
 dr = decoder.decode_batch(syndromes)
 error_predictions = np.array([e.result for e in dr], dtype=np.uint8)
