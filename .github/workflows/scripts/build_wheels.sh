@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 
 # ============================================================================ #
 # Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                   #
@@ -8,7 +8,7 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
-set -e  # Exit immediately if a command exits with a non-zero status
+set -euo pipefail
 
 # ==============================================================================
 # Handling options
@@ -35,8 +35,8 @@ parse_options() {
     while (( $# > 0 )); do
         case "$1" in
             --build-type)
-                if [[ -n "$2" && "$2" != -* ]]; then
-                    build_type=("$2")
+                if [[ -n "${2:-}" && "${2:-}" != -* ]]; then
+                    build_type="$2"
                     shift 2
                 else
                     echo "Error: Argument for $1 is missing" >&2
@@ -44,8 +44,8 @@ parse_options() {
                 fi
                 ;;
             --cuda-version)
-                if [[ -n "$2" && "$2" != -* ]]; then
-                    cuda_version=("$2")
+                if [[ -n "${2:-}" && "${2:-}" != -* ]]; then
+                    cuda_version="$2"
                     shift 2
                 else
                     echo "Error: Argument for $1 is missing" >&2
@@ -53,8 +53,8 @@ parse_options() {
                 fi
                 ;;
             --cudaq-prefix)
-                if [[ -n "$2" && "$2" != -* ]]; then
-                    cudaq_prefix=("$2")
+                if [[ -n "${2:-}" && "${2:-}" != -* ]]; then
+                    cudaq_prefix="$2"
                     shift 2
                 else
                     echo "Error: Argument for $1 is missing" >&2
@@ -62,8 +62,8 @@ parse_options() {
                 fi
                 ;;
             --python-version)
-                if [[ -n "$2" && "$2" != -* ]]; then
-                    python_version=("$2")
+                if [[ -n "${2:-}" && "${2:-}" != -* ]]; then
+                    python_version="$2"
                     shift 2
                 else
                     echo "Error: Argument for $1 is missing" >&2
@@ -71,8 +71,8 @@ parse_options() {
                 fi
                 ;;
             --tensorrt-path)
-                if [[ -n "$2" && "$2" != -* ]]; then
-                    tensorrt_path=("$2")
+                if [[ -n "${2:-}" && "${2:-}" != -* ]]; then
+                    tensorrt_path="$2"
                     shift 2
                 else
                     echo "Error: Argument for $1 is missing" >&2
@@ -84,8 +84,8 @@ parse_options() {
                 shift 1
                 ;;
             --version)
-                if [[ -n "$2" && "$2" != -* ]]; then
-                    wheels_version=("$2")
+                if [[ -n "${2:-}" && "${2:-}" != -* ]]; then
+                    wheels_version="$2"
                     shift 2
                 else
                     echo "Error: Argument for $1 is missing" >&2
@@ -151,7 +151,7 @@ export CUDAQX_SOLVERS_VERSION=$wheels_version
 # find the library on its own.  Resolve the wheel's install prefix here and
 # export CUQUANTUM_ROOT so the isolated build env's CMake invocation picks it
 # up.  Honors a pre-set CUQUANTUM_ROOT (e.g. for system installs).
-if [ -z "$CUQUANTUM_ROOT" ]; then
+if [ -z "${CUQUANTUM_ROOT:-}" ]; then
   $python -m pip install --upgrade "cuquantum-python-cu${cuda_version}>=26.3.0"
   CUQUANTUM_ROOT=$($python -m pip show "custabilizer-cu${cuda_version}" 2>/dev/null \
                    | sed -nE 's|^Location: (.*)|\1/cuquantum|p')
@@ -182,7 +182,7 @@ $python -m build --wheel
 CUDAQ_EXCLUDE_LIST=$(for f in $(find $cudaq_prefix/lib -name "*.so" -printf "%P\n" | sort); do echo "--exclude $f"; done | tr '\n' ' ')
 
 # We need to exclude a few libraries to prevent auditwheel from mistakenly grafting them into the wheel.
-LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$(pwd)/_skbuild/lib:$tensorrt_path/lib" \
+LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}$(pwd)/_skbuild/lib:$tensorrt_path/lib" \
 $python -m auditwheel -v repair dist/*.whl $CUDAQ_EXCLUDE_LIST \
   --wheel-dir /wheels \
   --exclude libcudart.so.${cuda_version} \
@@ -208,7 +208,7 @@ SKBUILD_CMAKE_ARGS+=";-DCMAKE_BUILD_TYPE=$build_type" \
 export SKBUILD_CMAKE_ARGS
 $python -m build --wheel
 
-LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$(pwd)/_skbuild/lib" \
+LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}$(pwd)/_skbuild/lib" \
 $python -m auditwheel -v repair dist/*.whl $CUDAQ_EXCLUDE_LIST \
   --exclude libgfortran.so.5 \
   --exclude libquadmath.so.0 \
