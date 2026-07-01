@@ -61,11 +61,17 @@ logical_measurements = logical_measurements.flatten()
 if verbose:
     print("LMz:\n", logical_measurements)
 
-# Reshape and drop the X stabilizers, keeping just the Z stabilizers (since this is prep0)
-syndromes = syndromes.reshape((nShots, nRounds, -1))
-syndromes = syndromes[:, :, :syndromes.shape[2] // 2]
-# Now flatten to two dimensions again
-syndromes = syndromes.reshape((nShots, -1))
+# Drop the X stabilizers, matching the output layout of z_dem_from_memory_circuit.
+numZStabs = surface_code.get_num_z_stabilizers()
+numXStabs = surface_code.get_num_x_stabilizers()
+numSyndromesPerRound = numZStabs + numXStabs
+totalCols = syndromes.shape[1]
+z_chunks = [syndromes[:, :numZStabs]]
+for i in range(nRounds - 1):
+    start = numZStabs + i * numSyndromesPerRound
+    z_chunks.append(syndromes[:, start:start + numZStabs])
+z_chunks.append(syndromes[:, totalCols - numZStabs:totalCols])
+syndromes = np.concatenate(z_chunks, axis=1)
 
 dr = decoder.decode_batch(syndromes)
 error_predictions = np.array([e.result for e in dr], dtype=np.uint8)

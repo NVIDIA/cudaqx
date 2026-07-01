@@ -221,13 +221,10 @@ sample_memory_circuit(const code &code, operation statePrep,
   // m2d.rows[d] = set of chronological measurement indices whose XOR = detector
   // d.
   cudaq::M2DSparseMatrix m2d;
-  cudaq::detail::runDemFromKernel(
-      cudaq::getKernelName(memory_circuit), cudaq::get_platform(), &noise,
-      [&] {
-        memory_circuit(stabRound, prep, numData, numAncx, numAncz, numRounds,
-                       xVec, zVec, obs_flat, num_obs, !is_z_prep);
-      },
-      /*options=*/{}, /*plugin_name=*/"stim", &m2d);
+  cudaq::M2OSparseMatrix m2o;
+  cudaq::dem_from_kernel(memory_circuit, &noise, /*options=*/{}, m2d, m2o,
+                         stabRound, prep, numData, numAncx, numAncz, numRounds,
+                         xVec, zVec, obs_flat, num_obs, !is_z_prep);
 
   // Sample the memory circuit and collect all raw measurements.
   cudaq::sample_options opts{
@@ -341,37 +338,68 @@ dem_from_memory_circuit(const code &code, operation statePrep,
   const auto numZStabs = code.get_num_z_stabilizers();
   const auto numSyndromesPerRound = numXStabs + numZStabs;
 
-  std::size_t numReturnSynPerRound = numSyndromesPerRound;
-  if (keep_x_stabilizers && !keep_z_stabilizers) {
-    numReturnSynPerRound = numXStabs;
-  } else if (!keep_x_stabilizers && keep_z_stabilizers) {
-    numReturnSynPerRound = numZStabs;
-  }
+  // Round-to-round detector values are laid out
+  // as [Z][X]. Keep a contiguous sub-range of that layout: skip
+  // past the Z values when only X is wanted, and keep however many values
+  // belong to the requested type(s).
+  const std::size_t offset = keep_z_stabilizers ? 0 : numZStabs;
+  const std::size_t numReturnSynPerRound =
+      (keep_z_stabilizers ? numZStabs : 0) +
+      (keep_x_stabilizers ? numXStabs : 0);
 
-  if (keep_x_stabilizers != keep_z_stabilizers) {
-    const auto numNoiseMechs = dem.num_error_mechanisms();
-    const auto rowOffset = keep_x_stabilizers ? numZStabs : 0;
-    std::vector<std::uint32_t> all_columns(numNoiseMechs);
-    std::iota(all_columns.begin(), all_columns.end(), 0);
-    cudaqx::tensor<uint8_t> sliced(std::vector<std::size_t>{
-        numRounds * numReturnSynPerRound, numNoiseMechs});
+  const auto numErrorMechs = dem.num_error_mechanisms();
+  const auto numDetectors = dem.detector_error_matrix.shape()[0];
 
-    for (std::size_t round = 0; round < numRounds; ++round) {
-      const auto src_row_begin =
-          static_cast<std::uint32_t>(round * numSyndromesPerRound + rowOffset);
-      const auto src_row_end =
-          src_row_begin + static_cast<std::uint32_t>(numReturnSynPerRound) - 1;
-      auto round_block = cudaq::qec::reorder_pcm_columns(
-          dem.detector_error_matrix, all_columns, src_row_begin, src_row_end);
+  // The very first and very last groups of detector values
+  // ("boundary" detectors) only contain the stabilizer type that
+  // matches the prep/measurement basis (`numFixed` values each), since that is
+  // the only type whose round-0 syndrome is deterministic and the only type
+  // whose last round can be reconstructed from the final data measurement.
+  // Only the `numRounds - 1` round-to-round detector values contain a
+  // full [Z][X] block. Slice the two boundary groups and the
+  // interior transitions as separate, contiguous segments.
+  const auto numFixed = is_z_prep ? numZStabs : numXStabs;
+  const bool keep_fixed =
+      (is_z_prep && keep_z_stabilizers) || (!is_z_prep && keep_x_stabilizers);
+  const auto numBoundaryDets = keep_fixed ? numFixed : 0;
+  const auto numInteriorRounds = numRounds > 0 ? numRounds - 1 : 0;
 
-      auto *dst = sliced.data() + round * numReturnSynPerRound * numNoiseMechs;
-      std::memcpy(dst, round_block.data(),
-                  numReturnSynPerRound * numNoiseMechs * sizeof(uint8_t));
-    }
-    dem.detector_error_matrix = std::move(sliced);
-    dem.canonicalize_for_rounds(numReturnSynPerRound,
-                                /*remove_zero_syndrome_errors=*/true);
-  }
+  if (2 * numFixed + numInteriorRounds * numSyndromesPerRound != numDetectors)
+    throw std::runtime_error("dem_from_memory_circuit error - unexpected "
+                             "number of detector values.");
+
+  const auto *src = dem.detector_error_matrix.data();
+  cudaqx::tensor<uint8_t> sliced(std::vector<std::size_t>{
+      2 * numBoundaryDets + numInteriorRounds * numReturnSynPerRound,
+      numErrorMechs});
+  auto *dst = sliced.data();
+
+  // Copy `numDets` consecutive detector values starting at `srcStart` from
+  // `src` into the next unwritten values of `sliced`.
+  auto copyRows = [&](std::size_t srcStart, std::size_t numDets) {
+    std::memcpy(dst, src + srcStart * numErrorMechs,
+                numDets * numErrorMechs * sizeof(uint8_t));
+    dst += numDets * numErrorMechs;
+  };
+
+  // Initial boundary detectors: the first `numFixed` values of the raw DEM.
+  if (numBoundaryDets > 0)
+    copyRows(0, numBoundaryDets);
+
+  // Interior round-to-round transitions: values [numFixed, numFixed +
+  // numInteriorRounds * numSyndromesPerRound), each sliced down to the
+  // requested stabilizer type(s).
+  for (std::size_t round = 0; round < numInteriorRounds; ++round)
+    copyRows(numFixed + round * numSyndromesPerRound + offset,
+             numReturnSynPerRound);
+
+  // Final boundary detectors: the last `numFixed` rows of the raw DEM.
+  if (numBoundaryDets > 0)
+    copyRows(numDetectors - numFixed, numBoundaryDets);
+
+  dem.detector_error_matrix = std::move(sliced);
+  dem.canonicalize_for_rounds(numReturnSynPerRound,
+                              /*remove_zero_syndrome_errors=*/true);
 
   return dem;
 }
