@@ -25,6 +25,20 @@ def test_basic_construction_d3():
     assert len(g.data_coords) == 9
 
 
+def test_orientation_construction_d3():
+    assert qec.parse_orientation("XH") == qec.sc_orientation.XH
+
+    g = qec.stabilizer_grid(3, qec.sc_orientation.XH)
+    assert g.orientation == qec.sc_orientation.XH
+    assert len(g.x_stabilizers) == 4
+    assert len(g.z_stabilizers) == 4
+
+    canonical_grid = qec.stabilizer_grid(3, "ZV")
+    assert canonical_grid.orientation == qec.sc_orientation.ZV
+    assert len(canonical_grid.x_stabilizers) == 4
+    assert len(canonical_grid.z_stabilizers) == 4
+
+
 def test_roles_layout_d3():
     g = qec.stabilizer_grid(3)
     roles = g.roles
