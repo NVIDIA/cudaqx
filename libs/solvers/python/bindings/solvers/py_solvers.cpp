@@ -5,6 +5,8 @@
  * This source code and the accompanying materials are made available under    *
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
+#include <algorithm>
+#include <complex>
 #include <limits>
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
@@ -20,6 +22,7 @@
 #include "cudaq/python/PythonCppInterop.h"
 
 #include "cudaq/solvers/adapt.h"
+#include "cudaq/solvers/hamiltonian_simulation/trotter.h"
 #include "cudaq/solvers/qaoa.h"
 #include "cudaq/solvers/stateprep/ceo.h"
 #include "cudaq/solvers/stateprep/uccgsd.h"
@@ -818,9 +821,67 @@ operator pool. Only integer and list configuration values are currently supporte
 )#");
 }
 
+void bindTrotter(nb::module_ &mod) {
+  auto terms_to_tuple = [](const cudaq::spin_op &hamiltonian,
+                           double coefficient_tolerance) {
+    auto terms =
+        cudaq::solvers::make_trotter_terms(hamiltonian, coefficient_tolerance);
+    return nb::make_tuple(terms.coefficients, terms.words,
+                          terms.identity_coefficient, terms.num_qubits);
+  };
+
+  mod.def(
+      "make_trotter_terms", terms_to_tuple, nb::arg("hamiltonian"),
+      nb::arg("coefficient_tolerance") = 1e-12,
+      R"(Return flattened non-identity coefficients, Pauli words, identity coefficient, and qubit count.
+
+The identity coefficient is returned separately because apply_trotter() omits
+that global phase. For H = c I + H', apply_trotter() approximates exp(-i H' t).
+Callers using controlled evolution, overlaps, phase estimation, Krylov/QEL
+moments, or other interference-based algorithms must account for the omitted
+exp(-i c t) phase when it becomes a relative phase.)");
+
+  mod.def(
+      "make_trotter_terms",
+      [terms_to_tuple](const cudaq::spin_op_term &hamiltonian,
+                       double coefficient_tolerance) {
+        return terms_to_tuple(cudaq::spin_op(hamiltonian),
+                              coefficient_tolerance);
+      },
+      nb::arg("hamiltonian"), nb::arg("coefficient_tolerance") = 1e-12);
+
+  mod.def(
+      "apply_trotter",
+      [](const std::vector<double> &, const std::vector<cudaq::pauli_word> &,
+         double, std::size_t, int, cudaq::qview<>) {},
+      R"(Apply Suzuki-Trotter evolution inside a CUDA-Q kernel.
+
+The QPU-facing form consumes flattened terms:
+
+    apply_trotter(coefficients, pauli_words, time, steps, order, qubits)
+
+Use make_trotter_terms(H) on the host to extract coefficients and words from a
+SpinOperator before passing them to a kernel. Identity terms are not applied by
+this primitive; use the returned identity coefficient to track or reintroduce
+the omitted phase in controlled or interference-based algorithms.)");
+
+  cudaq::python::registerDeviceKernel(
+      nb::cast<std::string>(mod.attr("__name__")), "apply_trotter",
+      cudaq::python::getMangledArgsString<
+          const std::vector<double> &, const std::vector<cudaq::pauli_word> &,
+          double, std::size_t, int, cudaq::qview<>>());
+
+  cudaq::python::addDeviceKernelInterop<
+      const std::vector<double> &, const std::vector<cudaq::pauli_word> &,
+      double, std::size_t, int, cudaq::qview<>>(
+      mod, "hamiltonian_simulation", "apply_trotter",
+      "Apply Suzuki-Trotter evolution inside a CUDA-Q kernel.");
+}
+
 void bindSolvers(nb::module_ &mod) {
 
   addStatePrepKernels(mod);
+  bindTrotter(mod);
 
   auto solvers = mod; //.def_submodule("solvers");
   bindOperators(solvers);
