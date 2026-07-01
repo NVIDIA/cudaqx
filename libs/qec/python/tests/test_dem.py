@@ -417,6 +417,8 @@ def test_dem_from_memory_circuit_boundary_row_format():
     xPrep = qec.operation.prepp
     z_dem_one_round = qec.z_dem_from_memory_circuit(code, xPrep, 1, noise)
     assert z_dem_one_round.detector_error_matrix.shape == (0, 0)
+
+
 # ---------------------------------------------------------------------------
 # Supplementary regression tests retained on top of PR #610.
 # #610 already fixed canonicalize_for_rounds (observable-aware merging,
@@ -475,6 +477,16 @@ def _build_steane_z_memory_stim_circuit(stim_mod, p, n_rounds):
                 ])
 
     c.append("M", [0, 1, 2, 3, 4, 5, 6])
+
+    # Final boundary: reconstruct each Z stabilizer from the transversal data
+    # measurement and compare it to the last ancz round, catching errors that
+    # happen between the last syndrome round and the final readout. Data
+    # qubit di lands at rec(-7 + di); the last ancz round (measured as
+    # [10, 11, 12, 7, 8, 9] before this M) lands at rec(-13 + zi).
+    for zi, support in enumerate(stab_supports):
+        c.append("DETECTOR", [stim_mod.target_rec(-7 + di) for di in support] +
+                 [stim_mod.target_rec(-13 + zi)])
+
     # Z_L = Z_4 Z_5 Z_6.
     c.append("OBSERVABLE_INCLUDE",
              [stim_mod.target_rec(i) for i in (-3, -2, -1)], 0)
