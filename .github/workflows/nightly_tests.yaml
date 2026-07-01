@@ -6,14 +6,14 @@ on:
   workflow_dispatch:
 
 jobs:
-  wheels:
-    name: Build and test wheels
-    uses: ./.github/workflows/build_wheels.yaml
-    with:
-      build_type: Release
-      cudaq_wheels: Custom
-      cache_key_suffix: nightly
-    secrets: inherit
+  # wheels:
+  #   name: Build and test wheels
+  #   uses: ./.github/workflows/build_wheels.yaml
+  #   with:
+  #     build_type: Release
+  #     cudaq_wheels: Custom
+  #     cache_key_suffix: nightly
+  #   secrets: inherit
 
   resolve-cudaq-main:
     name: Resolve CUDA-Q main
@@ -74,57 +74,70 @@ jobs:
           save-ccache: false
           platform: ${{ matrix.platform }}-cu${{ steps.config.outputs.cuda_major }}
 
-  cudaq-main-all-libs:
-    name: All libs against CUDA-Q main
-    needs: [resolve-cudaq-main, build-cudaq-main]
-    uses: ./.github/workflows/all_libs.yaml
-    with:
-      cudaq_repo: ${{ needs.resolve-cudaq-main.outputs.repo }}
-      cudaq_ref: ${{ needs.resolve-cudaq-main.outputs.ref }}
-      cache_key_suffix: nightly
-    secrets: inherit
+  # cudaq-main-all-libs:
+  #   name: All libs against CUDA-Q main
+  #   needs: [resolve-cudaq-main, build-cudaq-main]
+  #   uses: ./.github/workflows/all_libs.yaml
+  #   with:
+  #     cudaq_repo: ${{ needs.resolve-cudaq-main.outputs.repo }}
+  #     cudaq_ref: ${{ needs.resolve-cudaq-main.outputs.ref }}
+  #     cache_key_suffix: nightly
+  #   secrets: inherit
 
-  cudaq-main-qec:
-    name: QEC against CUDA-Q main
-    needs: [resolve-cudaq-main, build-cudaq-main]
-    uses: ./.github/workflows/lib_qec.yaml
-    with:
-      cudaq_repo: ${{ needs.resolve-cudaq-main.outputs.repo }}
-      cudaq_ref: ${{ needs.resolve-cudaq-main.outputs.ref }}
-      cache_key_suffix: nightly
-    secrets: inherit
+  # cudaq-main-qec:
+  #   name: QEC against CUDA-Q main
+  #   needs: [resolve-cudaq-main, build-cudaq-main]
+  #   uses: ./.github/workflows/lib_qec.yaml
+  #   with:
+  #     cudaq_repo: ${{ needs.resolve-cudaq-main.outputs.repo }}
+  #     cudaq_ref: ${{ needs.resolve-cudaq-main.outputs.ref }}
+  #     cache_key_suffix: nightly
+  #   secrets: inherit
 
-  cudaq-main-solvers:
-    name: Solvers against CUDA-Q main
-    needs: [resolve-cudaq-main, build-cudaq-main]
-    uses: ./.github/workflows/lib_solvers.yaml
-    with:
-      cudaq_repo: ${{ needs.resolve-cudaq-main.outputs.repo }}
-      cudaq_ref: ${{ needs.resolve-cudaq-main.outputs.ref }}
-      cache_key_suffix: nightly
-    secrets: inherit
+  # cudaq-main-solvers:
+  #   name: Solvers against CUDA-Q main
+  #   needs: [resolve-cudaq-main, build-cudaq-main]
+  #   uses: ./.github/workflows/lib_solvers.yaml
+  #   with:
+  #     cudaq_repo: ${{ needs.resolve-cudaq-main.outputs.repo }}
+  #     cudaq_ref: ${{ needs.resolve-cudaq-main.outputs.ref }}
+  #     cache_key_suffix: nightly
+  #   secrets: inherit
 
-  cudaq-main-docs:
-    name: Docs against CUDA-Q main
+  # cudaq-main-docs:
+  #   name: Docs against CUDA-Q main
+  #   needs: [resolve-cudaq-main, build-cudaq-main]
+  #   uses: ./.github/workflows/docs.yaml
+  #   with:
+  #     cudaq_repo: ${{ needs.resolve-cudaq-main.outputs.repo }}
+  #     cudaq_ref: ${{ needs.resolve-cudaq-main.outputs.ref }}
+  #     cache_key_suffix: nightly
+  #   secrets: inherit
+
+  cudaq-main-wheels:
+    name: Wheels against CUDA-Q main
     needs: [resolve-cudaq-main, build-cudaq-main]
-    uses: ./.github/workflows/docs.yaml
+    uses: ./.github/workflows/build_wheels.yaml
     with:
+      build_type: Release
+      cudaq_wheels: Custom
+      cache_key_suffix: nightly
       cudaq_repo: ${{ needs.resolve-cudaq-main.outputs.repo }}
       cudaq_ref: ${{ needs.resolve-cudaq-main.outputs.ref }}
-      cache_key_suffix: nightly
     secrets: inherit
 
   cleanup-nightly-cache:
     name: Clean up nightly cache
     if: ${{ always() }}
     needs:
-      - wheels
+      # - wheels
       - resolve-cudaq-main
       - build-cudaq-main
-      - cudaq-main-all-libs
-      - cudaq-main-qec
-      - cudaq-main-solvers
-      - cudaq-main-docs
+      # - cudaq-main-all-libs
+      # - cudaq-main-qec
+      # - cudaq-main-solvers
+      # - cudaq-main-docs
+      - cudaq-main-wheels
     runs-on: ubuntu-latest
     permissions:
       actions: write
