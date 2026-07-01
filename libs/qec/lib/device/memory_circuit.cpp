@@ -67,8 +67,7 @@ __qpu__ void memory_circuit(const code::stabilizer_round &stabilizer_round,
     cudaq::logical_observable(obs_support);
   }
 
-  // For each syndrome, connect output from final syndrome round to each qubit
-  // in the support of that stabilizer.
+  // For each stabilizer, form detectors from data qubit readout connected with final stabilizer round.
   const std::vector<size_t> &stabilizers =
       measure_in_x_basis ? x_stabilizers : z_stabilizers;
 
