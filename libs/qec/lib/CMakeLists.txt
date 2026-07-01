@@ -93,6 +93,9 @@ set_target_properties(${LIBRARY_NAME} PROPERTIES
 target_link_libraries(${DECODERS_LIBRARY_NAME} PRIVATE libstim)
 target_link_options(${DECODERS_LIBRARY_NAME} PRIVATE
   $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>>:-Wl,--exclude-libs,libstim.a>
+  # cudaqx-core is linked into this DSO only; keep its symbols local so they
+  # do not preempt libcudaq-xxx' tensor_impl registry in combined builds.
+  $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>>:-Wl,--exclude-libs,libcudaqx-core.a>
 )
 
 add_subdirectory(decoders/plugins/example)
@@ -145,13 +148,12 @@ target_link_options(${LIBRARY_NAME} PUBLIC
 
 target_link_libraries(${DECODERS_LIBRARY_NAME}
   PUBLIC
-    cudaqx-core
+    $<LINK_LIBRARY:WHOLE_ARCHIVE,cudaqx-core>
     fmt::fmt-header-only
 )
 
 target_link_libraries(${LIBRARY_NAME}
   PUBLIC 
-    cudaqx-core
     ${DECODERS_LIBRARY_NAME}
     cudaq::cudaq-operator
   PRIVATE

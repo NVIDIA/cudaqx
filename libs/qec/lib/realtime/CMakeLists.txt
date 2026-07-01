@@ -157,7 +157,6 @@ target_link_options(cudaq-qec-realtime-decoding PRIVATE
 
 target_link_libraries(cudaq-qec-realtime-decoding
   PUBLIC 
-    cudaqx-core
     cudaq-qec-decoders
   PRIVATE
     LLVMSupport
