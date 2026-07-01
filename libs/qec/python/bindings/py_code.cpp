@@ -553,19 +553,63 @@ void bindCode(nb::module_ &mod) {
             cudaq::python::copyCUDAQXTensorToPyArray(dataRes));
       },
       "Sample the memory circuit of the code with a specific initial "
-      "operation",
+      "operation. Returns (syndromes, data): syndromes has numFixed "
+      "boundary detectors (basis matching op), then one block per "
+      "inter-round transition, then numFixed more boundary detectors.",
+      nb::arg("code"), nb::arg("op"), nb::arg("numShots"), nb::arg("numRounds"),
+      nb::arg("noise") = nb::none());
+
+  qecmod.def(
+      "x_sample_memory_circuit",
+      [](code &code, operation op, std::size_t numShots, std::size_t numRounds,
+         std::optional<cudaq::noise_model> noise = std::nullopt) {
+        if (!noise)
+          throw std::runtime_error(
+              "x_sample_memory_circuit requires a noise model; noise=None "
+              "is not supported.");
+        auto [synd, dataRes] =
+            x_sample_memory_circuit(code, op, numShots, numRounds, *noise);
+        return nb::make_tuple(
+            cudaq::python::copyCUDAQXTensorToPyArray(synd),
+            cudaq::python::copyCUDAQXTensorToPyArray(dataRes));
+      },
+      "Sample the memory circuit of the code with a specific initial "
+      "operation, keeping only the X stabilizer syndromes (same detector "
+      "layout as sample_memory_circuit, restricted to X stabilizers).",
+      nb::arg("code"), nb::arg("op"), nb::arg("numShots"), nb::arg("numRounds"),
+      nb::arg("noise") = nb::none());
+
+  qecmod.def(
+      "z_sample_memory_circuit",
+      [](code &code, operation op, std::size_t numShots, std::size_t numRounds,
+         std::optional<cudaq::noise_model> noise = std::nullopt) {
+        if (!noise)
+          throw std::runtime_error(
+              "z_sample_memory_circuit requires a noise model; noise=None "
+              "is not supported.");
+        auto [synd, dataRes] =
+            z_sample_memory_circuit(code, op, numShots, numRounds, *noise);
+        return nb::make_tuple(
+            cudaq::python::copyCUDAQXTensorToPyArray(synd),
+            cudaq::python::copyCUDAQXTensorToPyArray(dataRes));
+      },
+      "Sample the memory circuit of the code with a specific initial "
+      "operation, keeping only the Z stabilizer syndromes (same detector "
+      "layout as sample_memory_circuit, restricted to Z stabilizers).",
       nb::arg("code"), nb::arg("op"), nb::arg("numShots"), nb::arg("numRounds"),
       nb::arg("noise") = nb::none());
 
   qecmod.def(
       "dem_from_memory_circuit",
       [](code &code, operation op, std::size_t numRounds,
-         std::optional<cudaq::noise_model> noise = std::nullopt) {
+         std::optional<cudaq::noise_model> noise = std::nullopt,
+         bool decompose_errors = false) {
         if (!noise)
           throw std::runtime_error(
               "dem_from_memory_circuit requires a noise model; noise=None is "
               "not supported.");
-        return dem_from_memory_circuit(code, op, numRounds, *noise);
+        return dem_from_memory_circuit(code, op, numRounds, *noise,
+                                       decompose_errors);
       },
       R"pbdoc(
         Generate a detector error model from a memory circuit.
@@ -580,22 +624,26 @@ void bindCode(nb::module_ &mod) {
             op: The initial state preparation operation.
             numRounds: The number of stabilizer measurement rounds.
             noise: The noise model to apply to the memory circuit.
+            decompose_errors: If True, hyperedge error mechanisms are decomposed
+                into pairs of two-detector edges by Stim before returning.
 
         Returns:
             A detector error model.
       )pbdoc",
       nb::arg("code"), nb::arg("op"), nb::arg("numRounds"),
-      nb::arg("noise") = nb::none());
+      nb::arg("noise") = nb::none(), nb::arg("decompose_errors") = false);
 
   qecmod.def(
       "x_dem_from_memory_circuit",
       [](code &code, operation op, std::size_t numRounds,
-         std::optional<cudaq::noise_model> noise = std::nullopt) {
+         std::optional<cudaq::noise_model> noise = std::nullopt,
+         bool decompose_errors = false) {
         if (!noise)
           throw std::runtime_error(
               "x_dem_from_memory_circuit requires a noise model; noise=None "
               "is not supported.");
-        return x_dem_from_memory_circuit(code, op, numRounds, *noise);
+        return x_dem_from_memory_circuit(code, op, numRounds, *noise,
+                                         decompose_errors);
       },
       R"pbdoc(
         Generate a detector error model from a memory circuit in the X basis.
@@ -610,22 +658,26 @@ void bindCode(nb::module_ &mod) {
             op: The initial state preparation operation.
             numRounds: The number of stabilizer measurement rounds.
             noise: The noise model to apply to the memory circuit.
+            decompose_errors: If True, hyperedge error mechanisms are decomposed
+                into pairs of two-detector edges by Stim before returning.
 
         Returns:
             A detector error model.
       )pbdoc",
       nb::arg("code"), nb::arg("op"), nb::arg("numRounds"),
-      nb::arg("noise") = nb::none());
+      nb::arg("noise") = nb::none(), nb::arg("decompose_errors") = false);
 
   qecmod.def(
       "z_dem_from_memory_circuit",
       [](code &code, operation op, std::size_t numRounds,
-         std::optional<cudaq::noise_model> noise = std::nullopt) {
+         std::optional<cudaq::noise_model> noise = std::nullopt,
+         bool decompose_errors = false) {
         if (!noise)
           throw std::runtime_error(
               "z_dem_from_memory_circuit requires a noise model; noise=None "
               "is not supported.");
-        return z_dem_from_memory_circuit(code, op, numRounds, *noise);
+        return z_dem_from_memory_circuit(code, op, numRounds, *noise,
+                                         decompose_errors);
       },
       R"pbdoc(
         Generate a detector error model from a memory circuit in the Z basis.
@@ -640,12 +692,14 @@ void bindCode(nb::module_ &mod) {
             op: The initial state preparation operation.
             numRounds: The number of stabilizer measurement rounds.
             noise: The noise model to apply to the memory circuit.
+            decompose_errors: If True, hyperedge error mechanisms are decomposed
+                into pairs of two-detector edges by Stim before returning.
 
         Returns:
             A detector error model.
       )pbdoc",
       nb::arg("code"), nb::arg("op"), nb::arg("numRounds"),
-      nb::arg("noise") = nb::none());
+      nb::arg("noise") = nb::none(), nb::arg("decompose_errors") = false);
 
   qecmod.def(
       "sample_code_capacity",

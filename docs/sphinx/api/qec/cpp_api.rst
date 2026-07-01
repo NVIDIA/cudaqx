@@ -145,3 +145,5 @@ Common
 .. doxygenfunction:: cudaq::qec::sample_memory_circuit(const code &, std::size_t, std::size_t, cudaq::noise_model &)
 .. doxygenfunction:: cudaq::qec::sample_memory_circuit(const code &, operation, std::size_t, std::size_t)
 .. doxygenfunction:: cudaq::qec::sample_memory_circuit(const code &, operation, std::size_t, std::size_t, cudaq::noise_model &)
+.. doxygenfunction:: cudaq::qec::x_sample_memory_circuit
+.. doxygenfunction:: cudaq::qec::z_sample_memory_circuit
