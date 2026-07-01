@@ -6,12 +6,12 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
-#include "common/ExtraPayloadProvider.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Base64.h"
 #include "llvm/Support/YAMLTraits.h"
 #include "llvm/Support/raw_ostream.h"
 #include "realtime_decoding.h"
+#include "cudaq/qec/decoder_config_payload.h"
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/realtime/decoding_config.h"
 #include <any>
@@ -837,38 +837,16 @@ cudaq::qec::decoding::config::decoder_config::to_yaml_str(int column_wrap) {
   return yaml_str;
 }
 
-namespace {
-/// \brief Provides extra payload for decoder-related messages.
-class decoder_provider : public cudaq::ExtraPayloadProvider {
-  /// The configuration YML string for the decoder to be injected to job
-  /// requests.
-  // Note: we convert the multi_decoder_config to a YAML string so that it can
-  // be reused across multiple requests without needing to re-parse the YAML
-  // each time.
-  std::string decoderConfigYmlStr;
-
-public:
-  decoder_provider(cudaq::qec::decoding::config::multi_decoder_config &config)
-      : decoderConfigYmlStr(config.to_yaml_str()) {}
-  virtual ~decoder_provider() = default;
-  virtual std::string name() const override { return "decoder"; }
-  virtual std::string getPayloadType() const override {
-    return "gpu_decoder_config";
-  }
-  virtual std::string
-  getExtraPayload(const cudaq::RuntimeTarget &target) override {
-    return decoderConfigYmlStr;
-  }
-};
-} // namespace
-
 namespace cudaq::qec::decoding::config {
+
 int configure_decoders(multi_decoder_config &config) {
   CUDA_QEC_INFO("Initializing realtime decoding library with config object");
-  // Register the decoder provider to inject the decoder configuration into
-  // the job requests.
-  cudaq::registerExtraPayloadProvider(
-      std::make_unique<decoder_provider>(config));
+  // Publish the decoder configuration so CUDA-Q can inject it into
+  // remote-target job requests. The cudaq integration (ExtraPayloadProvider) is
+  // installed by cudaq-qec at load time; this call is a no-op when cudaq-qec is
+  // not loaded, keeping this library free of any direct cudaq-common
+  // dependency.
+  cudaq::qec::publish_decoder_config_payload(config.to_yaml_str());
   return cudaq::qec::decoding::host::configure_decoders(config);
 }
 

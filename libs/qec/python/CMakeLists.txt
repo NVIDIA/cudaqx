@@ -41,6 +41,7 @@ cudaqx_add_pymodule(${MODULE_NAME}
 target_link_libraries(${MODULE_NAME}
   PRIVATE
     cudaq-qec
+    cudaq-qec-decoders
     cudaq-qec-realtime-decoding
     cudaq::cudaq-python-interop
     cudaq::cudaq-mlir-runtime

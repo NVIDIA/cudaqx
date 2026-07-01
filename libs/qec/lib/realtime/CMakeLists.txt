@@ -157,11 +157,10 @@ target_link_options(cudaq-qec-realtime-decoding PRIVATE
 
 target_link_libraries(cudaq-qec-realtime-decoding
   PUBLIC 
-    cudaqx-core
-    cudaq-qec
+    cudaq-qec-decoders
   PRIVATE
-    cudaq::cudaq-common
     LLVMSupport
+    CUDA::cudart
     $<$<BOOL:${CUDAQ_REALTIME_LIBRARY}>:${CUDAQ_REALTIME_LIBRARY}>
     $<$<BOOL:${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}>:${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}>
 )
@@ -229,7 +228,7 @@ if(CMAKE_CUDA_COMPILER AND CUDAQ_REALTIME_INCLUDE_DIR)
         POSITION_INDEPENDENT_CODE ON
         LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
         BUILD_RPATH "${_CUDAQ_RT_LIB_DIR};${CMAKE_BINARY_DIR}/lib"
-      )
+        INSTALL_RPATH "${_CUDAQ_RT_LIB_DIR};$ORIGIN")
 
       install(TARGETS cudaq-realtime-pipeline
         COMPONENT qec-lib

@@ -25,7 +25,7 @@ include(GoogleTest)
 add_compile_options(-Wno-attributes) 
 
 add_executable(test_pymatching test_pymatching.cpp)
-target_link_libraries(test_pymatching PRIVATE GTest::gtest_main cudaq-qec cudaq::cudaq)
+target_link_libraries(test_pymatching PRIVATE GTest::gtest_main cudaq-qec-decoders)
 add_dependencies(CUDAQXQECUnitTests test_pymatching)
 gtest_discover_tests(test_pymatching)
 
@@ -40,9 +40,8 @@ if(CUDAQ_REALTIME_ROOT AND CUDAQ_REALTIME_INCLUDE_DIR)
     CUDAQ_REALTIME_ROOT)
   target_link_libraries(test_pymatching_realtime PRIVATE
     GTest::gtest_main
-    cudaq-qec
+    cudaq-qec-decoders
     cudaq-qec-realtime-decoding
-    cudaq::cudaq
   )
   set_target_properties(test_pymatching_realtime PROPERTIES
     BUILD_RPATH "${CMAKE_BINARY_DIR}/lib;${CMAKE_BINARY_DIR}/lib/decoder-plugins"

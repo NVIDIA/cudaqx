@@ -35,14 +35,14 @@ find_package(CUDAToolkit REQUIRED)
 add_compile_options(-Wno-attributes) 
 
 add_executable(test_decoders test_decoders.cpp decoders/sample_decoder.cpp)
-target_link_libraries(test_decoders PRIVATE GTest::gtest_main cudaq-qec cudaq-qec-realtime-decoding cudaq::cudaq libstim)
+target_link_libraries(test_decoders PRIVATE GTest::gtest_main cudaq-qec-decoders libstim)
 add_dependencies(CUDAQXQECUnitTests test_decoders)
 gtest_discover_tests(test_decoders)
 
 add_executable(test_decoders_yaml test_decoders_yaml.cpp decoders/sample_decoder.cpp)
 target_link_libraries(test_decoders_yaml PRIVATE
   GTest::gtest_main
-  cudaq-qec
+  cudaq-qec-decoders
   cudaq-qec-realtime-decoding
   cudaq-qec-realtime-decoding-simulation
   cudaq::cudaq)
@@ -62,13 +62,13 @@ add_dependencies(CUDAQXQECUnitTests test_dem_sampling)
 gtest_discover_tests(test_dem_sampling)
 
 add_executable(test_sparse_binary_matrix test_sparse_binary_matrix.cpp)
-target_link_libraries(test_sparse_binary_matrix PRIVATE GTest::gtest_main cudaq-qec
-                                               cudaq::cudaq)
+target_link_libraries(test_sparse_binary_matrix PRIVATE GTest::gtest_main
+                                               cudaq-qec-decoders)
 add_dependencies(CUDAQXQECUnitTests test_sparse_binary_matrix)
 gtest_discover_tests(test_sparse_binary_matrix)
 
 add_executable(test_logger test_logger.cpp)
-target_link_libraries(test_logger PRIVATE GTest::gtest_main cudaq-qec cudaq::cudaq)
+target_link_libraries(test_logger PRIVATE GTest::gtest_main cudaq-qec-decoders)
 add_dependencies(CUDAQXQECUnitTests test_logger)
 gtest_discover_tests(test_logger)
 
@@ -107,7 +107,7 @@ if(CUDAQ_QEC_TRT_DECODER_ENABLED AND CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64)|(A
       ${TENSORRT_INCLUDE_DIR}
   )
 
-  target_link_libraries(test_trt_decoder PRIVATE GTest::gtest_main cudaq-qec cudaq-qec-trt-decoder cudaq::cudaq CUDA::cudart ${TENSORRT_LIBRARY})
+  target_link_libraries(test_trt_decoder PRIVATE GTest::gtest_main cudaq-qec-decoders cudaq-qec-trt-decoder CUDA::cudart ${TENSORRT_LIBRARY})
 
   find_package(Python COMPONENTS Interpreter QUIET)
   if(Python_Interpreter_FOUND)
