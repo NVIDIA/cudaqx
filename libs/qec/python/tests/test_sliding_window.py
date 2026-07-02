@@ -33,8 +33,14 @@ def test_sliding_window_1(decoder_name, batched, num_rounds, num_windows):
     statePrep = qec.operation.prep0
     nShots = 1000
 
-    dem = qec.z_dem_from_memory_circuit(code, statePrep, num_rounds, noise)
-    num_syndromes_per_round = dem.detector_error_matrix.shape[0] // num_rounds
+    dem = qec.z_dem_from_memory_circuit(code,
+                                        statePrep,
+                                        num_rounds,
+                                        noise,
+                                        decompose_errors=True)
+    num_syndromes_per_round = code.get_num_z_stabilizers()
+    effective_num_rounds = (dem.detector_error_matrix.shape[0] //
+                            num_syndromes_per_round)
 
     # Inject only one error per shot. This will keep the number of mismatches
     # low, and any debug should be straightforward.
@@ -55,12 +61,11 @@ def test_sliding_window_1(decoder_name, batched, num_rounds, num_windows):
     full_decoder = qec.get_decoder(decoder_name,
                                    dem.detector_error_matrix,
                                    merge_strategy='smallest_weight')
-    num_syndromes_per_round = dem.detector_error_matrix.shape[0] // num_rounds
 
     sw_as_full_decoder = qec.get_decoder(
         "sliding_window",
         dem.detector_error_matrix,
-        window_size=num_rounds - num_windows + 1,
+        window_size=effective_num_rounds - num_windows + 1,
         step_size=1,
         num_syndromes_per_round=num_syndromes_per_round,
         straddle_start_round=False,

@@ -251,8 +251,8 @@ TEST(QECCodeTester, checkSampleMemoryCircuit) {
       auto [syndromes, d] = cudaq::qec::sample_memory_circuit(
           *steane, cudaq::qec::operation::prep0, nShots, nRounds);
       syndromes.dump();
-      EXPECT_EQ(syndromes.shape()[0], nShots * nRounds);
-      EXPECT_EQ(syndromes.shape()[1], 6);
+      EXPECT_EQ(syndromes.shape()[0], nShots);
+      EXPECT_EQ(syndromes.shape()[1], 24u);
 
       // No noise here, should be all zeros
       int sum = 0;
@@ -751,14 +751,15 @@ TEST(QECCodeTester, checkRepetition) {
         cudaq::qec::sample_memory_circuit(*repetition, nShots, nRounds);
     syndromes.dump();
     data_mz.dump();
-    EXPECT_EQ(nShots * nRounds, syndromes.shape()[0]);
-    EXPECT_EQ(parity.shape()[0], syndromes.shape()[1]);
-    EXPECT_EQ(nShots, data_mz.shape()[0]);
-    EXPECT_EQ(parity_z.shape()[1], data_mz.shape()[1]);
-    // No noise here, should be all zeros
+    EXPECT_EQ(syndromes.shape()[0], static_cast<std::size_t>(nShots));
+    EXPECT_EQ(syndromes.shape()[1], 40u);
+    EXPECT_EQ(data_mz.shape()[0], static_cast<std::size_t>(nShots));
+    EXPECT_EQ(data_mz.shape()[1], parity_z.shape()[1]);
+
+    // No noise here, all detectors should be zero
     int sum = 0;
-    for (std::size_t i = 0; i < nShots - 1; i++)
-      for (std::size_t j = 0; j < parity.shape()[0]; j++)
+    for (std::size_t i = 0; i < syndromes.shape()[0]; i++)
+      for (std::size_t j = 0; j < syndromes.shape()[1]; j++)
         sum += syndromes.at({i, j});
 
     EXPECT_TRUE(sum == 0);
