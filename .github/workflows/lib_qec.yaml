@@ -244,22 +244,28 @@ jobs:
   # Multi-GPU tests - decoder placement across >= 2 GPUs (uses build artifacts
   # from build-and-test).
   #
-  # NVIDIA GHA runner labels follow linux-<arch>-gpu-<model>-latest-<gpu-count>;
-  # this job needs the 2-GPU variant. It runs on merges to the default branch
-  # and on manual dispatch only, to keep multi-GPU capacity out of the per-PR
-  # critical path; timeout-minutes turns a missing runner label into a visible
-  # failure instead of an indefinite queue.
+  # NVIDIA GHA runner labels are not fully derivable across runner families, so
+  # keep full labels in the matrix and use runner.arch for matching build
+  # artifacts and containers.
   # ==========================================================================
   multi-gpu-test:
-    name: Multi-GPU tests
+    name: Multi-GPU tests (${{ matrix.runner.arch }}, CUDA ${{ matrix.cuda_version }})
     needs: build-and-test
     strategy:
       fail-fast: false
       matrix:
-        cuda_version: ['12.6', '13.0']
-    runs-on: nv-gpu-amd64-rtxpro6000-2gpu
+        include:
+          - runner:
+              arch: amd64
+              label: nv-gpu-amd64-rtxpro6000-2gpu
+            cuda_version: '13.0'
+          - runner:
+              arch: arm64
+              label: linux-arm64-gpu-l4-latest-2
+            cuda_version: '13.0'
+    runs-on: ${{ matrix.runner.label }}
     container:
-      image: ghcr.io/nvidia/cuda-quantum-devcontainer:amd64-cu${{ matrix.cuda_version }}-gcc12-main
+      image: ghcr.io/nvidia/cuda-quantum-devcontainer:${{ matrix.runner.arch }}-cu${{ matrix.cuda_version }}-gcc12-main
       # SYS_NICE: see build-and-test.
       options: --cap-add=SYS_NICE
       env:
@@ -284,7 +290,7 @@ jobs:
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
-          name: qec-build-amd64-cu${{ matrix.cuda_version }}
+          name: qec-build-${{ matrix.runner.arch }}-cu${{ matrix.cuda_version }}
           path: /tmp
 
       - name: Extract build artifacts
@@ -308,10 +314,18 @@ jobs:
         run: |
           pip install --upgrade "cuquantum-python-cu${{ steps.config.outputs.cuda_major }}>=26.3.0"
 
-      - name: Install TensorRT (C++)
+      - name: Install TensorRT (C++, amd64)
+        if: matrix.runner.arch == 'amd64'
         run: |
           apt update
           apt-cache search tensorrt | awk '{print "Package: "$1"\nPin: version *+cuda${{ matrix.cuda_version }}\nPin-Priority: 1001\n"}' | tee /etc/apt/preferences.d/tensorrt-cuda${{ matrix.cuda_version }}.pref > /dev/null
+          apt install -y tensorrt-dev
+
+      - name: Install TensorRT (C++, arm64)
+        if: matrix.runner.arch == 'arm64' && !startsWith(matrix.cuda_version, '12')
+        run: |
+          apt update
+          apt-cache search tensorrt | awk '{print "Package: "$1"\nPin: version *+cuda13.0\nPin-Priority: 1001\n"}' | tee /etc/apt/preferences.d/tensorrt-cuda13.0.pref > /dev/null
           apt install -y tensorrt-dev
 
       - name: Run multi-GPU C++ tests
