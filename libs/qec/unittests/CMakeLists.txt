@@ -67,6 +67,11 @@ target_link_libraries(test_sparse_binary_matrix PRIVATE GTest::gtest_main cudaq-
 add_dependencies(CUDAQXQECUnitTests test_sparse_binary_matrix)
 gtest_discover_tests(test_sparse_binary_matrix)
 
+add_executable(test_logger test_logger.cpp)
+target_link_libraries(test_logger PRIVATE GTest::gtest_main cudaq-qec cudaq::cudaq)
+add_dependencies(CUDAQXQECUnitTests test_logger)
+gtest_discover_tests(test_logger)
+
 # TensorRT decoder test is only built for x86 architectures
 if(CUDAQ_QEC_TRT_DECODER_ENABLED AND CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64)|(AMD64|amd64)|(^i.86$)")
   add_executable(test_trt_decoder ./decoders/trt_decoder/test_trt_decoder.cpp)

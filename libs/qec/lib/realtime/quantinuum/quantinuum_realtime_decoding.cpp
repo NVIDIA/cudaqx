@@ -7,7 +7,7 @@
  ******************************************************************************/
 
 #include "common/Environment.h"
-#include "cudaq/runtime/logger/logger.h"
+#include "cudaq/qec/logger.h"
 
 #include "quantinuum_decoding.h"
 #include "../realtime_decoding.h"
@@ -83,8 +83,9 @@ static quantinuum_private_handler z_quantinuum_private_handler;
 void enqueue_syndromes_ui64(std::uint64_t decoder_id,
                             std::uint64_t syndrome_size, std::uint64_t syndrome,
                             std::uint64_t tag) {
-  CUDAQ_INFO("Entering enqueue_syndromes_ui64 for decoder id: {} and tag: {}",
-             decoder_id, tag);
+  CUDA_QEC_INFO(
+      "Entering enqueue_syndromes_ui64 for decoder id: {} and tag: {}",
+      decoder_id, tag);
   if (z_use_private_impl) {
     z_quantinuum_private_handler.enqueue_syndromes_ui64_private(
         decoder_id, syndrome_size, syndrome, tag);
@@ -100,7 +101,7 @@ void enqueue_syndromes_ui64(std::uint64_t decoder_id,
 std::uint64_t get_corrections_ui64(std::uint64_t decoder_id,
                                    std::uint64_t return_size,
                                    std::uint64_t reset) {
-  CUDAQ_INFO("Entering get_corrections_ui64 for decoder id: {}", decoder_id);
+  CUDA_QEC_INFO("Entering get_corrections_ui64 for decoder id: {}", decoder_id);
   if (z_use_private_impl) {
     return z_quantinuum_private_handler.get_corrections_ui64_private(
         decoder_id, return_size, reset);
@@ -118,7 +119,7 @@ std::uint64_t get_corrections_ui64(std::uint64_t decoder_id,
 }
 
 void reset_decoder_ui64(std::uint64_t decoder_id) {
-  CUDAQ_INFO("Entering reset_decoder_ui64 for decoder id: {}", decoder_id);
+  CUDA_QEC_INFO("Entering reset_decoder_ui64 for decoder id: {}", decoder_id);
   if (z_use_private_impl) {
     z_quantinuum_private_handler.reset_decoder_ui64_private(decoder_id);
   } else {
