@@ -13,6 +13,7 @@
 #include "cuda-qx/core/tensor.h"
 #include "sparse_binary_matrix.h"
 #include "cudaq/qec/detector_error_model.h"
+#include "cudaq/qec/device_affinity.h"
 #include <algorithm>
 #include <functional>
 #include <future>
@@ -245,6 +246,30 @@ public:
   std::size_t get_block_size() { return block_size; }
   std::size_t get_syndrome_size() { return syndrome_size; }
 
+  /// @brief Store hardware affinity parameters read from the constructor params
+  /// map. Called by decoder::get() after the plugin constructor returns.
+  /// Not intended for direct use by plugin authors.
+  void set_hardware_params(const cudaqx::heterogeneous_map &params);
+
+  /// @brief Target NUMA node for this decoder (-1 = no binding).
+  int numa_node_id() const { return numa_node_id_; }
+
+  /// @brief Target CUDA device for this decoder (-1 = inherit caller's device).
+  int cuda_device_id() const { return cuda_device_id_; }
+
+  /// @brief Persistently bind the CALLING thread to this decoder's NUMA node
+  /// (and CUDA device). Call once from the thread that will own decode()/
+  /// enqueue for this decoder (e.g. a realtime worker). No restore.
+  /// @return the node bound to, or -1 if nothing was applied. Warns if a node
+  /// was requested (>= 0) but could not be honored.
+  int bind_current_thread();
+
+  /// @brief Run decode(syndrome) on a fresh worker thread bound (via
+  /// bind_current_thread) to this decoder's CUDA device / NUMA node, and return
+  /// the result. Convenience for a one-off pinned decode; for sustained
+  /// throughput drive decode on a long-lived bound thread instead.
+  decoder_result decode_on_pinned_thread(const std::vector<float_t> &syndrome);
+
   // -- Begin realtime decoding API --
 
   // Note: all of the current realtime decoding API is designed to be used with
@@ -357,8 +382,28 @@ protected:
   /// @brief The decoder's D matrix in sparse format
   std::vector<std::vector<uint32_t>> D_sparse;
 
+  /// Target CUDA device for this decoder. -1 = inherit caller's device (no-op).
+  int cuda_device_id_ = -1;
+  /// Target NUMA node for this decoder. -1 = no binding.
+  int numa_node_id_ = -1;
+  /// Set once bind_current_thread() has pinned the owning thread, so the
+  /// synchronous decode_batch() guard can skip its redundant set/restore.
+  bool bound_persistently_ = false;
+  /// NUMA memory-policy mode for this decoder (default soft PREFERRED).
+  cudaq::qec::mempolicy_mode mempolicy_ = cudaq::qec::mempolicy_mode::preferred;
+  /// Explicit CPU cores for this decoder's owning thread (empty = use node
+  /// cpuset).
+  std::vector<int> cpu_affinity_;
+  /// Set once the current-device mismatch warning has fired, so it prints at
+  /// most once per decoder instance.
+  bool device_mismatch_warned_ = false;
+
 private:
   decode_result_type result_type_ = decode_result_type::decode_to_errs;
+
+  /// Warn (once) if this decoder has an explicit cuda_device_id and the
+  /// calling thread's current CUDA device does not match it.
+  void warn_if_device_mismatch();
 };
 
 /// @brief Convert a single soft probability to a hard 0/1 decision.

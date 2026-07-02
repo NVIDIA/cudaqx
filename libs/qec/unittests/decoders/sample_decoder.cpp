@@ -7,6 +7,7 @@
  ******************************************************************************/
 
 #include "cudaq/qec/decoder.h"
+#include <cuda_runtime.h>
 #include <vector>
 
 using namespace cudaqx;
@@ -49,5 +50,89 @@ public:
 };
 
 CUDAQ_EXT_PT_REGISTER_TYPE(sample_decoder)
+
+/// @brief Test-only decoder shaped like a typical GPU decoder: it overrides
+/// ONLY the single-syndrome decode() (NOT decode_batch) and "allocates lazily"
+/// on first decode(). It reports, via result.result[0], the CUDA device its
+/// allocation actually landed on — so a test can assert cuda_device_id was
+/// honored on whichever entry point invoked it.
+class device_probe_decoder : public decoder {
+public:
+  device_probe_decoder(const cudaq::qec::sparse_binary_matrix &H,
+                       const cudaqx::heterogeneous_map &params)
+      : decoder(H) {}
+
+  virtual decoder_result decode(const std::vector<float_t> &syndrome) override {
+    decoder_result result;
+    result.converged = true;
+    int dev = -1;
+    void *p = nullptr;
+    if (cudaMalloc(&p, 16) == cudaSuccess && p) {
+      cudaPointerAttributes attr{};
+      if (cudaPointerGetAttributes(&attr, p) == cudaSuccess)
+        dev = attr.device; // device the lazy allocation landed on
+      cudaFree(p);
+    } else {
+      cudaGetDevice(&dev);
+    }
+    result.result = std::vector<float_t>{static_cast<float_t>(dev)};
+    return result;
+  }
+
+  virtual ~device_probe_decoder() {}
+
+  CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
+      device_probe_decoder, static std::unique_ptr<decoder> create(
+                                const cudaq::qec::decoder_init &init,
+                                const cudaqx::heterogeneous_map &params) {
+        return cudaq::qec::make_pcm_decoder<device_probe_decoder>(init, params);
+      })
+};
+
+CUDAQ_EXT_PT_REGISTER_TYPE(device_probe_decoder)
+
+/// @brief Test-only decoder shaped like a typical GPU decoder that allocates
+/// eagerly at construction (like production GPU decoders), so a test can
+/// assert the construct-time device guard placed it correctly. The device its
+/// constructor-time allocation landed on is recorded in a member and echoed
+/// back by decode() via result.result[0].
+class eager_device_probe_decoder : public decoder {
+private:
+  int device_ = -1;
+
+public:
+  eager_device_probe_decoder(const cudaq::qec::sparse_binary_matrix &H,
+                             const cudaqx::heterogeneous_map &params)
+      : decoder(H) {
+    void *p = nullptr;
+    if (cudaMalloc(&p, 16) == cudaSuccess && p) {
+      cudaPointerAttributes attr{};
+      if (cudaPointerGetAttributes(&attr, p) == cudaSuccess)
+        device_ = attr.device; // device the eager allocation landed on
+      cudaFree(p);
+    } else {
+      cudaGetDevice(&device_);
+    }
+  }
+
+  virtual decoder_result decode(const std::vector<float_t> &syndrome) override {
+    decoder_result result;
+    result.converged = true;
+    result.result = std::vector<float_t>{static_cast<float_t>(device_)};
+    return result;
+  }
+
+  virtual ~eager_device_probe_decoder() {}
+
+  CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
+      eager_device_probe_decoder, static std::unique_ptr<decoder> create(
+                                      const cudaq::qec::decoder_init &init,
+                                      const cudaqx::heterogeneous_map &params) {
+        return cudaq::qec::make_pcm_decoder<eager_device_probe_decoder>(init,
+                                                                        params);
+      })
+};
+
+CUDAQ_EXT_PT_REGISTER_TYPE(eager_device_probe_decoder)
 
 } // namespace cudaq::qec

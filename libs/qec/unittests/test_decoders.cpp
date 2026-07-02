@@ -12,10 +12,15 @@
 #include "cudaq/qec/pcm_utils.h"
 #include <cmath>
 #include <cstdlib>
+#include <cuda_runtime.h>
 #include <future>
 #include <gtest/gtest.h>
 #include <optional>
 #include <random>
+#include <thread>
+#if defined(__linux__)
+#include <sched.h>
+#endif
 
 namespace {
 class ScopedEnv {
@@ -224,6 +229,16 @@ TEST(SampleDecoder, RealtimeApiAndDefaultGraphHooks) {
 
   // Longer input than the configured measurement buffer is rejected.
   EXPECT_FALSE(decoder->enqueue_syndrome(msyn.data(), msyn.size() + 1));
+}
+
+TEST(SampleDecoder, AcceptsNumaNodeId) {
+  std::size_t block_size = 10, syndrome_size = 5;
+  cudaqx::tensor<uint8_t> H({syndrome_size, block_size});
+  auto H_sparse = cudaq::qec::sparse_binary_matrix(H);
+  cudaqx::heterogeneous_map params;
+  params.insert("numa_node_id", 0); // node 0 always exists
+  auto d = cudaq::qec::decoder::get("sample_decoder", H_sparse, params);
+  ASSERT_NE(d, nullptr);
 }
 
 TEST(DecoderPlugins, SingleErrorLutExample_DecodesSingletonColumnSyndromes) {
@@ -956,6 +971,130 @@ TEST(StimDemGetDecoder, ThrowsOnProbabilityOutOfRange) {
                std::runtime_error);
 }
 
+TEST(HardwarePinning, AccessorsReturnStoredValues) {
+  cudaqx::tensor<uint8_t> H({2, 3});
+  cudaqx::heterogeneous_map params;
+  params.insert("numa_node_id", 0);
+  auto d = cudaq::qec::decoder::get("multi_error_lut", H, params);
+  EXPECT_EQ(d->numa_node_id(), 0);
+  EXPECT_EQ(d->cuda_device_id(), -1); // unset
+}
+
+TEST(HardwarePinning, BindCurrentThreadNoopWhenUnset) {
+  cudaqx::tensor<uint8_t> H({2, 3});
+  cudaqx::heterogeneous_map params; // no numa_node_id
+  auto d = cudaq::qec::decoder::get("multi_error_lut", H, params);
+  EXPECT_EQ(d->bind_current_thread(), -1); // nothing to bind
+}
+
+TEST(HardwarePinning, DecodeStillWorksAfterBind) {
+  cudaqx::tensor<uint8_t> H({2, 3});
+  cudaqx::heterogeneous_map params;
+  auto d = cudaq::qec::decoder::get("multi_error_lut", H, params);
+  d->bind_current_thread(); // no-op at -1, but must not break decode
+  std::vector<std::vector<cudaq::qec::float_t>> batch = {{0.1f, 0.1f}};
+  auto results = d->decode_batch(batch);
+  EXPECT_EQ(results.size(), 1u);
+}
+
+TEST(CudaDeviceId, OutOfRangeThrowsForAnyDecoder) {
+  // A device id beyond the available devices is rejected during construction
+  // for any decoder, including CPU ones.
+  cudaqx::tensor<uint8_t> H({2, 3});
+  cudaqx::heterogeneous_map params;
+  params.insert("cuda_device_id", 999999);
+  EXPECT_THROW(cudaq::qec::decoder::get("multi_error_lut", H, params),
+               std::runtime_error);
+}
+
+TEST(CudaDeviceId, DecodeAsyncRestoresCallerDevice) {
+  // Verify decoder::get() does not corrupt the calling thread's current device.
+  int count = 0;
+  cudaGetDeviceCount(&count);
+  if (count < 2)
+    GTEST_SKIP() << "needs >= 2 GPUs";
+
+  cudaSetDevice(0); // caller stays on device 0
+  cudaqx::tensor<uint8_t> H({2, 3});
+  cudaqx::heterogeneous_map params;
+  params.insert("cuda_device_id", 1); // decoder assigned to device 1
+
+  // multi_error_lut is a CPU decoder -- it does nothing on device 1 itself,
+  // but the base class guard must still set device 1 in the async thread
+  // and then restore device 0 on the calling thread after get().
+  auto d = cudaq::qec::decoder::get("multi_error_lut", H, params);
+
+  std::vector<cudaq::qec::float_t> syn = {0.1f, 0.1f};
+  auto fut = d->decode_async(syn);
+  fut.get(); // wait for completion
+
+  int restored = -1;
+  cudaGetDevice(&restored);
+  EXPECT_EQ(restored, 0)
+      << "calling thread device not restored after decode_async";
+}
+
+// On a multi-GPU box: after binding the caller to device 1, decode_batch must
+// NOT restore the caller to device 0 (it should leave the persistent binding
+// in place). Skipped where < 2 GPUs.
+TEST(HardwarePinning, DecodeBatchLeavesPersistentDeviceBinding) {
+  int count = 0;
+  cudaGetDeviceCount(&count);
+  if (count < 2)
+    GTEST_SKIP() << "needs >= 2 GPUs";
+
+  cudaSetDevice(0);
+  cudaqx::tensor<uint8_t> H({2, 3});
+  cudaqx::heterogeneous_map params;
+  params.insert("cuda_device_id", 1);
+  auto d = cudaq::qec::decoder::get("multi_error_lut", H, params);
+
+  d->bind_current_thread(); // caller now persistently on device 1
+  std::vector<std::vector<cudaq::qec::float_t>> batch = {{0.1f, 0.1f}};
+  (void)d->decode_batch(batch);
+
+  int dev = -1;
+  cudaGetDevice(&dev);
+  EXPECT_EQ(dev, 1) << "decode_batch restored device despite persistent bind";
+}
+
+TEST(HardwarePinning, BindCurrentThreadAppliesCpuAffinity) {
+  cudaqx::tensor<uint8_t> H({2, 3});
+  cudaqx::heterogeneous_map params;
+  params.insert("cpu_affinity", std::vector<int>{0});
+  auto d = cudaq::qec::decoder::get("multi_error_lut", H, params);
+  std::thread t([&] {
+    d->bind_current_thread();
+#if defined(__linux__)
+    cpu_set_t have;
+    CPU_ZERO(&have);
+    sched_getaffinity(0, sizeof(have), &have);
+    EXPECT_TRUE(CPU_ISSET(0, &have));
+    EXPECT_EQ(CPU_COUNT(&have), 1);
+#endif
+  });
+  t.join();
+}
+
+// NOTE: construction (decoder::get) already runs CudaDeviceGuard ctor_dev(dev)
+// before the decoder object is created/returned, so an out-of-range
+// cuda_device_id throws AT CONSTRUCTION, not inside bind_current_thread().
+// bind_current_thread() is hardened the same way (see decoder.cpp) for the
+// case where a decoder is constructed with cuda_device_id unset/valid and a
+// caller later attempts to bind to an out-of-range device directly, but this
+// test's OOB device is supplied via decoder::get()'s param_map, so the throw
+// fires during get() itself. Assert the throw at the layer where it actually
+// fires: construction.
+TEST(HardwarePinning, BindCurrentThreadThrowsOnOutOfRangeDevice) {
+  int n = 0;
+  cudaGetDeviceCount(&n);
+  cudaqx::tensor<uint8_t> H({2, 3});
+  cudaqx::heterogeneous_map params;
+  params.insert("cuda_device_id", n + 100); // guaranteed OOB
+  EXPECT_THROW(cudaq::qec::decoder::get("multi_error_lut", H, params),
+               std::runtime_error);
+}
+
 TEST(StimDemGetDecoder, ThrowsOnMalformedStimDem) {
   EXPECT_THROW(cudaq::qec::get_decoder("single_error_lut", "not a valid DEM"),
                std::runtime_error);
@@ -1189,4 +1328,180 @@ TEST(SlidingWindowDecoder, BaseStreamingCopiesFirstRoundDetectors) {
   EXPECT_FALSE(decoder->enqueue_syndrome(first_round))
       << "First-round detector copy runs, but the sliding window is not full "
          "yet so no final correction is committed.";
+}
+
+// GPU placement: cuda_device_id must be honored across the decode entry points.
+// A decoder that overrides only decode() and allocates lazily still lands on
+// the assigned GPU when its owning thread is pinned via bind_current_thread().
+
+TEST(HardwarePinningGpu, RawDecodeOnPinnedThreadUsesAssignedGpu) {
+  int n = 0;
+  cudaGetDeviceCount(&n);
+  if (n < 2)
+    GTEST_SKIP() << "needs >= 2 GPUs";
+  cudaSetDevice(0);
+  cudaqx::tensor<uint8_t> H({2, 3});
+  cudaqx::heterogeneous_map p;
+  p.insert("cuda_device_id", 1);
+  auto d = cudaq::qec::decoder::get("device_probe_decoder", H, p);
+  int observed = -1;
+  std::size_t sz = 0;
+  std::thread worker([&] {
+    d->bind_current_thread(); // owns this decoder; pins current device to 1
+    auto r = d->decode(std::vector<cudaq::qec::float_t>{0.1f, 0.1f});
+    sz = r.result.size();
+    if (sz)
+      observed = static_cast<int>(r.result[0]);
+  });
+  worker.join();
+  ASSERT_EQ(sz, 1u);
+  EXPECT_EQ(observed, 1)
+      << "decode() on a pinned worker did not use the assigned GPU";
+}
+
+// Two logical patches on two GPUs: each decoder, pinned to its own GPU on its
+// own worker thread, decodes on its assigned GPU with no cross-talk.
+TEST(HardwarePinningGpu, MultiPatchOnPinnedThreadsUseDistinctGpus) {
+  int n = 0;
+  cudaGetDeviceCount(&n);
+  if (n < 2)
+    GTEST_SKIP() << "needs >= 2 GPUs";
+  cudaSetDevice(0);
+  cudaqx::tensor<uint8_t> H({2, 3});
+  cudaqx::heterogeneous_map p0;
+  p0.insert("cuda_device_id", 0);
+  cudaqx::heterogeneous_map p1;
+  p1.insert("cuda_device_id", 1);
+  auto d0 = cudaq::qec::decoder::get("device_probe_decoder", H, p0);
+  auto d1 = cudaq::qec::decoder::get("device_probe_decoder", H, p1);
+  int o0 = -1, o1 = -1;
+  std::thread t0([&] {
+    d0->bind_current_thread();
+    auto r = d0->decode(std::vector<cudaq::qec::float_t>{0.1f, 0.1f});
+    if (r.result.size())
+      o0 = static_cast<int>(r.result[0]);
+  });
+  std::thread t1([&] {
+    d1->bind_current_thread();
+    auto r = d1->decode(std::vector<cudaq::qec::float_t>{0.1f, 0.1f});
+    if (r.result.size())
+      o1 = static_cast<int>(r.result[0]);
+  });
+  t0.join();
+  t1.join();
+  EXPECT_EQ(o0, 0) << "patch 0 did not use GPU 0";
+  EXPECT_EQ(o1, 1) << "patch 1 did not use GPU 1";
+}
+
+// decode_async applies the device guard on its worker, so it honors
+// cuda_device_id.
+TEST(HardwarePinningGpu, DecodeAsyncHonorsCudaDeviceId) {
+  int n = 0;
+  cudaGetDeviceCount(&n);
+  if (n < 2)
+    GTEST_SKIP() << "needs >= 2 GPUs";
+  cudaSetDevice(0);
+  cudaqx::tensor<uint8_t> H({2, 3});
+  cudaqx::heterogeneous_map p;
+  p.insert("cuda_device_id", 1);
+  auto d = cudaq::qec::decoder::get("device_probe_decoder", H, p);
+  auto fut = d->decode_async(std::vector<cudaq::qec::float_t>{0.1f, 0.1f});
+  auto r = fut.get();
+  EXPECT_EQ(static_cast<int>(r.result[0]), 1)
+      << "decode_async did not honor cuda_device_id";
+}
+
+// decode_batch applies the device guard, so it honors cuda_device_id.
+TEST(HardwarePinningGpu, DecodeBatchHonorsCudaDeviceId) {
+  int n = 0;
+  cudaGetDeviceCount(&n);
+  if (n < 2)
+    GTEST_SKIP() << "needs >= 2 GPUs";
+  cudaSetDevice(0);
+  cudaqx::tensor<uint8_t> H({2, 3});
+  cudaqx::heterogeneous_map p;
+  p.insert("cuda_device_id", 1);
+  auto d = cudaq::qec::decoder::get("device_probe_decoder", H, p);
+  auto rs = d->decode_batch(
+      std::vector<std::vector<cudaq::qec::float_t>>{{0.1f, 0.1f}});
+  ASSERT_EQ(rs.size(), 1u);
+  EXPECT_EQ(static_cast<int>(rs[0].result[0]), 1)
+      << "decode_batch did not honor cuda_device_id";
+}
+
+// The base-controlled decode(tensor) overload and enqueue_syndrome() both
+// check for a mismatch between an explicit cuda_device_id and the caller's
+// current CUDA device, warning once on stderr rather than silently decoding
+// on the wrong GPU.
+TEST(HardwarePinningGpu, WarnsOnceWhenDecodingOnMismatchedDevice) {
+  int n = 0;
+  cudaGetDeviceCount(&n);
+  if (n < 2)
+    GTEST_SKIP() << "needs >= 2 GPUs";
+  cudaSetDevice(0); // current device 0, but decoder wants 1 -> mismatch
+  cudaqx::tensor<uint8_t> H({2, 3});
+  cudaqx::heterogeneous_map p;
+  p.insert("cuda_device_id", 1);
+  auto d = cudaq::qec::decoder::get("device_probe_decoder", H, p);
+  cudaqx::tensor<uint8_t> syn;
+  std::vector<uint8_t> sv = {1, 0};
+  syn.copy(sv.data(), {2});
+  testing::internal::CaptureStderr();
+  (void)d->decode(syn); // base tensor overload -> warn_if_device_mismatch
+  (void)d->decode(syn); // second call must NOT warn again (once)
+  std::string err = testing::internal::GetCapturedStderr();
+  EXPECT_NE(err.find("cuda_device_id 1"), std::string::npos)
+      << "expected a device-mismatch warning on stderr";
+  // warn-once: the phrase appears exactly once
+  auto first = err.find("but decoding on current device");
+  ASSERT_NE(first, std::string::npos);
+  EXPECT_EQ(err.find("but decoding on current device", first + 1),
+            std::string::npos)
+      << "device-mismatch warning should fire at most once";
+}
+
+// decode_on_pinned_thread spawns a worker, binds it to the decoder's assigned
+// GPU/NUMA node, decodes there, and joins before returning the result.
+TEST(HardwarePinningGpu, DecodeOnPinnedThreadUsesAssignedGpu) {
+  int n = 0;
+  cudaGetDeviceCount(&n);
+  if (n < 2)
+    GTEST_SKIP() << "needs >= 2 GPUs";
+  cudaSetDevice(0);
+  cudaqx::tensor<uint8_t> H({2, 3});
+  cudaqx::heterogeneous_map p;
+  p.insert("cuda_device_id", 1);
+  auto d = cudaq::qec::decoder::get("device_probe_decoder", H, p);
+  auto r =
+      d->decode_on_pinned_thread(std::vector<cudaq::qec::float_t>{0.1f, 0.1f});
+  ASSERT_EQ(r.result.size(), 1u);
+  EXPECT_EQ(static_cast<int>(r.result[0]), 1)
+      << "decode_on_pinned_thread did not run on the assigned GPU";
+}
+
+TEST(HardwarePinning, NumaDerivesFromCudaDeviceOrDegrades) {
+  int n = 0;
+  cudaGetDeviceCount(&n);
+  if (n < 1)
+    GTEST_SKIP() << "needs a GPU";
+  int node = cudaq::qec::numa_node_for_cuda_device(0);
+  EXPECT_GE(node, -1); // real node on multi-node HW, or -1
+  EXPECT_EQ(cudaq::qec::numa_node_for_cuda_device(-1),
+            -1); // negative device -> -1
+}
+TEST(HardwarePinning, GetDecoderSoftDerivesNumaWhenOnlyCudaSet) {
+  int n = 0;
+  cudaGetDeviceCount(&n);
+  if (n < 1)
+    GTEST_SKIP() << "needs a GPU";
+  cudaqx::tensor<uint8_t> H({2, 3});
+  cudaqx::heterogeneous_map params;
+  params.insert("cuda_device_id", 0); // numa_node_id NOT set
+  auto d = cudaq::qec::decoder::get("multi_error_lut", H, params);
+  EXPECT_EQ(d->numa_node_id(),
+            cudaq::qec::numa_node_for_cuda_device(0)); // derivation ran
+}
+TEST(HardwarePinning, NumaAutoDeriveUnknownIsInfoNotThrow) {
+  EXPECT_NO_THROW(
+      { EXPECT_EQ(cudaq::qec::numa_node_for_cuda_device(-1), -1); });
 }

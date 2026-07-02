@@ -208,6 +208,9 @@ private:
   // ---- HOST_LOOP wiring (both modes) ----
   cudaq_host_dispatch_loop_ctx_t host_ctx_{};
   std::thread host_loop_thread_;
+  /// Single NUMA node this session pins to (dispatch thread + ring buffers).
+  /// -1 = no pinning (unset, or decoders disagree — see initialize()).
+  int session_numa_node_ = -1;
   std::uint64_t host_stats_counter_ = 0;
   // Plain (non-pinned) shutdown flag for HOST mode (no device kernel shares
   // it).

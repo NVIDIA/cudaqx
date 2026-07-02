@@ -10,6 +10,8 @@
 
 #include "qec_realtime_session.h"
 
+// Lib-private header one level up (libs/qec/lib); this file lives in realtime/.
+#include "../hardware_affinity.h"
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/realtime/decoder_rpc_ids.h"
 #include "cudaq/qec/realtime/graph_resources.h"
@@ -328,6 +330,31 @@ void qec_realtime_session::initialize() {
   try {
     if (device_mode_)
       capture_decoder_graphs();
+    // Resolve the session NUMA node from the decoders. A single shared dispatch
+    // thread can honor only one node; warn and disable pinning if they
+    // disagree.
+    {
+      int chosen = -1;
+      bool conflict = false;
+      for (const auto &d : decoders_) {
+        const int n = d->numa_node_id();
+        if (n < 0)
+          continue;
+        if (chosen < 0)
+          chosen = n;
+        else if (chosen != n)
+          conflict = true;
+      }
+      if (conflict) {
+        CUDA_QEC_WARN(
+            "realtime decoders request different numa_node_ids; the shared "
+            "host dispatch thread can honor only one. NUMA pinning "
+            "disabled for this session.");
+        session_numa_node_ = -1;
+      } else {
+        session_numa_node_ = chosen;
+      }
+    }
     allocate_ring_buffer();
     populate_function_table();
     if (device_mode_)
@@ -619,6 +646,22 @@ void qec_realtime_session::allocate_ring_buffer() {
     alloc_u64(tx_flags_host_, tx_flags_dev_, "tx_flags");
     alloc_u8(rx_data_host_, rx_data_dev_, "RX ring data");
     alloc_u8(tx_data_host_, tx_data_dev_, "TX ring data");
+    // Migrate the syndrome ring buffers onto the session node so the (pinned)
+    // dispatch thread reads them on-node. calloc already faulted these on the
+    // setup thread, so this relocates the pages (MPOL_MF_MOVE).
+    if (session_numa_node_ >= 0) {
+      using cudaq::qec::detail_affinity::bind_region_to_numa_node;
+      bind_region_to_numa_node((void *)rx_flags_host_,
+                               num_slots_ * sizeof(std::uint64_t),
+                               session_numa_node_);
+      bind_region_to_numa_node((void *)tx_flags_host_,
+                               num_slots_ * sizeof(std::uint64_t),
+                               session_numa_node_);
+      bind_region_to_numa_node((void *)rx_data_host_, num_slots_ * slot_size_,
+                               session_numa_node_);
+      bind_region_to_numa_node((void *)tx_data_host_, num_slots_ * slot_size_,
+                               session_numa_node_);
+    }
   }
 
   std::memset(&ringbuffer_, 0, sizeof(ringbuffer_));
@@ -843,8 +886,12 @@ void qec_realtime_session::start_host_loop() {
     host_ctx_.skip_stream_sweep = true;
     shutdown_flag_ = 0;
 
-    host_loop_thread_ =
-        std::thread([this]() { cudaq_host_dispatcher_loop(&host_ctx_); });
+    const int node = session_numa_node_;
+    host_loop_thread_ = std::thread([this, node]() {
+      // Persistent bind: this thread does nothing but decode for its lifetime.
+      cudaq::qec::detail_affinity::bind_this_thread_to_numa_node(node);
+      cudaq_host_dispatcher_loop(&host_ctx_);
+    });
     return;
   }
 

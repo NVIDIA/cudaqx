@@ -720,3 +720,41 @@ TEST(DecoderConfigTest, SimulationHostPointerWrappersForwardToHostRuntime) {
   EXPECT_EQ(corrections, (std::vector<uint8_t>{0}));
   finalize_decoders();
 }
+
+TEST(DecoderYaml, PinFieldsRoundTrip) {
+  using namespace cudaq::qec::decoding::config;
+  multi_decoder_config multi_config;
+  decoder_config cfg;
+  cfg.id = 0;
+  cfg.type = "multi_error_lut";
+  cfg.block_size = 4;
+  cfg.syndrome_size = 2;
+  cfg.H_sparse = {0, -1, 1, -1};
+  cfg.O_sparse = {};
+  cfg.D_sparse = {};
+  cfg.cuda_device_id = 1;
+  cfg.numa_node_id = 0;
+  multi_config.decoders.push_back(cfg);
+
+  test_decoder_yaml_roundtrip(multi_config);
+
+  auto reparsed =
+      multi_decoder_config::from_yaml_str(multi_config.to_yaml_str(200));
+  ASSERT_EQ(reparsed.decoders.size(), 1u);
+  EXPECT_EQ(reparsed.decoders[0].cuda_device_id, 1);
+  EXPECT_EQ(reparsed.decoders[0].numa_node_id, 0);
+}
+
+TEST(DecoderYaml, PrepareParamsInjectsKeys) {
+  using namespace cudaq::qec::decoding::config;
+  decoder_config cfg;
+  cfg.id = 0;
+  cfg.type = "multi_error_lut";
+  cfg.block_size = 4;
+  cfg.syndrome_size = 2;
+  cfg.cuda_device_id = 1;
+  cfg.numa_node_id = 0;
+  auto params = cudaq::qec::decoding::host::prepare_decoder_params(cfg);
+  EXPECT_TRUE(params.contains("cuda_device_id"));
+  EXPECT_TRUE(params.contains("numa_node_id"));
+}

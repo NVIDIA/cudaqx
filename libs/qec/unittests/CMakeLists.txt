@@ -35,9 +35,16 @@ find_package(CUDAToolkit REQUIRED)
 add_compile_options(-Wno-attributes) 
 
 add_executable(test_decoders test_decoders.cpp decoders/sample_decoder.cpp)
-target_link_libraries(test_decoders PRIVATE GTest::gtest_main cudaq-qec cudaq-qec-realtime-decoding cudaq::cudaq libstim)
+target_link_libraries(test_decoders PRIVATE GTest::gtest_main cudaq-qec cudaq-qec-realtime-decoding cudaq::cudaq libstim CUDA::cudart)
+target_include_directories(test_decoders PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
 add_dependencies(CUDAQXQECUnitTests test_decoders)
 gtest_discover_tests(test_decoders)
+
+add_executable(test_decoder_pool test_decoder_pool.cpp decoders/sample_decoder.cpp)
+target_link_libraries(test_decoder_pool PRIVATE GTest::gtest_main cudaq-qec cudaq::cudaq libstim CUDA::cudart)
+target_include_directories(test_decoder_pool PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+add_dependencies(CUDAQXQECUnitTests test_decoder_pool)
+gtest_discover_tests(test_decoder_pool)
 
 add_executable(test_decoders_yaml test_decoders_yaml.cpp decoders/sample_decoder.cpp)
 target_link_libraries(test_decoders_yaml PRIVATE
@@ -45,9 +52,32 @@ target_link_libraries(test_decoders_yaml PRIVATE
   cudaq-qec
   cudaq-qec-realtime-decoding
   cudaq-qec-realtime-decoding-simulation
-  cudaq::cudaq)
+  cudaq::cudaq
+  CUDA::cudart)
+target_include_directories(test_decoders_yaml PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
 add_dependencies(CUDAQXQECUnitTests test_decoders_yaml)
 gtest_discover_tests(test_decoders_yaml)
+
+# LD_PRELOAD interposer + benchmark/syscall-gate test for hardware pinning.
+add_library(affinity_syscall_shim SHARED support/affinity_syscall_shim.cpp)
+target_link_libraries(affinity_syscall_shim PRIVATE ${CMAKE_DL_LIBS})
+
+add_executable(test_pinning_benchmark test_pinning_benchmark.cpp)
+target_link_libraries(test_pinning_benchmark PRIVATE
+  GTest::gtest_main cudaq-qec cudaq::cudaq CUDA::cudart)
+target_include_directories(test_pinning_benchmark PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+add_dependencies(test_pinning_benchmark affinity_syscall_shim)
+add_dependencies(CUDAQXQECUnitTests test_pinning_benchmark)
+gtest_discover_tests(test_pinning_benchmark
+  PROPERTIES ENVIRONMENT "LD_PRELOAD=$<TARGET_FILE:affinity_syscall_shim>")
+
+add_executable(test_device_affinity test_device_affinity.cpp)
+target_link_libraries(test_device_affinity PRIVATE GTest::gtest_main cudaq-qec cudaq::cudaq CUDA::cudart)
+target_include_directories(test_device_affinity PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../lib
+  ${CUDAToolkit_INCLUDE_DIRS})
+add_dependencies(CUDAQXQECUnitTests test_device_affinity)
+gtest_discover_tests(test_device_affinity)
 
 add_executable(test_qec test_qec.cpp)
 target_link_libraries(test_qec PRIVATE GTest::gtest_main cudaq-qec cudaq::cudaq-stim-target)

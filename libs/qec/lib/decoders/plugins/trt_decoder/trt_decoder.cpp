@@ -888,6 +888,26 @@ decoder_result trt_decoder::decode(const std::vector<float_t> &syndrome) {
 
 std::vector<decoder_result>
 trt_decoder::decode_batch(const std::vector<std::vector<float_t>> &syndromes) {
+  // This override bypasses decoder::decode_batch()'s CudaDeviceGuard; apply it
+  // here so TRT inference lands on the right device regardless of the caller.
+  int _prev_dev = -1;
+  bool _dev_switched = false;
+  if (cuda_device_id_ >= 0) {
+    cudaGetDevice(&_prev_dev);
+    if (_prev_dev != cuda_device_id_) {
+      cudaSetDevice(cuda_device_id_);
+      _dev_switched = true;
+    }
+  }
+  struct _RestoreDevice {
+    int prev;
+    bool active;
+    ~_RestoreDevice() {
+      if (active)
+        cudaSetDevice(prev);
+    }
+  } _dev_guard{_prev_dev, _dev_switched};
+
   // Validate that we have syndromes to decode
   if (syndromes.empty()) {
     return {};
