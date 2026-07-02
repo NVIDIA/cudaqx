@@ -265,6 +265,10 @@ sample_memory_circuit(const code &code, operation statePrep,
   if (!keep_x_stabilizers && !keep_z_stabilizers)
     throw std::runtime_error(
         "sample_memory_circuit error - no stabilizers to keep.");
+  if (numRounds == 0)
+    throw std::runtime_error(
+        "sample_memory_circuit error - numRounds must be >= 1. The memory "
+        "circuit always performs at least one stabilizer measurement round. ");
   if (!code.contains_operation(statePrep))
     throw std::runtime_error(
         "sample_memory_circuit_error - requested state prep kernel not found.");
@@ -439,6 +443,10 @@ dem_from_memory_circuit(const code &code, operation statePrep,
   if (!keep_x_stabilizers && !keep_z_stabilizers)
     throw std::runtime_error("dem_from_memory_circuit error - no stabilizers "
                              "to keep.");
+  if (numRounds == 0)
+    throw std::runtime_error(
+        "dem_from_memory_circuit error - numRounds must be >= 1. The memory "
+        "circuit always performs at least one stabilizer measurement round. ");
   if (!code.contains_operation(statePrep))
     throw std::runtime_error("dem_from_memory_circuit error - requested state "
                              "prep kernel not found.");

@@ -64,11 +64,49 @@ TEST(QECCodeTester, checkRepetitionNoiseStim) {
   }
 }
 
+namespace {
+
+/// @brief Splits a `sample_memory_circuit` syndrome tensor's columns by
+/// stabilizer type. Returns (ancz-derived sum, ancx-derived sum).
+std::pair<std::size_t, std::size_t>
+sumDetectorsByType(const cudaqx::tensor<uint8_t> &syndromes,
+                   std::size_t numRounds, std::size_t numZStabs,
+                   std::size_t numXStabs, bool is_z_prep) {
+  const std::size_t numFixed = is_z_prep ? numZStabs : numXStabs;
+  const std::size_t numSynPerRound = numZStabs + numXStabs;
+  const std::size_t numInteriorRounds = numRounds - 1;
+  const std::size_t numCols = syndromes.shape()[1];
+
+  std::size_t z_type_sum = 0;
+  std::size_t x_type_sum = 0;
+  for (std::size_t i = 0; i < syndromes.shape()[0]; i++) {
+    std::size_t &fixed_sum = is_z_prep ? z_type_sum : x_type_sum;
+    // Boundary detectors
+    for (std::size_t b = 0; b < numFixed; b++) {
+      fixed_sum += syndromes.at({i, b});
+      fixed_sum += syndromes.at({i, numCols - numFixed + b});
+    }
+    // Interior round detectors
+    for (std::size_t round = 0; round < numInteriorRounds; round++) {
+      std::size_t base = numFixed + round * numSynPerRound;
+      for (std::size_t z = 0; z < numZStabs; z++)
+        z_type_sum += syndromes.at({i, base + z});
+      for (std::size_t x = 0; x < numXStabs; x++)
+        x_type_sum += syndromes.at({i, base + numZStabs + x});
+    }
+  }
+  return {z_type_sum, x_type_sum};
+}
+
+} // namespace
+
 TEST(QECCodeTester, checkSteaneNoiseStim) {
 
   auto steane = cudaq::qec::get_code("steane");
   int nShots = 10;
   int nRounds = 3;
+  size_t numAncz = steane->get_num_ancilla_z_qubits();
+  size_t numAncx = steane->get_num_ancilla_x_qubits();
   {
     // two qubit bitflip
     cudaq::set_random_seed(13);
@@ -84,12 +122,12 @@ TEST(QECCodeTester, checkSteaneNoiseStim) {
     EXPECT_EQ(syndromes.shape()[0], nShots); // numShots
     EXPECT_EQ(syndromes.shape()[1], 18);     // numDetectors
 
-    // Noise present — some detectors must fire.
-    int sum = 0;
-    for (std::size_t i = 0; i < syndromes.shape()[0]; i++)
-      for (std::size_t j = 0; j < syndromes.shape()[1]; j++)
-        sum += syndromes.at({i, j});
-    EXPECT_TRUE(sum > 0);
+    // ancx-derived (X-type) detectors must be exactly zero, while the
+    // ancz-derived (Z-type) detectors should fire.
+    auto [z_type_sum, x_type_sum] = sumDetectorsByType(
+        syndromes, nRounds, numAncz, numAncx, /*is_z_prep=*/true);
+    EXPECT_TRUE(z_type_sum > 0);
+    EXPECT_TRUE(x_type_sum == 0);
   }
   {
     // two qubit depol
@@ -105,11 +143,12 @@ TEST(QECCodeTester, checkSteaneNoiseStim) {
     printf("data\n");
     d.dump();
 
-    int sum = 0;
-    for (std::size_t i = 0; i < syndromes.shape()[0]; i++)
-      for (std::size_t j = 0; j < syndromes.shape()[1]; j++)
-        sum += syndromes.at({i, j});
-    EXPECT_TRUE(sum > 0);
+    // Depolarizing noise can introduce both X- and Z-type errors, so both
+    // detector types should fire.
+    auto [z_type_sum, x_type_sum] = sumDetectorsByType(
+        syndromes, nRounds, numAncz, numAncx, /*is_z_prep=*/true);
+    EXPECT_TRUE(z_type_sum > 0);
+    EXPECT_TRUE(x_type_sum > 0);
   }
   {
     // one qubit bitflip
@@ -123,12 +162,12 @@ TEST(QECCodeTester, checkSteaneNoiseStim) {
     syndromes.dump();
     printf("data\n");
     d.dump();
-    // Should have some 1s since it's noisy
-    int sum = 0;
-    for (std::size_t i = 0; i < syndromes.shape()[0]; i++)
-      for (std::size_t j = 0; j < syndromes.shape()[1]; j++)
-        sum += syndromes.at({i, j});
-    EXPECT_TRUE(sum > 0);
+    // This noise only touches ancx (every round) and data (only at the
+    // prep/readout boundary), so Z-type (ancz) detectors can never fire.
+    auto [z_type_sum, x_type_sum] = sumDetectorsByType(
+        syndromes, nRounds, numAncz, numAncx, /*is_z_prep=*/false);
+    EXPECT_TRUE(z_type_sum == 0);
+    EXPECT_TRUE(x_type_sum > 0);
   }
   {
     // one qubit phase
@@ -143,12 +182,12 @@ TEST(QECCodeTester, checkSteaneNoiseStim) {
     printf("data\n");
     d.dump();
 
-    // Should have some 1s since it's noisy
-    int sum = 0;
-    for (std::size_t i = 0; i < syndromes.shape()[0]; i++)
-      for (std::size_t j = 0; j < syndromes.shape()[1]; j++)
-        sum += syndromes.at({i, j});
-    EXPECT_TRUE(sum > 0);
+    // Same "h"-gate-only argument as above: Z-type detectors can never
+    // fire for this circuit/noise combination.
+    auto [z_type_sum, x_type_sum] = sumDetectorsByType(
+        syndromes, nRounds, numAncz, numAncx, /*is_z_prep=*/false);
+    EXPECT_TRUE(z_type_sum == 0);
+    EXPECT_TRUE(x_type_sum > 0);
   }
   {
     // one qubit depol
@@ -163,12 +202,12 @@ TEST(QECCodeTester, checkSteaneNoiseStim) {
     printf("data\n");
     d.dump();
 
-    // Should have some 1s since it's noisy
-    int sum = 0;
-    for (std::size_t i = 0; i < syndromes.shape()[0]; i++)
-      for (std::size_t j = 0; j < syndromes.shape()[1]; j++)
-        sum += syndromes.at({i, j});
-    EXPECT_TRUE(sum > 0);
+    // Same "h"-gate-only argument as above: Z-type detectors can never
+    // fire for this circuit/noise combination.
+    auto [z_type_sum, x_type_sum] = sumDetectorsByType(
+        syndromes, nRounds, numAncz, numAncx, /*is_z_prep=*/false);
+    EXPECT_TRUE(z_type_sum == 0);
+    EXPECT_TRUE(x_type_sum > 0);
   }
 }
 

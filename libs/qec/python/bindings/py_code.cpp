@@ -559,20 +559,22 @@ void bindCode(nb::module_ &mod) {
       nb::arg("code"), nb::arg("op"), nb::arg("numShots"), nb::arg("numRounds"),
       nb::arg("noise") = nb::none());
 
+  auto make_directional_sample_memory_circuit = [](auto samplingFn) {
+    return [samplingFn](code &code, operation op, std::size_t numShots,
+                        std::size_t numRounds,
+                        std::optional<cudaq::noise_model> noise =
+                            std::nullopt) {
+      cudaq::noise_model emptyNoise;
+      auto [synd, dataRes] = samplingFn(code, op, numShots, numRounds,
+                                        noise ? *noise : emptyNoise);
+      return nb::make_tuple(cudaq::python::copyCUDAQXTensorToPyArray(synd),
+                            cudaq::python::copyCUDAQXTensorToPyArray(dataRes));
+    };
+  };
+
   qecmod.def(
       "x_sample_memory_circuit",
-      [](code &code, operation op, std::size_t numShots, std::size_t numRounds,
-         std::optional<cudaq::noise_model> noise = std::nullopt) {
-        if (!noise)
-          throw std::runtime_error(
-              "x_sample_memory_circuit requires a noise model; noise=None "
-              "is not supported.");
-        auto [synd, dataRes] =
-            x_sample_memory_circuit(code, op, numShots, numRounds, *noise);
-        return nb::make_tuple(
-            cudaq::python::copyCUDAQXTensorToPyArray(synd),
-            cudaq::python::copyCUDAQXTensorToPyArray(dataRes));
-      },
+      make_directional_sample_memory_circuit(x_sample_memory_circuit),
       "Sample the memory circuit of the code with a specific initial "
       "operation, keeping only the X stabilizer syndromes (same detector "
       "layout as sample_memory_circuit, restricted to X stabilizers).",
@@ -581,18 +583,7 @@ void bindCode(nb::module_ &mod) {
 
   qecmod.def(
       "z_sample_memory_circuit",
-      [](code &code, operation op, std::size_t numShots, std::size_t numRounds,
-         std::optional<cudaq::noise_model> noise = std::nullopt) {
-        if (!noise)
-          throw std::runtime_error(
-              "z_sample_memory_circuit requires a noise model; noise=None "
-              "is not supported.");
-        auto [synd, dataRes] =
-            z_sample_memory_circuit(code, op, numShots, numRounds, *noise);
-        return nb::make_tuple(
-            cudaq::python::copyCUDAQXTensorToPyArray(synd),
-            cudaq::python::copyCUDAQXTensorToPyArray(dataRes));
-      },
+      make_directional_sample_memory_circuit(z_sample_memory_circuit),
       "Sample the memory circuit of the code with a specific initial "
       "operation, keeping only the Z stabilizer syndromes (same detector "
       "layout as sample_memory_circuit, restricted to Z stabilizers).",
@@ -633,19 +624,23 @@ void bindCode(nb::module_ &mod) {
       nb::arg("code"), nb::arg("op"), nb::arg("numRounds"),
       nb::arg("noise") = nb::none(), nb::arg("decompose_errors") = false);
 
-  qecmod.def(
-      "x_dem_from_memory_circuit",
-      [](code &code, operation op, std::size_t numRounds,
-         std::optional<cudaq::noise_model> noise = std::nullopt,
-         bool decompose_errors = false) {
-        if (!noise)
-          throw std::runtime_error(
-              "x_dem_from_memory_circuit requires a noise model; noise=None "
-              "is not supported.");
-        return x_dem_from_memory_circuit(code, op, numRounds, *noise,
-                                         decompose_errors);
-      },
-      R"pbdoc(
+  auto make_directional_dem_from_memory_circuit = [](auto demFn,
+                                                     const char *name) {
+    return [demFn, name](code &code, operation op, std::size_t numRounds,
+                         std::optional<cudaq::noise_model> noise = std::nullopt,
+                         bool decompose_errors = false) {
+      if (!noise)
+        throw std::runtime_error(std::string(name) +
+                                 " requires a noise model; noise=None is "
+                                 "not supported.");
+      return demFn(code, op, numRounds, *noise, decompose_errors);
+    };
+  };
+
+  qecmod.def("x_dem_from_memory_circuit",
+             make_directional_dem_from_memory_circuit(
+                 x_dem_from_memory_circuit, "x_dem_from_memory_circuit"),
+             R"pbdoc(
         Generate a detector error model from a memory circuit in the X basis.
 
         This function generates a detector error model from a memory circuit in
@@ -664,22 +659,14 @@ void bindCode(nb::module_ &mod) {
         Returns:
             A detector error model.
       )pbdoc",
-      nb::arg("code"), nb::arg("op"), nb::arg("numRounds"),
-      nb::arg("noise") = nb::none(), nb::arg("decompose_errors") = false);
+             nb::arg("code"), nb::arg("op"), nb::arg("numRounds"),
+             nb::arg("noise") = nb::none(),
+             nb::arg("decompose_errors") = false);
 
-  qecmod.def(
-      "z_dem_from_memory_circuit",
-      [](code &code, operation op, std::size_t numRounds,
-         std::optional<cudaq::noise_model> noise = std::nullopt,
-         bool decompose_errors = false) {
-        if (!noise)
-          throw std::runtime_error(
-              "z_dem_from_memory_circuit requires a noise model; noise=None "
-              "is not supported.");
-        return z_dem_from_memory_circuit(code, op, numRounds, *noise,
-                                         decompose_errors);
-      },
-      R"pbdoc(
+  qecmod.def("z_dem_from_memory_circuit",
+             make_directional_dem_from_memory_circuit(
+                 z_dem_from_memory_circuit, "z_dem_from_memory_circuit"),
+             R"pbdoc(
         Generate a detector error model from a memory circuit in the Z basis.
 
         This function generates a detector error model from a memory circuit in
@@ -698,8 +685,9 @@ void bindCode(nb::module_ &mod) {
         Returns:
             A detector error model.
       )pbdoc",
-      nb::arg("code"), nb::arg("op"), nb::arg("numRounds"),
-      nb::arg("noise") = nb::none(), nb::arg("decompose_errors") = false);
+             nb::arg("code"), nb::arg("op"), nb::arg("numRounds"),
+             nb::arg("noise") = nb::none(),
+             nb::arg("decompose_errors") = false);
 
   qecmod.def(
       "sample_code_capacity",
