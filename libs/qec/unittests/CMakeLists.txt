@@ -578,6 +578,87 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
 endif()
 
 # ==============================================================================
+# Dependency-closure guardrail
+# ------------------------------------------------------------------------------
+# The realtime decoding, decoder, decoder-plugin and realtime-pipeline shared
+# libraries are deliberately kept free of the heavy CUDA-Q runtime libraries
+# (libcudaq-common / libcudaq-operator / libcudaq-qec / libcudaq / libnvqir /
+# libcudaq-mlir-runtime).  These CTest checks inspect the built ELF dependency
+# closure (via readelf, no loader involved) and fail if any of those libraries
+# leaks in.
+# ==============================================================================
+if(TARGET cudaq-qec-decoders AND TARGET cudaq-qec-realtime-decoding)
+  set(_dep_closure_script
+    "${CMAKE_CURRENT_SOURCE_DIR}/check_dependency_closure.cmake")
+  # Heavy CUDA-Q libraries that must never appear in the realtime/decoder
+  # dependency closure.  libcudaq (core runtime) and libnvqir (simulator
+  # dispatch) are the roots of the quantum-runtime subtree, so blocking them
+  # transitively covers their runtime-loaded plugins as well.  Matching is
+  # anchored (^<stem>\.so), so e.g. "libcudaq" flags libcudaq.so but never
+  # libcudaq-realtime.so / libcudaq-qec-decoders.so.
+  set(_dep_closure_forbidden
+    "libcudaq-common|libcudaq-operator|libcudaq-qec|libcudaq|libnvqir|libcudaq-mlir-runtime")
+
+  # Always-present core libraries under guard, plus every decoder plugin and
+  # the realtime pipeline that were actually built in this configuration.  The
+  # plugins/pipeline are conditional (TensorRT / CUDA / realtime availability),
+  # so they are only added when their target exists.
+  set(_dep_closure_targets cudaq-qec-decoders cudaq-qec-realtime-decoding)
+  foreach(_t IN ITEMS
+      cudaq-qec-example
+      cudaq-qec-pymatching
+      cudaq-qec-chromobius
+      cudaq-qec-trt-decoder
+      cudaq-realtime-pipeline)
+    if(TARGET ${_t})
+      list(APPEND _dep_closure_targets ${_t})
+    endif()
+  endforeach()
+
+  # Build the "|"-separated $<TARGET_FILE:...> list consumed by the script.
+  set(_dep_closure_libs "")
+  foreach(_t IN LISTS _dep_closure_targets)
+    if(_dep_closure_libs)
+      string(APPEND _dep_closure_libs "|")
+    endif()
+    string(APPEND _dep_closure_libs "$<TARGET_FILE:${_t}>")
+  endforeach()
+
+  # Decoder plugins live in lib/decoder-plugins, everything else in lib; include
+  # both so transitive sonames resolve during the closure walk.
+  set(_dep_closure_search
+    "${CMAKE_BINARY_DIR}/lib|${CMAKE_BINARY_DIR}/lib/decoder-plugins")
+
+  # Make sure the libraries under test are built before CTest runs.
+  add_dependencies(CUDAQXQECUnitTests ${_dep_closure_targets})
+
+  add_test(NAME qec_dependency_closure
+    COMMAND ${CMAKE_COMMAND}
+      "-DLIBS=${_dep_closure_libs}"
+      "-DFORBIDDEN=${_dep_closure_forbidden}"
+      "-DTRANSITIVE=ON"
+      "-DEXTRA_SEARCH_DIRS=${_dep_closure_search}"
+      -P "${_dep_closure_script}")
+  set_tests_properties(qec_dependency_closure PROPERTIES LABELS "qec")
+
+  # Negative self-test: libcudaq-qec.so legitimately depends on the forbidden
+  # libraries, so the guardrail MUST flag it.  This proves the check is not
+  # silently passing due to a parsing or resolution bug.
+  if(TARGET cudaq-qec)
+    add_test(NAME qec_dependency_closure_selftest
+      COMMAND ${CMAKE_COMMAND}
+        "-DLIBS=$<TARGET_FILE:cudaq-qec>"
+        "-DFORBIDDEN=${_dep_closure_forbidden}"
+        "-DTRANSITIVE=ON"
+        "-DEXTRA_SEARCH_DIRS=${_dep_closure_search}"
+        "-DEXPECT_FAIL=ON"
+        -P "${_dep_closure_script}")
+    set_tests_properties(qec_dependency_closure_selftest PROPERTIES LABELS "qec")
+    add_dependencies(CUDAQXQECUnitTests cudaq-qec)
+  endif()
+endif()
+
+# ==============================================================================
 
 add_subdirectory(backend-specific)
 add_subdirectory(realtime)
