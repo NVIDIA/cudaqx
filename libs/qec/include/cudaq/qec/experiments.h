@@ -83,6 +83,7 @@ dem_sampling(const cudaqx::tensor<uint8_t> &check_matrix, std::size_t numShots,
              const std::vector<double> &error_probabilities, unsigned seed);
 
 /// @brief Sample syndrome measurements with circuit-level noise
+/// @param code QEC Code to sample
 /// @param statePrep Initial state preparation operation
 /// @param numShots Number of measurement shots
 /// @param numRounds Number of stabilizer measurement rounds
@@ -127,6 +128,7 @@ z_sample_memory_circuit(const code &code, operation statePrep,
                         cudaq::noise_model &noise);
 
 /// @brief Sample syndrome measurements from the memory circuit
+/// @param code QEC Code to sample
 /// @param statePrep Initial state preparation operation
 /// @param numShots Number of measurement shots
 /// @param numRounds Number of stabilizer measurement rounds
@@ -137,6 +139,7 @@ sample_memory_circuit(const code &code, operation statePrep,
                       std::size_t numShots, std::size_t numRounds = 1);
 
 /// @brief Sample syndrome measurements starting from |0⟩ state
+/// @param code QEC Code to sample
 /// @param numShots Number of measurement shots
 /// @param numRounds Number of stabilizer measurement rounds
 /// @return Tuple of (syndromeTensor, dataResults), equivalent to the
@@ -146,6 +149,7 @@ sample_memory_circuit(const code &code, std::size_t numShots,
                       std::size_t numRounds = 1);
 
 /// @brief Sample syndrome measurements from |0⟩ state with noise
+/// @param code QEC Code to sample
 /// @param numShots Number of measurement shots
 /// @param numRounds Number of stabilizer measurement rounds
 /// @param noise Noise model to apply
