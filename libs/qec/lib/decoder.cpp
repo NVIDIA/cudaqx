@@ -402,7 +402,18 @@ decoder::get(const std::string &name, const decoder_init &init,
     node = numa_node_for_cuda_device(dev);
   CudaDeviceGuard ctor_dev(dev);
   NumaGuard ctor_numa(node); // preferred mode at construction
-  auto d = iter->second(init, param_map);
+  // The affinity knobs above are consumed by the base class. Strip them from
+  // the map handed to the plugin constructor so a decoder that strictly
+  // validates its own parameter keys does not reject them.
+  auto is_affinity_key = [](const std::string &k) {
+    return k == "cuda_device_id" || k == "numa_node_id" || k == "mempolicy" ||
+           k == "cpu_affinity";
+  };
+  cudaqx::heterogeneous_map plugin_params;
+  for (const auto &kv : param_map)
+    if (!is_affinity_key(kv.first))
+      plugin_params.insert(kv.first, kv.second);
+  auto d = iter->second(init, plugin_params);
   d->set_hardware_params(param_map);
   return d;
 }

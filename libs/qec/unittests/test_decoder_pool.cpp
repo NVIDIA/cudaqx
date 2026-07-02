@@ -90,10 +90,13 @@ TEST(DecoderPool, NvQldpcRunsOnDistinctGpusWhenAvailable) {
     GTEST_SKIP() << "needs >= 2 GPUs";
 
   std::vector<cudaq::qec::pool_decoder_spec> specs;
+  // nv-qldpc's GPU batched-decode path requires sparse mode.
   cudaqx::heterogeneous_map o0;
   o0.insert("cuda_device_id", 0);
+  o0.insert("use_sparsity", true);
   cudaqx::heterogeneous_map o1;
   o1.insert("cuda_device_id", 1);
+  o1.insert("use_sparsity", true);
   specs.push_back({0, "nv-qldpc-decoder", H, o0});
   specs.push_back({1, "nv-qldpc-decoder", H, o1});
   cudaq::qec::decoder_pool pool(std::move(specs));

@@ -52,9 +52,24 @@ target_link_libraries(test_decoders_yaml PRIVATE
   cudaq-qec
   cudaq-qec-realtime-decoding
   cudaq-qec-realtime-decoding-simulation
-  cudaq::cudaq)
+  cudaq::cudaq
+  CUDA::cudart)
+target_include_directories(test_decoders_yaml PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
 add_dependencies(CUDAQXQECUnitTests test_decoders_yaml)
 gtest_discover_tests(test_decoders_yaml)
+
+# LD_PRELOAD interposer + benchmark/syscall-gate test for hardware pinning.
+add_library(affinity_syscall_shim SHARED support/affinity_syscall_shim.cpp)
+target_link_libraries(affinity_syscall_shim PRIVATE ${CMAKE_DL_LIBS})
+
+add_executable(test_pinning_benchmark test_pinning_benchmark.cpp)
+target_link_libraries(test_pinning_benchmark PRIVATE
+  GTest::gtest_main cudaq-qec cudaq::cudaq CUDA::cudart)
+target_include_directories(test_pinning_benchmark PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+add_dependencies(test_pinning_benchmark affinity_syscall_shim)
+add_dependencies(CUDAQXQECUnitTests test_pinning_benchmark)
+gtest_discover_tests(test_pinning_benchmark
+  PROPERTIES ENVIRONMENT "LD_PRELOAD=$<TARGET_FILE:affinity_syscall_shim>")
 
 add_executable(test_device_affinity test_device_affinity.cpp)
 target_link_libraries(test_device_affinity PRIVATE GTest::gtest_main cudaq-qec cudaq::cudaq CUDA::cudart)

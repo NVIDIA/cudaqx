@@ -10,7 +10,8 @@
 
 #include "qec_realtime_session.h"
 
-#include "hardware_affinity.h"
+// Lib-private header one level up (libs/qec/lib); this file lives in realtime/.
+#include "../hardware_affinity.h"
 #include "cudaq/qec/realtime/decoder_rpc_ids.h"
 #include "cudaq/qec/realtime/graph_resources.h"
 #include "cudaq/realtime/daemon/dispatcher/dispatch_kernel_launch.h"
