@@ -124,6 +124,7 @@ configure_decoders = qecrt.config.configure_decoders
 
 stabilizer_grid = qecrt.stabilizer_grid
 role_to_str = qecrt.role_to_str
+sc_orientation = qecrt.sc_orientation
 
 from .dem_sampling import dem_sampling
 

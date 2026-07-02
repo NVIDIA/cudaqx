@@ -28,36 +28,33 @@ std::string normalize_orientation(std::string value) {
 }
 
 surface_role role_for_parity(sc_orientation orientation, bool odd_parity) {
-  switch (orientation) {
-  case sc_orientation::XV:
-  case sc_orientation::XH:
-    // The first orientation character controls the bulk checkerboard. The H/V
-    // character controls boundary placement only, so XV and XH share this bulk
-    // assignment.
-    return odd_parity ? surface_role::amz : surface_role::amx;
-  case sc_orientation::ZV:
-  case sc_orientation::ZH:
-    // Likewise, ZV and ZH share a bulk assignment with Z on even parity and X
-    // on odd parity.
-    return odd_parity ? surface_role::amx : surface_role::amz;
-  }
-  throw std::runtime_error("Unhandled surface-code orientation.");
+  // The first orientation character controls the bulk checkerboard. The H/V
+  // character controls boundary placement only, so XV/XH share one bulk
+  // assignment and ZV/ZH share the other.
+  const bool x_on_even_parity =
+      orientation == sc_orientation::XV || orientation == sc_orientation::XH;
+  const bool z_on_even_parity =
+      orientation == sc_orientation::ZV || orientation == sc_orientation::ZH;
+  if (!x_on_even_parity && !z_on_even_parity)
+    throw std::runtime_error("Unhandled surface-code orientation.");
+  return (x_on_even_parity != odd_parity) ? surface_role::amx
+                                          : surface_role::amz;
 }
 
 } // namespace
 
-sc_orientation parse_orientation(const std::string &s) {
+sc_orientation sc_orientation_from_str(const std::string &s) {
   const auto orientation = normalize_orientation(s);
-  if (orientation == "XV")
+  if (orientation == "XV" || orientation == "O1")
     return sc_orientation::XV;
-  if (orientation == "XH")
+  if (orientation == "XH" || orientation == "O2")
     return sc_orientation::XH;
-  if (orientation == "ZV")
+  if (orientation == "ZV" || orientation == "O3")
     return sc_orientation::ZV;
-  if (orientation == "ZH")
+  if (orientation == "ZH" || orientation == "O4")
     return sc_orientation::ZH;
   throw std::runtime_error("Invalid surface-code orientation '" + s +
-                           "'. Expected XV, XH, ZV, or ZH.");
+                           "'. Expected XV(O1), XH(O2), ZV(O3), or ZH(O4).");
 }
 
 vec2d::vec2d(int row_in, int col_in) : row(row_in), col(col_in) {}
@@ -99,12 +96,12 @@ void stabilizer_grid::generate_grid_roles() {
     for (size_t col = 1; col < grid_length - 1; ++col) {
       size_t idx = row * grid_length + col;
       const bool is_odd_parity = (row + col) % 2;
-      roles[idx] = role_for_parity(orientation, is_odd_parity);
+      roles[idx] = role_for_parity(orientation_, is_odd_parity);
     }
   }
 
   const bool horizontal_boundaries_use_even_parity =
-      orientation == sc_orientation::XH || orientation == sc_orientation::ZH;
+      orientation_ == sc_orientation::XH || orientation_ == sc_orientation::ZH;
 
   // Boundary sites alternate around the perimeter. The top/bottom and
   // left/right edges therefore occupy complementary parities. Since
@@ -119,7 +116,7 @@ void stabilizer_grid::generate_grid_roles() {
       size_t idx = row * grid_length + col;
       const bool is_odd_parity = (row + col) % 2;
       if (is_odd_parity != horizontal_boundaries_use_even_parity)
-        roles[idx] = role_for_parity(orientation, is_odd_parity);
+        roles[idx] = role_for_parity(orientation_, is_odd_parity);
     }
   }
 
@@ -129,7 +126,7 @@ void stabilizer_grid::generate_grid_roles() {
       size_t idx = row * grid_length + col;
       const bool is_odd_parity = (row + col) % 2;
       if (is_odd_parity == horizontal_boundaries_use_even_parity)
-        roles[idx] = role_for_parity(orientation, is_odd_parity);
+        roles[idx] = role_for_parity(orientation_, is_odd_parity);
     }
   }
 }
@@ -212,7 +209,7 @@ void stabilizer_grid::generate_stabilizers() {
 stabilizer_grid::stabilizer_grid() {}
 
 stabilizer_grid::stabilizer_grid(uint32_t distance, sc_orientation orientation)
-    : distance(distance), orientation(orientation), grid_length(distance + 1),
+    : distance(distance), grid_length(distance + 1), orientation_(orientation),
       roles(grid_length * grid_length) {
   // generate a 2d grid of roles
   generate_grid_roles();
@@ -221,6 +218,8 @@ stabilizer_grid::stabilizer_grid(uint32_t distance, sc_orientation orientation)
   // now use coords to set the stabilizers
   generate_stabilizers();
 }
+
+sc_orientation stabilizer_grid::get_orientation() const { return orientation_; }
 
 void stabilizer_grid::print_stabilizer_coords() const {
   int width = std::to_string(grid_length).length();
@@ -398,7 +397,7 @@ stabilizer_grid::get_spin_op_observables() const {
   // Picking the wrong pair yields operators that do not commute with the
   // stabilizers.
   const bool x_logical_on_top_row =
-      orientation == sc_orientation::XV || orientation == sc_orientation::ZH;
+      orientation_ == sc_orientation::XV || orientation_ == sc_orientation::ZH;
 
   // Support that runs along the top row of data qubits.
   std::string top_row_obs(data_coords.size(), 'I');
@@ -434,8 +433,9 @@ surface_code::surface_code(const heterogeneous_map &options) : code() {
         "[surface_code] distance not provided. distance must be provided via "
         "qec::get_code(..., options) options map.");
   distance = options.get<std::size_t>("distance");
-  grid = stabilizer_grid(distance, parse_orientation(options.get<std::string>(
-                                       "orientation", "ZH")));
+  grid = stabilizer_grid(
+      distance,
+      sc_orientation_from_str(options.get<std::string>("orientation", "ZH")));
 
   m_stabilizers = grid.get_spin_op_stabilizers();
   m_pauli_observables = grid.get_spin_op_observables();
