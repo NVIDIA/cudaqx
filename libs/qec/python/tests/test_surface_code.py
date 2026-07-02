@@ -25,6 +25,35 @@ def test_basic_construction_d3():
     assert len(g.data_coords) == 9
 
 
+def test_orientation_construction_d3():
+    g = qec.stabilizer_grid(3, qec.sc_orientation.XH)
+    assert g.orientation == qec.sc_orientation.XH
+    assert len(g.x_stabilizers) == 4
+    assert len(g.z_stabilizers) == 4
+
+    alias_grid = qec.stabilizer_grid(3, "O3")
+    assert alias_grid.orientation == qec.sc_orientation.ZV
+    assert len(alias_grid.x_stabilizers) == 4
+    assert len(alias_grid.z_stabilizers) == 4
+
+    canonical_grid = qec.stabilizer_grid(3, " ZH ")
+    assert canonical_grid.orientation == qec.sc_orientation.ZH
+    assert len(canonical_grid.x_stabilizers) == 4
+    assert len(canonical_grid.z_stabilizers) == 4
+
+
+def test_get_code_orientation_option():
+    code = qec.get_code("surface_code", distance=3, orientation="O3")
+    assert isinstance(code, qec.Code)
+
+    np.testing.assert_array_equal(
+        code.get_observables_x(),
+        np.array([[1, 0, 0, 1, 0, 0, 1, 0, 0]], dtype=np.uint8))
+    np.testing.assert_array_equal(
+        code.get_observables_z(),
+        np.array([[1, 1, 1, 0, 0, 0, 0, 0, 0]], dtype=np.uint8))
+
+
 def test_roles_layout_d3():
     g = qec.stabilizer_grid(3)
     roles = g.roles
