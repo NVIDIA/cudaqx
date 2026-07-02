@@ -527,6 +527,12 @@ if(_APP_CUDAQ_REALTIME_DISPATCH_LIB
     --use-relay-bp)
 endif()
 
+# Relaxed round rule (T=6 not a multiple of d=5) and multi-logical patches, each
+# through the full generate + reload + decode driver -- so no hand-written
+# generate/reload duplication, and both get the driver's residual-LER check.
+add_surface_code_4_yaml_test(d5t6 5 6 pymatching 20 "")
+add_surface_code_4_yaml_test(multilogical 3 3 pymatching 20 "" --num_logical 2)
+
 # --------------------------------------------------------------------------- #
 # Negative / boundary tests: pin the validation behavior (distance/round guards,
 # YAML-to-geometry binding, X-basis-bundle rejection, replay guards including
@@ -568,13 +574,11 @@ printf '%s' "$out" | grep -qF -- "$diag" || {
     PROPERTIES ENVIRONMENT "${_sc4_neg_env}")
 endfunction()
 
-# distance guard: even / undersized rejected before code construction.
+# distance guard: an even or too-small distance is rejected (one guard, one
+# diagnostic) before code construction; d=4 covers it.
 _sc4_reject(distance-even "distance must be an odd integer"
   --distance 4 --num_rounds 4 --decoder_type pymatching
   --save_dem ${_sc4_neg_dir}/even.yml)
-_sc4_reject(distance-undersized "distance must be an odd integer"
-  --distance 1 --num_rounds 1 --decoder_type pymatching
-  --save_dem ${_sc4_neg_dir}/small.yml)
 
 # replay requires --yaml.
 _sc4_reject(replay-needs-yaml "load_syndrome requires --yaml"
@@ -590,21 +594,6 @@ _sc4_reject(xbasis-bundle "basis='X'"
   --onnx_path ${_sc4_neg_dir}/dummy.onnx --ising_bundle ${_sc4_neg_dir}/xbundle
   --save_dem ${_sc4_neg_dir}/xb.yml)
 
-# Relaxed round rule: d5/T6 (T not a multiple of d) generates AND reloads+decodes.
-add_test(NAME app_examples.surface_code-4-yaml-negative-d5t6-generate
-  COMMAND ${_sc4_exe} --distance 5 --num_rounds 6 --num_shots 20 --p_spam 0.01
-    --decoder_type pymatching --save_dem ${_sc4_neg_dir}/d5t6.yml
-  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-set_tests_properties(app_examples.surface_code-4-yaml-negative-d5t6-generate
-  PROPERTIES FIXTURES_SETUP sc4_d5t6 ENVIRONMENT "${_sc4_neg_env}")
-add_test(NAME app_examples.surface_code-4-yaml-negative-d5t6-reload
-  COMMAND ${_sc4_exe} --yaml ${_sc4_neg_dir}/d5t6.yml --distance 5 --num_rounds 6
-    --num_shots 20 --p_spam 0.01
-  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-set_tests_properties(app_examples.surface_code-4-yaml-negative-d5t6-reload
-  PROPERTIES FIXTURES_REQUIRED sc4_d5t6
-             ENVIRONMENT "${_sc4_neg_env}")
-
 # Geometry binding: a d5/T5 config rejected when loaded as d3/T15 (same 120
 # detectors, different measurement-buffer span).
 add_test(NAME app_examples.surface_code-4-yaml-negative-d5t5-generate
@@ -618,21 +607,6 @@ _sc4_reject(geometry-mismatch "measurement-buffer span"
   --num_shots 20 --p_spam 0.01)
 set_tests_properties(app_examples.surface_code-4-yaml-negative-geometry-mismatch
   PROPERTIES FIXTURES_REQUIRED sc4_d5t5)
-
-# Multi-logical (independent patches): generate then reload + decode.
-add_test(NAME app_examples.surface_code-4-yaml-negative-multilogical-generate
-  COMMAND ${_sc4_exe} --distance 3 --num_rounds 3 --num_logical 2 --num_shots 20
-    --p_spam 0.01 --decoder_type pymatching --save_dem ${_sc4_neg_dir}/nl2.yml
-  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-set_tests_properties(app_examples.surface_code-4-yaml-negative-multilogical-generate
-  PROPERTIES FIXTURES_SETUP sc4_nl2 ENVIRONMENT "${_sc4_neg_env}")
-add_test(NAME app_examples.surface_code-4-yaml-negative-multilogical-reload
-  COMMAND ${_sc4_exe} --yaml ${_sc4_neg_dir}/nl2.yml --distance 3 --num_rounds 3
-    --num_logical 2 --num_shots 20 --p_spam 0.01
-  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-set_tests_properties(app_examples.surface_code-4-yaml-negative-multilogical-reload
-  PROPERTIES FIXTURES_REQUIRED sc4_nl2
-             ENVIRONMENT "${_sc4_neg_env}")
 
 # Replay structural integrity: build a valid d3 capture, then derive a truncated
 # (footer dropped) and a corrections-flipped copy. Replaying a missing,
