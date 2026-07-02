@@ -59,8 +59,6 @@ void bindSurfaceCode(nb::module_ &mod) {
       .value("ZH", sc_orientation::ZH)
       .export_values();
 
-  qecmod.def("parse_orientation", &parse_orientation, nb::arg("orientation"));
-
   nb::class_<vec2d>(qecmod, "vec2d")
       .def(nb::init<int, int>(), nb::arg("row"), nb::arg("col"))
       .def_rw("row", &vec2d::row)
@@ -83,11 +81,11 @@ void bindSurfaceCode(nb::module_ &mod) {
           [](stabilizer_grid &self, std::uint32_t distance,
              const std::string &orientation) {
             new (&self)
-                stabilizer_grid(distance, parse_orientation(orientation));
+                stabilizer_grid(distance, sc_orientation_from_str(orientation));
           },
           nb::arg("distance"), nb::arg("orientation"))
       .def_ro("distance", &stabilizer_grid::distance)
-      .def_ro("orientation", &stabilizer_grid::orientation)
+      .def_prop_ro("orientation", &stabilizer_grid::get_orientation)
       .def_ro("grid_length", &stabilizer_grid::grid_length)
       .def_ro("roles", &stabilizer_grid::roles)
       .def_ro("x_stab_coords", &stabilizer_grid::x_stab_coords)

@@ -36,8 +36,10 @@ enum surface_role { amx, amz, empty };
 /// row). See get_spin_op_observables() for details.
 enum class sc_orientation { XV, XH, ZV, ZH };
 
-/// @brief Parse a surface-code orientation string (XV, XH, ZV, or ZH).
-sc_orientation parse_orientation(const std::string &s);
+/// @brief Convert a surface-code orientation string to a sc_orientation enum
+/// (XV, XH, ZV, ZH, or Ising's O1-O4 aliases, where O1/O2/O3/O4 map to
+/// XV/XH/ZV/ZH).
+sc_orientation sc_orientation_from_str(const std::string &s);
 
 /// @brief describes the 2d coordinate on the stabilizer grid
 struct vec2d {
@@ -69,9 +71,8 @@ bool operator<(const vec2d &lhs, const vec2d &rhs);
 ///
 /// Each entry on the grid can be an X stabilizer, Z stabilizer,
 /// or empty, as is needed on the edges.
-/// The diagrams below show the default ZH orientation, which preserves the
-/// original fixed surface-code layout. Other orientations assign X/Z roles
-/// according to sc_orientation.
+/// The diagrams below show the default ZH orientation. Other orientations
+/// assign X/Z roles according to sc_orientation.
 /// The grid length of 4 corresponds to a distance 3 surface code, which results
 /// in:
 /// ```
@@ -122,15 +123,15 @@ public:
   /// determines the number of data qubits per dimension
   uint32_t distance = 0;
 
-  /// @brief Orientation used to assign stabilizer roles. The default ZH is the
-  /// legacy fixed surface-code layout, named per Ising's code_rotation.
-  sc_orientation orientation = sc_orientation::ZH;
-
   /// @brief length of the stabilizer grid
   /// for distance = d data qubits,
   /// the stabilizer grid has length d+1
   uint32_t grid_length = 0;
 
+private:
+  sc_orientation orientation_ = sc_orientation::ZH;
+
+public:
   /// @brief flattened vector of the stabilizer grid sites roles'
   /// grid idx -> role
   /// stored in row major order
@@ -170,6 +171,9 @@ public:
                   sc_orientation orientation = sc_orientation::ZH);
   /// @brief Empty constructor
   stabilizer_grid();
+
+  /// @brief Get the orientation used to construct this stabilizer grid.
+  sc_orientation get_orientation() const;
 
   /// @brief Print a 2d grid of stabilizer roles
   void print_stabilizer_grid() const;

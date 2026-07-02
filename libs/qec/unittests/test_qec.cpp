@@ -59,6 +59,17 @@ std::vector<std::size_t> left_column_support(std::uint32_t distance) {
   return support;
 }
 
+// Recover the integer support (indices of non-identity Paulis) of a single
+// spin_op_term pauli word, e.g. "XIXII" -> {0, 2}.
+std::vector<std::size_t> support_of(const cudaq::spin_op_term &term) {
+  std::vector<std::size_t> support;
+  const std::string word = term.get_pauli_word();
+  for (std::size_t i = 0; i < word.size(); ++i)
+    if (word[i] != 'I')
+      support.push_back(i);
+  return support;
+}
+
 bool uses_horizontal_x_logical(sc_orientation orientation) {
   return orientation == sc_orientation::XV || orientation == sc_orientation::ZH;
 }
@@ -72,10 +83,17 @@ void expect_surface_code_algebra(sc_orientation orientation) {
 
   const auto top_row = top_row_support(distance);
   const auto left_column = left_column_support(distance);
-  const auto logical_x =
+  const auto expected_logical_x =
       uses_horizontal_x_logical(orientation) ? top_row : left_column;
-  const auto logical_z =
+  const auto expected_logical_z =
       uses_horizontal_x_logical(orientation) ? left_column : top_row;
+  const auto observables = grid.get_spin_op_observables();
+  ASSERT_EQ(2u, observables.size());
+  // get_spin_op_observables() emits the X observable first, then Z.
+  const auto logical_x = support_of(observables[0]);
+  const auto logical_z = support_of(observables[1]);
+  EXPECT_EQ(expected_logical_x, logical_x);
+  EXPECT_EQ(expected_logical_z, logical_z);
   EXPECT_EQ(1, overlap_parity(logical_x, logical_z));
 
   for (const auto &x_stabilizer : grid.x_stabilizers) {
@@ -86,17 +104,6 @@ void expect_surface_code_algebra(sc_orientation orientation) {
 
   for (const auto &z_stabilizer : grid.z_stabilizers)
     EXPECT_EQ(0, overlap_parity(z_stabilizer, logical_x));
-}
-
-// Recover the integer support (indices of non-identity Paulis) of a single
-// spin_op_term pauli word, e.g. "XIXII" -> {0, 2}.
-std::vector<std::size_t> support_of(const cudaq::spin_op_term &term) {
-  std::vector<std::size_t> support;
-  const std::string word = term.get_pauli_word();
-  for (std::size_t i = 0; i < word.size(); ++i)
-    if (word[i] != 'I')
-      support.push_back(i);
-  return support;
 }
 
 } // namespace
@@ -763,27 +770,30 @@ TEST(QECNoiseModelTester, ConstructsTwoQubitBitflipChannel) {
   EXPECT_NO_THROW({ cudaq::qec::two_qubit_bitflip channel(0.05); });
 }
 
-TEST(QECCodeTester, checkSurfaceCodeOrientationParser) {
-  using cudaq::qec::surface_code::parse_orientation;
+TEST(QECCodeTester, checkSurfaceCodeOrientationFromString) {
+  using cudaq::qec::surface_code::sc_orientation_from_str;
 
-  EXPECT_EQ(sc_orientation::XV, parse_orientation("XV"));
-  EXPECT_EQ(sc_orientation::XH, parse_orientation(" xh "));
-  EXPECT_EQ(sc_orientation::ZV, parse_orientation("ZV"));
-  EXPECT_EQ(sc_orientation::ZH, parse_orientation("zh"));
-  EXPECT_THROW(parse_orientation("north"), std::runtime_error);
+  EXPECT_EQ(sc_orientation::XV, sc_orientation_from_str("XV"));
+  EXPECT_EQ(sc_orientation::XV, sc_orientation_from_str("o1"));
+  EXPECT_EQ(sc_orientation::XH, sc_orientation_from_str(" xh "));
+  EXPECT_EQ(sc_orientation::XH, sc_orientation_from_str("O2"));
+  EXPECT_EQ(sc_orientation::ZV, sc_orientation_from_str("ZV"));
+  EXPECT_EQ(sc_orientation::ZV, sc_orientation_from_str(" o3 "));
+  EXPECT_EQ(sc_orientation::ZH, sc_orientation_from_str("zh"));
+  EXPECT_EQ(sc_orientation::ZH, sc_orientation_from_str("O4"));
+  EXPECT_THROW(sc_orientation_from_str("north"), std::runtime_error);
 
   auto surf_code = cudaq::qec::get_code(
       "surface_code",
-      cudaqx::heterogeneous_map{{"distance", 3}, {"orientation", "XH"}});
+      cudaqx::heterogeneous_map{{"distance", 3}, {"orientation", "O2"}});
   auto *surface =
       dynamic_cast<cudaq::qec::surface_code::surface_code *>(surf_code.get());
   ASSERT_NE(nullptr, surface);
-  EXPECT_EQ(sc_orientation::XH, surface->grid.orientation);
+  EXPECT_EQ(sc_orientation::XH, surface->grid.get_orientation());
 }
 
-TEST(QECCodeTester, checkSurfaceCodeDefaultPreservesLegacyLayout) {
-  // The default orientation (ZH under Ising naming) is the original fixed
-  // surface-code layout.
+TEST(QECCodeTester, checkSurfaceCodeDefaultZHLayout) {
+  // Default construction uses the ZH orientation.
   stabilizer_grid grid(3);
   const auto role_at = [&grid](std::size_t row, std::size_t col) {
     return grid.roles[row * grid.grid_length + col];
@@ -821,10 +831,9 @@ TEST(QECCodeTester, checkSurfaceCodeOrientationAlgebra) {
 // Pin the EXACT role grid of every orientation at d=3 so permuting the
 // orientation labels (or regressing the boundary logic) fails. Grids derived by
 // tracing generate_grid_roles()/role_for_parity() and cross-checked against
-// Ising's code_rotation stabilizers; the ZH grid is the legacy default layout
-// (see checkSurfaceCodeDefaultPreservesLegacyLayout). Boundary summary: XV/ZH
-// put amx on left/right and amz on top/bottom; XH/ZV put amx on top/bottom and
-// amz on left/right (XV vs ZH and XH vs ZV differ in the bulk checkerboard).
+// Ising's code_rotation stabilizers. Boundary summary: XV/ZH put amx on
+// left/right and amz on top/bottom; XH/ZV put amx on top/bottom and amz on
+// left/right (XV vs ZH and XH vs ZV differ in the bulk checkerboard).
 TEST(QECCodeTester, checkSurfaceCodeAllOrientationGeometries) {
   // ---- XV ----
   {
@@ -910,7 +919,7 @@ TEST(QECCodeTester, checkSurfaceCodeAllOrientationGeometries) {
     EXPECT_EQ(surface_role::empty, role_at(3, 3));
   }
 
-  // ---- ZH (legacy default layout) ----
+  // ---- ZH ----
   {
     SCOPED_TRACE("ZH");
     stabilizer_grid grid(3, sc_orientation::ZH);
@@ -936,45 +945,6 @@ TEST(QECCodeTester, checkSurfaceCodeAllOrientationGeometries) {
     EXPECT_EQ(surface_role::amz, role_at(3, 1));
     EXPECT_EQ(surface_role::empty, role_at(3, 2));
     EXPECT_EQ(surface_role::empty, role_at(3, 3));
-  }
-}
-
-// After making get_spin_op_observables() orientation-aware, every orientation
-// must yield a VALID logical pair: the X observable commutes with all Z
-// stabilizers, the Z observable commutes with all X stabilizers, and the two
-// observables anticommute. This also pins which physical support each
-// orientation uses (top row vs left column).
-TEST(QECCodeTester, checkSurfaceCodeObservablesPerOrientation) {
-  for (auto orientation : {sc_orientation::XV, sc_orientation::XH,
-                           sc_orientation::ZV, sc_orientation::ZH}) {
-    SCOPED_TRACE(static_cast<int>(orientation));
-    constexpr std::uint32_t distance = 3;
-    stabilizer_grid grid(distance, orientation);
-
-    const auto observables = grid.get_spin_op_observables();
-    ASSERT_EQ(2u, observables.size());
-    // get_spin_op_observables() emits the X observable first, then Z.
-    const auto logical_x = support_of(observables[0]);
-    const auto logical_z = support_of(observables[1]);
-
-    // Pin the expected physical support for each orientation.
-    const auto top_row = top_row_support(distance);
-    const auto left_column = left_column_support(distance);
-    if (uses_horizontal_x_logical(orientation)) {
-      EXPECT_EQ(top_row, logical_x);
-      EXPECT_EQ(left_column, logical_z);
-    } else {
-      EXPECT_EQ(left_column, logical_x);
-      EXPECT_EQ(top_row, logical_z);
-    }
-
-    // Valid logical pair: X obs commutes with all Z stabs, Z obs commutes with
-    // all X stabs, and the two observables anticommute.
-    for (const auto &z_stabilizer : grid.z_stabilizers)
-      EXPECT_EQ(0, overlap_parity(logical_x, z_stabilizer));
-    for (const auto &x_stabilizer : grid.x_stabilizers)
-      EXPECT_EQ(0, overlap_parity(logical_z, x_stabilizer));
-    EXPECT_EQ(1, overlap_parity(logical_x, logical_z));
   }
 }
 
