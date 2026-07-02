@@ -7,18 +7,18 @@
  ******************************************************************************/
 
 #include "cudaq/qec/decoder.h"
-#include "common/FmtCore.h"
 #include "cuda-qx/core/library_utils.h"
 #include "cudaq/qec/device_affinity.h"
+#include "cudaq/qec/logger.h"
 #include "cudaq/qec/plugin_loader.h"
 #include "cudaq/qec/version.h"
-#include "cudaq/runtime/logger/logger.h"
 #include <cassert>
 #include <cctype>
 #include <cstring>
 #include <cuda_runtime.h>
 #include <dlfcn.h>
 #include <filesystem>
+#include <fmt/ranges.h>
 #include <thread>
 #include <vector>
 #if defined(__linux__)
@@ -543,7 +543,7 @@ void decoder::set_D_sparse(const std::vector<int64_t> &D_sparse_vec_in) {
 bool decoder::enqueue_syndrome(const uint8_t *syndrome,
                                std::size_t syndrome_length) {
   if (pimpl->msyn_buffer_index + syndrome_length > pimpl->msyn_buffer.size()) {
-    // CUDAQ_WARN("Syndrome buffer overflow. Syndrome will be ignored.");
+    // CUDA_QEC_WARN("Syndrome buffer overflow. Syndrome will be ignored.");
     printf("Syndrome buffer overflow. Syndrome will be ignored.\n");
     return false;
   }
@@ -577,7 +577,7 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
     std::chrono::duration<double> log_dur1, log_dur2, log_dur3;
 
     const bool log_due_to_log_level =
-        cudaq::detail::should_log(cudaq::detail::LogLevel::info);
+        cudaq::qec::detail::should_log(cudaq::qec::detail::log_level::info);
     const bool should_log = pimpl->should_log || log_due_to_log_level;
 
     if (should_log) {
@@ -737,7 +737,7 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
           log_dur1.count() * 1e6, log_dur2.count() * 1e6,
           log_dur3.count() * 1e6);
       if (log_due_to_log_level)
-        cudaq::info("{}", s);
+        CUDA_QEC_INFO("{}", s);
       else
         printf("%s\n", s.c_str());
     }
@@ -757,7 +757,7 @@ void decoder::clear_corrections() {
   pimpl->corrections.clear();
   pimpl->corrections.resize(O_sparse.size());
   const bool log_due_to_log_level =
-      cudaq::detail::should_log(cudaq::detail::LogLevel::info);
+      cudaq::qec::detail::should_log(cudaq::qec::detail::log_level::info);
   const bool should_log = pimpl->should_log || log_due_to_log_level;
   if (should_log) {
     pimpl->log_counter++;
@@ -765,7 +765,7 @@ void decoder::clear_corrections() {
         fmt::format("[DecoderStats][{}] Counter:{} clear_corrections called",
                     static_cast<const void *>(this), pimpl->log_counter);
     if (log_due_to_log_level)
-      cudaq::info("{}", s);
+      CUDA_QEC_INFO("{}", s);
     else
       printf("%s\n", s.c_str());
   }
@@ -773,7 +773,7 @@ void decoder::clear_corrections() {
 
 const uint8_t *decoder::get_obs_corrections() const {
   const bool log_due_to_log_level =
-      cudaq::detail::should_log(cudaq::detail::LogLevel::info);
+      cudaq::qec::detail::should_log(cudaq::qec::detail::log_level::info);
   const bool should_log = pimpl->should_log || log_due_to_log_level;
   if (should_log) {
     pimpl->log_counter++;
@@ -781,7 +781,7 @@ const uint8_t *decoder::get_obs_corrections() const {
         fmt::format("[DecoderStats][{}] Counter:{} get_obs_corrections called",
                     static_cast<const void *>(this), pimpl->log_counter);
     if (log_due_to_log_level)
-      cudaq::info("{}", s);
+      CUDA_QEC_INFO("{}", s);
     else
       printf("%s\n", s.c_str());
   }
@@ -799,7 +799,7 @@ void decoder::reset_decoder() {
   pimpl->corrections.clear();
   pimpl->corrections.resize(O_sparse.size());
   const bool log_due_to_log_level =
-      cudaq::detail::should_log(cudaq::detail::LogLevel::info);
+      cudaq::qec::detail::should_log(cudaq::qec::detail::log_level::info);
   const bool should_log = pimpl->should_log || log_due_to_log_level;
   if (should_log) {
     pimpl->log_counter++;
@@ -807,7 +807,7 @@ void decoder::reset_decoder() {
         fmt::format("[DecoderStats][{}] Counter:{} reset_decoder called",
                     static_cast<const void *>(this), pimpl->log_counter);
     if (log_due_to_log_level)
-      cudaq::info("{}", s);
+      CUDA_QEC_INFO("{}", s);
     else
       printf("%s\n", s.c_str());
   }

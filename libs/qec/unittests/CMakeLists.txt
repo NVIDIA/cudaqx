@@ -24,7 +24,7 @@ set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 if (CMAKE_COMPILER_IS_GNUCXX
   AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 12.0.0
   AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 13.0.0)
-  target_compile_options(gtest PUBLIC
+  target_compile_options(gtest PRIVATE
     $<$<COMPILE_LANGUAGE:CXX>:--param=evrp-mode=legacy>)
 endif()
 include(GoogleTest)
@@ -97,6 +97,11 @@ target_link_libraries(test_sparse_binary_matrix PRIVATE GTest::gtest_main cudaq-
 add_dependencies(CUDAQXQECUnitTests test_sparse_binary_matrix)
 gtest_discover_tests(test_sparse_binary_matrix)
 
+add_executable(test_logger test_logger.cpp)
+target_link_libraries(test_logger PRIVATE GTest::gtest_main cudaq-qec cudaq::cudaq)
+add_dependencies(CUDAQXQECUnitTests test_logger)
+gtest_discover_tests(test_logger)
+
 # TensorRT decoder test is only built for x86 architectures
 if(CUDAQ_QEC_TRT_DECODER_ENABLED AND CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64)|(AMD64|amd64)|(^i.86$)")
   add_executable(test_trt_decoder ./decoders/trt_decoder/test_trt_decoder.cpp)
@@ -145,19 +150,27 @@ if(CUDAQ_QEC_TRT_DECODER_ENABLED AND CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64)|(A
       set(_trt_generated_onnx_dir "${CMAKE_CURRENT_BINARY_DIR}/trt_decoder_onnx")
       set(_trt_dynamic_identity_onnx "${_trt_generated_onnx_dir}/trt_dynamic_identity.onnx")
       set(_trt_uint8_identity_onnx "${_trt_generated_onnx_dir}/trt_uint8_identity.onnx")
+      set(_trt_uint8_to_float_onnx "${_trt_generated_onnx_dir}/trt_uint8_to_float.onnx")
       add_custom_command(
-        OUTPUT "${_trt_dynamic_identity_onnx}" "${_trt_uint8_identity_onnx}"
+        OUTPUT
+          "${_trt_dynamic_identity_onnx}"
+          "${_trt_uint8_identity_onnx}"
+          "${_trt_uint8_to_float_onnx}"
         COMMAND ${Python_EXECUTABLE}
           "${CMAKE_CURRENT_SOURCE_DIR}/decoders/trt_decoder/generate_trt_decoder_onnx.py"
           --out-dir "${_trt_generated_onnx_dir}"
         DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/decoders/trt_decoder/generate_trt_decoder_onnx.py"
         COMMENT "Generating TensorRT decoder ONNX test fixtures")
       add_custom_target(generate_trt_decoder_onnx
-        DEPENDS "${_trt_dynamic_identity_onnx}" "${_trt_uint8_identity_onnx}")
+        DEPENDS
+          "${_trt_dynamic_identity_onnx}"
+          "${_trt_uint8_identity_onnx}"
+          "${_trt_uint8_to_float_onnx}")
       add_dependencies(test_trt_decoder generate_trt_decoder_onnx)
       target_compile_definitions(test_trt_decoder PRIVATE
         TRT_TEST_DYNAMIC_ONNX_PATH="${_trt_dynamic_identity_onnx}"
-        TRT_TEST_UINT8_ONNX_PATH="${_trt_uint8_identity_onnx}")
+        TRT_TEST_UINT8_ONNX_PATH="${_trt_uint8_identity_onnx}"
+        TRT_TEST_UINT8_TO_FLOAT_ONNX_PATH="${_trt_uint8_to_float_onnx}")
     else()
       message(WARNING "Python package onnx not found. "
                       "Skipping generated TensorRT decoder ONNX fixtures.")
@@ -599,6 +612,7 @@ endif()
 add_subdirectory(backend-specific)
 add_subdirectory(realtime)
 add_subdirectory(decoders/pymatching)
+add_subdirectory(decoders/chromobius)
 
 # Hololink bridge tools (FPGA playback + graph-launched QLDPC bridge)
 if(CUDAQX_QEC_ENABLE_HOLOLINK_TOOLS)

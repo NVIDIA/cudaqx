@@ -45,7 +45,7 @@ def prep1(logicalQubit: patch):
 
 
 @cudaq.kernel
-def stabilizer_round(logicalQubit: patch) -> list[bool]:
+def stabilizer_round(logicalQubit: patch) -> list[cudaq.measure_handle]:
     # Run one round of stabilizer measurements for the Z-type repetition code
 
     num_ancilla = len(logicalQubit.ancz)

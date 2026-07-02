@@ -6,20 +6,20 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 #include "common/ExecutionContext.h"
-#include "common/FmtCore.h"
 #include "cuda-qx/core/kwargs_utils.h"
 #include "cuda-qx/core/library_utils.h"
 #include "type_casters.h"
 #include "cudaq/platform.h"
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/detector_error_model.h"
+#include "cudaq/qec/logger.h"
 #include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/plugin_loader.h"
 #include "cudaq/qec/sparse_binary_matrix.h"
-#include "cudaq/runtime/logger/logger.h"
 #include <algorithm>
 #include <cstring>
 #include <filesystem>
+#include <fmt/core.h>
 #include <functional>
 #include <limits>
 #include <link.h>
@@ -227,7 +227,7 @@ public:
   static void
   register_decoder(const std::string &name,
                    std::function<nb::object(nb::object, nb::kwargs)> factory) {
-    cudaq::info("Registering Pythonic Decoder with name {}", name);
+    cudaq::qec::info("Registering Pythonic Decoder with name {}", name);
     registry[name] = factory;
   }
 
@@ -814,10 +814,15 @@ void bindDecoder(nb::module_ &mod) {
            nb::arg("num_syndromes_per_round"),
            nb::arg("remove_zero_syndrome_errors") = false);
 
-  qecmod.def(
-      "dem_from_stim_text", &dem_from_stim_text,
-      "Parse a Stim detector error model string into a DetectorErrorModel.",
-      nb::arg("dem_text"));
+  qecmod.def("dem_from_stim_text", &dem_from_stim_text,
+             R"pbdoc(
+        Parse a Stim detector error model string into a DetectorErrorModel.
+
+        Args:
+            dem_text: A Stim detector error model string.
+            use_decomp_suggestions: If error mechanism separated by ``^`` are decomposed
+      )pbdoc",
+             nb::arg("dem_text"), nb::arg("use_decomp_suggestions") = false);
 
   // Expose decorator function that handles inheritance
   qecmod.def("decoder", [&](const std::string &name) {

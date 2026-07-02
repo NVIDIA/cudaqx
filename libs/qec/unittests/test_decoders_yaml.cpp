@@ -313,11 +313,23 @@ TEST(DecoderYAMLTest, TrtDecoderMonostateGlobalDecoderParams) {
   trt_config.global_decoder_params = std::monostate{};
 
   auto params = config.decoder_custom_args_to_heterogeneous_map();
-  EXPECT_FALSE(params.contains("global_decoder_params"));
+  EXPECT_TRUE(params.contains("global_decoder_params"));
+  EXPECT_TRUE(
+      params.get<cudaqx::heterogeneous_map>("global_decoder_params").empty());
 
   cudaq::qec::decoding::config::multi_decoder_config multi_config;
   multi_config.decoders.push_back(config);
-  test_decoder_yaml_roundtrip(multi_config);
+  const auto yaml = multi_config.to_yaml_str(200);
+  EXPECT_NE(yaml.find("global_decoder_params"), std::string::npos);
+  auto round_tripped =
+      cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(yaml);
+  EXPECT_EQ(round_tripped.to_yaml_str(200), yaml);
+  const auto &round_tripped_trt_config =
+      std::get<cudaq::qec::decoding::config::trt_decoder_config>(
+          round_tripped.decoders[0].decoder_custom_args);
+  EXPECT_TRUE(
+      std::holds_alternative<cudaq::qec::decoding::config::pymatching_config>(
+          round_tripped_trt_config.global_decoder_params));
 
   params = cudaq::qec::decoding::host::prepare_decoder_params(config);
   EXPECT_TRUE(params.contains("global_decoder_params"));
@@ -327,6 +339,105 @@ TEST(DecoderYAMLTest, TrtDecoderMonostateGlobalDecoderParams) {
   params = cudaq::qec::decoding::host::prepare_decoder_params(config);
   EXPECT_TRUE(params.contains("global_decoder_params"));
   EXPECT_FALSE(params.contains("O"));
+}
+
+TEST(DecoderYAMLTest, TrtDecoderDefaultGlobalDecoderParams) {
+  cudaqx::heterogeneous_map map;
+  map.insert("global_decoder", std::string("chromobius"));
+
+  auto trt_config =
+      cudaq::qec::decoding::config::trt_decoder_config::from_heterogeneous_map(
+          map);
+  EXPECT_TRUE(
+      std::holds_alternative<cudaq::qec::decoding::config::chromobius_config>(
+          trt_config.global_decoder_params));
+  auto params = trt_config.to_heterogeneous_map();
+  EXPECT_TRUE(params.contains("global_decoder_params"));
+  EXPECT_TRUE(
+      params.get<cudaqx::heterogeneous_map>("global_decoder_params").empty());
+
+  const std::string yaml_without_params = R"(
+decoders:
+  - id: 0
+    type: trt_decoder
+    block_size: 1
+    syndrome_size: 1
+    H_sparse: [0, -1]
+    O_sparse: []
+    D_sparse: [0, -1]
+    decoder_custom_args:
+      global_decoder: chromobius
+)";
+  auto parsed_without_params =
+      cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(
+          yaml_without_params);
+  const auto &parsed_trt_config =
+      std::get<cudaq::qec::decoding::config::trt_decoder_config>(
+          parsed_without_params.decoders[0].decoder_custom_args);
+  EXPECT_TRUE(
+      std::holds_alternative<cudaq::qec::decoding::config::chromobius_config>(
+          parsed_trt_config.global_decoder_params));
+
+  auto config = create_test_decoder_config_trt(0);
+  auto &yaml_trt_config =
+      std::get<cudaq::qec::decoding::config::trt_decoder_config>(
+          config.decoder_custom_args);
+  yaml_trt_config.global_decoder = "chromobius";
+  yaml_trt_config.global_decoder_params = std::monostate{};
+  cudaq::qec::decoding::config::multi_decoder_config multi_config;
+  multi_config.decoders.push_back(config);
+  const auto yaml = multi_config.to_yaml_str(200);
+  EXPECT_NE(yaml.find("global_decoder_params"), std::string::npos);
+  auto round_tripped =
+      cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(yaml);
+  const auto &round_tripped_trt_config =
+      std::get<cudaq::qec::decoding::config::trt_decoder_config>(
+          round_tripped.decoders[0].decoder_custom_args);
+  EXPECT_TRUE(
+      std::holds_alternative<cudaq::qec::decoding::config::chromobius_config>(
+          round_tripped_trt_config.global_decoder_params));
+}
+
+TEST(DecoderYAMLTest, UnknownTrtGlobalDecoderParamsThrow) {
+  cudaqx::heterogeneous_map map;
+  map.insert("global_decoder", std::string("my_plugin"));
+  map.insert("global_decoder_params", cudaqx::heterogeneous_map{});
+  EXPECT_THROW(
+      cudaq::qec::decoding::config::trt_decoder_config::from_heterogeneous_map(
+          map),
+      std::runtime_error);
+
+  cudaq::qec::decoding::config::trt_decoder_config trt_config;
+  trt_config.global_decoder = "my_plugin";
+  auto params = trt_config.to_heterogeneous_map();
+  EXPECT_EQ(params.get<std::string>("global_decoder"), "my_plugin");
+  EXPECT_FALSE(params.contains("global_decoder_params"));
+
+  map = cudaqx::heterogeneous_map();
+  map.insert("global_decoder", std::string("my_plugin"));
+  trt_config =
+      cudaq::qec::decoding::config::trt_decoder_config::from_heterogeneous_map(
+          map);
+  EXPECT_TRUE(
+      std::holds_alternative<std::monostate>(trt_config.global_decoder_params));
+
+  const std::string yaml_with_unknown_params = R"(
+decoders:
+  - id: 0
+    type: trt_decoder
+    block_size: 1
+    syndrome_size: 1
+    H_sparse: [0, -1]
+    O_sparse: []
+    D_sparse: [0, -1]
+    decoder_custom_args:
+      global_decoder: my_plugin
+      global_decoder_params: {}
+)";
+  EXPECT_THROW(
+      cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(
+          yaml_with_unknown_params),
+      std::runtime_error);
 }
 
 TEST(DecoderYAMLTest, TrtDecoderParamsWithoutDecoderThrows) {

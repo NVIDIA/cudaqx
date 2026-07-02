@@ -44,6 +44,8 @@ set(QEC_SOURCES
   decoder_pool.cpp
   detector_error_model.cpp
   experiments.cpp
+  logger.cpp
+  logger_forwarder.cpp
   pcm_utils.cpp
   plugin_loader.cpp
   sparse_binary_matrix.cpp
@@ -85,6 +87,7 @@ target_link_options(${LIBRARY_NAME} PRIVATE
 
 add_subdirectory(decoders/plugins/example)
 add_subdirectory(decoders/plugins/pymatching)
+add_subdirectory(decoders/plugins/chromobius)
 
 # The TRT decoder plugin honors the tri-state `CUDAQ_QEC_BUILD_TRT_DECODER`
 # cache variable (AUTO/ON/OFF) declared in the parent CMakeLists.txt.  Skip

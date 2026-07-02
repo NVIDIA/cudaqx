@@ -12,10 +12,10 @@
 
 // Lib-private header one level up (libs/qec/lib); this file lives in realtime/.
 #include "../hardware_affinity.h"
+#include "cudaq/qec/logger.h"
 #include "cudaq/qec/realtime/decoder_rpc_ids.h"
 #include "cudaq/qec/realtime/graph_resources.h"
 #include "cudaq/realtime/daemon/dispatcher/dispatch_kernel_launch.h"
-#include "cudaq/runtime/logger/logger.h"
 
 #include <algorithm>
 #include <atomic>
@@ -346,7 +346,7 @@ void qec_realtime_session::initialize() {
           conflict = true;
       }
       if (conflict) {
-        CUDAQ_WARN(
+        CUDA_QEC_WARN(
             "realtime decoders request different numa_node_ids; the shared "
             "host dispatch thread can honor only one. NUMA pinning "
             "disabled for this session.");
@@ -362,20 +362,20 @@ void qec_realtime_session::initialize() {
     start_host_loop();
     initialized_ = true;
   } catch (...) {
-    CUDAQ_WARN("qec_realtime_session::initialize: rolling back partial "
-               "initialization after exception");
+    CUDA_QEC_WARN("qec_realtime_session::initialize: rolling back partial "
+                  "initialization after exception");
     finalize();
     throw;
   }
 
   if (device_mode_)
-    CUDAQ_INFO("qec_realtime_session: initialized DEVICE mode "
-               "(num_decoders_with_graph={}, num_slots={}, slot_size={})",
-               num_decoders_with_graph_, num_slots_, slot_size_);
+    CUDA_QEC_INFO("qec_realtime_session: initialized DEVICE mode "
+                  "(num_decoders_with_graph={}, num_slots={}, slot_size={})",
+                  num_decoders_with_graph_, num_slots_, slot_size_);
   else
-    CUDAQ_INFO("qec_realtime_session: initialized HOST mode "
-               "(num_slots={}, slot_size={})",
-               num_slots_, slot_size_);
+    CUDA_QEC_INFO("qec_realtime_session: initialized HOST mode "
+                  "(num_slots={}, slot_size={})",
+                  num_slots_, slot_size_);
 }
 
 //==============================================================================
@@ -470,7 +470,7 @@ void qec_realtime_session::finalize() {
   std::memset(&host_ctx_, 0, sizeof(host_ctx_));
 
   if (was_initialized)
-    CUDAQ_INFO("qec_realtime_session: finalized");
+    CUDA_QEC_INFO("qec_realtime_session: finalized");
 }
 
 //==============================================================================

@@ -87,3 +87,34 @@ def test_sliding_window_1(decoder_name, batched, num_rounds, num_windows):
             if not np.array_equal(r1.result, r2.result):
                 num_mismatches += 1
         assert num_mismatches == 0
+
+
+def test_pymatching_parallel_edges_use_observable_faults():
+    # Same detector syndrome with different observable flips are distinct
+    # logical fault mechanisms. After #610 these stay as separate DEM columns,
+    # which are parallel edges in the matching graph. This guards the two
+    # PyMatching code paths: H-only construction must reject parallel edges,
+    # while the observable-aware path must merge them and still decode.
+    H = np.array([[1, 1]], dtype=np.uint8)
+    O = np.array([[1, 0], [0, 1]], dtype=np.uint8)
+    error_rates = np.array([0.1, 0.2], dtype=np.float64)
+
+    # ASSERT: the H-only path keeps the default 'disallow' strategy, so building
+    # a graph with two columns on the same edge raises rather than silently
+    # collapsing the mechanisms.
+    with pytest.raises(ValueError, match="Parallel edges not permitted"):
+        qec.get_decoder("pymatching", H)
+
+    # ASSERT: providing O with merge_strategy='independent' combines the
+    # parallel edges and yields a converged observable-space decode.
+    decoder = qec.get_decoder("pymatching",
+                              H,
+                              O=O,
+                              error_rate_vec=error_rates,
+                              merge_strategy="independent")
+    result = decoder.decode_batch(np.array([[1]], dtype=np.uint8))
+
+    assert isinstance(result, qec.BatchDecoderResult)
+    assert result.result.shape[0] == 1
+    assert result.result.shape[1] > 0
+    assert result.converged.tolist() == [True]
