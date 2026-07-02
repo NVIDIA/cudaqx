@@ -11,6 +11,7 @@
 #include "cudaq/realtime/daemon/dispatcher/dispatch_kernel_launch.h"
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -22,14 +23,17 @@ using cudaq_internal::device_call::DeviceCallHostDispatchTable;
 using cudaq_internal::device_call::DeviceCallService;
 using cudaq_internal::device_call::DeviceCallServicePluginInfo;
 
+// Realtime function ids are fnv1a_32 of the kernel-facing callee name, matching
+// the generic device_call targets emitted by the
+// cudaq-qec-realtime-decoding-simulation-cqr device wrappers (and the names
+// defined in decoder_server_runtime.md). All three are extern "C", so no name
+// mangling is involved.
 constexpr std::uint32_t kEnqueueSyndromesFnId =
-    cudaq::realtime::fnv1a_hash("simulation_enqueue_syndromes");
+    cudaq::realtime::fnv1a_hash("enqueue_syndromes");
 constexpr std::uint32_t kGetCorrectionsFnId =
-    cudaq::realtime::fnv1a_hash("simulation_get_corrections");
-// reset_decoder has C++ linkage in the simulation wrapper, so match the
-// mangled callee symbol emitted by CUDA-Q's realtime lowering.
-constexpr std::uint32_t kResetDecoderFnId = cudaq::realtime::fnv1a_hash(
-    "_ZN5cudaq3qec8decoding10simulation13reset_decoderEm");
+    cudaq::realtime::fnv1a_hash("get_corrections");
+constexpr std::uint32_t kResetDecoderFnId =
+    cudaq::realtime::fnv1a_hash("reset_decoder");
 
 constexpr std::int32_t kStatusSuccess = 0;
 constexpr std::int32_t kStatusInvalidRequest = -1;
@@ -122,6 +126,12 @@ bool read_stdvec_i1(const std::uint8_t *payload, std::size_t arg_len,
   return true;
 }
 
+// Counts validated requests this host-dispatch service has handled. Lets a test
+// confirm the device_call actually traversed the host-dispatch ring to the
+// service (HOP1) rather than resolving to a direct host trampoline. Exposed via
+// cudaqx_qec_device_call_dispatch_count() below.
+std::atomic<std::uint64_t> g_service_dispatch_count{0};
+
 bool read_request_payload(const void *rx_slot, std::size_t slot_size,
                           const cudaq::realtime::RPCHeader *&request,
                           const std::uint8_t *&payload, std::size_t &arg_len) {
@@ -138,6 +148,7 @@ bool read_request_payload(const void *rx_slot, std::size_t slot_size,
 
   payload = static_cast<const std::uint8_t *>(rx_slot) +
             sizeof(cudaq::realtime::RPCHeader);
+  g_service_dispatch_count.fetch_add(1, std::memory_order_relaxed);
   return true;
 }
 
@@ -199,8 +210,8 @@ void write_response(void *tx_slot, const void *rx_slot, std::int32_t status,
                    __ATOMIC_RELEASE);
 }
 
-void simulation_enqueue_syndromes_host(const void *rx_slot, void *tx_slot,
-                                       std::size_t slot_size) {
+void enqueue_syndromes_host(const void *rx_slot, void *tx_slot,
+                            std::size_t slot_size) {
   try {
     EnqueueSyndromesRequest request;
     if (!tx_slot ||
@@ -229,8 +240,8 @@ void simulation_enqueue_syndromes_host(const void *rx_slot, void *tx_slot,
   }
 }
 
-void simulation_get_corrections_host(const void *rx_slot, void *tx_slot,
-                                     std::size_t slot_size) {
+void get_corrections_host(const void *rx_slot, void *tx_slot,
+                          std::size_t slot_size) {
   try {
     GetCorrectionsRequest request;
     if (!tx_slot ||
@@ -268,8 +279,8 @@ void simulation_get_corrections_host(const void *rx_slot, void *tx_slot,
   }
 }
 
-void simulation_reset_decoder_host(const void *rx_slot, void *tx_slot,
-                                   std::size_t slot_size) {
+void reset_decoder_host(const void *rx_slot, void *tx_slot,
+                        std::size_t slot_size) {
   try {
     std::uint64_t decoder_id = 0;
     if (!tx_slot ||
@@ -320,28 +331,39 @@ void configure_entry(cudaq_function_entry_t &entry, std::uint32_t function_id,
   entry.schema.num_results = num_results;
 }
 
+// Registers the fixed default-route RPC handlers (enqueue_syndromes /
+// get_corrections / reset_decoder), all as CUDAQ_DISPATCH_HOST_CALL entries
+// that decode on the CPU via the host API.
+//
+// TODO(decoding-server): a more complete decoding server should build the
+// function table per configured decoder rather than as this fixed CPU set. Each
+// decoder instance would get its own configure_entry establishing the correct
+// processing mechanism -- CUDAQ_DISPATCH_HOST_CALL for CPU/host decoders, or
+// CUDAQ_DISPATCH_GRAPH_LAUNCH for GPU decoders driven by a captured CUDA graph
+// (see decoder_server_runtime.md "per-decoder alternative dispatch units").
+// That is what would let the device_call host-dispatch path (this service)
+// dispatch straight to the right per-decoder mechanism, superseding the
+// separate qec_realtime_session decode ring entirely.
 std::array<cudaq_function_entry_t, kDeviceCallEntryCount> make_entries() {
   std::array<cudaq_function_entry_t, kDeviceCallEntryCount> entries{};
 
   auto &enqueue_entry = entries[kEnqueueSyndromesEntry];
-  configure_entry(enqueue_entry, kEnqueueSyndromesFnId,
-                  simulation_enqueue_syndromes_host, kEnqueueArgCount,
-                  kNoResults);
+  configure_entry(enqueue_entry, kEnqueueSyndromesFnId, enqueue_syndromes_host,
+                  kEnqueueArgCount, kNoResults);
   set_u64(enqueue_entry.schema.args[kEnqueueDecoderIdArg]);
   set_array_u8(enqueue_entry.schema.args[kEnqueueSyndromesArg]);
   set_u64(enqueue_entry.schema.args[kEnqueueTagArg]);
 
   auto &get_entry = entries[kGetCorrectionsEntry];
-  configure_entry(get_entry, kGetCorrectionsFnId,
-                  simulation_get_corrections_host, kGetCorrectionsArgCount,
-                  kSingleResult);
+  configure_entry(get_entry, kGetCorrectionsFnId, get_corrections_host,
+                  kGetCorrectionsArgCount, kSingleResult);
   set_u64(get_entry.schema.args[kGetCorrectionsDecoderIdArg]);
   set_u64(get_entry.schema.args[kGetCorrectionsLengthArg]);
   set_u8(get_entry.schema.args[kGetCorrectionsResetArg]);
   set_array_u8(get_entry.schema.results[kCorrectionsResult]);
 
   auto &reset_entry = entries[kResetDecoderEntry];
-  configure_entry(reset_entry, kResetDecoderFnId, simulation_reset_decoder_host,
+  configure_entry(reset_entry, kResetDecoderFnId, reset_decoder_host,
                   kResetDecoderArgCount, kNoResults);
   set_u64(reset_entry.schema.args[kResetDecoderIdArg]);
 
@@ -368,6 +390,13 @@ DeviceCallService *get_service() { return &g_service; }
 
 extern "C" __attribute__((visibility("default"))) void
 cudaqx_qec_realtime_device_call_service_force_link() {}
+
+// Test hook: number of requests this service has dispatched. Non-zero only if
+// device_calls were routed through the host-dispatch ring to this service.
+extern "C" __attribute__((visibility("default"))) std::uint64_t
+cudaqx_qec_device_call_dispatch_count() {
+  return g_service_dispatch_count.load(std::memory_order_relaxed);
+}
 
 extern "C" __attribute__((visibility("default"))) DeviceCallServicePluginInfo
 cudaqGetDeviceCallServicePluginInfo() {

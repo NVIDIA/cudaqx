@@ -18,6 +18,10 @@
 #include <vector>
 
 extern "C" void cudaqx_qec_realtime_device_call_service_force_link();
+// Self-verification hook (see assertion below): proves the device_call actually
+// traversed the cudaq-realtime host-dispatch ring to the service instead of
+// silently bypassing to the direct trampoline.
+extern "C" std::uint64_t cudaqx_qec_device_call_dispatch_count();
 
 namespace {
 
@@ -131,4 +135,14 @@ TEST(PyMatchingDeviceCallRealtime, HostDispatch) {
   const auto results = cudaq::run(kRunShots, pymatching_device_call_kernel);
   ASSERT_EQ(results.size(), kRunShots);
   EXPECT_EQ(results[0], kExpectedCorrection);
+
+  // Self-verify the device_call actually went over the cudaq-realtime
+  // host-dispatch ring to the server (a correct result alone does not prove
+  // this
+  // -- the direct trampoline would also produce it).
+  EXPECT_GT(cudaqx_qec_device_call_dispatch_count(), 0u)
+      << "device_call did not reach the host-dispatch service; it likely "
+         "bypassed to the direct trampoline (missing -frealtime-lowering on "
+         "the "
+         "device wrappers, or the wrong simulation library was linked).";
 }

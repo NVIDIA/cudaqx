@@ -52,7 +52,7 @@ if(CUDAQ_REALTIME_ROOT AND CUDAQ_REALTIME_INCLUDE_DIR)
   gtest_discover_tests(test_pymatching_realtime)
 endif()
 
-if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-device-call)
+if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-decoding-server-cqr)
   add_executable(test_pymatching_device_call_realtime)
   set_target_properties(test_pymatching_device_call_realtime PROPERTIES
     LINKER_LANGUAGE CXX)
@@ -73,11 +73,19 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-device-call)
   target_link_directories(test_pymatching_device_call_realtime
     PRIVATE ${CUDAQ_INSTALL_DIR}/lib)
 
+  # This test wires up both ends of the cqr host-dispatch path:
+  #   - simulation-cqr: the simulated-QPU client whose device_calls are lowered
+  #     (-frealtime-lowering) to the realtime frame ABI, rather than resolving to
+  #     the plain -simulation library's direct trampolines (which would bypass
+  #     the server).
+  #   - decoding-server-cqr: the host-dispatch service that receives them (and
+  #     provides the force-link + self-check hooks the test asserts on).
   target_link_libraries(test_pymatching_device_call_realtime PRIVATE
     GTest::gtest_main
     cudaq-qec
     cudaq-qec-realtime-decoding
-    cudaq-qec-realtime-decoding-simulation
+    cudaq-qec-realtime-decoding-simulation-cqr
+    cudaq-qec-realtime-decoding-server-cqr
     cudaq::cudaq cudaq::cudaq-common cudaq-mlir-runtime
     nvqir nvqir-stim
   )
@@ -89,6 +97,11 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-device-call)
 
   add_dependencies(test_pymatching_device_call_realtime cudaq-qec-pymatching)
   add_dependencies(CUDAQXQECUnitTests test_pymatching_device_call_realtime)
+  # CUDAQ_DEVICE_CALL_CHANNEL=host_dispatch routes the device_call over the
+  # cudaq-realtime host-dispatch ring to the decoding server, which decodes on
+  # the CPU host. No CUDAQ_QEC_REALTIME_MODE=inproc_rpc: that second,
+  # server-internal decode ring is redundant now that the device_call already
+  # crosses cudaq-realtime here -- the server decodes inline instead.
   gtest_discover_tests(test_pymatching_device_call_realtime
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     PROPERTIES ENVIRONMENT "CUDAQ_DEVICE_CALL_CHANNEL=host_dispatch")
