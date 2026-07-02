@@ -12,8 +12,8 @@
 #include "llvm/Support/YAMLTraits.h"
 #include "llvm/Support/raw_ostream.h"
 #include "realtime_decoding.h"
+#include "cudaq/qec/logger.h"
 #include "cudaq/qec/realtime/decoding_config.h"
-#include "cudaq/runtime/logger/logger.h"
 #include <any>
 #include <filesystem>
 #include <fstream>
@@ -864,7 +864,7 @@ public:
 
 namespace cudaq::qec::decoding::config {
 int configure_decoders(multi_decoder_config &config) {
-  CUDAQ_INFO("Initializing realtime decoding library with config object");
+  CUDA_QEC_INFO("Initializing realtime decoding library with config object");
   // Register the decoder provider to inject the decoder configuration into
   // the job requests.
   cudaq::registerExtraPayloadProvider(
@@ -881,8 +881,8 @@ void log_config(const char *config_str, bool from_file) {
   }();
 
   if (dump_config) {
-    if (cudaq::detail::should_log(cudaq::detail::LogLevel::info)) {
-      CUDAQ_INFO(
+    if (cudaq::qec::detail::should_log(cudaq::qec::detail::log_level::info)) {
+      CUDA_QEC_INFO(
           "Initializing realtime decoding library with config string: {}",
           config_str);
     } else {
@@ -894,12 +894,12 @@ void log_config(const char *config_str, bool from_file) {
 
 int configure_decoders_from_file(const char *config_file) {
   std::string config_file_str(config_file);
-  CUDAQ_INFO("Initializing realtime decoding library with config file: {}",
-             config_file_str);
+  CUDA_QEC_INFO("Initializing realtime decoding library with config file: {}",
+                config_file_str);
 
   // Verify that the file exists.
   if (!std::filesystem::exists(config_file_str)) {
-    CUDAQ_WARN("Config file does not exist: {}", config_file_str);
+    CUDA_QEC_WARN("Config file does not exist: {}", config_file_str);
     return 1;
   }
 
@@ -914,7 +914,8 @@ int configure_decoders_from_file(const char *config_file) {
 }
 
 int configure_decoders_from_str(const char *config_str) {
-  CUDAQ_INFO("Initializing realtime decoding library with raw config string");
+  CUDA_QEC_INFO(
+      "Initializing realtime decoding library with raw config string");
   log_config(config_str, /*from_file=*/false);
   auto config = multi_decoder_config::from_yaml_str(config_str);
   return configure_decoders(config);

@@ -26,7 +26,7 @@ def prep0(logicalQubit: patch):
 
 @cudaq.kernel
 def stabilizer(logicalQubit: patch, x_stabilizers: list[int],
-               z_stabilizers: list[int]) -> list[bool]:
+               z_stabilizers: list[int]) -> list[cudaq.measure_handle]:
     h(logicalQubit.ancx)
     for xi in range(len(logicalQubit.ancx)):
         for di in range(len(logicalQubit.data)):

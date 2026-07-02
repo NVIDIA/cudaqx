@@ -1,5 +1,5 @@
 # ============================================================================ #
-# Copyright (c) 2025 NVIDIA Corporation & Affiliates.                          #
+# Copyright (c) 2025 - 2026 NVIDIA Corporation & Affiliates.                  #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -13,12 +13,27 @@
 # How to use this script:
 # python3 replay_decoder_logs.py --config config.yml --decoder-log decoder.log
 
+# Capturing logs for replay:
+#   * Recommended (forwarder-proof): emit the [DecoderStats] lines via a direct
+#     printf to stdout, bypassing the logger (and any forwarder) entirely:
+#         CUDAQ_QEC_DEBUG_DECODER=1 ./your_app > decoder.log 2>&1
+#   * Alternative: CUDAQ_LOG_LEVEL=info also emits the lines, but only via the
+#     logger, so a cudaq::qec log forwarder would truncate long messages (to
+#     message_capacity, appending " ...[truncated]"). Capture without a
+#     forwarder if you use this path.
+#   * This parser skips "...[truncated]" lines and warns.
+
 import sys
 import argparse
 import os
 import numpy
 import yaml
 import cudaq_qec as qec
+
+# Suffix the cudaq::qec log forwarder appends to messages it truncates to fit
+# its bounded message_capacity (see realtime_truncation_suffix in logger.h).
+# Lines containing this marker are incomplete and unsafe to parse.
+TRUNCATION_MARKER = "...[truncated]"
 
 
 # ---------------------------------------------------------------------------- #
@@ -41,14 +56,27 @@ def sparse_to_dense(sparse_list, num_rows, num_cols, dtype=numpy.uint8):
 def parse_decoder_log(decoder_log_file, log_detectors_sparse, log_errors_sparse,
                       log_observables_sparse, log_observables_dense,
                       log_result_types, decoder_id_list):
-    # running id of the last decoder seen (needed since the decoder id is not
-    # included in the 1 very verbose decode log message).
+    # The decoder id is read directly from each [DecoderStats] line's
+    # "DecoderId:" field. last_decoder_id is only a fallback for older logs
+    # whose stats lines predate that field (it is tracked from the enqueue
+    # message, which is emitted at the info level).
     last_decoder_id = -1
+    truncated_lines = 0  # count of skipped "...[truncated]" lines
     print(f'Parsing decoder log file {decoder_log_file}...')
-    enqueue_msg = "Entering enqueue_syndromes_ui64 for decoder id: "  # needed for last_decoder_id
+    enqueue_msg = "Entering enqueue_syndromes_ui64 for decoder id: "  # fallback decoder id
     with open(decoder_log_file, 'r') as f:
         for line in f:
             line = line.strip()
+            # A forwarder-truncated line has incomplete fields (e.g. a clipped
+            # InputDetectors list), which would silently desync the parallel
+            # result lists. Skip it entirely so nothing partial is appended.
+            if TRUNCATION_MARKER in line:
+                truncated_lines += 1
+                if truncated_lines == 1:
+                    print(f"WARNING: skipping '{TRUNCATION_MARKER}' lines "
+                          "(forwarder message_capacity too small). Re-capture "
+                          "without a log forwarder. See header comment.")
+                continue
             if enqueue_msg in line:
                 # Needed for last_decoder_id.
                 last_decoder_id = int(line.split(enqueue_msg)[1].split(" ")[0])
@@ -68,12 +96,18 @@ def parse_decoder_log(decoder_log_file, log_detectors_sparse, log_errors_sparse,
                     else:
                         log_detectors_sparse.append(
                             [int(x) for x in value.split(",")])
-                    if last_decoder_id == -1:
-                        print(
-                            f"Error: last_decoder_id is -1. This is a fatal error processing the log file."
-                        )
+                    # Prefer the DecoderId carried in the stats line; fall back
+                    # to the enqueue-derived id for older logs that lack it.
+                    if "DecoderId" in fields:
+                        decoder_id = int(fields["DecoderId"])
+                    elif last_decoder_id != -1:
+                        decoder_id = last_decoder_id
+                    else:
+                        print("Error: could not determine decoder id (no "
+                              "DecoderId field and no enqueue message). This "
+                              "is a fatal error processing the log file.")
                         exit(1)
-                    decoder_id_list.append(last_decoder_id)
+                    decoder_id_list.append(decoder_id)
 
                     value = fields.get("Errors", "")
                     if value == "":
@@ -98,6 +132,9 @@ def parse_decoder_log(decoder_log_file, log_detectors_sparse, log_errors_sparse,
                     if not result_types:
                         result_types = {"errs"}
                     log_result_types.append(result_types)
+    if truncated_lines > 0:
+        print(f"WARNING: skipped {truncated_lines} truncated line(s); "
+              "replay coverage is incomplete.")
 
 
 # ---------------------------------------------------------------------------- #
