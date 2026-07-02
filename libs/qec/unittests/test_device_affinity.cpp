@@ -51,14 +51,28 @@ TEST(DeviceAffinity, ReadNegativeThrows) {
 }
 
 #if defined(__linux__)
+// Container runtimes commonly block the mempolicy syscalls (seccomp without
+// CAP_SYS_NICE). The library degrades gracefully there (warns, keeps going),
+// but tests that assert the syscalls' effects must skip instead of fail.
+static bool mempolicy_syscalls_usable() {
+  int mode = -1;
+  if (syscall(SYS_get_mempolicy, &mode, nullptr, 0UL, nullptr, 0UL) != 0)
+    return false;
+  return syscall(SYS_set_mempolicy, MPOL_DEFAULT, nullptr, 0UL) == 0;
+}
+
 TEST(HardwareAffinity, MempolicyDefaultIsPreferredNotBind) {
   namespace da = cudaq::qec::detail_affinity;
+  if (!mempolicy_syscalls_usable())
+    GTEST_SKIP() << "mempolicy syscalls unavailable (container seccomp?)";
   da::bind_this_thread_to_numa_node(0);
   EXPECT_EQ(da::current_thread_mempolicy_mode(), MPOL_PREFERRED);
   syscall(SYS_set_mempolicy, MPOL_DEFAULT, nullptr, 0UL);
 }
 TEST(HardwareAffinity, MempolicyBindWhenRequested) {
   namespace da = cudaq::qec::detail_affinity;
+  if (!mempolicy_syscalls_usable())
+    GTEST_SKIP() << "mempolicy syscalls unavailable (container seccomp?)";
   da::bind_this_thread_to_numa_node(0, da::mempolicy_mode::bind);
   EXPECT_EQ(da::current_thread_mempolicy_mode(), MPOL_BIND);
   syscall(SYS_set_mempolicy, MPOL_DEFAULT, nullptr, 0UL);
@@ -120,6 +134,8 @@ TEST(HardwareAffinity, BindThreadPinsAffinityToNodeCpus) {
 }
 TEST(HardwareAffinity, NegativeNodeIsNoop) {
   namespace da = cudaq::qec::detail_affinity;
+  if (!mempolicy_syscalls_usable())
+    GTEST_SKIP() << "mempolicy syscalls unavailable (container seccomp?)";
   cpu_set_t before;
   CPU_ZERO(&before);
   sched_getaffinity(0, sizeof(before), &before);
