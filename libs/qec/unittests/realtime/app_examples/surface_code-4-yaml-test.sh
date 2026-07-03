@@ -79,11 +79,14 @@ export CUDAQ_QEC_REALTIME_MODE=${CUDAQ_QEC_REALTIME_MODE:-inproc_rpc}
 
 P_SPAM=0.01
 
-# Residual logical-error ceiling. A correctly-wired decoder should leave very
-# few residual logical errors; a wired-but-wrong decoder (e.g. one that loads
-# but does not actually correct) leaves many. num_shots/4 is a generous ceiling
-# that still catches a broken decoder.
-MAX_NON_ZERO=$((NUM_SHOTS / 4))
+# Residual logical-error ceiling. At p_spam=0.01 a correctly-wired decoder
+# leaves ~0 residual logical errors (measured: <=1 in 200), while the
+# UNCORRECTED rate is ~4% (d3) up to ~15% (d5/T6). The ceiling is 2% -- below
+# the uncorrected rate -- so a decoder that loads but never actually corrects
+# (leaving the uncorrected rate) is caught, not just one that aborts. Floored at
+# 1 so small shot counts do not truncate the ceiling to 0.
+MAX_NON_ZERO=$((NUM_SHOTS / 50))
+if [[ $MAX_NON_ZERO -lt 1 ]]; then MAX_NON_ZERO=1; fi
 
 # Create an isolated working directory and (by default) clean it up on exit.
 WORKDIR=$(mktemp -d)

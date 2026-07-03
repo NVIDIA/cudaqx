@@ -49,12 +49,6 @@ static int g_enqueues_per_shot = 0;
 static int g_syndrome_bits_per_round = 0;
 static int g_data_bits = 0;
 
-// Whether or not to put calls to debug functions in the QIR program. You cannot
-// set this to 1 if you are submitting to hardware.
-#ifndef PER_SHOT_DEBUG
-#define PER_SHOT_DEBUG 0
-#endif
-
 // Uncomment this to manually inject errors.
 // #define MANUALLY_INJECT_ERRORS
 
@@ -468,17 +462,6 @@ void get_stab_data_supports(char stab_type, int distance,
   }
 }
 
-void debug_print_syndromes(int64_t syndrome_x_int, int64_t syndrome_z_int) {
-  printf("syndrome_x_int: %ld, syndrome_z_int: %ld\n", syndrome_x_int,
-         syndrome_z_int);
-}
-
-void debug_print_applying_correction(int64_t correction) {
-  printf("Applying correction: %ld\n", correction);
-}
-
-void debug_start_shot() { printf("Starting shot\n"); }
-
 namespace cudaq::qec::qpu {
 
 // Transversal CNOT gate
@@ -597,9 +580,6 @@ __qpu__ void custom_memory_circuit_stabs(
     if (enqueue_syndromes)
       cudaq::qec::decoding::enqueue_syndromes(
           /*decoder_id=*/logical_qubit_idx, combined_syndrome);
-#if PER_SHOT_DEBUG
-    debug_print_syndromes(syndrome_x_int, syndrome_z_int);
-#endif
   }
 }
 
@@ -611,9 +591,6 @@ demo_circuit_qpu(bool allow_device_calls,
                  const std::vector<std::size_t> &cnot_schedX_flat,
                  const std::vector<std::size_t> &cnot_schedZ_flat,
                  double p_spam, bool apply_corrections) {
-#if PER_SHOT_DEBUG
-  debug_start_shot();
-#endif
   std::uint64_t num_corrections = 0;
 
   // Reset the decoder
@@ -703,9 +680,6 @@ demo_circuit_qpu(bool allow_device_calls,
         num_corrections++;
         std::uint64_t mask = (1ull << numData) - 1;
         measBits = measBits ^ mask;
-#if PER_SHOT_DEBUG
-        debug_print_applying_correction(correction_result);
-#endif
       }
     }
     ret |= measBits;
@@ -1349,55 +1323,53 @@ int main(int argc, char **argv) {
   std::string syndrome_filename;
   bool use_relay_bp = false;
 
-  // Parse the command line arguments
-  for (int i = 1; i < argc; i++) {
+  // Parse the command line arguments. Value-taking flags read the next argv
+  // entry through require_value, which errors out (rather than reading past the
+  // end of argv) when a flag is given with no following value.
+  int i;
+  auto require_value = [&](const char *flag) -> std::string {
+    if (i + 1 >= argc) {
+      printf("Error: %s requires a value.\n", flag);
+      std::exit(1);
+    }
+    return argv[++i];
+  };
+  for (i = 1; i < argc; i++) {
     std::string arg = argv[i];
     if (arg == "--distance") {
-      distance = std::stoi(argv[i + 1]);
-      i++;
+      distance = std::stoi(require_value("--distance"));
     } else if (arg == "--num_shots") {
-      num_shots = std::stoi(argv[i + 1]);
-      i++;
+      num_shots = std::stoi(require_value("--num_shots"));
     } else if (arg == "--p_spam") {
-      p_spam = std::stod(argv[i + 1]);
-      i++;
+      p_spam = std::stod(require_value("--p_spam"));
     } else if (arg == "--help" || arg == "-h") {
       show_help();
       return 0;
     } else if (arg == "--num_logical") {
-      num_logical = std::stoi(argv[i + 1]);
-      i++;
+      num_logical = std::stoi(require_value("--num_logical"));
     } else if (arg == "--num_rounds") {
-      num_rounds = std::stoi(argv[i + 1]);
-      i++;
+      num_rounds = std::stoi(require_value("--num_rounds"));
     } else if (arg == "--decoder_type") {
-      decoder_type = argv[i + 1];
+      decoder_type = require_value("--decoder_type");
       decoder_type_explicit = true;
-      i++;
     } else if (arg == "--onnx_path" || arg == "--onnx-path") {
-      onnx_path = argv[i + 1];
-      i++;
+      onnx_path = require_value("--onnx_path");
     } else if (arg == "--ising_bundle" || arg == "--ising-bundle") {
-      ising_bundle = argv[i + 1];
-      i++;
+      ising_bundle = require_value("--ising_bundle");
     } else if (arg == "--save_dem") {
       save_dem = true;
-      dem_filename = argv[i + 1];
-      i++;
+      dem_filename = require_value("--save_dem");
     } else if (arg == "--yaml" || arg == "--load_dem") {
       // Realtime phase: the decoder is read from the YAML (authoritative).
       load_dem = true;
       yaml_mode = true;
-      dem_filename = argv[i + 1];
-      i++;
+      dem_filename = require_value("--yaml");
     } else if (arg == "--save_syndrome") {
       save_syndrome = true;
-      syndrome_filename = argv[i + 1];
-      i++;
+      syndrome_filename = require_value("--save_syndrome");
     } else if (arg == "--load_syndrome") {
       load_syndrome = true;
-      syndrome_filename = argv[i + 1];
-      i++;
+      syndrome_filename = require_value("--load_syndrome");
     } else if (arg == "--use-relay-bp") {
       use_relay_bp = true;
     } else {
@@ -1449,6 +1421,14 @@ int main(int argc, char **argv) {
     printf(
         "Error: --decoder_type only applies to --save_dem (generation). "
         "With --yaml the decoder is read from the file; do not pass both.\n");
+    return 1;
+  }
+  // --save_dem (generation) and --yaml (realtime) are separate phases that
+  // write and read the same config file. Passing both silently drops the save,
+  // so reject the combination rather than surprise the user.
+  if (yaml_mode && save_dem) {
+    printf("Error: --save_dem (generation) and --yaml (realtime) are separate "
+           "phases; do not pass both.\n");
     return 1;
   }
 

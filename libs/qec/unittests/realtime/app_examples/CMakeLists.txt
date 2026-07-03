@@ -574,6 +574,29 @@ printf '%s' "$out" | grep -qF -- "$diag" || {
     PROPERTIES ENVIRONMENT "${_sc4_neg_env}")
 endfunction()
 
+# Positive-path assertion: the command must exit 0 AND print the expected
+# marker. Uses a wrapper for the same reason as _sc4_reject -- CTest's
+# PASS_REGULAR_EXPRESSION ignores the exit code, and here we want both.
+function(_sc4_accept name marker)
+  add_test(NAME app_examples.surface_code-4-yaml-${name}
+    COMMAND bash -c [==[
+mark=$1; shift
+if ! out=$("$@" 2>&1); then
+  printf '%s\n' "$out"
+  echo "POSITIVE TEST FAIL: command returned nonzero; expected success"
+  exit 1
+fi
+printf '%s\n' "$out"
+printf '%s' "$out" | grep -qF -- "$mark" || {
+  echo "POSITIVE TEST FAIL: missing expected output: $mark"
+  exit 1
+}
+]==] _ "${marker}" ${_sc4_exe} ${ARGN}
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+  set_tests_properties(app_examples.surface_code-4-yaml-${name}
+    PROPERTIES ENVIRONMENT "${_sc4_neg_env}")
+endfunction()
+
 # distance guard: an even or too-small distance is rejected (one guard, one
 # diagnostic) before code construction; d=4 covers it.
 _sc4_reject(distance-even "distance must be an odd integer"
@@ -635,4 +658,13 @@ _sc4_reject(replay-correction-mismatch "replay correction mismatch"
   --yaml ${_sc4_neg_dir}/d3.yml --load_syndrome ${_sc4_neg_dir}/cap_mismatch.txt
   --distance 3 --num_rounds 3 --num_shots 5)
 set_tests_properties(app_examples.surface_code-4-yaml-negative-replay-correction-mismatch
+  PROPERTIES FIXTURES_REQUIRED sc4_replay)
+
+# Positive replay: the untampered capture must round-trip -- every replayed
+# correction matches the captured run. Proves the load/replay path works on good
+# input, not just that it rejects tampered captures.
+_sc4_accept(replay-roundtrip "SUCCESS: All corrections match"
+  --yaml ${_sc4_neg_dir}/d3.yml --load_syndrome ${_sc4_neg_dir}/cap.txt
+  --distance 3 --num_rounds 3 --num_shots 5)
+set_tests_properties(app_examples.surface_code-4-yaml-replay-roundtrip
   PROPERTIES FIXTURES_REQUIRED sc4_replay)
