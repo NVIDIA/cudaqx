@@ -10,6 +10,7 @@
 #include "cudaq/qec/realtime/decoding.h"
 #include "cudaq/qec/realtime/decoding_config.h"
 #include "cudaq/realtime.h"
+#include <cuda_runtime.h>
 #include <gtest/gtest.h>
 
 #include <cstddef>
@@ -111,6 +112,11 @@ __qpu__ std::int64_t pymatching_device_call_kernel() {
                                                  : std::int64_t{0};
 }
 
+bool is_gpu_available() {
+  int device_count = 0;
+  return cudaGetDeviceCount(&device_count) == cudaSuccess && device_count > 0;
+}
+
 void initialize_realtime() {
   int argc = 1;
   char program[] = "test_pymatching_device_call_realtime";
@@ -121,6 +127,12 @@ void initialize_realtime() {
 } // namespace
 
 TEST(PyMatchingDeviceCallRealtime, HostDispatch) {
+  // FIXME: Remove this guard once cudaq-realtime host_dispatch no longer
+  // requires a visible CUDA device before dispatch reaches the host service.
+  if (!is_gpu_available())
+    GTEST_SKIP() << "No GPU available; cudaq-realtime host_dispatch "
+                    "currently requires a visible CUDA device.";
+
   // Keep the service library loaded so CUDA-Q can discover its
   // cudaqGetDeviceCallServicePluginInfo symbol via dlsym(RTLD_DEFAULT).
   cudaqx_qec_realtime_device_call_service_force_link();

@@ -87,6 +87,7 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-decoding-server-cqr)
     cudaq-qec-realtime-decoding-simulation-cqr
     cudaq-qec-realtime-decoding-server-cqr
     cudaq::cudaq cudaq::cudaq-common cudaq-mlir-runtime
+    CUDA::cudart
     nvqir nvqir-stim
   )
 
