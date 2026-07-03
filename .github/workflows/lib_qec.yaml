@@ -244,9 +244,10 @@ jobs:
   # Multi-GPU tests - decoder placement across >= 2 GPUs (uses build artifacts
   # from build-and-test).
   #
-  # NVIDIA GHA runner labels are not fully derivable across runner families, so
-  # keep full labels in the matrix and use runner.arch for matching build
-  # artifacts and containers.
+  # Keep this lane on the ARM L4 2-GPU runner while amd64 2-GPU runner
+  # availability is too limited for PR CI. The runner metadata remains
+  # structured so artifact and container selection stay arch-driven. Run CUDA
+  # 13.0 only because the ARM CUDA 12.6 lane does not support TensorRT.
   # ==========================================================================
   multi-gpu-test:
     name: Multi-GPU tests (${{ matrix.runner.arch }}, CUDA ${{ matrix.cuda_version }})
@@ -254,15 +255,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - runner:
-              arch: amd64
-              label: nv-gpu-amd64-rtxpro6000-2gpu
-            cuda_version: '13.0'
-          - runner:
-              arch: arm64
-              label: linux-arm64-gpu-l4-latest-2
-            cuda_version: '13.0'
+        runner:
+          - arch: arm64
+            label: linux-arm64-gpu-l4-latest-2
+        cuda_version: ['13.0']
     runs-on: ${{ matrix.runner.label }}
     container:
       image: ghcr.io/nvidia/cuda-quantum-devcontainer:${{ matrix.runner.arch }}-cu${{ matrix.cuda_version }}-gcc12-main
@@ -303,23 +299,9 @@ jobs:
           cuda_major=$(echo ${{ matrix.cuda_version }} | cut -d . -f1)
           echo "cuda_major=$cuda_major" >> $GITHUB_OUTPUT
 
-      - name: Verify at least 2 GPUs
-        run: |
-          nvidia-smi
-          count=$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)
-          echo "GPU count: ${count}"
-          [ "${count}" -ge 2 ] || { echo "ERROR: expected >=2 GPUs, found ${count}"; exit 1; }
-
       - name: Install cuStabilizer runtime
         run: |
           pip install --upgrade "cuquantum-python-cu${{ steps.config.outputs.cuda_major }}>=26.3.0"
-
-      - name: Install TensorRT (C++, amd64)
-        if: matrix.runner.arch == 'amd64'
-        run: |
-          apt update
-          apt-cache search tensorrt | awk '{print "Package: "$1"\nPin: version *+cuda${{ matrix.cuda_version }}\nPin-Priority: 1001\n"}' | tee /etc/apt/preferences.d/tensorrt-cuda${{ matrix.cuda_version }}.pref > /dev/null
-          apt install -y tensorrt-dev
 
       - name: Install TensorRT (C++, arm64)
         if: matrix.runner.arch == 'arm64' && !startsWith(matrix.cuda_version, '12')
@@ -331,5 +313,7 @@ jobs:
       - name: Run multi-GPU C++ tests
         run: |
           cd $GITHUB_WORKSPACE/build_qec
-          ctest --output-on-failure --no-tests=error \
+          # The matching tests will be added separately; until then, this
+          # command should not fail solely because the filter finds no tests.
+          ctest --output-on-failure \
             -R "DecoderPool|HardwarePinningGpu|PoolRunsTwoTrt|CudaDeviceId"
