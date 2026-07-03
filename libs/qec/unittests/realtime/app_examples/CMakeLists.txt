@@ -142,6 +142,61 @@ add_test(
 
 
 #------------------------------------------------------------------------------#
+# Surface code 1, cudaq-realtime (cqr) host-dispatch wire
+#
+# Same application source, but the device wrappers are lowered with
+# -frealtime-lowering and linked against the simulation-cqr client, so every
+# cudaq::qec::decoding::* device_call crosses the cudaq-realtime ring to the
+# decoding-server-cqr service (in-process here, selected via
+# CUDAQ_DEVICE_CALL_CHANNEL=host_dispatch) instead of resolving to the plain
+# simulation trampolines. The test additionally asserts the service's
+# dispatch count is non-zero, proving the syndromes went over the wire.
+#------------------------------------------------------------------------------#
+if(TARGET cudaq-qec-realtime-decoding-server-cqr)
+  add_executable(surface_code-1-cqr)
+  set_target_properties(surface_code-1-cqr PROPERTIES LINKER_LANGUAGE CXX)
+
+  cudaqx_add_device_code(surface_code-1-cqr
+    SOURCES
+      surface_code-1.cpp
+    COMPILER_FLAGS
+      --target stim
+      -frealtime-lowering
+      -DQEC_APP_CQR
+  )
+
+  target_link_directories(surface_code-1-cqr
+    PRIVATE ${CUDAQ_INSTALL_DIR}/lib)
+
+  target_link_libraries(surface_code-1-cqr
+    PRIVATE
+      cudaq-qec
+      cudaq-qec-realtime-decoding
+      cudaq-qec-realtime-decoding-simulation-cqr
+      cudaq-qec-realtime-decoding-server-cqr
+      cudaq-device-call-runtime
+      cudaq::cudaq cudaq::cudaq-common cudaq-mlir-runtime
+      nvqir nvqir-stim)
+  qec_realtime_app_link_options(surface_code-1-cqr)
+
+  add_test(
+    NAME app_examples.surface_code-1-cqr-test-distance-3
+    COMMAND
+      ${CMAKE_COMMAND} -E env CUDAQ_DEVICE_CALL_CHANNEL=host_dispatch
+      bash "${CMAKE_CURRENT_SOURCE_DIR}/surface_code-1-test.sh"
+        ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-cqr
+        ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-cqr
+        3 60 40 NULL 12 6
+        ${CMAKE_BINARY_DIR}/lib
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+  )
+endif()
+
+# End of surface code 1, cqr host-dispatch wire
+#------------------------------------------------------------------------------#
+
+
+#------------------------------------------------------------------------------#
 # Surface code 1, --target quantinuum --emulate
 add_executable(surface_code-1-quantinuum-emulate)
 set_target_properties(surface_code-1-quantinuum-emulate PROPERTIES LINKER_LANGUAGE CXX)
