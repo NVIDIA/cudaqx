@@ -970,7 +970,7 @@ Usage:
         opts = {
             'error_rate_vec': np.array(dem.error_rates),
             'window_size': 1,
-            'num_syndromes_per_round': dem.detector_error_matrix.shape[0] // num_rounds,
+            'num_syndromes_per_round': code.get_num_z_stabilizers(),
             'inner_decoder_name': 'nv-qldpc-decoder',
             'inner_decoder_params': inner_decoder_params,
         }
@@ -999,7 +999,7 @@ Usage:
             auto opts = cudaqx::heterogeneous_map{
                 {"error_rate_vec", dem.error_rates},
                 {"window_size", 1},
-                {"num_syndromes_per_round", dem.detector_error_matrix.shape()[0] / num_rounds},
+                {"num_syndromes_per_round", code->get_num_z_stabilizers()},
                 {"inner_decoder_name", "nv-qldpc-decoder"},
                 {"inner_decoder_params", inner_decoder_params}};
             auto swdec = cudaq::qec::get_decoder("sliding_window",
@@ -1235,8 +1235,12 @@ The functions return a tuple containing:
 
 1. **Syndrome Measurements** (:code:`tensor<uint8_t>`):
 
-   * Shape: :code:`(num_shots, num_rounds * syndrome_size)`
-   * Contains stabilizer measurement results
+   * Shape: :code:`(num_shots, num_detectors)`
+   * Columns are ordered as: ``num_fixed`` boundary detectors (only the
+     stabilizer type matching the state-prep basis, since that is the only
+     type that is deterministic at the circuit's endpoints), then one
+     detector block per inter-round transition (``num_rounds - 1`` of
+     them), then ``num_fixed`` more boundary detectors
    * Values are 0 or 1 representing measurement outcomes
 
 2. **Data Measurements** (:code:`tensor<uint8_t>`):

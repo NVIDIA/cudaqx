@@ -172,9 +172,6 @@ print("\n Sampling noisy memory circuit executions...")
 syndromes, data = qec.sample_memory_circuit(my_repetition_code, statePrep,
                                             nShots, nRounds, noise_model)
 
-# Reshape syndromes to flatten rounds per shot
-syndromes = syndromes.reshape((nShots, -1))
-
 print(f"\n Showing first {min(nShots, 5)} of {nShots} sampled results:")
 for i in range(min(nShots, 5)):
     print(

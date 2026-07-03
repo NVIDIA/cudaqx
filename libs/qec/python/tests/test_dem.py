@@ -100,12 +100,15 @@ def test_dem_from_memory_circuit():
     # are kept as distinct columns (they are not merged), so the same detector
     # column pattern can appear more than once with a distinct observable row.
     expected_detector_error_matrix = """
-11111.....1.................
-..1.1111...111..............
-...11..111..1.1111..........
-..........111.1.1.1111......
-.............1.11..1.11111..
-.................1..11..1111
+11111.....1...............................
+..1.1111...111............................
+...11..111..1.1111........................
+..........111.1.1.1111.....1..............
+.............1.11..1.1111...111...........
+.................1..11..111..1.1111.......
+...........................111.1.1.1111...
+..............................1.11..1.111.
+..................................1..11.11
 """
     # Uncomment the following line to get a string representation of the DEM
     # that you can compare to expected_detector_error_matrix.
@@ -120,14 +123,16 @@ def test_dem_from_memory_circuit():
     # The following error rates were captured from the above print statement and
     # are considered "truth" data now.
     expected_error_rates = [
-        0.0053, 0.0132, 0.0235, 0.0158, 0.0210, 0.0235, 0.0080, 0.0235, 0.0132,
-        0.0053, 0.0106, 0.0053, 0.0053, 0.0106, 0.0053, 0.0053, 0.0053, 0.0106,
-        0.0235, 0.0158, 0.0158, 0.0184, 0.0080, 0.0260, 0.0158, 0.0053, 0.0184,
-        0.0261
+        0.0132, 0.0053, 0.0236, 0.0158, 0.021, 0.0236, 0.008, 0.0236, 0.0053,
+        0.0132, 0.0106, 0.0053, 0.0053, 0.0106, 0.0053, 0.0053, 0.0053, 0.0106,
+        0.0132, 0.0158, 0.0158, 0.0184, 0.0106, 0.008, 0.0158, 0.0053, 0.0132,
+        0.0106, 0.0053, 0.0053, 0.0106, 0.0053, 0.0053, 0.0053, 0.0106, 0.0027,
+        0.0027, 0.0027, 0.0027, 0.0027, 0.0027, 0.0027
     ]
     assert np.allclose(dem.error_rates, expected_error_rates, atol=1e-4)
 
-    expected_observables_flips_matrix = '1.....111......1......1.1.1.\n'
+    expected_observables_flips_matrix = (
+        '.1....11.1.....1.......11.1.....1......111\n')
     # Uncomment the following line to get a string representation of the
     # observables flips matrix that you can compare to
     # expected_observables_flips_matrix.
@@ -165,7 +170,7 @@ def test_decoding_from_dem_from_memory_circuit():
     cudaq.set_random_seed(13)
     code = qec.get_code('steane')
     Lz = code.get_observables_z()
-    p = 0.001
+    p = 0.01
     noise = cudaq.NoiseModel()
     noise.add_all_qubit_channel("x", cudaq.Depolarization2(p), 1)
     statePrep = qec.operation.prep0
@@ -173,16 +178,12 @@ def test_decoding_from_dem_from_memory_circuit():
     nShots = 200
 
     dem = qec.dem_from_memory_circuit(code, statePrep, nRounds, noise)
-    # Sample the memory circuit with errors
     syndromes, data = qec.sample_memory_circuit(code, statePrep, nShots,
                                                 nRounds, noise)
+    syndromes = np.asarray(syndromes, dtype=np.uint8)
+    logical_measurements = ((Lz @ data.transpose()) % 2).flatten().astype(
+        np.uint8)
 
-    logical_measurements = (Lz @ data.transpose()) % 2
-    # only one logical qubit, so do not need the second axis
-    logical_measurements = logical_measurements.flatten()
-
-    # Use nShots for the first dimension and whatever is left for the second
-    syndromes = syndromes.reshape((nShots, -1))
     decoder = qec.get_decoder('single_error_lut', dem.detector_error_matrix)
     dr = decoder.decode_batch(syndromes)
     error_predictions = np.asarray(dr.result, dtype=np.uint8)
@@ -226,18 +227,13 @@ def test_decoding_from_surface_code_dem_from_memory_circuit(
     nShots = 2000
 
     # Sample the memory circuit with errors
-    syndromes, data = qec.sample_memory_circuit(code, statePrep, nShots,
-                                                nRounds, noise)
+    syndromes, data = qec.z_sample_memory_circuit(code, statePrep, nShots,
+                                                  nRounds, noise)
 
     logical_measurements = (Lz @ data.transpose()) % 2
     # only one logical qubit, so do not need the second axis
     logical_measurements = logical_measurements.flatten()
 
-    # Reshape and drop the X stabilizers, keeping just the Z stabilizers (since this is prep0)
-    syndromes = syndromes.reshape((nShots, nRounds, -1))
-    syndromes = syndromes[:, :, :syndromes.shape[2] // 2]
-    # Now flatten to two dimensions again
-    syndromes = syndromes.reshape((nShots, -1))
     # Sum syndromes across the second dimension
     num_syn_triggered_per_shot = np.sum(syndromes, axis=1)
 
@@ -312,15 +308,11 @@ def test_pymatching_decode_to_observable_surface_code_dem():
     nRounds = 5
     nShots = 2000
 
-    syndromes, data = qec.sample_memory_circuit(code, statePrep, nShots,
-                                                nRounds, noise)
+    syndromes, data = qec.z_sample_memory_circuit(code, statePrep, nShots,
+                                                  nRounds, noise)
 
     logical_measurements = (Lz @ data.transpose()) % 2
     logical_measurements = logical_measurements.flatten()
-
-    syndromes = syndromes.reshape((nShots, nRounds, -1))
-    syndromes = syndromes[:, :, :syndromes.shape[2] // 2]
-    syndromes = syndromes.reshape((nShots, -1))
 
     dem = qec.z_dem_from_memory_circuit(code, statePrep, nRounds, noise)
 
@@ -351,12 +343,12 @@ def test_pcm_extend_to_n_rounds():
     noise.add_all_qubit_channel("x", cudaq.Depolarization2(0.003), 1)
     code = qec.get_code('surface_code', distance=5)
     dem05 = qec.z_dem_from_memory_circuit(code, statePrep, nRounds, noise)
-    nSyndromesPerRound = dem05.detector_error_matrix.shape[0] // nRounds
+    nSyndromesPerRound = code.get_num_z_stabilizers()
     dem15 = qec.z_dem_from_memory_circuit(code, statePrep, 3 * nRounds, noise)
     H05 = dem05.detector_error_matrix
     H15 = dem15.detector_error_matrix
     H15_new, column_list = qec.pcm_extend_to_n_rounds(H05, nSyndromesPerRound,
-                                                      3 * nRounds)
+                                                      3 * nRounds + 1)
     # Check if H15 == H15_new, one column at a time.
     for c in range(H15.shape[1]):
         if not np.allclose(H15[:, c], H15_new[:, c]):
@@ -370,6 +362,61 @@ def test_pcm_extend_to_n_rounds():
     # Check the extended error rates.
     H15_new_error_rates = np.array(dem05.error_rates)[column_list]
     assert np.allclose(H15_new_error_rates, dem15.error_rates, atol=1e-6)
+
+
+def test_dem_from_memory_circuit_boundary_row_format():
+    """Test the data layout produced by dem_from_memory_circuit
+    Syndromes are formatted as:
+        [initial boundary: numFixed rows]
+        [(numRounds - 1) interior round-to-round transitions, each
+         numSyndromesPerRound rows, laid out as [Z rows][X rows]]
+        [final boundary: numFixed rows]
+    where `numFixed` is the number of stabilizers matching the prep/readout
+    basis (Z stabilizers for prep0/prep1), and both boundary groups contain
+    only that basis 
+    """
+    code = qec.get_code('steane')
+    numXStabs = code.get_num_x_stabilizers()
+    numZStabs = code.get_num_z_stabilizers()
+    assert numXStabs == numZStabs
+
+    noise = cudaq.NoiseModel()
+    noise.add_all_qubit_channel("x", cudaq.Depolarization2(0.01), 1)
+    statePrep = qec.operation.prep0  # Z-basis prep => Z is the "fixed" basis.
+
+    for nRounds in [1, 2, 3, 4, 6]:
+        full_dem = qec.dem_from_memory_circuit(code, statePrep, nRounds, noise)
+        z_dem = qec.z_dem_from_memory_circuit(code, statePrep, nRounds, noise)
+        x_dem = qec.x_dem_from_memory_circuit(code, statePrep, nRounds, noise)
+
+        expected_z_rows = (nRounds + 1) * numZStabs
+        expected_x_rows = max(nRounds - 1, 0) * numXStabs
+
+        assert z_dem.detector_error_matrix.shape[0] == expected_z_rows, (
+            f"nRounds={nRounds}: z_dem has "
+            f"{z_dem.detector_error_matrix.shape[0]} rows, expected "
+            f"{expected_z_rows}")
+        assert x_dem.detector_error_matrix.shape[0] == expected_x_rows, (
+            f"nRounds={nRounds}: x_dem has "
+            f"{x_dem.detector_error_matrix.shape[0]} rows, expected "
+            f"{expected_x_rows}")
+
+        # Z (the fixed/boundary basis) and X (the other basis) partition the
+        # full DEM's rows disjointly and exhaustively.
+        assert (z_dem.detector_error_matrix.shape[0] +
+                x_dem.detector_error_matrix.shape[0] ==
+                full_dem.detector_error_matrix.shape[0])
+
+    # With only one round, there are zero interior rounds, so an X-only DEM under a Z-prep
+    # experiment has literally no rows or columns at all.
+    x_dem_one_round = qec.x_dem_from_memory_circuit(code, statePrep, 1, noise)
+    assert x_dem_one_round.detector_error_matrix.shape == (0, 0)
+
+    # ...and, symmetrically, an X-prep experiment flips which basis is
+    # "fixed": now it is the Z-only DEM that is empty for a single round.
+    xPrep = qec.operation.prepp
+    z_dem_one_round = qec.z_dem_from_memory_circuit(code, xPrep, 1, noise)
+    assert z_dem_one_round.detector_error_matrix.shape == (0, 0)
 
 
 # ---------------------------------------------------------------------------
@@ -430,6 +477,16 @@ def _build_steane_z_memory_stim_circuit(stim_mod, p, n_rounds):
                 ])
 
     c.append("M", [0, 1, 2, 3, 4, 5, 6])
+
+    # Final boundary: reconstruct each Z stabilizer from the transversal data
+    # measurement and compare it to the last ancz round, catching errors that
+    # happen between the last syndrome round and the final readout. Data
+    # qubit di lands at rec(-7 + di); the last ancz round (measured as
+    # [10, 11, 12, 7, 8, 9] before this M) lands at rec(-13 + zi).
+    for zi, support in enumerate(stab_supports):
+        c.append("DETECTOR", [stim_mod.target_rec(-7 + di) for di in support] +
+                 [stim_mod.target_rec(-13 + zi)])
+
     # Z_L = Z_4 Z_5 Z_6.
     c.append("OBSERVABLE_INCLUDE",
              [stim_mod.target_rec(i) for i in (-3, -2, -1)], 0)
@@ -632,6 +689,57 @@ def test_pymatching_decodes_stim_surface_code_dem():
         f"PyMatching did not reduce logical errors: "
         f"with_decoding={n_errors_with_decoding}, "
         f"without_decoding={n_errors_without_decoding}")
+
+
+@pytest.mark.parametrize("statePrep,sample_fn,dem_fn", [
+    (qec.operation.prep0, qec.sample_memory_circuit,
+     qec.dem_from_memory_circuit),
+    (qec.operation.prep0, qec.z_sample_memory_circuit,
+     qec.z_dem_from_memory_circuit),
+    (qec.operation.prepp, qec.x_sample_memory_circuit,
+     qec.x_dem_from_memory_circuit),
+])
+def test_sample_memory_circuit_aligned_with_dem(statePrep, sample_fn, dem_fn):
+    """x_sample_memory_circuit/z_sample_memory_circuit must line up
+    column-for-column, in the same detector order, with the rows produced by
+    x_dem_from_memory_circuit/z_dem_from_memory_circuit for both a Z-basis
+    (prep0/z) and an X-basis (prepp/x) memory experiment.
+    """
+    cudaq.set_random_seed(13)
+    code = qec.get_code('surface_code', distance=5)
+    is_z_prep = statePrep in (qec.operation.prep0, qec.operation.prep1)
+    L = code.get_observables_z() if is_z_prep else code.get_observables_x()
+    noise = cudaq.NoiseModel()
+    noise.add_all_qubit_channel("x", cudaq.Depolarization2(0.003), 1)
+    nRounds = 5
+    nShots = 2000
+
+    dem = dem_fn(code, statePrep, nRounds, noise)
+    syndromes, data = sample_fn(code, statePrep, nShots, nRounds, noise)
+
+    # Shape alignment: one syndrome column per DEM detector row.
+    assert dem.detector_error_matrix.shape[0] == syndromes.shape[1], (
+        f"statePrep={statePrep}, {dem_fn.__name__} has "
+        f"{dem.detector_error_matrix.shape[0]} detector rows but "
+        f"{sample_fn.__name__} produced {syndromes.shape[1]} syndrome "
+        f"columns")
+
+    logical_measurements = ((L @ data.transpose()) % 2).flatten()
+
+    decoder = qec.get_decoder('single_error_lut', dem.detector_error_matrix)
+    dr = decoder.decode_batch(syndromes)
+    error_predictions = np.asarray(dr.result, dtype=np.uint8)
+    data_predictions = (dem.observables_flips_matrix @ error_predictions.T) % 2
+
+    nLogicalErrorsWithoutDecoding = np.sum(logical_measurements)
+    nLogicalErrorsWithDecoding = np.sum(data_predictions ^ logical_measurements)
+    print(nLogicalErrorsWithoutDecoding, nLogicalErrorsWithDecoding)
+    assert nLogicalErrorsWithDecoding < nLogicalErrorsWithoutDecoding, (
+        f"statePrep={statePrep}: decoding {sample_fn.__name__} syndromes "
+        f"with {dem_fn.__name__}'s DEM did not reduce the logical error "
+        f"rate ({nLogicalErrorsWithDecoding} vs "
+        f"{nLogicalErrorsWithoutDecoding}), suggesting misaligned detector "
+        f"order")
 
 
 if __name__ == "__main__":
