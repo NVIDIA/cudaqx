@@ -47,7 +47,7 @@
 
 #include "cudaq/qec/realtime/decoding_config.h"
 
-#include "cudaq_internal/device_call/DeviceCallService.h"
+#include "cudaq/realtime/device_call_service.h"
 
 #include "cudaq/realtime/cpu_transport/udp_wrapper.h"
 #include "cudaq/realtime/daemon/dispatcher/cudaq_realtime.h"
@@ -383,13 +383,22 @@ int main(int argc, char **argv) {
     return 1;
   }
   auto *service = pluginInfo.getService();
-  if (!service || service->create(nullptr, 0) != 0) {
+  if (!service) {
     std::cerr << "ERROR: QEC device_call service create failed" << std::endl;
     return 1;
   }
-  cudaq_internal::device_call::DeviceCallHostDispatchTable table;
-  if (service->getHostDispatchTable(table) != 0 || !table.entries ||
-      table.count == 0) {
+  // The session owns the function table; keep it alive for the daemon's
+  // lifetime (the dispatcher loop below reads table.entries in place).
+  auto session = service->createDispatchSession(
+      cudaq::realtime::DeviceCallDispatchMode::Host);
+  if (!session) {
+    std::cerr << "ERROR: QEC device_call service does not support host "
+                 "dispatch"
+              << std::endl;
+    return 1;
+  }
+  const auto &table = session->dispatchTable();
+  if (!table.entries || table.count == 0) {
     std::cerr << "ERROR: QEC host dispatch table unavailable" << std::endl;
     return 1;
   }

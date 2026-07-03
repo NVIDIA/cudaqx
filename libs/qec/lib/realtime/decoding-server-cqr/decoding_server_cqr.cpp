@@ -6,9 +6,9 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
-#include "cudaq_internal/device_call/DeviceCallService.h"
 #include "../realtime_decoding.h"
 #include "cudaq/realtime/daemon/dispatcher/dispatch_kernel_launch.h"
+#include "cudaq/realtime/device_call_service.h"
 
 #include <array>
 #include <atomic>
@@ -16,12 +16,15 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <memory>
 
 namespace {
 
-using cudaq_internal::device_call::DeviceCallHostDispatchTable;
-using cudaq_internal::device_call::DeviceCallService;
-using cudaq_internal::device_call::DeviceCallServicePluginInfo;
+using cudaq::realtime::DeviceCallDispatchMode;
+using cudaq::realtime::DeviceCallDispatchTable;
+using cudaq::realtime::DeviceCallService;
+using cudaq::realtime::DeviceCallServicePluginInfo;
+using cudaq::realtime::DeviceCallServiceSession;
 
 // Realtime function ids are fnv1a_32 of the kernel-facing callee name, matching
 // the generic device_call targets emitted by the
@@ -41,7 +44,7 @@ constexpr std::int32_t kStatusHandlerException = -2;
 constexpr std::int32_t kStatusPayloadTooLarge = -3;
 constexpr std::int32_t kStatusResultBufferTooSmall = -5;
 
-constexpr std::uint32_t kHostDispatchDeviceId = 0;
+constexpr std::int32_t kHostDispatchDeviceId = 0;
 constexpr std::uint32_t kScalarElementCount = 1;
 
 constexpr std::uint8_t kNoResults = 0;
@@ -370,15 +373,34 @@ std::array<cudaq_function_entry_t, kDeviceCallEntryCount> make_entries() {
   return entries;
 }
 
-class QecDeviceCallService : public DeviceCallService {
+class QecDeviceCallSession : public DeviceCallServiceSession {
 public:
-  int getHostDispatchTable(DeviceCallHostDispatchTable &table) override {
-    static auto entries = make_entries();
+  QecDeviceCallSession() {
+    table.mode = DeviceCallDispatchMode::Host;
     table.entries = entries.data();
     table.count = entries.size();
     table.deviceId = kHostDispatchDeviceId;
     table.mailbox = nullptr;
-    return kStatusSuccess;
+  }
+
+  const DeviceCallDispatchTable &dispatchTable() const noexcept override {
+    return table;
+  }
+
+private:
+  std::array<cudaq_function_entry_t, kDeviceCallEntryCount> entries =
+      make_entries();
+  DeviceCallDispatchTable table;
+};
+
+class QecDeviceCallService : public DeviceCallService {
+public:
+  std::unique_ptr<DeviceCallServiceSession>
+  createDispatchSession(DeviceCallDispatchMode mode) override {
+    // This service registers CUDAQ_DISPATCH_HOST_CALL handlers only.
+    if (mode != DeviceCallDispatchMode::Host)
+      return nullptr;
+    return std::make_unique<QecDeviceCallSession>();
   }
 };
 

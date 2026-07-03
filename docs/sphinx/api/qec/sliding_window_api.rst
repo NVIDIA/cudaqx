@@ -66,7 +66,7 @@
             opts = {
                 'error_rate_vec': np.array(dem.error_rates),
                 'window_size': 1,
-                'num_syndromes_per_round': dem.detector_error_matrix.shape[0] // num_rounds,
+                'num_syndromes_per_round': code.get_num_z_stabilizers(),
                 'inner_decoder_name': 'single_error_lut',
                 'inner_decoder_params': inner_decoder_params,
             }
@@ -97,8 +97,7 @@
                 auto opts = cudaqx::heterogeneous_map{
                     {"error_rate_vec", dem.error_rates},
                     {"window_size", 1},
-                    {"num_syndromes_per_round",
-                    dem.detector_error_matrix.shape()[0] / num_rounds},
+                    {"num_syndromes_per_round", code->get_num_z_stabilizers()},
                     {"inner_decoder_name", "single_error_lut"},
                     {"inner_decoder_params", inner_decoder_params}};
                 auto swdec = cudaq::qec::get_decoder("sliding_window",

@@ -52,6 +52,13 @@ void bindSurfaceCode(nb::module_ &mod) {
       .value("empty", surface_role::empty)
       .export_values();
 
+  nb::enum_<sc_orientation>(qecmod, "sc_orientation")
+      .value("XV", sc_orientation::XV)
+      .value("XH", sc_orientation::XH)
+      .value("ZV", sc_orientation::ZV)
+      .value("ZH", sc_orientation::ZH)
+      .export_values();
+
   nb::class_<vec2d>(qecmod, "vec2d")
       .def(nb::init<int, int>(), nb::arg("row"), nb::arg("col"))
       .def_rw("row", &vec2d::row)
@@ -67,8 +74,18 @@ void bindSurfaceCode(nb::module_ &mod) {
 
   nb::class_<stabilizer_grid>(qecmod, "stabilizer_grid")
       .def(nb::init<>())
-      .def(nb::init<std::uint32_t>(), nb::arg("distance"))
+      .def(nb::init<std::uint32_t, sc_orientation>(), nb::arg("distance"),
+           nb::arg("orientation") = sc_orientation::ZH)
+      .def(
+          "__init__",
+          [](stabilizer_grid &self, std::uint32_t distance,
+             const std::string &orientation) {
+            new (&self)
+                stabilizer_grid(distance, sc_orientation_from_str(orientation));
+          },
+          nb::arg("distance"), nb::arg("orientation"))
       .def_ro("distance", &stabilizer_grid::distance)
+      .def_prop_ro("orientation", &stabilizer_grid::get_orientation)
       .def_ro("grid_length", &stabilizer_grid::grid_length)
       .def_ro("roles", &stabilizer_grid::roles)
       .def_ro("x_stab_coords", &stabilizer_grid::x_stab_coords)
@@ -116,7 +133,8 @@ void bindSurfaceCode(nb::module_ &mod) {
       .def("get_spin_op_stabilizers", &stabilizer_grid::get_spin_op_stabilizers,
            "Return the stabilizers as a list of cudaq::spin_op_term")
       .def("get_spin_op_observables", &stabilizer_grid::get_spin_op_observables,
-           "Return the logical observables as a list of cudaq::spin_op_term");
+           "Return the logical observables as [X, Z] cudaq::spin_op_term "
+           "entries");
 
   qecmod.def("role_to_str", [](surface_role r) {
     switch (r) {

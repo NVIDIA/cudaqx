@@ -260,7 +260,8 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-decoding-server-cqr)
   # shared lib (cudaq_host_dispatcher_loop lives there, device-linked), and the
   # cpu_transport UDP ring transceiver static lib.
   find_path(QEC_UDP_DEVICE_CALL_INCLUDE_DIR
-    cudaq_internal/device_call/DeviceCallService.h
+    NAMES cudaq/realtime/device_call_service.h
+          cudaq_internal/device_call/DeviceCallService.h
     HINTS ${CUDAQ_REALTIME_ROOT} ${CUDAQ_INSTALL_DIR}
     PATH_SUFFIXES include)
   find_library(QEC_UDP_REALTIME_LIBRARY cudaq-realtime
