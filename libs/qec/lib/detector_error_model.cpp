@@ -7,8 +7,8 @@
  ******************************************************************************/
 
 #include "cudaq/qec/detector_error_model.h"
+#include "cudaq/qec/logger.h"
 #include "cudaq/qec/pcm_utils.h"
-#include "cudaq/runtime/logger/logger.h"
 
 #include "stim.h"
 
@@ -238,7 +238,7 @@ void detector_error_model::canonicalize_for_rounds(
           curr_row_indices, obs_indices, column_index);
       if (!first_seen && dit->second.first != obs_indices) {
         if (num_same_syndrome_diff_obs < max_same_syndrome_diff_obs_warnings)
-          cudaq::warn(
+          CUDA_QEC_WARN(
               "detector_error_model::canonicalize_for_rounds: identical "
               "syndromes exist in detector_error_matrix but have different "
               "observables in observables_flips_matrix; keeping column {} as a "
@@ -254,7 +254,7 @@ void detector_error_model::canonicalize_for_rounds(
 
   // Emit a single summary if we suppressed any per-column warnings above.
   if (num_same_syndrome_diff_obs > max_same_syndrome_diff_obs_warnings)
-    cudaq::warn(
+    CUDA_QEC_WARN(
         "detector_error_model::canonicalize_for_rounds: found {} columns with "
         "identical syndromes but different observables; suppressed {} "
         "additional warnings (only the first {} were shown).",

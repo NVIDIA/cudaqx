@@ -6,11 +6,56 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 #include "cudaq/qec/codes/surface_code.h"
+#include <algorithm>
+#include <cctype>
 #include <iomanip>
 
 using cudaq::qec::operation;
 
 namespace cudaq::qec::surface_code {
+namespace {
+
+std::string normalize_orientation(std::string value) {
+  auto is_not_space = [](unsigned char ch) { return !std::isspace(ch); };
+  value.erase(value.begin(),
+              std::find_if(value.begin(), value.end(), is_not_space));
+  value.erase(std::find_if(value.rbegin(), value.rend(), is_not_space).base(),
+              value.end());
+  std::transform(
+      value.begin(), value.end(), value.begin(),
+      [](unsigned char ch) { return static_cast<char>(std::toupper(ch)); });
+  return value;
+}
+
+surface_role role_for_parity(sc_orientation orientation, bool odd_parity) {
+  // The first orientation character controls the bulk checkerboard. The H/V
+  // character controls boundary placement only, so XV/XH share one bulk
+  // assignment and ZV/ZH share the other.
+  const bool x_on_even_parity =
+      orientation == sc_orientation::XV || orientation == sc_orientation::XH;
+  const bool z_on_even_parity =
+      orientation == sc_orientation::ZV || orientation == sc_orientation::ZH;
+  if (!x_on_even_parity && !z_on_even_parity)
+    throw std::runtime_error("Unhandled surface-code orientation.");
+  return (x_on_even_parity != odd_parity) ? surface_role::amx
+                                          : surface_role::amz;
+}
+
+} // namespace
+
+sc_orientation sc_orientation_from_str(const std::string &s) {
+  const auto orientation = normalize_orientation(s);
+  if (orientation == "XV" || orientation == "O1")
+    return sc_orientation::XV;
+  if (orientation == "XH" || orientation == "O2")
+    return sc_orientation::XH;
+  if (orientation == "ZV" || orientation == "O3")
+    return sc_orientation::ZV;
+  if (orientation == "ZH" || orientation == "O4")
+    return sc_orientation::ZH;
+  throw std::runtime_error("Invalid surface-code orientation '" + s +
+                           "'. Expected XV(O1), XH(O2), ZV(O3), or ZH(O4).");
+}
 
 vec2d::vec2d(int row_in, int col_in) : row(row_in), col(col_in) {}
 
@@ -50,32 +95,38 @@ void stabilizer_grid::generate_grid_roles() {
   for (size_t row = 1; row < grid_length - 1; ++row) {
     for (size_t col = 1; col < grid_length - 1; ++col) {
       size_t idx = row * grid_length + col;
-      bool parity = (row + col) % 2;
-      if (!parity) {
-        roles[idx] = surface_role::amz;
-      } else {
-        roles[idx] = surface_role::amx;
-      }
+      const bool is_odd_parity = (row + col) % 2;
+      roles[idx] = role_for_parity(orientation_, is_odd_parity);
     }
   }
 
-  // set top/bottom boundaries for weight 2 z-stabs
+  const bool horizontal_boundaries_use_even_parity =
+      orientation_ == sc_orientation::XH || orientation_ == sc_orientation::ZH;
+
+  // Boundary sites alternate around the perimeter. The top/bottom and
+  // left/right edges therefore occupy complementary parities. Since
+  // is_odd_parity is false for even parity, the top/bottom predicate is
+  // intentionally the inverse of horizontal_boundaries_use_even_parity.
+  // The left/right predicate selects the opposite edge parity class: when
+  // top/bottom uses even parity, == selects odd sites, and vice versa.
+
+  // set top/bottom boundaries for weight 2 stabs
   for (size_t row = 0; row < grid_length; row += grid_length - 1) {
     for (size_t col = 1; col < grid_length - 1; ++col) {
       size_t idx = row * grid_length + col;
-      bool parity = (row + col) % 2;
-      if (!parity)
-        roles[idx] = surface_role::amz;
+      const bool is_odd_parity = (row + col) % 2;
+      if (is_odd_parity != horizontal_boundaries_use_even_parity)
+        roles[idx] = role_for_parity(orientation_, is_odd_parity);
     }
   }
 
-  // set left/right boundaries for weight 2 x-stabs
+  // set left/right boundaries for weight 2 stabs
   for (size_t row = 1; row < grid_length - 1; ++row) {
     for (size_t col = 0; col < grid_length; col += grid_length - 1) {
       size_t idx = row * grid_length + col;
-      bool parity = (row + col) % 2;
-      if (parity)
-        roles[idx] = surface_role::amx;
+      const bool is_odd_parity = (row + col) % 2;
+      if (is_odd_parity == horizontal_boundaries_use_even_parity)
+        roles[idx] = role_for_parity(orientation_, is_odd_parity);
     }
   }
 }
@@ -157,8 +208,8 @@ void stabilizer_grid::generate_stabilizers() {
 
 stabilizer_grid::stabilizer_grid() {}
 
-stabilizer_grid::stabilizer_grid(uint32_t distance)
-    : distance(distance), grid_length(distance + 1),
+stabilizer_grid::stabilizer_grid(uint32_t distance, sc_orientation orientation)
+    : distance(distance), grid_length(distance + 1), orientation_(orientation),
       roles(grid_length * grid_length) {
   // generate a 2d grid of roles
   generate_grid_roles();
@@ -167,6 +218,8 @@ stabilizer_grid::stabilizer_grid(uint32_t distance)
   // now use coords to set the stabilizers
   generate_stabilizers();
 }
+
+sc_orientation stabilizer_grid::get_orientation() const { return orientation_; }
 
 void stabilizer_grid::print_stabilizer_coords() const {
   int width = std::to_string(grid_length).length();
@@ -336,19 +389,40 @@ stabilizer_grid::get_spin_op_stabilizers() const {
 std::vector<cudaq::spin_op_term>
 stabilizer_grid::get_spin_op_observables() const {
   std::vector<cudaq::spin_op_term> spin_op_obs;
-  // X obs runs along top row of data qubits
-  std::string xobs(data_coords.size(), 'I');
-  for (size_t i = 0; i < distance; ++i) {
-    xobs[i] = 'X';
-  }
-  spin_op_obs.emplace_back(cudaq::spin_op::from_word(xobs));
 
-  // Z ob runs along left col of data qubits
-  std::string zobs(data_coords.size(), 'I');
-  for (size_t i = 0; i < data_coords.size(); i += distance) {
-    zobs[i] = 'Z';
+  // The valid logical pair depends on orientation. For XV and ZH, the X logical
+  // runs along the top row of data qubits and the Z logical along the left
+  // column. For XH and ZV the boundary types are swapped, so the assignment is
+  // exchanged: X logical along the left column, Z logical along the top row.
+  // Picking the wrong pair yields operators that do not commute with the
+  // stabilizers.
+  const bool x_logical_on_top_row =
+      orientation_ == sc_orientation::XV || orientation_ == sc_orientation::ZH;
+
+  // Support that runs along the top row of data qubits.
+  std::string top_row_obs(data_coords.size(), 'I');
+  // Support that runs along the left column of data qubits.
+  std::string left_col_obs(data_coords.size(), 'I');
+
+  if (x_logical_on_top_row) {
+    // X obs runs along top row of data qubits.
+    for (size_t i = 0; i < distance; ++i)
+      top_row_obs[i] = 'X';
+    // Z obs runs along left col of data qubits.
+    for (size_t i = 0; i < data_coords.size(); i += distance)
+      left_col_obs[i] = 'Z';
+    spin_op_obs.emplace_back(cudaq::spin_op::from_word(top_row_obs));
+    spin_op_obs.emplace_back(cudaq::spin_op::from_word(left_col_obs));
+  } else {
+    // X obs runs along left col of data qubits.
+    for (size_t i = 0; i < data_coords.size(); i += distance)
+      left_col_obs[i] = 'X';
+    // Z obs runs along top row of data qubits.
+    for (size_t i = 0; i < distance; ++i)
+      top_row_obs[i] = 'Z';
+    spin_op_obs.emplace_back(cudaq::spin_op::from_word(left_col_obs));
+    spin_op_obs.emplace_back(cudaq::spin_op::from_word(top_row_obs));
   }
-  spin_op_obs.emplace_back(cudaq::spin_op::from_word(zobs));
 
   return spin_op_obs;
 }
@@ -359,7 +433,9 @@ surface_code::surface_code(const heterogeneous_map &options) : code() {
         "[surface_code] distance not provided. distance must be provided via "
         "qec::get_code(..., options) options map.");
   distance = options.get<std::size_t>("distance");
-  grid = stabilizer_grid(distance);
+  grid = stabilizer_grid(
+      distance,
+      sc_orientation_from_str(options.get<std::string>("orientation", "ZH")));
 
   m_stabilizers = grid.get_spin_op_stabilizers();
   m_pauli_observables = grid.get_spin_op_observables();

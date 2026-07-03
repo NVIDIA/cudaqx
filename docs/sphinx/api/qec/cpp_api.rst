@@ -30,9 +30,9 @@ Detector Error Model
 .. doxygenstruct:: cudaq::qec::detector_error_model
     :members:
 
-.. doxygenfunction:: cudaq::qec::dem_from_memory_circuit(const code &, operation, std::size_t, cudaq::noise_model &)
-.. doxygenfunction:: cudaq::qec::x_dem_from_memory_circuit(const code &, operation, std::size_t, cudaq::noise_model &)
-.. doxygenfunction:: cudaq::qec::z_dem_from_memory_circuit(const code &, operation, std::size_t, cudaq::noise_model &)
+.. doxygenfunction:: cudaq::qec::dem_from_memory_circuit(const code &, operation, std::size_t, cudaq::noise_model &, bool)
+.. doxygenfunction:: cudaq::qec::x_dem_from_memory_circuit(const code &, operation, std::size_t, cudaq::noise_model &, bool)
+.. doxygenfunction:: cudaq::qec::z_dem_from_memory_circuit(const code &, operation, std::size_t, cudaq::noise_model &, bool)
 .. doxygenfunction:: cudaq::qec::dem_from_stim_text(const std::string &, bool)
 
 Decoder Interfaces
@@ -94,6 +94,41 @@ Parity Check Matrix Utilities
 .. doxygenfunction:: cudaq::qec::simplify_pcm(const cudaqx::tensor<uint8_t> &, const std::vector<double> &, std::uint32_t);
 .. doxygenfunction:: cudaq::qec::sort_pcm_columns(const cudaqx::tensor<uint8_t> &, std::uint32_t);
 
+Logger
+=============
+
+The QEC logger API currently lives in ``cudaq::qec::detail`` and is used by
+the ``CUDA_QEC_*`` macros exposed in ``cudaq/qec/logger.h``.
+
+.. doxygenenum:: cudaq::qec::detail::log_level
+.. doxygenenum:: cudaq::qec::detail::forward_drop_policy
+
+.. doxygenstruct:: cudaq::qec::detail::forwarded_log_record
+    :members:
+
+.. doxygenstruct:: cudaq::qec::detail::forwarder_config
+    :members:
+
+.. doxygenstruct:: cudaq::qec::detail::forwarder_stats
+    :members:
+
+.. doxygenfunction:: cudaq::qec::detail::should_log
+.. doxygenfunction:: cudaq::qec::detail::set_forwarder(forwarder_config)
+.. doxygenfunction:: cudaq::qec::detail::set_forwarder()
+.. doxygenfunction:: cudaq::qec::detail::clear_forwarder()
+.. doxygenfunction:: cudaq::qec::detail::is_forwarder_enabled()
+.. doxygenfunction:: cudaq::qec::detail::get_forwarder_message_capacity()
+.. doxygenfunction:: cudaq::qec::detail::get_forwarder_stats()
+.. doxygenfunction:: cudaq::qec::detail::set_log_level
+.. doxygenfunction:: cudaq::qec::detail::get_log_level
+.. doxygenfunction:: cudaq::qec::detail::flush_logs()
+.. doxygenfunction:: cudaq::qec::detail::trace
+.. doxygenfunction:: cudaq::qec::detail::info
+.. doxygenfunction:: cudaq::qec::detail::debug
+.. doxygenfunction:: cudaq::qec::detail::warn
+.. doxygenfunction:: cudaq::qec::detail::error
+.. doxygenfunction:: cudaq::qec::detail::path_to_file_name
+
 Common
 =============
 
@@ -110,3 +145,5 @@ Common
 .. doxygenfunction:: cudaq::qec::sample_memory_circuit(const code &, std::size_t, std::size_t, cudaq::noise_model &)
 .. doxygenfunction:: cudaq::qec::sample_memory_circuit(const code &, operation, std::size_t, std::size_t)
 .. doxygenfunction:: cudaq::qec::sample_memory_circuit(const code &, operation, std::size_t, std::size_t, cudaq::noise_model &)
+.. doxygenfunction:: cudaq::qec::x_sample_memory_circuit
+.. doxygenfunction:: cudaq::qec::z_sample_memory_circuit
