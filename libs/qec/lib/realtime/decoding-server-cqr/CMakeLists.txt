@@ -8,8 +8,8 @@
 
 # Decoding server (skeleton) for the cudaq-realtime (cqr) host-dispatch path.
 #
-# This is the server end of the wire: a cudaq_internal::device_call
-# DeviceCallService that registers CUDAQ_DISPATCH_HOST_CALL handlers for the
+# This is the server end of the wire: a cudaq::realtime::DeviceCallService
+# that registers CUDAQ_DISPATCH_HOST_CALL handlers for the
 # default-route RPCs (enqueue_syndromes / get_corrections / reset_decoder, per
 # decoder_server_runtime.md) and drives the configured decoders via the
 # cudaq-qec-realtime-decoding host API. A simulated QPU (../simulation-cqr) or,
