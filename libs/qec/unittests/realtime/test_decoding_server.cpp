@@ -78,16 +78,17 @@ std::string env_or(const char *name, const std::string &fallback) {
   return value && *value ? std::string(value) : fallback;
 }
 
-// The daemon and config file are placed in the same directory as this test
-// binary; resolve them relative to our own executable so the test works from
-// any CWD.
-std::string self_dir() {
-  char self[4096] = {0};
-  const ssize_t n = ::readlink("/proc/self/exe", self, sizeof(self) - 1);
-  if (n <= 0)
-    return ".";
-  std::string path(self, static_cast<std::size_t>(n));
-  return path.substr(0, path.find_last_of('/'));
+// The daemon binary path is baked in at configure time (the daemon is built
+// from libs/qec/tools/decoding-server); QEC_DECODING_DAEMON overrides it. The
+// example decoder configs are placed in the same directory as the daemon.
+std::string daemon_path() {
+  return env_or("QEC_DECODING_DAEMON", QEC_DECODING_DAEMON_PATH);
+}
+
+std::string daemon_dir() {
+  const std::string path = daemon_path();
+  const auto slash = path.find_last_of('/');
+  return slash == std::string::npos ? "." : path.substr(0, slash);
 }
 
 // Spawns qec_decoding_daemon with the given decoder config file, hands
@@ -110,9 +111,9 @@ public:
       ::dup2(out_pipe[1], STDOUT_FILENO);
       ::close(out_pipe[0]);
       ::close(out_pipe[1]);
-      const std::string dir = self_dir();
-      const std::string daemon = dir + "/qec_decoding_daemon";
-      const std::string config_arg = "--config=" + dir + "/" + config_file;
+      const std::string daemon = daemon_path();
+      const std::string config_arg =
+          "--config=" + daemon_dir() + "/" + config_file;
       const std::string transport_arg =
           "--transport=" + env_or("QEC_DECODING_SERVER_TRANSPORT", "udp");
       const std::string device_arg =

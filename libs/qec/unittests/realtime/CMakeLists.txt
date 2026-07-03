@@ -253,117 +253,55 @@ endif()
 # test_decoding_server runs the caller (simulated QPU) side and spawns the
 # daemon as a subprocess.
 
-if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-decoding-server-cqr)
+# The decoding-server daemon itself is built from libs/qec/tools/decoding-server
+# (this test spawns it as a subprocess and receives its path + config dir via
+# compile definitions).
+if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET qec_decoding_daemon)
   include(GoogleTest)
 
-  # The daemon needs the DeviceCallService plugin headers, the libcudaq-realtime
-  # shared lib (cudaq_host_dispatcher_loop lives there, device-linked), and the
-  # cpu_transport UDP ring transceiver static lib.
-  find_path(QEC_UDP_DEVICE_CALL_INCLUDE_DIR
-    NAMES cudaq/realtime/device_call_service.h
-          cudaq_internal/device_call/DeviceCallService.h
-    HINTS ${CUDAQ_REALTIME_ROOT} ${CUDAQ_INSTALL_DIR}
-    PATH_SUFFIXES include)
-  find_library(QEC_UDP_REALTIME_LIBRARY cudaq-realtime
-    HINTS ${CUDAQ_REALTIME_ROOT} ${CUDAQ_INSTALL_DIR}
-    PATH_SUFFIXES lib)
-  find_library(QEC_UDP_TRANSPORT_LIBRARY cudaq-realtime-udp-transport
-    HINTS ${CUDAQ_REALTIME_ROOT} ${CUDAQ_INSTALL_DIR}
-    PATH_SUFFIXES lib)
-  # Optional: the daemon's --transport=cpu_roce path (real RDMA wire) needs
-  # the CPU RoCE transceiver and libibverbs; without them the daemon still
-  # builds with the udp transport only.
-  find_library(QEC_CPU_ROCE_TRANSPORT_LIBRARY cudaq-realtime-cpu-transport
-    HINTS ${CUDAQ_REALTIME_ROOT} ${CUDAQ_INSTALL_DIR}
-    PATH_SUFFIXES lib)
-  find_library(QEC_IBVERBS_LIBRARY ibverbs)
+  add_executable(test_decoding_server)
+  set_target_properties(test_decoding_server PROPERTIES
+    LINKER_LANGUAGE CXX)
+  target_include_directories(test_decoding_server PRIVATE
+    ${CUDAQ_REALTIME_INCLUDE_DIR}
+    ${CUDAToolkit_INCLUDE_DIRS}
+  )
+  # -DQEC_DECODING_DAEMON_PATH tells the test where the daemon binary lives
+  # (the example configs are placed next to it by tools/decoding-server). It
+  # rides COMPILER_FLAGS because cudaqx_add_device_code compiles with nvq++,
+  # which does not see target_compile_definitions.
+  cudaqx_add_device_code(test_decoding_server
+    SOURCES
+      test_decoding_server.cpp
+    COMPILER_FLAGS
+      --target stim
+      -frealtime-lowering
+      -DQEC_DECODING_DAEMON_PATH=\"$<TARGET_FILE:qec_decoding_daemon>\"
+  )
 
-  if(QEC_UDP_DEVICE_CALL_INCLUDE_DIR AND QEC_UDP_REALTIME_LIBRARY
-     AND QEC_UDP_TRANSPORT_LIBRARY)
-    add_executable(qec_decoding_daemon qec_decoding_daemon.cpp)
-    target_include_directories(qec_decoding_daemon PRIVATE
-      ${CUDAQ_REALTIME_INCLUDE_DIR}
-      ${QEC_UDP_DEVICE_CALL_INCLUDE_DIR}
-      ${CUDAToolkit_INCLUDE_DIRS}
-    )
-    target_link_directories(qec_decoding_daemon
-      PRIVATE ${CUDAQ_INSTALL_DIR}/lib)
-    target_link_libraries(qec_decoding_daemon PRIVATE
-      cudaq-qec
-      cudaq-qec-realtime-decoding
-      cudaq-qec-realtime-decoding-server-cqr
-      ${QEC_UDP_REALTIME_LIBRARY}
-      ${QEC_UDP_TRANSPORT_LIBRARY}
-      cudaq::cudaq cudaq::cudaq-common cudaq-mlir-runtime
-      nvqir nvqir-stim
-      CUDA::cudart
-    )
-    if(QEC_CPU_ROCE_TRANSPORT_LIBRARY AND QEC_IBVERBS_LIBRARY)
-      target_compile_definitions(qec_decoding_daemon PRIVATE
-        QEC_HAVE_CPU_ROCE_TRANSPORT)
-      target_link_libraries(qec_decoding_daemon PRIVATE
-        ${QEC_CPU_ROCE_TRANSPORT_LIBRARY}
-        ${QEC_IBVERBS_LIBRARY})
-      message(STATUS "qec_decoding_daemon: cpu_roce transport enabled")
-    endif()
-    set_target_properties(qec_decoding_daemon PROPERTIES
-      BUILD_RPATH
-        "${CMAKE_BINARY_DIR}/lib;${CMAKE_BINARY_DIR}/lib/decoder-plugins;${CUDAQ_INSTALL_DIR}/lib"
-    )
-    # Decoder plugins are loaded at runtime by decoder type name; the config
-    # file currently selects pymatching.
-    add_dependencies(qec_decoding_daemon cudaq-qec-pymatching)
+  target_link_directories(test_decoding_server
+    PRIVATE ${CUDAQ_INSTALL_DIR}/lib)
 
-    # Place the decoder configs next to the daemon/test binaries; the test
-    # resolves them relative to its own executable.
-    configure_file(
-      ${CMAKE_CURRENT_SOURCE_DIR}/decoding_server_config.yaml
-      ${CMAKE_CURRENT_BINARY_DIR}/decoding_server_config.yaml
-      COPYONLY)
-    configure_file(
-      ${CMAKE_CURRENT_SOURCE_DIR}/decoding_server_config_multi_error_lut.yaml
-      ${CMAKE_CURRENT_BINARY_DIR}/decoding_server_config_multi_error_lut.yaml
-      COPYONLY)
+  # Caller side only: the simulation-cqr device wrappers lower the kernel's
+  # device_calls to the realtime frame ABI; deliberately NOT linking the
+  # decoding-server-cqr service, so the only decoder is the daemon's.
+  target_link_libraries(test_decoding_server PRIVATE
+    GTest::gtest_main
+    cudaq-qec
+    cudaq-qec-realtime-decoding
+    cudaq-qec-realtime-decoding-simulation-cqr
+    cudaq-device-call-runtime
+    cudaq::cudaq cudaq::cudaq-common cudaq-mlir-runtime
+    nvqir nvqir-stim
+  )
 
-    add_executable(test_decoding_server)
-    set_target_properties(test_decoding_server PROPERTIES
-      LINKER_LANGUAGE CXX)
-    target_include_directories(test_decoding_server PRIVATE
-      ${CUDAQ_REALTIME_INCLUDE_DIR}
-      ${CUDAToolkit_INCLUDE_DIRS}
-    )
-    cudaqx_add_device_code(test_decoding_server
-      SOURCES
-        test_decoding_server.cpp
-      COMPILER_FLAGS
-        --target stim
-        -frealtime-lowering
-    )
+  set_target_properties(test_decoding_server PROPERTIES
+    BUILD_RPATH
+      "${CMAKE_BINARY_DIR}/lib;${CMAKE_BINARY_DIR}/lib/decoder-plugins;${CUDAQ_INSTALL_DIR}/lib"
+  )
 
-    target_link_directories(test_decoding_server
-      PRIVATE ${CUDAQ_INSTALL_DIR}/lib)
-
-    # Caller side only: the simulation-cqr device wrappers lower the kernel's
-    # device_calls to the realtime frame ABI; deliberately NOT linking the
-    # decoding-server-cqr service, so the only decoder is the daemon's.
-    target_link_libraries(test_decoding_server PRIVATE
-      GTest::gtest_main
-      cudaq-qec
-      cudaq-qec-realtime-decoding
-      cudaq-qec-realtime-decoding-simulation-cqr
-      cudaq-device-call-runtime
-      cudaq::cudaq cudaq::cudaq-common cudaq-mlir-runtime
-      nvqir nvqir-stim
-    )
-
-    set_target_properties(test_decoding_server PROPERTIES
-      BUILD_RPATH
-        "${CMAKE_BINARY_DIR}/lib;${CMAKE_BINARY_DIR}/lib/decoder-plugins;${CUDAQ_INSTALL_DIR}/lib"
-    )
-
-    add_dependencies(test_decoding_server qec_decoding_daemon)
-    add_dependencies(CUDAQXQECUnitTests test_decoding_server)
-    gtest_discover_tests(test_decoding_server
-      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-  endif()
+  add_dependencies(test_decoding_server qec_decoding_daemon)
+  add_dependencies(CUDAQXQECUnitTests test_decoding_server)
+  gtest_discover_tests(test_decoding_server
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 endif()
