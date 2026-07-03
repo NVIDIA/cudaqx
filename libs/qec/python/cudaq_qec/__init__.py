@@ -90,6 +90,8 @@ BatchDecoderResult = qecrt.BatchDecoderResult
 DetectorErrorModel = qecrt.DetectorErrorModel
 generate_random_bit_flips = qecrt.generate_random_bit_flips
 sample_memory_circuit = qecrt.sample_memory_circuit
+x_sample_memory_circuit = qecrt.x_sample_memory_circuit
+z_sample_memory_circuit = qecrt.z_sample_memory_circuit
 sample_code_capacity = qecrt.sample_code_capacity
 dem_from_memory_circuit = qecrt.dem_from_memory_circuit
 x_dem_from_memory_circuit = qecrt.x_dem_from_memory_circuit
@@ -124,6 +126,7 @@ configure_decoders = qecrt.config.configure_decoders
 
 stabilizer_grid = qecrt.stabilizer_grid
 role_to_str = qecrt.role_to_str
+sc_orientation = qecrt.sc_orientation
 
 from .dem_sampling import dem_sampling
 

@@ -77,7 +77,6 @@ syndromes, data = qec.sample_memory_circuit(three_qubit_repetition_code,
                                             statePrep, nShots, nRounds,
                                             noise_model)
 
-syndromes = syndromes.reshape((nShots, nRounds, -1))
 syndromes = syndromes.reshape((nShots, -1))
 
 # Expected logical measurement (we prepared |1⟩)
