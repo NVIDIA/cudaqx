@@ -8,20 +8,33 @@
 
 #include "trt_test_data.h"
 #include "cudaq/qec/decoder.h"
-#include "cudaq/qec/decoder_pool.h"
 #include "cudaq/qec/trt_decoder_internal.h"
 #include <chrono>
 #include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <optional>
 #include <random>
+#include <thread>
 #include <vector>
 
 #include <cuda_runtime_api.h>
 
+#if defined(__linux__)
+#include <linux/mempolicy.h>
+#include <sched.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+#endif
+
 using namespace cudaq::qec;
+
+// Resolved from the LD_PRELOAD affinity shim when preloaded; weak so the
+// binary still links (and counter asserts are skipped) without it.
+extern "C" __attribute__((weak)) void cudaqx_affinity_syscall_reset();
+extern "C" __attribute__((weak)) long cudaqx_set_mempolicy_count();
 
 static bool gpu_available() {
   int count = 0;
@@ -841,13 +854,9 @@ TEST_F(TRTDecoderTest, CudaDeviceId_DecodeAsyncOnGpu1) {
                           << trt_output << ", expected " << expected_output;
 }
 
-// Composition check: two real trt decoders, each configured for a separate GPU,
-// run concurrently through the pool and both converge to the correct output.
-// This exercises a heavy production decoder end-to-end (not a probe). The
-// precise per-worker device placement is asserted by the eager-probe pool test;
-// here the value is that a real decoder composes with the pool and stays
-// correct.
-TEST_F(TRTDecoderTest, PoolRunsTwoTrtDecodersConcurrently) {
+// Two real trt decoders, each pinned to a separate GPU, run concurrently from
+// two independent threads and both converge to the correct output.
+TEST_F(TRTDecoderTest, TwoTrtDecodersConcurrently) {
   if (!gpu_available())
     GTEST_SKIP() << "No CUDA GPU available";
   int count = 0;
@@ -857,8 +866,6 @@ TEST_F(TRTDecoderTest, PoolRunsTwoTrtDecodersConcurrently) {
   std::string onnx_path = get_onnx_asset_path();
   if (!std::filesystem::exists(onnx_path))
     GTEST_SKIP() << "ONNX model not found: " << onnx_path;
-
-  cudaSetDevice(0); // calling thread stays on the default device
 
   std::size_t num_detectors = NUM_DETECTORS;
   cudaqx::tensor<uint8_t> H_mat({num_detectors, num_detectors});
@@ -872,57 +879,330 @@ TEST_F(TRTDecoderTest, PoolRunsTwoTrtDecodersConcurrently) {
   params1.insert("onnx_load_path", onnx_path);
   params1.insert("cuda_device_id", 1);
 
-  std::vector<cudaq::qec::pool_decoder_spec> specs;
-  specs.push_back({0, "trt_decoder", H_mat, params0});
-  specs.push_back({1, "trt_decoder", H_mat, params1});
-
-  // Informational only: engine memory landing on each assigned GPU is
-  // reported for a human to see, but deltas are noisy so we don't assert.
-  auto free_bytes = [](int device) -> std::size_t {
-    int prev = 0;
-    cudaGetDevice(&prev);
-    cudaSetDevice(device);
-    std::size_t free = 0, total = 0;
-    cudaMemGetInfo(&free, &total);
-    cudaSetDevice(prev);
-    return free;
-  };
-  std::size_t free0_before = free_bytes(0);
-  std::size_t free1_before = free_bytes(1);
-
-  std::unique_ptr<cudaq::qec::decoder_pool> pool;
+  std::unique_ptr<decoder> dec0, dec1;
   try {
-    pool = std::make_unique<cudaq::qec::decoder_pool>(std::move(specs));
+    dec0 = decoder::get("trt_decoder", H_mat, params0);
+    dec1 = decoder::get("trt_decoder", H_mat, params1);
   } catch (const std::exception &e) {
     GTEST_SKIP() << "TRT construction failed: " << e.what();
   }
 
-  std::size_t free0_after = free_bytes(0);
-  std::size_t free1_after = free_bytes(1);
-  std::cout << "GPU 0 free-memory drop: "
-            << (free0_before - free0_after) / (1024 * 1024) << " MiB\n";
-  std::cout << "GPU 1 free-memory drop: "
-            << (free1_before - free1_after) / (1024 * 1024) << " MiB\n";
+  std::vector<cudaq::qec::float_t> syndrome(TEST_INPUTS[0].begin(),
+                                            TEST_INPUTS[0].end());
+
+  cudaq::qec::decoder_result res0, res1;
+  std::exception_ptr ex0, ex1;
+  std::thread t0([&] {
+    try {
+      res0 = dec0->decode(syndrome);
+    } catch (...) {
+      ex0 = std::current_exception();
+    }
+  });
+  std::thread t1([&] {
+    try {
+      res1 = dec1->decode(syndrome);
+    } catch (...) {
+      ex1 = std::current_exception();
+    }
+  });
+  t0.join();
+  t1.join();
+
+  if (ex0)
+    std::rethrow_exception(ex0);
+  if (ex1)
+    std::rethrow_exception(ex1);
+
+  float expected_output = TEST_OUTPUTS[0][0];
+  EXPECT_TRUE(res0.converged);
+  ASSERT_FALSE(res0.result.empty());
+  EXPECT_LT(std::abs(res0.result[0] - expected_output), 1e-4f)
+      << "GPU-0 decode differs from expected: got " << res0.result[0]
+      << ", expected " << expected_output;
+  EXPECT_TRUE(res1.converged);
+  ASSERT_FALSE(res1.result.empty());
+  EXPECT_LT(std::abs(res1.result[0] - expected_output), 1e-4f)
+      << "GPU-1 decode differs from expected: got " << res1.result[0]
+      << ", expected " << expected_output;
+}
+
+// Container runtimes commonly block the mempolicy syscalls (seccomp without
+// CAP_SYS_NICE). trt_decoder::decode_batch() degrades gracefully there (warns,
+// keeps going), but a test that wants to exercise the mempolicy path must skip
+// instead of fail. Mirrors the guard in test_device_affinity.cpp.
+TEST(TrtDecoder, DecodeBatchAppliesNumaPolicy) {
+#if defined(__linux__)
+  int mode = -1;
+  if (syscall(SYS_get_mempolicy, &mode, nullptr, 0UL, nullptr, 0UL) != 0)
+    GTEST_SKIP() << "mempolicy syscalls unavailable (container seccomp?)";
+#endif
+  if (!gpu_available())
+    GTEST_SKIP() << "No CUDA GPU available";
+  std::string onnx_path = get_onnx_asset_path();
+  if (!std::filesystem::exists(onnx_path))
+    GTEST_SKIP() << "ONNX model not found: " << onnx_path;
+
+  std::size_t num_detectors = NUM_DETECTORS;
+  cudaqx::tensor<uint8_t> H({num_detectors, num_detectors});
+  for (std::size_t i = 0; i < num_detectors; ++i)
+    H.at({i, i}) = 1;
+
+  cudaqx::heterogeneous_map params;
+  params.insert("onnx_load_path", onnx_path);
+  params.insert("numa_node_id", 0);
+
+  std::unique_ptr<decoder> trt_decoder;
+  try {
+    trt_decoder = decoder::get("trt_decoder", H, params);
+  } catch (const std::exception &e) {
+    GTEST_SKIP() << "Failed to create TRT decoder: " << e.what();
+  }
 
   std::vector<cudaq::qec::float_t> syndrome(TEST_INPUTS[0].begin(),
                                             TEST_INPUTS[0].end());
-  std::unordered_map<int, std::vector<std::vector<cudaq::qec::float_t>>> work;
-  work[0] = {syndrome};
-  work[1] = {syndrome};
-  auto res = pool->decode_all(work);
+  std::vector<decoder_result> results;
+  // decode_batch() applies the NUMA guard for the duration of the call and
+  // restores the thread's prior policy before returning, so this only proves
+  // no crash/throw occurs with a numa_node_id knob set; the mempolicy syscall
+  // behavior itself is covered at the primitive level by
+  // HardwareAffinity.MempolicyBindWhenRequested.
+  EXPECT_NO_THROW({ results = trt_decoder->decode_batch({syndrome}); });
+  ASSERT_EQ(results.size(), 1u);
+  EXPECT_TRUE(results[0].converged);
+  ASSERT_FALSE(results[0].result.empty());
+}
 
-  ASSERT_FALSE(res[0].empty());
-  ASSERT_FALSE(res[1].empty());
-  EXPECT_TRUE(res[0][0].converged);
-  EXPECT_TRUE(res[1][0].converged);
-  ASSERT_FALSE(res[0][0].result.empty());
-  ASSERT_FALSE(res[1][0].result.empty());
+#if defined(__linux__)
+// Snapshot of the calling thread's placement: CPU affinity mask plus thread
+// memory-policy mode and nodemask (raw SYS_get_mempolicy, matching what the
+// decode_batch guard saves/restores).
+struct thread_placement {
+  cpu_set_t mask;
+  int mempolicy_mode = -1;
+  unsigned long nodemask[16] = {0};
+};
 
-  float expected_output = TEST_OUTPUTS[0][0];
-  EXPECT_LT(std::abs(res[0][0].result[0] - expected_output), 1e-4f)
-      << "GPU-0 pool decode differs from expected: got " << res[0][0].result[0]
-      << ", expected " << expected_output;
-  EXPECT_LT(std::abs(res[1][0].result[0] - expected_output), 1e-4f)
-      << "GPU-1 pool decode differs from expected: got " << res[1][0].result[0]
-      << ", expected " << expected_output;
+static std::optional<thread_placement> capture_thread_placement() {
+  thread_placement p;
+  CPU_ZERO(&p.mask);
+  if (sched_getaffinity(0, sizeof(p.mask), &p.mask) != 0)
+    return std::nullopt;
+  if (syscall(SYS_get_mempolicy, &p.mempolicy_mode, p.nodemask,
+              sizeof(p.nodemask) * 8, nullptr, 0UL) != 0)
+    return std::nullopt;
+  return p;
+}
+
+static void expect_same_placement(const thread_placement &before,
+                                  const thread_placement &after) {
+  EXPECT_TRUE(CPU_EQUAL(&before.mask, &after.mask))
+      << "CPU affinity mask changed across decode_batch()";
+  EXPECT_EQ(before.mempolicy_mode, after.mempolicy_mode)
+      << "thread mempolicy mode changed across decode_batch()";
+  EXPECT_EQ(
+      0, std::memcmp(before.nodemask, after.nodemask, sizeof(before.nodemask)))
+      << "thread mempolicy nodemask changed across decode_batch()";
+}
+
+// Shared skip guard for the placement tests below (GPU + ONNX asset + NUMA
+// node 0 + mempolicy syscalls, which container seccomp commonly blocks).
+static std::optional<std::string> placement_test_skip_reason() {
+  if (!gpu_available())
+    return "No CUDA GPU available";
+  if (!std::filesystem::exists(get_onnx_asset_path()))
+    return "ONNX model not found: " + get_onnx_asset_path();
+  if (!std::filesystem::exists("/sys/devices/system/node/node0"))
+    return "NUMA node 0 not present";
+  int mode = -1;
+  if (syscall(SYS_get_mempolicy, &mode, nullptr, 0UL, nullptr, 0UL) != 0)
+    return "mempolicy syscalls unavailable (container seccomp?)";
+  return std::nullopt;
+}
+
+static void expect_first_output_correct(
+    const std::vector<cudaq::qec::decoder_result> &results) {
+  ASSERT_EQ(results.size(), 1u);
+  EXPECT_TRUE(results[0].converged);
+  ASSERT_FALSE(results[0].result.empty());
+  EXPECT_LT(std::abs(results[0].result[0] - TEST_OUTPUTS[0][0]), 1e-4f)
+      << "decode_batch output differs from expected: got "
+      << results[0].result[0] << ", expected " << TEST_OUTPUTS[0][0];
+}
+#endif
+
+// A thread that called bind_current_thread() owns its placement: the
+// decode_batch() guard must not fire on it. Placement is captured after the
+// bind and must be bit-identical after decode_batch() — regression test for
+// the pinning-defeat bug where the guard re-bound (and widened) an
+// already-bound thread.
+TEST(TrtDecoder, BoundThreadSkipsGuardInDecodeBatch) {
+#if defined(__linux__)
+  if (auto reason = placement_test_skip_reason())
+    GTEST_SKIP() << *reason;
+
+  cudaqx::heterogeneous_map params;
+  params.insert("onnx_load_path", get_onnx_asset_path());
+  params.insert("cuda_device_id", 0);
+  params.insert("numa_node_id", 0);
+  std::unique_ptr<decoder> trt_decoder;
+  try {
+    trt_decoder =
+        decoder::get("trt_decoder", make_identity_h(NUM_DETECTORS), params);
+  } catch (const std::exception &e) {
+    GTEST_SKIP() << "Failed to create TRT decoder: " << e.what();
+  }
+
+  std::vector<cudaq::qec::float_t> syndrome(TEST_INPUTS[0].begin(),
+                                            TEST_INPUTS[0].end());
+  // bind_current_thread() pins persistently (no restore), so run on a worker
+  // thread to keep the gtest main thread's placement intact for later tests.
+  std::optional<thread_placement> before, after;
+  std::vector<cudaq::qec::decoder_result> results;
+  std::exception_ptr err;
+  // A guard that fires and restores perfectly is indistinguishable from a
+  // skipped guard by before/after placement alone; the set_mempolicy counter
+  // is the observable difference (TRT itself never calls set_mempolicy).
+  const bool have_shim = cudaqx_affinity_syscall_reset != nullptr &&
+                         cudaqx_set_mempolicy_count != nullptr;
+  long setmem_during_decode = 0;
+  std::thread worker([&] {
+    try {
+      trt_decoder->bind_current_thread();
+      before = capture_thread_placement();
+      if (have_shim)
+        cudaqx_affinity_syscall_reset();
+      results = trt_decoder->decode_batch({syndrome});
+      if (have_shim)
+        setmem_during_decode = cudaqx_set_mempolicy_count();
+      after = capture_thread_placement();
+    } catch (...) {
+      err = std::current_exception();
+    }
+  });
+  worker.join();
+  if (err)
+    std::rethrow_exception(err);
+
+  expect_first_output_correct(results);
+  ASSERT_TRUE(before.has_value());
+  ASSERT_TRUE(after.has_value());
+  expect_same_placement(*before, *after);
+  if (have_shim)
+    EXPECT_EQ(setmem_during_decode, 0)
+        << "bound decode_batch() issued set_mempolicy: the guard fired on a "
+           "thread that already called bind_current_thread()";
+#else
+  GTEST_SKIP() << "Linux-only placement test";
+#endif
+}
+
+// Unbound caller: decode_batch() applies the NUMA guard for the duration of
+// the call and must restore the caller's placement exactly before returning.
+TEST(TrtDecoder, UnboundDecodeBatchRestoresPlacement) {
+#if defined(__linux__)
+  if (auto reason = placement_test_skip_reason())
+    GTEST_SKIP() << *reason;
+
+  cudaqx::heterogeneous_map params;
+  params.insert("onnx_load_path", get_onnx_asset_path());
+  params.insert("cuda_device_id", 0);
+  params.insert("numa_node_id", 0);
+  std::unique_ptr<decoder> trt_decoder;
+  try {
+    trt_decoder =
+        decoder::get("trt_decoder", make_identity_h(NUM_DETECTORS), params);
+  } catch (const std::exception &e) {
+    GTEST_SKIP() << "Failed to create TRT decoder: " << e.what();
+  }
+
+  std::vector<cudaq::qec::float_t> syndrome(TEST_INPUTS[0].begin(),
+                                            TEST_INPUTS[0].end());
+  auto before = capture_thread_placement();
+  ASSERT_TRUE(before.has_value());
+  auto results = trt_decoder->decode_batch({syndrome});
+  auto after = capture_thread_placement();
+  ASSERT_TRUE(after.has_value());
+
+  expect_first_output_correct(results);
+  expect_same_placement(*before, *after);
+#else
+  GTEST_SKIP() << "Linux-only placement test";
+#endif
+}
+
+// An explicit cpu_affinity={0} bind is strictly narrower than node 0's cpuset:
+// if decode_batch()'s _ScopedNuma guard fired on the bound thread it would
+// widen the mask to the whole node, so "exactly CPU 0 before AND after" proves
+// the explicit pin survives decode_batch().
+TEST(TrtDecoder, ExplicitCpuAffinityHonoredWhenBound) {
+#if defined(__linux__)
+  if (auto reason = placement_test_skip_reason())
+    GTEST_SKIP() << *reason;
+
+  cudaqx::heterogeneous_map params;
+  params.insert("onnx_load_path", get_onnx_asset_path());
+  params.insert("numa_node_id", 0);
+  params.insert("cpu_affinity", std::vector<int>{0});
+  std::unique_ptr<decoder> trt_decoder;
+  try {
+    trt_decoder =
+        decoder::get("trt_decoder", make_identity_h(NUM_DETECTORS), params);
+  } catch (const std::exception &e) {
+    GTEST_SKIP() << "Failed to create TRT decoder: " << e.what();
+  }
+
+  std::vector<cudaq::qec::float_t> syndrome(TEST_INPUTS[0].begin(),
+                                            TEST_INPUTS[0].end());
+  cpu_set_t only_cpu0;
+  CPU_ZERO(&only_cpu0);
+  CPU_SET(0, &only_cpu0);
+
+  std::optional<thread_placement> before, after;
+  std::vector<cudaq::qec::decoder_result> results;
+  std::exception_ptr err;
+  std::thread worker([&] {
+    try {
+      trt_decoder->bind_current_thread();
+      before = capture_thread_placement();
+      results = trt_decoder->decode_batch({syndrome});
+      after = capture_thread_placement();
+    } catch (...) {
+      err = std::current_exception();
+    }
+  });
+  worker.join();
+  if (err)
+    std::rethrow_exception(err);
+
+  expect_first_output_correct(results);
+  ASSERT_TRUE(before.has_value());
+  ASSERT_TRUE(after.has_value());
+  EXPECT_TRUE(CPU_EQUAL(&only_cpu0, &before->mask))
+      << "bind_current_thread() did not honor cpu_affinity={0}";
+  EXPECT_TRUE(CPU_EQUAL(&only_cpu0, &after->mask))
+      << "decode_batch() widened the explicit cpu_affinity={0} pin";
+  expect_same_placement(*before, *after);
+#else
+  GTEST_SKIP() << "Linux-only placement test";
+#endif
+}
+
+// Dependency-free regression guard: decoder::get()'s own construction-time
+// CudaDeviceGuard rejects an out-of-range cuda_device_id before the plugin is
+// ever instantiated, so decode_batch()'s own device-guard error-checking is
+// never reached for this particular failure mode. Kept as a guard on the
+// overall contract (out-of-range device ids must never silently proceed).
+TEST(TrtDecoder, DecodeBatchThrowsOnOutOfRangeCudaDeviceId) {
+  int count = 0;
+  cudaGetDeviceCount(&count);
+  cudaqx::tensor<uint8_t> H({2, 2});
+  H.at({0, 0}) = 1;
+  H.at({1, 1}) = 1;
+  cudaqx::heterogeneous_map params;
+  params.insert("onnx_load_path", get_onnx_asset_path());
+  params.insert("cuda_device_id", count + 5); // deliberately out of range
+  EXPECT_THROW(
+      { cudaq::qec::decoder::get("trt_decoder", H, params); },
+      std::runtime_error);
 }

@@ -10,6 +10,11 @@
 #include <cuda_runtime.h>
 #include <vector>
 
+#if defined(__linux__)
+#include <sys/syscall.h>
+#include <unistd.h>
+#endif
+
 using namespace cudaqx;
 
 namespace cudaq::qec {
@@ -51,88 +56,68 @@ public:
 
 CUDAQ_EXT_PT_REGISTER_TYPE(sample_decoder)
 
-/// @brief Test-only decoder shaped like a typical GPU decoder: it overrides
-/// ONLY the single-syndrome decode() (NOT decode_batch) and "allocates lazily"
-/// on first decode(). It reports, via result.result[0], the CUDA device its
-/// allocation actually landed on — so a test can assert cuda_device_id was
-/// honored on whichever entry point invoked it.
-class device_probe_decoder : public decoder {
-public:
-  device_probe_decoder(const cudaq::qec::sparse_binary_matrix &H,
-                       const cudaqx::heterogeneous_map &params)
-      : decoder(H) {}
+/// @brief Test-only decoder that records the calling thread's placement --
+/// the CUDA device a real allocation lands on and the raw MPOL_* mempolicy
+/// mode -- both DURING construction (inside decoder::get()'s guarded window)
+/// and inside each decode() call, and echoes them through result.result:
+///   [0] = CUDA device at construction   [1] = CUDA device inside decode()
+///   [2] = mempolicy mode at construction [3] = mempolicy mode inside decode()
+/// Unavailable probes (no CUDA / non-Linux / blocked syscall) report -1.
+class placement_probe_decoder : public decoder {
+private:
+  int ctor_device_ = -1;
+  int ctor_mempolicy_ = -1;
 
-  virtual decoder_result decode(const std::vector<float_t> &syndrome) override {
-    decoder_result result;
-    result.converged = true;
+  static int current_cuda_device() {
     int dev = -1;
     void *p = nullptr;
     if (cudaMalloc(&p, 16) == cudaSuccess && p) {
       cudaPointerAttributes attr{};
       if (cudaPointerGetAttributes(&attr, p) == cudaSuccess)
-        dev = attr.device; // device the lazy allocation landed on
+        dev = attr.device; // device the allocation actually landed on
       cudaFree(p);
     } else {
       cudaGetDevice(&dev);
     }
-    result.result = std::vector<float_t>{static_cast<float_t>(dev)};
-    return result;
+    return dev;
   }
 
-  virtual ~device_probe_decoder() {}
-
-  CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
-      device_probe_decoder, static std::unique_ptr<decoder> create(
-                                const cudaq::qec::decoder_init &init,
-                                const cudaqx::heterogeneous_map &params) {
-        return cudaq::qec::make_pcm_decoder<device_probe_decoder>(init, params);
-      })
-};
-
-CUDAQ_EXT_PT_REGISTER_TYPE(device_probe_decoder)
-
-/// @brief Test-only decoder shaped like a typical GPU decoder that allocates
-/// eagerly at construction (like production GPU decoders), so a test can
-/// assert the construct-time device guard placed it correctly. The device its
-/// constructor-time allocation landed on is recorded in a member and echoed
-/// back by decode() via result.result[0].
-class eager_device_probe_decoder : public decoder {
-private:
-  int device_ = -1;
+  static int current_mempolicy_mode() {
+    int mode = -1;
+#if defined(__linux__)
+    syscall(SYS_get_mempolicy, &mode, nullptr, 0UL, nullptr, 0UL);
+#endif
+    return mode;
+  }
 
 public:
-  eager_device_probe_decoder(const cudaq::qec::sparse_binary_matrix &H,
-                             const cudaqx::heterogeneous_map &params)
-      : decoder(H) {
-    void *p = nullptr;
-    if (cudaMalloc(&p, 16) == cudaSuccess && p) {
-      cudaPointerAttributes attr{};
-      if (cudaPointerGetAttributes(&attr, p) == cudaSuccess)
-        device_ = attr.device; // device the eager allocation landed on
-      cudaFree(p);
-    } else {
-      cudaGetDevice(&device_);
-    }
-  }
+  placement_probe_decoder(const cudaq::qec::sparse_binary_matrix &H,
+                          const cudaqx::heterogeneous_map &params)
+      : decoder(H), ctor_device_(current_cuda_device()),
+        ctor_mempolicy_(current_mempolicy_mode()) {}
 
   virtual decoder_result decode(const std::vector<float_t> &syndrome) override {
     decoder_result result;
     result.converged = true;
-    result.result = std::vector<float_t>{static_cast<float_t>(device_)};
+    result.result =
+        std::vector<float_t>{static_cast<float_t>(ctor_device_),
+                             static_cast<float_t>(current_cuda_device()),
+                             static_cast<float_t>(ctor_mempolicy_),
+                             static_cast<float_t>(current_mempolicy_mode())};
     return result;
   }
 
-  virtual ~eager_device_probe_decoder() {}
+  virtual ~placement_probe_decoder() {}
 
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
-      eager_device_probe_decoder, static std::unique_ptr<decoder> create(
-                                      const cudaq::qec::decoder_init &init,
-                                      const cudaqx::heterogeneous_map &params) {
-        return cudaq::qec::make_pcm_decoder<eager_device_probe_decoder>(init,
-                                                                        params);
+      placement_probe_decoder, static std::unique_ptr<decoder> create(
+                                   const cudaq::qec::decoder_init &init,
+                                   const cudaqx::heterogeneous_map &params) {
+        return cudaq::qec::make_pcm_decoder<placement_probe_decoder>(init,
+                                                                     params);
       })
 };
 
-CUDAQ_EXT_PT_REGISTER_TYPE(eager_device_probe_decoder)
+CUDAQ_EXT_PT_REGISTER_TYPE(placement_probe_decoder)
 
 } // namespace cudaq::qec

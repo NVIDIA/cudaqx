@@ -65,17 +65,25 @@ TEST(HardwareAffinity, MempolicyDefaultIsPreferredNotBind) {
   namespace da = cudaq::qec::detail_affinity;
   if (!mempolicy_syscalls_usable())
     GTEST_SKIP() << "mempolicy syscalls unavailable (container seccomp?)";
+  cpu_set_t saved;
+  CPU_ZERO(&saved);
+  sched_getaffinity(0, sizeof(saved), &saved);
   da::bind_this_thread_to_numa_node(0);
   EXPECT_EQ(da::current_thread_mempolicy_mode(), MPOL_PREFERRED);
   syscall(SYS_set_mempolicy, MPOL_DEFAULT, nullptr, 0UL);
+  sched_setaffinity(0, sizeof(saved), &saved);
 }
 TEST(HardwareAffinity, MempolicyBindWhenRequested) {
   namespace da = cudaq::qec::detail_affinity;
   if (!mempolicy_syscalls_usable())
     GTEST_SKIP() << "mempolicy syscalls unavailable (container seccomp?)";
-  da::bind_this_thread_to_numa_node(0, da::mempolicy_mode::bind);
+  cpu_set_t saved;
+  CPU_ZERO(&saved);
+  sched_getaffinity(0, sizeof(saved), &saved);
+  da::bind_this_thread_to_numa_node(0, cudaq::qec::mempolicy_mode::bind);
   EXPECT_EQ(da::current_thread_mempolicy_mode(), MPOL_BIND);
   syscall(SYS_set_mempolicy, MPOL_DEFAULT, nullptr, 0UL);
+  sched_setaffinity(0, sizeof(saved), &saved);
 }
 TEST(HardwareAffinity, MempolicyRejectsUnknownStringThrows) {
   cudaqx::heterogeneous_map p;
@@ -153,8 +161,7 @@ TEST(HardwareAffinity, BindRegionSetsPolicyOnBuffer) {
   ASSERT_NE(p, nullptr);
   da::bind_region_to_numa_node(p, bytes, 0); // preferred, node 0
   int mode = -1;
-  long rc =
-      syscall(SYS_get_mempolicy, &mode, nullptr, 0UL, p, 1UL /*MPOL_F_ADDR*/);
+  long rc = syscall(SYS_get_mempolicy, &mode, nullptr, 0UL, p, MPOL_F_ADDR);
   if (rc == 0)
     EXPECT_TRUE(mode == MPOL_PREFERRED || mode == MPOL_DEFAULT)
         << "region policy after preferred-bind should be PREFERRED (or DEFAULT "

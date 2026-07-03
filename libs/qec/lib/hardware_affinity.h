@@ -10,6 +10,7 @@
 // decoder and the realtime session. Never include from a public header.
 #pragma once
 
+#include "cudaq/qec/device_affinity.h"
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -46,9 +47,8 @@ inline void affinity_info(const std::string &msg) {
 
 #if defined(__linux__)
 
-enum class mempolicy_mode { preferred, bind };
-inline int mempolicy_syscall_mode(mempolicy_mode m) {
-  return (m == mempolicy_mode::bind) ? MPOL_BIND : MPOL_PREFERRED;
+inline int mempolicy_syscall_mode(cudaq::qec::mempolicy_mode m) {
+  return (m == cudaq::qec::mempolicy_mode::bind) ? MPOL_BIND : MPOL_PREFERRED;
 }
 
 // Parse /sys/devices/system/node/node<N>/cpulist e.g. "0-7,16-23".
@@ -83,11 +83,15 @@ inline bool build_node_cpuset(int node, cpu_set_t &out) {
 // Persistently bind the CALLING thread's CPU affinity + memory policy to a NUMA
 // node. No restore. node < 0 = no-op. Only pins CPU affinity when prior
 // affinity is readable (avoids permanent pinning in a locked-cpuset container).
+// apply_mempolicy=false skips the set_mempolicy half; temporary guards use it
+// when the prior policy could not be captured, so they never apply a policy
+// they cannot restore (the same only-if-restorable rule as the affinity half).
 // Throws if node cannot be encoded in the mempolicy nodemask (node >= 64).
 // Warns (does not throw) if the OS declines an otherwise well-formed request.
-inline void
-bind_this_thread_to_numa_node(int node,
-                              mempolicy_mode mode = mempolicy_mode::preferred) {
+inline void bind_this_thread_to_numa_node(
+    int node,
+    cudaq::qec::mempolicy_mode mode = cudaq::qec::mempolicy_mode::preferred,
+    bool apply_mempolicy = true) {
   if (node < 0)
     return;
   if (node >= static_cast<int>(sizeof(unsigned long) * 8))
@@ -111,6 +115,8 @@ bind_this_thread_to_numa_node(int node,
                   " requested but its CPU list could not be read (or prior "
                   "affinity unreadable); CPU affinity left unpinned");
   }
+  if (!apply_mempolicy)
+    return;
   unsigned long nodemask = 1UL << node;
   if (syscall(SYS_set_mempolicy, mempolicy_syscall_mode(mode), &nodemask,
               static_cast<unsigned long>(sizeof(nodemask) * 8)) != 0)
@@ -124,9 +130,9 @@ bind_this_thread_to_numa_node(int node,
 // to relocate the pages. node < 0 / null / 0 bytes = no-op.
 // Throws if node cannot be encoded in the mempolicy nodemask (node >= 64).
 // Warns (does not throw) if the OS declines an otherwise well-formed request.
-inline void
-bind_region_to_numa_node(void *p, std::size_t bytes, int node,
-                         mempolicy_mode mode = mempolicy_mode::preferred) {
+inline void bind_region_to_numa_node(
+    void *p, std::size_t bytes, int node,
+    cudaq::qec::mempolicy_mode mode = cudaq::qec::mempolicy_mode::preferred) {
   if (node < 0 || p == nullptr || bytes == 0)
     return;
   if (node >= static_cast<int>(sizeof(unsigned long) * 8))
@@ -150,6 +156,36 @@ inline int current_thread_mempolicy_mode() {
   if (syscall(SYS_get_mempolicy, &mode, nullptr, 0UL, nullptr, 0UL) != 0)
     return -1;
   return mode;
+}
+
+// Full state needed to restore a thread's memory policy exactly as it was.
+// mode == -1 means the capture failed (nothing to restore).
+struct mempolicy_state {
+  int mode = -1;
+  unsigned long nodemask[16] = {0}; // up to 1024 nodes
+};
+
+// Capture the calling thread's current memory policy (mode + nodemask) so it
+// can be restored exactly later.
+inline mempolicy_state capture_thread_mempolicy() {
+  mempolicy_state s;
+  if (syscall(SYS_get_mempolicy, &s.mode, s.nodemask,
+              static_cast<unsigned long>(sizeof(s.nodemask) * 8), nullptr,
+              0UL) != 0)
+    s.mode = -1;
+  return s;
+}
+
+// Restore a previously-captured memory policy exactly. No-op if the capture
+// failed. Warns (does not throw) if the OS declines.
+inline void restore_thread_mempolicy(const mempolicy_state &s) {
+  if (s.mode < 0)
+    return;
+  if (syscall(SYS_set_mempolicy, s.mode, s.nodemask,
+              static_cast<unsigned long>(sizeof(s.nodemask) * 8)) != 0)
+    affinity_warn("failed to restore prior thread mempolicy: " +
+                  std::string(std::strerror(errno)) +
+                  "; thread may remain bound to its temporary policy");
 }
 
 // Pin the CALLING thread's CPU affinity to an explicit list of core ids.
@@ -190,12 +226,7 @@ inline std::vector<int> current_thread_cpuset() {
 
 #else // non-Linux: no-ops
 
-enum class mempolicy_mode { preferred, bind };
-inline void
-bind_this_thread_to_numa_node(int node,
-                              mempolicy_mode = mempolicy_mode::preferred) {
-  if (node < 0)
-    return;
+inline void warn_numa_unsupported_once() {
   static bool warned = false;
   if (!warned) {
     affinity_warn(
@@ -203,12 +234,25 @@ bind_this_thread_to_numa_node(int node,
     warned = true;
   }
 }
-inline void
-bind_region_to_numa_node(void *, std::size_t, int,
-                         mempolicy_mode = mempolicy_mode::preferred) {}
+
+inline void bind_this_thread_to_numa_node(
+    int node,
+    cudaq::qec::mempolicy_mode = cudaq::qec::mempolicy_mode::preferred,
+    bool /*apply_mempolicy*/ = true) {
+  if (node < 0)
+    return;
+  warn_numa_unsupported_once();
+}
+inline void bind_region_to_numa_node(
+    void *, std::size_t, int,
+    cudaq::qec::mempolicy_mode = cudaq::qec::mempolicy_mode::preferred) {}
 inline int current_thread_mempolicy_mode() { return -1; }
 inline void set_thread_cpu_affinity(const std::vector<int> &) {}
 inline std::vector<int> current_thread_cpuset() { return {}; }
+
+struct mempolicy_state {};
+inline mempolicy_state capture_thread_mempolicy() { return {}; }
+inline void restore_thread_mempolicy(const mempolicy_state &) {}
 
 #endif
 

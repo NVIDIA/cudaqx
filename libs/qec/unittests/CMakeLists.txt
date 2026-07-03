@@ -40,11 +40,6 @@ target_include_directories(test_decoders PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
 add_dependencies(CUDAQXQECUnitTests test_decoders)
 gtest_discover_tests(test_decoders)
 
-add_executable(test_decoder_pool test_decoder_pool.cpp decoders/sample_decoder.cpp)
-target_link_libraries(test_decoder_pool PRIVATE GTest::gtest_main cudaq-qec cudaq::cudaq libstim CUDA::cudart)
-target_include_directories(test_decoder_pool PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
-add_dependencies(CUDAQXQECUnitTests test_decoder_pool)
-gtest_discover_tests(test_decoder_pool)
 
 add_executable(test_decoders_yaml test_decoders_yaml.cpp decoders/sample_decoder.cpp)
 target_link_libraries(test_decoders_yaml PRIVATE
@@ -181,7 +176,11 @@ if(CUDAQ_QEC_TRT_DECODER_ENABLED AND CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64)|(A
   target_compile_definitions(test_trt_decoder PRIVATE
     TRT_TEST_ONNX_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../../../assets/tests/surface_code_decoder.onnx")
   add_dependencies(CUDAQXQECUnitTests test_trt_decoder)
-  gtest_discover_tests(test_trt_decoder)
+  # Preload the affinity syscall shim so the guard tests can assert syscall
+  # counts (they degrade to placement-only asserts without it).
+  add_dependencies(test_trt_decoder affinity_syscall_shim)
+  gtest_discover_tests(test_trt_decoder
+    PROPERTIES ENVIRONMENT "LD_PRELOAD=$<TARGET_FILE:affinity_syscall_shim>")
 endif()
 
 # ==============================================================================

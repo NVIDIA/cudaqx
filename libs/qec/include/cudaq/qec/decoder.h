@@ -15,12 +15,14 @@
 #include "cudaq/qec/detector_error_model.h"
 #include "cudaq/qec/device_affinity.h"
 #include <algorithm>
+#include <atomic>
 #include <functional>
 #include <future>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <tuple>
 #include <variant>
 #include <vector>
@@ -174,6 +176,13 @@ public:
   /// length of the syndrome vector should be equal to `syndrome_size`.
   /// @returns Vector of length `block_size` with soft probabilities of errors
   /// in each index.
+  /// Note: this entry point has no automatic CUDA/NUMA guard. It is a pure
+  /// virtual that plugin implementations override directly, so the base
+  /// class cannot wrap it without an ABI-breaking vtable change.
+  /// decode_batch(), decode_async(), decode(tensor), and enqueue_syndrome()
+  /// all apply the guard around their own call into this function; a caller
+  /// invoking this overload directly on an unbound decoder is responsible
+  /// for its own placement (e.g. call bind_current_thread() first).
   virtual decoder_result decode(const std::vector<float_t> &syndrome) = 0;
 
   /// @brief Decode a single syndrome
@@ -386,24 +395,25 @@ protected:
   int cuda_device_id_ = -1;
   /// Target NUMA node for this decoder. -1 = no binding.
   int numa_node_id_ = -1;
-  /// Set once bind_current_thread() has pinned the owning thread, so the
-  /// synchronous decode_batch() guard can skip its redundant set/restore.
-  bool bound_persistently_ = false;
+  /// Thread that bind_current_thread() pinned, if any. Guarded call sites
+  /// (decode_batch, decode(tensor), enqueue_syndrome) skip their per-call
+  /// CUDA/NUMA guard only when the calling thread matches. A
+  /// default-constructed id means no thread is bound.
+  std::atomic<std::thread::id> bound_thread_{};
   /// NUMA memory-policy mode for this decoder (default soft PREFERRED).
   cudaq::qec::mempolicy_mode mempolicy_ = cudaq::qec::mempolicy_mode::preferred;
   /// Explicit CPU cores for this decoder's owning thread (empty = use node
   /// cpuset).
   std::vector<int> cpu_affinity_;
-  /// Set once the current-device mismatch warning has fired, so it prints at
-  /// most once per decoder instance.
-  bool device_mismatch_warned_ = false;
+
+  /// True if bind_current_thread() was called, and the CURRENT thread is the
+  /// one that called it -- the only thread allowed to skip the per-call
+  /// CUDA/NUMA guard. Protected so plugin overrides of decode_batch() can
+  /// apply the same skip as the base-class entry points.
+  bool is_bound_here() const;
 
 private:
   decode_result_type result_type_ = decode_result_type::decode_to_errs;
-
-  /// Warn (once) if this decoder has an explicit cuda_device_id and the
-  /// calling thread's current CUDA device does not match it.
-  void warn_if_device_mismatch();
 };
 
 /// @brief Convert a single soft probability to a hard 0/1 decision.

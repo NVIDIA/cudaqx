@@ -337,6 +337,8 @@ void qec_realtime_session::initialize() {
       int chosen = -1;
       bool conflict = false;
       for (const auto &d : decoders_) {
+        if (!d)
+          continue;
         const int n = d->numa_node_id();
         if (n < 0)
           continue;
@@ -889,7 +891,13 @@ void qec_realtime_session::start_host_loop() {
     const int node = session_numa_node_;
     host_loop_thread_ = std::thread([this, node]() {
       // Persistent bind: this thread does nothing but decode for its lifetime.
-      cudaq::qec::detail_affinity::bind_this_thread_to_numa_node(node);
+      try {
+        cudaq::qec::detail_affinity::bind_this_thread_to_numa_node(node);
+      } catch (const std::exception &e) {
+        cudaq::qec::detail_affinity::affinity_warn(
+            "host loop thread NUMA bind failed: " + std::string(e.what()) +
+            " — continuing without affinity");
+      }
       cudaq_host_dispatcher_loop(&host_ctx_);
     });
     return;
@@ -998,8 +1006,22 @@ void qec_realtime_session::start_host_loop() {
   host_ctx_.io_ctxs_dev = io_ctxs_dev_;
   host_ctx_.skip_stream_sweep = false;
 
-  host_loop_thread_ =
-      std::thread([this]() { cudaq_host_dispatcher_loop(&host_ctx_); });
+  {
+    const int node = session_numa_node_;
+    host_loop_thread_ = std::thread([this, node]() {
+      // Mirror the HOST-mode dispatch thread's pinning above: the CPU-side
+      // monitor thread benefits from the same NUMA locality regardless of
+      // dispatch mode.
+      try {
+        cudaq::qec::detail_affinity::bind_this_thread_to_numa_node(node);
+      } catch (const std::exception &e) {
+        cudaq::qec::detail_affinity::affinity_warn(
+            "host loop thread NUMA bind failed: " + std::string(e.what()) +
+            " — continuing without affinity");
+      }
+      cudaq_host_dispatcher_loop(&host_ctx_);
+    });
+  }
 }
 
 //==============================================================================

@@ -162,6 +162,24 @@ TEST(PyMatchingRealtime, RejectsOversizedSyndromeRequest) {
   session.finalize();
 }
 
+TEST(PyMatchingRealtime, InitializeToleratesSparseDecoderIds) {
+  auto decoders = make_pymatching_decoders(/*h_vec=*/{1, 0, 1, 1, 0, 1},
+                                           /*syndrome_size=*/3,
+                                           /*block_size=*/2);
+  auto other = make_pymatching_decoders(/*h_vec=*/{1, 0, 1, 1, 0, 1},
+                                        /*syndrome_size=*/3,
+                                        /*block_size=*/2);
+  other[0]->set_decoder_id(2);
+  // Gap at index 1: decoder ids {0, 2}, mirroring a production config where
+  // decoder_config ids are not contiguous.
+  decoders.push_back(nullptr);
+  decoders.push_back(std::move(other[0]));
+
+  cudaq::qec::realtime::qec_realtime_session session(decoders);
+  session.initialize();
+  session.finalize();
+}
+
 TEST(PyMatchingRealtime, ConfiguresViaRealtimeDecoderConfig) {
   namespace config = cudaq::qec::decoding::config;
 

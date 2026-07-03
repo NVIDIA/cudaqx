@@ -124,6 +124,7 @@ if(CUDAQ_QEC_TRT_DECODER_ENABLED)
         ${CMAKE_SOURCE_DIR}/libs/qec/include
         ${CMAKE_SOURCE_DIR}/libs/core/include
       PRIVATE
+        ${CMAKE_SOURCE_DIR}/libs/qec/lib
         ${TENSORRT_INCLUDE_DIR}
         ${CUDAToolkit_INCLUDE_DIRS}
     )
