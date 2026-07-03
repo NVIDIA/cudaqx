@@ -190,6 +190,26 @@ if(TARGET cudaq-qec-realtime-decoding-server-cqr)
         ${CMAKE_BINARY_DIR}/lib
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
   )
+
+  # Two-process: same application as the udp client, with the standard
+  # decoding server (qec_decoding_daemon, from tools/decoding-server) in a
+  # separate process serving the decoders configured from the app's own
+  # --save_dem YAML.
+  if(TARGET qec_decoding_daemon)
+    add_test(
+      NAME app_examples.surface_code-1-cqr-two-process-test-distance-3
+      COMMAND
+        # Non-zero threshold 60 (vs the -local test's 40): unseeded runs at
+        # 1000 shots land ~35-45, so 40 flakes; a broken decode path produces
+        # ~150+, so 60 still discriminates.
+        bash "${CMAKE_CURRENT_SOURCE_DIR}/surface_code-1-cqr-two-process-test.sh"
+          ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-cqr
+          3 60 40
+          $<TARGET_FILE:qec_decoding_daemon>
+          12 6
+      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+  endif()
 endif()
 
 # End of surface code 1, cqr host-dispatch wire
