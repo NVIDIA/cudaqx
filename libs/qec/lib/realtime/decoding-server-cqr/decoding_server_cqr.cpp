@@ -50,15 +50,20 @@ constexpr std::uint32_t kScalarElementCount = 1;
 constexpr std::uint8_t kNoResults = 0;
 constexpr std::uint8_t kSingleResult = 1;
 
+// Wire argument order per decoder_server_runtime.md: fixed-size scalars
+// first, the variable-length bit-packed byte array last.
 constexpr std::uint8_t kEnqueueDecoderIdArg = 0;
-constexpr std::uint8_t kEnqueueSyndromesArg = 1;
-constexpr std::uint8_t kEnqueueTagArg = 2;
-constexpr std::uint8_t kEnqueueArgCount = 3;
+constexpr std::uint8_t kEnqueueCounterArg = 1;
+constexpr std::uint8_t kEnqueueMappingIdArg = 2;
+constexpr std::uint8_t kEnqueueNumSyndromesArg = 3;
+constexpr std::uint8_t kEnqueueSyndromeBitsArg = 4;
+constexpr std::uint8_t kEnqueueArgCount = 5;
 
 constexpr std::uint8_t kGetCorrectionsDecoderIdArg = 0;
-constexpr std::uint8_t kGetCorrectionsLengthArg = 1;
-constexpr std::uint8_t kGetCorrectionsResetArg = 2;
-constexpr std::uint8_t kGetCorrectionsArgCount = 3;
+constexpr std::uint8_t kGetCorrectionsReturnSizeArg = 1;
+constexpr std::uint8_t kGetCorrectionsBytesArg = 2;
+constexpr std::uint8_t kGetCorrectionsResetArg = 3;
+constexpr std::uint8_t kGetCorrectionsArgCount = 4;
 
 constexpr std::uint8_t kResetDecoderIdArg = 0;
 constexpr std::uint8_t kResetDecoderArgCount = 1;
@@ -67,7 +72,10 @@ constexpr std::uint8_t kCorrectionsResult = 0;
 
 constexpr std::uint8_t kScalarU8Size = sizeof(std::uint8_t);
 constexpr std::uint8_t kScalarU64Size = sizeof(std::uint64_t);
-constexpr std::size_t kMaxRealtimeVectorLength = 64;
+// Syndrome/correction bits cross the wire bit-packed; these bound the
+// advertised bit count and the packed byte count respectively.
+constexpr std::size_t kMaxRealtimeVectorBits = 512;
+constexpr std::size_t kMaxPackedBytes = kMaxRealtimeVectorBits / 8;
 
 struct ByteSpan {
   const std::uint8_t *data = nullptr;
@@ -76,13 +84,16 @@ struct ByteSpan {
 
 struct EnqueueSyndromesRequest {
   std::uint64_t decoder_id = 0;
-  ByteSpan syndromes;
-  std::uint64_t tag = 0;
+  std::uint64_t counter = 0;
+  std::uint64_t syndrome_mapping_id = 0;
+  std::uint64_t num_syndromes = 0;
+  ByteSpan syndrome_bits;
 };
 
 struct GetCorrectionsRequest {
   std::uint64_t decoder_id = 0;
-  std::uint64_t correction_length = 0;
+  std::uint64_t return_size = 0;
+  std::uint64_t corrections_bytes = 0;
   bool reset = false;
 };
 
@@ -115,10 +126,10 @@ bool read_scalar(const std::uint8_t *payload, std::size_t arg_len,
   return true;
 }
 
-bool read_stdvec_i1(const std::uint8_t *payload, std::size_t arg_len,
-                    std::size_t &offset, ByteSpan &span) {
-  // CUDA-Q realtime lowering serializes stdvec<i1> as a uint64 length followed
-  // by one byte per bool element.
+bool read_byte_array(const std::uint8_t *payload, std::size_t arg_len,
+                     std::size_t &offset, ByteSpan &span) {
+  // Spec ARRAY_UINT8 request encoding (== the CUDA-Q stdvec<u8> lowering):
+  // a uint64 byte count followed by that many bytes.
   std::uint64_t length = 0;
   if (!read_scalar(payload, arg_len, offset, length))
     return false;
@@ -165,8 +176,11 @@ bool read_enqueue_syndromes_request(const void *rx_slot, std::size_t slot_size,
 
   std::size_t offset = 0;
   return read_scalar(payload, arg_len, offset, out.decoder_id) &&
-         read_stdvec_i1(payload, arg_len, offset, out.syndromes) &&
-         read_scalar(payload, arg_len, offset, out.tag) && offset == arg_len;
+         read_scalar(payload, arg_len, offset, out.counter) &&
+         read_scalar(payload, arg_len, offset, out.syndrome_mapping_id) &&
+         read_scalar(payload, arg_len, offset, out.num_syndromes) &&
+         read_byte_array(payload, arg_len, offset, out.syndrome_bits) &&
+         offset == arg_len;
 }
 
 bool read_get_corrections_request(const void *rx_slot, std::size_t slot_size,
@@ -180,7 +194,8 @@ bool read_get_corrections_request(const void *rx_slot, std::size_t slot_size,
   std::size_t offset = 0;
   std::uint8_t reset = 0;
   if (!read_scalar(payload, arg_len, offset, out.decoder_id) ||
-      !read_scalar(payload, arg_len, offset, out.correction_length) ||
+      !read_scalar(payload, arg_len, offset, out.return_size) ||
+      !read_scalar(payload, arg_len, offset, out.corrections_bytes) ||
       !read_scalar(payload, arg_len, offset, reset) || offset != arg_len)
     return false;
 
@@ -224,18 +239,25 @@ void enqueue_syndromes_host(const void *rx_slot, void *tx_slot,
       return;
     }
 
-    if (request.syndromes.size > kMaxRealtimeVectorLength) {
+    if (request.num_syndromes > kMaxRealtimeVectorBits) {
       write_response(tx_slot, rx_slot, kStatusPayloadTooLarge);
       return;
     }
+    // Spec validation: the packed byte count must match the advertised bit
+    // count. (No syndrome mapping table yet: id 0 is the identity mapping, so
+    // num_syndromes is not cross-checked against a mapping row.)
+    if (request.syndrome_bits.size != (request.num_syndromes + 7) / 8) {
+      write_response(tx_slot, rx_slot, kStatusInvalidRequest);
+      return;
+    }
 
-    std::array<std::uint8_t, kMaxRealtimeVectorLength> syndrome{};
-    if (request.syndromes.size != 0)
-      std::memcpy(syndrome.data(), request.syndromes.data,
-                  request.syndromes.size);
+    // Unpack LSB-first bits to the byte-per-bool buffer the host API takes.
+    std::array<std::uint8_t, kMaxRealtimeVectorBits> syndrome{};
+    for (std::uint64_t i = 0; i < request.num_syndromes; ++i)
+      syndrome[i] = (request.syndrome_bits.data[i / 8] >> (i % 8)) & 1;
     cudaq::qec::decoding::host::enqueue_syndromes(
         static_cast<std::size_t>(request.decoder_id), syndrome.data(),
-        static_cast<std::size_t>(request.syndromes.size), request.tag);
+        static_cast<std::size_t>(request.num_syndromes), request.counter);
     write_response(tx_slot, rx_slot, kStatusSuccess);
   } catch (...) {
     if (tx_slot && rx_slot)
@@ -254,27 +276,41 @@ void get_corrections_host(const void *rx_slot, void *tx_slot,
       return;
     }
 
-    if (request.correction_length > kMaxRealtimeVectorLength) {
+    if (request.return_size > kMaxRealtimeVectorBits) {
       write_response(tx_slot, rx_slot, kStatusPayloadTooLarge);
       return;
     }
+    // Spec validation: the caller-advertised response byte count must match
+    // the requested bit count.
+    if (request.corrections_bytes != (request.return_size + 7) / 8) {
+      write_response(tx_slot, rx_slot, kStatusInvalidRequest);
+      return;
+    }
 
-    const auto result_len =
-        static_cast<std::uint32_t>(request.correction_length);
+    const auto result_len = static_cast<std::uint32_t>(request.corrections_bytes);
     if (sizeof(cudaq::realtime::RPCResponse) + result_len > slot_size) {
       write_response(tx_slot, rx_slot, kStatusResultBufferTooSmall);
       return;
     }
 
-    std::array<std::uint8_t, kMaxRealtimeVectorLength> corrections{};
+    std::array<std::uint8_t, kMaxRealtimeVectorBits> corrections{};
     cudaq::qec::decoding::host::get_corrections(
         static_cast<std::size_t>(request.decoder_id), corrections.data(),
-        static_cast<std::size_t>(request.correction_length), request.reset);
+        static_cast<std::size_t>(request.return_size), request.reset);
 
+    // Pack the byte-per-bool corrections LSB-first into the raw (unprefixed)
+    // ARRAY_UINT8 result payload; result_len carries the byte count.
     auto *result = static_cast<std::uint8_t *>(tx_slot) +
                    sizeof(cudaq::realtime::RPCResponse);
-    if (result_len != 0)
-      std::memcpy(result, corrections.data(), result_len);
+    for (std::uint32_t byte = 0; byte < result_len; ++byte) {
+      std::uint8_t value = 0;
+      for (std::uint32_t bit = 0; bit < 8; ++bit) {
+        const std::uint64_t index = static_cast<std::uint64_t>(byte) * 8 + bit;
+        if (index < request.return_size && corrections[index])
+          value |= static_cast<std::uint8_t>(1u << bit);
+      }
+      result[byte] = value;
+    }
     write_response(tx_slot, rx_slot, kStatusSuccess, result_len);
   } catch (...) {
     if (tx_slot && rx_slot)
@@ -354,14 +390,17 @@ std::array<cudaq_function_entry_t, kDeviceCallEntryCount> make_entries() {
   configure_entry(enqueue_entry, kEnqueueSyndromesFnId, enqueue_syndromes_host,
                   kEnqueueArgCount, kNoResults);
   set_u64(enqueue_entry.schema.args[kEnqueueDecoderIdArg]);
-  set_array_u8(enqueue_entry.schema.args[kEnqueueSyndromesArg]);
-  set_u64(enqueue_entry.schema.args[kEnqueueTagArg]);
+  set_u64(enqueue_entry.schema.args[kEnqueueCounterArg]);
+  set_u64(enqueue_entry.schema.args[kEnqueueMappingIdArg]);
+  set_u64(enqueue_entry.schema.args[kEnqueueNumSyndromesArg]);
+  set_array_u8(enqueue_entry.schema.args[kEnqueueSyndromeBitsArg]);
 
   auto &get_entry = entries[kGetCorrectionsEntry];
   configure_entry(get_entry, kGetCorrectionsFnId, get_corrections_host,
                   kGetCorrectionsArgCount, kSingleResult);
   set_u64(get_entry.schema.args[kGetCorrectionsDecoderIdArg]);
-  set_u64(get_entry.schema.args[kGetCorrectionsLengthArg]);
+  set_u64(get_entry.schema.args[kGetCorrectionsReturnSizeArg]);
+  set_u64(get_entry.schema.args[kGetCorrectionsBytesArg]);
   set_u8(get_entry.schema.args[kGetCorrectionsResetArg]);
   set_array_u8(get_entry.schema.results[kCorrectionsResult]);
 
