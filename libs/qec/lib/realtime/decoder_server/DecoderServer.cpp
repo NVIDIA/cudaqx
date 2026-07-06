@@ -64,9 +64,9 @@ DecoderServer::DecoderServer(const std::string &config_yaml) {
   auto t = make_transport(read_transport_from_yaml(config_yaml));
   ITransceiver *raw = t.get();
   owned_transports_.push_back(std::move(t));
-  dispatch_map_[kEnqueueSyndromesFunctionId] = raw;
-  dispatch_map_[kGetCorrectionsFunctionId] = raw;
-  dispatch_map_[kResetDecoderFunctionId] = raw;
+  function_transport_[kEnqueueSyndromesFunctionId] = raw;
+  function_transport_[kGetCorrectionsFunctionId] = raw;
+  function_transport_[kResetDecoderFunctionId] = raw;
   init(config_yaml);
 }
 
@@ -74,17 +74,17 @@ DecoderServer::DecoderServer(std::unique_ptr<ITransceiver> transport,
                              const std::string &config_yaml) {
   ITransceiver *raw = transport.get();
   owned_transports_.push_back(std::move(transport));
-  dispatch_map_[kEnqueueSyndromesFunctionId] = raw;
-  dispatch_map_[kGetCorrectionsFunctionId] = raw;
-  dispatch_map_[kResetDecoderFunctionId] = raw;
+  function_transport_[kEnqueueSyndromesFunctionId] = raw;
+  function_transport_[kGetCorrectionsFunctionId] = raw;
+  function_transport_[kResetDecoderFunctionId] = raw;
   init(config_yaml);
 }
 
 DecoderServer::DecoderServer(std::vector<std::unique_ptr<ITransceiver>> owned,
-                             TransportMap dispatch_map,
+                             TransportMap function_transport,
                              const std::string &config_yaml)
     : owned_transports_(std::move(owned)),
-      dispatch_map_(std::move(dispatch_map)) {
+      function_transport_(std::move(function_transport)) {
   init(config_yaml);
 }
 
@@ -182,7 +182,7 @@ void DecoderServer::init(const std::string &config_yaml) {
 
 void DecoderServer::run() {
   std::vector<ITransceiver *> unique_transports;
-  for (auto &[fid, t] : dispatch_map_) {
+  for (auto &[fid, t] : function_transport_) {
     if (std::find(unique_transports.begin(), unique_transports.end(), t) ==
         unique_transports.end())
       unique_transports.push_back(t);

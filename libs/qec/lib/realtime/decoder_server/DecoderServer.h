@@ -41,10 +41,11 @@ public:
                 const std::string &config_yaml);
 
   /// Split-transport constructor: each function_id dispatched to its own
-  /// transceiver.  \p owned is moved in; \p dispatch_map holds raw pointers
-  /// into \p owned.
+  /// transceiver.  \p owned is moved in; \p function_transport holds raw
+  /// pointers into \p owned.
   DecoderServer(std::vector<std::unique_ptr<ITransceiver>> owned,
-                TransportMap dispatch_map, const std::string &config_yaml);
+                TransportMap function_transport,
+                const std::string &config_yaml);
 
   /// Block until stop() is called.
   void run();
@@ -62,7 +63,9 @@ private:
   make_transport(cudaq::qec::decoding::config::DecoderTransport transport_type);
 
   std::vector<std::unique_ptr<ITransceiver>> owned_transports_;
-  TransportMap dispatch_map_;
+  /// Maps function_id → transceiver; used to deduplicate receiver threads.
+  /// Routing within the server is by function_id, not by decoder_id.
+  TransportMap function_transport_;
   SessionRegistry registry_;
   RpcDispatcher dispatcher_;
   std::atomic<bool> shutdown_{false};
