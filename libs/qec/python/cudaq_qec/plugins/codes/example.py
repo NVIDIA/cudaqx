@@ -39,7 +39,7 @@ def stabilizer(logicalQubit: patch, x_stabilizers: list[int],
             if z_stabilizers[zi * len(logicalQubit.data) + di] == 1:
                 x.ctrl(logicalQubit.data[di], logicalQubit.ancz[zi])
 
-    results = mz([*logicalQubit.ancx, *logicalQubit.ancz])
+    results = mz([*logicalQubit.ancz, *logicalQubit.ancx])
 
     reset(logicalQubit.ancx)
     reset(logicalQubit.ancz)
