@@ -9,12 +9,15 @@
 #pragma once
 
 #include "DecoderSession.h"
+#include "cudaq/qec/realtime/decoding_config.h"
 
 #include <memory>
 #include <string>
 #include <unordered_map>
 
 namespace cudaq::qec::decoder_server {
+
+using cudaq::qec::decoding::config::DecoderTransport;
 
 /// Owns all DecoderSession instances, keyed by uint64_t decoder_id.
 ///
@@ -23,12 +26,16 @@ namespace cudaq::qec::decoder_server {
 class SessionRegistry {
 public:
   /// Parse \p yaml_path and construct one DecoderSession per decoder entry.
-  /// @throws std::runtime_error on duplicate id, missing required fields, or
-  /// decoder init failure.
+  /// All decoder entries must declare the same transport type.
+  /// @throws std::runtime_error on duplicate id, mixed transport types,
+  /// missing required fields, or decoder init failure.
   void load_from_config(const std::string &yaml_path);
 
   DecoderSession &get(uint64_t decoder_id);
   const DecoderSession &get(uint64_t decoder_id) const;
+
+  /// Transport type shared by all sessions; valid after load_from_config().
+  DecoderTransport required_transport() const { return transport_; }
 
   const std::unordered_map<uint64_t, std::unique_ptr<DecoderSession>> &
   sessions() const {
@@ -37,6 +44,7 @@ public:
 
 private:
   std::unordered_map<uint64_t, std::unique_ptr<DecoderSession>> sessions_;
+  DecoderTransport transport_{DecoderTransport::cpu_roce};
 };
 
 } // namespace cudaq::qec::decoder_server

@@ -11,6 +11,7 @@
 #include "ITransceiver.h"
 #include "RpcDispatcher.h"
 #include "SessionRegistry.h"
+#include "cudaq/qec/realtime/decoding_config.h"
 
 #include <atomic>
 #include <memory>
@@ -28,9 +29,16 @@ using TransportMap = std::unordered_map<uint32_t, ITransceiver *>;
 /// transceiver(s), and runs the blocking receive loop.
 class DecoderServer {
 public:
+  /// Config-driven constructor: reads the transport type from \p config_yaml
+  /// and creates the appropriate transceiver.  Requires CUDAQ_REALTIME for
+  /// RoCE transports; throws std::runtime_error if the adapters are not
+  /// available.  Use the explicit-transceiver constructors for testing with
+  /// LoopbackTransceiver.
+  explicit DecoderServer(const std::string &config_yaml);
+
   /// Single-transceiver constructor: all three RPCs share one transport.
-  explicit DecoderServer(std::unique_ptr<ITransceiver> transport,
-                         const std::string &config_yaml);
+  DecoderServer(std::unique_ptr<ITransceiver> transport,
+                const std::string &config_yaml);
 
   /// Split-transport constructor: each function_id dispatched to its own
   /// transceiver.  \p owned is moved in; \p dispatch_map holds raw pointers
@@ -46,6 +54,12 @@ public:
 
 private:
   void init(const std::string &config_yaml);
+
+  /// Create a transceiver for \p transport_type.  Throws for RoCE transports
+  /// until CpuRoceTransceiverAdapter / GpuRoceTransceiverAdapter are
+  /// available via CUDAQ_REALTIME.
+  static std::unique_ptr<ITransceiver>
+  make_transport(cudaq::qec::decoding::config::DecoderTransport transport_type);
 
   std::vector<std::unique_ptr<ITransceiver>> owned_transports_;
   TransportMap dispatch_map_;

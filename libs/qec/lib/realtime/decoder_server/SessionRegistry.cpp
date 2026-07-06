@@ -72,6 +72,16 @@ void SessionRegistry::load_from_config(const std::string &yaml_path) {
       throw std::runtime_error("Duplicate decoder id " + std::to_string(dc.id) +
                                " in " + yaml_path);
 
+    // All decoders in one server instance must share the same transport type
+    // because there is one receive loop per unique transceiver.
+    if (sessions_.empty()) {
+      transport_ = dc.transport;
+    } else if (dc.transport != transport_) {
+      throw std::runtime_error(
+          "Mixed transport types in " + yaml_path +
+          ": all decoder entries must declare the same transport");
+    }
+
     CUDA_QEC_INFO("SessionRegistry: creating decoder id={} type={}", dc.id,
                   dc.type);
 

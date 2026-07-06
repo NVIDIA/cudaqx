@@ -9,17 +9,66 @@
 #include "DecoderServer.h"
 
 #include "cudaq/qec/logger.h"
+#include "cudaq/qec/realtime/decoding_config.h"
 
 #include <algorithm>
+#include <fstream>
+#include <iterator>
 #include <stdexcept>
 #include <thread>
 #include <vector>
 
 namespace cudaq::qec::decoder_server {
 
+using cudaq::qec::decoding::config::DecoderTransport;
+
 // ---------------------------------------------------------------------------
 // Constructors
 // ---------------------------------------------------------------------------
+
+std::unique_ptr<ITransceiver>
+DecoderServer::make_transport(DecoderTransport transport_type) {
+#ifdef CUDAQ_REALTIME_AVAILABLE
+  // TODO: instantiate CpuRoceTransceiverAdapter / GpuRoceTransceiverAdapter
+  // once the adapters are available via CUDAQ_REALTIME headers.
+  (void)transport_type;
+#endif
+  throw std::runtime_error(
+      "cpu_roce / gpu_roce require CUDAQ_REALTIME adapters (not yet "
+      "available); for testing use DecoderServer(unique_ptr<ITransceiver>, "
+      "config_yaml) with LoopbackTransceiver");
+}
+
+/// Read only the transport type from the YAML config without instantiating
+/// any decoder sessions.
+static DecoderTransport read_transport_from_yaml(const std::string &yaml_path) {
+  std::ifstream f(yaml_path);
+  if (!f.is_open())
+    throw std::runtime_error("Cannot open config: " + yaml_path);
+  std::string yaml_str((std::istreambuf_iterator<char>(f)), {});
+  auto config =
+      cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(
+          yaml_str);
+  if (config.decoders.empty())
+    throw std::runtime_error("No decoders in config: " + yaml_path);
+  auto transport = config.decoders.front().transport;
+  for (const auto &dc : config.decoders)
+    if (dc.transport != transport)
+      throw std::runtime_error("Mixed transport types in " + yaml_path +
+                               ": all decoder entries must declare the same "
+                               "transport");
+  return transport;
+}
+
+DecoderServer::DecoderServer(const std::string &config_yaml) {
+  auto t = make_transport(read_transport_from_yaml(config_yaml));
+  ITransceiver *raw = t.get();
+  owned_transports_.push_back(std::move(t));
+  dispatch_map_[kEnqueueSyndromesFunctionId] = raw;
+  dispatch_map_[kGetCorrectionsFunctionId] = raw;
+  dispatch_map_[kResetDecoderFunctionId] = raw;
+  init(config_yaml);
+}
 
 DecoderServer::DecoderServer(std::unique_ptr<ITransceiver> transport,
                              const std::string &config_yaml) {
