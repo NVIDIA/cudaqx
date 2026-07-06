@@ -23,22 +23,23 @@ DecoderSession::~DecoderSession() {
     worker.join();
 }
 
-DecoderSession DecoderSession::create(const std::string &decoder_name,
-                                      const cudaq::qec::decoder_init &init,
-                                      const cudaqx::heterogeneous_map &params,
-                                      SyndromeMappingTable mapping_table_arg) {
-  DecoderSession s;
-  s.dec = cudaq::qec::decoder::get(decoder_name, init, params);
-  if (!s.dec)
+std::unique_ptr<DecoderSession>
+DecoderSession::create(const std::string &decoder_name,
+                       const cudaq::qec::decoder_init &init,
+                       const cudaqx::heterogeneous_map &params,
+                       SyndromeMappingTable mapping_table_arg) {
+  auto s = std::make_unique<DecoderSession>();
+  s->dec = cudaq::qec::decoder::get(decoder_name, init, params);
+  if (!s->dec)
     throw std::runtime_error("Failed to create decoder: " + decoder_name);
 
-  if (s.dec->supports_graph_dispatch()) {
-    void *gr = s.dec->capture_decode_graph();
-    s.graph_resources =
-        GraphResourcesPtr(gr, GraphResourcesDeleter{s.dec.get()});
+  if (s->dec->supports_graph_dispatch()) {
+    void *gr = s->dec->capture_decode_graph();
+    s->graph_resources =
+        GraphResourcesPtr(gr, GraphResourcesDeleter{s->dec.get()});
   }
 
-  s.mapping_table = std::move(mapping_table_arg);
+  s->mapping_table = std::move(mapping_table_arg);
   return s;
 }
 

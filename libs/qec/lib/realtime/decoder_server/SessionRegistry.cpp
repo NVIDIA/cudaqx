@@ -100,16 +100,16 @@ void SessionRegistry::load_from_config(const std::string &yaml_path) {
 
     // Configure O and D sparse matrices on the decoder.
     if (!dc.O_sparse.empty())
-      session.dec->set_O_sparse(dc.O_sparse);
+      session->dec->set_O_sparse(dc.O_sparse);
     if (!dc.D_sparse.empty())
-      session.dec->set_D_sparse(dc.D_sparse);
+      session->dec->set_D_sparse(dc.D_sparse);
 
     // [For follow-up] dc.transport (cpu_roce / gpu_roce) is parsed from YAML
     // but not yet used to select a transceiver here. Transport binding requires
     // CpuRoceTransceiverAdapter / GpuRoceTransceiverAdapter (gated on
     // CUDAQ_REALTIME headers); the split-transport DecoderServer constructor
     // is already in place to accept the resulting dispatch map.
-    session.start_worker();
+    session->start_worker();
     sessions_.emplace(id, std::move(session));
   }
 
@@ -122,7 +122,7 @@ DecoderSession &SessionRegistry::get(uint64_t decoder_id) {
   if (it == sessions_.end())
     throw std::out_of_range("Unknown decoder_id: " +
                             std::to_string(decoder_id));
-  return it->second;
+  return *it->second;
 }
 
 const DecoderSession &SessionRegistry::get(uint64_t decoder_id) const {
@@ -130,7 +130,7 @@ const DecoderSession &SessionRegistry::get(uint64_t decoder_id) const {
   if (it == sessions_.end())
     throw std::out_of_range("Unknown decoder_id: " +
                             std::to_string(decoder_id));
-  return it->second;
+  return *it->second;
 }
 
 } // namespace cudaq::qec::decoder_server

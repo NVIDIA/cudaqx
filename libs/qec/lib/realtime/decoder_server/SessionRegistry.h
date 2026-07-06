@@ -10,6 +10,7 @@
 
 #include "DecoderSession.h"
 
+#include <memory>
 #include <string>
 #include <unordered_map>
 
@@ -29,12 +30,13 @@ public:
   DecoderSession &get(uint64_t decoder_id);
   const DecoderSession &get(uint64_t decoder_id) const;
 
-  const std::unordered_map<uint64_t, DecoderSession> &sessions() const {
+  const std::unordered_map<uint64_t, std::unique_ptr<DecoderSession>> &
+  sessions() const {
     return sessions_;
   }
 
 private:
-  std::unordered_map<uint64_t, DecoderSession> sessions_;
+  std::unordered_map<uint64_t, std::unique_ptr<DecoderSession>> sessions_;
 };
 
 } // namespace cudaq::qec::decoder_server

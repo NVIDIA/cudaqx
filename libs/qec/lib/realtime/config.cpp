@@ -699,10 +699,9 @@ struct MappingTraits<cudaq::qec::decoding::config::sliding_window_config> {
 };
 
 template <>
-struct ScalarEnumerationTraits<
-    cudaq::qec::decoding::config::DecoderTransport> {
-  static void enumeration(
-      IO &io, cudaq::qec::decoding::config::DecoderTransport &value) {
+struct ScalarEnumerationTraits<cudaq::qec::decoding::config::DecoderTransport> {
+  static void
+  enumeration(IO &io, cudaq::qec::decoding::config::DecoderTransport &value) {
     io.enumCase(value, "cpu_roce",
                 cudaq::qec::decoding::config::DecoderTransport::cpu_roce);
     io.enumCase(value, "gpu_roce",
