@@ -9,6 +9,7 @@
 #include "DecoderSession.h"
 #include "RpcWireFormat.h"
 #include "cudaq/qec/logger.h"
+#include "cudaq/qec/realtime/decoder_rpc_ids.h"
 
 #include <chrono>
 #include <cstring>
@@ -94,10 +95,19 @@ void DecoderSession::on_enqueue(const WorkItem &item) {
   const auto *req = reinterpret_cast<const EnqueuePayload *>(
       item.frame_buf.data() + sizeof(RPCHeader));
 
+  if (req->num_syndromes < 0) {
+    ++error_count;
+    send_response(*item.response_transport, item.peer, item.request_id,
+                  item.ptp_timestamp, RpcStatus::BAD_REQUEST);
+    return;
+  }
+
   const size_t syndrome_bytes =
       bit_packed_bytes(static_cast<size_t>(req->num_syndromes));
   if (item.frame_buf.size() < min_size + syndrome_bytes) {
     ++error_count;
+    send_response(*item.response_transport, item.peer, item.request_id,
+                  item.ptp_timestamp, RpcStatus::BAD_REQUEST);
     return;
   }
 
@@ -124,7 +134,15 @@ void DecoderSession::on_enqueue(const WorkItem &item) {
   } catch (const std::exception &e) {
     CUDA_QEC_ERROR("DecoderSession::on_enqueue: {}", e.what());
     ++error_count;
+    send_response(*item.response_transport, item.peer, item.request_id,
+                  item.ptp_timestamp, RpcStatus::INTERNAL_ERROR);
+    return;
   }
+
+  // enqueue_syndromes is not fire-and-forget: the runtime reads a 24-byte ACK
+  // (result_len == 0) from the tx_slot to confirm delivery before releasing it.
+  send_response(*item.response_transport, item.peer, item.request_id,
+                item.ptp_timestamp, RpcStatus::OK);
 }
 
 void DecoderSession::on_get_corrections(const WorkItem &item) {
@@ -141,6 +159,13 @@ void DecoderSession::on_get_corrections(const WorkItem &item) {
   const auto *req = reinterpret_cast<const GetCorrectionsPayload *>(
       item.frame_buf.data() + sizeof(RPCHeader));
 
+  if (req->return_size < 0) {
+    ++error_count;
+    send_response(*item.response_transport, item.peer, item.request_id,
+                  item.ptp_timestamp, RpcStatus::BAD_REQUEST);
+    return;
+  }
+
   if (syndromes_dropped.exchange(false, std::memory_order_acq_rel)) {
     send_response(*item.response_transport, item.peer, item.request_id,
                   item.ptp_timestamp, RpcStatus::SYNDROMES_DROPPED);
@@ -148,16 +173,25 @@ void DecoderSession::on_get_corrections(const WorkItem &item) {
   }
 
   try {
-    const uint8_t *raw = dec->get_obs_corrections();
-    if (!raw) {
+    const uint8_t *corrections = dec->get_obs_corrections();
+    if (!corrections) {
       send_response(*item.response_transport, item.peer, item.request_id,
                     item.ptp_timestamp, RpcStatus::NOT_READY);
       return;
     }
-    const size_t num_bytes =
-        bit_packed_bytes(static_cast<size_t>(req->return_size));
+    const auto return_size = static_cast<size_t>(req->return_size);
+    // result_len must be align_to_8(ceil(R/8)) — rpc_producer validates this
+    // exactly.
+    const size_t result_len =
+        cudaq::qec::decoding::rpc::align_to_8(bit_packed_bytes(return_size));
+    // get_obs_corrections() returns byte-per-bit; pack into the wire format.
+    std::vector<uint8_t> packed(result_len, 0);
+    for (size_t i = 0; i < return_size; ++i) {
+      if (corrections[i] & 1u)
+        packed[i / 8] |= static_cast<uint8_t>(1u << (i % 8));
+    }
     send_response(*item.response_transport, item.peer, item.request_id,
-                  item.ptp_timestamp, RpcStatus::OK, raw, num_bytes);
+                  item.ptp_timestamp, RpcStatus::OK, packed.data(), result_len);
 
     if (req->reset) {
       dec->reset_decoder();
