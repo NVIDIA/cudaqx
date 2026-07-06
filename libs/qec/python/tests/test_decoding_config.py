@@ -173,6 +173,14 @@ FIELDS_PYMATCHING = {
     "merge_strategy": (str, "smallest_weight", "disallow"),
 }
 
+FIELDS_CHROMOBIUS = {
+    "drop_mobius_errors_involving_remnant_errors": (bool, True, False),
+    "ignore_decomposition_failures": (bool, True, False),
+    "include_coords_in_mobius_dem": (bool, True, False),
+    "return_weight": (bool, True, False),
+    "write_mobius_match_to_stderr": (bool, True, False),
+}
+
 # trt_decoder_config tests
 
 FIELDS_TRT_DECODER = {
@@ -196,6 +204,12 @@ def test_pymatching_config_defaults_are_none():
         assert getattr(pm, name) is None, f"Expected {name} to default to None"
 
 
+def test_chromobius_config_defaults_are_none():
+    chromobius = qec.chromobius_config()
+    for name in FIELDS_CHROMOBIUS:
+        assert getattr(chromobius, name) is None
+
+
 @pytest.mark.parametrize("name, meta", list(FIELDS_PYMATCHING.items()))
 def test_pymatching_config_set_and_get_each_optional(name, meta):
     pm = qec.pymatching_config()
@@ -215,6 +229,27 @@ def test_pymatching_config_set_and_get_each_optional(name, meta):
 
     setattr(pm, name, None)
     assert getattr(pm, name) is None
+
+
+@pytest.mark.parametrize("name, meta", list(FIELDS_CHROMOBIUS.items()))
+def test_chromobius_config_set_and_get_each_optional(name, meta):
+    chromobius = qec.chromobius_config()
+
+    py_type, sample_val, alt_val = meta
+
+    assert getattr(chromobius, name) is None
+
+    setattr(chromobius, name, sample_val)
+    got = getattr(chromobius, name)
+    assert isinstance(got, py_type)
+    assert got == sample_val
+
+    setattr(chromobius, name, alt_val)
+    got2 = getattr(chromobius, name)
+    assert got2 == alt_val
+
+    setattr(chromobius, name, None)
+    assert getattr(chromobius, name) is None
 
 
 def test_configure_valid_multi_error_lut_decoders():
@@ -307,6 +342,78 @@ def test_trt_decoder_config_yaml_roundtrip():
     assert trt2.memory_workspace == 1073741824
 
 
+def test_trt_decoder_config_chromobius_global_params_roundtrip():
+    trt = qec.trt_decoder_config()
+    chromobius = qec.chromobius_config()
+    chromobius.return_weight = True
+
+    trt.global_decoder = "chromobius"
+    trt.global_decoder_params = chromobius
+
+    got = trt.global_decoder_params
+    assert isinstance(got, qec.chromobius_config)
+    assert got.return_weight is True
+
+    as_map = trt.to_heterogeneous_map()
+    assert as_map["global_decoder"] == "chromobius"
+    assert as_map["global_decoder_params"]["return_weight"] is True
+
+    trt2 = qec.trt_decoder_config.from_heterogeneous_map(as_map)
+    got2 = trt2.global_decoder_params
+    assert isinstance(got2, qec.chromobius_config)
+    assert got2.return_weight is True
+
+    trt2.global_decoder_params = None
+    assert trt2.global_decoder_params is None
+
+
+def test_trt_decoder_config_defaults_omitted_global_params():
+    for global_decoder, config_type in (
+        ("pymatching", qec.pymatching_config),
+        ("chromobius", qec.chromobius_config),
+    ):
+        trt = qec.trt_decoder_config.from_heterogeneous_map(
+            {"global_decoder": global_decoder})
+
+        got = trt.global_decoder_params
+        assert isinstance(got, config_type)
+
+        as_map = trt.to_heterogeneous_map()
+        assert as_map["global_decoder"] == global_decoder
+        assert as_map["global_decoder_params"] == {}
+
+        trt = qec.trt_decoder_config()
+        trt.global_decoder = global_decoder
+        as_map = trt.to_heterogeneous_map()
+        assert as_map["global_decoder"] == global_decoder
+        assert as_map["global_decoder_params"] == {}
+
+
+def test_trt_decoder_config_preserves_unknown_omitted_global_params():
+    trt = qec.trt_decoder_config.from_heterogeneous_map(
+        {"global_decoder": "my_plugin"})
+
+    assert trt.global_decoder_params is None
+
+    as_map = trt.to_heterogeneous_map()
+    assert as_map["global_decoder"] == "my_plugin"
+    assert "global_decoder_params" not in as_map
+
+    trt = qec.trt_decoder_config()
+    trt.global_decoder = "my_plugin"
+    as_map = trt.to_heterogeneous_map()
+    assert as_map["global_decoder"] == "my_plugin"
+    assert "global_decoder_params" not in as_map
+
+
+def test_trt_decoder_config_rejects_unknown_global_params():
+    with pytest.raises(RuntimeError):
+        qec.trt_decoder_config.from_heterogeneous_map({
+            "global_decoder": "my_plugin",
+            "global_decoder_params": {},
+        })
+
+
 def test_pymatching_config_yaml_roundtrip():
     pm = qec.pymatching_config()
     pm.error_rate_vec = [0.1, 0.2, 0.3]
@@ -333,6 +440,42 @@ def test_pymatching_config_yaml_roundtrip():
     assert pm2 is not None
     assert pm2.error_rate_vec == [0.1, 0.2, 0.3]
     assert pm2.merge_strategy == "smallest_weight"
+
+
+def test_trt_decoder_chromobius_global_config_yaml_roundtrip():
+    chromobius = qec.chromobius_config()
+    chromobius.ignore_decomposition_failures = True
+    chromobius.return_weight = False
+
+    trt = qec.trt_decoder_config()
+    trt.global_decoder = "chromobius"
+    trt.global_decoder_params = chromobius
+
+    dc = qec.decoder_config()
+    dc.id = 0
+    dc.type = "trt_decoder"
+    dc.block_size = 3
+    dc.syndrome_size = 3
+    dc.H_sparse = [0, -1, 1, -1, 2, -1]
+    dc.O_sparse = [0, -1, 1, -1, 2, -1]
+    dc.D_sparse = [0, -1, 1, -1, 2, -1]
+    dc.set_decoder_custom_args(trt)
+
+    yaml_text = dc.to_yaml_str()
+    assert isinstance(yaml_text, str) and "chromobius" in yaml_text
+
+    dc2 = qec.decoder_config.from_yaml_str(yaml_text)
+    assert dc2 is not None
+    assert dc2.type == "trt_decoder"
+
+    trt2 = dc2.decoder_custom_args
+    assert trt2 is not None
+    assert trt2.global_decoder == "chromobius"
+
+    chromobius2 = trt2.global_decoder_params
+    assert chromobius2 is not None
+    assert chromobius2.ignore_decomposition_failures is True
+    assert chromobius2.return_weight is False
 
 
 # decoder_config tests

@@ -59,6 +59,14 @@ std::optional<std::string> get_uint8_onnx_asset_path() {
   return std::nullopt;
 #endif
 }
+
+std::optional<std::string> get_uint8_to_float_onnx_asset_path() {
+#ifdef TRT_TEST_UINT8_TO_FLOAT_ONNX_PATH
+  return std::string(TRT_TEST_UINT8_TO_FLOAT_ONNX_PATH);
+#else
+  return std::nullopt;
+#endif
+}
 } // namespace
 
 // Path to ONNX test asset. Set by CMake (absolute path) so the test finds it
@@ -663,6 +671,72 @@ TEST_F(TRTDecoderTest, Uint8IdentityModelBinarizesInputAndOutput) {
   EXPECT_FLOAT_EQ(result.result[0], 0.0);
   EXPECT_FLOAT_EQ(result.result[1], 1.0);
   EXPECT_FLOAT_EQ(result.result[2], 1.0);
+}
+
+TEST_F(TRTDecoderTest, MixedDtypeCopiesOutput) {
+  // Mixed UINT8 input and FLOAT output should use the engine output dtype when
+  // copying and interpreting output, not the input dtype selected for dispatch.
+  if (!gpu_available())
+    GTEST_SKIP() << "No CUDA GPU available";
+  auto onnx_path = get_uint8_to_float_onnx_asset_path();
+  if (!onnx_path || !std::filesystem::exists(*onnx_path))
+    GTEST_SKIP() << "Generated uint8-to-float ONNX fixture is unavailable";
+
+  cudaqx::heterogeneous_map params;
+  params.insert("onnx_load_path", *onnx_path);
+  params.insert("use_cuda_graph", false);
+
+  std::unique_ptr<decoder> trt_decoder;
+  try {
+    trt_decoder = decoder::get("trt_decoder", make_identity_h(3), params);
+  } catch (const std::exception &e) {
+    GTEST_SKIP() << "Failed to create uint8-to-float TRT decoder: " << e.what();
+  }
+
+  auto result = trt_decoder->decode({0.49, 0.5, 0.75});
+
+  // The Cast model should execute successfully; failure here means the mixed
+  // dtype path did not produce a usable decoder result.
+  ASSERT_TRUE(result.converged);
+  // The output has three float elements; a shorter result would show that the
+  // output buffer cardinality was not preserved.
+  ASSERT_EQ(result.result.size(), 3u);
+  EXPECT_FLOAT_EQ(result.result[0], 0.0);
+  EXPECT_FLOAT_EQ(result.result[1], 1.0);
+  EXPECT_FLOAT_EQ(result.result[2], 1.0);
+}
+
+TEST_F(TRTDecoderTest, BatchFailureKeepsResultCount) {
+  // A post-initialisation failure in decode_batch should preserve one result
+  // per input syndrome so decode() never indexes an empty result vector.
+  if (!gpu_available())
+    GTEST_SKIP() << "No CUDA GPU available";
+  auto onnx_path = get_dynamic_onnx_asset_path();
+  if (!onnx_path || !std::filesystem::exists(*onnx_path))
+    GTEST_SKIP() << "Generated dynamic ONNX fixture is unavailable";
+
+  cudaqx::heterogeneous_map params;
+  params.insert("onnx_load_path", *onnx_path);
+  params.insert("batch_size", std::size_t{1});
+  params.insert("use_cuda_graph", false);
+  params.insert("global_decoder", std::string("single_error_lut"));
+  params.insert("global_decoder_params", cudaqx::heterogeneous_map{});
+
+  std::unique_ptr<decoder> trt_decoder;
+  try {
+    trt_decoder = decoder::get("trt_decoder", make_identity_h(2), params);
+  } catch (const std::exception &e) {
+    GTEST_SKIP() << "Failed to create mismatch TRT decoder: " << e.what();
+  }
+
+  auto results = trt_decoder->decode_batch({{1.0, 0.0, 1.0}});
+
+  // The mismatched global decoder forces an exception before any result is
+  // pushed; the fixed path must still return one placeholder for the input.
+  ASSERT_EQ(results.size(), 1u);
+  // The placeholder must be marked failed so callers can distinguish it from a
+  // successful decode without touching out-of-range elements.
+  EXPECT_FALSE(results[0].converged);
 }
 
 TEST_F(TRTDecoderTest, CompositeGlobalDecoderCombinesLogicalFrame) {

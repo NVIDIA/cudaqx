@@ -62,18 +62,21 @@ python3 -m pytest -v libs/qec/python/tests --ignore libs/qec/python/tests/test_t
 python3 -m pytest -v libs/solvers/python/tests --ignore libs/solvers/python/tests/test_gqe.py
 ```
 
-If you want to change which version of CUDA-Q that CUDA-QX is paired with, you
-will need to rebuild CUDA-Q from source. This is achievable by going to the
-`/workspaces/cudaq` directory in that image and using the appropriate `git`
-commands to switch to whichever version you need. You can then use
-[these instructions](https://github.com/NVIDIA/cuda-quantum/blob/main/Building.md)
-to re-build CUDA-Q.
-
 Additionally, the following CMake options can be configured:
 
 - `CUDAQX_ENABLE_LIBS`: Specify which libraries to build (`all`, `qec`, `solvers`)
 - `CUDAQX_INCLUDE_TESTS`: Enable building of tests
 - `CUDAQX_BINDINGS_PYTHON`: Enable Python bindings
+
+If you want to change which version of CUDA-Q that CUDA-QX is paired with, you
+will need to rebuild CUDA-Q from source. This is achievable by going to the
+`/workspaces/cudaq` directory in that image and using the appropriate `git`
+commands to switch to whichever version you need. You can then use
+[these instructions](https://github.com/NVIDIA/cuda-quantum/blob/main/Building.md)
+to re-build CUDA-Q. Alternatively, you can use the `scripts/install_cudaq_with_realtime.sh`
+script to install CUDA-Q (from the pinned SHA in `.cudaq_version`) with realtime
+support. This script rebuilds CUDA-Q from source using the same recipe as the
+CUDA-Q QEC CI.
 
 The above instructions provide a fully open-source way of building and
 contributing to CUDA-QX, but it should be noted that while this environment

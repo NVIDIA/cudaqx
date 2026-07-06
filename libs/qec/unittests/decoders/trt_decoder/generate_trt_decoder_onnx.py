@@ -26,6 +26,18 @@ def make_identity_model(output_path, name, elem_type, shape):
     onnx.save(model, output_path)
 
 
+def make_cast_model(output_path, name, input_type, output_type, shape):
+    input_info = helper.make_tensor_value_info("input", input_type, shape)
+    output_info = helper.make_tensor_value_info("output", output_type, shape)
+    cast = helper.make_node("Cast", ["input"], ["output"], to=output_type)
+    graph = helper.make_graph([cast], name, [input_info], [output_info])
+    model = helper.make_model(graph,
+                              opset_imports=[helper.make_opsetid("", 19)])
+    model.ir_version = 10
+    onnx.checker.check_model(model)
+    onnx.save(model, output_path)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Generate small ONNX fixtures for trt_decoder tests.")
@@ -43,6 +55,13 @@ def main():
         os.path.join(args.out_dir, "trt_uint8_identity.onnx"),
         "trt_uint8_identity",
         TensorProto.UINT8,
+        [1, 3],
+    )
+    make_cast_model(
+        os.path.join(args.out_dir, "trt_uint8_to_float.onnx"),
+        "trt_uint8_to_float",
+        TensorProto.UINT8,
+        TensorProto.FLOAT,
         [1, 3],
     )
 

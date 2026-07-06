@@ -623,7 +623,8 @@ class TestTRTDecoderEdgeCases(TestTRTDecoderSetup):
         Test performance comparison: CUDA Graph vs Traditional execution.
         
         This test benchmarks the TRT decoder with CUDA graphs enabled vs disabled
-        to measure the performance improvement from graph optimization.
+        to report the performance from graph optimization without enforcing a
+        speedup threshold in CI.
         """
         if not os.path.exists(ONNX_MODEL_PATH) or not CUDA_AVAILABLE:
             pytest.skip("ONNX model file not found or CUDA/GPU not available")
@@ -720,13 +721,10 @@ class TestTRTDecoderEdgeCases(TestTRTDecoderSetup):
         # =====================================================================
         # Performance assertions
         # =====================================================================
-        # CUDA graphs should provide at least 5% improvement
-        # (Conservative threshold - typical improvement is 10-20%)
-        assert speedup > 1.05, (
-            f"CUDA graph execution should be at least 5% faster than traditional. "
-            f"Speedup: {speedup:.2f}x, Improvement: {improvement_percent:.2f}%")
-
-        # Sanity check: both should be reasonably fast (< 100ms per decode)
+        # Treat the speedup as diagnostic only. On small models, Python overhead,
+        # host/device copies, and runner noise can hide graph launch benefits.
+        # The adjacent correctness test verifies both execution paths agree.
+        # Keep only a coarse sanity check that both paths are reasonably fast.
         assert avg_time_cuda_graph < 100000.0, (
             f"CUDA graph execution unexpectedly slow: {avg_time_cuda_graph:.2f} μs"
         )

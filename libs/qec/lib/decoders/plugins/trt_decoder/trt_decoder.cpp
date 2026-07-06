@@ -7,8 +7,9 @@
  ******************************************************************************/
 
 #include "cudaq/qec/decoder.h"
+#include "cudaq/qec/logger.h"
+#include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/trt_decoder_internal.h"
-#include "cudaq/runtime/logger/logger.h"
 #include <algorithm>
 #include <cassert>
 #include <fstream>
@@ -90,9 +91,9 @@ public:
 
     // filter out info-level messages
     if (severity >= Severity::kWARNING) {
-      CUDAQ_INFO("[TensorRT] {}", msg);
+      CUDA_QEC_INFO("[TensorRT] {}", msg);
     } else {
-      CUDAQ_WARN("[TensorRT] {}", msg);
+      CUDA_QEC_WARN("[TensorRT] {}", msg);
     }
   }
 };
@@ -256,7 +257,7 @@ CaptureResult try_capture_cuda_graph(nvinfer1::IExecutionContext *context,
     }
 
     // Attempt to capture the graph
-    CUDAQ_INFO("Attempting to capture CUDA graph during initialization...");
+    CUDA_QEC_INFO("Attempting to capture CUDA graph during initialization...");
 
     err = cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
     if (err != cudaSuccess) {
@@ -291,7 +292,7 @@ CaptureResult try_capture_cuda_graph(nvinfer1::IExecutionContext *context,
       return result;
     }
 
-    CUDAQ_INFO("CUDA graph captured successfully during initialization");
+    CUDA_QEC_INFO("CUDA graph captured successfully during initialization");
     result.success = true;
 
   } catch (const std::exception &e) {
@@ -318,7 +319,7 @@ bool supports_cuda_graphs(const nvinfer1::ICudaEngine *engine) {
     auto dims = engine->getTensorShape(name);
     for (int j = 0; j < dims.nbDims; ++j) {
       if (dims.d[j] == -1) {
-        CUDAQ_INFO(
+        CUDA_QEC_INFO(
             "Dynamic shape detected in tensor '{}', CUDA graphs not supported",
             name);
         return false;
@@ -328,7 +329,7 @@ bool supports_cuda_graphs(const nvinfer1::ICudaEngine *engine) {
 
   // Check for multiple optimization profiles (often used with dynamic shapes)
   if (engine->getNbOptimizationProfiles() > 1) {
-    CUDAQ_INFO(
+    CUDA_QEC_INFO(
         "Multiple optimization profiles detected, CUDA graphs not supported");
     return false;
   }
@@ -440,9 +441,13 @@ public:
 private:
   void check_cuda();
 
-  /// Typed decode_batch: IoType matches the engine's I/O dtype
-  /// (currently float or uint8_t).
-  template <typename IoType>
+  /// Size to use for failed placeholder results. This preserves the
+  /// decode_batch contract even when inference fails before producing output.
+  size_t failure_result_size() const;
+
+  /// Typed decode_batch: input and output dtypes are selected independently
+  /// from the TensorRT engine metadata (currently float or uint8_t).
+  template <typename InputType, typename OutputType>
   std::vector<decoder_result>
   decode_batch_impl(const std::vector<std::vector<float_t>> &syndromes) const;
 };
@@ -623,9 +628,9 @@ trt_decoder::trt_decoder(const cudaq::qec::sparse_binary_matrix &H,
     impl_->input_elem_size = dataTypeSize(impl_->input_dtype);
     impl_->output_elem_size = dataTypeSize(impl_->output_dtype);
 
-    CUDAQ_INFO("TensorRT engine I/O data types: input={}, output={}",
-               dataTypeName(impl_->input_dtype),
-               dataTypeName(impl_->output_dtype));
+    CUDA_QEC_INFO("TensorRT engine I/O data types: input={}, output={}",
+                  dataTypeName(impl_->input_dtype),
+                  dataTypeName(impl_->output_dtype));
 
     if (impl_->input_dtype != nvinfer1::DataType::kFLOAT &&
         impl_->input_dtype != nvinfer1::DataType::kUINT8) {
@@ -692,10 +697,10 @@ trt_decoder::trt_decoder(const cudaq::qec::sparse_binary_matrix &H,
           static_cast<int>(model_batch_size_ * output_size_per_sample_);
     }
 
-    CUDAQ_INFO("TensorRT model configuration: batch_size={}, "
-               "syndrome_size_per_sample={}, output_size_per_sample={}",
-               model_batch_size_, syndrome_size_per_sample_,
-               output_size_per_sample_);
+    CUDA_QEC_INFO("TensorRT model configuration: batch_size={}, "
+                  "syndrome_size_per_sample={}, output_size_per_sample={}",
+                  model_batch_size_, syndrome_size_per_sample_,
+                  output_size_per_sample_);
 
     // Allocate GPU buffers (sized according to engine I/O data types)
     HANDLE_CUDA_ERROR(cudaMalloc(&impl_->buffers[impl_->input_index],
@@ -715,14 +720,14 @@ trt_decoder::trt_decoder(const cudaq::qec::sparse_binary_matrix &H,
     if (params.contains("use_cuda_graph")) {
       use_cuda_graph = params.get<bool>("use_cuda_graph");
       if (!use_cuda_graph) {
-        CUDAQ_INFO("CUDA graphs explicitly disabled by user");
+        CUDA_QEC_INFO("CUDA graphs explicitly disabled by user");
       }
     }
 
     // Check engine compatibility
     if (use_cuda_graph && !supports_cuda_graphs(impl_->engine.get())) {
-      CUDAQ_WARN("Model has dynamic shapes or multiple profiles, "
-                 "CUDA graphs not supported. Using traditional execution.");
+      CUDA_QEC_WARN("Model has dynamic shapes or multiple profiles, "
+                    "CUDA graphs not supported. Using traditional execution.");
       use_cuda_graph = false;
     }
 
@@ -738,16 +743,17 @@ trt_decoder::trt_decoder(const cudaq::qec::sparse_binary_matrix &H,
       if (capture_result.success) {
         impl_->executor =
             CudaGraphExecutor{capture_result.graph, capture_result.graph_exec};
-        CUDAQ_INFO("TensorRT decoder initialized with CUDA graph execution");
+        CUDA_QEC_INFO("TensorRT decoder initialized with CUDA graph execution");
       } else {
-        CUDAQ_WARN("CUDA graph capture failed: {}. Falling back to traditional "
-                   "execution.",
-                   capture_result.error_message);
+        CUDA_QEC_WARN(
+            "CUDA graph capture failed: {}. Falling back to traditional "
+            "execution.",
+            capture_result.error_message);
         impl_->executor = TraditionalExecutor{};
       }
     } else {
       impl_->executor = TraditionalExecutor{};
-      CUDAQ_INFO("TensorRT decoder initialized with traditional execution");
+      CUDA_QEC_INFO("TensorRT decoder initialized with traditional execution");
     }
 
     // Optional global decoder (e.g. DEM decoder), similar to sliding_window's
@@ -762,8 +768,8 @@ trt_decoder::trt_decoder(const cudaq::qec::sparse_binary_matrix &H,
       if (!global_decoder_name.empty()) {
         global_decoder_ =
             decoder::get(global_decoder_name, H, global_decoder_params_);
-        CUDAQ_INFO("TensorRT decoder: global_decoder '{}' attached",
-                   global_decoder_name);
+        CUDA_QEC_INFO("TensorRT decoder: global_decoder '{}' attached",
+                      global_decoder_name);
       }
     }
 
@@ -782,6 +788,13 @@ trt_decoder::trt_decoder(const cudaq::qec::sparse_binary_matrix &H,
       }
       decode_to_observables_ = true;
       num_observables_ = O.shape()[0];
+      // Keep the base decoder's observable matrix in sync with constructor O.
+      // TRT only needs num_observables_ locally because the model emits the
+      // observable prefix directly, while realtime enqueue state and nested
+      // global decoders still carry their own O copies. This duplicate plumbing
+      // is intentional for now; a follow-up can make O ownership less
+      // redundant.
+      set_O_sparse(cudaq::qec::pcm_to_sparse_vec(O));
       set_result_type(decode_result_type::decode_to_obs);
 
       // The TRT model output must encode [pre_L (num_observables_ entries),
@@ -807,16 +820,16 @@ trt_decoder::trt_decoder(const cudaq::qec::sparse_binary_matrix &H,
               ") for the [pre_L, residual_dets] split.");
         }
       }
-      CUDAQ_INFO("TensorRT decoder: decode_to_observables enabled "
-                 "(num_observables={})",
-                 num_observables_);
+      CUDA_QEC_INFO("TensorRT decoder: decode_to_observables enabled "
+                    "(num_observables={})",
+                    num_observables_);
     }
 
     // Decoder is now fully configured and ready for inference
     decoder_ready_ = true;
 
   } catch (const std::exception &e) {
-    CUDAQ_WARN("TensorRT initialization failed: {}", e.what());
+    CUDA_QEC_WARN("TensorRT initialization failed: {}", e.what());
     decoder_ready_ = false;
   }
 }
@@ -833,7 +846,7 @@ decoder_result trt_decoder::decode(const std::vector<float_t> &syndrome) {
   // This allows decode() to work with any batch size by filling unused slots
   // with zeros
   if (model_batch_size_ > 1) {
-    CUDAQ_INFO(
+    CUDA_QEC_INFO(
         "Model has batch_size={}, zero-padding single syndrome to fill batch",
         model_batch_size_);
 
@@ -851,6 +864,12 @@ decoder_result trt_decoder::decode(const std::vector<float_t> &syndrome) {
     }
 
     auto results = decode_batch(padded_batch);
+    if (results.empty()) {
+      decoder_result result;
+      result.converged = false;
+      result.result.resize(failure_result_size(), 0.0f);
+      return result;
+    }
 
     // Return only the first result (the real syndrome)
     return results[0];
@@ -858,6 +877,12 @@ decoder_result trt_decoder::decode(const std::vector<float_t> &syndrome) {
 
   // For batch_size == 1, directly delegate to decode_batch
   auto results = decode_batch({syndrome});
+  if (results.empty()) {
+    decoder_result result;
+    result.converged = false;
+    result.result.resize(failure_result_size(), 0.0f);
+    return result;
+  }
   return results[0];
 }
 
@@ -880,7 +905,7 @@ trt_decoder::decode_batch(const std::vector<std::vector<float_t>> &syndromes) {
 
   if (!decoder_ready_) {
     // Return unconverged results if decoder is not ready
-    CUDAQ_WARN(
+    CUDA_QEC_WARN(
         "Decoder not ready for inference, returning {} unconverged results. "
         "Check decoder initialization logs for errors.",
         syndromes.size());
@@ -895,13 +920,26 @@ trt_decoder::decode_batch(const std::vector<std::vector<float_t>> &syndromes) {
     return results;
   }
 
-  // Dispatch on the actual engine input dtype (uint8 or float).
-  if (impl_->input_dtype == nvinfer1::DataType::kUINT8)
-    return decode_batch_impl<uint8_t>(syndromes);
-  return decode_batch_impl<float>(syndromes);
+  // Dispatch on the actual engine I/O dtypes independently.
+  if (impl_->input_dtype == nvinfer1::DataType::kUINT8) {
+    if (impl_->output_dtype == nvinfer1::DataType::kUINT8)
+      return decode_batch_impl<uint8_t, uint8_t>(syndromes);
+    return decode_batch_impl<uint8_t, float>(syndromes);
+  }
+  if (impl_->output_dtype == nvinfer1::DataType::kUINT8)
+    return decode_batch_impl<float, uint8_t>(syndromes);
+  return decode_batch_impl<float, float>(syndromes);
 }
 
-template <typename IoType>
+size_t trt_decoder::failure_result_size() const {
+  if (decode_to_observables_)
+    return num_observables_;
+  if (global_decoder_)
+    return global_decoder_->get_block_size();
+  return output_size_per_sample_;
+}
+
+template <typename InputType, typename OutputType>
 std::vector<decoder_result> trt_decoder::decode_batch_impl(
     const std::vector<std::vector<float_t>> &syndromes) const {
   std::vector<decoder_result> results;
@@ -916,7 +954,7 @@ std::vector<decoder_result> trt_decoder::decode_batch_impl(
     size_t total_input_nonzero = 0;
     size_t total_residual_nonzero = 0;
     const bool log_residual_counts =
-        cudaq::detail::should_log(cudaq::detail::LogLevel::info);
+        cudaq::qec::detail::should_log(cudaq::qec::detail::log_level::info);
 
     for (size_t batch_start = 0; batch_start < syndromes.size();
          batch_start += model_batch_size_) {
@@ -926,18 +964,18 @@ std::vector<decoder_result> trt_decoder::decode_batch_impl(
 
       // Prepare input batch. For float input we preserve soft (raw) values;
       // for uint8 we binarize to 0/1.
-      std::vector<IoType> input_host(impl_->input_size);
+      std::vector<InputType> input_host(impl_->input_size);
       for (size_t batch_idx = 0; batch_idx < actual_batch; ++batch_idx) {
         const auto &syndrome = syndromes[batch_start + batch_idx];
-        if constexpr (std::is_same_v<IoType, float>) {
+        if constexpr (std::is_same_v<InputType, float>) {
           for (size_t i = 0; i < syndrome_size_per_sample_; ++i) {
             input_host[batch_idx * syndrome_size_per_sample_ + i] =
-                static_cast<IoType>(syndrome[i]);
+                static_cast<InputType>(syndrome[i]);
           }
         } else {
           for (size_t i = 0; i < syndrome_size_per_sample_; ++i) {
             input_host[batch_idx * syndrome_size_per_sample_ + i] =
-                static_cast<IoType>(
+                static_cast<InputType>(
                     cudaq::qec::convert_soft_to_hard(syndrome[i]));
           }
         }
@@ -945,14 +983,14 @@ std::vector<decoder_result> trt_decoder::decode_batch_impl(
 
       HANDLE_CUDA_ERROR(cudaMemcpy(
           impl_->buffers[impl_->input_index], input_host.data(),
-          impl_->input_size * sizeof(IoType), cudaMemcpyHostToDevice));
+          impl_->input_size * sizeof(InputType), cudaMemcpyHostToDevice));
 
       impl_->execute_inference(actual_batch);
 
-      std::vector<IoType> output_host(impl_->output_size);
+      std::vector<OutputType> output_host(impl_->output_size);
       HANDLE_CUDA_ERROR(cudaMemcpy(
           output_host.data(), impl_->buffers[impl_->output_index],
-          impl_->output_size * sizeof(IoType), cudaMemcpyDeviceToHost));
+          impl_->output_size * sizeof(OutputType), cudaMemcpyDeviceToHost));
 
       if (log_residual_counts) {
         const size_t input_elems = actual_batch * syndrome_size_per_sample_;
@@ -961,8 +999,9 @@ std::vector<decoder_result> trt_decoder::decode_batch_impl(
             total_input_nonzero++;
         // Count non-zero entries in just the residual portion of the output.
         for (size_t batch_idx = 0; batch_idx < actual_batch; ++batch_idx) {
-          const IoType *row = output_host.data() +
-                              batch_idx * output_size_per_sample_ + pre_L_size;
+          const OutputType *row = output_host.data() +
+                                  batch_idx * output_size_per_sample_ +
+                                  pre_L_size;
           for (size_t i = 0; i < residual_size; ++i)
             if (trt_io_nonzero(row[i]))
               total_residual_nonzero++;
@@ -984,8 +1023,9 @@ std::vector<decoder_result> trt_decoder::decode_batch_impl(
         std::vector<std::vector<float_t>> residual_soft(
             actual_batch, std::vector<float_t>(global_syndrome_size, 0.0f));
         for (size_t batch_idx = 0; batch_idx < actual_batch; ++batch_idx) {
-          const IoType *res = output_host.data() +
-                              batch_idx * output_size_per_sample_ + pre_L_size;
+          const OutputType *res = output_host.data() +
+                                  batch_idx * output_size_per_sample_ +
+                                  pre_L_size;
           float_t *out = residual_soft[batch_idx].data();
           for (size_t i = 0; i < global_syndrome_size; ++i)
             out[i] = trt_io_to_binary(res[i]);
@@ -1000,7 +1040,7 @@ std::vector<decoder_result> trt_decoder::decode_batch_impl(
             decoder_result combined;
             combined.converged = global_results[batch_idx].converged;
             combined.result.resize(num_observables_, 0.0f);
-            const IoType *pre_L_row =
+            const OutputType *pre_L_row =
                 output_host.data() + batch_idx * output_size_per_sample_;
             const std::vector<float_t> &g = global_results[batch_idx].result;
             for (size_t k = 0; k < num_observables_; ++k) {
@@ -1023,10 +1063,10 @@ std::vector<decoder_result> trt_decoder::decode_batch_impl(
           decoder_result result;
           result.converged = true;
           result.result.resize(out_per_sample);
-          const IoType *row =
+          const OutputType *row =
               output_host.data() + batch_idx * output_size_per_sample_;
           for (size_t i = 0; i < out_per_sample; ++i) {
-            if constexpr (std::is_same_v<IoType, float>) {
+            if constexpr (std::is_same_v<OutputType, float>) {
               result.result[i] = static_cast<float_t>(row[i]);
             } else {
               result.result[i] = trt_io_to_binary(row[i]);
@@ -1038,16 +1078,22 @@ std::vector<decoder_result> trt_decoder::decode_batch_impl(
     }
 
     if (log_residual_counts) {
-      CUDAQ_INFO("TRT decoder: total non-zero input detectors = {}, total "
-                 "non-zero residual detectors = {}",
-                 total_input_nonzero, total_residual_nonzero);
+      CUDA_QEC_INFO("TRT decoder: total non-zero input detectors = {}, total "
+                    "non-zero residual detectors = {}",
+                    total_input_nonzero, total_residual_nonzero);
     }
 
   } catch (const std::exception &e) {
-    CUDAQ_WARN("TensorRT batch inference failed: {}", e.what());
+    CUDA_QEC_WARN("TensorRT batch inference failed: {}", e.what());
     // Mark all results as unconverged
     for (auto &result : results) {
       result.converged = false;
+    }
+    while (results.size() < syndromes.size()) {
+      decoder_result result;
+      result.converged = false;
+      result.result.resize(failure_result_size(), 0.0f);
+      results.push_back(std::move(result));
     }
   }
 
@@ -1055,9 +1101,17 @@ std::vector<decoder_result> trt_decoder::decode_batch_impl(
 }
 
 // Explicit instantiations for the supported single-output engine I/O dtypes.
-template std::vector<decoder_result> trt_decoder::decode_batch_impl<float>(
+template std::vector<decoder_result>
+trt_decoder::decode_batch_impl<float, float>(
     const std::vector<std::vector<float_t>> &) const;
-template std::vector<decoder_result> trt_decoder::decode_batch_impl<uint8_t>(
+template std::vector<decoder_result>
+trt_decoder::decode_batch_impl<float, uint8_t>(
+    const std::vector<std::vector<float_t>> &) const;
+template std::vector<decoder_result>
+trt_decoder::decode_batch_impl<uint8_t, float>(
+    const std::vector<std::vector<float_t>> &) const;
+template std::vector<decoder_result>
+trt_decoder::decode_batch_impl<uint8_t, uint8_t>(
     const std::vector<std::vector<float_t>> &) const;
 
 trt_decoder::~trt_decoder() = default;
@@ -1121,12 +1175,12 @@ void parse_precision(const std::string &precision,
     // With strongly-typed networks the ONNX model's native types are used.
   } else if (precision == "fp16" || precision == "bf16" ||
              precision == "int8" || precision == "fp8") {
-    CUDAQ_WARN("Precision '{}' is ignored when building strongly-typed "
-               "networks. TensorRT uses the data types defined in the ONNX "
-               "model. To use {}, export the model with the desired types.",
-               precision, precision);
+    CUDA_QEC_WARN("Precision '{}' is ignored when building strongly-typed "
+                  "networks. TensorRT uses the data types defined in the ONNX "
+                  "model. To use {}, export the model with the desired types.",
+                  precision, precision);
   } else {
-    CUDAQ_WARN("Unknown precision '{}', using default (best)", precision);
+    CUDA_QEC_WARN("Unknown precision '{}', using default (best)", precision);
   }
 }
 
@@ -1209,8 +1263,8 @@ build_engine_from_onnx(const std::string &onnx_model_path,
             "Failed to set optimization profile dimensions for batch");
       }
       config->addOptimizationProfile(profile);
-      CUDAQ_INFO("TensorRT optimization profile: batch min=1, opt=max={}",
-                 batch_size);
+      CUDA_QEC_INFO("TensorRT optimization profile: batch min=1, opt=max={}",
+                    batch_size);
     }
   }
 
@@ -1251,7 +1305,7 @@ void save_engine_to_file(nvinfer1::ICudaEngine *engine,
   }
   file.close();
 
-  CUDAQ_INFO("TensorRT engine saved to: {}", file_path);
+  CUDA_QEC_INFO("TensorRT engine saved to: {}", file_path);
 }
 
 } // namespace cudaq::qec::trt_decoder_internal

@@ -9,6 +9,7 @@
 
 #include "cudaq/qec/code.h"
 #include "cudaq/qec/patch.h"
+#include <string>
 
 using namespace cudaqx;
 
@@ -17,6 +18,28 @@ namespace cudaq::qec::surface_code {
 /// @brief enumerates the role of a grid site in the surface codes stabilizer
 /// grid
 enum surface_role { amx, amz, empty };
+
+/// @brief Surface-code orientation: controls which Pauli type (X or Z) occupies
+/// the bulk interior and which boundaries are X-type vs Z-type.
+///
+/// Geometry names follow the NVIDIA/Ising-Decoding naming convention
+/// (https://github.com/NVIDIA/Ising-Decoding): Ising's `code_rotation`
+/// convention uses first character = bulk syndrome type, second character =
+/// rotated_type. By geometry: XV and ZH place X-type stabilizers on the
+/// left/right boundaries (Z on top/bottom); XH and ZV place X-type on
+/// top/bottom (Z on left/right). XV vs ZH (and XH vs ZV) differ in the bulk
+/// X/Z checkerboard.
+///
+/// Observable convention: get_spin_op_observables() returns the valid logical
+/// pair for the orientation. XV/ZH use X obs along the top row and Z obs along
+/// the left column; XH/ZV swap them (X along the left column, Z along the top
+/// row). See get_spin_op_observables() for details.
+enum class sc_orientation { XV, XH, ZV, ZH };
+
+/// @brief Convert a surface-code orientation string to a sc_orientation enum
+/// (XV, XH, ZV, ZH, or Ising's O1-O4 aliases, where O1/O2/O3/O4 map to
+/// XV/XH/ZV/ZH).
+sc_orientation sc_orientation_from_str(const std::string &s);
 
 /// @brief describes the 2d coordinate on the stabilizer grid
 struct vec2d {
@@ -48,6 +71,8 @@ bool operator<(const vec2d &lhs, const vec2d &rhs);
 ///
 /// Each entry on the grid can be an X stabilizer, Z stabilizer,
 /// or empty, as is needed on the edges.
+/// The diagrams below show the default ZH orientation. Other orientations
+/// assign X/Z roles according to sc_orientation.
 /// The grid length of 4 corresponds to a distance 3 surface code, which results
 /// in:
 /// ```
@@ -103,6 +128,10 @@ public:
   /// the stabilizer grid has length d+1
   uint32_t grid_length = 0;
 
+private:
+  sc_orientation orientation_ = sc_orientation::ZH;
+
+public:
   /// @brief flattened vector of the stabilizer grid sites roles'
   /// grid idx -> role
   /// stored in row major order
@@ -138,9 +167,13 @@ public:
   std::vector<std::vector<size_t>> z_stabilizers;
 
   /// @brief Construct the grid from the code's distance
-  stabilizer_grid(uint32_t distance);
+  stabilizer_grid(uint32_t distance,
+                  sc_orientation orientation = sc_orientation::ZH);
   /// @brief Empty constructor
   stabilizer_grid();
+
+  /// @brief Get the orientation used to construct this stabilizer grid.
+  sc_orientation get_orientation() const;
 
   /// @brief Print a 2d grid of stabilizer roles
   void print_stabilizer_grid() const;
@@ -164,6 +197,16 @@ public:
   std::vector<cudaq::spin_op_term> get_spin_op_stabilizers() const;
 
   /// @brief Get the observables as a vector of cudaq::spin_op_terms
+  ///
+  /// @return The X logical observable first, followed by the Z logical
+  /// observable.
+  ///
+  /// @note Returns the correct logical pair for the grid's orientation. For XV
+  /// and ZH the X observable runs along the top row of data qubits and the Z
+  /// observable along the left column; for XH and ZV the assignment is swapped
+  /// (X along the left column, Z along the top row) to match their boundary
+  /// types. The returned X/Z observables commute with the stabilizers and
+  /// anticommute with each other for every orientation.
   std::vector<cudaq::spin_op_term> get_spin_op_observables() const;
 };
 
