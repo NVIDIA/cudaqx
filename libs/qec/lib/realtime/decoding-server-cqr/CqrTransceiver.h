@@ -61,6 +61,15 @@ private:
   static bool build_enqueue_frame(const void *rx_slot, std::size_t slot_size,
                                   RxFrame &out);
 
+  // Hard cap on syndromes per request; guards against malformed/oversized
+  // payloads.
+  static constexpr uint64_t kMaxSyndromeBits = 1u << 20; // 1 M bits
+
+  static constexpr std::size_t align_up(std::size_t off,
+                                        std::size_t alignment) noexcept {
+    return (off + alignment - 1u) & ~(alignment - 1u);
+  }
+
   // For get_corrections and reset_decoder the field layouts are compatible;
   // copy rx_slot verbatim after swapping to our magic/RPCHeader type.
   static bool build_passthrough_frame(const void *rx_slot,
@@ -167,10 +176,14 @@ inline bool CqrTransceiver::build_enqueue_frame(const void *rx_slot,
   uint64_t decoder_id = 0, num_syndromes = 0, tag = 0;
   if (!read_u64(decoder_id) || !read_u64(num_syndromes))
     return false;
+  if (num_syndromes > kMaxSyndromeBits)
+    return false;
   if (num_syndromes > arg_len - off)
     return false;
   const uint8_t *bits_src = payload + off;
   off += static_cast<std::size_t>(num_syndromes);
+  // CUDAQ aligns each argument to 8 bytes; align before reading the tag u64.
+  off = align_up(off, sizeof(uint64_t));
   if (!read_u64(tag))
     return false;
 
