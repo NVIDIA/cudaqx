@@ -30,13 +30,13 @@ TEST(QECCodeTester, checkRepetitionNoiseStim) {
     syndromes.dump();
     printf("data\n");
     d.dump();
-    EXPECT_EQ(syndromes.shape()[0], 4);
-    EXPECT_EQ(syndromes.shape()[1], 8);
+    EXPECT_EQ(syndromes.shape()[0], 2u);
+    EXPECT_EQ(syndromes.shape()[1], 24u); // numDetectors
 
     // Should have some 1s since it's noisy
     int sum = 0;
-    for (std::size_t i = 0; i < 2; i++)
-      for (std::size_t j = 0; j < 8; j++)
+    for (std::size_t i = 0; i < syndromes.shape()[0]; i++)
+      for (std::size_t j = 0; j < syndromes.shape()[1]; j++)
         sum += syndromes.at({i, j});
 
     EXPECT_TRUE(sum > 0);
@@ -56,19 +56,57 @@ TEST(QECCodeTester, checkRepetitionNoiseStim) {
 
     // Should have some 1s since it's noisy
     int sum = 0;
-    for (std::size_t i = 0; i < 2; i++)
-      for (std::size_t j = 0; j < 8; j++)
+    for (std::size_t i = 0; i < syndromes.shape()[0]; i++)
+      for (std::size_t j = 0; j < syndromes.shape()[1]; j++)
         sum += syndromes.at({i, j});
 
     EXPECT_TRUE(sum > 0);
   }
 }
 
+namespace {
+
+/// @brief Splits a `sample_memory_circuit` syndrome tensor's columns by
+/// stabilizer type. Returns (ancz-derived sum, ancx-derived sum).
+std::pair<std::size_t, std::size_t>
+sumDetectorsByType(const cudaqx::tensor<uint8_t> &syndromes,
+                   std::size_t numRounds, std::size_t numZStabs,
+                   std::size_t numXStabs, bool is_z_prep) {
+  const std::size_t numFixed = is_z_prep ? numZStabs : numXStabs;
+  const std::size_t numSynPerRound = numZStabs + numXStabs;
+  const std::size_t numInteriorRounds = numRounds - 1;
+  const std::size_t numCols = syndromes.shape()[1];
+
+  std::size_t z_type_sum = 0;
+  std::size_t x_type_sum = 0;
+  for (std::size_t i = 0; i < syndromes.shape()[0]; i++) {
+    std::size_t &fixed_sum = is_z_prep ? z_type_sum : x_type_sum;
+    // Boundary detectors
+    for (std::size_t b = 0; b < numFixed; b++) {
+      fixed_sum += syndromes.at({i, b});
+      fixed_sum += syndromes.at({i, numCols - numFixed + b});
+    }
+    // Interior round detectors
+    for (std::size_t round = 0; round < numInteriorRounds; round++) {
+      std::size_t base = numFixed + round * numSynPerRound;
+      for (std::size_t z = 0; z < numZStabs; z++)
+        z_type_sum += syndromes.at({i, base + z});
+      for (std::size_t x = 0; x < numXStabs; x++)
+        x_type_sum += syndromes.at({i, base + numZStabs + x});
+    }
+  }
+  return {z_type_sum, x_type_sum};
+}
+
+} // namespace
+
 TEST(QECCodeTester, checkSteaneNoiseStim) {
 
   auto steane = cudaq::qec::get_code("steane");
   int nShots = 10;
   int nRounds = 3;
+  size_t numAncz = steane->get_num_ancilla_z_qubits();
+  size_t numAncx = steane->get_num_ancilla_x_qubits();
   {
     // two qubit bitflip
     cudaq::set_random_seed(13);
@@ -81,25 +119,15 @@ TEST(QECCodeTester, checkSteaneNoiseStim) {
     syndromes.dump();
     printf("data\n");
     d.dump();
-    EXPECT_EQ(syndromes.shape()[0], nShots * nRounds);
-    EXPECT_EQ(syndromes.shape()[1], 6);
+    EXPECT_EQ(syndromes.shape()[0], nShots); // numShots
+    EXPECT_EQ(syndromes.shape()[1], 18);     // numDetectors
 
-    // Should have some 1s since it's noisy
-    // bitflip should only trigger x syndromes
-    int x_sum = 0;
-    int z_sum = 0;
-
-    for (std::size_t i = 0; i < syndromes.shape()[0]; i++) {
-      for (std::size_t j_x = 0; j_x < syndromes.shape()[1] / 2; j_x++) {
-        x_sum += syndromes.at({i, j_x});
-      }
-      for (std::size_t j_z = syndromes.shape()[1] / 2;
-           j_z < syndromes.shape()[1]; j_z++) {
-        z_sum += syndromes.at({i, j_z});
-      }
-    }
-    EXPECT_TRUE(x_sum > 0);
-    EXPECT_TRUE(z_sum == 0);
+    // ancx-derived (X-type) detectors must be exactly zero, while the
+    // ancz-derived (Z-type) detectors should fire.
+    auto [z_type_sum, x_type_sum] = sumDetectorsByType(
+        syndromes, nRounds, numAncz, numAncx, /*is_z_prep=*/true);
+    EXPECT_TRUE(z_type_sum > 0);
+    EXPECT_TRUE(x_type_sum == 0);
   }
   {
     // two qubit depol
@@ -115,21 +143,12 @@ TEST(QECCodeTester, checkSteaneNoiseStim) {
     printf("data\n");
     d.dump();
 
-    // Should have some 1s since it's noisy
-    // depolarizing triggers x and z syndromes
-    int x_sum = 0;
-    int z_sum = 0;
-    for (std::size_t i = 0; i < syndromes.shape()[0]; i++) {
-      for (std::size_t j_x = 0; j_x < syndromes.shape()[1] / 2; j_x++) {
-        x_sum += syndromes.at({i, j_x});
-      }
-      for (std::size_t j_z = syndromes.shape()[1] / 2;
-           j_z < syndromes.shape()[1]; j_z++) {
-        z_sum += syndromes.at({i, j_z});
-      }
-    }
-    EXPECT_TRUE(x_sum > 0);
-    EXPECT_TRUE(z_sum > 0);
+    // Depolarizing noise can introduce both X- and Z-type errors, so both
+    // detector types should fire.
+    auto [z_type_sum, x_type_sum] = sumDetectorsByType(
+        syndromes, nRounds, numAncz, numAncx, /*is_z_prep=*/true);
+    EXPECT_TRUE(z_type_sum > 0);
+    EXPECT_TRUE(x_type_sum > 0);
   }
   {
     // one qubit bitflip
@@ -143,22 +162,12 @@ TEST(QECCodeTester, checkSteaneNoiseStim) {
     syndromes.dump();
     printf("data\n");
     d.dump();
-
-    // Should have some 1s since it's noisy
-    // only getting detectible errors on s_z ancillas
-    int x_sum = 0;
-    int z_sum = 0;
-    for (std::size_t i = 0; i < syndromes.shape()[0]; i++) {
-      for (std::size_t j_x = 0; j_x < syndromes.shape()[1] / 2; j_x++) {
-        x_sum += syndromes.at({i, j_x});
-      }
-      for (std::size_t j_z = syndromes.shape()[1] / 2;
-           j_z < syndromes.shape()[1]; j_z++) {
-        z_sum += syndromes.at({i, j_z});
-      }
-    }
-    EXPECT_TRUE(x_sum > 0);
-    EXPECT_TRUE(z_sum > 0);
+    // This noise only touches ancx (every round) and data (only at the
+    // prep/readout boundary), so Z-type (ancz) detectors can never fire.
+    auto [z_type_sum, x_type_sum] = sumDetectorsByType(
+        syndromes, nRounds, numAncz, numAncx, /*is_z_prep=*/false);
+    EXPECT_TRUE(z_type_sum == 0);
+    EXPECT_TRUE(x_type_sum > 0);
   }
   {
     // one qubit phase
@@ -173,23 +182,12 @@ TEST(QECCodeTester, checkSteaneNoiseStim) {
     printf("data\n");
     d.dump();
 
-    // Should have some 1s since it's noisy
-    // only getting detectible errors on s_z ancillas
-    int x_sum = 0;
-    int z_sum = 0;
-    for (std::size_t i = 0; i < syndromes.shape()[0]; i++) {
-      for (std::size_t j_x = 0; j_x < syndromes.shape()[1] / 2; j_x++) {
-        x_sum += syndromes.at({i, j_x});
-      }
-      for (std::size_t j_z = syndromes.shape()[1] / 2;
-           j_z < syndromes.shape()[1]; j_z++) {
-        z_sum += syndromes.at({i, j_z});
-      }
-    }
-    // Even though phase flip is a z error,
-    // additional hadamards in prepp can convert to x error (first round only)
-    EXPECT_TRUE(x_sum > 0);
-    EXPECT_TRUE(z_sum > 0);
+    // Same "h"-gate-only argument as above: Z-type detectors can never
+    // fire for this circuit/noise combination.
+    auto [z_type_sum, x_type_sum] = sumDetectorsByType(
+        syndromes, nRounds, numAncz, numAncx, /*is_z_prep=*/false);
+    EXPECT_TRUE(z_type_sum == 0);
+    EXPECT_TRUE(x_type_sum > 0);
   }
   {
     // one qubit depol
@@ -204,21 +202,12 @@ TEST(QECCodeTester, checkSteaneNoiseStim) {
     printf("data\n");
     d.dump();
 
-    // Should have some 1s since it's noisy
-    // only getting detectible errors on s_z ancillas
-    int x_sum = 0;
-    int z_sum = 0;
-    for (std::size_t i = 0; i < syndromes.shape()[0]; i++) {
-      for (std::size_t j_x = 0; j_x < syndromes.shape()[1] / 2; j_x++) {
-        x_sum += syndromes.at({i, j_x});
-      }
-      for (std::size_t j_z = syndromes.shape()[1] / 2;
-           j_z < syndromes.shape()[1]; j_z++) {
-        z_sum += syndromes.at({i, j_z});
-      }
-    }
-    EXPECT_TRUE(x_sum > 0);
-    EXPECT_TRUE(z_sum > 0);
+    // Same "h"-gate-only argument as above: Z-type detectors can never
+    // fire for this circuit/noise combination.
+    auto [z_type_sum, x_type_sum] = sumDetectorsByType(
+        syndromes, nRounds, numAncz, numAncx, /*is_z_prep=*/false);
+    EXPECT_TRUE(z_type_sum == 0);
+    EXPECT_TRUE(x_type_sum > 0);
   }
 }
 
@@ -429,12 +418,26 @@ TEST(QECCodeTester, checkNoisySampleMemoryCircuitAndDecodeStim) {
     printf("Hz:\n");
     H.dump();
     printf("end\n");
+    // syndromes shape: (nShots=1, nDetectors).
+    // Format: [numFixed round-0 detectors] [numCols * (nRounds-1) detectors]
+    // [numFixed final-data] For prep0 (Z-prep): numFixed = numAncz = 3 numCols
+    // = number of per-round syndromes
+    size_t numAncz_s = steane->get_num_ancilla_z_qubits();
+    size_t numAncx_s = steane->get_num_ancilla_x_qubits();
+    size_t numCols = numAncz_s + numAncx_s;
+    size_t numFixed = numAncz_s; // prep0 → Z-ancilla are fixed
+    size_t fixedOffset = 0;      // Z-ancilla sit at cols 0..numFixed-1
+    const uint8_t *shotRow = syndromes.data(); // nShots=1, shot=0
     size_t numLerrors = 0;
-    size_t stride = syndromes.shape()[1];
     cudaqx::tensor<uint8_t> pauli_frame({observables.shape()[0]});
     for (size_t i = 0; i < nRounds - 1; ++i) {
-      cudaqx::tensor<uint8_t> syndrome({stride});
-      syndrome.borrow(syndromes.data() + i * stride);
+      cudaqx::tensor<uint8_t> syndrome({numCols});
+      if (i == 0) {
+        for (size_t c = 0; c < numFixed; ++c)
+          syndrome.at({c}) = shotRow[c];
+      } else {
+        syndrome.borrow(shotRow + numFixed + (i - 1) * numCols);
+      }
       printf("syndrome:\n");
       syndrome.dump();
       auto [converged, v_result, opt] = decoder->decode(syndrome);
@@ -483,9 +486,8 @@ TEST(QECCodeTester, checkNoisySampleMemoryCircuitAndDecodeStim) {
         *steane, cudaq::qec::operation::prepp, nShots, nRounds, noise);
     printf("syndromes:\n");
     syndromes.dump();
-    EXPECT_EQ(syndromes.shape()[0], nShots * nRounds);
-    EXPECT_EQ(syndromes.shape()[1], 6);
-
+    EXPECT_EQ(syndromes.shape()[0], nShots);
+    EXPECT_EQ(syndromes.shape()[1], 24u); // numDetectors
     // With noise, Lx will sometimes be flipped
     printf("data:\n");
     d.dump();
@@ -508,15 +510,28 @@ TEST(QECCodeTester, checkNoisySampleMemoryCircuitAndDecodeStim) {
     observables.dump();
     auto decoder = cudaq::qec::get_decoder("single_error_lut", H);
     printf("end\n");
+    // syndromes shape: (nShots=1, nDetectors).
+    // Format: [numFixed round-0 detectors] [numCols * (nRounds-1) detectors]
+    // [numFixed final-data] For prepp (X-prep): numFixed = numAncx = 3 numCols
+    // = number of per-round syndromes
+    size_t numAncz_s2 = steane->get_num_ancilla_z_qubits();
+    size_t numAncx_s2 = steane->get_num_ancilla_x_qubits();
+    size_t numCols2 = numAncz_s2 + numAncx_s2;
+    size_t numFixed2 = numAncx_s2; // prepp → X-ancilla are fixed
+    size_t k2 = syndromes.shape()[1];
     size_t numLerrors = 0;
-    size_t stride = syndromes.shape()[1];
     for (size_t shot = 0; shot < nShots; ++shot) {
       cudaqx::tensor<uint8_t> pauli_frame({observables.shape()[0]});
+      const uint8_t *shotRow2 = syndromes.data() + shot * k2;
       for (size_t i = 0; i < nRounds; ++i) {
-        size_t count = shot * nRounds + i;
-        printf("shot: %zu, round: %zu, count: %zu\n", shot, i, count);
-        cudaqx::tensor<uint8_t> syndrome({stride});
-        syndrome.borrow(syndromes.data() + stride * count);
+        printf("shot: %zu, round: %zu\n", shot, i);
+        cudaqx::tensor<uint8_t> syndrome({numCols2});
+        if (i == 0) {
+          for (size_t c = 0; c < numFixed2; ++c)
+            syndrome.at({c}) = shotRow2[c];
+        } else {
+          syndrome.borrow(shotRow2 + numFixed2 + (i - 1) * numCols2);
+        }
         printf("syndrome:\n");
         syndrome.dump();
         auto [converged, v_result, opt] = decoder->decode(syndrome);
@@ -584,30 +599,30 @@ TEST(QECCodeTester, checkDemFromMemoryCircuit) {
 
   // clang-format off
   std::vector<std::string> expected_dem_str = {
-      "1.......................", 
-      ".1......................",
-      "..1.....................", 
-      "...1....................",
-      "....1...................", 
-      ".....1..................",
-      "1.....1.................", 
-      ".1.....1................",
-      "..1.....1...............", 
-      "...1.....1..............",
-      "....1.....1.............", 
-      ".....1.....1............",
-      "......1.....1...........", 
-      ".......1.....1..........",
-      "........1.....1.........", 
-      ".........1.....1........",
-      "..........1.....1.......", 
-      "...........1.....1......",
-      "............1.....1.....", 
-      ".............1.....1....",
-      "..............1.....1...", 
-      "...............1.....1..",
-      "................1.....1.", 
-      ".................1.....1"};
+      "1..............................",
+      ".1.............................",
+      "..1............................",
+      "1..1...........................",
+      ".1..1..........................",
+      "..1..1.........................",
+      "......1..1.....................",
+      ".......1..1....................",
+      "........1..1...................",
+      "...1........1..................",
+      "....1........1.................",
+      ".....1........1................",
+      ".........1.....1...............",
+      "..........1.....1..............",
+      "...........1.....1.............",
+      "............1.....1............",
+      ".............1.....1...........",
+      "..............1.....1..........",
+      "...............1.....1.........",
+      "................1.....1........",
+      ".................1.....1.......",
+      "..................1.....1111...",
+      "...................1.....1.111.",
+      "....................1.....11.11"};
   // clang-format on
   check_matrix_bits("detector_error_matrix", dem.detector_error_matrix,
                     expected_dem_str);
@@ -620,8 +635,8 @@ TEST(QECCodeTester, checkDemFromMemoryCircuit) {
   // printf("}\n");
 
   // Check error rates
-  ASSERT_EQ(dem.error_rates.size(), 24);
-  std::vector<double> expected_error_rates(24, 0.01);
+  ASSERT_EQ(dem.error_rates.size(), 31);
+  std::vector<double> expected_error_rates(31, 0.01);
   for (std::size_t i = 0; i < dem.error_rates.size(); i++) {
     EXPECT_FLOAT_EQ(dem.error_rates[i], expected_error_rates[i])
         << "i: " << i << ", error_rates[i]: " << dem.error_rates[i]
@@ -634,7 +649,7 @@ TEST(QECCodeTester, checkDemFromMemoryCircuit) {
 
   // Check observables flips matrix
   std::vector<std::string> expected_observables_flips_matrix_str = {
-      "........................"};
+      "............................111"};
   check_matrix_bits("observables_flips_matrix", dem.observables_flips_matrix,
                     expected_observables_flips_matrix_str);
 }
