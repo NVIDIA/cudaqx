@@ -711,6 +711,8 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
     io.mapRequired("D_sparse", config.D_sparse);
     io.mapOptional("cuda_device_id", config.cuda_device_id);
     io.mapOptional("numa_node_id", config.numa_node_id);
+    io.mapOptional("mempolicy", config.mempolicy);
+    io.mapOptional("cpu_affinity", config.cpu_affinity);
 
     // Validate that the number of rows in the H_sparse vector is equal to
     // syndrome_size.

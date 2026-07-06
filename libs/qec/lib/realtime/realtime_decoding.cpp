@@ -187,6 +187,10 @@ cudaqx::heterogeneous_map prepare_decoder_params(
     params.insert("cuda_device_id", decoder_config.cuda_device_id.value());
   if (decoder_config.numa_node_id.has_value())
     params.insert("numa_node_id", decoder_config.numa_node_id.value());
+  if (decoder_config.mempolicy.has_value())
+    params.insert("mempolicy", decoder_config.mempolicy.value());
+  if (decoder_config.cpu_affinity.has_value())
+    params.insert("cpu_affinity", decoder_config.cpu_affinity.value());
   if (decoder_config.type != "trt_decoder")
     return params;
 

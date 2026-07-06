@@ -23,6 +23,7 @@
 #include <sched.h>
 #endif
 #include "hardware_affinity.h"
+#include "hardware_guards.h"
 
 // TensorRT headers
 #include "NvInfer.h"
@@ -854,17 +855,26 @@ decoder_result trt_decoder::decode(const std::vector<float_t> &syndrome) {
         "Model has batch_size={}, zero-padding single syndrome to fill batch",
         model_batch_size_);
 
-    // Create a batch with the real syndrome plus zero-padded syndromes
+    // Create a batch with the real syndrome plus zero-padded syndromes.
+    // Declared before the guard scope (the empty vector allocates nothing);
+    // every allocation happens inside the scope below.
     std::vector<std::vector<float_t>> padded_batch;
-    padded_batch.reserve(model_batch_size_);
+    {
+      // The padding buffers must land on the decoder's NUMA node like every
+      // other decode-side allocation. The guard scope closes before the
+      // delegation because decode_batch() re-applies its own guards.
+      cudaq::qec::detail_affinity::NumaGuard place(
+          is_bound_here() ? -1 : numa_node_id_, mempolicy());
+      padded_batch.reserve(model_batch_size_);
 
-    // First syndrome is the real one
-    padded_batch.push_back(syndrome);
+      // First syndrome is the real one
+      padded_batch.push_back(syndrome);
 
-    // Fill remaining batch slots with zero syndromes
-    std::vector<float_t> zero_syndrome(syndrome_size_per_sample_, 0.0f);
-    for (size_t i = 1; i < model_batch_size_; ++i) {
-      padded_batch.push_back(zero_syndrome);
+      // Fill remaining batch slots with zero syndromes
+      std::vector<float_t> zero_syndrome(syndrome_size_per_sample_, 0.0f);
+      for (size_t i = 1; i < model_batch_size_; ++i) {
+        padded_batch.push_back(zero_syndrome);
+      }
     }
 
     auto results = decode_batch(padded_batch);
@@ -970,7 +980,7 @@ trt_decoder::decode_batch(const std::vector<std::vector<float_t>> &syndromes) {
             "thread may remain pinned");
 #endif
     }
-  } _numa_guard(skip_guard ? -1 : numa_node_id_, mempolicy_);
+  } _numa_guard(skip_guard ? -1 : numa_node_id_, mempolicy());
 
   // Validate that we have syndromes to decode
   if (syndromes.empty()) {

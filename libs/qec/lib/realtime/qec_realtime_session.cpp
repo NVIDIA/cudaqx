@@ -10,8 +10,10 @@
 
 #include "qec_realtime_session.h"
 
-// Lib-private header one level up (libs/qec/lib); this file lives in realtime/.
+// Lib-private headers one level up (libs/qec/lib); this file lives in
+// realtime/.
 #include "../hardware_affinity.h"
+#include "../hardware_guards.h"
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/realtime/decoder_rpc_ids.h"
 #include "cudaq/qec/realtime/graph_resources.h"
@@ -330,11 +332,11 @@ void qec_realtime_session::initialize() {
   // finalize() is null-safe at every step, so we can roll a half-built session
   // back from any throw.
   try {
-    if (device_mode_)
-      capture_decoder_graphs();
-    // Resolve the session NUMA node from the decoders. A single shared dispatch
-    // thread can honor only one node; warn and disable pinning if they
-    // disagree.
+    // Resolve the session's placement consensus (NUMA node, CUDA device, CPU
+    // list, mempolicy) from the decoders before the CUDA resource setup
+    // below: graph capture must run on the agreed device. A single shared
+    // dispatch thread can honor only one of each; warn and disable pinning
+    // on disagreement.
     {
       int chosen = -1;
       bool conflict = false;
@@ -342,6 +344,10 @@ void qec_realtime_session::initialize() {
       bool dev_conflict = false;
       std::vector<int> chosen_cpus;
       bool affinity_conflict = false;
+      bool have_mempolicy = false;
+      bool mempolicy_conflict = false;
+      cudaq::qec::mempolicy_mode chosen_mempolicy =
+          cudaq::qec::mempolicy_mode::preferred;
       for (const auto &d : decoders_) {
         if (!d)
           continue;
@@ -369,6 +375,16 @@ void qec_realtime_session::initialize() {
           else if (chosen_cpus != cpus)
             affinity_conflict = true;
         }
+        // mempolicy participates only when the decoder set a placement knob;
+        // the default (preferred) never conflicts with itself.
+        if (n >= 0 || dev >= 0 || !cpus.empty()) {
+          if (!have_mempolicy) {
+            chosen_mempolicy = d->mempolicy();
+            have_mempolicy = true;
+          } else if (chosen_mempolicy != d->mempolicy()) {
+            mempolicy_conflict = true;
+          }
+        }
       }
       if (conflict) {
         CUDA_QEC_WARN(
@@ -379,7 +395,9 @@ void qec_realtime_session::initialize() {
       } else {
         session_numa_node_ = chosen;
       }
-      if (dev_conflict)
+      // HOST mode only: DEVICE mode throws on dev_conflict below, and that
+      // message supersedes this one (per-call guards never get to run there).
+      if (dev_conflict && !device_mode_)
         CUDA_QEC_WARN(
             "realtime decoders request different cuda_device_ids; the shared "
             "dispatch thread cannot hold one device for all of them. "
@@ -389,12 +407,32 @@ void qec_realtime_session::initialize() {
             "realtime decoders request different cpu_affinity lists; the "
             "shared dispatch thread can honor only one. Guard-skip binding "
             "disabled; per-call guards stay active.");
-      bind_decoders_to_host_loop_ = !dev_conflict && !conflict &&
-                                    !affinity_conflict &&
-                                    (chosen >= 0 || chosen_dev >= 0);
+      if (mempolicy_conflict)
+        CUDA_QEC_WARN(
+            "realtime decoders request different mempolicy modes; the shared "
+            "dispatch thread can honor only one. Guard-skip binding disabled; "
+            "per-call guards stay active.");
+      bind_decoders_to_host_loop_ =
+          !dev_conflict && !conflict && !affinity_conflict &&
+          !mempolicy_conflict &&
+          (chosen >= 0 || chosen_dev >= 0 || !chosen_cpus.empty());
+      session_cuda_device_ = dev_conflict ? -1 : chosen_dev;
+      if (device_mode_ && dev_conflict)
+        throw std::runtime_error(
+            "qec_realtime_session::initialize: decoders request different "
+            "cuda_device_ids; DEVICE mode runs one dispatch kernel on one "
+            "device and cannot honor them. Use one device per session.");
     }
-    allocate_ring_buffer();
-    populate_function_table();
+    if (device_mode_)
+      capture_decoder_graphs();
+    {
+      // Ring buffers, function tables, and control words are polled every
+      // dispatch iteration; first-touch them on the session node. Scoped:
+      // restores the config thread's placement before the loops start.
+      cudaq::qec::detail_affinity::NumaGuard place(session_numa_node_);
+      allocate_ring_buffer();
+      populate_function_table();
+    }
     if (device_mode_)
       start_device_loop();
     start_host_loop();
@@ -516,6 +554,11 @@ void qec_realtime_session::finalize() {
 //==============================================================================
 
 void qec_realtime_session::capture_decoder_graphs() {
+  // Graph capture allocates streams/exec graphs on the CURRENT device; place
+  // it on the session's agreed device so a pinned decoder's graph does not
+  // land on the ambient device of whichever thread called initialize().
+  cudaq::qec::detail_affinity::CudaDeviceGuard place(session_cuda_device_);
+
   captured_graphs_.assign(decoders_.size(), nullptr);
   num_decoders_with_graph_ = 0;
 
@@ -846,13 +889,18 @@ void qec_realtime_session::populate_function_table() {
 //==============================================================================
 
 void qec_realtime_session::start_device_loop() {
+  // Dispatcher setup below (including the device_stats_dev_ cudaMalloc) runs
+  // on the CURRENT device; place it on the session's agreed device so the
+  // persistent dispatch kernel's resources live with the captured graphs.
+  cudaq::qec::detail_affinity::CudaDeviceGuard place(session_cuda_device_);
+
   if (cudaq_dispatch_manager_create(&device_manager_) != CUDAQ_OK)
     throw std::runtime_error(
         "qec_realtime_session::initialize: cudaq_dispatch_manager_create "
         "failed");
 
   cudaq_dispatcher_config_t dev_config{};
-  dev_config.device_id = 0;
+  dev_config.device_id = session_cuda_device_ >= 0 ? session_cuda_device_ : 0;
   dev_config.num_blocks = 1;
   dev_config.threads_per_block = 64;
   dev_config.num_slots = static_cast<std::uint32_t>(num_slots_);
@@ -943,8 +991,10 @@ void qec_realtime_session::start_host_loop() {
       // Persistent bind via decoder::bind_current_thread() so that
       // is_bound_here() returns true and per-call NUMA/CUDA guards are
       // suppressed in the decode hot path. Only when initialize() proved all
-      // decoders agree on both placement knobs; otherwise keep per-call
-      // guards active and give the thread plain NUMA locality at most.
+      // decoders agree on all placement knobs (device, node, cpu list,
+      // mempolicy); agreement on any knob engages the bind. Otherwise keep
+      // per-call guards active and give the thread plain NUMA locality at
+      // most.
       if (bind_decoders) {
         for (auto &d : decoders_) {
           if (!d)
@@ -993,60 +1043,72 @@ void qec_realtime_session::start_host_loop() {
 
   void **mailbox_bank = nullptr;
 
-  std::size_t slot = 0;
-  for (std::size_t i = 0; i < decoders_.size(); ++i) {
-    if (!captured_graphs_[i])
-      continue;
-    auto *gres = static_cast<cudaq::qec::realtime::graph_resources *>(
-        captured_graphs_[i]);
-
-    cudaStream_t stream = nullptr;
-    if (cudaStreamCreate(&stream) != cudaSuccess)
-      throw std::runtime_error(
-          "qec_realtime_session::initialize: cudaStreamCreate for HOST_LOOP "
-          "worker " +
-          std::to_string(slot) + " (decoder_id=" + std::to_string(i) +
-          ") failed");
-    host_worker_streams_[i] = stream;
-
-    auto &w = host_workers_[slot];
-    w.graph_exec = gres->graph_exec;
-    w.stream = stream;
-    w.function_id = cudaq::qec::decoding::rpc::kEnqueueSyndromesFunctionId;
-    w.routing_key = static_cast<std::uint64_t>(i);
-    w.pre_launch_fn = nullptr;
-    w.pre_launch_data = nullptr;
-    w.post_launch_fn = nullptr;
-    w.post_launch_data = nullptr;
-
-    if (slot == 0)
-      mailbox_bank = gres->h_mailbox;
-    ++slot;
-  }
-
-  host_idle_mask_storage_ = new std::uint64_t(
-      num_decoders_with_graph_ < 64
-          ? ((std::uint64_t{1} << num_decoders_with_graph_) - 1)
-          : ~std::uint64_t{0});
-  host_live_dispatched_storage_ = new std::uint64_t(0);
-  host_inflight_slot_tags_ = new int[num_decoders_with_graph_];
-  for (std::size_t i = 0; i < num_decoders_with_graph_; ++i)
-    host_inflight_slot_tags_[i] = -1;
-
-  // Per-worker GraphIOContext array (pinned-mapped so both CPU monitor and GPU
-  // graph see the same backing).
   {
-    void *h = nullptr;
-    void *d = nullptr;
-    const std::size_t bytes =
-        num_decoders_with_graph_ * sizeof(cudaq::realtime::GraphIOContext);
-    if (!allocate_pinned_mapped(bytes, &h, &d))
-      throw std::runtime_error("qec_realtime_session::start_host_loop: failed "
-                               "to allocate per-worker "
-                               "GraphIOContext array");
-    std::memset(h, 0, bytes);
-    io_ctxs_host_ = static_cast<cudaq::realtime::GraphIOContext *>(h);
-    io_ctxs_dev_ = static_cast<cudaq::realtime::GraphIOContext *>(d);
+    // Worker streams and the pinned-mapped GraphIOContext array are created
+    // on the CURRENT device; place them on the session's agreed device so
+    // they live where the captured graphs run (no-op when no decoder pinned
+    // a device).  The host-visible halves (GraphIOContext array, control
+    // words) are first-touched here, so also place them on the session node.
+    // The host_loop_thread_ spawned below stays outside this guard: it binds
+    // itself.
+    cudaq::qec::detail_affinity::CudaDeviceGuard place(session_cuda_device_);
+    cudaq::qec::detail_affinity::NumaGuard numa_place(session_numa_node_);
+
+    std::size_t slot = 0;
+    for (std::size_t i = 0; i < decoders_.size(); ++i) {
+      if (!captured_graphs_[i])
+        continue;
+      auto *gres = static_cast<cudaq::qec::realtime::graph_resources *>(
+          captured_graphs_[i]);
+
+      cudaStream_t stream = nullptr;
+      if (cudaStreamCreate(&stream) != cudaSuccess)
+        throw std::runtime_error(
+            "qec_realtime_session::initialize: cudaStreamCreate for HOST_LOOP "
+            "worker " +
+            std::to_string(slot) + " (decoder_id=" + std::to_string(i) +
+            ") failed");
+      host_worker_streams_[i] = stream;
+
+      auto &w = host_workers_[slot];
+      w.graph_exec = gres->graph_exec;
+      w.stream = stream;
+      w.function_id = cudaq::qec::decoding::rpc::kEnqueueSyndromesFunctionId;
+      w.routing_key = static_cast<std::uint64_t>(i);
+      w.pre_launch_fn = nullptr;
+      w.pre_launch_data = nullptr;
+      w.post_launch_fn = nullptr;
+      w.post_launch_data = nullptr;
+
+      if (slot == 0)
+        mailbox_bank = gres->h_mailbox;
+      ++slot;
+    }
+
+    host_idle_mask_storage_ = new std::uint64_t(
+        num_decoders_with_graph_ < 64
+            ? ((std::uint64_t{1} << num_decoders_with_graph_) - 1)
+            : ~std::uint64_t{0});
+    host_live_dispatched_storage_ = new std::uint64_t(0);
+    host_inflight_slot_tags_ = new int[num_decoders_with_graph_];
+    for (std::size_t i = 0; i < num_decoders_with_graph_; ++i)
+      host_inflight_slot_tags_[i] = -1;
+
+    // Per-worker GraphIOContext array (pinned-mapped so both CPU monitor and
+    // GPU graph see the same backing).
+    {
+      void *h = nullptr;
+      void *d = nullptr;
+      const std::size_t bytes =
+          num_decoders_with_graph_ * sizeof(cudaq::realtime::GraphIOContext);
+      if (!allocate_pinned_mapped(bytes, &h, &d))
+        throw std::runtime_error(
+            "qec_realtime_session::start_host_loop: failed to allocate "
+            "per-worker GraphIOContext array");
+      std::memset(h, 0, bytes);
+      io_ctxs_host_ = static_cast<cudaq::realtime::GraphIOContext *>(h);
+      io_ctxs_dev_ = static_cast<cudaq::realtime::GraphIOContext *>(d);
+    }
   }
 
   std::memset(&host_ctx_, 0, sizeof(host_ctx_));
@@ -1081,9 +1143,10 @@ void qec_realtime_session::start_host_loop() {
     host_loop_thread_ = std::thread([this, node, bind_decoders]() {
       // Mirror HOST-mode: bind via decoder::bind_current_thread() so that
       // guard-skip is activated for the decode hot path. Only when
-      // initialize() proved all decoders agree on both placement knobs;
-      // otherwise keep per-call guards active and give the thread plain NUMA
-      // locality at most.
+      // initialize() proved all decoders agree on all placement knobs
+      // (device, node, cpu list, mempolicy); agreement on any knob engages
+      // the bind. Otherwise keep per-call guards active and give the thread
+      // plain NUMA locality at most.
       if (bind_decoders) {
         for (auto &d : decoders_) {
           if (!d)
@@ -1146,6 +1209,16 @@ void qec_realtime_session::stop_loops() {
   if (device_manager_) {
     cudaq_dispatch_manager_destroy(device_manager_);
     device_manager_ = nullptr;
+  }
+
+  // Drain every worker stream before anything frees graph IO buffers:
+  // stream handles carry their device, so this synchronizes correctly even
+  // when the tearing-down thread's current device differs. In-flight graph
+  // launches from the non-blocking submit path must complete before
+  // release_decode_graph()/finalize() free the memory they read.
+  for (auto s : host_worker_streams_) {
+    if (s)
+      cudaStreamSynchronize(s);
   }
 
   for (auto s : host_worker_streams_) {

@@ -758,3 +758,35 @@ TEST(DecoderYaml, PrepareParamsInjectsKeys) {
   EXPECT_TRUE(params.contains("cuda_device_id"));
   EXPECT_TRUE(params.contains("numa_node_id"));
 }
+
+TEST(DecoderYaml, MempolicyAndCpuAffinityRoundTrip) {
+  using namespace cudaq::qec::decoding::config;
+  multi_decoder_config multi_config;
+  decoder_config cfg;
+  cfg.id = 0;
+  cfg.type = "multi_error_lut";
+  cfg.block_size = 4;
+  cfg.syndrome_size = 2;
+  cfg.H_sparse = {0, -1, 1, -1};
+  cfg.O_sparse = {};
+  cfg.D_sparse = {};
+  cfg.mempolicy = "bind";
+  cfg.cpu_affinity = std::vector<int>{0, 2};
+  multi_config.decoders.push_back(cfg);
+
+  test_decoder_yaml_roundtrip(multi_config);
+
+  auto reparsed =
+      multi_decoder_config::from_yaml_str(multi_config.to_yaml_str(200));
+  ASSERT_EQ(reparsed.decoders.size(), 1u);
+  const auto &dc = reparsed.decoders.at(0);
+  ASSERT_TRUE(dc.mempolicy.has_value());
+  EXPECT_EQ(*dc.mempolicy, "bind");
+  ASSERT_TRUE(dc.cpu_affinity.has_value());
+  EXPECT_EQ(*dc.cpu_affinity, (std::vector<int>{0, 2}));
+
+  auto params = cudaq::qec::decoding::host::prepare_decoder_params(dc);
+  EXPECT_EQ(cudaq::qec::read_mempolicy(params),
+            cudaq::qec::mempolicy_mode::bind);
+  EXPECT_EQ(cudaq::qec::read_cpu_affinity(params), (std::vector<int>{0, 2}));
+}

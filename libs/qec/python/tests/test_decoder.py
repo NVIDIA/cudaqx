@@ -1160,5 +1160,47 @@ def test_invalid_mempolicy_string_raises_naming_the_knob():
         qec.get_decoder("multi_error_lut", H, numa_node_id=0, mempolicy="bnid")
 
 
+def test_registered_decoder_with_python_decode_batch_rejects_affinity_kwargs():
+
+    @qec.decoder("shadowing_byod_neg")
+    class ShadowingDecoder:
+
+        def __init__(self, H, **kwargs):
+            qec.Decoder.__init__(self, H)
+
+        def decode(self, syndrome):
+            r = qec.DecoderResult()
+            r.converged = True
+            r.result = [0.0, 0.0, 0.0]
+            return r
+
+        # A Python-level decode_batch is dispatched by attribute lookup and
+        # bypasses the guarded C++ entry, so placement kwargs cannot apply.
+        def decode_batch(self, syndromes):
+            return [self.decode(s) for s in syndromes]
+
+    H = np.array([[1, 1, 0], [0, 1, 1]], dtype=np.uint8)
+    with pytest.raises(RuntimeError, match="decode_batch"):
+        qec.get_decoder("shadowing_byod_neg", H, numa_node_id=0)
+    # Without affinity kwargs the same class constructs fine:
+    d = qec.get_decoder("shadowing_byod_neg", H)
+    assert d is not None
+
+
+def test_python_bind_unbind_and_readback_surface():
+    H = np.array([[1, 1, 0], [0, 1, 1]], dtype=np.uint8)
+    d = qec.get_decoder("multi_error_lut",
+                        H,
+                        numa_node_id=0,
+                        mempolicy="bind",
+                        cpu_affinity=[0])
+    assert d.mempolicy() == "bind"
+    assert d.cpu_affinity() == [0]
+    d.bind_current_thread()
+    r = d.decode([0.0, 0.0])  # routes through the guarded single-shot entry
+    assert r is not None
+    d.unbind_thread()
+
+
 if __name__ == "__main__":
     pytest.main()

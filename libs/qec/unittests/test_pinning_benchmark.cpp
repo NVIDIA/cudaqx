@@ -409,6 +409,92 @@ TEST(PinningInvariants, UnboundEntryPointsApplyAndFullyRestoreGuard) {
   }
 }
 
+// The tensor-decode entry must construct its guards BEFORE building the
+// soft-syndrome temporaries, so those allocations land on the decoder's node.
+// Observable: with the shim, the FIRST placement syscall must occur before
+// any decode work — assert the guard fires even for a rank-check failure,
+// which returns before temporaries are built.
+TEST(PinningInvariants, TensorDecodeGuardPrecedesTemporaries) {
+  if (!shimCountersPresent())
+    GTEST_SKIP() << "affinity-counter shim not preloaded";
+  run_on_worker([] {
+    auto d = makeEntryReadyPinnedLut();
+    cudaqx::tensor<uint8_t> bad({2, 2}); // rank-2: must throw
+    cudaqx_affinity_syscall_reset();
+    EXPECT_THROW((void)d->decode(bad), std::runtime_error);
+    EXPECT_GT(readShimCounts().getaff + readShimCounts().getmem, 0)
+        << "guard must be constructed before input processing";
+  });
+}
+
+// Post-construction sparse setters allocate session-lifetime buffers
+// (corrections, msyn accumulators); those buffers must follow the decoder's
+// placement like every other allocating entry point, and the guard must
+// restore the calling thread's placement afterwards. Both overload shapes of
+// each setter allocate independently, so each is exercised on its own.
+TEST(PinningInvariants, SparseSettersApplyNumaGuardWhenUnbound) {
+  if (!shimCountersPresent())
+    GTEST_SKIP() << "affinity-counter shim not preloaded";
+  struct SetterCall {
+    const char *name;
+    void (*call)(cudaq::qec::decoder &);
+  };
+  const SetterCall kSetters[] = {
+      {"set_D_sparse(nested)",
+       [](cudaq::qec::decoder &d) {
+         d.set_D_sparse(std::vector<std::vector<uint32_t>>{{0}, {1}});
+       }},
+      {"set_D_sparse(flat)",
+       [](cudaq::qec::decoder &d) {
+         // -1 terminates a row: {{0}, {1}}.
+         d.set_D_sparse(std::vector<int64_t>{0, -1, 1});
+       }},
+      {"set_O_sparse(nested)",
+       [](cudaq::qec::decoder &d) {
+         d.set_O_sparse(std::vector<std::vector<uint32_t>>{{0, 1}});
+       }},
+      {"set_O_sparse(flat)",
+       [](cudaq::qec::decoder &d) {
+         d.set_O_sparse(std::vector<int64_t>{0, 1});
+       }},
+  };
+  run_on_worker([&] {
+    auto d = makePinnedLut(); // numa_node_id=0, unbound -> guard must run
+    for (const auto &s : kSetters) {
+      SCOPED_TRACE(s.name);
+      auto before = thread_placement::capture();
+      cudaqx_affinity_syscall_reset();
+      s.call(*d);
+      auto c = readShimCounts();
+      EXPECT_GT(c.setmem + c.setaff, 0)
+          << "sparse setters must apply the placement guard";
+      auto after = thread_placement::capture();
+      EXPECT_EQ(before, after) << "setter guard must restore placement: "
+                               << before.describe_difference(after);
+    }
+  });
+}
+
+// Non-virtual guarded single-syndrome entry (used by the Python binding —
+// callers that have not bound a thread must self-place).
+TEST(PinningInvariants, DecodeGuardedAppliesAndRestores) {
+  if (!shimCountersPresent())
+    GTEST_SKIP() << "affinity-counter shim not preloaded";
+  run_on_worker([] {
+    auto d = makePinnedLut();
+    auto before = thread_placement::capture();
+    cudaqx_affinity_syscall_reset();
+    (void)d->decode_guarded({0.1f, 0.1f});
+    EXPECT_GT(readShimCounts().setmem + readShimCounts().setaff, 0);
+    EXPECT_EQ(before, thread_placement::capture());
+    d->bind_current_thread();
+    cudaqx_affinity_syscall_reset();
+    (void)d->decode_guarded({0.1f, 0.1f});
+    EXPECT_EQ(cudaqx_affinity_syscall_count(), 0)
+        << "bound thread must skip decode_guarded's guard";
+  });
+}
+
 // unbind_thread() must forget the registration so guards re-engage — the
 // session calls it at teardown before the bound thread's id can be recycled.
 TEST(PinningBenchmark, UnbindThreadRestoresGuarding) {

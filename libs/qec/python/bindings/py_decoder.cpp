@@ -222,13 +222,20 @@ private:
   static std::unordered_map<std::string,
                             std::function<nb::object(nb::object, nb::kwargs)>>
       registry;
+  // Whether the registered class defines decode_batch/decode_async in Python
+  // (recorded at registration time from the class namespace). Such overrides
+  // are dispatched by Python attribute lookup, bypassing the guarded C++
+  // entry points, so hardware placement kwargs cannot take effect on them.
+  static std::unordered_map<std::string, bool> shadow_flags;
 
 public:
   static void
   register_decoder(const std::string &name,
-                   std::function<nb::object(nb::object, nb::kwargs)> factory) {
+                   std::function<nb::object(nb::object, nb::kwargs)> factory,
+                   bool shadows_guarded_entries) {
     cudaq::qec::info("Registering Pythonic Decoder with name {}", name);
     registry[name] = factory;
+    shadow_flags[name] = shadows_guarded_entries;
   }
 
   static nb::object get_decoder(const std::string &name, nb::object H,
@@ -244,11 +251,17 @@ public:
   static bool contains(const std::string &name) {
     return registry.find(name) != registry.end();
   }
+
+  static bool shadows_guarded_entries(const std::string &name) {
+    auto it = shadow_flags.find(name);
+    return it != shadow_flags.end() && it->second;
+  }
 };
 
 std::unordered_map<std::string,
                    std::function<nb::object(nb::object, nb::kwargs)>>
     PyDecoderRegistry::registry;
+std::unordered_map<std::string, bool> PyDecoderRegistry::shadow_flags;
 
 namespace {
 bool is_affinity_kwarg(const std::string &k) {
@@ -275,6 +288,20 @@ nb::object get_py_registered_decoder(const std::string &name, nb::object H,
     else
       stripped[item.first] = item.second;
   }
+  // A Python class that overrides decode_batch/decode_async in Python is
+  // called directly by Python attribute lookup — the guarded C++ entry
+  // points never run, so hardware kwargs would be accepted and silently
+  // dead. Reject loudly instead (before construction; the flag was recorded
+  // from the class namespace at decorator-registration time).
+  if (affinity_kwargs.size() > 0 &&
+      PyDecoderRegistry::shadows_guarded_entries(name))
+    throw std::runtime_error(
+        "Decoder '" + name +
+        "' overrides decode_batch/decode_async in "
+        "Python, so the hardware placement kwargs (cuda_device_id/"
+        "numa_node_id/mempolicy/cpu_affinity) cannot be applied to those "
+        "calls. Remove the kwargs, or implement only decode() and use the "
+        "guarded base-class batch entry points.");
   nb::object obj = PyDecoderRegistry::get_decoder(
       name, H, nb::borrow<nb::kwargs>(stripped.ptr()));
   // No affinity kwargs: preserve exact pre-existing behavior (including BYOD
@@ -731,9 +758,10 @@ void bindDecoder(nb::module_ &mod) {
       .def(
           "decode",
           [](decoder &decoder, const std::vector<float_t> &syndrome) {
-            return decoder.decode(syndrome);
+            return decoder.decode_guarded(syndrome);
           },
-          "Decode the given syndrome to determine the error correction",
+          "Decode the given syndrome to determine the error correction. "
+          "Applies the decoder's hardware placement automatically.",
           nb::arg("syndrome"))
       .def(
           "decode_async",
@@ -758,6 +786,23 @@ void bindDecoder(nb::module_ &mod) {
            "device).")
       .def("numa_node_id", &decoder::numa_node_id,
            "Target NUMA node for this decoder (-1 = no binding).")
+      .def(
+          "mempolicy",
+          [](decoder &d) {
+            return d.mempolicy() == cudaq::qec::mempolicy_mode::bind
+                       ? "bind"
+                       : "preferred";
+          },
+          "NUMA memory-policy mode for this decoder.")
+      .def("cpu_affinity", &decoder::cpu_affinity,
+           "Explicit CPU core list for this decoder's owning thread "
+           "(empty = node cpuset).")
+      .def("bind_current_thread", &decoder::bind_current_thread,
+           "Persistently pin the calling thread to this decoder's device/"
+           "node; guarded entry points then skip their per-call guard on "
+           "this thread. Call unbind_thread() before the thread exits.")
+      .def("unbind_thread", &decoder::unbind_thread,
+           "Forget a bind_current_thread() registration.")
       .def("get_block_size", &decoder::get_block_size,
            "Get the size of the code block")
       .def("get_syndrome_size", &decoder::get_syndrome_size,
@@ -893,6 +938,14 @@ void bindDecoder(nb::module_ &mod) {
       if (!nb::hasattr(decoder_class, "decode"))
         throw std::runtime_error("Decoder class must implement decode method");
 
+      // Record whether the class defines decode_batch/decode_async in
+      // PYTHON. The check must run here, on the class namespace: hasattr on
+      // an instance (or on new_class) also sees the guarded C++ bindings
+      // inherited from qec.Decoder and would always be true.
+      const bool shadows_guarded_entries =
+          namespace_dict.contains("decode_batch") ||
+          namespace_dict.contains("decode_async");
+
       // Use Python's type() so the correct metaclass (nanobind's) is resolved
       nb::object type_fn = nb::module_::import_("builtins").attr("type");
       nb::object new_class =
@@ -900,10 +953,12 @@ void bindDecoder(nb::module_ &mod) {
 
       // Register the new class in the decoder registry
       PyDecoderRegistry::register_decoder(
-          name, [new_class](nb::object H, nb::kwargs options) {
+          name,
+          [new_class](nb::object H, nb::kwargs options) {
             nb::object instance = new_class(H, **options);
             return instance;
-          });
+          },
+          shadows_guarded_entries);
       return new_class;
     });
   });

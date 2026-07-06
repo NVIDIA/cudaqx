@@ -268,6 +268,10 @@ public:
   /// @brief Target CUDA device for this decoder (-1 = inherit caller's device).
   int cuda_device_id() const { return cuda_device_id_; }
 
+  /// @brief NUMA memory-policy mode for this decoder (preferred = soft,
+  /// bind = strict).
+  cudaq::qec::mempolicy_mode mempolicy() const { return mempolicy_; }
+
   /// @brief Explicit CPU list for this decoder (empty = derive from NUMA node).
   const std::vector<int> &cpu_affinity() const { return cpu_affinity_; }
 
@@ -283,6 +287,12 @@ public:
   /// the result. Convenience for a one-off pinned decode; for sustained
   /// throughput drive decode on a long-lived bound thread instead.
   decoder_result decode_on_pinned_thread(const std::vector<float_t> &syndrome);
+
+  /// @brief Single-syndrome decode with the same automatic CUDA/NUMA guard as
+  /// decode_batch(). Non-virtual; dispatches to the virtual decode() inside
+  /// the guard. Intended for host-language bindings and callers that cannot
+  /// use bind_current_thread(); bound threads skip the guard as usual.
+  decoder_result decode_guarded(const std::vector<float_t> &syndrome);
 
   /// @brief Forget any bind_current_thread() registration on this decoder so
   /// guarded entry points stop skipping their per-call guard. Call before the

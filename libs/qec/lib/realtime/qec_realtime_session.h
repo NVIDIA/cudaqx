@@ -211,11 +211,18 @@ private:
   /// Single NUMA node this session pins to (dispatch thread + ring buffers).
   /// -1 = no pinning (unset, or decoders disagree — see initialize()).
   int session_numa_node_ = -1;
-  /// True when every decoder that sets a placement knob agrees on BOTH
-  /// cuda_device_id and numa_node_id — only then may the shared dispatch
-  /// thread register itself via bind_current_thread() (a bound decoder skips
-  /// its per-call guard, so binding under a device conflict would decode on
-  /// the wrong GPU).
+  /// Single CUDA device this session's decoders agreed on (-1 = none set,
+  /// or decoders disagree in HOST mode). DEVICE mode captures graphs, creates
+  /// worker streams, and launches the dispatch kernel on this device;
+  /// conflicting devices are rejected there.
+  int session_cuda_device_ = -1;
+  /// True when every decoder that sets a placement knob agrees on ALL of
+  /// cuda_device_id, numa_node_id, cpu_affinity, and mempolicy, and at least
+  /// one of numa_node_id / cuda_device_id / cpu_affinity is actually set —
+  /// only then may the shared dispatch thread register itself via
+  /// bind_current_thread() (a bound decoder skips its per-call guard, so
+  /// binding under any placement conflict would run some decoder on the
+  /// wrong GPU, node, CPU set, or memory policy).
   bool bind_decoders_to_host_loop_ = false;
   std::uint64_t host_stats_counter_ = 0;
   // Plain (non-pinned) shutdown flag for HOST mode (no device kernel shares

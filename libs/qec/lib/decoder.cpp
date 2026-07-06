@@ -31,117 +31,10 @@
 #include <unistd.h>
 #endif
 #include "hardware_affinity.h"
+#include "hardware_guards.h"
 
-namespace {
-
-// RAII: sets the calling thread's CUDA current device, restores on destruction.
-// target < 0 = no-op. Throws std::runtime_error if: target is out of range
-// of the visible device count, cudaGetDevice() fails while checking the
-// current device, or cudaSetDevice() fails while switching to target.
-struct CudaDeviceGuard {
-  int prev_ = -1;
-  bool active_ = false;
-
-  explicit CudaDeviceGuard(int target) {
-    if (target < 0)
-      return;
-    int count = 0;
-    if (cudaGetDeviceCount(&count) != cudaSuccess || target >= count)
-      throw std::runtime_error(
-          "cuda_device_id " + std::to_string(target) +
-          " out of range (device_count=" + std::to_string(count) + ")");
-    if (cudaGetDevice(&prev_) != cudaSuccess) {
-      // Can't determine the current device; warn and skip the switch so the
-      // decode proceeds on whatever device the caller is already on.
-      cudaq::qec::detail_affinity::affinity_warn(
-          "CudaDeviceGuard: cudaGetDevice failed for cuda_device_id " +
-          std::to_string(target) + "; skipping device switch");
-      return;
-    }
-    if (prev_ != target) {
-      cudaError_t e = cudaSetDevice(target);
-      if (e != cudaSuccess)
-        throw std::runtime_error("CudaDeviceGuard: cudaSetDevice(" +
-                                 std::to_string(target) +
-                                 ") failed: " + cudaGetErrorString(e));
-      active_ = true;
-    }
-  }
-  ~CudaDeviceGuard() {
-    if (!active_)
-      return;
-    if (cudaSetDevice(prev_) != cudaSuccess)
-      cudaq::qec::detail_affinity::affinity_warn(
-          "CudaDeviceGuard: failed to restore prior CUDA device " +
-          std::to_string(prev_) + "; thread may remain on wrong device");
-  }
-  CudaDeviceGuard(const CudaDeviceGuard &) = delete;
-  CudaDeviceGuard &operator=(const CudaDeviceGuard &) = delete;
-};
-
-#if defined(__linux__)
-// RAII: binds the calling thread to a NUMA node and restores on destruction.
-// node < 0 = no-op. Uses the shared persistent-bind primitive for the set half
-// and remembers prior affinity for the restore.
-struct NumaGuard {
-  bool affinity_set_ = false;
-  bool has_prev_affinity_ = false;
-  bool mempol_set_ = false;
-  cpu_set_t prev_set_{};
-  cudaq::qec::detail_affinity::mempolicy_state prev_mempolicy_;
-
-  explicit NumaGuard(int node, cudaq::qec::mempolicy_mode mode =
-                                   cudaq::qec::mempolicy_mode::preferred) {
-    if (node < 0)
-      return;
-    CPU_ZERO(&prev_set_);
-    has_prev_affinity_ =
-        (sched_getaffinity(0, sizeof(prev_set_), &prev_set_) == 0);
-    if (node < static_cast<int>(sizeof(unsigned long) * 8)) {
-      prev_mempolicy_ = cudaq::qec::detail_affinity::capture_thread_mempolicy();
-      mempol_set_ = (prev_mempolicy_.mode >= 0);
-      if (!mempol_set_)
-        cudaq::qec::detail_affinity::affinity_warn(
-            "NumaGuard: prior thread mempolicy unreadable (get_mempolicy "
-            "failed); temporary NUMA memory policy skipped for this decode");
-    }
-    // A temporary guard must never apply a policy it cannot restore: skip the
-    // mempolicy half when the capture failed (affinity is still applied, its
-    // restore path is independent).
-    cudaq::qec::detail_affinity::bind_this_thread_to_numa_node(
-        node, mode, /*apply_mempolicy=*/mempol_set_);
-    // Arm the affinity restore only after a successful bind; if bind throws the
-    // affinity was not changed and there is nothing to undo.
-    affinity_set_ = has_prev_affinity_;
-  }
-
-  ~NumaGuard() {
-    if (mempol_set_)
-      cudaq::qec::detail_affinity::restore_thread_mempolicy(prev_mempolicy_);
-    // has_prev_affinity_ is implied: it is set iff affinity_set_ is set.
-    if (affinity_set_)
-      if (sched_setaffinity(0, sizeof(prev_set_), &prev_set_) != 0)
-        cudaq::qec::detail_affinity::affinity_warn(
-            "NumaGuard restore: failed to reset thread affinity: " +
-            std::string(std::strerror(errno)) + "; thread may remain pinned");
-  }
-
-  NumaGuard(const NumaGuard &) = delete;
-  NumaGuard &operator=(const NumaGuard &) = delete;
-};
-#else
-struct NumaGuard {
-  explicit NumaGuard(int node, cudaq::qec::mempolicy_mode mode =
-                                   cudaq::qec::mempolicy_mode::preferred) {
-    (void)mode;
-    if (node < 0)
-      return;
-    cudaq::qec::detail_affinity::warn_numa_unsupported_once();
-  }
-};
-#endif
-
-} // anonymous namespace
+using cudaq::qec::detail_affinity::CudaDeviceGuard;
+using cudaq::qec::detail_affinity::NumaGuard;
 
 INSTANTIATE_REGISTRY(cudaq::qec::decoder, const cudaq::qec::decoder_init &,
                      const cudaqx::heterogeneous_map &)
@@ -379,6 +272,12 @@ decoder::decode_on_pinned_thread(const std::vector<float_t> &syndrome) {
 // Provide a trivial implementation of for tensor<uint8_t> decode call. Child
 // classes should override this if they never want to pass through floats.
 decoder_result decoder::decode(const cudaqx::tensor<uint8_t> &syndrome) {
+  // Guards are constructed before ANY input processing so the soft-syndrome
+  // temporaries below are allocated on the decoder's device/NUMA node. They
+  // are exception-safe RAII, so placement is restored even on the rank throw.
+  const bool skip_guard = is_bound_here();
+  CudaDeviceGuard dev(skip_guard ? -1 : cuda_device_id_);
+  NumaGuard numa(skip_guard ? -1 : numa_node_id_, mempolicy_);
   // Check tensor is of order-1
   // If order >1, we could check that other modes are of dim = 1 such that
   // n x 1, or 1 x n tensors are still valid.
@@ -389,10 +288,14 @@ decoder_result decoder::decode(const cudaqx::tensor<uint8_t> &syndrome) {
   std::vector<uint8_t> vec_cast(syndrome.data(),
                                 syndrome.data() + syndrome.shape()[0]);
   convert_vec_hard_to_soft(vec_cast, soft_syndrome);
+  return decode(soft_syndrome);
+}
+
+decoder_result decoder::decode_guarded(const std::vector<float_t> &syndrome) {
   const bool skip_guard = is_bound_here();
   CudaDeviceGuard dev(skip_guard ? -1 : cuda_device_id_);
   NumaGuard numa(skip_guard ? -1 : numa_node_id_, mempolicy_);
-  return decode(soft_syndrome);
+  return decode(syndrome);
 }
 
 // Provide a trivial implementation of the multi-syndrome decoder. Child classes
@@ -425,6 +328,8 @@ std::future<decoder_result>
 decoder::decode_async(const std::vector<float_t> &syndrome) {
   // The three affinity scalars are captured by value so the lambda doesn't
   // dereference decoder members on the hot path.
+  // The syndrome copy is captured on the CALLING thread; its pages follow the
+  // caller's placement. The worker's guards cover everything decode-side.
   // LIFETIME PRECONDITION: the decoder must outlive the returned future.
   // Destroying the decoder before calling .get() is undefined behaviour.
   const int cuda_id = cuda_device_id_;
@@ -539,6 +444,10 @@ set_sparse_from_vec(const std::vector<int64_t> &vec_in,
 }
 
 void decoder::set_O_sparse(const std::vector<std::vector<uint32_t>> &O_sparse) {
+  // The corrections buffer allocated here lives for the whole session, so it
+  // must follow the decoder's placement (host allocation: no device guard).
+  const bool skip_guard = is_bound_here();
+  NumaGuard numa(skip_guard ? -1 : numa_node_id_, mempolicy_);
   this->O_sparse = O_sparse;
   validate_sparse_column_indices(this->O_sparse, block_size, "O_sparse");
   this->pimpl->corrections.clear();
@@ -546,6 +455,10 @@ void decoder::set_O_sparse(const std::vector<std::vector<uint32_t>> &O_sparse) {
 }
 
 void decoder::set_O_sparse(const std::vector<int64_t> &O_sparse_vec_in) {
+  // The corrections buffer allocated here lives for the whole session, so it
+  // must follow the decoder's placement (host allocation: no device guard).
+  const bool skip_guard = is_bound_here();
+  NumaGuard numa(skip_guard ? -1 : numa_node_id_, mempolicy_);
   set_sparse_from_vec(O_sparse_vec_in, this->O_sparse);
   validate_sparse_column_indices(this->O_sparse, block_size, "O_sparse");
   this->pimpl->corrections.clear();
@@ -595,11 +508,21 @@ void set_D_sparse_common(decoder *decoder,
 }
 
 void decoder::set_D_sparse(const std::vector<std::vector<uint32_t>> &D_sparse) {
+  // The msyn/detector buffers allocated here live for the whole session, so
+  // they must follow the decoder's placement (host allocation: no device
+  // guard).
+  const bool skip_guard = is_bound_here();
+  NumaGuard numa(skip_guard ? -1 : numa_node_id_, mempolicy_);
   this->D_sparse = D_sparse;
   set_D_sparse_common(this, D_sparse, pimpl.get());
 }
 
 void decoder::set_D_sparse(const std::vector<int64_t> &D_sparse_vec_in) {
+  // The msyn/detector buffers allocated here live for the whole session, so
+  // they must follow the decoder's placement (host allocation: no device
+  // guard).
+  const bool skip_guard = is_bound_here();
+  NumaGuard numa(skip_guard ? -1 : numa_node_id_, mempolicy_);
   set_sparse_from_vec(D_sparse_vec_in, this->D_sparse);
   set_D_sparse_common(this, this->D_sparse, pimpl.get());
 }

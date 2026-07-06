@@ -431,6 +431,80 @@ TEST(PyMatchingRealtime, SessionNumaNodeConflictWarnsAndStillDecodes) {
   EXPECT_NO_THROW(session.finalize());
 }
 
+// Conflict gate: same NUMA node, different mempolicy modes.  One dispatch
+// thread can hold only one memory policy, so guard-skip binding must stay
+// off, loudly, while per-call guards keep every decoder decoding correctly.
+TEST(PyMatchingRealtime, SessionMempolicyConflictWarnsAndStillDecodes) {
+  auto decoders = make_session_pair();
+  cudaqx::heterogeneous_map knobs_a;
+  knobs_a.insert("numa_node_id", 0); // node 0 always exists
+  knobs_a.insert("mempolicy", std::string("preferred"));
+  decoders[0]->set_hardware_params(knobs_a);
+  cudaqx::heterogeneous_map knobs_b;
+  knobs_b.insert("numa_node_id", 0);
+  knobs_b.insert("mempolicy", std::string("bind"));
+  decoders[1]->set_hardware_params(knobs_b);
+
+  cudaq::qec::realtime::qec_realtime_session session(decoders);
+  session_finalizer fin{session};
+  bool threw = false;
+  std::string what;
+  const std::string err = initialize_capturing_stderr(session, threw, what);
+  ASSERT_FALSE(threw) << "conflicting mempolicy modes must degrade to "
+                         "per-call guards, not throw: "
+                      << what;
+  EXPECT_NE(err.find("different mempolicy modes"), std::string::npos)
+      << "conflict must be loud; captured stderr: [" << err << "]";
+
+  expect_decoder_still_decodes(session, /*decoder_id=*/0, /*tag=*/1);
+  expect_decoder_still_decodes(session, /*decoder_id=*/1, /*tag=*/2);
+  EXPECT_NO_THROW(session.finalize());
+}
+
+// Agreement on ONLY cpu_affinity (no numa_node_id, no cuda_device_id) must
+// still engage the dispatch-thread bind rather than silently dropping the
+// knob: initialize is conflict-warning-free, both decoders decode correctly
+// through the bound dispatch thread, and finalize round-trips cleanly.  (This
+// binary runs without the affinity syscall interposer, so the contract is
+// asserted through the warning-silence + decode + finalize surface.)
+TEST(PyMatchingRealtime, SessionCpuAffinityOnlyStillBinds) {
+#if defined(__linux__)
+  cpu_set_t allowed;
+  CPU_ZERO(&allowed);
+  ASSERT_EQ(sched_getaffinity(0, sizeof(allowed), &allowed), 0);
+  if (!CPU_ISSET(0, &allowed))
+    GTEST_SKIP() << "CPU 0 is not in the allowed cpuset";
+
+  auto decoders = make_session_pair();
+  cudaqx::heterogeneous_map knobs;
+  knobs.insert("cpu_affinity", std::vector<int>{0});
+  decoders[0]->set_hardware_params(knobs);
+  decoders[1]->set_hardware_params(knobs);
+
+  cudaq::qec::realtime::qec_realtime_session session(decoders);
+  session_finalizer fin{session};
+  bool threw = false;
+  std::string what;
+  const std::string err = initialize_capturing_stderr(session, threw, what);
+  ASSERT_FALSE(threw) << "agreeing cpu_affinity lists must initialize "
+                         "cleanly: "
+                      << what;
+  EXPECT_EQ(err.find("request different"), std::string::npos)
+      << "agreeing knobs must not raise a conflict warning; captured "
+         "stderr: ["
+      << err << "]";
+  EXPECT_EQ(err.find("[cudaq-qec affinity]"), std::string::npos)
+      << "binding to an allowed CPU must be silent; captured stderr: [" << err
+      << "]";
+
+  expect_decoder_still_decodes(session, /*decoder_id=*/0, /*tag=*/1);
+  expect_decoder_still_decodes(session, /*decoder_id=*/1, /*tag=*/2);
+  EXPECT_NO_THROW(session.finalize());
+#else
+  GTEST_SKIP() << "Linux-only (sched_getaffinity probe)";
+#endif
+}
+
 // Silence contract: a session over decoders that never
 // touched a pinning knob must emit ZERO affinity noise ("[cudaq-qec
 // affinity]" is the fprintf marker of hardware_affinity.h's affinity_warn)
