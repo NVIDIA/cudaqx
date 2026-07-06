@@ -25,7 +25,12 @@ jobs:
         platform: ['amd64', 'arm64']
         cuda_version: ['12.6', '13.0']
     runs-on: ${{ startsWith(github.repository, 'NVIDIA/cudaqx') && format('linux-{0}-cpu8', matrix.platform) || 'ubuntu-latest' }}
-    container: ghcr.io/nvidia/cuda-quantum-devcontainer:${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc12-main
+    container:
+      image: ghcr.io/nvidia/cuda-quantum-devcontainer:${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc12-main
+      # SYS_NICE: the default seccomp profile only admits the NUMA memory-policy
+      # syscalls (set_mempolicy/get_mempolicy/mbind) with this capability, which
+      # the hardware-affinity tests exercise.
+      options: --cap-add=SYS_NICE
     permissions:
       actions: write
       contents: read
@@ -234,3 +239,81 @@ jobs:
         run: |
           PYTHONPATH="/cudaq-install:$GITHUB_WORKSPACE/build_qec/python" \
             pytest -v libs/qec/python/tests/
+
+  # ==========================================================================
+  # Multi-GPU tests - decoder placement across >= 2 GPUs (uses build artifacts
+  # from build-and-test).
+  #
+  # Keep this lane on the ARM L4 2-GPU runner while amd64 2-GPU runner
+  # availability is too limited for PR CI. The runner metadata remains
+  # structured so artifact and container selection stay arch-driven. Run CUDA
+  # 13.0 only because the ARM CUDA 12.6 lane does not support TensorRT.
+  # ==========================================================================
+  multi-gpu-test:
+    name: Multi-GPU tests (${{ matrix.runner.arch }}, CUDA ${{ matrix.cuda_version }})
+    needs: build-and-test
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - arch: arm64
+            label: linux-arm64-gpu-l4-latest-2
+        cuda_version: ['13.0']
+    runs-on: ${{ matrix.runner.label }}
+    container:
+      image: ghcr.io/nvidia/cuda-quantum-devcontainer:${{ matrix.runner.arch }}-cu${{ matrix.cuda_version }}-gcc12-main
+      # SYS_NICE: see build-and-test.
+      options: --cap-add=SYS_NICE
+      env:
+        NVIDIA_VISIBLE_DEVICES: ${{ env.NVIDIA_VISIBLE_DEVICES }}
+    timeout-minutes: 45
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Install git for LFS
+        shell: bash
+        run: |
+          apt update
+          apt install -y --no-install-recommends git git-lfs
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          set-safe-directory: true
+          lfs: true # TRT tests read the ONNX asset from the source tree
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: qec-build-${{ matrix.runner.arch }}-cu${{ matrix.cuda_version }}
+          path: /tmp
+
+      - name: Extract build artifacts
+        run: |
+          tar xzf /tmp/qec-build-artifacts.tar.gz -C /
+
+      - name: Configure
+        id: config
+        run: |
+          cuda_major=$(echo ${{ matrix.cuda_version }} | cut -d . -f1)
+          echo "cuda_major=$cuda_major" >> $GITHUB_OUTPUT
+
+      - name: Install cuStabilizer runtime
+        run: |
+          pip install --upgrade "cuquantum-python-cu${{ steps.config.outputs.cuda_major }}>=26.3.0"
+
+      - name: Install TensorRT (C++, arm64)
+        if: matrix.runner.arch == 'arm64' && !startsWith(matrix.cuda_version, '12')
+        run: |
+          apt update
+          apt-cache search tensorrt | awk '{print "Package: "$1"\nPin: version *+cuda13.0\nPin-Priority: 1001\n"}' | tee /etc/apt/preferences.d/tensorrt-cuda13.0.pref > /dev/null
+          apt install -y tensorrt-dev
+
+      - name: Run multi-GPU C++ tests
+        run: |
+          cd $GITHUB_WORKSPACE/build_qec
+          # The matching tests will be added separately; until then, this
+          # command should not fail solely because the filter finds no tests.
+          ctest --output-on-failure \
+            -R "DecoderPool|HardwarePinningGpu|PoolRunsTwoTrt|CudaDeviceId"
