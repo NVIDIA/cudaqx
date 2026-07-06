@@ -11,7 +11,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <span>
+#include <vector>
 
 namespace cudaq::qec::decoder_server {
 
@@ -23,25 +23,23 @@ struct PeerId {
   bool operator==(const PeerId &) const = default;
 };
 
-/// A received frame: full wire bytes (RPCHeader + payload) plus transport
+/// A received frame: owns the wire bytes (RPCHeader + payload) plus transport
 /// metadata needed for syndrome scatter and response routing.
+/// Ownership of buf is transferred to WorkItem on enqueue; no release needed.
 struct RxFrame {
-  std::span<const uint8_t> bytes; ///< RPCHeader + payload
-  uint32_t vp_id;                 ///< transport QP / VP index
-  PeerId peer;                    ///< destination for the response
+  std::vector<uint8_t> buf; ///< RPCHeader + payload (owned)
+  uint32_t vp_id;
+  PeerId peer;
 };
 
 /// Transport abstraction used by DecoderServer and DecoderSession.
 struct ITransceiver {
-  /// Block until a frame is available and return it.
+  /// Block until a frame is available and return it (buf is owned by caller).
   virtual RxFrame recv() = 0;
 
   /// Send a response to \p peer.  Thread-safe: called from session worker
   /// threads, which may be concurrent.
-  virtual void send(const PeerId &peer, const uint8_t *buf, size_t len) = 0;
-
-  /// Release ring-buffer slot; no-op for copy-based impls.
-  virtual void release(RxFrame /*frame*/) {}
+  virtual void send(const PeerId &peer, const uint8_t *data, size_t len) = 0;
 
   virtual ~ITransceiver() = default;
 };

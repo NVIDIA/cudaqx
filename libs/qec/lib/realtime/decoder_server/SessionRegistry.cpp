@@ -104,6 +104,11 @@ void SessionRegistry::load_from_config(const std::string &yaml_path) {
     if (!dc.D_sparse.empty())
       session.dec->set_D_sparse(dc.D_sparse);
 
+    // [For follow-up] dc.transport (cpu_roce / gpu_roce) is parsed from YAML
+    // but not yet used to select a transceiver here. Transport binding requires
+    // CpuRoceTransceiverAdapter / GpuRoceTransceiverAdapter (gated on
+    // CUDAQ_REALTIME headers); the split-transport DecoderServer constructor
+    // is already in place to accept the resulting dispatch map.
     session.start_worker();
     sessions_.emplace(id, std::move(session));
   }

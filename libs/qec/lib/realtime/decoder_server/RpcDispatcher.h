@@ -23,8 +23,9 @@ namespace cudaq::qec::decoder_server {
 class ResponseWriter {
 public:
   ResponseWriter(ITransceiver &transport, const PeerId &peer,
-                 uint64_t request_id)
-      : transport_(transport), peer_(peer), request_id_(request_id) {}
+                 uint32_t request_id, uint64_t ptp_timestamp)
+      : transport_(transport), peer_(peer), request_id_(request_id),
+        ptp_timestamp_(ptp_timestamp) {}
 
   void write_error(RpcStatus status);
 
@@ -35,7 +36,8 @@ public:
 private:
   ITransceiver &transport_;
   PeerId peer_;
-  uint64_t request_id_;
+  uint32_t request_id_;
+  uint64_t ptp_timestamp_;
 };
 
 /// Routes incoming RxFrames to registered handlers by function_id.
@@ -46,13 +48,14 @@ private:
 class RpcDispatcher {
 public:
   /// Handler: enqueue a WorkItem or call writer.write_error() for sync errors.
-  using Handler = std::function<void(const RxFrame &, ResponseWriter &)>;
+  /// RxFrame is passed by value so the handler can move buf into WorkItem.
+  using Handler = std::function<void(RxFrame, ResponseWriter &)>;
 
   void register_handler(uint32_t function_id, Handler h);
 
   /// Validate header, look up function_id, and invoke the registered handler.
   /// Writes BAD_REQUEST if the header is malformed or function_id is unknown.
-  void dispatch(const RxFrame &frame, ITransceiver &transport);
+  void dispatch(RxFrame frame, ITransceiver &transport);
 
 private:
   std::unordered_map<uint32_t, Handler> table_;

@@ -22,8 +22,7 @@ namespace cudaq::qec::decoder_server {
 ///
 /// LoopbackTransceiver::make() returns two endpoints A and B.
 /// Data written with A.send() is readable via B.recv(), and vice versa.
-/// All payload bytes are copied on enqueue, so frames are owned and the
-/// caller does not need to hold the original buffer alive.
+/// All payload bytes are copied on enqueue so each RxFrame owns its buffer.
 class LoopbackTransceiver final : public ITransceiver {
 public:
   static std::pair<std::unique_ptr<LoopbackTransceiver>,
@@ -32,10 +31,7 @@ public:
 
   RxFrame recv() override;
 
-  void send(const PeerId &peer, const uint8_t *buf, size_t len) override;
-
-  // No-op: payload is already owned by the frame buffer.
-  void release(RxFrame /*frame*/) override {}
+  void send(const PeerId &peer, const uint8_t *data, size_t len) override;
 
 private:
   explicit LoopbackTransceiver(
@@ -45,9 +41,6 @@ private:
       std::shared_ptr<std::condition_variable> cv)
       : inbox_(std::move(inbox)), outbox_(std::move(outbox)),
         mtx_(std::move(mtx)), cv_(std::move(cv)) {}
-
-  // Current frame buffer held across recv() → release().
-  std::vector<uint8_t> current_frame_;
 
   std::shared_ptr<std::deque<std::vector<uint8_t>>> inbox_;
   std::shared_ptr<std::deque<std::vector<uint8_t>>> outbox_;
@@ -75,24 +68,17 @@ inline RxFrame LoopbackTransceiver::recv() {
   // Use a timed wait so the caller's shutdown loop can observe the flag.
   while (inbox_->empty())
     cv_->wait_for(lk, std::chrono::milliseconds(10));
-  current_frame_ = std::move(inbox_->front());
+  RxFrame frame;
+  frame.buf = std::move(inbox_->front());
   inbox_->pop_front();
-  lk.unlock();
-
-  PeerId peer{};
-  return RxFrame{
-      .bytes = std::span<const uint8_t>(current_frame_),
-      .vp_id = 0,
-      .peer = peer,
-  };
+  return frame;
 }
 
 inline void LoopbackTransceiver::send(const PeerId & /*peer*/,
-                                      const uint8_t *buf, size_t len) {
-  std::vector<uint8_t> frame(buf, buf + len);
+                                      const uint8_t *data, size_t len) {
   {
     std::lock_guard<std::mutex> lk(*mtx_);
-    outbox_->push_back(std::move(frame));
+    outbox_->emplace_back(data, data + len);
   }
   cv_->notify_all();
 }

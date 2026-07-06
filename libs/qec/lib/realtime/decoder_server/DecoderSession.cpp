@@ -63,16 +63,17 @@ void DecoderSession::latch_syndromes_dropped() {
 }
 
 static void send_response(ITransceiver &transport, const PeerId &peer,
-                          uint64_t request_id, RpcStatus status,
+                          uint32_t request_id, uint64_t ptp_timestamp,
+                          RpcStatus status,
                           const uint8_t *result_data = nullptr,
                           size_t result_len = 0) {
   std::vector<uint8_t> buf(sizeof(RPCResponse) + result_len);
   auto *hdr = reinterpret_cast<RPCResponse *>(buf.data());
   hdr->magic = kRPCResponseMagic;
   hdr->status = static_cast<int32_t>(status);
-  hdr->request_id = request_id;
   hdr->result_len = static_cast<uint32_t>(result_len);
-  hdr->_pad = 0;
+  hdr->request_id = request_id;
+  hdr->ptp_timestamp = ptp_timestamp;
   if (result_data && result_len)
     std::memcpy(buf.data() + sizeof(RPCResponse), result_data, result_len);
   transport.send(peer, buf.data(), buf.size());
@@ -84,23 +85,23 @@ void DecoderSession::on_enqueue(const WorkItem &item) {
   ++enqueue_count;
 
   const size_t min_size = sizeof(RPCHeader) + sizeof(EnqueuePayload);
-  if (item.payload.size() < min_size) {
+  if (item.frame_buf.size() < min_size) {
     ++error_count;
     return; // enqueue_syndromes never sends a response
   }
 
   const auto *req = reinterpret_cast<const EnqueuePayload *>(
-      item.payload.data() + sizeof(RPCHeader));
+      item.frame_buf.data() + sizeof(RPCHeader));
 
   const size_t syndrome_bytes =
       bit_packed_bytes(static_cast<size_t>(req->num_syndromes));
-  if (item.payload.size() < min_size + syndrome_bytes) {
+  if (item.frame_buf.size() < min_size + syndrome_bytes) {
     ++error_count;
     return;
   }
 
   const uint8_t *bit_data =
-      item.payload.data() + sizeof(RPCHeader) + sizeof(EnqueuePayload);
+      item.frame_buf.data() + sizeof(RPCHeader) + sizeof(EnqueuePayload);
 
   // Unpack bit-packed syndromes to byte-per-bit for the decoder.
   std::vector<uint8_t> unpacked(static_cast<size_t>(req->num_syndromes));
@@ -127,19 +128,20 @@ void DecoderSession::on_enqueue(const WorkItem &item) {
 void DecoderSession::on_get_corrections(const WorkItem &item) {
   ++get_corrections_count;
 
-  if (item.payload.size() < sizeof(RPCHeader) + sizeof(GetCorrectionsPayload)) {
+  if (item.frame_buf.size() <
+      sizeof(RPCHeader) + sizeof(GetCorrectionsPayload)) {
     ++error_count;
     send_response(*item.response_transport, item.peer, item.request_id,
-                  RpcStatus::BAD_REQUEST);
+                  item.ptp_timestamp, RpcStatus::BAD_REQUEST);
     return;
   }
 
   const auto *req = reinterpret_cast<const GetCorrectionsPayload *>(
-      item.payload.data() + sizeof(RPCHeader));
+      item.frame_buf.data() + sizeof(RPCHeader));
 
   if (syndromes_dropped.exchange(false, std::memory_order_acq_rel)) {
     send_response(*item.response_transport, item.peer, item.request_id,
-                  RpcStatus::INTERNAL_ERROR);
+                  item.ptp_timestamp, RpcStatus::INTERNAL_ERROR);
     return;
   }
 
@@ -147,13 +149,13 @@ void DecoderSession::on_get_corrections(const WorkItem &item) {
     const uint8_t *raw = dec->get_obs_corrections();
     if (!raw) {
       send_response(*item.response_transport, item.peer, item.request_id,
-                    RpcStatus::NOT_READY);
+                    item.ptp_timestamp, RpcStatus::NOT_READY);
       return;
     }
     const size_t num_bytes =
         bit_packed_bytes(static_cast<size_t>(req->return_size));
     send_response(*item.response_transport, item.peer, item.request_id,
-                  RpcStatus::OK, raw, num_bytes);
+                  item.ptp_timestamp, RpcStatus::OK, raw, num_bytes);
 
     if (req->reset) {
       dec->reset_decoder();
@@ -163,7 +165,7 @@ void DecoderSession::on_get_corrections(const WorkItem &item) {
     CUDA_QEC_ERROR("DecoderSession::on_get_corrections: {}", e.what());
     ++error_count;
     send_response(*item.response_transport, item.peer, item.request_id,
-                  RpcStatus::INTERNAL_ERROR);
+                  item.ptp_timestamp, RpcStatus::INTERNAL_ERROR);
   }
 }
 
@@ -174,12 +176,12 @@ void DecoderSession::on_reset(const WorkItem &item) {
     accumulator.clear();
     syndromes_dropped.store(false, std::memory_order_release);
     send_response(*item.response_transport, item.peer, item.request_id,
-                  RpcStatus::OK);
+                  item.ptp_timestamp, RpcStatus::OK);
   } catch (const std::exception &e) {
     CUDA_QEC_ERROR("DecoderSession::on_reset: {}", e.what());
     ++error_count;
     send_response(*item.response_transport, item.peer, item.request_id,
-                  RpcStatus::INTERNAL_ERROR);
+                  item.ptp_timestamp, RpcStatus::INTERNAL_ERROR);
   }
 }
 

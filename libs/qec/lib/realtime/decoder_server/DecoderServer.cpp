@@ -49,21 +49,20 @@ void DecoderServer::init(const std::string &config_yaml) {
   // enqueue_syndromes — fire-and-forget; no synchronous response.
   dispatcher_.register_handler(
       kEnqueueSyndromesFunctionId,
-      [this](const RxFrame &frame, ResponseWriter &writer) {
-        if (frame.bytes.size() < sizeof(RPCHeader) + sizeof(EnqueuePayload)) {
+      [this](RxFrame frame, ResponseWriter &writer) {
+        if (frame.buf.size() < sizeof(RPCHeader) + sizeof(EnqueuePayload)) {
           writer.write_error(RpcStatus::BAD_REQUEST);
           return;
         }
         const auto *req = reinterpret_cast<const EnqueuePayload *>(
-            frame.bytes.data() + sizeof(RPCHeader));
-        const auto *hdr =
-            reinterpret_cast<const RPCHeader *>(frame.bytes.data());
+            frame.buf.data() + sizeof(RPCHeader));
+        const auto *hdr = reinterpret_cast<const RPCHeader *>(frame.buf.data());
 
         auto &session = registry_.get(static_cast<uint64_t>(req->decoder_id));
 
         WorkItem item;
         item.function_id = kEnqueueSyndromesFunctionId;
-        item.payload.assign(frame.bytes.begin(), frame.bytes.end());
+        item.frame_buf = std::move(frame.buf);
         item.peer = frame.peer;
         item.request_id = hdr->request_id;
         item.ptp_timestamp = hdr->ptp_timestamp;
@@ -76,26 +75,24 @@ void DecoderServer::init(const std::string &config_yaml) {
 
   // get_corrections — response sent by the worker thread.
   dispatcher_.register_handler(
-      kGetCorrectionsFunctionId,
-      [this](const RxFrame &frame, ResponseWriter &writer) {
-        if (frame.bytes.size() <
+      kGetCorrectionsFunctionId, [this](RxFrame frame, ResponseWriter &writer) {
+        if (frame.buf.size() <
             sizeof(RPCHeader) + sizeof(GetCorrectionsPayload)) {
           writer.write_error(RpcStatus::BAD_REQUEST);
           return;
         }
         const auto *req = reinterpret_cast<const GetCorrectionsPayload *>(
-            frame.bytes.data() + sizeof(RPCHeader));
-        const auto *hdr =
-            reinterpret_cast<const RPCHeader *>(frame.bytes.data());
+            frame.buf.data() + sizeof(RPCHeader));
+        const auto *hdr = reinterpret_cast<const RPCHeader *>(frame.buf.data());
 
         auto &session = registry_.get(static_cast<uint64_t>(req->decoder_id));
 
         WorkItem item;
         item.function_id = kGetCorrectionsFunctionId;
-        item.payload.assign(frame.bytes.begin(), frame.bytes.end());
+        item.frame_buf = std::move(frame.buf);
         item.peer = frame.peer;
         item.request_id = hdr->request_id;
-        item.ptp_timestamp = 0;
+        item.ptp_timestamp = hdr->ptp_timestamp;
         item.vp_id = frame.vp_id;
         item.response_transport = writer.transport();
 
@@ -105,25 +102,23 @@ void DecoderServer::init(const std::string &config_yaml) {
 
   // reset_decoder — response sent by the worker thread.
   dispatcher_.register_handler(
-      kResetDecoderFunctionId,
-      [this](const RxFrame &frame, ResponseWriter &writer) {
-        if (frame.bytes.size() < sizeof(RPCHeader) + sizeof(ResetPayload)) {
+      kResetDecoderFunctionId, [this](RxFrame frame, ResponseWriter &writer) {
+        if (frame.buf.size() < sizeof(RPCHeader) + sizeof(ResetPayload)) {
           writer.write_error(RpcStatus::BAD_REQUEST);
           return;
         }
         const auto *req = reinterpret_cast<const ResetPayload *>(
-            frame.bytes.data() + sizeof(RPCHeader));
-        const auto *hdr =
-            reinterpret_cast<const RPCHeader *>(frame.bytes.data());
+            frame.buf.data() + sizeof(RPCHeader));
+        const auto *hdr = reinterpret_cast<const RPCHeader *>(frame.buf.data());
 
         auto &session = registry_.get(static_cast<uint64_t>(req->decoder_id));
 
         WorkItem item;
         item.function_id = kResetDecoderFunctionId;
-        item.payload.assign(frame.bytes.begin(), frame.bytes.end());
+        item.frame_buf = std::move(frame.buf);
         item.peer = frame.peer;
         item.request_id = hdr->request_id;
-        item.ptp_timestamp = 0;
+        item.ptp_timestamp = hdr->ptp_timestamp;
         item.vp_id = frame.vp_id;
         item.response_transport = writer.transport();
 
@@ -153,9 +148,7 @@ void DecoderServer::run() {
   for (ITransceiver *t : unique_transports) {
     recv_threads.emplace_back([this, t] {
       while (!shutdown_.load(std::memory_order_acquire)) {
-        auto frame = t->recv();
-        dispatcher_.dispatch(frame, *t);
-        t->release(frame);
+        dispatcher_.dispatch(t->recv(), *t);
       }
     });
   }

@@ -20,9 +20,9 @@ static constexpr uint32_t kEnqueueSyndromesFunctionId = 0x7ED8BE82u;
 static constexpr uint32_t kGetCorrectionsFunctionId = 0x882D5BA1u;
 static constexpr uint32_t kResetDecoderFunctionId = 0x977A59CFu;
 
-// Wire magic bytes.
-static constexpr uint32_t kRPCRequestMagic = 0xDEC0DEC0u;
-static constexpr uint32_t kRPCResponseMagic = 0xC0RREC0Ru;
+// Wire magic bytes (from cudaq-realtime spec).
+static constexpr uint32_t kRPCRequestMagic = 0x43555152u;  // 'CUQR'
+static constexpr uint32_t kRPCResponseMagic = 0x43555153u; // 'CUQS'
 
 // Status codes carried in RPCResponse::status.
 enum class RpcStatus : int32_t {
@@ -34,16 +34,16 @@ enum class RpcStatus : int32_t {
   BUSY = 5,
 };
 
-// Request header; precedes the payload bytes in every RxFrame.
+// Request header — 24 bytes, packed, little-endian, no padding.
+// Layout matches cudaq-realtime RPCHeader exactly.
 struct __attribute__((packed)) RPCHeader {
   uint32_t magic;         ///< kRPCRequestMagic
   uint32_t function_id;   ///< FNV1a-32 of the callee name
-  uint64_t request_id;    ///< client monotone counter; echoed in response
-  uint64_t ptp_timestamp; ///< nanoseconds (0 if unavailable)
   uint32_t arg_len;       ///< bytes of payload following this header
-  uint32_t _pad;          ///< zero
+  uint32_t request_id;    ///< caller-assigned; echoed in response
+  uint64_t ptp_timestamp; ///< PTP send timestamp in ns (0 if unused)
 };
-static_assert(sizeof(RPCHeader) == 32, "RPCHeader must be 32 bytes");
+static_assert(sizeof(RPCHeader) == 24, "RPCHeader must be 24 bytes");
 
 // Payload structs for each of the three RPCs.
 // Layouts mirror decoder_rpc_ids.h without requiring CUDAQ_REALTIME headers.
@@ -71,13 +71,14 @@ struct __attribute__((packed)) ResetPayload {
 };
 static_assert(sizeof(ResetPayload) == 8, "ResetPayload must be 8 bytes");
 
-// Response header; precedes the result bytes (if any).
+// Response header — 24 bytes, packed, little-endian, no padding.
+// Layout matches cudaq-realtime RPCResponse exactly.
 struct __attribute__((packed)) RPCResponse {
-  uint32_t magic;      ///< kRPCResponseMagic
-  int32_t status;      ///< RpcStatus cast to int32_t
-  uint64_t request_id; ///< echo of RPCHeader::request_id
-  uint32_t result_len; ///< bytes of result payload following (0 on error)
-  uint32_t _pad;       ///< zero
+  uint32_t magic;         ///< kRPCResponseMagic
+  int32_t status;         ///< RpcStatus cast to int32_t; 0 = success
+  uint32_t result_len;    ///< bytes of result payload following (0 on error)
+  uint32_t request_id;    ///< echoed from RPCHeader::request_id
+  uint64_t ptp_timestamp; ///< echoed from RPCHeader::ptp_timestamp
 };
 static_assert(sizeof(RPCResponse) == 24, "RPCResponse must be 24 bytes");
 

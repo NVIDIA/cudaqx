@@ -24,9 +24,9 @@ void ResponseWriter::write_error(RpcStatus status) {
   auto *hdr = reinterpret_cast<RPCResponse *>(buf.data());
   hdr->magic = kRPCResponseMagic;
   hdr->status = static_cast<int32_t>(status);
-  hdr->request_id = request_id_;
   hdr->result_len = 0;
-  hdr->_pad = 0;
+  hdr->request_id = request_id_;
+  hdr->ptp_timestamp = ptp_timestamp_;
   transport_.send(peer_, buf.data(), buf.size());
 }
 
@@ -38,23 +38,24 @@ void RpcDispatcher::register_handler(uint32_t function_id, Handler h) {
   table_.emplace(function_id, std::move(h));
 }
 
-void RpcDispatcher::dispatch(const RxFrame &frame, ITransceiver &transport) {
+void RpcDispatcher::dispatch(RxFrame frame, ITransceiver &transport) {
   // Minimum frame: RPCHeader only.
-  if (frame.bytes.size() < sizeof(RPCHeader)) {
+  if (frame.buf.size() < sizeof(RPCHeader)) {
     CUDA_QEC_DEBUG("RpcDispatcher: frame too short ({} bytes)",
-                   frame.bytes.size());
+                   frame.buf.size());
     // Cannot build a meaningful response without a valid request_id.
     return;
   }
 
-  const auto *hdr = reinterpret_cast<const RPCHeader *>(frame.bytes.data());
+  const auto *hdr = reinterpret_cast<const RPCHeader *>(frame.buf.data());
 
   if (hdr->magic != kRPCRequestMagic) {
     CUDA_QEC_DEBUG("RpcDispatcher: bad magic 0x{:08X}", hdr->magic);
     return;
   }
 
-  ResponseWriter writer(transport, frame.peer, hdr->request_id);
+  ResponseWriter writer(transport, frame.peer, hdr->request_id,
+                        hdr->ptp_timestamp);
 
   auto it = table_.find(hdr->function_id);
   if (it == table_.end()) {
@@ -65,7 +66,7 @@ void RpcDispatcher::dispatch(const RxFrame &frame, ITransceiver &transport) {
   }
 
   try {
-    it->second(frame, writer);
+    it->second(std::move(frame), writer);
   } catch (const std::out_of_range &) {
     writer.write_error(RpcStatus::INVALID_DECODER);
   } catch (const std::invalid_argument &) {

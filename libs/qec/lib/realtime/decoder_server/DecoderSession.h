@@ -28,12 +28,15 @@ using CorrectionBits = std::vector<uint8_t>;
 
 /// A unit of work dispatched from the RpcDispatcher to a DecoderSession worker
 /// thread.  The payload is an owned copy of the full frame bytes so that the
-/// dispatcher can return the transport ring slot immediately.
+/// dispatcher can return the transport ring slot immediately after dispatch.
+/// Zero-copy (holding a span into the ring buffer) is a future optimization;
+/// if adopted, release(frame) must move to after the worker consumes the
+/// payload.
 struct WorkItem {
   uint32_t function_id;
-  std::vector<uint8_t> payload; ///< RPCHeader + payload bytes (owned)
-  PeerId peer;                  ///< response destination
-  uint64_t request_id;          ///< echoed from RPCHeader
+  std::vector<uint8_t> frame_buf; ///< RPCHeader + payload (moved from RxFrame)
+  PeerId peer;                    ///< response destination
+  uint32_t request_id;            ///< echoed from RPCHeader
   uint64_t ptp_timestamp;
   uint32_t vp_id;
   ITransceiver *response_transport; ///< transport the request arrived on
