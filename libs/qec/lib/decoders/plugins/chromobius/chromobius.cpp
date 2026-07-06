@@ -140,6 +140,9 @@ public:
     // observable-reduction logic treat each predicted bit as its own observable
     // correction.
     this->set_O_sparse(identity_sparse(num_observables));
+    // Chromobius returns observable flips directly; declare this so the base
+    // class knows not to project through O_sparse a second time.
+    set_result_type(decode_to_obs);
   }
 
   decoder_result decode(const std::vector<float_t> &syndrome) override {

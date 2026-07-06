@@ -118,7 +118,8 @@ struct NumaGuard {
   ~NumaGuard() {
     if (mempol_set_)
       cudaq::qec::detail_affinity::restore_thread_mempolicy(prev_mempolicy_);
-    if (affinity_set_ && has_prev_affinity_)
+    // has_prev_affinity_ is implied: it is set iff affinity_set_ is set.
+    if (affinity_set_)
       if (sched_setaffinity(0, sizeof(prev_set_), &prev_set_) != 0)
         cudaq::qec::detail_affinity::affinity_warn(
             "NumaGuard restore: failed to reset thread affinity: " +
@@ -360,9 +361,12 @@ decoder::decode_on_pinned_thread(const std::vector<float_t> &syndrome) {
                                           std::memory_order_acq_rel);
   });
   worker.join();
-  // Restore the caller's prior binding that the worker overwrote. The worker
-  // has joined so this store races with nothing.
-  bound_thread_.store(caller_id, std::memory_order_release);
+  // Restore caller_id only if the slot is still empty (worker cleared it).
+  // If a concurrent bind_current_thread() wrote a different id between the
+  // worker's CAS-clear and here, leave that binding intact.
+  std::thread::id empty{};
+  bound_thread_.compare_exchange_strong(empty, caller_id,
+                                        std::memory_order_acq_rel);
   if (err)
     std::rethrow_exception(err);
   return result;
@@ -415,8 +419,10 @@ std::string decoder::get_version() const {
 
 std::future<decoder_result>
 decoder::decode_async(const std::vector<float_t> &syndrome) {
-  // Capture by value: avoids a data race if the decoder is destroyed before
-  // the future resolves.
+  // The three affinity scalars are captured by value so the lambda doesn't
+  // dereference decoder members on the hot path.
+  // LIFETIME PRECONDITION: the decoder must outlive the returned future.
+  // Destroying the decoder before calling .get() is undefined behaviour.
   const int cuda_id = cuda_device_id_;
   const int numa_id = numa_node_id_;
   const cudaq::qec::mempolicy_mode mempolicy = mempolicy_;
@@ -463,7 +469,12 @@ decoder::get(const std::string &name, const decoder_init &init,
     if (!is_affinity_key(kv.first))
       plugin_params.insert(kv.first, kv.second);
   auto d = iter->second(init, plugin_params);
-  d->set_hardware_params(param_map);
+  // Inject the pre-computed NUMA node so set_hardware_params() doesn't
+  // re-derive it via a second numa_node_for_cuda_device() sysfs read.
+  cudaqx::heterogeneous_map hw_params = param_map;
+  if (cudaq::qec::read_numa_node_id(param_map) < 0 && node >= 0)
+    hw_params.insert("numa_node_id", node);
+  d->set_hardware_params(hw_params);
   return d;
 }
 

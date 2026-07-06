@@ -197,6 +197,8 @@ public:
   /// value is the probability that the syndrome measurement is a |1>.
   /// @returns std::future of a vector of length `block_size` with soft
   /// probabilities of errors in each index.
+  /// @note The caller must ensure the decoder outlives the returned future.
+  ///       Destroying the decoder before calling .get() is undefined behaviour.
   virtual std::future<decoder_result>
   decode_async(const std::vector<float_t> &syndrome);
 

@@ -890,13 +890,24 @@ void qec_realtime_session::start_host_loop() {
 
     const int node = session_numa_node_;
     host_loop_thread_ = std::thread([this, node]() {
-      // Persistent bind: this thread does nothing but decode for its lifetime.
-      try {
-        cudaq::qec::detail_affinity::bind_this_thread_to_numa_node(node);
-      } catch (const std::exception &e) {
-        cudaq::qec::detail_affinity::affinity_warn(
-            "host loop thread NUMA bind failed: " + std::string(e.what()) +
-            " — continuing without affinity");
+      // Persistent bind via decoder::bind_current_thread() so that
+      // is_bound_here() returns true and per-call NUMA/CUDA guards are
+      // suppressed in the decode hot path.
+      // Guard: skip if initialize() detected a NUMA conflict and set
+      // session_numa_node_ < 0 — per-call guards must stay active then.
+      if (node >= 0) {
+        for (auto &d : decoders_) {
+          if (!d)
+            continue;
+          try {
+            d->bind_current_thread();
+          } catch (const std::exception &e) {
+            cudaq::qec::detail_affinity::affinity_warn(
+                "host loop thread bind failed for decoder " +
+                std::to_string(d->get_decoder_id()) + ": " +
+                std::string(e.what()) + " — continuing without guard-skip");
+          }
+        }
       }
       cudaq_host_dispatcher_loop(&host_ctx_);
     });
@@ -1009,15 +1020,22 @@ void qec_realtime_session::start_host_loop() {
   {
     const int node = session_numa_node_;
     host_loop_thread_ = std::thread([this, node]() {
-      // Mirror the HOST-mode dispatch thread's pinning above: the CPU-side
-      // monitor thread benefits from the same NUMA locality regardless of
-      // dispatch mode.
-      try {
-        cudaq::qec::detail_affinity::bind_this_thread_to_numa_node(node);
-      } catch (const std::exception &e) {
-        cudaq::qec::detail_affinity::affinity_warn(
-            "host loop thread NUMA bind failed: " + std::string(e.what()) +
-            " — continuing without affinity");
+      // Mirror HOST-mode: bind via decoder::bind_current_thread() so that
+      // guard-skip is activated for the decode hot path.
+      // Guard: skip if initialize() detected a NUMA conflict (node < 0).
+      if (node >= 0) {
+        for (auto &d : decoders_) {
+          if (!d)
+            continue;
+          try {
+            d->bind_current_thread();
+          } catch (const std::exception &e) {
+            cudaq::qec::detail_affinity::affinity_warn(
+                "host loop thread bind failed for decoder " +
+                std::to_string(d->get_decoder_id()) + ": " +
+                std::string(e.what()) + " — continuing without guard-skip");
+          }
+        }
       }
       cudaq_host_dispatcher_loop(&host_ctx_);
     });

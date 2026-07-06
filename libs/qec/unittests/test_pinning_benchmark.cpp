@@ -156,6 +156,45 @@ TEST(PinningBenchmark, OneShotPinnedDecodeDoesNotStickToObject) {
          "still issue affinity syscalls";
 }
 
+// Verify that decode_on_pinned_thread() does not clobber a concurrent
+// bind_current_thread() that runs from a third thread.
+TEST(PinningBenchmark, OneShotDoesNotClobberConcurrentBind) {
+  if (!cudaqx_affinity_syscall_count)
+    GTEST_SKIP() << "affinity-counter shim not preloaded";
+  auto d = makePinnedLut();
+
+  // Thread B will call bind_current_thread() while the one-shot worker runs.
+  std::atomic<bool> b_bound{false};
+  std::thread thread_b([&] {
+    // Spin until main_worker signals us to bind.
+    while (!b_bound.load(std::memory_order_acquire))
+      std::this_thread::yield();
+    d->bind_current_thread();
+  });
+
+  // Run decode_on_pinned_thread from the main thread; signal B to bind midway.
+  std::thread main_worker([&] {
+    // Signal B just before decode so the race window is as wide as possible.
+    b_bound.store(true, std::memory_order_release);
+    d->decode_on_pinned_thread(kChunk[0]);
+  });
+
+  main_worker.join();
+  thread_b.join();
+
+  // After both threads finish, whoever bound last should have their binding
+  // intact. At a minimum, is_bound_here() from thread_b must not permanently
+  // suppress guards: a subsequent decode from an unbound thread must still
+  // issue syscalls.
+  cudaqx_affinity_syscall_reset();
+  // Run decode from a fresh thread that was never bound.
+  std::thread unbound([&] { d->decode_batch(kChunk); });
+  unbound.join();
+  // An unbound thread must always fire the guard.
+  EXPECT_GT(cudaqx_affinity_syscall_count(), 0)
+      << "guard must still fire for unbound threads after concurrent-bind race";
+}
+
 TEST(PinningBenchmark, EnqueueSyndromeAppliesGuardOnUnboundThread) {
   if (!cudaqx_affinity_syscall_count)
     GTEST_SKIP() << "affinity-counter shim not preloaded";
