@@ -1045,19 +1045,23 @@ TEST(HardwarePinning, DecodeBatchLeavesPersistentDeviceBinding) {
   if (count < 2)
     GTEST_SKIP() << "needs >= 2 GPUs";
 
-  cudaSetDevice(0);
-  cudaqx::tensor<uint8_t> H({2, 3});
-  cudaqx::heterogeneous_map params;
-  params.insert("cuda_device_id", 1);
-  auto d = cudaq::qec::decoder::get("multi_error_lut", H, params);
+  // Persistent bind must not leak into later tests: run on a worker thread.
+  std::thread t([] {
+    cudaSetDevice(0);
+    cudaqx::tensor<uint8_t> H({2, 3});
+    cudaqx::heterogeneous_map params;
+    params.insert("cuda_device_id", 1);
+    auto d = cudaq::qec::decoder::get("multi_error_lut", H, params);
 
-  d->bind_current_thread(); // caller now persistently on device 1
-  std::vector<std::vector<cudaq::qec::float_t>> batch = {{0.1f, 0.1f}};
-  (void)d->decode_batch(batch);
+    d->bind_current_thread(); // caller now persistently on device 1
+    std::vector<std::vector<cudaq::qec::float_t>> batch = {{0.1f, 0.1f}};
+    (void)d->decode_batch(batch);
 
-  int dev = -1;
-  cudaGetDevice(&dev);
-  EXPECT_EQ(dev, 1) << "decode_batch restored device despite persistent bind";
+    int dev = -1;
+    cudaGetDevice(&dev);
+    EXPECT_EQ(dev, 1) << "decode_batch restored device despite persistent bind";
+  });
+  t.join();
 }
 
 TEST(HardwarePinning, BindCurrentThreadAppliesCpuAffinity) {

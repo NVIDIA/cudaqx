@@ -60,6 +60,38 @@ ShimCounts readShimCounts() {
           cudaqx_set_mempolicy_count(), cudaqx_get_mempolicy_count()};
 }
 
+#if defined(__linux__)
+// Container seccomp commonly blocks the mempolicy syscalls. When
+// SYS_get_mempolicy is blocked, NumaGuard cannot capture the prior policy and
+// correctly skips set_mempolicy entirely, so tests asserting setmem > 0 must
+// skip, not fail (mirrors test_device_affinity.cpp). Read-only: no side
+// effects on the thread's policy.
+bool get_mempolicy_usable() {
+  int mode = -1;
+  return syscall(SYS_get_mempolicy, &mode, nullptr, 0UL, nullptr, 0UL) == 0;
+}
+#else
+bool get_mempolicy_usable() { return false; }
+#endif
+
+// bind_current_thread() is persistent (no restore). Run test bodies that bind
+// on a disposable worker so the gtest main thread's placement stays intact
+// for later tests. EXPECT_* record correctly from any thread.
+template <typename F>
+void run_on_worker(F &&fn) {
+  std::exception_ptr err;
+  std::thread t([&] {
+    try {
+      fn();
+    } catch (...) {
+      err = std::current_exception();
+    }
+  });
+  t.join();
+  if (err)
+    std::rethrow_exception(err);
+}
+
 // Pinned decoder with D/O set so ALL entry points (incl. enqueue_syndrome)
 // are callable.
 std::unique_ptr<cudaq::qec::decoder> makeEntryReadyPinnedLut() {
@@ -99,43 +131,49 @@ void callDecodeAsync(cudaq::qec::decoder &d) {
 TEST(PinningBenchmark, BoundDecodeLoopIssuesNoAffinitySyscalls) {
   if (!cudaqx_affinity_syscall_count)
     GTEST_SKIP() << "affinity-counter shim not preloaded";
-  auto d = makePinnedLut();
-  constexpr int N = 200;
+  run_on_worker(
+      [] {
+        auto d = makePinnedLut();
+        constexpr int N = 200;
 
-  // Canary: unbound -> per-call guard fires.
-  cudaqx_affinity_syscall_reset();
-  for (int i = 0; i < N; ++i)
-    d->decode_batch(kChunk);
-  long unbound = cudaqx_affinity_syscall_count();
-  EXPECT_GT(unbound, 0) << "unbound decode loop should issue affinity syscalls "
-                           "(else the gate is vacuous)";
+        // Canary: unbound -> per-call guard fires.
+        cudaqx_affinity_syscall_reset();
+        for (int i = 0; i < N; ++i)
+          d->decode_batch(kChunk);
+        long unbound = cudaqx_affinity_syscall_count();
+        EXPECT_GT(unbound, 0)
+            << "unbound decode loop should issue affinity syscalls "
+               "(else the gate is vacuous)";
 
-  // Bound: bind once, then the loop must add none.
-  d->bind_current_thread();
-  cudaqx_affinity_syscall_reset();
-  for (int i = 0; i < N; ++i)
-    d->decode_batch(kChunk);
-  long bound = cudaqx_affinity_syscall_count();
-  EXPECT_EQ(bound, 0)
-      << "bound decode loop must not re-issue affinity syscalls";
+        // Bound: bind once, then the loop must add none.
+        d->bind_current_thread();
+        cudaqx_affinity_syscall_reset();
+        for (int i = 0; i < N; ++i)
+          d->decode_batch(kChunk);
+        long bound = cudaqx_affinity_syscall_count();
+        EXPECT_EQ(bound, 0)
+            << "bound decode loop must not re-issue affinity syscalls";
+      });
 }
 
 TEST(PinningBenchmark, BindOnOneThreadStillGuardsAnotherThread) {
   if (!cudaqx_affinity_syscall_count)
     GTEST_SKIP() << "affinity-counter shim not preloaded";
-  auto d = makePinnedLut();
-  d->bind_current_thread(); // bind on the main test thread
+  run_on_worker([] {
+    auto d = makePinnedLut();
+    d->bind_current_thread(); // bind on the binding worker thread
 
-  long from_other_thread = -1;
-  std::thread other([&] {
-    cudaqx_affinity_syscall_reset();
-    d->decode_batch(kChunk);
-    from_other_thread = cudaqx_affinity_syscall_count();
+    long from_other_thread = -1;
+    std::thread other([&] {
+      cudaqx_affinity_syscall_reset();
+      d->decode_batch(kChunk);
+      from_other_thread = cudaqx_affinity_syscall_count();
+    });
+    other.join();
+    EXPECT_GT(from_other_thread, 0)
+        << "a thread that never called bind_current_thread() must still be "
+           "guarded, even though a DIFFERENT thread bound this decoder";
   });
-  other.join();
-  EXPECT_GT(from_other_thread, 0)
-      << "a thread that never called bind_current_thread() must still be "
-         "guarded, even though a DIFFERENT thread bound this decoder";
 }
 
 // Guards the decode_on_pinned_thread() contract: its one-shot worker thread
@@ -211,26 +249,28 @@ TEST(PinningBenchmark, EnqueueSyndromeAppliesGuardOnUnboundThread) {
 
 // Loose A/B (report + gross-regression guard only; timing is noisy).
 TEST(PinningBenchmark, BoundThroughputNotWorseThanUnbound) {
-  auto d = makePinnedLut();
-  constexpr int N = 5000;
-  auto run = [&] {
-    auto t0 = std::chrono::steady_clock::now();
-    for (int i = 0; i < N; ++i)
-      d->decode_batch(kChunk);
-    return std::chrono::duration<double, std::micro>(
-               std::chrono::steady_clock::now() - t0)
-        .count();
-  };
-  run(); // warm up
-  double unbound_us = run();
-  d->bind_current_thread();
-  run(); // warm up bound
-  double bound_us = run();
-  std::printf(
-      "[pinning A/B] unbound=%.1fus bound=%.1fus (%d decodes) ratio=%.2f\n",
-      unbound_us, bound_us, N, bound_us / unbound_us);
-  // Pinning removes per-call guard work; it must not be materially slower.
-  EXPECT_LT(bound_us, unbound_us * 1.5);
+  run_on_worker([] {
+    auto d = makePinnedLut();
+    constexpr int N = 5000;
+    auto run = [&] {
+      auto t0 = std::chrono::steady_clock::now();
+      for (int i = 0; i < N; ++i)
+        d->decode_batch(kChunk);
+      return std::chrono::duration<double, std::micro>(
+                 std::chrono::steady_clock::now() - t0)
+          .count();
+    };
+    run(); // warm up
+    double unbound_us = run();
+    d->bind_current_thread();
+    run(); // warm up bound
+    double bound_us = run();
+    std::printf(
+        "[pinning A/B] unbound=%.1fus bound=%.1fus (%d decodes) ratio=%.2f\n",
+        unbound_us, bound_us, N, bound_us / unbound_us);
+    // Pinning removes per-call guard work; it must not be materially slower.
+    EXPECT_LT(bound_us, unbound_us * 1.5);
+  });
 }
 
 TEST(PinningBenchmark, DecodeBatchRestoresExactPriorMempolicy) {
@@ -290,22 +330,24 @@ TEST(PinningInvariants, GuardSkipsMempolicyWhenCaptureFails) {
 TEST(PinningInvariants, BoundEntryPointsIssueNoPlacementSyscalls) {
   if (!shimCountersPresent())
     GTEST_SKIP() << "affinity-counter shim not preloaded";
-  for (const auto &ep : kCallerGuardedEntryPoints) {
-    SCOPED_TRACE(ep.name);
-    auto d = makeEntryReadyPinnedLut();
-    d->bind_current_thread();
-    auto before = thread_placement::capture();
-    cudaqx_affinity_syscall_reset();
-    ep.call(*d);
-    auto c = readShimCounts();
-    EXPECT_EQ(c.setaff, 0) << "bound path issued sched_setaffinity";
-    EXPECT_EQ(c.getaff, 0) << "bound path issued sched_getaffinity";
-    EXPECT_EQ(c.setmem, 0) << "bound path issued set_mempolicy";
-    EXPECT_EQ(c.getmem, 0) << "bound path issued get_mempolicy";
-    auto after = thread_placement::capture();
-    EXPECT_EQ(before, after) << "bound path changed placement: "
-                             << before.describe_difference(after);
-  }
+  run_on_worker([] {
+    for (const auto &ep : kCallerGuardedEntryPoints) {
+      SCOPED_TRACE(ep.name);
+      auto d = makeEntryReadyPinnedLut();
+      d->bind_current_thread();
+      auto before = thread_placement::capture();
+      cudaqx_affinity_syscall_reset();
+      ep.call(*d);
+      auto c = readShimCounts();
+      EXPECT_EQ(c.setaff, 0) << "bound path issued sched_setaffinity";
+      EXPECT_EQ(c.getaff, 0) << "bound path issued sched_getaffinity";
+      EXPECT_EQ(c.setmem, 0) << "bound path issued set_mempolicy";
+      EXPECT_EQ(c.getmem, 0) << "bound path issued get_mempolicy";
+      auto after = thread_placement::capture();
+      EXPECT_EQ(before, after) << "bound path changed placement: "
+                               << before.describe_difference(after);
+    }
+  });
 }
 
 // decode_async decodes on a fresh std::async worker which can never be the
@@ -315,18 +357,24 @@ TEST(PinningInvariants, BoundEntryPointsIssueNoPlacementSyscalls) {
 TEST(PinningInvariants, BoundDecodeAsyncGuardsWorkerAndLeavesCallerPlacement) {
   if (!shimCountersPresent())
     GTEST_SKIP() << "affinity-counter shim not preloaded";
-  auto d = makeEntryReadyPinnedLut();
-  d->bind_current_thread();
-  auto before = thread_placement::capture();
-  cudaqx_affinity_syscall_reset();
-  callDecodeAsync(*d);
-  EXPECT_GT(readShimCounts().setmem, 0)
-      << "decode_async's worker-thread guard must still attempt set_mempolicy "
-         "(the caller's binding must not leak to the worker)";
-  auto after = thread_placement::capture();
-  EXPECT_EQ(before, after) << "decode_async changed the CALLING thread's "
-                              "placement: "
-                           << before.describe_difference(after);
+  if (!get_mempolicy_usable())
+    GTEST_SKIP() << "get_mempolicy blocked (container seccomp?); the guard "
+                    "correctly skips set_mempolicy then, so setmem > 0 "
+                    "cannot hold";
+  run_on_worker([] {
+    auto d = makeEntryReadyPinnedLut();
+    d->bind_current_thread();
+    auto before = thread_placement::capture();
+    cudaqx_affinity_syscall_reset();
+    callDecodeAsync(*d);
+    EXPECT_GT(readShimCounts().setmem, 0)
+        << "decode_async's worker-thread guard must still attempt "
+           "set_mempolicy (the caller's binding must not leak to the worker)";
+    auto after = thread_placement::capture();
+    EXPECT_EQ(before, after) << "decode_async changed the CALLING thread's "
+                                "placement: "
+                             << before.describe_difference(after);
+  });
 }
 
 // Unbound-path invariant, per entry point (incl. decode_async): the guard must
@@ -335,6 +383,10 @@ TEST(PinningInvariants, BoundDecodeAsyncGuardsWorkerAndLeavesCallerPlacement) {
 TEST(PinningInvariants, UnboundEntryPointsApplyAndFullyRestoreGuard) {
   if (!shimCountersPresent())
     GTEST_SKIP() << "affinity-counter shim not preloaded";
+  if (!get_mempolicy_usable())
+    GTEST_SKIP() << "get_mempolicy blocked (container seccomp?); the guard "
+                    "correctly skips set_mempolicy then, so setmem > 0 "
+                    "cannot hold";
   std::vector<GuardedEntryPoint> entries(std::begin(kCallerGuardedEntryPoints),
                                          std::end(kCallerGuardedEntryPoints));
   entries.push_back({"decode_async", callDecodeAsync});
@@ -350,4 +402,24 @@ TEST(PinningInvariants, UnboundEntryPointsApplyAndFullyRestoreGuard) {
     EXPECT_EQ(before, after) << "guard applied but not fully restored: "
                              << before.describe_difference(after);
   }
+}
+
+// unbind_thread() must forget the registration so guards re-engage — the
+// session calls it at teardown before the bound thread's id can be recycled.
+TEST(PinningBenchmark, UnbindThreadRestoresGuarding) {
+  if (!cudaqx_affinity_syscall_count)
+    GTEST_SKIP() << "affinity-counter shim not preloaded";
+  run_on_worker([] {
+    auto d = makePinnedLut();
+    d->bind_current_thread();
+    cudaqx_affinity_syscall_reset();
+    d->decode_batch(kChunk);
+    EXPECT_EQ(cudaqx_affinity_syscall_count(), 0)
+        << "bound thread must skip the guard";
+    d->unbind_thread();
+    cudaqx_affinity_syscall_reset();
+    d->decode_batch(kChunk);
+    EXPECT_GT(cudaqx_affinity_syscall_count(), 0)
+        << "after unbind_thread() the guard must fire again";
+  });
 }

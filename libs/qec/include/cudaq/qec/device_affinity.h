@@ -58,12 +58,26 @@ inline mempolicy_mode read_mempolicy(const cudaqx::heterogeneous_map &params) {
 }
 
 /// @brief Read "cpu_affinity": a list of CPU core ids. Absent -> empty (no
-/// override).
+/// override). Accepts vector<int> (C++/YAML) and vector<double> with integral
+/// values (Python kwargs path — lists arrive as doubles).
 inline std::vector<int>
 read_cpu_affinity(const cudaqx::heterogeneous_map &params) {
   if (!params.contains("cpu_affinity"))
     return {};
-  return params.get<std::vector<int>>("cpu_affinity");
+  try {
+    return params.get<std::vector<int>>("cpu_affinity");
+  } catch (...) {
+  }
+  const auto vals = params.get<std::vector<double>>("cpu_affinity");
+  std::vector<int> cores;
+  cores.reserve(vals.size());
+  for (double v : vals) {
+    if (v != static_cast<double>(static_cast<int>(v)))
+      throw std::runtime_error("cpu_affinity core ids must be integers (got " +
+                               std::to_string(v) + ")");
+    cores.push_back(static_cast<int>(v));
+  }
+  return cores;
 }
 
 /// @brief NUMA node local to a CUDA device (via PCIe locality), or -1 if the

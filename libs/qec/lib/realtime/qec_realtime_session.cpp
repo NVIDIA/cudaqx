@@ -22,8 +22,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
+#include <limits>
 #include <stdexcept>
 #include <string>
+#include <unistd.h>
 
 namespace cudaq::qec::realtime {
 
@@ -336,16 +338,37 @@ void qec_realtime_session::initialize() {
     {
       int chosen = -1;
       bool conflict = false;
+      int chosen_dev = -1;
+      bool dev_conflict = false;
+      std::vector<int> chosen_cpus;
+      bool affinity_conflict = false;
       for (const auto &d : decoders_) {
         if (!d)
           continue;
         const int n = d->numa_node_id();
-        if (n < 0)
-          continue;
-        if (chosen < 0)
-          chosen = n;
-        else if (chosen != n)
-          conflict = true;
+        if (n >= 0) {
+          if (chosen < 0)
+            chosen = n;
+          else if (chosen != n)
+            conflict = true;
+        }
+        const int dev = d->cuda_device_id();
+        if (dev >= 0) {
+          if (chosen_dev < 0)
+            chosen_dev = dev;
+          else if (chosen_dev != dev)
+            dev_conflict = true;
+        }
+        // bind_current_thread() also applies each decoder's explicit
+        // cpu_affinity list persistently; disagreeing non-empty lists would
+        // silently resolve to last-bind-wins. Empty lists never disagree.
+        const std::vector<int> &cpus = d->cpu_affinity();
+        if (!cpus.empty()) {
+          if (chosen_cpus.empty())
+            chosen_cpus = cpus;
+          else if (chosen_cpus != cpus)
+            affinity_conflict = true;
+        }
       }
       if (conflict) {
         CUDA_QEC_WARN(
@@ -356,6 +379,19 @@ void qec_realtime_session::initialize() {
       } else {
         session_numa_node_ = chosen;
       }
+      if (dev_conflict)
+        CUDA_QEC_WARN(
+            "realtime decoders request different cuda_device_ids; the shared "
+            "dispatch thread cannot hold one device for all of them. "
+            "Guard-skip binding disabled; per-call guards stay active.");
+      if (affinity_conflict)
+        CUDA_QEC_WARN(
+            "realtime decoders request different cpu_affinity lists; the "
+            "shared dispatch thread can honor only one. Guard-skip binding "
+            "disabled; per-call guards stay active.");
+      bind_decoders_to_host_loop_ = !dev_conflict && !conflict &&
+                                    !affinity_conflict &&
+                                    (chosen >= 0 || chosen_dev >= 0);
     }
     allocate_ring_buffer();
     populate_function_table();
@@ -618,29 +654,41 @@ void qec_realtime_session::allocate_ring_buffer() {
       shutdown_flag_dev_ = static_cast<int *>(d);
     }
   } else {
-    // HOST mode: plain host memory; the device-visible pointers alias the host
-    // backings (no GPU required at runtime).  The host loop reads only the
-    // *_host views; the producer's address-as-flag publish uses rx_data_dev()
-    // (== rx_data_host_ here), which the host loop dereferences as host memory.
-    auto alloc_u64 = [&](volatile std::uint64_t *&host,
-                         volatile std::uint64_t *&dev, const char *what) {
-      void *p = std::calloc(num_slots_, sizeof(std::uint64_t));
+    // HOST mode: plain page-aligned host memory; the device-visible pointers
+    // alias the host backings (no GPU required at runtime). Page alignment is
+    // required by the mbind(2) migration below — a calloc pointer is not
+    // page-aligned and made the migration fail with EINVAL.
+    const std::size_t page = static_cast<std::size_t>(sysconf(_SC_PAGESIZE));
+    // calloc (the previous allocator here) detected multiplication overflow;
+    // aligned_alloc does not, so guard the num_slots_ * size products.
+    auto checked_mul = [](std::size_t a, std::size_t b) -> std::size_t {
+      if (b != 0 && a > std::numeric_limits<std::size_t>::max() / b)
+        throw std::runtime_error(
+            "qec_realtime_session::initialize: ring size overflow");
+      return a * b;
+    };
+    auto alloc_zeroed_pages = [&](std::size_t bytes,
+                                  const char *what) -> void * {
+      const std::size_t rounded = (bytes + page - 1) & ~(page - 1);
+      void *p = std::aligned_alloc(page, rounded);
       if (!p)
         throw std::runtime_error(
             std::string(
                 "qec_realtime_session::initialize: failed to allocate ") +
             what);
+      std::memset(p, 0, rounded);
+      return p;
+    };
+    auto alloc_u64 = [&](volatile std::uint64_t *&host,
+                         volatile std::uint64_t *&dev, const char *what) {
+      void *p = alloc_zeroed_pages(
+          checked_mul(num_slots_, sizeof(std::uint64_t)), what);
       host = static_cast<volatile std::uint64_t *>(p);
       dev = host;
     };
     auto alloc_u8 = [&](std::uint8_t *&host, std::uint8_t *&dev,
                         const char *what) {
-      void *p = std::calloc(num_slots_, slot_size_);
-      if (!p)
-        throw std::runtime_error(
-            std::string(
-                "qec_realtime_session::initialize: failed to allocate ") +
-            what);
+      void *p = alloc_zeroed_pages(checked_mul(num_slots_, slot_size_), what);
       host = static_cast<std::uint8_t *>(p);
       dev = host;
     };
@@ -649,8 +697,9 @@ void qec_realtime_session::allocate_ring_buffer() {
     alloc_u8(rx_data_host_, rx_data_dev_, "RX ring data");
     alloc_u8(tx_data_host_, tx_data_dev_, "TX ring data");
     // Migrate the syndrome ring buffers onto the session node so the (pinned)
-    // dispatch thread reads them on-node. calloc already faulted these on the
-    // setup thread, so this relocates the pages (MPOL_MF_MOVE).
+    // dispatch thread reads them on-node. The pages are zero-filled (faulted)
+    // at allocation, so MPOL_MF_MOVE relocates them; unfaulted pages follow
+    // the VMA policy set by mbind.
     if (session_numa_node_ >= 0) {
       using cudaq::qec::detail_affinity::bind_region_to_numa_node;
       bind_region_to_numa_node((void *)rx_flags_host_,
@@ -889,13 +938,14 @@ void qec_realtime_session::start_host_loop() {
     shutdown_flag_ = 0;
 
     const int node = session_numa_node_;
-    host_loop_thread_ = std::thread([this, node]() {
+    const bool bind_decoders = bind_decoders_to_host_loop_;
+    host_loop_thread_ = std::thread([this, node, bind_decoders]() {
       // Persistent bind via decoder::bind_current_thread() so that
       // is_bound_here() returns true and per-call NUMA/CUDA guards are
-      // suppressed in the decode hot path.
-      // Guard: skip if initialize() detected a NUMA conflict and set
-      // session_numa_node_ < 0 — per-call guards must stay active then.
-      if (node >= 0) {
+      // suppressed in the decode hot path. Only when initialize() proved all
+      // decoders agree on both placement knobs; otherwise keep per-call
+      // guards active and give the thread plain NUMA locality at most.
+      if (bind_decoders) {
         for (auto &d : decoders_) {
           if (!d)
             continue;
@@ -907,6 +957,14 @@ void qec_realtime_session::start_host_loop() {
                 std::to_string(d->get_decoder_id()) + ": " +
                 std::string(e.what()) + " — continuing without guard-skip");
           }
+        }
+      } else if (node >= 0) {
+        try {
+          cudaq::qec::detail_affinity::bind_this_thread_to_numa_node(node);
+        } catch (const std::exception &e) {
+          cudaq::qec::detail_affinity::affinity_warn(
+              "host loop thread NUMA bind failed: " + std::string(e.what()) +
+              " — continuing without affinity");
         }
       }
       cudaq_host_dispatcher_loop(&host_ctx_);
@@ -1019,11 +1077,14 @@ void qec_realtime_session::start_host_loop() {
 
   {
     const int node = session_numa_node_;
-    host_loop_thread_ = std::thread([this, node]() {
+    const bool bind_decoders = bind_decoders_to_host_loop_;
+    host_loop_thread_ = std::thread([this, node, bind_decoders]() {
       // Mirror HOST-mode: bind via decoder::bind_current_thread() so that
-      // guard-skip is activated for the decode hot path.
-      // Guard: skip if initialize() detected a NUMA conflict (node < 0).
-      if (node >= 0) {
+      // guard-skip is activated for the decode hot path. Only when
+      // initialize() proved all decoders agree on both placement knobs;
+      // otherwise keep per-call guards active and give the thread plain NUMA
+      // locality at most.
+      if (bind_decoders) {
         for (auto &d : decoders_) {
           if (!d)
             continue;
@@ -1035,6 +1096,14 @@ void qec_realtime_session::start_host_loop() {
                 std::to_string(d->get_decoder_id()) + ": " +
                 std::string(e.what()) + " — continuing without guard-skip");
           }
+        }
+      } else if (node >= 0) {
+        try {
+          cudaq::qec::detail_affinity::bind_this_thread_to_numa_node(node);
+        } catch (const std::exception &e) {
+          cudaq::qec::detail_affinity::affinity_warn(
+              "host loop thread NUMA bind failed: " + std::string(e.what()) +
+              " — continuing without affinity");
         }
       }
       cudaq_host_dispatcher_loop(&host_ctx_);
@@ -1061,6 +1130,13 @@ void qec_realtime_session::stop_loops() {
 
   if (host_loop_thread_.joinable())
     host_loop_thread_.join();
+
+  // The dispatch thread may have registered itself on the decoders via
+  // bind_current_thread(); it is gone now — clear the registrations before
+  // its thread id can be recycled by an unrelated new thread.
+  for (auto &d : decoders_)
+    if (d)
+      d->unbind_thread();
 
   if (device_dispatcher_) {
     cudaq_dispatcher_stop(device_dispatcher_);

@@ -917,10 +917,10 @@ trt_decoder::decode_batch(const std::vector<std::vector<float_t>> &syndromes) {
       _dev_switched = true;
     }
   }
-  struct _RestoreDevice {
+  struct RestoreDevice {
     int prev;
     bool active;
-    ~_RestoreDevice() {
+    ~RestoreDevice() {
       if (!active)
         return;
       if (cudaSetDevice(prev) != cudaSuccess)
@@ -931,14 +931,14 @@ trt_decoder::decode_batch(const std::vector<std::vector<float_t>> &syndromes) {
   } _dev_guard{_prev_dev, _dev_switched};
 
   namespace da = cudaq::qec::detail_affinity;
-  struct _ScopedNuma {
+  struct ScopedNuma {
     bool active = false;
     bool has_prev_affinity = false;
 #if defined(__linux__)
     cpu_set_t prev_set{};
 #endif
     da::mempolicy_state prev_mempolicy;
-    _ScopedNuma(int node, cudaq::qec::mempolicy_mode mode) {
+    ScopedNuma(int node, cudaq::qec::mempolicy_mode mode) {
       if (node < 0)
         return;
       bool apply_mempol = true;
@@ -958,7 +958,7 @@ trt_decoder::decode_batch(const std::vector<std::vector<float_t>> &syndromes) {
       // syscall for out-of-range nodes, so there is nothing to undo then.
       active = true;
     }
-    ~_ScopedNuma() {
+    ~ScopedNuma() {
       if (!active)
         return;
 #if defined(__linux__)

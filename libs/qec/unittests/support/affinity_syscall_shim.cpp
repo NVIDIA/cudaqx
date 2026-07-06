@@ -1,3 +1,10 @@
+/*******************************************************************************
+ * Copyright (c) 2025 - 2026 NVIDIA Corporation & Affiliates.                  *
+ * All rights reserved.                                                        *
+ *                                                                             *
+ * This source code and the accompanying materials are made available under    *
+ * the terms of the Apache License 2.0 which accompanies this distribution.    *
+ ******************************************************************************/
 // Test-only LD_PRELOAD interposer: counts the placement-related syscalls so a
 // test can assert a bound decode loop issues none (and an unbound one does).
 // Counts four syscalls: sched_setaffinity / sched_getaffinity (glibc symbols)

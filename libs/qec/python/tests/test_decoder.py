@@ -1019,5 +1019,60 @@ def test_get_decoder_stim_dem_without_observables_returns_errors():
     assert list(result.result) == [1.0]
 
 
+def test_python_decoder_affinity_kwargs_stripped_and_stored():
+
+    @qec.decoder("strict_affinity_byod")
+    class StrictAffinityDecoder:
+        # Deliberately NO **kwargs: affinity keys must be stripped before
+        # __init__, mirroring the C++ decoder::get() contract.
+        def __init__(self, H):
+            qec.Decoder.__init__(self, H)
+
+        def decode(self, syndrome):
+            r = qec.DecoderResult()
+            r.converged = True
+            r.result = [0.0, 0.0, 0.0]
+            return r
+
+    H = np.array([[1, 1, 0], [0, 1, 1]], dtype=np.uint8)
+    # numa_node_id must not reach __init__ (no TypeError) and must be stored
+    # on the C++ base so guarded entry points pin correctly.
+    d = qec.get_decoder("strict_affinity_byod", H, numa_node_id=0)
+    assert d.numa_node_id() == 0
+    assert d.cuda_device_id() == -1
+    results = d.decode_batch([[0.0, 0.0], [0.1, 0.1]])
+    assert len(results) == 2
+
+
+def test_python_decoder_affinity_kwargs_coexist_with_arbitrary_kwargs():
+    received = {}
+
+    @qec.decoder("affinity_plus_callback_byod")
+    class AffinityPlusCallbackDecoder:
+
+        def __init__(self, H, **kwargs):
+            qec.Decoder.__init__(self, H)
+            received.update(kwargs)
+
+        def decode(self, syndrome):
+            r = qec.DecoderResult()
+            r.converged = True
+            r.result = [0.0, 0.0, 0.0]
+            return r
+
+    H = np.array([[1, 1, 0], [0, 1, 1]], dtype=np.uint8)
+    cb = lambda x: x
+    # Non-affinity kwargs of arbitrary Python types (e.g. callables) must pass
+    # through to __init__ untouched — only the affinity keys are converted to
+    # the C++ heterogeneous map, so this must construct without raising.
+    d = qec.get_decoder("affinity_plus_callback_byod",
+                        H,
+                        numa_node_id=0,
+                        callback=cb)
+    assert d.numa_node_id() == 0
+    assert received["callback"] is cb
+    assert "numa_node_id" not in received
+
+
 if __name__ == "__main__":
     pytest.main()

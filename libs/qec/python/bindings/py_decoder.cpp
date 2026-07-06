@@ -251,6 +251,54 @@ std::unordered_map<std::string,
     PyDecoderRegistry::registry;
 
 namespace {
+bool is_affinity_kwarg(const std::string &k) {
+  return k == "cuda_device_id" || k == "numa_node_id" || k == "mempolicy" ||
+         k == "cpu_affinity";
+}
+
+// Mirror decoder::get()'s affinity contract for Python-registered decoders:
+// strip the affinity keys before __init__ (a strict decoder must not reject
+// them) and store them on the C++ base object so the guarded entry points
+// (decode_batch / decode(tensor) / decode_async / enqueue_syndrome) pin
+// correctly. Construction-time placement is NOT guarded on this path — the
+// RAII guards are private to decoder.cpp and the bindings stay CUDA-free.
+// Only the affinity keys are converted through hetMapFromKwargs: converting
+// every kwarg would throw on Python types it cannot map (callables, None,
+// tuples, ...) that a BYOD __init__ may legitimately accept.
+nb::object get_py_registered_decoder(const std::string &name, nb::object H,
+                                     nb::kwargs options) {
+  nb::dict stripped;
+  nb::dict affinity_kwargs;
+  for (auto item : options) {
+    if (is_affinity_kwarg(nb::cast<std::string>(item.first)))
+      affinity_kwargs[item.first] = item.second;
+    else
+      stripped[item.first] = item.second;
+  }
+  nb::object obj = PyDecoderRegistry::get_decoder(
+      name, H, nb::borrow<nb::kwargs>(stripped.ptr()));
+  // No affinity kwargs: preserve exact pre-existing behavior (including BYOD
+  // classes that never call qec.Decoder.__init__).
+  if (affinity_kwargs.size() == 0)
+    return obj;
+  // Narrow try: only the base-class cast maps to the "uninitialized base"
+  // message. hetMapFromKwargs can itself throw nb::cast_error (e.g. a negative
+  // Python int for cuda_device_id) and must not be misreported as a missing
+  // qec.Decoder.__init__ call.
+  decoder *base = nullptr;
+  try {
+    base = &nb::cast<decoder &>(obj);
+  } catch (const nb::cast_error &) {
+    throw std::runtime_error(
+        "Python decoder '" + name +
+        "' did not initialize its qec.Decoder base; call "
+        "qec.Decoder.__init__(self, H) in __init__ before using hardware "
+        "affinity kwargs (cuda_device_id/numa_node_id/mempolicy/cpu_affinity)");
+  }
+  base->set_hardware_params(
+      hetMapFromKwargs(nb::borrow<nb::kwargs>(affinity_kwargs.ptr())));
+  return obj;
+}
 
 struct batch_decoder_result {
   // Python-facing constructor for decoder plugin authors. nanobind enforces
@@ -705,6 +753,11 @@ void bindDecoder(nb::module_ &mod) {
           },
           "Decode multiple syndromes and return the results",
           nb::arg("syndrome"))
+      .def("cuda_device_id", &decoder::cuda_device_id,
+           "Target CUDA device for this decoder (-1 = inherit caller's "
+           "device).")
+      .def("numa_node_id", &decoder::numa_node_id,
+           "Target NUMA node for this decoder (-1 = no binding).")
       .def("get_block_size", &decoder::get_block_size,
            "Get the size of the code block")
       .def("get_syndrome_size", &decoder::get_syndrome_size,
@@ -870,7 +923,7 @@ void bindDecoder(nb::module_ &mod) {
         options["error_rate_vec"] = copyToPyArray(*defaults.error_rate_vec);
 
       nb::object H_obj = copyToPyArray(dem.detector_error_matrix);
-      return PyDecoderRegistry::get_decoder(name, H_obj, options);
+      return get_py_registered_decoder(name, H_obj, options);
     }
 
     return get_decoder(name, decoder_init{dem_text}, hetMapFromKwargs(options));
@@ -887,7 +940,7 @@ void bindDecoder(nb::module_ &mod) {
         }
 
         if (PyDecoderRegistry::contains(name)) {
-          return PyDecoderRegistry::get_decoder(name, H, options);
+          return get_py_registered_decoder(name, H, options);
         }
 
         cudaq::qec::sparse_binary_matrix H_sparse;

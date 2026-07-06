@@ -268,6 +268,9 @@ public:
   /// @brief Target CUDA device for this decoder (-1 = inherit caller's device).
   int cuda_device_id() const { return cuda_device_id_; }
 
+  /// @brief Explicit CPU list for this decoder (empty = derive from NUMA node).
+  const std::vector<int> &cpu_affinity() const { return cpu_affinity_; }
+
   /// @brief Persistently bind the CALLING thread to this decoder's NUMA node
   /// (and CUDA device). Call once from the thread that will own decode()/
   /// enqueue for this decoder (e.g. a realtime worker). No restore.
@@ -280,6 +283,14 @@ public:
   /// the result. Convenience for a one-off pinned decode; for sustained
   /// throughput drive decode on a long-lived bound thread instead.
   decoder_result decode_on_pinned_thread(const std::vector<float_t> &syndrome);
+
+  /// @brief Forget any bind_current_thread() registration on this decoder so
+  /// guarded entry points stop skipping their per-call guard. Call before the
+  /// bound thread exits (e.g. session teardown): thread ids are recycled by
+  /// the runtime, and a stale registration would let an unrelated new thread
+  /// silently skip the guard. Does not undo the OS-level placement of the
+  /// (exiting) bound thread.
+  void unbind_thread();
 
   // -- Begin realtime decoding API --
 

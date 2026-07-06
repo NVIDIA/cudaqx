@@ -9,6 +9,7 @@
 #include "cuda-qx/core/heterogeneous_map.h"
 #include "cudaq/qec/device_affinity.h"
 #include <cstdlib>
+#include <cstring>
 #include <gtest/gtest.h>
 
 #if defined(__linux__)
@@ -48,6 +49,16 @@ TEST(DeviceAffinity, ReadNegativeThrows) {
   heterogeneous_map m;
   m.insert("cuda_device_id", -1);
   EXPECT_THROW(read_cuda_device_id(m), std::runtime_error);
+}
+
+TEST(DeviceAffinity, ReadCpuAffinityAcceptsDoubleStorage) {
+  // Python kwargs deliver lists as vector<double>; integral values convert.
+  heterogeneous_map m;
+  m.insert("cpu_affinity", std::vector<double>{0.0, 2.0});
+  EXPECT_EQ(cudaq::qec::read_cpu_affinity(m), (std::vector<int>{0, 2}));
+  heterogeneous_map bad;
+  bad.insert("cpu_affinity", std::vector<double>{0.5});
+  EXPECT_THROW(cudaq::qec::read_cpu_affinity(bad), std::runtime_error);
 }
 
 #if defined(__linux__)
@@ -98,7 +109,11 @@ TEST(HardwareAffinity, CpuAffinityPinsToExactCores) {
   namespace da = cudaq::qec::detail_affinity;
   cpu_set_t saved;
   CPU_ZERO(&saved);
-  sched_getaffinity(0, sizeof(saved), &saved);
+  ASSERT_EQ(sched_getaffinity(0, sizeof(saved), &saved), 0);
+  // sched_setaffinity succeeds with the INTERSECTION of the requested and
+  // allowed masks; assert exact placement only where both cores are allowed.
+  if (!CPU_ISSET(0, &saved) || !CPU_ISSET(2, &saved))
+    GTEST_SKIP() << "CPUs 0 and 2 not both in this process's allowed cpuset";
   da::set_thread_cpu_affinity({0, 2});
   auto cpus = da::current_thread_cpuset();
   EXPECT_EQ(cpus, (std::vector<int>{0, 2}));
@@ -156,18 +171,20 @@ TEST(HardwareAffinity, NegativeNodeIsNoop) {
 }
 TEST(HardwareAffinity, BindRegionSetsPolicyOnBuffer) {
   namespace da = cudaq::qec::detail_affinity;
-  const size_t bytes = 4096;
-  void *p = std::calloc(1, bytes);
+  const long page = sysconf(_SC_PAGESIZE);
+  void *p = std::aligned_alloc(page, static_cast<size_t>(page));
   ASSERT_NE(p, nullptr);
-  da::bind_region_to_numa_node(p, bytes, 0); // preferred, node 0
+  std::memset(p, 0, static_cast<size_t>(page));
+  da::bind_region_to_numa_node(p, static_cast<size_t>(page), 0); // preferred
   int mode = -1;
   long rc = syscall(SYS_get_mempolicy, &mode, nullptr, 0UL, p, MPOL_F_ADDR);
-  if (rc == 0)
-    EXPECT_TRUE(mode == MPOL_PREFERRED || mode == MPOL_DEFAULT)
-        << "region policy after preferred-bind should be PREFERRED (or DEFAULT "
-           "if unsupported)";
-  da::bind_region_to_numa_node(p, bytes,
-                               -1); // negative node -> no-op, no crash
+  if (rc != 0) {
+    std::free(p);
+    GTEST_SKIP() << "get_mempolicy(MPOL_F_ADDR) unavailable (seccomp?)";
+  }
+  EXPECT_EQ(mode, MPOL_PREFERRED)
+      << "mbind on a page-aligned region must set MPOL_PREFERRED";
+  da::bind_region_to_numa_node(p, static_cast<size_t>(page), -1); // no-op ok
   std::free(p);
 }
 TEST(HardwareAffinity, BindRegionNode64Throws) {

@@ -340,6 +340,10 @@ bool decoder::is_bound_here() const {
          std::this_thread::get_id();
 }
 
+void decoder::unbind_thread() {
+  bound_thread_.store(std::thread::id{}, std::memory_order_release);
+}
+
 decoder_result
 decoder::decode_on_pinned_thread(const std::vector<float_t> &syndrome) {
   decoder_result result;
