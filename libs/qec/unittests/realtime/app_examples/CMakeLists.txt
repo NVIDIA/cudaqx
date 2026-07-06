@@ -603,6 +603,11 @@ _sc4_reject(distance-even "distance must be an odd integer"
   --distance 4 --num_rounds 4 --decoder_type pymatching
   --save_dem ${_sc4_neg_dir}/even.yml)
 
+# rounds guard: a single round has no cross-round detectors, so require >= 2.
+_sc4_reject(rounds-too-few "must be >= 2"
+  --distance 3 --num_rounds 1 --decoder_type pymatching
+  --save_dem ${_sc4_neg_dir}/t1.yml)
+
 # replay requires --yaml.
 _sc4_reject(replay-needs-yaml "load_syndrome requires --yaml"
   --load_syndrome ${_sc4_neg_dir}/none.txt --distance 3 --num_rounds 3)

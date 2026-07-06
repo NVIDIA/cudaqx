@@ -1447,12 +1447,16 @@ int main(int argc, char **argv) {
   }
 
   // The example decodes ONE volume of num_rounds rounds (no sliding windows),
-  // so there is no window-divisibility constraint: any num_rounds >= 1 is a
-  // representable memory experiment (e.g. d5/T6). num_rounds < distance is
-  // decodable but not fault-tolerant, so warn rather than reject -- the API
-  // should be able to express it.
-  if (num_rounds < 1) {
-    printf("Error: num_rounds (%d) must be >= 1\n", num_rounds);
+  // so there is no window-divisibility constraint: any num_rounds >= 2 is a
+  // representable memory experiment (e.g. d5/T6). Require >= 2 because a single
+  // round has no cross-round detectors (pairedRounds = num_rounds - 1 = 0) and
+  // therefore no temporal error information -- not a meaningful memory run.
+  // num_rounds < distance is decodable but not fault-tolerant, so warn rather
+  // than reject -- the API should still express it.
+  if (num_rounds < 2) {
+    printf("Error: num_rounds (%d) must be >= 2 (a memory experiment needs at "
+           "least one cross-round detector).\n",
+           num_rounds);
     return 1;
   }
   if (num_rounds < distance)
