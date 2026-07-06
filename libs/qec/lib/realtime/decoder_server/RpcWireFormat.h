@@ -16,13 +16,13 @@ namespace cudaq::qec::decoder_server {
 // Function IDs for the three decoder RPCs (FNV1a-32 of function names).
 // Values match the static_asserts in decoder_rpc_ids.h; duplicated here to
 // avoid a dependency on CUDAQ_REALTIME headers.
-static constexpr uint32_t kEnqueueSyndromesFunctionId = 0x7ED8BE82u;
-static constexpr uint32_t kGetCorrectionsFunctionId = 0x882D5BA1u;
-static constexpr uint32_t kResetDecoderFunctionId = 0x977A59CFu;
+inline constexpr uint32_t kEnqueueSyndromesFunctionId = 0x7ED8BE82u;
+inline constexpr uint32_t kGetCorrectionsFunctionId = 0x882D5BA1u;
+inline constexpr uint32_t kResetDecoderFunctionId = 0x977A59CFu;
 
 // Wire magic bytes (from cudaq-realtime spec).
-static constexpr uint32_t kRPCRequestMagic = 0x43555152u;  // 'CUQR'
-static constexpr uint32_t kRPCResponseMagic = 0x43555153u; // 'CUQS'
+inline constexpr uint32_t kRPCRequestMagic = 0x43555152u;  // 'CUQR'
+inline constexpr uint32_t kRPCResponseMagic = 0x43555153u; // 'CUQS'
 
 // Status codes carried in RPCResponse::status.
 enum class RpcStatus : int32_t {
@@ -32,6 +32,7 @@ enum class RpcStatus : int32_t {
   INTERNAL_ERROR = 3,
   NOT_READY = 4,
   BUSY = 5,
+  SYNDROMES_DROPPED = 6,
 };
 
 // Request header — 24 bytes, packed, little-endian, no padding.

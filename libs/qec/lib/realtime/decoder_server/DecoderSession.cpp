@@ -104,6 +104,7 @@ void DecoderSession::on_enqueue(const WorkItem &item) {
   const uint8_t *bit_data =
       item.frame_buf.data() + sizeof(RPCHeader) + sizeof(EnqueuePayload);
 
+  // TODO: add byte-packed compat path once compiler lowering PR lands.
   // Unpack bit-packed syndromes to byte-per-bit for the decoder.
   std::vector<uint8_t> unpacked(static_cast<size_t>(req->num_syndromes));
   for (int64_t i = 0; i < req->num_syndromes; ++i)
@@ -142,7 +143,7 @@ void DecoderSession::on_get_corrections(const WorkItem &item) {
 
   if (syndromes_dropped.exchange(false, std::memory_order_acq_rel)) {
     send_response(*item.response_transport, item.peer, item.request_id,
-                  item.ptp_timestamp, RpcStatus::INTERNAL_ERROR);
+                  item.ptp_timestamp, RpcStatus::SYNDROMES_DROPPED);
     return;
   }
 

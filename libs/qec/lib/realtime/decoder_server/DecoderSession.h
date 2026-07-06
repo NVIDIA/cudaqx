@@ -52,7 +52,7 @@ struct GraphResourcesDeleter {
 };
 using GraphResourcesPtr = std::unique_ptr<void, GraphResourcesDeleter>;
 
-static constexpr size_t kDefaultQueueDepth = 64;
+inline constexpr size_t kDefaultQueueDepth = 64;
 
 /// Owns one decoder instance plus a dedicated FIFO worker thread; decoder calls
 /// are sequenced through the worker.
