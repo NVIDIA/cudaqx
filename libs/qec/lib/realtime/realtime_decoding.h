@@ -30,6 +30,30 @@ __attribute__((visibility("default"))) void
 enqueue_syndromes(std::size_t decoder_id, uint8_t *syndromes,
                   std::uint64_t syndrome_length, std::uint64_t tag);
 
+/// @brief Zero-copy staging for transport handlers: reserve the decoder's
+/// execution-worker ring slot and return its payload buffer (blocks while
+/// the ring is full -- natural backpressure). The caller writes the
+/// unpacked byte-per-bool syndrome directly into it and calls
+/// commit_syndromes; decoder execution then happens on the decoder's own
+/// worker thread, so multiple decoders (logical qubits) run concurrently.
+/// Per-decoder FIFO order is the stage/commit order (single staging
+/// producer: the transport dispatcher thread).
+__attribute__((visibility("default"))) uint8_t *
+stage_syndromes(std::size_t decoder_id, std::uint64_t max_length);
+
+/// @brief Commit the syndrome staged by stage_syndromes for asynchronous
+/// execution on the decoder's worker thread. A decoder exception during
+/// deferred execution becomes sticky and is rethrown at that decoder's
+/// next get_corrections (reset_decoder clears it).
+__attribute__((visibility("default"))) void
+commit_syndromes(std::size_t decoder_id, std::uint64_t length,
+                 std::uint64_t tag);
+
+/// @brief High-water mark of concurrently-busy decoder execution workers
+/// since decoder initialization (concurrency evidence for tests/stats).
+__attribute__((visibility("default"))) std::uint64_t
+max_concurrent_decoder_workers();
+
 __attribute__((visibility("default"))) cudaqx::heterogeneous_map
 prepare_decoder_params(
     const cudaq::qec::decoding::config::decoder_config &decoder_config);

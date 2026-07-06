@@ -97,6 +97,12 @@ function(cudaqx_add_device_code LIBRARY_NAME)
     set(work_dir "${CMAKE_CURRENT_BINARY_DIR}/${LIBRARY_NAME}_${filename}.nvqpp")
     file(MAKE_DIRECTORY ${work_dir})
 
+    # TODO: this custom command only depends on the source file, not on the
+    # headers it includes (nvq++ emits no depfile here), so header changes do
+    # NOT trigger recompilation -- a stale object silently survives ninja
+    # after e.g. a config-struct layout change (ABI-mismatch segfaults).
+    # Until nvq++ depfile output is wired up, `rm` the affected
+    # <target>_<source>.o under the build tree after header changes.
     add_custom_command(
       OUTPUT ${output_file}
       COMMAND ${COMPILER}

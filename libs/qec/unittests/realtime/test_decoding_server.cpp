@@ -32,6 +32,7 @@
 #include "cudaq.h"
 #include "cudaq/qec/realtime/decoding.h"
 #include "cudaq/realtime.h"
+#include <fstream>
 #include <gtest/gtest.h>
 
 #include <poll.h>
@@ -96,7 +97,8 @@ std::string daemon_dir() {
 // line).
 class DaemonProcess {
 public:
-  bool start(const std::string &config_file, std::string &error) {
+  bool start(const std::string &config_file, std::string &error,
+             int ready_timeout_ms = 15000) {
     int out_pipe[2] = {-1, -1};
     if (::pipe(out_pipe) != 0) {
       error = "pipe() failed";
@@ -113,7 +115,9 @@ public:
       ::close(out_pipe[1]);
       const std::string daemon = daemon_path();
       const std::string config_arg =
-          "--config=" + daemon_dir() + "/" + config_file;
+          "--config=" + (!config_file.empty() && config_file[0] == '/'
+                             ? config_file
+                             : daemon_dir() + "/" + config_file);
       const std::string transport_arg =
           "--transport=" + env_or("QEC_DECODING_SERVER_TRANSPORT", "udp");
       const std::string device_arg =
@@ -129,9 +133,11 @@ public:
     ::close(out_pipe[1]);
     outFd = out_pipe[0];
 
-    // Read stdout until the READY line (or a 15 s deadline).
+    // Read stdout until the READY line (or the deadline; decoders that
+    // build TensorRT engines at startup need more than the default 15 s).
     std::string ready_line;
-    if (!readLineWithPrefix("QEC_DECODING_DAEMON_READY", 15000, ready_line)) {
+    if (!readLineWithPrefix("QEC_DECODING_DAEMON_READY", ready_timeout_ms,
+                            ready_line)) {
       error = "daemon did not print QEC_DECODING_DAEMON_READY; output so "
               "far: " +
               captured;
@@ -146,7 +152,8 @@ public:
   }
 
   // Terminate the daemon and return its dispatched-request count (-1 if the
-  // shutdown line never appeared).
+  // shutdown line never appeared). Also captures the per-decoder-worker
+  // concurrency high-water mark into max_concurrent_decoders.
   std::int64_t stopAndGetDispatchCount() {
     if (pid <= 0)
       return -1;
@@ -159,6 +166,15 @@ public:
                       "QEC_DECODING_DAEMON_DISPATCHED count=%lld",
                       &parsed) == 1)
         count = parsed;
+    }
+    if (readLineWithPrefix("QEC_DECODING_DAEMON_MAX_CONCURRENT_DECODERS",
+                           5000, line)) {
+      long long parsed = -1;
+      if (std::sscanf(
+              line.c_str(),
+              "QEC_DECODING_DAEMON_MAX_CONCURRENT_DECODERS count=%lld",
+              &parsed) == 1)
+        max_concurrent_decoders = parsed;
     }
     int status = 0;
     ::waitpid(pid, &status, 0);
@@ -182,6 +198,7 @@ public:
 
   std::uint16_t port = 0;
   std::string captured;
+  std::int64_t max_concurrent_decoders = -1;
 
 private:
   bool readLineWithPrefix(const char *prefix, int timeout_ms,
@@ -283,4 +300,103 @@ TEST(DecodingServerUdp, TwoProcessHostDispatch) {
 
 TEST(DecodingServerUdp, TwoProcessHostDispatchMultiErrorLut) {
   run_two_process_decode_test("decoding_server_config_multi_error_lut.yaml");
+}
+
+// ---------------------------------------------------------------------------
+// Two decoders (two logical qubits) in ONE daemon, driven from ONE __qpu__
+// kernel: qubit A uses decoder 0 and qubit B uses decoder 1, with different
+// active syndrome bits. On the server each decoder executes on its own
+// per-decoder worker thread; the daemon's shutdown
+// QEC_DECODING_DAEMON_MAX_CONCURRENT_DECODERS line reports the busy
+// high-water mark of those workers.
+// ---------------------------------------------------------------------------
+
+__qpu__ std::int64_t dual_decoding_server_udp_kernel() {
+  constexpr std::uint64_t kDecoderA = 0;
+  constexpr std::uint64_t kDecoderB = 1;
+  constexpr std::uint64_t kBlockSize = 3;
+  constexpr std::uint64_t kSyndromeSize = 3;
+  constexpr std::size_t kActiveA = 1;
+  constexpr std::size_t kActiveB = 2;
+
+  cudaq::qec::decoding::reset_decoder(kDecoderA);
+  cudaq::qec::decoding::reset_decoder(kDecoderB);
+
+  std::vector<bool> syndrome_a(kSyndromeSize);
+  std::vector<bool> syndrome_b(kSyndromeSize);
+  for (std::size_t i = 0; i < kSyndromeSize; ++i) {
+    syndrome_a[i] = false;
+    syndrome_b[i] = false;
+  }
+  syndrome_a[kActiveA] = true;
+  syndrome_b[kActiveB] = true;
+  cudaq::qec::decoding::enqueue_syndromes_test(kDecoderA, syndrome_a,
+                                               /*tag=*/1);
+  cudaq::qec::decoding::enqueue_syndromes_test(kDecoderB, syndrome_b,
+                                               /*tag=*/1);
+
+  auto corr_a = cudaq::qec::decoding::get_corrections(kDecoderA, kBlockSize,
+                                                      /*reset=*/true);
+  auto corr_b = cudaq::qec::decoding::get_corrections(kDecoderB, kBlockSize,
+                                                      /*reset=*/true);
+  std::int64_t out = 0;
+  if (corr_a[kActiveA])
+    out = out + 1; // bit 0: decoder 0 corrected its active bit
+  if (corr_b[kActiveB])
+    out = out + 2; // bit 1: decoder 1 corrected its active bit
+  if (corr_a[kActiveB])
+    out = out + 4; // bit 2 set = cross-talk (decoder 0 saw B's syndrome)
+  if (corr_b[kActiveA])
+    out = out + 8; // bit 3 set = cross-talk (decoder 1 saw A's syndrome)
+  return out;
+}
+
+TEST(DecodingServerUdp, TwoProcessHostDispatchDualDecoders) {
+  // Two identical 3-bit-identity pymatching decoders (ids 0 and 1) in one
+  // daemon -- one per logical qubit.
+  const std::string config_path =
+      ::testing::TempDir() + "/decoding_server_dual_config.yaml";
+  {
+    std::ofstream config_file(config_path);
+    config_file << "decoders:\n";
+    for (int id = 0; id < 2; ++id) {
+      config_file << "  - id: " << id << "\n"
+                  << "    type: pymatching\n"
+                  << "    block_size: 3\n"
+                  << "    syndrome_size: 3\n"
+                  << "    H_sparse: [0, -1, 1, -1, 2, -1]\n"
+                  << "    O_sparse: [0, -1, 1, -1, 2, -1]\n"
+                  << "    D_sparse: [0, -1, 1, -1, 2, -1]\n"
+                  << "    decoder_custom_args:\n"
+                  << "      merge_strategy: smallest_weight\n"
+                  << "      error_rate_vec: [0.1, 0.1, 0.1]\n";
+    }
+  }
+
+  DaemonProcess daemon;
+  std::string error;
+  ASSERT_TRUE(daemon.start(config_path, error)) << error;
+
+  std::vector<std::string> args = {"test_decoding_server"};
+  for (auto &arg : channel_arguments(daemon.port))
+    args.push_back(std::move(arg));
+  std::vector<char *> argv;
+  for (auto &arg : args)
+    argv.push_back(arg.data());
+  argv.push_back(nullptr);
+  int argc = static_cast<int>(args.size());
+  cudaq::realtime::initialize(argc, argv.data());
+  RealtimeGuard realtime_guard{true};
+
+  const auto results = cudaq::run(kRunShots, dual_decoding_server_udp_kernel);
+  ASSERT_EQ(results.size(), kRunShots);
+  EXPECT_EQ(results[0], 3);
+
+  // Six calls crossed the wire (reset/enqueue/get per decoder), and both
+  // decoders' execution workers ran (high-water mark >= 1; == 2 when the
+  // decodes genuinely overlapped, which tiny identity decodes need not).
+  const std::int64_t dispatched = daemon.stopAndGetDispatchCount();
+  EXPECT_GE(dispatched, 6) << "daemon output:\n" << daemon.captured;
+  EXPECT_GE(daemon.max_concurrent_decoders, 1)
+      << "daemon output:\n" << daemon.captured;
 }

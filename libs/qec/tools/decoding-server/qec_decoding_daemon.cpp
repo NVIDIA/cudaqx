@@ -78,6 +78,10 @@
 
 extern "C" void cudaqx_qec_realtime_device_call_service_force_link();
 extern "C" std::uint64_t cudaqx_qec_device_call_dispatch_count();
+namespace cudaq::qec::decoding::host {
+__attribute__((visibility("default"))) std::uint64_t
+max_concurrent_decoder_workers();
+}
 
 namespace {
 
@@ -472,5 +476,10 @@ int main(int argc, char **argv) {
 
   std::cout << "QEC_DECODING_DAEMON_DISPATCHED count="
             << cudaqx_qec_device_call_dispatch_count() << std::endl;
+  // Concurrency evidence for multi-logical-qubit tests: high-water mark of
+  // simultaneously-busy per-decoder execution workers.
+  std::cout << "QEC_DECODING_DAEMON_MAX_CONCURRENT_DECODERS count="
+            << cudaq::qec::decoding::host::max_concurrent_decoder_workers()
+            << std::endl;
   return 0;
 }

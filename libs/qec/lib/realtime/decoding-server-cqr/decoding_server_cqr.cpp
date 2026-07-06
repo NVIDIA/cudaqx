@@ -251,13 +251,20 @@ void enqueue_syndromes_host(const void *rx_slot, void *tx_slot,
       return;
     }
 
-    // Unpack LSB-first bits to the byte-per-bool buffer the host API takes.
-    std::array<std::uint8_t, kMaxRealtimeVectorBits> syndrome{};
+    // Unpack LSB-first bits DIRECTLY into the decoder's execution-worker
+    // ring slot (zero-copy staging): decoder execution happens on the
+    // decoder's own thread, so this handler -- running on the single
+    // transport dispatcher thread -- returns immediately and other
+    // decoders' (logical qubits') streams are not serialized behind this
+    // one. "Success" here means ACCEPTED; a deferred decoder error is
+    // reported at this decoder's next get_corrections.
+    auto *staged = cudaq::qec::decoding::host::stage_syndromes(
+        static_cast<std::size_t>(request.decoder_id), request.num_syndromes);
     for (std::uint64_t i = 0; i < request.num_syndromes; ++i)
-      syndrome[i] = (request.syndrome_bits.data[i / 8] >> (i % 8)) & 1;
-    cudaq::qec::decoding::host::enqueue_syndromes(
-        static_cast<std::size_t>(request.decoder_id), syndrome.data(),
-        static_cast<std::size_t>(request.num_syndromes), request.counter);
+      staged[i] = (request.syndrome_bits.data[i / 8] >> (i % 8)) & 1;
+    cudaq::qec::decoding::host::commit_syndromes(
+        static_cast<std::size_t>(request.decoder_id), request.num_syndromes,
+        request.counter);
     write_response(tx_slot, rx_slot, kStatusSuccess);
   } catch (...) {
     if (tx_slot && rx_slot)
