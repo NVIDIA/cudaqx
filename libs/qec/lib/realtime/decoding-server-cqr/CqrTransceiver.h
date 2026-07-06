@@ -95,6 +95,18 @@ inline void CqrTransceiver::inject(const void *rx_slot, void *tx_slot,
   if (!ok)
     return;
 
+  // enqueue_syndromes is fire-and-forget in the CQR path: push the frame and
+  // return immediately so the CUDAQ handler thread is not held waiting for an
+  // ACK that the protocol does not require here.
+  if (function_id == kEnqueueSyndromesFunctionId) {
+    {
+      std::lock_guard<std::mutex> lk(mtx_);
+      inbox_.push_back(std::move(frame));
+    }
+    cv_.notify_one();
+    return;
+  }
+
   const auto *hdr = reinterpret_cast<const RPCHeader *>(frame.buf.data());
   const uint32_t rid = hdr->request_id;
 
