@@ -192,6 +192,8 @@ void DecoderSession::worker_loop() {
     WorkItem item;
     {
       std::unique_lock<std::mutex> lk(queue_mutex);
+      // Timed wait so the shutdown flag is observed even if no WorkItem
+      // arrives to trigger a notify (avoids a separate stop() notification).
       queue_cv.wait_for(lk, std::chrono::milliseconds(100), [this] {
         return !work_queue.empty() || shutdown.load(std::memory_order_acquire);
       });

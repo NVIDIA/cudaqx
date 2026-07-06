@@ -67,6 +67,7 @@ void RpcDispatcher::dispatch(RxFrame frame, ITransceiver &transport) {
   try {
     it->second(std::move(frame), writer);
   } catch (const std::out_of_range &) {
+    // SessionRegistry::get() throws std::out_of_range for unknown decoder_id.
     writer.write_error(RpcStatus::INVALID_DECODER);
   } catch (const std::invalid_argument &) {
     writer.write_error(RpcStatus::BAD_REQUEST);

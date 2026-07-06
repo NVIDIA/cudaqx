@@ -52,6 +52,10 @@ static DecoderTransport read_transport_from_yaml(const std::string &yaml_path) {
   if (config.decoders.empty())
     throw std::runtime_error("No decoders in config: " + yaml_path);
   auto transport = config.decoders.front().transport;
+  // MVP limitation: all decoders in one server instance must share the same
+  // transport type.  Heterogeneous deployments (e.g. decoder0=cpu_roce,
+  // decoder1=gpu_roce) require per-session transceiver binding, deferred to
+  // a follow-up once CpuRoce/GpuRoceTransceiverAdapter are available.
   for (const auto &dc : config.decoders)
     if (dc.transport != transport)
       throw std::runtime_error("Mixed transport types in " + yaml_path +
