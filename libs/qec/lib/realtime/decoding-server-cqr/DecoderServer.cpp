@@ -99,7 +99,7 @@ DecoderServer::DecoderServer(std::vector<std::unique_ptr<ITransceiver>> owned,
 void DecoderServer::init(const std::string &config_yaml) {
   registry_.load_from_config(config_yaml);
 
-  // enqueue_syndromes — fire-and-forget; no synchronous response.
+  // enqueue_syndromes — worker thread sends a 24-byte ACK (result_len==0).
   dispatcher_.register_handler(
       kEnqueueSyndromesFunctionId,
       [this](RxFrame frame, ResponseWriter &writer) {
@@ -122,8 +122,10 @@ void DecoderServer::init(const std::string &config_yaml) {
         item.vp_id = frame.vp_id;
         item.response_transport = writer.transport();
 
-        if (!session.try_enqueue(std::move(item)))
+        if (!session.try_enqueue(std::move(item))) {
           session.latch_syndromes_dropped();
+          writer.write_error(RpcStatus::SYNDROMES_DROPPED);
+        }
       });
 
   // get_corrections — response sent by the worker thread.

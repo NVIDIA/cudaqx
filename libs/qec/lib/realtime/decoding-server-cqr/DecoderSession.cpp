@@ -9,7 +9,6 @@
 #include "DecoderSession.h"
 #include "RpcWireFormat.h"
 #include "cudaq/qec/logger.h"
-#include "cudaq/qec/realtime/decoder_rpc_ids.h"
 
 #include <chrono>
 #include <cstring>
@@ -182,8 +181,7 @@ void DecoderSession::on_get_corrections(const WorkItem &item) {
     const auto return_size = static_cast<size_t>(req->return_size);
     // result_len must be align_to_8(ceil(R/8)) — rpc_producer validates this
     // exactly.
-    const size_t result_len =
-        cudaq::qec::decoding::rpc::align_to_8(bit_packed_bytes(return_size));
+    const size_t result_len = align_to_8(bit_packed_bytes(return_size));
     // get_obs_corrections() returns byte-per-bit; pack into the wire format.
     std::vector<uint8_t> packed(result_len, 0);
     for (size_t i = 0; i < return_size; ++i) {
@@ -193,10 +191,8 @@ void DecoderSession::on_get_corrections(const WorkItem &item) {
     send_response(*item.response_transport, item.peer, item.request_id,
                   item.ptp_timestamp, RpcStatus::OK, packed.data(), result_len);
 
-    if (req->reset) {
-      dec->reset_decoder();
-      accumulator.clear();
-    }
+    if (req->reset)
+      dec->clear_corrections();
   } catch (const std::exception &e) {
     CUDA_QEC_ERROR("DecoderSession::on_get_corrections: {}", e.what());
     ++error_count;
