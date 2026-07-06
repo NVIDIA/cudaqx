@@ -78,10 +78,8 @@
 
 extern "C" void cudaqx_qec_realtime_device_call_service_force_link();
 extern "C" std::uint64_t cudaqx_qec_device_call_dispatch_count();
-namespace cudaq::qec::decoding::host {
-__attribute__((visibility("default"))) std::uint64_t
-max_concurrent_decoder_workers();
-}
+extern "C" std::uint64_t cudaqx_qec_decoder_server_max_concurrent();
+extern "C" void cudaqx_qec_decoder_server_shutdown();
 
 namespace {
 
@@ -351,9 +349,9 @@ int main(int argc, char **argv) {
   std::signal(SIGINT, on_signal);
   std::signal(SIGTERM, on_signal);
 
-  // [1] Configure the decoders described by the YAML file in THIS process; in
-  // the two-process topology decode state lives with the service, not the
-  // caller.
+  // [1] Validate the YAML and hand its path to the decoding-server service:
+  // the DecoderServer (one DecoderSession worker thread per decoder) builds
+  // the decoder instances itself when the dispatch session is created below.
   std::ifstream config_file(cfg.config_path);
   if (!config_file) {
     std::cerr << "ERROR: cannot open config file " << cfg.config_path
@@ -369,10 +367,8 @@ int main(int argc, char **argv) {
               << std::endl;
     return 1;
   }
-  if (config::configure_decoders(decoder_config) != 0) {
-    std::cerr << "ERROR: configure_decoders failed" << std::endl;
-    return 1;
-  }
+  ::setenv("CUDAQ_QEC_DECODER_CONFIG", cfg.config_path.c_str(),
+           /*overwrite=*/1);
   std::cout << "Configured " << decoder_config.decoders.size()
             << " decoder(s); decoder 0 type: "
             << decoder_config.decoders[0].type
@@ -393,8 +389,18 @@ int main(int argc, char **argv) {
   }
   // The session owns the function table; keep it alive for the daemon's
   // lifetime (the dispatcher loop below reads table.entries in place).
-  auto session = service->createDispatchSession(
-      cudaq::realtime::DeviceCallDispatchMode::Host);
+  // Creating it also starts the DecoderServer (decoder construction + one
+  // worker thread per decoder) -- before the READY line below, so slow
+  // decoder initialization never races the first client request.
+  std::unique_ptr<cudaq::realtime::DeviceCallServiceSession> session;
+  try {
+    session = service->createDispatchSession(
+        cudaq::realtime::DeviceCallDispatchMode::Host);
+  } catch (const std::exception &e) {
+    std::cerr << "ERROR: decoder-server startup failed: " << e.what()
+              << std::endl;
+    return 1;
+  }
   if (!session) {
     std::cerr << "ERROR: QEC device_call service does not support host "
                  "dispatch"
@@ -472,14 +478,15 @@ int main(int argc, char **argv) {
     dispatcher_thread.join();
   if (tp.shutdown)
     tp.shutdown();
-  config::finalize_decoders();
+  // Stop the DecoderServer receive loop and join its thread before the
+  // process exits (a still-joinable static thread would std::terminate).
+  cudaqx_qec_decoder_server_shutdown();
 
   std::cout << "QEC_DECODING_DAEMON_DISPATCHED count="
             << cudaqx_qec_device_call_dispatch_count() << std::endl;
   // Concurrency evidence for multi-logical-qubit tests: high-water mark of
-  // simultaneously-busy per-decoder execution workers.
+  // simultaneously-busy DecoderSession workers.
   std::cout << "QEC_DECODING_DAEMON_MAX_CONCURRENT_DECODERS count="
-            << cudaq::qec::decoding::host::max_concurrent_decoder_workers()
-            << std::endl;
+            << cudaqx_qec_decoder_server_max_concurrent() << std::endl;
   return 0;
 }

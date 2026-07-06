@@ -170,10 +170,19 @@ struct sliding_window_config {
   from_heterogeneous_map(const cudaqx::heterogeneous_map &map);
 };
 
+/// Transport type for a decoder session.
+/// cpu_roce: CpuRoceTransceiver / SoftRoCE (dev, CI, no GPU required)
+/// gpu_roce: GpuRoceTransceiver / DOCA (production, real ConnectX)
+enum class DecoderTransport { cpu_roce, gpu_roce };
+
 /// @brief Configuration structure for decoder options.
 struct decoder_config {
   int64_t id = 0;
   std::string type;
+  /// Transport used to receive syndromes and send corrections for this decoder.
+  /// Defaults to cpu_roce.  Set to gpu_roce for decoders where syndrome bits
+  /// are DMA'd directly to GPU VRAM (e.g. nv_qldpc_decoder with RelayBP).
+  DecoderTransport transport = DecoderTransport::cpu_roce;
   uint64_t block_size = 0;
   uint64_t syndrome_size = 0;
   std::vector<std::int64_t> H_sparse;
@@ -279,5 +288,12 @@ configure_decoders_from_str(const char *config_str);
 
 /// @brief Finalize the decoders. This function finalizes local decoders.
 __attribute__((visibility("default"))) void finalize_decoders();
+
+/// @brief The last multi_decoder_config passed to configure_decoders() in
+/// this process, or nullptr if none. Consumed by the decoder-server
+/// DeviceCallService plugin when CUDAQ_QEC_DECODER_CONFIG is not set (the
+/// in-process host_dispatch application path).
+__attribute__((visibility("default"))) const multi_decoder_config *
+last_configured_multi_decoder_config();
 
 } // namespace cudaq::qec::decoding::config

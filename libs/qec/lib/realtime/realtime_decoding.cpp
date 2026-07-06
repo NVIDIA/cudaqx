@@ -12,16 +12,12 @@
 #include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/realtime/decoding_config.h"
 #include <algorithm>
-#include <atomic>
-#include <condition_variable>
 #include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
 #include <fmt/core.h>
-#include <mutex>
 #include <set>
 #include <stdexcept>
-#include <thread>
 
 #ifdef CUDAQ_REALTIME_ROOT
 #include "qec_realtime_session.h"
@@ -40,249 +36,6 @@ SyndromeCaptureCallback g_syndrome_capture_callback = nullptr;
 
 std::vector<std::unique_ptr<cudaq::qec::decoder>> g_decoders;
 std::unique_ptr<cudaq::qec::realtime::qec_realtime_session> g_realtime_session;
-
-// ---------------------------------------------------------------------------
-// Per-decoder execution workers.
-//
-// The transport dispatcher (cudaq_host_dispatcher_loop) is a single thread;
-// executing decoders inline there serializes every logical qubit's stream
-// behind every other's. Instead, each decoder owns a worker thread and a
-// bounded ring of request slots: the dispatcher VALIDATES and STAGES a
-// request (writing the payload directly into the decoder's slot -- no extra
-// copy) and returns immediately for the fire-and-forget calls
-// (enqueue_syndromes / reset_decoder); decoder execution happens on the
-// decoder's own thread, so N logical qubits decode concurrently.
-//
-// Ordering: the wire protocol requires per-decoder FIFO only. A single
-// staging producer (the dispatcher) plus a per-decoder FIFO ring preserves
-// exactly that; cross-decoder ordering is deliberately given up -- that is
-// the parallelism.
-//
-// get_corrections is the one response-bearing call: it is staged as a
-// sentinel and the caller blocks until the decoder's queue drains and the
-// corrections are produced (end-of-shot only, bounded by one decode tail).
-//
-// Errors: validation failures (bad id / size) still throw synchronously in
-// the caller. A decoder exception during deferred execution becomes STICKY
-// per-decoder state, delivered (rethrown) at that decoder's next
-// get_corrections; reset_decoder clears it.
-// ---------------------------------------------------------------------------
-namespace {
-
-struct decoder_worker {
-  enum class op : std::uint8_t { enqueue, reset, corrections };
-  struct item {
-    op kind = op::enqueue;
-    std::uint64_t length = 0;
-    std::uint64_t tag = 0;
-    // corrections / rendezvous
-    uint8_t *out = nullptr;
-    std::uint64_t out_length = 0;
-    bool reset_after = false;
-    bool done = false;
-    std::exception_ptr error;
-  };
-
-  static constexpr std::size_t kCapacity = 8192;
-
-  cudaq::qec::decoder *decoder = nullptr;
-  std::size_t decoder_id = 0;
-  std::size_t payload_stride = 0;
-  std::vector<uint8_t> payloads; // kCapacity * payload_stride
-  std::vector<item> items;       // kCapacity ring
-  std::size_t head = 0;          // next to execute (mod kCapacity)
-  std::size_t count = 0;         // committed, not yet executed
-  bool staging_open = false;     // a slot handed out, not yet committed
-  bool stop = false;
-  std::exception_ptr sticky;
-  std::mutex mtx;
-  std::condition_variable cv_worker, cv_caller;
-  std::thread thread;
-
-  decoder_worker(cudaq::qec::decoder *dec, std::size_t id,
-                 std::size_t max_payload)
-      : decoder(dec), decoder_id(id),
-        payload_stride(std::max<std::size_t>(max_payload, 1)),
-        payloads(kCapacity * payload_stride), items(kCapacity) {
-    thread = std::thread([this] { run(); });
-  }
-
-  ~decoder_worker() {
-    {
-      std::lock_guard<std::mutex> lock(mtx);
-      stop = true;
-    }
-    cv_worker.notify_all();
-    if (thread.joinable())
-      thread.join();
-  }
-
-  uint8_t *slot_payload(std::size_t index) {
-    return payloads.data() + (index % kCapacity) * payload_stride;
-  }
-
-  // Hand out the next slot's payload buffer (blocks while the ring is
-  // full -- natural backpressure onto the transport).
-  uint8_t *stage() {
-    std::unique_lock<std::mutex> lock(mtx);
-    cv_caller.wait(lock,
-                   [this] { return count < kCapacity && !staging_open; });
-    staging_open = true;
-    return slot_payload(head + count);
-  }
-
-  // Payload pointer of the currently-staged slot (staging_open must be
-  // true; single staging producer).
-  uint8_t *staged_payload() {
-    std::lock_guard<std::mutex> lock(mtx);
-    return slot_payload(head + count);
-  }
-
-  void commit(op kind, std::uint64_t length, std::uint64_t tag) {
-    {
-      std::lock_guard<std::mutex> lock(mtx);
-      auto &it = items[(head + count) % kCapacity];
-      it = item{};
-      it.kind = kind;
-      it.length = length;
-      it.tag = tag;
-      ++count;
-      staging_open = false;
-    }
-    cv_worker.notify_one();
-    cv_caller.notify_all();
-  }
-
-  // Reserve + commit a payload-less item (reset) in one step.
-  void post(op kind) {
-    {
-      std::unique_lock<std::mutex> lock(mtx);
-      cv_caller.wait(lock,
-                     [this] { return count < kCapacity && !staging_open; });
-      auto &it = items[(head + count) % kCapacity];
-      it = item{};
-      it.kind = kind;
-      ++count;
-    }
-    cv_worker.notify_one();
-  }
-
-  // Stage + wait for a corrections (or reset) rendezvous. `out` may be
-  // null for reset.
-  void execute_and_wait(op kind, uint8_t *out, std::uint64_t out_length,
-                        bool reset_after) {
-    item *slot = nullptr;
-    {
-      std::unique_lock<std::mutex> lock(mtx);
-      cv_caller.wait(lock,
-                     [this] { return count < kCapacity && !staging_open; });
-      slot = &items[(head + count) % kCapacity];
-      *slot = item{};
-      slot->kind = kind;
-      slot->out = out;
-      slot->out_length = out_length;
-      slot->reset_after = reset_after;
-      ++count;
-    }
-    cv_worker.notify_one();
-    std::exception_ptr error;
-    {
-      std::unique_lock<std::mutex> lock(mtx);
-      cv_caller.wait(lock, [slot] { return slot->done; });
-      error = slot->error;
-    }
-    if (error)
-      std::rethrow_exception(error);
-  }
-
-  void run();
-};
-
-std::vector<std::unique_ptr<decoder_worker>> g_decoder_workers;
-std::atomic<std::uint64_t> g_busy_decoder_workers{0};
-std::atomic<std::uint64_t> g_max_busy_decoder_workers{0};
-
-void decoder_worker::run() {
-  for (;;) {
-    std::size_t index = 0;
-    {
-      std::unique_lock<std::mutex> lock(mtx);
-      cv_worker.wait(lock, [this] { return count > 0 || stop; });
-      if (stop && count == 0)
-        return;
-      index = head % kCapacity;
-    }
-    auto &it = items[index];
-
-    const auto busy =
-        g_busy_decoder_workers.fetch_add(1, std::memory_order_relaxed) + 1;
-    auto observed =
-        g_max_busy_decoder_workers.load(std::memory_order_relaxed);
-    while (busy > observed &&
-           !g_max_busy_decoder_workers.compare_exchange_weak(
-               observed, busy, std::memory_order_relaxed))
-      ;
-
-    try {
-      switch (it.kind) {
-      case op::enqueue:
-        decoder->enqueue_syndrome(slot_payload(index), it.length);
-        break;
-      case op::reset:
-        decoder->reset_decoder();
-        sticky = nullptr; // a fresh shot clears the sticky error
-        break;
-      case op::corrections: {
-        if (sticky) {
-          it.error = sticky;
-          sticky = nullptr;
-          break;
-        }
-        const auto *ret = decoder->get_obs_corrections();
-        for (std::uint64_t i = 0; i < it.out_length; ++i)
-          it.out[i] = ret[i];
-        if (it.reset_after)
-          decoder->clear_corrections();
-        break;
-      }
-      }
-    } catch (const std::exception &e) {
-      CUDA_QEC_WARN("decoder {} worker: deferred {} failed: {}", decoder_id,
-                    it.kind == op::corrections ? "get_corrections"
-                    : it.kind == op::reset     ? "reset"
-                                               : "enqueue",
-                    e.what());
-      if (it.kind == op::corrections)
-        it.error = std::current_exception();
-      else if (!sticky)
-        sticky = std::current_exception();
-    } catch (...) {
-      if (it.kind == op::corrections)
-        it.error = std::current_exception();
-      else if (!sticky)
-        sticky = std::current_exception();
-    }
-
-    g_busy_decoder_workers.fetch_sub(1, std::memory_order_relaxed);
-
-    {
-      std::lock_guard<std::mutex> lock(mtx);
-      it.done = true;
-      head = (head + 1) % kCapacity;
-      --count;
-    }
-    cv_caller.notify_all();
-  }
-}
-
-decoder_worker *worker_for(std::size_t decoder_id) {
-  if (decoder_id >= g_decoder_workers.size() ||
-      !g_decoder_workers[decoder_id])
-    return nullptr;
-  return g_decoder_workers[decoder_id].get();
-}
-
-} // namespace
 
 namespace {
 
@@ -543,7 +296,6 @@ int configure_decoders(
 
   // Create the decoders based on the decoder configs.
   try {
-    g_decoder_workers.clear(); // workers reference the decoders; drop first
     g_decoders.clear();
     g_decoders.resize(max_decoder_id + 1);
     for (const auto &decoder_config : decoder_configs) {
@@ -594,18 +346,6 @@ int configure_decoders(
     return 4;
   }
 
-  // Per-decoder execution workers (see the comment block near the top):
-  // each configured decoder gets its own thread + request ring so multiple
-  // logical qubits' streams decode concurrently.
-  g_decoder_workers.clear();
-  g_decoder_workers.resize(g_decoders.size());
-  for (std::size_t id = 0; id < g_decoders.size(); ++id)
-    if (g_decoders[id])
-      g_decoder_workers[id] = std::make_unique<decoder_worker>(
-          g_decoders[id].get(), id,
-          std::max<std::size_t>(g_decoders[id]->get_num_msyn_per_decode(),
-                                4096));
-
   maybe_init_realtime_session();
   return 0;
 }
@@ -613,15 +353,17 @@ int configure_decoders(
 void finalize_decoders() {
   CUDA_QEC_INFO("Finalizing the realtime decoding library.");
   maybe_finalize_realtime_session();
-  // Drain and join the per-decoder workers before the decoders they
-  // execute on are destroyed.
-  g_decoder_workers.clear();
   g_decoders.clear();
 }
 
 __attribute__((visibility("default"))) void
 set_syndrome_capture_callback(void (*callback)(const uint8_t *, size_t)) {
   g_syndrome_capture_callback = callback;
+}
+
+__attribute__((visibility("default"))) void (*get_syndrome_capture_callback())(
+    const uint8_t *, size_t) {
+  return g_syndrome_capture_callback;
 }
 
 void enqueue_syndromes(std::size_t decoder_id, uint8_t *syndromes,
@@ -675,72 +417,24 @@ void enqueue_syndromes(std::size_t decoder_id, uint8_t *syndromes,
   }
 #endif
 
-  // Stage onto the decoder's worker: the payload lands directly in the
-  // worker's ring slot and execution happens on the decoder's own thread.
-  auto *worker = worker_for(decoder_id);
-  if (!worker) {
-    throw std::runtime_error(
-        fmt::format("Decoder {} has no execution worker (initialize_decoders "
-                    "not run?)",
-                    decoder_id));
+  std::vector<uint8_t> syndrome_u8(syndrome_length);
+  bool did_decode = false;
+  for (std::size_t i = 0; i < syndrome_length; i++) {
+    syndrome_u8[i] = syndromes[i];
   }
-  auto *slot = worker->stage();
-  std::memcpy(slot, syndromes, syndrome_length);
-  worker->commit(decoder_worker::op::enqueue, syndrome_length, tag);
-  CUDA_QEC_INFO("[decoder={}][tag={}] staged enqueue_syndrome, "
-                "syndrome_length={}",
-                decoder_id, tag, syndrome_length);
-}
+  std::chrono::duration<double> duration{};
+  auto t0 = std::chrono::high_resolution_clock::now();
+  did_decode =
+      decoder->enqueue_syndrome(syndrome_u8.data(), syndrome_u8.size());
+  auto t1 = std::chrono::high_resolution_clock::now();
+  duration = t1 - t0;
 
-// Zero-copy staging entry points for transport handlers: reserve the
-// decoder worker's next ring slot, let the caller write the unpacked
-// payload straight into it, then commit. Per-decoder FIFO order is that of
-// the stage/commit sequence (single staging producer -- the transport
-// dispatcher thread).
-uint8_t *stage_syndromes(std::size_t decoder_id, std::uint64_t max_length) {
-  if (decoder_id >= g_decoders.size() || !g_decoders[decoder_id]) {
-    throw std::invalid_argument(
-        fmt::format("Decoder {} not found", decoder_id));
-  }
-  auto *worker = worker_for(decoder_id);
-  if (!worker) {
-    throw std::runtime_error(
-        fmt::format("Decoder {} has no execution worker", decoder_id));
-  }
-  if (max_length == 0 || max_length > worker->payload_stride) {
-    throw std::invalid_argument(
-        fmt::format("syndrome staging length {} out of range (max {})",
-                    max_length, worker->payload_stride));
-  }
-  return worker->stage();
-}
-
-void commit_syndromes(std::size_t decoder_id, std::uint64_t length,
-                      std::uint64_t tag) {
-  auto *worker = worker_for(decoder_id);
-  if (!worker) {
-    throw std::runtime_error(
-        fmt::format("Decoder {} has no execution worker", decoder_id));
-  }
-  const auto max_syndromes =
-      g_decoders[decoder_id]->get_num_msyn_per_decode();
-  if (length == 0 ||
-      (max_syndromes != 0 && length > max_syndromes &&
-       length > worker->payload_stride)) {
-    throw std::invalid_argument(
-        fmt::format("syndrome_length ({}) out of range", length));
-  }
-  if (g_syndrome_capture_callback) {
-    auto packed_syndrome =
-        pack_syndrome_bits(worker->staged_payload(), length);
-    g_syndrome_capture_callback(packed_syndrome.data(),
-                                packed_syndrome.size());
-  }
-  worker->commit(decoder_worker::op::enqueue, length, tag);
-}
-
-std::uint64_t max_concurrent_decoder_workers() {
-  return g_max_busy_decoder_workers.load(std::memory_order_relaxed);
+  // Consider demoting this to a lower log level.
+  // Also consider logging the syndrome (at a lower log level).
+  CUDA_QEC_INFO("[decoder={}][tag={}] enqueue_syndrome took {:.3f} us, "
+                "syndrome_length={}, did_decode={}",
+                decoder_id, tag, duration.count() * 1e6, syndrome_length,
+                did_decode ? 'Y' : 'N');
 }
 
 void get_corrections(std::size_t decoder_id, uint8_t *corrections,
@@ -787,16 +481,12 @@ void get_corrections(std::size_t decoder_id, uint8_t *corrections,
   }
 #endif
 
-  // Rendezvous with the decoder's worker: waits for its queue to drain
-  // (per-decoder FIFO), then the worker produces the corrections. A sticky
-  // deferred-execution error from this shot's enqueues is rethrown here.
-  auto *worker = worker_for(decoder_id);
-  if (!worker) {
-    throw std::runtime_error(
-        fmt::format("Decoder {} has no execution worker", decoder_id));
+  auto ret = decoder->get_obs_corrections();
+  for (std::size_t i = 0; i < correction_length; ++i) {
+    corrections[i] = ret[i];
   }
-  worker->execute_and_wait(decoder_worker::op::corrections, corrections,
-                           correction_length, reset);
+  if (reset)
+    decoder->clear_corrections();
 }
 
 void reset_decoder(std::size_t decoder_id) {
@@ -826,14 +516,7 @@ void reset_decoder(std::size_t decoder_id) {
   }
 #endif
 
-  // Queued behind any in-flight work for this decoder (ordering matters:
-  // a reset must not overtake the previous shot's enqueues).
-  auto *worker = worker_for(decoder_id);
-  if (!worker) {
-    throw std::runtime_error(
-        fmt::format("Decoder {} has no execution worker", decoder_id));
-  }
-  worker->post(decoder_worker::op::reset);
+  decoder->reset_decoder();
 }
 
 } // namespace cudaq::qec::decoding::host
