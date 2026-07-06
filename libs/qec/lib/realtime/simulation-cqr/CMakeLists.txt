@@ -12,8 +12,7 @@
 # frame ABI and dispatched (by fnv1a(function_id)) through the host-dispatch
 # channel to the decoding server (../decoding-server-cqr) -- rather than
 # resolving to a direct in-process trampoline. Callees use the generic spec
-# function_ids. Compile these wrappers for the Stim simulator target, matching
-# the local simulated-QPU tests that consume this library.
+# function_ids; the wrappers are target-agnostic (no --target needed).
 add_library(cudaq-qec-realtime-decoding-simulation-cqr SHARED
   simulation_cqr_host.cpp
 )
@@ -25,7 +24,6 @@ cudaqx_add_device_code(cudaq-qec-realtime-decoding-simulation-cqr
   SOURCES
     simulation_cqr_device.cpp
   COMPILER_FLAGS
-    --target stim
     -frealtime-lowering
 )
 
