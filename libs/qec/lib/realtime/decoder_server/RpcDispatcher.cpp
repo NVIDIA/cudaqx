@@ -41,7 +41,7 @@ void RpcDispatcher::register_handler(uint32_t function_id, Handler h) {
 void RpcDispatcher::dispatch(RxFrame frame, ITransceiver &transport) {
   // Minimum frame: RPCHeader only.
   if (frame.buf.size() < sizeof(RPCHeader)) {
-    CUDA_QEC_DEBUG("RpcDispatcher: frame too short ({} bytes)",
+    CUDA_QEC_DBG("RpcDispatcher: frame too short ({} bytes)",
                    frame.buf.size());
     // Cannot build a meaningful response without a valid request_id.
     return;
@@ -50,7 +50,7 @@ void RpcDispatcher::dispatch(RxFrame frame, ITransceiver &transport) {
   const auto *hdr = reinterpret_cast<const RPCHeader *>(frame.buf.data());
 
   if (hdr->magic != kRPCRequestMagic) {
-    CUDA_QEC_DEBUG("RpcDispatcher: bad magic 0x{:08X}", hdr->magic);
+    CUDA_QEC_DBG("RpcDispatcher: bad magic 0x{:08X}", hdr->magic);
     return;
   }
 
@@ -59,7 +59,7 @@ void RpcDispatcher::dispatch(RxFrame frame, ITransceiver &transport) {
 
   auto it = table_.find(hdr->function_id);
   if (it == table_.end()) {
-    CUDA_QEC_DEBUG("RpcDispatcher: unknown function_id 0x{:08X}",
+    CUDA_QEC_DBG("RpcDispatcher: unknown function_id 0x{:08X}",
                    hdr->function_id);
     writer.write_error(RpcStatus::BAD_REQUEST);
     return;
