@@ -192,13 +192,12 @@ build_cudaqx_D_sparse(const cudaq::M2DSparseMatrix &m2d) {
 }
 
 void save_dem_to_file(const cudaq::qec::detector_error_model &dem,
-                      std::string dem_filename, uint64_t numSyndromesPerRound,
-                      uint64_t numLogical, const std::string &decoder_type,
-                      bool use_relay_bp, const std::string &onnx_path,
+                      std::string dem_filename, uint64_t numLogical,
+                      const std::string &decoder_type, bool use_relay_bp,
+                      const std::string &onnx_path,
                       const cudaq::M2DSparseMatrix &m2d,
                       const std::string &ising_bundle, int distance,
                       std::size_t numRounds) {
-  (void)numSyndromesPerRound;
   cudaq::qec::decoding::config::multi_decoder_config multi_config;
   for (uint64_t i = 0; i < numLogical; i++) {
     cudaq::qec::decoding::config::decoder_config config;
@@ -464,12 +463,6 @@ void get_stab_data_supports(char stab_type, int distance,
 
 namespace cudaq::qec::qpu {
 
-// Transversal CNOT gate
-__qpu__ void logical_cnot(cudaq::qview<> ctrl_data, cudaq::qview<> tgt_data) {
-  for (std::size_t i = 0; i < ctrl_data.size(); i++) {
-    cudaq::x<cudaq::ctrl>(ctrl_data[i], tgt_data[i]);
-  }
-}
 __qpu__ void spam_error(cudaq::qec::patch logicalQubit, double p_spam_data,
                         double p_spam_ancx, double p_spam_ancz) {
   for (std::size_t i = 0; i < logicalQubit.data.size(); i++) {
@@ -487,8 +480,8 @@ __qpu__ void spam_error(cudaq::qec::patch logicalQubit, double p_spam_data,
 }
 
 __qpu__ std::vector<cudaq::measure_result>
-se_z_ft(cudaq::qec::patch logicalQubit,
-        const std::vector<std::size_t> &cnot_sched) {
+extract_z_syndrome(cudaq::qec::patch logicalQubit,
+                   const std::vector<std::size_t> &cnot_sched) {
   for (std::size_t i = 0; i < cnot_sched.size(); i += 2) {
     cudaq::x<cudaq::ctrl>(logicalQubit.data[cnot_sched[i + 1]],
                           logicalQubit.ancz[cnot_sched[i]]);
@@ -500,8 +493,8 @@ se_z_ft(cudaq::qec::patch logicalQubit,
 }
 
 __qpu__ std::vector<cudaq::measure_result>
-se_x_ft(cudaq::qec::patch logicalQubit,
-        const std::vector<std::size_t> &cnot_sched) {
+extract_x_syndrome(cudaq::qec::patch logicalQubit,
+                   const std::vector<std::size_t> &cnot_sched) {
   h(logicalQubit.ancx);
   for (std::size_t i = 0; i < cnot_sched.size(); i += 2) {
     cudaq::x<cudaq::ctrl>(logicalQubit.ancx[cnot_sched[i]],
@@ -521,8 +514,8 @@ measure_syndrome_round(cudaq::qec::patch logicalQubit,
                        std::vector<cudaq::measure_result> &combined_syndrome) {
   // Measure X-ancillas then Z-ancillas (combined layout [X..., Z...]). The
   // shared helper keeps the DEM and the live enqueue path on the same ordering.
-  auto syndrome_x = se_x_ft(logicalQubit, cnot_schedX_flat);
-  auto syndrome_z = se_z_ft(logicalQubit, cnot_schedZ_flat);
+  auto syndrome_x = extract_x_syndrome(logicalQubit, cnot_schedX_flat);
+  auto syndrome_z = extract_z_syndrome(logicalQubit, cnot_schedZ_flat);
   int i = 0;
   for (auto s : syndrome_x)
     combined_syndrome[i++] = s;
@@ -882,9 +875,9 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
     dem.observables_flips_matrix.dump_bits();
 
     if (save_dem) {
-      save_dem_to_file(dem, dem_filename, numSyndromesPerRound, numLogical,
-                       decoder_type, use_relay_bp, onnx_path, m2d, ising_bundle,
-                       distance, numRounds);
+      save_dem_to_file(dem, dem_filename, numLogical, decoder_type,
+                       use_relay_bp, onnx_path, m2d, ising_bundle, distance,
+                       numRounds);
       return;
     }
   }
