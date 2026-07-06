@@ -104,10 +104,19 @@ void DecoderSession::on_enqueue(const WorkItem &item) {
   const auto *req = reinterpret_cast<const EnqueuePayload *>(
       item.frame_buf.data() + sizeof(RPCHeader));
 
+  if (req->num_syndromes < 0) {
+    ++error_count;
+    send_response(*item.response_transport, item.peer, item.request_id,
+                  item.ptp_timestamp, RpcStatus::BAD_REQUEST);
+    return;
+  }
+
   const size_t syndrome_bytes =
       bit_packed_bytes(static_cast<size_t>(req->num_syndromes));
   if (item.frame_buf.size() < min_size + syndrome_bytes) {
     ++error_count;
+    send_response(*item.response_transport, item.peer, item.request_id,
+                  item.ptp_timestamp, RpcStatus::BAD_REQUEST);
     return;
   }
 
@@ -134,10 +143,15 @@ void DecoderSession::on_enqueue(const WorkItem &item) {
   } catch (const std::exception &e) {
     CUDA_QEC_ERROR("DecoderSession::on_enqueue: {}", e.what());
     ++error_count;
-    // Fire-and-forget: no response carries this failure, so latch it and
-    // surface it at this session's next get_corrections.
+    // Latch the failure so it surfaces at this session's next
+    // get_corrections: over the CQR transport enqueue is ACKed at delivery
+    // (before execution), so the response below never reaches that caller.
     decoder_error = true;
+    send_response(*item.response_transport, item.peer, item.request_id,
+                  item.ptp_timestamp, RpcStatus::INTERNAL_ERROR);
   }
+  // No success response here: the transport layer already acknowledged
+  // delivery (fire-and-forget per decoder_server_runtime.md).
 }
 
 void DecoderSession::on_get_corrections(const WorkItem &item) {
@@ -193,19 +207,21 @@ void DecoderSession::on_get_corrections(const WorkItem &item) {
       return;
     }
     // get_obs_corrections is byte-per-bit; the wire result is bit-packed
-    // LSB-first per decoder_server_runtime.md.
+    // LSB-first with result_len == ceil(return_size/8) EXACTLY (no trailing
+    // pad) per decoder_server_runtime.md.
     const size_t num_bytes =
         bit_packed_bytes(static_cast<size_t>(req->return_size));
     std::vector<uint8_t> packed(num_bytes, 0);
     for (int64_t i = 0; i < req->return_size; ++i)
-      if (raw[i])
+      if (raw[i] & 1u)
         packed[i / 8] |= static_cast<uint8_t>(1u << (i % 8));
     send_response(*item.response_transport, item.peer, item.request_id,
                   item.ptp_timestamp, RpcStatus::OK, packed.data(), num_bytes);
 
     if (req->reset) {
-      dec->reset_decoder();
-      accumulator.clear();
+      // clear_corrections (not a full reset_decoder): matches the host-path
+      // semantics of get_corrections(reset=true).
+      dec->clear_corrections();
     }
   } catch (const std::exception &e) {
     CUDA_QEC_ERROR("DecoderSession::on_get_corrections: {}", e.what());

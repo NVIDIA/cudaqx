@@ -82,6 +82,15 @@ private:
   static bool build_enqueue_frame(const void *rx_slot, std::size_t slot_size,
                                   RxFrame &out);
 
+  // Hard cap on syndromes per request; guards against malformed/oversized
+  // payloads.
+  static constexpr uint64_t kMaxSyndromeBits = 1u << 20; // 1 M bits
+
+  static constexpr std::size_t align_up(std::size_t off,
+                                        std::size_t alignment) noexcept {
+    return (off + alignment - 1u) & ~(alignment - 1u);
+  }
+
   // For get_corrections and reset_decoder the field layouts are compatible;
   // copy rx_slot verbatim after swapping to our magic/RPCHeader type.
   static bool build_passthrough_frame(const void *rx_slot,
@@ -112,8 +121,11 @@ inline void CqrTransceiver::inject(const void *rx_slot, void *tx_slot,
 
   if (function_id == kEnqueueSyndromesFunctionId) {
     // Fire-and-forget: hand the frame to the server and ACK immediately
-    // (status OK = ACCEPTED); the dispatcher thread must not park on
-    // decoder execution.
+    // (status OK = ACCEPTED) -- the dispatcher thread must not park on
+    // decoder execution, and per the spec the dispatcher still emits an
+    // RPCResponse into the tx_slot (the transport needs it to complete the
+    // slot; the caller drops it). A deferred decoder error is reported at
+    // this decoder's next get_corrections.
     {
       std::lock_guard<std::mutex> lk(mtx_);
       inbox_.push_back(std::move(frame));
@@ -230,8 +242,10 @@ inline bool CqrTransceiver::build_enqueue_frame(const void *rx_slot,
       !read_u64(byte_count))
     return false;
   // Spec validation: the packed byte count must match the advertised bit
-  // count exactly.
-  if (num_syndromes == 0 || byte_count != bit_packed_bytes(num_syndromes) ||
+  // count exactly; kMaxSyndromeBits guards against malformed/oversized
+  // payloads.
+  if (num_syndromes == 0 || num_syndromes > kMaxSyndromeBits ||
+      byte_count != bit_packed_bytes(num_syndromes) ||
       byte_count > arg_len - off)
     return false;
   const uint8_t *bits_src = payload + off;
