@@ -7,10 +7,13 @@
  ******************************************************************************/
 #include "support/thread_placement.h"
 #include "cudaq/qec/decoder.h"
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <future>
 #include <gtest/gtest.h>
+#include <string>
 #include <thread>
 #include <vector>
 #if defined(__linux__)
@@ -28,6 +31,8 @@ extern "C" __attribute__((weak)) long cudaqx_sched_setaffinity_count();
 extern "C" __attribute__((weak)) long cudaqx_sched_getaffinity_count();
 extern "C" __attribute__((weak)) long cudaqx_set_mempolicy_count();
 extern "C" __attribute__((weak)) long cudaqx_get_mempolicy_count();
+extern "C" __attribute__((weak)) long cudaqx_mbind_count();
+extern "C" __attribute__((weak)) long cudaqx_node_sysfs_open_count();
 
 namespace {
 cudaqx::tensor<uint8_t> makeH() {
@@ -421,5 +426,319 @@ TEST(PinningBenchmark, UnbindThreadRestoresGuarding) {
     d->decode_batch(kChunk);
     EXPECT_GT(cudaqx_affinity_syscall_count(), 0)
         << "after unbind_thread() the guard must fire again";
+  });
+}
+
+// ---- Fault-injection negative tests ------------------------------------
+// Each test sets AND unsets its own CUDAQX_SHIM_FAIL_* variable so no
+// injection state leaks across tests.
+
+// T1.4: a container that blocks EVERY placement syscall (blanket injection).
+// The decode must still be correct, and the degradation must be loud.
+TEST(PinningNegative, FullyBlockedSyscallsDegradeLoudlyNotWrongly) {
+  if (!shimCountersPresent())
+    GTEST_SKIP() << "affinity-counter shim not preloaded";
+  run_on_worker([] {
+    setenv("CUDAQX_SHIM_FAIL_ALL_PLACEMENT", "1", 1);
+    auto d = makeEntryReadyPinnedLut();
+    testing::internal::CaptureStderr();
+    auto results = d->decode_batch(kChunk);
+    std::string err = testing::internal::GetCapturedStderr();
+    unsetenv("CUDAQX_SHIM_FAIL_ALL_PLACEMENT");
+    ASSERT_EQ(results.size(), kChunk.size());
+    for (auto &r : results)
+      EXPECT_TRUE(r.converged) << "degraded env must not corrupt decode";
+    EXPECT_NE(err.find("[cudaq-qec affinity] WARNING"), std::string::npos)
+        << "degradation must be loud";
+  });
+}
+
+// T2.8: when the prior affinity cannot be read, the guard could never restore
+// it, so it must not call sched_setaffinity at all (only-if-restorable rule).
+TEST(PinningInvariants, BlockedGetaffinityAppliesNoAffinityAtAll) {
+  if (!shimCountersPresent())
+    GTEST_SKIP() << "affinity-counter shim not preloaded";
+  run_on_worker([] {
+    auto d = makePinnedLut();
+    auto before = thread_placement::capture();
+    setenv("CUDAQX_SHIM_FAIL_GETAFFINITY", "1", 1);
+    cudaqx_affinity_syscall_reset();
+    auto results = d->decode_batch(kChunk);
+    unsetenv("CUDAQX_SHIM_FAIL_GETAFFINITY");
+    EXPECT_EQ(readShimCounts().setaff, 0)
+        << "unreadable prior affinity must mean NO sched_setaffinity";
+    auto after = thread_placement::capture();
+    EXPECT_EQ(before, after);
+    ASSERT_EQ(results.size(), kChunk.size());
+    EXPECT_TRUE(results[0].converged);
+  });
+}
+
+// T2.9: sched_setaffinity blocked (locked cpuset). The independent mempolicy
+// half must still run, the failure must be loud, and nothing may leak.
+TEST(PinningInvariants, BlockedSetaffinityStillAppliesMempolicyHalf) {
+  if (!shimCountersPresent())
+    GTEST_SKIP() << "affinity-counter shim not preloaded";
+  if (!get_mempolicy_usable())
+    GTEST_SKIP() << "get_mempolicy blocked (container seccomp?); the guard "
+                    "correctly skips set_mempolicy then, so setmem > 0 "
+                    "cannot hold";
+  run_on_worker([] {
+    auto d = makePinnedLut();
+    auto before = thread_placement::capture();
+    setenv("CUDAQX_SHIM_FAIL_SETAFFINITY", "1", 1);
+    cudaqx_affinity_syscall_reset();
+    testing::internal::CaptureStderr();
+    auto results = d->decode_batch(kChunk);
+    std::string err = testing::internal::GetCapturedStderr();
+    unsetenv("CUDAQX_SHIM_FAIL_SETAFFINITY");
+    EXPECT_GT(readShimCounts().setmem, 0)
+        << "mempolicy half must still run when sched_setaffinity is blocked";
+    auto after = thread_placement::capture();
+    EXPECT_EQ(before, after)
+        << "blocked sched_setaffinity leaked a placement change: "
+        << before.describe_difference(after);
+    ASSERT_EQ(results.size(), kChunk.size());
+    EXPECT_TRUE(results[0].converged);
+    EXPECT_NE(err.find("sched_setaffinity"), std::string::npos)
+        << "blocked sched_setaffinity must be loud; got: " << err;
+  });
+}
+
+// T2.10: set_mempolicy blocked (no CAP_SYS_NICE). The independent affinity
+// half must still run, the failure must be loud, and nothing may leak.
+TEST(PinningInvariants, BlockedSetMempolicyStillAppliesAffinityHalf) {
+  if (!shimCountersPresent())
+    GTEST_SKIP() << "affinity-counter shim not preloaded";
+  if (!get_mempolicy_usable())
+    GTEST_SKIP() << "get_mempolicy blocked (container seccomp?); the guard "
+                    "then skips the mempolicy half entirely and never prints "
+                    "\"set_mempolicy failed\"";
+  run_on_worker([] {
+    auto d = makePinnedLut();
+    auto before = thread_placement::capture();
+    setenv("CUDAQX_SHIM_FAIL_SET_MEMPOLICY", "1", 1);
+    cudaqx_affinity_syscall_reset();
+    testing::internal::CaptureStderr();
+    auto results = d->decode_batch(kChunk);
+    std::string err = testing::internal::GetCapturedStderr();
+    unsetenv("CUDAQX_SHIM_FAIL_SET_MEMPOLICY");
+    EXPECT_GT(readShimCounts().setaff, 0)
+        << "affinity half must still run when set_mempolicy is blocked";
+    auto after = thread_placement::capture();
+    EXPECT_EQ(before, after)
+        << "blocked set_mempolicy leaked a placement change: "
+        << before.describe_difference(after);
+    ASSERT_EQ(results.size(), kChunk.size());
+    EXPECT_TRUE(results[0].converged);
+    EXPECT_NE(err.find("set_mempolicy failed"), std::string::npos)
+        << "blocked set_mempolicy must be loud; got: " << err;
+  });
+}
+
+// ---- Binding lifecycle negative tests
+// -----------------------------------------------
+
+// T3.13: re-binding on a second thread migrates the guard-skip: the new owner
+// decodes guard-free, the previous owner is guarded again. promise/future
+// handshakes keep both threads alive through every measured decode (no thread
+// id can be recycled) and serialize the decodes (the shim counters are global).
+TEST(PinningBenchmark, RebindMigratesGuardSkipToNewOwner) {
+  if (!cudaqx_affinity_syscall_count)
+    GTEST_SKIP() << "affinity-counter shim not preloaded";
+  auto d = makePinnedLut();
+  std::promise<void> a_bound_p, b_done_p;
+  auto a_bound_f = a_bound_p.get_future();
+  auto b_done_f = b_done_p.get_future();
+  long a_first = -1, b_count = -1, a_second = -1;
+  std::thread ta([&] {
+    d->bind_current_thread();
+    cudaqx_affinity_syscall_reset();
+    d->decode_batch(kChunk);
+    a_first = cudaqx_affinity_syscall_count();
+    a_bound_p.set_value();
+    b_done_f.wait(); // B has re-bound and decoded
+    cudaqx_affinity_syscall_reset();
+    d->decode_batch(kChunk);
+    a_second = cudaqx_affinity_syscall_count();
+  });
+  std::thread tb([&] {
+    a_bound_f.wait();         // A is the current owner
+    d->bind_current_thread(); // rebind: ownership migrates to B
+    cudaqx_affinity_syscall_reset();
+    d->decode_batch(kChunk);
+    b_count = cudaqx_affinity_syscall_count();
+    b_done_p.set_value();
+  });
+  ta.join();
+  tb.join();
+  EXPECT_EQ(a_first, 0) << "owner A must decode guard-free before the rebind";
+  EXPECT_EQ(b_count, 0) << "new owner B must decode guard-free after rebinding";
+  EXPECT_GT(a_second, 0)
+      << "previous owner A must be guarded again after B re-bound";
+}
+
+// T3.13b: binding twice on the same thread is idempotent -- no throw, and the
+// thread still decodes guard-free.
+TEST(PinningBenchmark, DoubleBindIsIdempotent) {
+  if (!cudaqx_affinity_syscall_count)
+    GTEST_SKIP() << "affinity-counter shim not preloaded";
+  run_on_worker([] {
+    auto d = makePinnedLut();
+    d->bind_current_thread();
+    EXPECT_NO_THROW(d->bind_current_thread());
+    cudaqx_affinity_syscall_reset();
+    d->decode_batch(kChunk);
+    EXPECT_EQ(cudaqx_affinity_syscall_count(), 0);
+  });
+}
+
+// T3.14: unbind_thread() called from a DIFFERENT thread clears the owner; the
+// still-alive previously-bound thread must be guarded again. The worker stays
+// alive across the unbind via a promise/future handshake (no sleeps).
+TEST(PinningBenchmark, UnbindFromAnotherThreadRestoresGuarding) {
+  if (!cudaqx_affinity_syscall_count)
+    GTEST_SKIP() << "affinity-counter shim not preloaded";
+  auto d = makePinnedLut();
+  std::promise<void> bound_p, unbound_p;
+  auto bound_f = bound_p.get_future();
+  auto unbound_f = unbound_p.get_future();
+  long count = -1;
+  std::thread w([&] {
+    d->bind_current_thread();
+    bound_p.set_value();
+    unbound_f.wait(); // main thread has called unbind_thread()
+    cudaqx_affinity_syscall_reset();
+    d->decode_batch(kChunk);
+    count = cudaqx_affinity_syscall_count();
+  });
+  bound_f.wait();
+  d->unbind_thread(); // from the main thread, not the owner
+  unbound_p.set_value();
+  w.join();
+  EXPECT_GT(count, 0)
+      << "after unbind_thread() from another thread, the previously bound "
+         "thread must be guarded again";
+}
+
+// T3.16: two never-bound threads decode concurrently; each thread's placement
+// must be fully restored and each decode correct. No shim-counter asserts:
+// the counters are global and would race here.
+TEST(PinningInvariants, ConcurrentUnboundDecodesRestoreBothThreads) {
+  auto d = makePinnedLut();
+  std::atomic<bool> go{false};
+  auto body = [&] {
+    while (!go.load(std::memory_order_acquire))
+      std::this_thread::yield();
+    auto before = thread_placement::capture();
+    auto results = d->decode_batch(kChunk);
+    auto after = thread_placement::capture();
+    EXPECT_EQ(before, after) << "concurrent unbound decode leaked placement: "
+                             << before.describe_difference(after);
+    ASSERT_EQ(results.size(), kChunk.size());
+    EXPECT_TRUE(results[0].converged);
+  };
+  std::thread t1(body), t2(body);
+  go.store(true, std::memory_order_release);
+  t1.join();
+  t2.join();
+}
+
+// T3.17: N threads race bind_current_thread() on one decoder. The race itself
+// must not throw, and afterwards a FRESH never-bound thread must still be
+// guarded and decode correctly. The racers are held alive (promise/shared
+// handshake) until the fresh thread finishes so its thread id cannot be a
+// recycled racer id that would spuriously skip the guard. No attempt to
+// identify the winner.
+TEST(PinningBenchmark, BindRaceLeavesFreshThreadsGuarded) {
+  if (!cudaqx_affinity_syscall_count)
+    GTEST_SKIP() << "affinity-counter shim not preloaded";
+  auto d = makePinnedLut();
+  constexpr int kRacers = 4;
+  std::atomic<bool> go{false};
+  std::atomic<int> raced{0};
+  std::promise<void> done_p;
+  std::shared_future<void> done_f(done_p.get_future());
+  std::vector<std::thread> racers;
+  for (int i = 0; i < kRacers; ++i)
+    racers.emplace_back([&] {
+      while (!go.load(std::memory_order_acquire))
+        std::this_thread::yield();
+      EXPECT_NO_THROW(d->bind_current_thread());
+      raced.fetch_add(1, std::memory_order_acq_rel);
+      done_f.wait(); // stay alive: our thread id must not be recycled yet
+    });
+  go.store(true, std::memory_order_release);
+  while (raced.load(std::memory_order_acquire) < kRacers)
+    std::this_thread::yield();
+  std::thread fresh([&] {
+    cudaqx_affinity_syscall_reset();
+    auto results = d->decode_batch(kChunk);
+    EXPECT_GT(cudaqx_affinity_syscall_count(), 0)
+        << "a fresh thread that never bound must be guarded after the race";
+    ASSERT_EQ(results.size(), kChunk.size());
+    EXPECT_TRUE(results[0].converged);
+  });
+  fresh.join();
+  done_p.set_value();
+  for (auto &t : racers)
+    t.join();
+}
+
+// ---- syscall / sysfs budget gates -------------------------------------------
+
+// Perf-regression gate: the per-call guard must stay within a fixed syscall
+// budget. If you legitimately add a syscall, change the constant in the same
+// PR and say why in the commit message.
+TEST(PinningBudget, UnboundDecodeStaysWithinSyscallBudget) {
+  if (!shimCountersPresent())
+    GTEST_SKIP() << "affinity-counter shim not preloaded";
+  run_on_worker([] {
+    auto d = makePinnedLut();
+    (void)d->decode_batch(kChunk); // warm one-time paths
+    constexpr int kCalls = 10;
+    cudaqx_affinity_syscall_reset();
+    for (int i = 0; i < kCalls; ++i)
+      (void)d->decode_batch(kChunk);
+    auto c = readShimCounts();
+    long total = c.setaff + c.getaff + c.setmem + c.getmem;
+    std::printf(
+        "[pinning budget] %ld placement syscalls / %d unbound decodes "
+        "= %.1f per call (setaff=%ld getaff=%ld setmem=%ld getmem=%ld)\n",
+        total, kCalls, static_cast<double>(total) / kCalls, c.setaff, c.getaff,
+        c.setmem, c.getmem);
+    // Measured on a mempolicy-capable host: 7 syscalls per unbound decode
+    // (2 sched_getaffinity + 2 sched_setaffinity + 1 get_mempolicy +
+    // 2 set_mempolicy). Budget = measured + one call of headroom.
+    constexpr long kMeasuredPerCall = 7;
+    EXPECT_LE(total, kMeasuredPerCall * kCalls + kMeasuredPerCall)
+        << "guard syscall budget exceeded: " << total << " for " << kCalls
+        << " calls";
+    EXPECT_GT(total, 0);
+  });
+}
+
+// Sysfs budget gate: each guarded (unbound) decode currently re-reads the
+// node's cpulist -- 1 open of /sys/devices/system/node/... per call. Cpuset
+// caching should reduce this to amortized 0 -- tighten when it lands.
+TEST(PinningBudget, UnboundDecodeStaysWithinSysfsOpenBudget) {
+  if (!shimCountersPresent() || !cudaqx_node_sysfs_open_count)
+    GTEST_SKIP() << "affinity-counter shim (with sysfs open counter) not "
+                    "preloaded";
+  run_on_worker([] {
+    auto d = makePinnedLut();
+    (void)d->decode_batch(kChunk); // warm one-time paths
+    constexpr int kCalls = 10;
+    cudaqx_affinity_syscall_reset();
+    for (int i = 0; i < kCalls; ++i)
+      (void)d->decode_batch(kChunk);
+    long opens = cudaqx_node_sysfs_open_count();
+    std::printf("[pinning budget] %ld node-sysfs opens / %d unbound decodes "
+                "= %.1f per call\n",
+                opens, kCalls, static_cast<double>(opens) / kCalls);
+    EXPECT_LE(opens, kCalls) << "node-sysfs open budget exceeded: " << opens
+                             << " for " << kCalls << " calls";
+    EXPECT_GT(opens, 0) << "expected the unbound guard to read the node "
+                           "cpulist (counter wired?)";
   });
 }

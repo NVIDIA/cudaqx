@@ -195,3 +195,17 @@ TEST(HardwareAffinity, BindRegionNode64Throws) {
   std::free(p);
 }
 #endif
+
+// T1.2: a correctly named knob with the WRONG value type must throw, and the
+// error must name the offending key so the user can find it.
+TEST(DeviceAffinity, WrongTypedKnobThrowsNamingTheKey) {
+  heterogeneous_map m;
+  m.insert("cuda_device_id", std::string("0"));
+  try {
+    (void)read_cuda_device_id(m);
+    FAIL() << "expected a throw for string-typed cuda_device_id";
+  } catch (const std::exception &e) {
+    EXPECT_NE(std::string(e.what()).find("cuda_device_id"), std::string::npos)
+        << "error must name the key; got: " << e.what();
+  }
+}

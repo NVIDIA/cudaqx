@@ -13,6 +13,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cuda_runtime.h>
+#include <fstream>
 #include <future>
 #include <gtest/gtest.h>
 #include <optional>
@@ -1665,3 +1666,66 @@ TEST(DecoderAffinity, PinnedThreadDecodePreservesCallersBinding) {
   GTEST_SKIP() << "Linux-only";
 #endif
 }
+
+// ---- Knob-contract negative tests --------------------------------------
+
+// T1.1: a typo'd knob key must not accidentally pin anything -- the tolerant
+// plugin ignores unknown keys, so both affinity knobs stay unset and decoding
+// still works.
+TEST(HardwarePinningNegative, TypoedKnobKeyIsSilentlyIgnoredByTolerantPlugin) {
+  cudaqx::tensor<uint8_t> H({2, 3});
+  cudaqx::heterogeneous_map params;
+  params.insert("cuda_device", 1); // typo: should be cuda_device_id
+  auto d = cudaq::qec::decoder::get("multi_error_lut", H, params);
+  EXPECT_EQ(d->cuda_device_id(), -1) << "typo must not accidentally pin";
+  EXPECT_EQ(d->numa_node_id(), -1);
+  std::vector<std::vector<cudaq::qec::float_t>> batch = {{0.1f, 0.1f}};
+  EXPECT_NO_THROW((void)d->decode_batch(batch));
+}
+
+// T1.7: silence contract -- users who never touch the pinning knobs must never
+// see an affinity warning.
+TEST(HardwarePinningNegative, UnpinnedUsersSeeZeroAffinityWarnings) {
+  cudaqx::tensor<uint8_t> H({2, 3});
+  testing::internal::CaptureStderr();
+  auto d = cudaq::qec::decoder::get("multi_error_lut", H,
+                                    cudaqx::heterogeneous_map{});
+  std::vector<std::vector<cudaq::qec::float_t>> batch = {{0.1f, 0.1f}};
+  (void)d->decode_batch(batch);
+  std::string err = testing::internal::GetCapturedStderr();
+  EXPECT_EQ(err.find("[cudaq-qec affinity]"), std::string::npos)
+      << "knobless usage must be warning-silent, got: " << err;
+}
+
+// T2.12: a numa_node_id that is encodable (< 64) but does not exist on this
+// host must degrade loudly (warning naming the node) and still decode
+// correctly, unpinned.
+#if defined(__linux__)
+TEST(HardwarePinningNegative, NonexistentNodeWarnsAndRunsUnpinned) {
+  // Pick a node id in [0,64) that does not exist on this host.
+  int missing = -1;
+  for (int n = 8; n < 64; ++n) {
+    std::ifstream f("/sys/devices/system/node/node" + std::to_string(n) +
+                    "/cpulist");
+    if (!f.is_open()) {
+      missing = n;
+      break;
+    }
+  }
+  if (missing < 0)
+    GTEST_SKIP() << "every node id in [8,64) exists on this host";
+  cudaqx::tensor<uint8_t> H({2, 3});
+  cudaqx::heterogeneous_map params;
+  params.insert("numa_node_id", missing);
+  testing::internal::CaptureStderr();
+  auto d = cudaq::qec::decoder::get("multi_error_lut", H, params);
+  std::vector<std::vector<cudaq::qec::float_t>> batch = {{0.1f, 0.1f}};
+  auto results = d->decode_batch(batch);
+  std::string err = testing::internal::GetCapturedStderr();
+  ASSERT_EQ(results.size(), batch.size());
+  EXPECT_TRUE(results[0].converged) << "must degrade, not corrupt";
+  EXPECT_NE(err.find("numa_node_id " + std::to_string(missing)),
+            std::string::npos)
+      << "degradation must be loud";
+}
+#endif

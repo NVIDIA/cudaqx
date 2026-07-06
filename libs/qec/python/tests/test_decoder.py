@@ -1074,5 +1074,91 @@ def test_python_decoder_affinity_kwargs_coexist_with_arbitrary_kwargs():
     assert "numa_node_id" not in received
 
 
+def test_native_decoder_accepts_affinity_kwargs_from_python():
+    # Native (C++-registered) decoders route through decoder::get(), which
+    # strips the affinity keys before the plugin constructor and stores them
+    # on the base via set_hardware_params().
+    H = np.array([[1, 1, 0], [0, 1, 1]], dtype=np.uint8)
+    d = qec.get_decoder("multi_error_lut", H, numa_node_id=0)
+    assert d.numa_node_id() == 0
+    assert d.cuda_device_id() == -1
+    r = d.decode([0.0, 0.0])
+    assert r is not None
+
+
+def test_dem_text_overload_strips_affinity_kwargs_for_python_decoder():
+
+    @qec.decoder("dem_strict_affinity_byod_neg")
+    class DemStrictAffinityDecoder:
+        # Strict signature, deliberately NO **kwargs: the DEM-text path
+        # injects O and error_rate_vec kwargs, so exactly those (plus H)
+        # must arrive here — the affinity keys must already be stripped.
+        def __init__(self, H, O, error_rate_vec):
+            qec.Decoder.__init__(self, H)
+            self.num_obs = O.shape[0]
+
+        def decode(self, syndrome):
+            r = qec.DecoderResult()
+            r.converged = True
+            r.result = [0.0] * self.num_obs
+            return r
+
+    dem_text = ("error(0.1) D0 L0\n"
+                "error(0.1) D1 L0\n"
+                "error(0.05) D0 D1\n")
+    d = qec.get_decoder("dem_strict_affinity_byod_neg",
+                        dem_text,
+                        numa_node_id=0)
+    assert d.numa_node_id() == 0
+    r = d.decode([0.0, 0.0])
+    assert r.converged is True
+
+
+def test_uninitialized_base_with_affinity_kwargs_raises_actionable_error():
+
+    @qec.decoder("no_base_byod_neg")
+    class NoBaseDecoder:
+
+        def __init__(self, H):
+            pass  # deliberately never calls qec.Decoder.__init__
+
+        def decode(self, syndrome):
+            return None
+
+    H = np.array([[1, 1, 0], [0, 1, 1]], dtype=np.uint8)
+    with pytest.raises(RuntimeError, match="qec.Decoder.__init__"):
+        qec.get_decoder("no_base_byod_neg", H, numa_node_id=0)
+
+
+def test_explicit_negative_cuda_device_id_raises():
+    H = np.array([[1, 1, 0], [0, 1, 1]], dtype=np.uint8)
+    # The failure comes from the kwargs converter: hetMapFromKwargs stores
+    # Python ints as std::size_t, and nanobind's cast rejects negative ints
+    # for unsigned storage. That nb::cast_error surfaces as TypeError or
+    # RuntimeError depending on the nanobind translation, with no stable
+    # message text to match.
+    with pytest.raises((RuntimeError, TypeError)):
+        qec.get_decoder("multi_error_lut", H, cuda_device_id=-1)
+
+
+def test_non_integral_cpu_affinity_raises_naming_integers():
+    H = np.array([[1, 1, 0], [0, 1, 1]], dtype=np.uint8)
+    # Python lists arrive in the heterogeneous map as vector<double>;
+    # read_cpu_affinity() rejects non-integral core ids at construction.
+    with pytest.raises(RuntimeError, match="must be integers"):
+        qec.get_decoder("multi_error_lut",
+                        H,
+                        numa_node_id=0,
+                        cpu_affinity=[0.5])
+
+
+def test_invalid_mempolicy_string_raises_naming_the_knob():
+    H = np.array([[1, 1, 0], [0, 1, 1]], dtype=np.uint8)
+    # read_mempolicy() accepts only "preferred" or "bind"; anything else is
+    # malformed explicit input and must throw, naming the knob.
+    with pytest.raises(RuntimeError, match="mempolicy"):
+        qec.get_decoder("multi_error_lut", H, numa_node_id=0, mempolicy="bnid")
+
+
 if __name__ == "__main__":
     pytest.main()
