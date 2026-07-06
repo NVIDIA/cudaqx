@@ -762,7 +762,12 @@ void bindDecoder(nb::module_ &mod) {
           },
           "Decode the given syndrome to determine the error correction. "
           "Applies the decoder's hardware placement automatically.",
-          nb::arg("syndrome"))
+          nb::arg("syndrome"),
+          // Runs without the GIL so other Python threads can decode
+          // concurrently. Safe: the lambda is pure C++, and a Python-side
+          // decode override re-acquires the GIL in nanobind's trampoline
+          // (PyGILState_Ensure in trampoline_enter).
+          nb::call_guard<nb::gil_scoped_release>())
       .def(
           "decode_async",
           [](decoder &dec,
@@ -776,7 +781,16 @@ void bindDecoder(nb::module_ &mod) {
           "decode_batch",
           [](decoder &decoder,
              const std::vector<std::vector<float_t>> &syndrome) {
-            auto results = decoder.decode_batch(syndrome);
+            std::vector<decoder_result> results;
+            {
+              // Release the GIL only around the C++ decode: a call_guard
+              // would also cover makeBatchDecoderResult, which builds Python
+              // objects and must hold the GIL. A Python-side decode override
+              // reached from the batch loop re-acquires the GIL in nanobind's
+              // trampoline (PyGILState_Ensure in trampoline_enter).
+              nb::gil_scoped_release release;
+              results = decoder.decode_batch(syndrome);
+            }
             return makeBatchDecoderResult(results);
           },
           "Decode multiple syndromes and return the results",
@@ -800,7 +814,10 @@ void bindDecoder(nb::module_ &mod) {
       .def("bind_current_thread", &decoder::bind_current_thread,
            "Persistently pin the calling thread to this decoder's device/"
            "node; guarded entry points then skip their per-call guard on "
-           "this thread. Call unbind_thread() before the thread exits.")
+           "this thread. Call unbind_thread() before the thread exits.",
+           // Pure C++ (affinity/mempolicy/CUDA-device syscalls); runs without
+           // the GIL so pinning cannot stall other Python threads.
+           nb::call_guard<nb::gil_scoped_release>())
       .def("unbind_thread", &decoder::unbind_thread,
            "Forget a bind_current_thread() registration.")
       .def("get_block_size", &decoder::get_block_size,

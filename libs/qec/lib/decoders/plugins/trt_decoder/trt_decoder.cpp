@@ -906,81 +906,14 @@ trt_decoder::decode_batch(const std::vector<std::vector<float_t>> &syndromes) {
   // bind_current_thread() — mirrors the base class decode_batch() behaviour.
   const bool skip_guard = is_bound_here();
 
-  // This override bypasses decoder::decode_batch()'s CudaDeviceGuard/NumaGuard
-  // (private to decoder.cpp, not reachable across this plugin's shared-library
-  // boundary); reimplement the same contract here so TRT inference lands on
-  // the right device/NUMA node regardless of the caller.
-  int _prev_dev = -1;
-  bool _dev_switched = false;
-  if (!skip_guard && cuda_device_id_ >= 0) {
-    cudaError_t _get_err = cudaGetDevice(&_prev_dev);
-    if (_get_err != cudaSuccess)
-      throw std::runtime_error(
-          std::string("trt_decoder::decode_batch: cudaGetDevice failed: ") +
-          cudaGetErrorString(_get_err));
-    if (_prev_dev != cuda_device_id_) {
-      cudaError_t _set_err = cudaSetDevice(cuda_device_id_);
-      if (_set_err != cudaSuccess)
-        throw std::runtime_error("trt_decoder::decode_batch: cudaSetDevice(" +
-                                 std::to_string(cuda_device_id_) +
-                                 ") failed: " + cudaGetErrorString(_set_err));
-      _dev_switched = true;
-    }
-  }
-  struct RestoreDevice {
-    int prev;
-    bool active;
-    ~RestoreDevice() {
-      if (!active)
-        return;
-      if (cudaSetDevice(prev) != cudaSuccess)
-        cudaq::qec::detail_affinity::affinity_warn(
-            "trt_decoder: failed to restore prior CUDA device " +
-            std::to_string(prev) + "; thread may remain on wrong device");
-    }
-  } _dev_guard{_prev_dev, _dev_switched};
-
+  // This override bypasses decoder::decode_batch()'s guards, so it applies
+  // the same shared pair as the base-class entry points (lib-private header,
+  // reachable across the plugin boundary): device switch + NUMA bind, both
+  // restored on scope exit. Out-of-range ids throw; an unreadable current
+  // device warns and skips the switch.
   namespace da = cudaq::qec::detail_affinity;
-  struct ScopedNuma {
-    bool active = false;
-    bool has_prev_affinity = false;
-#if defined(__linux__)
-    cpu_set_t prev_set{};
-#endif
-    da::mempolicy_state prev_mempolicy;
-    ScopedNuma(int node, cudaq::qec::mempolicy_mode mode) {
-      if (node < 0)
-        return;
-      bool apply_mempol = true;
-#if defined(__linux__)
-      has_prev_affinity =
-          (sched_getaffinity(0, sizeof(prev_set), &prev_set) == 0);
-      prev_mempolicy = da::capture_thread_mempolicy();
-      // A temporary guard must never apply a policy it cannot restore.
-      apply_mempol = (prev_mempolicy.mode >= 0);
-      if (!apply_mempol)
-        da::affinity_warn(
-            "trt_decoder: prior thread mempolicy unreadable (get_mempolicy "
-            "failed); temporary NUMA memory policy skipped for this decode");
-#endif
-      da::bind_this_thread_to_numa_node(node, mode, apply_mempol);
-      // Arm the restore only after a successful bind; bind throws before any
-      // syscall for out-of-range nodes, so there is nothing to undo then.
-      active = true;
-    }
-    ~ScopedNuma() {
-      if (!active)
-        return;
-#if defined(__linux__)
-      da::restore_thread_mempolicy(prev_mempolicy);
-      if (has_prev_affinity &&
-          sched_setaffinity(0, sizeof(prev_set), &prev_set) != 0)
-        da::affinity_warn(
-            "trt_decoder: failed to reset thread affinity after decode; "
-            "thread may remain pinned");
-#endif
-    }
-  } _numa_guard(skip_guard ? -1 : numa_node_id_, mempolicy());
+  da::CudaDeviceGuard dev_guard(skip_guard ? -1 : cuda_device_id_);
+  da::NumaGuard numa_guard(skip_guard ? -1 : numa_node_id_, mempolicy());
 
   // Validate that we have syndromes to decode
   if (syndromes.empty()) {

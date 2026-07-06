@@ -18,9 +18,10 @@
 namespace cudaq::qec::detail_affinity {
 
 // RAII: sets the calling thread's CUDA current device, restores on destruction.
-// target < 0 = no-op. Throws std::runtime_error if: target is out of range
-// of the visible device count, cudaGetDevice() fails while checking the
-// current device, or cudaSetDevice() fails while switching to target.
+// target < 0 = no-op. Throws std::runtime_error if target is out of range of
+// the visible device count or cudaSetDevice() fails while switching to target.
+// If cudaGetDevice() cannot read the current device, warns and skips the
+// switch (the decode proceeds on the caller's current device).
 struct CudaDeviceGuard {
   int prev_ = -1;
   bool active_ = false;
