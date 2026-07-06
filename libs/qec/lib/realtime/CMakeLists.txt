@@ -68,6 +68,22 @@ if(CMAKE_CUDA_COMPILER)
     if(CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY)
       message(STATUS "Found cuda-quantum realtime host dispatch library at ${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}")
     endif()
+
+    # The device-graph dispatch API (cudaq_create_dispatch_graph_regular,
+    # cudaq_launch_dispatch_graph, cudaq_destroy_dispatch_graph,
+    # cudaq_dispatch_kernel_set_shared_ring_mode) -- called directly by
+    # qec_realtime_session's device-graph scheduler path -- lives in
+    # libcudaq-realtime-dispatch, separate from libcudaq-realtime.  Link it into
+    # cudaq-qec-realtime-decoding so the .so is self-contained and consumers
+    # (e.g. test_decoders) don't need to know about it.
+    find_library(CUDAQ_REALTIME_DISPATCH_LIBRARY
+      NAMES cudaq-realtime-dispatch
+      PATHS ${_cudaq_realtime_prefixes}
+      PATH_SUFFIXES lib
+    )
+    if(CUDAQ_REALTIME_DISPATCH_LIBRARY)
+      message(STATUS "Found cuda-quantum realtime dispatch library at ${CUDAQ_REALTIME_DISPATCH_LIBRARY}")
+    endif()
     
     # Create static device library for device code
     add_library(cudaq-qec-realtime-cudevice STATIC
@@ -163,11 +179,24 @@ target_link_libraries(cudaq-qec-realtime-decoding
     cudaq::cudaq-common
     LLVMSupport
     $<$<BOOL:${CUDAQ_REALTIME_LIBRARY}>:${CUDAQ_REALTIME_LIBRARY}>
+    $<$<BOOL:${CUDAQ_REALTIME_DISPATCH_LIBRARY}>:${CUDAQ_REALTIME_DISPATCH_LIBRARY}>
     $<$<BOOL:${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}>:${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}>
 )
 
 set_target_properties(cudaq-qec-realtime-decoding PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+
+# libcudaq-realtime-dispatch is relocatable device code (-rdc). Absorbing it
+# into this .so requires the .so to perform the CUDA device link itself;
+# otherwise __cudaRegisterLinkedBinary_..._dispatch_kernel_cu is left undefined
+# and every C++ consumer (e.g. test_decoders) fails to link. Only applies when
+# the dispatch archive is present (CUDA is available in that case).
+if(CUDAQ_REALTIME_DISPATCH_LIBRARY)
+  set_target_properties(cudaq-qec-realtime-decoding PROPERTIES
+    CUDA_RESOLVE_DEVICE_SYMBOLS ON
+    LINKER_LANGUAGE CUDA
+  )
+endif()
 
 if(_CUDAQ_REALTIME_LIB_DIR)
   set_target_properties(cudaq-qec-realtime-decoding PROPERTIES
