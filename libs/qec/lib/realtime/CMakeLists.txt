@@ -308,6 +308,7 @@ else()
   endif()
 endif()
 
+add_subdirectory(decoder_server)
 add_subdirectory(quantinuum)
 add_subdirectory(simulation)
 if(CUDAQ_QEC_DEVICE_CALL_SERVICE_AVAILABLE)

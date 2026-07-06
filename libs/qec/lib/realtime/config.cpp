@@ -699,11 +699,25 @@ struct MappingTraits<cudaq::qec::decoding::config::sliding_window_config> {
 };
 
 template <>
+struct ScalarEnumerationTraits<
+    cudaq::qec::decoding::config::DecoderTransport> {
+  static void enumeration(
+      IO &io, cudaq::qec::decoding::config::DecoderTransport &value) {
+    io.enumCase(value, "cpu_roce",
+                cudaq::qec::decoding::config::DecoderTransport::cpu_roce);
+    io.enumCase(value, "gpu_roce",
+                cudaq::qec::decoding::config::DecoderTransport::gpu_roce);
+  }
+};
+
+template <>
 struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
   static void mapping(IO &io,
                       cudaq::qec::decoding::config::decoder_config &config) {
     io.mapRequired("id", config.id);
     io.mapRequired("type", config.type);
+    io.mapOptional("transport", config.transport,
+                   cudaq::qec::decoding::config::DecoderTransport::cpu_roce);
     io.mapRequired("block_size", config.block_size);
     io.mapRequired("syndrome_size", config.syndrome_size);
     io.mapRequired("H_sparse", config.H_sparse);

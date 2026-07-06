@@ -298,6 +298,10 @@ foreach(lib ${CUDAQX_ENABLE_LIBS})
   add_subdirectory(libs/${lib})
 endforeach()
 
+if(TARGET cudaq-qec-decoder-server)
+  add_subdirectory(apps)
+endif()
+
 
 # Custom targets
 # ==============================================================================
