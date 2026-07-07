@@ -546,19 +546,14 @@ TEST_F(TRTDecoderTest, PerformanceComparisonCudaGraphVsTraditional) {
       << " μs";
 }
 
-TEST_F(TRTDecoderTest, DecodeUninitializedDecoderReturnsUnconvergedBatch) {
-  // A failed constructor leaves the decoder object present but not ready;
-  // decode_batch should return one unconverged empty result per input syndrome.
+TEST_F(TRTDecoderTest, ConstructionFailureThrows) {
+  // Initialization failure is an operational error, not decoding
+  // non-convergence. No unusable decoder object should escape construction.
   cudaqx::heterogeneous_map params;
   params.insert("engine_load_path",
                 std::string("/no/such/cudaq-qec-test.engine"));
-  auto trt_decoder = decoder::get("trt_decoder", make_identity_h(2), params);
-  ASSERT_NE(trt_decoder, nullptr);
-
-  auto results = trt_decoder->decode_batch({{}});
-  ASSERT_EQ(results.size(), 1u);
-  EXPECT_FALSE(results[0].converged);
-  EXPECT_TRUE(results[0].result.empty());
+  EXPECT_THROW(decoder::get("trt_decoder", make_identity_h(2), params),
+               std::runtime_error);
 }
 
 TEST_F(TRTDecoderTest, EngineSavePathAndEngineLoadPathRoundTrip) {
@@ -706,9 +701,9 @@ TEST_F(TRTDecoderTest, MixedDtypeCopiesOutput) {
   EXPECT_FLOAT_EQ(result.result[2], 1.0);
 }
 
-TEST_F(TRTDecoderTest, BatchFailureKeepsResultCount) {
-  // A post-initialisation failure in decode_batch should preserve one result
-  // per input syndrome so decode() never indexes an empty result vector.
+TEST_F(TRTDecoderTest, BatchInfrastructureFailureThrows) {
+  // A post-initialization infrastructure failure is distinct from an
+  // initialized decoder reporting algorithmic non-convergence.
   if (!gpu_available())
     GTEST_SKIP() << "No CUDA GPU available";
   auto onnx_path = get_dynamic_onnx_asset_path();
@@ -729,14 +724,8 @@ TEST_F(TRTDecoderTest, BatchFailureKeepsResultCount) {
     GTEST_SKIP() << "Failed to create mismatch TRT decoder: " << e.what();
   }
 
-  auto results = trt_decoder->decode_batch({{1.0, 0.0, 1.0}});
-
-  // The mismatched global decoder forces an exception before any result is
-  // pushed; the fixed path must still return one placeholder for the input.
-  ASSERT_EQ(results.size(), 1u);
-  // The placeholder must be marked failed so callers can distinguish it from a
-  // successful decode without touching out-of-range elements.
-  EXPECT_FALSE(results[0].converged);
+  EXPECT_THROW(trt_decoder->decode_batch({{1.0, 0.0, 1.0}}),
+               std::runtime_error);
 }
 
 TEST_F(TRTDecoderTest, CompositeGlobalDecoderCombinesLogicalFrame) {
