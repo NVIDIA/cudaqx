@@ -207,12 +207,18 @@ TEST(PinningBenchmark, OneShotDoesNotClobberConcurrentBind) {
   auto d = makePinnedLut();
 
   // Thread B will call bind_current_thread() while the one-shot worker runs.
+  // It stays alive until the unbound-thread check below completes: if it
+  // exited first, the fresh "unbound" thread could recycle its pthread id,
+  // spuriously pass is_bound_here(), and skip the guard (observed CI flake).
   std::atomic<bool> b_bound{false};
+  std::atomic<bool> b_done{false};
   std::thread thread_b([&] {
     // Spin until main_worker signals us to bind.
     while (!b_bound.load(std::memory_order_acquire))
       std::this_thread::yield();
     d->bind_current_thread();
+    while (!b_done.load(std::memory_order_acquire))
+      std::this_thread::yield();
   });
 
   // Run decode_on_pinned_thread from the main thread; signal B to bind midway.
@@ -223,19 +229,22 @@ TEST(PinningBenchmark, OneShotDoesNotClobberConcurrentBind) {
   });
 
   main_worker.join();
-  thread_b.join();
 
-  // After both threads finish, whoever bound last should have their binding
-  // intact. At a minimum, is_bound_here() from thread_b must not permanently
-  // suppress guards: a subsequent decode from an unbound thread must still
-  // issue syscalls.
+  // Whoever bound last should have their binding intact. At a minimum,
+  // thread_b's binding must not permanently suppress guards for other
+  // threads: a decode from a thread that was never bound must still issue
+  // syscalls.
   cudaqx_affinity_syscall_reset();
-  // Run decode from a fresh thread that was never bound.
+  // Run decode from a fresh thread that was never bound (thread_b is still
+  // alive, so this thread cannot alias its id).
   std::thread unbound([&] { d->decode_batch(kChunk); });
   unbound.join();
   // An unbound thread must always fire the guard.
   EXPECT_GT(cudaqx_affinity_syscall_count(), 0)
       << "guard must still fire for unbound threads after concurrent-bind race";
+
+  b_done.store(true, std::memory_order_release);
+  thread_b.join();
 }
 
 TEST(PinningBenchmark, EnqueueSyndromeAppliesGuardOnUnboundThread) {
