@@ -597,7 +597,7 @@ if(TARGET cudaq-qec-decoders AND TARGET cudaq-qec-realtime-decoding)
   # anchored (^<stem>\.so), so e.g. "libcudaq" flags libcudaq.so but never
   # libcudaq-realtime.so / libcudaq-qec-decoders.so.
   set(_dep_closure_forbidden
-    "libcudaq-common|libcudaq-operator|libcudaq-qec|libcudaq|libnvqir|libcudaq-mlir-runtime")
+    "libcudaq-common|libcudaq-operator|libcudaq-qec|libcudaq|libnvqir|libcudaq-mlir-runtime|libcustabilizer")
 
   # Always-present core libraries under guard, plus every decoder plugin and
   # the realtime pipeline that were actually built in this configuration.  The
@@ -609,7 +609,10 @@ if(TARGET cudaq-qec-decoders AND TARGET cudaq-qec-realtime-decoding)
       cudaq-qec-pymatching
       cudaq-qec-chromobius
       cudaq-qec-trt-decoder
-      cudaq-realtime-pipeline)
+      cudaq-realtime-pipeline
+      cudaq-qec-realtime-decoding
+      cudaq-qec-realtime-decoding-simulation
+      cudaq-qec-realtime-decoding-quantinuum)
     if(TARGET ${_t})
       list(APPEND _dep_closure_targets ${_t})
     endif()
