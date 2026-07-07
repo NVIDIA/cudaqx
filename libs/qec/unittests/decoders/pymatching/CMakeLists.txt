@@ -81,7 +81,7 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-decoding-server-cqr)
   #     provides the force-link + self-check hooks the test asserts on).
   target_link_libraries(test_pymatching_device_call_realtime PRIVATE
     GTest::gtest_main
-    cudaq-qec
+    cudaq-qec-decoders
     cudaq-qec-realtime-decoding
     cudaq-qec-realtime-decoding-simulation-cqr
     cudaq-qec-realtime-decoding-server-cqr
