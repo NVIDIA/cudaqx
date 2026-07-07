@@ -440,7 +440,9 @@ void qec_realtime_session::finalize() {
   }
 
   std::memset(&ringbuffer_, 0, sizeof(ringbuffer_));
-  std::memset(&host_ctx_, 0, sizeof(host_ctx_));
+  std::memset(&host_table_, 0, sizeof(host_table_));
+  std::memset(&host_config_, 0, sizeof(host_config_));
+  host_engine_ = nullptr;
 
   if (was_initialized)
     CUDA_QEC_INFO("qec_realtime_session: finalized");
@@ -820,43 +822,42 @@ void qec_realtime_session::start_device_loop() {
 
 void qec_realtime_session::start_host_loop() {
   if (!device_mode_) {
-    // HOST mode: inline HOST_CALL handlers, no graph worker pool.
-    std::memset(&host_ctx_, 0, sizeof(host_ctx_));
-    host_ctx_.ringbuffer = ringbuffer_;
-    host_ctx_.config.num_slots = static_cast<std::uint32_t>(num_slots_);
-    host_ctx_.config.slot_size = static_cast<std::uint32_t>(slot_size_);
-    host_ctx_.config.dispatch_path = CUDAQ_DISPATCH_PATH_HOST;
-    host_ctx_.config.dispatch_mode = CUDAQ_DISPATCH_HOST_CALL;
-    host_ctx_.config.skip_tx_markers = 1;
+    // HOST mode: inline HOST_CALL handlers, no graph worker pool.  Every table
+    // entry is HOST_CALL, so cudaq_graph_launch_engine_create() would build no
+    // workers -- we skip it entirely and drive the ring loop with a NULL
+    // engine (the loop runs HOST_CALL handlers inline).
+    std::memset(&host_config_, 0, sizeof(host_config_));
+    host_config_.num_slots = static_cast<std::uint32_t>(num_slots_);
+    host_config_.slot_size = static_cast<std::uint32_t>(slot_size_);
+    host_config_.dispatch_path = CUDAQ_DISPATCH_PATH_HOST;
+    host_config_.dispatch_mode = CUDAQ_DISPATCH_HOST_CALL;
+    host_config_.skip_tx_markers = 1;
     // shared_ring_mode lets the loop scan the whole ring for a non-zero
     // rx_flag instead of sitting on a single advancing cursor.  The producer's
     // acquire_slot() reuses the first free slot (slot 0 for serialized
     // round-trips), so without ring-scanning the loop's cursor would advance
     // past the reused slot and deadlock.  There is no second dispatcher here;
     // we only want the scan behavior.
-    host_ctx_.config.shared_ring_mode = 1;
-    host_ctx_.function_table.entries = function_table_host_;
-    host_ctx_.function_table.count =
-        static_cast<std::uint32_t>(function_table_count_);
-    host_ctx_.shutdown_flag = &shutdown_flag_;
-    host_ctx_.stats_counter = &host_stats_counter_;
-    host_ctx_.skip_stream_sweep = true;
+    host_config_.shared_ring_mode = 1;
+    host_table_.entries = function_table_host_;
+    host_table_.count = static_cast<std::uint32_t>(function_table_count_);
+    host_engine_ = nullptr;
     shutdown_flag_ = 0;
 
-    host_loop_thread_ =
-        std::thread([this]() { cudaq_host_dispatcher_loop(&host_ctx_); });
+    host_loop_thread_ = std::thread([this]() {
+      cudaq_host_ring_dispatch_loop(&ringbuffer_, &host_table_, &host_config_,
+                                    /*engine=*/nullptr, &shutdown_flag_,
+                                    &host_stats_counter_);
+    });
     return;
   }
 
-  // DEVICE mode: one graph worker per captured decoder.
-  host_workers_.assign(num_decoders_with_graph_,
-                       cudaq_host_dispatch_worker_t{});
-  // host_worker_streams_ is indexed by *source* decoder_id (sparse), not packed
-  // worker slot, because callers pass decoder_id.
-  host_worker_streams_.assign(decoders_.size(),
-                              static_cast<cudaStream_t>(nullptr));
+  // DEVICE mode: the GRAPH_LAUNCH engine builds one worker per GRAPH_LAUNCH
+  // entry in the function table (created earlier with graph_exec / function_id
+  // / routing_key already populated) and owns the worker streams, idle mask,
+  // inflight-slot tags, and per-worker GraphIOContext array.
 
-  // The host_dispatcher.h public ctx exposes a SINGLE mailbox bank per ctx.
+  // cudaq_graph_launch_engine_create takes a SINGLE external mailbox bank.
   // Demo 1's scope is one decoder per session, so the single-bank limitation
   // is fine -- the lone worker dispatches every enqueue RPC.
   if (num_decoders_with_graph_ > 1)
@@ -864,95 +865,50 @@ void qec_realtime_session::start_host_loop() {
         "qec_realtime_session::initialize: multi-decoder host dispatch is not "
         "yet supported (num_decoders_with_graph=" +
         std::to_string(num_decoders_with_graph_) +
-        ").  libcudaq-realtime's host dispatcher exposes a single h_mailbox_"
-        "bank per loop ctx; Demo 1 is scoped to one decoder.");
+        ").  The GRAPH_LAUNCH engine accepts a single external h_mailbox_bank; "
+        "Demo 1 is scoped to one decoder.");
 
+  // The lone captured decoder's pinned mailbox is the engine's external bank.
   void **mailbox_bank = nullptr;
-
-  std::size_t slot = 0;
   for (std::size_t i = 0; i < decoders_.size(); ++i) {
     if (!captured_graphs_[i])
       continue;
     auto *gres = static_cast<cudaq::qec::realtime::graph_resources *>(
         captured_graphs_[i]);
-
-    cudaStream_t stream = nullptr;
-    if (cudaStreamCreate(&stream) != cudaSuccess)
-      throw std::runtime_error(
-          "qec_realtime_session::initialize: cudaStreamCreate for HOST_LOOP "
-          "worker " +
-          std::to_string(slot) + " (decoder_id=" + std::to_string(i) +
-          ") failed");
-    host_worker_streams_[i] = stream;
-
-    auto &w = host_workers_[slot];
-    w.graph_exec = gres->graph_exec;
-    w.stream = stream;
-    w.function_id = cudaq::qec::decoding::rpc::kEnqueueSyndromesFunctionId;
-    w.routing_key = static_cast<std::uint64_t>(i);
-    w.pre_launch_fn = nullptr;
-    w.pre_launch_data = nullptr;
-    w.post_launch_fn = nullptr;
-    w.post_launch_data = nullptr;
-
-    if (slot == 0)
-      mailbox_bank = gres->h_mailbox;
-    ++slot;
+    mailbox_bank = gres->h_mailbox;
+    break;
   }
 
-  host_idle_mask_storage_ = new std::uint64_t(
-      num_decoders_with_graph_ < 64
-          ? ((std::uint64_t{1} << num_decoders_with_graph_) - 1)
-          : ~std::uint64_t{0});
-  host_live_dispatched_storage_ = new std::uint64_t(0);
-  host_inflight_slot_tags_ = new int[num_decoders_with_graph_];
-  for (std::size_t i = 0; i < num_decoders_with_graph_; ++i)
-    host_inflight_slot_tags_[i] = -1;
-
-  // Per-worker GraphIOContext array (pinned-mapped so both CPU monitor and GPU
-  // graph see the same backing).
-  {
-    void *h = nullptr;
-    void *d = nullptr;
-    const std::size_t bytes =
-        num_decoders_with_graph_ * sizeof(cudaq::realtime::GraphIOContext);
-    if (!allocate_pinned_mapped(bytes, &h, &d))
-      throw std::runtime_error("qec_realtime_session::start_host_loop: failed "
-                               "to allocate per-worker "
-                               "GraphIOContext array");
-    std::memset(h, 0, bytes);
-    io_ctxs_host_ = static_cast<cudaq::realtime::GraphIOContext *>(h);
-    io_ctxs_dev_ = static_cast<cudaq::realtime::GraphIOContext *>(d);
-  }
-
-  std::memset(&host_ctx_, 0, sizeof(host_ctx_));
-  host_ctx_.ringbuffer = ringbuffer_;
-  host_ctx_.config.num_slots = static_cast<std::uint32_t>(num_slots_);
-  host_ctx_.config.slot_size = static_cast<std::uint32_t>(slot_size_);
-  host_ctx_.config.shared_ring_mode = 1;
-  host_ctx_.config.skip_tx_markers = 1;
+  std::memset(&host_config_, 0, sizeof(host_config_));
+  host_config_.num_slots = static_cast<std::uint32_t>(num_slots_);
+  host_config_.slot_size = static_cast<std::uint32_t>(slot_size_);
+  host_config_.shared_ring_mode = 1;
+  host_config_.skip_tx_markers = 1;
   // The host loop dereferences these entries on the CPU, so it must use the
   // host view of the (pinned-mapped) table.  Under UVA the host and device
   // addresses are equal, but the host pointer is the correct/portable choice;
   // the device dispatcher separately receives function_table_dev_ via
   // cudaq_dispatcher_set_function_table().
-  host_ctx_.function_table.entries = function_table_host_;
-  host_ctx_.function_table.count =
-      static_cast<std::uint32_t>(function_table_count_);
-  host_ctx_.workers = host_workers_.data();
-  host_ctx_.num_workers = host_workers_.size();
-  host_ctx_.h_mailbox_bank = mailbox_bank;
-  host_ctx_.shutdown_flag = shutdown_flag_host_;
-  host_ctx_.stats_counter = &host_stats_counter_;
-  host_ctx_.live_dispatched = host_live_dispatched_storage_;
-  host_ctx_.idle_mask = host_idle_mask_storage_;
-  host_ctx_.inflight_slot_tags = host_inflight_slot_tags_;
-  host_ctx_.io_ctxs_host = io_ctxs_host_;
-  host_ctx_.io_ctxs_dev = io_ctxs_dev_;
-  host_ctx_.skip_stream_sweep = false;
+  host_table_.entries = function_table_host_;
+  host_table_.count = static_cast<std::uint32_t>(function_table_count_);
 
-  host_loop_thread_ =
-      std::thread([this]() { cudaq_host_dispatcher_loop(&host_ctx_); });
+  // The engine reads graph_exec / function_id / routing_key from the
+  // GRAPH_LAUNCH table entries and allocates its own worker streams + a
+  // GraphIOContext array (the latter only when rx_data != tx_data).
+  cudaq_status_t engine_st = CUDAQ_OK;
+  host_engine_ = cudaq_graph_launch_engine_create(
+      &ringbuffer_, &host_table_, &host_config_, mailbox_bank, &engine_st);
+  if (engine_st != CUDAQ_OK || !host_engine_)
+    throw std::runtime_error(
+        "qec_realtime_session::start_host_loop: "
+        "cudaq_graph_launch_engine_create failed (status=" +
+        std::to_string(static_cast<int>(engine_st)) + ")");
+
+  host_loop_thread_ = std::thread([this]() {
+    cudaq_host_ring_dispatch_loop(&ringbuffer_, &host_table_, &host_config_,
+                                  host_engine_, shutdown_flag_host_,
+                                  &host_stats_counter_);
+  });
 }
 
 //==============================================================================
@@ -985,24 +941,11 @@ void qec_realtime_session::stop_loops() {
     device_manager_ = nullptr;
   }
 
-  for (auto s : host_worker_streams_) {
-    if (s)
-      cudaStreamDestroy(s);
-  }
-  host_worker_streams_.clear();
-  host_workers_.clear();
-
-  delete host_idle_mask_storage_;
-  host_idle_mask_storage_ = nullptr;
-  delete host_live_dispatched_storage_;
-  host_live_dispatched_storage_ = nullptr;
-  delete[] host_inflight_slot_tags_;
-  host_inflight_slot_tags_ = nullptr;
-
-  if (io_ctxs_host_) {
-    cudaFreeHost(io_ctxs_host_);
-    io_ctxs_host_ = nullptr;
-    io_ctxs_dev_ = nullptr;
+  // The engine owns the worker streams, idle mask, inflight-slot tags, and
+  // GraphIOContext array; destroy it after the driving loop has stopped.
+  if (host_engine_) {
+    cudaq_graph_launch_engine_destroy(host_engine_);
+    host_engine_ = nullptr;
   }
 }
 
