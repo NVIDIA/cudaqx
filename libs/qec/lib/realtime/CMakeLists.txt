@@ -98,7 +98,7 @@ if(CMAKE_CUDA_COMPILER)
     # DeviceCallService provider API from a realtime/device-call-enabled CUDA-Q
     # build.
     cudaq_qec_find_realtime_path(CUDAQ_DEVICE_CALL_INCLUDE_DIR
-      NAMES cudaq_internal/device_call/DeviceCallService.h
+      NAMES cudaq/realtime/device_call_service.h
       PATH_SUFFIXES include
     )
     if(CUDAQ_DEVICE_CALL_INCLUDE_DIR)
