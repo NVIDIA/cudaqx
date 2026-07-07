@@ -52,7 +52,9 @@ set -euo pipefail
 #  $2 distance       Surface code distance (D)
 #  $3 num_rounds     Number of measurement rounds (R >= 1; R < D is decodable
 #                    but not fault-tolerant -- no multiple-of-D constraint)
-#  $4 decoder_type   Decoder to generate (optional, defaults to pymatching)
+#  $4 decoder_type   Decoder(s) to generate: a single type, or a comma list
+#                    with one entry per patch (pass --num_logical N in the
+#                    extra args). Optional, defaults to pymatching.
 #  $5 num_shots      Number of shots (optional, defaults to 200)
 #  $6 onnx_path      ONNX path for trt_decoder, or AUTO to generate one
 #  $7... extra args  Extra app args to pass to generation/realtime phases
@@ -79,14 +81,25 @@ export CUDAQ_QEC_REALTIME_MODE=${CUDAQ_QEC_REALTIME_MODE:-inproc_rpc}
 
 P_SPAM=0.01
 
-# Residual logical-error ceiling. At p_spam=0.01 a correctly-wired decoder
-# leaves ~0 residual logical errors (measured: <=1 in 200), while the
-# UNCORRECTED rate is ~4% (d3) up to ~15% (d5/T6). The ceiling is 2% -- below
-# the uncorrected rate -- so a decoder that loads but never actually corrects
-# (leaving the uncorrected rate) is caught, not just one that aborts. Floored at
-# 1 so small shot counts do not truncate the ceiling to 0.
+# Residual logical-error ceiling: a PREDECLARED correctness bound, set at
+# half the d3 UNCORRECTED logical-flip rate (~4% at p_spam=0.01; ~15% at
+# d5/T6). A decoder that loads but never corrects reliably exceeds it; any
+# working decoder sits well below it. This is a wiring/correctness check, not
+# a performance target -- it must never be tightened toward a particular
+# decoder's measured rate. Floored at 1 so small shot counts do not truncate
+# the ceiling to 0.
 MAX_NON_ZERO=$((NUM_SHOTS / 50))
 if [[ $MAX_NON_ZERO -lt 1 ]]; then MAX_NON_ZERO=1; fi
+
+# Multi-type mode: a comma list binds one decoder type per patch and the
+# per-decoder ceilings below replace the aggregate ceiling (which is
+# calibrated for ONE patch and would silently tighten N-fold). The same
+# predeclared bound applies per decoder; cases must run enough shots that
+# working-vs-broken is unambiguous for every entry (>= 1000 for BP-family
+# entries, whose working residual sits closest to the bound).
+IFS=',' read -r -a DECODER_TYPES <<< "$DECODER_TYPE"
+MULTI_TYPE=0
+if [[ ${#DECODER_TYPES[@]} -gt 1 ]]; then MULTI_TYPE=1; fi
 
 # Create an isolated working directory and (by default) clean it up on exit.
 WORKDIR=$(mktemp -d)
@@ -102,7 +115,7 @@ trap cleanup EXIT
 CONFIG_FILE=$WORKDIR/config.yml
 REALTIME_LOG=$WORKDIR/realtime.log
 
-if [[ "$DECODER_TYPE" == "trt_decoder" && "$ONNX_PATH" == "AUTO" ]]; then
+if [[ ",$DECODER_TYPE," == *",trt_decoder,"* && "$ONNX_PATH" == "AUTO" ]]; then
   ONNX_PATH=$WORKDIR/trt_identity_predecoder.onnx
   SYNDROME_SIZE=$(((DISTANCE * DISTANCE - 1) * NUM_ROUNDS))
   PYTHON_BIN=${PYTHON:-python3}
@@ -182,6 +195,24 @@ if [[ ! -s "$CONFIG_FILE" ]]; then
 fi
 echo "Config file generated: $CONFIG_FILE ($(stat -c %s "$CONFIG_FILE") bytes)"
 
+# Dual-parse structural proof (mixed BP + matching lists): BP entries carry
+# the undecomposed hyperedge H, so their block_size must be strictly LESS
+# than the matching entries' decomposed block_size. Deterministic guard that
+# the per-family factorization actually happened.
+if [[ "$MULTI_TYPE" -eq 1 && ",$DECODER_TYPE," == *",nv-qldpc-decoder,"* ]] \
+   && [[ ",$DECODER_TYPE," == *",pymatching,"* || ",$DECODER_TYPE," == *",trt_decoder,"* ]]; then
+  nv_bs=""
+  match_bs=""
+  while read -r typ bs; do
+    if [[ "$typ" == "nv-qldpc-decoder" ]]; then nv_bs=$bs; else match_bs=$bs; fi
+  done < <(awk '/- id:/{n++} /type:/{t[n]=$2} /block_size:/{b[n]=$2} END{for(i=1;i<=n;i++) print t[i], b[i]}' "$CONFIG_FILE")
+  if [[ -z "$nv_bs" || -z "$match_bs" ]] || [[ ! "$nv_bs" -lt "$match_bs" ]]; then
+    echo "FAIL: dual-parse structural check: nv-qldpc block_size ('$nv_bs') must be < matching block_size ('$match_bs')"
+    exit 1
+  fi
+  echo "Dual-parse structural check: nv block_size $nv_bs < matching $match_bs -- OK"
+fi
+
 # -------------------------------------------------------------------------- #
 # Phase 2: realtime -- load the YAML config and decode.
 # The decoder is read from the file, so do NOT pass --decoder_type here.
@@ -249,11 +280,48 @@ num_non_zero_values=$(grep "Number of non-zero values measured :" "$REALTIME_LOG
 if ! [[ "$num_non_zero_values" =~ ^[0-9]+$ ]]; then
   echo "FAIL: 'Number of non-zero values measured' is not a number (got '$num_non_zero_values')"
   return_code=1
+elif [[ "$MULTI_TYPE" -eq 1 ]]; then
+  echo "Multi-type mode: aggregate ceiling replaced by per-decoder ceilings below"
 elif [[ "$num_non_zero_values" -gt "$MAX_NON_ZERO" ]]; then
   echo "FAIL: residual logical errors ($num_non_zero_values) exceed ceiling ($MAX_NON_ZERO) -- decoder appears wired-but-wrong"
   return_code=1
 else
   echo "Residual logical errors: $num_non_zero_values (ceiling $MAX_NON_ZERO) -- OK"
+fi
+
+# Multi-type mode: one report line per patch, matched literally (grep -F --
+# the bracketed label is a regex trap), with a per-type residual ceiling.
+if [[ "$MULTI_TYPE" -eq 1 ]]; then
+  for i in "${!DECODER_TYPES[@]}"; do
+    t=${DECODER_TYPES[$i]}
+    line=$(grep -F "decoder[$i] ($t):" "$REALTIME_LOG" || true)
+    if [[ -z "$line" ]]; then
+      echo "FAIL: missing per-decoder report line 'decoder[$i] ($t):'"
+      return_code=1
+      continue
+    fi
+    errs=$(printf '%s\n' "$line" | sed -n 's/.*logical_errors=\([0-9][0-9]*\)\/[0-9][0-9]*.*/\1/p')
+    ceil=$MAX_NON_ZERO
+    if ! [[ "$errs" =~ ^[0-9]+$ ]]; then
+      echo "FAIL: could not parse logical_errors from: $line"
+      return_code=1
+    elif [[ "$errs" -gt "$ceil" ]]; then
+      echo "FAIL: decoder[$i] ($t) residual logical errors ($errs) exceed ceiling ($ceil)"
+      return_code=1
+    else
+      echo "decoder[$i] ($t): residual logical errors $errs (ceiling $ceil) -- OK"
+    fi
+  done
+fi
+
+# REQUIRE_HOST_MODE (relay trio ctest): assert the realtime session actually
+# initialized in HOST dispatch mode, so the test cannot pass vacuously through
+# the legacy direct-call path. Needs CUDAQ_LOG_LEVEL=info.
+if [[ -n "${REQUIRE_HOST_MODE:-}" ]]; then
+  if ! grep -q "using HOST dispatch mode" "$REALTIME_LOG"; then
+    echo "FAIL: 'using HOST dispatch mode' not found (realtime session did not initialize; is CUDAQ_LOG_LEVEL=info set?)"
+    return_code=1
+  fi
 fi
 
 echo ""

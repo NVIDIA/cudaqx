@@ -533,6 +533,61 @@ endif()
 add_surface_code_4_yaml_test(d5t6 5 6 pymatching 20 "")
 add_surface_code_4_yaml_test(multilogical 3 3 pymatching 20 "" --num_logical 2)
 
+# Multi-decoder-type cases: --decoder_type lists one decoder per patch (patch i
+# decodes with entry i through one realtime session). list-parse exercises the
+# list machinery with no new dependencies (homogeneous pair); the trio cases
+# bind three patches to heterogeneous decoder configs -- d5 exercises the
+# vector result path beyond the old num_logical*d^2 < 64 packing ceiling.
+add_surface_code_4_yaml_test(list-parse-d3 3 3 "pymatching,pymatching" 20 ""
+  --num_logical 2)
+if(TARGET cudaq-qec-trt-decoder AND _SC4_TRY_TRT_TEST)
+  add_surface_code_4_yaml_test(trio-trt-d3 3 3
+    "pymatching,trt_decoder,pymatching" 200 AUTO --num_logical 3)
+  add_surface_code_4_yaml_test(trio-trt-d5 5 5
+    "pymatching,trt_decoder,pymatching" 200 AUTO --num_logical 3)
+endif()
+
+# The multi-type cases must PROVE the patches traveled through one realtime
+# session: without realtime support maybe_init_realtime_session() is a no-op
+# and enqueue/get/reset silently take the legacy direct-call path, so the
+# tests would pass on YAML routing alone. Assert HOST-mode initialization
+# whenever this build has realtime support. Gate on the compile definition
+# actually applied to cudaq-qec-realtime-decoding (set when
+# CUDAQ_REALTIME_INCLUDE_DIR is discovered), NOT the optional
+# CUDAQ_REALTIME_ROOT search hint -- the headers can be found through
+# CUDAQ_INSTALL_DIR while the hint stays empty.
+get_target_property(_sc4_rt_defs cudaq-qec-realtime-decoding
+  COMPILE_DEFINITIONS)
+if(_sc4_rt_defs MATCHES "CUDAQ_REALTIME_ROOT")
+  set(_sc4_hostmode_env "REQUIRE_HOST_MODE=1;CUDAQ_LOG_LEVEL=info")
+  set_property(TEST app_examples.surface_code-4-yaml-list-parse-d3 APPEND
+    PROPERTY ENVIRONMENT "${_sc4_hostmode_env}")
+  if(TARGET cudaq-qec-trt-decoder AND _SC4_TRY_TRT_TEST)
+    set_property(TEST app_examples.surface_code-4-yaml-trio-trt-d3 APPEND
+      PROPERTY ENVIRONMENT "${_sc4_hostmode_env}")
+    set_property(TEST app_examples.surface_code-4-yaml-trio-trt-d5 APPEND
+      PROPERTY ENVIRONMENT "${_sc4_hostmode_env}")
+  endif()
+endif()
+
+# Three-way heterogeneous trio incl. relay-BP. Requires a HOST-dispatch
+# (non-graph) nv-qldpc plugin via QEC_EXTERNAL_DECODERS, built against the
+# CURRENT cudaq-qec headers (a stale plugin fails to load): the inproc session
+# must be dispatch-homogeneous, and pymatching/trt are host-mode. A
+# graph-flavor plugin (built with CUDAQ_REALTIME_ROOT) would be rejected as a
+# mixed set. 1000 shots make working-vs-broken unambiguous for the BP entry
+# under the predeclared 2% correctness bound. REQUIRE_HOST_MODE +
+# CUDAQ_LOG_LEVEL=info make the driver assert the realtime session actually
+# initialized (no vacuous pass through the legacy direct-call stub).
+if((QEC_EXTERNAL_DECODERS OR DEFINED ENV{QEC_EXTERNAL_DECODERS})
+   AND TARGET cudaq-qec-trt-decoder AND _SC4_TRY_TRT_TEST)
+  add_surface_code_4_yaml_test(trio-relay-d3 3 3
+    "pymatching,trt_decoder,nv-qldpc-decoder" 1000 AUTO
+    --num_logical 3 --use-relay-bp)
+  set_property(TEST app_examples.surface_code-4-yaml-trio-relay-d3 APPEND
+    PROPERTY ENVIRONMENT "REQUIRE_HOST_MODE=1;CUDAQ_LOG_LEVEL=info")
+endif()
+
 # --------------------------------------------------------------------------- #
 # Negative / boundary tests: pin the validation behavior (distance/round guards,
 # YAML-to-geometry binding, X-basis-bundle rejection, replay guards including
@@ -611,6 +666,157 @@ _sc4_reject(rounds-too-few "must be >= 2"
 # replay requires --yaml.
 _sc4_reject(replay-needs-yaml "load_syndrome requires --yaml"
   --load_syndrome ${_sc4_neg_dir}/none.txt --distance 3 --num_rounds 3)
+
+# --decoder_type list guards: length must be 1 or num_logical, entries must
+# name known decoders (a trailing comma is an empty entry), --use-relay-bp
+# needs an nv-qldpc entry at generation, and the vector-result guards bound
+# distance (numData < 64) and num_logical (correction bitmask width).
+_sc4_reject(list-length-mismatch "expected 1 or num_logical"
+  --distance 3 --num_rounds 3 --num_logical 3
+  --decoder_type pymatching,pymatching
+  --save_dem ${_sc4_neg_dir}/len.yml)
+_sc4_reject(list-unknown-entry "--decoder_type entries must be"
+  --distance 3 --num_rounds 3 --decoder_type pymatching,foo
+  --save_dem ${_sc4_neg_dir}/unknown.yml)
+_sc4_reject(list-trailing-comma "--decoder_type entries must be"
+  --distance 3 --num_rounds 3 --decoder_type "pymatching,"
+  --save_dem ${_sc4_neg_dir}/trail.yml)
+_sc4_reject(relay-without-nv "--use-relay-bp requires"
+  --distance 3 --num_rounds 3 --decoder_type pymatching --use-relay-bp
+  --save_dem ${_sc4_neg_dir}/relaynonv.yml)
+_sc4_reject(distance-too-large "only numData < 64"
+  --distance 9 --num_rounds 9 --decoder_type pymatching
+  --save_dem ${_sc4_neg_dir}/d9.yml)
+_sc4_reject(num-logical-too-large "--num_logical must be in [1, 64]"
+  --distance 3 --num_rounds 3 --num_logical 65 --decoder_type pymatching
+  --save_dem ${_sc4_neg_dir}/nl65.yml)
+# Pathological value: pins that the range guard fires BEFORE the decoder-type
+# list is replicated num_logical times (no num_logical-sized allocation).
+_sc4_reject(num-logical-pathological "--num_logical must be in [1, 64]"
+  --distance 3 --num_rounds 3 --num_logical 2000000000
+  --decoder_type pymatching --save_dem ${_sc4_neg_dir}/nlhuge.yml)
+# Malformed numeric flags must error cleanly, not abort on an uncaught
+# stoi/stod exception; > INT_MAX values take the same path.
+_sc4_reject(distance-not-a-number "--distance expects an integer"
+  --distance abc --num_rounds 3 --decoder_type pymatching
+  --save_dem ${_sc4_neg_dir}/nan.yml)
+_sc4_reject(num-logical-overflows-int "--num_logical expects an integer"
+  --distance 3 --num_rounds 3 --num_logical 5000000000
+  --decoder_type pymatching --save_dem ${_sc4_neg_dir}/nlof.yml)
+# Semantic ranges: lexically valid numbers outside the flag's domain must be
+# rejected (a negative shot count would wrap to an enormous size_t; p_spam is
+# advertised as [0, 1] and nan/inf must not pass).
+_sc4_reject(num-shots-nonpositive "--num_shots must be >= 1"
+  --distance 3 --num_rounds 3 --num_shots 0 --decoder_type pymatching
+  --save_dem ${_sc4_neg_dir}/ns0.yml)
+_sc4_reject(num-shots-negative "--num_shots must be >= 1"
+  --distance 3 --num_rounds 3 --num_shots -1 --decoder_type pymatching
+  --save_dem ${_sc4_neg_dir}/nsneg.yml)
+_sc4_reject(p-spam-out-of-range "--p_spam must be a finite value in [0, 1]"
+  --distance 3 --num_rounds 3 --p_spam 1.5 --decoder_type pymatching
+  --save_dem ${_sc4_neg_dir}/ps15.yml)
+_sc4_reject(p-spam-nan "--p_spam must be a finite value in [0, 1]"
+  --distance 3 --num_rounds 3 --p_spam nan --decoder_type pymatching
+  --save_dem ${_sc4_neg_dir}/psnan.yml)
+# p_spam = 0 is in [0, 1] (valid for a --yaml run) but cannot generate a DEM;
+# generation must fail with a nonzero status, not exit 0 with no config file.
+_sc4_reject(p-spam-zero-generation "--p_spam must be > 0 to generate"
+  --distance 3 --num_rounds 3 --p_spam 0 --decoder_type pymatching
+  --save_dem ${_sc4_neg_dir}/ps0.yml)
+
+# Dual-parse pin, plugin-free: generation instantiates no decoder, so this
+# runs everywhere. Structural check (always): the BP entry carries the
+# undecomposed hyperedge H -- strictly fewer columns than the matching entry's
+# decomposed H. Full check (python3 available): the mixed-list BP entry's
+# column multiset of (detector support, observable support, probability) is
+# IDENTICAL to a directly generated undecomposed reference config at the same
+# geometry.
+function(_sc4_dual_parse_test distance num_rounds)
+  add_test(NAME app_examples.surface_code-4-yaml-dual-parse-gen-d${distance}
+    COMMAND bash -c [==[
+set -e
+exe=$1; mixed=$2; pure=$3; d=$4; t=$5
+"$exe" --distance $d --num_rounds $t --num_logical 2 \
+  --decoder_type pymatching,nv-qldpc-decoder --p_spam 0.01 --save_dem "$mixed"
+"$exe" --distance $d --num_rounds $t \
+  --decoder_type nv-qldpc-decoder --p_spam 0.01 --save_dem "$pure"
+read -r nv match < <(awk '/- id:/{n++} /type:/{t[n]=$2} /block_size:/{b[n]=$2}
+  END{for(i=1;i<=n;i++){if(t[i]=="nv-qldpc-decoder")nv=b[i];else m=b[i]}
+  print nv, m}' "$mixed")
+echo "nv block_size=$nv matching block_size=$match"
+test -n "$nv" && test -n "$match" && test "$nv" -lt "$match"
+if command -v python3 >/dev/null 2>&1; then
+python3 - "$mixed" "$pure" << 'PY'
+import re, sys
+
+def nv_columns(path):
+    txt = open(path).read()
+    for chunk in re.split(r"(?m)^\s*- id:", txt)[1:]:
+        typ = re.search(r"type:\s*(\S+)", chunk).group(1)
+        if typ != "nv-qldpc-decoder":
+            continue
+        block_size = int(re.search(r"block_size:\s*(\d+)", chunk).group(1))
+
+        def sparse_rows(name):
+            m = re.search(name + r":\s*\[([^\]]*)\]", chunk, re.S)
+            rows, cur = [], []
+            for tok in m.group(1).replace("\n", " ").split(","):
+                tok = tok.strip()
+                if not tok:
+                    continue
+                v = int(tok)
+                if v == -1:
+                    rows.append(cur)
+                    cur = []
+                else:
+                    cur.append(v)
+            return rows
+
+        def col_map(rows):
+            cols = {}
+            for r, row in enumerate(rows):
+                for c in row:
+                    cols.setdefault(c, []).append(r)
+            return cols
+
+        hcol = col_map(sparse_rows("H_sparse"))
+        ocol = col_map(sparse_rows("O_sparse"))
+        pm = re.search(r"error_rate_vec:\s*\[([^\]]*)\]", chunk, re.S)
+        probs = [round(float(t), 12)
+                 for t in pm.group(1).replace("\n", " ").split(",")
+                 if t.strip()]
+        if len(probs) != block_size:
+            raise SystemExit("prob count %d != block_size %d in %s" %
+                             (len(probs), block_size, path))
+        return sorted((tuple(sorted(hcol.get(c, []))),
+                       tuple(sorted(ocol.get(c, []))), probs[c])
+                      for c in range(block_size))
+    raise SystemExit("no nv-qldpc-decoder entry in " + path)
+
+mixed = nv_columns(sys.argv[1])
+pure = nv_columns(sys.argv[2])
+if mixed != pure:
+    print("FAIL: mixed-list BP entry differs from undecomposed reference "
+          "(%d vs %d columns)" % (len(mixed), len(pure)))
+    for a, b in zip(mixed, pure):
+        if a != b:
+            print("first differing column:", a, "vs", b)
+            break
+    raise SystemExit(1)
+print("full column multiset (dets, obs, prob) identical: %d columns" %
+      len(mixed))
+PY
+else
+  echo "python3 not found; full multiset check skipped (structural check only)"
+fi
+]==] _ ${_sc4_exe} ${_sc4_neg_dir}/dualparse-mixed-d${distance}.yml
+     ${_sc4_neg_dir}/dualparse-pure-d${distance}.yml ${distance} ${num_rounds}
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+  set_tests_properties(app_examples.surface_code-4-yaml-dual-parse-gen-d${distance}
+    PROPERTIES ENVIRONMENT "${_sc4_neg_env}")
+endfunction()
+_sc4_dual_parse_test(3 3)
+_sc4_dual_parse_test(5 5)
 
 # X-basis Ising bundle rejected (basis must be Z). Fabricate just the
 # metadata.txt the loader inspects; the dummy ONNX is never opened because the
