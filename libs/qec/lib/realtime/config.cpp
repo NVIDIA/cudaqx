@@ -876,13 +876,24 @@ public:
 } // namespace
 
 namespace cudaq::qec::decoding::config {
+
+// Stash a copy for consumers that build their own decoder instances from the
+// process-wide configuration -- the decoder-server DeviceCallService plugin
+// reads it when CUDAQ_QEC_DECODER_CONFIG is not set (in-process path).
+static std::unique_ptr<multi_decoder_config> g_last_multi_decoder_config;
+
 int configure_decoders(multi_decoder_config &config) {
   CUDA_QEC_INFO("Initializing realtime decoding library with config object");
+  g_last_multi_decoder_config = std::make_unique<multi_decoder_config>(config);
   // Register the decoder provider to inject the decoder configuration into
   // the job requests.
   cudaq::registerExtraPayloadProvider(
       std::make_unique<decoder_provider>(config));
   return cudaq::qec::decoding::host::configure_decoders(config);
+}
+
+const multi_decoder_config *last_configured_multi_decoder_config() {
+  return g_last_multi_decoder_config.get();
 }
 
 void log_config(const char *config_str, bool from_file) {

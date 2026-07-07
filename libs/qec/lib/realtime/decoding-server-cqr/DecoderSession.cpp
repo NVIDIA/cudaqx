@@ -16,6 +16,15 @@
 
 namespace cudaq::qec::decoder_server {
 
+// Busy high-water mark across all sessions (worker threads increment while
+// executing an item).
+static std::atomic<uint64_t> g_busy_sessions{0};
+static std::atomic<uint64_t> g_max_busy_sessions{0};
+
+uint64_t max_concurrent_busy_sessions() {
+  return g_max_busy_sessions.load(std::memory_order_relaxed);
+}
+
 DecoderSession::~DecoderSession() {
   shutdown.store(true, std::memory_order_release);
   queue_cv.notify_one();
@@ -162,7 +171,11 @@ void DecoderSession::on_get_corrections(const WorkItem &item) {
   const auto *req = reinterpret_cast<const GetCorrectionsPayload *>(
       item.frame_buf.data() + sizeof(RPCHeader));
 
-  if (req->return_size < 0) {
+  // Spec validation: return_size must be positive and corrections_bytes must
+  // equal ceil(return_size/8) exactly.
+  if (req->return_size <= 0 ||
+      static_cast<size_t>(req->corrections_bytes) !=
+          bit_packed_bytes(static_cast<size_t>(req->return_size))) {
     ++error_count;
     send_response(*item.response_transport, item.peer, item.request_id,
                   item.ptp_timestamp, RpcStatus::BAD_REQUEST);
@@ -249,12 +262,21 @@ void DecoderSession::worker_loop() {
       work_queue.pop();
     }
 
+    const uint64_t busy =
+        g_busy_sessions.fetch_add(1, std::memory_order_relaxed) + 1;
+    uint64_t observed = g_max_busy_sessions.load(std::memory_order_relaxed);
+    while (busy > observed && !g_max_busy_sessions.compare_exchange_weak(
+                                  observed, busy, std::memory_order_relaxed))
+      ;
+
     if (item.function_id == kEnqueueSyndromesFunctionId)
       on_enqueue(item);
     else if (item.function_id == kGetCorrectionsFunctionId)
       on_get_corrections(item);
     else if (item.function_id == kResetDecoderFunctionId)
       on_reset(item);
+
+    g_busy_sessions.fetch_sub(1, std::memory_order_relaxed);
   }
 }
 

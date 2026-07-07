@@ -116,4 +116,9 @@ struct DecoderSession {
   void worker_loop();
 };
 
+/// High-water mark of simultaneously-busy DecoderSession workers across all
+/// sessions in this process (concurrency evidence for multi-logical-qubit
+/// tests and daemon stats).
+uint64_t max_concurrent_busy_sessions();
+
 } // namespace cudaq::qec::decoder_server

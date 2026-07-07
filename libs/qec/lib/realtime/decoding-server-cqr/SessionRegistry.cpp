@@ -67,13 +67,16 @@ void SessionRegistry::load_from_config(const std::string &yaml_path) {
 
   std::string yaml_str((std::istreambuf_iterator<char>(f)),
                        std::istreambuf_iterator<char>());
-  auto config = multi_decoder_config::from_yaml_str(yaml_str);
+  load_from_config(multi_decoder_config::from_yaml_str(yaml_str), yaml_path);
+}
 
+void SessionRegistry::load_from_config(const multi_decoder_config &config,
+                                       const std::string &source_name) {
   for (const auto &dc : config.decoders) {
     const uint64_t id = static_cast<uint64_t>(dc.id);
     if (sessions_.count(id))
       throw std::runtime_error("Duplicate decoder id " + std::to_string(dc.id) +
-                               " in " + yaml_path);
+                               " in " + source_name);
 
     // All decoders in one server instance must share the same transport type
     // because there is one receive loop per unique transceiver.
@@ -81,7 +84,7 @@ void SessionRegistry::load_from_config(const std::string &yaml_path) {
       transport_ = dc.transport;
     } else if (dc.transport != transport_) {
       throw std::runtime_error(
-          "Mixed transport types in " + yaml_path +
+          "Mixed transport types in " + source_name +
           ": all decoder entries must declare the same transport");
     }
 

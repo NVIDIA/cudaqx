@@ -361,6 +361,11 @@ set_syndrome_capture_callback(void (*callback)(const uint8_t *, size_t)) {
   g_syndrome_capture_callback = callback;
 }
 
+__attribute__((visibility("default"))) void (*get_syndrome_capture_callback())(
+    const uint8_t *, size_t) {
+  return g_syndrome_capture_callback;
+}
+
 void enqueue_syndromes(std::size_t decoder_id, uint8_t *syndromes,
                        std::uint64_t syndrome_length, std::uint64_t tag) {
   if (decoder_id >= g_decoders.size()) {

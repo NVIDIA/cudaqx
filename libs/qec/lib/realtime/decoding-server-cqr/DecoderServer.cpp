@@ -84,6 +84,18 @@ DecoderServer::DecoderServer(std::unique_ptr<ITransceiver> transport,
   init(config_yaml);
 }
 
+DecoderServer::DecoderServer(
+    std::unique_ptr<ITransceiver> transport,
+    const cudaq::qec::decoding::config::multi_decoder_config &config) {
+  ITransceiver *raw = transport.get();
+  owned_transports_.push_back(std::move(transport));
+  function_transport_[kEnqueueSyndromesFunctionId] = raw;
+  function_transport_[kGetCorrectionsFunctionId] = raw;
+  function_transport_[kResetDecoderFunctionId] = raw;
+  registry_.load_from_config(config, "configure_decoders()");
+  register_handlers();
+}
+
 DecoderServer::DecoderServer(std::vector<std::unique_ptr<ITransceiver>> owned,
                              TransportMap function_transport,
                              const std::string &config_yaml)
@@ -98,7 +110,10 @@ DecoderServer::DecoderServer(std::vector<std::unique_ptr<ITransceiver>> owned,
 
 void DecoderServer::init(const std::string &config_yaml) {
   registry_.load_from_config(config_yaml);
+  register_handlers();
+}
 
+void DecoderServer::register_handlers() {
   // enqueue_syndromes — worker thread sends a 24-byte ACK (result_len==0).
   dispatcher_.register_handler(
       kEnqueueSyndromesFunctionId,
@@ -180,7 +195,7 @@ void DecoderServer::init(const std::string &config_yaml) {
         if (!session.try_enqueue(std::move(item)))
           writer.write_error(RpcStatus::BUSY);
       });
-}
+} // register_handlers
 
 // ---------------------------------------------------------------------------
 // run / stop
@@ -214,6 +229,11 @@ void DecoderServer::run() {
   CUDA_QEC_INFO("DecoderServer: all receiver threads exited");
 }
 
-void DecoderServer::stop() { shutdown_.store(true, std::memory_order_release); }
+void DecoderServer::stop() {
+  shutdown_.store(true, std::memory_order_release);
+  // Unblock any receive loop parked in recv().
+  for (auto &t : owned_transports_)
+    t->shutdown();
+}
 
 } // namespace cudaq::qec::decoder_server

@@ -35,7 +35,14 @@ struct RxFrame {
 /// Transport abstraction used by DecoderServer and DecoderSession.
 struct ITransceiver {
   /// Block until a frame is available and return it (buf is owned by caller).
+  /// After shutdown() this may return a frame with an EMPTY buf -- the
+  /// sentinel that unblocks the receive loop so it can observe the shutdown
+  /// flag and exit.
   virtual RxFrame recv() = 0;
+
+  /// Unblock any thread waiting in recv() (which then returns an empty
+  /// sentinel frame). Called by DecoderServer::stop().
+  virtual void shutdown() {}
 
   /// Send a response to \p peer.  Thread-safe: called from session worker
   /// threads, which may be concurrent.

@@ -31,6 +31,13 @@ public:
   /// missing required fields, or decoder init failure.
   void load_from_config(const std::string &yaml_path);
 
+  /// Same, from an already-parsed config (the in-process application path,
+  /// where the config was handed to configure_decoders rather than a file).
+  /// \p source_name is used in error messages only.
+  void load_from_config(
+      const cudaq::qec::decoding::config::multi_decoder_config &config,
+      const std::string &source_name);
+
   DecoderSession &get(uint64_t decoder_id);
   const DecoderSession &get(uint64_t decoder_id) const;
 

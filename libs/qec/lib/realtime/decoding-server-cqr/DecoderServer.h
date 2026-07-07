@@ -40,6 +40,13 @@ public:
   DecoderServer(std::unique_ptr<ITransceiver> transport,
                 const std::string &config_yaml);
 
+  /// Single-transceiver constructor from an already-parsed config -- the
+  /// in-process path where the application handed the config to
+  /// configure_decoders() rather than pointing at a YAML file.
+  DecoderServer(
+      std::unique_ptr<ITransceiver> transport,
+      const cudaq::qec::decoding::config::multi_decoder_config &config);
+
   /// Split-transport constructor: each function_id dispatched to its own
   /// transceiver.  \p owned is moved in; \p function_transport holds raw
   /// pointers into \p owned.
@@ -55,6 +62,7 @@ public:
 
 private:
   void init(const std::string &config_yaml);
+  void register_handlers();
 
   /// Create a transceiver for \p transport_type.  Throws for RoCE transports
   /// until CpuRoceTransceiverAdapter / GpuRoceTransceiverAdapter are

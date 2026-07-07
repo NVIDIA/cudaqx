@@ -30,9 +30,10 @@ namespace cudaq::qec::decoder_server {
 /// send() with the response — at which point send() copies the bytes to
 /// tx_slot and unblocks the handler thread so CUDAQ can return.
 ///
-/// Format translation: CUDAQ serializes stdvec<i1> as a uint64 length followed
-/// by one byte per bit; inject() repacks this into the bit-packed
-/// EnqueuePayload layout that DecoderServer expects.
+/// Format translation: CUDAQ serializes the 5-arg enqueue_syndromes
+/// (decoder_id, counter, syndrome_mapping_id, num_syndromes, packed_bytes) into
+/// a flat byte stream; inject() validates and copies it into the EnqueuePayload
+/// layout that DecoderServer expects.
 class CqrTransceiver final : public ITransceiver {
 public:
   /// Called from CUDAQ handler threads for each incoming RPC.
@@ -43,8 +44,16 @@ public:
 
   RxFrame recv() override;
   void send(const PeerId &peer, const uint8_t *data, std::size_t len) override;
+  void shutdown() override;
 
 private:
+  bool stopped_ = false;
+
+  // Write an immediate success RPCResponse (no result payload) into the
+  // CUDAQ tx_slot for fire-and-forget calls.
+  static void write_ack(void *tx_slot, uint32_t request_id,
+                        uint64_t ptp_timestamp);
+
   struct PendingTx {
     void *tx_slot;
     std::size_t slot_size;
@@ -64,11 +73,6 @@ private:
   // Hard cap on syndromes per request; guards against malformed/oversized
   // payloads.
   static constexpr uint64_t kMaxSyndromeBits = 1u << 20; // 1 M bits
-
-  static constexpr std::size_t align_up(std::size_t off,
-                                        std::size_t alignment) noexcept {
-    return (off + alignment - 1u) & ~(alignment - 1u);
-  }
 
   // For get_corrections and reset_decoder the field layouts are compatible;
   // copy rx_slot verbatim after swapping to our magic/RPCHeader type.
@@ -92,40 +96,36 @@ inline void CqrTransceiver::inject(const void *rx_slot, void *tx_slot,
       (function_id == kEnqueueSyndromesFunctionId)
           ? build_enqueue_frame(rx_slot, slot_size, frame)
           : build_passthrough_frame(rx_slot, slot_size, function_id, frame);
-  if (!ok)
-    return;
-
-  // enqueue_syndromes is fire-and-forget in the CQR path: push to inbox and
-  // write an ACCEPTED (OK, result_len=0) response to tx_slot immediately.
-  // The CUDAQ handler is synchronous — the caller reads tx_slot after return,
-  // so we must complete the slot before returning.  Worker-side ACKs are
-  // irrelevant here because no pending_ entry is created for this request_id.
-  if (function_id == kEnqueueSyndromesFunctionId) {
-    {
-      std::lock_guard<std::mutex> lk(mtx_);
-      inbox_.push_back(std::move(frame));
-    }
-    cv_.notify_one();
-
-    const auto *cqr_hdr =
-        static_cast<const cudaq::realtime::RPCHeader *>(rx_slot);
-    RPCResponse resp{};
-    resp.status = static_cast<int32_t>(RpcStatus::OK);
-    resp.result_len = 0;
-    resp.request_id = cqr_hdr->request_id;
-    resp.ptp_timestamp = cqr_hdr->ptp_timestamp;
-    if (slot_size >= sizeof(RPCResponse)) {
-      std::memcpy(tx_slot, &resp, sizeof(RPCResponse));
-      // Release store so the CUDAQ runtime observes a complete response before
-      // seeing the magic word.
-      __atomic_store_n(reinterpret_cast<uint32_t *>(tx_slot),
-                       cudaq::realtime::RPC_MAGIC_RESPONSE, __ATOMIC_RELEASE);
-    }
+  if (!ok) {
+    // For blocking calls (get_corrections, reset_decoder) an unwritten tx_slot
+    // would stall the CUDAQ dispatcher indefinitely.  Write BAD_REQUEST so it
+    // gets a valid magic word regardless of call type.
+    const auto *cqr = static_cast<const cudaq::realtime::RPCHeader *>(rx_slot);
+    auto *resp = static_cast<cudaq::realtime::RPCResponse *>(tx_slot);
+    resp->status = static_cast<int32_t>(RpcStatus::BAD_REQUEST);
+    resp->result_len = 0;
+    resp->request_id = cqr->request_id;
+    resp->ptp_timestamp = cqr->ptp_timestamp;
+    __atomic_store_n(reinterpret_cast<uint32_t *>(tx_slot),
+                     cudaq::realtime::RPC_MAGIC_RESPONSE, __ATOMIC_RELEASE);
     return;
   }
 
   const auto *hdr = reinterpret_cast<const RPCHeader *>(frame.buf.data());
   const uint32_t rid = hdr->request_id;
+
+  if (function_id == kEnqueueSyndromesFunctionId) {
+    // Fire-and-forget: hand the frame to the server and ACK immediately
+    // (status OK = ACCEPTED); the dispatcher thread must not park on
+    // decoder execution.
+    {
+      std::lock_guard<std::mutex> lk(mtx_);
+      inbox_.push_back(std::move(frame));
+    }
+    cv_.notify_one();
+    write_ack(tx_slot, rid, hdr->ptp_timestamp);
+    return;
+  }
 
   std::future<void> fut;
   {
@@ -144,10 +144,31 @@ inline void CqrTransceiver::inject(const void *rx_slot, void *tx_slot,
 
 inline RxFrame CqrTransceiver::recv() {
   std::unique_lock<std::mutex> lk(mtx_);
-  cv_.wait(lk, [this] { return !inbox_.empty(); });
+  cv_.wait(lk, [this] { return !inbox_.empty() || stopped_; });
+  if (inbox_.empty())
+    return {}; // shutdown sentinel (empty buf)
   RxFrame frame = std::move(inbox_.front());
   inbox_.pop_front();
   return frame;
+}
+
+inline void CqrTransceiver::shutdown() {
+  {
+    std::lock_guard<std::mutex> lk(mtx_);
+    stopped_ = true;
+  }
+  cv_.notify_all();
+}
+
+inline void CqrTransceiver::write_ack(void *tx_slot, uint32_t request_id,
+                                      uint64_t ptp_timestamp) {
+  auto *resp = static_cast<cudaq::realtime::RPCResponse *>(tx_slot);
+  resp->status = 0;
+  resp->result_len = 0;
+  resp->request_id = request_id;
+  resp->ptp_timestamp = ptp_timestamp;
+  __atomic_store_n(reinterpret_cast<uint32_t *>(tx_slot),
+                   cudaq::realtime::RPC_MAGIC_RESPONSE, __ATOMIC_RELEASE);
 }
 
 inline void CqrTransceiver::send(const PeerId & /*peer*/, const uint8_t *data,
@@ -191,11 +212,11 @@ inline bool CqrTransceiver::build_enqueue_frame(const void *rx_slot,
   const auto *payload = static_cast<const uint8_t *>(rx_slot) +
                         sizeof(cudaq::realtime::RPCHeader);
 
-  // Wire format matches simulation_cqr_device.cpp 3-arg signature:
-  //   [u64 decoder_id][u64 num_syndromes (bit count)][u8 per-bit x
-  //   num_syndromes] [8-byte aligned][u64 tag]
-  // stdvec<bool> serializes as [u64 length][one byte per bit]; the length is
-  // the exact bit count, not a byte count, so num_syndromes is always precise.
+  // Spec 5-arg wire format (decoder_server_runtime.md):
+  //   [u64 decoder_id][u64 counter][u64 syndrome_mapping_id]
+  //   [u64 num_syndromes][u64 byte_count][u8 x byte_count (bit-packed)]
+  // packed_bytes is an array_u8 arg; CUDAQ serialises it as [u64
+  // length][bytes].
   std::size_t off = 0;
   auto read_u64 = [&](uint64_t &v) -> bool {
     if (off + sizeof(uint64_t) > arg_len)
@@ -205,42 +226,37 @@ inline bool CqrTransceiver::build_enqueue_frame(const void *rx_slot,
     return true;
   };
 
-  uint64_t decoder_id = 0, num_syndromes = 0, tag = 0;
-  if (!read_u64(decoder_id) || !read_u64(num_syndromes))
+  uint64_t decoder_id = 0, counter = 0, syndrome_mapping_id = 0,
+           num_syndromes = 0, byte_count = 0;
+  if (!read_u64(decoder_id) || !read_u64(counter) ||
+      !read_u64(syndrome_mapping_id) || !read_u64(num_syndromes))
     return false;
-  if (num_syndromes > kMaxSyndromeBits)
+  if (!read_u64(byte_count))
     return false;
-  if (num_syndromes > arg_len - off)
+  if (num_syndromes == 0 || num_syndromes > kMaxSyndromeBits ||
+      byte_count != bit_packed_bytes(num_syndromes) ||
+      byte_count > arg_len - off)
     return false;
-  const uint8_t *bits_src = payload + off;
-  off += static_cast<std::size_t>(num_syndromes);
-  // CUDAQ aligns each argument to 8 bytes; align before reading the tag u64.
-  off = align_up(off, sizeof(uint64_t));
-  if (!read_u64(tag))
-    return false;
+  const uint8_t *packed_src = payload + off;
 
-  // Build RPCHeader + EnqueuePayload + bit-packed bytes.
-  const std::size_t packed_bytes = bit_packed_bytes(num_syndromes);
-  out.buf.resize(sizeof(RPCHeader) + sizeof(EnqueuePayload) + packed_bytes, 0);
+  out.buf.resize(sizeof(RPCHeader) + sizeof(EnqueuePayload) + byte_count);
 
   auto *hdr = reinterpret_cast<RPCHeader *>(out.buf.data());
   hdr->magic = kRPCRequestMagic;
   hdr->function_id = kEnqueueSyndromesFunctionId;
-  hdr->arg_len = static_cast<uint32_t>(sizeof(EnqueuePayload) + packed_bytes);
+  hdr->arg_len = static_cast<uint32_t>(sizeof(EnqueuePayload) + byte_count);
   hdr->request_id = cqr_hdr->request_id;
   hdr->ptp_timestamp = cqr_hdr->ptp_timestamp;
 
   auto *req =
       reinterpret_cast<EnqueuePayload *>(out.buf.data() + sizeof(RPCHeader));
   req->decoder_id = static_cast<int64_t>(decoder_id);
-  req->counter = static_cast<int64_t>(tag);
-  req->syndrome_mapping_id = 0; // not in this wire format; default mapping
+  req->counter = static_cast<int64_t>(counter);
+  req->syndrome_mapping_id = static_cast<int64_t>(syndrome_mapping_id);
   req->num_syndromes = static_cast<int64_t>(num_syndromes);
 
-  // Repack stdvec<bool> (one byte per bit) → bit-packed LSB-first.
   uint8_t *dst = out.buf.data() + sizeof(RPCHeader) + sizeof(EnqueuePayload);
-  for (uint64_t i = 0; i < num_syndromes; ++i)
-    dst[i / 8] |= static_cast<uint8_t>((bits_src[i] & 1u) << (i % 8));
+  std::memcpy(dst, packed_src, byte_count);
 
   out.vp_id = 0;
   return true;
