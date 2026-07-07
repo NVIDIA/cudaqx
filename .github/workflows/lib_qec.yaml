@@ -313,7 +313,8 @@ jobs:
       - name: Run multi-GPU C++ tests
         run: |
           cd $GITHUB_WORKSPACE/build_qec
-          # The matching tests will be added separately; until then, this
-          # command should not fail solely because the filter finds no tests.
+          # CudaDeviceId also matches the TRT 2-GPU placement tests
+          # (TRTDecoderTest.CudaDeviceId_*); TwoTrtDecodersConcurrently is the
+          # TRT concurrent-decode test that skips on single-GPU lanes.
           ctest --output-on-failure \
-            -R "DecoderPool|HardwarePinningGpu|PoolRunsTwoTrt|CudaDeviceId"
+            -R "HardwarePinningGpu|CudaDeviceId|TwoTrtDecodersConcurrently"

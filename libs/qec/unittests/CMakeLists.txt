@@ -97,8 +97,9 @@ target_link_libraries(test_logger PRIVATE GTest::gtest_main cudaq-qec cudaq::cud
 add_dependencies(CUDAQXQECUnitTests test_logger)
 gtest_discover_tests(test_logger)
 
-# TensorRT decoder test is only built for x86 architectures
-if(CUDAQ_QEC_TRT_DECODER_ENABLED AND CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64)|(AMD64|amd64)|(^i.86$)")
+# Built wherever the TRT decoder plugin is enabled (x86_64 and arm64); the
+# flag is false on platforms without TensorRT (e.g. arm64 + CUDA 12).
+if(CUDAQ_QEC_TRT_DECODER_ENABLED)
   add_executable(test_trt_decoder ./decoders/trt_decoder/test_trt_decoder.cpp)
 
   # Find TensorRT for the test
