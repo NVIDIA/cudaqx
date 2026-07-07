@@ -104,13 +104,12 @@ void DecoderSession::on_enqueue(const WorkItem &item) {
   const auto *req = reinterpret_cast<const EnqueuePayload *>(
       item.frame_buf.data() + sizeof(RPCHeader));
 
-  if (req->num_syndromes < 0) {
+  if (req->num_syndromes <= 0) {
     ++error_count;
     send_response(*item.response_transport, item.peer, item.request_id,
                   item.ptp_timestamp, RpcStatus::BAD_REQUEST);
     return;
   }
-
   const size_t syndrome_bytes =
       bit_packed_bytes(static_cast<size_t>(req->num_syndromes));
   if (item.frame_buf.size() < min_size + syndrome_bytes) {
@@ -143,15 +142,10 @@ void DecoderSession::on_enqueue(const WorkItem &item) {
   } catch (const std::exception &e) {
     CUDA_QEC_ERROR("DecoderSession::on_enqueue: {}", e.what());
     ++error_count;
-    // Latch the failure so it surfaces at this session's next
-    // get_corrections: over the CQR transport enqueue is ACKed at delivery
-    // (before execution), so the response below never reaches that caller.
+    // Fire-and-forget: no response carries this failure, so latch it and
+    // surface it at this session's next get_corrections.
     decoder_error = true;
-    send_response(*item.response_transport, item.peer, item.request_id,
-                  item.ptp_timestamp, RpcStatus::INTERNAL_ERROR);
   }
-  // No success response here: the transport layer already acknowledged
-  // delivery (fire-and-forget per decoder_server_runtime.md).
 }
 
 void DecoderSession::on_get_corrections(const WorkItem &item) {
@@ -168,8 +162,8 @@ void DecoderSession::on_get_corrections(const WorkItem &item) {
   const auto *req = reinterpret_cast<const GetCorrectionsPayload *>(
       item.frame_buf.data() + sizeof(RPCHeader));
 
-  // Spec validation: the caller-advertised response byte budget must match
-  // the requested bit count.
+  // Spec validation: return_size must be positive and corrections_bytes must
+  // equal ceil(return_size/8) exactly.
   if (req->return_size <= 0 ||
       static_cast<size_t>(req->corrections_bytes) !=
           bit_packed_bytes(static_cast<size_t>(req->return_size))) {
@@ -194,29 +188,31 @@ void DecoderSession::on_get_corrections(const WorkItem &item) {
   }
 
   try {
-    if (static_cast<size_t>(req->return_size) != dec->get_num_observables()) {
+    const auto return_size = static_cast<size_t>(req->return_size);
+    if (return_size != dec->get_num_observables()) {
       ++error_count;
       send_response(*item.response_transport, item.peer, item.request_id,
                     item.ptp_timestamp, RpcStatus::BAD_REQUEST);
       return;
     }
-    const uint8_t *raw = dec->get_obs_corrections();
-    if (!raw) {
+    const uint8_t *corrections = dec->get_obs_corrections();
+    if (!corrections) {
       send_response(*item.response_transport, item.peer, item.request_id,
                     item.ptp_timestamp, RpcStatus::NOT_READY);
       return;
     }
-    // get_obs_corrections is byte-per-bit; the wire result is bit-packed
-    // LSB-first with result_len == ceil(return_size/8) EXACTLY (no trailing
-    // pad) per decoder_server_runtime.md.
-    const size_t num_bytes =
-        bit_packed_bytes(static_cast<size_t>(req->return_size));
-    std::vector<uint8_t> packed(num_bytes, 0);
-    for (int64_t i = 0; i < req->return_size; ++i)
-      if (raw[i] & 1u)
+    // result_len = ceil(R/8) exactly per decoder_server_runtime.md spec.
+    // The spec forbids trailing padding in the wire result_len; if a transport
+    // layer needs 8-byte alignment, it must add padding in its own framing.
+    const size_t result_len = bit_packed_bytes(return_size);
+    // get_obs_corrections() returns byte-per-bit; pack into the wire format.
+    std::vector<uint8_t> packed(result_len, 0);
+    for (size_t i = 0; i < return_size; ++i) {
+      if (corrections[i] & 1u)
         packed[i / 8] |= static_cast<uint8_t>(1u << (i % 8));
+    }
     send_response(*item.response_transport, item.peer, item.request_id,
-                  item.ptp_timestamp, RpcStatus::OK, packed.data(), num_bytes);
+                  item.ptp_timestamp, RpcStatus::OK, packed.data(), result_len);
 
     if (req->reset) {
       // clear_corrections (not a full reset_decoder): matches the host-path
@@ -237,7 +233,7 @@ void DecoderSession::on_reset(const WorkItem &item) {
     dec->reset_decoder();
     accumulator.clear();
     syndromes_dropped.store(false, std::memory_order_release);
-    decoder_error = false; // a fresh shot clears the sticky error
+    decoder_error = false;
     send_response(*item.response_transport, item.peer, item.request_id,
                   item.ptp_timestamp, RpcStatus::OK);
   } catch (const std::exception &e) {
@@ -272,9 +268,8 @@ void DecoderSession::worker_loop() {
     const uint64_t busy =
         g_busy_sessions.fetch_add(1, std::memory_order_relaxed) + 1;
     uint64_t observed = g_max_busy_sessions.load(std::memory_order_relaxed);
-    while (busy > observed &&
-           !g_max_busy_sessions.compare_exchange_weak(
-               observed, busy, std::memory_order_relaxed))
+    while (busy > observed && !g_max_busy_sessions.compare_exchange_weak(
+                                  observed, busy, std::memory_order_relaxed))
       ;
 
     if (item.function_id == kEnqueueSyndromesFunctionId)

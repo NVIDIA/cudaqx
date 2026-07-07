@@ -77,7 +77,7 @@ struct DecoderSession {
   // Cleared by the worker after surfacing the error in get_corrections.
   std::atomic<bool> syndromes_dropped{false};
 
-  // STICKY deferred-execution error: a decoder exception during on_enqueue
+  // Sticky deferred-execution error: a decoder exception during on_enqueue
   // is latched here (enqueue is fire-and-forget, so there is no response to
   // carry it) and surfaced as INTERNAL_ERROR at this session's next
   // get_corrections. Cleared by on_reset. Worker-thread-only.

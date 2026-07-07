@@ -102,8 +102,7 @@ constexpr int32_t kStatusHandlerException = 3; // RpcStatus::INTERNAL_ERROR
 
 static void write_error_response(const void *rx_slot, void *tx_slot,
                                  std::size_t slot_size, int32_t status) {
-  if (!tx_slot || !rx_slot ||
-      slot_size < sizeof(cudaq::realtime::RPCHeader))
+  if (!tx_slot || !rx_slot || slot_size < sizeof(cudaq::realtime::RPCHeader))
     return;
   const auto *req = static_cast<const cudaq::realtime::RPCHeader *>(rx_slot);
   auto *resp = static_cast<cudaq::realtime::RPCResponse *>(tx_slot);
@@ -121,8 +120,7 @@ static void write_error_response(const void *rx_slot, void *tx_slot,
 // path's saved-syndrome format.
 static void capture_enqueue_syndromes(const void *rx_slot,
                                       std::size_t slot_size) {
-  auto callback =
-      cudaq::qec::decoding::host::get_syndrome_capture_callback();
+  auto callback = cudaq::qec::decoding::host::get_syndrome_capture_callback();
   if (!callback)
     return;
   if (!rx_slot || slot_size < sizeof(cudaq::realtime::RPCHeader))
@@ -135,8 +133,7 @@ static void capture_enqueue_syndromes(const void *rx_slot,
   if (arg_len < 5 * sizeof(uint64_t))
     return;
   uint64_t num_syndromes = 0, byte_count = 0;
-  std::memcpy(&num_syndromes, payload + 3 * sizeof(uint64_t),
-              sizeof(uint64_t));
+  std::memcpy(&num_syndromes, payload + 3 * sizeof(uint64_t), sizeof(uint64_t));
   std::memcpy(&byte_count, payload + 4 * sizeof(uint64_t), sizeof(uint64_t));
   if (byte_count != (num_syndromes + 7) / 8 ||
       byte_count > arg_len - 5 * sizeof(uint64_t))
@@ -164,11 +161,9 @@ static void dispatch_rpc(const void *rx_slot, void *tx_slot,
     g_transceiver->inject(rx_slot, tx_slot, slot_size, function_id);
   } catch (const std::exception &e) {
     CUDA_QEC_ERROR("decoder-server RPC failed: {}", e.what());
-    write_error_response(rx_slot, tx_slot, slot_size,
-                         kStatusHandlerException);
+    write_error_response(rx_slot, tx_slot, slot_size, kStatusHandlerException);
   } catch (...) {
-    write_error_response(rx_slot, tx_slot, slot_size,
-                         kStatusHandlerException);
+    write_error_response(rx_slot, tx_slot, slot_size, kStatusHandlerException);
   }
 }
 
@@ -265,6 +260,10 @@ static std::array<cudaq_function_entry_t, kDeviceCallEntryCount>
 make_entries() {
   std::array<cudaq_function_entry_t, kDeviceCallEntryCount> entries{};
 
+  // enqueue_syndromes: 5-arg spec format per decoder_server_runtime.md.
+  // decoder_id, counter, syndrome_mapping_id, num_syndromes (scalars) +
+  // packed_bytes (array_u8: [u64 byte_count][u8 x byte_count], bit-packed
+  // LSB-first).
   auto &eq = entries[kEnqueueSyndromesEntry];
   configure_entry(eq, kEnqueueSyndromesFnId, enqueue_syndromes_host,
                   kEnqueueArgCount, kNoResults);
@@ -274,6 +273,7 @@ make_entries() {
   set_u64(eq.schema.args[kEnqueueNumSyndromesArg]);
   set_array_u8(eq.schema.args[kEnqueueSyndromeBitsArg]);
 
+  // get_corrections: 4-arg spec format per decoder_server_runtime.md.
   auto &gc = entries[kGetCorrectionsEntry];
   configure_entry(gc, kGetCorrectionsFnId, get_corrections_host,
                   kGetCorrectionsArgCount, kSingleResult);

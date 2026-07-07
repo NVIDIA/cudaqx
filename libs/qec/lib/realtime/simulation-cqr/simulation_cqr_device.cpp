@@ -111,8 +111,7 @@ __qpu__ std::vector<bool> get_corrections(std::uint64_t decoder_id,
   std::vector<std::uint8_t> packed(num_bytes);
   for (std::size_t byte = 0; byte < num_bytes; ++byte)
     packed[byte] = 0;
-  cudaq::device_call(::get_corrections, decoder_id, return_size, packed,
-                     reset);
+  cudaq::device_call(::get_corrections, decoder_id, return_size, packed, reset);
   std::vector<bool> result(return_size);
   for (std::size_t i = 0; i < return_size; ++i) {
     std::uint32_t byte_val = packed[i / 8];

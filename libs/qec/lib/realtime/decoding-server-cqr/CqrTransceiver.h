@@ -86,11 +86,6 @@ private:
   // payloads.
   static constexpr uint64_t kMaxSyndromeBits = 1u << 20; // 1 M bits
 
-  static constexpr std::size_t align_up(std::size_t off,
-                                        std::size_t alignment) noexcept {
-    return (off + alignment - 1u) & ~(alignment - 1u);
-  }
-
   // For get_corrections and reset_decoder the field layouts are compatible;
   // copy rx_slot verbatim after swapping to our magic/RPCHeader type.
   static bool build_passthrough_frame(const void *rx_slot,
@@ -113,8 +108,20 @@ inline void CqrTransceiver::inject(const void *rx_slot, void *tx_slot,
       (function_id == kEnqueueSyndromesFunctionId)
           ? build_enqueue_frame(rx_slot, slot_size, frame)
           : build_passthrough_frame(rx_slot, slot_size, function_id, frame);
-  if (!ok)
+  if (!ok) {
+    // For blocking calls (get_corrections, reset_decoder) an unwritten tx_slot
+    // would stall the CUDAQ dispatcher indefinitely.  Write BAD_REQUEST so it
+    // gets a valid magic word regardless of call type.
+    const auto *cqr = static_cast<const cudaq::realtime::RPCHeader *>(rx_slot);
+    auto *resp = static_cast<cudaq::realtime::RPCResponse *>(tx_slot);
+    resp->status = static_cast<int32_t>(RpcStatus::BAD_REQUEST);
+    resp->result_len = 0;
+    resp->request_id = cqr->request_id;
+    resp->ptp_timestamp = cqr->ptp_timestamp;
+    __atomic_store_n(reinterpret_cast<uint32_t *>(tx_slot),
+                     cudaq::realtime::RPC_MAGIC_RESPONSE, __ATOMIC_RELEASE);
     return;
+  }
 
   const auto *hdr = reinterpret_cast<const RPCHeader *>(frame.buf.data());
   const uint32_t rid = hdr->request_id;
@@ -134,6 +141,7 @@ inline void CqrTransceiver::inject(const void *rx_slot, void *tx_slot,
     write_ack(tx_slot, rid, hdr->ptp_timestamp);
     return;
   }
+
 
   std::future<void> fut;
   {
@@ -222,10 +230,11 @@ inline bool CqrTransceiver::build_enqueue_frame(const void *rx_slot,
   const auto *payload = static_cast<const uint8_t *>(rx_slot) +
                         sizeof(cudaq::realtime::RPCHeader);
 
-  // Wire payload per decoder_server_runtime.md (already bit-packed by the
-  // kernel-facing wrapper):
+  // Spec 5-arg wire format (decoder_server_runtime.md):
   //   [u64 decoder_id][u64 counter][u64 syndrome_mapping_id]
-  //   [u64 num_syndromes][u64 byte_count][bit-packed bytes]
+  //   [u64 num_syndromes][u64 byte_count][u8 x byte_count (bit-packed)]
+  // packed_bytes is an array_u8 arg; CUDAQ serialises it as [u64
+  // length][bytes].
   std::size_t off = 0;
   auto read_u64 = [&](uint64_t &v) -> bool {
     if (off + sizeof(uint64_t) > arg_len)
@@ -248,7 +257,7 @@ inline bool CqrTransceiver::build_enqueue_frame(const void *rx_slot,
       byte_count != bit_packed_bytes(num_syndromes) ||
       byte_count > arg_len - off)
     return false;
-  const uint8_t *bits_src = payload + off;
+  const uint8_t *packed_src = payload + off;
 
   // Re-frame to RPCHeader + EnqueuePayload + bit-packed bytes (the internal
   // layout drops the byte-count prefix; the bits stay packed as-is).
@@ -268,8 +277,8 @@ inline bool CqrTransceiver::build_enqueue_frame(const void *rx_slot,
   req->syndrome_mapping_id = static_cast<int64_t>(syndrome_mapping_id);
   req->num_syndromes = static_cast<int64_t>(num_syndromes);
 
-  std::memcpy(out.buf.data() + sizeof(RPCHeader) + sizeof(EnqueuePayload),
-              bits_src, byte_count);
+  uint8_t *dst = out.buf.data() + sizeof(RPCHeader) + sizeof(EnqueuePayload);
+  std::memcpy(dst, packed_src, byte_count);
 
   out.vp_id = 0;
   return true;

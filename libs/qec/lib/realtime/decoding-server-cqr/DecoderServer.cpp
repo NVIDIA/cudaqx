@@ -197,7 +197,7 @@ void DecoderServer::register_handlers() {
         if (!session.try_enqueue(std::move(item)))
           writer.write_error(RpcStatus::BUSY);
       });
-}
+} // register_handlers
 
 // ---------------------------------------------------------------------------
 // run / stop

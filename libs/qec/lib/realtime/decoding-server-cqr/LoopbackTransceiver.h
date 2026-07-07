@@ -44,12 +44,14 @@ private:
       std::shared_ptr<std::mutex> mtx,
       std::shared_ptr<std::condition_variable> cv)
       : inbox_(std::move(inbox)), outbox_(std::move(outbox)),
-        mtx_(std::move(mtx)), cv_(std::move(cv)) {}
+        mtx_(std::move(mtx)), cv_(std::move(cv)),
+        stopped_(std::make_shared<bool>(false)) {}
 
   std::shared_ptr<std::deque<std::vector<uint8_t>>> inbox_;
   std::shared_ptr<std::deque<std::vector<uint8_t>>> outbox_;
   std::shared_ptr<std::mutex> mtx_;
   std::shared_ptr<std::condition_variable> cv_;
+  std::shared_ptr<bool> stopped_;
 };
 
 inline std::pair<std::unique_ptr<LoopbackTransceiver>,

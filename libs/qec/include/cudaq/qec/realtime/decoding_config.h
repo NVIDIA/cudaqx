@@ -289,10 +289,11 @@ configure_decoders_from_str(const char *config_str);
 /// @brief Finalize the decoders. This function finalizes local decoders.
 __attribute__((visibility("default"))) void finalize_decoders();
 
-/// @brief The last multi_decoder_config passed to configure_decoders() in
-/// this process, or nullptr if none. Consumed by the decoder-server
-/// DeviceCallService plugin when CUDAQ_QEC_DECODER_CONFIG is not set (the
-/// in-process host_dispatch application path).
+/// @brief Return a pointer to the most recently passed multi_decoder_config,
+/// or nullptr if configure_decoders() has not been called in this process.
+/// Used by the decoder-server DeviceCallService plugin to build DecoderSessions
+/// on the in-process host_dispatch path without requiring
+/// CUDAQ_QEC_DECODER_CONFIG.
 __attribute__((visibility("default"))) const multi_decoder_config *
 last_configured_multi_decoder_config();
 

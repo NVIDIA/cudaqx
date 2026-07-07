@@ -41,14 +41,17 @@ make_H_tensor(const std::vector<int64_t> &H_sparse, size_t syndrome_size,
   return H;
 }
 
-/// Build the default single-VP identity syndrome mapping table:
-/// syndrome_mapping_id 0, VP 0, and an EMPTY index list = identity mapping
-/// (the fragment passes through as the round at whatever length it
-/// arrives). Clients batch per round or per shot; the decoder accumulates
-/// rounds itself, so the server does not fix a round shape here.
+/// Build the default single-VP pass-through syndrome mapping table.
+/// mapping_id=0 → VP 0 → empty index list (pass-through)
+///
+/// An empty index list signals RoundAccumulator to copy bits directly without
+/// scatter.  This is correct for the nominal per-round enqueue pattern where
+/// the caller sends exactly the syndromes for one round and does not need
+/// index remapping.  An identity-sized index list would force every enqueue
+/// to provide exactly syndrome_size bits, which breaks per-round batching.
 static SyndromeMappingTable make_default_mapping_table() {
   SyndromeMappingTable table;
-  table[0] = {std::vector<uint32_t>{}};
+  table[0] = {{}}; // syndrome_mapping_id=0, VP 0, pass-through
   return table;
 }
 
