@@ -128,6 +128,10 @@
         logical = np.array([[1, 0, 1]], dtype=np.float64)
         priors = [0.1, 0.2, 0.3]
 
+        rng = np.random.default_rng(0)
+        syndrome_data = rng.integers(0, 2, size=(200, 2)).astype(np.float64)
+        obs_flips = rng.integers(0, 2, size=200).astype(bool)
+
         opt = NMOptimizer(H, logical, priors, syndrome_data, obs_flips,
                           dtype="float64")
         logits = torch.logit(opt.noise_params[0].detach()).requires_grad_()
