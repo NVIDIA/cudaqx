@@ -1,22 +1,23 @@
 /*******************************************************************************
- * Copyright (c) 2025 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2026 NVIDIA Corporation & Affiliates.                         *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
-#include "common/Environment.h"
+#include "cudaq/qec/environment.h"
 #include "cudaq/qec/logger.h"
 
 #include "quantinuum_decoding.h"
 #include "../realtime_decoding.h"
 #include <dlfcn.h>
+#include <vector>
 
 // Get an environment variable to determine if we should use the simulated
 // implementation or the real implementation, using call_once.
 static bool z_use_private_impl =
-    cudaq::getEnvBool("CUDAQ_QTM_PRIVATE_IMPL", false);
+    cudaq::qec::get_env_bool("CUDAQ_QTM_PRIVATE_IMPL", false);
 
 // This class dynamically loads a private library for special test
 // configurations. It is not needed for normal usage.
