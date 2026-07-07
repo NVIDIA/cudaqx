@@ -830,13 +830,13 @@ void qec_realtime_session::start_device_loop() {
   // The scheduler kernel itself is lightweight (poll + parse + DEVICE_CALL +
   // fire-and-forget); the heavy cooperative decode lives in the triggered
   // graph, so a single-block scheduler is sufficient.
-  cudaError_t err = create_fn(
-      rx_flags_dev_, tx_flags_dev_, rx_data_dev_, tx_data_dev_, slot_size_,
-      slot_size_, function_table_dev_,
-      static_cast<std::size_t>(function_table_count_),
-      /*graph_io_ctx=*/nullptr, shutdown_flag_dev_, device_stats_dev_,
-      num_slots_, /*num_blocks=*/1, /*threads_per_block=*/64, decode_graph_exec,
-      scheduler_stream_, &scheduler_ctx_);
+  cudaError_t err =
+      create_fn(rx_flags_dev_, tx_flags_dev_, rx_data_dev_, tx_data_dev_,
+                slot_size_, slot_size_, function_table_dev_,
+                static_cast<std::size_t>(function_table_count_),
+                /*graph_io_ctx=*/nullptr, shutdown_flag_dev_, device_stats_dev_,
+                num_slots_, /*num_blocks=*/1, /*threads_per_block=*/64,
+                decode_graph_exec, scheduler_stream_, &scheduler_ctx_);
   if (err != cudaSuccess)
     throw std::runtime_error(
         std::string("qec_realtime_session::initialize: "

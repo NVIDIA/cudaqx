@@ -92,7 +92,8 @@ void maybe_init_realtime_session() {
           "CUDAQ_QEC_REALTIME_MODE=inproc_rpc requested with a graph-capable "
           "decoder but cudaq_launch_dispatch_kernel_regular could not be "
           "resolved via dlsym(RTLD_DEFAULT, ...). The host executable must "
-          "absorb libcudaq-realtime-dispatch.a and link with --export-dynamic.");
+          "absorb libcudaq-realtime-dispatch.a and link with "
+          "--export-dynamic.");
   } else {
     CUDA_QEC_INFO("CUDAQ_QEC_REALTIME_MODE=inproc_rpc with CPU (non-graph) "
                   "decoder(s); using HOST dispatch mode (no device kernel / no "

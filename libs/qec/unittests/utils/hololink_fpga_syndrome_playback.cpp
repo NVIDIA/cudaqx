@@ -144,8 +144,8 @@ std::uint64_t parse_scalar(const std::string &content,
 
 /// @brief Derive num_observables from O_sparse in the config.
 ///
-/// O_sparse encodes each observable as a row of correction indices terminated by
-/// -1, so the number of row terminators is the number of observables.
+/// O_sparse encodes each observable as a row of correction indices terminated
+/// by -1, so the number of row terminators is the number of observables.
 std::size_t derive_num_observables(const std::string &content) {
   std::size_t pos = content.find("O_sparse:");
   if (pos == std::string::npos)
