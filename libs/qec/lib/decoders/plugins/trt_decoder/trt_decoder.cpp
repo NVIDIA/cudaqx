@@ -11,11 +11,15 @@
 #include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/trt_decoder_internal.h"
 #include <algorithm>
+#include <atomic>
 #include <cassert>
+#include <cstdint>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <variant>
 #include <vector>
@@ -147,6 +151,22 @@ namespace cudaq::qec {
 
 namespace {
 
+// Narrow unit-test seam for TensorRT APIs whose failure returns cannot be
+// induced with a valid engine. Compiled out of non-test builds. A matching
+// request is consumed so tests can prove that the intended call was reached.
+bool consume_trt_test_failure(std::string_view point) {
+#ifdef CUDAQ_QEC_TRT_TEST_FAULT_INJECTION
+  const char *requested = std::getenv("CUDAQ_QEC_TRT_TEST_FAILURE");
+  if (requested && std::string_view(requested) == point) {
+    unsetenv("CUDAQ_QEC_TRT_TEST_FAILURE");
+    return true;
+  }
+#else
+  (void)point;
+#endif
+  return false;
+}
+
 // Helpers for templated I/O: binarize TRT output (float or uint8) to 0/1
 // for counting and for the decoder API (float_t).
 inline bool trt_io_nonzero(float val) { return val >= 0.5f; }
@@ -163,11 +183,17 @@ struct TraditionalExecutor {
   void execute(nvinfer1::IExecutionContext *context, cudaStream_t stream,
                void *input_buffer, void *output_buffer, int input_index,
                int output_index, nvinfer1::ICudaEngine *engine) {
-    context->setTensorAddress(engine->getIOTensorName(input_index),
-                              input_buffer);
-    context->setTensorAddress(engine->getIOTensorName(output_index),
-                              output_buffer);
-    context->enqueueV3(stream);
+    if (consume_trt_test_failure("input_address") ||
+        !context->setTensorAddress(engine->getIOTensorName(input_index),
+                                   input_buffer))
+      throw std::runtime_error("TensorRT rejected the input tensor address");
+    if (consume_trt_test_failure("output_address") ||
+        !context->setTensorAddress(engine->getIOTensorName(output_index),
+                                   output_buffer))
+      throw std::runtime_error("TensorRT rejected the output tensor address");
+    if (consume_trt_test_failure("traditional_enqueue") ||
+        !context->enqueueV3(stream))
+      throw std::runtime_error("TensorRT rejected inference enqueue");
     HANDLE_CUDA_ERROR(cudaStreamSynchronize(stream));
   }
 };
@@ -259,6 +285,19 @@ CaptureResult try_capture_cuda_graph(nvinfer1::IExecutionContext *context,
     // Attempt to capture the graph
     CUDA_QEC_INFO("Attempting to capture CUDA graph during initialization...");
 
+    if (consume_trt_test_failure("input_address") ||
+        !context->setTensorAddress(engine->getIOTensorName(input_index),
+                                   input_buffer)) {
+      result.error_message = "TensorRT rejected the input tensor address";
+      return result;
+    }
+    if (consume_trt_test_failure("output_address") ||
+        !context->setTensorAddress(engine->getIOTensorName(output_index),
+                                   output_buffer)) {
+      result.error_message = "TensorRT rejected the output tensor address";
+      return result;
+    }
+
     err = cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
     if (err != cudaSuccess) {
       result.error_message = "cudaStreamBeginCapture failed: " +
@@ -266,17 +305,32 @@ CaptureResult try_capture_cuda_graph(nvinfer1::IExecutionContext *context,
       return result;
     }
 
-    // Record TensorRT operations
-    context->setTensorAddress(engine->getIOTensorName(input_index),
-                              input_buffer);
-    context->setTensorAddress(engine->getIOTensorName(output_index),
-                              output_buffer);
-    context->enqueueV3(stream);
+    // Record TensorRT operations. A rejected enqueue can leave the stream in
+    // capture mode, so always end and discard that capture before falling back
+    // to traditional execution.
+    if (consume_trt_test_failure("capture_enqueue") ||
+        !context->enqueueV3(stream)) {
+      cudaGraph_t discarded_graph = nullptr;
+      const cudaError_t end_err =
+          cudaStreamEndCapture(stream, &discarded_graph);
+      if (discarded_graph)
+        cudaGraphDestroy(discarded_graph);
+      result.error_message = "TensorRT rejected CUDA graph capture enqueue";
+      if (end_err != cudaSuccess &&
+          end_err != cudaErrorStreamCaptureInvalidated)
+        result.error_message += ": cudaStreamEndCapture failed: " +
+                                std::string(cudaGetErrorString(end_err));
+      return result;
+    }
 
     err = cudaStreamEndCapture(stream, &result.graph);
     if (err != cudaSuccess) {
       result.error_message = "cudaStreamEndCapture failed: " +
                              std::string(cudaGetErrorString(err));
+      if (result.graph) {
+        cudaGraphDestroy(result.graph);
+        result.graph = nullptr;
+      }
       return result;
     }
 
@@ -471,6 +525,9 @@ struct trt_decoder::Impl {
 
   // Executor (chosen once at construction, never changes)
   std::variant<TraditionalExecutor, CudaGraphExecutor> executor;
+  // Test evidence for the external-server smoke path. Increment only after the
+  // selected TensorRT executor completes successfully.
+  std::atomic<std::uint64_t> inference_executions{0};
 
   /// actual_batch is used only when has_dynamic_batch_.
   void execute_inference(size_t actual_batch = 0) {
@@ -492,6 +549,7 @@ struct trt_decoder::Impl {
                        engine.get());
         },
         executor);
+    inference_executions.fetch_add(1, std::memory_order_relaxed);
   }
 
   ~Impl() {
@@ -1064,7 +1122,13 @@ template std::vector<decoder_result>
 trt_decoder::decode_batch_impl<uint8_t, uint8_t>(
     const std::vector<std::vector<float_t>> &) const;
 
-trt_decoder::~trt_decoder() = default;
+trt_decoder::~trt_decoder() {
+  const char *report = std::getenv("CUDAQ_QEC_TRT_REPORT_INFERENCE_EXECUTIONS");
+  if (report && report[0] != '\0')
+    std::cout << "QEC_TRT_INFERENCE_EXECUTIONS count="
+              << impl_->inference_executions.load(std::memory_order_relaxed)
+              << std::endl;
+}
 
 void trt_decoder::check_cuda() {
   int deviceCount = 0;

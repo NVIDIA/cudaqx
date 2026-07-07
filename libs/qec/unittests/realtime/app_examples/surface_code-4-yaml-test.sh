@@ -263,8 +263,14 @@ fi
 # but its CQR build deliberately does not construct local decoders.
 DAEMON_PORT=""
 if [[ -n "${QEC_DECODING_DAEMON:-}" ]]; then
-  "$QEC_DECODING_DAEMON" --config="$CONFIG_FILE" --transport=udp --port=0 \
-    --timeout=300 >"$DAEMON_LOG" 2>&1 &
+  if [[ -n "${REQUIRE_TRT_EXECUTION:-}" ]]; then
+    CUDAQ_QEC_TRT_REPORT_INFERENCE_EXECUTIONS=1 \
+      "$QEC_DECODING_DAEMON" --config="$CONFIG_FILE" --transport=udp --port=0 \
+        --timeout=300 >"$DAEMON_LOG" 2>&1 &
+  else
+    "$QEC_DECODING_DAEMON" --config="$CONFIG_FILE" --transport=udp --port=0 \
+      --timeout=300 >"$DAEMON_LOG" 2>&1 &
+  fi
   DAEMON_PID=$!
 
   for _ in $(seq 1 1200); do
@@ -466,6 +472,28 @@ if [[ -n "$DAEMON_PORT" ]]; then
     fi
     if [[ "$client_constructions" -ne 0 ]]; then
       echo "FAIL: external application constructed $client_constructions local decoder instances"
+      return_code=1
+    fi
+  fi
+  if [[ -n "${REQUIRE_TRT_EXECUTION:-}" ]]; then
+    trt_instances=0
+    for decoder_type_entry in "${DECODER_TYPES[@]}"; do
+      if [[ "$decoder_type_entry" == "trt_decoder" ]]; then
+        trt_instances=$((trt_instances + 1))
+      fi
+    done
+    expected_trt_decodes=$((trt_instances * (NUM_SHOTS + 1)))
+    trt_reports=$(grep -c '^QEC_TRT_INFERENCE_EXECUTIONS count=' \
+      "$DAEMON_LOG" || true)
+    trt_decodes=$(sed -n \
+      's/^QEC_TRT_INFERENCE_EXECUTIONS count=\([0-9][0-9]*\)$/\1/p' \
+      "$DAEMON_LOG" | awk '{sum += $1} END {print sum + 0}')
+    if [[ "$trt_reports" -ne "$trt_instances" ]]; then
+      echo "FAIL: TensorRT reported $trt_reports inference counters; expected $trt_instances"
+      return_code=1
+    fi
+    if [[ "$trt_decodes" -ne "$expected_trt_decodes" ]]; then
+      echo "FAIL: TensorRT decoded $trt_decodes times; expected $expected_trt_decodes"
       return_code=1
     fi
   fi

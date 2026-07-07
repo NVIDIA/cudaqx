@@ -11,11 +11,14 @@
 #include "cudaq/qec/trt_decoder_internal.h"
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <optional>
 #include <random>
+#include <stdexcept>
+#include <utility>
 #include <vector>
 
 #include <cuda_runtime_api.h>
@@ -28,6 +31,31 @@ static bool gpu_available() {
 }
 
 namespace {
+class ScopedEnvironmentVariable {
+public:
+  ScopedEnvironmentVariable(const char *name, const char *value) : name_(name) {
+    if (const char *previous = std::getenv(name))
+      previous_value_ = previous;
+    if (setenv(name, value, 1) != 0)
+      throw std::runtime_error("Failed to set test environment variable");
+  }
+
+  ScopedEnvironmentVariable(const ScopedEnvironmentVariable &) = delete;
+  ScopedEnvironmentVariable &
+  operator=(const ScopedEnvironmentVariable &) = delete;
+
+  ~ScopedEnvironmentVariable() {
+    if (previous_value_)
+      setenv(name_.c_str(), previous_value_->c_str(), 1);
+    else
+      unsetenv(name_.c_str());
+  }
+
+private:
+  std::string name_;
+  std::optional<std::string> previous_value_;
+};
+
 class TestTrtLogger : public nvinfer1::ILogger {
 public:
   void log(Severity, const char *) noexcept override {}
@@ -666,6 +694,81 @@ TEST_F(TRTDecoderTest, Uint8IdentityModelBinarizesInputAndOutput) {
   EXPECT_FLOAT_EQ(result.result[0], 0.0);
   EXPECT_FLOAT_EQ(result.result[1], 1.0);
   EXPECT_FLOAT_EQ(result.result[2], 1.0);
+}
+
+TEST_F(TRTDecoderTest, TraditionalExecutorPropagatesTensorRTFailures) {
+  if (!gpu_available())
+    GTEST_SKIP() << "No CUDA GPU available";
+  auto onnx_path = get_uint8_onnx_asset_path();
+  if (!onnx_path || !std::filesystem::exists(*onnx_path))
+    GTEST_SKIP() << "Generated uint8 ONNX fixture is unavailable";
+
+  cudaqx::heterogeneous_map params;
+  params.insert("onnx_load_path", *onnx_path);
+  params.insert("use_cuda_graph", false);
+
+  std::unique_ptr<decoder> trt_decoder;
+  try {
+    trt_decoder = decoder::get("trt_decoder", make_identity_h(3), params);
+  } catch (const std::exception &e) {
+    GTEST_SKIP() << "Failed to create uint8 TRT decoder: " << e.what();
+  }
+
+  const std::vector<std::pair<const char *, const char *>> failures = {
+      {"input_address", "TensorRT rejected the input tensor address"},
+      {"output_address", "TensorRT rejected the output tensor address"},
+      {"traditional_enqueue", "TensorRT rejected inference enqueue"}};
+  for (const auto &[point, expected_message] : failures) {
+    SCOPED_TRACE(point);
+    ScopedEnvironmentVariable failure("CUDAQ_QEC_TRT_TEST_FAILURE", point);
+    try {
+      trt_decoder->decode({0.0, 1.0, 0.0});
+      FAIL() << "Injected TensorRT failure was not propagated";
+    } catch (const std::runtime_error &e) {
+      EXPECT_STREQ(e.what(), expected_message);
+    }
+    EXPECT_EQ(std::getenv("CUDAQ_QEC_TRT_TEST_FAILURE"), nullptr)
+        << "The requested TensorRT call was not reached";
+  }
+
+  auto result = trt_decoder->decode({0.0, 1.0, 0.0});
+  ASSERT_TRUE(result.converged);
+  EXPECT_EQ(result.result, (std::vector<cudaq::qec::float_t>{0.0, 1.0, 0.0}));
+}
+
+TEST_F(TRTDecoderTest, RejectedGraphEnqueueFallsBackAndLeavesStreamUsable) {
+  if (!gpu_available())
+    GTEST_SKIP() << "No CUDA GPU available";
+  auto onnx_path = get_uint8_onnx_asset_path();
+  if (!onnx_path || !std::filesystem::exists(*onnx_path))
+    GTEST_SKIP() << "Generated uint8 ONNX fixture is unavailable";
+
+  cudaqx::heterogeneous_map params;
+  params.insert("onnx_load_path", *onnx_path);
+  params.insert("use_cuda_graph", true);
+
+  std::unique_ptr<decoder> trt_decoder;
+  {
+    ScopedEnvironmentVariable failure("CUDAQ_QEC_TRT_TEST_FAILURE",
+                                      "capture_enqueue");
+    ASSERT_NO_THROW(
+        trt_decoder = decoder::get("trt_decoder", make_identity_h(3), params));
+    EXPECT_EQ(std::getenv("CUDAQ_QEC_TRT_TEST_FAILURE"), nullptr)
+        << "CUDA graph capture did not reach the injected enqueue failure";
+  }
+
+  {
+    // Prove construction selected the traditional fallback rather than a CUDA
+    // graph that happened to capture successfully.
+    ScopedEnvironmentVariable failure("CUDAQ_QEC_TRT_TEST_FAILURE",
+                                      "traditional_enqueue");
+    EXPECT_THROW(trt_decoder->decode({0.0, 1.0, 0.0}), std::runtime_error);
+    EXPECT_EQ(std::getenv("CUDAQ_QEC_TRT_TEST_FAILURE"), nullptr);
+  }
+
+  auto result = trt_decoder->decode({0.0, 1.0, 0.0});
+  ASSERT_TRUE(result.converged);
+  EXPECT_EQ(result.result, (std::vector<cudaq::qec::float_t>{0.0, 1.0, 0.0}));
 }
 
 TEST_F(TRTDecoderTest, MixedDtypeCopiesOutput) {

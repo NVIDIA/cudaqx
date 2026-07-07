@@ -723,6 +723,14 @@ if(TARGET surface_code-4-yaml-cqr)
   set_property(TEST app_examples.surface_code-4-yaml-cqr-three-way-overlap
     APPEND PROPERTY ENVIRONMENT
       "QEC_CONCURRENCY_TEST_DECODERS=3;REQUIRE_DECODER_CONCURRENCY=3;EXPECTED_BARRIER_COMPLETIONS=2;EXPECTED_DECODER_CORRECTIONS=0,2,0;EXPECTED_DAEMON_DECODER_CONSTRUCTIONS=3;CHECK_MISSING_SERVER_PORT=1;SKIP_LOGICAL_ERROR_CEILING=1")
+
+  if(TARGET cudaq-qec-trt-decoder AND _SC4_TRY_TRT_TEST)
+    add_surface_code_4_yaml_external_test(happy-path
+      "pymatching,trt_decoder,pymatching" 200 AUTO)
+    set_property(TEST app_examples.surface_code-4-yaml-cqr-happy-path
+      APPEND PROPERTY ENVIRONMENT
+        "REQUIRE_TRT_EXECUTION=1")
+  endif()
 endif()
 
 # The multi-type cases must PROVE the patches traveled through one realtime

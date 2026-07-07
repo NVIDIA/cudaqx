@@ -117,6 +117,10 @@ if(CUDAQ_QEC_TRT_DECODER_ENABLED)
 
     # Set compile definitions
     target_compile_definitions(${MODULE_NAME} PRIVATE TENSORRT_AVAILABLE)
+    if(CUDAQX_QEC_INCLUDE_TESTS)
+      target_compile_definitions(${MODULE_NAME}
+        PRIVATE CUDAQ_QEC_TRT_TEST_FAULT_INJECTION)
+    endif()
 
     # Set the include directories for dependencies
     target_include_directories(${MODULE_NAME}
@@ -180,6 +184,5 @@ if(CUDAQ_QEC_TRT_DECODER_ENABLED)
       LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/decoder-plugins
     )
 endif()
-
 
 
