@@ -98,7 +98,7 @@ if(CMAKE_CUDA_COMPILER)
     # DeviceCallService provider API from a realtime/device-call-enabled CUDA-Q
     # build.
     cudaq_qec_find_realtime_path(CUDAQ_DEVICE_CALL_INCLUDE_DIR
-      NAMES cudaq_internal/device_call/DeviceCallService.h
+      NAMES cudaq/realtime/device_call_service.h
       PATH_SUFFIXES include
     )
     if(CUDAQ_DEVICE_CALL_INCLUDE_DIR)
@@ -217,11 +217,10 @@ target_link_options(cudaq-qec-realtime-decoding PRIVATE
 
 target_link_libraries(cudaq-qec-realtime-decoding
   PUBLIC 
-    cudaqx-core
-    cudaq-qec
+    cudaq-qec-decoders
   PRIVATE
-    cudaq::cudaq-common
     LLVMSupport
+    CUDA::cudart
     $<$<BOOL:${CUDAQ_REALTIME_LIBRARY}>:${CUDAQ_REALTIME_LIBRARY}>
     $<$<BOOL:${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}>:${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}>
 )
@@ -309,7 +308,7 @@ elseif(CMAKE_CUDA_COMPILER AND CUDAQ_REALTIME_INCLUDE_DIR)
         POSITION_INDEPENDENT_CODE ON
         LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
         BUILD_RPATH "${_CUDAQ_RT_LIB_DIR};${CMAKE_BINARY_DIR}/lib"
-      )
+        INSTALL_RPATH "${_CUDAQ_RT_LIB_DIR};$ORIGIN")
 
       install(TARGETS cudaq-realtime-pipeline
         COMPONENT qec-lib

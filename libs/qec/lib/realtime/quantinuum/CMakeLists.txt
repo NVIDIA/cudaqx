@@ -34,11 +34,9 @@ target_link_options(cudaq-qec-realtime-decoding-quantinuum PRIVATE
 
 target_link_libraries(cudaq-qec-realtime-decoding-quantinuum
   PUBLIC 
-    cudaqx-core
-    cudaq-qec
+    cudaq-qec-decoders
     cudaq-qec-realtime-decoding
   PRIVATE
-    cudaq::cudaq-common
     LLVMSupport
 )
 
