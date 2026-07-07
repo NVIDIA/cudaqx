@@ -7,10 +7,19 @@
 # ============================================================================ #
 
 # Two-process surface-code test: the surface_code-1-cqr application (simulated
-# QPU + cudaq-realtime udp device_call channel) in one process, the standard
+# QPU + cudaq-realtime device_call channel) in one process, the standard
 # decoding server (qec_decoding_daemon) in the other. The daemon is configured
 # from the same YAML the app's --save_dem pass produces, so the decoder setup
 # crosses the process boundary as configuration, not code.
+#
+# The wire between the two processes is selected by QEC_DECODING_SERVER_TRANSPORT:
+#   udp (default)  UDP loopback; runs anywhere.
+#   cpu_roce       CPU RoCE RDMA channel; needs an RDMA device (real ConnectX
+#                  or SoftRoCE/rdma_rxe) and the same topology env vars as
+#                  CUDA-Q's CpuRoceChannelTester:
+#                    CUDAQ_CPU_ROCE_TEST_CHANNEL_DEVICE / _CHANNEL_IP
+#                    CUDAQ_CPU_ROCE_TEST_DAEMON_DEVICE  / _DAEMON_IP
+#                  (e.g. a SoftRoCE self-loop: both = rxe_cudaq0 / 10.88.0.1)
 #
 # Expected args:
 #   1: path to surface_code-1-cqr executable
@@ -57,8 +66,16 @@ $EXE_PATH --distance $DISTANCE --num_rounds $NUM_ROUNDS --num_shots $NUM_SHOTS \
   --save_dem $CONFIG_FILE --decoder_window $DECODER_WINDOW \
   --decoder_type $DECODER_TYPE | tee save_dem-2proc-$FULL_SUFFIX.log
 
-# [2] Start the decoding server on an ephemeral UDP port with that config.
-$DAEMON_PATH --config=$CONFIG_FILE --transport=udp --port=0 --timeout=300 \
+# [2] Start the decoding server on an ephemeral port with that config.
+# For udp the READY port is the UDP data port; for cpu_roce it is the TCP
+# rendezvous port (the RDMA wire itself is negotiated via QP/rkey exchange).
+TRANSPORT=${QEC_DECODING_SERVER_TRANSPORT:-udp}
+DAEMON_ARGS=(--config=$CONFIG_FILE --transport=$TRANSPORT --port=0 --timeout=300)
+if [[ "$TRANSPORT" == "cpu_roce" ]]; then
+  DAEMON_ARGS+=(--device=${CUDAQ_CPU_ROCE_TEST_DAEMON_DEVICE:-mlx5_0})
+  DAEMON_ARGS+=(--local-ip=${CUDAQ_CPU_ROCE_TEST_DAEMON_IP:-10.0.0.2})
+fi
+$DAEMON_PATH "${DAEMON_ARGS[@]}" \
   > $DAEMON_LOG 2>&1 &
 DAEMON_PID=$!
 cleanup() {
@@ -80,10 +97,11 @@ if [[ -z "$DAEMON_PORT" ]]; then
   cat $DAEMON_LOG
   exit 1
 fi
-echo "Decoding server ready on udp port $DAEMON_PORT"
+echo "Decoding server ready on $TRANSPORT port $DAEMON_PORT"
 
 # [3] Run the experiment; QEC_DECODING_SERVER_PORT routes every
-# cudaq::qec::decoding device_call over the udp channel to the daemon.
+# cudaq::qec::decoding device_call over the selected channel to the daemon
+# (the app reads QEC_DECODING_SERVER_TRANSPORT for the channel type).
 QEC_DECODING_SERVER_PORT=$DAEMON_PORT \
   $EXE_PATH --distance $DISTANCE --num_shots $NUM_SHOTS \
   --load_dem $CONFIG_FILE --num_rounds $NUM_ROUNDS \
@@ -128,11 +146,11 @@ fi
 min_daemon_dispatches=$((NUM_SHOTS * 3))
 if ! [[ "$daemon_dispatch_count" =~ ^[0-9]+$ ]] || \
    [[ "$daemon_dispatch_count" -lt $min_daemon_dispatches ]]; then
-  echo "Error: daemon dispatch count '$daemon_dispatch_count' is missing or below $min_daemon_dispatches; device_calls did not cross the udp wire"
+  echo "Error: daemon dispatch count '$daemon_dispatch_count' is missing or below $min_daemon_dispatches; device_calls did not cross the $TRANSPORT wire"
   cat $DAEMON_LOG
   return_code=1
 else
-  echo "Daemon dispatch count check passed ($daemon_dispatch_count dispatches over udp)"
+  echo "Daemon dispatch count check passed ($daemon_dispatch_count dispatches over $TRANSPORT)"
 fi
 
 echo "Two-process test completed for distance $DISTANCE with return code $return_code"

@@ -51,7 +51,7 @@ namespace {
 constexpr std::uint64_t kRunShots = 1;
 constexpr std::int64_t kExpectedCorrection = 1;
 
-__qpu__ std::int64_t decoding_server_udp_kernel() {
+__qpu__ std::int64_t decoding_server_kernel() {
   constexpr std::uint64_t kKernelDecoderId = 0;
   constexpr std::uint64_t kKernelBlockSize = 3;
   constexpr std::uint64_t kKernelSyndromeSize = 3;
@@ -92,9 +92,9 @@ std::string daemon_dir() {
   return slash == std::string::npos ? "." : path.substr(0, slash);
 }
 
-// Spawns qec_decoding_daemon with the given decoder config file, hands
-// back its UDP port, and collects its stdout (for the shutdown dispatch-count
-// line).
+// Spawns qec_decoding_daemon with the given decoder config file, hands back
+// its READY port (udp: the UDP data port; cpu_roce: the TCP rendezvous port),
+// and collects its stdout (for the shutdown dispatch-count line).
 class DaemonProcess {
 public:
   bool start(const std::string &config_file, std::string &error,
@@ -162,18 +162,16 @@ public:
     std::int64_t count = -1;
     if (readLineWithPrefix("QEC_DECODING_DAEMON_DISPATCHED", 10000, line)) {
       long long parsed = -1;
-      if (std::sscanf(line.c_str(),
-                      "QEC_DECODING_DAEMON_DISPATCHED count=%lld",
+      if (std::sscanf(line.c_str(), "QEC_DECODING_DAEMON_DISPATCHED count=%lld",
                       &parsed) == 1)
         count = parsed;
     }
-    if (readLineWithPrefix("QEC_DECODING_DAEMON_MAX_CONCURRENT_DECODERS",
-                           5000, line)) {
+    if (readLineWithPrefix("QEC_DECODING_DAEMON_MAX_CONCURRENT_DECODERS", 5000,
+                           line)) {
       long long parsed = -1;
-      if (std::sscanf(
-              line.c_str(),
-              "QEC_DECODING_DAEMON_MAX_CONCURRENT_DECODERS count=%lld",
-              &parsed) == 1)
+      if (std::sscanf(line.c_str(),
+                      "QEC_DECODING_DAEMON_MAX_CONCURRENT_DECODERS count=%lld",
+                      &parsed) == 1)
         max_concurrent_decoders = parsed;
     }
     int status = 0;
@@ -252,13 +250,19 @@ std::vector<std::string> channel_arguments(std::uint16_t daemon_port) {
   if (transport == "cpu_roce") {
     // The daemon's READY port is its TCP rendezvous port; the RDMA topology
     // comes from the same env vars CUDA-Q's CpuRoceChannelTester uses.
-    return {
-        "--cudaq-device-call=cpu_roce",
-        "ib-device=" + env_or("CUDAQ_CPU_ROCE_TEST_CHANNEL_DEVICE", "mlx5_0"),
-        "local-ip=" + env_or("CUDAQ_CPU_ROCE_TEST_CHANNEL_IP", "10.0.0.1"),
-        "rendezvous-host=" +
-            env_or("CUDAQ_CPU_ROCE_TEST_DAEMON_IP", "10.0.0.2"),
-        "rendezvous-port=" + std::to_string(daemon_port)};
+    // Unlike udp, the RDMA ring geometry is part of the wire contract: the
+    // channel writes requests directly into the daemon's rings, so slots /
+    // slot-size must match the daemon's --num-slots / --slot-size defaults
+    // (8 x 256, see qec_decoding_daemon.cpp DaemonConfig).
+    return {"--cudaq-device-call=cpu_roce",
+            "--cudaq-device-call-slots=8",
+            "--cudaq-device-call-slot-size=256",
+            "ib-device=" +
+                env_or("CUDAQ_CPU_ROCE_TEST_CHANNEL_DEVICE", "mlx5_0"),
+            "local-ip=" + env_or("CUDAQ_CPU_ROCE_TEST_CHANNEL_IP", "10.0.0.1"),
+            "rendezvous-host=" +
+                env_or("CUDAQ_CPU_ROCE_TEST_DAEMON_IP", "10.0.0.2"),
+            "rendezvous-port=" + std::to_string(daemon_port)};
   }
   return {"--cudaq-device-call=udp", "udp-host=127.0.0.1",
           "udp-port=" + std::to_string(daemon_port)};
@@ -282,23 +286,23 @@ void run_two_process_decode_test(const std::string &config_file) {
   cudaq::realtime::initialize(argc, argv.data());
   RealtimeGuard realtime_guard{true};
 
-  const auto results = cudaq::run(kRunShots, decoding_server_udp_kernel);
+  const auto results = cudaq::run(kRunShots, decoding_server_kernel);
   ASSERT_EQ(results.size(), kRunShots);
   EXPECT_EQ(results[0], kExpectedCorrection);
 
   // Two-process self-verification: the decode can only have happened in the
   // daemon (this process configured no decoders), and the daemon's dispatch
-  // counter proves the device_calls crossed the UDP transport. Three calls:
-  // reset_decoder, enqueue_syndromes, get_corrections.
+  // counter proves the device_calls crossed the selected transport. Three
+  // calls: reset_decoder, enqueue_syndromes, get_corrections.
   const std::int64_t dispatched = daemon.stopAndGetDispatchCount();
   EXPECT_GE(dispatched, 3) << "daemon output:\n" << daemon.captured;
 }
 
-TEST(DecodingServerUdp, TwoProcessHostDispatch) {
+TEST(DecodingServerTwoProcess, TwoProcessHostDispatch) {
   run_two_process_decode_test("decoding_server_config.yaml");
 }
 
-TEST(DecodingServerUdp, TwoProcessHostDispatchMultiErrorLut) {
+TEST(DecodingServerTwoProcess, TwoProcessHostDispatchMultiErrorLut) {
   run_two_process_decode_test("decoding_server_config_multi_error_lut.yaml");
 }
 
@@ -311,7 +315,7 @@ TEST(DecodingServerUdp, TwoProcessHostDispatchMultiErrorLut) {
 // high-water mark of those workers.
 // ---------------------------------------------------------------------------
 
-__qpu__ std::int64_t dual_decoding_server_udp_kernel() {
+__qpu__ std::int64_t dual_decoding_server_kernel() {
   constexpr std::uint64_t kDecoderA = 0;
   constexpr std::uint64_t kDecoderB = 1;
   constexpr std::uint64_t kBlockSize = 3;
@@ -351,7 +355,7 @@ __qpu__ std::int64_t dual_decoding_server_udp_kernel() {
   return out;
 }
 
-TEST(DecodingServerUdp, TwoProcessHostDispatchDualDecoders) {
+TEST(DecodingServerTwoProcess, TwoProcessHostDispatchDualDecoders) {
   // Two identical 3-bit-identity pymatching decoders (ids 0 and 1) in one
   // daemon -- one per logical qubit.
   const std::string config_path =
@@ -388,7 +392,7 @@ TEST(DecodingServerUdp, TwoProcessHostDispatchDualDecoders) {
   cudaq::realtime::initialize(argc, argv.data());
   RealtimeGuard realtime_guard{true};
 
-  const auto results = cudaq::run(kRunShots, dual_decoding_server_udp_kernel);
+  const auto results = cudaq::run(kRunShots, dual_decoding_server_kernel);
   ASSERT_EQ(results.size(), kRunShots);
   EXPECT_EQ(results[0], 3);
 
@@ -397,6 +401,6 @@ TEST(DecodingServerUdp, TwoProcessHostDispatchDualDecoders) {
   // decodes genuinely overlapped, which tiny identity decodes need not).
   const std::int64_t dispatched = daemon.stopAndGetDispatchCount();
   EXPECT_GE(dispatched, 6) << "daemon output:\n" << daemon.captured;
-  EXPECT_GE(daemon.max_concurrent_decoders, 1)
-      << "daemon output:\n" << daemon.captured;
+  EXPECT_GE(daemon.max_concurrent_decoders, 1) << "daemon output:\n"
+                                               << daemon.captured;
 }
