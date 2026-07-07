@@ -68,6 +68,8 @@ namespace {
 std::atomic<bool> g_stop{false};
 void handle_sigint(int) { g_stop.store(true, std::memory_order_release); }
 
+constexpr auto kHololinkMonitorStartupGrace = std::chrono::milliseconds(250);
+
 std::string read_file(const std::string &path) {
   std::ifstream f(path);
   if (!f.is_open()) {
@@ -428,6 +430,11 @@ int main(int argc, char *argv[]) {
   // -- Run the Hololink RX/TX kernels on a worker thread ----------------------
   std::signal(SIGINT, handle_sigint);
   std::thread monitor([&]() { hololink_blocking_monitor(transceiver); });
+
+  // blocking_monitor() launches the Hololink RX/TX kernels inside the worker
+  // thread.  Give those launches a short grace period before the orchestration
+  // script sees "Bridge Ready" and starts playback.
+  std::this_thread::sleep_for(kHololinkMonitorStartupGrace);
 
   // Emit the bridge's RDMA target info in the exact format the orchestration
   // script greps (extract_hex for QP/Buffer, extract_decimal for RKey) so the

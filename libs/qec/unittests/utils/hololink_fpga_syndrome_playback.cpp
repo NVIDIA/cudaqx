@@ -142,6 +142,35 @@ std::uint64_t parse_scalar(const std::string &content,
   }
 }
 
+/// @brief Derive num_observables from O_sparse in the config.
+///
+/// O_sparse encodes each observable as a row of correction indices terminated by
+/// -1, so the number of row terminators is the number of observables.
+std::size_t derive_num_observables(const std::string &content) {
+  std::size_t pos = content.find("O_sparse:");
+  if (pos == std::string::npos)
+    return 0;
+  std::size_t bracket_start = content.find('[', pos);
+  if (bracket_start == std::string::npos)
+    return 0;
+  std::size_t bracket_end = content.find(']', bracket_start);
+  if (bracket_end == std::string::npos)
+    return 0;
+  std::string arr =
+      content.substr(bracket_start + 1, bracket_end - bracket_start - 1);
+
+  std::size_t rows = 0;
+  std::istringstream ss(arr);
+  std::string token;
+  while (std::getline(ss, token, ',')) {
+    token.erase(0, token.find_first_not_of(" \t\n\r"));
+    token.erase(token.find_last_not_of(" \t\n\r") + 1);
+    if (token == "-1")
+      ++rows;
+  }
+  return rows;
+}
+
 /// @brief Derive num_measurements from D_sparse in the config.
 ///
 /// D_sparse encodes the detector-measurement matrix in row-major order with
@@ -869,7 +898,8 @@ struct VerifyResult {
 VerifyResult verify_captured_responses(
     const std::vector<std::vector<std::uint32_t>> &samples,
     const std::vector<SyndromeEntry> &syndromes, std::size_t num_expected,
-    bool per_round = false, std::size_t frames_per_shot = 1) {
+    bool per_round = false, std::size_t frames_per_shot = 1,
+    std::size_t ring_depth = 64) {
   VerifyResult result;
   result.total_samples = samples.size();
   std::set<std::uint32_t> shots_seen;
@@ -1015,7 +1045,8 @@ VerifyResult verify_captured_responses(
       const char *kind =
           (local + 1 == frames_per_shot) ? "get_corrections" : "enqueue";
       std::cout << "    rid=" << rid << " (shot=" << shot << " local=" << local
-                << " " << kind << " slot%128=" << (rid % 128) << ")";
+                << " " << kind << " slot%" << ring_depth << "="
+                << (ring_depth ? rid % ring_depth : 0) << ")";
     };
     bool any = false;
     for (std::uint32_t rid = 0; rid < total_frames; ++rid) {
@@ -1085,6 +1116,18 @@ int main(int argc, char **argv) {
   if (num_measurements == 0)
     num_measurements = syndrome_size;
 
+  const std::size_t num_observables = derive_num_observables(config_content);
+  if (options.per_round && num_observables == 0) {
+    std::cerr << "Per-round mode requires O_sparse in config file\n";
+    return 1;
+  }
+  if (options.per_round && num_observables != 1) {
+    std::cerr << "Per-round playback verification currently supports exactly "
+                 "one observable (found "
+              << num_observables << " from O_sparse)\n";
+    return 1;
+  }
+
   auto syndromes = load_syndromes(syndromes_path, num_measurements);
   if (syndromes.empty()) {
     std::cerr << "No syndrome data loaded from " << syndromes_path << "\n";
@@ -1119,9 +1162,6 @@ int main(int argc, char **argv) {
           ? std::max<std::size_t>(1, syndromes.front().per_round.size())
           : 0;
   const std::size_t frames_per_shot = options.per_round ? rounds + 1 : 1;
-  // Single logical observable for the surface-code fixture; the verifier checks
-  // observable bit 0 against the expected correction.
-  const std::int64_t num_observables = 1;
 
   std::vector<std::vector<std::uint8_t>> windows;
   windows.reserve(num_shots * frames_per_shot);
@@ -1247,9 +1287,9 @@ int main(int argc, char **argv) {
   // ------------------------------------------------------------------
   // Configure FPGA SIF registers for RDMA target (if provided)
   // ------------------------------------------------------------------
+  std::uint32_t rdma_num_pages = options.rdma_num_pages.value_or(64);
   if (options.qp_number && options.rkey && options.buffer_addr) {
     std::uint32_t rdma_page_size = options.rdma_page_size.value_or(256);
-    std::uint32_t rdma_num_pages = options.rdma_num_pages.value_or(64);
 
     std::cout << "Configuring FPGA SIF for RDMA target:\n"
               << "  QP number:    0x" << std::hex << *options.qp_number
@@ -1402,7 +1442,8 @@ int main(int argc, char **argv) {
 
     // Verify correction responses against expected values.
     auto vr = verify_captured_responses(samples, syndromes, num_shots,
-                                        options.per_round, frames_per_shot);
+                                        options.per_round, frames_per_shot,
+                                        rdma_num_pages);
 
     // In per-round mode the response frames split into enqueue ACKs
     // (result_len==0) and get_corrections frames (result_len>0); only the

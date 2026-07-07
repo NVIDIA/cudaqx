@@ -142,24 +142,23 @@ void write_and_signal(cudaq::qec::realtime::qec_realtime_session &session,
       session.rx_data_dev() + slot * session.slot_size());
 }
 
-// Bounded spin for `RPCResponse::magic == RPC_MAGIC_RESPONSE`.  Returns
-// false on timeout.  The wire protocol guarantees the consumer writes the
-// header AFTER the payload + flag, so once the magic is visible the rest of
-// the slot is too.
+// Bounded spin for response publication.  Returns false on timeout.  The
+// response is considered complete only after the writer has produced an
+// RPCResponse header and published the matching tx_flags entry.
 bool wait_for_response(cudaq::qec::realtime::qec_realtime_session &session,
                        std::uint32_t slot, int timeout_ms) {
   // Two-ring wire format: the response lives in the TX slot.  The
   // dispatcher's writer (the captured graph for GRAPH_LAUNCH; the
-  // DEVICE_LOOP kernel for DEVICE_CALL) writes RPCResponse and signals
-  // tx_flags[slot]; we spin on the magic word as a structural cue then
-  // confirm via tx_flags before reading the body.
+  // DEVICE_LOOP kernel for DEVICE_CALL) writes RPCResponse and then signals
+  // tx_flags[slot].  Wait for both before reading or releasing the slot.
   std::uint8_t *tx_slot_host =
       session.tx_data_host() + slot * session.slot_size();
   auto *resp =
       reinterpret_cast<const cudaq::realtime::RPCResponse *>(tx_slot_host);
   for (int waited = 0; waited < timeout_ms; ++waited) {
     __sync_synchronize();
-    if (resp->magic == cudaq::realtime::RPC_MAGIC_RESPONSE)
+    if (resp->magic == cudaq::realtime::RPC_MAGIC_RESPONSE &&
+        session.tx_flags_host()[slot] != 0)
       return true;
     // 200us granularity matches the test.  Shorter than acquire_slot's
     // sleep because get_corrections / reset round-trips are sub-ms on
