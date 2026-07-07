@@ -77,7 +77,11 @@ if [[ $# -ge 7 ]]; then
 fi
 
 export CUDAQ_DEFAULT_SIMULATOR=stim
-export CUDAQ_QEC_REALTIME_MODE=${CUDAQ_QEC_REALTIME_MODE:-inproc_rpc}
+if [[ -n "${QEC_DECODING_DAEMON:-}" ]]; then
+  export CUDAQ_QEC_REALTIME_MODE=external_server
+else
+  export CUDAQ_QEC_REALTIME_MODE=${CUDAQ_QEC_REALTIME_MODE:-inproc_rpc}
+fi
 
 P_SPAM=0.01
 
@@ -103,7 +107,20 @@ if [[ ${#DECODER_TYPES[@]} -gt 1 ]]; then MULTI_TYPE=1; fi
 
 # Create an isolated working directory and (by default) clean it up on exit.
 WORKDIR=$(mktemp -d)
+DAEMON_PID=""
+DAEMON_LOG=$WORKDIR/daemon.log
+MISSING_PORT_LOG=$WORKDIR/missing-port.log
+
+stop_daemon() {
+  if [[ -n "$DAEMON_PID" ]]; then
+    kill -TERM "$DAEMON_PID" 2>/dev/null || true
+    wait "$DAEMON_PID" 2>/dev/null || true
+    DAEMON_PID=""
+  fi
+}
+
 cleanup() {
+  stop_daemon
   if [[ -z "${KEEP_LOG_FILES:-}" ]]; then
     rm -rf "$WORKDIR"
   else
@@ -213,6 +230,61 @@ if [[ "$MULTI_TYPE" -eq 1 && ",$DECODER_TYPE," == *",nv-qldpc-decoder,"* ]] \
   echo "Dual-parse structural check: nv block_size $nv_bs < matching $match_bs -- OK"
 fi
 
+if [[ -n "${CHECK_MISSING_SERVER_PORT:-}" ]]; then
+  MISSING_PORT_ARGS=(
+    --distance "$DISTANCE"
+    --num_rounds "$NUM_ROUNDS"
+    --num_shots 1
+    --p_spam "$P_SPAM"
+    --yaml "$CONFIG_FILE"
+  )
+  if [[ ${#EXTRA_APP_ARGS[@]} -gt 0 ]]; then
+    MISSING_PORT_ARGS+=("${EXTRA_APP_ARGS[@]}")
+  fi
+
+  set +e
+  env -u QEC_DECODING_SERVER_PORT \
+    "$EXE" "${MISSING_PORT_ARGS[@]}" >"$MISSING_PORT_LOG" 2>&1
+  missing_port_status=$?
+  set -e
+
+  if [[ "$missing_port_status" -ne 1 ]] || ! grep -Fq \
+    "Error: QEC_DECODING_SERVER_PORT is required for external decoding" \
+    "$MISSING_PORT_LOG"; then
+    echo "FAIL: missing server port did not produce a clean configuration error"
+    cat "$MISSING_PORT_LOG"
+    exit 1
+  fi
+  echo "Missing external-server port rejected cleanly -- OK"
+fi
+
+# An external-server test uses the generated YAML as the daemon's authoritative
+# decoder configuration. The application still reloads and validates that YAML,
+# but its CQR build deliberately does not construct local decoders.
+DAEMON_PORT=""
+if [[ -n "${QEC_DECODING_DAEMON:-}" ]]; then
+  "$QEC_DECODING_DAEMON" --config="$CONFIG_FILE" --transport=udp --port=0 \
+    --timeout=300 >"$DAEMON_LOG" 2>&1 &
+  DAEMON_PID=$!
+
+  for _ in $(seq 1 1200); do
+    DAEMON_PORT=$(grep -m1 "QEC_DECODING_DAEMON_READY" "$DAEMON_LOG" \
+      2>/dev/null | sed -n 's/.*port=\([0-9]\+\).*/\1/p' || true)
+    [[ -n "$DAEMON_PORT" ]] && break
+    if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
+      break
+    fi
+    sleep 0.1
+  done
+
+  if [[ -z "$DAEMON_PORT" ]]; then
+    echo "FAIL: decoding daemon did not become ready"
+    cat "$DAEMON_LOG"
+    exit 1
+  fi
+  echo "External decoding server ready on UDP port $DAEMON_PORT"
+fi
+
 # -------------------------------------------------------------------------- #
 # Phase 2: realtime -- load the YAML config and decode.
 # The decoder is read from the file, so do NOT pass --decoder_type here.
@@ -232,9 +304,19 @@ REALTIME_ARGS=(
 if [[ ${#EXTRA_APP_ARGS[@]} -gt 0 ]]; then
   REALTIME_ARGS+=("${EXTRA_APP_ARGS[@]}")
 fi
-"$EXE" "${REALTIME_ARGS[@]}" 2>&1 | tee "$REALTIME_LOG"
-app_status=${PIPESTATUS[0]}
+if [[ -n "$DAEMON_PORT" ]]; then
+  QEC_DECODING_SERVER_PORT="$DAEMON_PORT" \
+    "$EXE" "${REALTIME_ARGS[@]}" 2>&1 | tee "$REALTIME_LOG"
+  app_status=${PIPESTATUS[0]}
+else
+  "$EXE" "${REALTIME_ARGS[@]}" 2>&1 | tee "$REALTIME_LOG"
+  app_status=${PIPESTATUS[0]}
+fi
 set -e
+
+if [[ -n "$DAEMON_PORT" ]]; then
+  stop_daemon
+fi
 
 if [[ "$app_status" -ne 0 ]]; then
   echo "FAIL: realtime phase exited with non-zero status ($app_status)"
@@ -280,6 +362,8 @@ num_non_zero_values=$(grep "Number of non-zero values measured :" "$REALTIME_LOG
 if ! [[ "$num_non_zero_values" =~ ^[0-9]+$ ]]; then
   echo "FAIL: 'Number of non-zero values measured' is not a number (got '$num_non_zero_values')"
   return_code=1
+elif [[ -n "${SKIP_LOGICAL_ERROR_CEILING:-}" ]]; then
+  echo "Logical-error ceiling skipped for deterministic concurrency test"
 elif [[ "$MULTI_TYPE" -eq 1 ]]; then
   echo "Multi-type mode: aggregate ceiling replaced by per-decoder ceilings below"
 elif [[ "$num_non_zero_values" -gt "$MAX_NON_ZERO" ]]; then
@@ -305,6 +389,8 @@ if [[ "$MULTI_TYPE" -eq 1 ]]; then
     if ! [[ "$errs" =~ ^[0-9]+$ ]]; then
       echo "FAIL: could not parse logical_errors from: $line"
       return_code=1
+    elif [[ -n "${SKIP_LOGICAL_ERROR_CEILING:-}" ]]; then
+      echo "decoder[$i] ($t): logical-error ceiling skipped"
     elif [[ "$errs" -gt "$ceil" ]]; then
       echo "FAIL: decoder[$i] ($t) residual logical errors ($errs) exceed ceiling ($ceil)"
       return_code=1
@@ -312,6 +398,78 @@ if [[ "$MULTI_TYPE" -eq 1 ]]; then
       echo "decoder[$i] ($t): residual logical errors $errs (ceiling $ceil) -- OK"
     fi
   done
+fi
+
+if [[ -n "${EXPECTED_DECODER_CORRECTIONS:-}" ]]; then
+  IFS=',' read -r -a expected_corrections <<< \
+    "$EXPECTED_DECODER_CORRECTIONS"
+  if [[ ${#expected_corrections[@]} -ne ${#DECODER_TYPES[@]} ]]; then
+    echo "FAIL: EXPECTED_DECODER_CORRECTIONS has ${#expected_corrections[@]} entries; expected ${#DECODER_TYPES[@]}"
+    return_code=1
+  else
+    for i in "${!expected_corrections[@]}"; do
+      line=$(grep -F "decoder[$i] (${DECODER_TYPES[$i]}):" \
+        "$REALTIME_LOG" || true)
+      got=$(printf '%s\n' "$line" | \
+        sed -n 's/.*corrections=\([0-9][0-9]*\),.*/\1/p')
+      if [[ "$got" != "${expected_corrections[$i]}" ]]; then
+        echo "FAIL: decoder[$i] corrections='$got'; expected ${expected_corrections[$i]}"
+        return_code=1
+      fi
+    done
+  fi
+fi
+
+if [[ -n "$DAEMON_PORT" ]]; then
+  daemon_dispatches=$(sed -n \
+    's/^QEC_DECODING_DAEMON_DISPATCHED count=\([0-9][0-9]*\)$/\1/p' \
+    "$DAEMON_LOG" | tail -n1)
+  daemon_max_concurrent=$(sed -n \
+    's/^QEC_DECODING_DAEMON_MAX_CONCURRENT_DECODERS count=\([0-9][0-9]*\)$/\1/p' \
+    "$DAEMON_LOG" | tail -n1)
+  minimum_dispatches=$((NUM_SHOTS * ${#DECODER_TYPES[@]} * (NUM_ROUNDS + 3)))
+
+  if ! [[ "$daemon_dispatches" =~ ^[0-9]+$ ]] || \
+     [[ "$daemon_dispatches" -lt "$minimum_dispatches" ]]; then
+    echo "FAIL: daemon dispatch count '$daemon_dispatches' is below $minimum_dispatches"
+    return_code=1
+  fi
+  if ! grep -q \
+    "External decoding server owns all configured decoder instances" \
+    "$REALTIME_LOG"; then
+    echo "FAIL: external application did not report daemon-owned decoders"
+    return_code=1
+  fi
+  if [[ -n "${REQUIRE_DECODER_CONCURRENCY:-}" ]] && \
+     { ! [[ "$daemon_max_concurrent" =~ ^[0-9]+$ ]] || \
+       [[ "$daemon_max_concurrent" -lt "$REQUIRE_DECODER_CONCURRENCY" ]]; }; then
+    echo "FAIL: daemon max concurrency '$daemon_max_concurrent' is below $REQUIRE_DECODER_CONCURRENCY"
+    return_code=1
+  fi
+  if [[ -n "${EXPECTED_BARRIER_COMPLETIONS:-}" ]]; then
+    barrier_completions=$(grep -c \
+      '^QEC_CONCURRENCY_TEST_BARRIER generation=' "$DAEMON_LOG" || true)
+    if [[ "$barrier_completions" -ne "$EXPECTED_BARRIER_COMPLETIONS" ]]; then
+      echo "FAIL: barrier completed $barrier_completions times; expected $EXPECTED_BARRIER_COMPLETIONS"
+      return_code=1
+    fi
+  fi
+  if [[ -n "${EXPECTED_DAEMON_DECODER_CONSTRUCTIONS:-}" ]]; then
+    daemon_constructions=$(grep -c \
+      '^QEC_CONCURRENCY_TEST_DECODER_CONSTRUCTED$' "$DAEMON_LOG" || true)
+    client_constructions=$(grep -c \
+      '^QEC_CONCURRENCY_TEST_DECODER_CONSTRUCTED$' "$REALTIME_LOG" || true)
+    if [[ "$daemon_constructions" != \
+          "$EXPECTED_DAEMON_DECODER_CONSTRUCTIONS" ]]; then
+      echo "FAIL: daemon constructed $daemon_constructions test decoders; expected $EXPECTED_DAEMON_DECODER_CONSTRUCTIONS"
+      return_code=1
+    fi
+    if [[ "$client_constructions" -ne 0 ]]; then
+      echo "FAIL: external application constructed $client_constructions local decoder instances"
+      return_code=1
+    fi
+  fi
+  echo "Daemon evidence: dispatches=$daemon_dispatches, max_concurrent=$daemon_max_concurrent"
 fi
 
 # REQUIRE_HOST_MODE (relay trio ctest): assert the realtime session actually

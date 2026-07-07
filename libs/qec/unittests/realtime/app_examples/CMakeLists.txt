@@ -536,6 +536,77 @@ if(TARGET cudaq-qec-trt-decoder)
   add_dependencies(surface_code-4-yaml cudaq-qec-trt-decoder)
 endif()
 
+# External decoding-server form of the same application. The quantum kernels and
+# YAML generation/validation stay in surface_code-4-yaml.cpp; only the device-call
+# lowering and client-side simulation library differ. Decoder construction lives
+# exclusively in qec_decoding_daemon for this target.
+if(TARGET qec_decoding_daemon
+   AND TARGET cudaq-qec-realtime-decoding-simulation-cqr)
+  add_executable(surface_code-4-yaml-cqr)
+  set_target_properties(surface_code-4-yaml-cqr PROPERTIES LINKER_LANGUAGE CXX)
+
+  cudaqx_add_device_code(surface_code-4-yaml-cqr
+    SOURCES
+      surface_code-4-yaml.cpp
+    COMPILER_FLAGS
+      --target stim
+      -frealtime-lowering
+      -DQEC_APP_EXTERNAL_DECODING_SERVER
+  )
+
+  target_link_directories(surface_code-4-yaml-cqr
+    PRIVATE ${CUDAQ_INSTALL_DIR}/lib)
+
+  target_link_libraries(surface_code-4-yaml-cqr
+    PRIVATE
+      cudaq-qec
+      cudaq-qec-realtime-decoding
+      cudaq-qec-realtime-decoding-simulation-cqr
+      cudaq-device-call-runtime
+      cudaq::cudaq cudaq::cudaq-common cudaq-mlir-runtime
+      nvqir nvqir-stim)
+  qec_realtime_app_link_options(surface_code-4-yaml-cqr)
+
+  set_target_properties(surface_code-4-yaml-cqr PROPERTIES
+    BUILD_RPATH
+      "${CMAKE_BINARY_DIR}/lib;${CMAKE_BINARY_DIR}/lib/decoder-plugins;${CUDAQ_INSTALL_DIR}/lib"
+  )
+
+  if(TARGET cudaq-qec-pymatching)
+    add_dependencies(surface_code-4-yaml-cqr cudaq-qec-pymatching)
+  endif()
+  if(TARGET cudaq-qec-trt-decoder)
+    add_dependencies(surface_code-4-yaml-cqr cudaq-qec-trt-decoder)
+  endif()
+
+  # Test-only plugin: its realtime decode calls rendezvous at a reusable barrier,
+  # making three-worker overlap deterministic rather than scheduler-dependent.
+  add_library(cudaq-qec-concurrency-test-decoder SHARED
+    concurrency_test_decoder.cpp)
+  target_compile_features(cudaq-qec-concurrency-test-decoder PUBLIC cxx_std_20)
+  target_include_directories(cudaq-qec-concurrency-test-decoder
+    PUBLIC
+      ${CMAKE_SOURCE_DIR}/libs/qec/include
+      ${CMAKE_SOURCE_DIR}/libs/core/include)
+  target_link_libraries(cudaq-qec-concurrency-test-decoder
+    PUBLIC
+      cudaqx-core
+      cudaq::cudaq-operator
+    PRIVATE
+      cudaq::cudaq-common
+      cudaq-qec)
+  set_target_properties(cudaq-qec-concurrency-test-decoder PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib/decoder-plugins
+    BUILD_RPATH "$ORIGIN"
+  )
+
+  add_dependencies(surface_code-4-yaml-cqr
+    cudaq-qec-concurrency-test-decoder)
+  add_dependencies(CUDAQXQECUnitTests
+    surface_code-4-yaml-cqr
+    cudaq-qec-concurrency-test-decoder)
+endif()
+
 # Surface-code-4 YAML tests: exercise both d=3 and d=5 for each decoder entry.
 # All entries run through the realtime inproc RPC mode; relay-BP is registered
 # only when the private cudevice/archive and external decoder plugin are
@@ -572,6 +643,29 @@ function(add_surface_code_4_yaml_test test_suffix distance num_rounds
   set_tests_properties(
     app_examples.surface_code-4-yaml-${test_suffix}
     PROPERTIES ENVIRONMENT "${_sc4_env}")
+endfunction()
+
+function(add_surface_code_4_yaml_external_test test_suffix decoder_type
+         num_shots onnx_path)
+  set(_sc4_external_env
+    "QEC_DECODING_DAEMON=$<TARGET_FILE:qec_decoding_daemon>")
+  if(Python_Interpreter_FOUND)
+    list(APPEND _sc4_external_env "PYTHON=${Python_EXECUTABLE}")
+  endif()
+
+  add_test(
+    NAME app_examples.surface_code-4-yaml-cqr-${test_suffix}
+    COMMAND
+      ${CMAKE_COMMAND} -E env ${_sc4_external_env}
+      bash "${CMAKE_CURRENT_SOURCE_DIR}/surface_code-4-yaml-test.sh"
+        $<TARGET_FILE:surface_code-4-yaml-cqr>
+        3 3 ${decoder_type} ${num_shots} "${onnx_path}"
+        --num_logical 3 ${ARGN}
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+  )
+  set_tests_properties(
+    app_examples.surface_code-4-yaml-cqr-${test_suffix}
+    PROPERTIES TIMEOUT 300)
 endfunction()
 
 # This example decodes ONE volume of num_rounds rounds (no sliding windows), so
@@ -620,6 +714,15 @@ if(TARGET cudaq-qec-trt-decoder AND _SC4_TRY_TRT_TEST)
     "pymatching,trt_decoder,pymatching" 200 AUTO --num_logical 3)
   add_surface_code_4_yaml_test(trio-trt-d5 5 5
     "pymatching,trt_decoder,pymatching" 200 AUTO --num_logical 3)
+endif()
+
+if(TARGET surface_code-4-yaml-cqr)
+  add_surface_code_4_yaml_external_test(three-way-overlap
+    "concurrency_test_decoder,concurrency_test_decoder,concurrency_test_decoder"
+    2 "")
+  set_property(TEST app_examples.surface_code-4-yaml-cqr-three-way-overlap
+    APPEND PROPERTY ENVIRONMENT
+      "QEC_CONCURRENCY_TEST_DECODERS=3;REQUIRE_DECODER_CONCURRENCY=3;EXPECTED_BARRIER_COMPLETIONS=2;EXPECTED_DECODER_CORRECTIONS=0,2,0;EXPECTED_DAEMON_DECODER_CONSTRUCTIONS=3;CHECK_MISSING_SERVER_PORT=1;SKIP_LOGICAL_ERROR_CEILING=1")
 endif()
 
 # The multi-type cases must PROVE the patches traveled through one realtime

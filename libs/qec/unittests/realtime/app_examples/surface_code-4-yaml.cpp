@@ -16,15 +16,59 @@
 #include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/realtime/decoding.h"
 #include "cudaq/qec/realtime/decoding_config.h"
+#ifdef QEC_APP_EXTERNAL_DECODING_SERVER
+#include "cudaq/realtime.h"
+#endif
 #include <algorithm>
 #include <cmath>
 #include <common/NoiseModel.h>
 #include <cstdint>
+#include <cstdlib>
 #include <cudaq/algorithms/dem.h>
 #include <fstream>
 #include <mutex>
 #include <sstream>
 #include <vector>
+
+#ifdef QEC_APP_EXTERNAL_DECODING_SERVER
+namespace {
+
+class realtime_channel_guard {
+public:
+  realtime_channel_guard() = default;
+  realtime_channel_guard(const realtime_channel_guard &) = delete;
+  realtime_channel_guard &operator=(const realtime_channel_guard &) = delete;
+
+  ~realtime_channel_guard() {
+    if (active_)
+      cudaq::realtime::finalize();
+  }
+
+  void initialize(const char *program) {
+    const char *port = std::getenv("QEC_DECODING_SERVER_PORT");
+    if (!port || port[0] == '\0')
+      throw std::runtime_error(
+          "QEC_DECODING_SERVER_PORT is required for external decoding");
+
+    std::vector<std::string> args = {program, "--cudaq-device-call=udp",
+                                     "udp-host=127.0.0.1",
+                                     std::string("udp-port=") + port};
+    std::vector<char *> argv;
+    argv.reserve(args.size() + 1);
+    for (auto &arg : args)
+      argv.push_back(arg.data());
+    argv.push_back(nullptr);
+    int argc = static_cast<int>(args.size());
+    cudaq::realtime::initialize(argc, argv.data());
+    active_ = true;
+  }
+
+private:
+  bool active_ = false;
+};
+
+} // namespace
+#endif
 
 // Host-side decoding API (for syndrome capture)
 namespace cudaq::qec::decoding::host {
@@ -827,13 +871,17 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
           ", num_rounds=" + std::to_string(numRounds) +
           "); the YAML was generated for a different geometry");
     numSyndromesPerRound = fullSyndromesPerRound;
-    // In-process serving: construct the decoders here, AFTER all validation.
-    // An external decoding server owns decoder construction; a daemon-served
-    // run loads and validates the config but must not make this call.
+    // Construct local decoders only for the in-process executable. The external
+    // executable still performs all geometry validation above, but the daemon
+    // owns the decoder instances described by this same configuration.
+#ifdef QEC_APP_EXTERNAL_DECODING_SERVER
+    printf("External decoding server owns all configured decoder instances\n");
+#else
     int rc = cudaq::qec::decoding::config::configure_decoders(decoder_config);
     if (rc != 0)
       throw std::runtime_error("configure_decoders failed (status " +
                                std::to_string(rc) + ")");
+#endif
   } else {
     if (p_spam == 0.0)
       throw std::runtime_error(
@@ -1335,6 +1383,9 @@ void show_help() {
 }
 
 int main(int argc, char **argv) {
+#ifdef QEC_APP_EXTERNAL_DECODING_SERVER
+  realtime_channel_guard realtime_channel;
+#endif
   int num_shots = 10;
   int distance = 5;
   double p_spam = 0.01;
@@ -1540,7 +1591,12 @@ int main(int argc, char **argv) {
       decoder_types.push_back(std::string());
   }
   for (const auto &t : decoder_types) {
-    if (t != "pymatching" && t != "nv-qldpc-decoder" && t != "trt_decoder") {
+    bool supported =
+        t == "pymatching" || t == "nv-qldpc-decoder" || t == "trt_decoder";
+#ifdef QEC_APP_EXTERNAL_DECODING_SERVER
+    supported = supported || t == "concurrency_test_decoder";
+#endif
+    if (!supported) {
       printf("Error: --decoder_type entries must be 'pymatching', "
              "'nv-qldpc-decoder', or 'trt_decoder' (got '%s')\n",
              t.c_str());
@@ -1647,11 +1703,17 @@ int main(int argc, char **argv) {
   printf("Running with p_spam = %f, distance = %d, num_shots = %d, num_rounds "
          "= %d\n",
          p_spam, distance, num_shots, num_rounds);
+
   // Build the code at code_rotation XV (the predecoder's training orientation),
   // which sets the geometry and observable basis. The DEM-generation kernel
   // (dem_gen_circuit) emits the full detector structure -- prep singles +
   // data-derived boundary detectors, X-then-Z order.
   try {
+#ifdef QEC_APP_EXTERNAL_DECODING_SERVER
+    if (load_dem)
+      realtime_channel.initialize(argv[0]);
+#endif
+
     auto code = cudaq::qec::get_code(
         "surface_code",
         cudaqx::heterogeneous_map{{"distance", distance},
@@ -1663,9 +1725,8 @@ int main(int argc, char **argv) {
                       load_syndrome, syndrome_filename, use_relay_bp, onnx_path,
                       ising_bundle);
   } catch (const std::exception &e) {
-    // Geometry/config validation failures (a YAML or Ising bundle that does not
-    // match this experiment) surface here as a clean error rather than an
-    // uncaught-exception abort.
+    // Configuration, channel, and geometry failures surface as a clean error
+    // rather than an uncaught-exception abort.
     printf("Error: %s\n", e.what());
     cudaq::qec::decoding::config::finalize_decoders();
     return 1;
