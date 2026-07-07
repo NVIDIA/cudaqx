@@ -183,6 +183,14 @@ namespace cudaq::qec::decoding::host {
 cudaqx::heterogeneous_map prepare_decoder_params(
     const cudaq::qec::decoding::config::decoder_config &decoder_config) {
   auto params = decoder_config.decoder_custom_args_to_heterogeneous_map();
+  if (decoder_config.cuda_device_id.has_value())
+    params.insert("cuda_device_id", decoder_config.cuda_device_id.value());
+  if (decoder_config.numa_node_id.has_value())
+    params.insert("numa_node_id", decoder_config.numa_node_id.value());
+  if (decoder_config.mempolicy.has_value())
+    params.insert("mempolicy", decoder_config.mempolicy.value());
+  if (decoder_config.cpu_affinity.has_value())
+    params.insert("cpu_affinity", decoder_config.cpu_affinity.value());
   if (decoder_config.type != "trt_decoder")
     return params;
 

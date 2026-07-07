@@ -222,13 +222,20 @@ private:
   static std::unordered_map<std::string,
                             std::function<nb::object(nb::object, nb::kwargs)>>
       registry;
+  // Whether the registered class defines decode_batch/decode_async in Python
+  // (recorded at registration time from the class namespace). Such overrides
+  // are dispatched by Python attribute lookup, bypassing the guarded C++
+  // entry points, so hardware placement kwargs cannot take effect on them.
+  static std::unordered_map<std::string, bool> shadow_flags;
 
 public:
   static void
   register_decoder(const std::string &name,
-                   std::function<nb::object(nb::object, nb::kwargs)> factory) {
+                   std::function<nb::object(nb::object, nb::kwargs)> factory,
+                   bool shadows_guarded_entries) {
     cudaq::qec::info("Registering Pythonic Decoder with name {}", name);
     registry[name] = factory;
+    shadow_flags[name] = shadows_guarded_entries;
   }
 
   static nb::object get_decoder(const std::string &name, nb::object H,
@@ -244,13 +251,81 @@ public:
   static bool contains(const std::string &name) {
     return registry.find(name) != registry.end();
   }
+
+  static bool shadows_guarded_entries(const std::string &name) {
+    auto it = shadow_flags.find(name);
+    return it != shadow_flags.end() && it->second;
+  }
 };
 
 std::unordered_map<std::string,
                    std::function<nb::object(nb::object, nb::kwargs)>>
     PyDecoderRegistry::registry;
+std::unordered_map<std::string, bool> PyDecoderRegistry::shadow_flags;
 
 namespace {
+bool is_affinity_kwarg(const std::string &k) {
+  return k == "cuda_device_id" || k == "numa_node_id" || k == "mempolicy" ||
+         k == "cpu_affinity";
+}
+
+// Mirror decoder::get()'s affinity contract for Python-registered decoders:
+// strip the affinity keys before __init__ (a strict decoder must not reject
+// them) and store them on the C++ base object so the guarded entry points
+// (decode_batch / decode(tensor) / decode_async / enqueue_syndrome) pin
+// correctly. Construction-time placement is NOT guarded on this path — the
+// RAII guards are private to decoder.cpp and the bindings stay CUDA-free.
+// Only the affinity keys are converted through hetMapFromKwargs: converting
+// every kwarg would throw on Python types it cannot map (callables, None,
+// tuples, ...) that a BYOD __init__ may legitimately accept.
+nb::object get_py_registered_decoder(const std::string &name, nb::object H,
+                                     nb::kwargs options) {
+  nb::dict stripped;
+  nb::dict affinity_kwargs;
+  for (auto item : options) {
+    if (is_affinity_kwarg(nb::cast<std::string>(item.first)))
+      affinity_kwargs[item.first] = item.second;
+    else
+      stripped[item.first] = item.second;
+  }
+  // A Python class that overrides decode_batch/decode_async in Python is
+  // called directly by Python attribute lookup — the guarded C++ entry
+  // points never run, so hardware kwargs would be accepted and silently
+  // dead. Reject loudly instead (before construction; the flag was recorded
+  // from the class namespace at decorator-registration time).
+  if (affinity_kwargs.size() > 0 &&
+      PyDecoderRegistry::shadows_guarded_entries(name))
+    throw std::runtime_error(
+        "Decoder '" + name +
+        "' overrides decode_batch/decode_async in "
+        "Python, so the hardware placement kwargs (cuda_device_id/"
+        "numa_node_id/mempolicy/cpu_affinity) cannot be applied to those "
+        "calls. Remove the kwargs, or implement only decode() and use the "
+        "guarded base-class batch entry points.");
+  nb::object obj = PyDecoderRegistry::get_decoder(
+      name, H, nb::borrow<nb::kwargs>(stripped.ptr()));
+  // No affinity kwargs: preserve exact pre-existing behavior (including BYOD
+  // classes that never call qec.Decoder.__init__).
+  if (affinity_kwargs.size() == 0)
+    return obj;
+  // Narrow try: only the base-class cast maps to the "uninitialized base"
+  // message. hetMapFromKwargs can itself throw nb::cast_error (e.g. a negative
+  // Python int for cuda_device_id) and must not be misreported as a missing
+  // qec.Decoder.__init__ call.
+  decoder *base = nullptr;
+  try {
+    base = &nb::cast<decoder &>(obj);
+  } catch (const nb::cast_error &) {
+    throw std::runtime_error(
+        "Python decoder '" + name +
+        "' did not initialize its qec.Decoder base; call "
+        "qec.Decoder.__init__(self, H) in __init__ before using hardware "
+        "affinity kwargs (cuda_device_id/numa_node_id/mempolicy/cpu_affinity)");
+  }
+  base->set_hardware_params(
+      hetMapFromKwargs(nb::borrow<nb::kwargs>(affinity_kwargs.ptr())));
+  return obj;
+}
 
 struct batch_decoder_result {
   // Python-facing constructor for decoder plugin authors. nanobind enforces
@@ -683,10 +758,16 @@ void bindDecoder(nb::module_ &mod) {
       .def(
           "decode",
           [](decoder &decoder, const std::vector<float_t> &syndrome) {
-            return decoder.decode(syndrome);
+            return decoder.decode_guarded(syndrome);
           },
-          "Decode the given syndrome to determine the error correction",
-          nb::arg("syndrome"))
+          "Decode the given syndrome to determine the error correction. "
+          "Applies the decoder's hardware placement automatically.",
+          nb::arg("syndrome"),
+          // Runs without the GIL so other Python threads can decode
+          // concurrently. Safe: the lambda is pure C++, and a Python-side
+          // decode override re-acquires the GIL in nanobind's trampoline
+          // (PyGILState_Ensure in trampoline_enter).
+          nb::call_guard<nb::gil_scoped_release>())
       .def(
           "decode_async",
           [](decoder &dec,
@@ -700,11 +781,45 @@ void bindDecoder(nb::module_ &mod) {
           "decode_batch",
           [](decoder &decoder,
              const std::vector<std::vector<float_t>> &syndrome) {
-            auto results = decoder.decode_batch(syndrome);
+            std::vector<decoder_result> results;
+            {
+              // Release the GIL only around the C++ decode: a call_guard
+              // would also cover makeBatchDecoderResult, which builds Python
+              // objects and must hold the GIL. A Python-side decode override
+              // reached from the batch loop re-acquires the GIL in nanobind's
+              // trampoline (PyGILState_Ensure in trampoline_enter).
+              nb::gil_scoped_release release;
+              results = decoder.decode_batch(syndrome);
+            }
             return makeBatchDecoderResult(results);
           },
           "Decode multiple syndromes and return the results",
           nb::arg("syndrome"))
+      .def("cuda_device_id", &decoder::cuda_device_id,
+           "Target CUDA device for this decoder (-1 = inherit caller's "
+           "device).")
+      .def("numa_node_id", &decoder::numa_node_id,
+           "Target NUMA node for this decoder (-1 = no binding).")
+      .def(
+          "mempolicy",
+          [](decoder &d) {
+            return d.mempolicy() == cudaq::qec::mempolicy_mode::bind
+                       ? "bind"
+                       : "preferred";
+          },
+          "NUMA memory-policy mode for this decoder.")
+      .def("cpu_affinity", &decoder::cpu_affinity,
+           "Explicit CPU core list for this decoder's owning thread "
+           "(empty = node cpuset).")
+      .def("bind_current_thread", &decoder::bind_current_thread,
+           "Persistently pin the calling thread to this decoder's device/"
+           "node; guarded entry points then skip their per-call guard on "
+           "this thread. Call unbind_thread() before the thread exits.",
+           // Pure C++ (affinity/mempolicy/CUDA-device syscalls); runs without
+           // the GIL so pinning cannot stall other Python threads.
+           nb::call_guard<nb::gil_scoped_release>())
+      .def("unbind_thread", &decoder::unbind_thread,
+           "Forget a bind_current_thread() registration.")
       .def("get_block_size", &decoder::get_block_size,
            "Get the size of the code block")
       .def("get_syndrome_size", &decoder::get_syndrome_size,
@@ -840,6 +955,14 @@ void bindDecoder(nb::module_ &mod) {
       if (!nb::hasattr(decoder_class, "decode"))
         throw std::runtime_error("Decoder class must implement decode method");
 
+      // Record whether the class defines decode_batch/decode_async in
+      // PYTHON. The check must run here, on the class namespace: hasattr on
+      // an instance (or on new_class) also sees the guarded C++ bindings
+      // inherited from qec.Decoder and would always be true.
+      const bool shadows_guarded_entries =
+          namespace_dict.contains("decode_batch") ||
+          namespace_dict.contains("decode_async");
+
       // Use Python's type() so the correct metaclass (nanobind's) is resolved
       nb::object type_fn = nb::module_::import_("builtins").attr("type");
       nb::object new_class =
@@ -847,10 +970,12 @@ void bindDecoder(nb::module_ &mod) {
 
       // Register the new class in the decoder registry
       PyDecoderRegistry::register_decoder(
-          name, [new_class](nb::object H, nb::kwargs options) {
+          name,
+          [new_class](nb::object H, nb::kwargs options) {
             nb::object instance = new_class(H, **options);
             return instance;
-          });
+          },
+          shadows_guarded_entries);
       return new_class;
     });
   });
@@ -870,7 +995,7 @@ void bindDecoder(nb::module_ &mod) {
         options["error_rate_vec"] = copyToPyArray(*defaults.error_rate_vec);
 
       nb::object H_obj = copyToPyArray(dem.detector_error_matrix);
-      return PyDecoderRegistry::get_decoder(name, H_obj, options);
+      return get_py_registered_decoder(name, H_obj, options);
     }
 
     return get_decoder(name, decoder_init{dem_text}, hetMapFromKwargs(options));
@@ -887,7 +1012,7 @@ void bindDecoder(nb::module_ &mod) {
         }
 
         if (PyDecoderRegistry::contains(name)) {
-          return PyDecoderRegistry::get_decoder(name, H, options);
+          return get_py_registered_decoder(name, H, options);
         }
 
         cudaq::qec::sparse_binary_matrix H_sparse;

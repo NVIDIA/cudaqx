@@ -13,13 +13,16 @@
 #include "cuda-qx/core/tensor.h"
 #include "sparse_binary_matrix.h"
 #include "cudaq/qec/detector_error_model.h"
+#include "cudaq/qec/device_affinity.h"
 #include <algorithm>
+#include <atomic>
 #include <functional>
 #include <future>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <tuple>
 #include <variant>
 #include <vector>
@@ -173,6 +176,13 @@ public:
   /// length of the syndrome vector should be equal to `syndrome_size`.
   /// @returns Vector of length `block_size` with soft probabilities of errors
   /// in each index.
+  /// Note: this entry point has no automatic CUDA/NUMA guard. It is a pure
+  /// virtual that plugin implementations override directly, so the base
+  /// class cannot wrap it without an ABI-breaking vtable change.
+  /// decode_batch(), decode_async(), decode(tensor), and enqueue_syndrome()
+  /// all apply the guard around their own call into this function; a caller
+  /// invoking this overload directly on an unbound decoder is responsible
+  /// for its own placement (e.g. call bind_current_thread() first).
   virtual decoder_result decode(const std::vector<float_t> &syndrome) = 0;
 
   /// @brief Decode a single syndrome
@@ -187,6 +197,8 @@ public:
   /// value is the probability that the syndrome measurement is a |1>.
   /// @returns std::future of a vector of length `block_size` with soft
   /// probabilities of errors in each index.
+  /// @note The caller must ensure the decoder outlives the returned future.
+  ///       Destroying the decoder before calling .get() is undefined behaviour.
   virtual std::future<decoder_result>
   decode_async(const std::vector<float_t> &syndrome);
 
@@ -244,6 +256,51 @@ public:
 
   std::size_t get_block_size() { return block_size; }
   std::size_t get_syndrome_size() { return syndrome_size; }
+
+  /// @brief Store hardware affinity parameters read from the constructor params
+  /// map. Called by decoder::get() after the plugin constructor returns.
+  /// Not intended for direct use by plugin authors.
+  void set_hardware_params(const cudaqx::heterogeneous_map &params);
+
+  /// @brief Target NUMA node for this decoder (-1 = no binding).
+  int numa_node_id() const { return numa_node_id_; }
+
+  /// @brief Target CUDA device for this decoder (-1 = inherit caller's device).
+  int cuda_device_id() const { return cuda_device_id_; }
+
+  /// @brief NUMA memory-policy mode for this decoder (preferred = soft,
+  /// bind = strict).
+  cudaq::qec::mempolicy_mode mempolicy() const { return mempolicy_; }
+
+  /// @brief Explicit CPU list for this decoder (empty = derive from NUMA node).
+  const std::vector<int> &cpu_affinity() const { return cpu_affinity_; }
+
+  /// @brief Persistently bind the CALLING thread to this decoder's NUMA node
+  /// (and CUDA device). Call once from the thread that will own decode()/
+  /// enqueue for this decoder (e.g. a realtime worker). No restore.
+  /// @return the node bound to, or -1 if nothing was applied. Warns if a node
+  /// was requested (>= 0) but could not be honored.
+  int bind_current_thread();
+
+  /// @brief Run decode(syndrome) on a fresh worker thread bound (via
+  /// bind_current_thread) to this decoder's CUDA device / NUMA node, and return
+  /// the result. Convenience for a one-off pinned decode; for sustained
+  /// throughput drive decode on a long-lived bound thread instead.
+  decoder_result decode_on_pinned_thread(const std::vector<float_t> &syndrome);
+
+  /// @brief Single-syndrome decode with the same automatic CUDA/NUMA guard as
+  /// decode_batch(). Non-virtual; dispatches to the virtual decode() inside
+  /// the guard. Intended for host-language bindings and callers that cannot
+  /// use bind_current_thread(); bound threads skip the guard as usual.
+  decoder_result decode_guarded(const std::vector<float_t> &syndrome);
+
+  /// @brief Forget any bind_current_thread() registration on this decoder so
+  /// guarded entry points stop skipping their per-call guard. Call before the
+  /// bound thread exits (e.g. session teardown): thread ids are recycled by
+  /// the runtime, and a stale registration would let an unrelated new thread
+  /// silently skip the guard. Does not undo the OS-level placement of the
+  /// (exiting) bound thread.
+  void unbind_thread();
 
   // -- Begin realtime decoding API --
 
@@ -356,6 +413,27 @@ protected:
 
   /// @brief The decoder's D matrix in sparse format
   std::vector<std::vector<uint32_t>> D_sparse;
+
+  /// Target CUDA device for this decoder. -1 = inherit caller's device (no-op).
+  int cuda_device_id_ = -1;
+  /// Target NUMA node for this decoder. -1 = no binding.
+  int numa_node_id_ = -1;
+  /// Thread that bind_current_thread() pinned, if any. Guarded call sites
+  /// (decode_batch, decode(tensor), enqueue_syndrome) skip their per-call
+  /// CUDA/NUMA guard only when the calling thread matches. A
+  /// default-constructed id means no thread is bound.
+  std::atomic<std::thread::id> bound_thread_{};
+  /// NUMA memory-policy mode for this decoder (default soft PREFERRED).
+  cudaq::qec::mempolicy_mode mempolicy_ = cudaq::qec::mempolicy_mode::preferred;
+  /// Explicit CPU cores for this decoder's owning thread (empty = use node
+  /// cpuset).
+  std::vector<int> cpu_affinity_;
+
+  /// True if bind_current_thread() was called, and the CURRENT thread is the
+  /// one that called it -- the only thread allowed to skip the per-call
+  /// CUDA/NUMA guard. Protected so plugin overrides of decode_batch() can
+  /// apply the same skip as the base-class entry points.
+  bool is_bound_here() const;
 
 private:
   decode_result_type result_type_ = decode_result_type::decode_to_errs;

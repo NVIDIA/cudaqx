@@ -179,6 +179,10 @@ struct decoder_config {
   std::vector<std::int64_t> H_sparse;
   std::vector<std::int64_t> O_sparse;
   std::vector<std::int64_t> D_sparse;
+  std::optional<int> cuda_device_id;
+  std::optional<int> numa_node_id;
+  std::optional<std::string> mempolicy;         // "preferred" | "bind"
+  std::optional<std::vector<int>> cpu_affinity; // explicit core ids
   std::variant<single_error_lut_config, multi_error_lut_config,
                nv_qldpc_decoder_config, sliding_window_config,
                trt_decoder_config, pymatching_config>

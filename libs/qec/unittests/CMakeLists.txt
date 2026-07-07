@@ -35,9 +35,11 @@ find_package(CUDAToolkit REQUIRED)
 add_compile_options(-Wno-attributes) 
 
 add_executable(test_decoders test_decoders.cpp decoders/sample_decoder.cpp)
-target_link_libraries(test_decoders PRIVATE GTest::gtest_main cudaq-qec cudaq-qec-realtime-decoding cudaq::cudaq libstim)
+target_link_libraries(test_decoders PRIVATE GTest::gtest_main cudaq-qec cudaq-qec-realtime-decoding cudaq::cudaq libstim CUDA::cudart)
+target_include_directories(test_decoders PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
 add_dependencies(CUDAQXQECUnitTests test_decoders)
 gtest_discover_tests(test_decoders)
+
 
 add_executable(test_decoders_yaml test_decoders_yaml.cpp decoders/sample_decoder.cpp)
 target_link_libraries(test_decoders_yaml PRIVATE
@@ -45,9 +47,32 @@ target_link_libraries(test_decoders_yaml PRIVATE
   cudaq-qec
   cudaq-qec-realtime-decoding
   cudaq-qec-realtime-decoding-simulation
-  cudaq::cudaq)
+  cudaq::cudaq
+  CUDA::cudart)
+target_include_directories(test_decoders_yaml PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
 add_dependencies(CUDAQXQECUnitTests test_decoders_yaml)
 gtest_discover_tests(test_decoders_yaml)
+
+# LD_PRELOAD interposer + benchmark/syscall-gate test for hardware pinning.
+add_library(affinity_syscall_shim SHARED support/affinity_syscall_shim.cpp)
+target_link_libraries(affinity_syscall_shim PRIVATE ${CMAKE_DL_LIBS})
+
+add_executable(test_pinning_benchmark test_pinning_benchmark.cpp)
+target_link_libraries(test_pinning_benchmark PRIVATE
+  GTest::gtest_main cudaq-qec cudaq::cudaq CUDA::cudart)
+target_include_directories(test_pinning_benchmark PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+add_dependencies(test_pinning_benchmark affinity_syscall_shim)
+add_dependencies(CUDAQXQECUnitTests test_pinning_benchmark)
+gtest_discover_tests(test_pinning_benchmark
+  PROPERTIES ENVIRONMENT "LD_PRELOAD=$<TARGET_FILE:affinity_syscall_shim>")
+
+add_executable(test_device_affinity test_device_affinity.cpp)
+target_link_libraries(test_device_affinity PRIVATE GTest::gtest_main cudaq-qec cudaq::cudaq CUDA::cudart)
+target_include_directories(test_device_affinity PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../lib
+  ${CUDAToolkit_INCLUDE_DIRS})
+add_dependencies(CUDAQXQECUnitTests test_device_affinity)
+gtest_discover_tests(test_device_affinity)
 
 add_executable(test_qec test_qec.cpp)
 target_link_libraries(test_qec PRIVATE GTest::gtest_main cudaq-qec cudaq::cudaq-stim-target)
@@ -72,8 +97,9 @@ target_link_libraries(test_logger PRIVATE GTest::gtest_main cudaq-qec cudaq::cud
 add_dependencies(CUDAQXQECUnitTests test_logger)
 gtest_discover_tests(test_logger)
 
-# TensorRT decoder test is only built for x86 architectures
-if(CUDAQ_QEC_TRT_DECODER_ENABLED AND CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64)|(AMD64|amd64)|(^i.86$)")
+# Built wherever the TRT decoder plugin is enabled (x86_64 and arm64); the
+# flag is false on platforms without TensorRT (e.g. arm64 + CUDA 12).
+if(CUDAQ_QEC_TRT_DECODER_ENABLED)
   add_executable(test_trt_decoder ./decoders/trt_decoder/test_trt_decoder.cpp)
 
   # Find TensorRT for the test
@@ -151,7 +177,11 @@ if(CUDAQ_QEC_TRT_DECODER_ENABLED AND CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64)|(A
   target_compile_definitions(test_trt_decoder PRIVATE
     TRT_TEST_ONNX_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../../../assets/tests/surface_code_decoder.onnx")
   add_dependencies(CUDAQXQECUnitTests test_trt_decoder)
-  gtest_discover_tests(test_trt_decoder)
+  # Preload the affinity syscall shim so the guard tests can assert syscall
+  # counts (they degrade to placement-only asserts without it).
+  add_dependencies(test_trt_decoder affinity_syscall_shim)
+  gtest_discover_tests(test_trt_decoder
+    PROPERTIES ENVIRONMENT "LD_PRELOAD=$<TARGET_FILE:affinity_syscall_shim>")
 endif()
 
 # ==============================================================================

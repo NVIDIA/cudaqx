@@ -284,6 +284,10 @@ void bindDecodingConfig(nb::module_ &mod) {
       .def_rw("H_sparse", &decoder_config::H_sparse)
       .def_rw("O_sparse", &decoder_config::O_sparse)
       .def_rw("D_sparse", &decoder_config::D_sparse)
+      .def_rw("cuda_device_id", &decoder_config::cuda_device_id)
+      .def_rw("numa_node_id", &decoder_config::numa_node_id)
+      .def_rw("mempolicy", &decoder_config::mempolicy)
+      .def_rw("cpu_affinity", &decoder_config::cpu_affinity)
       .def_rw("decoder_custom_args", &decoder_config::decoder_custom_args)
       .def(
           "set_decoder_custom_args",
