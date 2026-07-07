@@ -88,9 +88,4 @@ constexpr size_t bit_packed_bytes(size_t num_bits) noexcept {
   return (num_bits + 7) / 8;
 }
 
-// Utility: round up to next multiple of 8 (matches rpc_producer spec).
-constexpr size_t align_to_8(size_t bytes) noexcept {
-  return (bytes + 7) & ~static_cast<size_t>(7);
-}
-
 } // namespace cudaq::qec::decoder_server

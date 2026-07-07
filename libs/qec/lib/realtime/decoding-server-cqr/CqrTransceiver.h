@@ -95,15 +95,32 @@ inline void CqrTransceiver::inject(const void *rx_slot, void *tx_slot,
   if (!ok)
     return;
 
-  // enqueue_syndromes is fire-and-forget in the CQR path: push the frame and
-  // return immediately so the CUDAQ handler thread is not held waiting for an
-  // ACK that the protocol does not require here.
+  // enqueue_syndromes is fire-and-forget in the CQR path: push to inbox and
+  // write an ACCEPTED (OK, result_len=0) response to tx_slot immediately.
+  // The CUDAQ handler is synchronous — the caller reads tx_slot after return,
+  // so we must complete the slot before returning.  Worker-side ACKs are
+  // irrelevant here because no pending_ entry is created for this request_id.
   if (function_id == kEnqueueSyndromesFunctionId) {
     {
       std::lock_guard<std::mutex> lk(mtx_);
       inbox_.push_back(std::move(frame));
     }
     cv_.notify_one();
+
+    const auto *cqr_hdr =
+        static_cast<const cudaq::realtime::RPCHeader *>(rx_slot);
+    RPCResponse resp{};
+    resp.status = static_cast<int32_t>(RpcStatus::OK);
+    resp.result_len = 0;
+    resp.request_id = cqr_hdr->request_id;
+    resp.ptp_timestamp = cqr_hdr->ptp_timestamp;
+    if (slot_size >= sizeof(RPCResponse)) {
+      std::memcpy(tx_slot, &resp, sizeof(RPCResponse));
+      // Release store so the CUDAQ runtime observes a complete response before
+      // seeing the magic word.
+      __atomic_store_n(reinterpret_cast<uint32_t *>(tx_slot),
+                       cudaq::realtime::RPC_MAGIC_RESPONSE, __ATOMIC_RELEASE);
+    }
     return;
   }
 
@@ -174,8 +191,11 @@ inline bool CqrTransceiver::build_enqueue_frame(const void *rx_slot,
   const auto *payload = static_cast<const uint8_t *>(rx_slot) +
                         sizeof(cudaq::realtime::RPCHeader);
 
-  // CUDAQ enqueue_syndromes payload:
-  //   [u64 decoder_id][u64 num_syndromes][u8 bit0]...[u8 bitN-1][u64 tag]
+  // Wire format matches simulation_cqr_device.cpp 3-arg signature:
+  //   [u64 decoder_id][u64 num_syndromes (bit count)][u8 per-bit x
+  //   num_syndromes] [8-byte aligned][u64 tag]
+  // stdvec<bool> serializes as [u64 length][one byte per bit]; the length is
+  // the exact bit count, not a byte count, so num_syndromes is always precise.
   std::size_t off = 0;
   auto read_u64 = [&](uint64_t &v) -> bool {
     if (off + sizeof(uint64_t) > arg_len)
@@ -214,10 +234,10 @@ inline bool CqrTransceiver::build_enqueue_frame(const void *rx_slot,
       reinterpret_cast<EnqueuePayload *>(out.buf.data() + sizeof(RPCHeader));
   req->decoder_id = static_cast<int64_t>(decoder_id);
   req->counter = static_cast<int64_t>(tag);
-  req->syndrome_mapping_id = 0; // not present in CQR path; use default
+  req->syndrome_mapping_id = 0; // not in this wire format; default mapping
   req->num_syndromes = static_cast<int64_t>(num_syndromes);
 
-  // Repack stdvec<i1> (one byte per bit) → bit-packed.
+  // Repack stdvec<bool> (one byte per bit) → bit-packed LSB-first.
   uint8_t *dst = out.buf.data() + sizeof(RPCHeader) + sizeof(EnqueuePayload);
   for (uint64_t i = 0; i < num_syndromes; ++i)
     dst[i / 8] |= static_cast<uint8_t>((bits_src[i] & 1u) << (i % 8));

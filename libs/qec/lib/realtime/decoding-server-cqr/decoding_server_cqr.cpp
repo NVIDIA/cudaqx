@@ -47,10 +47,21 @@ static std::atomic<uint64_t> g_service_dispatch_count{0};
 
 static void init_server() {
   const char *cfg = std::getenv("CUDAQ_QEC_DECODER_CONFIG");
-  if (!cfg || cfg[0] == '\0')
-    throw std::runtime_error("CUDAQ_QEC_DECODER_CONFIG env var not set; "
-                             "point it to a multi_decoder_config YAML file");
-  g_config_yaml = cfg;
+  if (cfg && cfg[0] != '\0') {
+    // Daemon path: sessions are built eagerly from the YAML config before
+    // the READY line is printed.
+    g_config_yaml = cfg;
+  } else {
+    // In-process path: fall back to the last configure_decoders() config.
+    // TODO: call the configure_decoders() API to retrieve the active config
+    // YAML and assign it to g_config_yaml here.  Until that API is wired,
+    // the daemon path (CUDAQ_QEC_DECODER_CONFIG) is the only supported entry
+    // point; in-process applications must set the env var before the first RPC.
+    throw std::runtime_error(
+        "CUDAQ_QEC_DECODER_CONFIG env var not set. "
+        "Daemon path: point it to a multi_decoder_config YAML. "
+        "In-process path: configure_decoders() fallback is not yet wired.");
+  }
 
   auto t = std::make_unique<CqrTransceiver>();
   g_transceiver = t.get();
@@ -139,19 +150,23 @@ static std::array<cudaq_function_entry_t, kDeviceCallEntryCount>
 make_entries() {
   std::array<cudaq_function_entry_t, kDeviceCallEntryCount> entries{};
 
+  // enqueue_syndromes: decoder_id (u64), syndromes (stdvec<bool>), tag (u64).
+  // Matches simulation_cqr_device.cpp; stdvec<bool> serializes as
+  // [u64 bit_count][u8 per-bit x bit_count].
   auto &eq = entries[kEnqueueSyndromesEntry];
   configure_entry(eq, kEnqueueSyndromesFnId, enqueue_syndromes_host, 3,
                   kNoResults);
-  set_u64(eq.schema.args[0]);
-  set_array_u8(eq.schema.args[1]);
-  set_u64(eq.schema.args[2]);
+  set_u64(eq.schema.args[0]);      // decoder_id
+  set_array_u8(eq.schema.args[1]); // syndromes (stdvec<bool>, byte-per-bit)
+  set_u64(eq.schema.args[2]);      // tag
 
+  // get_corrections: decoder_id (u64), corrections (stdvec<bool>), reset (u8).
   auto &gc = entries[kGetCorrectionsEntry];
   configure_entry(gc, kGetCorrectionsFnId, get_corrections_host, 3,
                   kSingleResult);
-  set_u64(gc.schema.args[0]);
-  set_u64(gc.schema.args[1]);
-  set_u8(gc.schema.args[2]);
+  set_u64(gc.schema.args[0]); // decoder_id
+  set_u64(gc.schema.args[1]); // return_size
+  set_u8(gc.schema.args[2]);  // reset
   set_array_u8(gc.schema.results[0]);
 
   auto &rd = entries[kResetDecoderEntry];

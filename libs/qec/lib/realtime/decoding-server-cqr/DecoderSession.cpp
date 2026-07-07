@@ -133,6 +133,10 @@ void DecoderSession::on_enqueue(const WorkItem &item) {
   } catch (const std::exception &e) {
     CUDA_QEC_ERROR("DecoderSession::on_enqueue: {}", e.what());
     ++error_count;
+    // Latch so the CQR caller sees the failure at the next get_corrections
+    // (inject() already sent the OK ACK; this send_response is silently
+    // dropped on CQR but unblocks non-CQR transports that are still waiting).
+    latch_syndromes_dropped();
     send_response(*item.response_transport, item.peer, item.request_id,
                   item.ptp_timestamp, RpcStatus::INTERNAL_ERROR);
     return;
@@ -179,9 +183,16 @@ void DecoderSession::on_get_corrections(const WorkItem &item) {
       return;
     }
     const auto return_size = static_cast<size_t>(req->return_size);
-    // result_len must be align_to_8(ceil(R/8)) — rpc_producer validates this
-    // exactly.
-    const size_t result_len = align_to_8(bit_packed_bytes(return_size));
+    if (return_size > dec->get_num_observables()) {
+      ++error_count;
+      send_response(*item.response_transport, item.peer, item.request_id,
+                    item.ptp_timestamp, RpcStatus::BAD_REQUEST);
+      return;
+    }
+    // result_len = ceil(R/8) exactly per decoder_server_runtime.md spec.
+    // The spec forbids trailing padding in the wire result_len; if a transport
+    // layer needs 8-byte alignment, it must add padding in its own framing.
+    const size_t result_len = bit_packed_bytes(return_size);
     // get_obs_corrections() returns byte-per-bit; pack into the wire format.
     std::vector<uint8_t> packed(result_len, 0);
     for (size_t i = 0; i < return_size; ++i) {
