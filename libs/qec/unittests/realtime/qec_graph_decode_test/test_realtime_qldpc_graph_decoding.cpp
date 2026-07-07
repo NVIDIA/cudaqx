@@ -298,13 +298,6 @@ protected:
     // The session's .so cannot reference it directly, so we hand it in as
     // a constructor parameter.  See qec_realtime_session.h for the
     // rationale (cudaq_dispatch_launch_fn_t docstring).
-    //
-    // Strict-FIFO: the scheduler consumes the ring in monotonic lockstep with
-    // the monotonic rpc_producer, so shared-ring scanning stays OFF.  The
-    // session itself forces it off in start_device_loop(); we set 0 here too
-    // (defensive against a stale value from a prior test in this process).
-    ASSERT_EQ(cudaq_dispatch_kernel_set_shared_ring_mode(0), cudaSuccess);
-
     session_ = std::make_unique<cudaq::qec::realtime::qec_realtime_session>(
         decoders_, &cudaq_launch_dispatch_kernel_regular);
     try {
@@ -332,11 +325,6 @@ protected:
       session_->finalize();
       session_.reset();
     }
-
-    // Best-effort: restore __constant__ to 0 so we don't affect subsequent
-    // tests in the same binary.  The session was constructed expecting
-    // shared_ring_mode=1 the whole time; SetUp set it, TearDown clears it.
-    (void)cudaq_dispatch_kernel_set_shared_ring_mode(0);
 
     // Drop the decoder vector AFTER the session releases its captured
     // graphs (session.finalize() above).  Order matters because the

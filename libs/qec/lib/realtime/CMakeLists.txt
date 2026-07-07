@@ -95,12 +95,16 @@ if(CMAKE_CUDA_COMPILER)
     endif()
 
     # The device-graph dispatch API (cudaq_create_dispatch_graph_regular,
-    # cudaq_launch_dispatch_graph, cudaq_destroy_dispatch_graph,
-    # cudaq_dispatch_kernel_set_shared_ring_mode) -- called directly by
-    # qec_realtime_session's device-graph scheduler path -- lives in
-    # libcudaq-realtime-dispatch, separate from libcudaq-realtime.  Link it into
-    # cudaq-qec-realtime-decoding so the .so is self-contained and consumers
-    # (e.g. test_decoders) don't need to know about it.
+    # cudaq_launch_dispatch_graph, cudaq_destroy_dispatch_graph) lives in
+    # libcudaq-realtime-dispatch, separate from libcudaq-realtime.  It is
+    # relocatable device code, and qec_realtime_session resolves it at runtime
+    # via dlsym(RTLD_DEFAULT, ...) from the host executable's absorbed copy --
+    # it must NOT be linked into cudaq-qec-realtime-decoding.so: a second
+    # device-linked copy of the dispatch kernel would live in a different CUDA
+    # module than the decoder's DEVICE_CALL handlers (captured from the
+    # executable's module), and cross-module device function pointer calls trap
+    # with cudaErrorIllegalInstruction.  The find result is used by device-mode
+    # test executables, which absorb the archive themselves.
     cudaq_qec_find_realtime_library(CUDAQ_REALTIME_DISPATCH_LIBRARY
       NAMES cudaq-realtime-dispatch
       PATH_SUFFIXES lib
@@ -237,24 +241,11 @@ target_link_libraries(cudaq-qec-realtime-decoding
     cudaq::cudaq-common
     LLVMSupport
     $<$<BOOL:${CUDAQ_REALTIME_LIBRARY}>:${CUDAQ_REALTIME_LIBRARY}>
-    $<$<BOOL:${CUDAQ_REALTIME_DISPATCH_LIBRARY}>:${CUDAQ_REALTIME_DISPATCH_LIBRARY}>
     $<$<BOOL:${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}>:${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}>
 )
 
 set_target_properties(cudaq-qec-realtime-decoding PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-
-# libcudaq-realtime-dispatch is relocatable device code (-rdc). Absorbing it
-# into this .so requires the .so to perform the CUDA device link itself;
-# otherwise __cudaRegisterLinkedBinary_..._dispatch_kernel_cu is left undefined
-# and every C++ consumer (e.g. test_decoders) fails to link. Only applies when
-# the dispatch archive is present (CUDA is available in that case).
-if(CUDAQ_REALTIME_DISPATCH_LIBRARY)
-  set_target_properties(cudaq-qec-realtime-decoding PROPERTIES
-    CUDA_RESOLVE_DEVICE_SYMBOLS ON
-    LINKER_LANGUAGE CUDA
-  )
-endif()
 
 if(_CUDAQ_REALTIME_LIB_DIR)
   set_target_properties(cudaq-qec-realtime-decoding PROPERTIES

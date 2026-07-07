@@ -383,8 +383,8 @@ int main(int argc, char *argv[]) {
   // the tail self-relaunch, so the scheduler waits at the next slot in order
   // rather than rescanning from 0 -- which is what avoids the slot-reuse race
   // (out-of-order grab + flag-clear vs. refill) that shared_ring scanning
-  // introduced here.
-  BRIDGE_CUDA_CHECK(cudaq_dispatch_kernel_set_shared_ring_mode(0));
+  // introduced here.  The dispatch kernel default is shared-ring OFF, so no
+  // setter call is needed.
 
   cudaStream_t sched_stream = nullptr;
   BRIDGE_CUDA_CHECK(cudaStreamCreate(&sched_stream));
@@ -400,7 +400,6 @@ int main(int argc, char *argv[]) {
   if (cerr != cudaSuccess) {
     std::cerr << "ERROR: cudaq_create_dispatch_graph_regular: "
               << cudaGetErrorString(cerr) << std::endl;
-    cudaq_dispatch_kernel_set_shared_ring_mode(0);
     cudaFree(d_stats);
     cudaFreeHost(ft_host);
     cudaFreeHost(sd_host);
@@ -414,7 +413,6 @@ int main(int argc, char *argv[]) {
     std::cerr << "ERROR: cudaq_launch_dispatch_graph: "
               << cudaGetErrorString(cerr) << std::endl;
     cudaq_destroy_dispatch_graph(sched_ctx);
-    cudaq_dispatch_kernel_set_shared_ring_mode(0);
     cudaFree(d_stats);
     cudaFreeHost(ft_host);
     cudaFreeHost(sd_host);
@@ -465,7 +463,6 @@ int main(int argc, char *argv[]) {
     monitor.join();
 
   cudaq_destroy_dispatch_graph(sched_ctx);
-  cudaq_dispatch_kernel_set_shared_ring_mode(0);
   cudaStreamDestroy(sched_stream);
   cudaFree(d_stats);
   cudaFreeHost(ft_host);

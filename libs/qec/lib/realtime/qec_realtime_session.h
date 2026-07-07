@@ -237,6 +237,13 @@ private:
   std::uint64_t *device_stats_dev_ = nullptr;
   cudaq_dispatch_graph_context *scheduler_ctx_ = nullptr;
   cudaStream_t scheduler_stream_ = nullptr;
+  // cudaq_destroy_dispatch_graph, resolved by start_device_loop() via
+  // dlsym(RTLD_DEFAULT, ...) from the host executable's absorbed
+  // libcudaq-realtime-dispatch.a (same image as the create/launch fns), so
+  // stop_loops() tears down the graph context with the copy that created it.
+  using destroy_dispatch_graph_fn_t =
+      cudaError_t (*)(cudaq_dispatch_graph_context *);
+  destroy_dispatch_graph_fn_t destroy_dispatch_graph_fn_ = nullptr;
   // Pinned-mapped shutdown flag polled by the scheduler graph (DEVICE mode).
   int *shutdown_flag_host_ = nullptr;
   int *shutdown_flag_dev_ = nullptr;
