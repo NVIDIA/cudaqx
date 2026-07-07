@@ -27,8 +27,10 @@ private:
   std::size_t window_size = 1;
   /// The number of rounds to advance the window by each time.
   std::size_t step_size = 1;
-  /// The number of syndromes per round.
+  /// The number of syndromes per round (the interior-layer width).
   std::size_t num_syndromes_per_round = 0;
+  /// The number of boundary measurements.
+  std::size_t num_boundary_syndromes = 0;
   /// When forming a window, should error mechanisms that span the start round
   /// and any preceding rounds be included?
   bool straddle_start_round = false;
@@ -46,6 +48,8 @@ private:
   std::size_t num_windows = 0;
   std::size_t num_rounds = 0;
   std::size_t num_syndromes_per_window = 0;
+  /// Number of detector rows in an unpadded (boundary-layout) syndrome.
+  std::size_t unpadded_syndrome_size = 0;
   std::size_t num_rounds_since_last_decode = 0;
   std::vector<std::unique_ptr<decoder>> inner_decoders;
   std::vector<std::size_t> first_columns;
@@ -108,15 +112,43 @@ private:
   /// @brief Decode a single window (internal helper)
   void decode_window();
 
+  /// @brief Whether the decoder is zero-padding narrower boundary layers up to
+  /// the interior width (i.e. a boundary-layout was supplied).
+  bool boundary_padding_active() const {
+    return num_boundary_syndromes != 0 &&
+           num_boundary_syndromes != num_syndromes_per_round;
+  }
+
+  /// @brief Pad an all-rounds syndrome from the unpadded boundary
+  /// layout up to the uniform padded layout by inserting zeros for the
+  /// boundary-layer padding rows.
+  std::vector<float_t> pad_syndrome(const std::vector<float_t> &syndrome) const;
+
+  /// @brief Pad a single boundary detector layer up to the interior width by
+  /// appending zeros.
+  std::vector<float_t> pad_round(const std::vector<float_t> &round) const;
+
+  /// @brief Zero-pad the two boundary layers of @p H up to the interior width
+  /// so all rounds are uniform. The first/last @p num_boundary_syndromes
+  /// rows are the narrower boundary layers and interior layers have
+  /// @p num_syndromes_per_round rows. Returns the canonical CSC form expected
+  /// by the base decoder. If no boundary padding is needed (@p
+  /// num_boundary_syndromes is 0 or equals @p num_syndromes_per_round), this
+  /// is just H.canonicalize().to_csc().
+  static sparse_binary_matrix
+  prepare_pcm(const cudaq::qec::sparse_binary_matrix &H,
+              std::size_t num_syndromes_per_round,
+              std::size_t num_boundary_syndromes);
+
 public:
   /// @brief Constructor
   /// @param H The full parity check matrix for all rounds
   /// @param params A heterogeneous map containing required parameters:
   ///   - window_size: Size of each decoding window (in rounds)
   ///   - step_size: Step size between consecutive windows (in rounds)
-  ///   - num_rounds: Total number of rounds
-  ///   - num_syndromes_per_round: Number of syndromes per round
-  ///   - inner_decoder: Name of the inner decoder to use
+  ///   - num_syndromes_per_round: Number of syndromes per (interior) round
+  ///   - num_boundary_syndromes: Boundary-layer width (0 if uniform)
+  ///   - inner_decoder_name: Name of the inner decoder to use
   ///   - inner_decoder_params: Parameters for the inner decoder (optional)
   sliding_window(const cudaq::qec::sparse_binary_matrix &H,
                  const cudaqx::heterogeneous_map &params);

@@ -187,28 +187,27 @@ void select_pcm_columns_for_round_range(
 
 namespace cudaq::qec {
 
-/// @brief Return a vector of column indices that would sort the PCM columns
-/// in topological order.
-/// @param row_indices For each column, a vector of row indices that have a
-/// non-zero value in that column.
-/// @param num_syndromes_per_round The number of syndromes per round. (Defaults
-/// to 0, which means that no secondary per-round sorting will occur.)
-/// @details This function tries to make a matrix that is close to a block
-/// diagonal matrix from its input. If \p num_syndromes_per_round is > 0, then
-/// the columns are first sorted by rounds numbers in which the checks are
-/// performed. Columns are then sorted by the index of the first non-zero entry
-/// in the column, and if those match, then they are sorted by the index of the
-/// last non-zero entry in the column. This ping pong continues for the indices
-/// of the second non-zero element and the second-to-last non-zero element, and
-/// so forth.
-std::vector<std::uint32_t> get_sorted_pcm_column_indices(
-    const std::vector<std::vector<std::uint32_t>> &row_indices,
-    std::uint32_t num_syndromes_per_round) {
+namespace {
+/// Topological column sort shared by the scalar and boundary-aware
+/// get_sorted_pcm_column_indices overloads. @p round_of maps a detector row to
+/// its round; when @p use_rounds is false the round key is skipped.
+///
+/// This function tries to make a matrix that is close to a block diagonal
+/// matrix from its input. If @p use_rounds is true, then the columns are first
+/// sorted by the round numbers in which the checks are performed. Columns are
+/// then sorted by the index of the first non-zero entry in the column, and if
+/// those match, then they are sorted by the index of the last non-zero entry
+/// in the column. This ping pong continues for the indices of the second
+/// non-zero element and the second-to-last non-zero element, and so forth.
+template <class RoundOf>
+std::vector<std::uint32_t> sorted_pcm_column_indices_impl(
+    const std::vector<std::vector<std::uint32_t>> &row_indices, bool use_rounds,
+    RoundOf round_of) {
   std::vector<std::uint32_t> column_order(row_indices.size());
   std::iota(column_order.begin(), column_order.end(), 0);
   std::sort(column_order.begin(), column_order.end(),
-            [&row_indices, num_syndromes_per_round](const std::uint32_t &a,
-                                                    const std::uint32_t &b) {
+            [&row_indices, use_rounds, &round_of](const std::uint32_t &a,
+                                                  const std::uint32_t &b) {
               const auto &a_vec = row_indices[a];
               const auto &b_vec = row_indices[b];
 
@@ -227,14 +226,12 @@ std::vector<std::uint32_t> get_sorted_pcm_column_indices(
               auto b_it_head = b_vec.begin();
               auto b_it_tail = b_vec.end() - 1;
 
-              // First sort by the span of rounds that the errors appear in. We
-              // can only do this sorting if we know how many syndromes per
-              // round.
-              if (num_syndromes_per_round > 0) {
-                auto a_first_round = *a_it_head / num_syndromes_per_round;
-                auto a_last_round = *a_it_tail / num_syndromes_per_round;
-                auto b_first_round = *b_it_head / num_syndromes_per_round;
-                auto b_last_round = *b_it_tail / num_syndromes_per_round;
+              // First sort by the span of rounds that the errors appear in.
+              if (use_rounds) {
+                auto a_first_round = round_of(*a_it_head);
+                auto a_last_round = round_of(*a_it_tail);
+                auto b_first_round = round_of(*b_it_head);
+                auto b_last_round = round_of(*b_it_tail);
                 if (a_first_round != b_first_round)
                   return a_first_round < b_first_round;
                 if (a_last_round != b_last_round)
@@ -290,6 +287,44 @@ std::vector<std::uint32_t> get_sorted_pcm_column_indices(
             });
 
   return column_order;
+}
+} // namespace
+
+std::vector<std::uint32_t> get_sorted_pcm_column_indices(
+    const std::vector<std::vector<std::uint32_t>> &row_indices,
+    std::uint32_t num_syndromes_per_round) {
+  return sorted_pcm_column_indices_impl(
+      row_indices, /*use_rounds=*/num_syndromes_per_round > 0,
+      // Only invoked when use_rounds is true, so the divisor is non-zero.
+      [num_syndromes_per_round](std::uint32_t r) {
+        return r / num_syndromes_per_round;
+      });
+}
+
+std::vector<std::uint32_t> get_sorted_pcm_column_indices(
+    const std::vector<std::vector<std::uint32_t>> &row_indices,
+    std::uint32_t num_syndromes_per_round,
+    std::uint32_t num_boundary_syndromes) {
+  if (num_syndromes_per_round == 0)
+    throw std::invalid_argument(
+        "get_sorted_pcm_column_indices: num_syndromes_per_round must be "
+        "non-zero when num_boundary_syndromes is specified");
+  if (num_boundary_syndromes > num_syndromes_per_round)
+    throw std::invalid_argument(
+        "get_sorted_pcm_column_indices: num_boundary_syndromes (" +
+        std::to_string(num_boundary_syndromes) +
+        ") must be <= num_syndromes_per_round (" +
+        std::to_string(num_syndromes_per_round) + ")");
+  // Detector rows map to rounds as: the first num_boundary_syndromes rows
+  // are round 0, then each num_syndromes_per_round block is an interior round.
+  return sorted_pcm_column_indices_impl(
+      row_indices, /*use_rounds=*/true,
+      [num_syndromes_per_round,
+       num_boundary_syndromes](std::uint32_t r) -> std::uint32_t {
+        if (r < num_boundary_syndromes)
+          return 0;
+        return 1 + (r - num_boundary_syndromes) / num_syndromes_per_round;
+      });
 }
 
 bool pcm_is_sorted(const std::vector<std::vector<std::uint32_t>> &sparse_pcm,

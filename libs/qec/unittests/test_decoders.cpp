@@ -1190,3 +1190,29 @@ TEST(SlidingWindowDecoder, BaseStreamingCopiesFirstRoundDetectors) {
       << "First-round detector copy runs, but the sliding window is not full "
          "yet so no final correction is committed.";
 }
+
+TEST(SlidingWindowDecoder, PreparePcmRejectsBadBoundaryLayout) {
+  // prepare_pcm runs in the constructor's member initializer list, so an
+  // inconsistent boundary layout must throw during construction.
+  auto params = [](std::size_t S, std::size_t B) {
+    cudaqx::heterogeneous_map p;
+    p.insert("window_size", std::size_t{1});
+    p.insert("step_size", std::size_t{1});
+    p.insert("num_syndromes_per_round", S);
+    p.insert("num_boundary_syndromes", B);
+    p.insert("error_rate_vec", std::vector<double>{});
+    p.insert("inner_decoder_name", std::string("single_error_lut"));
+    p.insert("inner_decoder_params", cudaqx::heterogeneous_map{});
+    return p;
+  };
+
+  // Boundary wider than the interior (B > S).
+  cudaqx::tensor<uint8_t> H4({4, 2});
+  EXPECT_THROW(cudaq::qec::decoder::get("sliding_window", H4, params(2, 4)),
+               std::invalid_argument);
+
+  // Row count inconsistent with a [B | K*S | B] layout (B < S).
+  cudaqx::tensor<uint8_t> H10({10, 2});
+  EXPECT_THROW(cudaq::qec::decoder::get("sliding_window", H10, params(8, 3)),
+               std::invalid_argument);
+}

@@ -115,6 +115,16 @@ std::vector<std::uint32_t>
 get_sorted_pcm_column_indices(const cudaqx::tensor<uint8_t> &pcm,
                               std::uint32_t num_syndromes_per_round = 0);
 
+/// @brief Boundary-aware overload of the above: the first and last
+/// @p num_boundary_syndromes rows form the boundary rounds and each interior
+/// round spans @p num_syndromes_per_round rows. throws std::invalid_argument if
+/// @p num_syndromes_per_round is zero or @p num_boundary_syndromes > @p
+/// num_syndromes_per_round.
+std::vector<std::uint32_t> get_sorted_pcm_column_indices(
+    const std::vector<std::vector<std::uint32_t>> &row_indices,
+    std::uint32_t num_syndromes_per_round,
+    std::uint32_t num_boundary_syndromes);
+
 /// @brief Check if a PCM is sorted.
 /// @param pcm The PCM to check.
 /// @param num_syndromes_per_round The number of syndromes per round.

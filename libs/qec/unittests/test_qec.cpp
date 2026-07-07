@@ -1701,6 +1701,40 @@ TEST(PCMUtilsTester, checkGetPCMForRounds) {
   }
 }
 
+TEST(PCMUtilsTester, checkGetSortedColumnIndicesWithBoundary) {
+  // Boundary layout: interior width S = 8, boundary width B = 6. The
+  // boundary-aware overload must map detector rows to rounds as
+  //   round(r) = (r < B) ? 0 : 1 + (r - B) / S,
+  // whereas the plain overload uses r / S. The two disagree on the transition
+  // rows [B, S), which is what this test pins down.
+  const std::uint32_t S = 8, B = 6;
+
+  // Three columns whose correct (boundary) round order differs from the order
+  // the plain r/S mapping produces:
+  //   c0 = {5, 12} : boundary span (0, 1),  r/S span (0, 1)
+  //   c1 = {6}     : boundary span (1, 1),  r/S span (0, 0)
+  //   c2 = {0}     : boundary span (0, 0),  r/S span (0, 0)
+  std::vector<std::vector<std::uint32_t>> cols = {{5, 12}, {6}, {0}};
+
+  // Boundary order sorts by (first_round, last_round): c2(0,0) < c0(0,1) <
+  // c1(1,1), i.e. indices {2, 0, 1}.
+  auto order = cudaq::qec::get_sorted_pcm_column_indices(cols, S, B);
+  EXPECT_EQ(order, (std::vector<std::uint32_t>{2, 0, 1}));
+
+  // The plain r/S mapping would put c1 in round 0, yielding a different order
+  // ({2, 1, 0}); confirm the boundary argument actually changes the result.
+  auto uniform_order = cudaq::qec::get_sorted_pcm_column_indices(cols, S);
+  EXPECT_EQ(uniform_order, (std::vector<std::uint32_t>{2, 1, 0}));
+  EXPECT_NE(order, uniform_order);
+
+  // Invalid boundary arguments must throw rather than divide by zero or
+  // silently misassign rounds.
+  EXPECT_THROW(cudaq::qec::get_sorted_pcm_column_indices(cols, 0, B),
+               std::invalid_argument);
+  EXPECT_THROW(cudaq::qec::get_sorted_pcm_column_indices(cols, S, S + 1),
+               std::invalid_argument);
+}
+
 TEST(PCMUtilsTester, checkShufflePCMColumns) {
   std::size_t n_rounds = 4;
   std::size_t n_errs_per_round = 30;
@@ -1985,6 +2019,21 @@ TEST(DetectorErrorModelTest, FailureOnEmptyErrorRatesCanonicalize) {
   EXPECT_EQ(dem.num_observables(), 1);
 
   EXPECT_THROW(dem.canonicalize_for_rounds(2), std::runtime_error);
+}
+
+TEST(DetectorErrorModelTest, CanonicalizeBoundaryRejectsWideBoundary) {
+  // The boundary-aware overload must reject a boundary wider than the interior
+  // (num_boundary_syndromes > num_syndromes_per_round)
+  cudaq::qec::detector_error_model dem;
+  dem.detector_error_matrix = cudaqx::tensor<uint8_t>({4, 2});
+  dem.observables_flips_matrix = cudaqx::tensor<uint8_t>({1, 2});
+  dem.error_rates = {0.1, 0.2};
+
+  EXPECT_THROW(
+      dem.canonicalize_for_rounds(/*num_syndromes_per_round=*/2,
+                                  /*num_boundary_syndromes=*/3,
+                                  /*remove_zero_syndrome_errors=*/true),
+      std::invalid_argument);
 }
 
 TEST(DetectorErrorModelTest, CanonicalizeWithoutErrorIds) {

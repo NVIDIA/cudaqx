@@ -178,16 +178,99 @@ void sliding_window::update_rw_next_read_index() {
     rw_next_read_index -= num_syndromes_per_window;
 }
 
+sparse_binary_matrix
+sliding_window::prepare_pcm(const cudaq::qec::sparse_binary_matrix &H,
+                            std::size_t num_syndromes_per_round,
+                            std::size_t num_boundary_syndromes) {
+  const std::size_t S = num_syndromes_per_round;
+  const std::size_t B = num_boundary_syndromes;
+
+  // Uniform layout (no boundary padding requested)
+  if (B == 0 || B == S)
+    return H.canonicalize().to_csc();
+
+  if (B > S)
+    throw std::invalid_argument(
+        "sliding_window: num_boundary_syndromes must be <= "
+        "num_syndromes_per_round");
+
+  const auto num_rows = static_cast<std::size_t>(H.num_rows());
+  // The boundary layout is [B | K*S | B]; verify it is consistent.
+  if (num_rows < 2 * B || (num_rows - 2 * B) % S != 0)
+    throw std::invalid_argument(
+        "sliding_window: number of PCM rows is inconsistent with the given "
+        "num_syndromes_per_round and num_boundary_syndromes");
+
+  const std::size_t pad = S - B;
+  // Shift rows past the initial boundary by (S - B): this zero-pads the initial
+  // boundary and leaves matching zero rows at the tail for the final boundary.
+  auto nested = H.to_nested_csc();
+  for (auto &col : nested)
+    for (auto &r : col)
+      if (r >= static_cast<sparse_binary_matrix::index_type>(B))
+        r += static_cast<sparse_binary_matrix::index_type>(pad);
+
+  const std::size_t padded_num_rows = num_rows + 2 * pad;
+  return sparse_binary_matrix::from_nested_csc(
+             static_cast<sparse_binary_matrix::index_type>(padded_num_rows),
+             H.num_cols(), nested)
+      .canonicalize()
+      .to_csc();
+}
+
+std::vector<float_t>
+sliding_window::pad_syndrome(const std::vector<float_t> &syndrome) const {
+  const std::size_t S = num_syndromes_per_round;
+  const std::size_t B = num_boundary_syndromes;
+  // Unpadded interior portion: syndrome[B, size - B) has length K * S.
+  const std::size_t num_interior = syndrome.size() - 2 * B;
+
+  std::vector<float_t> out(this->syndrome_size, 0.0);
+
+  // Initial boundary round
+  for (std::size_t i = 0; i < B; ++i)
+    out[i] = syndrome[i];
+
+  // Interior rounds
+  for (std::size_t i = 0; i < num_interior; ++i)
+    out[S + i] = syndrome[B + i];
+
+  // Final boundary round
+  const std::size_t final_round_start = this->syndrome_size - S;
+  const std::size_t final_boundary_src = syndrome.size() - B;
+  for (std::size_t i = 0; i < B; ++i)
+    out[final_round_start + i] = syndrome[final_boundary_src + i];
+
+  return out;
+}
+
+std::vector<float_t>
+sliding_window::pad_round(const std::vector<float_t> &round) const {
+  // A boundary layer is [real | zeros]: the real values come first, matching
+  // where prepare_pcm placed the boundary rows within each padded round.
+  std::vector<float_t> out(num_syndromes_per_round, 0.0);
+  std::copy(round.begin(), round.end(), out.begin());
+  return out;
+}
+
 sliding_window::sliding_window(const cudaq::qec::sparse_binary_matrix &H,
                                const cudaqx::heterogeneous_map &params)
     // Canonical CSC is the steady-state contract for decode_window's column
-    // slices and for validate_inputs's per-column .front()/.back() reads.
-    : decoder(H.canonicalize().to_csc()) {
+    // slices and for validate_inputs's per-column .front()/.back() reads. When
+    // a boundary layout is supplied (num_boundary_syndromes set),
+    // prepare_pcm zero-pads the narrower boundary layers up to the interior
+    // width so that this->H is uniform and all the round arithmetic below stays
+    // uniform.
+    : decoder(
+          prepare_pcm(H, params.get<std::size_t>("num_syndromes_per_round", 0),
+                      params.get<std::size_t>("num_boundary_syndromes", 0))) {
   // Fetch parameters from the params map.
   window_size = params.get<std::size_t>("window_size", window_size);
   step_size = params.get<std::size_t>("step_size", step_size);
   num_syndromes_per_round = params.get<std::size_t>("num_syndromes_per_round",
                                                     num_syndromes_per_round);
+  num_boundary_syndromes =
+      params.get<std::size_t>("num_boundary_syndromes", num_boundary_syndromes);
   straddle_start_round =
       params.get<bool>("straddle_start_round", straddle_start_round);
   straddle_end_round =
@@ -199,14 +282,24 @@ sliding_window::sliding_window(const cudaq::qec::sparse_binary_matrix &H,
   inner_decoder_params = params.get<cudaqx::heterogeneous_map>(
       "inner_decoder_params", inner_decoder_params);
 
-  // Guard the H.num_rows() / num_syndromes_per_round below.
+  // Guard the this->H.num_rows() / num_syndromes_per_round below.
   if (num_syndromes_per_round == 0)
     throw std::invalid_argument("sliding_window constructor: "
                                 "num_syndromes_per_round must be non-zero");
 
-  num_rounds = H.num_rows() / num_syndromes_per_round;
+  // this->H is the (possibly padded) uniform matrix, so every round has
+  // num_syndromes_per_round rows.
+  num_rounds = this->H.num_rows() / num_syndromes_per_round;
   num_windows = (num_rounds - window_size) / step_size + 1;
   num_syndromes_per_window = num_syndromes_per_round * window_size;
+
+  // Syndromes handed to decode() are in the original (unpadded) layout; the
+  // padded layout adds (num_syndromes_per_round - num_boundary_syndromes)
+  // rows at each of the two boundaries.
+  unpadded_syndrome_size = this->syndrome_size;
+  if (boundary_padding_active())
+    unpadded_syndrome_size -=
+        2 * (num_syndromes_per_round - num_boundary_syndromes);
 
   validate_inputs();
 
@@ -246,6 +339,15 @@ sliding_window::sliding_window(const cudaq::qec::sparse_binary_matrix &H,
 }
 
 decoder_result sliding_window::decode(const std::vector<float_t> &syndrome) {
+  // Boundary-layout inputs are padded to the uniform layout and re-dispatched:
+  // a full unpadded block via pad_syndrome, a single boundary layer via
+  // pad_round. Interior layers and already-padded inputs fall through.
+  if (boundary_padding_active()) {
+    if (syndrome.size() == unpadded_syndrome_size)
+      return decode(pad_syndrome(syndrome));
+    if (syndrome.size() == num_boundary_syndromes)
+      return decode(pad_round(syndrome));
+  }
   if (syndrome.size() == this->syndrome_size) {
     auto t0 = std::chrono::high_resolution_clock::now();
     CUDA_QEC_DBG("Decoding whole block");
@@ -313,6 +415,19 @@ std::vector<decoder_result> sliding_window::decode_batch(
   if (syndromes.empty()) {
     CUDA_QEC_DBG("Returning empty decoder_result (no syndrome)");
     return {};
+  }
+  // Boundary-layout inputs are padded up to the uniform layout, then
+  // re-dispatched: a full unpadded block via pad_syndrome, a single boundary
+  // detector layer via pad_round. Interior layers pass straight through.
+  if (boundary_padding_active()) {
+    const std::size_t sz = syndromes[0].size();
+    if (sz == unpadded_syndrome_size || sz == num_boundary_syndromes) {
+      std::vector<std::vector<float_t>> padded(syndromes.size());
+      for (std::size_t s = 0; s < syndromes.size(); ++s)
+        padded[s] = (sz == unpadded_syndrome_size) ? pad_syndrome(syndromes[s])
+                                                   : pad_round(syndromes[s]);
+      return decode_batch(padded);
+    }
   }
   if (syndromes[0].size() == this->syndrome_size) {
     CUDA_QEC_DBG("Decoding whole block");
