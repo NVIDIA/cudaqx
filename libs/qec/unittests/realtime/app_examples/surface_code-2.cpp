@@ -493,7 +493,8 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
     obs_matrix.dump_bits();
     dem.observables_flips_matrix = obs_matrix.dot(msm_obs) % 2;
     printf("numSyndromesPerRound: %ld\n", numSyndromesPerRound);
-    dem.canonicalize_for_rounds(numSyndromesPerRound);
+    dem.canonicalize_for_rounds(numSyndromesPerRound,
+                                /*remove_zero_syndrome_errors=*/true);
 
     printf("dem.detector_error_matrix:\n");
     dem.detector_error_matrix.dump_bits();

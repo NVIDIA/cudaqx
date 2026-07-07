@@ -667,8 +667,10 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
     printf("numSyndromesPerRound_x: %ld\n", numSyndromesPerRound_x);
 
     // Canonicalize both DEMs with their respective syndrome counts
-    dem_z.canonicalize_for_rounds(numSyndromesPerRound_z);
-    dem_x.canonicalize_for_rounds(numSyndromesPerRound_x);
+    dem_z.canonicalize_for_rounds(numSyndromesPerRound_z,
+                                  /*remove_zero_syndrome_errors=*/true);
+    dem_x.canonicalize_for_rounds(numSyndromesPerRound_x,
+                                  /*remove_zero_syndrome_errors=*/true);
 
     printf("dem_z.detector_error_matrix:\n");
     dem_z.detector_error_matrix.dump_bits();

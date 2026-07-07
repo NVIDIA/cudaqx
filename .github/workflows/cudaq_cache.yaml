@@ -8,6 +8,7 @@ on:
     paths:
       - '.github/workflows/cudaq_cache.yaml'
       - '.github/actions/get-cudaq-build/**'
+      - '.github/actions/get-cudaq-wheels/**'
       - '.cudaq_version'
 
 concurrency:
@@ -53,3 +54,35 @@ jobs:
           save-build: true
           save-ccache: true
           platform: ${{ matrix.platform }}-cu${{ steps.config.outputs.cuda_major }}
+
+  build-cudaq-wheels:
+    name: Build CUDAQ wheels
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ['amd64', 'arm64']
+        cuda_version: ['12.6', '13.0']
+    runs-on: ${{ startsWith(github.repository, 'NVIDIA/cudaqx') && format('linux-{0}-cpu32', matrix.platform) || 'ubuntu-latest' }}
+    permissions:
+      actions: write
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Get code
+        uses: actions/checkout@v4
+        with:
+          set-safe-directory: true
+
+      - name: Get required CUDAQ version
+        id: get-cudaq-version
+        uses: ./.github/actions/get-cudaq-version
+
+      - name: Get CUDAQ wheels
+        uses: ./.github/actions/get-cudaq-wheels
+        with:
+          cuda_version: ${{ matrix.cuda_version }}
+          repo: ${{ steps.get-cudaq-version.outputs.repo }}
+          ref: ${{ steps.get-cudaq-version.outputs.ref }}
+          token: ${{ secrets.CUDAQ_ACCESS_TOKEN }}
+          save-build: true
+          platform: ${{ matrix.platform }}
