@@ -34,14 +34,13 @@ DecoderSession::~DecoderSession() {
 }
 
 std::unique_ptr<DecoderSession>
-DecoderSession::create(const std::string &decoder_name,
-                       const cudaq::qec::decoder_init &init,
-                       const cudaqx::heterogeneous_map &params,
+DecoderSession::create(std::unique_ptr<cudaq::qec::decoder> decoder,
                        SyndromeMappingTable mapping_table_arg) {
+  if (!decoder)
+    throw std::invalid_argument("DecoderSession requires a decoder");
+
   auto s = std::make_unique<DecoderSession>();
-  s->dec = cudaq::qec::decoder::get(decoder_name, init, params);
-  if (!s->dec)
-    throw std::runtime_error("Failed to create decoder: " + decoder_name);
+  s->dec = std::move(decoder);
 
   if (s->dec->supports_graph_dispatch()) {
     void *gr = s->dec->capture_decode_graph();

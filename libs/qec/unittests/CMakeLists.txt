@@ -40,9 +40,12 @@ add_dependencies(CUDAQXQECUnitTests test_decoders)
 gtest_discover_tests(test_decoders)
 
 add_executable(test_decoders_yaml test_decoders_yaml.cpp decoders/sample_decoder.cpp)
+target_include_directories(test_decoders_yaml PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../lib/realtime/decoding-server-cqr)
 target_link_libraries(test_decoders_yaml PRIVATE
   GTest::gtest_main
   cudaq-qec
+  cudaq-qec-decoder-server
   cudaq-qec-realtime-decoding
   cudaq-qec-realtime-decoding-simulation
   cudaq::cudaq)

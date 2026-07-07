@@ -6,6 +6,7 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
+#include "SessionRegistry.h"
 #include "../lib/realtime/realtime_decoding.h"
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/pcm_utils.h"
@@ -16,6 +17,7 @@
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
+#include <limits>
 #include <optional>
 
 namespace {
@@ -97,6 +99,17 @@ create_test_empty_decoder_config(int id) {
   config.O_sparse = cudaq::qec::pcm_to_sparse_vec(O);
   config.D_sparse = cudaq::qec::generate_timelike_sparse_detector_matrix(
       config.syndrome_size, 2, /*include_first_round=*/false);
+  return config;
+}
+
+cudaq::qec::decoding::config::decoder_config
+create_test_sample_realtime_decoder_config(int id) {
+  auto config = create_test_empty_decoder_config(id);
+  config.type = "sample_decoder";
+  cudaqx::tensor<uint8_t> O({2, config.block_size});
+  O.at({0, 0}) = 1;
+  O.at({1, 1}) = 1;
+  config.O_sparse = cudaq::qec::pcm_to_sparse_vec(O);
   return config;
 }
 
@@ -664,6 +677,70 @@ TEST(DecoderConfigTest, ConfigureRejectsDuplicateAndNegativeIds) {
   negative_id.decoders.push_back(create_test_empty_decoder_config(-1));
   negative_id.decoders.push_back(create_test_empty_decoder_config(0));
   EXPECT_EQ(configure_decoders(negative_id), 3);
+}
+
+TEST(DecoderConfigTest, CreateRealtimeDecoderConfiguresRuntimeState) {
+  auto config = create_test_sample_realtime_decoder_config(7);
+
+  auto decoder = cudaq::qec::decoding::host::create_realtime_decoder(config);
+
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_EQ(decoder->get_decoder_id(), 7u);
+  EXPECT_EQ(decoder->get_num_observables(), 2u);
+  EXPECT_EQ(decoder->get_num_msyn_per_decode(), 20u);
+}
+
+TEST(DecoderConfigTest, CreateRealtimeDecoderRequiresDetectorMatrix) {
+  auto config = create_test_sample_realtime_decoder_config(0);
+  config.D_sparse.clear();
+
+  EXPECT_THROW(cudaq::qec::decoding::host::create_realtime_decoder(config),
+               std::runtime_error);
+}
+
+TEST(DecoderConfigTest, CreateRealtimeDecoderRejectsUnrepresentableId) {
+  auto config = create_test_sample_realtime_decoder_config(0);
+  config.id =
+      static_cast<std::int64_t>(std::numeric_limits<std::uint32_t>::max()) + 1;
+
+  EXPECT_THROW(cudaq::qec::decoding::host::create_realtime_decoder(config),
+               std::invalid_argument);
+}
+
+TEST(DecoderConfigTest, SessionRegistryUsesConfiguredRealtimeDecoder) {
+  cudaq::qec::decoding::config::multi_decoder_config config;
+  auto decoder_config = create_test_sample_realtime_decoder_config(0);
+  config.decoders.push_back(std::move(decoder_config));
+
+  cudaq::qec::decoder_server::SessionRegistry registry;
+  registry.load_from_config(config, "unit test");
+
+  const auto &decoder = registry.get(0).dec;
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_EQ(decoder->get_decoder_id(), 0u);
+  EXPECT_EQ(decoder->get_num_observables(), 2u);
+  EXPECT_EQ(decoder->get_num_msyn_per_decode(), 20u);
+}
+
+TEST(DecoderConfigTest, SessionRegistryRejectsMissingDetectorMatrix) {
+  cudaq::qec::decoding::config::multi_decoder_config config;
+  auto decoder_config = create_test_sample_realtime_decoder_config(0);
+  decoder_config.D_sparse.clear();
+  config.decoders.push_back(std::move(decoder_config));
+
+  cudaq::qec::decoder_server::SessionRegistry registry;
+  EXPECT_THROW(registry.load_from_config(config, "unit test"),
+               std::runtime_error);
+}
+
+TEST(DecoderConfigTest, SessionRegistryRejectsNegativeDecoderId) {
+  cudaq::qec::decoding::config::multi_decoder_config config;
+  auto decoder_config = create_test_sample_realtime_decoder_config(-1);
+  config.decoders.push_back(std::move(decoder_config));
+
+  cudaq::qec::decoder_server::SessionRegistry registry;
+  EXPECT_THROW(registry.load_from_config(config, "unit test"),
+               std::runtime_error);
 }
 
 TEST(DecoderConfigTest, ConfigureFromFileWithDebugLogging) {

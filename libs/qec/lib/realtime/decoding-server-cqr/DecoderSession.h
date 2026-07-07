@@ -98,11 +98,10 @@ struct DecoderSession {
   DecoderSession &operator=(DecoderSession &&) = delete;
   ~DecoderSession();
 
-  /// Construct a session on the heap: create the decoder, capture graph
+  /// Construct a session around an already configured decoder and capture graph
   /// resources if supported.
   static std::unique_ptr<DecoderSession>
-  create(const std::string &decoder_name, const cudaq::qec::decoder_init &init,
-         const cudaqx::heterogeneous_map &params,
+  create(std::unique_ptr<cudaq::qec::decoder> decoder,
          SyndromeMappingTable mapping_table);
 
   /// Start the FIFO worker thread.  Must be called after create().

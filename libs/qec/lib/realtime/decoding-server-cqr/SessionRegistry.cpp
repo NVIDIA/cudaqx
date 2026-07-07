@@ -7,7 +7,7 @@
  ******************************************************************************/
 
 #include "SessionRegistry.h"
-#include "cuda-qx/core/tensor.h"
+#include "../realtime_decoding.h"
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/realtime/decoding_config.h"
 
@@ -18,28 +18,6 @@
 namespace cudaq::qec::decoder_server {
 
 using cudaq::qec::decoding::config::multi_decoder_config;
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/// Build a dense H tensor from the flat -1-terminated H_sparse vector.
-static cudaqx::tensor<uint8_t>
-make_H_tensor(const std::vector<int64_t> &H_sparse, size_t syndrome_size,
-              size_t block_size) {
-  cudaqx::tensor<uint8_t> H({syndrome_size, block_size});
-  std::fill(H.data(), H.data() + syndrome_size * block_size, uint8_t{0});
-  size_t row = 0;
-  for (int64_t v : H_sparse) {
-    if (v == -1) {
-      ++row;
-      continue;
-    }
-    if (row < syndrome_size && static_cast<size_t>(v) < block_size)
-      H.data()[row * block_size + static_cast<size_t>(v)] = 1;
-  }
-  return H;
-}
 
 /// Build the default single-VP pass-through syndrome mapping table.
 /// mapping_id=0 → VP 0 → empty index list (pass-through)
@@ -72,6 +50,9 @@ void SessionRegistry::load_from_config(const std::string &yaml_path) {
 void SessionRegistry::load_from_config(const multi_decoder_config &config,
                                        const std::string &source_name) {
   for (const auto &dc : config.decoders) {
+    if (dc.id < 0)
+      throw std::runtime_error("Negative decoder id " + std::to_string(dc.id) +
+                               " in " + source_name);
     const uint64_t id = static_cast<uint64_t>(dc.id);
     if (sessions_.count(id))
       throw std::runtime_error("Duplicate decoder id " + std::to_string(dc.id) +
@@ -90,33 +71,9 @@ void SessionRegistry::load_from_config(const multi_decoder_config &config,
     CUDA_QEC_INFO("SessionRegistry: creating decoder id={} type={}", dc.id,
                   dc.type);
 
-    // Build H tensor.
-    auto H = make_H_tensor(dc.H_sparse, static_cast<size_t>(dc.syndrome_size),
-                           static_cast<size_t>(dc.block_size));
-
-    // Gather decoder-specific params from decoder_custom_args.
-    cudaqx::heterogeneous_map params = std::visit(
-        [](const auto &c) -> cudaqx::heterogeneous_map {
-          using T = std::decay_t<decltype(c)>;
-          if constexpr (std::is_same_v<T, std::monostate>)
-            return {};
-          else
-            return c.to_heterogeneous_map();
-        },
-        dc.decoder_custom_args);
-
-    // Create decoder session.
-    auto mapping_table = make_default_mapping_table();
-
-    auto session = DecoderSession::create(
-        dc.type, cudaq::qec::decoder_init{cudaq::qec::sparse_binary_matrix(H)},
-        params, std::move(mapping_table));
-
-    // Configure O and D sparse matrices on the decoder.
-    if (!dc.O_sparse.empty())
-      session->dec->set_O_sparse(dc.O_sparse);
-    if (!dc.D_sparse.empty())
-      session->dec->set_D_sparse(dc.D_sparse);
+    auto decoder = cudaq::qec::decoding::host::create_realtime_decoder(dc);
+    auto session = DecoderSession::create(std::move(decoder),
+                                          make_default_mapping_table());
 
     // [For follow-up] dc.transport (cpu_roce / gpu_roce) is parsed from YAML
     // but not yet used to select a transceiver here. Transport binding requires
