@@ -33,6 +33,8 @@ public:
 
   void send(const PeerId &peer, const uint8_t *data, size_t len) override;
 
+  void shutdown() override;
+
 private:
   explicit LoopbackTransceiver(
       std::shared_ptr<std::deque<std::vector<uint8_t>>> inbox,
@@ -40,12 +42,14 @@ private:
       std::shared_ptr<std::mutex> mtx,
       std::shared_ptr<std::condition_variable> cv)
       : inbox_(std::move(inbox)), outbox_(std::move(outbox)),
-        mtx_(std::move(mtx)), cv_(std::move(cv)) {}
+        mtx_(std::move(mtx)), cv_(std::move(cv)),
+        stopped_(std::make_shared<bool>(false)) {}
 
   std::shared_ptr<std::deque<std::vector<uint8_t>>> inbox_;
   std::shared_ptr<std::deque<std::vector<uint8_t>>> outbox_;
   std::shared_ptr<std::mutex> mtx_;
   std::shared_ptr<std::condition_variable> cv_;
+  std::shared_ptr<bool> stopped_;
 };
 
 inline std::pair<std::unique_ptr<LoopbackTransceiver>,
@@ -65,13 +69,21 @@ LoopbackTransceiver::make() {
 
 inline RxFrame LoopbackTransceiver::recv() {
   std::unique_lock<std::mutex> lk(*mtx_);
-  // Use a timed wait so the caller's shutdown loop can observe the flag.
-  while (inbox_->empty())
-    cv_->wait_for(lk, std::chrono::milliseconds(10));
+  cv_->wait(lk, [this] { return !inbox_->empty() || *stopped_; });
+  if (inbox_->empty())
+    return {}; // shutdown sentinel (empty buf)
   RxFrame frame;
   frame.buf = std::move(inbox_->front());
   inbox_->pop_front();
   return frame;
+}
+
+inline void LoopbackTransceiver::shutdown() {
+  {
+    std::lock_guard<std::mutex> lk(*mtx_);
+    *stopped_ = true;
+  }
+  cv_->notify_all();
 }
 
 inline void LoopbackTransceiver::send(const PeerId & /*peer*/,

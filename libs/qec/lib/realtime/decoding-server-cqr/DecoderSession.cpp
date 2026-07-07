@@ -103,13 +103,12 @@ void DecoderSession::on_enqueue(const WorkItem &item) {
   const auto *req = reinterpret_cast<const EnqueuePayload *>(
       item.frame_buf.data() + sizeof(RPCHeader));
 
-  if (req->num_syndromes < 0) {
+  if (req->num_syndromes <= 0) {
     ++error_count;
     send_response(*item.response_transport, item.peer, item.request_id,
                   item.ptp_timestamp, RpcStatus::BAD_REQUEST);
     return;
   }
-
   const size_t syndrome_bytes =
       bit_packed_bytes(static_cast<size_t>(req->num_syndromes));
   if (item.frame_buf.size() < min_size + syndrome_bytes) {
@@ -142,19 +141,10 @@ void DecoderSession::on_enqueue(const WorkItem &item) {
   } catch (const std::exception &e) {
     CUDA_QEC_ERROR("DecoderSession::on_enqueue: {}", e.what());
     ++error_count;
-    // Latch so the CQR caller sees the failure at the next get_corrections
-    // (inject() already sent the OK ACK; this send_response is silently
-    // dropped on CQR but unblocks non-CQR transports that are still waiting).
-    latch_syndromes_dropped();
-    send_response(*item.response_transport, item.peer, item.request_id,
-                  item.ptp_timestamp, RpcStatus::INTERNAL_ERROR);
-    return;
+    // Fire-and-forget: no response carries this failure, so latch it and
+    // surface it at this session's next get_corrections.
+    decoder_error = true;
   }
-
-  // enqueue_syndromes is not fire-and-forget: the runtime reads a 24-byte ACK
-  // (result_len == 0) from the tx_slot to confirm delivery before releasing it.
-  send_response(*item.response_transport, item.peer, item.request_id,
-                item.ptp_timestamp, RpcStatus::OK);
 }
 
 void DecoderSession::on_get_corrections(const WorkItem &item) {
@@ -188,18 +178,26 @@ void DecoderSession::on_get_corrections(const WorkItem &item) {
     return;
   }
 
+  // Surface a sticky deferred enqueue failure from this shot.
+  if (decoder_error) {
+    decoder_error = false;
+    send_response(*item.response_transport, item.peer, item.request_id,
+                  item.ptp_timestamp, RpcStatus::INTERNAL_ERROR);
+    return;
+  }
+
   try {
+    const auto return_size = static_cast<size_t>(req->return_size);
+    if (return_size != dec->get_num_observables()) {
+      ++error_count;
+      send_response(*item.response_transport, item.peer, item.request_id,
+                    item.ptp_timestamp, RpcStatus::BAD_REQUEST);
+      return;
+    }
     const uint8_t *corrections = dec->get_obs_corrections();
     if (!corrections) {
       send_response(*item.response_transport, item.peer, item.request_id,
                     item.ptp_timestamp, RpcStatus::NOT_READY);
-      return;
-    }
-    const auto return_size = static_cast<size_t>(req->return_size);
-    if (return_size > dec->get_num_observables()) {
-      ++error_count;
-      send_response(*item.response_transport, item.peer, item.request_id,
-                    item.ptp_timestamp, RpcStatus::BAD_REQUEST);
       return;
     }
     // result_len = ceil(R/8) exactly per decoder_server_runtime.md spec.
@@ -231,6 +229,7 @@ void DecoderSession::on_reset(const WorkItem &item) {
     dec->reset_decoder();
     accumulator.clear();
     syndromes_dropped.store(false, std::memory_order_release);
+    decoder_error = false;
     send_response(*item.response_transport, item.peer, item.request_id,
                   item.ptp_timestamp, RpcStatus::OK);
   } catch (const std::exception &e) {
