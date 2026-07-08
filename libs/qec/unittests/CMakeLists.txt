@@ -40,14 +40,25 @@ add_dependencies(CUDAQXQECUnitTests test_decoders)
 gtest_discover_tests(test_decoders)
 
 add_executable(test_decoders_yaml test_decoders_yaml.cpp decoders/sample_decoder.cpp)
+target_include_directories(test_decoders_yaml PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../lib/realtime/decoding-server-cqr)
 target_link_libraries(test_decoders_yaml PRIVATE
   GTest::gtest_main
-  cudaq-qec-decoders
+  cudaq-qec
+  cudaq-qec-decoder-server
   cudaq-qec-realtime-decoding
   cudaq-qec-realtime-decoding-simulation
   cudaq::cudaq)
 add_dependencies(CUDAQXQECUnitTests test_decoders_yaml)
 gtest_discover_tests(test_decoders_yaml)
+
+add_executable(test_decoder_server_core test_decoder_server_core.cpp)
+target_link_libraries(test_decoder_server_core PRIVATE
+  GTest::gtest_main
+  cudaq-qec-decoder-server
+  cudaq::cudaq)
+add_dependencies(CUDAQXQECUnitTests test_decoder_server_core)
+gtest_discover_tests(test_decoder_server_core)
 
 add_executable(test_qec test_qec.cpp)
 target_link_libraries(test_qec PRIVATE GTest::gtest_main cudaq-qec cudaq::cudaq-stim-target)
@@ -660,6 +671,99 @@ if(TARGET cudaq-qec-decoders AND TARGET cudaq-qec-realtime-decoding)
     set_tests_properties(qec_dependency_closure_selftest PROPERTIES LABELS "qec")
     add_dependencies(CUDAQXQECUnitTests cudaq-qec)
   endif()
+endif()
+
+# ==============================================================================
+# Architectural guardrail: the realtime decoding server deliverables must stay
+# free of the *heavy* CUDA-Q runtime: the core runtime (libcudaq), the simulator
+# dispatch (libnvqir), the QEC umbrella library (libcudaq-qec), and the MLIR JIT
+# runtime (libcudaq-mlir-runtime).  Pulling any of those back in would drag the
+# whole CUDA-Q execution stack (quantum_platform, execution manager, JIT
+# compiler) into the server package.
+#
+# Covered here (each only when built):
+#   - cudaq-qec-realtime-decoding-server-cqr / -simulation-cqr (the cudaq-realtime
+#     host-dispatch server + simulated-QPU client; built only when the cudaq
+#     device_call service is available)
+#
+# Unlike the decoder/realtime closure check above, the server libraries DO
+# legitimately depend on libcudaq-common / libcudaq-operator (they provide the
+# nvq++ kernel-registration symbols baked into the device code) and on the
+# allowed libcudaq-realtime, so those are intentionally NOT forbidden here.  This
+# guardrail is created whenever a server target is built.
+# ==============================================================================
+# Candidate server targets, each guarded so the check adapts to what was built.
+set(_srv_closure_targets "")
+foreach(_t IN ITEMS
+    cudaq-qec-realtime-decoding-server-cqr
+    cudaq-qec-realtime-decoding-simulation-cqr
+    )
+  if(TARGET ${_t})
+    list(APPEND _srv_closure_targets ${_t})
+  endif()
+endforeach()
+
+if(_srv_closure_targets)
+  if(NOT DEFINED _dep_closure_script)
+    set(_dep_closure_script
+      "${CMAKE_CURRENT_SOURCE_DIR}/check_dependency_closure.cmake")
+  endif()
+
+  # Heavy CUDA-Q runtime roots the server must never acquire.  Matching is
+  # anchored (^<stem>\.so), so "libcudaq" flags libcudaq.so but never
+  # libcudaq-common.so / libcudaq-realtime.so / libcudaq-qec-decoders.so,
+  # "libcudaq-qec" flags libcudaq-qec.so but never libcudaq-qec-decoders.so, and
+  # "libcustabilizer" flags libcustabilizer.so.0 (cuStabilizer, pulled only by
+  # libcudaq-qec).
+  set(_srv_closure_forbidden
+    "libcudaq-qec|libcudaq|libnvqir|libcudaq-mlir-runtime|libcustabilizer")
+
+  set(_srv_closure_libs "")
+  foreach(_t IN LISTS _srv_closure_targets)
+    if(_srv_closure_libs)
+      string(APPEND _srv_closure_libs "|")
+    endif()
+    string(APPEND _srv_closure_libs "$<TARGET_FILE:${_t}>")
+  endforeach()
+
+  # Search path for the transitive soname walk: build tree first, then the
+  # CUDA-Q install and realtime prefixes so intentionally-allowed deps
+  # (common/operator/realtime) resolve and their subtrees are inspected too.
+  # The server libraries only DT_NEEDED libs in lib/ (decoder plugins are
+  # dlopen'd, never linked), so lib/decoder-plugins is not needed here.
+  set(_srv_closure_search "${CMAKE_BINARY_DIR}/lib")
+  if(DEFINED CUDAQ_INSTALL_DIR AND CUDAQ_INSTALL_DIR)
+    string(APPEND _srv_closure_search "|${CUDAQ_INSTALL_DIR}/lib")
+  endif()
+  if(DEFINED CUDAQ_REALTIME_ROOT AND CUDAQ_REALTIME_ROOT)
+    string(APPEND _srv_closure_search "|${CUDAQ_REALTIME_ROOT}/lib")
+  endif()
+
+  add_dependencies(CUDAQXQECUnitTests ${_srv_closure_targets})
+
+  add_test(NAME qec_realtime_server_dependency_closure
+    COMMAND ${CMAKE_COMMAND}
+      "-DLIBS=${_srv_closure_libs}"
+      "-DFORBIDDEN=${_srv_closure_forbidden}"
+      "-DTRANSITIVE=ON"
+      "-DEXTRA_SEARCH_DIRS=${_srv_closure_search}"
+      -P "${_dep_closure_script}")
+  set_tests_properties(qec_realtime_server_dependency_closure
+    PROPERTIES LABELS "qec")
+
+  # Negative self-test: the server libraries DO legitimately depend on
+  # libcudaq-common, so forbidding it MUST fire.  This proves the guardrail is
+  # actually inspecting the server closure (and not silently passing).
+  add_test(NAME qec_realtime_server_dependency_closure_selftest
+    COMMAND ${CMAKE_COMMAND}
+      "-DLIBS=${_srv_closure_libs}"
+      "-DFORBIDDEN=libcudaq-common"
+      "-DTRANSITIVE=ON"
+      "-DEXTRA_SEARCH_DIRS=${_srv_closure_search}"
+      "-DEXPECT_FAIL=ON"
+      -P "${_dep_closure_script}")
+  set_tests_properties(qec_realtime_server_dependency_closure_selftest
+    PROPERTIES LABELS "qec")
 endif()
 
 # ==============================================================================

@@ -265,6 +265,7 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET qec_decoding_daemon)
   target_include_directories(test_decoding_server PRIVATE
     ${CUDAQ_REALTIME_INCLUDE_DIR}
     ${CUDAToolkit_INCLUDE_DIRS}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/realtime/decoding-server-cqr
   )
   # -DQEC_DECODING_DAEMON_PATH tells the test where the daemon binary lives
   # (the example configs are placed next to it by tools/decoding-server). It

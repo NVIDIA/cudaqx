@@ -20,6 +20,11 @@ inline constexpr uint32_t kEnqueueSyndromesFunctionId = 0x7ED8BE82u;
 inline constexpr uint32_t kGetCorrectionsFunctionId = 0x882D5BA1u;
 inline constexpr uint32_t kResetDecoderFunctionId = 0x977A59CFu;
 
+// Hard cap for one enqueue_syndromes request. Enforced at both transport and
+// session boundaries so alternate transports cannot bypass allocation and
+// packed-length validation.
+inline constexpr uint64_t kMaxSyndromeBits = 1u << 20; // 1 M bits
+
 // Wire magic bytes (from cudaq-realtime spec).
 inline constexpr uint32_t kRPCRequestMagic = 0x43555152u;  // 'CUQR'
 inline constexpr uint32_t kRPCResponseMagic = 0x43555153u; // 'CUQS'

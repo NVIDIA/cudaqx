@@ -23,6 +23,68 @@
 
 namespace cudaq::qec::decoder_server {
 
+namespace detail {
+
+/// Validated view of the cudaq-realtime enqueue_syndromes request format.
+struct CqrEnqueueFrameView {
+  const cudaq::realtime::RPCHeader *header = nullptr;
+  uint64_t decoder_id = 0;
+  uint64_t counter = 0;
+  uint64_t syndrome_mapping_id = 0;
+  uint64_t num_syndromes = 0;
+  uint64_t byte_count = 0;
+  const uint8_t *packed_bits = nullptr;
+};
+
+/// Parse an enqueue request only after proving the advertised payload is
+/// physically present in the supplied slot.
+inline bool parse_cqr_enqueue_frame(const void *rx_slot, std::size_t slot_size,
+                                    CqrEnqueueFrameView &out) {
+  if (!rx_slot || slot_size < sizeof(cudaq::realtime::RPCHeader))
+    return false;
+
+  const auto *header = static_cast<const cudaq::realtime::RPCHeader *>(rx_slot);
+  if (header->magic != cudaq::realtime::RPC_MAGIC_REQUEST ||
+      header->function_id != kEnqueueSyndromesFunctionId)
+    return false;
+
+  const std::size_t physical_payload =
+      slot_size - sizeof(cudaq::realtime::RPCHeader);
+  const std::size_t arg_len = header->arg_len;
+  if (arg_len > physical_payload)
+    return false;
+
+  const auto *payload = static_cast<const uint8_t *>(rx_slot) +
+                        sizeof(cudaq::realtime::RPCHeader);
+  std::size_t offset = 0;
+  auto read_u64 = [&](uint64_t &value) {
+    if (offset > arg_len || sizeof(uint64_t) > arg_len - offset)
+      return false;
+    std::memcpy(&value, payload + offset, sizeof(uint64_t));
+    offset += sizeof(uint64_t);
+    return true;
+  };
+
+  CqrEnqueueFrameView parsed;
+  parsed.header = header;
+  if (!read_u64(parsed.decoder_id) || !read_u64(parsed.counter) ||
+      !read_u64(parsed.syndrome_mapping_id) ||
+      !read_u64(parsed.num_syndromes) || !read_u64(parsed.byte_count))
+    return false;
+
+  if (parsed.num_syndromes == 0 || parsed.num_syndromes > kMaxSyndromeBits ||
+      parsed.byte_count !=
+          bit_packed_bytes(static_cast<std::size_t>(parsed.num_syndromes)) ||
+      offset > arg_len || parsed.byte_count > arg_len - offset)
+    return false;
+
+  parsed.packed_bits = payload + offset;
+  out = parsed;
+  return true;
+}
+
+} // namespace detail
+
 /// Bridges CUDAQ_REALTIME DeviceCallService handler callbacks to ITransceiver.
 ///
 /// CUDAQ calls handler functions synchronously with (rx_slot, tx_slot,
@@ -82,10 +144,6 @@ private:
   static bool build_enqueue_frame(const void *rx_slot, std::size_t slot_size,
                                   RxFrame &out);
 
-  // Hard cap on syndromes per request; guards against malformed/oversized
-  // payloads.
-  static constexpr uint64_t kMaxSyndromeBits = 1u << 20; // 1 M bits
-
   // For get_corrections and reset_decoder the field layouts are compatible;
   // copy rx_slot verbatim after swapping to our magic/RPCHeader type.
   static bool build_passthrough_frame(const void *rx_slot,
@@ -141,7 +199,6 @@ inline void CqrTransceiver::inject(const void *rx_slot, void *tx_slot,
     write_ack(tx_slot, rid, hdr->ptp_timestamp);
     return;
   }
-
 
   std::future<void> fut;
   {
@@ -218,67 +275,37 @@ inline void CqrTransceiver::send(const PeerId & /*peer*/, const uint8_t *data,
 inline bool CqrTransceiver::build_enqueue_frame(const void *rx_slot,
                                                 std::size_t slot_size,
                                                 RxFrame &out) {
-  if (slot_size < sizeof(cudaq::realtime::RPCHeader))
-    return false;
-
-  const auto *cqr_hdr =
-      static_cast<const cudaq::realtime::RPCHeader *>(rx_slot);
-  if (cqr_hdr->magic != cudaq::realtime::RPC_MAGIC_REQUEST)
-    return false;
-
-  const std::size_t arg_len = cqr_hdr->arg_len;
-  const auto *payload = static_cast<const uint8_t *>(rx_slot) +
-                        sizeof(cudaq::realtime::RPCHeader);
-
   // Spec 5-arg wire format (decoder_server_runtime.md):
   //   [u64 decoder_id][u64 counter][u64 syndrome_mapping_id]
   //   [u64 num_syndromes][u64 byte_count][u8 x byte_count (bit-packed)]
   // packed_bytes is an array_u8 arg; CUDAQ serialises it as [u64
   // length][bytes].
-  std::size_t off = 0;
-  auto read_u64 = [&](uint64_t &v) -> bool {
-    if (off + sizeof(uint64_t) > arg_len)
-      return false;
-    std::memcpy(&v, payload + off, sizeof(uint64_t));
-    off += sizeof(uint64_t);
-    return true;
-  };
-
-  uint64_t decoder_id = 0, counter = 0, syndrome_mapping_id = 0,
-           num_syndromes = 0, byte_count = 0;
-  if (!read_u64(decoder_id) || !read_u64(counter) ||
-      !read_u64(syndrome_mapping_id) || !read_u64(num_syndromes) ||
-      !read_u64(byte_count))
+  detail::CqrEnqueueFrameView request;
+  if (!detail::parse_cqr_enqueue_frame(rx_slot, slot_size, request))
     return false;
-  // Spec validation: the packed byte count must match the advertised bit
-  // count exactly; kMaxSyndromeBits guards against malformed/oversized
-  // payloads.
-  if (num_syndromes == 0 || num_syndromes > kMaxSyndromeBits ||
-      byte_count != bit_packed_bytes(num_syndromes) ||
-      byte_count > arg_len - off)
-    return false;
-  const uint8_t *packed_src = payload + off;
 
   // Re-frame to RPCHeader + EnqueuePayload + bit-packed bytes (the internal
   // layout drops the byte-count prefix; the bits stay packed as-is).
-  out.buf.resize(sizeof(RPCHeader) + sizeof(EnqueuePayload) + byte_count);
+  out.buf.resize(sizeof(RPCHeader) + sizeof(EnqueuePayload) +
+                 request.byte_count);
 
   auto *hdr = reinterpret_cast<RPCHeader *>(out.buf.data());
   hdr->magic = kRPCRequestMagic;
   hdr->function_id = kEnqueueSyndromesFunctionId;
-  hdr->arg_len = static_cast<uint32_t>(sizeof(EnqueuePayload) + byte_count);
-  hdr->request_id = cqr_hdr->request_id;
-  hdr->ptp_timestamp = cqr_hdr->ptp_timestamp;
+  hdr->arg_len =
+      static_cast<uint32_t>(sizeof(EnqueuePayload) + request.byte_count);
+  hdr->request_id = request.header->request_id;
+  hdr->ptp_timestamp = request.header->ptp_timestamp;
 
   auto *req =
       reinterpret_cast<EnqueuePayload *>(out.buf.data() + sizeof(RPCHeader));
-  req->decoder_id = static_cast<int64_t>(decoder_id);
-  req->counter = static_cast<int64_t>(counter);
-  req->syndrome_mapping_id = static_cast<int64_t>(syndrome_mapping_id);
-  req->num_syndromes = static_cast<int64_t>(num_syndromes);
+  req->decoder_id = static_cast<int64_t>(request.decoder_id);
+  req->counter = static_cast<int64_t>(request.counter);
+  req->syndrome_mapping_id = static_cast<int64_t>(request.syndrome_mapping_id);
+  req->num_syndromes = static_cast<int64_t>(request.num_syndromes);
 
   uint8_t *dst = out.buf.data() + sizeof(RPCHeader) + sizeof(EnqueuePayload);
-  std::memcpy(dst, packed_src, byte_count);
+  std::memcpy(dst, request.packed_bits, request.byte_count);
 
   out.vp_id = 0;
   return true;

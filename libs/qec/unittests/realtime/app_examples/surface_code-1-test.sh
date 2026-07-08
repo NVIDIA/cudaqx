@@ -45,6 +45,22 @@ SW_WINDOW_SIZE=${11:-$DECODER_WINDOW}
 SW_STEP_SIZE=${12:-1}
 EXTRA_CLI_ARGS=${EXTRA_CLI_ARGS:-}
 
+# The inproc_rpc realtime path is served by the device-graph scheduler, which
+# uses device-side graph launch -- compute capability 9.0+ (Hopper) only; the
+# dispatch kernel's TRIGGER_GRAPH interception is compiled out below sm_90 and
+# the enqueue RPC surfaces the raw sentinel as a non-zero status.  Skip on
+# older GPUs (e.g. A100/sm_80 CI runners), matching the skip in
+# test_realtime_qldpc_graph_decoding.  Exit code 77 pairs with the test's
+# SKIP_RETURN_CODE property.
+if [[ "${CUDAQ_QEC_REALTIME_MODE:-}" == "inproc_rpc" ]]; then
+  compute_cap=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1)
+  if [[ -n "$compute_cap" && "${compute_cap%%.*}" -lt 9 ]]; then
+    echo "SKIP: CUDAQ_QEC_REALTIME_MODE=inproc_rpc requires device-side graph" \
+         "launch (compute capability 9.0+); found ${compute_cap}"
+    exit 77
+  fi
+fi
+
 export CUDAQ_DEFAULT_SIMULATOR=stim
 
 ERROR_RATE=0.01

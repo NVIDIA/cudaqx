@@ -72,7 +72,7 @@ void RpcDispatcher::dispatch(RxFrame frame, ITransceiver &transport) {
   } catch (const std::invalid_argument &) {
     writer.write_error(RpcStatus::BAD_REQUEST);
   } catch (const std::exception &e) {
-    CUDA_QEC_ERROR("RpcDispatcher: handler threw: {}", e.what());
+    cudaq::qec::error("RpcDispatcher: handler threw: {}", e.what());
     writer.write_error(RpcStatus::INTERNAL_ERROR);
   }
 }

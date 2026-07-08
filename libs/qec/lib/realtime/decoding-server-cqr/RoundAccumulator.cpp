@@ -44,6 +44,10 @@ RoundAccumulator::ingest(const RoundKey &key, uint32_t vp_id,
   const auto &indices = vp_mappings[vp_id];
   const bool pass_through = indices.empty();
 
+  if (pass_through && vp_mappings.size() != 1)
+    throw std::invalid_argument(
+        "Pass-through syndrome mapping requires exactly one VP");
+
   if (!pass_through && num_syndromes != indices.size())
     throw std::invalid_argument("Syndrome count mismatch: got " +
                                 std::to_string(num_syndromes) + " expected " +

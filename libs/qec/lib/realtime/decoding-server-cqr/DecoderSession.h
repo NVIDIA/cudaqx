@@ -57,6 +57,8 @@ inline constexpr size_t kDefaultQueueDepth = 64;
 /// Owns one decoder instance plus a dedicated FIFO worker thread; decoder calls
 /// are sequenced through the worker.
 struct DecoderSession {
+  enum class ShotState { collecting, result_ready, failed };
+
   // -- Decoder and GPU resources --
   std::unique_ptr<cudaq::qec::decoder> dec;
   GraphResourcesPtr graph_resources;
@@ -73,15 +75,14 @@ struct DecoderSession {
   std::atomic<bool> shutdown{false};
   size_t queue_depth{kDefaultQueueDepth};
 
-  // Latched when enqueue_syndromes is dropped (queue full).
-  // Cleared by the worker after surfacing the error in get_corrections.
+  // Latched when enqueue_syndromes is dropped (queue full). The shot remains
+  // poisoned until reset_decoder clears all mutable state.
   std::atomic<bool> syndromes_dropped{false};
 
-  // Sticky deferred-execution error: a decoder exception during on_enqueue
-  // is latched here (enqueue is fire-and-forget, so there is no response to
-  // carry it) and surfaced as INTERNAL_ERROR at this session's next
-  // get_corrections. Cleared by on_reset. Worker-thread-only.
-  bool decoder_error = false;
+  // Worker-owned state for the current shot. result_ready means a decode call
+  // completed; it is deliberately independent of decoder_result::converged.
+  ShotState shot_state = ShotState::collecting;
+  size_t accepted_syndromes = 0;
 
   // Per-session metrics (updated atomically by the worker thread).
   std::atomic<uint64_t> enqueue_count{0};
@@ -98,11 +99,10 @@ struct DecoderSession {
   DecoderSession &operator=(DecoderSession &&) = delete;
   ~DecoderSession();
 
-  /// Construct a session on the heap: create the decoder, capture graph
+  /// Construct a session around an already configured decoder and capture graph
   /// resources if supported.
   static std::unique_ptr<DecoderSession>
-  create(const std::string &decoder_name, const cudaq::qec::decoder_init &init,
-         const cudaqx::heterogeneous_map &params,
+  create(std::unique_ptr<cudaq::qec::decoder> decoder,
          SyndromeMappingTable mapping_table);
 
   /// Start the FIFO worker thread.  Must be called after create().
