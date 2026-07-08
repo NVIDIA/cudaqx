@@ -149,14 +149,6 @@ public:
   std::size_t producer_cursor() const { return producer_cursor_; }
   void set_producer_cursor(std::size_t slot) { producer_cursor_ = slot; }
 
-  /// @brief (DEVICE mode) CUDA stream backing the HOST_LOOP worker for the
-  /// decoder at index `decoder_id`.  Since PR4770 the GRAPH_LAUNCH engine owns
-  /// (and hides) the per-worker streams, so this is no longer externally
-  /// observable; retained for API compatibility, always returns nullptr.
-  cudaStream_t host_worker_stream(std::size_t /*decoder_id*/) const {
-    return nullptr;
-  }
-
   /// @brief (DEVICE mode) Number of decoders that captured a CUDA graph.
   std::size_t num_decoders_with_graph() const {
     return num_decoders_with_graph_;
