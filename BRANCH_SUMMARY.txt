@@ -20,12 +20,12 @@ BUILD:
   cmake --build build
 
 RUN THE TESTS:
-  cd build && ctest -R "DecodingServerUdp"
-    -> TwoProcessHostDispatch, TwoProcessHostDispatchMultiErrorLut, TwoProcessHostDispatchDualDecoders (one __qpu__ kernel driving TWO decoders in one daemon over UDP: per-decoder correctness, no cross-talk, dispatch and concurrency-watermark assertions)
+  cd build && ctest -R "DecodingServerTwoProcess"
+    -> TwoProcessHostDispatch, TwoProcessHostDispatchMultiErrorLut, TwoProcessHostDispatchDualDecoders (one __qpu__ kernel driving TWO decoders in one daemon: per-decoder correctness, no cross-talk, dispatch and concurrency-watermark assertions)
   cd build && ctest -R "realtime|surface_code|pymatching_device"
-    -> surface-code app_examples including surface_code-1-cqr-two-process (full memory experiment decoded by a separate daemon over UDP) and the in-process host_dispatch variants
+    -> surface-code app_examples including surface_code-1-cqr-two-process (full memory experiment decoded by a separate daemon) and the in-process host_dispatch variants
   NOTE: the Python variants (app_examples.py-*) need PYTHONPATH=/usr/local/cudaq:$PWD/python (from the build dir).
-  Transport switchable via QEC_DECODING_SERVER_TRANSPORT=cpu_roce (CUDAQ_CPU_ROCE_TEST_* env vars); default udp loopback runs anywhere.
+  Transport for the two-process tests (DecodingServerTwoProcess and surface_code-1-cqr-two-process) is switchable via QEC_DECODING_SERVER_TRANSPORT=cpu_roce (RDMA topology from the CUDAQ_CPU_ROCE_TEST_* env vars; works over SoftRoCE/rdma_rxe, e.g. a self-loop rxe device on a veth pair); default udp loopback runs anywhere. NOTE: the cpu_roce ring geometry is part of the wire contract -- the caller channels pin --cudaq-device-call-slots=8 / --cudaq-device-call-slot-size=256 to match the daemon's --num-slots/--slot-size defaults.
 
 RUN THE SERVER MANUALLY (surface-code demo, two processes):
   1) generate config: build/libs/qec/unittests/realtime/app_examples/surface_code-1-cqr --distance 5 --num_rounds 5 --num_shots 1000 --save_dem config.yml --decoder_type multi_error_lut
