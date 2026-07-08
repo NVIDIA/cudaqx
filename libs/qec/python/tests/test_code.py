@@ -39,6 +39,28 @@ def test_code_parity_matrices():
     assert parity_z.shape == (3, 7)
 
 
+def test_repetition_empty_x_matrices_preserve_rank():
+    repetition = qec.get_code("repetition", distance=3)
+
+    # Repetition is Z-only; empty X-side results must still be matrices with
+    # one column per data qubit so Python callers can inspect their shape.
+    parity_x = repetition.get_parity_x()
+    assert isinstance(parity_x, np.ndarray)
+    assert parity_x.dtype == np.uint8
+    assert parity_x.shape == (0, 3)
+
+    observables_x = repetition.get_observables_x()
+    assert isinstance(observables_x, np.ndarray)
+    assert observables_x.dtype == np.uint8
+    assert observables_x.shape == (0, 3)
+
+    parity_z = repetition.get_parity_z()
+    assert parity_z.shape == (2, 3)
+
+    observables_z = repetition.get_observables_z()
+    assert observables_z.shape == (1, 3)
+
+
 def test_code_stabilizers():
     steane = qec.get_code("steane")
     stabilizers = steane.get_stabilizers()
