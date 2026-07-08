@@ -118,12 +118,13 @@ inline void CqrTransceiver::inject(const void *rx_slot, void *tx_slot,
     // Fire-and-forget: hand the frame to the server and ACK immediately
     // (status OK = ACCEPTED); the dispatcher thread must not park on
     // decoder execution.
+    const uint64_t ptp = hdr->ptp_timestamp; // save before frame is moved
     {
       std::lock_guard<std::mutex> lk(mtx_);
       inbox_.push_back(std::move(frame));
     }
     cv_.notify_one();
-    write_ack(tx_slot, rid, hdr->ptp_timestamp);
+    write_ack(tx_slot, rid, ptp);
     return;
   }
 
@@ -209,6 +210,8 @@ inline bool CqrTransceiver::build_enqueue_frame(const void *rx_slot,
     return false;
 
   const std::size_t arg_len = cqr_hdr->arg_len;
+  if (arg_len > slot_size - sizeof(cudaq::realtime::RPCHeader))
+    return false;
   const auto *payload = static_cast<const uint8_t *>(rx_slot) +
                         sizeof(cudaq::realtime::RPCHeader);
 
