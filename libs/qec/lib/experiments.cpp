@@ -7,7 +7,7 @@
  ******************************************************************************/
 
 #include "cudaq/qec/experiments.h"
-#include "device/memory_circuit.h"
+#include "cudaq/qec/device/memory_circuit.h"
 #include "cudaq/algorithms/dem.h"
 #include "cudaq/qec/dem_sampling.h"
 #include "cudaq/qec/pcm_utils.h"
@@ -316,14 +316,16 @@ sample_memory_circuit(const code &code, operation statePrep,
   cudaq::M2OSparseMatrix m2o;
   cudaq::dem_from_kernel(memory_circuit, &noise, /*options=*/{}, m2d, m2o,
                          stabRound, prep, numData, numAncx, numAncz, numRounds,
-                         xVec, zVec, obs_flat, num_obs, !is_z_prep);
+                         xVec, zVec, obs_flat, num_obs, !is_z_prep,
+                         /*enqueue_syndromes=*/false, /*decoder_id=*/0);
 
   // Sample the memory circuit and collect all raw measurements.
   cudaq::sample_options opts{
       .shots = numShots, .noise = noise, .explicit_measurements = true};
   auto result = cudaq::sample(opts, memory_circuit, stabRound, prep, numData,
                               numAncx, numAncz, numRounds, xVec, zVec, obs_flat,
-                              num_obs, !is_z_prep);
+                              num_obs, !is_z_prep, /*enqueue_syndromes=*/false,
+                              /*decoder_id=*/0);
 
   // mzTable[shot, meas_idx] = raw 0/1 outcome; shape (numShots,
   // numMeasPerShot). Measurement layout per shot: numRounds*numCols ancilla,
@@ -483,7 +485,8 @@ dem_from_memory_circuit(const code &code, operation statePrep,
   dem_opts.decompose_errors = decompose_errors;
   auto dem_text = cudaq::dem_from_kernel(
       memory_circuit, &noise, dem_opts, stabRound, prep, numData, numAncx,
-      numAncz, numRounds, xVec, zVec, obs_flat, num_obs, !is_z_prep);
+      numAncz, numRounds, xVec, zVec, obs_flat, num_obs, !is_z_prep,
+      /*enqueue_syndromes=*/false, /*decoder_id=*/0);
   auto dem = cudaq::qec::dem_from_stim_text(dem_text, decompose_errors);
 
   const auto numXStabs = code.get_num_x_stabilizers();

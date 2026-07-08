@@ -1,5 +1,5 @@
 /****************************************************************-*- C++ -*-****
- * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
+ * Copyright (c) 2024 - 2026 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -29,6 +29,14 @@ namespace cudaq::qec {
 ///        (num_observables × numData entries, values 0/1).
 /// @param num_observables Number of rows in the observable matrix (k).
 /// @param measure_in_x_basis Performing X- or Z-memory circuit
+/// @param enqueue_syndromes When true, enqueue each round's stabilizer
+///        measurements to the realtime decoder identified by @p decoder_id.
+///        Enqueueing requires the kernel to be compiled with
+///        `-DCUDAQ_QEC_ENABLE_REALTIME_DECODING` and linked against a realtime
+///        decoding shim (see cudaq/qec/realtime/decoding.h); in the default
+///        (offline) build this argument is ignored.
+/// @param decoder_id ID of the realtime decoder to enqueue syndromes to (only
+///        used when @p enqueue_syndromes is true).
 __qpu__ void memory_circuit(const code::stabilizer_round &stabilizer_round,
                             const code::one_qubit_encoding &statePrep,
                             std::size_t numData, std::size_t numAncx,
@@ -36,6 +44,7 @@ __qpu__ void memory_circuit(const code::stabilizer_round &stabilizer_round,
                             const std::vector<std::size_t> &x_stabilizers,
                             const std::vector<std::size_t> &z_stabilizers,
                             const std::vector<std::size_t> &obs_matrix_flat,
-                            std::size_t num_observables,
-                            bool measure_in_x_basis);
+                            std::size_t num_observables, bool measure_in_x_basis,
+                            bool enqueue_syndromes = false,
+                            std::uint64_t decoder_id = 0);
 } // namespace cudaq::qec
