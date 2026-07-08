@@ -50,6 +50,42 @@ populate_device_entry_fn resolve_populate_shim(const char *symbol_name) {
   return reinterpret_cast<populate_device_entry_fn>(sym);
 }
 
+// The device-graph dispatch API (cudaq_create_dispatch_graph_regular /
+// cudaq_launch_dispatch_graph / cudaq_destroy_dispatch_graph) lives in
+// libcudaq-realtime-dispatch.a -- relocatable device code the host executable
+// absorbs and device-links (see qec_realtime_app_link_options()).  It must be
+// resolved from the SAME image as the populate shims above: the dispatch
+// kernel invokes the decoder's __device__ function pointers captured by those
+// shims, and a device function pointer is only valid inside the CUDA module
+// (device-link unit) that produced it.  If this .so carried its own copy of
+// the archive, its dispatch kernel would live in a different CUDA module than
+// the executable's decoder handlers and the DEVICE_CALL would trap with
+// cudaErrorIllegalInstruction.  Resolving via dlsym(RTLD_DEFAULT, ...) binds
+// to the executable's copy (exported via --export-dynamic +
+// CUDAQ_REALTIME_DISPATCH_API default visibility), keeping kernel and handlers
+// in one module -- and keeps this .so free of undefined C-ABI symbols for
+// consumers that never touch the device path.
+using create_dispatch_graph_fn_t = cudaError_t (*)(
+    volatile std::uint64_t *, volatile std::uint64_t *, std::uint8_t *,
+    std::uint8_t *, std::size_t, std::size_t, cudaq_function_entry_t *,
+    std::size_t, void *, volatile int *, std::uint64_t *, std::size_t,
+    std::uint32_t, std::uint32_t, cudaGraphExec_t, cudaStream_t,
+    cudaq_dispatch_graph_context **);
+using launch_dispatch_graph_fn_t =
+    cudaError_t (*)(cudaq_dispatch_graph_context *, cudaStream_t);
+
+template <typename FnT>
+FnT resolve_dispatch_graph_api(const char *symbol_name) {
+  void *sym = ::dlsym(RTLD_DEFAULT, symbol_name);
+  if (!sym)
+    throw std::runtime_error(
+        std::string("qec_realtime_session::initialize: ") + symbol_name +
+        " not found via dlsym(RTLD_DEFAULT, ...).  The host executable must "
+        "absorb libcudaq-realtime-dispatch.a and link with --export-dynamic "
+        "(see qec_realtime_app_link_options()).");
+  return reinterpret_cast<FnT>(sym);
+}
+
 // Pinned mapped flags + pinned mapped data, with the device pointer obtained
 // via UVA so the GPU dispatcher can read the same backing.
 bool allocate_pinned_mapped(std::size_t bytes, void **host_out,
@@ -301,7 +337,33 @@ void qec_realtime_session::initialize() {
 
   classify_mode();
 
+  // Reset the monotonic producer cursor so it starts in lockstep with the
+  // strict-FIFO consumer (both begin at slot 0).
+  producer_cursor_ = 0;
+
   if (device_mode_) {
+    // The device-graph scheduler relies on device-side graph launch, which
+    // requires compute capability 9.0+ (Hopper).  Below sm_90 the dispatch
+    // kernel's TRIGGER_GRAPH interception is compiled out and the enqueue RPC
+    // would surface the raw sentinel (0x12A6E5) as a non-zero status -- fail
+    // fast with an actionable message instead.
+    {
+      int device = 0;
+      cudaDeviceProp prop{};
+      if (cudaGetDevice(&device) != cudaSuccess ||
+          cudaGetDeviceProperties(&prop, device) != cudaSuccess)
+        throw std::runtime_error(
+            "qec_realtime_session::initialize: unable to query the active "
+            "CUDA device for the DEVICE-mode compute-capability check");
+      if (prop.major < 9)
+        throw std::runtime_error(
+            "qec_realtime_session::initialize: DEVICE mode (the device-graph "
+            "scheduler) requires device-side graph launch, i.e. compute "
+            "capability 9.0+ (Hopper); found " +
+            std::to_string(prop.major) + "." + std::to_string(prop.minor) +
+            ".  Use a CPU decoder (HOST mode) or a Hopper+ GPU.");
+    }
+
     // Be tolerant of being called before any CUDA setup.  The pinned
     // allocations below require cudaDeviceMapHost on the active device.
     cudaError_t flags_err = cudaSetDeviceFlags(cudaDeviceMapHost);
@@ -331,8 +393,9 @@ void qec_realtime_session::initialize() {
     allocate_ring_buffer();
     populate_function_table();
     if (device_mode_)
-      start_device_loop();
-    start_host_loop();
+      start_device_loop(); // self-relaunching device-graph scheduler
+    else
+      start_host_loop();
     initialized_ = true;
   } catch (...) {
     CUDA_QEC_WARN("qec_realtime_session::initialize: rolling back partial "
@@ -671,10 +734,17 @@ void qec_realtime_session::populate_function_table() {
     return;
   }
 
-  // DEVICE mode: N GRAPH_LAUNCH entries (one per captured decoder) + 2
-  // DEVICE_CALL entries (get_corrections, reset_decoder).  Pinned-mapped so the
-  // device dispatcher kernel reads the same backing.
-  function_table_count_ = num_decoders_with_graph_ + 2;
+  // DEVICE mode: 3 DEVICE_CALL entries (enqueue_syndromes accumulate,
+  // get_corrections, reset_decoder), all serviced by the self-relaunching
+  // device-graph scheduler.  enqueue_syndromes is an accumulate handler (NOT a
+  // GRAPH_LAUNCH): it appends the round's syndromes into the registered
+  // GpuDecoderState and returns CUDAQ_DISPATCH_STATUS_TRIGGER_GRAPH when a full
+  // window has accumulated, which tells the scheduler to fire the per-decoder
+  // device-launchable decode graph fire-and-forget.  All three handlers live
+  // in the cudevice archive and are resolved by name via dlsym so a .so that
+  // did not link that archive can still load.  Pinned-mapped so the scheduler
+  // kernel reads the same backing.
+  function_table_count_ = 3;
 
   void *h = nullptr;
   void *d = nullptr;
@@ -685,66 +755,44 @@ void qec_realtime_session::populate_function_table() {
   function_table_host_ = static_cast<cudaq_function_entry_t *>(h);
   function_table_dev_ = static_cast<cudaq_function_entry_t *>(d);
 
-  // [0..N-1] GRAPH_LAUNCH per-decoder enqueue.  All share
-  // kEnqueueSyndromesFunctionId; the host monitor disambiguates via
-  // routing_key = source decoder_id (matched against arg0 of the request).
-  std::size_t slot = 0;
-  for (std::size_t i = 0; i < decoders_.size(); ++i) {
-    if (!captured_graphs_[i])
-      continue;
-    auto *gres = static_cast<cudaq::qec::realtime::graph_resources *>(
-        captured_graphs_[i]);
-    auto &entry = function_table_host_[slot++];
-    entry.handler.graph_exec = gres->graph_exec;
-    entry.function_id = rpc::kEnqueueSyndromesFunctionId;
-    entry.dispatch_mode = CUDAQ_DISPATCH_GRAPH_LAUNCH;
-    entry.routing_key = static_cast<std::uint64_t>(i);
-  }
+  // Resolve a DEVICE_CALL populate shim by name, invoke it on the target entry,
+  // stamp the function_id/routing_key, and validate it produced a real
+  // DEVICE_CALL handler.  routing_key is unused by the scheduler (single
+  // decoder) but kept 0 for forward compatibility with per-decoder routing.
+  auto populate_device_call = [&](std::size_t slot, const char *symbol,
+                                  std::uint32_t function_id) {
+    auto shim = resolve_populate_shim(symbol);
+    if (!shim)
+      throw std::runtime_error(
+          std::string("qec_realtime_session::initialize: ") + symbol +
+          " not found via dlsym(RTLD_DEFAULT, ...).  The final binary must "
+          "link libcudaq-qec-realtime-cudevice.a (or the static parts of "
+          "decoder_rpc_dispatch.cu via qec_realtime_app_link_options()).");
+    shim(&function_table_host_[slot]);
+    function_table_host_[slot].function_id = function_id;
+    function_table_host_[slot].routing_key = 0;
+    if (function_table_host_[slot].dispatch_mode !=
+            CUDAQ_DISPATCH_DEVICE_CALL ||
+        !function_table_host_[slot].handler.device_fn_ptr)
+      throw std::runtime_error(
+          std::string("qec_realtime_session::initialize: ") + symbol +
+          " did not produce a valid DEVICE_CALL entry (plugin bug)");
+  };
 
-  // [N] DEVICE_CALL get_corrections.  Resolved by name from the cudevice
-  // archive so consumers that did not link it can still load this .so.
+  // [0] enqueue_syndromes accumulate.
+  populate_device_call(
+      0, "cudaqx_qec_realtime_dispatch_populate_enqueue_syndromes_device_entry",
+      rpc::kEnqueueSyndromesFunctionId);
+  // [1] get_corrections.
   get_corrections_fn_id_ = rpc::kGetCorrectionsFunctionId;
-  auto populate_get_corrections = resolve_populate_shim(
-      "cudaqx_qec_realtime_dispatch_populate_get_corrections_device_entry");
-  if (!populate_get_corrections)
-    throw std::runtime_error(
-        "qec_realtime_session::initialize: "
-        "cudaqx_qec_realtime_dispatch_populate_get_corrections_device_entry "
-        "not found via dlsym(RTLD_DEFAULT, ...).  The final binary must link "
-        "libcudaq-qec-realtime-cudevice.a (or the static parts of "
-        "decoder_rpc_dispatch.cu via qec_realtime_app_link_options()).");
-  populate_get_corrections(&function_table_host_[slot]);
-  function_table_host_[slot].function_id = get_corrections_fn_id_;
-  function_table_host_[slot].routing_key = 0;
-  if (function_table_host_[slot].dispatch_mode != CUDAQ_DISPATCH_DEVICE_CALL ||
-      !function_table_host_[slot].handler.device_fn_ptr)
-    throw std::runtime_error(
-        "qec_realtime_session::initialize: "
-        "populate_get_corrections_device_entry did not produce a valid "
-        "DEVICE_CALL entry (plugin bug)");
-  ++slot;
-
-  // [N+1] DEVICE_CALL reset_decoder.  Same dlsym contract as above.
+  populate_device_call(
+      1, "cudaqx_qec_realtime_dispatch_populate_get_corrections_device_entry",
+      get_corrections_fn_id_);
+  // [2] reset_decoder.
   reset_decoder_fn_id_ = rpc::kResetDecoderFunctionId;
-  auto populate_reset_decoder = resolve_populate_shim(
-      "cudaqx_qec_realtime_dispatch_populate_reset_decoder_device_entry");
-  if (!populate_reset_decoder)
-    throw std::runtime_error(
-        "qec_realtime_session::initialize: "
-        "cudaqx_qec_realtime_dispatch_populate_reset_decoder_device_entry "
-        "not found via dlsym(RTLD_DEFAULT, ...).  The final binary must link "
-        "libcudaq-qec-realtime-cudevice.a (or the static parts of "
-        "decoder_rpc_dispatch.cu via qec_realtime_app_link_options()).");
-  populate_reset_decoder(&function_table_host_[slot]);
-  function_table_host_[slot].function_id = reset_decoder_fn_id_;
-  function_table_host_[slot].routing_key = 0;
-  if (function_table_host_[slot].dispatch_mode != CUDAQ_DISPATCH_DEVICE_CALL ||
-      !function_table_host_[slot].handler.device_fn_ptr)
-    throw std::runtime_error(
-        "qec_realtime_session::initialize: "
-        "populate_reset_decoder_device_entry did not produce a valid "
-        "DEVICE_CALL entry (plugin bug)");
-  ++slot;
+  populate_device_call(
+      2, "cudaqx_qec_realtime_dispatch_populate_reset_decoder_device_entry",
+      reset_decoder_fn_id_);
 }
 
 //==============================================================================
@@ -752,204 +800,107 @@ void qec_realtime_session::populate_function_table() {
 //==============================================================================
 
 void qec_realtime_session::start_device_loop() {
-  if (cudaq_dispatch_manager_create(&device_manager_) != CUDAQ_OK)
+  // The scheduler fires a single per-decoder decode graph fire-and-forget when
+  // the enqueue accumulate handler signals a full window.  The public host
+  // dispatcher exposes one triggered graph per scheduler, so DEVICE mode is
+  // scoped to a single graph-dispatch decoder (matching the prior single-
+  // mailbox-bank limitation).  A multi-decoder scheduler would need a
+  // function-id/routing-key -> triggered-graph map inside the dispatch kernel.
+  if (num_decoders_with_graph_ != 1)
     throw std::runtime_error(
-        "qec_realtime_session::initialize: cudaq_dispatch_manager_create "
-        "failed");
+        "qec_realtime_session::initialize: the device-graph scheduler supports "
+        "exactly one graph-dispatch decoder per session (got " +
+        std::to_string(num_decoders_with_graph_) + ").");
 
-  cudaq_dispatcher_config_t dev_config{};
-  dev_config.device_id = 0;
-  dev_config.num_blocks = 1;
-  dev_config.threads_per_block = 64;
-  dev_config.num_slots = static_cast<std::uint32_t>(num_slots_);
-  dev_config.slot_size = static_cast<std::uint32_t>(slot_size_);
-  dev_config.vp_id = 0;
-  dev_config.kernel_type = CUDAQ_KERNEL_REGULAR;
-  dev_config.dispatch_mode = CUDAQ_DISPATCH_DEVICE_CALL;
-  dev_config.dispatch_path = CUDAQ_DISPATCH_PATH_DEVICE;
-  dev_config.shared_ring_mode = 1;
-  dev_config.skip_tx_markers = 1;
-
-  if (cudaq_dispatcher_create(device_manager_, &dev_config,
-                              &device_dispatcher_) != CUDAQ_OK)
+  // The lone captured decoder's device-launchable decode graph.
+  cudaGraphExec_t decode_graph_exec = nullptr;
+  for (std::size_t i = 0; i < captured_graphs_.size(); ++i) {
+    if (!captured_graphs_[i])
+      continue;
+    auto *gres = static_cast<cudaq::qec::realtime::graph_resources *>(
+        captured_graphs_[i]);
+    decode_graph_exec = gres->graph_exec;
+    break;
+  }
+  if (!decode_graph_exec)
     throw std::runtime_error(
-        "qec_realtime_session::initialize: cudaq_dispatcher_create (DEVICE) "
-        "failed");
-
-  if (cudaq_dispatcher_set_ringbuffer(device_dispatcher_, &ringbuffer_) !=
-      CUDAQ_OK)
-    throw std::runtime_error(
-        "qec_realtime_session::initialize: cudaq_dispatcher_set_ringbuffer "
-        "(DEVICE) failed");
-
-  cudaq_function_table_t shared_table{};
-  shared_table.entries = function_table_dev_;
-  shared_table.count = static_cast<std::uint32_t>(function_table_count_);
-  if (cudaq_dispatcher_set_function_table(device_dispatcher_, &shared_table) !=
-      CUDAQ_OK)
-    throw std::runtime_error(
-        "qec_realtime_session::initialize: "
-        "cudaq_dispatcher_set_function_table (DEVICE) failed");
+        "qec_realtime_session::initialize: no captured decode graph for the "
+        "scheduler to trigger");
 
   if (cudaMalloc(&device_stats_dev_, sizeof(std::uint64_t)) != cudaSuccess ||
       cudaMemset(device_stats_dev_, 0, sizeof(std::uint64_t)) != cudaSuccess)
     throw std::runtime_error(
         "qec_realtime_session::initialize: device_stats_dev allocation failed");
 
-  if (cudaq_dispatcher_set_control(device_dispatcher_, shutdown_flag_dev_,
-                                   device_stats_dev_) != CUDAQ_OK)
+  if (cudaStreamCreate(&scheduler_stream_) != cudaSuccess)
     throw std::runtime_error(
-        "qec_realtime_session::initialize: cudaq_dispatcher_set_control "
-        "failed");
+        "qec_realtime_session::initialize: cudaStreamCreate for the scheduler "
+        "stream failed");
 
-  if (cudaq_dispatcher_set_launch_fn(device_dispatcher_, device_launch_fn_) !=
-      CUDAQ_OK)
-    throw std::runtime_error(
-        "qec_realtime_session::initialize: cudaq_dispatcher_set_launch_fn "
-        "failed");
+  // Bind the graph dispatch API from the host executable's device-link unit
+  // (NOT from any copy this .so might carry) so the dispatch kernel and the
+  // decoder's DEVICE_CALL handlers share one CUDA module -- see
+  // resolve_dispatch_graph_api().  The destroy fn is stashed for stop_loops().
+  auto create_fn = resolve_dispatch_graph_api<create_dispatch_graph_fn_t>(
+      "cudaq_create_dispatch_graph_regular");
+  auto launch_fn = resolve_dispatch_graph_api<launch_dispatch_graph_fn_t>(
+      "cudaq_launch_dispatch_graph");
+  destroy_dispatch_graph_fn_ =
+      resolve_dispatch_graph_api<destroy_dispatch_graph_fn_t>(
+          "cudaq_destroy_dispatch_graph");
 
-  if (cudaq_dispatcher_start(device_dispatcher_) != CUDAQ_OK)
+  // The scheduler kernel itself is lightweight (poll + parse + DEVICE_CALL +
+  // fire-and-forget); the heavy cooperative decode lives in the triggered
+  // graph, so a single-block scheduler is sufficient.
+  cudaError_t err =
+      create_fn(rx_flags_dev_, tx_flags_dev_, rx_data_dev_, tx_data_dev_,
+                slot_size_, slot_size_, function_table_dev_,
+                static_cast<std::size_t>(function_table_count_),
+                /*graph_io_ctx=*/nullptr, shutdown_flag_dev_, device_stats_dev_,
+                num_slots_, /*num_blocks=*/1, /*threads_per_block=*/64,
+                decode_graph_exec, scheduler_stream_, &scheduler_ctx_);
+  if (err != cudaSuccess)
     throw std::runtime_error(
-        "qec_realtime_session::initialize: cudaq_dispatcher_start (DEVICE) "
-        "failed");
+        std::string("qec_realtime_session::initialize: "
+                    "cudaq_create_dispatch_graph_regular failed: ") +
+        cudaGetErrorString(err));
+
+  err = launch_fn(scheduler_ctx_, scheduler_stream_);
+  if (err != cudaSuccess)
+    throw std::runtime_error(
+        std::string("qec_realtime_session::initialize: "
+                    "cudaq_launch_dispatch_graph failed: ") +
+        cudaGetErrorString(err));
 }
 
 //==============================================================================
-// start_host_loop()  [branches on device_mode_]
+// start_host_loop()  [HOST mode only]
 //==============================================================================
 
 void qec_realtime_session::start_host_loop() {
-  if (!device_mode_) {
-    // HOST mode: inline HOST_CALL handlers, no graph worker pool.
-    std::memset(&host_ctx_, 0, sizeof(host_ctx_));
-    host_ctx_.ringbuffer = ringbuffer_;
-    host_ctx_.config.num_slots = static_cast<std::uint32_t>(num_slots_);
-    host_ctx_.config.slot_size = static_cast<std::uint32_t>(slot_size_);
-    host_ctx_.config.dispatch_path = CUDAQ_DISPATCH_PATH_HOST;
-    host_ctx_.config.dispatch_mode = CUDAQ_DISPATCH_HOST_CALL;
-    host_ctx_.config.skip_tx_markers = 1;
-    // shared_ring_mode lets the loop scan the whole ring for a non-zero
-    // rx_flag instead of sitting on a single advancing cursor.  The producer's
-    // acquire_slot() reuses the first free slot (slot 0 for serialized
-    // round-trips), so without ring-scanning the loop's cursor would advance
-    // past the reused slot and deadlock.  There is no second dispatcher here;
-    // we only want the scan behavior.
-    host_ctx_.config.shared_ring_mode = 1;
-    host_ctx_.function_table.entries = function_table_host_;
-    host_ctx_.function_table.count =
-        static_cast<std::uint32_t>(function_table_count_);
-    host_ctx_.shutdown_flag = &shutdown_flag_;
-    host_ctx_.stats_counter = &host_stats_counter_;
-    host_ctx_.skip_stream_sweep = true;
-    shutdown_flag_ = 0;
-
-    host_loop_thread_ =
-        std::thread([this]() { cudaq_host_dispatcher_loop(&host_ctx_); });
-    return;
-  }
-
-  // DEVICE mode: one graph worker per captured decoder.
-  host_workers_.assign(num_decoders_with_graph_,
-                       cudaq_host_dispatch_worker_t{});
-  // host_worker_streams_ is indexed by *source* decoder_id (sparse), not packed
-  // worker slot, because callers pass decoder_id.
-  host_worker_streams_.assign(decoders_.size(),
-                              static_cast<cudaStream_t>(nullptr));
-
-  // The host_dispatcher.h public ctx exposes a SINGLE mailbox bank per ctx.
-  // Demo 1's scope is one decoder per session, so the single-bank limitation
-  // is fine -- the lone worker dispatches every enqueue RPC.
-  if (num_decoders_with_graph_ > 1)
-    throw std::runtime_error(
-        "qec_realtime_session::initialize: multi-decoder host dispatch is not "
-        "yet supported (num_decoders_with_graph=" +
-        std::to_string(num_decoders_with_graph_) +
-        ").  libcudaq-realtime's host dispatcher exposes a single h_mailbox_"
-        "bank per loop ctx; Demo 1 is scoped to one decoder.");
-
-  void **mailbox_bank = nullptr;
-
-  std::size_t slot = 0;
-  for (std::size_t i = 0; i < decoders_.size(); ++i) {
-    if (!captured_graphs_[i])
-      continue;
-    auto *gres = static_cast<cudaq::qec::realtime::graph_resources *>(
-        captured_graphs_[i]);
-
-    cudaStream_t stream = nullptr;
-    if (cudaStreamCreate(&stream) != cudaSuccess)
-      throw std::runtime_error(
-          "qec_realtime_session::initialize: cudaStreamCreate for HOST_LOOP "
-          "worker " +
-          std::to_string(slot) + " (decoder_id=" + std::to_string(i) +
-          ") failed");
-    host_worker_streams_[i] = stream;
-
-    auto &w = host_workers_[slot];
-    w.graph_exec = gres->graph_exec;
-    w.stream = stream;
-    w.function_id = cudaq::qec::decoding::rpc::kEnqueueSyndromesFunctionId;
-    w.routing_key = static_cast<std::uint64_t>(i);
-    w.pre_launch_fn = nullptr;
-    w.pre_launch_data = nullptr;
-    w.post_launch_fn = nullptr;
-    w.post_launch_data = nullptr;
-
-    if (slot == 0)
-      mailbox_bank = gres->h_mailbox;
-    ++slot;
-  }
-
-  host_idle_mask_storage_ = new std::uint64_t(
-      num_decoders_with_graph_ < 64
-          ? ((std::uint64_t{1} << num_decoders_with_graph_) - 1)
-          : ~std::uint64_t{0});
-  host_live_dispatched_storage_ = new std::uint64_t(0);
-  host_inflight_slot_tags_ = new int[num_decoders_with_graph_];
-  for (std::size_t i = 0; i < num_decoders_with_graph_; ++i)
-    host_inflight_slot_tags_[i] = -1;
-
-  // Per-worker GraphIOContext array (pinned-mapped so both CPU monitor and GPU
-  // graph see the same backing).
-  {
-    void *h = nullptr;
-    void *d = nullptr;
-    const std::size_t bytes =
-        num_decoders_with_graph_ * sizeof(cudaq::realtime::GraphIOContext);
-    if (!allocate_pinned_mapped(bytes, &h, &d))
-      throw std::runtime_error("qec_realtime_session::start_host_loop: failed "
-                               "to allocate per-worker "
-                               "GraphIOContext array");
-    std::memset(h, 0, bytes);
-    io_ctxs_host_ = static_cast<cudaq::realtime::GraphIOContext *>(h);
-    io_ctxs_dev_ = static_cast<cudaq::realtime::GraphIOContext *>(d);
-  }
-
+  // HOST mode only: inline HOST_CALL handlers, no graph worker pool.  DEVICE
+  // mode uses the self-relaunching device-graph scheduler launched in
+  // start_device_loop(), so this is reached only when device_mode_ is false.
   std::memset(&host_ctx_, 0, sizeof(host_ctx_));
   host_ctx_.ringbuffer = ringbuffer_;
   host_ctx_.config.num_slots = static_cast<std::uint32_t>(num_slots_);
   host_ctx_.config.slot_size = static_cast<std::uint32_t>(slot_size_);
-  host_ctx_.config.shared_ring_mode = 1;
+  host_ctx_.config.dispatch_path = CUDAQ_DISPATCH_PATH_HOST;
+  host_ctx_.config.dispatch_mode = CUDAQ_DISPATCH_HOST_CALL;
   host_ctx_.config.skip_tx_markers = 1;
-  // The host loop dereferences these entries on the CPU, so it must use the
-  // host view of the (pinned-mapped) table.  Under UVA the host and device
-  // addresses are equal, but the host pointer is the correct/portable choice;
-  // the device dispatcher separately receives function_table_dev_ via
-  // cudaq_dispatcher_set_function_table().
+  // Strict-FIFO: the host loop is the sole consumer and its current_slot
+  // already advances monotonically; with shared-ring scanning OFF it simply
+  // waits at current_slot for the next frame.  The rpc_producer now advances
+  // its slot monotonically too (see producer_cursor()), so producer and
+  // consumer walk the ring in lockstep -- no scan needed.
+  host_ctx_.config.shared_ring_mode = 0;
   host_ctx_.function_table.entries = function_table_host_;
   host_ctx_.function_table.count =
       static_cast<std::uint32_t>(function_table_count_);
-  host_ctx_.workers = host_workers_.data();
-  host_ctx_.num_workers = host_workers_.size();
-  host_ctx_.h_mailbox_bank = mailbox_bank;
-  host_ctx_.shutdown_flag = shutdown_flag_host_;
+  host_ctx_.shutdown_flag = &shutdown_flag_;
   host_ctx_.stats_counter = &host_stats_counter_;
-  host_ctx_.live_dispatched = host_live_dispatched_storage_;
-  host_ctx_.idle_mask = host_idle_mask_storage_;
-  host_ctx_.inflight_slot_tags = host_inflight_slot_tags_;
-  host_ctx_.io_ctxs_host = io_ctxs_host_;
-  host_ctx_.io_ctxs_dev = io_ctxs_dev_;
-  host_ctx_.skip_stream_sweep = false;
+  host_ctx_.skip_stream_sweep = true;
+  shutdown_flag_ = 0;
 
   host_loop_thread_ =
       std::thread([this]() { cudaq_host_dispatcher_loop(&host_ctx_); });
@@ -975,6 +926,24 @@ void qec_realtime_session::stop_loops() {
   if (host_loop_thread_.joinable())
     host_loop_thread_.join();
 
+  // Drain and destroy the device-graph scheduler (DEVICE mode).  The shutdown
+  // flag was set above; the scheduler observes it, stops tail-self-relaunching,
+  // and the in-flight self-relaunch chain drains.  cudaStreamSynchronize waits
+  // for that to finish before we destroy the graph context.
+  if (scheduler_ctx_) {
+    if (scheduler_stream_)
+      cudaStreamSynchronize(scheduler_stream_);
+    if (destroy_dispatch_graph_fn_)
+      destroy_dispatch_graph_fn_(scheduler_ctx_);
+    scheduler_ctx_ = nullptr;
+  }
+  if (scheduler_stream_) {
+    cudaStreamDestroy(scheduler_stream_);
+    scheduler_stream_ = nullptr;
+  }
+
+  // Legacy DEVICE_LOOP teardown (unused by the scheduler; both are null in
+  // scheduler mode, so these are harmless no-ops).
   if (device_dispatcher_) {
     cudaq_dispatcher_stop(device_dispatcher_);
     cudaq_dispatcher_destroy(device_dispatcher_);

@@ -94,6 +94,25 @@ if(CMAKE_CUDA_COMPILER)
       message(STATUS "Found cuda-quantum realtime host dispatch library at ${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}")
     endif()
 
+    # The device-graph dispatch API (cudaq_create_dispatch_graph_regular,
+    # cudaq_launch_dispatch_graph, cudaq_destroy_dispatch_graph) lives in
+    # libcudaq-realtime-dispatch, separate from libcudaq-realtime.  It is
+    # relocatable device code, and qec_realtime_session resolves it at runtime
+    # via dlsym(RTLD_DEFAULT, ...) from the host executable's absorbed copy --
+    # it must NOT be linked into cudaq-qec-realtime-decoding.so: a second
+    # device-linked copy of the dispatch kernel would live in a different CUDA
+    # module than the decoder's DEVICE_CALL handlers (captured from the
+    # executable's module), and cross-module device function pointer calls trap
+    # with cudaErrorIllegalInstruction.  The find result is used by device-mode
+    # test executables, which absorb the archive themselves.
+    cudaq_qec_find_realtime_library(CUDAQ_REALTIME_DISPATCH_LIBRARY
+      NAMES cudaq-realtime-dispatch
+      PATH_SUFFIXES lib
+    )
+    if(CUDAQ_REALTIME_DISPATCH_LIBRARY)
+      message(STATUS "Found cuda-quantum realtime dispatch library at ${CUDAQ_REALTIME_DISPATCH_LIBRARY}")
+    endif()
+
     # CUDA-Q lowered `cudaq::device_call` host-dispatch integration needs the
     # DeviceCallService provider API from a realtime/device-call-enabled CUDA-Q
     # build.
@@ -125,7 +144,6 @@ if(CMAKE_CUDA_COMPILER)
     if(CUDAQ_DEVICE_CALL_INCLUDE_DIR AND CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY)
       set(CUDAQ_QEC_DEVICE_CALL_SERVICE_AVAILABLE TRUE)
     endif()
-
     
     # Create static device library for device code
     add_library(cudaq-qec-realtime-cudevice STATIC
