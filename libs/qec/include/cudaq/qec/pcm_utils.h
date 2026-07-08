@@ -140,6 +140,18 @@ bool pcm_is_sorted(const cudaqx::tensor<uint8_t> &pcm,
 bool pcm_is_sorted(const std::vector<std::vector<std::uint32_t>> &sparse_pcm,
                    std::uint32_t num_syndromes_per_round = 0);
 
+/// @brief Boundary-aware overload of pcm_is_sorted: the first and last
+/// @p num_boundary_syndromes rows form the boundary rounds and each interior
+/// round spans @p num_syndromes_per_round rows (a [B | K*S | B] layout).
+/// @param sparse_pcm The sparse PCM to check (in the same format as
+/// dense_to_sparse())
+/// @param num_syndromes_per_round The interior-round width.
+/// @param num_boundary_syndromes The width of the first/last boundary rounds.
+/// @return True if the PCM is sorted for this boundary layout, false otherwise.
+bool pcm_is_sorted(const std::vector<std::vector<std::uint32_t>> &sparse_pcm,
+                   std::uint32_t num_syndromes_per_round,
+                   std::uint32_t num_boundary_syndromes);
+
 /// @brief Reorder the columns of a PCM according to the given column order.
 /// Note: this may return a subset of the columns in the original PCM if the
 /// \p column_order does not contain all of the columns in the original PCM.
@@ -182,6 +194,62 @@ simplify_pcm(const cudaqx::tensor<uint8_t> &pcm,
              const std::vector<double> &weights,
              std::uint32_t num_syndromes_per_round = 0);
 
+namespace details {
+
+/// @brief Internal helper (not part of the public API). Maps between detector
+/// rounds and detector rows for a (possibly non-uniform) round layout. The rows
+/// are laid out as [B | S | ... | S | B], where B == num_boundary_syndromes is
+/// the width of the first/last boundary rounds and S == num_syndromes_per_round
+/// is the interior width. B == 0 or B == S is the uniform layout (every round
+/// has width S).
+struct round_layout {
+  std::size_t S = 0;          ///< interior round width
+  std::size_t B = 0;          ///< boundary round width
+  std::size_t num_rows = 0;   ///< total number of detector rows
+  std::size_t num_rounds = 0; ///< number of rounds (detector layers)
+  bool boundary = false;      ///< true iff B is a distinct boundary width
+
+  round_layout() = default;
+  round_layout(std::size_t num_syndromes_per_round,
+               std::size_t num_boundary_syndromes, std::size_t total_rows)
+      : S(num_syndromes_per_round), B(num_boundary_syndromes),
+        num_rows(total_rows) {
+    boundary = (B != 0 && B != S);
+    num_rounds = boundary ? (num_rows - 2 * B) / S + 2 : num_rows / S;
+  }
+
+  /// Global row index at which round @p r begins; round_start(num_rounds) is
+  /// the trailing sentinel (== num_rows).
+  std::size_t round_start(std::size_t r) const {
+    if (!boundary)
+      return r * S;
+    if (r == 0)
+      return 0;
+    if (r >= num_rounds)
+      return num_rows;
+    return B + (r - 1) * S;
+  }
+
+  /// Number of detector rows in round @p r (B for the first/last round, else
+  /// S).
+  std::size_t round_width(std::size_t r) const {
+    return round_start(r + 1) - round_start(r);
+  }
+
+  /// The round that global detector row @p row belongs to.
+  std::size_t row_to_round(std::size_t row) const {
+    if (!boundary)
+      return row / S;
+    if (row < B)
+      return 0;
+    if (row >= num_rows - B)
+      return num_rounds - 1;
+    return 1 + (row - B) / S;
+  }
+};
+
+} // namespace details
+
 /// @brief Get a sub-PCM for a range of rounds. It is recommended (but not
 /// required) that you call sort_pcm_columns() before calling this function.
 /// @param pcm The PCM to get a sub-PCM for.
@@ -192,6 +260,8 @@ simplify_pcm(const cudaqx::tensor<uint8_t> &pcm,
 /// start_round (defaults to false)
 /// @param straddle_end_round Whether to include columns that straddle the
 /// end_round (defaults to false)
+/// @param num_boundary_syndromes Width of the narrower first/last boundary
+/// rounds for a non-uniform [B | K*S | B] detector layout (0 == uniform).
 /// @return A tuple with the new PCM with the columns in the range [start_round,
 /// end_round], the first column included, and the last column included.
 std::tuple<cudaqx::tensor<uint8_t>, std::uint32_t, std::uint32_t>
@@ -199,13 +269,22 @@ get_pcm_for_rounds(const cudaqx::tensor<uint8_t> &pcm,
                    std::uint32_t num_syndromes_per_round,
                    std::uint32_t start_round, std::uint32_t end_round,
                    bool straddle_start_round = false,
-                   bool straddle_end_round = false);
+                   bool straddle_end_round = false,
+                   std::uint32_t num_boundary_syndromes = 0);
 
 /// @brief Same semantics as the overload taking a dense tensor \p pcm, but
 /// reads from \p pcm as ``sparse_binary_matrix`` so the full dense PCM is not
 /// required (only the returned sub-matrix is dense). Parameter meanings match
 /// the dense overload.
 ///
+/// @param pcm The PCM to get a sub-PCM for.
+/// @param num_syndromes_per_round The number of syndromes per round.
+/// @param start_round The start round (0-based).
+/// @param end_round The end round (0-based).
+/// @param straddle_start_round Whether to include columns that straddle the
+/// start_round (defaults to false)
+/// @param straddle_end_round Whether to include columns that straddle the
+/// end_round (defaults to false)
 /// @param pcm_is_canonical If true, the caller asserts \p pcm has
 /// sorted-unique per-group indices (i.e. is the output of
 /// `sparse_binary_matrix::canonicalize`
@@ -225,13 +304,16 @@ get_pcm_for_rounds(const cudaqx::tensor<uint8_t> &pcm,
 /// wrong round assignments. If unsure, leave the flag `false`.
 /// @return A tuple with the new PCM with the columns in the range [start_round,
 /// end_round], the first column included, and the last column included.
+/// @param num_boundary_syndromes Width of the narrower first/last boundary
+/// rounds for a non-uniform [B | K*S | B] detector layout (0 == uniform).
 std::tuple<cudaqx::tensor<uint8_t>, std::uint32_t, std::uint32_t>
 get_pcm_for_rounds(const sparse_binary_matrix &pcm,
                    std::uint32_t num_syndromes_per_round,
                    std::uint32_t start_round, std::uint32_t end_round,
                    bool straddle_start_round = false,
                    bool straddle_end_round = false,
-                   bool pcm_is_canonical = false);
+                   bool pcm_is_canonical = false,
+                   std::uint32_t num_boundary_syndromes = 0);
 
 /// @brief Generate a random PCM with the given parameters.
 ///

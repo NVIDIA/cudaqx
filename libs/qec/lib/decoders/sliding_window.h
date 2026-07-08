@@ -9,6 +9,7 @@
 #pragma once
 
 #include "cudaq/qec/decoder.h"
+#include "cudaq/qec/pcm_utils.h"
 #include <vector>
 
 namespace cudaq::qec {
@@ -29,7 +30,9 @@ private:
   std::size_t step_size = 1;
   /// The number of syndromes per round (the interior-layer width).
   std::size_t num_syndromes_per_round = 0;
-  /// The number of boundary measurements.
+  /// The width of the first/last (boundary) rounds. A caller-supplied 0 means
+  /// "uniform layout"; the constructor normalizes it to num_syndromes_per_round
+  /// so the rest of the class always sees a concrete boundary width.
   std::size_t num_boundary_syndromes = 0;
   /// When forming a window, should error mechanisms that span the start round
   /// and any preceding rounds be included?
@@ -46,14 +49,15 @@ private:
 
   // Derived parameters.
   std::size_t num_windows = 0;
-  std::size_t num_rounds = 0;
-  std::size_t num_syndromes_per_window = 0;
-  /// Number of detector rows in an unpadded (boundary-layout) syndrome.
-  std::size_t unpadded_syndrome_size = 0;
-  std::size_t num_rounds_since_last_decode = 0;
+  /// Detector-row layers in the [B | S...S | B] layout (minimum 2 for a memory
+  /// circuit with no interior rounds)
+  std::size_t num_detector_layers = 0;
   std::vector<std::unique_ptr<decoder>> inner_decoders;
   std::vector<std::size_t> first_columns;
 
+  // Boundary-aware detector-layer layout ([B | S...S | B]); maps between layers
+  // and detector rows. Shared with the get_pcm_for_rounds machinery.
+  details::round_layout layout;
   // Enum type for timing data.
   enum WindowProcTimes {
     INITIALIZE_WINDOW,     // 0
@@ -68,12 +72,10 @@ private:
   };
 
   // State data
-  std::vector<std::vector<cudaq::qec::float_t>>
-      rolling_window; // [batch_size, num_syndromes_per_window]
-  // rolling window read and write indices (circular buffer)
-  std::size_t rw_next_write_index = 0; // [0, num_syndromes_per_window)
-  std::size_t rw_next_read_index = 0;  // [0, num_syndromes_per_window)
-  std::size_t rw_filled = 0;
+  std::vector<std::vector<std::vector<cudaq::qec::float_t>>> window_rounds;
+  std::size_t window_start_round = 0;
+  std::size_t rounds_since_last_reset = 0;
+  std::size_t batch_size = 1;
   std::size_t num_windows_decoded = 0;
   std::vector<std::vector<bool>> syndrome_mods; // [batch_size, syndrome_size]
   std::vector<decoder_result> rw_results;       // [batch_size]
@@ -84,61 +86,14 @@ private:
   /// @brief Validate constructor inputs
   void validate_inputs();
 
-  /// @brief Initialize the window
-  /// @param num_syndromes The number of syndromes to initialize the window for
-  void initialize_window(std::size_t num_syndromes);
+  /// @brief Reset per-syndrome streaming state and size the result/mod buffers.
+  /// @param batch_size The number of independent syndromes to decode together
+  /// (1 for non-batched mode).
+  void initialize_window(std::size_t batch_size);
 
-  /// @brief Add a single syndrome to the rolling window (circular buffer)
-  void add_syndrome_to_rolling_window(const std::vector<float_t> &syndrome,
-                                      std::size_t syndrome_index,
-                                      bool update_next_write_index = true);
-
-  /// @brief Add a batch of syndromes to the rolling window (circular buffer)
-  void add_syndromes_to_rolling_window(
-      const std::vector<std::vector<float_t>> &syndromes);
-
-  /// @brief Get a single syndrome from the rolling window (unwrapping circular
-  /// buffer)
-  std::vector<float_t>
-  get_syndrome_from_rolling_window(std::size_t syndrome_index);
-
-  /// @brief Get a batch of syndromes from the rolling window (unwrapping
-  /// circular buffer)
-  std::vector<std::vector<float_t>> get_syndromes_from_rolling_window();
-
-  /// @brief Update the read index for the rolling window
-  void update_rw_next_read_index();
-
-  /// @brief Decode a single window (internal helper)
+  /// @brief Decode the active window from the rolling buffer, commit, and back
+  /// out committed errors into the next window's syndrome mods.
   void decode_window();
-
-  /// @brief Whether the decoder is zero-padding narrower boundary layers up to
-  /// the interior width (i.e. a boundary-layout was supplied).
-  bool boundary_padding_active() const {
-    return num_boundary_syndromes != 0 &&
-           num_boundary_syndromes != num_syndromes_per_round;
-  }
-
-  /// @brief Pad an all-rounds syndrome from the unpadded boundary
-  /// layout up to the uniform padded layout by inserting zeros for the
-  /// boundary-layer padding rows.
-  std::vector<float_t> pad_syndrome(const std::vector<float_t> &syndrome) const;
-
-  /// @brief Pad a single boundary detector layer up to the interior width by
-  /// appending zeros.
-  std::vector<float_t> pad_round(const std::vector<float_t> &round) const;
-
-  /// @brief Zero-pad the two boundary layers of @p H up to the interior width
-  /// so all rounds are uniform. The first/last @p num_boundary_syndromes
-  /// rows are the narrower boundary layers and interior layers have
-  /// @p num_syndromes_per_round rows. Returns the canonical CSC form expected
-  /// by the base decoder. If no boundary padding is needed (@p
-  /// num_boundary_syndromes is 0 or equals @p num_syndromes_per_round), this
-  /// is just H.canonicalize().to_csc().
-  static sparse_binary_matrix
-  prepare_pcm(const cudaq::qec::sparse_binary_matrix &H,
-              std::size_t num_syndromes_per_round,
-              std::size_t num_boundary_syndromes);
 
 public:
   /// @brief Constructor

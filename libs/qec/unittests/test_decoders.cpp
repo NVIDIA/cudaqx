@@ -1192,8 +1192,8 @@ TEST(SlidingWindowDecoder, BaseStreamingCopiesFirstRoundDetectors) {
 }
 
 TEST(SlidingWindowDecoder, PreparePcmRejectsBadBoundaryLayout) {
-  // prepare_pcm runs in the constructor's member initializer list, so an
-  // inconsistent boundary layout must throw during construction.
+  // The boundary layout is validated during construction, so an inconsistent
+  // boundary layout must throw.
   auto params = [](std::size_t S, std::size_t B) {
     cudaqx::heterogeneous_map p;
     p.insert("window_size", std::size_t{1});
