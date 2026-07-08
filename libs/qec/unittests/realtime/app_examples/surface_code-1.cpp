@@ -31,7 +31,11 @@
 // of resolving to the in-process trampolines. The decoding is served either by
 // the in-process decoding-server-cqr service
 // (CUDAQ_DEVICE_CALL_CHANNEL=host_dispatch) or by a standalone
-// qec_decoding_daemon over UDP loopback (QEC_DECODING_SERVER_PORT=<port>).
+// qec_decoding_daemon (QEC_DECODING_SERVER_PORT=<port>). The wire to the
+// daemon defaults to udp loopback; set QEC_DECODING_SERVER_TRANSPORT=cpu_roce
+// to use the CPU RoCE RDMA channel instead (works over SoftRoCE/rdma_rxe; the
+// RDMA topology comes from the same CUDAQ_CPU_ROCE_TEST_* env vars as CUDA-Q's
+// CpuRoceChannelTester).
 #include "cudaq/realtime.h"
 
 // In-process service self-check hook (defined in decoding-server-cqr):
@@ -39,13 +43,37 @@
 extern "C" std::uint64_t cudaqx_qec_device_call_dispatch_count();
 
 namespace {
+std::string env_or(const char *name, const std::string &fallback) {
+  const char *value = std::getenv(name);
+  return (value && *value) ? std::string(value) : fallback;
+}
+
 void initialize_realtime_channel(const char *prog) {
   std::vector<std::string> args = {prog};
   if (const char *port = std::getenv("QEC_DECODING_SERVER_PORT");
       port && *port) {
-    args.push_back("--cudaq-device-call=udp");
-    args.push_back("udp-host=127.0.0.1");
-    args.push_back(std::string("udp-port=") + port);
+    const std::string transport =
+        env_or("QEC_DECODING_SERVER_TRANSPORT", "udp");
+    if (transport == "cpu_roce") {
+      // The RDMA ring geometry (slots x slot-size) is part of the cpu_roce
+      // wire contract: the channel writes requests directly into the daemon's
+      // rings, so these must match qec_decoding_daemon's --num-slots /
+      // --slot-size defaults (8 x 256).
+      args.push_back("--cudaq-device-call=cpu_roce");
+      args.push_back("--cudaq-device-call-slots=8");
+      args.push_back("--cudaq-device-call-slot-size=256");
+      args.push_back("ib-device=" +
+                     env_or("CUDAQ_CPU_ROCE_TEST_CHANNEL_DEVICE", "mlx5_0"));
+      args.push_back("local-ip=" +
+                     env_or("CUDAQ_CPU_ROCE_TEST_CHANNEL_IP", "10.0.0.1"));
+      args.push_back("rendezvous-host=" +
+                     env_or("CUDAQ_CPU_ROCE_TEST_DAEMON_IP", "10.0.0.2"));
+      args.push_back(std::string("rendezvous-port=") + port);
+    } else {
+      args.push_back("--cudaq-device-call=udp");
+      args.push_back("udp-host=127.0.0.1");
+      args.push_back(std::string("udp-port=") + port);
+    }
   }
   std::vector<char *> argv;
   for (auto &arg : args)
