@@ -545,7 +545,7 @@ std::unique_ptr<decoder> get_decoder(const std::string &name,
 __attribute__((constructor)) void load_decoder_plugins() {
   // Load plugins from the decoder-specific plugin directory
   std::filesystem::path libPath{cudaqx::__internal__::getCUDAQXLibraryPath(
-      cudaqx::__internal__::CUDAQXLibraryType::QEC)};
+      cudaqx::__internal__::CUDAQXLibraryType::QECDecoders)};
   auto pluginPath = libPath.parent_path() / "decoder-plugins";
   load_plugins(pluginPath.string(), PluginType::DECODER);
 }

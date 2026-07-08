@@ -10,6 +10,14 @@
 
 #ifdef CUDAQ_REALTIME_ROOT
 
+// Defines CUDA_VERSION, which gates the graph-based dispatch API (the
+// self-relaunching scheduler: cudaq_dispatch_graph_context,
+// cudaq_create_dispatch_graph_regular, ...) inside cudaq_realtime.h.  This TU
+// is compiled by the host C++ compiler (no __CUDACC__), so without this the
+// graph API would be preprocessed out and the scheduler members below would
+// not name a type.
+#include <cuda.h>
+
 #include "cudaq/qec/decoder.h"
 #include "cudaq/realtime/daemon/dispatcher/cudaq_realtime.h"
 #include "cudaq/realtime/daemon/dispatcher/dispatch_kernel_launch.h"
@@ -29,11 +37,17 @@ namespace cudaq::qec::realtime {
 /// `decoder::supports_graph_dispatch()`:
 ///
 ///   - DEVICE mode (every decoder supports graph dispatch -- e.g. the Relay BP
-///     GPU decoder).  This is the per-round `GRAPH_LAUNCH` enqueue + shared
-///     `DEVICE_CALL` get_corrections / reset_decoder design: a persistent GPU
-///     DEVICE_LOOP dispatcher services the DEVICE_CALL entries while a CPU
-///     HOST_LOOP monitor launches the per-decoder captured graphs.  Both share
-///     a pinned-mapped ring via `shared_ring_mode=1`.  Requires a non-null
+///     GPU decoder).  A single self-relaunching device-graph scheduler (see
+///     `start_device_loop()`) services all three RPCs as `DEVICE_CALL`
+///     handlers: `enqueue_syndromes` accumulates the round's syndromes into the
+///     decoder's registered GpuDecoderState and returns
+///     `CUDAQ_DISPATCH_STATUS_TRIGGER_GRAPH` when a full window is ready, which
+///     makes the scheduler fire the decoder's device-launchable cooperative
+///     decode graph fire-and-forget; `get_corrections` / `reset_decoder` run
+///     inline on device.  The scheduler tail-self-relaunches via
+///     `cudaGetCurrentGraphExec()` so the 120 fire-and-forget launches per
+///     parent-graph execution budget resets each relaunch.  Scoped to one
+///     graph-dispatch decoder per session.  Requires a non-null
 ///     `device_launch_fn`.
 ///
 ///   - HOST mode (no decoder supports graph dispatch -- e.g. PyMatching, a CPU
@@ -126,6 +140,15 @@ public:
   std::size_t num_slots() const { return num_slots_; }
   std::size_t slot_size() const { return slot_size_; }
 
+  /// @brief Monotonic producer cursor (rpc_producer ring discipline).
+  /// The single serialized producer advances this each RPC so it walks the
+  /// ring in lockstep with the strict-FIFO consumer (device-graph scheduler or
+  /// host loop, both with shared-ring scanning OFF) instead of reusing slot 0.
+  /// Reset to 0 by initialize().  Single-producer today; a future multi-
+  /// producer design would make the advance an atomic fetch-add.
+  std::size_t producer_cursor() const { return producer_cursor_; }
+  void set_producer_cursor(std::size_t slot) { producer_cursor_ = slot; }
+
   /// @brief (DEVICE mode) CUDA stream backing the HOST_LOOP worker for the
   /// decoder at index `decoder_id`.  Returns nullptr in HOST mode, out of
   /// range, or for a decoder that did not capture a graph.
@@ -178,6 +201,9 @@ private:
   static constexpr std::size_t kDefaultNumSlots = 8;
   std::size_t num_slots_ = kDefaultNumSlots;
   std::size_t slot_size_ = 0;
+  // Monotonic producer ring cursor (see producer_cursor()).  Reset in
+  // initialize().
+  std::size_t producer_cursor_ = 0;
   volatile std::uint64_t *rx_flags_host_ = nullptr;
   volatile std::uint64_t *rx_flags_dev_ = nullptr;
   volatile std::uint64_t *tx_flags_host_ = nullptr;
@@ -197,11 +223,28 @@ private:
   std::uint32_t get_corrections_fn_id_ = 0;
   std::uint32_t reset_decoder_fn_id_ = 0;
 
-  // ---- DEVICE_LOOP wiring (DEVICE mode only) ----
+  // ---- DEVICE-mode scheduler wiring ----
+  // A single self-relaunching device-graph scheduler replaces the legacy
+  // HOST_LOOP(graph-worker) + DEVICE_LOOP(get/reset) pair.  The scheduler
+  // runs all three RPCs as DEVICE_CALL handlers and fires the
+  // per-decoder device-launchable decode graph fire-and-forget when the
+  // enqueue accumulate handler signals a full window
+  // (CUDAQ_DISPATCH_STATUS_TRIGGER_GRAPH).  device_manager_/device_dispatcher_
+  // are retained (unused in scheduler mode) to keep the legacy DEVICE_LOOP
+  // teardown in stop_loops() a harmless no-op.
   cudaq_dispatch_manager_t *device_manager_ = nullptr;
   cudaq_dispatcher_t *device_dispatcher_ = nullptr;
   std::uint64_t *device_stats_dev_ = nullptr;
-  // Pinned-mapped shutdown flag shared with both dispatchers (DEVICE mode).
+  cudaq_dispatch_graph_context *scheduler_ctx_ = nullptr;
+  cudaStream_t scheduler_stream_ = nullptr;
+  // cudaq_destroy_dispatch_graph, resolved by start_device_loop() via
+  // dlsym(RTLD_DEFAULT, ...) from the host executable's absorbed
+  // libcudaq-realtime-dispatch.a (same image as the create/launch fns), so
+  // stop_loops() tears down the graph context with the copy that created it.
+  using destroy_dispatch_graph_fn_t =
+      cudaError_t (*)(cudaq_dispatch_graph_context *);
+  destroy_dispatch_graph_fn_t destroy_dispatch_graph_fn_ = nullptr;
+  // Pinned-mapped shutdown flag polled by the scheduler graph (DEVICE mode).
   int *shutdown_flag_host_ = nullptr;
   int *shutdown_flag_dev_ = nullptr;
 

@@ -13,6 +13,7 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -28,6 +29,7 @@
 #include <hololink/core/metadata.hpp>
 #include <hololink/core/timeout.hpp>
 
+#include "cudaq/qec/realtime/decoder_rpc_ids.h"
 #include "cudaq/realtime/daemon/dispatcher/dispatch_kernel_launch.h"
 
 namespace {
@@ -140,6 +142,35 @@ std::uint64_t parse_scalar(const std::string &content,
   }
 }
 
+/// @brief Derive num_observables from O_sparse in the config.
+///
+/// O_sparse encodes each observable as a row of correction indices terminated
+/// by -1, so the number of row terminators is the number of observables.
+std::size_t derive_num_observables(const std::string &content) {
+  std::size_t pos = content.find("O_sparse:");
+  if (pos == std::string::npos)
+    return 0;
+  std::size_t bracket_start = content.find('[', pos);
+  if (bracket_start == std::string::npos)
+    return 0;
+  std::size_t bracket_end = content.find(']', bracket_start);
+  if (bracket_end == std::string::npos)
+    return 0;
+  std::string arr =
+      content.substr(bracket_start + 1, bracket_end - bracket_start - 1);
+
+  std::size_t rows = 0;
+  std::istringstream ss(arr);
+  std::string token;
+  while (std::getline(ss, token, ',')) {
+    token.erase(0, token.find_first_not_of(" \t\n\r"));
+    token.erase(token.find_last_not_of(" \t\n\r") + 1);
+    if (token == "-1")
+      ++rows;
+  }
+  return rows;
+}
+
 /// @brief Derive num_measurements from D_sparse in the config.
 ///
 /// D_sparse encodes the detector-measurement matrix in row-major order with
@@ -181,7 +212,11 @@ std::size_t derive_num_measurements(const std::string &content) {
 // ============================================================================
 
 struct SyndromeEntry {
-  std::vector<std::uint8_t> measurements;
+  std::vector<std::uint8_t> measurements; ///< flat concat of all rounds
+  /// Per-round measurement slices (from ROUND_START markers).  Used by the
+  /// --per-round playback mode to emit one enqueue frame per round.  Empty (or
+  /// a single slice) when the syndrome file has no per-round structure.
+  std::vector<std::vector<std::uint8_t>> per_round;
   std::uint8_t expected_correction;
 };
 
@@ -193,27 +228,41 @@ std::vector<SyndromeEntry> load_syndromes(const std::string &path,
     return entries;
 
   std::string line;
-  std::vector<std::uint8_t> current_shot;
+  std::vector<std::uint8_t> current_shot;  // flat (all rounds)
+  std::vector<std::uint8_t> current_round; // bits since ROUND_START
+  std::vector<std::vector<std::uint8_t>> current_rounds; // rounds of this shot
   std::vector<std::vector<std::uint8_t>> shots;
+  std::vector<std::vector<std::vector<std::uint8_t>>> shots_rounds;
   std::vector<std::uint8_t> corrections;
   bool reading_shot = false;
   bool reading_corrections = false;
+  bool saw_round_marker = false;
+
+  auto close_round = [&]() {
+    if (!current_round.empty()) {
+      current_rounds.push_back(current_round);
+      current_round.clear();
+    }
+  };
+  auto close_shot = [&]() {
+    close_round();
+    if (reading_shot && !current_shot.empty()) {
+      shots.push_back(current_shot);
+      shots_rounds.push_back(current_rounds);
+    }
+    current_shot.clear();
+    current_rounds.clear();
+  };
 
   while (std::getline(file, line)) {
     if (line.find("SHOT_START") == 0) {
-      if (reading_shot && !current_shot.empty()) {
-        shots.push_back(current_shot);
-      }
-      current_shot.clear();
+      close_shot();
       reading_shot = true;
       reading_corrections = false;
       continue;
     }
     if (line == "CORRECTIONS_START") {
-      if (reading_shot && !current_shot.empty()) {
-        shots.push_back(current_shot);
-      }
-      current_shot.clear();
+      close_shot();
       reading_shot = false;
       reading_corrections = true;
       continue;
@@ -224,6 +273,9 @@ std::vector<SyndromeEntry> load_syndromes(const std::string &path,
     if (line.find("NUM_DATA") == 0 || line.find("NUM_LOGICAL") == 0) {
       continue;
     } else if (line.find("ROUND_START") == 0) {
+      // A new round within the current shot: close the prior round slice.
+      saw_round_marker = true;
+      close_round();
       continue;
     } else if (reading_shot) {
       line.erase(0, line.find_first_not_of(" \t\n\r"));
@@ -233,6 +285,7 @@ std::vector<SyndromeEntry> load_syndromes(const std::string &path,
       try {
         int bit = std::stoi(line);
         current_shot.push_back(static_cast<std::uint8_t>(bit));
+        current_round.push_back(static_cast<std::uint8_t>(bit));
       } catch (...) {
       }
     } else if (reading_corrections) {
@@ -247,10 +300,8 @@ std::vector<SyndromeEntry> load_syndromes(const std::string &path,
       }
     }
   }
-
-  if (reading_shot && !current_shot.empty()) {
-    shots.push_back(current_shot);
-  }
+  close_shot();
+  (void)saw_round_marker;
 
   for (std::size_t i = 0; i < shots.size(); ++i) {
     if (shots[i].size() < syndrome_size) {
@@ -260,6 +311,12 @@ std::vector<SyndromeEntry> load_syndromes(const std::string &path,
     }
     SyndromeEntry entry{};
     entry.measurements = std::move(shots[i]);
+    entry.per_round = (i < shots_rounds.size())
+                          ? std::move(shots_rounds[i])
+                          : std::vector<std::vector<std::uint8_t>>{};
+    // No per-round markers: treat the whole shot as a single round.
+    if (entry.per_round.empty())
+      entry.per_round.push_back(entry.measurements);
     entry.expected_correction = (i < corrections.size()) ? corrections[i] : 0;
     entries.push_back(std::move(entry));
   }
@@ -290,6 +347,71 @@ build_rpc_payload(const std::vector<std::uint8_t> &measurements,
   return payload;
 }
 
+/// Build a per-round `enqueue_syndromes` RPC frame for the device-graph
+/// scheduler (decoder_server_runtime.md#enqueue_syndromes):
+///   [RPCHeader (fid=enqueue, arg_len)][EnqueueRequestPayload (32B)]
+///   [ceil(n/8) LSB-first bit-packed syndrome bytes + 0..7 zero pad].
+/// One input byte (0/1) per syndrome bit.  ptp_timestamp left 0 (FPGA fills
+/// it).
+std::vector<std::uint8_t>
+build_enqueue_frame(const std::vector<std::uint8_t> &round_bits,
+                    std::uint32_t request_id, std::int64_t decoder_id,
+                    std::int64_t counter) {
+  namespace rpc = cudaq::qec::decoding::rpc;
+  const std::uint64_t n = round_bits.size();
+  const std::size_t packed = rpc::bit_packed_bytes(n);
+  const std::size_t arg_len =
+      rpc::align_to_8(sizeof(rpc::EnqueueRequestPayload) + packed);
+  std::vector<std::uint8_t> payload(
+      sizeof(cudaq::realtime::RPCHeader) + arg_len, 0);
+  auto *header = reinterpret_cast<cudaq::realtime::RPCHeader *>(payload.data());
+  header->magic = cudaq::realtime::RPC_MAGIC_REQUEST;
+  header->function_id = rpc::kEnqueueSyndromesFunctionId;
+  header->arg_len = static_cast<std::uint32_t>(arg_len);
+  header->request_id = request_id;
+  header->ptp_timestamp = 0;
+
+  auto *body = reinterpret_cast<rpc::EnqueueRequestPayload *>(
+      payload.data() + sizeof(cudaq::realtime::RPCHeader));
+  body->decoder_id = decoder_id;
+  body->counter = counter;
+  body->syndrome_mapping_id = 0;
+  body->num_syndromes = static_cast<std::int64_t>(n);
+
+  std::uint8_t *bits = payload.data() + sizeof(cudaq::realtime::RPCHeader) +
+                       sizeof(rpc::EnqueueRequestPayload);
+  for (std::uint64_t i = 0; i < n; ++i)
+    if (round_bits[i] & 0x1u)
+      bits[i >> 3] |= static_cast<std::uint8_t>(1u << (i & 7));
+  return payload;
+}
+
+/// Build a `get_corrections` RPC frame (decoder_server_runtime.md):
+///   [RPCHeader (fid=get_corrections, arg_len=24)]
+///   [GetCorrectionsRequestPayload{decoder_id, return_size, reset}].
+std::vector<std::uint8_t> build_get_corrections_frame(std::uint32_t request_id,
+                                                      std::int64_t decoder_id,
+                                                      std::int64_t return_size,
+                                                      std::uint8_t reset) {
+  namespace rpc = cudaq::qec::decoding::rpc;
+  const std::size_t arg_len = sizeof(rpc::GetCorrectionsRequestPayload);
+  std::vector<std::uint8_t> payload(
+      sizeof(cudaq::realtime::RPCHeader) + arg_len, 0);
+  auto *header = reinterpret_cast<cudaq::realtime::RPCHeader *>(payload.data());
+  header->magic = cudaq::realtime::RPC_MAGIC_REQUEST;
+  header->function_id = rpc::kGetCorrectionsFunctionId;
+  header->arg_len = static_cast<std::uint32_t>(arg_len);
+  header->request_id = request_id;
+  header->ptp_timestamp = 0;
+
+  auto *body = reinterpret_cast<rpc::GetCorrectionsRequestPayload *>(
+      payload.data() + sizeof(cudaq::realtime::RPCHeader));
+  body->decoder_id = decoder_id;
+  body->return_size = return_size;
+  body->reset = reset;
+  return payload;
+}
+
 // ============================================================================
 // Command-Line Options
 // ============================================================================
@@ -304,6 +426,11 @@ struct Options {
       function_name; // RPC function name (overrides default mock_decode)
   std::optional<std::size_t> num_shots;
   bool verify = false;
+
+  // Per-round mode (device-graph scheduler): emit N enqueue_syndromes frames
+  // (one per round) followed by 1 get_corrections frame per shot, instead of a
+  // single full-window request.  request_id = shot*(rounds+1)+local_frame.
+  bool per_round = false;
 
   // When set, bypass BOOTP enumeration and connect directly to this UDP port.
   // Used with the FPGA emulator which doesn't support BOOTP.
@@ -343,7 +470,16 @@ void print_usage(const char *argv0) {
       << "  --spacing <us>        Inter-shot spacing in microseconds "
          "(default: 10)\n"
       << "  --verify              Capture and verify correction responses "
-         "via ILA\n\n"
+         "via ILA\n"
+      << "  --per-round           Per-round protocol (device-graph scheduler): "
+         "send\n"
+      << "                        N enqueue_syndromes frames (one per "
+         "ROUND_START\n"
+      << "                        slice) + 1 get_corrections frame per shot. "
+         "Note:\n"
+      << "                        multiplies frames by rounds+1, so the 512-"
+         "cycle\n"
+      << "                        BRAM limits --num-shots accordingly.\n\n"
       << "Emulator mode (bypass BOOTP enumeration):\n"
       << "  --control-port <n>   UDP control port of the emulator\n"
       << "  --vp-address <n>     VP register base (default: 0x1000)\n"
@@ -382,6 +518,8 @@ Options parse_args(int argc, char **argv) {
           static_cast<std::uint32_t>(std::stoul(argv[++i], nullptr, 0));
     } else if (arg == "--verify") {
       options.verify = true;
+    } else if (arg == "--per-round") {
+      options.per_round = true;
     } else if (arg == "--qp-number" && i + 1 < argc) {
       options.qp_number =
           static_cast<std::uint32_t>(std::stoul(argv[++i], nullptr, 0));
@@ -721,7 +859,10 @@ int64_t ptp_delta_ns(PtpTimestamp send, PtpTimestamp recv) {
 }
 
 struct LatencySample {
-  uint32_t msg_id;
+  uint32_t request_id; ///< echoed request_id of the frame
+  uint32_t shot;       ///< request_id / frames_per_shot (per-round)
+  uint32_t local;      ///< frame index within the shot (per-round); else 0
+  bool is_corr;        ///< true = get_corrections frame, false = enqueue ACK
   uint32_t send_sec, send_nsec;
   uint32_t recv_sec, recv_nsec;
   int64_t delta_ns;
@@ -737,10 +878,10 @@ struct VerifyResult {
   std::size_t responses_matched = 0;
   std::size_t header_errors = 0;
   std::size_t correction_errors = 0;
-  std::size_t rpc_requests = 0;
   std::size_t rpc_responses = 0;
   std::size_t non_rpc_frames = 0;
   std::size_t tvalid_zero = 0;
+  std::size_t enqueue_acks = 0; ///< per-round: result_len==0 ACK responses
   std::vector<LatencySample> latency_samples;
 };
 
@@ -756,10 +897,17 @@ struct VerifyResult {
 ///   byte  [24]    correction value
 VerifyResult verify_captured_responses(
     const std::vector<std::vector<std::uint32_t>> &samples,
-    const std::vector<SyndromeEntry> &syndromes, std::size_t num_expected) {
+    const std::vector<SyndromeEntry> &syndromes, std::size_t num_expected,
+    bool per_round = false, std::size_t frames_per_shot = 1,
+    std::size_t ring_depth = 64) {
   VerifyResult result;
   result.total_samples = samples.size();
   std::set<std::uint32_t> shots_seen;
+  // DIAGNOSTIC census: count how many RPC responses carry each request_id, so a
+  // duplicate-processed frame (count==2) and a dropped frame (count==0) are
+  // identified exactly -- and we can check whether they alias the same ring
+  // slot (rid % num_pages).
+  std::map<std::uint32_t, int> rid_count;
 
   for (std::size_t i = 0; i < samples.size(); ++i) {
     const auto &sample = samples[i];
@@ -780,50 +928,92 @@ VerifyResult verify_captured_responses(
     std::uint8_t correction_byte =
         data_bytes[sizeof(cudaq::realtime::RPCResponse)];
 
-    if (resp.magic == cudaq::realtime::RPC_MAGIC_REQUEST) {
-      result.rpc_requests++;
-      continue;
-    }
+    // The ILA captures the FPGA-bound (TX) response path only, so every RPC
+    // frame here carries RPC_MAGIC_RESPONSE; anything else is a non-RPC frame
+    // (e.g. a continuation beat of a multi-beat AXI transfer).
     if (resp.magic != cudaq::realtime::RPC_MAGIC_RESPONSE) {
       result.non_rpc_frames++;
       continue;
     }
     result.rpc_responses++;
+    if (per_round)
+      rid_count[resp.request_id]++;
 
     if (resp.status != 0) {
       result.header_errors++;
       continue;
     }
 
-    std::uint32_t shot_index = resp.request_id;
+    // Frame identity (per-round): shot, local frame index within the shot, and
+    // whether this is the get_corrections frame (result_len>0) vs an enqueue
+    // ACK (result_len==0).
+    const std::size_t frames = frames_per_shot ? frames_per_shot : 1;
+    const std::uint32_t shot_index =
+        per_round ? static_cast<std::uint32_t>(resp.request_id / frames)
+                  : resp.request_id;
+    const std::uint32_t local =
+        per_round ? static_cast<std::uint32_t>(resp.request_id % frames) : 0;
+    const bool is_corr = (!per_round) || (resp.result_len != 0);
+
+    // PTP round-trip latency for EVERY response -- enqueue ACKs AND
+    // get_corrections.  The FPGA injects a send timestamp into every playback
+    // frame and the ILA captures a recv timestamp for every captured sample,
+    // so all frames carry valid PTP.  Recorded here (before the ACK skip
+    // below) so the CSV has one row per captured frame, not just one per shot.
+    {
+      uint64_t send_raw = extract_echoed_ptp_timestamp(resp);
+      uint64_t recv_raw = extract_ila_ptp_timestamp(sample);
+      if (send_raw != 0 && recv_raw != 0) {
+        auto send_ts = decode_ptp(send_raw);
+        auto recv_ts = decode_ptp(recv_raw);
+        int64_t delta = ptp_delta_ns(send_ts, recv_ts);
+        result.latency_samples.push_back({resp.request_id, shot_index, local,
+                                          is_corr, send_ts.sec, send_ts.nsec,
+                                          recv_ts.sec, recv_ts.nsec, delta});
+      }
+    }
+
+    // Per-round: enqueue_syndromes responses are empty ACKs (result_len==0);
+    // only get_corrections responses (result_len>0) carry corrections.
+    if (per_round && resp.result_len == 0) {
+      result.enqueue_acks++;
+      // DIAGNOSTIC: an empty response at the get_corrections frame position
+      // (local index == rounds) would be a get_corrections that came back
+      // result_len==0 (the old 99/100 anomaly).  Dump what we know about it.
+      const std::size_t rounds = frames ? frames - 1 : 0;
+      if (local == rounds) {
+        std::cout << "  [ANOMALY] sample " << i << ": result_len==0 at "
+                  << "get_corrections position; request_id=" << resp.request_id
+                  << " shot=" << shot_index << " status=" << resp.status
+                  << " magic=0x" << std::hex << resp.magic << std::dec
+                  << " corr_byte=" << static_cast<int>(correction_byte) << "\n";
+      }
+      continue;
+    }
+
     if (shot_index >= syndromes.size()) {
-      std::cout << "  Sample " << i << ": request_id=" << shot_index
+      std::cout << "  Sample " << i << ": request_id=" << resp.request_id
+                << " -> shot=" << shot_index
                 << " out of range (num_shots=" << syndromes.size()
                 << ") [WARN]\n";
       result.correction_errors++;
       continue;
     }
 
+    // Per-round get_corrections returns bit-packed observables (LSB-first);
+    // compare observable bit 0 to the expected logical correction.  The
+    // shot-based path compares the raw correction byte as before.
+    std::uint8_t got = per_round
+                           ? static_cast<std::uint8_t>(correction_byte & 0x1u)
+                           : correction_byte;
     std::uint8_t expected = syndromes[shot_index].expected_correction;
-    if (correction_byte == expected) {
+    if (got == expected) {
       result.responses_matched++;
     } else {
-      std::cout << "  Sample " << i << " request_id=" << shot_index
-                << ": got=" << static_cast<int>(correction_byte)
+      std::cout << "  Sample " << i << " request_id=" << resp.request_id
+                << " shot=" << shot_index << ": got=" << static_cast<int>(got)
                 << " expected=" << static_cast<int>(expected) << " [FAIL]\n";
       result.correction_errors++;
-    }
-
-    // PTP round-trip latency: send timestamp from response header,
-    // receive timestamp from ILA bits [584:521].
-    uint64_t send_raw = extract_echoed_ptp_timestamp(resp);
-    uint64_t recv_raw = extract_ila_ptp_timestamp(sample);
-    if (send_raw != 0 && recv_raw != 0) {
-      auto send_ts = decode_ptp(send_raw);
-      auto recv_ts = decode_ptp(recv_raw);
-      int64_t delta = ptp_delta_ns(send_ts, recv_ts);
-      result.latency_samples.push_back({shot_index, send_ts.sec, send_ts.nsec,
-                                        recv_ts.sec, recv_ts.nsec, delta});
     }
 
     shots_seen.insert(shot_index);
@@ -832,6 +1022,46 @@ VerifyResult verify_captured_responses(
   result.unique_shots_verified = shots_seen.size();
   std::cout << "  Unique shots verified:  " << shots_seen.size() << " of "
             << num_expected << "\n";
+
+  // DIAGNOSTIC: list any shots that never produced a get_corrections response.
+  if (shots_seen.size() < num_expected) {
+    std::cout << "  [ANOMALY] missing shots (no correction response):";
+    for (std::uint32_t s = 0; s < num_expected; ++s)
+      if (!shots_seen.count(s))
+        std::cout << " " << s;
+    std::cout << "\n";
+  }
+
+  // DIAGNOSTIC: per-request_id census -- report duplicated (count>1) and
+  // dropped (count==0) frames with their (shot, local-frame) and ring slot, to
+  // confirm a slot-aliasing race between the scheduler's flag clear and the
+  // Hololink RX kernel refilling reused slots.
+  if (per_round && frames_per_shot) {
+    const std::uint32_t total_frames =
+        static_cast<std::uint32_t>(num_expected * frames_per_shot);
+    auto describe = [&](std::uint32_t rid) {
+      const std::uint32_t local = rid % frames_per_shot;
+      const std::uint32_t shot = rid / frames_per_shot;
+      const char *kind =
+          (local + 1 == frames_per_shot) ? "get_corrections" : "enqueue";
+      std::cout << "    rid=" << rid << " (shot=" << shot << " local=" << local
+                << " " << kind << " slot%" << ring_depth << "="
+                << (ring_depth ? rid % ring_depth : 0) << ")";
+    };
+    bool any = false;
+    for (std::uint32_t rid = 0; rid < total_frames; ++rid) {
+      int c = rid_count.count(rid) ? rid_count[rid] : 0;
+      if (c != 1) {
+        if (!any) {
+          std::cout << "  [ANOMALY] request_id census (expected each seen "
+                       "exactly once):\n";
+          any = true;
+        }
+        describe(rid);
+        std::cout << " seen " << c << " times\n";
+      }
+    }
+  }
 
   return result;
 }
@@ -886,6 +1116,18 @@ int main(int argc, char **argv) {
   if (num_measurements == 0)
     num_measurements = syndrome_size;
 
+  const std::size_t num_observables = derive_num_observables(config_content);
+  if (options.per_round && num_observables == 0) {
+    std::cerr << "Per-round mode requires O_sparse in config file\n";
+    return 1;
+  }
+  if (options.per_round && num_observables != 1) {
+    std::cerr << "Per-round playback verification currently supports exactly "
+                 "one observable (found "
+              << num_observables << " from O_sparse)\n";
+    return 1;
+  }
+
   auto syndromes = load_syndromes(syndromes_path, num_measurements);
   if (syndromes.empty()) {
     std::cerr << "No syndrome data loaded from " << syndromes_path << "\n";
@@ -912,32 +1154,95 @@ int main(int argc, char **argv) {
                                               : options.function_name)
             << " (id=0x" << std::hex << function_id << std::dec << ")\n";
 
-  std::vector<std::vector<std::uint8_t>> windows;
-  windows.reserve(num_shots);
-  for (std::size_t i = 0; i < num_shots; ++i)
-    windows.push_back(build_rpc_payload(syndromes[i].measurements, function_id,
-                                        static_cast<std::uint32_t>(i)));
+  // Per-round shape (device-graph scheduler protocol): each shot becomes
+  // `rounds` enqueue_syndromes frames + 1 get_corrections frame.  rounds is the
+  // number of ROUND_START slices in the syndrome file (1 if unstructured).
+  const std::size_t rounds =
+      options.per_round
+          ? std::max<std::size_t>(1, syndromes.front().per_round.size())
+          : 0;
+  const std::size_t frames_per_shot = options.per_round ? rounds + 1 : 1;
 
-  std::size_t payload_size = windows.front().size();
+  std::vector<std::vector<std::uint8_t>> windows;
+  windows.reserve(num_shots * frames_per_shot);
+  if (options.per_round) {
+    for (std::size_t s = 0; s < num_shots; ++s) {
+      const auto &pr = syndromes[s].per_round;
+      for (std::size_t r = 0; r < rounds; ++r) {
+        const std::vector<std::uint8_t> &bits =
+            (r < pr.size()) ? pr[r] : syndromes[s].measurements;
+        auto rid = static_cast<std::uint32_t>(s * frames_per_shot + r);
+        windows.push_back(build_enqueue_frame(bits, rid, /*decoder_id=*/0,
+                                              /*counter=*/rid));
+      }
+      auto grid = static_cast<std::uint32_t>(s * frames_per_shot + rounds);
+      windows.push_back(build_get_corrections_frame(
+          grid, /*decoder_id=*/0, num_observables, /*reset=*/1));
+    }
+    std::cout << "Per-round mode: " << rounds << " enqueue + 1 get_corrections "
+              << "per shot (" << frames_per_shot << " frames/shot)\n";
+  } else {
+    for (std::size_t i = 0; i < num_shots; ++i)
+      windows.push_back(build_rpc_payload(syndromes[i].measurements,
+                                          function_id,
+                                          static_cast<std::uint32_t>(i)));
+  }
+
+  // Frames may differ in size (per-round); pad all to the largest, 64-aligned.
+  std::size_t payload_size = 0;
+  for (const auto &w : windows)
+    payload_size = std::max(payload_size, w.size());
   std::size_t bytes_per_window = align_up(payload_size, 64);
 
   for (auto &window : windows)
     window.resize(bytes_per_window, 0);
 
   std::size_t cycles_per_window = bytes_per_window / 64;
-  if (num_shots * cycles_per_window > RAM_DEPTH) {
-    std::cerr << "Data exceeds playback BRAM capacity: " << num_shots
-              << " shots x " << cycles_per_window
-              << " cycles = " << (num_shots * cycles_per_window) << " > "
-              << RAM_DEPTH << " depth\n";
+  if (cycles_per_window == 0)
+    cycles_per_window = 1;
+
+  // Per-round multiplies frames by (rounds+1), so all shots rarely fit the
+  // 512-cycle playback BRAM.  Auto-clamp num_shots to what fits (and truncate
+  // the already-built frames) so the run works without a hand-tuned
+  // --num-shots; the >120-decode guarantee is owned by the Stage A
+  // surface_code run, and hardware >120 would need multi-load chunking.
+  if (options.per_round) {
+    const std::size_t per_shot_cycles = frames_per_shot * cycles_per_window;
+    const std::size_t max_shots =
+        RAM_DEPTH / std::max<std::size_t>(1, per_shot_cycles);
+    if (max_shots == 0) {
+      std::cerr << "A single shot's " << frames_per_shot << " frames x "
+                << cycles_per_window << " cycles exceed the " << RAM_DEPTH
+                << "-cycle playback BRAM\n";
+      return 1;
+    }
+    if (num_shots > max_shots) {
+      std::cout << "WARNING: per-round playback is BRAM-limited to "
+                << max_shots << " shots (requested " << num_shots
+                << "); truncating.\n";
+      num_shots = max_shots;
+      windows.resize(num_shots * frames_per_shot);
+    }
+  }
+
+  const std::size_t num_windows = windows.size();
+  if (num_windows * cycles_per_window > RAM_DEPTH) {
+    std::cerr << "Data exceeds playback BRAM capacity: " << num_windows
+              << " frames x " << cycles_per_window
+              << " cycles = " << (num_windows * cycles_per_window) << " > "
+              << RAM_DEPTH << " depth.  Reduce --num-shots"
+              << (options.per_round ? " (per-round multiplies frames by "
+                                      "rounds+1)"
+                                    : "")
+              << ".\n";
     return 1;
   }
 
-  std::cout << "Loaded " << num_shots
-            << " shots (syndrome_size=" << syndrome_size
+  std::cout << "Loaded " << num_shots << " shots / " << num_windows
+            << " frames (syndrome_size=" << syndrome_size
             << ", payload=" << payload_size
             << " bytes, padded=" << bytes_per_window << " bytes, "
-            << cycles_per_window << " cycles/shot)\n";
+            << cycles_per_window << " cycles/frame)\n";
 
   // ------------------------------------------------------------------
   // Connect to Hololink (or emulator) and reset
@@ -982,9 +1287,9 @@ int main(int argc, char **argv) {
   // ------------------------------------------------------------------
   // Configure FPGA SIF registers for RDMA target (if provided)
   // ------------------------------------------------------------------
+  std::uint32_t rdma_num_pages = options.rdma_num_pages.value_or(64);
   if (options.qp_number && options.rkey && options.buffer_addr) {
     std::uint32_t rdma_page_size = options.rdma_page_size.value_or(256);
-    std::uint32_t rdma_num_pages = options.rdma_num_pages.value_or(64);
 
     std::cout << "Configuring FPGA SIF for RDMA target:\n"
               << "  QP number:    0x" << std::hex << *options.qp_number
@@ -1019,13 +1324,13 @@ int main(int argc, char **argv) {
   config_write.queue_write_uint32(PLAYER_ADDR + PLAYER_WINDOW_SIZE_OFFSET,
                                   static_cast<std::uint32_t>(bytes_per_window));
   config_write.queue_write_uint32(PLAYER_ADDR + PLAYER_WINDOW_NUMBER_OFFSET,
-                                  static_cast<std::uint32_t>(num_shots));
+                                  static_cast<std::uint32_t>(num_windows));
   config_write.queue_write_uint32(PLAYER_ADDR + PLAYER_TIMER_OFFSET,
                                   RF_SOC_TIMER_SCALE * options.spacing_us);
   if (!hololink->write_uint32(config_write))
     throw std::runtime_error("Failed to configure player");
 
-  std::cout << "Writing " << num_shots << " windows to playback BRAM..."
+  std::cout << "Writing " << num_windows << " windows to playback BRAM..."
             << std::endl;
   try {
     write_bram(*hololink, windows, bytes_per_window);
@@ -1086,8 +1391,8 @@ int main(int argc, char **argv) {
                               PLAYER_ENABLE))
     throw std::runtime_error("Failed to enable player");
 
-  std::cout << "Playback enabled: " << num_shots << " shots on hololink "
-            << options.hololink_ip << "\n";
+  std::cout << "Playback enabled: " << num_shots << " shots / " << num_windows
+            << " frames on hololink " << options.hololink_ip << "\n";
 
   // ------------------------------------------------------------------
   // ILA capture and correction verification
@@ -1136,14 +1441,22 @@ int main(int argc, char **argv) {
     std::cout << "Read " << samples.size() << " samples from ILA\n";
 
     // Verify correction responses against expected values.
-    auto vr = verify_captured_responses(samples, syndromes, num_shots);
+    auto vr = verify_captured_responses(samples, syndromes, num_shots,
+                                        options.per_round, frames_per_shot,
+                                        rdma_num_pages);
 
+    // In per-round mode the response frames split into enqueue ACKs
+    // (result_len==0) and get_corrections frames (result_len>0); only the
+    // latter carry corrections.
+    const std::size_t corrections_returned = vr.rpc_responses - vr.enqueue_acks;
     std::cout << "\n=== Verification Summary ===\n"
               << "  ILA samples captured:   " << actual_samples << "\n"
               << "  tvalid=0 (idle):        " << vr.tvalid_zero << "\n"
-              << "  RPC requests (syndromes): " << vr.rpc_requests << "\n"
-              << "  RPC responses (corrections): " << vr.rpc_responses << "\n"
-              << "  Non-RPC frames:         " << vr.non_rpc_frames << "\n"
+              << "  RPC response frames:    " << vr.rpc_responses << "\n";
+    if (options.per_round)
+      std::cout << "  Enqueue ACKs:           " << vr.enqueue_acks << "\n"
+                << "  get_corrections frames: " << corrections_returned << "\n";
+    std::cout << "  Non-RPC frames:         " << vr.non_rpc_frames << "\n"
               << "  Unique shots verified:  " << vr.unique_shots_verified
               << "\n"
               << "  Corrections matched:    " << vr.responses_matched << "\n"
@@ -1166,28 +1479,37 @@ int main(int argc, char **argv) {
       // Print first 5 samples for diagnostic
       for (std::size_t k = 0; k < 5 && k < vr.latency_samples.size(); ++k) {
         auto &s = vr.latency_samples[k];
-        std::cout << "  Msg " << std::setw(3) << s.msg_id
+        std::cout << "  rid " << std::setw(3) << s.request_id << " (shot "
+                  << s.shot << " local " << s.local << " "
+                  << (s.is_corr ? "get_corrections" : "enqueue") << ")"
                   << ": send={sec=" << s.send_sec << ", nsec=" << s.send_nsec
                   << "} recv={sec=" << s.recv_sec << ", nsec=" << s.recv_nsec
                   << "} delta=" << s.delta_ns << " ns\n";
       }
 
       std::cout << "\n=== PTP Round-Trip Latency ===\n"
-                << "  Samples:  " << vr.latency_samples.size() << "\n"
+                << "  Samples:  " << vr.latency_samples.size()
+                << " (all captured frames)\n"
                 << "  Min:      " << lat_min << " ns\n"
                 << "  Max:      " << lat_max << " ns\n"
                 << "  Avg:      " << std::fixed << std::setprecision(1)
                 << lat_avg << " ns\n";
 
+      // One row per captured frame.  `kind` is enqueue|get_corrections;
+      // `local` is the frame index within its shot (per-round).
       const std::string csv_path = "ptp_latency.csv";
       std::ofstream csv(csv_path);
       if (csv.is_open()) {
-        csv << "shot,send_sec,send_nsec,recv_sec,recv_nsec,delta_ns\n";
+        csv << "request_id,shot,local,kind,send_sec,send_nsec,recv_sec,"
+               "recv_nsec,delta_ns\n";
         for (auto &s : vr.latency_samples)
-          csv << s.msg_id << "," << s.send_sec << "," << s.send_nsec << ","
-              << s.recv_sec << "," << s.recv_nsec << "," << s.delta_ns << "\n";
+          csv << s.request_id << "," << s.shot << "," << s.local << ","
+              << (s.is_corr ? "get_corrections" : "enqueue") << ","
+              << s.send_sec << "," << s.send_nsec << "," << s.recv_sec << ","
+              << s.recv_nsec << "," << s.delta_ns << "\n";
         csv.close();
-        std::cout << "  CSV written: " << csv_path << "\n";
+        std::cout << "  CSV written: " << csv_path << " ("
+                  << vr.latency_samples.size() << " rows)\n";
       }
     } else {
       std::cout << "\n  PTP latency: no valid timestamps found\n";

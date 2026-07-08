@@ -99,7 +99,11 @@ if(_APP_CUDAQ_REALTIME_DISPATCH_LIB
   set_tests_properties(
     app_examples.surface_code-1-local-test-distance-3-inproc-rpc
     PROPERTIES ENVIRONMENT
-      "CUDAQ_QEC_REALTIME_MODE=inproc_rpc;EXTRA_CLI_ARGS=--use-relay-bp")
+      "CUDAQ_QEC_REALTIME_MODE=inproc_rpc;EXTRA_CLI_ARGS=--use-relay-bp"
+    # The wrapper exits 77 on GPUs below compute capability 9.0 (the
+    # device-graph scheduler needs device-side graph launch); report that
+    # as SKIPPED rather than FAILED.
+    SKIP_RETURN_CODE 77)
 endif()
 
 # Test with sliding_window decoder
