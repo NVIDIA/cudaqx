@@ -342,6 +342,28 @@ void qec_realtime_session::initialize() {
   producer_cursor_ = 0;
 
   if (device_mode_) {
+    // The device-graph scheduler relies on device-side graph launch, which
+    // requires compute capability 9.0+ (Hopper).  Below sm_90 the dispatch
+    // kernel's TRIGGER_GRAPH interception is compiled out and the enqueue RPC
+    // would surface the raw sentinel (0x12A6E5) as a non-zero status -- fail
+    // fast with an actionable message instead.
+    {
+      int device = 0;
+      cudaDeviceProp prop{};
+      if (cudaGetDevice(&device) != cudaSuccess ||
+          cudaGetDeviceProperties(&prop, device) != cudaSuccess)
+        throw std::runtime_error(
+            "qec_realtime_session::initialize: unable to query the active "
+            "CUDA device for the DEVICE-mode compute-capability check");
+      if (prop.major < 9)
+        throw std::runtime_error(
+            "qec_realtime_session::initialize: DEVICE mode (the device-graph "
+            "scheduler) requires device-side graph launch, i.e. compute "
+            "capability 9.0+ (Hopper); found " +
+            std::to_string(prop.major) + "." + std::to_string(prop.minor) +
+            ".  Use a CPU decoder (HOST mode) or a Hopper+ GPU.");
+    }
+
     // Be tolerant of being called before any CUDA setup.  The pinned
     // allocations below require cudaDeviceMapHost on the active device.
     cudaError_t flags_err = cudaSetDeviceFlags(cudaDeviceMapHost);
