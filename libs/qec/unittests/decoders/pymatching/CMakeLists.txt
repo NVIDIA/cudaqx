@@ -79,6 +79,13 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-decoding-server-cqr)
   #     the server).
   #   - decoding-server-cqr: the host-dispatch service that receives them (and
   #     provides the force-link + self-check hooks the test asserts on).
+  # cudaq::getRegisteredExecutionManager() is exported only by the execution
+  # manager plugin (libcudaq-em-default), which is pulled in transitively. The
+  # default --as-needed would drop it (nothing references it directly on the
+  # link line), leaving libcudaq-qec.so's reference unresolved; keep it.
+  target_link_options(test_pymatching_device_call_realtime PRIVATE
+    $<$<CXX_COMPILER_ID:GNU>:-Wl,--no-as-needed>)
+
   target_link_libraries(test_pymatching_device_call_realtime PRIVATE
     GTest::gtest_main
     cudaq-qec-decoders

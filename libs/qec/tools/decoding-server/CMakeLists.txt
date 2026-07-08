@@ -13,7 +13,7 @@
 # reset_decoder). Its decoders are selected entirely by a YAML config file
 # (see decoding_server_config.yaml) and its transport by --transport=udp
 # (loopback-capable, runs anywhere) or --transport=cpu_roce (real RDMA wire,
-# compiled in when libcudaq-realtime-cpu-transport + ibverbs are found).
+# compiled in when libcudaq-realtime-cpu-roce-transport + ibverbs are found).
 #
 # The two-process test (unittests/realtime/test_decoding_server.cpp) spawns
 # this binary as a subprocess.
@@ -33,16 +33,22 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-decoding-server-cqr)
   find_library(QEC_UDP_TRANSPORT_LIBRARY cudaq-realtime-udp-transport
     HINTS ${CUDAQ_REALTIME_ROOT} ${CUDAQ_INSTALL_DIR}
     PATH_SUFFIXES lib)
+  # The host-side ring dispatch loop (cudaq_host_ring_dispatch_loop) lives in
+  # its own static archive since the realtime host-dispatch split; it is no
+  # longer part of libcudaq-realtime.
+  find_library(QEC_HOST_DISPATCH_LIBRARY cudaq-realtime-host-dispatch
+    HINTS ${CUDAQ_REALTIME_ROOT} ${CUDAQ_INSTALL_DIR}
+    PATH_SUFFIXES lib)
   # Optional: the daemon's --transport=cpu_roce path (real RDMA wire) needs
   # the CPU RoCE transceiver and libibverbs; without them the daemon still
   # builds with the udp transport only.
-  find_library(QEC_CPU_ROCE_TRANSPORT_LIBRARY cudaq-realtime-cpu-transport
+  find_library(QEC_CPU_ROCE_TRANSPORT_LIBRARY cudaq-realtime-cpu-roce-transport
     HINTS ${CUDAQ_REALTIME_ROOT} ${CUDAQ_INSTALL_DIR}
     PATH_SUFFIXES lib)
   find_library(QEC_IBVERBS_LIBRARY ibverbs)
 
   if(QEC_UDP_DEVICE_CALL_INCLUDE_DIR AND QEC_UDP_REALTIME_LIBRARY
-     AND QEC_UDP_TRANSPORT_LIBRARY)
+     AND QEC_UDP_TRANSPORT_LIBRARY AND QEC_HOST_DISPATCH_LIBRARY)
     add_executable(qec_decoding_daemon qec_decoding_daemon.cpp)
     target_include_directories(qec_decoding_daemon PRIVATE
       ${CUDAQ_REALTIME_INCLUDE_DIR}
@@ -57,6 +63,7 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-decoding-server-cqr)
       cudaq-qec-realtime-decoding-server-cqr
       ${QEC_UDP_REALTIME_LIBRARY}
       ${QEC_UDP_TRANSPORT_LIBRARY}
+      ${QEC_HOST_DISPATCH_LIBRARY}
       cudaq::cudaq cudaq::cudaq-common cudaq-mlir-runtime
       nvqir nvqir-stim
       CUDA::cudart

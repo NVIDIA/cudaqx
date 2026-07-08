@@ -52,7 +52,7 @@
 #include "cudaq/realtime/cpu_transport/udp_wrapper.h"
 #include "cudaq/realtime/daemon/dispatcher/cudaq_realtime.h"
 #include "cudaq/realtime/daemon/dispatcher/dispatch_kernel_launch.h"
-#include "cudaq/realtime/daemon/dispatcher/host_dispatcher.h"
+#include "cudaq/realtime/daemon/dispatcher/graph_launch_engine.h"
 
 #ifdef QEC_HAVE_CPU_ROCE_TRANSPORT
 #include "cudaq/realtime/cpu_transport/roce_wrapper.h"
@@ -425,7 +425,7 @@ int main(int argc, char **argv) {
       return 1;
 #else
     std::cerr << "ERROR: this daemon was built without cpu_roce transport "
-                 "support (libcudaq-realtime-cpu-transport not found)"
+                 "support (libcudaq-realtime-cpu-roce-transport not found)"
               << std::endl;
     return 1;
 #endif
@@ -438,28 +438,33 @@ int main(int argc, char **argv) {
   // [4] Wire the libcudaq-realtime host dispatcher to the transceiver rings,
   // exactly as cpu_roce_test_daemon does. Everything from here down is
   // transport-independent.
-  std::atomic<int> dispatcher_shutdown{0};
+  // The dispatch table is HOST_CALL-only, so the ring loop runs the inline
+  // HOST_CALL path with no GRAPH_LAUNCH engine (engine == nullptr). Mirrors the
+  // HOST_CALL-only branch in qec_realtime_session.cpp.
+  int dispatcher_shutdown = 0;
   std::uint64_t packets_dispatched = 0;
-  cudaq_host_dispatch_loop_ctx_t dctx{};
-  dctx.ringbuffer.rx_flags_host = tp.rx_flags;
-  dctx.ringbuffer.tx_flags_host = tp.tx_flags;
-  dctx.ringbuffer.rx_data_host = tp.rx_data;
-  dctx.ringbuffer.tx_data_host = tp.tx_data;
-  dctx.ringbuffer.rx_stride_sz = cfg.slot_size;
-  dctx.ringbuffer.tx_stride_sz = cfg.slot_size;
-  dctx.config.num_slots = cfg.num_slots;
-  dctx.config.slot_size = static_cast<std::uint32_t>(cfg.slot_size);
-  dctx.config.dispatch_path = CUDAQ_DISPATCH_PATH_HOST;
-  dctx.config.dispatch_mode = CUDAQ_DISPATCH_HOST_CALL;
-  dctx.config.skip_tx_markers = 1;
-  dctx.function_table.entries = table.entries;
-  dctx.function_table.count = table.count;
-  dctx.shutdown_flag = &dispatcher_shutdown;
-  dctx.stats_counter = &packets_dispatched;
-  dctx.skip_stream_sweep = true;
+  cudaq_ringbuffer_t ringbuffer{};
+  ringbuffer.rx_flags_host = tp.rx_flags;
+  ringbuffer.tx_flags_host = tp.tx_flags;
+  ringbuffer.rx_data_host = tp.rx_data;
+  ringbuffer.tx_data_host = tp.tx_data;
+  ringbuffer.rx_stride_sz = cfg.slot_size;
+  ringbuffer.tx_stride_sz = cfg.slot_size;
+  cudaq_dispatcher_config_t dispatch_config{};
+  dispatch_config.num_slots = cfg.num_slots;
+  dispatch_config.slot_size = static_cast<std::uint32_t>(cfg.slot_size);
+  dispatch_config.dispatch_path = CUDAQ_DISPATCH_PATH_HOST;
+  dispatch_config.dispatch_mode = CUDAQ_DISPATCH_HOST_CALL;
+  dispatch_config.skip_tx_markers = 1;
+  cudaq_function_table_t function_table{};
+  function_table.entries = table.entries;
+  function_table.count = table.count;
 
-  std::thread dispatcher_thread(
-      [&dctx]() { cudaq_host_dispatcher_loop(&dctx); });
+  std::thread dispatcher_thread([&]() {
+    cudaq_host_ring_dispatch_loop(&ringbuffer, &function_table, &dispatch_config,
+                                  /*engine=*/nullptr, &dispatcher_shutdown,
+                                  &packets_dispatched);
+  });
 
   // [5] Run until signalled or timed out.
   const auto start_time = std::chrono::steady_clock::now();
@@ -473,7 +478,7 @@ int main(int argc, char **argv) {
   }
 
   // [6] Orderly shutdown.
-  dispatcher_shutdown.store(1, std::memory_order_release);
+  dispatcher_shutdown = 1;
   if (dispatcher_thread.joinable())
     dispatcher_thread.join();
   if (tp.shutdown)
