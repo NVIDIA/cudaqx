@@ -25,7 +25,7 @@ include(GoogleTest)
 add_compile_options(-Wno-attributes)
 
 add_executable(test_chromobius test_chromobius.cpp)
-target_link_libraries(test_chromobius PRIVATE GTest::gtest_main cudaq-qec cudaq::cudaq)
+target_link_libraries(test_chromobius PRIVATE GTest::gtest_main cudaq-qec-decoders)
 add_dependencies(test_chromobius cudaq-qec-chromobius)
 add_dependencies(CUDAQXQECUnitTests test_chromobius)
 gtest_discover_tests(test_chromobius)
@@ -35,7 +35,7 @@ add_executable(test_chromobius_correctness test_chromobius_correctness.cpp)
 target_compile_definitions(test_chromobius_correctness PRIVATE
   CHROMOBIUS_REFERENCE_DATA_DIR="${CMAKE_CURRENT_LIST_DIR}/../../../test_data/chromobius")
 target_link_libraries(test_chromobius_correctness PRIVATE
-  GTest::gtest_main cudaq-qec cudaq::cudaq)
+  GTest::gtest_main cudaq-qec-decoders)
 add_dependencies(test_chromobius_correctness cudaq-qec-chromobius)
 add_dependencies(CUDAQXQECUnitTests test_chromobius_correctness)
 gtest_discover_tests(test_chromobius_correctness)

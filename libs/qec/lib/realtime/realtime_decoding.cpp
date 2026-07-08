@@ -39,18 +39,10 @@ std::unique_ptr<cudaq::qec::realtime::qec_realtime_session> g_realtime_session;
 
 namespace {
 
-bool g_realtime_session_owns_shared_ring_mode = false;
-
 #ifdef CUDAQ_REALTIME_ROOT
 inline cudaq_dispatch_launch_fn_t resolve_launch_dispatch_kernel_regular() {
   return reinterpret_cast<cudaq_dispatch_launch_fn_t>(
       ::dlsym(RTLD_DEFAULT, "cudaq_launch_dispatch_kernel_regular"));
-}
-
-using set_shared_ring_mode_fn_t = cudaError_t (*)(uint32_t);
-inline set_shared_ring_mode_fn_t resolve_set_shared_ring_mode() {
-  return reinterpret_cast<set_shared_ring_mode_fn_t>(
-      ::dlsym(RTLD_DEFAULT, "cudaq_dispatch_kernel_set_shared_ring_mode"));
 }
 #endif
 
@@ -91,26 +83,17 @@ void maybe_init_realtime_session() {
 
   cudaq_dispatch_launch_fn_t launch_fn = nullptr;
   if (device_mode) {
-    // DEVICE mode needs the dispatch-kernel launch helper and the device-side
-    // shared-ring-mode setter, both resolved from libcudaq-realtime-dispatch.a
-    // (absorbed into the final executable).  HOST mode uses neither.
+    // DEVICE mode needs the dispatch-kernel launch helper from
+    // libcudaq-realtime-dispatch.a (absorbed into the final executable).  HOST
+    // mode uses no device launch helper.
     launch_fn = resolve_launch_dispatch_kernel_regular();
-    auto set_mode_fn = resolve_set_shared_ring_mode();
-    if (!launch_fn || !set_mode_fn)
+    if (!launch_fn)
       throw std::runtime_error(
           "CUDAQ_QEC_REALTIME_MODE=inproc_rpc requested with a graph-capable "
-          "decoder but cudaq_launch_dispatch_kernel_regular and/or "
-          "cudaq_dispatch_kernel_set_shared_ring_mode could not be resolved "
-          "via dlsym(RTLD_DEFAULT, ...). The host executable must absorb "
-          "libcudaq-realtime-dispatch.a and link with --export-dynamic.");
-
-    cudaError_t rc = set_mode_fn(1);
-    if (rc != cudaSuccess)
-      throw std::runtime_error(
-          "CUDAQ_QEC_REALTIME_MODE=inproc_rpc requested but "
-          "cudaq_dispatch_kernel_set_shared_ring_mode(1) failed with rc=" +
-          std::to_string(rc));
-    g_realtime_session_owns_shared_ring_mode = true;
+          "decoder but cudaq_launch_dispatch_kernel_regular could not be "
+          "resolved via dlsym(RTLD_DEFAULT, ...). The host executable must "
+          "absorb libcudaq-realtime-dispatch.a and link with "
+          "--export-dynamic.");
   } else {
     CUDA_QEC_INFO("CUDAQ_QEC_REALTIME_MODE=inproc_rpc with CPU (non-graph) "
                   "decoder(s); using HOST dispatch mode (no device kernel / no "
@@ -125,11 +108,6 @@ void maybe_init_realtime_session() {
   } catch (const std::exception &e) {
     const std::string what = e.what();
     g_realtime_session.reset();
-    if (g_realtime_session_owns_shared_ring_mode) {
-      if (auto set_mode_fn = resolve_set_shared_ring_mode())
-        (void)set_mode_fn(0);
-      g_realtime_session_owns_shared_ring_mode = false;
-    }
     throw std::runtime_error("CUDAQ_QEC_REALTIME_MODE=inproc_rpc requested but "
                              "qec_realtime_session::initialize() threw: " +
                              what);
@@ -145,11 +123,6 @@ void maybe_finalize_realtime_session() {
     }
     g_realtime_session.reset();
   }
-  if (g_realtime_session_owns_shared_ring_mode) {
-    if (auto set_mode_fn = resolve_set_shared_ring_mode())
-      (void)set_mode_fn(0);
-  }
-  g_realtime_session_owns_shared_ring_mode = false;
 }
 
 } // namespace
