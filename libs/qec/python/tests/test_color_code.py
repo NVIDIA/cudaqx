@@ -622,14 +622,17 @@ def _dem_signature(dem_text, stim_mod):
     return sig
 
 
-@pytest.mark.parametrize("basis", ["Z", "X"])
-def test_dem_matches_reference_golden(basis):
+@pytest.mark.parametrize("d,rounds,basis", [(5, 5, "Z"), (5, 5, "X")])
+def test_dem_matches_reference_golden(d, rounds, basis):
+    # d=5 is the smallest distance exercising every structural element: bulk
+    # weight-6 plaquettes of all three colors plus every boundary type.
     stim_mod = pytest.importorskip("stim")
-    with open(os.path.join(_DATA_DIR,
-                           f"superdense_golden_d3_r3_{basis}.dem")) as f:
+    with open(
+            os.path.join(_DATA_DIR,
+                         f"superdense_golden_d{d}_r{rounds}_{basis}.dem")) as f:
         golden = f.read()
     golden = "\n".join(l for l in golden.splitlines() if not l.startswith("#"))
-    plan = SuperdensePlan(3, 3, basis)
+    plan = SuperdensePlan(d, rounds, basis)
     # An (empty) noise model must be passed or in-kernel apply_noise is a
     # silent no-op and the DEM comes back with zero error mechanisms.
     ours_text = cudaq.dem_from_kernel(superdense_memory,
@@ -644,6 +647,56 @@ def test_dem_matches_reference_golden(basis):
     for k in ref:
         assert np.isclose(ref[k], got[k], atol=1e-6, rtol=1e-4), (
             f"probability mismatch at {k}: ref={ref[k]}, ours={got[k]}")
+
+
+_COORD_COLOR = {'red': 0., 'green': 1., 'blue': 2.}
+
+
+@pytest.mark.parametrize("d", [3, 5, 7])
+@pytest.mark.parametrize("basis", ["Z", "X"])
+def test_detector_coords_contract(d, basis):
+    # Emission-order blocks: round-0 (P, memory basis), then per round r >= 1
+    # an X block (P) followed by a Z block (P), then the final block (P,
+    # memory basis). Chromobius annotation: c = color + 3 for Z-checks.
+    rounds = 4
+    plan = SuperdensePlan(d, rounds, basis)
+    P = plan.grid.num_plaquettes
+    assert len(plan.detector_coords) == len(plan.detectors) == 2 * P * rounds
+
+    def block_is_z(det_idx):
+        if det_idx < P:
+            return basis == "Z"
+        if det_idx >= 2 * P * (rounds - 1) + P:
+            return basis == "Z"
+        return ((det_idx - P) // P) % 2 == 1
+
+    for i, (gr, gc, t, c) in enumerate(plan.detector_coords):
+        p = i % P
+        plaq = plan.grid.plaquettes[p]
+        assert (gr, gc) == tuple(map(float, plaq['grid_pos']))
+        is_final = i >= 2 * P * (rounds - 1) + P
+        assert t == (1.0 if is_final else 0.0)
+        expected_c = _COORD_COLOR[plaq['color']] + (3.0
+                                                    if block_is_z(i) else 0.0)
+        assert c == expected_c
+
+
+@pytest.mark.parametrize("basis,expected", [("Z", 0), ("X", 0)])
+def test_minimal_two_round_experiment(basis, expected):
+    # rounds=2 is the smallest experiment: round 0 plus the final round, with
+    # no bulk rounds in between.
+    dem = superdense_dem(3, 2, basis, p_cx=0.01)
+    plan = SuperdensePlan(3, 2, basis)
+    assert dem.num_detectors() == len(plan.detectors) == 12
+    assert dem.num_error_mechanisms() > 0
+    syndromes, data, logical = superdense_sample(3,
+                                                 2,
+                                                 basis,
+                                                 p_cx=0.0,
+                                                 shots=30)
+    assert syndromes.shape == (30, 12)
+    assert not syndromes.any()
+    assert np.all(logical == expected)
 
 
 if __name__ == "__main__":
