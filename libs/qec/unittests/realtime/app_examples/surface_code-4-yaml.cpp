@@ -237,7 +237,8 @@ build_cudaqx_D_sparse(const cudaq::M2DSparseMatrix &m2d) {
 }
 
 // One decoder entry per patch: entry i (decoder id i) gets decoder_types[i].
-// Entries carry decoder-appropriate representations of ONE source DEM text:
+// Entries carry decoder-appropriate representations of one source DEM per
+// patch, allowing each logical patch to use its own physical error rate:
 // matching-family entries (pymatching / trt_decoder) the decomposed graph-like
 // columns (`dem`; each component carries the parent instruction's probability
 // -- the documented lossy approximation matching requires), BP-family entries
@@ -246,18 +247,18 @@ build_cudaqx_D_sparse(const cudaq::M2DSparseMatrix &m2d) {
 // identical too; a trt+Ising entry substitutes an Ising-ordered D over the
 // same measurement span. The error-column representations are intentionally
 // not probabilistically identical.
-void save_dem_to_file(const cudaq::qec::detector_error_model &dem,
-                      const cudaq::qec::detector_error_model &dem_bp,
-                      std::string dem_filename,
-                      const std::vector<std::string> &decoder_types,
-                      bool use_relay_bp, const std::string &onnx_path,
-                      const cudaq::M2DSparseMatrix &m2d,
-                      const std::string &ising_bundle, int distance,
-                      std::size_t numRounds) {
+void save_dem_to_file(
+    const std::vector<cudaq::qec::detector_error_model> &dems,
+    const std::vector<cudaq::qec::detector_error_model> &dems_bp,
+    std::string dem_filename, const std::vector<std::string> &decoder_types,
+    bool use_relay_bp, const std::string &onnx_path,
+    const cudaq::M2DSparseMatrix &m2d, const std::string &ising_bundle,
+    int distance, std::size_t numRounds) {
   cudaq::qec::decoding::config::multi_decoder_config multi_config;
   for (uint64_t i = 0; i < decoder_types.size(); i++) {
     const std::string &decoder_type = decoder_types[i];
-    const auto &edem = (decoder_type == "nv-qldpc-decoder") ? dem_bp : dem;
+    const auto &edem =
+        (decoder_type == "nv-qldpc-decoder") ? dems_bp[i] : dems[i];
     cudaq::qec::decoding::config::decoder_config config;
     config.id = i;
     config.type = decoder_type;
@@ -630,7 +631,8 @@ demo_circuit_qpu(bool allow_device_calls,
                  std::size_t numRounds, std::size_t numLogical,
                  const std::vector<std::size_t> &cnot_schedX_flat,
                  const std::vector<std::size_t> &cnot_schedZ_flat,
-                 double p_spam, bool apply_corrections) {
+                 const std::vector<double> &p_spam_per_patch,
+                 bool apply_corrections) {
   // ret[i] = patch i's final data bits (numData bits, enforced < 64 in
   // main()); ret[numLogical] = per-patch correction bitmask (bit i set iff
   // decoder i predicted a logical flip).
@@ -664,7 +666,8 @@ demo_circuit_qpu(bool allow_device_calls,
     syndrome_round_once(data.slice(i * numData, numData),
                         xstab_anc.slice(i * numAncx, numAncx),
                         zstab_anc.slice(i * numAncz, numAncz), cnot_schedX_flat,
-                        cnot_schedZ_flat, /*do_spam=*/false, p_spam,
+                        cnot_schedZ_flat, /*do_spam=*/false,
+                        p_spam_per_patch[i],
                         /*do_enqueue=*/allow_device_calls, i,
                         /*round_counter=*/0);
   }
@@ -688,7 +691,8 @@ demo_circuit_qpu(bool allow_device_calls,
                           xstab_anc.slice(i * numAncx, numAncx),
                           zstab_anc.slice(i * numAncz, numAncz),
                           cnot_schedX_flat, cnot_schedZ_flat, /*do_spam=*/true,
-                          p_spam, /*do_enqueue=*/allow_device_calls, i,
+                          p_spam_per_patch[i],
+                          /*do_enqueue=*/allow_device_calls, i,
                           /*round_counter=*/round + 1);
     }
   }
@@ -801,7 +805,8 @@ dem_gen_circuit(const cudaq::qec::code::one_qubit_encoding &statePrep,
 } // namespace cudaq::qec::qpu
 
 void demo_circuit_host(const cudaq::qec::code &code, int distance,
-                       double p_spam, cudaq::qec::operation statePrep,
+                       const std::vector<double> &p_spam_per_patch,
+                       cudaq::qec::operation statePrep,
                        std::size_t numShots, std::size_t numRounds,
                        std::size_t numLogical, std::string dem_filename,
                        bool save_dem, bool load_dem,
@@ -883,10 +888,12 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
                                std::to_string(rc) + ")");
 #endif
   } else {
-    if (p_spam == 0.0)
-      throw std::runtime_error(
-          "--p_spam must be > 0 to generate a DEM (a zero-noise model has no "
-          "error mechanisms)");
+    for (std::size_t i = 0; i < p_spam_per_patch.size(); ++i)
+      if (p_spam_per_patch[i] == 0.0)
+        throw std::runtime_error(
+            "--p_spam must be > 0 to generate a DEM "
+            "(--p_spam_per_patch patch " +
+            std::to_string(i) + " has a zero-noise model)");
 
     // Left-column data qubits are the Z logical for XV (and the legacy ZH).
     // This must track the code's Z observable (code.get_observables_z()); if
@@ -924,26 +931,36 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
     const bool haveBp = contains_type("nv-qldpc-decoder");
     const bool decompose_errors = haveMatching;
     cudaq::M2DSparseMatrix m2d;
-    cudaq::M2OSparseMatrix m2o;
-    const std::string dem_text = cudaq::dem_from_kernel(
-        cudaq::qec::qpu::dem_gen_circuit, &noise,
-        cudaq::dem_options{.decompose_errors = decompose_errors}, m2d, m2o,
-        prep, numData, numAncx, numAncz, pairedRounds, cnot_schedX_flat,
-        cnot_schedZ_flat, p_spam, z_logical_indices, z_supports_flat,
-        z_supports_offsets);
-    dem = cudaq::qec::dem_from_stim_text(
-        dem_text, /*use_decomp_suggestions=*/decompose_errors);
-    // Dual parse for mixed lists: ONE source DEM text, two decoder-appropriate
-    // representations. Parsed WITH decomposition suggestions: graph-like
-    // columns where each component carries the parent probability (the
-    // documented lossy approximation matching requires). Parsed WITHOUT: one
-    // hyperedge column per instruction with its joint probability (BP's
-    // representation). Same detectors and m2d either way.
-    cudaq::qec::detector_error_model dem_undecomposed;
+    std::vector<cudaq::qec::detector_error_model> patch_dems;
+    std::vector<cudaq::qec::detector_error_model> patch_dems_undecomposed;
+    patch_dems.reserve(numLogical);
+    patch_dems_undecomposed.reserve(numLogical);
     const bool dual_parse = haveMatching && haveBp;
-    if (dual_parse)
-      dem_undecomposed = cudaq::qec::dem_from_stim_text(
-          dem_text, /*use_decomp_suggestions=*/false);
+    for (std::size_t patch = 0; patch < numLogical; ++patch) {
+      cudaq::M2DSparseMatrix patch_m2d;
+      cudaq::M2OSparseMatrix patch_m2o;
+      const std::string dem_text = cudaq::dem_from_kernel(
+          cudaq::qec::qpu::dem_gen_circuit, &noise,
+          cudaq::dem_options{.decompose_errors = decompose_errors}, patch_m2d,
+          patch_m2o, prep, numData, numAncx, numAncz, pairedRounds,
+          cnot_schedX_flat, cnot_schedZ_flat, p_spam_per_patch[patch],
+          z_logical_indices, z_supports_flat, z_supports_offsets);
+      if (patch == 0)
+        m2d = patch_m2d;
+      else if (patch_m2d.rows != m2d.rows)
+        throw std::runtime_error(
+            "per-patch DEMs produced different measurement mappings");
+
+      auto patch_dem = cudaq::qec::dem_from_stim_text(
+          dem_text, /*use_decomp_suggestions=*/decompose_errors);
+      patch_dems.push_back(patch_dem);
+      patch_dems_undecomposed.push_back(
+          dual_parse
+              ? cudaq::qec::dem_from_stim_text(
+                    dem_text, /*use_decomp_suggestions=*/false)
+              : patch_dem);
+    }
+    dem = patch_dems.front();
 
     numSyndromesPerRound = numAncx + numAncz;
     printf("numSyndromesPerRound: %ld\n", numSyndromesPerRound);
@@ -954,7 +971,7 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
     dem.observables_flips_matrix.dump_bits();
 
     if (save_dem) {
-      save_dem_to_file(dem, dual_parse ? dem_undecomposed : dem, dem_filename,
+      save_dem_to_file(patch_dems, patch_dems_undecomposed, dem_filename,
                        decoder_types, use_relay_bp, onnx_path, m2d,
                        ising_bundle, distance, numRounds);
       return;
@@ -1281,11 +1298,13 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
             ? cudaq::run(numShots, cudaq::qec::qpu::demo_circuit_qpu,
                          /*allow_device_calls=*/true, prep, numData, numAncx,
                          numAncz, numRounds, numLogical, cnot_schedX_flat,
-                         cnot_schedZ_flat, p_spam, /*apply_corrections=*/true)
+                         cnot_schedZ_flat, p_spam_per_patch,
+                         /*apply_corrections=*/true)
             : cudaq::run(numShots, noise, cudaq::qec::qpu::demo_circuit_qpu,
                          /*allow_device_calls=*/true, prep, numData, numAncx,
                          numAncz, numRounds, numLogical, cnot_schedX_flat,
-                         cnot_schedZ_flat, p_spam, /*apply_corrections=*/true);
+                         cnot_schedZ_flat, p_spam_per_patch,
+                         /*apply_corrections=*/true);
   }
   printf("Result size: %ld\n", run_result.size());
   std::vector<std::vector<uint8_t>> logical_results;
@@ -1350,6 +1369,9 @@ void show_help() {
   printf("  --num_shots <int>   Number of shots. Default: 10\n");
   printf(
       "  --p_spam <double>   SPAM probability. Range[0, 1]. Default: 0.01\n");
+  printf("  --p_spam_per_patch <list> Comma-separated SPAM probabilities; "
+         "one per logical patch, or one value replicated to all patches. "
+         "Overrides --p_spam.\n");
   printf("  --num_logical <int> Number of logical qubits. Default: 1\n");
   printf("  --num_rounds <int>  Number of measurement rounds. Default: "
          "distance\n");
@@ -1389,6 +1411,7 @@ int main(int argc, char **argv) {
   int num_shots = 10;
   int distance = 5;
   double p_spam = 0.01;
+  std::vector<double> p_spam_per_patch;
   int num_logical = 1;
   int num_rounds = -1; // Will be set to distance if not specified
   bool save_dem = false;
@@ -1452,6 +1475,31 @@ int main(int argc, char **argv) {
       std::exit(1);
     }
   };
+  auto require_double_list = [&](const char *flag) {
+    const std::string value = require_value(flag);
+    std::vector<double> parsed_values;
+    std::stringstream stream(value);
+    std::string token;
+    while (std::getline(stream, token, ',')) {
+      try {
+        std::size_t pos = 0;
+        double parsed = std::stod(token, &pos);
+        if (token.empty() || pos != token.size())
+          throw std::invalid_argument(token);
+        parsed_values.push_back(parsed);
+      } catch (const std::exception &) {
+        printf("Error: %s expects a comma-separated list of numbers, got "
+               "'%s'.\n",
+               flag, value.c_str());
+        std::exit(1);
+      }
+    }
+    if (parsed_values.empty() || value.back() == ',') {
+      printf("Error: %s expects a non-empty comma-separated list.\n", flag);
+      std::exit(1);
+    }
+    return parsed_values;
+  };
   for (i = 1; i < argc; i++) {
     std::string arg = argv[i];
     if (arg == "--distance") {
@@ -1460,6 +1508,9 @@ int main(int argc, char **argv) {
       num_shots = require_int("--num_shots");
     } else if (arg == "--p_spam") {
       p_spam = require_double("--p_spam");
+    } else if (arg == "--p_spam_per_patch" ||
+               arg == "--p-spam-per-patch") {
+      p_spam_per_patch = require_double_list("--p_spam_per_patch");
     } else if (arg == "--help" || arg == "-h") {
       show_help();
       return 0;
@@ -1556,6 +1607,25 @@ int main(int argc, char **argv) {
     printf("Error: --p_spam must be a finite value in [0, 1] (got %g).\n",
            p_spam);
     return 1;
+  }
+  if (p_spam_per_patch.empty())
+    p_spam_per_patch.assign(num_logical, p_spam);
+  else if (p_spam_per_patch.size() == 1 && num_logical > 1)
+    p_spam_per_patch.assign(num_logical, p_spam_per_patch.front());
+  else if (p_spam_per_patch.size() != static_cast<std::size_t>(num_logical)) {
+    printf("Error: --p_spam_per_patch lists %zu values; expected 1 or "
+           "num_logical (%d).\n",
+           p_spam_per_patch.size(), num_logical);
+    return 1;
+  }
+  for (std::size_t patch = 0; patch < p_spam_per_patch.size(); ++patch) {
+    const double value = p_spam_per_patch[patch];
+    if (!std::isfinite(value) || value < 0.0 || value > 1.0) {
+      printf("Error: --p_spam_per_patch[%zu] must be a finite value in [0, "
+             "1] (got %g).\n",
+             patch, value);
+      return 1;
+    }
   }
 
   // Set defaults if not specified
@@ -1700,9 +1770,11 @@ int main(int argc, char **argv) {
     }
   }
 
-  printf("Running with p_spam = %f, distance = %d, num_shots = %d, num_rounds "
-         "= %d\n",
-         p_spam, distance, num_shots, num_rounds);
+  printf("Running with p_spam_per_patch = [");
+  for (std::size_t patch = 0; patch < p_spam_per_patch.size(); ++patch)
+    printf("%s%g", patch ? ", " : "", p_spam_per_patch[patch]);
+  printf("], distance = %d, num_shots = %d, num_rounds = %d\n", distance,
+         num_shots, num_rounds);
 
   // Build the code at code_rotation XV (the predecoder's training orientation),
   // which sets the geometry and observable basis. The DEM-generation kernel
@@ -1719,11 +1791,11 @@ int main(int argc, char **argv) {
         cudaqx::heterogeneous_map{{"distance", distance},
                                   {"orientation", std::string("XV")}});
 
-    demo_circuit_host(*code, distance, p_spam, cudaq::qec::operation::prep0,
-                      num_shots, num_rounds, num_logical, dem_filename,
-                      save_dem, load_dem, decoder_types, save_syndrome,
-                      load_syndrome, syndrome_filename, use_relay_bp, onnx_path,
-                      ising_bundle);
+    demo_circuit_host(*code, distance, p_spam_per_patch,
+                      cudaq::qec::operation::prep0, num_shots, num_rounds,
+                      num_logical, dem_filename, save_dem, load_dem,
+                      decoder_types, save_syndrome, load_syndrome,
+                      syndrome_filename, use_relay_bp, onnx_path, ising_bundle);
   } catch (const std::exception &e) {
     // Configuration, channel, and geometry failures surface as a clean error
     // rather than an uncaught-exception abort.

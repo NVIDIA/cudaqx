@@ -159,7 +159,9 @@ concat = helper.make_node("Concat", ["pre_l", "input"], ["output"], axis=1)
 graph = helper.make_graph(
     [zero, concat], "trt_identity_predecoder", [input_info], [output_info])
 model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 19)])
-model.ir_version = 10
+# IR 9 is sufficient for opset 19 and remains readable by the ONNX checker in
+# the CUDA-QX development image.
+model.ir_version = 9
 onnx.checker.check_model(model)
 onnx.save(model, output_path)
 PY
@@ -228,6 +230,34 @@ if [[ "$MULTI_TYPE" -eq 1 && ",$DECODER_TYPE," == *",nv-qldpc-decoder,"* ]] \
     exit 1
   fi
   echo "Dual-parse structural check: nv block_size $nv_bs < matching $match_bs -- OK"
+fi
+
+# The hard-patch experiment must carry distinct decoder priors, not merely
+# inject different runtime noise into three identically configured decoders.
+if [[ -n "${CHECK_HARD_PATCH_MODELS:-}" ]]; then
+  PYTHON_BIN=${PYTHON:-python3}
+  "$PYTHON_BIN" - "$CONFIG_FILE" <<'PY'
+import re
+import sys
+
+text = open(sys.argv[1], encoding="utf-8").read()
+blocks = re.findall(r"(?ms)^  - id:\s+(-?\d+)\n(.*?)(?=^  - id:|\Z)", text)
+priors = {}
+for decoder_id, block in blocks:
+    match = re.search(r"error_rate_vec:\s*\[([^\]]*)\]", block, re.S)
+    if match:
+        priors[int(decoder_id)] = tuple(
+            round(float(value.strip()), 12)
+            for value in match.group(1).split(",") if value.strip())
+
+if set(priors) != {0, 1, 2}:
+    raise SystemExit(f"expected priors for decoder ids 0,1,2; got {sorted(priors)}")
+if priors[0] != priors[2]:
+    raise SystemExit("easy-patch decoder priors differ")
+if priors[1] == priors[0]:
+    raise SystemExit("hard-patch decoder priors are identical to easy patches")
+print("Hard-patch model check: decoder 1 priors differ; decoders 0 and 2 match -- OK")
+PY
 fi
 
 if [[ -n "${CHECK_MISSING_SERVER_PORT:-}" ]]; then

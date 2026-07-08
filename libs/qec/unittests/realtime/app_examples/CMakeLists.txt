@@ -648,8 +648,8 @@ function(add_surface_code_4_yaml_test test_suffix distance num_rounds
     PROPERTIES ENVIRONMENT "${_sc4_env}")
 endfunction()
 
-function(add_surface_code_4_yaml_external_test test_suffix decoder_type
-         num_shots onnx_path)
+function(add_surface_code_4_yaml_external_test test_suffix distance num_rounds
+         decoder_type num_shots onnx_path)
   set(_sc4_external_env
     "QEC_DECODING_DAEMON=$<TARGET_FILE:qec_decoding_daemon>")
   if(Python_Interpreter_FOUND)
@@ -662,7 +662,7 @@ function(add_surface_code_4_yaml_external_test test_suffix decoder_type
       ${CMAKE_COMMAND} -E env ${_sc4_external_env}
       bash "${CMAKE_CURRENT_SOURCE_DIR}/surface_code-4-yaml-test.sh"
         $<TARGET_FILE:surface_code-4-yaml-cqr>
-        3 3 ${decoder_type} ${num_shots} "${onnx_path}"
+        ${distance} ${num_rounds} ${decoder_type} ${num_shots} "${onnx_path}"
         --num_logical 3 ${ARGN}
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
   )
@@ -720,7 +720,7 @@ if(TARGET cudaq-qec-trt-decoder AND _SC4_TRY_TRT_TEST)
 endif()
 
 if(TARGET surface_code-4-yaml-cqr)
-  add_surface_code_4_yaml_external_test(three-way-overlap
+  add_surface_code_4_yaml_external_test(three-way-overlap 3 3
     "concurrency_test_decoder,concurrency_test_decoder,concurrency_test_decoder"
     2 "")
   set_property(TEST app_examples.surface_code-4-yaml-cqr-three-way-overlap
@@ -728,11 +728,46 @@ if(TARGET surface_code-4-yaml-cqr)
       "QEC_CONCURRENCY_TEST_DECODERS=3;REQUIRE_DECODER_CONCURRENCY=3;EXPECTED_BARRIER_COMPLETIONS=2;EXPECTED_DECODER_CORRECTIONS=0,2,0;EXPECTED_DAEMON_DECODER_CONSTRUCTIONS=3;CHECK_MISSING_SERVER_PORT=1;SKIP_LOGICAL_ERROR_CEILING=1")
 
   if(TARGET cudaq-qec-trt-decoder AND _SC4_TRY_TRT_TEST)
-    add_surface_code_4_yaml_external_test(happy-path
+    add_surface_code_4_yaml_external_test(happy-path 3 3
       "pymatching,trt_decoder,pymatching" 200 AUTO)
     set_property(TEST app_examples.surface_code-4-yaml-cqr-happy-path
       APPEND PROPERTY ENVIRONMENT
         "REQUIRE_TRT_EXECUTION=1")
+  endif()
+
+  # A real-workload skew case: all three patches use PyMatching, but patch 1
+  # receives a much higher physical error rate and a correspondingly generated
+  # decoder model. This exercises independent daemon workers without a
+  # test-only delay in the decoder implementation.
+  add_surface_code_4_yaml_external_test(hard-patch-pymatching 7 7
+    "pymatching,pymatching,pymatching" 100 ""
+    --p_spam_per_patch 0.001,0.20,0.001)
+  set_property(TEST app_examples.surface_code-4-yaml-cqr-hard-patch-pymatching
+    APPEND PROPERTY ENVIRONMENT
+      "CHECK_HARD_PATCH_MODELS=1;REQUIRE_DECODER_CONCURRENCY=2;SKIP_LOGICAL_ERROR_CEILING=1")
+
+  # Ising bundles are generated outside this repository. Supplying a bundle at
+  # configure time registers an external-daemon test using the same identity
+  # TRT predecoder as the mocked happy path, but with Ising H/O/priors/D.
+  set(QEC_SURFACE_CODE_4_ISING_BUNDLE "" CACHE PATH
+      "Ising d/T/Z bundle used by the external surface-code example")
+  set(QEC_SURFACE_CODE_4_ISING_DISTANCE 7 CACHE STRING
+      "Distance encoded by QEC_SURFACE_CODE_4_ISING_BUNDLE")
+  set(QEC_SURFACE_CODE_4_ISING_ROUNDS 7 CACHE STRING
+      "Round count encoded by QEC_SURFACE_CODE_4_ISING_BUNDLE")
+  set(QEC_SURFACE_CODE_4_ISING_P_SPAM "0.01" CACHE STRING
+      "Runtime SPAM rate matching the Ising bundle priors")
+  if(QEC_SURFACE_CODE_4_ISING_BUNDLE
+     AND TARGET cudaq-qec-trt-decoder AND _SC4_TRY_TRT_TEST)
+    add_surface_code_4_yaml_external_test(ising-identity
+      ${QEC_SURFACE_CODE_4_ISING_DISTANCE}
+      ${QEC_SURFACE_CODE_4_ISING_ROUNDS}
+      "pymatching,trt_decoder,pymatching" 20 AUTO
+      --ising_bundle "${QEC_SURFACE_CODE_4_ISING_BUNDLE}"
+      --p_spam_per_patch "${QEC_SURFACE_CODE_4_ISING_P_SPAM}")
+    set_property(TEST app_examples.surface_code-4-yaml-cqr-ising-identity
+      APPEND PROPERTY ENVIRONMENT
+        "REQUIRE_TRT_EXECUTION=1;SKIP_LOGICAL_ERROR_CEILING=1")
   endif()
 endif()
 
@@ -907,6 +942,18 @@ _sc4_reject(p-spam-out-of-range "--p_spam must be a finite value in [0, 1]"
 _sc4_reject(p-spam-nan "--p_spam must be a finite value in [0, 1]"
   --distance 3 --num_rounds 3 --p_spam nan --decoder_type pymatching
   --save_dem ${_sc4_neg_dir}/psnan.yml)
+_sc4_reject(p-spam-per-patch-length "expected 1 or num_logical"
+  --distance 3 --num_rounds 3 --num_logical 3
+  --p_spam_per_patch 0.01,0.20 --decoder_type pymatching
+  --save_dem ${_sc4_neg_dir}/psplen.yml)
+_sc4_reject(p-spam-per-patch-malformed "comma-separated list of numbers"
+  --distance 3 --num_rounds 3 --num_logical 3
+  --p_spam_per_patch 0.01,nope,0.01 --decoder_type pymatching
+  --save_dem ${_sc4_neg_dir}/pspbad.yml)
+_sc4_reject(p-spam-per-patch-out-of-range "must be a finite value in [0, 1]"
+  --distance 3 --num_rounds 3 --num_logical 3
+  --p_spam_per_patch 0.01,1.5,0.01 --decoder_type pymatching
+  --save_dem ${_sc4_neg_dir}/psprange.yml)
 # p_spam = 0 is in [0, 1] (valid for a --yaml run) but cannot generate a DEM;
 # generation must fail with a nonzero status, not exit 0 with no config file.
 _sc4_reject(p-spam-zero-generation "--p_spam must be > 0 to generate"
