@@ -148,6 +148,10 @@ static void dispatch_rpc(const void *rx_slot, void *tx_slot,
       capture_enqueue_syndromes(rx_slot, slot_size);
     g_transceiver->inject(rx_slot, tx_slot, slot_size, function_id);
   } catch (const std::exception &e) {
+    // Log via the non-throwing cudaq::qec::error() free function, NOT the
+    // CUDA_QEC_ERROR macro: the macro throws, and an exception escaping this
+    // handler into the transport dispatcher loop would terminate the process
+    // instead of returning the error response written below.
     cudaq::qec::error("decoder-server RPC failed: {}", e.what());
     write_error_response(rx_slot, tx_slot, slot_size, kStatusHandlerException);
   } catch (...) {
