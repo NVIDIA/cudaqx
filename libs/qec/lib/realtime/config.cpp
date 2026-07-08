@@ -864,10 +864,9 @@ static std::unique_ptr<multi_decoder_config> g_last_multi_decoder_config;
 int configure_decoders(multi_decoder_config &config) {
   CUDA_QEC_INFO("Initializing realtime decoding library with config object");
   g_last_multi_decoder_config = std::make_unique<multi_decoder_config>(config);
-  // Register the decoder provider to inject the decoder configuration into
-  // the job requests.
-  cudaq::registerExtraPayloadProvider(
-      std::make_unique<decoder_provider>(config));
+  // Publish the decoder configuration so CUDA-Q can inject it into
+  // remote-target job requests. The provider is installed by the QEC library
+  // integration when available; this publisher is a no-op otherwise.
   cudaq::qec::publish_decoder_config_payload(config.to_yaml_str());
   return cudaq::qec::decoding::host::configure_decoders(config);
 }

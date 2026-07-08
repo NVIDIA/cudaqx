@@ -594,7 +594,6 @@ if(TARGET qec_decoding_daemon
       ${CMAKE_SOURCE_DIR}/libs/core/include)
   target_link_libraries(cudaq-qec-concurrency-test-decoder
     PUBLIC
-      cudaqx-core
       cudaq::cudaq-operator
     PRIVATE
       cudaq::cudaq-common

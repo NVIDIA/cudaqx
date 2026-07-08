@@ -46,7 +46,6 @@ target_link_libraries(test_decoders_yaml PRIVATE
   GTest::gtest_main
   cudaq-qec
   cudaq-qec-decoder-server
-  cudaq-qec-decoders
   cudaq-qec-realtime-decoding
   cudaq-qec-realtime-decoding-simulation
   cudaq::cudaq)
