@@ -262,8 +262,24 @@ install(TARGETS cudaq-qec-realtime-decoding
 # ---------------------------------------------------------------------------
 # RealtimePipeline shared library
 # Requires pre-installed cudaq-realtime (set CUDAQ_REALTIME_ROOT)
+#
+# EXPERIMENTAL / temporarily disabled: realtime_pipeline.cu relies on host
+# dispatch API surface (skip_stream_sweep, caller-owned worker streams, and
+# per-worker pre/post-launch hooks) that was removed upstream in CUDA-Q PR4770
+# ("Split graph launch dispatch from the host ring loop").  Until it is ported
+# to the new graph_launch_engine API, keep this target off by default so CI
+# builds green.  Dependent unit tests (test_realtime_pipeline,
+# test_realtime_predecoder_w_pymatching, hololink bridge) auto-skip when this
+# target does not exist.
 # ---------------------------------------------------------------------------
-if(CMAKE_CUDA_COMPILER AND CUDAQ_REALTIME_INCLUDE_DIR)
+option(CUDAQX_QEC_ENABLE_REALTIME_PIPELINE
+  "Build the experimental cudaq-realtime-pipeline library (needs porting to \
+the post-PR4770 CUDA-Q graph_launch_engine API)" OFF)
+
+if(NOT CUDAQX_QEC_ENABLE_REALTIME_PIPELINE)
+  message(STATUS "RealtimePipeline: skipping (experimental; disabled by "
+                 "default -- set CUDAQX_QEC_ENABLE_REALTIME_PIPELINE=ON to build)")
+elseif(CMAKE_CUDA_COMPILER AND CUDAQ_REALTIME_INCLUDE_DIR)
     cudaq_qec_find_realtime_library(_CUDAQ_RT_LIB
       NAMES cudaq-realtime
       PATH_SUFFIXES lib

@@ -503,7 +503,9 @@ void qec_realtime_session::finalize() {
   }
 
   std::memset(&ringbuffer_, 0, sizeof(ringbuffer_));
-  std::memset(&host_ctx_, 0, sizeof(host_ctx_));
+  std::memset(&host_table_, 0, sizeof(host_table_));
+  std::memset(&host_config_, 0, sizeof(host_config_));
+  host_engine_ = nullptr;
 
   if (was_initialized)
     CUDA_QEC_INFO("qec_realtime_session: finalized");
@@ -880,30 +882,32 @@ void qec_realtime_session::start_device_loop() {
 void qec_realtime_session::start_host_loop() {
   // HOST mode only: inline HOST_CALL handlers, no graph worker pool.  DEVICE
   // mode uses the self-relaunching device-graph scheduler launched in
-  // start_device_loop(), so this is reached only when device_mode_ is false.
-  std::memset(&host_ctx_, 0, sizeof(host_ctx_));
-  host_ctx_.ringbuffer = ringbuffer_;
-  host_ctx_.config.num_slots = static_cast<std::uint32_t>(num_slots_);
-  host_ctx_.config.slot_size = static_cast<std::uint32_t>(slot_size_);
-  host_ctx_.config.dispatch_path = CUDAQ_DISPATCH_PATH_HOST;
-  host_ctx_.config.dispatch_mode = CUDAQ_DISPATCH_HOST_CALL;
-  host_ctx_.config.skip_tx_markers = 1;
+  // start_device_loop() (see initialize()'s dispatch), so this is reached only
+  // when device_mode_ is false.  Every table entry is HOST_CALL, so a
+  // GRAPH_LAUNCH engine would build no workers -- we drive the ring loop with a
+  // NULL engine (the loop runs the HOST_CALL handlers inline).
+  std::memset(&host_config_, 0, sizeof(host_config_));
+  host_config_.num_slots = static_cast<std::uint32_t>(num_slots_);
+  host_config_.slot_size = static_cast<std::uint32_t>(slot_size_);
+  host_config_.dispatch_path = CUDAQ_DISPATCH_PATH_HOST;
+  host_config_.dispatch_mode = CUDAQ_DISPATCH_HOST_CALL;
+  host_config_.skip_tx_markers = 1;
   // Strict-FIFO: the host loop is the sole consumer and its current_slot
   // already advances monotonically; with shared-ring scanning OFF it simply
-  // waits at current_slot for the next frame.  The rpc_producer now advances
-  // its slot monotonically too (see producer_cursor()), so producer and
-  // consumer walk the ring in lockstep -- no scan needed.
-  host_ctx_.config.shared_ring_mode = 0;
-  host_ctx_.function_table.entries = function_table_host_;
-  host_ctx_.function_table.count =
-      static_cast<std::uint32_t>(function_table_count_);
-  host_ctx_.shutdown_flag = &shutdown_flag_;
-  host_ctx_.stats_counter = &host_stats_counter_;
-  host_ctx_.skip_stream_sweep = true;
+  // waits at current_slot for the next frame.  The rpc_producer advances its
+  // slot monotonically too (see producer_cursor()), so producer and consumer
+  // walk the ring in lockstep -- no scan needed.
+  host_config_.shared_ring_mode = 0;
+  host_table_.entries = function_table_host_;
+  host_table_.count = static_cast<std::uint32_t>(function_table_count_);
+  host_engine_ = nullptr;
   shutdown_flag_ = 0;
 
-  host_loop_thread_ =
-      std::thread([this]() { cudaq_host_dispatcher_loop(&host_ctx_); });
+  host_loop_thread_ = std::thread([this]() {
+    cudaq_host_ring_dispatch_loop(&ringbuffer_, &host_table_, &host_config_,
+                                  /*engine=*/nullptr, &shutdown_flag_,
+                                  &host_stats_counter_);
+  });
 }
 
 //==============================================================================
@@ -954,24 +958,11 @@ void qec_realtime_session::stop_loops() {
     device_manager_ = nullptr;
   }
 
-  for (auto s : host_worker_streams_) {
-    if (s)
-      cudaStreamDestroy(s);
-  }
-  host_worker_streams_.clear();
-  host_workers_.clear();
-
-  delete host_idle_mask_storage_;
-  host_idle_mask_storage_ = nullptr;
-  delete host_live_dispatched_storage_;
-  host_live_dispatched_storage_ = nullptr;
-  delete[] host_inflight_slot_tags_;
-  host_inflight_slot_tags_ = nullptr;
-
-  if (io_ctxs_host_) {
-    cudaFreeHost(io_ctxs_host_);
-    io_ctxs_host_ = nullptr;
-    io_ctxs_dev_ = nullptr;
+  // The engine owns the worker streams, idle mask, inflight-slot tags, and
+  // GraphIOContext array; destroy it after the driving loop has stopped.
+  if (host_engine_) {
+    cudaq_graph_launch_engine_destroy(host_engine_);
+    host_engine_ = nullptr;
   }
 }
 

@@ -21,7 +21,7 @@
 #include "cudaq/qec/decoder.h"
 #include "cudaq/realtime/daemon/dispatcher/cudaq_realtime.h"
 #include "cudaq/realtime/daemon/dispatcher/dispatch_kernel_launch.h"
-#include "cudaq/realtime/daemon/dispatcher/host_dispatcher.h"
+#include "cudaq/realtime/daemon/dispatcher/graph_launch_engine.h"
 
 #include <cstdint>
 #include <memory>
@@ -149,15 +149,6 @@ public:
   std::size_t producer_cursor() const { return producer_cursor_; }
   void set_producer_cursor(std::size_t slot) { producer_cursor_ = slot; }
 
-  /// @brief (DEVICE mode) CUDA stream backing the HOST_LOOP worker for the
-  /// decoder at index `decoder_id`.  Returns nullptr in HOST mode, out of
-  /// range, or for a decoder that did not capture a graph.
-  cudaStream_t host_worker_stream(std::size_t decoder_id) const {
-    return decoder_id < host_worker_streams_.size()
-               ? host_worker_streams_[decoder_id]
-               : nullptr;
-  }
-
   /// @brief (DEVICE mode) Number of decoders that captured a CUDA graph.
   std::size_t num_decoders_with_graph() const {
     return num_decoders_with_graph_;
@@ -249,21 +240,18 @@ private:
   int *shutdown_flag_dev_ = nullptr;
 
   // ---- HOST_LOOP wiring (both modes) ----
-  cudaq_host_dispatch_loop_ctx_t host_ctx_{};
+  // The GRAPH_LAUNCH engine (DEVICE mode) owns the worker streams, idle mask,
+  // inflight-slot tags, and per-worker GraphIOContext array.  It is built from
+  // the GRAPH_LAUNCH entries of `function_table_host_` and is NULL in HOST mode
+  // (all-HOST_CALL table -> no graph workers).
+  cudaq_function_table_t host_table_{};
+  cudaq_dispatcher_config_t host_config_{};
+  cudaq_graph_launch_engine_t *host_engine_ = nullptr;
   std::thread host_loop_thread_;
   std::uint64_t host_stats_counter_ = 0;
   // Plain (non-pinned) shutdown flag for HOST mode (no device kernel shares
   // it).
   int shutdown_flag_ = 0;
-
-  // ---- DEVICE-mode HOST_LOOP graph workers ----
-  std::vector<cudaq_host_dispatch_worker_t> host_workers_;
-  std::vector<cudaStream_t> host_worker_streams_;
-  std::uint64_t *host_idle_mask_storage_ = nullptr;
-  std::uint64_t *host_live_dispatched_storage_ = nullptr;
-  int *host_inflight_slot_tags_ = nullptr;
-  cudaq::realtime::GraphIOContext *io_ctxs_host_ = nullptr;
-  cudaq::realtime::GraphIOContext *io_ctxs_dev_ = nullptr;
 
   // ---- Graph state (DEVICE mode only) ----
   std::vector<void *> captured_graphs_;
