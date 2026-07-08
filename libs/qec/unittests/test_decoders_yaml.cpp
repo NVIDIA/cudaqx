@@ -19,6 +19,7 @@
 #include <gtest/gtest.h>
 #include <limits>
 #include <optional>
+#include <stdexcept>
 
 namespace {
 class ScopedEnv {
@@ -48,6 +49,46 @@ void enqueue_syndromes(std::uint64_t decoder_id, uint8_t *syndromes,
 void get_corrections(std::uint64_t decoder_id, uint8_t *corrections,
                      std::uint64_t correction_length, bool reset);
 } // namespace cudaq::qec::decoding::simulation
+
+TEST(DecoderYAMLTest, RejectsParserErrors) {
+  const std::string unknown_root_key = R"(
+decoders:
+  - id: 0
+    type: pymatching
+    block_size: 1
+    syndrome_size: 1
+    H_sparse: [0, -1]
+    O_sparse: [0, -1]
+    D_sparse: [0, -1]
+unexpected: true
+)";
+  EXPECT_THROW(
+      cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(
+          unknown_root_key),
+      std::runtime_error);
+
+  const std::string misspelled_decoder_argument = R"(
+decoders:
+  - id: 0
+    type: pymatching
+    block_size: 1
+    syndrome_size: 1
+    H_sparse: [0, -1]
+    O_sparse: [0, -1]
+    D_sparse: [0, -1]
+    decoder_custom_args:
+      merge_stratgey: smallest_weight
+)";
+  EXPECT_THROW(
+      cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(
+          misspelled_decoder_argument),
+      std::runtime_error);
+
+  EXPECT_THROW(
+      cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(
+          "decoders: ["),
+      std::runtime_error);
+}
 
 /// Helper function to test that a decoder configuration can be serialized to
 /// and from YAML.

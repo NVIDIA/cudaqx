@@ -94,17 +94,27 @@ static void send_response(ITransceiver &transport, const PeerId &peer,
 void DecoderSession::on_enqueue(const WorkItem &item) {
   ++enqueue_count;
 
+  // Once an enqueue has been dropped or processing has failed, accepting more
+  // fragments would make the shot's measurement history unknowable. Only a
+  // full reset can establish a clean epoch again.
+  if (syndromes_dropped.load(std::memory_order_acquire) ||
+      shot_state == ShotState::failed)
+    return;
+
   const size_t min_size = sizeof(RPCHeader) + sizeof(EnqueuePayload);
   if (item.frame_buf.size() < min_size) {
     ++error_count;
+    shot_state = ShotState::failed;
     return; // enqueue_syndromes never sends a response
   }
 
   const auto *req = reinterpret_cast<const EnqueuePayload *>(
       item.frame_buf.data() + sizeof(RPCHeader));
 
-  if (req->num_syndromes <= 0) {
+  if (req->num_syndromes <= 0 ||
+      static_cast<uint64_t>(req->num_syndromes) > kMaxSyndromeBits) {
     ++error_count;
+    shot_state = ShotState::failed;
     send_response(*item.response_transport, item.peer, item.request_id,
                   item.ptp_timestamp, RpcStatus::BAD_REQUEST);
     return;
@@ -113,6 +123,7 @@ void DecoderSession::on_enqueue(const WorkItem &item) {
       bit_packed_bytes(static_cast<size_t>(req->num_syndromes));
   if (item.frame_buf.size() < min_size + syndrome_bytes) {
     ++error_count;
+    shot_state = ShotState::failed;
     send_response(*item.response_transport, item.peer, item.request_id,
                   item.ptp_timestamp, RpcStatus::BAD_REQUEST);
     return;
@@ -134,16 +145,33 @@ void DecoderSession::on_enqueue(const WorkItem &item) {
   };
 
   try {
+    // Any accepted input after a completed decode starts a new volume; the old
+    // correction vector must not be reported as the result of that volume.
+    shot_state = ShotState::collecting;
     auto completed = accumulator.ingest(key, item.vp_id, unpacked.data(),
                                         unpacked.size(), mapping_table);
-    if (completed)
-      dec->enqueue_syndrome(completed->bits.data(), completed->bits.size());
+    if (!completed)
+      return;
+
+    const size_t expected_syndromes = dec->get_num_msyn_per_decode();
+    if (accepted_syndromes > expected_syndromes ||
+        completed->bits.size() > expected_syndromes - accepted_syndromes)
+      throw std::invalid_argument(
+          "Syndrome volume exceeds decoder measurement capacity");
+
+    accepted_syndromes += completed->bits.size();
+    const bool did_decode =
+        dec->enqueue_syndrome(completed->bits.data(), completed->bits.size());
+    if (did_decode) {
+      accepted_syndromes = 0;
+      shot_state = ShotState::result_ready;
+    }
   } catch (const std::exception &e) {
-    CUDA_QEC_ERROR("DecoderSession::on_enqueue: {}", e.what());
+    cudaq::qec::error("DecoderSession::on_enqueue: {}", e.what());
     ++error_count;
     // Fire-and-forget: no response carries this failure, so latch it and
-    // surface it at this session's next get_corrections.
-    decoder_error = true;
+    // surface it until the client establishes a clean epoch with reset.
+    shot_state = ShotState::failed;
   }
 }
 
@@ -172,15 +200,15 @@ void DecoderSession::on_get_corrections(const WorkItem &item) {
     return;
   }
 
-  if (syndromes_dropped.exchange(false, std::memory_order_acq_rel)) {
+  if (syndromes_dropped.load(std::memory_order_acquire)) {
     send_response(*item.response_transport, item.peer, item.request_id,
                   item.ptp_timestamp, RpcStatus::SYNDROMES_DROPPED);
     return;
   }
 
-  // Surface a sticky deferred enqueue failure from this shot.
-  if (decoder_error) {
-    decoder_error = false;
+  // Surface a sticky deferred enqueue failure from this shot. Reporting it
+  // does not make partially accumulated decoder state safe to reuse.
+  if (shot_state == ShotState::failed) {
     send_response(*item.response_transport, item.peer, item.request_id,
                   item.ptp_timestamp, RpcStatus::INTERNAL_ERROR);
     return;
@@ -194,10 +222,16 @@ void DecoderSession::on_get_corrections(const WorkItem &item) {
                     item.ptp_timestamp, RpcStatus::BAD_REQUEST);
       return;
     }
-    const uint8_t *corrections = dec->get_obs_corrections();
-    if (!corrections) {
+    if (shot_state != ShotState::result_ready) {
       send_response(*item.response_transport, item.peer, item.request_id,
                     item.ptp_timestamp, RpcStatus::NOT_READY);
+      return;
+    }
+    const uint8_t *corrections = dec->get_obs_corrections();
+    if (!corrections) {
+      shot_state = ShotState::failed;
+      send_response(*item.response_transport, item.peer, item.request_id,
+                    item.ptp_timestamp, RpcStatus::INTERNAL_ERROR);
       return;
     }
     // result_len = ceil(R/8) exactly per decoder_server_runtime.md spec.
@@ -217,10 +251,12 @@ void DecoderSession::on_get_corrections(const WorkItem &item) {
       // clear_corrections (not a full reset_decoder): matches the host-path
       // semantics of get_corrections(reset=true).
       dec->clear_corrections();
+      shot_state = ShotState::collecting;
     }
   } catch (const std::exception &e) {
-    CUDA_QEC_ERROR("DecoderSession::on_get_corrections: {}", e.what());
+    cudaq::qec::error("DecoderSession::on_get_corrections: {}", e.what());
     ++error_count;
+    shot_state = ShotState::failed;
     send_response(*item.response_transport, item.peer, item.request_id,
                   item.ptp_timestamp, RpcStatus::INTERNAL_ERROR);
   }
@@ -232,12 +268,14 @@ void DecoderSession::on_reset(const WorkItem &item) {
     dec->reset_decoder();
     accumulator.clear();
     syndromes_dropped.store(false, std::memory_order_release);
-    decoder_error = false;
+    accepted_syndromes = 0;
+    shot_state = ShotState::collecting;
     send_response(*item.response_transport, item.peer, item.request_id,
                   item.ptp_timestamp, RpcStatus::OK);
   } catch (const std::exception &e) {
-    CUDA_QEC_ERROR("DecoderSession::on_reset: {}", e.what());
+    cudaq::qec::error("DecoderSession::on_reset: {}", e.what());
     ++error_count;
+    shot_state = ShotState::failed;
     send_response(*item.response_transport, item.peer, item.request_id,
                   item.ptp_timestamp, RpcStatus::INTERNAL_ERROR);
   }

@@ -52,6 +52,14 @@ target_link_libraries(test_decoders_yaml PRIVATE
 add_dependencies(CUDAQXQECUnitTests test_decoders_yaml)
 gtest_discover_tests(test_decoders_yaml)
 
+add_executable(test_decoder_server_core test_decoder_server_core.cpp)
+target_link_libraries(test_decoder_server_core PRIVATE
+  GTest::gtest_main
+  cudaq-qec-decoder-server
+  cudaq::cudaq)
+add_dependencies(CUDAQXQECUnitTests test_decoder_server_core)
+gtest_discover_tests(test_decoder_server_core)
+
 add_executable(test_qec test_qec.cpp)
 target_link_libraries(test_qec PRIVATE GTest::gtest_main cudaq-qec cudaq::cudaq-stim-target)
 add_dependencies(CUDAQXQECUnitTests test_qec)

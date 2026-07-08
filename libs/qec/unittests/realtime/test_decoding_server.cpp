@@ -29,6 +29,7 @@
 /// consistent with the H/O/D matrices in the config file (3-bit identity:
 /// syndrome bit 1 set -> correction bit 1 set for any sane decoder).
 
+#include "CqrTransceiver.h"
 #include "cudaq.h"
 #include "cudaq/qec/realtime/decoding.h"
 #include "cudaq/realtime.h"
@@ -40,6 +41,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -50,6 +52,76 @@ namespace {
 
 constexpr std::uint64_t kRunShots = 1;
 constexpr std::int64_t kExpectedCorrection = 1;
+
+TEST(CqrTransceiverTest, RejectsPayloadBeyondReportedSlot) {
+  using namespace cudaq::qec::decoder_server;
+
+  constexpr std::size_t payload_size = 5 * sizeof(uint64_t) + 1;
+  std::array<uint8_t, sizeof(cudaq::realtime::RPCHeader) + payload_size> rx{};
+  std::array<uint8_t, sizeof(cudaq::realtime::RPCResponse)> tx{};
+  cudaq::realtime::RPCHeader header{};
+  header.magic = cudaq::realtime::RPC_MAGIC_REQUEST;
+  header.function_id = kEnqueueSyndromesFunctionId;
+  header.arg_len = payload_size;
+  header.request_id = 17;
+  std::memcpy(rx.data(), &header, sizeof(header));
+
+  // Keep accessible, valid-looking payload bytes beyond the reported slot.
+  // A parser that trusts arg_len instead of slot_size will incorrectly accept
+  // this request even without a sanitizer detecting the contract violation.
+  const std::array<uint64_t, 5> fields = {
+      /*decoder_id=*/3, /*counter=*/7, /*mapping_id=*/0,
+      /*num_syndromes=*/1, /*byte_count=*/1};
+  std::memcpy(rx.data() + sizeof(header), fields.data(), sizeof(fields));
+  rx.back() = 1;
+
+  CqrTransceiver transceiver;
+  transceiver.inject(rx.data(), tx.data(), sizeof(header), header.function_id);
+
+  const auto *response =
+      reinterpret_cast<const cudaq::realtime::RPCResponse *>(tx.data());
+  EXPECT_EQ(response->magic, cudaq::realtime::RPC_MAGIC_RESPONSE);
+  EXPECT_EQ(response->status, static_cast<int32_t>(RpcStatus::BAD_REQUEST));
+  EXPECT_EQ(response->request_id, header.request_id);
+}
+
+TEST(CqrTransceiverTest, AcceptsAnExactlySizedEnqueuePayload) {
+  using namespace cudaq::qec::decoder_server;
+
+  constexpr std::size_t payload_size = 5 * sizeof(uint64_t) + 1;
+  std::array<uint8_t, sizeof(cudaq::realtime::RPCHeader) + payload_size> rx{};
+  std::array<uint8_t, sizeof(cudaq::realtime::RPCResponse)> tx{};
+  cudaq::realtime::RPCHeader header{};
+  header.magic = cudaq::realtime::RPC_MAGIC_REQUEST;
+  header.function_id = kEnqueueSyndromesFunctionId;
+  header.arg_len = payload_size;
+  header.request_id = 23;
+  std::memcpy(rx.data(), &header, sizeof(header));
+
+  const std::array<uint64_t, 5> fields = {
+      /*decoder_id=*/3, /*counter=*/7, /*mapping_id=*/0,
+      /*num_syndromes=*/1, /*byte_count=*/1};
+  std::memcpy(rx.data() + sizeof(header), fields.data(), sizeof(fields));
+  rx.back() = 1;
+
+  CqrTransceiver transceiver;
+  transceiver.inject(rx.data(), tx.data(), rx.size(), header.function_id);
+  auto frame = transceiver.recv();
+
+  ASSERT_EQ(frame.buf.size(), sizeof(RPCHeader) + sizeof(EnqueuePayload) + 1);
+  const auto *request = reinterpret_cast<const EnqueuePayload *>(
+      frame.buf.data() + sizeof(RPCHeader));
+  EXPECT_EQ(request->decoder_id, 3);
+  EXPECT_EQ(request->counter, 7);
+  EXPECT_EQ(request->syndrome_mapping_id, 0);
+  EXPECT_EQ(request->num_syndromes, 1);
+  EXPECT_EQ(frame.buf.back(), 1);
+
+  const auto *response =
+      reinterpret_cast<const cudaq::realtime::RPCResponse *>(tx.data());
+  EXPECT_EQ(response->magic, cudaq::realtime::RPC_MAGIC_RESPONSE);
+  EXPECT_EQ(response->status, 0);
+}
 
 __qpu__ std::int64_t decoding_server_udp_kernel() {
   constexpr std::uint64_t kKernelDecoderId = 0;
@@ -162,18 +234,16 @@ public:
     std::int64_t count = -1;
     if (readLineWithPrefix("QEC_DECODING_DAEMON_DISPATCHED", 10000, line)) {
       long long parsed = -1;
-      if (std::sscanf(line.c_str(),
-                      "QEC_DECODING_DAEMON_DISPATCHED count=%lld",
+      if (std::sscanf(line.c_str(), "QEC_DECODING_DAEMON_DISPATCHED count=%lld",
                       &parsed) == 1)
         count = parsed;
     }
-    if (readLineWithPrefix("QEC_DECODING_DAEMON_MAX_CONCURRENT_DECODERS",
-                           5000, line)) {
+    if (readLineWithPrefix("QEC_DECODING_DAEMON_MAX_CONCURRENT_DECODERS", 5000,
+                           line)) {
       long long parsed = -1;
-      if (std::sscanf(
-              line.c_str(),
-              "QEC_DECODING_DAEMON_MAX_CONCURRENT_DECODERS count=%lld",
-              &parsed) == 1)
+      if (std::sscanf(line.c_str(),
+                      "QEC_DECODING_DAEMON_MAX_CONCURRENT_DECODERS count=%lld",
+                      &parsed) == 1)
         max_concurrent_decoders = parsed;
     }
     int status = 0;
@@ -252,13 +322,13 @@ std::vector<std::string> channel_arguments(std::uint16_t daemon_port) {
   if (transport == "cpu_roce") {
     // The daemon's READY port is its TCP rendezvous port; the RDMA topology
     // comes from the same env vars CUDA-Q's CpuRoceChannelTester uses.
-    return {
-        "--cudaq-device-call=cpu_roce",
-        "ib-device=" + env_or("CUDAQ_CPU_ROCE_TEST_CHANNEL_DEVICE", "mlx5_0"),
-        "local-ip=" + env_or("CUDAQ_CPU_ROCE_TEST_CHANNEL_IP", "10.0.0.1"),
-        "rendezvous-host=" +
-            env_or("CUDAQ_CPU_ROCE_TEST_DAEMON_IP", "10.0.0.2"),
-        "rendezvous-port=" + std::to_string(daemon_port)};
+    return {"--cudaq-device-call=cpu_roce",
+            "ib-device=" +
+                env_or("CUDAQ_CPU_ROCE_TEST_CHANNEL_DEVICE", "mlx5_0"),
+            "local-ip=" + env_or("CUDAQ_CPU_ROCE_TEST_CHANNEL_IP", "10.0.0.1"),
+            "rendezvous-host=" +
+                env_or("CUDAQ_CPU_ROCE_TEST_DAEMON_IP", "10.0.0.2"),
+            "rendezvous-port=" + std::to_string(daemon_port)};
   }
   return {"--cudaq-device-call=udp", "udp-host=127.0.0.1",
           "udp-port=" + std::to_string(daemon_port)};
@@ -397,6 +467,6 @@ TEST(DecodingServerUdp, TwoProcessHostDispatchDualDecoders) {
   // decodes genuinely overlapped, which tiny identity decodes need not).
   const std::int64_t dispatched = daemon.stopAndGetDispatchCount();
   EXPECT_GE(dispatched, 6) << "daemon output:\n" << daemon.captured;
-  EXPECT_GE(daemon.max_concurrent_decoders, 1)
-      << "daemon output:\n" << daemon.captured;
+  EXPECT_GE(daemon.max_concurrent_decoders, 1) << "daemon output:\n"
+                                               << daemon.captured;
 }

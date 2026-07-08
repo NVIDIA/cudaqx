@@ -123,25 +123,13 @@ static void capture_enqueue_syndromes(const void *rx_slot,
   auto callback = cudaq::qec::decoding::host::get_syndrome_capture_callback();
   if (!callback)
     return;
-  if (!rx_slot || slot_size < sizeof(cudaq::realtime::RPCHeader))
+  cudaq::qec::decoder_server::detail::CqrEnqueueFrameView request;
+  if (!cudaq::qec::decoder_server::detail::parse_cqr_enqueue_frame(
+          rx_slot, slot_size, request))
     return;
-  const auto *hdr = static_cast<const cudaq::realtime::RPCHeader *>(rx_slot);
-  const auto *payload = static_cast<const uint8_t *>(rx_slot) +
-                        sizeof(cudaq::realtime::RPCHeader);
-  const std::size_t arg_len = hdr->arg_len;
-  // [decoder_id][counter][mapping_id][num_syndromes][byte_count][bits]
-  if (arg_len < 5 * sizeof(uint64_t))
-    return;
-  uint64_t num_syndromes = 0, byte_count = 0;
-  std::memcpy(&num_syndromes, payload + 3 * sizeof(uint64_t), sizeof(uint64_t));
-  std::memcpy(&byte_count, payload + 4 * sizeof(uint64_t), sizeof(uint64_t));
-  if (byte_count != (num_syndromes + 7) / 8 ||
-      byte_count > arg_len - 5 * sizeof(uint64_t))
-    return;
-  const uint8_t *bits = payload + 5 * sizeof(uint64_t);
-  std::vector<uint8_t> packed(byte_count, 0);
-  for (uint64_t i = 0; i < num_syndromes; ++i)
-    if ((bits[i / 8] >> (i % 8)) & 1u)
+  std::vector<uint8_t> packed(request.byte_count, 0);
+  for (uint64_t i = 0; i < request.num_syndromes; ++i)
+    if ((request.packed_bits[i / 8] >> (i % 8)) & 1u)
       packed[i / 8] |= static_cast<uint8_t>(1u << (7 - (i % 8)));
   callback(packed.data(), packed.size());
 }
@@ -160,7 +148,7 @@ static void dispatch_rpc(const void *rx_slot, void *tx_slot,
       capture_enqueue_syndromes(rx_slot, slot_size);
     g_transceiver->inject(rx_slot, tx_slot, slot_size, function_id);
   } catch (const std::exception &e) {
-    CUDA_QEC_ERROR("decoder-server RPC failed: {}", e.what());
+    cudaq::qec::error("decoder-server RPC failed: {}", e.what());
     write_error_response(rx_slot, tx_slot, slot_size, kStatusHandlerException);
   } catch (...) {
     write_error_response(rx_slot, tx_slot, slot_size, kStatusHandlerException);

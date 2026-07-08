@@ -17,6 +17,7 @@
 #include <any>
 #include <filesystem>
 #include <fstream>
+#include <stdexcept>
 #include <type_traits>
 
 // Helper function(s) to remove the optional wrapper from a type.
@@ -820,6 +821,9 @@ cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(
   multi_decoder_config config;
   llvm::yaml::Input yaml_in(yaml_str);
   yaml_in >> config;
+  if (const auto error = yaml_in.error())
+    throw std::runtime_error("Invalid decoder configuration YAML: " +
+                             error.message());
   return config;
 }
 
