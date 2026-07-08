@@ -225,6 +225,20 @@ protected:
     cudaGetDeviceCount(&device_count);
     if (device_count == 0)
       GTEST_SKIP() << "No CUDA devices available";
+
+    // The self-relaunching device-graph scheduler this test drives uses
+    // device-side graph launch, which requires compute capability 9.0+
+    // (Hopper). Skip on older GPUs (e.g. A100/sm_80 CI runners), matching the
+    // cuda-quantum dispatch-kernel tests.
+    int device = 0;
+    cudaGetDevice(&device);
+    cudaDeviceProp prop{};
+    cudaGetDeviceProperties(&prop, device);
+    if (prop.major < 9)
+      GTEST_SKIP() << "Graph device launch requires compute capability 9.0+, "
+                      "found "
+                   << prop.major << "." << prop.minor;
+
     cudaError_t flags_err = cudaSetDeviceFlags(cudaDeviceMapHost);
     ASSERT_TRUE(flags_err == cudaSuccess ||
                 flags_err == cudaErrorSetOnActiveProcess);
@@ -284,14 +298,6 @@ protected:
     // The session's .so cannot reference it directly, so we hand it in as
     // a constructor parameter.  See qec_realtime_session.h for the
     // rationale (cudaq_dispatch_launch_fn_t docstring).
-    //
-    // Also -- the session does NOT call cudaq_dispatch_kernel_set_shared_-
-    // ring_mode itself, by design: that function lives in the same hidden-
-    // visibility .a, and the session shared library can't reach it.  So
-    // we set it here (the same way surface_code-1-local will, post-
-    // Step-9), restoring 0 in TearDown.
-    ASSERT_EQ(cudaq_dispatch_kernel_set_shared_ring_mode(1), cudaSuccess);
-
     session_ = std::make_unique<cudaq::qec::realtime::qec_realtime_session>(
         decoders_, &cudaq_launch_dispatch_kernel_regular);
     try {
@@ -319,11 +325,6 @@ protected:
       session_->finalize();
       session_.reset();
     }
-
-    // Best-effort: restore __constant__ to 0 so we don't affect subsequent
-    // tests in the same binary.  The session was constructed expecting
-    // shared_ring_mode=1 the whole time; SetUp set it, TearDown clears it.
-    (void)cudaq_dispatch_kernel_set_shared_ring_mode(0);
 
     // Drop the decoder vector AFTER the session releases its captured
     // graphs (session.finalize() above).  Order matters because the

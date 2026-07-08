@@ -353,7 +353,8 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
       PATHS ${TENSORRT_ROOT}/lib /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu /usr/local/cuda/lib64 /usr/local/tensorrt/lib /opt/tensorrt/lib
     )
 
-    if(TENSORRT_INCLUDE_DIR_FOR_PIPELINE AND TENSORRT_LIBRARY_FOR_PIPELINE AND TENSORRT_ONNX_PARSER_FOR_PIPELINE)
+    if(TENSORRT_INCLUDE_DIR_FOR_PIPELINE AND TENSORRT_LIBRARY_FOR_PIPELINE AND TENSORRT_ONNX_PARSER_FOR_PIPELINE
+       AND TARGET cudaq-realtime-pipeline)
       get_filename_component(_cuda_bin_pipe "${CMAKE_CUDA_COMPILER}" DIRECTORY)
       get_filename_component(_cuda_root_pipe "${_cuda_bin_pipe}" DIRECTORY)
       set(_cuda_cccl_include_pipe "${_cuda_root_pipe}/include/cccl")
