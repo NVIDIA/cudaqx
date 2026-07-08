@@ -72,7 +72,7 @@ private:
 
   // Hard cap on syndromes per request; guards against malformed/oversized
   // payloads.
-  static constexpr uint64_t kMaxSyndromeBits = 1u << 20; // 1 M bits
+  static constexpr uint64_t kMaxSyndromeBits = 1ULL << 20; // 1 M bits
 
   // For get_corrections and reset_decoder the field layouts are compatible;
   // copy rx_slot verbatim after swapping to our magic/RPCHeader type.
@@ -88,7 +88,13 @@ private:
 inline void CqrTransceiver::inject(const void *rx_slot, void *tx_slot,
                                    std::size_t slot_size,
                                    uint32_t function_id) {
-  if (!rx_slot || !tx_slot || slot_size < sizeof(RPCHeader))
+  if (!rx_slot || !tx_slot)
+    return;
+  // sizeof(RPCResponse) == sizeof(cudaq::realtime::RPCHeader) == 24.  If the
+  // slot is smaller than that we can neither parse the request nor write a
+  // valid error response, so a blocking RPC would stall.  A well-formed CUDAQ
+  // transport never produces this; treat it as a broken-transport condition.
+  if (slot_size < sizeof(cudaq::realtime::RPCHeader))
     return;
 
   RxFrame frame;
@@ -131,6 +137,9 @@ inline void CqrTransceiver::inject(const void *rx_slot, void *tx_slot,
   std::future<void> fut;
   {
     std::lock_guard<std::mutex> lk(mtx_);
+    // Reject new blocking RPCs after shutdown to avoid a hung fut.wait().
+    if (stopped_)
+      throw std::runtime_error("CqrTransceiver: server is shutting down");
     auto &p = pending_[rid];
     p.tx_slot = tx_slot;
     p.slot_size = slot_size;
@@ -140,6 +149,8 @@ inline void CqrTransceiver::inject(const void *rx_slot, void *tx_slot,
   cv_.notify_one();
 
   // Block until DecoderServer worker calls send() with the response.
+  // If shutdown() fires while we're waiting, it destroys all pending_
+  // entries, which fires std::future_error(broken_promise) here.
   fut.wait();
 }
 
@@ -154,11 +165,18 @@ inline RxFrame CqrTransceiver::recv() {
 }
 
 inline void CqrTransceiver::shutdown() {
+  // Move out all in-flight pending entries under the lock, then destroy them
+  // outside it.  ~promise() fires std::future_error(broken_promise) on each
+  // shared state, which unblocks any fut.wait() in inject() with an exception
+  // that dispatch_rpc() catches and converts to a BAD_REQUEST response.
+  std::unordered_map<uint32_t, PendingTx> drained;
   {
     std::lock_guard<std::mutex> lk(mtx_);
     stopped_ = true;
+    drained = std::move(pending_);
   }
   cv_.notify_all();
+  drained.clear(); // fires broken_promise on each dangling future
 }
 
 inline void CqrTransceiver::write_ack(void *tx_slot, uint32_t request_id,

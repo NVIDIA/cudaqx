@@ -156,6 +156,13 @@ static void dispatch_rpc(const void *rx_slot, void *tx_slot,
   g_service_dispatch_count.fetch_add(1, std::memory_order_relaxed);
   try {
     std::call_once(g_init_flag, init_server);
+    // g_transceiver is null if init_server failed or after shutdown().
+    // g_init_flag is not resettable, so call_once won't retry after shutdown.
+    if (!g_transceiver) {
+      write_error_response(rx_slot, tx_slot, slot_size,
+                           kStatusHandlerException);
+      return;
+    }
     if (function_id == kEnqueueSyndromesFunctionId)
       capture_enqueue_syndromes(rx_slot, slot_size);
     g_transceiver->inject(rx_slot, tx_slot, slot_size, function_id);

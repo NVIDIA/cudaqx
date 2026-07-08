@@ -105,16 +105,17 @@ void DecoderSession::on_enqueue(const WorkItem &item) {
 
   if (req->num_syndromes <= 0) {
     ++error_count;
-    send_response(*item.response_transport, item.peer, item.request_id,
-                  item.ptp_timestamp, RpcStatus::BAD_REQUEST);
+    // enqueue_syndromes is fire-and-forget: the caller already received an ACK
+    // and send_response() would be silently dropped on CQR (no pending_ entry).
+    // Latch decoder_error so the next get_corrections surfaces the failure.
+    decoder_error = true;
     return;
   }
   const size_t syndrome_bytes =
       bit_packed_bytes(static_cast<size_t>(req->num_syndromes));
   if (item.frame_buf.size() < min_size + syndrome_bytes) {
     ++error_count;
-    send_response(*item.response_transport, item.peer, item.request_id,
-                  item.ptp_timestamp, RpcStatus::BAD_REQUEST);
+    decoder_error = true;
     return;
   }
 

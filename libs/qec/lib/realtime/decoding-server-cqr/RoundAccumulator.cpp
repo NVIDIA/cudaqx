@@ -72,6 +72,11 @@ RoundAccumulator::ingest(const RoundKey &key, uint32_t vp_id,
                                 std::to_string(vp_id));
 
   if (pass_through) {
+    if (num_syndromes != round.flat.size())
+      throw std::invalid_argument("Pass-through syndrome count mismatch: got " +
+                                  std::to_string(num_syndromes) +
+                                  ", expected " +
+                                  std::to_string(round.flat.size()));
     for (size_t i = 0; i < num_syndromes; ++i)
       round.flat[i] = bits[i];
   } else {

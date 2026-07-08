@@ -11,7 +11,6 @@
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/realtime/decoding_config.h"
 
-#include <algorithm>
 #include <fstream>
 #include <iterator>
 #include <stdexcept>
@@ -202,23 +201,20 @@ void DecoderServer::register_handlers() {
 // ---------------------------------------------------------------------------
 
 void DecoderServer::run() {
-  std::vector<ITransceiver *> unique_transports;
-  for (auto &[fid, t] : function_transport_) {
-    if (std::find(unique_transports.begin(), unique_transports.end(), t) ==
-        unique_transports.end())
-      unique_transports.push_back(t);
-  }
-
   CUDA_QEC_INFO("DecoderServer: starting {} receiver thread(s)",
-                unique_transports.size());
+                owned_transports_.size());
 
   // All threads share dispatcher_ — routing is by function_id, not transport.
   std::vector<std::thread> recv_threads;
-  recv_threads.reserve(unique_transports.size());
-  for (ITransceiver *t : unique_transports) {
+  recv_threads.reserve(owned_transports_.size());
+  for (auto &transport : owned_transports_) {
+    ITransceiver *t = transport.get();
     recv_threads.emplace_back([this, t] {
       while (!shutdown_.load(std::memory_order_acquire)) {
-        dispatcher_.dispatch(t->recv(), *t);
+        auto frame = t->recv();
+        if (frame.buf.empty())
+          break; // shutdown sentinel; don't dispatch a spurious empty frame
+        dispatcher_.dispatch(std::move(frame), *t);
       }
     });
   }
