@@ -118,7 +118,6 @@ if(CMAKE_CUDA_COMPILER)
     # build.
     cudaq_qec_find_realtime_path(CUDAQ_DEVICE_CALL_INCLUDE_DIR
       NAMES cudaq/realtime/device_call_service.h
-            cudaq_internal/device_call/DeviceCallService.h
       PATH_SUFFIXES include
     )
     if(CUDAQ_DEVICE_CALL_INCLUDE_DIR)

@@ -299,7 +299,6 @@ foreach(lib ${CUDAQX_ENABLE_LIBS})
 endforeach()
 
 
-
 # Custom targets
 # ==============================================================================
 set(ZIP_OUTPUT "${CMAKE_BINARY_DIR}/installed_files.zip")
