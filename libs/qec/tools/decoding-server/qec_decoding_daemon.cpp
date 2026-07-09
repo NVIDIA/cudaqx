@@ -477,8 +477,8 @@ bool init_cpu_roce_hsb_fpga_transport(const DaemonConfig &cfg,
             << std::dec << std::endl;
   std::cout.flush();
 
-  print_ready(/*port=*/0, "transport=cpu_roce qp_config=hsb_fpga peer_ip=" +
-                              cfg.peer_ip);
+  print_ready(/*port=*/0,
+              "transport=cpu_roce qp_config=hsb_fpga peer_ip=" + cfg.peer_ip);
   return true;
 }
 
