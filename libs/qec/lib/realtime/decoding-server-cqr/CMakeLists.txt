@@ -37,7 +37,11 @@ target_include_directories(cudaq-qec-decoder-server
 
 target_link_libraries(cudaq-qec-decoder-server
   PUBLIC
-    cudaq-qec
+    # The decode-server core only needs the decoder interface + logger (in
+    # cudaq-qec-decoders) and the realtime decoding config -- NOT the heavy
+    # cudaq-qec (which pulls in libcustabilizer etc.). Keeping cudaq-qec here
+    # violates the realtime-server dependency-closure contract.
+    cudaq-qec-decoders
     cudaq-qec-realtime-decoding
 )
 
