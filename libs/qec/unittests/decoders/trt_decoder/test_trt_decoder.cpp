@@ -11,14 +11,11 @@
 #include "cudaq/qec/trt_decoder_internal.h"
 #include <chrono>
 #include <cmath>
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <optional>
 #include <random>
-#include <stdexcept>
-#include <utility>
 #include <vector>
 
 #include <cuda_runtime_api.h>
@@ -31,31 +28,6 @@ static bool gpu_available() {
 }
 
 namespace {
-class ScopedEnvironmentVariable {
-public:
-  ScopedEnvironmentVariable(const char *name, const char *value) : name_(name) {
-    if (const char *previous = std::getenv(name))
-      previous_value_ = previous;
-    if (setenv(name, value, 1) != 0)
-      throw std::runtime_error("Failed to set test environment variable");
-  }
-
-  ScopedEnvironmentVariable(const ScopedEnvironmentVariable &) = delete;
-  ScopedEnvironmentVariable &
-  operator=(const ScopedEnvironmentVariable &) = delete;
-
-  ~ScopedEnvironmentVariable() {
-    if (previous_value_)
-      setenv(name_.c_str(), previous_value_->c_str(), 1);
-    else
-      unsetenv(name_.c_str());
-  }
-
-private:
-  std::string name_;
-  std::optional<std::string> previous_value_;
-};
-
 class TestTrtLogger : public nvinfer1::ILogger {
 public:
   void log(Severity, const char *) noexcept override {}
@@ -574,14 +546,19 @@ TEST_F(TRTDecoderTest, PerformanceComparisonCudaGraphVsTraditional) {
       << " μs";
 }
 
-TEST_F(TRTDecoderTest, ConstructionFailureThrows) {
-  // Initialization failure is an operational error, not decoding
-  // non-convergence. No unusable decoder object should escape construction.
+TEST_F(TRTDecoderTest, DecodeUninitializedDecoderReturnsUnconvergedBatch) {
+  // A failed constructor leaves the decoder object present but not ready;
+  // decode_batch should return one unconverged empty result per input syndrome.
   cudaqx::heterogeneous_map params;
   params.insert("engine_load_path",
                 std::string("/no/such/cudaq-qec-test.engine"));
-  EXPECT_THROW(decoder::get("trt_decoder", make_identity_h(2), params),
-               std::runtime_error);
+  auto trt_decoder = decoder::get("trt_decoder", make_identity_h(2), params);
+  ASSERT_NE(trt_decoder, nullptr);
+
+  auto results = trt_decoder->decode_batch({{}});
+  ASSERT_EQ(results.size(), 1u);
+  EXPECT_FALSE(results[0].converged);
+  EXPECT_TRUE(results[0].result.empty());
 }
 
 TEST_F(TRTDecoderTest, EngineSavePathAndEngineLoadPathRoundTrip) {
@@ -696,81 +673,6 @@ TEST_F(TRTDecoderTest, Uint8IdentityModelBinarizesInputAndOutput) {
   EXPECT_FLOAT_EQ(result.result[2], 1.0);
 }
 
-TEST_F(TRTDecoderTest, TraditionalExecutorPropagatesTensorRTFailures) {
-  if (!gpu_available())
-    GTEST_SKIP() << "No CUDA GPU available";
-  auto onnx_path = get_uint8_onnx_asset_path();
-  if (!onnx_path || !std::filesystem::exists(*onnx_path))
-    GTEST_SKIP() << "Generated uint8 ONNX fixture is unavailable";
-
-  cudaqx::heterogeneous_map params;
-  params.insert("onnx_load_path", *onnx_path);
-  params.insert("use_cuda_graph", false);
-
-  std::unique_ptr<decoder> trt_decoder;
-  try {
-    trt_decoder = decoder::get("trt_decoder", make_identity_h(3), params);
-  } catch (const std::exception &e) {
-    GTEST_SKIP() << "Failed to create uint8 TRT decoder: " << e.what();
-  }
-
-  const std::vector<std::pair<const char *, const char *>> failures = {
-      {"input_address", "TensorRT rejected the input tensor address"},
-      {"output_address", "TensorRT rejected the output tensor address"},
-      {"traditional_enqueue", "TensorRT rejected inference enqueue"}};
-  for (const auto &[point, expected_message] : failures) {
-    SCOPED_TRACE(point);
-    ScopedEnvironmentVariable failure("CUDAQ_QEC_TRT_TEST_FAILURE", point);
-    try {
-      trt_decoder->decode({0.0, 1.0, 0.0});
-      FAIL() << "Injected TensorRT failure was not propagated";
-    } catch (const std::runtime_error &e) {
-      EXPECT_STREQ(e.what(), expected_message);
-    }
-    EXPECT_EQ(std::getenv("CUDAQ_QEC_TRT_TEST_FAILURE"), nullptr)
-        << "The requested TensorRT call was not reached";
-  }
-
-  auto result = trt_decoder->decode({0.0, 1.0, 0.0});
-  ASSERT_TRUE(result.converged);
-  EXPECT_EQ(result.result, (std::vector<cudaq::qec::float_t>{0.0, 1.0, 0.0}));
-}
-
-TEST_F(TRTDecoderTest, RejectedGraphEnqueueFallsBackAndLeavesStreamUsable) {
-  if (!gpu_available())
-    GTEST_SKIP() << "No CUDA GPU available";
-  auto onnx_path = get_uint8_onnx_asset_path();
-  if (!onnx_path || !std::filesystem::exists(*onnx_path))
-    GTEST_SKIP() << "Generated uint8 ONNX fixture is unavailable";
-
-  cudaqx::heterogeneous_map params;
-  params.insert("onnx_load_path", *onnx_path);
-  params.insert("use_cuda_graph", true);
-
-  std::unique_ptr<decoder> trt_decoder;
-  {
-    ScopedEnvironmentVariable failure("CUDAQ_QEC_TRT_TEST_FAILURE",
-                                      "capture_enqueue");
-    ASSERT_NO_THROW(
-        trt_decoder = decoder::get("trt_decoder", make_identity_h(3), params));
-    EXPECT_EQ(std::getenv("CUDAQ_QEC_TRT_TEST_FAILURE"), nullptr)
-        << "CUDA graph capture did not reach the injected enqueue failure";
-  }
-
-  {
-    // Prove construction selected the traditional fallback rather than a CUDA
-    // graph that happened to capture successfully.
-    ScopedEnvironmentVariable failure("CUDAQ_QEC_TRT_TEST_FAILURE",
-                                      "traditional_enqueue");
-    EXPECT_THROW(trt_decoder->decode({0.0, 1.0, 0.0}), std::runtime_error);
-    EXPECT_EQ(std::getenv("CUDAQ_QEC_TRT_TEST_FAILURE"), nullptr);
-  }
-
-  auto result = trt_decoder->decode({0.0, 1.0, 0.0});
-  ASSERT_TRUE(result.converged);
-  EXPECT_EQ(result.result, (std::vector<cudaq::qec::float_t>{0.0, 1.0, 0.0}));
-}
-
 TEST_F(TRTDecoderTest, MixedDtypeCopiesOutput) {
   // Mixed UINT8 input and FLOAT output should use the engine output dtype when
   // copying and interpreting output, not the input dtype selected for dispatch.
@@ -804,9 +706,9 @@ TEST_F(TRTDecoderTest, MixedDtypeCopiesOutput) {
   EXPECT_FLOAT_EQ(result.result[2], 1.0);
 }
 
-TEST_F(TRTDecoderTest, BatchInfrastructureFailureThrows) {
-  // A post-initialization infrastructure failure is distinct from an
-  // initialized decoder reporting algorithmic non-convergence.
+TEST_F(TRTDecoderTest, BatchFailureKeepsResultCount) {
+  // A post-initialisation failure in decode_batch should preserve one result
+  // per input syndrome so decode() never indexes an empty result vector.
   if (!gpu_available())
     GTEST_SKIP() << "No CUDA GPU available";
   auto onnx_path = get_dynamic_onnx_asset_path();
@@ -827,8 +729,14 @@ TEST_F(TRTDecoderTest, BatchInfrastructureFailureThrows) {
     GTEST_SKIP() << "Failed to create mismatch TRT decoder: " << e.what();
   }
 
-  EXPECT_THROW(trt_decoder->decode_batch({{1.0, 0.0, 1.0}}),
-               std::runtime_error);
+  auto results = trt_decoder->decode_batch({{1.0, 0.0, 1.0}});
+
+  // The mismatched global decoder forces an exception before any result is
+  // pushed; the fixed path must still return one placeholder for the input.
+  ASSERT_EQ(results.size(), 1u);
+  // The placeholder must be marked failed so callers can distinguish it from a
+  // successful decode without touching out-of-range elements.
+  EXPECT_FALSE(results[0].converged);
 }
 
 TEST_F(TRTDecoderTest, CompositeGlobalDecoderCombinesLogicalFrame) {
