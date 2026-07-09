@@ -79,12 +79,17 @@ parse_options "$@"
 
 export CUDA_VERSION=${cuda_version}
 export CUDAQ_INSTALL_PREFIX=/usr/local/cudaq
+cmake_bin_dir=$(dirname "$(command -v cmake)")
 
 # We need to use a newer toolchain because CUDA-QX libraries rely on c++20
 source /opt/rh/gcc-toolset-12/enable
+export PATH="${cmake_bin_dir}:/usr/local/bin:$PATH"
+hash -r 2>/dev/null || true
 
 export CC=gcc
 export CXX=g++
+echo "Using CMake: $(cmake --version | sed -n '1p')"
+echo "Using Ninja: $(ninja --version) ($(command -v ninja))"
 
 python=python${python_version}
 ${python} -m pip install --no-cache-dir numpy auditwheel

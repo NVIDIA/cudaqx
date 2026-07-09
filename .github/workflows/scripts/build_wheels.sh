@@ -127,6 +127,7 @@ echo "Building in $build_type mode for Python $python_version, version $wheels_v
 python=python${python_version}
 ARCH=$(uname -m)
 PLAT_STR=""
+cmake_bin_dir=$(dirname "$(command -v cmake)")
 
 if $devdeps; then
   PLAT_STR="--plat manylinux_2_34_x86_64"
@@ -134,12 +135,16 @@ else
   # We need to use a newer toolchain because CUDA-QX libraries rely on c++20
   source /opt/rh/gcc-toolset-12/enable
 fi
+export PATH="${cmake_bin_dir}:/usr/local/bin:$PATH"
+hash -r 2>/dev/null || true
 
 export CC=gcc
 export CXX=g++
 export SETUPTOOLS_SCM_PRETEND_VERSION=$wheels_version
 export CUDAQX_QEC_VERSION=$wheels_version
 export CUDAQX_SOLVERS_VERSION=$wheels_version
+echo "Using CMake: $(cmake --version | sed -n '1p')"
+echo "Using Ninja: $(ninja --version) ($(command -v ninja))"
 
 # ==============================================================================
 # cuStabilizer / cuQuantum SDK location
