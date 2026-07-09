@@ -37,7 +37,7 @@ target_include_directories(cudaq-qec-decoder-server
 
 target_link_libraries(cudaq-qec-decoder-server
   PUBLIC
-    cudaq-qec
+    cudaq-qec-decoders
     cudaqx-core
     cudaq-qec-realtime-decoding
 )
