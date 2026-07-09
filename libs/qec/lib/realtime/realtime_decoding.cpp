@@ -340,11 +340,11 @@ void finalize_decoders() {
 }
 
 __attribute__((visibility("default"))) void
-set_syndrome_capture_callback(void (*callback)(const uint8_t *, size_t)) {
+_set_syndrome_capture_callback(void (*callback)(const uint8_t *, size_t)) {
   g_syndrome_capture_callback = callback;
 }
 
-__attribute__((visibility("default"))) void (*get_syndrome_capture_callback())(
+__attribute__((visibility("default"))) void (*_get_syndrome_capture_callback())(
     const uint8_t *, size_t) {
   return g_syndrome_capture_callback;
 }

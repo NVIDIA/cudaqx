@@ -112,14 +112,13 @@ def test_noisy_simulation():
     cudaq.reset_target()
 
 
-@pytest.mark.skip
 def test_python_code():
     steane = qec.get_code("py-steane-example")
     syndromes, dataResults = qec.sample_memory_circuit(steane,
                                                        numShots=10,
                                                        numRounds=4)
     assert isinstance(syndromes, np.ndarray)
-    assert syndromes.shape == (10, 40)
+    assert syndromes.shape == (10, 24)
     print(syndromes)
     assert not np.any(syndromes)
 
