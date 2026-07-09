@@ -232,9 +232,13 @@ static void set_u8(cudaq_type_desc_t &d) {
   d.num_elements = 1;
 }
 
-static void set_array_u8(cudaq_type_desc_t &d) {
+// Syndrome/correction bits cross the wire bit-packed (LSB-first), so the
+// argument type is CUDAQ_TYPE_BIT_PACKED -- matching the realtime device_call
+// lowering for std::vector<bool> (cudaq PR 4816) -- rather than the old
+// CUDAQ_TYPE_ARRAY_UINT8 stand-in used before that lowering existed.
+static void set_bit_packed(cudaq_type_desc_t &d) {
   d = {};
-  d.type_id = CUDAQ_TYPE_ARRAY_UINT8;
+  d.type_id = CUDAQ_TYPE_BIT_PACKED;
 }
 
 static void configure_entry(cudaq_function_entry_t &e, uint32_t fn_id,
@@ -254,8 +258,7 @@ make_entries() {
 
   // enqueue_syndromes: 5-arg spec format per decoder_server_runtime.md.
   // decoder_id, counter, syndrome_mapping_id, num_syndromes (scalars) +
-  // packed_bytes (array_u8: [u64 byte_count][u8 x byte_count], bit-packed
-  // LSB-first).
+  // syndrome_bits (bit_packed: bit-packed LSB-first).
   auto &eq = entries[kEnqueueSyndromesEntry];
   configure_entry(eq, kEnqueueSyndromesFnId, enqueue_syndromes_host,
                   kEnqueueArgCount, kNoResults);
@@ -263,7 +266,7 @@ make_entries() {
   set_u64(eq.schema.args[kEnqueueCounterArg]);
   set_u64(eq.schema.args[kEnqueueMappingIdArg]);
   set_u64(eq.schema.args[kEnqueueNumSyndromesArg]);
-  set_array_u8(eq.schema.args[kEnqueueSyndromeBitsArg]);
+  set_bit_packed(eq.schema.args[kEnqueueSyndromeBitsArg]);
 
   // get_corrections: 4-arg spec format per decoder_server_runtime.md.
   auto &gc = entries[kGetCorrectionsEntry];
@@ -273,7 +276,7 @@ make_entries() {
   set_u64(gc.schema.args[kGetCorrectionsReturnSizeArg]);
   set_u64(gc.schema.args[kGetCorrectionsBytesArg]);
   set_u8(gc.schema.args[kGetCorrectionsResetArg]);
-  set_array_u8(gc.schema.results[kCorrectionsResult]);
+  set_bit_packed(gc.schema.results[kCorrectionsResult]);
 
   auto &rd = entries[kResetDecoderEntry];
   configure_entry(rd, kResetDecoderFnId, reset_decoder_host,

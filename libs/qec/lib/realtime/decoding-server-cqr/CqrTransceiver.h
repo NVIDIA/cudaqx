@@ -67,15 +67,21 @@ inline bool parse_cqr_enqueue_frame(const void *rx_slot, std::size_t slot_size,
 
   CqrEnqueueFrameView parsed;
   parsed.header = header;
+  // arg4 is a std::vector<bool> (CUDAQ_TYPE_BIT_PACKED): the realtime
+  // device_call ABI serialises the 5th u64 as the stdvec array-length prefix,
+  // i.e. the # of logical elements = # of bits (= num_syndromes). The byte
+  // count is derived (ceil(bits/8)), not carried on the wire.
+  uint64_t array_len = 0;
   if (!read_u64(parsed.decoder_id) || !read_u64(parsed.counter) ||
       !read_u64(parsed.syndrome_mapping_id) ||
-      !read_u64(parsed.num_syndromes) || !read_u64(parsed.byte_count))
+      !read_u64(parsed.num_syndromes) || !read_u64(array_len))
     return false;
 
+  parsed.byte_count =
+      bit_packed_bytes(static_cast<std::size_t>(parsed.num_syndromes));
   if (parsed.num_syndromes == 0 || parsed.num_syndromes > kMaxSyndromeBits ||
-      parsed.byte_count !=
-          bit_packed_bytes(static_cast<std::size_t>(parsed.num_syndromes)) ||
-      offset > arg_len || parsed.byte_count > arg_len - offset)
+      array_len != parsed.num_syndromes || offset > arg_len ||
+      parsed.byte_count > arg_len - offset)
     return false;
 
   parsed.packed_bits = payload + offset;
@@ -277,9 +283,9 @@ inline bool CqrTransceiver::build_enqueue_frame(const void *rx_slot,
                                                 RxFrame &out) {
   // Spec 5-arg wire format (decoder_server_runtime.md):
   //   [u64 decoder_id][u64 counter][u64 syndrome_mapping_id]
-  //   [u64 num_syndromes][u64 byte_count][u8 x byte_count (bit-packed)]
-  // packed_bytes is an array_u8 arg; CUDAQ serialises it as [u64
-  // length][bytes].
+  //   [u64 num_syndromes][u64 array_len][u8 x ceil(bits/8) (bit-packed)]
+  // syndrome_bits is a std::vector<bool> (CUDAQ_TYPE_BIT_PACKED); CUDAQ
+  // serialises it as [u64 array_len = # logical bits][packed bytes].
   detail::CqrEnqueueFrameView request;
   if (!detail::parse_cqr_enqueue_frame(rx_slot, slot_size, request))
     return false;

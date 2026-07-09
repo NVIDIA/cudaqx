@@ -45,7 +45,7 @@ extern "C" {
 void enqueue_syndromes(std::uint64_t decoder_id, std::uint64_t counter,
                        std::uint64_t syndrome_mapping_id,
                        std::uint64_t num_syndromes,
-                       const std::vector<std::uint8_t> &syndrome_bits);
+                       const std::vector<bool> &syndrome_bits);
 
 void get_corrections(std::uint64_t decoder_id, std::uint64_t return_size,
                      std::vector<std::uint8_t> &corrections, bool reset);
@@ -61,25 +61,15 @@ enqueue_syndromes(std::uint64_t decoder_id,
                   std::uint64_t tag) {
   // No syndrome mapping table yet; id 0 is the identity mapping.
   constexpr std::uint64_t kSyndromeMappingId = 0;
-  // Discriminating the measurement handles to bits (element reads below) and
-  // packing LSB-first before crossing the boundary.
+  // Pass the syndrome bits as a std::vector<bool>; the realtime device_call
+  // lowering bit-packs it LSB-first into a CUDAQ_TYPE_BIT_PACKED payload (cudaq
+  // PR 4816), so no manual packing is needed here.
   std::size_t num_bits = syndromes.size();
-  std::size_t num_bytes = (num_bits + 7) / 8;
-  std::vector<std::uint8_t> packed(num_bytes);
-  for (std::size_t byte = 0; byte < num_bytes; ++byte) {
-    std::uint8_t value = 0;
-    for (std::size_t bit = 0; bit < 8; ++bit) {
-      std::size_t index = byte * 8 + bit;
-      if (index < num_bits) {
-        bool is_set = syndromes[index];
-        if (is_set)
-          value = value | static_cast<std::uint8_t>(1 << bit);
-      }
-    }
-    packed[byte] = value;
-  }
+  std::vector<bool> bits(num_bits);
+  for (std::size_t i = 0; i < num_bits; ++i)
+    bits[i] = syndromes[i];
   cudaq::device_call(::enqueue_syndromes, decoder_id, tag, kSyndromeMappingId,
-                     static_cast<std::uint64_t>(num_bits), packed);
+                     static_cast<std::uint64_t>(num_bits), bits);
 }
 
 __qpu__ void enqueue_syndromes_test(std::uint64_t decoder_id,
@@ -87,21 +77,9 @@ __qpu__ void enqueue_syndromes_test(std::uint64_t decoder_id,
                                     std::uint64_t tag) {
   constexpr std::uint64_t kSyndromeMappingId = 0;
   std::size_t num_bits = syndromes.size();
-  std::size_t num_bytes = (num_bits + 7) / 8;
-  std::vector<std::uint8_t> packed(num_bytes);
-  for (std::size_t byte = 0; byte < num_bytes; ++byte) {
-    std::uint8_t value = 0;
-    for (std::size_t bit = 0; bit < 8; ++bit) {
-      std::size_t index = byte * 8 + bit;
-      if (index < num_bits) {
-        std::uint8_t bit_val = syndromes[index];
-        value = value | static_cast<std::uint8_t>(bit_val << bit);
-      }
-    }
-    packed[byte] = value;
-  }
+  // syndromes is already a std::vector<bool>; the lowering bit-packs it.
   cudaq::device_call(::enqueue_syndromes, decoder_id, tag, kSyndromeMappingId,
-                     static_cast<std::uint64_t>(num_bits), packed);
+                     static_cast<std::uint64_t>(num_bits), syndromes);
 }
 
 __qpu__ std::vector<bool> get_corrections(std::uint64_t decoder_id,
