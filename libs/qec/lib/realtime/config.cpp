@@ -699,11 +699,24 @@ struct MappingTraits<cudaq::qec::decoding::config::sliding_window_config> {
 };
 
 template <>
+struct ScalarEnumerationTraits<cudaq::qec::decoding::config::DecoderTransport> {
+  static void
+  enumeration(IO &io, cudaq::qec::decoding::config::DecoderTransport &value) {
+    io.enumCase(value, "cpu_roce",
+                cudaq::qec::decoding::config::DecoderTransport::cpu_roce);
+    io.enumCase(value, "gpu_roce",
+                cudaq::qec::decoding::config::DecoderTransport::gpu_roce);
+  }
+};
+
+template <>
 struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
   static void mapping(IO &io,
                       cudaq::qec::decoding::config::decoder_config &config) {
     io.mapRequired("id", config.id);
     io.mapRequired("type", config.type);
+    io.mapOptional("transport", config.transport,
+                   cudaq::qec::decoding::config::DecoderTransport::cpu_roce);
     io.mapRequired("block_size", config.block_size);
     io.mapRequired("syndrome_size", config.syndrome_size);
     io.mapRequired("H_sparse", config.H_sparse);
@@ -839,8 +852,14 @@ cudaq::qec::decoding::config::decoder_config::to_yaml_str(int column_wrap) {
 
 namespace cudaq::qec::decoding::config {
 
+// Stash a copy for consumers that build their own decoder instances from the
+// process-wide configuration -- the decoder-server DeviceCallService plugin
+// reads it when CUDAQ_QEC_DECODER_CONFIG is not set (in-process path).
+static std::unique_ptr<multi_decoder_config> g_last_multi_decoder_config;
+
 int configure_decoders(multi_decoder_config &config) {
   CUDA_QEC_INFO("Initializing realtime decoding library with config object");
+  g_last_multi_decoder_config = std::make_unique<multi_decoder_config>(config);
   // Publish the decoder configuration so CUDA-Q can inject it into
   // remote-target job requests. The cudaq integration (ExtraPayloadProvider) is
   // installed by cudaq-qec at load time; this call is a no-op when cudaq-qec is
@@ -848,6 +867,10 @@ int configure_decoders(multi_decoder_config &config) {
   // dependency.
   cudaq::qec::publish_decoder_config_payload(config.to_yaml_str());
   return cudaq::qec::decoding::host::configure_decoders(config);
+}
+
+const multi_decoder_config *last_configured_multi_decoder_config() {
+  return g_last_multi_decoder_config.get();
 }
 
 void log_config(const char *config_str, bool from_file) {

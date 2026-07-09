@@ -25,7 +25,7 @@
 
 // Host-side decoding API (for syndrome capture)
 namespace cudaq::qec::decoding::host {
-void set_syndrome_capture_callback(void (*callback)(const uint8_t *, size_t));
+void _set_syndrome_capture_callback(void (*callback)(const uint8_t *, size_t));
 }
 
 // Global syndrome capture state for --save_syndrome option
@@ -657,7 +657,7 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
     g_syndrome_output_file.flush();
 
     // Register capture callback with decoder library
-    cudaq::qec::decoding::host::set_syndrome_capture_callback(
+    cudaq::qec::decoding::host::_set_syndrome_capture_callback(
         [](const uint8_t *data, size_t len) {
           std::lock_guard<std::mutex> lock(g_syndrome_file_mutex);
           if (!g_syndrome_output_file.is_open())
@@ -883,7 +883,7 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
   // Save corrections to file if syndrome capture was enabled
   if (save_syndrome && g_syndrome_output_file.is_open()) {
     // Disable callback to stop capturing
-    cudaq::qec::decoding::host::set_syndrome_capture_callback(nullptr);
+    cudaq::qec::decoding::host::_set_syndrome_capture_callback(nullptr);
 
     // Save logical corrections for each shot (for verification during replay)
     g_syndrome_output_file << "CORRECTIONS_START\n";

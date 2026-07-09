@@ -94,6 +94,25 @@ if(CMAKE_CUDA_COMPILER)
       message(STATUS "Found cuda-quantum realtime host dispatch library at ${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}")
     endif()
 
+    # The device-graph dispatch API (cudaq_create_dispatch_graph_regular,
+    # cudaq_launch_dispatch_graph, cudaq_destroy_dispatch_graph) lives in
+    # libcudaq-realtime-dispatch, separate from libcudaq-realtime.  It is
+    # relocatable device code, and qec_realtime_session resolves it at runtime
+    # via dlsym(RTLD_DEFAULT, ...) from the host executable's absorbed copy --
+    # it must NOT be linked into cudaq-qec-realtime-decoding.so: a second
+    # device-linked copy of the dispatch kernel would live in a different CUDA
+    # module than the decoder's DEVICE_CALL handlers (captured from the
+    # executable's module), and cross-module device function pointer calls trap
+    # with cudaErrorIllegalInstruction.  The find result is used by device-mode
+    # test executables, which absorb the archive themselves.
+    cudaq_qec_find_realtime_library(CUDAQ_REALTIME_DISPATCH_LIBRARY
+      NAMES cudaq-realtime-dispatch
+      PATH_SUFFIXES lib
+    )
+    if(CUDAQ_REALTIME_DISPATCH_LIBRARY)
+      message(STATUS "Found cuda-quantum realtime dispatch library at ${CUDAQ_REALTIME_DISPATCH_LIBRARY}")
+    endif()
+
     # CUDA-Q lowered `cudaq::device_call` host-dispatch integration needs the
     # DeviceCallService provider API from a realtime/device-call-enabled CUDA-Q
     # build.
@@ -125,7 +144,6 @@ if(CMAKE_CUDA_COMPILER)
     if(CUDAQ_DEVICE_CALL_INCLUDE_DIR AND CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY)
       set(CUDAQ_QEC_DEVICE_CALL_SERVICE_AVAILABLE TRUE)
     endif()
-
     
     # Create static device library for device code
     add_library(cudaq-qec-realtime-cudevice STATIC
@@ -244,8 +262,24 @@ install(TARGETS cudaq-qec-realtime-decoding
 # ---------------------------------------------------------------------------
 # RealtimePipeline shared library
 # Requires pre-installed cudaq-realtime (set CUDAQ_REALTIME_ROOT)
+#
+# EXPERIMENTAL / temporarily disabled: realtime_pipeline.cu relies on host
+# dispatch API surface (skip_stream_sweep, caller-owned worker streams, and
+# per-worker pre/post-launch hooks) that was removed upstream in CUDA-Q PR4770
+# ("Split graph launch dispatch from the host ring loop").  Until it is ported
+# to the new graph_launch_engine API, keep this target off by default so CI
+# builds green.  Dependent unit tests (test_realtime_pipeline,
+# test_realtime_predecoder_w_pymatching, hololink bridge) auto-skip when this
+# target does not exist.
 # ---------------------------------------------------------------------------
-if(CMAKE_CUDA_COMPILER AND CUDAQ_REALTIME_INCLUDE_DIR)
+option(CUDAQX_QEC_ENABLE_REALTIME_PIPELINE
+  "Build the experimental cudaq-realtime-pipeline library (needs porting to \
+the post-PR4770 CUDA-Q graph_launch_engine API)" OFF)
+
+if(NOT CUDAQX_QEC_ENABLE_REALTIME_PIPELINE)
+  message(STATUS "RealtimePipeline: skipping (experimental; disabled by "
+                 "default -- set CUDAQX_QEC_ENABLE_REALTIME_PIPELINE=ON to build)")
+elseif(CMAKE_CUDA_COMPILER AND CUDAQ_REALTIME_INCLUDE_DIR)
     cudaq_qec_find_realtime_library(_CUDAQ_RT_LIB
       NAMES cudaq-realtime
       PATH_SUFFIXES lib
@@ -307,11 +341,11 @@ else()
   endif()
 endif()
 
+add_subdirectory(decoding-server-cqr)
 add_subdirectory(quantinuum)
 add_subdirectory(simulation)
 if(CUDAQ_QEC_DEVICE_CALL_SERVICE_AVAILABLE)
-  # cudaq-realtime (cqr) host-dispatch: the decoding-server skeleton and the
-  # simulated-QPU client that drives it over cudaq-realtime.
-  add_subdirectory(decoding-server-cqr)
+  # cudaq-realtime (cqr) host-dispatch: simulated-QPU client that drives the
+  # decoding server over cudaq-realtime.
   add_subdirectory(simulation-cqr)
 endif()
