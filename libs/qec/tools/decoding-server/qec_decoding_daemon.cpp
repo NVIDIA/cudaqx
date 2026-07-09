@@ -24,6 +24,15 @@
 ///     (requires an RDMA NIC; pairs with the caller's
 ///     `--cudaq-device-call=cpu_roce` channel and includes the QP/rkey TCP
 ///     rendezvous server).
+///   - for cpu_roce, `--qp_config=rendezvous|hsb_fpga` selects how queue pairs
+///     are exchanged.  `rendezvous` (default) is the TCP QP/rkey swap with a
+///     CpuRoceChannel caller.  `hsb_fpga` is the Holoscan-Sensor-Bridge FPGA
+///     method: the peer QP comes from `--remote-qp` (the FPGA data-plane QP,
+///     or the emulator's QP) and this daemon prints its own QP / RKey /
+///     Buffer Addr in the canonical bridge handshake format
+///     (hololink_bridge_common.h) for the orchestration script to relay to
+///     the playback tool -- which alone programs the FPGA over the Hololink
+///     control plane.  The daemon itself performs NO control-plane traffic.
 ///
 /// The function table comes from the decoding-server-cqr service plugin
 /// (enqueue_syndromes / get_corrections / reset_decoder) regardless of
@@ -41,9 +50,14 @@
 ///                           [--transport=udp|cpu_roce] [--port=0]
 ///                           [--num-slots=8] [--slot-size=256] [--timeout=60]
 ///                           [--device=mlx5_0] [--local-ip=10.0.0.2]
+///                           [--qp_config=rendezvous|hsb_fpga]
+///                           [--peer-ip=ADDR] [--remote-qp=0x2]
+///                           [--frame-size=N]
 ///
 /// NOTE: --slot-size must match the caller channel's slot size (each frame
-/// occupies one full slot stride on both wires).
+/// occupies one full slot stride on both wires).  With --qp_config=hsb_fpga,
+/// --slot-size is the HSB page size (ring slot stride) and --num-slots is
+/// capped at 64 (the HSB WQE depth).
 
 #include "cudaq/qec/realtime/decoding_config.h"
 
@@ -102,6 +116,12 @@ struct DaemonConfig {
   // cpu_roce only:
   std::string device = "mlx5_0";
   std::string local_ip = "10.0.0.2";
+  // cpu_roce QP exchange method (see file header).
+  std::string qp_config = "rendezvous";
+  // hsb_fpga only:
+  std::string peer_ip;           // FPGA/emulator data-plane IPv4 (required)
+  std::uint32_t remote_qp = 0x2; // FPGA data-plane QP (emulator QP in emulate)
+  std::size_t frame_size = 0;    // TX SGE bytes; 0 => slot_size
 };
 
 bool starts_with(const std::string &s, const char *prefix) {
@@ -117,7 +137,9 @@ bool parse_args(int argc, char **argv, DaemonConfig &cfg) {
                 << " --config=<decoders.yaml> "
                    "[--transport=udp|cpu_roce|gpu_roce] "
                    "[--port=N] [--num-slots=N] [--slot-size=N] [--timeout=N] "
-                   "[--device=NAME] [--local-ip=ADDR]"
+                   "[--device=NAME] [--local-ip=ADDR] "
+                   "[--qp_config=rendezvous|hsb_fpga] [--peer-ip=ADDR] "
+                   "[--remote-qp=N] [--frame-size=N]"
                 << std::endl;
       return false;
     } else if (starts_with(a, "--config="))
@@ -136,6 +158,17 @@ bool parse_args(int argc, char **argv, DaemonConfig &cfg) {
       cfg.device = a.substr(9);
     else if (starts_with(a, "--local-ip="))
       cfg.local_ip = a.substr(11);
+    else if (starts_with(a, "--qp_config="))
+      cfg.qp_config = a.substr(12);
+    else if (starts_with(a, "--peer-ip="))
+      cfg.peer_ip = a.substr(10);
+    else if (starts_with(a, "--remote-qp="))
+      // base 0: accepts both decimal and 0x-prefixed hex (QP numbers are
+      // conventionally printed in hex, e.g. the FPGA's fixed 0x2).
+      cfg.remote_qp =
+          static_cast<std::uint32_t>(std::stoul(a.substr(12), nullptr, 0));
+    else if (starts_with(a, "--frame-size="))
+      cfg.frame_size = std::stoull(a.substr(13));
     else {
       std::cerr << "Unknown argument: " << a << " (use --help)" << std::endl;
       return false;
@@ -144,6 +177,33 @@ bool parse_args(int argc, char **argv, DaemonConfig &cfg) {
   if (cfg.config_path.empty()) {
     std::cerr << "ERROR: --config=<decoders.yaml> is required" << std::endl;
     return false;
+  }
+  if (cfg.qp_config != "rendezvous" && cfg.qp_config != "hsb_fpga") {
+    std::cerr << "ERROR: unknown --qp_config=" << cfg.qp_config
+              << " (expected rendezvous or hsb_fpga)" << std::endl;
+    return false;
+  }
+  if (cfg.qp_config == "hsb_fpga") {
+    if (cfg.transport != "cpu_roce") {
+      std::cerr << "ERROR: --qp_config=hsb_fpga requires --transport=cpu_roce"
+                << std::endl;
+      return false;
+    }
+    if (cfg.peer_ip.empty()) {
+      std::cerr << "ERROR: --qp_config=hsb_fpga requires --peer-ip=<FPGA or "
+                   "emulator IPv4>"
+                << std::endl;
+      return false;
+    }
+    // The HSB receive queue is WQE_NUM=64 deep; a deeper ring would alias two
+    // slots per WQE and race RX against TX (same constraint as the Hololink
+    // bridges).
+    constexpr std::uint32_t kHsbWqeNum = 64;
+    if (cfg.num_slots > kHsbWqeNum) {
+      std::cerr << "WARNING: --num-slots=" << cfg.num_slots << " exceeds the "
+                << "HSB WQE depth; clamping to " << kHsbWqeNum << std::endl;
+      cfg.num_slots = kHsbWqeNum;
+    }
   }
   return true;
 }
@@ -342,6 +402,86 @@ bool init_cpu_roce_transport(const DaemonConfig &cfg, TransportEndpoints &tp) {
   return true;
 }
 
+// CPU RoCE bring-up for the HSB FPGA QP-exchange method, mirroring
+// cuda-quantum's hsb_bridge_cpu.cpp (the proven CPU<->FPGA precedent): the
+// peer QP is a CLI input (the FPGA's fixed data-plane QP, or the emulator's),
+// the transceiver is created one-shot with the peer already known
+// (cpu_roce_start, no TCP rendezvous / no connect step), and this daemon
+// publishes its own QP / RKey / Buffer Addr on stdout in the canonical bridge
+// handshake format.  The orchestration script scrapes those values and hands
+// them to the playback tool, which alone programs the FPGA SIF over the
+// Hololink control plane (DataChannel::authenticate / configure_roce) -- this
+// daemon performs NO control-plane traffic.
+//
+// tx_mode=RDMA_SEND: the FPGA/emulator posts receive WQEs for the
+// server->FPGA direction and RDMA-WRITEs requests into our ring, exactly as
+// with hsb_bridge_cpu.
+bool init_cpu_roce_hsb_fpga_transport(const DaemonConfig &cfg,
+                                      TransportEndpoints &tp) {
+  const std::size_t frame_size =
+      cfg.frame_size ? cfg.frame_size : cfg.slot_size;
+
+  std::cout << "HSB FPGA QP exchange:\n"
+            << "  Device:     " << cfg.device << "\n"
+            << "  Peer IP:    " << cfg.peer_ip << "\n"
+            << "  Remote QP:  0x" << std::hex << cfg.remote_qp << std::dec
+            << "\n"
+            << "  Slots:      " << cfg.num_slots << "\n"
+            << "  Slot size:  " << cfg.slot_size << " bytes\n"
+            << "  Frame size: " << frame_size << " bytes" << std::endl;
+
+  cpu_roce_transceiver_t xcvr = cpu_roce_create_transceiver(
+      cfg.device.c_str(), /*ib_port=*/1, /*tx_ibv_qp=*/cfg.remote_qp,
+      frame_size, /*page_size=*/cfg.slot_size, cfg.num_slots,
+      cfg.peer_ip.c_str(), /*forward=*/0, /*rx_only=*/0, /*tx_only=*/0,
+      /*unified=*/0, CPU_ROCE_TX_MODE_RDMA_SEND, /*peer_rx_base_addr=*/0,
+      /*peer_rx_rkey=*/0);
+  if (!xcvr) {
+    std::cerr << "ERROR: cpu_roce transceiver create failed" << std::endl;
+    return false;
+  }
+  if (!cpu_roce_start(xcvr)) {
+    std::cerr << "ERROR: cpu_roce_start failed" << std::endl;
+    cpu_roce_destroy_transceiver(xcvr);
+    return false;
+  }
+
+  auto *monitor = new std::thread([xcvr] { cpu_roce_blocking_monitor(xcvr); });
+
+  tp.rx_flags = reinterpret_cast<volatile std::uint64_t *>(
+      cpu_roce_get_rx_ring_flag_addr(xcvr));
+  tp.tx_flags = reinterpret_cast<volatile std::uint64_t *>(
+      cpu_roce_get_tx_ring_flag_addr(xcvr));
+  tp.rx_data =
+      reinterpret_cast<std::uint8_t *>(cpu_roce_get_rx_ring_data_addr(xcvr));
+  tp.tx_data =
+      reinterpret_cast<std::uint8_t *>(cpu_roce_get_tx_ring_data_addr(xcvr));
+  tp.shutdown = [xcvr, monitor] {
+    cpu_roce_close(xcvr);
+    if (monitor->joinable())
+      monitor->join();
+    delete monitor;
+    cpu_roce_destroy_transceiver(xcvr);
+  };
+
+  // Canonical bridge handshake.  Format MUST match hololink_bridge_common.h
+  // exactly -- "  KEY: VALUE", single space after the colon -- because the
+  // orchestration script parses it with strict regexes (same contract as
+  // hsb_bridge_cpu.cpp and the Hololink GPU bridges).  Buffer Addr is 0 with
+  // an iova=0 MR registration; the playback tool handles that.
+  std::cout << "\n=== Bridge Ready ===" << std::endl;
+  std::cout << "  QP Number: 0x" << std::hex << cpu_roce_get_qp_number(xcvr)
+            << std::dec << std::endl;
+  std::cout << "  RKey: " << cpu_roce_get_rkey(xcvr) << std::endl;
+  std::cout << "  Buffer Addr: 0x" << std::hex << cpu_roce_get_buffer_addr(xcvr)
+            << std::dec << std::endl;
+  std::cout.flush();
+
+  print_ready(/*port=*/0,
+              "transport=cpu_roce qp_config=hsb_fpga peer_ip=" + cfg.peer_ip);
+  return true;
+}
+
 #endif // QEC_HAVE_CPU_ROCE_TRANSPORT
 
 } // namespace
@@ -458,7 +598,10 @@ int main(int argc, char **argv) {
       return 1;
   } else if (cfg.transport == "cpu_roce") {
 #ifdef QEC_HAVE_CPU_ROCE_TRANSPORT
-    if (!init_cpu_roce_transport(cfg, tp))
+    if (cfg.qp_config == "hsb_fpga") {
+      if (!init_cpu_roce_hsb_fpga_transport(cfg, tp))
+        return 1;
+    } else if (!init_cpu_roce_transport(cfg, tp))
       return 1;
 #else
     std::cerr << "ERROR: this daemon was built without cpu_roce transport "
