@@ -58,18 +58,14 @@ struct __attribute__((packed)) EnqueuePayload {
 };
 static_assert(sizeof(EnqueuePayload) == 32, "EnqueuePayload must be 32 bytes");
 
-// Layout per decoder_server_runtime.md: fixed-size scalars tightly packed in
-// schema order with the 1-byte bool last and NO trailing padding
-// (arg_len = 25 exactly).
 struct __attribute__((packed)) GetCorrectionsPayload {
-  int64_t decoder_id;        ///< arg0
-  int64_t return_size;       ///< arg1 (# correction bits to fetch)
-  int64_t corrections_bytes; ///< arg2 (caller's response byte budget,
-                             ///<       == ceil(return_size/8))
-  uint8_t reset;             ///< arg3 (1 = reset decoder after read)
+  int64_t decoder_id;  ///< arg0
+  int64_t return_size; ///< arg1 (# correction bits to fetch)
+  uint8_t reset;       ///< arg2 (1 = reset decoder after read)
+  uint8_t _pad[7];     ///< zero pad to 8-byte multiple
 };
-static_assert(sizeof(GetCorrectionsPayload) == 25,
-              "GetCorrectionsPayload must be 25 bytes (no trailing pad)");
+static_assert(sizeof(GetCorrectionsPayload) == 24,
+              "GetCorrectionsPayload must be 24 bytes");
 
 struct __attribute__((packed)) ResetPayload {
   int64_t decoder_id; ///< arg0

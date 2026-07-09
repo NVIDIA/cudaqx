@@ -162,11 +162,7 @@ void DecoderSession::on_get_corrections(const WorkItem &item) {
   const auto *req = reinterpret_cast<const GetCorrectionsPayload *>(
       item.frame_buf.data() + sizeof(RPCHeader));
 
-  // Spec validation: return_size must be positive and corrections_bytes must
-  // equal ceil(return_size/8) exactly.
-  if (req->return_size <= 0 ||
-      static_cast<size_t>(req->corrections_bytes) !=
-          bit_packed_bytes(static_cast<size_t>(req->return_size))) {
+  if (req->return_size <= 0) {
     ++error_count;
     send_response(*item.response_transport, item.peer, item.request_id,
                   item.ptp_timestamp, RpcStatus::BAD_REQUEST);
