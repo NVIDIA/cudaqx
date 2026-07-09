@@ -76,25 +76,44 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-decoding-server-cqr)
         ${QEC_IBVERBS_LIBRARY})
       message(STATUS "qec_decoding_daemon: cpu_roce transport enabled")
     endif()
-    # GPU RoCE: wire the Hololink/DOCA/CUDAQ device-graph scheduler path.
-    # Requires cudaq-qec-decoder-server built with CUDAQ_GPU_ROCE_AVAILABLE
-    # (set as a CACHE INTERNAL by decoding-server-cqr/CMakeLists.txt when all
-    # Hololink + DOCA + cudaq-realtime-dispatch libraries are found).
     if(CUDAQ_GPU_ROCE_AVAILABLE)
+      # Re-find in case the CQR subdir cache entry didn't propagate here.
+      if(NOT CUDAQ_REALTIME_DISPATCH_LIBRARY)
+        find_library(CUDAQ_REALTIME_DISPATCH_LIBRARY cudaq-realtime-dispatch
+          HINTS ${CUDAQ_REALTIME_ROOT} ${CUDAQ_INSTALL_DIR}
+          PATH_SUFFIXES lib)
+      endif()
+      if(NOT CUDAQ_REALTIME_DISPATCH_LIBRARY)
+        message(FATAL_ERROR
+          "CUDAQ_GPU_ROCE_AVAILABLE is set but cudaq-realtime-dispatch was "
+          "not found (searched CUDAQ_REALTIME_ROOT=${CUDAQ_REALTIME_ROOT} and "
+          "CUDAQ_INSTALL_DIR=${CUDAQ_INSTALL_DIR}).  "
+          "GpuRoceTransceiver::launch_scheduler resolves "
+          "cudaq_create/launch/destroy_dispatch_graph_regular via dlsym; "
+          "without this library in the daemon image those lookups will fail "
+          "at runtime.  Set CUDAQ_REALTIME_ROOT to the CUDA-Q realtime "
+          "install prefix and re-run CMake.")
+      endif()
       target_compile_definitions(qec_decoding_daemon PRIVATE
         QEC_HAVE_GPU_ROCE_TRANSPORT)
-      # DecoderServer.h and GpuRoceTransceiver.h live in the cqr source dir.
       target_include_directories(qec_decoding_daemon PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/realtime/decoding-server-cqr
       )
-      # cudaq-qec-decoder-server holds DecoderServer + GpuRoceTransceiver.
-      # GpuRoceTransceiver::launch_scheduler uses dlsym(RTLD_DEFAULT) to find
-      # the proprietary populate shims, so the process must absorb
-      # libcudaq-qec-realtime-cudevice-proprietary.a as WHOLE_ARCHIVE and link
-      # with --export-dynamic to make those symbols visible at runtime.
+      if(NOT TARGET cudaq-qec-realtime-cudevice-proprietary)
+        message(FATAL_ERROR
+          "CUDAQ_GPU_ROCE_AVAILABLE is set but the CMake target "
+          "cudaq-qec-realtime-cudevice-proprietary is not defined.  "
+          "GpuRoceTransceiver::launch_scheduler resolves the three "
+          "populate-shim symbols "
+          "(cudaqx_qec_realtime_dispatch_populate_*_device_entry) via "
+          "dlsym; without this archive absorbed as WHOLE_ARCHIVE those "
+          "lookups will fail at runtime.  Ensure the proprietary static "
+          "library target is available before configuring the daemon.")
+      endif()
       target_link_libraries(qec_decoding_daemon PRIVATE
         cudaq-qec-decoder-server
-        $<$<TARGET_EXISTS:cudaq-qec-realtime-cudevice-proprietary>:$<LINK_LIBRARY:WHOLE_ARCHIVE,cudaq-qec-realtime-cudevice-proprietary>>
+        ${CUDAQ_REALTIME_DISPATCH_LIBRARY}
+        $<LINK_LIBRARY:WHOLE_ARCHIVE,cudaq-qec-realtime-cudevice-proprietary>
       )
       target_link_options(qec_decoding_daemon PRIVATE
         "LINKER:--export-dynamic"

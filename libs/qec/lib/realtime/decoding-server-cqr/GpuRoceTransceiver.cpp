@@ -14,6 +14,8 @@
 #include "cudaq/qec/realtime/graph_resources.h"
 
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <dlfcn.h>
 #include <iostream>
@@ -200,8 +202,6 @@ GpuRoceTransceiver::GpuRoceTransceiver(const GpuRoceConfig &config)
 // ---------------------------------------------------------------------------
 
 void GpuRoceTransceiver::launch_scheduler(void *raw_graph_resources) {
-  // Cast the opaque decoder handle to the concrete graph_resources struct
-  // (defined in cudaq/qec/realtime/graph_resources.h, in-repo).
   auto *graph_res =
       static_cast<cudaq::qec::realtime::graph_resources *>(raw_graph_resources);
   if (!graph_res || !graph_res->graph_exec)
@@ -211,7 +211,6 @@ void GpuRoceTransceiver::launch_scheduler(void *raw_graph_resources) {
 
   GPU_CUDA_CHECK(cudaSetDevice(gpu_id_));
 
-  // -- Function entry table (pinned+mapped, 3 entries) -----------------------
   void *ft_dev = nullptr;
   if (!alloc_pinned_mapped(3 * sizeof(cudaq_function_entry_t), &ft_host_,
                            &ft_dev))
@@ -240,7 +239,40 @@ void GpuRoceTransceiver::launch_scheduler(void *raw_graph_resources) {
         "(see error log above)");
   }
 
-  // -- GPU scheduler shutdown flag (pinned+mapped) ---------------------------
+  // Resolve dispatch graph API via dlsym; cudaq-realtime-dispatch is linked
+  // into the daemon (not this static lib) to keep the CUDA module in one copy.
+  // Signatures must match create/launch/destroy_dispatch_graph_fn_t in
+  // qec_realtime_session.cpp/.h exactly — calling-convention mismatch is UB.
+  using create_fn_t = cudaError_t (*)(
+      volatile std::uint64_t *, volatile std::uint64_t *, std::uint8_t *,
+      std::uint8_t *, std::size_t, std::size_t, cudaq_function_entry_t *,
+      std::size_t, void *, volatile int *, std::uint64_t *, std::size_t,
+      std::uint32_t, std::uint32_t, cudaGraphExec_t, cudaStream_t,
+      cudaq_dispatch_graph_context **);
+  using launch_fn_t =
+      cudaError_t (*)(cudaq_dispatch_graph_context *, cudaStream_t);
+  using destroy_fn_t = cudaError_t (*)(cudaq_dispatch_graph_context *);
+
+  auto create_dispatch = reinterpret_cast<create_fn_t>(
+      ::dlsym(RTLD_DEFAULT, "cudaq_create_dispatch_graph_regular"));
+  auto launch_dispatch = reinterpret_cast<launch_fn_t>(
+      ::dlsym(RTLD_DEFAULT, "cudaq_launch_dispatch_graph"));
+  auto destroy_dispatch = reinterpret_cast<destroy_fn_t>(
+      ::dlsym(RTLD_DEFAULT, "cudaq_destroy_dispatch_graph"));
+
+  if (!create_dispatch || !launch_dispatch || !destroy_dispatch) {
+    cudaFreeHost(ft_host_);
+    ft_host_ = nullptr;
+    CUDA_QEC_ERROR(
+        "GpuRoceTransceiver: cudaq dispatch API not found via dlsym -- "
+        "the daemon must link cudaq-realtime-dispatch with --export-dynamic");
+    throw std::runtime_error(
+        "GpuRoceTransceiver::launch_scheduler: cudaq dispatch API not found "
+        "(cudaq_create/launch/destroy_dispatch_graph_regular); "
+        "link cudaq-realtime-dispatch into the daemon with --export-dynamic");
+  }
+  fn_destroy_dispatch_graph_ = destroy_dispatch;
+
   void *sd_host = nullptr, *sd_dev = nullptr;
   if (!alloc_pinned_mapped(sizeof(int), &sd_host, &sd_dev)) {
     cudaFreeHost(ft_host_);
@@ -251,7 +283,6 @@ void GpuRoceTransceiver::launch_scheduler(void *raw_graph_resources) {
   shutdown_host_ = static_cast<volatile int *>(sd_host);
   shutdown_dev_ = static_cast<volatile int *>(sd_dev);
 
-  // -- Stats buffer (device) -------------------------------------------------
   if (cudaMalloc(&d_stats_, sizeof(uint64_t)) != cudaSuccess ||
       cudaMemset(d_stats_, 0, sizeof(uint64_t)) != cudaSuccess) {
     cudaFreeHost(ft_host_);
@@ -263,13 +294,9 @@ void GpuRoceTransceiver::launch_scheduler(void *raw_graph_resources) {
         "GpuRoceTransceiver::launch_scheduler: d_stats_ alloc failed");
   }
 
-  // -- Create and launch the device-graph scheduler --------------------------
-  // Strict-FIFO consumption (shared_ring_mode OFF): the Hololink RX kernel
-  // fills slots monotonically and the scheduler's persistent cursor tracks the
-  // next slot without rescanning from 0.  Mirrors lines 378-410 in the bridge.
   GPU_CUDA_CHECK(cudaStreamCreate(&sched_stream_));
 
-  cudaError_t cerr = cudaq_create_dispatch_graph_regular(
+  cudaError_t cerr = create_dispatch(
       rx_ring_flag_, tx_ring_flag_, rx_ring_data_, tx_ring_data_, page_size_,
       page_size_, static_cast<cudaq_function_entry_t *>(ft_dev),
       /*func_count=*/3,
@@ -292,9 +319,9 @@ void GpuRoceTransceiver::launch_scheduler(void *raw_graph_resources) {
         cudaGetErrorString(cerr));
   }
 
-  cerr = cudaq_launch_dispatch_graph(sched_ctx_, sched_stream_);
+  cerr = launch_dispatch(sched_ctx_, sched_stream_);
   if (cerr != cudaSuccess) {
-    cudaq_destroy_dispatch_graph(sched_ctx_);
+    fn_destroy_dispatch_graph_(sched_ctx_);
     sched_ctx_ = nullptr;
     cudaStreamDestroy(sched_stream_);
     sched_stream_ = nullptr;
@@ -311,9 +338,6 @@ void GpuRoceTransceiver::launch_scheduler(void *raw_graph_resources) {
         cudaGetErrorString(cerr));
   }
 
-  // -- Start the Hololink RX/TX kernel monitor thread ------------------------
-  // hololink_blocking_monitor() drives the GPU RX/TX kernels; it must be
-  // running before data can flow from the FPGA.
   monitor_thread_ =
       std::thread([this] { hololink_blocking_monitor(transceiver_); });
 
@@ -326,9 +350,10 @@ void GpuRoceTransceiver::launch_scheduler(void *raw_graph_resources) {
                 static_cast<void *>(graph_res->graph_exec));
 
   // Print RDMA target info to stdout so the orchestration script can grep it.
-  // Matches the format in hololink_qldpc_graph_decoder_bridge.cpp lines 441-444.
-  std::cout << "QP Number: 0x" << std::hex << hololink_get_qp_number(transceiver_)
-            << std::dec << "\n"
+  // Matches the format in hololink_qldpc_graph_decoder_bridge.cpp lines
+  // 441-444.
+  std::cout << "QP Number: 0x" << std::hex
+            << hololink_get_qp_number(transceiver_) << std::dec << "\n"
             << "RKey: " << hololink_get_rkey(transceiver_) << "\n"
             << "Buffer Addr: 0x" << std::hex
             << hololink_get_buffer_addr(transceiver_) << std::dec << "\n";
@@ -386,8 +411,8 @@ GpuRoceTransceiver::~GpuRoceTransceiver() {
 
   if (sched_stream_) {
     cudaStreamSynchronize(sched_stream_); // drain the self-relaunch chain
-    if (sched_ctx_)
-      cudaq_destroy_dispatch_graph(sched_ctx_);
+    if (sched_ctx_ && fn_destroy_dispatch_graph_)
+      fn_destroy_dispatch_graph_(sched_ctx_);
     cudaStreamDestroy(sched_stream_);
   }
 

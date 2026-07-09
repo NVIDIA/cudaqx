@@ -62,17 +62,6 @@ struct GpuRoceConfig {
 /// is involved in the data path; those methods are stubs that satisfy the
 /// `ITransceiver` contract used by `DecoderServer::run()`.
 ///
-/// ## Deployment requirement
-///
-/// `launch_scheduler()` uses `dlsym(RTLD_DEFAULT)` to locate the three
-/// proprietary DEVICE_CALL populate shims:
-///   cudaqx_qec_realtime_dispatch_populate_enqueue_syndromes_device_entry
-///   cudaqx_qec_realtime_dispatch_populate_get_corrections_device_entry
-///   cudaqx_qec_realtime_dispatch_populate_reset_decoder_device_entry
-/// The process image must absorb `libcudaq-qec-realtime-cudevice-proprietary.a`
-/// as WHOLE_ARCHIVE (same as `hololink_qldpc_graph_decoder_bridge`) and be
-/// linked with `--export-dynamic` so the symbols are visible to dlsym.
-///
 /// ## Multi-decoder
 ///
 /// Currently limited to a single decoder session (enforced by DecoderServer).
@@ -127,6 +116,9 @@ private:
       nullptr}; ///< pinned host ptr: GPU scheduler stop flag
   volatile int *shutdown_dev_{nullptr}; ///< device-mapped ptr of shutdown_host_
   uint64_t *d_stats_{nullptr};
+  // Cached from launch_scheduler() so the destructor can call it without dlsym.
+  cudaError_t (*fn_destroy_dispatch_graph_)(cudaq_dispatch_graph_context *){
+      nullptr};
 
   std::atomic<bool> stopped_{false};
   std::thread monitor_thread_; ///< runs hololink_blocking_monitor()

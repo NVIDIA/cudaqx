@@ -274,8 +274,7 @@ bool init_cpu_roce_transport(const DaemonConfig &cfg, TransportEndpoints &tp) {
   srv.sin_family = AF_INET;
   srv.sin_addr.s_addr = htonl(INADDR_ANY);
   srv.sin_port = htons(cfg.port);
-  if (::bind(listen_fd, reinterpret_cast<sockaddr *>(&srv), sizeof(srv)) !=
-          0 ||
+  if (::bind(listen_fd, reinterpret_cast<sockaddr *>(&srv), sizeof(srv)) != 0 ||
       ::listen(listen_fd, 1) != 0) {
     std::cerr << "ERROR: rendezvous bind/listen failed" << std::endl;
     ::close(listen_fd);
@@ -301,8 +300,7 @@ bool init_cpu_roce_transport(const DaemonConfig &cfg, TransportEndpoints &tp) {
   in_addr local_addr{};
   ::inet_pton(AF_INET, cfg.local_ip.c_str(), &local_addr);
   const RendezvousInfo self{htonl(cpu_roce_get_qp_number(xcvr)),
-                            htonl(cpu_roce_get_rkey(xcvr)),
-                            local_addr.s_addr};
+                            htonl(cpu_roce_get_rkey(xcvr)), local_addr.s_addr};
   if (!read_all(conn_fd, &peer, sizeof(peer)) ||
       !write_all(conn_fd, &self, sizeof(self))) {
     std::cerr << "ERROR: rendezvous exchange failed" << std::endl;
@@ -324,8 +322,7 @@ bool init_cpu_roce_transport(const DaemonConfig &cfg, TransportEndpoints &tp) {
     return false;
   }
 
-  auto *monitor =
-      new std::thread([xcvr] { cpu_roce_blocking_monitor(xcvr); });
+  auto *monitor = new std::thread([xcvr] { cpu_roce_blocking_monitor(xcvr); });
 
   tp.rx_flags = reinterpret_cast<volatile std::uint64_t *>(
       cpu_roce_get_rx_ring_flag_addr(xcvr));
@@ -381,6 +378,38 @@ int main(int argc, char **argv) {
             << " decoder(s); decoder 0 type: "
             << decoder_config.decoders[0].type
             << "; transport: " << cfg.transport << std::endl;
+
+  // [2a] GPU RoCE takes a completely different path: bypass the CQR
+  // DeviceCallService / HOST_CALL dispatcher and use DecoderServer directly.
+  // Must be checked before force-linking the CQR plugin (which creates a
+  // DecoderServer internally for the HOST_CALL path) to avoid double-init.
+#ifdef QEC_HAVE_GPU_ROCE_TRANSPORT
+  if (cfg.transport == "gpu_roce") {
+    // DecoderServer(config_yaml) reads the YAML, creates GpuRoceTransceiver
+    // (Hololink Sensor Bridge + DOCA), loads decoder sessions, and calls
+    // launch_scheduler() to wire the CUDAQ device-graph scheduler to the
+    // Hololink ring buffers.  The GPU scheduler then handles
+    // RX→dispatch→decode→TX autonomously; this thread just waits for signal.
+    cudaq::qec::decoder_server::DecoderServer server(cfg.config_path);
+    // QP/rkey/buf already printed to stdout by launch_scheduler() so the
+    // orchestration script can grep them before the READY line.
+    std::cout << "QEC_DECODING_DAEMON_READY gpu_roce" << std::endl;
+    std::cout.flush();
+    std::thread server_thread([&server] { server.run(); });
+    const auto start_time_gr = std::chrono::steady_clock::now();
+    while (g_shutdown.load(std::memory_order_acquire) == 0) {
+      const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                               std::chrono::steady_clock::now() - start_time_gr)
+                               .count();
+      if (elapsed > cfg.timeout_sec)
+        break;
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    server.stop();
+    server_thread.join();
+    return 0;
+  }
+#endif
 
   // [2] Pull the QEC HOST_CALL function table from the decoding-server-cqr
   // service plugin -- the same table the in-process host_dispatch test uses.
@@ -438,39 +467,14 @@ int main(int argc, char **argv) {
     return 1;
 #endif
   } else if (cfg.transport == "gpu_roce") {
-#ifdef QEC_HAVE_GPU_ROCE_TRANSPORT
-    // GPU RoCE: bypass the CQR DeviceCallService / HOST_CALL dispatcher path
-    // entirely.  DecoderServer(config_yaml) reads the transport type from the
-    // YAML config, creates a GpuRoceTransceiver (Hololink Sensor Bridge +
-    // DOCA), loads decoder sessions from the config, then wires the CUDAQ
-    // device-graph scheduler to the Hololink ring buffers via
-    // launch_scheduler().  The GPU scheduler handles RX→dispatch→decode→TX
-    // autonomously; this thread just waits for the shutdown signal.
-    cudaq::qec::decoder_server::DecoderServer server(cfg.config_path);
-    // QP/rkey/buf already printed to stdout by launch_scheduler() so the
-    // orchestration script can grep them before the READY line.
-    std::cout << "QEC_DECODING_DAEMON_READY gpu_roce" << std::endl;
-    std::cout.flush();
-    std::thread server_thread([&server] { server.run(); });
-    const auto start_time_gr = std::chrono::steady_clock::now();
-    while (g_shutdown.load(std::memory_order_acquire) == 0) {
-      const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
-                               std::chrono::steady_clock::now() - start_time_gr)
-                               .count();
-      if (elapsed > cfg.timeout_sec)
-        break;
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
-    server.stop();
-    server_thread.join();
-    return 0;
-#else
+    // gpu_roce is handled before the CQR plugin force-link above ([2a]).
+    // Reaching here means QEC_HAVE_GPU_ROCE_TRANSPORT was not defined at
+    // build time (the daemon was not built with GPU RoCE support).
     std::cerr << "ERROR: this daemon was built without gpu_roce transport "
                  "support (rebuild with HOLOSCAN_SENSOR_BRIDGE_BUILD_DIR, "
                  "DOCA, and CUDA)"
               << std::endl;
     return 1;
-#endif
   } else {
     std::cerr << "ERROR: unknown --transport=" << cfg.transport
               << " (expected udp, cpu_roce, or gpu_roce)" << std::endl;
@@ -503,9 +507,9 @@ int main(int argc, char **argv) {
   function_table.count = table.count;
 
   std::thread dispatcher_thread([&]() {
-    cudaq_host_ring_dispatch_loop(&ringbuffer, &function_table, &dispatch_config,
-                                  /*engine=*/nullptr, &dispatcher_shutdown,
-                                  &packets_dispatched);
+    cudaq_host_ring_dispatch_loop(
+        &ringbuffer, &function_table, &dispatch_config,
+        /*engine=*/nullptr, &dispatcher_shutdown, &packets_dispatched);
   });
 
   // [5] Run until signalled or timed out.

@@ -158,8 +158,6 @@ if(CUDAQ_GPU_ROCE_AVAILABLE)
     "${_doca_root}/include"
   )
   target_link_libraries(cudaq-qec-decoder-server PRIVATE
-    "${CUDAQ_REALTIME_DISPATCH_LIBRARY}"
-    "${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}"
     "${CUDAQ_REALTIME_BRIDGE_HOLOLINK_LIBRARY}"
     "${GPU_ROCE_TRANSCEIVER_LIB}"
     "${BASE_RECEIVER_OP_LIB}"
