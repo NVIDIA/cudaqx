@@ -185,7 +185,7 @@ jobs:
           path: cudaq
           set-safe-directory: true
 
-      - name: Install CMake 4
+      - name: Install CMake 4 and Ninja
         shell: bash
         run: |
           cmake_version=4.0.7
@@ -200,6 +200,18 @@ jobs:
           echo "${cmake_bin}" >> "${GITHUB_PATH}"
           export PATH="${cmake_bin}:${PATH}"
           cmake --version
+
+          ninja_version=1.12.1
+          case "$(uname -m)" in
+            x86_64) ninja_zip=ninja-linux.zip ;;
+            aarch64) ninja_zip=ninja-linux-aarch64.zip ;;
+            *) echo "Unsupported architecture: $(uname -m)" && exit 1 ;;
+          esac
+          wget -q "https://github.com/ninja-build/ninja/releases/download/v${ninja_version}/${ninja_zip}" \
+            -O /tmp/ninja.zip
+          python3 -m zipfile -e /tmp/ninja.zip /usr/local/bin
+          chmod +x /usr/local/bin/ninja
+          ninja --version
 
       - name: Build CUDAQ toolchain
         run: |
