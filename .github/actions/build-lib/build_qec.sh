@@ -32,10 +32,9 @@ if [ -z "$CUDAQ_REALTIME_ROOT" ]; then
   apt-get update && apt-get install -y --no-install-recommends \
     ninja-build curl pkg-config
 
-  # HSB -> find_package(holoscan) -> rapids_logger requires a newer CMake than
-  # the current CI container provides. Pin CMake 4 for the CUDA-Q PR #4809
-  # validation path.
-  pip install 'cmake==4.0.7'
+  # HSB -> find_package(holoscan) -> rapids_logger requires CMake 4 for the
+  # CUDA-Q PR #4809 validation path.
+  pip install 'cmake==4.0.3'
   export PATH="$(python3 -c 'import cmake, os; print(os.path.join(os.path.dirname(cmake.__file__), "data", "bin"))'):$PATH"
   cmake --version
 
