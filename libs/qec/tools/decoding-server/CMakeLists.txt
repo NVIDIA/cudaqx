@@ -76,7 +76,15 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-decoding-server-cqr)
         ${QEC_IBVERBS_LIBRARY})
       message(STATUS "qec_decoding_daemon: cpu_roce transport enabled")
     endif()
-    if(CUDAQ_GPU_ROCE_AVAILABLE)
+    # The daemon's --transport=gpu_roce path needs BOTH the GPU RoCE transport
+    # (compiled into cudaq-qec-decoder-server when hololink/DOCA are present)
+    # AND the proprietary cudevice archive, which supplies the three
+    # populate-shim symbols (cudaqx_qec_realtime_dispatch_populate_*_device_entry)
+    # that GpuRoceTransceiver::launch_scheduler resolves via dlsym. Hololink
+    # presence and the proprietary archive are provisioned independently, so
+    # treat a missing archive as "gpu_roce transport not available" and fall
+    # back to the udp/cpu_roce transports rather than failing configuration.
+    if(CUDAQ_GPU_ROCE_AVAILABLE AND TARGET cudaq-qec-realtime-cudevice-proprietary)
       # Re-find in case the CQR subdir cache entry didn't propagate here.
       if(NOT CUDAQ_REALTIME_DISPATCH_LIBRARY)
         find_library(CUDAQ_REALTIME_DISPATCH_LIBRARY cudaq-realtime-dispatch
@@ -99,17 +107,6 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-decoding-server-cqr)
       target_include_directories(qec_decoding_daemon PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/realtime/decoding-server-cqr
       )
-      if(NOT TARGET cudaq-qec-realtime-cudevice-proprietary)
-        message(FATAL_ERROR
-          "CUDAQ_GPU_ROCE_AVAILABLE is set but the CMake target "
-          "cudaq-qec-realtime-cudevice-proprietary is not defined.  "
-          "GpuRoceTransceiver::launch_scheduler resolves the three "
-          "populate-shim symbols "
-          "(cudaqx_qec_realtime_dispatch_populate_*_device_entry) via "
-          "dlsym; without this archive absorbed as WHOLE_ARCHIVE those "
-          "lookups will fail at runtime.  Ensure the proprietary static "
-          "library target is available before configuring the daemon.")
-      endif()
       target_link_libraries(qec_decoding_daemon PRIVATE
         cudaq-qec-decoder-server
         ${CUDAQ_REALTIME_DISPATCH_LIBRARY}
@@ -119,6 +116,12 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-decoding-server-cqr)
         "LINKER:--export-dynamic"
       )
       message(STATUS "qec_decoding_daemon: gpu_roce transport enabled")
+    elseif(CUDAQ_GPU_ROCE_AVAILABLE)
+      message(WARNING
+        "qec_decoding_daemon: gpu_roce transport DISABLED "
+        "(cudaq-qec-realtime-cudevice-proprietary target not defined; set "
+        "CUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE to enable). "
+        "Daemon builds with udp/cpu_roce transports only.")
     endif()
     # RelayBP/nv-qldpc captures a CUDA device graph during decoder
     # initialization even when the daemon transport is udp or cpu_roce. Export

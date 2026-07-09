@@ -606,11 +606,26 @@ void qec_realtime_session::allocate_ring_buffer() {
   slot_size_ = std::max({enqueue_req, get_req, reset_req, enqueue_resp,
                          get_resp, reset_resp, std::size_t{64}});
 
-  if (device_mode_) {
-    // Round up to 256-byte alignment (keeps slot stride deterministic).
-    constexpr std::size_t kSlotAlignment = 256;
-    slot_size_ = (slot_size_ + (kSlotAlignment - 1)) & ~(kSlotAlignment - 1);
+  // Round the slot stride up to an alignment boundary so every slot -- and thus
+  // every RPCHeader/RPCResponse placed at slot offset i*slot_size_ -- starts
+  // aligned.  write_response() (and the producer) perform a 4-byte __atomic RMW
+  // on the header/response `magic` field at slot offset 0; with an unaligned
+  // stride (e.g. slot_size_ == 75 at distance 5) that atomic lands on an
+  // unaligned address, which the CPU splits into a bus-locked, cache-line-
+  // crossing access -- fatal SIGBUS on hosts with split-lock detection enabled
+  // (common on cloud / CI runners, tolerated silently elsewhere).  A distance-3
+  // config happens to floor at the aligned 64-byte minimum and so never hit
+  // this.  DEVICE mode additionally wants a 256-byte stride for deterministic
+  // GPU-visible slot addressing; HOST mode only needs the atomics aligned.
+  {
+    constexpr std::size_t kDeviceSlotAlignment = 256;
+    constexpr std::size_t kHostSlotAlignment = 16;
+    const std::size_t alignment =
+        device_mode_ ? kDeviceSlotAlignment : kHostSlotAlignment;
+    slot_size_ = (slot_size_ + (alignment - 1)) & ~(alignment - 1);
+  }
 
+  if (device_mode_) {
     auto alloc_u64 = [&](volatile std::uint64_t *&host,
                          volatile std::uint64_t *&dev, const char *what) {
       void *h = nullptr;
