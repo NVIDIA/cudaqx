@@ -308,12 +308,30 @@ int configure_decoders(
   // host allocation still works via UVA regardless of this device-wide flag),
   // and HOST-mode CPU sessions do not use mapped memory at all.
   if (realtime_mode_inproc_rpc_requested()) {
-    cudaError_t flags_err = cudaSetDeviceFlags(cudaDeviceMapHost);
-    if (flags_err != cudaSuccess && flags_err != cudaErrorSetOnActiveProcess)
-      CUDA_QEC_WARN(
-          "cudaSetDeviceFlags(cudaDeviceMapHost) returned '{}' before "
-          "decoder init; continuing (mapped alloc works via UVA).",
-          cudaGetErrorString(flags_err));
+    // The device-mapped ring buffers guarded by cudaDeviceMapHost are used only
+    // by the DEVICE-mode graph scheduler, which needs a usable GPU.  CPU
+    // decoders run in HOST mode with plain host memory and never touch the
+    // device, so probe for a GPU first and skip the flag entirely when none is
+    // present.  This keeps CPU-only / GPU-less machines from executing the
+    // device-flag call at all -- previously it ran unconditionally and logged a
+    // spurious "CUDA driver version is insufficient" warning.  (If a graph
+    // decoder is later selected without a usable device,
+    // qec_realtime_session::initialize() still fails with a clear DEVICE-mode
+    // error.)
+    int device_count = 0;
+    cudaError_t count_err = cudaGetDeviceCount(&device_count);
+    if (count_err == cudaSuccess && device_count > 0) {
+      cudaError_t flags_err = cudaSetDeviceFlags(cudaDeviceMapHost);
+      if (flags_err != cudaSuccess && flags_err != cudaErrorSetOnActiveProcess)
+        CUDA_QEC_WARN(
+            "cudaSetDeviceFlags(cudaDeviceMapHost) returned '{}' before "
+            "decoder init; continuing (mapped alloc works via UVA).",
+            cudaGetErrorString(flags_err));
+    } else {
+      // Reset the sticky runtime error so a later benign cudaGetLastError()
+      // isn't surprised by the no-device / insufficient-driver probe result.
+      cudaGetLastError();
+    }
   }
 #endif
 
