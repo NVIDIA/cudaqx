@@ -105,6 +105,42 @@ runs:
         path: cudaq
         set-safe-directory: true
 
+    - name: Patch CUDA-Q wheel builder Ninja
+      if: steps.check-cache.outputs.valid == 'false' && inputs.lookup-only == 'false'
+      run: |
+        python3 - <<'PY'
+        from pathlib import Path
+
+        path = Path("cudaq/docker/release/cudaq.wheel.Dockerfile")
+        text = path.read_text()
+        needle = "FROM $base_image AS wheelbuild\n\n"
+        insertion = "\n".join([
+            "FROM $base_image AS wheelbuild",
+            "",
+            "# Temporary for CUDA-Q PR #4809 testing: the current published manylinux",
+            "# devdeps image still has Ninja 1.8.2, but the CMake-4 CUDA-Q wheel build",
+            "# needs a newer Ninja. Remove this once the manylinux devdeps image is rebuilt",
+            "# with CUDA-Q PR #4809's docker/build/devdeps.manylinux.Dockerfile changes.",
+            "ARG NINJA_VERSION=1.12.1",
+            'RUN case "$(uname -m)" in \\',
+            "        x86_64) ninja_zip=ninja-linux.zip ;; \\",
+            "        aarch64) ninja_zip=ninja-linux-aarch64.zip ;; \\",
+            '        *) echo "Unsupported architecture: $(uname -m)" && exit 1 ;; \\',
+            "    esac \\",
+            '    && curl -L "https://github.com/ninja-build/ninja/releases/download/v${NINJA_VERSION}/${ninja_zip}" -o /tmp/ninja.zip \\',
+            "    && python3 -m zipfile -e /tmp/ninja.zip /usr/local/bin \\",
+            "    && rm /tmp/ninja.zip \\",
+            "    && chmod +x /usr/local/bin/ninja \\",
+            "    && ninja --version",
+            "",
+        ])
+
+        if needle not in text:
+            raise SystemExit(f"Did not find expected Dockerfile line: {needle!r}")
+        path.write_text(text.replace(needle, insertion, 1))
+        PY
+      shell: bash --noprofile --norc -euo pipefail {0}
+
     - name: Set up context for buildx
       if: steps.check-cache.outputs.valid == 'false' && inputs.lookup-only == 'false'
       run: |
