@@ -25,7 +25,7 @@
 
 // Host-side decoding API (for syndrome capture)
 namespace cudaq::qec::decoding::host {
-void __set_syndrome_capture_callback(void (*callback)(const uint8_t *, size_t));
+void _set_syndrome_capture_callback(void (*callback)(const uint8_t *, size_t));
 }
 
 // Global syndrome capture state for --save_syndrome option
