@@ -120,6 +120,24 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-decoding-server-cqr)
       )
       message(STATUS "qec_decoding_daemon: gpu_roce transport enabled")
     endif()
+    # RelayBP/nv-qldpc captures a CUDA device graph during decoder
+    # initialization even when the daemon transport is udp or cpu_roce. Export
+    # the graph-dispatch shims whenever the cudevice archives are available so
+    # plugin dlsym(RTLD_DEFAULT, ...) lookups succeed.
+    if(TARGET cudaq-qec-realtime-cudevice AND TARGET cudaq-qec-realtime-cudevice-proprietary)
+      target_link_libraries(qec_decoding_daemon PRIVATE
+        CUDA::cudart
+        $<LINK_LIBRARY:WHOLE_ARCHIVE,cudaq-qec-realtime-cudevice>
+        $<LINK_LIBRARY:WHOLE_ARCHIVE,cudaq-qec-realtime-cudevice-proprietary>
+      )
+      target_link_options(qec_decoding_daemon PRIVATE
+        "LINKER:--export-dynamic"
+      )
+      set_property(TARGET qec_decoding_daemon PROPERTY CUDA_SEPARABLE_COMPILATION ON)
+      set_property(TARGET qec_decoding_daemon PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+      set_property(TARGET qec_decoding_daemon PROPERTY CUDA_STANDARD 17)
+      set_property(TARGET qec_decoding_daemon PROPERTY LINKER_LANGUAGE CUDA)
+    endif()
     set_target_properties(qec_decoding_daemon PROPERTIES
       RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
       BUILD_RPATH
