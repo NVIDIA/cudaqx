@@ -79,12 +79,14 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-decoding-server-cqr)
   #     the server).
   #   - decoding-server-cqr: the host-dispatch service that receives them (and
   #     provides the force-link + self-check hooks the test asserts on).
-  # cudaq::getRegisteredExecutionManager() is exported only by the execution
-  # manager plugin (libcudaq-em-default), which is pulled in transitively. The
-  # default --as-needed would drop it (nothing references it directly on the
-  # link line), leaving libcudaq-qec.so's reference unresolved; keep it.
+  # The cudaq runtime resolves the quantum platform at runtime via
+  # dlopen(NULL) + dlsym("getQuantumPlatform") (common/PluginUtils.h), so
+  # libcudaq-platform-default.so must already be loaded even though nothing
+  # references its symbols at link time. GNU's default --as-needed would drop
+  # it (and libcudaq-em-default.so) from DT_NEEDED, and the test then fails
+  # with "undefined symbol: getQuantumPlatform"; keep them.
   target_link_options(test_pymatching_device_call_realtime PRIVATE
-    $<$<CXX_COMPILER_ID:GNU>:-Wl,--no-as-needed>)
+   $<$<CXX_COMPILER_ID:GNU>:-Wl,--no-as-needed>)
 
   target_link_libraries(test_pymatching_device_call_realtime PRIVATE
     GTest::gtest_main
