@@ -29,6 +29,14 @@ export CUDAQ_WERROR=${CUDAQ_WERROR:-OFF}
 # CUDAQ_INSTALL_PREFIX / CUQUANTUM_INSTALL_PREFIX / CUTENSOR_INSTALL_PREFIX /
 # CCACHE_DIR are expected to be set by the calling action (see action.yaml).
 
+cmake_version=4.0.7
+cmake_archive="cmake-${cmake_version}-linux-$(uname -m).tar.gz"
+wget -q "https://github.com/Kitware/CMake/releases/download/v${cmake_version}/${cmake_archive}" \
+  -O "/tmp/${cmake_archive}"
+tar -xf "/tmp/${cmake_archive}" -C /tmp
+export PATH="/tmp/cmake-${cmake_version}-linux-$(uname -m)/bin:$PATH"
+cmake --version
+
 cmake -G Ninja -S cudaq/realtime -B cudaq/realtime/build \
   -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
   -DCMAKE_INSTALL_PREFIX="$CUDAQ_INSTALL_PREFIX" \

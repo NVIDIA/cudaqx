@@ -123,7 +123,7 @@ runs:
       if: steps.check-cache.outputs.valid == 'false' && inputs.lookup-only == 'false'
       run: |
           bash .github/workflows/scripts/install_git_cli.sh
-          apt install -y --no-install-recommends ccache
+          apt install -y --no-install-recommends ccache wget ca-certificates
       shell: bash --noprofile --norc -euo pipefail {0}
 
     - name: Build CUDAQ
