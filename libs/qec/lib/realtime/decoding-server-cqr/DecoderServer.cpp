@@ -134,6 +134,15 @@ DecoderServer::DecoderServer(std::vector<std::unique_ptr<ITransceiver>> owned,
   init(config_yaml);
 }
 
+DecoderServer::~DecoderServer() {
+  stop();
+  // Join session workers while owned_transports_ is still alive: queued
+  // WorkItems reply via raw ITransceiver pointers.  Decoder/graph teardown
+  // still happens in ~registry_, after the transports, per the member-order
+  // comment in DecoderServer.h.
+  registry_.stop_workers();
+}
+
 // ---------------------------------------------------------------------------
 // init — load sessions and register RPC handlers
 // ---------------------------------------------------------------------------

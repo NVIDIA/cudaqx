@@ -666,8 +666,10 @@ int main(int argc, char **argv) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
 
-  // [6] Orderly shutdown.
-  dispatcher_shutdown = 1;
+  // [6] Orderly shutdown.  The dispatch loop polls the flag as volatile, not
+  // atomically; publish the store the same way qec_realtime_session.cpp does.
+  __atomic_store_n(&dispatcher_shutdown, 1, __ATOMIC_RELEASE);
+  __sync_synchronize();
   if (dispatcher_thread.joinable())
     dispatcher_thread.join();
   if (tp.shutdown)

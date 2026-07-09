@@ -126,10 +126,12 @@ public:
 private:
   bool stopped_ = false;
 
-  // Write an immediate success RPCResponse (no result payload) into the
-  // CUDAQ tx_slot for fire-and-forget calls.
+  // Write an immediate RPCResponse (no result payload) into the CUDAQ
+  // tx_slot: OK acks fire-and-forget calls; error statuses complete blocking
+  // calls that will never be dispatched (rejects after shutdown).
   static void write_ack(void *tx_slot, uint32_t request_id,
-                        uint64_t ptp_timestamp);
+                        uint64_t ptp_timestamp,
+                        RpcStatus status = RpcStatus::OK);
 
   struct PendingTx {
     void *tx_slot;
@@ -186,6 +188,7 @@ inline void CqrTransceiver::inject(const void *rx_slot, void *tx_slot,
 
   const auto *hdr = reinterpret_cast<const RPCHeader *>(frame.buf.data());
   const uint32_t rid = hdr->request_id;
+  const uint64_t ptp = hdr->ptp_timestamp; // save before frame is moved
 
   if (function_id == kEnqueueSyndromesFunctionId) {
     // Fire-and-forget: hand the frame to the server and ACK immediately
@@ -199,13 +202,20 @@ inline void CqrTransceiver::inject(const void *rx_slot, void *tx_slot,
       inbox_.push_back(std::move(frame));
     }
     cv_.notify_one();
-    write_ack(tx_slot, rid, hdr->ptp_timestamp);
+    write_ack(tx_slot, rid, ptp);
     return;
   }
 
   std::future<void> fut;
   {
     std::lock_guard<std::mutex> lk(mtx_);
+    // Reject new blocking RPCs after shutdown: the recv loop is exiting and
+    // will never dispatch this frame, so parking on the promise would hang
+    // the CUDAQ dispatcher thread forever.  Complete the slot immediately.
+    if (stopped_) {
+      write_ack(tx_slot, rid, ptp, RpcStatus::BAD_REQUEST);
+      return;
+    }
     auto &p = pending_[rid];
     p.tx_slot = tx_slot;
     p.slot_size = slot_size;
@@ -229,17 +239,31 @@ inline RxFrame CqrTransceiver::recv() {
 }
 
 inline void CqrTransceiver::shutdown() {
+  // Move out all in-flight pending entries under the lock, then complete
+  // them outside it.  The recv loop exits without draining inbox_, so a
+  // frame that inject() already queued would otherwise leave its handler
+  // thread parked in fut.wait() forever.  Write BAD_REQUEST into each
+  // tx_slot (the CUDAQ transport needs a valid response to complete the
+  // slot) and fulfill the promise to unblock the waiter.
+  std::unordered_map<uint32_t, PendingTx> drained;
   {
     std::lock_guard<std::mutex> lk(mtx_);
     stopped_ = true;
+    drained = std::move(pending_);
+    pending_.clear();
   }
   cv_.notify_all();
+  for (auto &[rid, p] : drained) {
+    write_ack(p.tx_slot, rid, /*ptp_timestamp=*/0, RpcStatus::BAD_REQUEST);
+    p.done.set_value();
+  }
 }
 
 inline void CqrTransceiver::write_ack(void *tx_slot, uint32_t request_id,
-                                      uint64_t ptp_timestamp) {
+                                      uint64_t ptp_timestamp,
+                                      RpcStatus status) {
   auto *resp = static_cast<cudaq::realtime::RPCResponse *>(tx_slot);
-  resp->status = 0;
+  resp->status = static_cast<int32_t>(status);
   resp->result_len = 0;
   resp->request_id = request_id;
   resp->ptp_timestamp = ptp_timestamp;

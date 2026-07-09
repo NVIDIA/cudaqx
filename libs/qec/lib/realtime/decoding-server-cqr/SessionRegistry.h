@@ -49,6 +49,15 @@ public:
     return sessions_;
   }
 
+  /// Stop and join every session's worker thread (each drains its queued
+  /// items first).  Must run while the transports the queued items reply
+  /// through are still alive; the sessions themselves stay registered so
+  /// decoder/graph resources can be torn down later in the required order.
+  void stop_workers() {
+    for (auto &[id, session] : sessions_)
+      session->stop_worker();
+  }
+
 private:
   std::unordered_map<uint64_t, std::unique_ptr<DecoderSession>> sessions_;
   DecoderTransport transport_{DecoderTransport::cpu_roce};

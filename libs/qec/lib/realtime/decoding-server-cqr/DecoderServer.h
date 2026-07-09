@@ -54,6 +54,12 @@ public:
                 TransportMap function_transport,
                 const std::string &config_yaml);
 
+  /// Stops the transports and joins all session workers before any member is
+  /// destroyed: workers drain queued items that reply through raw
+  /// ITransceiver pointers into owned_transports_, so they must finish while
+  /// the transports are still alive.
+  ~DecoderServer();
+
   /// Block until stop() is called.
   void run();
 

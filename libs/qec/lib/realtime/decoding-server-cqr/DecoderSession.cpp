@@ -26,7 +26,9 @@ uint64_t max_concurrent_busy_sessions() {
   return g_max_busy_sessions.load(std::memory_order_relaxed);
 }
 
-DecoderSession::~DecoderSession() {
+DecoderSession::~DecoderSession() { stop_worker(); }
+
+void DecoderSession::stop_worker() {
   shutdown.store(true, std::memory_order_release);
   queue_cv.notify_one();
   if (worker.joinable())
@@ -94,6 +96,18 @@ static void send_response(ITransceiver &transport, const PeerId &peer,
 void DecoderSession::on_enqueue(const WorkItem &item) {
   ++enqueue_count;
 
+  // ITransceiver contract: release_fn (zero-copy ring-slot return) must run
+  // exactly once, on every path out of this function — early returns and
+  // exceptions included — or the ring slot leaks.  Null on all current host
+  // paths; reserved for a future zero-copy ring-buffer variant.
+  struct ReleaseGuard {
+    const std::function<void()> &fn;
+    ~ReleaseGuard() {
+      if (fn)
+        fn();
+    }
+  } release_guard{item.release_fn};
+
   // Once an enqueue has been dropped or processing has failed, accepting more
   // fragments would make the shot's measurement history unknowable. Only a
   // full reset can establish a clean epoch again.
@@ -111,12 +125,15 @@ void DecoderSession::on_enqueue(const WorkItem &item) {
   const auto *req = reinterpret_cast<const EnqueuePayload *>(
       item.frame_buf.data() + sizeof(RPCHeader));
 
+  // enqueue_syndromes is fire-and-forget: the caller already received the
+  // transport-level ACK, so a response here would be unsolicited — silently
+  // dropped on CQR (no pending_ entry) and protocol-desynchronizing on
+  // in-order transports.  Latch the failure; it surfaces as INTERNAL_ERROR
+  // at this decoder's next get_corrections.
   if (req->num_syndromes <= 0 ||
       static_cast<uint64_t>(req->num_syndromes) > kMaxSyndromeBits) {
     ++error_count;
     shot_state = ShotState::failed;
-    send_response(*item.response_transport, item.peer, item.request_id,
-                  item.ptp_timestamp, RpcStatus::BAD_REQUEST);
     return;
   }
   const size_t syndrome_bytes =
@@ -124,8 +141,6 @@ void DecoderSession::on_enqueue(const WorkItem &item) {
   if (item.frame_buf.size() < min_size + syndrome_bytes) {
     ++error_count;
     shot_state = ShotState::failed;
-    send_response(*item.response_transport, item.peer, item.request_id,
-                  item.ptp_timestamp, RpcStatus::BAD_REQUEST);
     return;
   }
 
@@ -166,12 +181,6 @@ void DecoderSession::on_enqueue(const WorkItem &item) {
     // is never reached for GPU RoCE sessions.
     const bool did_decode =
         dec->enqueue_syndrome(completed->bits.data(), completed->bits.size());
-
-    // release_fn: null on all current host paths; reserved for a future
-    // zero-copy ring-buffer variant where the slot must be held until the
-    // decoder has consumed the data.
-    if (item.release_fn)
-      item.release_fn();
 
     if (did_decode) {
       accepted_syndromes = 0;

@@ -56,7 +56,10 @@ constexpr std::int64_t kExpectedCorrection = 1;
 TEST(CqrTransceiverTest, RejectsPayloadBeyondReportedSlot) {
   using namespace cudaq::qec::decoder_server;
 
-  constexpr std::size_t payload_size = 5 * sizeof(uint64_t) + 1;
+  // 4-arg wire format: [u64 decoder_id][u64 counter][u64 mapping_id]
+  // [u64 num_syndromes (the vector<bool> element-count prefix)]
+  // [u8 x ceil(bits/8) bit-packed syndromes]
+  constexpr std::size_t payload_size = 4 * sizeof(uint64_t) + 1;
   std::array<uint8_t, sizeof(cudaq::realtime::RPCHeader) + payload_size> rx{};
   std::array<uint8_t, sizeof(cudaq::realtime::RPCResponse)> tx{};
   cudaq::realtime::RPCHeader header{};
@@ -69,11 +72,11 @@ TEST(CqrTransceiverTest, RejectsPayloadBeyondReportedSlot) {
   // Keep accessible, valid-looking payload bytes beyond the reported slot.
   // A parser that trusts arg_len instead of slot_size will incorrectly accept
   // this request even without a sanitizer detecting the contract violation.
-  const std::array<uint64_t, 5> fields = {
-      /*decoder_id=*/3, /*counter=*/7, /*mapping_id=*/0,
-      /*num_syndromes=*/1, /*byte_count=*/1};
+  const std::array<uint64_t, 4> fields = {/*decoder_id=*/3, /*counter=*/7,
+                                          /*mapping_id=*/0,
+                                          /*num_syndromes=*/1};
   std::memcpy(rx.data() + sizeof(header), fields.data(), sizeof(fields));
-  rx.back() = 1;
+  rx.back() = 1; // bit-packed syndrome byte
 
   CqrTransceiver transceiver;
   transceiver.inject(rx.data(), tx.data(), sizeof(header), header.function_id);
@@ -88,7 +91,8 @@ TEST(CqrTransceiverTest, RejectsPayloadBeyondReportedSlot) {
 TEST(CqrTransceiverTest, AcceptsAnExactlySizedEnqueuePayload) {
   using namespace cudaq::qec::decoder_server;
 
-  constexpr std::size_t payload_size = 5 * sizeof(uint64_t) + 1;
+  // 4-arg wire format (see RejectsPayloadBeyondReportedSlot).
+  constexpr std::size_t payload_size = 4 * sizeof(uint64_t) + 1;
   std::array<uint8_t, sizeof(cudaq::realtime::RPCHeader) + payload_size> rx{};
   std::array<uint8_t, sizeof(cudaq::realtime::RPCResponse)> tx{};
   cudaq::realtime::RPCHeader header{};
@@ -98,11 +102,11 @@ TEST(CqrTransceiverTest, AcceptsAnExactlySizedEnqueuePayload) {
   header.request_id = 23;
   std::memcpy(rx.data(), &header, sizeof(header));
 
-  const std::array<uint64_t, 5> fields = {
-      /*decoder_id=*/3, /*counter=*/7, /*mapping_id=*/0,
-      /*num_syndromes=*/1, /*byte_count=*/1};
+  const std::array<uint64_t, 4> fields = {/*decoder_id=*/3, /*counter=*/7,
+                                          /*mapping_id=*/0,
+                                          /*num_syndromes=*/1};
   std::memcpy(rx.data() + sizeof(header), fields.data(), sizeof(fields));
-  rx.back() = 1;
+  rx.back() = 1; // bit-packed syndrome byte
 
   CqrTransceiver transceiver;
   transceiver.inject(rx.data(), tx.data(), rx.size(), header.function_id);

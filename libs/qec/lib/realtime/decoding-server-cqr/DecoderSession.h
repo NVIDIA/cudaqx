@@ -112,6 +112,12 @@ struct DecoderSession {
   /// Start the FIFO worker thread.  Must be called after create().
   void start_worker();
 
+  /// Signal shutdown and join the worker (drains any queued items first).
+  /// Idempotent; also called from the destructor.  DecoderServer calls this
+  /// before its transports are destroyed because queued items reply through
+  /// raw ITransceiver pointers.
+  void stop_worker();
+
   /// Non-blocking enqueue.  Returns false if the work queue is full.
   bool try_enqueue(WorkItem item);
 
