@@ -8,6 +8,9 @@
 
 find_package(LLVM 22.1.4 EXACT REQUIRED CONFIG)
 
+set(CUDAQ_QEC_LEGACY_REALTIME_SESSION_AVAILABLE FALSE CACHE INTERNAL
+    "Whether the installed cuda-quantum realtime package provides the legacy graph launch engine API.")
+
 # Enable CUDA for device code
 if(CMAKE_CUDA_COMPILER)
   enable_language(CUDA)
@@ -113,11 +116,26 @@ if(CMAKE_CUDA_COMPILER)
       message(STATUS "Found cuda-quantum realtime dispatch library at ${CUDAQ_REALTIME_DISPATCH_LIBRARY}")
     endif()
 
+    cudaq_qec_find_realtime_path(CUDAQ_GRAPH_LAUNCH_ENGINE_INCLUDE_DIR
+      NAMES cudaq/realtime/daemon/dispatcher/graph_launch_engine.h
+      PATH_SUFFIXES include
+    )
+    if(CUDAQ_GRAPH_LAUNCH_ENGINE_INCLUDE_DIR)
+      message(STATUS "Found cuda-quantum legacy graph launch engine headers at ${CUDAQ_GRAPH_LAUNCH_ENGINE_INCLUDE_DIR}")
+      set(CUDAQ_QEC_LEGACY_REALTIME_SESSION_AVAILABLE TRUE CACHE INTERNAL
+          "Whether the installed cuda-quantum realtime package provides the legacy graph launch engine API." FORCE)
+    else()
+      message(STATUS "cuda-quantum legacy graph launch engine headers not found. "
+                     "QEC in-process realtime session will not be built.")
+    endif()
+
     # CUDA-Q lowered `cudaq::device_call` host-dispatch integration needs the
     # DeviceCallService provider API from a realtime/device-call-enabled CUDA-Q
     # build.
     cudaq_qec_find_realtime_path(CUDAQ_DEVICE_CALL_INCLUDE_DIR
-      NAMES cudaq/realtime/device_call_service.h
+      NAMES
+        cudaq/realtime/device_call_service.h
+        cudaq_internal/device_call/DeviceCallService.h
       PATH_SUFFIXES include
     )
     if(CUDAQ_DEVICE_CALL_INCLUDE_DIR)
@@ -224,7 +242,7 @@ target_include_directories(cudaq-qec-realtime-decoding
     ${CUDAToolkit_INCLUDE_DIRS}
 )
 
-if(CUDAQ_REALTIME_INCLUDE_DIR)
+if(CUDAQ_QEC_LEGACY_REALTIME_SESSION_AVAILABLE)
   target_compile_definitions(cudaq-qec-realtime-decoding PRIVATE
     CUDAQ_REALTIME_ROOT)
 endif()

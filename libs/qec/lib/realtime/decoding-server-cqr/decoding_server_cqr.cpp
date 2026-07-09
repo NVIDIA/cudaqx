@@ -27,7 +27,14 @@
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/realtime/decoding_config.h"
 #include "cudaq/realtime/daemon/dispatcher/dispatch_kernel_launch.h"
+
+#if __has_include("cudaq_internal/device_call/DeviceCallService.h")
+#include "cudaq_internal/device_call/DeviceCallService.h"
+namespace cudaq_device_call = cudaq_internal::device_call;
+#else
 #include "cudaq/realtime/device_call_service.h"
+namespace cudaq_device_call = cudaq::realtime;
+#endif
 
 #include "../realtime_decoding.h"
 
@@ -52,11 +59,11 @@ using cudaq::qec::decoder_server::DecoderServer;
 using cudaq::qec::decoder_server::kEnqueueSyndromesFunctionId;
 using cudaq::qec::decoder_server::kGetCorrectionsFunctionId;
 using cudaq::qec::decoder_server::kResetDecoderFunctionId;
-using cudaq::realtime::DeviceCallDispatchMode;
-using cudaq::realtime::DeviceCallDispatchTable;
-using cudaq::realtime::DeviceCallService;
-using cudaq::realtime::DeviceCallServicePluginInfo;
-using cudaq::realtime::DeviceCallServiceSession;
+using cudaq_device_call::DeviceCallDispatchMode;
+using cudaq_device_call::DeviceCallDispatchTable;
+using cudaq_device_call::DeviceCallService;
+using cudaq_device_call::DeviceCallServicePluginInfo;
+using cudaq_device_call::DeviceCallServiceSession;
 
 static CqrTransceiver *g_transceiver = nullptr;
 static std::unique_ptr<DecoderServer> g_server;
@@ -312,6 +319,9 @@ public:
     return table_;
   }
 
+  void start() override {}
+  void stop() noexcept override {}
+
 private:
   std::array<cudaq_function_entry_t, kDeviceCallEntryCount> entries_ =
       make_entries();
@@ -341,7 +351,7 @@ DeviceCallService *get_service() { return &g_service; }
 } // namespace
 
 extern "C" __attribute__((visibility("default")))
-cudaq::realtime::DeviceCallServicePluginInfo
+cudaq_device_call::DeviceCallServicePluginInfo
 cudaqGetDeviceCallServicePluginInfo() {
   return {"cudaq-qec-realtime-device-call", &get_service};
 }

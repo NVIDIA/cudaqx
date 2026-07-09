@@ -83,7 +83,8 @@ add_test(
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
 
-if(_APP_CUDAQ_REALTIME_DISPATCH_LIB
+if(CUDAQ_QEC_LEGACY_REALTIME_SESSION_AVAILABLE
+   AND _APP_CUDAQ_REALTIME_DISPATCH_LIB
    AND TARGET cudaq-qec-realtime-cudevice-proprietary)
   add_test(
     NAME app_examples.surface_code-1-local-test-distance-3-inproc-rpc
@@ -431,5 +432,4 @@ add_surface_code_test(
 
 # End of surface code 3, --target quantinuum --emulate
 #------------------------------------------------------------------------------#
-
 

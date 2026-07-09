@@ -493,6 +493,8 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
     # Realtime QLDPC graph decode CI test (CPU-launched CUDA graph + relay BP)
     # ------------------------------------------------------------------
 
+    if(CUDAQ_QEC_LEGACY_REALTIME_SESSION_AVAILABLE)
+
     # cudaq-qec-realtime-decoding transitively pulls in cudaq-qec, which
     # references CUDA-Q quantum runtime symbols. Satisfy them here.
     find_library(_CUDAQ_LIBRARY NAMES cudaq
@@ -569,6 +571,11 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
         COMMAND test_realtime_qldpc_graph_decoding)
       set_tests_properties(test_realtime_qldpc_graph_decoding PROPERTIES
         LABELS "qec")
+    endif()
+
+    else()
+      message(STATUS "Skipping test_realtime_qldpc_graph_decoding: "
+                     "cuda-quantum legacy graph launch engine API not found.")
     endif()
 
   else()
