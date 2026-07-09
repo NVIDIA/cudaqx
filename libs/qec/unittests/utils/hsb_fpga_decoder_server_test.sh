@@ -65,13 +65,22 @@ VERIFY=true
 HSB_DIR="/workspaces/holoscan-sensor-bridge"
 CUDA_QUANTUM_DIR="/workspaces/cuda-quantum"
 CUDAQX_DIR="/workspaces/cudaqx"
-DATA_DIR=""  # auto-detected if empty
+DATA_DIR=""  # empty => generate data files (see resolve_data_files)
 
-# Decoder profile: selects config_${DECODER}.yml / syndromes_${DECODER}.txt in
-# DATA_DIR unless --config / --syndromes override them.
+# Decoder profile.  By default the config + syndromes files are GENERATED
+# fresh each run by the surface_code-4-yaml binary into GEN_DIR (they are
+# derived artifacts and not checked in); --config/--syndromes or --data-dir
+# switch to pre-made files and skip generation.
 DECODER="pymatching"
 CONFIG_FILE=""
 SYNDROMES_FILE=""
+
+# Data-generation parameters (surface-code memory experiment).  The
+# generator's RNG seed is fixed, so runs are reproducible.
+GEN_DISTANCE=3
+GEN_ROUNDS=4
+GEN_P_SPAM=0.01
+GEN_SHOTS=100
 
 # Network defaults
 IB_DEVICE=""           # auto-detect
@@ -120,12 +129,19 @@ Actions:
   --no-run               Skip running the test (useful with --build)
 
 Decoder options:
-  --decoder NAME         Decoder profile; selects DATA_DIR/config_NAME.yml and
-                         DATA_DIR/syndromes_NAME.txt (default: pymatching)
-  --config PATH          Decoder-server YAML config (overrides --decoder)
-  --syndromes PATH       Syndromes text file (overrides --decoder)
-  --data-dir DIR         Data directory (default:
-                         CUDAQX_DIR/libs/qec/unittests/realtime/qec_roce_decode_test/data)
+  --decoder NAME         Decoder profile (default: pymatching).  By default the
+                         config/syndromes files are generated fresh each run by
+                         surface_code-4-yaml into CUDAQX_DIR/build/hsb_fpga_test_data
+  --config PATH          Use a pre-made decoder-server YAML config (skips generation)
+  --syndromes PATH       Use a pre-made syndromes text file (skips generation)
+  --data-dir DIR         Use pre-made DIR/config_NAME.yml + DIR/syndromes_NAME.txt
+                         (skips generation)
+
+Data-generation options (ignored when --config/--syndromes/--data-dir given):
+  --distance N           Surface-code distance (default: 3)
+  --num-rounds N         Measurement rounds (default: 4)
+  --p-spam F             SPAM error probability (default: 0.01)
+  --gen-shots N          Shots to generate in the syndromes file (default: 100)
 
 Build options:
   --hsb-dir DIR          holoscan-sensor-bridge source directory
@@ -167,6 +183,10 @@ while [[ $# -gt 0 ]]; do
         --config)           CONFIG_FILE="$2"; shift ;;
         --syndromes)        SYNDROMES_FILE="$2"; shift ;;
         --data-dir)         DATA_DIR="$2"; shift ;;
+        --distance)         GEN_DISTANCE="$2"; shift ;;
+        --num-rounds)       GEN_ROUNDS="$2"; shift ;;
+        --p-spam)           GEN_P_SPAM="$2"; shift ;;
+        --gen-shots)        GEN_SHOTS="$2"; shift ;;
         --hsb-dir)          HSB_DIR="$2"; shift ;;
         --cuda-quantum-dir) CUDA_QUANTUM_DIR="$2"; shift ;;
         --cudaqx-dir)       CUDAQX_DIR="$2"; shift ;;
@@ -657,6 +677,7 @@ do_build() {
         --target qec_decoding_daemon \
                  hololink_fpga_syndrome_playback \
                  cudaq-qec-pymatching \
+                 surface_code-4-yaml \
         2>&1 | tail -5
     _info "cudaqx tools built: $cudaqx_build/bin + $cudaqx_build/libs/qec/unittests/utils/"
 
@@ -667,6 +688,87 @@ do_build() {
 # Tool Path Resolution
 # ============================================================================
 
+# Decide where the config + syndromes files come from.  Pre-made files
+# (--config/--syndromes or --data-dir) win and skip generation; otherwise the
+# files are generated into GEN_DIR by generate_data_files().
+GENERATE_DATA=false
+resolve_data_files() {
+    GEN_DIR="${CUDAQX_DIR}/build/hsb_fpga_test_data"
+
+    if [[ -n "$DATA_DIR" ]]; then
+        # Pre-made profile directory (e.g. checked-in data for some decoder).
+        CONFIG_FILE="${CONFIG_FILE:-${DATA_DIR}/config_${DECODER}.yml}"
+        SYNDROMES_FILE="${SYNDROMES_FILE:-${DATA_DIR}/syndromes_${DECODER}.txt}"
+        return 0
+    fi
+    if [[ -n "$CONFIG_FILE" && -n "$SYNDROMES_FILE" ]]; then
+        return 0
+    fi
+    if [[ -n "$CONFIG_FILE" || -n "$SYNDROMES_FILE" ]]; then
+        _err "--config and --syndromes must be given together (or use --data-dir)."
+        return 1
+    fi
+
+    # Default: generate both files fresh this run.
+    GENERATE_DATA=true
+    CONFIG_FILE="${GEN_DIR}/config_${DECODER}.yml"
+    SYNDROMES_FILE="${GEN_DIR}/syndromes_${DECODER}.txt"
+}
+
+# Generate the decoder config (DEM + decoder_custom_args) and the syndromes
+# file with the surface_code-4-yaml memory-experiment binary.  Runs in GEN_DIR
+# so the generator's auxiliary outputs land there too.
+generate_data_files() {
+    GENERATOR_BIN="${CUDAQX_DIR}/build/libs/qec/unittests/realtime/app_examples/surface_code-4-yaml"
+    if [[ ! -x "$GENERATOR_BIN" ]]; then
+        _err "Data generator not found: $GENERATOR_BIN"
+        _err "Run with --build to build the tools first."
+        return 1
+    fi
+
+    _log "Generating test data (decoder=$DECODER, distance=$GEN_DISTANCE," \
+         "rounds=$GEN_ROUNDS, p_spam=$GEN_P_SPAM, shots=$GEN_SHOTS)"
+    mkdir -p "$GEN_DIR"
+
+    local gen_ld_path
+    gen_ld_path="${CUDA_QUANTUM_DIR}/realtime/build/lib:${CUDAQX_DIR}/build/lib"
+
+    _info "$GENERATOR_BIN --distance $GEN_DISTANCE --num_rounds $GEN_ROUNDS" \
+          "--p_spam $GEN_P_SPAM --decoder_type $DECODER --save_dem $(basename "$CONFIG_FILE")"
+    (cd "$GEN_DIR" && \
+     LD_LIBRARY_PATH="${gen_ld_path}:${LD_LIBRARY_PATH:-}" \
+     "$GENERATOR_BIN" \
+        --distance "$GEN_DISTANCE" \
+        --num_rounds "$GEN_ROUNDS" \
+        --p_spam "$GEN_P_SPAM" \
+        --decoder_type "$DECODER" \
+        --save_dem "$(basename "$CONFIG_FILE")" > gen_config.log 2>&1) || {
+        _err "Config generation failed; see ${GEN_DIR}/gen_config.log"
+        tail -5 "${GEN_DIR}/gen_config.log" >&2 || true
+        return 1
+    }
+
+    _info "$GENERATOR_BIN --distance $GEN_DISTANCE --num_rounds $GEN_ROUNDS" \
+          "--p_spam $GEN_P_SPAM --num_shots $GEN_SHOTS --yaml $(basename "$CONFIG_FILE")" \
+          "--save_syndrome $(basename "$SYNDROMES_FILE")"
+    (cd "$GEN_DIR" && \
+     LD_LIBRARY_PATH="${gen_ld_path}:${LD_LIBRARY_PATH:-}" \
+     "$GENERATOR_BIN" \
+        --distance "$GEN_DISTANCE" \
+        --num_rounds "$GEN_ROUNDS" \
+        --p_spam "$GEN_P_SPAM" \
+        --num_shots "$GEN_SHOTS" \
+        --yaml "$(basename "$CONFIG_FILE")" \
+        --save_syndrome "$(basename "$SYNDROMES_FILE")" > gen_syndromes.log 2>&1) || {
+        _err "Syndrome generation failed; see ${GEN_DIR}/gen_syndromes.log"
+        tail -5 "${GEN_DIR}/gen_syndromes.log" >&2 || true
+        return 1
+    }
+
+    _info "Generated: $CONFIG_FILE"
+    _info "Generated: $SYNDROMES_FILE"
+}
+
 resolve_paths() {
     local cudaqx_utils="${CUDAQX_DIR}/build/libs/qec/unittests/utils"
     local cq_build_dir="${CUDA_QUANTUM_DIR}/realtime/build/unittests"
@@ -674,17 +776,6 @@ resolve_paths() {
     DAEMON_BIN="${CUDAQX_DIR}/build/bin/qec_decoding_daemon"
     PLAYBACK_BIN="${cudaqx_utils}/hololink_fpga_syndrome_playback"
     EMULATOR_BIN="${cq_build_dir}/utils/hololink_fpga_emulator"
-
-    if [[ -z "$DATA_DIR" ]]; then
-        DATA_DIR="${CUDAQX_DIR}/libs/qec/unittests/realtime/qec_roce_decode_test/data"
-    fi
-
-    if [[ -z "$CONFIG_FILE" ]]; then
-        CONFIG_FILE="${DATA_DIR}/config_${DECODER}.yml"
-    fi
-    if [[ -z "$SYNDROMES_FILE" ]]; then
-        SYNDROMES_FILE="${DATA_DIR}/syndromes_${DECODER}.txt"
-    fi
 
     if [[ ! -x "$DAEMON_BIN" ]]; then
         _err "Decoding server binary not found: $DAEMON_BIN"
@@ -710,7 +801,15 @@ resolve_paths() {
     fi
 
     if [ -z "${BRIDGE_DEVICE:-}" ] && [ -n "${IB_DEVICE:-}" ]; then
-        BRIDGE_DEVICE="$IB_DEVICE"
+        # Mirror do_setup_network's handling of the comma form ("devA,devB":
+        # daemon on devA, emulator on devB) so runs without --setup-network
+        # split it the same way.
+        if [[ "$IB_DEVICE" == *,* ]]; then
+            BRIDGE_DEVICE="${IB_DEVICE%%,*}"
+            EMULATOR_DEVICE="${IB_DEVICE#*,}"
+        else
+            BRIDGE_DEVICE="$IB_DEVICE"
+        fi
     fi
     : "${BRIDGE_DEVICE:=rocep1s0f0}"
     if $EMULATE; then
@@ -931,6 +1030,10 @@ main() {
         return 0
     fi
 
+    resolve_data_files
+    if $GENERATE_DATA; then
+        generate_data_files
+    fi
     resolve_paths
 
     local rc=0
