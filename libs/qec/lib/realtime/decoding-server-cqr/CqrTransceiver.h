@@ -72,8 +72,7 @@ inline bool parse_cqr_enqueue_frame(const void *rx_slot, std::size_t slot_size,
   // i.e. the # of logical elements = # of bits = num_syndromes. The byte count
   // is derived (ceil(bits/8)), not carried on the wire.
   if (!read_u64(parsed.decoder_id) || !read_u64(parsed.counter) ||
-      !read_u64(parsed.syndrome_mapping_id) ||
-      !read_u64(parsed.num_syndromes))
+      !read_u64(parsed.syndrome_mapping_id) || !read_u64(parsed.num_syndromes))
     return false;
 
   parsed.byte_count =

@@ -49,10 +49,10 @@ static_assert(sizeof(EnqueueRequestPayload) == 32,
 struct __attribute__((packed)) GetCorrectionsRequestPayload {
   std::int64_t decoder_id;  ///< arg0
   std::int64_t return_size; ///< arg1 (# correction bits to fetch; the
-                            ///<       cc.device_call lowering serializes the OUT
-                            ///<       std::vector<bool> length here)
-  std::uint8_t reset;       ///< arg2 (0 = keep state, 1 = reset after read;
-                            ///<       trailing bool, no padding)
+                            ///<       cc.device_call lowering serializes the
+                            ///<       OUT std::vector<bool> length here)
+  std::uint8_t reset; ///< arg2 (0 = keep state, 1 = reset after read;
+                      ///<       trailing bool, no padding)
 };
 static_assert(sizeof(GetCorrectionsRequestPayload) == 17,
               "GetCorrectionsRequestPayload must be exactly 17 bytes per "

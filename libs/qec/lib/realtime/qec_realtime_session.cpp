@@ -168,9 +168,8 @@ void enqueue_syndromes_host(const void *rx_slot, void *tx_slot,
       return;
     }
     const auto num_syndromes = static_cast<std::uint64_t>(body->num_syndromes);
-    const std::size_t expected_arg_len =
-        sizeof(rpc::EnqueueRequestPayload) +
-        rpc::bit_packed_bytes(num_syndromes);
+    const std::size_t expected_arg_len = sizeof(rpc::EnqueueRequestPayload) +
+                                         rpc::bit_packed_bytes(num_syndromes);
     if (header->arg_len != expected_arg_len ||
         sizeof(cudaq::realtime::RPCHeader) + expected_arg_len > slot_size) {
       write_response(tx_slot, rx_slot, -4);
@@ -592,9 +591,9 @@ void qec_realtime_session::allocate_ring_buffer() {
         std::max<std::size_t>(max_observables, dec->get_num_observables());
   }
 
-  const std::size_t enqueue_req =
-      sizeof(RPCHeader) + sizeof(rpc::EnqueueRequestPayload) +
-      rpc::bit_packed_bytes(max_measurements);
+  const std::size_t enqueue_req = sizeof(RPCHeader) +
+                                  sizeof(rpc::EnqueueRequestPayload) +
+                                  rpc::bit_packed_bytes(max_measurements);
   const std::size_t get_req =
       sizeof(RPCHeader) + sizeof(rpc::GetCorrectionsRequestPayload);
   const std::size_t reset_req =

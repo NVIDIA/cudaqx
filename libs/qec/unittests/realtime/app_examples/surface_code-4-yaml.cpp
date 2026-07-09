@@ -624,15 +624,13 @@ syndrome_round_once(cudaq::qview<> data, cudaq::qview<> xstab_anc,
         /*decoder_id=*/logical_qubit_idx, combined_syndrome, round_counter);
 }
 
-__qpu__ std::vector<std::uint64_t>
-demo_circuit_qpu(bool allow_device_calls,
-                 const cudaq::qec::code::one_qubit_encoding &statePrep,
-                 std::size_t numData, std::size_t numAncx, std::size_t numAncz,
-                 std::size_t numRounds, std::size_t numLogical,
-                 const std::vector<std::size_t> &cnot_schedX_flat,
-                 const std::vector<std::size_t> &cnot_schedZ_flat,
-                 const std::vector<double> &p_spam_per_patch,
-                 bool apply_corrections) {
+__qpu__ std::vector<std::uint64_t> demo_circuit_qpu(
+    bool allow_device_calls,
+    const cudaq::qec::code::one_qubit_encoding &statePrep, std::size_t numData,
+    std::size_t numAncx, std::size_t numAncz, std::size_t numRounds,
+    std::size_t numLogical, const std::vector<std::size_t> &cnot_schedX_flat,
+    const std::vector<std::size_t> &cnot_schedZ_flat,
+    const std::vector<double> &p_spam_per_patch, bool apply_corrections) {
   // ret[i] = patch i's final data bits (numData bits, enforced < 64 in
   // main()); ret[numLogical] = per-patch correction bitmask (bit i set iff
   // decoder i predicted a logical flip).
@@ -663,13 +661,12 @@ demo_circuit_qpu(bool allow_device_calls,
   // Round 0 (lock-in) for every patch: no spam; pins the stabilizer
   // eigenvalues after prep.
   for (int i = 0; i < numLogical; i++) {
-    syndrome_round_once(data.slice(i * numData, numData),
-                        xstab_anc.slice(i * numAncx, numAncx),
-                        zstab_anc.slice(i * numAncz, numAncz), cnot_schedX_flat,
-                        cnot_schedZ_flat, /*do_spam=*/false,
-                        p_spam_per_patch[i],
-                        /*do_enqueue=*/allow_device_calls, i,
-                        /*round_counter=*/0);
+    syndrome_round_once(
+        data.slice(i * numData, numData), xstab_anc.slice(i * numAncx, numAncx),
+        zstab_anc.slice(i * numAncz, numAncz), cnot_schedX_flat,
+        cnot_schedZ_flat, /*do_spam=*/false, p_spam_per_patch[i],
+        /*do_enqueue=*/allow_device_calls, i,
+        /*round_counter=*/0);
   }
 
   // Paired rounds, ROUND-MAJOR: every patch measures round r before any patch
@@ -806,10 +803,9 @@ dem_gen_circuit(const cudaq::qec::code::one_qubit_encoding &statePrep,
 
 void demo_circuit_host(const cudaq::qec::code &code, int distance,
                        const std::vector<double> &p_spam_per_patch,
-                       cudaq::qec::operation statePrep,
-                       std::size_t numShots, std::size_t numRounds,
-                       std::size_t numLogical, std::string dem_filename,
-                       bool save_dem, bool load_dem,
+                       cudaq::qec::operation statePrep, std::size_t numShots,
+                       std::size_t numRounds, std::size_t numLogical,
+                       std::string dem_filename, bool save_dem, bool load_dem,
                        const std::vector<std::string> &decoder_types,
                        bool save_syndrome = false, bool load_syndrome = false,
                        std::string syndrome_filename = "",
@@ -890,10 +886,10 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
   } else {
     for (std::size_t i = 0; i < p_spam_per_patch.size(); ++i)
       if (p_spam_per_patch[i] == 0.0)
-        throw std::runtime_error(
-            "--p_spam must be > 0 to generate a DEM "
-            "(--p_spam_per_patch patch " +
-            std::to_string(i) + " has a zero-noise model)");
+        throw std::runtime_error("--p_spam must be > 0 to generate a DEM "
+                                 "(--p_spam_per_patch patch " +
+                                 std::to_string(i) +
+                                 " has a zero-noise model)");
 
     // Left-column data qubits are the Z logical for XV (and the legacy ZH).
     // This must track the code's Z observable (code.get_observables_z()); if
@@ -955,10 +951,9 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
           dem_text, /*use_decomp_suggestions=*/decompose_errors);
       patch_dems.push_back(patch_dem);
       patch_dems_undecomposed.push_back(
-          dual_parse
-              ? cudaq::qec::dem_from_stim_text(
-                    dem_text, /*use_decomp_suggestions=*/false)
-              : patch_dem);
+          dual_parse ? cudaq::qec::dem_from_stim_text(
+                           dem_text, /*use_decomp_suggestions=*/false)
+                     : patch_dem);
     }
     dem = patch_dems.front();
 
@@ -1508,8 +1503,7 @@ int main(int argc, char **argv) {
       num_shots = require_int("--num_shots");
     } else if (arg == "--p_spam") {
       p_spam = require_double("--p_spam");
-    } else if (arg == "--p_spam_per_patch" ||
-               arg == "--p-spam-per-patch") {
+    } else if (arg == "--p_spam_per_patch" || arg == "--p-spam-per-patch") {
       p_spam_per_patch = require_double_list("--p_spam_per_patch");
     } else if (arg == "--help" || arg == "-h") {
       show_help();

@@ -89,8 +89,8 @@ __qpu__ std::vector<bool> get_corrections(std::uint64_t decoder_id,
   // serializes its length as an element (bit) count and unpacks the BIT_PACKED
   // response straight back into it (cudaq PR 4816).  That length IS the return
   // size, so no separate return_size argument is passed (matches
-  // simulation_device.cpp).  reset is a trailing bool, so the request payload is
-  // 17 bytes with no trailing padding.
+  // simulation_device.cpp).  reset is a trailing bool, so the request payload
+  // is 17 bytes with no trailing padding.
   std::vector<bool> result(return_size);
   cudaq::device_call(::get_corrections, decoder_id, result, reset);
   return result;

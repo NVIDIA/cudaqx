@@ -46,8 +46,8 @@ enqueue_syndromes(std::uint64_t decoder_id, std::uint64_t counter,
                   std::uint64_t syndrome_mapping_id, byte_span syndrome_bits) {
   // No syndrome mapping table yet: syndrome_mapping_id 0 is the identity
   // mapping. syndrome_bits is a std::vector<bool> span: `length` is the logical
-  // bit count (== num_syndromes) and `buffer` points at the LSB-first bit-packed
-  // bytes.
+  // bit count (== num_syndromes) and `buffer` points at the LSB-first
+  // bit-packed bytes.
   (void)syndrome_mapping_id;
   const std::uint64_t num_syndromes = syndrome_bits.length;
   std::vector<std::uint8_t> bits(num_syndromes);

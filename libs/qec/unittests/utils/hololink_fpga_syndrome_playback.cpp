@@ -360,8 +360,7 @@ build_enqueue_frame(const std::vector<std::uint8_t> &round_bits,
   namespace rpc = cudaq::qec::decoding::rpc;
   const std::uint64_t n = round_bits.size();
   const std::size_t packed = rpc::bit_packed_bytes(n);
-  const std::size_t arg_len =
-      sizeof(rpc::EnqueueRequestPayload) + packed;
+  const std::size_t arg_len = sizeof(rpc::EnqueueRequestPayload) + packed;
   std::vector<std::uint8_t> payload(
       sizeof(cudaq::realtime::RPCHeader) + arg_len, 0);
   auto *header = reinterpret_cast<cudaq::realtime::RPCHeader *>(payload.data());
