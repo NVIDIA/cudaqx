@@ -120,7 +120,7 @@ static void write_error_response(const void *rx_slot, void *tx_slot,
 // path's saved-syndrome format.
 static void capture_enqueue_syndromes(const void *rx_slot,
                                       std::size_t slot_size) {
-  auto callback = cudaq::qec::decoding::host::get_syndrome_capture_callback();
+  auto callback = cudaq::qec::decoding::host::_get_syndrome_capture_callback();
   if (!callback)
     return;
   if (!rx_slot || slot_size < sizeof(cudaq::realtime::RPCHeader))
