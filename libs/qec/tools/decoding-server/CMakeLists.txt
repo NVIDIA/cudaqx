@@ -76,6 +76,31 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-decoding-server-cqr)
         ${QEC_IBVERBS_LIBRARY})
       message(STATUS "qec_decoding_daemon: cpu_roce transport enabled")
     endif()
+    # GPU RoCE: wire the Hololink/DOCA/CUDAQ device-graph scheduler path.
+    # Requires cudaq-qec-decoder-server built with CUDAQ_GPU_ROCE_AVAILABLE
+    # (set as a CACHE INTERNAL by decoding-server-cqr/CMakeLists.txt when all
+    # Hololink + DOCA + cudaq-realtime-dispatch libraries are found).
+    if(CUDAQ_GPU_ROCE_AVAILABLE)
+      target_compile_definitions(qec_decoding_daemon PRIVATE
+        QEC_HAVE_GPU_ROCE_TRANSPORT)
+      # DecoderServer.h and GpuRoceTransceiver.h live in the cqr source dir.
+      target_include_directories(qec_decoding_daemon PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/realtime/decoding-server-cqr
+      )
+      # cudaq-qec-decoder-server holds DecoderServer + GpuRoceTransceiver.
+      # GpuRoceTransceiver::launch_scheduler uses dlsym(RTLD_DEFAULT) to find
+      # the proprietary populate shims, so the process must absorb
+      # libcudaq-qec-realtime-cudevice-proprietary.a as WHOLE_ARCHIVE and link
+      # with --export-dynamic to make those symbols visible at runtime.
+      target_link_libraries(qec_decoding_daemon PRIVATE
+        cudaq-qec-decoder-server
+        $<$<TARGET_EXISTS:cudaq-qec-realtime-cudevice-proprietary>:$<LINK_LIBRARY:WHOLE_ARCHIVE,cudaq-qec-realtime-cudevice-proprietary>>
+      )
+      target_link_options(qec_decoding_daemon PRIVATE
+        "LINKER:--export-dynamic"
+      )
+      message(STATUS "qec_decoding_daemon: gpu_roce transport enabled")
+    endif()
     set_target_properties(qec_decoding_daemon PROPERTIES
       RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
       BUILD_RPATH

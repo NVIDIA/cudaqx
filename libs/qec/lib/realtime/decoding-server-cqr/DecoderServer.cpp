@@ -7,6 +7,8 @@
  ******************************************************************************/
 
 #include "DecoderServer.h"
+#include "CpuRoceTransceiver.h"
+#include "GpuRoceTransceiver.h"
 
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/realtime/decoding_config.h"
@@ -28,15 +30,21 @@ using cudaq::qec::decoding::config::DecoderTransport;
 
 std::unique_ptr<ITransceiver>
 DecoderServer::make_transport(DecoderTransport transport_type) {
-#ifdef CUDAQ_REALTIME_AVAILABLE
-  // TODO: instantiate CpuRoceTransceiverAdapter / GpuRoceTransceiverAdapter
-  // once the adapters are available via CUDAQ_REALTIME headers.
-  (void)transport_type;
+  switch (transport_type) {
+  case DecoderTransport::gpu_roce:
+#ifdef CUDAQ_GPU_ROCE_AVAILABLE
+    return std::make_unique<GpuRoceTransceiver>(GpuRoceConfig::from_env());
+#else
+    throw std::runtime_error(
+        "gpu_roce transport requested but CUDAQ_GPU_ROCE_AVAILABLE is not set. "
+        "Build with HOLOSCAN_SENSOR_BRIDGE_BUILD_DIR and DOCA libs.");
 #endif
-  throw std::runtime_error(
-      "cpu_roce / gpu_roce require CUDAQ_REALTIME adapters (not yet "
-      "available); for testing use DecoderServer(unique_ptr<ITransceiver>, "
-      "config_yaml) with LoopbackTransceiver");
+
+  case DecoderTransport::cpu_roce:
+    // CpuRoceTransceiver constructor always throws (ibverbs pending).
+    return std::make_unique<CpuRoceTransceiver>();
+  }
+  throw std::runtime_error("make_transport: unknown DecoderTransport value");
 }
 
 /// Read only the transport type from the YAML config without instantiating
@@ -72,6 +80,28 @@ DecoderServer::DecoderServer(const std::string &config_yaml) {
   function_transport_[kGetCorrectionsFunctionId] = raw;
   function_transport_[kResetDecoderFunctionId] = raw;
   init(config_yaml);
+
+#ifdef CUDAQ_GPU_ROCE_AVAILABLE
+  // For the GPU RoCE path, wire the first (and only) session's decoder graph
+  // to the Hololink ring buffer via the CUDAQ device-graph scheduler.
+  // Multi-decoder GPU RoCE binding is deferred to a follow-up.
+  if (auto *gpu_trx = dynamic_cast<GpuRoceTransceiver *>(raw)) {
+    const auto &sessions = registry_.sessions();
+    if (sessions.size() != 1)
+      throw std::runtime_error(
+          "GPU RoCE transport currently supports exactly one decoder session; "
+          "found " +
+          std::to_string(sessions.size()) +
+          ". Multi-decoder GPU RoCE is deferred.");
+    auto *session = sessions.begin()->second.get();
+    if (!session->graph_resources)
+      throw std::runtime_error(
+          "GPU RoCE requires a decoder that supports graph dispatch "
+          "(supports_graph_dispatch() must return true and "
+          "capture_decode_graph() must succeed)");
+    gpu_trx->launch_scheduler(session->graph_resources.get());
+  }
+#endif
 }
 
 DecoderServer::DecoderServer(std::unique_ptr<ITransceiver> transport,
@@ -138,6 +168,7 @@ void DecoderServer::register_handlers() {
         item.ptp_timestamp = hdr->ptp_timestamp;
         item.vp_id = frame.vp_id;
         item.response_transport = writer.transport();
+        item.release_fn = std::move(frame.release_fn);
 
         if (!session.try_enqueue(std::move(item))) {
           session.latch_syndromes_dropped();

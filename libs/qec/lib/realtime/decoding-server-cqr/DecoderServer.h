@@ -70,13 +70,19 @@ private:
   static std::unique_ptr<ITransceiver>
   make_transport(cudaq::qec::decoding::config::DecoderTransport transport_type);
 
-  std::vector<std::unique_ptr<ITransceiver>> owned_transports_;
-  /// Maps function_id → transceiver; used to deduplicate receiver threads.
-  /// Routing within the server is by function_id, not by decoder_id.
-  TransportMap function_transport_;
+  // Destruction order matters: the GPU RoCE scheduler (inside
+  // owned_transports_) holds a cudaGraphExec_t captured from a session's
+  // decoder.  The scheduler must be destroyed (cudaStreamSynchronize +
+  // cudaq_destroy_dispatch_graph) before registry_ releases the decoder and its
+  // graph resources. C++ destroys members in reverse declaration order, so
+  // registry_ must be declared BEFORE owned_transports_.
   SessionRegistry registry_;
   RpcDispatcher dispatcher_;
   std::atomic<bool> shutdown_{false};
+  /// Maps function_id → transceiver; used to deduplicate receiver threads.
+  /// Routing within the server is by function_id, not by decoder_id.
+  TransportMap function_transport_;
+  std::vector<std::unique_ptr<ITransceiver>> owned_transports_;
 };
 
 } // namespace cudaq::qec::decoder_server

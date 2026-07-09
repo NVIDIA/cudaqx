@@ -11,6 +11,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 namespace cudaq::qec::decoder_server {
@@ -25,11 +26,19 @@ struct PeerId {
 
 /// A received frame: owns the wire bytes (RPCHeader + payload) plus transport
 /// metadata needed for syndrome scatter and response routing.
-/// Ownership of buf is transferred to WorkItem on enqueue; no release needed.
+/// Ownership of buf is transferred to WorkItem on enqueue.
+///
+/// release_fn: when non-null, must be called exactly once after the frame
+/// payload is no longer needed (i.e. after the GPU scheduler has accepted the
+/// data).  For host-copy transports (CQR, Loopback, CPU ring buffer path) this
+/// is always null — the copy itself constitutes "release."  For GPU ring buffer
+/// transports (full RelayBP path), release_fn returns the slot to Hololink
+/// once GPU decode completes; it must NOT be called before that.
 struct RxFrame {
-  std::vector<uint8_t> buf; ///< RPCHeader + payload (owned)
+  std::vector<uint8_t> buf; ///< RPCHeader + payload (owned copy)
   uint32_t vp_id;
   PeerId peer;
+  std::function<void()> release_fn; ///< null except on GPU ring-buffer path
 };
 
 /// Transport abstraction used by DecoderServer and DecoderSession.

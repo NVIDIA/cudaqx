@@ -64,6 +64,13 @@
 #include <unistd.h>
 #endif
 
+#ifdef QEC_HAVE_GPU_ROCE_TRANSPORT
+// DecoderServer.h (and GpuRoceTransceiver.h via DecoderServer.cpp) live in the
+// decoding-server-cqr directory, added to include paths by CMakeLists when
+// CUDAQ_GPU_ROCE_AVAILABLE is true.
+#include "DecoderServer.h"
+#endif
+
 #include <atomic>
 #include <chrono>
 #include <csignal>
@@ -107,7 +114,8 @@ bool parse_args(int argc, char **argv, DaemonConfig &cfg) {
     const std::string a = argv[i];
     if (a == "--help" || a == "-h") {
       std::cout << "Usage: " << argv[0]
-                << " --config=<decoders.yaml> [--transport=udp|cpu_roce] "
+                << " --config=<decoders.yaml> "
+                   "[--transport=udp|cpu_roce|gpu_roce] "
                    "[--port=N] [--num-slots=N] [--slot-size=N] [--timeout=N] "
                    "[--device=NAME] [--local-ip=ADDR]"
                 << std::endl;
@@ -429,9 +437,43 @@ int main(int argc, char **argv) {
               << std::endl;
     return 1;
 #endif
+  } else if (cfg.transport == "gpu_roce") {
+#ifdef QEC_HAVE_GPU_ROCE_TRANSPORT
+    // GPU RoCE: bypass the CQR DeviceCallService / HOST_CALL dispatcher path
+    // entirely.  DecoderServer(config_yaml) reads the transport type from the
+    // YAML config, creates a GpuRoceTransceiver (Hololink Sensor Bridge +
+    // DOCA), loads decoder sessions from the config, then wires the CUDAQ
+    // device-graph scheduler to the Hololink ring buffers via
+    // launch_scheduler().  The GPU scheduler handles RX→dispatch→decode→TX
+    // autonomously; this thread just waits for the shutdown signal.
+    cudaq::qec::decoder_server::DecoderServer server(cfg.config_path);
+    // QP/rkey/buf already printed to stdout by launch_scheduler() so the
+    // orchestration script can grep them before the READY line.
+    std::cout << "QEC_DECODING_DAEMON_READY gpu_roce" << std::endl;
+    std::cout.flush();
+    std::thread server_thread([&server] { server.run(); });
+    const auto start_time_gr = std::chrono::steady_clock::now();
+    while (g_shutdown.load(std::memory_order_acquire) == 0) {
+      const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                               std::chrono::steady_clock::now() - start_time_gr)
+                               .count();
+      if (elapsed > cfg.timeout_sec)
+        break;
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    server.stop();
+    server_thread.join();
+    return 0;
+#else
+    std::cerr << "ERROR: this daemon was built without gpu_roce transport "
+                 "support (rebuild with HOLOSCAN_SENSOR_BRIDGE_BUILD_DIR, "
+                 "DOCA, and CUDA)"
+              << std::endl;
+    return 1;
+#endif
   } else {
     std::cerr << "ERROR: unknown --transport=" << cfg.transport
-              << " (expected udp or cpu_roce)" << std::endl;
+              << " (expected udp, cpu_roce, or gpu_roce)" << std::endl;
     return 1;
   }
 
