@@ -158,6 +158,10 @@ namespace cudaq::qec::decoding::host {
 cudaqx::heterogeneous_map prepare_decoder_params(
     const cudaq::qec::decoding::config::decoder_config &decoder_config) {
   auto params = decoder_config.decoder_custom_args_to_heterogeneous_map();
+  // Placement knob: surfaced for every decoder type (deliberately before the
+  // trt-only early return below); consumed by decoder::get() at construction.
+  if (decoder_config.cuda_device_id.has_value())
+    params.insert("cuda_device_id", decoder_config.cuda_device_id.value());
   if (decoder_config.type != "trt_decoder")
     return params;
 

@@ -720,6 +720,7 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
     io.mapRequired("type", config.type);
     io.mapOptional("transport", config.transport,
                    cudaq::qec::decoding::config::DecoderTransport::cpu_roce);
+    io.mapOptional("cuda_device_id", config.cuda_device_id);
     io.mapRequired("block_size", config.block_size);
     io.mapRequired("syndrome_size", config.syndrome_size);
     io.mapRequired("H_sparse", config.H_sparse);

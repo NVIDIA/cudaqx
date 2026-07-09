@@ -8,10 +8,12 @@
 
 #include "cudaq/qec/decoder.h"
 #include "cuda-qx/core/library_utils.h"
+#include "hardware_guards.h"
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/plugin_loader.h"
 #include "cudaq/qec/version.h"
 #include <cassert>
+#include <cuda_runtime_api.h>
 #include <dlfcn.h>
 #include <filesystem>
 #include <fmt/ranges.h>
@@ -123,8 +125,33 @@ std::string decoder::get_version() const {
 
 std::future<decoder_result>
 decoder::decode_async(const std::vector<float_t> &syndrome) {
-  return std::async(std::launch::async,
-                    [this, syndrome] { return this->decode(syndrome); });
+  // Captured by value: the worker must not dereference decoder members to
+  // find its device. The std::async thread is brand-new and unpinned, so it
+  // guards itself for the duration of the call (the one exception to the
+  // one-thread-owns-one-decoder persistent pin).
+  const int cuda_id = cuda_device_id_;
+  return std::async(std::launch::async, [this, syndrome, cuda_id] {
+    cudaq::qec::detail_affinity::CudaDeviceGuard dev(cuda_id);
+    return this->decode(syndrome);
+  });
+}
+
+/// Reads "cuda_device_id" from the construction parameters. Absent -> -1.
+/// Negative or >= cudaGetDeviceCount() -> std::runtime_error (fail fast:
+/// never silently decode on the wrong GPU).
+static int read_cuda_device_id(const cudaqx::heterogeneous_map &params) {
+  if (!params.contains("cuda_device_id"))
+    return -1;
+  const int value = params.get<int>("cuda_device_id");
+  if (value < 0)
+    throw std::runtime_error("cuda_device_id must be >= 0 (got " +
+                             std::to_string(value) + ")");
+  int count = 0;
+  if (cudaGetDeviceCount(&count) != cudaSuccess || value >= count)
+    throw std::runtime_error("cuda_device_id " + std::to_string(value) +
+                             " is out of range: " + std::to_string(count) +
+                             " CUDA device(s) visible");
+  return value;
 }
 
 std::unique_ptr<decoder>
@@ -138,7 +165,26 @@ decoder::get(const std::string &name, const decoder_init &init,
         "invalid decoder requested: " + name +
         ". Run with CUDAQ_LOG_LEVEL=info (environment variable) to see "
         "additional plugin diagnostics at startup.");
-  return iter->second(init, param_map);
+  const int cuda_device_id = read_cuda_device_id(param_map);
+  if (cuda_device_id < 0)
+    return iter->second(init, param_map);
+  // Pin the constructing thread persistently (no restore): one thread owns
+  // one decoder, so every later allocation and kernel launch on this thread
+  // -- including lazy allocations inside a plugin's decode() -- lands on the
+  // requested device with no per-call machinery.
+  cudaError_t err = cudaSetDevice(cuda_device_id);
+  if (err != cudaSuccess)
+    throw std::runtime_error("cudaSetDevice(" + std::to_string(cuda_device_id) +
+                             ") failed: " + cudaGetErrorString(err));
+  // The key is consumed here; strip it so plugins that strictly validate
+  // their parameter keys do not reject it.
+  cudaqx::heterogeneous_map plugin_params;
+  for (const auto &kv : param_map)
+    if (kv.first != "cuda_device_id")
+      plugin_params.insert(kv.first, kv.second);
+  auto d = iter->second(init, plugin_params);
+  d->cuda_device_id_ = cuda_device_id;
+  return d;
 }
 
 namespace details {
