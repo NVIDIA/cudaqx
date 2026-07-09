@@ -82,6 +82,26 @@ runs:
         fi
       shell: bash --noprofile --norc -euo pipefail {0}
 
+    - name: Install CMake 4
+      if: inputs.lookup-only == 'false'
+      run: |
+        apt update
+        apt install -y --no-install-recommends wget ca-certificates
+
+        cmake_version=4.0.7
+        cmake_machine="$(uname -m)"
+        cmake_archive="cmake-${cmake_version}-linux-${cmake_machine}.tar.gz"
+        cmake_bin="/tmp/cmake-${cmake_version}-linux-${cmake_machine}/bin"
+
+        wget -q "https://github.com/Kitware/CMake/releases/download/v${cmake_version}/${cmake_archive}" \
+          -O "/tmp/${cmake_archive}"
+        tar -xf "/tmp/${cmake_archive}" -C /tmp
+
+        echo "${cmake_bin}" >> "${GITHUB_PATH}"
+        export PATH="${cmake_bin}:${PATH}"
+        cmake --version
+      shell: bash --noprofile --norc -euo pipefail {0}
+
     # ==========================================================================
     # Get cuQuantum
     # ==========================================================================
