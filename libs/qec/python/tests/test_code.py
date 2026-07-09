@@ -337,5 +337,157 @@ def test_version():
     assert "CUDA-Q QEC" in qec.__version__
 
 
+# Kernels for the inlined-feedback toy code: two data qubits with stabilizers
+# XX and ZZ, both extracted through a single superdense (Bell-pair) ancilla
+# pair (ancx[0] carries the XX record, ancz[0] the ZZ record). The round ends
+# with an *uncorrected* record-conditioned byproduct: after the Bell decode,
+# ancx[0] sits in the computational basis holding its future measurement
+# outcome r_X, so the trailing CX(ancx[0], data[1]) is the unitary equivalent
+# of the classically controlled byproduct X^{r_X} on data[1] that a hardware
+# frame update would otherwise track. Same gadget and feedback matrices as the
+# C++ toy in unittests/feedback_toy_device.cpp / test_qec.cpp (see the full
+# derivation there): feedback = [[0, 1], [0, 0]], observable feedback =
+# [[0, 1]], with records per round in [Z][X] order.
+@cudaq.kernel
+def _feedback_toy_prep0(q: patch):
+    reset(q.data[0])
+    reset(q.data[1])
+
+
+@cudaq.kernel
+def _feedback_toy_round(q: patch, x_stabilizers: list[int],
+                        z_stabilizers: list[int]) -> list[cudaq.measure_handle]:
+    # Bell-prepare the superdense ancilla pair.
+    h(q.ancx[0])
+    x.ctrl(q.ancx[0], q.ancz[0])
+    # Couple XX through the X ancilla and ZZ through the Z ancilla.
+    x.ctrl(q.ancx[0], q.data[0])
+    x.ctrl(q.ancx[0], q.data[1])
+    x.ctrl(q.data[0], q.ancz[0])
+    x.ctrl(q.data[1], q.ancz[0])
+    # Decode the Bell pair.
+    x.ctrl(q.ancx[0], q.ancz[0])
+    h(q.ancx[0])
+    # Uncorrected record-conditioned byproduct: X^{r_X} on data[1].
+    x.ctrl(q.ancx[0], q.data[1])
+    # Records in [Z][X] order.
+    results = mz([*q.ancz, *q.ancx])
+    reset(q.ancz[0])
+    reset(q.ancx[0])
+    return results
+
+
+def test_python_inlined_feedback_toy():
+
+    @qec.code('py-feedback-toy')
+    class FeedbackToy:
+
+        def __init__(self):
+            qec.Code.__init__(self)
+            self.stabilizers = [
+                cudaq.SpinOperator.from_word(w) for w in ["XX", "ZZ"]
+            ]
+            self.pauli_observables = [cudaq.SpinOperator.from_word("ZZ")]
+            self.operation_encodings = {
+                qec.operation.prep0: _feedback_toy_prep0,
+                qec.operation.stabilizer_round: _feedback_toy_round
+            }
+
+        def get_num_data_qubits(self):
+            return 2
+
+        def get_num_ancilla_qubits(self):
+            return 2
+
+        def get_num_ancilla_x_qubits(self):
+            return 1
+
+        def get_num_ancilla_z_qubits(self):
+            return 1
+
+        def get_num_x_stabilizers(self):
+            return 1
+
+        def get_num_z_stabilizers(self):
+            return 1
+
+        def get_inlined_feedback(self):
+            return np.array([[0, 1], [0, 0]], dtype=np.uint8)
+
+        def get_observable_inlined_feedback(self):
+            # Exercise the bridge's dtype coercion: int64 instead of uint8.
+            return np.array([[0, 1]])
+
+    # Sample on stim, mirroring the C++ unit tests (test_qec links the stim
+    # target). The toy's X record is genuinely random in round 1, and the
+    # default (qpp) target does not preserve cross-round mid-circuit
+    # measurement correlations when sampling Python kernels - independent of
+    # the inlined-feedback machinery, but this toy (unlike the steane
+    # example, whose records are all deterministically 0) exposes it.
+    cudaq.set_target('stim')
+
+    numShots, numRounds = 20, 4
+    syndromes, data = qec.sample_memory_circuit(qec.get_code('py-feedback-toy'),
+                                                numShots=numShots,
+                                                numRounds=numRounds)
+
+    # 1 first-round boundary + 2 * (numRounds - 1) cross-round + 1 final
+    # boundary detectors, all deterministic (zero) in the noiseless circuit.
+    assert syndromes.shape == (numShots, 2 * numRounds)
+    assert not np.any(syndromes)
+
+    # The individual data qubits are randomized by the XX measurement, but
+    # the ZZ parity must close deterministically every shot.
+    assert data.shape == (numShots, 2)
+    assert not np.any(data[:, 0] ^ data[:, 1])
+    cudaq.reset_target()
+
+
+def test_python_inlined_feedback_toy_negative_control():
+    # The identical toy without the feedback declarations: the uncorrected
+    # byproduct makes the record-0 detectors non-deterministic and stim must
+    # reject the circuit. This proves the Python-declared feedback is doing
+    # the work in the positive test above.
+    @qec.code('py-feedback-toy-nofb')
+    class FeedbackToyNoFeedback:
+
+        def __init__(self):
+            qec.Code.__init__(self)
+            self.stabilizers = [
+                cudaq.SpinOperator.from_word(w) for w in ["XX", "ZZ"]
+            ]
+            self.pauli_observables = [cudaq.SpinOperator.from_word("ZZ")]
+            self.operation_encodings = {
+                qec.operation.prep0: _feedback_toy_prep0,
+                qec.operation.stabilizer_round: _feedback_toy_round
+            }
+
+        def get_num_data_qubits(self):
+            return 2
+
+        def get_num_ancilla_qubits(self):
+            return 2
+
+        def get_num_ancilla_x_qubits(self):
+            return 1
+
+        def get_num_ancilla_z_qubits(self):
+            return 1
+
+        def get_num_x_stabilizers(self):
+            return 1
+
+        def get_num_z_stabilizers(self):
+            return 1
+
+    # stim's determinism analysis (a std::invalid_argument surfaced as
+    # ValueError) rejects the circuit inside dem_from_kernel, before any
+    # sampling happens.
+    with pytest.raises(ValueError, match="non-deterministic detectors"):
+        qec.sample_memory_circuit(qec.get_code('py-feedback-toy-nofb'),
+                                  numShots=20,
+                                  numRounds=4)
+
+
 if __name__ == "__main__":
     pytest.main()

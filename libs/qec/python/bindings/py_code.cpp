@@ -29,11 +29,52 @@ using namespace cudaqx;
 
 namespace cudaq::qec {
 
+/// @brief Convert the array returned by a Python inlined-feedback getter to
+/// an owning cudaqx::tensor<uint8_t>.
+/// @details The result is coerced to a C-contiguous uint8 numpy array first,
+/// so any integer-convertible input (other dtypes, nested lists) is accepted.
+/// toTensor only borrows the numpy buffer, so the data is copied into the
+/// returned tensor to outlive the temporary Python array.
+static cudaqx::tensor<uint8_t> feedbackArrayToTensor(nb::object array,
+                                                     const char *methodName) {
+  auto np = nb::module_::import_("numpy");
+  nb::object coerced = np.attr("ascontiguousarray")(array, np.attr("uint8"));
+  auto ndarray = nb::cast<nb::ndarray<nb::numpy, uint8_t>>(coerced);
+  if (ndarray.ndim() != 2)
+    throw std::runtime_error(std::string(methodName) +
+                             " must return a 2-D array.");
+  auto borrowed = cudaqx::toTensor(ndarray);
+  cudaqx::tensor<uint8_t> owned;
+  owned.copy(borrowed.data(), borrowed.shape());
+  return owned;
+}
+
 class PyCode : public qec::code {
 public:
-  NB_TRAMPOLINE(qec::code, 6);
+  NB_TRAMPOLINE(qec::code, 8);
 
 protected:
+  // Trampoline methods for the optional inlined-feedback virtuals: forward to
+  // a Python override when one exists (converting its numpy result), else
+  // fall back to the base-class empty default. This is NB_OVERRIDE with a
+  // custom return conversion, since cudaqx::tensor has no type caster.
+  cudaqx::tensor<uint8_t> get_inlined_feedback() const override {
+    nb::detail::ticket nb_ticket(nb_trampoline, "get_inlined_feedback", false);
+    if (nb_ticket.key.is_valid())
+      return feedbackArrayToTensor(nb_trampoline.base().attr(nb_ticket.key)(),
+                                   "get_inlined_feedback");
+    return NBBase::get_inlined_feedback();
+  }
+
+  cudaqx::tensor<uint8_t> get_observable_inlined_feedback() const override {
+    nb::detail::ticket nb_ticket(nb_trampoline,
+                                 "get_observable_inlined_feedback", false);
+    if (nb_ticket.key.is_valid())
+      return feedbackArrayToTensor(nb_trampoline.base().attr(nb_ticket.key)(),
+                                   "get_observable_inlined_feedback");
+    return NBBase::get_observable_inlined_feedback();
+  }
+
   // Trampoline methods for pure virtual functions
   std::size_t get_num_data_qubits() const override {
     NB_OVERRIDE_PURE(get_num_data_qubits);
@@ -184,6 +225,24 @@ public:
   const std::unordered_map<qec::operation, nb::object> &
   get_py_operation_encodings() const {
     return m_py_operation_encodings;
+  }
+
+  /// @brief Forward the optional inlined-feedback declarations to the
+  /// registered Python code when it defines them; otherwise return the
+  /// base-class empty default (identity detector layout).
+  cudaqx::tensor<uint8_t> get_inlined_feedback() const override {
+    if (!nb::hasattr(pyCode, "get_inlined_feedback"))
+      return code::get_inlined_feedback();
+    return feedbackArrayToTensor(pyCode.attr("get_inlined_feedback")(),
+                                 "get_inlined_feedback");
+  }
+
+  cudaqx::tensor<uint8_t> get_observable_inlined_feedback() const override {
+    if (!nb::hasattr(pyCode, "get_observable_inlined_feedback"))
+      return code::get_observable_inlined_feedback();
+    return feedbackArrayToTensor(
+        pyCode.attr("get_observable_inlined_feedback")(),
+        "get_observable_inlined_feedback");
   }
 
 protected:

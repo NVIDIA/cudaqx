@@ -2192,3 +2192,167 @@ TEST(PluginLoaderTester, checkCleanupPluginsEdgeCases) {
   // not do anything.
   cudaq::qec::cleanup_plugins(cudaq::qec::PluginType::CODE);
 }
+
+TEST(QECCodeTester, checkInlinedFeedbackDefaults) {
+  auto steane = cudaq::qec::get_code("steane");
+  auto feedback = steane->get_inlined_feedback();
+  EXPECT_EQ(feedback.rank(), 0);
+  EXPECT_EQ(feedback.size(), 0);
+  auto obs_feedback = steane->get_observable_inlined_feedback();
+  EXPECT_EQ(obs_feedback.rank(), 0);
+  EXPECT_EQ(obs_feedback.size(), 0);
+}
+
+// Device kernels for the inlined-feedback toy code, nvq++-compiled in
+// feedback_toy_device.cpp (host-compiled kernels cannot be resolved through
+// the kernel registry that the memory-circuit kernel uses for its qkernel
+// arguments).
+namespace cudaq::qec::feedback_toy {
+__qpu__ void prep0(patch p);
+__qpu__ std::vector<cudaq::measure_result>
+stabilizer_round(patch p, const std::vector<std::size_t> &x_stabilizers,
+                 const std::vector<std::size_t> &z_stabilizers);
+} // namespace cudaq::qec::feedback_toy
+
+namespace {
+
+// ---------------------------------------------------------------------------
+// Toy code for the inlined-feedback tests below.
+//
+// Two data qubits with stabilizers XX and ZZ and logical observable ZZ. Both
+// stabilizers are extracted through a single superdense (Bell-pair) ancilla
+// pair: ancx[0] carries the XX record and ancz[0] the ZZ record. The round
+// (defined in feedback_toy_device.cpp) deliberately ends with an
+// *uncorrected* record-conditioned byproduct: after the Bell decode, ancx[0]
+// sits in the computational basis holding its future measurement outcome
+// r_X, so the trailing CX(ancx[0], data[1]) is the unitary equivalent of the
+// classically-controlled byproduct X^{r_X} on data[1] that a hardware frame
+// update would otherwise track.
+//
+// Derivation of the feedback matrices (records per round in [Z][X] order:
+// record 0 = ancz outcome r_Z, record 1 = ancx outcome r_X):
+//  - r_Z(t) reads the ZZ parity of the data entering round t, i.e. the
+//    accumulated byproduct parity b_t, with b_1 = 0 and
+//    b_{t+1} = b_t XOR r_X(t).
+//  - r_X(t) reads XX: uniformly random in round 1 of a Z-basis memory and
+//    constant afterwards (the X byproduct commutes with XX).
+//  - Cross-round detector for record 0 without feedback:
+//    r_Z(t) XOR r_Z(t+1) = r_X(t) -> non-deterministic (the negative-control
+//    test relies on stim rejecting exactly this). XOR-ing in the earlier
+//    round's record 1 fixes it: feedback(0, 1) = 1.
+//  - Record 1 compares deterministically on its own: feedback row 1 = 0.
+//  - Final boundary detector for record 0:
+//    r_Z(T) XOR d0 XOR d1 = b_T XOR b_{T+1} = r_X(T); the same
+//    feedback(0, 1) entry extends the boundary detector with the last
+//    round's record 1.
+//  - The ZZ observable closes as d0 XOR d1 = b_{T+1} = XOR of every round's
+//    record 1: observable_feedback(0, 1) = 1.
+// Note that the byproduct must be heralded by the *other* (X) record: a
+// byproduct conditioned on the Z record - which is identically 0 in the
+// noiseless circuit - would never fire and could not break determinism.
+// Both matrices were validated against stim's determinism analysis for
+// 1 through 6 rounds.
+// ---------------------------------------------------------------------------
+
+class feedback_toy_code : public cudaq::qec::code {
+protected:
+  std::size_t get_num_data_qubits() const override { return 2; }
+  std::size_t get_num_ancilla_qubits() const override { return 2; }
+  std::size_t get_num_ancilla_x_qubits() const override { return 1; }
+  std::size_t get_num_ancilla_z_qubits() const override { return 1; }
+  std::size_t get_num_x_stabilizers() const override { return 1; }
+  std::size_t get_num_z_stabilizers() const override { return 1; }
+
+  bool declare_feedback;
+
+public:
+  explicit feedback_toy_code(bool declare_feedback)
+      : declare_feedback(declare_feedback) {
+    operation_encodings.insert(std::make_pair(
+        cudaq::qec::operation::prep0, cudaq::qec::feedback_toy::prep0));
+    operation_encodings.insert(
+        std::make_pair(cudaq::qec::operation::stabilizer_round,
+                       cudaq::qec::feedback_toy::stabilizer_round));
+    m_stabilizers = fromPauliWords({"XX", "ZZ"});
+    m_pauli_observables = fromPauliWords({"ZZ"});
+  }
+
+  cudaqx::tensor<uint8_t> get_inlined_feedback() const override {
+    if (!declare_feedback)
+      return code::get_inlined_feedback();
+    cudaqx::tensor<uint8_t> feedback({2, 2});
+    feedback.at({0, 1}) = 1;
+    return feedback;
+  }
+
+  cudaqx::tensor<uint8_t> get_observable_inlined_feedback() const override {
+    if (!declare_feedback)
+      return code::get_observable_inlined_feedback();
+    cudaqx::tensor<uint8_t> feedback({1, 2});
+    feedback.at({0, 1}) = 1;
+    return feedback;
+  }
+};
+
+} // namespace
+
+TEST(QECCodeTester, checkInlinedFeedbackToyMemoryCircuit) {
+  feedback_toy_code toy(/*declare_feedback=*/true);
+  const std::size_t numShots = 20;
+  const std::size_t numRounds = 4;
+  auto [syndromes, data] = cudaq::qec::sample_memory_circuit(
+      toy, cudaq::qec::operation::prep0, numShots, numRounds);
+
+  // 1 first-round boundary + 2 * (numRounds - 1) cross-round + 1 final
+  // boundary detectors.
+  ASSERT_EQ(syndromes.rank(), 2);
+  ASSERT_EQ(syndromes.shape()[0], numShots);
+  ASSERT_EQ(syndromes.shape()[1], 2 * numRounds);
+  for (std::size_t shot = 0; shot < numShots; ++shot)
+    for (std::size_t d = 0; d < syndromes.shape()[1]; ++d)
+      EXPECT_EQ(syndromes.at({shot, d}), 0)
+          << "shot " << shot << ", detector " << d;
+
+  // The individual data qubits are randomized by the XX measurement, but the
+  // ZZ parity must close deterministically every shot.
+  ASSERT_EQ(data.rank(), 2);
+  ASSERT_EQ(data.shape()[0], numShots);
+  ASSERT_EQ(data.shape()[1], 2);
+  for (std::size_t shot = 0; shot < numShots; ++shot)
+    EXPECT_EQ(data.at({shot, 0}) ^ data.at({shot, 1}), 0) << "shot " << shot;
+}
+
+TEST(QECCodeTester, checkInlinedFeedbackToyNegativeControl) {
+  // The identical toy without the feedback declaration: the uncorrected
+  // byproduct makes the record-0 detectors non-deterministic and stim must
+  // reject the circuit. This proves the declared feedback is doing the work
+  // in the positive test above.
+  feedback_toy_code toy(/*declare_feedback=*/false);
+  try {
+    cudaq::qec::sample_memory_circuit(
+        toy, cudaq::qec::operation::prep0, /*numShots=*/20, /*numRounds=*/4);
+    FAIL() << "expected sample_memory_circuit to reject the feedback-less toy";
+  } catch (const std::exception &e) {
+    // Fail-for-the-right-reason check: stim's determinism analysis must be
+    // what rejects the circuit (it flags the record-0 cross-round and final
+    // boundary detectors).
+    EXPECT_NE(std::string(e.what()).find("non-deterministic detectors"),
+              std::string::npos)
+        << "unexpected failure reason: " << e.what();
+  }
+}
+
+TEST(QECCodeTester, checkInlinedFeedbackToyDem) {
+  // The DEM path threads the same feedback declaration through
+  // dem_from_kernel; with circuit-level noise it must produce a valid model
+  // (a noiseless model has no error mechanisms and is rejected downstream).
+  feedback_toy_code toy(/*declare_feedback=*/true);
+  cudaq::noise_model noise;
+  noise.add_all_qubit_channel("x", cudaq::qec::two_qubit_depolarization(0.01),
+                              /*num_controls=*/1);
+  auto dem = cudaq::qec::dem_from_memory_circuit(
+      toy, cudaq::qec::operation::prep0, /*numRounds=*/4, noise);
+  EXPECT_GT(dem.num_detectors(), 0);
+  EXPECT_GT(dem.num_error_mechanisms(), 0);
+  EXPECT_EQ(dem.num_observables(), 1);
+}

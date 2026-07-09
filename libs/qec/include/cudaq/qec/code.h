@@ -201,6 +201,30 @@ public:
   /// @return Tensor representing Lz
   cudaqx::tensor<uint8_t> get_observables_z() const;
 
+  /// @brief Get the inlined feedback matrix for detector construction
+  ///
+  /// Shape is [numCols x numCols], where numCols =
+  /// get_num_ancilla_qubits() (one measurement record per ancilla per
+  /// round, in [Z][X] order). Entry (j, k) = 1 means the cross-round
+  /// detector comparing record j between consecutive rounds additionally
+  /// XORs record k of the earlier round, and the final boundary detector
+  /// for record j additionally XORs record k of the last round.
+  /// @return Tensor representing the inlined feedback matrix. An empty
+  /// tensor (the default) means no feedback is applied and detectors are
+  /// formed from same-record comparisons only.
+  virtual cudaqx::tensor<uint8_t> get_inlined_feedback() const;
+
+  /// @brief Get the inlined feedback matrix for logical observables
+  ///
+  /// Shape is [num_observables x numCols], where numCols =
+  /// get_num_ancilla_qubits() (one measurement record per ancilla per
+  /// round, in [Z][X] order). Entry (m, k) = 1 means logical observable m
+  /// additionally XORs record k of every round.
+  /// @return Tensor representing the observable inlined feedback matrix.
+  /// An empty tensor (the default) means no feedback is applied to the
+  /// logical observables.
+  virtual cudaqx::tensor<uint8_t> get_observable_inlined_feedback() const;
+
   /// @brief Get the stabilizer generators
   /// @return Reference to stabilizers
   const std::vector<cudaq::spin_op_term> &get_stabilizers() const {

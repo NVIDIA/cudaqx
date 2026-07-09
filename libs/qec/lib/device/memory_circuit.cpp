@@ -18,7 +18,9 @@ __qpu__ void memory_circuit(const code::stabilizer_round &stabilizer_round,
                             const std::vector<std::size_t> &z_stabilizers,
                             const std::vector<std::size_t> &obs_matrix_flat,
                             std::size_t num_observables,
-                            bool measure_in_x_basis) {
+                            bool measure_in_x_basis,
+                            const std::vector<std::size_t> &feedback_flat,
+                            const std::vector<std::size_t> &obs_feedback_flat) {
   // Allocate the data and ancilla qubits
   cudaq::qvector data(num_data), xstab_anc(numAncx), zstab_anc(numAncz);
 
@@ -39,10 +41,77 @@ __qpu__ void memory_circuit(const code::stabilizer_round &stabilizer_round,
     cudaq::detector(final_syndrome[fixed_offset + i]);
   }
 
+  std::size_t numCols = numAncx + numAncz;
+
+  // Observable inlined feedback accumulation. Nested std::vector is not
+  // supported in __qpu__ code, so instead of one record vector per
+  // observable we use a single flat buffer with per-observable prefix
+  // offsets: observable m's feedback records occupy
+  // [obs_fb_offset[m], obs_fb_offset[m] + num_rounds * obs_fb_weight[m]),
+  // laid out round-major within each observable's slice.
+  std::vector<std::size_t> obs_fb_weight(num_observables);
+  std::vector<std::size_t> obs_fb_offset(num_observables);
+  std::size_t obs_fb_total = 0;
+  if (obs_feedback_flat.size() > 0) {
+    for (std::size_t m = 0; m < num_observables; ++m) {
+      std::size_t weight = 0;
+      for (std::size_t k = 0; k < numCols; ++k) {
+        if (obs_feedback_flat[m * numCols + k] != 0)
+          weight++;
+      }
+      obs_fb_weight[m] = weight;
+      obs_fb_offset[m] = obs_fb_total;
+      obs_fb_total += num_rounds * weight;
+    }
+  }
+  std::vector<cudaq::measure_result> obs_fb_records(obs_fb_total);
+
+  // Collect the first-round feedback records for each observable.
+  if (obs_feedback_flat.size() > 0) {
+    for (std::size_t m = 0; m < num_observables; ++m) {
+      std::size_t idx = obs_fb_offset[m];
+      for (std::size_t k = 0; k < numCols; ++k) {
+        if (obs_feedback_flat[m * numCols + k] != 0)
+          obs_fb_records[idx++] = final_syndrome[k];
+      }
+    }
+  }
+
   // Generate syndrome data
   for (std::size_t round = 1; round < num_rounds; ++round) {
     auto syndrome = stabilizer_round(logical, x_stabilizers, z_stabilizers);
-    cudaq::detectors(final_syndrome, syndrome);
+    if (obs_feedback_flat.size() > 0) {
+      for (std::size_t m = 0; m < num_observables; ++m) {
+        std::size_t idx = obs_fb_offset[m] + round * obs_fb_weight[m];
+        for (std::size_t k = 0; k < numCols; ++k) {
+          if (obs_feedback_flat[m * numCols + k] != 0)
+            obs_fb_records[idx++] = syndrome[k];
+        }
+      }
+    }
+    if (feedback_flat.size() == 0) {
+      cudaq::detectors(final_syndrome, syndrome);
+    } else {
+      // Cross-round detector for record j: earlier vs current round record,
+      // augmented with the earlier-round records declared in row j of the
+      // feedback matrix.
+      for (std::size_t j = 0; j < numCols; ++j) {
+        std::size_t fb_weight = 0;
+        for (std::size_t k = 0; k < numCols; ++k) {
+          if (feedback_flat[j * numCols + k] != 0)
+            fb_weight++;
+        }
+        std::vector<cudaq::measure_result> det(2 + fb_weight);
+        det[0] = final_syndrome[j];
+        det[1] = syndrome[j];
+        std::size_t det_idx = 2;
+        for (std::size_t k = 0; k < numCols; ++k) {
+          if (feedback_flat[j * numCols + k] != 0)
+            det[det_idx++] = final_syndrome[k];
+        }
+        cudaq::detector(det);
+      }
+    }
     final_syndrome = syndrome;
   }
 
@@ -58,13 +127,27 @@ __qpu__ void memory_circuit(const code::stabilizer_round &stabilizer_round,
       if (obs_matrix_flat[obs * num_data + q] != 0)
         support_weight++;
     }
-    std::vector<cudaq::measure_result> obs_support(support_weight);
-    std::size_t idx = 0;
-    for (std::size_t q = 0; q < num_data; ++q) {
-      if (obs_matrix_flat[obs * num_data + q] != 0)
-        obs_support[idx++] = data_results[q];
+    if (obs_feedback_flat.size() == 0) {
+      std::vector<cudaq::measure_result> obs_support(support_weight);
+      std::size_t idx = 0;
+      for (std::size_t q = 0; q < num_data; ++q) {
+        if (obs_matrix_flat[obs * num_data + q] != 0)
+          obs_support[idx++] = data_results[q];
+      }
+      cudaq::logical_observable(obs_support);
+    } else {
+      // Feedback records from every round, then the data-qubit support.
+      std::size_t fb_count = num_rounds * obs_fb_weight[obs];
+      std::vector<cudaq::measure_result> obs_support(fb_count + support_weight);
+      for (std::size_t i = 0; i < fb_count; ++i)
+        obs_support[i] = obs_fb_records[obs_fb_offset[obs] + i];
+      std::size_t idx = fb_count;
+      for (std::size_t q = 0; q < num_data; ++q) {
+        if (obs_matrix_flat[obs * num_data + q] != 0)
+          obs_support[idx++] = data_results[q];
+      }
+      cudaq::logical_observable(obs_support);
     }
-    cudaq::logical_observable(obs_support);
   }
 
   // For each stabilizer, form detectors from data qubit readout connected with
@@ -82,12 +165,28 @@ __qpu__ void memory_circuit(const code::stabilizer_round &stabilizer_round,
       }
     }
 
-    std::vector<cudaq::measure_result> support(support_weight + 1);
+    // With inlined feedback, the boundary detector for record
+    // (fixed_offset + x) is extended with the declared last-round records.
+    std::size_t fb_weight = 0;
+    if (feedback_flat.size() > 0) {
+      for (std::size_t k = 0; k < numCols; ++k) {
+        if (feedback_flat[(fixed_offset + x) * numCols + k] != 0)
+          fb_weight++;
+      }
+    }
+
+    std::vector<cudaq::measure_result> support(support_weight + 1 + fb_weight);
     support[0] = final_syndrome[fixed_offset + x];
     std::size_t support_idx = 1;
     for (std::size_t q = 0; q < num_data; ++q) {
       if (stabilizers[row_base + q] != 0) {
         support[support_idx++] = data_results[q];
+      }
+    }
+    if (feedback_flat.size() > 0) {
+      for (std::size_t k = 0; k < numCols; ++k) {
+        if (feedback_flat[(fixed_offset + x) * numCols + k] != 0)
+          support[support_idx++] = final_syndrome[k];
       }
     }
 
