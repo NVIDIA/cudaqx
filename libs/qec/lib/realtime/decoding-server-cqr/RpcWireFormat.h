@@ -59,22 +59,22 @@ struct __attribute__((packed)) EnqueuePayload {
   int64_t counter;             ///< arg1
   int64_t syndrome_mapping_id; ///< arg2
   int64_t num_syndromes;       ///< arg3 (# syndrome bits)
-  // Trailing: ceil(num_syndromes/8) bit-packed bytes + 0-7 zero pad to 8B
+  // Trailing: ceil(num_syndromes/8) bit-packed bytes (LSB-first), no pad
 };
 static_assert(sizeof(EnqueuePayload) == 32, "EnqueuePayload must be 32 bytes");
 
-// Layout per decoder_server_runtime.md: fixed-size scalars tightly packed in
-// schema order with the 1-byte bool last and NO trailing padding
-// (arg_len = 25 exactly).
+// Layout per decoder_server_runtime.md: two 8-byte scalars in schema order plus
+// a trailing 1-byte bool, NO trailing padding (arg_len = 17 exactly).
 struct __attribute__((packed)) GetCorrectionsPayload {
-  int64_t decoder_id;        ///< arg0
-  int64_t return_size;       ///< arg1 (# correction bits to fetch)
-  int64_t corrections_bytes; ///< arg2 (caller's response byte budget,
-                             ///<       == ceil(return_size/8))
-  uint8_t reset;             ///< arg3 (1 = reset decoder after read)
+  int64_t decoder_id;  ///< arg0
+  int64_t return_size; ///< arg1 (# correction bits to fetch; the cc.device_call
+                       ///<       lowering serializes the OUT std::vector<bool>
+                       ///<       length here)
+  uint8_t reset;       ///< arg2 (1 = reset decoder after read; trailing bool,
+                       ///<       no padding)
 };
-static_assert(sizeof(GetCorrectionsPayload) == 25,
-              "GetCorrectionsPayload must be 25 bytes (no trailing pad)");
+static_assert(sizeof(GetCorrectionsPayload) == 17,
+              "GetCorrectionsPayload must be 17 bytes");
 
 struct __attribute__((packed)) ResetPayload {
   int64_t decoder_id; ///< arg0

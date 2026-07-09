@@ -169,8 +169,8 @@ void enqueue_syndromes_host(const void *rx_slot, void *tx_slot,
     }
     const auto num_syndromes = static_cast<std::uint64_t>(body->num_syndromes);
     const std::size_t expected_arg_len =
-        rpc::align_to_8(sizeof(rpc::EnqueueRequestPayload) +
-                        rpc::bit_packed_bytes(num_syndromes));
+        sizeof(rpc::EnqueueRequestPayload) +
+        rpc::bit_packed_bytes(num_syndromes);
     if (header->arg_len != expected_arg_len ||
         sizeof(cudaq::realtime::RPCHeader) + expected_arg_len > slot_size) {
       write_response(tx_slot, rx_slot, -4);
@@ -227,8 +227,8 @@ void get_corrections_host(const void *rx_slot, void *tx_slot,
       write_response(tx_slot, rx_slot, -4);
       return;
     }
-    const std::size_t result_len =
-        rpc::align_to_8(rpc::bit_packed_bytes(return_size));
+    // result_len = ceil(R/8) exactly per decoder_server_runtime.md (no pad).
+    const std::size_t result_len = rpc::bit_packed_bytes(return_size);
     if (sizeof(cudaq::realtime::RPCResponse) + result_len > slot_size) {
       write_response(tx_slot, rx_slot, -5);
       return;
@@ -593,17 +593,15 @@ void qec_realtime_session::allocate_ring_buffer() {
   }
 
   const std::size_t enqueue_req =
-      sizeof(RPCHeader) +
-      rpc::align_to_8(sizeof(rpc::EnqueueRequestPayload) +
-                      rpc::bit_packed_bytes(max_measurements));
+      sizeof(RPCHeader) + sizeof(rpc::EnqueueRequestPayload) +
+      rpc::bit_packed_bytes(max_measurements);
   const std::size_t get_req =
       sizeof(RPCHeader) + sizeof(rpc::GetCorrectionsRequestPayload);
   const std::size_t reset_req =
       sizeof(RPCHeader) + sizeof(rpc::ResetRequestPayload);
   const std::size_t enqueue_resp = sizeof(RPCResponse);
   const std::size_t get_resp =
-      sizeof(RPCResponse) +
-      rpc::align_to_8(rpc::bit_packed_bytes(max_observables));
+      sizeof(RPCResponse) + rpc::bit_packed_bytes(max_observables);
   const std::size_t reset_resp = sizeof(RPCResponse);
 
   slot_size_ = std::max({enqueue_req, get_req, reset_req, enqueue_resp,

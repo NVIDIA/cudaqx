@@ -67,21 +67,19 @@ inline bool parse_cqr_enqueue_frame(const void *rx_slot, std::size_t slot_size,
 
   CqrEnqueueFrameView parsed;
   parsed.header = header;
-  // arg4 is a std::vector<bool> (CUDAQ_TYPE_BIT_PACKED): the realtime
-  // device_call ABI serialises the 5th u64 as the stdvec array-length prefix,
-  // i.e. the # of logical elements = # of bits (= num_syndromes). The byte
-  // count is derived (ceil(bits/8)), not carried on the wire.
-  uint64_t array_len = 0;
+  // arg3 is a std::vector<bool> (CUDAQ_TYPE_BIT_PACKED): the realtime
+  // device_call ABI serialises the 4th u64 as the stdvec array-length prefix,
+  // i.e. the # of logical elements = # of bits = num_syndromes. The byte count
+  // is derived (ceil(bits/8)), not carried on the wire.
   if (!read_u64(parsed.decoder_id) || !read_u64(parsed.counter) ||
       !read_u64(parsed.syndrome_mapping_id) ||
-      !read_u64(parsed.num_syndromes) || !read_u64(array_len))
+      !read_u64(parsed.num_syndromes))
     return false;
 
   parsed.byte_count =
       bit_packed_bytes(static_cast<std::size_t>(parsed.num_syndromes));
   if (parsed.num_syndromes == 0 || parsed.num_syndromes > kMaxSyndromeBits ||
-      array_len != parsed.num_syndromes || offset > arg_len ||
-      parsed.byte_count > arg_len - offset)
+      offset > arg_len || parsed.byte_count > arg_len - offset)
     return false;
 
   parsed.packed_bits = payload + offset;

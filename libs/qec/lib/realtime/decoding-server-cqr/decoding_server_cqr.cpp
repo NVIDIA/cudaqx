@@ -196,15 +196,13 @@ constexpr uint8_t kScalarU64Size = sizeof(uint64_t);
 constexpr std::uint8_t kEnqueueDecoderIdArg = 0;
 constexpr std::uint8_t kEnqueueCounterArg = 1;
 constexpr std::uint8_t kEnqueueMappingIdArg = 2;
-constexpr std::uint8_t kEnqueueNumSyndromesArg = 3;
-constexpr std::uint8_t kEnqueueSyndromeBitsArg = 4;
-constexpr std::uint8_t kEnqueueArgCount = 5;
+constexpr std::uint8_t kEnqueueSyndromeBitsArg = 3;
+constexpr std::uint8_t kEnqueueArgCount = 4;
 
 constexpr std::uint8_t kGetCorrectionsDecoderIdArg = 0;
 constexpr std::uint8_t kGetCorrectionsReturnSizeArg = 1;
-constexpr std::uint8_t kGetCorrectionsBytesArg = 2;
-constexpr std::uint8_t kGetCorrectionsResetArg = 3;
-constexpr std::uint8_t kGetCorrectionsArgCount = 4;
+constexpr std::uint8_t kGetCorrectionsResetArg = 2;
+constexpr std::uint8_t kGetCorrectionsArgCount = 3;
 
 constexpr std::uint8_t kResetDecoderIdArg = 0;
 constexpr std::uint8_t kResetDecoderArgCount = 1;
@@ -256,25 +254,25 @@ static std::array<cudaq_function_entry_t, kDeviceCallEntryCount>
 make_entries() {
   std::array<cudaq_function_entry_t, kDeviceCallEntryCount> entries{};
 
-  // enqueue_syndromes: 5-arg spec format per decoder_server_runtime.md.
-  // decoder_id, counter, syndrome_mapping_id, num_syndromes (scalars) +
-  // syndrome_bits (bit_packed: bit-packed LSB-first).
+  // enqueue_syndromes: 4-arg spec format per decoder_server_runtime.md.
+  // decoder_id, counter, syndrome_mapping_id (scalars) + syndrome_bits
+  // (bit_packed: element-count prefix == num_syndromes, then LSB-first bits).
   auto &eq = entries[kEnqueueSyndromesEntry];
   configure_entry(eq, kEnqueueSyndromesFnId, enqueue_syndromes_host,
                   kEnqueueArgCount, kNoResults);
   set_u64(eq.schema.args[kEnqueueDecoderIdArg]);
   set_u64(eq.schema.args[kEnqueueCounterArg]);
   set_u64(eq.schema.args[kEnqueueMappingIdArg]);
-  set_u64(eq.schema.args[kEnqueueNumSyndromesArg]);
   set_bit_packed(eq.schema.args[kEnqueueSyndromeBitsArg]);
 
-  // get_corrections: 4-arg spec format per decoder_server_runtime.md.
+  // get_corrections: 3-arg spec format per decoder_server_runtime.md.
+  // decoder_id (scalar) + corrections (OUT std::vector<bool>: the request
+  // carries its length as return_size) + reset (scalar).
   auto &gc = entries[kGetCorrectionsEntry];
   configure_entry(gc, kGetCorrectionsFnId, get_corrections_host,
                   kGetCorrectionsArgCount, kSingleResult);
   set_u64(gc.schema.args[kGetCorrectionsDecoderIdArg]);
   set_u64(gc.schema.args[kGetCorrectionsReturnSizeArg]);
-  set_u64(gc.schema.args[kGetCorrectionsBytesArg]);
   set_u8(gc.schema.args[kGetCorrectionsResetArg]);
   set_bit_packed(gc.schema.results[kCorrectionsResult]);
 

@@ -108,7 +108,6 @@ WorkItem make_get_corrections(CaptureTransceiver &transport, bool reset) {
       item.frame_buf.data() + sizeof(RPCHeader));
   request->decoder_id = 0;
   request->return_size = 1;
-  request->corrections_bytes = 1;
   request->reset = reset ? 1 : 0;
   return item;
 }
