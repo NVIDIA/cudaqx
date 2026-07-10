@@ -50,6 +50,7 @@ runs:
         # This are a list of files that when changed should require a new cudaq build
         to_hash: |
           .github/actions/get-cudaq-build/**
+          scripts/build_cudaq_with_realtime.sh
           .cudaq_version
       run: |
         hash=${{ hashFiles(format('{0}', env.to_hash)) }}
