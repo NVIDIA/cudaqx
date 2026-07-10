@@ -140,10 +140,17 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-decoding-server-cqr)
       set_property(TARGET qec_decoding_daemon PROPERTY CUDA_STANDARD 17)
       set_property(TARGET qec_decoding_daemon PROPERTY LINKER_LANGUAGE CUDA)
     endif()
+    # The installed binary lives in <prefix>/bin with the qec libraries and
+    # decoder plugins in ../lib, so use $ORIGIN-relative rpaths for those;
+    # the CUDA-Q realtime libs stay at their absolute install location.
+    get_filename_component(_qec_daemon_realtime_lib_dir
+      "${QEC_UDP_REALTIME_LIBRARY}" DIRECTORY)
     set_target_properties(qec_decoding_daemon PROPERTIES
       RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
       BUILD_RPATH
         "${CMAKE_BINARY_DIR}/lib;${CMAKE_BINARY_DIR}/lib/decoder-plugins;${CUDAQ_INSTALL_DIR}/lib"
+      INSTALL_RPATH
+        "$ORIGIN/../lib;$ORIGIN/../lib/decoder-plugins;${_qec_daemon_realtime_lib_dir};${CUDAQ_INSTALL_DIR}/lib"
     )
     # Decoder plugins are loaded at runtime by decoder type name; the example
     # configs currently select pymatching / multi_error_lut.
@@ -158,6 +165,21 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-decoding-server-cqr)
       ${CMAKE_CURRENT_SOURCE_DIR}/decoding_server_config_multi_error_lut.yaml
       ${CMAKE_BINARY_DIR}/bin/decoding_server_config_multi_error_lut.yaml
       COPYONLY)
+
+    # Install the daemon (and its example configs) alongside the libraries.
+    # The qec-tools component is deliberately NOT in the Python wheel's
+    # install.components (pyproject.toml): the daemon depends on the CUDA-Q
+    # realtime libs, which the cudaq wheel does not ship.
+    install(TARGETS qec_decoding_daemon
+      COMPONENT qec-tools
+      RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
+    install(FILES
+      ${CMAKE_CURRENT_SOURCE_DIR}/decoding_server_config.yaml
+      ${CMAKE_CURRENT_SOURCE_DIR}/decoding_server_config_multi_error_lut.yaml
+      COMPONENT qec-tools
+      DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
   else()
     message(STATUS "qec_decoding_daemon: cudaq-realtime udp transport not "
                    "found; decoding-server tool will not be built.")

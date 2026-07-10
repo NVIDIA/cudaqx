@@ -7,7 +7,7 @@
  ******************************************************************************/
 
 /// @file qec_decoding_daemon.cpp
-/// @brief Test-only standalone decoding-server process: the service end of a
+/// @brief Standalone decoding-server process: the service end of a
 /// CUDA-Q device_call transport, decoding on the CPU with whatever decoder a
 /// YAML config file selects.
 ///
