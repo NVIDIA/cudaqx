@@ -131,10 +131,13 @@ runs:
             "    && python3 -m zipfile -e /tmp/ninja.zip /tmp/ninja-install \\",
             "    && install -m 0755 /tmp/ninja-install/ninja /usr/local/bin/ninja \\",
             "    && install -m 0755 /tmp/ninja-install/ninja /usr/bin/ninja \\",
+            "    && install -m 0755 /tmp/ninja-install/ninja /usr/bin/ninja-build \\",
+            "    && rm -f /llvm-project/build/.ninja_log /llvm-project/build/.ninja_deps \\",
             "    && rm -rf /tmp/ninja.zip /tmp/ninja-install \\",
             "    && chmod +x /usr/local/bin/ninja \\",
             "    && /usr/local/bin/ninja --version \\",
-            "    && /usr/bin/ninja --version",
+            "    && /usr/bin/ninja --version \\",
+            "    && /usr/bin/ninja-build --version",
             "",
         ])
 
