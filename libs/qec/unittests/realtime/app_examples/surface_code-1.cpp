@@ -240,22 +240,22 @@ std::vector<size_t> get_stab_cnot_schedule(char stab_type, int distance) {
     throw std::runtime_error(
         "get_stab_cnot_schedule: Invalid stabilizer type. Must be 'X' or 'Z'.");
   }
-  // First get the stabilizers
-  auto stabs = grid.get_spin_op_stabilizers();
-  cudaq::qec::sortStabilizerOps(stabs);
-  std::size_t stab_idx = 0;
+  // Schedule matrix: entry 0 = no support, k >= 1 = CNOT timestep, ordered so
+  // that mid-round ancilla (hook) errors land perpendicular to the logical
+  // operators. Rows match the sorted parity-matrix rows and hence the ancilla
+  // indexing.
+  auto sched = stab_type == 'X' ? grid.get_cnot_schedule_x()
+                                : grid.get_cnot_schedule_z();
   std::vector<size_t> cnot_schedule;
-  for (const auto &stab : stabs) {
-    auto stab_word = stab.get_pauli_word(distance * distance);
-    if (stab_word.find(stab_type) == std::string::npos)
-      continue; // None of the desired stabilizers in this row
-    for (std::size_t d = 0; d < stab_word.size(); ++d) {
-      if (stab_word[d] == stab_type) {
-        cnot_schedule.push_back(stab_idx);
-        cnot_schedule.push_back(d);
+  for (std::size_t s = 0; s < sched.shape()[0]; ++s) {
+    for (uint8_t step = 1; step <= 4; ++step) {
+      for (std::size_t d = 0; d < sched.shape()[1]; ++d) {
+        if (sched.at({s, d}) == step) {
+          cnot_schedule.push_back(s);
+          cnot_schedule.push_back(d);
+        }
       }
     }
-    stab_idx++;
   }
   return cnot_schedule;
 }

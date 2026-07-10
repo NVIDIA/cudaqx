@@ -386,6 +386,87 @@ stabilizer_grid::get_spin_op_stabilizers() const {
   return spin_op_stabs;
 }
 
+namespace {
+
+/// Corner offsets from a stabilizer grid coordinate to its four data qubits,
+/// listed in CNOT execution order (timesteps 1..4). Row-major ("Z"-shaped)
+/// visits NW, NE, SW, SE so the last two CNOTs touch a horizontally adjacent
+/// data pair; column-major ("N"-shaped) visits NW, SW, NE, SE so the last two
+/// touch a vertically adjacent pair. Assigning one shape to the X plaquettes
+/// and the transposed shape to the Z plaquettes is the standard zigzag
+/// schedule pair for the rotated surface code (Tomita & Svore,
+/// https://arxiv.org/abs/1404.3747; hook errors per Dennis et al.,
+/// https://arxiv.org/abs/quant-ph/0110143): it steers hook errors against
+/// the logical operators and stays conflict-free if the two timestep
+/// sequences are ever interleaved.
+constexpr int row_major_order[4][2] = {{-1, -1}, {-1, 0}, {0, -1}, {0, 0}};
+constexpr int col_major_order[4][2] = {{-1, -1}, {0, -1}, {-1, 0}, {0, 0}};
+
+cudaqx::tensor<uint8_t>
+build_cnot_schedule(const std::vector<vec2d> &stab_coords,
+                    const std::map<vec2d, size_t> &data_indices,
+                    std::size_t num_data, bool use_col_major_order) {
+  const auto &order = use_col_major_order ? col_major_order : row_major_order;
+  std::vector<std::vector<uint8_t>> rows;
+  rows.reserve(stab_coords.size());
+  for (const auto &sc : stab_coords) {
+    std::vector<uint8_t> row(num_data, 0);
+    for (int step = 0; step < 4; ++step) {
+      vec2d dq(sc.row + order[step][0], sc.col + order[step][1]);
+      auto it = data_indices.find(dq);
+      if (it != data_indices.end())
+        row[it->second] = step + 1;
+    }
+    rows.push_back(std::move(row));
+  }
+
+  // Match the row order of to_parity_matrix(): within one stabilizer type the
+  // sort comparator orders rows by the index of the first supported data
+  // qubit (no two same-type surface-code stabilizers share that index, so
+  // this order is total and deterministic).
+  auto first_support = [](const std::vector<uint8_t> &row) {
+    return std::find_if(row.begin(), row.end(),
+                        [](uint8_t v) { return v != 0; }) -
+           row.begin();
+  };
+  std::sort(rows.begin(), rows.end(),
+            [&](const std::vector<uint8_t> &a, const std::vector<uint8_t> &b) {
+              return first_support(a) < first_support(b);
+            });
+
+  cudaqx::tensor<uint8_t> t({rows.size(), num_data});
+  for (std::size_t r = 0; r < rows.size(); ++r)
+    for (std::size_t c = 0; c < num_data; ++c)
+      t.at({r, c}) = rows[r][c];
+  return t;
+}
+
+} // namespace
+
+cudaqx::tensor<uint8_t> stabilizer_grid::get_cnot_schedule_x() const {
+  // A fault on the ancilla mid-round propagates onto the data qubits of the
+  // CNOTs that have not executed yet ("hook error"): an X⊗X pair on the last
+  // two data qubits in the schedule. If the X logical runs along the top row
+  // (horizontal), that pair must be vertical (column-major order) so hook
+  // chains run against the logical instead of along it; otherwise the pair
+  // must be horizontal (row-major order).
+  const bool x_logical_on_top_row =
+      orientation_ == sc_orientation::XV || orientation_ == sc_orientation::ZH;
+  return build_cnot_schedule(x_stab_coords, data_indices, distance * distance,
+                             /*use_col_major_order=*/x_logical_on_top_row);
+}
+
+cudaqx::tensor<uint8_t> stabilizer_grid::get_cnot_schedule_z() const {
+  // Same reasoning as get_cnot_schedule_x() for Z⊗Z hook pairs versus the Z
+  // logical, which runs perpendicular to the X logical: the Z plaquettes use
+  // the transposed order. The two orders also form a conflict-free pair if
+  // the X and Z timesteps are ever interleaved.
+  const bool x_logical_on_top_row =
+      orientation_ == sc_orientation::XV || orientation_ == sc_orientation::ZH;
+  return build_cnot_schedule(z_stab_coords, data_indices, distance * distance,
+                             /*use_col_major_order=*/!x_logical_on_top_row);
+}
+
 std::vector<cudaq::spin_op_term>
 stabilizer_grid::get_spin_op_observables() const {
   std::vector<cudaq::spin_op_term> spin_op_obs;
@@ -478,6 +559,14 @@ std::size_t surface_code::get_num_x_stabilizers() const {
 
 std::size_t surface_code::get_num_z_stabilizers() const {
   return (distance * distance - 1) / 2;
+}
+
+cudaqx::tensor<uint8_t> surface_code::get_stabilizer_schedule_x() const {
+  return grid.get_cnot_schedule_x();
+}
+
+cudaqx::tensor<uint8_t> surface_code::get_stabilizer_schedule_z() const {
+  return grid.get_cnot_schedule_z();
 }
 
 /// @brief Register the surace_code type

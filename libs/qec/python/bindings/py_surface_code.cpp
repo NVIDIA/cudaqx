@@ -134,7 +134,37 @@ void bindSurfaceCode(nb::module_ &mod) {
            "Return the stabilizers as a list of cudaq::spin_op_term")
       .def("get_spin_op_observables", &stabilizer_grid::get_spin_op_observables,
            "Return the logical observables as [X, Z] cudaq::spin_op_term "
-           "entries");
+           "entries")
+      .def(
+          "get_cnot_schedule_x",
+          [](const stabilizer_grid &g) {
+            auto t = g.get_cnot_schedule_x();
+            std::vector<std::vector<uint8_t>> rows(
+                t.shape()[0], std::vector<uint8_t>(t.shape()[1]));
+            for (std::size_t r = 0; r < t.shape()[0]; ++r)
+              for (std::size_t c = 0; c < t.shape()[1]; ++c)
+                rows[r][c] = t.at({r, c});
+            return rows;
+          },
+          "Return the X-stabilizer CNOT schedule matrix as a list of rows "
+          "matching the sorted parity-matrix rows. Entry 0 = no support, "
+          "k >= 1 = CNOT timestep, ordered so that ancilla (hook) errors "
+          "land perpendicular to the logical operators.")
+      .def(
+          "get_cnot_schedule_z",
+          [](const stabilizer_grid &g) {
+            auto t = g.get_cnot_schedule_z();
+            std::vector<std::vector<uint8_t>> rows(
+                t.shape()[0], std::vector<uint8_t>(t.shape()[1]));
+            for (std::size_t r = 0; r < t.shape()[0]; ++r)
+              for (std::size_t c = 0; c < t.shape()[1]; ++c)
+                rows[r][c] = t.at({r, c});
+            return rows;
+          },
+          "Return the Z-stabilizer CNOT schedule matrix as a list of rows "
+          "matching the sorted parity-matrix rows. Entry 0 = no support, "
+          "k >= 1 = CNOT timestep, ordered so that ancilla (hook) errors "
+          "land perpendicular to the logical operators.");
 
   qecmod.def("role_to_str", [](surface_role r) {
     switch (r) {

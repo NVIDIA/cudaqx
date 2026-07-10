@@ -289,18 +289,20 @@ sample_memory_circuit(const code &code, operation statePrep,
   auto &stabRound =
       code.get_operation<code::stabilizer_round>(operation::stabilizer_round);
 
-  auto parity_x = code.get_parity_x();
-  auto parity_z = code.get_parity_z();
+  // Schedule matrices, not plain parity matrices: nonzero entries carry the
+  // per-stabilizer interaction timestep (see code::get_stabilizer_schedule_x).
+  auto sched_x = code.get_stabilizer_schedule_x();
+  auto sched_z = code.get_stabilizer_schedule_z();
   auto numData = code.get_num_data_qubits();
   auto numAncx = code.get_num_ancilla_x_qubits();
   auto numAncz = code.get_num_ancilla_z_qubits();
   auto numXStabs = code.get_num_x_stabilizers();
   auto numZStabs = code.get_num_z_stabilizers();
 
-  std::vector<std::size_t> xVec(parity_x.data(),
-                                parity_x.data() + parity_x.size());
-  std::vector<std::size_t> zVec(parity_z.data(),
-                                parity_z.data() + parity_z.size());
+  std::vector<std::size_t> xVec(sched_x.data(),
+                                sched_x.data() + sched_x.size());
+  std::vector<std::size_t> zVec(sched_z.data(),
+                                sched_z.data() + sched_z.size());
   auto logical_obs =
       is_z_prep ? code.get_observables_z() : code.get_observables_x();
   const std::size_t num_obs = logical_obs.shape()[0];
@@ -461,17 +463,19 @@ dem_from_memory_circuit(const code &code, operation statePrep,
   auto &prep = code.get_operation<code::one_qubit_encoding>(statePrep);
   auto &stabRound =
       code.get_operation<code::stabilizer_round>(operation::stabilizer_round);
-  auto parity_x = code.get_parity_x();
-  auto parity_z = code.get_parity_z();
+  // Schedule matrices, not plain parity matrices: nonzero entries carry the
+  // per-stabilizer interaction timestep (see code::get_stabilizer_schedule_x).
+  auto sched_x = code.get_stabilizer_schedule_x();
+  auto sched_z = code.get_stabilizer_schedule_z();
   auto numData = code.get_num_data_qubits();
   auto numAncx = code.get_num_ancilla_x_qubits();
   auto numAncz = code.get_num_ancilla_z_qubits();
   bool is_z_prep =
       statePrep == operation::prep0 || statePrep == operation::prep1;
-  std::vector<std::size_t> xVec(parity_x.data(),
-                                parity_x.data() + parity_x.size());
-  std::vector<std::size_t> zVec(parity_z.data(),
-                                parity_z.data() + parity_z.size());
+  std::vector<std::size_t> xVec(sched_x.data(),
+                                sched_x.data() + sched_x.size());
+  std::vector<std::size_t> zVec(sched_z.data(),
+                                sched_z.data() + sched_z.size());
 
   auto logical_obs =
       is_z_prep ? code.get_observables_z() : code.get_observables_x();
