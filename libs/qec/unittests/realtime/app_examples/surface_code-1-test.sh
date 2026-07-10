@@ -135,6 +135,19 @@ if [[ "$num_corrections_decoder" -lt $number_of_corrections_decoder_threshold ]]
   return_code=1
 fi
 
+# For the cqr host-dispatch variant, verify the device_calls actually crossed
+# the cudaq-realtime ring to the in-process decoding server (the count is 0 if
+# they silently bypassed to a direct trampoline).
+if [[ "${CUDAQ_DEVICE_CALL_CHANNEL:-}" == "host_dispatch" ]]; then
+  cqr_dispatch_count=$(grep "CQR service dispatch count:" load_dem-$FULL_SUFFIX.log | awk -F': ' '{print $2}')
+  if ! [[ "$cqr_dispatch_count" =~ ^[0-9]+$ ]] || [[ "$cqr_dispatch_count" -eq 0 ]]; then
+    echo "Error: CQR service dispatch count is missing or zero; device_calls did not traverse host dispatch"
+    return_code=1
+  else
+    echo "CQR service dispatch count check passed ($cqr_dispatch_count dispatches)"
+  fi
+fi
+
 echo "Test completed for distance $DISTANCE with return code $return_code"
 
 # ============================================================================ #

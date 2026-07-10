@@ -43,13 +43,13 @@ struct byte_span {
 
 extern "C" __attribute__((visibility("hidden"))) void
 enqueue_syndromes(std::uint64_t decoder_id, std::uint64_t counter,
-                  std::uint64_t syndrome_mapping_id,
-                  std::uint64_t num_syndromes, byte_span syndrome_bits) {
+                  std::uint64_t syndrome_mapping_id, byte_span syndrome_bits) {
   // No syndrome mapping table yet: syndrome_mapping_id 0 is the identity
-  // mapping; the packed byte count must match the advertised bit count.
+  // mapping. syndrome_bits is a std::vector<bool> span: `length` is the logical
+  // bit count (== num_syndromes) and `buffer` points at the LSB-first
+  // bit-packed bytes.
   (void)syndrome_mapping_id;
-  if (syndrome_bits.length != (num_syndromes + 7) / 8)
-    return;
+  const std::uint64_t num_syndromes = syndrome_bits.length;
   std::vector<std::uint8_t> bits(num_syndromes);
   for (std::uint64_t i = 0; i < num_syndromes; ++i)
     bits[i] = (syndrome_bits.buffer[i / 8] >> (i % 8)) & 1; // LSB-first
@@ -58,14 +58,15 @@ enqueue_syndromes(std::uint64_t decoder_id, std::uint64_t counter,
 }
 
 extern "C" __attribute__((visibility("hidden"))) void
-get_corrections(std::uint64_t decoder_id, std::uint64_t return_size,
-                byte_span corrections, bool reset) {
-  if (corrections.length != (return_size + 7) / 8)
-    return;
+get_corrections(std::uint64_t decoder_id, byte_span corrections, bool reset) {
+  // corrections is a std::vector<bool> span: `length` is the logical bit count
+  // (the return size) and `buffer` points at the LSB-first bit-packed bytes.
+  const std::uint64_t return_size = corrections.length;
   std::vector<std::uint8_t> bits(return_size);
   cudaq::qec::decoding::host::get_corrections(decoder_id, bits.data(),
                                               return_size, reset);
-  for (std::uint64_t byte = 0; byte < corrections.length; ++byte) {
+  std::uint64_t num_bytes = (return_size + 7) / 8;
+  for (std::uint64_t byte = 0; byte < num_bytes; ++byte) {
     std::uint8_t value = 0;
     for (std::uint64_t bit = 0; bit < 8; ++bit) {
       std::uint64_t index = byte * 8 + bit;

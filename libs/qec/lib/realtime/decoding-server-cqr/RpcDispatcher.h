@@ -15,7 +15,7 @@
 #include <functional>
 #include <unordered_map>
 
-namespace cudaq::qec::decoder_server {
+namespace cudaq::qec::decoding_server {
 
 /// Helper passed to RpcDispatcher handlers that writes synchronous error
 /// responses (e.g. BAD_REQUEST from header validation, BUSY from try_enqueue).
@@ -61,4 +61,4 @@ private:
   std::unordered_map<uint32_t, Handler> table_;
 };
 
-} // namespace cudaq::qec::decoder_server
+} // namespace cudaq::qec::decoding_server

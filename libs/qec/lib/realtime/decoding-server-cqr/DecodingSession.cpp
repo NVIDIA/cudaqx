@@ -6,15 +6,16 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
-#include "DecoderSession.h"
+#include "DecodingSession.h"
 #include "RpcWireFormat.h"
 #include "cudaq/qec/logger.h"
 
 #include <chrono>
 #include <cstring>
 #include <stdexcept>
+#include <vector>
 
-namespace cudaq::qec::decoder_server {
+namespace cudaq::qec::decoding_server {
 
 // Busy high-water mark across all sessions (worker threads increment while
 // executing an item).
@@ -25,22 +26,29 @@ uint64_t max_concurrent_busy_sessions() {
   return g_max_busy_sessions.load(std::memory_order_relaxed);
 }
 
-DecoderSession::~DecoderSession() {
-  shutdown.store(true, std::memory_order_release);
+DecodingSession::~DecodingSession() { stop_worker(); }
+
+void DecodingSession::stop_worker() {
+  {
+    // The store must happen under queue_mutex: worker_loop's untimed wait
+    // checks the flag under the same lock, so this serializes against the
+    // predicate-check-then-block window and the notify cannot be lost.
+    std::lock_guard<std::mutex> lk(queue_mutex);
+    shutdown.store(true, std::memory_order_release);
+  }
   queue_cv.notify_one();
   if (worker.joinable())
     worker.join();
 }
 
-std::unique_ptr<DecoderSession>
-DecoderSession::create(const std::string &decoder_name,
-                       const cudaq::qec::decoder_init &init,
-                       const cudaqx::heterogeneous_map &params,
-                       SyndromeMappingTable mapping_table_arg) {
-  auto s = std::make_unique<DecoderSession>();
-  s->dec = cudaq::qec::decoder::get(decoder_name, init, params);
-  if (!s->dec)
-    throw std::runtime_error("Failed to create decoder: " + decoder_name);
+std::unique_ptr<DecodingSession>
+DecodingSession::create(std::unique_ptr<cudaq::qec::decoder> decoder,
+                        SyndromeMappingTable mapping_table_arg) {
+  if (!decoder)
+    throw std::invalid_argument("DecodingSession requires a decoder");
+
+  auto s = std::make_unique<DecodingSession>();
+  s->dec = std::move(decoder);
 
   if (s->dec->supports_graph_dispatch()) {
     void *gr = s->dec->capture_decode_graph();
@@ -52,11 +60,11 @@ DecoderSession::create(const std::string &decoder_name,
   return s;
 }
 
-void DecoderSession::start_worker() {
+void DecodingSession::start_worker() {
   worker = std::thread([this] { worker_loop(); });
 }
 
-bool DecoderSession::try_enqueue(WorkItem item) {
+bool DecodingSession::try_enqueue(WorkItem item) {
   std::lock_guard<std::mutex> lk(queue_mutex);
   if (work_queue.size() >= queue_depth) {
     ++busy_count;
@@ -67,7 +75,7 @@ bool DecoderSession::try_enqueue(WorkItem item) {
   return true;
 }
 
-void DecoderSession::latch_syndromes_dropped() {
+void DecodingSession::latch_syndromes_dropped() {
   syndromes_dropped.store(true, std::memory_order_release);
   ++syndromes_dropped_count;
 }
@@ -91,31 +99,45 @@ static void send_response(ITransceiver &transport, const PeerId &peer,
 
 // Uses item.response_transport so split-transport sessions reply on the correct
 // transport.
-void DecoderSession::on_enqueue(const WorkItem &item) {
+void DecodingSession::on_enqueue(const WorkItem &item) {
   ++enqueue_count;
+  // No manual release_fn handling: WorkItem::release_fn is a ReleaseFn that
+  // fires when the item is destroyed at the end of the worker-loop iteration,
+  // covering every early return and the exception path.
+
+  // Once an enqueue has been dropped or processing has failed, accepting more
+  // fragments would make the shot's measurement history unknowable. Only a
+  // full reset can establish a clean epoch again.
+  if (syndromes_dropped.load(std::memory_order_acquire) ||
+      shot_state == ShotState::failed)
+    return;
 
   const size_t min_size = sizeof(RPCHeader) + sizeof(EnqueuePayload);
   if (item.frame_buf.size() < min_size) {
     ++error_count;
+    shot_state = ShotState::failed;
     return; // enqueue_syndromes never sends a response
   }
 
   const auto *req = reinterpret_cast<const EnqueuePayload *>(
       item.frame_buf.data() + sizeof(RPCHeader));
 
-  if (req->num_syndromes <= 0) {
+  // enqueue_syndromes is fire-and-forget: the caller already received the
+  // transport-level ACK, so a response here would be unsolicited — silently
+  // dropped on CQR (no pending_ entry) and protocol-desynchronizing on
+  // in-order transports.  Latch the failure; it surfaces as INTERNAL_ERROR
+  // at this decoder's next get_corrections.
+  if (req->num_syndromes <= 0 ||
+      static_cast<uint64_t>(req->num_syndromes) > kMaxSyndromeBits) {
     ++error_count;
-    // enqueue_syndromes is fire-and-forget: the caller already received an ACK
-    // and send_response() would be silently dropped on CQR (no pending_ entry).
-    // Latch decoder_error so the next get_corrections surfaces the failure.
-    decoder_error = true;
+    shot_state = ShotState::failed;
     return;
   }
   const size_t syndrome_bytes =
       bit_packed_bytes(static_cast<size_t>(req->num_syndromes));
   if (item.frame_buf.size() < min_size + syndrome_bytes) {
     ++error_count;
-    decoder_error = true;
+    shot_state = ShotState::failed;
     return;
   }
 
@@ -135,20 +157,42 @@ void DecoderSession::on_enqueue(const WorkItem &item) {
   };
 
   try {
+    // Any accepted input after a completed decode starts a new volume; the old
+    // correction vector must not be reported as the result of that volume.
+    shot_state = ShotState::collecting;
     auto completed = accumulator.ingest(key, item.vp_id, unpacked.data(),
                                         unpacked.size(), mapping_table);
-    if (completed)
-      dec->enqueue_syndrome(completed->bits.data(), completed->bits.size());
+    if (!completed)
+      return;
+
+    const size_t expected_syndromes = dec->get_num_msyn_per_decode();
+    if (accepted_syndromes > expected_syndromes ||
+        completed->bits.size() > expected_syndromes - accepted_syndromes)
+      throw std::invalid_argument(
+          "Syndrome volume exceeds decoder measurement capacity");
+
+    accepted_syndromes += completed->bits.size();
+    // Host-decoder path (CQR / Loopback transports).  On the gpu_roce path,
+    // the CUDAQ device-graph scheduler (cudaq_create_dispatch_graph_regular)
+    // handles RX→dispatch→decode→TX entirely on the GPU; this worker thread
+    // is never reached for GPU RoCE sessions.
+    const bool did_decode =
+        dec->enqueue_syndrome(completed->bits.data(), completed->bits.size());
+
+    if (did_decode) {
+      accepted_syndromes = 0;
+      shot_state = ShotState::result_ready;
+    }
   } catch (const std::exception &e) {
-    CUDA_QEC_ERROR("DecoderSession::on_enqueue: {}", e.what());
+    cudaq::qec::error("DecodingSession::on_enqueue: {}", e.what());
     ++error_count;
     // Fire-and-forget: no response carries this failure, so latch it and
-    // surface it at this session's next get_corrections.
-    decoder_error = true;
+    // surface it until the client establishes a clean epoch with reset.
+    shot_state = ShotState::failed;
   }
 }
 
-void DecoderSession::on_get_corrections(const WorkItem &item) {
+void DecodingSession::on_get_corrections(const WorkItem &item) {
   ++get_corrections_count;
 
   if (item.frame_buf.size() <
@@ -162,6 +206,8 @@ void DecoderSession::on_get_corrections(const WorkItem &item) {
   const auto *req = reinterpret_cast<const GetCorrectionsPayload *>(
       item.frame_buf.data() + sizeof(RPCHeader));
 
+  // Spec validation: return_size (the OUT std::vector<bool> length) must be
+  // positive.
   if (req->return_size <= 0) {
     ++error_count;
     send_response(*item.response_transport, item.peer, item.request_id,
@@ -169,15 +215,15 @@ void DecoderSession::on_get_corrections(const WorkItem &item) {
     return;
   }
 
-  if (syndromes_dropped.exchange(false, std::memory_order_acq_rel)) {
+  if (syndromes_dropped.load(std::memory_order_acquire)) {
     send_response(*item.response_transport, item.peer, item.request_id,
                   item.ptp_timestamp, RpcStatus::SYNDROMES_DROPPED);
     return;
   }
 
-  // Surface a sticky deferred enqueue failure from this shot.
-  if (decoder_error) {
-    decoder_error = false;
+  // Surface a sticky deferred enqueue failure from this shot. Reporting it
+  // does not make partially accumulated decoder state safe to reuse.
+  if (shot_state == ShotState::failed) {
     send_response(*item.response_transport, item.peer, item.request_id,
                   item.ptp_timestamp, RpcStatus::INTERNAL_ERROR);
     return;
@@ -191,10 +237,16 @@ void DecoderSession::on_get_corrections(const WorkItem &item) {
                     item.ptp_timestamp, RpcStatus::BAD_REQUEST);
       return;
     }
-    const uint8_t *corrections = dec->get_obs_corrections();
-    if (!corrections) {
+    if (shot_state != ShotState::result_ready) {
       send_response(*item.response_transport, item.peer, item.request_id,
                     item.ptp_timestamp, RpcStatus::NOT_READY);
+      return;
+    }
+    const uint8_t *corrections = dec->get_obs_corrections();
+    if (!corrections) {
+      shot_state = ShotState::failed;
+      send_response(*item.response_transport, item.peer, item.request_id,
+                    item.ptp_timestamp, RpcStatus::INTERNAL_ERROR);
       return;
     }
     // result_len = ceil(R/8) exactly per decoder_server_runtime.md spec.
@@ -207,52 +259,59 @@ void DecoderSession::on_get_corrections(const WorkItem &item) {
       if (corrections[i] & 1u)
         packed[i / 8] |= static_cast<uint8_t>(1u << (i % 8));
     }
+    if (req->reset) {
+      // clear_corrections (not a full reset_decoder): matches the host-path
+      // semantics of get_corrections(reset=true).  Runs BEFORE the OK is
+      // sent: `packed` already owns a copy of the correction bits, and a
+      // throw here must produce the single INTERNAL_ERROR response below,
+      // not a second response after an already-delivered OK.
+      dec->clear_corrections();
+      shot_state = ShotState::collecting;
+    }
     send_response(*item.response_transport, item.peer, item.request_id,
                   item.ptp_timestamp, RpcStatus::OK, packed.data(), result_len);
-
-    if (req->reset)
-      dec->clear_corrections();
   } catch (const std::exception &e) {
-    CUDA_QEC_ERROR("DecoderSession::on_get_corrections: {}", e.what());
+    cudaq::qec::error("DecodingSession::on_get_corrections: {}", e.what());
     ++error_count;
+    shot_state = ShotState::failed;
     send_response(*item.response_transport, item.peer, item.request_id,
                   item.ptp_timestamp, RpcStatus::INTERNAL_ERROR);
   }
 }
 
-void DecoderSession::on_reset(const WorkItem &item) {
+void DecodingSession::on_reset(const WorkItem &item) {
   ++reset_count;
   try {
     dec->reset_decoder();
     accumulator.clear();
     syndromes_dropped.store(false, std::memory_order_release);
-    decoder_error = false;
+    accepted_syndromes = 0;
+    shot_state = ShotState::collecting;
     send_response(*item.response_transport, item.peer, item.request_id,
                   item.ptp_timestamp, RpcStatus::OK);
   } catch (const std::exception &e) {
-    CUDA_QEC_ERROR("DecoderSession::on_reset: {}", e.what());
+    cudaq::qec::error("DecodingSession::on_reset: {}", e.what());
     ++error_count;
+    shot_state = ShotState::failed;
     send_response(*item.response_transport, item.peer, item.request_id,
                   item.ptp_timestamp, RpcStatus::INTERNAL_ERROR);
   }
 }
 
-void DecoderSession::worker_loop() {
+void DecodingSession::worker_loop() {
   while (true) {
     WorkItem item;
     {
       std::unique_lock<std::mutex> lk(queue_mutex);
-      // Timed wait so the shutdown flag is observed even if no WorkItem
-      // arrives to trigger a notify (avoids a separate stop() notification).
-      queue_cv.wait_for(lk, std::chrono::milliseconds(100), [this] {
+      // Untimed wait: stop_worker() stores the shutdown flag under
+      // queue_mutex before notifying, so the wakeup cannot be lost and no
+      // 100 ms poll is needed.
+      queue_cv.wait(lk, [this] {
         return !work_queue.empty() || shutdown.load(std::memory_order_acquire);
       });
 
-      if (work_queue.empty()) {
-        if (shutdown.load(std::memory_order_acquire))
-          break;
-        continue;
-      }
+      if (work_queue.empty())
+        break; // woken by stop_worker() with nothing left to drain
 
       item = std::move(work_queue.front());
       work_queue.pop();
@@ -265,15 +324,31 @@ void DecoderSession::worker_loop() {
                                   observed, busy, std::memory_order_relaxed))
       ;
 
-    if (item.function_id == kEnqueueSyndromesFunctionId)
-      on_enqueue(item);
-    else if (item.function_id == kGetCorrectionsFunctionId)
-      on_get_corrections(item);
-    else if (item.function_id == kResetDecoderFunctionId)
-      on_reset(item);
+    // Last-resort containment: an exception escaping the worker thread would
+    // std::terminate the whole process.  The handlers catch std::exception
+    // internally, but allocations outside their try blocks (e.g. the unpacked
+    // syndrome vector) and non-std exceptions from decoder plugins would
+    // otherwise escape.
+    try {
+      if (item.function_id == kEnqueueSyndromesFunctionId)
+        on_enqueue(item);
+      else if (item.function_id == kGetCorrectionsFunctionId)
+        on_get_corrections(item);
+      else if (item.function_id == kResetDecoderFunctionId)
+        on_reset(item);
+    } catch (const std::exception &e) {
+      cudaq::qec::error("DecodingSession worker: unhandled exception: {}",
+                        e.what());
+      ++error_count;
+      shot_state = ShotState::failed;
+    } catch (...) {
+      cudaq::qec::error("DecodingSession worker: unhandled non-std exception");
+      ++error_count;
+      shot_state = ShotState::failed;
+    }
 
     g_busy_sessions.fetch_sub(1, std::memory_order_relaxed);
   }
 }
 
-} // namespace cudaq::qec::decoder_server
+} // namespace cudaq::qec::decoding_server

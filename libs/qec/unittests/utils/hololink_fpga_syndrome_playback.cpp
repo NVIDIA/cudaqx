@@ -350,7 +350,7 @@ build_rpc_payload(const std::vector<std::uint8_t> &measurements,
 /// Build a per-round `enqueue_syndromes` RPC frame for the device-graph
 /// scheduler (decoder_server_runtime.md#enqueue_syndromes):
 ///   [RPCHeader (fid=enqueue, arg_len)][EnqueueRequestPayload (32B)]
-///   [ceil(n/8) LSB-first bit-packed syndrome bytes + 0..7 zero pad].
+///   [ceil(n/8) LSB-first bit-packed syndrome bytes, no pad].
 /// One input byte (0/1) per syndrome bit.  ptp_timestamp left 0 (FPGA fills
 /// it).
 std::vector<std::uint8_t>
@@ -360,8 +360,7 @@ build_enqueue_frame(const std::vector<std::uint8_t> &round_bits,
   namespace rpc = cudaq::qec::decoding::rpc;
   const std::uint64_t n = round_bits.size();
   const std::size_t packed = rpc::bit_packed_bytes(n);
-  const std::size_t arg_len =
-      rpc::align_to_8(sizeof(rpc::EnqueueRequestPayload) + packed);
+  const std::size_t arg_len = sizeof(rpc::EnqueueRequestPayload) + packed;
   std::vector<std::uint8_t> payload(
       sizeof(cudaq::realtime::RPCHeader) + arg_len, 0);
   auto *header = reinterpret_cast<cudaq::realtime::RPCHeader *>(payload.data());
@@ -387,7 +386,7 @@ build_enqueue_frame(const std::vector<std::uint8_t> &round_bits,
 }
 
 /// Build a `get_corrections` RPC frame (decoder_server_runtime.md):
-///   [RPCHeader (fid=get_corrections, arg_len=24)]
+///   [RPCHeader (fid=get_corrections, arg_len=17)]
 ///   [GetCorrectionsRequestPayload{decoder_id, return_size, reset}].
 std::vector<std::uint8_t> build_get_corrections_frame(std::uint32_t request_id,
                                                       std::int64_t decoder_id,
