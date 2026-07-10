@@ -17,6 +17,8 @@
 #include <any>
 #include <filesystem>
 #include <fstream>
+#include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <type_traits>
 
@@ -859,11 +861,20 @@ namespace cudaq::qec::decoding::config {
 // Stash a copy for consumers that build their own decoder instances from the
 // process-wide configuration -- the decoder-server DeviceCallService plugin
 // reads it when CUDAQ_QEC_DECODER_CONFIG is not set (in-process path).
-static std::unique_ptr<multi_decoder_config> g_last_multi_decoder_config;
+// shared_ptr + mutex: the plugin reads this from the realtime dispatcher
+// thread while the application thread may call configure_decoders() again;
+// shared ownership keeps the reader's config alive across a concurrent
+// replacement.
+static std::mutex g_last_multi_decoder_config_mutex;
+static std::shared_ptr<const multi_decoder_config> g_last_multi_decoder_config;
 
 int configure_decoders(multi_decoder_config &config) {
   CUDA_QEC_INFO("Initializing realtime decoding library with config object");
-  g_last_multi_decoder_config = std::make_unique<multi_decoder_config>(config);
+  {
+    std::lock_guard<std::mutex> lock(g_last_multi_decoder_config_mutex);
+    g_last_multi_decoder_config =
+        std::make_shared<const multi_decoder_config>(config);
+  }
   // Publish the decoder configuration so CUDA-Q can inject it into
   // remote-target job requests. The cudaq integration (ExtraPayloadProvider) is
   // installed by cudaq-qec at load time; this call is a no-op when cudaq-qec is
@@ -873,8 +884,10 @@ int configure_decoders(multi_decoder_config &config) {
   return cudaq::qec::decoding::host::configure_decoders(config);
 }
 
-const multi_decoder_config *last_configured_multi_decoder_config() {
-  return g_last_multi_decoder_config.get();
+std::shared_ptr<const multi_decoder_config>
+last_configured_multi_decoder_config() {
+  std::lock_guard<std::mutex> lock(g_last_multi_decoder_config_mutex);
+  return g_last_multi_decoder_config;
 }
 
 void log_config(const char *config_str, bool from_file) {

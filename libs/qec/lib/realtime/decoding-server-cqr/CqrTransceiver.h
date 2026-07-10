@@ -286,10 +286,20 @@ inline void CqrTransceiver::send(const PeerId & /*peer*/, const uint8_t *data,
   if (it == pending_.end())
     return;
 
-  // Write our RPCResponse into the CUDAQ tx_slot (layouts are compatible).
   auto &p = it->second;
-  const std::size_t copy_len = std::min(len, p.slot_size);
-  std::memcpy(p.tx_slot, data, copy_len);
+  if (len > p.slot_size) {
+    // Truncating would leave result_len advertising bytes that were never
+    // written, so the client would read stale slot memory as correction
+    // bits.  Fail the RPC explicitly instead (the pre-decoder-server code
+    // returned result-buffer-too-small here).
+    write_ack(p.tx_slot, rid, resp->ptp_timestamp, RpcStatus::INTERNAL_ERROR);
+    p.done.set_value();
+    pending_.erase(it);
+    return;
+  }
+
+  // Write our RPCResponse into the CUDAQ tx_slot (layouts are compatible).
+  std::memcpy(p.tx_slot, data, len);
   // Publish the magic last (release store) so the CUDAQ runtime sees a
   // complete response before observing the magic word.
   __atomic_store_n(reinterpret_cast<uint32_t *>(p.tx_slot),

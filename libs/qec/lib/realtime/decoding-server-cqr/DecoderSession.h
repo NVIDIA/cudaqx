@@ -24,17 +24,14 @@
 
 namespace cudaq::qec::decoder_server {
 
-/// Byte vector of observable correction bits returned by get_corrections.
-using CorrectionBits = std::vector<uint8_t>;
-
 /// A unit of work dispatched from the RpcDispatcher to a DecoderSession worker
 /// thread.  The payload is an owned copy of the full frame bytes so that the
 /// dispatcher can return the transport ring slot immediately after dispatch.
 ///
-/// release_fn: propagated from RxFrame::release_fn.  The worker thread must
-/// call it (if non-null) once it has handed the syndrome data to the GPU
-/// scheduler and the slot is no longer needed.  On CPU/CQR/loopback paths
-/// this is always null.
+/// release_fn: propagated from RxFrame::release_fn.  It fires when the
+/// WorkItem is destroyed — after the worker has processed it, or on any drop
+/// path (queue full, validation failure).  On CPU/CQR/loopback paths this is
+/// always null.
 struct WorkItem {
   uint32_t function_id;
   std::vector<uint8_t> frame_buf; ///< RPCHeader + payload (moved from RxFrame)
@@ -43,7 +40,7 @@ struct WorkItem {
   uint64_t ptp_timestamp;
   uint32_t vp_id;
   ITransceiver *response_transport; ///< transport the request arrived on
-  std::function<void()> release_fn; ///< null except on GPU ring-buffer path
+  ReleaseFn release_fn;             ///< null except on GPU ring-buffer path
 };
 
 /// RAII wrapper: calls decoder::release_decode_graph() on destruction.

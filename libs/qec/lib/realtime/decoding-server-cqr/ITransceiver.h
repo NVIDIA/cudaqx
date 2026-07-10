@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <utility>
 #include <vector>
 
 namespace cudaq::qec::decoder_server {
@@ -24,21 +25,52 @@ struct PeerId {
   bool operator==(const PeerId &) const = default;
 };
 
+/// Move-only wrapper that invokes the wrapped callback exactly once, when the
+/// holder is destroyed.  Frames are dropped on many paths (dispatcher
+/// validation failures, session queue full, handler exceptions); tying the
+/// release to the frame's lifetime guarantees the ring slot is returned on
+/// every one of them instead of relying on each path to call it by hand.
+class ReleaseFn {
+public:
+  ReleaseFn() = default;
+  explicit ReleaseFn(std::function<void()> fn) : fn_(std::move(fn)) {}
+  ReleaseFn(const ReleaseFn &) = delete;
+  ReleaseFn &operator=(const ReleaseFn &) = delete;
+  ReleaseFn(ReleaseFn &&other) noexcept
+      : fn_(std::exchange(other.fn_, nullptr)) {}
+  ReleaseFn &operator=(ReleaseFn &&other) noexcept {
+    if (this != &other) {
+      if (fn_)
+        fn_();
+      fn_ = std::exchange(other.fn_, nullptr);
+    }
+    return *this;
+  }
+  ~ReleaseFn() {
+    if (fn_)
+      fn_();
+  }
+  explicit operator bool() const noexcept { return static_cast<bool>(fn_); }
+
+private:
+  std::function<void()> fn_;
+};
+
 /// A received frame: owns the wire bytes (RPCHeader + payload) plus transport
 /// metadata needed for syndrome scatter and response routing.
 /// Ownership of buf is transferred to WorkItem on enqueue.
 ///
-/// release_fn: when non-null, must be called exactly once after the frame
-/// payload is no longer needed (i.e. after the GPU scheduler has accepted the
-/// data).  For host-copy transports (CQR, Loopback, CPU ring buffer path) this
-/// is always null — the copy itself constitutes "release."  For GPU ring buffer
-/// transports (full RelayBP path), release_fn returns the slot to Hololink
-/// once GPU decode completes; it must NOT be called before that.
+/// release_fn: when non-null, returns the transport ring slot; it fires
+/// automatically when the frame (or the WorkItem it was moved into) is
+/// destroyed.  For host-copy transports (CQR, Loopback, CPU ring buffer path)
+/// it is always null — the copy itself constitutes "release."  For GPU ring
+/// buffer transports (full RelayBP path), the frame must be kept alive until
+/// GPU decode completes so the slot is not returned to Hololink early.
 struct RxFrame {
   std::vector<uint8_t> buf; ///< RPCHeader + payload (owned copy)
-  uint32_t vp_id;
-  PeerId peer;
-  std::function<void()> release_fn; ///< null except on GPU ring-buffer path
+  uint32_t vp_id = 0;
+  PeerId peer{};
+  ReleaseFn release_fn; ///< null except on GPU ring-buffer path
 };
 
 /// Transport abstraction used by DecoderServer and DecoderSession.

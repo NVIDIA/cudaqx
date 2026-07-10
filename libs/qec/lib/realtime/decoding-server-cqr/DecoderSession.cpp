@@ -29,7 +29,13 @@ uint64_t max_concurrent_busy_sessions() {
 DecoderSession::~DecoderSession() { stop_worker(); }
 
 void DecoderSession::stop_worker() {
-  shutdown.store(true, std::memory_order_release);
+  {
+    // The store must happen under queue_mutex: worker_loop's untimed wait
+    // checks the flag under the same lock, so this serializes against the
+    // predicate-check-then-block window and the notify cannot be lost.
+    std::lock_guard<std::mutex> lk(queue_mutex);
+    shutdown.store(true, std::memory_order_release);
+  }
   queue_cv.notify_one();
   if (worker.joinable())
     worker.join();
@@ -95,18 +101,9 @@ static void send_response(ITransceiver &transport, const PeerId &peer,
 // transport.
 void DecoderSession::on_enqueue(const WorkItem &item) {
   ++enqueue_count;
-
-  // ITransceiver contract: release_fn (zero-copy ring-slot return) must run
-  // exactly once, on every path out of this function — early returns and
-  // exceptions included — or the ring slot leaks.  Null on all current host
-  // paths; reserved for a future zero-copy ring-buffer variant.
-  struct ReleaseGuard {
-    const std::function<void()> &fn;
-    ~ReleaseGuard() {
-      if (fn)
-        fn();
-    }
-  } release_guard{item.release_fn};
+  // No manual release_fn handling: WorkItem::release_fn is a ReleaseFn that
+  // fires when the item is destroyed at the end of the worker-loop iteration,
+  // covering every early return and the exception path.
 
   // Once an enqueue has been dropped or processing has failed, accepting more
   // fragments would make the shot's measurement history unknowable. Only a
@@ -262,15 +259,17 @@ void DecoderSession::on_get_corrections(const WorkItem &item) {
       if (corrections[i] & 1u)
         packed[i / 8] |= static_cast<uint8_t>(1u << (i % 8));
     }
-    send_response(*item.response_transport, item.peer, item.request_id,
-                  item.ptp_timestamp, RpcStatus::OK, packed.data(), result_len);
-
     if (req->reset) {
       // clear_corrections (not a full reset_decoder): matches the host-path
-      // semantics of get_corrections(reset=true).
+      // semantics of get_corrections(reset=true).  Runs BEFORE the OK is
+      // sent: `packed` already owns a copy of the correction bits, and a
+      // throw here must produce the single INTERNAL_ERROR response below,
+      // not a second response after an already-delivered OK.
       dec->clear_corrections();
       shot_state = ShotState::collecting;
     }
+    send_response(*item.response_transport, item.peer, item.request_id,
+                  item.ptp_timestamp, RpcStatus::OK, packed.data(), result_len);
   } catch (const std::exception &e) {
     cudaq::qec::error("DecoderSession::on_get_corrections: {}", e.what());
     ++error_count;
@@ -304,17 +303,15 @@ void DecoderSession::worker_loop() {
     WorkItem item;
     {
       std::unique_lock<std::mutex> lk(queue_mutex);
-      // Timed wait so the shutdown flag is observed even if no WorkItem
-      // arrives to trigger a notify (avoids a separate stop() notification).
-      queue_cv.wait_for(lk, std::chrono::milliseconds(100), [this] {
+      // Untimed wait: stop_worker() stores the shutdown flag under
+      // queue_mutex before notifying, so the wakeup cannot be lost and no
+      // 100 ms poll is needed.
+      queue_cv.wait(lk, [this] {
         return !work_queue.empty() || shutdown.load(std::memory_order_acquire);
       });
 
-      if (work_queue.empty()) {
-        if (shutdown.load(std::memory_order_acquire))
-          break;
-        continue;
-      }
+      if (work_queue.empty())
+        break; // woken by stop_worker() with nothing left to drain
 
       item = std::move(work_queue.front());
       work_queue.pop();
@@ -327,12 +324,28 @@ void DecoderSession::worker_loop() {
                                   observed, busy, std::memory_order_relaxed))
       ;
 
-    if (item.function_id == kEnqueueSyndromesFunctionId)
-      on_enqueue(item);
-    else if (item.function_id == kGetCorrectionsFunctionId)
-      on_get_corrections(item);
-    else if (item.function_id == kResetDecoderFunctionId)
-      on_reset(item);
+    // Last-resort containment: an exception escaping the worker thread would
+    // std::terminate the whole process.  The handlers catch std::exception
+    // internally, but allocations outside their try blocks (e.g. the unpacked
+    // syndrome vector) and non-std exceptions from decoder plugins would
+    // otherwise escape.
+    try {
+      if (item.function_id == kEnqueueSyndromesFunctionId)
+        on_enqueue(item);
+      else if (item.function_id == kGetCorrectionsFunctionId)
+        on_get_corrections(item);
+      else if (item.function_id == kResetDecoderFunctionId)
+        on_reset(item);
+    } catch (const std::exception &e) {
+      cudaq::qec::error("DecoderSession worker: unhandled exception: {}",
+                        e.what());
+      ++error_count;
+      shot_state = ShotState::failed;
+    } catch (...) {
+      cudaq::qec::error("DecoderSession worker: unhandled non-std exception");
+      ++error_count;
+      shot_state = ShotState::failed;
+    }
 
     g_busy_sessions.fetch_sub(1, std::memory_order_relaxed);
   }

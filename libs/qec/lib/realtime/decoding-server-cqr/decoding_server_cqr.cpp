@@ -68,22 +68,25 @@ static std::atomic<uint64_t> g_service_dispatch_count{0};
 
 static void init_server() {
   auto t = std::make_unique<CqrTransceiver>();
-  g_transceiver = t.get();
+  CqrTransceiver *raw = t.get();
 
   if (const char *cfg = std::getenv("CUDAQ_QEC_DECODER_CONFIG");
       cfg && cfg[0] != '\0') {
     g_server = std::make_unique<DecoderServer>(std::move(t), std::string(cfg));
-  } else if (const auto *config = cudaq::qec::decoding::config::
+  } else if (const auto config = cudaq::qec::decoding::config::
                  last_configured_multi_decoder_config()) {
     g_server = std::make_unique<DecoderServer>(std::move(t), *config);
   } else {
-    g_transceiver = nullptr;
     throw std::runtime_error(
         "decoder-server config not found: set CUDAQ_QEC_DECODER_CONFIG to a "
         "multi_decoder_config YAML path, or call "
         "cudaq::qec::decoding::config::configure_decoders() before realtime "
         "initialization");
   }
+  // Publish the transceiver only after the server is fully constructed: a
+  // throwing DecoderServer constructor has already freed the transceiver, and
+  // dispatch_rpc treats a null g_transceiver as "not serving".
+  g_transceiver = raw;
   g_server_thread = std::thread([] { g_server->run(); });
   // In-process applications never call the explicit shutdown hook the daemon
   // uses; stop the server at exit() so the static g_server_thread is joined
@@ -98,7 +101,8 @@ static void init_server() {
 
 // Write an error RPCResponse into tx_slot (handler-level failures must not
 // propagate into the transport dispatcher loop).
-constexpr int32_t kStatusHandlerException = 3; // RpcStatus::INTERNAL_ERROR
+constexpr int32_t kStatusHandlerException =
+    static_cast<int32_t>(cudaq::qec::decoder_server::RpcStatus::INTERNAL_ERROR);
 
 static void write_error_response(const void *rx_slot, void *tx_slot,
                                  std::size_t slot_size, int32_t status) {
@@ -185,12 +189,16 @@ void reset_decoder_host(const void *rx_slot, void *tx_slot,
 // DeviceCallService plugin
 // ---------------------------------------------------------------------------
 
-constexpr uint32_t kEnqueueSyndromesFnId =
-    cudaq::realtime::fnv1a_hash("enqueue_syndromes");
-constexpr uint32_t kGetCorrectionsFnId =
-    cudaq::realtime::fnv1a_hash("get_corrections");
-constexpr uint32_t kResetDecoderFnId =
-    cudaq::realtime::fnv1a_hash("reset_decoder");
+// The schema entries below register under the SAME function IDs the handlers
+// and CqrTransceiver route on (the kXFunctionId constants from
+// RpcWireFormat.h); these asserts pin them to the fnv1a hashes of the RPC
+// names so a rename cannot silently desynchronize registration from routing.
+static_assert(kEnqueueSyndromesFunctionId ==
+              cudaq::realtime::fnv1a_hash("enqueue_syndromes"));
+static_assert(kGetCorrectionsFunctionId ==
+              cudaq::realtime::fnv1a_hash("get_corrections"));
+static_assert(kResetDecoderFunctionId ==
+              cudaq::realtime::fnv1a_hash("reset_decoder"));
 
 constexpr int32_t kHostDispatchDeviceId = 0;
 constexpr uint8_t kNoResults = 0;
@@ -265,7 +273,7 @@ make_entries() {
   // decoder_id, counter, syndrome_mapping_id (scalars) + syndrome_bits
   // (bit_packed: element-count prefix == num_syndromes, then LSB-first bits).
   auto &eq = entries[kEnqueueSyndromesEntry];
-  configure_entry(eq, kEnqueueSyndromesFnId, enqueue_syndromes_host,
+  configure_entry(eq, kEnqueueSyndromesFunctionId, enqueue_syndromes_host,
                   kEnqueueArgCount, kNoResults);
   set_u64(eq.schema.args[kEnqueueDecoderIdArg]);
   set_u64(eq.schema.args[kEnqueueCounterArg]);
@@ -276,7 +284,7 @@ make_entries() {
   // decoder_id (scalar) + corrections (OUT std::vector<bool>: the request
   // carries its length as return_size) + reset (scalar).
   auto &gc = entries[kGetCorrectionsEntry];
-  configure_entry(gc, kGetCorrectionsFnId, get_corrections_host,
+  configure_entry(gc, kGetCorrectionsFunctionId, get_corrections_host,
                   kGetCorrectionsArgCount, kSingleResult);
   set_u64(gc.schema.args[kGetCorrectionsDecoderIdArg]);
   set_u64(gc.schema.args[kGetCorrectionsReturnSizeArg]);
@@ -284,7 +292,7 @@ make_entries() {
   set_bit_packed(gc.schema.results[kCorrectionsResult]);
 
   auto &rd = entries[kResetDecoderEntry];
-  configure_entry(rd, kResetDecoderFnId, reset_decoder_host,
+  configure_entry(rd, kResetDecoderFunctionId, reset_decoder_host,
                   kResetDecoderArgCount, kNoResults);
   set_u64(rd.schema.args[kResetDecoderIdArg]);
 
@@ -322,8 +330,20 @@ public:
     // application path has not called configure_decoders yet at this point;
     // it initializes lazily on the first RPC (see dispatch_rpc).
     if (const char *cfg = std::getenv("CUDAQ_QEC_DECODER_CONFIG");
-        cfg && cfg[0] != '\0')
-      std::call_once(g_init_flag, init_server);
+        cfg && cfg[0] != '\0') {
+      try {
+        std::call_once(g_init_flag, init_server);
+      } catch (const std::exception &e) {
+        // CUDAQ core does not expect plugin session creation to throw; a
+        // propagating exception would escape the channel-setup path and
+        // terminate. Report the config/decoder failure and decline the
+        // session instead.
+        cudaq::qec::error(
+            "decoder-server init failed (CUDAQ_QEC_DECODER_CONFIG={}): {}", cfg,
+            e.what());
+        return nullptr;
+      }
+    }
     return std::make_unique<QecDeviceCallSession>();
   }
 };

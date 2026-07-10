@@ -47,39 +47,30 @@ DecoderServer::make_transport(DecoderTransport transport_type) {
   throw std::runtime_error("make_transport: unknown DecoderTransport value");
 }
 
-/// Read only the transport type from the YAML config without instantiating
-/// any decoder sessions.
-static DecoderTransport read_transport_from_yaml(const std::string &yaml_path) {
-  std::ifstream f(yaml_path);
+DecoderServer::DecoderServer(const std::string &config_yaml) {
+  // Parse the YAML once: SessionRegistry validates the decoder entries
+  // (including the uniform-transport rule — MVP limitation: heterogeneous
+  // deployments require per-session transceiver binding, deferred to a
+  // follow-up once CpuRoce/GpuRoceTransceiverAdapter are available) and
+  // required_transport() then drives transceiver creation.
+  std::ifstream f(config_yaml);
   if (!f.is_open())
-    throw std::runtime_error("Cannot open config: " + yaml_path);
+    throw std::runtime_error("Cannot open config: " + config_yaml);
   std::string yaml_str((std::istreambuf_iterator<char>(f)), {});
   auto config =
       cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(
           yaml_str);
   if (config.decoders.empty())
-    throw std::runtime_error("No decoders in config: " + yaml_path);
-  auto transport = config.decoders.front().transport;
-  // MVP limitation: all decoders in one server instance must share the same
-  // transport type.  Heterogeneous deployments (e.g. decoder0=cpu_roce,
-  // decoder1=gpu_roce) require per-session transceiver binding, deferred to
-  // a follow-up once CpuRoce/GpuRoceTransceiverAdapter are available.
-  for (const auto &dc : config.decoders)
-    if (dc.transport != transport)
-      throw std::runtime_error("Mixed transport types in " + yaml_path +
-                               ": all decoder entries must declare the same "
-                               "transport");
-  return transport;
-}
+    throw std::runtime_error("No decoders in config: " + config_yaml);
+  registry_.load_from_config(config, config_yaml);
+  register_handlers();
 
-DecoderServer::DecoderServer(const std::string &config_yaml) {
-  auto t = make_transport(read_transport_from_yaml(config_yaml));
+  auto t = make_transport(registry_.required_transport());
   ITransceiver *raw = t.get();
   owned_transports_.push_back(std::move(t));
   function_transport_[kEnqueueSyndromesFunctionId] = raw;
   function_transport_[kGetCorrectionsFunctionId] = raw;
   function_transport_[kResetDecoderFunctionId] = raw;
-  init(config_yaml);
 
 #ifdef CUDAQ_GPU_ROCE_AVAILABLE
   // For the GPU RoCE path, wire the first (and only) session's decoder graph
