@@ -7,6 +7,7 @@
  ******************************************************************************/
 
 #include "realtime_decoding.h"
+#include "../hardware_guards.h"
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/pcm_utils.h"
@@ -421,6 +422,14 @@ void enqueue_syndromes(std::size_t decoder_id, uint8_t *syndromes,
     return;
   }
 #endif
+
+  // Direct-call path: this caller thread runs the decode, but
+  // configure_decoders() constructed every decoder sequentially on one thread,
+  // leaving the LAST decoder's device current. Point the thread at this
+  // decoder's pinned device before decoding (set-if-different; throws on
+  // failure).
+  cudaq::qec::detail_affinity::set_cuda_device_for_decode(
+      decoder->get_cuda_device_id());
 
   std::vector<uint8_t> syndrome_u8(syndrome_length);
   bool did_decode = false;

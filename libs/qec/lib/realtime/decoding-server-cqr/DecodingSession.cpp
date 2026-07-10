@@ -12,6 +12,7 @@
 
 #include <chrono>
 #include <cstring>
+#include <cuda_runtime_api.h>
 #include <stdexcept>
 #include <vector>
 
@@ -299,6 +300,15 @@ void DecodingSession::on_reset(const WorkItem &item) {
 }
 
 void DecodingSession::worker_loop() {
+  // One worker owns one decoder: pin this thread to the decoder's requested
+  // CUDA device once, so every decode (including lazy plugin allocations)
+  // lands there. Construction pinned only the registry thread.
+  if (const int cuda_id = dec->get_cuda_device_id(); cuda_id >= 0) {
+    const cudaError_t err = cudaSetDevice(cuda_id);
+    if (err != cudaSuccess)
+      cudaq::qec::error("DecodingSession worker: cudaSetDevice({}) failed: {}",
+                        cuda_id, cudaGetErrorString(err));
+  }
   while (true) {
     WorkItem item;
     {
