@@ -7,7 +7,7 @@
 # ============================================================================ #
 
 # Decoder configuration for the two-process decoding-server test
-# (test_decoding_server_udp + qec_udp_decoding_daemon). The daemon is
+# (test_decoding_server_udp + decoding_server). The server is
 # decoder-agnostic: swap `type` / `decoder_custom_args` to run the same test
 # against a different decoder.
 #

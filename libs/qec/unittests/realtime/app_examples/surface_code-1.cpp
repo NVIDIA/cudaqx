@@ -31,8 +31,8 @@
 // of resolving to the in-process trampolines. The decoding is served either by
 // the in-process decoding-server-cqr service
 // (CUDAQ_DEVICE_CALL_CHANNEL=host_dispatch) or by a standalone
-// qec_decoding_daemon (QEC_DECODING_SERVER_PORT=<port>). The wire to the
-// daemon defaults to udp loopback; set QEC_DECODING_SERVER_TRANSPORT=cpu_roce
+// decoding_server (QEC_DECODING_SERVER_PORT=<port>). The wire to the
+// server defaults to udp loopback; set QEC_DECODING_SERVER_TRANSPORT=cpu_roce
 // to use the CPU RoCE RDMA channel instead (works over SoftRoCE/rdma_rxe; the
 // RDMA topology comes from the same CUDAQ_CPU_ROCE_TEST_* env vars as CUDA-Q's
 // CpuRoceChannelTester).
@@ -56,8 +56,8 @@ void initialize_realtime_channel(const char *prog) {
         env_or("QEC_DECODING_SERVER_TRANSPORT", "udp");
     if (transport == "cpu_roce") {
       // The RDMA ring geometry (slots x slot-size) is part of the cpu_roce
-      // wire contract: the channel writes requests directly into the daemon's
-      // rings, so these must match qec_decoding_daemon's --num-slots /
+      // wire contract: the channel writes requests directly into the server's
+      // rings, so these must match decoding_server's --num-slots /
       // --slot-size defaults (8 x 256).
       args.push_back("--cudaq-device-call=cpu_roce");
       args.push_back("--cudaq-device-call-slots=8");
@@ -1170,7 +1170,7 @@ int main(int argc, char **argv) {
     // With CUDAQ_DEVICE_CALL_CHANNEL=host_dispatch this proves the shots'
     // device_calls crossed the ring to the in-process decoding server (it
     // stays 0 if they bypassed to a trampoline, or if a udp channel routed
-    // them to an external daemon instead).
+    // them to an external server instead).
     printf("CQR service dispatch count: %llu\n",
            static_cast<unsigned long long>(
                cudaqx_qec_device_call_dispatch_count()));

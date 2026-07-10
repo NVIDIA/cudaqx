@@ -8,9 +8,9 @@
 
 /// Two-process realtime decoding-server test: this process runs only the
 /// caller (simulated QPU) side; the decoder lives in a separate
-/// qec_decoding_daemon process reached through a CUDA-Q device_call
+/// decoding_server process reached through a CUDA-Q device_call
 /// channel.  Both the decoder and the transport are configuration:
-///   - the decoder comes from the YAML config file handed to the daemon
+///   - the decoder comes from the YAML config file handed to the server
 ///     (swapping decoders is a config-file change, not a code change);
 ///   - the transport defaults to `udp` (loopback; runs anywhere) and can be
 ///     switched to the CPU RoCE RDMA wire with
@@ -20,8 +20,8 @@
 ///       CUDAQ_CPU_ROCE_TEST_CHANNEL_DEVICE / CUDAQ_CPU_ROCE_TEST_CHANNEL_IP
 ///       CUDAQ_CPU_ROCE_TEST_DAEMON_DEVICE  / CUDAQ_CPU_ROCE_TEST_DAEMON_IP
 ///
-/// The daemon is spawned as a subprocess, its ephemeral port read from the
-/// QEC_DECODING_DAEMON_READY stdout line, and its dispatch count (printed at
+/// The server is spawned as a subprocess, its ephemeral port read from the
+/// QEC_DECODING_SERVER_READY stdout line, and its dispatch count (printed at
 /// shutdown) is the proof the device_calls crossed the process boundary --
 /// there is no decoder configured in this process at all.
 ///
@@ -155,23 +155,23 @@ std::string env_or(const char *name, const std::string &fallback) {
   return value && *value ? std::string(value) : fallback;
 }
 
-// The daemon binary path is baked in at configure time (the daemon is built
-// from libs/qec/tools/decoding-server); QEC_DECODING_DAEMON overrides it. The
-// example decoder configs are placed in the same directory as the daemon.
-std::string daemon_path() {
-  return env_or("QEC_DECODING_DAEMON", QEC_DECODING_DAEMON_PATH);
+// The server binary path is baked in at configure time (the server is built
+// from libs/qec/tools/decoding-server); QEC_DECODING_SERVER overrides it. The
+// example decoder configs are placed in the same directory as the server.
+std::string server_path() {
+  return env_or("QEC_DECODING_SERVER", QEC_DECODING_SERVER_PATH);
 }
 
-std::string daemon_dir() {
-  const std::string path = daemon_path();
+std::string server_dir() {
+  const std::string path = server_path();
   const auto slash = path.find_last_of('/');
   return slash == std::string::npos ? "." : path.substr(0, slash);
 }
 
-// Spawns qec_decoding_daemon with the given decoder config file, hands back
+// Spawns decoding_server with the given decoder config file, hands back
 // its READY port (udp: the UDP data port; cpu_roce: the TCP rendezvous port),
 // and collects its stdout (for the shutdown dispatch-count line).
-class DaemonProcess {
+class ServerProcess {
 public:
   bool start(const std::string &config_file, std::string &error,
              int ready_timeout_ms = 15000) {
@@ -189,21 +189,21 @@ public:
       ::dup2(out_pipe[1], STDOUT_FILENO);
       ::close(out_pipe[0]);
       ::close(out_pipe[1]);
-      const std::string daemon = daemon_path();
+      const std::string server = server_path();
       const std::string config_arg =
           "--config=" + (!config_file.empty() && config_file[0] == '/'
                              ? config_file
-                             : daemon_dir() + "/" + config_file);
+                             : server_dir() + "/" + config_file);
       const std::string transport_arg =
           "--transport=" + env_or("QEC_DECODING_SERVER_TRANSPORT", "udp");
       const std::string device_arg =
           "--device=" + env_or("CUDAQ_CPU_ROCE_TEST_DAEMON_DEVICE", "mlx5_0");
       const std::string local_ip_arg =
           "--local-ip=" + env_or("CUDAQ_CPU_ROCE_TEST_DAEMON_IP", "10.0.0.2");
-      ::execl(daemon.c_str(), daemon.c_str(), config_arg.c_str(),
+      ::execl(server.c_str(), server.c_str(), config_arg.c_str(),
               transport_arg.c_str(), device_arg.c_str(), local_ip_arg.c_str(),
               "--port=0", "--timeout=60", static_cast<char *>(nullptr));
-      std::perror("execl qec_decoding_daemon");
+      std::perror("execl decoding_server");
       _exit(127);
     }
     ::close(out_pipe[1]);
@@ -212,22 +212,22 @@ public:
     // Read stdout until the READY line (or the deadline; decoders that
     // build TensorRT engines at startup need more than the default 15 s).
     std::string ready_line;
-    if (!readLineWithPrefix("QEC_DECODING_DAEMON_READY", ready_timeout_ms,
+    if (!readLineWithPrefix("QEC_DECODING_SERVER_READY", ready_timeout_ms,
                             ready_line)) {
-      error = "daemon did not print QEC_DECODING_DAEMON_READY; output so "
+      error = "server did not print QEC_DECODING_SERVER_READY; output so "
               "far: " +
               captured;
       return false;
     }
-    if (std::sscanf(ready_line.c_str(), "QEC_DECODING_DAEMON_READY port=%hu",
+    if (std::sscanf(ready_line.c_str(), "QEC_DECODING_SERVER_READY port=%hu",
                     &port) != 1) {
-      error = "could not parse daemon port from: " + ready_line;
+      error = "could not parse server port from: " + ready_line;
       return false;
     }
     return true;
   }
 
-  // Terminate the daemon and return its dispatched-request count (-1 if the
+  // Terminate the server and return its dispatched-request count (-1 if the
   // shutdown line never appeared). Also captures the per-decoder-worker
   // concurrency high-water mark into max_concurrent_decoders.
   std::int64_t stopAndGetDispatchCount() {
@@ -236,17 +236,17 @@ public:
     ::kill(pid, SIGTERM);
     std::string line;
     std::int64_t count = -1;
-    if (readLineWithPrefix("QEC_DECODING_DAEMON_DISPATCHED", 10000, line)) {
+    if (readLineWithPrefix("QEC_DECODING_SERVER_DISPATCHED", 10000, line)) {
       long long parsed = -1;
-      if (std::sscanf(line.c_str(), "QEC_DECODING_DAEMON_DISPATCHED count=%lld",
+      if (std::sscanf(line.c_str(), "QEC_DECODING_SERVER_DISPATCHED count=%lld",
                       &parsed) == 1)
         count = parsed;
     }
-    if (readLineWithPrefix("QEC_DECODING_DAEMON_MAX_CONCURRENT_DECODERS", 5000,
+    if (readLineWithPrefix("QEC_DECODING_SERVER_MAX_CONCURRENT_DECODERS", 5000,
                            line)) {
       long long parsed = -1;
       if (std::sscanf(line.c_str(),
-                      "QEC_DECODING_DAEMON_MAX_CONCURRENT_DECODERS count=%lld",
+                      "QEC_DECODING_SERVER_MAX_CONCURRENT_DECODERS count=%lld",
                       &parsed) == 1)
         max_concurrent_decoders = parsed;
     }
@@ -260,7 +260,7 @@ public:
     return count;
   }
 
-  ~DaemonProcess() {
+  ~ServerProcess() {
     if (pid > 0) {
       ::kill(pid, SIGKILL);
       int status = 0;
@@ -321,15 +321,15 @@ struct RealtimeGuard {
 } // namespace
 
 // Caller-side device_call channel arguments for the selected transport.
-std::vector<std::string> channel_arguments(std::uint16_t daemon_port) {
+std::vector<std::string> channel_arguments(std::uint16_t server_port) {
   const std::string transport = env_or("QEC_DECODING_SERVER_TRANSPORT", "udp");
   if (transport == "cpu_roce") {
-    // The daemon's READY port is its TCP rendezvous port; the RDMA topology
+    // The server's READY port is its TCP rendezvous port; the RDMA topology
     // comes from the same env vars CUDA-Q's CpuRoceChannelTester uses.
     // Unlike udp, the RDMA ring geometry is part of the wire contract: the
-    // channel writes requests directly into the daemon's rings, so slots /
-    // slot-size must match the daemon's --num-slots / --slot-size defaults
-    // (8 x 256, see qec_decoding_daemon.cpp DaemonConfig).
+    // channel writes requests directly into the server's rings, so slots /
+    // slot-size must match the server's --num-slots / --slot-size defaults
+    // (8 x 256, see decoding_server.cpp ServerConfig).
     return {"--cudaq-device-call=cpu_roce",
             "--cudaq-device-call-slots=8",
             "--cudaq-device-call-slot-size=256",
@@ -338,21 +338,21 @@ std::vector<std::string> channel_arguments(std::uint16_t daemon_port) {
             "local-ip=" + env_or("CUDAQ_CPU_ROCE_TEST_CHANNEL_IP", "10.0.0.1"),
             "rendezvous-host=" +
                 env_or("CUDAQ_CPU_ROCE_TEST_DAEMON_IP", "10.0.0.2"),
-            "rendezvous-port=" + std::to_string(daemon_port)};
+            "rendezvous-port=" + std::to_string(server_port)};
   }
   return {"--cudaq-device-call=udp", "udp-host=127.0.0.1",
-          "udp-port=" + std::to_string(daemon_port)};
+          "udp-port=" + std::to_string(server_port)};
 }
 
-// Runs the full two-process round-trip against a daemon configured with
-// `config_file`. Each invocation spawns a fresh daemon on an ephemeral port.
+// Runs the full two-process round-trip against a server configured with
+// `config_file`. Each invocation spawns a fresh server on an ephemeral port.
 void run_two_process_decode_test(const std::string &config_file) {
-  DaemonProcess daemon;
+  ServerProcess server;
   std::string error;
-  ASSERT_TRUE(daemon.start(config_file, error)) << error;
+  ASSERT_TRUE(server.start(config_file, error)) << error;
 
   std::vector<std::string> args = {"test_decoding_server"};
-  for (auto &arg : channel_arguments(daemon.port))
+  for (auto &arg : channel_arguments(server.port))
     args.push_back(std::move(arg));
   std::vector<char *> argv;
   for (auto &arg : args)
@@ -367,11 +367,11 @@ void run_two_process_decode_test(const std::string &config_file) {
   EXPECT_EQ(results[0], kExpectedCorrection);
 
   // Two-process self-verification: the decode can only have happened in the
-  // daemon (this process configured no decoders), and the daemon's dispatch
+  // server (this process configured no decoders), and the server's dispatch
   // counter proves the device_calls crossed the selected transport. Three
   // calls: reset_decoder, enqueue_syndromes, get_corrections.
-  const std::int64_t dispatched = daemon.stopAndGetDispatchCount();
-  EXPECT_GE(dispatched, 3) << "daemon output:\n" << daemon.captured;
+  const std::int64_t dispatched = server.stopAndGetDispatchCount();
+  EXPECT_GE(dispatched, 3) << "server output:\n" << server.captured;
 }
 
 TEST(DecodingServerTwoProcess, TwoProcessHostDispatch) {
@@ -383,11 +383,11 @@ TEST(DecodingServerTwoProcess, TwoProcessHostDispatchMultiErrorLut) {
 }
 
 // ---------------------------------------------------------------------------
-// Two decoders (two logical qubits) in ONE daemon, driven from ONE __qpu__
+// Two decoders (two logical qubits) in ONE server, driven from ONE __qpu__
 // kernel: qubit A uses decoder 0 and qubit B uses decoder 1, with different
 // active syndrome bits. On the server each decoder executes on its own
-// per-decoder worker thread; the daemon's shutdown
-// QEC_DECODING_DAEMON_MAX_CONCURRENT_DECODERS line reports the busy
+// per-decoder worker thread; the server's shutdown
+// QEC_DECODING_SERVER_MAX_CONCURRENT_DECODERS line reports the busy
 // high-water mark of those workers.
 // ---------------------------------------------------------------------------
 
@@ -433,7 +433,7 @@ __qpu__ std::int64_t dual_decoding_server_kernel() {
 
 TEST(DecodingServerTwoProcess, TwoProcessHostDispatchDualDecoders) {
   // Two identical 3-bit-identity pymatching decoders (ids 0 and 1) in one
-  // daemon -- one per logical qubit.
+  // server -- one per logical qubit.
   const std::string config_path =
       ::testing::TempDir() + "/decoding_server_dual_config.yaml";
   {
@@ -453,12 +453,12 @@ TEST(DecodingServerTwoProcess, TwoProcessHostDispatchDualDecoders) {
     }
   }
 
-  DaemonProcess daemon;
+  ServerProcess server;
   std::string error;
-  ASSERT_TRUE(daemon.start(config_path, error)) << error;
+  ASSERT_TRUE(server.start(config_path, error)) << error;
 
   std::vector<std::string> args = {"test_decoding_server"};
-  for (auto &arg : channel_arguments(daemon.port))
+  for (auto &arg : channel_arguments(server.port))
     args.push_back(std::move(arg));
   std::vector<char *> argv;
   for (auto &arg : args)
@@ -475,8 +475,8 @@ TEST(DecodingServerTwoProcess, TwoProcessHostDispatchDualDecoders) {
   // Six calls crossed the wire (reset/enqueue/get per decoder), and both
   // decoders' execution workers ran (high-water mark >= 1; == 2 when the
   // decodes genuinely overlapped, which tiny identity decodes need not).
-  const std::int64_t dispatched = daemon.stopAndGetDispatchCount();
-  EXPECT_GE(dispatched, 6) << "daemon output:\n" << daemon.captured;
-  EXPECT_GE(daemon.max_concurrent_decoders, 1) << "daemon output:\n"
-                                               << daemon.captured;
+  const std::int64_t dispatched = server.stopAndGetDispatchCount();
+  EXPECT_GE(dispatched, 6) << "server output:\n" << server.captured;
+  EXPECT_GE(server.max_concurrent_decoders, 1) << "server output:\n"
+                                               << server.captured;
 }

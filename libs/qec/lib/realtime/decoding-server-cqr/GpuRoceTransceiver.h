@@ -32,7 +32,7 @@ struct cudaq_dispatch_graph_context;
 namespace cudaq::qec::decoder_server {
 
 /// Runtime configuration for GpuRoceTransceiver.  All fields are read from
-/// environment variables so that the daemon can be reconfigured without a
+/// environment variables so that the server can be reconfigured without a
 /// rebuild.
 struct GpuRoceConfig {
   std::string device_name; ///< HOLOLINK_DEVICE   (IB netdev, e.g. "mlx5_0")

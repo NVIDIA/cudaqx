@@ -385,7 +385,7 @@ void save_dem_to_file(
 // Parse and validate a saved decoder config: geometry guards, per-id types,
 // and the reconstructed DEM. Does NOT construct decoders -- instantiation is
 // the serving side's job (this process for in-process serving; the decoding
-// server for a daemon-served run).
+// server for a server-served run).
 cudaq::qec::decoding::config::multi_decoder_config
 load_decoder_config(const std::string &dem_filename,
                     cudaq::qec::detector_error_model &dem, uint64_t numLogical,
@@ -873,7 +873,7 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
           "); the YAML was generated for a different geometry");
     numSyndromesPerRound = fullSyndromesPerRound;
     // Construct local decoders only for the in-process executable. The external
-    // executable still performs all geometry validation above, but the daemon
+    // executable still performs all geometry validation above, but the server
     // owns the decoder instances described by this same configuration.
 #ifdef QEC_APP_EXTERNAL_DECODING_SERVER
     printf("External decoding server owns all configured decoder instances\n");

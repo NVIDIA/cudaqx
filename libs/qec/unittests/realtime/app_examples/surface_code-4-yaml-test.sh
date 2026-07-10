@@ -77,7 +77,7 @@ if [[ $# -ge 7 ]]; then
 fi
 
 export CUDAQ_DEFAULT_SIMULATOR=stim
-if [[ -n "${QEC_DECODING_DAEMON:-}" ]]; then
+if [[ -n "${QEC_DECODING_SERVER:-}" ]]; then
   export CUDAQ_QEC_REALTIME_MODE=external_server
 else
   export CUDAQ_QEC_REALTIME_MODE=${CUDAQ_QEC_REALTIME_MODE:-inproc_rpc}
@@ -107,20 +107,20 @@ if [[ ${#DECODER_TYPES[@]} -gt 1 ]]; then MULTI_TYPE=1; fi
 
 # Create an isolated working directory and (by default) clean it up on exit.
 WORKDIR=$(mktemp -d)
-DAEMON_PID=""
-DAEMON_LOG=$WORKDIR/daemon.log
+SERVER_PID=""
+SERVER_LOG=$WORKDIR/server.log
 MISSING_PORT_LOG=$WORKDIR/missing-port.log
 
-stop_daemon() {
-  if [[ -n "$DAEMON_PID" ]]; then
-    kill -TERM "$DAEMON_PID" 2>/dev/null || true
-    wait "$DAEMON_PID" 2>/dev/null || true
-    DAEMON_PID=""
+stop_server() {
+  if [[ -n "$SERVER_PID" ]]; then
+    kill -TERM "$SERVER_PID" 2>/dev/null || true
+    wait "$SERVER_PID" 2>/dev/null || true
+    SERVER_PID=""
   fi
 }
 
 cleanup() {
-  stop_daemon
+  stop_server
   if [[ -z "${KEEP_LOG_FILES:-}" ]]; then
     rm -rf "$WORKDIR"
   else
@@ -288,37 +288,37 @@ if [[ -n "${CHECK_MISSING_SERVER_PORT:-}" ]]; then
   echo "Missing external-server port rejected cleanly -- OK"
 fi
 
-# An external-server test uses the generated YAML as the daemon's authoritative
+# An external-server test uses the generated YAML as the server's authoritative
 # decoder configuration. The application still reloads and validates that YAML,
 # but its CQR build deliberately does not construct local decoders.
-DAEMON_PORT=""
-if [[ -n "${QEC_DECODING_DAEMON:-}" ]]; then
+SERVER_PORT=""
+if [[ -n "${QEC_DECODING_SERVER:-}" ]]; then
   if [[ -n "${REQUIRE_TRT_EXECUTION:-}" ]]; then
     CUDAQ_QEC_TRT_REPORT_INFERENCE_EXECUTIONS=1 \
-      "$QEC_DECODING_DAEMON" --config="$CONFIG_FILE" --transport=udp --port=0 \
-        --timeout=300 >"$DAEMON_LOG" 2>&1 &
+      "$QEC_DECODING_SERVER" --config="$CONFIG_FILE" --transport=udp --port=0 \
+        --timeout=300 >"$SERVER_LOG" 2>&1 &
   else
-    "$QEC_DECODING_DAEMON" --config="$CONFIG_FILE" --transport=udp --port=0 \
-      --timeout=300 >"$DAEMON_LOG" 2>&1 &
+    "$QEC_DECODING_SERVER" --config="$CONFIG_FILE" --transport=udp --port=0 \
+      --timeout=300 >"$SERVER_LOG" 2>&1 &
   fi
-  DAEMON_PID=$!
+  SERVER_PID=$!
 
   for _ in $(seq 1 1200); do
-    DAEMON_PORT=$(grep -m1 "QEC_DECODING_DAEMON_READY" "$DAEMON_LOG" \
+    SERVER_PORT=$(grep -m1 "QEC_DECODING_SERVER_READY" "$SERVER_LOG" \
       2>/dev/null | sed -n 's/.*port=\([0-9]\+\).*/\1/p' || true)
-    [[ -n "$DAEMON_PORT" ]] && break
-    if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
+    [[ -n "$SERVER_PORT" ]] && break
+    if ! kill -0 "$SERVER_PID" 2>/dev/null; then
       break
     fi
     sleep 0.1
   done
 
-  if [[ -z "$DAEMON_PORT" ]]; then
-    echo "FAIL: decoding daemon did not become ready"
-    cat "$DAEMON_LOG"
+  if [[ -z "$SERVER_PORT" ]]; then
+    echo "FAIL: decoding server did not become ready"
+    cat "$SERVER_LOG"
     exit 1
   fi
-  echo "External decoding server ready on UDP port $DAEMON_PORT"
+  echo "External decoding server ready on UDP port $SERVER_PORT"
 fi
 
 # -------------------------------------------------------------------------- #
@@ -340,8 +340,8 @@ REALTIME_ARGS=(
 if [[ ${#EXTRA_APP_ARGS[@]} -gt 0 ]]; then
   REALTIME_ARGS+=("${EXTRA_APP_ARGS[@]}")
 fi
-if [[ -n "$DAEMON_PORT" ]]; then
-  QEC_DECODING_SERVER_PORT="$DAEMON_PORT" \
+if [[ -n "$SERVER_PORT" ]]; then
+  QEC_DECODING_SERVER_PORT="$SERVER_PORT" \
     "$EXE" "${REALTIME_ARGS[@]}" 2>&1 | tee "$REALTIME_LOG"
   app_status=${PIPESTATUS[0]}
 else
@@ -350,8 +350,8 @@ else
 fi
 set -e
 
-if [[ -n "$DAEMON_PORT" ]]; then
-  stop_daemon
+if [[ -n "$SERVER_PORT" ]]; then
+  stop_server
 fi
 
 if [[ "$app_status" -ne 0 ]]; then
@@ -456,48 +456,48 @@ if [[ -n "${EXPECTED_DECODER_CORRECTIONS:-}" ]]; then
   fi
 fi
 
-if [[ -n "$DAEMON_PORT" ]]; then
-  daemon_dispatches=$(sed -n \
-    's/^QEC_DECODING_DAEMON_DISPATCHED count=\([0-9][0-9]*\)$/\1/p' \
-    "$DAEMON_LOG" | tail -n1)
-  daemon_max_concurrent=$(sed -n \
-    's/^QEC_DECODING_DAEMON_MAX_CONCURRENT_DECODERS count=\([0-9][0-9]*\)$/\1/p' \
-    "$DAEMON_LOG" | tail -n1)
+if [[ -n "$SERVER_PORT" ]]; then
+  server_dispatches=$(sed -n \
+    's/^QEC_DECODING_SERVER_DISPATCHED count=\([0-9][0-9]*\)$/\1/p' \
+    "$SERVER_LOG" | tail -n1)
+  server_max_concurrent=$(sed -n \
+    's/^QEC_DECODING_SERVER_MAX_CONCURRENT_DECODERS count=\([0-9][0-9]*\)$/\1/p' \
+    "$SERVER_LOG" | tail -n1)
   minimum_dispatches=$((NUM_SHOTS * ${#DECODER_TYPES[@]} * (NUM_ROUNDS + 3)))
 
-  if ! [[ "$daemon_dispatches" =~ ^[0-9]+$ ]] || \
-     [[ "$daemon_dispatches" -lt "$minimum_dispatches" ]]; then
-    echo "FAIL: daemon dispatch count '$daemon_dispatches' is below $minimum_dispatches"
+  if ! [[ "$server_dispatches" =~ ^[0-9]+$ ]] || \
+     [[ "$server_dispatches" -lt "$minimum_dispatches" ]]; then
+    echo "FAIL: server dispatch count '$server_dispatches' is below $minimum_dispatches"
     return_code=1
   fi
   if ! grep -q \
     "External decoding server owns all configured decoder instances" \
     "$REALTIME_LOG"; then
-    echo "FAIL: external application did not report daemon-owned decoders"
+    echo "FAIL: external application did not report server-owned decoders"
     return_code=1
   fi
   if [[ -n "${REQUIRE_DECODER_CONCURRENCY:-}" ]] && \
-     { ! [[ "$daemon_max_concurrent" =~ ^[0-9]+$ ]] || \
-       [[ "$daemon_max_concurrent" -lt "$REQUIRE_DECODER_CONCURRENCY" ]]; }; then
-    echo "FAIL: daemon max concurrency '$daemon_max_concurrent' is below $REQUIRE_DECODER_CONCURRENCY"
+     { ! [[ "$server_max_concurrent" =~ ^[0-9]+$ ]] || \
+       [[ "$server_max_concurrent" -lt "$REQUIRE_DECODER_CONCURRENCY" ]]; }; then
+    echo "FAIL: server max concurrency '$server_max_concurrent' is below $REQUIRE_DECODER_CONCURRENCY"
     return_code=1
   fi
   if [[ -n "${EXPECTED_BARRIER_COMPLETIONS:-}" ]]; then
     barrier_completions=$(grep -c \
-      '^QEC_CONCURRENCY_TEST_BARRIER generation=' "$DAEMON_LOG" || true)
+      '^QEC_CONCURRENCY_TEST_BARRIER generation=' "$SERVER_LOG" || true)
     if [[ "$barrier_completions" -ne "$EXPECTED_BARRIER_COMPLETIONS" ]]; then
       echo "FAIL: barrier completed $barrier_completions times; expected $EXPECTED_BARRIER_COMPLETIONS"
       return_code=1
     fi
   fi
-  if [[ -n "${EXPECTED_DAEMON_DECODER_CONSTRUCTIONS:-}" ]]; then
-    daemon_constructions=$(grep -c \
-      '^QEC_CONCURRENCY_TEST_DECODER_CONSTRUCTED$' "$DAEMON_LOG" || true)
+  if [[ -n "${EXPECTED_SERVER_DECODER_CONSTRUCTIONS:-}" ]]; then
+    server_constructions=$(grep -c \
+      '^QEC_CONCURRENCY_TEST_DECODER_CONSTRUCTED$' "$SERVER_LOG" || true)
     client_constructions=$(grep -c \
       '^QEC_CONCURRENCY_TEST_DECODER_CONSTRUCTED$' "$REALTIME_LOG" || true)
-    if [[ "$daemon_constructions" != \
-          "$EXPECTED_DAEMON_DECODER_CONSTRUCTIONS" ]]; then
-      echo "FAIL: daemon constructed $daemon_constructions test decoders; expected $EXPECTED_DAEMON_DECODER_CONSTRUCTIONS"
+    if [[ "$server_constructions" != \
+          "$EXPECTED_SERVER_DECODER_CONSTRUCTIONS" ]]; then
+      echo "FAIL: server constructed $server_constructions test decoders; expected $EXPECTED_SERVER_DECODER_CONSTRUCTIONS"
       return_code=1
     fi
     if [[ "$client_constructions" -ne 0 ]]; then
@@ -514,10 +514,10 @@ if [[ -n "$DAEMON_PORT" ]]; then
     done
     expected_trt_decodes=$((trt_instances * (NUM_SHOTS + 1)))
     trt_reports=$(grep -c '^QEC_TRT_INFERENCE_EXECUTIONS count=' \
-      "$DAEMON_LOG" || true)
+      "$SERVER_LOG" || true)
     trt_decodes=$(sed -n \
       's/^QEC_TRT_INFERENCE_EXECUTIONS count=\([0-9][0-9]*\)$/\1/p' \
-      "$DAEMON_LOG" | awk '{sum += $1} END {print sum + 0}')
+      "$SERVER_LOG" | awk '{sum += $1} END {print sum + 0}')
     if [[ "$trt_reports" -ne "$trt_instances" ]]; then
       echo "FAIL: TensorRT reported $trt_reports inference counters; expected $trt_instances"
       return_code=1
@@ -527,7 +527,7 @@ if [[ -n "$DAEMON_PORT" ]]; then
       return_code=1
     fi
   fi
-  echo "Daemon evidence: dispatches=$daemon_dispatches, max_concurrent=$daemon_max_concurrent"
+  echo "Server evidence: dispatches=$server_dispatches, max_concurrent=$server_max_concurrent"
 fi
 
 # REQUIRE_HOST_MODE (relay trio ctest): assert the realtime session actually

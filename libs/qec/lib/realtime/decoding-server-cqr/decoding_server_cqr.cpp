@@ -16,7 +16,7 @@
 ///
 /// The decoder configuration comes from, in priority order:
 ///   1. the CUDAQ_QEC_DECODER_CONFIG env var (path to a multi_decoder_config
-///      YAML) -- the standalone-daemon path;
+///      YAML) -- the standalone-server path;
 ///   2. the last multi_decoder_config passed to
 ///      cudaq::qec::decoding::config::configure_decoders() in this process --
 ///      the in-process (host_dispatch) application path.
@@ -88,7 +88,7 @@ static void init_server() {
   // dispatch_rpc treats a null g_transceiver as "not serving".
   g_transceiver = raw;
   g_server_thread = std::thread([] { g_server->run(); });
-  // In-process applications never call the explicit shutdown hook the daemon
+  // In-process applications never call the explicit shutdown hook the server
   // uses; stop the server at exit() so the static g_server_thread is joined
   // before static destruction (a still-joinable thread would
   // std::terminate, aborting the process and losing buffered stdout).
@@ -140,7 +140,7 @@ static void capture_enqueue_syndromes(const void *rx_slot,
 
 // The server is constructed lazily on the first RPC (the in-process
 // application path configures decoders AFTER the realtime channel — and
-// with it this dispatch session — is created); the daemon path instead
+// with it this dispatch session — is created); the server path instead
 // initializes eagerly at session creation via CUDAQ_QEC_DECODER_CONFIG so
 // slow decoder construction happens before its READY line.
 static void dispatch_rpc(const void *rx_slot, void *tx_slot,
@@ -325,8 +325,8 @@ public:
   createDispatchSession(DeviceCallDispatchMode mode) override {
     if (mode != DeviceCallDispatchMode::Host)
       return nullptr;
-    // Daemon path: the config path is in the environment, so build the
-    // decoder sessions NOW (before the daemon's READY line). The in-process
+    // Server path: the config path is in the environment, so build the
+    // decoder sessions NOW (before the server's READY line). The in-process
     // application path has not called configure_decoders yet at this point;
     // it initializes lazily on the first RPC (see dispatch_rpc).
     if (const char *cfg = std::getenv("CUDAQ_QEC_DECODER_CONFIG");
@@ -368,13 +368,13 @@ cudaqx_qec_device_call_dispatch_count() {
 }
 
 /// High-water mark of simultaneously-busy DecoderSession workers -- the
-/// daemon's concurrency evidence for multi-logical-qubit tests.
+/// server's concurrency evidence for multi-logical-qubit tests.
 extern "C" __attribute__((visibility("default"))) uint64_t
 cudaqx_qec_decoder_server_max_concurrent() {
   return cudaq::qec::decoder_server::max_concurrent_busy_sessions();
 }
 
-/// Stop the DecoderServer receive loop and join its thread. The daemon calls
+/// Stop the DecoderServer receive loop and join its thread. The server calls
 /// this before exiting; without it the static g_server_thread would still be
 /// joinable at static destruction (std::terminate).
 extern "C" __attribute__((visibility("default"))) void

@@ -196,10 +196,10 @@ if(TARGET cudaq-qec-realtime-decoding-server-cqr)
   )
 
   # Two-process: same application as the udp client, with the standard
-  # decoding server (qec_decoding_daemon, from tools/decoding-server) in a
+  # decoding server (decoding_server, from tools/decoding-server) in a
   # separate process serving the decoders configured from the app's own
   # --save_dem YAML.
-  if(TARGET qec_decoding_daemon)
+  if(TARGET decoding_server)
     add_test(
       NAME app_examples.surface_code-1-cqr-two-process-test-distance-3
       COMMAND
@@ -209,7 +209,7 @@ if(TARGET cudaq-qec-realtime-decoding-server-cqr)
         bash "${CMAKE_CURRENT_SOURCE_DIR}/surface_code-1-cqr-two-process-test.sh"
           ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-cqr
           3 60 40
-          $<TARGET_FILE:qec_decoding_daemon>
+          $<TARGET_FILE:decoding_server>
           12 6
       WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     )
@@ -543,8 +543,8 @@ endif()
 # External decoding-server form of the same application. The quantum kernels and
 # YAML generation/validation stay in surface_code-4-yaml.cpp; only the device-call
 # lowering and client-side simulation library differ. Decoder construction lives
-# exclusively in qec_decoding_daemon for this target.
-if(TARGET qec_decoding_daemon
+# exclusively in decoding_server for this target.
+if(TARGET decoding_server
    AND TARGET cudaq-qec-realtime-decoding-simulation-cqr)
   add_executable(surface_code-4-yaml-cqr)
   set_target_properties(surface_code-4-yaml-cqr PROPERTIES LINKER_LANGUAGE CXX)
@@ -651,7 +651,7 @@ endfunction()
 function(add_surface_code_4_yaml_external_test test_suffix distance num_rounds
          decoder_type num_shots onnx_path)
   set(_sc4_external_env
-    "QEC_DECODING_DAEMON=$<TARGET_FILE:qec_decoding_daemon>")
+    "QEC_DECODING_SERVER=$<TARGET_FILE:decoding_server>")
   if(Python_Interpreter_FOUND)
     list(APPEND _sc4_external_env "PYTHON=${Python_EXECUTABLE}")
   endif()
@@ -725,7 +725,7 @@ if(TARGET surface_code-4-yaml-cqr)
     2 "")
   set_property(TEST app_examples.surface_code-4-yaml-cqr-three-way-overlap
     APPEND PROPERTY ENVIRONMENT
-      "QEC_CONCURRENCY_TEST_DECODERS=3;REQUIRE_DECODER_CONCURRENCY=3;EXPECTED_BARRIER_COMPLETIONS=2;EXPECTED_DECODER_CORRECTIONS=0,2,0;EXPECTED_DAEMON_DECODER_CONSTRUCTIONS=3;CHECK_MISSING_SERVER_PORT=1;SKIP_LOGICAL_ERROR_CEILING=1")
+      "QEC_CONCURRENCY_TEST_DECODERS=3;REQUIRE_DECODER_CONCURRENCY=3;EXPECTED_BARRIER_COMPLETIONS=2;EXPECTED_DECODER_CORRECTIONS=0,2,0;EXPECTED_SERVER_DECODER_CONSTRUCTIONS=3;CHECK_MISSING_SERVER_PORT=1;SKIP_LOGICAL_ERROR_CEILING=1")
 
   if(TARGET cudaq-qec-trt-decoder AND _SC4_TRY_TRT_TEST)
     add_surface_code_4_yaml_external_test(happy-path 3 3
@@ -737,7 +737,7 @@ if(TARGET surface_code-4-yaml-cqr)
 
   # A real-workload skew case: all three patches use PyMatching, but patch 1
   # receives a much higher physical error rate and a correspondingly generated
-  # decoder model. This exercises independent daemon workers without a
+  # decoder model. This exercises independent server workers without a
   # test-only delay in the decoder implementation.
   add_surface_code_4_yaml_external_test(hard-patch-pymatching 7 7
     "pymatching,pymatching,pymatching" 100 ""
@@ -747,7 +747,7 @@ if(TARGET surface_code-4-yaml-cqr)
       "CHECK_HARD_PATCH_MODELS=1;REQUIRE_DECODER_CONCURRENCY=2;SKIP_LOGICAL_ERROR_CEILING=1")
 
   # Ising bundles are generated outside this repository. Supplying a bundle at
-  # configure time registers an external-daemon test using the same identity
+  # configure time registers an external-server test using the same identity
   # TRT predecoder as the mocked happy path, but with Ising H/O/priors/D.
   set(QEC_SURFACE_CODE_4_ISING_BUNDLE "" CACHE PATH
       "Ising d/T/Z bundle used by the external surface-code example")

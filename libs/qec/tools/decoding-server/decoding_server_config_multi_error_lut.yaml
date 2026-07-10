@@ -7,7 +7,7 @@
 # ============================================================================ #
 
 # Decoder configuration for the two-process decoding-server test
-# (test_decoding_server_udp + qec_udp_decoding_daemon): the multi_error_lut
+# (test_decoding_server_udp + decoding_server): the multi_error_lut
 # variant, demonstrating that swapping decoders is a config-file change only.
 #
 # Same identity-matrix H/O/D contract as decoding_server_config.yaml: 3-bit

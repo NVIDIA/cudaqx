@@ -11,26 +11,26 @@
 #
 # Generic orchestration script for end-to-end decoder testing over Holoscan-
 # Sensor-Bridge (HSB) RDMA/RoCE, with the decode work served by the standalone
-# decoding server (qec_decoding_daemon) on the CPU HOST_CALL path instead of a
+# decoding server (decoding_server) on the CPU HOST_CALL path instead of a
 # GPU bridge.  Works with any CPU decoder the server's YAML config selects;
 # the default profile is pymatching.
 #
 # Data path:
-#   FPGA/emulator --RDMA WRITE--> daemon cpu_roce rx ring
-#   daemon        --RDMA SEND---> FPGA SIF TX (captured by the ILA)
+#   FPGA/emulator --RDMA WRITE--> server cpu_roce rx ring
+#   server        --RDMA SEND---> FPGA SIF TX (captured by the ILA)
 #
 # Division of labor (identical to hololink_qldpc_graph_decoder_test.sh):
-#   - qec_decoding_daemon (--transport=cpu_roce --qp_config=hsb_fpga) owns the
+#   - decoding_server (--transport=cpu_roce --qp_config=hsb_fpga) owns the
 #     RDMA ring and prints its QP / RKey / Buffer Addr handshake.  It performs
 #     NO Hololink control-plane traffic.
 #   - hololink_fpga_syndrome_playback is the sole FPGA control-plane writer:
-#     it programs the SIF RDMA target with the daemon's handshake values,
+#     it programs the SIF RDMA target with the server's handshake values,
 #     writes the syndrome frames to BRAM, arms the ILA, enables the player,
 #     and verifies the captured RPC responses.
 #
 # Modes:
-#   Default (FPGA):   daemon + playback  (requires real FPGA)
-#   --emulate:        emulator + daemon + playback  (no FPGA needed)
+#   Default (FPGA):   server + playback  (requires real FPGA)
+#   --emulate:        emulator + server + playback  (no FPGA needed)
 #
 # Actions (can be combined):
 #   --build            Build all required tools
@@ -84,7 +84,7 @@ GEN_SHOTS=100
 
 # Network defaults
 IB_DEVICE=""           # auto-detect
-BRIDGE_IP="10.0.0.1"   # daemon-side NIC IP (kept the qldpc script's name)
+BRIDGE_IP="10.0.0.1"   # server-side NIC IP (kept the qldpc script's name)
 EMULATOR_IP="10.0.0.2"
 FPGA_IP="192.168.0.2"
 MTU=4096
@@ -95,9 +95,9 @@ NUM_SHOTS=""
 PAGE_SIZE=384
 # Ring depth is intentionally NOT configurable: stock HSB posts WQE_NUM=64
 # receive/send WQEs, so a deeper ring aliases two slots per WQE and races
-# RX/TX.  The daemon clamps to 64 as well.
+# RX/TX.  The server clamps to 64 as well.
 NUM_SLOTS=64
-# TX SGE bytes for the daemon's SEND responses.  RPCResponse (24B) + a
+# TX SGE bytes for the server's SEND responses.  RPCResponse (24B) + a
 # bit-packed correction byte fits well inside 64, keeping every response a
 # single 512-bit ILA beat.
 FRAME_SIZE=64
@@ -116,7 +116,7 @@ print_usage() {
 Usage: hsb_fpga_decoder_server_test.sh [options]
 
 Generic orchestration script for decoder end-to-end testing over HSB
-RDMA/RoCE with the decoding server (qec_decoding_daemon) on the CPU
+RDMA/RoCE with the decoding server (decoding_server) on the CPU
 HOST_CALL path.  Default decoder profile: pymatching.
 
 Modes:
@@ -148,23 +148,23 @@ Build options:
                          (default: /workspaces/holoscan-sensor-bridge)
   --cuda-quantum-dir DIR cuda-quantum source directory; must match the ref in
                          CUDAQX_DIR/.cudaq_version (default: /workspaces/cuda-quantum)
-  --cudaqx-dir DIR       cudaqx source dir that builds the daemon + playback
+  --cudaqx-dir DIR       cudaqx source dir that builds the server + playback
                          (default: /workspaces/cudaqx)
   --jobs N               Parallel build jobs (default: nproc)
 
 Network options:
   --device DEV           ConnectX IB device name (default: auto-detect)
-  --bridge-ip ADDR       Daemon-side NIC IP (default: 10.0.0.1)
+  --bridge-ip ADDR       Server-side NIC IP (default: 10.0.0.1)
   --emulator-ip ADDR     Emulator IP (default: 10.0.0.2)
   --fpga-ip ADDR         FPGA IP for non-emulate mode (default: 192.168.0.2)
   --mtu N                MTU size (default: 4096)
 
 Run options:
-  --timeout N            Daemon timeout in seconds (default: 60)
+  --timeout N            Server timeout in seconds (default: 60)
   --no-verify            Skip correction verification
   --num-shots N          Limit number of shots
   --page-size N          Ring buffer slot size in bytes (default: 384)
-  --frame-size N         Daemon TX SGE bytes (default: 64)
+  --frame-size N         Server TX SGE bytes (default: 64)
   --spacing N            Inter-shot spacing in microseconds (default: 10)
   --control-port N       UDP control port for emulator (default: 8193)
 
@@ -316,8 +316,8 @@ setup_port() {
     _info "  Done: $iface is up at $ip"
 }
 
-# Pre-seed a PERMANENT neighbor entry for a real FPGA on the daemon interface.
-# The daemon's QP connect resolves the FPGA's L2 (MAC) address via
+# Pre-seed a PERMANENT neighbor entry for a real FPGA on the server interface.
+# The server's QP connect resolves the FPGA's L2 (MAC) address via
 # ibv_create_ah, which consults the kernel neighbor table; without priming it
 # the in-call ARP resolution times out even though the link is up.
 _seed_fpga_neighbor() {
@@ -333,7 +333,7 @@ _seed_fpga_neighbor() {
     else
         _err "  Could not resolve FPGA MAC for $fpga_ip on $iface."
         _err "  Check the FPGA is cabled to this NIC, powered, and reachable"
-        _err "  (ping $fpga_ip); otherwise the daemon QP connect will time out."
+        _err "  (ping $fpga_ip); otherwise the server QP connect will time out."
     fi
 }
 
@@ -362,7 +362,7 @@ ipv4_to_gid_suffix() {
 # Poll until the IPv4-mapped RoCE v2 GID for $ip appears on $ib_dev port 1.
 # The CPU RoCE transceiver requires this specific GID; it only exists while
 # the netdev has the IPv4 address AND is up, and it populates asynchronously,
-# so a blind sleep races the daemon's GID lookup.
+# so a blind sleep races the server's GID lookup.
 wait_for_roce_v2_gid() {
     local ib_dev="$1" ip="$2" timeout_s="${3:-15}"
     local suffix gids_dir types_dir elapsed=0
@@ -390,8 +390,8 @@ wait_for_roce_v2_gid() {
         elapsed=$((elapsed + 1))
     done
     _err "Timed out waiting for IPv4 RoCE v2 GID (${suffix}) on ${ib_dev}."
-    _err "The daemon's cpu_roce bring-up will fail its GID lookup.  Verify"
-    _err "${ip} is assigned to the daemon netdev and the interface is up."
+    _err "The server's cpu_roce bring-up will fail its GID lookup.  Verify"
+    _err "${ip} is assigned to the server netdev and the interface is up."
     return 1
 }
 
@@ -425,7 +425,7 @@ do_setup_network() {
                 iface_emulator="$second_iface"
             fi
 
-            _info "Daemon interface:   $iface_bridge"
+            _info "Server interface:   $iface_bridge"
             _info "Emulator interface: $iface_emulator"
             setup_port "$iface_bridge" "$BRIDGE_IP" "$MTU"
             setup_port "$iface_emulator" "$EMULATOR_IP" "$MTU"
@@ -437,7 +437,7 @@ do_setup_network() {
             _add_static_arp "$iface_emulator" "$BRIDGE_IP" "$iface_bridge"
         else
             # --device accepts either one dual-port device (ports 1+2) or two
-            # comma-separated single-port devices ("devA,devB": daemon on devA,
+            # comma-separated single-port devices ("devA,devB": server on devA,
             # emulator on devB).
             local iface1 iface2
             if [[ "$IB_DEVICE" == *,* ]]; then
@@ -465,8 +465,8 @@ do_setup_network() {
             _add_static_arp "$iface2" "$BRIDGE_IP" "$iface1"
         fi
 
-        # Wait for the daemon device's IPv4 RoCE v2 GID before proceeding so
-        # the daemon's cpu_roce GID lookup can't race GID-table population.
+        # Wait for the server device's IPv4 RoCE v2 GID before proceeding so
+        # the server's cpu_roce GID lookup can't race GID-table population.
         wait_for_roce_v2_gid "$BRIDGE_DEVICE" "$BRIDGE_IP" 15 || true
     else
         local iface_bridge
@@ -477,17 +477,17 @@ do_setup_network() {
         fi
 
         if [[ -z "$iface_bridge" ]]; then
-            _err "Cannot detect ConnectX interface for the daemon."
+            _err "Cannot detect ConnectX interface for the server."
             return 1
         fi
 
-        _info "Daemon interface: $iface_bridge"
+        _info "Server interface: $iface_bridge"
         setup_port "$iface_bridge" "$BRIDGE_IP" "$MTU"
         BRIDGE_DEVICE=$(netdev_to_ib "$iface_bridge")
 
         wait_for_roce_v2_gid "$BRIDGE_DEVICE" "$BRIDGE_IP" 15 || true
 
-        # Pre-seed the FPGA's neighbor entry so the daemon QP connect can
+        # Pre-seed the FPGA's neighbor entry so the server QP connect can
         # resolve its MAC immediately.
         _seed_fpga_neighbor "$iface_bridge" "$FPGA_IP"
     fi
@@ -630,7 +630,7 @@ do_build() {
 
     if $EMULATE; then
         # Reconfigure cuda-quantum/realtime with hololink tools (for the
-        # emulator binary only; the daemon itself has no HSB dependency).
+        # emulator binary only; the server itself has no HSB dependency).
         cmake -G Ninja -S "$cq_src" -B "$cq_build" \
             -DCMAKE_BUILD_TYPE=Release \
             $cuda_arch_flag \
@@ -643,13 +643,13 @@ do_build() {
     fi
 
     # ---- Stage 3: cudaqx decoding server + playback + decoder plugin ----
-    _banner "Stage 3/3: Building cudaqx daemon + playback"
+    _banner "Stage 3/3: Building cudaqx server + playback"
     if [[ ! -d "$CUDAQX_DIR" ]]; then
         _err "cudaqx source not found at $CUDAQX_DIR"
         return 1
     fi
 
-    # The daemon's CMake locates the cpu_transport archives via explicit cache
+    # The server's CMake locates the cpu_transport archives via explicit cache
     # entries (its find_library does not search the cuda-quantum build tree).
     cmake -G Ninja -S "$CUDAQX_DIR" -B "$cudaqx_build" \
         $cuda_arch_flag \
@@ -674,7 +674,7 @@ do_build() {
         2>&1 | tail -5
 
     cmake --build "$cudaqx_build" -j "$JOBS" \
-        --target qec_decoding_daemon \
+        --target decoding_server \
                  hololink_fpga_syndrome_playback \
                  cudaq-qec-pymatching \
                  surface_code-4-yaml \
@@ -773,12 +773,12 @@ resolve_paths() {
     local cudaqx_utils="${CUDAQX_DIR}/build/libs/qec/unittests/utils"
     local cq_build_dir="${CUDA_QUANTUM_DIR}/realtime/build/unittests"
 
-    DAEMON_BIN="${CUDAQX_DIR}/build/bin/qec_decoding_daemon"
+    SERVER_BIN="${CUDAQX_DIR}/build/bin/decoding_server"
     PLAYBACK_BIN="${cudaqx_utils}/hololink_fpga_syndrome_playback"
     EMULATOR_BIN="${cq_build_dir}/utils/hololink_fpga_emulator"
 
-    if [[ ! -x "$DAEMON_BIN" ]]; then
-        _err "Decoding server binary not found: $DAEMON_BIN"
+    if [[ ! -x "$SERVER_BIN" ]]; then
+        _err "Decoding server binary not found: $SERVER_BIN"
         _err "Run with --build to build the tools first."
         return 1
     fi
@@ -802,7 +802,7 @@ resolve_paths() {
 
     if [ -z "${BRIDGE_DEVICE:-}" ] && [ -n "${IB_DEVICE:-}" ]; then
         # Mirror do_setup_network's handling of the comma form ("devA,devB":
-        # daemon on devA, emulator on devB) so runs without --setup-network
+        # server on devA, emulator on devB) so runs without --setup-network
         # split it the same way.
         if [[ "$IB_DEVICE" == *,* ]]; then
             BRIDGE_DEVICE="${IB_DEVICE%%,*}"
@@ -859,21 +859,21 @@ extract_decimal() {
 }
 
 # ============================================================================
-# Daemon + Playback (shared by both modes)
+# Server + Playback (shared by both modes)
 # ============================================================================
 
 # Start the decoding server against $1=peer_ip $2=remote_qp; scrape its
-# Bridge Ready handshake into DAEMON_QP / DAEMON_RKEY / DAEMON_ADDR.
-start_daemon() {
-    local peer_ip="$1" remote_qp="$2" daemon_log="$3"
+# Bridge Ready handshake into SERVER_QP / SERVER_RKEY / SERVER_ADDR.
+start_server() {
+    local peer_ip="$1" remote_qp="$2" server_log="$3"
 
     _log "Starting decoding server (decoder=$DECODER, remote-qp=$remote_qp)"
 
-    local daemon_ld_path
-    daemon_ld_path="${CUDA_QUANTUM_DIR}/realtime/build/lib:${CUDAQX_DIR}/build/lib"
+    local server_ld_path
+    server_ld_path="${CUDA_QUANTUM_DIR}/realtime/build/lib:${CUDAQX_DIR}/build/lib"
 
-    LD_LIBRARY_PATH="${daemon_ld_path}:${LD_LIBRARY_PATH:-}" \
-    "$DAEMON_BIN" \
+    LD_LIBRARY_PATH="${server_ld_path}:${LD_LIBRARY_PATH:-}" \
+    "$SERVER_BIN" \
         --config="$CONFIG_FILE" \
         --transport=cpu_roce \
         --qp_config=hsb_fpga \
@@ -884,30 +884,30 @@ start_daemon() {
         --slot-size="$PAGE_SIZE" \
         --frame-size="$FRAME_SIZE" \
         --timeout="$TIMEOUT" \
-        > >(tee "$daemon_log") 2>&1 &
-    DAEMON_PID=$!
-    PIDS_TO_KILL+=("$DAEMON_PID")
-    _info "Daemon PID: $DAEMON_PID"
+        > >(tee "$server_log") 2>&1 &
+    SERVER_PID=$!
+    PIDS_TO_KILL+=("$SERVER_PID")
+    _info "Server PID: $SERVER_PID"
 
-    wait_for_pattern "$daemon_log" "Bridge Ready" 60 "$DAEMON_PID" >/dev/null || {
+    wait_for_pattern "$server_log" "Bridge Ready" 60 "$SERVER_PID" >/dev/null || {
         _err "Decoding server did not become ready"
-        _err "--- Daemon log ---"
-        cat "$daemon_log" >&2
+        _err "--- Server log ---"
+        cat "$server_log" >&2
         return 1
     }
 
     local qp_line rkey_line addr_line
-    qp_line=$(wait_for_pattern "$daemon_log" "QP Number:" 5 "$DAEMON_PID") || return 1
-    rkey_line=$(wait_for_pattern "$daemon_log" "RKey:" 5 "$DAEMON_PID") || return 1
-    addr_line=$(wait_for_pattern "$daemon_log" "Buffer Addr:" 5 "$DAEMON_PID") || return 1
+    qp_line=$(wait_for_pattern "$server_log" "QP Number:" 5 "$SERVER_PID") || return 1
+    rkey_line=$(wait_for_pattern "$server_log" "RKey:" 5 "$SERVER_PID") || return 1
+    addr_line=$(wait_for_pattern "$server_log" "Buffer Addr:" 5 "$SERVER_PID") || return 1
 
-    DAEMON_QP=$(extract_hex "$qp_line")
-    DAEMON_RKEY=$(extract_decimal "$rkey_line")
-    DAEMON_ADDR=$(extract_hex "$addr_line")
+    SERVER_QP=$(extract_hex "$qp_line")
+    SERVER_RKEY=$(extract_decimal "$rkey_line")
+    SERVER_ADDR=$(extract_hex "$addr_line")
 
-    _info "Daemon QP:     $DAEMON_QP"
-    _info "Daemon RKey:   $DAEMON_RKEY"
-    _info "Daemon Buffer: $DAEMON_ADDR"
+    _info "Server QP:     $SERVER_QP"
+    _info "Server RKey:   $SERVER_RKEY"
+    _info "Server Buffer: $SERVER_ADDR"
 }
 
 # Run playback against $1=hololink_ip; extra args appended from $2...
@@ -920,9 +920,9 @@ run_playback() {
         --per-round
         --config "$CONFIG_FILE"
         --syndromes "$SYNDROMES_FILE"
-        --qp-number "$DAEMON_QP"
-        --rkey "$DAEMON_RKEY"
-        --buffer-addr "$DAEMON_ADDR"
+        --qp-number "$SERVER_QP"
+        --rkey "$SERVER_RKEY"
+        --buffer-addr "$SERVER_ADDR"
         --page-size "$PAGE_SIZE"
         "$@"
     )
@@ -948,10 +948,10 @@ run_playback() {
 run_emulated() {
     _banner "Decoder Server Decode Loop Test (Emulated FPGA, $DECODER)"
 
-    local emu_log daemon_log
+    local emu_log server_log
     emu_log=$(mktemp /tmp/hsb_decoder_server_emulator.XXXXXX.log)
-    daemon_log=$(mktemp /tmp/hsb_decoder_server_daemon.XXXXXX.log)
-    TEMP_FILES+=("$emu_log" "$daemon_log")
+    server_log=$(mktemp /tmp/hsb_decoder_server.XXXXXX.log)
+    TEMP_FILES+=("$emu_log" "$server_log")
 
     # ---- 1. Start emulator ----
     _log "Starting FPGA emulator on port $CONTROL_PORT"
@@ -975,7 +975,7 @@ run_emulated() {
     _info "Emulator QP: $emu_qp"
 
     # ---- 2. Start decoding server ----
-    start_daemon "$EMULATOR_IP" "$emu_qp" "$daemon_log" || return 1
+    start_server "$EMULATOR_IP" "$emu_qp" "$server_log" || return 1
 
     # ---- 3. Start playback tool ----
     run_playback "$EMULATOR_IP" --control-port "$CONTROL_PORT"
@@ -988,12 +988,12 @@ run_emulated() {
 run_fpga() {
     _banner "Decoder Server Decode Loop Test (Real FPGA, $DECODER)"
 
-    local daemon_log
-    daemon_log=$(mktemp /tmp/hsb_decoder_server_daemon.XXXXXX.log)
-    TEMP_FILES+=("$daemon_log")
+    local server_log
+    server_log=$(mktemp /tmp/hsb_decoder_server.XXXXXX.log)
+    TEMP_FILES+=("$server_log")
 
     # ---- 1. Start decoding server (FPGA data-plane QP is fixed 0x2) ----
-    start_daemon "$FPGA_IP" "0x2" "$daemon_log" || return 1
+    start_server "$FPGA_IP" "0x2" "$server_log" || return 1
 
     # ---- 2. Start playback tool (BOOTP enumeration; no control port) ----
     run_playback "$FPGA_IP"

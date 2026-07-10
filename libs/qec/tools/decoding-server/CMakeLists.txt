@@ -6,7 +6,7 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
-# qec_decoding_daemon is a decoder-agnostic decoding-server process: the
+# decoding_server is a decoder-agnostic decoding-server process: the
 # service end of a CUDA-Q device_call transport, wiring the libcudaq-realtime
 # HOST_CALL dispatcher onto a transceiver's rings and serving the
 # decoding-server-cqr function table (enqueue_syndromes / get_corrections /
@@ -19,7 +19,7 @@
 # this binary as a subprocess.
 
 if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-decoding-server-cqr)
-  # The daemon needs the DeviceCallService plugin headers, the libcudaq-realtime
+  # The server needs the DeviceCallService plugin headers, the libcudaq-realtime
   # shared lib (cudaq_host_dispatcher_loop lives there, device-linked), and the
   # cpu_transport UDP ring transceiver static lib.
   find_path(QEC_UDP_DEVICE_CALL_INCLUDE_DIR
@@ -38,8 +38,8 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-decoding-server-cqr)
   find_library(QEC_HOST_DISPATCH_LIBRARY cudaq-realtime-host-dispatch
     HINTS ${CUDAQ_REALTIME_ROOT} ${CUDAQ_INSTALL_DIR}
     PATH_SUFFIXES lib)
-  # Optional: the daemon's --transport=cpu_roce path (real RDMA wire) needs
-  # the CPU RoCE transceiver and libibverbs; without them the daemon still
+  # Optional: the server's --transport=cpu_roce path (real RDMA wire) needs
+  # the CPU RoCE transceiver and libibverbs; without them the server still
   # builds with the udp transport only.
   find_library(QEC_CPU_ROCE_TRANSPORT_LIBRARY cudaq-realtime-cpu-roce-transport
     HINTS ${CUDAQ_REALTIME_ROOT} ${CUDAQ_INSTALL_DIR}
@@ -48,15 +48,15 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-decoding-server-cqr)
 
   if(QEC_UDP_DEVICE_CALL_INCLUDE_DIR AND QEC_UDP_REALTIME_LIBRARY
      AND QEC_UDP_TRANSPORT_LIBRARY AND QEC_HOST_DISPATCH_LIBRARY)
-    add_executable(qec_decoding_daemon qec_decoding_daemon.cpp)
-    target_include_directories(qec_decoding_daemon PRIVATE
+    add_executable(decoding_server decoding_server.cpp)
+    target_include_directories(decoding_server PRIVATE
       ${CUDAQ_REALTIME_INCLUDE_DIR}
       ${QEC_UDP_DEVICE_CALL_INCLUDE_DIR}
       ${CUDAToolkit_INCLUDE_DIRS}
     )
-    target_link_directories(qec_decoding_daemon
+    target_link_directories(decoding_server
       PRIVATE ${CUDAQ_INSTALL_DIR}/lib)
-    target_link_libraries(qec_decoding_daemon PRIVATE
+    target_link_libraries(decoding_server PRIVATE
       cudaq-qec
       cudaq-qec-realtime-decoding
       cudaq-qec-realtime-decoding-server-cqr
@@ -68,14 +68,14 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-decoding-server-cqr)
       CUDA::cudart
     )
     if(QEC_CPU_ROCE_TRANSPORT_LIBRARY AND QEC_IBVERBS_LIBRARY)
-      target_compile_definitions(qec_decoding_daemon PRIVATE
+      target_compile_definitions(decoding_server PRIVATE
         QEC_HAVE_CPU_ROCE_TRANSPORT)
-      target_link_libraries(qec_decoding_daemon PRIVATE
+      target_link_libraries(decoding_server PRIVATE
         ${QEC_CPU_ROCE_TRANSPORT_LIBRARY}
         ${QEC_IBVERBS_LIBRARY})
-      message(STATUS "qec_decoding_daemon: cpu_roce transport enabled")
+      message(STATUS "decoding_server: cpu_roce transport enabled")
     endif()
-    # The daemon's --transport=gpu_roce path needs BOTH the GPU RoCE transport
+    # The server's --transport=gpu_roce path needs BOTH the GPU RoCE transport
     # (compiled into cudaq-qec-decoder-server when hololink/DOCA are present)
     # AND the proprietary cudevice archive, which supplies the three
     # populate-shim symbols (cudaqx_qec_realtime_dispatch_populate_*_device_entry)
@@ -97,66 +97,66 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-decoding-server-cqr)
           "CUDAQ_INSTALL_DIR=${CUDAQ_INSTALL_DIR}).  "
           "GpuRoceTransceiver::launch_scheduler resolves "
           "cudaq_create/launch/destroy_dispatch_graph_regular via dlsym; "
-          "without this library in the daemon image those lookups will fail "
+          "without this library in the server image those lookups will fail "
           "at runtime.  Set CUDAQ_REALTIME_ROOT to the CUDA-Q realtime "
           "install prefix and re-run CMake.")
       endif()
-      target_compile_definitions(qec_decoding_daemon PRIVATE
+      target_compile_definitions(decoding_server PRIVATE
         QEC_HAVE_GPU_ROCE_TRANSPORT)
-      target_include_directories(qec_decoding_daemon PRIVATE
+      target_include_directories(decoding_server PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/realtime/decoding-server-cqr
       )
-      target_link_libraries(qec_decoding_daemon PRIVATE
+      target_link_libraries(decoding_server PRIVATE
         cudaq-qec-decoder-server
         ${CUDAQ_REALTIME_DISPATCH_LIBRARY}
         $<LINK_LIBRARY:WHOLE_ARCHIVE,cudaq-qec-realtime-cudevice-proprietary>
       )
-      target_link_options(qec_decoding_daemon PRIVATE
+      target_link_options(decoding_server PRIVATE
         "LINKER:--export-dynamic"
       )
-      message(STATUS "qec_decoding_daemon: gpu_roce transport enabled")
+      message(STATUS "decoding_server: gpu_roce transport enabled")
     elseif(CUDAQ_GPU_ROCE_AVAILABLE)
       message(WARNING
-        "qec_decoding_daemon: gpu_roce transport DISABLED "
+        "decoding_server: gpu_roce transport DISABLED "
         "(cudaq-qec-realtime-cudevice-proprietary target not defined; set "
         "CUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE to enable). "
-        "Daemon builds with udp/cpu_roce transports only.")
+        "Server builds with udp/cpu_roce transports only.")
     endif()
     # RelayBP/nv-qldpc captures a CUDA device graph during decoder
-    # initialization even when the daemon transport is udp or cpu_roce. Export
+    # initialization even when the server transport is udp or cpu_roce. Export
     # the graph-dispatch shims whenever the cudevice archives are available so
     # plugin dlsym(RTLD_DEFAULT, ...) lookups succeed.
     if(TARGET cudaq-qec-realtime-cudevice AND TARGET cudaq-qec-realtime-cudevice-proprietary)
-      target_link_libraries(qec_decoding_daemon PRIVATE
+      target_link_libraries(decoding_server PRIVATE
         CUDA::cudart
         $<LINK_LIBRARY:WHOLE_ARCHIVE,cudaq-qec-realtime-cudevice>
         $<LINK_LIBRARY:WHOLE_ARCHIVE,cudaq-qec-realtime-cudevice-proprietary>
       )
-      target_link_options(qec_decoding_daemon PRIVATE
+      target_link_options(decoding_server PRIVATE
         "LINKER:--export-dynamic"
       )
-      set_property(TARGET qec_decoding_daemon PROPERTY CUDA_SEPARABLE_COMPILATION ON)
-      set_property(TARGET qec_decoding_daemon PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS ON)
-      set_property(TARGET qec_decoding_daemon PROPERTY CUDA_STANDARD 17)
-      set_property(TARGET qec_decoding_daemon PROPERTY LINKER_LANGUAGE CUDA)
+      set_property(TARGET decoding_server PROPERTY CUDA_SEPARABLE_COMPILATION ON)
+      set_property(TARGET decoding_server PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+      set_property(TARGET decoding_server PROPERTY CUDA_STANDARD 17)
+      set_property(TARGET decoding_server PROPERTY LINKER_LANGUAGE CUDA)
     endif()
     # The installed binary lives in <prefix>/bin with the qec libraries and
     # decoder plugins in ../lib, so use $ORIGIN-relative rpaths for those;
     # the CUDA-Q realtime libs stay at their absolute install location.
-    get_filename_component(_qec_daemon_realtime_lib_dir
+    get_filename_component(_decoding_server_realtime_lib_dir
       "${QEC_UDP_REALTIME_LIBRARY}" DIRECTORY)
-    set_target_properties(qec_decoding_daemon PROPERTIES
+    set_target_properties(decoding_server PROPERTIES
       RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
       BUILD_RPATH
         "${CMAKE_BINARY_DIR}/lib;${CMAKE_BINARY_DIR}/lib/decoder-plugins;${CUDAQ_INSTALL_DIR}/lib"
       INSTALL_RPATH
-        "$ORIGIN/../lib;$ORIGIN/../lib/decoder-plugins;${_qec_daemon_realtime_lib_dir};${CUDAQ_INSTALL_DIR}/lib"
+        "$ORIGIN/../lib;$ORIGIN/../lib/decoder-plugins;${_decoding_server_realtime_lib_dir};${CUDAQ_INSTALL_DIR}/lib"
     )
     # Decoder plugins are loaded at runtime by decoder type name; the example
     # configs currently select pymatching / multi_error_lut.
-    add_dependencies(qec_decoding_daemon cudaq-qec-pymatching)
+    add_dependencies(decoding_server cudaq-qec-pymatching)
 
-    # Place the example decoder configs next to the daemon binary.
+    # Place the example decoder configs next to the server binary.
     configure_file(
       ${CMAKE_CURRENT_SOURCE_DIR}/decoding_server_config.yaml
       ${CMAKE_BINARY_DIR}/bin/decoding_server_config.yaml
@@ -166,11 +166,11 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-decoding-server-cqr)
       ${CMAKE_BINARY_DIR}/bin/decoding_server_config_multi_error_lut.yaml
       COPYONLY)
 
-    # Install the daemon (and its example configs) alongside the libraries.
+    # Install the server (and its example configs) alongside the libraries.
     # The qec-tools component is deliberately NOT in the Python wheel's
-    # install.components (pyproject.toml): the daemon depends on the CUDA-Q
+    # install.components (pyproject.toml): the server depends on the CUDA-Q
     # realtime libs, which the cudaq wheel does not ship.
-    install(TARGETS qec_decoding_daemon
+    install(TARGETS decoding_server
       COMPONENT qec-tools
       RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     )
@@ -181,7 +181,7 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-decoding-server-cqr)
       DESTINATION ${CMAKE_INSTALL_BINDIR}
     )
   else()
-    message(STATUS "qec_decoding_daemon: cudaq-realtime udp transport not "
+    message(STATUS "decoding_server: cudaq-realtime udp transport not "
                    "found; decoding-server tool will not be built.")
   endif()
 endif()

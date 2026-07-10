@@ -6,7 +6,7 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
-/// @file qec_decoding_daemon.cpp
+/// @file decoding_server.cpp
 /// @brief Standalone decoding-server process: the service end of a
 /// CUDA-Q device_call transport, decoding on the CPU with whatever decoder a
 /// YAML config file selects.
@@ -28,25 +28,25 @@
 ///     are exchanged.  `rendezvous` (default) is the TCP QP/rkey swap with a
 ///     CpuRoceChannel caller.  `hsb_fpga` is the Holoscan-Sensor-Bridge FPGA
 ///     method: the peer QP comes from `--remote-qp` (the FPGA data-plane QP,
-///     or the emulator's QP) and this daemon prints its own QP / RKey /
+///     or the emulator's QP) and this server prints its own QP / RKey /
 ///     Buffer Addr in the canonical bridge handshake format
 ///     (hololink_bridge_common.h) for the orchestration script to relay to
 ///     the playback tool -- which alone programs the FPGA over the Hololink
-///     control plane.  The daemon itself performs NO control-plane traffic.
+///     control plane.  The server itself performs NO control-plane traffic.
 ///
 /// The function table comes from the decoding-server-cqr service plugin
 /// (enqueue_syndromes / get_corrections / reset_decoder) regardless of
 /// transport or decoder.
 ///
-/// Prints `QEC_DECODING_DAEMON_READY port=<P> ...` on stdout once listening
+/// Prints `QEC_DECODING_SERVER_READY port=<P> ...` on stdout once listening
 /// (for udp, P is the UDP port; for cpu_roce, P is the TCP rendezvous port and
 /// the line also carries `roce_ip=<IP>`), and
-/// `QEC_DECODING_DAEMON_DISPATCHED count=<N>` at shutdown (the two-process
+/// `QEC_DECODING_SERVER_DISPATCHED count=<N>` at shutdown (the two-process
 /// stand-in for the in-process cudaqx_qec_device_call_dispatch_count()
 /// assertion).
 ///
 /// Usage:
-///   qec_decoding_daemon --config=<decoders.yaml>
+///   decoding_server --config=<decoders.yaml>
 ///                           [--transport=udp|cpu_roce] [--port=0]
 ///                           [--num-slots=8] [--slot-size=256] [--timeout=60]
 ///                           [--device=mlx5_0] [--local-ip=10.0.0.2]
@@ -106,7 +106,7 @@ namespace {
 
 namespace config = cudaq::qec::decoding::config;
 
-struct DaemonConfig {
+struct ServerConfig {
   std::string config_path;
   std::string transport = "udp";
   std::uint16_t port = 0; // 0 => ephemeral, printed on stdout
@@ -129,7 +129,7 @@ bool starts_with(const std::string &s, const char *prefix) {
   return s.size() >= n && std::memcmp(s.data(), prefix, n) == 0;
 }
 
-bool parse_args(int argc, char **argv, DaemonConfig &cfg) {
+bool parse_args(int argc, char **argv, ServerConfig &cfg) {
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
     if (a == "--help" || a == "-h") {
@@ -226,12 +226,12 @@ struct TransportEndpoints {
 // caller can start connecting (udp: socket bound; cpu_roce: TCP rendezvous
 // listening).
 void print_ready(std::uint16_t port, const std::string &extra) {
-  std::cout << "QEC_DECODING_DAEMON_READY port=" << port
+  std::cout << "QEC_DECODING_SERVER_READY port=" << port
             << (extra.empty() ? "" : " ") << extra << std::endl;
   std::cout.flush();
 }
 
-bool init_udp_transport(const DaemonConfig &cfg, TransportEndpoints &tp) {
+bool init_udp_transport(const ServerConfig &cfg, TransportEndpoints &tp) {
   cpu_udp_transceiver_t xcvr =
       cpu_udp_create_transceiver(cfg.slot_size, cfg.num_slots);
   if (!xcvr) {
@@ -302,7 +302,7 @@ bool read_all(int fd, void *buf, std::size_t len) {
 // setup, TCP rendezvous server (READY printed once listening; blocks in
 // accept until the caller channel connects), QP/rkey swap, connect, monitor
 // thread.  tx_mode=RDMA_SEND: we Send responses; the caller Writes requests.
-bool init_cpu_roce_transport(const DaemonConfig &cfg, TransportEndpoints &tp) {
+bool init_cpu_roce_transport(const ServerConfig &cfg, TransportEndpoints &tp) {
   cpu_roce_transceiver_t xcvr = cpu_roce_create_transceiver(
       cfg.device.c_str(), /*ib_port=*/1, /*tx_ibv_qp=*/0u,
       /*frame_size=*/cfg.slot_size, /*page_size=*/cfg.slot_size, cfg.num_slots,
@@ -406,17 +406,17 @@ bool init_cpu_roce_transport(const DaemonConfig &cfg, TransportEndpoints &tp) {
 // cuda-quantum's hsb_bridge_cpu.cpp (the proven CPU<->FPGA precedent): the
 // peer QP is a CLI input (the FPGA's fixed data-plane QP, or the emulator's),
 // the transceiver is created one-shot with the peer already known
-// (cpu_roce_start, no TCP rendezvous / no connect step), and this daemon
+// (cpu_roce_start, no TCP rendezvous / no connect step), and this server
 // publishes its own QP / RKey / Buffer Addr on stdout in the canonical bridge
 // handshake format.  The orchestration script scrapes those values and hands
 // them to the playback tool, which alone programs the FPGA SIF over the
 // Hololink control plane (DataChannel::authenticate / configure_roce) -- this
-// daemon performs NO control-plane traffic.
+// server performs NO control-plane traffic.
 //
 // tx_mode=RDMA_SEND: the FPGA/emulator posts receive WQEs for the
 // server->FPGA direction and RDMA-WRITEs requests into our ring, exactly as
 // with hsb_bridge_cpu.
-bool init_cpu_roce_hsb_fpga_transport(const DaemonConfig &cfg,
+bool init_cpu_roce_hsb_fpga_transport(const ServerConfig &cfg,
                                       TransportEndpoints &tp) {
   const std::size_t frame_size =
       cfg.frame_size ? cfg.frame_size : cfg.slot_size;
@@ -487,7 +487,7 @@ bool init_cpu_roce_hsb_fpga_transport(const DaemonConfig &cfg,
 } // namespace
 
 int main(int argc, char **argv) {
-  DaemonConfig cfg;
+  ServerConfig cfg;
   if (!parse_args(argc, argv, cfg))
     return 1;
 
@@ -533,7 +533,7 @@ int main(int argc, char **argv) {
     cudaq::qec::decoder_server::DecoderServer server(cfg.config_path);
     // QP/rkey/buf already printed to stdout by launch_scheduler() so the
     // orchestration script can grep them before the READY line.
-    std::cout << "QEC_DECODING_DAEMON_READY gpu_roce" << std::endl;
+    std::cout << "QEC_DECODING_SERVER_READY gpu_roce" << std::endl;
     std::cout.flush();
     std::thread server_thread([&server] { server.run(); });
     const auto start_time_gr = std::chrono::steady_clock::now();
@@ -564,7 +564,7 @@ int main(int argc, char **argv) {
     std::cerr << "ERROR: QEC device_call service create failed" << std::endl;
     return 1;
   }
-  // The session owns the function table; keep it alive for the daemon's
+  // The session owns the function table; keep it alive for the server's
   // lifetime (the dispatcher loop below reads table.entries in place).
   // Creating it also starts the DecoderServer (decoder construction + one
   // worker thread per decoder) -- before the READY line below, so slow
@@ -604,7 +604,7 @@ int main(int argc, char **argv) {
     } else if (!init_cpu_roce_transport(cfg, tp))
       return 1;
 #else
-    std::cerr << "ERROR: this daemon was built without cpu_roce transport "
+    std::cerr << "ERROR: this server was built without cpu_roce transport "
                  "support (libcudaq-realtime-cpu-roce-transport not found)"
               << std::endl;
     return 1;
@@ -612,8 +612,8 @@ int main(int argc, char **argv) {
   } else if (cfg.transport == "gpu_roce") {
     // gpu_roce is handled before the CQR plugin force-link above ([2a]).
     // Reaching here means QEC_HAVE_GPU_ROCE_TRANSPORT was not defined at
-    // build time (the daemon was not built with GPU RoCE support).
-    std::cerr << "ERROR: this daemon was built without gpu_roce transport "
+    // build time (the server was not built with GPU RoCE support).
+    std::cerr << "ERROR: this server was built without gpu_roce transport "
                  "support (rebuild with HOLOSCAN_SENSOR_BRIDGE_BUILD_DIR, "
                  "DOCA, and CUDA)"
               << std::endl;
@@ -678,11 +678,11 @@ int main(int argc, char **argv) {
   // process exits (a still-joinable static thread would std::terminate).
   cudaqx_qec_decoder_server_shutdown();
 
-  std::cout << "QEC_DECODING_DAEMON_DISPATCHED count="
+  std::cout << "QEC_DECODING_SERVER_DISPATCHED count="
             << cudaqx_qec_device_call_dispatch_count() << std::endl;
   // Concurrency evidence for multi-logical-qubit tests: high-water mark of
   // simultaneously-busy DecoderSession workers.
-  std::cout << "QEC_DECODING_DAEMON_MAX_CONCURRENT_DECODERS count="
+  std::cout << "QEC_DECODING_SERVER_MAX_CONCURRENT_DECODERS count="
             << cudaqx_qec_decoder_server_max_concurrent() << std::endl;
   return 0;
 }

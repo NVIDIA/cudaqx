@@ -52,7 +52,7 @@ bool alloc_pinned_mapped(size_t bytes, void **host_out, void **dev_out) {
 }
 
 // Resolve a proprietary DEVICE_CALL populate shim via dlsym and stamp the
-// function table entry.  The daemon process must absorb
+// function table entry.  The server process must absorb
 // libcudaq-qec-realtime-cudevice-proprietary.a (WHOLE_ARCHIVE) and link with
 // --export-dynamic so the symbols are visible.
 using populate_fn = void (*)(void *);
@@ -240,7 +240,7 @@ void GpuRoceTransceiver::launch_scheduler(void *raw_graph_resources) {
   }
 
   // Resolve dispatch graph API via dlsym; cudaq-realtime-dispatch is linked
-  // into the daemon (not this static lib) to keep the CUDA module in one copy.
+  // into the server (not this static lib) to keep the CUDA module in one copy.
   // Signatures must match create/launch/destroy_dispatch_graph_fn_t in
   // qec_realtime_session.cpp/.h exactly — calling-convention mismatch is UB.
   using create_fn_t = cudaError_t (*)(
@@ -265,11 +265,11 @@ void GpuRoceTransceiver::launch_scheduler(void *raw_graph_resources) {
     ft_host_ = nullptr;
     CUDA_QEC_ERROR(
         "GpuRoceTransceiver: cudaq dispatch API not found via dlsym -- "
-        "the daemon must link cudaq-realtime-dispatch with --export-dynamic");
+        "the server must link cudaq-realtime-dispatch with --export-dynamic");
     throw std::runtime_error(
         "GpuRoceTransceiver::launch_scheduler: cudaq dispatch API not found "
         "(cudaq_create/launch/destroy_dispatch_graph_regular); "
-        "link cudaq-realtime-dispatch into the daemon with --export-dynamic");
+        "link cudaq-realtime-dispatch into the server with --export-dynamic");
   }
   fn_destroy_dispatch_graph_ = destroy_dispatch;
 
