@@ -110,21 +110,12 @@ def get_stab_cnot_schedule(stab_type: str, distance: int) -> List[int]:
             "get_stab_cnot_schedule: Invalid stabilizer type. Must be 'X' or 'Z'."
         )
 
-    # Schedule matrix: entry 0 = no support, k >= 1 = CNOT timestep, ordered
-    # so that mid-round ancilla (hook) errors land perpendicular to the
-    # logical operators. Rows match the sorted parity-matrix rows and hence
-    # the ancilla indexing.
-    sched = (grid.get_cnot_schedule_x()
-             if stab_type == "X" else grid.get_cnot_schedule_z())
-
-    cnot_schedule: List[int] = []
-    for stab_idx, row in enumerate(sched):
-        for step in range(1, 5):
-            for d, entry in enumerate(row):
-                if entry == step:
-                    cnot_schedule.extend([stab_idx, d])
-
-    return cnot_schedule
+    # CNOT pairs ordered by timestep within each stabilizer, so that mid-round
+    # ancilla (hook) errors land perpendicular to the logical operators.
+    # Stabilizer indices match the sorted parity-matrix rows and hence the
+    # ancilla indexing.
+    return list(grid.get_cnot_schedule_pairs_x() if stab_type ==
+                "X" else grid.get_cnot_schedule_pairs_z())
 
 
 def debug_print_syndromes(syndrome_x_int: int, syndrome_z_int: int) -> None:

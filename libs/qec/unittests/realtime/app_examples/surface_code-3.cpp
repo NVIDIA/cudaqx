@@ -145,24 +145,12 @@ std::vector<size_t> get_stab_cnot_schedule(char stab_type, int distance) {
     throw std::runtime_error(
         "get_stab_cnot_schedule: Invalid stabilizer type. Must be 'X' or 'Z'.");
   }
-  // Schedule matrix: entry 0 = no support, k >= 1 = CNOT timestep, ordered so
-  // that mid-round ancilla (hook) errors land perpendicular to the logical
-  // operators. Rows match the sorted parity-matrix rows and hence the ancilla
-  // indexing.
-  auto sched = stab_type == 'X' ? grid.get_cnot_schedule_x()
-                                : grid.get_cnot_schedule_z();
-  std::vector<size_t> cnot_schedule;
-  for (std::size_t s = 0; s < sched.shape()[0]; ++s) {
-    for (uint8_t step = 1; step <= 4; ++step) {
-      for (std::size_t d = 0; d < sched.shape()[1]; ++d) {
-        if (sched.at({s, d}) == step) {
-          cnot_schedule.push_back(s);
-          cnot_schedule.push_back(d);
-        }
-      }
-    }
-  }
-  return cnot_schedule;
+  // CNOT pairs ordered by timestep within each stabilizer, so that mid-round
+  // ancilla (hook) errors land perpendicular to the logical operators.
+  // Stabilizer indices match the sorted parity-matrix rows and hence the
+  // ancilla indexing.
+  return stab_type == 'X' ? grid.get_cnot_schedule_pairs_x()
+                          : grid.get_cnot_schedule_pairs_z();
 }
 
 void debug_print_syndromes(int64_t syndrome_x_int, int64_t syndrome_z_int) {

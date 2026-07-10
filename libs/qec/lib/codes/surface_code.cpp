@@ -422,23 +422,54 @@ build_cnot_schedule(const std::vector<vec2d> &stab_coords,
 
   // Match the row order of to_parity_matrix(): within one stabilizer type the
   // sort comparator orders rows by the index of the first supported data
-  // qubit (no two same-type surface-code stabilizers share that index, so
-  // this order is total and deterministic).
-  auto first_support = [](const std::vector<uint8_t> &row) {
-    return std::find_if(row.begin(), row.end(),
-                        [](uint8_t v) { return v != 0; }) -
-           row.begin();
-  };
-  std::sort(rows.begin(), rows.end(),
-            [&](const std::vector<uint8_t> &a, const std::vector<uint8_t> &b) {
-              return first_support(a) < first_support(b);
-            });
+  // qubit. That order is total only because no two same-type surface-code
+  // stabilizers share a first-support index — enforce it rather than assume
+  // it, since a violation would silently pair schedule rows with the wrong
+  // ancilla/parity rows.
+  std::vector<std::pair<std::size_t, std::size_t>>
+      keyed; // (first support, row)
+  keyed.reserve(rows.size());
+  for (std::size_t r = 0; r < rows.size(); ++r) {
+    auto it = std::find_if(rows[r].begin(), rows[r].end(),
+                           [](uint8_t v) { return v != 0; });
+    keyed.emplace_back(it - rows[r].begin(), r);
+  }
+  std::sort(keyed.begin(), keyed.end());
+  for (std::size_t r = 1; r < keyed.size(); ++r)
+    if (keyed[r].first == keyed[r - 1].first)
+      throw std::runtime_error(
+          "surface-code CNOT schedule: two same-type stabilizers share their "
+          "first supported data qubit, so the schedule rows cannot be aligned "
+          "with the parity-matrix rows.");
 
   cudaqx::tensor<uint8_t> t({rows.size(), num_data});
   for (std::size_t r = 0; r < rows.size(); ++r)
     for (std::size_t c = 0; c < num_data; ++c)
-      t.at({r, c}) = rows[r][c];
+      t.at({r, c}) = rows[keyed[r].second][c];
   return t;
+}
+
+/// Flatten a schedule matrix into (stabilizer, data) index pairs ordered by
+/// timestep within each stabilizer — the replay format used by kernels that
+/// take an explicit CNOT pair list.
+std::vector<std::size_t>
+schedule_to_pairs(const cudaqx::tensor<uint8_t> &sched) {
+  std::vector<std::size_t> pairs;
+  const auto num_stabs = sched.shape()[0];
+  const auto num_data = sched.shape()[1];
+  std::vector<std::pair<uint8_t, std::size_t>> row; // (step, data)
+  for (std::size_t s = 0; s < num_stabs; ++s) {
+    row.clear();
+    for (std::size_t d = 0; d < num_data; ++d)
+      if (sched.at({s, d}) != 0)
+        row.emplace_back(sched.at({s, d}), d);
+    std::sort(row.begin(), row.end());
+    for (const auto &[step, d] : row) {
+      pairs.push_back(s);
+      pairs.push_back(d);
+    }
+  }
+  return pairs;
 }
 
 } // namespace
@@ -465,6 +496,14 @@ cudaqx::tensor<uint8_t> stabilizer_grid::get_cnot_schedule_z() const {
       orientation_ == sc_orientation::XV || orientation_ == sc_orientation::ZH;
   return build_cnot_schedule(z_stab_coords, data_indices, distance * distance,
                              /*use_col_major_order=*/!x_logical_on_top_row);
+}
+
+std::vector<std::size_t> stabilizer_grid::get_cnot_schedule_pairs_x() const {
+  return schedule_to_pairs(get_cnot_schedule_x());
+}
+
+std::vector<std::size_t> stabilizer_grid::get_cnot_schedule_pairs_z() const {
+  return schedule_to_pairs(get_cnot_schedule_z());
 }
 
 std::vector<cudaq::spin_op_term>

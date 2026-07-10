@@ -7,6 +7,7 @@
  ******************************************************************************/
 
 #include "py_surface_code.h"
+#include "type_casters.h"
 
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/string.h>
@@ -138,33 +139,33 @@ void bindSurfaceCode(nb::module_ &mod) {
       .def(
           "get_cnot_schedule_x",
           [](const stabilizer_grid &g) {
-            auto t = g.get_cnot_schedule_x();
-            std::vector<std::vector<uint8_t>> rows(
-                t.shape()[0], std::vector<uint8_t>(t.shape()[1]));
-            for (std::size_t r = 0; r < t.shape()[0]; ++r)
-              for (std::size_t c = 0; c < t.shape()[1]; ++c)
-                rows[r][c] = t.at({r, c});
-            return rows;
+            return cudaq::python::copyCUDAQXTensorToPyArray(
+                g.get_cnot_schedule_x());
           },
-          "Return the X-stabilizer CNOT schedule matrix as a list of rows "
-          "matching the sorted parity-matrix rows. Entry 0 = no support, "
-          "k >= 1 = CNOT timestep, ordered so that ancilla (hook) errors "
-          "land perpendicular to the logical operators.")
+          "Return the X-stabilizer CNOT schedule matrix as a numpy array "
+          "whose rows match the sorted parity-matrix rows. Entry 0 = no "
+          "support, k >= 1 = CNOT timestep, ordered so that ancilla (hook) "
+          "errors land perpendicular to the logical operators.")
       .def(
           "get_cnot_schedule_z",
           [](const stabilizer_grid &g) {
-            auto t = g.get_cnot_schedule_z();
-            std::vector<std::vector<uint8_t>> rows(
-                t.shape()[0], std::vector<uint8_t>(t.shape()[1]));
-            for (std::size_t r = 0; r < t.shape()[0]; ++r)
-              for (std::size_t c = 0; c < t.shape()[1]; ++c)
-                rows[r][c] = t.at({r, c});
-            return rows;
+            return cudaq::python::copyCUDAQXTensorToPyArray(
+                g.get_cnot_schedule_z());
           },
-          "Return the Z-stabilizer CNOT schedule matrix as a list of rows "
-          "matching the sorted parity-matrix rows. Entry 0 = no support, "
-          "k >= 1 = CNOT timestep, ordered so that ancilla (hook) errors "
-          "land perpendicular to the logical operators.");
+          "Return the Z-stabilizer CNOT schedule matrix as a numpy array "
+          "whose rows match the sorted parity-matrix rows. Entry 0 = no "
+          "support, k >= 1 = CNOT timestep, ordered so that ancilla (hook) "
+          "errors land perpendicular to the logical operators.")
+      .def("get_cnot_schedule_pairs_x",
+           &stabilizer_grid::get_cnot_schedule_pairs_x,
+           "Return the X-stabilizer CNOT schedule as a flat list of "
+           "(stabilizer index, data index) pairs ordered by timestep within "
+           "each stabilizer.")
+      .def("get_cnot_schedule_pairs_z",
+           &stabilizer_grid::get_cnot_schedule_pairs_z,
+           "Return the Z-stabilizer CNOT schedule as a flat list of "
+           "(stabilizer index, data index) pairs ordered by timestep within "
+           "each stabilizer.");
 
   qecmod.def("role_to_str", [](surface_role r) {
     switch (r) {

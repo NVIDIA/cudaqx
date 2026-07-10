@@ -222,6 +222,15 @@ public:
   /// ordering.
   cudaqx::tensor<uint8_t> get_cnot_schedule_z() const;
 
+  /// @brief Get the X-stabilizer CNOT schedule as a flat list of
+  /// (stabilizer index, data index) pairs, ordered by timestep within each
+  /// stabilizer — the replay format for kernels that take an explicit CNOT
+  /// pair list. Stabilizer indices match the rows of get_cnot_schedule_x().
+  std::vector<std::size_t> get_cnot_schedule_pairs_x() const;
+
+  /// @brief Z-stabilizer counterpart of get_cnot_schedule_pairs_x().
+  std::vector<std::size_t> get_cnot_schedule_pairs_z() const;
+
   /// @brief Get the observables as a vector of cudaq::spin_op_terms
   ///
   /// @return The X logical observable first, followed by the Z logical
