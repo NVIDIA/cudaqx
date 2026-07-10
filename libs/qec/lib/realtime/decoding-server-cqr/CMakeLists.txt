@@ -173,6 +173,11 @@ if(CUDAQ_GPU_ROCE_AVAILABLE)
     "${DOCA_COMMON_LIB}"
     $<$<BOOL:${IBVERBS_LIB}>:${IBVERBS_LIB}>
     CUDA::cudart
+    # libdoca_gpunetio.so and libcudaq-realtime-bridge-hololink.so reference
+    # the CUDA Driver API (cu*); consumers of this static lib inherit those
+    # deps, so link the driver here.  CUDA::cuda_driver resolves to the
+    # toolkit's stubs in driverless build environments (CI containers).
+    CUDA::cuda_driver
   )
 endif()
 
