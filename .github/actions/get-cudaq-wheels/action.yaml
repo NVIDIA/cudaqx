@@ -128,10 +128,13 @@ runs:
             '        *) echo "Unsupported architecture: $(uname -m)" && exit 1 ;; \\',
             "    esac \\",
             '    && curl -L "https://github.com/ninja-build/ninja/releases/download/v${NINJA_VERSION}/${ninja_zip}" -o /tmp/ninja.zip \\',
-            "    && python3 -m zipfile -e /tmp/ninja.zip /usr/local/bin \\",
-            "    && rm /tmp/ninja.zip \\",
+            "    && python3 -m zipfile -e /tmp/ninja.zip /tmp/ninja-install \\",
+            "    && install -m 0755 /tmp/ninja-install/ninja /usr/local/bin/ninja \\",
+            "    && install -m 0755 /tmp/ninja-install/ninja /usr/bin/ninja \\",
+            "    && rm -rf /tmp/ninja.zip /tmp/ninja-install \\",
             "    && chmod +x /usr/local/bin/ninja \\",
-            "    && ninja --version",
+            "    && /usr/local/bin/ninja --version \\",
+            "    && /usr/bin/ninja --version",
             "",
         ])
 
