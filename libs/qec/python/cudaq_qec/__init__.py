@@ -96,6 +96,8 @@ sample_code_capacity = qecrt.sample_code_capacity
 dem_from_memory_circuit = qecrt.dem_from_memory_circuit
 x_dem_from_memory_circuit = qecrt.x_dem_from_memory_circuit
 z_dem_from_memory_circuit = qecrt.z_dem_from_memory_circuit
+decoder_context_from_memory_circuit = qecrt.decoder_context_from_memory_circuit
+DecoderContext = qecrt.DecoderContext
 
 dump_pcm = qecrt.dump_pcm
 generate_random_pcm = qecrt.generate_random_pcm

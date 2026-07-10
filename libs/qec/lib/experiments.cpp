@@ -432,17 +432,15 @@ sample_memory_circuit(const code &code, std::size_t numShots,
                                noise);
 }
 
-namespace details {
-/// @brief Given a memory circuit setup, generate a DEM. This is the main driver
-/// function that all of the function overloads invoke.
-cudaq::qec::detector_error_model
-dem_from_memory_circuit(const code &code, operation statePrep,
-                        std::size_t numRounds, cudaq::noise_model &noise,
-                        bool keep_x_stabilizers, bool keep_z_stabilizers,
-                        bool decompose_errors) {
-  if (!keep_x_stabilizers && !keep_z_stabilizers)
-    throw std::runtime_error("dem_from_memory_circuit error - no stabilizers "
-                             "to keep.");
+/// @brief Fully characterize a memory-circuit experiment, returning the
+/// decoder_context. This is the shared driver behind all the public entry
+/// points: `dem_from_memory_circuit` keeps just the `.dem`, and the `x_`/`z_`
+/// variants slice the result via `x_component()`/`z_component()`.
+decoder_context decoder_context_from_memory_circuit(const code &code,
+                                                    operation statePrep,
+                                                    std::size_t numRounds,
+                                                    cudaq::noise_model &noise,
+                                                    bool decompose_errors) {
   if (numRounds == 0)
     throw std::runtime_error(
         "dem_from_memory_circuit error - numRounds must be >= 1. The memory "
@@ -481,54 +479,133 @@ dem_from_memory_circuit(const code &code, operation statePrep,
 
   cudaq::dem_options dem_opts;
   dem_opts.decompose_errors = decompose_errors;
+  cudaq::M2DSparseMatrix m2d;
+  cudaq::M2OSparseMatrix m2o;
   auto dem_text = cudaq::dem_from_kernel(
-      memory_circuit, &noise, dem_opts, stabRound, prep, numData, numAncx,
-      numAncz, numRounds, xVec, zVec, obs_flat, num_obs, !is_z_prep);
+      memory_circuit, &noise, dem_opts, m2d, m2o, stabRound, prep, numData,
+      numAncx, numAncz, numRounds, xVec, zVec, obs_flat, num_obs, !is_z_prep);
   auto dem = cudaq::qec::dem_from_stim_text(dem_text, decompose_errors);
 
   const auto numXStabs = code.get_num_x_stabilizers();
   const auto numZStabs = code.get_num_z_stabilizers();
   const auto numDetectors = dem.detector_error_matrix.shape()[0];
 
-  auto ranges = stabilizer_detector_ranges(numRounds, numZStabs, numXStabs,
-                                           is_z_prep, keep_x_stabilizers,
-                                           keep_z_stabilizers, numDetectors);
+  decoder_context result;
+  result.num_rounds = numRounds;
+  result.num_x_stabilizers = numXStabs;
+  result.num_z_stabilizers = numZStabs;
+  result.fixed_basis_is_z = is_z_prep;
 
-  // Build a new [total_length(ranges), numCols] tensor by copying the
-  // requested row ranges out of the DEM's detector_error_matrix, to restrict
-  // it to the requested stabilizer type(s).
-  const auto numCols = dem.detector_error_matrix.shape()[1];
-  cudaqx::tensor<uint8_t> selectedRows({total_length(ranges), numCols});
-  {
-    auto *dst_data = selectedRows.data();
-    const auto *src_data = dem.detector_error_matrix.data();
-    for (const auto &r : ranges) {
-      std::memcpy(dst_data, src_data + r.start * numCols,
-                  r.length * numCols * sizeof(uint8_t));
-      dst_data += r.length * numCols;
-    }
-  }
-  dem.detector_error_matrix = std::move(selectedRows);
+  result.m2d = std::move(m2d.rows);
+  result.m2o = std::move(m2o.rows);
+  result.num_measurements = m2d.num_measurements;
 
-  const std::size_t numReturnSynPerRound =
-      (keep_z_stabilizers ? numZStabs : 0) +
-      (keep_x_stabilizers ? numXStabs : 0);
-  dem.canonicalize_for_rounds(numReturnSynPerRound,
+  dem.canonicalize_for_rounds(numZStabs + numXStabs,
                               /*remove_zero_syndrome_errors=*/true);
 
-  return dem;
+  result.dem = std::move(dem);
+  return result;
 }
-} // namespace details
+
+std::vector<std::int64_t> decoder_context::d_sparse() const {
+  std::vector<std::int64_t> d_sparse_vec;
+  for (const auto &row : m2d) {
+    for (auto meas : row)
+      d_sparse_vec.push_back(static_cast<std::int64_t>(meas));
+    d_sparse_vec.push_back(-1);
+  }
+  return d_sparse_vec;
+}
+
+namespace {
+/// Slice a decoder context down to one stabilizer type: select
+/// the type's detector rows of the DEM matrix and m2d using the memory-circuit
+/// layout ranges, zero the dropped type's stabilizer count so the result stays
+/// self-consistent, then re-canonicalize the DEM over that type's per-round
+/// syndrome count.
+decoder_context slice_full(const decoder_context &self, bool keep_x,
+                           bool keep_z) {
+  const std::size_t numDetectors = self.dem.detector_error_matrix.shape()[0];
+  const std::size_t numErrorMechanisms =
+      self.dem.detector_error_matrix.shape()[1];
+  const auto ranges = details::stabilizer_detector_ranges(
+      self.num_rounds, self.num_z_stabilizers, self.num_x_stabilizers,
+      self.fixed_basis_is_z, keep_x, keep_z, numDetectors);
+
+  decoder_context out = self;
+
+  const std::size_t length = total_length(ranges);
+  cudaqx::tensor<uint8_t> out_dem({length, numErrorMechanisms});
+  auto *dst = out_dem.data();
+  const auto *src = self.dem.detector_error_matrix.data();
+  for (const auto &r : ranges) {
+    std::memcpy(dst, src + r.start * numErrorMechanisms,
+                r.length * numErrorMechanisms * sizeof(uint8_t));
+    dst += r.length * numErrorMechanisms;
+  }
+  out.dem.detector_error_matrix = std::move(out_dem);
+
+  out.m2d.clear();
+  out.m2d.reserve(length);
+  for (const auto &r : ranges)
+    for (std::size_t i = 0; i < r.length; ++i)
+      out.m2d.push_back(self.m2d[r.start + i]);
+
+  if (!keep_x)
+    out.num_x_stabilizers = 0;
+  if (!keep_z)
+    out.num_z_stabilizers = 0;
+
+  const std::size_t numReturnSynPerRound =
+      (keep_z ? self.num_z_stabilizers : 0) +
+      (keep_x ? self.num_x_stabilizers : 0);
+  out.dem.canonicalize_for_rounds(numReturnSynPerRound,
+                                  /*remove_zero_syndrome_errors=*/true);
+  return out;
+}
+
+/// A decoder context that contains none of the requested type's detectors:
+/// empty DEM and m2d, but keeping the observable map and layout metadata.
+decoder_context empty_component(const decoder_context &self, bool keep_x,
+                                bool keep_z) {
+  decoder_context out;
+  out.num_rounds = self.num_rounds;
+  out.num_x_stabilizers = keep_x ? self.num_x_stabilizers : 0;
+  out.num_z_stabilizers = keep_z ? self.num_z_stabilizers : 0;
+  out.fixed_basis_is_z = self.fixed_basis_is_z;
+  out.num_measurements = self.num_measurements;
+  out.m2o = self.m2o;
+  return out; // dem is default (0 detectors), m2d empty
+}
+} // namespace
+
+decoder_context decoder_context::x_component() const {
+  // Slice only a full (both-type) decoder context. An already-restricted one
+  // is returned unchanged if it is the X part, or empty if it has no X.
+  if (num_x_stabilizers > 0 && num_z_stabilizers > 0)
+    return slice_full(*this, /*keep_x=*/true, /*keep_z=*/false);
+  if (num_x_stabilizers > 0)
+    return *this;
+  return empty_component(*this, /*keep_x=*/true, /*keep_z=*/false);
+}
+
+decoder_context decoder_context::z_component() const {
+  if (num_x_stabilizers > 0 && num_z_stabilizers > 0)
+    return slice_full(*this, /*keep_x=*/false, /*keep_z=*/true);
+  if (num_z_stabilizers > 0)
+    return *this;
+  return empty_component(*this, /*keep_x=*/false, /*keep_z=*/true);
+}
 
 /// @brief Given a memory circuit setup, generate a DEM
-cudaq::qec::detector_error_model
-dem_from_memory_circuit(const code &code, operation statePrep,
-                        std::size_t numRounds, cudaq::noise_model &noise,
-                        bool decompose_errors) {
-  return details::dem_from_memory_circuit(code, statePrep, numRounds, noise,
-                                          /*keep_x_stabilizers=*/true,
-                                          /*keep_z_stabilizers=*/true,
-                                          decompose_errors);
+detector_error_model dem_from_memory_circuit(const code &code,
+                                             operation statePrep,
+                                             std::size_t numRounds,
+                                             cudaq::noise_model &noise,
+                                             bool decompose_errors) {
+  return decoder_context_from_memory_circuit(code, statePrep, numRounds, noise,
+                                             decompose_errors)
+      .dem;
 }
 
 // For CSS codes, may want to partition x vs z decoding
@@ -537,10 +614,10 @@ detector_error_model x_dem_from_memory_circuit(const code &code,
                                                std::size_t numRounds,
                                                cudaq::noise_model &noise,
                                                bool decompose_errors) {
-  return details::dem_from_memory_circuit(code, statePrep, numRounds, noise,
-                                          /*keep_x_stabilizers=*/true,
-                                          /*keep_z_stabilizers=*/false,
-                                          decompose_errors);
+  return decoder_context_from_memory_circuit(code, statePrep, numRounds, noise,
+                                             decompose_errors)
+      .x_component()
+      .dem;
 }
 
 detector_error_model z_dem_from_memory_circuit(const code &code,
@@ -548,10 +625,10 @@ detector_error_model z_dem_from_memory_circuit(const code &code,
                                                std::size_t numRounds,
                                                cudaq::noise_model &noise,
                                                bool decompose_errors) {
-  return details::dem_from_memory_circuit(code, statePrep, numRounds, noise,
-                                          /*keep_x_stabilizers=*/false,
-                                          /*keep_z_stabilizers=*/true,
-                                          decompose_errors);
+  return decoder_context_from_memory_circuit(code, statePrep, numRounds, noise,
+                                             decompose_errors)
+      .z_component()
+      .dem;
 }
 
 } // namespace cudaq::qec
