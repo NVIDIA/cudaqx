@@ -1,5 +1,5 @@
 # ============================================================================ #
-# Copyright (c) 2025 NVIDIA Corporation & Affiliates.                          #
+# Copyright (c) 2025 - 2026 NVIDIA Corporation & Affiliates.                  #
 # All rights reserved.                                                         #
 #                                                                              #
 # This source code and the accompanying materials are made available under     #
@@ -13,12 +13,27 @@
 # How to use this script:
 # python3 replay_decoder_logs.py --config config.yml --decoder-log decoder.log
 
+# Capturing logs for replay:
+#   * Recommended (forwarder-proof): emit the [DecoderStats] lines via a direct
+#     printf to stdout, bypassing the logger (and any forwarder) entirely:
+#         CUDAQ_QEC_DEBUG_DECODER=1 ./your_app > decoder.log 2>&1
+#   * Alternative: CUDAQ_LOG_LEVEL=info also emits the lines, but only via the
+#     logger, so a cudaq::qec log forwarder would truncate long messages (to
+#     message_capacity, appending " ...[truncated]"). Capture without a
+#     forwarder if you use this path.
+#   * This parser skips "...[truncated]" lines and warns.
+
 import sys
 import argparse
 import os
 import numpy
 import yaml
 import cudaq_qec as qec
+
+# Suffix the cudaq::qec log forwarder appends to messages it truncates to fit
+# its bounded message_capacity (see realtime_truncation_suffix in logger.h).
+# Lines containing this marker are incomplete and unsafe to parse.
+TRUNCATION_MARKER = "...[truncated]"
 
 
 # ---------------------------------------------------------------------------- #
@@ -39,15 +54,29 @@ def sparse_to_dense(sparse_list, num_rows, num_cols, dtype=numpy.uint8):
 # decoder is created, a dummy decode call is made to "warm up" the decoder, so
 # you may see more decode calls than shots.
 def parse_decoder_log(decoder_log_file, log_detectors_sparse, log_errors_sparse,
-                      log_observables_dense, decoder_id_list):
-    # running id of the last decoder seen (needed since the decoder id is not
-    # included in the 1 very verbose decode log message).
+                      log_observables_sparse, log_observables_dense,
+                      log_result_types, decoder_id_list):
+    # The decoder id is read directly from each [DecoderStats] line's
+    # "DecoderId:" field. last_decoder_id is only a fallback for older logs
+    # whose stats lines predate that field (it is tracked from the enqueue
+    # message, which is emitted at the info level).
     last_decoder_id = -1
+    truncated_lines = 0  # count of skipped "...[truncated]" lines
     print(f'Parsing decoder log file {decoder_log_file}...')
-    enqueue_msg = "Entering enqueue_syndromes_ui64 for decoder id: "  # needed for last_decoder_id
+    enqueue_msg = "Entering enqueue_syndromes_ui64 for decoder id: "  # fallback decoder id
     with open(decoder_log_file, 'r') as f:
         for line in f:
             line = line.strip()
+            # A forwarder-truncated line has incomplete fields (e.g. a clipped
+            # InputDetectors list), which would silently desync the parallel
+            # result lists. Skip it entirely so nothing partial is appended.
+            if TRUNCATION_MARKER in line:
+                truncated_lines += 1
+                if truncated_lines == 1:
+                    print(f"WARNING: skipping '{TRUNCATION_MARKER}' lines "
+                          "(forwarder message_capacity too small). Re-capture "
+                          "without a log forwarder. See header comment.")
+                continue
             if enqueue_msg in line:
                 # Needed for last_decoder_id.
                 last_decoder_id = int(line.split(enqueue_msg)[1].split(" ")[0])
@@ -55,32 +84,57 @@ def parse_decoder_log(decoder_log_file, log_detectors_sparse, log_errors_sparse,
                 line = line.split("[DecoderStats]")[1]
                 # print(line)
                 if "InputDetectors:" in line:  # this is a decode call
-                    line = line.split(" ")
-                    for elem in line:
+                    fields = {}
+                    for elem in line.split(" "):
                         if ":" in elem:
-                            key, value = elem.split(":")
-                            # print(key, value)
-                            if key == "InputDetectors":
-                                if value == "":
-                                    log_detectors_sparse.append([])
-                                else:
-                                    log_detectors_sparse.append(
-                                        [int(x) for x in value.split(",")])
-                                if last_decoder_id == -1:
-                                    print(
-                                        f"Error: last_decoder_id is -1. This is a fatal error processing the log file."
-                                    )
-                                    exit(1)
-                                decoder_id_list.append(last_decoder_id)
-                            elif key == "Errors":
-                                if value == "":
-                                    log_errors_sparse.append([])
-                                else:
-                                    log_errors_sparse.append(
-                                        [int(x) for x in value.split(",")])
-                            elif key == "ObservableCorrectionsThisCall":
-                                log_observables_dense.append(
-                                    [int(x) for x in value.split(",")])
+                            key, value = elem.split(":", 1)
+                            fields[key] = value
+
+                    value = fields["InputDetectors"]
+                    if value == "":
+                        log_detectors_sparse.append([])
+                    else:
+                        log_detectors_sparse.append(
+                            [int(x) for x in value.split(",")])
+                    # Prefer the DecoderId carried in the stats line; fall back
+                    # to the enqueue-derived id for older logs that lack it.
+                    if "DecoderId" in fields:
+                        decoder_id = int(fields["DecoderId"])
+                    elif last_decoder_id != -1:
+                        decoder_id = last_decoder_id
+                    else:
+                        print("Error: could not determine decoder id (no "
+                              "DecoderId field and no enqueue message). This "
+                              "is a fatal error processing the log file.")
+                        exit(1)
+                    decoder_id_list.append(decoder_id)
+
+                    value = fields.get("Errors", "")
+                    if value == "":
+                        log_errors_sparse.append([])
+                    else:
+                        log_errors_sparse.append(
+                            [int(x) for x in value.split(",")])
+
+                    value = fields.get("Observables", "")
+                    if value == "":
+                        log_observables_sparse.append([])
+                    else:
+                        log_observables_sparse.append(
+                            [int(x) for x in value.split(",")])
+
+                    value = fields["ObservableCorrectionsThisCall"]
+                    log_observables_dense.append(
+                        [int(x) for x in value.split(",")])
+
+                    value = fields.get("ResultType", "errs")
+                    result_types = {x for x in value.split(",") if x}
+                    if not result_types:
+                        result_types = {"errs"}
+                    log_result_types.append(result_types)
+    if truncated_lines > 0:
+        print(f"WARNING: skipped {truncated_lines} truncated line(s); "
+              "replay coverage is incomplete.")
 
 
 # ---------------------------------------------------------------------------- #
@@ -115,6 +169,9 @@ def parse_decoder_config(config_file, decoders, O_per_decoder):
                     decoder_custom_args[key] = float(value)
                 elif type(value) == bool:
                     decoder_custom_args[key] = bool(value)
+            # Replaying an obs-frame decoder reconstructs the full composite
+            # decoder here, so trt_decoder replay needs TensorRT, a GPU, and
+            # the referenced ONNX/engine artifacts. LUT replay is lighter.
             decoders.append(
                 qec.get_decoder(decoder['type'], H, **decoder_custom_args))
             print(f"Decoder {decoder_id} created.")
@@ -149,14 +206,17 @@ decoder_id_list = []  # Decoder ID of each decode call.
 log_detectors_sparse = []  # Detection events seen in the log file.
 log_errors_sparse = []  # Errors seen in the log file.
 replay_errors_sparse = []  # Errors seen in the replay.
+log_observables_sparse = []  # Observable results seen in the log file.
 log_observables_dense = []  # Observable flips seen in the log file.
 replay_observables_dense = []  # Observable flips calculated in the replay.
+log_result_types = []  # ResultType tokens seen in each log decode call.
 
 decoders = []
 O_per_decoder = []
 
 parse_decoder_log(args.decoder_log, log_detectors_sparse, log_errors_sparse,
-                  log_observables_dense, decoder_id_list)
+                  log_observables_sparse, log_observables_dense,
+                  log_result_types, decoder_id_list)
 parse_decoder_config(args.config, decoders, O_per_decoder)
 
 # Basic error checking
@@ -171,6 +231,7 @@ if len(decoders) < max_decoder_id + 1:
 # Now loop through the syndromes and compare the results.
 decode_call_idx = 0
 replay_error_mismatch = 0
+replay_observable_result_mismatch = 0
 replay_observable_mismatch = 0
 print(f'Processing {len(log_detectors_sparse)} decode calls.')
 for s, o in zip(log_detectors_sparse, log_observables_dense):
@@ -181,28 +242,60 @@ for s, o in zip(log_detectors_sparse, log_observables_dense):
     for idx in s:
         syndrome[idx] = 1
     result = decoders[decoder_id_list[decode_call_idx]].decode(syndrome)
-    dec_err_sparse = [
+    result_types = log_result_types[decode_call_idx]
+
+    mismatch_flag = False
+    decoded_sparse = [
         i for i in range(len(result.result)) if result.result[i] > 0.5
     ]
-    replay_errors_sparse.append(dec_err_sparse)
-    mismatch_flag = False
-    if dec_err_sparse != log_errors_sparse[decode_call_idx]:
-        replay_error_mismatch += 1
-        mismatch_flag = True
-        if args.verbose_on_mismatch:
-            print(
-                f"Replay mismatch in error in decode_call_idx {decode_call_idx}"
-            )
-            print(f"Decoded errors : {dec_err_sparse}")
-            print(f"Expected errors: {log_errors_sparse[decode_call_idx]}")
-    dec_err_dense = numpy.array(result.result, dtype=numpy.uint8)
-    O_replay = (
-        O_per_decoder[decoder_id_list[decode_call_idx]] @ dec_err_dense %
-        2).astype(numpy.uint8)
+    if "errs" in result_types:
+        dec_err_sparse = decoded_sparse
+        replay_errors_sparse.append(dec_err_sparse)
+        if dec_err_sparse != log_errors_sparse[decode_call_idx]:
+            replay_error_mismatch += 1
+            mismatch_flag = True
+            if args.verbose_on_mismatch:
+                print(
+                    f"Replay mismatch in error in decode_call_idx {decode_call_idx}"
+                )
+                print(f"Decoded errors : {dec_err_sparse}")
+                print(f"Expected errors: {log_errors_sparse[decode_call_idx]}")
+        dec_err_dense = numpy.array(result.result, dtype=numpy.uint8)
+        O_replay = (
+            O_per_decoder[decoder_id_list[decode_call_idx]] @ dec_err_dense %
+            2).astype(numpy.uint8)
+        decoded_observables_sparse = [
+            i for i in range(len(O_replay)) if O_replay[i]
+        ]
+    elif "obs" in result_types:
+        replay_errors_sparse.append([])
+        O_replay = numpy.array([1 if x > 0.5 else 0 for x in result.result],
+                               dtype=numpy.uint8)
+        decoded_observables_sparse = decoded_sparse
+    else:
+        print(f"Error: unsupported ResultType set {sorted(result_types)} "
+              f"in decode_call_idx {decode_call_idx}.")
+        exit(1)
+
+    if "obs" in result_types:
+        expected_observables_sparse = log_observables_sparse[decode_call_idx]
+        if decoded_observables_sparse != expected_observables_sparse:
+            replay_observable_result_mismatch += 1
+            mismatch_flag = True
+            if args.verbose_on_mismatch:
+                print(
+                    f"Replay mismatch in observable result in decode_call_idx {decode_call_idx}"
+                )
+                print(
+                    f"Decoded observable result : {decoded_observables_sparse}")
+                print(
+                    f"Expected observable result: {expected_observables_sparse}"
+                )
+
     replay_observables_dense.append(O_replay)
     O_log = numpy.array(log_observables_dense[decode_call_idx],
                         dtype=numpy.uint8)
-    if (O_replay != O_log).any():
+    if O_replay.shape != O_log.shape or (O_replay != O_log).any():
         replay_observable_mismatch += 1
         mismatch_flag = True
         if args.verbose_on_mismatch:
@@ -220,6 +313,9 @@ for s, o in zip(log_detectors_sparse, log_observables_dense):
 
 print()
 print(f"Number of error mismatches during replay: {replay_error_mismatch}")
+print(
+    f"Number of observable result mismatches during replay: {replay_observable_result_mismatch}"
+)
 print(
     f"Number of observable mismatches during replay: {replay_observable_mismatch}"
 )

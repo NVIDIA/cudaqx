@@ -41,9 +41,9 @@ dem = qec.z_dem_from_memory_circuit(surface_code, statePrep, nRounds, noise)
 # For large runs, set verbose to False to suppress output
 verbose = nShots <= 10
 
-# Sample the surface code memory circuit with noise on each cx gate
-syndromes, data = qec.sample_memory_circuit(surface_code, statePrep, nShots,
-                                            nRounds, noise)
+# Sample the surface code memory circuit with noise on each cx gate.
+syndromes, data = qec.z_sample_memory_circuit(surface_code, statePrep, nShots,
+                                              nRounds, noise)
 
 if verbose:
     print("From sample function:\n")
@@ -60,12 +60,6 @@ logical_measurements = (Lz @ data.transpose()) % 2
 logical_measurements = logical_measurements.flatten()
 if verbose:
     print("LMz:\n", logical_measurements)
-
-# Reshape and drop the X stabilizers, keeping just the Z stabilizers (since this is prep0)
-syndromes = syndromes.reshape((nShots, nRounds, -1))
-syndromes = syndromes[:, :, :syndromes.shape[2] // 2]
-# Now flatten to two dimensions again
-syndromes = syndromes.reshape((nShots, -1))
 
 dr = decoder.decode_batch(syndromes)
 error_predictions = np.array([e.result for e in dr], dtype=np.uint8)

@@ -28,6 +28,11 @@ dense_to_sparse(const cudaqx::tensor<uint8_t> &pcm);
 /// @return A string that represents the PCM in a sparse format.
 std::string pcm_to_sparse_string(const cudaqx::tensor<uint8_t> &pcm);
 
+/// @brief Sparse overload of pcm_to_sparse_string.
+/// Duplicate stored entries are canonicalized with GF(2) cancellation before
+/// serialization.
+std::string pcm_to_sparse_string(const sparse_binary_matrix &pcm);
+
 /// @brief Return a PCM from a sparse representation.
 /// @param sparse_str The sparse representation of the PCM.
 /// @param num_rows The number of rows in the PCM.
@@ -52,6 +57,11 @@ pcm_from_sparse_vec(const std::vector<std::int64_t> &sparse_vec,
 /// @return A vector of integers that represents the PCM in a sparse format,
 /// where -1 separates rows.
 std::vector<std::int64_t> pcm_to_sparse_vec(const cudaqx::tensor<uint8_t> &pcm);
+
+/// @brief Sparse overload of pcm_to_sparse_vec.
+/// Duplicate stored entries are canonicalized with GF(2) cancellation before
+/// serialization.
+std::vector<std::int64_t> pcm_to_sparse_vec(const sparse_binary_matrix &pcm);
 
 /// @brief Generate a sparse detector matrix for a given number of syndromes per
 /// round and number of rounds. Timelike here means that each round of syndrome
@@ -133,6 +143,13 @@ bool pcm_is_sorted(const std::vector<std::vector<std::uint32_t>> &sparse_pcm,
 /// order.
 cudaqx::tensor<uint8_t>
 reorder_pcm_columns(const cudaqx::tensor<uint8_t> &pcm,
+                    const std::vector<std::uint32_t> &column_order,
+                    uint32_t row_begin = 0,
+                    uint32_t row_end = std::numeric_limits<uint32_t>::max());
+
+/// @brief Sparse overload of reorder_pcm_columns. Returns CSC.
+sparse_binary_matrix
+reorder_pcm_columns(const sparse_binary_matrix &pcm,
                     const std::vector<std::uint32_t> &column_order,
                     uint32_t row_begin = 0,
                     uint32_t row_end = std::numeric_limits<uint32_t>::max());
@@ -238,6 +255,10 @@ generate_random_pcm_sparse(std::size_t n_rounds, std::size_t n_errs_per_round,
 /// @return A new PCM with the columns permuted randomly.
 cudaqx::tensor<uint8_t> shuffle_pcm_columns(const cudaqx::tensor<uint8_t> &pcm,
                                             std::mt19937_64 &&rng);
+
+/// @brief Sparse overload of shuffle_pcm_columns.
+sparse_binary_matrix shuffle_pcm_columns(const sparse_binary_matrix &pcm,
+                                         std::mt19937_64 &&rng);
 
 /// @brief Extend a PCM to the given number of rounds.
 /// @param pcm The PCM to extend.

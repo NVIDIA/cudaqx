@@ -15,11 +15,13 @@ struct boolean_span {
   uint64_t length;
 };
 
-void enqueue_syndromes(std::uint64_t decoder_id, uint8_t *syndromes,
-                       std::uint64_t syndrome_length);
+__attribute__((visibility("default"))) void
+enqueue_syndromes(std::uint64_t decoder_id, uint8_t *syndromes,
+                  std::uint64_t syndrome_length, std::uint64_t tag);
 
-std::uint64_t get_corrections(std::uint64_t decoder_id,
-                              std::uint64_t return_size, bool reset);
+__attribute__((visibility("default"))) void
+get_corrections(std::uint64_t decoder_id, uint8_t *corrections,
+                std::uint64_t correction_length, bool reset);
 
 __attribute__((visibility("default"))) void
 reset_decoder(std::uint64_t decoder_id);

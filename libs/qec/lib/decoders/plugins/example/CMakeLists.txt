@@ -30,12 +30,8 @@ target_include_directories(${MODULE_NAME}
 
 # Link with required libraries 
 target_link_libraries(${MODULE_NAME}
-  PUBLIC
-    cudaqx-core
-    cudaq::cudaq-operator
   PRIVATE
-    cudaq::cudaq-common
-    cudaq-qec
+    cudaq-qec-decoders
 )
 
 set_target_properties(${MODULE_NAME} PROPERTIES

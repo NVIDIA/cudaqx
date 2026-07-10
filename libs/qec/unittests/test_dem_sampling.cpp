@@ -366,6 +366,27 @@ TEST(DemSamplingCPU, SeedlessPathRuns) {
       EXPECT_TRUE(checks.at({shot, c}) == 0 || checks.at({shot, c}) == 1);
 }
 
+TEST(DemSamplingCPU, PublicSeedlessWrapperRuns) {
+  // The public wrapper without a seed delegates to the CPU sampler and should
+  // preserve the expected tensor shapes.
+  auto H = make_tensor({1, 0, 1, 0, 1, 1}, 2, 3);
+  std::vector<double> probs = {0.0, 1.0, 0.0};
+
+  auto [checks, errors] = cudaq::qec::dem_sampling(H, 5, probs);
+
+  EXPECT_EQ(checks.shape()[0], 5u);
+  EXPECT_EQ(checks.shape()[1], 2u);
+  EXPECT_EQ(errors.shape()[0], 5u);
+  EXPECT_EQ(errors.shape()[1], 3u);
+  for (size_t shot = 0; shot < 5; shot++) {
+    EXPECT_EQ(errors.at({shot, 0}), 0);
+    EXPECT_EQ(errors.at({shot, 1}), 1);
+    EXPECT_EQ(errors.at({shot, 2}), 0);
+    EXPECT_EQ(checks.at({shot, 0}), 0);
+    EXPECT_EQ(checks.at({shot, 1}), 1);
+  }
+}
+
 // =============================================================================
 // GPU tests
 // =============================================================================
@@ -439,6 +460,22 @@ protected:
 TEST_F(DemSamplingGPU, AllZeroProbabilities) {
   const size_t num_checks = 3, num_errors = 5, num_shots = 10;
   std::vector<uint8_t> H = {1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1};
+  std::vector<double> probs(num_errors, 0.0);
+
+  GpuBuffers buf(H, probs, num_checks, num_errors, num_shots);
+  ASSERT_TRUE(buf.run(42));
+
+  for (auto v : buf.get_checks())
+    EXPECT_EQ(v, 0);
+  for (auto v : buf.get_errors())
+    EXPECT_EQ(v, 0);
+}
+
+TEST_F(DemSamplingGPU, SparseCapacityClampsToShotCount) {
+  // With zero probabilities and many shots, the initial sparse capacity
+  // estimate is below num_shots and must be raised before cuStabilizer runs.
+  const size_t num_checks = 2, num_errors = 3, num_shots = 2048;
+  std::vector<uint8_t> H = {1, 0, 1, 0, 1, 1};
   std::vector<double> probs(num_errors, 0.0);
 
   GpuBuffers buf(H, probs, num_checks, num_errors, num_shots);

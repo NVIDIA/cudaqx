@@ -10,6 +10,7 @@
 
 #include "cuda-qx/core/heterogeneous_map.h"
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <variant>
@@ -107,12 +108,35 @@ struct pymatching_config {
   from_heterogeneous_map(const cudaqx::heterogeneous_map &map);
 };
 
+struct chromobius_config {
+  std::optional<bool> drop_mobius_errors_involving_remnant_errors;
+  std::optional<bool> ignore_decomposition_failures;
+  std::optional<bool> include_coords_in_mobius_dem;
+  std::optional<bool> return_weight;
+  std::optional<bool> write_mobius_match_to_stderr;
+
+  bool operator==(const chromobius_config &) const = default;
+
+  __attribute__((visibility("default"))) cudaqx::heterogeneous_map
+  to_heterogeneous_map() const;
+
+  __attribute__((visibility("default"))) static chromobius_config
+  from_heterogeneous_map(const cudaqx::heterogeneous_map &map);
+};
+
+using global_decoder_config =
+    std::variant<std::monostate, pymatching_config, chromobius_config>;
+
 struct trt_decoder_config {
   std::optional<std::string> onnx_load_path;
   std::optional<std::string> engine_load_path;
   std::optional<std::string> engine_save_path;
   std::optional<std::string> precision;
   std::optional<std::size_t> memory_workspace;
+  std::optional<std::size_t> batch_size;
+  std::optional<bool> use_cuda_graph;
+  std::optional<std::string> global_decoder;
+  global_decoder_config global_decoder_params;
 
   bool operator==(const trt_decoder_config &) const = default;
 
@@ -147,10 +171,19 @@ struct sliding_window_config {
   from_heterogeneous_map(const cudaqx::heterogeneous_map &map);
 };
 
+/// Transport type for a decoder session.
+/// cpu_roce: CpuRoceTransceiver / SoftRoCE (dev, CI, no GPU required)
+/// gpu_roce: GpuRoceTransceiver / DOCA (production, real ConnectX)
+enum class DecoderTransport { cpu_roce, gpu_roce };
+
 /// @brief Configuration structure for decoder options.
 struct decoder_config {
   int64_t id = 0;
   std::string type;
+  /// Transport used to receive syndromes and send corrections for this decoder.
+  /// Defaults to cpu_roce.  Set to gpu_roce for decoders where syndrome bits
+  /// are DMA'd directly to GPU VRAM (e.g. nv_qldpc_decoder with RelayBP).
+  DecoderTransport transport = DecoderTransport::cpu_roce;
   uint64_t block_size = 0;
   uint64_t syndrome_size = 0;
   std::vector<std::int64_t> H_sparse;
@@ -256,5 +289,16 @@ configure_decoders_from_str(const char *config_str);
 
 /// @brief Finalize the decoders. This function finalizes local decoders.
 __attribute__((visibility("default"))) void finalize_decoders();
+
+/// @brief Return the most recently passed multi_decoder_config, or an empty
+/// pointer if configure_decoders() has not been called in this process.
+/// Used by the decoding-server DeviceCallService plugin to build
+/// DecodingSessions on the in-process host_dispatch path without requiring
+/// CUDAQ_QEC_DECODER_CONFIG.  Returns shared ownership: a concurrent
+/// configure_decoders() replaces the stored config but cannot free it out
+/// from under the caller.
+__attribute__((visibility("default")))
+std::shared_ptr<const multi_decoder_config>
+last_configured_multi_decoder_config();
 
 } // namespace cudaq::qec::decoding::config

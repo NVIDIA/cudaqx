@@ -82,6 +82,8 @@ Common
 =============
 
 .. autofunction:: cudaq_qec.sample_memory_circuit
+.. autofunction:: cudaq_qec.x_sample_memory_circuit
+.. autofunction:: cudaq_qec.z_sample_memory_circuit
 
 .. autofunction:: cudaq_qec.sample_code_capacity
 

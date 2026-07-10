@@ -24,7 +24,7 @@ set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 if (CMAKE_COMPILER_IS_GNUCXX
   AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 12.0.0
   AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 13.0.0)
-  target_compile_options(gtest PUBLIC
+  target_compile_options(gtest PRIVATE
     $<$<COMPILE_LANGUAGE:CXX>:--param=evrp-mode=legacy>)
 endif()
 include(GoogleTest)
@@ -35,14 +35,30 @@ find_package(CUDAToolkit REQUIRED)
 add_compile_options(-Wno-attributes) 
 
 add_executable(test_decoders test_decoders.cpp decoders/sample_decoder.cpp)
-target_link_libraries(test_decoders PRIVATE GTest::gtest_main cudaq-qec cudaq-qec-realtime-decoding cudaq::cudaq libstim)
+target_link_libraries(test_decoders PRIVATE GTest::gtest_main cudaq-qec-decoders libstim)
 add_dependencies(CUDAQXQECUnitTests test_decoders)
 gtest_discover_tests(test_decoders)
 
 add_executable(test_decoders_yaml test_decoders_yaml.cpp decoders/sample_decoder.cpp)
-target_link_libraries(test_decoders_yaml PRIVATE GTest::gtest_main cudaq-qec cudaq-qec-realtime-decoding cudaq::cudaq)
+target_include_directories(test_decoders_yaml PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../lib/realtime/decoding-server-cqr)
+target_link_libraries(test_decoders_yaml PRIVATE
+  GTest::gtest_main
+  cudaq-qec
+  cudaq-qec-decoding-server
+  cudaq-qec-realtime-decoding
+  cudaq-qec-realtime-decoding-simulation
+  cudaq::cudaq)
 add_dependencies(CUDAQXQECUnitTests test_decoders_yaml)
 gtest_discover_tests(test_decoders_yaml)
+
+add_executable(test_decoding_server_core test_decoding_server_core.cpp)
+target_link_libraries(test_decoding_server_core PRIVATE
+  GTest::gtest_main
+  cudaq-qec-decoding-server
+  cudaq::cudaq)
+add_dependencies(CUDAQXQECUnitTests test_decoding_server_core)
+gtest_discover_tests(test_decoding_server_core)
 
 add_executable(test_qec test_qec.cpp)
 target_link_libraries(test_qec PRIVATE GTest::gtest_main cudaq-qec cudaq::cudaq-stim-target)
@@ -57,10 +73,15 @@ add_dependencies(CUDAQXQECUnitTests test_dem_sampling)
 gtest_discover_tests(test_dem_sampling)
 
 add_executable(test_sparse_binary_matrix test_sparse_binary_matrix.cpp)
-target_link_libraries(test_sparse_binary_matrix PRIVATE GTest::gtest_main cudaq-qec
-                                               cudaq::cudaq)
+target_link_libraries(test_sparse_binary_matrix PRIVATE GTest::gtest_main
+                                               cudaq-qec-decoders)
 add_dependencies(CUDAQXQECUnitTests test_sparse_binary_matrix)
 gtest_discover_tests(test_sparse_binary_matrix)
+
+add_executable(test_logger test_logger.cpp)
+target_link_libraries(test_logger PRIVATE GTest::gtest_main cudaq-qec-decoders)
+add_dependencies(CUDAQXQECUnitTests test_logger)
+gtest_discover_tests(test_logger)
 
 # TensorRT decoder test is only built for x86 architectures
 if(CUDAQ_QEC_TRT_DECODER_ENABLED AND CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64)|(AMD64|amd64)|(^i.86$)")
@@ -77,12 +98,66 @@ if(CUDAQ_QEC_TRT_DECODER_ENABLED AND CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64)|(A
       NO_DEFAULT_PATH
   )
 
+  # test_trt_decoder.cpp calls TensorRT APIs directly (nvinfer1::createInferBuilder,
+  # nvinfer1::ILogger), so the test must link libnvinfer itself. Relying on the
+  # transitive dependency through cudaq-qec-trt-decoder fails at link time with
+  # "DSO missing from command line".
+  find_library(TENSORRT_LIBRARY nvinfer
+      PATHS
+          ${TENSORRT_ROOT}/lib
+          /usr/lib/x86_64-linux-gnu
+          /usr/lib/aarch64-linux-gnu
+          /usr/local/cuda/lib64
+          /usr/local/tensorrt/lib
+          /opt/tensorrt/lib
+      NO_DEFAULT_PATH
+  )
+
   target_include_directories(test_trt_decoder PRIVATE
       ${CUDAToolkit_INCLUDE_DIRS}
       ${TENSORRT_INCLUDE_DIR}
   )
 
-  target_link_libraries(test_trt_decoder PRIVATE GTest::gtest_main cudaq-qec cudaq-qec-trt-decoder cudaq::cudaq CUDA::cudart)
+  target_link_libraries(test_trt_decoder PRIVATE GTest::gtest_main cudaq-qec-decoders cudaq-qec-trt-decoder CUDA::cudart ${TENSORRT_LIBRARY})
+
+  find_package(Python COMPONENTS Interpreter QUIET)
+  if(Python_Interpreter_FOUND)
+    execute_process(
+      COMMAND ${Python_EXECUTABLE} -c "import onnx"
+      RESULT_VARIABLE _trt_onnx_python_result
+      OUTPUT_QUIET
+      ERROR_QUIET)
+    if(_trt_onnx_python_result EQUAL 0)
+      set(_trt_generated_onnx_dir "${CMAKE_CURRENT_BINARY_DIR}/trt_decoder_onnx")
+      set(_trt_dynamic_identity_onnx "${_trt_generated_onnx_dir}/trt_dynamic_identity.onnx")
+      set(_trt_uint8_identity_onnx "${_trt_generated_onnx_dir}/trt_uint8_identity.onnx")
+      set(_trt_uint8_to_float_onnx "${_trt_generated_onnx_dir}/trt_uint8_to_float.onnx")
+      add_custom_command(
+        OUTPUT
+          "${_trt_dynamic_identity_onnx}"
+          "${_trt_uint8_identity_onnx}"
+          "${_trt_uint8_to_float_onnx}"
+        COMMAND ${Python_EXECUTABLE}
+          "${CMAKE_CURRENT_SOURCE_DIR}/decoders/trt_decoder/generate_trt_decoder_onnx.py"
+          --out-dir "${_trt_generated_onnx_dir}"
+        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/decoders/trt_decoder/generate_trt_decoder_onnx.py"
+        COMMENT "Generating TensorRT decoder ONNX test fixtures")
+      add_custom_target(generate_trt_decoder_onnx
+        DEPENDS
+          "${_trt_dynamic_identity_onnx}"
+          "${_trt_uint8_identity_onnx}"
+          "${_trt_uint8_to_float_onnx}")
+      add_dependencies(test_trt_decoder generate_trt_decoder_onnx)
+      target_compile_definitions(test_trt_decoder PRIVATE
+        TRT_TEST_DYNAMIC_ONNX_PATH="${_trt_dynamic_identity_onnx}"
+        TRT_TEST_UINT8_ONNX_PATH="${_trt_uint8_identity_onnx}"
+        TRT_TEST_UINT8_TO_FLOAT_ONNX_PATH="${_trt_uint8_to_float_onnx}")
+    else()
+      message(WARNING "Python package onnx not found. "
+                      "Skipping generated TensorRT decoder ONNX fixtures.")
+    endif()
+  endif()
+
   # Path to ONNX test asset at repo root (absolute so test finds it regardless of CWD)
   target_compile_definitions(test_trt_decoder PRIVATE
     TRT_TEST_ONNX_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../../../assets/tests/surface_code_decoder.onnx")
@@ -289,7 +364,8 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
       PATHS ${TENSORRT_ROOT}/lib /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu /usr/local/cuda/lib64 /usr/local/tensorrt/lib /opt/tensorrt/lib
     )
 
-    if(TENSORRT_INCLUDE_DIR_FOR_PIPELINE AND TENSORRT_LIBRARY_FOR_PIPELINE AND TENSORRT_ONNX_PARSER_FOR_PIPELINE)
+    if(TENSORRT_INCLUDE_DIR_FOR_PIPELINE AND TENSORRT_LIBRARY_FOR_PIPELINE AND TENSORRT_ONNX_PARSER_FOR_PIPELINE
+       AND TARGET cudaq-realtime-pipeline)
       get_filename_component(_cuda_bin_pipe "${CMAKE_CUDA_COMPILER}" DIRECTORY)
       get_filename_component(_cuda_root_pipe "${_cuda_bin_pipe}" DIRECTORY)
       set(_cuda_cccl_include_pipe "${_cuda_root_pipe}/include/cccl")
@@ -514,10 +590,188 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
 endif()
 
 # ==============================================================================
+# Dependency-closure guardrail
+# ------------------------------------------------------------------------------
+# The realtime decoding, decoder, decoder-plugin and realtime-pipeline shared
+# libraries are deliberately kept free of the heavy CUDA-Q runtime libraries
+# (libcudaq-common / libcudaq-operator / libcudaq-qec / libcudaq / libnvqir /
+# libcudaq-mlir-runtime).  These CTest checks inspect the built ELF dependency
+# closure (via readelf, no loader involved) and fail if any of those libraries
+# leaks in.
+# ==============================================================================
+if(TARGET cudaq-qec-decoders AND TARGET cudaq-qec-realtime-decoding)
+  set(_dep_closure_script
+    "${CMAKE_CURRENT_SOURCE_DIR}/check_dependency_closure.cmake")
+  # Heavy CUDA-Q libraries that must never appear in the realtime/decoder
+  # dependency closure.  libcudaq (core runtime) and libnvqir (simulator
+  # dispatch) are the roots of the quantum-runtime subtree, so blocking them
+  # transitively covers their runtime-loaded plugins as well.  Matching is
+  # anchored (^<stem>\.so), so e.g. "libcudaq" flags libcudaq.so but never
+  # libcudaq-realtime.so / libcudaq-qec-decoders.so.
+  set(_dep_closure_forbidden
+    "libcudaq-common|libcudaq-operator|libcudaq-qec|libcudaq|libnvqir|libcudaq-mlir-runtime|libcustabilizer")
+
+  # Always-present core libraries under guard, plus every decoder plugin and
+  # the realtime pipeline that were actually built in this configuration.  The
+  # plugins/pipeline are conditional (TensorRT / CUDA / realtime availability),
+  # so they are only added when their target exists.
+  set(_dep_closure_targets cudaq-qec-decoders cudaq-qec-realtime-decoding)
+  foreach(_t IN ITEMS
+      cudaq-qec-example
+      cudaq-qec-pymatching
+      cudaq-qec-chromobius
+      cudaq-qec-trt-decoder
+      cudaq-realtime-pipeline
+      cudaq-qec-realtime-decoding
+      cudaq-qec-realtime-decoding-simulation
+      cudaq-qec-realtime-decoding-quantinuum)
+    if(TARGET ${_t})
+      list(APPEND _dep_closure_targets ${_t})
+    endif()
+  endforeach()
+
+  # Build the "|"-separated $<TARGET_FILE:...> list consumed by the script.
+  set(_dep_closure_libs "")
+  foreach(_t IN LISTS _dep_closure_targets)
+    if(_dep_closure_libs)
+      string(APPEND _dep_closure_libs "|")
+    endif()
+    string(APPEND _dep_closure_libs "$<TARGET_FILE:${_t}>")
+  endforeach()
+
+  # Decoder plugins live in lib/decoder-plugins, everything else in lib; include
+  # both so transitive sonames resolve during the closure walk.
+  set(_dep_closure_search
+    "${CMAKE_BINARY_DIR}/lib|${CMAKE_BINARY_DIR}/lib/decoder-plugins")
+
+  # Make sure the libraries under test are built before CTest runs.
+  add_dependencies(CUDAQXQECUnitTests ${_dep_closure_targets})
+
+  add_test(NAME qec_dependency_closure
+    COMMAND ${CMAKE_COMMAND}
+      "-DLIBS=${_dep_closure_libs}"
+      "-DFORBIDDEN=${_dep_closure_forbidden}"
+      "-DTRANSITIVE=ON"
+      "-DEXTRA_SEARCH_DIRS=${_dep_closure_search}"
+      -P "${_dep_closure_script}")
+  set_tests_properties(qec_dependency_closure PROPERTIES LABELS "qec")
+
+  # Negative self-test: libcudaq-qec.so legitimately depends on the forbidden
+  # libraries, so the guardrail MUST flag it.  This proves the check is not
+  # silently passing due to a parsing or resolution bug.
+  if(TARGET cudaq-qec)
+    add_test(NAME qec_dependency_closure_selftest
+      COMMAND ${CMAKE_COMMAND}
+        "-DLIBS=$<TARGET_FILE:cudaq-qec>"
+        "-DFORBIDDEN=${_dep_closure_forbidden}"
+        "-DTRANSITIVE=ON"
+        "-DEXTRA_SEARCH_DIRS=${_dep_closure_search}"
+        "-DEXPECT_FAIL=ON"
+        -P "${_dep_closure_script}")
+    set_tests_properties(qec_dependency_closure_selftest PROPERTIES LABELS "qec")
+    add_dependencies(CUDAQXQECUnitTests cudaq-qec)
+  endif()
+endif()
+
+# ==============================================================================
+# Architectural guardrail: the realtime decoding server deliverables must stay
+# free of the *heavy* CUDA-Q runtime: the core runtime (libcudaq), the simulator
+# dispatch (libnvqir), the QEC umbrella library (libcudaq-qec), and the MLIR JIT
+# runtime (libcudaq-mlir-runtime).  Pulling any of those back in would drag the
+# whole CUDA-Q execution stack (quantum_platform, execution manager, JIT
+# compiler) into the server package.
+#
+# Covered here (each only when built):
+#   - cudaq-qec-realtime-decoding-server-cqr / -simulation-cqr (the cudaq-realtime
+#     host-dispatch server + simulated-QPU client; built only when the cudaq
+#     device_call service is available)
+#
+# Unlike the decoder/realtime closure check above, the server libraries DO
+# legitimately depend on libcudaq-common / libcudaq-operator (they provide the
+# nvq++ kernel-registration symbols baked into the device code) and on the
+# allowed libcudaq-realtime, so those are intentionally NOT forbidden here.  This
+# guardrail is created whenever a server target is built.
+# ==============================================================================
+# Candidate server targets, each guarded so the check adapts to what was built.
+set(_srv_closure_targets "")
+foreach(_t IN ITEMS
+    cudaq-qec-realtime-decoding-server-cqr
+    cudaq-qec-realtime-decoding-simulation-cqr
+    )
+  if(TARGET ${_t})
+    list(APPEND _srv_closure_targets ${_t})
+  endif()
+endforeach()
+
+if(_srv_closure_targets)
+  if(NOT DEFINED _dep_closure_script)
+    set(_dep_closure_script
+      "${CMAKE_CURRENT_SOURCE_DIR}/check_dependency_closure.cmake")
+  endif()
+
+  # Heavy CUDA-Q runtime roots the server must never acquire.  Matching is
+  # anchored (^<stem>\.so), so "libcudaq" flags libcudaq.so but never
+  # libcudaq-common.so / libcudaq-realtime.so / libcudaq-qec-decoders.so,
+  # "libcudaq-qec" flags libcudaq-qec.so but never libcudaq-qec-decoders.so, and
+  # "libcustabilizer" flags libcustabilizer.so.0 (cuStabilizer, pulled only by
+  # libcudaq-qec).
+  set(_srv_closure_forbidden
+    "libcudaq-qec|libcudaq|libnvqir|libcudaq-mlir-runtime|libcustabilizer")
+
+  set(_srv_closure_libs "")
+  foreach(_t IN LISTS _srv_closure_targets)
+    if(_srv_closure_libs)
+      string(APPEND _srv_closure_libs "|")
+    endif()
+    string(APPEND _srv_closure_libs "$<TARGET_FILE:${_t}>")
+  endforeach()
+
+  # Search path for the transitive soname walk: build tree first, then the
+  # CUDA-Q install and realtime prefixes so intentionally-allowed deps
+  # (common/operator/realtime) resolve and their subtrees are inspected too.
+  # The server libraries only DT_NEEDED libs in lib/ (decoder plugins are
+  # dlopen'd, never linked), so lib/decoder-plugins is not needed here.
+  set(_srv_closure_search "${CMAKE_BINARY_DIR}/lib")
+  if(DEFINED CUDAQ_INSTALL_DIR AND CUDAQ_INSTALL_DIR)
+    string(APPEND _srv_closure_search "|${CUDAQ_INSTALL_DIR}/lib")
+  endif()
+  if(DEFINED CUDAQ_REALTIME_ROOT AND CUDAQ_REALTIME_ROOT)
+    string(APPEND _srv_closure_search "|${CUDAQ_REALTIME_ROOT}/lib")
+  endif()
+
+  add_dependencies(CUDAQXQECUnitTests ${_srv_closure_targets})
+
+  add_test(NAME qec_realtime_server_dependency_closure
+    COMMAND ${CMAKE_COMMAND}
+      "-DLIBS=${_srv_closure_libs}"
+      "-DFORBIDDEN=${_srv_closure_forbidden}"
+      "-DTRANSITIVE=ON"
+      "-DEXTRA_SEARCH_DIRS=${_srv_closure_search}"
+      -P "${_dep_closure_script}")
+  set_tests_properties(qec_realtime_server_dependency_closure
+    PROPERTIES LABELS "qec")
+
+  # Negative self-test: the server libraries DO legitimately depend on
+  # libcudaq-common, so forbidding it MUST fire.  This proves the guardrail is
+  # actually inspecting the server closure (and not silently passing).
+  add_test(NAME qec_realtime_server_dependency_closure_selftest
+    COMMAND ${CMAKE_COMMAND}
+      "-DLIBS=${_srv_closure_libs}"
+      "-DFORBIDDEN=libcudaq-common"
+      "-DTRANSITIVE=ON"
+      "-DEXTRA_SEARCH_DIRS=${_srv_closure_search}"
+      "-DEXPECT_FAIL=ON"
+      -P "${_dep_closure_script}")
+  set_tests_properties(qec_realtime_server_dependency_closure_selftest
+    PROPERTIES LABELS "qec")
+endif()
+
+# ==============================================================================
 
 add_subdirectory(backend-specific)
 add_subdirectory(realtime)
 add_subdirectory(decoders/pymatching)
+add_subdirectory(decoders/chromobius)
 
 # Hololink bridge tools (FPGA playback + graph-launched QLDPC bridge)
 if(CUDAQX_QEC_ENABLE_HOLOLINK_TOOLS)
