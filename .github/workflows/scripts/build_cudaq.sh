@@ -101,11 +101,14 @@ cd cudaq
 # Building MLIR bindings
 # ==============================================================================
 
+# Avoid the manylinux image's pre-existing /llvm-project/build cache,
+# which can pin CMAKE_MAKE_PROGRAM to old Ninja even after PATH is fixed.
 echo "Building MLIR bindings for ${python}" && \
     rm -rf "$LLVM_INSTALL_PREFIX/src" "$LLVM_INSTALL_PREFIX/python_packages" && \
     Python3_EXECUTABLE="$(which ${python})" \
     LLVM_PROJECTS='clang;mlir;python-bindings' \
     LLVM_CMAKE_CACHE=/cmake/caches/LLVM.cmake LLVM_SOURCE=/llvm-project \
+    LLVM_BUILD_FOLDER=build-cmake4-ninja112 \
     bash scripts/build_llvm.sh -c Release -v
 
 # ==============================================================================
