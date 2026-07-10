@@ -282,23 +282,24 @@ public:
 
   /// @brief Enqueue a syndrome for decoding (pointer version)
   /// @return True if enough syndromes have been enqueued to trigger a decode.
-  bool enqueue_syndrome(const uint8_t *syndrome, std::size_t syndrome_length);
+  virtual bool enqueue_syndrome(const uint8_t *syndrome,
+                                std::size_t syndrome_length);
 
   /// @brief Enqueue a syndrome for decoding (vector version)
   /// @return True if enough syndromes have been enqueued to trigger a decode.
-  bool enqueue_syndrome(const std::vector<uint8_t> &syndrome);
+  virtual bool enqueue_syndrome(const std::vector<uint8_t> &syndrome);
 
   /// @brief Get the current observable corrections.
-  const uint8_t *get_obs_corrections() const;
+  virtual const uint8_t *get_obs_corrections() const;
 
   /// @brief Get the number of observables.
   std::size_t get_num_observables() const;
 
   /// @brief Clear any stored corrections.
-  void clear_corrections();
+  virtual void clear_corrections();
 
   /// @brief Reset the decoder, clearing all per-shot memory and corrections.
-  void reset_decoder();
+  virtual void reset_decoder();
 
   // -- End realtime decoding API --
 
