@@ -20,7 +20,7 @@ if [ -z "$CUDAQ_REALTIME_ROOT" ]; then
   git clone --filter=blob:none --no-checkout "https://github.com/${CUDAQ_REPO}.git" cudaq-realtime-src
   cd cudaq-realtime-src
   git sparse-checkout init --cone
-  git sparse-checkout set realtime
+  git sparse-checkout set realtime cmake
   git checkout "$CUDAQ_REF"
 
   # Install build tools and DOCA/Holoscan SDK for HSB.
