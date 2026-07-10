@@ -80,6 +80,12 @@ public:
   /// `cudaq::qec::realtime::graph_resources *` to extract `graph_exec`.
   void launch_scheduler(void *raw_graph_resources);
 
+  /// ITransceiver hook: forwards to launch_scheduler().
+  bool launch_device_scheduler(void *raw_graph_resources) override {
+    launch_scheduler(raw_graph_resources);
+    return true;
+  }
+
   /// Block until shutdown() is called.  The GPU scheduler handles RX/TX;
   /// this method only satisfies the ITransceiver contract for DecodingServer.
   RxFrame recv() override;
