@@ -14,6 +14,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <queue>
@@ -21,17 +22,16 @@
 #include <thread>
 #include <vector>
 
-namespace cudaq::qec::decoder_server {
+namespace cudaq::qec::decoding_server {
 
-/// Byte vector of observable correction bits returned by get_corrections.
-using CorrectionBits = std::vector<uint8_t>;
-
-/// A unit of work dispatched from the RpcDispatcher to a DecoderSession worker
+/// A unit of work dispatched from the RpcDispatcher to a DecodingSession worker
 /// thread.  The payload is an owned copy of the full frame bytes so that the
 /// dispatcher can return the transport ring slot immediately after dispatch.
-/// Zero-copy (holding a span into the ring buffer) is a future optimization;
-/// if adopted, release(frame) must move to after the worker consumes the
-/// payload.
+///
+/// release_fn: propagated from RxFrame::release_fn.  It fires when the
+/// WorkItem is destroyed — after the worker has processed it, or on any drop
+/// path (queue full, validation failure).  On CPU/CQR/loopback paths this is
+/// always null.
 struct WorkItem {
   uint32_t function_id;
   std::vector<uint8_t> frame_buf; ///< RPCHeader + payload (moved from RxFrame)
@@ -40,6 +40,7 @@ struct WorkItem {
   uint64_t ptp_timestamp;
   uint32_t vp_id;
   ITransceiver *response_transport; ///< transport the request arrived on
+  ReleaseFn release_fn;             ///< null except on GPU ring-buffer path
 };
 
 /// RAII wrapper: calls decoder::release_decode_graph() on destruction.
@@ -56,7 +57,9 @@ inline constexpr size_t kDefaultQueueDepth = 64;
 
 /// Owns one decoder instance plus a dedicated FIFO worker thread; decoder calls
 /// are sequenced through the worker.
-struct DecoderSession {
+struct DecodingSession {
+  enum class ShotState { collecting, result_ready, failed };
+
   // -- Decoder and GPU resources --
   std::unique_ptr<cudaq::qec::decoder> dec;
   GraphResourcesPtr graph_resources;
@@ -73,15 +76,14 @@ struct DecoderSession {
   std::atomic<bool> shutdown{false};
   size_t queue_depth{kDefaultQueueDepth};
 
-  // Latched when enqueue_syndromes is dropped (queue full).
-  // Cleared by the worker after surfacing the error in get_corrections.
+  // Latched when enqueue_syndromes is dropped (queue full). The shot remains
+  // poisoned until reset_decoder clears all mutable state.
   std::atomic<bool> syndromes_dropped{false};
 
-  // Sticky deferred-execution error: a decoder exception during on_enqueue
-  // is latched here (enqueue is fire-and-forget, so there is no response to
-  // carry it) and surfaced as INTERNAL_ERROR at this session's next
-  // get_corrections. Cleared by on_reset. Worker-thread-only.
-  bool decoder_error = false;
+  // Worker-owned state for the current shot. result_ready means a decode call
+  // completed; it is deliberately independent of decoder_result::converged.
+  ShotState shot_state = ShotState::collecting;
+  size_t accepted_syndromes = 0;
 
   // Per-session metrics (updated atomically by the worker thread).
   std::atomic<uint64_t> enqueue_count{0};
@@ -91,22 +93,27 @@ struct DecoderSession {
   std::atomic<uint64_t> busy_count{0};
   std::atomic<uint64_t> syndromes_dropped_count{0};
 
-  DecoderSession() = default;
-  DecoderSession(const DecoderSession &) = delete;
-  DecoderSession &operator=(const DecoderSession &) = delete;
-  DecoderSession(DecoderSession &&) = delete;
-  DecoderSession &operator=(DecoderSession &&) = delete;
-  ~DecoderSession();
+  DecodingSession() = default;
+  DecodingSession(const DecodingSession &) = delete;
+  DecodingSession &operator=(const DecodingSession &) = delete;
+  DecodingSession(DecodingSession &&) = delete;
+  DecodingSession &operator=(DecodingSession &&) = delete;
+  ~DecodingSession();
 
-  /// Construct a session on the heap: create the decoder, capture graph
+  /// Construct a session around an already configured decoder and capture graph
   /// resources if supported.
-  static std::unique_ptr<DecoderSession>
-  create(const std::string &decoder_name, const cudaq::qec::decoder_init &init,
-         const cudaqx::heterogeneous_map &params,
+  static std::unique_ptr<DecodingSession>
+  create(std::unique_ptr<cudaq::qec::decoder> decoder,
          SyndromeMappingTable mapping_table);
 
   /// Start the FIFO worker thread.  Must be called after create().
   void start_worker();
+
+  /// Signal shutdown and join the worker (drains any queued items first).
+  /// Idempotent; also called from the destructor.  DecodingServer calls this
+  /// before its transports are destroyed because queued items reply through
+  /// raw ITransceiver pointers.
+  void stop_worker();
 
   /// Non-blocking enqueue.  Returns false if the work queue is full.
   bool try_enqueue(WorkItem item);
@@ -122,9 +129,9 @@ struct DecoderSession {
   void worker_loop();
 };
 
-/// High-water mark of simultaneously-busy DecoderSession workers across all
+/// High-water mark of simultaneously-busy DecodingSession workers across all
 /// sessions in this process (concurrency evidence for multi-logical-qubit
-/// tests and daemon stats).
+/// tests and server stats).
 uint64_t max_concurrent_busy_sessions();
 
-} // namespace cudaq::qec::decoder_server
+} // namespace cudaq::qec::decoding_server

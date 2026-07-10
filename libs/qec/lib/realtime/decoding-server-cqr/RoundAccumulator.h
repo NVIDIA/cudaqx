@@ -15,7 +15,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace cudaq::qec::decoder_server {
+namespace cudaq::qec::decoding_server {
 
 /// Round type forwarded from the syndrome mapping table.
 enum class RoundType : uint8_t {
@@ -36,7 +36,11 @@ struct CompletedRound {
 ///   table[syndrome_mapping_id][vp_id] = vector of flat target indices
 ///
 /// For the 0.7.0 MVP (single VP), the table has one entry per
-/// syndrome_mapping_id with one VP whose indices are [0, 1, ..., N-1].
+/// syndrome_mapping_id with one VP whose EMPTY index list denotes the
+/// identity mapping: the fragment passes through as the completed round at
+/// whatever length it arrives (the decoder accumulates rounds itself).
+/// Non-empty index lists scatter round-relative indices per the spec's
+/// syndrome mapping table.
 using SyndromeMappingTable =
     std::unordered_map<uint64_t, std::vector<std::vector<uint32_t>>>;
 
@@ -55,7 +59,7 @@ struct RoundKeyHash {
 /// Assembles VP syndrome fragments into the flat detector vector required by
 /// the decoder.
 ///
-/// Owned by DecoderSession and accessed exclusively by that session's FIFO
+/// Owned by DecodingSession and accessed exclusively by that session's FIFO
 /// worker thread.  No internal locking is required.
 class RoundAccumulator {
 public:
@@ -68,7 +72,7 @@ public:
                                        size_t num_syndromes,
                                        const SyndromeMappingTable &table);
 
-  /// Discard all in-progress rounds.  Called by DecoderSession::on_reset().
+  /// Discard all in-progress rounds.  Called by DecodingSession::on_reset().
   void clear();
 
 private:
@@ -82,4 +86,4 @@ private:
   std::unordered_map<RoundKey, InProgressRound, RoundKeyHash> rounds_;
 };
 
-} // namespace cudaq::qec::decoder_server
+} // namespace cudaq::qec::decoding_server

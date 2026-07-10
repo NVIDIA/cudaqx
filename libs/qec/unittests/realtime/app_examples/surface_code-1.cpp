@@ -19,9 +19,71 @@
 #include <common/CustomOp.h>
 #include <common/ExecutionContext.h>
 #include <common/NoiseModel.h>
+#include <cstdlib>
 #include <fstream>
 #include <mutex>
 #include <sstream>
+
+#ifdef QEC_APP_CQR
+// cqr build variant: this same application compiled with -frealtime-lowering
+// and linked against the simulation-cqr client wrappers, so every
+// cudaq::qec::decoding::* device_call crosses the cudaq-realtime wire instead
+// of resolving to the in-process trampolines. The decoding is served either by
+// the in-process decoding-server-cqr service
+// (CUDAQ_DEVICE_CALL_CHANNEL=host_dispatch) or by a standalone
+// decoding_server (QEC_DECODING_SERVER_PORT=<port>). The wire to the
+// server defaults to udp loopback; set QEC_DECODING_SERVER_TRANSPORT=cpu_roce
+// to use the CPU RoCE RDMA channel instead (works over SoftRoCE/rdma_rxe; the
+// RDMA topology comes from the same CUDAQ_CPU_ROCE_TEST_* env vars as CUDA-Q's
+// CpuRoceChannelTester).
+#include "cudaq/realtime.h"
+
+// In-process service self-check hook (defined in decoding-server-cqr):
+// non-zero only if device_calls actually traversed the host-dispatch ring.
+extern "C" std::uint64_t cudaqx_qec_device_call_dispatch_count();
+
+namespace {
+std::string env_or(const char *name, const std::string &fallback) {
+  const char *value = std::getenv(name);
+  return (value && *value) ? std::string(value) : fallback;
+}
+
+void initialize_realtime_channel(const char *prog) {
+  std::vector<std::string> args = {prog};
+  if (const char *port = std::getenv("QEC_DECODING_SERVER_PORT");
+      port && *port) {
+    const std::string transport =
+        env_or("QEC_DECODING_SERVER_TRANSPORT", "udp");
+    if (transport == "cpu_roce") {
+      // The RDMA ring geometry (slots x slot-size) is part of the cpu_roce
+      // wire contract: the channel writes requests directly into the server's
+      // rings, so these must match decoding_server's --num-slots /
+      // --slot-size defaults (8 x 256).
+      args.push_back("--cudaq-device-call=cpu_roce");
+      args.push_back("--cudaq-device-call-slots=8");
+      args.push_back("--cudaq-device-call-slot-size=256");
+      args.push_back("ib-device=" +
+                     env_or("CUDAQ_CPU_ROCE_TEST_CHANNEL_DEVICE", "mlx5_0"));
+      args.push_back("local-ip=" +
+                     env_or("CUDAQ_CPU_ROCE_TEST_CHANNEL_IP", "10.0.0.1"));
+      args.push_back("rendezvous-host=" +
+                     env_or("CUDAQ_CPU_ROCE_TEST_DAEMON_IP", "10.0.0.2"));
+      args.push_back(std::string("rendezvous-port=") + port);
+    } else {
+      args.push_back("--cudaq-device-call=udp");
+      args.push_back("udp-host=127.0.0.1");
+      args.push_back(std::string("udp-port=") + port);
+    }
+  }
+  std::vector<char *> argv;
+  for (auto &arg : args)
+    argv.push_back(arg.data());
+  argv.push_back(nullptr);
+  int argc = static_cast<int>(args.size());
+  cudaq::realtime::initialize(argc, argv.data());
+}
+} // namespace
+#endif
 
 // Host-side decoding API (for syndrome capture)
 namespace cudaq::qec::decoding::host {
@@ -1090,11 +1152,31 @@ int main(int argc, char **argv) {
   auto code = cudaq::qec::get_code(
       "surface_code", cudaqx::heterogeneous_map{{"distance", distance}});
 
+#ifdef QEC_APP_CQR
+  // The --save_dem pass runs with allow_device_calls=false (MSM contexts
+  // only), so the device_call channel is only needed when shots actually run.
+  if (!save_dem)
+    initialize_realtime_channel(argv[0]);
+#endif
+
   demo_circuit_host(*code, distance, p_spam, cudaq::qec::operation::prep0,
                     num_shots, num_rounds, num_logical, dem_filename, save_dem,
                     load_dem, decoder_window, decoder_type, sw_window_size,
                     sw_step_size, save_syndrome, load_syndrome,
                     syndrome_filename, use_relay_bp);
+
+#ifdef QEC_APP_CQR
+  if (!save_dem) {
+    // With CUDAQ_DEVICE_CALL_CHANNEL=host_dispatch this proves the shots'
+    // device_calls crossed the ring to the in-process decoding server (it
+    // stays 0 if they bypassed to a trampoline, or if a udp channel routed
+    // them to an external server instead).
+    printf("CQR service dispatch count: %llu\n",
+           static_cast<unsigned long long>(
+               cudaqx_qec_device_call_dispatch_count()));
+    cudaq::realtime::finalize();
+  }
+#endif
 
   // Ensure clean shutdown
   cudaq::qec::decoding::config::finalize_decoders();

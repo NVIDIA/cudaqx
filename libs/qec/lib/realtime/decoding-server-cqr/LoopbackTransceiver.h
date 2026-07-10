@@ -16,7 +16,7 @@
 #include <mutex>
 #include <vector>
 
-namespace cudaq::qec::decoder_server {
+namespace cudaq::qec::decoding_server {
 
 /// Paired in-process transceivers for development and testing.
 ///
@@ -40,15 +40,18 @@ private:
       std::shared_ptr<std::deque<std::vector<uint8_t>>> inbox,
       std::shared_ptr<std::deque<std::vector<uint8_t>>> outbox,
       std::shared_ptr<std::mutex> mtx,
-      std::shared_ptr<std::condition_variable> cv)
+      std::shared_ptr<std::condition_variable> cv,
+      std::shared_ptr<bool> stopped)
       : inbox_(std::move(inbox)), outbox_(std::move(outbox)),
-        mtx_(std::move(mtx)), cv_(std::move(cv)),
-        stopped_(std::make_shared<bool>(false)) {}
+        mtx_(std::move(mtx)), cv_(std::move(cv)), stopped_(std::move(stopped)) {
+  }
 
   std::shared_ptr<std::deque<std::vector<uint8_t>>> inbox_;
   std::shared_ptr<std::deque<std::vector<uint8_t>>> outbox_;
   std::shared_ptr<std::mutex> mtx_;
   std::shared_ptr<std::condition_variable> cv_;
+  // Shared between the two endpoints so that shutting down either side wakes
+  // a peer blocked in recv() on the other.
   std::shared_ptr<bool> stopped_;
 };
 
@@ -59,11 +62,12 @@ LoopbackTransceiver::make() {
   auto q_ba = std::make_shared<std::deque<std::vector<uint8_t>>>();
   auto mtx = std::make_shared<std::mutex>();
   auto cv = std::make_shared<std::condition_variable>();
+  auto stopped = std::make_shared<bool>(false);
 
   auto a = std::unique_ptr<LoopbackTransceiver>(
-      new LoopbackTransceiver(q_ba, q_ab, mtx, cv));
+      new LoopbackTransceiver(q_ba, q_ab, mtx, cv, stopped));
   auto b = std::unique_ptr<LoopbackTransceiver>(
-      new LoopbackTransceiver(q_ab, q_ba, mtx, cv));
+      new LoopbackTransceiver(q_ab, q_ba, mtx, cv, stopped));
   return {std::move(a), std::move(b)};
 }
 
@@ -95,4 +99,4 @@ inline void LoopbackTransceiver::send(const PeerId & /*peer*/,
   cv_->notify_all();
 }
 
-} // namespace cudaq::qec::decoder_server
+} // namespace cudaq::qec::decoding_server

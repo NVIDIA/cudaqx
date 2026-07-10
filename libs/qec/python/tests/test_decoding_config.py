@@ -577,7 +577,9 @@ def test_configure_decoders_from_str_smoke():
     decoder_config.syndrome_size = 3
     decoder_config.H_sparse = [1, 2, 3, -1, 6, 7, 8, -1, -1]
     decoder_config.set_decoder_custom_args(nv)
-    yaml_str = decoder_config.to_yaml_str()
+    multi_decoder_config = qec.multi_decoder_config()
+    multi_decoder_config.decoders = [decoder_config]
+    yaml_str = multi_decoder_config.to_yaml_str()
     # Do not instantiate the decoder if it is not available.
     if not is_nv_qldpc_decoder_available():
         return

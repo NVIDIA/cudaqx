@@ -11,7 +11,7 @@
 #include <stdexcept>
 #include <string>
 
-namespace cudaq::qec::decoder_server {
+namespace cudaq::qec::decoding_server {
 
 std::size_t RoundKeyHash::operator()(const RoundKey &k) const noexcept {
   // FNV-1a style mix over the three fields.
@@ -44,6 +44,10 @@ RoundAccumulator::ingest(const RoundKey &key, uint32_t vp_id,
   const auto &indices = vp_mappings[vp_id];
   const bool pass_through = indices.empty();
 
+  if (pass_through && vp_mappings.size() != 1)
+    throw std::invalid_argument(
+        "Pass-through syndrome mapping requires exactly one VP");
+
   if (!pass_through && num_syndromes != indices.size())
     throw std::invalid_argument("Syndrome count mismatch: got " +
                                 std::to_string(num_syndromes) + " expected " +
@@ -72,11 +76,6 @@ RoundAccumulator::ingest(const RoundKey &key, uint32_t vp_id,
                                 std::to_string(vp_id));
 
   if (pass_through) {
-    if (num_syndromes != round.flat.size())
-      throw std::invalid_argument("Pass-through syndrome count mismatch: got " +
-                                  std::to_string(num_syndromes) +
-                                  ", expected " +
-                                  std::to_string(round.flat.size()));
     for (size_t i = 0; i < num_syndromes; ++i)
       round.flat[i] = bits[i];
   } else {
@@ -101,4 +100,4 @@ RoundAccumulator::ingest(const RoundKey &key, uint32_t vp_id,
 
 void RoundAccumulator::clear() { rounds_.clear(); }
 
-} // namespace cudaq::qec::decoder_server
+} // namespace cudaq::qec::decoding_server

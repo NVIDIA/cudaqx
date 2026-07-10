@@ -11,7 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace cudaq::qec::decoder_server {
+namespace cudaq::qec::decoding_server {
 
 // Function IDs for the three decoder RPCs (FNV1a-32 of function names).
 // Values match the static_asserts in decoder_rpc_ids.h; duplicated here to
@@ -19,6 +19,11 @@ namespace cudaq::qec::decoder_server {
 inline constexpr uint32_t kEnqueueSyndromesFunctionId = 0x7ED8BE82u;
 inline constexpr uint32_t kGetCorrectionsFunctionId = 0x882D5BA1u;
 inline constexpr uint32_t kResetDecoderFunctionId = 0x977A59CFu;
+
+// Hard cap for one enqueue_syndromes request. Enforced at both transport and
+// session boundaries so alternate transports cannot bypass allocation and
+// packed-length validation.
+inline constexpr uint64_t kMaxSyndromeBits = 1u << 20; // 1 M bits
 
 // Wire magic bytes (from cudaq-realtime spec).
 inline constexpr uint32_t kRPCRequestMagic = 0x43555152u;  // 'CUQR'
@@ -54,18 +59,22 @@ struct __attribute__((packed)) EnqueuePayload {
   int64_t counter;             ///< arg1
   int64_t syndrome_mapping_id; ///< arg2
   int64_t num_syndromes;       ///< arg3 (# syndrome bits)
-  // Trailing: ceil(num_syndromes/8) bit-packed bytes + 0-7 zero pad to 8B
+  // Trailing: ceil(num_syndromes/8) bit-packed bytes (LSB-first), no pad
 };
 static_assert(sizeof(EnqueuePayload) == 32, "EnqueuePayload must be 32 bytes");
 
+// Layout per decoder_server_runtime.md: two 8-byte scalars in schema order plus
+// a trailing 1-byte bool, NO trailing padding (arg_len = 17 exactly).
 struct __attribute__((packed)) GetCorrectionsPayload {
   int64_t decoder_id;  ///< arg0
-  int64_t return_size; ///< arg1 (# correction bits to fetch)
-  uint8_t reset;       ///< arg2 (1 = reset decoder after read)
-  uint8_t _pad[7];     ///< zero pad to 8-byte multiple
+  int64_t return_size; ///< arg1 (# correction bits to fetch; the cc.device_call
+                       ///<       lowering serializes the OUT std::vector<bool>
+                       ///<       length here)
+  uint8_t reset;       ///< arg2 (1 = reset decoder after read; trailing bool,
+                       ///<       no padding)
 };
-static_assert(sizeof(GetCorrectionsPayload) == 24,
-              "GetCorrectionsPayload must be 24 bytes");
+static_assert(sizeof(GetCorrectionsPayload) == 17,
+              "GetCorrectionsPayload must be 17 bytes");
 
 struct __attribute__((packed)) ResetPayload {
   int64_t decoder_id; ///< arg0
@@ -88,4 +97,4 @@ constexpr size_t bit_packed_bytes(size_t num_bits) noexcept {
   return (num_bits + 7) / 8;
 }
 
-} // namespace cudaq::qec::decoder_server
+} // namespace cudaq::qec::decoding_server

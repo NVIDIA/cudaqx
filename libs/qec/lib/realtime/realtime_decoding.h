@@ -8,8 +8,10 @@
 
 #pragma once
 
+#include "cudaq/qec/decoder.h"
 #include "cudaq/qec/realtime/decoding_config.h"
 #include <cstdint>
+#include <memory>
 
 // Note: none of these are intended to be user-facing functions.
 
@@ -34,6 +36,17 @@ __attribute__((visibility("default"))) cudaqx::heterogeneous_map
 prepare_decoder_params(
     const cudaq::qec::decoding::config::decoder_config &decoder_config);
 
+/// Construct and initialize one decoder for realtime use. The returned decoder
+/// is fully configured with its ID and O/D matrices, but is not installed in a
+/// process-global registry or attached to a worker thread.
+///
+/// @throws std::invalid_argument if the decoder ID cannot be represented.
+/// @throws std::runtime_error if required realtime configuration is missing or
+/// decoder construction/initialization fails.
+__attribute__((visibility("default"))) std::unique_ptr<cudaq::qec::decoder>
+create_realtime_decoder(
+    const cudaq::qec::decoding::config::decoder_config &decoder_config);
+
 __attribute__((visibility("default"))) void
 get_corrections(std::size_t decoder_id, uint8_t *corrections,
                 std::uint64_t correction_length, bool reset);
@@ -56,7 +69,7 @@ _set_syndrome_capture_callback(void (*callback)(const uint8_t *, size_t));
 
 /// @brief The currently registered syndrome-capture callback (nullptr if
 /// none). Served decode paths that bypass host::enqueue_syndromes (the
-/// decoder-server service) use this to keep --save_syndrome working.
+/// decoding-server service) use this to keep --save_syndrome working.
 __attribute__((visibility("default"))) void (*_get_syndrome_capture_callback())(
     const uint8_t *, size_t);
 
