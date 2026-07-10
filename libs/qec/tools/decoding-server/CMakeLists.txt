@@ -76,7 +76,7 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-decoding-server-cqr)
       message(STATUS "decoding_server: cpu_roce transport enabled")
     endif()
     # The server's --transport=gpu_roce path needs BOTH the GPU RoCE transport
-    # (compiled into cudaq-qec-decoder-server when hololink/DOCA are present)
+    # (compiled into cudaq-qec-decoding-server when hololink/DOCA are present)
     # AND the proprietary cudevice archive, which supplies the three
     # populate-shim symbols (cudaqx_qec_realtime_dispatch_populate_*_device_entry)
     # that GpuRoceTransceiver::launch_scheduler resolves via dlsym. Hololink
@@ -107,7 +107,7 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-decoding-server-cqr)
         ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/realtime/decoding-server-cqr
       )
       target_link_libraries(decoding_server PRIVATE
-        cudaq-qec-decoder-server
+        cudaq-qec-decoding-server
         ${CUDAQ_REALTIME_DISPATCH_LIBRARY}
         $<LINK_LIBRARY:WHOLE_ARCHIVE,cudaq-qec-realtime-cudevice-proprietary>
       )

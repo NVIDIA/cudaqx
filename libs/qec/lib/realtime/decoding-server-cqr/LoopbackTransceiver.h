@@ -16,7 +16,7 @@
 #include <mutex>
 #include <vector>
 
-namespace cudaq::qec::decoder_server {
+namespace cudaq::qec::decoding_server {
 
 /// Paired in-process transceivers for development and testing.
 ///
@@ -99,4 +99,4 @@ inline void LoopbackTransceiver::send(const PeerId & /*peer*/,
   cv_->notify_all();
 }
 
-} // namespace cudaq::qec::decoder_server
+} // namespace cudaq::qec::decoding_server

@@ -79,10 +79,10 @@
 #endif
 
 #ifdef QEC_HAVE_GPU_ROCE_TRANSPORT
-// DecoderServer.h (and GpuRoceTransceiver.h via DecoderServer.cpp) live in the
-// decoding-server-cqr directory, added to include paths by CMakeLists when
+// DecodingServer.h (and GpuRoceTransceiver.h via DecodingServer.cpp) live in
+// the decoding-server-cqr directory, added to include paths by CMakeLists when
 // CUDAQ_GPU_ROCE_AVAILABLE is true.
-#include "DecoderServer.h"
+#include "DecodingServer.h"
 #endif
 
 #include <atomic>
@@ -99,8 +99,8 @@
 
 extern "C" void cudaqx_qec_realtime_device_call_service_force_link();
 extern "C" std::uint64_t cudaqx_qec_device_call_dispatch_count();
-extern "C" std::uint64_t cudaqx_qec_decoder_server_max_concurrent();
-extern "C" void cudaqx_qec_decoder_server_shutdown();
+extern "C" std::uint64_t cudaqx_qec_decoding_server_max_concurrent();
+extern "C" void cudaqx_qec_decoding_server_shutdown();
 
 namespace {
 
@@ -495,7 +495,7 @@ int main(int argc, char **argv) {
   std::signal(SIGTERM, on_signal);
 
   // [1] Validate the YAML and hand its path to the decoding-server service:
-  // the DecoderServer (one DecoderSession worker thread per decoder) builds
+  // the DecodingServer (one DecodingSession worker thread per decoder) builds
   // the decoder instances itself when the dispatch session is created below.
   std::ifstream config_file(cfg.config_path);
   if (!config_file) {
@@ -520,17 +520,17 @@ int main(int argc, char **argv) {
             << "; transport: " << cfg.transport << std::endl;
 
   // [2a] GPU RoCE takes a completely different path: bypass the CQR
-  // DeviceCallService / HOST_CALL dispatcher and use DecoderServer directly.
+  // DeviceCallService / HOST_CALL dispatcher and use DecodingServer directly.
   // Must be checked before force-linking the CQR plugin (which creates a
-  // DecoderServer internally for the HOST_CALL path) to avoid double-init.
+  // DecodingServer internally for the HOST_CALL path) to avoid double-init.
 #ifdef QEC_HAVE_GPU_ROCE_TRANSPORT
   if (cfg.transport == "gpu_roce") {
-    // DecoderServer(config_yaml) reads the YAML, creates GpuRoceTransceiver
+    // DecodingServer(config_yaml) reads the YAML, creates GpuRoceTransceiver
     // (Hololink Sensor Bridge + DOCA), loads decoder sessions, and calls
     // launch_scheduler() to wire the CUDAQ device-graph scheduler to the
     // Hololink ring buffers.  The GPU scheduler then handles
     // RX→dispatch→decode→TX autonomously; this thread just waits for signal.
-    cudaq::qec::decoder_server::DecoderServer server(cfg.config_path);
+    cudaq::qec::decoding_server::DecodingServer server(cfg.config_path);
     // QP/rkey/buf already printed to stdout by launch_scheduler() so the
     // orchestration script can grep them before the READY line.
     std::cout << "QEC_DECODING_SERVER_READY gpu_roce" << std::endl;
@@ -566,7 +566,7 @@ int main(int argc, char **argv) {
   }
   // The session owns the function table; keep it alive for the server's
   // lifetime (the dispatcher loop below reads table.entries in place).
-  // Creating it also starts the DecoderServer (decoder construction + one
+  // Creating it also starts the DecodingServer (decoder construction + one
   // worker thread per decoder) -- before the READY line below, so slow
   // decoder initialization never races the first client request.
   std::unique_ptr<cudaq::realtime::DeviceCallServiceSession> session;
@@ -574,7 +574,7 @@ int main(int argc, char **argv) {
     session = service->createDispatchSession(
         cudaq::realtime::DeviceCallDispatchMode::Host);
   } catch (const std::exception &e) {
-    std::cerr << "ERROR: decoder-server startup failed: " << e.what()
+    std::cerr << "ERROR: decoding-server startup failed: " << e.what()
               << std::endl;
     return 1;
   }
@@ -674,15 +674,15 @@ int main(int argc, char **argv) {
     dispatcher_thread.join();
   if (tp.shutdown)
     tp.shutdown();
-  // Stop the DecoderServer receive loop and join its thread before the
+  // Stop the DecodingServer receive loop and join its thread before the
   // process exits (a still-joinable static thread would std::terminate).
-  cudaqx_qec_decoder_server_shutdown();
+  cudaqx_qec_decoding_server_shutdown();
 
   std::cout << "QEC_DECODING_SERVER_DISPATCHED count="
             << cudaqx_qec_device_call_dispatch_count() << std::endl;
   // Concurrency evidence for multi-logical-qubit tests: high-water mark of
-  // simultaneously-busy DecoderSession workers.
+  // simultaneously-busy DecodingSession workers.
   std::cout << "QEC_DECODING_SERVER_MAX_CONCURRENT_DECODERS count="
-            << cudaqx_qec_decoder_server_max_concurrent() << std::endl;
+            << cudaqx_qec_decoding_server_max_concurrent() << std::endl;
   return 0;
 }

@@ -10,7 +10,7 @@
 
 #include "ITransceiver.h"
 
-namespace cudaq::qec::decoder_server {
+namespace cudaq::qec::decoding_server {
 
 /// CPU RoCE transport skeleton (ibverbs).
 ///
@@ -30,4 +30,4 @@ public:
   void shutdown() override;
 };
 
-} // namespace cudaq::qec::decoder_server
+} // namespace cudaq::qec::decoding_server

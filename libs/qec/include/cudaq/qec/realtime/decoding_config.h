@@ -292,8 +292,8 @@ __attribute__((visibility("default"))) void finalize_decoders();
 
 /// @brief Return the most recently passed multi_decoder_config, or an empty
 /// pointer if configure_decoders() has not been called in this process.
-/// Used by the decoder-server DeviceCallService plugin to build DecoderSessions
-/// on the in-process host_dispatch path without requiring
+/// Used by the decoding-server DeviceCallService plugin to build
+/// DecodingSessions on the in-process host_dispatch path without requiring
 /// CUDAQ_QEC_DECODER_CONFIG.  Returns shared ownership: a concurrent
 /// configure_decoders() replaces the stored config but cannot free it out
 /// from under the caller.

@@ -11,7 +11,7 @@
 #include <stdexcept>
 #include <string>
 
-namespace cudaq::qec::decoder_server {
+namespace cudaq::qec::decoding_server {
 
 std::size_t RoundKeyHash::operator()(const RoundKey &k) const noexcept {
   // FNV-1a style mix over the three fields.
@@ -100,4 +100,4 @@ RoundAccumulator::ingest(const RoundKey &key, uint32_t vp_id,
 
 void RoundAccumulator::clear() { rounds_.clear(); }
 
-} // namespace cudaq::qec::decoder_server
+} // namespace cudaq::qec::decoding_server

@@ -15,7 +15,7 @@
 #include <iterator>
 #include <stdexcept>
 
-namespace cudaq::qec::decoder_server {
+namespace cudaq::qec::decoding_server {
 
 using cudaq::qec::decoding::config::multi_decoder_config;
 
@@ -72,13 +72,13 @@ void SessionRegistry::load_from_config(const multi_decoder_config &config,
                   dc.type);
 
     auto decoder = cudaq::qec::decoding::host::create_realtime_decoder(dc);
-    auto session = DecoderSession::create(std::move(decoder),
-                                          make_default_mapping_table());
+    auto session = DecodingSession::create(std::move(decoder),
+                                           make_default_mapping_table());
 
     // [For follow-up] dc.transport (cpu_roce / gpu_roce) is parsed from YAML
     // but not yet used to select a transceiver here. Transport binding requires
     // CpuRoceTransceiverAdapter / GpuRoceTransceiverAdapter (gated on
-    // CUDAQ_REALTIME headers); the split-transport DecoderServer constructor
+    // CUDAQ_REALTIME headers); the split-transport DecodingServer constructor
     // is already in place to accept the resulting dispatch map.
     session->start_worker();
     sessions_.emplace(id, std::move(session));
@@ -88,7 +88,7 @@ void SessionRegistry::load_from_config(const multi_decoder_config &config,
                 sessions_.size());
 }
 
-DecoderSession &SessionRegistry::get(uint64_t decoder_id) {
+DecodingSession &SessionRegistry::get(uint64_t decoder_id) {
   auto it = sessions_.find(decoder_id);
   if (it == sessions_.end())
     throw std::out_of_range("Unknown decoder_id: " +
@@ -96,7 +96,7 @@ DecoderSession &SessionRegistry::get(uint64_t decoder_id) {
   return *it->second;
 }
 
-const DecoderSession &SessionRegistry::get(uint64_t decoder_id) const {
+const DecodingSession &SessionRegistry::get(uint64_t decoder_id) const {
   auto it = sessions_.find(decoder_id);
   if (it == sessions_.end())
     throw std::out_of_range("Unknown decoder_id: " +
@@ -104,4 +104,4 @@ const DecoderSession &SessionRegistry::get(uint64_t decoder_id) const {
   return *it->second;
 }
 
-} // namespace cudaq::qec::decoder_server
+} // namespace cudaq::qec::decoding_server

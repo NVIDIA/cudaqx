@@ -11,7 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace cudaq::qec::decoder_server {
+namespace cudaq::qec::decoding_server {
 
 // Function IDs for the three decoder RPCs (FNV1a-32 of function names).
 // Values match the static_asserts in decoder_rpc_ids.h; duplicated here to
@@ -97,4 +97,4 @@ constexpr size_t bit_packed_bytes(size_t num_bits) noexcept {
   return (num_bits + 7) / 8;
 }
 
-} // namespace cudaq::qec::decoder_server
+} // namespace cudaq::qec::decoding_server

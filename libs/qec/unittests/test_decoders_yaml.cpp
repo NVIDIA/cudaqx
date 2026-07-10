@@ -753,7 +753,7 @@ TEST(DecoderConfigTest, SessionRegistryUsesConfiguredRealtimeDecoder) {
   auto decoder_config = create_test_sample_realtime_decoder_config(0);
   config.decoders.push_back(std::move(decoder_config));
 
-  cudaq::qec::decoder_server::SessionRegistry registry;
+  cudaq::qec::decoding_server::SessionRegistry registry;
   registry.load_from_config(config, "unit test");
 
   const auto &decoder = registry.get(0).dec;
@@ -769,7 +769,7 @@ TEST(DecoderConfigTest, SessionRegistryRejectsMissingDetectorMatrix) {
   decoder_config.D_sparse.clear();
   config.decoders.push_back(std::move(decoder_config));
 
-  cudaq::qec::decoder_server::SessionRegistry registry;
+  cudaq::qec::decoding_server::SessionRegistry registry;
   EXPECT_THROW(registry.load_from_config(config, "unit test"),
                std::runtime_error);
 }
@@ -779,7 +779,7 @@ TEST(DecoderConfigTest, SessionRegistryRejectsNegativeDecoderId) {
   auto decoder_config = create_test_sample_realtime_decoder_config(-1);
   config.decoders.push_back(std::move(decoder_config));
 
-  cudaq::qec::decoder_server::SessionRegistry registry;
+  cudaq::qec::decoding_server::SessionRegistry registry;
   EXPECT_THROW(registry.load_from_config(config, "unit test"),
                std::runtime_error);
 }

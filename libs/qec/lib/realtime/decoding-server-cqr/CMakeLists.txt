@@ -98,42 +98,42 @@ if(HOLOSCAN_SENSOR_BRIDGE_BUILD_DIR AND CUDAQ_REALTIME_INCLUDE_DIR)
       AND DOCA_COMMON_LIB AND CUDAQ_REALTIME_BRIDGE_HOLOLINK_LIBRARY
       AND CUDAQ_REALTIME_DISPATCH_LIBRARY AND CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY)
     set(CUDAQ_GPU_ROCE_AVAILABLE TRUE CACHE INTERNAL
-      "GPU RoCE transport compiled into cudaq-qec-decoder-server")
+      "GPU RoCE transport compiled into cudaq-qec-decoding-server")
     message(STATUS
-      "cudaq-qec-decoder-server: GPU RoCE ENABLED (core=${HOLOLINK_CORE_LIB})")
+      "cudaq-qec-decoding-server: GPU RoCE ENABLED (core=${HOLOLINK_CORE_LIB})")
   else()
     message(STATUS
-      "cudaq-qec-decoder-server: GPU RoCE DISABLED "
+      "cudaq-qec-decoding-server: GPU RoCE DISABLED "
       "(missing one or more of: hololink_core gpu_roce_transceiver hololink "
       "base_receiver_op ibverbs doca_* cudaq-realtime-bridge-hololink "
       "cudaq-realtime-dispatch cudaq-realtime-host-dispatch)")
   endif()
 else()
   message(STATUS
-    "cudaq-qec-decoder-server: GPU RoCE DISABLED "
+    "cudaq-qec-decoding-server: GPU RoCE DISABLED "
     "(HOLOSCAN_SENSOR_BRIDGE_BUILD_DIR or CUDAQ_REALTIME_INCLUDE_DIR not set)")
 endif()
 
 message(STATUS
-  "cudaq-qec-decoder-server: CPU RoCE DISABLED (skeleton only; ibverbs implementation pending)")
+  "cudaq-qec-decoding-server: CPU RoCE DISABLED (skeleton only; ibverbs implementation pending)")
 
 # ---------------------------------------------------------------------------
-# Core decoder server (always built): transport abstraction, session registry,
+# Core decoding server (always built): transport abstraction, session registry,
 # per-decoder worker threads, RPC dispatcher.  No dependency on CUDAQ_REALTIME.
 # ---------------------------------------------------------------------------
-add_library(cudaq-qec-decoder-server STATIC
+add_library(cudaq-qec-decoding-server STATIC
   RoundAccumulator.cpp
-  DecoderSession.cpp
+  DecodingSession.cpp
   SessionRegistry.cpp
   RpcDispatcher.cpp
-  DecoderServer.cpp
+  DecodingServer.cpp
   CpuRoceTransceiver.cpp
   GpuRoceTransceiver.cpp
 )
 
-target_compile_features(cudaq-qec-decoder-server PUBLIC cxx_std_20)
+target_compile_features(cudaq-qec-decoding-server PUBLIC cxx_std_20)
 
-target_include_directories(cudaq-qec-decoder-server
+target_include_directories(cudaq-qec-decoding-server
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
     $<BUILD_INTERFACE:${CUDAQX_QEC_INCLUDE_DIR}>
@@ -141,7 +141,7 @@ target_include_directories(cudaq-qec-decoder-server
     $<INSTALL_INTERFACE:include>
 )
 
-target_link_libraries(cudaq-qec-decoder-server
+target_link_libraries(cudaq-qec-decoding-server
   PUBLIC
     # The decode-server core only needs the decoder interface + logger (in
     # cudaq-qec-decoders) and the realtime decoding config -- NOT the heavy
@@ -152,12 +152,12 @@ target_link_libraries(cudaq-qec-decoder-server
 )
 
 if(CUDAQ_GPU_ROCE_AVAILABLE)
-  target_compile_definitions(cudaq-qec-decoder-server PRIVATE CUDAQ_GPU_ROCE_AVAILABLE)
-  target_include_directories(cudaq-qec-decoder-server PRIVATE
+  target_compile_definitions(cudaq-qec-decoding-server PRIVATE CUDAQ_GPU_ROCE_AVAILABLE)
+  target_include_directories(cudaq-qec-decoding-server PRIVATE
     "${CUDAQ_REALTIME_INCLUDE_DIR}"
     "${_doca_root}/include"
   )
-  target_link_libraries(cudaq-qec-decoder-server PRIVATE
+  target_link_libraries(cudaq-qec-decoding-server PRIVATE
     "${CUDAQ_REALTIME_BRIDGE_HOLOLINK_LIBRARY}"
     "${GPU_ROCE_TRANSCEIVER_LIB}"
     "${BASE_RECEIVER_OP_LIB}"
@@ -171,12 +171,12 @@ if(CUDAQ_GPU_ROCE_AVAILABLE)
   )
 endif()
 
-set_target_properties(cudaq-qec-decoder-server PROPERTIES
+set_target_properties(cudaq-qec-decoding-server PROPERTIES
   ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
   POSITION_INDEPENDENT_CODE ON
 )
 
-install(TARGETS cudaq-qec-decoder-server
+install(TARGETS cudaq-qec-decoding-server
   COMPONENT qec-lib
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
@@ -184,7 +184,7 @@ install(TARGETS cudaq-qec-decoder-server
 # ---------------------------------------------------------------------------
 # CQR host-dispatch plugin (only when CUDAQ device_call headers are available):
 # CqrTransceiver bridges DeviceCallService handler callbacks to ITransceiver,
-# then hands off to DecoderServer for session management and decoding.
+# then hands off to DecodingServer for session management and decoding.
 # ---------------------------------------------------------------------------
 if(CUDAQ_QEC_DEVICE_CALL_SERVICE_AVAILABLE)
   add_library(cudaq-qec-realtime-decoding-server-cqr SHARED
@@ -207,14 +207,14 @@ if(CUDAQ_QEC_DEVICE_CALL_SERVICE_AVAILABLE)
   )
 
   target_link_options(cudaq-qec-realtime-decoding-server-cqr PRIVATE
-    $<$<CXX_COMPILER_ID:GNU>:-Wl,--exclude-libs,libcudaq-qec-decoder-server.a>
+    $<$<CXX_COMPILER_ID:GNU>:-Wl,--exclude-libs,libcudaq-qec-decoding-server.a>
   )
 
   target_link_libraries(cudaq-qec-realtime-decoding-server-cqr
     PUBLIC
       cudaq-qec-realtime-decoding
     PRIVATE
-      cudaq-qec-decoder-server
+      cudaq-qec-decoding-server
       cudaq::cudaq-common
       ${CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY}
   )

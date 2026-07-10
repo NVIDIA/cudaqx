@@ -6,7 +6,7 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  *******************************************************************************/
 
-#include "DecoderSession.h"
+#include "DecodingSession.h"
 #include "RoundAccumulator.h"
 #include "RpcDispatcher.h"
 #include "RpcWireFormat.h"
@@ -24,7 +24,7 @@
 
 namespace {
 
-using namespace cudaq::qec::decoder_server;
+using namespace cudaq::qec::decoding_server;
 
 class ControlledDecoder final : public cudaq::qec::decoder {
 public:
@@ -65,11 +65,12 @@ public:
   std::vector<uint8_t> response;
 };
 
-std::pair<std::unique_ptr<DecoderSession>, ControlledDecoder *> make_session() {
+std::pair<std::unique_ptr<DecodingSession>, ControlledDecoder *>
+make_session() {
   auto decoder = std::make_unique<ControlledDecoder>();
   auto *raw_decoder = decoder.get();
   SyndromeMappingTable mappings{{0, {{}}}};
-  return {DecoderSession::create(std::move(decoder), std::move(mappings)),
+  return {DecodingSession::create(std::move(decoder), std::move(mappings)),
           raw_decoder};
 }
 
@@ -132,7 +133,7 @@ void expect_status(const CaptureTransceiver &transport, RpcStatus status) {
   EXPECT_EQ(response->status, static_cast<int32_t>(status));
 }
 
-TEST(DecoderSessionStateTest, RequiresACompletedDecodeForEachResult) {
+TEST(DecodingSessionStateTest, RequiresACompletedDecodeForEachResult) {
   auto [session, decoder] = make_session();
   CaptureTransceiver transport;
 
@@ -164,7 +165,7 @@ TEST(DecoderSessionStateTest, RequiresACompletedDecodeForEachResult) {
   expect_status(transport, RpcStatus::NOT_READY);
 }
 
-TEST(DecoderSessionStateTest, KeepsFailuresStickyUntilReset) {
+TEST(DecodingSessionStateTest, KeepsFailuresStickyUntilReset) {
   auto [session, decoder] = make_session();
   CaptureTransceiver transport;
 
@@ -196,7 +197,7 @@ TEST(DecoderSessionStateTest, KeepsFailuresStickyUntilReset) {
   expect_status(transport, RpcStatus::NOT_READY);
 }
 
-TEST(DecoderSessionStateTest, RejectsMeasurementVolumeOverflow) {
+TEST(DecodingSessionStateTest, RejectsMeasurementVolumeOverflow) {
   auto [session, decoder] = make_session();
   CaptureTransceiver transport;
   (void)decoder;

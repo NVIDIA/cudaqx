@@ -54,7 +54,7 @@ constexpr std::uint64_t kRunShots = 1;
 constexpr std::int64_t kExpectedCorrection = 1;
 
 TEST(CqrTransceiverTest, RejectsPayloadBeyondReportedSlot) {
-  using namespace cudaq::qec::decoder_server;
+  using namespace cudaq::qec::decoding_server;
 
   // 4-arg wire format: [u64 decoder_id][u64 counter][u64 mapping_id]
   // [u64 num_syndromes (the vector<bool> element-count prefix)]
@@ -89,7 +89,7 @@ TEST(CqrTransceiverTest, RejectsPayloadBeyondReportedSlot) {
 }
 
 TEST(CqrTransceiverTest, AcceptsAnExactlySizedEnqueuePayload) {
-  using namespace cudaq::qec::decoder_server;
+  using namespace cudaq::qec::decoding_server;
 
   // 4-arg wire format (see RejectsPayloadBeyondReportedSlot).
   constexpr std::size_t payload_size = 4 * sizeof(uint64_t) + 1;

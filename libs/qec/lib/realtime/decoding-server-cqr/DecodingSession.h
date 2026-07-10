@@ -22,9 +22,9 @@
 #include <thread>
 #include <vector>
 
-namespace cudaq::qec::decoder_server {
+namespace cudaq::qec::decoding_server {
 
-/// A unit of work dispatched from the RpcDispatcher to a DecoderSession worker
+/// A unit of work dispatched from the RpcDispatcher to a DecodingSession worker
 /// thread.  The payload is an owned copy of the full frame bytes so that the
 /// dispatcher can return the transport ring slot immediately after dispatch.
 ///
@@ -57,7 +57,7 @@ inline constexpr size_t kDefaultQueueDepth = 64;
 
 /// Owns one decoder instance plus a dedicated FIFO worker thread; decoder calls
 /// are sequenced through the worker.
-struct DecoderSession {
+struct DecodingSession {
   enum class ShotState { collecting, result_ready, failed };
 
   // -- Decoder and GPU resources --
@@ -93,16 +93,16 @@ struct DecoderSession {
   std::atomic<uint64_t> busy_count{0};
   std::atomic<uint64_t> syndromes_dropped_count{0};
 
-  DecoderSession() = default;
-  DecoderSession(const DecoderSession &) = delete;
-  DecoderSession &operator=(const DecoderSession &) = delete;
-  DecoderSession(DecoderSession &&) = delete;
-  DecoderSession &operator=(DecoderSession &&) = delete;
-  ~DecoderSession();
+  DecodingSession() = default;
+  DecodingSession(const DecodingSession &) = delete;
+  DecodingSession &operator=(const DecodingSession &) = delete;
+  DecodingSession(DecodingSession &&) = delete;
+  DecodingSession &operator=(DecodingSession &&) = delete;
+  ~DecodingSession();
 
   /// Construct a session around an already configured decoder and capture graph
   /// resources if supported.
-  static std::unique_ptr<DecoderSession>
+  static std::unique_ptr<DecodingSession>
   create(std::unique_ptr<cudaq::qec::decoder> decoder,
          SyndromeMappingTable mapping_table);
 
@@ -110,7 +110,7 @@ struct DecoderSession {
   void start_worker();
 
   /// Signal shutdown and join the worker (drains any queued items first).
-  /// Idempotent; also called from the destructor.  DecoderServer calls this
+  /// Idempotent; also called from the destructor.  DecodingServer calls this
   /// before its transports are destroyed because queued items reply through
   /// raw ITransceiver pointers.
   void stop_worker();
@@ -129,9 +129,9 @@ struct DecoderSession {
   void worker_loop();
 };
 
-/// High-water mark of simultaneously-busy DecoderSession workers across all
+/// High-water mark of simultaneously-busy DecodingSession workers across all
 /// sessions in this process (concurrency evidence for multi-logical-qubit
 /// tests and server stats).
 uint64_t max_concurrent_busy_sessions();
 
-} // namespace cudaq::qec::decoder_server
+} // namespace cudaq::qec::decoding_server

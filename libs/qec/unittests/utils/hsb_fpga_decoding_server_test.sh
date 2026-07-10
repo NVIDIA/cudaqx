@@ -7,7 +7,7 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 #
-# hsb_fpga_decoder_server_test.sh
+# hsb_fpga_decoding_server_test.sh
 #
 # Generic orchestration script for end-to-end decoder testing over Holoscan-
 # Sensor-Bridge (HSB) RDMA/RoCE, with the decode work served by the standalone
@@ -39,13 +39,13 @@
 #
 # Examples:
 #   # Full emulated test: build, configure network, run
-#   ./hsb_fpga_decoder_server_test.sh --emulate --build --setup-network
+#   ./hsb_fpga_decoding_server_test.sh --emulate --build --setup-network
 #
 #   # Just run (tools already built, network already set up)
-#   ./hsb_fpga_decoder_server_test.sh --emulate
+#   ./hsb_fpga_decoding_server_test.sh --emulate
 #
 #   # Real FPGA
-#   ./hsb_fpga_decoder_server_test.sh --setup-network --device rocep1s0f0 \
+#   ./hsb_fpga_decoding_server_test.sh --setup-network --device rocep1s0f0 \
 #       --bridge-ip 192.168.0.1 --fpga-ip 192.168.0.2
 set -euo pipefail
 
@@ -113,7 +113,7 @@ JOBS=$(nproc 2>/dev/null || echo 8)
 
 print_usage() {
     cat <<'EOF'
-Usage: hsb_fpga_decoder_server_test.sh [options]
+Usage: hsb_fpga_decoding_server_test.sh [options]
 
 Generic orchestration script for decoder end-to-end testing over HSB
 RDMA/RoCE with the decoding server (decoding_server) on the CPU
@@ -132,7 +132,7 @@ Decoder options:
   --decoder NAME         Decoder profile (default: pymatching).  By default the
                          config/syndromes files are generated fresh each run by
                          surface_code-4-yaml into CUDAQX_DIR/build/hsb_fpga_test_data
-  --config PATH          Use a pre-made decoder-server YAML config (skips generation)
+  --config PATH          Use a pre-made decoding-server YAML config (skips generation)
   --syndromes PATH       Use a pre-made syndromes text file (skips generation)
   --data-dir DIR         Use pre-made DIR/config_NAME.yml + DIR/syndromes_NAME.txt
                          (skips generation)
@@ -946,11 +946,11 @@ run_playback() {
 # ============================================================================
 
 run_emulated() {
-    _banner "Decoder Server Decode Loop Test (Emulated FPGA, $DECODER)"
+    _banner "Decoding Server Decode Loop Test (Emulated FPGA, $DECODER)"
 
     local emu_log server_log
-    emu_log=$(mktemp /tmp/hsb_decoder_server_emulator.XXXXXX.log)
-    server_log=$(mktemp /tmp/hsb_decoder_server.XXXXXX.log)
+    emu_log=$(mktemp /tmp/hsb_decoding_server_emulator.XXXXXX.log)
+    server_log=$(mktemp /tmp/hsb_decoding_server.XXXXXX.log)
     TEMP_FILES+=("$emu_log" "$server_log")
 
     # ---- 1. Start emulator ----
@@ -986,10 +986,10 @@ run_emulated() {
 # ============================================================================
 
 run_fpga() {
-    _banner "Decoder Server Decode Loop Test (Real FPGA, $DECODER)"
+    _banner "Decoding Server Decode Loop Test (Real FPGA, $DECODER)"
 
     local server_log
-    server_log=$(mktemp /tmp/hsb_decoder_server.XXXXXX.log)
+    server_log=$(mktemp /tmp/hsb_decoding_server.XXXXXX.log)
     TEMP_FILES+=("$server_log")
 
     # ---- 1. Start decoding server (FPGA data-plane QP is fixed 0x2) ----
@@ -1004,7 +1004,7 @@ run_fpga() {
 # ============================================================================
 
 main() {
-    _banner "HSB FPGA Decoder Server Test"
+    _banner "HSB FPGA Decoding Server Test"
 
     _info "Decoder: $DECODER (decoding server, CPU HOST_CALL path)"
     if $EMULATE; then
@@ -1046,9 +1046,9 @@ main() {
     # ---- Verdict ----
     echo ""
     if [[ $rc -eq 0 ]]; then
-        _banner "DECODER SERVER DECODE LOOP ($DECODER): PASS"
+        _banner "DECODING SERVER DECODE LOOP ($DECODER): PASS"
     else
-        _banner "DECODER SERVER DECODE LOOP ($DECODER): FAIL"
+        _banner "DECODING SERVER DECODE LOOP ($DECODER): FAIL"
     fi
 
     return $rc

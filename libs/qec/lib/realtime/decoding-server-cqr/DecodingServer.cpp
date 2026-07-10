@@ -6,7 +6,7 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
-#include "DecoderServer.h"
+#include "DecodingServer.h"
 #include "CpuRoceTransceiver.h"
 #include "GpuRoceTransceiver.h"
 
@@ -20,7 +20,7 @@
 #include <thread>
 #include <vector>
 
-namespace cudaq::qec::decoder_server {
+namespace cudaq::qec::decoding_server {
 
 using cudaq::qec::decoding::config::DecoderTransport;
 
@@ -29,7 +29,7 @@ using cudaq::qec::decoding::config::DecoderTransport;
 // ---------------------------------------------------------------------------
 
 std::unique_ptr<ITransceiver>
-DecoderServer::make_transport(DecoderTransport transport_type) {
+DecodingServer::make_transport(DecoderTransport transport_type) {
   switch (transport_type) {
   case DecoderTransport::gpu_roce:
 #ifdef CUDAQ_GPU_ROCE_AVAILABLE
@@ -47,7 +47,7 @@ DecoderServer::make_transport(DecoderTransport transport_type) {
   throw std::runtime_error("make_transport: unknown DecoderTransport value");
 }
 
-DecoderServer::DecoderServer(const std::string &config_yaml) {
+DecodingServer::DecodingServer(const std::string &config_yaml) {
   // Parse the YAML once: SessionRegistry validates the decoder entries
   // (including the uniform-transport rule — MVP limitation: heterogeneous
   // deployments require per-session transceiver binding, deferred to a
@@ -95,8 +95,8 @@ DecoderServer::DecoderServer(const std::string &config_yaml) {
 #endif
 }
 
-DecoderServer::DecoderServer(std::unique_ptr<ITransceiver> transport,
-                             const std::string &config_yaml) {
+DecodingServer::DecodingServer(std::unique_ptr<ITransceiver> transport,
+                               const std::string &config_yaml) {
   ITransceiver *raw = transport.get();
   owned_transports_.push_back(std::move(transport));
   function_transport_[kEnqueueSyndromesFunctionId] = raw;
@@ -105,7 +105,7 @@ DecoderServer::DecoderServer(std::unique_ptr<ITransceiver> transport,
   init(config_yaml);
 }
 
-DecoderServer::DecoderServer(
+DecodingServer::DecodingServer(
     std::unique_ptr<ITransceiver> transport,
     const cudaq::qec::decoding::config::multi_decoder_config &config) {
   ITransceiver *raw = transport.get();
@@ -117,20 +117,20 @@ DecoderServer::DecoderServer(
   register_handlers();
 }
 
-DecoderServer::DecoderServer(std::vector<std::unique_ptr<ITransceiver>> owned,
-                             TransportMap function_transport,
-                             const std::string &config_yaml)
+DecodingServer::DecodingServer(std::vector<std::unique_ptr<ITransceiver>> owned,
+                               TransportMap function_transport,
+                               const std::string &config_yaml)
     : owned_transports_(std::move(owned)),
       function_transport_(std::move(function_transport)) {
   init(config_yaml);
 }
 
-DecoderServer::~DecoderServer() {
+DecodingServer::~DecodingServer() {
   stop();
   // Join session workers while owned_transports_ is still alive: queued
   // WorkItems reply via raw ITransceiver pointers.  Decoder/graph teardown
   // still happens in ~registry_, after the transports, per the member-order
-  // comment in DecoderServer.h.
+  // comment in DecodingServer.h.
   registry_.stop_workers();
 }
 
@@ -138,12 +138,12 @@ DecoderServer::~DecoderServer() {
 // init — load sessions and register RPC handlers
 // ---------------------------------------------------------------------------
 
-void DecoderServer::init(const std::string &config_yaml) {
+void DecodingServer::init(const std::string &config_yaml) {
   registry_.load_from_config(config_yaml);
   register_handlers();
 }
 
-void DecoderServer::register_handlers() {
+void DecodingServer::register_handlers() {
   // enqueue_syndromes — fire-and-forget at the RPC level; the transport
   // layer ACKs delivery (ACCEPTED), and a queue-full drop is reported both
   // here and at the next get_corrections.
@@ -234,7 +234,7 @@ void DecoderServer::register_handlers() {
 // run / stop
 // ---------------------------------------------------------------------------
 
-void DecoderServer::run() {
+void DecodingServer::run() {
   std::vector<ITransceiver *> unique_transports;
   for (auto &[fid, t] : function_transport_) {
     if (std::find(unique_transports.begin(), unique_transports.end(), t) ==
@@ -242,7 +242,7 @@ void DecoderServer::run() {
       unique_transports.push_back(t);
   }
 
-  CUDA_QEC_INFO("DecoderServer: starting {} receiver thread(s)",
+  CUDA_QEC_INFO("DecodingServer: starting {} receiver thread(s)",
                 unique_transports.size());
 
   // All threads share dispatcher_ — routing is by function_id, not transport.
@@ -262,14 +262,14 @@ void DecoderServer::run() {
   for (auto &th : recv_threads)
     th.join();
 
-  CUDA_QEC_INFO("DecoderServer: all receiver threads exited");
+  CUDA_QEC_INFO("DecodingServer: all receiver threads exited");
 }
 
-void DecoderServer::stop() {
+void DecodingServer::stop() {
   shutdown_.store(true, std::memory_order_release);
   // Unblock any receive loop parked in recv().
   for (auto &t : owned_transports_)
     t->shutdown();
 }
 
-} // namespace cudaq::qec::decoder_server
+} // namespace cudaq::qec::decoding_server

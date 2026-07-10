@@ -29,7 +29,7 @@
 // of the full cudaq_realtime.h.
 struct cudaq_dispatch_graph_context;
 
-namespace cudaq::qec::decoder_server {
+namespace cudaq::qec::decoding_server {
 
 /// Runtime configuration for GpuRoceTransceiver.  All fields are read from
 /// environment variables so that the server can be reconfigured without a
@@ -47,7 +47,7 @@ struct GpuRoceConfig {
   static GpuRoceConfig from_env();
 };
 
-/// GPU RoCE transport and device-graph scheduler for the decoder server.
+/// GPU RoCE transport and device-graph scheduler for the decoding server.
 ///
 /// ## Architecture
 ///
@@ -60,11 +60,11 @@ struct GpuRoceConfig {
 /// After `launch_scheduler()` returns, the GPU handles the full
 /// RX → dispatch → decode → TX loop autonomously.  No CPU `recv()` or `send()`
 /// is involved in the data path; those methods are stubs that satisfy the
-/// `ITransceiver` contract used by `DecoderServer::run()`.
+/// `ITransceiver` contract used by `DecodingServer::run()`.
 ///
 /// ## Multi-decoder
 ///
-/// Currently limited to a single decoder session (enforced by DecoderServer).
+/// Currently limited to a single decoder session (enforced by DecodingServer).
 /// Multi-decoder GPU RoCE with per-session ring binding is deferred.
 class GpuRoceTransceiver final : public ITransceiver {
 public:
@@ -81,7 +81,7 @@ public:
   void launch_scheduler(void *raw_graph_resources);
 
   /// Block until shutdown() is called.  The GPU scheduler handles RX/TX;
-  /// this method only satisfies the ITransceiver contract for DecoderServer.
+  /// this method only satisfies the ITransceiver contract for DecodingServer.
   RxFrame recv() override;
 
   /// Not used on the GPU scheduler path — the device graph kernel writes TX
@@ -124,6 +124,6 @@ private:
   std::thread monitor_thread_; ///< runs hololink_blocking_monitor()
 };
 
-} // namespace cudaq::qec::decoder_server
+} // namespace cudaq::qec::decoding_server
 
 #endif // CUDAQ_GPU_ROCE_AVAILABLE

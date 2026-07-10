@@ -10,7 +10,7 @@
 
 #include <stdexcept>
 
-namespace cudaq::qec::decoder_server {
+namespace cudaq::qec::decoding_server {
 
 CpuRoceTransceiver::CpuRoceTransceiver() {
   throw std::runtime_error(
@@ -32,4 +32,4 @@ void CpuRoceTransceiver::send(const PeerId & /*peer*/, const uint8_t * /*data*/,
 
 void CpuRoceTransceiver::shutdown() {}
 
-} // namespace cudaq::qec::decoder_server
+} // namespace cudaq::qec::decoding_server

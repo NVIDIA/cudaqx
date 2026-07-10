@@ -15,7 +15,7 @@
 #include <utility>
 #include <vector>
 
-namespace cudaq::qec::decoder_server {
+namespace cudaq::qec::decoding_server {
 
 /// Peer identity — the address to which the server sends a response.
 struct PeerId {
@@ -73,7 +73,7 @@ struct RxFrame {
   ReleaseFn release_fn; ///< null except on GPU ring-buffer path
 };
 
-/// Transport abstraction used by DecoderServer and DecoderSession.
+/// Transport abstraction used by DecodingServer and DecodingSession.
 struct ITransceiver {
   /// Block until a frame is available and return it (buf is owned by caller).
   /// After shutdown() this may return a frame with an EMPTY buf -- the
@@ -82,7 +82,7 @@ struct ITransceiver {
   virtual RxFrame recv() = 0;
 
   /// Unblock any thread waiting in recv() (which then returns an empty
-  /// sentinel frame). Called by DecoderServer::stop().
+  /// sentinel frame). Called by DecodingServer::stop().
   virtual void shutdown() {}
 
   /// Send a response to \p peer.  Thread-safe: called from session worker
@@ -92,4 +92,4 @@ struct ITransceiver {
   virtual ~ITransceiver() = default;
 };
 
-} // namespace cudaq::qec::decoder_server
+} // namespace cudaq::qec::decoding_server

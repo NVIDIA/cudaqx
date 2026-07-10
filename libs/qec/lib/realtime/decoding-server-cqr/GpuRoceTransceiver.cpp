@@ -26,7 +26,7 @@
 // CUDAQ device-graph scheduler API (cudaq-realtime-dispatch).
 #include "cudaq/realtime/hololink_bridge_common.h"
 
-namespace cudaq::qec::decoder_server {
+namespace cudaq::qec::decoding_server {
 
 // ---------------------------------------------------------------------------
 // Internal helpers (same pattern as hololink_qldpc_graph_decoder_bridge.cpp)
@@ -366,7 +366,7 @@ void GpuRoceTransceiver::launch_scheduler(void *raw_graph_resources) {
 
 RxFrame GpuRoceTransceiver::recv() {
   // The GPU device-graph scheduler handles RX→dispatch→decode→TX autonomously.
-  // This method only exists so DecoderServer::run()'s recv loop blocks until
+  // This method only exists so DecodingServer::run()'s recv loop blocks until
   // shutdown() is called.
   while (!stopped_.load(std::memory_order_acquire))
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -440,6 +440,6 @@ uint64_t GpuRoceTransceiver::buffer_addr() const {
   return hololink_get_buffer_addr(transceiver_);
 }
 
-} // namespace cudaq::qec::decoder_server
+} // namespace cudaq::qec::decoding_server
 
 #endif // CUDAQ_GPU_ROCE_AVAILABLE

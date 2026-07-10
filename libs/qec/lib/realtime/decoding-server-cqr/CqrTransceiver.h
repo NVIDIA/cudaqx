@@ -21,7 +21,7 @@
 #include <stdexcept>
 #include <unordered_map>
 
-namespace cudaq::qec::decoder_server {
+namespace cudaq::qec::decoding_server {
 
 namespace detail {
 
@@ -95,7 +95,7 @@ inline bool parse_cqr_enqueue_frame(const void *rx_slot, std::size_t slot_size,
 ///
 /// Response-bearing calls (get_corrections, reset_decoder): inject() copies
 /// rx_slot bytes into an RxFrame, stores the tx_slot pointer keyed by
-/// request_id, and blocks until the DecoderSession worker calls send() with
+/// request_id, and blocks until the DecodingSession worker calls send() with
 /// the response — at which point send() copies the bytes to tx_slot and
 /// unblocks the handler thread so CUDAQ can return.
 ///
@@ -115,7 +115,7 @@ class CqrTransceiver final : public ITransceiver {
 public:
   /// Called from CUDAQ handler threads for each incoming RPC.
   /// Translates the CUDAQ-format payload to our wire format, enqueues an
-  /// RxFrame, then blocks until DecoderServer sends the response.
+  /// RxFrame, then blocks until DecodingServer sends the response.
   void inject(const void *rx_slot, void *tx_slot, std::size_t slot_size,
               uint32_t function_id);
 
@@ -224,7 +224,7 @@ inline void CqrTransceiver::inject(const void *rx_slot, void *tx_slot,
   }
   cv_.notify_one();
 
-  // Block until the DecoderSession worker calls send() with the response.
+  // Block until the DecodingSession worker calls send() with the response.
   fut.wait();
 }
 
@@ -290,7 +290,7 @@ inline void CqrTransceiver::send(const PeerId & /*peer*/, const uint8_t *data,
   if (len > p.slot_size) {
     // Truncating would leave result_len advertising bytes that were never
     // written, so the client would read stale slot memory as correction
-    // bits.  Fail the RPC explicitly instead (the pre-decoder-server code
+    // bits.  Fail the RPC explicitly instead (the pre-decoding-server code
     // returned result-buffer-too-small here).
     write_ack(p.tx_slot, rid, resp->ptp_timestamp, RpcStatus::INTERNAL_ERROR);
     p.done.set_value();
@@ -384,4 +384,4 @@ inline bool CqrTransceiver::build_passthrough_frame(const void *rx_slot,
   return true;
 }
 
-} // namespace cudaq::qec::decoder_server
+} // namespace cudaq::qec::decoding_server

@@ -602,7 +602,7 @@ measure_syndrome_round(cudaq::qec::patch logicalQubit,
 // patches can be interleaved round-major. round_counter is the per-patch
 // monotonic enqueue index (0 = lock-in, 1..T-1 paired, T = data round):
 // logging-only on the in-process path, the round counter on the
-// decoder-server wire.
+// decoding-server wire.
 __qpu__ void
 syndrome_round_once(cudaq::qview<> data, cudaq::qview<> xstab_anc,
                     cudaq::qview<> zstab_anc,

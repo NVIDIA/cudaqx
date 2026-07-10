@@ -859,7 +859,7 @@ cudaq::qec::decoding::config::decoder_config::to_yaml_str(int column_wrap) {
 namespace cudaq::qec::decoding::config {
 
 // Stash a copy for consumers that build their own decoder instances from the
-// process-wide configuration -- the decoder-server DeviceCallService plugin
+// process-wide configuration -- the decoding-server DeviceCallService plugin
 // reads it when CUDAQ_QEC_DECODER_CONFIG is not set (in-process path).
 // shared_ptr + mutex: the plugin reads this from the realtime dispatcher
 // thread while the application thread may call configure_decoders() again;

@@ -13,7 +13,7 @@
 #include <cstring>
 #include <stdexcept>
 
-namespace cudaq::qec::decoder_server {
+namespace cudaq::qec::decoding_server {
 
 // ---------------------------------------------------------------------------
 // ResponseWriter
@@ -77,4 +77,4 @@ void RpcDispatcher::dispatch(RxFrame frame, ITransceiver &transport) {
   }
 }
 
-} // namespace cudaq::qec::decoder_server
+} // namespace cudaq::qec::decoding_server

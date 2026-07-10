@@ -69,7 +69,7 @@ _set_syndrome_capture_callback(void (*callback)(const uint8_t *, size_t));
 
 /// @brief The currently registered syndrome-capture callback (nullptr if
 /// none). Served decode paths that bypass host::enqueue_syndromes (the
-/// decoder-server service) use this to keep --save_syndrome working.
+/// decoding-server service) use this to keep --save_syndrome working.
 __attribute__((visibility("default"))) void (*_get_syndrome_capture_callback())(
     const uint8_t *, size_t);
 

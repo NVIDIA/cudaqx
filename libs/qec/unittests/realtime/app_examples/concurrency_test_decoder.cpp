@@ -80,7 +80,7 @@ reusable_decode_barrier &decode_barrier() {
 
 } // namespace
 
-/// Test-only decoder used to prove that independent decoder-server workers
+/// Test-only decoder used to prove that independent decoding-server workers
 /// enter decode concurrently. The factory performs one initialization decode
 /// per instance, which is deliberately excluded from the barrier. Every
 /// subsequent decode rendezvous with all configured instances before returning.
