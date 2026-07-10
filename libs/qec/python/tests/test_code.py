@@ -425,22 +425,28 @@ def test_python_inlined_feedback_toy():
     # the inlined-feedback machinery, but this toy (unlike the steane
     # example, whose records are all deterministically 0) exposes it.
     cudaq.set_target('stim')
+    try:
+        # numRounds >= 2 exercises the final boundary detector (same-round
+        # herald) distinctly from the cross-round detectors (earlier-round
+        # herald).
+        numShots, numRounds = 20, 4
+        syndromes, data = qec.sample_memory_circuit(
+            qec.get_code('py-feedback-toy'),
+            numShots=numShots,
+            numRounds=numRounds)
 
-    numShots, numRounds = 20, 4
-    syndromes, data = qec.sample_memory_circuit(qec.get_code('py-feedback-toy'),
-                                                numShots=numShots,
-                                                numRounds=numRounds)
+        # 1 first-round boundary + 2 * (numRounds - 1) cross-round + 1 final
+        # boundary detectors, all deterministic (zero) in the noiseless
+        # circuit.
+        assert syndromes.shape == (numShots, 2 * numRounds)
+        assert not np.any(syndromes)
 
-    # 1 first-round boundary + 2 * (numRounds - 1) cross-round + 1 final
-    # boundary detectors, all deterministic (zero) in the noiseless circuit.
-    assert syndromes.shape == (numShots, 2 * numRounds)
-    assert not np.any(syndromes)
-
-    # The individual data qubits are randomized by the XX measurement, but
-    # the ZZ parity must close deterministically every shot.
-    assert data.shape == (numShots, 2)
-    assert not np.any(data[:, 0] ^ data[:, 1])
-    cudaq.reset_target()
+        # The individual data qubits are randomized by the XX measurement,
+        # but the ZZ parity must close deterministically every shot.
+        assert data.shape == (numShots, 2)
+        assert not np.any(data[:, 0] ^ data[:, 1])
+    finally:
+        cudaq.reset_target()
 
 
 def test_python_inlined_feedback_toy_negative_control():

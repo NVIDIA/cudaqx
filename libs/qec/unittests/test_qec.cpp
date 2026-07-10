@@ -2268,8 +2268,8 @@ protected:
 public:
   explicit feedback_toy_code(bool declare_feedback)
       : declare_feedback(declare_feedback) {
-    operation_encodings.insert(std::make_pair(
-        cudaq::qec::operation::prep0, cudaq::qec::feedback_toy::prep0));
+    operation_encodings.insert(std::make_pair(cudaq::qec::operation::prep0,
+                                              cudaq::qec::feedback_toy::prep0));
     operation_encodings.insert(
         std::make_pair(cudaq::qec::operation::stabilizer_round,
                        cudaq::qec::feedback_toy::stabilizer_round));
@@ -2329,8 +2329,8 @@ TEST(QECCodeTester, checkInlinedFeedbackToyNegativeControl) {
   // in the positive test above.
   feedback_toy_code toy(/*declare_feedback=*/false);
   try {
-    cudaq::qec::sample_memory_circuit(
-        toy, cudaq::qec::operation::prep0, /*numShots=*/20, /*numRounds=*/4);
+    cudaq::qec::sample_memory_circuit(toy, cudaq::qec::operation::prep0,
+                                      /*numShots=*/20, /*numRounds=*/4);
     FAIL() << "expected sample_memory_circuit to reject the feedback-less toy";
   } catch (const std::exception &e) {
     // Fail-for-the-right-reason check: stim's determinism analysis must be
@@ -2347,12 +2347,69 @@ TEST(QECCodeTester, checkInlinedFeedbackToyDem) {
   // dem_from_kernel; with circuit-level noise it must produce a valid model
   // (a noiseless model has no error mechanisms and is rejected downstream).
   feedback_toy_code toy(/*declare_feedback=*/true);
+  const std::size_t numRounds = 4;
   cudaq::noise_model noise;
   noise.add_all_qubit_channel("x", cudaq::qec::two_qubit_depolarization(0.01),
                               /*num_controls=*/1);
   auto dem = cudaq::qec::dem_from_memory_circuit(
-      toy, cudaq::qec::operation::prep0, /*numRounds=*/4, noise);
-  EXPECT_GT(dem.num_detectors(), 0);
+      toy, cudaq::qec::operation::prep0, numRounds, noise);
+  // 1 first-round boundary + 2 * (numRounds - 1) cross-round + 1 final
+  // boundary detectors.
+  EXPECT_EQ(dem.num_detectors(), 2 * numRounds);
   EXPECT_GT(dem.num_error_mechanisms(), 0);
   EXPECT_EQ(dem.num_observables(), 1);
+}
+
+TEST(InlinedFeedbackLayout, EmptyTensorsGiveEmptyLayout) {
+  cudaqx::tensor<uint8_t> empty;
+  auto layout = cudaq::qec::apply_inlined_feedback(empty, empty, 2, 1);
+  EXPECT_TRUE(layout.detector_indices.empty());
+  EXPECT_TRUE(layout.detector_offsets.empty());
+  EXPECT_TRUE(layout.observable_indices.empty());
+  EXPECT_TRUE(layout.observable_offsets.empty());
+}
+
+TEST(InlinedFeedbackLayout, ToyMatricesCsr) {
+  // fb = [[0,1],[0,0]]: record 0 heralded by record 1; row 1 empty.
+  cudaqx::tensor<uint8_t> fb({2, 2});
+  fb.at({0, 1}) = 1;
+  // obs_fb = [[0,1]]: observable 0 XORs record 1 every round.
+  cudaqx::tensor<uint8_t> obs_fb({1, 2});
+  obs_fb.at({0, 1}) = 1;
+  auto layout = cudaq::qec::apply_inlined_feedback(fb, obs_fb, 2, 1);
+  EXPECT_EQ(layout.detector_indices, (std::vector<std::size_t>{1}));
+  EXPECT_EQ(layout.detector_offsets, (std::vector<std::size_t>{0, 1, 1}));
+  EXPECT_EQ(layout.observable_indices, (std::vector<std::size_t>{1}));
+  EXPECT_EQ(layout.observable_offsets, (std::vector<std::size_t>{0, 1}));
+}
+
+TEST(InlinedFeedbackLayout, MultiRowWeights) {
+  // 3x3 with row weights 2, 0, 1.
+  cudaqx::tensor<uint8_t> fb({3, 3});
+  fb.at({0, 0}) = 1;
+  fb.at({0, 2}) = 1;
+  fb.at({2, 1}) = 1;
+  cudaqx::tensor<uint8_t> empty;
+  auto layout = cudaq::qec::apply_inlined_feedback(fb, empty, 3, 0);
+  EXPECT_EQ(layout.detector_indices, (std::vector<std::size_t>{0, 2, 1}));
+  EXPECT_EQ(layout.detector_offsets, (std::vector<std::size_t>{0, 2, 2, 3}));
+  EXPECT_TRUE(layout.observable_offsets.empty());
+}
+
+TEST(InlinedFeedbackLayout, AllZeroMatrixGivesZeroWeightRows) {
+  cudaqx::tensor<uint8_t> fb({2, 2});
+  cudaqx::tensor<uint8_t> empty;
+  auto layout = cudaq::qec::apply_inlined_feedback(fb, empty, 2, 0);
+  EXPECT_TRUE(layout.detector_indices.empty());
+  EXPECT_EQ(layout.detector_offsets, (std::vector<std::size_t>{0, 0, 0}));
+}
+
+TEST(InlinedFeedbackLayout, ThrowsOnWrongShape) {
+  cudaqx::tensor<uint8_t> bad({2, 3}); // expected [2 x 2]
+  cudaqx::tensor<uint8_t> empty;
+  EXPECT_THROW(cudaq::qec::apply_inlined_feedback(bad, empty, 2, 0),
+               std::runtime_error);
+  cudaqx::tensor<uint8_t> bad_obs({2, 2}); // expected [1 x 2]
+  EXPECT_THROW(cudaq::qec::apply_inlined_feedback(empty, bad_obs, 2, 1),
+               std::runtime_error);
 }

@@ -29,16 +29,20 @@ namespace cudaq::qec {
 ///        (num_observables × numData entries, values 0/1).
 /// @param num_observables Number of rows in the observable matrix (k).
 /// @param measure_in_x_basis Performing X- or Z-memory circuit
-/// @param feedback_flat Row-major flattened inlined feedback matrix for
-///        detectors. Size is 0 (no feedback; legacy detector structure) or
-///        numCols*numCols with numCols = numAncx + numAncz. Entry (j, k) = 1
-///        means the cross-round detector for record j additionally XORs
-///        record k of the earlier round, and the final boundary detector for
-///        record j additionally XORs record k of the last round.
-/// @param obs_feedback_flat Row-major flattened inlined feedback matrix for
-///        logical observables. Size is 0 (no feedback) or
-///        num_observables*numCols. Entry (m, k) = 1 means logical observable
-///        m additionally XORs record k of every round.
+/// @param fb_indices CSR herald-column indices for the detector inlined
+///        feedback layout. `fb_indices[fb_offsets[j] .. fb_offsets[j+1])`
+///        lists the herald record columns XORed into record j's cross-round
+///        detector (records of the earlier round) and into its final boundary
+///        detector (records of the last round).
+/// @param fb_offsets CSR row offsets for the detector inlined feedback layout.
+///        Size is 0 (no feedback; legacy `cudaq::detectors` structure) or
+///        numCols + 1 with numCols = numAncx + numAncz.
+/// @param obs_fb_indices CSR record-column indices for the observable inlined
+///        feedback layout. `obs_fb_indices[obs_fb_offsets[m] ..
+///        obs_fb_offsets[m+1])` lists the record columns XORed into logical
+///        observable m on every round.
+/// @param obs_fb_offsets CSR row offsets for the observable inlined feedback
+///        layout. Size is 0 (no feedback) or num_observables + 1.
 __qpu__ void memory_circuit(const code::stabilizer_round &stabilizer_round,
                             const code::one_qubit_encoding &statePrep,
                             std::size_t numData, std::size_t numAncx,
@@ -48,6 +52,8 @@ __qpu__ void memory_circuit(const code::stabilizer_round &stabilizer_round,
                             const std::vector<std::size_t> &obs_matrix_flat,
                             std::size_t num_observables,
                             bool measure_in_x_basis,
-                            const std::vector<std::size_t> &feedback_flat,
-                            const std::vector<std::size_t> &obs_feedback_flat);
+                            const std::vector<std::size_t> &fb_indices,
+                            const std::vector<std::size_t> &fb_offsets,
+                            const std::vector<std::size_t> &obs_fb_indices,
+                            const std::vector<std::size_t> &obs_fb_offsets);
 } // namespace cudaq::qec

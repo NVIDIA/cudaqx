@@ -82,6 +82,49 @@ struct detector_error_model {
                                bool remove_zero_syndrome_errors = false);
 };
 
+/// @brief Record-to-detector composition layout derived from a code's
+/// declared inlined-feedback matrices (CSR-style).
+///
+/// Entry range [detector_offsets[j], detector_offsets[j+1]) of
+/// detector_indices lists the herald record columns XOR-ed into record j's
+/// cross-round detector (records of the earlier round) and into its final
+/// boundary detector (records of the last round). Entry range
+/// [observable_offsets[m], observable_offsets[m+1]) of observable_indices
+/// lists the record columns XOR-ed into logical observable m on every round.
+/// Empty offsets vectors mean no feedback is declared for that target
+/// (identity detector/observable structure).
+struct inlined_feedback_layout {
+  std::vector<std::size_t> detector_indices;
+  std::vector<std::size_t> detector_offsets;
+  std::vector<std::size_t> observable_indices;
+  std::vector<std::size_t> observable_offsets;
+};
+
+/// @brief Build the record-to-detector composition layout from a code's
+/// declared inlined-feedback matrices.
+///
+/// @param feedback Detector feedback matrix, shape
+///        [num_syndromes_per_round x num_syndromes_per_round] with 0/1
+///        entries, or an empty tensor for none. Entry (j, k) = 1 means the
+///        cross-round detector for record j additionally XORs record k of
+///        the earlier round, and the final boundary detector for record j
+///        additionally XORs record k of the last round.
+/// @param obs_feedback Observable feedback matrix, shape
+///        [num_observables x num_syndromes_per_round] with 0/1 entries, or
+///        an empty tensor for none. Entry (m, k) = 1 means logical
+///        observable m additionally XORs record k of every round.
+/// @param num_syndromes_per_round Records per round (number of ancilla
+///        qubits).
+/// @param num_observables Number of logical observables.
+/// @return The CSR layout; see inlined_feedback_layout.
+/// @throws std::runtime_error if a non-empty tensor's shape does not match
+///         the expected dimensions.
+inlined_feedback_layout
+apply_inlined_feedback(const cudaqx::tensor<uint8_t> &feedback,
+                       const cudaqx::tensor<uint8_t> &obs_feedback,
+                       std::size_t num_syndromes_per_round,
+                       std::size_t num_observables);
+
 /// Parse the Stim DEM string @p dem_text into detector/observable flip
 /// matrices and error rates. DEM-native decoders should consume raw DEM text
 /// instead. By default (@p use_decomp_suggestions = false) the '^' separators
