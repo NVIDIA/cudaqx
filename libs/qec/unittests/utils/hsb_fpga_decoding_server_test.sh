@@ -82,6 +82,22 @@ GEN_ROUNDS=4
 GEN_P_SPAM=0.01
 GEN_SHOTS=100
 
+# Server transport.  Empty => derived from the decoder profile:
+#   pymatching        -> cpu_roce  (HOST_CALL dispatch on the CPU)
+#   nv-qldpc-decoder  -> gpu_roce  (self-relaunching device-graph scheduler:
+#                        enqueue/get/reset run as DEVICE_CALLs on the GPU and
+#                        the captured RelayBP decode graph fires device-side)
+TRANSPORT=""
+# GPU for the gpu_roce scheduler + decode graph (HOLOLINK_GPU_ID).
+GPU_ID=0
+
+# gpu_roce build artifacts from the proprietary cuda-qx tree: the cudevice
+# archive (DEVICE_CALL handlers + populate shims, WHOLE_ARCHIVE-linked and
+# device-linked into the server) and the nv-qldpc plugin .so (dlopen'd;
+# capture_decode_graph builds the RelayBP decode graph).
+PROPRIETARY_ARCHIVE="/workspaces/cuda-qx/build/lib/libcudaq-qec-realtime-cudevice-proprietary.a"
+NV_QLDPC_PLUGIN="/workspaces/cuda-qx/build/lib/decoder-plugins/libcudaq-qec-nv-qldpc-decoder.so"
+
 # Network defaults
 IB_DEVICE=""           # auto-detect
 BRIDGE_IP="10.0.0.1"   # server-side NIC IP (kept the qldpc script's name)
@@ -129,9 +145,13 @@ Actions:
   --no-run               Skip running the test (useful with --build)
 
 Decoder options:
-  --decoder NAME         Decoder profile (default: pymatching).  By default the
+  --decoder NAME         Decoder profile: pymatching (default) or
+                         nv-qldpc-decoder (Relay BP).  By default the
                          config/syndromes files are generated fresh each run by
                          surface_code-4-yaml into CUDAQX_DIR/build/hsb_fpga_test_data
+  --transport T          Server transport: cpu_roce or gpu_roce.  Default is
+                         derived from the decoder (pymatching -> cpu_roce,
+                         nv-qldpc-decoder -> gpu_roce device-graph scheduler)
   --config PATH          Use a pre-made decoding-server YAML config (skips generation)
   --syndromes PATH       Use a pre-made syndromes text file (skips generation)
   --data-dir DIR         Use pre-made DIR/config_NAME.yml + DIR/syndromes_NAME.txt
@@ -150,6 +170,12 @@ Build options:
                          CUDAQX_DIR/.cudaq_version (default: /workspaces/cuda-quantum)
   --cudaqx-dir DIR       cudaqx source dir that builds the server + playback
                          (default: /workspaces/cudaqx)
+  --proprietary-archive PATH  Prebuilt libcudaq-qec-realtime-cudevice-proprietary.a
+                         for the gpu_roce server build (default:
+                         /workspaces/cuda-qx/build/lib/...)
+  --nv-qldpc-plugin PATH Prebuilt libcudaq-qec-nv-qldpc-decoder.so, symlinked
+                         into build/lib/decoder-plugins (default:
+                         /workspaces/cuda-qx/build/lib/decoder-plugins/...)
   --jobs N               Parallel build jobs (default: nproc)
 
 Network options:
@@ -164,7 +190,9 @@ Run options:
   --no-verify            Skip correction verification
   --num-shots N          Limit number of shots
   --page-size N          Ring buffer slot size in bytes (default: 384)
-  --frame-size N         Server TX SGE bytes (default: 64)
+  --frame-size N         Server TX SGE bytes, cpu_roce only (default: 64;
+                         gpu_roce uses page-size as HOLOLINK_FRAME_SIZE)
+  --gpu N                GPU device id for gpu_roce (default: 0)
   --spacing N            Inter-shot spacing in microseconds (default: 10)
   --control-port N       UDP control port for emulator (default: 8193)
 
@@ -180,6 +208,10 @@ while [[ $# -gt 0 ]]; do
         --no-run)           DO_RUN=false ;;
         --no-verify)        VERIFY=false ;;
         --decoder)          DECODER="$2"; shift ;;
+        --transport)        TRANSPORT="$2"; shift ;;
+        --gpu)              GPU_ID="$2"; shift ;;
+        --proprietary-archive) PROPRIETARY_ARCHIVE="$2"; shift ;;
+        --nv-qldpc-plugin)  NV_QLDPC_PLUGIN="$2"; shift ;;
         --config)           CONFIG_FILE="$2"; shift ;;
         --syndromes)        SYNDROMES_FILE="$2"; shift ;;
         --data-dir)         DATA_DIR="$2"; shift ;;
@@ -211,6 +243,18 @@ while [[ $# -gt 0 ]]; do
     esac
     shift
 done
+
+# Derive the transport from the decoder profile unless explicitly chosen.
+if [[ -z "$TRANSPORT" ]]; then
+    case "$DECODER" in
+        nv-qldpc-decoder) TRANSPORT="gpu_roce" ;;
+        *)                TRANSPORT="cpu_roce" ;;
+    esac
+fi
+if [[ "$TRANSPORT" != "cpu_roce" && "$TRANSPORT" != "gpu_roce" ]]; then
+    echo "ERROR: unknown --transport $TRANSPORT (expected cpu_roce or gpu_roce)" >&2
+    exit 1
+fi
 
 # ============================================================================
 # Logging Helpers
@@ -624,23 +668,34 @@ do_build() {
         "$hsb_cmake" "${hsb_common_args[@]}" 2>&1 | tail -5
     fi
 
+    # hololink_core is enough for playback + the emulator; the gpu_roce
+    # server additionally needs the HSB gpu_roce_transceiver archive.
+    local hsb_targets=(hololink_core)
+    local hsb_gpu_roce_lib="${hsb_build}/src/hololink/operators/gpu_roce_transceiver/libgpu_roce_transceiver.a"
+    if [[ -f "$PROPRIETARY_ARCHIVE" ]]; then
+        hsb_targets+=(gpu_roce_transceiver)
+    fi
     "$hsb_cmake" --build "$hsb_build" -j "$JOBS" \
-        --target hololink_core 2>&1 | tail -5
+        --target "${hsb_targets[@]}" 2>&1 | tail -5
     _info "holoscan-sensor-bridge built: $hsb_build/"
 
+    # Reconfigure cuda-quantum/realtime with hololink tools: the emulator
+    # binary (emulate mode) and the bridge-hololink .so the gpu_roce server
+    # path links against.
+    local cq_hololink_targets=(cudaq-realtime-bridge-hololink)
     if $EMULATE; then
-        # Reconfigure cuda-quantum/realtime with hololink tools (for the
-        # emulator binary only; the server itself has no HSB dependency).
-        cmake -G Ninja -S "$cq_src" -B "$cq_build" \
-            -DCMAKE_BUILD_TYPE=Release \
-            $cuda_arch_flag \
-            -DCUDAQ_REALTIME_ENABLE_HOLOLINK_TOOLS=ON \
-            -DHOLOSCAN_SENSOR_BRIDGE_SOURCE_DIR="$HSB_DIR" \
-            -DHOLOSCAN_SENSOR_BRIDGE_BUILD_DIR="$hsb_build" \
-            2>&1 | tail -5
-        cmake --build "$cq_build" -j "$JOBS" \
-            --target hololink_fpga_emulator 2>&1 | tail -5
+        cq_hololink_targets+=(hololink_fpga_emulator)
     fi
+    cmake -G Ninja -S "$cq_src" -B "$cq_build" \
+        -DCMAKE_BUILD_TYPE=Release \
+        $cuda_arch_flag \
+        -DCUDAQ_REALTIME_ENABLE_HOLOLINK_TOOLS=ON \
+        -DHOLOSCAN_SENSOR_BRIDGE_SOURCE_DIR="$HSB_DIR" \
+        -DHOLOSCAN_SENSOR_BRIDGE_BUILD_DIR="$hsb_build" \
+        -DGPU_ROCE_TRANSCEIVER_LIB="$hsb_gpu_roce_lib" \
+        2>&1 | tail -5
+    cmake --build "$cq_build" -j "$JOBS" \
+        --target "${cq_hololink_targets[@]}" 2>&1 | tail -5
 
     # ---- Stage 3: cudaqx decoding server + playback + decoder plugin ----
     _banner "Stage 3/3: Building cudaqx server + playback"
@@ -648,6 +703,28 @@ do_build() {
         _err "cudaqx source not found at $CUDAQX_DIR"
         return 1
     fi
+
+    # gpu_roce server support (Relay BP / nv-qldpc profile): wire in the
+    # proprietary cudevice archive + HSB gpu_roce transceiver + the
+    # cuda-quantum bridge-hololink lib when the proprietary artifacts exist;
+    # a pymatching-only rig builds fine without them (the server then has
+    # udp/cpu_roce transports only).
+    local gpu_roce_cmake_args=()
+    if [[ -f "$PROPRIETARY_ARCHIVE" ]]; then
+        gpu_roce_cmake_args+=(
+            -DCUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE="$PROPRIETARY_ARCHIVE"
+            -DGPU_ROCE_TRANSCEIVER_LIB="$hsb_gpu_roce_lib"
+            -DCUDAQ_REALTIME_BRIDGE_HOLOLINK_LIBRARY="${cq_build}/lib/libcudaq-realtime-bridge-hololink.so"
+        )
+        _info "gpu_roce server support: using $PROPRIETARY_ARCHIVE"
+    else
+        _info "gpu_roce server support: DISABLED (no proprietary archive at" \
+              "$PROPRIETARY_ARCHIVE)"
+    fi
+
+    # Clear stale cmake cache entries (find_library caches NOTFOUND
+    # permanently, and CUDAQ_GPU_ROCE_AVAILABLE is CACHE INTERNAL).
+    rm -f "$cudaqx_build/CMakeCache.txt"
 
     # The server's CMake locates the cpu_transport archives via explicit cache
     # entries (its find_library does not search the cuda-quantum build tree).
@@ -671,7 +748,18 @@ do_build() {
         -DQEC_HOST_DISPATCH_LIBRARY="${cq_build}/lib/libcudaq-realtime-host-dispatch.a" \
         -DCUDAQ_INSTALL_PREFIX="${CUDAQ_INSTALL_PREFIX:-/usr/local/cudaq}" \
         -DCUDAQ_DIR="${CUDAQ_INSTALL_PREFIX:-/usr/local/cudaq}/lib/cmake/cudaq" \
+        ${gpu_roce_cmake_args[@]+"${gpu_roce_cmake_args[@]}"} \
         2>&1 | tail -5
+
+    # The plugin loader searches relative to libcudaq-qec.so; symlink the
+    # cuda-qx-built nv-qldpc plugin into the cudaqx decoder-plugins dir so
+    # both the generator and the server can dlopen it.
+    if [[ -f "$NV_QLDPC_PLUGIN" ]]; then
+        mkdir -p "$cudaqx_build/lib/decoder-plugins"
+        ln -sf "$NV_QLDPC_PLUGIN" \
+            "$cudaqx_build/lib/decoder-plugins/$(basename "$NV_QLDPC_PLUGIN")"
+        _info "nv-qldpc plugin symlinked: $NV_QLDPC_PLUGIN"
+    fi
 
     cmake --build "$cudaqx_build" -j "$JOBS" \
         --target decoding_server \
@@ -733,8 +821,15 @@ generate_data_files() {
     local gen_ld_path
     gen_ld_path="${CUDA_QUANTUM_DIR}/realtime/build/lib:${CUDAQX_DIR}/build/lib"
 
+    # nv-qldpc profile == the Relay BP test: select Relay BP custom args.
+    local gen_extra_args=()
+    if [[ "$DECODER" == "nv-qldpc-decoder" ]]; then
+        gen_extra_args+=(--use-relay-bp)
+    fi
+
     _info "$GENERATOR_BIN --distance $GEN_DISTANCE --num_rounds $GEN_ROUNDS" \
-          "--p_spam $GEN_P_SPAM --decoder_type $DECODER --save_dem $(basename "$CONFIG_FILE")"
+          "--p_spam $GEN_P_SPAM --decoder_type $DECODER ${gen_extra_args[*]:-}" \
+          "--save_dem $(basename "$CONFIG_FILE")"
     (cd "$GEN_DIR" && \
      LD_LIBRARY_PATH="${gen_ld_path}:${LD_LIBRARY_PATH:-}" \
      "$GENERATOR_BIN" \
@@ -742,11 +837,29 @@ generate_data_files() {
         --num_rounds "$GEN_ROUNDS" \
         --p_spam "$GEN_P_SPAM" \
         --decoder_type "$DECODER" \
+        ${gen_extra_args[@]+"${gen_extra_args[@]}"} \
         --save_dem "$(basename "$CONFIG_FILE")" > gen_config.log 2>&1) || {
         _err "Config generation failed; see ${GEN_DIR}/gen_config.log"
         tail -5 "${GEN_DIR}/gen_config.log" >&2 || true
         return 1
     }
+
+    # The server selects its transceiver from the per-decoder `transport:` YAML
+    # key (default cpu_roce).  The generator doesn't emit non-default optional
+    # fields, so for the gpu_roce profile inject the key into our generated
+    # config, directly under the decoder's `type:` line.
+    if [[ "$TRANSPORT" == "gpu_roce" ]]; then
+        _info "Injecting 'transport: gpu_roce' into $(basename "$CONFIG_FILE")"
+        awk '{ print }
+             /^[[:space:]]*type:/ && !done {
+                 print "    transport:       gpu_roce"; done = 1
+             }' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" \
+            && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+        if ! grep -q "transport:.*gpu_roce" "$CONFIG_FILE"; then
+            _err "Failed to inject transport: gpu_roce into $CONFIG_FILE"
+            return 1
+        fi
+    fi
 
     _info "$GENERATOR_BIN --distance $GEN_DISTANCE --num_rounds $GEN_ROUNDS" \
           "--p_spam $GEN_P_SPAM --num_shots $GEN_SHOTS --yaml $(basename "$CONFIG_FILE")" \
@@ -767,6 +880,25 @@ generate_data_files() {
 
     _info "Generated: $CONFIG_FILE"
     _info "Generated: $SYNDROMES_FILE"
+}
+
+# The nv-qldpc profile needs the proprietary plugin dlopen-able from the
+# cudaqx decoder-plugins dir (used by both the data generator and the server).
+# Symlink it opportunistically so plain runs work without --build.
+ensure_nv_qldpc_plugin() {
+    local plugin_dir="${CUDAQX_DIR}/build/lib/decoder-plugins"
+    local link="${plugin_dir}/$(basename "$NV_QLDPC_PLUGIN")"
+    if [[ -e "$link" ]]; then
+        return 0
+    fi
+    if [[ ! -f "$NV_QLDPC_PLUGIN" ]]; then
+        _err "nv-qldpc plugin not found: $NV_QLDPC_PLUGIN"
+        _err "Build it in the proprietary cuda-qx tree or pass --nv-qldpc-plugin PATH."
+        return 1
+    fi
+    mkdir -p "$plugin_dir"
+    ln -sf "$NV_QLDPC_PLUGIN" "$link"
+    _info "nv-qldpc plugin symlinked: $link"
 }
 
 resolve_paths() {
@@ -867,29 +999,58 @@ extract_decimal() {
 start_server() {
     local peer_ip="$1" remote_qp="$2" server_log="$3"
 
-    _log "Starting decoding server (decoder=$DECODER, remote-qp=$remote_qp)"
+    _log "Starting decoding server (decoder=$DECODER, transport=$TRANSPORT," \
+         "remote-qp=$remote_qp)"
 
     local server_ld_path
     server_ld_path="${CUDA_QUANTUM_DIR}/realtime/build/lib:${CUDAQX_DIR}/build/lib"
 
-    LD_LIBRARY_PATH="${server_ld_path}:${LD_LIBRARY_PATH:-}" \
-    "$SERVER_BIN" \
-        --config="$CONFIG_FILE" \
-        --transport=cpu_roce \
-        --qp_config=hsb_fpga \
-        --device="$BRIDGE_DEVICE" \
-        --peer-ip="$peer_ip" \
-        --remote-qp="$remote_qp" \
-        --num-slots="$NUM_SLOTS" \
-        --slot-size="$PAGE_SIZE" \
-        --frame-size="$FRAME_SIZE" \
-        --timeout="$TIMEOUT" \
-        > >(tee "$server_log") 2>&1 &
+    local ready_pattern
+    if [[ "$TRANSPORT" == "gpu_roce" ]]; then
+        # Device-graph scheduler path: enqueue/get/reset run as DEVICE_CALLs
+        # on the GPU and the captured RelayBP decode graph fires device-side.
+        # The Hololink transceiver is configured via HOLOLINK_* env (the
+        # server's gpu_roce mode ignores the cpu_roce CLI flags), and eager
+        # module loading avoids lazy-load stalls inside the persistent
+        # scheduler (same as the old bridge launcher).
+        CUDA_MODULE_LOADING=EAGER \
+        LD_LIBRARY_PATH="${server_ld_path}:${LD_LIBRARY_PATH:-}" \
+        HOLOLINK_DEVICE="$BRIDGE_DEVICE" \
+        HOLOLINK_PEER_IP="$peer_ip" \
+        HOLOLINK_REMOTE_QP="$((remote_qp))" \
+        HOLOLINK_FRAME_SIZE="$PAGE_SIZE" \
+        HOLOLINK_NUM_PAGES="$NUM_SLOTS" \
+        HOLOLINK_GPU_ID="$GPU_ID" \
+        "$SERVER_BIN" \
+            --config="$CONFIG_FILE" \
+            --transport=gpu_roce \
+            --timeout="$TIMEOUT" \
+            > >(tee "$server_log") 2>&1 &
+        # The GpuRoceTransceiver prints the QP/RKey/Buffer handshake during
+        # server construction, BEFORE this READY sentinel -- so waiting for
+        # READY guarantees the three lines are scrapeable.
+        ready_pattern="QEC_DECODING_SERVER_READY gpu_roce"
+    else
+        LD_LIBRARY_PATH="${server_ld_path}:${LD_LIBRARY_PATH:-}" \
+        "$SERVER_BIN" \
+            --config="$CONFIG_FILE" \
+            --transport=cpu_roce \
+            --qp_config=hsb_fpga \
+            --device="$BRIDGE_DEVICE" \
+            --peer-ip="$peer_ip" \
+            --remote-qp="$remote_qp" \
+            --num-slots="$NUM_SLOTS" \
+            --slot-size="$PAGE_SIZE" \
+            --frame-size="$FRAME_SIZE" \
+            --timeout="$TIMEOUT" \
+            > >(tee "$server_log") 2>&1 &
+        ready_pattern="Bridge Ready"
+    fi
     SERVER_PID=$!
     PIDS_TO_KILL+=("$SERVER_PID")
     _info "Server PID: $SERVER_PID"
 
-    wait_for_pattern "$server_log" "Bridge Ready" 60 "$SERVER_PID" >/dev/null || {
+    wait_for_pattern "$server_log" "$ready_pattern" 60 "$SERVER_PID" >/dev/null || {
         _err "Decoding server did not become ready"
         _err "--- Server log ---"
         cat "$server_log" >&2
@@ -1030,6 +1191,9 @@ main() {
         return 0
     fi
 
+    if [[ "$DECODER" == "nv-qldpc-decoder" ]]; then
+        ensure_nv_qldpc_plugin
+    fi
     resolve_data_files
     if $GENERATE_DATA; then
         generate_data_files

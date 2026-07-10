@@ -99,6 +99,11 @@ if(HOLOSCAN_SENSOR_BRIDGE_BUILD_DIR AND CUDAQ_REALTIME_INCLUDE_DIR)
       AND CUDAQ_REALTIME_DISPATCH_LIBRARY AND CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY)
     set(CUDAQ_GPU_ROCE_AVAILABLE TRUE CACHE INTERNAL
       "GPU RoCE transport compiled into cudaq-qec-decoding-server")
+    # Under CMP0126 (NEW) the CACHE set above does NOT update the normal
+    # variable initialized FALSE at the top of this file, and the normal
+    # variable shadows the cache in this scope -- so the compile-definition
+    # gate below would never fire.  Set the normal variable explicitly.
+    set(CUDAQ_GPU_ROCE_AVAILABLE TRUE)
     message(STATUS
       "cudaq-qec-decoding-server: GPU RoCE ENABLED (core=${HOLOLINK_CORE_LIB})")
   else()
