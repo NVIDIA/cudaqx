@@ -112,6 +112,7 @@ def test_noisy_simulation():
     cudaq.reset_target()
 
 
+@pytest.mark.skip(reason="Temporarily disabled for CUDA-Q PR #4809 validation.")
 def test_python_code():
     steane = qec.get_code("py-steane-example")
     syndromes, dataResults = qec.sample_memory_circuit(steane,

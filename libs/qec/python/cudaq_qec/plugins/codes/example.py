@@ -34,22 +34,12 @@ def stabilizer(logicalQubit: patch, x_stabilizers: list[int],
                 x.ctrl(logicalQubit.ancx[xi], logicalQubit.data[di])
 
     h(logicalQubit.ancx)
-    for zi in range(len(logicalQubit.ancz)):
+    for zi in range(len(logicalQubit.ancx)):
         for di in range(len(logicalQubit.data)):
             if z_stabilizers[zi * len(logicalQubit.data) + di] == 1:
                 x.ctrl(logicalQubit.data[di], logicalQubit.ancz[zi])
 
-    # The memory-circuit detector layout expects stabilizer results in
-    # (Z-syndrome, X-syndrome) order. Keep the order explicit instead of
-    # relying on qview splatting through a single mz(...) call.
-    results = [
-        mz(logicalQubit.ancz[0]),
-        mz(logicalQubit.ancz[1]),
-        mz(logicalQubit.ancz[2]),
-        mz(logicalQubit.ancx[0]),
-        mz(logicalQubit.ancx[1]),
-        mz(logicalQubit.ancx[2]),
-    ]
+    results = mz([*logicalQubit.ancz, *logicalQubit.ancx])
 
     reset(logicalQubit.ancx)
     reset(logicalQubit.ancz)
