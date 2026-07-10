@@ -83,6 +83,12 @@ The code base class provides:
        using stabilizer_round = cudaq::qkernel<std::vector<cudaq::measure_result>(
            patch, const std::vector<std::size_t>&, const std::vector<std::size_t>&)>;
 
+   The two vector arguments of :code:`stabilizer_round` are the flattened X and
+   Z stabilizer *schedule* matrices, which can encode an optimized gate order
+   on top of the parity-check support. See
+   :cpp:func:`cudaq::qec::code::get_stabilizer_schedule_x` for the encoding
+   and the default (the plain parity matrices).
+
 4. **Protected Members**:
 
    - :code:`operation_encodings`: Maps operations to their quantum kernel implementations. The key is the ``operation`` enum and the value is a variant on the above kernel type aliases.
@@ -481,6 +487,26 @@ print the layout. **Python:** :class:`cudaq_qec.stabilizer_grid` — see
 :cpp:class:`cudaq::qec::surface_code::stabilizer_grid` — see
 :ref:`qec_stabilizer_grid_cpp`. The header :file:`cudaq/qec/codes/surface_code.h`
 contains the full declaration.
+
+**Stabilizer measurement schedule**
+
+The surface code's :code:`stabilizer_round` kernel executes one depth-4
+extraction round: the X- and Z-check CNOTs are interleaved over four shared
+timesteps. Within each plaquette the CNOT order follows the standard zigzag
+schedule for the rotated surface code (`Tomita & Svore
+<https://arxiv.org/abs/1404.3747>`__): the X and Z plaquettes traverse their
+corners in transposed orders, selected per orientation so that mid-round
+ancilla faults ("hook errors", `Dennis et al.
+<https://arxiv.org/abs/quant-ph/0110143>`__) propagate onto data-qubit pairs
+perpendicular to the same-type logical operator. This preserves the full code
+distance :math:`d` under circuit-level noise; a naive schedule (both plaquette
+types in ascending qubit-index order) halves the effective distance of one
+memory basis. The schedule is available from the :code:`stabilizer_grid`
+helper via
+:cpp:func:`~cudaq::qec::surface_code::stabilizer_grid::get_cnot_schedule_x` /
+:code:`get_cnot_schedule_z` (matrix form) and
+:code:`get_cnot_schedule_pairs_x` / :code:`get_cnot_schedule_pairs_z` (flat
+pair-list form).
 
 Usage:
 
