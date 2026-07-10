@@ -75,6 +75,13 @@ DECODER="pymatching"
 CONFIG_FILE=""
 SYNDROMES_FILE=""
 
+# ONNX model for the trt_decoder profile (TRT predecoder + PyMatching global
+# decoder).  AUTO => generate the tiny identity predecoder at run time
+# (output row = [pre_L=0, syndrome untouched], so TRT preserves the syndrome
+# and PyMatching performs the actual correction -- no trained model needed).
+ONNX_PATH="AUTO"
+ONNX_FILE=""
+
 # Data-generation parameters (surface-code memory experiment).  The
 # generator's RNG seed is fixed, so runs are reproducible.
 GEN_DISTANCE=3
@@ -129,9 +136,15 @@ Actions:
   --no-run               Skip running the test (useful with --build)
 
 Decoder options:
-  --decoder NAME         Decoder profile (default: pymatching).  By default the
-                         config/syndromes files are generated fresh each run by
-                         surface_code-4-yaml into CUDAQX_DIR/build/hsb_fpga_test_data
+  --decoder NAME         Decoder profile: pymatching (default) or trt_decoder
+                         (TensorRT predecoder + PyMatching global decoder in one
+                         server session; requires the TRT plugin, see --build).
+                         By default the config/syndromes files are generated
+                         fresh each run by surface_code-4-yaml into
+                         CUDAQX_DIR/build/hsb_fpga_test_data
+  --onnx PATH            ONNX model for the trt_decoder profile.  Default AUTO
+                         generates the identity predecoder at run time (needs
+                         the python3 'onnx' module)
   --config PATH          Use a pre-made decoding-server YAML config (skips generation)
   --syndromes PATH       Use a pre-made syndromes text file (skips generation)
   --data-dir DIR         Use pre-made DIR/config_NAME.yml + DIR/syndromes_NAME.txt
@@ -180,6 +193,7 @@ while [[ $# -gt 0 ]]; do
         --no-run)           DO_RUN=false ;;
         --no-verify)        VERIFY=false ;;
         --decoder)          DECODER="$2"; shift ;;
+        --onnx)             ONNX_PATH="$2"; shift ;;
         --config)           CONFIG_FILE="$2"; shift ;;
         --syndromes)        SYNDROMES_FILE="$2"; shift ;;
         --data-dir)         DATA_DIR="$2"; shift ;;
@@ -649,6 +663,18 @@ do_build() {
         return 1
     fi
 
+    # trt_decoder profile: build the TRT plugin, and use ON rather than AUTO
+    # so a rig without the TensorRT dev packages fails loudly at configure
+    # instead of silently skipping the plugin (the decoder-plugin loader also
+    # skips missing .so's silently -- two silences would mask the problem
+    # until data generation).  Other profiles keep the plugin OFF as before.
+    local trt_decoder_flag=OFF
+    local -a trt_targets=()
+    if [[ "$DECODER" == "trt_decoder" ]]; then
+        trt_decoder_flag=ON
+        trt_targets=(cudaq-qec-trt-decoder)
+    fi
+
     # The server's CMake locates the cpu_transport archives via explicit cache
     # entries (its find_library does not search the cuda-quantum build tree).
     cmake -G Ninja -S "$CUDAQX_DIR" -B "$cudaqx_build" \
@@ -657,7 +683,7 @@ do_build() {
         -DCMAKE_CUDA_COMPILER="$cuda_compiler" \
         -DCUDAToolkit_ROOT="$cuda_toolkit_root" \
         -DCUDAQX_QEC_ENABLE_HOLOLINK_TOOLS=ON \
-        -DCUDAQ_QEC_BUILD_TRT_DECODER=OFF \
+        -DCUDAQ_QEC_BUILD_TRT_DECODER="$trt_decoder_flag" \
         -DHOLOSCAN_SENSOR_BRIDGE_SOURCE_DIR="$HSB_DIR" \
         -DHOLOSCAN_SENSOR_BRIDGE_BUILD_DIR="$hsb_build" \
         -DCUDAQ_REALTIME_ROOT="${CUDA_QUANTUM_DIR}/realtime" \
@@ -678,6 +704,7 @@ do_build() {
                  hololink_fpga_syndrome_playback \
                  cudaq-qec-pymatching \
                  surface_code-4-yaml \
+                 "${trt_targets[@]}" \
         2>&1 | tail -5
     _info "cudaqx tools built: $cudaqx_build/bin + $cudaqx_build/libs/qec/unittests/utils/"
 
@@ -715,6 +742,65 @@ resolve_data_files() {
     SYNDROMES_FILE="${GEN_DIR}/syndromes_${DECODER}.txt"
 }
 
+# Resolve ONNX_FILE for the trt_decoder profile.  AUTO generates the tiny
+# identity predecoder (mirrors app_examples/surface_code-4-yaml-test.sh):
+# output row = [pre_L=0, input syndrome untouched], so TRT preserves the
+# syndrome and the PyMatching global decoder performs the actual correction --
+# expected corrections stay computable at generation time without a trained
+# model, while still exercising ONNX parse, engine build, and per-shot
+# inference.
+generate_identity_onnx() {
+    if [[ "$ONNX_PATH" != "AUTO" ]]; then
+        if [[ ! -f "$ONNX_PATH" ]]; then
+            _err "--onnx file not found: $ONNX_PATH"
+            return 1
+        fi
+        ONNX_FILE="$ONNX_PATH"
+        return 0
+    fi
+    if ! python3 -c "import onnx" 2>/dev/null; then
+        _err "python3 module 'onnx' is required to generate the identity ONNX"
+        _err "model (pip install onnx), or pass a pre-made model with --onnx."
+        return 1
+    fi
+    ONNX_FILE="${GEN_DIR}/trt_identity_predecoder.onnx"
+    local syndrome_size=$(((GEN_DISTANCE * GEN_DISTANCE - 1) * GEN_ROUNDS))
+    _info "Generating identity ONNX: $ONNX_FILE (syndrome_size=$syndrome_size)"
+    python3 - "$ONNX_FILE" "$syndrome_size" <<'PY'
+import sys
+
+import onnx
+from onnx import TensorProto, helper
+
+output_path = sys.argv[1]
+syndrome_size = int(sys.argv[2])
+
+input_info = helper.make_tensor_value_info(
+    "input", TensorProto.FLOAT, [1, syndrome_size])
+output_info = helper.make_tensor_value_info(
+    "output", TensorProto.FLOAT, [1, syndrome_size + 1])
+zero = helper.make_node(
+    "Constant",
+    [],
+    ["pre_l"],
+    value=helper.make_tensor("zero", TensorProto.FLOAT, [1, 1], [0.0]),
+)
+concat = helper.make_node("Concat", ["pre_l", "input"], ["output"], axis=1)
+graph = helper.make_graph(
+    [zero, concat], "trt_identity_predecoder", [input_info], [output_info])
+model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 19)])
+# IR 9 is sufficient for opset 19 and remains readable by the ONNX checker in
+# the CUDA-QX development image.
+model.ir_version = 9
+onnx.checker.check_model(model)
+onnx.save(model, output_path)
+PY
+    if [[ ! -f "$ONNX_FILE" ]]; then
+        _err "Identity ONNX generation failed"
+        return 1
+    fi
+}
+
 # Generate the decoder config (DEM + decoder_custom_args) and the syndromes
 # file with the surface_code-4-yaml memory-experiment binary.  Runs in GEN_DIR
 # so the generator's auxiliary outputs land there too.
@@ -726,6 +812,25 @@ generate_data_files() {
         return 1
     fi
 
+    # trt_decoder profile: the generator needs an ONNX model at
+    # config-generation time (--onnx_path is required with --decoder_type
+    # trt_decoder), and the syndromes run (--yaml) constructs the decoder
+    # in-process and decodes -- so the TRT plugin must be present and working.
+    # The plugin loader silently skips broken .so's, hence the explicit check.
+    local extra_gen_flags=()
+    if [[ "$DECODER" == "trt_decoder" ]]; then
+        local trt_plugin="${CUDAQX_DIR}/build/lib/decoder-plugins/libcudaq-qec-trt-decoder.so"
+        if [[ ! -f "$trt_plugin" ]]; then
+            _err "TRT decoder plugin not found: $trt_plugin"
+            _err "Run with --build --decoder trt_decoder (requires the TensorRT"
+            _err "dev packages: libnvinfer-dev libnvonnxparsers-dev)."
+            return 1
+        fi
+        mkdir -p "$GEN_DIR"
+        generate_identity_onnx || return 1
+        extra_gen_flags+=(--onnx_path "$ONNX_FILE")
+    fi
+
     _log "Generating test data (decoder=$DECODER, distance=$GEN_DISTANCE," \
          "rounds=$GEN_ROUNDS, p_spam=$GEN_P_SPAM, shots=$GEN_SHOTS)"
     mkdir -p "$GEN_DIR"
@@ -734,7 +839,8 @@ generate_data_files() {
     gen_ld_path="${CUDA_QUANTUM_DIR}/realtime/build/lib:${CUDAQX_DIR}/build/lib"
 
     _info "$GENERATOR_BIN --distance $GEN_DISTANCE --num_rounds $GEN_ROUNDS" \
-          "--p_spam $GEN_P_SPAM --decoder_type $DECODER --save_dem $(basename "$CONFIG_FILE")"
+          "--p_spam $GEN_P_SPAM --decoder_type $DECODER ${extra_gen_flags[*]}" \
+          "--save_dem $(basename "$CONFIG_FILE")"
     (cd "$GEN_DIR" && \
      LD_LIBRARY_PATH="${gen_ld_path}:${LD_LIBRARY_PATH:-}" \
      "$GENERATOR_BIN" \
@@ -742,11 +848,25 @@ generate_data_files() {
         --num_rounds "$GEN_ROUNDS" \
         --p_spam "$GEN_P_SPAM" \
         --decoder_type "$DECODER" \
+        "${extra_gen_flags[@]}" \
         --save_dem "$(basename "$CONFIG_FILE")" > gen_config.log 2>&1) || {
         _err "Config generation failed; see ${GEN_DIR}/gen_config.log"
         tail -5 "${GEN_DIR}/gen_config.log" >&2 || true
         return 1
     }
+
+    # Configuration-identity check: the identity ONNX makes TRT->PyMatching
+    # output bit-identical to plain PyMatching, so a silently-substituted
+    # entry would pass verification below.  Pin the generated config to the
+    # combo before anything downstream consumes it.
+    if [[ "$DECODER" == "trt_decoder" ]]; then
+        if ! grep -Eq "type:[[:space:]]+trt_decoder" "$CONFIG_FILE" || \
+           ! grep -q "onnx_load_path" "$CONFIG_FILE"; then
+            _err "Generated config lacks a trt_decoder entry with onnx_load_path: $CONFIG_FILE"
+            return 1
+        fi
+        _info "Config carries the trt_decoder entry (onnx_load_path set)"
+    fi
 
     _info "$GENERATOR_BIN --distance $GEN_DISTANCE --num_rounds $GEN_ROUNDS" \
           "--p_spam $GEN_P_SPAM --num_shots $GEN_SHOTS --yaml $(basename "$CONFIG_FILE")" \
@@ -891,6 +1011,17 @@ start_server() {
 
     wait_for_pattern "$server_log" "Bridge Ready" 60 "$SERVER_PID" >/dev/null || {
         _err "Decoding server did not become ready"
+        _err "--- Server log ---"
+        cat "$server_log" >&2
+        return 1
+    }
+
+    # Configuration-identity check (all profiles): the server names the
+    # decoder session it actually constructed.  Matters most for trt_decoder,
+    # where the identity ONNX makes a silently-substituted pymatching session
+    # pass the corrections verification bit-identically.
+    wait_for_pattern "$server_log" "decoder 0 type: ${DECODER}" 5 "$SERVER_PID" >/dev/null || {
+        _err "Server did not construct a '${DECODER}' decoder session"
         _err "--- Server log ---"
         cat "$server_log" >&2
         return 1
