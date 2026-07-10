@@ -228,12 +228,11 @@ void enqueue_syndromes(cudaq::qec::realtime::qec_realtime_session &session,
   // Build the wire payload per decoder_server_runtime.md#enqueue_syndromes:
   //   32-byte EnqueueRequestPayload (decoder_id, counter,
   //   syndrome_mapping_id, num_syndromes; all INT64)
-  //   + ceil(num_syndromes/8) bit-packed syndrome bytes (LSB-first)
-  //   + 0..7 zero pad bytes to round to an 8-byte multiple.
+  //   + ceil(num_syndromes/8) bit-packed syndrome bytes (LSB-first), no pad.
   const std::size_t bp_bytes =
       cudaq::qec::decoding::rpc::bit_packed_bytes(num_syndromes);
-  const std::size_t body_bytes = cudaq::qec::decoding::rpc::align_to_8(
-      sizeof(cudaq::qec::decoding::rpc::EnqueueRequestPayload) + bp_bytes);
+  const std::size_t body_bytes =
+      sizeof(cudaq::qec::decoding::rpc::EnqueueRequestPayload) + bp_bytes;
   std::vector<std::uint8_t> payload(body_bytes, 0);
   auto *p =
       reinterpret_cast<cudaq::qec::decoding::rpc::EnqueueRequestPayload *>(
@@ -321,8 +320,9 @@ void get_corrections(cudaq::qec::realtime::qec_realtime_session &session,
         "correction_length > 0");
 
   // Build the wire payload per decoder_server_runtime.md#get_corrections:
-  //   24 bytes total: decoder_id (INT64) + return_size (INT64) +
-  //   reset (UINT8) + 7 pad.  The struct is laid out exactly this way.
+  //   17 bytes total: decoder_id (INT64) + return_size (INT64, the OUT
+  //   std::vector<bool> length) + reset (UINT8, trailing bool, no pad).  The
+  //   struct is laid out exactly this way.
   cudaq::qec::decoding::rpc::GetCorrectionsRequestPayload payload{};
   payload.decoder_id = static_cast<std::int64_t>(decoder_id);
   payload.return_size = static_cast<std::int64_t>(correction_length);
@@ -360,18 +360,16 @@ void get_corrections(cudaq::qec::realtime::qec_realtime_session &session,
        << ") for decoder_id=" << decoder_id;
     throw std::runtime_error(os.str());
   }
-  // Per spec result_len = ceil(R/8) + 0..7 pad, always a multiple of 8.
+  // Per spec result_len = ceil(R/8) exactly (no trailing pad).
   const std::size_t expected_bp =
       cudaq::qec::decoding::rpc::bit_packed_bytes(correction_length);
-  const std::size_t expected_aligned =
-      cudaq::qec::decoding::rpc::align_to_8(expected_bp);
-  if (resp->result_len != static_cast<std::uint32_t>(expected_aligned)) {
+  if (resp->result_len != static_cast<std::uint32_t>(expected_bp)) {
     const std::uint32_t got = resp->result_len;
     release_slot(session, slot);
     std::ostringstream os;
     os << "rpc_producer::get_corrections: result_len mismatch (decoder_id="
-       << decoder_id << "), expected " << expected_aligned
-       << " (ceil(R/8) + pad for R=" << correction_length << "), got " << got;
+       << decoder_id << "), expected " << expected_bp
+       << " (ceil(R/8) for R=" << correction_length << "), got " << got;
     throw std::runtime_error(os.str());
   }
 
