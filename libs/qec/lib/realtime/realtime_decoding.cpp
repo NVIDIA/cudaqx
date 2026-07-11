@@ -7,6 +7,7 @@
  ******************************************************************************/
 
 #include "realtime_decoding.h"
+#include "common/ExecutionContext.h"
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/pcm_utils.h"
@@ -362,6 +363,11 @@ _set_syndrome_capture_callback(void (*callback)(const uint8_t *, size_t)) {
   g_syndrome_capture_callback = callback;
 }
 
+static bool in_dem_analysis_context() {
+  auto *ctx = cudaq::getExecutionContext();
+  return ctx && ctx->name == "dem";
+}
+
 __attribute__((visibility("default"))) void (*_get_syndrome_capture_callback())(
     const uint8_t *, size_t) {
   return g_syndrome_capture_callback;
@@ -369,6 +375,8 @@ __attribute__((visibility("default"))) void (*_get_syndrome_capture_callback())(
 
 void enqueue_syndromes(std::size_t decoder_id, uint8_t *syndromes,
                        std::uint64_t syndrome_length, std::uint64_t tag) {
+  if (in_dem_analysis_context())
+    return;
   if (decoder_id >= g_decoders.size()) {
     throw std::invalid_argument(
         fmt::format("Decoder {} not found", decoder_id));
@@ -440,6 +448,13 @@ void enqueue_syndromes(std::size_t decoder_id, uint8_t *syndromes,
 
 void get_corrections(std::size_t decoder_id, uint8_t *corrections,
                      std::uint64_t correction_length, bool reset) {
+  if (in_dem_analysis_context()) {
+    // Circuit analysis (e.g. DEM extraction): return zeroed corrections rather
+    // than driving a decoder that isn't configured.
+    if (corrections && correction_length > 0)
+      std::memset(corrections, 0, correction_length);
+    return;
+  }
   CUDA_QEC_INFO("Entered get_corrections function decoder_id={}, "
                 "correction_length={}, reset={}",
                 decoder_id, correction_length, reset);
@@ -491,6 +506,8 @@ void get_corrections(std::size_t decoder_id, uint8_t *corrections,
 }
 
 void reset_decoder(std::size_t decoder_id) {
+  if (in_dem_analysis_context())
+    return;
   CUDA_QEC_INFO("Entered reset_decoder for decoder_id={}", decoder_id);
   if (decoder_id >= g_decoders.size()) {
     throw std::invalid_argument(

@@ -16,10 +16,21 @@
 // offload decoding work to our QEC decoders in real time
 // (within qubit coherence times)
 //
-// The design here is as follows: We declare but do not
-// implement the API. Then we allow users to specify concrete
-// implementations of the API via the target specification passed to
-// nvq++.
+// The design here is as follows: this header only declares the API; what a
+// kernel's calls bind to is resolved per binary.
+//
+//  - A target decoding shim (cudaq-qec-realtime-decoding-{simulation,
+//    quantinuum,...}), when linked, provides the real implementations. They
+//    win kernel-registry resolution because the shim registers after its
+//    libcudaq-qec dependency.
+//  - Without a shim, the calls bind to the default no-op implementations
+//    that libcudaq-qec registers (lib/device/memory_circuit.cpp): enqueues
+//    and resets do nothing, and corrections come back all-zero.
+//
+// In short: link a shim and these calls decode; link nothing extra and they
+// are no-ops. The host-side entry points additionally no-op while a circuit
+// is being analyzed for its detector error model, so kernels containing these
+// calls are safe to pass to dem_from_memory_circuit.
 
 namespace cudaq::qec::decoding {
 // CUDA-Q QEC Realtime Decoding API (declarations)
