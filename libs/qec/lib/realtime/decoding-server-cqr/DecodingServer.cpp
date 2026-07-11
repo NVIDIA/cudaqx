@@ -157,7 +157,8 @@ void DecodingServer::register_handlers() {
   dispatcher_.register_handler(
       kEnqueueSyndromesFunctionId,
       [this](RxFrame frame, ResponseWriter &writer) {
-        if (frame.buf.size() < sizeof(RPCHeader) + sizeof(EnqueueRequestPayload)) {
+        if (frame.buf.size() <
+            sizeof(RPCHeader) + sizeof(EnqueueRequestPayload)) {
           writer.write_error(RpcStatus::BAD_REQUEST);
           return;
         }
@@ -191,8 +192,9 @@ void DecodingServer::register_handlers() {
           writer.write_error(RpcStatus::BAD_REQUEST);
           return;
         }
-        const auto *req = reinterpret_cast<const GetCorrectionsRequestPayload *>(
-            frame.buf.data() + sizeof(RPCHeader));
+        const auto *req =
+            reinterpret_cast<const GetCorrectionsRequestPayload *>(
+                frame.buf.data() + sizeof(RPCHeader));
         const auto *hdr = reinterpret_cast<const RPCHeader *>(frame.buf.data());
 
         auto &session = registry_.get(static_cast<uint64_t>(req->decoder_id));
@@ -213,7 +215,8 @@ void DecodingServer::register_handlers() {
   // reset_decoder — response sent by the worker thread.
   dispatcher_.register_handler(
       kResetDecoderFunctionId, [this](RxFrame frame, ResponseWriter &writer) {
-        if (frame.buf.size() < sizeof(RPCHeader) + sizeof(ResetRequestPayload)) {
+        if (frame.buf.size() <
+            sizeof(RPCHeader) + sizeof(ResetRequestPayload)) {
           writer.write_error(RpcStatus::BAD_REQUEST);
           return;
         }

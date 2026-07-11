@@ -86,8 +86,8 @@ WorkItem make_enqueue(CaptureTransceiver &transport, uint64_t counter,
   item.frame_buf.resize(sizeof(RPCHeader) + sizeof(EnqueueRequestPayload) +
                         bit_packed_bytes(bits.size()));
 
-  auto *request = reinterpret_cast<EnqueueRequestPayload *>(item.frame_buf.data() +
-                                                     sizeof(RPCHeader));
+  auto *request = reinterpret_cast<EnqueueRequestPayload *>(
+      item.frame_buf.data() + sizeof(RPCHeader));
   request->decoder_id = 0;
   request->counter = static_cast<int64_t>(counter);
   request->syndrome_mapping_id = 0;
@@ -106,7 +106,8 @@ WorkItem make_get_corrections(CaptureTransceiver &transport, bool reset) {
   item.function_id = kGetCorrectionsFunctionId;
   item.request_id = 101;
   item.response_transport = &transport;
-  item.frame_buf.resize(sizeof(RPCHeader) + sizeof(GetCorrectionsRequestPayload));
+  item.frame_buf.resize(sizeof(RPCHeader) +
+                        sizeof(GetCorrectionsRequestPayload));
 
   auto *request = reinterpret_cast<GetCorrectionsRequestPayload *>(
       item.frame_buf.data() + sizeof(RPCHeader));
@@ -122,8 +123,8 @@ WorkItem make_reset(CaptureTransceiver &transport) {
   item.request_id = 202;
   item.response_transport = &transport;
   item.frame_buf.resize(sizeof(RPCHeader) + sizeof(ResetRequestPayload));
-  auto *request = reinterpret_cast<ResetRequestPayload *>(item.frame_buf.data() +
-                                                   sizeof(RPCHeader));
+  auto *request = reinterpret_cast<ResetRequestPayload *>(
+      item.frame_buf.data() + sizeof(RPCHeader));
   request->decoder_id = 0;
   return item;
 }

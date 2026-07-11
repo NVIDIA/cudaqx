@@ -329,8 +329,8 @@ inline bool CqrTransceiver::build_enqueue_frame(const void *rx_slot,
   if (!detail::parse_cqr_enqueue_frame(rx_slot, slot_size, request))
     return false;
 
-  // Re-frame to RPCHeader + EnqueueRequestPayload + bit-packed bytes (the internal
-  // layout drops the byte-count prefix; the bits stay packed as-is).
+  // Re-frame to RPCHeader + EnqueueRequestPayload + bit-packed bytes (the
+  // internal layout drops the byte-count prefix; the bits stay packed as-is).
   out.buf.resize(sizeof(RPCHeader) + sizeof(EnqueueRequestPayload) +
                  request.byte_count);
 
@@ -342,14 +342,15 @@ inline bool CqrTransceiver::build_enqueue_frame(const void *rx_slot,
   hdr->request_id = request.header->request_id;
   hdr->ptp_timestamp = request.header->ptp_timestamp;
 
-  auto *req =
-      reinterpret_cast<EnqueueRequestPayload *>(out.buf.data() + sizeof(RPCHeader));
+  auto *req = reinterpret_cast<EnqueueRequestPayload *>(out.buf.data() +
+                                                        sizeof(RPCHeader));
   req->decoder_id = static_cast<int64_t>(request.decoder_id);
   req->counter = static_cast<int64_t>(request.counter);
   req->syndrome_mapping_id = static_cast<int64_t>(request.syndrome_mapping_id);
   req->num_syndromes = static_cast<int64_t>(request.num_syndromes);
 
-  uint8_t *dst = out.buf.data() + sizeof(RPCHeader) + sizeof(EnqueueRequestPayload);
+  uint8_t *dst =
+      out.buf.data() + sizeof(RPCHeader) + sizeof(EnqueueRequestPayload);
   std::memcpy(dst, request.packed_bits, request.byte_count);
 
   out.vp_id = 0;

@@ -101,8 +101,8 @@ static void init_server() {
 
 // Write an error RPCResponse into tx_slot (handler-level failures must not
 // propagate into the transport dispatcher loop).
-constexpr int32_t kStatusHandlerException = static_cast<int32_t>(
-    cudaq::qec::decoding::rpc::RpcStatus::INTERNAL_ERROR);
+constexpr int32_t kStatusHandlerException =
+    static_cast<int32_t>(cudaq::qec::decoding::rpc::RpcStatus::INTERNAL_ERROR);
 
 static void write_error_response(const void *rx_slot, void *tx_slot,
                                  std::size_t slot_size, int32_t status) {

@@ -112,7 +112,8 @@ TEST(CqrTransceiverTest, AcceptsAnExactlySizedEnqueueRequestPayload) {
   transceiver.inject(rx.data(), tx.data(), rx.size(), header.function_id);
   auto frame = transceiver.recv();
 
-  ASSERT_EQ(frame.buf.size(), sizeof(RPCHeader) + sizeof(EnqueueRequestPayload) + 1);
+  ASSERT_EQ(frame.buf.size(),
+            sizeof(RPCHeader) + sizeof(EnqueueRequestPayload) + 1);
   const auto *request = reinterpret_cast<const EnqueueRequestPayload *>(
       frame.buf.data() + sizeof(RPCHeader));
   EXPECT_EQ(request->decoder_id, 3);
