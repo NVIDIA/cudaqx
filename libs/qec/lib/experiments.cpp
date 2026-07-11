@@ -254,6 +254,29 @@ stabilizer_detector_ranges(std::size_t numRounds, std::size_t numZStabs,
   return ranges;
 }
 
+/// @brief Validate and flatten (row-major) an inlined feedback tensor
+/// declared by a code. An empty tensor (the identity default) flattens to an
+/// empty vector; a non-empty tensor must have shape
+/// [expected_rows, expected_cols].
+static std::vector<std::size_t>
+flatten_feedback_tensor(const cudaqx::tensor<uint8_t> &t,
+                        std::size_t expected_rows, std::size_t expected_cols,
+                        const std::string &name) {
+  if (t.size() == 0)
+    return {};
+  if (t.rank() != 2 || t.shape()[0] != expected_rows ||
+      t.shape()[1] != expected_cols) {
+    std::string actual;
+    for (std::size_t d = 0; d < t.rank(); ++d)
+      actual += (d ? ", " : "") + std::to_string(t.shape()[d]);
+    throw std::runtime_error(name + " has invalid shape [" + actual +
+                             "] - expected [" + std::to_string(expected_rows) +
+                             ", " + std::to_string(expected_cols) +
+                             "] or an empty tensor.");
+  }
+  return std::vector<std::size_t>(t.data(), t.data() + t.size());
+}
+
 /// @brief Given a memory circuit setup, sample syndrome and data qubit
 /// measurements. This is the main driver function that all of the
 /// sample_memory_circuit overloads invoke.
@@ -309,29 +332,29 @@ sample_memory_circuit(const code &code, operation statePrep,
 
   const std::size_t numCols = numAncx + numAncz;
 
-  auto fb_layout = apply_inlined_feedback(
-      code.get_inlined_feedback(), code.get_observable_inlined_feedback(),
-      numCols, num_obs);
+  auto feedback_flat = flatten_feedback_tensor(
+      code.get_inlined_feedback(), numCols, numCols, "get_inlined_feedback()");
+  auto obs_feedback_flat =
+      flatten_feedback_tensor(code.get_observable_inlined_feedback(), num_obs,
+                              numCols, "get_observable_inlined_feedback()");
 
   // Obtain the Measurement-to-Detector (M2D) sparse matrix.
   // m2d.rows[d] = set of chronological measurement indices whose XOR = detector
   // d.
   cudaq::M2DSparseMatrix m2d;
   cudaq::M2OSparseMatrix m2o;
-  cudaq::dem_from_kernel(
-      memory_circuit, &noise, /*options=*/{}, m2d, m2o, stabRound, prep,
-      numData, numAncx, numAncz, numRounds, xVec, zVec, obs_flat, num_obs,
-      !is_z_prep, fb_layout.detector_indices, fb_layout.detector_offsets,
-      fb_layout.observable_indices, fb_layout.observable_offsets);
+  cudaq::dem_from_kernel(memory_circuit, &noise, /*options=*/{}, m2d, m2o,
+                         stabRound, prep, numData, numAncx, numAncz, numRounds,
+                         xVec, zVec, obs_flat, num_obs, !is_z_prep,
+                         feedback_flat, obs_feedback_flat);
 
   // Sample the memory circuit and collect all raw measurements.
   cudaq::sample_options opts{
       .shots = numShots, .noise = noise, .explicit_measurements = true};
-  auto result = cudaq::sample(
-      opts, memory_circuit, stabRound, prep, numData, numAncx, numAncz,
-      numRounds, xVec, zVec, obs_flat, num_obs, !is_z_prep,
-      fb_layout.detector_indices, fb_layout.detector_offsets,
-      fb_layout.observable_indices, fb_layout.observable_offsets);
+  auto result =
+      cudaq::sample(opts, memory_circuit, stabRound, prep, numData, numAncx,
+                    numAncz, numRounds, xVec, zVec, obs_flat, num_obs,
+                    !is_z_prep, feedback_flat, obs_feedback_flat);
 
   // mzTable[shot, meas_idx] = raw 0/1 outcome; shape (numShots,
   // numMeasPerShot). Measurement layout per shot: numRounds*numCols ancilla,
@@ -488,17 +511,18 @@ dem_from_memory_circuit(const code &code, operation statePrep,
                                     logical_obs.data() + logical_obs.size());
 
   const std::size_t numAnc = numAncx + numAncz;
-  auto fb_layout = apply_inlined_feedback(
-      code.get_inlined_feedback(), code.get_observable_inlined_feedback(),
-      numAnc, num_obs);
+  auto feedback_flat = flatten_feedback_tensor(
+      code.get_inlined_feedback(), numAnc, numAnc, "get_inlined_feedback()");
+  auto obs_feedback_flat =
+      flatten_feedback_tensor(code.get_observable_inlined_feedback(), num_obs,
+                              numAnc, "get_observable_inlined_feedback()");
 
   cudaq::dem_options dem_opts;
   dem_opts.decompose_errors = decompose_errors;
   auto dem_text = cudaq::dem_from_kernel(
       memory_circuit, &noise, dem_opts, stabRound, prep, numData, numAncx,
       numAncz, numRounds, xVec, zVec, obs_flat, num_obs, !is_z_prep,
-      fb_layout.detector_indices, fb_layout.detector_offsets,
-      fb_layout.observable_indices, fb_layout.observable_offsets);
+      feedback_flat, obs_feedback_flat);
   auto dem = cudaq::qec::dem_from_stim_text(dem_text, decompose_errors);
 
   const auto numXStabs = code.get_num_x_stabilizers();

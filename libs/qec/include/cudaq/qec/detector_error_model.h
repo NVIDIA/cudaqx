@@ -120,10 +120,10 @@ struct inlined_feedback_layout {
 /// @throws std::runtime_error if a non-empty tensor's shape does not match
 ///         the expected dimensions.
 inlined_feedback_layout
-apply_inlined_feedback(const cudaqx::tensor<uint8_t> &feedback,
-                       const cudaqx::tensor<uint8_t> &obs_feedback,
-                       std::size_t num_syndromes_per_round,
-                       std::size_t num_observables);
+build_inlined_feedback_layout(const cudaqx::tensor<uint8_t> &feedback,
+                              const cudaqx::tensor<uint8_t> &obs_feedback,
+                              std::size_t num_syndromes_per_round,
+                              std::size_t num_observables);
 
 /// Parse the Stim DEM string @p dem_text into detector/observable flip
 /// matrices and error rates. DEM-native decoders should consume raw DEM text

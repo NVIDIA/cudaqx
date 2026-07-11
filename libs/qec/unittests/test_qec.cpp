@@ -11,9 +11,11 @@
 #include <fstream>
 #include <gtest/gtest.h>
 #include <random>
+#include <set>
 #include <unistd.h>
 
 #include "cuda-qx/core/library_utils.h"
+#include "cudaq/algorithms/dem.h"
 #include "cudaq/qec/codes/surface_code.h"
 #include "cudaq/qec/experiments.h"
 #include "cudaq/qec/pcm_utils.h"
@@ -2362,7 +2364,7 @@ TEST(QECCodeTester, checkInlinedFeedbackToyDem) {
 
 TEST(InlinedFeedbackLayout, EmptyTensorsGiveEmptyLayout) {
   cudaqx::tensor<uint8_t> empty;
-  auto layout = cudaq::qec::apply_inlined_feedback(empty, empty, 2, 1);
+  auto layout = cudaq::qec::build_inlined_feedback_layout(empty, empty, 2, 1);
   EXPECT_TRUE(layout.detector_indices.empty());
   EXPECT_TRUE(layout.detector_offsets.empty());
   EXPECT_TRUE(layout.observable_indices.empty());
@@ -2376,7 +2378,7 @@ TEST(InlinedFeedbackLayout, ToyMatricesCsr) {
   // obs_fb = [[0,1]]: observable 0 XORs record 1 every round.
   cudaqx::tensor<uint8_t> obs_fb({1, 2});
   obs_fb.at({0, 1}) = 1;
-  auto layout = cudaq::qec::apply_inlined_feedback(fb, obs_fb, 2, 1);
+  auto layout = cudaq::qec::build_inlined_feedback_layout(fb, obs_fb, 2, 1);
   EXPECT_EQ(layout.detector_indices, (std::vector<std::size_t>{1}));
   EXPECT_EQ(layout.detector_offsets, (std::vector<std::size_t>{0, 1, 1}));
   EXPECT_EQ(layout.observable_indices, (std::vector<std::size_t>{1}));
@@ -2390,7 +2392,7 @@ TEST(InlinedFeedbackLayout, MultiRowWeights) {
   fb.at({0, 2}) = 1;
   fb.at({2, 1}) = 1;
   cudaqx::tensor<uint8_t> empty;
-  auto layout = cudaq::qec::apply_inlined_feedback(fb, empty, 3, 0);
+  auto layout = cudaq::qec::build_inlined_feedback_layout(fb, empty, 3, 0);
   EXPECT_EQ(layout.detector_indices, (std::vector<std::size_t>{0, 2, 1}));
   EXPECT_EQ(layout.detector_offsets, (std::vector<std::size_t>{0, 2, 2, 3}));
   EXPECT_TRUE(layout.observable_offsets.empty());
@@ -2399,7 +2401,7 @@ TEST(InlinedFeedbackLayout, MultiRowWeights) {
 TEST(InlinedFeedbackLayout, AllZeroMatrixGivesZeroWeightRows) {
   cudaqx::tensor<uint8_t> fb({2, 2});
   cudaqx::tensor<uint8_t> empty;
-  auto layout = cudaq::qec::apply_inlined_feedback(fb, empty, 2, 0);
+  auto layout = cudaq::qec::build_inlined_feedback_layout(fb, empty, 2, 0);
   EXPECT_TRUE(layout.detector_indices.empty());
   EXPECT_EQ(layout.detector_offsets, (std::vector<std::size_t>{0, 0, 0}));
 }
@@ -2407,9 +2409,126 @@ TEST(InlinedFeedbackLayout, AllZeroMatrixGivesZeroWeightRows) {
 TEST(InlinedFeedbackLayout, ThrowsOnWrongShape) {
   cudaqx::tensor<uint8_t> bad({2, 3}); // expected [2 x 2]
   cudaqx::tensor<uint8_t> empty;
-  EXPECT_THROW(cudaq::qec::apply_inlined_feedback(bad, empty, 2, 0),
+  EXPECT_THROW(cudaq::qec::build_inlined_feedback_layout(bad, empty, 2, 0),
                std::runtime_error);
   cudaqx::tensor<uint8_t> bad_obs({2, 2}); // expected [1 x 2]
-  EXPECT_THROW(cudaq::qec::apply_inlined_feedback(empty, bad_obs, 2, 1),
+  EXPECT_THROW(cudaq::qec::build_inlined_feedback_layout(empty, bad_obs, 2, 1),
                std::runtime_error);
+}
+
+// The entry-point memory-circuit kernel (defined in device/memory_circuit.cpp);
+// forward-declared here - like the feedback_toy kernels above - so the
+// conformance test below can drive dem_from_kernel directly.
+namespace cudaq::qec {
+__qpu__ void memory_circuit(const code::stabilizer_round &stabilizer_round,
+                            const code::one_qubit_encoding &statePrep,
+                            std::size_t numData, std::size_t numAncx,
+                            std::size_t numAncz, std::size_t numRounds,
+                            const std::vector<std::size_t> &x_stabilizers,
+                            const std::vector<std::size_t> &z_stabilizers,
+                            const std::vector<std::size_t> &obs_matrix_flat,
+                            std::size_t num_observables,
+                            bool measure_in_x_basis,
+                            const std::vector<std::size_t> &feedback_flat,
+                            const std::vector<std::size_t> &obs_feedback_flat);
+} // namespace cudaq::qec
+
+// Conformance: the device fold inside memory_circuit and the host-side rule in
+// build_inlined_feedback_layout must agree on which records compose each
+// detector. Build the measurements-to-detectors matrix (M2D) from the kernel
+// and compare it, row by row, against the M2D reconstructed from the host
+// layout plus the known emission order. If either the device fold or the host
+// layout drifts, this test fails.
+TEST(InlinedFeedbackLayout, HostLayoutMatchesKernelM2D) {
+  feedback_toy_code toy(/*declare_feedback=*/true);
+  const std::size_t numRounds = 4;
+  const std::size_t numData = 2, numAncx = 1, numAncz = 1;
+  const std::size_t numCols = numAncx + numAncz; // records per round
+  const std::size_t num_obs = 1;
+
+  // --- Kernel-derived M2D, mirroring experiments.cpp's sample path. prep0 is a
+  // Z-basis memory, so measure_in_x_basis = false and the fixed records are the
+  // Z ancillas (fixed_offset = 0). ---
+  auto &prep = toy.get_operation<cudaq::qec::code::one_qubit_encoding>(
+      cudaq::qec::operation::prep0);
+  auto &stabRound = toy.get_operation<cudaq::qec::code::stabilizer_round>(
+      cudaq::qec::operation::stabilizer_round);
+  auto parity_x = toy.get_parity_x();
+  auto parity_z = toy.get_parity_z();
+  std::vector<std::size_t> xVec(parity_x.data(),
+                                parity_x.data() + parity_x.size());
+  std::vector<std::size_t> zVec(parity_z.data(),
+                                parity_z.data() + parity_z.size());
+  auto logical_obs = toy.get_observables_z();
+  std::vector<std::size_t> obs_flat(logical_obs.data(),
+                                    logical_obs.data() + logical_obs.size());
+
+  auto feedback = toy.get_inlined_feedback();
+  auto obs_feedback = toy.get_observable_inlined_feedback();
+  std::vector<std::size_t> feedback_flat(feedback.data(),
+                                         feedback.data() + feedback.size());
+  std::vector<std::size_t> obs_feedback_flat(
+      obs_feedback.data(), obs_feedback.data() + obs_feedback.size());
+
+  cudaq::noise_model noise;
+  cudaq::M2DSparseMatrix m2d;
+  cudaq::M2OSparseMatrix m2o;
+  cudaq::dem_from_kernel(
+      cudaq::qec::memory_circuit, &noise, /*options=*/{}, m2d, m2o, stabRound,
+      prep, numData, numAncx, numAncz, numRounds, xVec, zVec, obs_flat, num_obs,
+      /*measure_in_x_basis=*/false, feedback_flat, obs_feedback_flat);
+
+  // --- Host-layout-derived expected M2D. Global record index for round r,
+  // column c is r*numCols + c; the readout for data qubit q is at
+  // numRounds*numCols + q. ---
+  auto layout = cudaq::qec::build_inlined_feedback_layout(
+      feedback, obs_feedback, numCols, num_obs);
+  auto rec = [numCols](std::size_t round, std::size_t col) {
+    return round * numCols + col;
+  };
+  auto herald_cols = [](const std::vector<std::size_t> &indices,
+                        const std::vector<std::size_t> &offsets,
+                        std::size_t row) {
+    std::vector<std::size_t> cols;
+    if (!offsets.empty())
+      cols.assign(indices.begin() + offsets[row],
+                  indices.begin() + offsets[row + 1]);
+    return cols;
+  };
+
+  std::vector<std::set<std::size_t>> expected;
+  // Round-0 fixed detector: the fixed record (fixed_offset + 0) of round 0.
+  expected.push_back({rec(0, 0)});
+  // Interior cross-round detectors, emitted each round for j = 0..numCols-1:
+  // {prev_j, curr_j} plus the layout-row-j heralds taken from the earlier
+  // round.
+  for (std::size_t r = 1; r < numRounds; ++r) {
+    for (std::size_t j = 0; j < numCols; ++j) {
+      std::set<std::size_t> row{rec(r - 1, j), rec(r, j)};
+      for (auto k :
+           herald_cols(layout.detector_indices, layout.detector_offsets, j))
+        row.insert(rec(r - 1, k));
+      expected.push_back(row);
+    }
+  }
+  // Final boundary detector for the fixed record (row 0): the last-round fixed
+  // record, the data readouts in the stabilizer support, and the layout-row-0
+  // heralds taken from the last round.
+  {
+    std::set<std::size_t> row{rec(numRounds - 1, 0)};
+    for (std::size_t q = 0; q < numData; ++q)
+      if (zVec[q] != 0)
+        row.insert(numRounds * numCols + q);
+    for (auto k :
+         herald_cols(layout.detector_indices, layout.detector_offsets, 0))
+      row.insert(rec(numRounds - 1, k));
+    expected.push_back(row);
+  }
+
+  ASSERT_EQ(m2d.rows.size(), 2 * numRounds);
+  ASSERT_EQ(m2d.rows.size(), expected.size());
+  for (std::size_t d = 0; d < expected.size(); ++d) {
+    std::set<std::size_t> actual(m2d.rows[d].begin(), m2d.rows[d].end());
+    EXPECT_EQ(actual, expected[d]) << "detector " << d;
+  }
 }

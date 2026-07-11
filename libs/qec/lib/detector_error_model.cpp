@@ -327,10 +327,10 @@ static void feedback_rows_to_csr(const cudaqx::tensor<uint8_t> &matrix,
 }
 
 inlined_feedback_layout
-apply_inlined_feedback(const cudaqx::tensor<uint8_t> &feedback,
-                       const cudaqx::tensor<uint8_t> &obs_feedback,
-                       std::size_t num_syndromes_per_round,
-                       std::size_t num_observables) {
+build_inlined_feedback_layout(const cudaqx::tensor<uint8_t> &feedback,
+                              const cudaqx::tensor<uint8_t> &obs_feedback,
+                              std::size_t num_syndromes_per_round,
+                              std::size_t num_observables) {
   inlined_feedback_layout layout;
   feedback_rows_to_csr(feedback, num_syndromes_per_round,
                        num_syndromes_per_round, "inlined feedback",

@@ -6,7 +6,7 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 #include "memory_circuit.h"
-#include <numeric>
+#include "inlined_feedback.h"
 
 namespace cudaq::qec {
 
@@ -19,10 +19,8 @@ __qpu__ void memory_circuit(const code::stabilizer_round &stabilizer_round,
                             const std::vector<std::size_t> &obs_matrix_flat,
                             std::size_t num_observables,
                             bool measure_in_x_basis,
-                            const std::vector<std::size_t> &fb_indices,
-                            const std::vector<std::size_t> &fb_offsets,
-                            const std::vector<std::size_t> &obs_fb_indices,
-                            const std::vector<std::size_t> &obs_fb_offsets) {
+                            const std::vector<std::size_t> &feedback_flat,
+                            const std::vector<std::size_t> &obs_feedback_flat) {
   // Allocate the data and ancilla qubits
   cudaq::qvector data(num_data), xstab_anc(numAncx), zstab_anc(numAncz);
 
@@ -45,53 +43,39 @@ __qpu__ void memory_circuit(const code::stabilizer_round &stabilizer_round,
 
   std::size_t numCols = numAncx + numAncz;
 
-  // Observable inlined-feedback accumulation. Nested std::vector is not
-  // supported in __qpu__ code, so observable m's per-round feedback records
-  // occupy the round-major slice starting at num_rounds * obs_fb_offsets[m]
-  // of a single flat buffer; the round-r block of observable m starts at
-  // num_rounds * obs_fb_offsets[m] + r * row_weight(m) with
-  // row_weight(m) = obs_fb_offsets[m + 1] - obs_fb_offsets[m].
-  bool has_obs_fb = obs_fb_offsets.size() > 0;
+  // Observable inlined feedback accumulation. Nested std::vector is not
+  // supported in __qpu__ code, so instead of one record vector per observable
+  // we use a single flat buffer with per-observable round-major slices; see
+  // observable_feedback_offsets / collect_observable_feedback_round in
+  // inlined_feedback.h.
+  std::vector<std::size_t> obs_fb_offsets = observable_feedback_offsets(
+      obs_feedback_flat, num_observables, numCols, num_rounds);
   std::size_t obs_fb_total =
-      has_obs_fb ? num_rounds * obs_fb_offsets[num_observables] : 0;
+      obs_feedback_flat.size() > 0 ? obs_fb_offsets[num_observables] : 0;
   std::vector<cudaq::measure_result> obs_fb_records(obs_fb_total);
 
   // Collect the first-round feedback records for each observable.
-  if (has_obs_fb) {
-    for (std::size_t m = 0; m < num_observables; ++m) {
-      std::size_t idx = num_rounds * obs_fb_offsets[m];
-      for (std::size_t i = obs_fb_offsets[m]; i < obs_fb_offsets[m + 1]; ++i)
-        obs_fb_records[idx++] = final_syndrome[obs_fb_indices[i]];
-    }
-  }
+  if (obs_feedback_flat.size() > 0)
+    collect_observable_feedback_round(obs_fb_records, obs_fb_offsets,
+                                      final_syndrome, 0, obs_feedback_flat,
+                                      num_observables, numCols);
 
   // Generate syndrome data
   for (std::size_t round = 1; round < num_rounds; ++round) {
     auto syndrome = stabilizer_round(logical, x_stabilizers, z_stabilizers);
-    if (has_obs_fb) {
-      for (std::size_t m = 0; m < num_observables; ++m) {
-        std::size_t row_weight = obs_fb_offsets[m + 1] - obs_fb_offsets[m];
-        std::size_t idx = num_rounds * obs_fb_offsets[m] + round * row_weight;
-        for (std::size_t i = obs_fb_offsets[m]; i < obs_fb_offsets[m + 1]; ++i)
-          obs_fb_records[idx++] = syndrome[obs_fb_indices[i]];
-      }
-    }
-    if (fb_offsets.size() == 0) {
+    if (obs_feedback_flat.size() > 0)
+      collect_observable_feedback_round(obs_fb_records, obs_fb_offsets,
+                                        syndrome, round, obs_feedback_flat,
+                                        num_observables, numCols);
+    if (feedback_flat.size() == 0) {
       cudaq::detectors(final_syndrome, syndrome);
     } else {
       // Cross-round detector for record j: earlier vs current round record,
-      // augmented with the earlier-round herald records in row j of the
-      // feedback layout.
-      for (std::size_t j = 0; j < numCols; ++j) {
-        std::size_t begin = fb_offsets[j];
-        std::size_t end = fb_offsets[j + 1];
-        std::vector<cudaq::measure_result> det(2 + end - begin);
-        det[0] = final_syndrome[j];
-        det[1] = syndrome[j];
-        for (std::size_t i = begin; i < end; ++i)
-          det[2 + (i - begin)] = final_syndrome[fb_indices[i]];
-        cudaq::detector(det);
-      }
+      // augmented with the earlier-round records declared in row j of the
+      // feedback matrix.
+      for (std::size_t j = 0; j < numCols; ++j)
+        cudaq::detector(cross_round_detector_records(
+            final_syndrome, syndrome, j, feedback_flat, numCols));
     }
     final_syndrome = syndrome;
   }
@@ -101,76 +85,23 @@ __qpu__ void memory_circuit(const code::stabilizer_round &stabilizer_round,
   }
   auto data_results = mz(data);
 
-  // Emit one logical_observable per row of the observable matrix.
-  for (std::size_t obs = 0; obs < num_observables; ++obs) {
-    std::size_t support_weight = 0;
-    for (std::size_t q = 0; q < num_data; ++q) {
-      if (obs_matrix_flat[obs * num_data + q] != 0)
-        support_weight++;
-    }
-    if (!has_obs_fb) {
-      std::vector<cudaq::measure_result> obs_support(support_weight);
-      std::size_t idx = 0;
-      for (std::size_t q = 0; q < num_data; ++q) {
-        if (obs_matrix_flat[obs * num_data + q] != 0)
-          obs_support[idx++] = data_results[q];
-      }
-      cudaq::logical_observable(obs_support);
-    } else {
-      // Feedback records from every round, then the data-qubit support.
-      std::size_t row_weight = obs_fb_offsets[obs + 1] - obs_fb_offsets[obs];
-      std::size_t fb_count = num_rounds * row_weight;
-      std::size_t base = num_rounds * obs_fb_offsets[obs];
-      std::vector<cudaq::measure_result> obs_support(fb_count + support_weight);
-      for (std::size_t i = 0; i < fb_count; ++i)
-        obs_support[i] = obs_fb_records[base + i];
-      std::size_t idx = fb_count;
-      for (std::size_t q = 0; q < num_data; ++q) {
-        if (obs_matrix_flat[obs * num_data + q] != 0)
-          obs_support[idx++] = data_results[q];
-      }
-      cudaq::logical_observable(obs_support);
-    }
-  }
+  // Emit one logical_observable per row of the observable matrix: the per-round
+  // feedback records followed by the data-qubit support.
+  for (std::size_t obs = 0; obs < num_observables; ++obs)
+    cudaq::logical_observable(
+        observable_support_records(obs, obs_matrix_flat, num_data, data_results,
+                                   obs_fb_records, obs_fb_offsets));
 
   // For each stabilizer, form detectors from data qubit readout connected with
-  // final stabilizer round.
+  // final stabilizer round. With inlined feedback, the boundary detector for
+  // record (fixed_offset + x) is extended with the declared last-round records.
   const std::vector<size_t> &stabilizers =
       measure_in_x_basis ? x_stabilizers : z_stabilizers;
 
-  for (std::size_t x = 0; x < num_fixed_measurements; ++x) {
-    std::size_t row_base = x * num_data;
-
-    std::size_t support_weight = 0;
-    for (std::size_t q = 0; q < num_data; ++q) {
-      if (stabilizers[row_base + q] != 0) {
-        support_weight++;
-      }
-    }
-
-    // With inlined feedback, the boundary detector for record
-    // (fixed_offset + x) is extended with its declared last-round records.
-    std::size_t fb_begin = 0;
-    std::size_t fb_end = 0;
-    if (fb_offsets.size() > 0) {
-      fb_begin = fb_offsets[fixed_offset + x];
-      fb_end = fb_offsets[fixed_offset + x + 1];
-    }
-
-    std::vector<cudaq::measure_result> support(support_weight + 1 +
-                                               (fb_end - fb_begin));
-    support[0] = final_syndrome[fixed_offset + x];
-    std::size_t support_idx = 1;
-    for (std::size_t q = 0; q < num_data; ++q) {
-      if (stabilizers[row_base + q] != 0) {
-        support[support_idx++] = data_results[q];
-      }
-    }
-    for (std::size_t i = fb_begin; i < fb_end; ++i)
-      support[support_idx++] = final_syndrome[fb_indices[i]];
-
-    cudaq::detector(support);
-  }
+  for (std::size_t x = 0; x < num_fixed_measurements; ++x)
+    cudaq::detector(boundary_detector_records(
+        final_syndrome, fixed_offset + x, data_results, stabilizers,
+        x * num_data, num_data, feedback_flat, numCols));
 }
 
 } // namespace cudaq::qec
