@@ -11,7 +11,7 @@
 #include "qec_realtime_session.h"
 
 #include "cudaq/qec/logger.h"
-#include "cudaq/qec/realtime/decoder_rpc_ids.h"
+#include "cudaq/qec/realtime/decoder_rpc_wire_format.h"
 #include "cudaq/qec/realtime/graph_resources.h"
 #include "cudaq/realtime/daemon/dispatcher/dispatch_kernel_launch.h"
 

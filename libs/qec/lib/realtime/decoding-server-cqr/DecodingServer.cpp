@@ -23,6 +23,13 @@
 namespace cudaq::qec::decoding_server {
 
 using cudaq::qec::decoding::config::DecoderTransport;
+using cudaq::qec::decoding::rpc::EnqueueRequestPayload;
+using cudaq::qec::decoding::rpc::GetCorrectionsRequestPayload;
+using cudaq::qec::decoding::rpc::kEnqueueSyndromesFunctionId;
+using cudaq::qec::decoding::rpc::kGetCorrectionsFunctionId;
+using cudaq::qec::decoding::rpc::kResetDecoderFunctionId;
+using cudaq::qec::decoding::rpc::ResetRequestPayload;
+using cudaq::realtime::RPCHeader;
 
 // ---------------------------------------------------------------------------
 // Constructors
@@ -150,11 +157,11 @@ void DecodingServer::register_handlers() {
   dispatcher_.register_handler(
       kEnqueueSyndromesFunctionId,
       [this](RxFrame frame, ResponseWriter &writer) {
-        if (frame.buf.size() < sizeof(RPCHeader) + sizeof(EnqueuePayload)) {
+        if (frame.buf.size() < sizeof(RPCHeader) + sizeof(EnqueueRequestPayload)) {
           writer.write_error(RpcStatus::BAD_REQUEST);
           return;
         }
-        const auto *req = reinterpret_cast<const EnqueuePayload *>(
+        const auto *req = reinterpret_cast<const EnqueueRequestPayload *>(
             frame.buf.data() + sizeof(RPCHeader));
         const auto *hdr = reinterpret_cast<const RPCHeader *>(frame.buf.data());
 
@@ -180,11 +187,11 @@ void DecodingServer::register_handlers() {
   dispatcher_.register_handler(
       kGetCorrectionsFunctionId, [this](RxFrame frame, ResponseWriter &writer) {
         if (frame.buf.size() <
-            sizeof(RPCHeader) + sizeof(GetCorrectionsPayload)) {
+            sizeof(RPCHeader) + sizeof(GetCorrectionsRequestPayload)) {
           writer.write_error(RpcStatus::BAD_REQUEST);
           return;
         }
-        const auto *req = reinterpret_cast<const GetCorrectionsPayload *>(
+        const auto *req = reinterpret_cast<const GetCorrectionsRequestPayload *>(
             frame.buf.data() + sizeof(RPCHeader));
         const auto *hdr = reinterpret_cast<const RPCHeader *>(frame.buf.data());
 
@@ -206,11 +213,11 @@ void DecodingServer::register_handlers() {
   // reset_decoder — response sent by the worker thread.
   dispatcher_.register_handler(
       kResetDecoderFunctionId, [this](RxFrame frame, ResponseWriter &writer) {
-        if (frame.buf.size() < sizeof(RPCHeader) + sizeof(ResetPayload)) {
+        if (frame.buf.size() < sizeof(RPCHeader) + sizeof(ResetRequestPayload)) {
           writer.write_error(RpcStatus::BAD_REQUEST);
           return;
         }
-        const auto *req = reinterpret_cast<const ResetPayload *>(
+        const auto *req = reinterpret_cast<const ResetRequestPayload *>(
             frame.buf.data() + sizeof(RPCHeader));
         const auto *hdr = reinterpret_cast<const RPCHeader *>(frame.buf.data());
 

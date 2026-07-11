@@ -29,7 +29,7 @@
 #include <hololink/core/metadata.hpp>
 #include <hololink/core/timeout.hpp>
 
-#include "cudaq/qec/realtime/decoder_rpc_ids.h"
+#include "cudaq/qec/realtime/decoder_rpc_wire_format.h"
 #include "cudaq/realtime/daemon/dispatcher/dispatch_kernel_launch.h"
 
 namespace {

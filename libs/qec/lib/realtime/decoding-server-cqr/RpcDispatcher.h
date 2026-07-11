@@ -9,13 +9,15 @@
 #pragma once
 
 #include "ITransceiver.h"
-#include "RpcWireFormat.h"
+#include "cudaq/qec/realtime/decoder_rpc_wire_format.h"
 
 #include <cstdint>
 #include <functional>
 #include <unordered_map>
 
 namespace cudaq::qec::decoding_server {
+
+using cudaq::qec::decoding::rpc::RpcStatus;
 
 /// Helper passed to RpcDispatcher handlers that writes synchronous error
 /// responses (e.g. BAD_REQUEST from header validation, BUSY from try_enqueue).

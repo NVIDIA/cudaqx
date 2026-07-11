@@ -35,6 +35,22 @@ static_assert(kResetDecoderFunctionId == 0x977A59CFu,
               "reset_decoder function_id must match "
               "decoder_server_runtime.md");
 
+// Status codes carried in cudaq::realtime::RPCResponse::status.
+enum class RpcStatus : std::int32_t {
+  OK = 0,
+  INVALID_DECODER = 1,
+  BAD_REQUEST = 2,
+  INTERNAL_ERROR = 3,
+  NOT_READY = 4,
+  BUSY = 5,
+  SYNDROMES_DROPPED = 6,
+};
+
+// Hard cap for one enqueue_syndromes request. Enforced at both transport and
+// session boundaries so alternate transports cannot bypass allocation and
+// packed-length validation.
+inline constexpr std::uint64_t kMaxSyndromeBits = 1u << 20; // 1 M bits
+
 struct __attribute__((packed)) EnqueueRequestPayload {
   std::int64_t decoder_id;          ///< arg0
   std::int64_t counter;             ///< arg1
