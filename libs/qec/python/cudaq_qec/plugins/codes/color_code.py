@@ -71,18 +71,18 @@ from cudaq_qec import patch
 class ColorCodeGeometry:
     """
     Triangular color code with rectangular grid embedding.
-    
+
     Qubit numbering (for distance d):
     - Data qubits: [0, num_data)
     - X-check ancillas: [num_data, num_data + num_plaquettes)
     - Z-check ancillas: [num_data + num_plaquettes, num_data + 2*num_plaquettes)
-    
+
     Data qubits are numbered top-to-bottom, left-to-right.
     Ancillas are numbered by their mapped grid position (top-to-bottom, left-to-right).
-    
+
     Args:
         distance: Code distance (odd integer >= 3)
-    
+
     Attributes:
         data_qubits: Array of data qubit indices [0, num_data)
         xcheck_qubits: Array of X-check ancilla indices
@@ -271,7 +271,7 @@ class ColorCodeGeometry:
                                ptype: str) -> int:
         """
         Get the data qubit that a plaquette's syndrome maps to.
-        
+
         Rules:
         - Right boundary (red weight-4): top-left data qubit
         - All others: top-right data qubit
@@ -371,7 +371,7 @@ class ColorCodeGeometry:
     def get_syndrome_grid_indices(self) -> np.ndarray:
         """
         Return array mapping stabilizer index to flat grid index.
-        
+
         For use with reshape_stabilizers_to_grid functions.
         Returns array of shape (num_plaquettes,) where each entry is the
         flat index (row * n_cols + col) into the n_rows x n_cols grid.
@@ -592,6 +592,313 @@ class ColorCodeGeometry:
 
         return out
 
+    # ------------------------------------------------------------------ #
+    # Superdense paired-ancilla CX-layer schedule (host-side builders)
+    # ------------------------------------------------------------------ #
+
+    def _rowmajor_cnot_layers(self) -> List[List[Tuple[int, int]]]:
+        """The 8 CNOT layers of the superdense schedule in the row-major
+        inverted-triangle numbering.
+
+        The triangle is oriented with its widest row (d data qubits) on top,
+        narrowing to a single qubit at the bottom.
+
+        Returns a length-8 list; each element is a list of (control, target)
+        pairs where data qubits are 0..num_data-1 (row-major, top-to-bottom)
+        and ancillas are num_data..num_data+2*num_plaquettes-1, grouped as
+        (a1, a2) = (num_data + 2p, num_data + 2p + 1) with a1 the X-ancilla
+        and a2 the Z-ancilla of plaquette p.
+        """
+        d = int(self.distance)
+        num_data = (3 * d * d + 1) // 4
+        num_plaquettes = (3 * (d * d - 1)) // 8
+        num_rows_data_qubits = (3 * d - 1) // 2
+
+        layers: List[List[Tuple[int, int]]] = []
+
+        # tt=1..8 correspond to 8 layers
+        for tt in range(1, 9):
+            edges: List[Tuple[int, int]] = []
+
+            if tt == 1 or tt == 8:
+                # CNOT between the two ancilla qubits: control |+> (a1),
+                # target |0> (a2)
+                index = num_data
+                for _ in range(num_plaquettes):
+                    a1 = index
+                    a2 = index + 1
+                    edges.append((a1, a2))
+                    index += 2
+
+            elif tt == 2:
+                # First sequence (data = control)
+                data_qubit_index = d
+                index_ancilla = num_data
+                cols = d - 1
+                for rr in range(num_rows_data_qubits - 1):
+                    if rr % 3 == 0:
+                        for _ in range(cols):
+                            edges.append((data_qubit_index, index_ancilla))
+                            data_qubit_index += 1
+                            index_ancilla += 1
+                        cols -= 1
+                    elif rr % 3 == 1:
+                        for cc in range(cols):
+                            edges.append((data_qubit_index, index_ancilla))
+                            data_qubit_index += 1
+                            if cc == cols - 1:
+                                index_ancilla += 3
+                            else:
+                                index_ancilla += 1
+                    else:  # rr % 3 == 2
+                        for _ in range(cols):
+                            edges.append((data_qubit_index, index_ancilla))
+                            data_qubit_index += 1
+                            index_ancilla += 1
+                        cols -= 1
+
+            elif tt == 3:
+                # Second sequence (data = control)
+                data_qubit_index = 0
+                index_ancilla = num_data
+                cols = d - 1
+                for rr in range(num_rows_data_qubits - 1):
+                    if rr % 3 == 0:
+                        for cc in range(cols):
+                            edges.append((data_qubit_index, index_ancilla))
+                            index_ancilla += 1
+                            if cc == cols - 1:
+                                data_qubit_index += 3
+                            else:
+                                data_qubit_index += 1
+                        cols -= 1
+                    elif rr % 3 == 1:
+                        for cc in range(cols):
+                            edges.append((data_qubit_index, index_ancilla))
+                            data_qubit_index += 1
+                            if cc == cols - 1:
+                                index_ancilla += 3
+                            else:
+                                index_ancilla += 1
+                    else:  # rr % 3 == 2
+                        for _ in range(cols):
+                            edges.append((data_qubit_index, index_ancilla))
+                            data_qubit_index += 1
+                            index_ancilla += 1
+                        cols -= 1
+
+            elif tt == 4:
+                # Third sequence (data = control)
+                data_qubit_index = 1
+                index_ancilla = num_data + d - 1
+                cols = d - 1
+                for rr in range(num_rows_data_qubits - 2):
+                    if rr % 3 == 0:
+                        for _ in range(cols):
+                            edges.append((data_qubit_index, index_ancilla))
+                            data_qubit_index += 1
+                            index_ancilla += 1
+                    elif rr % 3 == 1:
+                        for _ in range(cols):
+                            edges.append((data_qubit_index, index_ancilla))
+                            data_qubit_index += 1
+                            index_ancilla += 1
+                        cols -= 2
+                    else:  # rr % 3 == 2
+                        for cc in range(cols):
+                            edges.append((data_qubit_index, index_ancilla))
+                            index_ancilla += 1
+                            if cc == cols - 1:
+                                data_qubit_index += 3
+                            else:
+                                data_qubit_index += 1
+
+            elif tt == 5:
+                # First sequence (data = target) => ancilla is control
+                data_qubit_index = d
+                index_ancilla = num_data
+                cols = d - 1
+                for rr in range(num_rows_data_qubits - 1):
+                    if rr % 3 == 0:
+                        for _ in range(cols):
+                            edges.append((index_ancilla, data_qubit_index))
+                            data_qubit_index += 1
+                            index_ancilla += 1
+                        cols -= 1
+                    elif rr % 3 == 1:
+                        for cc in range(cols):
+                            edges.append((index_ancilla, data_qubit_index))
+                            data_qubit_index += 1
+                            if cc == cols - 1:
+                                index_ancilla += 3
+                            else:
+                                index_ancilla += 1
+                    else:  # rr % 3 == 2
+                        for _ in range(cols):
+                            edges.append((index_ancilla, data_qubit_index))
+                            data_qubit_index += 1
+                            index_ancilla += 1
+                        cols -= 1
+
+            elif tt == 6:
+                # Second sequence (data = target) => ancilla is control
+                data_qubit_index = 0
+                index_ancilla = num_data
+                cols = d - 1
+                for rr in range(num_rows_data_qubits - 1):
+                    if rr % 3 == 0:
+                        for cc in range(cols):
+                            edges.append((index_ancilla, data_qubit_index))
+                            index_ancilla += 1
+                            if cc == cols - 1:
+                                data_qubit_index += 3
+                            else:
+                                data_qubit_index += 1
+                        cols -= 1
+                    elif rr % 3 == 1:
+                        for cc in range(cols):
+                            edges.append((index_ancilla, data_qubit_index))
+                            data_qubit_index += 1
+                            if cc == cols - 1:
+                                index_ancilla += 3
+                            else:
+                                index_ancilla += 1
+                    else:  # rr % 3 == 2
+                        for _ in range(cols):
+                            edges.append((index_ancilla, data_qubit_index))
+                            data_qubit_index += 1
+                            index_ancilla += 1
+                        cols -= 1
+
+            else:  # tt == 7
+                # Third sequence (data = target) => ancilla is control
+                data_qubit_index = 1
+                index_ancilla = num_data + d - 1
+                cols = d - 1
+                for rr in range(num_rows_data_qubits - 2):
+                    if rr % 3 == 0:
+                        for _ in range(cols):
+                            edges.append((index_ancilla, data_qubit_index))
+                            data_qubit_index += 1
+                            index_ancilla += 1
+                    elif rr % 3 == 1:
+                        for _ in range(cols):
+                            edges.append((index_ancilla, data_qubit_index))
+                            data_qubit_index += 1
+                            index_ancilla += 1
+                        cols -= 2
+                    else:  # rr % 3 == 2
+                        for cc in range(cols):
+                            edges.append((index_ancilla, data_qubit_index))
+                            index_ancilla += 1
+                            if cc == cols - 1:
+                                data_qubit_index += 3
+                            else:
+                                data_qubit_index += 1
+
+            layers.append(sorted(edges))
+
+        return layers
+
+    def _rowmajor_to_unified(self) -> Dict[int, int]:
+        """Bijection from the row-major inverted-triangle qubit numbering of
+        :meth:`_rowmajor_cnot_layers` to the unified label space (data
+        0..N-1, X-ancilla N+i, Z-ancilla N+P+i for plaquette i).
+
+        Data qubits: the grid's coordinates put row 0 at the top with rows
+        decreasing (more negative) downward, so sorting data ids by (row, col)
+        ascending enumerates them bottom-to-top, left-to-right -- exactly the
+        row-major order of the inverted triangle (widest row first).
+
+        Ancillas: plaquettes are matched by their data-qubit support sets (the
+        data endpoints coupled to an ancilla pair across all layers), then
+        (a1, a2) = (num_data + 2p, num_data + 2p + 1) maps to
+        (N + i, N + P + i) for the matching plaquette index i.
+        """
+        N = int(self.num_data)
+        P = int(self.num_plaquettes)
+
+        ordered_data = sorted(
+            range(N),
+            key=lambda q:
+            (self.qubit_to_coord[q][0], self.qubit_to_coord[q][1]))
+        data_to_rowmajor = {q: i for i, q in enumerate(ordered_data)}
+
+        layers = self._rowmajor_cnot_layers()
+
+        # Support set (in row-major data ids) of each row-major plaquette.
+        support_to_plaq = {}
+        for p in range(P):
+            a1 = N + 2 * p
+            a2 = N + 2 * p + 1
+            ds = set()
+            for layer in layers:
+                for c, t in layer:
+                    if c < N and t in (a1, a2):
+                        ds.add(c)
+                    if c in (a1, a2) and t < N:
+                        ds.add(t)
+            support_to_plaq[tuple(sorted(ds))] = p
+
+        mapping = {i: q for q, i in data_to_rowmajor.items()}
+        for i, plaq in enumerate(self.plaquettes):
+            key = tuple(sorted(
+                data_to_rowmajor[q] for q in plaq['data_qubits']))
+            p = support_to_plaq.get(key)
+            if p is None:
+                raise ValueError(
+                    f"Plaquette {i} (data qubits {plaq['data_qubits']}) has no "
+                    f"support-set match in the schedule")
+            mapping[N + 2 * p] = N + i
+            mapping[N + 2 * p + 1] = N + P + i
+        return mapping
+
+    def _superdense_cnot_layers(self) -> List[List[Tuple[int, int]]]:
+        """The eight CNOT layers of the paired-ancilla superdense schedule in
+        the unified label space: data 0..N-1, X-ancilla N+i and Z-ancilla
+        N+P+i of plaquette i. Layers 0 and 7 entangle each plaquette's
+        ancilla pair; layers 1-3 couple data (control) into the pair; layers
+        4-6 apply the mirrored ancilla-controlled CNOTs.
+        """
+        mapping = self._rowmajor_to_unified()
+        return [
+            sorted((mapping[c], mapping[t])
+                   for c, t in layer)
+            for layer in self._rowmajor_cnot_layers()
+        ]
+
+    def z_side_data(self) -> List[List[int]]:
+        """Per plaquette (grid order), the data qubits coupled to its
+        Z-ancilla by the schedule; a conditional X on exactly these qubits is
+        the byproduct the Z-ancilla readout heralds."""
+        layers = self._superdense_cnot_layers()
+        N, P = self.num_data, self.num_plaquettes
+        out = [set() for _ in range(P)]
+        for li in (1, 2, 3):
+            for c, t in layers[li]:
+                if t >= N + P:
+                    out[t - N - P].add(c)
+        return [sorted(s) for s in out]
+
+    def superdense_schedule(self) -> List[int]:
+        """Flattened one-round CX-layer schedule over the unified index space
+        (data 0..N-1, X-ancilla N..N+P-1, Z-ancilla N+P..N+2P-1).
+
+        Encoding: the eight layers are concatenated as flat integers; within a
+        layer each (control, target) CNOT contributes the two ints control,
+        target, and every layer is closed by a -1 terminator. All qubit ids
+        are non-negative, so -1 unambiguously marks a layer boundary. A
+        consumer reads ints two at a time as (control, target) pairs and
+        advances to the next layer on -1.
+        """
+        schedule: List[int] = []
+        for layer in self._superdense_cnot_layers():
+            for c, t in layer:
+                schedule.append(int(c))
+                schedule.append(int(t))
+            schedule.append(-1)
+        return schedule
+
 
 # ---------------------------------------------------------------------------
 # CUDA-QX plugin glue: Pauli words over the data qubits
@@ -625,15 +932,79 @@ def _plaquette_pauli_words(
 def _logical_pauli_words(grid: "ColorCodeGeometry") -> Tuple[str, str]:
     """Return (x_word, z_word) for the logical X/Z operators.
 
-    Both logicals use the bottom-edge representative (``logical_qubits``,
-    weight exactly d) — see ColorCodeGeometry._find_logical_qubits for why
-    the bottom edge is preferred over the full data-qubit support.
+    The logical X is the all-data-qubit representative (X on every one of the
+    N data qubits), matching the reference construction's all-data
+    ``logical_observable``. The logical Z is the bottom-edge representative
+    (``logical_qubits``, weight exactly d) — see
+    ColorCodeGeometry._find_logical_qubits for why the bottom edge is
+    preferred for Z (O(d) measurement error, no boundary detectors).
+
+    The representatives are deliberately asymmetric. Both are valid: X on all
+    N data qubits commutes with every plaquette (all even weight, 4 or 6) and
+    anti-commutes with the bottom-edge logical Z (overlap = the d bottom-edge
+    qubits, d odd), so the pair is a logical X/Z.
     """
-    chars = ['I'] * grid.num_data
+    x_word = 'X' * grid.num_data
+    z_chars = ['I'] * grid.num_data
     for q in grid.logical_qubits:
-        chars[q] = 'X'
-    x_word = ''.join(chars)
-    return x_word, x_word.replace('X', 'Z')
+        z_chars[q] = 'Z'
+    return x_word, ''.join(z_chars)
+
+
+# ---------------------------------------------------------------------------
+# Inlined-feedback declarations
+#
+# The registered stabilizer_round replays the reference superdense schedule
+# with the byproduct left BARE: the mirrored ancilla-controlled CNOTs (layers
+# 5-7) leave an uncorrected X byproduct on each plaquette's Z-ancilla-coupled
+# data qubits (ColorCodeGeometry.z_side_data()), heralded by that Z-ancilla's
+# readout record. The framework absorbs the byproduct downstream by XOR-ing the
+# heralding records into the affected detectors / observables via these matrices
+# (see libs/qec/lib/device/inlined_feedback.h), instead of a coherent in-round
+# correction CX.
+# ---------------------------------------------------------------------------
+
+
+def _feedback_set(z_side_data: List[List[int]], support) -> List[int]:
+    """``F(S) = {a in [0,P) : |z_side_data[a] ∩ S| odd}``.
+
+    ``z_side_data[a]`` is the data-qubit set coupled to plaquette ``a``'s
+    Z-ancilla by the schedule; its readout heralds a conditional X on exactly
+    those qubits. A record support ``S`` (a detector's or observable's
+    data-qubit support) picks up plaquette ``a``'s byproduct iff ``S`` overlaps
+    ``z_side_data[a]`` on an odd number of qubits.
+    """
+    s = set(support)
+    return [
+        a for a, zd in enumerate(z_side_data)
+        if len(s.intersection(zd)) % 2 == 1
+    ]
+
+
+def _assert_plaquette_order(plaquettes: List[dict]) -> None:
+    """Require min data-qubit index strictly increasing across grid-ordered
+    plaquettes; raise ValueError otherwise.
+
+    ``to_parity_matrix`` (stabilizer_utils.cpp) sorts the Z-stabilizers by the
+    index of their first ``Z`` character, i.e. by min data-qubit index. The
+    memory circuit uses parity row k for the boundary detector of measurement
+    record k, and record k is plaquette k's Z-ancilla in this module's grid
+    order. Record k therefore maps to plaquette k only when the grid order is
+    already the min-data-qubit sort — i.e. min data-qubit is strictly
+    increasing across grid-ordered plaquettes (also guaranteeing the sort keys
+    are unique, so the non-stable std::sort cannot permute them). The declared
+    feedback matrices are indexed by that record order, so a violation would
+    silently misalign them.
+    """
+    mins = [min(p['data_qubits']) for p in plaquettes]
+    for k in range(1, len(mins)):
+        if mins[k] <= mins[k - 1]:
+            raise ValueError(
+                "[color_code] plaquette order violates the min-data-qubit "
+                "strictly-increasing invariant required for measurement "
+                "record k to map to plaquette k (the framework sorts "
+                "stabilizers by min data-qubit index); min-data-qubit "
+                f"sequence={mins}.")
 
 
 # ---------------------------------------------------------------------------
@@ -678,35 +1049,98 @@ def prepm(logicalQubit: patch):
     h(logicalQubit.data)
 
 
-@cudaq.kernel
-def stabilizer_round(logicalQubit: patch, x_stabilizers: list[int],
-                     z_stabilizers: list[int]) -> list[cudaq.measure_handle]:
-    # x_stabilizers / z_stabilizers are the flattened
-    # [num_stabilizers x num_data] parity rows handed over by the framework
-    # (row i, column q at index i * num_data + q).
-    num_data = len(logicalQubit.data)
+def _make_stabilizer_round(schedule_flat: list[int]):
+    """Build the per-round ``stabilizer_round`` kernel that replays the
+    reference superdense CX schedule exactly, as captured from
+    :meth:`ColorCodeGeometry.superdense_schedule`.
 
-    # X-stabilizer half: ancilla in |+>, CX from ancilla onto plaquette data.
-    h(logicalQubit.ancx)
-    for xi in range(len(logicalQubit.ancx)):
-        for di in range(num_data):
-            if x_stabilizers[xi * num_data + di] == 1:
-                x.ctrl(logicalQubit.ancx[xi], logicalQubit.data[di])
-    h(logicalQubit.ancx)
+    The factory closes over the flat, ``-1``-terminated schedule so the kernel
+    walks a concrete gate list (a ``@cudaq.kernel`` defined inside a factory
+    captures a host ``list[int]``, and the capture survives the C++
+    ``memory_circuit`` -> registered-Python-sub-kernel dispatch; each registered
+    instance keeps its own capture).
 
-    # Z-stabilizer half: CX from plaquette data onto ancilla.
-    for zi in range(len(logicalQubit.ancz)):
-        for di in range(num_data):
-            if z_stabilizers[zi * num_data + di] == 1:
-                x.ctrl(logicalQubit.data[di], logicalQubit.ancz[zi])
+    Schedule encoding (unified index space, data ``0..N-1``, X-ancilla
+    ``N..N+P-1``, Z-ancilla ``N+P..N+2P-1``): ints are read two at a time as
+    ``(control, target)`` CNOT pairs; a ``-1`` closes the current layer. All
+    qubit ids are non-negative, so ``-1`` unambiguously marks a layer boundary.
+    Applying the pairs in flat order (skipping the ``-1`` markers) reproduces
+    the eight-layer gate sequence exactly: layers are emitted in order and each
+    layer's gates act on disjoint qubits, so the within-layer order is
+    immaterial.
 
-    # [Z][X] measurement order matches the framework's per-round detector
-    # layout.
-    results = mz([*logicalQubit.ancz, *logicalQubit.ancx])
+    No byproduct-correction gates are emitted. The eight schedule layers include
+    the mirrored ancilla-controlled CNOTs (layers 5-7) that leave an uncorrected
+    X byproduct on the Z-ancilla-coupled data qubits; the correction is absorbed
+    downstream by the code's inlined-feedback declarations rather than by a
+    coherent in-round CX.
+    """
 
-    reset(logicalQubit.ancx)
-    reset(logicalQubit.ancz)
-    return results
+    @cudaq.kernel
+    def _round(logicalQubit: patch, x_stabilizers: list[int],
+               z_stabilizers: list[int]) -> list[cudaq.measure_handle]:
+        # x_stabilizers / z_stabilizers arrive from the framework but are
+        # unused: the captured schedule alone drives the gate sequence.
+        num_data = len(logicalQubit.data)
+        P = len(logicalQubit.ancx)
+
+        # X-ancilla (a1) prep in |+>.
+        h(logicalQubit.ancx)
+
+        # Walk the captured schedule: (control, target) CNOT pairs, layers
+        # separated by -1. Index -> patch view: i < N -> data[i];
+        # N <= i < N+P -> ancx[i-N]; N+P <= i < N+2P -> ancz[i-N-P].
+        i = 0
+        n = len(schedule_flat)
+        while i < n:
+            if schedule_flat[i] == -1:
+                i = i + 1
+            else:
+                ci = schedule_flat[i]
+                ti = schedule_flat[i + 1]
+                if ci < num_data:
+                    if ti < num_data:
+                        x.ctrl(logicalQubit.data[ci], logicalQubit.data[ti])
+                    elif ti < num_data + P:
+                        x.ctrl(logicalQubit.data[ci],
+                               logicalQubit.ancx[ti - num_data])
+                    else:
+                        x.ctrl(logicalQubit.data[ci],
+                               logicalQubit.ancz[ti - num_data - P])
+                elif ci < num_data + P:
+                    if ti < num_data:
+                        x.ctrl(logicalQubit.ancx[ci - num_data],
+                               logicalQubit.data[ti])
+                    elif ti < num_data + P:
+                        x.ctrl(logicalQubit.ancx[ci - num_data],
+                               logicalQubit.ancx[ti - num_data])
+                    else:
+                        x.ctrl(logicalQubit.ancx[ci - num_data],
+                               logicalQubit.ancz[ti - num_data - P])
+                else:
+                    if ti < num_data:
+                        x.ctrl(logicalQubit.ancz[ci - num_data - P],
+                               logicalQubit.data[ti])
+                    elif ti < num_data + P:
+                        x.ctrl(logicalQubit.ancz[ci - num_data - P],
+                               logicalQubit.ancx[ti - num_data])
+                    else:
+                        x.ctrl(logicalQubit.ancz[ci - num_data - P],
+                               logicalQubit.ancz[ti - num_data - P])
+                i = i + 2
+
+        # Rotate a1 back to the computational basis for the X readout.
+        h(logicalQubit.ancx)
+
+        # [Z][X] record order (ancz first) — the order the framework detectors
+        # and the inlined-feedback matrices assume.
+        results = mz([*logicalQubit.ancz, *logicalQubit.ancx])
+
+        reset(logicalQubit.ancx)
+        reset(logicalQubit.ancz)
+        return results
+
+    return _round
 
 
 # ---------------------------------------------------------------------------
@@ -739,6 +1173,12 @@ class ColorCode:
         self.distance = kwargs['distance']
         self.grid = ColorCodeGeometry(self.distance)
 
+        # The declared feedback matrices are indexed by the measurement-record
+        # order (record k = plaquette k's Z-ancilla in grid order). That only
+        # matches the framework's parity-row order when the grid order is the
+        # min-data-qubit sort; fail loudly otherwise.
+        _assert_plaquette_order(self.grid.plaquettes)
+
         x_words, z_words = _plaquette_pauli_words(self.grid)
         self.stabilizers = [
             cudaq.SpinOperator.from_word(w) for w in z_words + x_words
@@ -749,11 +1189,20 @@ class ColorCode:
         ]
 
         self.operation_encodings = {
-            qec.operation.prep0: prep0,
-            qec.operation.prep1: prep1,
-            qec.operation.prepp: prepp,
-            qec.operation.prepm: prepm,
-            qec.operation.stabilizer_round: stabilizer_round,
+            qec.operation.prep0:
+                prep0,
+            qec.operation.prep1:
+                prep1,
+            qec.operation.prepp:
+                prepp,
+            qec.operation.prepm:
+                prepm,
+            # Per-instance round: replays this code's captured reference
+            # superdense schedule with the byproduct left uncorrected; the
+            # inlined-feedback getters declared below (get_inlined_feedback,
+            # get_observable_inlined_feedback_z) absorb it downstream.
+            qec.operation.stabilizer_round:
+                _make_stabilizer_round(self.grid.superdense_schedule()),
         }
 
     def get_num_data_qubits(self):
@@ -773,6 +1222,55 @@ class ColorCode:
 
     def get_num_z_stabilizers(self):
         return self.grid.num_plaquettes
+
+    # ------------------------------------------------------------------ #
+    # Inlined-feedback declarations. Records are ordered [Z][X]:
+    # record k in [0,P) is plaquette k's Z-ancilla (a2); record P+k is
+    # plaquette k's X-ancilla (a1); numCols = 2P. Matrices are row-major
+    # uint8 (the bridge coerces dtype but requires a 2-D array).
+    # ------------------------------------------------------------------ #
+
+    def get_inlined_feedback(self):
+        """[2P x 2P] detector feedback: fb[j][k] = 1 iff detector record j and
+        herald record k are both Z records (< P) and plaquette k is in
+        F(support of plaquette j).
+
+        The bare schedule leaves an X byproduct on plaquette k's z_side_data,
+        heralded by Z-record k; it flips plaquette j's Z detector iff that
+        detector's support overlaps z_side_data[k] oddly (k in F(supp j)). X
+        records (>= P) neither carry nor receive the byproduct (an X byproduct
+        commutes with the X stabilizers), so those rows and columns are zero.
+        Diagonal entries (k in F(supp k)) are intentional: cudaq::detector
+        XOR-cancels the duplicated record.
+        """
+        P = self.grid.num_plaquettes
+        z_side_data = self.grid.z_side_data()
+        fb = np.zeros((2 * P, 2 * P), dtype=np.uint8)
+        for j, plaq in enumerate(self.grid.plaquettes):
+            for k in _feedback_set(z_side_data, plaq['data_qubits']):
+                fb[j, k] = 1
+        return fb
+
+    def get_observable_inlined_feedback_z(self):
+        """[1 x 2P] logical-Z observable feedback: column k = 1 iff k is a Z
+        record (< P) and plaquette k is in F(logical_qubits).
+
+        The logical Z (bottom edge, ``logical_qubits``) picks up plaquette k's
+        Z-ancilla-heralded X byproduct iff it overlaps z_side_data[k] oddly.
+        """
+        P = self.grid.num_plaquettes
+        z_side_data = self.grid.z_side_data()
+        fb = np.zeros((1, 2 * P), dtype=np.uint8)
+        for k in _feedback_set(z_side_data, self.grid.logical_qubits):
+            fb[0, k] = 1
+        return fb
+
+    # get_observable_inlined_feedback_x is intentionally NOT defined: the
+    # X-basis logical (logical X read from data measured in X) commutes with
+    # the schedule's X byproduct, so it needs no feedback. The bridge maps the
+    # absent method to the base-class empty tensor, which flattens to no
+    # observable feedback on the X path (py_code.cpp get_observable_inlined_
+    # feedback_x -> code::... empty; flatten_feedback_tensor empty -> {}).
 
 
 if __name__ == "__main__":
