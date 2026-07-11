@@ -34,6 +34,9 @@ using cudaq::qec::decoding::config::DecoderTransport;
 /// and graph launch across devices, which CUDA graphs cannot do. Both knobs
 /// name the same topology fact, so they must agree.
 int reconcile_gpu_roce_device(std::optional<int> env_gpu_id, int decoder_pin) {
+  if (env_gpu_id && *env_gpu_id < 0)
+    throw std::runtime_error("HOLOLINK_GPU_ID must be >= 0 (got " +
+                             std::to_string(*env_gpu_id) + ")");
   if (env_gpu_id && decoder_pin >= 0 && *env_gpu_id != decoder_pin)
     throw std::runtime_error(
         "gpu_roce device conflict: HOLOLINK_GPU_ID=" +
@@ -130,7 +133,12 @@ DecodingServer::DecodingServer(std::unique_ptr<ITransceiver> transport,
   function_transport_[kEnqueueSyndromesFunctionId] = raw;
   function_transport_[kGetCorrectionsFunctionId] = raw;
   function_transport_[kResetDecoderFunctionId] = raw;
-  init(config_yaml);
+  try {
+    init(config_yaml);
+  } catch (...) {
+    registry_.stop_workers();
+    throw;
+  }
 }
 
 DecodingServer::DecodingServer(
@@ -141,7 +149,14 @@ DecodingServer::DecodingServer(
   function_transport_[kEnqueueSyndromesFunctionId] = raw;
   function_transport_[kGetCorrectionsFunctionId] = raw;
   function_transport_[kResetDecoderFunctionId] = raw;
-  registry_.load_from_config(config, "configure_decoders()");
+  try {
+    registry_.load_from_config(config, "configure_decoders()");
+  } catch (...) {
+    // Members destroy in reverse order (transports before registry); join any
+    // already-started workers while the transports still exist.
+    registry_.stop_workers();
+    throw;
+  }
   register_handlers();
 }
 
@@ -150,7 +165,12 @@ DecodingServer::DecodingServer(std::vector<std::unique_ptr<ITransceiver>> owned,
                                const std::string &config_yaml)
     : owned_transports_(std::move(owned)),
       function_transport_(std::move(function_transport)) {
-  init(config_yaml);
+  try {
+    init(config_yaml);
+  } catch (...) {
+    registry_.stop_workers();
+    throw;
+  }
 }
 
 DecodingServer::~DecodingServer() {

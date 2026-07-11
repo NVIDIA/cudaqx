@@ -279,7 +279,9 @@ void reset_decoder_host(const void *rx_slot, void *tx_slot, std::size_t) {
     const auto *body = reinterpret_cast<const rpc::ResetRequestPayload *>(
         static_cast<const std::uint8_t *>(rx_slot) +
         sizeof(cudaq::realtime::RPCHeader));
-    get_decoder_or_throw(body->decoder_id)->reset_decoder();
+    auto *decoder = get_decoder_or_throw(body->decoder_id);
+    apply_decoder_cuda_device(decoder);
+    decoder->reset_decoder();
     write_response(tx_slot, rx_slot, 0);
   } catch (...) {
     write_response(tx_slot, rx_slot, -2);

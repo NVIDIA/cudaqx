@@ -303,6 +303,44 @@ TEST(SetCudaDeviceForDecode, ImpossibleDeviceThrows) {
       std::runtime_error);
 }
 
+/// cuda_device_id_ is protected: setting an impossible id directly bypasses
+/// decoder::get()'s construction-time range check, the only front door --
+/// which is exactly what makes the handshake's failure path injectable here.
+class MispinnedDecoder final : public cudaq::qec::decoder {
+public:
+  MispinnedDecoder()
+      : decoder(cudaq::qec::sparse_binary_matrix::from_csr(
+            /*num_rows=*/1, /*num_cols=*/1, /*row_ptrs=*/{0, 1},
+            /*col_indices=*/{0})) {
+    set_O_sparse(std::vector<std::vector<uint32_t>>{{0}});
+    set_D_sparse(std::vector<std::vector<uint32_t>>{{0, 1}});
+    cuda_device_id_ = 1 << 20;
+  }
+  cudaq::qec::decoder_result
+  decode(const std::vector<cudaq::qec::float_t> &) override {
+    return {};
+  }
+};
+
+TEST(DecodingSessionPinHandshake, UnhonorablePinFailsStartWorker) {
+  // The contract under test: a worker that cannot pin must never serve, and
+  // the failure must surface on the caller (server-startup) thread. This is
+  // the test that fails if start_worker ever reverts to log-and-continue.
+  SyndromeMappingTable table;
+  table[0] = {{}};
+  auto session = DecodingSession::create(std::make_unique<MispinnedDecoder>(),
+                                         std::move(table));
+  EXPECT_THROW(session->start_worker(), std::runtime_error);
+  // The failed worker was joined inside start_worker; nothing is left to
+  // serve and destruction must not hang.
+  EXPECT_FALSE(session->worker.joinable());
+}
+
+TEST(GpuRoceDeviceReconcile, NegativeEnvThrows) {
+  EXPECT_THROW(cudaq::qec::decoding_server::reconcile_gpu_roce_device(-1, -1),
+               std::runtime_error);
+}
+
 TEST(DecodingSessionPinHandshake, PinnedWorkerStartsAndServes) {
   // start_worker() must resolve the pin handshake (throwing on failure per
   // its contract) and leave a live worker serving items.

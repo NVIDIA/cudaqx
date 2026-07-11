@@ -13,7 +13,6 @@
 
 #include <chrono>
 #include <cstring>
-#include <cuda_runtime_api.h>
 #include <future>
 #include <stdexcept>
 #include <vector>
