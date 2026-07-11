@@ -414,7 +414,7 @@ def test_python_inlined_feedback_toy():
         def get_inlined_feedback(self):
             return np.array([[0, 1], [0, 0]], dtype=np.uint8)
 
-        def get_observable_inlined_feedback(self):
+        def get_observable_inlined_feedback_z(self):
             # Exercise the bridge's dtype coercion: int64 instead of uint8.
             return np.array([[0, 1]])
 
@@ -493,6 +493,71 @@ def test_python_inlined_feedback_toy_negative_control():
         qec.sample_memory_circuit(qec.get_code('py-feedback-toy-nofb'),
                                   numShots=20,
                                   numRounds=4)
+
+
+def test_python_inlined_feedback_observable_basis_selection():
+    # The bridge routes get_observable_inlined_feedback_x to the X-basis getter,
+    # so it is never queried on the Z (prep0) path. Plant a deliberately
+    # wrong-shape _x matrix alongside a valid _z matrix: were the bridge to feed
+    # _x into the Z path, flatten_feedback_tensor's shape check would reject the
+    # circuit. The toy registers only prep0, so this proves selection from the
+    # Z path (the wrong-shape _x is inert there).
+    @qec.code('py-feedback-toy-basis-select')
+    class FeedbackToyBasisSelect:
+
+        def __init__(self):
+            qec.Code.__init__(self)
+            self.stabilizers = [
+                cudaq.SpinOperator.from_word(w) for w in ["XX", "ZZ"]
+            ]
+            self.pauli_observables = [cudaq.SpinOperator.from_word("ZZ")]
+            self.operation_encodings = {
+                qec.operation.prep0: _feedback_toy_prep0,
+                qec.operation.stabilizer_round: _feedback_toy_round
+            }
+
+        def get_num_data_qubits(self):
+            return 2
+
+        def get_num_ancilla_qubits(self):
+            return 2
+
+        def get_num_ancilla_x_qubits(self):
+            return 1
+
+        def get_num_ancilla_z_qubits(self):
+            return 1
+
+        def get_num_x_stabilizers(self):
+            return 1
+
+        def get_num_z_stabilizers(self):
+            return 1
+
+        def get_inlined_feedback(self):
+            return np.array([[0, 1], [0, 0]], dtype=np.uint8)
+
+        def get_observable_inlined_feedback_z(self):
+            return np.array([[0, 1]], dtype=np.uint8)
+
+        def get_observable_inlined_feedback_x(self):
+            # Wrong shape for [num_obs=1 x numCols=2]; must never reach the
+            # Z-basis flatten on the prep0 path.
+            return np.zeros((3, 5), dtype=np.uint8)
+
+    cudaq.set_target('stim')
+    try:
+        numShots, numRounds = 20, 4
+        syndromes, data = qec.sample_memory_circuit(
+            qec.get_code('py-feedback-toy-basis-select'),
+            numShots=numShots,
+            numRounds=numRounds)
+        assert syndromes.shape == (numShots, 2 * numRounds)
+        assert not np.any(syndromes)
+        assert data.shape == (numShots, 2)
+        assert not np.any(data[:, 0] ^ data[:, 1])
+    finally:
+        cudaq.reset_target()
 
 
 if __name__ == "__main__":

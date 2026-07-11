@@ -214,16 +214,33 @@ public:
   /// formed from same-record comparisons only.
   virtual cudaqx::tensor<uint8_t> get_inlined_feedback() const;
 
-  /// @brief Get the inlined feedback matrix for logical observables
+  /// @brief Get the inlined feedback matrix for logical observables measured
+  /// in the Z basis
   ///
   /// Shape is [num_observables x numCols], where numCols =
   /// get_num_ancilla_qubits() (one measurement record per ancilla per
   /// round, in [Z][X] order). Entry (m, k) = 1 means logical observable m
-  /// additionally XORs record k of every round.
-  /// @return Tensor representing the observable inlined feedback matrix.
-  /// An empty tensor (the default) means no feedback is applied to the
-  /// logical observables.
-  virtual cudaqx::tensor<uint8_t> get_observable_inlined_feedback() const;
+  /// additionally XORs record k of every round. This getter is consumed when
+  /// the memory experiment measures its observables in the Z basis (prep0 /
+  /// prep1 state preparations).
+  /// @return Tensor representing the Z-basis observable inlined feedback
+  /// matrix. An empty tensor (the default) means no observable feedback is
+  /// applied in the Z basis.
+  virtual cudaqx::tensor<uint8_t> get_observable_inlined_feedback_z() const;
+
+  /// @brief Get the inlined feedback matrix for logical observables measured
+  /// in the X basis
+  ///
+  /// Shape is [num_observables x numCols], where numCols =
+  /// get_num_ancilla_qubits() (one measurement record per ancilla per
+  /// round, in [Z][X] order). Entry (m, k) = 1 means logical observable m
+  /// additionally XORs record k of every round. This getter is consumed when
+  /// the memory experiment measures its observables in the X basis (prepp /
+  /// prepm state preparations).
+  /// @return Tensor representing the X-basis observable inlined feedback
+  /// matrix. An empty tensor (the default) means no observable feedback is
+  /// applied in the X basis.
+  virtual cudaqx::tensor<uint8_t> get_observable_inlined_feedback_x() const;
 
   /// @brief Get the stabilizer generators
   /// @return Reference to stabilizers

@@ -334,9 +334,12 @@ sample_memory_circuit(const code &code, operation statePrep,
 
   auto feedback_flat = flatten_feedback_tensor(
       code.get_inlined_feedback(), numCols, numCols, "get_inlined_feedback()");
-  auto obs_feedback_flat =
-      flatten_feedback_tensor(code.get_observable_inlined_feedback(), num_obs,
-                              numCols, "get_observable_inlined_feedback()");
+  auto obs_feedback_flat = flatten_feedback_tensor(
+      is_z_prep ? code.get_observable_inlined_feedback_z()
+                : code.get_observable_inlined_feedback_x(),
+      num_obs, numCols,
+      is_z_prep ? "get_observable_inlined_feedback_z()"
+                : "get_observable_inlined_feedback_x()");
 
   // Obtain the Measurement-to-Detector (M2D) sparse matrix.
   // m2d.rows[d] = set of chronological measurement indices whose XOR = detector
@@ -513,9 +516,12 @@ dem_from_memory_circuit(const code &code, operation statePrep,
   const std::size_t numAnc = numAncx + numAncz;
   auto feedback_flat = flatten_feedback_tensor(
       code.get_inlined_feedback(), numAnc, numAnc, "get_inlined_feedback()");
-  auto obs_feedback_flat =
-      flatten_feedback_tensor(code.get_observable_inlined_feedback(), num_obs,
-                              numAnc, "get_observable_inlined_feedback()");
+  auto obs_feedback_flat = flatten_feedback_tensor(
+      is_z_prep ? code.get_observable_inlined_feedback_z()
+                : code.get_observable_inlined_feedback_x(),
+      num_obs, numAnc,
+      is_z_prep ? "get_observable_inlined_feedback_z()"
+                : "get_observable_inlined_feedback_x()");
 
   cudaq::dem_options dem_opts;
   dem_opts.decompose_errors = decompose_errors;

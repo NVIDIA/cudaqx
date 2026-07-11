@@ -65,7 +65,11 @@ cudaqx::tensor<uint8_t> code::get_inlined_feedback() const {
   return cudaqx::tensor<uint8_t>();
 }
 
-cudaqx::tensor<uint8_t> code::get_observable_inlined_feedback() const {
+cudaqx::tensor<uint8_t> code::get_observable_inlined_feedback_z() const {
+  return cudaqx::tensor<uint8_t>();
+}
+
+cudaqx::tensor<uint8_t> code::get_observable_inlined_feedback_x() const {
   return cudaqx::tensor<uint8_t>();
 }
 

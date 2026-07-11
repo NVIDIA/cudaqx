@@ -2200,9 +2200,12 @@ TEST(QECCodeTester, checkInlinedFeedbackDefaults) {
   auto feedback = steane->get_inlined_feedback();
   EXPECT_EQ(feedback.rank(), 0);
   EXPECT_EQ(feedback.size(), 0);
-  auto obs_feedback = steane->get_observable_inlined_feedback();
-  EXPECT_EQ(obs_feedback.rank(), 0);
-  EXPECT_EQ(obs_feedback.size(), 0);
+  auto obs_feedback_z = steane->get_observable_inlined_feedback_z();
+  EXPECT_EQ(obs_feedback_z.rank(), 0);
+  EXPECT_EQ(obs_feedback_z.size(), 0);
+  auto obs_feedback_x = steane->get_observable_inlined_feedback_x();
+  EXPECT_EQ(obs_feedback_x.rank(), 0);
+  EXPECT_EQ(obs_feedback_x.size(), 0);
 }
 
 // Device kernels for the inlined-feedback toy code, nvq++-compiled in
@@ -2287,12 +2290,35 @@ public:
     return feedback;
   }
 
-  cudaqx::tensor<uint8_t> get_observable_inlined_feedback() const override {
+  cudaqx::tensor<uint8_t> get_observable_inlined_feedback_z() const override {
     if (!declare_feedback)
-      return code::get_observable_inlined_feedback();
+      return code::get_observable_inlined_feedback_z();
     cudaqx::tensor<uint8_t> feedback({1, 2});
     feedback.at({0, 1}) = 1;
     return feedback;
+  }
+};
+
+// Basis-selection variant of the toy: returns caller-planted observable-
+// feedback matrices for the two bases so a test can put a deliberately
+// wrong-shape matrix on the basis it expects sample_memory_circuit NOT to
+// query. The detector feedback (get_inlined_feedback) stays valid, so the
+// underlying Z-memory circuit is otherwise identical to the positive toy.
+class feedback_toy_basis_select_code : public feedback_toy_code {
+  cudaqx::tensor<uint8_t> m_obs_z;
+  cudaqx::tensor<uint8_t> m_obs_x;
+
+public:
+  feedback_toy_basis_select_code(cudaqx::tensor<uint8_t> obs_z,
+                                 cudaqx::tensor<uint8_t> obs_x)
+      : feedback_toy_code(/*declare_feedback=*/true), m_obs_z(std::move(obs_z)),
+        m_obs_x(std::move(obs_x)) {}
+
+  cudaqx::tensor<uint8_t> get_observable_inlined_feedback_z() const override {
+    return m_obs_z;
+  }
+  cudaqx::tensor<uint8_t> get_observable_inlined_feedback_x() const override {
+    return m_obs_x;
   }
 };
 
@@ -2322,6 +2348,62 @@ TEST(QECCodeTester, checkInlinedFeedbackToyMemoryCircuit) {
   ASSERT_EQ(data.shape()[1], 2);
   for (std::size_t shot = 0; shot < numShots; ++shot)
     EXPECT_EQ(data.at({shot, 0}) ^ data.at({shot, 1}), 0) << "shot " << shot;
+}
+
+TEST(QECCodeTester, checkInlinedFeedbackObservableBasisSelection) {
+  // The observable-feedback getter must be selected by the memory basis: a
+  // Z-basis (prep0) memory queries only get_observable_inlined_feedback_z()
+  // and never get_observable_inlined_feedback_x(). The toy device kernels
+  // register only prep0, so selection is proved from the Z path in both
+  // directions.
+  auto valid_obs = [] {
+    cudaqx::tensor<uint8_t> t({1, 2});
+    t.at({0, 1}) = 1;
+    return t;
+  };
+  // Non-empty and the wrong shape for [num_obs=1 x numCols=2], so any code that
+  // flattens it trips flatten_feedback_tensor's shape check.
+  auto wrong_shape_obs = [] { return cudaqx::tensor<uint8_t>({3, 5}); };
+
+  // (a) Valid Z matrix, deliberately wrong-shape X matrix: the Z-memory run
+  // must succeed exactly as the positive toy test, proving the X getter is
+  // never queried on the Z path.
+  {
+    feedback_toy_basis_select_code toy(valid_obs(), wrong_shape_obs());
+    const std::size_t numShots = 20;
+    const std::size_t numRounds = 4;
+    auto [syndromes, data] = cudaq::qec::sample_memory_circuit(
+        toy, cudaq::qec::operation::prep0, numShots, numRounds);
+    ASSERT_EQ(syndromes.rank(), 2);
+    ASSERT_EQ(syndromes.shape()[0], numShots);
+    ASSERT_EQ(syndromes.shape()[1], 2 * numRounds);
+    for (std::size_t shot = 0; shot < numShots; ++shot)
+      for (std::size_t d = 0; d < syndromes.shape()[1]; ++d)
+        EXPECT_EQ(syndromes.at({shot, d}), 0)
+            << "shot " << shot << ", detector " << d;
+    ASSERT_EQ(data.shape()[0], numShots);
+    ASSERT_EQ(data.shape()[1], 2);
+    for (std::size_t shot = 0; shot < numShots; ++shot)
+      EXPECT_EQ(data.at({shot, 0}) ^ data.at({shot, 1}), 0) << "shot " << shot;
+  }
+
+  // (converse) Wrong-shape Z matrix, valid X matrix: the same Z-memory run
+  // must now throw the shape-validation error, proving the Z getter IS the one
+  // queried on the Z path (the valid X matrix is irrelevant here).
+  {
+    feedback_toy_basis_select_code toy(wrong_shape_obs(), valid_obs());
+    try {
+      cudaq::qec::sample_memory_circuit(toy, cudaq::qec::operation::prep0,
+                                        /*numShots=*/20, /*numRounds=*/4);
+      FAIL() << "expected sample_memory_circuit to reject the wrong-shape "
+                "Z-basis observable feedback";
+    } catch (const std::exception &e) {
+      EXPECT_NE(std::string(e.what()).find(
+                    "get_observable_inlined_feedback_z() has invalid shape"),
+                std::string::npos)
+          << "unexpected failure reason: " << e.what();
+    }
+  }
 }
 
 TEST(QECCodeTester, checkInlinedFeedbackToyNegativeControl) {
@@ -2464,7 +2546,7 @@ TEST(InlinedFeedbackLayout, HostLayoutMatchesKernelM2D) {
                                     logical_obs.data() + logical_obs.size());
 
   auto feedback = toy.get_inlined_feedback();
-  auto obs_feedback = toy.get_observable_inlined_feedback();
+  auto obs_feedback = toy.get_observable_inlined_feedback_z();
   std::vector<std::size_t> feedback_flat(feedback.data(),
                                          feedback.data() + feedback.size());
   std::vector<std::size_t> obs_feedback_flat(

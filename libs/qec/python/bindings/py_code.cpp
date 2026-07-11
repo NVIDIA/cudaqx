@@ -51,7 +51,7 @@ static cudaqx::tensor<uint8_t> feedbackArrayToTensor(nb::object array,
 
 class PyCode : public qec::code {
 public:
-  NB_TRAMPOLINE(qec::code, 8);
+  NB_TRAMPOLINE(qec::code, 9);
 
 protected:
   // Trampoline methods for the optional inlined-feedback virtuals: forward to
@@ -66,13 +66,22 @@ protected:
     return NBBase::get_inlined_feedback();
   }
 
-  cudaqx::tensor<uint8_t> get_observable_inlined_feedback() const override {
+  cudaqx::tensor<uint8_t> get_observable_inlined_feedback_z() const override {
     nb::detail::ticket nb_ticket(nb_trampoline,
-                                 "get_observable_inlined_feedback", false);
+                                 "get_observable_inlined_feedback_z", false);
     if (nb_ticket.key.is_valid())
       return feedbackArrayToTensor(nb_trampoline.base().attr(nb_ticket.key)(),
-                                   "get_observable_inlined_feedback");
-    return NBBase::get_observable_inlined_feedback();
+                                   "get_observable_inlined_feedback_z");
+    return NBBase::get_observable_inlined_feedback_z();
+  }
+
+  cudaqx::tensor<uint8_t> get_observable_inlined_feedback_x() const override {
+    nb::detail::ticket nb_ticket(nb_trampoline,
+                                 "get_observable_inlined_feedback_x", false);
+    if (nb_ticket.key.is_valid())
+      return feedbackArrayToTensor(nb_trampoline.base().attr(nb_ticket.key)(),
+                                   "get_observable_inlined_feedback_x");
+    return NBBase::get_observable_inlined_feedback_x();
   }
 
   // Trampoline methods for pure virtual functions
@@ -237,12 +246,20 @@ public:
                                  "get_inlined_feedback");
   }
 
-  cudaqx::tensor<uint8_t> get_observable_inlined_feedback() const override {
-    if (!nb::hasattr(pyCode, "get_observable_inlined_feedback"))
-      return code::get_observable_inlined_feedback();
+  cudaqx::tensor<uint8_t> get_observable_inlined_feedback_z() const override {
+    if (!nb::hasattr(pyCode, "get_observable_inlined_feedback_z"))
+      return code::get_observable_inlined_feedback_z();
     return feedbackArrayToTensor(
-        pyCode.attr("get_observable_inlined_feedback")(),
-        "get_observable_inlined_feedback");
+        pyCode.attr("get_observable_inlined_feedback_z")(),
+        "get_observable_inlined_feedback_z");
+  }
+
+  cudaqx::tensor<uint8_t> get_observable_inlined_feedback_x() const override {
+    if (!nb::hasattr(pyCode, "get_observable_inlined_feedback_x"))
+      return code::get_observable_inlined_feedback_x();
+    return feedbackArrayToTensor(
+        pyCode.attr("get_observable_inlined_feedback_x")(),
+        "get_observable_inlined_feedback_x");
   }
 
 protected:
