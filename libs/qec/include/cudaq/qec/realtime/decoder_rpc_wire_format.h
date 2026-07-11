@@ -35,6 +35,14 @@ static_assert(kResetDecoderFunctionId == 0x977A59CFu,
               "reset_decoder function_id must match "
               "decoder_server_runtime.md");
 
+// Wire framing is cudaq::realtime::RPCHeader / RPCResponse (24 bytes each,
+// packed).  Pin the sizes here so a cudaq-side layout change cannot silently
+// desynchronize the decoder wire format from decoder_server_runtime.md.
+static_assert(sizeof(cudaq::realtime::RPCHeader) == 24,
+              "cudaq::realtime::RPCHeader must be 24 bytes");
+static_assert(sizeof(cudaq::realtime::RPCResponse) == 24,
+              "cudaq::realtime::RPCResponse must be 24 bytes");
+
 // Status codes carried in cudaq::realtime::RPCResponse::status.
 enum class RpcStatus : std::int32_t {
   OK = 0,

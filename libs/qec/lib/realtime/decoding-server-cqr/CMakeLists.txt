@@ -169,7 +169,6 @@ target_link_libraries(cudaq-qec-decoding-server
 if(CUDAQ_GPU_ROCE_AVAILABLE)
   target_compile_definitions(cudaq-qec-decoding-server PRIVATE CUDAQ_GPU_ROCE_AVAILABLE)
   target_include_directories(cudaq-qec-decoding-server PRIVATE
-    "${CUDAQ_REALTIME_INCLUDE_DIR}"
     "${_doca_root}/include"
   )
   target_link_libraries(cudaq-qec-decoding-server PRIVATE
