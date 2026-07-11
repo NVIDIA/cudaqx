@@ -626,13 +626,21 @@ if(Python_Interpreter_FOUND)
     set(_SC4_TRY_TRT_TEST TRUE)
   endif()
 endif()
-if(NOT _SC4_TRY_TRT_TEST)
-  # A silent skip here once masked a dead test check for a whole release
-  # cycle: without python-onnx none of the trt surface-code tests register,
-  # so their assertions are never exercised.
+# A silent skip here once masked a dead test check for a whole release cycle:
+# the trt surface-code tests register only when BOTH the trt plugin target and
+# python-onnx are available, so name whichever gate actually failed.
+if(NOT TARGET cudaq-qec-trt-decoder)
   message(WARNING "surface_code-4-yaml: trt_decoder tests NOT registered "
-    "(python module 'onnx' not importable by ${Python_EXECUTABLE}); "
-    "pip install onnx to enable them.")
+    "(cudaq-qec-trt-decoder target not built).")
+elseif(NOT _SC4_TRY_TRT_TEST)
+  if(Python_Interpreter_FOUND)
+    message(WARNING "surface_code-4-yaml: trt_decoder tests NOT registered "
+      "(python module 'onnx' not importable by ${Python_EXECUTABLE}); "
+      "pip install onnx to enable them.")
+  else()
+    message(WARNING "surface_code-4-yaml: trt_decoder tests NOT registered "
+      "(no python interpreter found).")
+  endif()
 endif()
 
 function(add_surface_code_4_yaml_test test_suffix distance num_rounds

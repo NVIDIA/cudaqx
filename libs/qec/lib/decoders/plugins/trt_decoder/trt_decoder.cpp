@@ -439,8 +439,6 @@ public:
 private:
   void check_cuda();
 
-  /// Size to use for failed placeholder results. This preserves the
-
   /// Typed decode_batch: input and output dtypes are selected independently
   /// from the TensorRT engine metadata (currently float or uint8_t).
   template <typename InputType, typename OutputType>
@@ -465,7 +463,7 @@ struct trt_decoder::Impl {
   size_t input_elem_size = sizeof(float);
   size_t output_elem_size = sizeof(float);
   void *buffers[2] = {nullptr, nullptr};
-  cudaStream_t stream;
+  cudaStream_t stream = nullptr;
 
   // Dynamic batch: set input shape before each inference (only when dynamic)
   bool has_dynamic_batch_ = false;
@@ -513,12 +511,13 @@ struct trt_decoder::Impl {
     context.reset();
     engine.reset();
 
-    // 4. Free GPU buffers
-    if (buffers[input_index]) {
+    // 4. Free GPU buffers.  The indices are -1 mid-construction (binding
+    // scan), and the constructor can throw there.
+    if (input_index >= 0 && buffers[input_index]) {
       HANDLE_CUDA_ERROR_NO_THROW(cudaFree(buffers[input_index]));
       buffers[input_index] = nullptr;
     }
-    if (buffers[output_index]) {
+    if (output_index >= 0 && buffers[output_index]) {
       HANDLE_CUDA_ERROR_NO_THROW(cudaFree(buffers[output_index]));
       buffers[output_index] = nullptr;
     }
@@ -885,14 +884,24 @@ trt_decoder::decode_batch(const std::vector<std::vector<float_t>> &syndromes) {
   }
 
   // Dispatch on the actual engine I/O dtypes independently.
+  std::vector<decoder_result> results;
   if (impl_->input_dtype == nvinfer1::DataType::kUINT8) {
     if (impl_->output_dtype == nvinfer1::DataType::kUINT8)
-      return decode_batch_impl<uint8_t, uint8_t>(syndromes);
-    return decode_batch_impl<uint8_t, float>(syndromes);
+      results = decode_batch_impl<uint8_t, uint8_t>(syndromes);
+    else
+      results = decode_batch_impl<uint8_t, float>(syndromes);
+  } else if (impl_->output_dtype == nvinfer1::DataType::kUINT8) {
+    results = decode_batch_impl<float, uint8_t>(syndromes);
+  } else {
+    results = decode_batch_impl<float, float>(syndromes);
   }
-  if (impl_->output_dtype == nvinfer1::DataType::kUINT8)
-    return decode_batch_impl<float, uint8_t>(syndromes);
-  return decode_batch_impl<float, float>(syndromes);
+  // One result per input, always: callers index results positionally, and a
+  // misbehaving external global decoder must not turn that into UB.
+  if (results.size() != syndromes.size())
+    throw std::runtime_error(
+        "TensorRT decode_batch produced " + std::to_string(results.size()) +
+        " results for " + std::to_string(syndromes.size()) + " syndromes");
+  return results;
 }
 
 template <typename InputType, typename OutputType>

@@ -676,8 +676,9 @@ int main(int argc, char **argv) {
     dispatcher_thread.join();
   if (tp.shutdown)
     tp.shutdown();
-  // Transport is down (no new requests) but the server still exists: emit the
-  // opt-in per-decoder counters before shutdown releases the sessions.
+  // The counters are atomics and the per-shot get_corrections cadence means
+  // they are settled by the time a client-driven run reaches shutdown; print
+  // before cudaqx_qec_decoding_server_shutdown() releases the sessions.
   if (const char *stats = std::getenv("QEC_DECODING_SERVER_STATS");
       stats && stats[0] != '\0')
     cudaqx_qec_decoding_server_print_stats();
