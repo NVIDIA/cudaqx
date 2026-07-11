@@ -8,11 +8,13 @@
 
 #include "DecodingSession.h"
 #include "RpcWireFormat.h"
+#include "../../hardware_guards.h"
 #include "cudaq/qec/logger.h"
 
 #include <chrono>
 #include <cstring>
 #include <cuda_runtime_api.h>
+#include <future>
 #include <stdexcept>
 #include <vector>
 
@@ -62,7 +64,30 @@ DecodingSession::create(std::unique_ptr<cudaq::qec::decoder> decoder,
 }
 
 void DecodingSession::start_worker() {
-  worker = std::thread([this] { worker_loop(); });
+  // The pin must happen ON the worker thread (CUDA device selection is
+  // thread-local), but a failure is a startup error that belongs to the
+  // caller: hand it back through a promise so load_from_config aborts the
+  // server instead of a worker silently decoding on the wrong device.
+  std::promise<void> pinned;
+  auto pin_result = pinned.get_future();
+  worker = std::thread([this, &pinned] {
+    try {
+      cudaq::qec::detail_affinity::set_cuda_device_for_decode(
+          dec->get_cuda_device_id());
+      pinned.set_value();
+    } catch (...) {
+      pinned.set_exception(std::current_exception());
+      return; // never serve work from a mispinned thread
+    }
+    worker_loop();
+  });
+  try {
+    pin_result.get();
+  } catch (...) {
+    if (worker.joinable())
+      worker.join();
+    throw;
+  }
 }
 
 bool DecodingSession::try_enqueue(WorkItem item) {
@@ -300,15 +325,6 @@ void DecodingSession::on_reset(const WorkItem &item) {
 }
 
 void DecodingSession::worker_loop() {
-  // One worker owns one decoder: pin this thread to the decoder's requested
-  // CUDA device once, so every decode (including lazy plugin allocations)
-  // lands there. Construction pinned only the registry thread.
-  if (const int cuda_id = dec->get_cuda_device_id(); cuda_id >= 0) {
-    const cudaError_t err = cudaSetDevice(cuda_id);
-    if (err != cudaSuccess)
-      cudaq::qec::error("DecodingSession worker: cudaSetDevice({}) failed: {}",
-                        cuda_id, cudaGetErrorString(err));
-  }
   while (true) {
     WorkItem item;
     {

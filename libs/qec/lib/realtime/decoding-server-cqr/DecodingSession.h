@@ -106,7 +106,10 @@ struct DecodingSession {
   create(std::unique_ptr<cudaq::qec::decoder> decoder,
          SyndromeMappingTable mapping_table);
 
-  /// Start the FIFO worker thread.  Must be called after create().
+  /// Start the FIFO worker thread.  Must be called after create().  The
+  /// worker pins itself to the decoder's cuda_device_id before serving work;
+  /// a pin failure throws HERE (one worker owns one decoder -- a worker on
+  /// the wrong device must never serve).
   void start_worker();
 
   /// Signal shutdown and join the worker (drains any queued items first).

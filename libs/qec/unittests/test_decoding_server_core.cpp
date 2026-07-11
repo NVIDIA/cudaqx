@@ -6,6 +6,7 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  *******************************************************************************/
 
+#include "DecodingServer.h"
 #include "DecodingSession.h"
 #include "RoundAccumulator.h"
 #include "RpcDispatcher.h"
@@ -254,6 +255,31 @@ TEST(RpcDispatcherTest, ConvertsHandlerExceptionsToErrorResponses) {
   CaptureTransceiver transport;
   EXPECT_NO_THROW(dispatcher.dispatch(std::move(frame), transport));
   expect_status(transport, RpcStatus::INTERNAL_ERROR);
+}
+
+TEST(GpuRoceDeviceReconcile, BothUnsetDefaultsToZero) {
+  EXPECT_EQ(
+      cudaq::qec::decoding_server::reconcile_gpu_roce_device(std::nullopt, -1),
+      0);
+}
+
+TEST(GpuRoceDeviceReconcile, EnvOnlyWins) {
+  EXPECT_EQ(cudaq::qec::decoding_server::reconcile_gpu_roce_device(2, -1), 2);
+}
+
+TEST(GpuRoceDeviceReconcile, PinOnlyWins) {
+  EXPECT_EQ(
+      cudaq::qec::decoding_server::reconcile_gpu_roce_device(std::nullopt, 3),
+      3);
+}
+
+TEST(GpuRoceDeviceReconcile, AgreementPasses) {
+  EXPECT_EQ(cudaq::qec::decoding_server::reconcile_gpu_roce_device(1, 1), 1);
+}
+
+TEST(GpuRoceDeviceReconcile, ConflictThrows) {
+  EXPECT_THROW(cudaq::qec::decoding_server::reconcile_gpu_roce_device(0, 2),
+               std::runtime_error);
 }
 
 } // namespace
