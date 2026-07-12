@@ -44,6 +44,13 @@ version_file="$repo_root/.cudaq_version"
 # Configuration
 # ---------------------------------------------------------------------------
 CUDAQ_SRC=${CUDAQ_SRC:-/workspaces/cudaq}
+# Resolve to absolute path so later cd's don't confuse relative paths.
+# The parent directory must already exist (we're about to clone into it or it's
+# already a git checkout).
+_cudaq_parent=$(cd "$(dirname "$CUDAQ_SRC")" 2>/dev/null && pwd) || \
+  die "parent directory of CUDAQ_SRC does not exist: $(dirname "$CUDAQ_SRC")"
+CUDAQ_SRC="$_cudaq_parent/$(basename "$CUDAQ_SRC")"
+unset _cudaq_parent
 CUDAQ_INSTALL_PREFIX=${CUDAQ_INSTALL_PREFIX:-/usr/local/cudaq}
 LLVM_INSTALL_PREFIX=${LLVM_INSTALL_PREFIX:-/usr/local/llvm}
 BUILD_TYPE=${BUILD_TYPE:-Release}
@@ -87,10 +94,13 @@ else
   # No submodules: CUDA-Q uses the prebuilt LLVM_INSTALL_PREFIX / NANOBIND_INSTALL_PREFIX
   # and FetchContent for tpls, so initializing submodules would needlessly clone
   # the huge tpls/llvm tree. (Matches the CI checkout, which inits no submodules.)
-  log "Cloning ${CUDAQ_REPO} into $CUDAQ_SRC"
-  git clone "https://github.com/${CUDAQ_REPO}.git" "$CUDAQ_SRC"
+  log "Cloning ${CUDAQ_REPO} into $CUDAQ_SRC (shallow)"
+  # --no-checkout: skip checking out the default branch; we only want CUDAQ_REF.
+  git clone --no-checkout "https://github.com/${CUDAQ_REPO}.git" "$CUDAQ_SRC"
   cd "$CUDAQ_SRC"
-  git checkout --force "$CUDAQ_REF"
+  # Fetch only the pinned SHA with a shallow window so we don't pull full history.
+  git fetch --depth=10 origin "$CUDAQ_REF"
+  git checkout --force FETCH_HEAD
 fi
 
 [ -x "$LLVM_INSTALL_PREFIX/bin/llvm-config" ] || \
@@ -100,15 +110,11 @@ fi
 # 2. Clean the build dirs, then build + install realtime AND the full CUDA-Q
 #    (with device_call) by delegating to the canonical CI recipe instead of
 #    duplicating it. That script uses a positional contract (BUILD_TYPE,
-#    LAUNCHER, CC, CXX), reads CUDAQ_INSTALL_PREFIX / LLVM_INSTALL_PREFIX from
-#    the env, and resolves the checkout as ./cudaq relative to CWD -- so it runs
-#    from the parent of CUDAQ_SRC, which must therefore be named "cudaq".
+#    LAUNCHER, CC, CXX) and reads CUDAQ_SRC / CUDAQ_INSTALL_PREFIX /
+#    LLVM_INSTALL_PREFIX from the env.
 # ---------------------------------------------------------------------------
 build_script="$repo_root/.github/actions/get-cudaq-build/build_cudaq.sh"
 [ -f "$build_script" ] || die "delegate build script not found: $build_script"
-
-[ "$(basename "$CUDAQ_SRC")" = "cudaq" ] || \
-  die "delegate build script resolves the checkout as ./cudaq; CUDAQ_SRC must be named 'cudaq' (got $CUDAQ_SRC)"
 
 # Force a fresh build. ($CUDAQ_SRC/build is also wiped by the inner build script,
 # but $CUDAQ_SRC/realtime/build is incremental, so clean both explicitly.)
@@ -116,7 +122,7 @@ log "Cleaning build directories"
 rm -rf "$CUDAQ_SRC/realtime/build" "$CUDAQ_SRC/build"
 
 log "Building realtime + CUDA-Q via $build_script"
-cd "$(dirname "$CUDAQ_SRC")"
+CUDAQ_SRC="$CUDAQ_SRC" \
 CUDAQ_INSTALL_PREFIX="$CUDAQ_INSTALL_PREFIX" \
 LLVM_INSTALL_PREFIX="$LLVM_INSTALL_PREFIX" \
   bash "$build_script" "$BUILD_TYPE" "" "$CC" "$CXX"
