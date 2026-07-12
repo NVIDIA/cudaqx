@@ -11,38 +11,17 @@
 // into linkable symbols + JIT kernel registrations for the sample/DEM entry
 // points in experiments.cpp (and for applications, which only include the
 // declarations in cudaq/qec/device/memory_circuit.h).
-#include "cudaq/qec/device/memory_circuit.h"
-
-namespace cudaq::qec::decoding {
-
-// Default no-op implementations of the realtime decoding API (see
-// cudaq/qec/realtime/decoding.h), so that binaries which do not link a target
-// decoding shim still link and run: enqueues and resets do nothing, and
-// corrections come back all-zero.
 //
-// Deliberately defined in the SAME translation unit as the kernels above:
-// nvq++ inlines these empty bodies into the library's registered copy of the
-// kernels, making that copy deterministically decoding-free (it serves the
-// sample/DEM entry points). Realtime applications compile their own kernel
-// copy (by including memory_circuit.h in one nvq++ TU) and link a
-// decoding shim, whose implementations their copy binds to instead.
-
-__qpu__ void
-enqueue_syndromes(std::uint64_t decoder_id,
-                  const std::vector<cudaq::measure_result> &syndromes,
-                  std::uint64_t tag) {}
-
-__qpu__ void enqueue_syndromes_test(std::uint64_t decoder_id,
-                                    const std::vector<bool> &syndromes,
-                                    std::uint64_t tag) {}
-
-__qpu__ std::vector<bool> get_corrections(std::uint64_t decoder_id,
-                                          std::uint64_t return_size,
-                                          bool reset) {
-  std::vector<bool> result(return_size);
-  return result;
-}
-
-__qpu__ void reset_decoder(std::uint64_t decoder_id) {}
-
-} // namespace cudaq::qec::decoding
+// This TU is compiled with CUDAQ_QEC_DISABLE_REALTIME_DECODING (set in
+// lib/device/CMakeLists.txt), so its copy of the kernels is decoding-free and
+// makes no reference to the realtime decoding API. The API implementations
+// (enqueue_syndromes / get_corrections / reset_decoder) are NOT defined here:
+// they come from a linked decoding shim (realtime/simulation,
+// realtime/simulation-cqr, or realtime/quantinuum), or -- when no shim is
+// linked -- from the no-op fallback archive (realtime/noop) that the
+// cudaq-qec CMake target appends to the end of every consumer's link line.
+// Housing default no-ops in libcudaq-qec itself instead made them win weak /
+// first-in-DT_NEEDED symbol resolution over any real shim (libcudaq-qec is
+// always linked first), silently shadowing it -- so a binary that meant to
+// decode would no-op.
+#include "cudaq/qec/device/memory_circuit.h"

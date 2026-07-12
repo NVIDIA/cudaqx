@@ -23,14 +23,19 @@
 //    quantinuum,...}), when linked, provides the real implementations. They
 //    win kernel-registry resolution because the shim registers after its
 //    libcudaq-qec dependency.
-//  - Without a shim, the calls bind to the default no-op implementations
-//    that libcudaq-qec registers (lib/device/memory_circuit.cpp): enqueues
-//    and resets do nothing, and corrections come back all-zero.
+//  - Without a shim, the calls bind to the no-op fallback (realtime/noop): a
+//    STATIC archive the cudaq-qec CMake target appends to the end of every
+//    consumer's link line, which the linker only extracts for symbols no shim
+//    already provided. Enqueues and resets do nothing, corrections come back
+//    all-zero. No default is baked into libcudaq-qec itself: a shared-library
+//    fallback would win dynamic resolution over the linked shim (libcudaq-qec
+//    is first in DT_NEEDED order) and silently shadow it.
 //
-// In short: link a shim and these calls decode; link nothing extra and they
-// are no-ops. The host-side entry points additionally no-op while a circuit
-// is being analyzed for its detector error model, so kernels containing these
-// calls are safe to pass to dem_from_memory_circuit.
+// In short: applications are no-op by default and opt into decoding purely by
+// linking a shim; exactly one provider defines the API in any given binary.
+// The host-side entry points additionally no-op while a circuit is being
+// analyzed for its detector error model, so kernels containing these calls
+// are safe to pass to dem_from_memory_circuit.
 
 namespace cudaq::qec::decoding {
 // CUDA-Q QEC Realtime Decoding API (declarations)

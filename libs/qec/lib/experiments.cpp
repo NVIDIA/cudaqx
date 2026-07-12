@@ -7,9 +7,9 @@
  ******************************************************************************/
 
 #include "cudaq/qec/experiments.h"
-#include "cudaq/qec/device/memory_circuit.h"
 #include "cudaq/algorithms/dem.h"
 #include "cudaq/qec/dem_sampling.h"
+#include "cudaq/qec/device/memory_circuit.h"
 #include "cudaq/qec/pcm_utils.h"
 #include <algorithm>
 #include <cmath>
@@ -316,16 +316,14 @@ sample_memory_circuit(const code &code, operation statePrep,
   cudaq::M2OSparseMatrix m2o;
   cudaq::dem_from_kernel(memory_circuit, &noise, /*options=*/{}, m2d, m2o,
                          stabRound, prep, numData, numAncx, numAncz, numRounds,
-                         xVec, zVec, obs_flat, num_obs, !is_z_prep,
-                         /*enqueue_decoder_id=*/std::int64_t{-1});
+                         xVec, zVec, obs_flat, num_obs, !is_z_prep);
 
   // Sample the memory circuit and collect all raw measurements.
   cudaq::sample_options opts{
       .shots = numShots, .noise = noise, .explicit_measurements = true};
-  auto result =
-      cudaq::sample(opts, memory_circuit, stabRound, prep, numData, numAncx,
-                    numAncz, numRounds, xVec, zVec, obs_flat, num_obs,
-                    !is_z_prep, /*enqueue_decoder_id=*/std::int64_t{-1});
+  auto result = cudaq::sample(opts, memory_circuit, stabRound, prep, numData,
+                              numAncx, numAncz, numRounds, xVec, zVec, obs_flat,
+                              num_obs, !is_z_prep);
 
   // mzTable[shot, meas_idx] = raw 0/1 outcome; shape (numShots,
   // numMeasPerShot). Measurement layout per shot: numRounds*numCols ancilla,
@@ -437,10 +435,11 @@ sample_memory_circuit(const code &code, std::size_t numShots,
 namespace details {
 /// @brief Given a memory circuit setup, generate a DEM. This is the main driver
 /// function that all of the function overloads invoke.
-cudaq::qec::detector_error_model dem_from_memory_circuit(
-    const code &code, operation statePrep, std::size_t numRounds,
-    cudaq::noise_model &noise, bool keep_x_stabilizers, bool keep_z_stabilizers,
-    bool decompose_errors) {
+cudaq::qec::detector_error_model
+dem_from_memory_circuit(const code &code, operation statePrep,
+                        std::size_t numRounds, cudaq::noise_model &noise,
+                        bool keep_x_stabilizers, bool keep_z_stabilizers,
+                        bool decompose_errors) {
   if (!keep_x_stabilizers && !keep_z_stabilizers)
     throw std::runtime_error("dem_from_memory_circuit error - no stabilizers "
                              "to keep.");
@@ -484,8 +483,7 @@ cudaq::qec::detector_error_model dem_from_memory_circuit(
   dem_opts.decompose_errors = decompose_errors;
   auto dem_text = cudaq::dem_from_kernel(
       memory_circuit, &noise, dem_opts, stabRound, prep, numData, numAncx,
-      numAncz, numRounds, xVec, zVec, obs_flat, num_obs, !is_z_prep,
-      /*enqueue_decoder_id=*/std::int64_t{-1});
+      numAncz, numRounds, xVec, zVec, obs_flat, num_obs, !is_z_prep);
   auto dem = cudaq::qec::dem_from_stim_text(dem_text, decompose_errors);
 
   const auto numXStabs = code.get_num_x_stabilizers();

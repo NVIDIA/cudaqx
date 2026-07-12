@@ -44,20 +44,11 @@ namespace cudaq::qec {
 ///        (num_observables × data.size() entries, values 0/1).
 /// @param num_observables Number of rows in the observable matrix (k).
 /// @param measure_in_x_basis Performing X- or Z-memory circuit
-/// @param enqueue_decoder_id When >= 0, enqueue each round's stabilizer
-///        measurements followed by the final data-qubit readout (in
-///        chronological measurement order) to the realtime decoder with this
-///        ID, so the decoder forms the same detectors as
-///        `dem_from_memory_circuit`. A negative value (the default) disables
-///        enqueueing. Enqueueing requires linking a realtime decoding shim
-///        (see cudaq/qec/realtime/decoding.h); in a binary without a shim the
-///        decoding calls bind to libcudaq-qec's default no-op implementations,
-///        so this argument is effectively ignored.
 ///
-///        The same kernel can therefore be used both to generate the DEM (via
-///        `dem_from_memory_circuit`) and to run the live experiment: the host
-///        decoding entry points no-op while a circuit is being analyzed for its
-///        DEM, so the enqueue is harmless during extraction.
+/// This is the PLAIN family: it never streams measurements to a realtime
+/// decoder and its binary needs no decoding shim. The realtime family --
+/// identical kernels that additionally take an enqueue decoder id -- lives in
+/// cudaq::qec::realtime (cudaq/qec/device/memory_circuit_realtime.h).
 __qpu__ void memory_circuit_hw(cudaq::qview<> data, cudaq::qview<> xstab_anc,
                                cudaq::qview<> zstab_anc,
                                const code::stabilizer_round &stabilizer_round,
@@ -67,8 +58,7 @@ __qpu__ void memory_circuit_hw(cudaq::qview<> data, cudaq::qview<> xstab_anc,
                                const std::vector<std::size_t> &z_stabilizers,
                                const std::vector<std::size_t> &obs_matrix_flat,
                                std::size_t num_observables,
-                               bool measure_in_x_basis,
-                               std::int64_t enqueue_decoder_id = -1);
+                               bool measure_in_x_basis);
 
 /// \entry_point_kernel
 ///
@@ -86,8 +76,7 @@ __qpu__ void memory_circuit(const code::stabilizer_round &stabilizer_round,
                             const std::vector<std::size_t> &z_stabilizers,
                             const std::vector<std::size_t> &obs_matrix_flat,
                             std::size_t num_observables,
-                            bool measure_in_x_basis,
-                            std::int64_t enqueue_decoder_id = -1);
+                            bool measure_in_x_basis);
 
 /// \pure_device_kernel
 ///
@@ -96,10 +85,7 @@ __qpu__ void memory_circuit(const code::stabilizer_round &stabilizer_round,
 /// out on slices of the caller-allocated registers: logical qubit `i` uses
 /// `data[i*numData, (i+1)*numData)` and the matching ancilla slices, so the
 /// registers must hold `numLogical * numData` (resp. `numLogical * numAncx`,
-/// `numLogical * numAncz`) qubits. `enqueue_decoder_ids` selects the realtime
-/// decoder for each logical qubit (need not be consecutive): logical qubit `i`
-/// resets and enqueues to decoder `enqueue_decoder_ids[i]`. Pass an empty
-/// vector to disable all realtime decoding. Parameters otherwise match
+/// `numLogical * numAncz`) qubits. Parameters otherwise match
 /// `memory_circuit_hw`.
 ///
 /// Callers that need the readout re-measure their `data` register after this
@@ -114,8 +100,7 @@ __qpu__ void memory_circuit_multi(
     const std::vector<std::size_t> &z_stabilizers,
     const std::vector<std::size_t> &obs_matrix_flat,
     std::size_t num_observables, bool measure_in_x_basis,
-    std::size_t numLogical,
-    const std::vector<std::int64_t> &enqueue_decoder_ids = {});
+    std::size_t numLogical);
 
 /// @brief Host-side helper that reshapes a flat `numLogical * numData`
 /// row-major readout (e.g. a caller's re-measurement of the `data` register
@@ -138,57 +123,37 @@ memory_circuit_multi_readout(const std::vector<T> &flat_readout,
 //
 // The implementations are part of this header so that a translation unit
 // compiled with nvq++ gets compiling kernels just by including
-// cudaq/qec/device/memory_circuit.h (link a realtime decoding shim to stream
-// syndromes; without one, the decoding calls bind to libcudaq-qec's default
-// no-ops defined in lib/device/memory_circuit.cpp). Host-only translation
-// units must not compile kernel definitions: CMake consumers of the cudaq-qec
-// target inherit CUDAQ_QEC_MEMORY_CIRCUIT_DECLARATIONS_ONLY automatically (a
-// PUBLIC compile definition; nvq++ device-code TUs do not), and non-CMake host
-// code defines it manually before including this header. The copy shipped in libcudaq-qec is compiled with
-// CUDAQ_QEC_DISABLE_REALTIME_DECODING (set in lib/device/CMakeLists.txt),
-// which turns the decoder calls off so the library's registered copy is
-// deterministically decoding-free.
+// cudaq/qec/device/memory_circuit.h. This is the PLAIN family: the decoding
+// helpers below are unconditional no-ops, so the TU makes no reference to the
+// realtime decoding API and its binary needs no decoding shim. The realtime
+// family -- the same kernels instantiated in cudaq::qec::realtime with
+// helpers that forward to the decoding API -- lives in
+// cudaq/qec/device/memory_circuit_realtime.h; using it is the opt-in and
+// requires linking a decoding shim. The shared kernel bodies live in
+// memory_circuit_impl.h, included into each family's namespace.
+//
+// Host-only translation units must not compile kernel definitions: CMake
+// consumers of the cudaq-qec target inherit
+// CUDAQ_QEC_MEMORY_CIRCUIT_DECLARATIONS_ONLY automatically (a PUBLIC compile
+// definition; nvq++ device-code TUs do not), and non-CMake host code defines
+// it manually before including this header.
 //===----------------------------------------------------------------------===//
 #if !defined(CUDAQ_QEC_MEMORY_CIRCUIT_DECLARATIONS_ONLY)
 /// \cond INTERNAL
 
-#if !defined(CUDAQ_QEC_DISABLE_REALTIME_DECODING)
-#include "cudaq/qec/realtime/decoding.h"
-#endif
-
-// Helper kernels shared by the memory-circuit bodies: forward to the realtime
-// decoding API when a decoder id is selected. Without a decoding shim linked,
-// the calls bind to libcudaq-qec's default no-op implementations (see
-// lib/device/memory_circuit.cpp). The cudaq-qec build itself compiles with
-// CUDAQ_QEC_DISABLE_REALTIME_DECODING (set in lib/device/CMakeLists.txt) so
-// the library's registered copy of the kernels is deterministically
-// decoding-free; the copy an application compiles (by including
-// memory_circuit.h) keeps the calls.
-#if defined(CUDAQ_QEC_DISABLE_REALTIME_DECODING)
+// No-op decoding helpers for the plain family: enqueue_decoder_id is accepted
+// (the signatures are shared with the realtime family) but ignored.
 namespace cudaq::qec::detail {
 __qpu__ void
 enqueue_syndromes_if(std::int64_t decoder_id,
                      const std::vector<cudaq::measure_result> &syndromes) {}
 __qpu__ void reset_decoder_if(std::int64_t decoder_id) {}
 } // namespace cudaq::qec::detail
-#else
-namespace cudaq::qec::detail {
-__qpu__ void
-enqueue_syndromes_if(std::int64_t decoder_id,
-                     const std::vector<cudaq::measure_result> &syndromes) {
-  if (decoder_id >= 0)
-    cudaq::qec::decoding::enqueue_syndromes(
-        static_cast<std::uint64_t>(decoder_id), syndromes);
-}
-__qpu__ void reset_decoder_if(std::int64_t decoder_id) {
-  if (decoder_id >= 0)
-    cudaq::qec::decoding::reset_decoder(static_cast<std::uint64_t>(decoder_id));
-}
-} // namespace cudaq::qec::detail
-#endif
 
 namespace cudaq::qec {
+#include "cudaq/qec/device/memory_circuit_impl.h"
 
+// Plain public kernel: forwards to the shared body with enqueueing disabled.
 __qpu__ void memory_circuit_hw(cudaq::qview<> data, cudaq::qview<> xstab_anc,
                                cudaq::qview<> zstab_anc,
                                const code::stabilizer_round &stabilizer_round,
@@ -198,102 +163,11 @@ __qpu__ void memory_circuit_hw(cudaq::qview<> data, cudaq::qview<> xstab_anc,
                                const std::vector<std::size_t> &z_stabilizers,
                                const std::vector<std::size_t> &obs_matrix_flat,
                                std::size_t num_observables,
-                               bool measure_in_x_basis,
-                               std::int64_t enqueue_decoder_id) {
-  std::size_t num_data = data.size();
-
-  // Create the logical patch on the caller-allocated registers
-  patch logical(data, xstab_anc, zstab_anc);
-
-  // Prepare the initial state
-  statePrep({data, xstab_anc, zstab_anc});
-
-  // The "off-basis" detectors will be non-deterministic after the first
-  // stabilizer round.
-  auto final_syndrome = stabilizer_round(logical, x_stabilizers, z_stabilizers);
-  {
-    // Rebuild the syndrome in local scope before enqueueing: hardware QIR
-    // profiles cannot lower a heap-materialized measurement vector, and the
-    // optimizer only folds the enqueue's bit-packing into scalar ops when the
-    // vector is constructed in the enqueueing scope.
-    std::vector<cudaq::measure_result> syn(final_syndrome.size());
-    for (std::size_t i = 0; i < final_syndrome.size(); ++i)
-      syn[i] = final_syndrome[i];
-    detail::enqueue_syndromes_if(enqueue_decoder_id, syn);
-  }
-  std::size_t num_fixed_measurements =
-      measure_in_x_basis ? xstab_anc.size() : zstab_anc.size();
-  std::size_t fixed_offset =
-      measure_in_x_basis ? final_syndrome.size() - num_fixed_measurements : 0;
-  for (std::size_t i = 0; i < num_fixed_measurements; ++i) {
-    cudaq::detector(final_syndrome[fixed_offset + i]);
-  }
-
-  // Generate syndrome data
-  for (std::size_t round = 1; round < num_rounds; ++round) {
-    auto syndrome = stabilizer_round(logical, x_stabilizers, z_stabilizers);
-    {
-      std::vector<cudaq::measure_result> syn(syndrome.size());
-      for (std::size_t i = 0; i < syndrome.size(); ++i)
-        syn[i] = syndrome[i];
-      detail::enqueue_syndromes_if(enqueue_decoder_id, syn);
-    }
-    cudaq::detectors(final_syndrome, syndrome);
-    final_syndrome = syndrome;
-  }
-
-  if (measure_in_x_basis) {
-    h(data);
-  }
-  auto data_results = mz(data);
-
-  // Stream the raw data readout as the final "round" so the realtime decoder
-  // can form the data-vs-stabilizer boundary detectors from it, matching the
-  // detector layout emitted below (and by dem_from_memory_circuit).
-  detail::enqueue_syndromes_if(enqueue_decoder_id, data_results);
-
-  // Emit one logical_observable per row of the observable matrix.
-  for (std::size_t obs = 0; obs < num_observables; ++obs) {
-    std::size_t support_weight = 0;
-    for (std::size_t q = 0; q < num_data; ++q) {
-      if (obs_matrix_flat[obs * num_data + q] != 0)
-        support_weight++;
-    }
-    std::vector<cudaq::measure_result> obs_support(support_weight);
-    std::size_t idx = 0;
-    for (std::size_t q = 0; q < num_data; ++q) {
-      if (obs_matrix_flat[obs * num_data + q] != 0)
-        obs_support[idx++] = data_results[q];
-    }
-    cudaq::logical_observable(obs_support);
-  }
-
-  // For each stabilizer, form detectors from data qubit readout connected with
-  // final stabilizer round.
-  const std::vector<size_t> &stabilizers =
-      measure_in_x_basis ? x_stabilizers : z_stabilizers;
-
-  for (std::size_t x = 0; x < num_fixed_measurements; ++x) {
-    std::size_t row_base = x * num_data;
-
-    std::size_t support_weight = 0;
-    for (std::size_t q = 0; q < num_data; ++q) {
-      if (stabilizers[row_base + q] != 0) {
-        support_weight++;
-      }
-    }
-
-    std::vector<cudaq::measure_result> support(support_weight + 1);
-    support[0] = final_syndrome[fixed_offset + x];
-    std::size_t support_idx = 1;
-    for (std::size_t q = 0; q < num_data; ++q) {
-      if (stabilizers[row_base + q] != 0) {
-        support[support_idx++] = data_results[q];
-      }
-    }
-
-    cudaq::detector(support);
-  }
+                               bool measure_in_x_basis) {
+  cudaq::qec::memory_circuit_hw_impl(
+      data, xstab_anc, zstab_anc, stabilizer_round, statePrep, num_rounds,
+      x_stabilizers, z_stabilizers, obs_matrix_flat, num_observables,
+      measure_in_x_basis, /*enqueue_decoder_id=*/-1);
 }
 
 // Host-launchable entry point: allocates the registers and forwards to
@@ -309,22 +183,17 @@ __qpu__ void memory_circuit(const code::stabilizer_round &stabilizer_round,
                             const std::vector<std::size_t> &z_stabilizers,
                             const std::vector<std::size_t> &obs_matrix_flat,
                             std::size_t num_observables,
-                            bool measure_in_x_basis,
-                            std::int64_t enqueue_decoder_id) {
+                            bool measure_in_x_basis) {
   cudaq::qvector data(numData), xstab_anc(numAncx), zstab_anc(numAncz);
-  memory_circuit_hw(data, xstab_anc, zstab_anc, stabilizer_round, statePrep,
-                    numRounds, x_stabilizers, z_stabilizers, obs_matrix_flat,
-                    num_observables, measure_in_x_basis, enqueue_decoder_id);
+  cudaq::qec::memory_circuit_hw(data, xstab_anc, zstab_anc, stabilizer_round,
+                                statePrep, numRounds, x_stabilizers,
+                                z_stabilizers, obs_matrix_flat, num_observables,
+                                measure_in_x_basis);
 }
 
-// Multi-logical-qubit wrapper around `memory_circuit_hw`. Runs an independent
+// Multi-logical-qubit wrapper around `memory_circuit_hw`: an independent
 // memory experiment on each of `numLogical` logical qubits, each on its own
-// slice of the caller-allocated registers (logical qubit `i` uses
-// `data[i*numData, (i+1)*numData)` and the matching ancilla slices).
-// `enqueue_decoder_ids` selects the realtime decoder for each logical qubit
-// (need not be consecutive): logical qubit `i` resets and enqueues to decoder
-// `enqueue_decoder_ids[i]`. Pass an empty vector to disable all realtime
-// decoding (matching `memory_circuit`'s convention).
+// slice of the caller-allocated registers.
 __qpu__ void memory_circuit_multi(
     cudaq::qview<> data, cudaq::qview<> xstab_anc, cudaq::qview<> zstab_anc,
     const code::stabilizer_round &stabilizer_round,
@@ -334,24 +203,15 @@ __qpu__ void memory_circuit_multi(
     const std::vector<std::size_t> &z_stabilizers,
     const std::vector<std::size_t> &obs_matrix_flat,
     std::size_t num_observables, bool measure_in_x_basis,
-    std::size_t numLogical,
-    const std::vector<std::int64_t> &enqueue_decoder_ids) {
-  bool enqueue = enqueue_decoder_ids.size() == numLogical;
+    std::size_t numLogical) {
   for (std::size_t i = 0; i < numLogical; ++i) {
-    std::int64_t enqueue_decoder_id = -1;
-    if (enqueue)
-      enqueue_decoder_id = enqueue_decoder_ids[i];
-
-    detail::reset_decoder_if(enqueue_decoder_id);
-
-    memory_circuit_hw(
+    cudaq::qec::memory_circuit_hw(
         data.slice(i * numData, numData), xstab_anc.slice(i * numAncx, numAncx),
         zstab_anc.slice(i * numAncz, numAncz), stabilizer_round, statePrep,
         num_rounds, x_stabilizers, z_stabilizers, obs_matrix_flat,
-        num_observables, measure_in_x_basis, enqueue_decoder_id);
+        num_observables, measure_in_x_basis);
   }
 }
-
 } // namespace cudaq::qec
 /// \endcond
 #endif // CUDAQ_QEC_MEMORY_CIRCUIT_DECLARATIONS_ONLY

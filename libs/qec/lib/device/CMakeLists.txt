@@ -7,8 +7,6 @@
 # ============================================================================ #
 
 cudaqx_add_device_code(cudaq-qec
-  SOURCES 
+  SOURCES
     memory_circuit.cpp
-  COMPILER_FLAGS
-    -DCUDAQ_QEC_DISABLE_REALTIME_DECODING
 )
