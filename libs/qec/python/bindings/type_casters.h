@@ -8,6 +8,7 @@
 #pragma once
 
 #include <cstring>
+#include <stdexcept>
 
 #include "common/ObserveResult.h"
 #include "cuda-qx/core/heterogeneous_map.h"
@@ -256,13 +257,18 @@ namespace python {
 template <typename T>
 auto copyCUDAQXTensorToPyArray(const cudaqx::tensor<T> &tensor) {
   auto shape = tensor.shape();
+  if (shape.size() != 2)
+    throw std::runtime_error(
+        "Expected a rank-2 cudaqx::tensor for NumPy conversion.");
+
   auto rows = shape[0];
   auto cols = shape[1];
   size_t total_size = rows * cols;
 
   // Allocate new memory and copy the data
   T *data_copy = new T[total_size];
-  std::memcpy(data_copy, tensor.data(), total_size * sizeof(T));
+  if (total_size > 0)
+    std::memcpy(data_copy, tensor.data(), total_size * sizeof(T));
 
   size_t arr_shape[] = {rows, cols};
   return nb::ndarray<nb::numpy, T>(data_copy, 2, arr_shape,
@@ -274,12 +280,17 @@ auto copyCUDAQXTensorToPyArray(const cudaqx::tensor<T> &tensor) {
 template <typename T>
 auto copy1DCUDAQXTensorToPyArray(const cudaqx::tensor<T> &tensor) {
   auto shape = tensor.shape();
+  if (shape.size() != 1)
+    throw std::runtime_error(
+        "Expected a rank-1 cudaqx::tensor for NumPy conversion.");
+
   auto rows = shape[0];
   size_t total_size = rows;
 
   // Allocate new memory and copy the data
   T *data_copy = new T[total_size];
-  std::memcpy(data_copy, tensor.data(), total_size * sizeof(T));
+  if (total_size > 0)
+    std::memcpy(data_copy, tensor.data(), total_size * sizeof(T));
 
   size_t arr_shape[] = {rows};
   return nb::ndarray<nb::numpy, T>(data_copy, 1, arr_shape,

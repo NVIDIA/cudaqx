@@ -28,10 +28,13 @@ FORCE=false
 SKIP_CLEANUP=false
 PRUNE_ORPHANS=false
 DEBUG=false
+NO_CACHE=false
+CACHE_DIR="${PRUNE_CACHE_DIR:-$HOME/.cache/prune-cudaqx-dev}"
 
 usage() {
   cat <<EOF
 Usage: $0 [--force] [--skip-cleanup] [--prune-orphans] [--debug]
+          [--no-cache] [--cache-dir DIR]
 
 - Reads GitHub Packages API for $ORG/$PKG/versions
 - Resolves each tagged version's manifest + OCI referrers from ghcr.io so it
@@ -47,6 +50,12 @@ Usage: $0 [--force] [--skip-cleanup] [--prune-orphans] [--debug]
   to \$TMP_DIR/debug/<id>/, and error if an OCI index manifest reports zero
   children (which would indicate a misclassification risk). Pair with
   --skip-cleanup to keep the dumps after the script exits.
+- --no-cache: disable the manifest/referrers cache; always re-fetch from
+  ghcr.io (useful if you suspect the cache is corrupt).
+- --cache-dir DIR: use DIR as the cache directory instead of the default
+  (\$PRUNE_CACHE_DIR if set, otherwise ~/.cache/prune-cudaqx-dev).
+  Manifest + referrer results are keyed by version id + digest and reused on
+  subsequent runs so only new/changed versions require a live fetch.
 
 Examples:
   $0
@@ -54,6 +63,8 @@ Examples:
   $0 --skip-cleanup
   $0 --prune-orphans
   $0 --debug --skip-cleanup
+  $0 --no-cache
+  $0 --cache-dir /tmp/my-cache
 EOF
 }
 
@@ -63,6 +74,8 @@ while [[ $# -gt 0 ]]; do
     --skip-cleanup) SKIP_CLEANUP=true; shift ;;
     --prune-orphans) PRUNE_ORPHANS=true; shift ;;
     --debug) DEBUG=true; shift ;;
+    --no-cache) NO_CACHE=true; shift ;;
+    --cache-dir) CACHE_DIR="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown arg: $1"; usage; exit 1 ;;
   esac
@@ -165,8 +178,12 @@ manifest_accept_args=(
   -H "Accept: application/vnd.docker.distribution.manifest.v2+json"
 )
 
+# resolve_refs_for id digest out_file
+#   Fetches the manifest + OCI referrers for the given digest and writes each
+#   referenced child digest (one per line) to out_file.  Resolution problems
+#   are appended to the global RESOLUTION_PROBLEMS array.
 resolve_refs_for() {
-  local id="$1" digest="$2"
+  local id="$1" digest="$2" out_file="$3"
   local dbg_id_dir=""
   if [[ "$DEBUG" == "true" ]]; then
     dbg_id_dir="$DEBUG_DIR/$id"
@@ -187,7 +204,7 @@ resolve_refs_for() {
   if [[ "$code" == "200" ]]; then
     while IFS= read -r child; do
       [[ -z "$child" ]] && continue
-      printf '%s\t%s\n' "$child" "$id" >> referenced.tsv
+      echo "$child" >> "$out_file"
       child_count=$((child_count+1))
     done < <(jq -r 'try .manifests[]?.digest // empty' "$manifest_file" 2>/dev/null)
   fi
@@ -216,7 +233,7 @@ resolve_refs_for() {
   if [[ "$rcode" == "200" ]]; then
     while IFS= read -r ref; do
       [[ -z "$ref" ]] && continue
-      printf '%s\t%s\n' "$ref" "$id" >> referenced.tsv
+      echo "$ref" >> "$out_file"
       ref_count=$((ref_count+1))
     done < <(jq -r 'try .manifests[]?.digest // empty' "$referrers_file" 2>/dev/null)
   fi
@@ -248,17 +265,59 @@ resolve_refs_for() {
 }
 
 NUM_TAGGED=$(awk -F'\t' '$3 != "" {n++} END {print n+0}' versions.tsv)
-echo "Resolving manifests + referrers for $NUM_TAGGED tagged version(s) from $REGISTRY_BASE ..."
+
+if [[ "$NO_CACHE" != "true" ]]; then
+  mkdir -p "$CACHE_DIR"
+  echo "Resolving manifests + referrers for $NUM_TAGGED tagged version(s) (cache: $CACHE_DIR) ..."
+else
+  echo "Resolving manifests + referrers for $NUM_TAGGED tagged version(s) (cache disabled) ..."
+fi
+
+# Cache format: $CACHE_DIR/<id>.cache
+#   Line 1: the version's digest (cache key — digest is content-addressed and
+#            never changes for a given id, but we validate it as a safety check)
+#   Lines 2+: one child digest per line (manifest children + OCI referrers)
+# A cached entry is used as-is; a missing or stale entry triggers a live fetch.
 
 i=0
+num_cached=0
 while IFS=$'\t' read -r id digest tags; do
   [[ -z "$tags" ]] && continue
   [[ -z "$digest" ]] && continue
   i=$((i+1))
   printf '  [%d/%d] id=%s\r' "$i" "$NUM_TAGGED" "$id"
-  resolve_refs_for "$id" "$digest"
+
+  children_file=$(mktemp -p "$TMP_DIR" "children.$id.XXXXXX")
+  cache_file="$CACHE_DIR/${id}.cache"
+
+  use_cached=false
+  if [[ "$NO_CACHE" != "true" && -f "$cache_file" ]]; then
+    cached_digest=$(head -1 "$cache_file" 2>/dev/null || true)
+    if [[ "$cached_digest" == "$digest" ]]; then
+      use_cached=true
+    fi
+  fi
+
+  if [[ "$use_cached" == "true" ]]; then
+    tail -n +2 "$cache_file" > "$children_file"
+    num_cached=$((num_cached+1))
+  else
+    resolve_refs_for "$id" "$digest" "$children_file"
+    if [[ "$NO_CACHE" != "true" ]]; then
+      { echo "$digest"; cat "$children_file"; } > "${cache_file}.tmp" && \
+        mv "${cache_file}.tmp" "$cache_file"
+    fi
+  fi
+
+  while IFS= read -r child; do
+    [[ -z "$child" ]] && continue
+    printf '%s\t%s\n' "$child" "$id" >> referenced.tsv
+  done < "$children_file"
+
+  rm -f "$children_file"
 done < versions.tsv
 echo
+echo "  (${num_cached}/${NUM_TAGGED} served from cache, $((NUM_TAGGED - num_cached)) fetched live)"
 
 # --- 3b) Abort if any tagged version could not be fully resolved ------------ #
 

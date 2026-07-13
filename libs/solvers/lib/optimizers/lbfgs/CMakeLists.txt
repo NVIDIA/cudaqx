@@ -16,7 +16,14 @@ if(NOT liblbfgs_POPULATED)
   set(LBFGS_USE_SSE ON)
   set(LBFGS_lib_TARGET_NAME liblbfgs)
   set(LBFGS_BUILD_SHARED_LIBS OFF)
-  add_subdirectory(${liblbfgs_SOURCE_DIR} ${liblbfgs_BINARY_DIR} EXCLUDE_FROM_ALL)
+  block()
+    # libLBFGS still declares cmake_minimum_required(VERSION 2.8.12).
+    # CMake 4 removed compatibility with versions below 3.5, so keep this
+    # policy floor scoped to the vendored dependency.
+    set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+    add_subdirectory(${liblbfgs_SOURCE_DIR} ${liblbfgs_BINARY_DIR}
+                     EXCLUDE_FROM_ALL)
+  endblock()
 endif()
 
 # ==============================================================================
