@@ -1230,10 +1230,9 @@ TEST(SlidingWindowDecoder, PreparePcmRejectsBadBoundaryLayout) {
       "num_boundary_syndromes must be <= num_syndromes_per_round");
 
   // Row count inconsistent with a [B | K*S | B] layout (B < S).
-  cudaqx::tensor<uint8_t> H10({10, 2});
-  expectBoundaryThrow(H10, params(8, 3), "number of PCM rows is inconsistent");
+  cudaqx::tensor<uint8_t> H17({17, 2});
+  expectBoundaryThrow(H17, params(8, 3), "number of PCM rows is inconsistent");
 }
-  
 
 namespace {
 
