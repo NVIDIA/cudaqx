@@ -94,5 +94,29 @@ def test_adapt_empty_gradients():
         x(q[1])
 
     energy, thetas, ops = solvers.adapt_vqe(initState, H, pool)
-    # Should return without crashing; no operators selected
+    # |11> has <Z0 Z1> = +1, which must be retained without optimisation.
+    assert energy == pytest.approx(1.0)
+    # All commutators vanish, so no operator should be selected.
+    assert len(ops) == 0
+
+
+def test_adapt_converged_initial_energy():
+    # [Z0 Z1, X0] is nonzero but has zero expectation on the initial |11>.
+    H = spin.z(0) * spin.z(1)
+    pool = [spin.x(0)]
+
+    @cudaq.kernel
+    def initState(q: cudaq.qview):
+        x(q[0])
+        x(q[1])
+
+    energy, thetas, ops = solvers.adapt_vqe(initState,
+                                            H,
+                                            pool,
+                                            grad_norm_tolerance=1e-3)
+    # The converged initial |11> has <Z0 Z1> = +1.
+    assert energy == pytest.approx(1.0)
+    # First-step convergence must not add a variational parameter.
+    assert len(thetas) == 0
+    # Without a parameter, no pool operator should be selected.
     assert len(ops) == 0

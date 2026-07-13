@@ -33,7 +33,6 @@ simulator::run(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
   std::vector<double> thetas, coefficients;
   std::vector<std::size_t> poolIndices;
   std::vector<cudaq::spin_op> chosenOps;
-  double latestEnergy = std::numeric_limits<double>::max();
   double ediff = std::numeric_limits<double>::max();
 
   int maxIter = options.get<int>("max_iter", 30);
@@ -51,7 +50,7 @@ simulator::run(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
   std::size_t numRanks =
       cudaq::mpi::is_initialized() ? cudaq::mpi::num_ranks() : 1;
   std::size_t rank = cudaq::mpi::is_initialized() ? cudaq::mpi::rank() : 0;
-  double energy = 0.0, lastNorm = std::numeric_limits<double>::max();
+  double lastNorm = std::numeric_limits<double>::max();
 
   // poolList is split into numRanks chunks, and each chunk can be
   // further parallelized across numQpus.
@@ -94,6 +93,9 @@ simulator::run(const cudaq::qkernel<void(cudaq::qvector<> &)> &initialState,
   // Start of with the initial |psi_n>
   cudaq::state state = get_state(adapt_kernel, numQubits, initialState, thetas,
                                  coefficients, pauliWords, poolIndices);
+  // Initialise the result and convergence baseline from the initial state.
+  double energy = observe(prepare_state, H, state).expectation();
+  double latestEnergy = energy;
 
   int step = 0;
   while (true) {

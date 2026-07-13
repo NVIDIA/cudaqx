@@ -511,6 +511,39 @@ TEST_F(SolversTester, checkAdaptEmptyGradients) {
   auto [energy, thetas, ops] = cudaq::solvers::adapt_vqe(
       hartreeFock2Electrons, H, pool,
       {{"grad_norm_tolerance", 1e-3}, {"max_iter", 5}});
+  // |11> has <Z0 Z1> = +1, which must be retained without optimisation.
+  EXPECT_DOUBLE_EQ(energy, 1.0);
   // No operators should be selected since all commutators are zero
+  EXPECT_TRUE(ops.empty());
+}
+
+// adapt_vqe must return the initial energy when its first gradient has
+// converged.
+TEST_F(SolversTester, checkAdaptConvergedInitialEnergy) {
+  auto H = cudaq::spin::z(0) * cudaq::spin::z(1);
+  std::vector<cudaq::spin_op> pool = {cudaq::spin::x(0)};
+
+  auto [energy, thetas, ops] = cudaq::solvers::adapt_vqe(
+      hartreeFock2Electrons, H, pool, {{"grad_norm_tolerance", 1e-3}});
+  // <[Z0 Z1, X0]> is zero on |11>, so its unchanged energy must be +1.
+  EXPECT_DOUBLE_EQ(energy, 1.0);
+  // First-step convergence must not add a variational parameter.
+  EXPECT_TRUE(thetas.empty());
+  // Without a variational parameter, no pool operator may be selected.
+  EXPECT_TRUE(ops.empty());
+}
+
+// adapt_vqe with no allowed iterations must still report the initial energy.
+TEST_F(SolversTester, checkAdaptZeroIterationsInitialEnergy) {
+  auto H = cudaq::spin::z(0) * cudaq::spin::z(1);
+  std::vector<cudaq::spin_op> pool = {cudaq::spin::x(0)};
+
+  auto [energy, thetas, ops] = cudaq::solvers::adapt_vqe(
+      hartreeFock2Electrons, H, pool, {{"max_iter", 0}});
+  // Zero iterations leave |11> unchanged, whose <Z0 Z1> energy is +1.
+  EXPECT_DOUBLE_EQ(energy, 1.0);
+  // Zero allowed iterations must leave the ansatz parameter-free.
+  EXPECT_TRUE(thetas.empty());
+  // A parameter-free result must not contain a selected pool operator.
   EXPECT_TRUE(ops.empty());
 }
