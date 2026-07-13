@@ -30,7 +30,6 @@ inline void set_cuda_device_for_decode(int target) {
                              ") failed: " + cudaGetErrorString(err));
 }
 
-
 /// RAII: set the calling thread's CUDA device, restore the previous device on
 /// scope exit. No-op for target < 0. Lib-private and header-only so decoder
 /// plugins built as separate .so files can reuse it (PR2 extends this header
