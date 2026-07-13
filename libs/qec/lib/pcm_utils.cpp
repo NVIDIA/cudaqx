@@ -171,11 +171,6 @@ void validate_pcm_for_rounds_params(std::uint32_t num_syndromes_per_round,
     throw std::invalid_argument(
         "get_pcm_for_rounds: num_syndromes_per_round must be greater than 0");
   }
-  if (num_syndromes_per_round > num_rows) {
-    throw std::invalid_argument(
-        "get_pcm_for_rounds: num_syndromes_per_round must be less than the "
-        "number of rows in PCM");
-  }
   if (num_boundary_syndromes > num_syndromes_per_round) {
     throw std::invalid_argument(
         "get_pcm_for_rounds: num_boundary_syndromes must be <= "

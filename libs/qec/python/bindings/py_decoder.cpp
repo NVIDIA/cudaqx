@@ -1148,13 +1148,14 @@ void bindDecoder(nb::module_ &mod) {
       [](const nb::ndarray<nb::numpy, uint8_t> &H,
          std::uint32_t num_syndromes_per_round, std::uint32_t start_round,
          std::uint32_t end_round, bool straddle_start_round,
-         bool straddle_end_round) {
+         bool straddle_end_round, std::uint32_t num_boundary_syndromes) {
         auto tensor_H = pcmToTensor(H);
 
         auto [H_new, first_column, last_column] =
             cudaq::qec::get_pcm_for_rounds(
                 tensor_H, num_syndromes_per_round, start_round, end_round,
-                straddle_start_round, straddle_end_round);
+                straddle_start_round, straddle_end_round,
+                num_boundary_syndromes);
 
         // Construct a new ndarray from H_new (deep copy)
         auto rows = H_new.shape()[0];
@@ -1181,6 +1182,7 @@ void bindDecoder(nb::module_ &mod) {
             straddle_end_round: Whether to allow error mechanisms that straddle
               the end round (i.e. include future rounds, too). This defaults to
               false.
+            num_boundary_syndromes: The number of syndrome measurements in the boundary layers
 
         Returns:
             A tuple containing the sub-parity check matrix and the first and last
@@ -1192,7 +1194,8 @@ void bindDecoder(nb::module_ &mod) {
       )pbdoc",
       nb::arg("H"), nb::arg("num_syndromes_per_round"), nb::arg("start_round"),
       nb::arg("end_round"), nb::arg("straddle_start_round") = false,
-      nb::arg("straddle_end_round") = false);
+      nb::arg("straddle_end_round") = false,
+      nb::arg("num_boundary_syndromes") = 0);
 
   qecmod.def(
       "pcm_extend_to_n_rounds",

@@ -21,6 +21,12 @@ void sliding_window::validate_inputs() {
     throw std::invalid_argument(
         "sliding_window constructor: num_boundary_syndromes must be <= "
         "num_syndromes_per_round");
+  // Memory circuits always emit at least a lock-in and a read-out round.
+  if (num_rows < 2 * num_syndromes_per_round)
+    throw std::invalid_argument(
+        "sliding_window constructor: num_rows must be >= "
+        "2 * num_syndromes_per_round; memory circuits always produce "
+        "at least a lock-in and a read-out round");
   // The detector rows must form a [B | K*S | B] layout.
   if (num_rows < 2 * num_boundary_syndromes ||
       (num_rows - 2 * num_boundary_syndromes) % num_syndromes_per_round != 0)
