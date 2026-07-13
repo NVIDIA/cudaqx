@@ -84,6 +84,24 @@ decoders:
           misspelled_decoder_argument),
       std::runtime_error);
 
+  // Device placement is deliberately limited to direct decoder construction
+  // until realtime session workers and teardown own a CUDA device.
+  const std::string unsupported_cuda_device_id = R"(
+decoders:
+  - id: 0
+    type: pymatching
+    cuda_device_id: 0
+    block_size: 1
+    syndrome_size: 1
+    H_sparse: [0, -1]
+    O_sparse: [0, -1]
+    D_sparse: [0, -1]
+)";
+  EXPECT_THROW(
+      cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(
+          unsupported_cuda_device_id),
+      std::runtime_error);
+
   EXPECT_THROW(
       cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(
           "decoders: ["),
@@ -837,37 +855,4 @@ TEST(DecoderConfigTest, SimulationHostPointerWrappersForwardToHostRuntime) {
       /*decoder_id=*/0, corrections.data(), corrections.size(), /*reset=*/true);
   EXPECT_EQ(corrections, (std::vector<uint8_t>{0}));
   finalize_decoders();
-}
-
-TEST(DecoderYAMLTest, CudaDeviceIdRoundTrip) {
-  cudaq::qec::decoding::config::multi_decoder_config multi_config;
-  auto config = create_test_empty_decoder_config(0);
-  config.cuda_device_id = 2;
-  multi_config.decoders.push_back(config);
-  test_decoder_yaml_roundtrip(multi_config);
-}
-
-TEST(DecoderYAMLTest, PrepareDecoderParamsSurfacesCudaDeviceId) {
-  // Non-trt type: the insert must happen before prepare_decoder_params()'s
-  // trt-only early return, so the knob reaches every decoder type.
-  auto config = create_test_empty_decoder_config(0);
-  config.cuda_device_id = 3;
-  auto params = cudaq::qec::decoding::host::prepare_decoder_params(config);
-  ASSERT_TRUE(params.contains("cuda_device_id"));
-  EXPECT_EQ(params.get<int>("cuda_device_id"), 3);
-
-  // Absent -> key absent (decoder::get() treats absence as unpinned).
-  auto config2 = create_test_empty_decoder_config(1);
-  auto params2 = cudaq::qec::decoding::host::prepare_decoder_params(config2);
-  EXPECT_FALSE(params2.contains("cuda_device_id"));
-
-  // trt type: still surfaced on the trt branch.
-  auto config3 = create_test_empty_decoder_config(2);
-  config3.type = "trt_decoder";
-  config3.decoder_custom_args =
-      cudaq::qec::decoding::config::trt_decoder_config{};
-  config3.cuda_device_id = 1;
-  auto params3 = cudaq::qec::decoding::host::prepare_decoder_params(config3);
-  ASSERT_TRUE(params3.contains("cuda_device_id"));
-  EXPECT_EQ(params3.get<int>("cuda_device_id"), 1);
 }
