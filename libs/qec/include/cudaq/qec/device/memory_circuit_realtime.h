@@ -11,15 +11,9 @@
 #include "cudaq/qec/device/memory_circuit.h"
 #include "cudaq/qec/realtime/decoding.h"
 
-// Realtime family of the memory-circuit kernels: identical to the plain
-// cudaq::qec family (same shared bodies, see memory_circuit_impl.h) except
-// that the decoding helpers forward to the realtime decoding API, so a
-// decoder id >= 0 streams each round's stabilizer measurements and the final
-// data readout to that decoder. Using these kernels is the realtime opt-in:
-// the binary must link exactly one decoding shim (realtime/simulation,
-// realtime/simulation-cqr, or realtime/quantinuum); linking none is a link
-// error. No compiler flags are involved -- plain applications simply use
-// cudaq::qec::memory_circuit* from memory_circuit.h instead.
+// Realtime family of the memory-circuit kernels. Same kernels as cudaq::qec
+// but decoding helpers forward to the realtime API: a decoder_id >= 0 streams
+// each syndrome round and the data readout to that decoder.
 
 namespace cudaq::qec::realtime {
 
@@ -65,8 +59,6 @@ __qpu__ void memory_circuit_multi(
 
 namespace cudaq::qec::realtime {
 
-// Forwarding decoding helpers: shadow cudaq::qec::detail's no-ops for this
-// family's instantiation of the shared kernel bodies.
 namespace detail {
 __qpu__ void
 enqueue_syndromes_if(std::int64_t decoder_id,
@@ -83,8 +75,6 @@ __qpu__ void reset_decoder_if(std::int64_t decoder_id) {
 
 #include "cudaq/qec/device/memory_circuit_impl.h"
 
-// Realtime public kernel: forwards to this family's shared body, which
-// streams to decoder `enqueue_decoder_id` when it is >= 0.
 __qpu__ void memory_circuit_hw(cudaq::qview<> data, cudaq::qview<> xstab_anc,
                                cudaq::qview<> zstab_anc,
                                const code::stabilizer_round &stabilizer_round,
@@ -102,8 +92,6 @@ __qpu__ void memory_circuit_hw(cudaq::qview<> data, cudaq::qview<> xstab_anc,
       measure_in_x_basis, enqueue_decoder_id);
 }
 
-// Host-launchable entry point (realtime family): allocates the registers and
-// forwards to the realtime memory_circuit_hw.
 __qpu__ void memory_circuit(const code::stabilizer_round &stabilizer_round,
                             const code::one_qubit_encoding &statePrep,
                             std::size_t numData, std::size_t numAncx,
@@ -115,15 +103,12 @@ __qpu__ void memory_circuit(const code::stabilizer_round &stabilizer_round,
                             bool measure_in_x_basis,
                             std::int64_t enqueue_decoder_id) {
   cudaq::qvector data(numData), xstab_anc(numAncx), zstab_anc(numAncz);
-  cudaq::qec::realtime::memory_circuit_hw(
+  cudaq::qec::realtime::memory_circuit_hw_impl(
       data, xstab_anc, zstab_anc, stabilizer_round, statePrep, numRounds,
       x_stabilizers, z_stabilizers, obs_matrix_flat, num_observables,
       measure_in_x_basis, enqueue_decoder_id);
 }
 
-// Multi-logical-qubit wrapper (realtime family): an independent memory
-// experiment on each of `numLogical` logical qubits; logical qubit `i` resets
-// and enqueues to decoder `enqueue_decoder_ids[i]`.
 __qpu__ void memory_circuit_multi(
     cudaq::qview<> data, cudaq::qview<> xstab_anc, cudaq::qview<> zstab_anc,
     const code::stabilizer_round &stabilizer_round,
@@ -137,13 +122,9 @@ __qpu__ void memory_circuit_multi(
     const std::vector<std::int64_t> &enqueue_decoder_ids) {
   bool enqueue = enqueue_decoder_ids.size() == numLogical;
   for (std::size_t i = 0; i < numLogical; ++i) {
-    std::int64_t enqueue_decoder_id = -1;
-    if (enqueue)
-      enqueue_decoder_id = enqueue_decoder_ids[i];
-
+    std::int64_t enqueue_decoder_id = enqueue ? enqueue_decoder_ids[i] : -1;
     detail::reset_decoder_if(enqueue_decoder_id);
-
-    cudaq::qec::realtime::memory_circuit_hw(
+    cudaq::qec::realtime::memory_circuit_hw_impl(
         data.slice(i * numData, numData), xstab_anc.slice(i * numAncx, numAncx),
         zstab_anc.slice(i * numAncz, numAncz), stabilizer_round, statePrep,
         num_rounds, x_stabilizers, z_stabilizers, obs_matrix_flat,
