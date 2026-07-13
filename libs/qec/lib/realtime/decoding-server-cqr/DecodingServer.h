@@ -74,7 +74,8 @@ private:
   /// until CpuRoceTransceiverAdapter / GpuRoceTransceiverAdapter are
   /// available via CUDAQ_REALTIME.
   static std::unique_ptr<ITransceiver>
-  make_transport(cudaq::qec::decoding::config::DecoderTransport transport_type);
+  make_transport(cudaq::qec::decoding::config::DecoderTransport transport_type,
+                 int cuda_device_id = -1);
 
   // Destruction order matters: the GPU RoCE scheduler (inside
   // owned_transports_) holds a cudaGraphExec_t captured from a session's

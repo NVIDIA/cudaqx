@@ -48,7 +48,8 @@ target_link_libraries(test_decoders_yaml PRIVATE
   cudaq-qec-decoding-server
   cudaq-qec-realtime-decoding
   cudaq-qec-realtime-decoding-simulation
-  cudaq::cudaq)
+  cudaq::cudaq
+  CUDA::cudart)
 add_dependencies(CUDAQXQECUnitTests test_decoders_yaml)
 gtest_discover_tests(test_decoders_yaml)
 
@@ -56,7 +57,8 @@ add_executable(test_decoding_server_core test_decoding_server_core.cpp)
 target_link_libraries(test_decoding_server_core PRIVATE
   GTest::gtest_main
   cudaq-qec-decoding-server
-  cudaq::cudaq)
+  cudaq::cudaq
+  CUDA::cudart)
 add_dependencies(CUDAQXQECUnitTests test_decoding_server_core)
 gtest_discover_tests(test_decoding_server_core)
 

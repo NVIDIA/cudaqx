@@ -7,6 +7,7 @@
  ******************************************************************************/
 
 #include "realtime_decoding.h"
+#include "../hardware_guards.h"
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/pcm_utils.h"
@@ -40,6 +41,32 @@ std::vector<std::unique_ptr<cudaq::qec::decoder>> g_decoders;
 std::unique_ptr<cudaq::qec::realtime::qec_realtime_session> g_realtime_session;
 
 namespace {
+
+void reset_decoder_on_owning_device(
+    std::unique_ptr<cudaq::qec::decoder> &decoder) noexcept {
+  if (!decoder)
+    return;
+
+  const int cuda_device_id = decoder->get_cuda_device_id();
+  try {
+    cudaq::qec::detail_affinity::CudaDeviceGuard device(cuda_device_id);
+    decoder.reset();
+  } catch (const std::exception &e) {
+    CUDA_QEC_WARN(
+        "Failed to select cuda_device_id {} while destroying decoder: {}",
+        cuda_device_id, e.what());
+    // Destruction still has to make progress. The decoder may be CPU-only or
+    // the CUDA runtime may already be shutting down.
+    decoder.reset();
+  }
+}
+
+void clear_decoders_on_owning_devices(
+    std::vector<std::unique_ptr<cudaq::qec::decoder>> &decoders) noexcept {
+  for (auto &decoder : decoders)
+    reset_decoder_on_owning_device(decoder);
+  decoders.clear();
+}
 
 #ifdef CUDAQ_REALTIME_ROOT
 inline cudaq_dispatch_launch_fn_t resolve_launch_dispatch_kernel_regular() {
@@ -158,6 +185,8 @@ namespace cudaq::qec::decoding::host {
 cudaqx::heterogeneous_map prepare_decoder_params(
     const cudaq::qec::decoding::config::decoder_config &decoder_config) {
   auto params = decoder_config.decoder_custom_args_to_heterogeneous_map();
+  if (decoder_config.cuda_device_id.has_value())
+    params.insert("cuda_device_id", decoder_config.cuda_device_id.value());
   if (decoder_config.type != "trt_decoder")
     return params;
 
@@ -337,12 +366,19 @@ int configure_decoders(
 
   // Create the decoders based on the decoder configs.
   try {
-    g_decoders.clear();
+    maybe_finalize_realtime_session();
+    clear_decoders_on_owning_devices(g_decoders);
     g_decoders.resize(max_decoder_id + 1);
     for (const auto &decoder_config : decoder_configs) {
+      // Configuration transfers ownership to the realtime runtime. Restore
+      // the configuring thread after each decoder; the direct-call path and
+      // dispatcher workers select the owning device when they execute.
+      cudaq::qec::detail_affinity::CudaDeviceGuard construction_device(
+          decoder_config.cuda_device_id.value_or(-1));
       g_decoders[decoder_config.id] = create_realtime_decoder(decoder_config);
     }
   } catch (const std::exception &e) {
+    clear_decoders_on_owning_devices(g_decoders);
     CUDA_QEC_WARN("Error initializing decoders: {}", e.what());
     return 4;
   }
@@ -354,7 +390,7 @@ int configure_decoders(
 void finalize_decoders() {
   CUDA_QEC_INFO("Finalizing the realtime decoding library.");
   maybe_finalize_realtime_session();
-  g_decoders.clear();
+  clear_decoders_on_owning_devices(g_decoders);
 }
 
 __attribute__((visibility("default"))) void
@@ -418,6 +454,8 @@ void enqueue_syndromes(std::size_t decoder_id, uint8_t *syndromes,
   }
 #endif
 
+  cudaq::qec::detail_affinity::select_cuda_device(decoder->get_cuda_device_id(),
+                                                  "realtime enqueue_syndromes");
   std::vector<uint8_t> syndrome_u8(syndrome_length);
   bool did_decode = false;
   for (std::size_t i = 0; i < syndrome_length; i++) {
@@ -482,6 +520,8 @@ void get_corrections(std::size_t decoder_id, uint8_t *corrections,
   }
 #endif
 
+  cudaq::qec::detail_affinity::select_cuda_device(decoder->get_cuda_device_id(),
+                                                  "realtime get_corrections");
   auto ret = decoder->get_obs_corrections();
   for (std::size_t i = 0; i < correction_length; ++i) {
     corrections[i] = ret[i];
@@ -517,6 +557,8 @@ void reset_decoder(std::size_t decoder_id) {
   }
 #endif
 
+  cudaq::qec::detail_affinity::select_cuda_device(decoder->get_cuda_device_id(),
+                                                  "realtime reset_decoder");
   decoder->reset_decoder();
 }
 

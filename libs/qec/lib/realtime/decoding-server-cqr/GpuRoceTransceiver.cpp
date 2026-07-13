@@ -10,6 +10,7 @@
 
 #include "GpuRoceTransceiver.h"
 #include "RpcWireFormat.h"
+#include "../../hardware_guards.h"
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/realtime/graph_resources.h"
 
@@ -19,6 +20,7 @@
 #include <cstring>
 #include <dlfcn.h>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -138,6 +140,8 @@ GpuRoceTransceiver::GpuRoceTransceiver(const GpuRoceConfig &config)
   if (config.remote_qp == 0)
     throw std::runtime_error("GpuRoceTransceiver: HOLOLINK_REMOTE_QP not set");
 
+  cudaq::qec::detail_affinity::CudaDeviceGuard device(config.gpu_id);
+
   // Derive page_size from frame_size if not overridden, then round up to the
   // 128-byte Hololink granularity.  Mirrors the derivation in
   // hololink_qldpc_graph_decoder_bridge.cpp (lines 279-282).
@@ -209,7 +213,7 @@ void GpuRoceTransceiver::launch_scheduler(void *raw_graph_resources) {
         "GpuRoceTransceiver::launch_scheduler: null graph_exec "
         "(decoder must support_graph_dispatch() and capture_decode_graph())");
 
-  GPU_CUDA_CHECK(cudaSetDevice(gpu_id_));
+  cudaq::qec::detail_affinity::CudaDeviceGuard device(gpu_id_);
 
   void *ft_dev = nullptr;
   if (!alloc_pinned_mapped(3 * sizeof(cudaq_function_entry_t), &ft_host_,
@@ -338,8 +342,15 @@ void GpuRoceTransceiver::launch_scheduler(void *raw_graph_resources) {
         cudaGetErrorString(cerr));
   }
 
-  monitor_thread_ =
-      std::thread([this] { hololink_blocking_monitor(transceiver_); });
+  monitor_thread_ = std::thread([this] {
+    try {
+      cudaq::qec::detail_affinity::select_cuda_device(
+          gpu_id_, "GpuRoceTransceiver monitor");
+      hololink_blocking_monitor(transceiver_);
+    } catch (const std::exception &e) {
+      CUDA_QEC_WARN("GpuRoceTransceiver monitor failed: {}", e.what());
+    }
+  });
 
   CUDA_QEC_INFO("GpuRoceTransceiver: GPU scheduler launched  "
                 "QP=0x{:X} rkey={} buf=0x{:X}  "
@@ -388,6 +399,15 @@ void GpuRoceTransceiver::shutdown() {
   if (stopped_.exchange(true, std::memory_order_acq_rel))
     return; // already stopped
 
+  std::optional<cudaq::qec::detail_affinity::CudaDeviceGuard> device;
+  try {
+    device.emplace(gpu_id_);
+  } catch (const std::exception &e) {
+    CUDA_QEC_WARN(
+        "GpuRoceTransceiver shutdown could not select CUDA device {}: {}",
+        gpu_id_, e.what());
+  }
+
   // Signal the GPU scheduler kernel to stop its self-relaunch loop.
   if (shutdown_host_)
     __atomic_store_n(shutdown_host_, 1, __ATOMIC_RELEASE);
@@ -398,6 +418,15 @@ void GpuRoceTransceiver::shutdown() {
 }
 
 GpuRoceTransceiver::~GpuRoceTransceiver() {
+  std::optional<cudaq::qec::detail_affinity::CudaDeviceGuard> device;
+  try {
+    device.emplace(gpu_id_);
+  } catch (const std::exception &e) {
+    CUDA_QEC_WARN(
+        "GpuRoceTransceiver teardown could not select CUDA device {}: {}",
+        gpu_id_, e.what());
+  }
+
   // Ensure clean shutdown even if the caller omitted shutdown().
   if (!stopped_.exchange(true, std::memory_order_acq_rel)) {
     if (shutdown_host_)

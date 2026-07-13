@@ -254,6 +254,7 @@ protected:
     num_measurements_ = loaded.num_measurements;
     num_observables_ = loaded.num_observables;
     ASSERT_NE(loaded.decoder, nullptr);
+    EXPECT_EQ(loaded.decoder->get_cuda_device_id(), 0);
     printf("Config: num_measurements=%zu, num_observables=%zu\n",
            num_measurements_, num_observables_);
 

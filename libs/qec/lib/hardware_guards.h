@@ -11,8 +11,32 @@
 #include <cuda_runtime_api.h>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 namespace cudaq::qec::detail_affinity {
+
+/// Persistently select \p target for the calling thread. The device id must
+/// already have been validated by decoder::get(). This is the hot-path helper
+/// for long-lived decoder workers and shared realtime dispatcher threads.
+inline void select_cuda_device(int target, std::string_view context) {
+  if (target < 0)
+    return;
+
+  int current = -1;
+  cudaError_t err = cudaGetDevice(&current);
+  if (err != cudaSuccess)
+    throw std::runtime_error(
+        std::string(context) +
+        ": cudaGetDevice() failed: " + cudaGetErrorString(err));
+  if (current == target)
+    return;
+
+  err = cudaSetDevice(target);
+  if (err != cudaSuccess)
+    throw std::runtime_error(std::string(context) + ": cudaSetDevice(" +
+                             std::to_string(target) +
+                             ") failed: " + cudaGetErrorString(err));
+}
 
 /// RAII: set the calling thread's CUDA device, restore the previous device on
 /// scope exit. No-op for target < 0. Lib-private and header-only so it can be

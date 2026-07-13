@@ -7,6 +7,7 @@
  ******************************************************************************/
 
 #include "SessionRegistry.h"
+#include "../../hardware_guards.h"
 #include "../realtime_decoding.h"
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/realtime/decoding_config.h"
@@ -71,6 +72,11 @@ void SessionRegistry::load_from_config(const multi_decoder_config &config,
     CUDA_QEC_INFO("SessionRegistry: creating decoder id={} type={}", dc.id,
                   dc.type);
 
+    // Keep each construction transaction on its configured device, then
+    // restore the registry thread. Runtime ownership transfers to the
+    // session's dedicated worker in start_worker().
+    cudaq::qec::detail_affinity::CudaDeviceGuard construction_device(
+        dc.cuda_device_id.value_or(-1));
     auto decoder = cudaq::qec::decoding::host::create_realtime_decoder(dc);
     auto session = DecodingSession::create(std::move(decoder),
                                            make_default_mapping_table());

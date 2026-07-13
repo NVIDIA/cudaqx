@@ -149,6 +149,8 @@ target_link_libraries(cudaq-qec-decoding-server
     # violates the realtime-server dependency-closure contract.
     cudaq-qec-decoders
     cudaq-qec-realtime-decoding
+  PRIVATE
+    CUDA::cudart
 )
 
 if(CUDAQ_GPU_ROCE_AVAILABLE)

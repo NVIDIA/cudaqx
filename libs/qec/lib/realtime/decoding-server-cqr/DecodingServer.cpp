@@ -14,6 +14,7 @@
 #include "cudaq/qec/realtime/decoding_config.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <fstream>
 #include <iterator>
 #include <stdexcept>
@@ -24,16 +25,44 @@ namespace cudaq::qec::decoding_server {
 
 using cudaq::qec::decoding::config::DecoderTransport;
 
+namespace {
+
+int resolve_gpu_roce_device_id(
+    const cudaq::qec::decoding::config::decoder_config &decoder) {
+  const char *raw_env_id = std::getenv("HOLOLINK_GPU_ID");
+  const int env_id = raw_env_id ? std::stoi(raw_env_id) : 0;
+  if (decoder.cuda_device_id.has_value() && raw_env_id &&
+      decoder.cuda_device_id.value() != env_id)
+    throw std::runtime_error("HOLOLINK_GPU_ID=" + std::to_string(env_id) +
+                             " conflicts with decoder cuda_device_id=" +
+                             std::to_string(decoder.cuda_device_id.value()));
+  return decoder.cuda_device_id.value_or(env_id);
+}
+
+} // namespace
+
 // ---------------------------------------------------------------------------
 // Constructors
 // ---------------------------------------------------------------------------
 
 std::unique_ptr<ITransceiver>
-DecodingServer::make_transport(DecoderTransport transport_type) {
+DecodingServer::make_transport(DecoderTransport transport_type,
+                               int cuda_device_id) {
   switch (transport_type) {
   case DecoderTransport::gpu_roce:
 #ifdef CUDAQ_GPU_ROCE_AVAILABLE
-    return std::make_unique<GpuRoceTransceiver>(GpuRoceConfig::from_env());
+  {
+    auto config = GpuRoceConfig::from_env();
+    if (cuda_device_id >= 0) {
+      if (std::getenv("HOLOLINK_GPU_ID") && config.gpu_id != cuda_device_id)
+        throw std::runtime_error(
+            "HOLOLINK_GPU_ID=" + std::to_string(config.gpu_id) +
+            " conflicts with decoder cuda_device_id=" +
+            std::to_string(cuda_device_id));
+      config.gpu_id = cuda_device_id;
+    }
+    return std::make_unique<GpuRoceTransceiver>(config);
+  }
 #else
     throw std::runtime_error(
         "gpu_roce transport requested but CUDAQ_GPU_ROCE_AVAILABLE is not set. "
@@ -62,10 +91,38 @@ DecodingServer::DecodingServer(const std::string &config_yaml) {
           yaml_str);
   if (config.decoders.empty())
     throw std::runtime_error("No decoders in config: " + config_yaml);
+
+  if (config.decoders.front().transport == DecoderTransport::gpu_roce) {
+    if (config.decoders.size() != 1)
+      throw std::runtime_error(
+          "GPU RoCE transport currently supports exactly one decoder session; "
+          "found " +
+          std::to_string(config.decoders.size()) +
+          ". Multi-decoder GPU RoCE is deferred.");
+    // GPU RoCE has one physical CUDA owner. If YAML omits placement, inherit
+    // the transport's legacy environment setting (GPU 0 by default) before
+    // decoder construction so graph capture and DOCA allocations cannot land
+    // on different devices.
+    config.decoders.front().cuda_device_id =
+        resolve_gpu_roce_device_id(config.decoders.front());
+  }
+
   registry_.load_from_config(config, config_yaml);
   register_handlers();
 
-  auto t = make_transport(registry_.required_transport());
+  int cuda_device_id = -1;
+  if (registry_.required_transport() == DecoderTransport::gpu_roce) {
+    const auto &sessions = registry_.sessions();
+    if (sessions.size() != 1)
+      throw std::runtime_error(
+          "GPU RoCE transport currently supports exactly one decoder session; "
+          "found " +
+          std::to_string(sessions.size()) +
+          ". Multi-decoder GPU RoCE is deferred.");
+    cuda_device_id = sessions.begin()->second->dec->get_cuda_device_id();
+  }
+
+  auto t = make_transport(registry_.required_transport(), cuda_device_id);
   ITransceiver *raw = t.get();
   owned_transports_.push_back(std::move(t));
   function_transport_[kEnqueueSyndromesFunctionId] = raw;
@@ -78,12 +135,6 @@ DecodingServer::DecodingServer(const std::string &config_yaml) {
   // Multi-decoder GPU RoCE binding is deferred to a follow-up.
   if (auto *gpu_trx = dynamic_cast<GpuRoceTransceiver *>(raw)) {
     const auto &sessions = registry_.sessions();
-    if (sessions.size() != 1)
-      throw std::runtime_error(
-          "GPU RoCE transport currently supports exactly one decoder session; "
-          "found " +
-          std::to_string(sessions.size()) +
-          ". Multi-decoder GPU RoCE is deferred.");
     auto *session = sessions.begin()->second.get();
     if (!session->graph_resources)
       throw std::runtime_error(

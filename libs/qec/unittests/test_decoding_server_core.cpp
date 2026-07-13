@@ -14,11 +14,15 @@
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/sparse_binary_matrix.h"
 
+#include <cuda_runtime_api.h>
 #include <gtest/gtest.h>
 
+#include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -50,6 +54,60 @@ public:
 
   bool converged = false;
   bool throw_on_decode = false;
+};
+
+class ServerDeviceRecordingDecoder final : public cudaq::qec::decoder {
+public:
+  std::atomic<int> last_decode_device{-2};
+  inline static std::atomic<int> last_destroy_device{-2};
+
+  ServerDeviceRecordingDecoder(const cudaq::qec::sparse_binary_matrix &H,
+                               const cudaqx::heterogeneous_map &)
+      : decoder(H) {}
+
+  ~ServerDeviceRecordingDecoder() override {
+    int device = -1;
+    if (cudaGetDevice(&device) != cudaSuccess)
+      device = -1;
+    last_destroy_device.store(device, std::memory_order_release);
+  }
+
+  cudaq::qec::decoder_result
+  decode(const std::vector<cudaq::qec::float_t> &) override {
+    int device = -1;
+    if (cudaGetDevice(&device) != cudaSuccess)
+      device = -1;
+    last_decode_device.store(device, std::memory_order_release);
+    cudaq::qec::decoder_result result;
+    result.converged = true;
+    result.result = std::vector<cudaq::qec::float_t>(block_size, 0.0);
+    return result;
+  }
+
+  CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
+      ServerDeviceRecordingDecoder,
+      static std::unique_ptr<cudaq::qec::decoder> create(
+          const cudaq::qec::decoder_init &init,
+          const cudaqx::heterogeneous_map &params) {
+        return cudaq::qec::make_pcm_decoder<ServerDeviceRecordingDecoder>(
+            init, params);
+      })
+};
+CUDAQ_EXT_PT_REGISTER_TYPE(ServerDeviceRecordingDecoder)
+
+class ScopedDeviceRestore {
+public:
+  ScopedDeviceRestore() {
+    if (cudaGetDevice(&previous) != cudaSuccess)
+      previous = -1;
+  }
+  ~ScopedDeviceRestore() {
+    if (previous >= 0)
+      (void)cudaSetDevice(previous);
+  }
+
+private:
+  int previous = -1;
 };
 
 class CaptureTransceiver final : public ITransceiver {
@@ -254,6 +312,55 @@ TEST(RpcDispatcherTest, ConvertsHandlerExceptionsToErrorResponses) {
   CaptureTransceiver transport;
   EXPECT_NO_THROW(dispatcher.dispatch(std::move(frame), transport));
   expect_status(transport, RpcStatus::INTERNAL_ERROR);
+}
+
+TEST(DecodingSessionCudaDeviceId, WorkerAndTeardownUseConfiguredDevice) {
+  int device_count = 0;
+  if (cudaGetDeviceCount(&device_count) != cudaSuccess || device_count < 2)
+    GTEST_SKIP() << "needs >= 2 CUDA devices";
+
+  ScopedDeviceRestore restore;
+  ServerDeviceRecordingDecoder::last_destroy_device.store(
+      -2, std::memory_order_release);
+
+  auto H = cudaq::qec::sparse_binary_matrix::from_csr(
+      /*num_rows=*/1, /*num_cols=*/1, /*row_ptrs=*/{0, 1},
+      /*col_indices=*/{0});
+  cudaqx::heterogeneous_map params;
+  params.insert("cuda_device_id", 1);
+  auto decoder =
+      cudaq::qec::decoder::get("ServerDeviceRecordingDecoder", H, params);
+  auto *recording = dynamic_cast<ServerDeviceRecordingDecoder *>(decoder.get());
+  ASSERT_NE(recording, nullptr);
+  decoder->set_O_sparse(std::vector<std::vector<uint32_t>>{{0}});
+  decoder->set_D_sparse(std::vector<std::vector<uint32_t>>{{0}});
+
+  SyndromeMappingTable mappings{{0, {{}}}};
+  auto session =
+      DecodingSession::create(std::move(decoder), std::move(mappings));
+
+  // Worker startup must not depend on the caller still being on device 1.
+  ASSERT_EQ(cudaSetDevice(0), cudaSuccess);
+  session->start_worker();
+  CaptureTransceiver transport;
+  ASSERT_TRUE(session->try_enqueue(make_enqueue(transport, 0, {1})));
+
+  for (int attempt = 0; attempt < 200 && recording->last_decode_device.load(
+                                             std::memory_order_acquire) < 0;
+       ++attempt)
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  EXPECT_EQ(recording->last_decode_device.load(std::memory_order_acquire), 1);
+
+  session->stop_worker();
+  ASSERT_EQ(cudaSetDevice(0), cudaSuccess);
+  session.reset();
+  EXPECT_EQ(ServerDeviceRecordingDecoder::last_destroy_device.load(
+                std::memory_order_acquire),
+            1);
+
+  int current = -1;
+  ASSERT_EQ(cudaGetDevice(&current), cudaSuccess);
+  EXPECT_EQ(current, 0);
 }
 
 } // namespace

@@ -12,8 +12,10 @@
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/realtime/decoding_config.h"
 
+#include <cuda_runtime_api.h>
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -23,6 +25,53 @@
 namespace {
 
 using DecoderVec = std::vector<std::unique_ptr<cudaq::qec::decoder>>;
+
+class RealtimeSessionDeviceRecordingDecoder final : public cudaq::qec::decoder {
+public:
+  std::atomic<int> last_decode_device{-2};
+
+  RealtimeSessionDeviceRecordingDecoder(
+      const cudaq::qec::sparse_binary_matrix &H,
+      const cudaqx::heterogeneous_map &)
+      : decoder(H) {}
+
+  cudaq::qec::decoder_result
+  decode(const std::vector<cudaq::qec::float_t> &syndrome) override {
+    int device = -1;
+    if (cudaGetDevice(&device) != cudaSuccess)
+      device = -1;
+    last_decode_device.store(device, std::memory_order_release);
+    cudaq::qec::decoder_result result;
+    result.converged = true;
+    result.result = {syndrome.at(0)};
+    return result;
+  }
+
+  CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
+      RealtimeSessionDeviceRecordingDecoder,
+      static std::unique_ptr<cudaq::qec::decoder> create(
+          const cudaq::qec::decoder_init &init,
+          const cudaqx::heterogeneous_map &params) {
+        return cudaq::qec::make_pcm_decoder<
+            RealtimeSessionDeviceRecordingDecoder>(init, params);
+      })
+};
+CUDAQ_EXT_PT_REGISTER_TYPE(RealtimeSessionDeviceRecordingDecoder)
+
+class ScopedDeviceRestore {
+public:
+  ScopedDeviceRestore() {
+    if (cudaGetDevice(&previous) != cudaSuccess)
+      previous = -1;
+  }
+  ~ScopedDeviceRestore() {
+    if (previous >= 0)
+      (void)cudaSetDevice(previous);
+  }
+
+private:
+  int previous = -1;
+};
 
 DecoderVec make_pymatching_decoders(const std::vector<std::uint8_t> &h_vec,
                                     std::size_t syndrome_size,
@@ -207,4 +256,39 @@ TEST(PyMatchingRealtime, ConfiguresViaRealtimeDecoderConfig) {
   EXPECT_EQ(corrections, (std::vector<std::uint8_t>{0, 0, 0}));
 
   config::finalize_decoders();
+}
+
+TEST(RealtimeSessionCudaDeviceId, HostDispatcherUsesConfiguredDevice) {
+  int device_count = 0;
+  if (cudaGetDeviceCount(&device_count) != cudaSuccess || device_count < 2)
+    GTEST_SKIP() << "needs >= 2 CUDA devices";
+
+  ScopedDeviceRestore restore;
+  cudaqx::tensor<std::uint8_t> H({std::size_t{1}, std::size_t{1}});
+  H.at({0, 0}) = 1;
+  cudaqx::heterogeneous_map params;
+  params.insert("cuda_device_id", 1);
+  auto decoder = cudaq::qec::decoder::get(
+      "RealtimeSessionDeviceRecordingDecoder", H, params);
+  auto *recording =
+      dynamic_cast<RealtimeSessionDeviceRecordingDecoder *>(decoder.get());
+  ASSERT_NE(recording, nullptr);
+  decoder->set_decoder_id(0);
+  decoder->set_D_sparse(std::vector<std::vector<std::uint32_t>>{{0}});
+  decoder->set_O_sparse(std::vector<std::vector<std::uint32_t>>{{0}});
+
+  DecoderVec decoders;
+  decoders.push_back(std::move(decoder));
+  ASSERT_EQ(cudaSetDevice(0), cudaSuccess);
+  cudaq::qec::realtime::qec_realtime_session session(decoders);
+  session.initialize();
+
+  expect_corrections(session, {1}, std::vector<std::uint8_t>{1},
+                     /*counter=*/1);
+  EXPECT_EQ(recording->last_decode_device.load(std::memory_order_acquire), 1);
+
+  int current = -1;
+  ASSERT_EQ(cudaGetDevice(&current), cudaSuccess);
+  EXPECT_EQ(current, 0);
+  session.finalize();
 }

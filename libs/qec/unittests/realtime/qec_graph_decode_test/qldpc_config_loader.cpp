@@ -7,6 +7,7 @@
  ******************************************************************************/
 
 #include "qldpc_config_loader.h"
+#include "realtime_decoding.h"
 
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/realtime/decoding_config.h"
@@ -64,7 +65,7 @@ LoadedDecoder load_decoder_from_yaml(const std::string &yaml_path) {
     for (std::uint32_t j = h_row_ptr[r]; j < h_row_ptr[r + 1]; ++j)
       H_tensor.at({r, static_cast<std::size_t>(h_col_idx[j])}) = 1;
 
-  auto params = dec.decoder_custom_args_to_heterogeneous_map();
+  auto params = decoding::host::prepare_decoder_params(dec);
   auto plugin = decoder::get("nv-qldpc-decoder", H_tensor, params);
   if (!plugin)
     throw std::runtime_error(

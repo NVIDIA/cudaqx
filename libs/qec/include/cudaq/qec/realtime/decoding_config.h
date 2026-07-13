@@ -184,6 +184,9 @@ struct decoder_config {
   /// Defaults to cpu_roce.  Set to gpu_roce for decoders where syndrome bits
   /// are DMA'd directly to GPU VRAM (e.g. nv_qldpc_decoder with RelayBP).
   DecoderTransport transport = DecoderTransport::cpu_roce;
+  /// CUDA device that owns this decoder's construction, execution, captured
+  /// graph resources, and teardown. Unset leaves device selection unchanged.
+  std::optional<int> cuda_device_id;
   uint64_t block_size = 0;
   uint64_t syndrome_size = 0;
   std::vector<std::int64_t> H_sparse;

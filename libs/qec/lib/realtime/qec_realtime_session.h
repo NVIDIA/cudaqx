@@ -187,6 +187,10 @@ private:
   // ---- Lifetime / mode ----
   bool initialized_ = false;
   bool device_mode_ = false;
+  // Every DEVICE-mode decoder must share one CUDA owner, so each scheduler
+  // allocation, graph launch, and cleanup operation belongs to this device.
+  // -1 means none of the decoders requested explicit placement.
+  int device_mode_cuda_device_id_ = -1;
 
   // ---- Ring buffer (raw pointers; _dev aliases _host in HOST mode) ----
   static constexpr std::size_t kDefaultNumSlots = 8;

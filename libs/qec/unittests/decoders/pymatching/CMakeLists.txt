@@ -42,6 +42,8 @@ if(CUDAQ_REALTIME_ROOT AND CUDAQ_REALTIME_INCLUDE_DIR)
     GTest::gtest_main
     cudaq-qec-decoders
     cudaq-qec-realtime-decoding
+    cudaq::cudaq
+    CUDA::cudart
   )
   set_target_properties(test_pymatching_realtime PROPERTIES
     BUILD_RPATH "${CMAKE_BINARY_DIR}/lib;${CMAKE_BINARY_DIR}/lib/decoder-plugins"

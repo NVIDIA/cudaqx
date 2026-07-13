@@ -10,6 +10,7 @@
 
 #include "qec_realtime_session.h"
 
+#include "../hardware_guards.h"
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/realtime/decoder_rpc_ids.h"
 #include "cudaq/qec/realtime/graph_resources.h"
@@ -21,6 +22,7 @@
 #include <cstring>
 #include <cuda_runtime_api.h>
 #include <dlfcn.h>
+#include <optional>
 #include <stdexcept>
 #include <string>
 
@@ -178,6 +180,9 @@ void enqueue_syndromes_host(const void *rx_slot, void *tx_slot,
     }
 
     auto *decoder = get_decoder_or_throw(body->decoder_id);
+    cudaq::qec::detail_affinity::select_cuda_device(
+        decoder->get_cuda_device_id(),
+        "qec_realtime_session enqueue_syndromes");
     // Reject requests larger than this decoder's per-decode window.  The slot
     // is sized for the largest decoder in the session, so an oversized request
     // for a smaller decoder can still fit the slot; without this guard it would
@@ -222,6 +227,8 @@ void get_corrections_host(const void *rx_slot, void *tx_slot,
     }
 
     auto *decoder = get_decoder_or_throw(body->decoder_id);
+    cudaq::qec::detail_affinity::select_cuda_device(
+        decoder->get_cuda_device_id(), "qec_realtime_session get_corrections");
     const auto return_size = static_cast<std::uint64_t>(body->return_size);
     if (return_size > decoder->get_num_observables()) {
       write_response(tx_slot, rx_slot, -4);
@@ -261,7 +268,10 @@ void reset_decoder_host(const void *rx_slot, void *tx_slot, std::size_t) {
     const auto *body = reinterpret_cast<const rpc::ResetRequestPayload *>(
         static_cast<const std::uint8_t *>(rx_slot) +
         sizeof(cudaq::realtime::RPCHeader));
-    get_decoder_or_throw(body->decoder_id)->reset_decoder();
+    auto *decoder = get_decoder_or_throw(body->decoder_id);
+    cudaq::qec::detail_affinity::select_cuda_device(
+        decoder->get_cuda_device_id(), "qec_realtime_session reset_decoder");
+    decoder->reset_decoder();
     write_response(tx_slot, rx_slot, 0);
   } catch (...) {
     write_response(tx_slot, rx_slot, -2);
@@ -283,7 +293,11 @@ qec_realtime_session::~qec_realtime_session() {
   // Best-effort teardown.  finalize() is null-safe at every step (each resource
   // has its own guard), so calling it from a never-fully-initialized or
   // already-finalized session is a no-op beyond the trace message.
-  finalize();
+  try {
+    finalize();
+  } catch (const std::exception &e) {
+    CUDA_QEC_WARN("qec_realtime_session::~qec_realtime_session: {}", e.what());
+  }
 }
 
 //==============================================================================
@@ -293,20 +307,30 @@ qec_realtime_session::~qec_realtime_session() {
 void qec_realtime_session::classify_mode() {
   bool any_graph = false;
   bool any_host = false;
+  bool any_pinned_graph = false;
+  bool any_unpinned_graph = false;
   std::size_t non_null = 0;
+  device_mode_cuda_device_id_ = -1;
   for (auto &decoder : decoders_) {
     if (!decoder)
       continue;
     ++non_null;
-    if (decoder->get_cuda_device_id() >= 0)
-      throw std::runtime_error(
-          "qec_realtime_session does not yet support cuda_device_id; "
-          "construct realtime decoders without device placement until "
-          "session worker affinity is implemented");
-    if (decoder->supports_graph_dispatch())
+    if (decoder->supports_graph_dispatch()) {
       any_graph = true;
-    else
+      const int cuda_device_id = decoder->get_cuda_device_id();
+      any_pinned_graph |= cuda_device_id >= 0;
+      any_unpinned_graph |= cuda_device_id < 0;
+      if (cuda_device_id >= 0 && device_mode_cuda_device_id_ >= 0 &&
+          cuda_device_id != device_mode_cuda_device_id_)
+        throw std::runtime_error(
+            "qec_realtime_session::initialize: graph-dispatch decoders are "
+            "assigned to different CUDA devices; DEVICE mode supports one "
+            "decoder/device per session");
+      if (cuda_device_id >= 0)
+        device_mode_cuda_device_id_ = cuda_device_id;
+    } else {
       any_host = true;
+    }
   }
 
   if (non_null == 0)
@@ -321,6 +345,13 @@ void qec_realtime_session::classify_mode() {
         "a function table entry by function_id alone, so a GRAPH_LAUNCH and a "
         "HOST_CALL enqueue sharing kEnqueueSyndromesFunctionId would collide.  "
         "Use one decoder per session (or a homogeneous decoder set).");
+
+  if (any_pinned_graph && any_unpinned_graph)
+    throw std::runtime_error(
+        "qec_realtime_session::initialize: graph-dispatch decoders mix "
+        "explicit and implicit CUDA placement. Assign the same "
+        "cuda_device_id to every graph decoder in the session so captured "
+        "graphs and scheduler resources have one unambiguous owner.");
 
   device_mode_ = any_graph;
 
@@ -341,6 +372,13 @@ void qec_realtime_session::initialize() {
     return;
 
   classify_mode();
+
+  // DEVICE-mode CUDA resources must be created on the decoder's owning
+  // device. HOST mode selects the appropriate device inside each RPC handler
+  // because one dispatcher thread may serve multiple pinned decoders.
+  std::optional<cudaq::qec::detail_affinity::CudaDeviceGuard> device_guard;
+  if (device_mode_ && device_mode_cuda_device_id_ >= 0)
+    device_guard.emplace(device_mode_cuda_device_id_);
 
   // Reset the monotonic producer cursor so it starts in lockstep with the
   // strict-FIFO consumer (both begin at slot 0).
@@ -424,6 +462,10 @@ void qec_realtime_session::initialize() {
 //==============================================================================
 
 void qec_realtime_session::finalize() {
+  std::optional<cudaq::qec::detail_affinity::CudaDeviceGuard> device_guard;
+  if (device_mode_ && device_mode_cuda_device_id_ >= 0)
+    device_guard.emplace(device_mode_cuda_device_id_);
+
   const bool was_initialized = initialized_;
   if (was_initialized)
     initialized_ = false;
@@ -543,6 +585,8 @@ void qec_realtime_session::capture_decoder_graphs() {
           " does not support graph dispatch in DEVICE mode.");
 
     // reserved_sms = 0 is intentional for the inproc_rpc desktop / CI path.
+    cudaq::qec::detail_affinity::CudaDeviceGuard device(
+        dec->get_cuda_device_id());
     void *raw = dec->capture_decode_graph(/*reserved_sms=*/0);
     if (!raw)
       throw std::runtime_error("qec_realtime_session::initialize: decoder " +

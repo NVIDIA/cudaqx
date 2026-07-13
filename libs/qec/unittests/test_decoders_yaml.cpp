@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <cuda_runtime_api.h>
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
@@ -40,6 +41,18 @@ public:
 private:
   std::string name;
   std::optional<std::string> oldValue;
+};
+
+class ScopedCudaDeviceRestore {
+public:
+  ScopedCudaDeviceRestore() { (void)cudaGetDevice(&device); }
+  ~ScopedCudaDeviceRestore() {
+    if (device >= 0)
+      (void)cudaSetDevice(device);
+  }
+
+private:
+  int device = -1;
 };
 } // namespace
 
@@ -82,24 +95,6 @@ decoders:
   EXPECT_THROW(
       cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(
           misspelled_decoder_argument),
-      std::runtime_error);
-
-  // Device placement is deliberately limited to direct decoder construction
-  // until realtime session workers and teardown own a CUDA device.
-  const std::string unsupported_cuda_device_id = R"(
-decoders:
-  - id: 0
-    type: pymatching
-    cuda_device_id: 0
-    block_size: 1
-    syndrome_size: 1
-    H_sparse: [0, -1]
-    O_sparse: [0, -1]
-    D_sparse: [0, -1]
-)";
-  EXPECT_THROW(
-      cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(
-          unsupported_cuda_device_id),
       std::runtime_error);
 
   EXPECT_THROW(
@@ -855,4 +850,51 @@ TEST(DecoderConfigTest, SimulationHostPointerWrappersForwardToHostRuntime) {
       /*decoder_id=*/0, corrections.data(), corrections.size(), /*reset=*/true);
   EXPECT_EQ(corrections, (std::vector<uint8_t>{0}));
   finalize_decoders();
+}
+
+TEST(DecoderYAMLTest, CudaDeviceIdRoundTrip) {
+  cudaq::qec::decoding::config::multi_decoder_config multi_config;
+  auto config = create_test_empty_decoder_config(0);
+  config.cuda_device_id = 2;
+  multi_config.decoders.push_back(config);
+  test_decoder_yaml_roundtrip(multi_config);
+}
+
+TEST(DecoderYAMLTest, PrepareDecoderParamsSurfacesCudaDeviceId) {
+  auto config = create_test_empty_decoder_config(0);
+  config.cuda_device_id = 3;
+  auto params = cudaq::qec::decoding::host::prepare_decoder_params(config);
+  ASSERT_TRUE(params.contains("cuda_device_id"));
+  EXPECT_EQ(params.get<int>("cuda_device_id"), 3);
+
+  auto unpinned = create_test_empty_decoder_config(1);
+  auto unpinned_params =
+      cudaq::qec::decoding::host::prepare_decoder_params(unpinned);
+  EXPECT_FALSE(unpinned_params.contains("cuda_device_id"));
+
+  auto trt = create_test_empty_decoder_config(2);
+  trt.type = "trt_decoder";
+  trt.decoder_custom_args = cudaq::qec::decoding::config::trt_decoder_config{};
+  trt.cuda_device_id = 1;
+  auto trt_params = cudaq::qec::decoding::host::prepare_decoder_params(trt);
+  ASSERT_TRUE(trt_params.contains("cuda_device_id"));
+  EXPECT_EQ(trt_params.get<int>("cuda_device_id"), 1);
+}
+
+TEST(DecoderConfigCudaDeviceId, RealtimeFactoryUsesConfiguredDevice) {
+  int device_count = 0;
+  if (cudaGetDeviceCount(&device_count) != cudaSuccess || device_count < 2)
+    GTEST_SKIP() << "needs >= 2 CUDA devices";
+
+  ScopedCudaDeviceRestore restore;
+  ASSERT_EQ(cudaSetDevice(0), cudaSuccess);
+  auto config = create_test_sample_realtime_decoder_config(0);
+  config.cuda_device_id = 1;
+
+  auto decoder = cudaq::qec::decoding::host::create_realtime_decoder(config);
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_EQ(decoder->get_cuda_device_id(), 1);
+  int current = -1;
+  ASSERT_EQ(cudaGetDevice(&current), cudaSuccess);
+  EXPECT_EQ(current, 1);
 }

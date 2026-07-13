@@ -128,6 +128,19 @@ def create_test_decoder_config_nv_qldpc(decoder_id):
     return config
 
 
+def test_cuda_device_id_yaml_roundtrip():
+    multi_config = qec.multi_decoder_config()
+    config = create_test_empty_decoder_config(0)
+    assert config.cuda_device_id is None
+    config.cuda_device_id = 2
+    multi_config.decoders = [config]
+
+    check_decoder_yaml_roundtrip(multi_config)
+    parsed = qec.multi_decoder_config.from_yaml_str(
+        multi_config.to_yaml_str(200))
+    assert parsed.decoders[0].cuda_device_id == 2
+
+
 def test_single_decoder():
     """
     Test YAML serialization/deserialization and creation of a single NV-QLDPC decoder.

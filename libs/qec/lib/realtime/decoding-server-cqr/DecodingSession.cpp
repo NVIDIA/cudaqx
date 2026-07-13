@@ -8,10 +8,12 @@
 
 #include "DecodingSession.h"
 #include "RpcWireFormat.h"
+#include "../../hardware_guards.h"
 #include "cudaq/qec/logger.h"
 
 #include <chrono>
 #include <cstring>
+#include <future>
 #include <stdexcept>
 #include <vector>
 
@@ -26,7 +28,25 @@ uint64_t max_concurrent_busy_sessions() {
   return g_max_busy_sessions.load(std::memory_order_relaxed);
 }
 
-DecodingSession::~DecodingSession() { stop_worker(); }
+DecodingSession::~DecodingSession() {
+  stop_worker();
+  if (!dec)
+    return;
+
+  const int cuda_device_id = dec->get_cuda_device_id();
+  try {
+    cudaq::qec::detail_affinity::CudaDeviceGuard device(cuda_device_id);
+    // Release captured graphs before the decoder plugin that owns them.
+    graph_resources.reset();
+    dec.reset();
+  } catch (const std::exception &e) {
+    cudaq::qec::error(
+        "DecodingSession teardown could not select cuda_device_id {}: {}",
+        cuda_device_id, e.what());
+    graph_resources.reset();
+    dec.reset();
+  }
+}
 
 void DecodingSession::stop_worker() {
   {
@@ -46,14 +66,12 @@ DecodingSession::create(std::unique_ptr<cudaq::qec::decoder> decoder,
                         SyndromeMappingTable mapping_table_arg) {
   if (!decoder)
     throw std::invalid_argument("DecodingSession requires a decoder");
-  if (decoder->get_cuda_device_id() >= 0)
-    throw std::invalid_argument(
-        "DecodingSession does not yet support cuda_device_id; worker-thread "
-        "affinity and device-owned teardown will be added in a follow-up");
 
   auto s = std::make_unique<DecodingSession>();
   s->dec = std::move(decoder);
 
+  cudaq::qec::detail_affinity::CudaDeviceGuard device(
+      s->dec->get_cuda_device_id());
   if (s->dec->supports_graph_dispatch()) {
     void *gr = s->dec->capture_decode_graph();
     s->graph_resources =
@@ -65,7 +83,32 @@ DecodingSession::create(std::unique_ptr<cudaq::qec::decoder> decoder,
 }
 
 void DecodingSession::start_worker() {
-  worker = std::thread([this] { worker_loop(); });
+  if (worker.joinable())
+    throw std::logic_error("DecodingSession worker already started");
+
+  std::promise<void> ready;
+  auto ready_future = ready.get_future();
+  const int cuda_device_id = dec ? dec->get_cuda_device_id() : -1;
+  worker =
+      std::thread([this, cuda_device_id, ready = std::move(ready)]() mutable {
+        try {
+          cudaq::qec::detail_affinity::select_cuda_device(
+              cuda_device_id, "DecodingSession worker startup");
+        } catch (...) {
+          ready.set_exception(std::current_exception());
+          return;
+        }
+        ready.set_value();
+        worker_loop();
+      });
+
+  try {
+    ready_future.get();
+  } catch (...) {
+    if (worker.joinable())
+      worker.join();
+    throw;
+  }
 }
 
 bool DecodingSession::try_enqueue(WorkItem item) {
