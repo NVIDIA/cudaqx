@@ -150,6 +150,8 @@ target_link_libraries(cudaq-qec-decoding-server
     cudaq-qec-decoders
     cudaq-qec-realtime-decoding
   PRIVATE
+    # DecodingSession worker threads pin themselves to their decoder's
+    # cuda_device_id (cudaSetDevice).
     CUDA::cudart
 )
 

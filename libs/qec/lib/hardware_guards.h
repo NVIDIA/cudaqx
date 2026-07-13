@@ -11,29 +11,21 @@
 #include <cuda_runtime_api.h>
 #include <stdexcept>
 #include <string>
-#include <string_view>
 
 namespace cudaq::qec::detail_affinity {
 
-/// Persistently select \p target for the calling thread. The device id must
-/// already have been validated by decoder::get(). This is the hot-path helper
-/// for long-lived decoder workers and shared realtime dispatcher threads.
-inline void select_cuda_device(int target, std::string_view context) {
+/// Point the calling thread at \p target before work that allocates or
+/// launches on it (no restore; set-if-different). No-op for target < 0.
+/// Throws on failure: never silently decode on the wrong GPU.
+inline void set_cuda_device_for_decode(int target) {
   if (target < 0)
     return;
-
   int current = -1;
-  cudaError_t err = cudaGetDevice(&current);
-  if (err != cudaSuccess)
-    throw std::runtime_error(
-        std::string(context) +
-        ": cudaGetDevice() failed: " + cudaGetErrorString(err));
-  if (current == target)
+  if (cudaGetDevice(&current) == cudaSuccess && current == target)
     return;
-
-  err = cudaSetDevice(target);
+  cudaError_t err = cudaSetDevice(target);
   if (err != cudaSuccess)
-    throw std::runtime_error(std::string(context) + ": cudaSetDevice(" +
+    throw std::runtime_error("set_cuda_device_for_decode: cudaSetDevice(" +
                              std::to_string(target) +
                              ") failed: " + cudaGetErrorString(err));
 }

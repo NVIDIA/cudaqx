@@ -119,7 +119,9 @@ GpuRoceConfig GpuRoceConfig::from_env() {
   c.device_name = env_str("HOLOLINK_DEVICE");
   c.peer_ip = env_str("HOLOLINK_PEER_IP");
   c.remote_qp = env_u32("HOLOLINK_REMOTE_QP", 0);
-  c.gpu_id = env_int("HOLOLINK_GPU_ID", 0);
+  if (std::getenv("HOLOLINK_GPU_ID"))
+    c.gpu_id_env = env_int("HOLOLINK_GPU_ID", 0);
+  c.gpu_id = c.gpu_id_env.value_or(0);
   c.frame_size = env_size("HOLOLINK_FRAME_SIZE", 384);
   c.page_size = env_size("HOLOLINK_PAGE_SIZE", 0); // 0 → derived below
   c.num_pages = env_size("HOLOLINK_NUM_PAGES", 64);
@@ -344,8 +346,7 @@ void GpuRoceTransceiver::launch_scheduler(void *raw_graph_resources) {
 
   monitor_thread_ = std::thread([this] {
     try {
-      cudaq::qec::detail_affinity::select_cuda_device(
-          gpu_id_, "GpuRoceTransceiver monitor");
+      cudaq::qec::detail_affinity::set_cuda_device_for_decode(gpu_id_);
       hololink_blocking_monitor(transceiver_);
     } catch (const std::exception &e) {
       CUDA_QEC_WARN("GpuRoceTransceiver monitor failed: {}", e.what());

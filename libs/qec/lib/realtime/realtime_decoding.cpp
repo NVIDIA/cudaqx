@@ -454,8 +454,12 @@ void enqueue_syndromes(std::size_t decoder_id, uint8_t *syndromes,
   }
 #endif
 
-  cudaq::qec::detail_affinity::select_cuda_device(decoder->get_cuda_device_id(),
-                                                  "realtime enqueue_syndromes");
+  // Direct-call path: this caller thread runs the decode, but
+  // configure_decoders() constructed every decoder sequentially on one thread,
+  // and then restored the caller's device. Point the thread at this decoder's
+  // pinned device before decoding (set-if-different; throws on failure).
+  cudaq::qec::detail_affinity::set_cuda_device_for_decode(
+      decoder->get_cuda_device_id());
   std::vector<uint8_t> syndrome_u8(syndrome_length);
   bool did_decode = false;
   for (std::size_t i = 0; i < syndrome_length; i++) {
@@ -520,8 +524,8 @@ void get_corrections(std::size_t decoder_id, uint8_t *corrections,
   }
 #endif
 
-  cudaq::qec::detail_affinity::select_cuda_device(decoder->get_cuda_device_id(),
-                                                  "realtime get_corrections");
+  cudaq::qec::detail_affinity::set_cuda_device_for_decode(
+      decoder->get_cuda_device_id());
   auto ret = decoder->get_obs_corrections();
   for (std::size_t i = 0; i < correction_length; ++i) {
     corrections[i] = ret[i];
@@ -557,8 +561,8 @@ void reset_decoder(std::size_t decoder_id) {
   }
 #endif
 
-  cudaq::qec::detail_affinity::select_cuda_device(decoder->get_cuda_device_id(),
-                                                  "realtime reset_decoder");
+  cudaq::qec::detail_affinity::set_cuda_device_for_decode(
+      decoder->get_cuda_device_id());
   decoder->reset_decoder();
 }
 

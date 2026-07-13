@@ -27,16 +27,10 @@ using cudaq::qec::decoding::config::DecoderTransport;
 
 namespace {
 
-int resolve_gpu_roce_device_id(
-    const cudaq::qec::decoding::config::decoder_config &decoder) {
-  const char *raw_env_id = std::getenv("HOLOLINK_GPU_ID");
-  const int env_id = raw_env_id ? std::stoi(raw_env_id) : 0;
-  if (decoder.cuda_device_id.has_value() && raw_env_id &&
-      decoder.cuda_device_id.value() != env_id)
-    throw std::runtime_error("HOLOLINK_GPU_ID=" + std::to_string(env_id) +
-                             " conflicts with decoder cuda_device_id=" +
-                             std::to_string(decoder.cuda_device_id.value()));
-  return decoder.cuda_device_id.value_or(env_id);
+std::optional<int> gpu_roce_env_device_id() {
+  if (const char *raw_env_id = std::getenv("HOLOLINK_GPU_ID"))
+    return std::stoi(raw_env_id);
+  return std::nullopt;
 }
 
 } // namespace
@@ -45,23 +39,34 @@ int resolve_gpu_roce_device_id(
 // Constructors
 // ---------------------------------------------------------------------------
 
+/// gpu_roce runs the whole pipeline -- rings, dispatch scheduler, device-side
+/// graph fire -- on ONE GPU: the one the FPGA/NIC is affine to
+/// (HOLOLINK_GPU_ID). A decoder pinned elsewhere would split graph capture
+/// and graph launch across devices, which CUDA graphs cannot do. Both knobs
+/// name the same topology fact, so they must agree.
+int reconcile_gpu_roce_device(std::optional<int> env_gpu_id, int decoder_pin) {
+  if (env_gpu_id && decoder_pin >= 0 && *env_gpu_id != decoder_pin)
+    throw std::runtime_error(
+        "gpu_roce device conflict: HOLOLINK_GPU_ID=" +
+        std::to_string(*env_gpu_id) + " but the decoder is pinned to " +
+        std::to_string(decoder_pin) +
+        " (cuda_device_id). The FPGA-affine GPU and the decoder pin must be "
+        "the same device.");
+  if (env_gpu_id)
+    return *env_gpu_id;
+  return decoder_pin >= 0 ? decoder_pin : 0;
+}
+
 std::unique_ptr<ITransceiver>
 DecodingServer::make_transport(DecoderTransport transport_type,
-                               int cuda_device_id) {
+                               int pinned_cuda_device) {
   switch (transport_type) {
   case DecoderTransport::gpu_roce:
 #ifdef CUDAQ_GPU_ROCE_AVAILABLE
   {
-    auto config = GpuRoceConfig::from_env();
-    if (cuda_device_id >= 0) {
-      if (std::getenv("HOLOLINK_GPU_ID") && config.gpu_id != cuda_device_id)
-        throw std::runtime_error(
-            "HOLOLINK_GPU_ID=" + std::to_string(config.gpu_id) +
-            " conflicts with decoder cuda_device_id=" +
-            std::to_string(cuda_device_id));
-      config.gpu_id = cuda_device_id;
-    }
-    return std::make_unique<GpuRoceTransceiver>(config);
+    auto cfg = GpuRoceConfig::from_env();
+    cfg.gpu_id = reconcile_gpu_roce_device(cfg.gpu_id_env, pinned_cuda_device);
+    return std::make_unique<GpuRoceTransceiver>(cfg);
   }
 #else
     throw std::runtime_error(
@@ -103,26 +108,24 @@ DecodingServer::DecodingServer(const std::string &config_yaml) {
     // the transport's legacy environment setting (GPU 0 by default) before
     // decoder construction so graph capture and DOCA allocations cannot land
     // on different devices.
-    config.decoders.front().cuda_device_id =
-        resolve_gpu_roce_device_id(config.decoders.front());
+    auto &decoder = config.decoders.front();
+    if (decoder.cuda_device_id && *decoder.cuda_device_id < 0)
+      throw std::runtime_error(
+          "cuda_device_id must be a non-negative integer (got " +
+          std::to_string(*decoder.cuda_device_id) + ")");
+    decoder.cuda_device_id = reconcile_gpu_roce_device(
+        gpu_roce_env_device_id(), decoder.cuda_device_id.value_or(-1));
   }
 
   registry_.load_from_config(config, config_yaml);
   register_handlers();
 
-  int cuda_device_id = -1;
-  if (registry_.required_transport() == DecoderTransport::gpu_roce) {
-    const auto &sessions = registry_.sessions();
-    if (sessions.size() != 1)
-      throw std::runtime_error(
-          "GPU RoCE transport currently supports exactly one decoder session; "
-          "found " +
-          std::to_string(sessions.size()) +
-          ". Multi-decoder GPU RoCE is deferred.");
-    cuda_device_id = sessions.begin()->second->dec->get_cuda_device_id();
-  }
-
-  auto t = make_transport(registry_.required_transport(), cuda_device_id);
+  const auto &boot_sessions = registry_.sessions();
+  const int pinned_cuda_device =
+      boot_sessions.size() == 1
+          ? boot_sessions.begin()->second->dec->get_cuda_device_id()
+          : -1;
+  auto t = make_transport(registry_.required_transport(), pinned_cuda_device);
   ITransceiver *raw = t.get();
   owned_transports_.push_back(std::move(t));
   function_transport_[kEnqueueSyndromesFunctionId] = raw;

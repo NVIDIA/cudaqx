@@ -129,6 +129,21 @@ cudaq::qec::decoder *get_decoder_or_throw(std::int64_t decoder_id) {
   return (*decoders)[static_cast<std::size_t>(decoder_id)].get();
 }
 
+// Point the calling thread at the decoder's pinned CUDA device before work
+// that allocates or launches on it. Set-and-leave (no restore): one
+// dispatcher thread serves all decoders, so the thread simply converges to
+// the device of the decoder it is currently serving; cudaSetDevice on an
+// already-current device is a cheap no-op.
+static void apply_decoder_cuda_device(cudaq::qec::decoder *dec) {
+  if (!dec)
+    return;
+  // Throws on failure (fail fast): host dispatch surfaces it as an error
+  // response and graph initialization aborts, rather than continuing on
+  // whichever device happened to be current.
+  cudaq::qec::detail_affinity::set_cuda_device_for_decode(
+      dec->get_cuda_device_id());
+}
+
 // Two-ring response writer: the request stays in `rx_slot` (read-only); the
 // response is written into the distinct `tx_slot`.  The preserved header fields
 // (request_id, ptp_timestamp) must be echoed explicitly from rx to tx.  The
@@ -180,9 +195,7 @@ void enqueue_syndromes_host(const void *rx_slot, void *tx_slot,
     }
 
     auto *decoder = get_decoder_or_throw(body->decoder_id);
-    cudaq::qec::detail_affinity::select_cuda_device(
-        decoder->get_cuda_device_id(),
-        "qec_realtime_session enqueue_syndromes");
+    apply_decoder_cuda_device(decoder);
     // Reject requests larger than this decoder's per-decode window.  The slot
     // is sized for the largest decoder in the session, so an oversized request
     // for a smaller decoder can still fit the slot; without this guard it would
@@ -227,8 +240,7 @@ void get_corrections_host(const void *rx_slot, void *tx_slot,
     }
 
     auto *decoder = get_decoder_or_throw(body->decoder_id);
-    cudaq::qec::detail_affinity::select_cuda_device(
-        decoder->get_cuda_device_id(), "qec_realtime_session get_corrections");
+    apply_decoder_cuda_device(decoder);
     const auto return_size = static_cast<std::uint64_t>(body->return_size);
     if (return_size > decoder->get_num_observables()) {
       write_response(tx_slot, rx_slot, -4);
@@ -269,8 +281,7 @@ void reset_decoder_host(const void *rx_slot, void *tx_slot, std::size_t) {
         static_cast<const std::uint8_t *>(rx_slot) +
         sizeof(cudaq::realtime::RPCHeader));
     auto *decoder = get_decoder_or_throw(body->decoder_id);
-    cudaq::qec::detail_affinity::select_cuda_device(
-        decoder->get_cuda_device_id(), "qec_realtime_session reset_decoder");
+    apply_decoder_cuda_device(decoder);
     decoder->reset_decoder();
     write_response(tx_slot, rx_slot, 0);
   } catch (...) {
@@ -585,8 +596,7 @@ void qec_realtime_session::capture_decoder_graphs() {
           " does not support graph dispatch in DEVICE mode.");
 
     // reserved_sms = 0 is intentional for the inproc_rpc desktop / CI path.
-    cudaq::qec::detail_affinity::CudaDeviceGuard device(
-        dec->get_cuda_device_id());
+    apply_decoder_cuda_device(dec);
     void *raw = dec->capture_decode_graph(/*reserved_sms=*/0);
     if (!raw)
       throw std::runtime_error("qec_realtime_session::initialize: decoder " +
