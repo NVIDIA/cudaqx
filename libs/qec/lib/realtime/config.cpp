@@ -6,17 +6,20 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
-#include "common/ExtraPayloadProvider.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Base64.h"
 #include "llvm/Support/YAMLTraits.h"
 #include "llvm/Support/raw_ostream.h"
 #include "realtime_decoding.h"
+#include "cudaq/qec/decoder_config_payload.h"
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/realtime/decoding_config.h"
 #include <any>
 #include <filesystem>
 #include <fstream>
+#include <memory>
+#include <mutex>
+#include <stdexcept>
 #include <type_traits>
 
 // Helper function(s) to remove the optional wrapper from a type.
@@ -702,11 +705,24 @@ struct MappingTraits<cudaq::qec::decoding::config::sliding_window_config> {
 };
 
 template <>
+struct ScalarEnumerationTraits<cudaq::qec::decoding::config::DecoderTransport> {
+  static void
+  enumeration(IO &io, cudaq::qec::decoding::config::DecoderTransport &value) {
+    io.enumCase(value, "cpu_roce",
+                cudaq::qec::decoding::config::DecoderTransport::cpu_roce);
+    io.enumCase(value, "gpu_roce",
+                cudaq::qec::decoding::config::DecoderTransport::gpu_roce);
+  }
+};
+
+template <>
 struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
   static void mapping(IO &io,
                       cudaq::qec::decoding::config::decoder_config &config) {
     io.mapRequired("id", config.id);
     io.mapRequired("type", config.type);
+    io.mapOptional("transport", config.transport,
+                   cudaq::qec::decoding::config::DecoderTransport::cpu_roce);
     io.mapRequired("block_size", config.block_size);
     io.mapRequired("syndrome_size", config.syndrome_size);
     io.mapRequired("H_sparse", config.H_sparse);
@@ -810,6 +826,9 @@ cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(
   multi_decoder_config config;
   llvm::yaml::Input yaml_in(yaml_str);
   yaml_in >> config;
+  if (const auto error = yaml_in.error())
+    throw std::runtime_error("Invalid decoder configuration YAML: " +
+                             error.message());
   return config;
 }
 
@@ -840,39 +859,38 @@ cudaq::qec::decoding::config::decoder_config::to_yaml_str(int column_wrap) {
   return yaml_str;
 }
 
-namespace {
-/// \brief Provides extra payload for decoder-related messages.
-class decoder_provider : public cudaq::ExtraPayloadProvider {
-  /// The configuration YML string for the decoder to be injected to job
-  /// requests.
-  // Note: we convert the multi_decoder_config to a YAML string so that it can
-  // be reused across multiple requests without needing to re-parse the YAML
-  // each time.
-  std::string decoderConfigYmlStr;
-
-public:
-  decoder_provider(cudaq::qec::decoding::config::multi_decoder_config &config)
-      : decoderConfigYmlStr(config.to_yaml_str()) {}
-  virtual ~decoder_provider() = default;
-  virtual std::string name() const override { return "decoder"; }
-  virtual std::string getPayloadType() const override {
-    return "gpu_decoder_config";
-  }
-  virtual std::string
-  getExtraPayload(const cudaq::RuntimeTarget &target) override {
-    return decoderConfigYmlStr;
-  }
-};
-} // namespace
-
 namespace cudaq::qec::decoding::config {
+
+// Stash a copy for consumers that build their own decoder instances from the
+// process-wide configuration -- the decoding-server DeviceCallService plugin
+// reads it when CUDAQ_QEC_DECODER_CONFIG is not set (in-process path).
+// shared_ptr + mutex: the plugin reads this from the realtime dispatcher
+// thread while the application thread may call configure_decoders() again;
+// shared ownership keeps the reader's config alive across a concurrent
+// replacement.
+static std::mutex g_last_multi_decoder_config_mutex;
+static std::shared_ptr<const multi_decoder_config> g_last_multi_decoder_config;
+
 int configure_decoders(multi_decoder_config &config) {
   CUDA_QEC_INFO("Initializing realtime decoding library with config object");
-  // Register the decoder provider to inject the decoder configuration into
-  // the job requests.
-  cudaq::registerExtraPayloadProvider(
-      std::make_unique<decoder_provider>(config));
+  {
+    std::lock_guard<std::mutex> lock(g_last_multi_decoder_config_mutex);
+    g_last_multi_decoder_config =
+        std::make_shared<const multi_decoder_config>(config);
+  }
+  // Publish the decoder configuration so CUDA-Q can inject it into
+  // remote-target job requests. The cudaq integration (ExtraPayloadProvider) is
+  // installed by cudaq-qec at load time; this call is a no-op when cudaq-qec is
+  // not loaded, keeping this library free of any direct cudaq-common
+  // dependency.
+  cudaq::qec::publish_decoder_config_payload(config.to_yaml_str());
   return cudaq::qec::decoding::host::configure_decoders(config);
+}
+
+std::shared_ptr<const multi_decoder_config>
+last_configured_multi_decoder_config() {
+  std::lock_guard<std::mutex> lock(g_last_multi_decoder_config_mutex);
+  return g_last_multi_decoder_config;
 }
 
 void log_config(const char *config_str, bool from_file) {

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2024 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2024 - 2026 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -10,7 +10,7 @@
 // decoder, code
 //
 // Compile and run with
-// nvq++ --target=stim -lcudaq-qec code_capacity_noise.cpp
+// nvq++ --target=stim -lcudaq-qec -lcudaq-qec-decoders code_capacity_noise.cpp
 // ./a.out
 
 #include <algorithm>

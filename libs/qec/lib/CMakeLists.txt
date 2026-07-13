@@ -7,6 +7,7 @@
 # ============================================================================ #
 
 set(LIBRARY_NAME cudaq-qec)
+set(DECODERS_LIBRARY_NAME cudaq-qec-decoders)
 
 include(FetchContent)
 
@@ -38,26 +39,36 @@ if(NOT cuStabilizer_FOUND)
     "(both are also honored as environment variables).")
 endif()
 
-set(QEC_SOURCES
-  code.cpp
+set(DECODERS_SOURCES
   decoder.cpp
+  decoder_config_payload.cpp
   detector_error_model.cpp
-  experiments.cpp
   logger.cpp
   logger_forwarder.cpp
   pcm_utils.cpp
   plugin_loader.cpp
   sparse_binary_matrix.cpp
-  stabilizer_utils.cpp
   decoders/lut.cpp
   decoders/sliding_window.cpp
   version.cpp
+)
+
+set(QEC_SOURCES
+  code.cpp
+  decoder_config_payload_provider.cpp
+  experiments.cpp
+  stabilizer_utils.cpp
 )
 
 list(APPEND QEC_SOURCES
   dem_sampling/dem_sampling_utils.cu
   dem_sampling/dem_sampling_gpu.cpp
 )
+
+add_library(${DECODERS_LIBRARY_NAME} SHARED ${DECODERS_SOURCES})
+set_target_properties(${DECODERS_LIBRARY_NAME} PROPERTIES
+  VISIBILITY_INLINES_HIDDEN ON
+  LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 # FIXME?: This must be a shared library. Trying to build a static one will fail.
 add_library(${LIBRARY_NAME} SHARED ${QEC_SOURCES})
@@ -78,10 +89,13 @@ if(NOT TARGET libstim)
 endif()
 set_target_properties(${LIBRARY_NAME} PROPERTIES
   VISIBILITY_INLINES_HIDDEN ON
-)
-target_link_libraries(${LIBRARY_NAME} PRIVATE libstim)
-target_link_options(${LIBRARY_NAME} PRIVATE
+  LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+target_link_libraries(${DECODERS_LIBRARY_NAME} PRIVATE libstim)
+target_link_options(${DECODERS_LIBRARY_NAME} PRIVATE
   $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>>:-Wl,--exclude-libs,libstim.a>
+  # cudaqx-core is linked into this DSO only; keep its symbols local so they
+  # do not preempt libcudaq-xxx' tensor_impl registry in combined builds.
+  $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>>:-Wl,--exclude-libs,libcudaqx-core.a>
 )
 
 add_subdirectory(decoders/plugins/example)
@@ -104,8 +118,18 @@ add_subdirectory(codes)
 add_subdirectory(device) 
 
 if (CUDAQX_QEC_USE_FLOAT)
+   target_compile_definitions(${DECODERS_LIBRARY_NAME} PUBLIC -DCUDAQX_QEC_FLOAT_TYPE=float)
    target_compile_definitions(${LIBRARY_NAME} PUBLIC -DCUDAQX_QEC_FLOAT_TYPE=float)
 endif()
+
+target_include_directories(${DECODERS_LIBRARY_NAME}
+  PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+  PUBLIC
+    $<BUILD_INTERFACE:${CUDAQX_QEC_INCLUDE_DIR}>
+    $<BUILD_INTERFACE:$<TARGET_PROPERTY:fmt::fmt-header-only,INTERFACE_INCLUDE_DIRECTORIES>>
+    $<INSTALL_INTERFACE:${CUDAQ_INCLUDE_DIR}>
+    $<INSTALL_INTERFACE:include>
+)
 
 target_include_directories(${LIBRARY_NAME}
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
@@ -115,13 +139,22 @@ target_include_directories(${LIBRARY_NAME}
     $<INSTALL_INTERFACE:include>
 )
 
+target_link_options(${DECODERS_LIBRARY_NAME} PRIVATE
+  $<$<CXX_COMPILER_ID:GNU>:-Wl,--no-as-needed>
+)
 target_link_options(${LIBRARY_NAME} PUBLIC
   $<$<CXX_COMPILER_ID:GNU>:-Wl,--no-as-needed>
 )
 
+target_link_libraries(${DECODERS_LIBRARY_NAME}
+  PUBLIC
+    $<LINK_LIBRARY:WHOLE_ARCHIVE,cudaqx-core>
+    fmt::fmt-header-only
+)
+
 target_link_libraries(${LIBRARY_NAME}
   PUBLIC 
-    cudaqx-core
+    ${DECODERS_LIBRARY_NAME}
     cudaq::cudaq-operator
   PRIVATE
     cudaq::cudaq-common
@@ -135,9 +168,6 @@ set_source_files_properties(
   dem_sampling/dem_sampling_utils.cu
   PROPERTIES LANGUAGE CUDA
 )
-
-set_target_properties(${LIBRARY_NAME} PROPERTIES
-  LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 # RPATH configuration 
 # ==============================================================================
@@ -179,7 +209,7 @@ endif()
 # Install 
 # ==============================================================================
 
-install(TARGETS ${LIBRARY_NAME}
+install(TARGETS ${DECODERS_LIBRARY_NAME} ${LIBRARY_NAME}
   COMPONENT qec-lib
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )

@@ -25,7 +25,7 @@ include(GoogleTest)
 add_compile_options(-Wno-attributes) 
 
 add_executable(test_pymatching test_pymatching.cpp)
-target_link_libraries(test_pymatching PRIVATE GTest::gtest_main cudaq-qec cudaq::cudaq)
+target_link_libraries(test_pymatching PRIVATE GTest::gtest_main cudaq-qec-decoders)
 add_dependencies(CUDAQXQECUnitTests test_pymatching)
 gtest_discover_tests(test_pymatching)
 
@@ -40,9 +40,8 @@ if(CUDAQ_REALTIME_ROOT AND CUDAQ_REALTIME_INCLUDE_DIR)
     CUDAQ_REALTIME_ROOT)
   target_link_libraries(test_pymatching_realtime PRIVATE
     GTest::gtest_main
-    cudaq-qec
+    cudaq-qec-decoders
     cudaq-qec-realtime-decoding
-    cudaq::cudaq
   )
   set_target_properties(test_pymatching_realtime PROPERTIES
     BUILD_RPATH "${CMAKE_BINARY_DIR}/lib;${CMAKE_BINARY_DIR}/lib/decoder-plugins"
@@ -80,9 +79,18 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-decoding-server-cqr)
   #     the server).
   #   - decoding-server-cqr: the host-dispatch service that receives them (and
   #     provides the force-link + self-check hooks the test asserts on).
+  # The cudaq runtime resolves the quantum platform at runtime via
+  # dlopen(NULL) + dlsym("getQuantumPlatform") (common/PluginUtils.h), so
+  # libcudaq-platform-default.so must already be loaded even though nothing
+  # references its symbols at link time. GNU's default --as-needed would drop
+  # it (and libcudaq-em-default.so) from DT_NEEDED, and the test then fails
+  # with "undefined symbol: getQuantumPlatform"; keep them.
+  target_link_options(test_pymatching_device_call_realtime PRIVATE
+   $<$<CXX_COMPILER_ID:GNU>:-Wl,--no-as-needed>)
+
   target_link_libraries(test_pymatching_device_call_realtime PRIVATE
     GTest::gtest_main
-    cudaq-qec
+    cudaq-qec-decoders
     cudaq-qec-realtime-decoding
     cudaq-qec-realtime-decoding-simulation-cqr
     cudaq-qec-realtime-decoding-server-cqr

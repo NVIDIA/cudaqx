@@ -88,15 +88,29 @@ function(cudaqx_add_device_code LIBRARY_NAME)
   foreach(source ${ARGS_SOURCES})
     get_filename_component(filename ${source} NAME_WE)
     set(output_file "${CMAKE_CURRENT_BINARY_DIR}/${LIBRARY_NAME}_${filename}.o")
-    cmake_path(GET output_file FILENAME baseName)
 
+    # nvq++ drops intermediates named after the *source* (<src>.o, <src>.qke.o,
+    # <src>.classic.o, ...) into its working directory, so two targets
+    # compiling the same source file in the same directory race and corrupt
+    # each other's objects under parallel builds. Isolate each object's
+    # compile in its own working directory.
+    set(work_dir "${CMAKE_CURRENT_BINARY_DIR}/${LIBRARY_NAME}_${filename}.nvqpp")
+    file(MAKE_DIRECTORY ${work_dir})
+
+    # TODO: this custom command only depends on the source file, not on the
+    # headers it includes (nvq++ emits no depfile here), so header changes do
+    # NOT trigger recompilation -- a stale object silently survives ninja
+    # after e.g. a config-struct layout change (ABI-mismatch segfaults).
+    # Until nvq++ depfile output is wired up, `rm` the affected
+    # <target>_<source>.o under the build tree after header changes.
     add_custom_command(
       OUTPUT ${output_file}
       COMMAND ${COMPILER}
         ${ARGS_COMPILER_FLAGS} -c -fPIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/${source} -o ${baseName}
+        ${CMAKE_CURRENT_SOURCE_DIR}/${source} -o ${output_file}
         "$<$<BOOL:${prop}>:-I $<JOIN:${prop}, -I >>"
       DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${source} ${ARGS_DEPENDS_ON}
+      WORKING_DIRECTORY ${work_dir}
       COMMENT "Compiling ${source} with nvq++"
       VERBATIM
     )

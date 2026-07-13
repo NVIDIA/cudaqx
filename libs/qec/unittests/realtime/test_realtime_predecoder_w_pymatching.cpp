@@ -32,7 +32,7 @@
 #include <unistd.h>
 
 #include "cudaq/qec/realtime/ai_decoder_service.h"
-#include "cudaq/realtime/daemon/dispatcher/host_dispatcher.h"
+#include "cudaq/realtime/daemon/dispatcher/graph_launch_engine.h"
 
 #define CUDA_CHECK(call)                                                       \
   do {                                                                         \

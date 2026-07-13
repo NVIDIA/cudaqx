@@ -38,7 +38,7 @@ Here's how to use CUDA-Q QEC to perform a circuit-level noise model experiment i
 
    .. code-block:: bash
 
-      nvq++ --target=stim -lcudaq-qec circuit_level_noise.cpp -o circuit_level_noise
+      nvq++ --target=stim -lcudaq-qec -lcudaq-qec-decoders circuit_level_noise.cpp -o circuit_level_noise
       ./circuit_level_noise
 
 

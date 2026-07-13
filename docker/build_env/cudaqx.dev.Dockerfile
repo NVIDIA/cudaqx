@@ -16,14 +16,13 @@ LABEL org.opencontainers.image.source="https://github.com/NVIDIA/cudaqx"
 LABEL org.opencontainers.image.title="cudaqx-dev"
 LABEL org.opencontainers.image.url="https://github.com/NVIDIA/cudaqx"
 
-# FIXME: Remove the cmake install once private repos are updated.
 RUN apt-get update && CUDA_DASH=$(echo $cuda_version | tr '.' '-') \
   && apt-get install -y gfortran libblas-dev jq cuda-nvtx-${CUDA_DASH} \
   && apt-get install -y git-lfs \
-  && python3 -m pip install "cmake<4" --user \
   && apt-get autoremove -y --purge && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 COPY .cudaq_version /cudaq_version
+COPY scripts/build_cudaq_with_realtime.sh /usr/local/bin/build_cudaq_with_realtime.sh
 
 ENV CUDAQ_INSTALL_PREFIX=/usr/local/cudaq
 
@@ -34,8 +33,8 @@ RUN mkdir -p /workspaces/cudaq && cd /workspaces/cudaq \
   && git remote add origin https://github.com/${CUDAQ_REPO} \
   && git fetch -q --depth=1 origin ${CUDAQ_COMMIT} \
   && git reset --hard FETCH_HEAD \
-  && bash scripts/build_cudaq.sh -v \
-  && rm -rf build
+  && CUDAQ_SRC=/workspaces/cudaq bash /usr/local/bin/build_cudaq_with_realtime.sh \
+  && rm -rf build realtime/build
 
 #RUN mkdir -p /workspaces/cudaqx && cd /workspaces/cudaqx \
 #  && cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DCUDAQ_DIR=/usr/local/cudaq/lib/cmake/cudaq .. \

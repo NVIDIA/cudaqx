@@ -7,7 +7,7 @@
  ******************************************************************************/
 // [Begin Documentation]
 // Compile and run with:
-// nvq++ -lcudaq-qec stim_dem_decoder.cpp
+// nvq++ -lcudaq-qec -lcudaq-qec-decoders stim_dem_decoder.cpp
 // ./a.out
 
 #include "cudaq/qec/decoder.h"
