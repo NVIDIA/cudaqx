@@ -183,12 +183,16 @@ if(TARGET cudaq-qec-realtime-decoding-server-cqr)
       nvqir nvqir-stim)
   qec_realtime_app_link_options(surface_code-1-cqr)
 
+  set(_surface_code_1_cqr_env CUDAQ_DEVICE_CALL_CHANNEL=host_dispatch)
+  if(TARGET cudaq-qec-realtime-cudevice-proprietary
+     AND (QEC_EXTERNAL_DECODERS OR DEFINED ENV{QEC_EXTERNAL_DECODERS}))
+    list(APPEND _surface_code_1_cqr_env EXTRA_CLI_ARGS=--use-relay-bp)
+  endif()
+
   add_test(
     NAME app_examples.surface_code-1-cqr-test-distance-3
     COMMAND
-      ${CMAKE_COMMAND} -E env
-        CUDAQ_DEVICE_CALL_CHANNEL=host_dispatch
-        EXTRA_CLI_ARGS=--use-relay-bp
+      ${CMAKE_COMMAND} -E env ${_surface_code_1_cqr_env}
       bash "${CMAKE_CURRENT_SOURCE_DIR}/surface_code-1-test.sh"
         ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-cqr
         ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-cqr

@@ -162,7 +162,7 @@ SYNDROME_NUM_SHOTS=10  # Use fewer shots for syndrome test
 # Step 1: Run simulation with --save_syndrome to capture syndrome data
 # Use local executable for syndrome capture (works with any platform)
 echo "Step 1: Saving syndromes to $SYNDROME_FILE"
-$EXE_PATH1 --distance $DISTANCE --num_shots $SYNDROME_NUM_SHOTS --load_dem $CONFIG_FILE --num_rounds $NUM_ROUNDS --decoder_window $DECODER_WINDOW --decoder_type $DECODER_TYPE --sw_window_size $SW_WINDOW_SIZE --sw_step_size $SW_STEP_SIZE --save_syndrome $SYNDROME_FILE |& tee save_syndrome-$FULL_SUFFIX.log
+$EXE_PATH1 --distance $DISTANCE --num_shots $SYNDROME_NUM_SHOTS --load_dem $CONFIG_FILE --num_rounds $NUM_ROUNDS --decoder_window $DECODER_WINDOW --decoder_type $DECODER_TYPE --sw_window_size $SW_WINDOW_SIZE --sw_step_size $SW_STEP_SIZE $EXTRA_CLI_ARGS --save_syndrome $SYNDROME_FILE |& tee save_syndrome-$FULL_SUFFIX.log
 
 # Check that the syndrome file was created
 if [[ ! -f "$SYNDROME_FILE" ]]; then
@@ -182,7 +182,7 @@ else
   # Step 2: Replay syndromes with --load_syndrome
   # Use local executable for replay (doesn't need quantum simulation)
   echo "Step 2: Replaying syndromes from $SYNDROME_FILE"
-  $EXE_PATH1 --distance $DISTANCE --num_shots $SYNDROME_NUM_SHOTS --load_dem $CONFIG_FILE --num_rounds $NUM_ROUNDS --decoder_window $DECODER_WINDOW --decoder_type $DECODER_TYPE --sw_window_size $SW_WINDOW_SIZE --sw_step_size $SW_STEP_SIZE --load_syndrome $SYNDROME_FILE |& tee load_syndrome-$FULL_SUFFIX.log
+  $EXE_PATH1 --distance $DISTANCE --num_shots $SYNDROME_NUM_SHOTS --load_dem $CONFIG_FILE --num_rounds $NUM_ROUNDS --decoder_window $DECODER_WINDOW --decoder_type $DECODER_TYPE --sw_window_size $SW_WINDOW_SIZE --sw_step_size $SW_STEP_SIZE $EXTRA_CLI_ARGS --load_syndrome $SYNDROME_FILE |& tee load_syndrome-$FULL_SUFFIX.log
   
   # Check for successful replay
   if grep -q "Replay complete" load_syndrome-$FULL_SUFFIX.log; then
