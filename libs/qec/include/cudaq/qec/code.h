@@ -205,7 +205,8 @@ public:
   ///
   /// Shape is [numCols x numCols], where numCols =
   /// get_num_ancilla_qubits() (one measurement record per ancilla per
-  /// round, in [Z][X] order). Entry (j, k) = 1 means the cross-round
+  /// round, in [Z][X] order). Entries must be exactly 0 or 1. Entry
+  /// (j, k) = 1 means the cross-round
   /// detector comparing record j between consecutive rounds additionally
   /// XORs record k of the earlier round, and the final boundary detector
   /// for record j additionally XORs record k of the last round.
@@ -219,7 +220,8 @@ public:
   ///
   /// Shape is [num_observables x numCols], where numCols =
   /// get_num_ancilla_qubits() (one measurement record per ancilla per
-  /// round, in [Z][X] order). Entry (m, k) = 1 means logical observable m
+  /// round, in [Z][X] order). Entries must be exactly 0 or 1. Entry
+  /// (m, k) = 1 means logical observable m
   /// additionally XORs record k of every round. This getter is consumed when
   /// the memory experiment measures its observables in the Z basis (prep0 /
   /// prep1 state preparations).
@@ -233,7 +235,8 @@ public:
   ///
   /// Shape is [num_observables x numCols], where numCols =
   /// get_num_ancilla_qubits() (one measurement record per ancilla per
-  /// round, in [Z][X] order). Entry (m, k) = 1 means logical observable m
+  /// round, in [Z][X] order). Entries must be exactly 0 or 1. Entry
+  /// (m, k) = 1 means logical observable m
   /// additionally XORs record k of every round. This getter is consumed when
   /// the memory experiment measures its observables in the X basis (prepp /
   /// prepm state preparations).

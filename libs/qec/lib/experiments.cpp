@@ -262,18 +262,9 @@ static std::vector<std::size_t>
 flatten_feedback_tensor(const cudaqx::tensor<uint8_t> &t,
                         std::size_t expected_rows, std::size_t expected_cols,
                         const std::string &name) {
+  validate_inlined_feedback_tensor(t, expected_rows, expected_cols, name);
   if (t.size() == 0)
     return {};
-  if (t.rank() != 2 || t.shape()[0] != expected_rows ||
-      t.shape()[1] != expected_cols) {
-    std::string actual;
-    for (std::size_t d = 0; d < t.rank(); ++d)
-      actual += (d ? ", " : "") + std::to_string(t.shape()[d]);
-    throw std::runtime_error(name + " has invalid shape [" + actual +
-                             "] - expected [" + std::to_string(expected_rows) +
-                             ", " + std::to_string(expected_cols) +
-                             "] or an empty tensor.");
-  }
   return std::vector<std::size_t>(t.data(), t.data() + t.size());
 }
 

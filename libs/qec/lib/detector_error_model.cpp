@@ -304,18 +304,9 @@ static void feedback_rows_to_csr(const cudaqx::tensor<uint8_t> &matrix,
                                  const char *name,
                                  std::vector<std::size_t> &indices,
                                  std::vector<std::size_t> &offsets) {
-  if (matrix.rank() == 0 || matrix.size() == 0)
+  details::validate_inlined_feedback_tensor(matrix, num_rows, num_cols, name);
+  if (matrix.size() == 0)
     return;
-  if (matrix.rank() != 2 || matrix.shape()[0] != num_rows ||
-      matrix.shape()[1] != num_cols) {
-    std::string actual;
-    for (std::size_t d = 0; d < matrix.rank(); ++d)
-      actual += (d ? ", " : "") + std::to_string(matrix.shape()[d]);
-    throw std::runtime_error(
-        std::string(name) + " has invalid shape [" + actual + "] - expected [" +
-        std::to_string(num_rows) + ", " + std::to_string(num_cols) +
-        "] or an empty tensor.");
-  }
   offsets.resize(num_rows + 1);
   offsets[0] = 0;
   for (std::size_t r = 0; r < num_rows; ++r) {

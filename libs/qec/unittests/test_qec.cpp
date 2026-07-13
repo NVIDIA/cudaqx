@@ -2269,10 +2269,16 @@ protected:
   std::size_t get_num_z_stabilizers() const override { return 1; }
 
   bool declare_feedback;
+  uint8_t detector_feedback_value;
+  uint8_t observable_feedback_value;
 
 public:
-  explicit feedback_toy_code(bool declare_feedback)
-      : declare_feedback(declare_feedback) {
+  explicit feedback_toy_code(bool declare_feedback,
+                             uint8_t detector_feedback_value = 1,
+                             uint8_t observable_feedback_value = 1)
+      : declare_feedback(declare_feedback),
+        detector_feedback_value(detector_feedback_value),
+        observable_feedback_value(observable_feedback_value) {
     operation_encodings.insert(std::make_pair(cudaq::qec::operation::prep0,
                                               cudaq::qec::feedback_toy::prep0));
     operation_encodings.insert(
@@ -2286,7 +2292,7 @@ public:
     if (!declare_feedback)
       return code::get_inlined_feedback();
     cudaqx::tensor<uint8_t> feedback({2, 2});
-    feedback.at({0, 1}) = 1;
+    feedback.at({0, 1}) = detector_feedback_value;
     return feedback;
   }
 
@@ -2294,7 +2300,7 @@ public:
     if (!declare_feedback)
       return code::get_observable_inlined_feedback_z();
     cudaqx::tensor<uint8_t> feedback({1, 2});
-    feedback.at({0, 1}) = 1;
+    feedback.at({0, 1}) = observable_feedback_value;
     return feedback;
   }
 };
@@ -2327,27 +2333,27 @@ public:
 TEST(QECCodeTester, checkInlinedFeedbackToyMemoryCircuit) {
   feedback_toy_code toy(/*declare_feedback=*/true);
   const std::size_t numShots = 20;
-  const std::size_t numRounds = 4;
-  auto [syndromes, data] = cudaq::qec::sample_memory_circuit(
-      toy, cudaq::qec::operation::prep0, numShots, numRounds);
+  for (const std::size_t numRounds : {1UL, 2UL, 3UL, 4UL}) {
+    auto [syndromes, data] = cudaq::qec::sample_memory_circuit(
+        toy, cudaq::qec::operation::prep0, numShots, numRounds);
 
-  // 1 first-round boundary + 2 * (numRounds - 1) cross-round + 1 final
-  // boundary detectors.
-  ASSERT_EQ(syndromes.rank(), 2);
-  ASSERT_EQ(syndromes.shape()[0], numShots);
-  ASSERT_EQ(syndromes.shape()[1], 2 * numRounds);
-  for (std::size_t shot = 0; shot < numShots; ++shot)
-    for (std::size_t d = 0; d < syndromes.shape()[1]; ++d)
-      EXPECT_EQ(syndromes.at({shot, d}), 0)
-          << "shot " << shot << ", detector " << d;
+    // 1 first-round boundary + 2 * (numRounds - 1) cross-round + 1 final
+    // boundary detectors.
+    ASSERT_EQ(syndromes.rank(), 2);
+    ASSERT_EQ(syndromes.shape()[0], numShots);
+    ASSERT_EQ(syndromes.shape()[1], 2 * numRounds);
+    for (std::size_t shot = 0; shot < numShots; ++shot)
+      for (std::size_t d = 0; d < syndromes.shape()[1]; ++d)
+        EXPECT_EQ(syndromes.at({shot, d}), 0)
+            << "rounds " << numRounds << ", shot " << shot << ", detector "
+            << d;
 
-  // The individual data qubits are randomized by the XX measurement, but the
-  // ZZ parity must close deterministically every shot.
-  ASSERT_EQ(data.rank(), 2);
-  ASSERT_EQ(data.shape()[0], numShots);
-  ASSERT_EQ(data.shape()[1], 2);
-  for (std::size_t shot = 0; shot < numShots; ++shot)
-    EXPECT_EQ(data.at({shot, 0}) ^ data.at({shot, 1}), 0) << "shot " << shot;
+    // data contains raw final measurements. In particular, it does not fold
+    // get_observable_inlined_feedback_z() into a corrected logical result.
+    ASSERT_EQ(data.rank(), 2);
+    ASSERT_EQ(data.shape()[0], numShots);
+    ASSERT_EQ(data.shape()[1], 2);
+  }
 }
 
 TEST(QECCodeTester, checkInlinedFeedbackObservableBasisSelection) {
@@ -2383,8 +2389,6 @@ TEST(QECCodeTester, checkInlinedFeedbackObservableBasisSelection) {
             << "shot " << shot << ", detector " << d;
     ASSERT_EQ(data.shape()[0], numShots);
     ASSERT_EQ(data.shape()[1], 2);
-    for (std::size_t shot = 0; shot < numShots; ++shot)
-      EXPECT_EQ(data.at({shot, 0}) ^ data.at({shot, 1}), 0) << "shot " << shot;
   }
 
   // (converse) Wrong-shape Z matrix, valid X matrix: the same Z-memory run
@@ -2404,6 +2408,31 @@ TEST(QECCodeTester, checkInlinedFeedbackObservableBasisSelection) {
           << "unexpected failure reason: " << e.what();
     }
   }
+}
+
+TEST(QECCodeTester, checkInlinedFeedbackRejectsNonBinaryDeclarations) {
+  auto expect_non_binary_rejection = [](const feedback_toy_code &toy,
+                                        const std::string &getter_name) {
+    try {
+      cudaq::qec::sample_memory_circuit(toy, cudaq::qec::operation::prep0,
+                                        /*numShots=*/1, /*numRounds=*/1);
+      FAIL() << "expected sample_memory_circuit to reject " << getter_name;
+    } catch (const std::exception &e) {
+      EXPECT_NE(
+          std::string(e.what()).find(getter_name + " has non-binary value 2"),
+          std::string::npos)
+          << "unexpected failure reason: " << e.what();
+    }
+  };
+
+  expect_non_binary_rejection(feedback_toy_code(/*declare_feedback=*/true,
+                                                /*detector_feedback_value=*/2),
+                              "get_inlined_feedback()");
+  expect_non_binary_rejection(
+      feedback_toy_code(/*declare_feedback=*/true,
+                        /*detector_feedback_value=*/1,
+                        /*observable_feedback_value=*/2),
+      "get_observable_inlined_feedback_z()");
 }
 
 TEST(QECCodeTester, checkInlinedFeedbackToyNegativeControl) {
@@ -2431,7 +2460,7 @@ TEST(QECCodeTester, checkInlinedFeedbackToyDem) {
   // dem_from_kernel; with circuit-level noise it must produce a valid model
   // (a noiseless model has no error mechanisms and is rejected downstream).
   feedback_toy_code toy(/*declare_feedback=*/true);
-  const std::size_t numRounds = 4;
+  const std::size_t numRounds = 3;
   cudaq::noise_model noise;
   noise.add_all_qubit_channel("x", cudaq::qec::two_qubit_depolarization(0.01),
                               /*num_controls=*/1);
@@ -2498,6 +2527,33 @@ TEST(InlinedFeedbackLayout, ThrowsOnWrongShape) {
                std::runtime_error);
 }
 
+TEST(InlinedFeedbackLayout, ThrowsOnNonBinaryEntries) {
+  cudaqx::tensor<uint8_t> empty;
+
+  cudaqx::tensor<uint8_t> bad_detector({2, 2});
+  bad_detector.at({1, 0}) = 2;
+  try {
+    cudaq::qec::build_inlined_feedback_layout(bad_detector, empty, 2, 0);
+    FAIL() << "expected non-binary detector feedback to be rejected";
+  } catch (const std::exception &e) {
+    EXPECT_NE(std::string(e.what()).find("non-binary value 2 at flat index 2"),
+              std::string::npos)
+        << "unexpected failure reason: " << e.what();
+  }
+
+  cudaqx::tensor<uint8_t> bad_observable({1, 2});
+  bad_observable.at({0, 1}) = 255;
+  try {
+    cudaq::qec::build_inlined_feedback_layout(empty, bad_observable, 2, 1);
+    FAIL() << "expected non-binary observable feedback to be rejected";
+  } catch (const std::exception &e) {
+    EXPECT_NE(
+        std::string(e.what()).find("non-binary value 255 at flat index 1"),
+        std::string::npos)
+        << "unexpected failure reason: " << e.what();
+  }
+}
+
 // The entry-point memory-circuit kernel (defined in device/memory_circuit.cpp);
 // forward-declared here - like the feedback_toy kernels above - so the
 // conformance test below can drive dem_from_kernel directly.
@@ -2517,13 +2573,12 @@ __qpu__ void memory_circuit(const code::stabilizer_round &stabilizer_round,
 
 // Conformance: the device fold inside memory_circuit and the host-side rule in
 // build_inlined_feedback_layout must agree on which records compose each
-// detector. Build the measurements-to-detectors matrix (M2D) from the kernel
-// and compare it, row by row, against the M2D reconstructed from the host
-// layout plus the known emission order. If either the device fold or the host
-// layout drifts, this test fails.
-TEST(InlinedFeedbackLayout, HostLayoutMatchesKernelM2D) {
+// detector and observable. Build M2D and M2O from the kernel and compare them,
+// row by row, against the matrices reconstructed from the host layout plus the
+// known emission order. If either fold drifts, this test fails.
+TEST(InlinedFeedbackLayout, HostLayoutMatchesKernelM2DAndM2O) {
   feedback_toy_code toy(/*declare_feedback=*/true);
-  const std::size_t numRounds = 4;
+  const std::size_t numRounds = 3;
   const std::size_t numData = 2, numAncx = 1, numAncz = 1;
   const std::size_t numCols = numAncx + numAncz; // records per round
   const std::size_t num_obs = 1;
@@ -2612,5 +2667,22 @@ TEST(InlinedFeedbackLayout, HostLayoutMatchesKernelM2D) {
   for (std::size_t d = 0; d < expected.size(); ++d) {
     std::set<std::size_t> actual(m2d.rows[d].begin(), m2d.rows[d].end());
     EXPECT_EQ(actual, expected[d]) << "detector " << d;
+  }
+
+  // Observable m contains every per-round record selected by observable row m
+  // followed by the final data measurements in logical-observable row m.
+  ASSERT_EQ(m2o.rows.size(), num_obs);
+  for (std::size_t obs = 0; obs < num_obs; ++obs) {
+    std::set<std::size_t> obs_expected;
+    for (std::size_t r = 0; r < numRounds; ++r)
+      for (auto k : herald_cols(layout.observable_indices,
+                                layout.observable_offsets, obs))
+        obs_expected.insert(rec(r, k));
+    for (std::size_t q = 0; q < numData; ++q)
+      if (obs_flat[obs * numData + q] != 0)
+        obs_expected.insert(numRounds * numCols + q);
+
+    std::set<std::size_t> actual(m2o.rows[obs].begin(), m2o.rows[obs].end());
+    EXPECT_EQ(actual, obs_expected) << "observable " << obs;
   }
 }

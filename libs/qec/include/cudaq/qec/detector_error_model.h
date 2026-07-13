@@ -1,5 +1,5 @@
 /****************************************************************-*- C++ -*-****
- * Copyright (c) 2025 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2025 - 2026 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -82,6 +83,41 @@ struct detector_error_model {
                                bool remove_zero_syndrome_errors = false);
 };
 
+namespace details {
+
+/// Validate one optional inlined-feedback tensor. Empty tensors represent no
+/// feedback. Non-empty tensors must have the requested shape and contain only
+/// exact binary values so that no caller can silently reinterpret an arbitrary
+/// nonzero uint8_t as a measurement-record dependency.
+inline void validate_inlined_feedback_tensor(
+    const cudaqx::tensor<uint8_t> &tensor, std::size_t expected_rows,
+    std::size_t expected_cols, const std::string &name) {
+  if (tensor.size() == 0)
+    return;
+
+  if (tensor.rank() != 2 || tensor.shape()[0] != expected_rows ||
+      tensor.shape()[1] != expected_cols) {
+    std::string actual;
+    for (std::size_t d = 0; d < tensor.rank(); ++d)
+      actual += (d ? ", " : "") + std::to_string(tensor.shape()[d]);
+    throw std::runtime_error(name + " has invalid shape [" + actual +
+                             "] - expected [" + std::to_string(expected_rows) +
+                             ", " + std::to_string(expected_cols) +
+                             "] or an empty tensor.");
+  }
+
+  for (std::size_t i = 0; i < tensor.size(); ++i) {
+    const auto value = tensor.data()[i];
+    if (value > 1)
+      throw std::runtime_error(
+          name + " has non-binary value " +
+          std::to_string(static_cast<unsigned int>(value)) + " at flat index " +
+          std::to_string(i) + "; entries must be exactly 0 or 1.");
+  }
+}
+
+} // namespace details
+
 /// @brief Record-to-detector composition layout derived from a code's
 /// declared inlined-feedback matrices (CSR-style).
 ///
@@ -118,7 +154,7 @@ struct inlined_feedback_layout {
 /// @param num_observables Number of logical observables.
 /// @return The CSR layout; see inlined_feedback_layout.
 /// @throws std::runtime_error if a non-empty tensor's shape does not match
-///         the expected dimensions.
+///         the expected dimensions or if an entry is not exactly 0 or 1.
 inlined_feedback_layout
 build_inlined_feedback_layout(const cudaqx::tensor<uint8_t> &feedback,
                               const cudaqx::tensor<uint8_t> &obs_feedback,

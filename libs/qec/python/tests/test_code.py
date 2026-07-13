@@ -377,9 +377,12 @@ def _feedback_toy_round(q: patch, x_stabilizers: list[int],
     return results
 
 
-def test_python_inlined_feedback_toy():
+def _register_feedback_toy(name,
+                           detector_feedback=None,
+                           observable_feedback_z=None,
+                           observable_feedback_x=None):
+    """Register one variant of the common Python feedback toy."""
 
-    @qec.code('py-feedback-toy')
     class FeedbackToy:
 
         def __init__(self):
@@ -411,40 +414,65 @@ def test_python_inlined_feedback_toy():
         def get_num_z_stabilizers(self):
             return 1
 
-        def get_inlined_feedback(self):
-            return np.array([[0, 1], [0, 0]], dtype=np.uint8)
+    if detector_feedback is not None:
+        FeedbackToy.get_inlined_feedback = lambda self: detector_feedback()
+    if observable_feedback_z is not None:
+        FeedbackToy.get_observable_inlined_feedback_z = \
+            lambda self: observable_feedback_z()
+    if observable_feedback_x is not None:
+        FeedbackToy.get_observable_inlined_feedback_x = \
+            lambda self: observable_feedback_x()
+    qec.code(name)(FeedbackToy)
 
-        def get_observable_inlined_feedback_z(self):
-            # Exercise the bridge's dtype coercion: int64 instead of uint8.
-            return np.array([[0, 1]])
+
+def _valid_detector_feedback():
+    return np.array([[0, 1], [0, 0]], dtype=np.uint8)
+
+
+def _valid_observable_feedback():
+    # Exercise the bridge's dtype coercion: int64 instead of uint8.
+    return np.array([[0, 1]])
+
+
+def test_python_inlined_feedback_toy():
+    _register_feedback_toy('py-feedback-toy', _valid_detector_feedback,
+                           _valid_observable_feedback)
 
     # Sample on stim, mirroring the C++ unit tests (test_qec links the stim
-    # target). The toy's X record is genuinely random in round 1, and the
-    # default (qpp) target does not preserve cross-round mid-circuit
-    # measurement correlations when sampling Python kernels - independent of
-    # the inlined-feedback machinery, but this toy (unlike the steane
-    # example, whose records are all deterministically 0) exposes it.
+    # target). qpp-cpu cannot preserve the cross-round correlations required by
+    # this Python kernel and is rejected explicitly by the binding below.
     cudaq.set_target('stim')
     try:
-        # numRounds >= 2 exercises the final boundary detector (same-round
-        # herald) distinctly from the cross-round detectors (earlier-round
-        # herald).
-        numShots, numRounds = 20, 4
-        syndromes, data = qec.sample_memory_circuit(
-            qec.get_code('py-feedback-toy'),
-            numShots=numShots,
-            numRounds=numRounds)
+        code = qec.get_code('py-feedback-toy')
+        numShots = 20
+        for numRounds in (1, 2, 3, 4):
+            syndromes, data = qec.sample_memory_circuit(code,
+                                                        numShots=numShots,
+                                                        numRounds=numRounds)
 
-        # 1 first-round boundary + 2 * (numRounds - 1) cross-round + 1 final
-        # boundary detectors, all deterministic (zero) in the noiseless
-        # circuit.
-        assert syndromes.shape == (numShots, 2 * numRounds)
-        assert not np.any(syndromes)
+            # 1 first-round boundary + 2 * (numRounds - 1) cross-round + 1
+            # final boundary detectors, all deterministic (zero) in the
+            # noiseless circuit.
+            assert syndromes.shape == (numShots, 2 * numRounds)
+            assert not np.any(syndromes)
 
-        # The individual data qubits are randomized by the XX measurement,
-        # but the ZZ parity must close deterministically every shot.
-        assert data.shape == (numShots, 2)
-        assert not np.any(data[:, 0] ^ data[:, 1])
+            # data contains raw final measurements; observable feedback is
+            # folded into the DEM observable, not into this returned tensor.
+            assert data.shape == (numShots, 2)
+    finally:
+        cudaq.reset_target()
+
+
+def test_python_inlined_feedback_rejects_unsupported_qpp_sampling():
+    _register_feedback_toy('py-feedback-toy-qpp', _valid_detector_feedback,
+                           _valid_observable_feedback)
+    cudaq.set_target('qpp-cpu')
+    try:
+        with pytest.raises(RuntimeError,
+                           match="Use cudaq.set_target\\('stim'\\)"):
+            qec.sample_memory_circuit(qec.get_code('py-feedback-toy-qpp'),
+                                      numShots=1,
+                                      numRounds=1)
     finally:
         cudaq.reset_target()
 
@@ -454,37 +482,7 @@ def test_python_inlined_feedback_toy_negative_control():
     # byproduct makes the record-0 detectors non-deterministic and stim must
     # reject the circuit. This proves the Python-declared feedback is doing
     # the work in the positive test above.
-    @qec.code('py-feedback-toy-nofb')
-    class FeedbackToyNoFeedback:
-
-        def __init__(self):
-            qec.Code.__init__(self)
-            self.stabilizers = [
-                cudaq.SpinOperator.from_word(w) for w in ["XX", "ZZ"]
-            ]
-            self.pauli_observables = [cudaq.SpinOperator.from_word("ZZ")]
-            self.operation_encodings = {
-                qec.operation.prep0: _feedback_toy_prep0,
-                qec.operation.stabilizer_round: _feedback_toy_round
-            }
-
-        def get_num_data_qubits(self):
-            return 2
-
-        def get_num_ancilla_qubits(self):
-            return 2
-
-        def get_num_ancilla_x_qubits(self):
-            return 1
-
-        def get_num_ancilla_z_qubits(self):
-            return 1
-
-        def get_num_x_stabilizers(self):
-            return 1
-
-        def get_num_z_stabilizers(self):
-            return 1
+    _register_feedback_toy('py-feedback-toy-nofb')
 
     # stim's determinism analysis (a std::invalid_argument surfaced as
     # ValueError) rejects the circuit inside dem_from_kernel, before any
@@ -495,6 +493,34 @@ def test_python_inlined_feedback_toy_negative_control():
                                   numRounds=4)
 
 
+@pytest.mark.parametrize("invalid_target", ["detector", "observable"])
+def test_python_inlined_feedback_rejects_non_binary_values(invalid_target):
+
+    def invalid_detector_feedback():
+        # All of these values previously truncated or wrapped during the eager
+        # uint8 conversion in the Python bridge.
+        return np.array([[2, -1], [0.5, 256]])
+
+    def invalid_observable_feedback():
+        return np.array([[0, 2]])
+
+    name = f'py-feedback-toy-non-binary-{invalid_target}'
+    _register_feedback_toy(
+        name, invalid_detector_feedback if invalid_target == "detector" else
+        _valid_detector_feedback, invalid_observable_feedback
+        if invalid_target == "observable" else _valid_observable_feedback)
+
+    cudaq.set_target('stim')
+    try:
+        with pytest.raises(RuntimeError,
+                           match="must contain only exact 0 or 1 entries"):
+            qec.sample_memory_circuit(qec.get_code(name),
+                                      numShots=1,
+                                      numRounds=1)
+    finally:
+        cudaq.reset_target()
+
+
 def test_python_inlined_feedback_observable_basis_selection():
     # The bridge routes get_observable_inlined_feedback_x to the X-basis getter,
     # so it is never queried on the Z (prep0) path. Plant a deliberately
@@ -502,48 +528,14 @@ def test_python_inlined_feedback_observable_basis_selection():
     # _x into the Z path, flatten_feedback_tensor's shape check would reject the
     # circuit. The toy registers only prep0, so this proves selection from the
     # Z path (the wrong-shape _x is inert there).
-    @qec.code('py-feedback-toy-basis-select')
-    class FeedbackToyBasisSelect:
+    def wrong_shape_observable_feedback():
+        # Wrong shape for [num_obs=1 x numCols=2]; must never reach the Z-basis
+        # flatten on the prep0 path.
+        return np.zeros((3, 5), dtype=np.uint8)
 
-        def __init__(self):
-            qec.Code.__init__(self)
-            self.stabilizers = [
-                cudaq.SpinOperator.from_word(w) for w in ["XX", "ZZ"]
-            ]
-            self.pauli_observables = [cudaq.SpinOperator.from_word("ZZ")]
-            self.operation_encodings = {
-                qec.operation.prep0: _feedback_toy_prep0,
-                qec.operation.stabilizer_round: _feedback_toy_round
-            }
-
-        def get_num_data_qubits(self):
-            return 2
-
-        def get_num_ancilla_qubits(self):
-            return 2
-
-        def get_num_ancilla_x_qubits(self):
-            return 1
-
-        def get_num_ancilla_z_qubits(self):
-            return 1
-
-        def get_num_x_stabilizers(self):
-            return 1
-
-        def get_num_z_stabilizers(self):
-            return 1
-
-        def get_inlined_feedback(self):
-            return np.array([[0, 1], [0, 0]], dtype=np.uint8)
-
-        def get_observable_inlined_feedback_z(self):
-            return np.array([[0, 1]], dtype=np.uint8)
-
-        def get_observable_inlined_feedback_x(self):
-            # Wrong shape for [num_obs=1 x numCols=2]; must never reach the
-            # Z-basis flatten on the prep0 path.
-            return np.zeros((3, 5), dtype=np.uint8)
+    _register_feedback_toy('py-feedback-toy-basis-select',
+                           _valid_detector_feedback, _valid_observable_feedback,
+                           wrong_shape_observable_feedback)
 
     cudaq.set_target('stim')
     try:
@@ -555,7 +547,6 @@ def test_python_inlined_feedback_observable_basis_selection():
         assert syndromes.shape == (numShots, 2 * numRounds)
         assert not np.any(syndromes)
         assert data.shape == (numShots, 2)
-        assert not np.any(data[:, 0] ^ data[:, 1])
     finally:
         cudaq.reset_target()
 
