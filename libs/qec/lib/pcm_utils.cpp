@@ -27,7 +27,14 @@ round_layout::round_layout(std::size_t num_syndromes_per_round,
     : S(num_syndromes_per_round), B(num_boundary_syndromes),
       num_rows(total_rows) {
   boundary = (B != 0 && B != S);
-  num_rounds = boundary ? (num_rows - 2 * B) / S + 2 : num_rows / S;
+  // Guard the boundary subtraction: a malformed layout (num_rows < 2*B) would
+  // otherwise underflow. Callers validate row consistency and reject it.
+  if (!boundary)
+    num_rounds = num_rows / S;
+  else if (num_rows >= 2 * B)
+    num_rounds = (num_rows - 2 * B) / S + 2;
+  else
+    num_rounds = 0;
 }
 
 std::size_t round_layout::round_start(std::size_t r) const {
@@ -184,16 +191,14 @@ void validate_pcm_for_rounds_params(std::uint32_t num_syndromes_per_round,
         "get_pcm_for_rounds: number of PCM rows is inconsistent with the given "
         "num_syndromes_per_round and num_boundary_syndromes");
   }
+  if (end_round >= layout.num_rounds) {
+    throw std::invalid_argument(
+        "get_pcm_for_rounds: end_round is greater than the last round index");
+  }
   const std::size_t first_row_to_keep = layout.round_start(start_round);
-  const std::size_t last_row_to_keep = layout.round_start(end_round + 1) - 1;
   if (first_row_to_keep >= num_rows) {
     throw std::invalid_argument(
         "get_pcm_for_rounds: first_row_to_keep is greater than the number of "
-        "rows in PCM");
-  }
-  if (last_row_to_keep >= num_rows) {
-    throw std::invalid_argument(
-        "get_pcm_for_rounds: last_row_to_keep is greater than the number of "
         "rows in PCM");
   }
 }

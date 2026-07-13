@@ -93,7 +93,6 @@ void sliding_window::initialize_window(std::size_t batch_size) {
   std::fill(window_proc_times.begin(), window_proc_times.end(), 0.0);
   this->batch_size = batch_size;
   window_rounds.clear();
-  window_start_round = 0;
   rounds_since_last_reset = 0;
   num_windows_decoded = 0;
   CUDA_QEC_DBG("Initializing window");
@@ -210,7 +209,6 @@ std::vector<decoder_result> sliding_window::decode_batch(
     }
     return results;
   }
-  // Else we're receiving a single round.
   if (rounds_since_last_reset == 0)
     initialize_window(syndromes.size());
 
@@ -221,12 +219,17 @@ std::vector<decoder_result> sliding_window::decode_batch(
 
   const std::size_t expected = layout.round_width(rounds_since_last_reset);
   for (const auto &r : syndromes)
+    // Inputs are either a whole block (handled above) or one detector layer per
+    // call. Multi-round chunks are rejected.
     if (r.size() != expected)
       throw std::invalid_argument(fmt::format(
           "sliding_window: round {} has width {} but expected {} for this "
           "round in the boundary layout",
           rounds_since_last_reset, r.size(), expected));
 
+  // Maybe FIXME:
+  // Copies this layer into the rolling buffer. Revisit with a pooled buffer if
+  // buffer if per-round allocation shows up in profiles.
   window_rounds.push_back(syndromes);
   ++rounds_since_last_reset;
 
@@ -244,13 +247,11 @@ std::vector<decoder_result> sliding_window::decode_batch(
     window_rounds.clear();
     rounds_since_last_reset = 0;
     num_windows_decoded = 0;
-    window_start_round = 0;
     return results;
   }
 
   // Slide the window: drop the oldest step_size rounds.
   window_rounds.erase(window_rounds.begin(), window_rounds.begin() + step_size);
-  window_start_round += step_size;
   CUDA_QEC_DBG("Returning empty decoder_result");
   return std::vector<decoder_result>(); // empty return value
 }

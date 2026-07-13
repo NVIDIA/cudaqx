@@ -874,8 +874,9 @@ TEST(QECCodeTester, checkDemFromMemoryCircuitShor9) {
     }
 
     // Calling the boundary-aware canonicalize again is stable.
-    dem.canonicalize_for_rounds(interiorWidth, static_cast<uint32_t>(numFixed),
-                                /*remove_zero_syndrome_errors=*/true);
+    dem.canonicalize_for_rounds_with_boundary(
+        interiorWidth, static_cast<uint32_t>(numFixed),
+        /*remove_zero_syndrome_errors=*/true);
     EXPECT_EQ(dem.detector_error_matrix.shape()[0], expected_rows);
     EXPECT_EQ(dem.detector_error_matrix.shape()[1], num_cols);
     EXPECT_EQ(dem.error_rates.size(), num_cols);
@@ -901,18 +902,18 @@ TEST(QECCodeTester, checkSlidingWindowShor9Boundary) {
 
     auto dem = shor9_dem(num_rounds, prep);
     const std::size_t rows = dem.detector_error_matrix.shape()[0];
-    // Padded (uniform) layout adds (interior - numBoundary) rows at each
-    // boundary => num_rounds + 1 uniform rounds.
-    const std::size_t padded_rounds =
+    // The [B | S...S | B] layout has one more detector layer than there are
+    // rounds: two narrow boundary layers plus (num_rounds - 1) interior layers.
+    const std::size_t num_layers =
         (rows + 2 * (interior - numBoundary)) / interior;
-    ASSERT_EQ(padded_rounds, num_rounds + 1);
+    ASSERT_EQ(num_layers, num_rounds + 1);
 
     auto full =
         cudaq::qec::decoder::get("single_error_lut", dem.detector_error_matrix);
-    // A single window spanning all rounds -- should match the full decoder.
+    // A single window spanning all layers -- should match the full decoder.
     auto sw = cudaq::qec::decoder::get(
         "sliding_window", dem.detector_error_matrix,
-        shor9_sliding_params(padded_rounds, interior, numBoundary,
+        shor9_sliding_params(num_layers, interior, numBoundary,
                              dem.error_rates));
 
     expectObservablesMatchFullDecoder(
@@ -922,11 +923,11 @@ TEST(QECCodeTester, checkSlidingWindowShor9Boundary) {
   }
 }
 
-// Real-time (streaming) sliding-window decoding of the Shor boundary layout:
+// Streaming sliding-window decoding of the Shor boundary layout:
 // detector layers are fed one at a time. The two boundary layers arrive with
 // numZStabs (6) values and the interior layers with numXStabs+numZStabs (8)
-// values; the decoder pads the boundary layers on the fly. The streamed result
-// must match a full decoder.
+// values; the decoder consumes each layer at its native width.
+// The streamed result must match a full decoder.
 TEST(QECCodeTester, checkSlidingWindowShor9Streaming) {
   auto shor = cudaq::qec::get_code("shor9");
   const std::size_t numXStabs = shor->get_num_x_stabilizers();
@@ -942,12 +943,12 @@ TEST(QECCodeTester, checkSlidingWindowShor9Streaming) {
 
     auto dem = shor9_dem(num_rounds, prep);
     const std::size_t rows = dem.detector_error_matrix.shape()[0];
-    const std::size_t padded_rounds =
+    const std::size_t num_layers =
         (rows + 2 * (interior - numBoundary)) / interior;
 
-    // Detector-layer sizes: [numBoundary | interior*(padded_rounds-2) |
+    // Detector-layer sizes: [numBoundary | interior*(num_layers-2) |
     // numBoundary].
-    std::vector<std::size_t> layer_sizes(padded_rounds, interior);
+    std::vector<std::size_t> layer_sizes(num_layers, interior);
     layer_sizes.front() = numBoundary;
     layer_sizes.back() = numBoundary;
 
@@ -978,10 +979,10 @@ TEST(QECCodeTester, checkSlidingWindowShor9Streaming) {
   }
 }
 
-// End-to-end realtime sliding-window decoding of a
-// boundary-layout memory circuit.
-// The decoder streams one detector layer at its real width ([B | S...S | B])
-// and must match a whole-block decode of the same detectors.
+
+// End-to-end realtime sliding-window decoding of a boundary-layout memory
+// circuit. The decoder streams one detector layer at its real width ([B | S...S
+// | B]) and must match a whole-block decode of the same detectors.
 TEST(QECCodeTester, checkSlidingWindowRealtimeBoundaryStreaming) {
   cudaq::set_random_seed(13);
   auto code = cudaq::qec::get_code("surface_code",

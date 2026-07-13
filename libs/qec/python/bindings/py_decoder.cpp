@@ -815,9 +815,9 @@ void bindDecoder(nb::module_ &mod) {
            nb::arg("num_syndromes_per_round"),
            nb::arg("remove_zero_syndrome_errors") = false)
       .def(
-          "canonicalize_for_rounds",
+          "canonicalize_for_rounds_with_boundary",
           static_cast<void (detector_error_model::*)(uint32_t, uint32_t, bool)>(
-              &detector_error_model::canonicalize_for_rounds),
+              &detector_error_model::canonicalize_for_rounds_with_boundary),
           R"pbdoc(
             Boundary-aware canonicalization for memory-experiment DEMs whose
             first and last detector layers (the boundaries) are narrower than
@@ -828,8 +828,9 @@ void bindDecoder(nb::module_ &mod) {
             This makes the round-based column ordering respect the true rounds
             even when the boundary width differs from the interior width.
 
-            ``remove_zero_syndrome_errors`` behaves as in the two-argument
-            overload. Raises ``ValueError`` if ``num_syndromes_per_round`` is
+            ``remove_zero_syndrome_errors`` behaves as in
+            ``canonicalize_for_rounds``. Raises ``ValueError`` if
+            ``num_syndromes_per_round`` is
             zero or ``num_boundary_syndromes`` exceeds
             ``num_syndromes_per_round``.
           )pbdoc",

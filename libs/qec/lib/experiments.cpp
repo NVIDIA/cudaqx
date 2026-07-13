@@ -516,8 +516,9 @@ dem_from_memory_circuit(const code &code, operation statePrep,
     // Boundary width = fixed-basis count (numZStabs for a Z-basis prep, else
     // numXStabs).
     const uint32_t numBoundary = is_z_prep ? numZStabs : numXStabs;
-    dem.canonicalize_for_rounds(numXStabs + numZStabs, numBoundary,
-                                /*remove_zero_syndrome_errors=*/true);
+    dem.canonicalize_for_rounds_with_boundary(
+        numXStabs + numZStabs, numBoundary,
+        /*remove_zero_syndrome_errors=*/true);
   } else {
     // A single-basis DEM is uniform (every layer has the same width)
     const std::size_t numReturnSynPerRound =

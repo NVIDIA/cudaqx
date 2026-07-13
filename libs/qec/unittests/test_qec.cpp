@@ -2085,11 +2085,11 @@ TEST(DetectorErrorModelTest, CanonicalizeBoundaryRejectsWideBoundary) {
   dem.observables_flips_matrix = cudaqx::tensor<uint8_t>({1, 2});
   dem.error_rates = {0.1, 0.2};
 
-  EXPECT_THROW(
-      dem.canonicalize_for_rounds(/*num_syndromes_per_round=*/2,
-                                  /*num_boundary_syndromes=*/3,
-                                  /*remove_zero_syndrome_errors=*/true),
-      std::invalid_argument);
+  EXPECT_THROW(dem.canonicalize_for_rounds_with_boundary(
+                   /*num_syndromes_per_round=*/2,
+                   /*num_boundary_syndromes=*/3,
+                   /*remove_zero_syndrome_errors=*/true),
+               std::invalid_argument);
 }
 
 TEST(DetectorErrorModelTest, CanonicalizeWithoutErrorIds) {

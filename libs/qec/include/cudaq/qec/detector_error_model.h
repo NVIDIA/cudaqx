@@ -82,7 +82,7 @@ struct detector_error_model {
   void canonicalize_for_rounds(uint32_t num_syndromes_per_round,
                                bool remove_zero_syndrome_errors = false);
 
-  /// @brief Boundary-aware overload of canonicalize_for_rounds for
+  /// @brief Boundary-aware variant of canonicalize_for_rounds for
   /// memory-experiment DEMs whose first and last detector layers (the
   /// boundaries) are narrower than the interior layers
   /// @param num_syndromes_per_round Interior-layer width (syndromes per
@@ -94,9 +94,9 @@ struct detector_error_model {
   /// @param remove_zero_syndrome_errors Same meaning as in the scalar overload.
   /// @throws std::invalid_argument if @p num_syndromes_per_round is 0 or
   /// @p num_boundary_syndromes > @p num_syndromes_per_round.
-  void canonicalize_for_rounds(uint32_t num_syndromes_per_round,
-                               uint32_t num_boundary_syndromes,
-                               bool remove_zero_syndrome_errors);
+  void canonicalize_for_rounds_with_boundary(uint32_t num_syndromes_per_round,
+                                             uint32_t num_boundary_syndromes,
+                                             bool remove_zero_syndrome_errors);
 
 private:
   /// Shared implementation of the canonicalize_for_rounds overloads. Given the

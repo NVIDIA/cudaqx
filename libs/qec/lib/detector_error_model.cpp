@@ -158,13 +158,13 @@ void detector_error_model::canonicalize_for_rounds(
                                remove_zero_syndrome_errors);
 }
 
-void detector_error_model::canonicalize_for_rounds(
+void detector_error_model::canonicalize_for_rounds_with_boundary(
     uint32_t num_syndromes_per_round, uint32_t num_boundary_syndromes,
     bool remove_zero_syndrome_errors) {
   // A boundary wider than the interior would misassign rounds silently.
   if (num_boundary_syndromes > num_syndromes_per_round)
     throw std::invalid_argument(
-        "canonicalize_for_rounds: num_boundary_syndromes (" +
+        "canonicalize_for_rounds_with_boundary: num_boundary_syndromes (" +
         std::to_string(num_boundary_syndromes) +
         ") must be <= num_syndromes_per_round (" +
         std::to_string(num_syndromes_per_round) + ")");

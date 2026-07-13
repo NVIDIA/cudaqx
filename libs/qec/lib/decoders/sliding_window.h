@@ -73,7 +73,6 @@ private:
 
   // State data
   std::vector<std::vector<std::vector<cudaq::qec::float_t>>> window_rounds;
-  std::size_t window_start_round = 0;
   std::size_t rounds_since_last_reset = 0;
   std::size_t batch_size = 1;
   std::size_t num_windows_decoded = 0;
