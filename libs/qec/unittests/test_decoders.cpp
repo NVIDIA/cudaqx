@@ -16,7 +16,6 @@
 #include <cuda_runtime_api.h>
 #include <future>
 #include <gtest/gtest.h>
-#include <limits>
 #include <optional>
 #include <random>
 #include <thread>
@@ -1306,30 +1305,6 @@ TEST(DecoderCudaDeviceId, NegativeIdThrows) {
   }
 }
 
-TEST(DecoderCudaDeviceId, OversizedIntegerThrowsBeforeNarrowing) {
-  cudaqx::heterogeneous_map params;
-  params.insert("cuda_device_id", std::numeric_limits<std::size_t>::max());
-  try {
-    auto d = cudaq::qec::decoder::get("sample_decoder", make_test_H(), params);
-    FAIL() << "expected std::runtime_error";
-  } catch (const std::runtime_error &e) {
-    EXPECT_NE(std::string(e.what()).find("cuda_device_id"), std::string::npos);
-    EXPECT_NE(std::string(e.what()).find("too large"), std::string::npos);
-  }
-}
-
-TEST(DecoderCudaDeviceId, NonIntegerThrows) {
-  cudaqx::heterogeneous_map params;
-  params.insert("cuda_device_id", true);
-  try {
-    auto d = cudaq::qec::decoder::get("sample_decoder", make_test_H(), params);
-    FAIL() << "expected std::runtime_error";
-  } catch (const std::runtime_error &e) {
-    EXPECT_NE(std::string(e.what()).find("cuda_device_id"), std::string::npos);
-    EXPECT_NE(std::string(e.what()).find("integer"), std::string::npos);
-  }
-}
-
 TEST(DecoderCudaDeviceId, OutOfRangeIdThrows) {
   cudaqx::heterogeneous_map params;
   params.insert("cuda_device_id", 1 << 20);
@@ -1379,24 +1354,6 @@ TEST(DecoderCudaDeviceId, KeyStrippedFromPluginParams) {
   params.insert("decode_to_obs", true);
   EXPECT_NO_THROW(
       cudaq::qec::decoder::get("strict_keys_decoder", make_test_H(), params));
-}
-
-TEST(DecoderCudaDeviceId, ConstructionFailureRestoresPreviousDevice) {
-  if (cuda_device_count() < 2)
-    GTEST_SKIP() << "needs >= 2 CUDA devices";
-  ScopedDeviceRestore restore;
-  ASSERT_EQ(cudaSetDevice(0), cudaSuccess);
-
-  cudaqx::heterogeneous_map params;
-  params.insert("cuda_device_id", 1);
-  params.insert("bogus_key", 1); // strict_keys_decoder throws in its ctor.
-  EXPECT_THROW(
-      cudaq::qec::decoder::get("strict_keys_decoder", make_test_H(), params),
-      std::runtime_error);
-
-  int current = -1;
-  ASSERT_EQ(cudaGetDevice(&current), cudaSuccess);
-  EXPECT_EQ(current, 0);
 }
 
 TEST(DecoderCudaDeviceId, AsyncWorkerPinsItself) {

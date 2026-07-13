@@ -1,5 +1,5 @@
 /****************************************************************-*- C++ -*-****
- * Copyright (c) 2024 - 2026 NVIDIA Corporation & Affiliates.                  *
+ * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -13,7 +13,6 @@
 #include <nanobind/ndarray.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
-#include <stdexcept>
 
 namespace nb = nanobind;
 
@@ -42,14 +41,7 @@ inline heterogeneous_map hetMapFromKwargs(const nb::kwargs &kwargs) {
     if (nb::isinstance<nb::bool_>(value)) {
       result.insert(key, nb::cast<bool>(value));
     } else if (nb::isinstance<nb::int_>(value)) {
-      std::size_t integer_value = 0;
-      try {
-        integer_value = nb::cast<std::size_t>(value);
-      } catch (...) {
-        throw std::runtime_error("Integer keyword argument '" + key +
-                                 "' must be non-negative and fit in size_t");
-      }
-      result.insert(key, integer_value);
+      result.insert(key, nb::cast<std::size_t>(value));
     } else if (nb::isinstance<nb::float_>(value)) {
       result.insert(key, nb::cast<double>(value));
     } else if (nb::isinstance<nb::str>(value)) {

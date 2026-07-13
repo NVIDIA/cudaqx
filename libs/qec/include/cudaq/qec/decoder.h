@@ -264,7 +264,7 @@ public:
   /// the "cuda_device_id" parameter, or -1 when no pin was requested.
   /// Construction pins the constructing thread persistently (the thread that
   /// creates a decoder is the thread expected to drive its decode calls).
-  int get_cuda_device_id() const;
+  int get_cuda_device_id() const { return cuda_device_id_; }
 
   /// @brief Set the observable matrix.
   void set_O_sparse(const std::vector<std::vector<uint32_t>> &O_sparse);
@@ -362,6 +362,10 @@ protected:
 
   /// @brief The decoder's D matrix in sparse format
   std::vector<std::vector<uint32_t>> D_sparse;
+
+  /// @brief CUDA device id consumed from the construction parameters by
+  /// decoder::get(); -1 = unpinned. See get_cuda_device_id().
+  int cuda_device_id_ = -1;
 
 private:
   decode_result_type result_type_ = decode_result_type::decode_to_errs;
