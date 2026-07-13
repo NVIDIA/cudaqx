@@ -241,3 +241,68 @@ else()
   message(WARNING "hololink_predecoder_bridge: skipped (missing deps). "
                   "Requires hololink bridge libs + TensorRT + cudaq-realtime-pipeline.")
 endif()
+
+# =========================================================================== #
+# Two-process decoding-server test (UDP transport)
+# =========================================================================== #
+# decoding_server is a decoder-agnostic decoding-server process: the
+# service end of the CUDA-Q `udp` DeviceCallChannel (the loopback stand-in for
+# the RoCE transport on hosts without an RDMA NIC), with its decoders selected
+# entirely by a YAML config file (decoding_server_config.yaml -- currently
+# pymatching; swap the decoder by editing the config, not the code).
+# test_decoding_server runs the caller (simulated QPU) side and spawns the
+# server as a subprocess.
+
+# The decoding-server server itself is built from libs/qec/tools/decoding-server
+# (this test spawns it as a subprocess and receives its path + config dir via
+# compile definitions).
+if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET decoding_server)
+  include(GoogleTest)
+
+  add_executable(test_decoding_server)
+  set_target_properties(test_decoding_server PROPERTIES
+    LINKER_LANGUAGE CXX)
+  target_include_directories(test_decoding_server PRIVATE
+    ${CUDAQ_REALTIME_INCLUDE_DIR}
+    ${CUDAToolkit_INCLUDE_DIRS}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/realtime/decoding-server-cqr
+  )
+  # -DQEC_DECODING_SERVER_PATH tells the test where the server binary lives
+  # (the example configs are placed next to it by tools/decoding-server). It
+  # rides COMPILER_FLAGS because cudaqx_add_device_code compiles with nvq++,
+  # which does not see target_compile_definitions.
+  cudaqx_add_device_code(test_decoding_server
+    SOURCES
+      test_decoding_server.cpp
+    COMPILER_FLAGS
+      --target stim
+      -frealtime-lowering
+      -DQEC_DECODING_SERVER_PATH=\"$<TARGET_FILE:decoding_server>\"
+  )
+
+  target_link_directories(test_decoding_server
+    PRIVATE ${CUDAQ_INSTALL_DIR}/lib)
+
+  # Caller side only: the simulation-cqr device wrappers lower the kernel's
+  # device_calls to the realtime frame ABI; deliberately NOT linking the
+  # decoding-server-cqr service, so the only decoder is the server's.
+  target_link_libraries(test_decoding_server PRIVATE
+    GTest::gtest_main
+    cudaq-qec
+    cudaq-qec-realtime-decoding
+    cudaq-qec-realtime-decoding-simulation-cqr
+    cudaq-device-call-runtime
+    cudaq::cudaq cudaq::cudaq-common cudaq-mlir-runtime
+    nvqir nvqir-stim
+  )
+
+  set_target_properties(test_decoding_server PROPERTIES
+    BUILD_RPATH
+      "${CMAKE_BINARY_DIR}/lib;${CMAKE_BINARY_DIR}/lib/decoder-plugins;${CUDAQ_INSTALL_DIR}/lib"
+  )
+
+  add_dependencies(test_decoding_server decoding_server)
+  add_dependencies(CUDAQXQECUnitTests test_decoding_server)
+  gtest_discover_tests(test_decoding_server
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+endif()

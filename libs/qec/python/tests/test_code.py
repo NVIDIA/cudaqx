@@ -39,6 +39,28 @@ def test_code_parity_matrices():
     assert parity_z.shape == (3, 7)
 
 
+def test_repetition_empty_x_matrices_preserve_rank():
+    repetition = qec.get_code("repetition", distance=3)
+
+    # Repetition is Z-only; empty X-side results must still be matrices with
+    # one column per data qubit so Python callers can inspect their shape.
+    parity_x = repetition.get_parity_x()
+    assert isinstance(parity_x, np.ndarray)
+    assert parity_x.dtype == np.uint8
+    assert parity_x.shape == (0, 3)
+
+    observables_x = repetition.get_observables_x()
+    assert isinstance(observables_x, np.ndarray)
+    assert observables_x.dtype == np.uint8
+    assert observables_x.shape == (0, 3)
+
+    parity_z = repetition.get_parity_z()
+    assert parity_z.shape == (2, 3)
+
+    observables_z = repetition.get_observables_z()
+    assert observables_z.shape == (1, 3)
+
+
 def test_code_stabilizers():
     steane = qec.get_code("steane")
     stabilizers = steane.get_stabilizers()
@@ -112,14 +134,13 @@ def test_noisy_simulation():
     cudaq.reset_target()
 
 
-@pytest.mark.skip
 def test_python_code():
     steane = qec.get_code("py-steane-example")
     syndromes, dataResults = qec.sample_memory_circuit(steane,
                                                        numShots=10,
                                                        numRounds=4)
     assert isinstance(syndromes, np.ndarray)
-    assert syndromes.shape == (10, 40)
+    assert syndromes.shape == (10, 24)
     print(syndromes)
     assert not np.any(syndromes)
 

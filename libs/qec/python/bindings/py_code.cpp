@@ -227,6 +227,21 @@ static nb::object get_python_kernel_or_throw(const code &self, operation op) {
 
   return it->second;
 }
+
+template <typename T>
+static auto copyCodeMatrixToPyArray(const cudaqx::tensor<T> &tensor,
+                                    std::size_t emptyCols) {
+  if (tensor.rank() == 0 && tensor.size() == 0) {
+    T *data_copy = new T[0];
+    size_t arr_shape[] = {0, emptyCols};
+    return nb::ndarray<nb::numpy, T>(
+        data_copy, 2, arr_shape, nb::capsule(data_copy, [](void *p) noexcept {
+          delete[] static_cast<T *>(p);
+        }));
+  }
+
+  return cudaq::python::copyCUDAQXTensorToPyArray(tensor);
+}
 } // namespace
 
 // Registry to store code factory functions
@@ -364,42 +379,43 @@ void bindCode(nb::module_ &mod) {
       .def(
           "get_parity",
           [](code &code) {
-            return cudaq::python::copyCUDAQXTensorToPyArray(code.get_parity());
+            return copyCodeMatrixToPyArray(code.get_parity(),
+                                           2 * code.get_num_data_qubits());
           },
           "Get the parity check matrix of the code")
       .def(
           "get_parity_x",
           [](code &code) {
-            return cudaq::python::copyCUDAQXTensorToPyArray(
-                code.get_parity_x());
+            return copyCodeMatrixToPyArray(code.get_parity_x(),
+                                           code.get_num_data_qubits());
           },
           "Get the X-type parity check matrix of the code")
       .def(
           "get_parity_z",
           [](code &code) {
-            return cudaq::python::copyCUDAQXTensorToPyArray(
-                code.get_parity_z());
+            return copyCodeMatrixToPyArray(code.get_parity_z(),
+                                           code.get_num_data_qubits());
           },
           "Get the Z-type parity check matrix of the code")
       .def(
           "get_pauli_observables_matrix",
           [](code &code) {
-            return cudaq::python::copyCUDAQXTensorToPyArray(
-                code.get_pauli_observables_matrix());
+            return copyCodeMatrixToPyArray(code.get_pauli_observables_matrix(),
+                                           2 * code.get_num_data_qubits());
           },
           "Get a matrix of the Pauli observables of the code")
       .def(
           "get_observables_x",
           [](code &code) {
-            return cudaq::python::copyCUDAQXTensorToPyArray(
-                code.get_observables_x());
+            return copyCodeMatrixToPyArray(code.get_observables_x(),
+                                           code.get_num_data_qubits());
           },
           "Get the Pauli X observables of the code")
       .def(
           "get_observables_z",
           [](code &code) {
-            return cudaq::python::copyCUDAQXTensorToPyArray(
-                code.get_observables_z());
+            return copyCodeMatrixToPyArray(code.get_observables_z(),
+                                           code.get_num_data_qubits());
           },
           "Get the Pauli Z observables of the code")
       .def("get_stabilizers", &code::get_stabilizers,
