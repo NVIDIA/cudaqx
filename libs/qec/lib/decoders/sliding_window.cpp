@@ -379,6 +379,18 @@ std::size_t sliding_window::get_num_syndromes_per_round() const {
   return num_syndromes_per_round;
 }
 
+std::size_t sliding_window::get_num_boundary_syndromes() const {
+  return num_boundary_syndromes;
+}
+
+std::size_t sliding_window::get_layer_offset(std::size_t r) const {
+  return layout.round_start(r);
+}
+
+std::size_t sliding_window::get_num_detector_layers() const {
+  return num_detector_layers;
+}
+
 CUDAQ_EXT_PT_REGISTER_TYPE(sliding_window)
 
 } // namespace cudaq::qec

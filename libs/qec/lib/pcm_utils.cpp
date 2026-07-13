@@ -7,6 +7,7 @@
  ******************************************************************************/
 
 #include "cudaq/qec/pcm_utils.h"
+#include "round_layout.h"
 #include "cudaq/qec/sparse_binary_matrix.h"
 #include <algorithm>
 #include <cassert>
@@ -17,6 +18,43 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+
+namespace cudaq::qec::details {
+
+round_layout::round_layout(std::size_t num_syndromes_per_round,
+                           std::size_t num_boundary_syndromes,
+                           std::size_t total_rows)
+    : S(num_syndromes_per_round), B(num_boundary_syndromes),
+      num_rows(total_rows) {
+  boundary = (B != 0 && B != S);
+  num_rounds = boundary ? (num_rows - 2 * B) / S + 2 : num_rows / S;
+}
+
+std::size_t round_layout::round_start(std::size_t r) const {
+  if (!boundary)
+    return r * S;
+  if (r == 0)
+    return 0;
+  if (r >= num_rounds)
+    return num_rows;
+  return B + (r - 1) * S;
+}
+
+std::size_t round_layout::round_width(std::size_t r) const {
+  return round_start(r + 1) - round_start(r);
+}
+
+std::size_t round_layout::row_to_round(std::size_t row) const {
+  if (!boundary)
+    return row / S;
+  if (row < B)
+    return 0;
+  if (row >= num_rows - B)
+    return num_rounds - 1;
+  return 1 + (row - B) / S;
+}
+
+} // namespace cudaq::qec::details
 
 namespace {
 

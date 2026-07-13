@@ -10,7 +10,9 @@
 #include <gtest/gtest.h>
 
 #include "cudaq.h"
+#include "cudaq/algorithms/dem.h"
 
+#include "device/memory_circuit.h"
 #include "cudaq/qec/code.h"
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/experiments.h"
@@ -974,4 +976,144 @@ TEST(QECCodeTester, checkSlidingWindowShor9Streaming) {
           return streamed.result;
         });
   }
+}
+
+// End-to-end realtime sliding-window decoding of a
+// boundary-layout memory circuit.
+// The decoder streams one detector layer at its real width ([B | S...S | B])
+// and must match a whole-block decode of the same detectors.
+TEST(QECCodeTester, checkSlidingWindowRealtimeBoundaryStreaming) {
+  cudaq::set_random_seed(13);
+  auto code = cudaq::qec::get_code("surface_code",
+                                   cudaqx::heterogeneous_map{{"distance", 3}});
+  const std::size_t numRounds = 4;
+  const auto prep = cudaq::qec::operation::prep0; // Z-basis => Z boundary
+  const bool is_z_prep = true;
+
+  cudaq::noise_model noise;
+  noise.add_all_qubit_channel("x", cudaq::qec::two_qubit_depolarization(0.02),
+                              /*num_controls=*/1);
+
+  auto &prepOp =
+      code->get_operation<cudaq::qec::code::one_qubit_encoding>(prep);
+  auto &stabRound = code->get_operation<cudaq::qec::code::stabilizer_round>(
+      cudaq::qec::operation::stabilizer_round);
+  auto parity_x = code->get_parity_x();
+  auto parity_z = code->get_parity_z();
+  std::vector<std::size_t> xVec(parity_x.data(),
+                                parity_x.data() + parity_x.size());
+  std::vector<std::size_t> zVec(parity_z.data(),
+                                parity_z.data() + parity_z.size());
+  const std::size_t numData = code->get_num_data_qubits();
+  const std::size_t numAncx = code->get_num_ancilla_x_qubits();
+  const std::size_t numAncz = code->get_num_ancilla_z_qubits();
+  const std::size_t numXStabs = code->get_num_x_stabilizers();
+  const std::size_t numZStabs = code->get_num_z_stabilizers();
+  auto logical_obs = code->get_observables_z();
+  const std::size_t num_obs = logical_obs.shape()[0];
+  std::vector<std::size_t> obs_flat(logical_obs.data(),
+                                    logical_obs.data() + logical_obs.size());
+
+  cudaq::M2DSparseMatrix m2d;
+  cudaq::M2OSparseMatrix m2o;
+  cudaq::dem_from_kernel(cudaq::qec::memory_circuit, &noise, /*options=*/{},
+                         m2d, m2o, stabRound, prepOp, numData, numAncx, numAncz,
+                         numRounds, xVec, zVec, obs_flat, num_obs, !is_z_prep);
+
+  // Boundary DEM: its detector rows share m2d's [B | S...S | B] order.
+  auto dem = cudaq::qec::dem_from_memory_circuit(*code, prep, numRounds, noise);
+  const std::size_t S = numXStabs + numZStabs;
+  const std::size_t B = numZStabs;
+  const std::size_t numCols =
+      numAncx + numAncz; // ancilla measurements per round
+
+  auto to_sparse = [](std::size_t nRows, auto get_row) {
+    std::vector<std::vector<uint32_t>> out(nRows);
+    for (std::size_t r = 0; r < nRows; r++)
+      out[r] = get_row(r);
+    return out;
+  };
+  auto D_sparse = to_sparse(m2d.rows.size(), [&](std::size_t r) {
+    return std::vector<uint32_t>(m2d.rows[r].begin(), m2d.rows[r].end());
+  });
+  const auto &O = dem.observables_flips_matrix;
+  auto O_sparse = to_sparse(O.shape()[0], [&](std::size_t r) {
+    std::vector<uint32_t> row;
+    for (std::size_t c = 0; c < O.shape()[1]; c++)
+      if (O.at({r, c}))
+        row.push_back(static_cast<uint32_t>(c));
+    return row;
+  });
+
+  auto make_sw = [&]() {
+    cudaqx::heterogeneous_map params;
+    params.insert("window_size", std::size_t{2});
+    params.insert("step_size", std::size_t{1});
+    params.insert("num_syndromes_per_round", S);
+    params.insert("num_boundary_syndromes", B);
+    params.insert("straddle_start_round", false);
+    params.insert("straddle_end_round", true);
+    params.insert("error_rate_vec", dem.error_rates);
+    params.insert("inner_decoder_name", std::string("single_error_lut"));
+    params.insert("inner_decoder_params", cudaqx::heterogeneous_map{});
+    return cudaq::qec::decoder::get("sliding_window", dem.detector_error_matrix,
+                                    params);
+  };
+  auto sw = make_sw();     // realtime streaming
+  auto sw_ref = make_sw(); // whole-block reference
+  sw->set_D_sparse(D_sparse);
+  sw->set_O_sparse(O_sparse);
+
+  // Raw measurements: numRounds*numCols ancilla, then numData data, per shot.
+  const std::size_t nShots = 200;
+  cudaq::sample_options opts{
+      .shots = nShots, .noise = noise, .explicit_measurements = true};
+  auto result = cudaq::sample(opts, cudaq::qec::memory_circuit, stabRound,
+                              prepOp, numData, numAncx, numAncz, numRounds,
+                              xVec, zVec, obs_flat, num_obs, !is_z_prep);
+  cudaqx::tensor<uint8_t> mzTable(result.sequential_data());
+  const std::size_t numMeas = mzTable.shape()[1];
+
+  std::size_t mismatches = 0, nonzero_shots = 0;
+  for (std::size_t shot = 0; shot < nShots; shot++) {
+    const uint8_t *meas = &mzTable.at({shot, 0});
+
+    // Reference: full detector vector via m2d
+    std::vector<cudaq::qec::float_t> det(m2d.rows.size());
+    for (std::size_t d = 0; d < m2d.rows.size(); d++) {
+      uint8_t v = 0;
+      for (auto m : m2d.rows[d])
+        v ^= meas[m];
+      det[d] = v;
+    }
+    auto ref = sw_ref->decode(det).result;
+    std::vector<uint8_t> ref_obs(num_obs, 0);
+    for (std::size_t k = 0; k < num_obs; k++)
+      for (auto c : O_sparse[k])
+        ref_obs[k] ^= (ref[c] > 0.5);
+
+    // Realtime: stream measurement groups (numCols ancilla per round, then
+    // data).
+    sw->reset_decoder();
+    sw->clear_corrections();
+    std::size_t off = 0;
+    for (std::size_t r = 0; r < numRounds; r++) {
+      sw->enqueue_syndrome(
+          std::vector<uint8_t>(meas + off, meas + off + numCols));
+      off += numCols;
+    }
+    bool decoded =
+        sw->enqueue_syndrome(std::vector<uint8_t>(meas + off, meas + numMeas));
+    EXPECT_TRUE(decoded); // final measurement group must complete a decode
+
+    const uint8_t *rt = sw->get_obs_corrections();
+    for (std::size_t k = 0; k < num_obs; k++) {
+      if (rt[k] != ref_obs[k])
+        mismatches++;
+      if (ref_obs[k])
+        nonzero_shots++;
+    }
+  }
+  EXPECT_EQ(mismatches, 0u);
+  EXPECT_GT(nonzero_shots, 0u); // guard against an all-zero pass
 }

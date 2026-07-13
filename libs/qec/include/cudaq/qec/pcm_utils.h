@@ -194,62 +194,6 @@ simplify_pcm(const cudaqx::tensor<uint8_t> &pcm,
              const std::vector<double> &weights,
              std::uint32_t num_syndromes_per_round = 0);
 
-namespace details {
-
-/// @brief Internal helper (not part of the public API). Maps between detector
-/// rounds and detector rows for a (possibly non-uniform) round layout. The rows
-/// are laid out as [B | S | ... | S | B], where B == num_boundary_syndromes is
-/// the width of the first/last boundary rounds and S == num_syndromes_per_round
-/// is the interior width. B == 0 or B == S is the uniform layout (every round
-/// has width S).
-struct round_layout {
-  std::size_t S = 0;          ///< interior round width
-  std::size_t B = 0;          ///< boundary round width
-  std::size_t num_rows = 0;   ///< total number of detector rows
-  std::size_t num_rounds = 0; ///< number of rounds (detector layers)
-  bool boundary = false;      ///< true iff B is a distinct boundary width
-
-  round_layout() = default;
-  round_layout(std::size_t num_syndromes_per_round,
-               std::size_t num_boundary_syndromes, std::size_t total_rows)
-      : S(num_syndromes_per_round), B(num_boundary_syndromes),
-        num_rows(total_rows) {
-    boundary = (B != 0 && B != S);
-    num_rounds = boundary ? (num_rows - 2 * B) / S + 2 : num_rows / S;
-  }
-
-  /// Global row index at which round @p r begins; round_start(num_rounds) is
-  /// the trailing sentinel (== num_rows).
-  std::size_t round_start(std::size_t r) const {
-    if (!boundary)
-      return r * S;
-    if (r == 0)
-      return 0;
-    if (r >= num_rounds)
-      return num_rows;
-    return B + (r - 1) * S;
-  }
-
-  /// Number of detector rows in round @p r (B for the first/last round, else
-  /// S).
-  std::size_t round_width(std::size_t r) const {
-    return round_start(r + 1) - round_start(r);
-  }
-
-  /// The round that global detector row @p row belongs to.
-  std::size_t row_to_round(std::size_t row) const {
-    if (!boundary)
-      return row / S;
-    if (row < B)
-      return 0;
-    if (row >= num_rows - B)
-      return num_rounds - 1;
-    return 1 + (row - B) / S;
-  }
-};
-
-} // namespace details
-
 /// @brief Get a sub-PCM for a range of rounds. It is recommended (but not
 /// required) that you call sort_pcm_columns() before calling this function.
 /// @param pcm The PCM to get a sub-PCM for.

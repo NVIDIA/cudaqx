@@ -8,8 +8,8 @@
 
 #pragma once
 
+#include "round_layout.h"
 #include "cudaq/qec/decoder.h"
-#include "cudaq/qec/pcm_utils.h"
 #include <vector>
 
 namespace cudaq::qec {
@@ -122,6 +122,19 @@ public:
   /// @brief Get the number of syndromes per round
   /// @return The number of syndromes measured in each round
   std::size_t get_num_syndromes_per_round() const;
+
+  /// @brief Get the boundary-layer width, i.e. the number of detectors in the
+  /// first/last detector layers. Equals get_num_syndromes_per_round() for a
+  /// uniform layout.
+  std::size_t get_num_boundary_syndromes() const;
+
+  /// @brief The global row index at which detector layer @p r begins in the
+  /// [B | S | ... | S | B] layout (round_start(num_detector_layers) ==
+  /// syndrome_size).
+  std::size_t get_layer_offset(std::size_t r) const;
+
+  /// @brief The number of detector layers in the layout.
+  std::size_t get_num_detector_layers() const;
 
   /// @brief Destructor
   virtual ~sliding_window();
