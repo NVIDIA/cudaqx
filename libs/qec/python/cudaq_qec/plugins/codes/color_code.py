@@ -1157,9 +1157,15 @@ class ColorCode:
     ``distance`` (odd, >= 3) must be provided via
     ``qec.get_code('color_code', distance=d)``.
 
-    The full grid geometry (plaquette layout, syndrome-to-grid mapping, CNN
-    embedding, physical circuit layout) is exposed on the ``grid`` attribute,
-    an instance of :class:`ColorCodeGeometry`.
+    Memory-circuit sampling for this Python feedback code currently requires
+    ``cudaq.set_target('stim')``; the ``qpp-cpu`` target does not preserve the
+    required cross-round measurement correlations.
+
+    The generic :class:`qec.Code` object returned by :func:`qec.get_code`
+    consumes ``distance`` but does not expose the Python implementation's
+    ``distance`` or ``grid`` attributes. Callers that need the plaquette
+    layout, syndrome-to-grid mapping, or CNN embedding should construct
+    :class:`ColorCodeGeometry` with the same distance.
     """
 
     def __init__(self, **kwargs):
