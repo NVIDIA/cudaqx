@@ -84,6 +84,24 @@ decoders:
           misspelled_decoder_argument),
       std::runtime_error);
 
+  // Device placement is deliberately limited to direct decoder construction
+  // until realtime session workers and teardown own a CUDA device.
+  const std::string unsupported_cuda_device_id = R"(
+decoders:
+  - id: 0
+    type: pymatching
+    cuda_device_id: 0
+    block_size: 1
+    syndrome_size: 1
+    H_sparse: [0, -1]
+    O_sparse: [0, -1]
+    D_sparse: [0, -1]
+)";
+  EXPECT_THROW(
+      cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(
+          unsupported_cuda_device_id),
+      std::runtime_error);
+
   EXPECT_THROW(
       cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(
           "decoders: ["),

@@ -260,6 +260,12 @@ public:
   /// depends on D_sparse, so you must have called set_D_sparse() first.
   uint32_t get_num_msyn_per_decode() const;
 
+  /// @brief The CUDA device this decoder was pinned to at construction via
+  /// the "cuda_device_id" parameter, or -1 when no pin was requested.
+  /// Construction pins the constructing thread persistently (the thread that
+  /// creates a decoder is the thread expected to drive its decode calls).
+  int get_cuda_device_id() const;
+
   /// @brief Set the observable matrix.
   void set_O_sparse(const std::vector<std::vector<uint32_t>> &O_sparse);
 

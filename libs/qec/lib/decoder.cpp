@@ -8,13 +8,19 @@
 
 #include "cudaq/qec/decoder.h"
 #include "cuda-qx/core/library_utils.h"
+#include "hardware_guards.h"
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/plugin_loader.h"
 #include "cudaq/qec/version.h"
+#include <any>
 #include <cassert>
+#include <cstdint>
+#include <cuda_runtime_api.h>
 #include <dlfcn.h>
 #include <filesystem>
 #include <fmt/ranges.h>
+#include <limits>
+#include <type_traits>
 #include <vector>
 
 INSTANTIATE_REGISTRY(cudaq::qec::decoder, const cudaq::qec::decoder_init &,
@@ -53,6 +59,11 @@ struct decoder::rt_impl {
 
   /// The id of the decoder (for instrumentation)
   uint32_t decoder_id = 0;
+
+  /// CUDA device selected by decoder::get(), or -1 when no placement was
+  /// requested. Keep this in the existing pimpl so adding placement does not
+  /// change the public decoder object layout used by external plugins.
+  int cuda_device_id = -1;
 
   bool is_sliding_window = false;
 
@@ -121,11 +132,138 @@ std::string decoder::get_version() const {
   return ss.str();
 }
 
+int decoder::get_cuda_device_id() const { return pimpl->cuda_device_id; }
+
 std::future<decoder_result>
 decoder::decode_async(const std::vector<float_t> &syndrome) {
-  return std::async(std::launch::async,
-                    [this, syndrome] { return this->decode(syndrome); });
+  // Captured by value: the worker must not dereference decoder members to
+  // find its device. The std::async thread is brand-new and unpinned, so it
+  // guards itself for the duration of the call (the one exception to the
+  // one-thread-owns-one-decoder persistent pin).
+  const int cuda_id = get_cuda_device_id();
+  return std::async(std::launch::async, [this, syndrome, cuda_id] {
+    cudaq::qec::detail_affinity::CudaDeviceGuard dev(cuda_id);
+    return this->decode(syndrome);
+  });
 }
+
+/// Reads "cuda_device_id" from the construction parameters. Absent -> -1.
+/// Negative or >= cudaGetDeviceCount() -> std::runtime_error (fail fast:
+/// never silently decode on the wrong GPU).
+template <typename Integer>
+static bool try_read_cuda_device_id(const std::any &raw_value, int &result) {
+  const auto *value = std::any_cast<Integer>(&raw_value);
+  if (!value)
+    return false;
+
+  if constexpr (std::is_signed_v<Integer>) {
+    if (*value < 0)
+      throw std::runtime_error(
+          "cuda_device_id must be a non-negative integer (got " +
+          std::to_string(*value) + ")");
+  }
+
+  using unsigned_integer = std::make_unsigned_t<Integer>;
+  const auto magnitude =
+      static_cast<std::uintmax_t>(static_cast<unsigned_integer>(*value));
+  if (magnitude > static_cast<std::uintmax_t>(std::numeric_limits<int>::max()))
+    throw std::runtime_error("cuda_device_id is too large (got " +
+                             std::to_string(*value) +
+                             "); maximum supported value is " +
+                             std::to_string(std::numeric_limits<int>::max()));
+
+  result = static_cast<int>(magnitude);
+  return true;
+}
+
+static int read_cuda_device_id(const cudaqx::heterogeneous_map &params) {
+  if (!params.contains("cuda_device_id"))
+    return -1;
+
+  const std::any *raw_value = nullptr;
+  for (const auto &[key, value] : params) {
+    if (key == "cuda_device_id") {
+      raw_value = &value;
+      break;
+    }
+  }
+  if (!raw_value)
+    throw std::runtime_error("cuda_device_id is missing from parameter map");
+
+  int value = -1;
+  const bool is_integer =
+      try_read_cuda_device_id<signed char>(*raw_value, value) ||
+      try_read_cuda_device_id<unsigned char>(*raw_value, value) ||
+      try_read_cuda_device_id<short>(*raw_value, value) ||
+      try_read_cuda_device_id<unsigned short>(*raw_value, value) ||
+      try_read_cuda_device_id<int>(*raw_value, value) ||
+      try_read_cuda_device_id<unsigned int>(*raw_value, value) ||
+      try_read_cuda_device_id<long>(*raw_value, value) ||
+      try_read_cuda_device_id<unsigned long>(*raw_value, value) ||
+      try_read_cuda_device_id<long long>(*raw_value, value) ||
+      try_read_cuda_device_id<unsigned long long>(*raw_value, value);
+  if (!is_integer)
+    throw std::runtime_error("cuda_device_id must be an integer");
+
+  int count = 0;
+  const cudaError_t count_status = cudaGetDeviceCount(&count);
+  if (count_status != cudaSuccess)
+    throw std::runtime_error(
+        "cuda_device_id " + std::to_string(value) +
+        " could not be validated because cudaGetDeviceCount() failed: " +
+        cudaGetErrorString(count_status));
+  if (value >= count)
+    throw std::runtime_error("cuda_device_id " + std::to_string(value) +
+                             " is out of range: " + std::to_string(count) +
+                             " CUDA device(s) visible");
+  return value;
+}
+
+/// Selects a device for decoder construction and restores the previous device
+/// unless commit() is called. This keeps the successful persistent-pin
+/// contract while making failed plugin construction transactional.
+class ConstructionDevicePin {
+public:
+  explicit ConstructionDevicePin(int target) : target_(target) {
+    cudaError_t err = cudaGetDevice(&previous_);
+    if (err != cudaSuccess)
+      throw std::runtime_error(
+          "cuda_device_id " + std::to_string(target_) +
+          " could not be selected because cudaGetDevice() failed: " +
+          cudaGetErrorString(err));
+
+    err = cudaSetDevice(target_);
+    if (err != cudaSuccess)
+      throw std::runtime_error(
+          "cudaSetDevice(" + std::to_string(target_) +
+          ") failed for cuda_device_id: " + cudaGetErrorString(err));
+    selected_ = true;
+  }
+
+  ~ConstructionDevicePin() {
+    if (selected_ && !committed_ && previous_ != target_)
+      (void)cudaSetDevice(previous_);
+  }
+
+  ConstructionDevicePin(const ConstructionDevicePin &) = delete;
+  ConstructionDevicePin &operator=(const ConstructionDevicePin &) = delete;
+
+  void commit() {
+    const cudaError_t err = cudaSetDevice(target_);
+    if (err != cudaSuccess)
+      throw std::runtime_error(
+          "cudaSetDevice(" + std::to_string(target_) +
+          ") failed while finalizing cuda_device_id placement: " +
+          cudaGetErrorString(err));
+    committed_ = true;
+  }
+
+private:
+  int target_ = -1;
+  int previous_ = -1;
+  bool selected_ = false;
+  bool committed_ = false;
+};
 
 std::unique_ptr<decoder>
 decoder::get(const std::string &name, const decoder_init &init,
@@ -138,7 +276,24 @@ decoder::get(const std::string &name, const decoder_init &init,
         "invalid decoder requested: " + name +
         ". Run with CUDAQ_LOG_LEVEL=info (environment variable) to see "
         "additional plugin diagnostics at startup.");
-  return iter->second(init, param_map);
+  const int cuda_device_id = read_cuda_device_id(param_map);
+  if (cuda_device_id < 0)
+    return iter->second(init, param_map);
+  // Pin the constructing thread persistently (no restore): one thread owns
+  // one decoder, so every later allocation and kernel launch on this thread
+  // -- including lazy allocations inside a plugin's decode() -- lands on the
+  // requested device with no per-call machinery.
+  ConstructionDevicePin device_pin(cuda_device_id);
+  // The key is consumed here; strip it so plugins that strictly validate
+  // their parameter keys do not reject it.
+  cudaqx::heterogeneous_map plugin_params;
+  for (const auto &kv : param_map)
+    if (kv.first != "cuda_device_id")
+      plugin_params.insert(kv.first, kv.second);
+  auto d = iter->second(init, plugin_params);
+  d->pimpl->cuda_device_id = cuda_device_id;
+  device_pin.commit();
+  return d;
 }
 
 namespace details {

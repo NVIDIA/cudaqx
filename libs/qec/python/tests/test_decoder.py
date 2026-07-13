@@ -1002,6 +1002,32 @@ def test_get_decoder_rejects_unknown_decoder_for_stim_dem_text():
         qec.get_decoder("__no_such_decoder__", "error(0.1) D0 L0\n")
 
 
+def test_decoder_cuda_device_id_invalid_raises():
+    H = create_test_matrix()
+    with pytest.raises(RuntimeError, match="cuda_device_id"):
+        qec.get_decoder("single_error_lut", H, cuda_device_id=-2)
+    with pytest.raises(RuntimeError, match="cuda_device_id"):
+        qec.get_decoder("single_error_lut", H, cuda_device_id=1 << 20)
+    # This value used to narrow to zero on platforms with a 32-bit C++ int.
+    with pytest.raises(RuntimeError, match="cuda_device_id.*too large"):
+        qec.get_decoder("single_error_lut", H, cuda_device_id=1 << 32)
+    with pytest.raises(RuntimeError, match="cuda_device_id.*integer"):
+        qec.get_decoder("single_error_lut", H, cuda_device_id=True)
+
+
+def test_decoder_cuda_device_id_valid():
+    H = create_test_matrix()
+    try:
+        d = qec.get_decoder("single_error_lut", H, cuda_device_id=0)
+    except RuntimeError as e:
+        if "out of range" in str(e) or "cudaGetDeviceCount" in str(e):
+            pytest.skip("no CUDA device visible")
+        raise
+    syndrome = create_test_syndrome()
+    result = d.decode(syndrome)
+    assert len(result.result) == H.shape[1]
+
+
 def test_get_decoder_user_O_wins_over_dem_derived():
     dem_text = ("error(0.1) D0 L0\n"
                 "error(0.1) D1 L0\n"

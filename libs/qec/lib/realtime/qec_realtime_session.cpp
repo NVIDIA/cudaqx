@@ -19,6 +19,7 @@
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
+#include <cuda_runtime_api.h>
 #include <dlfcn.h>
 #include <stdexcept>
 #include <string>
@@ -297,6 +298,11 @@ void qec_realtime_session::classify_mode() {
     if (!decoder)
       continue;
     ++non_null;
+    if (decoder->get_cuda_device_id() >= 0)
+      throw std::runtime_error(
+          "qec_realtime_session does not yet support cuda_device_id; "
+          "construct realtime decoders without device placement until "
+          "session worker affinity is implemented");
     if (decoder->supports_graph_dispatch())
       any_graph = true;
     else

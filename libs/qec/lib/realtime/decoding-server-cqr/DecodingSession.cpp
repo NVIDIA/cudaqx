@@ -46,6 +46,10 @@ DecodingSession::create(std::unique_ptr<cudaq::qec::decoder> decoder,
                         SyndromeMappingTable mapping_table_arg) {
   if (!decoder)
     throw std::invalid_argument("DecodingSession requires a decoder");
+  if (decoder->get_cuda_device_id() >= 0)
+    throw std::invalid_argument(
+        "DecodingSession does not yet support cuda_device_id; worker-thread "
+        "affinity and device-owned teardown will be added in a follow-up");
 
   auto s = std::make_unique<DecodingSession>();
   s->dec = std::move(decoder);
