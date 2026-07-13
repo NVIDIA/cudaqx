@@ -186,7 +186,9 @@ if(TARGET cudaq-qec-realtime-decoding-server-cqr)
   add_test(
     NAME app_examples.surface_code-1-cqr-test-distance-3
     COMMAND
-      ${CMAKE_COMMAND} -E env CUDAQ_DEVICE_CALL_CHANNEL=host_dispatch
+      ${CMAKE_COMMAND} -E env
+        CUDAQ_DEVICE_CALL_CHANNEL=host_dispatch
+        EXTRA_CLI_ARGS=--use-relay-bp
       bash "${CMAKE_CURRENT_SOURCE_DIR}/surface_code-1-test.sh"
         ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-cqr
         ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-cqr
