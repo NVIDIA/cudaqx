@@ -22,7 +22,7 @@ target_link_directories(test_qec_stim
 
 # For the internal device/memory_circuit.h kernel used by the realtime test.
 target_include_directories(test_qec_stim
-  PRIVATE ${CMAKE_SOURCE_DIR}/libs/qec/lib)
+  PRIVATE ${CUDAQX_QEC_SOURCE_DIR}/lib)
 
 target_link_libraries(test_qec_stim
   PRIVATE
