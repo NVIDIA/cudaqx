@@ -979,7 +979,6 @@ TEST(QECCodeTester, checkSlidingWindowShor9Streaming) {
   }
 }
 
-
 // End-to-end realtime sliding-window decoding of a boundary-layout memory
 // circuit. The decoder streams one detector layer at its real width ([B | S...S
 // | B]) and must match a whole-block decode of the same detectors.
