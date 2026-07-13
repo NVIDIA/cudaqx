@@ -29,23 +29,11 @@ using cudaq::qec::decoding::config::DecoderTransport;
 // ---------------------------------------------------------------------------
 
 /// gpu_roce runs the whole pipeline -- rings, dispatch scheduler, device-side
-/// graph fire -- on ONE GPU: the one the FPGA/NIC is affine to
-/// (HOLOLINK_GPU_ID). A decoder pinned elsewhere would split graph capture
-/// and graph launch across devices, which CUDA graphs cannot do. Both knobs
-/// name the same topology fact, so they must agree.
-int reconcile_gpu_roce_device(std::optional<int> env_gpu_id, int decoder_pin) {
-  if (env_gpu_id && *env_gpu_id < 0)
-    throw std::runtime_error("HOLOLINK_GPU_ID must be >= 0 (got " +
-                             std::to_string(*env_gpu_id) + ")");
-  if (env_gpu_id && decoder_pin >= 0 && *env_gpu_id != decoder_pin)
-    throw std::runtime_error(
-        "gpu_roce device conflict: HOLOLINK_GPU_ID=" +
-        std::to_string(*env_gpu_id) + " but the decoder is pinned to " +
-        std::to_string(decoder_pin) +
-        " (cuda_device_id). The FPGA-affine GPU and the decoder pin must be "
-        "the same device.");
-  if (env_gpu_id)
-    return *env_gpu_id;
+/// graph fire -- on ONE GPU: the one the FPGA/NIC is affine to. The decoder
+/// must be pinned to that same device via cuda_device_id, because CUDA graphs
+/// cannot split capture and launch across devices. An unpinned decoder defaults
+/// to device 0.
+int reconcile_gpu_roce_device(int decoder_pin) {
   return decoder_pin >= 0 ? decoder_pin : 0;
 }
 
@@ -57,7 +45,7 @@ DecodingServer::make_transport(DecoderTransport transport_type,
 #ifdef CUDAQ_GPU_ROCE_AVAILABLE
   {
     auto cfg = GpuRoceConfig::from_env();
-    cfg.gpu_id = reconcile_gpu_roce_device(cfg.gpu_id_env, pinned_cuda_device);
+    cfg.gpu_id = reconcile_gpu_roce_device(pinned_cuda_device);
     return std::make_unique<GpuRoceTransceiver>(cfg);
   }
 #else
