@@ -204,10 +204,6 @@ if(CMAKE_CUDA_COMPILER)
       target_link_libraries(cudaq-qec-realtime-decoder-rpc-dispatch PUBLIC
         CUDA::cudart
       )
-      install(TARGETS cudaq-qec-realtime-decoder-rpc-dispatch
-        COMPONENT qec-lib
-        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-      )
     endif()
   else()
     message(WARNING "cuda-quantum realtime headers not found. "
