@@ -154,6 +154,31 @@ void detector_error_model::canonicalize_for_rounds(
   auto row_indices = dense_to_sparse(detector_error_matrix);
   auto column_order =
       get_sorted_pcm_column_indices(row_indices, num_syndromes_per_round);
+  canonicalize_for_rounds_impl(row_indices, column_order,
+                               remove_zero_syndrome_errors);
+}
+
+void detector_error_model::canonicalize_for_rounds_with_boundary(
+    uint32_t num_syndromes_per_round, uint32_t num_boundary_syndromes,
+    bool remove_zero_syndrome_errors) {
+  // A boundary wider than the interior would misassign rounds silently.
+  if (num_boundary_syndromes > num_syndromes_per_round)
+    throw std::invalid_argument(
+        "canonicalize_for_rounds_with_boundary: num_boundary_syndromes (" +
+        std::to_string(num_boundary_syndromes) +
+        ") must be <= num_syndromes_per_round (" +
+        std::to_string(num_syndromes_per_round) + ")");
+  auto row_indices = dense_to_sparse(detector_error_matrix);
+  auto column_order = get_sorted_pcm_column_indices(
+      row_indices, num_syndromes_per_round, num_boundary_syndromes);
+  canonicalize_for_rounds_impl(row_indices, column_order,
+                               remove_zero_syndrome_errors);
+}
+
+void detector_error_model::canonicalize_for_rounds_impl(
+    const std::vector<std::vector<std::uint32_t>> &row_indices,
+    const std::vector<std::uint32_t> &column_order,
+    bool remove_zero_syndrome_errors) {
   const std::size_t num_obs = this->num_observables();
   const auto num_cols = column_order.size();
   const bool has_error_ids =

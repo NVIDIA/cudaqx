@@ -94,6 +94,72 @@ def test_sliding_window_1(decoder_name, batched, num_rounds, num_windows):
         assert num_mismatches == 0
 
 
+@pytest.mark.parametrize("code_name", ['steane', 'repetition', 'surface_code'])
+@pytest.mark.parametrize("num_windows", [1, 2, 3])
+def test_sliding_window_boundary_layout(code_name, num_windows):
+    # A full both-basis DEM has a non-uniform detector layout: the first and
+    # last detector layers (the boundaries) carry only the fixed basis, so they
+    # are narrower than the interior layers. The sliding window handles this via
+    # num_boundary_syndromes, and must agree with a full decoder. The
+    # repetition code has no X stabilizers, so it exercises the degenerate
+    # uniform (boundary width == interior width) path.
+    cudaq.set_random_seed(13)
+    code = qec.get_code(code_name, distance=3)
+    numX = code.get_num_x_stabilizers()
+    numZ = code.get_num_z_stabilizers()
+    interior = numX + numZ
+    num_boundary = numZ  # prep0 => Z is the fixed (boundary) basis
+
+    p = 0.001
+    noise = cudaq.NoiseModel()
+    noise.add_all_qubit_channel("x", cudaq.Depolarization2(p), 1)
+
+    # Choose num_rounds so the padded layout gives the requested num_windows
+    # with window_size = padded_rounds - num_windows + 1, step_size = 1.
+    num_rounds = 6
+    dem = qec.dem_from_memory_circuit(code, qec.operation.prep0, num_rounds,
+                                      noise)
+    H = np.asarray(dem.detector_error_matrix)
+    rows, cols = H.shape
+    # Padded (uniform) layout has one extra (interior-boundary) block at each
+    # boundary, i.e. num_rounds + 1 layers.
+    padded_rounds = (rows + 2 * (interior - num_boundary)) // interior
+    assert padded_rounds == num_rounds + 1
+    window_size = padded_rounds - num_windows + 1
+
+    full_decoder = qec.get_decoder('single_error_lut',
+                                   dem.detector_error_matrix)
+    sw = qec.get_decoder("sliding_window",
+                         dem.detector_error_matrix,
+                         window_size=window_size,
+                         step_size=1,
+                         num_syndromes_per_round=interior,
+                         num_boundary_syndromes=num_boundary,
+                         straddle_start_round=False,
+                         straddle_end_round=True,
+                         error_rate_vec=np.array(dem.error_rates),
+                         inner_decoder_name="single_error_lut",
+                         inner_decoder_params={'dummy_param': 1})
+
+    # Inject one error mechanism per shot (a DEM column) in the unpadded
+    # boundary layout, and confirm the observable prediction matches the full
+    # decoder.
+    np.random.seed(13)
+    nShots = 300
+    O = np.asarray(dem.observables_flips_matrix)
+    num_mismatches = 0
+    for _ in range(nShots):
+        col = np.random.randint(0, cols)
+        syndrome = H[:, col].astype(np.uint8)
+        r_full = np.asarray(full_decoder.decode(syndrome).result) > 0.5
+        r_sw = np.asarray(sw.decode(syndrome).result) > 0.5
+        of_full = (O @ r_full.astype(np.uint8)) % 2
+        of_sw = (O @ r_sw.astype(np.uint8)) % 2
+        if not np.array_equal(of_full, of_sw):
+            num_mismatches += 1
+    assert num_mismatches == 0
+
+
 def test_pymatching_parallel_edges_use_observable_faults():
     # Same detector syndrome with different observable flips are distinct
     # logical fault mechanisms. After #610 these stay as separate DEM columns,

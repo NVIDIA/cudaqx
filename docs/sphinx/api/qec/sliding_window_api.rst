@@ -121,6 +121,9 @@
         - `window_size` (int): The number of rounds of syndrome data in each window. (Defaults to 1.)
         - `step_size` (int): The number of rounds to advance the window by each time. (Defaults to 1.)
         - `num_syndromes_per_round` (int): The number of syndromes per round. (Must be provided.)
+        - `num_boundary_syndromes` (int): The number of boundary syndromes, i.e. the number of 
+          detectors in the first and last round of the memory experiment. (Defaults to 0, meaning all 
+          layers have `num_syndromes_per_round` detectors.)
         - `straddle_start_round` (bool): When forming a window, should error
           mechanisms that span the start round and any preceding rounds be included? (Defaults to False.)
         - `straddle_end_round` (bool): When forming a window, should error
