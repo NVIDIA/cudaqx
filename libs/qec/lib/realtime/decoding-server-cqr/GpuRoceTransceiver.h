@@ -15,7 +15,6 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
-#include <optional>
 #include <string>
 #include <thread>
 
@@ -32,21 +31,20 @@ struct cudaq_dispatch_graph_context;
 
 namespace cudaq::qec::decoding_server {
 
-/// Runtime configuration for GpuRoceTransceiver.  All fields are read from
-/// environment variables so that the server can be reconfigured without a
-/// rebuild.
+/// Runtime configuration for GpuRoceTransceiver.  Transport fields are read
+/// from environment variables so that the server can be reconfigured without a
+/// rebuild; gpu_id is the exception -- it is the decoder's cuda_device_id,
+/// filled in at transport creation.
 struct GpuRoceConfig {
   std::string device_name; ///< HOLOLINK_DEVICE   (IB netdev, e.g. "mlx5_0")
   uint32_t remote_qp{0};   ///< HOLOLINK_REMOTE_QP (FPGA/emulator QP number)
-  int gpu_id{0};           ///< HOLOLINK_GPU_ID
-  /// Set iff HOLOLINK_GPU_ID was present in the environment (the FPGA/NIC
-  /// affinity is a topology fact; absence defers to the decoder's pin).
-  std::optional<int> gpu_id_env;
-  size_t frame_size{384}; ///< HOLOLINK_FRAME_SIZE (max RPC frame bytes)
-  size_t page_size{0};    ///< HOLOLINK_PAGE_SIZE (0 → derived from frame_size)
-  size_t num_pages{64};   ///< HOLOLINK_NUM_PAGES (ring depth)
-  std::string peer_ip;    ///< HOLOLINK_PEER_IP   (FPGA/emulator IPv4)
-  int reserved_sms{2};    ///< HOLOLINK_RESERVED_SMS (SMs for Hololink RX/TX)
+  int gpu_id{0};           ///< FPGA-affine GPU; set from the decoder's
+                           ///< cuda_device_id by resolve_decode_device()
+  size_t frame_size{384};  ///< HOLOLINK_FRAME_SIZE (max RPC frame bytes)
+  size_t page_size{0};     ///< HOLOLINK_PAGE_SIZE (0 → derived from frame_size)
+  size_t num_pages{64};    ///< HOLOLINK_NUM_PAGES (ring depth)
+  std::string peer_ip;     ///< HOLOLINK_PEER_IP   (FPGA/emulator IPv4)
+  int reserved_sms{2};     ///< HOLOLINK_RESERVED_SMS (SMs for Hololink RX/TX)
 
   static GpuRoceConfig from_env();
 };
