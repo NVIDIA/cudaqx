@@ -60,12 +60,24 @@ d=7 (37 data qubits, 18 plaquettes, 10x7 grid):
   [28,29,34,35]: blue (boundary)
 """
 
-import numpy as np
+from numbers import Integral
 from typing import Dict, List, Tuple, Optional
+
+import numpy as np
 
 import cudaq
 import cudaq_qec as qec
 from cudaq_qec import patch
+
+
+def _validate_distance(distance) -> int:
+    """Return ``distance`` as an int after validating color-code bounds."""
+    if isinstance(distance, bool) or not isinstance(distance, Integral):
+        raise ValueError("Distance must be an odd integer >= 3")
+    distance = int(distance)
+    if distance < 3 or distance % 2 == 0:
+        raise ValueError("Distance must be an odd integer >= 3")
+    return distance
 
 
 class ColorCodeGeometry:
@@ -91,8 +103,7 @@ class ColorCodeGeometry:
     """
 
     def __init__(self, distance: int):
-        if distance < 3 or distance % 2 == 0:
-            raise ValueError("Distance must be odd and >= 3")
+        distance = _validate_distance(distance)
 
         self.distance = distance
         self.n_rows = distance + (distance - 1) // 2
@@ -590,8 +601,6 @@ class ColorCodeGeometry:
             f"Unsupported w4 geometry for plaq_idx={plaq_idx}: distinct_rows={len(rows)}, distinct_cols={len(cols)}, coords={coords}"
         )
 
-        return out
-
     # ------------------------------------------------------------------ #
     # Superdense paired-ancilla CX-layer schedule (host-side builders)
     # ------------------------------------------------------------------ #
@@ -614,191 +623,105 @@ class ColorCodeGeometry:
         num_plaquettes = (3 * (d * d - 1)) // 8
         num_rows_data_qubits = (3 * d - 1) // 2
 
-        layers: List[List[Tuple[int, int]]] = []
+        # CNOT between each plaquette's |+> X-ancilla (a1) and |0>
+        # Z-ancilla (a2). The same layer opens and closes the schedule.
+        ancilla_layer = [(num_data + 2 * p, num_data + 2 * p + 1)
+                         for p in range(num_plaquettes)]
 
-        # tt=1..8 correspond to 8 layers
-        for tt in range(1, 9):
-            edges: List[Tuple[int, int]] = []
+        # First data-controlled sequence.
+        first: List[Tuple[int, int]] = []
+        data_qubit_index = d
+        index_ancilla = num_data
+        cols = d - 1
+        for rr in range(num_rows_data_qubits - 1):
+            if rr % 3 == 0:
+                for _ in range(cols):
+                    first.append((data_qubit_index, index_ancilla))
+                    data_qubit_index += 1
+                    index_ancilla += 1
+                cols -= 1
+            elif rr % 3 == 1:
+                for cc in range(cols):
+                    first.append((data_qubit_index, index_ancilla))
+                    data_qubit_index += 1
+                    if cc == cols - 1:
+                        index_ancilla += 3
+                    else:
+                        index_ancilla += 1
+            else:  # rr % 3 == 2
+                for _ in range(cols):
+                    first.append((data_qubit_index, index_ancilla))
+                    data_qubit_index += 1
+                    index_ancilla += 1
+                cols -= 1
 
-            if tt == 1 or tt == 8:
-                # CNOT between the two ancilla qubits: control |+> (a1),
-                # target |0> (a2)
-                index = num_data
-                for _ in range(num_plaquettes):
-                    a1 = index
-                    a2 = index + 1
-                    edges.append((a1, a2))
-                    index += 2
+        # Second data-controlled sequence.
+        second: List[Tuple[int, int]] = []
+        data_qubit_index = 0
+        index_ancilla = num_data
+        cols = d - 1
+        for rr in range(num_rows_data_qubits - 1):
+            if rr % 3 == 0:
+                for cc in range(cols):
+                    second.append((data_qubit_index, index_ancilla))
+                    index_ancilla += 1
+                    if cc == cols - 1:
+                        data_qubit_index += 3
+                    else:
+                        data_qubit_index += 1
+                cols -= 1
+            elif rr % 3 == 1:
+                for cc in range(cols):
+                    second.append((data_qubit_index, index_ancilla))
+                    data_qubit_index += 1
+                    if cc == cols - 1:
+                        index_ancilla += 3
+                    else:
+                        index_ancilla += 1
+            else:  # rr % 3 == 2
+                for _ in range(cols):
+                    second.append((data_qubit_index, index_ancilla))
+                    data_qubit_index += 1
+                    index_ancilla += 1
+                cols -= 1
 
-            elif tt == 2:
-                # First sequence (data = control)
-                data_qubit_index = d
-                index_ancilla = num_data
-                cols = d - 1
-                for rr in range(num_rows_data_qubits - 1):
-                    if rr % 3 == 0:
-                        for _ in range(cols):
-                            edges.append((data_qubit_index, index_ancilla))
-                            data_qubit_index += 1
-                            index_ancilla += 1
-                        cols -= 1
-                    elif rr % 3 == 1:
-                        for cc in range(cols):
-                            edges.append((data_qubit_index, index_ancilla))
-                            data_qubit_index += 1
-                            if cc == cols - 1:
-                                index_ancilla += 3
-                            else:
-                                index_ancilla += 1
-                    else:  # rr % 3 == 2
-                        for _ in range(cols):
-                            edges.append((data_qubit_index, index_ancilla))
-                            data_qubit_index += 1
-                            index_ancilla += 1
-                        cols -= 1
+        # Third data-controlled sequence.
+        third: List[Tuple[int, int]] = []
+        data_qubit_index = 1
+        index_ancilla = num_data + d - 1
+        cols = d - 1
+        for rr in range(num_rows_data_qubits - 2):
+            if rr % 3 == 0:
+                for _ in range(cols):
+                    third.append((data_qubit_index, index_ancilla))
+                    data_qubit_index += 1
+                    index_ancilla += 1
+            elif rr % 3 == 1:
+                for _ in range(cols):
+                    third.append((data_qubit_index, index_ancilla))
+                    data_qubit_index += 1
+                    index_ancilla += 1
+                cols -= 2
+            else:  # rr % 3 == 2
+                for cc in range(cols):
+                    third.append((data_qubit_index, index_ancilla))
+                    index_ancilla += 1
+                    if cc == cols - 1:
+                        data_qubit_index += 3
+                    else:
+                        data_qubit_index += 1
 
-            elif tt == 3:
-                # Second sequence (data = control)
-                data_qubit_index = 0
-                index_ancilla = num_data
-                cols = d - 1
-                for rr in range(num_rows_data_qubits - 1):
-                    if rr % 3 == 0:
-                        for cc in range(cols):
-                            edges.append((data_qubit_index, index_ancilla))
-                            index_ancilla += 1
-                            if cc == cols - 1:
-                                data_qubit_index += 3
-                            else:
-                                data_qubit_index += 1
-                        cols -= 1
-                    elif rr % 3 == 1:
-                        for cc in range(cols):
-                            edges.append((data_qubit_index, index_ancilla))
-                            data_qubit_index += 1
-                            if cc == cols - 1:
-                                index_ancilla += 3
-                            else:
-                                index_ancilla += 1
-                    else:  # rr % 3 == 2
-                        for _ in range(cols):
-                            edges.append((data_qubit_index, index_ancilla))
-                            data_qubit_index += 1
-                            index_ancilla += 1
-                        cols -= 1
-
-            elif tt == 4:
-                # Third sequence (data = control)
-                data_qubit_index = 1
-                index_ancilla = num_data + d - 1
-                cols = d - 1
-                for rr in range(num_rows_data_qubits - 2):
-                    if rr % 3 == 0:
-                        for _ in range(cols):
-                            edges.append((data_qubit_index, index_ancilla))
-                            data_qubit_index += 1
-                            index_ancilla += 1
-                    elif rr % 3 == 1:
-                        for _ in range(cols):
-                            edges.append((data_qubit_index, index_ancilla))
-                            data_qubit_index += 1
-                            index_ancilla += 1
-                        cols -= 2
-                    else:  # rr % 3 == 2
-                        for cc in range(cols):
-                            edges.append((data_qubit_index, index_ancilla))
-                            index_ancilla += 1
-                            if cc == cols - 1:
-                                data_qubit_index += 3
-                            else:
-                                data_qubit_index += 1
-
-            elif tt == 5:
-                # First sequence (data = target) => ancilla is control
-                data_qubit_index = d
-                index_ancilla = num_data
-                cols = d - 1
-                for rr in range(num_rows_data_qubits - 1):
-                    if rr % 3 == 0:
-                        for _ in range(cols):
-                            edges.append((index_ancilla, data_qubit_index))
-                            data_qubit_index += 1
-                            index_ancilla += 1
-                        cols -= 1
-                    elif rr % 3 == 1:
-                        for cc in range(cols):
-                            edges.append((index_ancilla, data_qubit_index))
-                            data_qubit_index += 1
-                            if cc == cols - 1:
-                                index_ancilla += 3
-                            else:
-                                index_ancilla += 1
-                    else:  # rr % 3 == 2
-                        for _ in range(cols):
-                            edges.append((index_ancilla, data_qubit_index))
-                            data_qubit_index += 1
-                            index_ancilla += 1
-                        cols -= 1
-
-            elif tt == 6:
-                # Second sequence (data = target) => ancilla is control
-                data_qubit_index = 0
-                index_ancilla = num_data
-                cols = d - 1
-                for rr in range(num_rows_data_qubits - 1):
-                    if rr % 3 == 0:
-                        for cc in range(cols):
-                            edges.append((index_ancilla, data_qubit_index))
-                            index_ancilla += 1
-                            if cc == cols - 1:
-                                data_qubit_index += 3
-                            else:
-                                data_qubit_index += 1
-                        cols -= 1
-                    elif rr % 3 == 1:
-                        for cc in range(cols):
-                            edges.append((index_ancilla, data_qubit_index))
-                            data_qubit_index += 1
-                            if cc == cols - 1:
-                                index_ancilla += 3
-                            else:
-                                index_ancilla += 1
-                    else:  # rr % 3 == 2
-                        for _ in range(cols):
-                            edges.append((index_ancilla, data_qubit_index))
-                            data_qubit_index += 1
-                            index_ancilla += 1
-                        cols -= 1
-
-            else:  # tt == 7
-                # Third sequence (data = target) => ancilla is control
-                data_qubit_index = 1
-                index_ancilla = num_data + d - 1
-                cols = d - 1
-                for rr in range(num_rows_data_qubits - 2):
-                    if rr % 3 == 0:
-                        for _ in range(cols):
-                            edges.append((index_ancilla, data_qubit_index))
-                            data_qubit_index += 1
-                            index_ancilla += 1
-                    elif rr % 3 == 1:
-                        for _ in range(cols):
-                            edges.append((index_ancilla, data_qubit_index))
-                            data_qubit_index += 1
-                            index_ancilla += 1
-                        cols -= 2
-                    else:  # rr % 3 == 2
-                        for cc in range(cols):
-                            edges.append((index_ancilla, data_qubit_index))
-                            index_ancilla += 1
-                            if cc == cols - 1:
-                                data_qubit_index += 3
-                            else:
-                                data_qubit_index += 1
-
-            layers.append(sorted(edges))
-
-        return layers
+        forward_layers = [sorted(first), sorted(second), sorted(third)]
+        mirrored_layers = [
+            sorted((target, control)
+                   for control, target in layer)
+            for layer in forward_layers
+        ]
+        ancilla_layer = sorted(ancilla_layer)
+        return [
+            ancilla_layer, *forward_layers, *mirrored_layers,
+            list(ancilla_layer)
+        ]
 
     def _rowmajor_to_unified(self) -> Dict[int, int]:
         """Bijection from the row-major inverted-triangle qubit numbering of
@@ -1176,7 +1099,7 @@ class ColorCode:
             raise RuntimeError(
                 "[color_code] distance not provided. distance must be "
                 "provided via qec.get_code('color_code', distance=d).")
-        self.distance = kwargs['distance']
+        self.distance = _validate_distance(kwargs['distance'])
         self.grid = ColorCodeGeometry(self.distance)
 
         # The declared feedback matrices are indexed by the measurement-record

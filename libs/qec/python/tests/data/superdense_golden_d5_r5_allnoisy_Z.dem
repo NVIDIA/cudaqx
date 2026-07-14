@@ -1,5 +1,7 @@
 # Reference superdense color-code DEM, d=5, 5 rounds, DEPOLARIZE2(0.01)
 # per CX, ALL ROUNDS NOISY (physically stricter convention).
+# Reproduce from the repository root:
+# PYTHONPATH=build/python:/usr/local/cudaq python3 libs/qec/python/tests/generate_color_code_goldens.py --output-dir libs/qec/python/tests/data
 # Generator: reference superdense construction (superdense_memory kernel,
 # cudaq.dem_from_kernel). The perfect-final-round originals are
 # byte-reproduced by the same generator with its two noise guards restored

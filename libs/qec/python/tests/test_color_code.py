@@ -90,10 +90,11 @@ def test_geometry_counts(d):
     assert len(grid.all_qubits) == grid.num_data + 2 * grid.num_plaquettes
 
 
-@pytest.mark.parametrize("d", [1, 2, 4, 6])
-def test_invalid_distance_rejected(d):
-    with pytest.raises(ValueError, match="odd"):
-        ColorCodeGeometry(d)
+@pytest.mark.parametrize("distance",
+                         [None, True, False, "3", 3.0, -3, 0, 1, 2, 4, 6])
+def test_invalid_distance_rejected(distance):
+    with pytest.raises(ValueError, match="odd integer"):
+        ColorCodeGeometry(distance)
 
 
 @pytest.mark.parametrize("d", [3, 5, 7])
@@ -268,6 +269,12 @@ def test_get_code_rejects_even_distance():
         qec.get_code('color_code', distance=4)
 
 
+@pytest.mark.parametrize("distance", [None, True, False, "3", 3.0, -3, 0])
+def test_get_code_rejects_invalid_distance(distance):
+    with pytest.raises(ValueError, match="odd integer"):
+        qec.get_code('color_code', distance=distance)
+
+
 @pytest.mark.parametrize("d", [3, 5])
 def test_plugin_interface(d):
     code = qec.get_code('color_code', distance=d)
@@ -344,6 +351,23 @@ def test_z_side_data_d3_truth_table():
     # Grid order: p0 green [0,1,2,3], p1 red [1,3,5,6], p2 blue [2,3,4,5].
     grid = ColorCodeGeometry(3)
     assert grid.z_side_data() == [[0, 1, 3], [6], [3, 5]]
+
+
+@pytest.mark.parametrize("d", [3, 5, 7])
+def test_rowmajor_schedule_has_mirrored_data_layers(d):
+    layers = ColorCodeGeometry(d)._rowmajor_cnot_layers()
+    assert len(layers) == 8
+    assert layers[0] == layers[7]
+    for forward, mirrored in zip(layers[1:4], layers[4:7]):
+        assert mirrored == sorted(
+            (target, control) for control, target in forward)
+
+
+@pytest.mark.parametrize("d", [3, 5])
+def test_superdense_schedule_has_eight_terminated_layers(d):
+    schedule = ColorCodeGeometry(d).superdense_schedule()
+    assert schedule.count(-1) == 8
+    assert schedule[-1] == -1
 
 
 # ---------------------------------------------------------------------------
@@ -523,7 +547,7 @@ def test_plaquette_order_assertion_rejects_bad_order():
     (qec.operation.prepp, 'x', 'get_observables_x', 0),
     (qec.operation.prepm, 'x', 'get_observables_x', 1),
 ])
-@pytest.mark.parametrize("nRounds", [2, 4])
+@pytest.mark.parametrize("nRounds", [1, 2, 4])
 def test_noiseless_memory_deterministic_both_bases(plugin_color_code, prep,
                                                    basis, obs_getter, expected,
                                                    nRounds):
@@ -713,6 +737,23 @@ def test_undeclared_feedback_breaks_determinism(plugin_color_code):
 # ---------------------------------------------------------------------------
 
 _DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+
+
+def test_golden_generator_configuration():
+    from generate_color_code_goldens import (DISTANCE, NOISE_PROBABILITY,
+                                             ROUNDS)
+    assert (DISTANCE, ROUNDS, NOISE_PROBABILITY) == (5, 5, 0.01)
+
+
+def test_golden_headers_document_reproduction_command():
+    command = ("python3 libs/qec/python/tests/generate_color_code_goldens.py "
+               "--output-dir libs/qec/python/tests/data")
+    for basis in ("X", "Z"):
+        path = os.path.join(_DATA_DIR,
+                            f"superdense_golden_d5_r5_allnoisy_{basis}.dem")
+        with open(path) as stream:
+            header = "".join(stream.readline() for _ in range(10))
+        assert command in header
 
 
 def _merge_error_prob(p, q):
