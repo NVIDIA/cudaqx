@@ -35,7 +35,7 @@ find_package(CUDAToolkit REQUIRED)
 add_compile_options(-Wno-attributes) 
 
 add_executable(test_decoders test_decoders.cpp decoders/sample_decoder.cpp)
-target_link_libraries(test_decoders PRIVATE GTest::gtest_main cudaq-qec-decoders libstim)
+target_link_libraries(test_decoders PRIVATE GTest::gtest_main cudaq-qec-decoders libstim CUDA::cudart)
 add_dependencies(CUDAQXQECUnitTests test_decoders)
 gtest_discover_tests(test_decoders)
 
@@ -56,7 +56,8 @@ add_executable(test_decoding_server_core test_decoding_server_core.cpp)
 target_link_libraries(test_decoding_server_core PRIVATE
   GTest::gtest_main
   cudaq-qec-decoding-server
-  cudaq::cudaq)
+  cudaq::cudaq
+  CUDA::cudart)
 add_dependencies(CUDAQXQECUnitTests test_decoding_server_core)
 gtest_discover_tests(test_decoding_server_core)
 

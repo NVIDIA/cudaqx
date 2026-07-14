@@ -15,11 +15,18 @@
 
 #include <atomic>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 namespace cudaq::qec::decoding_server {
+
+/// Resolve the single GPU a gpu_roce pipeline runs on from the two knobs that
+/// can name it: HOLOLINK_GPU_ID (FPGA/NIC affinity; nullopt when unset) and
+/// the decoder's cuda_device_id (-1 when unpinned). Throws when both are set
+/// and disagree; unset env defers to the pin; neither set -> 0.
+int reconcile_gpu_roce_device(std::optional<int> env_gpu_id, int decoder_pin);
 
 /// Maps function_id → non-owning ITransceiver pointer.
 /// Ownership lives in DecodingServer::owned_transports_.
@@ -74,7 +81,8 @@ private:
   /// until CpuRoceTransceiverAdapter / GpuRoceTransceiverAdapter are
   /// available via CUDAQ_REALTIME.
   static std::unique_ptr<ITransceiver>
-  make_transport(cudaq::qec::decoding::config::DecoderTransport transport_type);
+  make_transport(cudaq::qec::decoding::config::DecoderTransport transport_type,
+                 int pinned_cuda_device);
 
   // Destruction order matters: the GPU RoCE scheduler (inside
   // owned_transports_) holds a cudaGraphExec_t captured from a session's
