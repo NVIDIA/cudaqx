@@ -217,7 +217,6 @@ target_include_directories(cudaq-qec-realtime-decoding
   PUBLIC
     $<BUILD_INTERFACE:${CUDAQX_QEC_INCLUDE_DIR}>
     $<BUILD_INTERFACE:${LLVM_INCLUDE_DIRS}>
-    $<BUILD_INTERFACE:${CUDAQ_INCLUDE_DIR}>
     $<INSTALL_INTERFACE:${CUDAQ_INCLUDE_DIR}>
     $<INSTALL_INTERFACE:include>
   PRIVATE
@@ -238,7 +237,6 @@ target_link_libraries(cudaq-qec-realtime-decoding
   PUBLIC
     cudaq-qec-decoders
   PRIVATE
-    cudaq::cudaq-common
     LLVMSupport
     CUDA::cudart
     $<$<BOOL:${CUDAQ_REALTIME_LIBRARY}>:${CUDAQ_REALTIME_LIBRARY}>
