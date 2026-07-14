@@ -1009,7 +1009,6 @@ start_server() {
         HOLOLINK_REMOTE_QP="$((remote_qp))" \
         HOLOLINK_FRAME_SIZE="$PAGE_SIZE" \
         HOLOLINK_NUM_PAGES="$GPU_ROCE_NUM_PAGES" \
-        HOLOLINK_GPU_ID="$GPU_ID" \
         "$SERVER_BIN" \
             --config="$CONFIG_FILE" \
             --transport=gpu_roce \
