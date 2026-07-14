@@ -181,30 +181,6 @@ if(CMAKE_CUDA_COMPILER)
       ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     )
 
-    # Private builds may provide decoder_rpc_dispatch.cu, which exports the
-    # decoder-state registration and DEVICE_CALL handler glue that graph-based
-    # decoders resolve via dlsym(RTLD_DEFAULT, ...). Keep this optional so the
-    # public tree still builds without proprietary sources.
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/decoder_rpc_dispatch.cu")
-      add_library(cudaq-qec-realtime-decoder-rpc-dispatch STATIC
-        decoder_rpc_dispatch.cu
-      )
-      set_target_properties(cudaq-qec-realtime-decoder-rpc-dispatch PROPERTIES
-        CUDA_SEPARABLE_COMPILATION ON
-        CUDA_STANDARD 17
-        POSITION_INDEPENDENT_CODE ON
-        ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
-      )
-      target_include_directories(cudaq-qec-realtime-decoder-rpc-dispatch PUBLIC
-        $<BUILD_INTERFACE:${CUDAQX_QEC_INCLUDE_DIR}>
-        $<BUILD_INTERFACE:${_core_include_dir}>
-        $<BUILD_INTERFACE:${CUDAQ_REALTIME_INCLUDE_DIR}>
-        $<INSTALL_INTERFACE:include>
-      )
-      target_link_libraries(cudaq-qec-realtime-decoder-rpc-dispatch PUBLIC
-        CUDA::cudart
-      )
-    endif()
   else()
     message(WARNING "cuda-quantum realtime headers not found. "
                     "Device library cudaq-qec-realtime-device will not be built. "

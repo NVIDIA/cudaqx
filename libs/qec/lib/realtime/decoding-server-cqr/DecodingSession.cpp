@@ -7,6 +7,7 @@
  ******************************************************************************/
 
 #include "DecodingSession.h"
+#include "DecodingServer.h"
 #include "RpcWireFormat.h"
 #include "../../hardware_guards.h"
 #include "cudaq/qec/logger.h"
@@ -36,22 +37,9 @@ std::optional<int> env_int_optional(const char *name) {
   }
 }
 
-int graph_capture_device(const cudaq::qec::decoder &decoder) {
-  const int decoder_pin = decoder.get_cuda_device_id();
-  const auto hololink_gpu_id = env_int_optional("HOLOLINK_GPU_ID");
-  if (hololink_gpu_id && decoder_pin >= 0 && *hololink_gpu_id != decoder_pin)
-    throw std::runtime_error(
-        "gpu_roce device conflict: HOLOLINK_GPU_ID=" +
-        std::to_string(*hololink_gpu_id) + " but the decoder is pinned to " +
-        std::to_string(decoder_pin) +
-        " (cuda_device_id). The FPGA-affine GPU and decoder pin must match.");
-  if (decoder_pin >= 0)
-    return decoder_pin;
-  return hololink_gpu_id.value_or(-1);
-}
-
 void set_graph_capture_device(const cudaq::qec::decoder &decoder) {
-  const int device = graph_capture_device(decoder);
+  const int device = reconcile_gpu_roce_device(
+      env_int_optional("HOLOLINK_GPU_ID"), decoder.get_cuda_device_id());
   cudaq::qec::detail_affinity::set_cuda_device_for_decode(device);
   if (device >= 0)
     CUDA_QEC_INFO(
