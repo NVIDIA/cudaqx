@@ -105,8 +105,11 @@ GEN_SHOTS=100
 #                        enqueue/get/reset run as DEVICE_CALLs on the GPU and
 #                        the captured RelayBP decode graph fires device-side)
 TRANSPORT=""
-# GPU for the gpu_roce scheduler + decode graph (HOLOLINK_GPU_ID).
+# GPU for the gpu_roce scheduler + decode graph.
 GPU_ID=0
+# Server-side GPU RoCE ring depth. "auto" chooses a page count whose total
+# allocation satisfies the host page-size requirement.
+GPU_ROCE_NUM_PAGES=auto
 
 # Runtime nv-qldpc plugin for the Relay BP profile: the prebuilt
 # libcudaq-qec-nv-qldpc-decoder.so, dlopen'd by both the generator (during
@@ -129,10 +132,10 @@ MTU=4096
 TIMEOUT=60
 NUM_SHOTS=""
 PAGE_SIZE=384
-# Ring depth is intentionally NOT configurable: stock HSB posts WQE_NUM=64
-# receive/send WQEs, so a deeper ring aliases two slots per WQE and races
-# RX/TX.  The server clamps to 64 as well.
+# CPU RoCE server ring slots.
 NUM_SLOTS=64
+# FPGA/emulator playback window pages.
+PLAYBACK_NUM_PAGES=512
 # TX SGE bytes for the server's SEND responses.  RPCResponse (24B) + a
 # bit-packed correction byte fits well inside 64, keeping every response a
 # single 512-bit ILA beat.
@@ -217,6 +220,9 @@ Run options:
   --frame-size N         Server TX SGE bytes, cpu_roce only (default: 64;
                          gpu_roce uses page-size as HOLOLINK_FRAME_SIZE)
   --gpu N                GPU device id for gpu_roce (default: 0)
+  --gpu-roce-num-pages N Server GPU RoCE ring pages (default: auto-align;
+                         starts from playback window pages)
+  --playback-num-pages N FPGA/emulator playback window pages (default: 512)
   --spacing N            Inter-shot spacing in microseconds (default: 10)
   --control-port N       UDP control port for emulator (default: 8193)
 
@@ -235,6 +241,8 @@ while [[ $# -gt 0 ]]; do
         --onnx)             ONNX_PATH="$2"; shift ;;
         --transport)        TRANSPORT="$2"; shift ;;
         --gpu)              GPU_ID="$2"; shift ;;
+        --gpu-roce-num-pages) GPU_ROCE_NUM_PAGES="$2"; shift ;;
+        --playback-num-pages) PLAYBACK_NUM_PAGES="$2"; shift ;;
         --nv-qldpc-plugin)  NV_QLDPC_PLUGIN="$2"; shift ;;
         --config)           CONFIG_FILE="$2"; shift ;;
         --syndromes)        SYNDROMES_FILE="$2"; shift ;;
@@ -278,6 +286,22 @@ fi
 if [[ "$TRANSPORT" != "cpu_roce" && "$TRANSPORT" != "gpu_roce" ]]; then
     echo "ERROR: unknown --transport $TRANSPORT (expected cpu_roce or gpu_roce)" >&2
     exit 1
+fi
+
+# Some DOCA registrations require the gpu_roce server ring allocation to be
+# host-page aligned. Keep playback capacity independent from the server ring,
+# and choose a server page count that satisfies the allocation contract.
+if [[ "$TRANSPORT" == "gpu_roce" && "$GPU_ROCE_NUM_PAGES" == "auto" ]]; then
+    HOST_PAGE_SIZE=$(getconf PAGESIZE 2>/dev/null || echo 4096)
+    SERVER_PAGE_SIZE=$(( ((PAGE_SIZE + 127) / 128) * 128 ))
+    GPU_ROCE_NUM_PAGES="$PLAYBACK_NUM_PAGES"
+    while (( (SERVER_PAGE_SIZE * GPU_ROCE_NUM_PAGES) % HOST_PAGE_SIZE != 0 )); do
+        ((GPU_ROCE_NUM_PAGES++))
+        if (( GPU_ROCE_NUM_PAGES > 65536 )); then
+            echo "ERROR: unable to auto-align gpu_roce ring for page-size=$PAGE_SIZE host-page-size=$HOST_PAGE_SIZE" >&2
+            exit 1
+        fi
+    done
 fi
 
 # ============================================================================
@@ -798,18 +822,22 @@ generate_data_files() {
     fi
 
     # The server selects its transceiver from the per-decoder `transport:` YAML
-    # key (default cpu_roce).  The generator doesn't emit non-default optional
-    # fields, so for the gpu_roce profile inject the key into our generated
-    # config, directly under the decoder's `type:` line.
+    # key (default cpu_roce). For gpu_roce, `cuda_device_id` pins graph capture
+    # and worker-thread execution to the selected GPU. The generator doesn't emit
+    # these non-default optional fields, so inject them into our generated config
+    # directly under the decoder's `type:` line.
     if [[ "$TRANSPORT" == "gpu_roce" ]]; then
-        _info "Injecting 'transport: gpu_roce' into $(basename "$CONFIG_FILE")"
-        awk '{ print }
+        _info "Injecting 'transport: gpu_roce' and cuda_device_id=$GPU_ID into $(basename "$CONFIG_FILE")"
+        awk -v gpu_id="$GPU_ID" '{ print }
              /^[[:space:]]*type:/ && !done {
-                 print "    transport:       gpu_roce"; done = 1
+                 print "    transport:       gpu_roce"
+                 print "    cuda_device_id:  " gpu_id
+                 done = 1
              }' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" \
             && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
-        if ! grep -q "transport:.*gpu_roce" "$CONFIG_FILE"; then
-            _err "Failed to inject transport: gpu_roce into $CONFIG_FILE"
+        if ! grep -q "transport:.*gpu_roce" "$CONFIG_FILE" || \
+           ! grep -q "cuda_device_id:.*$GPU_ID" "$CONFIG_FILE"; then
+            _err "Failed to inject gpu_roce transport/cuda_device_id into $CONFIG_FILE"
             return 1
         fi
     fi
@@ -980,7 +1008,7 @@ start_server() {
         HOLOLINK_PEER_IP="$peer_ip" \
         HOLOLINK_REMOTE_QP="$((remote_qp))" \
         HOLOLINK_FRAME_SIZE="$PAGE_SIZE" \
-        HOLOLINK_NUM_PAGES="$NUM_SLOTS" \
+        HOLOLINK_NUM_PAGES="$GPU_ROCE_NUM_PAGES" \
         HOLOLINK_GPU_ID="$GPU_ID" \
         "$SERVER_BIN" \
             --config="$CONFIG_FILE" \
@@ -1057,6 +1085,7 @@ run_playback() {
         --rkey "$SERVER_RKEY"
         --buffer-addr "$SERVER_ADDR"
         --page-size "$PAGE_SIZE"
+        --num-pages "$PLAYBACK_NUM_PAGES"
         "$@"
     )
     if $VERIFY; then
@@ -1093,6 +1122,7 @@ run_emulated() {
         --port="$CONTROL_PORT" \
         --bridge-ip="$BRIDGE_IP" \
         --page-size="$PAGE_SIZE" \
+        --num-pages="$PLAYBACK_NUM_PAGES" \
         > >(tee "$emu_log") 2>&1 &
     local emu_pid=$!
     PIDS_TO_KILL+=("$emu_pid")
