@@ -10,6 +10,8 @@
 
 #include "qec_realtime_session.h"
 
+#include "../hardware_guards.h"
+
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/realtime/decoder_rpc_ids.h"
 #include "cudaq/qec/realtime/graph_resources.h"
@@ -135,16 +137,11 @@ cudaq::qec::decoder *get_decoder_or_throw(std::int64_t decoder_id) {
 static void apply_decoder_cuda_device(cudaq::qec::decoder *dec) {
   if (!dec)
     return;
-  const int id = dec->get_cuda_device_id();
-  if (id < 0)
-    return;
-  int cur = -1;
-  if (cudaGetDevice(&cur) == cudaSuccess && cur == id)
-    return;
-  cudaError_t err = cudaSetDevice(id);
-  if (err != cudaSuccess)
-    CUDA_QEC_WARN("apply_decoder_cuda_device: cudaSetDevice({}) failed: {}", id,
-                  cudaGetErrorString(err));
+  // Throws on failure (fail fast): host dispatch surfaces it as an error
+  // response and graph initialization aborts, rather than continuing on
+  // whichever device happened to be current.
+  cudaq::qec::detail_affinity::set_cuda_device_for_decode(
+      dec->get_cuda_device_id());
 }
 
 // Two-ring response writer: the request stays in `rx_slot` (read-only); the
@@ -282,7 +279,9 @@ void reset_decoder_host(const void *rx_slot, void *tx_slot, std::size_t) {
     const auto *body = reinterpret_cast<const rpc::ResetRequestPayload *>(
         static_cast<const std::uint8_t *>(rx_slot) +
         sizeof(cudaq::realtime::RPCHeader));
-    get_decoder_or_throw(body->decoder_id)->reset_decoder();
+    auto *decoder = get_decoder_or_throw(body->decoder_id);
+    apply_decoder_cuda_device(decoder);
+    decoder->reset_decoder();
     write_response(tx_slot, rx_slot, 0);
   } catch (...) {
     write_response(tx_slot, rx_slot, -2);

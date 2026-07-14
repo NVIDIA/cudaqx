@@ -15,6 +15,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <thread>
 
@@ -38,6 +39,9 @@ struct GpuRoceConfig {
   std::string device_name; ///< HOLOLINK_DEVICE   (IB netdev, e.g. "mlx5_0")
   uint32_t remote_qp{0};   ///< HOLOLINK_REMOTE_QP (FPGA/emulator QP number)
   int gpu_id{0};           ///< HOLOLINK_GPU_ID
+  /// Set iff HOLOLINK_GPU_ID was present in the environment (the FPGA/NIC
+  /// affinity is a topology fact; absence defers to the decoder's pin).
+  std::optional<int> gpu_id_env;
   size_t frame_size{384};  ///< HOLOLINK_FRAME_SIZE (max RPC frame bytes)
   size_t page_size{0};     ///< HOLOLINK_PAGE_SIZE (0 → derived from frame_size)
   size_t num_pages{64};    ///< HOLOLINK_NUM_PAGES (ring depth)

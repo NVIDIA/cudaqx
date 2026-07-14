@@ -28,12 +28,38 @@ using cudaq::qec::decoding::config::DecoderTransport;
 // Constructors
 // ---------------------------------------------------------------------------
 
+/// gpu_roce runs the whole pipeline -- rings, dispatch scheduler, device-side
+/// graph fire -- on ONE GPU: the one the FPGA/NIC is affine to
+/// (HOLOLINK_GPU_ID). A decoder pinned elsewhere would split graph capture
+/// and graph launch across devices, which CUDA graphs cannot do. Both knobs
+/// name the same topology fact, so they must agree.
+int reconcile_gpu_roce_device(std::optional<int> env_gpu_id, int decoder_pin) {
+  if (env_gpu_id && *env_gpu_id < 0)
+    throw std::runtime_error("HOLOLINK_GPU_ID must be >= 0 (got " +
+                             std::to_string(*env_gpu_id) + ")");
+  if (env_gpu_id && decoder_pin >= 0 && *env_gpu_id != decoder_pin)
+    throw std::runtime_error(
+        "gpu_roce device conflict: HOLOLINK_GPU_ID=" +
+        std::to_string(*env_gpu_id) + " but the decoder is pinned to " +
+        std::to_string(decoder_pin) +
+        " (cuda_device_id). The FPGA-affine GPU and the decoder pin must be "
+        "the same device.");
+  if (env_gpu_id)
+    return *env_gpu_id;
+  return decoder_pin >= 0 ? decoder_pin : 0;
+}
+
 std::unique_ptr<ITransceiver>
-DecodingServer::make_transport(DecoderTransport transport_type) {
+DecodingServer::make_transport(DecoderTransport transport_type,
+                               int pinned_cuda_device) {
   switch (transport_type) {
   case DecoderTransport::gpu_roce:
 #ifdef CUDAQ_GPU_ROCE_AVAILABLE
-    return std::make_unique<GpuRoceTransceiver>(GpuRoceConfig::from_env());
+  {
+    auto cfg = GpuRoceConfig::from_env();
+    cfg.gpu_id = reconcile_gpu_roce_device(cfg.gpu_id_env, pinned_cuda_device);
+    return std::make_unique<GpuRoceTransceiver>(cfg);
+  }
 #else
     throw std::runtime_error(
         "gpu_roce transport requested but CUDAQ_GPU_ROCE_AVAILABLE is not set. "
@@ -65,7 +91,12 @@ DecodingServer::DecodingServer(const std::string &config_yaml) {
   registry_.load_from_config(config, config_yaml);
   register_handlers();
 
-  auto t = make_transport(registry_.required_transport());
+  const auto &boot_sessions = registry_.sessions();
+  const int pinned_cuda_device =
+      boot_sessions.size() == 1
+          ? boot_sessions.begin()->second->dec->get_cuda_device_id()
+          : -1;
+  auto t = make_transport(registry_.required_transport(), pinned_cuda_device);
   ITransceiver *raw = t.get();
   owned_transports_.push_back(std::move(t));
   function_transport_[kEnqueueSyndromesFunctionId] = raw;
@@ -102,7 +133,12 @@ DecodingServer::DecodingServer(std::unique_ptr<ITransceiver> transport,
   function_transport_[kEnqueueSyndromesFunctionId] = raw;
   function_transport_[kGetCorrectionsFunctionId] = raw;
   function_transport_[kResetDecoderFunctionId] = raw;
-  init(config_yaml);
+  try {
+    init(config_yaml);
+  } catch (...) {
+    registry_.stop_workers();
+    throw;
+  }
 }
 
 DecodingServer::DecodingServer(
@@ -113,7 +149,14 @@ DecodingServer::DecodingServer(
   function_transport_[kEnqueueSyndromesFunctionId] = raw;
   function_transport_[kGetCorrectionsFunctionId] = raw;
   function_transport_[kResetDecoderFunctionId] = raw;
-  registry_.load_from_config(config, "configure_decoders()");
+  try {
+    registry_.load_from_config(config, "configure_decoders()");
+  } catch (...) {
+    // Members destroy in reverse order (transports before registry); join any
+    // already-started workers while the transports still exist.
+    registry_.stop_workers();
+    throw;
+  }
   register_handlers();
 }
 
@@ -122,7 +165,12 @@ DecodingServer::DecodingServer(std::vector<std::unique_ptr<ITransceiver>> owned,
                                const std::string &config_yaml)
     : owned_transports_(std::move(owned)),
       function_transport_(std::move(function_transport)) {
-  init(config_yaml);
+  try {
+    init(config_yaml);
+  } catch (...) {
+    registry_.stop_workers();
+    throw;
+  }
 }
 
 DecodingServer::~DecodingServer() {
