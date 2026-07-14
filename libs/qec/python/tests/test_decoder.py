@@ -433,6 +433,44 @@ def test_get_pcm_for_rounds():
     print('')
 
 
+def test_get_pcm_for_rounds_boundary():
+    # Boundary layout [B | S | S | B]: boundary width B=3, interior width S=5,
+    # two interior rounds => 4 detector layers over 2*B + 2*S = 16 rows. Each
+    # column carries a single nonzero placed in exactly one round.
+    B, S = 3, 5
+    round_starts = [0, 3, 8, 13]  # first row of rounds 0..3
+    num_rows = 16
+    pcm = np.zeros((num_rows, len(round_starts)), dtype=np.uint8)
+    for col, start in enumerate(round_starts):
+        pcm[start, col] = 1
+
+    # Boundary-aware slice of rounds 0..1 keeps rows [0, 8) = B + S and only the
+    # two columns whose nonzeros fall in those rounds.
+    sub, first_column, last_column = qec.get_pcm_for_rounds(
+        pcm, S, 0, 1, num_boundary_syndromes=B)
+    assert sub.shape == (B + S, 2)
+    assert (first_column, last_column) == (0, 1)
+    assert sub[0, 0] == 1 and sub[3, 1] == 1 and sub.sum() == 2
+
+    # Interior-only span (rounds 1..2) keeps rows [3, 13) = 2*S.
+    sub_interior, _, _ = qec.get_pcm_for_rounds(pcm,
+                                                S,
+                                                1,
+                                                2,
+                                                num_boundary_syndromes=B)
+    assert sub_interior.shape == (2 * S, 2)
+
+    # Omitting num_boundary_syndromes reinterprets the same matrix as a uniform
+    # S-wide layout, which slices rounds 0..1 to rows [0, 10) and selects a
+    # different set of columns -- confirming the parameter changes behavior.
+    sub_uniform, _, _ = qec.get_pcm_for_rounds(pcm, S, 0, 1)
+    assert sub_uniform.shape == (2 * S, 3)
+
+    # An out-of-range end_round is rejected for the boundary layout (4 layers).
+    with pytest.raises(ValueError, match="end_round"):
+        qec.get_pcm_for_rounds(pcm, S, 0, 4, num_boundary_syndromes=B)
+
+
 def test_shuffle_pcm_columns():
     pcm = qec.generate_random_pcm(n_rounds=10,
                                   n_errs_per_round=20,
@@ -1000,6 +1038,32 @@ def test_get_decoder_rejects_malformed_stim_dem_text():
 def test_get_decoder_rejects_unknown_decoder_for_stim_dem_text():
     with pytest.raises(RuntimeError, match="__no_such_decoder__"):
         qec.get_decoder("__no_such_decoder__", "error(0.1) D0 L0\n")
+
+
+def test_decoder_cuda_device_id_invalid_raises():
+    H = create_test_matrix()
+    # A negative id is rejected before reaching the C++ guard: the kwargs
+    # marshalling layer stores Python ints as size_t, so nanobind refuses the
+    # negative value with a bare RuntimeError ("std::bad_cast").
+    with pytest.raises(RuntimeError):
+        qec.get_decoder("single_error_lut", H, cuda_device_id=-2)
+    # An out-of-range id flows through kwargs to decoder::get(), which raises
+    # a runtime_error naming the offending parameter.
+    with pytest.raises(RuntimeError, match="cuda_device_id"):
+        qec.get_decoder("single_error_lut", H, cuda_device_id=1 << 20)
+
+
+def test_decoder_cuda_device_id_valid():
+    H = create_test_matrix()
+    try:
+        d = qec.get_decoder("single_error_lut", H, cuda_device_id=0)
+    except RuntimeError as e:
+        if "out of range" in str(e):
+            pytest.skip("no CUDA device visible")
+        raise
+    syndrome = create_test_syndrome()
+    result = d.decode(syndrome)
+    assert len(result.result) == H.shape[1]
 
 
 def test_get_decoder_user_O_wins_over_dem_derived():

@@ -7,6 +7,7 @@
  ******************************************************************************/
 
 #include "realtime_decoding.h"
+#include "../hardware_guards.h"
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/pcm_utils.h"
@@ -158,6 +159,10 @@ namespace cudaq::qec::decoding::host {
 cudaqx::heterogeneous_map prepare_decoder_params(
     const cudaq::qec::decoding::config::decoder_config &decoder_config) {
   auto params = decoder_config.decoder_custom_args_to_heterogeneous_map();
+  // Placement knob: surfaced for every decoder type (deliberately before the
+  // trt-only early return below); consumed by decoder::get() at construction.
+  if (decoder_config.cuda_device_id.has_value())
+    params.insert("cuda_device_id", decoder_config.cuda_device_id.value());
   if (decoder_config.type != "trt_decoder")
     return params;
 
@@ -396,15 +401,18 @@ void enqueue_syndromes(std::size_t decoder_id, uint8_t *syndromes,
                     syndrome_length, max_syndromes));
   }
 
-  // Invoke syndrome capture callback if registered (for --save_syndrome
-  // feature)
-  if (g_syndrome_capture_callback) {
-    auto packed_syndrome = pack_syndrome_bits(syndromes, syndrome_length);
-    g_syndrome_capture_callback(packed_syndrome.data(), packed_syndrome.size());
-  }
+  const auto capture_syndromes = [&] {
+    // --save_syndrome feature: record what is actually submitted for decode.
+    if (g_syndrome_capture_callback) {
+      auto packed_syndrome = pack_syndrome_bits(syndromes, syndrome_length);
+      g_syndrome_capture_callback(packed_syndrome.data(),
+                                  packed_syndrome.size());
+    }
+  };
 
 #ifdef CUDAQ_REALTIME_ROOT
   if (g_realtime_session) {
+    capture_syndromes();
     try {
       cudaq::qec::decoding::rpc_producer::enqueue_syndromes(
           *g_realtime_session, decoder_id, syndromes, syndrome_length, tag);
@@ -417,6 +425,16 @@ void enqueue_syndromes(std::size_t decoder_id, uint8_t *syndromes,
     return;
   }
 #endif
+
+  // Direct-call path: this caller thread runs the decode, but
+  // configure_decoders() constructed every decoder sequentially on one thread,
+  // leaving the LAST decoder's device current. Point the thread at this
+  // decoder's pinned device before decoding (set-if-different; throws on
+  // failure) -- and before the capture callback, so a pin failure cannot
+  // record a round that was never decoded.
+  cudaq::qec::detail_affinity::set_cuda_device_for_decode(
+      decoder->get_cuda_device_id());
+  capture_syndromes();
 
   std::vector<uint8_t> syndrome_u8(syndrome_length);
   bool did_decode = false;
@@ -482,6 +500,9 @@ void get_corrections(std::size_t decoder_id, uint8_t *corrections,
   }
 #endif
 
+  // clear_corrections may touch device memory in some plugins.
+  cudaq::qec::detail_affinity::set_cuda_device_for_decode(
+      decoder->get_cuda_device_id());
   auto ret = decoder->get_obs_corrections();
   for (std::size_t i = 0; i < correction_length; ++i) {
     corrections[i] = ret[i];
@@ -517,6 +538,8 @@ void reset_decoder(std::size_t decoder_id) {
   }
 #endif
 
+  cudaq::qec::detail_affinity::set_cuda_device_for_decode(
+      decoder->get_cuda_device_id());
   decoder->reset_decoder();
 }
 

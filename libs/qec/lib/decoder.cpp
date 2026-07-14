@@ -8,10 +8,12 @@
 
 #include "cudaq/qec/decoder.h"
 #include "cuda-qx/core/library_utils.h"
+#include "hardware_guards.h"
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/plugin_loader.h"
 #include "cudaq/qec/version.h"
 #include <cassert>
+#include <cuda_runtime_api.h>
 #include <dlfcn.h>
 #include <filesystem>
 #include <fmt/ranges.h>
@@ -65,6 +67,13 @@ struct decoder::rt_impl {
 
   /// The current round.  Only used for sliding window decoder.
   uint32_t current_round = 0;
+
+  /// Detector-layer offsets [0, w0, w0+w1, ...] for the [B | S...S | B] layout;
+  /// back() == total detectors. Only used for sliding window decoder.
+  std::vector<std::size_t> detector_layer_offsets;
+
+  /// Index of the next detector layer to emit. Only used for sliding window.
+  std::size_t detector_layer_index = 0;
 };
 
 void decoder::rt_impl_deleter::operator()(rt_impl *p) const { delete p; }
@@ -123,9 +132,75 @@ std::string decoder::get_version() const {
 
 std::future<decoder_result>
 decoder::decode_async(const std::vector<float_t> &syndrome) {
-  return std::async(std::launch::async,
-                    [this, syndrome] { return this->decode(syndrome); });
+  // Captured by value: the worker must not dereference decoder members to
+  // find its device. The std::async thread is brand-new and unpinned, so it
+  // guards itself for the duration of the call (the one exception to the
+  // one-thread-owns-one-decoder persistent pin).
+  const int cuda_id = cuda_device_id_;
+  return std::async(std::launch::async, [this, syndrome, cuda_id] {
+    cudaq::qec::detail_affinity::CudaDeviceGuard dev(cuda_id);
+    return this->decode(syndrome);
+  });
 }
+
+/// Reads "cuda_device_id" from the construction parameters. Absent -> -1.
+/// Negative or >= cudaGetDeviceCount() -> std::runtime_error (fail fast:
+/// never silently decode on the wrong GPU).
+static int read_cuda_device_id(const cudaqx::heterogeneous_map &params) {
+  if (!params.contains("cuda_device_id"))
+    return -1;
+  const int value = params.get<int>("cuda_device_id");
+  if (value < 0)
+    throw std::runtime_error("cuda_device_id must be >= 0 (got " +
+                             std::to_string(value) + ")");
+  int count = 0;
+  if (cudaGetDeviceCount(&count) != cudaSuccess || value >= count)
+    throw std::runtime_error("cuda_device_id " + std::to_string(value) +
+                             " is out of range: " + std::to_string(count) +
+                             " CUDA device(s) visible");
+  return value;
+}
+
+/// Selects the construction device and restores the previous device unless
+/// commit() is called. Makes failed plugin construction transactional: if the
+/// plugin ctor throws, the calling thread is left on its original device
+/// instead of leaking the pin to whichever device was selected for the attempt.
+class ConstructionDevicePin {
+public:
+  explicit ConstructionDevicePin(int target) : target_(target) {
+    cudaError_t err = cudaGetDevice(&previous_);
+    if (err != cudaSuccess)
+      throw std::runtime_error(
+          "cuda_device_id " + std::to_string(target_) +
+          " could not be selected because cudaGetDevice() failed: " +
+          cudaGetErrorString(err));
+    err = cudaSetDevice(target_);
+    if (err != cudaSuccess)
+      throw std::runtime_error("cudaSetDevice(" + std::to_string(target_) +
+                               ") failed: " + cudaGetErrorString(err));
+    selected_ = true;
+  }
+
+  ~ConstructionDevicePin() {
+    if (selected_ && !committed_ && previous_ != target_)
+      (void)cudaSetDevice(previous_);
+  }
+
+  ConstructionDevicePin(const ConstructionDevicePin &) = delete;
+  ConstructionDevicePin &operator=(const ConstructionDevicePin &) = delete;
+
+  // Keep the pin: one thread owns one decoder, so leaving the constructing
+  // thread on the target device lets later allocations and kernel launches --
+  // including lazy ones inside decode() -- land there with no per-call
+  // machinery.
+  void commit() { committed_ = true; }
+
+private:
+  int target_ = -1;
+  int previous_ = -1;
+  bool selected_ = false;
+  bool committed_ = false;
+};
 
 std::unique_ptr<decoder>
 decoder::get(const std::string &name, const decoder_init &init,
@@ -138,7 +213,20 @@ decoder::get(const std::string &name, const decoder_init &init,
         "invalid decoder requested: " + name +
         ". Run with CUDAQ_LOG_LEVEL=info (environment variable) to see "
         "additional plugin diagnostics at startup.");
-  return iter->second(init, param_map);
+  const int cuda_device_id = read_cuda_device_id(param_map);
+  if (cuda_device_id < 0)
+    return iter->second(init, param_map);
+  ConstructionDevicePin device_pin(cuda_device_id);
+  // The key is consumed here; strip it so plugins that strictly validate
+  // their parameter keys do not reject it.
+  cudaqx::heterogeneous_map plugin_params;
+  for (const auto &kv : param_map)
+    if (kv.first != "cuda_device_id")
+      plugin_params.insert(kv.first, kv.second);
+  auto d = iter->second(init, plugin_params);
+  d->cuda_device_id_ = cuda_device_id;
+  device_pin.commit();
+  return d;
 }
 
 namespace details {
@@ -234,6 +322,14 @@ void set_D_sparse_common(decoder *decoder,
     pimpl->has_first_round_detectors =
         (D_sparse.size() > 0 && D_sparse[0].size() == 1);
     pimpl->current_round = 0;
+    // Detector-layer offsets for the [B | S...S | B] layout; each streamed
+    // layer's width comes from these.
+    const std::size_t num_layers = sw_decoder->get_num_detector_layers();
+    pimpl->detector_layer_offsets.resize(num_layers + 1);
+    for (std::size_t r = 0; r <= num_layers; ++r)
+      pimpl->detector_layer_offsets[r] = sw_decoder->get_layer_offset(r);
+    pimpl->detector_layer_index = 0;
+    // The interior width is the widest layer, so it bounds the buffers.
     pimpl->persistent_detector_buffer.resize(pimpl->num_syndromes_per_round);
     pimpl->persistent_soft_detector_buffer.resize(
         pimpl->num_syndromes_per_round);
@@ -318,24 +414,15 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
           pimpl->persistent_detector_buffer[i] ^= pimpl->msyn_buffer[col];
       }
     } else {
-      // For sliding window decoder, syndrome_length must equal
-      // num_syndromes_per_round
-      assert(syndrome_length == pimpl->num_syndromes_per_round);
-      if (pimpl->current_round == 1 && pimpl->has_first_round_detectors) {
-        // First round: only compute first-round detectors (direct copy)
-        for (std::size_t i = 0; i < pimpl->num_syndromes_per_round; i++) {
-          pimpl->persistent_detector_buffer[i] = pimpl->msyn_buffer[i];
-        }
-      } else {
-        // Buffer is full with 2 rounds: compute timelike detectors (XOR of two
-        // rounds)
-        std::size_t index =
-            (pimpl->current_round - 2) * pimpl->num_syndromes_per_round;
-        for (std::size_t i = 0; i < pimpl->num_syndromes_per_round; i++) {
-          pimpl->persistent_detector_buffer[i] =
-              pimpl->msyn_buffer[index + i] ^
-              pimpl->msyn_buffer[index + i + pimpl->num_syndromes_per_round];
-        }
+      const std::size_t k = pimpl->detector_layer_index++;
+      const std::size_t off = pimpl->detector_layer_offsets[k];
+      const std::size_t width = pimpl->detector_layer_offsets[k + 1] - off;
+      pimpl->persistent_detector_buffer.resize(width);
+      for (std::size_t j = 0; j < width; j++) {
+        uint8_t v = 0;
+        for (auto col : this->D_sparse[off + j])
+          v ^= pimpl->msyn_buffer[col];
+        pimpl->persistent_detector_buffer[j] = v;
       }
     }
 
@@ -467,6 +554,7 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
     // Prepare for more data.
     pimpl->msyn_buffer_index = 0;
     pimpl->current_round = 0;
+    pimpl->detector_layer_index = 0;
   }
   return did_decode;
 }
@@ -516,6 +604,7 @@ void decoder::reset_decoder() {
   // Zero out all data that is considered "per-shot" memory.
   pimpl->msyn_buffer_index = 0;
   pimpl->current_round = 0;
+  pimpl->detector_layer_index = 0;
   pimpl->msyn_buffer.clear();
   pimpl->msyn_buffer.resize(pimpl->num_msyn_per_decode);
   pimpl->corrections.clear();
