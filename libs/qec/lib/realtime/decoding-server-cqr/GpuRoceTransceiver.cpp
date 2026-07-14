@@ -117,7 +117,9 @@ GpuRoceConfig GpuRoceConfig::from_env() {
   c.device_name = env_str("HOLOLINK_DEVICE");
   c.peer_ip = env_str("HOLOLINK_PEER_IP");
   c.remote_qp = env_u32("HOLOLINK_REMOTE_QP", 0);
-  c.gpu_id = env_int("HOLOLINK_GPU_ID", 0);
+  if (std::getenv("HOLOLINK_GPU_ID"))
+    c.gpu_id_env = env_int("HOLOLINK_GPU_ID", 0);
+  c.gpu_id = c.gpu_id_env.value_or(0);
   c.frame_size = env_size("HOLOLINK_FRAME_SIZE", 384);
   c.page_size = env_size("HOLOLINK_PAGE_SIZE", 0); // 0 → derived below
   c.num_pages = env_size("HOLOLINK_NUM_PAGES", 64);

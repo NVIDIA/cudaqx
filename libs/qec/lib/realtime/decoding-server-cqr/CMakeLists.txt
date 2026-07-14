@@ -159,6 +159,10 @@ target_link_libraries(cudaq-qec-decoding-server
     # violates the realtime-server dependency-closure contract.
     cudaq-qec-decoders
     cudaq-qec-realtime-decoding
+  PRIVATE
+    # DecodingSession worker threads pin themselves to their decoder's
+    # cuda_device_id (cudaSetDevice).
+    CUDA::cudart
 )
 
 set_target_properties(cudaq-qec-decoding-server PROPERTIES

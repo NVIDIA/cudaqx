@@ -6,19 +6,24 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  *******************************************************************************/
 
+#include "DecodingServer.h"
 #include "DecodingSession.h"
 #include "RoundAccumulator.h"
 #include "RpcDispatcher.h"
 #include "RpcWireFormat.h"
+#include "../lib/hardware_guards.h"
 
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/sparse_binary_matrix.h"
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <cstdint>
+#include <cuda_runtime_api.h>
 #include <memory>
 #include <stdexcept>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -254,6 +259,114 @@ TEST(RpcDispatcherTest, ConvertsHandlerExceptionsToErrorResponses) {
   CaptureTransceiver transport;
   EXPECT_NO_THROW(dispatcher.dispatch(std::move(frame), transport));
   expect_status(transport, RpcStatus::INTERNAL_ERROR);
+}
+
+TEST(GpuRoceDeviceReconcile, BothUnsetDefaultsToZero) {
+  EXPECT_EQ(
+      cudaq::qec::decoding_server::reconcile_gpu_roce_device(std::nullopt, -1),
+      0);
+}
+
+TEST(GpuRoceDeviceReconcile, EnvOnlyWins) {
+  EXPECT_EQ(cudaq::qec::decoding_server::reconcile_gpu_roce_device(2, -1), 2);
+}
+
+TEST(GpuRoceDeviceReconcile, PinOnlyWins) {
+  EXPECT_EQ(
+      cudaq::qec::decoding_server::reconcile_gpu_roce_device(std::nullopt, 3),
+      3);
+}
+
+TEST(GpuRoceDeviceReconcile, AgreementPasses) {
+  EXPECT_EQ(cudaq::qec::decoding_server::reconcile_gpu_roce_device(1, 1), 1);
+}
+
+TEST(GpuRoceDeviceReconcile, ConflictThrows) {
+  EXPECT_THROW(cudaq::qec::decoding_server::reconcile_gpu_roce_device(0, 2),
+               std::runtime_error);
+}
+
+TEST(SetCudaDeviceForDecode, UnpinnedIsNoOp) {
+  // -1 = unpinned: must never touch the device or throw, even on a machine
+  // with no CUDA devices at all.
+  EXPECT_NO_THROW(cudaq::qec::detail_affinity::set_cuda_device_for_decode(-1));
+}
+
+TEST(SetCudaDeviceForDecode, ImpossibleDeviceThrows) {
+  // The handshake's failure transport rides on this throw; an id beyond the
+  // device count fails cudaSetDevice on any machine, including GPU-less CI.
+  int count = 0;
+  if (cudaGetDeviceCount(&count) != cudaSuccess)
+    count = 0;
+  EXPECT_THROW(
+      cudaq::qec::detail_affinity::set_cuda_device_for_decode(count + 7),
+      std::runtime_error);
+}
+
+/// cuda_device_id_ is protected: setting an impossible id directly bypasses
+/// decoder::get()'s construction-time range check, the only front door --
+/// which is exactly what makes the handshake's failure path injectable here.
+class MispinnedDecoder final : public cudaq::qec::decoder {
+public:
+  MispinnedDecoder()
+      : decoder(cudaq::qec::sparse_binary_matrix::from_csr(
+            /*num_rows=*/1, /*num_cols=*/1, /*row_ptrs=*/{0, 1},
+            /*col_indices=*/{0})) {
+    set_O_sparse(std::vector<std::vector<uint32_t>>{{0}});
+    set_D_sparse(std::vector<std::vector<uint32_t>>{{0, 1}});
+    cuda_device_id_ = 1 << 20;
+  }
+  cudaq::qec::decoder_result
+  decode(const std::vector<cudaq::qec::float_t> &) override {
+    return {};
+  }
+};
+
+TEST(DecodingSessionPinHandshake, UnhonorablePinFailsStartWorker) {
+  // The contract under test: a worker that cannot pin must never serve, and
+  // the failure must surface on the caller (server-startup) thread. This is
+  // the test that fails if start_worker ever reverts to log-and-continue.
+  SyndromeMappingTable table;
+  table[0] = {{}};
+  auto session = DecodingSession::create(std::make_unique<MispinnedDecoder>(),
+                                         std::move(table));
+  EXPECT_THROW(session->start_worker(), std::runtime_error);
+  // The failed worker was joined inside start_worker; nothing is left to
+  // serve and destruction must not hang.
+  EXPECT_FALSE(session->worker.joinable());
+}
+
+TEST(GpuRoceDeviceReconcile, NegativeEnvThrows) {
+  EXPECT_THROW(cudaq::qec::decoding_server::reconcile_gpu_roce_device(-1, -1),
+               std::runtime_error);
+}
+
+TEST(DecodingSessionPinHandshake, PinnedWorkerStartsAndServes) {
+  // start_worker() must resolve the pin handshake (throwing on failure per
+  // its contract) and leave a live worker serving items.
+  int count = 0;
+  if (cudaGetDeviceCount(&count) != cudaSuccess || count < 1)
+    GTEST_SKIP() << "needs >= 1 CUDA device";
+
+  cudaqx::heterogeneous_map params;
+  params.insert("cuda_device_id", 0);
+  auto dec = cudaq::qec::decoder::get(
+      "single_error_lut",
+      cudaq::qec::sparse_binary_matrix::from_csr(1, 1, {0, 1}, {0}), params);
+  dec->set_O_sparse(std::vector<std::vector<uint32_t>>{{0}});
+  dec->set_D_sparse(std::vector<std::vector<uint32_t>>{{0, 1}});
+
+  SyndromeMappingTable table;
+  table[0] = {{}};
+  auto session = DecodingSession::create(std::move(dec), std::move(table));
+  ASSERT_NO_THROW(session->start_worker());
+
+  CaptureTransceiver transport;
+  ASSERT_TRUE(session->try_enqueue(make_reset(transport)));
+  for (int i = 0; i < 200 && session->reset_count.load() == 0; ++i)
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  EXPECT_EQ(session->reset_count.load(), 1u)
+      << "pinned worker did not serve the queued item";
 }
 
 } // namespace

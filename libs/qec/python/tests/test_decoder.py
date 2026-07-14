@@ -1002,6 +1002,32 @@ def test_get_decoder_rejects_unknown_decoder_for_stim_dem_text():
         qec.get_decoder("__no_such_decoder__", "error(0.1) D0 L0\n")
 
 
+def test_decoder_cuda_device_id_invalid_raises():
+    H = create_test_matrix()
+    # A negative id is rejected before reaching the C++ guard: the kwargs
+    # marshalling layer stores Python ints as size_t, so nanobind refuses the
+    # negative value with a bare RuntimeError ("std::bad_cast").
+    with pytest.raises(RuntimeError):
+        qec.get_decoder("single_error_lut", H, cuda_device_id=-2)
+    # An out-of-range id flows through kwargs to decoder::get(), which raises
+    # a runtime_error naming the offending parameter.
+    with pytest.raises(RuntimeError, match="cuda_device_id"):
+        qec.get_decoder("single_error_lut", H, cuda_device_id=1 << 20)
+
+
+def test_decoder_cuda_device_id_valid():
+    H = create_test_matrix()
+    try:
+        d = qec.get_decoder("single_error_lut", H, cuda_device_id=0)
+    except RuntimeError as e:
+        if "out of range" in str(e):
+            pytest.skip("no CUDA device visible")
+        raise
+    syndrome = create_test_syndrome()
+    result = d.decode(syndrome)
+    assert len(result.result) == H.shape[1]
+
+
 def test_get_decoder_user_O_wins_over_dem_derived():
     dem_text = ("error(0.1) D0 L0\n"
                 "error(0.1) D1 L0\n"
