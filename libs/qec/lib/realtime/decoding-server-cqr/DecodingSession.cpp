@@ -12,12 +12,54 @@
 #include "cudaq/qec/logger.h"
 
 #include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <future>
+#include <optional>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace cudaq::qec::decoding_server {
+
+namespace {
+
+std::optional<int> env_int_optional(const char *name) {
+  const char *value = std::getenv(name);
+  if (!value || !*value)
+    return std::nullopt;
+  try {
+    return std::stoi(value);
+  } catch (const std::exception &) {
+    throw std::runtime_error(std::string("invalid ") + name +
+                             " value: " + value);
+  }
+}
+
+int graph_capture_device(const cudaq::qec::decoder &decoder) {
+  const int decoder_pin = decoder.get_cuda_device_id();
+  const auto hololink_gpu_id = env_int_optional("HOLOLINK_GPU_ID");
+  if (hololink_gpu_id && decoder_pin >= 0 && *hololink_gpu_id != decoder_pin)
+    throw std::runtime_error(
+        "gpu_roce device conflict: HOLOLINK_GPU_ID=" +
+        std::to_string(*hololink_gpu_id) + " but the decoder is pinned to " +
+        std::to_string(decoder_pin) +
+        " (cuda_device_id). The FPGA-affine GPU and decoder pin must match.");
+  if (decoder_pin >= 0)
+    return decoder_pin;
+  return hololink_gpu_id.value_or(-1);
+}
+
+void set_graph_capture_device(const cudaq::qec::decoder &decoder) {
+  const int device = graph_capture_device(decoder);
+  cudaq::qec::detail_affinity::set_cuda_device_for_decode(device);
+  if (device >= 0)
+    CUDA_QEC_INFO(
+        "DecodingSession::create: set CUDA device {} before graph capture",
+        device);
+}
+
+} // namespace
 
 // Busy high-water mark across all sessions (worker threads increment while
 // executing an item).
@@ -53,6 +95,7 @@ DecodingSession::create(std::unique_ptr<cudaq::qec::decoder> decoder,
   s->dec = std::move(decoder);
 
   if (s->dec->supports_graph_dispatch()) {
+    set_graph_capture_device(*s->dec);
     void *gr = s->dec->capture_decode_graph();
     s->graph_resources =
         GraphResourcesPtr(gr, GraphResourcesDeleter{s->dec.get()});

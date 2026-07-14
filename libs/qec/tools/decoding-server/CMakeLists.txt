@@ -143,6 +143,11 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-decoding-server-cqr)
         $<LINK_LIBRARY:WHOLE_ARCHIVE,cudaq-qec-realtime-cudevice>
         $<LINK_LIBRARY:WHOLE_ARCHIVE,cudaq-qec-realtime-cudevice-proprietary>
       )
+      if(TARGET cudaq-qec-realtime-decoder-rpc-dispatch)
+        target_link_libraries(decoding_server PRIVATE
+          $<LINK_LIBRARY:WHOLE_ARCHIVE,cudaq-qec-realtime-decoder-rpc-dispatch>
+        )
+      endif()
       target_link_options(decoding_server PRIVATE
         "LINKER:--export-dynamic"
       )
