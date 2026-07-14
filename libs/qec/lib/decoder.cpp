@@ -67,6 +67,13 @@ struct decoder::rt_impl {
 
   /// The current round.  Only used for sliding window decoder.
   uint32_t current_round = 0;
+
+  /// Detector-layer offsets [0, w0, w0+w1, ...] for the [B | S...S | B] layout;
+  /// back() == total detectors. Only used for sliding window decoder.
+  std::vector<std::size_t> detector_layer_offsets;
+
+  /// Index of the next detector layer to emit. Only used for sliding window.
+  std::size_t detector_layer_index = 0;
 };
 
 void decoder::rt_impl_deleter::operator()(rt_impl *p) const { delete p; }
@@ -315,6 +322,14 @@ void set_D_sparse_common(decoder *decoder,
     pimpl->has_first_round_detectors =
         (D_sparse.size() > 0 && D_sparse[0].size() == 1);
     pimpl->current_round = 0;
+    // Detector-layer offsets for the [B | S...S | B] layout; each streamed
+    // layer's width comes from these.
+    const std::size_t num_layers = sw_decoder->get_num_detector_layers();
+    pimpl->detector_layer_offsets.resize(num_layers + 1);
+    for (std::size_t r = 0; r <= num_layers; ++r)
+      pimpl->detector_layer_offsets[r] = sw_decoder->get_layer_offset(r);
+    pimpl->detector_layer_index = 0;
+    // The interior width is the widest layer, so it bounds the buffers.
     pimpl->persistent_detector_buffer.resize(pimpl->num_syndromes_per_round);
     pimpl->persistent_soft_detector_buffer.resize(
         pimpl->num_syndromes_per_round);
@@ -399,24 +414,15 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
           pimpl->persistent_detector_buffer[i] ^= pimpl->msyn_buffer[col];
       }
     } else {
-      // For sliding window decoder, syndrome_length must equal
-      // num_syndromes_per_round
-      assert(syndrome_length == pimpl->num_syndromes_per_round);
-      if (pimpl->current_round == 1 && pimpl->has_first_round_detectors) {
-        // First round: only compute first-round detectors (direct copy)
-        for (std::size_t i = 0; i < pimpl->num_syndromes_per_round; i++) {
-          pimpl->persistent_detector_buffer[i] = pimpl->msyn_buffer[i];
-        }
-      } else {
-        // Buffer is full with 2 rounds: compute timelike detectors (XOR of two
-        // rounds)
-        std::size_t index =
-            (pimpl->current_round - 2) * pimpl->num_syndromes_per_round;
-        for (std::size_t i = 0; i < pimpl->num_syndromes_per_round; i++) {
-          pimpl->persistent_detector_buffer[i] =
-              pimpl->msyn_buffer[index + i] ^
-              pimpl->msyn_buffer[index + i + pimpl->num_syndromes_per_round];
-        }
+      const std::size_t k = pimpl->detector_layer_index++;
+      const std::size_t off = pimpl->detector_layer_offsets[k];
+      const std::size_t width = pimpl->detector_layer_offsets[k + 1] - off;
+      pimpl->persistent_detector_buffer.resize(width);
+      for (std::size_t j = 0; j < width; j++) {
+        uint8_t v = 0;
+        for (auto col : this->D_sparse[off + j])
+          v ^= pimpl->msyn_buffer[col];
+        pimpl->persistent_detector_buffer[j] = v;
       }
     }
 
@@ -548,6 +554,7 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
     // Prepare for more data.
     pimpl->msyn_buffer_index = 0;
     pimpl->current_round = 0;
+    pimpl->detector_layer_index = 0;
   }
   return did_decode;
 }
@@ -597,6 +604,7 @@ void decoder::reset_decoder() {
   // Zero out all data that is considered "per-shot" memory.
   pimpl->msyn_buffer_index = 0;
   pimpl->current_round = 0;
+  pimpl->detector_layer_index = 0;
   pimpl->msyn_buffer.clear();
   pimpl->msyn_buffer.resize(pimpl->num_msyn_per_decode);
   pimpl->corrections.clear();

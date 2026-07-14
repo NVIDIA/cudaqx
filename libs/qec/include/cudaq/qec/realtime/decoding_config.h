@@ -151,6 +151,7 @@ struct sliding_window_config {
   std::optional<std::size_t> window_size;
   std::optional<std::size_t> step_size;
   std::optional<std::size_t> num_syndromes_per_round;
+  std::optional<std::size_t> num_boundary_syndromes;
   std::optional<bool> straddle_start_round;
   std::optional<bool> straddle_end_round;
   std::vector<double> error_rate_vec;
