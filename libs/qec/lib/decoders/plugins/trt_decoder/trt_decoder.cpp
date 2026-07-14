@@ -898,9 +898,9 @@ trt_decoder::decode_batch(const std::vector<std::vector<float_t>> &syndromes) {
   // One result per input, always: callers index results positionally, and a
   // misbehaving external global decoder must not turn that into UB.
   if (results.size() != syndromes.size())
-    throw std::runtime_error(
-        "TensorRT decode_batch produced " + std::to_string(results.size()) +
-        " results for " + std::to_string(syndromes.size()) + " syndromes");
+    throw std::runtime_error("TensorRT decode_batch produced " +
+                             std::to_string(results.size()) + " results for " +
+                             std::to_string(syndromes.size()) + " syndromes");
   return results;
 }
 
