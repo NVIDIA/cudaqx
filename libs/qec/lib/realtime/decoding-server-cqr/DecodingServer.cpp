@@ -37,24 +37,13 @@ using cudaq::qec::decoding::config::DecoderTransport;
 // Constructors
 // ---------------------------------------------------------------------------
 
-/// gpu_roce runs the whole pipeline -- rings, dispatch scheduler, device-side
-/// graph fire -- on ONE GPU: the one the FPGA/NIC is affine to
-/// (HOLOLINK_GPU_ID). A decoder pinned elsewhere would split graph capture
-/// and graph launch across devices, which CUDA graphs cannot do. Both knobs
-/// name the same topology fact, so they must agree.
-int reconcile_gpu_roce_device(std::optional<int> env_gpu_id, int decoder_pin) {
-  if (env_gpu_id && *env_gpu_id < 0)
-    throw std::runtime_error("HOLOLINK_GPU_ID must be >= 0 (got " +
-                             std::to_string(*env_gpu_id) + ")");
-  if (env_gpu_id && decoder_pin >= 0 && *env_gpu_id != decoder_pin)
-    throw std::runtime_error(
-        "gpu_roce device conflict: HOLOLINK_GPU_ID=" +
-        std::to_string(*env_gpu_id) + " but the decoder is pinned to " +
-        std::to_string(decoder_pin) +
-        " (cuda_device_id). The FPGA-affine GPU and the decoder pin must be "
-        "the same device.");
-  if (env_gpu_id)
-    return *env_gpu_id;
+/// Resolve the CUDA device a decode pipeline runs on from the decoder's
+/// cuda_device_id pin; an unpinned decoder (-1) defaults to device 0. The
+/// gpu_roce path relies on this to place its rings, dispatch scheduler, and
+/// device-side graph fire on the one GPU the FPGA/NIC is affine to -- CUDA
+/// graphs cannot split capture and launch across devices, so the decoder must
+/// be pinned to that device.
+int resolve_decode_device(int decoder_pin) {
   return decoder_pin >= 0 ? decoder_pin : 0;
 }
 
@@ -64,9 +53,9 @@ DecodingServer::make_transport(DecoderTransport transport_type,
   switch (transport_type) {
   case DecoderTransport::gpu_roce:
     // gpu_roce lives in the cudaq-qec-decoding-server-gpuroce component,
-    // reached through the weak factory.  The device reconciliation (env
-    // HOLOLINK_GPU_ID vs the decoder's cuda_device_id pin) happens inside the
-    // factory, where GpuRoceConfig lives; we just thread the pin to it.
+    // reached through the weak factory.  The device is the decoder's
+    // cuda_device_id pin, resolved inside the factory where GpuRoceConfig
+    // lives; we just thread the pin to it.
     if (cudaqx_qec_make_gpu_roce_transceiver)
       return std::unique_ptr<ITransceiver>(
           cudaqx_qec_make_gpu_roce_transceiver(pinned_cuda_device));
@@ -103,7 +92,7 @@ DecodingServer::DecodingServer(const std::string &config_yaml) {
   const auto transport_type = registry_.required_transport();
   // gpu_roce must run on the GPU the FPGA/NIC is affine to; when exactly one
   // session is booting, pass its decoder's cuda_device_id so the factory can
-  // reconcile it against HOLOLINK_GPU_ID.
+  // place the transport on that device.
   const auto &boot_sessions = registry_.sessions();
   const int pinned_cuda_device =
       boot_sessions.size() == 1

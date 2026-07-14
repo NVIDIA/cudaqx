@@ -13,15 +13,15 @@
 // component WHOLE_ARCHIVE: the sole reference to this symbol is weak, which
 // does not pull archive members on its own.
 
-#include "DecodingServer.h" // reconcile_gpu_roce_device (core symbol)
+#include "DecodingServer.h" // resolve_decode_device (core symbol)
 #include "GpuRoceTransceiver.h"
 
 extern "C" cudaq::qec::decoding_server::ITransceiver *
 cudaqx_qec_make_gpu_roce_transceiver(int pinned_cuda_device) {
   using namespace cudaq::qec::decoding_server;
-  // Reconcile the FPGA-affine GPU (HOLOLINK_GPU_ID) with the decoder's pin
-  // here, inside the component, where GpuRoceConfig is visible.
+  // The gpu_roce device is the decoder's cuda_device_id pin; resolve it here,
+  // inside the component, where GpuRoceConfig is visible.
   auto cfg = GpuRoceConfig::from_env();
-  cfg.gpu_id = reconcile_gpu_roce_device(cfg.gpu_id_env, pinned_cuda_device);
+  cfg.gpu_id = resolve_decode_device(pinned_cuda_device);
   return new GpuRoceTransceiver(cfg);
 }
