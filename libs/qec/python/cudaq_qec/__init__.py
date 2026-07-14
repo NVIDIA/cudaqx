@@ -156,7 +156,9 @@ for finder, name, ispkg in iter_namespace(codes):
 try:
     from .plugins.decoders.tensor_network_utils.nm_optimizer import (
         NMOptimizer,
+        make_batch_sliced_step,
         make_compiled_step,
+        make_training_step,
     )
 except (ModuleNotFoundError, ImportError):
     pass

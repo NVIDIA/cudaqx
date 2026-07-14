@@ -22,9 +22,13 @@ torch = pytest.importorskip(
     "torch", reason="torch not installed; skipping TN noise-learning tests")
 
 if sys.version_info >= (3, 11):
+    from cudaq_qec.plugins.decoders.tensor_network_utils import (
+        nm_optimizer as nm_optimizer_mod,)
     from cudaq_qec.plugins.decoders.tensor_network_utils.nm_optimizer import (
         NMOptimizer,
+        make_batch_sliced_step,
         make_compiled_step,
+        make_training_step,
         remap_eq_to_ascii,
     )
 
@@ -951,7 +955,136 @@ def test_cpu_gpu_parity_forward():
     np.testing.assert_allclose(p_cpu, p_gpu, atol=1e-4, rtol=1e-4)
 
 
+def test_default_torch_path_prefers_rank_safe_candidate(monkeypatch):
+    """Path selection avoids steps PyTorch cannot materialize."""
+
+    class _Info:
+
+        def __init__(self, largest, cost, eq):
+            self.largest_intermediate = largest
+            self.opt_cost = cost
+            self.contraction_list = [(None, None, eq)]
+
+    def _fake_contract_path(eq, *shapes, optimize=None, **kwargs):
+        del eq, shapes, kwargs
+        if optimize == "greedy":
+            unsafe_eq = "abcdefghijklmnopqrstuvwxyz,ABCDEFGHIJKLMNOPQRSTUVWXYZ" \
+                        "->abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            return ["unsafe"], _Info(1.0, 1.0, unsafe_eq)
+        return ["safe"], _Info(10.0, 10.0, "ab,bc->ac")
+
+    monkeypatch.setattr(nm_optimizer_mod.oe, "contract_path",
+                        _fake_contract_path)
+    path, info = nm_optimizer_mod._select_default_torch_path(
+        "ab,bc->ac", ((2, 2), (2, 2)))
+
+    assert path == ["safe"]
+    assert nm_optimizer_mod._path_max_einsum_rank(info) <= 25
+
+
+# -- batch-sliced training ---------------------------------------------------
+
+
+@pytest.mark.parametrize("execute", _EXECUTE_MODES)
+def test_batch_sliced_step_matches_full_step_with_tail(execute):
+    """Batch-sliced accumulation matches the full summed objective."""
+    rng = np.random.default_rng(5150)
+    H, logical = _nondegenerate_code()
+    true_priors = [0.03, 0.12, 0.08]
+    syn, flips = _sample_synthetic_dataset(H,
+                                           logical,
+                                           true_priors,
+                                           num_shots=10,
+                                           rng=rng)
+    init_priors = [0.10] * H.shape[1]
+    full_opt = _make_opt(H,
+                         logical,
+                         init_priors,
+                         syn,
+                         flips,
+                         device="cpu",
+                         dtype="float64",
+                         execute=execute)
+    slice_size = 4
+    sliced_opt = _make_opt(H,
+                           logical,
+                           init_priors,
+                           syn[:slice_size],
+                           flips[:slice_size],
+                           device="cpu",
+                           dtype="float64",
+                           execute=execute)
+    logits_full = torch.logit(full_opt.noise_params[0].detach()).clone()
+    logits_full.requires_grad_(True)
+    logits_sliced = torch.logit(sliced_opt.noise_params[0].detach()).clone()
+    logits_sliced.requires_grad_(True)
+    full_torch_opt = torch.optim.SGD([logits_full], lr=0.01)
+    sliced_torch_opt = torch.optim.SGD([logits_sliced], lr=0.01)
+
+    full_loss = make_compiled_step(full_opt, logits_full, full_torch_opt)()
+    sliced_loss = make_batch_sliced_step(sliced_opt, logits_sliced,
+                                         sliced_torch_opt)(syn, flips)
+
+    assert torch.allclose(full_loss.detach(),
+                          sliced_loss,
+                          atol=1e-10,
+                          rtol=1e-10)
+    assert torch.allclose(logits_full.detach(),
+                          logits_sliced.detach(),
+                          atol=1e-10,
+                          rtol=1e-10)
+
+
 # -- truth-data convergence --------------------------------------------------
+
+
+def test_make_training_step_auto_matches_full_batch_step():
+    """Factory hides slice construction while preserving the objective."""
+    rng = np.random.default_rng(8675309)
+    H, logical = _nondegenerate_code()
+    true_priors = [0.03, 0.12, 0.08]
+    syn, flips = _sample_synthetic_dataset(H,
+                                           logical,
+                                           true_priors,
+                                           num_shots=10,
+                                           rng=rng)
+    init_priors = [0.10] * H.shape[1]
+
+    full_opt = _make_opt(H,
+                         logical,
+                         init_priors,
+                         syn,
+                         flips,
+                         device="cpu",
+                         dtype="float64",
+                         execute="opt_einsum")
+    logits_full = torch.logit(full_opt.noise_params[0].detach()).clone()
+    logits_full.requires_grad_(True)
+    full_torch_opt = torch.optim.SGD([logits_full], lr=0.01)
+    full_loss = make_compiled_step(full_opt, logits_full, full_torch_opt)()
+
+    logits_auto = torch.logit(full_opt.noise_params[0].detach()).clone()
+    logits_auto.requires_grad_(True)
+    auto_torch_opt = torch.optim.SGD([logits_auto], lr=0.01)
+    auto_opt, auto_step = make_training_step(H,
+                                             logical,
+                                             init_priors,
+                                             syn,
+                                             flips,
+                                             logits_auto,
+                                             auto_torch_opt,
+                                             batch_slicing="auto",
+                                             device="cpu",
+                                             dtype="float64",
+                                             execute="opt_einsum")
+    assert auto_opt._batch_size == 1
+    auto_loss = auto_step()
+
+    assert torch.allclose(full_loss.detach(), auto_loss, atol=1e-10, rtol=1e-10)
+    assert torch.allclose(logits_full.detach(),
+                          logits_auto.detach(),
+                          atol=1e-10,
+                          rtol=1e-10)
 
 
 @pytest.mark.parametrize("device", _device_params())

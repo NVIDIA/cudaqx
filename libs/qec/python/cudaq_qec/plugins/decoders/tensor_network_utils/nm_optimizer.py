@@ -18,7 +18,7 @@ The static noise-model builders (:func:`factorized_noise_model`,
 from __future__ import annotations
 
 import warnings
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 import cudaq_qec as qec
 import numpy as np
@@ -44,6 +44,7 @@ _PRIOR_EPS_BY_DTYPE: dict[str, float] = {
     "float32": 1e-6,
 }
 _SUPPORTED_DTYPES: tuple[str, ...] = ("float32", "float64")
+_TORCH_EINSUM_MAX_DIMS = 25
 
 
 def _validate_and_clamp_priors(noise_model: Any, dtype: str) -> list[float]:
@@ -176,6 +177,24 @@ def _path_opt_cost(info: Any) -> float:
         return float("inf")
 
 
+def _einsum_rank(eq: str) -> int:
+    """Maximum tensor rank touched by one explicit einsum step."""
+    if "->" not in eq:
+        return 0
+    lhs, rhs = eq.split("->", 1)
+    terms = [term for term in lhs.split(",") if term]
+    terms.append(rhs)
+    return max((len(term) for term in terms), default=0)
+
+
+def _path_max_einsum_rank(info: Any) -> int:
+    """Maximum rank emitted by an opt_einsum contraction path."""
+    ranks = [
+        _einsum_rank(step[2]) for step in getattr(info, "contraction_list", ())
+    ]
+    return max(ranks, default=0)
+
+
 def _select_default_torch_path(
     eq: str,
     shapes: tuple[tuple[int, ...], ...],
@@ -207,6 +226,13 @@ def _select_default_torch_path(
     if not candidates:
         raise RuntimeError("No NMOptimizer contraction path candidate "
                            "succeeded.")
+
+    safe_candidates = [
+        candidate for candidate in candidates
+        if _path_max_einsum_rank(candidate[2]) <= _TORCH_EINSUM_MAX_DIMS
+    ]
+    if safe_candidates:
+        candidates = safe_candidates
 
     _tag, selected_path, selected_info = min(
         candidates,
@@ -1207,3 +1233,184 @@ def make_compiled_step(optimizer: NMOptimizer, logits: torch.Tensor,
         return loss
 
     return _step
+
+
+def make_batch_sliced_step(
+        optimizer: NMOptimizer,
+        logits: torch.Tensor,
+        torch_optimizer: torch.optim.Optimizer,
+        progress_callback: Callable[[int, int, float], None] | None = None):
+    """Build a step callable that streams a larger batch through slices.
+
+    The optimizer should be constructed with the desired slice-sized
+    dataset.  The returned callable accepts a larger raw syndrome batch,
+    repeatedly updates the optimizer with fixed-shape slices, accumulates
+    gradients, and performs one ``torch_optimizer.step()``.  This keeps
+    path finding and contraction execution tied to the smaller batch
+    shape while preserving the summed cross-entropy objective over all
+    supplied shots.  The optimizer's live dataset is left at the final
+    slice after the step.
+
+    Args:
+        optimizer: An :class:`NMOptimizer` constructed with the desired
+            batch-slice size.
+        logits: Trainable 1-D tensor of length ``len(optimizer.error_inds)``
+            with ``requires_grad=True``.
+        torch_optimizer: A ``torch.optim`` instance owning ``logits``.
+        progress_callback: Optional callback invoked as
+            ``callback(done_chunks, total_chunks, elapsed_seconds)``.
+
+    Returns:
+        A callable ``step(syndrome_data, observable_flips)`` that runs one
+        optimizer step and returns the detached summed loss.
+    """
+    if not optimizer._dynamic_syndromes:
+        raise ValueError("batch-sliced steps require dynamic_syndromes=True.")
+
+    batch_slice_size = int(optimizer._batch_size)
+    if batch_slice_size <= 0:
+        raise ValueError("optimizer batch size must be positive.")
+
+    def _step(syndrome_data: npt.NDArray[Any],
+              observable_flips: npt.NDArray[Any]) -> torch.Tensor:
+        syndrome_arr = np.asarray(syndrome_data)
+        flips_arr = np.asarray(observable_flips, dtype=bool).reshape(-1)
+        if syndrome_arr.ndim != 2:
+            raise ValueError("syndrome_data must have shape (shots, checks).")
+        if syndrome_arr.shape[0] != flips_arr.shape[0]:
+            raise ValueError(
+                "syndrome_data and observable_flips length mismatch.")
+        if syndrome_arr.shape[0] == 0:
+            raise ValueError("syndrome_data must contain at least one shot.")
+
+        torch_optimizer.zero_grad(set_to_none=True)
+        total_loss = torch.zeros((), dtype=logits.dtype, device=logits.device)
+        num_chunks = ((syndrome_arr.shape[0] + batch_slice_size - 1) //
+                      batch_slice_size)
+        wall_start = None
+        if progress_callback is not None:
+            import time
+            wall_start = time.perf_counter()
+
+        for chunk_idx, start in enumerate(range(0, syndrome_arr.shape[0],
+                                                batch_slice_size),
+                                          start=1):
+            stop = min(start + batch_slice_size, syndrome_arr.shape[0])
+            valid = stop - start
+            chunk_syn = syndrome_arr[start:stop]
+            chunk_flips = flips_arr[start:stop]
+            if valid < batch_slice_size:
+                padded_syn = np.zeros((batch_slice_size, syndrome_arr.shape[1]),
+                                      dtype=syndrome_arr.dtype)
+                padded_flips = np.zeros((batch_slice_size,), dtype=bool)
+                padded_syn[:valid] = chunk_syn
+                padded_flips[:valid] = chunk_flips
+                chunk_syn = padded_syn
+                update_flips = padded_flips
+            else:
+                update_flips = chunk_flips
+
+            optimizer.update_dataset(chunk_syn,
+                                     update_flips,
+                                     enforce_shape=True)
+            preds = optimizer._compiled_predict(
+                torch.sigmoid(logits), optimizer.current_syndrome_args())
+            preds = preds[:valid]
+            flips_t = torch.as_tensor(chunk_flips,
+                                      dtype=torch.bool,
+                                      device=preds.device)
+            loss = (-torch.log(_clamp_log_input(preds[flips_t, 1])).sum() -
+                    torch.log(_clamp_log_input(preds[~flips_t, 0])).sum())
+            loss.backward()
+            total_loss = total_loss + loss.detach()
+
+            if progress_callback is not None:
+                elapsed = (0.0 if wall_start is None else time.perf_counter() -
+                           wall_start)
+                progress_callback(chunk_idx, num_chunks, elapsed)
+
+        torch_optimizer.step()
+        return total_loss
+
+    return _step
+
+
+def make_training_step(H: npt.NDArray[Any],
+                       logical_obs: npt.NDArray[Any],
+                       noise_model: list[float],
+                       syndrome_data: npt.NDArray[Any],
+                       observable_flips: npt.NDArray[Any],
+                       logits: torch.Tensor,
+                       torch_optimizer: torch.optim.Optimizer,
+                       batch_slicing: bool | Literal["auto"] = "auto",
+                       batch_slice_size: int | None = None,
+                       progress_callback: Callable[[int, int, float], None] |
+                       None = None,
+                       **optimizer_kwargs: Any) -> tuple[NMOptimizer, Any]:
+    """Construct an :class:`NMOptimizer` and matching training step.
+
+    Args:
+        H: Parity check matrix.
+        logical_obs: Logical observable matrix.
+        noise_model: Initial per-error probabilities.
+        syndrome_data: Full syndrome batch, shape ``(shots, checks)``.
+        observable_flips: Observable flips for the full batch.
+        logits: Trainable logit tensor owned by ``torch_optimizer``.
+        torch_optimizer: Optimizer for ``logits``.
+        batch_slicing: ``False`` uses the full batch. ``"auto"`` or
+            ``True`` constructs a slice-sized optimizer and streams the
+            full batch through it with gradient accumulation.
+        batch_slice_size: Optional explicit slice size. Defaults to ``1``
+            when batch slicing is enabled.
+        progress_callback: Optional callback forwarded to the batch-sliced
+            step as ``callback(done_chunks, total_chunks, elapsed_seconds)``.
+        **optimizer_kwargs: Forwarded to :class:`NMOptimizer`.
+
+    Returns:
+        ``(optimizer, step_fn)``.  For full-batch training ``step_fn`` is
+        no-arg.  For batch-sliced training it accepts optional
+        ``(syndrome_data, observable_flips)`` and defaults to the original
+        full batch supplied here.
+    """
+    if batch_slicing not in (False, True, "auto"):
+        raise ValueError("batch_slicing must be False, True, or 'auto'.")
+
+    use_batch_slicing = batch_slicing in (True, "auto")
+    syndrome_arr = np.asarray(syndrome_data)
+    flips_arr = np.asarray(observable_flips, dtype=bool).reshape(-1)
+    if syndrome_arr.ndim != 2:
+        raise ValueError("syndrome_data must have shape (shots, checks).")
+    if syndrome_arr.shape[0] != flips_arr.shape[0]:
+        raise ValueError("syndrome_data and observable_flips length mismatch.")
+    if syndrome_arr.shape[0] == 0:
+        raise ValueError("syndrome_data must contain at least one shot.")
+
+    if not use_batch_slicing:
+        optimizer = NMOptimizer(H, logical_obs, noise_model, syndrome_arr,
+                                flips_arr, **optimizer_kwargs)
+        return optimizer, make_compiled_step(optimizer, logits, torch_optimizer)
+
+    slice_size = 1 if batch_slice_size is None else int(batch_slice_size)
+    if slice_size <= 0:
+        raise ValueError("batch_slice_size must be a positive integer.")
+    slice_size = min(slice_size, syndrome_arr.shape[0])
+    optimizer = NMOptimizer(H, logical_obs, noise_model,
+                            syndrome_arr[:slice_size], flips_arr[:slice_size],
+                            **optimizer_kwargs)
+    sliced_step = make_batch_sliced_step(optimizer, logits, torch_optimizer,
+                                         progress_callback)
+
+    def _step(
+            new_syndrome_data: npt.NDArray[Any] | None = None,
+            new_observable_flips: npt.NDArray[Any] | None = None
+    ) -> torch.Tensor:
+        if new_syndrome_data is None:
+            if new_observable_flips is not None:
+                raise ValueError(
+                    "observable_flips provided without syndrome_data.")
+            return sliced_step(syndrome_arr, flips_arr)
+        if new_observable_flips is None:
+            raise ValueError("observable_flips is required with syndrome_data.")
+        return sliced_step(new_syndrome_data, new_observable_flips)
+
+    return optimizer, _step
