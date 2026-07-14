@@ -287,7 +287,18 @@ to prototype and develop new codes.
    .. note::
 
       The kernel registered for :code:`stabilizer_round` must be annotated to
-      return :code:`list[cudaq.measure_handle]`. 
+      return :code:`list[cudaq.measure_handle]`.
+
+   .. note::
+
+      As in C++, the two list arguments passed to the
+      :code:`stabilizer_round` kernel are the flattened X and Z stabilizer
+      schedule matrices, which default to the parity-check matrices. A Python
+      code can optionally define :code:`get_stabilizer_schedule_x` /
+      :code:`get_stabilizer_schedule_z` methods returning a 2D array with the
+      same shape and support pattern as the corresponding parity-check
+      matrix, where entry :code:`k >= 1` schedules that interaction at
+      timestep :code:`k`.
 
 3. **Implement the Code Class**:
 
