@@ -1381,6 +1381,11 @@ TEST(SurfaceCodeTester, checkCnotSchedule) {
       for (std::size_t s = 0; s < sched_x.shape()[0]; ++s)
         for (std::size_t d = 0; d < num_data; ++d)
           EXPECT_EQ(code_sched_x.at({s, d}), sched_x.at({s, d})) << label;
+      auto code_sched_z = code->get_stabilizer_schedule_z();
+      ASSERT_EQ(code_sched_z.shape(), sched_z.shape()) << label;
+      for (std::size_t s = 0; s < sched_z.shape()[0]; ++s)
+        for (std::size_t d = 0; d < num_data; ++d)
+          EXPECT_EQ(code_sched_z.at({s, d}), sched_z.at({s, d})) << label;
     }
   }
 }

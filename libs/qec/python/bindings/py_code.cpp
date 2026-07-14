@@ -398,6 +398,26 @@ void bindCode(nb::module_ &mod) {
           },
           "Get the Z-type parity check matrix of the code")
       .def(
+          "get_stabilizer_schedule_x",
+          [](code &code) {
+            return copyCodeMatrixToPyArray(code.get_stabilizer_schedule_x(),
+                                           code.get_num_data_qubits());
+          },
+          "Get the X-stabilizer schedule matrix passed to the code's "
+          "stabilizer_round kernel. Entry 0 = no support, entry k >= 1 = "
+          "interaction at timestep k; defaults to the X-type parity check "
+          "matrix (every interaction at timestep 1).")
+      .def(
+          "get_stabilizer_schedule_z",
+          [](code &code) {
+            return copyCodeMatrixToPyArray(code.get_stabilizer_schedule_z(),
+                                           code.get_num_data_qubits());
+          },
+          "Get the Z-stabilizer schedule matrix passed to the code's "
+          "stabilizer_round kernel. Entry 0 = no support, entry k >= 1 = "
+          "interaction at timestep k; defaults to the Z-type parity check "
+          "matrix (every interaction at timestep 1).")
+      .def(
           "get_pauli_observables_matrix",
           [](code &code) {
             return copyCodeMatrixToPyArray(code.get_pauli_observables_matrix(),

@@ -299,12 +299,15 @@ __qpu__ void prepm(patch p);
 ///
 /// @brief Perform stabilizer measurements on a surface_code patch
 /// @param p The patch to measure
-/// @param x_stabilizers Indices of X stabilizers to measure
-/// @param z_stabilizers Indices of Z stabilizers to measure
+/// @param x_stabilizer_schedule Flattened X-stabilizer CNOT schedule matrix
+/// (see stabilizer_grid::get_cnot_schedule_x): entry 0 = no support, entry
+/// k >= 1 = CNOT at timestep k
+/// @param z_stabilizer_schedule Flattened Z-stabilizer CNOT schedule matrix
+/// (see stabilizer_grid::get_cnot_schedule_z)
 /// @return Vector of measurement results
 __qpu__ std::vector<cudaq::measure_result>
-stabilizer(patch p, const std::vector<std::size_t> &x_stabilizers,
-           const std::vector<std::size_t> &z_stabilizers);
+stabilizer(patch p, const std::vector<std::size_t> &x_stabilizer_schedule,
+           const std::vector<std::size_t> &z_stabilizer_schedule);
 
 /// @brief surface_code implementation
 class surface_code : public cudaq::qec::code {

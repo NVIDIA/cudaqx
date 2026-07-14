@@ -39,6 +39,27 @@ def test_code_parity_matrices():
     assert parity_z.shape == (3, 7)
 
 
+def test_code_stabilizer_schedule_matrices():
+    # Codes without a schedule override return the plain parity matrices.
+    steane = qec.get_code("steane")
+    assert np.array_equal(steane.get_stabilizer_schedule_x(),
+                          steane.get_parity_x())
+    assert np.array_equal(steane.get_stabilizer_schedule_z(),
+                          steane.get_parity_z())
+
+    # The surface code overrides the schedule: same support pattern as the
+    # parity matrices, entries are CNOT timesteps in [1, 4].
+    surface = qec.get_code("surface_code", distance=3)
+    for schedule, parity in [
+        (surface.get_stabilizer_schedule_x(), surface.get_parity_x()),
+        (surface.get_stabilizer_schedule_z(), surface.get_parity_z())
+    ]:
+        assert isinstance(schedule, np.ndarray)
+        assert schedule.shape == parity.shape
+        assert np.array_equal(schedule != 0, parity != 0)
+        assert schedule.max() <= 4
+
+
 def test_repetition_empty_x_matrices_preserve_rank():
     repetition = qec.get_code("repetition", distance=3)
 

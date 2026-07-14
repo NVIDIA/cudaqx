@@ -142,6 +142,20 @@ To implement a new quantum error correcting code:
            // Implement stabilizer measurements
        }
 
+   .. note::
+
+      The two vector arguments passed to the :code:`stabilizer_round` kernel
+      are the flattened X and Z stabilizer *schedule* matrices returned by
+      :cpp:func:`cudaq::qec::code::get_stabilizer_schedule_x` and
+      :cpp:func:`cudaq::qec::code::get_stabilizer_schedule_z`. By default
+      these equal the plain parity-check matrices (every entry 0 or 1), but a
+      code can override the :code:`get_stabilizer_schedule_*` methods to
+      encode a gate order, in which case entry :code:`k >= 1` means the
+      interaction executes at timestep :code:`k` (the built-in
+      :code:`surface_code` does this to avoid hook errors). A kernel that only
+      needs the support pattern should therefore test entries for
+      :code:`!= 0` rather than :code:`== 1`.
+
 4. **Register Operations**:
 
    In the constructor, register quantum kernels for each operation:

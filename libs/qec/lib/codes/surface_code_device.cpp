@@ -49,38 +49,28 @@ __qpu__ void prepm(patch logicalQubit) {
 }
 
 __qpu__ std::vector<cudaq::measure_result>
-stabilizer(patch logicalQubit, const std::vector<std::size_t> &x_stabilizers,
-           const std::vector<std::size_t> &z_stabilizers) {
+stabilizer(patch logicalQubit,
+           const std::vector<std::size_t> &x_stabilizer_schedule,
+           const std::vector<std::size_t> &z_stabilizer_schedule) {
   for (std::size_t i = 0; i < logicalQubit.ancx.size(); i++)
     reset(logicalQubit.ancx[i]);
   for (std::size_t i = 0; i < logicalQubit.ancz.size(); i++)
     reset(logicalQubit.ancz[i]);
 
-  // The stabilizer matrices are CNOT schedules: entry 0 means the ancilla
-  // does not touch that data qubit, entry k >= 1 means the CNOT executes at
-  // timestep k. The X and Z checks share the timesteps, giving one depth-4
-  // extraction round. The order matters twice over: per plaquette it steers
-  // mid-round ancilla (hook) errors perpendicular to the logical operators,
-  // and across the X/Z interleaving it must be a valid schedule pair so the
-  // non-commuting CNOTs still measure the intended stabilizers (see
-  // stabilizer_grid::get_cnot_schedule_x).
-  std::size_t num_steps = 1;
-  for (std::size_t i = 0; i < x_stabilizers.size(); ++i)
-    if (x_stabilizers[i] > num_steps)
-      num_steps = x_stabilizers[i];
-  for (std::size_t i = 0; i < z_stabilizers.size(); ++i)
-    if (z_stabilizers[i] > num_steps)
-      num_steps = z_stabilizers[i];
+  // The X and Z checks share the timesteps, and the surface-code schedule
+  // always fits in one depth-4 extraction round (see
+  // stabilizer_grid::get_cnot_schedule_x), so num_steps is a constant.
+  const std::size_t num_steps = 4;
 
   h(logicalQubit.ancx);
   for (std::size_t step = 1; step <= num_steps; ++step) {
     for (std::size_t xi = 0; xi < logicalQubit.ancx.size(); ++xi)
       for (std::size_t di = 0; di < logicalQubit.data.size(); ++di)
-        if (x_stabilizers[xi * logicalQubit.data.size() + di] == step)
+        if (x_stabilizer_schedule[xi * logicalQubit.data.size() + di] == step)
           cudaq::x<cudaq::ctrl>(logicalQubit.ancx[xi], logicalQubit.data[di]);
     for (std::size_t zi = 0; zi < logicalQubit.ancz.size(); ++zi)
       for (std::size_t di = 0; di < logicalQubit.data.size(); ++di)
-        if (z_stabilizers[zi * logicalQubit.data.size() + di] == step)
+        if (z_stabilizer_schedule[zi * logicalQubit.data.size() + di] == step)
           cudaq::x<cudaq::ctrl>(logicalQubit.data[di], logicalQubit.ancz[zi]);
   }
   h(logicalQubit.ancx);
