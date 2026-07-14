@@ -150,6 +150,10 @@ target_link_libraries(${DECODERS_LIBRARY_NAME}
   PUBLIC
     $<LINK_LIBRARY:WHOLE_ARCHIVE,cudaqx-core>
     fmt::fmt-header-only
+  PRIVATE
+    # decoder::get() consumes the "cuda_device_id" construction parameter
+    # (validation via cudaGetDeviceCount + persistent cudaSetDevice pin).
+    CUDA::cudart
 )
 
 target_link_libraries(${LIBRARY_NAME}

@@ -20,6 +20,10 @@ cudaqx_add_device_code(test_qec_stim
 target_link_directories(test_qec_stim
   PRIVATE ${CUDAQ_INSTALL_DIR}/lib)
 
+# For the internal device/memory_circuit.h kernel used by the realtime test.
+target_include_directories(test_qec_stim
+  PRIVATE ${CUDAQX_QEC_SOURCE_DIR}/lib)
+
 target_link_libraries(test_qec_stim
   PRIVATE
     GTest::gtest_main

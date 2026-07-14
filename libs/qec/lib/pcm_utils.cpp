@@ -7,6 +7,7 @@
  ******************************************************************************/
 
 #include "cudaq/qec/pcm_utils.h"
+#include "round_layout.h"
 #include "cudaq/qec/sparse_binary_matrix.h"
 #include <algorithm>
 #include <cassert>
@@ -17,6 +18,50 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+
+namespace cudaq::qec::details {
+
+round_layout::round_layout(std::size_t num_syndromes_per_round,
+                           std::size_t num_boundary_syndromes,
+                           std::size_t total_rows)
+    : S(num_syndromes_per_round), B(num_boundary_syndromes),
+      num_rows(total_rows) {
+  boundary = (B != 0 && B != S);
+  // Guard the boundary subtraction: a malformed layout (num_rows < 2*B) would
+  // otherwise underflow. Callers validate row consistency and reject it.
+  if (!boundary)
+    num_rounds = num_rows / S;
+  else if (num_rows >= 2 * B)
+    num_rounds = (num_rows - 2 * B) / S + 2;
+  else
+    num_rounds = 0;
+}
+
+std::size_t round_layout::round_start(std::size_t r) const {
+  if (!boundary)
+    return r * S;
+  if (r == 0)
+    return 0;
+  if (r >= num_rounds)
+    return num_rows;
+  return B + (r - 1) * S;
+}
+
+std::size_t round_layout::round_width(std::size_t r) const {
+  return round_start(r + 1) - round_start(r);
+}
+
+std::size_t round_layout::row_to_round(std::size_t row) const {
+  if (!boundary)
+    return row / S;
+  if (row < B)
+    return 0;
+  if (row >= num_rows - B)
+    return num_rounds - 1;
+  return 1 + (row - B) / S;
+}
+
+} // namespace cudaq::qec::details
 
 namespace {
 
@@ -118,6 +163,7 @@ void validate_reorder_pcm_columns_column_order(
 /// Validate the round-related parameters shared by both get_pcm_for_rounds
 /// overloads. Throws std::invalid_argument on violation.
 void validate_pcm_for_rounds_params(std::uint32_t num_syndromes_per_round,
+                                    std::uint32_t num_boundary_syndromes,
                                     std::uint32_t start_round,
                                     std::uint32_t end_round,
                                     std::size_t num_rows) {
@@ -125,23 +171,29 @@ void validate_pcm_for_rounds_params(std::uint32_t num_syndromes_per_round,
     throw std::invalid_argument(
         "get_pcm_for_rounds: num_syndromes_per_round must be greater than 0");
   }
-  if (num_syndromes_per_round > num_rows) {
+  if (num_boundary_syndromes > num_syndromes_per_round) {
     throw std::invalid_argument(
-        "get_pcm_for_rounds: num_syndromes_per_round must be less than the "
-        "number of rows in PCM");
+        "get_pcm_for_rounds: num_boundary_syndromes must be <= "
+        "num_syndromes_per_round");
   }
-  const std::size_t first_row_to_keep =
-      static_cast<std::size_t>(start_round) * num_syndromes_per_round;
-  const std::size_t last_row_to_keep =
-      static_cast<std::size_t>(end_round + 1) * num_syndromes_per_round - 1;
+  const cudaq::qec::details::round_layout layout(
+      num_syndromes_per_round, num_boundary_syndromes, num_rows);
+  if (layout.boundary &&
+      (num_rows < 2 * num_boundary_syndromes ||
+       (num_rows - 2 * num_boundary_syndromes) % num_syndromes_per_round !=
+           0)) {
+    throw std::invalid_argument(
+        "get_pcm_for_rounds: number of PCM rows is inconsistent with the given "
+        "num_syndromes_per_round and num_boundary_syndromes");
+  }
+  if (end_round >= layout.num_rounds) {
+    throw std::invalid_argument(
+        "get_pcm_for_rounds: end_round is greater than the last round index");
+  }
+  const std::size_t first_row_to_keep = layout.round_start(start_round);
   if (first_row_to_keep >= num_rows) {
     throw std::invalid_argument(
         "get_pcm_for_rounds: first_row_to_keep is greater than the number of "
-        "rows in PCM");
-  }
-  if (last_row_to_keep >= num_rows) {
-    throw std::invalid_argument(
-        "get_pcm_for_rounds: last_row_to_keep is greater than the number of "
         "rows in PCM");
   }
 }
@@ -151,7 +203,7 @@ void validate_pcm_for_rounds_params(std::uint32_t num_syndromes_per_round,
 /// `get_pcm_for_rounds`).
 void select_pcm_columns_for_round_range(
     const std::vector<std::vector<std::uint32_t>> &row_indices,
-    std::uint32_t num_syndromes_per_round, std::uint32_t start_round,
+    const cudaq::qec::details::round_layout &layout, std::uint32_t start_round,
     std::uint32_t end_round, bool straddle_start_round, bool straddle_end_round,
     std::vector<std::uint32_t> &columns_in_range_out,
     std::uint32_t &first_column, std::uint32_t &last_column) {
@@ -160,8 +212,8 @@ void select_pcm_columns_for_round_range(
     const auto &col = row_indices[c];
     if (col.empty())
       continue;
-    auto first_round = col.front() / num_syndromes_per_round;
-    auto last_round = col.back() / num_syndromes_per_round;
+    auto first_round = layout.row_to_round(col.front());
+    auto last_round = layout.row_to_round(col.back());
     if (last_round < start_round || first_round > end_round)
       continue;
 
@@ -187,28 +239,27 @@ void select_pcm_columns_for_round_range(
 
 namespace cudaq::qec {
 
-/// @brief Return a vector of column indices that would sort the PCM columns
-/// in topological order.
-/// @param row_indices For each column, a vector of row indices that have a
-/// non-zero value in that column.
-/// @param num_syndromes_per_round The number of syndromes per round. (Defaults
-/// to 0, which means that no secondary per-round sorting will occur.)
-/// @details This function tries to make a matrix that is close to a block
-/// diagonal matrix from its input. If \p num_syndromes_per_round is > 0, then
-/// the columns are first sorted by rounds numbers in which the checks are
-/// performed. Columns are then sorted by the index of the first non-zero entry
-/// in the column, and if those match, then they are sorted by the index of the
-/// last non-zero entry in the column. This ping pong continues for the indices
-/// of the second non-zero element and the second-to-last non-zero element, and
-/// so forth.
-std::vector<std::uint32_t> get_sorted_pcm_column_indices(
-    const std::vector<std::vector<std::uint32_t>> &row_indices,
-    std::uint32_t num_syndromes_per_round) {
+namespace {
+/// Topological column sort shared by the scalar and boundary-aware
+/// get_sorted_pcm_column_indices overloads. @p round_of maps a detector row to
+/// its round; when @p use_rounds is false the round key is skipped.
+///
+/// This function tries to make a matrix that is close to a block diagonal
+/// matrix from its input. If @p use_rounds is true, then the columns are first
+/// sorted by the round numbers in which the checks are performed. Columns are
+/// then sorted by the index of the first non-zero entry in the column, and if
+/// those match, then they are sorted by the index of the last non-zero entry
+/// in the column. This ping pong continues for the indices of the second
+/// non-zero element and the second-to-last non-zero element, and so forth.
+template <class RoundOf>
+std::vector<std::uint32_t> sorted_pcm_column_indices_impl(
+    const std::vector<std::vector<std::uint32_t>> &row_indices, bool use_rounds,
+    RoundOf round_of) {
   std::vector<std::uint32_t> column_order(row_indices.size());
   std::iota(column_order.begin(), column_order.end(), 0);
   std::sort(column_order.begin(), column_order.end(),
-            [&row_indices, num_syndromes_per_round](const std::uint32_t &a,
-                                                    const std::uint32_t &b) {
+            [&row_indices, use_rounds, &round_of](const std::uint32_t &a,
+                                                  const std::uint32_t &b) {
               const auto &a_vec = row_indices[a];
               const auto &b_vec = row_indices[b];
 
@@ -227,14 +278,12 @@ std::vector<std::uint32_t> get_sorted_pcm_column_indices(
               auto b_it_head = b_vec.begin();
               auto b_it_tail = b_vec.end() - 1;
 
-              // First sort by the span of rounds that the errors appear in. We
-              // can only do this sorting if we know how many syndromes per
-              // round.
-              if (num_syndromes_per_round > 0) {
-                auto a_first_round = *a_it_head / num_syndromes_per_round;
-                auto a_last_round = *a_it_tail / num_syndromes_per_round;
-                auto b_first_round = *b_it_head / num_syndromes_per_round;
-                auto b_last_round = *b_it_tail / num_syndromes_per_round;
+              // First sort by the span of rounds that the errors appear in.
+              if (use_rounds) {
+                auto a_first_round = round_of(*a_it_head);
+                auto a_last_round = round_of(*a_it_tail);
+                auto b_first_round = round_of(*b_it_head);
+                auto b_last_round = round_of(*b_it_tail);
                 if (a_first_round != b_first_round)
                   return a_first_round < b_first_round;
                 if (a_last_round != b_last_round)
@@ -291,11 +340,61 @@ std::vector<std::uint32_t> get_sorted_pcm_column_indices(
 
   return column_order;
 }
+} // namespace
+
+std::vector<std::uint32_t> get_sorted_pcm_column_indices(
+    const std::vector<std::vector<std::uint32_t>> &row_indices,
+    std::uint32_t num_syndromes_per_round) {
+  return sorted_pcm_column_indices_impl(
+      row_indices, /*use_rounds=*/num_syndromes_per_round > 0,
+      // Only invoked when use_rounds is true, so the divisor is non-zero.
+      [num_syndromes_per_round](std::uint32_t r) {
+        return r / num_syndromes_per_round;
+      });
+}
+
+std::vector<std::uint32_t> get_sorted_pcm_column_indices(
+    const std::vector<std::vector<std::uint32_t>> &row_indices,
+    std::uint32_t num_syndromes_per_round,
+    std::uint32_t num_boundary_syndromes) {
+  if (num_syndromes_per_round == 0)
+    throw std::invalid_argument(
+        "get_sorted_pcm_column_indices: num_syndromes_per_round must be "
+        "non-zero when num_boundary_syndromes is specified");
+  if (num_boundary_syndromes > num_syndromes_per_round)
+    throw std::invalid_argument(
+        "get_sorted_pcm_column_indices: num_boundary_syndromes (" +
+        std::to_string(num_boundary_syndromes) +
+        ") must be <= num_syndromes_per_round (" +
+        std::to_string(num_syndromes_per_round) + ")");
+  // Detector rows map to rounds as: the first num_boundary_syndromes rows
+  // are round 0, then each num_syndromes_per_round block is an interior round.
+  return sorted_pcm_column_indices_impl(
+      row_indices, /*use_rounds=*/true,
+      [num_syndromes_per_round,
+       num_boundary_syndromes](std::uint32_t r) -> std::uint32_t {
+        if (r < num_boundary_syndromes)
+          return 0;
+        return 1 + (r - num_boundary_syndromes) / num_syndromes_per_round;
+      });
+}
 
 bool pcm_is_sorted(const std::vector<std::vector<std::uint32_t>> &sparse_pcm,
                    std::uint32_t num_syndromes_per_round) {
   auto column_indices =
       get_sorted_pcm_column_indices(sparse_pcm, num_syndromes_per_round);
+  auto num_cols = sparse_pcm.size();
+  for (std::size_t c = 0; c < num_cols; c++)
+    if (column_indices[c] != c)
+      return false;
+  return true;
+}
+
+bool pcm_is_sorted(const std::vector<std::vector<std::uint32_t>> &sparse_pcm,
+                   std::uint32_t num_syndromes_per_round,
+                   std::uint32_t num_boundary_syndromes) {
+  auto column_indices = get_sorted_pcm_column_indices(
+      sparse_pcm, num_syndromes_per_round, num_boundary_syndromes);
   auto num_cols = sparse_pcm.size();
   for (std::size_t c = 0; c < num_cols; c++)
     if (column_indices[c] != c)
@@ -515,20 +614,23 @@ std::tuple<cudaqx::tensor<uint8_t>, std::uint32_t, std::uint32_t>
 get_pcm_for_rounds(const cudaqx::tensor<uint8_t> &pcm,
                    std::uint32_t num_syndromes_per_round,
                    std::uint32_t start_round, std::uint32_t end_round,
-                   bool straddle_start_round, bool straddle_end_round) {
-  validate_pcm_for_rounds_params(num_syndromes_per_round, start_round,
-                                 end_round, pcm.shape()[0]);
-  auto first_row_to_keep = start_round * num_syndromes_per_round;
-  auto last_row_to_keep = (end_round + 1) * num_syndromes_per_round - 1;
+                   bool straddle_start_round, bool straddle_end_round,
+                   std::uint32_t num_boundary_syndromes) {
+  validate_pcm_for_rounds_params(num_syndromes_per_round,
+                                 num_boundary_syndromes, start_round, end_round,
+                                 pcm.shape()[0]);
+  const details::round_layout layout(num_syndromes_per_round,
+                                     num_boundary_syndromes, pcm.shape()[0]);
+  auto first_row_to_keep = layout.round_start(start_round);
+  auto last_row_to_keep = layout.round_start(end_round + 1) - 1;
 
   // Get a sparse representation of the PCM.
   auto row_indices = dense_to_sparse(pcm);
   std::vector<std::uint32_t> columns_in_range;
   std::uint32_t first_column = 0, last_column = 0;
   select_pcm_columns_for_round_range(
-      row_indices, num_syndromes_per_round, start_round, end_round,
-      straddle_start_round, straddle_end_round, columns_in_range, first_column,
-      last_column);
+      row_indices, layout, start_round, end_round, straddle_start_round,
+      straddle_end_round, columns_in_range, first_column, last_column);
 
   return std::make_tuple(reorder_pcm_columns(pcm, columns_in_range,
                                              first_row_to_keep,
@@ -541,13 +643,17 @@ get_pcm_for_rounds(const sparse_binary_matrix &pcm,
                    std::uint32_t num_syndromes_per_round,
                    std::uint32_t start_round, std::uint32_t end_round,
                    bool straddle_start_round, bool straddle_end_round,
-                   bool pcm_is_canonical) {
-  validate_pcm_for_rounds_params(num_syndromes_per_round, start_round,
-                                 end_round, pcm.num_rows());
+                   bool pcm_is_canonical,
+                   std::uint32_t num_boundary_syndromes) {
+  validate_pcm_for_rounds_params(num_syndromes_per_round,
+                                 num_boundary_syndromes, start_round, end_round,
+                                 pcm.num_rows());
+  const details::round_layout layout(num_syndromes_per_round,
+                                     num_boundary_syndromes, pcm.num_rows());
   auto first_row_to_keep =
-      static_cast<std::uint32_t>(start_round * num_syndromes_per_round);
+      static_cast<std::uint32_t>(layout.round_start(start_round));
   auto last_row_to_keep =
-      static_cast<std::uint32_t>((end_round + 1) * num_syndromes_per_round - 1);
+      static_cast<std::uint32_t>(layout.round_start(end_round + 1) - 1);
 
   // select_pcm_columns_for_round_range reads .front()/.back() as min/max row,
   // which requires sorted-per-column input. Canonicalize unless the caller
@@ -557,9 +663,8 @@ get_pcm_for_rounds(const sparse_binary_matrix &pcm,
   std::vector<std::uint32_t> columns_in_range;
   std::uint32_t first_column = 0, last_column = 0;
   select_pcm_columns_for_round_range(
-      row_indices, num_syndromes_per_round, start_round, end_round,
-      straddle_start_round, straddle_end_round, columns_in_range, first_column,
-      last_column);
+      row_indices, layout, start_round, end_round, straddle_start_round,
+      straddle_end_round, columns_in_range, first_column, last_column);
 
   const std::uint32_t num_rows_to_copy =
       last_row_to_keep - first_row_to_keep + 1;
