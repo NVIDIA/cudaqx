@@ -118,7 +118,7 @@ GpuRoceConfig GpuRoceConfig::from_env() {
   c.peer_ip = env_str("HOLOLINK_PEER_IP");
   c.remote_qp = env_u32("HOLOLINK_REMOTE_QP", 0);
   // gpu_id is not read from the environment: the device is the decoder's
-  // cuda_device_id, resolved by reconcile_gpu_roce_device() at transport
+  // cuda_device_id, resolved by resolve_decode_device() at transport
   // creation.
   c.frame_size = env_size("HOLOLINK_FRAME_SIZE", 384);
   c.page_size = env_size("HOLOLINK_PAGE_SIZE", 0); // 0 → derived below

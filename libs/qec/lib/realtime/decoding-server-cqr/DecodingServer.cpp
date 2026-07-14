@@ -37,12 +37,13 @@ using cudaq::qec::decoding::config::DecoderTransport;
 // Constructors
 // ---------------------------------------------------------------------------
 
-/// gpu_roce runs the whole pipeline -- rings, dispatch scheduler, device-side
-/// graph fire -- on ONE GPU: the one the FPGA/NIC is affine to. The decoder
-/// must be pinned to that same device via cuda_device_id, because CUDA graphs
-/// cannot split capture and launch across devices. An unpinned decoder defaults
-/// to device 0.
-int reconcile_gpu_roce_device(int decoder_pin) {
+/// Resolve the CUDA device a decode pipeline runs on from the decoder's
+/// cuda_device_id pin; an unpinned decoder (-1) defaults to device 0. The
+/// gpu_roce path relies on this to place its rings, dispatch scheduler, and
+/// device-side graph fire on the one GPU the FPGA/NIC is affine to -- CUDA
+/// graphs cannot split capture and launch across devices, so the decoder must
+/// be pinned to that device.
+int resolve_decode_device(int decoder_pin) {
   return decoder_pin >= 0 ? decoder_pin : 0;
 }
 

@@ -21,9 +21,9 @@
 
 namespace cudaq::qec::decoding_server {
 
-/// Resolve the single GPU a gpu_roce pipeline runs on from the decoder's
+/// Resolve the CUDA device a decode pipeline runs on from the decoder's
 /// cuda_device_id (-1 when unpinned). An unpinned decoder defaults to device 0.
-int reconcile_gpu_roce_device(int decoder_pin);
+int resolve_decode_device(int decoder_pin);
 
 /// Maps function_id → non-owning ITransceiver pointer.
 /// Ownership lives in DecodingServer::owned_transports_.

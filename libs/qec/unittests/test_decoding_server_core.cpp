@@ -261,12 +261,12 @@ TEST(RpcDispatcherTest, ConvertsHandlerExceptionsToErrorResponses) {
   expect_status(transport, RpcStatus::INTERNAL_ERROR);
 }
 
-TEST(GpuRoceDeviceReconcile, UnpinnedDefaultsToZero) {
-  EXPECT_EQ(cudaq::qec::decoding_server::reconcile_gpu_roce_device(-1), 0);
+TEST(ResolveDecodeDevice, UnpinnedDefaultsToZero) {
+  EXPECT_EQ(cudaq::qec::decoding_server::resolve_decode_device(-1), 0);
 }
 
-TEST(GpuRoceDeviceReconcile, PinSelectsDevice) {
-  EXPECT_EQ(cudaq::qec::decoding_server::reconcile_gpu_roce_device(3), 3);
+TEST(ResolveDecodeDevice, PinSelectsDevice) {
+  EXPECT_EQ(cudaq::qec::decoding_server::resolve_decode_device(3), 3);
 }
 
 TEST(SetCudaDeviceForDecode, UnpinnedIsNoOp) {

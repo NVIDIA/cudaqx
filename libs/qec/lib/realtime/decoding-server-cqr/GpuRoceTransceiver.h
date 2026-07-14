@@ -39,7 +39,7 @@ struct GpuRoceConfig {
   std::string device_name; ///< HOLOLINK_DEVICE   (IB netdev, e.g. "mlx5_0")
   uint32_t remote_qp{0};   ///< HOLOLINK_REMOTE_QP (FPGA/emulator QP number)
   int gpu_id{0};           ///< FPGA-affine GPU; set from the decoder's
-                           ///< cuda_device_id by reconcile_gpu_roce_device()
+                           ///< cuda_device_id by resolve_decode_device()
   size_t frame_size{384};  ///< HOLOLINK_FRAME_SIZE (max RPC frame bytes)
   size_t page_size{0};     ///< HOLOLINK_PAGE_SIZE (0 → derived from frame_size)
   size_t num_pages{64};    ///< HOLOLINK_NUM_PAGES (ring depth)
