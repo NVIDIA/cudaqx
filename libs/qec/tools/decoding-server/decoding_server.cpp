@@ -530,23 +530,33 @@ int main(int argc, char **argv) {
     // launch_scheduler() to wire the CUDAQ device-graph scheduler to the
     // Hololink ring buffers.  The GPU scheduler then handles
     // RX→dispatch→decode→TX autonomously; this thread just waits for signal.
-    cudaq::qec::decoding_server::DecodingServer server(cfg.config_path);
-    // QP/rkey/buf already printed to stdout by launch_scheduler() so the
-    // orchestration script can grep them before the READY line.
-    std::cout << "QEC_DECODING_SERVER_READY gpu_roce" << std::endl;
-    std::cout.flush();
-    std::thread server_thread([&server] { server.run(); });
-    const auto start_time_gr = std::chrono::steady_clock::now();
-    while (g_shutdown.load(std::memory_order_acquire) == 0) {
-      const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
-                               std::chrono::steady_clock::now() - start_time_gr)
-                               .count();
-      if (elapsed > cfg.timeout_sec)
-        break;
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    //
+    // Construction throws when the GPU RoCE component is not linked into
+    // this binary (built against HSB/DOCA headers but without the
+    // proprietary cudevice archive) or when Hololink bring-up fails.
+    try {
+      cudaq::qec::decoding_server::DecodingServer server(cfg.config_path);
+      // QP/rkey/buf already printed to stdout by launch_scheduler() so the
+      // orchestration script can grep them before the READY line.
+      std::cout << "QEC_DECODING_SERVER_READY gpu_roce" << std::endl;
+      std::cout.flush();
+      std::thread server_thread([&server] { server.run(); });
+      const auto start_time_gr = std::chrono::steady_clock::now();
+      while (g_shutdown.load(std::memory_order_acquire) == 0) {
+        const auto elapsed =
+            std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::steady_clock::now() - start_time_gr)
+                .count();
+        if (elapsed > cfg.timeout_sec)
+          break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      }
+      server.stop();
+      server_thread.join();
+    } catch (const std::exception &e) {
+      std::cerr << "ERROR: gpu_roce startup failed: " << e.what() << std::endl;
+      return 1;
     }
-    server.stop();
-    server_thread.join();
     return 0;
   }
 #endif

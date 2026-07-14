@@ -500,8 +500,14 @@ decoder_context decoder_context_from_memory_circuit(const code &code,
   result.m2o = std::move(m2o.rows);
   result.num_measurements = m2d.num_measurements;
 
-  dem.canonicalize_for_rounds(numZStabs + numXStabs,
-                              /*remove_zero_syndrome_errors=*/true);
+  // The full both-basis DEM's boundary layers carry only the fixed basis and
+  // are narrower than the interior [Z][X] layers, so canonicalize is
+  // boundary-aware. Boundary width = fixed-basis count (numZStabs for a Z-basis
+  // prep, else numXStabs).
+  const uint32_t numBoundary = is_z_prep ? numZStabs : numXStabs;
+  dem.canonicalize_for_rounds_with_boundary(
+      numXStabs + numZStabs, numBoundary,
+      /*remove_zero_syndrome_errors=*/true);
 
   result.dem = std::move(dem);
   return result;
@@ -556,6 +562,8 @@ decoder_context slice_full(const decoder_context &self, bool keep_x,
   if (!keep_z)
     out.num_z_stabilizers = 0;
 
+  // A sliced context keeps a single stabilizer type, so the DEM is uniform
+  // (every detector layer has the same width) and canonicalizes per round.
   const std::size_t numReturnSynPerRound =
       (keep_z ? self.num_z_stabilizers : 0) +
       (keep_x ? self.num_x_stabilizers : 0);
