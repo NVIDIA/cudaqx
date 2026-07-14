@@ -10,17 +10,18 @@
 
 namespace cudaq::qec {
 
-__qpu__ void memory_circuit(const code::stabilizer_round &stabilizer_round,
-                            const code::one_qubit_encoding &statePrep,
-                            std::size_t num_data, std::size_t numAncx,
-                            std::size_t numAncz, std::size_t num_rounds,
-                            const std::vector<std::size_t> &x_stabilizers,
-                            const std::vector<std::size_t> &z_stabilizers,
-                            const std::vector<std::size_t> &obs_matrix_flat,
-                            std::size_t num_observables,
-                            bool measure_in_x_basis,
-                            const std::vector<std::size_t> &feedback_flat,
-                            const std::vector<std::size_t> &obs_feedback_flat) {
+__qpu__ void
+memory_circuit(const code::stabilizer_round &stabilizer_round,
+               const code::one_qubit_encoding &statePrep, std::size_t num_data,
+               std::size_t numAncx, std::size_t numAncz, std::size_t num_rounds,
+               const std::vector<std::size_t> &x_stabilizers,
+               const std::vector<std::size_t> &z_stabilizers,
+               const std::vector<std::size_t> &obs_matrix_flat,
+               std::size_t num_observables, bool measure_in_x_basis,
+               const std::vector<std::size_t> &feedback_indices,
+               const std::vector<std::size_t> &feedback_offsets,
+               const std::vector<std::size_t> &obs_feedback_indices,
+               const std::vector<std::size_t> &obs_feedback_offsets) {
   // Allocate the data and ancilla qubits
   cudaq::qvector data(num_data), xstab_anc(numAncx), zstab_anc(numAncz);
 
@@ -46,28 +47,30 @@ __qpu__ void memory_circuit(const code::stabilizer_round &stabilizer_round,
   // Observable inlined feedback accumulation. Nested std::vector is not
   // supported in __qpu__ code, so instead of one record vector per observable
   // we use a single flat buffer with per-observable round-major slices; see
-  // observable_feedback_offsets / collect_observable_feedback_round in
+  // observable_feedback_record_offsets / collect_observable_feedback_round in
   // inlined_feedback.h.
-  std::vector<std::size_t> obs_fb_offsets = observable_feedback_offsets(
-      obs_feedback_flat, num_observables, numCols, num_rounds);
-  std::size_t obs_fb_total =
-      obs_feedback_flat.size() > 0 ? obs_fb_offsets[num_observables] : 0;
+  std::vector<std::size_t> obs_fb_record_offsets =
+      observable_feedback_record_offsets(obs_feedback_offsets, num_observables,
+                                         num_rounds);
+  std::size_t obs_fb_total = obs_feedback_offsets.size() > 0
+                                 ? obs_fb_record_offsets[num_observables]
+                                 : 0;
   std::vector<cudaq::measure_result> obs_fb_records(obs_fb_total);
 
   // Collect the first-round feedback records for each observable.
-  if (obs_feedback_flat.size() > 0)
-    collect_observable_feedback_round(obs_fb_records, obs_fb_offsets,
-                                      final_syndrome, 0, obs_feedback_flat,
-                                      num_observables, numCols);
+  if (obs_feedback_offsets.size() > 0)
+    collect_observable_feedback_round(obs_fb_records, obs_fb_record_offsets,
+                                      final_syndrome, 0, obs_feedback_indices,
+                                      obs_feedback_offsets, num_observables);
 
   // Generate syndrome data
   for (std::size_t round = 1; round < num_rounds; ++round) {
     auto syndrome = stabilizer_round(logical, x_stabilizers, z_stabilizers);
-    if (obs_feedback_flat.size() > 0)
-      collect_observable_feedback_round(obs_fb_records, obs_fb_offsets,
-                                        syndrome, round, obs_feedback_flat,
-                                        num_observables, numCols);
-    if (feedback_flat.size() == 0) {
+    if (obs_feedback_offsets.size() > 0)
+      collect_observable_feedback_round(obs_fb_records, obs_fb_record_offsets,
+                                        syndrome, round, obs_feedback_indices,
+                                        obs_feedback_offsets, num_observables);
+    if (feedback_offsets.size() == 0) {
       cudaq::detectors(final_syndrome, syndrome);
     } else {
       // Cross-round detector for record j: earlier vs current round record,
@@ -75,7 +78,7 @@ __qpu__ void memory_circuit(const code::stabilizer_round &stabilizer_round,
       // feedback matrix.
       for (std::size_t j = 0; j < numCols; ++j)
         cudaq::detector(cross_round_detector_records(
-            final_syndrome, syndrome, j, feedback_flat, numCols));
+            final_syndrome, syndrome, j, feedback_indices, feedback_offsets));
     }
     final_syndrome = syndrome;
   }
@@ -90,7 +93,7 @@ __qpu__ void memory_circuit(const code::stabilizer_round &stabilizer_round,
   for (std::size_t obs = 0; obs < num_observables; ++obs)
     cudaq::logical_observable(
         observable_support_records(obs, obs_matrix_flat, num_data, data_results,
-                                   obs_fb_records, obs_fb_offsets));
+                                   obs_fb_records, obs_fb_record_offsets));
 
   // For each stabilizer, form detectors from data qubit readout connected with
   // final stabilizer round. With inlined feedback, the boundary detector for
@@ -101,7 +104,7 @@ __qpu__ void memory_circuit(const code::stabilizer_round &stabilizer_round,
   for (std::size_t x = 0; x < num_fixed_measurements; ++x)
     cudaq::detector(boundary_detector_records(
         final_syndrome, fixed_offset + x, data_results, stabilizers,
-        x * num_data, num_data, feedback_flat, numCols));
+        x * num_data, num_data, feedback_indices, feedback_offsets));
 }
 
 } // namespace cudaq::qec

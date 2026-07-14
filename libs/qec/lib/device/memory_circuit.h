@@ -29,25 +29,23 @@ namespace cudaq::qec {
 ///        (num_observables × numData entries, values 0/1).
 /// @param num_observables Number of rows in the observable matrix (k).
 /// @param measure_in_x_basis Performing X- or Z-memory circuit
-/// @param feedback_flat Row-major flattened inlined feedback matrix for
-///        detectors. Size is 0 (no feedback; legacy detector structure) or
-///        numCols*numCols with numCols = numAncx + numAncz. Entry (j, k) = 1
-///        means the cross-round detector for record j additionally XORs
-///        record k of the earlier round, and the final boundary detector for
-///        record j additionally XORs record k of the last round.
-/// @param obs_feedback_flat Row-major flattened inlined feedback matrix for
-///        logical observables. Size is 0 (no feedback) or
-///        num_observables*numCols. Entry (m, k) = 1 means logical observable
-///        m additionally XORs record k of every round.
-__qpu__ void memory_circuit(const code::stabilizer_round &stabilizer_round,
-                            const code::one_qubit_encoding &statePrep,
-                            std::size_t numData, std::size_t numAncx,
-                            std::size_t numAncz, std::size_t numRounds,
-                            const std::vector<std::size_t> &x_stabilizers,
-                            const std::vector<std::size_t> &z_stabilizers,
-                            const std::vector<std::size_t> &obs_matrix_flat,
-                            std::size_t num_observables,
-                            bool measure_in_x_basis,
-                            const std::vector<std::size_t> &feedback_flat,
-                            const std::vector<std::size_t> &obs_feedback_flat);
+/// @param feedback_indices CSR column indices for detector feedback.
+/// @param feedback_offsets CSR row offsets for detector feedback. Size is 0
+///        (no feedback; legacy detector structure) or numCols + 1 with
+///        numCols = numAncx + numAncz.
+/// @param obs_feedback_indices CSR column indices for observable feedback.
+/// @param obs_feedback_offsets CSR row offsets for observable feedback. Size
+///        is 0 (no feedback) or num_observables + 1.
+__qpu__ void
+memory_circuit(const code::stabilizer_round &stabilizer_round,
+               const code::one_qubit_encoding &statePrep, std::size_t numData,
+               std::size_t numAncx, std::size_t numAncz, std::size_t numRounds,
+               const std::vector<std::size_t> &x_stabilizers,
+               const std::vector<std::size_t> &z_stabilizers,
+               const std::vector<std::size_t> &obs_matrix_flat,
+               std::size_t num_observables, bool measure_in_x_basis,
+               const std::vector<std::size_t> &feedback_indices,
+               const std::vector<std::size_t> &feedback_offsets,
+               const std::vector<std::size_t> &obs_feedback_indices,
+               const std::vector<std::size_t> &obs_feedback_offsets);
 } // namespace cudaq::qec

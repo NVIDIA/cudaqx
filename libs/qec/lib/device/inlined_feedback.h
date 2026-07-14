@@ -27,20 +27,20 @@ row_support_weight(const std::vector<std::size_t> &matrix_flat, std::size_t row,
 
 /// @brief Records for the cross-round detector of syndrome record @p j: the
 /// earlier-vs-current comparison `{prev[j], curr[j]}` followed by the
-/// earlier-round herald records `prev[k]` for each column k (ascending) with
-/// `feedback_flat(j, k) != 0`.
-inline __qpu__ std::vector<cudaq::measure_result> cross_round_detector_records(
-    const std::vector<cudaq::measure_result> &prev,
-    const std::vector<cudaq::measure_result> &curr, std::size_t j,
-    const std::vector<std::size_t> &feedback_flat, std::size_t num_cols) {
-  std::size_t weight = row_support_weight(feedback_flat, j, num_cols);
+/// earlier-round herald records selected by the CSR row for j.
+inline __qpu__ std::vector<cudaq::measure_result>
+cross_round_detector_records(const std::vector<cudaq::measure_result> &prev,
+                             const std::vector<cudaq::measure_result> &curr,
+                             std::size_t j,
+                             const std::vector<std::size_t> &feedback_indices,
+                             const std::vector<std::size_t> &feedback_offsets) {
+  std::size_t weight = feedback_offsets[j + 1] - feedback_offsets[j];
   std::vector<cudaq::measure_result> det(2 + weight);
   det[0] = prev[j];
   det[1] = curr[j];
   std::size_t idx = 2;
-  for (std::size_t k = 0; k < num_cols; ++k)
-    if (feedback_flat[j * num_cols + k] != 0)
-      det[idx++] = prev[k];
+  for (std::size_t i = feedback_offsets[j]; i < feedback_offsets[j + 1]; ++i)
+    det[idx++] = prev[feedback_indices[i]];
   return det;
 }
 
@@ -48,24 +48,23 @@ inline __qpu__ std::vector<cudaq::measure_result> cross_round_detector_records(
 /// `{last_syndrome[record_row]}`, then the data-qubit readouts
 /// `data_results[q]` for each data qubit q (ascending) in the stabilizer
 /// support `stabilizers[row_base + q]`, then the last-round herald records
-/// `last_syndrome[k]` for each column k (ascending) with
-/// `feedback_flat(record_row, k) != 0`. When @p feedback_flat is empty the
-/// herald part contributes nothing, so one helper serves both the
-/// feedback and legacy branches.
+/// selected by the CSR row for @p record_row. Empty feedback offsets mean the
+/// herald part contributes nothing, so one helper serves both feedback and
+/// legacy branches.
 inline __qpu__ std::vector<cudaq::measure_result> boundary_detector_records(
     const std::vector<cudaq::measure_result> &last_syndrome,
     std::size_t record_row,
     const std::vector<cudaq::measure_result> &data_results,
     const std::vector<std::size_t> &stabilizers, std::size_t row_base,
-    std::size_t num_data, const std::vector<std::size_t> &feedback_flat,
-    std::size_t num_cols) {
+    std::size_t num_data, const std::vector<std::size_t> &feedback_indices,
+    const std::vector<std::size_t> &feedback_offsets) {
   std::size_t support_weight = 0;
   for (std::size_t q = 0; q < num_data; ++q)
     if (stabilizers[row_base + q] != 0)
       support_weight++;
   std::size_t fb_weight =
-      feedback_flat.size() > 0
-          ? row_support_weight(feedback_flat, record_row, num_cols)
+      feedback_offsets.size() > 0
+          ? feedback_offsets[record_row + 1] - feedback_offsets[record_row]
           : 0;
   std::vector<cudaq::measure_result> support(1 + support_weight + fb_weight);
   support[0] = last_syndrome[record_row];
@@ -73,34 +72,34 @@ inline __qpu__ std::vector<cudaq::measure_result> boundary_detector_records(
   for (std::size_t q = 0; q < num_data; ++q)
     if (stabilizers[row_base + q] != 0)
       support[idx++] = data_results[q];
-  if (feedback_flat.size() > 0)
-    for (std::size_t k = 0; k < num_cols; ++k)
-      if (feedback_flat[record_row * num_cols + k] != 0)
-        support[idx++] = last_syndrome[k];
+  if (feedback_offsets.size() > 0)
+    for (std::size_t i = feedback_offsets[record_row];
+         i < feedback_offsets[record_row + 1]; ++i)
+      support[idx++] = last_syndrome[feedback_indices[i]];
   return support;
 }
 
 /// @brief Round-major slice offsets into the observable-feedback buffer. Entry
 /// m is the start index of observable m's slice; each observable occupies
-/// `num_rounds * (weight of obs_feedback_flat row m)` records. The returned
-/// vector has `num_observables + 1` entries; the last entry is the total
-/// buffer size. Returns an empty vector when @p obs_feedback_flat is empty
-/// (no observable feedback declared).
-inline __qpu__ std::vector<std::size_t>
-observable_feedback_offsets(const std::vector<std::size_t> &obs_feedback_flat,
-                            std::size_t num_observables, std::size_t num_cols,
-                            std::size_t num_rounds) {
+/// `num_rounds * (obs_feedback_offsets[m+1] - obs_feedback_offsets[m])`
+/// records. The returned vector has `num_observables + 1` entries; the last
+/// entry is the total buffer size. Returns an empty vector when the input
+/// offsets are empty (no observable feedback declared).
+inline __qpu__ std::vector<std::size_t> observable_feedback_record_offsets(
+    const std::vector<std::size_t> &obs_feedback_offsets,
+    std::size_t num_observables, std::size_t num_rounds) {
   // Sized (not default) construction: the __qpu__ dialect forbids the default
-  // std::vector constructor. An empty obs_feedback_flat yields a size-0 vector.
+  // std::vector constructor. Empty CSR offsets yield a size-0 vector.
   std::size_t num_offsets =
-      obs_feedback_flat.size() > 0 ? num_observables + 1 : 0;
+      obs_feedback_offsets.size() > 0 ? num_observables + 1 : 0;
   std::vector<std::size_t> offsets(num_offsets);
-  if (obs_feedback_flat.size() == 0)
+  if (obs_feedback_offsets.size() == 0)
     return offsets;
   std::size_t total = 0;
   for (std::size_t m = 0; m < num_observables; ++m) {
     offsets[m] = total;
-    total += num_rounds * row_support_weight(obs_feedback_flat, m, num_cols);
+    total +=
+        num_rounds * (obs_feedback_offsets[m + 1] - obs_feedback_offsets[m]);
   }
   offsets[num_observables] = total;
   return offsets;
@@ -108,22 +107,23 @@ observable_feedback_offsets(const std::vector<std::size_t> &obs_feedback_flat,
 
 /// @brief Write the records that observable feedback collects during @p round
 /// into the round-major @p obs_fb_records buffer. For each observable m, the
-/// round-r block starts at `offsets[m] + round * (weight of obs_feedback_flat
-/// row m)` and holds `syndrome[k]` for each column k (ascending) with
-/// `obs_feedback_flat(m, k) != 0`. Call with round 0 for the first round's
-/// syndrome and with the running round index for each subsequent round.
+/// round-r block starts at `record_offsets[m] + round * row_weight(m)` and
+/// holds the syndrome records selected by CSR row m. Call with round 0 for the
+/// first round's syndrome and with the running round index for each subsequent
+/// round.
 inline __qpu__ void collect_observable_feedback_round(
     std::vector<cudaq::measure_result> &obs_fb_records,
-    const std::vector<std::size_t> &offsets,
+    const std::vector<std::size_t> &record_offsets,
     const std::vector<cudaq::measure_result> &syndrome, std::size_t round,
-    const std::vector<std::size_t> &obs_feedback_flat,
-    std::size_t num_observables, std::size_t num_cols) {
+    const std::vector<std::size_t> &obs_feedback_indices,
+    const std::vector<std::size_t> &obs_feedback_offsets,
+    std::size_t num_observables) {
   for (std::size_t m = 0; m < num_observables; ++m) {
-    std::size_t weight = row_support_weight(obs_feedback_flat, m, num_cols);
-    std::size_t idx = offsets[m] + round * weight;
-    for (std::size_t k = 0; k < num_cols; ++k)
-      if (obs_feedback_flat[m * num_cols + k] != 0)
-        obs_fb_records[idx++] = syndrome[k];
+    std::size_t weight = obs_feedback_offsets[m + 1] - obs_feedback_offsets[m];
+    std::size_t idx = record_offsets[m] + round * weight;
+    for (std::size_t i = obs_feedback_offsets[m];
+         i < obs_feedback_offsets[m + 1]; ++i)
+      obs_fb_records[idx++] = syndrome[obs_feedback_indices[i]];
   }
 }
 

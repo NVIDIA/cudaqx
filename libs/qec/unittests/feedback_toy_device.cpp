@@ -22,12 +22,19 @@ __qpu__ void prep0(patch p) {
     reset(p.data[i]);
 }
 
+__qpu__ void prepp(patch p) {
+  for (std::size_t i = 0; i < p.data.size(); i++) {
+    reset(p.data[i]);
+    h(p.data[i]);
+  }
+}
+
 // A superdense (Bell-pair) round for a 2-data-qubit code with stabilizers XX
 // and ZZ that deliberately ends with an *uncorrected* record-conditioned
-// byproduct: after the Bell decode, ancx[0] sits in the computational basis
-// holding its future measurement outcome r_X, so the trailing
-// CX(ancx[0], data[1]) is the unitary equivalent of the classically
-// controlled byproduct X^{r_X} on data[1] that a hardware frame update would
+// byproducts: after the Bell decode, the ancillas sit in the computational
+// basis holding their future measurement outcomes r_X and r_Z. The trailing
+// controlled gates are the unitary equivalent of classically controlled
+// X^{r_X} Z^{r_Z} byproducts on data[1] that a hardware frame update would
 // otherwise track. The stabilizer supports are hardcoded (a single XX and ZZ
 // plaquette), so the x/z_stabilizers arguments are intentionally unused.
 __qpu__ std::vector<cudaq::measure_result>
@@ -44,8 +51,9 @@ stabilizer_round(patch p, const std::vector<std::size_t> &x_stabilizers,
   // Decode the Bell pair.
   cudaq::x<cudaq::ctrl>(p.ancx[0], p.ancz[0]);
   h(p.ancx[0]);
-  // Uncorrected record-conditioned byproduct: X^{r_X} on data[1].
+  // Uncorrected record-conditioned byproducts on data[1].
   cudaq::x<cudaq::ctrl>(p.ancx[0], p.data[1]);
+  cudaq::z<cudaq::ctrl>(p.ancz[0], p.data[1]);
   // Records in [Z][X] order.
   auto results = mz(p.ancz, p.ancx);
   reset(p.ancz[0]);
