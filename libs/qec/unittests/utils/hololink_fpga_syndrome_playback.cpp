@@ -1418,9 +1418,10 @@ int main(int argc, char **argv) {
     std::uint32_t actual_samples = ila_sample_count(*hololink);
     ila_disable(*hololink);
 
-    if (actual_samples == 0) {
-      std::cerr << "ILA: captured 0 samples (timeout " << kVerifyTimeoutMs
-                << " ms)\n";
+    if (actual_samples < expected_samples) {
+      std::cerr << "ILA: captured " << actual_samples << " of "
+                << expected_samples << " expected samples (timeout "
+                << kVerifyTimeoutMs << " ms)\n";
       return 1;
     }
     std::cout << "ILA: captured " << actual_samples << " samples\n";

@@ -107,10 +107,8 @@ GEN_SHOTS=100
 TRANSPORT=""
 # GPU for the gpu_roce scheduler + decode graph.
 GPU_ID=0
-# Server-side GPU RoCE ring depth. This is intentionally separate from
-# NUM_SLOTS, which describes the FPGA/playback SIF ring. "auto" keeps the
-# FPGA/playback defaults stable and grows only the server ring if the host page
-# size requires a larger aligned GPU allocation.
+# Server-side GPU RoCE ring depth. "auto" chooses a page count whose total
+# allocation satisfies the host page-size requirement.
 GPU_ROCE_NUM_PAGES=auto
 
 # Runtime nv-qldpc plugin for the Relay BP profile: the prebuilt
@@ -134,9 +132,10 @@ MTU=4096
 TIMEOUT=60
 NUM_SHOTS=""
 PAGE_SIZE=384
-# FPGA/playback SIF ring depth. Stock HSB posts WQE_NUM=64 receive/send
-# WQEs, so keep this at 64 for both emulator and real FPGA playback.
+# CPU RoCE server ring slots.
 NUM_SLOTS=64
+# FPGA/emulator playback window pages.
+PLAYBACK_NUM_PAGES=512
 # TX SGE bytes for the server's SEND responses.  RPCResponse (24B) + a
 # bit-packed correction byte fits well inside 64, keeping every response a
 # single 512-bit ILA beat.
@@ -222,7 +221,8 @@ Run options:
                          gpu_roce uses page-size as HOLOLINK_FRAME_SIZE)
   --gpu N                GPU device id for gpu_roce (default: 0)
   --gpu-roce-num-pages N Server GPU RoCE ring pages (default: auto-align;
-                         FPGA/playback ring remains 64)
+                         starts from playback window pages)
+  --playback-num-pages N FPGA/emulator playback window pages (default: 512)
   --spacing N            Inter-shot spacing in microseconds (default: 10)
   --control-port N       UDP control port for emulator (default: 8193)
 
@@ -242,6 +242,7 @@ while [[ $# -gt 0 ]]; do
         --transport)        TRANSPORT="$2"; shift ;;
         --gpu)              GPU_ID="$2"; shift ;;
         --gpu-roce-num-pages) GPU_ROCE_NUM_PAGES="$2"; shift ;;
+        --playback-num-pages) PLAYBACK_NUM_PAGES="$2"; shift ;;
         --nv-qldpc-plugin)  NV_QLDPC_PLUGIN="$2"; shift ;;
         --config)           CONFIG_FILE="$2"; shift ;;
         --syndromes)        SYNDROMES_FILE="$2"; shift ;;
@@ -287,13 +288,13 @@ if [[ "$TRANSPORT" != "cpu_roce" && "$TRANSPORT" != "gpu_roce" ]]; then
     exit 1
 fi
 
-# On 64 KiB-page kernels (GB200), DOCA rejects gpu_roce server ring allocations
-# whose total size is not host-page aligned. Keep PAGE_SIZE and NUM_SLOTS as the
-# FPGA/playback contract, and only grow the server-side GPU ring when needed.
+# Some DOCA registrations require the gpu_roce server ring allocation to be
+# host-page aligned. Keep playback capacity independent from the server ring,
+# and choose a server page count that satisfies the allocation contract.
 if [[ "$TRANSPORT" == "gpu_roce" && "$GPU_ROCE_NUM_PAGES" == "auto" ]]; then
     HOST_PAGE_SIZE=$(getconf PAGESIZE 2>/dev/null || echo 4096)
     SERVER_PAGE_SIZE=$(( ((PAGE_SIZE + 127) / 128) * 128 ))
-    GPU_ROCE_NUM_PAGES="$NUM_SLOTS"
+    GPU_ROCE_NUM_PAGES="$PLAYBACK_NUM_PAGES"
     while (( (SERVER_PAGE_SIZE * GPU_ROCE_NUM_PAGES) % HOST_PAGE_SIZE != 0 )); do
         ((GPU_ROCE_NUM_PAGES++))
         if (( GPU_ROCE_NUM_PAGES > 65536 )); then
@@ -822,9 +823,9 @@ generate_data_files() {
 
     # The server selects its transceiver from the per-decoder `transport:` YAML
     # key (default cpu_roce). For gpu_roce, `cuda_device_id` pins graph capture
-    # and worker threads to the same FPGA/NIC-affine GPU named by HOLOLINK_GPU_ID.
-    # The generator doesn't emit these non-default optional fields, so inject
-    # them into our generated config directly under the decoder's `type:` line.
+    # and worker-thread execution to the selected GPU. The generator doesn't emit
+    # these non-default optional fields, so inject them into our generated config
+    # directly under the decoder's `type:` line.
     if [[ "$TRANSPORT" == "gpu_roce" ]]; then
         _info "Injecting 'transport: gpu_roce' and cuda_device_id=$GPU_ID into $(basename "$CONFIG_FILE")"
         awk -v gpu_id="$GPU_ID" '{ print }
@@ -1084,7 +1085,7 @@ run_playback() {
         --rkey "$SERVER_RKEY"
         --buffer-addr "$SERVER_ADDR"
         --page-size "$PAGE_SIZE"
-        --num-pages "$NUM_SLOTS"
+        --num-pages "$PLAYBACK_NUM_PAGES"
         "$@"
     )
     if $VERIFY; then
@@ -1121,7 +1122,7 @@ run_emulated() {
         --port="$CONTROL_PORT" \
         --bridge-ip="$BRIDGE_IP" \
         --page-size="$PAGE_SIZE" \
-        --num-pages="$NUM_SLOTS" \
+        --num-pages="$PLAYBACK_NUM_PAGES" \
         > >(tee "$emu_log") 2>&1 &
     local emu_pid=$!
     PIDS_TO_KILL+=("$emu_pid")
