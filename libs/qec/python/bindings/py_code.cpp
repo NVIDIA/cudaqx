@@ -14,7 +14,7 @@
 #include <nanobind/stl/vector.h>
 #include <nanobind/trampoline.h>
 
-#include "cudaq/runtime/logger/logger.h"
+#include "cudaq/qec/logger.h"
 
 #include "common/DeviceCodeRegistry.h"
 #include "cudaq/python/PythonCppInterop.h"
@@ -141,6 +141,29 @@ public:
 
       // Make sure we cast the function pointer correctly
       if (opKeyEnum == operation::stabilizer_round) {
+        // The kernel must return list[cudaq.measure_handle]; a list[bool]
+        // return discriminates measurements to bits and drops the record
+        // indices that cudaq.detector needs. Validate the lowered return type.
+        nb::object retTyObj = nb::hasattr(kernel, "return_type")
+                                  ? kernel.attr("return_type")
+                                  : nb::none();
+        bool returnsHandleVector = false;
+        if (!retTyObj.is_none()) {
+          nb::object cc =
+              nb::module_::import_("cudaq.mlir.dialects").attr("cc");
+          nb::object stdvecTy = cc.attr("StdvecType");
+          if (nb::cast<bool>(stdvecTy.attr("isinstance")(retTyObj))) {
+            nb::object eleTy = stdvecTy.attr("getElementType")(retTyObj);
+            returnsHandleVector = nb::cast<bool>(
+                cc.attr("MeasureHandleType").attr("isinstance")(eleTy));
+          }
+        }
+        if (!returnsHandleVector)
+          throw std::runtime_error(
+              "Invalid stabilizer_round kernel: it must return "
+              "list[cudaq.measure_handle]. Change the kernel's return "
+              "annotation to '-> list[cudaq.measure_handle]'.");
+
         encoding fptr = kernInterop->getDirectKernelCall<qkernel<
             std::vector<measure_result>(patch, const std::vector<std::size_t> &,
                                         const std::vector<std::size_t> &)>>();
@@ -204,6 +227,21 @@ static nb::object get_python_kernel_or_throw(const code &self, operation op) {
 
   return it->second;
 }
+
+template <typename T>
+static auto copyCodeMatrixToPyArray(const cudaqx::tensor<T> &tensor,
+                                    std::size_t emptyCols) {
+  if (tensor.rank() == 0 && tensor.size() == 0) {
+    T *data_copy = new T[0];
+    size_t arr_shape[] = {0, emptyCols};
+    return nb::ndarray<nb::numpy, T>(
+        data_copy, 2, arr_shape, nb::capsule(data_copy, [](void *p) noexcept {
+          delete[] static_cast<T *>(p);
+        }));
+  }
+
+  return cudaq::python::copyCUDAQXTensorToPyArray(tensor);
+}
 } // namespace
 
 // Registry to store code factory functions
@@ -223,7 +261,7 @@ public:
 
   static void register_code(const std::string &name,
                             std::function<nb::object(nb::kwargs)> factory) {
-    cudaq::info("Registering Pythonic QEC Code with name {}", name);
+    cudaq::qec::info("Registering Pythonic QEC Code with name {}", name);
     registry[name] = factory;
   }
 
@@ -341,42 +379,43 @@ void bindCode(nb::module_ &mod) {
       .def(
           "get_parity",
           [](code &code) {
-            return cudaq::python::copyCUDAQXTensorToPyArray(code.get_parity());
+            return copyCodeMatrixToPyArray(code.get_parity(),
+                                           2 * code.get_num_data_qubits());
           },
           "Get the parity check matrix of the code")
       .def(
           "get_parity_x",
           [](code &code) {
-            return cudaq::python::copyCUDAQXTensorToPyArray(
-                code.get_parity_x());
+            return copyCodeMatrixToPyArray(code.get_parity_x(),
+                                           code.get_num_data_qubits());
           },
           "Get the X-type parity check matrix of the code")
       .def(
           "get_parity_z",
           [](code &code) {
-            return cudaq::python::copyCUDAQXTensorToPyArray(
-                code.get_parity_z());
+            return copyCodeMatrixToPyArray(code.get_parity_z(),
+                                           code.get_num_data_qubits());
           },
           "Get the Z-type parity check matrix of the code")
       .def(
           "get_pauli_observables_matrix",
           [](code &code) {
-            return cudaq::python::copyCUDAQXTensorToPyArray(
-                code.get_pauli_observables_matrix());
+            return copyCodeMatrixToPyArray(code.get_pauli_observables_matrix(),
+                                           2 * code.get_num_data_qubits());
           },
           "Get a matrix of the Pauli observables of the code")
       .def(
           "get_observables_x",
           [](code &code) {
-            return cudaq::python::copyCUDAQXTensorToPyArray(
-                code.get_observables_x());
+            return copyCodeMatrixToPyArray(code.get_observables_x(),
+                                           code.get_num_data_qubits());
           },
           "Get the Pauli X observables of the code")
       .def(
           "get_observables_z",
           [](code &code) {
-            return cudaq::python::copyCUDAQXTensorToPyArray(
-                code.get_observables_z());
+            return copyCodeMatrixToPyArray(code.get_observables_z(),
+                                           code.get_num_data_qubits());
           },
           "Get the Pauli Z observables of the code")
       .def("get_stabilizers", &code::get_stabilizers,
@@ -530,19 +569,54 @@ void bindCode(nb::module_ &mod) {
             cudaq::python::copyCUDAQXTensorToPyArray(dataRes));
       },
       "Sample the memory circuit of the code with a specific initial "
-      "operation",
+      "operation. Returns (syndromes, data): syndromes has numFixed "
+      "boundary detectors (basis matching op), then one block per "
+      "inter-round transition, then numFixed more boundary detectors.",
+      nb::arg("code"), nb::arg("op"), nb::arg("numShots"), nb::arg("numRounds"),
+      nb::arg("noise") = nb::none());
+
+  auto make_directional_sample_memory_circuit = [](auto samplingFn) {
+    return [samplingFn](code &code, operation op, std::size_t numShots,
+                        std::size_t numRounds,
+                        std::optional<cudaq::noise_model> noise =
+                            std::nullopt) {
+      cudaq::noise_model emptyNoise;
+      auto [synd, dataRes] = samplingFn(code, op, numShots, numRounds,
+                                        noise ? *noise : emptyNoise);
+      return nb::make_tuple(cudaq::python::copyCUDAQXTensorToPyArray(synd),
+                            cudaq::python::copyCUDAQXTensorToPyArray(dataRes));
+    };
+  };
+
+  qecmod.def(
+      "x_sample_memory_circuit",
+      make_directional_sample_memory_circuit(x_sample_memory_circuit),
+      "Sample the memory circuit of the code with a specific initial "
+      "operation, keeping only the X stabilizer syndromes (same detector "
+      "layout as sample_memory_circuit, restricted to X stabilizers).",
+      nb::arg("code"), nb::arg("op"), nb::arg("numShots"), nb::arg("numRounds"),
+      nb::arg("noise") = nb::none());
+
+  qecmod.def(
+      "z_sample_memory_circuit",
+      make_directional_sample_memory_circuit(z_sample_memory_circuit),
+      "Sample the memory circuit of the code with a specific initial "
+      "operation, keeping only the Z stabilizer syndromes (same detector "
+      "layout as sample_memory_circuit, restricted to Z stabilizers).",
       nb::arg("code"), nb::arg("op"), nb::arg("numShots"), nb::arg("numRounds"),
       nb::arg("noise") = nb::none());
 
   qecmod.def(
       "dem_from_memory_circuit",
       [](code &code, operation op, std::size_t numRounds,
-         std::optional<cudaq::noise_model> noise = std::nullopt) {
+         std::optional<cudaq::noise_model> noise = std::nullopt,
+         bool decompose_errors = false) {
         if (!noise)
           throw std::runtime_error(
               "dem_from_memory_circuit requires a noise model; noise=None is "
               "not supported.");
-        return dem_from_memory_circuit(code, op, numRounds, *noise);
+        return dem_from_memory_circuit(code, op, numRounds, *noise,
+                                       decompose_errors);
       },
       R"pbdoc(
         Generate a detector error model from a memory circuit.
@@ -557,24 +631,32 @@ void bindCode(nb::module_ &mod) {
             op: The initial state preparation operation.
             numRounds: The number of stabilizer measurement rounds.
             noise: The noise model to apply to the memory circuit.
+            decompose_errors: If True, hyperedge error mechanisms are decomposed
+                into pairs of two-detector edges by Stim before returning.
 
         Returns:
             A detector error model.
       )pbdoc",
       nb::arg("code"), nb::arg("op"), nb::arg("numRounds"),
-      nb::arg("noise") = nb::none());
+      nb::arg("noise") = nb::none(), nb::arg("decompose_errors") = false);
 
-  qecmod.def(
-      "x_dem_from_memory_circuit",
-      [](code &code, operation op, std::size_t numRounds,
-         std::optional<cudaq::noise_model> noise = std::nullopt) {
-        if (!noise)
-          throw std::runtime_error(
-              "x_dem_from_memory_circuit requires a noise model; noise=None "
-              "is not supported.");
-        return x_dem_from_memory_circuit(code, op, numRounds, *noise);
-      },
-      R"pbdoc(
+  auto make_directional_dem_from_memory_circuit = [](auto demFn,
+                                                     const char *name) {
+    return [demFn, name](code &code, operation op, std::size_t numRounds,
+                         std::optional<cudaq::noise_model> noise = std::nullopt,
+                         bool decompose_errors = false) {
+      if (!noise)
+        throw std::runtime_error(std::string(name) +
+                                 " requires a noise model; noise=None is "
+                                 "not supported.");
+      return demFn(code, op, numRounds, *noise, decompose_errors);
+    };
+  };
+
+  qecmod.def("x_dem_from_memory_circuit",
+             make_directional_dem_from_memory_circuit(
+                 x_dem_from_memory_circuit, "x_dem_from_memory_circuit"),
+             R"pbdoc(
         Generate a detector error model from a memory circuit in the X basis.
 
         This function generates a detector error model from a memory circuit in
@@ -587,24 +669,20 @@ void bindCode(nb::module_ &mod) {
             op: The initial state preparation operation.
             numRounds: The number of stabilizer measurement rounds.
             noise: The noise model to apply to the memory circuit.
+            decompose_errors: If True, hyperedge error mechanisms are decomposed
+                into pairs of two-detector edges by Stim before returning.
 
         Returns:
             A detector error model.
       )pbdoc",
-      nb::arg("code"), nb::arg("op"), nb::arg("numRounds"),
-      nb::arg("noise") = nb::none());
+             nb::arg("code"), nb::arg("op"), nb::arg("numRounds"),
+             nb::arg("noise") = nb::none(),
+             nb::arg("decompose_errors") = false);
 
-  qecmod.def(
-      "z_dem_from_memory_circuit",
-      [](code &code, operation op, std::size_t numRounds,
-         std::optional<cudaq::noise_model> noise = std::nullopt) {
-        if (!noise)
-          throw std::runtime_error(
-              "z_dem_from_memory_circuit requires a noise model; noise=None "
-              "is not supported.");
-        return z_dem_from_memory_circuit(code, op, numRounds, *noise);
-      },
-      R"pbdoc(
+  qecmod.def("z_dem_from_memory_circuit",
+             make_directional_dem_from_memory_circuit(
+                 z_dem_from_memory_circuit, "z_dem_from_memory_circuit"),
+             R"pbdoc(
         Generate a detector error model from a memory circuit in the Z basis.
 
         This function generates a detector error model from a memory circuit in
@@ -617,12 +695,15 @@ void bindCode(nb::module_ &mod) {
             op: The initial state preparation operation.
             numRounds: The number of stabilizer measurement rounds.
             noise: The noise model to apply to the memory circuit.
+            decompose_errors: If True, hyperedge error mechanisms are decomposed
+                into pairs of two-detector edges by Stim before returning.
 
         Returns:
             A detector error model.
       )pbdoc",
-      nb::arg("code"), nb::arg("op"), nb::arg("numRounds"),
-      nb::arg("noise") = nb::none());
+             nb::arg("code"), nb::arg("op"), nb::arg("numRounds"),
+             nb::arg("noise") = nb::none(),
+             nb::arg("decompose_errors") = false);
 
   qecmod.def(
       "sample_code_capacity",

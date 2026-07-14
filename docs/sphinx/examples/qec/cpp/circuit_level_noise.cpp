@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2024 - 2025 NVIDIA Corporation & Affiliates.                  *
+ * Copyright (c) 2024 - 2026 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -7,7 +7,7 @@
  ******************************************************************************/
 // [Begin Documentation]
 // Compile and run with:
-// nvq++ --target=stim -lcudaq-qec circuit_level_noise.cpp
+// nvq++ --target=stim -lcudaq-qec -lcudaq-qec-decoders circuit_level_noise.cpp
 // ./a.out
 
 #include "cudaq.h"

@@ -155,6 +155,7 @@ arguments:
    decoders:
      - id: 0
        type: pymatching
+       cuda_device_id: 0   # optional: pin this decoder to a CUDA device
        block_size: 3
        syndrome_size: 3
        H_sparse: [ 0, -1, 1, -1, 2, -1 ]
@@ -163,6 +164,14 @@ arguments:
        decoder_custom_args:
          error_rate_vec: [ 0.1, 0.1, 0.1 ]
          merge_strategy: smallest_weight
+
+``cuda_device_id`` pins a GPU-accelerated decoder (e.g. ``nv-qldpc-decoder``
+or ``trt_decoder``) to a specific CUDA device. The same knob is available as
+a construction parameter in C++ and Python
+(``qec.get_decoder("trt_decoder", H, cuda_device_id=1)``). The thread that
+creates a decoder is pinned to that device and is expected to drive its
+decode calls; create each pinned decoder on its own thread to place several
+decoders on different GPUs.
 
 Here is how to create and save a decoder configuration:
 
@@ -300,6 +309,7 @@ Use the simulation backend for local development and testing:
 
       # Compile with simulation support
       nvq++ -std=c++20 my_circuit.cpp -lcudaq-qec \
+            -lcudaq-qec-decoders \
             -lcudaq-qec-realtime-decoding \
             -lcudaq-qec-realtime-decoding-simulation
       
@@ -347,6 +357,7 @@ Use the Quantinuum backend for hardware or emulation:
       # Compile for Quantinuum
       nvq++ --target quantinuum --quantinuum-machine Helios-1 \
             my_circuit.cpp -lcudaq-qec \
+            -lcudaq-qec-decoders \
             -lcudaq-qec-realtime-decoding \
             -lcudaq-qec-realtime-decoding-quantinuum
       
@@ -382,6 +393,7 @@ Compile with the simulation backend for local testing:
 
    nvq++ --target stim surface_code-1.cpp         \
          -lcudaq-qec                              \
+         -lcudaq-qec-decoders                     \
          -lcudaq-qec-realtime-decoding            \
          -lcudaq-qec-realtime-decoding-simulation \
          -o surface_code-1
@@ -393,6 +405,7 @@ Compile with the simulation backend for local testing:
 
 - ``--target stim``: Use the Stim quantum simulator
 - ``-lcudaq-qec``: Core QEC library with codes and experiments
+- ``-lcudaq-qec-decoders``: Decoder core API (decoders, ``sparse_binary_matrix``, and PCM utilities such as ``pcm_to_sparse_vec``)
 - ``-lcudaq-qec-realtime-decoding``: Real-time decoding core API
 - ``-lcudaq-qec-realtime-decoding-simulation``: Simulation-specific decoder backend
 
@@ -407,6 +420,7 @@ Compile for actual Quantinuum hardware:
          --quantinuum-extra-payload-provider decoder \
          surface_code-1.cpp                          \
          -lcudaq-qec                                 \
+         -lcudaq-qec-decoders                        \
          -lcudaq-qec-realtime-decoding               \
          -lcudaq-qec-realtime-decoding-quantinuum    \
          -Wl,--export-dynamic                        \
@@ -433,6 +447,7 @@ Compile for Quantinuum emulation mode:
          --quantinuum-machine Helios-Fake         \
          surface_code-1.cpp                       \
          -lcudaq-qec                              \
+         -lcudaq-qec-decoders                     \
          -lcudaq-qec-realtime-decoding            \
          -lcudaq-qec-realtime-decoding-quantinuum \
          -Wl,--export-dynamic                     \

@@ -287,6 +287,7 @@ configure_file("${CMAKE_CURRENT_SOURCE_DIR}/lib/version.cpp.in"
 # ==============================================================================
 
 add_subdirectory(lib)
+add_subdirectory(tools)
 
 if (CUDAQX_QEC_BINDINGS_PYTHON)
   add_subdirectory(python)
@@ -343,6 +344,12 @@ function(add_target_libs_to_wheel decoder_lib)
   install(FILES ${decoder_lib}
           DESTINATION ${CMAKE_INSTALL_LIBDIR}/decoder-plugins
           COMPONENT qec-lib-plugins)
+  # Mirror the (rpath-patched) plugin into the build tree so build-tree ctests
+  # can load it -- the runtime scans <libdir>/decoder-plugins next to
+  # libcudaq-qec.so. configure_file re-runs cmake when the source .so changes.
+  get_filename_component(_decoder_lib_name "${decoder_lib}" NAME)
+  configure_file("${decoder_lib}"
+    "${CMAKE_BINARY_DIR}/lib/decoder-plugins/${_decoder_lib_name}" COPYONLY)
 endfunction()
 
 if(NOT QEC_EXTERNAL_DECODERS)

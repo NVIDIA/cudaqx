@@ -40,7 +40,7 @@ struct __attribute__((packed)) EnqueueRequestPayload {
   std::int64_t counter;             ///< arg1
   std::int64_t syndrome_mapping_id; ///< arg2
   std::int64_t num_syndromes;       ///< arg3 (# syndrome bits following)
-  // Trailing: ceil(num_syndromes/8) bit-packed bytes + 0..7 zero pad.
+  // Trailing: ceil(num_syndromes/8) bit-packed bytes (LSB-first), no pad.
 };
 static_assert(sizeof(EnqueueRequestPayload) == 32,
               "EnqueueRequestPayload must be exactly 32 bytes per "
@@ -48,12 +48,14 @@ static_assert(sizeof(EnqueueRequestPayload) == 32,
 
 struct __attribute__((packed)) GetCorrectionsRequestPayload {
   std::int64_t decoder_id;  ///< arg0
-  std::int64_t return_size; ///< arg1 (# correction bits to fetch)
-  std::uint8_t reset;       ///< arg2 (0 = keep state, 1 = reset after read)
-  std::uint8_t _pad[7];     ///< zero pad to 8-byte multiple
+  std::int64_t return_size; ///< arg1 (# correction bits to fetch; the
+                            ///<       cc.device_call lowering serializes the
+                            ///<       OUT std::vector<bool> length here)
+  std::uint8_t reset;       ///< arg2 (0 = keep state, 1 = reset after read;
+                            ///<       trailing bool, no padding)
 };
-static_assert(sizeof(GetCorrectionsRequestPayload) == 24,
-              "GetCorrectionsRequestPayload must be exactly 24 bytes per "
+static_assert(sizeof(GetCorrectionsRequestPayload) == 17,
+              "GetCorrectionsRequestPayload must be exactly 17 bytes per "
               "decoder_server_runtime.md#get_corrections");
 
 struct __attribute__((packed)) ResetRequestPayload {

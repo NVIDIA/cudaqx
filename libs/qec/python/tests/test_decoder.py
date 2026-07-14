@@ -262,6 +262,21 @@ def test_decoder_plugin_initialization_with_int16_vec():
     assert "Unsupported array data type" in repr(e)
 
 
+def test_decoder_kwargs_accept_lists_and_2d_arrays():
+    decoder = qec.get_decoder(
+        'single_error_lut_example',
+        H,
+        flat_values=[0.1, 0.2, 0.3],
+        nested_values=[[0.1, 0.2], [0.3, 0.4]],
+        matrix_float32=np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32),
+        matrix_float64=np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float64),
+        matrix_int32=np.array([[1, 2], [3, 4]], dtype=np.int32),
+        matrix_uint8=np.array([[1, 0], [0, 1]], dtype=np.uint8),
+    )
+    assert decoder is not None
+    assert hasattr(decoder, 'decode')
+
+
 def test_decoder_plugin_result_structure():
     decoder = qec.get_decoder('single_error_lut_example', H)
     result = decoder.decode(create_test_syndrome())
@@ -432,6 +447,52 @@ def test_shuffle_pcm_columns():
 
     # They should be equal after sorting
     assert np.array_equal(qec.sort_pcm_columns(shuffled_pcm), sorted_pcm)
+
+
+def test_reorder_pcm_columns_scipy_sparse():
+    scipy_sparse = pytest.importorskip("scipy.sparse")
+    H = np.array([[1, 0, 1, 0], [0, 1, 0, 1], [0, 0, 1, 0]], dtype=np.uint8)
+    column_order = [2, 0]
+
+    dense_reordered = qec.reorder_pcm_columns(H, column_order)
+    sparse_reordered = qec.reorder_pcm_columns(scipy_sparse.csr_matrix(H),
+                                               column_order)
+
+    assert scipy_sparse.issparse(sparse_reordered)
+    assert scipy_sparse.isspmatrix_csc(sparse_reordered)
+    assert np.array_equal(sparse_reordered.toarray(), dense_reordered)
+
+
+def test_reorder_pcm_columns_scipy_sparse_zero_nnz_result():
+    scipy_sparse = pytest.importorskip("scipy.sparse")
+    H = scipy_sparse.csr_matrix((3, 4), dtype=np.uint8)
+
+    sparse_reordered = qec.reorder_pcm_columns(H, [2, 0])
+
+    assert scipy_sparse.isspmatrix_csc(sparse_reordered)
+    assert sparse_reordered.shape == (3, 2)
+    assert sparse_reordered.nnz == 0
+
+
+def test_shuffle_pcm_columns_scipy_sparse():
+    scipy_sparse = pytest.importorskip("scipy.sparse")
+    H = np.array([[1, 0, 1, 0], [0, 1, 0, 1], [0, 0, 1, 0]], dtype=np.uint8)
+
+    dense_shuffled = qec.shuffle_pcm_columns(H, seed=13)
+    sparse_shuffled = qec.shuffle_pcm_columns(scipy_sparse.csc_matrix(H),
+                                              seed=13)
+
+    assert scipy_sparse.issparse(sparse_shuffled)
+    assert scipy_sparse.isspmatrix_csc(sparse_shuffled)
+    assert np.array_equal(sparse_shuffled.toarray(), dense_shuffled)
+
+
+def test_pcm_to_sparse_vec_scipy_sparse():
+    scipy_sparse = pytest.importorskip("scipy.sparse")
+    H = np.array([[1, 0, 1, 0], [0, 1, 0, 1], [0, 0, 1, 0]], dtype=np.uint8)
+
+    sparse_vec = qec.pcm_to_sparse_vec(scipy_sparse.csr_matrix(H))
+    assert sparse_vec == qec.pcm_to_sparse_vec(H)
 
 
 def test_simplify_pcm():
@@ -852,6 +913,85 @@ def test_dem_from_stim_text_explicit_parse_then_get_decoder():
     assert decoder.get_block_size() == 3
 
 
+def test_dem_from_stim_text_use_decomp_suggestions():
+    dem_text = ("error(0.05) D0 D1 L0\n"
+                "error(0.03) D2 L1\n"
+                "error(0.1) D0 D2 ^ D1 D3\n")
+
+    # ── use_decomp_suggestions=False
+    dem_no = qec.dem_from_stim_text(dem_text, use_decomp_suggestions=False)
+    assert dem_no.num_detectors() == 4
+    assert dem_no.num_observables() == 2
+    assert dem_no.num_error_mechanisms() == 3
+
+    # Also confirm that the default matches explicit False.
+    assert qec.dem_from_stim_text(dem_text).num_error_mechanisms() == 3
+
+    explicit_H_no = np.array([[1, 0, 1], [1, 0, 1], [0, 1, 1], [0, 0, 1]],
+                             dtype=np.uint8)
+    explicit_O_no = np.array([[1, 0, 0], [0, 1, 0]], dtype=np.uint8)
+
+    np.testing.assert_array_equal(
+        np.array(dem_no.detector_error_matrix, dtype=np.uint8), explicit_H_no)
+    np.testing.assert_array_equal(
+        np.array(dem_no.observables_flips_matrix, dtype=np.uint8),
+        explicit_O_no)
+    np.testing.assert_allclose(dem_no.error_rates, [0.05, 0.03, 0.1],
+                               atol=1e-12)
+
+    # ── use_decomp_suggestions=True
+    dem_yes = qec.dem_from_stim_text(dem_text, use_decomp_suggestions=True)
+    assert dem_yes.num_detectors() == 4
+    assert dem_yes.num_observables() == 2
+    assert dem_yes.num_error_mechanisms() == 4  # instruction 3 splits into 2
+
+    explicit_H_yes = np.array(
+        [[1, 0, 1, 0], [1, 0, 0, 1], [0, 1, 1, 0], [0, 0, 0, 1]],
+        dtype=np.uint8)
+    explicit_O_yes = np.array([[1, 0, 0, 0], [0, 1, 0, 0]], dtype=np.uint8)
+
+    np.testing.assert_array_equal(
+        np.array(dem_yes.detector_error_matrix, dtype=np.uint8), explicit_H_yes)
+    np.testing.assert_array_equal(
+        np.array(dem_yes.observables_flips_matrix, dtype=np.uint8),
+        explicit_O_yes)
+    # Each decomposed component inherits the parent instruction's probability.
+    np.testing.assert_allclose(dem_yes.error_rates, [0.05, 0.03, 0.1, 0.1],
+                               atol=1e-12)
+
+
+def test_dem_from_stim_text_use_decomp_suggestions_edge_cases():
+    A = lambda d: np.array(d, dtype=np.uint8)
+
+    # 1. No '^' in DEM — use_decomp_suggestions=True must be a no-op.
+    dem_text = "error(0.1) D0 D1 L0\nerror(0.2) D1 D2\n"
+    no = qec.dem_from_stim_text(dem_text, use_decomp_suggestions=False)
+    yes = qec.dem_from_stim_text(dem_text, use_decomp_suggestions=True)
+    np.testing.assert_array_equal(A(no.detector_error_matrix),
+                                  A(yes.detector_error_matrix))
+    np.testing.assert_array_equal(A(no.observables_flips_matrix),
+                                  A(yes.observables_flips_matrix))
+    np.testing.assert_allclose(no.error_rates, yes.error_rates, atol=1e-12)
+
+    # 2. Observable flips split across components — each L stays with its '^' segment.
+    # error(0.1) D0 L0 ^ D1 L1  →  col0: D0+L0, col1: D1+L1
+    dem_text = "error(0.1) D0 L0 ^ D1 L1\n"
+    dem = qec.dem_from_stim_text(dem_text, use_decomp_suggestions=True)
+    assert dem.num_error_mechanisms() == 2
+    np.testing.assert_array_equal(A(dem.detector_error_matrix),
+                                  A([[1, 0], [0, 1]]))
+    np.testing.assert_array_equal(A(dem.observables_flips_matrix),
+                                  A([[1, 0], [0, 1]]))
+
+    # 3. Repeated detector within one component XOR-cancels to 0.
+    # error(0.1) D0 D0 ^ D1  →  component 0 has no net detectors after
+    # cancellation so it is dropped entirely; only D1 remains as one column.
+    dem_text = "error(0.1) D0 D0 ^ D1\n"
+    dem = qec.dem_from_stim_text(dem_text, use_decomp_suggestions=True)
+    assert dem.num_error_mechanisms() == 1
+    np.testing.assert_array_equal(A(dem.detector_error_matrix), A([[0], [1]]))
+
+
 def test_get_decoder_rejects_malformed_stim_dem_text():
     with pytest.raises(RuntimeError):
         qec.get_decoder("single_error_lut", "not a valid DEM")
@@ -860,6 +1000,32 @@ def test_get_decoder_rejects_malformed_stim_dem_text():
 def test_get_decoder_rejects_unknown_decoder_for_stim_dem_text():
     with pytest.raises(RuntimeError, match="__no_such_decoder__"):
         qec.get_decoder("__no_such_decoder__", "error(0.1) D0 L0\n")
+
+
+def test_decoder_cuda_device_id_invalid_raises():
+    H = create_test_matrix()
+    # A negative id is rejected before reaching the C++ guard: the kwargs
+    # marshalling layer stores Python ints as size_t, so nanobind refuses the
+    # negative value with a bare RuntimeError ("std::bad_cast").
+    with pytest.raises(RuntimeError):
+        qec.get_decoder("single_error_lut", H, cuda_device_id=-2)
+    # An out-of-range id flows through kwargs to decoder::get(), which raises
+    # a runtime_error naming the offending parameter.
+    with pytest.raises(RuntimeError, match="cuda_device_id"):
+        qec.get_decoder("single_error_lut", H, cuda_device_id=1 << 20)
+
+
+def test_decoder_cuda_device_id_valid():
+    H = create_test_matrix()
+    try:
+        d = qec.get_decoder("single_error_lut", H, cuda_device_id=0)
+    except RuntimeError as e:
+        if "out of range" in str(e):
+            pytest.skip("no CUDA device visible")
+        raise
+    syndrome = create_test_syndrome()
+    result = d.decode(syndrome)
+    assert len(result.result) == H.shape[1]
 
 
 def test_get_decoder_user_O_wins_over_dem_derived():

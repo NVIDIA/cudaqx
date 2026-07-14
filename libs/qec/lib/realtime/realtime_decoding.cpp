@@ -7,14 +7,18 @@
  ******************************************************************************/
 
 #include "realtime_decoding.h"
-#include "common/FmtCore.h"
+#include "../hardware_guards.h"
 #include "cudaq/qec/decoder.h"
+#include "cudaq/qec/logger.h"
 #include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/realtime/decoding_config.h"
-#include "cudaq/runtime/logger/logger.h"
+#include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
+#include <fmt/core.h>
+#include <limits>
 #include <set>
 #include <stdexcept>
 
@@ -38,18 +42,10 @@ std::unique_ptr<cudaq::qec::realtime::qec_realtime_session> g_realtime_session;
 
 namespace {
 
-bool g_realtime_session_owns_shared_ring_mode = false;
-
 #ifdef CUDAQ_REALTIME_ROOT
 inline cudaq_dispatch_launch_fn_t resolve_launch_dispatch_kernel_regular() {
   return reinterpret_cast<cudaq_dispatch_launch_fn_t>(
       ::dlsym(RTLD_DEFAULT, "cudaq_launch_dispatch_kernel_regular"));
-}
-
-using set_shared_ring_mode_fn_t = cudaError_t (*)(uint32_t);
-inline set_shared_ring_mode_fn_t resolve_set_shared_ring_mode() {
-  return reinterpret_cast<set_shared_ring_mode_fn_t>(
-      ::dlsym(RTLD_DEFAULT, "cudaq_dispatch_kernel_set_shared_ring_mode"));
 }
 #endif
 
@@ -75,8 +71,8 @@ namespace {
 
 void maybe_init_realtime_session() {
   if (!realtime_mode_inproc_rpc_requested()) {
-    CUDAQ_INFO("CUDAQ_QEC_REALTIME_MODE not set to inproc_rpc; using "
-               "legacy direct-call decoding path.");
+    CUDA_QEC_INFO("CUDAQ_QEC_REALTIME_MODE not set to inproc_rpc; using "
+                  "legacy direct-call decoding path.");
     return;
   }
 
@@ -90,30 +86,21 @@ void maybe_init_realtime_session() {
 
   cudaq_dispatch_launch_fn_t launch_fn = nullptr;
   if (device_mode) {
-    // DEVICE mode needs the dispatch-kernel launch helper and the device-side
-    // shared-ring-mode setter, both resolved from libcudaq-realtime-dispatch.a
-    // (absorbed into the final executable).  HOST mode uses neither.
+    // DEVICE mode needs the dispatch-kernel launch helper from
+    // libcudaq-realtime-dispatch.a (absorbed into the final executable).  HOST
+    // mode uses no device launch helper.
     launch_fn = resolve_launch_dispatch_kernel_regular();
-    auto set_mode_fn = resolve_set_shared_ring_mode();
-    if (!launch_fn || !set_mode_fn)
+    if (!launch_fn)
       throw std::runtime_error(
           "CUDAQ_QEC_REALTIME_MODE=inproc_rpc requested with a graph-capable "
-          "decoder but cudaq_launch_dispatch_kernel_regular and/or "
-          "cudaq_dispatch_kernel_set_shared_ring_mode could not be resolved "
-          "via dlsym(RTLD_DEFAULT, ...). The host executable must absorb "
-          "libcudaq-realtime-dispatch.a and link with --export-dynamic.");
-
-    cudaError_t rc = set_mode_fn(1);
-    if (rc != cudaSuccess)
-      throw std::runtime_error(
-          "CUDAQ_QEC_REALTIME_MODE=inproc_rpc requested but "
-          "cudaq_dispatch_kernel_set_shared_ring_mode(1) failed with rc=" +
-          std::to_string(rc));
-    g_realtime_session_owns_shared_ring_mode = true;
+          "decoder but cudaq_launch_dispatch_kernel_regular could not be "
+          "resolved via dlsym(RTLD_DEFAULT, ...). The host executable must "
+          "absorb libcudaq-realtime-dispatch.a and link with "
+          "--export-dynamic.");
   } else {
-    CUDAQ_INFO("CUDAQ_QEC_REALTIME_MODE=inproc_rpc with CPU (non-graph) "
-               "decoder(s); using HOST dispatch mode (no device kernel / no "
-               "device shared-ring setup).");
+    CUDA_QEC_INFO("CUDAQ_QEC_REALTIME_MODE=inproc_rpc with CPU (non-graph) "
+                  "decoder(s); using HOST dispatch mode (no device kernel / no "
+                  "device shared-ring setup).");
   }
 
   try {
@@ -124,11 +111,6 @@ void maybe_init_realtime_session() {
   } catch (const std::exception &e) {
     const std::string what = e.what();
     g_realtime_session.reset();
-    if (g_realtime_session_owns_shared_ring_mode) {
-      if (auto set_mode_fn = resolve_set_shared_ring_mode())
-        (void)set_mode_fn(0);
-      g_realtime_session_owns_shared_ring_mode = false;
-    }
     throw std::runtime_error("CUDAQ_QEC_REALTIME_MODE=inproc_rpc requested but "
                              "qec_realtime_session::initialize() threw: " +
                              what);
@@ -140,15 +122,10 @@ void maybe_finalize_realtime_session() {
     try {
       g_realtime_session->finalize();
     } catch (const std::exception &e) {
-      CUDAQ_WARN("qec_realtime_session::finalize threw: {}", e.what());
+      CUDA_QEC_WARN("qec_realtime_session::finalize threw: {}", e.what());
     }
     g_realtime_session.reset();
   }
-  if (g_realtime_session_owns_shared_ring_mode) {
-    if (auto set_mode_fn = resolve_set_shared_ring_mode())
-      (void)set_mode_fn(0);
-  }
-  g_realtime_session_owns_shared_ring_mode = false;
 }
 
 } // namespace
@@ -179,13 +156,122 @@ static std::vector<uint8_t> pack_syndrome_bits(const uint8_t *syndromes,
 
 namespace cudaq::qec::decoding::host {
 
+cudaqx::heterogeneous_map prepare_decoder_params(
+    const cudaq::qec::decoding::config::decoder_config &decoder_config) {
+  auto params = decoder_config.decoder_custom_args_to_heterogeneous_map();
+  // Placement knob: surfaced for every decoder type (deliberately before the
+  // trt-only early return below); consumed by decoder::get() at construction.
+  if (decoder_config.cuda_device_id.has_value())
+    params.insert("cuda_device_id", decoder_config.cuda_device_id.value());
+  if (decoder_config.type != "trt_decoder")
+    return params;
+
+  // batch_size > 1 has no effect on the realtime path: enqueue_syndrome decodes
+  // one syndrome per call, so the trt_decoder zero-pads the batch and discards
+  // all but slot 0. Warn rather than reject -- the result is correct, just
+  // wasteful. (Offline decode_batch users set batch_size via a raw params map,
+  // not this realtime config path.)
+  if (params.contains("batch_size") &&
+      params.get<std::size_t>("batch_size") > 1)
+    CUDA_QEC_WARN(
+        "trt_decoder batch_size > 1 has no effect on the realtime decode path "
+        "(one syndrome is decoded per call); the extra batch slots are "
+        "zero-padded and discarded. Use batch_size = 1 for realtime.");
+
+  // The trt_decoder plugin attaches a global decoder only when both
+  // "global_decoder" and "global_decoder_params" are present. Most config
+  // paths materialize defaults for known global decoders, but callers can still
+  // provide a hand-built map with only "global_decoder"; synthesize params here
+  // before the O_sparse early return so that decoder still attaches.
+  const bool has_global_decoder =
+      params.contains("global_decoder") &&
+      !params.get<std::string>("global_decoder").empty();
+  const bool has_pymatching_global =
+      has_global_decoder &&
+      params.get<std::string>("global_decoder") == "pymatching";
+  if (has_global_decoder && !params.contains("global_decoder_params"))
+    params.insert("global_decoder_params", cudaqx::heterogeneous_map());
+
+  if (decoder_config.O_sparse.empty())
+    return params;
+
+  const auto num_observables = std::count(decoder_config.O_sparse.begin(),
+                                          decoder_config.O_sparse.end(), -1);
+  if (num_observables == 0)
+    return params;
+
+  auto O = cudaq::qec::pcm_from_sparse_vec(
+      decoder_config.O_sparse, num_observables, decoder_config.block_size);
+  params.insert("O", O);
+
+  // PyMatching consumes the observable matrix through its params; other global
+  // decoders receive only the top-level O until they define a matching
+  // contract.
+  if (has_pymatching_global) {
+    auto global_decoder_params =
+        params.get<cudaqx::heterogeneous_map>("global_decoder_params");
+    global_decoder_params.insert("O", O);
+    params.insert("global_decoder_params", global_decoder_params);
+  }
+
+  return params;
+}
+
+std::unique_ptr<cudaq::qec::decoder> create_realtime_decoder(
+    const cudaq::qec::decoding::config::decoder_config &decoder_config) {
+  if (decoder_config.id < 0 || static_cast<std::uint64_t>(decoder_config.id) >
+                                   std::numeric_limits<std::uint32_t>::max())
+    throw std::invalid_argument("Decoder ID is outside the uint32_t range: " +
+                                std::to_string(decoder_config.id));
+  if (decoder_config.D_sparse.empty())
+    throw std::runtime_error(
+        "D_sparse must be provided in decoder configuration");
+
+  auto t0 = std::chrono::high_resolution_clock::now();
+  CUDA_QEC_INFO("Creating decoder {} of type {}", decoder_config.id,
+                decoder_config.type);
+
+  auto pcm = cudaq::qec::pcm_from_sparse_vec(decoder_config.H_sparse,
+                                             decoder_config.syndrome_size,
+                                             decoder_config.block_size);
+  const auto num_observables = std::count(decoder_config.O_sparse.begin(),
+                                          decoder_config.O_sparse.end(), -1);
+  // Materialize O before decoder construction to validate its sparse shape and
+  // column indices for every decoder type. TRT also receives this matrix in its
+  // constructor parameters through prepare_decoder_params() below.
+  (void)cudaq::qec::pcm_from_sparse_vec(
+      decoder_config.O_sparse, num_observables, decoder_config.block_size);
+  auto decoder = cudaq::qec::get_decoder(
+      decoder_config.type, pcm, prepare_decoder_params(decoder_config));
+  decoder->set_decoder_id(decoder_config.id);
+  decoder->set_O_sparse(decoder_config.O_sparse);
+  decoder->set_D_sparse(decoder_config.D_sparse);
+
+  // Force plugin initialization before the caller publishes the decoder for
+  // realtime work. This preserves configure_decoders()'s existing behavior.
+  auto t1 = std::chrono::high_resolution_clock::now();
+  std::vector<cudaq::qec::float_t> syndrome(decoder_config.syndrome_size, 0.0);
+  decoder->decode(syndrome);
+  auto t2 = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double> creation_duration = t1 - t0;
+  std::chrono::duration<double> initialization_duration = t2 - t1;
+  CUDA_QEC_INFO(
+      "Done initializing decoder {} in {:.6f} seconds (creation: {:.6f}s, "
+      "initial decoding dry run: {:.6f}s)",
+      decoder_config.id,
+      creation_duration.count() + initialization_duration.count(),
+      creation_duration.count(), initialization_duration.count());
+
+  return decoder;
+}
+
 cudaq::qec::realtime::qec_realtime_session *get_realtime_session() {
   return g_realtime_session.get();
 }
 
 int configure_decoders(
     cudaq::qec::decoding::config::multi_decoder_config &config) {
-  CUDAQ_INFO("Initializing decoders...");
+  CUDA_QEC_INFO("Initializing decoders...");
 
   const auto &decoder_configs = config.decoders;
 
@@ -195,7 +281,7 @@ int configure_decoders(
   auto max_decoder_id = std::numeric_limits<int64_t>::min();
   for (auto &decoder_config : decoder_configs) {
     if (decoder_ids.count(decoder_config.id) > 0) {
-      CUDAQ_WARN("Duplicate decoder ID found: {}", decoder_config.id);
+      CUDA_QEC_WARN("Duplicate decoder ID found: {}", decoder_config.id);
       return 1;
     }
     decoder_ids.insert(decoder_config.id);
@@ -205,13 +291,13 @@ int configure_decoders(
 
   // Then check that the maximum decoder ID is less than the number of decoders.
   if (max_decoder_id >= decoder_configs.size()) {
-    CUDAQ_WARN(
+    CUDA_QEC_WARN(
         "Maximum decoder ID is greater than the number of decoders: {} >= {}",
         max_decoder_id, decoder_configs.size());
     return 2;
   }
   if (min_decoder_id < 0) {
-    CUDAQ_WARN("Minimum decoder ID is less than 0: {}", min_decoder_id);
+    CUDA_QEC_WARN("Minimum decoder ID is less than 0: {}", min_decoder_id);
     return 3;
   }
 
@@ -227,11 +313,30 @@ int configure_decoders(
   // host allocation still works via UVA regardless of this device-wide flag),
   // and HOST-mode CPU sessions do not use mapped memory at all.
   if (realtime_mode_inproc_rpc_requested()) {
-    cudaError_t flags_err = cudaSetDeviceFlags(cudaDeviceMapHost);
-    if (flags_err != cudaSuccess && flags_err != cudaErrorSetOnActiveProcess)
-      CUDAQ_WARN("cudaSetDeviceFlags(cudaDeviceMapHost) returned '{}' before "
-                 "decoder init; continuing (mapped alloc works via UVA).",
-                 cudaGetErrorString(flags_err));
+    // The device-mapped ring buffers guarded by cudaDeviceMapHost are used only
+    // by the DEVICE-mode graph scheduler, which needs a usable GPU.  CPU
+    // decoders run in HOST mode with plain host memory and never touch the
+    // device, so probe for a GPU first and skip the flag entirely when none is
+    // present.  This keeps CPU-only / GPU-less machines from executing the
+    // device-flag call at all -- previously it ran unconditionally and logged a
+    // spurious "CUDA driver version is insufficient" warning.  (If a graph
+    // decoder is later selected without a usable device,
+    // qec_realtime_session::initialize() still fails with a clear DEVICE-mode
+    // error.)
+    int device_count = 0;
+    cudaError_t count_err = cudaGetDeviceCount(&device_count);
+    if (count_err == cudaSuccess && device_count > 0) {
+      cudaError_t flags_err = cudaSetDeviceFlags(cudaDeviceMapHost);
+      if (flags_err != cudaSuccess && flags_err != cudaErrorSetOnActiveProcess)
+        CUDA_QEC_WARN(
+            "cudaSetDeviceFlags(cudaDeviceMapHost) returned '{}' before "
+            "decoder init; continuing (mapped alloc works via UVA).",
+            cudaGetErrorString(flags_err));
+    } else {
+      // Reset the sticky runtime error so a later benign cudaGetLastError()
+      // isn't surprised by the no-device / insufficient-driver probe result.
+      cudaGetLastError();
+    }
   }
 #endif
 
@@ -240,51 +345,10 @@ int configure_decoders(
     g_decoders.clear();
     g_decoders.resize(max_decoder_id + 1);
     for (const auto &decoder_config : decoder_configs) {
-      // Form the PCM from the sparse vector.
-      auto t0 = std::chrono::high_resolution_clock::now();
-      CUDAQ_INFO("Creating decoder {} of type {}", decoder_config.id,
-                 decoder_config.type);
-      auto pcm = cudaq::qec::pcm_from_sparse_vec(decoder_config.H_sparse,
-                                                 decoder_config.syndrome_size,
-                                                 decoder_config.block_size);
-      auto new_decoder = cudaq::qec::get_decoder(
-          decoder_config.type, pcm,
-          decoder_config.decoder_custom_args_to_heterogeneous_map());
-      new_decoder->set_decoder_id(decoder_config.id);
-      // Count the number of -1's in the O_sparse vector. That is the number of
-      // rows (observables) in the observable matrix.
-      auto num_observables = std::count(decoder_config.O_sparse.begin(),
-                                        decoder_config.O_sparse.end(), -1);
-      // Populate the ***real-time*** fields of the decoder.
-      auto observable_matrix = cudaq::qec::pcm_from_sparse_vec(
-          decoder_config.O_sparse, num_observables, decoder_config.block_size);
-      new_decoder->set_O_sparse(decoder_config.O_sparse);
-      if (!decoder_config.D_sparse.empty()) {
-        new_decoder->set_D_sparse(decoder_config.D_sparse);
-      } else {
-        throw std::runtime_error(
-            "D_sparse must be provided in decoder configuration");
-      }
-
-      // Invoke a dummy decoding operation to force the decoder to be
-      // initialized.
-      auto t1 = std::chrono::high_resolution_clock::now();
-      std::vector<cudaq::qec::float_t> syndrome(decoder_config.syndrome_size,
-                                                0.0);
-      new_decoder->decode(syndrome);
-      auto t2 = std::chrono::high_resolution_clock::now();
-      std::chrono::duration<double> duration1 = t1 - t0;
-      std::chrono::duration<double> duration2 = t2 - t1;
-      CUDAQ_INFO(
-          "Done initializing decoder {} in {:.6f} seconds (creation: {:.6f}s, "
-          "initial decoding dry run: {:.6f}s)",
-          decoder_config.id, duration1.count() + duration2.count(),
-          duration1.count(), duration2.count());
-
-      g_decoders[decoder_config.id] = std::move(new_decoder);
+      g_decoders[decoder_config.id] = create_realtime_decoder(decoder_config);
     }
   } catch (const std::exception &e) {
-    CUDAQ_WARN("Error initializing decoders: {}", e.what());
+    CUDA_QEC_WARN("Error initializing decoders: {}", e.what());
     return 4;
   }
 
@@ -293,14 +357,19 @@ int configure_decoders(
 }
 
 void finalize_decoders() {
-  CUDAQ_INFO("Finalizing the realtime decoding library.");
+  CUDA_QEC_INFO("Finalizing the realtime decoding library.");
   maybe_finalize_realtime_session();
   g_decoders.clear();
 }
 
 __attribute__((visibility("default"))) void
-set_syndrome_capture_callback(void (*callback)(const uint8_t *, size_t)) {
+_set_syndrome_capture_callback(void (*callback)(const uint8_t *, size_t)) {
   g_syndrome_capture_callback = callback;
+}
+
+__attribute__((visibility("default"))) void (*_get_syndrome_capture_callback())(
+    const uint8_t *, size_t) {
+  return g_syndrome_capture_callback;
 }
 
 void enqueue_syndromes(std::size_t decoder_id, uint8_t *syndromes,
@@ -332,15 +401,18 @@ void enqueue_syndromes(std::size_t decoder_id, uint8_t *syndromes,
                     syndrome_length, max_syndromes));
   }
 
-  // Invoke syndrome capture callback if registered (for --save_syndrome
-  // feature)
-  if (g_syndrome_capture_callback) {
-    auto packed_syndrome = pack_syndrome_bits(syndromes, syndrome_length);
-    g_syndrome_capture_callback(packed_syndrome.data(), packed_syndrome.size());
-  }
+  const auto capture_syndromes = [&] {
+    // --save_syndrome feature: record what is actually submitted for decode.
+    if (g_syndrome_capture_callback) {
+      auto packed_syndrome = pack_syndrome_bits(syndromes, syndrome_length);
+      g_syndrome_capture_callback(packed_syndrome.data(),
+                                  packed_syndrome.size());
+    }
+  };
 
 #ifdef CUDAQ_REALTIME_ROOT
   if (g_realtime_session) {
+    capture_syndromes();
     try {
       cudaq::qec::decoding::rpc_producer::enqueue_syndromes(
           *g_realtime_session, decoder_id, syndromes, syndrome_length, tag);
@@ -353,6 +425,16 @@ void enqueue_syndromes(std::size_t decoder_id, uint8_t *syndromes,
     return;
   }
 #endif
+
+  // Direct-call path: this caller thread runs the decode, but
+  // configure_decoders() constructed every decoder sequentially on one thread,
+  // leaving the LAST decoder's device current. Point the thread at this
+  // decoder's pinned device before decoding (set-if-different; throws on
+  // failure) -- and before the capture callback, so a pin failure cannot
+  // record a round that was never decoded.
+  cudaq::qec::detail_affinity::set_cuda_device_for_decode(
+      decoder->get_cuda_device_id());
+  capture_syndromes();
 
   std::vector<uint8_t> syndrome_u8(syndrome_length);
   bool did_decode = false;
@@ -368,17 +450,17 @@ void enqueue_syndromes(std::size_t decoder_id, uint8_t *syndromes,
 
   // Consider demoting this to a lower log level.
   // Also consider logging the syndrome (at a lower log level).
-  CUDAQ_INFO("[decoder={}][tag={}] enqueue_syndrome took {:.3f} us, "
-             "syndrome_length={}, did_decode={}",
-             decoder_id, tag, duration.count() * 1e6, syndrome_length,
-             did_decode ? 'Y' : 'N');
+  CUDA_QEC_INFO("[decoder={}][tag={}] enqueue_syndrome took {:.3f} us, "
+                "syndrome_length={}, did_decode={}",
+                decoder_id, tag, duration.count() * 1e6, syndrome_length,
+                did_decode ? 'Y' : 'N');
 }
 
 void get_corrections(std::size_t decoder_id, uint8_t *corrections,
                      std::uint64_t correction_length, bool reset) {
-  CUDAQ_INFO("Entered get_corrections function decoder_id={}, "
-             "correction_length={}, reset={}",
-             decoder_id, correction_length, reset);
+  CUDA_QEC_INFO("Entered get_corrections function decoder_id={}, "
+                "correction_length={}, reset={}",
+                decoder_id, correction_length, reset);
   if (decoder_id >= g_decoders.size()) {
     throw std::invalid_argument(
         fmt::format("Decoder {} not found", decoder_id));
@@ -418,6 +500,9 @@ void get_corrections(std::size_t decoder_id, uint8_t *corrections,
   }
 #endif
 
+  // clear_corrections may touch device memory in some plugins.
+  cudaq::qec::detail_affinity::set_cuda_device_for_decode(
+      decoder->get_cuda_device_id());
   auto ret = decoder->get_obs_corrections();
   for (std::size_t i = 0; i < correction_length; ++i) {
     corrections[i] = ret[i];
@@ -427,7 +512,7 @@ void get_corrections(std::size_t decoder_id, uint8_t *corrections,
 }
 
 void reset_decoder(std::size_t decoder_id) {
-  CUDAQ_INFO("Entered reset_decoder for decoder_id={}", decoder_id);
+  CUDA_QEC_INFO("Entered reset_decoder for decoder_id={}", decoder_id);
   if (decoder_id >= g_decoders.size()) {
     throw std::invalid_argument(
         fmt::format("Decoder {} not found", decoder_id));
@@ -453,6 +538,8 @@ void reset_decoder(std::size_t decoder_id) {
   }
 #endif
 
+  cudaq::qec::detail_affinity::set_cuda_device_for_decode(
+      decoder->get_cuda_device_id());
   decoder->reset_decoder();
 }
 

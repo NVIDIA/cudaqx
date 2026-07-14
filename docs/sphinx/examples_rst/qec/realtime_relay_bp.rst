@@ -7,13 +7,43 @@ Relay BP Decoding with CUDA-Q Realtime
   from source and is not part of any distributed CUDA-Q QEC binaries.
 
 This guide explains how to build, test, and run the nv-qldpc-decoder Relay BP
-decoder using CUDA-Q's realtime host dispatch system.  The decoder runs as a
-CPU-launched CUDA graph (``HOST_LOOP`` dispatch path) and can operate in three
+decoder using CUDA-Q's realtime dispatch system.  The decoder is driven by a
+**self-relaunching device-graph scheduler** and can operate in three
 configurations:
 
 - **CI unit test** -- standalone executable, no FPGA or network hardware needed
 - **Emulated end-to-end test** -- software FPGA emulator replaces real hardware
 - **FPGA end-to-end test** -- real FPGA connected via ConnectX RDMA/RoCE
+
+Decode dispatch architecture
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The realtime path uses the per-round decode-server protocol with three RPCs:
+``enqueue_syndromes`` (append one round of syndromes), ``get_corrections``
+(read the logical correction for a completed shot), and ``reset_decoder``.
+These are serviced by a single GPU **device-graph scheduler** -- a persistent,
+self-relaunching CUDA graph:
+
+- All three RPCs are ``DEVICE_CALL`` handlers.  ``enqueue_syndromes``
+  accumulates a round's syndromes into the decoder's device-resident state;
+  when a full window has accumulated it returns a sentinel
+  (``CUDAQ_DISPATCH_STATUS_TRIGGER_GRAPH``) that tells the scheduler to fire
+  the decode.
+- The Relay BP decode is captured as a **device-launchable cooperative CUDA
+  graph** and launched *fire-and-forget* from the scheduler when a window is
+  ready.  ``get_corrections`` then reads the result.
+- After firing a decode the scheduler **tail self-relaunches**
+  (``cudaGraphLaunch(cudaGetCurrentGraphExec(), cudaStreamGraphTailLaunch)``),
+  which resets the 120 fire-and-forget-launch-per-parent-execution budget --
+  so an unbounded number of decodes can be dispatched without the host in the
+  loop.  The tail launch is ordered after the fired decode, so
+  ``get_corrections`` always observes the finished result.
+
+This replaces the earlier ``HOST_LOOP`` design (a CPU thread launching one
+graph per request).  ``libcudaq-realtime`` provides the scheduler
+(``cudaq_create_dispatch_graph_regular`` / ``cudaq_launch_dispatch_graph`` in
+``dispatch_kernel.cu``); the closed-source proprietary archive provides the
+``DEVICE_CALL`` handlers (see *Obtaining the proprietary components* below).
 
 Prerequisites
 -------------
@@ -54,11 +84,26 @@ Software
   three configurations -- see *Obtaining the nv-qldpc-decoder plugin* below
   for how to install it.
 
-Obtaining the nv-qldpc-decoder plugin
+Obtaining the proprietary components
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The ``libcudaq-qec-nv-qldpc-decoder.so`` plugin is closed-source and is not
-built from this repository.  It must be obtained as a pre-built binary.
+The realtime decode path uses **two** closed-source artifacts that are not
+built from this (cudaqx) repository:
+
+- ``libcudaq-qec-nv-qldpc-decoder.so`` -- the Relay BP decoder **plugin**,
+  ``dlopen``'d at runtime.  It supplies the device-launchable cooperative
+  decode graph (``capture_decode_graph``).
+- ``libcudaq-qec-realtime-cudevice-proprietary.a`` -- a static **archive**
+  needed at **build** time.  It contains the ``enqueue_syndromes`` /
+  ``get_corrections`` / ``reset_decoder`` ``DEVICE_CALL`` handlers (the device
+  functions the scheduler dispatches).  It is linked ``WHOLE_ARCHIVE`` and
+  device-linked into the bridge and the CI test, and is pointed at via the
+  ``-DCUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE=<path>`` CMake variable.
+  Both artifacts come from the same closed-source decoder package; build the
+  ``cudaq-qec-realtime-cudevice-proprietary`` target from the proprietary
+  decoder sources to produce the ``.a``.
+
+The plugin must be obtained as a pre-built binary as shown below.
 
 .. important::
 
@@ -112,14 +157,22 @@ Source Repositories
      - ``main`` branch (or your feature branch)
    * - **cuda-quantum** (realtime)
      - https://github.com/NVIDIA/cuda-quantum
-     - Branch ``releases/v0.14.1``
+     - Branch ``releases/v0.15.1``
    * - **holoscan-sensor-bridge**
      - https://github.com/nvidia-holoscan/holoscan-sensor-bridge
      - Tag ``2.6.0-EA2``
 
-``cuda-quantum`` provides ``libcudaq-realtime`` (the host dispatcher, ring
-buffer management, and dispatch kernel).  ``holoscan-sensor-bridge`` provides
-the Hololink ``GpuRoceTransceiver`` library for RDMA transport.
+``cuda-quantum`` provides ``libcudaq-realtime`` (the dispatch kernel, ring
+buffer management, and the device-graph scheduler).  ``holoscan-sensor-bridge``
+provides the Hololink ``GpuRoceTransceiver`` library for RDMA transport.
+
+.. note::
+
+   The self-relaunching device-graph scheduler is provided by the
+   ``releases/v0.15.1`` branch of ``cuda-quantum`` (the extension that adds the
+   ``CUDAQ_DISPATCH_STATUS_TRIGGER_GRAPH`` sentinel, the triggered
+   fire-and-forget decode launch, and tail self-relaunch on top of the
+   device-side graph dispatch).
 
 .. note::
 
@@ -169,17 +222,21 @@ If you only need to run the CI unit test, you can build without
    # 1. Build libcudaq-realtime
    git clone https://github.com/NVIDIA/cuda-quantum.git cudaq-realtime-src
    cd cudaq-realtime-src
-   git checkout releases/v0.14.1
+   git checkout releases/v0.15.1
    cd realtime && mkdir -p build && cd build
    cmake -G Ninja -DCMAKE_INSTALL_PREFIX=/tmp/cudaq-realtime ..
    ninja && ninja install
    cd ../../..
 
-   # 2. Build cudaqx with the nv-qldpc-decoder test
+   # 2. Build cudaqx with the nv-qldpc-decoder test.
+   #    CUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE points at the static
+   #    archive with the DEVICE_CALL handlers; it is linked WHOLE_ARCHIVE into
+   #    the test (see "Obtaining the proprietary components").
    cmake -S cudaqx -B cudaqx/build \
      -DCMAKE_BUILD_TYPE=Release \
      -DCUDAQ_DIR=/path/to/cudaq-install/lib/cmake/cudaq/ \
      -DCUDAQ_REALTIME_ROOT=/tmp/cudaq-realtime \
+     -DCUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE=/path/to/libcudaq-qec-realtime-cudevice-proprietary.a \
      -DCUDAQX_ENABLE_LIBS="qec" \
      -DCUDAQX_INCLUDE_TESTS=ON
    cmake --build cudaqx/build --target test_realtime_qldpc_graph_decoding
@@ -197,7 +254,7 @@ To also build the bridge and playback tools for emulated or FPGA testing:
    cd cudaq-realtime-src
    git sparse-checkout init --cone
    git sparse-checkout set realtime
-   git checkout releases/v0.14.1
+   git checkout releases/v0.15.1
    cd ..
 
    # 2. Build holoscan-sensor-bridge (tag 2.6.0-EA2)
@@ -240,11 +297,14 @@ To also build the bridge and playback tools for emulated or FPGA testing:
    ninja && ninja install
    cd ../../..
 
-   # 4. Build cudaqx with Hololink tools enabled
+   # 4. Build cudaqx with Hololink tools enabled.
+   #    CUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE supplies the DEVICE_CALL
+   #    handlers (WHOLE_ARCHIVE-linked into the bridge + test).
    cmake -S cudaqx -B cudaqx/build \
      -DCMAKE_BUILD_TYPE=Release \
      -DCUDAQ_DIR=/path/to/cudaq-install/lib/cmake/cudaq/ \
      -DCUDAQ_REALTIME_ROOT=/tmp/cudaq-realtime \
+     -DCUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE=/path/to/libcudaq-qec-realtime-cudevice-proprietary.a \
      -DCUDAQX_ENABLE_LIBS="qec" \
      -DCUDAQX_INCLUDE_TESTS=ON \
      -DCUDAQX_QEC_ENABLE_HOLOLINK_TOOLS=ON \
@@ -272,14 +332,19 @@ CI Unit Test
 ------------
 
 The CI unit test (``test_realtime_qldpc_graph_decoding``) exercises the full
-host dispatch decode path without any network hardware.  It:
+device-graph scheduler decode path without any network hardware.  It:
 
 1. Loads the Relay BP config and syndrome data from YAML/text files
 2. Creates the decoder via the ``decoder::get("nv-qldpc-decoder", ...)`` plugin API
-3. Captures a CUDA graph of the decode pipeline
-4. Wires ``libcudaq-realtime``'s host dispatcher (HOST_LOOP) to a ring buffer
-5. Writes RPC requests into the ring buffer, the host dispatcher launches the
-   CUDA graph, and the test verifies corrections
+3. Constructs a ``qec_realtime_session``, which captures the decoder's
+   device-launchable cooperative decode graph and starts the device-graph
+   scheduler on a pinned-mapped ring (3 ``DEVICE_CALL`` entries:
+   ``enqueue_syndromes`` / ``get_corrections`` / ``reset_decoder``)
+4. Drives the per-round protocol with ``rpc_producer``: for each shot it sends
+   one ``enqueue_syndromes`` per round, then a ``get_corrections``; the
+   scheduler fires the decode when a window completes and tail self-relaunches
+5. Verifies each shot's correction against the fixture, then a final
+   ``reset_decoder`` + ``get_corrections`` confirms reset
 
 Running
 ^^^^^^^
@@ -289,7 +354,7 @@ Running
    cd cudaqx/build
 
    # The nv-qldpc-decoder plugin must be in <cudaqx-build>/lib/decoder-plugins/
-   # before running -- see "Obtaining the nv-qldpc-decoder plugin" above.
+   # before running -- see "Obtaining the proprietary components" above.
 
    ./libs/qec/unittests/test_realtime_qldpc_graph_decoding
 
@@ -298,12 +363,55 @@ Expected output:
 .. code-block:: text
 
    [==========] Running 1 test from 1 test suite.
-   [----------] 1 test from RealtimeQLDPCGraphDecodingTest
-   [ RUN      ] RealtimeQLDPCGraphDecodingTest.DispatchHostLoopAllShots
+   [----------] 1 test from GraphDecodeTest
+   [ RUN      ] GraphDecodeTest.DecodesAllSyndromes
    ...
-   [       OK ] RealtimeQLDPCGraphDecodingTest.DispatchHostLoopAllShots (XXX ms)
+   [       OK ] GraphDecodeTest.DecodesAllSyndromes (XXX ms)
    [==========] 1 test from 1 test suite ran.
    [  PASSED  ] 1 test.
+
+Surface Code Test (Relay BP)
+----------------------------
+
+The ``surface_code-1-local`` app example drives the device-graph scheduler
+through the in-process RPC path (``CUDAQ_QEC_REALTIME_MODE=inproc_rpc``) with
+the nv-qldpc-decoder configured for Relay BP (``--use-relay-bp``).  It simulates
+a surface code with ``stim`` and generates syndromes on the fly, so -- unlike
+the fixed-fixture CI unit test -- it can run an arbitrary number of shots.
+
+Build the app example (it links the same plugin + proprietary archive as the
+CI test):
+
+.. code-block:: bash
+
+   cmake --build cudaqx/build --target surface_code-1-local
+
+Run it in two steps -- generate the decoder config (DEM), then run the decode
+loop through the scheduler:
+
+.. code-block:: bash
+
+   cd cudaqx/build
+   export CUDAQ_DEFAULT_SIMULATOR=stim
+   export CUDAQ_QEC_REALTIME_MODE=inproc_rpc
+
+   APP=./libs/qec/unittests/realtime/app_examples/surface_code-1-local
+
+   # 1. Generate the Relay BP decoder config (DEM) for a distance-3 surface code
+   "$APP" --distance 3 --num_rounds 12 --decoder_window 6 \
+          --decoder_type nv-qldpc-decoder --use-relay-bp \
+          --num_shots 1000 --save_dem config.yml
+
+   # 2. Run the decode loop through the device-graph scheduler
+   "$APP" --distance 3 --num_rounds 12 --decoder_window 6 \
+          --decoder_type nv-qldpc-decoder --use-relay-bp \
+          --num_shots 1000 --load_dem config.yml
+
+A clean run exits ``0`` and reports a small number of non-zero syndrome
+measurements alongside a larger number of corrections found.  The
+``app_examples`` CTest ``surface_code-1-local-test-distance-3-inproc-rpc``
+wraps this flow (it sets ``CUDAQ_QEC_REALTIME_MODE=inproc_rpc`` and
+``EXTRA_CLI_ARGS=--use-relay-bp``).
 
 Emulated End-to-End Test
 ------------------------
@@ -313,10 +421,20 @@ processes run concurrently:
 
 1. **Emulator** -- receives syndromes via the UDP control plane, sends them
    to the bridge via RDMA, and captures corrections
-2. **Bridge** -- runs the host dispatcher and CUDA graph decode loop on the GPU,
-   receiving syndromes and sending corrections via RDMA
+2. **Bridge** -- runs the device-graph scheduler on the GPU directly on the
+   Hololink DOCA ring (the scheduler polls the RX flags written by the
+   Hololink RX kernel and writes responses for the TX kernel), firing the
+   cooperative Relay BP decode fire-and-forget per completed shot
 3. **Playback** -- loads syndrome data into the emulator's BRAM and triggers
-   playback, then verifies corrections
+   playback in **per-round** mode (``--per-round``: N ``enqueue_syndromes``
+   frames + one ``get_corrections`` per shot), then verifies corrections
+
+.. note::
+
+   The orchestration script drives the playback tool in ``--per-round`` mode
+   automatically (matching the decode-server protocol the scheduler speaks).
+   The playback tool also retains a shot-based default for other decoders; the
+   per-round path is opt-in via ``--per-round``.
 
 Requirements
 ^^^^^^^^^^^^
@@ -381,7 +499,15 @@ Running
      --fpga-ip 192.168.0.2 \
      --gpu 2 \
      --page-size 512 \
+     --spacing 100 \
      --hsb-dir /path/to/holoscan-sensor-bridge
+
+``--spacing`` is **important for the FPGA** (it is not needed for the
+emulator).  The FPGA's BRAM player is **open-loop** -- it transmits a frame
+every ``--spacing`` microseconds on a fixed hardware timer, with no
+backpressure -- whereas the emulator naturally paces itself by waiting for each
+response.  Without adequate spacing the FPGA outruns the decoder, the input
+ring fills, and frames are lost.  See the note below for sizing.
 
 Key parameters for FPGA mode:
 
@@ -402,15 +528,26 @@ Key parameters for FPGA mode:
    * - ``--page-size``
      - Ring buffer slot size in bytes (use ``512`` on GB200 for alignment)
    * - ``--spacing``
-     - Inter-shot spacing in microseconds
+     - Inter-**frame** spacing in microseconds (FPGA BRAM-player timer)
 
 .. note::
 
-   The ``--spacing`` value should be set to at least the per-shot decode
-   time to avoid overrunning the input ring buffer.  If syndromes arrive faster
-   than the decoder can process them, the buffer fills up and messages are lost.
-   Use a ``--spacing`` value at or above the observed decode time for sustained
-   operation.
+   **Sizing the spacing.**  In per-round mode each shot is ``rounds + 1``
+   frames (N ``enqueue_syndromes`` + one ``get_corrections``) but only one
+   decode, so the decoder consumes roughly one ``decode_time`` per shot.  Since
+   ``--spacing`` is the gap between *frames*, the sustained-safe value is
+
+   .. code-block:: text
+
+      spacing >= decode_time / (rounds + 1)
+
+   For this ``[[8,3,6]]`` relay-BP config (~200 us decode, 4 rounds -> 5
+   frames/shot) that is ``>= ~40 us``.  Start **conservative** (e.g.
+   ``--spacing 100``) for the first run to rule out ring overrun while
+   confirming corrections, then tune down toward ``~50 us`` for a realistic
+   latency profile.  If frames are still dropped/duplicated at generous
+   spacing, the cause is *not* ring overrun -- investigate the FPGA capture
+   (ILA) side.
 
 GPU Selection
 ^^^^^^^^^^^^^
@@ -543,9 +680,6 @@ Run Options
    * - ``--page-size N``
      - ``384``
      - Ring buffer slot size in bytes
-   * - ``--num-pages N``
-     - ``128``
-     - Number of ring buffer slots
    * - ``--spacing N``
      - ``10``
      - Inter-shot spacing in microseconds
@@ -555,3 +689,24 @@ Run Options
    * - ``--control-port N``
      - ``8193``
      - UDP control port for emulator
+
+Ring buffer depth (``num_pages``)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The ring depth is intentionally **not** a script option and is fixed at
+**64** (both the bridge and playback default to it).  This matches the
+Hololink ``gpu_roce_transceiver`` work-queue depth ``WQE_NUM = 64``: the
+transceiver posts 64 receive/send WQEs and runs one kernel thread per WQE.
+
+A ring deeper than ``WQE_NUM`` makes a single transceiver thread service more
+than one ring slot (slot ``t`` and slot ``t+64`` share one WQE / CQ position),
+and the free-running RX/TX kernels then race on that shared resource.  On the
+emulator this was observed as a rare (~1-2%) **duplicated frame ``W`` plus a
+dropped frame ``W+64``** -- every failure was an exact ``(W, W+64)`` pair on a
+single thread.  A 1:1 slot-to-WQE mapping (``num_pages <= WQE_NUM``) is the
+only safe configuration and is collision-free.
+
+The bridge enforces this: if ``--num-pages`` is ever passed with a value above
+``WQE_NUM``, it clamps to 64 and prints a warning.  Supporting a deeper ring
+would require changing ``WQE_NUM`` (and the per-thread WQE striding) in
+``holoscan-sensor-bridge``, diverging from the ``2.6.0-EA2`` tag.

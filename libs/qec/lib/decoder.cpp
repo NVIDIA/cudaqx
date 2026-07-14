@@ -7,14 +7,16 @@
  ******************************************************************************/
 
 #include "cudaq/qec/decoder.h"
-#include "common/FmtCore.h"
 #include "cuda-qx/core/library_utils.h"
+#include "hardware_guards.h"
+#include "cudaq/qec/logger.h"
 #include "cudaq/qec/plugin_loader.h"
 #include "cudaq/qec/version.h"
-#include "cudaq/runtime/logger/logger.h"
 #include <cassert>
+#include <cuda_runtime_api.h>
 #include <dlfcn.h>
 #include <filesystem>
+#include <fmt/ranges.h>
 #include <vector>
 
 INSTANTIATE_REGISTRY(cudaq::qec::decoder, const cudaq::qec::decoder_init &,
@@ -123,9 +125,75 @@ std::string decoder::get_version() const {
 
 std::future<decoder_result>
 decoder::decode_async(const std::vector<float_t> &syndrome) {
-  return std::async(std::launch::async,
-                    [this, syndrome] { return this->decode(syndrome); });
+  // Captured by value: the worker must not dereference decoder members to
+  // find its device. The std::async thread is brand-new and unpinned, so it
+  // guards itself for the duration of the call (the one exception to the
+  // one-thread-owns-one-decoder persistent pin).
+  const int cuda_id = cuda_device_id_;
+  return std::async(std::launch::async, [this, syndrome, cuda_id] {
+    cudaq::qec::detail_affinity::CudaDeviceGuard dev(cuda_id);
+    return this->decode(syndrome);
+  });
 }
+
+/// Reads "cuda_device_id" from the construction parameters. Absent -> -1.
+/// Negative or >= cudaGetDeviceCount() -> std::runtime_error (fail fast:
+/// never silently decode on the wrong GPU).
+static int read_cuda_device_id(const cudaqx::heterogeneous_map &params) {
+  if (!params.contains("cuda_device_id"))
+    return -1;
+  const int value = params.get<int>("cuda_device_id");
+  if (value < 0)
+    throw std::runtime_error("cuda_device_id must be >= 0 (got " +
+                             std::to_string(value) + ")");
+  int count = 0;
+  if (cudaGetDeviceCount(&count) != cudaSuccess || value >= count)
+    throw std::runtime_error("cuda_device_id " + std::to_string(value) +
+                             " is out of range: " + std::to_string(count) +
+                             " CUDA device(s) visible");
+  return value;
+}
+
+/// Selects the construction device and restores the previous device unless
+/// commit() is called. Makes failed plugin construction transactional: if the
+/// plugin ctor throws, the calling thread is left on its original device
+/// instead of leaking the pin to whichever device was selected for the attempt.
+class ConstructionDevicePin {
+public:
+  explicit ConstructionDevicePin(int target) : target_(target) {
+    cudaError_t err = cudaGetDevice(&previous_);
+    if (err != cudaSuccess)
+      throw std::runtime_error(
+          "cuda_device_id " + std::to_string(target_) +
+          " could not be selected because cudaGetDevice() failed: " +
+          cudaGetErrorString(err));
+    err = cudaSetDevice(target_);
+    if (err != cudaSuccess)
+      throw std::runtime_error("cudaSetDevice(" + std::to_string(target_) +
+                               ") failed: " + cudaGetErrorString(err));
+    selected_ = true;
+  }
+
+  ~ConstructionDevicePin() {
+    if (selected_ && !committed_ && previous_ != target_)
+      (void)cudaSetDevice(previous_);
+  }
+
+  ConstructionDevicePin(const ConstructionDevicePin &) = delete;
+  ConstructionDevicePin &operator=(const ConstructionDevicePin &) = delete;
+
+  // Keep the pin: one thread owns one decoder, so leaving the constructing
+  // thread on the target device lets later allocations and kernel launches --
+  // including lazy ones inside decode() -- land there with no per-call
+  // machinery.
+  void commit() { committed_ = true; }
+
+private:
+  int target_ = -1;
+  int previous_ = -1;
+  bool selected_ = false;
+  bool committed_ = false;
+};
 
 std::unique_ptr<decoder>
 decoder::get(const std::string &name, const decoder_init &init,
@@ -138,7 +206,20 @@ decoder::get(const std::string &name, const decoder_init &init,
         "invalid decoder requested: " + name +
         ". Run with CUDAQ_LOG_LEVEL=info (environment variable) to see "
         "additional plugin diagnostics at startup.");
-  return iter->second(init, param_map);
+  const int cuda_device_id = read_cuda_device_id(param_map);
+  if (cuda_device_id < 0)
+    return iter->second(init, param_map);
+  ConstructionDevicePin device_pin(cuda_device_id);
+  // The key is consumed here; strip it so plugins that strictly validate
+  // their parameter keys do not reject it.
+  cudaqx::heterogeneous_map plugin_params;
+  for (const auto &kv : param_map)
+    if (kv.first != "cuda_device_id")
+      plugin_params.insert(kv.first, kv.second);
+  auto d = iter->second(init, plugin_params);
+  d->cuda_device_id_ = cuda_device_id;
+  device_pin.commit();
+  return d;
 }
 
 namespace details {
@@ -266,7 +347,7 @@ void decoder::set_D_sparse(const std::vector<int64_t> &D_sparse_vec_in) {
 bool decoder::enqueue_syndrome(const uint8_t *syndrome,
                                std::size_t syndrome_length) {
   if (pimpl->msyn_buffer_index + syndrome_length > pimpl->msyn_buffer.size()) {
-    // CUDAQ_WARN("Syndrome buffer overflow. Syndrome will be ignored.");
+    // CUDA_QEC_WARN("Syndrome buffer overflow. Syndrome will be ignored.");
     printf("Syndrome buffer overflow. Syndrome will be ignored.\n");
     return false;
   }
@@ -292,6 +373,7 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
     std::vector<uint32_t> log_msyn;
     std::vector<uint32_t> log_detectors;
     std::vector<uint32_t> log_errors;
+    std::vector<uint32_t> log_observables;
     std::vector<uint8_t> log_observable_corrections;
     // The four time points are used to measure the duration of each of 3 steps.
     std::chrono::time_point<std::chrono::high_resolution_clock> log_t0, log_t1,
@@ -299,12 +381,13 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
     std::chrono::duration<double> log_dur1, log_dur2, log_dur3;
 
     const bool log_due_to_log_level =
-        cudaq::detail::should_log(cudaq::detail::LogLevel::info);
+        cudaq::qec::detail::should_log(cudaq::qec::detail::log_level::info);
     const bool should_log = pimpl->should_log || log_due_to_log_level;
 
     if (should_log) {
       log_t0 = std::chrono::high_resolution_clock::now();
       log_errors.reserve(syndrome_length);
+      log_observables.reserve(O_sparse.size());
       log_observable_corrections.resize(O_sparse.size());
     }
 
@@ -362,36 +445,76 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
         return false;
       }
     }
-    if ((!pimpl->is_sliding_window &&
-         decoded_result.result.size() != block_size) ||
-        (pimpl->is_sliding_window && !decoded_result.result.empty() &&
-         decoded_result.result.size() != block_size)) {
-      throw std::runtime_error(
-          fmt::format("Decoder result size ({}) does not match block_size ({})",
-                      decoded_result.result.size(), block_size));
-    }
-
-    if (should_log) {
-      log_t2 = std::chrono::high_resolution_clock::now();
-      for (std::size_t e = 0, E = decoded_result.result.size(); e < E; e++)
-        if (decoded_result.result[e])
-          log_errors.push_back(e);
-    }
     // Process the results.
     // TODO - should this interrogate the decoded_result.converged flag?
-    auto num_observables = O_sparse.size();
-    // For each observable
-    for (std::size_t i = 0; i < num_observables; i++) {
-      // For each error that flips this observable
-      for (auto col : O_sparse[i]) {
-        // If the decoder predicted that this error occurred
-        if (decoded_result.result[col]) {
-          // Flip the correction for this observable
-          pimpl->corrections[i] ^= 1;
+    const auto result_type = get_result_type();
+    const auto num_observables = get_num_observables();
+    const char *result_type_str = nullptr;
+    const char *result_type_name = nullptr;
+    std::size_t expected_result_size = 0;
+    switch (result_type) {
+    case decode_result_type::decode_to_errs:
+      result_type_str = "errs";
+      result_type_name = "decode_to_errs";
+      expected_result_size = block_size;
+      break;
+    case decode_result_type::decode_to_obs:
+      result_type_str = "obs";
+      result_type_name = "decode_to_obs";
+      expected_result_size = num_observables;
+      break;
+    }
+    if (!result_type_name)
+      throw std::runtime_error(
+          fmt::format("Unsupported decoder result type ({})",
+                      static_cast<int>(result_type)));
+    if ((!pimpl->is_sliding_window &&
+         decoded_result.result.size() != expected_result_size) ||
+        (pimpl->is_sliding_window && !decoded_result.result.empty() &&
+         decoded_result.result.size() != expected_result_size)) {
+      throw std::runtime_error(fmt::format(
+          "Decoder result size ({}) does not match expected size ({}) for "
+          "result type {}",
+          decoded_result.result.size(), expected_result_size,
+          result_type_name));
+    }
+
+    // Flip an observable correction and mirror it into the per-call log so the
+    // logged flips stay faithful to the applied corrections.
+    auto flip_correction = [&](std::size_t i) {
+      pimpl->corrections[i] ^= 1;
+      if (should_log)
+        log_observable_corrections[i] ^= 1;
+    };
+
+    if (should_log)
+      log_t2 = std::chrono::high_resolution_clock::now();
+
+    switch (result_type) {
+    case decode_result_type::decode_to_obs:
+      // Observable-frame path: decoder already projected to observables via its
+      // internal "O" matrix; use the result directly.
+      for (std::size_t i = 0; i < num_observables; i++)
+        if (decoded_result.result[i]) {
           if (should_log)
-            log_observable_corrections[i] ^= 1;
+            log_observables.push_back(i);
+          flip_correction(i);
         }
-      }
+      break;
+    case decode_result_type::decode_to_errs:
+      // Error-frame path: decoder returns a block-sized error vector; project
+      // to observables via O_sparse.
+      if (should_log)
+        for (std::size_t e = 0, E = decoded_result.result.size(); e < E; e++)
+          if (decoded_result.result[e])
+            log_errors.push_back(e);
+      // For each observable, flip its correction once for each predicted error
+      // that flips it (net parity over O_sparse[i]).
+      for (std::size_t i = 0; i < num_observables; i++)
+        for (auto col : O_sparse[i])
+          if (decoded_result.result[col])
+            flip_correction(i);
+      break;
     }
     if (should_log) {
       log_t3 = std::chrono::high_resolution_clock::now();
@@ -401,13 +524,15 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
       pimpl->log_counter++;
       auto s = fmt::format(
           "[DecoderStats][{}] Counter:{} DecoderId:{} InputMsyn:{} "
-          "InputDetectors:{} Converged:{} Errors:{} "
+          "InputDetectors:{} Converged:{} ResultType:{} Errors:{} "
+          "Observables:{} "
           "ObservableCorrectionsThisCall:{} ObservableCorrectionsTotal:{} "
           "Dur1:{:.1f}us Dur2:{:.1f}us Dur3:{:.1f}us",
           static_cast<const void *>(this), pimpl->log_counter,
           pimpl->decoder_id, fmt::join(log_msyn, ","),
           fmt::join(log_detectors, ","), decoded_result.converged ? 1 : 0,
-          fmt::join(log_errors, ","),
+          result_type_str, fmt::join(log_errors, ","),
+          fmt::join(log_observables, ","),
           fmt::join(log_observable_corrections, ","),
           fmt::join(std::vector<uint8_t>(pimpl->corrections.begin(),
                                          pimpl->corrections.end()),
@@ -415,7 +540,7 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
           log_dur1.count() * 1e6, log_dur2.count() * 1e6,
           log_dur3.count() * 1e6);
       if (log_due_to_log_level)
-        cudaq::info("{}", s);
+        CUDA_QEC_INFO("{}", s);
       else
         printf("%s\n", s.c_str());
     }
@@ -435,7 +560,7 @@ void decoder::clear_corrections() {
   pimpl->corrections.clear();
   pimpl->corrections.resize(O_sparse.size());
   const bool log_due_to_log_level =
-      cudaq::detail::should_log(cudaq::detail::LogLevel::info);
+      cudaq::qec::detail::should_log(cudaq::qec::detail::log_level::info);
   const bool should_log = pimpl->should_log || log_due_to_log_level;
   if (should_log) {
     pimpl->log_counter++;
@@ -443,7 +568,7 @@ void decoder::clear_corrections() {
         fmt::format("[DecoderStats][{}] Counter:{} clear_corrections called",
                     static_cast<const void *>(this), pimpl->log_counter);
     if (log_due_to_log_level)
-      cudaq::info("{}", s);
+      CUDA_QEC_INFO("{}", s);
     else
       printf("%s\n", s.c_str());
   }
@@ -451,7 +576,7 @@ void decoder::clear_corrections() {
 
 const uint8_t *decoder::get_obs_corrections() const {
   const bool log_due_to_log_level =
-      cudaq::detail::should_log(cudaq::detail::LogLevel::info);
+      cudaq::qec::detail::should_log(cudaq::qec::detail::log_level::info);
   const bool should_log = pimpl->should_log || log_due_to_log_level;
   if (should_log) {
     pimpl->log_counter++;
@@ -459,7 +584,7 @@ const uint8_t *decoder::get_obs_corrections() const {
         fmt::format("[DecoderStats][{}] Counter:{} get_obs_corrections called",
                     static_cast<const void *>(this), pimpl->log_counter);
     if (log_due_to_log_level)
-      cudaq::info("{}", s);
+      CUDA_QEC_INFO("{}", s);
     else
       printf("%s\n", s.c_str());
   }
@@ -477,7 +602,7 @@ void decoder::reset_decoder() {
   pimpl->corrections.clear();
   pimpl->corrections.resize(O_sparse.size());
   const bool log_due_to_log_level =
-      cudaq::detail::should_log(cudaq::detail::LogLevel::info);
+      cudaq::qec::detail::should_log(cudaq::qec::detail::log_level::info);
   const bool should_log = pimpl->should_log || log_due_to_log_level;
   if (should_log) {
     pimpl->log_counter++;
@@ -485,7 +610,7 @@ void decoder::reset_decoder() {
         fmt::format("[DecoderStats][{}] Counter:{} reset_decoder called",
                     static_cast<const void *>(this), pimpl->log_counter);
     if (log_due_to_log_level)
-      cudaq::info("{}", s);
+      CUDA_QEC_INFO("{}", s);
     else
       printf("%s\n", s.c_str());
   }
@@ -501,7 +626,7 @@ std::unique_ptr<decoder> get_decoder(const std::string &name,
 __attribute__((constructor)) void load_decoder_plugins() {
   // Load plugins from the decoder-specific plugin directory
   std::filesystem::path libPath{cudaqx::__internal__::getCUDAQXLibraryPath(
-      cudaqx::__internal__::CUDAQXLibraryType::QEC)};
+      cudaqx::__internal__::CUDAQXLibraryType::QECDecoders)};
   auto pluginPath = libPath.parent_path() / "decoder-plugins";
   load_plugins(pluginPath.string(), PluginType::DECODER);
 }

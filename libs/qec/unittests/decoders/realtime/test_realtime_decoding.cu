@@ -599,7 +599,8 @@ TEST_F(RealtimeDecodingTest, DispatchKernelAllShotsGraphLaunch) {
   cudaError_t create_err = cudaq_create_dispatch_graph_regular(
       rx_flags_, tx_flags_, rx_data_, tx_data_, slot_size_, slot_size_,
       d_function_entries_, func_count_, d_graph_io_ctx_, d_shutdown_flag_,
-      d_stats_, num_slots_, 1, 32, dispatch_stream, &dispatch_ctx);
+      d_stats_, num_slots_, 1, 32, /*triggered_graph_exec=*/nullptr,
+      dispatch_stream, &dispatch_ctx);
 
   if (create_err != cudaSuccess) {
     cudaStreamDestroy(dispatch_stream);

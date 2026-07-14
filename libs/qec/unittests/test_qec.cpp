@@ -13,11 +13,100 @@
 #include <random>
 #include <unistd.h>
 
+#include "cuda-qx/core/library_utils.h"
 #include "cudaq/qec/codes/surface_code.h"
 #include "cudaq/qec/experiments.h"
 #include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/plugin_loader.h"
 #include "cudaq/qec/version.h"
+
+namespace {
+
+using cudaq::qec::surface_code::sc_orientation;
+using cudaq::qec::surface_code::stabilizer_grid;
+using cudaq::qec::surface_code::surface_role;
+
+int overlap_parity(const std::vector<std::size_t> &a,
+                   const std::vector<std::size_t> &b) {
+  auto a_it = a.begin();
+  auto b_it = b.begin();
+  int parity = 0;
+  while (a_it != a.end() && b_it != b.end()) {
+    if (*a_it < *b_it) {
+      ++a_it;
+    } else if (*b_it < *a_it) {
+      ++b_it;
+    } else {
+      parity ^= 1;
+      ++a_it;
+      ++b_it;
+    }
+  }
+  return parity;
+}
+
+std::vector<std::size_t> top_row_support(std::uint32_t distance) {
+  std::vector<std::size_t> support;
+  for (std::size_t i = 0; i < distance; ++i)
+    support.push_back(i);
+  return support;
+}
+
+std::vector<std::size_t> left_column_support(std::uint32_t distance) {
+  std::vector<std::size_t> support;
+  for (std::size_t i = 0; i < distance * distance; i += distance)
+    support.push_back(i);
+  return support;
+}
+
+// Recover the integer support (indices of non-identity Paulis) of a single
+// spin_op_term pauli word, e.g. "XIXII" -> {0, 2}.
+std::vector<std::size_t> support_of(const cudaq::spin_op_term &term) {
+  std::vector<std::size_t> support;
+  const std::string word = term.get_pauli_word();
+  for (std::size_t i = 0; i < word.size(); ++i)
+    if (word[i] != 'I')
+      support.push_back(i);
+  return support;
+}
+
+bool uses_horizontal_x_logical(sc_orientation orientation) {
+  return orientation == sc_orientation::XV || orientation == sc_orientation::ZH;
+}
+
+void expect_surface_code_algebra(sc_orientation orientation) {
+  constexpr std::uint32_t distance = 5;
+  stabilizer_grid grid(distance, orientation);
+  const auto expected_stabilizer_count = (distance * distance - 1) / 2;
+  EXPECT_EQ(expected_stabilizer_count, grid.x_stabilizers.size());
+  EXPECT_EQ(expected_stabilizer_count, grid.z_stabilizers.size());
+
+  const auto top_row = top_row_support(distance);
+  const auto left_column = left_column_support(distance);
+  const auto expected_logical_x =
+      uses_horizontal_x_logical(orientation) ? top_row : left_column;
+  const auto expected_logical_z =
+      uses_horizontal_x_logical(orientation) ? left_column : top_row;
+  const auto observables = grid.get_spin_op_observables();
+  ASSERT_EQ(2u, observables.size());
+  // get_spin_op_observables() emits the X observable first, then Z.
+  const auto logical_x = support_of(observables[0]);
+  const auto logical_z = support_of(observables[1]);
+  EXPECT_EQ(expected_logical_x, logical_x);
+  EXPECT_EQ(expected_logical_z, logical_z);
+  EXPECT_EQ(1, overlap_parity(logical_x, logical_z));
+
+  for (const auto &x_stabilizer : grid.x_stabilizers) {
+    EXPECT_EQ(0, overlap_parity(x_stabilizer, logical_z));
+    for (const auto &z_stabilizer : grid.z_stabilizers)
+      EXPECT_EQ(0, overlap_parity(x_stabilizer, z_stabilizer));
+  }
+
+  for (const auto &z_stabilizer : grid.z_stabilizers)
+    EXPECT_EQ(0, overlap_parity(z_stabilizer, logical_x));
+}
+
+} // namespace
 
 TEST(StabilizerTester, checkConstructFromSpinOps) {
   {
@@ -162,8 +251,8 @@ TEST(QECCodeTester, checkSampleMemoryCircuit) {
       auto [syndromes, d] = cudaq::qec::sample_memory_circuit(
           *steane, cudaq::qec::operation::prep0, nShots, nRounds);
       syndromes.dump();
-      EXPECT_EQ(syndromes.shape()[0], nShots * nRounds);
-      EXPECT_EQ(syndromes.shape()[1], 6);
+      EXPECT_EQ(syndromes.shape()[0], nShots);
+      EXPECT_EQ(syndromes.shape()[1], 24u);
 
       // No noise here, should be all zeros
       int sum = 0;
@@ -590,6 +679,9 @@ TEST(QECCodeTester, checkRepetition) {
   auto repetition = cudaq::qec::get_code(
       "repetition", cudaqx::heterogeneous_map{{"distance", 9}});
 
+  EXPECT_EQ(repetition->get_num_x_stabilizers(), 0u);
+  EXPECT_EQ(repetition->get_num_z_stabilizers(), 8u);
+
   {
     auto stabilizers = repetition->get_stabilizers();
 
@@ -659,17 +751,201 @@ TEST(QECCodeTester, checkRepetition) {
         cudaq::qec::sample_memory_circuit(*repetition, nShots, nRounds);
     syndromes.dump();
     data_mz.dump();
-    EXPECT_EQ(nShots * nRounds, syndromes.shape()[0]);
-    EXPECT_EQ(parity.shape()[0], syndromes.shape()[1]);
-    EXPECT_EQ(nShots, data_mz.shape()[0]);
-    EXPECT_EQ(parity_z.shape()[1], data_mz.shape()[1]);
-    // No noise here, should be all zeros
+    EXPECT_EQ(syndromes.shape()[0], static_cast<std::size_t>(nShots));
+    EXPECT_EQ(syndromes.shape()[1], 40u);
+    EXPECT_EQ(data_mz.shape()[0], static_cast<std::size_t>(nShots));
+    EXPECT_EQ(data_mz.shape()[1], parity_z.shape()[1]);
+
+    // No noise here, all detectors should be zero
     int sum = 0;
-    for (std::size_t i = 0; i < nShots - 1; i++)
-      for (std::size_t j = 0; j < parity.shape()[0]; j++)
+    for (std::size_t i = 0; i < syndromes.shape()[0]; i++)
+      for (std::size_t j = 0; j < syndromes.shape()[1]; j++)
         sum += syndromes.at({i, j});
 
     EXPECT_TRUE(sum == 0);
+  }
+}
+
+TEST(QECNoiseModelTester, ConstructsTwoQubitBitflipChannel) {
+  // Direct construction covers the inline Kraus construction path.
+  EXPECT_NO_THROW({ cudaq::qec::two_qubit_bitflip channel(0.05); });
+}
+
+TEST(QECCodeTester, checkSurfaceCodeOrientationFromString) {
+  using cudaq::qec::surface_code::sc_orientation_from_str;
+
+  EXPECT_EQ(sc_orientation::XV, sc_orientation_from_str("XV"));
+  EXPECT_EQ(sc_orientation::XV, sc_orientation_from_str("o1"));
+  EXPECT_EQ(sc_orientation::XH, sc_orientation_from_str(" xh "));
+  EXPECT_EQ(sc_orientation::XH, sc_orientation_from_str("O2"));
+  EXPECT_EQ(sc_orientation::ZV, sc_orientation_from_str("ZV"));
+  EXPECT_EQ(sc_orientation::ZV, sc_orientation_from_str(" o3 "));
+  EXPECT_EQ(sc_orientation::ZH, sc_orientation_from_str("zh"));
+  EXPECT_EQ(sc_orientation::ZH, sc_orientation_from_str("O4"));
+  EXPECT_THROW(sc_orientation_from_str("north"), std::runtime_error);
+
+  auto surf_code = cudaq::qec::get_code(
+      "surface_code",
+      cudaqx::heterogeneous_map{{"distance", 3}, {"orientation", "O2"}});
+  auto *surface =
+      dynamic_cast<cudaq::qec::surface_code::surface_code *>(surf_code.get());
+  ASSERT_NE(nullptr, surface);
+  EXPECT_EQ(sc_orientation::XH, surface->grid.get_orientation());
+}
+
+TEST(QECCodeTester, checkSurfaceCodeDefaultZHLayout) {
+  // Default construction uses the ZH orientation.
+  stabilizer_grid grid(3);
+  const auto role_at = [&grid](std::size_t row, std::size_t col) {
+    return grid.roles[row * grid.grid_length + col];
+  };
+
+  EXPECT_EQ(surface_role::empty, role_at(0, 0));
+  EXPECT_EQ(surface_role::empty, role_at(0, 1));
+  EXPECT_EQ(surface_role::amz, role_at(0, 2));
+  EXPECT_EQ(surface_role::empty, role_at(0, 3));
+
+  EXPECT_EQ(surface_role::amx, role_at(1, 0));
+  EXPECT_EQ(surface_role::amz, role_at(1, 1));
+  EXPECT_EQ(surface_role::amx, role_at(1, 2));
+  EXPECT_EQ(surface_role::empty, role_at(1, 3));
+
+  EXPECT_EQ(surface_role::empty, role_at(2, 0));
+  EXPECT_EQ(surface_role::amx, role_at(2, 1));
+  EXPECT_EQ(surface_role::amz, role_at(2, 2));
+  EXPECT_EQ(surface_role::amx, role_at(2, 3));
+
+  EXPECT_EQ(surface_role::empty, role_at(3, 0));
+  EXPECT_EQ(surface_role::amz, role_at(3, 1));
+  EXPECT_EQ(surface_role::empty, role_at(3, 2));
+  EXPECT_EQ(surface_role::empty, role_at(3, 3));
+}
+
+TEST(QECCodeTester, checkSurfaceCodeOrientationAlgebra) {
+  for (auto orientation : {sc_orientation::XV, sc_orientation::XH,
+                           sc_orientation::ZV, sc_orientation::ZH}) {
+    SCOPED_TRACE(static_cast<int>(orientation));
+    expect_surface_code_algebra(orientation);
+  }
+}
+
+// Pin the EXACT role grid of every orientation at d=3 so permuting the
+// orientation labels (or regressing the boundary logic) fails. Grids derived by
+// tracing generate_grid_roles()/role_for_parity() and cross-checked against
+// Ising's code_rotation stabilizers. Boundary summary: XV/ZH put amx on
+// left/right and amz on top/bottom; XH/ZV put amx on top/bottom and amz on
+// left/right (XV vs ZH and XH vs ZV differ in the bulk checkerboard).
+TEST(QECCodeTester, checkSurfaceCodeAllOrientationGeometries) {
+  // ---- XV ----
+  {
+    SCOPED_TRACE("XV");
+    stabilizer_grid grid(3, sc_orientation::XV);
+    const auto role_at = [&grid](std::size_t row, std::size_t col) {
+      return grid.roles[row * grid.grid_length + col];
+    };
+    EXPECT_EQ(surface_role::empty, role_at(0, 0));
+    EXPECT_EQ(surface_role::amz, role_at(0, 1));
+    EXPECT_EQ(surface_role::empty, role_at(0, 2));
+    EXPECT_EQ(surface_role::empty, role_at(0, 3));
+
+    EXPECT_EQ(surface_role::empty, role_at(1, 0));
+    EXPECT_EQ(surface_role::amx, role_at(1, 1));
+    EXPECT_EQ(surface_role::amz, role_at(1, 2));
+    EXPECT_EQ(surface_role::amx, role_at(1, 3));
+
+    EXPECT_EQ(surface_role::amx, role_at(2, 0));
+    EXPECT_EQ(surface_role::amz, role_at(2, 1));
+    EXPECT_EQ(surface_role::amx, role_at(2, 2));
+    EXPECT_EQ(surface_role::empty, role_at(2, 3));
+
+    EXPECT_EQ(surface_role::empty, role_at(3, 0));
+    EXPECT_EQ(surface_role::empty, role_at(3, 1));
+    EXPECT_EQ(surface_role::amz, role_at(3, 2));
+    EXPECT_EQ(surface_role::empty, role_at(3, 3));
+  }
+
+  // ---- XH ----
+  {
+    SCOPED_TRACE("XH");
+    stabilizer_grid grid(3, sc_orientation::XH);
+    const auto role_at = [&grid](std::size_t row, std::size_t col) {
+      return grid.roles[row * grid.grid_length + col];
+    };
+    EXPECT_EQ(surface_role::empty, role_at(0, 0));
+    EXPECT_EQ(surface_role::empty, role_at(0, 1));
+    EXPECT_EQ(surface_role::amx, role_at(0, 2));
+    EXPECT_EQ(surface_role::empty, role_at(0, 3));
+
+    EXPECT_EQ(surface_role::amz, role_at(1, 0));
+    EXPECT_EQ(surface_role::amx, role_at(1, 1));
+    EXPECT_EQ(surface_role::amz, role_at(1, 2));
+    EXPECT_EQ(surface_role::empty, role_at(1, 3));
+
+    EXPECT_EQ(surface_role::empty, role_at(2, 0));
+    EXPECT_EQ(surface_role::amz, role_at(2, 1));
+    EXPECT_EQ(surface_role::amx, role_at(2, 2));
+    EXPECT_EQ(surface_role::amz, role_at(2, 3));
+
+    EXPECT_EQ(surface_role::empty, role_at(3, 0));
+    EXPECT_EQ(surface_role::amx, role_at(3, 1));
+    EXPECT_EQ(surface_role::empty, role_at(3, 2));
+    EXPECT_EQ(surface_role::empty, role_at(3, 3));
+  }
+
+  // ---- ZV ----
+  {
+    SCOPED_TRACE("ZV");
+    stabilizer_grid grid(3, sc_orientation::ZV);
+    const auto role_at = [&grid](std::size_t row, std::size_t col) {
+      return grid.roles[row * grid.grid_length + col];
+    };
+    EXPECT_EQ(surface_role::empty, role_at(0, 0));
+    EXPECT_EQ(surface_role::amx, role_at(0, 1));
+    EXPECT_EQ(surface_role::empty, role_at(0, 2));
+    EXPECT_EQ(surface_role::empty, role_at(0, 3));
+
+    EXPECT_EQ(surface_role::empty, role_at(1, 0));
+    EXPECT_EQ(surface_role::amz, role_at(1, 1));
+    EXPECT_EQ(surface_role::amx, role_at(1, 2));
+    EXPECT_EQ(surface_role::amz, role_at(1, 3));
+
+    EXPECT_EQ(surface_role::amz, role_at(2, 0));
+    EXPECT_EQ(surface_role::amx, role_at(2, 1));
+    EXPECT_EQ(surface_role::amz, role_at(2, 2));
+    EXPECT_EQ(surface_role::empty, role_at(2, 3));
+
+    EXPECT_EQ(surface_role::empty, role_at(3, 0));
+    EXPECT_EQ(surface_role::empty, role_at(3, 1));
+    EXPECT_EQ(surface_role::amx, role_at(3, 2));
+    EXPECT_EQ(surface_role::empty, role_at(3, 3));
+  }
+
+  // ---- ZH ----
+  {
+    SCOPED_TRACE("ZH");
+    stabilizer_grid grid(3, sc_orientation::ZH);
+    const auto role_at = [&grid](std::size_t row, std::size_t col) {
+      return grid.roles[row * grid.grid_length + col];
+    };
+    EXPECT_EQ(surface_role::empty, role_at(0, 0));
+    EXPECT_EQ(surface_role::empty, role_at(0, 1));
+    EXPECT_EQ(surface_role::amz, role_at(0, 2));
+    EXPECT_EQ(surface_role::empty, role_at(0, 3));
+
+    EXPECT_EQ(surface_role::amx, role_at(1, 0));
+    EXPECT_EQ(surface_role::amz, role_at(1, 1));
+    EXPECT_EQ(surface_role::amx, role_at(1, 2));
+    EXPECT_EQ(surface_role::empty, role_at(1, 3));
+
+    EXPECT_EQ(surface_role::empty, role_at(2, 0));
+    EXPECT_EQ(surface_role::amx, role_at(2, 1));
+    EXPECT_EQ(surface_role::amz, role_at(2, 2));
+    EXPECT_EQ(surface_role::amx, role_at(2, 3));
+
+    EXPECT_EQ(surface_role::empty, role_at(3, 0));
+    EXPECT_EQ(surface_role::amz, role_at(3, 1));
+    EXPECT_EQ(surface_role::empty, role_at(3, 2));
+    EXPECT_EQ(surface_role::empty, role_at(3, 3));
   }
 }
 
@@ -1494,6 +1770,72 @@ TEST(PCMUtilsTester, checkPCMToSparseVec) {
       n_rounds * n_errs_per_round);
   // Verify that the original and the from-string PCM are the same
   check_pcm_equality(pcm, pcm_from_vec, true);
+}
+
+TEST(PCMUtilsTester, DetectorMatrixAndExtendUtilityPaths) {
+  auto detector_without_first =
+      cudaq::qec::generate_timelike_sparse_detector_matrix(
+          /*num_syndromes_per_round=*/2, /*num_rounds=*/3,
+          /*include_first_round=*/false);
+  EXPECT_EQ(detector_without_first,
+            (std::vector<int64_t>{0, 2, -1, 1, 3, -1, 2, 4, -1, 3, 5, -1}));
+
+  auto detector_with_custom_first =
+      cudaq::qec::generate_timelike_sparse_detector_matrix(
+          /*num_syndromes_per_round=*/2, /*num_rounds=*/3,
+          std::vector<int64_t>{0, -1, 1, -1});
+  EXPECT_EQ(detector_with_custom_first.front(), 0);
+  EXPECT_EQ(detector_with_custom_first.back(), -1);
+
+  // Two identical sorted rounds give pcm_extend_to_n_rounds a repeat pattern to
+  // detect and extend.
+  cudaqx::tensor<uint8_t> pcm({4, 4});
+  std::vector<uint8_t> data = {
+      1, 0, 0, 0, //
+      0, 1, 0, 0, //
+      0, 0, 1, 0, //
+      0, 0, 0, 1, //
+  };
+  pcm.copy(data.data(), {4, 4});
+  ASSERT_TRUE(cudaq::qec::pcm_is_sorted(pcm, /*num_syndromes_per_round=*/2));
+
+  auto [extended, columns] =
+      cudaq::qec::pcm_extend_to_n_rounds(pcm, 2, /*n_rounds=*/4);
+  EXPECT_EQ(extended.shape()[0], 8u);
+  EXPECT_GE(extended.shape()[1], pcm.shape()[1]);
+  EXPECT_FALSE(columns.empty());
+}
+
+TEST(PluginLoaderTester, LoadPluginsCoversSuccessAndFailure) {
+  namespace fs = std::filesystem;
+  const fs::path tmp_dir =
+      fs::temp_directory_path() /
+      ("cudaq_qec_plugin_loader_" + std::to_string(getpid()));
+  fs::create_directories(tmp_dir);
+
+  const fs::path bad_plugin = tmp_dir / "bad_plugin.so";
+  {
+    std::ofstream out(bad_plugin);
+    out << "not an ELF shared object";
+  }
+
+  const fs::path libm = "/lib/x86_64-linux-gnu/libm.so.6";
+  if (!fs::exists(libm)) {
+    fs::remove_all(tmp_dir);
+    GTEST_SKIP() << "libm.so.6 not found for plugin loader dlopen smoke test";
+  }
+  const fs::path good_plugin = tmp_dir / "good_plugin.so";
+  fs::create_symlink(libm, good_plugin);
+
+  cudaq::qec::load_plugins(tmp_dir.string(), cudaq::qec::PluginType::DECODER);
+  cudaq::qec::cleanup_plugins(cudaq::qec::PluginType::DECODER);
+  fs::remove_all(tmp_dir);
+}
+
+TEST(LibraryUtilsTester, FindsQecLibraryPath) {
+  auto path = cudaqx::__internal__::getCUDAQXLibraryPath(
+      cudaqx::__internal__::CUDAQXLibraryType::QEC);
+  EXPECT_NE(path.find("libcudaq-qec"), std::string::npos);
 }
 
 // Test detector_error_model methods

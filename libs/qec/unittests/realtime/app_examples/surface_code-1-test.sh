@@ -45,6 +45,22 @@ SW_WINDOW_SIZE=${11:-$DECODER_WINDOW}
 SW_STEP_SIZE=${12:-1}
 EXTRA_CLI_ARGS=${EXTRA_CLI_ARGS:-}
 
+# The inproc_rpc realtime path is served by the device-graph scheduler, which
+# uses device-side graph launch -- compute capability 9.0+ (Hopper) only; the
+# dispatch kernel's TRIGGER_GRAPH interception is compiled out below sm_90 and
+# the enqueue RPC surfaces the raw sentinel as a non-zero status.  Skip on
+# older GPUs (e.g. A100/sm_80 CI runners), matching the skip in
+# test_realtime_qldpc_graph_decoding.  Exit code 77 pairs with the test's
+# SKIP_RETURN_CODE property.
+if [[ "${CUDAQ_QEC_REALTIME_MODE:-}" == "inproc_rpc" ]]; then
+  compute_cap=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1)
+  if [[ -n "$compute_cap" && "${compute_cap%%.*}" -lt 9 ]]; then
+    echo "SKIP: CUDAQ_QEC_REALTIME_MODE=inproc_rpc requires device-side graph" \
+         "launch (compute capability 9.0+); found ${compute_cap}"
+    exit 77
+  fi
+fi
+
 export CUDAQ_DEFAULT_SIMULATOR=stim
 
 ERROR_RATE=0.01
@@ -117,6 +133,19 @@ fi
 if [[ "$num_corrections_decoder" -lt $number_of_corrections_decoder_threshold ]]; then
   echo "Error: Number of corrections decoder found is less than $number_of_corrections_decoder_threshold (unexpected)"
   return_code=1
+fi
+
+# For the cqr host-dispatch variant, verify the device_calls actually crossed
+# the cudaq-realtime ring to the in-process decoding server (the count is 0 if
+# they silently bypassed to a direct trampoline).
+if [[ "${CUDAQ_DEVICE_CALL_CHANNEL:-}" == "host_dispatch" ]]; then
+  cqr_dispatch_count=$(grep "CQR service dispatch count:" load_dem-$FULL_SUFFIX.log | awk -F': ' '{print $2}')
+  if ! [[ "$cqr_dispatch_count" =~ ^[0-9]+$ ]] || [[ "$cqr_dispatch_count" -eq 0 ]]; then
+    echo "Error: CQR service dispatch count is missing or zero; device_calls did not traverse host dispatch"
+    return_code=1
+  else
+    echo "CQR service dispatch count check passed ($cqr_dispatch_count dispatches)"
+  fi
 fi
 
 echo "Test completed for distance $DISTANCE with return code $return_code"
