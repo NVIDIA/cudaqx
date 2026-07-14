@@ -793,7 +793,8 @@ void bindDecoder(nb::module_ &mod) {
             The number of observables in the detector error model
           )pbdoc")
       .def("canonicalize_for_rounds",
-           &detector_error_model::canonicalize_for_rounds,
+           static_cast<void (detector_error_model::*)(uint32_t, bool)>(
+               &detector_error_model::canonicalize_for_rounds),
            R"pbdoc(
             Canonicalize the detector error model for a given number of rounds.
 
@@ -812,7 +813,29 @@ void bindDecoder(nb::module_ &mod) {
             correlation in the input model is discarded.
           )pbdoc",
            nb::arg("num_syndromes_per_round"),
-           nb::arg("remove_zero_syndrome_errors") = false);
+           nb::arg("remove_zero_syndrome_errors") = false)
+      .def(
+          "canonicalize_for_rounds_with_boundary",
+          static_cast<void (detector_error_model::*)(uint32_t, uint32_t, bool)>(
+              &detector_error_model::canonicalize_for_rounds_with_boundary),
+          R"pbdoc(
+            Boundary-aware canonicalization for memory-experiment DEMs whose
+            first and last detector layers (the boundaries) are narrower than
+            the interior layers. The first ``num_boundary_syndromes`` detector
+            rows form the initial round, each subsequent block of
+            ``num_syndromes_per_round`` rows is an interior round, and the
+            trailing ``num_boundary_syndromes`` rows form the final round.
+            This makes the round-based column ordering respect the true rounds
+            even when the boundary width differs from the interior width.
+
+            ``remove_zero_syndrome_errors`` behaves as in
+            ``canonicalize_for_rounds``. Raises ``ValueError`` if
+            ``num_syndromes_per_round`` is
+            zero or ``num_boundary_syndromes`` exceeds
+            ``num_syndromes_per_round``.
+          )pbdoc",
+          nb::arg("num_syndromes_per_round"), nb::arg("num_boundary_syndromes"),
+          nb::arg("remove_zero_syndrome_errors") = false);
 
   qecmod.def("dem_from_stim_text", &dem_from_stim_text,
              R"pbdoc(
@@ -1125,13 +1148,14 @@ void bindDecoder(nb::module_ &mod) {
       [](const nb::ndarray<nb::numpy, uint8_t> &H,
          std::uint32_t num_syndromes_per_round, std::uint32_t start_round,
          std::uint32_t end_round, bool straddle_start_round,
-         bool straddle_end_round) {
+         bool straddle_end_round, std::uint32_t num_boundary_syndromes) {
         auto tensor_H = pcmToTensor(H);
 
         auto [H_new, first_column, last_column] =
             cudaq::qec::get_pcm_for_rounds(
                 tensor_H, num_syndromes_per_round, start_round, end_round,
-                straddle_start_round, straddle_end_round);
+                straddle_start_round, straddle_end_round,
+                num_boundary_syndromes);
 
         // Construct a new ndarray from H_new (deep copy)
         auto rows = H_new.shape()[0];
@@ -1158,6 +1182,7 @@ void bindDecoder(nb::module_ &mod) {
             straddle_end_round: Whether to allow error mechanisms that straddle
               the end round (i.e. include future rounds, too). This defaults to
               false.
+            num_boundary_syndromes: The number of syndrome measurements in the boundary layers
 
         Returns:
             A tuple containing the sub-parity check matrix and the first and last
@@ -1169,7 +1194,8 @@ void bindDecoder(nb::module_ &mod) {
       )pbdoc",
       nb::arg("H"), nb::arg("num_syndromes_per_round"), nb::arg("start_round"),
       nb::arg("end_round"), nb::arg("straddle_start_round") = false,
-      nb::arg("straddle_end_round") = false);
+      nb::arg("straddle_end_round") = false,
+      nb::arg("num_boundary_syndromes") = 0);
 
   qecmod.def(
       "pcm_extend_to_n_rounds",

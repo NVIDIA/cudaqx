@@ -8,10 +8,12 @@
 
 #include "DecodingSession.h"
 #include "RpcWireFormat.h"
+#include "../../hardware_guards.h"
 #include "cudaq/qec/logger.h"
 
 #include <chrono>
 #include <cstring>
+#include <future>
 #include <stdexcept>
 #include <vector>
 
@@ -61,7 +63,30 @@ DecodingSession::create(std::unique_ptr<cudaq::qec::decoder> decoder,
 }
 
 void DecodingSession::start_worker() {
-  worker = std::thread([this] { worker_loop(); });
+  // The pin must happen ON the worker thread (CUDA device selection is
+  // thread-local), but a failure is a startup error that belongs to the
+  // caller: hand it back through a promise so load_from_config aborts the
+  // server instead of a worker silently decoding on the wrong device.
+  std::promise<void> pinned;
+  auto pin_result = pinned.get_future();
+  worker = std::thread([this, &pinned] {
+    try {
+      cudaq::qec::detail_affinity::set_cuda_device_for_decode(
+          dec->get_cuda_device_id());
+      pinned.set_value();
+    } catch (...) {
+      pinned.set_exception(std::current_exception());
+      return; // never serve work from a mispinned thread
+    }
+    worker_loop();
+  });
+  try {
+    pin_result.get();
+  } catch (...) {
+    if (worker.joinable())
+      worker.join();
+    throw;
+  }
 }
 
 bool DecodingSession::try_enqueue(WorkItem item) {

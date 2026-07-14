@@ -260,6 +260,12 @@ public:
   /// depends on D_sparse, so you must have called set_D_sparse() first.
   uint32_t get_num_msyn_per_decode() const;
 
+  /// @brief The CUDA device this decoder was pinned to at construction via
+  /// the "cuda_device_id" parameter, or -1 when no pin was requested.
+  /// Construction pins the constructing thread persistently (the thread that
+  /// creates a decoder is the thread expected to drive its decode calls).
+  int get_cuda_device_id() const { return cuda_device_id_; }
+
   /// @brief Set the observable matrix.
   void set_O_sparse(const std::vector<std::vector<uint32_t>> &O_sparse);
 
@@ -282,23 +288,24 @@ public:
 
   /// @brief Enqueue a syndrome for decoding (pointer version)
   /// @return True if enough syndromes have been enqueued to trigger a decode.
-  bool enqueue_syndrome(const uint8_t *syndrome, std::size_t syndrome_length);
+  virtual bool enqueue_syndrome(const uint8_t *syndrome,
+                                std::size_t syndrome_length);
 
   /// @brief Enqueue a syndrome for decoding (vector version)
   /// @return True if enough syndromes have been enqueued to trigger a decode.
-  bool enqueue_syndrome(const std::vector<uint8_t> &syndrome);
+  virtual bool enqueue_syndrome(const std::vector<uint8_t> &syndrome);
 
   /// @brief Get the current observable corrections.
-  const uint8_t *get_obs_corrections() const;
+  virtual const uint8_t *get_obs_corrections() const;
 
   /// @brief Get the number of observables.
   std::size_t get_num_observables() const;
 
   /// @brief Clear any stored corrections.
-  void clear_corrections();
+  virtual void clear_corrections();
 
   /// @brief Reset the decoder, clearing all per-shot memory and corrections.
-  void reset_decoder();
+  virtual void reset_decoder();
 
   // -- End realtime decoding API --
 
@@ -356,6 +363,10 @@ protected:
 
   /// @brief The decoder's D matrix in sparse format
   std::vector<std::vector<uint32_t>> D_sparse;
+
+  /// @brief CUDA device id consumed from the construction parameters by
+  /// decoder::get(); -1 = unpinned. See get_cuda_device_id().
+  int cuda_device_id_ = -1;
 
 private:
   decode_result_type result_type_ = decode_result_type::decode_to_errs;
