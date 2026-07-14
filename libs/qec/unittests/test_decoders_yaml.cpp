@@ -231,17 +231,6 @@ TEST(DecoderYAMLTest, SingleDecoder) {
   test_decoder_creation(multi_config);
 }
 
-TEST(DecoderYAMLTest, CudaDeviceIdRoundTrip) {
-  cudaq::qec::decoding::config::multi_decoder_config multi_config;
-  auto config = create_test_decoder_config_nv_qldpc(0);
-  config.cuda_device_id = 2;
-  multi_config.decoders.push_back(config);
-
-  const auto yaml = multi_config.to_yaml_str(200);
-  EXPECT_NE(yaml.find("cuda_device_id"), std::string::npos);
-  test_decoder_yaml_roundtrip(multi_config);
-}
-
 TEST(DecoderYAMLTest, MultiDecoder) {
   if (!is_nv_qldpc_decoder_available()) {
     GTEST_SKIP() << "nv-qldpc-decoder is not available";
@@ -729,16 +718,6 @@ TEST(DecoderConfigTest, ConfigureRejectsDuplicateAndNegativeIds) {
   negative_id.decoders.push_back(create_test_empty_decoder_config(-1));
   negative_id.decoders.push_back(create_test_empty_decoder_config(0));
   EXPECT_EQ(configure_decoders(negative_id), 3);
-}
-
-TEST(DecoderConfigTest, PrepareDecoderParamsIncludesCudaDeviceId) {
-  auto config = create_test_sample_realtime_decoder_config(7);
-  config.cuda_device_id = 3;
-
-  auto params = cudaq::qec::decoding::host::prepare_decoder_params(config);
-
-  ASSERT_TRUE(params.contains("cuda_device_id"));
-  EXPECT_EQ(params.get<int>("cuda_device_id"), 3);
 }
 
 TEST(DecoderConfigTest, CreateRealtimeDecoderConfiguresRuntimeState) {

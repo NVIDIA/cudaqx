@@ -22,7 +22,9 @@ struct ITransceiver;
 extern "C" cudaq::qec::decoding_server::ITransceiver *
 cudaqx_qec_make_gpu_roce_transceiver(int pinned_cuda_device);
 
-int main() {
-  (void)cudaqx_qec_make_gpu_roce_transceiver(0);
-  return 0;
-}
+using GpuRoceFactoryFn = cudaq::qec::decoding_server::ITransceiver *(*)(int);
+
+static GpuRoceFactoryFn volatile gpu_roce_factory =
+    &cudaqx_qec_make_gpu_roce_transceiver;
+
+int main() { return gpu_roce_factory ? 0 : 1; }

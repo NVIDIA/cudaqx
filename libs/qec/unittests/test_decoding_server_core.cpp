@@ -22,7 +22,6 @@
 #include <cstdint>
 #include <cuda_runtime_api.h>
 #include <memory>
-#include <optional>
 #include <stdexcept>
 #include <thread>
 #include <utility>
