@@ -20,7 +20,7 @@
 #   server        --RDMA SEND---> FPGA SIF TX (captured by the ILA)
 #
 # Division of labor (identical to hololink_qldpc_graph_decoder_test.sh):
-#   - decoding_server (--transport=cpu_roce --qp_config=hsb_fpga) owns the
+#   - decoding_server (server.transports cpu_roce/hsb_fpga) owns the
 #     RDMA ring and prints its QP / RKey / Buffer Addr handshake.  It performs
 #     NO Hololink control-plane traffic.
 #   - hololink_fpga_syndrome_playback is the sole FPGA control-plane writer:
@@ -994,12 +994,33 @@ start_server() {
     local server_ld_path
     server_ld_path="${CUDA_QUANTUM_DIR}/realtime/build/lib:${CUDAQX_DIR}/build/lib"
 
+    local server_config
+    server_config=$(mktemp /tmp/hsb_decoding_server_config.XXXXXX.yml)
+    TEMP_FILES+=("$server_config")
+    {
+        echo "server:"
+        echo "  transports:"
+        if [[ "$TRANSPORT" == "gpu_roce" ]]; then
+            echo "    - type: gpu_roce"
+        else
+            echo "    - type: cpu_roce"
+            echo "      qp_config: hsb_fpga"
+            echo "      device: $BRIDGE_DEVICE"
+            echo "      peer_ip: $peer_ip"
+            echo "      remote_qp: $remote_qp"
+            echo "      num_slots: $NUM_SLOTS"
+            echo "      slot_size: $PAGE_SIZE"
+            echo "      frame_size: $FRAME_SIZE"
+        fi
+        cat "$CONFIG_FILE"
+    } >"$server_config"
+
     local ready_pattern
     if [[ "$TRANSPORT" == "gpu_roce" ]]; then
         # Device-graph scheduler path: enqueue/get/reset run as DEVICE_CALLs
         # on the GPU and the captured RelayBP decode graph fires device-side.
         # The Hololink transceiver is configured via HOLOLINK_* env (the
-        # server's gpu_roce mode ignores the cpu_roce CLI flags), and eager
+        # server's gpu_roce mode ignores CPU RoCE transport fields), and eager
         # module loading avoids lazy-load stalls inside the persistent
         # scheduler (same as the old bridge launcher).
         CUDA_MODULE_LOADING=EAGER \
@@ -1010,8 +1031,7 @@ start_server() {
         HOLOLINK_FRAME_SIZE="$PAGE_SIZE" \
         HOLOLINK_NUM_PAGES="$GPU_ROCE_NUM_PAGES" \
         "$SERVER_BIN" \
-            --config="$CONFIG_FILE" \
-            --transport=gpu_roce \
+            --config="$server_config" \
             --timeout="$TIMEOUT" \
             > >(tee "$server_log") 2>&1 &
         # The GpuRoceTransceiver prints the QP/RKey/Buffer handshake during
@@ -1021,15 +1041,7 @@ start_server() {
     else
         LD_LIBRARY_PATH="${server_ld_path}:${LD_LIBRARY_PATH:-}" \
         "$SERVER_BIN" \
-            --config="$CONFIG_FILE" \
-            --transport=cpu_roce \
-            --qp_config=hsb_fpga \
-            --device="$BRIDGE_DEVICE" \
-            --peer-ip="$peer_ip" \
-            --remote-qp="$remote_qp" \
-            --num-slots="$NUM_SLOTS" \
-            --slot-size="$PAGE_SIZE" \
-            --frame-size="$FRAME_SIZE" \
+            --config="$server_config" \
             --timeout="$TIMEOUT" \
             > >(tee "$server_log") 2>&1 &
         ready_pattern="Bridge Ready"

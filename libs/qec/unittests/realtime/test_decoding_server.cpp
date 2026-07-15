@@ -12,13 +12,9 @@
 /// channel.  Both the decoder and the transport are configuration:
 ///   - the decoder comes from the YAML config file handed to the server
 ///     (swapping decoders is a config-file change, not a code change);
-///   - the transport defaults to `udp` (loopback; runs anywhere) and can be
-///     switched to the CPU RoCE RDMA wire with
-///       QEC_DECODING_SERVER_TRANSPORT=cpu_roce
-///     plus the RDMA topology env vars shared with CUDA-Q's
-///     CpuRoceChannelTester:
-///       CUDAQ_CPU_ROCE_TEST_CHANNEL_DEVICE / CUDAQ_CPU_ROCE_TEST_CHANNEL_IP
-///       CUDAQ_CPU_ROCE_TEST_DAEMON_DEVICE  / CUDAQ_CPU_ROCE_TEST_DAEMON_IP
+///   - decoder-only YAML defaults the daemon transport to `udp` (loopback;
+///     runs anywhere). Non-UDP daemon transport tests use YAML
+///     `server.transports`.
 ///
 /// The server is spawned as a subprocess, its ephemeral port read from the
 /// QEC_DECODING_SERVER_READY stdout line, and its dispatch count (printed at
@@ -169,7 +165,7 @@ std::string server_dir() {
 }
 
 // Spawns decoding_server with the given decoder config file, hands back
-// its READY port (udp: the UDP data port; cpu_roce: the TCP rendezvous port),
+// its READY port (the UDP data port),
 // and collects its stdout (for the shutdown dispatch-count line).
 class ServerProcess {
 public:
@@ -194,16 +190,9 @@ public:
           "--config=" + (!config_file.empty() && config_file[0] == '/'
                              ? config_file
                              : server_dir() + "/" + config_file);
-      const std::string transport_arg =
-          "--transport=" + env_or("QEC_DECODING_SERVER_TRANSPORT", "udp");
-      const std::string device_arg =
-          "--device=" + env_or("CUDAQ_CPU_ROCE_TEST_DAEMON_DEVICE", "mlx5_0");
-      const std::string local_ip_arg =
-          "--local-ip=" + env_or("CUDAQ_CPU_ROCE_TEST_DAEMON_IP", "10.0.0.2");
       const std::string stats_arg =
           "--stats-interval=" + std::to_string(stats_interval_sec);
       ::execl(server.c_str(), server.c_str(), config_arg.c_str(),
-              transport_arg.c_str(), device_arg.c_str(), local_ip_arg.c_str(),
               stats_arg.c_str(), "--port=0", "--timeout=60",
               static_cast<char *>(nullptr));
       std::perror("execl decoding_server");
@@ -329,26 +318,10 @@ struct RealtimeGuard {
 
 } // namespace
 
-// Caller-side device_call channel arguments for the selected transport.
+// This unit test spawns decoder-only server YAML, which defaults the daemon to
+// UDP. Non-UDP two-process coverage is driven by script tests that create a
+// daemon YAML with server.transports.
 std::vector<std::string> channel_arguments(std::uint16_t server_port) {
-  const std::string transport = env_or("QEC_DECODING_SERVER_TRANSPORT", "udp");
-  if (transport == "cpu_roce") {
-    // The server's READY port is its TCP rendezvous port; the RDMA topology
-    // comes from the same env vars CUDA-Q's CpuRoceChannelTester uses.
-    // Unlike udp, the RDMA ring geometry is part of the wire contract: the
-    // channel writes requests directly into the server's rings, so slots /
-    // slot-size must match the server's --num-slots / --slot-size defaults
-    // (8 x 256, see decoding_server.cpp ServerConfig).
-    return {"--cudaq-device-call=cpu_roce",
-            "--cudaq-device-call-slots=8",
-            "--cudaq-device-call-slot-size=256",
-            "ib-device=" +
-                env_or("CUDAQ_CPU_ROCE_TEST_CHANNEL_DEVICE", "mlx5_0"),
-            "local-ip=" + env_or("CUDAQ_CPU_ROCE_TEST_CHANNEL_IP", "10.0.0.1"),
-            "rendezvous-host=" +
-                env_or("CUDAQ_CPU_ROCE_TEST_DAEMON_IP", "10.0.0.2"),
-            "rendezvous-port=" + std::to_string(server_port)};
-  }
   return {"--cudaq-device-call=udp", "udp-host=127.0.0.1",
           "udp-port=" + std::to_string(server_port)};
 }

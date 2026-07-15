@@ -19,20 +19,22 @@
 /// code:
 ///   - decoders come from `--config=<yaml>`
 ///     (multi_decoder_config::from_yaml_str);
-///   - the transport comes from `--transport=udp|cpu_roce`: the UDP ring
+///   - the transport comes from a top-level `server.transports` YAML block
+///     (decoder-only YAML defaults to UDP for compatibility): the UDP ring
 ///     transceiver (loopback; runs anywhere) or the CPU RoCE RDMA transceiver
 ///     (requires an RDMA NIC; pairs with the caller's
 ///     `--cudaq-device-call=cpu_roce` channel and includes the QP/rkey TCP
 ///     rendezvous server).
-///   - for cpu_roce, `--qp_config=rendezvous|hsb_fpga` selects how queue pairs
-///     are exchanged.  `rendezvous` (default) is the TCP QP/rkey swap with a
-///     CpuRoceChannel caller.  `hsb_fpga` is the Holoscan-Sensor-Bridge FPGA
-///     method: the peer QP comes from `--remote-qp` (the FPGA data-plane QP,
-///     or the emulator's QP) and this server prints its own QP / RKey /
-///     Buffer Addr in the canonical bridge handshake format
-///     (hololink_bridge_common.h) for the orchestration script to relay to
-///     the playback tool -- which alone programs the FPGA over the Hololink
-///     control plane.  The server itself performs NO control-plane traffic.
+///   - for cpu_roce,
+///     `--qp_config=rendezvous|hsb_fpga` selects how queue pairs are exchanged.
+///     `rendezvous` (default) is the TCP QP/rkey swap with a CpuRoceChannel
+///     caller.  `hsb_fpga` is the Holoscan-Sensor-Bridge FPGA method: the peer
+///     QP comes from `--remote-qp` (the FPGA data-plane QP, or the emulator's
+///     QP) and this server prints its own QP / RKey / Buffer Addr in the
+///     canonical bridge handshake format (hololink_bridge_common.h) for the
+///     orchestration script to relay to the playback tool -- which alone
+///     programs the FPGA over the Hololink control plane.  The server itself
+///     performs NO control-plane traffic.
 ///
 /// The function table comes from the decoding-server-cqr service plugin
 /// (enqueue_syndromes / get_corrections / reset_decoder) regardless of
@@ -47,8 +49,9 @@
 ///
 /// Usage:
 ///   decoding_server --config=<decoders.yaml>
-///                           [--transport=udp|cpu_roce] [--port=0]
-///                           [--num-slots=8] [--slot-size=256] [--timeout=N]
+///                           [--port=0]
+///                           [--num-slots=8] [--slot-size=256]
+///                           [--timeout=N]
 ///                           [--device=mlx5_0] [--local-ip=10.0.0.2]
 ///                           [--qp_config=rendezvous|hsb_fpga]
 ///                           [--peer-ip=ADDR] [--remote-qp=0x2]
@@ -151,7 +154,6 @@ int current_process_id() {
 struct ServerConfig {
   std::string config_path;
   std::string transport = "udp";
-  bool transport_explicit = false;
   std::uint16_t port = 0; // 0 => ephemeral, printed on stdout
   std::uint32_t num_slots = 8;
   std::size_t slot_size = 256;
@@ -244,18 +246,6 @@ bool yaml_key_is(const std::string &trimmed, const char *expected) {
   std::string key;
   std::string value;
   return parse_yaml_key_value(trimmed, key, value) && key == expected;
-}
-
-std::vector<std::string> split_csv(const std::string &csv) {
-  std::vector<std::string> out;
-  std::stringstream ss(csv);
-  std::string item;
-  while (std::getline(ss, item, ',')) {
-    item = trim_copy(std::move(item));
-    if (!item.empty())
-      out.push_back(item);
-  }
-  return out;
 }
 
 void apply_transport_yaml_value(ServerConfig &cfg, const std::string &key,
@@ -412,7 +402,6 @@ parse_yaml_transport_configs(const std::string &yaml,
       finish_current();
       current = base;
       current.transport.clear();
-      current.transport_explicit = true;
       current.endpoint_file.clear();
       current.endpoint_file_explicit = false;
       have_current = true;
@@ -497,14 +486,8 @@ void finalize_transport_configs(std::vector<ServerConfig> &configs,
 std::vector<ServerConfig> resolve_transport_configs(const ServerConfig &cfg,
                                                     const std::string &yaml) {
   std::vector<ServerConfig> configs = parse_yaml_transport_configs(yaml, cfg);
-  if (configs.empty()) {
-    for (const auto &transport : split_csv(cfg.transport)) {
-      ServerConfig next = cfg;
-      next.transport = transport;
-      next.transport_explicit = true;
-      configs.push_back(std::move(next));
-    }
-  }
+  if (configs.empty())
+    configs.push_back(cfg);
   finalize_transport_configs(configs, cfg);
   return configs;
 }
@@ -526,15 +509,13 @@ bool parse_args(int argc, char **argv, ServerConfig &cfg) {
       std::cout
           << "Usage: " << argv[0]
           << " --config=<decoders.yaml> "
-             "[--transport=udp|cpu_roce|gpu_roce[,..]] "
              "[--port=N] [--num-slots=N] [--slot-size=N] "
              "[--timeout=N] "
              "[--stats-interval=N] [--endpoint-file=PATH] "
              "[--device=NAME] [--local-ip=ADDR] "
              "[--qp_config=rendezvous|hsb_fpga] [--peer-ip=ADDR] "
              "[--remote-qp=N] [--frame-size=N]\n"
-             "YAML server.transports is authoritative when present; "
-             "--transport is only a legacy fallback for decoder-only YAML. "
+             "YAML server.transports configures daemon transports. "
              "Existing decoder-only YAML files continue to default to udp. "
              "By default the daemon runs until signalled; --timeout=N is "
              "test-only/CI convenience. SIGHUP parses the current decoder "
@@ -552,10 +533,7 @@ bool parse_args(int argc, char **argv, ServerConfig &cfg) {
       return false;
     } else if (starts_with(a, "--config="))
       cfg.config_path = a.substr(9);
-    else if (starts_with(a, "--transport=")) {
-      cfg.transport = a.substr(12);
-      cfg.transport_explicit = true;
-    } else if (starts_with(a, "--port="))
+    else if (starts_with(a, "--port="))
       cfg.port = static_cast<std::uint16_t>(std::stoul(a.substr(7)));
     else if (starts_with(a, "--num-slots="))
       cfg.num_slots = static_cast<std::uint32_t>(std::stoul(a.substr(12)));
@@ -610,12 +588,7 @@ bool parse_args(int argc, char **argv, ServerConfig &cfg) {
               << " (expected rendezvous or hsb_fpga)" << std::endl;
     return false;
   }
-  if (cfg.transport_explicit && cfg.qp_config == "hsb_fpga" &&
-      cfg.transport != "cpu_roce") {
-    std::cerr << "ERROR: --qp_config=hsb_fpga requires --transport=cpu_roce"
-              << std::endl;
-    return false;
-  }
+
   return true;
 }
 

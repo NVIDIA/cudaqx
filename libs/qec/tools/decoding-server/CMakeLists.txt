@@ -11,9 +11,8 @@
 # HOST_CALL dispatcher onto a transceiver's rings and serving the
 # decoding-server-cqr function table (enqueue_syndromes / get_corrections /
 # reset_decoder). Its decoders are selected entirely by a YAML config file
-# (see decoding_server_config.yaml) and its transport by --transport=udp
-# (loopback-capable, runs anywhere) or --transport=cpu_roce (real RDMA wire,
-# compiled in when libcudaq-realtime-cpu-roce-transport + ibverbs are found).
+# (see decoding_server_config.yaml); daemon transports come from the top-level
+# server.transports YAML block (decoder-only YAML defaults to UDP).
 #
 # The two-process test (unittests/realtime/test_decoding_server.cpp) spawns
 # this binary as a subprocess.
@@ -38,7 +37,7 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-decoding-server-cqr)
   find_library(QEC_HOST_DISPATCH_LIBRARY cudaq-realtime-host-dispatch
     HINTS ${CUDAQ_REALTIME_ROOT} ${CUDAQ_INSTALL_DIR}
     PATH_SUFFIXES lib)
-  # Optional: the server's --transport=cpu_roce path (real RDMA wire) needs
+  # Optional: the server's cpu_roce transport path (real RDMA wire) needs
   # the CPU RoCE transceiver and libibverbs; without them the server still
   # builds with the udp transport only.
   find_library(QEC_CPU_ROCE_TRANSPORT_LIBRARY cudaq-realtime-cpu-roce-transport
@@ -75,7 +74,7 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-decoding-server-cqr)
         ${QEC_IBVERBS_LIBRARY})
       message(STATUS "decoding_server: cpu_roce transport enabled")
     endif()
-    # The gpu_roce CLI branch ([2a] in decoding_server.cpp) references only
+    # The gpu_roce runtime branch ([2a] in decoding_server.cpp) references only
     # the core DecodingServer API, so compile it whenever hololink/DOCA are
     # present -- machines without the proprietary archive (CI in particular)
     # still build the branch; at runtime it fails with a clear "GPU RoCE
@@ -130,10 +129,10 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-decoding-server-cqr)
       message(STATUS "decoding_server: gpu_roce transport enabled")
     elseif(CUDAQ_GPU_ROCE_AVAILABLE)
       message(WARNING
-        "decoding_server: gpu_roce CLI compiled but transport NOT linked "
+        "decoding_server: gpu_roce support compiled but transport NOT linked "
         "(cudaq-qec-realtime-cudevice-proprietary target not defined; set "
         "CUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE to enable). "
-        "--transport=gpu_roce will fail at runtime with a not-linked error.")
+        "gpu_roce in server.transports will fail at runtime with a not-linked error.")
     endif()
     # RelayBP/nv-qldpc captures a CUDA device graph during decoder
     # initialization even when the server transport is udp or cpu_roce. Export

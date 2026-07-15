@@ -294,12 +294,23 @@ fi
 # but its CQR build deliberately does not construct local decoders.
 SERVER_PORT=""
 if [[ -n "${QEC_DECODING_SERVER:-}" ]]; then
+  SERVER_CONFIG_FILE=$WORKDIR/server-config.yml
+  {
+    cat <<'YAML'
+server:
+  transports:
+    - type: udp
+      port: 0
+YAML
+    cat "$CONFIG_FILE"
+  } >"$SERVER_CONFIG_FILE"
+
   if [[ -n "${REQUIRE_SERVER_DECODE_COUNTS:-}" ]]; then
     QEC_DECODING_SERVER_STATS=1 \
-      "$QEC_DECODING_SERVER" --config="$CONFIG_FILE" --transport=udp --port=0 \
+      "$QEC_DECODING_SERVER" --config="$SERVER_CONFIG_FILE" \
         --timeout=300 >"$SERVER_LOG" 2>&1 &
   else
-    "$QEC_DECODING_SERVER" --config="$CONFIG_FILE" --transport=udp --port=0 \
+    "$QEC_DECODING_SERVER" --config="$SERVER_CONFIG_FILE" \
       --timeout=300 >"$SERVER_LOG" 2>&1 &
   fi
   SERVER_PID=$!
