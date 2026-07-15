@@ -274,18 +274,19 @@ if [[ -n "${CHECK_MISSING_SERVER_PORT:-}" ]]; then
 
   set +e
   env -u QEC_DECODING_SERVER_PORT \
+    QEC_DECODING_SERVER_ENDPOINT_FILE="$WORKDIR/missing-endpoint.env" \
     "$EXE" "${MISSING_PORT_ARGS[@]}" >"$MISSING_PORT_LOG" 2>&1
   missing_port_status=$?
   set -e
 
   if [[ "$missing_port_status" -ne 1 ]] || ! grep -Fq \
-    "Error: QEC_DECODING_SERVER_PORT is required for external decoding" \
+    "Error: QEC_DECODING_SERVER_PORT or endpoint file is required for external decoding" \
     "$MISSING_PORT_LOG"; then
     echo "FAIL: missing server port did not produce a clean configuration error"
     cat "$MISSING_PORT_LOG"
     exit 1
   fi
-  echo "Missing external-server port rejected cleanly -- OK"
+  echo "Missing external-server endpoint rejected cleanly -- OK"
 fi
 
 # An external-server test uses the generated YAML as the server's authoritative
@@ -293,12 +294,23 @@ fi
 # but its CQR build deliberately does not construct local decoders.
 SERVER_PORT=""
 if [[ -n "${QEC_DECODING_SERVER:-}" ]]; then
+  SERVER_CONFIG_FILE=$WORKDIR/server-config.yml
+  {
+    cat <<'YAML'
+server:
+  transports:
+    - type: udp
+      port: 0
+YAML
+    cat "$CONFIG_FILE"
+  } >"$SERVER_CONFIG_FILE"
+
   if [[ -n "${REQUIRE_SERVER_DECODE_COUNTS:-}" ]]; then
     QEC_DECODING_SERVER_STATS=1 \
-      "$QEC_DECODING_SERVER" --config="$CONFIG_FILE" --transport=udp --port=0 \
+      "$QEC_DECODING_SERVER" --config="$SERVER_CONFIG_FILE" \
         --timeout=300 >"$SERVER_LOG" 2>&1 &
   else
-    "$QEC_DECODING_SERVER" --config="$CONFIG_FILE" --transport=udp --port=0 \
+    "$QEC_DECODING_SERVER" --config="$SERVER_CONFIG_FILE" \
       --timeout=300 >"$SERVER_LOG" 2>&1 &
   fi
   SERVER_PID=$!

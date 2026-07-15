@@ -99,6 +99,9 @@ struct ITransceiver {
     return false;
   }
 
+  /// Stop a launched device scheduler while keeping the transport bound.
+  virtual void stop_device_scheduler() {}
+
   virtual ~ITransceiver() = default;
 };
 

@@ -227,6 +227,11 @@ if(TARGET cudaq-qec-realtime-decoding-server-cqr)
           12 6
       WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     )
+    set_property(TEST app_examples.surface_code-1-cqr-two-process-test-distance-3
+      APPEND PROPERTY ENVIRONMENT
+        "QEC_TWO_PROCESS_RECONFIG=1"
+        "QEC_RECONFIG_REQUESTS=2"
+        "QEC_RECONFIG_STATS_INTERVAL=1")
   endif()
 endif()
 

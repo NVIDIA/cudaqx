@@ -34,6 +34,38 @@ namespace cudaq::qec::decoding_server {
 
 using cudaq::qec::decoding::config::DecoderTransport;
 
+namespace {
+
+int pinned_cuda_device_for_transport(const SessionRegistry &registry) {
+  const auto &sessions = registry.sessions();
+  return sessions.size() == 1
+             ? sessions.begin()->second->dec->get_cuda_device_id()
+             : -1;
+}
+
+void validate_transport_requirements(const SessionRegistry &registry,
+                                     const std::string &source_name) {
+  if (registry.required_transport() != DecoderTransport::gpu_roce)
+    return;
+
+  const auto &sessions = registry.sessions();
+  if (sessions.size() != 1)
+    throw std::runtime_error("GPU RoCE transport currently supports exactly "
+                             "one decoder session in " +
+                             source_name + "; found " +
+                             std::to_string(sessions.size()) +
+                             ". Multi-decoder GPU RoCE is deferred.");
+
+  auto *session = sessions.begin()->second.get();
+  if (!session->graph_resources)
+    throw std::runtime_error(
+        "GPU RoCE requires a decoder that supports graph dispatch in " +
+        source_name +
+        " (supports_graph_dispatch() must return true and "
+        "capture_decode_graph() must succeed)");
+}
+
+} // namespace
 // ---------------------------------------------------------------------------
 // Constructors
 // ---------------------------------------------------------------------------
@@ -72,60 +104,129 @@ DecodingServer::make_transport(DecoderTransport transport_type,
   throw std::runtime_error("make_transport: unknown DecoderTransport value");
 }
 
-DecodingServer::DecodingServer(const std::string &config_yaml) {
-  // Parse the YAML once: SessionRegistry validates the decoder entries
-  // (including the uniform-transport rule — MVP limitation: heterogeneous
-  // deployments require per-session transceiver binding, deferred to a
-  // follow-up once CpuRoce/GpuRoceTransceiverAdapter are available) and
-  // required_transport() then drives transceiver creation.
-  std::ifstream f(config_yaml);
-  if (!f.is_open())
-    throw std::runtime_error("Cannot open config: " + config_yaml);
-  std::string yaml_str((std::istreambuf_iterator<char>(f)), {});
+DecodingServer::DecodingServer(const std::string &config_path)
+    : DecodingServer(
+          yaml_string_tag_t{},
+          [&config_path]() -> std::string {
+            std::ifstream f(config_path);
+            if (!f.is_open())
+              throw std::runtime_error("Cannot open config: " + config_path);
+            return {std::istreambuf_iterator<char>(f), {}};
+          }(),
+          config_path) {}
+
+DecodingServer::DecodingServer(yaml_string_tag_t, const std::string &yaml_str,
+                               const std::string &config_path) {
+  try {
+    auto config =
+        cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(
+            yaml_str);
+    if (config.decoders.empty())
+      throw std::runtime_error("No decoders in config: " + config_path);
+    registry_.load_from_config(config, config_path);
+    validate_transport_requirements(registry_, config_path);
+    register_handlers();
+
+    const auto transport_type = registry_.required_transport();
+    // gpu_roce must run on the GPU the FPGA/NIC is affine to; when exactly
+    // one session is booting, pass its decoder's cuda_device_id so the
+    // factory can place the transport on that device.
+    const int pinned_cuda_device = pinned_cuda_device_for_transport(registry_);
+    auto t = make_transport(transport_type, pinned_cuda_device);
+    transport_cuda_device_ = resolve_decode_device(pinned_cuda_device);
+    ITransceiver *raw = t.get();
+    owned_transports_.push_back(std::move(t));
+    function_transport_[kEnqueueSyndromesFunctionId] = raw;
+    function_transport_[kGetCorrectionsFunctionId] = raw;
+    function_transport_[kResetDecoderFunctionId] = raw;
+
+    // For the GPU RoCE path, wire the first session's decoder graph to the
+    // Hololink ring buffer via the CUDAQ device-graph scheduler. The shared
+    // validation above enforces that there is exactly one compatible session.
+    if (transport_type == DecoderTransport::gpu_roce) {
+      auto *session = registry_.sessions().begin()->second.get();
+      if (!raw->launch_device_scheduler(session->graph_resources.get()))
+        throw std::runtime_error(
+            "gpu_roce transceiver did not provide a device scheduler");
+    }
+  } catch (...) {
+    registry_.stop_workers();
+    throw;
+  }
+}
+
+std::unique_ptr<DecodingServer>
+DecodingServer::from_yaml_str(const std::string &yaml_str,
+                              const std::string &config_path) {
+  // Use new directly: make_unique cannot reach the private constructor.
+  return std::unique_ptr<DecodingServer>(
+      new DecodingServer(yaml_string_tag_t{}, yaml_str, config_path));
+}
+
+void DecodingServer::reconfigure_from_yaml_str(const std::string &yaml_str,
+                                               const std::string &config_path) {
+  // GPU RoCE only: run() stays alive, but CPU handler lambdas are idle while
+  // the device scheduler owns dispatch during registry replacement.
   auto config =
       cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(
           yaml_str);
   if (config.decoders.empty())
-    throw std::runtime_error("No decoders in config: " + config_yaml);
-  registry_.load_from_config(config, config_yaml);
-  register_handlers();
+    throw std::runtime_error("No decoders in config: " + config_path);
 
-  const auto transport_type = registry_.required_transport();
-  // gpu_roce must run on the GPU the FPGA/NIC is affine to; when exactly one
-  // session is booting, pass its decoder's cuda_device_id so the factory can
-  // place the transport on that device.
-  const auto &boot_sessions = registry_.sessions();
-  const int pinned_cuda_device =
-      boot_sessions.size() == 1
-          ? boot_sessions.begin()->second->dec->get_cuda_device_id()
-          : -1;
-  auto t = make_transport(transport_type, pinned_cuda_device);
-  ITransceiver *raw = t.get();
-  owned_transports_.push_back(std::move(t));
-  function_transport_[kEnqueueSyndromesFunctionId] = raw;
-  function_transport_[kGetCorrectionsFunctionId] = raw;
-  function_transport_[kResetDecoderFunctionId] = raw;
+  const auto transport_type = config.decoders.front().transport;
+  for (const auto &decoder : config.decoders) {
+    if (decoder.transport != transport_type)
+      throw std::runtime_error("Mixed transport types in " + config_path +
+                               ": all decoder entries must declare the same "
+                               "transport");
+  }
+  if (transport_type != DecoderTransport::gpu_roce)
+    throw std::runtime_error(
+        "transport-preserving reconfigure currently requires gpu_roce");
+  if (config.decoders.size() != 1)
+    throw std::runtime_error(
+        "GPU RoCE reconfigure currently requires exactly one decoder");
+  const int new_cuda_device = resolve_decode_device(
+      config.decoders.front().cuda_device_id.value_or(-1));
+  if (transport_cuda_device_ >= 0 && new_cuda_device != transport_cuda_device_)
+    throw std::runtime_error(
+        "cannot change cuda_device_id during GPU RoCE live reconfigure");
+  if (!registry_.sessions().empty() &&
+      registry_.required_transport() != transport_type)
+    throw std::runtime_error(
+        "cannot change decoder transport during live reconfigure");
+  if (owned_transports_.empty())
+    throw std::runtime_error("cannot reconfigure without an owned transport");
 
-  // For the GPU RoCE path, wire the first (and only) session's decoder graph
-  // to the Hololink ring buffer via the CUDAQ device-graph scheduler.
-  // Multi-decoder GPU RoCE binding is deferred to a follow-up.
-  if (transport_type == DecoderTransport::gpu_roce) {
-    const auto &sessions = registry_.sessions();
-    if (sessions.size() != 1)
-      throw std::runtime_error(
-          "GPU RoCE transport currently supports exactly one decoder session; "
-          "found " +
-          std::to_string(sessions.size()) +
-          ". Multi-decoder GPU RoCE is deferred.");
-    auto *session = sessions.begin()->second.get();
-    if (!session->graph_resources)
-      throw std::runtime_error(
-          "GPU RoCE requires a decoder that supports graph dispatch "
-          "(supports_graph_dispatch() must return true and "
-          "capture_decode_graph() must succeed)");
-    if (!raw->launch_device_scheduler(session->graph_resources.get()))
+  for (auto &transport : owned_transports_)
+    transport->stop_device_scheduler();
+  registry_.stop_workers();
+  registry_ = SessionRegistry{};
+
+  try {
+    registry_.load_from_config(config, config_path);
+    validate_transport_requirements(registry_, config_path);
+
+    auto *session = registry_.sessions().begin()->second.get();
+    bool launched = false;
+    for (auto &transport : owned_transports_) {
+      if (transport->launch_device_scheduler(session->graph_resources.get())) {
+        launched = true;
+        break;
+      }
+    }
+    if (!launched)
       throw std::runtime_error(
           "gpu_roce transceiver did not provide a device scheduler");
+    transport_cuda_device_ = new_cuda_device;
+  } catch (...) {
+    for (auto &transport : owned_transports_)
+      transport->stop_device_scheduler();
+    registry_.stop_workers();
+    // Decoder-less awaiting-config state; the run() thread stays alive, and
+    // RPCs fail until a valid reconfigure succeeds.
+    registry_ = SessionRegistry{};
+    throw;
   }
 }
 

@@ -33,12 +33,15 @@ using TransportMap = std::unordered_map<uint32_t, ITransceiver *>;
 /// transceiver(s), and runs the blocking receive loop.
 class DecodingServer {
 public:
-  /// Config-driven constructor: reads the transport type from \p config_yaml
-  /// and creates the appropriate transceiver.  Requires CUDAQ_REALTIME for
-  /// RoCE transports; throws std::runtime_error if the adapters are not
-  /// available.  Use the explicit-transceiver constructors for testing with
-  /// LoopbackTransceiver.
-  explicit DecodingServer(const std::string &config_yaml);
+  /// Reads YAML from \p config_path, creates the transceiver, and launches
+  /// the server.  Throws if the transport adapters are unavailable.
+  explicit DecodingServer(const std::string &config_path);
+
+  /// Construct from a pre-read YAML string; \p config_path is for error
+  /// messages only and is not re-opened (avoids TOCTOU on hot-reload).
+  static std::unique_ptr<DecodingServer>
+  from_yaml_str(const std::string &yaml_str,
+                const std::string &config_path = "<in-memory>");
 
   /// Single-transceiver constructor: all three RPCs share one transport.
   DecodingServer(std::unique_ptr<ITransceiver> transport,
@@ -74,7 +77,18 @@ public:
   /// (test/diagnostic evidence; callers gate on QEC_DECODING_SERVER_STATS).
   void print_session_stats() const;
 
+  /// Replace decoder sessions without rebinding owned transports.
+  void
+  reconfigure_from_yaml_str(const std::string &yaml_str,
+                            const std::string &config_path = "<in-memory>");
+
+  int transport_cuda_device() const { return transport_cuda_device_; }
+
 private:
+  struct yaml_string_tag_t {};
+  explicit DecodingServer(yaml_string_tag_t, const std::string &yaml_str,
+                          const std::string &config_path);
+
   void init(const std::string &config_yaml);
   void register_handlers();
 
@@ -98,6 +112,7 @@ private:
   /// Routing within the server is by function_id, not by decoder_id.
   TransportMap function_transport_;
   std::vector<std::unique_ptr<ITransceiver>> owned_transports_;
+  int transport_cuda_device_{-1};
 };
 
 } // namespace cudaq::qec::decoding_server

@@ -16,6 +16,7 @@
 #include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/realtime/decoding.h"
 #include "cudaq/qec/realtime/decoding_config.h"
+#include <cctype>
 #include <common/CustomOp.h>
 #include <common/ExecutionContext.h>
 #include <common/NoiseModel.h>
@@ -43,17 +44,64 @@
 extern "C" std::uint64_t cudaqx_qec_device_call_dispatch_count();
 
 namespace {
+constexpr const char *kDefaultEndpointFile =
+    "/tmp/cudaq-qec-decoding-server.env";
+
 std::string env_or(const char *name, const std::string &fallback) {
   const char *value = std::getenv(name);
   return (value && *value) ? std::string(value) : fallback;
 }
 
+bool env_set(const char *name) {
+  const char *value = std::getenv(name);
+  return value && *value;
+}
+
+std::string endpoint_file_default_for_transport(const std::string &transport) {
+  if (transport == "udp")
+    return kDefaultEndpointFile;
+  std::string suffix = transport;
+  for (char &c : suffix)
+    if (!std::isalnum(static_cast<unsigned char>(c)))
+      c = '-';
+  return "/tmp/cudaq-qec-decoding-server-" + suffix + ".env";
+}
+
+std::string endpoint_file_path() {
+  if (env_set("QEC_DECODING_SERVER_ENDPOINT_FILE"))
+    return std::getenv("QEC_DECODING_SERVER_ENDPOINT_FILE");
+  return endpoint_file_default_for_transport(
+      env_or("QEC_DECODING_SERVER_TRANSPORT", "udp"));
+}
+
+std::string endpoint_file_value(const std::string &key) {
+  std::ifstream endpoint(endpoint_file_path());
+  if (!endpoint)
+    return {};
+  std::string line;
+  const std::string prefix = key + "=";
+  while (std::getline(endpoint, line))
+    if (line.rfind(prefix, 0) == 0)
+      return line.substr(prefix.size());
+  return {};
+}
+
+std::string endpoint_value_or_env(const char *name,
+                                  const std::string &fallback) {
+  if (env_set(name))
+    return std::getenv(name);
+  const std::string value = endpoint_file_value(name);
+  return value.empty() ? fallback : value;
+}
+
 void initialize_realtime_channel(const char *prog) {
   std::vector<std::string> args = {prog};
-  if (const char *port = std::getenv("QEC_DECODING_SERVER_PORT");
-      port && *port) {
+  std::string port = env_or("QEC_DECODING_SERVER_PORT", "");
+  if (port.empty() && !env_set("CUDAQ_DEVICE_CALL_CHANNEL"))
+    port = endpoint_file_value("QEC_DECODING_SERVER_PORT");
+  if (!port.empty()) {
     const std::string transport =
-        env_or("QEC_DECODING_SERVER_TRANSPORT", "udp");
+        endpoint_value_or_env("QEC_DECODING_SERVER_TRANSPORT", "udp");
     if (transport == "cpu_roce") {
       // The RDMA ring geometry (slots x slot-size) is part of the cpu_roce
       // wire contract: the channel writes requests directly into the server's
@@ -67,11 +115,15 @@ void initialize_realtime_channel(const char *prog) {
       args.push_back("local-ip=" +
                      env_or("CUDAQ_CPU_ROCE_TEST_CHANNEL_IP", "10.0.0.1"));
       args.push_back("rendezvous-host=" +
-                     env_or("CUDAQ_CPU_ROCE_TEST_DAEMON_IP", "10.0.0.2"));
+                     endpoint_value_or_env(
+                         "QEC_DECODING_SERVER_HOST",
+                         env_or("CUDAQ_CPU_ROCE_TEST_DAEMON_IP", "10.0.0.2")));
       args.push_back(std::string("rendezvous-port=") + port);
     } else {
       args.push_back("--cudaq-device-call=udp");
-      args.push_back("udp-host=127.0.0.1");
+      args.push_back(
+          "udp-host=" +
+          endpoint_value_or_env("QEC_DECODING_SERVER_HOST", "127.0.0.1"));
       args.push_back(std::string("udp-port=") + port);
     }
   }

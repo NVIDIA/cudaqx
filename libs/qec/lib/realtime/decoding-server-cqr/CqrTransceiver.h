@@ -17,6 +17,7 @@
 #include <cstring>
 #include <deque>
 #include <future>
+#include <limits>
 #include <mutex>
 #include <stdexcept>
 #include <unordered_map>
@@ -91,13 +92,16 @@ inline bool parse_cqr_enqueue_frame(const void *rx_slot, std::size_t slot_size,
 /// Bridges CUDAQ_REALTIME DeviceCallService handler callbacks to ITransceiver.
 ///
 /// CUDAQ calls handler functions synchronously with (rx_slot, tx_slot,
-/// slot_size), all on the SINGLE transport dispatcher thread.
+/// slot_size). A standalone daemon may have more than one transport dispatcher
+/// thread sharing this bridge.
 ///
 /// Response-bearing calls (get_corrections, reset_decoder): inject() copies
 /// rx_slot bytes into an RxFrame, stores the tx_slot pointer keyed by
-/// request_id, and blocks until the DecodingSession worker calls send() with
-/// the response — at which point send() copies the bytes to tx_slot and
-/// unblocks the handler thread so CUDAQ can return.
+/// an internal request_id, and blocks until the DecodingSession worker calls
+/// send() with
+/// the response — at which point send() copies the bytes to tx_slot,
+/// restores the caller's
+/// original request_id, and unblocks the handler thread so CUDAQ can return.
 ///
 /// Fire-and-forget calls (enqueue_syndromes): inject() enqueues the frame
 /// and writes an immediate ACCEPTED response into tx_slot WITHOUT blocking —
@@ -125,6 +129,7 @@ public:
 
 private:
   bool stopped_ = false;
+  uint32_t next_internal_request_id_ = 1;
 
   // Write an immediate RPCResponse (no result payload) into the CUDAQ
   // tx_slot: OK acks fire-and-forget calls; error statuses complete blocking
@@ -136,13 +141,20 @@ private:
   struct PendingTx {
     void *tx_slot;
     std::size_t slot_size;
+    uint32_t original_request_id;
+    uint64_t ptp_timestamp;
     std::promise<void> done;
   };
 
   std::mutex mtx_;
   std::condition_variable cv_;
   std::deque<RxFrame> inbox_;
-  std::unordered_map<uint32_t, PendingTx> pending_; // keyed by request_id
+  // Keyed by daemon-local request_id. The caller's request_id is not globally
+  // unique once several transport listeners share one CQR bridge.
+  std::unordered_map<uint32_t, PendingTx> pending_;
+
+  uint32_t allocate_internal_request_id_locked();
+  static void rewrite_frame_request_id(RxFrame &frame, uint32_t request_id);
 
   // Translate CUDAQ enqueue_syndromes payload (stdvec<i1> format) to our
   // RPCHeader + EnqueuePayload + bit-packed bytes.
@@ -163,8 +175,13 @@ private:
 inline void CqrTransceiver::inject(const void *rx_slot, void *tx_slot,
                                    std::size_t slot_size,
                                    uint32_t function_id) {
-  if (!rx_slot || !tx_slot || slot_size < sizeof(RPCHeader))
+  if (!tx_slot || slot_size < sizeof(cudaq::realtime::RPCResponse))
     return;
+  if (!rx_slot || slot_size < sizeof(RPCHeader)) {
+    write_ack(tx_slot, /*request_id=*/0, /*ptp_timestamp=*/0,
+              RpcStatus::BAD_REQUEST);
+    return;
+  }
 
   RxFrame frame;
   bool ok =
@@ -187,7 +204,7 @@ inline void CqrTransceiver::inject(const void *rx_slot, void *tx_slot,
   }
 
   const auto *hdr = reinterpret_cast<const RPCHeader *>(frame.buf.data());
-  const uint32_t rid = hdr->request_id;
+  const uint32_t original_rid = hdr->request_id;
   const uint64_t ptp = hdr->ptp_timestamp; // save before frame is moved
 
   if (function_id == kEnqueueSyndromesFunctionId) {
@@ -202,7 +219,7 @@ inline void CqrTransceiver::inject(const void *rx_slot, void *tx_slot,
       inbox_.push_back(std::move(frame));
     }
     cv_.notify_one();
-    write_ack(tx_slot, rid, ptp);
+    write_ack(tx_slot, original_rid, ptp);
     return;
   }
 
@@ -213,12 +230,16 @@ inline void CqrTransceiver::inject(const void *rx_slot, void *tx_slot,
     // will never dispatch this frame, so parking on the promise would hang
     // the CUDAQ dispatcher thread forever.  Complete the slot immediately.
     if (stopped_) {
-      write_ack(tx_slot, rid, ptp, RpcStatus::BAD_REQUEST);
+      write_ack(tx_slot, original_rid, ptp, RpcStatus::BAD_REQUEST);
       return;
     }
-    auto &p = pending_[rid];
+    const uint32_t internal_rid = allocate_internal_request_id_locked();
+    rewrite_frame_request_id(frame, internal_rid);
+    auto &p = pending_[internal_rid];
     p.tx_slot = tx_slot;
     p.slot_size = slot_size;
+    p.original_request_id = original_rid;
+    p.ptp_timestamp = ptp;
     fut = p.done.get_future();
     inbox_.push_back(std::move(frame));
   }
@@ -238,6 +259,27 @@ inline RxFrame CqrTransceiver::recv() {
   return frame;
 }
 
+inline uint32_t CqrTransceiver::allocate_internal_request_id_locked() {
+  for (uint64_t attempts = 0;
+       attempts <= static_cast<uint64_t>(std::numeric_limits<uint32_t>::max());
+       ++attempts) {
+    const uint32_t candidate = next_internal_request_id_++;
+    if (candidate == 0)
+      continue;
+    if (pending_.find(candidate) == pending_.end())
+      return candidate;
+  }
+  throw std::runtime_error("CQR transceiver request-id space exhausted");
+}
+
+inline void CqrTransceiver::rewrite_frame_request_id(RxFrame &frame,
+                                                     uint32_t request_id) {
+  if (frame.buf.size() < sizeof(RPCHeader))
+    throw std::runtime_error("malformed CQR frame: missing RPC header");
+  auto *hdr = reinterpret_cast<RPCHeader *>(frame.buf.data());
+  hdr->request_id = request_id;
+}
+
 inline void CqrTransceiver::shutdown() {
   // Move out all in-flight pending entries under the lock, then complete
   // them outside it.  The recv loop exits without draining inbox_, so a
@@ -254,7 +296,9 @@ inline void CqrTransceiver::shutdown() {
   }
   cv_.notify_all();
   for (auto &[rid, p] : drained) {
-    write_ack(p.tx_slot, rid, /*ptp_timestamp=*/0, RpcStatus::BAD_REQUEST);
+    (void)rid;
+    write_ack(p.tx_slot, p.original_request_id, p.ptp_timestamp,
+              RpcStatus::BAD_REQUEST);
     p.done.set_value();
   }
 }
@@ -279,10 +323,10 @@ inline void CqrTransceiver::send(const PeerId & /*peer*/, const uint8_t *data,
     return;
 
   const auto *resp = reinterpret_cast<const RPCResponse *>(data);
-  const uint32_t rid = resp->request_id;
+  const uint32_t internal_rid = resp->request_id;
 
   std::lock_guard<std::mutex> lk(mtx_);
-  auto it = pending_.find(rid);
+  auto it = pending_.find(internal_rid);
   if (it == pending_.end())
     return;
 
@@ -292,7 +336,8 @@ inline void CqrTransceiver::send(const PeerId & /*peer*/, const uint8_t *data,
     // written, so the client would read stale slot memory as correction
     // bits.  Fail the RPC explicitly instead (the pre-decoding-server code
     // returned result-buffer-too-small here).
-    write_ack(p.tx_slot, rid, resp->ptp_timestamp, RpcStatus::INTERNAL_ERROR);
+    write_ack(p.tx_slot, p.original_request_id, resp->ptp_timestamp,
+              RpcStatus::INTERNAL_ERROR);
     p.done.set_value();
     pending_.erase(it);
     return;
@@ -300,6 +345,8 @@ inline void CqrTransceiver::send(const PeerId & /*peer*/, const uint8_t *data,
 
   // Write our RPCResponse into the CUDAQ tx_slot (layouts are compatible).
   std::memcpy(p.tx_slot, data, len);
+  auto *out = static_cast<cudaq::realtime::RPCResponse *>(p.tx_slot);
+  out->request_id = p.original_request_id;
   // Publish the magic last (release store) so the CUDAQ runtime sees a
   // complete response before observing the magic word.
   __atomic_store_n(reinterpret_cast<uint32_t *>(p.tx_slot),

@@ -223,6 +223,11 @@ GpuRoceTransceiver::GpuRoceTransceiver(const GpuRoceConfig &config)
 // ---------------------------------------------------------------------------
 
 void GpuRoceTransceiver::launch_scheduler(void *raw_graph_resources) {
+  if (stopped_.load(std::memory_order_acquire))
+    throw std::runtime_error(
+        "GpuRoceTransceiver::launch_scheduler: transport is stopped");
+  stop_device_scheduler();
+
   auto *graph_res =
       static_cast<cudaq::qec::realtime::graph_resources *>(raw_graph_resources);
   if (!graph_res || !graph_res->graph_exec)
@@ -359,8 +364,21 @@ void GpuRoceTransceiver::launch_scheduler(void *raw_graph_resources) {
         cudaGetErrorString(cerr));
   }
 
-  monitor_thread_ =
-      std::thread([this] { hololink_blocking_monitor(transceiver_); });
+  if (monitor_thread_.joinable() &&
+      monitor_done_.load(std::memory_order_acquire))
+    monitor_thread_.join();
+  if (!monitor_thread_.joinable()) {
+    monitor_done_.store(false, std::memory_order_release);
+    try {
+      monitor_thread_ = std::thread([this] {
+        hololink_blocking_monitor(transceiver_);
+        monitor_done_.store(true, std::memory_order_release);
+      });
+    } catch (...) {
+      monitor_done_.store(true, std::memory_order_release);
+      throw;
+    }
+  }
 
   CUDA_QEC_INFO("GpuRoceTransceiver: GPU scheduler launched  "
                 "QP=0x{:X} rkey={} buf=0x{:X}  "
@@ -402,8 +420,41 @@ void GpuRoceTransceiver::send(const PeerId & /*peer*/, const uint8_t * /*data*/,
 }
 
 // ---------------------------------------------------------------------------
-// shutdown / destructor
+// scheduler / shutdown / destructor
 // ---------------------------------------------------------------------------
+
+void GpuRoceTransceiver::stop_device_scheduler() {
+  if (sched_stream_ || ft_host_ || shutdown_host_ || d_stats_)
+    cudaSetDevice(gpu_id_);
+  if (shutdown_host_)
+    __atomic_store_n(shutdown_host_, 1, __ATOMIC_RELEASE);
+
+  if (sched_stream_) {
+    cudaStreamSynchronize(sched_stream_);
+    if (sched_ctx_ && fn_destroy_dispatch_graph_)
+      fn_destroy_dispatch_graph_(sched_ctx_);
+    sched_ctx_ = nullptr;
+    cudaStreamDestroy(sched_stream_);
+    sched_stream_ = nullptr;
+  } else if (sched_ctx_ && fn_destroy_dispatch_graph_) {
+    fn_destroy_dispatch_graph_(sched_ctx_);
+    sched_ctx_ = nullptr;
+  }
+
+  if (ft_host_) {
+    cudaFreeHost(ft_host_);
+    ft_host_ = nullptr;
+  }
+  if (shutdown_host_) {
+    cudaFreeHost(const_cast<int *>(shutdown_host_));
+    shutdown_host_ = nullptr;
+    shutdown_dev_ = nullptr;
+  }
+  if (d_stats_) {
+    cudaFree(d_stats_);
+    d_stats_ = nullptr;
+  }
+}
 
 void GpuRoceTransceiver::shutdown() {
   if (stopped_.exchange(true, std::memory_order_acq_rel))
@@ -430,19 +481,7 @@ GpuRoceTransceiver::~GpuRoceTransceiver() {
   if (monitor_thread_.joinable())
     monitor_thread_.join();
 
-  if (sched_stream_) {
-    cudaStreamSynchronize(sched_stream_); // drain the self-relaunch chain
-    if (sched_ctx_ && fn_destroy_dispatch_graph_)
-      fn_destroy_dispatch_graph_(sched_ctx_);
-    cudaStreamDestroy(sched_stream_);
-  }
-
-  if (ft_host_)
-    cudaFreeHost(ft_host_);
-  if (shutdown_host_)
-    cudaFreeHost(const_cast<int *>(shutdown_host_));
-  if (d_stats_)
-    cudaFree(d_stats_);
+  stop_device_scheduler();
   if (transceiver_)
     hololink_destroy_transceiver(transceiver_);
 }

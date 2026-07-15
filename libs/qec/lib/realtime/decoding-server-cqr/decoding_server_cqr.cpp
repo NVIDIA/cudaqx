@@ -39,11 +39,16 @@
 
 extern "C" void cudaqx_qec_decoding_server_shutdown();
 #include <cstdint>
+#include <cstdio>
+#include <fstream>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <unordered_set>
 
 namespace {
 
@@ -62,6 +67,14 @@ static CqrTransceiver *g_transceiver = nullptr;
 static std::unique_ptr<DecodingServer> g_server;
 static std::thread g_server_thread;
 static std::once_flag g_init_flag;
+
+// Guards g_server / g_transceiver across hot reconfiguration. RPC handlers
+// and stats readers hold it shared; apply_config/shutdown hold it unique so
+// pointer swaps wait for in-flight RPCs and new RPCs see a complete server.
+static std::shared_mutex g_server_mutex;
+static std::mutex g_apply_config_mutex;
+// True once init_server has run; null g_transceiver after that -> NOT_READY.
+static std::atomic<bool> g_ever_initialized{false};
 
 // Counts requests dispatched through this service (test hook).
 static std::atomic<uint64_t> g_service_dispatch_count{0};
@@ -87,7 +100,8 @@ static void init_server() {
   // throwing DecodingServer constructor has already freed the transceiver, and
   // dispatch_rpc treats a null g_transceiver as "not serving".
   g_transceiver = raw;
-  g_server_thread = std::thread([] { g_server->run(); });
+  g_server_thread = std::thread([s = g_server.get()] { s->run(); });
+  g_ever_initialized.store(true, std::memory_order_release);
   // In-process applications never call the explicit shutdown hook the server
   // uses; stop the server at exit() so the static g_server_thread is joined
   // before static destruction (a still-joinable thread would
@@ -96,32 +110,38 @@ static void init_server() {
 }
 
 // ---------------------------------------------------------------------------
-// CUDAQ handler functions — thin delegates to CqrTransceiver::inject()
+// CUDAQ handler functions - thin delegates to CqrTransceiver::inject()
 // ---------------------------------------------------------------------------
 
 // Write an error RPCResponse into tx_slot (handler-level failures must not
 // propagate into the transport dispatcher loop).
 constexpr int32_t kStatusHandlerException = static_cast<int32_t>(
     cudaq::qec::decoding_server::RpcStatus::INTERNAL_ERROR);
+constexpr int32_t kStatusNotReady =
+    static_cast<int32_t>(cudaq::qec::decoding_server::RpcStatus::NOT_READY);
 
 static void write_error_response(const void *rx_slot, void *tx_slot,
                                  std::size_t slot_size, int32_t status) {
-  if (!tx_slot || !rx_slot || slot_size < sizeof(cudaq::realtime::RPCHeader))
+  if (!tx_slot || slot_size < sizeof(cudaq::realtime::RPCResponse))
     return;
-  const auto *req = static_cast<const cudaq::realtime::RPCHeader *>(rx_slot);
+  uint32_t request_id = 0;
+  uint64_t ptp_timestamp = 0;
+  if (rx_slot && slot_size >= sizeof(cudaq::realtime::RPCHeader)) {
+    const auto *req = static_cast<const cudaq::realtime::RPCHeader *>(rx_slot);
+    request_id = req->request_id;
+    ptp_timestamp = req->ptp_timestamp;
+  }
   auto *resp = static_cast<cudaq::realtime::RPCResponse *>(tx_slot);
   resp->status = status;
   resp->result_len = 0;
-  resp->request_id = req->request_id;
-  resp->ptp_timestamp = req->ptp_timestamp;
+  resp->request_id = request_id;
+  resp->ptp_timestamp = ptp_timestamp;
   __atomic_store_n(reinterpret_cast<uint32_t *>(tx_slot),
                    cudaq::realtime::RPC_MAGIC_RESPONSE, __ATOMIC_RELEASE);
 }
 
-// --save_syndrome support: the served path bypasses host::enqueue_syndromes
-// (where capture used to hook), so replicate its capture here -- unpack the
-// wire's LSB-first bits and repack MSB-first, byte-identical to the host
-// path's saved-syndrome format.
+// --save_syndrome: the served path bypasses host::enqueue_syndromes, so
+// replicate its LSB->MSB repack here.
 static void capture_enqueue_syndromes(const void *rx_slot,
                                       std::size_t slot_size) {
   auto callback = cudaq::qec::decoding::host::_get_syndrome_capture_callback();
@@ -139,20 +159,24 @@ static void capture_enqueue_syndromes(const void *rx_slot,
 }
 
 // The server is constructed lazily on the first RPC (the in-process
-// application path configures decoders AFTER the realtime channel — and
-// with it this dispatch session — is created); the server path instead
+// application path configures decoders AFTER the realtime channel - and
+// with it this dispatch session - is created); the server path instead
 // initializes eagerly at session creation via CUDAQ_QEC_DECODER_CONFIG so
 // slow decoder construction happens before its READY line.
 static void dispatch_rpc(const void *rx_slot, void *tx_slot,
                          std::size_t slot_size, uint32_t function_id) {
   g_service_dispatch_count.fetch_add(1, std::memory_order_relaxed);
   try {
+    std::shared_lock server_guard(g_server_mutex);
     std::call_once(g_init_flag, init_server);
-    // g_transceiver is null if init_server failed or after shutdown().
-    // g_init_flag is not resettable, so call_once won't retry after shutdown.
+    // g_transceiver is null if init_server failed, after shutdown(), or after
+    // a failed config apply. g_init_flag is not resettable, so call_once won't
+    // retry after shutdown.
     if (!g_transceiver) {
       write_error_response(rx_slot, tx_slot, slot_size,
-                           kStatusHandlerException);
+                           g_ever_initialized.load(std::memory_order_acquire)
+                               ? kStatusNotReady
+                               : kStatusHandlerException);
       return;
     }
     if (function_id == kEnqueueSyndromesFunctionId)
@@ -379,6 +403,7 @@ cudaqx_qec_decoding_server_max_concurrent() {
 /// QEC_DECODING_SERVER_STATS environment variable.
 extern "C" __attribute__((visibility("default"))) void
 cudaqx_qec_decoding_server_print_stats() {
+  std::shared_lock server_guard(g_server_mutex);
   if (g_server)
     g_server->print_session_stats();
 }
@@ -388,6 +413,7 @@ cudaqx_qec_decoding_server_print_stats() {
 /// joinable at static destruction (std::terminate).
 extern "C" __attribute__((visibility("default"))) void
 cudaqx_qec_decoding_server_shutdown() {
+  std::unique_lock server_guard(g_server_mutex);
   if (g_server) {
     g_server->stop();
     if (g_server_thread.joinable())
@@ -395,4 +421,131 @@ cudaqx_qec_decoding_server_shutdown() {
     g_server.reset();
     g_transceiver = nullptr;
   }
+}
+
+namespace {
+void set_apply_config_error(char *err, size_t err_len, const char *msg) {
+  if (err && err_len > 0)
+    std::snprintf(err, err_len, "%s", msg);
+}
+} // namespace
+
+/// Returns 0=ok, 1=static config rejected (old serving), 2=decoder-less,
+/// 3=busy.
+extern "C" __attribute__((visibility("default"))) int
+cudaqx_qec_decoding_server_apply_config_from_yaml(const char *yaml,
+                                                  size_t yaml_len, char *err,
+                                                  size_t err_len) {
+  std::unique_lock apply_config_guard(g_apply_config_mutex, std::try_to_lock);
+  if (!apply_config_guard.owns_lock()) {
+    set_apply_config_error(
+        err, err_len,
+        "apply_config already in progress; retry after completion");
+    return 3;
+  }
+  if (!yaml || yaml_len == 0) {
+    set_apply_config_error(err, err_len, "empty config");
+    return 1;
+  }
+
+  cudaq::qec::decoding::config::multi_decoder_config config;
+  try {
+    config = cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(
+        std::string(yaml, yaml_len));
+    if (config.decoders.empty())
+      throw std::runtime_error("no decoders in config");
+    std::unordered_set<int64_t> ids;
+    for (const auto &d : config.decoders) {
+      if (d.type.empty())
+        throw std::runtime_error("decoder " + std::to_string(d.id) +
+                                 " has no type");
+      if (d.block_size == 0 || d.syndrome_size == 0)
+        throw std::runtime_error("decoder " + std::to_string(d.id) +
+                                 " has zero block_size/syndrome_size");
+      if (!ids.insert(d.id).second)
+        throw std::runtime_error("duplicate decoder id " +
+                                 std::to_string(d.id));
+    }
+  } catch (const std::exception &e) {
+    cudaq::qec::error("decoding-server apply_config rejected (config invalid, "
+                      "old decoders still serving): {}",
+                      e.what());
+    set_apply_config_error(err, err_len, e.what());
+    return 1;
+  }
+
+  std::unique_ptr<DecodingServer> old;
+  std::thread old_thread;
+  {
+    std::unique_lock server_guard(g_server_mutex);
+    // RPC handlers hold the shared lock through inject(), so this waits for
+    // in-flight blocking decodes before entering the decoder-less gap.
+    // Explicit apply owns recovery from here; lazy init will not run later.
+    std::call_once(g_init_flag, [] {});
+    old = std::move(g_server);
+    old_thread = std::move(g_server_thread);
+    g_transceiver = nullptr;
+    g_ever_initialized.store(true, std::memory_order_release);
+  }
+
+  if (old)
+    old->stop();
+  if (old_thread.joinable())
+    old_thread.join();
+  old.reset();
+
+  auto t = std::make_unique<CqrTransceiver>();
+  CqrTransceiver *next_transceiver = t.get();
+  std::unique_ptr<DecodingServer> next;
+  try {
+    next = std::make_unique<DecodingServer>(std::move(t), config);
+  } catch (const std::exception &e) {
+    cudaq::qec::error(
+        "decoding-server apply_config failed (decoder-less; awaiting valid "
+        "config): {}",
+        e.what());
+    set_apply_config_error(err, err_len, e.what());
+    return 2;
+  }
+
+  std::thread next_thread;
+  try {
+    DecodingServer *started = next.get();
+    next_thread = std::thread([started] { started->run(); });
+  } catch (const std::exception &e) {
+    cudaq::qec::error(
+        "decoding-server apply_config failed to start server thread "
+        "(decoder-less; awaiting valid config): {}",
+        e.what());
+    set_apply_config_error(err, err_len, e.what());
+    return 2;
+  }
+
+  {
+    std::unique_lock server_guard(g_server_mutex);
+    g_server = std::move(next);
+    g_transceiver = next_transceiver;
+    g_server_thread = std::move(next_thread);
+  }
+  return 0;
+}
+
+/// File-path variant: reads CUDAQ_QEC_DECODER_CONFIG and delegates.
+/// Returns same codes as apply_config_from_yaml, or -2 if no path is set.
+extern "C" __attribute__((visibility("default"))) int
+cudaqx_qec_decoding_server_apply_config() {
+  const char *cfg = std::getenv("CUDAQ_QEC_DECODER_CONFIG");
+  if (!cfg || cfg[0] == '\0')
+    return -2;
+  std::ifstream file(cfg);
+  if (!file) {
+    cudaq::qec::error("decoding-server apply_config: cannot open {}", cfg);
+    return 1;
+  }
+  std::stringstream text;
+  text << file.rdbuf();
+  const std::string yaml = text.str();
+  char reason[512] = {0};
+  return cudaqx_qec_decoding_server_apply_config_from_yaml(
+      yaml.data(), yaml.size(), reason, sizeof(reason));
 }
