@@ -7,8 +7,6 @@
  ******************************************************************************/
 #include "cudaq/qec/code.h"
 
-#include "device/memory_circuit.h"
-
 INSTANTIATE_REGISTRY(cudaq::qec::code, const cudaqx::heterogeneous_map &)
 
 namespace cudaq::qec {

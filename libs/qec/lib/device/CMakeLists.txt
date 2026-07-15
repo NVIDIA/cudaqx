@@ -7,6 +7,6 @@
 # ============================================================================ #
 
 cudaqx_add_device_code(cudaq-qec
-  SOURCES 
+  SOURCES
     memory_circuit.cpp
 )

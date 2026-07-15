@@ -122,6 +122,12 @@ if (CUDAQX_QEC_USE_FLOAT)
    target_compile_definitions(${LIBRARY_NAME} PUBLIC -DCUDAQX_QEC_FLOAT_TYPE=float)
 endif()
 
+# Host (g++) translation units -- this library's own and every consumer's -- must 
+# see kernel declarations only when including cudaq/qec/device/memory_circuit.h; the kernel implementations
+# are compiled solely by nvq++ device-code TUs 
+target_compile_definitions(${LIBRARY_NAME} PUBLIC
+  CUDAQ_QEC_MEMORY_CIRCUIT_DECLARATIONS_ONLY)
+
 target_include_directories(${DECODERS_LIBRARY_NAME}
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
   PUBLIC

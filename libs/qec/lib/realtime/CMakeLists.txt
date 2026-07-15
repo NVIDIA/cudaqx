@@ -215,7 +215,7 @@ target_compile_options(cudaq-qec-realtime-decoding
   PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden)
 
 target_include_directories(cudaq-qec-realtime-decoding
-  PUBLIC 
+  PUBLIC
     $<BUILD_INTERFACE:${CUDAQX_QEC_INCLUDE_DIR}>
     $<BUILD_INTERFACE:${LLVM_INCLUDE_DIRS}>
     $<INSTALL_INTERFACE:${CUDAQ_INCLUDE_DIR}>
@@ -235,7 +235,7 @@ target_link_options(cudaq-qec-realtime-decoding PRIVATE
 )
 
 target_link_libraries(cudaq-qec-realtime-decoding
-  PUBLIC 
+  PUBLIC
     cudaq-qec-decoders
   PRIVATE
     LLVMSupport

@@ -15,6 +15,7 @@
 
 #include "cuda-qx/core/library_utils.h"
 #include "cudaq/qec/codes/surface_code.h"
+#include "cudaq/qec/device/memory_circuit.h"
 #include "cudaq/qec/experiments.h"
 #include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/plugin_loader.h"
@@ -2296,4 +2297,19 @@ TEST(PluginLoaderTester, checkCleanupPluginsEdgeCases) {
   // with type PluginType::DECODER, so cleanup with type PluginType::CODE will
   // not do anything.
   cudaq::qec::cleanup_plugins(cudaq::qec::PluginType::CODE);
+}
+
+TEST(QECCodeTester, checkMemoryCircuitMultiReadout) {
+  // memory_circuit_multi lays out logical qubit i's data readout at
+  // [i * numData, (i+1) * numData); the helper reshapes that flat buffer.
+  std::vector<int> flat{0, 1, 2, 3, 4, 5};
+  auto per_logical = cudaq::qec::memory_circuit_multi_readout(flat, 2, 3);
+  ASSERT_EQ(per_logical.size(), 2u);
+  EXPECT_EQ(per_logical[0], (std::vector<int>{0, 1, 2}));
+  EXPECT_EQ(per_logical[1], (std::vector<int>{3, 4, 5}));
+
+  // Degenerate single-logical case is the identity reshape.
+  auto single = cudaq::qec::memory_circuit_multi_readout(flat, 1, 6);
+  ASSERT_EQ(single.size(), 1u);
+  EXPECT_EQ(single[0], flat);
 }

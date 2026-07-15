@@ -7,9 +7,9 @@
  ******************************************************************************/
 
 #include "cudaq/qec/experiments.h"
-#include "device/memory_circuit.h"
 #include "cudaq/algorithms/dem.h"
 #include "cudaq/qec/dem_sampling.h"
+#include "cudaq/qec/device/memory_circuit.h"
 #include "cudaq/qec/pcm_utils.h"
 #include <algorithm>
 #include <cmath>
