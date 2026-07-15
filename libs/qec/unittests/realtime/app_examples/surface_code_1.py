@@ -42,24 +42,6 @@ def pcm_from_sparse_vec(sparse_vec: Iterable[int], num_rows: int,
     return pcm
 
 
-def sorted_stabilizer_ops_inplace_numpy(ops: List[cudaq.Operator]) -> None:
-    if not ops:
-        return []
-
-    words = np.array([term.get_pauli_word() for term in ops], dtype=str)
-
-    z_idx = np.char.find(words, "Z")
-    x_idx = np.char.find(words, "X")
-
-    # Group 0 if Z exists, else 1
-    group = np.where(z_idx >= 0, 0, 1)
-    # Index: first Z if exists else first X (big sentinel if none)
-    idx = np.where(z_idx >= 0, z_idx, np.where(x_idx >= 0, x_idx, 10**9))
-
-    order = np.lexsort((idx, group)).tolist()
-    ops[:] = [ops[i] for i in order]
-
-
 def save_dem_to_file(dem, dem_filename, numSyndromesPerRound, num_logical):
     multi_config = qec.multi_decoder_config()
     decoders = []
@@ -75,9 +57,7 @@ def save_dem_to_file(dem, dem_filename, numSyndromesPerRound, num_logical):
         config.O_sparse = qec.pcm_to_sparse_vec(dem.observables_flips_matrix)
         config.D_sparse = qec.generate_timelike_sparse_detector_matrix(
             numSyndromesPerRound, numRounds, False)
-        multi_error_lut_config = qec.multi_error_lut_config()
-        multi_error_lut_config.lut_error_depth = 2
-        config.set_decoder_custom_args(multi_error_lut_config)
+        config.decoder_custom_args = {"lut_error_depth": 2}
         decoders.append(config)
 
     multi_config.decoders = decoders
@@ -128,22 +108,12 @@ def get_stab_cnot_schedule(stab_type: str, distance: int) -> List[int]:
             "get_stab_cnot_schedule: Invalid stabilizer type. Must be 'X' or 'Z'."
         )
 
-    stabs = grid.get_spin_op_stabilizers()
-    sorted_stabilizer_ops_inplace_numpy(stabs)
-
-    stab_idx = 0
-    cnot_schedule: List[int] = []
-
-    for stab in stabs:
-        word = stab.get_pauli_word(distance * distance)
-        if stab_type not in word:
-            continue
-        for d, ch in enumerate(word):
-            if ch == stab_type:
-                cnot_schedule.extend([stab_idx, d])
-        stab_idx += 1
-
-    return cnot_schedule
+    # CNOT pairs ordered by timestep within each stabilizer, so that mid-round
+    # ancilla (hook) errors land perpendicular to the logical operators.
+    # Stabilizer indices match the sorted parity-matrix rows and hence the
+    # ancilla indexing.
+    return list(grid.get_cnot_schedule_pairs_x() if stab_type ==
+                "X" else grid.get_cnot_schedule_pairs_z())
 
 
 def debug_print_syndromes(syndrome_x_int: int, syndrome_z_int: int) -> None:

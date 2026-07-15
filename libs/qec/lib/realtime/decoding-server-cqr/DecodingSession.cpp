@@ -7,6 +7,7 @@
  ******************************************************************************/
 
 #include "DecodingSession.h"
+#include "DecodingServer.h"
 #include "RpcWireFormat.h"
 #include "../../hardware_guards.h"
 #include "cudaq/qec/logger.h"
@@ -18,6 +19,19 @@
 #include <vector>
 
 namespace cudaq::qec::decoding_server {
+
+namespace {
+
+void set_graph_capture_device(const cudaq::qec::decoder &decoder) {
+  const int device = resolve_decode_device(decoder.get_cuda_device_id());
+  cudaq::qec::detail_affinity::set_cuda_device_for_decode(device);
+  if (device >= 0)
+    CUDA_QEC_INFO(
+        "DecodingSession::create: set CUDA device {} before graph capture",
+        device);
+}
+
+} // namespace
 
 // Busy high-water mark across all sessions (worker threads increment while
 // executing an item).
@@ -53,6 +67,7 @@ DecodingSession::create(std::unique_ptr<cudaq::qec::decoder> decoder,
   s->dec = std::move(decoder);
 
   if (s->dec->supports_graph_dispatch()) {
+    set_graph_capture_device(*s->dec);
     void *gr = s->dec->capture_decode_graph();
     s->graph_resources =
         GraphResourcesPtr(gr, GraphResourcesDeleter{s->dec.get()});
@@ -205,6 +220,7 @@ void DecodingSession::on_enqueue(const WorkItem &item) {
         dec->enqueue_syndrome(completed->bits.data(), completed->bits.size());
 
     if (did_decode) {
+      ++decode_count;
       accepted_syndromes = 0;
       shot_state = ShotState::result_ready;
     }

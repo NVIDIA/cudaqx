@@ -97,6 +97,7 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-decoding-server-cqr)
     # presence and the proprietary archive are provisioned independently, so
     # treat a missing archive as "gpu_roce transport not available" and fall
     # back to the udp/cpu_roce transports rather than failing configuration.
+    set(_decoding_server_linked_proprietary_cudevice FALSE)
     if(CUDAQ_GPU_ROCE_AVAILABLE AND TARGET cudaq-qec-realtime-cudevice-proprietary)
       # Re-find in case the CQR subdir cache entry didn't propagate here.
       if(NOT CUDAQ_REALTIME_DISPATCH_LIBRARY)
@@ -122,6 +123,7 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-decoding-server-cqr)
         ${CUDAQ_REALTIME_DISPATCH_LIBRARY}
         $<LINK_LIBRARY:WHOLE_ARCHIVE,cudaq-qec-realtime-cudevice-proprietary>
       )
+      set(_decoding_server_linked_proprietary_cudevice TRUE)
       target_link_options(decoding_server PRIVATE
         "LINKER:--export-dynamic"
       )
@@ -135,14 +137,25 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-decoding-server-cqr)
     endif()
     # RelayBP/nv-qldpc captures a CUDA device graph during decoder
     # initialization even when the server transport is udp or cpu_roce. Export
-    # the graph-dispatch shims whenever the cudevice archives are available so
-    # plugin dlsym(RTLD_DEFAULT, ...) lookups succeed.
-    if(TARGET cudaq-qec-realtime-cudevice AND TARGET cudaq-qec-realtime-cudevice-proprietary)
+    # the graph-dispatch shims whenever a cudevice archive is available so
+    # plugin dlsym(RTLD_DEFAULT, ...) lookups succeed. The proprietary archive
+    # also carries the public gpu_kernels.cu.o symbols, so do not whole-archive
+    # both the proprietary and public cudevice archives into the same binary.
+    if(TARGET cudaq-qec-realtime-cudevice OR TARGET cudaq-qec-realtime-cudevice-proprietary)
       target_link_libraries(decoding_server PRIVATE
         CUDA::cudart
-        $<LINK_LIBRARY:WHOLE_ARCHIVE,cudaq-qec-realtime-cudevice>
-        $<LINK_LIBRARY:WHOLE_ARCHIVE,cudaq-qec-realtime-cudevice-proprietary>
       )
+      if(TARGET cudaq-qec-realtime-cudevice-proprietary)
+        if(NOT _decoding_server_linked_proprietary_cudevice)
+          target_link_libraries(decoding_server PRIVATE
+            $<LINK_LIBRARY:WHOLE_ARCHIVE,cudaq-qec-realtime-cudevice-proprietary>
+          )
+        endif()
+      elseif(TARGET cudaq-qec-realtime-cudevice)
+        target_link_libraries(decoding_server PRIVATE
+          $<LINK_LIBRARY:WHOLE_ARCHIVE,cudaq-qec-realtime-cudevice>
+        )
+      endif()
       target_link_options(decoding_server PRIVATE
         "LINKER:--export-dynamic"
       )

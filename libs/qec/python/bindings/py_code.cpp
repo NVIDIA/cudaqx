@@ -211,6 +211,77 @@ protected:
   std::size_t get_num_z_stabilizers() const override {
     return nb::cast<std::size_t>(pyCode.attr("get_num_z_stabilizers")());
   }
+
+  /// @brief True if the Python class itself defines this method. A plain
+  /// hasattr won't do: the @qec.code decorator makes the class inherit from
+  /// the bound Code class, which exposes same-named read-only getters.
+  bool has_py_override(const char *methodName) const {
+    nb::handle base = nb::type<qec::code>();
+    for (nb::handle cls : nb::cast<nb::tuple>(pyCode.type().attr("__mro__"))) {
+      if (cls.is(base))
+        break;
+      if (nb::cast<bool>(cls.attr("__dict__").attr("__contains__")(methodName)))
+        return true;
+    }
+    return false;
+  }
+
+  /// @brief Convert a Python-provided stabilizer schedule matrix (any 2D
+  /// sequence of integers in [0, 255]) into a tensor, validating it against
+  /// the corresponding parity matrix.
+  cudaqx::tensor<uint8_t>
+  py_stabilizer_schedule(const char *methodName,
+                         const cudaqx::tensor<uint8_t> &parity) const {
+    std::vector<std::vector<uint8_t>> rows;
+    try {
+      rows = nb::cast<std::vector<std::vector<uint8_t>>>(
+          pyCode.attr(methodName)());
+    } catch (...) {
+      throw std::runtime_error(
+          std::string(methodName) +
+          " must return a 2D array/list of integers in [0, 255].");
+    }
+    if (rows.empty()) {
+      if (parity.size() != 0)
+        throw std::runtime_error(std::string(methodName) +
+                                 " shape does not match the parity matrix.");
+      return parity;
+    }
+    const std::size_t num_cols = rows[0].size();
+    if (parity.rank() != 2 || parity.shape()[0] != rows.size() ||
+        parity.shape()[1] != num_cols)
+      throw std::runtime_error(std::string(methodName) +
+                               " shape does not match the parity matrix.");
+    cudaqx::tensor<uint8_t> schedule({rows.size(), num_cols});
+    for (std::size_t r = 0; r < rows.size(); ++r) {
+      if (rows[r].size() != num_cols)
+        throw std::runtime_error(std::string(methodName) +
+                                 " rows must all have the same length.");
+      for (std::size_t c = 0; c < num_cols; ++c) {
+        // A schedule may reorder interactions but not change which data
+        // qubits each stabilizer touches.
+        if ((rows[r][c] != 0) != (parity.at({r, c}) != 0))
+          throw std::runtime_error(
+              std::string(methodName) +
+              " support pattern does not match the parity matrix.");
+        schedule.at({r, c}) = rows[r][c];
+      }
+    }
+    return schedule;
+  }
+
+public:
+  cudaqx::tensor<uint8_t> get_stabilizer_schedule_x() const override {
+    if (!has_py_override("get_stabilizer_schedule_x"))
+      return code::get_stabilizer_schedule_x();
+    return py_stabilizer_schedule("get_stabilizer_schedule_x", get_parity_x());
+  }
+
+  cudaqx::tensor<uint8_t> get_stabilizer_schedule_z() const override {
+    if (!has_py_override("get_stabilizer_schedule_z"))
+      return code::get_stabilizer_schedule_z();
+    return py_stabilizer_schedule("get_stabilizer_schedule_z", get_parity_z());
+  }
 };
 
 namespace {
@@ -397,6 +468,26 @@ void bindCode(nb::module_ &mod) {
                                            code.get_num_data_qubits());
           },
           "Get the Z-type parity check matrix of the code")
+      .def(
+          "get_stabilizer_schedule_x",
+          [](code &code) {
+            return copyCodeMatrixToPyArray(code.get_stabilizer_schedule_x(),
+                                           code.get_num_data_qubits());
+          },
+          "Get the X-stabilizer schedule matrix passed to the code's "
+          "stabilizer_round kernel. Entry 0 = no support, entry k >= 1 = "
+          "interaction at timestep k; defaults to the X-type parity check "
+          "matrix (every interaction at timestep 1).")
+      .def(
+          "get_stabilizer_schedule_z",
+          [](code &code) {
+            return copyCodeMatrixToPyArray(code.get_stabilizer_schedule_z(),
+                                           code.get_num_data_qubits());
+          },
+          "Get the Z-stabilizer schedule matrix passed to the code's "
+          "stabilizer_round kernel. Entry 0 = no support, entry k >= 1 = "
+          "interaction at timestep k; defaults to the Z-type parity check "
+          "matrix (every interaction at timestep 1).")
       .def(
           "get_pauli_observables_matrix",
           [](code &code) {

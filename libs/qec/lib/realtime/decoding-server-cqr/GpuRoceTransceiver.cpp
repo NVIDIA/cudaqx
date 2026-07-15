@@ -19,9 +19,11 @@
 #include <cstring>
 #include <dlfcn.h>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <unistd.h>
 
 // CUDAQ device-graph scheduler API (cudaq-realtime-dispatch).
 #include "cudaq/realtime/hololink_bridge_common.h"
@@ -117,9 +119,9 @@ GpuRoceConfig GpuRoceConfig::from_env() {
   c.device_name = env_str("HOLOLINK_DEVICE");
   c.peer_ip = env_str("HOLOLINK_PEER_IP");
   c.remote_qp = env_u32("HOLOLINK_REMOTE_QP", 0);
-  if (std::getenv("HOLOLINK_GPU_ID"))
-    c.gpu_id_env = env_int("HOLOLINK_GPU_ID", 0);
-  c.gpu_id = c.gpu_id_env.value_or(0);
+  // gpu_id is not read from the environment: the device is the decoder's
+  // cuda_device_id, resolved by resolve_decode_device() at transport
+  // creation.
   c.frame_size = env_size("HOLOLINK_FRAME_SIZE", 384);
   c.page_size = env_size("HOLOLINK_PAGE_SIZE", 0); // 0 → derived below
   c.num_pages = env_size("HOLOLINK_NUM_PAGES", 64);
@@ -145,6 +147,23 @@ GpuRoceTransceiver::GpuRoceTransceiver(const GpuRoceConfig &config)
   // hololink_qldpc_graph_decoder_bridge.cpp (lines 279-282).
   size_t page_size = config.page_size ? config.page_size : config.frame_size;
   page_size = (page_size + 127) & ~static_cast<size_t>(127);
+
+  if (page_size != 0 &&
+      config.num_pages > std::numeric_limits<size_t>::max() / page_size)
+    throw std::runtime_error(
+        "GpuRoceTransceiver: ring size overflow for "
+        "HOLOLINK_FRAME_SIZE/HOLOLINK_PAGE_SIZE=" +
+        std::to_string(page_size) +
+        " and HOLOLINK_NUM_PAGES=" + std::to_string(config.num_pages));
+  const size_t ring_bytes = page_size * config.num_pages;
+  const long host_page_size = ::sysconf(_SC_PAGESIZE);
+  if (host_page_size > 0 &&
+      ring_bytes % static_cast<size_t>(host_page_size) != 0)
+    throw std::runtime_error(
+        "GpuRoceTransceiver: ring buffer size " + std::to_string(ring_bytes) +
+        " bytes is not aligned to host page size " +
+        std::to_string(host_page_size) +
+        " bytes; adjust HOLOLINK_NUM_PAGES or HOLOLINK_PAGE_SIZE");
 
   // Matches the call shape in hololink_qldpc_graph_decoder_bridge.cpp (lines
   // 288-291).

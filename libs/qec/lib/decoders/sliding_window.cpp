@@ -7,6 +7,7 @@
  ******************************************************************************/
 
 #include "sliding_window.h"
+#include "cudaq/qec/decoder_config_schema.h"
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/pcm_utils.h"
 #include <cassert>
@@ -399,5 +400,62 @@ std::size_t sliding_window::get_num_detector_layers() const {
 }
 
 CUDAQ_EXT_PT_REGISTER_TYPE(sliding_window)
+
+// Parameter schema for the realtime decoding YAML (`decoder_custom_args` for
+// `type: sliding_window`). `inner_decoder_params` is a discriminated section
+// parsed with the schema registered under the value of `inner_decoder_name`
+// (whichever decoder that names must have registered its own schema).
+// Unknown-key and required-key checks are applied by the framework from the
+// param specs alone; the `validate` hook adds the cross-field constraints
+// those specs cannot express.
+namespace {
+struct sliding_window_schema_registrar {
+  sliding_window_schema_registrar() {
+    using k = decoding::config::param_kind;
+    decoding::config::decoder_schema schema{
+        "sliding_window",
+        {
+            {"window_size", k::uint64},
+            {"step_size", k::uint64},
+            {"num_syndromes_per_round", k::uint64},
+            {"num_boundary_syndromes", k::uint64},
+            {"straddle_start_round", k::boolean},
+            {"straddle_end_round", k::boolean},
+            {"error_rate_vec", k::f64_vec, /*required=*/true},
+            {"inner_decoder_name", k::string, /*required=*/true},
+            {"inner_decoder_params", k::discriminated, false, "",
+             "inner_decoder_name", /*materialize_empty=*/false},
+        }};
+    schema.validate = [](const cudaqx::heterogeneous_map &args) {
+      if (args.contains("window_size") && args.contains("step_size")) {
+        auto window_size = args.get<std::size_t>("window_size");
+        auto step_size = args.get<std::size_t>("step_size");
+        if (step_size < 1 || step_size > window_size)
+          throw std::runtime_error(fmt::format(
+              "sliding_window parameters: step_size ({}) must be between 1 "
+              "and window_size ({})",
+              step_size, window_size));
+      }
+      if (args.contains("num_boundary_syndromes") &&
+          args.contains("num_syndromes_per_round")) {
+        auto num_boundary_syndromes =
+            args.get<std::size_t>("num_boundary_syndromes");
+        auto num_syndromes_per_round =
+            args.get<std::size_t>("num_syndromes_per_round");
+        if (num_boundary_syndromes > num_syndromes_per_round)
+          throw std::runtime_error(fmt::format(
+              "sliding_window parameters: num_boundary_syndromes ({}) must be "
+              "<= num_syndromes_per_round ({})",
+              num_boundary_syndromes, num_syndromes_per_round));
+      }
+      if (args.get<std::vector<double>>("error_rate_vec").empty())
+        throw std::runtime_error(
+            "sliding_window parameters: error_rate_vec must be non-empty");
+    };
+    decoding::config::register_decoder_schema(std::move(schema));
+  }
+};
+sliding_window_schema_registrar register_sliding_window_schema;
+} // namespace
 
 } // namespace cudaq::qec

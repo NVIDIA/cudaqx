@@ -107,10 +107,14 @@ def main():
     config.syndrome_size = dem.detector_error_matrix.shape[0]
     config.H_sparse = qec.pcm_to_sparse_vec(dem.detector_error_matrix)
     config.O_sparse = qec.pcm_to_sparse_vec(dem.observables_flips_matrix)
+
     config.D_sparse = qec.d_sparse(m2d)
-    lut_config = qec.multi_error_lut_config()
-    lut_config.lut_error_depth = 2
-    config.set_decoder_custom_args(lut_config)
+    # Decoder parameters are a plain dict; keys are governed by the parameter
+    # schema the decoder registered (see qec.decoder_param_schema).
+    config.decoder_custom_args = {"lut_error_depth": 2}
+    # Check the dict against the decoder's schema (unknown keys, missing
+    # required keys, decoder-specific constraints) before using the config.
+    config.validate_custom_args()
 
     multi_config = qec.multi_decoder_config()
     multi_config.decoders = [config]

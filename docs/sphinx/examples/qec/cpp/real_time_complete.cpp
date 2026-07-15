@@ -41,9 +41,14 @@ void save_dem(const cudaq::qec::decoder_context &ctx,
   config.O_sparse = cudaq::qec::pcm_to_sparse_vec(dem.observables_flips_matrix);
   config.D_sparse = cudaq::qec::d_sparse(ctx.m2d);
 
-  cudaq::qec::decoding::config::multi_error_lut_config lut_config;
-  lut_config.lut_error_depth = 2;
-  config.decoder_custom_args = lut_config;
+  // Decoder parameters are a plain heterogeneous_map; keys are governed by
+  // the parameter schema the decoder registered.
+  cudaqx::heterogeneous_map lut_args;
+  lut_args.insert("lut_error_depth", 2);
+  config.decoder_custom_args = lut_args;
+  // Check the map against the decoder's schema (unknown keys, missing
+  // required keys, decoder-specific constraints) before using the config.
+  config.validate_custom_args();
 
   cudaq::qec::decoding::config::multi_decoder_config multi_config;
   multi_config.decoders.push_back(config);

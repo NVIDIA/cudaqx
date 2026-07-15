@@ -640,6 +640,22 @@ if(Python_Interpreter_FOUND)
     set(_SC4_TRY_TRT_TEST TRUE)
   endif()
 endif()
+# A silent skip here once masked a dead test check for a whole release cycle:
+# the trt surface-code tests register only when BOTH the trt plugin target and
+# python-onnx are available, so name whichever gate actually failed.
+if(NOT TARGET cudaq-qec-trt-decoder)
+  message(WARNING "surface_code-4-yaml: trt_decoder tests NOT registered "
+    "(cudaq-qec-trt-decoder target not built).")
+elseif(NOT _SC4_TRY_TRT_TEST)
+  if(Python_Interpreter_FOUND)
+    message(WARNING "surface_code-4-yaml: trt_decoder tests NOT registered "
+      "(python module 'onnx' not importable by ${Python_EXECUTABLE}); "
+      "pip install onnx to enable them.")
+  else()
+    message(WARNING "surface_code-4-yaml: trt_decoder tests NOT registered "
+      "(no python interpreter found).")
+  endif()
+endif()
 
 function(add_surface_code_4_yaml_test test_suffix distance num_rounds
          decoder_type num_shots onnx_path)
@@ -746,7 +762,7 @@ if(TARGET surface_code-4-yaml-cqr)
       "pymatching,trt_decoder,pymatching" 200 AUTO)
     set_property(TEST app_examples.surface_code-4-yaml-cqr-happy-path
       APPEND PROPERTY ENVIRONMENT
-        "REQUIRE_TRT_EXECUTION=1")
+        "REQUIRE_SERVER_DECODE_COUNTS=1")
   endif()
 
   # A real-workload skew case: all three patches use PyMatching, but patch 1

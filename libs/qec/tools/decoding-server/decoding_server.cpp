@@ -89,6 +89,7 @@
 #include <chrono>
 #include <csignal>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <functional>
@@ -100,6 +101,7 @@
 extern "C" void cudaqx_qec_realtime_device_call_service_force_link();
 extern "C" std::uint64_t cudaqx_qec_device_call_dispatch_count();
 extern "C" std::uint64_t cudaqx_qec_decoding_server_max_concurrent();
+extern "C" void cudaqx_qec_decoding_server_print_stats();
 extern "C" void cudaqx_qec_decoding_server_shutdown();
 
 namespace {
@@ -684,6 +686,12 @@ int main(int argc, char **argv) {
     dispatcher_thread.join();
   if (tp.shutdown)
     tp.shutdown();
+  // The counters are atomics and the per-shot get_corrections cadence means
+  // they are settled by the time a client-driven run reaches shutdown; print
+  // before cudaqx_qec_decoding_server_shutdown() releases the sessions.
+  if (const char *stats = std::getenv("QEC_DECODING_SERVER_STATS");
+      stats && stats[0] != '\0')
+    cudaqx_qec_decoding_server_print_stats();
   // Stop the DecodingServer receive loop and join its thread before the
   // process exits (a still-joinable static thread would std::terminate).
   cudaqx_qec_decoding_server_shutdown();

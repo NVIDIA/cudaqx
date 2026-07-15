@@ -14,7 +14,6 @@
 #include "cuda-qx/core/heterogeneous_map.h"
 #include "cuda-qx/core/kwargs_utils.h"
 #include "cuda-qx/core/tensor.h"
-#include "cudaq/qec/realtime/decoding_config.h"
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
 #include <nanobind/stl/string.h>
@@ -180,53 +179,6 @@ struct type_caster<cudaqx::heterogeneous_map> {
                        std::any_cast<cudaqx::heterogeneous_map>(&val)) {
           // Recursively convert nested heterogeneous_map
           result[key.c_str()] = nb::cast(*hetMap);
-        } else if (auto *srelay_cfg = std::any_cast<
-                       cudaq::qec::decoding::config::srelay_bp_config>(&val)) {
-          result[key.c_str()] = nb::cast(srelay_cfg->to_heterogeneous_map());
-        } else if (auto *nv_cfg = std::any_cast<
-                       cudaq::qec::decoding::config::nv_qldpc_decoder_config>(
-                       &val)) {
-          result[key.c_str()] = nb::cast(nv_cfg->to_heterogeneous_map());
-        } else if (auto *multi_cfg = std::any_cast<
-                       cudaq::qec::decoding::config::multi_error_lut_config>(
-                       &val)) {
-          result[key.c_str()] = nb::cast(multi_cfg->to_heterogeneous_map());
-        } else if (auto *single_cfg = std::any_cast<
-                       cudaq::qec::decoding::config::single_error_lut_config>(
-                       &val)) {
-          result[key.c_str()] = nb::cast(single_cfg->to_heterogeneous_map());
-        } else if (auto *global_cfg = std::any_cast<
-                       cudaq::qec::decoding::config::global_decoder_config>(
-                       &val)) {
-          if (std::holds_alternative<std::monostate>(*global_cfg)) {
-            // Omit the key for monostate, matching
-            // trt_decoder_config::to_heterogeneous_map(): an unset global
-            // decoder serializes as absent, not as a null value.
-          } else if (std::holds_alternative<
-                         cudaq::qec::decoding::config::pymatching_config>(
-                         *global_cfg)) {
-            result[key.c_str()] = nb::cast(
-                std::get<cudaq::qec::decoding::config::pymatching_config>(
-                    *global_cfg)
-                    .to_heterogeneous_map());
-          } else {
-            result[key.c_str()] = nb::cast(
-                std::get<cudaq::qec::decoding::config::chromobius_config>(
-                    *global_cfg)
-                    .to_heterogeneous_map());
-          }
-        } else if (auto *pymatching_cfg = std::any_cast<
-                       cudaq::qec::decoding::config::pymatching_config>(&val)) {
-          result[key.c_str()] =
-              nb::cast(pymatching_cfg->to_heterogeneous_map());
-        } else if (auto *chromobius_cfg = std::any_cast<
-                       cudaq::qec::decoding::config::chromobius_config>(&val)) {
-          result[key.c_str()] =
-              nb::cast(chromobius_cfg->to_heterogeneous_map());
-        } else if (auto *sw_cfg = std::any_cast<
-                       cudaq::qec::decoding::config::sliding_window_config>(
-                       &val)) {
-          result[key.c_str()] = nb::cast(sw_cfg->to_heterogeneous_map());
         } else {
           PyErr_SetString(PyExc_RuntimeError,
                           ("Failed to cast from heterogeneous_map to "
