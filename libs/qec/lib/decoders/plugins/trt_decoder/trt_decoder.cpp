@@ -7,6 +7,7 @@
  ******************************************************************************/
 
 #include "cudaq/qec/decoder.h"
+#include "cudaq/qec/decoder_config_schema.h"
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/trt_decoder_internal.h"
@@ -1087,6 +1088,35 @@ void trt_decoder::check_cuda() {
 }
 
 CUDAQ_EXT_PT_REGISTER_TYPE(trt_decoder)
+
+// Parameter schema for the realtime decoding YAML (`decoder_custom_args` for
+// `type: trt_decoder`). `global_decoder_params` is a discriminated section:
+// it is parsed with the schema registered under the value of
+// `global_decoder` (e.g. "pymatching" or "chromobius", each registered by its
+// own plugin), and an empty section is materialized when `global_decoder`
+// names a registered schema but no params are given.
+namespace {
+struct trt_decoder_schema_registrar {
+  trt_decoder_schema_registrar() {
+    using k = cudaq::qec::decoding::config::param_kind;
+    cudaq::qec::decoding::config::register_decoder_schema(
+        {"trt_decoder",
+         {
+             {"onnx_load_path", k::string},
+             {"engine_load_path", k::string},
+             {"engine_save_path", k::string},
+             {"precision", k::string},
+             {"memory_workspace", k::uint64},
+             {"batch_size", k::uint64},
+             {"use_cuda_graph", k::boolean},
+             {"global_decoder", k::string},
+             {"global_decoder_params", k::discriminated, false, "",
+              "global_decoder", /*materialize_empty=*/true},
+         }});
+  }
+};
+trt_decoder_schema_registrar register_trt_decoder_schema;
+} // namespace
 
 } // namespace cudaq::qec
 

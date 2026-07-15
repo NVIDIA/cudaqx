@@ -45,9 +45,9 @@ void save_dem_to_file(const cudaq::qec::detector_error_model &dem,
     config.O_sparse =
         cudaq::qec::pcm_to_sparse_vec(dem.observables_flips_matrix);
     config.D_sparse = std::vector<int64_t>(det_mat);
-    cudaq::qec::decoding::config::multi_error_lut_config lut_config;
-    lut_config.lut_error_depth = 2;
-    config.decoder_custom_args = lut_config;
+    cudaqx::heterogeneous_map lut_args;
+    lut_args.insert("lut_error_depth", 2);
+    config.decoder_custom_args = lut_args;
     multi_config.decoders.push_back(config);
   }
   std::string config_str = multi_config.to_yaml_str(200);
@@ -76,9 +76,6 @@ void load_dem_from_file(const std::string &dem_filename,
     exit(1);
   }
   auto decoder_config = config.decoders[0];
-  auto multi_error_lut_config =
-      std::get<cudaq::qec::decoding::config::multi_error_lut_config>(
-          decoder_config.decoder_custom_args);
   dem.detector_error_matrix = cudaq::qec::pcm_from_sparse_vec(
       decoder_config.H_sparse, decoder_config.syndrome_size,
       decoder_config.block_size);

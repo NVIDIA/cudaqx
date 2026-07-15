@@ -57,9 +57,7 @@ def save_dem_to_file(dem, dem_filename, numSyndromesPerRound, num_logical):
         config.O_sparse = qec.pcm_to_sparse_vec(dem.observables_flips_matrix)
         config.D_sparse = qec.generate_timelike_sparse_detector_matrix(
             numSyndromesPerRound, numRounds, False)
-        multi_error_lut_config = qec.multi_error_lut_config()
-        multi_error_lut_config.lut_error_depth = 2
-        config.set_decoder_custom_args(multi_error_lut_config)
+        config.decoder_custom_args = {"lut_error_depth": 2}
         decoders.append(config)
 
     multi_config.decoders = decoders

@@ -107,9 +107,12 @@ def main():
         0] // num_syndromes_per_round + 1
     config.D_sparse = qec.generate_timelike_sparse_detector_matrix(
         num_syndromes_per_round, num_rounds, False)
-    lut_config = qec.multi_error_lut_config()
-    lut_config.lut_error_depth = 2
-    config.set_decoder_custom_args(lut_config)
+    # Decoder parameters are a plain dict; keys are governed by the parameter
+    # schema the decoder registered (see qec.decoder_param_schema).
+    config.decoder_custom_args = {"lut_error_depth": 2}
+    # Check the dict against the decoder's schema (unknown keys, missing
+    # required keys, decoder-specific constraints) before using the config.
+    config.validate_custom_args()
 
     multi_config = qec.multi_decoder_config()
     multi_config.decoders = [config]

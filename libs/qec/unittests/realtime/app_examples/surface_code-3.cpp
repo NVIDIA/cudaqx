@@ -43,9 +43,9 @@ create_decoder_config(uint64_t id, const cudaq::qec::detector_error_model &dem,
   config.H_sparse = cudaq::qec::pcm_to_sparse_vec(dem.detector_error_matrix);
   config.O_sparse = cudaq::qec::pcm_to_sparse_vec(dem.observables_flips_matrix);
   config.D_sparse = det_mat;
-  cudaq::qec::decoding::config::multi_error_lut_config lut_config;
-  lut_config.lut_error_depth = 2;
-  config.decoder_custom_args = lut_config;
+  cudaqx::heterogeneous_map lut_args;
+  lut_args.insert("lut_error_depth", 2);
+  config.decoder_custom_args = lut_args;
   return config;
 }
 
@@ -101,13 +101,6 @@ void load_dem_from_file(const std::string &dem_filename,
   for (uint64_t i = 0; i < numLogical; ++i) {
     const auto &decoder_config_z = config.decoders[2 * i];
     const auto &decoder_config_x = config.decoders[2 * i + 1];
-
-    auto multi_error_lut_config_z =
-        std::get<cudaq::qec::decoding::config::multi_error_lut_config>(
-            decoder_config_z.decoder_custom_args);
-    auto multi_error_lut_config_x =
-        std::get<cudaq::qec::decoding::config::multi_error_lut_config>(
-            decoder_config_x.decoder_custom_args);
 
     // Z stab decoder
     dem_z[i].detector_error_matrix = cudaq::qec::pcm_from_sparse_vec(

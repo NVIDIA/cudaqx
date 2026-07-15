@@ -274,52 +274,49 @@ void save_dem_to_file(
     config.D_sparse = build_cudaqx_D_sparse(m2d);
 
     if (decoder_type == "nv-qldpc-decoder") {
-      config.decoder_custom_args =
-          cudaq::qec::decoding::config::nv_qldpc_decoder_config();
-      auto &nv_config =
-          std::get<cudaq::qec::decoding::config::nv_qldpc_decoder_config>(
-              config.decoder_custom_args);
+      cudaqx::heterogeneous_map nv_args;
 
       // Basic settings
-      nv_config.use_sparsity = true;
-      nv_config.error_rate_vec = edem.error_rates;
-      nv_config.max_iterations = 50;
+      nv_args.insert("use_sparsity", true);
+      nv_args.insert("error_rate_vec", edem.error_rates);
+      nv_args.insert("max_iterations", 50);
 
       if (use_relay_bp) {
-        nv_config.bp_method = 3;   // min-sum+dmem (required for relay)
-        nv_config.composition = 1; // Enable sequential relay
-        nv_config.gamma0 = 0.0;    // Initial gamma value
-        nv_config.clip_value = 200.0;
-        nv_config.repeatable = true;
-        nv_config.srelay_config =
-            cudaq::qec::decoding::config::srelay_bp_config();
-        nv_config.srelay_config->pre_iter = 5;
-        nv_config.srelay_config->num_sets = 10;
-        nv_config.srelay_config->stopping_criterion = "All";
-        nv_config.srelay_config->stop_nconv = 1;
-        nv_config.gamma_dist = {0.1, 0.2};
+        nv_args.insert("bp_method", 3);   // min-sum+dmem (required for relay)
+        nv_args.insert("composition", 1); // Enable sequential relay
+        nv_args.insert("gamma0", 0.0);    // Initial gamma value
+        nv_args.insert("clip_value", 200.0);
+        nv_args.insert("repeatable", true);
+        cudaqx::heterogeneous_map srelay_args;
+        srelay_args.insert("pre_iter", std::size_t{5});
+        srelay_args.insert("num_sets", std::size_t{10});
+        srelay_args.insert("stopping_criterion", "All");
+        srelay_args.insert("stop_nconv", std::size_t{1});
+        nv_args.insert("srelay_config", srelay_args);
+        nv_args.insert("gamma_dist", std::vector<double>{0.1, 0.2});
       } else {
         // OSD post-processor
-        nv_config.use_osd = true;
-        nv_config.osd_order = 60;
-        nv_config.osd_method = 3;
+        nv_args.insert("use_osd", true);
+        nv_args.insert("osd_order", 60);
+        nv_args.insert("osd_method", 3);
       }
+      config.decoder_custom_args = nv_args;
     } else if (decoder_type == "pymatching") {
-      cudaq::qec::decoding::config::pymatching_config pm_config;
-      pm_config.merge_strategy = "smallest_weight";
-      pm_config.error_rate_vec = edem.error_rates;
-      config.decoder_custom_args = pm_config;
+      cudaqx::heterogeneous_map pm_args;
+      pm_args.insert("merge_strategy", "smallest_weight");
+      pm_args.insert("error_rate_vec", edem.error_rates);
+      config.decoder_custom_args = pm_args;
     } else if (decoder_type == "trt_decoder") {
-      cudaq::qec::decoding::config::trt_decoder_config trt_config;
+      cudaqx::heterogeneous_map trt_args;
       // The TensorRT predecoder model is supplied through the saved decoder
       // config so the same ONNX path is used after reload.
-      trt_config.onnx_load_path = onnx_path;
-      trt_config.batch_size = 1;
-      trt_config.use_cuda_graph = true;
-      trt_config.global_decoder = "pymatching";
+      trt_args.insert("onnx_load_path", onnx_path);
+      trt_args.insert("batch_size", std::size_t{1});
+      trt_args.insert("use_cuda_graph", true);
+      trt_args.insert("global_decoder", "pymatching");
 
-      cudaq::qec::decoding::config::pymatching_config pm_config;
-      pm_config.merge_strategy = "smallest_weight";
+      cudaqx::heterogeneous_map pm_args;
+      pm_args.insert("merge_strategy", "smallest_weight");
 
       if (!ising_bundle.empty()) {
         // Enforce the bundle's semantics match this experiment (basis Z,
@@ -354,16 +351,16 @@ void save_dem_to_file(
 
         config.syndrome_size = hRows;
         config.block_size = hCols;
-        pm_config.error_rate_vec = priors;
+        pm_args.insert("error_rate_vec", priors);
         printf("trt+Ising: loaded Ising bundle '%s' (H %ux%u, O %u rows, "
                "priors %zu); D_sparse from D_sparse.txt (%zu detectors)\n",
                ising_bundle.c_str(), hRows, hCols, oRows, priors.size(), dRows);
       } else {
-        pm_config.error_rate_vec = edem.error_rates;
+        pm_args.insert("error_rate_vec", edem.error_rates);
       }
-      trt_config.global_decoder_params = pm_config;
+      trt_args.insert("global_decoder_params", pm_args);
 
-      config.decoder_custom_args = trt_config;
+      config.decoder_custom_args = trt_args;
     }
 
     multi_config.decoders.push_back(config);

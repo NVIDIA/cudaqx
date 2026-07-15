@@ -9,6 +9,7 @@
 #include "pymatching/sparse_blossom/driver/mwpm_decoding.h"
 #include "pymatching/sparse_blossom/driver/user_graph.h"
 #include "cudaq/qec/decoder.h"
+#include "cudaq/qec/decoder_config_schema.h"
 #include <algorithm>
 #include <cassert>
 #include <map>
@@ -265,5 +266,24 @@ public:
 };
 
 CUDAQ_EXT_PT_REGISTER_TYPE(pymatching)
+
+// Parameter schema for the realtime decoding YAML (`decoder_custom_args` for
+// `type: pymatching`, and the trt_decoder `global_decoder_params` section when
+// `global_decoder: pymatching`). Registered here so the schema ships with the
+// decoder itself.
+namespace {
+struct pymatching_schema_registrar {
+  pymatching_schema_registrar() {
+    using k = cudaq::qec::decoding::config::param_kind;
+    cudaq::qec::decoding::config::register_decoder_schema(
+        {"pymatching",
+         {
+             {"error_rate_vec", k::f64_vec},
+             {"merge_strategy", k::string},
+         }});
+  }
+};
+pymatching_schema_registrar register_pymatching_schema;
+} // namespace
 
 } // namespace cudaq::qec
