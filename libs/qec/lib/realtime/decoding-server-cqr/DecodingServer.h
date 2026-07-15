@@ -33,12 +33,15 @@ using TransportMap = std::unordered_map<uint32_t, ITransceiver *>;
 /// transceiver(s), and runs the blocking receive loop.
 class DecodingServer {
 public:
-  /// Config-driven constructor: reads the transport type from \p config_yaml
-  /// and creates the appropriate transceiver.  Requires CUDAQ_REALTIME for
-  /// RoCE transports; throws std::runtime_error if the adapters are not
-  /// available.  Use the explicit-transceiver constructors for testing with
-  /// LoopbackTransceiver.
-  explicit DecodingServer(const std::string &config_yaml);
+  /// Reads YAML from \p config_path, creates the transceiver, and launches
+  /// the server.  Throws if the transport adapters are unavailable.
+  explicit DecodingServer(const std::string &config_path);
+
+  /// Construct from a pre-read YAML string; \p config_path is for error
+  /// messages only and is not re-opened (avoids TOCTOU on hot-reload).
+  static std::unique_ptr<DecodingServer>
+  from_yaml_str(const std::string &yaml_str,
+                const std::string &config_path = "<in-memory>");
 
   /// Single-transceiver constructor: all three RPCs share one transport.
   DecodingServer(std::unique_ptr<ITransceiver> transport,
@@ -75,6 +78,10 @@ public:
   void print_session_stats() const;
 
 private:
+  struct yaml_string_tag_t {};
+  explicit DecodingServer(yaml_string_tag_t, const std::string &yaml_str,
+                          const std::string &config_path);
+
   void init(const std::string &config_yaml);
   void register_handlers();
 

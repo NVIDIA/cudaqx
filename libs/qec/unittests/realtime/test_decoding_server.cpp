@@ -270,6 +270,12 @@ public:
       ::close(outFd);
   }
 
+  bool signalConfigApply() { return pid > 0 && ::kill(pid, SIGHUP) == 0; }
+
+  bool waitForLine(const char *prefix, int timeout_ms, std::string &line_out) {
+    return readLineWithPrefix(prefix, timeout_ms, line_out);
+  }
+
   std::uint16_t port = 0;
   std::string captured;
   std::int64_t max_concurrent_decoders = -1;
@@ -479,4 +485,146 @@ TEST(DecodingServerTwoProcess, TwoProcessHostDispatchDualDecoders) {
   EXPECT_GE(dispatched, 6) << "server output:\n" << server.captured;
   EXPECT_GE(server.max_concurrent_decoders, 1) << "server output:\n"
                                                << server.captured;
+}
+
+// ---------------------------------------------------------------------------
+// Config-apply tests: SIGHUP applies a new decoder set without exposing
+// transport-specific lifecycle details to the client.
+// ---------------------------------------------------------------------------
+
+static std::string pymatching_3bit_yaml() {
+  return "decoders:\n"
+         "  - id: 0\n"
+         "    type: pymatching\n"
+         "    block_size: 3\n"
+         "    syndrome_size: 3\n"
+         "    H_sparse: [0, -1, 1, -1, 2, -1]\n"
+         "    O_sparse: [0, -1, 1, -1, 2, -1]\n"
+         "    D_sparse: [0, -1, 1, -1, 2, -1]\n"
+         "    decoder_custom_args:\n"
+         "      merge_strategy: smallest_weight\n"
+         "      error_rate_vec: [0.1, 0.1, 0.1]\n";
+}
+
+static std::string multi_error_lut_3bit_yaml() {
+  return "decoders:\n"
+         "  - id: 0\n"
+         "    type: multi_error_lut\n"
+         "    block_size: 3\n"
+         "    syndrome_size: 3\n"
+         "    H_sparse: [0, -1, 1, -1, 2, -1]\n"
+         "    O_sparse: [0, -1, 1, -1, 2, -1]\n"
+         "    D_sparse: [0, -1, 1, -1, 2, -1]\n"
+         "    decoder_custom_args:\n"
+         "      lut_error_depth: 1\n";
+}
+
+// Unknown type passes static checks but fails at DecodingServer construction.
+static std::string unknown_decoder_type_yaml() {
+  return "decoders:\n"
+         "  - id: 0\n"
+         "    type: test-unknown-decoder-type\n"
+         "    block_size: 3\n"
+         "    syndrome_size: 3\n"
+         "    H_sparse: [0, -1, 1, -1, 2, -1]\n"
+         "    O_sparse: [0, -1, 1, -1, 2, -1]\n"
+         "    D_sparse: [0, -1, 1, -1, 2, -1]\n";
+}
+
+static bool write_file(const std::string &path, const std::string &content) {
+  std::ofstream f(path);
+  if (!f)
+    return false;
+  f << content;
+  return f.good();
+}
+
+TEST(DecodingServerTwoProcess, ApplyConfigSwapsDecoderWithoutRestart) {
+  const std::string config_path = ::testing::TempDir() + "/reconfig_live.yml";
+  ASSERT_TRUE(write_file(config_path, multi_error_lut_3bit_yaml()));
+
+  ServerProcess server;
+  std::string error;
+  ASSERT_TRUE(server.start(config_path, error)) << error;
+
+  std::vector<std::string> args = {"test_decoding_server"};
+  for (auto &arg : channel_arguments(server.port))
+    args.push_back(std::move(arg));
+  std::vector<char *> argv;
+  for (auto &arg : args)
+    argv.push_back(arg.data());
+  argv.push_back(nullptr);
+  int argc = static_cast<int>(args.size());
+  cudaq::realtime::initialize(argc, argv.data());
+  RealtimeGuard realtime_guard{true};
+
+  auto r1 = cudaq::run(kRunShots, decoding_server_kernel);
+  ASSERT_EQ(r1.size(), kRunShots);
+  EXPECT_EQ(r1[0], kExpectedCorrection);
+
+  ASSERT_TRUE(write_file(config_path, pymatching_3bit_yaml()));
+  ASSERT_TRUE(server.signalConfigApply());
+  std::string recfg_line;
+  ASSERT_TRUE(server.waitForLine("QEC_DECODING_SERVER_CONFIG_APPLIED", 15000,
+                                 recfg_line))
+      << server.captured;
+
+  auto r2 = cudaq::run(kRunShots, decoding_server_kernel);
+  ASSERT_EQ(r2.size(), kRunShots);
+  EXPECT_EQ(r2[0], kExpectedCorrection);
+
+  const std::int64_t dispatched = server.stopAndGetDispatchCount();
+  EXPECT_GE(dispatched, 6) << "server output:\n" << server.captured;
+}
+
+TEST(DecodingServerTwoProcess, ApplyConfigBadConfigRecovers) {
+  const std::string config_path =
+      ::testing::TempDir() + "/reconfig_recover.yml";
+  ASSERT_TRUE(write_file(config_path, pymatching_3bit_yaml()));
+
+  ServerProcess server;
+  std::string error;
+  ASSERT_TRUE(server.start(config_path, error)) << error;
+
+  std::vector<std::string> args = {"test_decoding_server"};
+  for (auto &arg : channel_arguments(server.port))
+    args.push_back(std::move(arg));
+  std::vector<char *> argv;
+  for (auto &arg : args)
+    argv.push_back(arg.data());
+  argv.push_back(nullptr);
+  int argc = static_cast<int>(args.size());
+  cudaq::realtime::initialize(argc, argv.data());
+  RealtimeGuard realtime_guard{true};
+
+  auto r1 = cudaq::run(kRunShots, decoding_server_kernel);
+  ASSERT_EQ(r1.size(), kRunShots);
+  EXPECT_EQ(r1[0], kExpectedCorrection);
+
+  ASSERT_TRUE(write_file(config_path, unknown_decoder_type_yaml()));
+  ASSERT_TRUE(server.signalConfigApply());
+  std::string failed_line;
+  ASSERT_TRUE(server.waitForLine("QEC_DECODING_SERVER_CONFIG_FAILED", 15000,
+                                 failed_line))
+      << server.captured;
+  EXPECT_NE(failed_line.find("awaiting_config"), std::string::npos)
+      << failed_line;
+
+  EXPECT_THROW(cudaq::run(kRunShots, decoding_server_kernel), std::exception);
+
+  ASSERT_TRUE(write_file(config_path, multi_error_lut_3bit_yaml()));
+  ASSERT_TRUE(server.signalConfigApply());
+  std::string recfg_line;
+  ASSERT_TRUE(server.waitForLine("QEC_DECODING_SERVER_CONFIG_APPLIED", 15000,
+                                 recfg_line))
+      << server.captured;
+
+  auto r3 = cudaq::run(kRunShots, decoding_server_kernel);
+  ASSERT_EQ(r3.size(), kRunShots);
+  EXPECT_EQ(r3[0], kExpectedCorrection);
+
+  // Kernel may throw on first NOT_READY; healthy rounds (r1 + r3) account
+  // for 6.
+  const std::int64_t dispatched = server.stopAndGetDispatchCount();
+  EXPECT_GE(dispatched, 6) << "server output:\n" << server.captured;
 }

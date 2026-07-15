@@ -95,6 +95,7 @@
 #include <functional>
 #include <iostream>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 
@@ -103,6 +104,8 @@ extern "C" std::uint64_t cudaqx_qec_device_call_dispatch_count();
 extern "C" std::uint64_t cudaqx_qec_decoding_server_max_concurrent();
 extern "C" void cudaqx_qec_decoding_server_print_stats();
 extern "C" void cudaqx_qec_decoding_server_shutdown();
+extern "C" int cudaqx_qec_decoding_server_apply_config_from_yaml(
+    const char *yaml, size_t yaml_len, char *err, size_t err_len);
 
 namespace {
 
@@ -135,14 +138,20 @@ bool parse_args(int argc, char **argv, ServerConfig &cfg) {
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
     if (a == "--help" || a == "-h") {
-      std::cout << "Usage: " << argv[0]
-                << " --config=<decoders.yaml> "
-                   "[--transport=udp|cpu_roce|gpu_roce] "
-                   "[--port=N] [--num-slots=N] [--slot-size=N] [--timeout=N] "
-                   "[--device=NAME] [--local-ip=ADDR] "
-                   "[--qp_config=rendezvous|hsb_fpga] [--peer-ip=ADDR] "
-                   "[--remote-qp=N] [--frame-size=N]"
-                << std::endl;
+      std::cout
+          << "Usage: " << argv[0]
+          << " --config=<decoders.yaml> "
+             "[--transport=udp|cpu_roce|gpu_roce] "
+             "[--port=N] [--num-slots=N] [--slot-size=N] [--timeout=N] "
+             "[--device=NAME] [--local-ip=ADDR] "
+             "[--qp_config=rendezvous|hsb_fpga] [--peer-ip=ADDR] "
+             "[--remote-qp=N] [--frame-size=N]\n"
+             "SIGHUP applies the current --config. A successful apply reports "
+             "QEC_DECODING_SERVER_CONFIG_APPLIED. Invalid configs are rejected "
+             "while the current config keeps serving when possible; decoder "
+             "construction failure leaves the server awaiting the next valid "
+             "config."
+          << std::endl;
       return false;
     } else if (starts_with(a, "--config="))
       cfg.config_path = a.substr(9);
@@ -213,6 +222,101 @@ bool parse_args(int argc, char **argv, ServerConfig &cfg) {
 std::atomic<int> g_shutdown{0};
 void on_signal(int) { g_shutdown.store(1, std::memory_order_release); }
 
+std::atomic<int> g_apply_config_requested{0};
+void on_sighup(int) {
+  g_apply_config_requested.store(1, std::memory_order_release);
+}
+
+struct ConfigApplyRequest {
+  std::string yaml;
+  std::size_t num_decoders = 0;
+  std::string type0 = "?";
+};
+
+ConfigApplyRequest read_apply_config(const std::string &config_path) {
+  std::ifstream config_file(config_path);
+  if (!config_file)
+    throw std::runtime_error("cannot open " + config_path);
+  std::stringstream config_text;
+  config_text << config_file.rdbuf();
+
+  ConfigApplyRequest out;
+  out.yaml = config_text.str();
+  auto decoder_config = config::multi_decoder_config::from_yaml_str(out.yaml);
+  if (decoder_config.decoders.empty())
+    throw std::runtime_error("no decoders parsed from " + config_path);
+  out.num_decoders = decoder_config.decoders.size();
+  out.type0 = decoder_config.decoders[0].type;
+  return out;
+}
+
+void print_config_applied(const ConfigApplyRequest &config) {
+  std::cout << "QEC_DECODING_SERVER_CONFIG_APPLIED decoders="
+            << config.num_decoders << " type0=" << config.type0 << std::endl;
+  std::cout.flush();
+}
+
+void print_config_failed(int rc, const char *state, const std::string &why) {
+  std::cout << "QEC_DECODING_SERVER_CONFIG_FAILED rc=" << rc
+            << " state=" << state;
+  if (!why.empty())
+    std::cout << " reason=" << why;
+  std::cout << std::endl;
+  std::cout.flush();
+}
+
+void handle_config_apply(const std::string &config_path) {
+  ConfigApplyRequest config;
+  try {
+    config = read_apply_config(config_path);
+  } catch (const std::exception &e) {
+    print_config_failed(/*rc=*/1, "serving_old", e.what());
+    return;
+  }
+  char reason[512] = {0};
+  const int rc = cudaqx_qec_decoding_server_apply_config_from_yaml(
+      config.yaml.data(), config.yaml.size(), reason, sizeof(reason));
+  if (rc == 0) {
+    print_config_applied(config);
+  } else {
+    const char *state = rc == 1   ? "serving_old"
+                        : rc == 2 ? "awaiting_config"
+                        : rc == 3 ? "busy"
+                                  : "unknown";
+    print_config_failed(rc, state, reason);
+  }
+}
+#ifdef QEC_HAVE_GPU_ROCE_TRANSPORT
+// Like the CQR apply path, decoder-specific validation happens by constructing
+// replacement sessions; a future dry-run validator should make this cheaper.
+void handle_gpu_roce_config_apply(
+    const std::string &config_path,
+    std::unique_ptr<cudaq::qec::decoding_server::DecodingServer> &server,
+    std::thread &server_thread) {
+  ConfigApplyRequest config;
+  try {
+    config = read_apply_config(config_path);
+  } catch (const std::exception &e) {
+    print_config_failed(/*rc=*/1, "serving_old", e.what());
+    return;
+  }
+  if (server) {
+    server->stop();
+    if (server_thread.joinable())
+      server_thread.join();
+  }
+  server.reset();
+  try {
+    server = cudaq::qec::decoding_server::DecodingServer::from_yaml_str(
+        config.yaml, config_path);
+    server_thread = std::thread([&server] { server->run(); });
+    print_config_applied(config);
+  } catch (const std::exception &e) {
+    // server is null; caller's loop continues (state=awaiting_config).
+    print_config_failed(/*rc=*/2, "awaiting_config", e.what());
+  }
+}
+#endif // QEC_HAVE_GPU_ROCE_TRANSPORT
 // Transport-agnostic view of one wired-up transceiver: the four ring
 // addresses the dispatcher consumes, plus a teardown hook. Both transports
 // provide the identical ring contract (see udp_wrapper.h / roce_wrapper.h).
@@ -495,6 +599,7 @@ int main(int argc, char **argv) {
 
   std::signal(SIGINT, on_signal);
   std::signal(SIGTERM, on_signal);
+  std::signal(SIGHUP, on_sighup);
 
   // [1] Validate the YAML and hand its path to the decoding-server service:
   // the DecodingServer (one DecodingSession worker thread per decoder) builds
@@ -531,20 +636,26 @@ int main(int argc, char **argv) {
     // (Hololink Sensor Bridge + DOCA), loads decoder sessions, and calls
     // launch_scheduler() to wire the CUDAQ device-graph scheduler to the
     // Hololink ring buffers.  The GPU scheduler then handles
-    // RX→dispatch→decode→TX autonomously; this thread just waits for signal.
+    // RX->dispatch->decode->TX autonomously; this thread waits for signal and
+    // config-apply requests.
     //
     // Construction throws when the GPU RoCE component is not linked into
     // this binary (built against HSB/DOCA headers but without the
     // proprietary cudevice archive) or when Hololink bring-up fails.
     try {
-      cudaq::qec::decoding_server::DecodingServer server(cfg.config_path);
+      auto server =
+          std::make_unique<cudaq::qec::decoding_server::DecodingServer>(
+              cfg.config_path);
       // QP/rkey/buf already printed to stdout by launch_scheduler() so the
       // orchestration script can grep them before the READY line.
       std::cout << "QEC_DECODING_SERVER_READY gpu_roce" << std::endl;
       std::cout.flush();
-      std::thread server_thread([&server] { server.run(); });
+      std::thread server_thread([&server] { server->run(); });
       const auto start_time_gr = std::chrono::steady_clock::now();
       while (g_shutdown.load(std::memory_order_acquire) == 0) {
+        if (g_apply_config_requested.exchange(0, std::memory_order_acq_rel) !=
+            0)
+          handle_gpu_roce_config_apply(cfg.config_path, server, server_thread);
         const auto elapsed =
             std::chrono::duration_cast<std::chrono::seconds>(
                 std::chrono::steady_clock::now() - start_time_gr)
@@ -553,8 +664,10 @@ int main(int argc, char **argv) {
           break;
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
       }
-      server.stop();
-      server_thread.join();
+      if (server)
+        server->stop();
+      if (server_thread.joinable())
+        server_thread.join();
     } catch (const std::exception &e) {
       std::cerr << "ERROR: gpu_roce startup failed: " << e.what() << std::endl;
       return 1;
@@ -667,9 +780,11 @@ int main(int argc, char **argv) {
         /*engine=*/nullptr, &dispatcher_shutdown, &packets_dispatched);
   });
 
-  // [5] Run until signalled or timed out.
+  // [5] Run until signalled or timed out; SIGHUP applies the latest config.
   const auto start_time = std::chrono::steady_clock::now();
   while (g_shutdown.load(std::memory_order_acquire) == 0) {
+    if (g_apply_config_requested.exchange(0, std::memory_order_acq_rel) != 0)
+      handle_config_apply(cfg.config_path);
     const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
                              std::chrono::steady_clock::now() - start_time)
                              .count();

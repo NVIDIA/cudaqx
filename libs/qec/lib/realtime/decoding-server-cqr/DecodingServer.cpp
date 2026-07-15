@@ -72,63 +72,78 @@ DecodingServer::make_transport(DecoderTransport transport_type,
   throw std::runtime_error("make_transport: unknown DecoderTransport value");
 }
 
-DecodingServer::DecodingServer(const std::string &config_yaml) {
-  // Parse the YAML once: SessionRegistry validates the decoder entries
-  // (including the uniform-transport rule — MVP limitation: heterogeneous
-  // deployments require per-session transceiver binding, deferred to a
-  // follow-up once CpuRoce/GpuRoceTransceiverAdapter are available) and
-  // required_transport() then drives transceiver creation.
-  std::ifstream f(config_yaml);
-  if (!f.is_open())
-    throw std::runtime_error("Cannot open config: " + config_yaml);
-  std::string yaml_str((std::istreambuf_iterator<char>(f)), {});
-  auto config =
-      cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(
-          yaml_str);
-  if (config.decoders.empty())
-    throw std::runtime_error("No decoders in config: " + config_yaml);
-  registry_.load_from_config(config, config_yaml);
-  register_handlers();
+DecodingServer::DecodingServer(const std::string &config_path)
+    : DecodingServer(
+          yaml_string_tag_t{},
+          [&config_path]() -> std::string {
+            std::ifstream f(config_path);
+            if (!f.is_open())
+              throw std::runtime_error("Cannot open config: " + config_path);
+            return {std::istreambuf_iterator<char>(f), {}};
+          }(),
+          config_path) {}
 
-  const auto transport_type = registry_.required_transport();
-  // gpu_roce must run on the GPU the FPGA/NIC is affine to; when exactly one
-  // session is booting, pass its decoder's cuda_device_id so the factory can
-  // place the transport on that device.
-  const auto &boot_sessions = registry_.sessions();
-  const int pinned_cuda_device =
-      boot_sessions.size() == 1
-          ? boot_sessions.begin()->second->dec->get_cuda_device_id()
-          : -1;
-  auto t = make_transport(transport_type, pinned_cuda_device);
-  ITransceiver *raw = t.get();
-  owned_transports_.push_back(std::move(t));
-  function_transport_[kEnqueueSyndromesFunctionId] = raw;
-  function_transport_[kGetCorrectionsFunctionId] = raw;
-  function_transport_[kResetDecoderFunctionId] = raw;
+DecodingServer::DecodingServer(yaml_string_tag_t, const std::string &yaml_str,
+                               const std::string &config_path) {
+  try {
+    auto config =
+        cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(
+            yaml_str);
+    if (config.decoders.empty())
+      throw std::runtime_error("No decoders in config: " + config_path);
+    registry_.load_from_config(config, config_path);
+    register_handlers();
 
-  // For the GPU RoCE path, wire the first (and only) session's decoder graph
-  // to the Hololink ring buffer via the CUDAQ device-graph scheduler.
-  // Multi-decoder GPU RoCE binding is deferred to a follow-up.
-  if (transport_type == DecoderTransport::gpu_roce) {
-    const auto &sessions = registry_.sessions();
-    if (sessions.size() != 1)
-      throw std::runtime_error(
-          "GPU RoCE transport currently supports exactly one decoder session; "
-          "found " +
-          std::to_string(sessions.size()) +
-          ". Multi-decoder GPU RoCE is deferred.");
-    auto *session = sessions.begin()->second.get();
-    if (!session->graph_resources)
-      throw std::runtime_error(
-          "GPU RoCE requires a decoder that supports graph dispatch "
-          "(supports_graph_dispatch() must return true and "
-          "capture_decode_graph() must succeed)");
-    if (!raw->launch_device_scheduler(session->graph_resources.get()))
-      throw std::runtime_error(
-          "gpu_roce transceiver did not provide a device scheduler");
+    const auto transport_type = registry_.required_transport();
+    // gpu_roce must run on the GPU the FPGA/NIC is affine to; when exactly
+    // one session is booting, pass its decoder's cuda_device_id so the
+    // factory can place the transport on that device.
+    const auto &boot_sessions = registry_.sessions();
+    const int pinned_cuda_device =
+        boot_sessions.size() == 1
+            ? boot_sessions.begin()->second->dec->get_cuda_device_id()
+            : -1;
+    auto t = make_transport(transport_type, pinned_cuda_device);
+    ITransceiver *raw = t.get();
+    owned_transports_.push_back(std::move(t));
+    function_transport_[kEnqueueSyndromesFunctionId] = raw;
+    function_transport_[kGetCorrectionsFunctionId] = raw;
+    function_transport_[kResetDecoderFunctionId] = raw;
+
+    // For the GPU RoCE path, wire the first (and only) session's decoder graph
+    // to the Hololink ring buffer via the CUDAQ device-graph scheduler.
+    // Multi-decoder GPU RoCE binding is deferred to a follow-up.
+    if (transport_type == DecoderTransport::gpu_roce) {
+      const auto &sessions = registry_.sessions();
+      if (sessions.size() != 1)
+        throw std::runtime_error(
+            "GPU RoCE transport currently supports exactly one decoder "
+            "session; found " +
+            std::to_string(sessions.size()) +
+            ". Multi-decoder GPU RoCE is deferred.");
+      auto *session = sessions.begin()->second.get();
+      if (!session->graph_resources)
+        throw std::runtime_error(
+            "GPU RoCE requires a decoder that supports graph dispatch "
+            "(supports_graph_dispatch() must return true and "
+            "capture_decode_graph() must succeed)");
+      if (!raw->launch_device_scheduler(session->graph_resources.get()))
+        throw std::runtime_error(
+            "gpu_roce transceiver did not provide a device scheduler");
+    }
+  } catch (...) {
+    registry_.stop_workers();
+    throw;
   }
 }
 
+std::unique_ptr<DecodingServer>
+DecodingServer::from_yaml_str(const std::string &yaml_str,
+                              const std::string &config_path) {
+  // Use new directly: make_unique cannot reach the private constructor.
+  return std::unique_ptr<DecodingServer>(
+      new DecodingServer(yaml_string_tag_t{}, yaml_str, config_path));
+}
 DecodingServer::DecodingServer(std::unique_ptr<ITransceiver> transport,
                                const std::string &config_yaml) {
   ITransceiver *raw = transport.get();
