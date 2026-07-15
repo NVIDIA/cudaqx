@@ -89,6 +89,7 @@
 #include <chrono>
 #include <csignal>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <functional>
@@ -100,6 +101,7 @@
 extern "C" void cudaqx_qec_realtime_device_call_service_force_link();
 extern "C" std::uint64_t cudaqx_qec_device_call_dispatch_count();
 extern "C" std::uint64_t cudaqx_qec_decoding_server_max_concurrent();
+extern "C" void cudaqx_qec_decoding_server_print_stats();
 extern "C" void cudaqx_qec_decoding_server_shutdown();
 
 namespace {
@@ -530,23 +532,33 @@ int main(int argc, char **argv) {
     // launch_scheduler() to wire the CUDAQ device-graph scheduler to the
     // Hololink ring buffers.  The GPU scheduler then handles
     // RX→dispatch→decode→TX autonomously; this thread just waits for signal.
-    cudaq::qec::decoding_server::DecodingServer server(cfg.config_path);
-    // QP/rkey/buf already printed to stdout by launch_scheduler() so the
-    // orchestration script can grep them before the READY line.
-    std::cout << "QEC_DECODING_SERVER_READY gpu_roce" << std::endl;
-    std::cout.flush();
-    std::thread server_thread([&server] { server.run(); });
-    const auto start_time_gr = std::chrono::steady_clock::now();
-    while (g_shutdown.load(std::memory_order_acquire) == 0) {
-      const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
-                               std::chrono::steady_clock::now() - start_time_gr)
-                               .count();
-      if (elapsed > cfg.timeout_sec)
-        break;
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    //
+    // Construction throws when the GPU RoCE component is not linked into
+    // this binary (built against HSB/DOCA headers but without the
+    // proprietary cudevice archive) or when Hololink bring-up fails.
+    try {
+      cudaq::qec::decoding_server::DecodingServer server(cfg.config_path);
+      // QP/rkey/buf already printed to stdout by launch_scheduler() so the
+      // orchestration script can grep them before the READY line.
+      std::cout << "QEC_DECODING_SERVER_READY gpu_roce" << std::endl;
+      std::cout.flush();
+      std::thread server_thread([&server] { server.run(); });
+      const auto start_time_gr = std::chrono::steady_clock::now();
+      while (g_shutdown.load(std::memory_order_acquire) == 0) {
+        const auto elapsed =
+            std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::steady_clock::now() - start_time_gr)
+                .count();
+        if (elapsed > cfg.timeout_sec)
+          break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      }
+      server.stop();
+      server_thread.join();
+    } catch (const std::exception &e) {
+      std::cerr << "ERROR: gpu_roce startup failed: " << e.what() << std::endl;
+      return 1;
     }
-    server.stop();
-    server_thread.join();
     return 0;
   }
 #endif
@@ -674,6 +686,12 @@ int main(int argc, char **argv) {
     dispatcher_thread.join();
   if (tp.shutdown)
     tp.shutdown();
+  // The counters are atomics and the per-shot get_corrections cadence means
+  // they are settled by the time a client-driven run reaches shutdown; print
+  // before cudaqx_qec_decoding_server_shutdown() releases the sessions.
+  if (const char *stats = std::getenv("QEC_DECODING_SERVER_STATS");
+      stats && stats[0] != '\0')
+    cudaqx_qec_decoding_server_print_stats();
   // Stop the DecodingServer receive loop and join its thread before the
   // process exits (a still-joinable static thread would std::terminate).
   cudaqx_qec_decoding_server_shutdown();

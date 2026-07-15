@@ -1399,37 +1399,29 @@ int main(int argc, char **argv) {
   if (options.verify) {
     std::cout << "\n=== ILA Capture & Verification ===\n";
 
-    // In single-pass mode the player sends exactly num_shots packets, so the
-    // ILA buffer will not fill completely.  Poll until the sample count
-    // stabilizes (no new samples for 2 consecutive checks).
-    constexpr int kStableChecks = 2;
     constexpr int kPollIntervalMs = 500;
     constexpr int kVerifyTimeoutMs = 30000;
-    std::cout << "Waiting for ILA capture to stabilize (timeout "
-              << kVerifyTimeoutMs << " ms)...\n";
+    const std::uint32_t expected_samples = static_cast<std::uint32_t>(
+        std::min<std::size_t>(num_windows, ILA_DEPTH));
+    std::cout << "Waiting for ILA capture to reach " << expected_samples
+              << " samples (timeout " << kVerifyTimeoutMs << " ms)...\n";
 
-    std::uint32_t prev_count = 0;
-    int stable = 0;
     int elapsed = 0;
     while (elapsed < kVerifyTimeoutMs) {
       std::this_thread::sleep_for(std::chrono::milliseconds(kPollIntervalMs));
       elapsed += kPollIntervalMs;
-      std::uint32_t count = ila_sample_count(*hololink);
-      if (count > 0 && count == prev_count)
-        ++stable;
-      else
-        stable = 0;
-      prev_count = count;
-      if (stable >= kStableChecks)
+      const std::uint32_t count = ila_sample_count(*hololink);
+      if (count >= expected_samples)
         break;
     }
 
     std::uint32_t actual_samples = ila_sample_count(*hololink);
     ila_disable(*hololink);
 
-    if (actual_samples == 0) {
-      std::cerr << "ILA: captured 0 samples (timeout " << kVerifyTimeoutMs
-                << " ms)\n";
+    if (actual_samples < expected_samples) {
+      std::cerr << "ILA: captured " << actual_samples << " of "
+                << expected_samples << " expected samples (timeout "
+                << kVerifyTimeoutMs << " ms)\n";
       return 1;
     }
     std::cout << "ILA: captured " << actual_samples << " samples\n";

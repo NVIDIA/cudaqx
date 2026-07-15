@@ -510,11 +510,23 @@ dem_from_memory_circuit(const code &code, operation statePrep,
   }
   dem.detector_error_matrix = std::move(selectedRows);
 
-  const std::size_t numReturnSynPerRound =
-      (keep_z_stabilizers ? numZStabs : 0) +
-      (keep_x_stabilizers ? numXStabs : 0);
-  dem.canonicalize_for_rounds(numReturnSynPerRound,
-                              /*remove_zero_syndrome_errors=*/true);
+  if (keep_x_stabilizers && keep_z_stabilizers) {
+    // Full both-basis DEM: the boundary layers carry only the fixed basis and
+    // are narrower than the interior, so canonicalize is boundary-aware.
+    // Boundary width = fixed-basis count (numZStabs for a Z-basis prep, else
+    // numXStabs).
+    const uint32_t numBoundary = is_z_prep ? numZStabs : numXStabs;
+    dem.canonicalize_for_rounds_with_boundary(
+        numXStabs + numZStabs, numBoundary,
+        /*remove_zero_syndrome_errors=*/true);
+  } else {
+    // A single-basis DEM is uniform (every layer has the same width)
+    const std::size_t numReturnSynPerRound =
+        (keep_z_stabilizers ? numZStabs : 0) +
+        (keep_x_stabilizers ? numXStabs : 0);
+    dem.canonicalize_for_rounds(numReturnSynPerRound,
+                                /*remove_zero_syndrome_errors=*/true);
+  }
 
   return dem;
 }

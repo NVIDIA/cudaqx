@@ -183,10 +183,24 @@ if(TARGET cudaq-qec-realtime-decoding-server-cqr)
       nvqir nvqir-stim)
   qec_realtime_app_link_options(surface_code-1-cqr)
 
+  # Enable Relay-BP only when this build provides nv-qldpc support.
+  set(_surface_code_1_cqr_has_nv_qldpc_decoder FALSE)
+  if(TARGET cudaq-qec-nv-qldpc-decoder
+     OR QEC_EXTERNAL_DECODERS
+     OR DEFINED ENV{QEC_EXTERNAL_DECODERS})
+    set(_surface_code_1_cqr_has_nv_qldpc_decoder TRUE)
+  endif()
+
+  set(_surface_code_1_cqr_env CUDAQ_DEVICE_CALL_CHANNEL=host_dispatch)
+  if(TARGET cudaq-qec-realtime-cudevice-proprietary
+     AND _surface_code_1_cqr_has_nv_qldpc_decoder)
+    list(APPEND _surface_code_1_cqr_env EXTRA_CLI_ARGS=--use-relay-bp)
+  endif()
+
   add_test(
     NAME app_examples.surface_code-1-cqr-test-distance-3
     COMMAND
-      ${CMAKE_COMMAND} -E env CUDAQ_DEVICE_CALL_CHANNEL=host_dispatch
+      ${CMAKE_COMMAND} -E env ${_surface_code_1_cqr_env}
       bash "${CMAKE_CURRENT_SOURCE_DIR}/surface_code-1-test.sh"
         ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-cqr
         ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-cqr
@@ -626,6 +640,22 @@ if(Python_Interpreter_FOUND)
     set(_SC4_TRY_TRT_TEST TRUE)
   endif()
 endif()
+# A silent skip here once masked a dead test check for a whole release cycle:
+# the trt surface-code tests register only when BOTH the trt plugin target and
+# python-onnx are available, so name whichever gate actually failed.
+if(NOT TARGET cudaq-qec-trt-decoder)
+  message(WARNING "surface_code-4-yaml: trt_decoder tests NOT registered "
+    "(cudaq-qec-trt-decoder target not built).")
+elseif(NOT _SC4_TRY_TRT_TEST)
+  if(Python_Interpreter_FOUND)
+    message(WARNING "surface_code-4-yaml: trt_decoder tests NOT registered "
+      "(python module 'onnx' not importable by ${Python_EXECUTABLE}); "
+      "pip install onnx to enable them.")
+  else()
+    message(WARNING "surface_code-4-yaml: trt_decoder tests NOT registered "
+      "(no python interpreter found).")
+  endif()
+endif()
 
 function(add_surface_code_4_yaml_test test_suffix distance num_rounds
          decoder_type num_shots onnx_path)
@@ -732,7 +762,7 @@ if(TARGET surface_code-4-yaml-cqr)
       "pymatching,trt_decoder,pymatching" 200 AUTO)
     set_property(TEST app_examples.surface_code-4-yaml-cqr-happy-path
       APPEND PROPERTY ENVIRONMENT
-        "REQUIRE_TRT_EXECUTION=1")
+        "REQUIRE_SERVER_DECODE_COUNTS=1")
   endif()
 
   # A real-workload skew case: all three patches use PyMatching, but patch 1

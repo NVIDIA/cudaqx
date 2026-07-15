@@ -33,7 +33,7 @@
 #   --emulate:        emulator + server + playback  (no FPGA needed)
 #
 # Actions (can be combined):
-#   --build            Build all required tools
+#   --build            Build the surface_code-4 generator (only)
 #   --setup-network    Configure ConnectX interfaces
 #   (run is implicit unless only --build / --setup-network are given)
 #
@@ -47,6 +47,16 @@
 #   # Real FPGA
 #   ./hsb_fpga_decoding_server_test.sh --setup-network --device rocep1s0f0 \
 #       --bridge-ip 192.168.0.1 --fpga-ip 192.168.0.2
+#
+# Deployment note:
+#   --build builds ONLY the surface_code-4 generator (the one artifact not
+#   shipped in the decoding-server image).  Everything else -- decoding_server
+#   (with gpu_roce linked in), the playback tool, the HSB / cudaq-realtime
+#   shared libs, and the decoder plugins -- is consumed PREBUILT: on a dev rig
+#   from the /workspaces/*/build trees, and in a productized container from
+#   their installed locations.  This script never builds cuda-quantum, HSB, or
+#   the decoder server, and needs no proprietary .a at build time.  A clean,
+#   unconfigured rig cannot bootstrap from it.
 set -euo pipefail
 
 # ============================================================================
@@ -75,12 +85,41 @@ DECODER="pymatching"
 CONFIG_FILE=""
 SYNDROMES_FILE=""
 
+# ONNX model for the trt_decoder profile (TRT predecoder + PyMatching global
+# decoder).  AUTO => generate the tiny identity predecoder at run time
+# (output row = [pre_L=0, syndrome untouched], so TRT preserves the syndrome
+# and PyMatching performs the actual correction -- no trained model needed).
+ONNX_PATH="AUTO"
+ONNX_FILE=""
+
 # Data-generation parameters (surface-code memory experiment).  The
 # generator's RNG seed is fixed, so runs are reproducible.
 GEN_DISTANCE=3
 GEN_ROUNDS=4
 GEN_P_SPAM=0.01
 GEN_SHOTS=100
+
+# Server transport.  Empty => derived from the decoder profile:
+#   pymatching        -> cpu_roce  (HOST_CALL dispatch on the CPU)
+#   nv-qldpc-decoder  -> gpu_roce  (self-relaunching device-graph scheduler:
+#                        enqueue/get/reset run as DEVICE_CALLs on the GPU and
+#                        the captured RelayBP decode graph fires device-side)
+TRANSPORT=""
+# GPU for the gpu_roce scheduler + decode graph.
+GPU_ID=0
+# Server-side GPU RoCE ring depth. "auto" chooses a page count whose total
+# allocation satisfies the host page-size requirement.
+GPU_ROCE_NUM_PAGES=auto
+
+# Runtime nv-qldpc plugin for the Relay BP profile: the prebuilt
+# libcudaq-qec-nv-qldpc-decoder.so, dlopen'd by both the generator (during
+# syndrome generation) and the prebuilt decoder server.  Not delivered in this
+# repo and has no default path -- point at it with --nv-qldpc-plugin or the
+# CUDAQ_QEC_NV_QLDPC_PLUGIN env var (eventual home: a GitHub release artifact
+# via all_libs_release.yml).  The pymatching profile never uses it.  The
+# proprietary cudevice archive is NOT a concern of this script: it is a
+# build-time input to the decoder server, which is consumed prebuilt here.
+NV_QLDPC_PLUGIN="${CUDAQ_QEC_NV_QLDPC_PLUGIN:-}"
 
 # Network defaults
 IB_DEVICE=""           # auto-detect
@@ -93,10 +132,10 @@ MTU=4096
 TIMEOUT=60
 NUM_SHOTS=""
 PAGE_SIZE=384
-# Ring depth is intentionally NOT configurable: stock HSB posts WQE_NUM=64
-# receive/send WQEs, so a deeper ring aliases two slots per WQE and races
-# RX/TX.  The server clamps to 64 as well.
+# CPU RoCE server ring slots.
 NUM_SLOTS=64
+# FPGA/emulator playback window pages.
+PLAYBACK_NUM_PAGES=512
 # TX SGE bytes for the server's SEND responses.  RPCResponse (24B) + a
 # bit-packed correction byte fits well inside 64, keeping every response a
 # single 512-bit ILA beat.
@@ -129,9 +168,19 @@ Actions:
   --no-run               Skip running the test (useful with --build)
 
 Decoder options:
-  --decoder NAME         Decoder profile (default: pymatching).  By default the
-                         config/syndromes files are generated fresh each run by
-                         surface_code-4-yaml into CUDAQX_DIR/build/hsb_fpga_test_data
+  --decoder NAME         Decoder profile: pymatching (default), trt_decoder, or
+                         nv-qldpc-decoder (Relay BP).  trt_decoder runs a
+                         TensorRT predecoder + PyMatching global decoder in one
+                         server session (requires the TRT plugin, see --build).
+                         By default the config/syndromes files are generated
+                         fresh each run by surface_code-4-yaml into
+                         CUDAQX_DIR/build/hsb_fpga_test_data
+  --onnx PATH            ONNX model for the trt_decoder profile.  Default AUTO
+                         generates the identity predecoder at run time (needs
+                         the python3 'onnx' module)
+  --transport T          Server transport: cpu_roce or gpu_roce.  Default is
+                         derived from the decoder (pymatching -> cpu_roce,
+                         nv-qldpc-decoder -> gpu_roce device-graph scheduler)
   --config PATH          Use a pre-made decoding-server YAML config (skips generation)
   --syndromes PATH       Use a pre-made syndromes text file (skips generation)
   --data-dir DIR         Use pre-made DIR/config_NAME.yml + DIR/syndromes_NAME.txt
@@ -150,6 +199,10 @@ Build options:
                          CUDAQX_DIR/.cudaq_version (default: /workspaces/cuda-quantum)
   --cudaqx-dir DIR       cudaqx source dir that builds the server + playback
                          (default: /workspaces/cudaqx)
+  --nv-qldpc-plugin PATH Prebuilt libcudaq-qec-nv-qldpc-decoder.so, symlinked
+                         into build/lib/decoder-plugins for the prebuilt server
+                         + generator to dlopen.  No default; required for the
+                         nv-qldpc profile (or set CUDAQ_QEC_NV_QLDPC_PLUGIN)
   --jobs N               Parallel build jobs (default: nproc)
 
 Network options:
@@ -164,7 +217,12 @@ Run options:
   --no-verify            Skip correction verification
   --num-shots N          Limit number of shots
   --page-size N          Ring buffer slot size in bytes (default: 384)
-  --frame-size N         Server TX SGE bytes (default: 64)
+  --frame-size N         Server TX SGE bytes, cpu_roce only (default: 64;
+                         gpu_roce uses page-size as HOLOLINK_FRAME_SIZE)
+  --gpu N                GPU device id for gpu_roce (default: 0)
+  --gpu-roce-num-pages N Server GPU RoCE ring pages (default: auto-align;
+                         starts from playback window pages)
+  --playback-num-pages N FPGA/emulator playback window pages (default: 512)
   --spacing N            Inter-shot spacing in microseconds (default: 10)
   --control-port N       UDP control port for emulator (default: 8193)
 
@@ -180,6 +238,12 @@ while [[ $# -gt 0 ]]; do
         --no-run)           DO_RUN=false ;;
         --no-verify)        VERIFY=false ;;
         --decoder)          DECODER="$2"; shift ;;
+        --onnx)             ONNX_PATH="$2"; shift ;;
+        --transport)        TRANSPORT="$2"; shift ;;
+        --gpu)              GPU_ID="$2"; shift ;;
+        --gpu-roce-num-pages) GPU_ROCE_NUM_PAGES="$2"; shift ;;
+        --playback-num-pages) PLAYBACK_NUM_PAGES="$2"; shift ;;
+        --nv-qldpc-plugin)  NV_QLDPC_PLUGIN="$2"; shift ;;
         --config)           CONFIG_FILE="$2"; shift ;;
         --syndromes)        SYNDROMES_FILE="$2"; shift ;;
         --data-dir)         DATA_DIR="$2"; shift ;;
@@ -211,6 +275,34 @@ while [[ $# -gt 0 ]]; do
     esac
     shift
 done
+
+# Derive the transport from the decoder profile unless explicitly chosen.
+if [[ -z "$TRANSPORT" ]]; then
+    case "$DECODER" in
+        nv-qldpc-decoder) TRANSPORT="gpu_roce" ;;
+        *)                TRANSPORT="cpu_roce" ;;
+    esac
+fi
+if [[ "$TRANSPORT" != "cpu_roce" && "$TRANSPORT" != "gpu_roce" ]]; then
+    echo "ERROR: unknown --transport $TRANSPORT (expected cpu_roce or gpu_roce)" >&2
+    exit 1
+fi
+
+# Some DOCA registrations require the gpu_roce server ring allocation to be
+# host-page aligned. Keep playback capacity independent from the server ring,
+# and choose a server page count that satisfies the allocation contract.
+if [[ "$TRANSPORT" == "gpu_roce" && "$GPU_ROCE_NUM_PAGES" == "auto" ]]; then
+    HOST_PAGE_SIZE=$(getconf PAGESIZE 2>/dev/null || echo 4096)
+    SERVER_PAGE_SIZE=$(( ((PAGE_SIZE + 127) / 128) * 128 ))
+    GPU_ROCE_NUM_PAGES="$PLAYBACK_NUM_PAGES"
+    while (( (SERVER_PAGE_SIZE * GPU_ROCE_NUM_PAGES) % HOST_PAGE_SIZE != 0 )); do
+        ((GPU_ROCE_NUM_PAGES++))
+        if (( GPU_ROCE_NUM_PAGES > 65536 )); then
+            echo "ERROR: unable to auto-align gpu_roce ring for page-size=$PAGE_SIZE host-page-size=$HOST_PAGE_SIZE" >&2
+            exit 1
+        fi
+    done
+fi
 
 # ============================================================================
 # Logging Helpers
@@ -507,33 +599,41 @@ detect_cuda_arch() {
 }
 
 do_build() {
-    _log "Building all tools (jobs=$JOBS)"
+    _log "Building the surface_code-4 generator only (jobs=$JOBS)"
 
     local cudaqx_build="${CUDAQX_DIR}/build"
-    local cq_build="${CUDA_QUANTUM_DIR}/realtime/build"
-    local hsb_build="${HSB_DIR}/build"
 
-    # cuda-quantum must be at the ref cudaqx pins (matches cudaqx CI).
+    # This script builds ONLY the surface_code-4 generator (the config +
+    # syndrome producer that is NOT shipped in the decoding-server image).  The
+    # decoder server, playback tool, HSB / cudaq-realtime shared libs, and
+    # decoder plugins are consumed PREBUILT -- on a dev rig from the
+    # /workspaces/*/build trees (resolve_paths points there), and in a
+    # productized image from their installed locations.  So a clean,
+    # unconfigured rig cannot bootstrap from this script.
+    if [[ ! -f "$cudaqx_build/CMakeCache.txt" ]]; then
+        _err "cudaqx build dir is not configured ($cudaqx_build/CMakeCache.txt"
+        _err "missing).  This script builds only the surface_code-4 generator and"
+        _err "consumes the decoder server, playback, libs, and plugins prebuilt."
+        _err "Configure + build the cudaqx tree once first, or run against a"
+        _err "prebuilt/installed image."
+        return 1
+    fi
+
+    # cuda-quantum should be at the ref cudaqx pins (the generator links the
+    # cuda-quantum realtime libs); warn on skew, as the full build did.
     local pinned_ref current_ref
     pinned_ref=$(jq -r '.cudaq.ref' "${CUDAQX_DIR}/.cudaq_version" 2>/dev/null || true)
     current_ref=$(git -C "$CUDA_QUANTUM_DIR" rev-parse HEAD 2>/dev/null || true)
     if [[ -n "$pinned_ref" && -n "$current_ref" && "$pinned_ref" != "$current_ref" ]]; then
-        _err "cuda-quantum checkout ($current_ref)"
-        _err "does not match the cudaqx pin  ($pinned_ref)"
-        _err "from ${CUDAQX_DIR}/.cudaq_version.  Continuing, but the realtime"
-        _err "libraries may be ABI-skewed against this cudaqx tree."
+        _err "cuda-quantum checkout ($current_ref) does not match the cudaqx pin"
+        _err "($pinned_ref) from ${CUDAQX_DIR}/.cudaq_version.  Continuing, but the"
+        _err "realtime libraries may be ABI-skewed against this cudaqx tree."
     elif [[ -n "$pinned_ref" ]]; then
         _info "cuda-quantum at the cudaqx pin: $pinned_ref"
     fi
 
-    local cuda_arch
-    cuda_arch=$(detect_cuda_arch)
-    local cuda_arch_flag=""
-    if [ -n "$cuda_arch" ]; then
-        cuda_arch_flag="-DCMAKE_CUDA_ARCHITECTURES=$cuda_arch"
-        _info "CUDA arch: $cuda_arch"
-    fi
-
+    # Ensure nvcc is discoverable for the generator's device-code (nvq++)
+    # compile step; best-effort (a no-op rebuild needs no compiler).
     local cuda_compiler=""
     if [[ -n "${CMAKE_CUDA_COMPILER:-}" ]]; then
         cuda_compiler="${CMAKE_CUDA_COMPILER}"
@@ -542,144 +642,23 @@ do_build() {
     else
         cuda_compiler="$(command -v nvcc || true)"
     fi
-    if [[ -z "$cuda_compiler" || ! -x "$cuda_compiler" ]]; then
-        _err "Unable to locate nvcc. Set CMAKE_CUDA_COMPILER or update PATH."
-        return 1
-    fi
-    local cuda_bin_dir
-    cuda_bin_dir="$(dirname "$cuda_compiler")"
-    case ":$PATH:" in
-        *":$cuda_bin_dir:"*) ;;
-        *) export PATH="$cuda_bin_dir:$PATH" ;;
-    esac
-    if [[ -z "$cuda_arch" ]]; then
-        cuda_arch=$(detect_cuda_arch)
-        if [[ -n "$cuda_arch" ]]; then
-            cuda_arch_flag="-DCMAKE_CUDA_ARCHITECTURES=$cuda_arch"
-            _info "CUDA arch (re-detected): $cuda_arch"
-        fi
-    fi
-    local cuda_toolkit_root
-    cuda_toolkit_root="$(cd "$(dirname "$cuda_compiler")/.." && pwd -P)"
-    _info "CUDA compiler: $cuda_compiler"
-    _info "CUDA toolkit:  $cuda_toolkit_root"
-
-    # ---- Stage 1: cuda-quantum/realtime ----
-    _banner "Stage 1/3: Building cuda-quantum/realtime"
-    local cq_src="${CUDA_QUANTUM_DIR}/realtime"
-    if [[ ! -d "$cq_src" ]]; then
-        _err "cuda-quantum realtime source not found at $cq_src"
-        return 1
+    if [[ -n "$cuda_compiler" && -x "$cuda_compiler" ]]; then
+        local cuda_bin_dir
+        cuda_bin_dir="$(dirname "$cuda_compiler")"
+        case ":$PATH:" in
+            *":$cuda_bin_dir:"*) ;;
+            *) export PATH="$cuda_bin_dir:$PATH" ;;
+        esac
     fi
 
-    cmake -G Ninja -S "$cq_src" -B "$cq_build" \
-        -DCMAKE_BUILD_TYPE=Release \
-        $cuda_arch_flag \
+    # Rebuild only the generator.  The cudaqx build dir is already configured
+    # (checked above); ninja regenerates the build if CMakeLists changed
+    # (reusing the cached configure) and recompiles only what is stale.  This
+    # script never builds cuda-quantum, HSB, or the decoder server.
+    cmake --build "$cudaqx_build" -j "$JOBS" --target surface_code-4-yaml \
         2>&1 | tail -5
-    cmake --build "$cq_build" -j "$JOBS" 2>&1 | tail -5
-    _info "cuda-quantum/realtime built: $cq_build/lib/"
-
-    # ---- Stage 2: holoscan-sensor-bridge (hololink_core for playback,
-    # plus the emulator via a cuda-quantum reconfigure) ----
-    _banner "Stage 2/3: Building holoscan-sensor-bridge (hololink_core)"
-    if [[ ! -d "$HSB_DIR" ]]; then
-        _err "holoscan-sensor-bridge source not found at $HSB_DIR"
-        return 1
-    fi
-
-    local target_arch="amd64"
-    if [[ "$(uname -m)" == "aarch64" ]]; then
-        target_arch="arm64"
-    fi
-
-    # Holoscan SDK requires CMake >= 3.30.4; find a suitable binary.
-    local hsb_cmake="cmake"
-    if [[ -x /tmp/cmake-3.31.6-linux-aarch64/bin/cmake ]]; then
-        hsb_cmake="/tmp/cmake-3.31.6-linux-aarch64/bin/cmake"
-    elif [[ -x /usr/local/cmake-3.31/bin/cmake ]]; then
-        hsb_cmake="/usr/local/cmake-3.31/bin/cmake"
-    fi
-
-    local hsb_common_args=(
-        -G Ninja
-        -S "$HSB_DIR"
-        -B "$hsb_build"
-        -DCMAKE_BUILD_TYPE=Release
-        -DCMAKE_CUDA_COMPILER="$cuda_compiler"
-        -DCUDAToolkit_ROOT="$cuda_toolkit_root"
-        $cuda_arch_flag
-        -DTARGET_ARCH="$target_arch"
-        -DHOLOLINK_BUILD_ONLY_NATIVE=OFF
-        -DHOLOLINK_BUILD_PYTHON=OFF
-        -DHOLOLINK_BUILD_TESTS=OFF
-        -DHOLOLINK_BUILD_TOOLS=OFF
-        -DHOLOLINK_BUILD_EXAMPLES=OFF
-        -DHOLOLINK_BUILD_EMULATOR=OFF
-    )
-    if "$hsb_cmake" --help 2>/dev/null | grep -q -- "--fresh"; then
-        "$hsb_cmake" --fresh "${hsb_common_args[@]}" 2>&1 | tail -5
-    else
-        rm -f "$hsb_build/CMakeCache.txt"
-        rm -rf "$hsb_build/CMakeFiles"
-        "$hsb_cmake" "${hsb_common_args[@]}" 2>&1 | tail -5
-    fi
-
-    "$hsb_cmake" --build "$hsb_build" -j "$JOBS" \
-        --target hololink_core 2>&1 | tail -5
-    _info "holoscan-sensor-bridge built: $hsb_build/"
-
-    if $EMULATE; then
-        # Reconfigure cuda-quantum/realtime with hololink tools (for the
-        # emulator binary only; the server itself has no HSB dependency).
-        cmake -G Ninja -S "$cq_src" -B "$cq_build" \
-            -DCMAKE_BUILD_TYPE=Release \
-            $cuda_arch_flag \
-            -DCUDAQ_REALTIME_ENABLE_HOLOLINK_TOOLS=ON \
-            -DHOLOSCAN_SENSOR_BRIDGE_SOURCE_DIR="$HSB_DIR" \
-            -DHOLOSCAN_SENSOR_BRIDGE_BUILD_DIR="$hsb_build" \
-            2>&1 | tail -5
-        cmake --build "$cq_build" -j "$JOBS" \
-            --target hololink_fpga_emulator 2>&1 | tail -5
-    fi
-
-    # ---- Stage 3: cudaqx decoding server + playback + decoder plugin ----
-    _banner "Stage 3/3: Building cudaqx server + playback"
-    if [[ ! -d "$CUDAQX_DIR" ]]; then
-        _err "cudaqx source not found at $CUDAQX_DIR"
-        return 1
-    fi
-
-    # The server's CMake locates the cpu_transport archives via explicit cache
-    # entries (its find_library does not search the cuda-quantum build tree).
-    cmake -G Ninja -S "$CUDAQX_DIR" -B "$cudaqx_build" \
-        $cuda_arch_flag \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_CUDA_COMPILER="$cuda_compiler" \
-        -DCUDAToolkit_ROOT="$cuda_toolkit_root" \
-        -DCUDAQX_QEC_ENABLE_HOLOLINK_TOOLS=ON \
-        -DCUDAQ_QEC_BUILD_TRT_DECODER=OFF \
-        -DHOLOSCAN_SENSOR_BRIDGE_SOURCE_DIR="$HSB_DIR" \
-        -DHOLOSCAN_SENSOR_BRIDGE_BUILD_DIR="$hsb_build" \
-        -DCUDAQ_REALTIME_ROOT="${CUDA_QUANTUM_DIR}/realtime" \
-        -DCUDAQ_REALTIME_INCLUDE_DIR="${CUDA_QUANTUM_DIR}/realtime/include" \
-        -DCUDAQ_REALTIME_LIBRARY="${cq_build}/lib/libcudaq-realtime.so" \
-        -DCUDAQ_REALTIME_DISPATCH_LIBRARY="${cq_build}/lib/libcudaq-realtime-dispatch.a" \
-        -DCUDAQ_REALTIME_HOST_DISPATCH_LIBRARY="${cq_build}/lib/libcudaq-realtime-host-dispatch.a" \
-        -DQEC_UDP_TRANSPORT_LIBRARY="${cq_build}/lib/libcudaq-realtime-udp-transport.a" \
-        -DQEC_CPU_ROCE_TRANSPORT_LIBRARY="${cq_build}/lib/libcudaq-realtime-cpu-roce-transport.a" \
-        -DQEC_UDP_REALTIME_LIBRARY="${cq_build}/lib/libcudaq-realtime.so" \
-        -DQEC_HOST_DISPATCH_LIBRARY="${cq_build}/lib/libcudaq-realtime-host-dispatch.a" \
-        -DCUDAQ_INSTALL_PREFIX="${CUDAQ_INSTALL_PREFIX:-/usr/local/cudaq}" \
-        -DCUDAQ_DIR="${CUDAQ_INSTALL_PREFIX:-/usr/local/cudaq}/lib/cmake/cudaq" \
-        2>&1 | tail -5
-
-    cmake --build "$cudaqx_build" -j "$JOBS" \
-        --target decoding_server \
-                 hololink_fpga_syndrome_playback \
-                 cudaq-qec-pymatching \
-                 surface_code-4-yaml \
-        2>&1 | tail -5
-    _info "cudaqx tools built: $cudaqx_build/bin + $cudaqx_build/libs/qec/unittests/utils/"
+    _info "surface_code-4 generator built:"
+    _info "  $cudaqx_build/libs/qec/unittests/realtime/app_examples/surface_code-4-yaml"
 
     _banner "Build complete"
 }
@@ -715,6 +694,65 @@ resolve_data_files() {
     SYNDROMES_FILE="${GEN_DIR}/syndromes_${DECODER}.txt"
 }
 
+# Resolve ONNX_FILE for the trt_decoder profile.  AUTO generates the tiny
+# identity predecoder (mirrors app_examples/surface_code-4-yaml-test.sh):
+# output row = [pre_L=0, input syndrome untouched], so TRT preserves the
+# syndrome and the PyMatching global decoder performs the actual correction --
+# expected corrections stay computable at generation time without a trained
+# model, while still exercising ONNX parse, engine build, and per-shot
+# inference.
+generate_identity_onnx() {
+    if [[ "$ONNX_PATH" != "AUTO" ]]; then
+        if [[ ! -f "$ONNX_PATH" ]]; then
+            _err "--onnx file not found: $ONNX_PATH"
+            return 1
+        fi
+        ONNX_FILE="$ONNX_PATH"
+        return 0
+    fi
+    if ! python3 -c "import onnx" 2>/dev/null; then
+        _err "python3 module 'onnx' is required to generate the identity ONNX"
+        _err "model (pip install onnx), or pass a pre-made model with --onnx."
+        return 1
+    fi
+    ONNX_FILE="${GEN_DIR}/trt_identity_predecoder.onnx"
+    local syndrome_size=$(((GEN_DISTANCE * GEN_DISTANCE - 1) * GEN_ROUNDS))
+    _info "Generating identity ONNX: $ONNX_FILE (syndrome_size=$syndrome_size)"
+    python3 - "$ONNX_FILE" "$syndrome_size" <<'PY'
+import sys
+
+import onnx
+from onnx import TensorProto, helper
+
+output_path = sys.argv[1]
+syndrome_size = int(sys.argv[2])
+
+input_info = helper.make_tensor_value_info(
+    "input", TensorProto.FLOAT, [1, syndrome_size])
+output_info = helper.make_tensor_value_info(
+    "output", TensorProto.FLOAT, [1, syndrome_size + 1])
+zero = helper.make_node(
+    "Constant",
+    [],
+    ["pre_l"],
+    value=helper.make_tensor("zero", TensorProto.FLOAT, [1, 1], [0.0]),
+)
+concat = helper.make_node("Concat", ["pre_l", "input"], ["output"], axis=1)
+graph = helper.make_graph(
+    [zero, concat], "trt_identity_predecoder", [input_info], [output_info])
+model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 19)])
+# IR 9 is sufficient for opset 19 and remains readable by the ONNX checker in
+# the CUDA-QX development image.
+model.ir_version = 9
+onnx.checker.check_model(model)
+onnx.save(model, output_path)
+PY
+    if [[ ! -f "$ONNX_FILE" ]]; then
+        _err "Identity ONNX generation failed"
+        return 1
+    fi
+}
+
 # Generate the decoder config (DEM + decoder_custom_args) and the syndromes
 # file with the surface_code-4-yaml memory-experiment binary.  Runs in GEN_DIR
 # so the generator's auxiliary outputs land there too.
@@ -726,6 +764,18 @@ generate_data_files() {
         return 1
     fi
 
+    # trt_decoder profile: the generator needs an ONNX model at
+    # config-generation time (--onnx_path is required with --decoder_type
+    # trt_decoder).  The TRT plugin itself is consumed PREBUILT and resolved at
+    # load time from the decoder-plugins dir on LD_LIBRARY_PATH, exactly like
+    # the pymatching plugin -- no explicit existence check here.
+    local extra_gen_flags=()
+    if [[ "$DECODER" == "trt_decoder" ]]; then
+        mkdir -p "$GEN_DIR"
+        generate_identity_onnx || return 1
+        extra_gen_flags+=(--onnx_path "$ONNX_FILE")
+    fi
+
     _log "Generating test data (decoder=$DECODER, distance=$GEN_DISTANCE," \
          "rounds=$GEN_ROUNDS, p_spam=$GEN_P_SPAM, shots=$GEN_SHOTS)"
     mkdir -p "$GEN_DIR"
@@ -733,8 +783,16 @@ generate_data_files() {
     local gen_ld_path
     gen_ld_path="${CUDA_QUANTUM_DIR}/realtime/build/lib:${CUDAQX_DIR}/build/lib"
 
+    # nv-qldpc profile == the Relay BP test: select Relay BP custom args.
+    local gen_extra_args=()
+    if [[ "$DECODER" == "nv-qldpc-decoder" ]]; then
+        gen_extra_args+=(--use-relay-bp)
+    fi
+
     _info "$GENERATOR_BIN --distance $GEN_DISTANCE --num_rounds $GEN_ROUNDS" \
-          "--p_spam $GEN_P_SPAM --decoder_type $DECODER --save_dem $(basename "$CONFIG_FILE")"
+          "--p_spam $GEN_P_SPAM --decoder_type $DECODER" \
+          "${extra_gen_flags[*]} ${gen_extra_args[*]:-}" \
+          "--save_dem $(basename "$CONFIG_FILE")"
     (cd "$GEN_DIR" && \
      LD_LIBRARY_PATH="${gen_ld_path}:${LD_LIBRARY_PATH:-}" \
      "$GENERATOR_BIN" \
@@ -742,11 +800,47 @@ generate_data_files() {
         --num_rounds "$GEN_ROUNDS" \
         --p_spam "$GEN_P_SPAM" \
         --decoder_type "$DECODER" \
+        ${extra_gen_flags[@]+"${extra_gen_flags[@]}"} \
+        ${gen_extra_args[@]+"${gen_extra_args[@]}"} \
         --save_dem "$(basename "$CONFIG_FILE")" > gen_config.log 2>&1) || {
         _err "Config generation failed; see ${GEN_DIR}/gen_config.log"
         tail -5 "${GEN_DIR}/gen_config.log" >&2 || true
         return 1
     }
+
+    # Configuration-identity check: the identity ONNX makes TRT->PyMatching
+    # output bit-identical to plain PyMatching, so a silently-substituted
+    # entry would pass verification below.  Pin the generated config to the
+    # combo before anything downstream consumes it.
+    if [[ "$DECODER" == "trt_decoder" ]]; then
+        if ! grep -Eq "type:[[:space:]]+trt_decoder" "$CONFIG_FILE" || \
+           ! grep -q "onnx_load_path" "$CONFIG_FILE"; then
+            _err "Generated config lacks a trt_decoder entry with onnx_load_path: $CONFIG_FILE"
+            return 1
+        fi
+        _info "Config carries the trt_decoder entry (onnx_load_path set)"
+    fi
+
+    # The server selects its transceiver from the per-decoder `transport:` YAML
+    # key (default cpu_roce). For gpu_roce, `cuda_device_id` pins graph capture
+    # and worker-thread execution to the selected GPU. The generator doesn't emit
+    # these non-default optional fields, so inject them into our generated config
+    # directly under the decoder's `type:` line.
+    if [[ "$TRANSPORT" == "gpu_roce" ]]; then
+        _info "Injecting 'transport: gpu_roce' and cuda_device_id=$GPU_ID into $(basename "$CONFIG_FILE")"
+        awk -v gpu_id="$GPU_ID" '{ print }
+             /^[[:space:]]*type:/ && !done {
+                 print "    transport:       gpu_roce"
+                 print "    cuda_device_id:  " gpu_id
+                 done = 1
+             }' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" \
+            && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+        if ! grep -q "transport:.*gpu_roce" "$CONFIG_FILE" || \
+           ! grep -q "cuda_device_id:.*$GPU_ID" "$CONFIG_FILE"; then
+            _err "Failed to inject gpu_roce transport/cuda_device_id into $CONFIG_FILE"
+            return 1
+        fi
+    fi
 
     _info "$GENERATOR_BIN --distance $GEN_DISTANCE --num_rounds $GEN_ROUNDS" \
           "--p_spam $GEN_P_SPAM --num_shots $GEN_SHOTS --yaml $(basename "$CONFIG_FILE")" \
@@ -767,6 +861,33 @@ generate_data_files() {
 
     _info "Generated: $CONFIG_FILE"
     _info "Generated: $SYNDROMES_FILE"
+}
+
+# The nv-qldpc profile needs the proprietary plugin dlopen-able from the
+# cudaqx decoder-plugins dir (used by both the data generator and the server).
+# Symlink it opportunistically so plain runs work without --build.
+ensure_nv_qldpc_plugin() {
+    local plugin_dir="${CUDAQX_DIR}/build/lib/decoder-plugins"
+    # Guard the empty default first: basename "" yields "" so the link path
+    # would collapse to "$plugin_dir/", which -e reports as an existing
+    # directory -- a false "already present".
+    if [[ -z "$NV_QLDPC_PLUGIN" ]]; then
+        _err "nv-qldpc profile requires the plugin path: pass --nv-qldpc-plugin PATH"
+        _err "or set CUDAQ_QEC_NV_QLDPC_PLUGIN (eventual home: all_libs_release.yml artifact)."
+        return 1
+    fi
+    local link="${plugin_dir}/$(basename "$NV_QLDPC_PLUGIN")"
+    if [[ -e "$link" ]]; then
+        return 0
+    fi
+    if [[ ! -f "$NV_QLDPC_PLUGIN" ]]; then
+        _err "nv-qldpc plugin not found: $NV_QLDPC_PLUGIN"
+        _err "Build it in the proprietary cuda-qx tree or pass --nv-qldpc-plugin PATH."
+        return 1
+    fi
+    mkdir -p "$plugin_dir"
+    ln -sf "$NV_QLDPC_PLUGIN" "$link"
+    _info "nv-qldpc plugin symlinked: $link"
 }
 
 resolve_paths() {
@@ -867,30 +988,69 @@ extract_decimal() {
 start_server() {
     local peer_ip="$1" remote_qp="$2" server_log="$3"
 
-    _log "Starting decoding server (decoder=$DECODER, remote-qp=$remote_qp)"
+    _log "Starting decoding server (decoder=$DECODER, transport=$TRANSPORT," \
+         "remote-qp=$remote_qp)"
 
     local server_ld_path
     server_ld_path="${CUDA_QUANTUM_DIR}/realtime/build/lib:${CUDAQX_DIR}/build/lib"
 
-    LD_LIBRARY_PATH="${server_ld_path}:${LD_LIBRARY_PATH:-}" \
-    "$SERVER_BIN" \
-        --config="$CONFIG_FILE" \
-        --transport=cpu_roce \
-        --qp_config=hsb_fpga \
-        --device="$BRIDGE_DEVICE" \
-        --peer-ip="$peer_ip" \
-        --remote-qp="$remote_qp" \
-        --num-slots="$NUM_SLOTS" \
-        --slot-size="$PAGE_SIZE" \
-        --frame-size="$FRAME_SIZE" \
-        --timeout="$TIMEOUT" \
-        > >(tee "$server_log") 2>&1 &
+    local ready_pattern
+    if [[ "$TRANSPORT" == "gpu_roce" ]]; then
+        # Device-graph scheduler path: enqueue/get/reset run as DEVICE_CALLs
+        # on the GPU and the captured RelayBP decode graph fires device-side.
+        # The Hololink transceiver is configured via HOLOLINK_* env (the
+        # server's gpu_roce mode ignores the cpu_roce CLI flags), and eager
+        # module loading avoids lazy-load stalls inside the persistent
+        # scheduler (same as the old bridge launcher).
+        CUDA_MODULE_LOADING=EAGER \
+        LD_LIBRARY_PATH="${server_ld_path}:${LD_LIBRARY_PATH:-}" \
+        HOLOLINK_DEVICE="$BRIDGE_DEVICE" \
+        HOLOLINK_PEER_IP="$peer_ip" \
+        HOLOLINK_REMOTE_QP="$((remote_qp))" \
+        HOLOLINK_FRAME_SIZE="$PAGE_SIZE" \
+        HOLOLINK_NUM_PAGES="$GPU_ROCE_NUM_PAGES" \
+        "$SERVER_BIN" \
+            --config="$CONFIG_FILE" \
+            --transport=gpu_roce \
+            --timeout="$TIMEOUT" \
+            > >(tee "$server_log") 2>&1 &
+        # The GpuRoceTransceiver prints the QP/RKey/Buffer handshake during
+        # server construction, BEFORE this READY sentinel -- so waiting for
+        # READY guarantees the three lines are scrapeable.
+        ready_pattern="QEC_DECODING_SERVER_READY gpu_roce"
+    else
+        LD_LIBRARY_PATH="${server_ld_path}:${LD_LIBRARY_PATH:-}" \
+        "$SERVER_BIN" \
+            --config="$CONFIG_FILE" \
+            --transport=cpu_roce \
+            --qp_config=hsb_fpga \
+            --device="$BRIDGE_DEVICE" \
+            --peer-ip="$peer_ip" \
+            --remote-qp="$remote_qp" \
+            --num-slots="$NUM_SLOTS" \
+            --slot-size="$PAGE_SIZE" \
+            --frame-size="$FRAME_SIZE" \
+            --timeout="$TIMEOUT" \
+            > >(tee "$server_log") 2>&1 &
+        ready_pattern="Bridge Ready"
+    fi
     SERVER_PID=$!
     PIDS_TO_KILL+=("$SERVER_PID")
     _info "Server PID: $SERVER_PID"
 
-    wait_for_pattern "$server_log" "Bridge Ready" 60 "$SERVER_PID" >/dev/null || {
+    wait_for_pattern "$server_log" "$ready_pattern" 60 "$SERVER_PID" >/dev/null || {
         _err "Decoding server did not become ready"
+        _err "--- Server log ---"
+        cat "$server_log" >&2
+        return 1
+    }
+
+    # Configuration-identity check (all profiles): the server names the
+    # decoder session it actually constructed.  Matters most for trt_decoder,
+    # where the identity ONNX makes a silently-substituted pymatching session
+    # pass the corrections verification bit-identically.
+    wait_for_pattern "$server_log" "decoder 0 type: ${DECODER}" 5 "$SERVER_PID" >/dev/null || {
+        _err "Server did not construct a '${DECODER}' decoder session"
         _err "--- Server log ---"
         cat "$server_log" >&2
         return 1
@@ -924,6 +1084,7 @@ run_playback() {
         --rkey "$SERVER_RKEY"
         --buffer-addr "$SERVER_ADDR"
         --page-size "$PAGE_SIZE"
+        --num-pages "$PLAYBACK_NUM_PAGES"
         "$@"
     )
     if $VERIFY; then
@@ -960,6 +1121,7 @@ run_emulated() {
         --port="$CONTROL_PORT" \
         --bridge-ip="$BRIDGE_IP" \
         --page-size="$PAGE_SIZE" \
+        --num-pages="$PLAYBACK_NUM_PAGES" \
         > >(tee "$emu_log") 2>&1 &
     local emu_pid=$!
     PIDS_TO_KILL+=("$emu_pid")
@@ -1030,6 +1192,9 @@ main() {
         return 0
     fi
 
+    if [[ "$DECODER" == "nv-qldpc-decoder" ]]; then
+        ensure_nv_qldpc_plugin
+    fi
     resolve_data_files
     if $GENERATE_DATA; then
         generate_data_files

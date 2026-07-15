@@ -293,8 +293,8 @@ fi
 # but its CQR build deliberately does not construct local decoders.
 SERVER_PORT=""
 if [[ -n "${QEC_DECODING_SERVER:-}" ]]; then
-  if [[ -n "${REQUIRE_TRT_EXECUTION:-}" ]]; then
-    CUDAQ_QEC_TRT_REPORT_INFERENCE_EXECUTIONS=1 \
+  if [[ -n "${REQUIRE_SERVER_DECODE_COUNTS:-}" ]]; then
+    QEC_DECODING_SERVER_STATS=1 \
       "$QEC_DECODING_SERVER" --config="$CONFIG_FILE" --transport=udp --port=0 \
         --timeout=300 >"$SERVER_LOG" 2>&1 &
   else
@@ -505,27 +505,26 @@ if [[ -n "$SERVER_PORT" ]]; then
       return_code=1
     fi
   fi
-  if [[ -n "${REQUIRE_TRT_EXECUTION:-}" ]]; then
-    trt_instances=0
-    for decoder_type_entry in "${DECODER_TYPES[@]}"; do
-      if [[ "$decoder_type_entry" == "trt_decoder" ]]; then
-        trt_instances=$((trt_instances + 1))
+  # Decoder-agnostic execution evidence: the server reports per-session
+  # counters (QEC_DECODING_SERVER_STATS=1); every decoder must have completed
+  # exactly one decode per shot. This replaces the removed trt-internal
+  # QEC_TRT_INFERENCE_EXECUTIONS counter and covers closed-source decoders.
+  if [[ -n "${REQUIRE_SERVER_DECODE_COUNTS:-}" ]]; then
+    stats_lines=$(grep -c '^QEC_DECODING_SERVER_DECODER_STATS ' \
+      "$SERVER_LOG" || true)
+    if [[ "$stats_lines" -ne "${#DECODER_TYPES[@]}" ]]; then
+      echo "FAIL: server reported $stats_lines decoder stats lines; expected ${#DECODER_TYPES[@]}"
+      return_code=1
+    fi
+    for ((i = 0; i < ${#DECODER_TYPES[@]}; i++)); do
+      got_decodes=$(sed -n \
+        "s/^QEC_DECODING_SERVER_DECODER_STATS id=$i decodes=\([0-9][0-9]*\) .*/\1/p" \
+        "$SERVER_LOG" | tail -n1)
+      if [[ "$got_decodes" != "$NUM_SHOTS" ]]; then
+        echo "FAIL: decoder[$i] (${DECODER_TYPES[$i]}) completed '$got_decodes' decodes; expected $NUM_SHOTS"
+        return_code=1
       fi
     done
-    expected_trt_decodes=$((trt_instances * (NUM_SHOTS + 1)))
-    trt_reports=$(grep -c '^QEC_TRT_INFERENCE_EXECUTIONS count=' \
-      "$SERVER_LOG" || true)
-    trt_decodes=$(sed -n \
-      's/^QEC_TRT_INFERENCE_EXECUTIONS count=\([0-9][0-9]*\)$/\1/p' \
-      "$SERVER_LOG" | awk '{sum += $1} END {print sum + 0}')
-    if [[ "$trt_reports" -ne "$trt_instances" ]]; then
-      echo "FAIL: TensorRT reported $trt_reports inference counters; expected $trt_instances"
-      return_code=1
-    fi
-    if [[ "$trt_decodes" -ne "$expected_trt_decodes" ]]; then
-      echo "FAIL: TensorRT decoded $trt_decodes times; expected $expected_trt_decodes"
-      return_code=1
-    fi
   fi
   echo "Server evidence: dispatches=$server_dispatches, max_concurrent=$server_max_concurrent"
 fi

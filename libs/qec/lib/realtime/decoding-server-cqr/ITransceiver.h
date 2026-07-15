@@ -89,6 +89,16 @@ struct ITransceiver {
   /// threads, which may be concurrent.
   virtual void send(const PeerId &peer, const uint8_t *data, size_t len) = 0;
 
+  /// Optional hook for GPU ring-buffer transports: wire \p graph_resources
+  /// (the opaque pointer from decoder::capture_decode_graph()) into an
+  /// on-device scheduler and launch it.  Returns false when the transport has
+  /// no device scheduler (the default); callers that require one treat that
+  /// as an error.  Keeps DecodingServer free of concrete-transceiver types
+  /// (and their link-time dependencies).
+  virtual bool launch_device_scheduler(void * /*graph_resources*/) {
+    return false;
+  }
+
   virtual ~ITransceiver() = default;
 };
 
