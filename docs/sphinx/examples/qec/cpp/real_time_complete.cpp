@@ -39,8 +39,7 @@ void save_dem(const cudaq::qec::decoder_context &ctx,
   config.syndrome_size = dem.num_detectors();
   config.H_sparse = cudaq::qec::pcm_to_sparse_vec(dem.detector_error_matrix);
   config.O_sparse = cudaq::qec::pcm_to_sparse_vec(dem.observables_flips_matrix);
-  // The decoder context builds D_sparse directly from its m2d map.
-  config.D_sparse = ctx.d_sparse();
+  config.D_sparse = cudaq::qec::d_sparse(ctx.m2d);
 
   cudaq::qec::decoding::config::multi_error_lut_config lut_config;
   lut_config.lut_error_depth = 2;
@@ -144,7 +143,7 @@ int main() {
       *code, cudaq::qec::operation::prep0, 3, noise);
   // [End DEM Generation]
 
-  save_dem(ctx, "config.yaml");
+  save_dem(ctx.full_component(), "config.yaml");
 
   // Step 2: Load config and run circuit
   printf("\nStep 2: Running circuit with decoding...\n");

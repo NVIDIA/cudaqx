@@ -95,7 +95,7 @@ def main():
 
     ctx = qec.decoder_context_from_memory_circuit(code, qec.operation.prep0, 3,
                                                   noise)
-    dem = ctx.dem
+    dem, m2d, m2o = ctx.full_component()
     # [End DEM Generation]
 
     # [Begin Save DEM]
@@ -107,7 +107,7 @@ def main():
     config.syndrome_size = dem.detector_error_matrix.shape[0]
     config.H_sparse = qec.pcm_to_sparse_vec(dem.detector_error_matrix)
     config.O_sparse = qec.pcm_to_sparse_vec(dem.observables_flips_matrix)
-    config.D_sparse = ctx.d_sparse()
+    config.D_sparse = qec.d_sparse(m2d)
     lut_config = qec.multi_error_lut_config()
     lut_config.lut_error_depth = 2
     config.set_decoder_custom_args(lut_config)
