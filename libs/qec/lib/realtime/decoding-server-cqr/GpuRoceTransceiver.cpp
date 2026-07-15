@@ -364,9 +364,21 @@ void GpuRoceTransceiver::launch_scheduler(void *raw_graph_resources) {
         cudaGetErrorString(cerr));
   }
 
-  if (!monitor_thread_.joinable())
-    monitor_thread_ =
-        std::thread([this] { hololink_blocking_monitor(transceiver_); });
+  if (monitor_thread_.joinable() &&
+      monitor_done_.load(std::memory_order_acquire))
+    monitor_thread_.join();
+  if (!monitor_thread_.joinable()) {
+    monitor_done_.store(false, std::memory_order_release);
+    try {
+      monitor_thread_ = std::thread([this] {
+        hololink_blocking_monitor(transceiver_);
+        monitor_done_.store(true, std::memory_order_release);
+      });
+    } catch (...) {
+      monitor_done_.store(true, std::memory_order_release);
+      throw;
+    }
+  }
 
   CUDA_QEC_INFO("GpuRoceTransceiver: GPU scheduler launched  "
                 "QP=0x{:X} rkey={} buf=0x{:X}  "

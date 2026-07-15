@@ -131,6 +131,7 @@ private:
       nullptr};
 
   std::atomic<bool> stopped_{false};
+  std::atomic<bool> monitor_done_{true};
   std::thread monitor_thread_; ///< runs hololink_blocking_monitor()
 };
 

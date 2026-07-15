@@ -175,8 +175,13 @@ private:
 inline void CqrTransceiver::inject(const void *rx_slot, void *tx_slot,
                                    std::size_t slot_size,
                                    uint32_t function_id) {
-  if (!rx_slot || !tx_slot || slot_size < sizeof(RPCHeader))
+  if (!tx_slot || slot_size < sizeof(cudaq::realtime::RPCResponse))
     return;
+  if (!rx_slot || slot_size < sizeof(RPCHeader)) {
+    write_ack(tx_slot, /*request_id=*/0, /*ptp_timestamp=*/0,
+              RpcStatus::BAD_REQUEST);
+    return;
+  }
 
   RxFrame frame;
   bool ok =

@@ -122,14 +122,20 @@ constexpr int32_t kStatusNotReady =
 
 static void write_error_response(const void *rx_slot, void *tx_slot,
                                  std::size_t slot_size, int32_t status) {
-  if (!tx_slot || !rx_slot || slot_size < sizeof(cudaq::realtime::RPCHeader))
+  if (!tx_slot || slot_size < sizeof(cudaq::realtime::RPCResponse))
     return;
-  const auto *req = static_cast<const cudaq::realtime::RPCHeader *>(rx_slot);
+  uint32_t request_id = 0;
+  uint64_t ptp_timestamp = 0;
+  if (rx_slot && slot_size >= sizeof(cudaq::realtime::RPCHeader)) {
+    const auto *req = static_cast<const cudaq::realtime::RPCHeader *>(rx_slot);
+    request_id = req->request_id;
+    ptp_timestamp = req->ptp_timestamp;
+  }
   auto *resp = static_cast<cudaq::realtime::RPCResponse *>(tx_slot);
   resp->status = status;
   resp->result_len = 0;
-  resp->request_id = req->request_id;
-  resp->ptp_timestamp = req->ptp_timestamp;
+  resp->request_id = request_id;
+  resp->ptp_timestamp = ptp_timestamp;
   __atomic_store_n(reinterpret_cast<uint32_t *>(tx_slot),
                    cudaq::realtime::RPC_MAGIC_RESPONSE, __ATOMIC_RELEASE);
 }
@@ -474,6 +480,7 @@ cudaqx_qec_decoding_server_apply_config_from_yaml(const char *yaml,
     std::unique_lock server_guard(g_server_mutex);
     // RPC handlers hold the shared lock through inject(), so this waits for
     // in-flight blocking decodes before entering the decoder-less gap.
+    // Explicit apply owns recovery from here; lazy init will not run later.
     std::call_once(g_init_flag, [] {});
     old = std::move(g_server);
     old_thread = std::move(g_server_thread);
@@ -501,12 +508,24 @@ cudaqx_qec_decoding_server_apply_config_from_yaml(const char *yaml,
     return 2;
   }
 
+  std::thread next_thread;
+  try {
+    DecodingServer *started = next.get();
+    next_thread = std::thread([started] { started->run(); });
+  } catch (const std::exception &e) {
+    cudaq::qec::error(
+        "decoding-server apply_config failed to start server thread "
+        "(decoder-less; awaiting valid config): {}",
+        e.what());
+    set_apply_config_error(err, err_len, e.what());
+    return 2;
+  }
+
   {
     std::unique_lock server_guard(g_server_mutex);
     g_server = std::move(next);
     g_transceiver = next_transceiver;
-    DecodingServer *started = g_server.get();
-    g_server_thread = std::thread([started] { started->run(); });
+    g_server_thread = std::move(next_thread);
   }
   return 0;
 }

@@ -280,6 +280,10 @@ void apply_transport_yaml_value(ServerConfig &cfg, const std::string &key,
     cfg.remote_qp = static_cast<std::uint32_t>(std::stoul(value, nullptr, 0));
   } else if (key == "frame_size") {
     cfg.frame_size = std::stoull(value);
+  } else if (key == "endpoint_file") {
+    throw std::runtime_error(
+        "server.transports.endpoint_file is not supported; use "
+        "--endpoint-file or QEC_DECODING_SERVER_ENDPOINT_FILE");
   } else {
     throw std::runtime_error("unknown server.transports key '" + key + "'");
   }
