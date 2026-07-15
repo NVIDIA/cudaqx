@@ -62,7 +62,16 @@ add_dependencies(CUDAQXQECUnitTests test_decoding_server_core)
 gtest_discover_tests(test_decoding_server_core)
 
 add_executable(test_qec test_qec.cpp)
-target_link_libraries(test_qec PRIVATE GTest::gtest_main cudaq-qec cudaq::cudaq-stim-target)
+# The inlined-feedback toy code's kernels are nvq++-compiled (like the
+# registered codes' *_device.cpp files) so the memory-circuit kernel can
+# resolve them through the kernel registry; cudaq::cudaq and nvqir provide
+# the runtime symbols that the device object references.
+cudaqx_add_device_code(test_qec
+  SOURCES
+    feedback_toy_device.cpp
+)
+target_link_directories(test_qec PRIVATE ${CUDAQ_INSTALL_DIR}/lib)
+target_link_libraries(test_qec PRIVATE GTest::gtest_main cudaq-qec cudaq::cudaq nvqir cudaq::cudaq-stim-target)
 add_dependencies(CUDAQXQECUnitTests test_qec)
 gtest_discover_tests(test_qec)
 

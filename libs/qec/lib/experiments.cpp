@@ -8,6 +8,7 @@
 
 #include "cudaq/qec/experiments.h"
 #include "device/memory_circuit.h"
+#include "inlined_feedback_layout.h"
 #include "cudaq/algorithms/dem.h"
 #include "cudaq/qec/dem_sampling.h"
 #include "cudaq/qec/pcm_utils.h"
@@ -309,21 +310,34 @@ sample_memory_circuit(const code &code, operation statePrep,
 
   const std::size_t numCols = numAncx + numAncz;
 
+  auto feedback_layout = build_inlined_feedback_layout(
+      code.get_inlined_feedback(),
+      is_z_prep ? code.get_observable_inlined_feedback_z()
+                : code.get_observable_inlined_feedback_x(),
+      numCols, num_obs, "get_inlined_feedback()",
+      is_z_prep ? "get_observable_inlined_feedback_z()"
+                : "get_observable_inlined_feedback_x()");
+
   // Obtain the Measurement-to-Detector (M2D) sparse matrix.
   // m2d.rows[d] = set of chronological measurement indices whose XOR = detector
   // d.
   cudaq::M2DSparseMatrix m2d;
   cudaq::M2OSparseMatrix m2o;
-  cudaq::dem_from_kernel(memory_circuit, &noise, /*options=*/{}, m2d, m2o,
-                         stabRound, prep, numData, numAncx, numAncz, numRounds,
-                         xVec, zVec, obs_flat, num_obs, !is_z_prep);
+  cudaq::dem_from_kernel(
+      memory_circuit, &noise, /*options=*/{}, m2d, m2o, stabRound, prep,
+      numData, numAncx, numAncz, numRounds, xVec, zVec, obs_flat, num_obs,
+      !is_z_prep, feedback_layout.detector_indices,
+      feedback_layout.detector_offsets, feedback_layout.observable_indices,
+      feedback_layout.observable_offsets);
 
   // Sample the memory circuit and collect all raw measurements.
   cudaq::sample_options opts{
       .shots = numShots, .noise = noise, .explicit_measurements = true};
-  auto result = cudaq::sample(opts, memory_circuit, stabRound, prep, numData,
-                              numAncx, numAncz, numRounds, xVec, zVec, obs_flat,
-                              num_obs, !is_z_prep);
+  auto result = cudaq::sample(
+      opts, memory_circuit, stabRound, prep, numData, numAncx, numAncz,
+      numRounds, xVec, zVec, obs_flat, num_obs, !is_z_prep,
+      feedback_layout.detector_indices, feedback_layout.detector_offsets,
+      feedback_layout.observable_indices, feedback_layout.observable_offsets);
 
   // mzTable[shot, meas_idx] = raw 0/1 outcome; shape (numShots,
   // numMeasPerShot). Measurement layout per shot: numRounds*numCols ancilla,
@@ -479,11 +493,22 @@ dem_from_memory_circuit(const code &code, operation statePrep,
   std::vector<std::size_t> obs_flat(logical_obs.data(),
                                     logical_obs.data() + logical_obs.size());
 
+  const std::size_t numAnc = numAncx + numAncz;
+  auto feedback_layout = build_inlined_feedback_layout(
+      code.get_inlined_feedback(),
+      is_z_prep ? code.get_observable_inlined_feedback_z()
+                : code.get_observable_inlined_feedback_x(),
+      numAnc, num_obs, "get_inlined_feedback()",
+      is_z_prep ? "get_observable_inlined_feedback_z()"
+                : "get_observable_inlined_feedback_x()");
+
   cudaq::dem_options dem_opts;
   dem_opts.decompose_errors = decompose_errors;
   auto dem_text = cudaq::dem_from_kernel(
       memory_circuit, &noise, dem_opts, stabRound, prep, numData, numAncx,
-      numAncz, numRounds, xVec, zVec, obs_flat, num_obs, !is_z_prep);
+      numAncz, numRounds, xVec, zVec, obs_flat, num_obs, !is_z_prep,
+      feedback_layout.detector_indices, feedback_layout.detector_offsets,
+      feedback_layout.observable_indices, feedback_layout.observable_offsets);
   auto dem = cudaq::qec::dem_from_stim_text(dem_text, decompose_errors);
 
   const auto numXStabs = code.get_num_x_stabilizers();

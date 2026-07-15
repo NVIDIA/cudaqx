@@ -61,6 +61,18 @@ cudaqx::tensor<uint8_t> code::get_observables_z() const {
   return to_parity_matrix(m_pauli_observables, stabilizer_type::Z);
 }
 
+cudaqx::tensor<uint8_t> code::get_inlined_feedback() const {
+  return cudaqx::tensor<uint8_t>();
+}
+
+cudaqx::tensor<uint8_t> code::get_observable_inlined_feedback_z() const {
+  return cudaqx::tensor<uint8_t>();
+}
+
+cudaqx::tensor<uint8_t> code::get_observable_inlined_feedback_x() const {
+  return cudaqx::tensor<uint8_t>();
+}
+
 std::unique_ptr<code> get_code(const std::string &name,
                                const std::vector<cudaq::spin_op_term> &stab,
                                const heterogeneous_map options) {

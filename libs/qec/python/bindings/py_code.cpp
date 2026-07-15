@@ -29,11 +29,70 @@ using namespace cudaqx;
 
 namespace cudaq::qec {
 
+/// @brief Convert the array returned by a Python inlined-feedback getter to
+/// an owning cudaqx::tensor<uint8_t>.
+/// @details Exact binary values from other dtypes or nested lists are accepted,
+/// then copied into a C-contiguous uint8 numpy array. Validation happens before
+/// conversion so fractional, negative, and overflowing values cannot silently
+/// truncate or wrap. toTensor only borrows the numpy buffer, so the data is
+/// copied into the returned tensor to outlive the temporary Python array.
+static cudaqx::tensor<uint8_t> feedbackArrayToTensor(nb::object array,
+                                                     const char *methodName) {
+  auto np = nb::module_::import_("numpy");
+  nb::object input = np.attr("asarray")(array);
+  if (nb::cast<std::size_t>(input.attr("ndim")) != 2)
+    throw std::runtime_error(std::string(methodName) +
+                             " must return a 2-D array.");
+
+  nb::object isBinary = np.attr("logical_or")(np.attr("equal")(input, 0),
+                                              np.attr("equal")(input, 1));
+  if (!nb::cast<bool>(np.attr("all")(isBinary).attr("item")()))
+    throw std::runtime_error(std::string(methodName) +
+                             " must contain only exact 0 or 1 entries.");
+
+  nb::object coerced = np.attr("ascontiguousarray")(input, np.attr("uint8"));
+  auto ndarray = nb::cast<nb::ndarray<nb::numpy, uint8_t>>(coerced);
+  auto borrowed = cudaqx::toTensor(ndarray);
+  cudaqx::tensor<uint8_t> owned;
+  owned.copy(borrowed.data(), borrowed.shape());
+  return owned;
+}
+
 class PyCode : public qec::code {
 public:
-  NB_TRAMPOLINE(qec::code, 6);
+  NB_TRAMPOLINE(qec::code, 9);
 
 protected:
+  // Trampoline methods for the optional inlined-feedback virtuals: forward to
+  // a Python override when one exists (converting its numpy result), else
+  // fall back to the base-class empty default. This is NB_OVERRIDE with a
+  // custom return conversion, since cudaqx::tensor has no type caster.
+  cudaqx::tensor<uint8_t> get_inlined_feedback() const override {
+    nb::detail::ticket nb_ticket(nb_trampoline, "get_inlined_feedback", false);
+    if (nb_ticket.key.is_valid())
+      return feedbackArrayToTensor(nb_trampoline.base().attr(nb_ticket.key)(),
+                                   "get_inlined_feedback");
+    return NBBase::get_inlined_feedback();
+  }
+
+  cudaqx::tensor<uint8_t> get_observable_inlined_feedback_z() const override {
+    nb::detail::ticket nb_ticket(nb_trampoline,
+                                 "get_observable_inlined_feedback_z", false);
+    if (nb_ticket.key.is_valid())
+      return feedbackArrayToTensor(nb_trampoline.base().attr(nb_ticket.key)(),
+                                   "get_observable_inlined_feedback_z");
+    return NBBase::get_observable_inlined_feedback_z();
+  }
+
+  cudaqx::tensor<uint8_t> get_observable_inlined_feedback_x() const override {
+    nb::detail::ticket nb_ticket(nb_trampoline,
+                                 "get_observable_inlined_feedback_x", false);
+    if (nb_ticket.key.is_valid())
+      return feedbackArrayToTensor(nb_trampoline.base().attr(nb_ticket.key)(),
+                                   "get_observable_inlined_feedback_x");
+    return NBBase::get_observable_inlined_feedback_x();
+  }
+
   // Trampoline methods for pure virtual functions
   std::size_t get_num_data_qubits() const override {
     NB_OVERRIDE_PURE(get_num_data_qubits);
@@ -186,6 +245,38 @@ public:
     return m_py_operation_encodings;
   }
 
+  bool declares_inlined_feedback() const {
+    return nb::hasattr(pyCode, "get_inlined_feedback") ||
+           nb::hasattr(pyCode, "get_observable_inlined_feedback_z") ||
+           nb::hasattr(pyCode, "get_observable_inlined_feedback_x");
+  }
+
+  /// @brief Forward the optional inlined-feedback declarations to the
+  /// registered Python code when it defines them; otherwise return the
+  /// base-class empty default (identity detector layout).
+  cudaqx::tensor<uint8_t> get_inlined_feedback() const override {
+    if (!nb::hasattr(pyCode, "get_inlined_feedback"))
+      return code::get_inlined_feedback();
+    return feedbackArrayToTensor(pyCode.attr("get_inlined_feedback")(),
+                                 "get_inlined_feedback");
+  }
+
+  cudaqx::tensor<uint8_t> get_observable_inlined_feedback_z() const override {
+    if (!nb::hasattr(pyCode, "get_observable_inlined_feedback_z"))
+      return code::get_observable_inlined_feedback_z();
+    return feedbackArrayToTensor(
+        pyCode.attr("get_observable_inlined_feedback_z")(),
+        "get_observable_inlined_feedback_z");
+  }
+
+  cudaqx::tensor<uint8_t> get_observable_inlined_feedback_x() const override {
+    if (!nb::hasattr(pyCode, "get_observable_inlined_feedback_x"))
+      return code::get_observable_inlined_feedback_x();
+    return feedbackArrayToTensor(
+        pyCode.attr("get_observable_inlined_feedback_x")(),
+        "get_observable_inlined_feedback_x");
+  }
+
 protected:
   // Trampoline methods for pure virtual functions
   std::size_t get_num_data_qubits() const override {
@@ -241,6 +332,22 @@ static auto copyCodeMatrixToPyArray(const cudaqx::tensor<T> &tensor,
   }
 
   return cudaq::python::copyCUDAQXTensorToPyArray(tensor);
+}
+
+static void ensure_feedback_sampling_target_supported(const code &self) {
+  auto *pyHandle = dynamic_cast<const PyCodeHandle *>(&self);
+  if (!pyHandle || !pyHandle->declares_inlined_feedback())
+    return;
+
+  const auto targetName = nb::cast<std::string>(
+      nb::module_::import_("cudaq").attr("get_target")().attr("name"));
+  if (targetName == "qpp-cpu")
+    throw std::runtime_error(
+        "Memory-circuit sampling for Python codes that declare inlined "
+        "feedback is not supported on target 'qpp-cpu': this target does not "
+        "preserve the required cross-round mid-circuit measurement "
+        "correlations. Use cudaq.set_target('stim'). Detector-error-model "
+        "generation remains supported.");
 }
 } // namespace
 
@@ -548,6 +655,7 @@ void bindCode(nb::module_ &mod) {
       "sample_memory_circuit",
       [](code &code, std::size_t numShots, std::size_t numRounds,
          std::optional<cudaq::noise_model> noise = std::nullopt) {
+        ensure_feedback_sampling_target_supported(code);
         auto [synd, dataRes] =
             noise ? sample_memory_circuit(code, numShots, numRounds, *noise)
                   : sample_memory_circuit(code, numShots, numRounds);
@@ -555,12 +663,17 @@ void bindCode(nb::module_ &mod) {
             cudaq::python::copyCUDAQXTensorToPyArray(synd),
             cudaq::python::copyCUDAQXTensorToPyArray(dataRes));
       },
-      "Sample the memory circuit of the code", nb::arg("code"),
-      nb::arg("numShots"), nb::arg("numRounds"), nb::arg("noise") = nb::none());
+      "Sample the memory circuit of the code. Returns (syndromes, data), "
+      "where data contains raw final data-qubit measurements; observable "
+      "inlined feedback is represented in generated detector error models and "
+      "is not folded into data as a corrected logical-observable value.",
+      nb::arg("code"), nb::arg("numShots"), nb::arg("numRounds"),
+      nb::arg("noise") = nb::none());
   qecmod.def(
       "sample_memory_circuit",
       [](code &code, operation op, std::size_t numShots, std::size_t numRounds,
          std::optional<cudaq::noise_model> noise = std::nullopt) {
+        ensure_feedback_sampling_target_supported(code);
         auto [synd, dataRes] =
             noise ? sample_memory_circuit(code, op, numShots, numRounds, *noise)
                   : sample_memory_circuit(code, op, numShots, numRounds);
@@ -571,7 +684,10 @@ void bindCode(nb::module_ &mod) {
       "Sample the memory circuit of the code with a specific initial "
       "operation. Returns (syndromes, data): syndromes has numFixed "
       "boundary detectors (basis matching op), then one block per "
-      "inter-round transition, then numFixed more boundary detectors.",
+      "inter-round transition, then numFixed more boundary detectors. data "
+      "contains raw final data-qubit measurements; observable inlined "
+      "feedback is represented in generated detector error models and is not "
+      "folded into data as a corrected logical-observable value.",
       nb::arg("code"), nb::arg("op"), nb::arg("numShots"), nb::arg("numRounds"),
       nb::arg("noise") = nb::none());
 
@@ -580,6 +696,7 @@ void bindCode(nb::module_ &mod) {
                         std::size_t numRounds,
                         std::optional<cudaq::noise_model> noise =
                             std::nullopt) {
+      ensure_feedback_sampling_target_supported(code);
       cudaq::noise_model emptyNoise;
       auto [synd, dataRes] = samplingFn(code, op, numShots, numRounds,
                                         noise ? *noise : emptyNoise);
