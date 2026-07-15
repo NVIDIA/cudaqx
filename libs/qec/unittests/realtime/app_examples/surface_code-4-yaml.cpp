@@ -20,6 +20,7 @@
 #include "cudaq/realtime.h"
 #endif
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <common/NoiseModel.h>
 #include <cstdint>
@@ -33,6 +34,52 @@
 #ifdef QEC_APP_EXTERNAL_DECODING_SERVER
 namespace {
 
+constexpr const char *kDefaultEndpointFile =
+    "/tmp/cudaq-qec-decoding-server.env";
+
+std::string env_or(const char *name, const std::string &fallback) {
+  const char *value = std::getenv(name);
+  return value && *value ? std::string(value) : fallback;
+}
+
+std::string endpoint_file_default_for_transport(const std::string &transport) {
+  if (transport == "udp")
+    return kDefaultEndpointFile;
+  std::string suffix = transport;
+  for (char &c : suffix)
+    if (!std::isalnum(static_cast<unsigned char>(c)))
+      c = '-';
+  return "/tmp/cudaq-qec-decoding-server-" + suffix + ".env";
+}
+
+std::string endpoint_file_path() {
+  if (const char *path = std::getenv("QEC_DECODING_SERVER_ENDPOINT_FILE");
+      path && *path)
+    return path;
+  return endpoint_file_default_for_transport(
+      env_or("QEC_DECODING_SERVER_TRANSPORT", "udp"));
+}
+
+std::string endpoint_file_value(const std::string &key) {
+  std::ifstream endpoint(endpoint_file_path());
+  if (!endpoint)
+    return {};
+  std::string line;
+  const std::string prefix = key + "=";
+  while (std::getline(endpoint, line))
+    if (line.rfind(prefix, 0) == 0)
+      return line.substr(prefix.size());
+  return {};
+}
+
+std::string endpoint_value_or_env(const char *name,
+                                  const std::string &fallback) {
+  if (const char *value = std::getenv(name); value && *value)
+    return value;
+  const std::string value = endpoint_file_value(name);
+  return value.empty() ? fallback : value;
+}
+
 class realtime_channel_guard {
 public:
   realtime_channel_guard() = default;
@@ -45,14 +92,18 @@ public:
   }
 
   void initialize(const char *program) {
-    const char *port = std::getenv("QEC_DECODING_SERVER_PORT");
-    if (!port || port[0] == '\0')
+    const std::string port =
+        endpoint_value_or_env("QEC_DECODING_SERVER_PORT", "");
+    if (port.empty())
       throw std::runtime_error(
-          "QEC_DECODING_SERVER_PORT is required for external decoding");
+          "QEC_DECODING_SERVER_PORT or endpoint file is required for "
+          "external decoding");
 
-    std::vector<std::string> args = {program, "--cudaq-device-call=udp",
-                                     "udp-host=127.0.0.1",
-                                     std::string("udp-port=") + port};
+    std::vector<std::string> args = {
+        program, "--cudaq-device-call=udp",
+        "udp-host=" +
+            endpoint_value_or_env("QEC_DECODING_SERVER_HOST", "127.0.0.1"),
+        std::string("udp-port=") + port};
     std::vector<char *> argv;
     argv.reserve(args.size() + 1);
     for (auto &arg : args)

@@ -48,7 +48,7 @@
 /// Usage:
 ///   decoding_server --config=<decoders.yaml>
 ///                           [--transport=udp|cpu_roce] [--port=0]
-///                           [--num-slots=8] [--slot-size=256] [--timeout=60]
+///                           [--num-slots=8] [--slot-size=256] [--timeout=N]
 ///                           [--device=mlx5_0] [--local-ip=10.0.0.2]
 ///                           [--qp_config=rendezvous|hsb_fpga]
 ///                           [--peer-ip=ADDR] [--remote-qp=0x2]
@@ -74,6 +74,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #endif
@@ -85,19 +86,32 @@
 #include "DecodingServer.h"
 #endif
 
+#include <algorithm>
 #include <atomic>
+#include <cctype>
+#include <cerrno>
 #include <chrono>
 #include <csignal>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <memory>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <vector>
+
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 
 extern "C" void cudaqx_qec_realtime_device_call_service_force_link();
 extern "C" std::uint64_t cudaqx_qec_device_call_dispatch_count();
@@ -111,13 +125,40 @@ namespace {
 
 namespace config = cudaq::qec::decoding::config;
 
+constexpr const char *kDefaultEndpointFile =
+    "/tmp/cudaq-qec-decoding-server.env";
+
+std::string endpoint_file_default() { return kDefaultEndpointFile; }
+
+std::string endpoint_file_default_for_transport(const std::string &transport) {
+  if (transport == "udp")
+    return kDefaultEndpointFile;
+  std::string suffix = transport;
+  for (char &c : suffix)
+    if (!std::isalnum(static_cast<unsigned char>(c)))
+      c = '-';
+  return "/tmp/cudaq-qec-decoding-server-" + suffix + ".env";
+}
+
+int current_process_id() {
+#ifdef _WIN32
+  return _getpid();
+#else
+  return static_cast<int>(::getpid());
+#endif
+}
+
 struct ServerConfig {
   std::string config_path;
   std::string transport = "udp";
+  bool transport_explicit = false;
   std::uint16_t port = 0; // 0 => ephemeral, printed on stdout
   std::uint32_t num_slots = 8;
   std::size_t slot_size = 256;
-  int timeout_sec = 60;
+  int timeout_sec = 0; // 0 => run until signalled
+  int stats_interval_sec = 0;
+  std::string endpoint_file;
+  bool endpoint_file_explicit = false;
   // cpu_roce only:
   std::string device = "mlx5_0";
   std::string local_ip = "10.0.0.2";
@@ -134,6 +175,346 @@ bool starts_with(const std::string &s, const char *prefix) {
   return s.size() >= n && std::memcmp(s.data(), prefix, n) == 0;
 }
 
+std::string trim_copy(std::string s) {
+  auto not_space = [](unsigned char c) { return !std::isspace(c); };
+  s.erase(s.begin(), std::find_if(s.begin(), s.end(), not_space));
+  s.erase(std::find_if(s.rbegin(), s.rend(), not_space).base(), s.end());
+  return s;
+}
+
+int leading_spaces(const std::string &line) {
+  int count = 0;
+  for (char c : line) {
+    if (c == ' ')
+      ++count;
+    else
+      break;
+  }
+  return count;
+}
+
+void reject_tab_indentation(const std::string &line) {
+  for (char c : line) {
+    if (c == '\t')
+      throw std::runtime_error(
+          "daemon YAML indentation must use spaces, not tabs");
+    if (c != ' ')
+      return;
+  }
+}
+
+std::string strip_inline_comment(std::string value) {
+  bool quoted = false;
+  char quote = '\0';
+  for (std::size_t i = 0; i < value.size(); ++i) {
+    const char c = value[i];
+    if ((c == '\'' || c == '"') && (i == 0 || value[i - 1] != '\\')) {
+      if (!quoted) {
+        quoted = true;
+        quote = c;
+      } else if (quote == c) {
+        quoted = false;
+      }
+    } else if (c == '#' && !quoted) {
+      return trim_copy(value.substr(0, i));
+    }
+  }
+  return trim_copy(value);
+}
+
+std::string unquote_yaml_scalar(std::string value) {
+  value = strip_inline_comment(trim_copy(std::move(value)));
+  if (value.size() >= 2 && ((value.front() == '"' && value.back() == '"') ||
+                            (value.front() == '\'' && value.back() == '\'')))
+    return value.substr(1, value.size() - 2);
+  return value;
+}
+
+bool parse_yaml_key_value(const std::string &text, std::string &key,
+                          std::string &value) {
+  const std::size_t colon = text.find(':');
+  if (colon == std::string::npos)
+    return false;
+  key = trim_copy(text.substr(0, colon));
+  value = unquote_yaml_scalar(text.substr(colon + 1));
+  return !key.empty();
+}
+
+bool yaml_key_is(const std::string &trimmed, const char *expected) {
+  std::string key;
+  std::string value;
+  return parse_yaml_key_value(trimmed, key, value) && key == expected;
+}
+
+std::vector<std::string> split_csv(const std::string &csv) {
+  std::vector<std::string> out;
+  std::stringstream ss(csv);
+  std::string item;
+  while (std::getline(ss, item, ',')) {
+    item = trim_copy(std::move(item));
+    if (!item.empty())
+      out.push_back(item);
+  }
+  return out;
+}
+
+void apply_transport_yaml_value(ServerConfig &cfg, const std::string &key,
+                                const std::string &value) {
+  if (key == "type" || key == "transport") {
+    cfg.transport = value;
+  } else if (key == "port") {
+    cfg.port = static_cast<std::uint16_t>(std::stoul(value));
+  } else if (key == "num_slots") {
+    cfg.num_slots = static_cast<std::uint32_t>(std::stoul(value));
+  } else if (key == "slot_size") {
+    cfg.slot_size = std::stoull(value);
+  } else if (key == "device") {
+    cfg.device = value;
+  } else if (key == "local_ip") {
+    cfg.local_ip = value;
+  } else if (key == "qp_config") {
+    cfg.qp_config = value;
+  } else if (key == "peer_ip") {
+    cfg.peer_ip = value;
+  } else if (key == "remote_qp") {
+    cfg.remote_qp = static_cast<std::uint32_t>(std::stoul(value, nullptr, 0));
+  } else if (key == "frame_size") {
+    cfg.frame_size = std::stoull(value);
+  } else {
+    throw std::runtime_error("unknown server.transports key '" + key + "'");
+  }
+}
+
+std::string decoder_yaml_from_daemon_yaml(const std::string &yaml) {
+  std::stringstream out;
+  std::istringstream in(yaml);
+  std::string line;
+  bool skipping_server = false;
+  while (std::getline(in, line)) {
+    if (!line.empty() && line.back() == '\r')
+      line.pop_back();
+    reject_tab_indentation(line);
+    const std::string trimmed = trim_copy(line);
+    const int indent = leading_spaces(line);
+    if (!skipping_server && indent == 0 && yaml_key_is(trimmed, "server")) {
+      skipping_server = true;
+      continue;
+    }
+    if (skipping_server) {
+      if (!trimmed.empty() && trimmed[0] != '#' && indent == 0) {
+        skipping_server = false;
+      } else {
+        continue;
+      }
+    }
+    out << line << '\n';
+  }
+  return out.str();
+}
+
+std::string materialize_decoder_yaml(const ServerConfig &cfg,
+                                     const std::string &raw_yaml,
+                                     const std::string &decoder_yaml) {
+  if (raw_yaml == decoder_yaml)
+    return cfg.config_path;
+
+  const auto stamp =
+      std::chrono::steady_clock::now().time_since_epoch().count();
+  const auto hash = std::hash<std::string>{}(cfg.config_path);
+  const std::string path = "/tmp/cudaq-qec-decoding-server-decoders-" +
+                           std::to_string(hash) + "-" + std::to_string(stamp) +
+                           ".yaml";
+  std::ofstream out(path, std::ios::trunc);
+  if (!out)
+    throw std::runtime_error("failed to write stripped decoder config: " +
+                             path);
+  out << decoder_yaml;
+  return path;
+}
+
+struct TempFileCleanup {
+  std::string path;
+  bool enabled = false;
+
+  ~TempFileCleanup() {
+    if (enabled && !path.empty())
+      std::remove(path.c_str());
+  }
+};
+
+std::vector<ServerConfig>
+parse_yaml_transport_configs(const std::string &yaml,
+                             const ServerConfig &base) {
+  std::vector<ServerConfig> transports;
+  std::istringstream in(yaml);
+  std::string line;
+  bool in_server = false;
+  bool saw_server = false;
+  bool in_transports = false;
+  bool saw_transports = false;
+  bool have_current = false;
+  int server_indent = -1;
+  int transports_indent = -1;
+  ServerConfig current;
+
+  auto finish_current = [&] {
+    if (!have_current)
+      return;
+    if (current.transport.empty())
+      throw std::runtime_error("server.transports entry is missing type");
+    transports.push_back(current);
+    have_current = false;
+  };
+
+  while (std::getline(in, line)) {
+    if (!line.empty() && line.back() == '\r')
+      line.pop_back();
+    reject_tab_indentation(line);
+    const std::string trimmed = trim_copy(line);
+    if (trimmed.empty() || trimmed[0] == '#')
+      continue;
+    const int indent = leading_spaces(line);
+
+    if (!in_server) {
+      if (indent == 0 && yaml_key_is(trimmed, "server")) {
+        in_server = true;
+        saw_server = true;
+        server_indent = indent;
+      }
+      continue;
+    }
+
+    if (indent <= server_indent && !yaml_key_is(trimmed, "server")) {
+      finish_current();
+      break;
+    }
+
+    if (!in_transports) {
+      if (indent > server_indent && yaml_key_is(trimmed, "transports")) {
+        in_transports = true;
+        saw_transports = true;
+        transports_indent = indent;
+      }
+      continue;
+    }
+
+    if (indent <= transports_indent) {
+      finish_current();
+      in_transports = false;
+      continue;
+    }
+
+    if (trimmed[0] == '-') {
+      finish_current();
+      current = base;
+      current.transport.clear();
+      current.transport_explicit = true;
+      current.endpoint_file.clear();
+      current.endpoint_file_explicit = false;
+      have_current = true;
+      const std::string rest = trim_copy(trimmed.substr(1));
+      if (!rest.empty()) {
+        std::string key, value;
+        if (parse_yaml_key_value(rest, key, value)) {
+          apply_transport_yaml_value(current, key, value);
+        } else {
+          current.transport = unquote_yaml_scalar(rest);
+        }
+      }
+      continue;
+    }
+
+    if (!have_current)
+      throw std::runtime_error("server.transports must be a YAML sequence");
+    std::string key, value;
+    if (!parse_yaml_key_value(trimmed, key, value))
+      throw std::runtime_error("invalid server.transports line: " + trimmed);
+    apply_transport_yaml_value(current, key, value);
+  }
+  finish_current();
+  if (saw_server && !saw_transports)
+    throw std::runtime_error(
+        "top-level server block is missing required transports list");
+  if (saw_transports && transports.empty())
+    throw std::runtime_error(
+        "server.transports must contain at least one entry");
+  return transports;
+}
+
+void validate_transport_config(ServerConfig &cfg) {
+  if (cfg.transport != "udp" && cfg.transport != "cpu_roce" &&
+      cfg.transport != "gpu_roce")
+    throw std::runtime_error("unknown transport '" + cfg.transport +
+                             "' (expected udp, cpu_roce, or gpu_roce)");
+  if (cfg.qp_config != "rendezvous" && cfg.qp_config != "hsb_fpga")
+    throw std::runtime_error("unknown qp_config '" + cfg.qp_config +
+                             "' (expected rendezvous or hsb_fpga)");
+  if (cfg.qp_config == "hsb_fpga") {
+    if (cfg.transport != "cpu_roce")
+      throw std::runtime_error("qp_config=hsb_fpga requires cpu_roce");
+    if (cfg.peer_ip.empty())
+      throw std::runtime_error("qp_config=hsb_fpga requires peer_ip");
+    constexpr std::uint32_t kHsbWqeNum = 64;
+    if (cfg.num_slots > kHsbWqeNum) {
+      std::cerr << "WARNING: --num-slots=" << cfg.num_slots << " exceeds the "
+                << "HSB WQE depth; clamping to " << kHsbWqeNum << std::endl;
+      cfg.num_slots = kHsbWqeNum;
+    }
+  }
+}
+
+void finalize_transport_configs(std::vector<ServerConfig> &configs,
+                                const ServerConfig &base) {
+  if (configs.empty())
+    throw std::runtime_error("no transports configured");
+
+  bool has_gpu_roce = false;
+  std::set<std::string> endpoint_files;
+  for (std::size_t i = 0; i < configs.size(); ++i) {
+    auto &cfg = configs[i];
+    validate_transport_config(cfg);
+    has_gpu_roce = has_gpu_roce || cfg.transport == "gpu_roce";
+    if (cfg.endpoint_file.empty()) {
+      if (base.endpoint_file_explicit && (configs.size() == 1 || i == 0))
+        cfg.endpoint_file = base.endpoint_file;
+      else
+        cfg.endpoint_file = endpoint_file_default_for_transport(cfg.transport);
+    }
+    if (!endpoint_files.insert(cfg.endpoint_file).second) {
+      cfg.endpoint_file += "." + std::to_string(i + 1);
+      endpoint_files.insert(cfg.endpoint_file);
+    }
+  }
+  if (has_gpu_roce && configs.size() != 1)
+    throw std::runtime_error(
+        "gpu_roce cannot be combined with HOST_CALL transports in one daemon");
+}
+
+std::vector<ServerConfig> resolve_transport_configs(const ServerConfig &cfg,
+                                                    const std::string &yaml) {
+  std::vector<ServerConfig> configs = parse_yaml_transport_configs(yaml, cfg);
+  if (configs.empty()) {
+    for (const auto &transport : split_csv(cfg.transport)) {
+      ServerConfig next = cfg;
+      next.transport = transport;
+      next.transport_explicit = true;
+      configs.push_back(std::move(next));
+    }
+  }
+  finalize_transport_configs(configs, cfg);
+  return configs;
+}
+
+std::string transport_summary(const std::vector<ServerConfig> &configs) {
+  std::string out;
+  for (std::size_t i = 0; i < configs.size(); ++i) {
+    if (i)
+      out += ",";
+    out += configs[i].transport;
+  }
+  return out;
+}
+
 bool parse_args(int argc, char **argv, ServerConfig &cfg) {
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
@@ -141,23 +522,36 @@ bool parse_args(int argc, char **argv, ServerConfig &cfg) {
       std::cout
           << "Usage: " << argv[0]
           << " --config=<decoders.yaml> "
-             "[--transport=udp|cpu_roce|gpu_roce] "
-             "[--port=N] [--num-slots=N] [--slot-size=N] [--timeout=N] "
+             "[--transport=udp|cpu_roce|gpu_roce[,..]] "
+             "[--port=N] [--num-slots=N] [--slot-size=N] "
+             "[--timeout=N] "
+             "[--stats-interval=N] [--endpoint-file=PATH] "
              "[--device=NAME] [--local-ip=ADDR] "
              "[--qp_config=rendezvous|hsb_fpga] [--peer-ip=ADDR] "
              "[--remote-qp=N] [--frame-size=N]\n"
-             "SIGHUP applies the current --config. A successful apply reports "
-             "QEC_DECODING_SERVER_CONFIG_APPLIED. Invalid configs are rejected "
-             "while the current config keeps serving when possible; decoder "
-             "construction failure leaves the server awaiting the next valid "
-             "config."
+             "YAML server.transports is authoritative when present; "
+             "--transport is only a legacy fallback for decoder-only YAML. "
+             "Existing decoder-only YAML files continue to default to udp. "
+             "By default the daemon runs until signalled; --timeout=N is "
+             "test-only/CI convenience. SIGHUP parses the current decoder "
+             "config, stops existing decoders, and starts replacements; "
+             "UDP/CPU RoCE listeners and GPU RoCE transport binding are "
+             "process lifetime state. "
+             "--stats-interval=N checks live stats every N "
+             "seconds and prints QEC_DECODING_SERVER_STATS only when "
+             "counters change. Endpoint files are daemon-owned discovery "
+             "artifacts, not YAML config; use --endpoint-file or "
+             "QEC_DECODING_SERVER_ENDPOINT_FILE only as an operator/test "
+             "override. READY prints the watched config path. Rejected "
+             "decoder configs keep the current config serving when possible."
           << std::endl;
       return false;
     } else if (starts_with(a, "--config="))
       cfg.config_path = a.substr(9);
-    else if (starts_with(a, "--transport="))
+    else if (starts_with(a, "--transport=")) {
       cfg.transport = a.substr(12);
-    else if (starts_with(a, "--port="))
+      cfg.transport_explicit = true;
+    } else if (starts_with(a, "--port="))
       cfg.port = static_cast<std::uint16_t>(std::stoul(a.substr(7)));
     else if (starts_with(a, "--num-slots="))
       cfg.num_slots = static_cast<std::uint32_t>(std::stoul(a.substr(12)));
@@ -165,7 +559,12 @@ bool parse_args(int argc, char **argv, ServerConfig &cfg) {
       cfg.slot_size = std::stoull(a.substr(12));
     else if (starts_with(a, "--timeout="))
       cfg.timeout_sec = std::stoi(a.substr(10));
-    else if (starts_with(a, "--device="))
+    else if (starts_with(a, "--stats-interval="))
+      cfg.stats_interval_sec = std::stoi(a.substr(17));
+    else if (starts_with(a, "--endpoint-file=")) {
+      cfg.endpoint_file = a.substr(16);
+      cfg.endpoint_file_explicit = true;
+    } else if (starts_with(a, "--device="))
       cfg.device = a.substr(9);
     else if (starts_with(a, "--local-ip="))
       cfg.local_ip = a.substr(11);
@@ -189,32 +588,29 @@ bool parse_args(int argc, char **argv, ServerConfig &cfg) {
     std::cerr << "ERROR: --config=<decoders.yaml> is required" << std::endl;
     return false;
   }
+  if (cfg.stats_interval_sec < 0) {
+    std::cerr << "ERROR: --stats-interval must be >= 0" << std::endl;
+    return false;
+  }
+  if (cfg.endpoint_file.empty()) {
+    if (const char *path = std::getenv("QEC_DECODING_SERVER_ENDPOINT_FILE");
+        path && *path) {
+      cfg.endpoint_file = path;
+      cfg.endpoint_file_explicit = true;
+    } else {
+      cfg.endpoint_file = endpoint_file_default();
+    }
+  }
   if (cfg.qp_config != "rendezvous" && cfg.qp_config != "hsb_fpga") {
     std::cerr << "ERROR: unknown --qp_config=" << cfg.qp_config
               << " (expected rendezvous or hsb_fpga)" << std::endl;
     return false;
   }
-  if (cfg.qp_config == "hsb_fpga") {
-    if (cfg.transport != "cpu_roce") {
-      std::cerr << "ERROR: --qp_config=hsb_fpga requires --transport=cpu_roce"
-                << std::endl;
-      return false;
-    }
-    if (cfg.peer_ip.empty()) {
-      std::cerr << "ERROR: --qp_config=hsb_fpga requires --peer-ip=<FPGA or "
-                   "emulator IPv4>"
-                << std::endl;
-      return false;
-    }
-    // The HSB receive queue is WQE_NUM=64 deep; a deeper ring would alias two
-    // slots per WQE and race RX against TX (same constraint as the Hololink
-    // bridges).
-    constexpr std::uint32_t kHsbWqeNum = 64;
-    if (cfg.num_slots > kHsbWqeNum) {
-      std::cerr << "WARNING: --num-slots=" << cfg.num_slots << " exceeds the "
-                << "HSB WQE depth; clamping to " << kHsbWqeNum << std::endl;
-      cfg.num_slots = kHsbWqeNum;
-    }
+  if (cfg.transport_explicit && cfg.qp_config == "hsb_fpga" &&
+      cfg.transport != "cpu_roce") {
+    std::cerr << "ERROR: --qp_config=hsb_fpga requires --transport=cpu_roce"
+              << std::endl;
+    return false;
   }
   return true;
 }
@@ -225,6 +621,52 @@ void on_signal(int) { g_shutdown.store(1, std::memory_order_release); }
 std::atomic<int> g_apply_config_requested{0};
 void on_sighup(int) {
   g_apply_config_requested.store(1, std::memory_order_release);
+}
+
+std::atomic<int> g_stats_requested{0};
+void on_stats_signal(int) {
+  g_stats_requested.store(1, std::memory_order_release);
+}
+struct LiveStatsSnapshot {
+  uint64_t dispatched = 0;
+  uint64_t max_concurrent_decoders = 0;
+};
+
+LiveStatsSnapshot read_live_stats() {
+  return {cudaqx_qec_device_call_dispatch_count(),
+          cudaqx_qec_decoding_server_max_concurrent()};
+}
+
+bool stats_equal(const LiveStatsSnapshot &lhs, const LiveStatsSnapshot &rhs) {
+  return lhs.dispatched == rhs.dispatched &&
+         lhs.max_concurrent_decoders == rhs.max_concurrent_decoders;
+}
+
+void print_live_stats(const LiveStatsSnapshot &stats) {
+  std::cout << "QEC_DECODING_SERVER_STATS dispatched=" << stats.dispatched
+            << " max_concurrent_decoders=" << stats.max_concurrent_decoders
+            << std::endl;
+  if (const char *verbose = std::getenv("QEC_DECODING_SERVER_STATS");
+      verbose && verbose[0] != '\0')
+    cudaqx_qec_decoding_server_print_stats();
+  std::cout.flush();
+}
+
+void print_live_stats() { print_live_stats(read_live_stats()); }
+
+void maybe_print_periodic_stats(
+    const ServerConfig &cfg,
+    std::chrono::steady_clock::time_point &last_stats_time,
+    LiveStatsSnapshot &last_stats, std::chrono::steady_clock::time_point now) {
+  if (cfg.stats_interval_sec <= 0)
+    return;
+  if (now - last_stats_time < std::chrono::seconds(cfg.stats_interval_sec))
+    return;
+  LiveStatsSnapshot current = read_live_stats();
+  if (!stats_equal(current, last_stats))
+    print_live_stats(current);
+  last_stats = current;
+  last_stats_time = now;
 }
 
 struct ConfigApplyRequest {
@@ -241,7 +683,7 @@ ConfigApplyRequest read_apply_config(const std::string &config_path) {
   config_text << config_file.rdbuf();
 
   ConfigApplyRequest out;
-  out.yaml = config_text.str();
+  out.yaml = decoder_yaml_from_daemon_yaml(config_text.str());
   auto decoder_config = config::multi_decoder_config::from_yaml_str(out.yaml);
   if (decoder_config.decoders.empty())
     throw std::runtime_error("no decoders parsed from " + config_path);
@@ -287,32 +729,50 @@ void handle_config_apply(const std::string &config_path) {
   }
 }
 #ifdef QEC_HAVE_GPU_ROCE_TRANSPORT
-// Like the CQR apply path, decoder-specific validation happens by constructing
-// replacement sessions; a future dry-run validator should make this cheaper.
 void handle_gpu_roce_config_apply(
     const std::string &config_path,
-    std::unique_ptr<cudaq::qec::decoding_server::DecodingServer> &server,
-    std::thread &server_thread) {
+    std::unique_ptr<cudaq::qec::decoding_server::DecodingServer> &server) {
+  auto reject_without_rebind = [&server](const std::exception &e) {
+    if (server)
+      print_config_failed(/*rc=*/1, "serving_old", e.what());
+    else
+      print_config_failed(/*rc=*/2, "awaiting_config", e.what());
+  };
+
   ConfigApplyRequest config;
+  // Outer checks reject no-state-change errors before touching the live GPU
+  // transport; reconfigure_from_yaml_str repeats committed-state checks.
   try {
     config = read_apply_config(config_path);
+    auto decoder_config =
+        config::multi_decoder_config::from_yaml_str(config.yaml);
+    if (decoder_config.decoders.size() != 1)
+      throw std::runtime_error(
+          "GPU RoCE reconfigure currently requires exactly one decoder");
+    const auto &decoder = decoder_config.decoders.front();
+    if (decoder.transport != config::DecoderTransport::gpu_roce)
+      throw std::runtime_error(
+          "GPU RoCE reconfigure requires decoder transport gpu_roce");
+    if (server) {
+      const int requested_device =
+          cudaq::qec::decoding_server::resolve_decode_device(
+              decoder.cuda_device_id.value_or(-1));
+      if (server->transport_cuda_device() >= 0 &&
+          requested_device != server->transport_cuda_device())
+        throw std::runtime_error(
+            "cannot change cuda_device_id during GPU RoCE live reconfigure");
+    }
   } catch (const std::exception &e) {
-    print_config_failed(/*rc=*/1, "serving_old", e.what());
+    reject_without_rebind(e);
     return;
   }
-  if (server) {
-    server->stop();
-    if (server_thread.joinable())
-      server_thread.join();
-  }
-  server.reset();
+
   try {
-    server = cudaq::qec::decoding_server::DecodingServer::from_yaml_str(
-        config.yaml, config_path);
-    server_thread = std::thread([&server] { server->run(); });
+    if (!server)
+      throw std::runtime_error("gpu_roce server is not initialized");
+    server->reconfigure_from_yaml_str(config.yaml, config_path);
     print_config_applied(config);
   } catch (const std::exception &e) {
-    // server is null; caller's loop continues (state=awaiting_config).
     print_config_failed(/*rc=*/2, "awaiting_config", e.what());
   }
 }
@@ -331,9 +791,29 @@ struct TransportEndpoints {
 // Publish the rendezvous endpoint for the test fixture. Emitted once the
 // caller can start connecting (udp: socket bound; cpu_roce: TCP rendezvous
 // listening).
-void print_ready(std::uint16_t port, const std::string &extra) {
+void publish_endpoint_file(const ServerConfig &cfg, std::uint16_t port) {
+  if (cfg.endpoint_file.empty())
+    return;
+  std::ofstream endpoint(cfg.endpoint_file, std::ios::trunc);
+  if (!endpoint) {
+    std::cerr << "WARNING: failed to write endpoint file " << cfg.endpoint_file
+              << std::endl;
+    return;
+  }
+  const std::string host =
+      cfg.transport == "cpu_roce" ? cfg.local_ip : "127.0.0.1";
+  endpoint << "QEC_DECODING_SERVER_HOST=" << host << "\n";
+  endpoint << "QEC_DECODING_SERVER_PORT=" << port << "\n";
+  endpoint << "QEC_DECODING_SERVER_TRANSPORT=" << cfg.transport << "\n";
+  endpoint << "QEC_DECODING_SERVER_PID=" << current_process_id() << "\n";
+}
+
+void print_ready(const ServerConfig &cfg, std::uint16_t port,
+                 const std::string &extra) {
+  publish_endpoint_file(cfg, port);
   std::cout << "QEC_DECODING_SERVER_READY port=" << port
-            << (extra.empty() ? "" : " ") << extra << std::endl;
+            << (extra.empty() ? "" : " ") << extra
+            << " config=" << cfg.config_path << std::endl;
   std::cout.flush();
 }
 
@@ -361,7 +841,7 @@ bool init_udp_transport(const ServerConfig &cfg, TransportEndpoints &tp) {
     cpu_udp_close(xcvr);
     cpu_udp_destroy_transceiver(xcvr);
   };
-  print_ready(cpu_udp_get_port(xcvr), "transport=udp");
+  print_ready(cfg, cpu_udp_get_port(xcvr), "transport=udp");
   return true;
 }
 
@@ -402,6 +882,29 @@ bool read_all(int fd, void *buf, std::size_t len) {
     len -= static_cast<std::size_t>(n);
   }
   return true;
+}
+
+int accept_until_shutdown(int listen_fd) {
+  while (g_shutdown.load(std::memory_order_acquire) == 0) {
+    fd_set read_fds;
+    FD_ZERO(&read_fds);
+    FD_SET(listen_fd, &read_fds);
+    timeval timeout{};
+    timeout.tv_sec = 0;
+    timeout.tv_usec = 100000;
+    const int ready =
+        ::select(listen_fd + 1, &read_fds, nullptr, nullptr, &timeout);
+    if (ready < 0) {
+      if (errno == EINTR)
+        continue;
+      return -1;
+    }
+    if (ready == 0)
+      continue;
+    return ::accept(listen_fd, nullptr, nullptr);
+  }
+  errno = EINTR;
+  return -1;
 }
 
 // Service-end CPU RoCE bring-up, mirroring cpu_roce_test_daemon: transceiver
@@ -449,13 +952,14 @@ bool init_cpu_roce_transport(const ServerConfig &cfg, TransportEndpoints &tp) {
   }
   socklen_t srvlen = sizeof(srv);
   ::getsockname(listen_fd, reinterpret_cast<sockaddr *>(&srv), &srvlen);
-  print_ready(ntohs(srv.sin_port),
+  print_ready(cfg, ntohs(srv.sin_port),
               "transport=cpu_roce roce_ip=" + cfg.local_ip);
 
-  const int conn_fd = ::accept(listen_fd, nullptr, nullptr);
+  const int conn_fd = accept_until_shutdown(listen_fd);
   ::close(listen_fd);
   if (conn_fd < 0) {
-    std::cerr << "ERROR: rendezvous accept() failed" << std::endl;
+    if (g_shutdown.load(std::memory_order_acquire) == 0)
+      std::cerr << "ERROR: rendezvous accept() failed" << std::endl;
     cpu_roce_destroy_transceiver(xcvr);
     return false;
   }
@@ -583,13 +1087,115 @@ bool init_cpu_roce_hsb_fpga_transport(const ServerConfig &cfg,
             << std::dec << std::endl;
   std::cout.flush();
 
-  print_ready(/*port=*/0,
+  print_ready(cfg, /*port=*/0,
               "transport=cpu_roce qp_config=hsb_fpga peer_ip=" + cfg.peer_ip);
   return true;
 }
 
 #endif // QEC_HAVE_CPU_ROCE_TRANSPORT
 
+bool init_transport(const ServerConfig &cfg, TransportEndpoints &tp) {
+  if (cfg.transport == "udp")
+    return init_udp_transport(cfg, tp);
+  if (cfg.transport == "cpu_roce") {
+#ifdef QEC_HAVE_CPU_ROCE_TRANSPORT
+    if (cfg.qp_config == "hsb_fpga")
+      return init_cpu_roce_hsb_fpga_transport(cfg, tp);
+    return init_cpu_roce_transport(cfg, tp);
+#else
+    std::cerr << "ERROR: this server was built without cpu_roce transport "
+                 "support (libcudaq-realtime-cpu-roce-transport not found)"
+              << std::endl;
+    return false;
+#endif
+  }
+  std::cerr << "ERROR: unknown HOST_CALL transport " << cfg.transport
+            << " (expected udp or cpu_roce)" << std::endl;
+  return false;
+}
+
+struct RunningTransport {
+  explicit RunningTransport(ServerConfig config) : cfg(std::move(config)) {}
+
+  ServerConfig cfg;
+  TransportEndpoints endpoints;
+  int dispatcher_shutdown = 0;
+  std::uint64_t packets_dispatched = 0;
+  cudaq_ringbuffer_t ringbuffer{};
+  cudaq_dispatcher_config_t dispatch_config{};
+  cudaq_function_table_t function_table{};
+  std::thread supervisor_thread;
+  std::thread dispatcher_thread;
+  std::atomic<bool> dispatcher_started{false};
+  std::atomic<bool> failed{false};
+};
+
+void stop_running_transport(RunningTransport &rt) {
+  __atomic_store_n(&rt.dispatcher_shutdown, 1, __ATOMIC_RELEASE);
+  __sync_synchronize();
+  if (rt.dispatcher_thread.joinable())
+    rt.dispatcher_thread.join();
+  if (rt.endpoints.shutdown) {
+    rt.endpoints.shutdown();
+    rt.endpoints.shutdown = nullptr;
+  }
+}
+
+void run_transport_supervisor(std::shared_ptr<RunningTransport> rt,
+                              cudaq_function_table_t function_table) {
+  if (!init_transport(rt->cfg, rt->endpoints)) {
+    rt->failed.store(true, std::memory_order_release);
+    return;
+  }
+
+  rt->ringbuffer.rx_flags_host = rt->endpoints.rx_flags;
+  rt->ringbuffer.tx_flags_host = rt->endpoints.tx_flags;
+  rt->ringbuffer.rx_data_host = rt->endpoints.rx_data;
+  rt->ringbuffer.tx_data_host = rt->endpoints.tx_data;
+  rt->ringbuffer.rx_stride_sz = rt->cfg.slot_size;
+  rt->ringbuffer.tx_stride_sz = rt->cfg.slot_size;
+
+  rt->dispatch_config.num_slots = rt->cfg.num_slots;
+  rt->dispatch_config.slot_size = static_cast<std::uint32_t>(rt->cfg.slot_size);
+  rt->dispatch_config.dispatch_path = CUDAQ_DISPATCH_PATH_HOST;
+  rt->dispatch_config.dispatch_mode = CUDAQ_DISPATCH_HOST_CALL;
+  rt->dispatch_config.skip_tx_markers = 1;
+  rt->function_table = function_table;
+
+  rt->dispatcher_thread = std::thread([rt] {
+    cudaq_host_ring_dispatch_loop(
+        &rt->ringbuffer, &rt->function_table, &rt->dispatch_config,
+        /*engine=*/nullptr, &rt->dispatcher_shutdown, &rt->packets_dispatched);
+  });
+  rt->dispatcher_started.store(true, std::memory_order_release);
+
+  while (g_shutdown.load(std::memory_order_acquire) == 0)
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+  stop_running_transport(*rt);
+}
+
+std::vector<std::shared_ptr<RunningTransport>>
+start_transport_supervisors(const std::vector<ServerConfig> &configs,
+                            cudaq_function_table_t function_table) {
+  std::vector<std::shared_ptr<RunningTransport>> transports;
+  transports.reserve(configs.size());
+  for (const auto &cfg : configs) {
+    auto rt = std::make_shared<RunningTransport>(cfg);
+    rt->supervisor_thread = std::thread(
+        [rt, function_table] { run_transport_supervisor(rt, function_table); });
+    transports.push_back(std::move(rt));
+  }
+  return transports;
+}
+
+void stop_transport_supervisors(
+    std::vector<std::shared_ptr<RunningTransport>> &transports) {
+  g_shutdown.store(1, std::memory_order_release);
+  for (auto &rt : transports)
+    if (rt->supervisor_thread.joinable())
+      rt->supervisor_thread.join();
+}
 } // namespace
 
 int main(int argc, char **argv) {
@@ -600,10 +1206,14 @@ int main(int argc, char **argv) {
   std::signal(SIGINT, on_signal);
   std::signal(SIGTERM, on_signal);
   std::signal(SIGHUP, on_sighup);
+#ifdef SIGUSR1
+  std::signal(SIGUSR1, on_stats_signal);
+#endif
 
-  // [1] Validate the YAML and hand its path to the decoding-server service:
-  // the DecodingServer (one DecodingSession worker thread per decoder) builds
-  // the decoder instances itself when the dispatch session is created below.
+  // [1] Validate decoder YAML, resolve daemon listeners, and hand a
+  // decoder-only config path to the decoding-server service. A top-level
+  // `server:` block belongs to this daemon and is stripped before existing
+  // decoder parsers see the YAML.
   std::ifstream config_file(cfg.config_path);
   if (!config_file) {
     std::cerr << "ERROR: cannot open config file " << cfg.config_path
@@ -612,26 +1222,47 @@ int main(int argc, char **argv) {
   }
   std::stringstream config_text;
   config_text << config_file.rdbuf();
-  auto decoder_config =
-      config::multi_decoder_config::from_yaml_str(config_text.str());
+  const std::string raw_config_yaml = config_text.str();
+
+  std::vector<ServerConfig> transport_configs;
+  config::multi_decoder_config decoder_config;
+  std::string decoder_yaml;
+  std::string runtime_decoder_config_path;
+  TempFileCleanup runtime_decoder_config_cleanup;
+  try {
+    transport_configs = resolve_transport_configs(cfg, raw_config_yaml);
+    decoder_yaml = decoder_yaml_from_daemon_yaml(raw_config_yaml);
+    decoder_config = config::multi_decoder_config::from_yaml_str(decoder_yaml);
+    runtime_decoder_config_path =
+        materialize_decoder_yaml(cfg, raw_config_yaml, decoder_yaml);
+    runtime_decoder_config_cleanup.path = runtime_decoder_config_path;
+    runtime_decoder_config_cleanup.enabled =
+        runtime_decoder_config_path != cfg.config_path;
+  } catch (const std::exception &e) {
+    std::cerr << "ERROR: invalid decoding_server config: " << e.what()
+              << std::endl;
+    return 1;
+  }
   if (decoder_config.decoders.empty()) {
     std::cerr << "ERROR: no decoders parsed from " << cfg.config_path
               << std::endl;
     return 1;
   }
-  ::setenv("CUDAQ_QEC_DECODER_CONFIG", cfg.config_path.c_str(),
+  ::setenv("CUDAQ_QEC_DECODER_CONFIG", runtime_decoder_config_path.c_str(),
            /*overwrite=*/1);
   std::cout << "Configured " << decoder_config.decoders.size()
             << " decoder(s); decoder 0 type: "
             << decoder_config.decoders[0].type
-            << "; transport: " << cfg.transport << std::endl;
-
+            << "; transport: " << transport_summary(transport_configs)
+            << std::endl;
   // [2a] GPU RoCE takes a completely different path: bypass the CQR
   // DeviceCallService / HOST_CALL dispatcher and use DecodingServer directly.
   // Must be checked before force-linking the CQR plugin (which creates a
   // DecodingServer internally for the HOST_CALL path) to avoid double-init.
 #ifdef QEC_HAVE_GPU_ROCE_TRANSPORT
-  if (cfg.transport == "gpu_roce") {
+  const bool gpu_roce_requested = transport_configs.size() == 1 &&
+                                  transport_configs[0].transport == "gpu_roce";
+  if (gpu_roce_requested) {
     // DecodingServer(config_yaml) reads the YAML, creates GpuRoceTransceiver
     // (Hololink Sensor Bridge + DOCA), loads decoder sessions, and calls
     // launch_scheduler() to wire the CUDAQ device-graph scheduler to the
@@ -643,25 +1274,35 @@ int main(int argc, char **argv) {
     // this binary (built against HSB/DOCA headers but without the
     // proprietary cudevice archive) or when Hololink bring-up fails.
     try {
-      auto server =
-          std::make_unique<cudaq::qec::decoding_server::DecodingServer>(
-              cfg.config_path);
+      auto server = cudaq::qec::decoding_server::DecodingServer::from_yaml_str(
+          decoder_yaml, cfg.config_path);
       // QP/rkey/buf already printed to stdout by launch_scheduler() so the
       // orchestration script can grep them before the READY line.
-      std::cout << "QEC_DECODING_SERVER_READY gpu_roce" << std::endl;
+      std::cout << "QEC_DECODING_SERVER_READY gpu_roce config="
+                << cfg.config_path << std::endl;
       std::cout.flush();
       std::thread server_thread([&server] { server->run(); });
       const auto start_time_gr = std::chrono::steady_clock::now();
+      auto last_stats_time = start_time_gr;
+      auto last_stats = read_live_stats();
       while (g_shutdown.load(std::memory_order_acquire) == 0) {
+        const auto now = std::chrono::steady_clock::now();
         if (g_apply_config_requested.exchange(0, std::memory_order_acq_rel) !=
             0)
-          handle_gpu_roce_config_apply(cfg.config_path, server, server_thread);
-        const auto elapsed =
-            std::chrono::duration_cast<std::chrono::seconds>(
-                std::chrono::steady_clock::now() - start_time_gr)
-                .count();
-        if (elapsed > cfg.timeout_sec)
-          break;
+          handle_gpu_roce_config_apply(cfg.config_path, server);
+        if (g_stats_requested.exchange(0, std::memory_order_acq_rel) != 0) {
+          last_stats = read_live_stats();
+          print_live_stats(last_stats);
+          last_stats_time = now;
+        }
+        maybe_print_periodic_stats(cfg, last_stats_time, last_stats, now);
+        if (cfg.timeout_sec > 0) {
+          const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                                   now - start_time_gr)
+                                   .count();
+          if (elapsed > cfg.timeout_sec)
+            break;
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
       }
       if (server)
@@ -673,6 +1314,16 @@ int main(int argc, char **argv) {
       return 1;
     }
     return 0;
+  }
+#endif
+#ifndef QEC_HAVE_GPU_ROCE_TRANSPORT
+  if (transport_configs.size() == 1 &&
+      transport_configs[0].transport == "gpu_roce") {
+    std::cerr << "ERROR: this server was built without gpu_roce transport "
+                 "support (rebuild with HOLOSCAN_SENSOR_BRIDGE_BUILD_DIR, "
+                 "DOCA, and CUDA)"
+              << std::endl;
+    return 1;
   }
 #endif
 
@@ -715,92 +1366,56 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  // [3] Bring up the selected transport (prints the READY line once the
-  // caller can start connecting).
-  TransportEndpoints tp;
-  if (cfg.transport == "udp") {
-    if (!init_udp_transport(cfg, tp))
-      return 1;
-  } else if (cfg.transport == "cpu_roce") {
-#ifdef QEC_HAVE_CPU_ROCE_TRANSPORT
-    if (cfg.qp_config == "hsb_fpga") {
-      if (!init_cpu_roce_hsb_fpga_transport(cfg, tp))
-        return 1;
-    } else if (!init_cpu_roce_transport(cfg, tp))
-      return 1;
-#else
-    std::cerr << "ERROR: this server was built without cpu_roce transport "
-                 "support (libcudaq-realtime-cpu-roce-transport not found)"
-              << std::endl;
-    return 1;
-#endif
-  } else if (cfg.transport == "gpu_roce") {
-    // gpu_roce is handled before the CQR plugin force-link above ([2a]).
-    // Reaching here means QEC_HAVE_GPU_ROCE_TRANSPORT was not defined at
-    // build time (the server was not built with GPU RoCE support).
-    std::cerr << "ERROR: this server was built without gpu_roce transport "
-                 "support (rebuild with HOLOSCAN_SENSOR_BRIDGE_BUILD_DIR, "
-                 "DOCA, and CUDA)"
-              << std::endl;
-    return 1;
-  } else {
-    std::cerr << "ERROR: unknown --transport=" << cfg.transport
-              << " (expected udp, cpu_roce, or gpu_roce)" << std::endl;
-    return 1;
-  }
-
-  // [4] Wire the libcudaq-realtime host dispatcher to the transceiver rings,
-  // exactly as cpu_roce_test_daemon does. Everything from here down is
-  // transport-independent.
-  // The dispatch table is HOST_CALL-only, so the ring loop runs the inline
-  // HOST_CALL path with no GRAPH_LAUNCH engine (engine == nullptr). Mirrors the
-  // HOST_CALL-only branch in qec_realtime_session.cpp.
-  int dispatcher_shutdown = 0;
-  std::uint64_t packets_dispatched = 0;
-  cudaq_ringbuffer_t ringbuffer{};
-  ringbuffer.rx_flags_host = tp.rx_flags;
-  ringbuffer.tx_flags_host = tp.tx_flags;
-  ringbuffer.rx_data_host = tp.rx_data;
-  ringbuffer.tx_data_host = tp.tx_data;
-  ringbuffer.rx_stride_sz = cfg.slot_size;
-  ringbuffer.tx_stride_sz = cfg.slot_size;
-  cudaq_dispatcher_config_t dispatch_config{};
-  dispatch_config.num_slots = cfg.num_slots;
-  dispatch_config.slot_size = static_cast<std::uint32_t>(cfg.slot_size);
-  dispatch_config.dispatch_path = CUDAQ_DISPATCH_PATH_HOST;
-  dispatch_config.dispatch_mode = CUDAQ_DISPATCH_HOST_CALL;
-  dispatch_config.skip_tx_markers = 1;
+  // [3] Start every configured HOST_CALL listener. Each listener owns one
+  // CUDAQ realtime ring dispatcher, but all dispatch into the same QEC
+  // DeviceCallService/DecodingServer instance created above.
   cudaq_function_table_t function_table{};
   function_table.entries = table.entries;
   function_table.count = table.count;
+  auto running_transports =
+      start_transport_supervisors(transport_configs, function_table);
 
-  std::thread dispatcher_thread([&]() {
-    cudaq_host_ring_dispatch_loop(
-        &ringbuffer, &function_table, &dispatch_config,
-        /*engine=*/nullptr, &dispatcher_shutdown, &packets_dispatched);
-  });
-
-  // [5] Run until signalled or timed out; SIGHUP applies the latest config.
+  // [4] Run until signalled or timed out; SIGHUP applies the latest decoder
+  // config without rebinding process-lifetime transport listeners.
   const auto start_time = std::chrono::steady_clock::now();
+  auto last_stats_time = start_time;
+  auto last_stats = read_live_stats();
+  bool all_transports_failed = false;
   while (g_shutdown.load(std::memory_order_acquire) == 0) {
+    const auto now = std::chrono::steady_clock::now();
     if (g_apply_config_requested.exchange(0, std::memory_order_acq_rel) != 0)
       handle_config_apply(cfg.config_path);
-    const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
-                             std::chrono::steady_clock::now() - start_time)
-                             .count();
-    if (elapsed > cfg.timeout_sec)
+    if (g_stats_requested.exchange(0, std::memory_order_acq_rel) != 0) {
+      last_stats = read_live_stats();
+      print_live_stats(last_stats);
+      last_stats_time = now;
+    }
+    maybe_print_periodic_stats(cfg, last_stats_time, last_stats, now);
+
+    bool all_failed = !running_transports.empty();
+    for (const auto &rt : running_transports)
+      all_failed = all_failed && rt->failed.load(std::memory_order_acquire);
+    if (all_failed) {
+      std::cerr << "ERROR: all requested HOST_CALL transports failed to start"
+                << std::endl;
+      all_transports_failed = true;
       break;
+    }
+
+    if (cfg.timeout_sec > 0) {
+      const auto elapsed =
+          std::chrono::duration_cast<std::chrono::seconds>(now - start_time)
+              .count();
+      if (elapsed > cfg.timeout_sec)
+        break;
+    }
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
 
-  // [6] Orderly shutdown.  The dispatch loop polls the flag as volatile, not
-  // atomically; publish the store the same way qec_realtime_session.cpp does.
-  __atomic_store_n(&dispatcher_shutdown, 1, __ATOMIC_RELEASE);
-  __sync_synchronize();
-  if (dispatcher_thread.joinable())
-    dispatcher_thread.join();
-  if (tp.shutdown)
-    tp.shutdown();
+  // [5] Orderly shutdown for all listener supervisors. Each supervisor stops
+  // its dispatcher loop and tears down its transport before returning.
+  stop_transport_supervisors(running_transports);
+
   // The counters are atomics and the per-shot get_corrections cadence means
   // they are settled by the time a client-driven run reaches shutdown; print
   // before cudaqx_qec_decoding_server_shutdown() releases the sessions.
@@ -817,5 +1432,5 @@ int main(int argc, char **argv) {
   // simultaneously-busy DecodingSession workers.
   std::cout << "QEC_DECODING_SERVER_MAX_CONCURRENT_DECODERS count="
             << cudaqx_qec_decoding_server_max_concurrent() << std::endl;
-  return 0;
+  return all_transports_failed ? 1 : 0;
 }

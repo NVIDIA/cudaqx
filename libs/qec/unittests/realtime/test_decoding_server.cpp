@@ -174,7 +174,7 @@ std::string server_dir() {
 class ServerProcess {
 public:
   bool start(const std::string &config_file, std::string &error,
-             int ready_timeout_ms = 15000) {
+             int ready_timeout_ms = 15000, int stats_interval_sec = 0) {
     int out_pipe[2] = {-1, -1};
     if (::pipe(out_pipe) != 0) {
       error = "pipe() failed";
@@ -200,9 +200,12 @@ public:
           "--device=" + env_or("CUDAQ_CPU_ROCE_TEST_DAEMON_DEVICE", "mlx5_0");
       const std::string local_ip_arg =
           "--local-ip=" + env_or("CUDAQ_CPU_ROCE_TEST_DAEMON_IP", "10.0.0.2");
+      const std::string stats_arg =
+          "--stats-interval=" + std::to_string(stats_interval_sec);
       ::execl(server.c_str(), server.c_str(), config_arg.c_str(),
               transport_arg.c_str(), device_arg.c_str(), local_ip_arg.c_str(),
-              "--port=0", "--timeout=60", static_cast<char *>(nullptr));
+              stats_arg.c_str(), "--port=0", "--timeout=60",
+              static_cast<char *>(nullptr));
       std::perror("execl decoding_server");
       _exit(127);
     }
@@ -386,6 +389,62 @@ TEST(DecodingServerTwoProcess, TwoProcessHostDispatch) {
 
 TEST(DecodingServerTwoProcess, TwoProcessHostDispatchMultiErrorLut) {
   run_two_process_decode_test("decoding_server_config_multi_error_lut.yaml");
+}
+
+TEST(DecodingServerTwoProcess, HandlesRepeatedRequestsWithoutRestart) {
+  ServerProcess server;
+  std::string error;
+  ASSERT_TRUE(server.start("decoding_server_config_multi_error_lut.yaml", error,
+                           /*ready_timeout_ms=*/15000,
+                           /*stats_interval_sec=*/1))
+      << error;
+
+  std::vector<std::string> args = {"test_decoding_server"};
+  for (auto &arg : channel_arguments(server.port))
+    args.push_back(std::move(arg));
+  std::vector<char *> argv;
+  for (auto &arg : args)
+    argv.push_back(arg.data());
+  argv.push_back(nullptr);
+  int argc = static_cast<int>(args.size());
+  cudaq::realtime::initialize(argc, argv.data());
+  RealtimeGuard realtime_guard{true};
+
+  constexpr int kRequests = 5;
+  for (int request = 0; request < kRequests; ++request) {
+    SCOPED_TRACE(request);
+    const auto results = cudaq::run(kRunShots, decoding_server_kernel);
+    ASSERT_EQ(results.size(), kRunShots);
+    EXPECT_EQ(results[0], kExpectedCorrection);
+  }
+
+  std::string stats_line;
+  long long live_dispatched = -1;
+  for (int attempt = 0; attempt < 6 && live_dispatched < kRequests * 3;
+       ++attempt) {
+    ASSERT_TRUE(
+        server.waitForLine("QEC_DECODING_SERVER_STATS", 5000, stats_line))
+        << server.captured;
+    long long parsed = -1;
+    ASSERT_EQ(std::sscanf(stats_line.c_str(),
+                          "QEC_DECODING_SERVER_STATS dispatched=%lld", &parsed),
+              1)
+        << stats_line;
+    live_dispatched = parsed;
+  }
+  EXPECT_GE(live_dispatched, kRequests * 3) << stats_line;
+
+  // Periodic live stats must not stop the server; another request on the
+  // same READY port should still decode normally.
+  const auto after_stats = cudaq::run(kRunShots, decoding_server_kernel);
+  ASSERT_EQ(after_stats.size(), kRunShots);
+  EXPECT_EQ(after_stats[0], kExpectedCorrection);
+
+  // One server process, one READY port, many client-side runs. Each run sends
+  // reset_decoder, enqueue_syndromes, and get_corrections.
+  const std::int64_t dispatched = server.stopAndGetDispatchCount();
+  EXPECT_GE(dispatched, (kRequests + 1) * 3) << "server output:\n"
+                                             << server.captured;
 }
 
 // ---------------------------------------------------------------------------
@@ -577,9 +636,10 @@ TEST(DecodingServerTwoProcess, ApplyConfigSwapsDecoderWithoutRestart) {
   EXPECT_GE(dispatched, 6) << "server output:\n" << server.captured;
 }
 
-TEST(DecodingServerTwoProcess, ApplyConfigBadConfigRecovers) {
+TEST(DecodingServerTwoProcess,
+     ApplyConfigConstructionFailureLeavesAwaitingConfig) {
   const std::string config_path =
-      ::testing::TempDir() + "/reconfig_recover.yml";
+      ::testing::TempDir() + "/reconfig_awaiting_config.yml";
   ASSERT_TRUE(write_file(config_path, pymatching_3bit_yaml()));
 
   ServerProcess server;
@@ -610,7 +670,9 @@ TEST(DecodingServerTwoProcess, ApplyConfigBadConfigRecovers) {
   EXPECT_NE(failed_line.find("awaiting_config"), std::string::npos)
       << failed_line;
 
-  EXPECT_THROW(cudaq::run(kRunShots, decoding_server_kernel), std::exception);
+  EXPECT_THROW((void)cudaq::run(kRunShots, decoding_server_kernel),
+               std::exception)
+      << "expected decoder-less server to fail fast";
 
   ASSERT_TRUE(write_file(config_path, multi_error_lut_3bit_yaml()));
   ASSERT_TRUE(server.signalConfigApply());
@@ -623,8 +685,6 @@ TEST(DecodingServerTwoProcess, ApplyConfigBadConfigRecovers) {
   ASSERT_EQ(r3.size(), kRunShots);
   EXPECT_EQ(r3[0], kExpectedCorrection);
 
-  // Kernel may throw on first NOT_READY; healthy rounds (r1 + r3) account
-  // for 6.
   const std::int64_t dispatched = server.stopAndGetDispatchCount();
   EXPECT_GE(dispatched, 6) << "server output:\n" << server.captured;
 }
