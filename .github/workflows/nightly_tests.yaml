@@ -114,6 +114,18 @@ jobs:
       cache_key_suffix: nightly
     secrets: inherit
 
+  cudaq-main-wheels:
+    name: Wheels against CUDA-Q main
+    needs: [resolve-cudaq-main, build-cudaq-main]
+    uses: ./.github/workflows/build_wheels.yaml
+    with:
+      build_type: Release
+      cudaq_wheels: Custom
+      cache_key_suffix: nightly
+      cudaq_repo: ${{ needs.resolve-cudaq-main.outputs.repo }}
+      cudaq_ref: ${{ needs.resolve-cudaq-main.outputs.ref }}
+    secrets: inherit
+
   cleanup-nightly-cache:
     name: Clean up nightly cache
     if: ${{ always() }}
@@ -125,6 +137,7 @@ jobs:
       - cudaq-main-qec
       - cudaq-main-solvers
       - cudaq-main-docs
+      - cudaq-main-wheels
     runs-on: ubuntu-latest
     permissions:
       actions: write

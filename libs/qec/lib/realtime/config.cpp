@@ -409,6 +409,7 @@ cudaqx::heterogeneous_map sliding_window_config::to_heterogeneous_map() const {
   INSERT_ARG(window_size);
   INSERT_ARG(step_size);
   INSERT_ARG(num_syndromes_per_round);
+  INSERT_ARG(num_boundary_syndromes);
   INSERT_ARG(straddle_start_round);
   INSERT_ARG(straddle_end_round);
   INSERT_ARG_PLAIN(error_rate_vec);
@@ -439,6 +440,7 @@ sliding_window_config sliding_window_config::from_heterogeneous_map(
   GET_ARG(window_size);
   GET_ARG(step_size);
   GET_ARG(num_syndromes_per_round);
+  GET_ARG(num_boundary_syndromes);
   GET_ARG(straddle_start_round);
   GET_ARG(straddle_end_round);
   GET_ARG_PLAIN(error_rate_vec);
@@ -685,6 +687,7 @@ struct MappingTraits<cudaq::qec::decoding::config::sliding_window_config> {
     io.mapOptional("window_size", config.window_size);
     io.mapOptional("step_size", config.step_size);
     io.mapOptional("num_syndromes_per_round", config.num_syndromes_per_round);
+    io.mapOptional("num_boundary_syndromes", config.num_boundary_syndromes);
     io.mapOptional("straddle_start_round", config.straddle_start_round);
     io.mapOptional("straddle_end_round", config.straddle_end_round);
     io.mapRequired("error_rate_vec", config.error_rate_vec);

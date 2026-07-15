@@ -42,32 +42,6 @@ std::unique_ptr<cudaq::qec::realtime::qec_realtime_session> g_realtime_session;
 
 namespace {
 
-void reset_decoder_on_owning_device(
-    std::unique_ptr<cudaq::qec::decoder> &decoder) noexcept {
-  if (!decoder)
-    return;
-
-  const int cuda_device_id = decoder->get_cuda_device_id();
-  try {
-    cudaq::qec::detail_affinity::CudaDeviceGuard device(cuda_device_id);
-    decoder.reset();
-  } catch (const std::exception &e) {
-    CUDA_QEC_WARN(
-        "Failed to select cuda_device_id {} while destroying decoder: {}",
-        cuda_device_id, e.what());
-    // Destruction still has to make progress. The decoder may be CPU-only or
-    // the CUDA runtime may already be shutting down.
-    decoder.reset();
-  }
-}
-
-void clear_decoders_on_owning_devices(
-    std::vector<std::unique_ptr<cudaq::qec::decoder>> &decoders) noexcept {
-  for (auto &decoder : decoders)
-    reset_decoder_on_owning_device(decoder);
-  decoders.clear();
-}
-
 #ifdef CUDAQ_REALTIME_ROOT
 inline cudaq_dispatch_launch_fn_t resolve_launch_dispatch_kernel_regular() {
   return reinterpret_cast<cudaq_dispatch_launch_fn_t>(
@@ -185,6 +159,8 @@ namespace cudaq::qec::decoding::host {
 cudaqx::heterogeneous_map prepare_decoder_params(
     const cudaq::qec::decoding::config::decoder_config &decoder_config) {
   auto params = decoder_config.decoder_custom_args_to_heterogeneous_map();
+  // Placement knob: surfaced for every decoder type (deliberately before the
+  // trt-only early return below); consumed by decoder::get() at construction.
   if (decoder_config.cuda_device_id.has_value())
     params.insert("cuda_device_id", decoder_config.cuda_device_id.value());
   if (decoder_config.type != "trt_decoder")
@@ -366,19 +342,12 @@ int configure_decoders(
 
   // Create the decoders based on the decoder configs.
   try {
-    maybe_finalize_realtime_session();
-    clear_decoders_on_owning_devices(g_decoders);
+    g_decoders.clear();
     g_decoders.resize(max_decoder_id + 1);
     for (const auto &decoder_config : decoder_configs) {
-      // Configuration transfers ownership to the realtime runtime. Restore
-      // the configuring thread after each decoder; the direct-call path and
-      // dispatcher workers select the owning device when they execute.
-      cudaq::qec::detail_affinity::CudaDeviceGuard construction_device(
-          decoder_config.cuda_device_id.value_or(-1));
       g_decoders[decoder_config.id] = create_realtime_decoder(decoder_config);
     }
   } catch (const std::exception &e) {
-    clear_decoders_on_owning_devices(g_decoders);
     CUDA_QEC_WARN("Error initializing decoders: {}", e.what());
     return 4;
   }
@@ -390,7 +359,7 @@ int configure_decoders(
 void finalize_decoders() {
   CUDA_QEC_INFO("Finalizing the realtime decoding library.");
   maybe_finalize_realtime_session();
-  clear_decoders_on_owning_devices(g_decoders);
+  g_decoders.clear();
 }
 
 __attribute__((visibility("default"))) void
@@ -432,15 +401,18 @@ void enqueue_syndromes(std::size_t decoder_id, uint8_t *syndromes,
                     syndrome_length, max_syndromes));
   }
 
-  // Invoke syndrome capture callback if registered (for --save_syndrome
-  // feature)
-  if (g_syndrome_capture_callback) {
-    auto packed_syndrome = pack_syndrome_bits(syndromes, syndrome_length);
-    g_syndrome_capture_callback(packed_syndrome.data(), packed_syndrome.size());
-  }
+  const auto capture_syndromes = [&] {
+    // --save_syndrome feature: record what is actually submitted for decode.
+    if (g_syndrome_capture_callback) {
+      auto packed_syndrome = pack_syndrome_bits(syndromes, syndrome_length);
+      g_syndrome_capture_callback(packed_syndrome.data(),
+                                  packed_syndrome.size());
+    }
+  };
 
 #ifdef CUDAQ_REALTIME_ROOT
   if (g_realtime_session) {
+    capture_syndromes();
     try {
       cudaq::qec::decoding::rpc_producer::enqueue_syndromes(
           *g_realtime_session, decoder_id, syndromes, syndrome_length, tag);
@@ -456,10 +428,14 @@ void enqueue_syndromes(std::size_t decoder_id, uint8_t *syndromes,
 
   // Direct-call path: this caller thread runs the decode, but
   // configure_decoders() constructed every decoder sequentially on one thread,
-  // and then restored the caller's device. Point the thread at this decoder's
-  // pinned device before decoding (set-if-different; throws on failure).
+  // leaving the LAST decoder's device current. Point the thread at this
+  // decoder's pinned device before decoding (set-if-different; throws on
+  // failure) -- and before the capture callback, so a pin failure cannot
+  // record a round that was never decoded.
   cudaq::qec::detail_affinity::set_cuda_device_for_decode(
       decoder->get_cuda_device_id());
+  capture_syndromes();
+
   std::vector<uint8_t> syndrome_u8(syndrome_length);
   bool did_decode = false;
   for (std::size_t i = 0; i < syndrome_length; i++) {
@@ -524,6 +500,7 @@ void get_corrections(std::size_t decoder_id, uint8_t *corrections,
   }
 #endif
 
+  // clear_corrections may touch device memory in some plugins.
   cudaq::qec::detail_affinity::set_cuda_device_for_decode(
       decoder->get_cuda_device_id());
   auto ret = decoder->get_obs_corrections();

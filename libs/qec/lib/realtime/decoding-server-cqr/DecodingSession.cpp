@@ -7,6 +7,7 @@
  ******************************************************************************/
 
 #include "DecodingSession.h"
+#include "DecodingServer.h"
 #include "RpcWireFormat.h"
 #include "../../hardware_guards.h"
 #include "cudaq/qec/logger.h"
@@ -19,6 +20,19 @@
 
 namespace cudaq::qec::decoding_server {
 
+namespace {
+
+void set_graph_capture_device(const cudaq::qec::decoder &decoder) {
+  const int device = resolve_decode_device(decoder.get_cuda_device_id());
+  cudaq::qec::detail_affinity::set_cuda_device_for_decode(device);
+  if (device >= 0)
+    CUDA_QEC_INFO(
+        "DecodingSession::create: set CUDA device {} before graph capture",
+        device);
+}
+
+} // namespace
+
 // Busy high-water mark across all sessions (worker threads increment while
 // executing an item).
 static std::atomic<uint64_t> g_busy_sessions{0};
@@ -28,25 +42,7 @@ uint64_t max_concurrent_busy_sessions() {
   return g_max_busy_sessions.load(std::memory_order_relaxed);
 }
 
-DecodingSession::~DecodingSession() {
-  stop_worker();
-  if (!dec)
-    return;
-
-  const int cuda_device_id = dec->get_cuda_device_id();
-  try {
-    cudaq::qec::detail_affinity::CudaDeviceGuard device(cuda_device_id);
-    // Release captured graphs before the decoder plugin that owns them.
-    graph_resources.reset();
-    dec.reset();
-  } catch (const std::exception &e) {
-    cudaq::qec::error(
-        "DecodingSession teardown could not select cuda_device_id {}: {}",
-        cuda_device_id, e.what());
-    graph_resources.reset();
-    dec.reset();
-  }
-}
+DecodingSession::~DecodingSession() { stop_worker(); }
 
 void DecodingSession::stop_worker() {
   {
@@ -70,9 +66,8 @@ DecodingSession::create(std::unique_ptr<cudaq::qec::decoder> decoder,
   auto s = std::make_unique<DecodingSession>();
   s->dec = std::move(decoder);
 
-  cudaq::qec::detail_affinity::CudaDeviceGuard device(
-      s->dec->get_cuda_device_id());
   if (s->dec->supports_graph_dispatch()) {
+    set_graph_capture_device(*s->dec);
     void *gr = s->dec->capture_decode_graph();
     s->graph_resources =
         GraphResourcesPtr(gr, GraphResourcesDeleter{s->dec.get()});
@@ -83,28 +78,23 @@ DecodingSession::create(std::unique_ptr<cudaq::qec::decoder> decoder,
 }
 
 void DecodingSession::start_worker() {
-  if (worker.joinable())
-    throw std::logic_error("DecodingSession worker already started");
-
   // The pin must happen ON the worker thread (CUDA device selection is
   // thread-local), but a failure is a startup error that belongs to the
   // caller: hand it back through a promise so load_from_config aborts the
   // server instead of a worker silently decoding on the wrong device.
   std::promise<void> pinned;
   auto pin_result = pinned.get_future();
-  const int cuda_device_id = dec ? dec->get_cuda_device_id() : -1;
-  worker = std::thread([this, cuda_device_id,
-                        pinned = std::move(pinned)]() mutable {
+  worker = std::thread([this, &pinned] {
     try {
-      cudaq::qec::detail_affinity::set_cuda_device_for_decode(cuda_device_id);
+      cudaq::qec::detail_affinity::set_cuda_device_for_decode(
+          dec->get_cuda_device_id());
+      pinned.set_value();
     } catch (...) {
       pinned.set_exception(std::current_exception());
       return; // never serve work from a mispinned thread
     }
-    pinned.set_value();
     worker_loop();
   });
-
   try {
     pin_result.get();
   } catch (...) {
@@ -230,6 +220,7 @@ void DecodingSession::on_enqueue(const WorkItem &item) {
         dec->enqueue_syndrome(completed->bits.data(), completed->bits.size());
 
     if (did_decode) {
+      ++decode_count;
       accepted_syndromes = 0;
       shot_state = ShotState::result_ready;
     }

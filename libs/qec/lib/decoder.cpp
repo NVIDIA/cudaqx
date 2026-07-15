@@ -12,15 +12,11 @@
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/plugin_loader.h"
 #include "cudaq/qec/version.h"
-#include <any>
 #include <cassert>
-#include <cstdint>
 #include <cuda_runtime_api.h>
 #include <dlfcn.h>
 #include <filesystem>
 #include <fmt/ranges.h>
-#include <limits>
-#include <type_traits>
 #include <vector>
 
 INSTANTIATE_REGISTRY(cudaq::qec::decoder, const cudaq::qec::decoder_init &,
@@ -60,11 +56,6 @@ struct decoder::rt_impl {
   /// The id of the decoder (for instrumentation)
   uint32_t decoder_id = 0;
 
-  /// CUDA device selected by decoder::get(), or -1 when no placement was
-  /// requested. Keep this in the existing pimpl so adding placement does not
-  /// change the public decoder object layout used by external plugins.
-  int cuda_device_id = -1;
-
   bool is_sliding_window = false;
 
   /// The number of syndromes per round.  Only used for sliding window decoder.
@@ -76,6 +67,13 @@ struct decoder::rt_impl {
 
   /// The current round.  Only used for sliding window decoder.
   uint32_t current_round = 0;
+
+  /// Detector-layer offsets [0, w0, w0+w1, ...] for the [B | S...S | B] layout;
+  /// back() == total detectors. Only used for sliding window decoder.
+  std::vector<std::size_t> detector_layer_offsets;
+
+  /// Index of the next detector layer to emit. Only used for sliding window.
+  std::size_t detector_layer_index = 0;
 };
 
 void decoder::rt_impl_deleter::operator()(rt_impl *p) const { delete p; }
@@ -132,15 +130,13 @@ std::string decoder::get_version() const {
   return ss.str();
 }
 
-int decoder::get_cuda_device_id() const { return pimpl->cuda_device_id; }
-
 std::future<decoder_result>
 decoder::decode_async(const std::vector<float_t> &syndrome) {
   // Captured by value: the worker must not dereference decoder members to
   // find its device. The std::async thread is brand-new and unpinned, so it
   // guards itself for the duration of the call (the one exception to the
   // one-thread-owns-one-decoder persistent pin).
-  const int cuda_id = get_cuda_device_id();
+  const int cuda_id = cuda_device_id_;
   return std::async(std::launch::async, [this, syndrome, cuda_id] {
     cudaq::qec::detail_affinity::CudaDeviceGuard dev(cuda_id);
     return this->decode(syndrome);
@@ -150,78 +146,25 @@ decoder::decode_async(const std::vector<float_t> &syndrome) {
 /// Reads "cuda_device_id" from the construction parameters. Absent -> -1.
 /// Negative or >= cudaGetDeviceCount() -> std::runtime_error (fail fast:
 /// never silently decode on the wrong GPU).
-template <typename Integer>
-static bool try_read_cuda_device_id(const std::any &raw_value, int &result) {
-  const auto *value = std::any_cast<Integer>(&raw_value);
-  if (!value)
-    return false;
-
-  if constexpr (std::is_signed_v<Integer>) {
-    if (*value < 0)
-      throw std::runtime_error(
-          "cuda_device_id must be a non-negative integer (got " +
-          std::to_string(*value) + ")");
-  }
-
-  using unsigned_integer = std::make_unsigned_t<Integer>;
-  const auto magnitude =
-      static_cast<std::uintmax_t>(static_cast<unsigned_integer>(*value));
-  if (magnitude > static_cast<std::uintmax_t>(std::numeric_limits<int>::max()))
-    throw std::runtime_error("cuda_device_id is too large (got " +
-                             std::to_string(*value) +
-                             "); maximum supported value is " +
-                             std::to_string(std::numeric_limits<int>::max()));
-
-  result = static_cast<int>(magnitude);
-  return true;
-}
-
 static int read_cuda_device_id(const cudaqx::heterogeneous_map &params) {
   if (!params.contains("cuda_device_id"))
     return -1;
-
-  const std::any *raw_value = nullptr;
-  for (const auto &[key, value] : params) {
-    if (key == "cuda_device_id") {
-      raw_value = &value;
-      break;
-    }
-  }
-  if (!raw_value)
-    throw std::runtime_error("cuda_device_id is missing from parameter map");
-
-  int value = -1;
-  const bool is_integer =
-      try_read_cuda_device_id<signed char>(*raw_value, value) ||
-      try_read_cuda_device_id<unsigned char>(*raw_value, value) ||
-      try_read_cuda_device_id<short>(*raw_value, value) ||
-      try_read_cuda_device_id<unsigned short>(*raw_value, value) ||
-      try_read_cuda_device_id<int>(*raw_value, value) ||
-      try_read_cuda_device_id<unsigned int>(*raw_value, value) ||
-      try_read_cuda_device_id<long>(*raw_value, value) ||
-      try_read_cuda_device_id<unsigned long>(*raw_value, value) ||
-      try_read_cuda_device_id<long long>(*raw_value, value) ||
-      try_read_cuda_device_id<unsigned long long>(*raw_value, value);
-  if (!is_integer)
-    throw std::runtime_error("cuda_device_id must be an integer");
-
+  const int value = params.get<int>("cuda_device_id");
+  if (value < 0)
+    throw std::runtime_error("cuda_device_id must be >= 0 (got " +
+                             std::to_string(value) + ")");
   int count = 0;
-  const cudaError_t count_status = cudaGetDeviceCount(&count);
-  if (count_status != cudaSuccess)
-    throw std::runtime_error(
-        "cuda_device_id " + std::to_string(value) +
-        " could not be validated because cudaGetDeviceCount() failed: " +
-        cudaGetErrorString(count_status));
-  if (value >= count)
+  if (cudaGetDeviceCount(&count) != cudaSuccess || value >= count)
     throw std::runtime_error("cuda_device_id " + std::to_string(value) +
                              " is out of range: " + std::to_string(count) +
                              " CUDA device(s) visible");
   return value;
 }
 
-/// Selects a device for decoder construction and restores the previous device
-/// unless commit() is called. This keeps the successful persistent-pin
-/// contract while making failed plugin construction transactional.
+/// Selects the construction device and restores the previous device unless
+/// commit() is called. Makes failed plugin construction transactional: if the
+/// plugin ctor throws, the calling thread is left on its original device
+/// instead of leaking the pin to whichever device was selected for the attempt.
 class ConstructionDevicePin {
 public:
   explicit ConstructionDevicePin(int target) : target_(target) {
@@ -231,12 +174,10 @@ public:
           "cuda_device_id " + std::to_string(target_) +
           " could not be selected because cudaGetDevice() failed: " +
           cudaGetErrorString(err));
-
     err = cudaSetDevice(target_);
     if (err != cudaSuccess)
-      throw std::runtime_error(
-          "cudaSetDevice(" + std::to_string(target_) +
-          ") failed for cuda_device_id: " + cudaGetErrorString(err));
+      throw std::runtime_error("cudaSetDevice(" + std::to_string(target_) +
+                               ") failed: " + cudaGetErrorString(err));
     selected_ = true;
   }
 
@@ -248,15 +189,11 @@ public:
   ConstructionDevicePin(const ConstructionDevicePin &) = delete;
   ConstructionDevicePin &operator=(const ConstructionDevicePin &) = delete;
 
-  void commit() {
-    const cudaError_t err = cudaSetDevice(target_);
-    if (err != cudaSuccess)
-      throw std::runtime_error(
-          "cudaSetDevice(" + std::to_string(target_) +
-          ") failed while finalizing cuda_device_id placement: " +
-          cudaGetErrorString(err));
-    committed_ = true;
-  }
+  // Keep the pin: one thread owns one decoder, so leaving the constructing
+  // thread on the target device lets later allocations and kernel launches --
+  // including lazy ones inside decode() -- land there with no per-call
+  // machinery.
+  void commit() { committed_ = true; }
 
 private:
   int target_ = -1;
@@ -279,10 +216,6 @@ decoder::get(const std::string &name, const decoder_init &init,
   const int cuda_device_id = read_cuda_device_id(param_map);
   if (cuda_device_id < 0)
     return iter->second(init, param_map);
-  // Pin the constructing thread persistently (no restore): one thread owns
-  // one decoder, so every later allocation and kernel launch on this thread
-  // -- including lazy allocations inside a plugin's decode() -- lands on the
-  // requested device with no per-call machinery.
   ConstructionDevicePin device_pin(cuda_device_id);
   // The key is consumed here; strip it so plugins that strictly validate
   // their parameter keys do not reject it.
@@ -291,7 +224,7 @@ decoder::get(const std::string &name, const decoder_init &init,
     if (kv.first != "cuda_device_id")
       plugin_params.insert(kv.first, kv.second);
   auto d = iter->second(init, plugin_params);
-  d->pimpl->cuda_device_id = cuda_device_id;
+  d->cuda_device_id_ = cuda_device_id;
   device_pin.commit();
   return d;
 }
@@ -389,6 +322,14 @@ void set_D_sparse_common(decoder *decoder,
     pimpl->has_first_round_detectors =
         (D_sparse.size() > 0 && D_sparse[0].size() == 1);
     pimpl->current_round = 0;
+    // Detector-layer offsets for the [B | S...S | B] layout; each streamed
+    // layer's width comes from these.
+    const std::size_t num_layers = sw_decoder->get_num_detector_layers();
+    pimpl->detector_layer_offsets.resize(num_layers + 1);
+    for (std::size_t r = 0; r <= num_layers; ++r)
+      pimpl->detector_layer_offsets[r] = sw_decoder->get_layer_offset(r);
+    pimpl->detector_layer_index = 0;
+    // The interior width is the widest layer, so it bounds the buffers.
     pimpl->persistent_detector_buffer.resize(pimpl->num_syndromes_per_round);
     pimpl->persistent_soft_detector_buffer.resize(
         pimpl->num_syndromes_per_round);
@@ -473,24 +414,15 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
           pimpl->persistent_detector_buffer[i] ^= pimpl->msyn_buffer[col];
       }
     } else {
-      // For sliding window decoder, syndrome_length must equal
-      // num_syndromes_per_round
-      assert(syndrome_length == pimpl->num_syndromes_per_round);
-      if (pimpl->current_round == 1 && pimpl->has_first_round_detectors) {
-        // First round: only compute first-round detectors (direct copy)
-        for (std::size_t i = 0; i < pimpl->num_syndromes_per_round; i++) {
-          pimpl->persistent_detector_buffer[i] = pimpl->msyn_buffer[i];
-        }
-      } else {
-        // Buffer is full with 2 rounds: compute timelike detectors (XOR of two
-        // rounds)
-        std::size_t index =
-            (pimpl->current_round - 2) * pimpl->num_syndromes_per_round;
-        for (std::size_t i = 0; i < pimpl->num_syndromes_per_round; i++) {
-          pimpl->persistent_detector_buffer[i] =
-              pimpl->msyn_buffer[index + i] ^
-              pimpl->msyn_buffer[index + i + pimpl->num_syndromes_per_round];
-        }
+      const std::size_t k = pimpl->detector_layer_index++;
+      const std::size_t off = pimpl->detector_layer_offsets[k];
+      const std::size_t width = pimpl->detector_layer_offsets[k + 1] - off;
+      pimpl->persistent_detector_buffer.resize(width);
+      for (std::size_t j = 0; j < width; j++) {
+        uint8_t v = 0;
+        for (auto col : this->D_sparse[off + j])
+          v ^= pimpl->msyn_buffer[col];
+        pimpl->persistent_detector_buffer[j] = v;
       }
     }
 
@@ -622,6 +554,7 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
     // Prepare for more data.
     pimpl->msyn_buffer_index = 0;
     pimpl->current_round = 0;
+    pimpl->detector_layer_index = 0;
   }
   return did_decode;
 }
@@ -671,6 +604,7 @@ void decoder::reset_decoder() {
   // Zero out all data that is considered "per-shot" memory.
   pimpl->msyn_buffer_index = 0;
   pimpl->current_round = 0;
+  pimpl->detector_layer_index = 0;
   pimpl->msyn_buffer.clear();
   pimpl->msyn_buffer.resize(pimpl->num_msyn_per_decode);
   pimpl->corrections.clear();

@@ -31,8 +31,9 @@ inline void set_cuda_device_for_decode(int target) {
 }
 
 /// RAII: set the calling thread's CUDA device, restore the previous device on
-/// scope exit. No-op for target < 0. Lib-private and header-only so it can be
-/// reused by decoder implementation files without adding a public API.
+/// scope exit. No-op for target < 0. Lib-private and header-only so decoder
+/// plugins built as separate .so files can reuse it (PR2 extends this header
+/// with NUMA guards; the nv-qldpc follow-up mirrors its use).
 ///
 /// This guard is for threads that do NOT follow the one-thread-owns-one-
 /// decoder persistent pin (e.g. the fresh worker spawned by decode_async).
@@ -42,12 +43,7 @@ public:
     if (target < 0)
       return;
     int count = 0;
-    const cudaError_t count_status = cudaGetDeviceCount(&count);
-    if (count_status != cudaSuccess)
-      throw std::runtime_error(
-          "CudaDeviceGuard: cudaGetDeviceCount() failed for cuda_device_id " +
-          std::to_string(target) + ": " + cudaGetErrorString(count_status));
-    if (target >= count)
+    if (cudaGetDeviceCount(&count) != cudaSuccess || target >= count)
       throw std::runtime_error("cuda_device_id " + std::to_string(target) +
                                " is out of range: " + std::to_string(count) +
                                " CUDA device(s) visible");

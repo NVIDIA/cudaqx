@@ -14,7 +14,6 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
-#include <cuda_runtime_api.h>
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
@@ -41,18 +40,6 @@ public:
 private:
   std::string name;
   std::optional<std::string> oldValue;
-};
-
-class ScopedCudaDeviceRestore {
-public:
-  ScopedCudaDeviceRestore() { (void)cudaGetDevice(&device); }
-  ~ScopedCudaDeviceRestore() {
-    if (device >= 0)
-      (void)cudaSetDevice(device);
-  }
-
-private:
-  int device = -1;
 };
 } // namespace
 
@@ -861,40 +848,26 @@ TEST(DecoderYAMLTest, CudaDeviceIdRoundTrip) {
 }
 
 TEST(DecoderYAMLTest, PrepareDecoderParamsSurfacesCudaDeviceId) {
+  // Non-trt type: the insert must happen before prepare_decoder_params()'s
+  // trt-only early return, so the knob reaches every decoder type.
   auto config = create_test_empty_decoder_config(0);
   config.cuda_device_id = 3;
   auto params = cudaq::qec::decoding::host::prepare_decoder_params(config);
   ASSERT_TRUE(params.contains("cuda_device_id"));
   EXPECT_EQ(params.get<int>("cuda_device_id"), 3);
 
-  auto unpinned = create_test_empty_decoder_config(1);
-  auto unpinned_params =
-      cudaq::qec::decoding::host::prepare_decoder_params(unpinned);
-  EXPECT_FALSE(unpinned_params.contains("cuda_device_id"));
+  // Absent -> key absent (decoder::get() treats absence as unpinned).
+  auto config2 = create_test_empty_decoder_config(1);
+  auto params2 = cudaq::qec::decoding::host::prepare_decoder_params(config2);
+  EXPECT_FALSE(params2.contains("cuda_device_id"));
 
-  auto trt = create_test_empty_decoder_config(2);
-  trt.type = "trt_decoder";
-  trt.decoder_custom_args = cudaq::qec::decoding::config::trt_decoder_config{};
-  trt.cuda_device_id = 1;
-  auto trt_params = cudaq::qec::decoding::host::prepare_decoder_params(trt);
-  ASSERT_TRUE(trt_params.contains("cuda_device_id"));
-  EXPECT_EQ(trt_params.get<int>("cuda_device_id"), 1);
-}
-
-TEST(DecoderConfigCudaDeviceId, RealtimeFactoryUsesConfiguredDevice) {
-  int device_count = 0;
-  if (cudaGetDeviceCount(&device_count) != cudaSuccess || device_count < 2)
-    GTEST_SKIP() << "needs >= 2 CUDA devices";
-
-  ScopedCudaDeviceRestore restore;
-  ASSERT_EQ(cudaSetDevice(0), cudaSuccess);
-  auto config = create_test_sample_realtime_decoder_config(0);
-  config.cuda_device_id = 1;
-
-  auto decoder = cudaq::qec::decoding::host::create_realtime_decoder(config);
-  ASSERT_NE(decoder, nullptr);
-  EXPECT_EQ(decoder->get_cuda_device_id(), 1);
-  int current = -1;
-  ASSERT_EQ(cudaGetDevice(&current), cudaSuccess);
-  EXPECT_EQ(current, 1);
+  // trt type: still surfaced on the trt branch.
+  auto config3 = create_test_empty_decoder_config(2);
+  config3.type = "trt_decoder";
+  config3.decoder_custom_args =
+      cudaq::qec::decoding::config::trt_decoder_config{};
+  config3.cuda_device_id = 1;
+  auto params3 = cudaq::qec::decoding::host::prepare_decoder_params(config3);
+  ASSERT_TRUE(params3.contains("cuda_device_id"));
+  EXPECT_EQ(params3.get<int>("cuda_device_id"), 1);
 }

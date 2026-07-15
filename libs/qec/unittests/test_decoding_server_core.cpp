@@ -16,14 +16,12 @@
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/sparse_binary_matrix.h"
 
-#include <cuda_runtime_api.h>
 #include <gtest/gtest.h>
 
-#include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cuda_runtime_api.h>
 #include <memory>
-#include <optional>
 #include <stdexcept>
 #include <thread>
 #include <utility>
@@ -57,60 +55,6 @@ public:
 
   bool converged = false;
   bool throw_on_decode = false;
-};
-
-class ServerDeviceRecordingDecoder final : public cudaq::qec::decoder {
-public:
-  std::atomic<int> last_decode_device{-2};
-  inline static std::atomic<int> last_destroy_device{-2};
-
-  ServerDeviceRecordingDecoder(const cudaq::qec::sparse_binary_matrix &H,
-                               const cudaqx::heterogeneous_map &)
-      : decoder(H) {}
-
-  ~ServerDeviceRecordingDecoder() override {
-    int device = -1;
-    if (cudaGetDevice(&device) != cudaSuccess)
-      device = -1;
-    last_destroy_device.store(device, std::memory_order_release);
-  }
-
-  cudaq::qec::decoder_result
-  decode(const std::vector<cudaq::qec::float_t> &) override {
-    int device = -1;
-    if (cudaGetDevice(&device) != cudaSuccess)
-      device = -1;
-    last_decode_device.store(device, std::memory_order_release);
-    cudaq::qec::decoder_result result;
-    result.converged = true;
-    result.result = std::vector<cudaq::qec::float_t>(block_size, 0.0);
-    return result;
-  }
-
-  CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
-      ServerDeviceRecordingDecoder,
-      static std::unique_ptr<cudaq::qec::decoder> create(
-          const cudaq::qec::decoder_init &init,
-          const cudaqx::heterogeneous_map &params) {
-        return cudaq::qec::make_pcm_decoder<ServerDeviceRecordingDecoder>(
-            init, params);
-      })
-};
-CUDAQ_EXT_PT_REGISTER_TYPE(ServerDeviceRecordingDecoder)
-
-class ScopedDeviceRestore {
-public:
-  ScopedDeviceRestore() {
-    if (cudaGetDevice(&previous) != cudaSuccess)
-      previous = -1;
-  }
-  ~ScopedDeviceRestore() {
-    if (previous >= 0)
-      (void)cudaSetDevice(previous);
-  }
-
-private:
-  int previous = -1;
 };
 
 class CaptureTransceiver final : public ITransceiver {
@@ -317,78 +261,12 @@ TEST(RpcDispatcherTest, ConvertsHandlerExceptionsToErrorResponses) {
   expect_status(transport, RpcStatus::INTERNAL_ERROR);
 }
 
-TEST(DecodingSessionCudaDeviceId, WorkerAndTeardownUseConfiguredDevice) {
-  int device_count = 0;
-  if (cudaGetDeviceCount(&device_count) != cudaSuccess || device_count < 2)
-    GTEST_SKIP() << "needs >= 2 CUDA devices";
-
-  ScopedDeviceRestore restore;
-  ServerDeviceRecordingDecoder::last_destroy_device.store(
-      -2, std::memory_order_release);
-
-  auto H = cudaq::qec::sparse_binary_matrix::from_csr(
-      /*num_rows=*/1, /*num_cols=*/1, /*row_ptrs=*/{0, 1},
-      /*col_indices=*/{0});
-  cudaqx::heterogeneous_map params;
-  params.insert("cuda_device_id", 1);
-  auto decoder =
-      cudaq::qec::decoder::get("ServerDeviceRecordingDecoder", H, params);
-  auto *recording = dynamic_cast<ServerDeviceRecordingDecoder *>(decoder.get());
-  ASSERT_NE(recording, nullptr);
-  decoder->set_O_sparse(std::vector<std::vector<uint32_t>>{{0}});
-  decoder->set_D_sparse(std::vector<std::vector<uint32_t>>{{0}});
-
-  SyndromeMappingTable mappings{{0, {{}}}};
-  auto session =
-      DecodingSession::create(std::move(decoder), std::move(mappings));
-
-  // Worker startup must not depend on the caller still being on device 1.
-  ASSERT_EQ(cudaSetDevice(0), cudaSuccess);
-  session->start_worker();
-  CaptureTransceiver transport;
-  ASSERT_TRUE(session->try_enqueue(make_enqueue(transport, 0, {1})));
-
-  for (int attempt = 0; attempt < 200 && recording->last_decode_device.load(
-                                             std::memory_order_acquire) < 0;
-       ++attempt)
-    std::this_thread::sleep_for(std::chrono::milliseconds(5));
-  EXPECT_EQ(recording->last_decode_device.load(std::memory_order_acquire), 1);
-
-  session->stop_worker();
-  ASSERT_EQ(cudaSetDevice(0), cudaSuccess);
-  session.reset();
-  EXPECT_EQ(ServerDeviceRecordingDecoder::last_destroy_device.load(
-                std::memory_order_acquire),
-            1);
-
-  int current = -1;
-  ASSERT_EQ(cudaGetDevice(&current), cudaSuccess);
-  EXPECT_EQ(current, 0);
+TEST(ResolveDecodeDevice, UnpinnedDefaultsToZero) {
+  EXPECT_EQ(cudaq::qec::decoding_server::resolve_decode_device(-1), 0);
 }
 
-TEST(GpuRoceDeviceReconcile, BothUnsetDefaultsToZero) {
-  EXPECT_EQ(
-      cudaq::qec::decoding_server::reconcile_gpu_roce_device(std::nullopt, -1),
-      0);
-}
-
-TEST(GpuRoceDeviceReconcile, EnvOnlyWins) {
-  EXPECT_EQ(cudaq::qec::decoding_server::reconcile_gpu_roce_device(2, -1), 2);
-}
-
-TEST(GpuRoceDeviceReconcile, PinOnlyWins) {
-  EXPECT_EQ(
-      cudaq::qec::decoding_server::reconcile_gpu_roce_device(std::nullopt, 3),
-      3);
-}
-
-TEST(GpuRoceDeviceReconcile, AgreementPasses) {
-  EXPECT_EQ(cudaq::qec::decoding_server::reconcile_gpu_roce_device(1, 1), 1);
-}
-
-TEST(GpuRoceDeviceReconcile, ConflictThrows) {
-  EXPECT_THROW(cudaq::qec::decoding_server::reconcile_gpu_roce_device(0, 2),
-               std::runtime_error);
+TEST(ResolveDecodeDevice, PinSelectsDevice) {
+  EXPECT_EQ(cudaq::qec::decoding_server::resolve_decode_device(3), 3);
 }
 
 TEST(SetCudaDeviceForDecode, UnpinnedIsNoOp) {
@@ -406,6 +284,39 @@ TEST(SetCudaDeviceForDecode, ImpossibleDeviceThrows) {
   EXPECT_THROW(
       cudaq::qec::detail_affinity::set_cuda_device_for_decode(count + 7),
       std::runtime_error);
+}
+
+/// cuda_device_id_ is protected: setting an impossible id directly bypasses
+/// decoder::get()'s construction-time range check, the only front door --
+/// which is exactly what makes the handshake's failure path injectable here.
+class MispinnedDecoder final : public cudaq::qec::decoder {
+public:
+  MispinnedDecoder()
+      : decoder(cudaq::qec::sparse_binary_matrix::from_csr(
+            /*num_rows=*/1, /*num_cols=*/1, /*row_ptrs=*/{0, 1},
+            /*col_indices=*/{0})) {
+    set_O_sparse(std::vector<std::vector<uint32_t>>{{0}});
+    set_D_sparse(std::vector<std::vector<uint32_t>>{{0, 1}});
+    cuda_device_id_ = 1 << 20;
+  }
+  cudaq::qec::decoder_result
+  decode(const std::vector<cudaq::qec::float_t> &) override {
+    return {};
+  }
+};
+
+TEST(DecodingSessionPinHandshake, UnhonorablePinFailsStartWorker) {
+  // The contract under test: a worker that cannot pin must never serve, and
+  // the failure must surface on the caller (server-startup) thread. This is
+  // the test that fails if start_worker ever reverts to log-and-continue.
+  SyndromeMappingTable table;
+  table[0] = {{}};
+  auto session = DecodingSession::create(std::make_unique<MispinnedDecoder>(),
+                                         std::move(table));
+  EXPECT_THROW(session->start_worker(), std::runtime_error);
+  // The failed worker was joined inside start_worker; nothing is left to
+  // serve and destruction must not hang.
+  EXPECT_FALSE(session->worker.joinable());
 }
 
 TEST(DecodingSessionPinHandshake, PinnedWorkerStartsAndServes) {

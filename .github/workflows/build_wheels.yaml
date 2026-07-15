@@ -65,6 +65,16 @@ on:
         type: string
         default: ''
         required: false
+      cudaq_repo:
+        type: string
+        description: Optional CUDA-Q repository override.
+        default: ''
+        required: false
+      cudaq_ref:
+        type: string
+        description: Optional CUDA-Q ref override.
+        default: ''
+        required: false
       cache_key_suffix:
         type: string
         default: ''
@@ -76,7 +86,7 @@ on:
         required: false
 
 concurrency:
-  group: ${{ github.workflow }}-build-wheels-${{ github.ref }}
+  group: ${{ github.workflow }}-build-wheels-${{ github.ref }}-${{ inputs.cudaq_repo || 'default-repo' }}-${{ inputs.cudaq_ref || 'default-ref' }}
   cancel-in-progress: true
 
 jobs:
@@ -176,6 +186,9 @@ jobs:
       - name: Get required CUDAQ version
         id: get-cudaq-version
         uses: ./.github/actions/get-cudaq-version
+        with:
+          repo: ${{ inputs.cudaq_repo }}
+          ref: ${{ inputs.cudaq_ref }}
 
       - name: Get CUDAQ code
         uses: actions/checkout@v4
@@ -283,6 +296,9 @@ jobs:
       - name: Get required CUDAQ version
         id: get-cudaq-version
         uses: ./.github/actions/get-cudaq-version
+        with:
+          repo: ${{ inputs.cudaq_repo }}
+          ref: ${{ inputs.cudaq_ref }}
 
       - name: Get CUDAQ wheels
         uses: ./.github/actions/get-cudaq-wheels

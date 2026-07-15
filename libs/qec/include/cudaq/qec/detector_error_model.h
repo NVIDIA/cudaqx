@@ -63,23 +63,50 @@ struct detector_error_model {
   /// Return the number of rows in the observables_flips_matrix.
   std::size_t num_observables() const;
 
-  /// Put the detector_error_matrix into canonical form, where the rows and
-  /// columns are ordered in a way that is amenable to the round-based decoding
-  /// process. Columns sharing the same detector AND observable signature are
-  /// merged, with their rates composed so the resulting model matches the
-  /// input model. By default, zero-syndrome columns that still flip an
-  /// observable (undetectable logical errors) are retained so the model's
-  /// observable-flip probability is preserved. Set @p
-  /// remove_zero_syndrome_errors to true to drop all columns with no detector
-  /// signature, which is appropriate when the canonicalized DEM is consumed
-  /// only for round-based decoding (where such columns carry no syndrome).
-  ///
+  /// @brief Put the detector_error_matrix into canonical form for round-based
+  /// decoding: topologically order the columns and merge columns that share the
+  /// same detector AND observable signature, composing their rates so the
+  /// canonicalized model matches the input.
+  /// @param num_syndromes_per_round Number of syndromes per round, used to
+  /// order columns by the rounds their detectors span; 0 disables the per-round
+  /// key.
+  /// @param remove_zero_syndrome_errors If false (default), zero-syndrome
+  /// columns that still flip an observable (undetectable logical errors) are
+  /// retained so the observable-flip probability is preserved; if true, all
+  /// columns with no detector signature are dropped (appropriate when the DEM
+  /// is consumed only for round-based decoding).
   /// @note Canonicalization does not preserve cross-column exclusivity
-  /// structure. Each output column is given a fresh unique error id and is
-  /// treated as independent of every other column; any `error_ids` correlation
-  /// present in the input model is discarded.
+  /// structure: each output column is given a fresh unique error id and is
+  /// treated as independent, so any `error_ids` correlation in the input model
+  /// is discarded.
   void canonicalize_for_rounds(uint32_t num_syndromes_per_round,
                                bool remove_zero_syndrome_errors = false);
+
+  /// @brief Boundary-aware variant of canonicalize_for_rounds for
+  /// memory-experiment DEMs whose first and last detector layers (the
+  /// boundaries) are narrower than the interior layers
+  /// @param num_syndromes_per_round Interior-layer width (syndromes per
+  /// interior round).
+  /// @param num_boundary_syndromes Width of the leading and trailing boundary
+  /// layers: the first and last @p num_boundary_syndromes rows form the
+  /// boundary rounds and each intermediate block of @p num_syndromes_per_round
+  /// rows is an interior round.
+  /// @param remove_zero_syndrome_errors Same meaning as in the scalar overload.
+  /// @throws std::invalid_argument if @p num_syndromes_per_round is 0 or
+  /// @p num_boundary_syndromes > @p num_syndromes_per_round.
+  void canonicalize_for_rounds_with_boundary(uint32_t num_syndromes_per_round,
+                                             uint32_t num_boundary_syndromes,
+                                             bool remove_zero_syndrome_errors);
+
+private:
+  /// Shared implementation of the canonicalize_for_rounds overloads. Given the
+  /// sparse detector matrix and a precomputed topological @p column_order,
+  /// merges columns sharing a full (detector, observable) signature and
+  /// reorders/reduces the matrices accordingly.
+  void canonicalize_for_rounds_impl(
+      const std::vector<std::vector<std::uint32_t>> &row_indices,
+      const std::vector<std::uint32_t> &column_order,
+      bool remove_zero_syndrome_errors);
 };
 
 /// Parse the Stim DEM string @p dem_text into detector/observable flip
