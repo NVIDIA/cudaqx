@@ -8,6 +8,7 @@
 
 #include "DecodingServer.h"
 #include "CpuRoceTransceiver.h"
+#include "../../hardware_guards.h"
 
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/realtime/decoding_config.h"
@@ -45,7 +46,7 @@ using cudaq::qec::decoding::config::DecoderTransport;
 /// graphs cannot split capture and launch across devices, so the decoder must
 /// be pinned to that device.
 int resolve_decode_device(int decoder_pin) {
-  return decoder_pin >= 0 ? decoder_pin : 0;
+  return detail_affinity::decode_device_for(decoder_pin);
 }
 
 std::unique_ptr<ITransceiver>

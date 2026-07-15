@@ -7,7 +7,6 @@
  ******************************************************************************/
 
 #include "DecodingSession.h"
-#include "DecodingServer.h"
 #include "RpcWireFormat.h"
 #include "../../hardware_guards.h"
 #include "cudaq/qec/logger.h"
@@ -19,19 +18,6 @@
 #include <vector>
 
 namespace cudaq::qec::decoding_server {
-
-namespace {
-
-void set_graph_capture_device(const cudaq::qec::decoder &decoder) {
-  const int device = resolve_decode_device(decoder.get_cuda_device_id());
-  cudaq::qec::detail_affinity::set_cuda_device_for_decode(device);
-  if (device >= 0)
-    CUDA_QEC_INFO(
-        "DecodingSession::create: set CUDA device {} before graph capture",
-        device);
-}
-
-} // namespace
 
 // Busy high-water mark across all sessions (worker threads increment while
 // executing an item).
@@ -67,8 +53,7 @@ DecodingSession::create(std::unique_ptr<cudaq::qec::decoder> decoder,
   s->dec = std::move(decoder);
 
   if (s->dec->supports_graph_dispatch()) {
-    set_graph_capture_device(*s->dec);
-    void *gr = s->dec->capture_decode_graph();
+    void *gr = cudaq::qec::detail_affinity::capture_graph_pinned(*s->dec);
     s->graph_resources =
         GraphResourcesPtr(gr, GraphResourcesDeleter{s->dec.get()});
   }
@@ -86,8 +71,7 @@ void DecodingSession::start_worker() {
   auto pin_result = pinned.get_future();
   worker = std::thread([this, &pinned] {
     try {
-      cudaq::qec::detail_affinity::set_cuda_device_for_decode(
-          dec->get_cuda_device_id());
+      cudaq::qec::detail_affinity::pin_decode_device(*dec);
       pinned.set_value();
     } catch (...) {
       pinned.set_exception(std::current_exception());
