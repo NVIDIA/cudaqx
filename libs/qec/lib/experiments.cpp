@@ -254,6 +254,20 @@ stabilizer_detector_ranges(std::size_t numRounds, std::size_t numZStabs,
   return ranges;
 }
 
+/// @brief Validate and flatten (row-major) an inlined feedback tensor
+/// declared by a code. An empty tensor (the identity default) flattens to an
+/// empty vector; a non-empty tensor must have shape
+/// [expected_rows, expected_cols].
+static std::vector<std::size_t>
+flatten_feedback_tensor(const cudaqx::tensor<uint8_t> &t,
+                        std::size_t expected_rows, std::size_t expected_cols,
+                        const std::string &name) {
+  validate_inlined_feedback_tensor(t, expected_rows, expected_cols, name);
+  if (t.size() == 0)
+    return {};
+  return std::vector<std::size_t>(t.data(), t.data() + t.size());
+}
+
 /// @brief Given a memory circuit setup, sample syndrome and data qubit
 /// measurements. This is the main driver function that all of the
 /// sample_memory_circuit overloads invoke.
@@ -309,6 +323,15 @@ sample_memory_circuit(const code &code, operation statePrep,
 
   const std::size_t numCols = numAncx + numAncz;
 
+  auto feedback_flat = flatten_feedback_tensor(
+      code.get_inlined_feedback(), numCols, numCols, "get_inlined_feedback()");
+  auto obs_feedback_flat = flatten_feedback_tensor(
+      is_z_prep ? code.get_observable_inlined_feedback_z()
+                : code.get_observable_inlined_feedback_x(),
+      num_obs, numCols,
+      is_z_prep ? "get_observable_inlined_feedback_z()"
+                : "get_observable_inlined_feedback_x()");
+
   // Obtain the Measurement-to-Detector (M2D) sparse matrix.
   // m2d.rows[d] = set of chronological measurement indices whose XOR = detector
   // d.
@@ -316,14 +339,16 @@ sample_memory_circuit(const code &code, operation statePrep,
   cudaq::M2OSparseMatrix m2o;
   cudaq::dem_from_kernel(memory_circuit, &noise, /*options=*/{}, m2d, m2o,
                          stabRound, prep, numData, numAncx, numAncz, numRounds,
-                         xVec, zVec, obs_flat, num_obs, !is_z_prep);
+                         xVec, zVec, obs_flat, num_obs, !is_z_prep,
+                         feedback_flat, obs_feedback_flat);
 
   // Sample the memory circuit and collect all raw measurements.
   cudaq::sample_options opts{
       .shots = numShots, .noise = noise, .explicit_measurements = true};
-  auto result = cudaq::sample(opts, memory_circuit, stabRound, prep, numData,
-                              numAncx, numAncz, numRounds, xVec, zVec, obs_flat,
-                              num_obs, !is_z_prep);
+  auto result =
+      cudaq::sample(opts, memory_circuit, stabRound, prep, numData, numAncx,
+                    numAncz, numRounds, xVec, zVec, obs_flat, num_obs,
+                    !is_z_prep, feedback_flat, obs_feedback_flat);
 
   // mzTable[shot, meas_idx] = raw 0/1 outcome; shape (numShots,
   // numMeasPerShot). Measurement layout per shot: numRounds*numCols ancilla,
@@ -479,11 +504,22 @@ dem_from_memory_circuit(const code &code, operation statePrep,
   std::vector<std::size_t> obs_flat(logical_obs.data(),
                                     logical_obs.data() + logical_obs.size());
 
+  const std::size_t numAnc = numAncx + numAncz;
+  auto feedback_flat = flatten_feedback_tensor(
+      code.get_inlined_feedback(), numAnc, numAnc, "get_inlined_feedback()");
+  auto obs_feedback_flat = flatten_feedback_tensor(
+      is_z_prep ? code.get_observable_inlined_feedback_z()
+                : code.get_observable_inlined_feedback_x(),
+      num_obs, numAnc,
+      is_z_prep ? "get_observable_inlined_feedback_z()"
+                : "get_observable_inlined_feedback_x()");
+
   cudaq::dem_options dem_opts;
   dem_opts.decompose_errors = decompose_errors;
   auto dem_text = cudaq::dem_from_kernel(
       memory_circuit, &noise, dem_opts, stabRound, prep, numData, numAncx,
-      numAncz, numRounds, xVec, zVec, obs_flat, num_obs, !is_z_prep);
+      numAncz, numRounds, xVec, zVec, obs_flat, num_obs, !is_z_prep,
+      feedback_flat, obs_feedback_flat);
   auto dem = cudaq::qec::dem_from_stim_text(dem_text, decompose_errors);
 
   const auto numXStabs = code.get_num_x_stabilizers();

@@ -1,5 +1,5 @@
 /****************************************************************-*- C++ -*-****
- * Copyright (c) 2025 NVIDIA Corporation & Affiliates.                         *
+ * Copyright (c) 2025 - 2026 NVIDIA Corporation & Affiliates.                  *
  * All rights reserved.                                                        *
  *                                                                             *
  * This source code and the accompanying materials are made available under    *
@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -108,6 +109,84 @@ private:
       const std::vector<std::uint32_t> &column_order,
       bool remove_zero_syndrome_errors);
 };
+
+namespace details {
+
+/// Validate one optional inlined-feedback tensor. Empty tensors represent no
+/// feedback. Non-empty tensors must have the requested shape and contain only
+/// exact binary values so that no caller can silently reinterpret an arbitrary
+/// nonzero uint8_t as a measurement-record dependency.
+inline void validate_inlined_feedback_tensor(
+    const cudaqx::tensor<uint8_t> &tensor, std::size_t expected_rows,
+    std::size_t expected_cols, const std::string &name) {
+  if (tensor.size() == 0)
+    return;
+
+  if (tensor.rank() != 2 || tensor.shape()[0] != expected_rows ||
+      tensor.shape()[1] != expected_cols) {
+    std::string actual;
+    for (std::size_t d = 0; d < tensor.rank(); ++d)
+      actual += (d ? ", " : "") + std::to_string(tensor.shape()[d]);
+    throw std::runtime_error(name + " has invalid shape [" + actual +
+                             "] - expected [" + std::to_string(expected_rows) +
+                             ", " + std::to_string(expected_cols) +
+                             "] or an empty tensor.");
+  }
+
+  for (std::size_t i = 0; i < tensor.size(); ++i) {
+    const auto value = tensor.data()[i];
+    if (value > 1)
+      throw std::runtime_error(
+          name + " has non-binary value " +
+          std::to_string(static_cast<unsigned int>(value)) + " at flat index " +
+          std::to_string(i) + "; entries must be exactly 0 or 1.");
+  }
+}
+
+} // namespace details
+
+/// @brief Record-to-detector composition layout derived from a code's
+/// declared inlined-feedback matrices (CSR-style).
+///
+/// Entry range [detector_offsets[j], detector_offsets[j+1]) of
+/// detector_indices lists the herald record columns XOR-ed into record j's
+/// cross-round detector (records of the earlier round) and into its final
+/// boundary detector (records of the last round). Entry range
+/// [observable_offsets[m], observable_offsets[m+1]) of observable_indices
+/// lists the record columns XOR-ed into logical observable m on every round.
+/// Empty offsets vectors mean no feedback is declared for that target
+/// (identity detector/observable structure).
+struct inlined_feedback_layout {
+  std::vector<std::size_t> detector_indices;
+  std::vector<std::size_t> detector_offsets;
+  std::vector<std::size_t> observable_indices;
+  std::vector<std::size_t> observable_offsets;
+};
+
+/// @brief Build the record-to-detector composition layout from a code's
+/// declared inlined-feedback matrices.
+///
+/// @param feedback Detector feedback matrix, shape
+///        [num_syndromes_per_round x num_syndromes_per_round] with 0/1
+///        entries, or an empty tensor for none. Entry (j, k) = 1 means the
+///        cross-round detector for record j additionally XORs record k of
+///        the earlier round, and the final boundary detector for record j
+///        additionally XORs record k of the last round.
+/// @param obs_feedback Observable feedback matrix, shape
+///        [num_observables x num_syndromes_per_round] with 0/1 entries, or
+///        an empty tensor for none. Entry (m, k) = 1 means logical
+///        observable m additionally XORs record k of every round.
+/// @param num_syndromes_per_round Records per round (number of ancilla
+///        qubits).
+/// @param num_observables Number of logical observables.
+/// @return The CSR layout; see inlined_feedback_layout.
+/// @throws std::runtime_error if a non-empty tensor's shape does not match
+///         the expected dimensions or if an entry is not exactly 0 or 1.
+inlined_feedback_layout
+build_inlined_feedback_layout(const cudaqx::tensor<uint8_t> &feedback,
+                              const cudaqx::tensor<uint8_t> &obs_feedback,
+                              std::size_t num_syndromes_per_round,
+                              std::size_t num_observables);
 
 /// Parse the Stim DEM string @p dem_text into detector/observable flip
 /// matrices and error rates. DEM-native decoders should consume raw DEM text

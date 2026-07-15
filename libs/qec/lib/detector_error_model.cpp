@@ -321,4 +321,40 @@ void detector_error_model::canonicalize_for_rounds_impl(
       this->observables_flips_matrix, final_column_order);
 }
 
+/// @brief Convert one 0/1 feedback matrix into a CSR row layout. An empty
+/// tensor (the identity default) leaves @p indices and @p offsets empty; a
+/// non-empty tensor must have shape [num_rows, num_cols].
+static void feedback_rows_to_csr(const cudaqx::tensor<uint8_t> &matrix,
+                                 std::size_t num_rows, std::size_t num_cols,
+                                 const char *name,
+                                 std::vector<std::size_t> &indices,
+                                 std::vector<std::size_t> &offsets) {
+  details::validate_inlined_feedback_tensor(matrix, num_rows, num_cols, name);
+  if (matrix.size() == 0)
+    return;
+  offsets.resize(num_rows + 1);
+  offsets[0] = 0;
+  for (std::size_t r = 0; r < num_rows; ++r) {
+    for (std::size_t c = 0; c < num_cols; ++c)
+      if (matrix.at({r, c}) != 0)
+        indices.push_back(c);
+    offsets[r + 1] = indices.size();
+  }
+}
+
+inlined_feedback_layout
+build_inlined_feedback_layout(const cudaqx::tensor<uint8_t> &feedback,
+                              const cudaqx::tensor<uint8_t> &obs_feedback,
+                              std::size_t num_syndromes_per_round,
+                              std::size_t num_observables) {
+  inlined_feedback_layout layout;
+  feedback_rows_to_csr(feedback, num_syndromes_per_round,
+                       num_syndromes_per_round, "inlined feedback",
+                       layout.detector_indices, layout.detector_offsets);
+  feedback_rows_to_csr(obs_feedback, num_observables, num_syndromes_per_round,
+                       "observable inlined feedback", layout.observable_indices,
+                       layout.observable_offsets);
+  return layout;
+}
+
 } // namespace cudaq::qec

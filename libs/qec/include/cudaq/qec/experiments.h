@@ -93,7 +93,10 @@ dem_sampling(const cudaqx::tensor<uint8_t> &check_matrix, std::size_t numShots,
 /// type matching `statePrep`'s basis, since only that type is deterministic
 /// at the circuit's endpoints), then one detector block per each of the
 /// `numRounds - 1` inter-round transitions, then `numFixed` more boundary
-/// detectors. `dataResults` has shape `(numShots, numDataQubits)`.
+/// detectors. `dataResults` has shape `(numShots, numDataQubits)` and contains
+/// the raw final data-qubit measurements. In particular, observable inlined
+/// feedback is represented in a generated detector error model, but is not
+/// folded into `dataResults` as a corrected logical-observable value.
 std::tuple<cudaqx::tensor<uint8_t>, cudaqx::tensor<uint8_t>>
 sample_memory_circuit(const code &code, operation statePrep,
                       std::size_t numShots, std::size_t numRounds,
