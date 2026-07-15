@@ -432,19 +432,92 @@ sample_memory_circuit(const code &code, std::size_t numShots,
                                noise);
 }
 
-/// @brief Fully characterize a memory-circuit experiment, returning the
-/// decoder_context. This is the shared driver behind all the public entry
-/// points: `dem_from_memory_circuit` keeps just the `.dem`, and the `x_`/`z_`
-/// variants slice the result via `x_component()`/`z_component()`.
-decoder_context decoder_context_from_memory_circuit(const code &code,
-                                                    operation statePrep,
-                                                    std::size_t numRounds,
-                                                    cudaq::noise_model &noise,
-                                                    bool decompose_errors) {
+namespace details {
+
+/// @brief Select detector rows and m2d rows, canonicalize once, and return
+/// (dem, m2d, m2o). For the full (both-basis) case the boundary-aware
+/// canonicalization is used; for a single-type selection the layout is uniform
+/// so the simpler overload suffices.
+static decoder_context
+make_component(detector_error_model dem, cudaq::M2DSparseMatrix m2d,
+               cudaq::M2OSparseMatrix m2o, std::size_t num_rounds,
+               std::size_t num_x_stabilizers, std::size_t num_z_stabilizers,
+               bool fixed_basis_is_z, bool keep_x, bool keep_z) {
+  if (keep_x && keep_z) {
+    const uint32_t numBoundary = fixed_basis_is_z
+                                     ? static_cast<uint32_t>(num_z_stabilizers)
+                                     : static_cast<uint32_t>(num_x_stabilizers);
+    dem.canonicalize_for_rounds_with_boundary(
+        static_cast<uint32_t>(num_x_stabilizers + num_z_stabilizers),
+        numBoundary, /*remove_zero_syndrome_errors=*/true);
+    return {std::move(dem), std::move(m2d), std::move(m2o)};
+  }
+
+  const std::size_t numDetectors = dem.detector_error_matrix.shape()[0];
+  const std::size_t numErrorMechanisms = dem.detector_error_matrix.shape()[1];
+  const auto ranges = stabilizer_detector_ranges(
+      num_rounds, num_z_stabilizers, num_x_stabilizers, fixed_basis_is_z,
+      keep_x, keep_z, numDetectors);
+  const std::size_t length = total_length(ranges);
+
+  if (length == 0) {
+    // No detectors for this stabilizer type: return an empty result that
+    // carries the observable map and measurement count.
+    cudaq::M2DSparseMatrix empty_m2d;
+    empty_m2d.num_measurements = m2d.num_measurements;
+    const std::size_t numObs = dem.num_observables();
+    detector_error_model empty_dem;
+    empty_dem.detector_error_matrix = cudaqx::tensor<uint8_t>({0, 0});
+    empty_dem.observables_flips_matrix = cudaqx::tensor<uint8_t>({numObs, 0});
+    return {std::move(empty_dem), std::move(empty_m2d), std::move(m2o)};
+  }
+
+  // Select the detector rows.
+  cudaqx::tensor<uint8_t> selected_dem({length, numErrorMechanisms});
+  auto *dst = selected_dem.data();
+  const auto *src = dem.detector_error_matrix.data();
+  for (const auto &r : ranges) {
+    std::memcpy(dst, src + r.start * numErrorMechanisms,
+                r.length * numErrorMechanisms * sizeof(uint8_t));
+    dst += r.length * numErrorMechanisms;
+  }
+  dem.detector_error_matrix = std::move(selected_dem);
+
+  // Select the m2d rows.
+  cudaq::M2DSparseMatrix out_m2d;
+  out_m2d.num_measurements = m2d.num_measurements;
+  out_m2d.rows.reserve(length);
+  for (const auto &r : ranges)
+    for (std::size_t i = 0; i < r.length; ++i)
+      out_m2d.rows.push_back(std::move(m2d.rows[r.start + i]));
+
+  const std::size_t numReturnSynPerRound =
+      (keep_z ? num_z_stabilizers : 0) + (keep_x ? num_x_stabilizers : 0);
+  dem.canonicalize_for_rounds(static_cast<uint32_t>(numReturnSynPerRound),
+                              /*remove_zero_syndrome_errors=*/true);
+  return {std::move(dem), std::move(out_m2d), std::move(m2o)};
+}
+
+} // namespace details
+
+std::vector<std::int64_t> d_sparse(const cudaq::M2DSparseMatrix &m2d) {
+  std::vector<std::int64_t> out;
+  out.reserve(m2d.rows.size() * 2); // rough estimate
+  for (const auto &row : m2d.rows) {
+    for (auto meas : row)
+      out.push_back(static_cast<std::int64_t>(meas));
+    out.push_back(-1);
+  }
+  return out;
+}
+
+decoder_context_handle decoder_context_from_memory_circuit(
+    const code &code, operation statePrep, std::size_t numRounds,
+    cudaq::noise_model &noise, bool decompose_errors) {
   if (numRounds == 0)
     throw std::runtime_error(
         "dem_from_memory_circuit error - numRounds must be >= 1. The memory "
-        "circuit always performs at least one stabilizer measurement round. ");
+        "circuit always performs at least one stabilizer measurement round.");
   if (!code.contains_operation(statePrep))
     throw std::runtime_error("dem_from_memory_circuit error - requested state "
                              "prep kernel not found.");
@@ -464,13 +537,12 @@ decoder_context decoder_context_from_memory_circuit(const code &code,
   auto numData = code.get_num_data_qubits();
   auto numAncx = code.get_num_ancilla_x_qubits();
   auto numAncz = code.get_num_ancilla_z_qubits();
-  bool is_z_prep =
+  const bool is_z_prep =
       statePrep == operation::prep0 || statePrep == operation::prep1;
   std::vector<std::size_t> xVec(parity_x.data(),
                                 parity_x.data() + parity_x.size());
   std::vector<std::size_t> zVec(parity_z.data(),
                                 parity_z.data() + parity_z.size());
-
   auto logical_obs =
       is_z_prep ? code.get_observables_z() : code.get_observables_x();
   const std::size_t num_obs = logical_obs.shape()[0];
@@ -479,130 +551,42 @@ decoder_context decoder_context_from_memory_circuit(const code &code,
 
   cudaq::dem_options dem_opts;
   dem_opts.decompose_errors = decompose_errors;
-  cudaq::M2DSparseMatrix m2d;
-  cudaq::M2OSparseMatrix m2o;
+  decoder_context_handle result;
   auto dem_text = cudaq::dem_from_kernel(
-      memory_circuit, &noise, dem_opts, m2d, m2o, stabRound, prep, numData,
-      numAncx, numAncz, numRounds, xVec, zVec, obs_flat, num_obs, !is_z_prep);
-  auto dem = cudaq::qec::dem_from_stim_text(dem_text, decompose_errors);
-
-  const auto numXStabs = code.get_num_x_stabilizers();
-  const auto numZStabs = code.get_num_z_stabilizers();
-  const auto numDetectors = dem.detector_error_matrix.shape()[0];
-
-  decoder_context result;
-  result.num_rounds = numRounds;
-  result.num_x_stabilizers = numXStabs;
-  result.num_z_stabilizers = numZStabs;
-  result.fixed_basis_is_z = is_z_prep;
-
-  result.m2d = std::move(m2d.rows);
-  result.m2o = std::move(m2o.rows);
-  result.num_measurements = m2d.num_measurements;
-
-  // The full both-basis DEM's boundary layers carry only the fixed basis and
-  // are narrower than the interior [Z][X] layers, so canonicalize is
-  // boundary-aware. Boundary width = fixed-basis count (numZStabs for a Z-basis
-  // prep, else numXStabs).
-  const uint32_t numBoundary = is_z_prep ? numZStabs : numXStabs;
-  dem.canonicalize_for_rounds_with_boundary(
-      numXStabs + numZStabs, numBoundary,
-      /*remove_zero_syndrome_errors=*/true);
-
-  result.dem = std::move(dem);
+      memory_circuit, &noise, dem_opts, result.m2d_, result.m2o_, stabRound,
+      prep, numData, numAncx, numAncz, numRounds, xVec, zVec, obs_flat, num_obs,
+      !is_z_prep);
+  result.dem_ = cudaq::qec::dem_from_stim_text(dem_text, decompose_errors);
+  result.num_rounds_ = numRounds;
+  result.num_x_stabilizers_ = code.get_num_x_stabilizers();
+  result.num_z_stabilizers_ = code.get_num_z_stabilizers();
+  result.fixed_basis_is_z_ = is_z_prep;
   return result;
 }
 
-std::vector<std::int64_t> decoder_context::d_sparse() const {
-  std::vector<std::int64_t> d_sparse_vec;
-  for (const auto &row : m2d) {
-    for (auto meas : row)
-      d_sparse_vec.push_back(static_cast<std::int64_t>(meas));
-    d_sparse_vec.push_back(-1);
-  }
-  return d_sparse_vec;
+std::size_t decoder_context_handle::num_measurements() const {
+  return m2d_.num_measurements;
 }
 
-namespace {
-/// Slice a decoder context down to one stabilizer type: select
-/// the type's detector rows of the DEM matrix and m2d using the memory-circuit
-/// layout ranges, zero the dropped type's stabilizer count so the result stays
-/// self-consistent, then re-canonicalize the DEM over that type's per-round
-/// syndrome count.
-decoder_context slice_full(const decoder_context &self, bool keep_x,
-                           bool keep_z) {
-  const std::size_t numDetectors = self.dem.detector_error_matrix.shape()[0];
-  const std::size_t numErrorMechanisms =
-      self.dem.detector_error_matrix.shape()[1];
-  const auto ranges = details::stabilizer_detector_ranges(
-      self.num_rounds, self.num_z_stabilizers, self.num_x_stabilizers,
-      self.fixed_basis_is_z, keep_x, keep_z, numDetectors);
-
-  decoder_context out = self;
-
-  const std::size_t length = total_length(ranges);
-  cudaqx::tensor<uint8_t> out_dem({length, numErrorMechanisms});
-  auto *dst = out_dem.data();
-  const auto *src = self.dem.detector_error_matrix.data();
-  for (const auto &r : ranges) {
-    std::memcpy(dst, src + r.start * numErrorMechanisms,
-                r.length * numErrorMechanisms * sizeof(uint8_t));
-    dst += r.length * numErrorMechanisms;
-  }
-  out.dem.detector_error_matrix = std::move(out_dem);
-
-  out.m2d.clear();
-  out.m2d.reserve(length);
-  for (const auto &r : ranges)
-    for (std::size_t i = 0; i < r.length; ++i)
-      out.m2d.push_back(self.m2d[r.start + i]);
-
-  if (!keep_x)
-    out.num_x_stabilizers = 0;
-  if (!keep_z)
-    out.num_z_stabilizers = 0;
-
-  // A sliced context keeps a single stabilizer type, so the DEM is uniform
-  // (every detector layer has the same width) and canonicalizes per round.
-  const std::size_t numReturnSynPerRound =
-      (keep_z ? self.num_z_stabilizers : 0) +
-      (keep_x ? self.num_x_stabilizers : 0);
-  out.dem.canonicalize_for_rounds(numReturnSynPerRound,
-                                  /*remove_zero_syndrome_errors=*/true);
-  return out;
+decoder_context decoder_context_handle::x_component() const {
+  return details::make_component(dem_, m2d_, m2o_, num_rounds_,
+                                 num_x_stabilizers_, num_z_stabilizers_,
+                                 fixed_basis_is_z_, /*keep_x=*/true,
+                                 /*keep_z=*/false);
 }
 
-/// A decoder context that contains none of the requested type's detectors:
-/// empty DEM and m2d, but keeping the observable map and layout metadata.
-decoder_context empty_component(const decoder_context &self, bool keep_x,
-                                bool keep_z) {
-  decoder_context out;
-  out.num_rounds = self.num_rounds;
-  out.num_x_stabilizers = keep_x ? self.num_x_stabilizers : 0;
-  out.num_z_stabilizers = keep_z ? self.num_z_stabilizers : 0;
-  out.fixed_basis_is_z = self.fixed_basis_is_z;
-  out.num_measurements = self.num_measurements;
-  out.m2o = self.m2o;
-  return out; // dem is default (0 detectors), m2d empty
-}
-} // namespace
-
-decoder_context decoder_context::x_component() const {
-  // Slice only a full (both-type) decoder context. An already-restricted one
-  // is returned unchanged if it is the X part, or empty if it has no X.
-  if (num_x_stabilizers > 0 && num_z_stabilizers > 0)
-    return slice_full(*this, /*keep_x=*/true, /*keep_z=*/false);
-  if (num_x_stabilizers > 0)
-    return *this;
-  return empty_component(*this, /*keep_x=*/true, /*keep_z=*/false);
+decoder_context decoder_context_handle::z_component() const {
+  return details::make_component(dem_, m2d_, m2o_, num_rounds_,
+                                 num_x_stabilizers_, num_z_stabilizers_,
+                                 fixed_basis_is_z_, /*keep_x=*/false,
+                                 /*keep_z=*/true);
 }
 
-decoder_context decoder_context::z_component() const {
-  if (num_x_stabilizers > 0 && num_z_stabilizers > 0)
-    return slice_full(*this, /*keep_x=*/false, /*keep_z=*/true);
-  if (num_z_stabilizers > 0)
-    return *this;
-  return empty_component(*this, /*keep_x=*/false, /*keep_z=*/true);
+decoder_context decoder_context_handle::full_component() const {
+  return details::make_component(dem_, m2d_, m2o_, num_rounds_,
+                                 num_x_stabilizers_, num_z_stabilizers_,
+                                 fixed_basis_is_z_, /*keep_x=*/true,
+                                 /*keep_z=*/true);
 }
 
 /// @brief Given a memory circuit setup, generate a DEM
@@ -613,6 +597,7 @@ detector_error_model dem_from_memory_circuit(const code &code,
                                              bool decompose_errors) {
   return decoder_context_from_memory_circuit(code, statePrep, numRounds, noise,
                                              decompose_errors)
+      .full_component()
       .dem;
 }
 

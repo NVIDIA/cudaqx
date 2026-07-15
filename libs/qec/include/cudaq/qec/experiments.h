@@ -7,9 +7,10 @@
  ******************************************************************************/
 #pragma once
 
+#include "cudaq/algorithms/dem.h"
 #include "cudaq/qec/code.h"
 #include "cudaq/qec/detector_error_model.h"
-#include <tuple>
+#include <cstddef>
 #include <vector>
 
 namespace cudaq::qec {
@@ -159,46 +160,52 @@ std::tuple<cudaqx::tensor<uint8_t>, cudaqx::tensor<uint8_t>>
 sample_memory_circuit(const code &code, std::size_t numShots,
                       std::size_t numRounds, cudaq::noise_model &noise);
 
-/// @brief Everything a QEC decoder needs to interpret a QEC experiment: a
-/// detector error model together with the measurement maps that tie the
-/// experiment's raw measurements to the DEM's detectors and observables.
-/// - `dem` describes noise: which errors flip which detectors and observables.
-/// - `m2d[d]` lists the chronological measurement indices XOR-ed together to
-///   form detector `d`. Its rows share the detector ordering of
-///   `dem.detector_error_matrix`.
-/// - `m2o[k]` lists the measurement indices XOR-ed to form observable `k`. Its
-///   rows share the observable ordering of `dem.observables_flips_matrix`.
-/// - `num_measurements` is the total measurement count (column count of both
-///   maps)
+/// @brief Finalized decoder inputs: a canonicalized DEM and measurement maps.
 struct decoder_context {
   detector_error_model dem;
-  std::vector<std::vector<std::size_t>> m2d;
-  std::vector<std::vector<std::size_t>> m2o;
-  std::size_t num_measurements = 0;
+  cudaq::M2DSparseMatrix m2d;
+  cudaq::M2OSparseMatrix m2o;
+};
 
-  /// Detector-layout metadata describing how the detector rows are organized
-  /// into X/Z stabilizer types across rounds.
-  std::size_t num_rounds = 0;
-  std::size_t num_x_stabilizers = 0;
-  std::size_t num_z_stabilizers = 0;
-  /// True if the "fixed" stabilizers -- the type whose round-0 syndrome is
-  /// deterministic and whose boundary detectors are present (i.e. the type
-  /// matching the state-prep/measurement basis) -- are the Z stabilizers.
-  bool fixed_basis_is_z = false;
+/// @brief Lazy handle returned by `decoder_context_from_memory_circuit`.
+///
+/// Stores the raw (uncanonicalized) circuit analysis. Call a component method
+/// to canonicalize exactly the stabilizer type needed and obtain a
+/// `decoder_context`:
+///   - `x_component()` — X-stabilizer detectors only
+///   - `z_component()` — Z-stabilizer detectors only
+///   - `full_component()` — both stabilizer types, boundary-aware
+struct decoder_context_handle {
+  /// @brief Total number of measurements per shot (column count of m2d/m2o).
+  std::size_t num_measurements() const;
 
-  /// @brief Flatten `m2d` into the `-1`-terminated sparse vector a realtime
-  /// decoder config expects for its `D_sparse` (each detector's measurement
-  /// indices in order, followed by `-1`).
-  std::vector<std::int64_t> d_sparse() const;
-
-  /// @brief Restrict this decoder context to just the X-stabilizer
-  /// detectors
+  /// @brief Canonicalize X-stabilizer detectors; return decoder_context.
   decoder_context x_component() const;
 
-  /// @brief Restrict this decoder context to just the Z-stabilizer
-  /// detectors
+  /// @brief Canonicalize Z-stabilizer detectors; return decoder_context.
   decoder_context z_component() const;
+
+  /// @brief Canonicalize both stabilizer types with boundary awareness;
+  /// return decoder_context.
+  decoder_context full_component() const;
+
+private:
+  cudaq::M2DSparseMatrix m2d_;
+  cudaq::M2OSparseMatrix m2o_;
+  detector_error_model dem_;
+  std::size_t num_rounds_ = 0;
+  std::size_t num_x_stabilizers_ = 0;
+  std::size_t num_z_stabilizers_ = 0;
+  bool fixed_basis_is_z_ = false;
+
+  friend decoder_context_handle
+  decoder_context_from_memory_circuit(const code &, operation, std::size_t,
+                                      cudaq::noise_model &, bool);
 };
+
+/// @brief Flatten an M2DSparseMatrix into the `-1`-terminated sparse vector a
+/// realtime decoder config expects for its `D_sparse`.
+std::vector<std::int64_t> d_sparse(const cudaq::M2DSparseMatrix &m2d);
 
 /// @brief Given a memory circuit setup, generate a DEM
 /// @param code QEC Code to sample
@@ -242,17 +249,12 @@ detector_error_model z_dem_from_memory_circuit(const code &code,
                                                cudaq::noise_model &noise,
                                                bool decompose_errors = false);
 
-/// @brief Fully characterize a memory-circuit experiment for a decoder: the
-/// detector error model plus the measurement-to-detector (m2d) and
-/// measurement-to-observable (m2o) maps.
-/// @param code QEC Code to sample
-/// @param statePrep Initial state preparation operation
-/// @param numRounds Number of stabilizer measurement rounds
-/// @param noise Noise model to apply
-/// @param decompose_errors If true, hyperedge error mechanisms are decomposed
-///        into pairs of two-detector edges by Stim before returning.
-/// @return A decoder_context (DEM + m2d/m2o + num_measurements).
-decoder_context decoder_context_from_memory_circuit(
+/// @brief Run a memory-circuit analysis and return a lazy handle.
+///
+/// Executes `dem_from_kernel` once and stores the raw result. Call
+/// `x_component()`, `z_component()`, or `full_component()` on the returned
+/// handle to canonicalize exactly the stabilizer type needed.
+decoder_context_handle decoder_context_from_memory_circuit(
     const code &code, operation statePrep, std::size_t numRounds,
     cudaq::noise_model &noise, bool decompose_errors = false);
 } // namespace cudaq::qec

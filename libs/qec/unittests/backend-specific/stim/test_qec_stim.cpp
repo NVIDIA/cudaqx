@@ -590,7 +590,7 @@ void check_matrix_bits(const std::string &name,
   }
 }
 
-// End-to-end realtime decode driven by the decoder_context struct,
+// End-to-end realtime decode driven by the memory_circuit_handle API,
 // built from a full-basis CSS memory circuit. Steane's boundary is
 // inhomogeneous: only the fixed (Z) stabilizers carry boundary detectors while
 // interior rounds carry both types. The measurement
@@ -609,16 +609,16 @@ TEST(QECCodeTester, checkRealtimeDecodeFromMemoryCircuit) {
 
   auto ctx = cudaq::qec::decoder_context_from_memory_circuit(
       *steane, cudaq::qec::operation::prep0, nRounds, noise);
-  const auto &dem = ctx.dem;
+  auto [dem, m2d, m2o] = ctx.full_component();
 
-  ASSERT_FALSE(ctx.m2d.empty());
-  EXPECT_EQ(ctx.m2d.size(), dem.num_detectors());
-  ASSERT_EQ(ctx.num_measurements, nRounds * numCols + numData);
+  ASSERT_FALSE(m2d.rows.empty());
+  EXPECT_EQ(m2d.rows.size(), dem.num_detectors());
+  ASSERT_EQ(ctx.num_measurements(), nRounds * numCols + numData);
 
   // Inhomogeneous boundary: single-measurement boundary detectors coexist with
   // multi-measurement interior/final ones, so m2d rows are not all one shape.
-  std::size_t minRow = ctx.m2d[0].size(), maxRow = ctx.m2d[0].size();
-  for (const auto &row : ctx.m2d) {
+  std::size_t minRow = m2d.rows[0].size(), maxRow = m2d.rows[0].size();
+  for (const auto &row : m2d.rows) {
     minRow = std::min(minRow, row.size());
     maxRow = std::max(maxRow, row.size());
   }
@@ -629,8 +629,8 @@ TEST(QECCodeTester, checkRealtimeDecodeFromMemoryCircuit) {
       cudaq::qec::get_decoder("single_error_lut", dem.detector_error_matrix);
   decoder->set_O_sparse(
       cudaq::qec::pcm_to_sparse_vec(dem.observables_flips_matrix));
-  decoder->set_D_sparse(ctx.d_sparse());
-  ASSERT_EQ(decoder->get_num_msyn_per_decode(), ctx.num_measurements);
+  decoder->set_D_sparse(cudaq::qec::d_sparse(m2d));
+  ASSERT_EQ(decoder->get_num_msyn_per_decode(), m2d.num_measurements);
 
   // Stream numCols ancilla per round, then the final data readout. The window
   // must not decode until that last chunk completes it.
@@ -657,11 +657,11 @@ bool tensors_equal(const cudaqx::tensor<uint8_t> &a,
 }
 } // namespace
 
-// decoder_context_from_memory_circuit returns the full DEM plus m2d/m2o in one
-// analysis. Verify its DEM matches dem_from_memory_circuit; x_/z_component()
-// reproduce x_/z_dem_from_memory_circuit and partition the detectors; and
-// chaining components is idempotent with the cross type empty. Steane is a CSS
-// code with both X and Z stabilizers.
+// decoder_context_from_memory_circuit returns a memory_circuit_handle;
+// canonicalization is deferred until a component method is called. Verify that
+// full_component() matches dem_from_memory_circuit and that x_component() /
+// z_component() reproduce x_/z_dem_from_memory_circuit and partition the
+// detectors.
 TEST(QECCodeTester, checkDecoderContextAndComponents) {
   auto steane = cudaq::qec::get_code("steane");
   const auto prep = cudaq::qec::operation::prep0;
@@ -669,33 +669,28 @@ TEST(QECCodeTester, checkDecoderContextAndComponents) {
   cudaq::noise_model noise;
   noise.add_all_qubit_channel("x", cudaq::qec::two_qubit_depolarization(0.05),
                               1);
-  auto full = cudaq::qec::decoder_context_from_memory_circuit(*steane, prep,
-                                                              nRounds, noise);
+  auto ctx = cudaq::qec::decoder_context_from_memory_circuit(*steane, prep,
+                                                             nRounds, noise);
   auto dem = cudaq::qec::dem_from_memory_circuit(*steane, prep, nRounds, noise);
   auto z = cudaq::qec::z_dem_from_memory_circuit(*steane, prep, nRounds, noise);
   auto x = cudaq::qec::x_dem_from_memory_circuit(*steane, prep, nRounds, noise);
 
-  // Full DEM matches the plain entry point.
+  // full_component() matches the plain entry point.
+  auto [fc_dem, fc_m2d, fc_m2o] = ctx.full_component();
   EXPECT_TRUE(
-      tensors_equal(full.dem.detector_error_matrix, dem.detector_error_matrix));
+      tensors_equal(fc_dem.detector_error_matrix, dem.detector_error_matrix));
 
-  // Components reproduce the per-type DEMs and partition the detectors.
-  auto zc = full.z_component();
-  auto xc = full.x_component();
+  // x_component() / z_component() reproduce the per-type DEMs and partition
+  // the detectors without re-running dem_from_kernel.
+  auto [zc_dem, zc_m2d, zc_m2o] = ctx.z_component();
+  auto [xc_dem, xc_m2d, xc_m2o] = ctx.x_component();
   EXPECT_TRUE(
-      tensors_equal(zc.dem.detector_error_matrix, z.detector_error_matrix));
+      tensors_equal(zc_dem.detector_error_matrix, z.detector_error_matrix));
   EXPECT_TRUE(
-      tensors_equal(xc.dem.detector_error_matrix, x.detector_error_matrix));
-  EXPECT_EQ(zc.dem.num_detectors() + xc.dem.num_detectors(),
-            full.dem.num_detectors());
-  EXPECT_EQ(zc.m2d.size(), zc.dem.num_detectors());
-
-  // Chaining stays consistent: metadata updated, idempotent, cross-type empty.
-  EXPECT_EQ(zc.num_x_stabilizers, 0u);
-  EXPECT_TRUE(tensors_equal(zc.z_component().dem.detector_error_matrix,
-                            zc.dem.detector_error_matrix));
-  EXPECT_EQ(zc.x_component().dem.num_detectors(), 0u);
-  EXPECT_EQ(xc.z_component().dem.num_detectors(), 0u);
+      tensors_equal(xc_dem.detector_error_matrix, x.detector_error_matrix));
+  EXPECT_EQ(zc_dem.num_detectors() + xc_dem.num_detectors(),
+            fc_dem.num_detectors());
+  EXPECT_EQ(zc_m2d.rows.size(), zc_dem.num_detectors());
 }
 
 TEST(QECCodeTester, checkDemFromMemoryCircuit) {

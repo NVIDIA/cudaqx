@@ -606,49 +606,74 @@ void bindCode(nb::module_ &mod) {
       nb::arg("code"), nb::arg("op"), nb::arg("numShots"), nb::arg("numRounds"),
       nb::arg("noise") = nb::none());
 
-  nb::class_<decoder_context>(qecmod, "DecoderContext",
-                              R"pbdoc(
-      A detector error model together with the measurement maps that tie a
-      circuit's raw measurements to the DEM's detectors and observables.
-      Returned by ``decoder_context_from_memory_circuit``.
+  nb::class_<decoder_context_handle>(qecmod, "DecoderContext",
+                                     R"pbdoc(
+      Lazy handle returned by ``decoder_context_from_memory_circuit``.
+
+      Stores the raw circuit analysis. Each *_component method canonicalizes
+      exactly the requested stabilizer type and returns a ``(dem, m2d, m2o)``
+      tuple.
     )pbdoc")
-      .def(nb::init<>())
-      .def_ro("dem", &decoder_context::dem,
-              "The detector error model (noise-dependent).")
-      .def_ro("m2d", &decoder_context::m2d, R"pbdoc(
-       Measurement-to-detector map. ``m2d[d]`` lists the measurement indices
-       XOR-ed together to form detector ``d``. Rows share the detector ordering
-       of ``dem.detector_error_matrix``. Used to build a decoder's D_sparse.
+      .def_prop_ro("num_measurements",
+                   &decoder_context_handle::num_measurements,
+                   "Total number of measurements per shot.")
+      .def(
+          "x_component",
+          [](const decoder_context_handle &h) {
+            auto ctx = h.x_component();
+            return nb::make_tuple(ctx.dem, ctx.m2d.rows, ctx.m2o.rows);
+          },
+          R"pbdoc(
+       Canonicalize X-stabilizer detectors; return (dem, m2d, m2o).
+
+       ``dem`` is the canonicalized DetectorErrorModel, ``m2d`` and ``m2o``
+       are lists of lists of measurement indices.
     )pbdoc")
-      .def_ro("m2o", &decoder_context::m2o, R"pbdoc(
-       Measurement-to-observable map. ``m2o[k]`` lists the measurement indices
-       XOR-ed to form observable ``k``.
+      .def(
+          "z_component",
+          [](const decoder_context_handle &h) {
+            auto ctx = h.z_component();
+            return nb::make_tuple(ctx.dem, ctx.m2d.rows, ctx.m2o.rows);
+          },
+          R"pbdoc(
+       Canonicalize Z-stabilizer detectors; return (dem, m2d, m2o).
+
+       ``dem`` is the canonicalized DetectorErrorModel, ``m2d`` and ``m2o``
+       are lists of lists of measurement indices.
     )pbdoc")
-      .def_ro("num_measurements", &decoder_context::num_measurements,
-              "Total number of measurements (column count of m2d/m2o).")
-      .def_ro("num_rounds", &decoder_context::num_rounds,
-              "Number of stabilizer measurement rounds.")
-      .def_ro("num_x_stabilizers", &decoder_context::num_x_stabilizers,
-              "Number of X stabilizers.")
-      .def_ro("num_z_stabilizers", &decoder_context::num_z_stabilizers,
-              "Number of Z stabilizers.")
-      .def_ro(
-          "fixed_basis_is_z", &decoder_context::fixed_basis_is_z,
-          "True if the fixed (boundary) stabilizers -- the type matching the "
-          "prep/measurement basis -- are the Z stabilizers.")
-      .def("d_sparse", &decoder_context::d_sparse, R"pbdoc(
-       Flatten m2d into the -1-terminated sparse vector a realtime decoder
-       config expects for its D_sparse (each detector's measurement indices in
-       order, followed by -1).
-    )pbdoc")
-      .def("x_component", &decoder_context::x_component, R"pbdoc(
-       Restrict this decoder context to just the X-stabilizer detectors,
-       slicing the DEM and m2d rows and re-canonicalizing. 
-    )pbdoc")
-      .def("z_component", &decoder_context::z_component, R"pbdoc(
-       Restrict this decoder context to just the Z-stabilizer detectors,
-       slicing the DEM and m2d rows and re-canonicalizing. 
+      .def(
+          "full_component",
+          [](const decoder_context_handle &h) {
+            auto ctx = h.full_component();
+            return nb::make_tuple(ctx.dem, ctx.m2d.rows, ctx.m2o.rows);
+          },
+          R"pbdoc(
+       Canonicalize both stabilizer types with boundary awareness;
+       return (dem, m2d, m2o).
+
+       ``dem`` is the canonicalized DetectorErrorModel, ``m2d`` and ``m2o``
+       are lists of lists of measurement indices.
     )pbdoc");
+
+  qecmod.def(
+      "d_sparse",
+      [](const std::vector<std::vector<std::size_t>> &rows) {
+        cudaq::M2DSparseMatrix m2d;
+        m2d.rows = rows;
+        return cudaq::qec::d_sparse(m2d);
+      },
+      R"pbdoc(
+       Flatten a measurement-to-detector map into the -1-terminated sparse
+       vector a realtime decoder config expects for its D_sparse.
+
+       ``m2d`` is a list of lists: ``m2d[d]`` contains the measurement indices
+       whose XOR forms detector ``d``. Each detector's indices are emitted in
+       order, followed by -1.
+
+       This is a standalone helper for ``dem_from_kernel`` consumers who hold
+       an m2d map but not a full ``DecoderContext``.
+    )pbdoc",
+      nb::arg("m2d"));
 
   qecmod.def(
       "dem_from_memory_circuit",
@@ -762,10 +787,12 @@ void bindCode(nb::module_ &mod) {
                                                    decompose_errors);
       },
       R"pbdoc(
-        Fully characterize a memory-circuit experiment for a decoder.
+        Run a memory-circuit analysis and return a lazy DecoderContext handle.
 
-        Returns the detector error model together with the measurement-to-detector
-        (m2d) and measurement-to-observable (m2o) maps. 
+        Executes ``dem_from_kernel`` once and stores the raw result.
+        Canonicalization is deferred: call ``x_component()``,
+        ``z_component()``, or ``full_component()`` on the returned handle to
+        canonicalize exactly the stabilizer type needed.
 
         Args:
             code: The code to characterize.
@@ -776,8 +803,8 @@ void bindCode(nb::module_ &mod) {
                 into pairs of two-detector edges by Stim before returning.
 
         Returns:
-            An DecoderContext (`.dem`, `.m2d`, `.m2o`,
-            `.num_measurements`, and `.d_sparse()`).
+            A DecoderContext handle; call a component method to obtain the
+            canonicalized ``(dem, m2d, m2o)`` tuple.
       )pbdoc",
       nb::arg("code"), nb::arg("op"), nb::arg("numRounds"),
       nb::arg("noise") = nb::none(), nb::arg("decompose_errors") = false);
