@@ -220,6 +220,7 @@ void DecodingSession::on_enqueue(const WorkItem &item) {
         dec->enqueue_syndrome(completed->bits.data(), completed->bits.size());
 
     if (did_decode) {
+      ++decode_count;
       accepted_syndromes = 0;
       shot_state = ShotState::result_ready;
     }

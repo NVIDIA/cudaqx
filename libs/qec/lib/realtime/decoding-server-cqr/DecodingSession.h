@@ -87,6 +87,7 @@ struct DecodingSession {
 
   // Per-session metrics (updated atomically by the worker thread).
   std::atomic<uint64_t> enqueue_count{0};
+  std::atomic<uint64_t> decode_count{0};
   std::atomic<uint64_t> get_corrections_count{0};
   std::atomic<uint64_t> reset_count{0};
   std::atomic<uint64_t> error_count{0};

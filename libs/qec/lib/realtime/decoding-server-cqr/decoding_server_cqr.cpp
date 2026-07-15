@@ -374,6 +374,15 @@ cudaqx_qec_decoding_server_max_concurrent() {
   return cudaq::qec::decoding_server::max_concurrent_busy_sessions();
 }
 
+/// Per-decoder session counters (decodes/enqueues/...), one stdout line per
+/// decoder. Test/diagnostic evidence; callers gate on the
+/// QEC_DECODING_SERVER_STATS environment variable.
+extern "C" __attribute__((visibility("default"))) void
+cudaqx_qec_decoding_server_print_stats() {
+  if (g_server)
+    g_server->print_session_stats();
+}
+
 /// Stop the DecodingServer receive loop and join its thread. The server calls
 /// this before exiting; without it the static g_server_thread would still be
 /// joinable at static destruction (std::terminate).

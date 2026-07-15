@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <iostream>
 #include <iterator>
 #include <stdexcept>
 #include <thread>
@@ -313,6 +314,17 @@ void DecodingServer::run() {
     th.join();
 
   CUDA_QEC_INFO("DecodingServer: all receiver threads exited");
+}
+
+void DecodingServer::print_session_stats() const {
+  for (const auto &[id, session] : registry_.sessions()) {
+    std::cout << "QEC_DECODING_SERVER_DECODER_STATS id=" << id
+              << " decodes=" << session->decode_count.load()
+              << " enqueues=" << session->enqueue_count.load()
+              << " corrections=" << session->get_corrections_count.load()
+              << " resets=" << session->reset_count.load()
+              << " errors=" << session->error_count.load() << std::endl;
+  }
 }
 
 void DecodingServer::stop() {
