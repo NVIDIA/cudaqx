@@ -199,7 +199,7 @@ public:
             *mwpm, detection_events, /*edge_correlations=*/false);
         for (size_t i = 0; i < mwpm->flooder.graph.num_observables; i++) {
           result.result[i] =
-              static_cast<float_t>(res.obs_mask & (1 << i) ? 1.0 : 0.0);
+              static_cast<float_t>(res.obs_mask & (1ULL << i) ? 1.0 : 0.0);
         }
       } else {
         result.result.resize(mwpm->flooder.graph.num_observables);

@@ -6,8 +6,11 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
+#include <array>
 #include <cmath>
+#include <deque>
 #include <gtest/gtest.h>
+#include <limits>
 
 #include "cudaq.h"
 #include "cudaq/algorithms/dem.h"
@@ -656,6 +659,89 @@ TEST(QECCodeTester, checkDemFromMemoryCircuit) {
       "............................111"};
   check_matrix_bits("observables_flips_matrix", dem.observables_flips_matrix,
                     expected_observables_flips_matrix_str);
+}
+
+// Shortest undetectable logical error of a graphlike DEM. Detectors are graph
+// nodes (plus one virtual boundary node), each error mechanism with <= 2
+// flipped detectors is an edge labeled with its observable flip, and the
+// effective distance is the shortest boundary-to-boundary walk with an odd
+// number of observable flips (BFS over (node, parity) states). Error
+// mechanisms flipping more than 2 detectors are skipped; that can only
+// overestimate the distance, so the equality assertion below stays sound.
+static std::size_t
+shortest_graphlike_logical_error(const cudaq::qec::detector_error_model &dem) {
+  const std::size_t numDet = dem.num_detectors();
+  const std::size_t numErr = dem.num_error_mechanisms();
+  const std::size_t boundary = numDet;
+  struct Edge {
+    std::size_t to;
+    bool obs;
+  };
+  std::vector<std::vector<Edge>> adj(numDet + 1);
+  for (std::size_t e = 0; e < numErr; ++e) {
+    std::vector<std::size_t> dets;
+    for (std::size_t d = 0; d < numDet && dets.size() <= 2; ++d)
+      if (dem.detector_error_matrix.at({d, e}))
+        dets.push_back(d);
+    if (dets.size() > 2)
+      continue;
+    const bool obs = dem.observables_flips_matrix.at({0, e}) != 0;
+    const std::size_t u = dets.empty() ? boundary : dets[0];
+    const std::size_t v = dets.size() == 2 ? dets[1] : boundary;
+    adj[u].push_back({v, obs});
+    if (u != v)
+      adj[v].push_back({u, obs});
+  }
+  std::vector<std::array<long, 2>> dist(numDet + 1, {-1, -1});
+  std::deque<std::pair<std::size_t, int>> queue;
+  dist[boundary][0] = 0;
+  queue.push_back({boundary, 0});
+  while (!queue.empty()) {
+    auto [u, p] = queue.front();
+    queue.pop_front();
+    for (const auto &edge : adj[u]) {
+      const int np = p ^ (edge.obs ? 1 : 0);
+      if (dist[edge.to][np] < 0) {
+        dist[edge.to][np] = dist[u][p] + 1;
+        queue.push_back({edge.to, np});
+      }
+    }
+  }
+  return dist[boundary][1] < 0 ? std::numeric_limits<std::size_t>::max()
+                               : static_cast<std::size_t>(dist[boundary][1]);
+}
+
+// Under circuit-level (two-qubit gate) noise the surface code only retains
+// its full code distance if the per-plaquette CNOT order steers hook errors
+// perpendicular to the logical operators. A same-order schedule for X and Z
+// plaquettes halves the effective distance of one of the two memory bases.
+TEST(QECCodeTester, checkSurfaceCodeEffectiveDistance) {
+  for (std::size_t distance : {3, 5}) {
+    // Each orientation assigns the two schedule shapes to opposite plaquette
+    // types, so every orientation must retain the full distance in both
+    // memory bases.
+    for (const std::string orientation : {"XV", "XH", "ZV", "ZH"}) {
+      auto code = cudaq::qec::get_code(
+          "surface_code",
+          cudaqx::heterogeneous_map{{"distance", distance},
+                                    {"orientation", orientation}});
+      for (auto prep :
+           {cudaq::qec::operation::prep0, cudaq::qec::operation::prepp}) {
+        cudaq::noise_model noise;
+        noise.add_all_qubit_channel("x",
+                                    cudaq::qec::two_qubit_depolarization(0.001),
+                                    /*num_controls=*/1);
+        auto dem = cudaq::qec::dem_from_memory_circuit(
+            *code, prep, /*numRounds=*/distance, noise,
+            /*decompose_errors=*/true);
+        ASSERT_EQ(dem.num_observables(), 1);
+        EXPECT_EQ(distance, shortest_graphlike_logical_error(dem))
+            << "distance " << distance << " orientation " << orientation
+            << " statePrep "
+            << (prep == cudaq::qec::operation::prep0 ? "prep0" : "prepp");
+      }
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
