@@ -190,23 +190,35 @@ TEST(PyMatchingDecoder, RejectsObservableMatrixWithWrongBlockSize) {
                std::runtime_error);
 }
 
-TEST(PyMatchingDecoder, Decodes64ObservablePath) {
-  cudaqx::tensor<uint8_t> H;
-  std::vector<uint8_t> H_vec = {1};
-  H.copy(H_vec.data(), {1, 1});
+TEST(PyMatchingDecoder, DecodesHighObservableIndicesAcrossPaths) {
+  using cudaq::qec::float_t;
 
-  cudaqx::tensor<uint8_t> O({64, 1});
-  for (std::size_t row = 0; row < 64; ++row)
-    O.at({row, 0}) = 1;
+  // Exercise the packed-mask path at bit 32 and retain the vector-path
+  // coverage at 64 observables; each identity edge flips only its matching bit.
+  for (const std::size_t num_observables : {33u, 64u}) {
+    cudaqx::tensor<uint8_t> H({num_observables, num_observables});
+    cudaqx::tensor<uint8_t> O({num_observables, num_observables});
+    for (std::size_t i = 0; i < num_observables; ++i) {
+      H.at({i, i}) = 1;
+      O.at({i, i}) = 1;
+    }
 
-  cudaqx::heterogeneous_map params;
-  params.insert("O", O);
-  auto d = cudaq::qec::decoder::get("pymatching", H, params);
-  ASSERT_NE(d, nullptr);
+    cudaqx::heterogeneous_map params;
+    params.insert("O", O);
+    auto d = cudaq::qec::decoder::get("pymatching", H, params);
+    // ASSERT: valid graph-like identity matrices must construct a decoder.
+    ASSERT_NE(d, nullptr);
 
-  auto result = d->decode(std::vector<cudaq::qec::float_t>{1.0});
-  ASSERT_TRUE(result.converged);
-  ASSERT_EQ(result.result.size(), 64u);
-  for (auto value : result.result)
-    EXPECT_TRUE(value == 0.0 || value == 1.0);
+    std::vector<float_t> syndrome(num_observables, 0.0);
+    syndrome.back() = 1.0;
+    auto result = d->decode(syndrome);
+    // ASSERT: both observable decoding paths must successfully converge.
+    ASSERT_TRUE(result.converged) << "num_observables=" << num_observables;
+    // ASSERT: observable-aware decoding returns one result per O row.
+    ASSERT_EQ(result.result.size(), num_observables);
+    // ASSERT: the high bit must not alias another bit through a narrow mask.
+    for (std::size_t i = 0; i < num_observables; ++i)
+      EXPECT_EQ(result.result[i], i == num_observables - 1 ? 1.0 : 0.0)
+          << "num_observables=" << num_observables << ", index=" << i;
+  }
 }
