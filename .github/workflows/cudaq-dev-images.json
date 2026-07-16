@@ -1,0 +1,6 @@
+{
+  "amd64-cu12.6": "ghcr.io/nvidia/cuda-quantum-devcontainer@sha256:46d0b72f85b083b8fb20af243eeca1308fbdee4fa2e87d1166f029a38d0d72e7",
+  "amd64-cu13.0": "ghcr.io/nvidia/cuda-quantum-devcontainer@sha256:da93c244cfe54d154b486e8e79ec94f2da6103ad0345246d8779286a72b60d6a",
+  "arm64-cu12.6": "ghcr.io/nvidia/cuda-quantum-devcontainer@sha256:c8928ddfc5d9acea2dcd9cb5fdfd11636b0aac73b1717c915d82ad972759261a",
+  "arm64-cu13.0": "ghcr.io/nvidia/cuda-quantum-devcontainer@sha256:50ebd24617f930e5e8cf8d2aa3cca51efe3dddb2ebbe690ba2d2601f2c4a7b6e"
+}
