@@ -28,15 +28,14 @@
 #   4: number_of_corrections_decoder_threshold
 #   5: path to decoding_server executable
 #   6: num_rounds
-#   7: decoder_window
-#   8: decoder_type (optional, defaults to multi_error_lut)
+#   7: decoder_type (optional, defaults to multi_error_lut)
 
 set -e
 
 return_code=0
 
-if [[ $# -lt 7 ]]; then
-  echo "Error: Expected at least 7 arguments (got $#)"
+if [[ $# -lt 6 ]]; then
+  echo "Error: Expected at least 6 arguments (got $#)"
   exit 1
 fi
 
@@ -46,8 +45,7 @@ number_of_non_zero_values_threshold=$3
 number_of_corrections_decoder_threshold=$4
 SERVER_PATH=$5
 NUM_ROUNDS=$6
-DECODER_WINDOW=$7
-DECODER_TYPE=${8:-multi_error_lut}
+DECODER_TYPE=${7:-multi_error_lut}
 
 export CUDAQ_DEFAULT_SIMULATOR=stim
 

@@ -375,7 +375,7 @@ Surface Code Test (Relay BP)
 
 The ``surface_code-1-local`` app example drives the device-graph scheduler
 through the in-process RPC path (``CUDAQ_QEC_REALTIME_MODE=inproc_rpc``) with
-the nv-qldpc-decoder configured for Relay BP (``--use-relay-bp``).  It simulates
+the nv-qldpc-decoder configured for Relay BP.  It simulates
 a surface code with ``stim`` and generates syndromes on the fly, so -- unlike
 the fixed-fixture CI unit test -- it can run an arbitrary number of shots.
 
@@ -398,20 +398,19 @@ loop through the scheduler:
    APP=./libs/qec/unittests/realtime/app_examples/surface_code-1-local
 
    # 1. Generate the Relay BP decoder config (DEM) for a distance-3 surface code
-   "$APP" --distance 3 --num_rounds 12 --decoder_window 6 \
-          --decoder_type nv-qldpc-decoder --use-relay-bp \
+   "$APP" --distance 3 --num_rounds 12 \
+          --decoder_type nv-qldpc-decoder \
           --num_shots 1000 --save_dem config.yml
 
    # 2. Run the decode loop through the device-graph scheduler
-   "$APP" --distance 3 --num_rounds 12 --decoder_window 6 \
-          --decoder_type nv-qldpc-decoder --use-relay-bp \
+   "$APP" --distance 3 --num_rounds 12 \
+          --decoder_type nv-qldpc-decoder \
           --num_shots 1000 --load_dem config.yml
 
 A clean run exits ``0`` and reports a small number of non-zero syndrome
 measurements alongside a larger number of corrections found.  The
 ``app_examples`` CTest ``surface_code-1-local-test-distance-3-inproc-rpc``
-wraps this flow (it sets ``CUDAQ_QEC_REALTIME_MODE=inproc_rpc`` and
-``EXTRA_CLI_ARGS=--use-relay-bp``).
+wraps this flow (it sets ``CUDAQ_QEC_REALTIME_MODE=inproc_rpc``).
 
 Emulated End-to-End Test
 ------------------------

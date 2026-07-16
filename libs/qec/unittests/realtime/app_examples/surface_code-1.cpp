@@ -45,6 +45,7 @@
 #include <mutex>
 #include <numeric>
 #include <sstream>
+#include <stdexcept>
 
 #ifdef QEC_APP_CQR
 // cqr build variant: this same application compiled with -frealtime-lowering
@@ -132,7 +133,6 @@ struct run_options {
   bool save_syndrome = false;
   bool load_syndrome = false;
   std::string syndrome_filename;
-  bool use_relay_bp = false;
 };
 
 // The per-experiment inputs derived once from the code + options: register
@@ -189,24 +189,18 @@ build_multi_decoder_config(const cudaq::qec::decoder_inputs &inputs,
       nv_args.insert("use_sparsity", true);
       nv_args.insert("error_rate_vec", dem.error_rates);
       nv_args.insert("max_iterations", 50);
-      if (opts.use_relay_bp) {
-        nv_args.insert("bp_method", 3);   // min-sum + dmem (required for relay)
-        nv_args.insert("composition", 1); // sequential relay
-        nv_args.insert("gamma0", 0.0);
-        nv_args.insert("clip_value", 200.0);
-        nv_args.insert("repeatable", true);
-        cudaqx::heterogeneous_map srelay_args;
-        srelay_args.insert("pre_iter", std::size_t{5});
-        srelay_args.insert("num_sets", std::size_t{10});
-        srelay_args.insert("stopping_criterion", "All");
-        srelay_args.insert("stop_nconv", std::size_t{1});
-        nv_args.insert("srelay_config", srelay_args);
-        nv_args.insert("gamma_dist", std::vector<double>{0.1, 0.2});
-      } else {
-        nv_args.insert("use_osd", true); // BP + OSD
-        nv_args.insert("osd_order", 60);
-        nv_args.insert("osd_method", 3);
-      }
+      nv_args.insert("bp_method", 3);   // min-sum + dmem (required for relay)
+      nv_args.insert("composition", 1); // sequential relay
+      nv_args.insert("gamma0", 0.0);
+      nv_args.insert("clip_value", 200.0);
+      nv_args.insert("repeatable", true);
+      cudaqx::heterogeneous_map srelay_args;
+      srelay_args.insert("pre_iter", std::size_t{5});
+      srelay_args.insert("num_sets", std::size_t{10});
+      srelay_args.insert("stopping_criterion", "All");
+      srelay_args.insert("stop_nconv", std::size_t{1});
+      nv_args.insert("srelay_config", srelay_args);
+      nv_args.insert("gamma_dist", std::vector<double>{0.1, 0.2});
       dc.decoder_custom_args = nv_args;
     } else if (opts.decoder_type == "sliding_window") {
       dc.type = "sliding_window";
@@ -223,6 +217,12 @@ build_multi_decoder_config(const cudaq::qec::decoder_inputs &inputs,
       inner_lut_args.insert("lut_error_depth", 2);
       sw_args.insert("inner_decoder_params", inner_lut_args);
       dc.decoder_custom_args = sw_args;
+    } else if (opts.decoder_type == "pymatching") {
+      dc.type = "pymatching";
+      cudaqx::heterogeneous_map pm_args;
+      pm_args.insert("merge_strategy", "smallest_weight");
+      pm_args.insert("error_rate_vec", dem.error_rates);
+      dc.decoder_custom_args = pm_args;
     } else {
       dc.type = "multi_error_lut";
       cudaqx::heterogeneous_map lut_args;
@@ -369,11 +369,9 @@ bool setup_decoders(const cudaq::qec::code &code,
 
   if (opts.load_dem) {
     std::ifstream config_file(opts.dem_filename);
-    if (!config_file) {
-      printf("Error: Could not open dem config file: %s\n",
-             opts.dem_filename.c_str());
-      return false;
-    }
+    if (!config_file)
+      throw std::runtime_error("Could not open dem config file: " +
+                               opts.dem_filename);
     std::stringstream config_text;
     config_text << config_file.rdbuf();
     auto cfg = config::multi_decoder_config::from_yaml_str(config_text.str());
@@ -385,8 +383,9 @@ bool setup_decoders(const cudaq::qec::code &code,
 
   // Characterize the DEM and build the decoder configuration. full_component()
   // canonicalizes both stabilizer types (boundary-aware) into decoder_inputs.
+  const bool decompose_errors = (opts.decoder_type == "pymatching");
   auto ctx = cudaq::qec::decoder_context_from_memory_circuit(
-      code, state_prep, opts.num_rounds, noise);
+      code, state_prep, opts.num_rounds, noise, decompose_errors);
   const auto inputs = ctx.full_component();
   printf("DEM: %ld detectors x %ld error mechanisms\n",
          inputs.dem.num_detectors(), inputs.dem.num_error_mechanisms());
@@ -416,19 +415,12 @@ bool setup_decoders(const cudaq::qec::code &code,
 
 // --save_syndrome: register a callback that tees every syndrome the decoder
 // receives during the live run into `filename`, so it can be replayed offline.
-// Returns false if the file cannot be opened.
-bool begin_syndrome_capture(const std::string &filename,
+void begin_syndrome_capture(const std::string &filename,
                             const experiment &exp) {
-  if (filename.empty()) {
-    printf("Error: --save_syndrome requires a filename argument\n");
-    return false;
-  }
   g_capture.file.open(filename, std::ios::out | std::ios::trunc);
-  if (!g_capture.file) {
-    printf("Error: Could not open syndrome file for writing: %s\n",
-           filename.c_str());
-    return false;
-  }
+  if (!g_capture.file)
+    throw std::runtime_error("Could not open syndrome file for writing: " +
+                             filename);
   g_capture.count = 0;
   g_capture.syndromes_per_shot =
       static_cast<int>(exp.num_logical * (exp.num_rounds + 1));
@@ -457,7 +449,6 @@ bool begin_syndrome_capture(const std::string &filename,
         g_capture.file.flush();
         g_capture.count++;
       });
-  return true;
 }
 
 // Append the per-shot corrections so a later --load_syndrome run can verify the
@@ -479,18 +470,12 @@ void finish_syndrome_capture(const std::vector<std::int64_t> &run_result,
 // circuit is run) and check the resulting corrections match the ones saved
 // alongside the syndromes.
 void replay_syndrome_file(const std::string &filename, const experiment &exp) {
-  if (filename.empty()) {
-    printf("Error: --load_syndrome requires a filename argument\n");
-    return;
-  }
   printf("\n=== Syndrome Replay Mode ===\n");
   printf("Loading syndromes from: %s\n", filename.c_str());
 
   std::ifstream syndrome_file(filename);
-  if (!syndrome_file) {
-    printf("Error: Could not open syndrome file: %s\n", filename.c_str());
-    return;
-  }
+  if (!syndrome_file)
+    throw std::runtime_error("Could not open syndrome file: " + filename);
 
   // Parse the header, then per shot a list of ROUND_START-delimited groups
   // (each a byte-aligned, MSB-first bit dump), then the per-shot corrections.
@@ -526,12 +511,13 @@ void replay_syndrome_file(const std::string &filename, const experiment &exp) {
     }
   }
 
-  if (file_num_data != exp.num_data || file_num_logical != exp.num_logical) {
-    printf("Error: File parameters (num_data=%zu, num_logical=%zu) don't match "
-           "current (num_data=%zu, num_logical=%zu)\n",
-           file_num_data, file_num_logical, exp.num_data, exp.num_logical);
-    return;
-  }
+  if (file_num_data != exp.num_data || file_num_logical != exp.num_logical)
+    throw std::runtime_error(
+        "Syndrome file mismatch: file has num_data=" +
+        std::to_string(file_num_data) +
+        " num_logical=" + std::to_string(file_num_logical) +
+        ", expected num_data=" + std::to_string(exp.num_data) +
+        " num_logical=" + std::to_string(exp.num_logical));
 
   printf("Read %zu shots with syndromes\n", saved_shots.size());
   printf("Feeding %zu shots of saved syndromes to decoder...\n",
@@ -586,8 +572,11 @@ void replay_syndrome_file(const std::string &filename, const experiment &exp) {
   if (!saved_corrections.empty()) {
     printf("Correction verification: %d matched, %d mismatched\n", matched,
            mismatched);
-    if (mismatched == 0)
-      printf("SUCCESS: All corrections match!\n");
+    if (mismatched > 0)
+      throw std::runtime_error(
+          "Replay correction mismatch: " + std::to_string(mismatched) + " of " +
+          std::to_string(matched + mismatched) + " shots did not match");
+    printf("SUCCESS: All corrections match!\n");
   }
 }
 
@@ -640,9 +629,8 @@ void run_experiment(const cudaq::qec::code &code,
                     cudaq::qec::operation state_prep, const run_options &opts,
                     cudaq::noise_model &noise, const experiment &exp,
                     const std::vector<std::int64_t> &decoder_ids) {
-  if (opts.save_syndrome &&
-      !begin_syndrome_capture(opts.syndrome_filename, exp))
-    return;
+  if (opts.save_syndrome)
+    begin_syndrome_capture(opts.syndrome_filename, exp);
 
   auto &prep =
       code.get_operation<cudaq::qec::code::one_qubit_encoding>(state_prep);
@@ -705,7 +693,8 @@ void show_help() {
   printf("  --seed <int>          Simulator seed for reproducible shots; "
          "negative leaves it unseeded. Default: 42\n");
   printf("  --decoder_type <string> Decoder type: 'multi_error_lut', "
-         "'nv-qldpc-decoder', or 'sliding_window'. Default: multi_error_lut\n");
+         "'nv-qldpc-decoder', 'sliding_window', or 'pymatching'. Default: "
+         "multi_error_lut\n");
   printf("  --sw_window_size <int>  Sliding window size (only for "
          "sliding_window decoder). Default: distance\n");
   printf("  --sw_step_size <int>    Sliding window step size. Default: 1\n");
@@ -718,8 +707,6 @@ void show_help() {
          "replay.\n");
   printf("  --load_syndrome <string> Load and replay syndrome data from a "
          "file.\n");
-  printf("  --use-relay-bp      For --decoder_type nv-qldpc-decoder: select "
-         "Relay BP instead of the default BP + OSD block.\n");
   printf("  --help              Show this help message\n");
 }
 
@@ -774,8 +761,6 @@ int main(int argc, char **argv) {
       opts.load_syndrome = true;
       opts.syndrome_filename = argv[i + 1];
       i++;
-    } else if (arg == "--use-relay-bp") {
-      opts.use_relay_bp = true;
     } else {
       printf("Unknown argument: %s\n", arg.c_str());
       show_help();
@@ -809,9 +794,10 @@ int main(int argc, char **argv) {
 
   if (opts.decoder_type != "multi_error_lut" &&
       opts.decoder_type != "sliding_window" &&
-      opts.decoder_type != "nv-qldpc-decoder") {
+      opts.decoder_type != "nv-qldpc-decoder" &&
+      opts.decoder_type != "pymatching") {
     printf("Error: --decoder_type must be 'multi_error_lut', "
-           "'nv-qldpc-decoder', or 'sliding_window'\n");
+           "'nv-qldpc-decoder', 'sliding_window', or 'pymatching'\n");
     return 1;
   }
 
@@ -840,7 +826,13 @@ int main(int argc, char **argv) {
     initialize_realtime_channel(argv[0]);
 #endif
 
-  demo_circuit_host(*code, opts);
+  try {
+    demo_circuit_host(*code, opts);
+  } catch (const std::exception &e) {
+    printf("Error: %s\n", e.what());
+    cudaq::qec::decoding::config::finalize_decoders();
+    return 1;
+  }
 
 #ifdef QEC_APP_CQR
   if (!opts.save_dem) {
@@ -855,8 +847,6 @@ int main(int argc, char **argv) {
   }
 #endif
 
-  // Ensure clean shutdown
   cudaq::qec::decoding::config::finalize_decoders();
-
   return 0;
 }

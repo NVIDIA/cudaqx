@@ -19,15 +19,14 @@ return_code=0
 #  number_of_corrections_decoder_threshold
 #  Path to server executable
 #  num_rounds
-#  decoder_window
 #  Path to libcudaq-qec-realtime-decoding-quantinuum-private.so
 #  decoder_type (optional, defaults to multi_error_lut)
-#  sw_window_size (optional, for sliding_window decoder, defaults to decoder_window)
+#  sw_window_size (optional, for sliding_window decoder)
 #  sw_step_size (optional, for sliding_window decoder, defaults to 1)
 
 # Check that at least 9 arguments are provided.
-if [[ $# -lt 9 ]]; then
-  echo "Error: Expected at least 9 arguments (got $#)"
+if [[ $# -lt 8 ]]; then
+  echo "Error: Expected at least 8 arguments (got $#)"
   exit 1
 fi
 
@@ -38,11 +37,10 @@ number_of_non_zero_values_threshold=$4
 number_of_corrections_decoder_threshold=$5
 SERVER_EXECUTABLE=$6
 NUM_ROUNDS=$7
-DECODER_WINDOW=$8
-LIB_DIR=$9
-DECODER_TYPE=${10:-multi_error_lut}
-SW_WINDOW_SIZE=${11:-$DECODER_WINDOW}
-SW_STEP_SIZE=${12:-1}
+LIB_DIR=$8
+DECODER_TYPE=${9:-multi_error_lut}
+SW_WINDOW_SIZE=${10:-5}
+SW_STEP_SIZE=${11:-1}
 EXTRA_CLI_ARGS=${EXTRA_CLI_ARGS:-}
 
 # The inproc_rpc realtime path is served by the device-graph scheduler, which
