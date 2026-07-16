@@ -338,10 +338,10 @@ experiment make_experiment(const cudaq::qec::code &code,
   exp.num_rounds = static_cast<std::size_t>(opts.num_rounds);
   exp.num_logical = static_cast<std::size_t>(opts.num_logical);
 
-  auto parity_x = code.get_parity_x();
-  auto parity_z = code.get_parity_z();
-  exp.x_vec.assign(parity_x.data(), parity_x.data() + parity_x.size());
-  exp.z_vec.assign(parity_z.data(), parity_z.data() + parity_z.size());
+  auto schedule_x = code.get_stabilizer_schedule_x();
+  auto schedule_z = code.get_stabilizer_schedule_z();
+  exp.x_vec.assign(schedule_x.data(), schedule_x.data() + schedule_x.size());
+  exp.z_vec.assign(schedule_z.data(), schedule_z.data() + schedule_z.size());
 
   const bool is_z_prep = state_prep == cudaq::qec::operation::prep0 ||
                          state_prep == cudaq::qec::operation::prep1;

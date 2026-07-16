@@ -280,9 +280,10 @@ if(TARGET cudaq-qec-realtime-decoding-server-cqr)
       NAME app_examples.surface_code-1-cqr-two-process-test-distance-3
       COMMAND
         # The app seeds the simulator (--seed, default 42), so the run is
-        # deterministic: ~36 non-zero and ~39 corrections at 1000 shots. The
+        # deterministic: ~10 non-zero and ~67 corrections at 1000 shots. The
         # thresholds (non-zero <= 60, corrections >= 30) leave margin while
-        # still catching a broken decode path (which produces ~150+ / ~0).
+        # still catching a broken decode path (which applies ~0 corrections,
+        # leaving all ~70 raw logical errors uncorrected).
         bash "${CMAKE_CURRENT_SOURCE_DIR}/surface_code-1-cqr-two-process-test.sh"
           ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-cqr
           3 60 30
