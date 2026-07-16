@@ -85,13 +85,6 @@ DECODER="pymatching"
 CONFIG_FILE=""
 SYNDROMES_FILE=""
 
-# ONNX model for the trt_decoder profile (TRT predecoder + PyMatching global
-# decoder).  AUTO => generate the tiny identity predecoder at run time
-# (output row = [pre_L=0, syndrome untouched], so TRT preserves the syndrome
-# and PyMatching performs the actual correction -- no trained model needed).
-ONNX_PATH="AUTO"
-ONNX_FILE=""
-
 # Data-generation parameters (surface-code memory experiment).  The
 # generator's RNG seed is fixed, so runs are reproducible.
 GEN_DISTANCE=3
@@ -165,16 +158,10 @@ Actions:
   --no-run               Skip running the test (useful with --build)
 
 Decoder options:
-  --decoder NAME         Decoder profile: pymatching (default), trt_decoder, or
-                         nv-qldpc-decoder (Relay BP).  trt_decoder runs a
-                         TensorRT predecoder + PyMatching global decoder in one
-                         server session (requires the TRT plugin, see --build).
-                         By default the config/syndromes files are generated
-                         fresh each run by surface_code-4-yaml into
-                         CUDAQX_DIR/build/hsb_fpga_test_data
-  --onnx PATH            ONNX model for the trt_decoder profile.  Default AUTO
-                         generates the identity predecoder at run time (needs
-                         the python3 'onnx' module)
+  --decoder NAME         Decoder profile: pymatching (default) or
+                         nv-qldpc-decoder (Relay BP).  By default the
+                         config/syndromes files are generated fresh each run by
+                         surface_code-4-yaml into CUDAQX_DIR/build/hsb_fpga_test_data
   --transport T          Server transport: cpu_roce or gpu_roce.  Default is
                          derived from the decoder (pymatching -> cpu_roce,
                          nv-qldpc-decoder -> gpu_roce device-graph scheduler)
@@ -232,7 +219,6 @@ while [[ $# -gt 0 ]]; do
         --no-run)           DO_RUN=false ;;
         --no-verify)        VERIFY=false ;;
         --decoder)          DECODER="$2"; shift ;;
-        --onnx)             ONNX_PATH="$2"; shift ;;
         --transport)        TRANSPORT="$2"; shift ;;
         --gpu)              GPU_ID="$2"; shift ;;
         --nv-qldpc-plugin)  NV_QLDPC_PLUGIN="$2"; shift ;;
@@ -670,65 +656,6 @@ resolve_data_files() {
     SYNDROMES_FILE="${GEN_DIR}/syndromes_${DECODER}.txt"
 }
 
-# Resolve ONNX_FILE for the trt_decoder profile.  AUTO generates the tiny
-# identity predecoder (mirrors app_examples/surface_code-4-yaml-test.sh):
-# output row = [pre_L=0, input syndrome untouched], so TRT preserves the
-# syndrome and the PyMatching global decoder performs the actual correction --
-# expected corrections stay computable at generation time without a trained
-# model, while still exercising ONNX parse, engine build, and per-shot
-# inference.
-generate_identity_onnx() {
-    if [[ "$ONNX_PATH" != "AUTO" ]]; then
-        if [[ ! -f "$ONNX_PATH" ]]; then
-            _err "--onnx file not found: $ONNX_PATH"
-            return 1
-        fi
-        ONNX_FILE="$ONNX_PATH"
-        return 0
-    fi
-    if ! python3 -c "import onnx" 2>/dev/null; then
-        _err "python3 module 'onnx' is required to generate the identity ONNX"
-        _err "model (pip install onnx), or pass a pre-made model with --onnx."
-        return 1
-    fi
-    ONNX_FILE="${GEN_DIR}/trt_identity_predecoder.onnx"
-    local syndrome_size=$(((GEN_DISTANCE * GEN_DISTANCE - 1) * GEN_ROUNDS))
-    _info "Generating identity ONNX: $ONNX_FILE (syndrome_size=$syndrome_size)"
-    python3 - "$ONNX_FILE" "$syndrome_size" <<'PY'
-import sys
-
-import onnx
-from onnx import TensorProto, helper
-
-output_path = sys.argv[1]
-syndrome_size = int(sys.argv[2])
-
-input_info = helper.make_tensor_value_info(
-    "input", TensorProto.FLOAT, [1, syndrome_size])
-output_info = helper.make_tensor_value_info(
-    "output", TensorProto.FLOAT, [1, syndrome_size + 1])
-zero = helper.make_node(
-    "Constant",
-    [],
-    ["pre_l"],
-    value=helper.make_tensor("zero", TensorProto.FLOAT, [1, 1], [0.0]),
-)
-concat = helper.make_node("Concat", ["pre_l", "input"], ["output"], axis=1)
-graph = helper.make_graph(
-    [zero, concat], "trt_identity_predecoder", [input_info], [output_info])
-model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 19)])
-# IR 9 is sufficient for opset 19 and remains readable by the ONNX checker in
-# the CUDA-QX development image.
-model.ir_version = 9
-onnx.checker.check_model(model)
-onnx.save(model, output_path)
-PY
-    if [[ ! -f "$ONNX_FILE" ]]; then
-        _err "Identity ONNX generation failed"
-        return 1
-    fi
-}
-
 # Generate the decoder config (DEM + decoder_custom_args) and the syndromes
 # file with the surface_code-4-yaml memory-experiment binary.  Runs in GEN_DIR
 # so the generator's auxiliary outputs land there too.
@@ -738,18 +665,6 @@ generate_data_files() {
         _err "Data generator not found: $GENERATOR_BIN"
         _err "Run with --build to build the tools first."
         return 1
-    fi
-
-    # trt_decoder profile: the generator needs an ONNX model at
-    # config-generation time (--onnx_path is required with --decoder_type
-    # trt_decoder).  The TRT plugin itself is consumed PREBUILT and resolved at
-    # load time from the decoder-plugins dir on LD_LIBRARY_PATH, exactly like
-    # the pymatching plugin -- no explicit existence check here.
-    local extra_gen_flags=()
-    if [[ "$DECODER" == "trt_decoder" ]]; then
-        mkdir -p "$GEN_DIR"
-        generate_identity_onnx || return 1
-        extra_gen_flags+=(--onnx_path "$ONNX_FILE")
     fi
 
     _log "Generating test data (decoder=$DECODER, distance=$GEN_DISTANCE," \
@@ -766,8 +681,7 @@ generate_data_files() {
     fi
 
     _info "$GENERATOR_BIN --distance $GEN_DISTANCE --num_rounds $GEN_ROUNDS" \
-          "--p_spam $GEN_P_SPAM --decoder_type $DECODER" \
-          "${extra_gen_flags[*]} ${gen_extra_args[*]:-}" \
+          "--p_spam $GEN_P_SPAM --decoder_type $DECODER ${gen_extra_args[*]:-}" \
           "--save_dem $(basename "$CONFIG_FILE")"
     (cd "$GEN_DIR" && \
      LD_LIBRARY_PATH="${gen_ld_path}:${LD_LIBRARY_PATH:-}" \
@@ -776,26 +690,12 @@ generate_data_files() {
         --num_rounds "$GEN_ROUNDS" \
         --p_spam "$GEN_P_SPAM" \
         --decoder_type "$DECODER" \
-        ${extra_gen_flags[@]+"${extra_gen_flags[@]}"} \
         ${gen_extra_args[@]+"${gen_extra_args[@]}"} \
         --save_dem "$(basename "$CONFIG_FILE")" > gen_config.log 2>&1) || {
         _err "Config generation failed; see ${GEN_DIR}/gen_config.log"
         tail -5 "${GEN_DIR}/gen_config.log" >&2 || true
         return 1
     }
-
-    # Configuration-identity check: the identity ONNX makes TRT->PyMatching
-    # output bit-identical to plain PyMatching, so a silently-substituted
-    # entry would pass verification below.  Pin the generated config to the
-    # combo before anything downstream consumes it.
-    if [[ "$DECODER" == "trt_decoder" ]]; then
-        if ! grep -Eq "type:[[:space:]]+trt_decoder" "$CONFIG_FILE" || \
-           ! grep -q "onnx_load_path" "$CONFIG_FILE"; then
-            _err "Generated config lacks a trt_decoder entry with onnx_load_path: $CONFIG_FILE"
-            return 1
-        fi
-        _info "Config carries the trt_decoder entry (onnx_load_path set)"
-    fi
 
     # The server selects its transceiver from the per-decoder `transport:` YAML
     # key (default cpu_roce).  The generator doesn't emit non-default optional
@@ -1013,17 +913,6 @@ start_server() {
 
     wait_for_pattern "$server_log" "$ready_pattern" 60 "$SERVER_PID" >/dev/null || {
         _err "Decoding server did not become ready"
-        _err "--- Server log ---"
-        cat "$server_log" >&2
-        return 1
-    }
-
-    # Configuration-identity check (all profiles): the server names the
-    # decoder session it actually constructed.  Matters most for trt_decoder,
-    # where the identity ONNX makes a silently-substituted pymatching session
-    # pass the corrections verification bit-identically.
-    wait_for_pattern "$server_log" "decoder 0 type: ${DECODER}" 5 "$SERVER_PID" >/dev/null || {
-        _err "Server did not construct a '${DECODER}' decoder session"
         _err "--- Server log ---"
         cat "$server_log" >&2
         return 1
