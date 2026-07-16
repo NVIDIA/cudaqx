@@ -185,10 +185,10 @@ set_target_properties(cudaq-qec-decoding-server PROPERTIES
   POSITION_INDEPENDENT_CODE ON
 )
 
-install(TARGETS cudaq-qec-decoding-server
-  COMPONENT qec-lib
-  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-)
+# NOTE: cudaq-qec-decoding-server is a STATIC archive consumed only at link
+# time -- the decoding_server executable and the CQR plugin (.so) absorb its
+# objects during their own link.  It is not needed at runtime and is not part
+# of a public link-against-install SDK, so it is deliberately NOT installed.
 
 # ---------------------------------------------------------------------------
 # Optional GPU RoCE component: GpuRoceTransceiver plus the strong definition
@@ -239,10 +239,9 @@ if(CUDAQ_GPU_ROCE_AVAILABLE)
     POSITION_INDEPENDENT_CODE ON
   )
 
-  install(TARGETS cudaq-qec-decoding-server-gpuroce
-    COMPONENT qec-lib
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  )
+  # NOTE: cudaq-qec-decoding-server-gpuroce is a STATIC archive consumed only
+  # at link time (absorbed WHOLE_ARCHIVE into the decoding_server executable).
+  # It is not needed at runtime, so it is deliberately NOT installed.
 
   # Link canary (never executed, not installed, not a test): a static
   # archive alone never resolves symbols, and the one real consumer
