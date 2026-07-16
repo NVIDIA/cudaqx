@@ -205,6 +205,12 @@ bool is_trt_decoder_schema_available() {
          nullptr;
 }
 
+// The nv-qldpc-decoder schema is registered by the proprietary plugin.
+bool is_nv_qldpc_schema_available() {
+  return cudaq::qec::decoding::config::find_decoder_schema(
+             "nv-qldpc-decoder") != nullptr;
+}
+
 bool is_nv_qldpc_decoder_available() {
   try {
     std::size_t block_size = 7;
@@ -595,13 +601,15 @@ TEST(DecoderYAMLTest, SlidingWindowInnerDecoderVariantRoundTrips) {
   single_lut_sw.insert("inner_decoder_name", "single_error_lut");
   check_roundtrip(single_lut_sw);
 
-  auto nv_sw = single_lut_sw;
-  nv_sw.insert("inner_decoder_name", "nv-qldpc-decoder");
-  cudaqx::heterogeneous_map nv_inner;
-  nv_inner.insert("max_iterations", 5);
-  nv_inner.insert("error_rate_vec", std::vector<double>(6, 0.1));
-  nv_sw.insert("inner_decoder_params", nv_inner);
-  check_roundtrip(nv_sw);
+  if (is_nv_qldpc_schema_available()) {
+    auto nv_sw = single_lut_sw;
+    nv_sw.insert("inner_decoder_name", "nv-qldpc-decoder");
+    cudaqx::heterogeneous_map nv_inner;
+    nv_inner.insert("max_iterations", 5);
+    nv_inner.insert("error_rate_vec", std::vector<double>(6, 0.1));
+    nv_sw.insert("inner_decoder_params", nv_inner);
+    check_roundtrip(nv_sw);
+  }
 }
 
 TEST(DecoderConfigTest, ConfigureRejectsDuplicateAndNegativeIds) {
@@ -1159,6 +1167,9 @@ TEST(DecoderYAMLTest, PrepareDecoderParamsSurfacesCudaDeviceId) {
 }
 
 TEST(DecoderYAMLTest, ValidateCustomArgsChecksValueKinds) {
+  if (!is_nv_qldpc_schema_available())
+    GTEST_SKIP() << "nv-qldpc-decoder plugin (and its parameter schema) not "
+                    "available";
   // A validated map is guaranteed to serialize: every value must be readable
   // as its schema kind's canonical storage type, not just have a known key.
   using cudaq::qec::decoding::config::decoder_config;

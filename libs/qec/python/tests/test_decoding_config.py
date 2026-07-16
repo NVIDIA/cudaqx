@@ -16,6 +16,8 @@ import cudaq_qec as qec
 # Decoder custom args are plain dicts. Their keys are governed by the
 # parameter schema each decoder registers (see qec.decoder_param_schema).
 
+nv_qldpc_schema_missing = qec.decoder_param_schema("nv-qldpc-decoder") is None
+
 
 def is_nv_qldpc_decoder_available():
     """
@@ -34,7 +36,10 @@ def is_nv_qldpc_decoder_available():
 # Schema introspection tests
 
 
-def test_decoder_param_schema_introspection():
+@pytest.mark.skipif(
+    nv_qldpc_schema_missing,
+    reason="nv-qldpc-decoder plugin (and its parameter schema) not available")
+def test_nv_qldpc_decoder_param_schema_introspection():
     schema = qec.decoder_param_schema("nv-qldpc-decoder")
     assert schema is not None
     by_key = {entry["key"]: entry for entry in schema}
@@ -43,6 +48,8 @@ def test_decoder_param_schema_introspection():
     assert by_key["srelay_config"]["kind"] == "subschema"
     assert by_key["srelay_config"]["subschema"] == "srelay_bp"
 
+
+def test_decoder_param_schema_introspection():
     sw_schema = qec.decoder_param_schema("sliding_window")
     assert sw_schema is not None
     by_key = {entry["key"]: entry for entry in sw_schema}
@@ -72,6 +79,9 @@ def test_decoder_custom_args_is_a_dict():
     assert dc.decoder_custom_args == {"lut_error_depth": 3}
 
 
+@pytest.mark.skipif(
+    nv_qldpc_schema_missing,
+    reason="nv-qldpc-decoder plugin (and its parameter schema) not available")
 def test_decoder_config_yaml_roundtrip_and_custom_args():
     dc = qec.decoder_config()
     dc.id = 0
@@ -178,6 +188,9 @@ def test_validate_custom_args_checks_dict_built_configs():
         mdc.validate_custom_args()
 
 
+@pytest.mark.skipif(
+    nv_qldpc_schema_missing,
+    reason="nv-qldpc-decoder plugin (and its parameter schema) not available")
 def test_custom_args_dict_values_convert_to_schema_types():
     # The setter converts dict values to the canonical types the registered
     # schema declares: Python ints are accepted for f64 params and negative
@@ -401,6 +414,9 @@ def test_trt_decoder_default_global_params_materialized():
     assert mdc2.to_yaml_str() == first
 
 
+@pytest.mark.skipif(
+    nv_qldpc_schema_missing,
+    reason="nv-qldpc-decoder plugin (and its parameter schema) not available")
 def test_validate_custom_args_checks_value_kinds():
     # A dict assigned before `type` is set takes the generic conversion
     # (ints stored as size_t), which an f64 param cannot read back at
@@ -474,6 +490,9 @@ decoders:
 # multi_decoder_config tests
 
 
+@pytest.mark.skipif(
+    nv_qldpc_schema_missing,
+    reason="nv-qldpc-decoder plugin (and its parameter schema) not available")
 def test_multi_decoder_config_yaml_roundtrip():
     d1 = qec.decoder_config()
     d1.id = 0
@@ -539,6 +558,8 @@ def test_configure_decoders_from_str_smoke():
     assert isinstance(status, int)
     qec.finalize_decoders()
 
+    if nv_qldpc_schema_missing:
+        return
     decoder_config = qec.decoder_config()
     decoder_config.id = 0
     decoder_config.type = "nv-qldpc-decoder"

@@ -31,6 +31,7 @@ pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
 trt_schema_missing = qec.decoder_param_schema("trt_decoder") is None
 chromobius_schema_missing = qec.decoder_param_schema("chromobius") is None
+nv_qldpc_schema_missing = qec.decoder_param_schema("nv-qldpc-decoder") is None
 
 
 def is_nv_qldpc_decoder_available():
@@ -70,6 +71,9 @@ def test_deprecated_typed_configs_warn_on_construction():
             cls()
 
 
+@pytest.mark.skipif(
+    nv_qldpc_schema_missing,
+    reason="nv-qldpc-decoder plugin (and its parameter schema) not available")
 def test_deprecated_config_matches_dict_built_yaml():
     cfg = qec.nv_qldpc_decoder_config()
     cfg.use_sparsity = True
@@ -264,6 +268,9 @@ def test_nv_qldpc_decoder_config_set_and_get_each_optional(name, meta):
     assert getattr(nv, name) is None
 
 
+@pytest.mark.skipif(
+    nv_qldpc_schema_missing,
+    reason="nv-qldpc-decoder plugin (and its parameter schema) not available")
 def test_nv_qldpc_decoder_config_setting_wrong_types_raises_typeerror():
     nv = qec.nv_qldpc_decoder_config()
 
@@ -662,6 +669,9 @@ def test_trt_decoder_chromobius_global_config_yaml_roundtrip():
 # decoder_config tests
 
 
+@pytest.mark.skipif(
+    nv_qldpc_schema_missing,
+    reason="nv-qldpc-decoder plugin (and its parameter schema) not available")
 def test_decoder_config_yaml_roundtrip_and_custom_args():
     # Build NV config and embed into DecoderConfig via helper
     nv = qec.nv_qldpc_decoder_config()
@@ -702,6 +712,9 @@ def test_decoder_config_yaml_roundtrip_and_custom_args():
 # multi_decoder_config tests
 
 
+@pytest.mark.skipif(
+    nv_qldpc_schema_missing,
+    reason="nv-qldpc-decoder plugin (and its parameter schema) not available")
 def test_multi_decoder_config_yaml_roundtrip():
     # Build NV config and embed into DecoderConfig via helper
     nv = qec.nv_qldpc_decoder_config()
@@ -749,6 +762,8 @@ def test_configure_decoders_from_str_smoke():
     assert isinstance(status, int)
     qec.finalize_decoders()
 
+    if nv_qldpc_schema_missing:
+        return
     nv = qec.nv_qldpc_decoder_config()
     nv.error_rate_vec = [0.1, 0.2, 0.3, 0.1, 0.2, 0.3, 0.1, 0.2, 0.3, 0.1]
 

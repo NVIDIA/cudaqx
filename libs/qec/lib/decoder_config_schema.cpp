@@ -410,64 +410,11 @@ bool custom_args_maps_equal(const cudaqx::heterogeneous_map &a,
   return true;
 }
 
-// ---------------------------------------------------------------------------
-// Hosted decoder schemas
-//
 // Decoder schemas are registered by the shared library that ships the
 // decoder: lut.cpp and sliding_window.cpp register theirs in this library,
-// and the pymatching / chromobius / trt_decoder plugins register theirs from
-// their own .so. The nv-qldpc-decoder schema is hosted here temporarily: the
-// decoder is a proprietary out-of-tree plugin, and its schema (plus the
-// srelay_bp subschema it references) moves into that plugin once it links
-// against this registry. Third-party decoders register their schema from
-// their own plugin library instead of editing this file.
-// ---------------------------------------------------------------------------
-
-namespace {
-
-struct hosted_schema_registrar {
-  hosted_schema_registrar() {
-    using k = param_kind;
-
-    register_decoder_schema({"srelay_bp",
-                             {
-                                 {"pre_iter", k::uint64},
-                                 {"num_sets", k::uint64},
-                                 {"stopping_criterion", k::string},
-                                 {"stop_nconv", k::uint64},
-                             }});
-
-    register_decoder_schema(
-        {"nv-qldpc-decoder",
-         {
-             {"use_sparsity", k::boolean},
-             {"error_rate", k::f64},
-             {"error_rate_vec", k::f64_vec},
-             {"max_iterations", k::int32},
-             {"n_threads", k::int32},
-             {"use_osd", k::boolean},
-             {"osd_method", k::int32},
-             {"osd_order", k::int32},
-             {"bp_batch_size", k::int32},
-             {"osd_batch_size", k::int32},
-             {"iter_per_check", k::int32},
-             {"clip_value", k::f64},
-             {"bp_method", k::int32},
-             {"scale_factor", k::f64},
-             {"proc_float", k::string},
-             {"gamma0", k::f64},
-             {"gamma_dist", k::f64_vec},
-             {"explicit_gammas", k::f64_matrix},
-             {"bp_seed", k::int32},
-             {"srelay_config", k::subschema, false, "srelay_bp"},
-             {"composition", k::int32},
-             {"repeatable", k::boolean},
-         }});
-  }
-};
-
-hosted_schema_registrar hosted_schemas;
-
-} // namespace
+// and the decoder plugins (pymatching, chromobius, trt_decoder,
+// nv-qldpc-decoder, ...) register theirs from their own .so. Third-party
+// decoders register their schema from their own plugin library instead of
+// editing this file.
 
 } // namespace cudaq::qec::decoding::config
