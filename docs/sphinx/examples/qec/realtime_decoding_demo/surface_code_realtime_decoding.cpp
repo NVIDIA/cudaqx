@@ -10,7 +10,8 @@
 // Compiled two ways against the installed SDK (see this directory's
 // CMakeLists.txt) and driven by run_realtime_decoding.sh:
 //   plain (--target stim)          -> the generator: writes the decoder config
-//                                     and, for the FPGA source, a syndrome file.
+//                                     and, for the FPGA source, a syndrome
+//                                     file.
 //   -frealtime-lowering + the      -> the lowered kernel: streams syndromes to
 //   QEC_APP_EXTERNAL_DECODING_SERVER  the delivered decoding_server over UDP.
 
