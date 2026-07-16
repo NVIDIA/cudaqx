@@ -23,6 +23,7 @@ jobs:
       build-examples-solvers: ${{ steps.filter.outputs.build-examples-solvers }}
       pr-number: ${{ steps.export-pr-info.outputs.pr_number }}
       build-wheels: ${{ steps.filter.outputs.build-wheels }}
+      cudaq-dev-images: ${{ steps.cudaq-dev-images.outputs.images }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -40,6 +41,11 @@ jobs:
         run: |
           echo "pr_number=${{ fromJSON(steps.get-pr-info.outputs.pr-info).number }}" >> $GITHUB_OUTPUT
 
+      - name: Set CUDA-Q dev container images
+        id: cudaq-dev-images
+        run: |
+          echo "images=$(jq -c . .github/workflows/cudaq-dev-images.json)" >> "$GITHUB_OUTPUT"
+
       - name: Check what needs testing
         uses: dorny/paths-filter@v3
         id: filter
@@ -49,6 +55,7 @@ jobs:
             build-cudaq:
               - '.github/actions/get-cudaq-build/**'
               - '.github/actions/get-cudaq-version/**'
+              - '.github/workflows/cudaq-dev-images.json'
               - '.cudaq_version'
             build-docs:
               - '.github/workflows/docs.yaml'
@@ -122,7 +129,7 @@ jobs:
         platform: ['amd64', 'arm64']
         cuda_version: ['12.6', '13.0']
     runs-on: ${{ startsWith(github.repository, 'NVIDIA/cudaqx') && format('linux-{0}-cpu32', matrix.platform) || 'ubuntu-latest' }}
-    container: ghcr.io/nvidia/cuda-quantum-devcontainer:${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc12-main
+    container: ${{ fromJSON(needs.check-changes.outputs.cudaq-dev-images)[format('{0}-cu{1}', matrix.platform, matrix.cuda_version)] }}
     permissions:
       actions: write
       contents: read
@@ -163,6 +170,7 @@ jobs:
     uses: ./.github/workflows/docs.yaml
     with:
       cache_key_suffix: pr${{ needs.check-changes.outputs.pr-number }}
+      cudaq_dev_images: ${{ needs.check-changes.outputs.cudaq-dev-images }}
 
   build-all:
     name: All libs
@@ -173,6 +181,7 @@ jobs:
     uses: ./.github/workflows/all_libs.yaml
     with:
       cache_key_suffix: pr${{ needs.check-changes.outputs.pr-number }}
+      cudaq_dev_images: ${{ needs.check-changes.outputs.cudaq-dev-images }}
 
   build-qec:
     name: QEC
@@ -187,6 +196,7 @@ jobs:
     uses: ./.github/workflows/lib_qec.yaml
     with:
       cache_key_suffix: pr${{ needs.check-changes.outputs.pr-number }}
+      cudaq_dev_images: ${{ needs.check-changes.outputs.cudaq-dev-images }}
 
   build-solvers:
     name: Solvers
@@ -201,6 +211,7 @@ jobs:
     uses: ./.github/workflows/lib_solvers.yaml
     with:
       cache_key_suffix: pr${{ needs.check-changes.outputs.pr-number }}
+      cudaq_dev_images: ${{ needs.check-changes.outputs.cudaq-dev-images }}
 
   build-wheels:
     name: Wheels
