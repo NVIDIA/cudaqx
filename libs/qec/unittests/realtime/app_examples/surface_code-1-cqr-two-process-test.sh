@@ -63,7 +63,7 @@ APP_LOG=load_dem-2proc-${FULL_SUFFIX}.log
 
 # [1] Generate the decoder config (no realtime channel needed for this pass).
 $EXE_PATH --distance $DISTANCE --num_rounds $NUM_ROUNDS --num_shots $NUM_SHOTS \
-  --save_dem $CONFIG_FILE --decoder_window $DECODER_WINDOW \
+  --save_dem $CONFIG_FILE \
   --decoder_type $DECODER_TYPE | tee save_dem-2proc-$FULL_SUFFIX.log
 
 # [2] Start the decoding server on an ephemeral port with that config.
@@ -105,7 +105,7 @@ echo "Decoding server ready on $TRANSPORT port $SERVER_PORT"
 QEC_DECODING_SERVER_PORT=$SERVER_PORT \
   $EXE_PATH --distance $DISTANCE --num_shots $NUM_SHOTS \
   --load_dem $CONFIG_FILE --num_rounds $NUM_ROUNDS \
-  --decoder_window $DECODER_WINDOW --decoder_type $DECODER_TYPE \
+  --decoder_type $DECODER_TYPE \
   |& tee $APP_LOG
 
 # [4] Stop the server and collect its dispatch count.

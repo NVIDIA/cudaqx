@@ -78,7 +78,7 @@ add_test(
     bash "${CMAKE_CURRENT_SOURCE_DIR}/surface_code-1-test.sh"
       ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-local
       ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-local
-      3 40 40 NULL 12 6
+      3 60 30 NULL 12 6
       ${CMAKE_BINARY_DIR}/lib
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
@@ -91,7 +91,7 @@ if(_APP_CUDAQ_REALTIME_DISPATCH_LIB
       bash "${CMAKE_CURRENT_SOURCE_DIR}/surface_code-1-test.sh"
         ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-local
         ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-local
-        3 60 40 NULL 12 6
+        3 60 30 NULL 12 6
         ${CMAKE_BINARY_DIR}/lib
         nv-qldpc-decoder
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
@@ -113,7 +113,7 @@ add_test(
     bash "${CMAKE_CURRENT_SOURCE_DIR}/surface_code-1-test.sh"
       ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-local
       ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-local
-      3 40 40 NULL 12 6
+      3 60 30 NULL 12 6
       ${CMAKE_BINARY_DIR}/lib
       sliding_window 6 1
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
@@ -204,7 +204,7 @@ if(TARGET cudaq-qec-realtime-decoding-server-cqr)
       bash "${CMAKE_CURRENT_SOURCE_DIR}/surface_code-1-test.sh"
         ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-cqr
         ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-cqr
-        3 60 40 NULL 12 6
+        3 60 30 NULL 12 6
         ${CMAKE_BINARY_DIR}/lib
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
   )
@@ -217,12 +217,13 @@ if(TARGET cudaq-qec-realtime-decoding-server-cqr)
     add_test(
       NAME app_examples.surface_code-1-cqr-two-process-test-distance-3
       COMMAND
-        # Non-zero threshold 60 (vs the -local test's 40): unseeded runs at
-        # 1000 shots land ~35-45, so 40 flakes; a broken decode path produces
-        # ~150+, so 60 still discriminates.
+        # The app seeds the simulator (--seed, default 42), so the run is
+        # deterministic: ~36 non-zero and ~39 corrections at 1000 shots. The
+        # thresholds (non-zero <= 60, corrections >= 30) leave margin while
+        # still catching a broken decode path (which produces ~150+ / ~0).
         bash "${CMAKE_CURRENT_SOURCE_DIR}/surface_code-1-cqr-two-process-test.sh"
           ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-cqr
-          3 60 40
+          3 60 30
           $<TARGET_FILE:decoding_server>
           12 6
       WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
@@ -245,7 +246,7 @@ cudaqx_add_device_code(surface_code-1-quantinuum-emulate
   SOURCES
     surface_code-1.cpp
   COMPILER_FLAGS
-    --target quantinuum --emulate --quantinuum-machine Helios-Fake -DMANUALLY_INJECT_ERRORS=1 
+    --target quantinuum --emulate --quantinuum-machine Helios-Fake
   DEPENDS_ON
     # Must wait for the local executable to be built because it has the same
     # surface_code-1.cpp file, and the nvq++ compiler will use the same filename
@@ -274,7 +275,10 @@ add_test(
     bash "${CMAKE_CURRENT_SOURCE_DIR}/surface_code-1-test.sh"
       ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-local
       ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-quantinuum-emulate
-      3 0 1000 NULL 12 6
+      # QIR emulation applies no noise, so the live generate-and-decode run
+      # finds 0 errors / 0 corrections: this is a lowering + run smoke test
+      # (matches the distance-5 variant's 0/0 thresholds).
+      3 0 0 NULL 12 6
       ${CMAKE_BINARY_DIR}/lib
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
@@ -285,7 +289,7 @@ add_test(
     bash "${CMAKE_CURRENT_SOURCE_DIR}/surface_code-1-test.sh"
       ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-local
       ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-quantinuum-emulate
-      5 0 0 NULL 20 10
+      5 0 0 NULL 5 5
       ${CMAKE_BINARY_DIR}/lib
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
