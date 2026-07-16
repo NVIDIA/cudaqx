@@ -325,11 +325,11 @@ else()
   endif()
 endif()
 
-add_subdirectory(decoding-server-cqr)
 add_subdirectory(quantinuum)
 add_subdirectory(simulation)
 if(CUDAQ_QEC_DEVICE_CALL_SERVICE_AVAILABLE)
-  # cudaq-realtime (cqr) host-dispatch: simulated-QPU client that drives the
-  # decoding server over cudaq-realtime.
+  # cudaq-realtime (cqr) host-dispatch: the decoding-server skeleton and the
+  # simulated-QPU client that drives it over cudaq-realtime.
+  add_subdirectory(decoding-server-cqr)
   add_subdirectory(simulation-cqr)
 endif()
