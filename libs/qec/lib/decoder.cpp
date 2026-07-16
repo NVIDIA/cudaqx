@@ -154,6 +154,47 @@ static int read_cuda_device_id(const cudaqx::heterogeneous_map &params) {
   return value;
 }
 
+/// Selects the construction device and restores the previous device unless
+/// commit() is called. Makes failed plugin construction transactional: if the
+/// plugin ctor throws, the calling thread is left on its original device
+/// instead of leaking the pin to whichever device was selected for the attempt.
+class ConstructionDevicePin {
+public:
+  explicit ConstructionDevicePin(int target) : target_(target) {
+    cudaError_t err = cudaGetDevice(&previous_);
+    if (err != cudaSuccess)
+      throw std::runtime_error(
+          "cuda_device_id " + std::to_string(target_) +
+          " could not be selected because cudaGetDevice() failed: " +
+          cudaGetErrorString(err));
+    err = cudaSetDevice(target_);
+    if (err != cudaSuccess)
+      throw std::runtime_error("cudaSetDevice(" + std::to_string(target_) +
+                               ") failed: " + cudaGetErrorString(err));
+    selected_ = true;
+  }
+
+  ~ConstructionDevicePin() {
+    if (selected_ && !committed_ && previous_ != target_)
+      (void)cudaSetDevice(previous_);
+  }
+
+  ConstructionDevicePin(const ConstructionDevicePin &) = delete;
+  ConstructionDevicePin &operator=(const ConstructionDevicePin &) = delete;
+
+  // Keep the pin: one thread owns one decoder, so leaving the constructing
+  // thread on the target device lets later allocations and kernel launches --
+  // including lazy ones inside decode() -- land there with no per-call
+  // machinery.
+  void commit() { committed_ = true; }
+
+private:
+  int target_ = -1;
+  int previous_ = -1;
+  bool selected_ = false;
+  bool committed_ = false;
+};
+
 std::unique_ptr<decoder>
 decoder::get(const std::string &name, const decoder_init &init,
              const cudaqx::heterogeneous_map &param_map) {
@@ -168,14 +209,7 @@ decoder::get(const std::string &name, const decoder_init &init,
   const int cuda_device_id = read_cuda_device_id(param_map);
   if (cuda_device_id < 0)
     return iter->second(init, param_map);
-  // Pin the constructing thread persistently (no restore): one thread owns
-  // one decoder, so every later allocation and kernel launch on this thread
-  // -- including lazy allocations inside a plugin's decode() -- lands on the
-  // requested device with no per-call machinery.
-  cudaError_t err = cudaSetDevice(cuda_device_id);
-  if (err != cudaSuccess)
-    throw std::runtime_error("cudaSetDevice(" + std::to_string(cuda_device_id) +
-                             ") failed: " + cudaGetErrorString(err));
+  ConstructionDevicePin device_pin(cuda_device_id);
   // The key is consumed here; strip it so plugins that strictly validate
   // their parameter keys do not reject it.
   cudaqx::heterogeneous_map plugin_params;
@@ -184,6 +218,7 @@ decoder::get(const std::string &name, const decoder_init &init,
       plugin_params.insert(kv.first, kv.second);
   auto d = iter->second(init, plugin_params);
   d->cuda_device_id_ = cuda_device_id;
+  device_pin.commit();
   return d;
 }
 
