@@ -169,22 +169,7 @@ if(CMAKE_CUDA_COMPILER)
   endif()
 endif()
 
-set(CUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE "" CACHE FILEPATH
-    "Path to prebuilt proprietary realtime cudevice archive")
-if(CUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE)
-  if(NOT EXISTS "${CUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE}")
-    message(FATAL_ERROR
-      "CUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE does not exist: "
-      "${CUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE}")
-  endif()
-  add_library(cudaq-qec-realtime-cudevice-proprietary STATIC IMPORTED GLOBAL)
-  set_target_properties(cudaq-qec-realtime-cudevice-proprietary PROPERTIES
-    IMPORTED_LOCATION "${CUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE}")
-endif()
-
-# Shared library for host-side API. The cqr host-dispatch service (server) and
-# the simulated-QPU client wrappers live in their own sibling libraries built
-# from ./decoding-server-cqr and ./simulation-cqr (added below), not here.
+# Shared library for host-side API
 add_library(cudaq-qec-realtime-decoding SHARED
   realtime_decoding.cpp
   config.cpp
@@ -211,7 +196,7 @@ if(CUDAQ_REALTIME_INCLUDE_DIR)
     CUDAQ_REALTIME_ROOT)
 endif()
 
-target_link_options(cudaq-qec-realtime-decoding PRIVATE
+target_link_options(cudaq-qec-realtime-decoding PUBLIC
   $<$<CXX_COMPILER_ID:GNU>:-Wl,--exclude-libs,ALL>
 )
 
