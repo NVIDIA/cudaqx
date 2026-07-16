@@ -13,17 +13,33 @@
 #include "cudaq/qec/logger.h"
 
 #include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <future>
+#include <optional>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace cudaq::qec::decoding_server {
 
 namespace {
 
+std::optional<int> env_int_optional(const char *name) {
+  const char *value = std::getenv(name);
+  if (!value || !*value)
+    return std::nullopt;
+  try {
+    return std::stoi(value);
+  } catch (const std::exception &) {
+    throw std::runtime_error(std::string("invalid ") + name +
+                             " value: " + value);
+  }
+}
+
 void set_graph_capture_device(const cudaq::qec::decoder &decoder) {
-  const int device = resolve_decode_device(decoder.get_cuda_device_id());
+  const int device = reconcile_gpu_roce_device(
+      env_int_optional("HOLOLINK_GPU_ID"), decoder.get_cuda_device_id());
   cudaq::qec::detail_affinity::set_cuda_device_for_decode(device);
   if (device >= 0)
     CUDA_QEC_INFO(

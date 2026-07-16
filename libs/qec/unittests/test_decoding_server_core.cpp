@@ -261,12 +261,29 @@ TEST(RpcDispatcherTest, ConvertsHandlerExceptionsToErrorResponses) {
   expect_status(transport, RpcStatus::INTERNAL_ERROR);
 }
 
-TEST(ResolveDecodeDevice, UnpinnedDefaultsToZero) {
-  EXPECT_EQ(cudaq::qec::decoding_server::resolve_decode_device(-1), 0);
+TEST(GpuRoceDeviceReconcile, BothUnsetDefaultsToZero) {
+  EXPECT_EQ(
+      cudaq::qec::decoding_server::reconcile_gpu_roce_device(std::nullopt, -1),
+      0);
 }
 
-TEST(ResolveDecodeDevice, PinSelectsDevice) {
-  EXPECT_EQ(cudaq::qec::decoding_server::resolve_decode_device(3), 3);
+TEST(GpuRoceDeviceReconcile, EnvOnlyWins) {
+  EXPECT_EQ(cudaq::qec::decoding_server::reconcile_gpu_roce_device(2, -1), 2);
+}
+
+TEST(GpuRoceDeviceReconcile, PinOnlyWins) {
+  EXPECT_EQ(
+      cudaq::qec::decoding_server::reconcile_gpu_roce_device(std::nullopt, 3),
+      3);
+}
+
+TEST(GpuRoceDeviceReconcile, AgreementPasses) {
+  EXPECT_EQ(cudaq::qec::decoding_server::reconcile_gpu_roce_device(1, 1), 1);
+}
+
+TEST(GpuRoceDeviceReconcile, ConflictThrows) {
+  EXPECT_THROW(cudaq::qec::decoding_server::reconcile_gpu_roce_device(0, 2),
+               std::runtime_error);
 }
 
 TEST(SetCudaDeviceForDecode, UnpinnedIsNoOp) {
@@ -317,6 +334,11 @@ TEST(DecodingSessionPinHandshake, UnhonorablePinFailsStartWorker) {
   // The failed worker was joined inside start_worker; nothing is left to
   // serve and destruction must not hang.
   EXPECT_FALSE(session->worker.joinable());
+}
+
+TEST(GpuRoceDeviceReconcile, NegativeEnvThrows) {
+  EXPECT_THROW(cudaq::qec::decoding_server::reconcile_gpu_roce_device(-1, -1),
+               std::runtime_error);
 }
 
 TEST(DecodingSessionPinHandshake, PinnedWorkerStartsAndServes) {
