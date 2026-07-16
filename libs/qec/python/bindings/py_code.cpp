@@ -697,20 +697,19 @@ void bindCode(nb::module_ &mod) {
       nb::arg("code"), nb::arg("op"), nb::arg("numShots"), nb::arg("numRounds"),
       nb::arg("noise") = nb::none());
 
-  nb::class_<decoder_context_handle>(qecmod, "DecoderContext",
-                                     R"pbdoc(
+  nb::class_<decoder_context>(qecmod, "DecoderContext",
+                              R"pbdoc(
       Lazy handle returned by ``decoder_context_from_memory_circuit``.
 
       Stores the raw circuit analysis. Each *_component method canonicalizes
       exactly the requested stabilizer type and returns a ``(dem, m2d, m2o)``
       tuple.
     )pbdoc")
-      .def_prop_ro("num_measurements",
-                   &decoder_context_handle::num_measurements,
+      .def_prop_ro("num_measurements", &decoder_context::num_measurements,
                    "Total number of measurements per shot.")
       .def(
           "x_component",
-          [](const decoder_context_handle &h) {
+          [](const decoder_context &h) {
             auto ctx = h.x_component();
             return nb::make_tuple(ctx.dem, ctx.m2d.rows, ctx.m2o.rows);
           },
@@ -722,7 +721,7 @@ void bindCode(nb::module_ &mod) {
     )pbdoc")
       .def(
           "z_component",
-          [](const decoder_context_handle &h) {
+          [](const decoder_context &h) {
             auto ctx = h.z_component();
             return nb::make_tuple(ctx.dem, ctx.m2d.rows, ctx.m2o.rows);
           },
@@ -734,7 +733,7 @@ void bindCode(nb::module_ &mod) {
     )pbdoc")
       .def(
           "full_component",
-          [](const decoder_context_handle &h) {
+          [](const decoder_context &h) {
             auto ctx = h.full_component();
             return nb::make_tuple(ctx.dem, ctx.m2d.rows, ctx.m2o.rows);
           },
@@ -761,8 +760,10 @@ void bindCode(nb::module_ &mod) {
        whose XOR forms detector ``d``. Each detector's indices are emitted in
        order, followed by -1.
 
-       This is a standalone helper for ``dem_from_kernel`` consumers who hold
-       an m2d map but not a full ``DecoderContext``.
+       This is a standalone helper for consumers who hold an m2d map (e.g.,
+       extracted from a ``decoder_inputs`` returned by a component method)
+       and want to build the D_sparse vector without going through a
+       ``DecoderContext``.
     )pbdoc",
       nb::arg("m2d"));
 

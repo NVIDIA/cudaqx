@@ -593,7 +593,7 @@ void check_matrix_bits(const std::string &name,
   }
 }
 
-// End-to-end realtime decode driven by the memory_circuit_handle API,
+// End-to-end realtime decode driven by the decoder_context API,
 // built from a full-basis CSS memory circuit. Steane's boundary is
 // inhomogeneous: only the fixed (Z) stabilizers carry boundary detectors while
 // interior rounds carry both types. The measurement
@@ -627,7 +627,8 @@ TEST(QECCodeTester, checkRealtimeDecodeFromMemoryCircuit) {
   }
   EXPECT_LT(minRow, maxRow);
 
-  // Configure the realtime decoder entirely from the decoder context.
+  // Configure the realtime decoder from the decoder_inputs returned by
+  // full_component().
   auto decoder =
       cudaq::qec::get_decoder("single_error_lut", dem.detector_error_matrix);
   decoder->set_O_sparse(
@@ -660,7 +661,7 @@ bool tensors_equal(const cudaqx::tensor<uint8_t> &a,
 }
 } // namespace
 
-// decoder_context_from_memory_circuit returns a memory_circuit_handle;
+// decoder_context_from_memory_circuit returns a decoder_context;
 // canonicalization is deferred until a component method is called. Verify that
 // full_component() matches dem_from_memory_circuit and that x_component() /
 // z_component() reproduce x_/z_dem_from_memory_circuit and partition the

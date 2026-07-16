@@ -756,7 +756,7 @@ def test_decoder_context_from_memory_circuit_requires_noise_model():
 
 
 def test_decoder_context_and_components():
-    # decoder_context_from_memory_circuit returns a memory_circuit_handle;
+    # decoder_context_from_memory_circuit returns a decoder_context;
     # canonicalization is deferred until a component method is called.
     # full_component() matches dem_from_memory_circuit;
     # x_component() / z_component() reproduce x_/z_dem_from_memory_circuit.

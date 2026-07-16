@@ -440,7 +440,7 @@ namespace details {
 /// (dem, m2d, m2o). For the full (both-basis) case the boundary-aware
 /// canonicalization is used; for a single-type selection the layout is uniform
 /// so the simpler overload suffices.
-static decoder_context
+static decoder_inputs
 make_component(detector_error_model dem, cudaq::M2DSparseMatrix m2d,
                cudaq::M2OSparseMatrix m2o, std::size_t num_rounds,
                std::size_t num_x_stabilizers, std::size_t num_z_stabilizers,
@@ -513,9 +513,11 @@ std::vector<std::int64_t> d_sparse(const cudaq::M2DSparseMatrix &m2d) {
   return out;
 }
 
-decoder_context_handle decoder_context_from_memory_circuit(
-    const code &code, operation statePrep, std::size_t numRounds,
-    cudaq::noise_model &noise, bool decompose_errors) {
+decoder_context decoder_context_from_memory_circuit(const code &code,
+                                                    operation statePrep,
+                                                    std::size_t numRounds,
+                                                    cudaq::noise_model &noise,
+                                                    bool decompose_errors) {
   if (numRounds == 0)
     throw std::runtime_error(
         "dem_from_memory_circuit error - numRounds must be >= 1. The memory "
@@ -556,7 +558,7 @@ decoder_context_handle decoder_context_from_memory_circuit(
 
   cudaq::dem_options dem_opts;
   dem_opts.decompose_errors = decompose_errors;
-  decoder_context_handle result;
+  decoder_context result;
   auto dem_text = cudaq::dem_from_kernel(
       memory_circuit, &noise, dem_opts, result.m2d_, result.m2o_, stabRound,
       prep, numData, numAncx, numAncz, numRounds, xVec, zVec, obs_flat, num_obs,
@@ -569,25 +571,25 @@ decoder_context_handle decoder_context_from_memory_circuit(
   return result;
 }
 
-std::size_t decoder_context_handle::num_measurements() const {
+std::size_t decoder_context::num_measurements() const {
   return m2d_.num_measurements;
 }
 
-decoder_context decoder_context_handle::x_component() const {
+decoder_inputs decoder_context::x_component() const {
   return details::make_component(dem_, m2d_, m2o_, num_rounds_,
                                  num_x_stabilizers_, num_z_stabilizers_,
                                  fixed_basis_is_z_, /*keep_x=*/true,
                                  /*keep_z=*/false);
 }
 
-decoder_context decoder_context_handle::z_component() const {
+decoder_inputs decoder_context::z_component() const {
   return details::make_component(dem_, m2d_, m2o_, num_rounds_,
                                  num_x_stabilizers_, num_z_stabilizers_,
                                  fixed_basis_is_z_, /*keep_x=*/false,
                                  /*keep_z=*/true);
 }
 
-decoder_context decoder_context_handle::full_component() const {
+decoder_inputs decoder_context::full_component() const {
   return details::make_component(dem_, m2d_, m2o_, num_rounds_,
                                  num_x_stabilizers_, num_z_stabilizers_,
                                  fixed_basis_is_z_, /*keep_x=*/true,

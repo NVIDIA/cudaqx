@@ -161,7 +161,7 @@ sample_memory_circuit(const code &code, std::size_t numShots,
                       std::size_t numRounds, cudaq::noise_model &noise);
 
 /// @brief Finalized decoder inputs: a canonicalized DEM and measurement maps.
-struct decoder_context {
+struct decoder_inputs {
   detector_error_model dem;
   cudaq::M2DSparseMatrix m2d;
   cudaq::M2OSparseMatrix m2o;
@@ -171,23 +171,23 @@ struct decoder_context {
 ///
 /// Stores the raw (uncanonicalized) circuit analysis. Call a component method
 /// to canonicalize exactly the stabilizer type needed and obtain a
-/// `decoder_context`:
+/// `decoder_inputs`:
 ///   - `x_component()` — X-stabilizer detectors only
 ///   - `z_component()` — Z-stabilizer detectors only
 ///   - `full_component()` — both stabilizer types, boundary-aware
-struct decoder_context_handle {
+struct decoder_context {
   /// @brief Total number of measurements per shot (column count of m2d/m2o).
   std::size_t num_measurements() const;
 
-  /// @brief Canonicalize X-stabilizer detectors; return decoder_context.
-  decoder_context x_component() const;
+  /// @brief Canonicalize X-stabilizer detectors; return decoder_inputs.
+  decoder_inputs x_component() const;
 
-  /// @brief Canonicalize Z-stabilizer detectors; return decoder_context.
-  decoder_context z_component() const;
+  /// @brief Canonicalize Z-stabilizer detectors; return decoder_inputs.
+  decoder_inputs z_component() const;
 
   /// @brief Canonicalize both stabilizer types with boundary awareness;
-  /// return decoder_context.
-  decoder_context full_component() const;
+  /// return decoder_inputs.
+  decoder_inputs full_component() const;
 
 private:
   cudaq::M2DSparseMatrix m2d_;
@@ -198,7 +198,7 @@ private:
   std::size_t num_z_stabilizers_ = 0;
   bool fixed_basis_is_z_ = false;
 
-  friend decoder_context_handle
+  friend decoder_context
   decoder_context_from_memory_circuit(const code &, operation, std::size_t,
                                       cudaq::noise_model &, bool);
 };
@@ -254,7 +254,7 @@ detector_error_model z_dem_from_memory_circuit(const code &code,
 /// Executes `dem_from_kernel` once and stores the raw result. Call
 /// `x_component()`, `z_component()`, or `full_component()` on the returned
 /// handle to canonicalize exactly the stabilizer type needed.
-decoder_context_handle decoder_context_from_memory_circuit(
+decoder_context decoder_context_from_memory_circuit(
     const code &code, operation statePrep, std::size_t numRounds,
     cudaq::noise_model &noise, bool decompose_errors = false);
 } // namespace cudaq::qec

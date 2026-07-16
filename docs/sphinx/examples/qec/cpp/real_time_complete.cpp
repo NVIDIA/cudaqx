@@ -28,9 +28,9 @@
 
 // [Begin Save DEM]
 // Save decoder configuration to YAML file
-void save_dem(const cudaq::qec::decoder_context &ctx,
+void save_dem(const cudaq::qec::decoder_inputs &inputs,
               const std::string &filename) {
-  const auto &dem = ctx.dem;
+  const auto &dem = inputs.dem;
   // Create decoder config
   cudaq::qec::decoding::config::decoder_config config;
   config.id = 0;
@@ -39,7 +39,7 @@ void save_dem(const cudaq::qec::decoder_context &ctx,
   config.syndrome_size = dem.num_detectors();
   config.H_sparse = cudaq::qec::pcm_to_sparse_vec(dem.detector_error_matrix);
   config.O_sparse = cudaq::qec::pcm_to_sparse_vec(dem.observables_flips_matrix);
-  config.D_sparse = cudaq::qec::d_sparse(ctx.m2d);
+  config.D_sparse = cudaq::qec::d_sparse(inputs.m2d);
 
   // Decoder parameters are a plain heterogeneous_map; keys are governed by
   // the parameter schema the decoder registered.
