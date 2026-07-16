@@ -107,8 +107,9 @@ GEN_SHOTS=100
 TRANSPORT=""
 # GPU for the gpu_roce scheduler + decode graph.
 GPU_ID=0
-# Server-side GPU RoCE ring depth. "auto" chooses a page count whose total
-# allocation satisfies the host page-size requirement.
+# Server-side GPU RoCE ring depth. "auto" uses the HSB QP's 64-entry receive
+# WQE depth (rings deeper than the WQE count drop frames under load); explicit
+# values above it are clamped.
 GPU_ROCE_NUM_PAGES=auto
 
 # Runtime nv-qldpc plugin for the Relay BP profile: the prebuilt
@@ -132,10 +133,10 @@ MTU=4096
 TIMEOUT=60
 NUM_SHOTS=""
 PAGE_SIZE=384
-# CPU RoCE server ring slots.
+# RX ring depth for both transports, bounded by the HSB QP's 64 receive WQEs (a
+# ring with more slots than WQEs drops frames under load). The server clamps
+# cpu_roce --num-slots to this; the gpu_roce ring is capped to it below.
 NUM_SLOTS=64
-# FPGA/emulator playback window pages.
-PLAYBACK_NUM_PAGES=512
 # TX SGE bytes for the server's SEND responses.  RPCResponse (24B) + a
 # bit-packed correction byte fits well inside 64, keeping every response a
 # single 512-bit ILA beat.
@@ -220,9 +221,9 @@ Run options:
   --frame-size N         Server TX SGE bytes, cpu_roce only (default: 64;
                          gpu_roce uses page-size as HOLOLINK_FRAME_SIZE)
   --gpu N                GPU device id for gpu_roce (default: 0)
-  --gpu-roce-num-pages N Server GPU RoCE ring pages (default: auto-align;
-                         starts from playback window pages)
-  --playback-num-pages N FPGA/emulator playback window pages (default: 512)
+  --gpu-roce-num-pages N Server GPU RoCE ring slots (default: the HSB 64-WQE
+                         depth; values above it are clamped, since a ring with
+                         more slots than WQEs drops frames)
   --spacing N            Inter-shot spacing in microseconds (default: 10)
   --control-port N       UDP control port for emulator (default: 8193)
 
@@ -242,7 +243,6 @@ while [[ $# -gt 0 ]]; do
         --transport)        TRANSPORT="$2"; shift ;;
         --gpu)              GPU_ID="$2"; shift ;;
         --gpu-roce-num-pages) GPU_ROCE_NUM_PAGES="$2"; shift ;;
-        --playback-num-pages) PLAYBACK_NUM_PAGES="$2"; shift ;;
         --nv-qldpc-plugin)  NV_QLDPC_PLUGIN="$2"; shift ;;
         --config)           CONFIG_FILE="$2"; shift ;;
         --syndromes)        SYNDROMES_FILE="$2"; shift ;;
@@ -288,20 +288,38 @@ if [[ "$TRANSPORT" != "cpu_roce" && "$TRANSPORT" != "gpu_roce" ]]; then
     exit 1
 fi
 
-# Some DOCA registrations require the gpu_roce server ring allocation to be
-# host-page aligned. Keep playback capacity independent from the server ring,
-# and choose a server page count that satisfies the allocation contract.
-if [[ "$TRANSPORT" == "gpu_roce" && "$GPU_ROCE_NUM_PAGES" == "auto" ]]; then
-    HOST_PAGE_SIZE=$(getconf PAGESIZE 2>/dev/null || echo 4096)
-    SERVER_PAGE_SIZE=$(( ((PAGE_SIZE + 127) / 128) * 128 ))
-    GPU_ROCE_NUM_PAGES="$PLAYBACK_NUM_PAGES"
-    while (( (SERVER_PAGE_SIZE * GPU_ROCE_NUM_PAGES) % HOST_PAGE_SIZE != 0 )); do
-        ((GPU_ROCE_NUM_PAGES++))
-        if (( GPU_ROCE_NUM_PAGES > 65536 )); then
-            echo "ERROR: unable to auto-align gpu_roce ring for page-size=$PAGE_SIZE host-page-size=$HOST_PAGE_SIZE" >&2
-            exit 1
-        fi
-    done
+# The HSB QP exposes a fixed 64-entry receive WQE depth, and the receiver
+# pre-posts one WQE per ring slot. A ring with MORE slots than WQEs leaves slots
+# un-posted and drops frames under load: cpu_roce (whose registered MR is only
+# num_slots wide) fails outright, and gpu_roce (deeper MR) drops occasionally.
+# So both transports cap the RX ring at the WQE depth -- cpu_roce via
+# NUM_SLOTS (the server clamps its --num-slots the same way), gpu_roce here.
+readonly HSB_WQE_DEPTH=64
+if (( NUM_SLOTS > HSB_WQE_DEPTH )); then
+    echo "WARNING: NUM_SLOTS=$NUM_SLOTS exceeds the HSB WQE depth" \
+         "($HSB_WQE_DEPTH); clamping so the playback ring modulus matches the" \
+         "server's clamped RX ring" >&2
+    NUM_SLOTS="$HSB_WQE_DEPTH"
+fi
+if [[ "$TRANSPORT" == "gpu_roce" ]]; then
+    if [[ "$GPU_ROCE_NUM_PAGES" == "auto" ]]; then
+        GPU_ROCE_NUM_PAGES="$HSB_WQE_DEPTH"
+    elif (( GPU_ROCE_NUM_PAGES > HSB_WQE_DEPTH )); then
+        echo "WARNING: --gpu-roce-num-pages=$GPU_ROCE_NUM_PAGES exceeds the HSB WQE" \
+             "depth ($HSB_WQE_DEPTH); clamping to $HSB_WQE_DEPTH to avoid dropped frames" >&2
+        GPU_ROCE_NUM_PAGES="$HSB_WQE_DEPTH"
+    fi
+    # DOCA requires the gpu_roce ring allocation (num_pages * page size) to be
+    # a multiple of the HOST page size (GpuRoceTransceiver rejects it at
+    # startup otherwise). 64 x 384 B = 24 KiB satisfies 4K/8K-page kernels;
+    # 16K/64K-page hosts (some aarch64 configs) need a larger stride.
+    host_page=$(getconf PAGESIZE)
+    if (( (GPU_ROCE_NUM_PAGES * PAGE_SIZE) % host_page != 0 )); then
+        echo "ERROR: gpu_roce ring ($GPU_ROCE_NUM_PAGES pages x $PAGE_SIZE B) is not a multiple of" >&2
+        echo "       this host's page size ($host_page B). Pass --page-size <multiple of" >&2
+        echo "       $(( host_page / GPU_ROCE_NUM_PAGES ))> so the WQE-depth ring stays host-page aligned." >&2
+        exit 1
+    fi
 fi
 
 # ============================================================================
@@ -1075,6 +1093,16 @@ run_playback() {
     local hololink_ip="$1"; shift
 
     _log "Starting syndrome playback (hololink=$hololink_ip)"
+    # The FPGA/emulator writes syndrome frame rid to RDMA slot (rid % num-pages);
+    # --num-pages programs that ring modulus (via the SIF RDMA target). It MUST
+    # equal the server's RX ring depth, or frames past one ring land outside the
+    # server's registered memory region and are silently lost -- the server then
+    # starves after exactly one ring's worth of slots. The cpu_roce server ring
+    # is NUM_SLOTS; the gpu_roce server ring is GPU_ROCE_NUM_PAGES (both == the 64
+    # WQE depth). This also programs the emulator's SIF target, so emulated mode
+    # tracks the same modulus.
+    local pb_pages="$NUM_SLOTS"
+    if [[ "$TRANSPORT" == "gpu_roce" ]]; then pb_pages="$GPU_ROCE_NUM_PAGES"; fi
     local playback_args=(
         --hololink "$hololink_ip"
         --per-round
@@ -1084,7 +1112,7 @@ run_playback() {
         --rkey "$SERVER_RKEY"
         --buffer-addr "$SERVER_ADDR"
         --page-size "$PAGE_SIZE"
-        --num-pages "$PLAYBACK_NUM_PAGES"
+        --num-pages "$pb_pages"
         "$@"
     )
     if $VERIFY; then
@@ -1115,13 +1143,15 @@ run_emulated() {
     TEMP_FILES+=("$emu_log" "$server_log")
 
     # ---- 1. Start emulator ----
+    # The emulator's RDMA-write ring modulus is the SIF target the playback
+    # programs it with (target.max_buff + 1), not a CLI flag -- it does not parse
+    # --num-pages -- so run_playback's page count drives emulated mode too.
     _log "Starting FPGA emulator on port $CONTROL_PORT"
     "$EMULATOR_BIN" \
         --device="$EMULATOR_DEVICE" \
         --port="$CONTROL_PORT" \
         --bridge-ip="$BRIDGE_IP" \
         --page-size="$PAGE_SIZE" \
-        --num-pages="$PLAYBACK_NUM_PAGES" \
         > >(tee "$emu_log") 2>&1 &
     local emu_pid=$!
     PIDS_TO_KILL+=("$emu_pid")

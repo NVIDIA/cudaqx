@@ -136,6 +136,38 @@ jobs:
         run: bash scripts/ci/test_examples.sh qec
 
       # ========================================================================
+      # Realtime decoding demo example
+      #
+      # Build the two example binaries against the INSTALLED SDK -- this is what
+      # enforces the installed-headers-only rule: a build-tree-only include
+      # would fail to compile here. Then drive the delivered decoding_server
+      # over UDP loopback with a real pymatching decode (the qpu-kernel source).
+      # No hardware: the FPGA source needs a ConnectX NIC and is not run in CI.
+      # ========================================================================
+      - name: Build & run realtime_decoding_demo (qpu-kernel, UDP loopback)
+        shell: bash
+        run: |
+          export PATH=/cudaq-install/bin:$PATH
+          # Mirror build_qec.sh: it builds+installs cudaq-realtime to
+          # $CUDAQ_REALTIME_ROOT, defaulting to /tmp/cudaq-realtime when unset
+          # (the case for this workflow). Track the same value so this step
+          # stays correct if the job ever sets CUDAQ_REALTIME_ROOT.
+          RT="${CUDAQ_REALTIME_ROOT:-/tmp/cudaq-realtime}"
+          EX=docs/sphinx/examples/qec/realtime_decoding_demo
+          cmake -S "$EX" -B /tmp/rtdemo-build -G Ninja \
+            -DCUDAQ_INSTALL_DIR=/cudaq-install \
+            -DCUDAQX_INSTALL_DIR="$HOME/.cudaqx" \
+            -DCUDAQ_REALTIME_DIR="$RT"
+          cmake --build /tmp/rtdemo-build -j
+          bash "$EX/run_realtime_decoding.sh" \
+            --source qpu-kernel --decoder pymatching \
+            --install-prefix "$HOME/.cudaqx" \
+            --cudaq-prefix /cudaq-install \
+            --realtime-lib-dir "$RT" \
+            --example-build-dir /tmp/rtdemo-build \
+            --num-shots 50
+
+      # ========================================================================
       # Upload build artifacts for GPU tests
       # ========================================================================
       - name: Create artifact archive
@@ -143,6 +175,8 @@ jobs:
           tar czf /tmp/qec-build-artifacts.tar.gz \
             /cudaq-install \
             /tmp/cudaq-realtime \
+            "$HOME/.cudaqx" \
+            /tmp/rtdemo-build \
             $GITHUB_WORKSPACE/libs/qec/unittests/decoders/realtime/data \
             $GITHUB_WORKSPACE/${{ steps.build.outputs.build-dir }}
 
@@ -239,6 +273,29 @@ jobs:
         run: |
           PYTHONPATH="/cudaq-install:$GITHUB_WORKSPACE/build_qec/python" \
             pytest -v libs/qec/python/tests/
+
+      # ========================================================================
+      # Realtime decoding demo: trt_decoder THROUGH the decoding server over UDP.
+      # This is the only CI coverage of trt_decoder via the decoding server (the
+      # TRTDecoder unit tests exercise the decoder standalone, not the server).
+      # Reuses the example binaries + SDK install prebuilt in build-and-test
+      # (from the artifact). Needs a GPU (TensorRT inference runs server-side)
+      # plus python onnx (the script generates the identity predecoder model).
+      # Gated on TensorRT availability, matching the TensorRT installs above.
+      # ========================================================================
+      - name: Realtime decoding demo (trt_decoder, qpu-kernel over UDP)
+        if: matrix.platform != 'arm64' || !startsWith(matrix.cuda_version, '12')
+        shell: bash
+        run: |
+          pip install onnx
+          RT="${CUDAQ_REALTIME_ROOT:-/tmp/cudaq-realtime}"
+          bash docs/sphinx/examples/qec/realtime_decoding_demo/run_realtime_decoding.sh \
+            --source qpu-kernel --decoder trt_decoder \
+            --install-prefix "$HOME/.cudaqx" \
+            --cudaq-prefix /cudaq-install \
+            --realtime-lib-dir "$RT" \
+            --example-build-dir /tmp/rtdemo-build \
+            --num-shots 50
 
   # ==========================================================================
   # Multi-GPU tests - decoder placement across >= 2 GPUs (uses build artifacts

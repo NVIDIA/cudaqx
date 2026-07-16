@@ -93,7 +93,10 @@ master_doc = 'index'
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
 # This pattern also affects html_static_path and html_extra_path.
-exclude_patterns = ['_templates']
+# Example-directory READMEs are for the shipped example tree (rendered on
+# GitHub), not standalone doc pages -- without this they are ingested via the
+# '.md' source suffix and warn as toctree orphans.
+exclude_patterns = ['_templates', 'examples/**/README.md']
 
 # The reST default role (used for this markup: `text`) to use for all documents.
 default_role = 'code'  # NOTE: the following may be a better choice to error on the side of flagging anything that is referenced but but not declared
