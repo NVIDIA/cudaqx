@@ -13,7 +13,7 @@
 #include <cstring>
 #include <stdexcept>
 
-namespace cudaq::qec::decoding_server {
+namespace cudaq::qec::decoder_server {
 
 // ---------------------------------------------------------------------------
 // ResponseWriter
@@ -72,9 +72,9 @@ void RpcDispatcher::dispatch(RxFrame frame, ITransceiver &transport) {
   } catch (const std::invalid_argument &) {
     writer.write_error(RpcStatus::BAD_REQUEST);
   } catch (const std::exception &e) {
-    cudaq::qec::error("RpcDispatcher: handler threw: {}", e.what());
+    CUDA_QEC_ERROR("RpcDispatcher: handler threw: {}", e.what());
     writer.write_error(RpcStatus::INTERNAL_ERROR);
   }
 }
 
-} // namespace cudaq::qec::decoding_server
+} // namespace cudaq::qec::decoder_server
