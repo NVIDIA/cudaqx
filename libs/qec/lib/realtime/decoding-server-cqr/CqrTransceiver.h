@@ -9,7 +9,7 @@
 #pragma once
 
 #include "ITransceiver.h"
-#include "RpcWireFormat.h"
+#include "cudaq/qec/realtime/decoder_rpc_wire_format.h"
 #include "cudaq/realtime/daemon/dispatcher/cudaq_realtime.h"
 #include "cudaq/realtime/daemon/dispatcher/dispatch_kernel_launch.h"
 
@@ -22,6 +22,14 @@
 #include <unordered_map>
 
 namespace cudaq::qec::decoding_server {
+
+using cudaq::qec::decoding::rpc::bit_packed_bytes;
+using cudaq::qec::decoding::rpc::EnqueueRequestPayload;
+using cudaq::qec::decoding::rpc::kEnqueueSyndromesFunctionId;
+using cudaq::qec::decoding::rpc::kMaxSyndromeBits;
+using cudaq::qec::decoding::rpc::RpcStatus;
+using cudaq::realtime::RPCHeader;
+using cudaq::realtime::RPCResponse;
 
 namespace detail {
 
@@ -110,7 +118,7 @@ inline bool parse_cqr_enqueue_frame(const void *rx_slot, std::size_t slot_size,
 /// Format translation: the wire frame follows decoder_server_runtime.md
 /// (bit-packed syndromes with an explicit uint64 byte-count prefix on the
 /// ARRAY_UINT8 argument); inject() validates it and re-frames to the
-/// internal EnqueuePayload layout (same fields, no byte-count prefix).
+/// internal EnqueueRequestPayload layout (same fields, no byte-count prefix).
 class CqrTransceiver final : public ITransceiver {
 public:
   /// Called from CUDAQ handler threads for each incoming RPC.
@@ -145,7 +153,7 @@ private:
   std::unordered_map<uint32_t, PendingTx> pending_; // keyed by request_id
 
   // Translate CUDAQ enqueue_syndromes payload (stdvec<i1> format) to our
-  // RPCHeader + EnqueuePayload + bit-packed bytes.
+  // RPCHeader + EnqueueRequestPayload + bit-packed bytes.
   static bool build_enqueue_frame(const void *rx_slot, std::size_t slot_size,
                                   RxFrame &out);
 
@@ -321,27 +329,28 @@ inline bool CqrTransceiver::build_enqueue_frame(const void *rx_slot,
   if (!detail::parse_cqr_enqueue_frame(rx_slot, slot_size, request))
     return false;
 
-  // Re-frame to RPCHeader + EnqueuePayload + bit-packed bytes (the internal
-  // layout drops the byte-count prefix; the bits stay packed as-is).
-  out.buf.resize(sizeof(RPCHeader) + sizeof(EnqueuePayload) +
+  // Re-frame to RPCHeader + EnqueueRequestPayload + bit-packed bytes (the
+  // internal layout drops the byte-count prefix; the bits stay packed as-is).
+  out.buf.resize(sizeof(RPCHeader) + sizeof(EnqueueRequestPayload) +
                  request.byte_count);
 
   auto *hdr = reinterpret_cast<RPCHeader *>(out.buf.data());
-  hdr->magic = kRPCRequestMagic;
+  hdr->magic = cudaq::realtime::RPC_MAGIC_REQUEST;
   hdr->function_id = kEnqueueSyndromesFunctionId;
   hdr->arg_len =
-      static_cast<uint32_t>(sizeof(EnqueuePayload) + request.byte_count);
+      static_cast<uint32_t>(sizeof(EnqueueRequestPayload) + request.byte_count);
   hdr->request_id = request.header->request_id;
   hdr->ptp_timestamp = request.header->ptp_timestamp;
 
-  auto *req =
-      reinterpret_cast<EnqueuePayload *>(out.buf.data() + sizeof(RPCHeader));
+  auto *req = reinterpret_cast<EnqueueRequestPayload *>(out.buf.data() +
+                                                        sizeof(RPCHeader));
   req->decoder_id = static_cast<int64_t>(request.decoder_id);
   req->counter = static_cast<int64_t>(request.counter);
   req->syndrome_mapping_id = static_cast<int64_t>(request.syndrome_mapping_id);
   req->num_syndromes = static_cast<int64_t>(request.num_syndromes);
 
-  uint8_t *dst = out.buf.data() + sizeof(RPCHeader) + sizeof(EnqueuePayload);
+  uint8_t *dst =
+      out.buf.data() + sizeof(RPCHeader) + sizeof(EnqueueRequestPayload);
   std::memcpy(dst, request.packed_bits, request.byte_count);
 
   out.vp_id = 0;
@@ -360,8 +369,9 @@ inline bool CqrTransceiver::build_passthrough_frame(const void *rx_slot,
   if (cqr_hdr->magic != cudaq::realtime::RPC_MAGIC_REQUEST)
     return false;
 
-  // get_corrections and reset_decoder payloads are field-compatible with our
-  // GetCorrectionsPayload / ResetPayload; copy verbatim and rewrite the header.
+  // get_corrections and reset_decoder payloads already match
+  // GetCorrectionsRequestPayload / ResetRequestPayload; copy verbatim and
+  // rewrite the header.
   const std::size_t total =
       sizeof(cudaq::realtime::RPCHeader) + cqr_hdr->arg_len;
   if (total > slot_size)
@@ -369,7 +379,7 @@ inline bool CqrTransceiver::build_passthrough_frame(const void *rx_slot,
 
   out.buf.resize(sizeof(RPCHeader) + cqr_hdr->arg_len);
   auto *hdr = reinterpret_cast<RPCHeader *>(out.buf.data());
-  hdr->magic = kRPCRequestMagic;
+  hdr->magic = cudaq::realtime::RPC_MAGIC_REQUEST;
   hdr->function_id = fn_id;
   hdr->arg_len = cqr_hdr->arg_len;
   hdr->request_id = cqr_hdr->request_id;

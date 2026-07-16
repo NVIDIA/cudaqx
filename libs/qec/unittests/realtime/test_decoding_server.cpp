@@ -88,7 +88,7 @@ TEST(CqrTransceiverTest, RejectsPayloadBeyondReportedSlot) {
   EXPECT_EQ(response->request_id, header.request_id);
 }
 
-TEST(CqrTransceiverTest, AcceptsAnExactlySizedEnqueuePayload) {
+TEST(CqrTransceiverTest, AcceptsAnExactlySizedEnqueueRequestPayload) {
   using namespace cudaq::qec::decoding_server;
 
   // 4-arg wire format (see RejectsPayloadBeyondReportedSlot).
@@ -112,8 +112,9 @@ TEST(CqrTransceiverTest, AcceptsAnExactlySizedEnqueuePayload) {
   transceiver.inject(rx.data(), tx.data(), rx.size(), header.function_id);
   auto frame = transceiver.recv();
 
-  ASSERT_EQ(frame.buf.size(), sizeof(RPCHeader) + sizeof(EnqueuePayload) + 1);
-  const auto *request = reinterpret_cast<const EnqueuePayload *>(
+  ASSERT_EQ(frame.buf.size(),
+            sizeof(RPCHeader) + sizeof(EnqueueRequestPayload) + 1);
+  const auto *request = reinterpret_cast<const EnqueueRequestPayload *>(
       frame.buf.data() + sizeof(RPCHeader));
   EXPECT_EQ(request->decoder_id, 3);
   EXPECT_EQ(request->counter, 7);

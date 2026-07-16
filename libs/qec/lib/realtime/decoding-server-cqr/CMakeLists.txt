@@ -123,8 +123,12 @@ message(STATUS
   "cudaq-qec-decoding-server: CPU RoCE DISABLED (skeleton only; ibverbs implementation pending)")
 
 # ---------------------------------------------------------------------------
-# Core decoding server (always built): transport abstraction, session registry,
-# per-decoder worker threads, RPC dispatcher.  No dependency on CUDAQ_REALTIME.
+# Core decoding server: transport abstraction, session registry, per-decoder
+# worker threads, RPC dispatcher.  The wire format (function IDs, payload
+# structs, RPCHeader/RPCResponse) comes from cudaq/qec/realtime/
+# decoder_rpc_wire_format.h, which includes the cudaq realtime headers -- so
+# the server (and everything below) is only built when a realtime-enabled
+# CUDA-Q install is found.
 #
 # Deliberately excludes GpuRoceTransceiver: consumers of this library (unit
 # tests, the CQR plugin) must stay loadable on driverless machines, and the
@@ -132,6 +136,13 @@ message(STATUS
 # time.  gpu_roce lives in the cudaq-qec-decoding-server-gpuroce component
 # below, reached through a weak factory symbol (see DecodingServer.cpp).
 # ---------------------------------------------------------------------------
+if(NOT CUDAQ_REALTIME_INCLUDE_DIR)
+  message(STATUS
+    "cudaq-qec-decoding-server: SKIPPED (cuda-quantum realtime headers not "
+    "found; set CUDAQ_REALTIME_ROOT to enable the decoding server)")
+  return()
+endif()
+
 add_library(cudaq-qec-decoding-server STATIC
   RoundAccumulator.cpp
   DecodingSession.cpp
@@ -148,6 +159,10 @@ target_include_directories(cudaq-qec-decoding-server
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
     $<BUILD_INTERFACE:${CUDAQX_QEC_INCLUDE_DIR}>
     $<BUILD_INTERFACE:${_core_include_dir}>
+    # decoder_rpc_wire_format.h pulls in the cudaq realtime dispatcher
+    # headers; propagate the path so test targets linking this library
+    # compile without their own realtime include setup.
+    $<BUILD_INTERFACE:${CUDAQ_REALTIME_INCLUDE_DIR}>
     $<INSTALL_INTERFACE:include>
 )
 

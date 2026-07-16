@@ -13,7 +13,7 @@
 #include "../hardware_guards.h"
 
 #include "cudaq/qec/logger.h"
-#include "cudaq/qec/realtime/decoder_rpc_ids.h"
+#include "cudaq/qec/realtime/decoder_rpc_wire_format.h"
 #include "cudaq/qec/realtime/graph_resources.h"
 #include "cudaq/realtime/daemon/dispatcher/dispatch_kernel_launch.h"
 
@@ -111,6 +111,8 @@ bool allocate_pinned_mapped(std::size_t bytes, void **host_out,
 // HOST-mode helpers (two-ring CUDAQ_DISPATCH_HOST_CALL handlers)
 //==============================================================================
 
+namespace rpc = cudaq::qec::decoding::rpc;
+
 // The HOST_CALL handlers below are plain C function pointers with no
 // user-context argument, so the active decoder table must be reachable from a
 // process-global.  It is published/cleared by a HOST-mode initialize()/
@@ -119,13 +121,15 @@ bool allocate_pinned_mapped(std::size_t bytes, void **host_out,
 // initialize()).
 std::atomic<Decoders *> g_active_decoders{nullptr};
 
+// Throws std::out_of_range for an unknown decoder_id so the handlers below can
+// map it to RpcStatus::INVALID_DECODER, mirroring SessionRegistry::get() /
+// RpcDispatcher on the network-transport path.
 cudaq::qec::decoder *get_decoder_or_throw(std::int64_t decoder_id) {
   Decoders *decoders = g_active_decoders.load(std::memory_order_acquire);
   if (!decoders || decoder_id < 0 ||
       static_cast<std::size_t>(decoder_id) >= decoders->size() ||
       !(*decoders)[static_cast<std::size_t>(decoder_id)])
-    throw std::runtime_error("invalid decoder_id " +
-                             std::to_string(decoder_id));
+    throw std::out_of_range("invalid decoder_id " + std::to_string(decoder_id));
   return (*decoders)[static_cast<std::size_t>(decoder_id)].get();
 }
 
@@ -150,12 +154,12 @@ static void apply_decoder_cuda_device(cudaq::qec::decoder *dec) {
 // caller (cudaq_host_dispatcher_loop::handle_host_call) publishes tx_flags
 // AFTER the handler returns; the handler only needs to write the response body
 // + header and release-store the magic.
-void write_response(void *tx_slot, const void *rx_slot, std::int32_t status,
+void write_response(void *tx_slot, const void *rx_slot, rpc::RpcStatus status,
                     std::uint32_t result_len = 0) {
   const auto *request =
       static_cast<const cudaq::realtime::RPCHeader *>(rx_slot);
   auto *response = static_cast<cudaq::realtime::RPCResponse *>(tx_slot);
-  response->status = status;
+  response->status = static_cast<std::int32_t>(status);
   response->result_len = result_len;
   response->request_id = request->request_id;
   response->ptp_timestamp = request->ptp_timestamp;
@@ -170,19 +174,18 @@ std::uint8_t *response_body(void *tx_slot) {
 
 void enqueue_syndromes_host(const void *rx_slot, void *tx_slot,
                             std::size_t slot_size) {
-  namespace rpc = cudaq::qec::decoding::rpc;
   try {
     const auto *header =
         static_cast<const cudaq::realtime::RPCHeader *>(rx_slot);
     if (header->arg_len < sizeof(rpc::EnqueueRequestPayload)) {
-      write_response(tx_slot, rx_slot, -1);
+      write_response(tx_slot, rx_slot, rpc::RpcStatus::BAD_REQUEST);
       return;
     }
     const auto *body = reinterpret_cast<const rpc::EnqueueRequestPayload *>(
         static_cast<const std::uint8_t *>(rx_slot) +
         sizeof(cudaq::realtime::RPCHeader));
     if (body->num_syndromes < 0 || body->syndrome_mapping_id != 0) {
-      write_response(tx_slot, rx_slot, -4);
+      write_response(tx_slot, rx_slot, rpc::RpcStatus::BAD_REQUEST);
       return;
     }
     const auto num_syndromes = static_cast<std::uint64_t>(body->num_syndromes);
@@ -190,7 +193,7 @@ void enqueue_syndromes_host(const void *rx_slot, void *tx_slot,
                                          rpc::bit_packed_bytes(num_syndromes);
     if (header->arg_len != expected_arg_len ||
         sizeof(cudaq::realtime::RPCHeader) + expected_arg_len > slot_size) {
-      write_response(tx_slot, rx_slot, -4);
+      write_response(tx_slot, rx_slot, rpc::RpcStatus::BAD_REQUEST);
       return;
     }
 
@@ -202,7 +205,7 @@ void enqueue_syndromes_host(const void *rx_slot, void *tx_slot,
     // overflow the decoder's accumulation buffer and be silently dropped by
     // enqueue_syndrome (which returns false) while we ACK success.
     if (num_syndromes > decoder->get_num_msyn_per_decode()) {
-      write_response(tx_slot, rx_slot, -4);
+      write_response(tx_slot, rx_slot, rpc::RpcStatus::BAD_REQUEST);
       return;
     }
     const std::uint8_t *bits = reinterpret_cast<const std::uint8_t *>(body + 1);
@@ -214,20 +217,21 @@ void enqueue_syndromes_host(const void *rx_slot, void *tx_slot,
     // success, so it is intentionally not treated as an error here; the
     // oversize guard above is what rejects malformed lengths.
     (void)decoder->enqueue_syndrome(syndromes.data(), syndromes.size());
-    write_response(tx_slot, rx_slot, 0);
+    write_response(tx_slot, rx_slot, rpc::RpcStatus::OK);
+  } catch (const std::out_of_range &) {
+    write_response(tx_slot, rx_slot, rpc::RpcStatus::INVALID_DECODER);
   } catch (...) {
-    write_response(tx_slot, rx_slot, -2);
+    write_response(tx_slot, rx_slot, rpc::RpcStatus::INTERNAL_ERROR);
   }
 }
 
 void get_corrections_host(const void *rx_slot, void *tx_slot,
                           std::size_t slot_size) {
-  namespace rpc = cudaq::qec::decoding::rpc;
   try {
     const auto *header =
         static_cast<const cudaq::realtime::RPCHeader *>(rx_slot);
     if (header->arg_len != sizeof(rpc::GetCorrectionsRequestPayload)) {
-      write_response(tx_slot, rx_slot, -1);
+      write_response(tx_slot, rx_slot, rpc::RpcStatus::BAD_REQUEST);
       return;
     }
     const auto *body =
@@ -235,20 +239,20 @@ void get_corrections_host(const void *rx_slot, void *tx_slot,
             static_cast<const std::uint8_t *>(rx_slot) +
             sizeof(cudaq::realtime::RPCHeader));
     if (body->return_size < 0) {
-      write_response(tx_slot, rx_slot, -4);
+      write_response(tx_slot, rx_slot, rpc::RpcStatus::BAD_REQUEST);
       return;
     }
 
     auto *decoder = get_decoder_or_throw(body->decoder_id);
     const auto return_size = static_cast<std::uint64_t>(body->return_size);
     if (return_size > decoder->get_num_observables()) {
-      write_response(tx_slot, rx_slot, -4);
+      write_response(tx_slot, rx_slot, rpc::RpcStatus::BAD_REQUEST);
       return;
     }
     // result_len = ceil(R/8) exactly per decoder_server_runtime.md (no pad).
     const std::size_t result_len = rpc::bit_packed_bytes(return_size);
     if (sizeof(cudaq::realtime::RPCResponse) + result_len > slot_size) {
-      write_response(tx_slot, rx_slot, -5);
+      write_response(tx_slot, rx_slot, rpc::RpcStatus::BAD_REQUEST);
       return;
     }
 
@@ -261,19 +265,21 @@ void get_corrections_host(const void *rx_slot, void *tx_slot,
     }
     if (body->reset != 0)
       decoder->clear_corrections();
-    write_response(tx_slot, rx_slot, 0, static_cast<std::uint32_t>(result_len));
+    write_response(tx_slot, rx_slot, rpc::RpcStatus::OK,
+                   static_cast<std::uint32_t>(result_len));
+  } catch (const std::out_of_range &) {
+    write_response(tx_slot, rx_slot, rpc::RpcStatus::INVALID_DECODER);
   } catch (...) {
-    write_response(tx_slot, rx_slot, -2);
+    write_response(tx_slot, rx_slot, rpc::RpcStatus::INTERNAL_ERROR);
   }
 }
 
 void reset_decoder_host(const void *rx_slot, void *tx_slot, std::size_t) {
-  namespace rpc = cudaq::qec::decoding::rpc;
   try {
     const auto *header =
         static_cast<const cudaq::realtime::RPCHeader *>(rx_slot);
     if (header->arg_len != sizeof(rpc::ResetRequestPayload)) {
-      write_response(tx_slot, rx_slot, -1);
+      write_response(tx_slot, rx_slot, rpc::RpcStatus::BAD_REQUEST);
       return;
     }
     const auto *body = reinterpret_cast<const rpc::ResetRequestPayload *>(
@@ -282,9 +288,11 @@ void reset_decoder_host(const void *rx_slot, void *tx_slot, std::size_t) {
     auto *decoder = get_decoder_or_throw(body->decoder_id);
     apply_decoder_cuda_device(decoder);
     decoder->reset_decoder();
-    write_response(tx_slot, rx_slot, 0);
+    write_response(tx_slot, rx_slot, rpc::RpcStatus::OK);
+  } catch (const std::out_of_range &) {
+    write_response(tx_slot, rx_slot, rpc::RpcStatus::INVALID_DECODER);
   } catch (...) {
-    write_response(tx_slot, rx_slot, -2);
+    write_response(tx_slot, rx_slot, rpc::RpcStatus::INTERNAL_ERROR);
   }
 }
 

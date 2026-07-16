@@ -69,7 +69,7 @@
 
 #include "qec_realtime_session.h"
 #include "rpc_producer.h"
-#include "cudaq/qec/realtime/decoder_rpc_ids.h"
+#include "cudaq/qec/realtime/decoder_rpc_wire_format.h"
 
 // YAML -> decoder construction lives in a .cpp shim so this .cu file doesn't
 // need to include decoding_config.h, which uses C++20 `= default` operator==
