@@ -1,11 +1,6 @@
 {
   "cudaq": {
-<<<<<<< HEAD
     "repository": "anjbur/cuda-quantum",
     "ref": "d16bf937633078e81e558a4c4972fa811153eb42"
-=======
-    "repository": "NVIDIA/cuda-quantum",
-    "ref": "1305d05568ff5a09663c39325315bf8b2a4f9d23"
->>>>>>> parent of 77cc4681 (Bump CUDA-Q commit (#688))
   }
 }
