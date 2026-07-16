@@ -42,11 +42,11 @@ struct GpuRoceConfig {
   /// Set iff HOLOLINK_GPU_ID was present in the environment (the FPGA/NIC
   /// affinity is a topology fact; absence defers to the decoder's pin).
   std::optional<int> gpu_id_env;
-  size_t frame_size{384}; ///< HOLOLINK_FRAME_SIZE (max RPC frame bytes)
-  size_t page_size{0};    ///< HOLOLINK_PAGE_SIZE (0 → derived from frame_size)
-  size_t num_pages{64};   ///< HOLOLINK_NUM_PAGES (ring depth)
-  std::string peer_ip;    ///< HOLOLINK_PEER_IP   (FPGA/emulator IPv4)
-  int reserved_sms{2};    ///< HOLOLINK_RESERVED_SMS (SMs for Hololink RX/TX)
+  size_t frame_size{384};  ///< HOLOLINK_FRAME_SIZE (max RPC frame bytes)
+  size_t page_size{0};     ///< HOLOLINK_PAGE_SIZE (0 → derived from frame_size)
+  size_t num_pages{64};    ///< HOLOLINK_NUM_PAGES (ring depth)
+  std::string peer_ip;     ///< HOLOLINK_PEER_IP   (FPGA/emulator IPv4)
+  int reserved_sms{2};     ///< HOLOLINK_RESERVED_SMS (SMs for Hololink RX/TX)
 
   static GpuRoceConfig from_env();
 };
@@ -83,12 +83,6 @@ public:
   /// `decoder::capture_decode_graph()`; it is cast internally to
   /// `cudaq::qec::realtime::graph_resources *` to extract `graph_exec`.
   void launch_scheduler(void *raw_graph_resources);
-
-  /// ITransceiver hook: forwards to launch_scheduler().
-  bool launch_device_scheduler(void *raw_graph_resources) override {
-    launch_scheduler(raw_graph_resources);
-    return true;
-  }
 
   /// Block until shutdown() is called.  The GPU scheduler handles RX/TX;
   /// this method only satisfies the ITransceiver contract for DecodingServer.
