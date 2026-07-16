@@ -704,6 +704,7 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
                       cudaq::qec::decoding::config::decoder_config &config) {
     io.mapRequired("id", config.id);
     io.mapRequired("type", config.type);
+    io.mapOptional("cuda_device_id", config.cuda_device_id);
     io.mapRequired("block_size", config.block_size);
     io.mapRequired("syndrome_size", config.syndrome_size);
     io.mapRequired("H_sparse", config.H_sparse);

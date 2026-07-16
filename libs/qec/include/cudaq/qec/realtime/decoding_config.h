@@ -174,6 +174,11 @@ struct sliding_window_config {
 struct decoder_config {
   int64_t id = 0;
   std::string type;
+  /// CUDA device this decoder is pinned to at construction (see the
+  /// "cuda_device_id" decoder parameter). Placement knob common to any
+  /// GPU-accelerated decoder, hence at this level rather than inside the
+  /// per-decoder custom args. Unset = unpinned.
+  std::optional<int> cuda_device_id;
   uint64_t block_size = 0;
   uint64_t syndrome_size = 0;
   std::vector<std::int64_t> H_sparse;

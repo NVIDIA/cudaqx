@@ -155,6 +155,7 @@ arguments:
    decoders:
      - id: 0
        type: pymatching
+       cuda_device_id: 0   # optional: pin this decoder to a CUDA device
        block_size: 3
        syndrome_size: 3
        H_sparse: [ 0, -1, 1, -1, 2, -1 ]
@@ -163,6 +164,14 @@ arguments:
        decoder_custom_args:
          error_rate_vec: [ 0.1, 0.1, 0.1 ]
          merge_strategy: smallest_weight
+
+``cuda_device_id`` pins a GPU-accelerated decoder (e.g. ``nv-qldpc-decoder``
+or ``trt_decoder``) to a specific CUDA device. The same knob is available as
+a construction parameter in C++ and Python
+(``qec.get_decoder("trt_decoder", H, cuda_device_id=1)``). The thread that
+creates a decoder is pinned to that device and is expected to drive its
+decode calls; create each pinned decoder on its own thread to place several
+decoders on different GPUs.
 
 Here is how to create and save a decoder configuration:
 
