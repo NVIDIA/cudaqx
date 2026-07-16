@@ -56,8 +56,7 @@ add_executable(test_decoding_server_core test_decoding_server_core.cpp)
 target_link_libraries(test_decoding_server_core PRIVATE
   GTest::gtest_main
   cudaq-qec-decoding-server
-  cudaq::cudaq
-  CUDA::cudart)
+  cudaq::cudaq)
 add_dependencies(CUDAQXQECUnitTests test_decoding_server_core)
 gtest_discover_tests(test_decoding_server_core)
 
