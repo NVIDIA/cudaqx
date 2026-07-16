@@ -7,47 +7,17 @@
  ******************************************************************************/
 
 #include "DecodingSession.h"
-#include "DecodingServer.h"
 #include "RpcWireFormat.h"
 #include "../../hardware_guards.h"
 #include "cudaq/qec/logger.h"
 
 #include <chrono>
-#include <cstdlib>
 #include <cstring>
 #include <future>
-#include <optional>
 #include <stdexcept>
-#include <string>
 #include <vector>
 
 namespace cudaq::qec::decoding_server {
-
-namespace {
-
-std::optional<int> env_int_optional(const char *name) {
-  const char *value = std::getenv(name);
-  if (!value || !*value)
-    return std::nullopt;
-  try {
-    return std::stoi(value);
-  } catch (const std::exception &) {
-    throw std::runtime_error(std::string("invalid ") + name +
-                             " value: " + value);
-  }
-}
-
-void set_graph_capture_device(const cudaq::qec::decoder &decoder) {
-  const int device = reconcile_gpu_roce_device(
-      env_int_optional("HOLOLINK_GPU_ID"), decoder.get_cuda_device_id());
-  cudaq::qec::detail_affinity::set_cuda_device_for_decode(device);
-  if (device >= 0)
-    CUDA_QEC_INFO(
-        "DecodingSession::create: set CUDA device {} before graph capture",
-        device);
-}
-
-} // namespace
 
 // Busy high-water mark across all sessions (worker threads increment while
 // executing an item).
@@ -83,7 +53,6 @@ DecodingSession::create(std::unique_ptr<cudaq::qec::decoder> decoder,
   s->dec = std::move(decoder);
 
   if (s->dec->supports_graph_dispatch()) {
-    set_graph_capture_device(*s->dec);
     void *gr = s->dec->capture_decode_graph();
     s->graph_resources =
         GraphResourcesPtr(gr, GraphResourcesDeleter{s->dec.get()});

@@ -180,7 +180,6 @@ if(CMAKE_CUDA_COMPILER)
       COMPONENT qec-lib
       ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     )
-
   else()
     message(WARNING "cuda-quantum realtime headers not found. "
                     "Device library cudaq-qec-realtime-device will not be built. "
