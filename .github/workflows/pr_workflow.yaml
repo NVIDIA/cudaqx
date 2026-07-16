@@ -213,20 +213,19 @@ jobs:
       cache_key_suffix: pr${{ needs.check-changes.outputs.pr-number }}
       cudaq_dev_images: ${{ needs.check-changes.outputs.cudaq-dev-images }}
 
-  # Temporarily disabled while validating the CUDA-Q 0.15.1 release inputs.
-  # build-wheels:
-  #   name: Wheels
-  #   needs: [check-changes]
-  #   if: |
-  #     !failure() && !cancelled() &&
-  #     needs.check-changes.outputs.build-wheels == 'true'
-  #   uses: ./.github/workflows/build_wheels.yaml
-  #   with:
-  #     build_type: Release
-  #     cudaq_wheels: Custom
-  #     cache_key_suffix: pr${{ needs.check-changes.outputs.pr-number }}
-  #   secrets:
-  #     CUDAQ_ACCESS_TOKEN: ${{ secrets.CUDAQ_ACCESS_TOKEN }}
+  build-wheels:
+    name: Wheels
+    needs: [check-changes]
+    if: |
+      !failure() && !cancelled() &&
+      needs.check-changes.outputs.build-wheels == 'true'
+    uses: ./.github/workflows/build_wheels.yaml
+    with:
+      build_type: Release
+      cudaq_wheels: Custom
+      cache_key_suffix: pr${{ needs.check-changes.outputs.pr-number }}
+    secrets:
+      CUDAQ_ACCESS_TOKEN: ${{ secrets.CUDAQ_ACCESS_TOKEN }}
 
   # This job is used for branch protection checks.
   verify:
@@ -237,7 +236,7 @@ jobs:
       - build-all
       - build-qec
       - build-solvers
-      # - build-wheels
+      - build-wheels
     runs-on: ubuntu-latest
     steps:
       - name: Check results
@@ -260,7 +259,7 @@ jobs:
           check_result "build-all"     "${{needs.build-all.result}}"
           check_result "build-qec"     "${{needs.build-qec.result}}"
           check_result "build-solvers" "${{needs.build-solvers.result}}"
-          # check_result "build-wheels"  "${{needs.build-wheels.result}}"
+          check_result "build-wheels"  "${{needs.build-wheels.result}}"
 
           if [[ "$status" != "success" ]]; then
             exit 1
