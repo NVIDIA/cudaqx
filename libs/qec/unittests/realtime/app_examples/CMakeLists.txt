@@ -990,13 +990,13 @@ _sc4_reject(p-spam-zero-generation "--p_spam must be > 0 to generate"
   --distance 3 --num_rounds 3 --p_spam 0 --decoder_type pymatching
   --save_dem ${_sc4_neg_dir}/ps0.yml)
 
-# Dual-parse pin, plugin-free: generation instantiates no decoder, so this
-# runs everywhere. Structural check (always): the BP entry carries the
-# undecomposed hyperedge H -- strictly fewer columns than the matching entry's
-# decomposed H. Full check (python3 available): the mixed-list BP entry's
-# column multiset of (detector support, observable support, probability) is
-# IDENTICAL to a directly generated undecomposed reference config at the same
-# geometry.
+# Dual-parse pin: generation instantiates no decoder, but YAML emission
+# requires the nv-qldpc-decoder parameter schema (registered by the plugin).
+# Structural check: the BP entry carries the undecomposed hyperedge H --
+# strictly fewer columns than the matching entry's decomposed H.
+# Full check (python3 available): the mixed-list BP entry's column multiset
+# of (detector support, observable support, probability) is IDENTICAL to a
+# directly generated undecomposed reference config at the same geometry.
 function(_sc4_dual_parse_test distance num_rounds)
   add_test(NAME app_examples.surface_code-4-yaml-dual-parse-gen-d${distance}
     COMMAND bash -c [==[
@@ -1081,8 +1081,12 @@ fi
   set_tests_properties(app_examples.surface_code-4-yaml-dual-parse-gen-d${distance}
     PROPERTIES ENVIRONMENT "${_sc4_neg_env}")
 endfunction()
-_sc4_dual_parse_test(3 3)
-_sc4_dual_parse_test(5 5)
+if(TARGET cudaq-qec-nv-qldpc-decoder
+   OR QEC_EXTERNAL_DECODERS
+   OR DEFINED ENV{QEC_EXTERNAL_DECODERS})
+  _sc4_dual_parse_test(3 3)
+  _sc4_dual_parse_test(5 5)
+endif()
 
 # X-basis Ising bundle rejected (basis must be Z). Fabricate just the
 # metadata.txt the loader inspects; the dummy ONNX is never opened because the
