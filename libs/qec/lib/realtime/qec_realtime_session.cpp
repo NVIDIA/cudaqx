@@ -49,38 +49,39 @@ void apply_decoder_cuda_device(cudaq::qec::decoder *decoder) {
       decoder->get_cuda_device_id());
 }
 
-void write_response(void *slot_host, std::int32_t status,
+void write_response(void *tx_slot, const void *rx_slot, std::int32_t status,
                     std::uint32_t result_len = 0) {
-  auto *header = static_cast<cudaq::realtime::RPCHeader *>(slot_host);
-  auto *response = static_cast<cudaq::realtime::RPCResponse *>(slot_host);
-  const std::uint32_t request_id = header->request_id;
-  const std::uint64_t ptp_timestamp = header->ptp_timestamp;
+  const auto *request =
+      static_cast<const cudaq::realtime::RPCHeader *>(rx_slot);
+  auto *response = static_cast<cudaq::realtime::RPCResponse *>(tx_slot);
   response->status = status;
   response->result_len = result_len;
-  response->request_id = request_id;
-  response->ptp_timestamp = ptp_timestamp;
+  response->request_id = request->request_id;
+  response->ptp_timestamp = request->ptp_timestamp;
   __atomic_store_n(&response->magic, cudaq::realtime::RPC_MAGIC_RESPONSE,
                    __ATOMIC_RELEASE);
 }
 
-std::uint8_t *response_body(void *slot_host) {
-  return static_cast<std::uint8_t *>(slot_host) +
+std::uint8_t *response_body(void *tx_slot) {
+  return static_cast<std::uint8_t *>(tx_slot) +
          sizeof(cudaq::realtime::RPCResponse);
 }
 
-void enqueue_syndromes_host(void *slot_host, std::size_t slot_size) {
+void enqueue_syndromes_host(const void *rx_slot, void *tx_slot,
+                            std::size_t slot_size) {
   namespace rpc = cudaq::qec::decoding::rpc;
   try {
-    auto *header = static_cast<cudaq::realtime::RPCHeader *>(slot_host);
+    const auto *header =
+        static_cast<const cudaq::realtime::RPCHeader *>(rx_slot);
     if (header->arg_len < sizeof(rpc::EnqueueRequestPayload)) {
-      write_response(slot_host, -1);
+      write_response(tx_slot, rx_slot, -1);
       return;
     }
-    auto *body = reinterpret_cast<const rpc::EnqueueRequestPayload *>(
-        static_cast<std::uint8_t *>(slot_host) +
+    const auto *body = reinterpret_cast<const rpc::EnqueueRequestPayload *>(
+        static_cast<const std::uint8_t *>(rx_slot) +
         sizeof(cudaq::realtime::RPCHeader));
     if (body->num_syndromes < 0 || body->syndrome_mapping_id != 0) {
-      write_response(slot_host, -4);
+      write_response(tx_slot, rx_slot, -4);
       return;
     }
     const auto num_syndromes = static_cast<std::uint64_t>(body->num_syndromes);
@@ -89,7 +90,7 @@ void enqueue_syndromes_host(void *slot_host, std::size_t slot_size) {
                         rpc::bit_packed_bytes(num_syndromes));
     if (header->arg_len != expected_arg_len ||
         sizeof(cudaq::realtime::RPCHeader) + expected_arg_len > slot_size) {
-      write_response(slot_host, -4);
+      write_response(tx_slot, rx_slot, -4);
       return;
     }
 
@@ -101,7 +102,7 @@ void enqueue_syndromes_host(void *slot_host, std::size_t slot_size) {
     // overflow the decoder's accumulation buffer and be silently dropped by
     // enqueue_syndrome (which returns false) while we ACK success.
     if (num_syndromes > decoder->get_num_msyn_per_decode()) {
-      write_response(slot_host, -4);
+      write_response(tx_slot, rx_slot, -4);
       return;
     }
     const std::uint8_t *bits = reinterpret_cast<const std::uint8_t *>(body + 1);
@@ -113,25 +114,28 @@ void enqueue_syndromes_host(void *slot_host, std::size_t slot_size) {
     // success, so it is intentionally not treated as an error here; the
     // oversize guard above is what rejects malformed lengths.
     (void)decoder->enqueue_syndrome(syndromes.data(), syndromes.size());
-    write_response(slot_host, 0);
+    write_response(tx_slot, rx_slot, 0);
   } catch (...) {
-    write_response(slot_host, -2);
+    write_response(tx_slot, rx_slot, -2);
   }
 }
 
-void get_corrections_host(void *slot_host, std::size_t slot_size) {
+void get_corrections_host(const void *rx_slot, void *tx_slot,
+                          std::size_t slot_size) {
   namespace rpc = cudaq::qec::decoding::rpc;
   try {
-    auto *header = static_cast<cudaq::realtime::RPCHeader *>(slot_host);
+    const auto *header =
+        static_cast<const cudaq::realtime::RPCHeader *>(rx_slot);
     if (header->arg_len != sizeof(rpc::GetCorrectionsRequestPayload)) {
-      write_response(slot_host, -1);
+      write_response(tx_slot, rx_slot, -1);
       return;
     }
-    auto *body = reinterpret_cast<const rpc::GetCorrectionsRequestPayload *>(
-        static_cast<std::uint8_t *>(slot_host) +
-        sizeof(cudaq::realtime::RPCHeader));
+    const auto *body =
+        reinterpret_cast<const rpc::GetCorrectionsRequestPayload *>(
+            static_cast<const std::uint8_t *>(rx_slot) +
+            sizeof(cudaq::realtime::RPCHeader));
     if (body->return_size < 0) {
-      write_response(slot_host, -4);
+      write_response(tx_slot, rx_slot, -4);
       return;
     }
 
@@ -139,17 +143,17 @@ void get_corrections_host(void *slot_host, std::size_t slot_size) {
     apply_decoder_cuda_device(decoder);
     const auto return_size = static_cast<std::uint64_t>(body->return_size);
     if (return_size > decoder->get_num_observables()) {
-      write_response(slot_host, -4);
+      write_response(tx_slot, rx_slot, -4);
       return;
     }
     const std::size_t result_len =
         rpc::align_to_8(rpc::bit_packed_bytes(return_size));
     if (sizeof(cudaq::realtime::RPCResponse) + result_len > slot_size) {
-      write_response(slot_host, -5);
+      write_response(tx_slot, rx_slot, -5);
       return;
     }
 
-    std::uint8_t *out = response_body(slot_host);
+    std::uint8_t *out = response_body(tx_slot);
     std::memset(out, 0, result_len);
     const std::uint8_t *corrections = decoder->get_obs_corrections();
     for (std::uint64_t i = 0; i < return_size; ++i) {
@@ -158,29 +162,31 @@ void get_corrections_host(void *slot_host, std::size_t slot_size) {
     }
     if (body->reset != 0)
       decoder->clear_corrections();
-    write_response(slot_host, 0, static_cast<std::uint32_t>(result_len));
+    write_response(tx_slot, rx_slot, 0,
+                   static_cast<std::uint32_t>(result_len));
   } catch (...) {
-    write_response(slot_host, -2);
+    write_response(tx_slot, rx_slot, -2);
   }
 }
 
-void reset_decoder_host(void *slot_host, std::size_t) {
+void reset_decoder_host(const void *rx_slot, void *tx_slot, std::size_t) {
   namespace rpc = cudaq::qec::decoding::rpc;
   try {
-    auto *header = static_cast<cudaq::realtime::RPCHeader *>(slot_host);
+    const auto *header =
+        static_cast<const cudaq::realtime::RPCHeader *>(rx_slot);
     if (header->arg_len != sizeof(rpc::ResetRequestPayload)) {
-      write_response(slot_host, -1);
+      write_response(tx_slot, rx_slot, -1);
       return;
     }
-    auto *body = reinterpret_cast<const rpc::ResetRequestPayload *>(
-        static_cast<std::uint8_t *>(slot_host) +
+    const auto *body = reinterpret_cast<const rpc::ResetRequestPayload *>(
+        static_cast<const std::uint8_t *>(rx_slot) +
         sizeof(cudaq::realtime::RPCHeader));
     auto *decoder = get_decoder_or_throw(body->decoder_id);
     apply_decoder_cuda_device(decoder);
     decoder->reset_decoder();
-    write_response(slot_host, 0);
+    write_response(tx_slot, rx_slot, 0);
   } catch (...) {
-    write_response(slot_host, -2);
+    write_response(tx_slot, rx_slot, -2);
   }
 }
 
