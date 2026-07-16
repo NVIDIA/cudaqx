@@ -49,7 +49,7 @@ jobs:
       id: get-cudaq-version-short
       run: |
         shortref=$(echo "${{ steps.get-cudaq-version.outputs.ref }}" | head -c8)
-        commit_date=$(curl -s "https://api.github.com/repos/NVIDIA/cuda-quantum/commits/${{ steps.get-cudaq-version.outputs.ref }}" | jq -r '.commit.committer.date' | cut -dT -f1)
+        commit_date=$(curl -s "https://api.github.com/repos/${{ steps.get-cudaq-version.outputs.repo }}/commits/${{ steps.get-cudaq-version.outputs.ref }}" | jq -r '.commit.committer.date' | cut -dT -f1)
         echo "shortref=$shortref" >> $GITHUB_OUTPUT
         echo "commit_date=$commit_date" >> $GITHUB_OUTPUT
 
@@ -86,8 +86,14 @@ jobs:
         if [ -n "$other_tag" ]; then
           TAGS+=" -t ghcr.io/nvidia/cudaqx-dev:${other_tag}-${{ matrix.platform }}-cu${{ matrix.cuda_version }}"
         fi
+        image_key="${{ matrix.platform }}-cu${{ matrix.cuda_version }}"
+        base_image=$(jq -r --arg key "$image_key" '.[$key] // empty' .github/workflows/cudaq-dev-images.json)
+        if [ -z "$base_image" ]; then
+          echo "No CUDA-Q devcontainer image configured for $image_key" >&2
+          exit 1
+        fi
         docker build $TAGS -f docker/build_env/cudaqx.dev.Dockerfile . \
-          --build-arg base_image=ghcr.io/nvidia/cuda-quantum-devcontainer:${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc12-main \
+          --build-arg base_image="$base_image" \
           --build-arg cuda_version=${{ matrix.cuda_version }}
         docker push -a ghcr.io/nvidia/cudaqx-dev
       shell: bash --noprofile --norc -euo pipefail {0}
