@@ -1,6 +1,6 @@
 {
   "cudaq": {
     "repository": "anjbur/cuda-quantum",
-    "ref": "5dd9ce1f8c7d2f5119d0d046825ee531371564b8"
+    "ref": "d16bf937633078e81e558a4c4972fa811153eb42"
   }
 }
