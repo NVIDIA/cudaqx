@@ -1061,7 +1061,7 @@ start_server() {
     # decoder session it actually constructed.  Matters most for trt_decoder,
     # where the identity ONNX makes a silently-substituted pymatching session
     # pass the corrections verification bit-identically.
-    wait_for_pattern "$server_log" "decoder 0 type: ${DECODER}" 5 "$SERVER_PID" >/dev/null || {
+    wait_for_pattern "$server_log" "type0=${DECODER}" 5 "$SERVER_PID" >/dev/null || {
         _err "Server did not construct a '${DECODER}' decoder session"
         _err "--- Server log ---"
         cat "$server_log" >&2

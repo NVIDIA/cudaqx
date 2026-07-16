@@ -77,11 +77,6 @@ public:
   /// (test/diagnostic evidence; callers gate on QEC_DECODING_SERVER_STATS).
   void print_session_stats() const;
 
-  /// Replace decoder sessions without rebinding owned transports.
-  void
-  reconfigure_from_yaml_str(const std::string &yaml_str,
-                            const std::string &config_path = "<in-memory>");
-
   int transport_cuda_device() const { return transport_cuda_device_; }
 
 private:

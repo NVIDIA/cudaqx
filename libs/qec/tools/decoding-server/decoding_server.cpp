@@ -113,6 +113,7 @@
 #ifdef _WIN32
 #include <process.h>
 #else
+#include <pthread.h>
 #include <unistd.h>
 #endif
 
@@ -153,6 +154,7 @@ int current_process_id() {
 
 struct ServerConfig {
   std::string config_path;
+  std::string decoder_summary;
   std::string transport = "udp";
   std::uint16_t port = 0; // 0 => ephemeral, printed on stdout
   std::uint32_t num_slots = 8;
@@ -502,6 +504,14 @@ std::string transport_summary(const std::vector<ServerConfig> &configs) {
   return out;
 }
 
+std::string decoder_summary(const config::multi_decoder_config &config) {
+  std::ostringstream out;
+  out << "decoders=" << config.decoders.size();
+  for (std::size_t i = 0; i < config.decoders.size(); ++i)
+    out << " type" << i << "=" << config.decoders[i].type;
+  return out.str();
+}
+
 bool parse_args(int argc, char **argv, ServerConfig &cfg) {
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
@@ -592,18 +602,105 @@ bool parse_args(int argc, char **argv, ServerConfig &cfg) {
   return true;
 }
 
-std::atomic<int> g_shutdown{0};
-void on_signal(int) { g_shutdown.store(1, std::memory_order_release); }
-
+std::atomic<int> g_shutdown_requested{0};
 std::atomic<int> g_apply_config_requested{0};
+std::atomic<int> g_stats_requested{0};
+
+bool consume_signal_flag(std::atomic<int> &flag) {
+  return flag.exchange(0, std::memory_order_acq_rel) != 0;
+}
+
+void request_shutdown() {
+  g_shutdown_requested.store(1, std::memory_order_release);
+}
+
+#ifdef _WIN32
+void on_signal(int) { request_shutdown(); }
 void on_sighup(int) {
   g_apply_config_requested.store(1, std::memory_order_release);
 }
-
-std::atomic<int> g_stats_requested{0};
 void on_stats_signal(int) {
   g_stats_requested.store(1, std::memory_order_release);
 }
+
+void install_signal_handlers() {
+  std::signal(SIGINT, on_signal);
+  std::signal(SIGTERM, on_signal);
+  std::signal(SIGHUP, on_sighup);
+#ifdef SIGUSR1
+  std::signal(SIGUSR1, on_stats_signal);
+#endif
+}
+#else
+void fill_daemon_signal_set(sigset_t &signals) {
+  sigemptyset(&signals);
+  sigaddset(&signals, SIGINT);
+  sigaddset(&signals, SIGTERM);
+  sigaddset(&signals, SIGHUP);
+#ifdef SIGUSR1
+  sigaddset(&signals, SIGUSR1);
+#endif
+}
+
+bool block_daemon_signals() {
+  sigset_t signals;
+  fill_daemon_signal_set(signals);
+  const int rc = pthread_sigmask(SIG_BLOCK, &signals, nullptr);
+  if (rc != 0) {
+    std::cerr << "ERROR: pthread_sigmask failed: " << std::strerror(rc)
+              << std::endl;
+    return false;
+  }
+  return true;
+}
+
+class SignalWatcher {
+public:
+  SignalWatcher() : thread_([] { run(); }) {}
+  ~SignalWatcher() { stop(); }
+
+  SignalWatcher(const SignalWatcher &) = delete;
+  SignalWatcher &operator=(const SignalWatcher &) = delete;
+
+  void stop() {
+    request_shutdown();
+    if (thread_.joinable()) {
+      pthread_kill(thread_.native_handle(), SIGTERM);
+      thread_.join();
+    }
+  }
+
+private:
+  static void run() {
+    sigset_t signals;
+    fill_daemon_signal_set(signals);
+    while (g_shutdown_requested.load(std::memory_order_acquire) == 0) {
+      int signum = 0;
+      const int rc = sigwait(&signals, &signum);
+      if (rc != 0)
+        continue;
+      switch (signum) {
+      case SIGHUP:
+        g_apply_config_requested.store(1, std::memory_order_release);
+        break;
+#ifdef SIGUSR1
+      case SIGUSR1:
+        g_stats_requested.store(1, std::memory_order_release);
+        break;
+#endif
+      case SIGINT:
+      case SIGTERM:
+        request_shutdown();
+        return;
+      default:
+        break;
+      }
+    }
+  }
+
+  std::thread thread_;
+};
+#endif
 struct LiveStatsSnapshot {
   uint64_t dispatched = 0;
   uint64_t max_concurrent_decoders = 0;
@@ -648,8 +745,7 @@ void maybe_print_periodic_stats(
 
 struct ConfigApplyRequest {
   std::string yaml;
-  std::size_t num_decoders = 0;
-  std::string type0 = "?";
+  std::string summary;
 };
 
 ConfigApplyRequest read_apply_config(const std::string &config_path) {
@@ -664,14 +760,13 @@ ConfigApplyRequest read_apply_config(const std::string &config_path) {
   auto decoder_config = config::multi_decoder_config::from_yaml_str(out.yaml);
   if (decoder_config.decoders.empty())
     throw std::runtime_error("no decoders parsed from " + config_path);
-  out.num_decoders = decoder_config.decoders.size();
-  out.type0 = decoder_config.decoders[0].type;
+  out.summary = decoder_summary(decoder_config);
   return out;
 }
 
 void print_config_applied(const ConfigApplyRequest &config) {
-  std::cout << "QEC_DECODING_SERVER_CONFIG_APPLIED decoders="
-            << config.num_decoders << " type0=" << config.type0 << std::endl;
+  std::cout << "QEC_DECODING_SERVER_CONFIG_APPLIED " << config.summary
+            << std::endl;
   std::cout.flush();
 }
 
@@ -708,7 +803,8 @@ void handle_config_apply(const std::string &config_path) {
 #ifdef QEC_HAVE_GPU_ROCE_TRANSPORT
 void handle_gpu_roce_config_apply(
     const std::string &config_path,
-    std::unique_ptr<cudaq::qec::decoding_server::DecodingServer> &server) {
+    std::unique_ptr<cudaq::qec::decoding_server::DecodingServer> &server,
+    std::string &active_decoder_yaml) {
   auto reject_without_rebind = [&server](const std::exception &e) {
     if (server)
       print_config_failed(/*rc=*/1, "serving_old", e.what());
@@ -718,7 +814,11 @@ void handle_gpu_roce_config_apply(
 
   ConfigApplyRequest config;
   // Outer checks reject no-state-change errors before touching the live GPU
-  // transport; reconfigure_from_yaml_str repeats committed-state checks.
+  // transport. Unlike udp/cpu_roce, gpu_roce owns a Hololink/DOCA transport
+  // plus a live captured CUDA graph scheduler; tearing that graph down inside
+  // the serving process can block in CUDA graph destruction. Treat an
+  // unchanged config as an idempotent apply and reject changed configs cleanly
+  // until cudaq-realtime exposes a safe graph replacement/drain path.
   try {
     config = read_apply_config(config_path);
     auto decoder_config =
@@ -743,15 +843,15 @@ void handle_gpu_roce_config_apply(
     reject_without_rebind(e);
     return;
   }
-
-  try {
-    if (!server)
-      throw std::runtime_error("gpu_roce server is not initialized");
-    server->reconfigure_from_yaml_str(config.yaml, config_path);
+  if (config.yaml == active_decoder_yaml) {
     print_config_applied(config);
-  } catch (const std::exception &e) {
-    print_config_failed(/*rc=*/2, "awaiting_config", e.what());
+    return;
   }
+
+  print_config_failed(
+      /*rc=*/3, "busy",
+      "GPU RoCE live reconfigure cannot replace an active CUDA graph in-place; "
+      "apply changed configs by restarting the server between complete shots");
 }
 #endif // QEC_HAVE_GPU_ROCE_TRANSPORT
 // Transport-agnostic view of one wired-up transceiver: the four ring
@@ -790,6 +890,7 @@ void print_ready(const ServerConfig &cfg, std::uint16_t port,
   publish_endpoint_file(cfg, port);
   std::cout << "QEC_DECODING_SERVER_READY port=" << port
             << (extra.empty() ? "" : " ") << extra
+            << (cfg.decoder_summary.empty() ? "" : " ") << cfg.decoder_summary
             << " config=" << cfg.config_path << std::endl;
   std::cout.flush();
 }
@@ -862,7 +963,7 @@ bool read_all(int fd, void *buf, std::size_t len) {
 }
 
 int accept_until_shutdown(int listen_fd) {
-  while (g_shutdown.load(std::memory_order_acquire) == 0) {
+  while (g_shutdown_requested.load(std::memory_order_acquire) == 0) {
     fd_set read_fds;
     FD_ZERO(&read_fds);
     FD_SET(listen_fd, &read_fds);
@@ -935,7 +1036,7 @@ bool init_cpu_roce_transport(const ServerConfig &cfg, TransportEndpoints &tp) {
   const int conn_fd = accept_until_shutdown(listen_fd);
   ::close(listen_fd);
   if (conn_fd < 0) {
-    if (g_shutdown.load(std::memory_order_acquire) == 0)
+    if (g_shutdown_requested.load(std::memory_order_acquire) == 0)
       std::cerr << "ERROR: rendezvous accept() failed" << std::endl;
     cpu_roce_destroy_transceiver(xcvr);
     return false;
@@ -1146,7 +1247,7 @@ void run_transport_supervisor(std::shared_ptr<RunningTransport> rt,
   });
   rt->dispatcher_started.store(true, std::memory_order_release);
 
-  while (g_shutdown.load(std::memory_order_acquire) == 0)
+  while (g_shutdown_requested.load(std::memory_order_acquire) == 0)
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
   stop_running_transport(*rt);
@@ -1168,7 +1269,7 @@ start_transport_supervisors(const std::vector<ServerConfig> &configs,
 
 void stop_transport_supervisors(
     std::vector<std::shared_ptr<RunningTransport>> &transports) {
-  g_shutdown.store(1, std::memory_order_release);
+  request_shutdown();
   for (auto &rt : transports)
     if (rt->supervisor_thread.joinable())
       rt->supervisor_thread.join();
@@ -1180,11 +1281,11 @@ int main(int argc, char **argv) {
   if (!parse_args(argc, argv, cfg))
     return 1;
 
-  std::signal(SIGINT, on_signal);
-  std::signal(SIGTERM, on_signal);
-  std::signal(SIGHUP, on_sighup);
-#ifdef SIGUSR1
-  std::signal(SIGUSR1, on_stats_signal);
+#ifdef _WIN32
+  install_signal_handlers();
+#else
+  if (!block_daemon_signals())
+    return 1;
 #endif
 
   // [1] Validate decoder YAML, resolve daemon listeners, and hand a
@@ -1225,13 +1326,17 @@ int main(int argc, char **argv) {
               << std::endl;
     return 1;
   }
+  const std::string startup_decoder_summary = decoder_summary(decoder_config);
+  for (auto &transport_config : transport_configs)
+    transport_config.decoder_summary = startup_decoder_summary;
   ::setenv("CUDAQ_QEC_DECODER_CONFIG", runtime_decoder_config_path.c_str(),
            /*overwrite=*/1);
-  std::cout << "Configured " << decoder_config.decoders.size()
-            << " decoder(s); decoder 0 type: "
-            << decoder_config.decoders[0].type
+  std::cout << "Configured " << startup_decoder_summary
             << "; transport: " << transport_summary(transport_configs)
             << std::endl;
+#ifndef _WIN32
+  SignalWatcher signal_watcher;
+#endif
   // [2a] GPU RoCE takes a completely different path: bypass the CQR
   // DeviceCallService / HOST_CALL dispatcher and use DecodingServer directly.
   // Must be checked before force-linking the CQR plugin (which creates a
@@ -1255,19 +1360,21 @@ int main(int argc, char **argv) {
           decoder_yaml, cfg.config_path);
       // QP/rkey/buf already printed to stdout by launch_scheduler() so the
       // orchestration script can grep them before the READY line.
-      std::cout << "QEC_DECODING_SERVER_READY gpu_roce config="
-                << cfg.config_path << std::endl;
+      std::cout << "QEC_DECODING_SERVER_READY gpu_roce "
+                << startup_decoder_summary << " config=" << cfg.config_path
+                << std::endl;
       std::cout.flush();
       std::thread server_thread([&server] { server->run(); });
+      std::string active_decoder_yaml = decoder_yaml;
       const auto start_time_gr = std::chrono::steady_clock::now();
       auto last_stats_time = start_time_gr;
       auto last_stats = read_live_stats();
-      while (g_shutdown.load(std::memory_order_acquire) == 0) {
+      while (g_shutdown_requested.load(std::memory_order_acquire) == 0) {
         const auto now = std::chrono::steady_clock::now();
-        if (g_apply_config_requested.exchange(0, std::memory_order_acq_rel) !=
-            0)
-          handle_gpu_roce_config_apply(cfg.config_path, server);
-        if (g_stats_requested.exchange(0, std::memory_order_acq_rel) != 0) {
+        if (consume_signal_flag(g_apply_config_requested))
+          handle_gpu_roce_config_apply(cfg.config_path, server,
+                                       active_decoder_yaml);
+        if (consume_signal_flag(g_stats_requested)) {
           last_stats = read_live_stats();
           print_live_stats(last_stats);
           last_stats_time = now;
@@ -1358,11 +1465,11 @@ int main(int argc, char **argv) {
   auto last_stats_time = start_time;
   auto last_stats = read_live_stats();
   bool all_transports_failed = false;
-  while (g_shutdown.load(std::memory_order_acquire) == 0) {
+  while (g_shutdown_requested.load(std::memory_order_acquire) == 0) {
     const auto now = std::chrono::steady_clock::now();
-    if (g_apply_config_requested.exchange(0, std::memory_order_acq_rel) != 0)
+    if (consume_signal_flag(g_apply_config_requested))
       handle_config_apply(cfg.config_path);
-    if (g_stats_requested.exchange(0, std::memory_order_acq_rel) != 0) {
+    if (consume_signal_flag(g_stats_requested)) {
       last_stats = read_live_stats();
       print_live_stats(last_stats);
       last_stats_time = now;

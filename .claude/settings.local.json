@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(powershell -Command \"gh api 'https://api.github.com/repos/NVIDIA/cudaqx/pulls/628/comments?per_page=100' 2>&1 | Select-Object -First 5\")"
+    ]
+  }
+}
