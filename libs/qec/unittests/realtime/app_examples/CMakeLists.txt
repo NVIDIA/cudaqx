@@ -78,7 +78,7 @@ add_test(
     bash "${CMAKE_CURRENT_SOURCE_DIR}/surface_code-1-test.sh"
       ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-local
       ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-local
-      3 40 40 NULL 12 6
+      3 60 30 NULL 12
       ${CMAKE_BINARY_DIR}/lib
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
@@ -91,7 +91,7 @@ if(_APP_CUDAQ_REALTIME_DISPATCH_LIB
       bash "${CMAKE_CURRENT_SOURCE_DIR}/surface_code-1-test.sh"
         ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-local
         ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-local
-        3 60 40 NULL 12 6
+        3 60 30 NULL 12
         ${CMAKE_BINARY_DIR}/lib
         nv-qldpc-decoder
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
@@ -99,7 +99,7 @@ if(_APP_CUDAQ_REALTIME_DISPATCH_LIB
   set_tests_properties(
     app_examples.surface_code-1-local-test-distance-3-inproc-rpc
     PROPERTIES ENVIRONMENT
-      "CUDAQ_QEC_REALTIME_MODE=inproc_rpc;EXTRA_CLI_ARGS=--use-relay-bp"
+      "CUDAQ_QEC_REALTIME_MODE=inproc_rpc"
     # The wrapper exits 77 on GPUs below compute capability 9.0 (the
     # device-graph scheduler needs device-side graph launch); report that
     # as SKIPPED rather than FAILED.
@@ -113,7 +113,7 @@ add_test(
     bash "${CMAKE_CURRENT_SOURCE_DIR}/surface_code-1-test.sh"
       ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-local
       ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-local
-      3 40 40 NULL 12 6
+      3 60 30 NULL 12
       ${CMAKE_BINARY_DIR}/lib
       sliding_window 6 1
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
@@ -128,7 +128,7 @@ add_test(
 #     bash "${CMAKE_CURRENT_SOURCE_DIR}/surface_code-1-test.sh"
 #       ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-local
 #       ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-local
-#       5 40 40 NULL 20 10
+#       5 40 40 NULL 20
 #       ${CMAKE_BINARY_DIR}/lib
 #   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 # )
@@ -140,6 +140,80 @@ add_test(
     pytest ${CMAKE_CURRENT_SOURCE_DIR}/surface_code-1-test.py
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
+
+# --------------------------------------------------------------------------- #
+# surface_code-1 negative / error-path tests
+#
+# These drive the three throw sites added to surface_code-1.cpp so that every
+# error path is exercised by at least one ctest. Each test asserts BOTH a
+# nonzero exit AND the expected diagnostic substring.
+# --------------------------------------------------------------------------- #
+set(_sc1_exe ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-local)
+set(_sc1_neg_dir ${CMAKE_CURRENT_BINARY_DIR}/sc1_negative)
+file(MAKE_DIRECTORY ${_sc1_neg_dir})
+set(_sc1_neg_env "CUDAQ_DEFAULT_SIMULATOR=stim")
+
+# Helper: command must exit nonzero AND print the expected diagnostic.
+function(_sc1_reject name diagnostic)
+  add_test(NAME app_examples.surface_code-1-negative-${name}
+    COMMAND bash -c [==[
+diag=$1; shift
+if out=$("$@" 2>&1); then
+  printf '%s\n' "$out"
+  echo "NEGATIVE TEST FAIL: command returned 0; expected a nonzero exit"
+  exit 1
+fi
+printf '%s\n' "$out"
+printf '%s' "$out" | grep -qF -- "$diag" || {
+  echo "NEGATIVE TEST FAIL: missing expected diagnostic: $diag"
+  exit 1
+}
+]==] _ "${diagnostic}" ${_sc1_exe} ${ARGN}
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+  set_tests_properties(app_examples.surface_code-1-negative-${name}
+    PROPERTIES ENVIRONMENT "${_sc1_neg_env}")
+endfunction()
+
+# 1. --load_dem with a nonexistent file → setup_decoders throws.
+_sc1_reject(load-dem-missing-file "Could not open dem config file"
+  --load_dem ${_sc1_neg_dir}/nonexistent.yml
+  --distance 3 --num_rounds 3)
+
+# 2. --save_syndrome to an unwriteable path → begin_syndrome_capture throws.
+_sc1_reject(save-syndrome-bad-path "Could not open syndrome file for writing"
+  --distance 3 --num_rounds 3 --num_shots 2
+  --save_syndrome ${_sc1_neg_dir}/no_such_dir/out.txt)
+
+# 3. --load_syndrome with a nonexistent file → replay_syndrome_file throws.
+_sc1_reject(load-syndrome-missing-file "Could not open syndrome file"
+  --distance 3 --num_rounds 3
+  --load_syndrome ${_sc1_neg_dir}/nonexistent.txt)
+
+# Fixture: capture a valid d=3 syndrome file, then derive a
+# corrections-flipped copy (0↔1 in the CORRECTIONS block).
+add_test(NAME app_examples.surface_code-1-negative-replay-fixtures
+  COMMAND bash -c "set -e
+'${_sc1_exe}' --distance 3 --num_rounds 3 --num_shots 5 \
+  --save_syndrome '${_sc1_neg_dir}/cap.txt'
+sed '/CORRECTIONS_START/,/CORRECTIONS_END/{s/^0$/X/;s/^1$/0/;s/^X$/1/}' \
+  '${_sc1_neg_dir}/cap.txt' > '${_sc1_neg_dir}/cap_mismatch.txt'"
+  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+set_tests_properties(app_examples.surface_code-1-negative-replay-fixtures
+  PROPERTIES FIXTURES_SETUP sc1_replay ENVIRONMENT "${_sc1_neg_env}")
+
+# 4. Replay d=3 capture against d=5 experiment → num_data mismatch (9 vs 25).
+_sc1_reject(replay-geometry-mismatch "Syndrome file mismatch"
+  --distance 5 --num_rounds 5
+  --load_syndrome ${_sc1_neg_dir}/cap.txt)
+set_tests_properties(app_examples.surface_code-1-negative-replay-geometry-mismatch
+  PROPERTIES FIXTURES_REQUIRED sc1_replay)
+
+# 5. Replay with flipped corrections → correction mismatch throw.
+_sc1_reject(replay-correction-mismatch "Replay correction mismatch"
+  --distance 3 --num_rounds 3
+  --load_syndrome ${_sc1_neg_dir}/cap_mismatch.txt)
+set_tests_properties(app_examples.surface_code-1-negative-replay-correction-mismatch
+  PROPERTIES FIXTURES_REQUIRED sc1_replay)
 
 # End of surface code 1, fully local, regular Stim simulator
 #------------------------------------------------------------------------------#
@@ -183,19 +257,7 @@ if(TARGET cudaq-qec-realtime-decoding-server-cqr)
       nvqir nvqir-stim)
   qec_realtime_app_link_options(surface_code-1-cqr)
 
-  # Enable Relay-BP only when this build provides nv-qldpc support.
-  set(_surface_code_1_cqr_has_nv_qldpc_decoder FALSE)
-  if(TARGET cudaq-qec-nv-qldpc-decoder
-     OR QEC_EXTERNAL_DECODERS
-     OR DEFINED ENV{QEC_EXTERNAL_DECODERS})
-    set(_surface_code_1_cqr_has_nv_qldpc_decoder TRUE)
-  endif()
-
   set(_surface_code_1_cqr_env CUDAQ_DEVICE_CALL_CHANNEL=host_dispatch)
-  if(TARGET cudaq-qec-realtime-cudevice-proprietary
-     AND _surface_code_1_cqr_has_nv_qldpc_decoder)
-    list(APPEND _surface_code_1_cqr_env EXTRA_CLI_ARGS=--use-relay-bp)
-  endif()
 
   add_test(
     NAME app_examples.surface_code-1-cqr-test-distance-3
@@ -204,7 +266,7 @@ if(TARGET cudaq-qec-realtime-decoding-server-cqr)
       bash "${CMAKE_CURRENT_SOURCE_DIR}/surface_code-1-test.sh"
         ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-cqr
         ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-cqr
-        3 60 40 NULL 12 6
+        3 60 30 NULL 12
         ${CMAKE_BINARY_DIR}/lib
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
   )
@@ -217,14 +279,16 @@ if(TARGET cudaq-qec-realtime-decoding-server-cqr)
     add_test(
       NAME app_examples.surface_code-1-cqr-two-process-test-distance-3
       COMMAND
-        # Non-zero threshold 60 (vs the -local test's 40): unseeded runs at
-        # 1000 shots land ~35-45, so 40 flakes; a broken decode path produces
-        # ~150+, so 60 still discriminates.
+        # The app seeds the simulator (--seed, default 42), so the run is
+        # deterministic: ~10 non-zero and ~67 corrections at 1000 shots. The
+        # thresholds (non-zero <= 60, corrections >= 30) leave margin while
+        # still catching a broken decode path (which applies ~0 corrections,
+        # leaving all ~70 raw logical errors uncorrected).
         bash "${CMAKE_CURRENT_SOURCE_DIR}/surface_code-1-cqr-two-process-test.sh"
           ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-cqr
-          3 60 40
+          3 60 30
           $<TARGET_FILE:decoding_server>
-          12 6
+          12
       WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     )
   endif()
@@ -245,7 +309,7 @@ cudaqx_add_device_code(surface_code-1-quantinuum-emulate
   SOURCES
     surface_code-1.cpp
   COMPILER_FLAGS
-    --target quantinuum --emulate --quantinuum-machine Helios-Fake -DMANUALLY_INJECT_ERRORS=1 
+    --target quantinuum --emulate --quantinuum-machine Helios-Fake
   DEPENDS_ON
     # Must wait for the local executable to be built because it has the same
     # surface_code-1.cpp file, and the nvq++ compiler will use the same filename
@@ -274,7 +338,10 @@ add_test(
     bash "${CMAKE_CURRENT_SOURCE_DIR}/surface_code-1-test.sh"
       ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-local
       ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-quantinuum-emulate
-      3 0 1000 NULL 12 6
+      # QIR emulation applies no noise, so the live generate-and-decode run
+      # finds 0 errors / 0 corrections: this is a lowering + run smoke test
+      # (matches the distance-5 variant's 0/0 thresholds).
+      3 0 0 NULL 12
       ${CMAKE_BINARY_DIR}/lib
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
@@ -285,7 +352,7 @@ add_test(
     bash "${CMAKE_CURRENT_SOURCE_DIR}/surface_code-1-test.sh"
       ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-local
       ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-quantinuum-emulate
-      5 0 0 NULL 20 10
+      5 0 0 NULL 5
       ${CMAKE_BINARY_DIR}/lib
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )

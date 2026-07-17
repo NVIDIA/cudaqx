@@ -583,38 +583,39 @@ Given that the user follows the structure of the examples provided, where each e
    # This is done once per code/distance/noise configuration
    
    ## C++
-   ./surface_code-1 --distance 3 --num_shots 1000 --p_spam 0.01 \
-                    --save_dem config_d3.yaml --num_rounds 12 --decoder_window 6
-   
+   ./surface_code-1 --distance 3 --num_shots 1000 --p_cnot 0.001 \
+                    --save_dem config_d3.yaml --num_rounds 12
+
    ## Python
    python surface_code-1.py --distance 3 --num_shots 1000 --p_spam 0.01 \
                             --save_dem config_d3.yaml --num_rounds 12 --decoder_window 6
-   
+
    # Phase 2: Run with Real-Time Decoding
    # Use the saved DEM configuration
-   
+
    ## Simulation
    ./surface_code-1 --distance 3 --num_shots 1000 --load_dem config_d3.yaml \
-                    --num_rounds 12 --decoder_window 6
-   
+                    --num_rounds 12
+
    ## Quantinuum Emulation
    ./surface_code-1-quantinuum-emulate --distance 3 --num_shots 1000 --load_dem config_d3.yaml \
-                           --num_rounds 12 --decoder_window 6
-   
+                           --num_rounds 12
+
    ## Quantinuum Hardware
    export CUDAQ_QUANTINUUM_CREDENTIALS=credentials.json
    ./surface_code-1-quantinuum-hardware --distance 3 --num_shots 100 --load_dem config_d3.yaml \
-                         --num_rounds 12 --decoder_window 6
+                         --num_rounds 12
 
 **Application Parameters:**
 
 - ``--distance``: Code distance (3, 5, 7, etc.)
 - ``--num_shots``: Number of circuit repetitions
-- ``--p_spam``: Physical error rate for noise model (DEM generation only)
+- ``--p_cnot``: Two-qubit depolarizing rate on CNOT gates for DEM generation (C++ binary)
+- ``--p_spam``: Single-qubit SPAM error rate for DEM generation (Python script)
 - ``--save_dem``: Generate and save DEM configuration to file
 - ``--load_dem``: Load existing DEM configuration from file
 - ``--num_rounds``: Total number of syndrome measurement rounds
-- ``--decoder_window``: Number of rounds processed per decoding window
+- ``--decoder_window``: Number of rounds processed per decoding window (Python script only)
 
 Debugging and Environment Variables
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
