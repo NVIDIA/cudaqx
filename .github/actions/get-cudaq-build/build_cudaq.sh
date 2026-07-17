@@ -19,9 +19,6 @@ CXX=${4:-"g++"}
 
 export CC
 export CXX
-# Pin nvcc's host compiler to $CXX so it matches the compiler the realtime
-# BF16-header guards key off of (else nvcc falls back to the image default).
-export CUDAHOSTCXX=${CUDAHOSTCXX:-$CXX}
 
 # Keep cudaqx CI's previous defaults (these differ from upstream defaults).
 export LLVM_INSTALL_PREFIX=${LLVM_INSTALL_PREFIX:-/usr/local/llvm}
