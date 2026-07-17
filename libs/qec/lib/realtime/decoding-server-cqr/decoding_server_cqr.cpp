@@ -369,6 +369,17 @@ cudaqx_qec_decoding_server_max_concurrent() {
   return cudaq::qec::decoding_server::max_concurrent_busy_sessions();
 }
 
+/// Opaque graph resources (decoder::capture_decode_graph()) of one decoder
+/// hosted by this service, or nullptr.  The decoding_server process uses
+/// this to wire a device-graph ring consumer to a decoder whose sessions
+/// live behind this plugin.
+extern "C" __attribute__((visibility("default"))) void *
+cudaqx_qec_decoding_server_graph_resources(uint64_t decoder_id) {
+  if (!g_server)
+    return nullptr;
+  return g_server->graph_resources_for(decoder_id);
+}
+
 /// Per-decoder session counters (decodes/enqueues/...), one stdout line per
 /// decoder. Test/diagnostic evidence; callers gate on the
 /// QEC_DECODING_SERVER_STATS environment variable.

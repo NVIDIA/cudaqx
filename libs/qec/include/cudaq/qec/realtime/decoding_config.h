@@ -17,10 +17,17 @@
 
 namespace cudaq::qec::decoding::config {
 
-/// Transport type for a decoder session.
-/// cpu_roce: CpuRoceTransceiver / SoftRoCE (dev, CI, no GPU required)
-/// gpu_roce: GpuRoceTransceiver / DOCA (production, real ConnectX)
-enum class DecoderTransport { cpu_roce, gpu_roce };
+/// Dispatch shape for a decoder session -- HOW its RPCs are executed, not
+/// which wire the bytes arrive on (the wire is a server-level transport
+/// provider, selected independently).
+/// host:         requests are dispatched on the CPU (HOST_CALL); works with
+///               any transport provider (dev, CI, no GPU required).
+/// device_graph: requests are dispatched on the GPU by the self-relaunching
+///               device-graph scheduler (DeviceGraphTransceiver); requires a
+///               decoder with a captured decode graph and a provider whose
+///               rings are GPU-visible (e.g. Hololink/DOCA).
+/// YAML key: `dispatch: host|device_graph`.
+enum class DecoderDispatch { host, device_graph };
 
 /// @brief Decoder-specific constructor arguments, stored as a
 /// `cudaqx::heterogeneous_map` -- the form every decoder's constructor
@@ -53,10 +60,11 @@ private:
 struct decoder_config {
   int64_t id = 0;
   std::string type;
-  /// Transport used to receive syndromes and send corrections for this decoder.
-  /// Defaults to cpu_roce.  Set to gpu_roce for decoders where syndrome bits
-  /// are DMA'd directly to GPU VRAM (e.g. nv_qldpc_decoder with RelayBP).
-  DecoderTransport transport = DecoderTransport::cpu_roce;
+  /// Dispatch shape for this decoder's RPCs.  Defaults to host.  Set to
+  /// device_graph for decoders where syndrome bits are DMA'd directly to GPU
+  /// VRAM and decoded by a captured CUDA graph (e.g. nv_qldpc_decoder with
+  /// RelayBP).
+  DecoderDispatch dispatch = DecoderDispatch::host;
   /// CUDA device this decoder is pinned to at construction (see the
   /// "cuda_device_id" decoder parameter). Placement knob common to any
   /// GPU-accelerated decoder, hence at this level rather than inside the
@@ -92,9 +100,50 @@ struct decoder_config {
   from_yaml_str(const std::string &yaml_str);
 };
 
+/// Transport override applied to the rings of one dispatch shape (see
+/// transport_config::device_graph).
+struct transport_shape_override {
+  /// Provider name (e.g. udp, cpu_roce, hololink) or /path/to/lib.so.
+  /// Empty = inherit the section/CLI default.
+  std::string provider;
+  /// Extra provider arguments appended for this shape's rings.
+  std::vector<std::string> args;
+
+  bool operator==(const transport_shape_override &) const = default;
+};
+
+/// Server-level transport section: the WIRE is deployment configuration and
+/// lives OUTSIDE the decoders list.  Transports differ between rings only by
+/// dispatch shape (a device_graph ring must be GPU-pollable), so the only
+/// override is shape-keyed -- decoder entries carry no transport
+/// information.
+///
+///   transport:
+///     provider: udp
+///     args: [--slot-size=256]
+///     device_graph:
+///       provider: udp          # "hololink" on an HSB rig
+///       args: [--pinned-rings]
+///
+/// Resolution per ring: shape override (device_graph rings) > this
+/// section's provider/args > the server's --transport CLI fallback.  The
+/// CLI flag only applies when this section names no provider; a config
+/// that names one plus an explicit --transport is rejected at startup
+/// (the deployment file is the source of truth for the wire).
+struct transport_config {
+  std::string provider;
+  std::vector<std::string> args;
+  transport_shape_override device_graph;
+
+  bool operator==(const transport_config &) const = default;
+};
+
 class multi_decoder_config {
 public:
   std::vector<decoder_config> decoders;
+  /// Optional server-level transport section (empty provider/args = not
+  /// specified; the server's CLI defaults apply).
+  transport_config transport;
 
   bool operator==(const multi_decoder_config &) const = default;
 

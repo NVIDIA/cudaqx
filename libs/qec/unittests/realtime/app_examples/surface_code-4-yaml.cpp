@@ -53,6 +53,17 @@ public:
     std::vector<std::string> args = {program, "--cudaq-device-call=udp",
                                      "udp-host=127.0.0.1",
                                      std::string("udp-port=") + port};
+    // One-ring-per-decoder servers publish per-decoder endpoints; wire each
+    // decoder's device_call session to its own ring via device-scoped
+    // channel args (QEC_DECODING_SERVER_PORT_<id> -> udp-port.<id>=).
+    for (int device = 1; device < 64; ++device) {
+      const std::string name =
+          "QEC_DECODING_SERVER_PORT_" + std::to_string(device);
+      const char *scoped = std::getenv(name.c_str());
+      if (!scoped || scoped[0] == '\0')
+        break;
+      args.push_back("udp-port." + std::to_string(device) + "=" + scoped);
+    }
     std::vector<char *> argv;
     argv.reserve(args.size() + 1);
     for (auto &arg : args)

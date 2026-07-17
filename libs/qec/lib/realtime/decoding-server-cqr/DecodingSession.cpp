@@ -13,6 +13,7 @@
 #include "cudaq/qec/realtime/decoder_rpc_wire_format.h"
 
 #include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <future>
 #include <stdexcept>
@@ -80,7 +81,17 @@ DecodingSession::create(std::unique_ptr<cudaq::qec::decoder> decoder,
 
   if (s->dec->supports_graph_dispatch()) {
     set_graph_capture_device(*s->dec);
-    void *gr = s->dec->capture_decode_graph();
+    // Reserve SMs so the cooperative decode graph can become co-resident
+    // with everything else occupying the GPU when it is fired device-side:
+    // the persistent dispatch graph itself (1 block) plus any transport
+    // kernels.  A cooperative grid sized for ALL SMs deadlocks at
+    // grid.sync() the moment anything else is resident -- the launch
+    // silently queues forever.  Overridable for rigs with more coresident
+    // kernels (e.g. Hololink RX/TX) via QEC_DEVICE_GRAPH_RESERVED_SMS.
+    int reserved_sms = 1;
+    if (const char *env = std::getenv("QEC_DEVICE_GRAPH_RESERVED_SMS"))
+      reserved_sms = std::atoi(env);
+    void *gr = s->dec->capture_decode_graph(reserved_sms);
     s->graph_resources =
         GraphResourcesPtr(gr, GraphResourcesDeleter{s->dec.get()});
   }
@@ -224,7 +235,7 @@ void DecodingSession::on_enqueue(const WorkItem &item) {
           "Syndrome volume exceeds decoder measurement capacity");
 
     accepted_syndromes += completed->bits.size();
-    // Host-decoder path (CQR / Loopback transports).  On the gpu_roce path,
+    // Host-decoder path (CQR / Loopback transports).  On the device_graph path,
     // the CUDAQ device-graph scheduler (cudaq_create_dispatch_graph_regular)
     // handles RX→dispatch→decode→TX entirely on the GPU; this worker thread
     // is never reached for GPU RoCE sessions.
