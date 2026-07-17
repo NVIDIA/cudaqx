@@ -29,7 +29,8 @@ target_link_libraries(test_pymatching PRIVATE GTest::gtest_main cudaq-qec-decode
 add_dependencies(CUDAQXQECUnitTests test_pymatching)
 gtest_discover_tests(test_pymatching)
 
-if(CUDAQ_REALTIME_ROOT AND CUDAQ_REALTIME_INCLUDE_DIR)
+if(CUDAQ_REALTIME_ROOT AND CUDAQ_REALTIME_INCLUDE_DIR
+   AND CUDAQ_REALTIME_FOR_0_16)
   add_executable(test_pymatching_realtime test_pymatching_realtime.cpp)
   target_include_directories(test_pymatching_realtime PRIVATE
     ${CUDAQ_REALTIME_INCLUDE_DIR}
@@ -37,7 +38,8 @@ if(CUDAQ_REALTIME_ROOT AND CUDAQ_REALTIME_INCLUDE_DIR)
     ${CUDAQX_QEC_SOURCE_DIR}/lib/realtime
   )
   target_compile_definitions(test_pymatching_realtime PRIVATE
-    CUDAQ_REALTIME_ROOT)
+    CUDAQ_REALTIME_ROOT
+    CUDAQ_REALTIME_FOR_0_16)
   target_link_libraries(test_pymatching_realtime PRIVATE
     GTest::gtest_main
     cudaq-qec-decoders

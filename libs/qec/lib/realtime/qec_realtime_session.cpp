@@ -6,7 +6,7 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
-#ifdef CUDAQ_REALTIME_ROOT
+#if defined(CUDAQ_REALTIME_ROOT) && defined(CUDAQ_REALTIME_FOR_0_16)
 
 #include "qec_realtime_session.h"
 
@@ -1010,4 +1010,4 @@ void qec_realtime_session::stop_loops() {
 
 } // namespace cudaq::qec::realtime
 
-#endif // CUDAQ_REALTIME_ROOT
+#endif // CUDAQ_REALTIME_ROOT && CUDAQ_REALTIME_FOR_0_16

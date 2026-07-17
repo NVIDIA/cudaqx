@@ -22,7 +22,7 @@
 #include <set>
 #include <stdexcept>
 
-#ifdef CUDAQ_REALTIME_ROOT
+#if defined(CUDAQ_REALTIME_ROOT) && defined(CUDAQ_REALTIME_FOR_0_16)
 #include "qec_realtime_session.h"
 #include "rpc_producer.h"
 #else
@@ -42,7 +42,7 @@ std::unique_ptr<cudaq::qec::realtime::qec_realtime_session> g_realtime_session;
 
 namespace {
 
-#ifdef CUDAQ_REALTIME_ROOT
+#if defined(CUDAQ_REALTIME_ROOT) && defined(CUDAQ_REALTIME_FOR_0_16)
 inline cudaq_dispatch_launch_fn_t resolve_launch_dispatch_kernel_regular() {
   return reinterpret_cast<cudaq_dispatch_launch_fn_t>(
       ::dlsym(RTLD_DEFAULT, "cudaq_launch_dispatch_kernel_regular"));
@@ -66,7 +66,7 @@ bool any_decoder_supports_graph_dispatch() {
 
 } // namespace
 
-#ifdef CUDAQ_REALTIME_ROOT
+#if defined(CUDAQ_REALTIME_ROOT) && defined(CUDAQ_REALTIME_FOR_0_16)
 namespace {
 
 void maybe_init_realtime_session() {
@@ -301,7 +301,7 @@ int configure_decoders(
     return 3;
   }
 
-#ifdef CUDAQ_REALTIME_ROOT
+#if defined(CUDAQ_REALTIME_ROOT) && defined(CUDAQ_REALTIME_FOR_0_16)
   // inproc_rpc DEVICE sessions allocate pinned, device-mapped ring buffers
   // (cudaHostAlloc(cudaHostAllocMapped) + cudaHostGetDevicePointer).
   // cudaSetDeviceFlags(cudaDeviceMapHost) only takes effect BEFORE the device's
@@ -410,7 +410,7 @@ void enqueue_syndromes(std::size_t decoder_id, uint8_t *syndromes,
     }
   };
 
-#ifdef CUDAQ_REALTIME_ROOT
+#if defined(CUDAQ_REALTIME_ROOT) && defined(CUDAQ_REALTIME_FOR_0_16)
   if (g_realtime_session) {
     capture_syndromes();
     try {
@@ -484,7 +484,7 @@ void get_corrections(std::size_t decoder_id, uint8_t *corrections,
                     correction_length, num_observables));
   }
 
-#ifdef CUDAQ_REALTIME_ROOT
+#if defined(CUDAQ_REALTIME_ROOT) && defined(CUDAQ_REALTIME_FOR_0_16)
   if (g_realtime_session) {
     try {
       cudaq::qec::decoding::rpc_producer::get_corrections(
@@ -523,7 +523,7 @@ void reset_decoder(std::size_t decoder_id) {
         fmt::format("Decoder {} not found", decoder_id));
   }
 
-#ifdef CUDAQ_REALTIME_ROOT
+#if defined(CUDAQ_REALTIME_ROOT) && defined(CUDAQ_REALTIME_FOR_0_16)
   if (g_realtime_session) {
     try {
       cudaq::qec::decoding::rpc_producer::reset_decoder(*g_realtime_session,

@@ -876,10 +876,12 @@ endif()
 # actually applied to cudaq-qec-realtime-decoding (set when
 # CUDAQ_REALTIME_INCLUDE_DIR is discovered), NOT the optional
 # CUDAQ_REALTIME_ROOT search hint -- the headers can be found through
-# CUDAQ_INSTALL_DIR while the hint stays empty.
+# CUDAQ_INSTALL_DIR while the hint stays empty.  The session additionally
+# requires the graph-launch dispatch API (CUDAQ_REALTIME_FOR_0_16); without
+# it the session is a stub and HOST mode never initializes.
 get_target_property(_sc4_rt_defs cudaq-qec-realtime-decoding
   COMPILE_DEFINITIONS)
-if(_sc4_rt_defs MATCHES "CUDAQ_REALTIME_ROOT")
+if(_sc4_rt_defs MATCHES "CUDAQ_REALTIME_ROOT" AND CUDAQ_REALTIME_FOR_0_16)
   set(_sc4_hostmode_env "REQUIRE_HOST_MODE=1;CUDAQ_LOG_LEVEL=info")
   set_property(TEST app_examples.surface_code-4-yaml-list-parse-d3 APPEND
     PROPERTY ENVIRONMENT "${_sc4_hostmode_env}")
