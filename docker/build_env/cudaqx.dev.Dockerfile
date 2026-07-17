@@ -6,7 +6,7 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
-ARG base_image=ghcr.io/nvidia/cuda-quantum-devcontainer:amd64-cu12.6-gcc12-main
+ARG base_image=ghcr.io/nvidia/cuda-quantum-devcontainer@sha256:46d0b72f85b083b8fb20af243eeca1308fbdee4fa2e87d1166f029a38d0d72e7
 FROM $base_image
 
 ARG cuda_version=12.6
@@ -16,9 +16,11 @@ LABEL org.opencontainers.image.source="https://github.com/NVIDIA/cudaqx"
 LABEL org.opencontainers.image.title="cudaqx-dev"
 LABEL org.opencontainers.image.url="https://github.com/NVIDIA/cudaqx"
 
+# FIXME: Remove the cmake install once private repos are updated.
 RUN apt-get update && CUDA_DASH=$(echo $cuda_version | tr '.' '-') \
   && apt-get install -y gfortran libblas-dev jq cuda-nvtx-${CUDA_DASH} \
   && apt-get install -y git-lfs \
+  && python3 -m pip install "cmake<4" --user \
   && apt-get autoremove -y --purge && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 COPY .cudaq_version /cudaq_version
