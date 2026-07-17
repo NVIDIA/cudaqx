@@ -137,7 +137,12 @@ DeviceGraphTransceiver::DeviceGraphTransceiver(const DeviceGraphConfig &config)
   // create() = hololink_create_transceiver + hololink_start (3-kernel shape:
   // no --forward / --unified => rx_only + tx_only kernels, with dispatch
   // supplied by our device-graph scheduler in launch_scheduler()).
+  // args[0] is a program-name placeholder: the provider's parse_bridge_args
+  // follows the C argv convention and starts parsing at argv[1] -- without
+  // the placeholder the first real option would be silently skipped (and the
+  // bridge would fall back to its built-in device default).
   const std::vector<std::string> args = {
+      "device-graph-transceiver",
       "--device=" + config.device_name,
       "--peer-ip=" + config.peer_ip,
       "--remote-qp=" + std::to_string(config.remote_qp),
