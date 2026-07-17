@@ -640,8 +640,7 @@ int main(int argc, char **argv) {
   // exactly as cpu_roce_test_daemon does. Everything from here down is
   // transport-independent.
   // The dispatch table is HOST_CALL-only, so the ring loop runs the inline
-  // HOST_CALL path with no GRAPH_LAUNCH engine (engine == nullptr). Mirrors the
-  // HOST_CALL-only branch in qec_realtime_session.cpp.
+  // HOST_CALL path with no GRAPH_LAUNCH engine (engine == nullptr).
   int dispatcher_shutdown = 0;
   std::uint64_t packets_dispatched = 0;
   cudaq_ringbuffer_t ringbuffer{};
@@ -679,7 +678,7 @@ int main(int argc, char **argv) {
   }
 
   // [6] Orderly shutdown.  The dispatch loop polls the flag as volatile, not
-  // atomically; publish the store the same way qec_realtime_session.cpp does.
+  // atomically; publish the store with a release barrier so the loop sees it.
   __atomic_store_n(&dispatcher_shutdown, 1, __ATOMIC_RELEASE);
   __sync_synchronize();
   if (dispatcher_thread.joinable())

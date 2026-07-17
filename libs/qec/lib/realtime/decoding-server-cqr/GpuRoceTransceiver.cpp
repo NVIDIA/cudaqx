@@ -266,8 +266,8 @@ void GpuRoceTransceiver::launch_scheduler(void *raw_graph_resources) {
 
   // Resolve dispatch graph API via dlsym; cudaq-realtime-dispatch is linked
   // into the server (not this static lib) to keep the CUDA module in one copy.
-  // Signatures must match create/launch/destroy_dispatch_graph_fn_t in
-  // qec_realtime_session.cpp/.h exactly — calling-convention mismatch is UB.
+  // Signatures must match cudaq-realtime's create/launch/destroy_dispatch_graph
+  // exports exactly — calling-convention mismatch is UB.
   using create_fn_t = cudaError_t (*)(
       volatile std::uint64_t *, volatile std::uint64_t *, std::uint8_t *,
       std::uint8_t *, std::size_t, std::size_t, cudaq_function_entry_t *,
