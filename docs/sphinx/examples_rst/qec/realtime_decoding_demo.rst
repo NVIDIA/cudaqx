@@ -1,5 +1,5 @@
-Realtime Decoding: Driving the Decoding Server from an FPGA or a QPU Kernel
-===========================================================================
+Realtime Decoding with CUDA-Q Decoding Server
+=============================================
 
 .. note::
 
@@ -64,8 +64,9 @@ In a CUDA-QX container ``CUDAQ_INSTALL_DIR`` defaults to ``/usr/local/cudaq``.
 If the realtime libraries are in a separate prefix, add
 ``-DCUDAQ_REALTIME_DIR=<realtime prefix>``. The lowered kernel links the
 realtime dispatch archive (relocatable CUDA device code), so the build needs a
-CUDA toolchain; the device-link architecture defaults to ``80`` — override with
-``-DCMAKE_CUDA_ARCHITECTURES=90`` to match a Hopper / GB200 GPU.
+CUDA toolchain; the device-link architecture defaults to ``80`` (Ampere) —
+override with ``-DCMAKE_CUDA_ARCHITECTURES=90`` for Hopper or
+``-DCMAKE_CUDA_ARCHITECTURES=100`` for Blackwell (e.g. GB200).
 
 
 Running

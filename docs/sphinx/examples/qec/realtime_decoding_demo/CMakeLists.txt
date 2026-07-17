@@ -26,8 +26,8 @@ cmake_minimum_required(VERSION 3.23)
 # The lowered-kernel binary links the realtime dispatch archive (relocatable
 # CUDA device code), so the project enables CUDA and needs an architecture for
 # the device-link step. Default to 80 (A100) -- an architecture the shipped
-# SDK's dispatch archive includes; override to match your GPU, e.g.
-# -DCMAKE_CUDA_ARCHITECTURES=90 for Hopper / GB200.
+# SDK's dispatch archive includes; override to match your GPU:
+# -DCMAKE_CUDA_ARCHITECTURES=90 for Hopper, 100 for Blackwell (e.g. GB200).
 if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
   set(CMAKE_CUDA_ARCHITECTURES 80)
 endif()

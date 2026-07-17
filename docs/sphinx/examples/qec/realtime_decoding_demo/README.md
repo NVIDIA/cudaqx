@@ -33,8 +33,9 @@ In a CUDA-QX container `CUDAQ_INSTALL_DIR` defaults to `/usr/local/cudaq` (or
 installed. If the realtime libraries live in a separate prefix, add
 `-DCUDAQ_REALTIME_DIR=<realtime prefix>`. The lowered kernel links the realtime
 dispatch archive (relocatable CUDA device code), so the build needs a CUDA
-toolchain; override the device-link architecture with
-`-DCMAKE_CUDA_ARCHITECTURES=90` (default `80`) to match your GPU.
+toolchain; the device-link architecture defaults to `80` (Ampere) — override
+with `-DCMAKE_CUDA_ARCHITECTURES=90` for Hopper or
+`-DCMAKE_CUDA_ARCHITECTURES=100` for Blackwell (e.g. GB200).
 
 ## Run
 
