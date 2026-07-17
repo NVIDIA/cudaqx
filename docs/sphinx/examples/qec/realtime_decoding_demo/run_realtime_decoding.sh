@@ -14,15 +14,15 @@
 #
 #   --source qpu-kernel   The lowered QEC kernel supplies syndromes itself over
 #                         UDP, in software (no NIC).  The server decodes on the
-#                         CPU host-call path (pymatching/trt) or the GPU
-#                         (nv-qldpc).  This is the portable, hardware-free mode.
+#                         CPU host-call path (pymatching/multi_error_lut) or the
+#                         GPU (nv-qldpc).  This is the portable, hardware-free mode.
 #
 #   --source fpga         The delivered hololink_fpga_syndrome_playback tool
 #                         streams pre-generated syndromes over RoCE from a REAL
 #                         FPGA into the server's RDMA ring (needs a ConnectX NIC
-#                         cabled to the FPGA).  pymatching/trt decode on the CPU
-#                         (cpu_roce); nv-qldpc on the GPU device-graph scheduler
-#                         (gpu_roce).  There is NO emulator here -- emulator
+#                         cabled to the FPGA).  pymatching/multi_error_lut decode
+#                         on the CPU (cpu_roce); nv-qldpc on the GPU device-graph
+#                         scheduler (gpu_roce).  There is NO emulator here -- emulator
 #                         testing lives in the unittests hsb_fpga_decoding_server_test.sh.
 #
 # DELIVERABLES (consumed prebuilt from --install-prefix, never built here):
@@ -41,7 +41,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ============================================================================
 
 SOURCE="qpu-kernel"          # qpu-kernel | fpga
-DECODER="pymatching"         # pymatching | trt_decoder | nv-qldpc-decoder
+DECODER="pymatching"         # pymatching | nv-qldpc-decoder | multi_error_lut
 
 # Where the deliverables live (bin/ + lib/).  Required unless the per-artifact
 # overrides below are all given.  No dev-tree fallback -- shipped code resolves
@@ -62,14 +62,14 @@ GENERATOR_BIN=""
 KERNEL_BIN=""
 NV_QLDPC_PLUGIN="${CUDAQ_QEC_NV_QLDPC_PLUGIN:-}"
 
-# trt_decoder identity ONNX: AUTO generates it at run time (needs python onnx).
-ONNX_PATH="AUTO"
-ONNX_FILE=""
-
-# Surface-code experiment parameters (RNG seed is fixed => reproducible).
+# Surface-code experiment parameters. The generator applies two-qubit
+# depolarizing noise on the stabilizer-extraction CNOTs (p_cnot); the fixed
+# simulator seed makes every run -- and therefore the pass/fail counts --
+# reproducible (pass --seed -1 for unseeded runs).
 GEN_DISTANCE=3
 GEN_ROUNDS=4
-GEN_P_SPAM=0.01
+GEN_P_CNOT=0.001
+SEED=42
 
 # Shot counts differ by mode: the FPGA plays back a fixed set through a 64-slot
 # RDMA RX ring; the qpu-kernel self-paces via its blocking get_corrections and
@@ -82,7 +82,7 @@ NUM_SHOTS=""                 # explicit override
 # FPGA's fixed 64-slot RX ring.  The qpu-kernel path needs none.
 SPACING="10"
 
-# FPGA transport is derived from the decoder unless set: pymatching/trt ->
+# FPGA transport is derived from the decoder unless set: CPU decoders ->
 # cpu_roce (CPU host-call), nv-qldpc -> gpu_roce (GPU device-graph scheduler).
 TRANSPORT=""
 GPU_ID=0
@@ -120,7 +120,7 @@ Sources:
   --source fpga           Delivered playback streams from a real FPGA over RoCE.
 
 Common:
-  --decoder NAME          pymatching (default) | trt_decoder | nv-qldpc-decoder
+  --decoder NAME          pymatching (default) | nv-qldpc-decoder | multi_error_lut
   --install-prefix DIR    Deliverables prefix (decoding_server, playback, libs,
                           plugins in DIR/bin and DIR/lib).  Required (or give the
                           per-artifact overrides).
@@ -129,13 +129,12 @@ Common:
   --realtime-lib-dir DIR  Extra realtime lib dir (udp transport / dispatch)
   --example-build-dir DIR The example's build dir with the two binaries
                           (default: <script dir>/build)
-  --onnx PATH             trt_decoder ONNX model (default AUTO: generate identity
-                          predecoder at run time; needs python 'onnx')
   --nv-qldpc-plugin PATH  Prebuilt libcudaq-qec-nv-qldpc-decoder.so (or set
                           CUDAQ_QEC_NV_QLDPC_PLUGIN); required for nv-qldpc
   --distance N            Surface-code distance (default 3)
-  --num-rounds N          Measurement rounds (default 4)
-  --p-spam F              SPAM error probability (default 0.01)
+  --num-rounds N          Measurement rounds (default 4; must be >= distance)
+  --p-cnot F              Two-qubit depolarizing rate on the CNOTs (default 0.001)
+  --seed N                Simulator seed; -1 = unseeded (default 42)
   --num-shots N           Shots (default: 85 fpga / 200 qpu-kernel)
   --gpu N                 GPU id for nv-qldpc (default 0)
 
@@ -165,11 +164,11 @@ while [[ $# -gt 0 ]]; do
         --cudaq-prefix)     CUDAQ_PREFIX="$2"; shift ;;
         --realtime-lib-dir) REALTIME_LIB_DIR="$2"; shift ;;
         --example-build-dir) EXAMPLE_BUILD_DIR="$2"; shift ;;
-        --onnx)             ONNX_PATH="$2"; shift ;;
+        --seed)             SEED="$2"; shift ;;
         --nv-qldpc-plugin)  NV_QLDPC_PLUGIN="$2"; shift ;;
         --distance)         GEN_DISTANCE="$2"; shift ;;
         --num-rounds)       GEN_ROUNDS="$2"; shift ;;
-        --p-spam)           GEN_P_SPAM="$2"; shift ;;
+        --p-cnot)           GEN_P_CNOT="$2"; shift ;;
         --num-shots)        NUM_SHOTS="$2"; shift ;;
         --gpu)              GPU_ID="$2"; shift ;;
         --server)           SERVER_BIN="$2"; shift ;;
@@ -194,6 +193,12 @@ if [[ "$SOURCE" != "qpu-kernel" && "$SOURCE" != "fpga" ]]; then
     echo "ERROR: --source must be qpu-kernel or fpga (got '$SOURCE')" >&2; exit 1
 fi
 
+case "$DECODER" in
+    pymatching|nv-qldpc-decoder|multi_error_lut) ;;
+    *) echo "ERROR: --decoder must be pymatching, nv-qldpc-decoder, or" >&2
+       echo "       multi_error_lut (got '$DECODER')" >&2; exit 1 ;;
+esac
+
 _log()  { echo "==> $*"; }
 _info() { echo "    $*"; }
 _err()  { echo "ERROR: $*" >&2; }
@@ -208,11 +213,11 @@ resolve_paths() {
     # Canonicalize user-supplied paths first: generate_data runs the generator
     # from a temp working dir, and library paths are exported to subprocesses,
     # so a relative path that validates here would break there. Only rewrite
-    # values that resolve to an existing path -- sentinels (e.g. the AUTO onnx
-    # default) and missing paths stay as-is for the normal validation below.
+    # values that resolve to an existing path -- missing paths stay as-is for
+    # the normal validation below.
     local _v _abs
     for _v in INSTALL_PREFIX CUDAQ_PREFIX REALTIME_LIB_DIR EXAMPLE_BUILD_DIR \
-              SERVER_BIN PLAYBACK_BIN GENERATOR_BIN KERNEL_BIN ONNX_PATH NV_QLDPC_PLUGIN; do
+              SERVER_BIN PLAYBACK_BIN GENERATOR_BIN KERNEL_BIN NV_QLDPC_PLUGIN; do
         if [[ -n "${!_v}" ]]; then
             if _abs=$(readlink -f -- "${!_v}" 2>/dev/null) && [[ -e "$_abs" ]]; then
                 printf -v "$_v" '%s' "$_abs"
@@ -280,56 +285,15 @@ GEN_DIR=""
 CONFIG_FILE=""
 SYNDROMES_FILE=""
 
-generate_identity_onnx() {
-    if [[ "$ONNX_PATH" != "AUTO" ]]; then
-        [[ -f "$ONNX_PATH" ]] || { _err "--onnx not found: $ONNX_PATH"; return 1; }
-        ONNX_FILE="$ONNX_PATH"; return 0
-    fi
-    if ! python3 -c "import onnx" 2>/dev/null; then
-        _err "python3 'onnx' module required for the identity ONNX (pip install onnx),"
-        _err "or pass --onnx PATH."; return 1
-    fi
-    ONNX_FILE="$GEN_DIR/trt_identity_predecoder.onnx"
-    local syndrome_size=$(((GEN_DISTANCE * GEN_DISTANCE - 1) * GEN_ROUNDS))
-    _info "Generating identity ONNX: $ONNX_FILE (syndrome_size=$syndrome_size)"
-    python3 - "$ONNX_FILE" "$syndrome_size" <<'PY'
-import sys
-import onnx
-from onnx import TensorProto, helper
-output_path = sys.argv[1]
-syndrome_size = int(sys.argv[2])
-input_info = helper.make_tensor_value_info("input", TensorProto.FLOAT, [1, syndrome_size])
-output_info = helper.make_tensor_value_info("output", TensorProto.FLOAT, [1, syndrome_size + 1])
-zero = helper.make_node("Constant", [], ["pre_l"],
-    value=helper.make_tensor("zero", TensorProto.FLOAT, [1, 1], [0.0]))
-concat = helper.make_node("Concat", ["pre_l", "input"], ["output"], axis=1)
-graph = helper.make_graph([zero, concat], "trt_identity_predecoder", [input_info], [output_info])
-model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 19)])
-model.ir_version = 9
-onnx.checker.check_model(model)
-onnx.save(model, output_path)
-PY
-    [[ -f "$ONNX_FILE" ]] || { _err "identity ONNX generation failed"; return 1; }
-}
-
 generate_data() {
     GEN_DIR="$(mktemp -d /tmp/realtime_decoding_demo.XXXXXX)"
     CONFIG_FILE="$GEN_DIR/config_${DECODER}.yml"
     SYNDROMES_FILE="$GEN_DIR/syndromes_${DECODER}.txt"
 
-    local gen_extra=()
-    if [[ "$DECODER" == "trt_decoder" ]]; then
-        generate_identity_onnx || exit 1
-        gen_extra+=(--onnx_path "$ONNX_FILE")
-    fi
-    if [[ "$DECODER" == "nv-qldpc-decoder" ]]; then
-        gen_extra+=(--use-relay-bp)
-    fi
-
     _log "Generating decoder config (decoder=$DECODER, d=$GEN_DISTANCE, rounds=$GEN_ROUNDS)"
     ( cd "$GEN_DIR" && "$GENERATOR_BIN" \
-        --distance "$GEN_DISTANCE" --num_rounds "$GEN_ROUNDS" --p_spam "$GEN_P_SPAM" \
-        --decoder_type "$DECODER" ${gen_extra[@]+"${gen_extra[@]}"} \
+        --distance "$GEN_DISTANCE" --num_rounds "$GEN_ROUNDS" --p_cnot "$GEN_P_CNOT" \
+        --decoder_type "$DECODER" \
         --save_dem "$CONFIG_FILE" ) >"$GEN_DIR/gen_config.log" 2>&1 || {
         _err "config generation failed; see $GEN_DIR/gen_config.log"; tail -5 "$GEN_DIR/gen_config.log" >&2; exit 1; }
 
@@ -337,7 +301,7 @@ generate_data() {
     # host worker / device-graph scheduler both honor it). The fpga/gpu_roce
     # device path additionally switches the transport. The generator omits these
     # optional fields, so inject them under the decoder's `type:` line.
-    # pymatching/trt need neither.
+    # pymatching/multi_error_lut need neither.
     if [[ "$DECODER" == "nv-qldpc-decoder" ]]; then
         local inject_tr=""
         if [[ "$SOURCE" == "fpga" && "$TRANSPORT" == "gpu_roce" ]]; then
@@ -366,8 +330,8 @@ generate_data() {
         local shots="${NUM_SHOTS:-$FPGA_SHOTS}"
         _log "Generating $shots syndromes for playback"
         ( cd "$GEN_DIR" && "$GENERATOR_BIN" \
-            --distance "$GEN_DISTANCE" --num_rounds "$GEN_ROUNDS" --p_spam "$GEN_P_SPAM" \
-            --num_shots "$shots" --yaml "$CONFIG_FILE" \
+            --distance "$GEN_DISTANCE" --num_rounds "$GEN_ROUNDS" --p_cnot "$GEN_P_CNOT" \
+            --seed "$SEED" --num_shots "$shots" --load_dem "$CONFIG_FILE" \
             --save_syndrome "$SYNDROMES_FILE" ) >"$GEN_DIR/gen_syndromes.log" 2>&1 || {
             _err "syndrome generation failed; see $GEN_DIR/gen_syndromes.log"; tail -5 "$GEN_DIR/gen_syndromes.log" >&2; exit 1; }
     fi
@@ -404,12 +368,13 @@ wait_for_pattern() {
 }
 
 # ============================================================================
-# qpu-kernel pass/fail criteria -- the same checks the in-tree surface_code-4
-# ctest driver applies (unittests/realtime/app_examples/surface_code-4-yaml-
-# test.sh), so this example fails on the same evidence as the existing tests:
-# hard decoder-failure messages, the corrections-line completion proof, a
-# residual logical-error ceiling of num_shots/50 (min 1), and external-server
-# evidence (server-owned decoders + a dispatch-count floor).
+# qpu-kernel pass/fail criteria -- the same checks the in-tree surface-code
+# ctest drivers apply (surface_code-1-cqr-two-process-test.sh and
+# surface_code-4-yaml-test.sh), so this example fails on the same evidence as
+# the existing tests: hard decoder-failure messages, the corrections-line
+# completion proof, a residual logical-error ceiling of num_shots/50 (min 1),
+# and external-server evidence (the app's in-process dispatch count must be 0
+# + a server dispatch-count floor).
 # ============================================================================
 verify_qpu_kernel_output() {
     local kernel_log="$1" server_log="$2" shots="$3"
@@ -452,12 +417,14 @@ verify_qpu_kernel_output() {
         _info "residual logical errors: $non_zero (ceiling $max_non_zero) -- OK"
     fi
 
-    # External-server evidence: the kernel must report server-owned decoders
-    # (no silent local-decoder fallback), and the server must have dispatched
-    # at least shots * (rounds + 3) RPCs -- rounds+1 enqueues + get_corrections
-    # + reset per shot.
-    if ! grep -q "External decoding server owns all configured decoder instances" "$kernel_log"; then
-        _err "kernel did not report server-owned decoders"; rc=1
+    # External-server evidence: the app's in-process decoding service must
+    # have dispatched NOTHING (decode did not silently stay local), and the
+    # server must have dispatched at least shots * (rounds + 3) RPCs --
+    # reset + (rounds+1) enqueues + get_corrections per shot.
+    local inproc
+    inproc=$(grep "CQR service dispatch count:" "$kernel_log" | awk -F': ' '{print $2}' | tr -d '[:space:]')
+    if [[ "$inproc" != "0" ]]; then
+        _err "in-process CQR dispatch count is '${inproc:-<missing>}' (expected 0); decode did not stay in the server"; rc=1
     fi
     local dispatches min_dispatches=$((shots * (GEN_ROUNDS + 3)))
     dispatches=$(sed -n 's/^QEC_DECODING_SERVER_DISPATCHED count=\([0-9][0-9]*\)$/\1/p' \
@@ -492,11 +459,15 @@ run_qpu_kernel() {
     local shots="${NUM_SHOTS:-$QPU_KERNEL_SHOTS}"
     local kernel_log; kernel_log="$GEN_DIR/kernel.log"
     _log "Running lowered kernel: $shots shots"
+    # QEC_DECODING_SERVER_PORT alone routes every decoding device_call over
+    # the udp channel to the external server (the app brings the channel up
+    # itself in its QEC_APP_CQR build).
     local rc=0
-    CUDAQ_QEC_REALTIME_MODE=external_server QEC_DECODING_SERVER_PORT="$port" \
-        "$KERNEL_BIN" --yaml "$CONFIG_FILE" \
+    QEC_DECODING_SERVER_PORT="$port" \
+        "$KERNEL_BIN" --load_dem "$CONFIG_FILE" \
         --distance "$GEN_DISTANCE" --num_rounds "$GEN_ROUNDS" \
-        --p_spam "$GEN_P_SPAM" --num_shots "$shots" 2>&1 | tee "$kernel_log" || rc=$?
+        --p_cnot "$GEN_P_CNOT" --seed "$SEED" \
+        --num_shots "$shots" 2>&1 | tee "$kernel_log" || rc=$?
     # Stop the server and wait for it to exit so its shutdown stats
     # (QEC_DECODING_SERVER_DISPATCHED ...) are flushed to the log.
     kill -TERM "$spid" 2>/dev/null || true
@@ -680,7 +651,7 @@ main() {
     resolve_paths
     # Derive the FPGA transport before generating the config: nv-qldpc runs on
     # the gpu_roce device-graph path, and generate_data injects that transport
-    # (+ cuda_device_id) into the config. pymatching/trt use cpu_roce.
+    # (+ cuda_device_id) into the config. CPU decoders use cpu_roce.
     if [[ "$SOURCE" == "fpga" && -z "$TRANSPORT" ]]; then
         case "$DECODER" in
             nv-qldpc-decoder) TRANSPORT="gpu_roce" ;;

@@ -164,8 +164,7 @@ jobs:
             --install-prefix "$HOME/.cudaqx" \
             --cudaq-prefix /cudaq-install \
             --realtime-lib-dir "$RT" \
-            --example-build-dir /tmp/rtdemo-build \
-            --num-shots 50
+            --example-build-dir /tmp/rtdemo-build
 
       # ========================================================================
       # Upload build artifacts for GPU tests
@@ -175,8 +174,6 @@ jobs:
           tar czf /tmp/qec-build-artifacts.tar.gz \
             /cudaq-install \
             /tmp/cudaq-realtime \
-            "$HOME/.cudaqx" \
-            /tmp/rtdemo-build \
             $GITHUB_WORKSPACE/libs/qec/unittests/decoders/realtime/data \
             $GITHUB_WORKSPACE/${{ steps.build.outputs.build-dir }}
 
@@ -273,29 +270,6 @@ jobs:
         run: |
           PYTHONPATH="/cudaq-install:$GITHUB_WORKSPACE/build_qec/python" \
             pytest -v libs/qec/python/tests/
-
-      # ========================================================================
-      # Realtime decoding demo: trt_decoder THROUGH the decoding server over UDP.
-      # This is the only CI coverage of trt_decoder via the decoding server (the
-      # TRTDecoder unit tests exercise the decoder standalone, not the server).
-      # Reuses the example binaries + SDK install prebuilt in build-and-test
-      # (from the artifact). Needs a GPU (TensorRT inference runs server-side)
-      # plus python onnx (the script generates the identity predecoder model).
-      # Gated on TensorRT availability, matching the TensorRT installs above.
-      # ========================================================================
-      - name: Realtime decoding demo (trt_decoder, qpu-kernel over UDP)
-        if: matrix.platform != 'arm64' || !startsWith(matrix.cuda_version, '12')
-        shell: bash
-        run: |
-          pip install onnx
-          RT="${CUDAQ_REALTIME_ROOT:-/tmp/cudaq-realtime}"
-          bash docs/sphinx/examples/qec/realtime_decoding_demo/run_realtime_decoding.sh \
-            --source qpu-kernel --decoder trt_decoder \
-            --install-prefix "$HOME/.cudaqx" \
-            --cudaq-prefix /cudaq-install \
-            --realtime-lib-dir "$RT" \
-            --example-build-dir /tmp/rtdemo-build \
-            --num-shots 50
 
   # ==========================================================================
   # Multi-GPU tests - decoder placement across >= 2 GPUs (uses build artifacts

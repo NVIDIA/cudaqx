@@ -19,15 +19,6 @@ configurations:
 For the software-only benchmark (no FPGA or network hardware), see
 :doc:`/examples_rst/qec/realtime_predecoder_pymatching`.
 
-.. tip::
-
-   To run this TensorRT-predecoder pipeline end-to-end against the delivered
-   ``decoding_server`` -- from either a real FPGA or a lowered QPU kernel over
-   UDP -- use the :doc:`/examples_rst/qec/realtime_decoding_demo` example with
-   ``--decoder trt_decoder``. That example compiles against the installed SDK
-   and resolves the server + playback tool from the install prefix. This page
-   documents the underlying predecoder pipeline and its emulator-based testing.
-
 
 Prerequisites
 -------------

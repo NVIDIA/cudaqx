@@ -131,7 +131,8 @@ set_target_properties(surface_code_realtime_decoding PROPERTIES LINKER_LANGUAGE 
 # DT_NEEDED and the process would crash at startup with no platform.
 target_link_libraries(surface_code_realtime_decoding PRIVATE
   -Wl,--no-as-needed
-  cudaq-qec cudaq-qec-realtime-decoding-simulation ${_cudaq_core_libs}
+  cudaq-qec cudaq-qec-realtime-decoding
+  cudaq-qec-realtime-decoding-simulation ${_cudaq_core_libs}
   -Wl,--as-needed
   "${CUDAQ_REALTIME_DISPATCH_LIB}")
 target_link_options(surface_code_realtime_decoding PRIVATE
@@ -143,7 +144,7 @@ target_link_options(surface_code_realtime_decoding PRIVATE
 # (nvcc -dlink) that resolves the dispatch archive's RDC registration symbols.
 # ---------------------------------------------------------------------------- #
 _add_nvqpp_object(_cqr_obj generator-cqr
-  --target stim -frealtime-lowering -DQEC_APP_EXTERNAL_DECODING_SERVER)
+  --target stim -frealtime-lowering -DQEC_APP_CQR)
 add_executable(surface_code_realtime_decoding-cqr "${_cqr_obj}")
 set_target_properties(surface_code_realtime_decoding-cqr PROPERTIES
   CUDA_SEPARABLE_COMPILATION ON
@@ -152,7 +153,13 @@ set_target_properties(surface_code_realtime_decoding-cqr PROPERTIES
   LINKER_LANGUAGE CUDA)
 target_link_libraries(surface_code_realtime_decoding-cqr PRIVATE
   -Wl,--no-as-needed
-  cudaq-qec cudaq-qec-realtime-decoding-simulation-cqr cudaq-device-call-runtime
+  cudaq-qec cudaq-qec-realtime-decoding
+  cudaq-qec-realtime-decoding-simulation-cqr
+  # The in-process decoding service; also exports
+  # cudaqx_qec_device_call_dispatch_count, which the app prints as evidence
+  # that an external server (not the in-process service) did the decoding.
+  cudaq-qec-realtime-decoding-server-cqr
+  cudaq-device-call-runtime
   ${_cudaq_core_libs}
   -Wl,--as-needed
   "${CUDAQ_REALTIME_DISPATCH_LIB}" CUDA::cudart)

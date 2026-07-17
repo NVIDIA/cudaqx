@@ -20,14 +20,13 @@ syndrome sources, both decoding through the **same prebuilt server**:
   emulator here.
 
 Both sources decode with any of three decoders — ``pymatching``,
-``trt_decoder`` (a TensorRT predecoder + PyMatching), and ``nv-qldpc-decoder``
-(GPU relay-BP).
+``multi_error_lut`` (CPU lookup table), and ``nv-qldpc-decoder`` (GPU
+relay-BP). Runs are seeded (``--seed``, default 42), so the reported counts
+are reproducible.
 
-For the decoder-specific FPGA walkthroughs see
-:doc:`/examples_rst/qec/realtime_predecoder_fpga` (TensorRT predecoder) and
-:doc:`/examples_rst/qec/realtime_relay_bp` (nv-qldpc Relay BP); for the
-software-only pymatching benchmark see
-:doc:`/examples_rst/qec/realtime_predecoder_pymatching`.
+For the nv-qldpc Relay BP device-graph walkthrough see
+:doc:`/examples_rst/qec/realtime_relay_bp`; for the software-only pymatching
+benchmark see :doc:`/examples_rst/qec/realtime_predecoder_pymatching`.
 
 
 Deliverables versus the example
@@ -81,7 +80,7 @@ QPU-kernel source (software, UDP, no hardware)
 .. code-block:: bash
 
    ./run_realtime_decoding.sh --source qpu-kernel --decoder pymatching            --install-prefix <prefix>
-   ./run_realtime_decoding.sh --source qpu-kernel --decoder trt_decoder           --install-prefix <prefix>
+   ./run_realtime_decoding.sh --source qpu-kernel --decoder multi_error_lut       --install-prefix <prefix>
    ./run_realtime_decoding.sh --source qpu-kernel --decoder nv-qldpc-decoder --gpu 0 --install-prefix <prefix>
 
 The lowered kernel runs the surface-code memory experiment and streams each
@@ -99,17 +98,17 @@ FPGA source (real FPGA over RoCE)
 
 ``--setup-network`` configures the ConnectX interface (needs ``sudo``);
 ``--spacing`` (default 10 µs) paces the playback so it does not overrun the
-FPGA's fixed 64-slot RDMA RX ring. ``pymatching`` and ``trt_decoder`` decode on
-the CPU (``cpu_roce``); ``nv-qldpc-decoder --gpu 0`` decodes on the GPU
-device-graph scheduler (``gpu_roce``).
+FPGA's fixed 64-slot RDMA RX ring. ``pymatching`` and ``multi_error_lut``
+decode on the CPU (``cpu_roce``); ``nv-qldpc-decoder --gpu 0`` decodes on the
+GPU device-graph scheduler (``gpu_roce``).
 
 Both sources apply real pass/fail criteria. The qpu-kernel source uses the
-same checks as the in-tree surface_code-4 tests — no decoder errors, a
-residual logical-error ceiling of ``num_shots/50``, server-owned decoders,
-and a server dispatch-count floor of ``num_shots * (num_rounds + 3)``. The
-FPGA source verifies every shot's corrections against the expected values
-computed at syndrome-generation time (the playback tool's per-shot
-verification).
+same checks as the in-tree surface-code tests — no decoder errors, a residual
+logical-error ceiling of ``num_shots/50``, an in-process dispatch count of 0
+(proof the decode stayed in the external server), and a server dispatch-count
+floor of ``num_shots * (num_rounds + 3)``. The FPGA source verifies every
+shot's corrections against the expected values computed at
+syndrome-generation time (the playback tool's per-shot verification).
 
 
 Decoders
@@ -126,18 +125,16 @@ Decoders
      - CPU, no hardware
      - NIC
      - none
-   * - ``trt_decoder``
-     - GPU (server-side TensorRT)
-     - NIC + GPU
-     - python ``onnx`` + GPU
+   * - ``multi_error_lut``
+     - CPU, no hardware
+     - NIC
+     - none
    * - ``nv-qldpc-decoder``
      - GPU (host-call path)
      - NIC + GPU (device path)
      - plugin + ``--gpu``
 
-The ``trt_decoder`` profile generates a tiny identity-predecoder ONNX at
-runtime (needs the python ``onnx`` module; override with ``--onnx``). The
-``nv-qldpc-decoder`` profile needs the prebuilt plugin — auto-found in the
+The ``nv-qldpc-decoder`` profile needs the prebuilt plugin — auto-found in the
 install prefix, else ``--nv-qldpc-plugin <path.so>`` — and a GPU; if the plugin
 is unavailable the script exits ``77`` (skip).
 

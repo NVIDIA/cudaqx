@@ -46,19 +46,21 @@ toolchain; override the device-link architecture with
 
 ```bash
 ./run_realtime_decoding.sh --source qpu-kernel --decoder pymatching        --install-prefix <prefix>
-./run_realtime_decoding.sh --source qpu-kernel --decoder trt_decoder       --install-prefix <prefix>
+./run_realtime_decoding.sh --source qpu-kernel --decoder multi_error_lut   --install-prefix <prefix>
 ./run_realtime_decoding.sh --source qpu-kernel --decoder nv-qldpc-decoder --gpu 0 --install-prefix <prefix>
 ```
 
 The lowered kernel runs the surface-code memory experiment and streams each
 shot's syndromes to the server over UDP; the server decodes and returns
-corrections. No NIC, no FPGA, no network setup.
+corrections. No NIC, no FPGA, no network setup. Runs are seeded (`--seed`,
+default 42), so the reported counts are reproducible.
 
-PASS/FAIL uses the same criteria as the in-tree surface_code-4 tests: the run
+PASS/FAIL uses the same criteria as the in-tree surface-code tests: the run
 must complete without decoder errors, the residual logical-error count must
 stay at or under `num_shots/50` (a decoder that is connected but decoding
-wrong produces far more), the kernel must report server-owned decoders, and
-the server must have dispatched at least `num_shots * (num_rounds + 3)` RPCs.
+wrong produces far more), the kernel's in-process dispatch count must be 0
+(proof the decode stayed in the external server), and the server must have
+dispatched at least `num_shots * (num_rounds + 3)` RPCs.
 
 ### FPGA source (real FPGA; needs a ConnectX NIC)
 
@@ -66,7 +68,7 @@ the server must have dispatched at least `num_shots * (num_rounds + 3)` RPCs.
 ./run_realtime_decoding.sh --source fpga --decoder pymatching \
     --setup-network --device <nic> --bridge-ip <host-ip> --fpga-ip <fpga-ip> \
     --install-prefix <prefix>
-#   --decoder trt_decoder / --decoder nv-qldpc-decoder --gpu 0 likewise
+#   --decoder multi_error_lut / --decoder nv-qldpc-decoder --gpu 0 likewise
 ```
 
 The delivered playback tool streams pre-generated syndromes over RoCE from the
@@ -80,14 +82,11 @@ testing lives in the unittests `hsb_fpga_decoding_server_test.sh`.)
 | decoder | qpu-kernel (UDP) | fpga (real FPGA) | extra requirement |
 |---|---|---|---|
 | `pymatching` | CPU, no hardware | NIC | none |
-| `trt_decoder` | GPU (server-side TensorRT) | NIC + GPU | python `onnx` + GPU |
+| `multi_error_lut` | CPU, no hardware | NIC | none |
 | `nv-qldpc-decoder` | GPU (host-call path) | NIC + GPU (device path) | plugin + `--gpu` |
 
 - **`pymatching`** — CPU matching decoder; nothing extra.
-- **`trt_decoder`** — a TensorRT predecoder feeding a PyMatching global decoder.
-  TensorRT inference runs server-side on a GPU (both sources). The script
-  generates a tiny identity-predecoder ONNX at runtime (needs the python
-  `onnx` module); override with `--onnx <model>`.
+- **`multi_error_lut`** — CPU lookup-table decoder; nothing extra.
 - **`nv-qldpc-decoder`** — GPU relay-BP. Needs the prebuilt plugin
   (auto-found in the install prefix, else pass `--nv-qldpc-plugin <path.so>`)
   and a GPU selected with `--gpu <id>`. If the plugin is unavailable the script
