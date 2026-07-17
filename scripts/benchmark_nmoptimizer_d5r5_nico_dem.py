@@ -57,7 +57,7 @@ except ImportError as exc:  # pragma: no cover
 
 from cudaq_qec import NMOptimizer, make_training_step
 
-EXECUTE_MODES = ("codegen", "unrolled", "opt_einsum")
+EXECUTE_MODES = ("codegen", "unrolled", "opt_einsum", "cutensornet")
 
 
 @dataclass
@@ -198,6 +198,22 @@ def path_opt_cost(info: Any) -> float:
         return float("nan")
 
 
+def einsum_rank(eq: str) -> int:
+    if "->" not in eq:
+        return 0
+    lhs, rhs = eq.split("->", 1)
+    terms = [term for term in lhs.split(",") if term]
+    terms.append(rhs)
+    return max((len(term) for term in terms), default=0)
+
+
+def path_max_einsum_rank(info: Any) -> int:
+    ranks = [
+        einsum_rank(step[2]) for step in getattr(info, "contraction_list", ())
+    ]
+    return max(ranks, default=0)
+
+
 def fmt_float(value: float) -> str:
     if math.isnan(value):
         return "n/a"
@@ -252,18 +268,24 @@ def construct_optimizer(problem: Problem, syn: np.ndarray, flips: np.ndarray,
                        compile=args.compile)
 
 
-def run_case(problem: Problem, batch_size: int, execute: str,
-             args: argparse.Namespace) -> dict[str, str]:
+def run_case(problem: Problem,
+             batch_size: int,
+             execute: str,
+             args: argparse.Namespace,
+             fixed_path: Any | None = None,
+             fixed_path_source: str = "") -> tuple[dict[str, str], Any | None]:
     label = f"batch={batch_size}, execute={execute}"
     row = {
         "batch": str(batch_size),
         "construct_batch": str(batch_size),
         "execute": execute,
+        "path_source": fixed_path_source if fixed_path is not None else "self",
         "status": "FAIL",
         "construct_s": "n/a",
         "largest_intermediate": "n/a",
         "intermediate_gib": "n/a",
         "opt_cost": "n/a",
+        "max_einsum_rank": "n/a",
         "step_s": "n/a",
         "peak_mem_mib": "n/a",
         "error": "",
@@ -271,6 +293,7 @@ def run_case(problem: Problem, batch_size: int, execute: str,
     init_priors = make_initial_priors(problem.priors, args.init)
     syn, flips = sample_problem(problem, batch_size, args.seed + batch_size)
 
+    selected_path = None
     try:
         clear_cuda(args.device)
         with timed(f"Construct NMOptimizer ({label})"):
@@ -310,6 +333,10 @@ def run_case(problem: Problem, batch_size: int, execute: str,
                 opt = construct_optimizer(problem, syn, flips, init_priors,
                                           args, execute)
                 step_fn = None
+            if fixed_path is not None:
+                print(f"Reusing reduced path from {fixed_path_source}",
+                      flush=True)
+                opt.optimize_path(fixed_path)
             row["construct_s"] = f"{time.perf_counter() - t0:.3f}"
 
         construct_batch = int(getattr(opt, "_batch_size", batch_size))
@@ -319,10 +346,12 @@ def run_case(problem: Problem, batch_size: int, execute: str,
             run_label += f", construct_batch={construct_batch}"
 
         info = getattr(opt, "_reduced_info", None)
+        selected_path = getattr(opt, "path_batch", None)
         largest = path_largest_intermediate(info)
         cost = path_opt_cost(info)
         row["largest_intermediate"] = fmt_float(largest)
         row["opt_cost"] = fmt_float(cost)
+        row["max_einsum_rank"] = str(path_max_einsum_rank(info))
         if not math.isnan(largest):
             gib = largest * element_size(args.dtype) / 2**30
             row["intermediate_gib"] = f"{gib:.3f}"
@@ -343,7 +372,7 @@ def run_case(problem: Problem, batch_size: int, execute: str,
 
         row["peak_mem_mib"] = peak_mem_mib(args.device)
         row["status"] = "OK"
-        return row
+        return row, selected_path
     except Exception as exc:  # intentionally broad: this is an OOM probe.
         row["error"] = repr(exc)
         with contextlib.suppress(Exception):
@@ -351,7 +380,7 @@ def run_case(problem: Problem, batch_size: int, execute: str,
         print(f"FAILED CASE {label}: {exc!r}", flush=True)
         if args.stop_on_failure:
             raise
-        return row
+        return row, selected_path
     finally:
         with contextlib.suppress(Exception):
             del opt  # type: ignore[name-defined]
@@ -396,7 +425,7 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--execute",
         default="all",
-        help="all, codegen, unrolled, opt_einsum, or comma list")
+        help="all, codegen, unrolled, opt_einsum, cutensornet, or comma list")
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--dtype",
                         choices=["float32", "float64"],
@@ -423,6 +452,11 @@ def make_parser() -> argparse.ArgumentParser:
                         type=int,
                         default=10,
                         help="Print batch-slice progress every N chunks.")
+    parser.add_argument(
+        "--reuse-first-path",
+        action="store_true",
+        help=("For each requested batch size, reuse the first execute mode's "
+              "reduced contraction path for later execute modes."))
     parser.add_argument("--lr",
                         type=float,
                         default=1e-2,
@@ -456,6 +490,7 @@ def main() -> int:
         f"d={args.distance}, r={args.rounds}, device={args.device}, "
         f"dtype={args.dtype}, execute={execute_modes}, "
         f"batch_sizes={args.batch_sizes}, run_step={args.run_step}, "
+        f"reuse_first_path={args.reuse_first_path}, "
         f"batch_slice_size={args.batch_slice_size}",
         flush=True)
 
@@ -477,14 +512,26 @@ def main() -> int:
 
     rows = []
     for batch_size in args.batch_sizes:
+        fixed_path = None
+        fixed_path_source = ""
         for execute in execute_modes:
-            rows.append(run_case(problem, batch_size, execute, args))
+            row, selected_path = run_case(problem,
+                                          batch_size,
+                                          execute,
+                                          args,
+                                          fixed_path=fixed_path,
+                                          fixed_path_source=fixed_path_source)
+            rows.append(row)
+            if (args.reuse_first_path and fixed_path is None and
+                    row["status"] == "OK" and selected_path is not None):
+                fixed_path = selected_path
+                fixed_path_source = f"execute={execute}"
 
     print("\n## NMOptimizer d=5/r=5 Large-DEM Memory Matrix")
     headers = [
-        "batch", "construct_batch", "execute", "status", "construct_s",
-        "largest_intermediate", "intermediate_gib", "opt_cost", "step_s",
-        "peak_mem_mib", "error"
+        "batch", "construct_batch", "execute", "path_source", "status",
+        "construct_s", "largest_intermediate", "intermediate_gib", "opt_cost",
+        "max_einsum_rank", "step_s", "peak_mem_mib", "error"
     ]
     print("| " + " | ".join(headers) + " |")
     print("| " + " | ".join(["---"] * len(headers)) + " |")

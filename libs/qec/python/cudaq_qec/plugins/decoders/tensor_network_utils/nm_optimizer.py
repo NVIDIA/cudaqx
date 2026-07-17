@@ -283,7 +283,8 @@ class NMOptimizer(TensorNetworkDecoder):
         execute: Forward backend.  ``"codegen"`` (default) partial-evaluates
             the path into a flat Python function; ``"unrolled"`` keeps an
             interpretive einsum list; ``"opt_einsum"`` dispatches via
-            :func:`opt_einsum.contract_expression`.
+            :func:`opt_einsum.contract_expression`; ``"cutensornet"``
+            executes the reduced contraction with cuTensorNet on CUDA.
         compile_mode: Forwarded to :func:`torch.compile`; ignored when
             ``compile=False``.
         dynamic_syndromes: If ``True`` (default), syndromes are runtime
@@ -324,11 +325,12 @@ class NMOptimizer(TensorNetworkDecoder):
         device: str = "cuda",
         *,
         compile: bool = False,
-        execute: Literal["codegen", "unrolled", "opt_einsum"] = "codegen",
+        execute: Literal["codegen", "unrolled", "opt_einsum",
+                         "cutensornet"] = "codegen",
         compile_mode: str | None = None,
         dynamic_syndromes: bool = True,
     ) -> None:
-        if execute not in ("unrolled", "opt_einsum", "codegen"):
+        if execute not in ("unrolled", "opt_einsum", "codegen", "cutensornet"):
             raise ValueError(f"Invalid execute mode: {execute!r}")
         if dtype not in _SUPPORTED_DTYPES:
             raise ValueError(f"Invalid dtype {dtype!r}; expected one of "
@@ -346,6 +348,9 @@ class NMOptimizer(TensorNetworkDecoder):
                 stacklevel=2,
             )
             target_device = "cpu"
+
+        if execute == "cutensornet" and "cuda" not in target_device:
+            raise ValueError("execute='cutensornet' requires a CUDA device.")
 
         # Build the topology directly so NMOptimizer never selects the
         # TensorNetworkDecoder cuTensorNet contractor during setup.
@@ -397,7 +402,9 @@ class NMOptimizer(TensorNetworkDecoder):
         self.slicing_batch = tuple()
         self.slicing_single = tuple()
 
-        self._set_contractor("oe_torch_compiled", target_device, "torch", dtype)
+        contractor = ("cutensornet"
+                      if execute == "cutensornet" else "oe_torch_compiled")
+        self._set_contractor(contractor, target_device, "torch", dtype)
         self.init_noise_model(
             factorized_noise_model(self.error_inds, noise_model),
             contract=False,
@@ -718,6 +725,7 @@ class NMOptimizer(TensorNetworkDecoder):
             })
 
         self._batched_einsum_groups = batched_groups
+        self._reduced_eq = reduced_eq
         self._reduced_static_positions = reduced_static
         self._reduced_syndrome_positions = reduced_syndrome
         self._reduced_recipe_positions = reduced_recipe_positions
@@ -735,6 +743,7 @@ class NMOptimizer(TensorNetworkDecoder):
             "opt_einsum": self._build_predict_reduced_opt_einsum,
             "unrolled": self._build_predict_reduced_unrolled,
             "codegen": self._build_predict_reduced_codegen,
+            "cutensornet": self._build_predict_reduced_cutensornet,
         }
         return builders[self._execute_mode]()
 
@@ -771,6 +780,34 @@ class NMOptimizer(TensorNetworkDecoder):
                                 self._precontract_reduced_noise(noise_probs)):
                 arrays[pos] = arr
             out = oe_expr(*arrays)
+            return _normalize_prediction(out)
+
+        return _predict
+
+    def _build_predict_reduced_cutensornet(self):
+        static_positions = self._reduced_static_positions
+        syndrome_positions = self._reduced_syndrome_positions
+        recipe_positions = self._reduced_recipe_positions
+        eq = self._reduced_eq
+        n = self._reduced_n_tensors
+        contractor = self.contractor_config.contractor
+        device_id = self.contractor_config.device_id
+
+        def _predict(noise_probs: torch.Tensor,
+                     syndrome_tuple: tuple[torch.Tensor, ...]) -> torch.Tensor:
+            arrays: list[torch.Tensor] = [None] * n  # type: ignore
+            for pos, arr in static_positions.items():
+                arrays[pos] = arr
+            for pos, syndrome_idx in syndrome_positions:
+                arrays[pos] = syndrome_tuple[syndrome_idx]
+            for pos, arr in zip(recipe_positions,
+                                self._precontract_reduced_noise(noise_probs)):
+                arrays[pos] = arr
+            out = contractor(eq,
+                             arrays,
+                             optimize=self.path_batch,
+                             slicing=self.slicing_batch,
+                             device_id=device_id)
             return _normalize_prediction(out)
 
         return _predict
@@ -852,7 +889,7 @@ class NMOptimizer(TensorNetworkDecoder):
         On any compile failure, warn and fall back to eager.  ``kind``
         is included in the warning to disambiguate predict vs loss.
         """
-        if not self._use_torch_compile:
+        if not self._use_torch_compile or self._execute_mode == "cutensornet":
             return fn
         try:
             kwargs = self._torch_compile_kwargs()

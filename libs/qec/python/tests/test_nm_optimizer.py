@@ -203,6 +203,23 @@ def test_invalid_dtype_rejected(device):
                   dtype="float16")
 
 
+def test_cutensornet_execute_requires_cuda():
+    H, logical, priors = _simple_repetition_code()
+    syn, flips = _sample_synthetic_dataset(H,
+                                           logical,
+                                           priors,
+                                           num_shots=4,
+                                           rng=np.random.default_rng(11))
+    with pytest.raises(ValueError, match="requires a CUDA device"):
+        _make_opt(H,
+                  logical,
+                  priors,
+                  syn,
+                  flips,
+                  device="cpu",
+                  execute="cutensornet")
+
+
 # -- forward pass / gradient -------------------------------------------------
 
 
@@ -427,6 +444,53 @@ def test_reduced_path_matches_full_network_reference_static_codegen(device):
                               opt.cross_entropy_loss(),
                               atol=1e-7,
                               rtol=1e-7)
+
+
+@pytest.mark.skipif(not _gpu_available(), reason="CUDA not available")
+def test_cutensornet_execute_matches_opt_einsum_and_backpropagates():
+    """cuTN can execute the reduced torch graph with autograd."""
+    pytest.importorskip("cuquantum")
+    rng = np.random.default_rng(31415)
+    H, logical = _nondegenerate_code()
+    init_priors = [0.2, 0.3, 0.4]
+    syn, flips = _sample_synthetic_dataset(H,
+                                           logical, [0.1, 0.15, 0.25],
+                                           num_shots=12,
+                                           rng=rng)
+    ref = _make_opt(H,
+                    logical,
+                    init_priors,
+                    syn,
+                    flips,
+                    device="cuda",
+                    dtype="float64",
+                    execute="opt_einsum")
+    cutn = _make_opt(H,
+                     logical,
+                     init_priors,
+                     syn,
+                     flips,
+                     device="cuda",
+                     dtype="float64",
+                     execute="cutensornet")
+
+    with torch.no_grad():
+        p_ref = ref.decoder_prediction()
+        p_cutn = cutn.decoder_prediction()
+        loss_ref = ref.cross_entropy_loss()
+        loss_cutn = cutn.cross_entropy_loss()
+
+    assert torch.allclose(p_cutn, p_ref, atol=1e-10, rtol=1e-10)
+    assert torch.allclose(loss_cutn, loss_ref, atol=1e-10, rtol=1e-10)
+    assert cutn.contractor_config.contractor_name == "cutensornet"
+
+    cutn.noise_params[0].grad = None
+    loss = cutn.cross_entropy_loss()
+    loss.backward()
+    grad = cutn.noise_params[0].grad
+    assert grad is not None
+    assert torch.isfinite(grad).all()
+    assert torch.any(grad != 0.0)
 
 
 # -- numerical guards --------------------------------------------------------
