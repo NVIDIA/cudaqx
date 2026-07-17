@@ -91,39 +91,37 @@ def create_test_decoder_config_nv_qldpc(decoder_id):
     config = create_test_empty_decoder_config(decoder_id)
     config.type = "nv-qldpc-decoder"
 
-    # Create NV-QLDPC decoder configuration
-    nv_config = qec.nv_qldpc_decoder_config()
-    nv_config.use_sparsity = True
-    nv_config.max_iterations = 50
-    nv_config.use_osd = True
-    nv_config.osd_order = 60
-    nv_config.osd_method = 3
-    nv_config.error_rate_vec = [0.1] * config.block_size
-
-    nv_config.n_threads = 128
-    nv_config.bp_batch_size = 1
-    nv_config.osd_batch_size = 16
-    nv_config.iter_per_check = 2
-    nv_config.clip_value = 10.0
-    nv_config.bp_method = 3
-    nv_config.scale_factor = 1.0
-    nv_config.proc_float = "fp64"
-
-    # Relay-BP configuration
-    nv_config.gamma0 = 0.0
-    nv_config.gamma_dist = [0.1, 0.2]
-    nv_config.srelay_config = qec.qecrt.config.srelay_bp_config()
-    nv_config.srelay_config.pre_iter = 5
-    nv_config.srelay_config.num_sets = 10
-    nv_config.srelay_config.stopping_criterion = "NConv"
-    nv_config.srelay_config.stop_nconv = 10
-    # explicit_gammas must have num_sets rows (10 in this case)
-    nv_config.explicit_gammas = [[0.1] * config.block_size for _ in range(10)]
-    nv_config.bp_seed = 42
-    nv_config.composition = 1
-
-    # Set the custom args
-    config.set_decoder_custom_args(nv_config)
+    # Create NV-QLDPC decoder configuration (a parameter dict; keys are
+    # governed by the decoder's registered schema)
+    config.decoder_custom_args = {
+        "use_sparsity": True,
+        "max_iterations": 50,
+        "use_osd": True,
+        "osd_order": 60,
+        "osd_method": 3,
+        "error_rate_vec": [0.1] * config.block_size,
+        "n_threads": 128,
+        "bp_batch_size": 1,
+        "osd_batch_size": 16,
+        "iter_per_check": 2,
+        "clip_value": 10.0,
+        "bp_method": 3,
+        "scale_factor": 1.0,
+        "proc_float": "fp64",
+        # Relay-BP configuration
+        "gamma0": 0.0,
+        "gamma_dist": [0.1, 0.2],
+        "srelay_config": {
+            "pre_iter": 5,
+            "num_sets": 10,
+            "stopping_criterion": "NConv",
+            "stop_nconv": 10,
+        },
+        # explicit_gammas must have num_sets rows (10 in this case)
+        "explicit_gammas": [[0.1] * config.block_size for _ in range(10)],
+        "bp_seed": 42,
+        "composition": 1,
+    }
 
     return config
 
@@ -165,9 +163,7 @@ def test_multi_lut_decoder():
     config = create_test_empty_decoder_config(0)
     config.type = "multi_error_lut"
 
-    lut_config = qec.multi_error_lut_config()
-    lut_config.lut_error_depth = 2
-    config.set_decoder_custom_args(lut_config)
+    config.decoder_custom_args = {"lut_error_depth": 2}
 
     multi_config.decoders = [config]
 
@@ -183,8 +179,7 @@ def test_single_lut_decoder():
     config = create_test_empty_decoder_config(0)
     config.type = "single_error_lut"
 
-    single_lut_config = qec.qecrt.config.single_error_lut_config()
-    config.set_decoder_custom_args(single_lut_config)
+    config.decoder_custom_args = {}
 
     multi_config.decoders = [config]
 
@@ -228,26 +223,58 @@ def test_sliding_window_decoder():
     config.D_sparse = qec.generate_timelike_sparse_detector_matrix(
         config.syndrome_size, 2, include_first_round=False)
 
-    # Sliding window config
-    sw_config = qec.qecrt.config.sliding_window_config()
-    sw_config.window_size = 1
-    sw_config.step_size = 1
-    sw_config.num_syndromes_per_round = n_syndromes_per_round
-    sw_config.straddle_start_round = False
-    sw_config.straddle_end_round = True
-    sw_config.error_rate_vec = [0.1] * config.block_size
-
-    # Inner decoder config
-    sw_config.inner_decoder_name = "multi_error_lut"
-    sw_config.multi_error_lut_params = qec.multi_error_lut_config()
-    sw_config.multi_error_lut_params.lut_error_depth = 2
-
-    config.set_decoder_custom_args(sw_config)
+    # Sliding window config. inner_decoder_params is validated against the
+    # schema registered under inner_decoder_name.
+    config.decoder_custom_args = {
+        "window_size": 1,
+        "step_size": 1,
+        "num_syndromes_per_round": n_syndromes_per_round,
+        "straddle_start_round": False,
+        "straddle_end_round": True,
+        "error_rate_vec": [0.1] * config.block_size,
+        "inner_decoder_name": "multi_error_lut",
+        "inner_decoder_params": {
+            "lut_error_depth": 2
+        },
+    }
 
     multi_config.decoders = [config]
 
     check_decoder_yaml_roundtrip(multi_config)
     check_decoder_creation(multi_config)
+
+
+def test_sliding_window_boundary_syndromes_roundtrip():
+    """
+    Test that a sliding_window's num_boundary_syndromes parameter survives a
+    YAML round trip. This is serialization-only (the boundary-layout decoding
+    behavior is exercised by the direct-decoder tests in test_sliding_window).
+    """
+    multi_config = qec.multi_decoder_config()
+    config = create_test_empty_decoder_config(0)
+    config.type = "sliding_window"
+    config.block_size = 6
+    config.syndrome_size = 4
+
+    H = np.zeros((config.syndrome_size, config.block_size), dtype=np.uint8)
+    config.H_sparse = qec.pcm_to_sparse_vec(H)
+    O = np.zeros((1, config.block_size), dtype=np.uint8)
+    config.O_sparse = qec.pcm_to_sparse_vec(O)
+    config.D_sparse = qec.generate_timelike_sparse_detector_matrix(
+        config.syndrome_size, 2, include_first_round=False)
+
+    config.decoder_custom_args = {
+        "window_size": 1,
+        "step_size": 1,
+        "num_syndromes_per_round": 2,
+        "num_boundary_syndromes": 1,
+        "error_rate_vec": [0.1] * config.block_size,
+        "inner_decoder_name": "single_error_lut",
+    }
+
+    multi_config.decoders = [config]
+
+    check_decoder_yaml_roundtrip(multi_config)
 
 
 if __name__ == "__main__":

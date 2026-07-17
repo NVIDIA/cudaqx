@@ -274,52 +274,49 @@ void save_dem_to_file(
     config.D_sparse = build_cudaqx_D_sparse(m2d);
 
     if (decoder_type == "nv-qldpc-decoder") {
-      config.decoder_custom_args =
-          cudaq::qec::decoding::config::nv_qldpc_decoder_config();
-      auto &nv_config =
-          std::get<cudaq::qec::decoding::config::nv_qldpc_decoder_config>(
-              config.decoder_custom_args);
+      cudaqx::heterogeneous_map nv_args;
 
       // Basic settings
-      nv_config.use_sparsity = true;
-      nv_config.error_rate_vec = edem.error_rates;
-      nv_config.max_iterations = 50;
+      nv_args.insert("use_sparsity", true);
+      nv_args.insert("error_rate_vec", edem.error_rates);
+      nv_args.insert("max_iterations", 50);
 
       if (use_relay_bp) {
-        nv_config.bp_method = 3;   // min-sum+dmem (required for relay)
-        nv_config.composition = 1; // Enable sequential relay
-        nv_config.gamma0 = 0.0;    // Initial gamma value
-        nv_config.clip_value = 200.0;
-        nv_config.repeatable = true;
-        nv_config.srelay_config =
-            cudaq::qec::decoding::config::srelay_bp_config();
-        nv_config.srelay_config->pre_iter = 5;
-        nv_config.srelay_config->num_sets = 10;
-        nv_config.srelay_config->stopping_criterion = "All";
-        nv_config.srelay_config->stop_nconv = 1;
-        nv_config.gamma_dist = {0.1, 0.2};
+        nv_args.insert("bp_method", 3);   // min-sum+dmem (required for relay)
+        nv_args.insert("composition", 1); // Enable sequential relay
+        nv_args.insert("gamma0", 0.0);    // Initial gamma value
+        nv_args.insert("clip_value", 200.0);
+        nv_args.insert("repeatable", true);
+        cudaqx::heterogeneous_map srelay_args;
+        srelay_args.insert("pre_iter", std::size_t{5});
+        srelay_args.insert("num_sets", std::size_t{10});
+        srelay_args.insert("stopping_criterion", "All");
+        srelay_args.insert("stop_nconv", std::size_t{1});
+        nv_args.insert("srelay_config", srelay_args);
+        nv_args.insert("gamma_dist", std::vector<double>{0.1, 0.2});
       } else {
         // OSD post-processor
-        nv_config.use_osd = true;
-        nv_config.osd_order = 60;
-        nv_config.osd_method = 3;
+        nv_args.insert("use_osd", true);
+        nv_args.insert("osd_order", 60);
+        nv_args.insert("osd_method", 3);
       }
+      config.decoder_custom_args = nv_args;
     } else if (decoder_type == "pymatching") {
-      cudaq::qec::decoding::config::pymatching_config pm_config;
-      pm_config.merge_strategy = "smallest_weight";
-      pm_config.error_rate_vec = edem.error_rates;
-      config.decoder_custom_args = pm_config;
+      cudaqx::heterogeneous_map pm_args;
+      pm_args.insert("merge_strategy", "smallest_weight");
+      pm_args.insert("error_rate_vec", edem.error_rates);
+      config.decoder_custom_args = pm_args;
     } else if (decoder_type == "trt_decoder") {
-      cudaq::qec::decoding::config::trt_decoder_config trt_config;
+      cudaqx::heterogeneous_map trt_args;
       // The TensorRT predecoder model is supplied through the saved decoder
       // config so the same ONNX path is used after reload.
-      trt_config.onnx_load_path = onnx_path;
-      trt_config.batch_size = 1;
-      trt_config.use_cuda_graph = true;
-      trt_config.global_decoder = "pymatching";
+      trt_args.insert("onnx_load_path", onnx_path);
+      trt_args.insert("batch_size", std::size_t{1});
+      trt_args.insert("use_cuda_graph", true);
+      trt_args.insert("global_decoder", "pymatching");
 
-      cudaq::qec::decoding::config::pymatching_config pm_config;
-      pm_config.merge_strategy = "smallest_weight";
+      cudaqx::heterogeneous_map pm_args;
+      pm_args.insert("merge_strategy", "smallest_weight");
 
       if (!ising_bundle.empty()) {
         // Enforce the bundle's semantics match this experiment (basis Z,
@@ -354,16 +351,16 @@ void save_dem_to_file(
 
         config.syndrome_size = hRows;
         config.block_size = hCols;
-        pm_config.error_rate_vec = priors;
+        pm_args.insert("error_rate_vec", priors);
         printf("trt+Ising: loaded Ising bundle '%s' (H %ux%u, O %u rows, "
                "priors %zu); D_sparse from D_sparse.txt (%zu detectors)\n",
                ising_bundle.c_str(), hRows, hCols, oRows, priors.size(), dRows);
       } else {
-        pm_config.error_rate_vec = edem.error_rates;
+        pm_args.insert("error_rate_vec", edem.error_rates);
       }
-      trt_config.global_decoder_params = pm_config;
+      trt_args.insert("global_decoder_params", pm_args);
 
-      config.decoder_custom_args = trt_config;
+      config.decoder_custom_args = trt_args;
     }
 
     multi_config.decoders.push_back(config);
@@ -479,36 +476,24 @@ std::vector<size_t> get_stab_cnot_schedule(char stab_type, int distance) {
     throw std::runtime_error(
         "get_stab_cnot_schedule: Invalid stabilizer type. Must be 'X' or 'Z'.");
   }
-  // First get the stabilizers
-  auto stabs = grid.get_spin_op_stabilizers();
-  cudaq::qec::sortStabilizerOps(stabs);
-  std::size_t stab_idx = 0;
-  std::vector<size_t> cnot_schedule;
-  for (const auto &stab : stabs) {
-    auto stab_word = stab.get_pauli_word(distance * distance);
-    if (stab_word.find(stab_type) == std::string::npos)
-      continue; // None of the desired stabilizers in this row
-    for (std::size_t d = 0; d < stab_word.size(); ++d) {
-      if (stab_word[d] == stab_type) {
-        cnot_schedule.push_back(stab_idx);
-        cnot_schedule.push_back(d);
-      }
-    }
-    stab_idx++;
-  }
-  return cnot_schedule;
+  // CNOT pairs ordered by timestep within each stabilizer, so that mid-round
+  // ancilla (hook) errors land perpendicular to the logical operators.
+  // Stabilizer indices match the sorted parity-matrix rows and hence the
+  // ancilla indexing.
+  return stab_type == 'X' ? grid.get_cnot_schedule_pairs_x()
+                          : grid.get_cnot_schedule_pairs_z();
 }
 
 // Per-stabilizer data-qubit supports, ordered to match the ancilla measurement
-// order produced by get_stab_cnot_schedule(stab_type, ...). The s-th returned
-// support is the data-qubit support of the s-th `stab_type`-containing
-// stabilizer in the same sorted spin-op traversal that get_stab_cnot_schedule
-// uses, so support[s] lines up with ancilla[s] in se_{x,z}_ft's measurement
-// vector. This is what the Ising MemoryCircuit boundary detectors pair against
-// (a stabilizer's data support XOR-ed with that stabilizer's last ancilla
-// measurement). Returns a flat vector of data-qubit indices plus per-stabilizer
-// offsets (offsets has size num_stabs+1; support s spans [offsets[s],
-// offsets[s+1])), the same flat+offset pattern as cnot_schedZ_flat.
+// order produced by get_stab_cnot_schedule(stab_type, ...). The supports are
+// derived from the same schedule matrix as the CNOT pairs (row s = ancilla s),
+// so support[s] lines up with ancilla[s] in se_{x,z}_ft's measurement vector
+// by construction rather than via a parallel sort. This is what the Ising
+// MemoryCircuit boundary detectors pair against (a stabilizer's data support
+// XOR-ed with that stabilizer's last ancilla measurement). Returns a flat
+// vector of data-qubit indices plus per-stabilizer offsets (offsets has size
+// num_stabs+1; support s spans [offsets[s], offsets[s+1])), the same
+// flat+offset pattern as cnot_schedZ_flat.
 void get_stab_data_supports(char stab_type, int distance,
                             std::vector<std::size_t> &supports_flat,
                             std::vector<std::size_t> &supports_offsets) {
@@ -518,17 +503,14 @@ void get_stab_data_supports(char stab_type, int distance,
     throw std::runtime_error(
         "get_stab_data_supports: Invalid stabilizer type. Must be 'X' or 'Z'.");
   }
-  auto stabs = grid.get_spin_op_stabilizers();
-  cudaq::qec::sortStabilizerOps(stabs);
+  auto sched = stab_type == 'X' ? grid.get_cnot_schedule_x()
+                                : grid.get_cnot_schedule_z();
   supports_flat.clear();
   supports_offsets.clear();
   supports_offsets.push_back(0);
-  for (const auto &stab : stabs) {
-    auto stab_word = stab.get_pauli_word(distance * distance);
-    if (stab_word.find(stab_type) == std::string::npos)
-      continue; // None of the desired stabilizers in this row
-    for (std::size_t d = 0; d < stab_word.size(); ++d) {
-      if (stab_word[d] == stab_type)
+  for (std::size_t s = 0; s < sched.shape()[0]; ++s) {
+    for (std::size_t d = 0; d < sched.shape()[1]; ++d) {
+      if (sched.at({s, d}) != 0)
         supports_flat.push_back(d);
     }
     supports_offsets.push_back(supports_flat.size());

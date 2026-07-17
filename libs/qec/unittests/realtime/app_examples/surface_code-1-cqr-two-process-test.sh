@@ -28,15 +28,14 @@
 #   4: number_of_corrections_decoder_threshold
 #   5: path to decoding_server executable
 #   6: num_rounds
-#   7: decoder_window
-#   8: decoder_type (optional, defaults to multi_error_lut)
+#   7: decoder_type (optional, defaults to multi_error_lut)
 
 set -e
 
 return_code=0
 
-if [[ $# -lt 7 ]]; then
-  echo "Error: Expected at least 7 arguments (got $#)"
+if [[ $# -lt 6 ]]; then
+  echo "Error: Expected at least 6 arguments (got $#)"
   exit 1
 fi
 
@@ -46,8 +45,7 @@ number_of_non_zero_values_threshold=$3
 number_of_corrections_decoder_threshold=$4
 SERVER_PATH=$5
 NUM_ROUNDS=$6
-DECODER_WINDOW=$7
-DECODER_TYPE=${8:-multi_error_lut}
+DECODER_TYPE=${7:-multi_error_lut}
 
 export CUDAQ_DEFAULT_SIMULATOR=stim
 
@@ -63,7 +61,7 @@ APP_LOG=load_dem-2proc-${FULL_SUFFIX}.log
 
 # [1] Generate the decoder config (no realtime channel needed for this pass).
 $EXE_PATH --distance $DISTANCE --num_rounds $NUM_ROUNDS --num_shots $NUM_SHOTS \
-  --save_dem $CONFIG_FILE --decoder_window $DECODER_WINDOW \
+  --save_dem $CONFIG_FILE \
   --decoder_type $DECODER_TYPE | tee save_dem-2proc-$FULL_SUFFIX.log
 
 # [2] Start the decoding server on an ephemeral port with that config.
@@ -105,7 +103,7 @@ echo "Decoding server ready on $TRANSPORT port $SERVER_PORT"
 QEC_DECODING_SERVER_PORT=$SERVER_PORT \
   $EXE_PATH --distance $DISTANCE --num_shots $NUM_SHOTS \
   --load_dem $CONFIG_FILE --num_rounds $NUM_ROUNDS \
-  --decoder_window $DECODER_WINDOW --decoder_type $DECODER_TYPE \
+  --decoder_type $DECODER_TYPE \
   |& tee $APP_LOG
 
 # [4] Stop the server and collect its dispatch count.

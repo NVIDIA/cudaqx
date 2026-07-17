@@ -10,6 +10,7 @@ import numpy as np
 import cudaq
 import cudaq_qec as qec
 from cudaq_qec import patch
+from cudaq_qec.plugins.codes import example
 
 
 def test_get_code():
@@ -37,6 +38,27 @@ def test_code_parity_matrices():
     parity_z = steane.get_parity_z()
     assert isinstance(parity, np.ndarray)
     assert parity_z.shape == (3, 7)
+
+
+def test_code_stabilizer_schedule_matrices():
+    # Codes without a schedule override return the plain parity matrices.
+    steane = qec.get_code("steane")
+    assert np.array_equal(steane.get_stabilizer_schedule_x(),
+                          steane.get_parity_x())
+    assert np.array_equal(steane.get_stabilizer_schedule_z(),
+                          steane.get_parity_z())
+
+    # The surface code overrides the schedule: same support pattern as the
+    # parity matrices, entries are CNOT timesteps in [1, 4].
+    surface = qec.get_code("surface_code", distance=3)
+    for schedule, parity in [
+        (surface.get_stabilizer_schedule_x(), surface.get_parity_x()),
+        (surface.get_stabilizer_schedule_z(), surface.get_parity_z())
+    ]:
+        assert isinstance(schedule, np.ndarray)
+        assert schedule.shape == parity.shape
+        assert np.array_equal(schedule != 0, parity != 0)
+        assert schedule.max() <= 4
 
 
 def test_repetition_empty_x_matrices_preserve_rank():
@@ -143,6 +165,125 @@ def test_python_code():
     assert syndromes.shape == (10, 24)
     print(syndromes)
     assert not np.any(syndromes)
+
+
+# A stabilizer_round kernel that honors the schedule entries: the CNOT for a
+# nonzero entry k executes at timestep k (the example plugin's kernel instead
+# tests `== 1`, i.e. plain parity support).
+@cudaq.kernel
+def _scheduled_stabilizer(logicalQubit: patch, x_schedule: list[int],
+                          z_schedule: list[int]) -> list[cudaq.measure_handle]:
+    h(logicalQubit.ancx)
+    for step in range(1, 5):
+        for xi in range(len(logicalQubit.ancx)):
+            for di in range(len(logicalQubit.data)):
+                if x_schedule[xi * len(logicalQubit.data) + di] == step:
+                    x.ctrl(logicalQubit.ancx[xi], logicalQubit.data[di])
+    h(logicalQubit.ancx)
+    for step in range(1, 5):
+        for zi in range(len(logicalQubit.ancz)):
+            for di in range(len(logicalQubit.data)):
+                if z_schedule[zi * len(logicalQubit.data) + di] == step:
+                    x.ctrl(logicalQubit.data[di], logicalQubit.ancz[zi])
+
+    results = mz([*logicalQubit.ancz, *logicalQubit.ancx])
+
+    reset(logicalQubit.ancx)
+    reset(logicalQubit.ancz)
+    return results
+
+
+def _make_scheduled_steane(name, schedule_x, schedule_z):
+    """Register a Python Steane code that provides stabilizer schedules."""
+
+    @qec.code(name)
+    class ScheduledSteane:
+
+        def __init__(self, **kwargs):
+            qec.Code.__init__(self, **kwargs)
+            self.stabilizers = [
+                cudaq.SpinOperator.from_word(w) for w in [
+                    "XXXXIII", "IXXIXXI", "IIXXIXX", "ZZZZIII", "IZZIZZI",
+                    "IIZZIZZ"
+                ]
+            ]
+            self.pauli_observables = [
+                cudaq.SpinOperator.from_word(p) for p in ["IIIIXXX", "IIIIZZZ"]
+            ]
+            self.operation_encodings = {
+                qec.operation.prep0: example.prep0,
+                qec.operation.stabilizer_round: _scheduled_stabilizer
+            }
+
+        def get_num_data_qubits(self):
+            return 7
+
+        def get_num_ancilla_x_qubits(self):
+            return 3
+
+        def get_num_ancilla_z_qubits(self):
+            return 3
+
+        def get_num_ancilla_qubits(self):
+            return 6
+
+        def get_num_x_stabilizers(self):
+            return 3
+
+        def get_num_z_stabilizers(self):
+            return 3
+
+        def get_stabilizer_schedule_x(self):
+            return schedule_x
+
+        def get_stabilizer_schedule_z(self):
+            return schedule_z
+
+    return qec.get_code(name)
+
+
+def test_python_code_stabilizer_schedule():
+    # A Python code may provide schedule matrices: same support as the parity
+    # matrices, with entries giving the interaction timestep.
+    steane = qec.get_code("py-steane-example")
+    parity_x = steane.get_parity_x()
+    parity_z = steane.get_parity_z()
+
+    # Without the optional methods, the schedule defaults to the parity.
+    assert np.array_equal(steane.get_stabilizer_schedule_x(), parity_x)
+    assert np.array_equal(steane.get_stabilizer_schedule_z(), parity_z)
+
+    # Number the interactions within each stabilizer to form a schedule.
+    schedule_x = (np.cumsum(parity_x, axis=1) * parity_x).astype(np.uint8)
+    schedule_z = (np.cumsum(parity_z, axis=1) * parity_z).astype(np.uint8)
+    code = _make_scheduled_steane("py-steane-scheduled", schedule_x, schedule_z)
+    assert np.array_equal(code.get_stabilizer_schedule_x(), schedule_x)
+    assert np.array_equal(code.get_stabilizer_schedule_z(), schedule_z)
+
+    # The schedule must flow through to the sampled memory circuit.
+    syndromes, _ = qec.sample_memory_circuit(code, numShots=10, numRounds=4)
+    assert syndromes.shape == (10, 24)
+    assert not np.any(syndromes)
+
+
+def test_python_code_stabilizer_schedule_invalid():
+    steane = qec.get_code("py-steane-example")
+    parity_x = steane.get_parity_x()
+    parity_z = steane.get_parity_z()
+
+    # Wrong shape.
+    bad = _make_scheduled_steane("py-steane-bad-schedule-shape",
+                                 parity_x[:, :-1], parity_z)
+    with pytest.raises(RuntimeError, match="shape"):
+        bad.get_stabilizer_schedule_x()
+
+    # Support pattern differs from the parity matrix.
+    flipped = parity_x.copy()
+    flipped[0, 0] ^= 1
+    bad = _make_scheduled_steane("py-steane-bad-schedule-support", flipped,
+                                 parity_z)
+    with pytest.raises(RuntimeError, match="support"):
+        bad.get_stabilizer_schedule_x()
 
 
 # stabilizer_round kernels with invalid (non list[cudaq.measure_handle])

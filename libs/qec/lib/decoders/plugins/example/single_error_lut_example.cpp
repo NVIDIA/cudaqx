@@ -7,6 +7,7 @@
  ******************************************************************************/
 
 #include "cudaq/qec/decoder.h"
+#include "cudaq/qec/decoder_config_schema.h"
 #include <cassert>
 #include <map>
 #include <vector>
@@ -84,5 +85,21 @@ public:
 };
 
 CUDAQ_EXT_PT_REGISTER_TYPE(single_error_lut_example)
+
+// Registering a parameter schema alongside the decoder makes the decoder
+// configurable through the realtime decoding YAML (`decoder_custom_args`)
+// without any changes to the cudaq-qec libraries: the YAML layer converts the
+// section to the heterogeneous_map this decoder's constructor receives, using
+// only this description. This decoder takes no parameters, so the schema is
+// empty; list each accepted key and its param_kind here otherwise.
+namespace {
+struct schema_registrar {
+  schema_registrar() {
+    cudaq::qec::decoding::config::register_decoder_schema(
+        {"single_error_lut_example", {}});
+  }
+};
+schema_registrar register_schema;
+} // namespace
 
 } // namespace cudaq::qec

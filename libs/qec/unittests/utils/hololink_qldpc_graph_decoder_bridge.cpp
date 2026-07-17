@@ -58,7 +58,7 @@
 #include "cudaq/realtime/hololink_bridge_common.h"
 
 #include "cudaq/qec/decoder.h"
-#include "cudaq/qec/realtime/decoder_rpc_ids.h"
+#include "cudaq/qec/realtime/decoder_rpc_wire_format.h"
 #include "cudaq/qec/realtime/decoding_config.h"
 #include "cudaq/qec/realtime/graph_resources.h"
 #include "cudaq/qec/realtime/sparse_to_csr.h"

@@ -121,7 +121,7 @@ base decoder to accumulate logical corrections returned by ``get_corrections``.
 Vanilla PyMatching requires graphlike detector error models, where every
 ``H_sparse`` column has one or two detector entries.
 For belief propagation decoders, the user sets iteration limits and convergence criteria. 
-The configuration API provides type-safe structures for each decoder, ensuring that all required parameters are included.
+Decoder parameters are validated against the parameter schema each decoder registers, ensuring unknown keys are rejected and required parameters are present.
 
 The configuration is then saved to a YAML file for reuse. The YAML format is human-readable, making it easy to inspect, modify, and share configurations across different execution environments.
 
@@ -139,10 +139,10 @@ For example, a PyMatching real-time decoder can be configured programmatically:
    config.D_sparse = qec.generate_timelike_sparse_detector_matrix(
        num_syndromes_per_round, num_rounds, include_first_round=False)
 
-   pm_config = qec.pymatching_config()
-   pm_config.error_rate_vec = list(dem.error_rates)
-   pm_config.merge_strategy = "smallest_weight"
-   config.set_decoder_custom_args(pm_config)
+   config.decoder_custom_args = {
+       "error_rate_vec": list(dem.error_rates),
+       "merge_strategy": "smallest_weight",
+   }
 
    multi_config = qec.multi_decoder_config()
    multi_config.decoders = [config]
@@ -164,6 +164,74 @@ arguments:
        decoder_custom_args:
          error_rate_vec: [ 0.1, 0.1, 0.1 ]
          merge_strategy: smallest_weight
+
+The ``decoder_custom_args`` section is converted between YAML and the
+parameter map a decoder's constructor receives using a *parameter schema*
+registered under the decoder's name. All built-in decoders ship with a
+schema, and custom (out-of-tree) decoder plugins can register their own so
+their parameters become configurable through the same YAML -- no changes to
+the CUDA-Q QEC libraries are required. A plugin registers its schema from a
+static initializer in the same shared library that registers the decoder
+itself (see ``cudaq/qec/decoder_config_schema.h`` and the in-tree example
+plugin ``single_error_lut_example``):
+
+.. code-block:: cpp
+
+   #include "cudaq/qec/decoder_config_schema.h"
+
+   namespace {
+   struct schema_registrar {
+     schema_registrar() {
+       using k = cudaq::qec::decoding::config::param_kind;
+       cudaq::qec::decoding::config::decoder_schema schema{
+           "my_decoder",
+           {
+               {"strength", k::f64},
+               {"passes", k::int32},
+               {"mode", k::string, /*required=*/true},
+           }};
+       // Optional: cross-field constraints the per-key specs can't express.
+       // Unknown keys and missing required keys are already rejected by the
+       // framework; a decoder never implements those checks itself.
+       schema.validate = [](const cudaqx::heterogeneous_map &args) {
+         if (args.contains("strength") && args.get<double>("strength") <= 0.0)
+           throw std::runtime_error("my_decoder: strength must be positive");
+       };
+       cudaq::qec::decoding::config::register_decoder_schema(
+           std::move(schema));
+     }
+   };
+   schema_registrar register_schema;
+   } // namespace
+
+With the schema in place, a ``decoder_custom_args`` section for
+``type: my_decoder`` is validated (unknown keys and missing required keys are
+rejected, then the schema's ``validate`` hook runs) and delivered to the
+decoder's constructor as a ``cudaqx::heterogeneous_map``. The same checks can
+be applied to a configuration built programmatically -- before it is
+serialized or used -- by calling ``decoder_config::validate_custom_args()``
+(``config.validate_custom_args()`` in Python, also available on
+``multi_decoder_config``). The registered schemas can be inspected from
+Python via ``qec.decoder_param_schema("my_decoder")`` and
+``qec.registered_decoder_schemas()``.
+
+The registered schemas can also be exported as a standard JSON Schema
+(draft 2020-12) document via ``qec.decoder_config_json_schema()``, so
+configuration YAML files can be validated by third-party tooling -- editors,
+CI checks, or the `check-jsonschema
+<https://check-jsonschema.readthedocs.io/>`_ command line tool -- without
+loading the CUDA-Q QEC libraries:
+
+.. code-block:: bash
+
+   python3 -c "import cudaq_qec; print(cudaq_qec.decoder_config_json_schema())" > decoder_config_schema.json
+   check-jsonschema --schemafile decoder_config_schema.json my_config.yaml
+
+The export is generated from the schemas registered at call time, so decoder
+plugins loaded in the process (including out-of-tree ones) appear in it
+automatically. Schema ``validate`` hooks are arbitrary code and cannot be
+represented in JSON Schema, so a file that passes the exported schema may
+still be rejected by a hook when the configuration is parsed.
 
 ``cuda_device_id`` pins a GPU-accelerated decoder (e.g. ``nv-qldpc-decoder``
 or ``trt_decoder``) to a specific CUDA device. The same knob is available as
@@ -515,38 +583,39 @@ Given that the user follows the structure of the examples provided, where each e
    # This is done once per code/distance/noise configuration
    
    ## C++
-   ./surface_code-1 --distance 3 --num_shots 1000 --p_spam 0.01 \
-                    --save_dem config_d3.yaml --num_rounds 12 --decoder_window 6
-   
+   ./surface_code-1 --distance 3 --num_shots 1000 --p_cnot 0.001 \
+                    --save_dem config_d3.yaml --num_rounds 12
+
    ## Python
    python surface_code-1.py --distance 3 --num_shots 1000 --p_spam 0.01 \
                             --save_dem config_d3.yaml --num_rounds 12 --decoder_window 6
-   
+
    # Phase 2: Run with Real-Time Decoding
    # Use the saved DEM configuration
-   
+
    ## Simulation
    ./surface_code-1 --distance 3 --num_shots 1000 --load_dem config_d3.yaml \
-                    --num_rounds 12 --decoder_window 6
-   
+                    --num_rounds 12
+
    ## Quantinuum Emulation
    ./surface_code-1-quantinuum-emulate --distance 3 --num_shots 1000 --load_dem config_d3.yaml \
-                           --num_rounds 12 --decoder_window 6
-   
+                           --num_rounds 12
+
    ## Quantinuum Hardware
    export CUDAQ_QUANTINUUM_CREDENTIALS=credentials.json
    ./surface_code-1-quantinuum-hardware --distance 3 --num_shots 100 --load_dem config_d3.yaml \
-                         --num_rounds 12 --decoder_window 6
+                         --num_rounds 12
 
 **Application Parameters:**
 
 - ``--distance``: Code distance (3, 5, 7, etc.)
 - ``--num_shots``: Number of circuit repetitions
-- ``--p_spam``: Physical error rate for noise model (DEM generation only)
+- ``--p_cnot``: Two-qubit depolarizing rate on CNOT gates for DEM generation (C++ binary)
+- ``--p_spam``: Single-qubit SPAM error rate for DEM generation (Python script)
 - ``--save_dem``: Generate and save DEM configuration to file
 - ``--load_dem``: Load existing DEM configuration from file
 - ``--num_rounds``: Total number of syndrome measurement rounds
-- ``--decoder_window``: Number of rounds processed per decoding window
+- ``--decoder_window``: Number of rounds processed per decoding window (Python script only)
 
 Debugging and Environment Variables
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -589,8 +658,8 @@ Decoder Selection
 ^^^^^^^^^^^^^^^^^
 The page `CUDA-Q QEC Decoders <https://nvidia.github.io/cudaqx/components/qec/introduction.html#pre-built-qec-decoders>`_ provides information about which decoders are compatible with real-time decoding.
 
-The TRT decoder (``trt_decoder``) can be configured for real-time decoding by specifying 
-``trt_decoder_config`` parameters. This is useful for neural network-based 
+The TRT decoder (``trt_decoder``) can be configured for real-time decoding by specifying
+its ``decoder_custom_args`` parameters. This is useful for neural network-based
 decoders trained for specific codes and noise models. Note that TRT models 
 must be trained with the appropriate input/output dimensions matching the 
 syndrome and error spaces. See :ref:`trt_decoder_api_python` for detailed configuration options.
