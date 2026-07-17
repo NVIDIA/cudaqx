@@ -206,8 +206,6 @@ endif()
 add_library(cudaq-qec-realtime-decoding SHARED
   realtime_decoding.cpp
   config.cpp
-  qec_realtime_session.cpp
-  rpc_producer.cpp
 )
 
 target_compile_options(cudaq-qec-realtime-decoding 

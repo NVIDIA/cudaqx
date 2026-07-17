@@ -524,6 +524,8 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
             ${CUDAQ_DIR}/.. $ENV{CUDAQ_DIR}/..
       PATH_SUFFIXES lib)
 
+    # inproc_rpc path removed; disabled pending deletion in follow-up commit.
+    if(FALSE)
     add_executable(test_realtime_qldpc_graph_decoding
       ${CMAKE_CURRENT_SOURCE_DIR}/realtime/qec_graph_decode_test/test_realtime_qldpc_graph_decoding.cpp
       ${CMAKE_CURRENT_SOURCE_DIR}/realtime/qec_graph_decode_test/qldpc_config_loader.cpp
@@ -589,6 +591,7 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
         COMMAND test_realtime_qldpc_graph_decoding)
       set_tests_properties(test_realtime_qldpc_graph_decoding PROPERTIES
         LABELS "qec")
+    endif()
     endif()
 
   else()

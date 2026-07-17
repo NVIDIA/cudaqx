@@ -83,7 +83,8 @@ add_test(
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
 
-if(_APP_CUDAQ_REALTIME_DISPATCH_LIB
+# inproc_rpc path removed; disabled pending deletion in follow-up commit.
+if(FALSE AND _APP_CUDAQ_REALTIME_DISPATCH_LIB
    AND TARGET cudaq-qec-realtime-cudevice-proprietary)
   add_test(
     NAME app_examples.surface_code-1-local-test-distance-3-inproc-rpc
@@ -879,7 +880,10 @@ endif()
 # CUDAQ_INSTALL_DIR while the hint stays empty.
 get_target_property(_sc4_rt_defs cudaq-qec-realtime-decoding
   COMPILE_DEFINITIONS)
-if(_sc4_rt_defs MATCHES "CUDAQ_REALTIME_ROOT")
+# inproc_rpc path removed; REQUIRE_HOST_MODE proved patches used the inproc
+# session. Disabled here; re-pointed to direct-call + external_server in
+# follow-up commit.
+if(FALSE AND _sc4_rt_defs MATCHES "CUDAQ_REALTIME_ROOT")
   set(_sc4_hostmode_env "REQUIRE_HOST_MODE=1;CUDAQ_LOG_LEVEL=info")
   set_property(TEST app_examples.surface_code-4-yaml-list-parse-d3 APPEND
     PROPERTY ENVIRONMENT "${_sc4_hostmode_env}")

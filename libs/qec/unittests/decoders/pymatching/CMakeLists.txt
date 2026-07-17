@@ -29,7 +29,8 @@ target_link_libraries(test_pymatching PRIVATE GTest::gtest_main cudaq-qec-decode
 add_dependencies(CUDAQXQECUnitTests test_pymatching)
 gtest_discover_tests(test_pymatching)
 
-if(CUDAQ_REALTIME_ROOT AND CUDAQ_REALTIME_INCLUDE_DIR)
+# inproc_rpc path removed; disabled pending deletion in follow-up commit.
+if(FALSE AND CUDAQ_REALTIME_ROOT AND CUDAQ_REALTIME_INCLUDE_DIR)
   add_executable(test_pymatching_realtime test_pymatching_realtime.cpp)
   target_include_directories(test_pymatching_realtime PRIVATE
     ${CUDAQ_REALTIME_INCLUDE_DIR}
