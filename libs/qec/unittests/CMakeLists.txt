@@ -39,27 +39,35 @@ target_link_libraries(test_decoders PRIVATE GTest::gtest_main cudaq-qec-decoders
 add_dependencies(CUDAQXQECUnitTests test_decoders)
 gtest_discover_tests(test_decoders)
 
-add_executable(test_decoders_yaml test_decoders_yaml.cpp decoders/sample_decoder.cpp)
-target_include_directories(test_decoders_yaml PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/../lib/realtime/decoding-server-cqr)
-target_link_libraries(test_decoders_yaml PRIVATE
-  GTest::gtest_main
-  cudaq-qec
-  cudaq-qec-decoding-server
-  cudaq-qec-realtime-decoding
-  cudaq-qec-realtime-decoding-simulation
-  cudaq::cudaq)
-add_dependencies(CUDAQXQECUnitTests test_decoders_yaml)
-gtest_discover_tests(test_decoders_yaml)
+# These two tests need cudaq-qec-decoding-server, which is only built when a
+# realtime-enabled CUDA-Q install is found (see
+# lib/realtime/decoding-server-cqr/CMakeLists.txt).
+if(TARGET cudaq-qec-decoding-server)
+  add_executable(test_decoders_yaml test_decoders_yaml.cpp decoders/sample_decoder.cpp)
+  target_include_directories(test_decoders_yaml PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../lib/realtime/decoding-server-cqr)
+  target_link_libraries(test_decoders_yaml PRIVATE
+    GTest::gtest_main
+    cudaq-qec
+    cudaq-qec-decoding-server
+    cudaq-qec-realtime-decoding
+    cudaq-qec-realtime-decoding-simulation
+    cudaq::cudaq)
+  add_dependencies(CUDAQXQECUnitTests test_decoders_yaml)
+  gtest_discover_tests(test_decoders_yaml)
 
-add_executable(test_decoding_server_core test_decoding_server_core.cpp)
-target_link_libraries(test_decoding_server_core PRIVATE
-  GTest::gtest_main
-  cudaq-qec-decoding-server
-  cudaq::cudaq
-  CUDA::cudart)
-add_dependencies(CUDAQXQECUnitTests test_decoding_server_core)
-gtest_discover_tests(test_decoding_server_core)
+  add_executable(test_decoding_server_core test_decoding_server_core.cpp)
+  target_link_libraries(test_decoding_server_core PRIVATE
+    GTest::gtest_main
+    cudaq-qec-decoding-server
+    cudaq::cudaq
+    CUDA::cudart)
+  add_dependencies(CUDAQXQECUnitTests test_decoding_server_core)
+  gtest_discover_tests(test_decoding_server_core)
+else()
+  message(STATUS "Skipping test_decoders_yaml / test_decoding_server_core "
+                 "(cudaq-qec-decoding-server not built)")
+endif()
 
 add_executable(test_qec test_qec.cpp)
 target_link_libraries(test_qec PRIVATE GTest::gtest_main cudaq-qec cudaq::cudaq-stim-target)

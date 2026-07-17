@@ -9,8 +9,8 @@
 #ifdef CUDAQ_GPU_ROCE_AVAILABLE
 
 #include "GpuRoceTransceiver.h"
-#include "RpcWireFormat.h"
 #include "cudaq/qec/logger.h"
+#include "cudaq/qec/realtime/decoder_rpc_wire_format.h"
 #include "cudaq/qec/realtime/graph_resources.h"
 
 #include <chrono>
@@ -29,6 +29,10 @@
 #include "cudaq/realtime/hololink_bridge_common.h"
 
 namespace cudaq::qec::decoding_server {
+
+using cudaq::qec::decoding::rpc::kEnqueueSyndromesFunctionId;
+using cudaq::qec::decoding::rpc::kGetCorrectionsFunctionId;
+using cudaq::qec::decoding::rpc::kResetDecoderFunctionId;
 
 // ---------------------------------------------------------------------------
 // Internal helpers (same pattern as hololink_qldpc_graph_decoder_bridge.cpp)

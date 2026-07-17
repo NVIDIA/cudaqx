@@ -45,9 +45,9 @@ void save_dem_to_file(const cudaq::qec::detector_error_model &dem,
     config.O_sparse =
         cudaq::qec::pcm_to_sparse_vec(dem.observables_flips_matrix);
     config.D_sparse = std::vector<int64_t>(det_mat);
-    cudaq::qec::decoding::config::multi_error_lut_config lut_config;
-    lut_config.lut_error_depth = 2;
-    config.decoder_custom_args = lut_config;
+    cudaqx::heterogeneous_map lut_args;
+    lut_args.insert("lut_error_depth", 2);
+    config.decoder_custom_args = lut_args;
     multi_config.decoders.push_back(config);
   }
   std::string config_str = multi_config.to_yaml_str(200);
@@ -76,9 +76,6 @@ void load_dem_from_file(const std::string &dem_filename,
     exit(1);
   }
   auto decoder_config = config.decoders[0];
-  auto multi_error_lut_config =
-      std::get<cudaq::qec::decoding::config::multi_error_lut_config>(
-          decoder_config.decoder_custom_args);
   dem.detector_error_matrix = cudaq::qec::pcm_from_sparse_vec(
       decoder_config.H_sparse, decoder_config.syndrome_size,
       decoder_config.block_size);
@@ -100,24 +97,12 @@ std::vector<size_t> get_stab_cnot_schedule(char stab_type, int distance) {
     throw std::runtime_error(
         "get_stab_cnot_schedule: Invalid stabilizer type. Must be 'X' or 'Z'.");
   }
-  // First get the stabilizers
-  auto stabs = grid.get_spin_op_stabilizers();
-  cudaq::qec::sortStabilizerOps(stabs);
-  std::size_t stab_idx = 0;
-  std::vector<size_t> cnot_schedule;
-  for (const auto &stab : stabs) {
-    auto stab_word = stab.get_pauli_word(distance * distance);
-    if (stab_word.find(stab_type) == std::string::npos)
-      continue; // None of the desired stabilizers in this row
-    for (std::size_t d = 0; d < stab_word.size(); ++d) {
-      if (stab_word[d] == stab_type) {
-        cnot_schedule.push_back(stab_idx);
-        cnot_schedule.push_back(d);
-      }
-    }
-    stab_idx++;
-  }
-  return cnot_schedule;
+  // CNOT pairs ordered by timestep within each stabilizer, so that mid-round
+  // ancilla (hook) errors land perpendicular to the logical operators.
+  // Stabilizer indices match the sorted parity-matrix rows and hence the
+  // ancilla indexing.
+  return stab_type == 'X' ? grid.get_cnot_schedule_pairs_x()
+                          : grid.get_cnot_schedule_pairs_z();
 }
 
 void debug_print_syndromes(int64_t syndrome_x_int, int64_t syndrome_z_int) {

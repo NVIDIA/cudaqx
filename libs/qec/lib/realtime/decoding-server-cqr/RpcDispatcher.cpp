@@ -15,6 +15,9 @@
 
 namespace cudaq::qec::decoding_server {
 
+using cudaq::realtime::RPCHeader;
+using cudaq::realtime::RPCResponse;
+
 // ---------------------------------------------------------------------------
 // ResponseWriter
 // ---------------------------------------------------------------------------
@@ -22,7 +25,7 @@ namespace cudaq::qec::decoding_server {
 void ResponseWriter::write_error(RpcStatus status) {
   std::vector<uint8_t> buf(sizeof(RPCResponse));
   auto *hdr = reinterpret_cast<RPCResponse *>(buf.data());
-  hdr->magic = kRPCResponseMagic;
+  hdr->magic = cudaq::realtime::RPC_MAGIC_RESPONSE;
   hdr->status = static_cast<int32_t>(status);
   hdr->result_len = 0;
   hdr->request_id = request_id_;
@@ -48,7 +51,7 @@ void RpcDispatcher::dispatch(RxFrame frame, ITransceiver &transport) {
 
   const auto *hdr = reinterpret_cast<const RPCHeader *>(frame.buf.data());
 
-  if (hdr->magic != kRPCRequestMagic) {
+  if (hdr->magic != cudaq::realtime::RPC_MAGIC_REQUEST) {
     CUDA_QEC_DBG("RpcDispatcher: bad magic 0x{:08X}", hdr->magic);
     return;
   }

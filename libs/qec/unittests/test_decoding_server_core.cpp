@@ -10,10 +10,10 @@
 #include "DecodingSession.h"
 #include "RoundAccumulator.h"
 #include "RpcDispatcher.h"
-#include "RpcWireFormat.h"
 #include "../lib/hardware_guards.h"
 
 #include "cudaq/qec/decoder.h"
+#include "cudaq/qec/realtime/decoder_rpc_wire_format.h"
 #include "cudaq/qec/sparse_binary_matrix.h"
 
 #include <gtest/gtest.h>
@@ -30,6 +30,9 @@
 namespace {
 
 using namespace cudaq::qec::decoding_server;
+using namespace cudaq::qec::decoding::rpc;
+using cudaq::realtime::RPCHeader;
+using cudaq::realtime::RPCResponse;
 
 class ControlledDecoder final : public cudaq::qec::decoder {
 public:
@@ -85,18 +88,18 @@ WorkItem make_enqueue(CaptureTransceiver &transport, uint64_t counter,
   item.function_id = kEnqueueSyndromesFunctionId;
   item.request_id = static_cast<uint32_t>(counter + 1);
   item.response_transport = &transport;
-  item.frame_buf.resize(sizeof(RPCHeader) + sizeof(EnqueuePayload) +
+  item.frame_buf.resize(sizeof(RPCHeader) + sizeof(EnqueueRequestPayload) +
                         bit_packed_bytes(bits.size()));
 
-  auto *request = reinterpret_cast<EnqueuePayload *>(item.frame_buf.data() +
-                                                     sizeof(RPCHeader));
+  auto *request = reinterpret_cast<EnqueueRequestPayload *>(
+      item.frame_buf.data() + sizeof(RPCHeader));
   request->decoder_id = 0;
   request->counter = static_cast<int64_t>(counter);
   request->syndrome_mapping_id = 0;
   request->num_syndromes = static_cast<int64_t>(bits.size());
 
   auto *packed =
-      item.frame_buf.data() + sizeof(RPCHeader) + sizeof(EnqueuePayload);
+      item.frame_buf.data() + sizeof(RPCHeader) + sizeof(EnqueueRequestPayload);
   for (std::size_t i = 0; i < bits.size(); ++i)
     if (bits[i] & 1u)
       packed[i / 8] |= static_cast<uint8_t>(1u << (i % 8));
@@ -108,9 +111,10 @@ WorkItem make_get_corrections(CaptureTransceiver &transport, bool reset) {
   item.function_id = kGetCorrectionsFunctionId;
   item.request_id = 101;
   item.response_transport = &transport;
-  item.frame_buf.resize(sizeof(RPCHeader) + sizeof(GetCorrectionsPayload));
+  item.frame_buf.resize(sizeof(RPCHeader) +
+                        sizeof(GetCorrectionsRequestPayload));
 
-  auto *request = reinterpret_cast<GetCorrectionsPayload *>(
+  auto *request = reinterpret_cast<GetCorrectionsRequestPayload *>(
       item.frame_buf.data() + sizeof(RPCHeader));
   request->decoder_id = 0;
   request->return_size = 1;
@@ -123,9 +127,9 @@ WorkItem make_reset(CaptureTransceiver &transport) {
   item.function_id = kResetDecoderFunctionId;
   item.request_id = 202;
   item.response_transport = &transport;
-  item.frame_buf.resize(sizeof(RPCHeader) + sizeof(ResetPayload));
-  auto *request = reinterpret_cast<ResetPayload *>(item.frame_buf.data() +
-                                                   sizeof(RPCHeader));
+  item.frame_buf.resize(sizeof(RPCHeader) + sizeof(ResetRequestPayload));
+  auto *request = reinterpret_cast<ResetRequestPayload *>(
+      item.frame_buf.data() + sizeof(RPCHeader));
   request->decoder_id = 0;
   return item;
 }
@@ -134,7 +138,7 @@ void expect_status(const CaptureTransceiver &transport, RpcStatus status) {
   ASSERT_GE(transport.response.size(), sizeof(RPCResponse));
   const auto *response =
       reinterpret_cast<const RPCResponse *>(transport.response.data());
-  EXPECT_EQ(response->magic, kRPCResponseMagic);
+  EXPECT_EQ(response->magic, cudaq::realtime::RPC_MAGIC_RESPONSE);
   EXPECT_EQ(response->status, static_cast<int32_t>(status));
 }
 
@@ -252,7 +256,7 @@ TEST(RpcDispatcherTest, ConvertsHandlerExceptionsToErrorResponses) {
   RxFrame frame;
   frame.buf.resize(sizeof(RPCHeader));
   auto *header = reinterpret_cast<RPCHeader *>(frame.buf.data());
-  header->magic = kRPCRequestMagic;
+  header->magic = cudaq::realtime::RPC_MAGIC_REQUEST;
   header->function_id = function_id;
   header->request_id = 55;
 

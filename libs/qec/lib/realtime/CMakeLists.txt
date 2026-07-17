@@ -176,11 +176,10 @@ if(CMAKE_CUDA_COMPILER)
       ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
     )
     
-    install(TARGETS cudaq-qec-realtime-cudevice
-      COMPONENT qec-lib
-      ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    )
-
+    # NOTE: cudaq-qec-realtime-cudevice is a STATIC archive consumed only at
+    # link time -- the decoding_server executable (and the realtime tests)
+    # absorb its objects WHOLE_ARCHIVE during their own link.  It is not needed
+    # at runtime, so it is deliberately NOT installed.
   else()
     message(WARNING "cuda-quantum realtime headers not found. "
                     "Device library cudaq-qec-realtime-device will not be built. "

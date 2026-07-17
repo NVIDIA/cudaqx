@@ -640,6 +640,22 @@ if(Python_Interpreter_FOUND)
     set(_SC4_TRY_TRT_TEST TRUE)
   endif()
 endif()
+# A silent skip here once masked a dead test check for a whole release cycle:
+# the trt surface-code tests register only when BOTH the trt plugin target and
+# python-onnx are available, so name whichever gate actually failed.
+if(NOT TARGET cudaq-qec-trt-decoder)
+  message(WARNING "surface_code-4-yaml: trt_decoder tests NOT registered "
+    "(cudaq-qec-trt-decoder target not built).")
+elseif(NOT _SC4_TRY_TRT_TEST)
+  if(Python_Interpreter_FOUND)
+    message(WARNING "surface_code-4-yaml: trt_decoder tests NOT registered "
+      "(python module 'onnx' not importable by ${Python_EXECUTABLE}); "
+      "pip install onnx to enable them.")
+  else()
+    message(WARNING "surface_code-4-yaml: trt_decoder tests NOT registered "
+      "(no python interpreter found).")
+  endif()
+endif()
 
 function(add_surface_code_4_yaml_test test_suffix distance num_rounds
          decoder_type num_shots onnx_path)
@@ -746,7 +762,7 @@ if(TARGET surface_code-4-yaml-cqr)
       "pymatching,trt_decoder,pymatching" 200 AUTO)
     set_property(TEST app_examples.surface_code-4-yaml-cqr-happy-path
       APPEND PROPERTY ENVIRONMENT
-        "REQUIRE_TRT_EXECUTION=1")
+        "REQUIRE_SERVER_DECODE_COUNTS=1")
   endif()
 
   # A real-workload skew case: all three patches use PyMatching, but patch 1
@@ -974,13 +990,13 @@ _sc4_reject(p-spam-zero-generation "--p_spam must be > 0 to generate"
   --distance 3 --num_rounds 3 --p_spam 0 --decoder_type pymatching
   --save_dem ${_sc4_neg_dir}/ps0.yml)
 
-# Dual-parse pin, plugin-free: generation instantiates no decoder, so this
-# runs everywhere. Structural check (always): the BP entry carries the
-# undecomposed hyperedge H -- strictly fewer columns than the matching entry's
-# decomposed H. Full check (python3 available): the mixed-list BP entry's
-# column multiset of (detector support, observable support, probability) is
-# IDENTICAL to a directly generated undecomposed reference config at the same
-# geometry.
+# Dual-parse pin: generation instantiates no decoder, but YAML emission
+# requires the nv-qldpc-decoder parameter schema (registered by the plugin).
+# Structural check: the BP entry carries the undecomposed hyperedge H --
+# strictly fewer columns than the matching entry's decomposed H.
+# Full check (python3 available): the mixed-list BP entry's column multiset
+# of (detector support, observable support, probability) is IDENTICAL to a
+# directly generated undecomposed reference config at the same geometry.
 function(_sc4_dual_parse_test distance num_rounds)
   add_test(NAME app_examples.surface_code-4-yaml-dual-parse-gen-d${distance}
     COMMAND bash -c [==[
@@ -1065,8 +1081,12 @@ fi
   set_tests_properties(app_examples.surface_code-4-yaml-dual-parse-gen-d${distance}
     PROPERTIES ENVIRONMENT "${_sc4_neg_env}")
 endfunction()
-_sc4_dual_parse_test(3 3)
-_sc4_dual_parse_test(5 5)
+if(TARGET cudaq-qec-nv-qldpc-decoder
+   OR QEC_EXTERNAL_DECODERS
+   OR DEFINED ENV{QEC_EXTERNAL_DECODERS})
+  _sc4_dual_parse_test(3 3)
+  _sc4_dual_parse_test(5 5)
+endif()
 
 # X-basis Ising bundle rejected (basis must be Z). Fabricate just the
 # metadata.txt the loader inspects; the dummy ONNX is never opened because the

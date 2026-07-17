@@ -125,57 +125,55 @@ void save_dem_to_file(const cudaq::qec::detector_error_model &dem,
         numSyndromesPerRound, numRounds, /*include_first_round=*/false);
 
     if (decoder_type == "nv-qldpc-decoder") {
-      config.decoder_custom_args =
-          cudaq::qec::decoding::config::nv_qldpc_decoder_config();
-      auto &nv_config =
-          std::get<cudaq::qec::decoding::config::nv_qldpc_decoder_config>(
-              config.decoder_custom_args);
+      cudaqx::heterogeneous_map nv_args;
 
       // Basic settings
-      nv_config.use_sparsity = true;
-      nv_config.error_rate_vec = dem.error_rates;
-      nv_config.max_iterations = 50;
+      nv_args.insert("use_sparsity", true);
+      nv_args.insert("error_rate_vec", dem.error_rates);
+      nv_args.insert("max_iterations", 50);
 
       if (use_relay_bp) {
-        nv_config.bp_method = 3;   // min-sum+dmem (required for relay)
-        nv_config.composition = 1; // Enable sequential relay
-        nv_config.gamma0 = 0.0;    // Initial gamma value
-        nv_config.clip_value = 200.0;
-        nv_config.repeatable = true;
-        nv_config.srelay_config =
-            cudaq::qec::decoding::config::srelay_bp_config();
-        nv_config.srelay_config->pre_iter = 5;
-        nv_config.srelay_config->num_sets = 10;
-        nv_config.srelay_config->stopping_criterion = "All";
-        nv_config.srelay_config->stop_nconv = 1;
-        nv_config.gamma_dist = {0.1, 0.2};
+        nv_args.insert("bp_method", 3);   // min-sum+dmem (required for relay)
+        nv_args.insert("composition", 1); // Enable sequential relay
+        nv_args.insert("gamma0", 0.0);    // Initial gamma value
+        nv_args.insert("clip_value", 200.0);
+        nv_args.insert("repeatable", true);
+        cudaqx::heterogeneous_map srelay_args;
+        srelay_args.insert("pre_iter", std::size_t{5});
+        srelay_args.insert("num_sets", std::size_t{10});
+        srelay_args.insert("stopping_criterion", "All");
+        srelay_args.insert("stop_nconv", std::size_t{1});
+        nv_args.insert("srelay_config", srelay_args);
+        nv_args.insert("gamma_dist", std::vector<double>{0.1, 0.2});
       } else {
         // OSD post-processor
-        nv_config.use_osd = true;
-        nv_config.osd_order = 60;
-        nv_config.osd_method = 3;
+        nv_args.insert("use_osd", true);
+        nv_args.insert("osd_order", 60);
+        nv_args.insert("osd_method", 3);
       }
+      config.decoder_custom_args = nv_args;
     } else if (decoder_type == "multi_error_lut") {
       // Original multi_error_lut configuration
-      cudaq::qec::decoding::config::multi_error_lut_config lut_config;
-      lut_config.lut_error_depth = 2;
-      config.decoder_custom_args = lut_config;
+      cudaqx::heterogeneous_map lut_args;
+      lut_args.insert("lut_error_depth", 2);
+      config.decoder_custom_args = lut_args;
     } else if (decoder_type == "sliding_window") {
       // Sliding window configuration
-      cudaq::qec::decoding::config::sliding_window_config sw_config;
-      sw_config.window_size = sw_window_size;
-      sw_config.step_size = sw_step_size;
-      sw_config.num_syndromes_per_round = numSyndromesPerRound;
-      sw_config.straddle_start_round = false;
-      sw_config.straddle_end_round = true;
-      sw_config.inner_decoder_name = "multi_error_lut";
-      sw_config.error_rate_vec = dem.error_rates; // Required by sliding_window
+      cudaqx::heterogeneous_map sw_args;
+      sw_args.insert("window_size", sw_window_size);
+      sw_args.insert("step_size", sw_step_size);
+      sw_args.insert("num_syndromes_per_round", numSyndromesPerRound);
+      sw_args.insert("straddle_start_round", false);
+      sw_args.insert("straddle_end_round", true);
+      sw_args.insert("inner_decoder_name", "multi_error_lut");
+      // Required by sliding_window
+      sw_args.insert("error_rate_vec", dem.error_rates);
 
       // Configure inner multi_error_lut decoder
-      cudaq::qec::decoding::config::multi_error_lut_config lut_config;
-      lut_config.lut_error_depth = 2;
-      sw_config.multi_error_lut_params = lut_config;
-      config.decoder_custom_args = sw_config;
+      cudaqx::heterogeneous_map inner_lut_args;
+      inner_lut_args.insert("lut_error_depth", 2);
+      sw_args.insert("inner_decoder_params", inner_lut_args);
+      config.decoder_custom_args = sw_args;
     }
 
     multi_config.decoders.push_back(config);
@@ -209,12 +207,10 @@ void load_dem_from_file(const std::string &dem_filename,
   auto decoder_config = config.decoders[0];
 
   if (decoder_config.type == "sliding_window") {
-    auto sw_config =
-        std::get<cudaq::qec::decoding::config::sliding_window_config>(
-            decoder_config.decoder_custom_args);
+    const auto &sw_args = decoder_config.decoder_custom_args.map();
     // Extract from top-level error_rate_vec (required for sliding_window)
-    if (!sw_config.error_rate_vec.empty()) {
-      dem.error_rates = sw_config.error_rate_vec;
+    if (sw_args.contains("error_rate_vec")) {
+      dem.error_rates = sw_args.get<std::vector<double>>("error_rate_vec");
     }
   }
 
@@ -240,24 +236,12 @@ std::vector<size_t> get_stab_cnot_schedule(char stab_type, int distance) {
     throw std::runtime_error(
         "get_stab_cnot_schedule: Invalid stabilizer type. Must be 'X' or 'Z'.");
   }
-  // First get the stabilizers
-  auto stabs = grid.get_spin_op_stabilizers();
-  cudaq::qec::sortStabilizerOps(stabs);
-  std::size_t stab_idx = 0;
-  std::vector<size_t> cnot_schedule;
-  for (const auto &stab : stabs) {
-    auto stab_word = stab.get_pauli_word(distance * distance);
-    if (stab_word.find(stab_type) == std::string::npos)
-      continue; // None of the desired stabilizers in this row
-    for (std::size_t d = 0; d < stab_word.size(); ++d) {
-      if (stab_word[d] == stab_type) {
-        cnot_schedule.push_back(stab_idx);
-        cnot_schedule.push_back(d);
-      }
-    }
-    stab_idx++;
-  }
-  return cnot_schedule;
+  // CNOT pairs ordered by timestep within each stabilizer, so that mid-round
+  // ancilla (hook) errors land perpendicular to the logical operators.
+  // Stabilizer indices match the sorted parity-matrix rows and hence the
+  // ancilla indexing.
+  return stab_type == 'X' ? grid.get_cnot_schedule_pairs_x()
+                          : grid.get_cnot_schedule_pairs_z();
 }
 
 void debug_print_syndromes(int64_t syndrome_x_int, int64_t syndrome_z_int) {

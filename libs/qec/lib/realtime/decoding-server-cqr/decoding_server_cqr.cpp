@@ -23,8 +23,8 @@
 
 #include "CqrTransceiver.h"
 #include "DecodingServer.h"
-#include "RpcWireFormat.h"
 #include "cudaq/qec/logger.h"
+#include "cudaq/qec/realtime/decoder_rpc_wire_format.h"
 #include "cudaq/qec/realtime/decoding_config.h"
 #include "cudaq/realtime/daemon/dispatcher/dispatch_kernel_launch.h"
 #include "cudaq/realtime/device_call_service.h"
@@ -47,11 +47,11 @@ extern "C" void cudaqx_qec_decoding_server_shutdown();
 
 namespace {
 
+using cudaq::qec::decoding::rpc::kEnqueueSyndromesFunctionId;
+using cudaq::qec::decoding::rpc::kGetCorrectionsFunctionId;
+using cudaq::qec::decoding::rpc::kResetDecoderFunctionId;
 using cudaq::qec::decoding_server::CqrTransceiver;
 using cudaq::qec::decoding_server::DecodingServer;
-using cudaq::qec::decoding_server::kEnqueueSyndromesFunctionId;
-using cudaq::qec::decoding_server::kGetCorrectionsFunctionId;
-using cudaq::qec::decoding_server::kResetDecoderFunctionId;
 using cudaq::realtime::DeviceCallDispatchMode;
 using cudaq::realtime::DeviceCallDispatchTable;
 using cudaq::realtime::DeviceCallService;
@@ -101,8 +101,8 @@ static void init_server() {
 
 // Write an error RPCResponse into tx_slot (handler-level failures must not
 // propagate into the transport dispatcher loop).
-constexpr int32_t kStatusHandlerException = static_cast<int32_t>(
-    cudaq::qec::decoding_server::RpcStatus::INTERNAL_ERROR);
+constexpr int32_t kStatusHandlerException =
+    static_cast<int32_t>(cudaq::qec::decoding::rpc::RpcStatus::INTERNAL_ERROR);
 
 static void write_error_response(const void *rx_slot, void *tx_slot,
                                  std::size_t slot_size, int32_t status) {
@@ -190,15 +190,10 @@ void reset_decoder_host(const void *rx_slot, void *tx_slot,
 // ---------------------------------------------------------------------------
 
 // The schema entries below register under the SAME function IDs the handlers
-// and CqrTransceiver route on (the kXFunctionId constants from
-// RpcWireFormat.h); these asserts pin them to the fnv1a hashes of the RPC
-// names so a rename cannot silently desynchronize registration from routing.
-static_assert(kEnqueueSyndromesFunctionId ==
-              cudaq::realtime::fnv1a_hash("enqueue_syndromes"));
-static_assert(kGetCorrectionsFunctionId ==
-              cudaq::realtime::fnv1a_hash("get_corrections"));
-static_assert(kResetDecoderFunctionId ==
-              cudaq::realtime::fnv1a_hash("reset_decoder"));
+// and CqrTransceiver route on: the kXFunctionId constants from
+// decoder_rpc_wire_format.h, which derives them from the RPC names via
+// cudaq::realtime::fnv1a_hash so a rename cannot silently desynchronize
+// registration from routing.
 
 constexpr int32_t kHostDispatchDeviceId = 0;
 constexpr uint8_t kNoResults = 0;
@@ -372,6 +367,15 @@ cudaqx_qec_device_call_dispatch_count() {
 extern "C" __attribute__((visibility("default"))) uint64_t
 cudaqx_qec_decoding_server_max_concurrent() {
   return cudaq::qec::decoding_server::max_concurrent_busy_sessions();
+}
+
+/// Per-decoder session counters (decodes/enqueues/...), one stdout line per
+/// decoder. Test/diagnostic evidence; callers gate on the
+/// QEC_DECODING_SERVER_STATS environment variable.
+extern "C" __attribute__((visibility("default"))) void
+cudaqx_qec_decoding_server_print_stats() {
+  if (g_server)
+    g_server->print_session_stats();
 }
 
 /// Stop the DecodingServer receive loop and join its thread. The server calls
