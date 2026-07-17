@@ -432,8 +432,7 @@ void enqueue_syndromes(std::size_t decoder_id, uint8_t *syndromes,
   // decoder's pinned device before decoding (set-if-different; throws on
   // failure) -- and before the capture callback, so a pin failure cannot
   // record a round that was never decoded.
-  cudaq::qec::detail_affinity::set_cuda_device_for_decode(
-      decoder->get_cuda_device_id());
+  cudaq::qec::detail_affinity::pin_decode_device(*decoder);
   capture_syndromes();
 
   std::vector<uint8_t> syndrome_u8(syndrome_length);
@@ -501,8 +500,7 @@ void get_corrections(std::size_t decoder_id, uint8_t *corrections,
 #endif
 
   // clear_corrections may touch device memory in some plugins.
-  cudaq::qec::detail_affinity::set_cuda_device_for_decode(
-      decoder->get_cuda_device_id());
+  cudaq::qec::detail_affinity::pin_decode_device(*decoder);
   auto ret = decoder->get_obs_corrections();
   for (std::size_t i = 0; i < correction_length; ++i) {
     corrections[i] = ret[i];
@@ -538,8 +536,7 @@ void reset_decoder(std::size_t decoder_id) {
   }
 #endif
 
-  cudaq::qec::detail_affinity::set_cuda_device_for_decode(
-      decoder->get_cuda_device_id());
+  cudaq::qec::detail_affinity::pin_decode_device(*decoder);
   decoder->reset_decoder();
 }
 

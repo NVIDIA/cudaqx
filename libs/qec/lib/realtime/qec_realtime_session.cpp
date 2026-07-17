@@ -144,8 +144,7 @@ static void apply_decoder_cuda_device(cudaq::qec::decoder *dec) {
   // Throws on failure (fail fast): host dispatch surfaces it as an error
   // response and graph initialization aborts, rather than continuing on
   // whichever device happened to be current.
-  cudaq::qec::detail_affinity::set_cuda_device_for_decode(
-      dec->get_cuda_device_id());
+  cudaq::qec::detail_affinity::pin_decode_device(*dec);
 }
 
 // Two-ring response writer: the request stays in `rx_slot` (read-only); the
@@ -565,9 +564,9 @@ void qec_realtime_session::capture_decoder_graphs() {
           "qec_realtime_session::initialize: decoder " + std::to_string(i) +
           " does not support graph dispatch in DEVICE mode.");
 
-    apply_decoder_cuda_device(dec);
     // reserved_sms = 0 is intentional for the inproc_rpc desktop / CI path.
-    void *raw = dec->capture_decode_graph(/*reserved_sms=*/0);
+    void *raw =
+        cudaq::qec::detail_affinity::capture_graph_pinned(*dec, /*sms=*/0);
     if (!raw)
       throw std::runtime_error("qec_realtime_session::initialize: decoder " +
                                std::to_string(i) +
