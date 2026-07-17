@@ -93,7 +93,20 @@ master_doc = 'index'
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
 # This pattern also affects html_static_path and html_extra_path.
-exclude_patterns = ['_templates']
+# Fragment files pulled in via ``.. include::`` must not also be processed as
+# standalone documents — doing so causes duplicate C++ / Python domain
+# declarations in the Sphinx domain registry.
+exclude_patterns = [
+    '_templates',
+    'api/qec/nv_qldpc_decoder_api.rst',
+    'api/qec/sliding_window_api.rst',
+    'api/qec/trt_decoder_api.rst',
+    'api/qec/tensor_network_decoder_api.rst',
+    'api/qec/python_realtime_decoding_api.rst',
+    'api/qec/cpp_realtime_decoding_api.rst',
+    'api/qec/realtime_pipeline_api.rst',
+    'api/solvers/gqe_api.rst',
+]
 
 # The reST default role (used for this markup: `text`) to use for all documents.
 default_role = 'code'  # NOTE: the following may be a better choice to error on the side of flagging anything that is referenced but but not declared
@@ -153,6 +166,17 @@ def process_signature(app, what, name, obj, options, signature, return_annotatio
     return (fix_string(signature), fix_string(return_annotation))
 
 def process_docstring(app, what, name, obj, options, lines):
+    # In docs-gen mode the native extension is replaced by MagicMock, so any
+    # autodoc directive targeting a pybind11 symbol gets the MagicMock class
+    # docstring ("MagicMock is a subclass of Mock …") via inspect.getdoc().
+    # Suppress it so the generated page is empty rather than misleading.
+    try:
+        from unittest.mock import MagicMock
+        if isinstance(obj, MagicMock):
+            lines.clear()
+            return
+    except ImportError:
+        pass
     for i, line in enumerate(lines):
         lines[i] = fix_string(line)
 
@@ -172,6 +196,12 @@ breathe_show_enumvalue_initializer = True
 
 autosummary_generate = True
 
+# cudaq is not available in doc-only build environments; mock it so autodoc
+# can import cudaq_qec without cudaq's C runtime being present.  The native
+# extension load failure is handled separately via CUDAQX_DOCS_GEN_IMPORT_CUDAQ
+# in cudaq_qec/__init__.py.
+autodoc_mock_imports = ['cudaq']
+
 intersphinx_mapping = {
     'python': ('https://docs.python.org/3/', None),
     'numpy': ('https://numpy.org/doc/stable/', None),
@@ -183,6 +213,16 @@ redirects = {"versions": "../latest/releases.html"}
 nitpick_ignore = [
     ('cpp:identifier', 'pid_t'),
     ('cpp:identifier', 'uint8_t'),
+    ('cpp:identifier', 'uint32_t'),
+    ('cpp:identifier', 'int64_t'),
+    ('cpp:identifier', 'index_type'),
+    ('ref', 'graph__resources_8h'),
+    ('ref', 'decoder__config__schema_8h'),
+    ('cpp:identifier', 'cudaq::pauli_word'),
+    ('cpp:identifier', 'cudaGraphExec_t'),
+    ('cpp:identifier', 'cudaStream_t'),
+    ('cpp:identifier', 'SIZE_MAX'),
+    ('cpp:identifier', 'uint64_t'),
     ('cpp:identifier', 'details::tensor_impl<Scalar>::scalar_type'),
     ('cpp:identifier', 'cudaqx'),
     ('cpp:identifier', 'size_t'),
@@ -199,9 +239,18 @@ nitpick_ignore = [
     ('cpp:identifier', 'cudaq::qview<>'),
     ('cpp:identifier', 'cudaq::measure_result'),
     ('py:class', 'SpinOperator'),
+    ('py:class', 'cudaq.SpinOperator'),
+    ('py:class', 'cudaq::sum_op<cudaq::spin_handler>'),
+    ('py:class', 'list[cudaq::sum_op<cudaq::spin_handler>]'),
+    ('py:class', 'tuple[float, list[float], list[cudaq::sum_op<cudaq::spin_handler>]]'),
+    ('py:class', 'pauli_word'),
+    ('py:class', 'PauliWord'),
     ('py:class', 'numpy.int32'),
     ('py:class', 'numpy.uint8'),
-    ('py:class', 'cudaq.mlir._mlir_libs._quakeDialects.cudaq_runtime.qview')
+    ('py:class', 'cudaq.mlir._mlir_libs._quakeDialects.cudaq_runtime.qview'),
+    ('py:class', 'cudaq_qec.surface_role'),
+    ('py:class', 'sc_orientation'),
+    ('py:class', 'vec2d'),
 ]
 
 napoleon_google_docstring = True

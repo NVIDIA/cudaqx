@@ -125,6 +125,31 @@ fi
 rm -rf sphinx/_doxygen/
 rm -rf sphinx/_mdgen/
 
+# Verify that none of the following strings appear in the generated HTML.
+# Any match is a documentation bug that must be fixed in the RST or conf.py.in:
+#   MagicMock                    — autodoc targeted a MagicMock symbol in docs-gen mode
+#   "alias of"                   — autoclass on a symbol whose __module__ differs from
+#                                  the documenting module; applies in all build modes
+#   _pycudaqx_qec_the_suffix_*   — internal pybind11 module name that doc_replacements
+#                                  in conf.py.in should have stripped from all output
+#
+# Exit codes: 13 = MagicMock, 14 = "alias of", 15 = internal pybind11 module name.
+invalid_html_checks=(
+    "13|MagicMock|MagicMock references"
+    "14|alias of|'alias of' references"
+    "15|_pycudaqx_qec_the_suffix_matters|internal pybind11 module name"
+)
+
+for check in "${invalid_html_checks[@]}"; do
+    IFS='|' read -r check_exit pattern label <<< "$check"
+    if grep -rql "$pattern" "$sphinx_output_dir" --include="*.html" 2>/dev/null; then
+        echo "ERROR: ${label} found in generated documentation:"
+        grep -rn "$pattern" "$sphinx_output_dir" --include="*.html" | \
+            sed "s|${sphinx_output_dir}/||"
+        docs_exit_code=$check_exit
+    fi
+done
+
 mkdir -p "$DOCS_INSTALL_PREFIX"
 if [ "$docs_exit_code" -eq "0" ]; then
     cp -r "$sphinx_output_dir"/* "$DOCS_INSTALL_PREFIX"

@@ -6,6 +6,10 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
+import os as _os
+
+_docs_gen = _os.getenv("CUDAQX_DOCS_GEN_IMPORT_CUDAQ") == "ON"
+
 
 def _ensure_cuda_runtime_loaded():
     """Ensure CUDA runtime libraries are in the process before loading native extensions."""
@@ -36,7 +40,15 @@ except ImportError as exc:
         raise ImportError(
             f"{err}. Ensure 'nvidia-cuda-runtime-cuXX' is installed "
             "alongside 'cuda-quantum-cuXX'.") from exc
-    raise
+    if not _docs_gen:
+        raise
+    # In docs-gen mode provide a mock so autodoc can import the module and
+    # document the pure-Python layer without cudaq's C runtime present.
+    # Normally qecrt is the nanobind submodule of
+    # _pycudaqx_qec_the_suffix_matters_cudaq_qec that holds all C++ bindings.
+    from unittest.mock import MagicMock as _MagicMock
+    qecrt = _MagicMock()
+    qecrt.__version__ = "unknown"
 
 __version__ = qecrt.__version__
 code = qecrt.code
@@ -175,7 +187,9 @@ try:
 except (ModuleNotFoundError, ImportError):
     pass
 
-import cudaq
-from .loader import qec_set_target_callback
-
-cudaq.register_set_target_callback(qec_set_target_callback, "cudaq_qec")
+try:
+    import cudaq
+    from .loader import qec_set_target_callback
+    cudaq.register_set_target_callback(qec_set_target_callback, "cudaq_qec")
+except ImportError:
+    pass
