@@ -108,6 +108,7 @@ jobs:
 
       - name: Build cuda-quantum realtime
         run: |
+          source "$GITHUB_WORKSPACE/scripts/cudaq_realtime_cmake_flags.sh"
           CUDAQ_REPO="${{ steps.get-cudaq-version.outputs.repo }}"
           CUDAQ_REF="${{ steps.get-cudaq-version.outputs.ref }}"
           CUDAQ_REALTIME_ROOT=/tmp/cudaq-realtime
@@ -119,7 +120,9 @@ jobs:
           git sparse-checkout set realtime cmake
           git checkout "$CUDAQ_REF"
           cd realtime && mkdir -p build && cd build
-          cmake -G Ninja -DCMAKE_INSTALL_PREFIX=$CUDAQ_REALTIME_ROOT ..
+          cmake -G Ninja -DCMAKE_INSTALL_PREFIX=$CUDAQ_REALTIME_ROOT \
+            -DCMAKE_CUDA_FLAGS="$(cudaq_realtime_cmake_cuda_flags)" \
+            ..
           ninja && ninja install
           echo "CUDAQ_REALTIME_ROOT=$CUDAQ_REALTIME_ROOT" >> $GITHUB_ENV
         shell: bash
