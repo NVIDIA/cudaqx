@@ -18,8 +18,9 @@ The static noise-model builders (:func:`factorized_noise_model`,
 from __future__ import annotations
 
 import warnings
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
+import cudaq_qec as qec
 import numpy as np
 import numpy.typing as npt
 import opt_einsum as oe
@@ -27,7 +28,9 @@ import torch
 from quimb.tensor import TensorNetwork
 
 from ..tensor_network_decoder import TensorNetworkDecoder
+from .noise_models import factorized_noise_model
 from .tensor_network_factory import (
+    tensor_network_from_parity_check,
     tensor_network_from_syndrome_batch,
     prepare_syndrome_data_batch,
 )
@@ -41,6 +44,7 @@ _PRIOR_EPS_BY_DTYPE: dict[str, float] = {
     "float32": 1e-6,
 }
 _SUPPORTED_DTYPES: tuple[str, ...] = ("float32", "float64")
+_TORCH_EINSUM_MAX_DIMS = 25
 
 
 def _validate_and_clamp_priors(noise_model: Any, dtype: str) -> list[float]:
@@ -106,6 +110,12 @@ def _clamp_log_input(x: torch.Tensor) -> torch.Tensor:
     return x.clamp_min(torch.finfo(x.dtype).tiny)
 
 
+def _normalize_prediction(x: torch.Tensor) -> torch.Tensor:
+    """Normalize decoder scores while keeping zero rows finite."""
+    norm = x.sum(dim=1, keepdim=True).clamp_min(torch.finfo(x.dtype).tiny)
+    return x / norm
+
+
 def remap_eq_to_ascii(eq: str) -> str:
     """Rewrite an einsum equation so every label is in ``[a-zA-Z]``.
 
@@ -145,6 +155,90 @@ def remap_eq_to_ascii(eq: str) -> str:
                 "on the LHS; cannot remap.")
         out_rhs_chars.append(mapping[c])
     return f"{out_lhs}->{''.join(out_rhs_chars)}"
+
+
+def _path_largest_intermediate(info: Any) -> float:
+    value = getattr(info, "largest_intermediate", None)
+    if value is None:
+        return float("inf")
+    try:
+        return float(value)
+    except (TypeError, ValueError, OverflowError):
+        return float("inf")
+
+
+def _path_opt_cost(info: Any) -> float:
+    value = getattr(info, "opt_cost", None)
+    if value is None:
+        return float("inf")
+    try:
+        return float(value)
+    except (TypeError, ValueError, OverflowError):
+        return float("inf")
+
+
+def _einsum_rank(eq: str) -> int:
+    """Maximum tensor rank touched by one explicit einsum step."""
+    if "->" not in eq:
+        return 0
+    lhs, rhs = eq.split("->", 1)
+    terms = [term for term in lhs.split(",") if term]
+    terms.append(rhs)
+    return max((len(term) for term in terms), default=0)
+
+
+def _path_max_einsum_rank(info: Any) -> int:
+    """Maximum rank emitted by an opt_einsum contraction path."""
+    ranks = [
+        _einsum_rank(step[2]) for step in getattr(info, "contraction_list", ())
+    ]
+    return max(ranks, default=0)
+
+
+def _select_default_torch_path(
+    eq: str,
+    shapes: tuple[tuple[int, ...], ...],
+) -> tuple[Any, Any]:
+    candidates: list[tuple[str, Any, Any]] = []
+    optimizers: list[tuple[str, Any]] = [
+        ("greedy", "greedy"),
+        ("auto", "auto"),
+        ("auto-hq", "auto-hq"),
+        ("random-greedy", "random-greedy"),
+        ("random-greedy-128", "random-greedy-128"),
+    ]
+
+    for tag, optimize in optimizers:
+        try:
+            path, info = oe.contract_path(eq,
+                                          *shapes,
+                                          shapes=True,
+                                          optimize=optimize)
+        except Exception as exc:
+            warnings.warn(
+                f"NMOptimizer path candidate {tag!r} failed: {exc!r}",
+                RuntimeWarning,
+                stacklevel=3,
+            )
+            continue
+        candidates.append((tag, path, info))
+
+    if not candidates:
+        raise RuntimeError("No NMOptimizer contraction path candidate "
+                           "succeeded.")
+
+    safe_candidates = [
+        candidate for candidate in candidates
+        if _path_max_einsum_rank(candidate[2]) <= _TORCH_EINSUM_MAX_DIMS
+    ]
+    if safe_candidates:
+        candidates = safe_candidates
+
+    _tag, selected_path, selected_info = min(
+        candidates,
+        key=lambda c: (_path_largest_intermediate(c[2]), _path_opt_cost(c[2])),
+    )
+    return selected_path, selected_info
 
 
 class NMOptimizer(TensorNetworkDecoder):
@@ -189,7 +283,8 @@ class NMOptimizer(TensorNetworkDecoder):
         execute: Forward backend.  ``"codegen"`` (default) partial-evaluates
             the path into a flat Python function; ``"unrolled"`` keeps an
             interpretive einsum list; ``"opt_einsum"`` dispatches via
-            :func:`opt_einsum.contract_expression`.
+            :func:`opt_einsum.contract_expression`; ``"cutensornet"``
+            executes the reduced contraction with cuTensorNet on CUDA.
         compile_mode: Forwarded to :func:`torch.compile`; ignored when
             ``compile=False``.
         dynamic_syndromes: If ``True`` (default), syndromes are runtime
@@ -199,6 +294,9 @@ class NMOptimizer(TensorNetworkDecoder):
             the closure as constants -- fewer runtime einsums, but every
             :meth:`update_dataset` call rebuilds the graph.  Only affects
             ``execute="codegen"``.
+        Per-error noise tensors are contracted with their adjacent code
+            tensors using differentiable torch ops, then the reduced
+            network is contracted with the selected ``execute`` backend.
 
     Example (logit-space, no clamping needed)::
 
@@ -227,11 +325,12 @@ class NMOptimizer(TensorNetworkDecoder):
         device: str = "cuda",
         *,
         compile: bool = False,
-        execute: Literal["codegen", "unrolled", "opt_einsum"] = "codegen",
+        execute: Literal["codegen", "unrolled", "opt_einsum",
+                         "cutensornet"] = "codegen",
         compile_mode: str | None = None,
         dynamic_syndromes: bool = True,
     ) -> None:
-        if execute not in ("unrolled", "opt_einsum", "codegen"):
+        if execute not in ("unrolled", "opt_einsum", "codegen", "cutensornet"):
             raise ValueError(f"Invalid execute mode: {execute!r}")
         if dtype not in _SUPPORTED_DTYPES:
             raise ValueError(f"Invalid dtype {dtype!r}; expected one of "
@@ -240,42 +339,50 @@ class NMOptimizer(TensorNetworkDecoder):
         # Sanitise once so the base TN tensors and ``self._noise_probs``
         # see identical values (see :func:`_validate_and_clamp_priors`).
         noise_model = _validate_and_clamp_priors(noise_model, dtype)
-
-        super().__init__(
-            H,
-            logical_obs,
-            noise_model,
-            check_inds=check_inds,
-            error_inds=error_inds,
-            logical_inds=logical_inds,
-            logical_tags=logical_tags,
-            contract_noise_model=False,
-            dtype=dtype,
-            device=device,
-        )
-
-        # Force the torch backend so tensor data lives in the autograd
-        # graph (the base class would otherwise pick cutensornet/numpy
-        # on GPU).  Contractions still go through codegen / cotengra
-        # below, not cuTensorNet.
-        if self.contractor_config.contractor_name == "cutensornet" \
-                and self.contractor_config.backend != "torch":
+        target_device = device
+        if "cuda" in target_device and not torch.cuda.is_available():
             warnings.warn(
-                "NMOptimizer requires the torch backend for autograd; "
-                f"switching contractor backend from "
-                f"{self.contractor_config.backend!r} to 'torch'. "
-                "Contractions are executed via codegen/opt_einsum, not "
-                "cuTensorNet.",
-                stacklevel=3,
+                "CUDA was requested for NMOptimizer, but torch CUDA is not "
+                "available. Using CPU.",
+                UserWarning,
+                stacklevel=2,
             )
-            self._set_contractor(
-                "cutensornet",
-                self.contractor_config.device,
-                "torch",
-                dtype,
-            )
+            target_device = "cpu"
 
-        # Swap the base's placeholder single-syndrome TN for a batched one.
+        if execute == "cutensornet" and "cuda" not in target_device:
+            raise ValueError("execute='cutensornet' requires a CUDA device.")
+
+        # Build the topology directly so NMOptimizer never selects the
+        # TensorNetworkDecoder cuTensorNet contractor during setup.
+        qec.Decoder.__init__(self, H)
+
+        num_checks, num_errs = H.shape
+        if check_inds is None:
+            self.check_inds = [f"s_{j}" for j in range(num_checks)]
+        else:
+            assert len(check_inds) == num_checks, (
+                f"check_inds must have length {num_checks}, "
+                f"but got {len(check_inds)}.")
+            self.check_inds = check_inds
+        if error_inds is None:
+            self.error_inds = [f"e_{j}" for j in range(num_errs)]
+        else:
+            assert len(error_inds) == num_errs, (
+                f"error_inds must have length {num_errs}, "
+                f"but got {len(error_inds)}.")
+            self.error_inds = error_inds
+
+        self.logical_obs_inds = ["obs"]
+        self.parity_check_matrix = H.copy()
+        self.code_tn = tensor_network_from_parity_check(
+            self.parity_check_matrix,
+            col_inds=self.error_inds,
+            row_inds=self.check_inds,
+        )
+        self.replace_logical_observable(logical_obs,
+                                        logical_inds=logical_inds,
+                                        logical_tags=logical_tags)
+
         self._syndrome_tags = [f"SYN_{i}" for i in range(len(self.check_inds))]
         self.syndrome_tn = tensor_network_from_syndrome_batch(
             syndrome_data,
@@ -285,14 +392,23 @@ class NMOptimizer(TensorNetworkDecoder):
         )
         self._batch_size = syndrome_data.shape[0]
 
-        # Re-stitch ``full_tn`` around the batched syndrome TN.
         self.full_tn = TensorNetwork()
         self.full_tn = self.full_tn.combine(self.code_tn, virtual=True)
         self.full_tn = self.full_tn.combine(self.logical_tn, virtual=True)
         self.full_tn = self.full_tn.combine(self.syndrome_tn, virtual=True)
-        self.full_tn = self.full_tn.combine(self.noise_model, virtual=True)
 
-        self._set_tensor_type(self.syndrome_tn)
+        self.path_single = "auto"
+        self.path_batch = "auto"
+        self.slicing_batch = tuple()
+        self.slicing_single = tuple()
+
+        contractor = ("cutensornet"
+                      if execute == "cutensornet" else "oe_torch_compiled")
+        self._set_contractor(contractor, target_device, "torch", dtype)
+        self.init_noise_model(
+            factorized_noise_model(self.error_inds, noise_model),
+            contract=False,
+        )
 
         torch_dtype = getattr(torch, self._dtype)
         self._noise_probs = torch.tensor(
@@ -301,10 +417,10 @@ class NMOptimizer(TensorNetworkDecoder):
             device=self.torch_device,
             requires_grad=True,
         )
-        # The base's noise tensors stay in ``full_tn`` as numpy
-        # placeholders: ``_snapshot_arrays_and_eq`` uses ``id()`` to
-        # locate their positions, then ``self._noise_probs`` (autograd
-        # live) is written into those slots.  Do not strip them.
+        # The base's noise tensors stay in ``full_tn`` as placeholders:
+        # ``_snapshot_arrays_and_eq`` uses ``id()`` to locate their
+        # positions, then ``self._noise_probs`` (autograd live) is written
+        # into those slots.  Do not strip them.
 
         self._suspend_loss_rebuild = True
         self.observable_flips = observable_flips
@@ -443,117 +559,307 @@ class NMOptimizer(TensorNetworkDecoder):
         self._syndrome_shapes: tuple[tuple[int, ...], ...] = tuple(
             tuple(s.shape) for s in self._syndrome_arrays)
 
-        if self._execute_mode == "opt_einsum":
-            shapes = tuple(t.shape for t in tensors)
-            self._oe_expr = oe.contract_expression(
-                self._eq_batch,
-                *shapes,
-                optimize=self.path_batch
-                if self.path_batch not in (None, "auto") else "auto",
-            )
-            self._path_steps = None
-        else:
-            self._oe_expr = None
-            # Flatten the path into ``[(eq, idxs, sorted_desc), ...]``;
-            # ``sorted_desc`` is precomputed for the unrolled-mode pop
-            # walk, and labels are remapped to ASCII because
-            # opt_einsum falls back to unicode past 52 indices and
-            # torch.einsum rejects those.
-            shapes = tuple(t.shape for t in tensors)
-            _, info = oe.contract_path(
-                self._eq_batch,
-                *shapes,
-                shapes=True,
-                optimize=self.path_batch
-                if self.path_batch not in (None, "auto") else "auto",
-            )
-            self._path_steps = [(remap_eq_to_ascii(step[2]), tuple(step[0]),
-                                 tuple(sorted(step[0], reverse=True)))
-                                for step in info.contraction_list]
+        self._oe_expr = None
+        self._path_steps = None
+        self._build_reduced_tn_state()
 
         self._compile_predict()
         self._compile_loss()
 
     def _compile_predict(self) -> None:
         """Build ``self._predict_fn`` for the configured execute mode."""
-        builders = {
-            "opt_einsum": self._build_predict_opt_einsum,
-            "unrolled": self._build_predict_unrolled,
-            "codegen": self._build_predict_codegen,
-        }
-        self._predict_fn = builders[self._execute_mode]()
+        self._predict_fn = self._build_predict_reduced()
         self._compiled_predict = self._maybe_torch_compile(self._predict_fn,
                                                            kind="predict")
 
-    def _build_predict_opt_einsum(self):
-        """opt_einsum-backed predict: reuse the cached contract expression."""
-        static_arrays = self._static_arrays
-        syndrome_positions = tuple(p for p, _t in self._syndrome_positions)
-        noise_pos_ordered = self._noise_pos_ordered
-        n = len(self._tensors_ref)
-        oe_expr = self._oe_expr
+    def _build_reduced_tn_state(self) -> None:
+        """Build reduced TN topology plus differentiable noise recipes."""
+        from collections import defaultdict
+
+        error_inds_set = set(self.error_inds)
+        survivor_lookup: dict[tuple[tuple[str, ...], frozenset[str]], int] = {}
+        doomed_lookup: dict[tuple[tuple[str, ...], frozenset[str]], int] = {}
+        for opt_pos, tensor in enumerate(self._tensors_ref):
+            key = (tuple(tensor.inds), frozenset(tensor.tags))
+            if any(ind in error_inds_set for ind in tensor.inds):
+                doomed_lookup[key] = opt_pos
+            else:
+                survivor_lookup[key] = opt_pos
+
+        reduced_tn = self.full_tn.copy()
+        recipes: list[dict[str, Any]] = []
+        merged_id_to_recipe_idx: dict[int, int] = {}
+
+        for error_idx, error_ind in enumerate(self.error_inds):
+            doomed = [t for t in reduced_tn.tensors if error_ind in t.inds]
+            code_tensors = [t for t in doomed if "NOISE" not in t.tags]
+            code_opt_positions = [
+                doomed_lookup[(tuple(t.inds), frozenset(t.tags))]
+                for t in code_tensors
+            ]
+
+            ids_before = {id(t) for t in reduced_tn.tensors}
+            reduced_tn.contract_ind(error_ind)
+            new_tensors = [
+                t for t in reduced_tn.tensors if id(t) not in ids_before
+            ]
+            assert len(new_tensors) == 1
+            new_tensor = new_tensors[0]
+            merged_id_to_recipe_idx[id(new_tensor)] = error_idx
+
+            out_inds = tuple(new_tensor.inds)
+            mapping = {error_ind: "e"}
+            next_code = ord("a")
+            for ind in out_inds:
+                while chr(next_code) == "e":
+                    next_code += 1
+                mapping[ind] = chr(next_code)
+                next_code += 1
+
+            noise_str = mapping[error_ind]
+            code_strs = [
+                "".join(mapping[ind] for ind in t.inds) for t in code_tensors
+            ]
+            out_str = "".join(mapping[ind] for ind in out_inds)
+            ordered_code_positions: list[int] = [None] * len(  # type: ignore
+                code_tensors)
+            for tensor, opt_pos in zip(code_tensors, code_opt_positions):
+                non_error_ind = next(
+                    ind for ind in tensor.inds if ind != error_ind)
+                ordered_code_positions[out_inds.index(non_error_ind)] = opt_pos
+
+            recipes.append({
+                "eq": ",".join([noise_str] + code_strs) + "->" + out_str,
+                "ordered_code_positions": ordered_code_positions,
+                "k": len(code_tensors),
+            })
+
+        reduced_eq = reduced_tn.get_equation(
+            output_inds=("batch_index", self.logical_obs_inds[0]))
+        reduced_shapes = tuple(t.shape for t in reduced_tn.tensors)
+
+        reduced_static: dict[int, torch.Tensor] = {}
+        reduced_syndrome: list[tuple[int, int]] = []
+        reduced_recipes: dict[int, int] = {}
+        syn_pos_to_idx = {
+            p: i for i, (p, _) in enumerate(self._syndrome_positions)
+        }
+        for pos, tensor in enumerate(reduced_tn.tensors):
+            if id(tensor) in merged_id_to_recipe_idx:
+                reduced_recipes[pos] = merged_id_to_recipe_idx[id(tensor)]
+                continue
+
+            key = (tuple(tensor.inds), frozenset(tensor.tags))
+            opt_pos = survivor_lookup[key]
+            if opt_pos in self._static_arrays:
+                reduced_static[pos] = self._static_arrays[opt_pos]
+            elif opt_pos in syn_pos_to_idx:
+                reduced_syndrome.append((pos, syn_pos_to_idx[opt_pos]))
+            else:
+                raise AssertionError(
+                    f"Reduced tensor at position {pos} maps to full tensor "
+                    f"position {opt_pos}, which is not static or syndrome.")
+
+        reduced_path = self.path_batch
+        if reduced_path in (None, "auto"):
+            reduced_path, reduced_info = _select_default_torch_path(
+                reduced_eq, reduced_shapes)
+        else:
+            _path, reduced_info = oe.contract_path(reduced_eq,
+                                                   *reduced_shapes,
+                                                   shapes=True,
+                                                   optimize=reduced_path)
+        reduced_path_steps = [(remap_eq_to_ascii(step[2]), tuple(step[0]),
+                               tuple(sorted(step[0], reverse=True)))
+                              for step in reduced_info.contraction_list]
+        reduced_oe_expr = None
+        if self._execute_mode == "opt_einsum":
+            reduced_oe_expr = oe.contract_expression(reduced_eq,
+                                                     *reduced_shapes,
+                                                     optimize=reduced_path)
+
+        recipe_to_reduced_pos = {ri: pos for pos, ri in reduced_recipes.items()}
+        reduced_recipe_positions = tuple(
+            recipe_to_reduced_pos[ri] for ri in range(len(recipes)))
+        groups_by_k: dict[int, list[int]] = defaultdict(list)
+        for recipe_idx, recipe in enumerate(recipes):
+            groups_by_k[recipe["k"]].append(recipe_idx)
+
+        batched_groups: list[dict[str, Any]] = []
+        device = self.torch_device
+        for k, error_indices in sorted(groups_by_k.items()):
+            out_letters: list[str] = []
+            next_code = ord("a")
+            for _ in range(k):
+                while chr(next_code) in ("e", "n"):
+                    next_code += 1
+                out_letters.append(chr(next_code))
+                next_code += 1
+
+            if k == 0:
+                eq = "ne->ne"
+            else:
+                check_strs = [f"n{letter}e" for letter in out_letters]
+                eq = "ne," + ",".join(check_strs) + "->n" + "".join(out_letters)
+
+            stacked_checks = []
+            for axis in range(k):
+                axis_arrays = [
+                    self._static_arrays[recipes[ri]["ordered_code_positions"]
+                                        [axis]] for ri in error_indices
+                ]
+                stacked_checks.append(torch.stack(axis_arrays, dim=0))
+
+            batched_groups.append({
+                "k":
+                    k,
+                "eq":
+                    eq,
+                "error_indices_t":
+                    torch.tensor(error_indices, dtype=torch.long,
+                                 device=device),
+                "stacked_checks":
+                    stacked_checks,
+                "recipe_indices":
+                    error_indices,
+            })
+
+        self._batched_einsum_groups = batched_groups
+        self._reduced_eq = reduced_eq
+        self._reduced_static_positions = reduced_static
+        self._reduced_syndrome_positions = reduced_syndrome
+        self._reduced_recipe_positions = reduced_recipe_positions
+        self._reduced_oe_expr = reduced_oe_expr
+        self._reduced_path_steps = reduced_path_steps
+        self._reduced_n_tensors = len(reduced_tn.tensors)
+        self._reduced_n_recipes = len(recipes)
+        self._reduced_info = reduced_info
+        self.path_batch = reduced_path
+        self.slicing_batch = tuple()
+
+    def _build_predict_reduced(self):
+        """Predict using the reduced TN plus batched noise precontraction."""
+        builders = {
+            "opt_einsum": self._build_predict_reduced_opt_einsum,
+            "unrolled": self._build_predict_reduced_unrolled,
+            "codegen": self._build_predict_reduced_codegen,
+            "cutensornet": self._build_predict_reduced_cutensornet,
+        }
+        return builders[self._execute_mode]()
+
+    def _precontract_reduced_noise(
+            self, noise_probs: torch.Tensor) -> tuple[torch.Tensor, ...]:
+        noise_stacked = torch.stack((1.0 - noise_probs, noise_probs), dim=-1)
+        recipe_arrays = [None] * self._reduced_n_recipes
+        for group in self._batched_einsum_groups:
+            noise_batch = noise_stacked[group["error_indices_t"]]
+            if group["k"] == 0:
+                out_batch = noise_batch
+            else:
+                out_batch = torch.einsum(group["eq"], noise_batch,
+                                         *group["stacked_checks"])
+            for i, recipe_idx in enumerate(group["recipe_indices"]):
+                recipe_arrays[recipe_idx] = out_batch[i]
+        return tuple(recipe_arrays)  # type: ignore[return-value]
+
+    def _build_predict_reduced_opt_einsum(self):
+        static_positions = self._reduced_static_positions
+        syndrome_positions = self._reduced_syndrome_positions
+        oe_expr = self._reduced_oe_expr
+        recipe_positions = self._reduced_recipe_positions
+        n = self._reduced_n_tensors
 
         def _predict(noise_probs: torch.Tensor,
                      syndrome_tuple: tuple[torch.Tensor, ...]) -> torch.Tensor:
-            noise_stacked = torch.stack((1.0 - noise_probs, noise_probs),
-                                        dim=-1)
             arrays: list[torch.Tensor] = [None] * n  # type: ignore
-            for pos, arr in static_arrays.items():
+            for pos, arr in static_positions.items():
                 arrays[pos] = arr
-            for pos, arr in zip(syndrome_positions, syndrome_tuple):
+            for pos, syndrome_idx in syndrome_positions:
+                arrays[pos] = syndrome_tuple[syndrome_idx]
+            for pos, arr in zip(recipe_positions,
+                                self._precontract_reduced_noise(noise_probs)):
                 arrays[pos] = arr
-            for k, pos in enumerate(noise_pos_ordered):
-                arrays[pos] = noise_stacked[k]
-            # Torch backend is auto-selected from the tensor type;
-            # avoids the per-call ``backend=`` dispatch.
             out = oe_expr(*arrays)
-            return out / out.sum(dim=1, keepdim=True)
+            return _normalize_prediction(out)
 
         return _predict
 
-    def _build_predict_unrolled(self):
-        """Unrolled predict: walk the cached pairwise contraction path."""
-        static_arrays = self._static_arrays
-        syndrome_positions = tuple(p for p, _t in self._syndrome_positions)
-        noise_pos_ordered = self._noise_pos_ordered
-        n = len(self._tensors_ref)
-        path_steps = self._path_steps
+    def _build_predict_reduced_cutensornet(self):
+        static_positions = self._reduced_static_positions
+        syndrome_positions = self._reduced_syndrome_positions
+        recipe_positions = self._reduced_recipe_positions
+        eq = self._reduced_eq
+        n = self._reduced_n_tensors
+        contractor = self.contractor_config.contractor
+        device_id = self.contractor_config.device_id
 
         def _predict(noise_probs: torch.Tensor,
                      syndrome_tuple: tuple[torch.Tensor, ...]) -> torch.Tensor:
-            noise_stacked = torch.stack((1.0 - noise_probs, noise_probs),
-                                        dim=-1)
+            arrays: list[torch.Tensor] = [None] * n  # type: ignore
+            for pos, arr in static_positions.items():
+                arrays[pos] = arr
+            for pos, syndrome_idx in syndrome_positions:
+                arrays[pos] = syndrome_tuple[syndrome_idx]
+            for pos, arr in zip(recipe_positions,
+                                self._precontract_reduced_noise(noise_probs)):
+                arrays[pos] = arr
+            out = contractor(eq,
+                             arrays,
+                             optimize=self.path_batch,
+                             slicing=self.slicing_batch,
+                             device_id=device_id)
+            return _normalize_prediction(out)
+
+        return _predict
+
+    def _build_predict_reduced_unrolled(self):
+        static_positions = self._reduced_static_positions
+        syndrome_positions = self._reduced_syndrome_positions
+        recipe_positions = self._reduced_recipe_positions
+        path_steps = self._reduced_path_steps
+        n = self._reduced_n_tensors
+
+        def _predict(noise_probs: torch.Tensor,
+                     syndrome_tuple: tuple[torch.Tensor, ...]) -> torch.Tensor:
             ops: list[torch.Tensor] = [None] * n  # type: ignore
-            for pos, arr in static_arrays.items():
+            for pos, arr in static_positions.items():
                 ops[pos] = arr
-            for pos, arr in zip(syndrome_positions, syndrome_tuple):
+            for pos, syndrome_idx in syndrome_positions:
+                ops[pos] = syndrome_tuple[syndrome_idx]
+            for pos, arr in zip(recipe_positions,
+                                self._precontract_reduced_noise(noise_probs)):
                 ops[pos] = arr
-            for k, pos in enumerate(noise_pos_ordered):
-                ops[pos] = noise_stacked[k]
             for eq_str, idxs, sorted_idxs in path_steps:
                 picked = [ops[i] for i in idxs]
                 for i in sorted_idxs:
                     ops.pop(i)
                 ops.append(torch.einsum(eq_str, *picked))
             out = ops[0]
-            return out / out.sum(dim=1, keepdim=True)
+            return _normalize_prediction(out)
 
         return _predict
 
-    def _build_predict_codegen(self):
-        """Codegen predict: partial-eval'd flat Python with named locals."""
-        static_arrays = self._static_arrays
-        syndrome_positions = tuple(p for p, _t in self._syndrome_positions)
-        noise_pos_ordered = self._noise_pos_ordered
-        n = len(self._tensors_ref)
-        syndrome_tensors = list(self._syndrome_arrays)
-        codegen_fn = self._build_codegen_predict(
-            n,
+    def _build_predict_reduced_codegen(self):
+        static_arrays = dict(self._reduced_static_positions)
+        dynamic_positions = [
+            (pos, f"_R{idx}")
+            for idx, pos in enumerate(self._reduced_recipe_positions)
+        ]
+        if self._dynamic_syndromes:
+            dynamic_positions.extend(
+                (pos, f"_S{sidx}")
+                for pos, sidx in self._reduced_syndrome_positions)
+        else:
+            for pos, sidx in self._reduced_syndrome_positions:
+                static_arrays[pos] = self._syndrome_arrays[sidx]
+
+        codegen_fn = self._build_codegen_reduced_predict(
+            self._reduced_n_tensors,
             static_arrays,
-            syndrome_positions,
-            noise_pos_ordered,
-            self._path_steps,
-            syndrome_tensors,
+            tuple(dynamic_positions),
+            self._reduced_path_steps,
+            n_recipes=self._reduced_n_recipes,
+            n_syndromes=len(self._reduced_syndrome_positions),
             dynamic_syndromes=self._dynamic_syndromes,
         )
         self._codegen_fn = codegen_fn
@@ -561,17 +867,21 @@ class NMOptimizer(TensorNetworkDecoder):
         self._codegen_n_runtime = getattr(codegen_fn, "_n_runtime", 0)
 
         if self._dynamic_syndromes:
-            return codegen_fn
 
-        # Static mode bakes syndromes into the closure and returns a
-        # 1-arg callable; wrap to match the public 2-arg signature.
-        def _predict_static(
-            noise_probs: torch.Tensor,
-            syndrome_tuple: tuple[torch.Tensor, ...] = ()
-        ) -> torch.Tensor:
-            return codegen_fn(noise_probs)
+            def _predict(
+                    noise_probs: torch.Tensor,
+                    syndrome_tuple: tuple[torch.Tensor, ...]) -> torch.Tensor:
+                return codegen_fn(self._precontract_reduced_noise(noise_probs),
+                                  syndrome_tuple)
+        else:
 
-        return _predict_static
+            def _predict(
+                noise_probs: torch.Tensor,
+                syndrome_tuple: tuple[torch.Tensor, ...] = ()
+            ) -> torch.Tensor:
+                return codegen_fn(self._precontract_reduced_noise(noise_probs))
+
+        return _predict
 
     def _maybe_torch_compile(self, fn, *, kind: str):
         """Wrap ``fn`` with :func:`torch.compile` if requested.
@@ -579,7 +889,7 @@ class NMOptimizer(TensorNetworkDecoder):
         On any compile failure, warn and fall back to eager.  ``kind``
         is included in the warning to disambiguate predict vs loss.
         """
-        if not self._use_torch_compile:
+        if not self._use_torch_compile or self._execute_mode == "cutensornet":
             return fn
         try:
             kwargs = self._torch_compile_kwargs()
@@ -599,10 +909,7 @@ class NMOptimizer(TensorNetworkDecoder):
         Two variants are produced: one accepting logits (sigmoid applied
         inside) and one accepting probabilities directly.
         """
-        if self._execute_mode == "codegen":
-            logits_fn, probs_fn = self._build_loss_codegen()
-        else:
-            logits_fn, probs_fn = self._build_loss_wrapped()
+        logits_fn, probs_fn = self._build_loss_wrapped()
 
         self._loss_from_logits_fn = logits_fn
         self._loss_from_probs_fn = probs_fn
@@ -610,57 +917,6 @@ class NMOptimizer(TensorNetworkDecoder):
                                                                     kind="loss")
         self._compiled_loss_from_probs = self._maybe_torch_compile(probs_fn,
                                                                    kind="loss")
-
-    def _build_loss_codegen(self):
-        """Codegen loss: fuse the CE reduction into the contraction graph."""
-        static_arrays = self._static_arrays
-        syndrome_positions = tuple(p for p, _t in self._syndrome_positions)
-        noise_pos_ordered = self._noise_pos_ordered
-        n = len(self._tensors_ref)
-        syndrome_tensors = list(self._syndrome_arrays)
-
-        codegen_logits = self._build_codegen_loss(
-            n,
-            static_arrays,
-            syndrome_positions,
-            noise_pos_ordered,
-            self._path_steps,
-            syndrome_tensors,
-            obs_idx_true=self.obs_idx_true,
-            obs_idx_false=self.obs_idx_false,
-            dynamic_syndromes=self._dynamic_syndromes,
-            from_logits=True,
-        )
-        codegen_probs = self._build_codegen_loss(
-            n,
-            static_arrays,
-            syndrome_positions,
-            noise_pos_ordered,
-            self._path_steps,
-            syndrome_tensors,
-            obs_idx_true=self.obs_idx_true,
-            obs_idx_false=self.obs_idx_false,
-            dynamic_syndromes=self._dynamic_syndromes,
-            from_logits=False,
-        )
-
-        if self._dynamic_syndromes:
-            return codegen_logits, codegen_probs
-
-        # Static codegen bakes syndromes into the closure and returns a
-        # 1-arg callable; wrap to match the public 2-arg signature.
-        def _loss_from_logits_static(
-            logits: torch.Tensor, syndrome_tuple: tuple[torch.Tensor, ...] = ()
-        ) -> torch.Tensor:
-            return codegen_logits(logits)
-
-        def _loss_from_probs_static(
-            noise_probs: torch.Tensor,
-            syndrome_tuple: tuple[torch.Tensor, ...] = ()
-        ) -> torch.Tensor:
-            return codegen_probs(noise_probs)
-
-        return _loss_from_logits_static, _loss_from_probs_static
 
     def _build_loss_wrapped(self):
         """opt_einsum / unrolled loss: wrap CE around ``self._predict_fn``."""
@@ -708,59 +964,28 @@ class NMOptimizer(TensorNetworkDecoder):
         return kwargs
 
     @staticmethod
-    def _codegen_partial_eval(n, static_arrays, syndrome_positions,
-                              noise_pos_ordered, path_steps, syndrome_tensors,
-                              dynamic_syndromes: bool):
-        """Partial-evaluate ``path_steps``; return the codegen building blocks.
-
-        Steps whose inputs are all static are evaluated eagerly under
-        ``torch.no_grad`` and become closure constants; the remaining
-        steps become source lines.
-
-        Returns ``(runtime_lines, closure_vars, used_static, final_state,
-        n_folded)``: emitted source lines, name -> tensor map for the
-        function namespace, the subset of names actually referenced, the
-        single surviving state slot ``(name, is_dynamic, value_or_None)``,
-        and the count of folded steps.
-        """
+    def _codegen_partial_eval_dynamic(n, static_arrays, dynamic_positions,
+                                      path_steps):
         static_positions = sorted(static_arrays.keys())
-        noise_pos_set = set(noise_pos_ordered)
-        syn_pos_set = set(syndrome_positions)
-        # O(1) reverse lookup tables (avoid repeated list.index() inside
-        # the per-step loop below — was O(N^2) for large path lengths).
-        noise_pos_to_k = {pos: k for k, pos in enumerate(noise_pos_ordered)}
-        syn_pos_to_sidx = {
-            pos: sidx for sidx, pos in enumerate(syndrome_positions)
-        }
+        dynamic_names = {pos: name for pos, name in dynamic_positions}
         static_pos_to_sidx = {
             pos: sidx for sidx, pos in enumerate(static_positions)
         }
 
-        # state[pos] = (var_name, is_dynamic, concrete_value_or_None)
         state: list[tuple[str, bool, torch.Tensor | None]] = []
         for pos in range(n):
-            if pos in noise_pos_set:
-                k = noise_pos_to_k[pos]
-                state.append((f"_n{k}", True, None))
-            elif pos in syn_pos_set:
-                sidx = syn_pos_to_sidx[pos]
-                if dynamic_syndromes:
-                    state.append((f"_S{sidx}", True, None))
-                else:
-                    state.append((f"_S{sidx}", False, syndrome_tensors[sidx]))
+            if pos in dynamic_names:
+                state.append((dynamic_names[pos], True, None))
             else:
                 sidx = static_pos_to_sidx[pos]
                 state.append(
                     (f"_C{sidx}", False, static_arrays[static_positions[sidx]]))
 
-        closure_vars: dict[str, torch.Tensor] = {}
+        closure_vars = {
+            f"_C{sidx}": static_arrays[pos]
+            for sidx, pos in enumerate(static_positions)
+        }
         runtime_lines: list[str] = []
-        # Names that the emitted source actually references and that must
-        # be available in the closure namespace.  We track this
-        # structurally as we go instead of re-parsing the source string,
-        # which is both faster and immune to lexical false positives /
-        # negatives (e.g. if an einsum equation contained an underscore).
-        used_static: set[str] = set()
         n_folded = 0
 
         for step_idx, step in enumerate(path_steps):
@@ -781,214 +1006,57 @@ class NMOptimizer(TensorNetworkDecoder):
                 n_folded += 1
             else:
                 arg_names = [p[0] for p in picked]
-                # Track which closure names this line will read.  ``_n*``
-                # names are header-built locals (from noise_probs) so
-                # they are *not* closure values; everything else is.
-                for name in arg_names:
-                    if name.startswith(("_C", "_P")):
-                        used_static.add(name)
-                    elif name.startswith("_S") and not dynamic_syndromes:
-                        used_static.add(name)
                 runtime_lines.append(
                     f"    {out_name} = torch.einsum({eq_str!r}, "
                     f"{', '.join(arg_names)})")
                 state.append((out_name, True, None))
 
         assert len(state) == 1
-        for name in used_static:
-            if name in closure_vars:
-                continue
-            if name.startswith("_C"):
-                sidx = int(name[2:])
-                closure_vars[name] = static_arrays[static_positions[sidx]]
-            elif name.startswith("_S"):  # static-syndromes mode only
-                sidx = int(name[2:])
-                closure_vars[name] = syndrome_tensors[sidx]
-
-        return runtime_lines, closure_vars, used_static, state[0], n_folded
-
-    @staticmethod
-    def _emit_noise_header(noise_pos_ordered,
-                           transform: str = "identity") -> list[str]:
-        """Emit source lines materialising ``_n0 .. _n{K-1}``.
-
-        ``transform="identity"`` treats the input as probabilities;
-        ``"sigmoid"`` treats it as logits and applies ``torch.sigmoid``
-        first.  A single ``(K, 2)`` stack is built and then sliced, which
-        keeps the autograd graph compact.
-        """
-        lines: list[str] = []
-        if transform == "sigmoid":
-            lines.append("    _p = torch.sigmoid(noise_probs)")
-        else:
-            lines.append("    _p = noise_probs")
-        lines.append("    _q = 1.0 - _p")
-        # One stack of shape (K, 2) instead of K stacks of shape (2,).
-        # ``dim=1`` makes ``_NS[k]`` a contiguous view of length 2.
-        lines.append("    _NS = torch.stack((_q, _p), dim=1)")
-        for k in range(len(noise_pos_ordered)):
-            lines.append(f"    _n{k} = _NS[{k}]")
-        return lines
-
-    @staticmethod
-    def _emit_syndrome_header(syndrome_positions,
-                              dynamic_syndromes: bool) -> list[str]:
-        """Emit source lines binding ``_S0 .. _S{S-1}`` to runtime
-        ``syndromes`` arguments; empty in static mode."""
-        if not dynamic_syndromes:
-            return []
-        return [
-            f"    _S{sidx} = syndromes[{sidx}]"
-            for sidx in range(len(syndrome_positions))
-        ]
+        return runtime_lines, closure_vars, state[0], n_folded
 
     @classmethod
-    def _build_codegen_predict(cls,
-                               n,
-                               static_arrays,
-                               syndrome_positions,
-                               noise_pos_ordered,
-                               path_steps,
-                               syndrome_tensors,
-                               dynamic_syndromes: bool = True):
-        """Generate ``_predict(noise_probs[, syndromes]) -> (shots, 2)``.
-
-        With ``dynamic_syndromes=False`` syndromes are folded into the
-        closure, which maximises partial evaluation but forces a rebuild
-        on every :meth:`update_dataset` call.  With ``True`` (default)
-        syndromes stay runtime arguments and dataset swaps are free.
-        """
-        runtime_lines, closure_vars, _used, final_state, n_folded = (
-            cls._codegen_partial_eval(
+    def _build_codegen_reduced_predict(cls,
+                                       n,
+                                       static_arrays,
+                                       dynamic_positions,
+                                       path_steps,
+                                       n_recipes: int,
+                                       n_syndromes: int,
+                                       dynamic_syndromes: bool = True):
+        runtime_lines, closure_vars, final_state, n_folded = (
+            cls._codegen_partial_eval_dynamic(
                 n,
                 static_arrays,
-                syndrome_positions,
-                noise_pos_ordered,
+                dynamic_positions,
                 path_steps,
-                syndrome_tensors,
-                dynamic_syndromes,
             ))
         final_name, is_final_dyn, final_value = final_state
         fully_static = not is_final_dyn
 
         body: list[str] = []
         if dynamic_syndromes:
-            body.append("def _predict(noise_probs, syndromes):")
+            body.append("def _predict(recipe_arrays, syndromes):")
         else:
-            body.append("def _predict(noise_probs):")
+            body.append("def _predict(recipe_arrays):")
 
         if fully_static:
-            # Degenerate case: contraction didn't depend on noise (or any
-            # other dynamic input).  Pre-normalise the constant and
-            # return it unchanged on every call.
             with torch.no_grad():
-                normed = final_value / final_value.sum(dim=1, keepdim=True)
+                normed = _normalize_prediction(final_value)
             closure_vars["_FINAL"] = normed
             body.append("    return _FINAL")
             runtime_lines = []
         else:
-            body.extend(
-                cls._emit_noise_header(noise_pos_ordered, transform="identity"))
-            body.extend(
-                cls._emit_syndrome_header(syndrome_positions,
-                                          dynamic_syndromes))
+            for k in range(n_recipes):
+                body.append(f"    _R{k} = recipe_arrays[{k}]")
+            if dynamic_syndromes:
+                for sidx in range(n_syndromes):
+                    body.append(f"    _S{sidx} = syndromes[{sidx}]")
             body.extend(runtime_lines)
             body.append(f"    _out = {final_name}")
-            body.append("    return _out / _out.sum(dim=1, keepdim=True)")
+            body.append("    return _normalize_prediction(_out)")
 
         return cls._compile_codegen_source(body, closure_vars, n_folded,
                                            len(runtime_lines), "predict")
-
-    @classmethod
-    def _build_codegen_loss(cls,
-                            n,
-                            static_arrays,
-                            syndrome_positions,
-                            noise_pos_ordered,
-                            path_steps,
-                            syndrome_tensors,
-                            obs_idx_true: torch.Tensor,
-                            obs_idx_false: torch.Tensor,
-                            dynamic_syndromes: bool = True,
-                            from_logits: bool = True):
-        """Generate a fused ``(input, syndromes) -> scalar`` loss callable.
-
-        Pipes the contraction output straight into the cross-entropy
-        reduction so the whole pipeline (optional sigmoid, contraction,
-        normalisation, cross-entropy) is a single autograd graph.
-
-        Args:
-            from_logits: If ``True`` (default), apply ``torch.sigmoid`` to
-                the input; if ``False``, the input must already be in
-                ``[0, 1]``.
-        """
-        runtime_lines, closure_vars, _used, final_state, n_folded = (
-            cls._codegen_partial_eval(
-                n,
-                static_arrays,
-                syndrome_positions,
-                noise_pos_ordered,
-                path_steps,
-                syndrome_tensors,
-                dynamic_syndromes,
-            ))
-        final_name, is_final_dyn, final_value = final_state
-        fully_static = not is_final_dyn
-
-        closure_vars["_OBS_T"] = obs_idx_true
-        closure_vars["_OBS_F"] = obs_idx_false
-
-        body: list[str] = []
-        if dynamic_syndromes:
-            body.append("def _loss(noise_probs, syndromes):")
-        else:
-            body.append("def _loss(noise_probs):")
-
-        if fully_static:
-            # The contraction is a constant; the loss it produces is
-            # also a constant.  We still need the gradient wrt
-            # noise_probs to be zero (a real-valued zero tensor with a
-            # graph edge), so emit a no-op multiplication by
-            # noise_probs.sum() * 0 to keep autograd happy.
-            with torch.no_grad():
-                normed = final_value / final_value.sum(dim=1, keepdim=True)
-                # Compute the loss eagerly; we can't fold it because
-                # autograd needs a path back to noise_probs.
-                ce = (
-                    -torch.log(_clamp_log_input(normed[obs_idx_true, 1])).sum()
-                    -
-                    torch.log(_clamp_log_input(normed[obs_idx_false, 0])).sum())
-            closure_vars["_LOSS"] = ce
-            body.append("    return _LOSS + 0.0 * noise_probs.sum()")
-            runtime_lines = []
-        else:
-            transform = "sigmoid" if from_logits else "identity"
-            body.extend(cls._emit_noise_header(noise_pos_ordered, transform))
-            body.extend(
-                cls._emit_syndrome_header(syndrome_positions,
-                                          dynamic_syndromes))
-            body.extend(runtime_lines)
-            # Fused cross-entropy that skips the explicit
-            # ``_preds = _out / _out.sum(dim=1, keepdim=True)`` step.
-            # OBS_T and OBS_F partition the batch (every row is in exactly
-            # one), so:
-            #     -log(p_T[:,1]).sum() - log(p_F[:,0]).sum()
-            #     = log(Z).sum() - log(_out[OBS_T,1]).sum()
-            #                    - log(_out[OBS_F,0]).sum()
-            # where Z = _out[:,0] + _out[:,1].  Saves one (shots, 2)
-            # division + materialisation and the corresponding backward
-            # nodes -- ~2-5% per-step on CPU at d=3/r=3.
-            body.append(f"    _out = {final_name}")
-            body.append("    _z0 = _out[:, 0]")
-            body.append("    _z1 = _out[:, 1]")
-            body.append("    _eps = torch.finfo(_z0.dtype).tiny")
-            body.append(
-                "    return (torch.log((_z0 + _z1).clamp_min(_eps)).sum() "
-                "- torch.log(_z1[_OBS_T].clamp_min(_eps)).sum() "
-                "- torch.log(_z0[_OBS_F].clamp_min(_eps)).sum())")
-
-        return cls._compile_codegen_source(body, closure_vars, n_folded,
-                                           len(runtime_lines), "loss")
 
     @staticmethod
     def _compile_codegen_source(body: list[str],
@@ -996,7 +1064,10 @@ class NMOptimizer(TensorNetworkDecoder):
                                 n_folded: int, n_runtime: int, kind: str):
         """Compile the assembled function source and return the callable."""
         source = "\n".join(body)
-        ns: dict[str, Any] = {"torch": torch}
+        ns: dict[str, Any] = {
+            "torch": torch,
+            "_normalize_prediction": _normalize_prediction,
+        }
         ns.update(closure_vars)
         fn_name = "_loss" if kind == "loss" else "_predict"
         exec(compile(source, f"<nm_compiled_{kind}>", "exec"), ns)
@@ -1067,7 +1138,7 @@ class NMOptimizer(TensorNetworkDecoder):
         should use :meth:`update_dataset` instead.
         """
         # Patch syndrome tensor data in the quimb TN in place; the
-        # cotengra path is invalidated below if any shape changed.
+        # contraction path is invalidated below if any shape changed.
         for i, tag in enumerate(self._syndrome_tags):
             t = self.syndrome_tn.tensors[next(
                 iter(self.syndrome_tn.tag_map[tag]))]
@@ -1100,7 +1171,7 @@ class NMOptimizer(TensorNetworkDecoder):
         # Shape change: cached path / codegen / oe expression / compile
         # guards are all stale.  Drop the path and rebuild from scratch.
         # Shapes unchanged: dynamic codegen and the unrolled /
-        # opt_einsum paths read syndromes per call — refreshing the
+        # opt_einsum paths read syndromes per call - refreshing the
         # cached tuple is enough.  Static codegen baked the old tensors
         # into the closure and still needs a full rebuild.
         shape_changed = new_shapes_tuple != self._syndrome_shapes
@@ -1154,7 +1225,7 @@ class NMOptimizer(TensorNetworkDecoder):
         Always routes through :meth:`TensorNetwork.contraction_info` so
         the resulting path is compatible with :mod:`opt_einsum` and
         manual unrolling -- unlike :meth:`TensorNetworkDecoder.optimize_path`,
-        which defaults to a cuTensorNet-only path.
+        which may return a path not usable by these torch-backed modes.
 
         ``batch_size`` is part of the parent ``TensorNetworkDecoder``
         signature (which rebuilds its TN around a fake batch); on the
@@ -1163,14 +1234,10 @@ class NMOptimizer(TensorNetworkDecoder):
         ignored.  Kept for Liskov substitution with the parent.
         """
         del batch_size
-        info = self.full_tn.contraction_info(
-            output_inds=("batch_index", self.logical_obs_inds[0]),
-            optimize=optimize if optimize is not None else "auto",
-        )
-        self.path_batch = info.path
+        self.path_batch = optimize if optimize is not None else "auto"
         self.slicing_batch = tuple()
         self._snapshot_arrays_and_eq()
-        return info
+        return self._reduced_info
 
 
 def make_compiled_step(optimizer: NMOptimizer, logits: torch.Tensor,
@@ -1203,3 +1270,184 @@ def make_compiled_step(optimizer: NMOptimizer, logits: torch.Tensor,
         return loss
 
     return _step
+
+
+def make_batch_sliced_step(
+        optimizer: NMOptimizer,
+        logits: torch.Tensor,
+        torch_optimizer: torch.optim.Optimizer,
+        progress_callback: Callable[[int, int, float], None] | None = None):
+    """Build a step callable that streams a larger batch through slices.
+
+    The optimizer should be constructed with the desired slice-sized
+    dataset.  The returned callable accepts a larger raw syndrome batch,
+    repeatedly updates the optimizer with fixed-shape slices, accumulates
+    gradients, and performs one ``torch_optimizer.step()``.  This keeps
+    path finding and contraction execution tied to the smaller batch
+    shape while preserving the summed cross-entropy objective over all
+    supplied shots.  The optimizer's live dataset is left at the final
+    slice after the step.
+
+    Args:
+        optimizer: An :class:`NMOptimizer` constructed with the desired
+            batch-slice size.
+        logits: Trainable 1-D tensor of length ``len(optimizer.error_inds)``
+            with ``requires_grad=True``.
+        torch_optimizer: A ``torch.optim`` instance owning ``logits``.
+        progress_callback: Optional callback invoked as
+            ``callback(done_chunks, total_chunks, elapsed_seconds)``.
+
+    Returns:
+        A callable ``step(syndrome_data, observable_flips)`` that runs one
+        optimizer step and returns the detached summed loss.
+    """
+    if not optimizer._dynamic_syndromes:
+        raise ValueError("batch-sliced steps require dynamic_syndromes=True.")
+
+    batch_slice_size = int(optimizer._batch_size)
+    if batch_slice_size <= 0:
+        raise ValueError("optimizer batch size must be positive.")
+
+    def _step(syndrome_data: npt.NDArray[Any],
+              observable_flips: npt.NDArray[Any]) -> torch.Tensor:
+        syndrome_arr = np.asarray(syndrome_data)
+        flips_arr = np.asarray(observable_flips, dtype=bool).reshape(-1)
+        if syndrome_arr.ndim != 2:
+            raise ValueError("syndrome_data must have shape (shots, checks).")
+        if syndrome_arr.shape[0] != flips_arr.shape[0]:
+            raise ValueError(
+                "syndrome_data and observable_flips length mismatch.")
+        if syndrome_arr.shape[0] == 0:
+            raise ValueError("syndrome_data must contain at least one shot.")
+
+        torch_optimizer.zero_grad(set_to_none=True)
+        total_loss = torch.zeros((), dtype=logits.dtype, device=logits.device)
+        num_chunks = ((syndrome_arr.shape[0] + batch_slice_size - 1) //
+                      batch_slice_size)
+        wall_start = None
+        if progress_callback is not None:
+            import time
+            wall_start = time.perf_counter()
+
+        for chunk_idx, start in enumerate(range(0, syndrome_arr.shape[0],
+                                                batch_slice_size),
+                                          start=1):
+            stop = min(start + batch_slice_size, syndrome_arr.shape[0])
+            valid = stop - start
+            chunk_syn = syndrome_arr[start:stop]
+            chunk_flips = flips_arr[start:stop]
+            if valid < batch_slice_size:
+                padded_syn = np.zeros((batch_slice_size, syndrome_arr.shape[1]),
+                                      dtype=syndrome_arr.dtype)
+                padded_flips = np.zeros((batch_slice_size,), dtype=bool)
+                padded_syn[:valid] = chunk_syn
+                padded_flips[:valid] = chunk_flips
+                chunk_syn = padded_syn
+                update_flips = padded_flips
+            else:
+                update_flips = chunk_flips
+
+            optimizer.update_dataset(chunk_syn,
+                                     update_flips,
+                                     enforce_shape=True)
+            preds = optimizer._compiled_predict(
+                torch.sigmoid(logits), optimizer.current_syndrome_args())
+            preds = preds[:valid]
+            flips_t = torch.as_tensor(chunk_flips,
+                                      dtype=torch.bool,
+                                      device=preds.device)
+            loss = (-torch.log(_clamp_log_input(preds[flips_t, 1])).sum() -
+                    torch.log(_clamp_log_input(preds[~flips_t, 0])).sum())
+            loss.backward()
+            total_loss = total_loss + loss.detach()
+
+            if progress_callback is not None:
+                elapsed = (0.0 if wall_start is None else time.perf_counter() -
+                           wall_start)
+                progress_callback(chunk_idx, num_chunks, elapsed)
+
+        torch_optimizer.step()
+        return total_loss
+
+    return _step
+
+
+def make_training_step(H: npt.NDArray[Any],
+                       logical_obs: npt.NDArray[Any],
+                       noise_model: list[float],
+                       syndrome_data: npt.NDArray[Any],
+                       observable_flips: npt.NDArray[Any],
+                       logits: torch.Tensor,
+                       torch_optimizer: torch.optim.Optimizer,
+                       batch_slicing: bool | Literal["auto"] = "auto",
+                       batch_slice_size: int | None = None,
+                       progress_callback: Callable[[int, int, float], None] |
+                       None = None,
+                       **optimizer_kwargs: Any) -> tuple[NMOptimizer, Any]:
+    """Construct an :class:`NMOptimizer` and matching training step.
+
+    Args:
+        H: Parity check matrix.
+        logical_obs: Logical observable matrix.
+        noise_model: Initial per-error probabilities.
+        syndrome_data: Full syndrome batch, shape ``(shots, checks)``.
+        observable_flips: Observable flips for the full batch.
+        logits: Trainable logit tensor owned by ``torch_optimizer``.
+        torch_optimizer: Optimizer for ``logits``.
+        batch_slicing: ``False`` uses the full batch. ``"auto"`` or
+            ``True`` constructs a slice-sized optimizer and streams the
+            full batch through it with gradient accumulation.
+        batch_slice_size: Optional explicit slice size. Defaults to ``1``
+            when batch slicing is enabled.
+        progress_callback: Optional callback forwarded to the batch-sliced
+            step as ``callback(done_chunks, total_chunks, elapsed_seconds)``.
+        **optimizer_kwargs: Forwarded to :class:`NMOptimizer`.
+
+    Returns:
+        ``(optimizer, step_fn)``.  For full-batch training ``step_fn`` is
+        no-arg.  For batch-sliced training it accepts optional
+        ``(syndrome_data, observable_flips)`` and defaults to the original
+        full batch supplied here.
+    """
+    if batch_slicing not in (False, True, "auto"):
+        raise ValueError("batch_slicing must be False, True, or 'auto'.")
+
+    use_batch_slicing = batch_slicing in (True, "auto")
+    syndrome_arr = np.asarray(syndrome_data)
+    flips_arr = np.asarray(observable_flips, dtype=bool).reshape(-1)
+    if syndrome_arr.ndim != 2:
+        raise ValueError("syndrome_data must have shape (shots, checks).")
+    if syndrome_arr.shape[0] != flips_arr.shape[0]:
+        raise ValueError("syndrome_data and observable_flips length mismatch.")
+    if syndrome_arr.shape[0] == 0:
+        raise ValueError("syndrome_data must contain at least one shot.")
+
+    if not use_batch_slicing:
+        optimizer = NMOptimizer(H, logical_obs, noise_model, syndrome_arr,
+                                flips_arr, **optimizer_kwargs)
+        return optimizer, make_compiled_step(optimizer, logits, torch_optimizer)
+
+    slice_size = 1 if batch_slice_size is None else int(batch_slice_size)
+    if slice_size <= 0:
+        raise ValueError("batch_slice_size must be a positive integer.")
+    slice_size = min(slice_size, syndrome_arr.shape[0])
+    optimizer = NMOptimizer(H, logical_obs, noise_model,
+                            syndrome_arr[:slice_size], flips_arr[:slice_size],
+                            **optimizer_kwargs)
+    sliced_step = make_batch_sliced_step(optimizer, logits, torch_optimizer,
+                                         progress_callback)
+
+    def _step(
+            new_syndrome_data: npt.NDArray[Any] | None = None,
+            new_observable_flips: npt.NDArray[Any] | None = None
+    ) -> torch.Tensor:
+        if new_syndrome_data is None:
+            if new_observable_flips is not None:
+                raise ValueError(
+                    "observable_flips provided without syndrome_data.")
+            return sliced_step(syndrome_arr, flips_arr)
+        if new_observable_flips is None:
+            raise ValueError("observable_flips is required with syndrome_data.")
+        return sliced_step(new_syndrome_data, new_observable_flips)
+
+    return optimizer, _step
