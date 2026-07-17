@@ -85,8 +85,9 @@ QPU-kernel source (software, UDP, no hardware)
    ./run_realtime_decoding.sh --source qpu-kernel --decoder nv-qldpc-decoder --gpu 0 --install-prefix <prefix>
 
 The lowered kernel runs the surface-code memory experiment and streams each
-shot's syndromes to the server over UDP; the server decodes on the host-call
-path and returns corrections.
+shot's syndromes to the server over the ``udp`` wire; every decoder is served
+on ``host`` dispatch (a server CPU thread calls the decoder — nv-qldpc still
+decodes on its GPU) and the corrections come back before readout.
 
 FPGA source (real FPGA over RoCE)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -97,11 +98,27 @@ FPGA source (real FPGA over RoCE)
        --setup-network --device <nic> --bridge-ip <host-ip> --fpga-ip <fpga-ip> \
        --install-prefix <prefix>
 
+   ./run_realtime_decoding.sh --source fpga --decoder multi_error_lut \
+       --setup-network --device <nic> --bridge-ip <host-ip> --fpga-ip <fpga-ip> \
+       --install-prefix <prefix>
+
+   ./run_realtime_decoding.sh --source fpga --decoder nv-qldpc-decoder --gpu 0 \
+       --setup-network --device <nic> --bridge-ip <host-ip> --fpga-ip <fpga-ip> \
+       --install-prefix <prefix>
+
 ``--setup-network`` configures the ConnectX interface (needs ``sudo``);
 ``--spacing`` (default 10 µs) paces the playback so it does not overrun the
-FPGA's fixed 64-slot RDMA RX ring. ``pymatching`` and ``multi_error_lut``
-decode on the CPU (``cpu_roce``); ``nv-qldpc-decoder --gpu 0`` decodes on the
-GPU device-graph scheduler (``gpu_roce``).
+FPGA's fixed 64-slot RDMA RX ring.
+
+The server has two independent knobs, both derived automatically (override
+with ``--wire`` / ``--dispatch``): the **wire** is the bridge-provider library
+that carries syndromes into the server, and the **dispatch** is the engine
+consuming each decoder's ring. ``pymatching`` and ``multi_error_lut`` ride the
+``cpu_roce`` wire on ``host`` dispatch (a server CPU thread calls the
+decoder); ``nv-qldpc-decoder --gpu 0`` defaults to the ``hololink`` wire on
+``device_graph`` dispatch (the GPU device-call scheduler fires the Relay BP
+decode graph on-device) and can be forced onto the host path with
+``--dispatch host``.
 
 Both sources apply real pass/fail criteria. The qpu-kernel source uses the
 same checks as the in-tree surface-code tests — no decoder errors, a residual
@@ -131,8 +148,8 @@ Decoders
      - NIC
      - none
    * - ``nv-qldpc-decoder``
-     - GPU (host-call path)
-     - NIC + GPU (device path)
+     - GPU (host dispatch)
+     - NIC + GPU (device_graph dispatch)
      - plugin + ``--gpu``
 
 The ``nv-qldpc-decoder`` profile needs the prebuilt plugin — auto-found in the

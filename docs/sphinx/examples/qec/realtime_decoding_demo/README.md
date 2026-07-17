@@ -84,7 +84,7 @@ testing lives in the unittests `hsb_fpga_decoding_server_test.sh`.)
 |---|---|---|---|
 | `pymatching` | CPU, no hardware | NIC | none |
 | `multi_error_lut` | CPU, no hardware | NIC | none |
-| `nv-qldpc-decoder` | GPU (host-call path) | NIC + GPU (device path) | plugin + `--gpu` |
+| `nv-qldpc-decoder` | GPU (host dispatch) | NIC + GPU (device_graph dispatch) | plugin + `--gpu` |
 
 - **`pymatching`** — CPU matching decoder; nothing extra.
 - **`multi_error_lut`** — CPU lookup-table decoder; nothing extra.

@@ -1005,8 +1005,16 @@ start_server() {
     _log "Starting decoding server (decoder=$DECODER, transport=$TRANSPORT," \
          "remote-qp=$remote_qp)"
 
-    local server_ld_path
-    server_ld_path="${CUDA_QUANTUM_DIR}/realtime/build/lib:${CUDAQX_DIR}/build/lib"
+    # The server dlopens the realtime bridge providers and needs the
+    # cudaq-realtime that matches .cudaq_version. Prefer an explicit
+    # CUDAQ_REALTIME_LIB_DIR, then the conventional realtime build dirs.
+    local server_ld_path rt_lib=""
+    for d in "${CUDAQ_REALTIME_LIB_DIR:-}" \
+             "${CUDA_QUANTUM_DIR}/realtime/build-bridge/lib" \
+             "${CUDA_QUANTUM_DIR}/realtime/build/lib"; do
+        [[ -n "$d" && -f "$d/libcudaq-realtime.so" ]] && { rt_lib="$d"; break; }
+    done
+    server_ld_path="${rt_lib}:${CUDAQX_DIR}/build/lib"
 
     local ready_pattern
     if [[ "$TRANSPORT" == "gpu_roce" ]]; then
@@ -1037,7 +1045,7 @@ start_server() {
         LD_LIBRARY_PATH="${server_ld_path}:${LD_LIBRARY_PATH:-}" \
         "$SERVER_BIN" \
             --config="$CONFIG_FILE" \
-            --transport=cpu_roce \
+            --transport=cpu-roce \
             --qp_config=hsb_fpga \
             --device="$BRIDGE_DEVICE" \
             --peer-ip="$peer_ip" \
@@ -1071,11 +1079,13 @@ start_server() {
         return 1
     }
 
-    # The transceiver publishes the provider's endpoint description verbatim
-    # (one `key=value ...` line); pull the RDMA rendezvous tokens the
-    # playback tool needs out of it.
+    # The RDMA rendezvous tokens (qp=/rkey=/buffer_addr=) are published on ONE
+    # line: the device-graph transceiver prints a dedicated
+    # QEC_DECODING_SERVER_ENDPOINT line, while the host/cpu-roce path carries
+    # the provider's endpoint info on the READY line itself. Scrape whichever
+    # arrives.
     local ep_line
-    ep_line=$(wait_for_pattern "$server_log" "QEC_DECODING_SERVER_ENDPOINT" 5 "$SERVER_PID") || return 1
+    ep_line=$(wait_for_pattern "$server_log" "buffer_addr=" 5 "$SERVER_PID") || return 1
 
     SERVER_QP=$(sed -n 's/.*[[:space:]]qp=\([0-9a-fA-FxX]*\).*/\1/p' <<<"$ep_line")
     SERVER_RKEY=$(sed -n 's/.*[[:space:]]rkey=\([0-9]*\).*/\1/p' <<<"$ep_line")

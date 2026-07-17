@@ -13,17 +13,20 @@
 # decoding through the SAME prebuilt server:
 #
 #   --source qpu-kernel   The lowered QEC kernel supplies syndromes itself over
-#                         UDP, in software (no NIC).  The server decodes on the
-#                         CPU host-call path (pymatching/multi_error_lut) or the
-#                         GPU (nv-qldpc).  This is the portable, hardware-free mode.
+#                         the udp wire, in software (no NIC).  Every decoder is
+#                         served on host dispatch (a CPU thread calls the
+#                         decoder; nv-qldpc still decodes on its GPU).  This is
+#                         the portable, hardware-free mode.
 #
 #   --source fpga         The delivered hololink_fpga_syndrome_playback tool
 #                         streams pre-generated syndromes over RoCE from a REAL
 #                         FPGA into the server's RDMA ring (needs a ConnectX NIC
-#                         cabled to the FPGA).  pymatching/multi_error_lut decode
-#                         on the CPU (cpu_roce); nv-qldpc on the GPU device-graph
-#                         scheduler (gpu_roce).  There is NO emulator here -- emulator
-#                         testing lives in the unittests hsb_fpga_decoding_server_test.sh.
+#                         cabled to the FPGA).  CPU decoders ride the cpu_roce
+#                         wire on host dispatch; nv-qldpc defaults to the
+#                         hololink wire on device_graph dispatch (the GPU
+#                         device-call scheduler).  There is NO emulator here --
+#                         emulator testing lives in the unittests
+#                         hsb_fpga_decoding_server_test.sh.
 #
 # DELIVERABLES (consumed prebuilt from --install-prefix, never built here):
 #   decoding_server, hololink_fpga_syndrome_playback, the QEC + realtime libs,
@@ -82,9 +85,14 @@ NUM_SHOTS=""                 # explicit override
 # FPGA's fixed 64-slot RX ring.  The qpu-kernel path needs none.
 SPACING="10"
 
-# FPGA transport is derived from the decoder unless set: CPU decoders ->
-# cpu_roce (CPU host-call), nv-qldpc -> gpu_roce (GPU device-graph scheduler).
-TRANSPORT=""
+# The decoding server's two knobs (both default from --source/--decoder):
+#   WIRE     which bridge-provider library carries syndromes into the server
+#            (loaded at runtime as libcudaq-realtime-bridge-<name>.so)
+#   DISPATCH which engine consumes each decoder's ring: host (a CPU dispatcher
+#            thread) or device_graph (the GPU device-call scheduler)
+# The combination gate below rejects pairings this example has not wired up.
+WIRE=""                      # udp | cpu_roce | hololink
+DISPATCH=""                  # host | device_graph
 GPU_ID=0
 
 # Network (fpga source only)
@@ -94,10 +102,10 @@ BRIDGE_IP="10.0.0.1"
 FPGA_IP="192.168.0.2"
 MTU=4096
 PAGE_SIZE=384
-# RX ring depth for both transports, bounded by the HSB QP's 64 receive WQEs
+# RX ring depth for both FPGA paths, bounded by the HSB QP's 64 receive WQEs
 # (the FPGA writes frame rid to slot rid % NUM_SLOTS; more slots than WQEs drops
-# frames under load). The server clamps cpu_roce --num-slots to this; the
-# gpu_roce ring is capped to it in run_fpga.
+# frames under load). The server clamps the cpu_roce wire's --num-slots to
+# this; the device_graph ring is capped to it in run_fpga.
 NUM_SLOTS=64
 FRAME_SIZE=64
 # Server lifetime failsafe (seconds). decoding_server's --timeout is a TOTAL
@@ -137,6 +145,13 @@ Common:
   --seed N                Simulator seed; -1 = unseeded (default 42)
   --num-shots N           Shots (default: 85 fpga / 200 qpu-kernel)
   --gpu N                 GPU id for nv-qldpc (default 0)
+  --wire W                Bridge provider carrying syndromes into the server:
+                          udp | cpu_roce | hololink (default: derived --
+                          qpu-kernel -> udp; fpga -> cpu_roce for host
+                          dispatch, hololink for device_graph)
+  --dispatch D            Per-decoder ring consumer: host | device_graph
+                          (default: derived -- fpga + nv-qldpc-decoder ->
+                          device_graph, everything else -> host)
 
 Per-artifact overrides:
   --server PATH  --playback PATH  --generator PATH  --kernel PATH
@@ -149,7 +164,6 @@ FPGA-only:
   --mtu N                 MTU (default 4096)
   --spacing US            Inter-shot spacing us (default 10; keeps the RX ring
                           from overrunning)
-  --transport T           cpu_roce | gpu_roce (default: derived from decoder)
   --no-verify             Skip playback correction verification
 
   --help, -h              Show this help
@@ -181,7 +195,8 @@ while [[ $# -gt 0 ]]; do
         --fpga-ip)          FPGA_IP="$2"; shift ;;
         --mtu)              MTU="$2"; shift ;;
         --spacing)          SPACING="$2"; shift ;;
-        --transport)        TRANSPORT="$2"; shift ;;
+        --wire)             WIRE="$2"; shift ;;
+        --dispatch)         DISPATCH="$2"; shift ;;
         --no-verify)        VERIFY=false ;;
         --help|-h)          print_usage; exit 0 ;;
         *) echo "ERROR: unknown option: $1" >&2; print_usage >&2; exit 1 ;;
@@ -205,6 +220,69 @@ case "$DECODER" in
     *) echo "ERROR: --decoder must be pymatching, nv-qldpc-decoder, or" >&2
        echo "       multi_error_lut (got '$DECODER')" >&2; exit 1 ;;
 esac
+
+# ---------------------------------------------------------------------------
+# Derive the wire + dispatch defaults, then gate on the combinations this
+# example has wired up and verified:
+#   qpu-kernel : udp wire,      host dispatch          (any decoder)
+#   fpga       : cpu_roce wire, host dispatch          (any decoder)
+#   fpga       : hololink wire, device_graph dispatch  (nv-qldpc-decoder)
+# Everything else is a real configuration of the decoding server that this
+# example does not (yet) exercise, so it is rejected with the reason.
+# ---------------------------------------------------------------------------
+if [[ -z "$DISPATCH" ]]; then
+    if [[ "$SOURCE" == "fpga" && "$DECODER" == "nv-qldpc-decoder" ]]; then
+        DISPATCH="device_graph"
+    else
+        DISPATCH="host"
+    fi
+fi
+case "$DISPATCH" in host|device_graph) ;;
+    *) echo "ERROR: --dispatch must be host or device_graph (got '$DISPATCH')" >&2; exit 1 ;;
+esac
+
+[[ "$WIRE" == "cpu-roce" ]] && WIRE="cpu_roce"   # accept both spellings
+if [[ -z "$WIRE" ]]; then
+    if [[ "$SOURCE" == "qpu-kernel" ]]; then WIRE="udp"
+    elif [[ "$DISPATCH" == "device_graph" ]]; then WIRE="hololink"
+    else WIRE="cpu_roce"; fi
+fi
+case "$WIRE" in udp|cpu_roce|hololink) ;;
+    *) echo "ERROR: --wire must be udp, cpu_roce, or hololink (got '$WIRE')" >&2; exit 1 ;;
+esac
+
+if [[ "$SOURCE" == "qpu-kernel" ]]; then
+    if [[ "$WIRE" != "udp" ]]; then
+        echo "ERROR: the qpu-kernel source is not yet wired to the '$WIRE' wire in" >&2
+        echo "       this example (only udp for now)." >&2; exit 1
+    fi
+    if [[ "$DISPATCH" != "host" ]]; then
+        echo "ERROR: device_graph dispatch over the udp wire (pinned shared rings)" >&2
+        echo "       is not exposed by this example." >&2; exit 1
+    fi
+else
+    if [[ "$DISPATCH" == "device_graph" ]]; then
+        if [[ "$DECODER" != "nv-qldpc-decoder" ]]; then
+            echo "ERROR: device_graph dispatch serves only nv-qldpc-decoder" >&2
+            echo "       (got '$DECODER'); CPU decoders use --dispatch host." >&2; exit 1
+        fi
+        if [[ "$WIRE" != "hololink" ]]; then
+            echo "ERROR: device_graph dispatch on the FPGA requires the hololink" >&2
+            echo "       wire (got '$WIRE')." >&2; exit 1
+        fi
+    else
+        if [[ "$WIRE" != "cpu_roce" ]]; then
+            echo "ERROR: host dispatch on the FPGA requires the cpu_roce wire" >&2
+            echo "       (got '$WIRE')." >&2; exit 1
+        fi
+    fi
+fi
+
+# The provider library soname is hyphenated (libcudaq-realtime-bridge-cpu-roce.so)
+# while the conventional token is cpu_roce; the server's resolver composes the
+# soname literally from the token, so pass the hyphenated form on the wire.
+WIRE_TOKEN="$WIRE"
+[[ "$WIRE_TOKEN" == "cpu_roce" ]] && WIRE_TOKEN="cpu-roce"
 
 _log()  { echo "==> $*"; }
 _info() { echo "    $*"; }
@@ -306,29 +384,29 @@ generate_data() {
         _err "config generation failed; see $GEN_DIR/gen_config.log"; tail -5 "$GEN_DIR/gen_config.log" >&2; exit 1; }
 
     # nv-qldpc runs on a GPU: pin the decoder to --gpu via cuda_device_id (the
-    # host worker / device-graph scheduler both honor it). The fpga/gpu_roce
-    # device path additionally switches the transport. The generator omits these
-    # optional fields, so inject them under the decoder's `type:` line.
-    # pymatching/multi_error_lut need neither.
+    # host worker / device-graph scheduler both honor it). device_graph
+    # dispatch additionally needs the per-decoder `dispatch:` key. The
+    # generator omits these optional fields, so inject them under the
+    # decoder's `type:` line. pymatching/multi_error_lut need neither.
     if [[ "$DECODER" == "nv-qldpc-decoder" ]]; then
-        local inject_tr=""
-        if [[ "$SOURCE" == "fpga" && "$TRANSPORT" == "gpu_roce" ]]; then
-            inject_tr="    transport:       gpu_roce"
+        local inject_dispatch=""
+        if [[ "$DISPATCH" == "device_graph" ]]; then
+            inject_dispatch="    dispatch:        device_graph"
         fi
-        awk -v gpu="$GPU_ID" -v tr="$inject_tr" '{ print }
-             /^[[:space:]]*type:/ && !d { if (tr != "") print tr;
+        awk -v gpu="$GPU_ID" -v dp="$inject_dispatch" '{ print }
+             /^[[:space:]]*type:/ && !d { if (dp != "") print dp;
                                           print "    cuda_device_id:  " gpu; d=1 }' \
             "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
         # Verify the injection landed: a YAML formatting change in the
-        # generator would otherwise silently drop --gpu / the transport
-        # override (pinning nv-qldpc to GPU 0, or mismatching the server's
-        # transport).
+        # generator would otherwise silently drop --gpu / the dispatch
+        # override (pinning nv-qldpc to GPU 0, or leaving the decoder on host
+        # dispatch).
         if ! grep -qE "^[[:space:]]*cuda_device_id:[[:space:]]*${GPU_ID}\$" "$CONFIG_FILE"; then
             _err "config injection failed: cuda_device_id not found in $CONFIG_FILE"; exit 1
         fi
-        if [[ -n "$inject_tr" ]] && \
-           ! grep -qE "^[[:space:]]*transport:[[:space:]]*gpu_roce\$" "$CONFIG_FILE"; then
-            _err "config injection failed: transport not found in $CONFIG_FILE"; exit 1
+        if [[ -n "$inject_dispatch" ]] && \
+           ! grep -qE "^[[:space:]]*dispatch:[[:space:]]*device_graph\$" "$CONFIG_FILE"; then
+            _err "config injection failed: dispatch not found in $CONFIG_FILE"; exit 1
         fi
     fi
 
@@ -443,6 +521,17 @@ verify_qpu_kernel_output() {
         _info "server evidence: dispatches=$dispatches (>= $min_dispatches) -- OK"
     fi
 
+    # Per-decoder ring evidence (one ring per decoder in the YAML): decoder 0's
+    # ring must have carried traffic.
+    local ring0
+    ring0=$(sed -n 's/^QEC_DECODING_SERVER_RING decoder=0 dispatched=\([0-9][0-9]*\).*/\1/p' \
+        "$server_log" | tail -n1)
+    if ! [[ "$ring0" =~ ^[0-9]+$ ]] || (( ring0 == 0 )); then
+        _err "ring 0 dispatch count '${ring0:-<missing>}' (expected > 0)"; rc=1
+    else
+        _info "ring evidence: decoder 0 dispatched=$ring0 -- OK"
+    fi
+
     return $rc
 }
 
@@ -456,7 +545,7 @@ run_qpu_kernel() {
     _log "Starting decoding_server on UDP"
     # The GPU for nv-qldpc is selected via cuda_device_id in the config (injected
     # in generate_data), not a server flag.
-    "$SERVER_BIN" --config="$CONFIG_FILE" --transport=udp --port=0 \
+    "$SERVER_BIN" --config="$CONFIG_FILE" --transport="$WIRE_TOKEN" --port=0 \
         --timeout="$TIMEOUT" >"$server_log" 2>&1 &
     local spid=$!; PIDS+=("$spid")
     wait_for_pattern "$server_log" "QEC_DECODING_SERVER_READY" 60 "$spid" >/dev/null || {
@@ -493,8 +582,6 @@ run_qpu_kernel() {
 # fpga source: delivered playback streams syndromes over RoCE from a real FPGA
 # (network helpers ported from the unittests hsb_fpga_decoding_server_test.sh)
 # ============================================================================
-extract_hex()     { echo "$1" | grep -oP '0x[0-9a-fA-F]+' | head -1; }
-extract_decimal() { echo "$1" | awk -F': ' '{print $NF}' | tr -d ' '; }
 
 ib_to_netdev() { ibdev2netdev | awk -v d="$1" -v p="${2:-1}" '$1==d && $3==p {print $5}'; }
 netdev_to_ib() { ibdev2netdev | awk -v i="$1" '$5==i {print $1}'; }
@@ -565,18 +652,23 @@ setup_network() {
 
 start_roce_server() {
     local peer_ip="$1" remote_qp="$2" server_log="$3"
-    _log "Starting decoding_server (transport=$TRANSPORT, remote-qp=$remote_qp)"
+    _log "Starting decoding_server (wire=$WIRE, dispatch=$DISPATCH, remote-qp=$remote_qp)"
     local ready
-    if [[ "$TRANSPORT" == "gpu_roce" ]]; then
+    if [[ "$DISPATCH" == "device_graph" ]]; then
+        # All-device_graph config: the standalone device-graph transceiver
+        # brings up the wire itself (defaulting to the hololink provider) from
+        # the QEC_DEVICE_GRAPH_* env; no --transport flag is passed.
         CUDA_MODULE_LOADING=EAGER \
-        HOLOLINK_DEVICE="$BRIDGE_DEVICE" HOLOLINK_PEER_IP="$peer_ip" \
-        HOLOLINK_REMOTE_QP="$((remote_qp))" HOLOLINK_FRAME_SIZE="$PAGE_SIZE" \
-        HOLOLINK_NUM_PAGES="$GPU_ROCE_NUM_PAGES" \
-        "$SERVER_BIN" --config="$CONFIG_FILE" --transport=gpu_roce --timeout="$TIMEOUT" \
+        QEC_DEVICE_GRAPH_DEVICE="$BRIDGE_DEVICE" \
+        QEC_DEVICE_GRAPH_PEER_IP="$peer_ip" \
+        QEC_DEVICE_GRAPH_REMOTE_QP="$((remote_qp))" \
+        QEC_DEVICE_GRAPH_FRAME_SIZE="$PAGE_SIZE" \
+        QEC_DEVICE_GRAPH_NUM_PAGES="$DEVICE_GRAPH_NUM_PAGES" \
+        "$SERVER_BIN" --config="$CONFIG_FILE" --timeout="$TIMEOUT" \
             > >(tee "$server_log") 2>&1 &
-        ready="QEC_DECODING_SERVER_READY gpu_roce"
+        ready="QEC_DECODING_SERVER_READY device_graph"
     else
-        "$SERVER_BIN" --config="$CONFIG_FILE" --transport=cpu_roce --qp_config=hsb_fpga \
+        "$SERVER_BIN" --config="$CONFIG_FILE" --transport="$WIRE_TOKEN" --qp_config=hsb_fpga \
             --device="$BRIDGE_DEVICE" --peer-ip="$peer_ip" --remote-qp="$remote_qp" \
             --num-slots="$NUM_SLOTS" --slot-size="$PAGE_SIZE" --frame-size="$FRAME_SIZE" \
             --timeout="$TIMEOUT" > >(tee "$server_log") 2>&1 &
@@ -586,38 +678,43 @@ start_roce_server() {
     wait_for_pattern "$server_log" "$ready" 60 "$spid" >/dev/null || { cat "$server_log" >&2; return 1; }
     wait_for_pattern "$server_log" "decoder 0 type: ${DECODER}" 5 "$spid" >/dev/null || {
         _err "server did not construct a '${DECODER}' session"; cat "$server_log" >&2; return 1; }
-    local qp rk ad
-    qp=$(wait_for_pattern "$server_log" "QP Number:"   5 "$spid") || return 1
-    rk=$(wait_for_pattern "$server_log" "RKey:"        5 "$spid") || return 1
-    ad=$(wait_for_pattern "$server_log" "Buffer Addr:" 5 "$spid") || return 1
-    SERVER_QP=$(extract_hex "$qp"); SERVER_RKEY=$(extract_decimal "$rk"); SERVER_ADDR=$(extract_hex "$ad")
+    # The RDMA handshake is published as qp=/rkey=/buffer_addr= tokens on ONE
+    # line: the READY line for host dispatch (the bridge provider's endpoint
+    # info rides it), or a dedicated QEC_DECODING_SERVER_ENDPOINT line from
+    # the device-graph transceiver. Scrape whichever arrives.
+    local ep_line
+    ep_line=$(wait_for_pattern "$server_log" "buffer_addr=" 5 "$spid") || return 1
+    SERVER_QP=$(sed -n 's/.*[[:space:]]qp=\([0-9a-fA-FxX]*\).*/\1/p' <<<"$ep_line")
+    SERVER_RKEY=$(sed -n 's/.*[[:space:]]rkey=\([0-9]*\).*/\1/p' <<<"$ep_line")
+    SERVER_ADDR=$(sed -n 's/.*[[:space:]]buffer_addr=\([0-9a-fA-FxX]*\).*/\1/p' <<<"$ep_line")
+    if [[ -z "$SERVER_QP" || -z "$SERVER_RKEY" || -z "$SERVER_ADDR" ]]; then
+        _err "endpoint line missing qp=/rkey=/buffer_addr= tokens: $ep_line"; return 1
+    fi
     _info "server QP=$SERVER_QP RKey=$SERVER_RKEY Buffer=$SERVER_ADDR"
 }
 
 run_fpga() {
     _banner "Realtime decoding: fpga source (RoCE), decoder=$DECODER"
-    # (TRANSPORT was derived from the decoder in main(), before generate_data.)
-    #
     # The HSB QP has a fixed 64-entry receive WQE depth and the receiver
     # pre-posts one WQE per ring slot, so a ring with more slots than WQEs
-    # leaves slots un-posted and drops frames under load. Both transports run
-    # a WQE-depth ring: cpu_roce via NUM_SLOTS (which the server also clamps),
-    # gpu_roce via GPU_ROCE_NUM_PAGES here.
+    # leaves slots un-posted and drops frames under load. Both FPGA paths run
+    # a WQE-depth ring: the cpu_roce wire via NUM_SLOTS (which the server also
+    # clamps), device_graph dispatch via DEVICE_GRAPH_NUM_PAGES here.
     local HSB_WQE_DEPTH=64
-    local GPU_ROCE_NUM_PAGES="$HSB_WQE_DEPTH"
+    local DEVICE_GRAPH_NUM_PAGES="$HSB_WQE_DEPTH"
     if (( NUM_SLOTS > HSB_WQE_DEPTH )); then
         _warn "NUM_SLOTS=$NUM_SLOTS exceeds the HSB WQE depth ($HSB_WQE_DEPTH); clamping"
         NUM_SLOTS="$HSB_WQE_DEPTH"
     fi
-    if [[ "$TRANSPORT" == "gpu_roce" ]]; then
-        # DOCA requires the gpu_roce ring allocation (num_pages * page size) to
-        # be a multiple of the HOST page size. 64 x 384 B = 24 KiB satisfies
-        # 4K/8K-page kernels; on 16K/64K-page hosts (some aarch64 configs) the
-        # server would reject the ring at startup, so fail fast with the
-        # constraint spelled out.
+    if [[ "$DISPATCH" == "device_graph" ]]; then
+        # DOCA requires the device-graph ring allocation (num_pages * page
+        # size) to be a multiple of the HOST page size. 64 x 384 B = 24 KiB
+        # satisfies 4K/8K-page kernels; on 16K/64K-page hosts (some aarch64
+        # configs) the server would reject the ring at startup, so fail fast
+        # with the constraint spelled out.
         local host_page; host_page=$(getconf PAGESIZE)
-        if (( (GPU_ROCE_NUM_PAGES * PAGE_SIZE) % host_page != 0 )); then
-            _err "gpu_roce ring ($GPU_ROCE_NUM_PAGES slots x $PAGE_SIZE B) is not a multiple of this host's page size ($host_page B)."
+        if (( (DEVICE_GRAPH_NUM_PAGES * PAGE_SIZE) % host_page != 0 )); then
+            _err "device_graph ring ($DEVICE_GRAPH_NUM_PAGES slots x $PAGE_SIZE B) is not a multiple of this host's page size ($host_page B)."
             _err "The HSB frame stride must be a multiple of $(( host_page / HSB_WQE_DEPTH )) B on this host; see the unittests"
             _err "hsb_fpga_decoding_server_test.sh (--page-size) for a tunable-geometry run."
             exit 1
@@ -633,10 +730,10 @@ run_fpga() {
     # playback ring modulus MUST equal the server's RX ring depth. Otherwise
     # frames past one ring land outside the server's registered memory region
     # and are silently lost, and the server starves after exactly one ring
-    # (num_slots). The cpu_roce server ring is NUM_SLOTS; the gpu_roce server
-    # ring is GPU_ROCE_NUM_PAGES.
+    # (num_slots). The cpu_roce wire's server ring is NUM_SLOTS; the
+    # device_graph ring is DEVICE_GRAPH_NUM_PAGES.
     local pb_pages="$NUM_SLOTS"
-    if [[ "$TRANSPORT" == "gpu_roce" ]]; then pb_pages="$GPU_ROCE_NUM_PAGES"; fi
+    if [[ "$DISPATCH" == "device_graph" ]]; then pb_pages="$DEVICE_GRAPH_NUM_PAGES"; fi
     local args=( --hololink "$FPGA_IP" --per-round --config "$CONFIG_FILE"
         --syndromes "$SYNDROMES_FILE" --qp-number "$SERVER_QP" --rkey "$SERVER_RKEY"
         --buffer-addr "$SERVER_ADDR" --page-size "$PAGE_SIZE" --num-pages "$pb_pages" )
@@ -654,18 +751,9 @@ run_fpga() {
 # ============================================================================
 main() {
     _banner "Realtime Decoding Demo"
-    _info "source=$SOURCE  decoder=$DECODER"
+    _info "source=$SOURCE  decoder=$DECODER  wire=$WIRE  dispatch=$DISPATCH"
 
     resolve_paths
-    # Derive the FPGA transport before generating the config: nv-qldpc runs on
-    # the gpu_roce device-graph path, and generate_data injects that transport
-    # (+ cuda_device_id) into the config. CPU decoders use cpu_roce.
-    if [[ "$SOURCE" == "fpga" && -z "$TRANSPORT" ]]; then
-        case "$DECODER" in
-            nv-qldpc-decoder) TRANSPORT="gpu_roce" ;;
-            *)                TRANSPORT="cpu_roce" ;;
-        esac
-    fi
     if [[ "$SOURCE" == "fpga" ]] && $DO_SETUP_NETWORK; then setup_network; fi
     generate_data
 
