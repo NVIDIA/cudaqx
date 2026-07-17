@@ -15,7 +15,7 @@ or a lowered QPU kernel — both decoding through the **same prebuilt server**.
     writes the decoder config and, for the FPGA source, the syndrome file.
   - `surface_code_realtime_decoding-cqr` — the **lowered kernel**
     (`-frealtime-lowering`): the live syndrome source that streams to the server
-    over UDP.
+    over UDP or, with `--wire cpu_roce`, over real RDMA.
 
 ## Build (once)
 
@@ -43,7 +43,7 @@ with `-DCMAKE_CUDA_ARCHITECTURES=90` for Hopper or
 (`$PREFIX/bin`, `$PREFIX/lib`) and the two example binaries from
 `--example-build-dir` (default `./build`).
 
-### QPU-kernel source (software, UDP, no NIC)
+### QPU-kernel source (software; udp by default, no NIC)
 
 ```bash
 ./run_realtime_decoding.sh --source qpu-kernel --decoder pymatching        --install-prefix <prefix>
@@ -63,6 +63,31 @@ wrong produces far more), the kernel's in-process dispatch count must be 0
 (proof the decode stayed in the external server), and the server must have
 dispatched at least `num_shots * (num_rounds + 3)` RPCs.
 
+### QPU-kernel source over real RDMA (`--wire cpu_roce`)
+
+The same kernel can carry its syndromes over the `cpu_roce` wire instead: its
+channel RDMA-writes each request straight into the server's ring. This needs
+two RoCE-capable ports (kernel side = *channel*, server side = *daemon*) that
+can reach each other — e.g. loopback-cabled ConnectX ports, or SoftRoCE
+(`rdma_rxe`) devices. The topology comes from the same env vars as the
+in-tree cpu_roce tests; `--setup-network` assigns the IPs and waits for the
+RoCE v2 GIDs:
+
+```bash
+export CUDAQ_CPU_ROCE_TEST_CHANNEL_DEVICE=<kernel-side ibdev>   # e.g. mlx5_0
+export CUDAQ_CPU_ROCE_TEST_DAEMON_DEVICE=<server-side ibdev>    # e.g. mlx5_1
+# IPs default to 10.0.0.1 (channel) / 10.0.0.2 (daemon); override with
+# CUDAQ_CPU_ROCE_TEST_CHANNEL_IP / CUDAQ_CPU_ROCE_TEST_DAEMON_IP.
+
+./run_realtime_decoding.sh --source qpu-kernel --decoder pymatching        --wire cpu_roce --setup-network --install-prefix <prefix>
+./run_realtime_decoding.sh --source qpu-kernel --decoder multi_error_lut   --wire cpu_roce --setup-network --install-prefix <prefix>
+./run_realtime_decoding.sh --source qpu-kernel --decoder nv-qldpc-decoder --gpu 0 --wire cpu_roce --setup-network --install-prefix <prefix>
+```
+
+The server's READY `port=` is then the TCP rendezvous port (the RDMA wire
+itself is negotiated via the QP/rkey exchange), and the same PASS/FAIL
+criteria apply unchanged.
+
 ### FPGA source (real FPGA; needs a ConnectX NIC)
 
 ```bash
@@ -80,10 +105,10 @@ testing lives in the unittests `hsb_fpga_decoding_server_test.sh`.)
 
 ## Decoders
 
-| decoder | qpu-kernel (UDP) | fpga (real FPGA) | extra requirement |
+| decoder | qpu-kernel (udp / cpu_roce wire) | fpga (real FPGA) | extra requirement |
 |---|---|---|---|
-| `pymatching` | CPU, no hardware | NIC | none |
-| `multi_error_lut` | CPU, no hardware | NIC | none |
+| `pymatching` | CPU (udp: no hardware) | NIC | none |
+| `multi_error_lut` | CPU (udp: no hardware) | NIC | none |
 | `nv-qldpc-decoder` | GPU (host dispatch) | NIC + GPU (device_graph dispatch) | plugin + `--gpu` |
 
 - **`pymatching`** — CPU matching decoder; nothing extra.

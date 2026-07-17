@@ -13,7 +13,9 @@ syndrome sources, both decoding through the **same prebuilt server**:
 
 - ``--source qpu-kernel`` — a lowered QEC kernel supplies syndromes itself over
   **UDP**, in software. No NIC, no FPGA. This is the portable, hardware-free
-  path and is what CI exercises.
+  path and is what CI exercises. With ``--wire cpu_roce`` the same kernel
+  carries its syndromes over **real RDMA** between two RoCE-capable ports
+  instead.
 - ``--source fpga`` — the delivered ``hololink_fpga_syndrome_playback`` tool
   streams pre-generated syndromes over **RoCE from a real FPGA** into the
   server's RDMA ring. Requires a ConnectX NIC cabled to the FPGA. There is no
@@ -89,6 +91,32 @@ shot's syndromes to the server over the ``udp`` wire; every decoder is served
 on ``host`` dispatch (a server CPU thread calls the decoder — nv-qldpc still
 decodes on its GPU) and the corrections come back before readout.
 
+QPU-kernel source over real RDMA (``--wire cpu_roce``)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The same lowered kernel can carry its syndromes over the ``cpu_roce`` wire
+instead: its channel RDMA-writes each request straight into the server's ring.
+This needs two RoCE-capable ports that can reach each other (kernel side =
+*channel*, server side = *daemon*) — e.g. loopback-cabled ConnectX ports, or
+SoftRoCE (``rdma_rxe``) devices. The topology comes from the same environment
+variables as the in-tree cpu_roce tests; ``--setup-network`` assigns the IPs
+and waits for the RoCE v2 GIDs:
+
+.. code-block:: bash
+
+   export CUDAQ_CPU_ROCE_TEST_CHANNEL_DEVICE=<kernel-side ibdev>   # e.g. mlx5_0
+   export CUDAQ_CPU_ROCE_TEST_DAEMON_DEVICE=<server-side ibdev>    # e.g. mlx5_1
+   # IPs default to 10.0.0.1 (channel) / 10.0.0.2 (daemon); override with
+   # CUDAQ_CPU_ROCE_TEST_CHANNEL_IP / CUDAQ_CPU_ROCE_TEST_DAEMON_IP.
+
+   ./run_realtime_decoding.sh --source qpu-kernel --decoder pymatching            --wire cpu_roce --setup-network --install-prefix <prefix>
+   ./run_realtime_decoding.sh --source qpu-kernel --decoder multi_error_lut       --wire cpu_roce --setup-network --install-prefix <prefix>
+   ./run_realtime_decoding.sh --source qpu-kernel --decoder nv-qldpc-decoder --gpu 0 --wire cpu_roce --setup-network --install-prefix <prefix>
+
+The server's READY ``port=`` is then the TCP rendezvous port (the RDMA wire
+itself is negotiated via the QP/rkey exchange); dispatch stays ``host``, and
+the same pass/fail criteria apply unchanged.
+
 FPGA source (real FPGA over RoCE)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -136,15 +164,15 @@ Decoders
    :header-rows: 1
 
    * - decoder
-     - qpu-kernel (UDP)
+     - qpu-kernel (udp / cpu_roce wire)
      - fpga (real FPGA)
      - extra requirement
    * - ``pymatching``
-     - CPU, no hardware
+     - CPU (udp: no hardware)
      - NIC
      - none
    * - ``multi_error_lut``
-     - CPU, no hardware
+     - CPU (udp: no hardware)
      - NIC
      - none
    * - ``nv-qldpc-decoder``

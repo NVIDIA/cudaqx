@@ -13,10 +13,14 @@
 # decoding through the SAME prebuilt server:
 #
 #   --source qpu-kernel   The lowered QEC kernel supplies syndromes itself over
-#                         the udp wire, in software (no NIC).  Every decoder is
-#                         served on host dispatch (a CPU thread calls the
-#                         decoder; nv-qldpc still decodes on its GPU).  This is
-#                         the portable, hardware-free mode.
+#                         the udp wire, in software (no NIC) -- the portable,
+#                         hardware-free mode -- or over the cpu_roce wire
+#                         (--wire cpu_roce: real RDMA between two loopback-
+#                         cabled RoCE ports; topology from the same
+#                         CUDAQ_CPU_ROCE_TEST_* env vars as the in-tree
+#                         cpu_roce tests).  Every decoder is served on host
+#                         dispatch (a CPU thread calls the decoder; nv-qldpc
+#                         still decodes on its GPU).
 #
 #   --source fpga         The delivered hololink_fpga_syndrome_playback tool
 #                         streams pre-generated syndromes over RoCE from a REAL
@@ -33,7 +37,7 @@
 #   and the decoder plugins.
 # EXAMPLE BINARIES (the only things the user compiles; from --example-build-dir):
 #   surface_code_realtime_decoding       generator: writes config + syndromes
-#   surface_code_realtime_decoding-cqr   lowered kernel: the live UDP source
+#   surface_code_realtime_decoding-cqr   lowered kernel: the live syndrome source
 #
 set -euo pipefail
 
@@ -124,7 +128,8 @@ print_usage() {
 Usage: run_realtime_decoding.sh --source {qpu-kernel|fpga} [options]
 
 Sources:
-  --source qpu-kernel     Lowered kernel streams syndromes over UDP (no NIC).
+  --source qpu-kernel     Lowered kernel streams syndromes over udp (no NIC) or,
+                          with --wire cpu_roce, over real RDMA (see below).
   --source fpga           Delivered playback streams from a real FPGA over RoCE.
 
 Common:
@@ -156,12 +161,25 @@ Common:
 Per-artifact overrides:
   --server PATH  --playback PATH  --generator PATH  --kernel PATH
 
+Network:
+  --setup-network         Configure the NIC port(s) first (needs sudo): the
+                          FPGA-facing port for --source fpga, or the cpu_roce
+                          channel + daemon pair for --source qpu-kernel
+                          --wire cpu_roce
+  --mtu N                 MTU (default 4096)
+
+qpu-kernel + --wire cpu_roce only -- RDMA topology, via the same env vars as
+the in-tree cpu_roce tests (kernel side = channel, server side = daemon; two
+RoCE-capable ports, e.g. loopback-cabled):
+  CUDAQ_CPU_ROCE_TEST_CHANNEL_DEVICE   kernel-side IB device      (required)
+  CUDAQ_CPU_ROCE_TEST_CHANNEL_IP       kernel-side RoCE IPv4      (10.0.0.1)
+  CUDAQ_CPU_ROCE_TEST_DAEMON_DEVICE    server-side IB device      (required)
+  CUDAQ_CPU_ROCE_TEST_DAEMON_IP        server-side RoCE IPv4      (10.0.0.2)
+
 FPGA-only:
-  --setup-network         Configure the ConnectX interface first (needs sudo)
   --device DEV            ConnectX IB device (default: auto-detect)
   --bridge-ip ADDR        Server-side NIC IP (default 10.0.0.1)
   --fpga-ip ADDR          FPGA IP (default 192.168.0.2)
-  --mtu N                 MTU (default 4096)
   --spacing US            Inter-shot spacing us (default 10; keeps the RX ring
                           from overrunning)
   --no-verify             Skip playback correction verification
@@ -225,6 +243,7 @@ esac
 # Derive the wire + dispatch defaults, then gate on the combinations this
 # example has wired up and verified:
 #   qpu-kernel : udp wire,      host dispatch          (any decoder)
+#   qpu-kernel : cpu_roce wire, host dispatch          (any decoder)
 #   fpga       : cpu_roce wire, host dispatch          (any decoder)
 #   fpga       : hololink wire, device_graph dispatch  (nv-qldpc-decoder)
 # Everything else is a real configuration of the decoding server that this
@@ -252,13 +271,13 @@ case "$WIRE" in udp|cpu_roce|hololink) ;;
 esac
 
 if [[ "$SOURCE" == "qpu-kernel" ]]; then
-    if [[ "$WIRE" != "udp" ]]; then
-        echo "ERROR: the qpu-kernel source is not yet wired to the '$WIRE' wire in" >&2
-        echo "       this example (only udp for now)." >&2; exit 1
+    if [[ "$WIRE" == "hololink" ]]; then
+        echo "ERROR: the qpu-kernel source is not wired to the hololink wire in" >&2
+        echo "       this example (use --wire udp or --wire cpu_roce)." >&2; exit 1
     fi
     if [[ "$DISPATCH" != "host" ]]; then
-        echo "ERROR: device_graph dispatch over the udp wire (pinned shared rings)" >&2
-        echo "       is not exposed by this example." >&2; exit 1
+        echo "ERROR: device_graph dispatch on the qpu-kernel source (pinned shared" >&2
+        echo "       rings) is not exposed by this example." >&2; exit 1
     fi
 else
     if [[ "$DISPATCH" == "device_graph" ]]; then
@@ -283,6 +302,31 @@ fi
 # soname literally from the token, so pass the hyphenated form on the wire.
 WIRE_TOKEN="$WIRE"
 [[ "$WIRE_TOKEN" == "cpu_roce" ]] && WIRE_TOKEN="cpu-roce"
+
+# ---------------------------------------------------------------------------
+# qpu-kernel over cpu_roce: RDMA topology.  Same four-env-var convention as
+# every in-tree cpu_roce test (CUDA-Q's CpuRoceChannelTester and the QEC
+# two-process test): the lowered kernel (channel) and the server (daemon) each
+# own one RoCE-capable port, cabled to the other.  The kernel binary reads the
+# CHANNEL_* values itself; the DAEMON_* values feed the server's
+# --device/--local-ip and double as the kernel's rendezvous target.
+# ---------------------------------------------------------------------------
+CHANNEL_DEVICE=""; CHANNEL_IP=""; DAEMON_DEVICE=""; DAEMON_IP=""
+if [[ "$SOURCE" == "qpu-kernel" && "$WIRE" == "cpu_roce" ]]; then
+    CHANNEL_DEVICE="${CUDAQ_CPU_ROCE_TEST_CHANNEL_DEVICE:-}"
+    CHANNEL_IP="${CUDAQ_CPU_ROCE_TEST_CHANNEL_IP:-10.0.0.1}"
+    DAEMON_DEVICE="${CUDAQ_CPU_ROCE_TEST_DAEMON_DEVICE:-}"
+    DAEMON_IP="${CUDAQ_CPU_ROCE_TEST_DAEMON_IP:-10.0.0.2}"
+    if [[ -z "$CHANNEL_DEVICE" || -z "$DAEMON_DEVICE" ]]; then
+        echo "ERROR: --wire cpu_roce needs the RDMA topology: set" >&2
+        echo "       CUDAQ_CPU_ROCE_TEST_CHANNEL_DEVICE (kernel-side IB device) and" >&2
+        echo "       CUDAQ_CPU_ROCE_TEST_DAEMON_DEVICE (server-side IB device)." >&2
+        echo "       IPs default to 10.0.0.1 / 10.0.0.2 (override with" >&2
+        echo "       CUDAQ_CPU_ROCE_TEST_CHANNEL_IP / _DAEMON_IP)." >&2
+        echo "       Available IB devices: $(ls /sys/class/infiniband 2>/dev/null | tr '\n' ' ')" >&2
+        exit 1
+    fi
+fi
 
 _log()  { echo "==> $*"; }
 _info() { echo "    $*"; }
@@ -539,28 +583,49 @@ verify_qpu_kernel_output() {
 # qpu-kernel source: lowered kernel drives the server over UDP
 # ============================================================================
 run_qpu_kernel() {
-    _banner "Realtime decoding: qpu-kernel source (UDP), decoder=$DECODER"
+    _banner "Realtime decoding: qpu-kernel source (wire=$WIRE), decoder=$DECODER"
 
     local server_log; server_log="$GEN_DIR/server.log"
-    _log "Starting decoding_server on UDP"
+    _log "Starting decoding_server on the $WIRE wire"
     # The GPU for nv-qldpc is selected via cuda_device_id in the config (injected
     # in generate_data), not a server flag.
-    "$SERVER_BIN" --config="$CONFIG_FILE" --transport="$WIRE_TOKEN" --port=0 \
-        --timeout="$TIMEOUT" >"$server_log" 2>&1 &
+    local server_args=(--config="$CONFIG_FILE" --transport="$WIRE_TOKEN" --port=0
+                       --timeout="$TIMEOUT")
+    if [[ "$WIRE" == "cpu_roce" ]]; then
+        # The RDMA ring geometry (slots x slot-size) is part of the cpu_roce
+        # wire contract -- the lowered kernel's channel writes straight into
+        # the server's rings and hardcodes 8 x 256 -- so pin the server to it
+        # explicitly rather than relying on its defaults.
+        server_args+=(--device="$DAEMON_DEVICE" --local-ip="$DAEMON_IP"
+                      --num-slots=8 --slot-size=256)
+    fi
+    "$SERVER_BIN" "${server_args[@]}" >"$server_log" 2>&1 &
     local spid=$!; PIDS+=("$spid")
     wait_for_pattern "$server_log" "QEC_DECODING_SERVER_READY" 60 "$spid" >/dev/null || {
         cat "$server_log" >&2; return 1; }
-    local port; port=$(grep -oE 'port=[0-9]+' "$server_log" | head -1 | cut -d= -f2)
-    _info "server ready on UDP port $port (pid $spid)"
+    # udp: the UDP data port; cpu_roce: the TCP rendezvous port (the RDMA wire
+    # itself is negotiated via the QP/rkey exchange).
+    local port
+    port=$(grep -m1 "QEC_DECODING_SERVER_READY" "$server_log" \
+           | grep -oE 'port=[0-9]+' | head -1 | cut -d= -f2)
+    _info "server ready on the $WIRE wire, port $port (pid $spid)"
 
     local shots="${NUM_SHOTS:-$QPU_KERNEL_SHOTS}"
     local kernel_log; kernel_log="$GEN_DIR/kernel.log"
     _log "Running lowered kernel: $shots shots"
-    # QEC_DECODING_SERVER_PORT alone routes every decoding device_call over
-    # the udp channel to the external server (the app brings the channel up
-    # itself in its QEC_APP_CQR build).
+    # QEC_DECODING_SERVER_PORT routes every decoding device_call to the
+    # external server (the app brings the channel up itself in its
+    # QEC_APP_CQR build).  For cpu_roce the app additionally reads the
+    # transport selector and the channel-side RDMA topology from the env.
+    local kernel_env=(QEC_DECODING_SERVER_PORT="$port")
+    if [[ "$WIRE" == "cpu_roce" ]]; then
+        kernel_env+=(QEC_DECODING_SERVER_TRANSPORT=cpu_roce
+                     CUDAQ_CPU_ROCE_TEST_CHANNEL_DEVICE="$CHANNEL_DEVICE"
+                     CUDAQ_CPU_ROCE_TEST_CHANNEL_IP="$CHANNEL_IP"
+                     CUDAQ_CPU_ROCE_TEST_DAEMON_IP="$DAEMON_IP")
+    fi
     local rc=0
-    QEC_DECODING_SERVER_PORT="$port" \
+    env "${kernel_env[@]}" \
         "$KERNEL_BIN" --load_dem "$CONFIG_FILE" \
         --distance "$GEN_DISTANCE" --num_rounds "$GEN_ROUNDS" \
         --p_cnot "$GEN_P_CNOT" --seed "$SEED" \
@@ -648,6 +713,31 @@ setup_network() {
     BRIDGE_DEVICE=$(netdev_to_ib "$iface")
     wait_for_roce_v2_gid "$BRIDGE_DEVICE" "$BRIDGE_IP" 15 || true
     seed_fpga_neighbor "$iface" "$FPGA_IP"
+}
+
+# qpu-kernel/cpu_roce network setup: give the channel and daemon ports their
+# RoCE IPv4s and wait for the matching RoCE v2 GIDs (the kernel populates a
+# GID asynchronously after `ip addr add`, and the transceiver's GID lookup
+# loses that race, notably after a cold boot).  Unlike the FPGA path there is
+# no peer to ARP-seed -- the RDMA endpoints cross the TCP rendezvous -- but a
+# stale copy of either IP on another interface would confuse routing, so
+# sweep it off first.
+_setup_roce_port() {
+    local role="$1" ib_dev="$2" ip="$3" iface other
+    iface=$(ib_to_netdev "$ib_dev" 1)
+    [[ -n "$iface" ]] || { _err "no netdev for IB device '$ib_dev' ($role)"; return 1; }
+    for other in $(ls /sys/class/net/ 2>/dev/null); do
+        [[ "$other" != "$iface" ]] && \
+            sudo ip addr del "${ip}/24" dev "$other" 2>/dev/null || true
+    done
+    _info "$role: $ib_dev ($iface) ip=$ip"
+    setup_port "$iface" "$ip" "$MTU"
+    wait_for_roce_v2_gid "$ib_dev" "$ip" 20
+}
+setup_network_cpu_roce() {
+    _log "Setting up the cpu_roce channel + daemon port pair"
+    _setup_roce_port "channel (kernel side)" "$CHANNEL_DEVICE" "$CHANNEL_IP"
+    _setup_roce_port "daemon (server side)"  "$DAEMON_DEVICE"  "$DAEMON_IP"
 }
 
 start_roce_server() {
@@ -754,7 +844,12 @@ main() {
     _info "source=$SOURCE  decoder=$DECODER  wire=$WIRE  dispatch=$DISPATCH"
 
     resolve_paths
-    if [[ "$SOURCE" == "fpga" ]] && $DO_SETUP_NETWORK; then setup_network; fi
+    if $DO_SETUP_NETWORK; then
+        if [[ "$SOURCE" == "fpga" ]]; then setup_network
+        elif [[ "$SOURCE" == "qpu-kernel" && "$WIRE" == "cpu_roce" ]]; then
+            setup_network_cpu_roce
+        fi
+    fi
     generate_data
 
     local rc=0
