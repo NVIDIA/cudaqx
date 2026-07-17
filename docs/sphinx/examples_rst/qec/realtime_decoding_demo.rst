@@ -46,7 +46,7 @@ SDK — using only installed headers and libraries:
 - ``surface_code_realtime_decoding`` — the **generator** (``--target stim``):
   writes the decoder configuration and, for the FPGA source, a syndrome file.
 - ``surface_code_realtime_decoding-cqr`` — the **lowered kernel**
-  (``-frealtime-lowering -DQEC_APP_EXTERNAL_DECODING_SERVER``): the live
+  (``-frealtime-lowering -DQEC_APP_CQR``): the live
   syndrome source that streams to the server over UDP.
 
 

@@ -14,9 +14,9 @@
 #   surface_code_realtime_decoding       generator: --target stim; writes the
 #                                        decoder config + syndrome files.
 #   surface_code_realtime_decoding-cqr   lowered kernel: adds -frealtime-lowering
-#                                        -DQEC_APP_EXTERNAL_DECODING_SERVER; the
-#                                        live QPU kernel that streams syndromes to
-#                                        the delivered decoding_server over UDP.
+#                                        -DQEC_APP_CQR; the live QPU kernel that
+#                                        streams syndromes to the delivered
+#                                        decoding_server over UDP.
 #
 # The decoding_server and the FPGA playback tool are DELIVERABLES (installed,
 # not built here); run_realtime_decoding.sh resolves them from --install-prefix.

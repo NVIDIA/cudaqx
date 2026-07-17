@@ -193,14 +193,22 @@ if [[ "$SOURCE" != "qpu-kernel" && "$SOURCE" != "fpga" ]]; then
     echo "ERROR: --source must be qpu-kernel or fpga (got '$SOURCE')" >&2; exit 1
 fi
 
+# The example source also supports 'sliding_window', but that decoder is not
+# yet supported over the realtime decoding path to the GPU (it needs matching
+# updates to the proprietary cudevice archive), so this script does not accept
+# it.
 case "$DECODER" in
     pymatching|nv-qldpc-decoder|multi_error_lut) ;;
+    sliding_window)
+       echo "ERROR: sliding_window is not yet supported over the realtime" >&2
+       echo "       decoding path to the GPU." >&2; exit 1 ;;
     *) echo "ERROR: --decoder must be pymatching, nv-qldpc-decoder, or" >&2
        echo "       multi_error_lut (got '$DECODER')" >&2; exit 1 ;;
 esac
 
 _log()  { echo "==> $*"; }
 _info() { echo "    $*"; }
+_warn() { echo "WARNING: $*" >&2; }
 _err()  { echo "ERROR: $*" >&2; }
 _banner() { echo; echo "========================================";
             echo "  $*"; echo "========================================"; echo; }
@@ -598,7 +606,7 @@ run_fpga() {
     local HSB_WQE_DEPTH=64
     local GPU_ROCE_NUM_PAGES="$HSB_WQE_DEPTH"
     if (( NUM_SLOTS > HSB_WQE_DEPTH )); then
-        _err "NUM_SLOTS=$NUM_SLOTS exceeds the HSB WQE depth ($HSB_WQE_DEPTH); clamping"
+        _warn "NUM_SLOTS=$NUM_SLOTS exceeds the HSB WQE depth ($HSB_WQE_DEPTH); clamping"
         NUM_SLOTS="$HSB_WQE_DEPTH"
     fi
     if [[ "$TRANSPORT" == "gpu_roce" ]]; then
