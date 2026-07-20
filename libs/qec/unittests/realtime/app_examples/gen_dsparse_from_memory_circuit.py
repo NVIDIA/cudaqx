@@ -23,7 +23,7 @@ Recipe (see surface_code-4-yaml-test.sh header for the full flow):
      cnot_schedZ_flat lines. Save that stdout to a sched.txt.
   3. python gen_dsparse_from_memory_circuit.py D T Z XV sched.txt \
        <bundle>/D_sparse.txt --ising-repo /path/to/ising/code
-  4. Run surface_code-4-yaml --ising_bundle <bundle> ...
+  4. Run surface_code-4-yaml --use-ising --ising-artifacts-dir <bundle> ...
 
 Geometry: cudaqx surface_code orientation XV corresponds to Ising code_rotation
 "XV" (first_bulk X, rotated_type V) under an identity data- and X-ancilla

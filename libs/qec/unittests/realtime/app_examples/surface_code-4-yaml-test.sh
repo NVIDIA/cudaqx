@@ -22,6 +22,38 @@
 #   --onnx-path <file>
 #   --use-ising [--ising-artifacts-dir <dir>]
 # The Ising path is deliberately opt-in and is not exercised by CI.
+#
+# The default Ising preset is d=7, T=7, basis Z, orientation XV, p_spam=0.01.
+# It resolves this prepared directory:
+#   ${XDG_CACHE_HOME:-$HOME/.cache}/cudaqx/ising/fast/d7_t7_z_xv
+#
+# Hugging Face publishes SafeTensors weights, not model.onnx or the decoder
+# matrices needed by this example. After accepting the gated model terms at
+# https://huggingface.co/nvidia/Ising-Decoder-SurfaceCode-1-Fast:
+#
+#   hf download nvidia/Ising-Decoder-SurfaceCode-1-Fast \
+#       --include '*.safetensors' --local-dir <weights>
+#
+# Follow the Ising-Decoding installation instructions at
+# https://github.com/NVIDIA/Ising-Decoding, then export the Z-basis ONNX model
+# from the downloaded SafeTensors file:
+#
+#   PREDECODER_SAFETENSORS_CHECKPOINT=<weights>/<checkpoint>.safetensors \
+#   PREDECODER_INFERENCE_MEAS_BASIS=Z ONNX_WORKFLOW=1 WORKFLOW=inference \
+#   DISTANCE=7 N_ROUNDS=7 bash code/scripts/local_run.sh
+#
+# Prepare the matching decoder matrices and cudaqx measurement mapping:
+#
+#   python code/export/generate_test_data.py --distance 7 --n-rounds 7 \
+#       --basis Z --code-rotation XV --num-samples 1 --output-dir <artifacts>
+#   cp predecoder_memory_d7_T7_Z.onnx <artifacts>/model.onnx
+#   surface_code-4-yaml --save_dem cfg.yml --decoder_type pymatching \
+#       --distance 7 --num_rounds 7 > sched.txt
+#   python gen_dsparse_from_memory_circuit.py 7 7 Z XV sched.txt \
+#       <artifacts>/D_sparse.txt --ising-repo <Ising-Decoding>/code
+#
+# A custom --ising-artifacts-dir may use another supported distance/round count;
+# its metadata must match the command-line geometry and the Z/XV contract.
 
 set -euo pipefail
 
@@ -51,6 +83,7 @@ NUM_SHOTS=${5:-200}
 ONNX_PATH=""
 MODEL_SOURCE=""
 ISING_ARTIFACTS_DIR=""
+ISING_ARTIFACTS_DIR_EXPLICIT=0
 EXTRA_APP_ARGS=()
 
 select_model_source() {
@@ -92,6 +125,7 @@ while [[ $# -gt 0 ]]; do
         exit 1
       fi
       ISING_ARTIFACTS_DIR=$2
+      ISING_ARTIFACTS_DIR_EXPLICIT=1
       shift 2
       ;;
     *)
@@ -113,6 +147,24 @@ if [[ ",$DECODER_TYPE," == *",trt_decoder,"* ]]; then
 elif [[ -n "$MODEL_SOURCE" ]]; then
   echo "Error: '$MODEL_SOURCE' is a TensorRT model source, but decoder_type has no trt_decoder entry"
   exit 1
+fi
+
+PYTHON_BIN=${PYTHON:-python3}
+if [[ "$MODEL_SOURCE" == "ising" ]]; then
+  if [[ -z "$ISING_ARTIFACTS_DIR" && \
+        ("$DISTANCE" != "7" || "$NUM_ROUNDS" != "7") ]]; then
+    echo "Error: the built-in Ising example only supports distance=7, num_rounds=7, basis=Z, orientation=XV, and p_spam=0.01"
+    echo "       To use another compatible export, pass --ising-artifacts-dir <dir>."
+    exit 1
+  fi
+  RESOLVER=$(dirname -- "$0")/resolve_ising_artifacts.py
+  RESOLVE_ARGS=(--distance "$DISTANCE" --num-rounds "$NUM_ROUNDS")
+  if [[ -n "$ISING_ARTIFACTS_DIR" ]]; then
+    RESOLVE_ARGS+=(--artifacts-dir "$ISING_ARTIFACTS_DIR")
+  fi
+  ISING_ARTIFACTS_DIR=$(
+    "$PYTHON_BIN" "$RESOLVER" "${RESOLVE_ARGS[@]}"
+  )
 fi
 
 # The app defaults to one logical patch. The aggregate result sums residual
@@ -187,7 +239,6 @@ REALTIME_LOG=$WORKDIR/realtime.log
 if [[ "$MODEL_SOURCE" == "identity" ]]; then
   ONNX_PATH=$WORKDIR/trt_identity_predecoder.onnx
   SYNDROME_SIZE=$(((DISTANCE * DISTANCE - 1) * NUM_ROUNDS))
-  PYTHON_BIN=${PYTHON:-python3}
   "$PYTHON_BIN" - "$ONNX_PATH" "$SYNDROME_SIZE" <<'PY'
 import sys
 
@@ -260,7 +311,7 @@ if [[ -n "$ONNX_PATH" ]]; then
   GEN_ARGS+=(--onnx-path "$ONNX_PATH")
 elif [[ "$MODEL_SOURCE" == "ising" ]]; then
   GEN_ARGS+=(--use-ising)
-  if [[ -n "$ISING_ARTIFACTS_DIR" ]]; then
+  if [[ "$ISING_ARTIFACTS_DIR_EXPLICIT" -eq 1 ]]; then
     GEN_ARGS+=(--ising-artifacts-dir "$ISING_ARTIFACTS_DIR")
   fi
 fi
@@ -297,7 +348,6 @@ fi
 # The hard-patch experiment must carry distinct decoder priors, not merely
 # inject different runtime noise into three identically configured decoders.
 if [[ -n "${CHECK_HARD_PATCH_MODELS:-}" ]]; then
-  PYTHON_BIN=${PYTHON:-python3}
   "$PYTHON_BIN" - "$CONFIG_FILE" <<'PY'
 import re
 import sys

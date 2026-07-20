@@ -26,6 +26,7 @@
 #include <cstdlib>
 #include <cudaq/algorithms/dem.h>
 #include <fstream>
+#include <limits>
 #include <mutex>
 #include <sstream>
 #include <vector>
@@ -94,6 +95,35 @@ static int g_enqueues_per_shot = 0;
 static int g_syndrome_bits_per_round = 0;
 static int g_data_bits = 0;
 
+static std::string default_ising_artifacts_dir() {
+  if (const char *cache = std::getenv("XDG_CACHE_HOME"); cache && cache[0])
+    return std::string(cache) + "/cudaqx/ising/fast/d7_t7_z_xv";
+  if (const char *home = std::getenv("HOME"); home && home[0])
+    return std::string(home) + "/.cache/cudaqx/ising/fast/d7_t7_z_xv";
+  throw std::runtime_error(
+      "--use-ising could not determine the default artifact directory: set "
+      "XDG_CACHE_HOME or HOME, or pass --ising-artifacts-dir <dir>");
+}
+
+static void require_ising_artifact_files(const std::string &directory) {
+  const std::vector<std::string> required = {"model.onnx",   "H_csr.bin",
+                                             "O_csr.bin",    "priors.bin",
+                                             "metadata.txt", "D_sparse.txt"};
+  std::vector<std::string> missing;
+  for (const auto &name : required) {
+    std::ifstream file(directory + "/" + name, std::ios::binary);
+    if (!file || file.peek() == std::ifstream::traits_type::eof())
+      missing.push_back(name);
+  }
+  if (!missing.empty()) {
+    std::string message = "Ising artifact directory '" + directory +
+                          "' is incomplete; missing or empty:";
+    for (const auto &name : missing)
+      message += " " + name;
+    throw std::runtime_error(message);
+  }
+}
+
 // Uncomment this to manually inject errors.
 // #define MANUALLY_INJECT_ERRORS
 
@@ -130,6 +160,30 @@ read_csr_bin_to_sparse_vec(const std::string &path, std::uint32_t &rows,
   f.read(reinterpret_cast<char *>(&rows), sizeof(rows));
   f.read(reinterpret_cast<char *>(&cols), sizeof(cols));
   f.read(reinterpret_cast<char *>(&nnz), sizeof(nnz));
+  if (!f)
+    throw std::runtime_error("Truncated Ising CSR header: " + path);
+  constexpr auto maxSignedIndex =
+      static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max());
+  if (rows == 0 || cols == 0 || rows > maxSignedIndex ||
+      cols > maxSignedIndex || nnz > maxSignedIndex ||
+      static_cast<std::uint64_t>(nnz) > static_cast<std::uint64_t>(rows) * cols)
+    throw std::runtime_error("Invalid Ising CSR dimensions: " + path);
+
+  const auto payloadStart = f.tellg();
+  f.seekg(0, std::ios::end);
+  const auto fileEnd = f.tellg();
+  const std::uint64_t expectedBytes =
+      3 * sizeof(std::uint32_t) +
+      (static_cast<std::uint64_t>(rows) + 1 + nnz) * sizeof(std::int32_t);
+  if (fileEnd == std::streampos(-1) ||
+      static_cast<std::uint64_t>(static_cast<std::streamoff>(fileEnd)) !=
+          expectedBytes)
+    throw std::runtime_error("Ising CSR file size does not match header: " +
+                             path);
+  f.seekg(payloadStart);
+  if (!f)
+    throw std::runtime_error("Could not seek in Ising CSR file: " + path);
+
   std::vector<std::int32_t> indptr(rows + 1), indices(nnz);
   f.read(reinterpret_cast<char *>(indptr.data()),
          static_cast<std::streamsize>(indptr.size() * sizeof(std::int32_t)));
@@ -137,6 +191,15 @@ read_csr_bin_to_sparse_vec(const std::string &path, std::uint32_t &rows,
          static_cast<std::streamsize>(indices.size() * sizeof(std::int32_t)));
   if (!f)
     throw std::runtime_error("Truncated Ising CSR file: " + path);
+  if (indptr.front() != 0 || indptr.back() != static_cast<std::int32_t>(nnz))
+    throw std::runtime_error("Invalid Ising CSR row pointers: " + path);
+  for (std::uint32_t r = 0; r < rows; ++r)
+    if (indptr[r] < 0 || indptr[r] > indptr[r + 1] ||
+        indptr[r + 1] > static_cast<std::int32_t>(nnz))
+      throw std::runtime_error("Invalid Ising CSR row pointers: " + path);
+  for (auto column : indices)
+    if (column < 0 || column >= static_cast<std::int32_t>(cols))
+      throw std::runtime_error("Invalid Ising CSR column index: " + path);
   std::vector<std::int64_t> sparse;
   for (std::uint32_t r = 0; r < rows; ++r) {
     for (std::int32_t k = indptr[r]; k < indptr[r + 1]; ++k)
@@ -153,11 +216,32 @@ static std::vector<double> read_priors_bin(const std::string &path) {
     throw std::runtime_error("Could not open Ising priors file: " + path);
   std::uint32_t n = 0;
   f.read(reinterpret_cast<char *>(&n), sizeof(n));
+  if (!f || n == 0)
+    throw std::runtime_error("Invalid Ising priors header: " + path);
+
+  const auto payloadStart = f.tellg();
+  f.seekg(0, std::ios::end);
+  const auto fileEnd = f.tellg();
+  const std::uint64_t expectedBytes =
+      sizeof(std::uint32_t) + static_cast<std::uint64_t>(n) * sizeof(double);
+  if (fileEnd == std::streampos(-1) ||
+      static_cast<std::uint64_t>(static_cast<std::streamoff>(fileEnd)) !=
+          expectedBytes)
+    throw std::runtime_error("Ising priors file size does not match header: " +
+                             path);
+  f.seekg(payloadStart);
+  if (!f)
+    throw std::runtime_error("Could not seek in Ising priors file: " + path);
+
   std::vector<double> priors(n);
   f.read(reinterpret_cast<char *>(priors.data()),
          static_cast<std::streamsize>(priors.size() * sizeof(double)));
   if (!f)
     throw std::runtime_error("Truncated Ising priors file: " + path);
+  for (double probability : priors)
+    if (!std::isfinite(probability) || probability < 0.0 || probability > 1.0)
+      throw std::runtime_error("Invalid probability in Ising priors file: " +
+                               path);
   return priors;
 }
 
@@ -166,6 +250,7 @@ static std::vector<double> read_priors_bin(const std::string &path) {
 // measurement indices (so each row reproduces a cudaqx detector bit, in Ising's
 // detector order). Returns the flat -1-terminated vector and the row count.
 static std::vector<std::int64_t> read_D_sparse_txt(const std::string &path,
+                                                   std::size_t measurementSpan,
                                                    std::size_t &numRows) {
   std::ifstream f(path);
   if (!f)
@@ -173,11 +258,35 @@ static std::vector<std::int64_t> read_D_sparse_txt(const std::string &path,
   std::vector<std::int64_t> D;
   std::int64_t v;
   numRows = 0;
+  std::size_t entriesInRow = 0;
+  std::size_t maxMeasurement = 0;
+  bool haveMeasurement = false;
   while (f >> v) {
+    if (v < -1 || (v >= 0 && static_cast<std::size_t>(v) >= measurementSpan))
+      throw std::runtime_error("Invalid measurement index in Ising D_sparse: " +
+                               path);
     D.push_back(v);
-    if (v == -1)
+    if (v == -1) {
+      if (entriesInRow == 0)
+        throw std::runtime_error("Empty row in Ising D_sparse: " + path);
       ++numRows;
+      entriesInRow = 0;
+    } else {
+      ++entriesInRow;
+      maxMeasurement = std::max(maxMeasurement, static_cast<std::size_t>(v));
+      haveMeasurement = true;
+    }
   }
+  if (!f.eof())
+    throw std::runtime_error("Invalid token in Ising D_sparse: " + path);
+  if (D.empty() || D.back() != -1)
+    throw std::runtime_error("Unterminated row in Ising D_sparse: " + path);
+  const std::size_t mappedSpan = haveMeasurement ? maxMeasurement + 1 : 0;
+  if (mappedSpan != measurementSpan)
+    throw std::runtime_error("Ising D_sparse measurement span (" +
+                             std::to_string(mappedSpan) +
+                             ") != cudaqx measurement-buffer span (" +
+                             std::to_string(measurementSpan) + "): " + path);
   return D;
 }
 
@@ -193,12 +302,31 @@ static void enforce_ising_metadata(const std::string &bundle, int distance,
                              "/metadata.txt");
   std::vector<std::pair<std::string, std::string>> kv;
   std::string line;
+  auto trim = [](std::string value) {
+    const auto begin = value.find_first_not_of(" \t\r");
+    if (begin == std::string::npos)
+      return std::string();
+    const auto end = value.find_last_not_of(" \t\r");
+    return value.substr(begin, end - begin + 1);
+  };
   while (std::getline(f, line)) {
-    while (!line.empty() && (line.back() == '\r' || line.back() == ' '))
-      line.pop_back();
+    line = trim(line);
+    if (line.empty())
+      continue;
     auto eq = line.find('=');
-    if (eq != std::string::npos)
-      kv.emplace_back(line.substr(0, eq), line.substr(eq + 1));
+    if (eq == std::string::npos)
+      throw std::runtime_error("Ising bundle " + bundle +
+                               ": malformed metadata line '" + line + "'");
+    auto key = trim(line.substr(0, eq));
+    auto value = trim(line.substr(eq + 1));
+    if (key.empty() || value.empty())
+      throw std::runtime_error("Ising bundle " + bundle +
+                               ": malformed metadata line '" + line + "'");
+    if (std::any_of(kv.begin(), kv.end(),
+                    [&](const auto &entry) { return entry.first == key; }))
+      throw std::runtime_error("Ising bundle " + bundle +
+                               ": duplicate metadata key '" + key + "'");
+    kv.emplace_back(std::move(key), std::move(value));
   }
   auto require = [&](const std::string &key, const std::string &want) {
     for (const auto &p : kv)
@@ -323,7 +451,8 @@ void save_dem_to_file(
         auto priors = read_priors_bin(ising_artifacts_dir + "/priors.bin");
         std::size_t dRows = 0;
         config.D_sparse =
-            read_D_sparse_txt(ising_artifacts_dir + "/D_sparse.txt", dRows);
+            read_D_sparse_txt(ising_artifacts_dir + "/D_sparse.txt",
+                              inputs.m2d.num_measurements, dRows);
 
         if (hRows != inputs.m2d.rows.size())
           throw std::runtime_error("Ising H rows (" + std::to_string(hRows) +
@@ -337,6 +466,9 @@ void save_dem_to_file(
               std::to_string(inputs.m2d.rows.size()) + ")");
         if (hCols != oCols || hCols != priors.size())
           throw std::runtime_error("Ising H/O/priors column counts disagree");
+        if (oRows != 1)
+          throw std::runtime_error("Ising O rows (" + std::to_string(oRows) +
+                                   ") != expected one logical observable");
 
         config.syndrome_size = hRows;
         config.block_size = hCols;
@@ -1363,10 +1495,13 @@ void show_help() {
          "instead of the default BP + OSD block. Accepted and ignored with "
          "--yaml (the YAML is authoritative).\n");
   printf("  --use-ising        Opt in to an Ising ONNX model and its matching "
-         "decoder artifacts. Requires --save_dem and a trt_decoder entry.\n");
+         "decoder artifacts. Requires --save_dem and a trt_decoder entry. "
+         "Without --ising-artifacts-dir, selects the built-in d7/T7/Z/XV "
+         "preset at the CUDA-QX cache path.\n");
   printf("  --ising-artifacts-dir <dir> Prepared Ising artifact directory "
          "containing model.onnx, H_csr.bin, O_csr.bin, priors.bin, "
-         "metadata.txt, and D_sparse.txt. Only valid with --use-ising.\n");
+         "metadata.txt, and D_sparse.txt. Only valid with --use-ising; use "
+         "this for compatible custom d/T exports.\n");
   printf("  --help              Show this help message\n");
 }
 
@@ -1376,10 +1511,14 @@ int main(int argc, char **argv) {
 #endif
   int num_shots = 10;
   int distance = 5;
+  bool distance_explicit = false;
   double p_spam = 0.01;
+  bool p_spam_explicit = false;
   std::vector<double> p_spam_per_patch;
+  bool p_spam_per_patch_explicit = false;
   int num_logical = 1;
   int num_rounds = -1; // Will be set to distance if not specified
+  bool num_rounds_explicit = false;
   bool save_dem = false;
   bool load_dem = false;
   std::string dem_filename;
@@ -1467,12 +1606,15 @@ int main(int argc, char **argv) {
     std::string arg = argv[i];
     if (arg == "--distance") {
       distance = require_int("--distance");
+      distance_explicit = true;
     } else if (arg == "--num_shots") {
       num_shots = require_int("--num_shots");
     } else if (arg == "--p_spam") {
       p_spam = require_double("--p_spam");
+      p_spam_explicit = true;
     } else if (arg == "--p_spam_per_patch" || arg == "--p-spam-per-patch") {
       p_spam_per_patch = require_double_list("--p_spam_per_patch");
+      p_spam_per_patch_explicit = true;
     } else if (arg == "--help" || arg == "-h") {
       show_help();
       return 0;
@@ -1480,6 +1622,7 @@ int main(int argc, char **argv) {
       num_logical = require_int("--num_logical");
     } else if (arg == "--num_rounds") {
       num_rounds = require_int("--num_rounds");
+      num_rounds_explicit = true;
     } else if (arg == "--decoder_type") {
       decoder_type = require_value("--decoder_type");
       decoder_type_explicit = true;
@@ -1510,6 +1653,35 @@ int main(int argc, char **argv) {
       show_help();
       return 1;
     }
+  }
+
+  const bool use_builtin_ising_artifacts =
+      use_ising && ising_artifacts_dir.empty();
+  if (use_builtin_ising_artifacts) {
+    constexpr int supported_distance = 7;
+    constexpr int supported_rounds = 7;
+    constexpr double supported_p_spam = 0.01;
+    if ((distance_explicit && distance != supported_distance) ||
+        (num_rounds_explicit && num_rounds != supported_rounds) ||
+        (p_spam_explicit && p_spam != supported_p_spam)) {
+      printf("Error: the built-in Ising example only supports distance=7, "
+             "num_rounds=7, p_spam=0.01, basis=Z, and orientation=XV. To "
+             "use another compatible export, pass --ising-artifacts-dir "
+             "<dir>.\n");
+      return 1;
+    }
+    if (p_spam_per_patch_explicit &&
+        std::any_of(p_spam_per_patch.begin(), p_spam_per_patch.end(),
+                    [](double value) { return value != supported_p_spam; })) {
+      printf("Error: the built-in Ising example only supports "
+             "p_spam_per_patch=0.01. To use another compatible export, pass "
+             "--ising-artifacts-dir <dir>.\n");
+      return 1;
+    }
+    distance = supported_distance;
+    num_rounds = supported_rounds;
+    p_spam = supported_p_spam;
+    ising_artifacts_dir = default_ising_artifacts_dir();
   }
 
   if (!load_dem && !save_dem && !load_syndrome) {
@@ -1718,32 +1890,18 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  // The trt+Ising path needs an external predecoder bundle that is generated
-  // locally and not shipped with this repository. If the bundle is absent (no
-  // metadata.txt), stop with the exact generation recipe rather than failing
-  // deeper in.
+  // Fail before DEM generation if the explicitly selected Ising source is not
+  // a complete prepared artifact directory. The shell driver gives the full
+  // SafeTensors-to-ONNX preparation recipe.
   if (use_ising) {
-    if (!std::ifstream(ising_artifacts_dir + "/metadata.txt")) {
-      printf(
-          "This example's trt+Ising path requires the Ising predecoder bundle, "
-          "which is generated locally and not shipped in this repository.\n"
-          "  '%s/metadata.txt' was not found.\n"
-          "Generate it from the Ising decoding project "
-          "(https://github.com/NVIDIA/Ising-Decoding) into '%s':\n"
-          "  1. python generate_test_data.py --distance %d --n-rounds %d "
-          "--basis Z --code-rotation XV --output-dir %s\n"
-          "  2. surface_code-4-yaml --save_dem cfg.yml --decoder_type "
-          "pymatching --distance %d --num_rounds %d > sched.txt\n"
-          "     python gen_dsparse_from_memory_circuit.py %d %d Z XV sched.txt "
-          "%s/D_sparse.txt --ising-repo /path/to/ising/code\n"
-          "  3. export the ONNX predecoder predecoder_memory_d%d_T%d_Z.onnx "
-          "and "
-          "place it at %s/model.onnx.\n"
-          "Then re-run with --use-ising --ising-artifacts-dir %s.\n",
-          ising_artifacts_dir.c_str(), ising_artifacts_dir.c_str(), distance,
-          num_rounds, ising_artifacts_dir.c_str(), distance, num_rounds,
-          distance, num_rounds, ising_artifacts_dir.c_str(), distance,
-          num_rounds, ising_artifacts_dir.c_str(), ising_artifacts_dir.c_str());
+    try {
+      enforce_ising_metadata(ising_artifacts_dir, distance, num_rounds);
+      require_ising_artifact_files(ising_artifacts_dir);
+    } catch (const std::exception &error) {
+      printf("Error: %s\n", error.what());
+      printf("The Hugging Face repository provides SafeTensors weights, not a "
+             "ready CUDA-QX artifact directory. Follow the Ising export "
+             "recipe in surface_code-4-yaml-test.sh.\n");
       return 1;
     }
   }
