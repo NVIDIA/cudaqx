@@ -115,6 +115,7 @@ add_custom_command(
     ${SPHINX_SOURCE}/index.rst
     ${DOXYGEN_INDEX_FILE}
     cudaqx-pymodules
+    cudaq-qec-realtime-decoding-simulation
     ${CUDAQX_PUBLIC_PYTHON}
     ${CUDAQX_PUBLIC_RST}
   MAIN_DEPENDENCY ${SPHINX_CONF_IN} ${SPHINX_CONF}
