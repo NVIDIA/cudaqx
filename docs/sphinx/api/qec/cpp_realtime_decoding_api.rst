@@ -22,6 +22,17 @@ Configuration API
 
 The configuration API enables setting up decoders before circuit execution. Decoders are configured using YAML files or programmatically constructed configuration objects.
 
+.. doxygenstruct:: cudaq::qec::realtime::graph_resources
+   :members:
+
+.. doxygenenum:: cudaq::qec::decoding::config::DecoderTransport
+
+.. doxygenstruct:: cudaq::qec::decoding::config::decoder_config
+   :members:
+
+.. doxygenclass:: cudaq::qec::decoding::config::multi_decoder_config
+   :members:
+
 .. doxygenfunction:: cudaq::qec::decoding::config::configure_decoders
 .. doxygenfunction:: cudaq::qec::decoding::config::configure_decoders_from_file
 .. doxygenfunction:: cudaq::qec::decoding::config::configure_decoders_from_str

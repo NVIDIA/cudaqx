@@ -221,4 +221,4 @@ Real-time decoding requires converting matrices to sparse format for efficient d
       config.D_sparse = qec.generate_timelike_sparse_detector_matrix(
           numSyndromesPerRound, numRounds, False)
 
-See also :ref:`Parity Check Matrix Utilities <python_api:Parity Check Matrix Utilities>` for additional PCM manipulation functions.
+See also :ref:`parity_check_matrix_utilities_python` for additional PCM manipulation functions.

@@ -18,6 +18,11 @@ Code
 
 .. _qec_stabilizer_grid_cpp:
 
+.. doxygenenum:: cudaq::qec::surface_code::surface_role
+.. doxygenenum:: cudaq::qec::surface_code::sc_orientation
+.. doxygenstruct:: cudaq::qec::surface_code::vec2d
+   :members:
+
 .. doxygenclass:: cudaq::qec::surface_code::stabilizer_grid
     :members:
 
@@ -41,6 +46,11 @@ Detector Error Model
 
 Decoder Interfaces
 ==================
+
+.. doxygenstruct:: cudaq::qec::decoder_inputs
+    :members:
+
+.. doxygentypedef:: cudaq::qec::decoder_init
 
 .. doxygenclass:: cudaq::qec::decoder
     :members:
@@ -82,6 +92,14 @@ Real-Time Decoding
 Parity Check Matrix Utilities
 =============================
 
+.. doxygenenum:: cudaq::qec::sparse_binary_matrix_layout
+
+.. doxygenclass:: cudaq::qec::sparse_binary_matrix
+    :members:
+
+.. doxygenfunction:: cudaq::qec::to_parity_matrix(const std::vector<cudaq::spin_op_term> &, stabilizer_type)
+.. doxygenfunction:: cudaq::qec::to_parity_matrix(const std::vector<std::string> &, stabilizer_type)
+
 .. doxygenfunction:: cudaq::qec::dense_to_sparse(const cudaqx::tensor<uint8_t> &)
 .. doxygenfunction:: cudaq::qec::generate_random_pcm(std::size_t, std::size_t, std::size_t, int, std::mt19937_64 &&);
 .. doxygenfunction:: cudaq::qec::generate_timelike_sparse_detector_matrix(std::uint32_t num_syndromes_per_round, std::uint32_t num_rounds, bool include_first_round = false)
@@ -112,6 +130,8 @@ the ``CUDA_QEC_*`` macros exposed in ``cudaq/qec/logger.h``.
 .. doxygenstruct:: cudaq::qec::detail::forwarded_log_record
     :members:
 
+.. doxygenvariable:: cudaq::qec::detail::realtime_forwarder_default_message_capacity
+
 .. doxygenstruct:: cudaq::qec::detail::forwarder_config
     :members:
 
@@ -141,6 +161,7 @@ Common
 .. doxygentypedef:: cudaq::qec::float_t
 
 .. doxygenenum:: cudaq::qec::operation
+.. doxygenenum:: cudaq::qec::stabilizer_type
 
 .. doxygenfunction:: cudaq::qec::sample_code_capacity(const cudaqx::tensor<uint8_t> &, std::size_t, double)
 .. doxygenfunction:: cudaq::qec::sample_code_capacity(const cudaqx::tensor<uint8_t> &, std::size_t, double, unsigned)

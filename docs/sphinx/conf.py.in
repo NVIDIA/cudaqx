@@ -93,7 +93,20 @@ master_doc = 'index'
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
 # This pattern also affects html_static_path and html_extra_path.
-exclude_patterns = ['_templates']
+# Fragment files pulled in via ``.. include::`` must not also be processed as
+# standalone documents — doing so causes duplicate C++ / Python domain
+# declarations in the Sphinx domain registry.
+exclude_patterns = [
+    '_templates',
+    'api/qec/nv_qldpc_decoder_api.rst',
+    'api/qec/sliding_window_api.rst',
+    'api/qec/trt_decoder_api.rst',
+    'api/qec/tensor_network_decoder_api.rst',
+    'api/qec/python_realtime_decoding_api.rst',
+    'api/qec/cpp_realtime_decoding_api.rst',
+    'api/qec/realtime_pipeline_api.rst',
+    'api/solvers/gqe_api.rst',
+]
 
 # The reST default role (used for this markup: `text`) to use for all documents.
 default_role = 'code'  # NOTE: the following may be a better choice to error on the side of flagging anything that is referenced but but not declared
@@ -156,6 +169,34 @@ def process_docstring(app, what, name, obj, options, lines):
     for i, line in enumerate(lines):
         lines[i] = fix_string(line)
 
+def _fixup_class_modules():
+    # Types bound in the qecrt nanobind submodule have __module__ set to the
+    # internal extension path.  Autodoc treats any class whose __module__ doesn't
+    # match the documenting module as an alias and emits "alias of <internal path>"
+    # instead of real documentation; stringify_annotation() also uses __module__ to
+    # build type-annotation strings in function signatures.  Fix up every public
+    # type in cudaq_qec whose module still points at the internal path so that
+    # both autoclass and autofunction produce clean output automatically.
+    try:
+        import cudaq_qec
+        _internal_prefix = 'cudaq_qec._pycudaqx'
+        for _name in dir(cudaq_qec):
+            if _name.startswith('_'):
+                continue
+            _obj = getattr(cudaq_qec, _name, None)
+            if isinstance(_obj, type) and \
+                    getattr(_obj, '__module__', '').startswith(_internal_prefix):
+                try:
+                    _obj.__module__ = 'cudaq_qec'
+                except (AttributeError, TypeError):
+                    pass
+    except ImportError:
+        pass
+
+_fixup_class_modules()
+del _fixup_class_modules
+
+
 def setup(app):
     app.connect('autodoc-process-signature', process_signature)
     app.connect('autodoc-process-docstring', process_docstring)
@@ -183,6 +224,16 @@ redirects = {"versions": "../latest/releases.html"}
 nitpick_ignore = [
     ('cpp:identifier', 'pid_t'),
     ('cpp:identifier', 'uint8_t'),
+    ('cpp:identifier', 'uint32_t'),
+    ('cpp:identifier', 'int64_t'),
+    ('cpp:identifier', 'index_type'),
+    ('ref', 'graph__resources_8h'),
+    ('ref', 'decoder__config__schema_8h'),
+    ('cpp:identifier', 'cudaq::pauli_word'),
+    ('cpp:identifier', 'cudaGraphExec_t'),
+    ('cpp:identifier', 'cudaStream_t'),
+    ('cpp:identifier', 'SIZE_MAX'),
+    ('cpp:identifier', 'uint64_t'),
     ('cpp:identifier', 'details::tensor_impl<Scalar>::scalar_type'),
     ('cpp:identifier', 'cudaqx'),
     ('cpp:identifier', 'size_t'),
@@ -199,9 +250,28 @@ nitpick_ignore = [
     ('cpp:identifier', 'cudaq::qview<>'),
     ('cpp:identifier', 'cudaq::measure_result'),
     ('py:class', 'SpinOperator'),
+    ('py:class', 'cudaq.SpinOperator'),
+    ('py:class', 'cudaq::sum_op<cudaq::spin_handler>'),
+    ('py:class', 'list[cudaq::sum_op<cudaq::spin_handler>]'),
+    ('py:class', 'tuple[float, list[float], list[cudaq::sum_op<cudaq::spin_handler>]]'),
+    ('py:class', 'pauli_word'),
+    ('py:class', 'PauliWord'),
     ('py:class', 'numpy.int32'),
     ('py:class', 'numpy.uint8'),
-    ('py:class', 'cudaq.mlir._mlir_libs._quakeDialects.cudaq_runtime.qview')
+    ('py:class', 'cudaq.mlir._mlir_libs._quakeDialects.cudaq_runtime.qview'),
+    ('py:class', 'cudaq_qec.surface_role'),
+    ('py:class', 'cudaq_qec.operation'),
+    ('py:class', 'sc_orientation'),
+    ('py:class', 'vec2d'),
+]
+
+# Suppress cross-reference warnings for types whose fully-qualified path still
+# contains the internal pybind11 module name.  This happens when Sphinx
+# extracts the cross-reference from the raw nanobind-generated signature before
+# the process_docstring / process_signature hooks have a chance to strip the
+# prefix via doc_replacements.
+nitpick_ignore_regex = [
+    ('py:class', r'cudaq_qec\._pycudaqx_qec_the_suffix_matters_cudaq_qec\..*'),
 ]
 
 napoleon_google_docstring = True
