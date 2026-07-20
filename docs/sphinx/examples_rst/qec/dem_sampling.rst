@@ -39,8 +39,8 @@ Example
 
    .. code-block:: bash
 
-      nvq++ --enable-mlir -lcudaq-qec dem_sampling.cpp -o dem_sampling
-      ./dem_sampling
+      nvq++ -lcudaq-qec dem_sampling.cpp
+      ./a.out
 
 GPU Acceleration
 ++++++++++++++++
@@ -105,6 +105,34 @@ The C++ API exposes two namespaces:
 - ``cudaq::qec::dem_sampler::gpu::sample_dem`` — takes raw device pointers and
   writes results into caller-provided device buffers; returns ``false`` if
   cuStabilizer is not available at runtime.
+
+The ``gpu`` overload works with device pointers that you allocate, populate,
+and free yourself. Guard the call behind a device-count check and fall back to
+the ``cpu`` overload when it returns ``false``:
+
+.. code-block:: cpp
+
+   #include "cudaq/qec/dem_sampling.h"
+   #include <cuda_runtime.h>
+
+   // H: [num_checks x num_mechanisms] uint8, probs: [num_mechanisms] double.
+   uint8_t *d_H, *d_syndromes, *d_errors;
+   double *d_probs;
+   cudaMalloc(&d_H, num_checks * num_mechanisms);
+   cudaMalloc(&d_probs, num_mechanisms * sizeof(double));
+   cudaMalloc(&d_syndromes, num_shots * num_checks);
+   cudaMalloc(&d_errors, num_shots * num_mechanisms);
+   cudaMemcpy(d_H, h_data, num_checks * num_mechanisms, cudaMemcpyHostToDevice);
+   cudaMemcpy(d_probs, prob_data, num_mechanisms * sizeof(double),
+              cudaMemcpyHostToDevice);
+
+   bool ok = cudaq::qec::dem_sampler::gpu::sample_dem(
+       d_H, num_checks, num_mechanisms, d_probs, num_shots, /*seed=*/42,
+       d_syndromes, d_errors);
+   if (!ok) {
+     // cuStabilizer unavailable at runtime — use the cpu overload instead.
+   }
+   // Copy d_syndromes / d_errors back to host, then cudaFree each buffer.
 
 See Also
 ++++++++
