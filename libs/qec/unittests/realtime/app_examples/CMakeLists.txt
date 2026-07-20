@@ -912,7 +912,7 @@ set(_sc4_neg_env "CUDAQ_QEC_REALTIME_MODE=inproc_rpc"
 if(Python_Interpreter_FOUND)
   add_test(NAME app_examples.surface_code-4-yaml-ising-artifacts
     COMMAND ${Python_EXECUTABLE}
-      ${CMAKE_CURRENT_SOURCE_DIR}/surface_code-4-yaml-ising-test.py
+      ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_surface_code_4_yaml_ising.py
       --app ${_sc4_exe}
       --driver ${CMAKE_CURRENT_SOURCE_DIR}/surface_code-4-yaml-test.sh
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
