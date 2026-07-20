@@ -905,6 +905,22 @@ file(MAKE_DIRECTORY ${_sc4_neg_dir})
 set(_sc4_neg_env "CUDAQ_QEC_REALTIME_MODE=inproc_rpc"
                  "CUDAQ_DEFAULT_SIMULATOR=stim")
 
+# The Ising opt-in path is covered entirely offline. The Python harness builds
+# small synthetic artifact directories, checks the shell driver's source-mode
+# contract, and drives the C++ loader through valid and malformed bundle data.
+# It deliberately stops at YAML generation, before TensorRT opens model.onnx.
+if(Python_Interpreter_FOUND)
+  add_test(NAME app_examples.surface_code-4-yaml-ising-artifacts
+    COMMAND ${Python_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/surface_code-4-yaml-ising-test.py
+      --app ${_sc4_exe}
+      --driver ${CMAKE_CURRENT_SOURCE_DIR}/surface_code-4-yaml-test.sh
+      --resolver ${CMAKE_CURRENT_SOURCE_DIR}/resolve_ising_artifacts.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+  set_tests_properties(app_examples.surface_code-4-yaml-ising-artifacts
+    PROPERTIES ENVIRONMENT "${_sc4_neg_env}")
+endif()
+
 # A rejection case must satisfy BOTH conditions: a nonzero exit AND the expected
 # diagnostic. CTest's PASS_REGULAR_EXPRESSION ignores the exit code, so a wrapper
 # enforces both -- a future regression that prints the message but returns 0
