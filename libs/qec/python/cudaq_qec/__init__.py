@@ -87,6 +87,7 @@ get_decoder = qecrt.get_decoder
 dem_from_stim_text = qecrt.dem_from_stim_text
 DecoderResult = qecrt.DecoderResult
 BatchDecoderResult = qecrt.BatchDecoderResult
+AsyncDecoderResult = qecrt.AsyncDecoderResult
 DetectorErrorModel = qecrt.DetectorErrorModel
 generate_random_bit_flips = qecrt.generate_random_bit_flips
 sample_memory_circuit = qecrt.sample_memory_circuit
@@ -175,7 +176,9 @@ try:
 except (ModuleNotFoundError, ImportError):
     pass
 
-import cudaq
-from .loader import qec_set_target_callback
-
-cudaq.register_set_target_callback(qec_set_target_callback, "cudaq_qec")
+try:
+    import cudaq
+    from .loader import qec_set_target_callback
+    cudaq.register_set_target_callback(qec_set_target_callback, "cudaq_qec")
+except ImportError:
+    pass

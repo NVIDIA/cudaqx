@@ -507,10 +507,9 @@ You must pass ``distance`` when constructing the code; there is no default.
 
 The :ref:`stabilizer_grid <qec_stabilizer_grid_python>` helper documents how
 stabilizers and data qubits are indexed on the grid and provides helpers to
-print the layout. **Python:** :class:`cudaq_qec.stabilizer_grid` — see
-:ref:`qec_stabilizer_grid_python`. **C++:**
+print the layout. **Python:** :ref:`cudaq_qec.stabilizer_grid <qec_stabilizer_grid_python>` — **C++:**
 :cpp:class:`cudaq::qec::surface_code::stabilizer_grid` — see
-:ref:`qec_stabilizer_grid_cpp`. The header :file:`cudaq/qec/codes/surface_code.h`
+:ref:`API <qec_stabilizer_grid_cpp>`. The header :file:`cudaq/qec/codes/surface_code.h`
 contains the full declaration.
 
 **Stabilizer measurement schedule**
