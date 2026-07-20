@@ -28,7 +28,9 @@ ENABLE_PREPROCESSING   = YES
 MACRO_EXPANSION        = YES
 EXPAND_ONLY_PREDEF     = YES
 PREDEFINED             = "__qpu__=" \
-                         "__attribute__(x)="
+                         "__attribute__(x)=" \
+                         "CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(TYPE,...)=" \
+                         "CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION_WITH_NAME(TYPE,NAME,...)="
 
 #---------------------------------------------------------------------------
 # Configuration options related to the HTML output
