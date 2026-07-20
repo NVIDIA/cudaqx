@@ -35,6 +35,7 @@
 #include "cudaq.h"
 #include "cudaq/qec/code.h"
 #include "cudaq/qec/decoder.h"
+#include "cudaq/qec/decoder_config_schema.h"
 #include "cudaq/qec/experiments.h"
 #include "cudaq/qec/noise_model.h"
 #include "cudaq/qec/pcm_utils.h"
@@ -130,6 +131,7 @@ struct run_options {
   int sw_step_size = 1;
   std::string sw_inner_decoder = "multi_error_lut";
   bool sw_inner_decoder_set = false;
+  std::vector<std::string> decoder_params; // --param key=value overrides
   bool save_dem = false;
   bool load_dem = false;
   std::string dem_filename;
@@ -161,10 +163,12 @@ syndrome_capture_state g_capture;
 
 } // namespace
 
-// Return the custom-args map for a named decoder given the DEM error rates.
-// Used for both the outer decoder and the sliding_window inner decoder.
+// Return the custom-args map for a named decoder given the DEM error rates,
+// with any --param key=value overrides applied on top. The registered decoder
+// schema drives type coercion for each override.
 static cudaqx::heterogeneous_map
-decoder_args(const std::string &type, const std::vector<double> &error_rates) {
+decoder_args(const std::string &type, const std::vector<double> &error_rates,
+             const std::vector<std::string> &params = {}) {
   cudaqx::heterogeneous_map args;
   if (type == "nv-qldpc-decoder") {
     args.insert("use_sparsity", true);
@@ -189,6 +193,80 @@ decoder_args(const std::string &type, const std::vector<double> &error_rates) {
     args.insert("lut_error_depth", 2);
   } else {
     throw std::runtime_error("Unknown decoder type: " + type);
+  }
+  if (params.empty())
+    return args;
+  namespace cfg = cudaq::qec::decoding::config;
+  const auto *schema = cfg::find_decoder_schema(type);
+  if (!schema)
+    throw std::runtime_error("No parameter schema registered for decoder '" +
+                             type + "'; --param overrides unavailable");
+  for (const auto &kv : params) {
+    const auto eq = kv.find('=');
+    if (eq == std::string::npos)
+      throw std::runtime_error("--param requires key=value format: " + kv);
+    const std::string key = kv.substr(0, eq);
+    const std::string val = kv.substr(eq + 1);
+    const cfg::param_spec *spec = nullptr;
+    for (const auto &p : schema->params)
+      if (p.key == key) {
+        spec = &p;
+        break;
+      }
+    if (!spec)
+      throw std::runtime_error("Unknown parameter '" + key + "' for decoder '" +
+                               type + "'");
+    // Parse s with fn, reject trailing garbage, rethrow anything as a
+    // user-friendly message naming the key. `throw 0` is the trailing-garbage
+    // sentinel; both it and parser exceptions are caught by catch(...).
+    auto coerce = [&](const std::string &s, auto fn) {
+      try {
+        std::size_t n;
+        auto v = fn(s, &n);
+        if (n != s.size())
+          throw 0;
+        return v;
+      } catch (...) {
+        throw std::runtime_error("--param '" + key + "': invalid value '" +
+                                 val + "'");
+      }
+    };
+    switch (spec->kind) {
+    case cfg::param_kind::f64:
+      args.insert(
+          key, coerce(val, [](auto &s, auto *p) { return std::stod(s, p); }));
+      break;
+    case cfg::param_kind::int32:
+      args.insert(
+          key, coerce(val, [](auto &s, auto *p) { return std::stoi(s, p); }));
+      break;
+    case cfg::param_kind::uint64:
+      args.insert(key, (std::size_t)coerce(val, [](auto &s, auto *p) {
+                    return std::stoull(s, p);
+                  }));
+      break;
+    case cfg::param_kind::boolean:
+      if (val != "true" && val != "false" && val != "1" && val != "0")
+        throw std::runtime_error("--param '" + key + "': invalid value '" +
+                                 val + "'");
+      args.insert(key, val == "true" || val == "1");
+      break;
+    case cfg::param_kind::string:
+      args.insert(key, val);
+      break;
+    case cfg::param_kind::f64_vec: {
+      std::vector<double> vec;
+      std::istringstream ss(val);
+      std::string tok;
+      while (std::getline(ss, tok, ','))
+        vec.push_back(
+            coerce(tok, [](auto &s, auto *p) { return std::stod(s, p); }));
+      args.insert(key, vec);
+      break;
+    }
+    default:
+      throw std::runtime_error("--param: unsupported type for '" + key + "'");
+    }
   }
   return args;
 }
@@ -230,11 +308,13 @@ build_multi_decoder_config(const cudaq::qec::decoder_inputs &inputs,
       sw_args.insert("inner_decoder_name", opts.sw_inner_decoder);
       sw_args.insert("error_rate_vec", dem.error_rates);
       sw_args.insert("inner_decoder_params",
-                     decoder_args(opts.sw_inner_decoder, dem.error_rates));
+                     decoder_args(opts.sw_inner_decoder, dem.error_rates,
+                                  opts.decoder_params));
       dc.decoder_custom_args = sw_args;
     } else {
       dc.type = opts.decoder_type;
-      dc.decoder_custom_args = decoder_args(opts.decoder_type, dem.error_rates);
+      dc.decoder_custom_args =
+          decoder_args(opts.decoder_type, dem.error_rates, opts.decoder_params);
     }
 
     multi_config.decoders.push_back(dc);
@@ -754,6 +834,11 @@ void show_help() {
   printf("  --sw_step_size <int>    Sliding window step size. Default: 1\n");
   printf("  --sw_inner_decoder <string> Inner decoder for sliding_window. "
          "Default: multi_error_lut\n");
+  printf(
+      "  --param <key=value> Override a decoder parameter (repeatable). For\n"
+      "      --decoder_type sliding_window the override targets the inner\n"
+      "      decoder; otherwise the outer decoder. Uses the registered\n"
+      "      schema for type coercion. Example: --param lut_error_depth=1\n");
   printf("  --save_dem <string> Characterize the DEM, write the decoder config "
          "YAML to a file, and exit (to configure a standalone "
          "decoding_server).\n");
@@ -806,6 +891,9 @@ int main(int argc, char **argv) {
         i++;
       } else if (arg == "--sw_step_size") {
         opts.sw_step_size = std::stoi(val(i));
+        i++;
+      } else if (arg == "--param") {
+        opts.decoder_params.push_back(val(i));
         i++;
       } else if (arg == "--sw_inner_decoder") {
         opts.sw_inner_decoder = val(i);
@@ -889,6 +977,22 @@ int main(int argc, char **argv) {
     printf("Error: num_rounds (%d) must be at least equal to distance (%d)\n",
            opts.num_rounds, opts.distance);
     return 1;
+  }
+  if (opts.decoder_type == "sliding_window") {
+    if (opts.sw_step_size < 1) {
+      printf("Error: sw_step_size (%d) must be >= 1\n", opts.sw_step_size);
+      return 1;
+    }
+    if (opts.sw_window_size > opts.num_rounds) {
+      printf("Error: sw_window_size (%d) must be <= num_rounds (%d)\n",
+             opts.sw_window_size, opts.num_rounds);
+      return 1;
+    }
+    if (opts.sw_step_size > opts.sw_window_size) {
+      printf("Error: sw_step_size (%d) must be <= sw_window_size (%d)\n",
+             opts.sw_step_size, opts.sw_window_size);
+      return 1;
+    }
   }
 
   if (opts.num_logical > 32) {
