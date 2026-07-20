@@ -33,7 +33,7 @@ translates Ising's detector->measurement map into the cudaqx buffer order.
 
 Usage:
   gen_dsparse_from_memory_circuit.py <distance> <n_rounds> <basis> \
-      <code_rotation> <sched.txt> <out D_sparse.txt> [--ising-repo PATH]
+      <code_rotation> <sched.txt> <out D_sparse.txt> --ising-repo PATH
 
 Positional arguments:
   distance       Surface code distance D.
@@ -46,8 +46,7 @@ Positional arguments:
 
 Options:
   --ising-repo PATH  Path to the Ising repo's `code` directory (the one
-                     containing qec/surface_code). Defaults to
-                     /work/github/ising/code.
+                     containing qec/surface_code).
 """
 import argparse
 import sys
@@ -67,9 +66,9 @@ def parse_args(argv):
                     help="file with the app's printed cnot_schedX/Z_flat lines")
     ap.add_argument("out", help="output D_sparse.txt path")
     ap.add_argument("--ising-repo",
-                    default="/work/github/ising/code",
+                    required=True,
                     help="path to the Ising repo's `code` directory "
-                    "(contains qec/surface_code); default %(default)s")
+                    "(contains qec/surface_code)")
     return ap.parse_args(argv)
 
 

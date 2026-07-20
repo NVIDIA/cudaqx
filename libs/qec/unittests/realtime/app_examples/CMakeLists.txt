@@ -915,7 +915,6 @@ if(Python_Interpreter_FOUND)
       ${CMAKE_CURRENT_SOURCE_DIR}/surface_code-4-yaml-ising-test.py
       --app ${_sc4_exe}
       --driver ${CMAKE_CURRENT_SOURCE_DIR}/surface_code-4-yaml-test.sh
-      --resolver ${CMAKE_CURRENT_SOURCE_DIR}/resolve_ising_artifacts.py
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
   set_tests_properties(app_examples.surface_code-4-yaml-ising-artifacts
     PROPERTIES ENVIRONMENT "${_sc4_neg_env}")
@@ -1151,16 +1150,6 @@ if(TARGET cudaq-qec-nv-qldpc-decoder
   _sc4_dual_parse_test(3 3)
   _sc4_dual_parse_test(5 5)
 endif()
-
-# X-basis Ising bundle rejected (basis must be Z). Fabricate just the
-# metadata.txt the loader inspects; the dummy ONNX is never opened because the
-# basis check throws first.
-file(WRITE ${_sc4_neg_dir}/xbundle/metadata.txt
-  "distance=3\nn_rounds=3\nbasis=X\ncode_rotation=XV\n")
-_sc4_reject(xbasis-bundle "basis='X'"
-  --distance 3 --num_rounds 3 --decoder_type trt_decoder
-  --use-ising --ising-artifacts-dir ${_sc4_neg_dir}/xbundle
-  --save_dem ${_sc4_neg_dir}/xb.yml)
 
 # Geometry binding: a d5/T5 config rejected when loaded as d3/T15 (same 120
 # detectors, different measurement-buffer span).

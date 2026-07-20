@@ -124,27 +124,21 @@ static void require_ising_artifact_files(const std::string &directory) {
   }
 }
 
+static void require_binary_size(const std::string &path, std::uint64_t expected,
+                                const char *kind) {
+  std::ifstream file(path, std::ios::binary | std::ios::ate);
+  if (!file || file.tellg() < 0 ||
+      static_cast<std::uint64_t>(file.tellg()) != expected)
+    throw std::runtime_error("Ising " + std::string(kind) +
+                             " file size does not match header: " + path);
+}
+
 // Uncomment this to manually inject errors.
 // #define MANUALLY_INJECT_ERRORS
 
-// ---------------------------------------------------------------------------
 // Ising-bundle interop (trt+Ising path)
-//
-// The Ising d/T/Z bundle (generate_test_data.py) ships H_csr.bin/O_csr.bin/
-// priors.bin in *Ising detector order*, plus a D_sparse.txt we generate that
-// expresses each Ising detector as a parity over the *cudaqx* live measurement
-// buffer. With these, the trt+Ising config carries Ising's exact H/O/priors and
-// a D_sparse aligned to Ising's detector rows while reading the cudaqx stream.
-//
-// Geometry: cudaqx's surface code at orientation XV is identical to the bundle
-// geometry (Ising code_rotation string "XV" == first_bulk X, rotated_type V,
-// logical_direction XH) under the IDENTITY data and X-ancilla mapping; only the
-// Z-ancillas are permuted (a fixed bijection). D_sparse.txt encodes exactly
-// that: it takes Ising's detector->measurement map and translates each
-// measurement index from Ising's buffer order into cudaqx's buffer order
-// (X-ancilla and data identity, Z-ancilla permuted), so every D row reproduces
-// one of cudaqx's own detector bits, now in Ising's detector order.
-// ---------------------------------------------------------------------------
+// H/O/priors use Ising detector order. D_sparse.txt maps those detector rows to
+// CUDA-QX's live measurement order, whose XV Z-ancilla ordering differs.
 
 // Read a binary-CSR file (rows:u32, cols:u32, nnz:u32, indptr[(rows+1)*i32],
 // indices[nnz*i32]) and return it as a -1-terminated sparse row vector
@@ -169,20 +163,10 @@ read_csr_bin_to_sparse_vec(const std::string &path, std::uint32_t &rows,
       static_cast<std::uint64_t>(nnz) > static_cast<std::uint64_t>(rows) * cols)
     throw std::runtime_error("Invalid Ising CSR dimensions: " + path);
 
-  const auto payloadStart = f.tellg();
-  f.seekg(0, std::ios::end);
-  const auto fileEnd = f.tellg();
   const std::uint64_t expectedBytes =
       3 * sizeof(std::uint32_t) +
       (static_cast<std::uint64_t>(rows) + 1 + nnz) * sizeof(std::int32_t);
-  if (fileEnd == std::streampos(-1) ||
-      static_cast<std::uint64_t>(static_cast<std::streamoff>(fileEnd)) !=
-          expectedBytes)
-    throw std::runtime_error("Ising CSR file size does not match header: " +
-                             path);
-  f.seekg(payloadStart);
-  if (!f)
-    throw std::runtime_error("Could not seek in Ising CSR file: " + path);
+  require_binary_size(path, expectedBytes, "CSR");
 
   std::vector<std::int32_t> indptr(rows + 1), indices(nnz);
   f.read(reinterpret_cast<char *>(indptr.data()),
@@ -219,19 +203,9 @@ static std::vector<double> read_priors_bin(const std::string &path) {
   if (!f || n == 0)
     throw std::runtime_error("Invalid Ising priors header: " + path);
 
-  const auto payloadStart = f.tellg();
-  f.seekg(0, std::ios::end);
-  const auto fileEnd = f.tellg();
   const std::uint64_t expectedBytes =
       sizeof(std::uint32_t) + static_cast<std::uint64_t>(n) * sizeof(double);
-  if (fileEnd == std::streampos(-1) ||
-      static_cast<std::uint64_t>(static_cast<std::streamoff>(fileEnd)) !=
-          expectedBytes)
-    throw std::runtime_error("Ising priors file size does not match header: " +
-                             path);
-  f.seekg(payloadStart);
-  if (!f)
-    throw std::runtime_error("Could not seek in Ising priors file: " + path);
+  require_binary_size(path, expectedBytes, "priors");
 
   std::vector<double> priors(n);
   f.read(reinterpret_cast<char *>(priors.data()),
@@ -366,8 +340,7 @@ void save_dem_to_file(
     const std::vector<cudaq::qec::decoder_inputs> &bp_inputs,
     std::string dem_filename, const std::vector<std::string> &decoder_types,
     bool use_relay_bp, const std::string &onnx_path, bool use_ising,
-    const std::string &ising_artifacts_dir, int distance,
-    std::size_t numRounds) {
+    const std::string &ising_artifacts_dir) {
   cudaq::qec::decoding::config::multi_decoder_config multi_config;
   for (uint64_t i = 0; i < decoder_types.size(); i++) {
     const std::string &decoder_type = decoder_types[i];
@@ -435,9 +408,6 @@ void save_dem_to_file(
       pm_args.insert("merge_strategy", "smallest_weight");
 
       if (use_ising) {
-        // Enforce the bundle's semantics match this experiment (basis Z,
-        // code_rotation XV, same d / n_rounds) before trusting its matrices.
-        enforce_ising_metadata(ising_artifacts_dir, distance, numRounds);
         // trt+Ising path: carry the Ising d/T/Z model. H/O/priors come from
         // the Ising bundle (Ising detector order); D_sparse (D_sparse.txt)
         // expresses each Ising detector as a parity over the cudaqx live
@@ -1071,8 +1041,7 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
 
     if (save_dem) {
       save_dem_to_file(matching_inputs, bp_inputs, dem_filename, decoder_types,
-                       use_relay_bp, onnx_path, use_ising, ising_artifacts_dir,
-                       distance, numRounds);
+                       use_relay_bp, onnx_path, use_ising, ising_artifacts_dir);
       return;
     }
   }

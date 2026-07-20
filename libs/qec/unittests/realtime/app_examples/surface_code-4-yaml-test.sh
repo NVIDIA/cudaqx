@@ -83,7 +83,6 @@ NUM_SHOTS=${5:-200}
 ONNX_PATH=""
 MODEL_SOURCE=""
 ISING_ARTIFACTS_DIR=""
-ISING_ARTIFACTS_DIR_EXPLICIT=0
 EXTRA_APP_ARGS=()
 
 select_model_source() {
@@ -125,7 +124,6 @@ while [[ $# -gt 0 ]]; do
         exit 1
       fi
       ISING_ARTIFACTS_DIR=$2
-      ISING_ARTIFACTS_DIR_EXPLICIT=1
       shift 2
       ;;
     *)
@@ -149,23 +147,13 @@ elif [[ -n "$MODEL_SOURCE" ]]; then
   exit 1
 fi
 
-PYTHON_BIN=${PYTHON:-python3}
-if [[ "$MODEL_SOURCE" == "ising" ]]; then
-  if [[ -z "$ISING_ARTIFACTS_DIR" && \
-        ("$DISTANCE" != "7" || "$NUM_ROUNDS" != "7") ]]; then
-    echo "Error: the built-in Ising example only supports distance=7, num_rounds=7, basis=Z, orientation=XV, and p_spam=0.01"
-    echo "       To use another compatible export, pass --ising-artifacts-dir <dir>."
-    exit 1
-  fi
-  RESOLVER=$(dirname -- "$0")/resolve_ising_artifacts.py
-  RESOLVE_ARGS=(--distance "$DISTANCE" --num-rounds "$NUM_ROUNDS")
-  if [[ -n "$ISING_ARTIFACTS_DIR" ]]; then
-    RESOLVE_ARGS+=(--artifacts-dir "$ISING_ARTIFACTS_DIR")
-  fi
-  ISING_ARTIFACTS_DIR=$(
-    "$PYTHON_BIN" "$RESOLVER" "${RESOLVE_ARGS[@]}"
-  )
+if [[ "$MODEL_SOURCE" == "ising" && -z "$ISING_ARTIFACTS_DIR" && \
+      ("$DISTANCE" != "7" || "$NUM_ROUNDS" != "7") ]]; then
+  echo "Error: the built-in Ising example only supports distance=7, num_rounds=7, basis=Z, orientation=XV, and p_spam=0.01"
+  echo "       To use another compatible export, pass --ising-artifacts-dir <dir>."
+  exit 1
 fi
+PYTHON_BIN=${PYTHON:-python3}
 
 # The app defaults to one logical patch. The aggregate result sums residual
 # errors across patches, so retain the per-patch ceiling when --num_logical
@@ -284,7 +272,11 @@ if [[ -n "$ONNX_PATH" ]]; then
 fi
 if [[ "$MODEL_SOURCE" == "ising" ]]; then
   echo "  model source   = Ising"
-  echo "  artifacts dir  = $ISING_ARTIFACTS_DIR"
+  if [[ -n "$ISING_ARTIFACTS_DIR" ]]; then
+    echo "  artifacts dir  = $ISING_ARTIFACTS_DIR"
+  else
+    echo "  artifacts dir  = default CUDA-QX cache"
+  fi
 fi
 if [[ ${#EXTRA_APP_ARGS[@]} -gt 0 ]]; then
   echo "  extra args     = ${EXTRA_APP_ARGS[*]}"
@@ -311,7 +303,7 @@ if [[ -n "$ONNX_PATH" ]]; then
   GEN_ARGS+=(--onnx-path "$ONNX_PATH")
 elif [[ "$MODEL_SOURCE" == "ising" ]]; then
   GEN_ARGS+=(--use-ising)
-  if [[ "$ISING_ARTIFACTS_DIR_EXPLICIT" -eq 1 ]]; then
+  if [[ -n "$ISING_ARTIFACTS_DIR" ]]; then
     GEN_ARGS+=(--ising-artifacts-dir "$ISING_ARTIFACTS_DIR")
   fi
 fi
