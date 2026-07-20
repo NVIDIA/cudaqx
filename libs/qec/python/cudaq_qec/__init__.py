@@ -111,8 +111,6 @@ shuffle_pcm_columns = qecrt.shuffle_pcm_columns
 simplify_pcm = qecrt.simplify_pcm
 sort_pcm_columns = qecrt.sort_pcm_columns
 pcm_extend_to_n_rounds = qecrt.pcm_extend_to_n_rounds
-compute_msm = qecrt.compute_msm
-construct_mz_table = qecrt.construct_mz_table
 generate_timelike_sparse_detector_matrix = qecrt.generate_timelike_sparse_detector_matrix
 pcm_to_sparse_vec = qecrt.pcm_to_sparse_vec
 

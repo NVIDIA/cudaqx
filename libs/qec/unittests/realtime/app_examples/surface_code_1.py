@@ -42,12 +42,11 @@ def pcm_from_sparse_vec(sparse_vec: Iterable[int], num_rows: int,
     return pcm
 
 
-def save_dem_to_file(dem, dem_filename, numSyndromesPerRound, num_logical):
+def save_dem_to_file(dem, d_sparse, dem_filename, numSyndromesPerRound,
+                     num_logical):
     multi_config = qec.multi_decoder_config()
     decoders = []
     for i in range(num_logical):
-        # We actually send 1 additional round in this example, so add 1.
-        numRounds = dem.num_detectors() // numSyndromesPerRound + 1
         config = qec.decoder_config()
         config.id = i
         config.type = "multi_error_lut"
@@ -55,8 +54,7 @@ def save_dem_to_file(dem, dem_filename, numSyndromesPerRound, num_logical):
         config.syndrome_size = dem.num_detectors()
         config.H_sparse = qec.pcm_to_sparse_vec(dem.detector_error_matrix)
         config.O_sparse = qec.pcm_to_sparse_vec(dem.observables_flips_matrix)
-        config.D_sparse = qec.generate_timelike_sparse_detector_matrix(
-            numSyndromesPerRound, numRounds, False)
+        config.D_sparse = d_sparse
         config.decoder_custom_args = {"lut_error_depth": 2}
         decoders.append(config)
 
@@ -180,6 +178,14 @@ def se_x_ft(logical_qubit: patch,
     return results
 
 
+# Runs the stabilizer measurement rounds. When declare_detectors is set (DEM
+# generation), every round after the first declares one cross-round detector
+# per syndrome bit against the previous round, in the same [Z..., X...] order
+# the syndromes are enqueued; the first round is the reference round and
+# declares none of its own. All detector bookkeeping (the measure-handle
+# lists) is guarded by declare_detectors - a synthesized constant on hardware
+# targets - so it folds away entirely for live runs: the adaptive QIR profile
+# rejects the memory traffic that live measure-handle lists leave behind.
 @cudaq.kernel
 def custom_memory_circuit_stabs(
     data: cudaq.qview,
@@ -194,27 +200,35 @@ def custom_memory_circuit_stabs(
     logical_qubit_idx: int,
     decoder_window: int,
     manually_inject_errors: bool,
+    declare_detectors: bool,
 ) -> None:
     # Create the logical patch
     logical = patch(data, xstab_anc, zstab_anc)
-    # Mirror the C++ idiom `std::vector<measure_result>(N)`: pre-allocate a
-    # list of unbound `measure_handle`s, each slot is overwritten with a real
-    # handle from `se_z_ft`/`se_x_ft` before any discrimination occurs.
-    # Can't use `measure_handle`: https://github.com/NVIDIA/cuda-quantum/issues/4527
-    combined_syndrome = [False for i in range(len(xstab_anc) + len(zstab_anc))]
-    # Handle the stabilizer lock-in round (numRounds == 1)
+    # Bool mirror of the current round's syndrome for the enqueue calls,
+    # rebuilt in place each round with constant-bound loops (size queries on
+    # measure-handle lists, e.g. to_bools, do not survive the full loop
+    # unrolling that hardware targets require).
+    combined_bools = [False for i in range(len(xstab_anc) + len(zstab_anc))]
+    # The previous round's measurement handles (cross-round detectors only).
+    have_prev = False
+    prev = [
+        cudaq.measure_handle() for _ in range(len(xstab_anc) + len(zstab_anc))
+    ]
+
+    # Handle the stabilizer lock-in round (numRounds == 1). The syndrome
+    # lists are read with constant-bound indexed loops (len of the qviews):
+    # iterating the returned lists directly gives loops bounded by the list
+    # size, which does not survive the full loop unrolling that hardware
+    # targets require.
     if num_rounds == 1:
         syndrome_z = se_z_ft(logical, cnot_schedZ_flat)
         syndrome_x = se_x_ft(logical, cnot_schedX_flat)
-        i = 0
-        for s in syndrome_z:
-            combined_syndrome[i] = bool(s)
-            i += 1
-        for s in syndrome_x:
-            combined_syndrome[i] = bool(s)
-            i += 1
+        for k in range(len(zstab_anc)):
+            combined_bools[k] = bool(syndrome_z[k])
+        for k in range(len(xstab_anc)):
+            combined_bools[len(zstab_anc) + k] = bool(syndrome_x[k])
         if enqueue_synd:
-            qec.enqueue_syndromes_test(logical_qubit_idx, combined_syndrome, 0)
+            qec.enqueue_syndromes_test(logical_qubit_idx, combined_bools, 0)
         return
 
     # Process rounds window by window for the main measurement rounds
@@ -223,24 +237,34 @@ def custom_memory_circuit_stabs(
     for window_idx in range(num_rounds // decoder_window):
         # For window_idx > 0, enqueue the last syndrome from previous window first
         if window_idx > 0 and enqueue_synd:
-            qec.enqueue_syndromes_test(logical_qubit_idx, combined_syndrome, 0)
+            qec.enqueue_syndromes_test(logical_qubit_idx, combined_bools, 0)
 
         # Process the current window rounds
         for round_idx in range(window_idx * decoder_window,
                                (window_idx + 1) * decoder_window):
             syndrome_z = se_z_ft(logical, cnot_schedZ_flat)
             syndrome_x = se_x_ft(logical, cnot_schedX_flat)
-            i = 0
-            for s in syndrome_z:
-                combined_syndrome[i] = bool(s)
-                i += 1
-            for s in syndrome_x:
-                combined_syndrome[i] = bool(s)
-                i += 1
+            for k in range(len(zstab_anc)):
+                combined_bools[k] = bool(syndrome_z[k])
+            for k in range(len(xstab_anc)):
+                combined_bools[len(zstab_anc) + k] = bool(syndrome_x[k])
 
             if enqueue_synd:
-                qec.enqueue_syndromes_test(logical_qubit_idx, combined_syndrome,
-                                           0)
+                qec.enqueue_syndromes_test(logical_qubit_idx, combined_bools, 0)
+            if declare_detectors:
+                combined_syndrome = [
+                    cudaq.measure_handle()
+                    for _ in range(len(xstab_anc) + len(zstab_anc))
+                ]
+                for k in range(len(zstab_anc)):
+                    combined_syndrome[k] = syndrome_z[k]
+                for k in range(len(xstab_anc)):
+                    combined_syndrome[len(zstab_anc) + k] = syndrome_x[k]
+                if have_prev:
+                    for k in range(len(xstab_anc) + len(zstab_anc)):
+                        cudaq.detector(prev[k], combined_syndrome[k])
+                prev = combined_syndrome
+                have_prev = True
 
             if do_errors_after_non_last_rounds and round_idx < (
                     window_idx + 1) * decoder_window - 1:
@@ -251,9 +275,16 @@ def custom_memory_circuit_stabs(
                         x(logical.data[3])
 
 
+# When declare_detectors is set (only meaningful with num_logical = 1 and
+# allow_device_calls = False), the kernel annotates itself for DEM generation
+# via cudaq.dem_from_kernel: every stabilizer round declares cross-round
+# detectors against the previous round (the lock-in round is the first
+# reference), and the Z logical observable is declared over the final data
+# measurements at z_obs_indices.
 @cudaq.kernel
 def demo_circuit_qpu(
     allow_device_calls: bool,
+    declare_detectors: bool,
     #state_prep: Callable[[patch], None],
     num_data: int,
     num_ancx: int,
@@ -266,6 +297,7 @@ def demo_circuit_qpu(
     apply_corrections: bool,
     decoder_window: int,
     manually_inject_errors: bool,
+    z_obs_indices: List[int],
 ) -> int:
     # if PER_SHOT_DEBUG:
     #     debug_start_shot()
@@ -291,56 +323,90 @@ def demo_circuit_qpu(
         logical = patch(sub_data, sub_x, sub_z)
         prep_0(logical)  # FIXME: replace with state_prep(logical)
 
-    # One stabilizer round to lock in
-    for i in range(num_logical):
-        sub_data = data[i * num_data:(i + 1) *
-                        num_data]  # FIXME: all sub_data are incorrect
-        sub_x = xstab_anc[i * num_ancx:(i + 1) * num_ancx]  # same other vectors
-        sub_z = zstab_anc[i * num_ancz:(i + 1) * num_ancz]
+    if declare_detectors:
+        # DEM-generation slice (num_logical == 1, no device calls): a single
+        # call covering the stabilizer lock-in round plus one decoder window
+        # (num_rounds + 1 rounds, with spam after every non-last round). This
+        # reproduces the exact gate and noise sequence of the live path in
+        # the else branch - the injected error round there equals the
+        # per-round spam - while keeping all measurement handles inside one
+        # kernel call, so the lock-in round can serve as the reference round
+        # for the first cross-round detectors. Keep the two paths in
+        # lockstep.
+        sub_data = data[0:num_data]
+        sub_x = xstab_anc[0:num_ancx]
+        sub_z = zstab_anc[0:num_ancz]
         custom_memory_circuit_stabs(
             sub_data,
             sub_x,
             sub_z,
-            1,
+            num_rounds + 1,
             cnot_schedX_flat,
             cnot_schedZ_flat,
-            allow_device_calls,
-            False,
+            False,  # enqueue_synd
+            True,  # do_errors_after_non_last_rounds
             p_spam,
-            i,
-            decoder_window,
-            manually_inject_errors,
+            0,
+            num_rounds + 1,  # decoder_window: a single window
+            False,  # manually_inject_errors
+            True,  # declare_detectors
         )
+    else:
+        # One stabilizer round to lock in
+        for i in range(num_logical):
+            sub_data = data[i * num_data:(i + 1) *
+                            num_data]  # FIXME: all sub_data are incorrect
+            sub_x = xstab_anc[i * num_ancx:(i + 1) *
+                              num_ancx]  # same other vectors
+            sub_z = zstab_anc[i * num_ancz:(i + 1) * num_ancz]
+            custom_memory_circuit_stabs(
+                sub_data,
+                sub_x,
+                sub_z,
+                1,
+                cnot_schedX_flat,
+                cnot_schedZ_flat,
+                allow_device_calls,
+                False,
+                p_spam,
+                i,
+                decoder_window,
+                manually_inject_errors,
+                False,  # declare_detectors
+            )
 
-    # Inject errors
-    for i in range(num_logical):
-        sub_data = data[i * num_data:(i + 1) *
-                        num_data]  # FIXME: all sub_data are incorrect
-        sub_x = xstab_anc[i * num_ancx:(i + 1) * num_ancx]  # same other vectors
-        sub_z = zstab_anc[i * num_ancz:(i + 1) * num_ancz]
-        logical = patch(sub_data, sub_x, sub_z)
-        spam_error(logical, p_spam, 0.0, 0.0)
+        # Inject errors
+        for i in range(num_logical):
+            sub_data = data[i * num_data:(i + 1) *
+                            num_data]  # FIXME: all sub_data are incorrect
+            sub_x = xstab_anc[i * num_ancx:(i + 1) *
+                              num_ancx]  # same other vectors
+            sub_z = zstab_anc[i * num_ancz:(i + 1) * num_ancz]
+            logical = patch(sub_data, sub_x, sub_z)
+            spam_error(logical, p_spam, 0.0, 0.0)
 
-    # Do stabilizer rounds
-    for i in range(num_logical):
-        sub_data = data[i * num_data:(i + 1) *
-                        num_data]  # FIXME: all sub_data are incorrect
-        sub_x = xstab_anc[i * num_ancx:(i + 1) * num_ancx]  # same other vectors
-        sub_z = zstab_anc[i * num_ancz:(i + 1) * num_ancz]
-        custom_memory_circuit_stabs(
-            sub_data,
-            sub_x,
-            sub_z,
-            num_rounds,
-            cnot_schedX_flat,
-            cnot_schedZ_flat,
-            allow_device_calls,
-            True,
-            p_spam,
-            i,
-            decoder_window,
-            manually_inject_errors,
-        )
+        # Do stabilizer rounds
+        for i in range(num_logical):
+            sub_data = data[i * num_data:(i + 1) *
+                            num_data]  # FIXME: all sub_data are incorrect
+            sub_x = xstab_anc[i * num_ancx:(i + 1) *
+                              num_ancx]  # same other vectors
+            sub_z = zstab_anc[i * num_ancz:(i + 1) * num_ancz]
+            custom_memory_circuit_stabs(
+                sub_data,
+                sub_x,
+                sub_z,
+                num_rounds,
+                cnot_schedX_flat,
+                cnot_schedZ_flat,
+                allow_device_calls,
+                True,
+                p_spam,
+                i,
+                decoder_window,
+                manually_inject_errors,
+                False,  # declare_detectors
+            )
 
     # Only apply corrections after processing all windows
     if allow_device_calls and apply_corrections:
@@ -365,7 +431,19 @@ def demo_circuit_qpu(
             ret = ret << num_data
         sub_data = data[i * num_data:(i + 1) * num_data]
         sub_meas = mz(sub_data)
-        ret |= cudaq.to_integer(cudaq.to_bools(sub_meas))
+        if declare_detectors and i == 0:
+            zlog = [cudaq.measure_handle() for _ in range(len(z_obs_indices))]
+            for k in range(len(z_obs_indices)):
+                zlog[k] = sub_meas[z_obs_indices[k]]
+            cudaq.logical_observable(zlog, observable_index=0)
+        # Pack the measured bits branch-free (bit j = data qubit j, the same
+        # LSB-first order as cudaq.to_integer). Routing the measurement
+        # results through a call (to_bools/to_integer) or a branch would tag
+        # this kernel with qubitMeasurementFeedback, which
+        # cudaq.dem_from_kernel rejects.
+        for j in range(num_data):
+            bitval = sub_meas[j]
+            ret = ret | (bitval << j)
 
     # The remaining bits are allocated to the number of corrections.
     ret = ret | (num_corrections << (num_data * num_logical))
@@ -423,7 +501,16 @@ def demo_circuit_host(code_obj: qec.code,
 
     noise = cudaq.NoiseModel()
 
-    # Build or load DEM (MSM path)
+    # The Z logical observable's data-qubit support (row 0 of the Z
+    # observables matrix); demo_circuit_qpu declares the matching
+    # logical_observable over the final data measurements when generating the
+    # DEM.
+    obs_matrix = code_obj.get_observables_z()
+    z_obs_indices = [
+        int(col) for col in range(obs_matrix.shape[1]) if obs_matrix[0, col]
+    ]
+
+    # Build or load DEM
     dem = qec.DetectorErrorModel()
 
     if load_dem:
@@ -433,101 +520,59 @@ def demo_circuit_host(code_obj: qec.code,
         print(f"Preparing DEM to save to {dem_filename}")
         # Always use stim to build the DEM
         cudaq.set_target("stim")
-        cudaq.set_noise(noise)
         if p_spam == 0.0:
+            raise RuntimeError("Cannot build a DEM with p_spam = 0.0.")
+        # Analyze the same demo_circuit_qpu kernel the shots run, with
+        # declare_detectors so it annotates its detectors and observable.
+        # Always use numLogical = 1, and decoder_window rounds instead of
+        # numRounds: the decoder consumes one window at a time.
+        dem_text, m2d, m2o = cudaq.dem_from_kernel(
+            demo_circuit_qpu,
+            False,  # allow_device_calls
+            True,  # declare_detectors
+            num_data,
+            num_ancx,
+            num_ancz,
+            decoder_window,  # Use decoder_window instead of numRounds for DEM generation
+            1,  # numLogical
+            cnot_schedX_flat,
+            cnot_schedZ_flat,
+            p_spam,
+            False,  # applyCorrections
+            decoder_window,
+            False,  # manuallyInjectErrors
+            z_obs_indices,
+            noise_model=noise,
+            return_measurement_matrices=True)
+        dem = qec.dem_from_stim_text(dem_text)
+
+        numSyndromesPerRound = distance * distance - 1
+        if dem.num_detectors() != decoder_window * numSyndromesPerRound:
             raise RuntimeError(
-                "Cannot build a DEM with p_spam = 0.0 (cannot get the MSM).")
-        # Always use numLogical = 1 for the MSM
-        (msm_as_strings, msm_dimensions, msm_probabilities, msm_prob_err_id
-        ) = qec.compute_msm(
-            lambda: demo_circuit_qpu(
-                False,
-                num_data,
-                num_ancx,
-                num_ancz,
-                decoder_window,  # Use decoder_window instead of numRounds for DEM generation
-                1,  # numLogical
-                cnot_schedX_flat,
-                cnot_schedZ_flat,
-                p_spam,
-                False,  # applyCorrections
-                decoder_window,
-                False,  # manuallyInjectErrors
-            ),
-            True)
-
-        print("MSM result obtained.")
-        # print(f"MSM dimensions: {msm_dimensions}")
-        # print(f"MSM probabilities: {msm_probabilities}")
-        # print(f"MSM probability error ID: {msm_prob_err_id}")
-
-        # Populate error rates and error IDs
-        dem.error_rates = msm_probabilities
-        dem.error_ids = msm_prob_err_id
-        mzTable = qec.construct_mz_table(msm_as_strings)
-        print("mzTable:", mzTable)
-        # Subtract the number of data qubits to get the number of syndrome measurements.
-        totalNumSyndromes = mzTable.shape[0] - distance * distance
-        numNoiseMechs = mzTable.shape[1]
-        numSyndromesPerRound = distance * distance - 1
-        if (totalNumSyndromes % numSyndromesPerRound != 0):
-            raise RuntimeError("Num syndromes per round is not a divisor of "
-                               "the number of syndrome measurements")
-
-        numRoundsOfSyndromData = totalNumSyndromes // numSyndromesPerRound
-        if (numRoundsOfSyndromData != decoder_window +
-                1):  # Use decoder_window instead of numRounds
-            raise RuntimeError("Num rounds of syndrome data [" +
-                               str(numRoundsOfSyndromData) +
-                               "] is not equal to the decoder_window + 1[" +
-                               str(decoder_window + 1) + "]")
-        detector_error_matrix = np.zeros(
-            (decoder_window * numSyndromesPerRound, numNoiseMechs),
-            dtype=np.uint8)
-        # There should be (decoder_window + 1) rounds of data in MSM.
-        # TODO: [feature] Good candidate. Auto-generating the detector error
-        # matrix. Currently, we need to manually construct the detector error
-        # matrix by copying the measurements from the MSM.
-        for round in range(
-                decoder_window):  # Use decoder_window instead of numRounds
-            for syndrome in range(numSyndromesPerRound):
-                for noise_mech in range(numNoiseMechs):
-                    detector_error_matrix[
-                        round * numSyndromesPerRound + syndrome,
-                        noise_mech] = mzTable[
-                            (round + 0) * numSyndromesPerRound + syndrome,
-                            noise_mech] ^ mzTable[
-                                (round + 1) * numSyndromesPerRound + syndrome,
-                                noise_mech]
-        dem.detector_error_matrix = detector_error_matrix
-        print("detector_error_matrix:", dem.detector_error_matrix)
-
-        first_data_row = (
-            decoder_window +
-            1) * numSyndromesPerRound  # Use decoder_window instead of numRounds
-        numSyndromesPerRound = distance * distance - 1
-        msm_obs = np.zeros((mzTable.shape[0] - first_data_row, numNoiseMechs),
-                           dtype=np.uint8)
-        for row in range(first_data_row, mzTable.shape[0]):
-            for col in range(numNoiseMechs):
-                msm_obs[row - first_data_row, col] = mzTable[row, col]
-
-        print("msm_obs:", msm_obs)
-
-        # Populate dem.observables_flips_matrix by converting the physical data
-        # qubit measurements to logical observables.
-        obs_matrix = code_obj.get_observables_z()
-        print("obs_matrix:", obs_matrix)
-        dem.observables_flips_matrix = (obs_matrix @ msm_obs) % 2
+                "Number of detectors [" + str(dem.num_detectors()) +
+                "] is not equal to decoder_window * numSyndromesPerRound [" +
+                str(decoder_window * numSyndromesPerRound) + "]")
         print("numSyndromesPerRound:", numSyndromesPerRound)
         dem.canonicalize_for_rounds(numSyndromesPerRound,
                                     remove_zero_syndrome_errors=True)
+
+        # The runtime detector matrix comes straight from the analysis'
+        # measurements-to-detectors map: row d lists the (chronological, and
+        # thus enqueue-ordered) measurement indices whose XOR forms detector
+        # d.
+        m2d = m2d.tocsr()
+        d_sparse = []
+        for r in range(m2d.shape[0]):
+            row = m2d.indices[m2d.indptr[r]:m2d.indptr[r + 1]]
+            d_sparse.extend(sorted(int(c) for c in row))
+            d_sparse.append(-1)
 
         print("dem.detector_error_matrix:")
         print(dem.detector_error_matrix)
         print("dem.observables_flips_matrix:")
         print(dem.observables_flips_matrix)
-        save_dem_to_file(dem, dem_filename, numSyndromesPerRound, num_logical)
+        save_dem_to_file(dem, d_sparse, dem_filename, numSyndromesPerRound,
+                         num_logical)
         return
 
     # Actual run
@@ -584,7 +629,8 @@ def demo_circuit_host(code_obj: qec.code,
     # Run shots
     run_result = cudaq.run(
         demo_circuit_qpu,
-        True,
+        True,  # allow_device_calls
+        False,  # declare_detectors
         # prep_0,
         num_data,
         num_ancx,
@@ -597,13 +643,13 @@ def demo_circuit_host(code_obj: qec.code,
         True,
         decoder_window,
         manually_inject_errors,
+        z_obs_indices,
         shots_count=num_shots,
         noise_model=cudaq.NoiseModel() if not is_remote_qpu else None)
 
     print("Done with cudaq.run!")
     # print(f"Result: {len(run_result)}")
 
-    obs_matrix = code_obj.get_observables_z()
     num_non_zero = 0
     num_corrections = 0
     print("Result size: " + str(len(run_result)))

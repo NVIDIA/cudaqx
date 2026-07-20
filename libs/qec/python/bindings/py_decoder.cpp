@@ -5,7 +5,6 @@
  * This source code and the accompanying materials are made available under    *
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
-#include "common/ExecutionContext.h"
 #include "cuda-qx/core/kwargs_utils.h"
 #include "cuda-qx/core/library_utils.h"
 #include "type_casters.h"
@@ -1403,50 +1402,6 @@ void bindDecoder(nb::module_ &mod) {
       R"pbdoc(
         [Internal] Load local simulation realtime decoder library.
       )pbdoc");
-
-  qecmod.def(
-      "compute_msm",
-      [](std::function<void()> kernel, bool verbose = false) {
-        cudaq::ExecutionContext ctx_msm_size("msm_size");
-        auto &platform = cudaq::get_platform();
-        platform.with_execution_context(ctx_msm_size, kernel);
-        if (!ctx_msm_size.msm_dimensions.has_value()) {
-          throw std::runtime_error("No MSM dimensions found");
-        }
-        if (ctx_msm_size.msm_dimensions.value().second == 0) {
-          throw std::runtime_error("No MSM dimensions found");
-        }
-        cudaq::ExecutionContext ctx_msm("msm");
-        ctx_msm.msm_dimensions = ctx_msm_size.msm_dimensions;
-        platform.with_execution_context(ctx_msm, kernel);
-
-        auto msm_as_strings = ctx_msm.result.sequential_data();
-        if (verbose) {
-          printf("MSM Dimensions: %ld measurements x %ld error mechanisms\n",
-                 ctx_msm.msm_dimensions.value().first,
-                 ctx_msm.msm_dimensions.value().second);
-          for (std::size_t i = 0; i < ctx_msm.msm_dimensions.value().first;
-               i++) {
-            for (std::size_t j = 0; j < ctx_msm.msm_dimensions.value().second;
-                 j++) {
-              printf("%c", msm_as_strings[j][i] == '1' ? '1' : '.');
-            }
-            printf("\n");
-          }
-        }
-        return std::make_tuple(msm_as_strings, ctx_msm.msm_dimensions.value(),
-                               ctx_msm.msm_probabilities.value(),
-                               ctx_msm.msm_prob_err_id.value());
-      },
-      "");
-  qecmod.def(
-      "construct_mz_table",
-      [](const std::vector<std::string> &msm_as_strings) {
-        cudaqx::tensor<uint8_t> mzTable(msm_as_strings);
-        mzTable = mzTable.transpose();
-        return cudaq::python::copyCUDAQXTensorToPyArray(mzTable);
-      },
-      "");
 
   qecmod.def(
       "generate_timelike_sparse_detector_matrix",
