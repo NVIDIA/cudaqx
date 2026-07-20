@@ -1268,6 +1268,128 @@ TEST(QECCodeTester, checkStabilizerGrid) {
   }
 }
 
+TEST(SurfaceCodeTester, checkCnotSchedule) {
+  using cudaq::qec::surface_code::stabilizer_grid;
+
+  // Verify a schedule matrix against its parity matrix and the hook-error
+  // requirement: the pair of data qubits touched by the two *last* CNOTs of
+  // every weight-4 plaquette must be perpendicular to the same-type logical.
+  auto check_schedule = [](const cudaqx::tensor<uint8_t> &sched,
+                           const cudaqx::tensor<uint8_t> &parity,
+                           uint32_t distance, bool expect_vertical_hook_pair,
+                           const std::string &label) {
+    ASSERT_EQ(sched.shape(), parity.shape()) << label;
+    const auto num_stabs = sched.shape()[0];
+    const auto num_data = sched.shape()[1];
+    for (std::size_t s = 0; s < num_stabs; ++s) {
+      std::vector<std::size_t> support; // data idx per ascending timestep
+      std::vector<bool> steps_seen(5, false);
+      for (std::size_t d = 0; d < num_data; ++d) {
+        auto step = sched.at({s, d});
+        // Support pattern must match the parity-matrix row exactly (this
+        // also pins the row ordering to the sorted parity rows).
+        EXPECT_EQ(step != 0, parity.at({s, d}) != 0)
+            << label << " row " << s << " col " << d;
+        if (step == 0)
+          continue;
+        ASSERT_LE(step, 4) << label << " row " << s;
+        EXPECT_FALSE(steps_seen[step])
+            << label << " row " << s << " duplicate step";
+        steps_seen[step] = true;
+      }
+      for (uint8_t step = 1; step <= 4; ++step)
+        for (std::size_t d = 0; d < num_data; ++d)
+          if (sched.at({s, d}) == step)
+            support.push_back(d);
+      ASSERT_TRUE(support.size() == 2 || support.size() == 4)
+          << label << " row " << s;
+      if (support.size() == 4) {
+        // Hook errors on the ancilla propagate to the data qubits of the two
+        // remaining CNOTs; that pair must run against the logical direction.
+        auto a = support[2], b = support[3];
+        int row_a = a / distance, col_a = a % distance;
+        int row_b = b / distance, col_b = b % distance;
+        if (expect_vertical_hook_pair) {
+          EXPECT_EQ(col_a, col_b) << label << " row " << s;
+          EXPECT_EQ(1, std::abs(row_a - row_b)) << label << " row " << s;
+        } else {
+          EXPECT_EQ(row_a, row_b) << label << " row " << s;
+          EXPECT_EQ(1, std::abs(col_a - col_b)) << label << " row " << s;
+        }
+      }
+    }
+  };
+
+  for (uint32_t distance : {3u, 5u, 7u}) {
+    for (auto orientation : {sc_orientation::XV, sc_orientation::XH,
+                             sc_orientation::ZV, sc_orientation::ZH}) {
+      stabilizer_grid grid(distance, orientation);
+      auto stabs = grid.get_spin_op_stabilizers();
+      auto parity_x =
+          cudaq::qec::to_parity_matrix(stabs, cudaq::qec::stabilizer_type::X);
+      auto parity_z =
+          cudaq::qec::to_parity_matrix(stabs, cudaq::qec::stabilizer_type::Z);
+      auto sched_x = grid.get_cnot_schedule_x();
+      auto sched_z = grid.get_cnot_schedule_z();
+
+      const std::string label =
+          "d=" + std::to_string(distance) +
+          " orientation=" + std::to_string(static_cast<int>(orientation));
+
+      // XV/ZH place the X logical along the top data row (horizontal), so X
+      // hook pairs must be vertical and Z hook pairs horizontal; XH/ZV swap
+      // the logicals and hence the requirement.
+      const bool x_logical_horizontal = orientation == sc_orientation::XV ||
+                                        orientation == sc_orientation::ZH;
+      check_schedule(sched_x, parity_x, distance,
+                     /*expect_vertical_hook_pair=*/x_logical_horizontal,
+                     label + " X");
+      check_schedule(sched_z, parity_z, distance,
+                     /*expect_vertical_hook_pair=*/!x_logical_horizontal,
+                     label + " Z");
+
+      // The X and Z schedules must also be conflict-free if interleaved: no
+      // data qubit is touched by two CNOTs in the same timestep.
+      const auto num_data = distance * distance;
+      for (uint8_t step = 1; step <= 4; ++step) {
+        std::vector<int> touches(num_data, 0);
+        for (std::size_t s = 0; s < sched_x.shape()[0]; ++s)
+          for (std::size_t d = 0; d < num_data; ++d)
+            if (sched_x.at({s, d}) == step)
+              touches[d]++;
+        for (std::size_t s = 0; s < sched_z.shape()[0]; ++s)
+          for (std::size_t d = 0; d < num_data; ++d)
+            if (sched_z.at({s, d}) == step)
+              touches[d]++;
+        for (std::size_t d = 0; d < num_data; ++d)
+          EXPECT_LE(touches[d], 1)
+              << label << " step " << int(step) << " data " << d;
+      }
+
+      // The surface_code plugin must expose the grid schedule.
+      const std::string orientation_str =
+          orientation == sc_orientation::XV   ? "XV"
+          : orientation == sc_orientation::XH ? "XH"
+          : orientation == sc_orientation::ZV ? "ZV"
+                                              : "ZH";
+      auto code = cudaq::qec::get_code(
+          "surface_code", cudaqx::heterogeneous_map{
+                              {"distance", static_cast<std::size_t>(distance)},
+                              {"orientation", orientation_str}});
+      auto code_sched_x = code->get_stabilizer_schedule_x();
+      ASSERT_EQ(code_sched_x.shape(), sched_x.shape()) << label;
+      for (std::size_t s = 0; s < sched_x.shape()[0]; ++s)
+        for (std::size_t d = 0; d < num_data; ++d)
+          EXPECT_EQ(code_sched_x.at({s, d}), sched_x.at({s, d})) << label;
+      auto code_sched_z = code->get_stabilizer_schedule_z();
+      ASSERT_EQ(code_sched_z.shape(), sched_z.shape()) << label;
+      for (std::size_t s = 0; s < sched_z.shape()[0]; ++s)
+        for (std::size_t d = 0; d < num_data; ++d)
+          EXPECT_EQ(code_sched_z.at({s, d}), sched_z.at({s, d})) << label;
+    }
+  }
+}
+
 TEST(SurfaceCodeTester, checkVec2dOperators) {
   // Test vec2d operators that are used in stabilizer_grid maps
   using cudaq::qec::surface_code::vec2d;
@@ -1701,6 +1823,96 @@ TEST(PCMUtilsTester, checkGetPCMForRounds) {
   }
 }
 
+TEST(PCMUtilsTester, checkGetSortedColumnIndicesWithBoundary) {
+  // Boundary layout: interior width S = 8, boundary width B = 6. The
+  // boundary-aware overload must map detector rows to rounds as
+  //   round(r) = (r < B) ? 0 : 1 + (r - B) / S,
+  // whereas the plain overload uses r / S. The two disagree on the transition
+  // rows [B, S), which is what this test pins down.
+  const std::uint32_t S = 8, B = 6;
+
+  // Three columns whose correct (boundary) round order differs from the order
+  // the plain r/S mapping produces:
+  //   c0 = {5, 12} : boundary span (0, 1),  r/S span (0, 1)
+  //   c1 = {6}     : boundary span (1, 1),  r/S span (0, 0)
+  //   c2 = {0}     : boundary span (0, 0),  r/S span (0, 0)
+  std::vector<std::vector<std::uint32_t>> cols = {{5, 12}, {6}, {0}};
+
+  // Boundary order sorts by (first_round, last_round): c2(0,0) < c0(0,1) <
+  // c1(1,1), i.e. indices {2, 0, 1}.
+  auto order = cudaq::qec::get_sorted_pcm_column_indices(cols, S, B);
+  EXPECT_EQ(order, (std::vector<std::uint32_t>{2, 0, 1}));
+
+  // The plain r/S mapping would put c1 in round 0, yielding a different order
+  // ({2, 1, 0}); confirm the boundary argument actually changes the result.
+  auto uniform_order = cudaq::qec::get_sorted_pcm_column_indices(cols, S);
+  EXPECT_EQ(uniform_order, (std::vector<std::uint32_t>{2, 1, 0}));
+  EXPECT_NE(order, uniform_order);
+
+  // Invalid boundary arguments must throw rather than divide by zero or
+  // silently misassign rounds.
+  EXPECT_THROW(cudaq::qec::get_sorted_pcm_column_indices(cols, 0, B),
+               std::invalid_argument);
+  EXPECT_THROW(cudaq::qec::get_sorted_pcm_column_indices(cols, S, S + 1),
+               std::invalid_argument);
+}
+
+TEST(PCMUtilsTester, checkPCMIsSortedWithBoundary) {
+  // Same boundary layout as above (S = 8, B = 6). Rows < B are round 0; the
+  // boundary and uniform mappings disagree on rows [B, S).
+  const std::uint32_t S = 8, B = 6;
+
+  // Columns in boundary-sorted order: spans (0,0) < (0,1) < (1,1).
+  std::vector<std::vector<std::uint32_t>> sorted = {{0}, {5, 12}, {6}};
+  EXPECT_TRUE(cudaq::qec::pcm_is_sorted(sorted, S, B));
+
+  // Swapping the last two breaks the boundary order: {6} is round 1 and must
+  // follow {5, 12} (which ends in round 1), so this is not boundary-sorted.
+  std::vector<std::vector<std::uint32_t>> unsorted = {{0}, {6}, {5, 12}};
+  EXPECT_FALSE(cudaq::qec::pcm_is_sorted(unsorted, S, B));
+
+  // The uniform overload disagrees: both {6} and {5, 12}
+  // start in round 0, so `unsorted` *is* uniform-sorted.
+  EXPECT_TRUE(cudaq::qec::pcm_is_sorted(unsorted, S));
+}
+
+TEST(PCMUtilsTester, checkGetPCMForRoundsWithBoundary) {
+  // Boundary layout [B | S | S | B] with B = 2, S = 4 -> 12 rows, 4 rounds:
+  //   round 0: rows [0,2), round 1: [2,6), round 2: [6,10), round 3: [10,12).
+  const std::uint32_t S = 4, B = 2;
+  const std::size_t n_rows = 12;
+
+  // Identity PCM: column j triggers exactly detector row j.
+  cudaqx::tensor<uint8_t> pcm({n_rows, n_rows});
+  for (std::size_t j = 0; j < n_rows; ++j)
+    pcm.at({j, j}) = 1;
+
+  // The leading boundary round is B rows wide, not S: the boundary overload
+  // keeps rows [0,B) while the uniform interpretation keeps rows [0,S).
+  auto [sub_b, fc_b, lc_b] = cudaq::qec::get_pcm_for_rounds(
+      pcm, S, /*start_round=*/0, /*end_round=*/0, /*straddle_start=*/false,
+      /*straddle_end=*/false, /*num_boundary_syndromes=*/B);
+  EXPECT_EQ(sub_b.shape()[0], B);
+  auto [sub_u, fc_u, lc_u] = cudaq::qec::get_pcm_for_rounds(
+      pcm, S, /*start_round=*/0, /*end_round=*/0);
+  EXPECT_EQ(sub_u.shape()[0], S);
+
+  // Spanning every round returns all rows (confirms the round count is right).
+  auto [sub_all, fc_all, lc_all] = cudaq::qec::get_pcm_for_rounds(
+      pcm, S, /*start_round=*/0, /*end_round=*/3, false, false, B);
+  EXPECT_EQ(sub_all.shape()[0], n_rows);
+
+  // Invalid boundary arguments / inconsistent row counts must throw.
+  EXPECT_THROW(
+      cudaq::qec::get_pcm_for_rounds(pcm, S, 0, 0, false, false, S + 1),
+      std::invalid_argument);
+  // 13 rows cannot be split as 2*B + K*S for B = 2, S = 4.
+  cudaqx::tensor<uint8_t> bad_pcm({13, 13});
+  EXPECT_THROW(
+      cudaq::qec::get_pcm_for_rounds(bad_pcm, S, 0, 0, false, false, B),
+      std::invalid_argument);
+}
+
 TEST(PCMUtilsTester, checkShufflePCMColumns) {
   std::size_t n_rounds = 4;
   std::size_t n_errs_per_round = 30;
@@ -1985,6 +2197,21 @@ TEST(DetectorErrorModelTest, FailureOnEmptyErrorRatesCanonicalize) {
   EXPECT_EQ(dem.num_observables(), 1);
 
   EXPECT_THROW(dem.canonicalize_for_rounds(2), std::runtime_error);
+}
+
+TEST(DetectorErrorModelTest, CanonicalizeBoundaryRejectsWideBoundary) {
+  // The boundary-aware overload must reject a boundary wider than the interior
+  // (num_boundary_syndromes > num_syndromes_per_round)
+  cudaq::qec::detector_error_model dem;
+  dem.detector_error_matrix = cudaqx::tensor<uint8_t>({4, 2});
+  dem.observables_flips_matrix = cudaqx::tensor<uint8_t>({1, 2});
+  dem.error_rates = {0.1, 0.2};
+
+  EXPECT_THROW(dem.canonicalize_for_rounds_with_boundary(
+                   /*num_syndromes_per_round=*/2,
+                   /*num_boundary_syndromes=*/3,
+                   /*remove_zero_syndrome_errors=*/true),
+               std::invalid_argument);
 }
 
 TEST(DetectorErrorModelTest, CanonicalizeWithoutErrorIds) {

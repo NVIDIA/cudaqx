@@ -30,9 +30,13 @@ Detector Error Model
 .. doxygenstruct:: cudaq::qec::detector_error_model
     :members:
 
+.. doxygenstruct:: cudaq::qec::decoder_context
+    :members:
+
 .. doxygenfunction:: cudaq::qec::dem_from_memory_circuit(const code &, operation, std::size_t, cudaq::noise_model &, bool)
 .. doxygenfunction:: cudaq::qec::x_dem_from_memory_circuit(const code &, operation, std::size_t, cudaq::noise_model &, bool)
 .. doxygenfunction:: cudaq::qec::z_dem_from_memory_circuit(const code &, operation, std::size_t, cudaq::noise_model &, bool)
+.. doxygenfunction:: cudaq::qec::decoder_context_from_memory_circuit(const code &, operation, std::size_t, cudaq::noise_model &, bool)
 .. doxygenfunction:: cudaq::qec::dem_from_stim_text(const std::string &, bool)
 
 Decoder Interfaces
@@ -108,14 +112,16 @@ rejects dimensions whose products overflow ``std::size_t``.
 .. doxygenfunction:: cudaq::qec::generate_random_pcm_sparse(std::size_t, std::size_t, std::size_t, int, std::mt19937_64 &&);
 .. doxygenfunction:: cudaq::qec::generate_timelike_sparse_detector_matrix(std::uint32_t num_syndromes_per_round, std::uint32_t num_rounds, bool include_first_round = false)
 .. doxygenfunction:: cudaq::qec::generate_timelike_sparse_detector_matrix(std::uint32_t num_syndromes_per_round, std::uint32_t num_rounds, std::vector<std::int64_t> first_round_matrix)
-.. doxygenfunction:: cudaq::qec::get_pcm_for_rounds(const cudaqx::tensor<uint8_t> &, std::uint32_t, std::uint32_t, std::uint32_t, bool, bool);
-.. doxygenfunction:: cudaq::qec::get_pcm_for_rounds(const sparse_binary_matrix &, std::uint32_t, std::uint32_t, std::uint32_t, bool, bool, bool);
+.. doxygenfunction:: cudaq::qec::get_pcm_for_rounds(const cudaqx::tensor<uint8_t> &, std::uint32_t, std::uint32_t, std::uint32_t, bool, bool, std::uint32_t);
+.. doxygenfunction:: cudaq::qec::get_pcm_for_rounds(const sparse_binary_matrix &, std::uint32_t, std::uint32_t, std::uint32_t, bool, bool, bool, std::uint32_t);
 .. doxygenfunction:: cudaq::qec::get_sorted_pcm_column_indices(const std::vector<std::vector<std::uint32_t>> &, std::uint32_t);
+.. doxygenfunction:: cudaq::qec::get_sorted_pcm_column_indices(const std::vector<std::vector<std::uint32_t>> &, std::uint32_t, std::uint32_t);
 .. doxygenfunction:: cudaq::qec::get_sorted_pcm_column_indices(const cudaqx::tensor<uint8_t> &, std::uint32_t);
 .. doxygenfunction:: cudaq::qec::pcm_extend_to_n_rounds(const cudaqx::tensor<uint8_t> &, std::size_t, std::uint32_t);
 .. doxygenfunction:: cudaq::qec::pcm_from_sparse_string(const std::string &, std::size_t, std::size_t)
 .. doxygenfunction:: cudaq::qec::pcm_from_sparse_vec(const std::vector<std::int64_t>& sparse_vec, std::size_t num_rows, std::size_t num_cols)
 .. doxygenfunction:: cudaq::qec::pcm_is_sorted(const cudaqx::tensor<uint8_t> &, std::uint32_t);
+.. doxygenfunction:: cudaq::qec::pcm_is_sorted(const std::vector<std::vector<std::uint32_t>> &, std::uint32_t, std::uint32_t);
 .. doxygenfunction:: cudaq::qec::pcm_to_sparse_string(const cudaqx::tensor<uint8_t> &)
 .. doxygenfunction:: cudaq::qec::pcm_to_sparse_string(const sparse_binary_matrix &)
 .. doxygenfunction:: cudaq::qec::pcm_to_sparse_vec(const cudaqx::tensor<uint8_t>& pcm)

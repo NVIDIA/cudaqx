@@ -29,9 +29,13 @@ Detector Error Model
 .. autoclass:: cudaq_qec.DetectorErrorModel
     :members:
 
+.. autoclass:: cudaq_qec.DecoderContext
+    :members:
+
 .. autofunction:: cudaq_qec.dem_from_memory_circuit
 .. autofunction:: cudaq_qec.x_dem_from_memory_circuit
 .. autofunction:: cudaq_qec.z_dem_from_memory_circuit
+.. autofunction:: cudaq_qec.decoder_context_from_memory_circuit
 .. autofunction:: cudaq_qec.dem_from_stim_text
 
 Decoder Interfaces

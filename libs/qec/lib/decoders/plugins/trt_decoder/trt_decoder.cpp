@@ -7,6 +7,7 @@
  ******************************************************************************/
 
 #include "cudaq/qec/decoder.h"
+#include "cudaq/qec/decoder_config_schema.h"
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/trt_decoder_internal.h"
@@ -167,7 +168,8 @@ struct TraditionalExecutor {
                               input_buffer);
     context->setTensorAddress(engine->getIOTensorName(output_index),
                               output_buffer);
-    context->enqueueV3(stream);
+    if (!context->enqueueV3(stream))
+      throw std::runtime_error("TensorRT enqueueV3 failed");
     HANDLE_CUDA_ERROR(cudaStreamSynchronize(stream));
   }
 };
@@ -399,9 +401,6 @@ private:
   struct Impl;
   std::unique_ptr<Impl> impl_;
 
-  // True when decoder is fully configured and ready for inference
-  bool decoder_ready_ = false;
-
   // Batch dimension from TensorRT model (first dimension of input tensor)
   size_t model_batch_size_ = 1;
 
@@ -441,10 +440,6 @@ public:
 private:
   void check_cuda();
 
-  /// Size to use for failed placeholder results. This preserves the
-  /// decode_batch contract even when inference fails before producing output.
-  size_t failure_result_size() const;
-
   /// Typed decode_batch: input and output dtypes are selected independently
   /// from the TensorRT engine metadata (currently float or uint8_t).
   template <typename InputType, typename OutputType>
@@ -469,7 +464,7 @@ struct trt_decoder::Impl {
   size_t input_elem_size = sizeof(float);
   size_t output_elem_size = sizeof(float);
   void *buffers[2] = {nullptr, nullptr};
-  cudaStream_t stream;
+  cudaStream_t stream = nullptr;
 
   // Dynamic batch: set input shape before each inference (only when dynamic)
   bool has_dynamic_batch_ = false;
@@ -517,12 +512,13 @@ struct trt_decoder::Impl {
     context.reset();
     engine.reset();
 
-    // 4. Free GPU buffers
-    if (buffers[input_index]) {
+    // 4. Free GPU buffers.  The indices are -1 mid-construction (binding
+    // scan), and the constructor can throw there.
+    if (input_index >= 0 && buffers[input_index]) {
       HANDLE_CUDA_ERROR_NO_THROW(cudaFree(buffers[input_index]));
       buffers[input_index] = nullptr;
     }
-    if (buffers[output_index]) {
+    if (output_index >= 0 && buffers[output_index]) {
       HANDLE_CUDA_ERROR_NO_THROW(cudaFree(buffers[output_index]));
       buffers[output_index] = nullptr;
     }
@@ -541,7 +537,7 @@ struct trt_decoder::Impl {
 
 trt_decoder::trt_decoder(const cudaq::qec::sparse_binary_matrix &H,
                          const cudaqx::heterogeneous_map &params)
-    : decoder(H), decoder_ready_(false) {
+    : decoder(H) {
 
   impl_ = std::make_unique<Impl>();
 
@@ -825,12 +821,12 @@ trt_decoder::trt_decoder(const cudaq::qec::sparse_binary_matrix &H,
                     num_observables_);
     }
 
-    // Decoder is now fully configured and ready for inference
-    decoder_ready_ = true;
-
   } catch (const std::exception &e) {
-    CUDA_QEC_WARN("TensorRT initialization failed: {}", e.what());
-    decoder_ready_ = false;
+    // Fail fast: a decoder that cannot infer must not exist. Callers
+    // (decoder::get, configure_decoders, the decoding server) all propagate
+    // or map this to their error channel.
+    throw std::runtime_error(std::string("TensorRT initialization failed: ") +
+                             e.what());
   }
 }
 
@@ -863,27 +859,12 @@ decoder_result trt_decoder::decode(const std::vector<float_t> &syndrome) {
       padded_batch.push_back(zero_syndrome);
     }
 
-    auto results = decode_batch(padded_batch);
-    if (results.empty()) {
-      decoder_result result;
-      result.converged = false;
-      result.result.resize(failure_result_size(), 0.0f);
-      return result;
-    }
-
     // Return only the first result (the real syndrome)
-    return results[0];
+    return decode_batch(padded_batch)[0];
   }
 
   // For batch_size == 1, directly delegate to decode_batch
-  auto results = decode_batch({syndrome});
-  if (results.empty()) {
-    decoder_result result;
-    result.converged = false;
-    result.result.resize(failure_result_size(), 0.0f);
-    return result;
-  }
-  return results[0];
+  return decode_batch({syndrome})[0];
 }
 
 std::vector<decoder_result>
@@ -903,40 +884,25 @@ trt_decoder::decode_batch(const std::vector<std::vector<float_t>> &syndromes) {
     }
   }
 
-  if (!decoder_ready_) {
-    // Return unconverged results if decoder is not ready
-    CUDA_QEC_WARN(
-        "Decoder not ready for inference, returning {} unconverged results. "
-        "Check decoder initialization logs for errors.",
-        syndromes.size());
-
-    std::vector<decoder_result> results(syndromes.size());
-    const size_t result_size =
-        decode_to_observables_ ? num_observables_ : output_size_per_sample_;
-    for (auto &result : results) {
-      result.converged = false;
-      result.result.resize(result_size, 0.0);
-    }
-    return results;
-  }
-
   // Dispatch on the actual engine I/O dtypes independently.
+  std::vector<decoder_result> results;
   if (impl_->input_dtype == nvinfer1::DataType::kUINT8) {
     if (impl_->output_dtype == nvinfer1::DataType::kUINT8)
-      return decode_batch_impl<uint8_t, uint8_t>(syndromes);
-    return decode_batch_impl<uint8_t, float>(syndromes);
+      results = decode_batch_impl<uint8_t, uint8_t>(syndromes);
+    else
+      results = decode_batch_impl<uint8_t, float>(syndromes);
+  } else if (impl_->output_dtype == nvinfer1::DataType::kUINT8) {
+    results = decode_batch_impl<float, uint8_t>(syndromes);
+  } else {
+    results = decode_batch_impl<float, float>(syndromes);
   }
-  if (impl_->output_dtype == nvinfer1::DataType::kUINT8)
-    return decode_batch_impl<float, uint8_t>(syndromes);
-  return decode_batch_impl<float, float>(syndromes);
-}
-
-size_t trt_decoder::failure_result_size() const {
-  if (decode_to_observables_)
-    return num_observables_;
-  if (global_decoder_)
-    return global_decoder_->get_block_size();
-  return output_size_per_sample_;
+  // One result per input, always: callers index results positionally, and a
+  // misbehaving external global decoder must not turn that into UB.
+  if (results.size() != syndromes.size())
+    throw std::runtime_error("TensorRT decode_batch produced " +
+                             std::to_string(results.size()) + " results for " +
+                             std::to_string(syndromes.size()) + " syndromes");
+  return results;
 }
 
 template <typename InputType, typename OutputType>
@@ -1084,17 +1050,10 @@ std::vector<decoder_result> trt_decoder::decode_batch_impl(
     }
 
   } catch (const std::exception &e) {
-    CUDA_QEC_WARN("TensorRT batch inference failed: {}", e.what());
-    // Mark all results as unconverged
-    for (auto &result : results) {
-      result.converged = false;
-    }
-    while (results.size() < syndromes.size()) {
-      decoder_result result;
-      result.converged = false;
-      result.result.resize(failure_result_size(), 0.0f);
-      results.push_back(std::move(result));
-    }
+    // Fail fast: an inference failure is an error, not a non-converged
+    // decode. Never fabricate results for syndromes that were not decoded.
+    throw std::runtime_error(std::string("TensorRT batch inference failed: ") +
+                             e.what());
   }
 
   return results;
@@ -1129,6 +1088,35 @@ void trt_decoder::check_cuda() {
 }
 
 CUDAQ_EXT_PT_REGISTER_TYPE(trt_decoder)
+
+// Parameter schema for the realtime decoding YAML (`decoder_custom_args` for
+// `type: trt_decoder`). `global_decoder_params` is a discriminated section:
+// it is parsed with the schema registered under the value of
+// `global_decoder` (e.g. "pymatching" or "chromobius", each registered by its
+// own plugin), and an empty section is materialized when `global_decoder`
+// names a registered schema but no params are given.
+namespace {
+struct trt_decoder_schema_registrar {
+  trt_decoder_schema_registrar() {
+    using k = cudaq::qec::decoding::config::param_kind;
+    cudaq::qec::decoding::config::register_decoder_schema(
+        {"trt_decoder",
+         {
+             {"onnx_load_path", k::string},
+             {"engine_load_path", k::string},
+             {"engine_save_path", k::string},
+             {"precision", k::string},
+             {"memory_workspace", k::uint64},
+             {"batch_size", k::uint64},
+             {"use_cuda_graph", k::boolean},
+             {"global_decoder", k::string},
+             {"global_decoder_params", k::discriminated, false, "",
+              "global_decoder", /*materialize_empty=*/true},
+         }});
+  }
+};
+trt_decoder_schema_registrar register_trt_decoder_schema;
+} // namespace
 
 } // namespace cudaq::qec
 

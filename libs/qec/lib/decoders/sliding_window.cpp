@@ -7,6 +7,7 @@
  ******************************************************************************/
 
 #include "sliding_window.h"
+#include "cudaq/qec/decoder_config_schema.h"
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/pcm_utils.h"
 #include <cassert>
@@ -17,11 +18,27 @@ namespace cudaq::qec {
 
 void sliding_window::validate_inputs() {
   uint32_t num_rows = H.num_rows();
-  if (window_size < 1 || window_size > num_rounds) {
+  if (num_boundary_syndromes > num_syndromes_per_round)
+    throw std::invalid_argument(
+        "sliding_window constructor: num_boundary_syndromes must be <= "
+        "num_syndromes_per_round");
+  // Memory circuits always emit at least a lock-in and a read-out round.
+  if (num_rows < 2 * num_syndromes_per_round)
+    throw std::invalid_argument(
+        "sliding_window constructor: num_rows must be >= "
+        "2 * num_syndromes_per_round; memory circuits always produce "
+        "at least a lock-in and a read-out round");
+  // The detector rows must form a [B | K*S | B] layout.
+  if (num_rows < 2 * num_boundary_syndromes ||
+      (num_rows - 2 * num_boundary_syndromes) % num_syndromes_per_round != 0)
+    throw std::invalid_argument(
+        "sliding_window constructor: number of PCM rows is inconsistent with "
+        "the given num_syndromes_per_round and num_boundary_syndromes");
+  if (window_size < 1 || window_size > num_detector_layers) {
     throw std::invalid_argument(
         fmt::format("sliding_window constructor: window_size ({}) must "
-                    "be between 1 and num_rounds ({})",
-                    window_size, num_rounds));
+                    "be between 1 and the number of detector layers ({})",
+                    window_size, num_detector_layers));
   }
   if (step_size < 1 || step_size > window_size) {
     throw std::invalid_argument(
@@ -29,20 +46,15 @@ void sliding_window::validate_inputs() {
                     "be between 1 and window_size ({})",
                     step_size, window_size));
   }
-  if ((num_rounds - window_size) % step_size != 0) {
+  if ((num_detector_layers - window_size) % step_size != 0) {
     throw std::invalid_argument(
-        fmt::format("sliding_window constructor: num_rounds - "
+        fmt::format("sliding_window constructor: detector layers - "
                     "window_size ({}) must be divisible by step_size ({})",
-                    num_rounds - window_size, step_size));
+                    num_detector_layers - window_size, step_size));
   }
   if (num_syndromes_per_round == 0) {
     throw std::invalid_argument("sliding_window constructor: "
                                 "num_syndromes_per_round must be non-zero");
-  }
-  if (num_rows % num_syndromes_per_round != 0) {
-    throw std::invalid_argument(
-        "sliding_window constructor: Number of rows in H must be divisible "
-        "by num_syndromes_per_round");
   }
   if (inner_decoder_name.empty()) {
     throw std::invalid_argument(
@@ -59,123 +71,41 @@ void sliding_window::validate_inputs() {
 
   // Enforce topological column order. Ctor-time materialization only.
   if (!cudaq::qec::pcm_is_sorted(this->H.to_nested_csc(),
-                                 this->num_syndromes_per_round)) {
+                                 this->num_syndromes_per_round,
+                                 this->num_boundary_syndromes)) {
     throw std::invalid_argument("sliding_window constructor: PCM must be "
                                 "sorted. See cudaq::qec::simplify_pcm.");
   }
 }
 
 /// Helper function to initialize the window.
-/// @param num_syndromes The number of syndromes to initialize the window for.
-/// This will be 1 for non-batched mode.
-void sliding_window::initialize_window(std::size_t num_syndromes) {
+/// @param batch_size The number of independent syndromes (the batch size) to
+/// initialize the window for. This will be 1 for non-batched mode.
+void sliding_window::initialize_window(std::size_t batch_size) {
   // Initialize the syndrome mods and rw_results.
   auto t0 = std::chrono::high_resolution_clock::now();
   window_proc_times_arr.fill(0.0);
-  syndrome_mods.resize(num_syndromes);
-  for (std::size_t s = 0; s < num_syndromes; ++s) {
+  syndrome_mods.resize(batch_size);
+  for (std::size_t s = 0; s < batch_size; ++s) {
     syndrome_mods[s].clear();
     syndrome_mods[s].resize(this->syndrome_size);
   }
   rw_results.clear();
-  rw_results.resize(num_syndromes);
-  for (std::size_t s = 0; s < num_syndromes; ++s) {
+  rw_results.resize(batch_size);
+  for (std::size_t s = 0; s < batch_size; ++s) {
     rw_results[s].converged = true; // Gets set to false if we fail to decode
     rw_results[s].result.resize(this->block_size);
   }
-  rolling_window.resize(num_syndromes);
-  for (std::size_t s = 0; s < num_syndromes; ++s) {
-    rolling_window[s].clear();
-    rolling_window[s].resize(num_syndromes_per_window);
-  }
   window_proc_times.resize(num_windows);
   std::fill(window_proc_times.begin(), window_proc_times.end(), 0.0);
-  rw_next_write_index = 0;
-  rw_next_read_index = 0;
-  rw_filled = 0;
-  num_rounds_since_last_decode = 0;
+  this->batch_size = batch_size;
+  window_rounds.clear();
+  rounds_since_last_reset = 0;
+  num_windows_decoded = 0;
   CUDA_QEC_DBG("Initializing window");
   auto t1 = std::chrono::high_resolution_clock::now();
   window_proc_times_arr[WindowProcTimes::INITIALIZE_WINDOW] =
       std::chrono::duration<double>(t1 - t0).count() * 1000;
-}
-
-/// Helper function to add a single syndrome to the rolling window (circular
-/// buffer).
-void sliding_window::add_syndrome_to_rolling_window(
-    const std::vector<float_t> &syndrome, std::size_t syndrome_index,
-    bool update_next_write_index) {
-  // This assumes that the syndrome size evenly divides into the rolling
-  // window (of length num_syndromes_per_window), so verify that here.
-  if (num_syndromes_per_window % syndrome.size() != 0) {
-    throw std::invalid_argument(
-        fmt::format("add_syndrome_to_rolling_window: syndrome "
-                    "size ({}) must evenly divide into the rolling "
-                    "window size ({})",
-                    syndrome.size(), num_syndromes_per_window));
-  }
-  std::copy(syndrome.begin(), syndrome.end(),
-            rolling_window[syndrome_index].begin() + rw_next_write_index);
-  if (update_next_write_index) {
-    rw_next_write_index += syndrome.size();
-    if (rw_next_write_index >= num_syndromes_per_window)
-      rw_next_write_index = 0;
-  }
-}
-
-/// Helper function to add a batch of syndromes to the rolling window
-/// (circular buffer).
-void sliding_window::add_syndromes_to_rolling_window(
-    const std::vector<std::vector<float_t>> &syndromes) {
-  // Set update_next_write_index to false in the loop because we will update
-  // it once at the end.
-  for (std::size_t s = 0; s < syndromes.size(); ++s) {
-    add_syndrome_to_rolling_window(syndromes[s], s,
-                                   /*update_next_write_index=*/false);
-    if (syndromes[s].size() != syndromes[0].size()) {
-      throw std::invalid_argument(
-          fmt::format("add_syndromes_to_rolling_window: syndrome "
-                      "size ({}) must be the same as the first syndrome "
-                      "size ({})",
-                      syndromes[s].size(), syndromes[0].size()));
-    }
-  }
-  rw_next_write_index += syndromes[0].size();
-  if (rw_next_write_index >= num_syndromes_per_window)
-    rw_next_write_index = 0;
-}
-
-/// Helper function to get a single syndrome from the rolling window
-/// (unwrapping a circular buffer).
-std::vector<float_t>
-sliding_window::get_syndrome_from_rolling_window(std::size_t syndrome_index) {
-  std::vector<float_t> syndrome(num_syndromes_per_window);
-  // Copy from rw_next_read_index to the end of the buffer.
-  std::copy(rolling_window[syndrome_index].begin() + rw_next_read_index,
-            rolling_window[syndrome_index].end(), syndrome.begin());
-  // Copy from the beginning of the rolling window to rw_next_read_index.
-  std::copy(rolling_window[syndrome_index].begin(),
-            rolling_window[syndrome_index].begin() + rw_next_read_index,
-            syndrome.end() - rw_next_read_index);
-  return syndrome;
-}
-
-/// Helper function to get a batch of syndromes from the rolling window
-/// (unwrapping a circular buffer).
-std::vector<std::vector<float_t>>
-sliding_window::get_syndromes_from_rolling_window() {
-  std::vector<std::vector<float_t>> syndromes(rolling_window.size());
-  for (std::size_t s = 0; s < rolling_window.size(); ++s) {
-    syndromes[s] = get_syndrome_from_rolling_window(s);
-  }
-  return syndromes;
-}
-
-/// Helper function to update the read index for the rolling window.
-void sliding_window::update_rw_next_read_index() {
-  rw_next_read_index += step_size * num_syndromes_per_round;
-  if (rw_next_read_index >= num_syndromes_per_window)
-    rw_next_read_index -= num_syndromes_per_window;
 }
 
 sliding_window::sliding_window(const cudaq::qec::sparse_binary_matrix &H,
@@ -188,6 +118,8 @@ sliding_window::sliding_window(const cudaq::qec::sparse_binary_matrix &H,
   step_size = params.get<std::size_t>("step_size", step_size);
   num_syndromes_per_round = params.get<std::size_t>("num_syndromes_per_round",
                                                     num_syndromes_per_round);
+  num_boundary_syndromes =
+      params.get<std::size_t>("num_boundary_syndromes", num_boundary_syndromes);
   straddle_start_round =
       params.get<bool>("straddle_start_round", straddle_start_round);
   straddle_end_round =
@@ -199,17 +131,25 @@ sliding_window::sliding_window(const cudaq::qec::sparse_binary_matrix &H,
   inner_decoder_params = params.get<cudaqx::heterogeneous_map>(
       "inner_decoder_params", inner_decoder_params);
 
-  // Guard the H.num_rows() / num_syndromes_per_round below.
   if (num_syndromes_per_round == 0)
     throw std::invalid_argument("sliding_window constructor: "
                                 "num_syndromes_per_round must be non-zero");
 
-  num_rounds = H.num_rows() / num_syndromes_per_round;
-  num_windows = (num_rounds - window_size) / step_size + 1;
-  num_syndromes_per_window = num_syndromes_per_round * window_size;
+  // Treat a 0 boundary width as the uniform layout (B == S).
+  if (num_boundary_syndromes == 0)
+    num_boundary_syndromes = num_syndromes_per_round;
+
+  const std::size_t num_rows = this->H.num_rows();
+  // The [B | S...S | B] detector-layer layout drives all round<->row mapping.
+  layout = details::round_layout(num_syndromes_per_round,
+                                 num_boundary_syndromes, num_rows);
+  num_detector_layers = layout.num_rounds; // 2 boundary + K interior
+  num_windows = (num_detector_layers - window_size) / step_size + 1;
 
   validate_inputs();
 
+  // Build the per-window inner decoders from the real (unpadded) sub-PCMs. The
+  // boundary-aware round layout is handled by get_pcm_for_rounds.
   // this->H is canonical CSC (ctor init list), so skip the per-call
   // canonicalize in get_pcm_for_rounds.
   for (std::size_t w = 0; w < num_windows; ++w) {
@@ -217,7 +157,8 @@ sliding_window::sliding_window(const cudaq::qec::sparse_binary_matrix &H,
     std::size_t end_round = start_round + window_size - 1;
     auto [H_round, first_column, last_column] = cudaq::qec::get_pcm_for_rounds(
         this->H, num_syndromes_per_round, start_round, end_round,
-        straddle_start_round, straddle_end_round, /*pcm_is_canonical=*/true);
+        straddle_start_round, straddle_end_round, /*pcm_is_canonical=*/true,
+        num_boundary_syndromes);
     first_columns.push_back(first_column);
 
     // Slice the error vector to only include the current window.
@@ -246,66 +187,10 @@ sliding_window::sliding_window(const cudaq::qec::sparse_binary_matrix &H,
 }
 
 decoder_result sliding_window::decode(const std::vector<float_t> &syndrome) {
-  if (syndrome.size() == this->syndrome_size) {
-    auto t0 = std::chrono::high_resolution_clock::now();
-    CUDA_QEC_DBG("Decoding whole block");
-    // Decode the whole thing, iterating over windows manually.
-    decoder_result result;
-    std::vector<float_t> syndrome_round(num_syndromes_per_round);
-    for (std::size_t r = 0; r < num_rounds; ++r) {
-      std::copy(syndrome.begin() + r * num_syndromes_per_round,
-                syndrome.begin() + (r + 1) * num_syndromes_per_round,
-                syndrome_round.begin());
-      result = decode(syndrome_round);
-      // Note: result will be empty until the final loop iteration.
-    }
-    auto t1 = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> diff = t1 - t0;
-    CUDA_QEC_INFO("Whole block time: {:.3f} ms", diff.count() * 1000);
-    return result;
-  }
-  // Else we're receiving a single round.
-  if (rw_filled == 0) {
-    initialize_window(/*num_syndromes=*/1);
-  }
-  if (this->rw_filled == num_syndromes_per_window) {
-    auto t0 = std::chrono::high_resolution_clock::now();
-    CUDA_QEC_DBG("Window is full, sliding the window by one round");
-    add_syndrome_to_rolling_window(syndrome, 0);
-
-    auto t1 = std::chrono::high_resolution_clock::now();
-    window_proc_times_arr[WindowProcTimes::SLIDE_WINDOW] +=
-        std::chrono::duration<double>(t1 - t0).count() * 1000;
-  } else {
-    // Just copy the data to the end of the rolling window.
-    auto t0 = std::chrono::high_resolution_clock::now();
-    CUDA_QEC_DBG("Copying data to the end of the rolling window");
-    add_syndrome_to_rolling_window(syndrome, 0);
-    this->rw_filled += num_syndromes_per_round;
-    auto t1 = std::chrono::high_resolution_clock::now();
-    window_proc_times_arr[WindowProcTimes::COPY_DATA] +=
-        std::chrono::duration<double>(t1 - t0).count() * 1000;
-  }
-  num_rounds_since_last_decode++;
-  if (rw_filled == num_syndromes_per_window &&
-      num_rounds_since_last_decode >= step_size) {
-    CUDA_QEC_DBG("Decoding window {}/{}", num_windows_decoded + 1, num_windows);
-    decode_window();
-    num_rounds_since_last_decode = 0;
-
-    num_windows_decoded++;
-    if (num_windows_decoded == num_windows) {
-      num_windows_decoded = 0;
-      rw_filled = 0;
-      // for (std::size_t w = 0; w < num_windows; ++w) {
-      //   CUDA_QEC_DBG("Window {} time: {} ms", w, window_proc_times[w]);
-      // }
-      CUDA_QEC_DBG("Returning decoder_result");
-      return std::move(this->rw_results[0]);
-    }
-  }
-  CUDA_QEC_DBG("Returning empty decoder_result");
-  return decoder_result(); // empty return value
+  auto results = decode_batch({syndrome});
+  if (results.empty())
+    return decoder_result(); // empty until the final window
+  return std::move(results[0]);
 }
 
 std::vector<decoder_result> sliding_window::decode_batch(
@@ -316,54 +201,64 @@ std::vector<decoder_result> sliding_window::decode_batch(
   }
   if (syndromes[0].size() == this->syndrome_size) {
     CUDA_QEC_DBG("Decoding whole block");
-    // Decode the whole thing, iterating over windows manually.
+    // Decode the whole thing, feeding one detector layer at a time.
     std::vector<decoder_result> results;
     std::vector<std::vector<float_t>> syndromes_round(syndromes.size());
-    for (std::size_t r = 0; r < num_rounds; ++r) {
+    for (std::size_t r = 0; r < num_detector_layers; ++r) {
+      std::size_t round_start = layout.round_start(r);
+      std::size_t round_end = round_start + layout.round_width(r);
       for (std::size_t s = 0; s < syndromes.size(); ++s) {
-        syndromes_round[s].resize(num_syndromes_per_round);
-        std::copy(syndromes[s].begin() + r * num_syndromes_per_round,
-                  syndromes[s].begin() + (r + 1) * num_syndromes_per_round,
-                  syndromes_round[s].begin());
+        syndromes_round[s].resize(round_end - round_start);
+        std::copy(syndromes[s].begin() + round_start,
+                  syndromes[s].begin() + round_end, syndromes_round[s].begin());
       }
       results = decode_batch(syndromes_round);
     }
     return results;
   }
-  // Else we're receiving a single round.
-  if (rw_filled == 0) {
+  if (rounds_since_last_reset == 0)
     initialize_window(syndromes.size());
+
+  if (syndromes.size() != batch_size)
+    throw std::invalid_argument(
+        fmt::format("sliding_window: batch size changed mid-stream ({} vs {})",
+                    syndromes.size(), batch_size));
+
+  const std::size_t expected = layout.round_width(rounds_since_last_reset);
+  for (const auto &r : syndromes)
+    // Inputs are either a whole block (handled above) or one detector layer per
+    // call. Multi-round chunks are rejected.
+    if (r.size() != expected)
+      throw std::invalid_argument(fmt::format(
+          "sliding_window: round {} has width {} but expected {} for this "
+          "round in the boundary layout",
+          rounds_since_last_reset, r.size(), expected));
+
+  // Maybe FIXME:
+  // Copies this layer into the rolling buffer. Revisit with a pooled buffer if
+  // buffer if per-round allocation shows up in profiles.
+  window_rounds.push_back(syndromes);
+  ++rounds_since_last_reset;
+
+  if (window_rounds.size() < window_size)
+    return {};
+
+  // A full window is buffered; decode it.
+  CUDA_QEC_DBG("Decoding window {}/{}", num_windows_decoded + 1, num_windows);
+  decode_window();
+  ++num_windows_decoded;
+
+  if (num_windows_decoded == num_windows) {
+    // Final window decoded: hand back the accumulated results and reset.
+    auto results = std::move(rw_results);
+    window_rounds.clear();
+    rounds_since_last_reset = 0;
+    num_windows_decoded = 0;
+    return results;
   }
-  if (this->rw_filled == num_syndromes_per_window) {
-    CUDA_QEC_DBG("Window is full, sliding the window by one round");
-    // The window is full. Slide existing data to the left and write the new
-    // data at the end.
-    add_syndromes_to_rolling_window(syndromes);
-    num_rounds_since_last_decode++;
-  } else {
-    // Just copy the data to the end of the rolling window.
-    CUDA_QEC_DBG("Copying data to the end of the rolling window");
-    add_syndromes_to_rolling_window(syndromes);
-    this->rw_filled += num_syndromes_per_round;
-    num_rounds_since_last_decode++;
-  }
-  if (rw_filled == num_syndromes_per_window &&
-      num_rounds_since_last_decode >= step_size) {
-    CUDA_QEC_DBG("Decoding window {}/{}", num_windows_decoded + 1, num_windows);
-    decode_window();
-    num_rounds_since_last_decode = 0;
-    num_windows_decoded++;
-    if (num_windows_decoded == num_windows) {
-      num_windows_decoded = 0;
-      rw_filled = 0;
-      // Dump the per window processing times.
-      // for (std::size_t w = 0; w < num_windows; ++w) {
-      //   CUDA_QEC_DBG("Window {} time: {} ms", w, window_proc_times[w]);
-      // }
-      CUDA_QEC_DBG("Returning decoder_result");
-      return std::move(this->rw_results);
-    }
-  }
+
+  // Slide the window: drop the oldest step_size rounds.
+  window_rounds.erase(window_rounds.begin(), window_rounds.begin() + step_size);
   CUDA_QEC_DBG("Returning empty decoder_result");
   return std::vector<decoder_result>(); // empty return value
 }
@@ -375,50 +270,40 @@ std::vector<decoder_result> sliding_window::decode_batch(
 void sliding_window::decode_window() {
   auto t0 = std::chrono::high_resolution_clock::now();
   const auto &w = this->num_windows_decoded;
-  std::size_t syndrome_start = w * step_size * num_syndromes_per_round;
-  std::size_t syndrome_end = syndrome_start + num_syndromes_per_window - 1;
-  std::size_t syndrome_start_next_window =
-      (w + 1) * step_size * num_syndromes_per_round;
-  std::size_t syndrome_end_next_window =
-      syndrome_start_next_window + num_syndromes_per_round - 1;
+  // Detector range of window w's rounds.
+  std::size_t syndrome_start = layout.round_start(w * step_size);
+  std::size_t num_window_syndromes =
+      layout.round_start(w * step_size + window_size) - syndrome_start;
   auto t3 = std::chrono::high_resolution_clock::now();
-  if (w > 0) {
-    // Modify the syndrome slice to account for the previous windows.
-    for (std::size_t s = 0; s < this->rolling_window.size(); ++s) {
-      std::size_t r2 = rw_next_read_index;
-      for (std::size_t r = 0; r < num_syndromes_per_window; ++r) {
-        auto &slice_val = this->rolling_window[s].at(r2);
-        slice_val =
-            static_cast<double>(static_cast<std::uint8_t>(slice_val) ^
-                                syndrome_mods[s].at(r + syndrome_start));
-        r2++;
-        if (r2 >= num_syndromes_per_window)
-          r2 = 0;
-      }
+  std::vector<std::vector<float_t>> window_syndromes(batch_size);
+  for (std::size_t s = 0; s < batch_size; ++s) {
+    // Assemble each batch element's window syndrome by concatenating its
+    // buffered rounds
+    auto &syn = window_syndromes[s];
+    syn.reserve(num_window_syndromes);
+    for (std::size_t slot = 0; slot < window_size; ++slot)
+      syn.insert(syn.end(), window_rounds[slot][s].begin(),
+                 window_rounds[slot][s].end());
+    if (w > 0) {
+      // Apply the accumulated syndrome mods from the previously committed
+      // windows.
+      for (std::size_t r = 0; r < num_window_syndromes; ++r)
+        syn[r] = static_cast<float_t>(static_cast<std::uint8_t>(syn[r]) ^
+                                      syndrome_mods[s][syndrome_start + r]);
     }
   }
   auto t4 = std::chrono::high_resolution_clock::now();
-  CUDA_QEC_DBG("Window {}: syndrome_start = {}, syndrome_end = {}, length1 = "
-               "{}, length2 = {}",
-               w, syndrome_start, syndrome_end, this->rolling_window[0].size(),
-               syndrome_end - syndrome_start + 1);
-  std::vector<decoder_result> inner_results;
-  if (this->rolling_window.size() == 1) {
-    inner_results.push_back(
-        inner_decoders[w]->decode(get_syndrome_from_rolling_window(0)));
-  } else {
-    inner_results =
-        inner_decoders[w]->decode_batch(get_syndromes_from_rolling_window());
-  }
-  // We've grabbed data from the rolling window, so we need to update the
-  // read index for the next call to decode_window.
-  update_rw_next_read_index();
+  CUDA_QEC_DBG("Window {}: syndrome_start = {}, num_window_syndromes = {}", w,
+               syndrome_start, num_window_syndromes);
+
+  std::vector<decoder_result> inner_results =
+      inner_decoders[w]->decode_batch(window_syndromes);
   if (!inner_results[0].converged) {
     CUDA_QEC_DBG("Window {}: inner decoder failed to converge", w);
   }
   auto t5 = std::chrono::high_resolution_clock::now();
-  std::vector<std::vector<uint8_t>> window_results(this->rolling_window.size());
-  for (std::size_t s = 0; s < this->rolling_window.size(); ++s) {
+  std::vector<std::vector<uint8_t>> window_results(batch_size);
+  for (std::size_t s = 0; s < batch_size; ++s) {
     this->rw_results[s].converged &= inner_results[s].converged;
     cudaq::qec::convert_vec_soft_to_hard(inner_results[s].result,
                                          window_results[s]);
@@ -431,7 +316,7 @@ void sliding_window::decode_window() {
     auto this_window_first_column = first_columns[w];
     auto num_to_commit = next_window_first_column - this_window_first_column;
     CUDA_QEC_DBG("  Committing {} bits from window {}", num_to_commit, w);
-    for (std::size_t s = 0; s < this->rolling_window.size(); ++s) {
+    for (std::size_t s = 0; s < batch_size; ++s) {
       for (std::size_t c = 0; c < num_to_commit; ++c) {
         rw_results[s].result[c + this_window_first_column] =
             window_results[s][c];
@@ -440,9 +325,13 @@ void sliding_window::decode_window() {
     // Back out committed errors from the next window's syndrome by flipping
     // the rows where the corresponding H columns have a 1. Read directly off
     // the canonical CSC arrays.
+    std::size_t syndrome_start_next_window =
+        layout.round_start((w + 1) * step_size);
+    std::size_t syndrome_end_next_window =
+        layout.round_start((w + 1) * step_size + 1) - 1;
     const auto &h_ptr = this->H.ptr();
     const auto &h_indices = this->H.indices();
-    for (std::size_t s = 0; s < this->rolling_window.size(); ++s) {
+    for (std::size_t s = 0; s < batch_size; ++s) {
       for (std::size_t c = 0; c < num_to_commit; ++c) {
         if (rw_results[s].result[c + this_window_first_column]) {
           // Flip next-round syndrome bits where PCM has a 1 in this column.
@@ -463,7 +352,7 @@ void sliding_window::decode_window() {
     auto this_window_first_column = first_columns[w];
     auto num_to_commit = window_results[0].size();
     CUDA_QEC_DBG("  Committing {} bits from window {}", num_to_commit, w);
-    for (std::size_t s = 0; s < this->rolling_window.size(); ++s) {
+    for (std::size_t s = 0; s < batch_size; ++s) {
       for (std::size_t c = 0; c < num_to_commit; ++c) {
         rw_results[s].result[c + this_window_first_column] =
             window_results[s][c];
@@ -498,6 +387,75 @@ std::size_t sliding_window::get_num_syndromes_per_round() const {
   return num_syndromes_per_round;
 }
 
+std::size_t sliding_window::get_num_boundary_syndromes() const {
+  return num_boundary_syndromes;
+}
+
+std::size_t sliding_window::get_layer_offset(std::size_t r) const {
+  return layout.round_start(r);
+}
+
+std::size_t sliding_window::get_num_detector_layers() const {
+  return num_detector_layers;
+}
+
 CUDAQ_EXT_PT_REGISTER_TYPE(sliding_window)
+
+// Parameter schema for the realtime decoding YAML (`decoder_custom_args` for
+// `type: sliding_window`). `inner_decoder_params` is a discriminated section
+// parsed with the schema registered under the value of `inner_decoder_name`
+// (whichever decoder that names must have registered its own schema).
+// Unknown-key and required-key checks are applied by the framework from the
+// param specs alone; the `validate` hook adds the cross-field constraints
+// those specs cannot express.
+namespace {
+struct sliding_window_schema_registrar {
+  sliding_window_schema_registrar() {
+    using k = decoding::config::param_kind;
+    decoding::config::decoder_schema schema{
+        "sliding_window",
+        {
+            {"window_size", k::uint64},
+            {"step_size", k::uint64},
+            {"num_syndromes_per_round", k::uint64},
+            {"num_boundary_syndromes", k::uint64},
+            {"straddle_start_round", k::boolean},
+            {"straddle_end_round", k::boolean},
+            {"error_rate_vec", k::f64_vec, /*required=*/true},
+            {"inner_decoder_name", k::string, /*required=*/true},
+            {"inner_decoder_params", k::discriminated, false, "",
+             "inner_decoder_name", /*materialize_empty=*/false},
+        }};
+    schema.validate = [](const cudaqx::heterogeneous_map &args) {
+      if (args.contains("window_size") && args.contains("step_size")) {
+        auto window_size = args.get<std::size_t>("window_size");
+        auto step_size = args.get<std::size_t>("step_size");
+        if (step_size < 1 || step_size > window_size)
+          throw std::runtime_error(fmt::format(
+              "sliding_window parameters: step_size ({}) must be between 1 "
+              "and window_size ({})",
+              step_size, window_size));
+      }
+      if (args.contains("num_boundary_syndromes") &&
+          args.contains("num_syndromes_per_round")) {
+        auto num_boundary_syndromes =
+            args.get<std::size_t>("num_boundary_syndromes");
+        auto num_syndromes_per_round =
+            args.get<std::size_t>("num_syndromes_per_round");
+        if (num_boundary_syndromes > num_syndromes_per_round)
+          throw std::runtime_error(fmt::format(
+              "sliding_window parameters: num_boundary_syndromes ({}) must be "
+              "<= num_syndromes_per_round ({})",
+              num_boundary_syndromes, num_syndromes_per_round));
+      }
+      if (args.get<std::vector<double>>("error_rate_vec").empty())
+        throw std::runtime_error(
+            "sliding_window parameters: error_rate_vec must be non-empty");
+    };
+    decoding::config::register_decoder_schema(std::move(schema));
+  }
+};
+sliding_window_schema_registrar register_sliding_window_schema;
+} // namespace
 
 } // namespace cudaq::qec

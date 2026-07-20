@@ -372,9 +372,9 @@ class TestTRTDecoderParameterValidation(TestTRTDecoderSetup):
         pass
 
     def test_validate_parameters_no_paths_provided(self):
-        """Test that providing no paths creates decoder with warning."""
-        # Decoder is created but logs a warning - it won't be usable for inference
-        # Create the TRT decoder
+        """Providing no model path is an initialization error."""
+        # Initialization failures throw (converged never stands in for
+        # decoder health), so construction without a path raises.
         try:
             decoder = qec.get_decoder('trt_decoder', self.H)
             # If decoder is None or doesn't initialize properly, skip these tests

@@ -130,12 +130,8 @@ if(CUDAQ_QEC_TRT_DECODER_ENABLED)
 
     # Link with required libraries 
     target_link_libraries(${MODULE_NAME}
-      PUBLIC
-        cudaqx-core
-        cudaq::cudaq-operator
       PRIVATE
-        cudaq::cudaq-common
-        cudaq-qec
+        cudaq-qec-decoders
         ${TENSORRT_LIBRARY}
         ${TENSORRT_ONNX_LIBRARY}
         CUDA::cudart

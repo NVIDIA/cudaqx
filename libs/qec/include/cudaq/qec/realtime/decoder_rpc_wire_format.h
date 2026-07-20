@@ -35,12 +35,36 @@ static_assert(kResetDecoderFunctionId == 0x977A59CFu,
               "reset_decoder function_id must match "
               "decoder_server_runtime.md");
 
+// Wire framing is cudaq::realtime::RPCHeader / RPCResponse (24 bytes each,
+// packed).  Pin the sizes here so a cudaq-side layout change cannot silently
+// desynchronize the decoder wire format from decoder_server_runtime.md.
+static_assert(sizeof(cudaq::realtime::RPCHeader) == 24,
+              "cudaq::realtime::RPCHeader must be 24 bytes");
+static_assert(sizeof(cudaq::realtime::RPCResponse) == 24,
+              "cudaq::realtime::RPCResponse must be 24 bytes");
+
+// Status codes carried in cudaq::realtime::RPCResponse::status.
+enum class RpcStatus : std::int32_t {
+  OK = 0,
+  INVALID_DECODER = 1,
+  BAD_REQUEST = 2,
+  INTERNAL_ERROR = 3,
+  NOT_READY = 4,
+  BUSY = 5,
+  SYNDROMES_DROPPED = 6,
+};
+
+// Hard cap for one enqueue_syndromes request. Enforced at both transport and
+// session boundaries so alternate transports cannot bypass allocation and
+// packed-length validation.
+inline constexpr std::uint64_t kMaxSyndromeBits = 1u << 20; // 1 M bits
+
 struct __attribute__((packed)) EnqueueRequestPayload {
   std::int64_t decoder_id;          ///< arg0
   std::int64_t counter;             ///< arg1
   std::int64_t syndrome_mapping_id; ///< arg2
   std::int64_t num_syndromes;       ///< arg3 (# syndrome bits following)
-  // Trailing: ceil(num_syndromes/8) bit-packed bytes + 0..7 zero pad.
+  // Trailing: ceil(num_syndromes/8) bit-packed bytes (LSB-first), no pad.
 };
 static_assert(sizeof(EnqueueRequestPayload) == 32,
               "EnqueueRequestPayload must be exactly 32 bytes per "
@@ -48,12 +72,14 @@ static_assert(sizeof(EnqueueRequestPayload) == 32,
 
 struct __attribute__((packed)) GetCorrectionsRequestPayload {
   std::int64_t decoder_id;  ///< arg0
-  std::int64_t return_size; ///< arg1 (# correction bits to fetch)
-  std::uint8_t reset;       ///< arg2 (0 = keep state, 1 = reset after read)
-  std::uint8_t _pad[7];     ///< zero pad to 8-byte multiple
+  std::int64_t return_size; ///< arg1 (# correction bits to fetch; the
+                            ///<       cc.device_call lowering serializes the
+                            ///<       OUT std::vector<bool> length here)
+  std::uint8_t reset;       ///< arg2 (0 = keep state, 1 = reset after read;
+                            ///<       trailing bool, no padding)
 };
-static_assert(sizeof(GetCorrectionsRequestPayload) == 24,
-              "GetCorrectionsRequestPayload must be exactly 24 bytes per "
+static_assert(sizeof(GetCorrectionsRequestPayload) == 17,
+              "GetCorrectionsRequestPayload must be exactly 17 bytes per "
               "decoder_server_runtime.md#get_corrections");
 
 struct __attribute__((packed)) ResetRequestPayload {

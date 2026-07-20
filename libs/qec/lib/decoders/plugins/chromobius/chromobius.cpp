@@ -9,6 +9,7 @@
 #include "chromobius/decode/decoder.h"
 #include "stim.h"
 #include "cudaq/qec/decoder.h"
+#include "cudaq/qec/decoder_config_schema.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -188,5 +189,27 @@ public:
 };
 
 CUDAQ_EXT_PT_REGISTER_TYPE(chromobius)
+
+// Parameter schema for the realtime decoding YAML (`decoder_custom_args` for
+// `type: chromobius`, and the trt_decoder `global_decoder_params` section when
+// `global_decoder: chromobius`). Registered here so the schema ships with the
+// decoder itself.
+namespace {
+struct chromobius_schema_registrar {
+  chromobius_schema_registrar() {
+    using k = cudaq::qec::decoding::config::param_kind;
+    cudaq::qec::decoding::config::register_decoder_schema(
+        {"chromobius",
+         {
+             {"drop_mobius_errors_involving_remnant_errors", k::boolean},
+             {"ignore_decomposition_failures", k::boolean},
+             {"include_coords_in_mobius_dem", k::boolean},
+             {"return_weight", k::boolean},
+             {"write_mobius_match_to_stderr", k::boolean},
+         }});
+  }
+};
+chromobius_schema_registrar register_chromobius_schema;
+} // namespace
 
 } // namespace cudaq::qec

@@ -742,5 +742,104 @@ def test_sample_memory_circuit_aligned_with_dem(statePrep, sample_fn, dem_fn):
         f"order")
 
 
+def test_decoder_context_from_memory_circuit_requires_noise_model():
+    # Like the *_dem_from_memory_circuit bindings, the decoder_context binding
+    # dereferences an optional noise model, so noise=None/omitted must fail.
+    code = qec.get_code('steane')
+    statePrep = qec.operation.prep0
+
+    with pytest.raises(RuntimeError, match="requires a noise model"):
+        qec.decoder_context_from_memory_circuit(code, statePrep, 1)
+
+    with pytest.raises(RuntimeError, match="requires a noise model"):
+        qec.decoder_context_from_memory_circuit(code, statePrep, 1, None)
+
+
+def test_decoder_context_and_components():
+    # decoder_context_from_memory_circuit returns a decoder_context;
+    # canonicalization is deferred until a component method is called.
+    # full_component() matches dem_from_memory_circuit;
+    # x_component() / z_component() reproduce x_/z_dem_from_memory_circuit.
+    code = qec.get_code('steane')
+    prep = qec.operation.prep0
+    nRounds = 3
+    noise = cudaq.NoiseModel()
+    noise.add_all_qubit_channel("x", cudaq.Depolarization2(0.05), 1)
+
+    ctx = qec.decoder_context_from_memory_circuit(code, prep, nRounds, noise)
+    dem = qec.dem_from_memory_circuit(code, prep, nRounds, noise)
+    z = qec.z_dem_from_memory_circuit(code, prep, nRounds, noise)
+    x = qec.x_dem_from_memory_circuit(code, prep, nRounds, noise)
+
+    # full_component() matches the plain entry point.
+    fc_dem, fc_m2d, fc_m2o = ctx.full_component()
+    assert mat_to_str(fc_dem.detector_error_matrix) == mat_to_str(
+        dem.detector_error_matrix)
+
+    # m2d/m2o maps are present and aligned to the DEM (Python binding surface).
+    assert len(fc_m2d) == fc_dem.detector_error_matrix.shape[0]
+    assert len(fc_m2o) == fc_dem.observables_flips_matrix.shape[0]
+    assert ctx.num_measurements > 0
+    assert all(0 <= m < ctx.num_measurements for row in fc_m2d for m in row)
+
+    # x_component() / z_component() reproduce the per-type DEMs and partition
+    # the detectors
+    zc_dem, zc_m2d, zc_m2o = ctx.z_component()
+    xc_dem, xc_m2d, xc_m2o = ctx.x_component()
+    assert mat_to_str(zc_dem.detector_error_matrix) == mat_to_str(
+        z.detector_error_matrix)
+    assert mat_to_str(xc_dem.detector_error_matrix) == mat_to_str(
+        x.detector_error_matrix)
+    assert (zc_dem.detector_error_matrix.shape[0] +
+            xc_dem.detector_error_matrix.shape[0] ==
+            fc_dem.detector_error_matrix.shape[0])
+    assert len(zc_m2d) == zc_dem.detector_error_matrix.shape[0]
+
+
+def test_decoder_context_d_sparse_layout():
+    # qec.d_sparse(m2d) flattens a measurement-to-detector map into the
+    # -1-terminated sparse vector a realtime decoder expects.
+    code = qec.get_code('steane')
+    noise = cudaq.NoiseModel()
+    noise.add_all_qubit_channel("x", cudaq.Depolarization2(0.05), 1)
+    ctx = qec.decoder_context_from_memory_circuit(code, qec.operation.prep0, 3,
+                                                  noise)
+    fc_dem, fc_m2d, fc_m2o = ctx.full_component()
+
+    d_sparse = qec.d_sparse(fc_m2d)
+    # One -1 terminator per detector row.
+    assert d_sparse.count(-1) == len(fc_m2d)
+    # Reconstruct the m2d rows from the flattened form and compare.
+    rebuilt, row = [], []
+    for v in d_sparse:
+        if v == -1:
+            rebuilt.append(row)
+            row = []
+        else:
+            row.append(v)
+    assert rebuilt == [list(r) for r in fc_m2d]
+
+
+def test_decoder_context_single_type_code_empty_component():
+    # The repetition code has only Z stabilizers, so its X context has no
+    # detectors. Verify the empty context is self-consistent (no detectors,
+    # empty maps), and the Z context keeps every detector.
+    code = qec.get_code('repetition', distance=3)
+    noise = cudaq.NoiseModel()
+    noise.add_all_qubit_channel("x", cudaq.Depolarization2(0.05), 1)
+    ctx = qec.decoder_context_from_memory_circuit(code, qec.operation.prep0, 3,
+                                                  noise)
+
+    xc_dem, xc_m2d, xc_m2o = ctx.x_component()
+    assert xc_dem.num_detectors() == 0
+    assert len(xc_m2d) == 0
+    assert qec.d_sparse(xc_m2d) == []  # empty m2d -> empty D_sparse
+
+    zc_dem, zc_m2d, zc_m2o = ctx.z_component()
+    fc_dem, fc_m2d, fc_m2o = ctx.full_component()
+    assert zc_dem.num_detectors() == fc_dem.num_detectors()
+    assert len(zc_m2d) == zc_dem.num_detectors()
+
+
 if __name__ == "__main__":
     pytest.main()

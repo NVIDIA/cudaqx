@@ -10,12 +10,15 @@
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/detector_error_model.h"
 #include "cudaq/qec/pcm_utils.h"
+#include <atomic>
 #include <cmath>
 #include <cstdlib>
+#include <cuda_runtime_api.h>
 #include <future>
 #include <gtest/gtest.h>
 #include <optional>
 #include <random>
+#include <thread>
 
 namespace {
 class ScopedEnv {
@@ -1189,4 +1192,254 @@ TEST(SlidingWindowDecoder, BaseStreamingCopiesFirstRoundDetectors) {
   EXPECT_FALSE(decoder->enqueue_syndrome(first_round))
       << "First-round detector copy runs, but the sliding window is not full "
          "yet so no final correction is committed.";
+}
+
+TEST(SlidingWindowDecoder, PreparePcmRejectsBadBoundaryLayout) {
+  // The boundary layout is validated during construction, so an inconsistent
+  // boundary layout must throw.
+  auto params = [](std::size_t S, std::size_t B) {
+    cudaqx::heterogeneous_map p;
+    p.insert("window_size", std::size_t{1});
+    p.insert("step_size", std::size_t{1});
+    p.insert("num_syndromes_per_round", S);
+    p.insert("num_boundary_syndromes", B);
+    p.insert("error_rate_vec", std::vector<double>{0.1, 0.1});
+    p.insert("inner_decoder_name", std::string("single_error_lut"));
+    p.insert("inner_decoder_params", cudaqx::heterogeneous_map{});
+    return p;
+  };
+
+  // Assert the constructor throws with a message identifying the boundary
+  // layout as the cause
+  auto expectBoundaryThrow = [](const cudaqx::tensor<uint8_t> &H,
+                                const cudaqx::heterogeneous_map &p,
+                                const std::string &needle) {
+    try {
+      cudaq::qec::decoder::get("sliding_window", H, p);
+      FAIL() << "expected sliding_window construction to throw";
+    } catch (const std::invalid_argument &e) {
+      EXPECT_NE(std::string(e.what()).find(needle), std::string::npos)
+          << "unexpected message: " << e.what();
+    }
+  };
+
+  // Boundary wider than the interior (B > S).
+  cudaqx::tensor<uint8_t> H4({4, 2});
+  expectBoundaryThrow(
+      H4, params(2, 4),
+      "num_boundary_syndromes must be <= num_syndromes_per_round");
+
+  // Row count inconsistent with a [B | K*S | B] layout (B < S).
+  cudaqx::tensor<uint8_t> H17({17, 2});
+  expectBoundaryThrow(H17, params(8, 3), "number of PCM rows is inconsistent");
+}
+
+namespace {
+
+int cuda_device_count() {
+  int count = 0;
+  if (cudaGetDeviceCount(&count) != cudaSuccess)
+    return 0;
+  return count;
+}
+
+/// Restores the caller's CUDA device on scope exit so the persistent pin
+/// made by one test does not leak into the next (gtest shares the process).
+class ScopedDeviceRestore {
+public:
+  ScopedDeviceRestore() {
+    if (cudaGetDevice(&prev_) != cudaSuccess)
+      prev_ = -1;
+  }
+  ~ScopedDeviceRestore() {
+    if (prev_ >= 0)
+      (void)cudaSetDevice(prev_);
+  }
+
+private:
+  int prev_ = -1;
+};
+
+/// A decoder that rejects any construction parameter it does not know,
+/// proving decoder::get() strips cuda_device_id before the plugin ctor.
+class strict_keys_decoder : public cudaq::qec::decoder {
+public:
+  strict_keys_decoder(const cudaq::qec::sparse_binary_matrix &H,
+                      const cudaqx::heterogeneous_map &params)
+      : decoder(H) {
+    auto invalid =
+        cudaq::qec::validate_config_parameters(params, {"decode_to_obs"});
+    if (!invalid.empty())
+      throw std::runtime_error("strict_keys_decoder: unexpected key " +
+                               invalid.front());
+  }
+  cudaq::qec::decoder_result
+  decode(const std::vector<cudaq::qec::float_t> &syndrome) override {
+    cudaq::qec::decoder_result r;
+    r.converged = true;
+    r.result = std::vector<cudaq::qec::float_t>(block_size, 0.0);
+    return r;
+  }
+  CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
+      strict_keys_decoder, static std::unique_ptr<cudaq::qec::decoder> create(
+                               const cudaq::qec::decoder_init &init,
+                               const cudaqx::heterogeneous_map &params) {
+        return cudaq::qec::make_pcm_decoder<strict_keys_decoder>(init, params);
+      })
+};
+CUDAQ_EXT_PT_REGISTER_TYPE(strict_keys_decoder)
+
+cudaq::qec::sparse_binary_matrix make_test_H() {
+  cudaqx::tensor<uint8_t> H({std::size_t{4}, std::size_t{10}});
+  return cudaq::qec::sparse_binary_matrix(H);
+}
+
+/// Records the CUDA device current on the thread that runs decode(), so a
+/// test can observe which device an async worker thread actually used.
+class device_recording_decoder : public cudaq::qec::decoder {
+public:
+  std::atomic<int> last_decode_device{-2};
+  device_recording_decoder(const cudaq::qec::sparse_binary_matrix &H,
+                           const cudaqx::heterogeneous_map &)
+      : decoder(H) {}
+  cudaq::qec::decoder_result
+  decode(const std::vector<cudaq::qec::float_t> &) override {
+    int dev = -1;
+    if (cudaGetDevice(&dev) != cudaSuccess)
+      dev = -1;
+    last_decode_device.store(dev);
+    cudaq::qec::decoder_result r;
+    r.converged = true;
+    r.result = std::vector<cudaq::qec::float_t>(block_size, 0.0);
+    return r;
+  }
+  CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
+      device_recording_decoder,
+      static std::unique_ptr<cudaq::qec::decoder> create(
+          const cudaq::qec::decoder_init &init,
+          const cudaqx::heterogeneous_map &params) {
+        return cudaq::qec::make_pcm_decoder<device_recording_decoder>(init,
+                                                                      params);
+      })
+};
+CUDAQ_EXT_PT_REGISTER_TYPE(device_recording_decoder)
+
+} // namespace
+
+TEST(DecoderCudaDeviceId, AbsentKeyIsNoOp) {
+  auto d = cudaq::qec::decoder::get("sample_decoder", make_test_H());
+  EXPECT_EQ(d->get_cuda_device_id(), -1);
+  std::vector<cudaq::qec::float_t> syndrome(4);
+  auto r = d->decode(syndrome);
+  EXPECT_EQ(r.result.size(), 10);
+}
+
+TEST(DecoderCudaDeviceId, NegativeIdThrows) {
+  cudaqx::heterogeneous_map params;
+  params.insert("cuda_device_id", -2);
+  try {
+    auto d = cudaq::qec::decoder::get("sample_decoder", make_test_H(), params);
+    FAIL() << "expected std::runtime_error";
+  } catch (const std::runtime_error &e) {
+    EXPECT_NE(std::string(e.what()).find("cuda_device_id"), std::string::npos);
+  }
+}
+
+TEST(DecoderCudaDeviceId, OutOfRangeIdThrows) {
+  cudaqx::heterogeneous_map params;
+  params.insert("cuda_device_id", 1 << 20);
+  try {
+    auto d = cudaq::qec::decoder::get("sample_decoder", make_test_H(), params);
+    FAIL() << "expected std::runtime_error";
+  } catch (const std::runtime_error &e) {
+    EXPECT_NE(std::string(e.what()).find("cuda_device_id"), std::string::npos);
+  }
+}
+
+TEST(DecoderCudaDeviceId, PersistentPinAtConstruction) {
+  if (cuda_device_count() < 2)
+    GTEST_SKIP() << "needs >= 2 CUDA devices";
+  ScopedDeviceRestore restore;
+  cudaqx::heterogeneous_map params;
+  params.insert("cuda_device_id", 1);
+  auto d = cudaq::qec::decoder::get("sample_decoder", make_test_H(), params);
+  EXPECT_EQ(d->get_cuda_device_id(), 1);
+  // The pin is persistent: the constructing thread is still on device 1
+  // after decoder::get() returns.
+  int cur = -1;
+  ASSERT_EQ(cudaGetDevice(&cur), cudaSuccess);
+  EXPECT_EQ(cur, 1);
+  // Decode entry points need no per-call guard on this thread.
+  std::vector<cudaq::qec::float_t> syndrome(4);
+  auto r = d->decode(syndrome);
+  EXPECT_EQ(r.result.size(), 10);
+  ASSERT_EQ(cudaGetDevice(&cur), cudaSuccess);
+  EXPECT_EQ(cur, 1);
+}
+
+TEST(DecoderCudaDeviceId, KeyStrippedFromPluginParams) {
+  if (cuda_device_count() < 1)
+    GTEST_SKIP() << "needs >= 1 CUDA device";
+  ScopedDeviceRestore restore;
+  // Sanity: strict_keys_decoder does reject unknown keys.
+  cudaqx::heterogeneous_map bogus;
+  bogus.insert("bogus_key", 1);
+  EXPECT_THROW(
+      cudaq::qec::decoder::get("strict_keys_decoder", make_test_H(), bogus),
+      std::runtime_error);
+  // cuda_device_id must be consumed by the base and never reach the plugin,
+  // while permitted keys (decode_to_obs) must survive the rebuild-and-strip.
+  cudaqx::heterogeneous_map params;
+  params.insert("cuda_device_id", 0);
+  params.insert("decode_to_obs", true);
+  EXPECT_NO_THROW(
+      cudaq::qec::decoder::get("strict_keys_decoder", make_test_H(), params));
+}
+
+TEST(DecoderCudaDeviceId, AsyncWorkerPinsItself) {
+  if (cuda_device_count() < 2)
+    GTEST_SKIP() << "needs >= 2 CUDA devices";
+  ScopedDeviceRestore restore;
+  cudaqx::heterogeneous_map params;
+  params.insert("cuda_device_id", 1);
+  auto d = cudaq::qec::decoder::get("device_recording_decoder", make_test_H(),
+                                    params);
+  auto *rec = dynamic_cast<device_recording_decoder *>(d.get());
+  ASSERT_NE(rec, nullptr);
+  // decode_async spawns a brand-new std::async thread whose current device
+  // defaults to 0, NOT the owning thread's device 1. The worker must pin
+  // itself to the decoder's device for the duration of the call.
+  std::vector<cudaq::qec::float_t> syndrome(4);
+  auto r = d->decode_async(syndrome).get();
+  EXPECT_EQ(r.result.size(), 10);
+  EXPECT_EQ(rec->last_decode_device.load(), 1);
+  // The owning (calling) thread's device is untouched by the async call.
+  int cur = -1;
+  ASSERT_EQ(cudaGetDevice(&cur), cudaSuccess);
+  EXPECT_EQ(cur, 1);
+}
+
+TEST(DecoderCudaDeviceId, TwoThreadsTwoDevices) {
+  if (cuda_device_count() < 2)
+    GTEST_SKIP() << "needs >= 2 CUDA devices";
+  auto worker = [](int id, int &observed_device, bool &decode_ok) {
+    cudaqx::heterogeneous_map params;
+    params.insert("cuda_device_id", id);
+    auto d = cudaq::qec::decoder::get("sample_decoder", make_test_H(), params);
+    std::vector<cudaq::qec::float_t> syndrome(4);
+    auto r = d->decode(syndrome);
+    decode_ok = (r.result.size() == 10);
+    int cur = -1;
+    observed_device = (cudaGetDevice(&cur) == cudaSuccess) ? cur : -1;
+  };
+  int dev0 = -1, dev1 = -1;
+  bool ok0 = false, ok1 = false;
+  std::thread t0(worker, 0, std::ref(dev0), std::ref(ok0));
+  std::thread t1(worker, 1, std::ref(dev1), std::ref(ok1));
+  t0.join();
+  t1.join();
+  EXPECT_TRUE(ok0);
+  EXPECT_TRUE(ok1);
+  EXPECT_EQ(dev0, 0);
+  EXPECT_EQ(dev1, 1);
 }

@@ -59,9 +59,9 @@ struct dispatcher_unresponsive_error : std::runtime_error {
 //      `g_realtime_session`.
 //   2. Acquires a free RX slot from the ring buffer.
 //   3. Writes RPCHeader + the matching wire-format payload from
-//      decoder_rpc_ids.h.  Payload scalars are INT64; bools are UINT8+pad;
-//      bit-packed arrays are LSB-first; whole payload is padded to an
-//      8-byte multiple.
+//      decoder_rpc_wire_format.h.  Payload scalars are INT64; bools are
+//      UINT8+pad; bit-packed arrays are LSB-first; whole payload is padded to
+//      an 8-byte multiple.
 //   4. Publishes the slot by writing the DEVICE-visible RX slot address
 //      into rx_flags[slot] (the "address-as-flag" convention of the shared
 //      ring; both the HOST_LOOP and DEVICE_LOOP dispatchers expect this).

@@ -62,7 +62,7 @@ def test_decoder_init_and_attributes():
         assert decoder.contractor_config.contractor_name == "torch"
         assert decoder.contractor_config.backend == "torch"
         assert decoder.contractor_config.device == "cpu"
-    assert decoder._dtype == "float32"
+    assert decoder._dtype == "float64"
 
 
 def test_decoder_replace_logical_observable():
@@ -158,8 +158,9 @@ def test_decoder_decode_batch():
     assert res.result.shape == (3, 1)
     assert res.converged.shape == (3,)
     assert np.all(res.converged)
-    assert np.all((0.0 <= np.round(res.result[:, 0])) &
-                  (np.round(res.result[:, 0]) <= 1.0))
+    np.testing.assert_allclose(res.result[:, 0], [1.0, 1.0, 0.0],
+                               atol=1e-12,
+                               rtol=1e-12)
 
 
 def test_decoder_set_contractor_invalid():
@@ -583,6 +584,108 @@ def test_invalid_backend():
 def test_invalid_combo():
     with pytest.raises(ValueError):
         ContractorConfig("torch", "numpy", "cpu")
+
+
+# ---------------------------------------------------------------------------
+# Focused tests for _safe_posterior / mass-validation logic, using a mocked
+# contractor so these run without a GPU and without a real contraction.
+# ContractorConfig is a frozen dataclass; its contractor property reads from
+# the class-level _contractors dict, which is the correct mock surface.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def mock_decoder(monkeypatch):
+    """Fixture that returns a factory for decoders with a mocked contractor.
+
+    Usage:
+        decoder = mock_decoder(np.array([m0, m1]))           # single decode
+        decoder = mock_decoder(np.array([[...],...]), rows=N) # batch decode
+    The factory patches ContractorConfig._contractors for the active backend
+    and pre-sets path_single/path_batch so no path optimisation is triggered.
+    """
+
+    def _make(mock_output, rows=None, dtype="float64"):
+        H, logical, noise = make_simple_code()
+        decoder = qec.get_decoder("tensor_network_decoder",
+                                  H,
+                                  logical_obs=logical,
+                                  noise_model=noise,
+                                  dtype=dtype)
+        decoder.path_single = "auto"
+        decoder.path_batch = "auto"
+        if rows is not None:
+            decoder._batch_size = rows
+        name = decoder.contractor_config.contractor_name
+        monkeypatch.setitem(ContractorConfig._contractors, name,
+                            lambda *a, **kw: mock_output)
+        return decoder
+
+    return _make
+
+
+def test_default_dtype_is_float64():
+    H, logical, noise = make_simple_code()
+    decoder = qec.get_decoder("tensor_network_decoder",
+                              H,
+                              logical_obs=logical,
+                              noise_model=noise)
+    assert decoder._dtype == "float64"
+
+
+_BIG = np.finfo(np.float64).max
+
+
+@pytest.mark.parametrize(
+    "masses",
+    [
+        [-0.1, 1.1],  # negative mass
+        [0.0, 0.0],  # zero denominator
+        [float("nan"), 0.5],  # NaN
+        [float("inf"), 0.5],  # infinite mass
+        [_BIG, _BIG],  # finite masses whose sum overflows to inf
+    ])
+def test_decode_invalid_masses_marks_unconverged(mock_decoder, masses):
+    res = mock_decoder(np.array(masses)).decode([0.0, 0.0])
+    assert not res.converged
+    assert res.result[0] == pytest.approx(0.5)
+
+
+def test_decode_valid_masses_converged(mock_decoder):
+    res = mock_decoder(np.array([0.3, 0.7])).decode([0.0, 0.0])
+    assert res.converged
+    assert res.result[0] == pytest.approx(0.7)
+
+
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+def test_decode_roundoff_negative_mass_converged(mock_decoder, dtype):
+    eps = np.finfo(np.dtype(dtype)).eps
+    res = mock_decoder(np.array([-eps, 1.0]), dtype=dtype).decode([0.0, 0.0])
+    assert res.converged
+    assert res.result[0] == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize(
+    "bad_row",
+    [
+        [-0.1, 1.1],  # negative mass
+        [float("nan"), 0.5],  # NaN
+        [0.0, 0.0],  # zero denominator
+    ])
+def test_decode_batch_invalid_row_marks_unconverged(mock_decoder, bad_row):
+    mock = np.array([[0.3, 0.7], bad_row])
+    res = mock_decoder(mock, rows=2).decode_batch(np.zeros((2, 2)))
+    assert res.converged[0]
+    assert not res.converged[1]
+    assert res.result[0, 0] == pytest.approx(0.7)
+    assert res.result[1, 0] == pytest.approx(0.5)
+
+
+def test_decode_batch_all_valid_all_converged(mock_decoder):
+    mock = np.array([[0.2, 0.8], [0.6, 0.4], [0.1, 0.9]])
+    res = mock_decoder(mock, rows=3).decode_batch(np.zeros((3, 2)))
+    assert np.all(res.converged)
+    np.testing.assert_allclose(res.result[:, 0], [0.8, 0.4, 0.9])
 
 
 if __name__ == "__main__":
