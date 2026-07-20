@@ -56,7 +56,7 @@ void DecodingSession::stop_worker() {
 }
 
 std::unique_ptr<DecodingSession>
-DecodingSession::create(std::unique_ptr<cudaq::qec::decoder> decoder,
+DecodingSession::create(std::shared_ptr<cudaq::qec::decoder> decoder,
                         SyndromeMappingTable mapping_table_arg) {
   if (!decoder)
     throw std::invalid_argument("DecodingSession requires a decoder");

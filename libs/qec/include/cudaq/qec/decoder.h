@@ -135,7 +135,8 @@ public:
 /// decoder.
 class decoder
     : public cudaqx::extension_point<decoder, const decoder_init &,
-                                     const cudaqx::heterogeneous_map &> {
+                                     const cudaqx::heterogeneous_map &>,
+      public std::enable_shared_from_this<decoder> {
 private:
   struct rt_impl;
   struct rt_impl_deleter {
@@ -185,8 +186,10 @@ public:
   /// @brief Decode a single syndrome
   /// @param syndrome A vector of syndrome measurements where the floating point
   /// value is the probability that the syndrome measurement is a |1>.
+  /// The decoder must be shared-owned, normally via `decoder::get()`.
   /// @returns std::future of a vector of length `block_size` with soft
   /// probabilities of errors in each index.
+  /// @throws std::runtime_error if the decoder is not shared-owned.
   virtual std::future<decoder_result>
   decode_async(const std::vector<float_t> &syndrome);
 
@@ -203,39 +206,40 @@ public:
   /// @param name The registered decoder name.
   /// @param init A parity-check matrix or raw Stim DEM string.
   /// @param param_map Optional decoder-specific parameters.
-  static std::unique_ptr<decoder>
+  /// @returns Shared ownership of the decoder.
+  static std::shared_ptr<decoder>
   get(const std::string &name, const decoder_init &init,
       const cudaqx::heterogeneous_map &param_map = cudaqx::heterogeneous_map());
 
-  static std::unique_ptr<decoder>
+  static std::shared_ptr<decoder>
   get(const std::string &name, const cudaq::qec::sparse_binary_matrix &H,
       const cudaqx::heterogeneous_map &param_map =
           cudaqx::heterogeneous_map()) {
     return get(name, decoder_init{H}, param_map);
   }
 
-  static std::unique_ptr<decoder>
+  static std::shared_ptr<decoder>
   get(const std::string &name, const cudaqx::tensor<uint8_t> &H,
       const cudaqx::heterogeneous_map &param_map =
           cudaqx::heterogeneous_map()) {
     return get(name, cudaq::qec::sparse_binary_matrix(H), param_map);
   }
 
-  static std::unique_ptr<decoder>
+  static std::shared_ptr<decoder>
   get(const std::string &name, const std::string &stim_dem_text,
       const cudaqx::heterogeneous_map &param_map =
           cudaqx::heterogeneous_map()) {
     return get(name, decoder_init{stim_dem_text}, param_map);
   }
 
-  static std::unique_ptr<decoder>
+  static std::shared_ptr<decoder>
   get(const std::string &name, const char *stim_dem_text,
       const cudaqx::heterogeneous_map &param_map =
           cudaqx::heterogeneous_map()) {
     return get(name, decoder_init{std::string{stim_dem_text}}, param_map);
   }
 
-  static std::unique_ptr<decoder>
+  static std::shared_ptr<decoder>
   get(const std::string &name, std::string_view stim_dem_text,
       const cudaqx::heterogeneous_map &param_map =
           cudaqx::heterogeneous_map()) {
@@ -524,35 +528,35 @@ inline void convert_vec_hard_to_soft(const std::vector<std::vector<t_hard>> &in,
   }
 }
 
-std::unique_ptr<decoder>
+std::shared_ptr<decoder>
 get_decoder(const std::string &name, const decoder_init &init,
             const cudaqx::heterogeneous_map options = {});
 
-inline std::unique_ptr<decoder>
+inline std::shared_ptr<decoder>
 get_decoder(const std::string &name, const cudaq::qec::sparse_binary_matrix &H,
             const cudaqx::heterogeneous_map options = {}) {
   return get_decoder(name, decoder_init{H}, options);
 }
 
-inline std::unique_ptr<decoder>
+inline std::shared_ptr<decoder>
 get_decoder(const std::string &name, const cudaqx::tensor<uint8_t> &H,
             const cudaqx::heterogeneous_map options = {}) {
   return get_decoder(name, cudaq::qec::sparse_binary_matrix(H), options);
 }
 
-inline std::unique_ptr<decoder>
+inline std::shared_ptr<decoder>
 get_decoder(const std::string &name, const std::string &stim_dem_text,
             const cudaqx::heterogeneous_map options = {}) {
   return get_decoder(name, decoder_init{stim_dem_text}, options);
 }
 
-inline std::unique_ptr<decoder>
+inline std::shared_ptr<decoder>
 get_decoder(const std::string &name, const char *stim_dem_text,
             const cudaqx::heterogeneous_map options = {}) {
   return get_decoder(name, decoder_init{std::string{stim_dem_text}}, options);
 }
 
-inline std::unique_ptr<decoder>
+inline std::shared_ptr<decoder>
 get_decoder(const std::string &name, std::string_view stim_dem_text,
             const cudaqx::heterogeneous_map options = {}) {
   return get_decoder(name, decoder_init{std::string{stim_dem_text}}, options);

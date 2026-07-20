@@ -52,7 +52,7 @@ private:
   /// Detector-row layers in the [B | S...S | B] layout (minimum 2 for a memory
   /// circuit with no interior rounds)
   std::size_t num_detector_layers = 0;
-  std::vector<std::unique_ptr<decoder>> inner_decoders;
+  std::vector<std::shared_ptr<decoder>> inner_decoders;
   std::vector<std::size_t> first_columns;
 
   // Boundary-aware detector-layer layout ([B | S...S | B]); maps between layers

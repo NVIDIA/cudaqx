@@ -43,7 +43,7 @@ prepare_decoder_params(
 /// @throws std::invalid_argument if the decoder ID cannot be represented.
 /// @throws std::runtime_error if required realtime configuration is missing or
 /// decoder construction/initialization fails.
-__attribute__((visibility("default"))) std::unique_ptr<cudaq::qec::decoder>
+__attribute__((visibility("default"))) std::shared_ptr<cudaq::qec::decoder>
 create_realtime_decoder(
     const cudaq::qec::decoding::config::decoder_config &decoder_config);
 
