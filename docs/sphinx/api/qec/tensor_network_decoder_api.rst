@@ -1,4 +1,4 @@
-.. class:: cudaq_qec.plugin.decoders.tensor_network_decoder.TensorNetworkDecoder
+.. class:: cudaq_qec.plugins.decoders.tensor_network_decoder.TensorNetworkDecoder
 
     A general class for tensor network decoders for quantum error correction codes.
 

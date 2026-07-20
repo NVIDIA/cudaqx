@@ -2,7 +2,6 @@ CUDA-Q QEC Python API
 ******************************
 
 .. automodule:: cudaq_qec
-    :members:
 
 Code
 =============
@@ -46,6 +45,14 @@ Decoder Interfaces
 
 .. autoclass:: cudaq_qec.DecoderResult
     :members:
+
+.. autoclass:: cudaq_qec.BatchDecoderResult
+    :members:
+
+.. autoclass:: cudaq_qec.AsyncDecoderResult
+    :members:
+
+.. autofunction:: cudaq_qec.get_decoder
 
 Built-in Decoders
 =================
@@ -97,6 +104,8 @@ DEM Sampling
 ============
 
 .. autofunction:: cudaq_qec.dem_sampling
+
+.. _parity_check_matrix_utilities_python:
 
 Parity Check Matrix Utilities
 =============================
