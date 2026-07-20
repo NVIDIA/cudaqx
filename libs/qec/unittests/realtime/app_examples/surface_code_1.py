@@ -281,6 +281,8 @@ def setup_decoders(code, state_prep_op, opts, noise) -> bool:
 
             # also cross-check the raw-measurement span:
             # the largest measurement index in D_sparse, plus one.
+            if len(cfg.decoders[0].D_sparse) == 0:
+                raise RuntimeError("Loaded DEM has empty D_sparse")
             loaded_measurements = max(cfg.decoders[0].D_sparse) + 1
             expected_measurements = (opts.num_rounds * (num_ancx + num_ancz) +
                                      code.get_num_data_qubits())

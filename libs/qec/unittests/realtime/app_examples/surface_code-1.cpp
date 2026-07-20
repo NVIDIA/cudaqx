@@ -484,6 +484,8 @@ bool setup_decoders(const cudaq::qec::code &code,
       // also cross-check the raw-measurement span: the largest measurement
       // index in D_sparse, plus one.
       const auto &D = cfg.decoders[0].D_sparse;
+      if (D.empty())
+        throw std::runtime_error("Loaded DEM has empty D_sparse");
       const std::size_t loaded_measurements =
           *std::max_element(D.begin(), D.end()) + 1;
       const std::size_t expected_measurements =
