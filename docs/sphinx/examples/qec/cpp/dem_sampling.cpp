@@ -9,8 +9,8 @@
 // DEM Sampling — sample errors and syndromes from a detector error model.
 //
 // Compile and run with:
-// nvq++ --enable-mlir --target=stim -lcudaq-qec dem_sampling.cpp
-// ./a.out
+// nvq++ --enable-mlir -lcudaq-qec dem_sampling.cpp -o dem_sampling
+// ./dem_sampling
 
 #include <cstdint>
 #include <iostream>

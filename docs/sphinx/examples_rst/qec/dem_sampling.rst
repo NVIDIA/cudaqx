@@ -45,9 +45,10 @@ Example
 GPU Acceleration
 ++++++++++++++++
 
-When a CUDA-capable GPU is available, ``dem_sampling`` uses a fully on-device
-pipeline that is significantly faster than per-shot CPU sampling, especially
-for large numbers of shots and sparse error models (low probabilities):
+When a CUDA-capable GPU is available, ``dem_sampling`` keeps the sampling and
+syndrome computation on-device, which is significantly faster than per-shot CPU
+sampling, especially for large numbers of shots and sparse error models (low
+probabilities):
 
 1. **Sparse Bernoulli sampling** — Errors are generated directly in compressed
    sparse row (CSR) format. For low error probabilities the CSR representation

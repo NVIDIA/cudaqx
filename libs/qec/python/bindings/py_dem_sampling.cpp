@@ -621,7 +621,9 @@ void bindDemSampling(nb::module_ &mod) {
         When PyTorch CUDA tensors are provided on the GPU path, outputs are
         returned as PyTorch CUDA tensors. Otherwise, outputs are NumPy arrays.
 
-        PyTorch CPU tensors are not supported. Convert to NumPy first.
+        PyTorch CPU tensors are moved to CUDA automatically under
+        backend="gpu"; under backend="auto" or "cpu" they are rejected —
+        convert to NumPy first.
 
         Args:
             check_matrix: Binary check matrix [num_checks x num_error_mechanisms],
