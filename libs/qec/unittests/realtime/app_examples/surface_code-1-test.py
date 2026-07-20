@@ -14,6 +14,7 @@ import pytest
 # Note: this must be done before importing `cudaq`
 os.environ["CUDAQ_DEFAULT_SIMULATOR"] = "stim"
 
+import cudaq
 import cudaq_qec as qec
 
 from surface_code_1 import run
@@ -81,6 +82,11 @@ CASES = [
 @pytest.fixture(scope="module", params=CASES)
 def case(request):
     return request.param
+
+
+@pytest.fixture(autouse=True)
+def reset_cudaq_target():
+    cudaq.set_target("stim")
 
 
 @pytest.fixture(scope="module")
