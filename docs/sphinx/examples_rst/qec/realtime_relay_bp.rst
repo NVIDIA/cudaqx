@@ -444,8 +444,8 @@ Requirements
   `cuda-quantum realtime build guide <https://github.com/NVIDIA/cuda-quantum/blob/main/realtime/docs/building.md>`__
 - All three tools built (bridge, playback, emulator)
 
-Running
-^^^^^^^
+Running the Emulated Test
+^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. code-block:: bash
 
@@ -474,8 +474,8 @@ processes run:
 2. **Playback** -- loads syndromes into the FPGA's BRAM and triggers playback,
    then reads back corrections from the FPGA's capture RAM to verify them
 
-Requirements
-^^^^^^^^^^^^
+FPGA Requirements
+^^^^^^^^^^^^^^^^^
 
 - FPGA programmed with the HSB IP bitfile, connected to a ConnectX NIC via
   direct cable or switch.  Bitfiles for supported FPGA vendors are available
@@ -485,8 +485,8 @@ Requirements
 - FPGA IP and bridge IP on the same subnet
 - ConnectX device name (e.g., ``mlx5_4``, ``mlx5_5``)
 
-Running
-^^^^^^^
+Running the FPGA Test
+^^^^^^^^^^^^^^^^^^^^^
 
 .. code-block:: bash
 

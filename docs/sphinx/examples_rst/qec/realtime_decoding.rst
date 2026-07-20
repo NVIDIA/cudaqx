@@ -24,7 +24,7 @@ The workflow consists of four stages:
 4. **Real-Time Decoding**: During quantum circuit execution, the decoding API is used within quantum kernels to interact with decoders. As the circuit measures stabilizers, syndromes are enqueued to the decoder, which processes them concurrently. When corrections are needed, the decoder is queried and the suggested operations are applied to the logical qubits. This entire process happens within the coherence time constraints of the quantum hardware.
 
 Real-Time Decoding Example
-----------------
+--------------------------
 
 Here are two examples demonstrating real-time decoding in Python and C++:
 
@@ -565,11 +565,12 @@ Python Execution
 .. code-block:: bash
 
    python3 surface_code-1.py --distance 3 --load_dem config.yaml --num_shots 1000 --target quantinuum --emulate
+
 **Key Points:**
 
 - ``emulate=True``: Emulate Quantinuum compilation path
 - Decoder config is automatically uploaded to Quantinuum's servers when
-  :py:func:`cudaq_qec.configure_decoders_from_file` (Python) or
+  ``cudaq_qec.configure_decoders_from_file`` (Python) or
   :cpp:func:`cudaq::qec::decoding::config::configure_decoders_from_file` (C++) is called
 
 Complete Workflow Example
