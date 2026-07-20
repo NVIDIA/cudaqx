@@ -68,7 +68,7 @@
     :param logical_inds: (optional) List of logical index names
     :param logical_tags: (optional) List of logical tags
     :param contract_noise_model: (bool, optional) Whether to contract the noise model at initialization (default: True)
-    :param dtype: (str, optional) Data type for tensors (default: "float32")
+    :param dtype: (str, optional) Data type for tensors (default: "float64")
     :param device: (str, optional) Device for tensor operations ("cpu", "cuda", or "cuda:X", default: "cuda")
 
     **Methods**

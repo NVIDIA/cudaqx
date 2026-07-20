@@ -76,6 +76,18 @@ if [[ $# -ge 7 ]]; then
   EXTRA_APP_ARGS=("${@:7}")
 fi
 
+# The app defaults to one logical patch. The aggregate result sums residual
+# errors across patches, so retain the per-patch ceiling when --num_logical
+# requests multiple patches.
+NUM_LOGICAL=1
+for ((i = 0; i < ${#EXTRA_APP_ARGS[@]}; i++)); do
+  if [[ "${EXTRA_APP_ARGS[$i]}" == "--num_logical" ]] &&
+    ((i + 1 < ${#EXTRA_APP_ARGS[@]})); then
+    i=$((i + 1))
+    NUM_LOGICAL=${EXTRA_APP_ARGS[$i]}
+  fi
+done
+
 export CUDAQ_DEFAULT_SIMULATOR=stim
 if [[ -n "${QEC_DECODING_SERVER:-}" ]]; then
   export CUDAQ_QEC_REALTIME_MODE=external_server
@@ -90,10 +102,11 @@ P_SPAM=0.01
 # d5/T6). A decoder that loads but never corrects reliably exceeds it; any
 # working decoder sits well below it. This is a wiring/correctness check, not
 # a performance target -- it must never be tightened toward a particular
-# decoder's measured rate. Floored at 1 so small shot counts do not truncate
-# the ceiling to 0.
-MAX_NON_ZERO=$((NUM_SHOTS / 50))
-if [[ $MAX_NON_ZERO -lt 1 ]]; then MAX_NON_ZERO=1; fi
+# decoder's measured rate. Floored at 1 per logical patch so small shot counts
+# do not truncate the ceiling to 0, then scaled for the aggregate result.
+MAX_NON_ZERO_PER_LOGICAL=$((NUM_SHOTS / 50))
+if [[ $MAX_NON_ZERO_PER_LOGICAL -lt 1 ]]; then MAX_NON_ZERO_PER_LOGICAL=1; fi
+MAX_NON_ZERO=$((MAX_NON_ZERO_PER_LOGICAL * NUM_LOGICAL))
 
 # Multi-type mode: a comma list binds one decoder type per patch and the
 # per-decoder ceilings below replace the aggregate ceiling (which is
@@ -174,6 +187,7 @@ echo "  distance       = $DISTANCE"
 echo "  num_rounds     = $NUM_ROUNDS"
 echo "  decoder_type   = $DECODER_TYPE"
 echo "  num_shots      = $NUM_SHOTS"
+echo "  num_logical    = $NUM_LOGICAL"
 echo "  realtime mode  = $CUDAQ_QEC_REALTIME_MODE"
 if [[ -n "$ONNX_PATH" ]]; then
   echo "  onnx_path      = $ONNX_PATH"

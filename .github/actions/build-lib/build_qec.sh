@@ -2,6 +2,7 @@
 set -e
 
 . "$(dirname "$0")/setup_custabilizer.sh"
+. "$(dirname "$0")/../../../scripts/cudaq_realtime_cmake_flags.sh"
 
 build_dir=$1
 install_prefix=$2
@@ -100,7 +101,9 @@ if [ -z "$CUDAQ_REALTIME_ROOT" ]; then
   # which produces libcudaq-realtime-bridge-hololink.so needed by the bridge.
   cd /tmp/cudaq-realtime-src/realtime
   mkdir -p build && cd build
+
   cmake -G Ninja -DCMAKE_INSTALL_PREFIX="$CUDAQ_REALTIME_ROOT" \
+    -DCMAKE_CUDA_FLAGS="$(cudaq_realtime_cmake_cuda_flags)" \
     -DCUDAQ_REALTIME_ENABLE_HOLOLINK_TOOLS=ON \
     -DHOLOSCAN_SENSOR_BRIDGE_SOURCE_DIR=$HSB_ROOT \
     -DHOLOSCAN_SENSOR_BRIDGE_BUILD_DIR=$HSB_BUILD \
