@@ -6,10 +6,6 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
-import os as _os
-
-_docs_gen = _os.getenv("CUDAQX_DOCS_GEN_IMPORT_CUDAQ") == "ON"
-
 
 def _ensure_cuda_runtime_loaded():
     """Ensure CUDA runtime libraries are in the process before loading native extensions."""
@@ -40,15 +36,7 @@ except ImportError as exc:
         raise ImportError(
             f"{err}. Ensure 'nvidia-cuda-runtime-cuXX' is installed "
             "alongside 'cuda-quantum-cuXX'.") from exc
-    if not _docs_gen:
-        raise
-    # In docs-gen mode provide a mock so autodoc can import the module and
-    # document the pure-Python layer without cudaq's C runtime present.
-    # Normally qecrt is the nanobind submodule of
-    # _pycudaqx_qec_the_suffix_matters_cudaq_qec that holds all C++ bindings.
-    from unittest.mock import MagicMock as _MagicMock
-    qecrt = _MagicMock()
-    qecrt.__version__ = "unknown"
+    raise
 
 __version__ = qecrt.__version__
 code = qecrt.code
@@ -99,6 +87,7 @@ get_decoder = qecrt.get_decoder
 dem_from_stim_text = qecrt.dem_from_stim_text
 DecoderResult = qecrt.DecoderResult
 BatchDecoderResult = qecrt.BatchDecoderResult
+AsyncDecoderResult = qecrt.AsyncDecoderResult
 DetectorErrorModel = qecrt.DetectorErrorModel
 generate_random_bit_flips = qecrt.generate_random_bit_flips
 sample_memory_circuit = qecrt.sample_memory_circuit

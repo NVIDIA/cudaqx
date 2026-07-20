@@ -166,19 +166,36 @@ def process_signature(app, what, name, obj, options, signature, return_annotatio
     return (fix_string(signature), fix_string(return_annotation))
 
 def process_docstring(app, what, name, obj, options, lines):
-    # In docs-gen mode the native extension is replaced by MagicMock, so any
-    # autodoc directive targeting a pybind11 symbol gets the MagicMock class
-    # docstring ("MagicMock is a subclass of Mock …") via inspect.getdoc().
-    # Suppress it so the generated page is empty rather than misleading.
-    try:
-        from unittest.mock import MagicMock
-        if isinstance(obj, MagicMock):
-            lines.clear()
-            return
-    except ImportError:
-        pass
     for i, line in enumerate(lines):
         lines[i] = fix_string(line)
+
+def _fixup_class_modules():
+    # Types bound in the qecrt nanobind submodule have __module__ set to the
+    # internal extension path.  Autodoc treats any class whose __module__ doesn't
+    # match the documenting module as an alias and emits "alias of <internal path>"
+    # instead of real documentation; stringify_annotation() also uses __module__ to
+    # build type-annotation strings in function signatures.  Fix up every public
+    # type in cudaq_qec whose module still points at the internal path so that
+    # both autoclass and autofunction produce clean output automatically.
+    try:
+        import cudaq_qec
+        _internal_prefix = 'cudaq_qec._pycudaqx'
+        for _name in dir(cudaq_qec):
+            if _name.startswith('_'):
+                continue
+            _obj = getattr(cudaq_qec, _name, None)
+            if isinstance(_obj, type) and \
+                    getattr(_obj, '__module__', '').startswith(_internal_prefix):
+                try:
+                    _obj.__module__ = 'cudaq_qec'
+                except (AttributeError, TypeError):
+                    pass
+    except ImportError:
+        pass
+
+_fixup_class_modules()
+del _fixup_class_modules
+
 
 def setup(app):
     app.connect('autodoc-process-signature', process_signature)
@@ -195,12 +212,6 @@ breathe_show_enumvalue_initializer = True
 # -- Other options -------------------------------------------------
 
 autosummary_generate = True
-
-# cudaq is not available in doc-only build environments; mock it so autodoc
-# can import cudaq_qec without cudaq's C runtime being present.  The native
-# extension load failure is handled separately via CUDAQX_DOCS_GEN_IMPORT_CUDAQ
-# in cudaq_qec/__init__.py.
-autodoc_mock_imports = ['cudaq']
 
 intersphinx_mapping = {
     'python': ('https://docs.python.org/3/', None),
@@ -249,8 +260,18 @@ nitpick_ignore = [
     ('py:class', 'numpy.uint8'),
     ('py:class', 'cudaq.mlir._mlir_libs._quakeDialects.cudaq_runtime.qview'),
     ('py:class', 'cudaq_qec.surface_role'),
+    ('py:class', 'cudaq_qec.operation'),
     ('py:class', 'sc_orientation'),
     ('py:class', 'vec2d'),
+]
+
+# Suppress cross-reference warnings for types whose fully-qualified path still
+# contains the internal pybind11 module name.  This happens when Sphinx
+# extracts the cross-reference from the raw nanobind-generated signature before
+# the process_docstring / process_signature hooks have a chance to strip the
+# prefix via doc_replacements.
+nitpick_ignore_regex = [
+    ('py:class', r'cudaq_qec\._pycudaqx_qec_the_suffix_matters_cudaq_qec\..*'),
 ]
 
 napoleon_google_docstring = True

@@ -104,7 +104,8 @@ configure_file(${SPHINX_CONF_IN} ${SPHINX_CONF} @ONLY)
 # TODO: set warning as error (-W flag)
 add_custom_command(
   OUTPUT ${SPHINX_INDEX_FILE}
-  COMMAND ${CMAKE_COMMAND} -E env CUDAQX_DOCS_GEN_IMPORT_CUDAQ=ON
+  COMMAND ${CMAKE_COMMAND} -E env
+          LD_LIBRARY_PATH=${CUDAQ_LIBRARY_DIR}:$ENV{LD_LIBRARY_PATH}
           ${SPHINX_EXECUTABLE} -v -n --keep-going -b html
           -c ${CMAKE_CURRENT_BINARY_DIR}
           -Dbreathe_projects.cudaqx=${DOXYGEN_OUTPUT_DIR}/xml
