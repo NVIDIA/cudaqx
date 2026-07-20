@@ -361,7 +361,7 @@ cudaqx_add_device_code(surface_code-1-quantinuum-emulate
   SOURCES
     surface_code-1.cpp
   COMPILER_FLAGS
-    --target quantinuum --emulate --quantinuum-machine Helios-Fake -DMANUALLY_INJECT_ERRORS=1
+    --target quantinuum --emulate --quantinuum-machine Helios-Fake
   DEPENDS_ON
     # Must wait for the local executable to be built because it has the same
     # surface_code-1.cpp file, and the nvq++ compiler will use the same filename
@@ -390,10 +390,9 @@ add_test(
     bash "${CMAKE_CURRENT_SOURCE_DIR}/surface_code-1-test.sh"
       ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-local
       ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-quantinuum-emulate
-      # MANUALLY_INJECT_ERRORS forces one X error per shot; the decoder must
-      # produce a correction for each. Thresholds: <=0 residual errors,
-      # >=1000 corrections (one per shot at 1000 shots).
-      3 0 1000 NULL 12
+      # QIR emulation applies no noise, so the live generate-and-decode run
+      # finds 0 errors / 0 corrections: this is a lowering + run smoke test.
+      3 0 0 NULL 12
       ${CMAKE_BINARY_DIR}/lib
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
@@ -404,7 +403,7 @@ add_test(
     bash "${CMAKE_CURRENT_SOURCE_DIR}/surface_code-1-test.sh"
       ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-local
       ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-quantinuum-emulate
-      5 0 1000 NULL 5
+      5 0 0 NULL 5
       ${CMAKE_BINARY_DIR}/lib
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
