@@ -199,7 +199,7 @@ inline size_t round_up_pow2(size_t v) {
 /// residual syndrome output.
 struct DecoderContext {
   /// @brief Pool of decoder instances (one per decode worker thread).
-  std::vector<std::unique_ptr<cudaq::qec::decoder>> decoders;
+  std::vector<std::shared_ptr<cudaq::qec::decoder>> decoders;
   /// @brief Atomic counter for round-robin decoder assignment.
   std::atomic<int> next_decoder_idx{0};
 

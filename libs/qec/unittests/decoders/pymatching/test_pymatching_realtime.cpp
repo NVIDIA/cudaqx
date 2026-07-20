@@ -22,7 +22,7 @@
 
 namespace {
 
-using DecoderVec = std::vector<std::unique_ptr<cudaq::qec::decoder>>;
+using DecoderVec = std::vector<std::shared_ptr<cudaq::qec::decoder>>;
 
 DecoderVec make_pymatching_decoders(const std::vector<std::uint8_t> &h_vec,
                                     std::size_t syndrome_size,

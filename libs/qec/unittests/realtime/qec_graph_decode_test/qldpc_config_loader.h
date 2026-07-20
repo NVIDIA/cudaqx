@@ -29,7 +29,7 @@ class decoder;
 namespace test_realtime_qldpc {
 
 struct LoadedDecoder {
-  std::unique_ptr<cudaq::qec::decoder> decoder;
+  std::shared_ptr<cudaq::qec::decoder> decoder;
   std::size_t num_measurements = 0; ///< total per-shot, derived from D_sparse
   std::size_t num_observables = 0;  ///< rows of O_sparse
 };

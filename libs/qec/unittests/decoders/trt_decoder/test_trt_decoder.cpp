@@ -282,7 +282,7 @@ TEST_F(TRTDecoderTest, ValidateAgainstPyTorchModel) {
   cudaqx::heterogeneous_map params;
   params.insert("onnx_load_path", onnx_path);
 
-  std::unique_ptr<decoder> trt_decoder;
+  std::shared_ptr<decoder> trt_decoder;
   try {
     trt_decoder = decoder::get("trt_decoder", H, params);
   } catch (const std::exception &e) {
@@ -375,7 +375,7 @@ TEST_F(TRTDecoderTest, ValidateSingleTestCase) {
   cudaqx::heterogeneous_map params;
   params.insert("onnx_load_path", onnx_path);
 
-  std::unique_ptr<decoder> trt_decoder;
+  std::shared_ptr<decoder> trt_decoder;
   try {
     trt_decoder = decoder::get("trt_decoder", H, params);
   } catch (const std::exception &e) {
@@ -436,7 +436,7 @@ TEST_F(TRTDecoderTest, PerformanceComparisonCudaGraphVsTraditional) {
   params_cuda_graph.insert("precision", "fp16");
   params_cuda_graph.insert("use_cuda_graph", true);
 
-  std::unique_ptr<decoder> decoder_cuda_graph;
+  std::shared_ptr<decoder> decoder_cuda_graph;
   try {
     decoder_cuda_graph = decoder::get("trt_decoder", H, params_cuda_graph);
   } catch (const std::exception &e) {
@@ -451,7 +451,7 @@ TEST_F(TRTDecoderTest, PerformanceComparisonCudaGraphVsTraditional) {
   params_traditional.insert("precision", "fp16");
   params_traditional.insert("use_cuda_graph", false);
 
-  std::unique_ptr<decoder> decoder_traditional;
+  std::shared_ptr<decoder> decoder_traditional;
   try {
     decoder_traditional = decoder::get("trt_decoder", H, params_traditional);
   } catch (const std::exception &e) {
@@ -579,7 +579,7 @@ TEST_F(TRTDecoderTest, EngineSavePathAndEngineLoadPathRoundTrip) {
   build_params.insert("precision", std::string("fp16"));
   build_params.insert("use_cuda_graph", false);
 
-  std::unique_ptr<decoder> built_decoder;
+  std::shared_ptr<decoder> built_decoder;
   try {
     built_decoder = decoder::get("trt_decoder", H, build_params);
   } catch (const std::exception &e) {
@@ -590,7 +590,7 @@ TEST_F(TRTDecoderTest, EngineSavePathAndEngineLoadPathRoundTrip) {
   cudaqx::heterogeneous_map load_params;
   load_params.insert("engine_load_path", engine_path.string());
   load_params.insert("use_cuda_graph", false);
-  std::unique_ptr<decoder> loaded_decoder;
+  std::shared_ptr<decoder> loaded_decoder;
   try {
     loaded_decoder = decoder::get("trt_decoder", H, load_params);
   } catch (const std::exception &e) {
@@ -623,7 +623,7 @@ TEST_F(TRTDecoderTest, DynamicBatchIdentityModelUsesOptimizationProfile) {
   params.insert("use_cuda_graph", true);
   params.insert("memory_workspace", std::size_t{1 << 20});
 
-  std::unique_ptr<decoder> trt_decoder;
+  std::shared_ptr<decoder> trt_decoder;
   try {
     trt_decoder = decoder::get("trt_decoder", make_identity_h(3), params);
   } catch (const std::exception &e) {
@@ -655,7 +655,7 @@ TEST_F(TRTDecoderTest, Uint8IdentityModelBinarizesInputAndOutput) {
   params.insert("onnx_load_path", *onnx_path);
   params.insert("use_cuda_graph", false);
 
-  std::unique_ptr<decoder> trt_decoder;
+  std::shared_ptr<decoder> trt_decoder;
   try {
     trt_decoder = decoder::get("trt_decoder", make_identity_h(3), params);
   } catch (const std::exception &e) {
@@ -683,7 +683,7 @@ TEST_F(TRTDecoderTest, MixedDtypeCopiesOutput) {
   params.insert("onnx_load_path", *onnx_path);
   params.insert("use_cuda_graph", false);
 
-  std::unique_ptr<decoder> trt_decoder;
+  std::shared_ptr<decoder> trt_decoder;
   try {
     trt_decoder = decoder::get("trt_decoder", make_identity_h(3), params);
   } catch (const std::exception &e) {
@@ -717,7 +717,7 @@ TEST_F(TRTDecoderTest, BatchFailureThrows) {
   params.insert("global_decoder", std::string("single_error_lut"));
   params.insert("global_decoder_params", cudaqx::heterogeneous_map{});
 
-  std::unique_ptr<decoder> trt_decoder;
+  std::shared_ptr<decoder> trt_decoder;
   try {
     trt_decoder = decoder::get("trt_decoder", make_identity_h(2), params);
   } catch (const std::exception &e) {
@@ -753,7 +753,7 @@ TEST_F(TRTDecoderTest, CompositeGlobalDecoderCombinesLogicalFrame) {
   params.insert("global_decoder_params", cudaqx::heterogeneous_map{});
   params.insert("O", O);
 
-  std::unique_ptr<decoder> trt_decoder;
+  std::shared_ptr<decoder> trt_decoder;
   try {
     trt_decoder = decoder::get("trt_decoder", H, params);
   } catch (const std::exception &e) {

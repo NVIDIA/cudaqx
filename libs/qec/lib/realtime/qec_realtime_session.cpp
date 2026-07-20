@@ -30,7 +30,7 @@ namespace cudaq::qec::realtime {
 
 namespace {
 
-using Decoders = std::vector<std::unique_ptr<cudaq::qec::decoder>>;
+using Decoders = std::vector<std::shared_ptr<cudaq::qec::decoder>>;
 
 //==============================================================================
 // DEVICE-mode helpers
@@ -302,7 +302,7 @@ void reset_decoder_host(const void *rx_slot, void *tx_slot, std::size_t) {
 //==============================================================================
 
 qec_realtime_session::qec_realtime_session(
-    std::vector<std::unique_ptr<cudaq::qec::decoder>> &decoders,
+    std::vector<std::shared_ptr<cudaq::qec::decoder>> &decoders,
     cudaq_dispatch_launch_fn_t device_launch_fn)
     : decoders_(decoders), device_launch_fn_(device_launch_fn) {}
 

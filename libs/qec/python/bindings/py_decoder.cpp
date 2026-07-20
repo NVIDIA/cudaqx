@@ -30,6 +30,7 @@
 #include <nanobind/stl/function.h>
 #include <nanobind/stl/optional.h>
 #include <nanobind/stl/pair.h>
+#include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/tuple.h>
 #include <nanobind/stl/unique_ptr.h>
@@ -689,11 +690,10 @@ void bindDecoder(nb::module_ &mod) {
           nb::arg("syndrome"))
       .def(
           "decode_async",
-          [](decoder &dec,
+          [](std::shared_ptr<decoder> dec,
              const std::vector<float_t> &syndrome) -> async_decoder_result {
-            // Release the GIL while launching asynchronous work.
             nb::gil_scoped_release release;
-            return async_decoder_result(dec.decode_async(syndrome));
+            return async_decoder_result(dec->decode_async(syndrome));
           },
           "Asynchronously decode the given syndrome", nb::arg("syndrome"))
       .def(
@@ -881,7 +881,7 @@ void bindDecoder(nb::module_ &mod) {
   auto get_decoder_from_dem_text = [](const std::string &name,
                                       const std::string &dem_text,
                                       nb::kwargs options)
-      -> std::variant<nb::object, std::unique_ptr<decoder>> {
+      -> std::variant<nb::object, std::shared_ptr<decoder>> {
     if (PyDecoderRegistry::contains(name)) {
       auto dem = dem_from_stim_text(dem_text);
 
@@ -903,7 +903,7 @@ void bindDecoder(nb::module_ &mod) {
       "get_decoder",
       [get_decoder_from_dem_text](const std::string &name, nb::object H,
                                   nb::kwargs options)
-          -> std::variant<nb::object, std::unique_ptr<decoder>> {
+          -> std::variant<nb::object, std::shared_ptr<decoder>> {
         if (nb::isinstance<nb::str>(H)) {
           return get_decoder_from_dem_text(name, nb::cast<std::string>(H),
                                            options);

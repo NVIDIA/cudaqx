@@ -96,7 +96,7 @@ public:
   ///                 decoder) session; `initialize()` throws if a DEVICE-mode
   ///                 decoder set is given without it.
   explicit qec_realtime_session(
-      std::vector<std::unique_ptr<cudaq::qec::decoder>> &decoders,
+      std::vector<std::shared_ptr<cudaq::qec::decoder>> &decoders,
       cudaq_dispatch_launch_fn_t device_launch_fn = nullptr);
 
   ~qec_realtime_session();
@@ -181,7 +181,7 @@ private:
   void stop_loops();
 
   // ---- References / external state ----
-  std::vector<std::unique_ptr<cudaq::qec::decoder>> &decoders_;
+  std::vector<std::shared_ptr<cudaq::qec::decoder>> &decoders_;
   cudaq_dispatch_launch_fn_t device_launch_fn_ = nullptr;
 
   // ---- Lifetime / mode ----

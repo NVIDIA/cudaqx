@@ -199,7 +199,7 @@ protected:
   // session is constructed with a reference to this so the test (and the
   // session) share ownership semantics with the production path's
   // `g_decoders` global.
-  std::vector<std::unique_ptr<decoder>> decoders_;
+  std::vector<std::shared_ptr<decoder>> decoders_;
 
   // The realtime session abstracts: shared ring buffer, function table,
   // HOST_LOOP CPU dispatcher (for per-round GRAPH_LAUNCH enqueue), and

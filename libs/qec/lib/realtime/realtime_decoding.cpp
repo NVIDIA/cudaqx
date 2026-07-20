@@ -37,7 +37,7 @@ using SyndromeCaptureCallback = void (*)(const uint8_t *, size_t);
 SyndromeCaptureCallback g_syndrome_capture_callback = nullptr;
 } // namespace
 
-std::vector<std::unique_ptr<cudaq::qec::decoder>> g_decoders;
+std::vector<std::shared_ptr<cudaq::qec::decoder>> g_decoders;
 std::unique_ptr<cudaq::qec::realtime::qec_realtime_session> g_realtime_session;
 
 namespace {
@@ -217,7 +217,7 @@ cudaqx::heterogeneous_map prepare_decoder_params(
   return params;
 }
 
-std::unique_ptr<cudaq::qec::decoder> create_realtime_decoder(
+std::shared_ptr<cudaq::qec::decoder> create_realtime_decoder(
     const cudaq::qec::decoding::config::decoder_config &decoder_config) {
   if (decoder_config.id < 0 || static_cast<std::uint64_t>(decoder_config.id) >
                                    std::numeric_limits<std::uint32_t>::max())

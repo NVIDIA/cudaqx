@@ -19,6 +19,7 @@
 #include <optional>
 #include <random>
 #include <thread>
+#include <type_traits>
 
 namespace {
 class ScopedEnv {
@@ -1324,6 +1325,47 @@ public:
 };
 CUDAQ_EXT_PT_REGISTER_TYPE(device_recording_decoder)
 
+// Test-owned state that outlives the decoder.
+struct async_lifetime_probe {
+  std::promise<void> entered;
+  std::promise<void> may_finish;
+  std::future<void> may_finish_future{may_finish.get_future()};
+  std::atomic<bool> destroyed{false};
+};
+
+/// Blocks decode until the test permits completion.
+class async_lifetime_decoder : public cudaq::qec::decoder {
+public:
+  async_lifetime_probe *probe = nullptr;
+  async_lifetime_decoder(const cudaq::qec::sparse_binary_matrix &H,
+                         const cudaqx::heterogeneous_map &)
+      : decoder(H) {}
+  cudaq::qec::decoder_result
+  decode(const std::vector<cudaq::qec::float_t> &) override {
+    async_lifetime_probe *p = probe;
+    const std::size_t bs = block_size;
+    p->entered.set_value();
+    p->may_finish_future.wait();
+    cudaq::qec::decoder_result r;
+    r.converged = true;
+    r.result = std::vector<cudaq::qec::float_t>(bs, 0.0);
+    return r;
+  }
+  ~async_lifetime_decoder() override {
+    if (probe)
+      probe->destroyed.store(true);
+  }
+  CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
+      async_lifetime_decoder,
+      static std::unique_ptr<cudaq::qec::decoder> create(
+          const cudaq::qec::decoder_init &init,
+          const cudaqx::heterogeneous_map &params) {
+        return cudaq::qec::make_pcm_decoder<async_lifetime_decoder>(init,
+                                                                    params);
+      })
+};
+CUDAQ_EXT_PT_REGISTER_TYPE(async_lifetime_decoder)
+
 } // namespace
 
 TEST(DecoderCudaDeviceId, AbsentKeyIsNoOp) {
@@ -1442,4 +1484,46 @@ TEST(DecoderCudaDeviceId, TwoThreadsTwoDevices) {
   EXPECT_TRUE(ok1);
   EXPECT_EQ(dev0, 0);
   EXPECT_EQ(dev1, 1);
+}
+
+// An async decode must retain the decoder after its caller releases ownership.
+TEST(DecoderAsyncLifetime, PendingAsyncKeepsDecoderAlive) {
+  using decoder_handle =
+      decltype(cudaq::qec::decoder::get("sample_decoder", make_test_H()));
+  if constexpr (!std::is_same_v<decoder_handle,
+                                std::shared_ptr<cudaq::qec::decoder>>) {
+    FAIL() << "decoder::get must return shared ownership for decode_async";
+    return;
+  }
+
+  async_lifetime_probe probe;
+  auto entered = probe.entered.get_future();
+
+  auto d = cudaq::qec::decoder::get("async_lifetime_decoder", make_test_H());
+  auto *owner = dynamic_cast<async_lifetime_decoder *>(d.get());
+  // ASSERT: the factory returned the instrumented decoder.
+  ASSERT_NE(owner, nullptr);
+  owner->probe = &probe;
+  const std::size_t block_size = d->get_block_size();
+
+  std::vector<cudaq::qec::float_t> syndrome(4);
+  auto async = d->decode_async(syndrome);
+  const auto entered_status = entered.wait_for(std::chrono::seconds(5));
+  if (entered_status != std::future_status::ready)
+    probe.may_finish.set_value();
+  // ASSERT: decode reached the controlled blocking point.
+  ASSERT_EQ(entered_status, std::future_status::ready);
+
+  d.reset();
+
+  // ASSERT: the in-flight task still owns the decoder.
+  EXPECT_FALSE(probe.destroyed.load())
+      << "decoder destroyed while decode_async was pending";
+
+  probe.may_finish.set_value();
+  auto result = async.get();
+
+  // ASSERT: retained ownership allowed decode to complete normally.
+  EXPECT_TRUE(result.converged);
+  EXPECT_EQ(result.result.size(), block_size);
 }
