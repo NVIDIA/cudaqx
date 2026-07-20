@@ -908,8 +908,9 @@ set(_sc4_neg_env "CUDAQ_QEC_REALTIME_MODE=inproc_rpc"
 # The Ising opt-in path is covered entirely offline. The Python harness builds
 # small synthetic artifact directories, checks the shell driver's source-mode
 # contract, and drives the C++ loader through valid and malformed bundle data.
-# It deliberately stops at YAML generation, before TensorRT opens model.onnx.
-if(Python_Interpreter_FOUND)
+# It needs the TRT plugin's registered configuration schema, but stops at YAML
+# generation before TensorRT opens model.onnx.
+if(Python_Interpreter_FOUND AND TARGET cudaq-qec-trt-decoder)
   add_test(NAME app_examples.surface_code-4-yaml-ising-artifacts
     COMMAND ${Python_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_surface_code_4_yaml_ising.py
