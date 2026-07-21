@@ -234,6 +234,12 @@ if (GPU_ROCE_TRANSCEIVER_LIB AND CUDAQ_REALTIME_INCLUDE_DIR AND
     cuda_link_stub.cu
   )
 
+  # Without the 0.16-era device-graph scheduler API (CUDAQ_REALTIME_FOR_0_16,
+  # see libs/qec/lib/realtime/CMakeLists.txt) the bridge compiles its earlier
+  # HOST_LOOP full-window implementation instead of the per-round scheduler.
+  target_compile_definitions(hololink_qldpc_graph_decoder_bridge PRIVATE
+    $<$<BOOL:${CUDAQ_REALTIME_FOR_0_16}>:CUDAQ_REALTIME_FOR_0_16>)
+
   set_target_properties(hololink_qldpc_graph_decoder_bridge PROPERTIES
     LINKER_LANGUAGE CUDA
     CUDA_SEPARABLE_COMPILATION ON

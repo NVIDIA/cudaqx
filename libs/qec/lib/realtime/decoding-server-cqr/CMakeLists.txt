@@ -13,6 +13,21 @@ else()
   set(_core_include_dir "${CMAKE_SOURCE_DIR}/libs/core/include")
 endif()
 
+# The decoding server is built on the 0.16-era cuda-quantum realtime dispatch
+# API (routing_key function-table routing, the device-graph scheduler).
+# Against an older cuda-quantum, skip the whole component: every dependent
+# target -- the gpuroce transport, the CQR plugin, the decoding_server tool,
+# and their tests -- is gated on if(TARGET ...) and disables itself with it.
+# TEMPORARY (see CUDAQ_REALTIME_FOR_0_16 in ../CMakeLists.txt).
+if(NOT CUDAQ_REALTIME_FOR_0_16)
+  set(CUDAQ_GPU_ROCE_AVAILABLE FALSE CACHE INTERNAL
+    "GPU RoCE transport component cudaq-qec-decoding-server-gpuroce available")
+  message(STATUS
+    "cudaq-qec-decoding-server: SKIPPED (requires the 0.16-era cuda-quantum "
+    "realtime dispatch API; see CUDAQ_REALTIME_FOR_0_16)")
+  return()
+endif()
+
 # ---------------------------------------------------------------------------
 # Optional: GPU RoCE transport via Hololink Sensor Bridge + DOCA
 #

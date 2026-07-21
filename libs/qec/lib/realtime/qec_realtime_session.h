@@ -8,7 +8,7 @@
 
 #pragma once
 
-#ifdef CUDAQ_REALTIME_ROOT
+#if defined(CUDAQ_REALTIME_ROOT) && defined(CUDAQ_REALTIME_FOR_0_16)
 
 // Defines CUDA_VERSION, which gates the graph-based dispatch API (the
 // self-relaunching scheduler: cudaq_dispatch_graph_context,
@@ -260,4 +260,4 @@ private:
 
 } // namespace cudaq::qec::realtime
 
-#endif // CUDAQ_REALTIME_ROOT
+#endif // CUDAQ_REALTIME_ROOT && CUDAQ_REALTIME_FOR_0_16

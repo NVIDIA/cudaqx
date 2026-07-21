@@ -270,7 +270,8 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
   )
 
   set(_have_realtime_for_tests FALSE)
-  if(CUDAQ_REALTIME_INCLUDE_DIR AND CUDAQ_REALTIME_LIBRARY AND CUDAQ_REALTIME_DISPATCH_LIBRARY)
+  if(CUDAQ_REALTIME_INCLUDE_DIR AND CUDAQ_REALTIME_LIBRARY
+     AND CUDAQ_REALTIME_DISPATCH_LIBRARY AND CUDAQ_REALTIME_FOR_0_16)
     set(_have_realtime_for_tests TRUE)
     message(STATUS "Found cuda-quantum realtime headers at ${CUDAQ_REALTIME_INCLUDE_DIR}")
     message(STATUS "Found cuda-quantum realtime library at ${CUDAQ_REALTIME_LIBRARY}")
@@ -547,6 +548,7 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
     target_compile_definitions(test_realtime_qldpc_graph_decoding PRIVATE
       TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/realtime/qec_roce_decode_test/data"
       CUDAQ_REALTIME_ROOT
+      CUDAQ_REALTIME_FOR_0_16
     )
 
     target_link_libraries(test_realtime_qldpc_graph_decoding PRIVATE

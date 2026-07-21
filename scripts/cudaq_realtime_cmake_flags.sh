@@ -1,9 +1,17 @@
 #!/bin/sh
 
+# Single source of truth for nvcc's host compiler. Exported at source time
+# (a function called via command substitution runs in a subshell and could
+# not set it for the caller) so CMake honors it during compiler
+# identification and passes -ccbin itself. The guard selection below keys
+# off the same variable, so the guards and the compiler nvcc actually uses
+# cannot diverge, regardless of the container image's default g++.
+export CUDAHOSTCXX="${CUDAHOSTCXX:-${CXX:-c++}}"
+
 # CMake flags required when CUDA-QX builds CUDA-Q's realtime dependency.
 cudaq_realtime_cmake_cuda_flags() {
   _cudaq_realtime_cuda_flags="${CMAKE_CUDA_FLAGS:-}"
-  _cudaq_realtime_host_cxx="${CXX:-c++}"
+  _cudaq_realtime_host_cxx="$CUDAHOSTCXX"
   _cudaq_realtime_host_cxx_major=$("$_cudaq_realtime_host_cxx" -dumpversion 2>/dev/null | cut -d. -f1)
   _cudaq_realtime_cuda_major=$(nvcc --version 2>/dev/null |
     sed -n 's/^.*release \([0-9][0-9]*\)\..*$/\1/p')
