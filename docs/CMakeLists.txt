@@ -101,12 +101,11 @@ configure_file(${SPHINX_CONF_IN} ${SPHINX_CONF} @ONLY)
 # - Doxygen has rerun
 # - Our doc files have been updated
 # - The Sphinx config has been updated
-# TODO: set warning as error (-W flag)
 add_custom_command(
   OUTPUT ${SPHINX_INDEX_FILE}
   COMMAND ${CMAKE_COMMAND} -E env
           LD_LIBRARY_PATH=${CUDAQ_LIBRARY_DIR}:$ENV{LD_LIBRARY_PATH}
-          ${SPHINX_EXECUTABLE} -v -n --keep-going -b html
+          ${SPHINX_EXECUTABLE} -v -n -W --keep-going -b html
           -c ${CMAKE_CURRENT_BINARY_DIR}
           -Dbreathe_projects.cudaqx=${DOXYGEN_OUTPUT_DIR}/xml
           ${SPHINX_SOURCE} ${SPHINX_BUILD}
