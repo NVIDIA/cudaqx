@@ -174,10 +174,24 @@ printf '%s' "$out" | grep -qF -- "$diag" || {
     PROPERTIES ENVIRONMENT "${_sc1_neg_env}")
 endfunction()
 
-# 1. --load_dem with a nonexistent file → setup_decoders throws.
+# 1a. --load_dem with a nonexistent file → setup_decoders throws.
 _sc1_reject(load-dem-missing-file "Could not open dem config file"
   --load_dem ${_sc1_neg_dir}/nonexistent.yml
   --distance 3 --num_rounds 3)
+
+# 1b. --load_dem with a mismatched geometry → syndrome_size check throws.
+# Fixture: generate a d=3 config, then try to load it as d=5.
+add_test(NAME app_examples.surface_code-1-negative-load-dem-fixtures
+  COMMAND ${_sc1_exe} --distance 3 --num_rounds 3
+    --save_dem ${_sc1_neg_dir}/d3.yml
+  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+set_tests_properties(app_examples.surface_code-1-negative-load-dem-fixtures
+  PROPERTIES FIXTURES_SETUP sc1_dem ENVIRONMENT "${_sc1_neg_env}")
+_sc1_reject(load-dem-geometry-mismatch "does not match current geometry"
+  --distance 5 --num_rounds 5
+  --load_dem ${_sc1_neg_dir}/d3.yml)
+set_tests_properties(app_examples.surface_code-1-negative-load-dem-geometry-mismatch
+  PROPERTIES FIXTURES_REQUIRED sc1_dem)
 
 # 2. --save_syndrome to an unwriteable path → begin_syndrome_capture throws.
 _sc1_reject(save-syndrome-bad-path "Could not open syndrome file for writing"
@@ -214,6 +228,44 @@ _sc1_reject(replay-correction-mismatch "Replay correction mismatch"
   --load_syndrome ${_sc1_neg_dir}/cap_mismatch.txt)
 set_tests_properties(app_examples.surface_code-1-negative-replay-correction-mismatch
   PROPERTIES FIXTURES_REQUIRED sc1_replay)
+
+# 6. Invalid --sw_inner_decoder is rejected before any circuit runs.
+_sc1_reject(sw-inner-decoder-invalid "--sw_inner_decoder must be"
+  --distance 3 --num_rounds 3
+  --decoder_type sliding_window --sw_inner_decoder bogus)
+
+# 7a. --param with an unknown key is rejected before any circuit runs.
+_sc1_reject(param-unknown-key "Unknown parameter 'bogus'"
+  --distance 3 --num_rounds 3
+  --param bogus=1)
+
+# 7b. --param threads overrides into the inner decoder: save the DEM and verify
+# the YAML contains the overridden lut_error_depth value.
+add_test(NAME app_examples.surface_code-1-negative-param-inner-decoder-fixture
+  COMMAND ${_sc1_exe}
+    --distance 3 --num_rounds 3
+    --decoder_type sliding_window --sw_window_size 3
+    --param lut_error_depth=1
+    --save_dem ${_sc1_neg_dir}/param_inner.yml
+  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+set_tests_properties(app_examples.surface_code-1-negative-param-inner-decoder-fixture
+  PROPERTIES FIXTURES_SETUP sc1_param_inner ENVIRONMENT "${_sc1_neg_env}")
+
+add_test(NAME app_examples.surface_code-1-param-inner-decoder-threaded
+  COMMAND bash -c "grep -q 'lut_error_depth: 1' '${_sc1_neg_dir}/param_inner.yml'"
+  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+set_tests_properties(app_examples.surface_code-1-param-inner-decoder-threaded
+  PROPERTIES FIXTURES_REQUIRED sc1_param_inner ENVIRONMENT "${_sc1_neg_env}")
+
+# 7. sliding_window with a non-default inner decoder (pymatching) runs cleanly.
+add_test(NAME app_examples.surface_code-1-sw-inner-pymatching
+  COMMAND ${_sc1_exe}
+    --distance 3 --num_rounds 3 --num_shots 50
+    --decoder_type sliding_window --sw_window_size 3
+    --sw_inner_decoder pymatching
+  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+set_tests_properties(app_examples.surface_code-1-sw-inner-pymatching
+  PROPERTIES ENVIRONMENT "${_sc1_neg_env}")
 
 # End of surface code 1, fully local, regular Stim simulator
 #------------------------------------------------------------------------------#
@@ -339,8 +391,7 @@ add_test(
       ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-local
       ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-quantinuum-emulate
       # QIR emulation applies no noise, so the live generate-and-decode run
-      # finds 0 errors / 0 corrections: this is a lowering + run smoke test
-      # (matches the distance-5 variant's 0/0 thresholds).
+      # finds 0 errors / 0 corrections: this is a lowering + run smoke test.
       3 0 0 NULL 12
       ${CMAKE_BINARY_DIR}/lib
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}

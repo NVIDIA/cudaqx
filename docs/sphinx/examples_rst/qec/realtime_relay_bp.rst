@@ -373,11 +373,10 @@ Expected output:
 Surface Code Test (Relay BP)
 ----------------------------
 
-The ``surface_code-1-local`` app example drives the device-graph scheduler
-through the in-process RPC path (``CUDAQ_QEC_REALTIME_MODE=inproc_rpc``) with
-the nv-qldpc-decoder configured for Relay BP.  It simulates
-a surface code with ``stim`` and generates syndromes on the fly, so -- unlike
-the fixed-fixture CI unit test -- it can run an arbitrary number of shots.
+The ``surface_code-1-local`` app example runs a surface code memory experiment
+with the nv-qldpc-decoder configured for Relay BP.  It simulates a surface code
+with ``stim`` and generates syndromes on the fly, so -- unlike the fixed-fixture
+CI unit test -- it can run an arbitrary number of shots.
 
 Build the app example (it links the same plugin + proprietary archive as the
 CI test):
@@ -386,14 +385,12 @@ CI test):
 
    cmake --build cudaqx/build --target surface_code-1-local
 
-Run it in two steps -- generate the decoder config (DEM), then run the decode
-loop through the scheduler:
+Run it in two steps -- generate the decoder config (DEM), then run the shots:
 
 .. code-block:: bash
 
    cd cudaqx/build
    export CUDAQ_DEFAULT_SIMULATOR=stim
-   export CUDAQ_QEC_REALTIME_MODE=inproc_rpc
 
    APP=./libs/qec/unittests/realtime/app_examples/surface_code-1-local
 
@@ -402,15 +399,13 @@ loop through the scheduler:
           --decoder_type nv-qldpc-decoder \
           --num_shots 1000 --save_dem config.yml
 
-   # 2. Run the decode loop through the device-graph scheduler
+   # 2. Run the shots
    "$APP" --distance 3 --num_rounds 12 \
           --decoder_type nv-qldpc-decoder \
           --num_shots 1000 --load_dem config.yml
 
 A clean run exits ``0`` and reports a small number of non-zero syndrome
-measurements alongside a larger number of corrections found.  The
-``app_examples`` CTest ``surface_code-1-local-test-distance-3-inproc-rpc``
-wraps this flow (it sets ``CUDAQ_QEC_REALTIME_MODE=inproc_rpc``).
+measurements alongside a larger number of corrections found.
 
 Emulated End-to-End Test
 ------------------------
@@ -444,8 +439,8 @@ Requirements
   `cuda-quantum realtime build guide <https://github.com/NVIDIA/cuda-quantum/blob/main/realtime/docs/building.md>`__
 - All three tools built (bridge, playback, emulator)
 
-Running
-^^^^^^^
+Running the Emulated Test
+^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. code-block:: bash
 
@@ -474,8 +469,8 @@ processes run:
 2. **Playback** -- loads syndromes into the FPGA's BRAM and triggers playback,
    then reads back corrections from the FPGA's capture RAM to verify them
 
-Requirements
-^^^^^^^^^^^^
+FPGA Requirements
+^^^^^^^^^^^^^^^^^
 
 - FPGA programmed with the HSB IP bitfile, connected to a ConnectX NIC via
   direct cable or switch.  Bitfiles for supported FPGA vendors are available
@@ -485,8 +480,8 @@ Requirements
 - FPGA IP and bridge IP on the same subnet
 - ConnectX device name (e.g., ``mlx5_4``, ``mlx5_5``)
 
-Running
-^^^^^^^
+Running the FPGA Test
+^^^^^^^^^^^^^^^^^^^^^
 
 .. code-block:: bash
 
