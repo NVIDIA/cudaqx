@@ -100,7 +100,7 @@ Common
 
 .. _dem_sampling_python_api:
 
-DEM Sampling
+Detector Error Model (DEM) Sampling
 ============
 
 .. autofunction:: cudaq_qec.dem_sampling
