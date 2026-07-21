@@ -17,33 +17,24 @@
 #
 # The example decodes ONE volume of num_rounds rounds (no sliding windows).
 #
-# The driver is decoder-agnostic. For trt_decoder, pass an ONNX path as arg 6
-# or pass AUTO to generate a small [pre_L=0, residual=identity] model sized for
-# the requested distance/num_rounds. Additional app args (for example
-# --use-relay-bp) may follow arg 6.
+# For trt_decoder, select exactly one model source explicitly:
+#   --generate-identity-onnx
+#   --onnx-path <file>
+#   --use-ising [--ising-artifacts-dir <dir>]
+# The Ising path is deliberately opt-in and is not exercised by CI.
 #
-# trt+Ising external-bundle path (NOT exercised by the AUTO ctest, which uses an
-# identity predecoder): to run the example against an Ising d/T/Z predecoder, you
-# need the predecoder bundle (H_csr.bin/O_csr.bin/priors.bin/metadata.txt +
-# D_sparse.txt) and the ONNX model, neither of which ships in this repository.
-# Generate them locally from the Ising decoding project
-# (https://github.com/NVIDIA/Ising-Decoding):
-#   (i)   bundle matrices (writes H_csr.bin/O_csr.bin/priors.bin/metadata.txt
-#         into <bundle>):
-#           python generate_test_data.py --distance D --n-rounds T --basis Z \
-#               --code-rotation XV --output-dir <bundle>
-#   (ii)  D_sparse.txt aligning Ising detectors to the cudaqx live buffer (run
-#         the app once with --save_dem to print cnot_schedX/Z, then translate):
-#           surface_code-4-yaml --save_dem cfg.yml --decoder_type pymatching \
-#               --distance D --num_rounds T > sched.txt
-#           python gen_dsparse_from_memory_circuit.py D T Z XV sched.txt \
-#               <bundle>/D_sparse.txt --ising-repo /path/to/ising/code
-#   (iii) export the ONNX predecoder predecoder_memory_dD_TT_Z.onnx.
-#   (iv)  run the example (pass <bundle> to --ising_bundle):
-#           surface_code-4-yaml --save_dem cfg.yml --decoder_type trt_decoder \
-#               --onnx_path predecoder_memory_dD_TT_Z.onnx \
-#               --ising_bundle <bundle> --distance D --num_rounds T ...
-#           surface_code-4-yaml --yaml cfg.yml --distance D --num_rounds T ...
+# The Ising path is opt-in. To prepare the default d7/T7/Z/XV Fast bundle,
+# accept the gated model terms and authenticate with `hf auth login`:
+#   https://huggingface.co/nvidia/Ising-Decoder-SurfaceCode-1-Fast
+# Then, from this directory, run:
+#   python prepare_ising_artifacts.py --app <path>/surface_code-4-yaml
+#   bash surface_code-4-yaml-test.sh <path>/surface_code-4-yaml 7 7 \
+#       trt_decoder 200 --use-ising
+#
+# The utility installs under
+# ${XDG_CACHE_HOME:-$HOME/.cache}/cudaqx/ising/fast/d7_t7_z_xv. Compatible
+# custom exports may instead use --ising-artifacts-dir; use the utility's
+# d-sparse subcommand to generate their CUDA-QX measurement mapping.
 
 set -euo pipefail
 
@@ -56,8 +47,8 @@ set -euo pipefail
 #                    with one entry per patch (pass --num_logical N in the
 #                    extra args). Optional, defaults to pymatching.
 #  $5 num_shots      Number of shots (optional, defaults to 200)
-#  $6 onnx_path      ONNX path for trt_decoder, or AUTO to generate one
-#  $7... extra args  Extra app args to pass to generation/realtime phases
+#  $6... options     One explicit TRT model-source option, when needed, plus
+#                    extra app args for both generation and realtime phases
 
 if [[ $# -lt 3 ]]; then
   echo "Error: Expected at least 3 arguments (got $#)"
@@ -70,11 +61,74 @@ DISTANCE=$2
 NUM_ROUNDS=$3
 DECODER_TYPE=${4:-pymatching}
 NUM_SHOTS=${5:-200}
-ONNX_PATH=${6:-}
+ONNX_PATH=""
+MODEL_SOURCE=""
+ISING_ARTIFACTS_DIR=""
 EXTRA_APP_ARGS=()
-if [[ $# -ge 7 ]]; then
-  EXTRA_APP_ARGS=("${@:7}")
+
+select_model_source() {
+  local requested=$1
+  if [[ -n "$MODEL_SOURCE" ]]; then
+    echo "Error: model sources are mutually exclusive; already selected '$MODEL_SOURCE', got '$requested'"
+    exit 1
+  fi
+  MODEL_SOURCE=$requested
+}
+
+if [[ $# -ge 5 ]]; then
+  shift 5
+else
+  shift "$#"
 fi
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --generate-identity-onnx)
+      select_model_source identity
+      shift
+      ;;
+    --onnx-path|--onnx_path)
+      if [[ $# -lt 2 ]]; then
+        echo "Error: $1 requires a value"
+        exit 1
+      fi
+      select_model_source onnx
+      ONNX_PATH=$2
+      shift 2
+      ;;
+    --use-ising)
+      select_model_source ising
+      shift
+      ;;
+    --ising-artifacts-dir)
+      if [[ $# -lt 2 ]]; then
+        echo "Error: --ising-artifacts-dir requires a value"
+        exit 1
+      fi
+      ISING_ARTIFACTS_DIR=$2
+      shift 2
+      ;;
+    *)
+      EXTRA_APP_ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [[ -n "$ISING_ARTIFACTS_DIR" && "$MODEL_SOURCE" != "ising" ]]; then
+  echo "Error: --ising-artifacts-dir does not enable Ising; pass --use-ising explicitly"
+  exit 1
+fi
+if [[ ",$DECODER_TYPE," == *",trt_decoder,"* ]]; then
+  if [[ -z "$MODEL_SOURCE" ]]; then
+    echo "Error: trt_decoder requires one model source: --generate-identity-onnx, --onnx-path <file>, or --use-ising"
+    exit 1
+  fi
+elif [[ -n "$MODEL_SOURCE" ]]; then
+  echo "Error: '$MODEL_SOURCE' is a TensorRT model source, but decoder_type has no trt_decoder entry"
+  exit 1
+fi
+
+PYTHON_BIN=${PYTHON:-python3}
 
 # The app defaults to one logical patch. The aggregate result sums residual
 # errors across patches, so retain the per-patch ceiling when --num_logical
@@ -145,10 +199,9 @@ trap cleanup EXIT
 CONFIG_FILE=$WORKDIR/config.yml
 REALTIME_LOG=$WORKDIR/realtime.log
 
-if [[ ",$DECODER_TYPE," == *",trt_decoder,"* && "$ONNX_PATH" == "AUTO" ]]; then
+if [[ "$MODEL_SOURCE" == "identity" ]]; then
   ONNX_PATH=$WORKDIR/trt_identity_predecoder.onnx
   SYNDROME_SIZE=$(((DISTANCE * DISTANCE - 1) * NUM_ROUNDS))
-  PYTHON_BIN=${PYTHON:-python3}
   "$PYTHON_BIN" - "$ONNX_PATH" "$SYNDROME_SIZE" <<'PY'
 import sys
 
@@ -192,6 +245,14 @@ echo "  realtime mode  = $CUDAQ_QEC_REALTIME_MODE"
 if [[ -n "$ONNX_PATH" ]]; then
   echo "  onnx_path      = $ONNX_PATH"
 fi
+if [[ "$MODEL_SOURCE" == "ising" ]]; then
+  echo "  model source   = Ising"
+  if [[ -n "$ISING_ARTIFACTS_DIR" ]]; then
+    echo "  artifacts dir  = $ISING_ARTIFACTS_DIR"
+  else
+    echo "  artifacts dir  = default CUDA-QX cache"
+  fi
+fi
 if [[ ${#EXTRA_APP_ARGS[@]} -gt 0 ]]; then
   echo "  extra args     = ${EXTRA_APP_ARGS[*]}"
 fi
@@ -214,7 +275,12 @@ GEN_ARGS=(
   --save_dem "$CONFIG_FILE"
 )
 if [[ -n "$ONNX_PATH" ]]; then
-  GEN_ARGS+=(--onnx_path "$ONNX_PATH")
+  GEN_ARGS+=(--onnx-path "$ONNX_PATH")
+elif [[ "$MODEL_SOURCE" == "ising" ]]; then
+  GEN_ARGS+=(--use-ising)
+  if [[ -n "$ISING_ARTIFACTS_DIR" ]]; then
+    GEN_ARGS+=(--ising-artifacts-dir "$ISING_ARTIFACTS_DIR")
+  fi
 fi
 if [[ ${#EXTRA_APP_ARGS[@]} -gt 0 ]]; then
   GEN_ARGS+=("${EXTRA_APP_ARGS[@]}")
@@ -249,7 +315,6 @@ fi
 # The hard-patch experiment must carry distinct decoder priors, not merely
 # inject different runtime noise into three identically configured decoders.
 if [[ -n "${CHECK_HARD_PATCH_MODELS:-}" ]]; then
-  PYTHON_BIN=${PYTHON:-python3}
   "$PYTHON_BIN" - "$CONFIG_FILE" <<'PY'
 import re
 import sys
