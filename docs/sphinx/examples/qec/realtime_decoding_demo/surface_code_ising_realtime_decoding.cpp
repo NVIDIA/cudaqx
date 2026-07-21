@@ -194,8 +194,8 @@ static int g_data_bits = 0;
 // front so a partial preparation fails with the complete list of gaps instead
 // of a low-level read error.
 static void require_ising_artifact_files(const std::string &dir) {
-  const char *required[] = {"model.onnx",  "H_csr.bin",    "O_csr.bin",
-                            "priors.bin",  "metadata.txt", "D_sparse.txt"};
+  const char *required[] = {"model.onnx", "H_csr.bin",    "O_csr.bin",
+                            "priors.bin", "metadata.txt", "D_sparse.txt"};
   std::string missing;
   for (const char *name : required) {
     std::ifstream f(dir + "/" + name, std::ios::binary);
@@ -405,10 +405,9 @@ void save_dem_to_file(const std::vector<cudaq::qec::detector_error_model> &dems,
                                  ") != cudaqx m2d detectors (" +
                                  std::to_string(m2d.rows.size()) + ")");
       if (dRows != m2d.rows.size())
-        throw std::runtime_error(
-            "D_sparse.txt rows (" + std::to_string(dRows) +
-            ") != cudaqx m2d detectors (" + std::to_string(m2d.rows.size()) +
-            ")");
+        throw std::runtime_error("D_sparse.txt rows (" + std::to_string(dRows) +
+                                 ") != cudaqx m2d detectors (" +
+                                 std::to_string(m2d.rows.size()) + ")");
       if (hCols != oCols || hCols != priors.size())
         throw std::runtime_error("Ising H/O/priors column counts disagree");
 
