@@ -92,6 +92,27 @@ Real-Time Decoding
 Parity Check Matrix Utilities
 =============================
 
+The utilities below create, convert, inspect, and transform parity-check
+matrices (PCMs). CUDA-Q QEC supports dense matrices as
+``cudaqx::tensor<std::uint8_t>`` and sparse matrices as
+``sparse_binary_matrix``. Decoder entry points accept either representation
+and store the PCM internally as a sparse matrix.
+
+``sparse_binary_matrix`` stores a binary matrix in compressed sparse column
+(CSC) or compressed sparse row (CSR) layout without storing values for its
+nonzero entries. Input indices are preserved as supplied. Use
+:cpp:func:`cudaq::qec::sparse_binary_matrix::canonicalize` when duplicate
+indices should be combined over GF(2) and each compressed row or column should
+be sorted. Canonicalization preserves the matrix layout. The matrix uses
+``std::uint32_t`` indices, so each dimension and the number of stored entries
+must fit in that type.
+
+Sparse utility overloads operate without materializing the full input as a
+dense tensor. Use
+:cpp:func:`cudaq::qec::generate_random_pcm_sparse` when a generated PCM would
+be impractical to allocate densely. The dense generator remains available and
+rejects dimensions whose products overflow ``std::size_t``.
+
 .. doxygenenum:: cudaq::qec::sparse_binary_matrix_layout
 
 .. doxygenclass:: cudaq::qec::sparse_binary_matrix
@@ -102,19 +123,27 @@ Parity Check Matrix Utilities
 
 .. doxygenfunction:: cudaq::qec::dense_to_sparse(const cudaqx::tensor<uint8_t> &)
 .. doxygenfunction:: cudaq::qec::generate_random_pcm(std::size_t, std::size_t, std::size_t, int, std::mt19937_64 &&);
+.. doxygenfunction:: cudaq::qec::generate_random_pcm_sparse(std::size_t, std::size_t, std::size_t, int, std::mt19937_64 &&);
 .. doxygenfunction:: cudaq::qec::generate_timelike_sparse_detector_matrix(std::uint32_t num_syndromes_per_round, std::uint32_t num_rounds, bool include_first_round = false)
 .. doxygenfunction:: cudaq::qec::generate_timelike_sparse_detector_matrix(std::uint32_t num_syndromes_per_round, std::uint32_t num_rounds, std::vector<std::int64_t> first_round_matrix)
 .. doxygenfunction:: cudaq::qec::get_pcm_for_rounds(const cudaqx::tensor<uint8_t> &, std::uint32_t, std::uint32_t, std::uint32_t, bool, bool, std::uint32_t);
+.. doxygenfunction:: cudaq::qec::get_pcm_for_rounds(const sparse_binary_matrix &, std::uint32_t, std::uint32_t, std::uint32_t, bool, bool, bool, std::uint32_t);
 .. doxygenfunction:: cudaq::qec::get_sorted_pcm_column_indices(const std::vector<std::vector<std::uint32_t>> &, std::uint32_t);
 .. doxygenfunction:: cudaq::qec::get_sorted_pcm_column_indices(const std::vector<std::vector<std::uint32_t>> &, std::uint32_t, std::uint32_t);
 .. doxygenfunction:: cudaq::qec::get_sorted_pcm_column_indices(const cudaqx::tensor<uint8_t> &, std::uint32_t);
 .. doxygenfunction:: cudaq::qec::pcm_extend_to_n_rounds(const cudaqx::tensor<uint8_t> &, std::size_t, std::uint32_t);
+.. doxygenfunction:: cudaq::qec::pcm_from_sparse_string(const std::string &, std::size_t, std::size_t)
 .. doxygenfunction:: cudaq::qec::pcm_from_sparse_vec(const std::vector<std::int64_t>& sparse_vec, std::size_t num_rows, std::size_t num_cols)
 .. doxygenfunction:: cudaq::qec::pcm_is_sorted(const cudaqx::tensor<uint8_t> &, std::uint32_t);
 .. doxygenfunction:: cudaq::qec::pcm_is_sorted(const std::vector<std::vector<std::uint32_t>> &, std::uint32_t, std::uint32_t);
+.. doxygenfunction:: cudaq::qec::pcm_to_sparse_string(const cudaqx::tensor<uint8_t> &)
+.. doxygenfunction:: cudaq::qec::pcm_to_sparse_string(const sparse_binary_matrix &)
 .. doxygenfunction:: cudaq::qec::pcm_to_sparse_vec(const cudaqx::tensor<uint8_t>& pcm)
+.. doxygenfunction:: cudaq::qec::pcm_to_sparse_vec(const sparse_binary_matrix &)
 .. doxygenfunction:: cudaq::qec::reorder_pcm_columns(const cudaqx::tensor<uint8_t> &, const std::vector<std::uint32_t> &, uint32_t, uint32_t);
+.. doxygenfunction:: cudaq::qec::reorder_pcm_columns(const sparse_binary_matrix &, const std::vector<std::uint32_t> &, uint32_t, uint32_t);
 .. doxygenfunction:: cudaq::qec::shuffle_pcm_columns(const cudaqx::tensor<uint8_t> &, std::mt19937_64 &&);
+.. doxygenfunction:: cudaq::qec::shuffle_pcm_columns(const sparse_binary_matrix &, std::mt19937_64 &&);
 .. doxygenfunction:: cudaq::qec::simplify_pcm(const cudaqx::tensor<uint8_t> &, const std::vector<double> &, std::uint32_t);
 .. doxygenfunction:: cudaq::qec::sort_pcm_columns(const cudaqx::tensor<uint8_t> &, std::uint32_t);
 
