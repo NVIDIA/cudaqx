@@ -23,8 +23,10 @@ syndrome sources, both decoding through the **same prebuilt server**:
 
 Both sources decode with any of three decoders — ``pymatching``,
 ``multi_error_lut`` (CPU lookup table), and ``nv-qldpc-decoder`` (GPU
-relay-BP). Runs are seeded (``--seed``, default 42), so the reported counts
-are reproducible.
+relay-BP) — plus an opt-in fourth, ``trt_decoder`` (the Ising neural-network
+predecoder on TensorRT + a PyMatching global decoder; see
+`Ising decoder (TensorRT predecoder + PyMatching)`_). Runs are seeded
+(``--seed``, default 42), so the reported counts are reproducible.
 
 For the nv-qldpc Relay BP device-graph walkthrough see
 :doc:`/examples_rst/qec/realtime_relay_bp`; for the software-only pymatching
@@ -41,15 +43,17 @@ Deliverables versus the example
   the hololink-enabled deliverable image).
 - the QEC + realtime libraries and the decoder plugins.
 
-**The example** (the only thing you compile) is a single source,
-``surface_code_realtime_decoding.cpp``, built two ways against the installed
-SDK — using only installed headers and libraries:
+**The example** (the only thing you compile) is two sources, each built two
+ways against the installed SDK — using only installed headers and libraries:
 
 - ``surface_code_realtime_decoding`` — the **generator** (``--target stim``):
   writes the decoder configuration and, for the FPGA source, a syndrome file.
 - ``surface_code_realtime_decoding-cqr`` — the **lowered kernel**
   (``-frealtime-lowering -DQEC_APP_CQR``): the live
-  syndrome source that streams to the server over UDP.
+  syndrome source that streams to the server over UDP or cpu_roce.
+- ``surface_code_ising_realtime_decoding`` / ``…-cqr`` — the same pair for the
+  opt-in Ising ``trt_decoder`` profile (a separate source whose measurement
+  layout matches the Ising artifacts; see the Ising section below).
 
 
 Building the example
@@ -157,6 +161,80 @@ shot's corrections against the expected values computed at
 syndrome-generation time (the playback tool's per-shot verification).
 
 
+Ising decoder (TensorRT predecoder + PyMatching)
+------------------------------------------------
+
+The ``trt_decoder`` profile decodes with the published **Ising neural-network
+predecoder** (a TensorRT engine built from its ONNX export) chained into a
+PyMatching global decoder — the same decoder stack, served by the same
+``decoding_server``, over any of the wires above (host dispatch only).
+
+This profile is **opt-in** and never runs in CI: the model weights are a gated
+Hugging Face download, and the decoder inputs are prepared locally into a
+six-file *artifact directory* passed via ``--ising-artifacts-dir`` (or the
+``QEC_ISING_ARTIFACTS_DIR`` environment variable):
+
+``model.onnx`` (the exported predecoder), ``H_csr.bin`` / ``O_csr.bin``
+(detector-error and observables matrices, Ising detector order),
+``priors.bin`` (per-mechanism priors), ``metadata.txt`` (the contract:
+``basis=Z``, ``code_rotation=XV``, ``distance=7``, ``n_rounds=7``), and
+``D_sparse.txt`` (each Ising detector as a parity over this example's live
+measurement stream). A missing or incomplete directory makes the profile
+**skip** (exit 77) listing the absent files by name.
+
+The profile is pinned to the published model's operating point: distance 7,
+7 rounds, Z basis, XV orientation, SPAM noise ``--p-spam`` (default 0.01,
+replacing ``--p-cnot``). It runs its own example pair —
+``surface_code_ising_realtime_decoding``/``-cqr``, built from the same
+CMake configure — whose measurement layout matches the artifacts' binding
+(the sibling ``surface_code_realtime_decoding`` source uses a different
+orientation and per-round bit order and cannot consume these artifacts).
+
+.. code-block:: bash
+
+   ./run_realtime_decoding.sh --source qpu-kernel --decoder trt_decoder \
+       --ising-artifacts-dir <dir> --install-prefix <prefix>
+
+   ./run_realtime_decoding.sh --source qpu-kernel --decoder trt_decoder --wire cpu_roce \
+       --setup-network --ising-artifacts-dir <dir> --install-prefix <prefix>
+
+   ./run_realtime_decoding.sh --source fpga --decoder trt_decoder \
+       --setup-network --device <nic> --bridge-ip <host-ip> --fpga-ip <fpga-ip> \
+       --ising-artifacts-dir <dir> --install-prefix <prefix>
+
+On the FPGA source the playback BRAM (512 frames) caps this geometry at **56
+shots** per run (9 frames per shot: 8 syndrome slices + 1 corrections frame);
+the script defaults to exactly that, and also raises the inter-shot
+``--spacing`` to 5 ms for this profile — the 9-frame bursts would otherwise
+overrun the server's 64-slot RX ring (about 7 shots of buffer against a
+~35 µs decode round trip).
+
+Preparing the artifact directory (once, on any machine):
+
+1. Accept the gated model terms at
+   ``https://huggingface.co/nvidia/Ising-Decoder-SurfaceCode-1-Fast`` and
+   download the SafeTensors checkpoint:
+   ``hf download nvidia/Ising-Decoder-SurfaceCode-1-Fast --include '*.safetensors' --local-dir <weights>``.
+2. Clone ``https://github.com/NVIDIA/Ising-Decoding`` and install its
+   inference requirements (``code/requirements_public_inference.txt``; on
+   aarch64 install torch from a CUDA wheel index, and ``pip install onnx``
+   for the export step).
+3. Export the Z-basis ONNX model from the checkpoint (from the Ising repo
+   root; the file lands in the repo root)::
+
+      PREDECODER_SAFETENSORS_CHECKPOINT=<weights>/<ckpt>.safetensors \
+      PREDECODER_INFERENCE_MEAS_BASIS=Z ONNX_WORKFLOW=1 WORKFLOW=inference \
+      DISTANCE=7 N_ROUNDS=7 bash code/scripts/local_run.sh
+
+4. Generate the decoder matrices:
+   ``python code/export/generate_test_data.py --distance 7 --n-rounds 7 --basis Z --code-rotation XV --num-samples 1 --output-dir <dir>``,
+   then copy the exported ONNX in as ``<dir>/model.onnx``.
+5. Generate ``D_sparse.txt`` against THIS example's measurement layout: run
+   ``surface_code_ising_realtime_decoding --save_dem cfg.yml --decoder_type pymatching > sched.txt``
+   (it prints the CNOT schedules), then
+   ``python gen_dsparse_from_memory_circuit.py 7 7 Z XV sched.txt <dir>/D_sparse.txt --ising-repo <Ising-Decoding>/code``
+   (the script ships in this example's directory).
+
 Decoders
 --------
 
@@ -179,6 +257,10 @@ Decoders
      - GPU (host dispatch)
      - NIC + GPU (device_graph dispatch)
      - plugin + ``--gpu``
+   * - ``trt_decoder``
+     - GPU (host dispatch)
+     - NIC + GPU (host dispatch)
+     - TRT plugin + Ising artifacts (opt-in)
 
 The ``nv-qldpc-decoder`` profile needs the prebuilt plugin — auto-found in the
 install prefix, else ``--nv-qldpc-plugin <path.so>`` — and a GPU; if the plugin
@@ -187,6 +269,11 @@ is unavailable the script exits ``77`` (skip).
 
 The example source
 ------------------
+
+The Ising profile builds its own companion source,
+``surface_code_ising_realtime_decoding.cpp`` (plus the shipped
+``gen_dsparse_from_memory_circuit.py`` used during artifact preparation), in
+the same example directory. The primary example source:
 
 .. literalinclude:: ../../examples/qec/realtime_decoding_demo/surface_code_realtime_decoding.cpp
    :language: cpp

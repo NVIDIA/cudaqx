@@ -68,6 +68,10 @@ PLAYBACK_BIN=""
 GENERATOR_BIN=""
 KERNEL_BIN=""
 NV_QLDPC_PLUGIN="${CUDAQ_QEC_NV_QLDPC_PLUGIN:-}"
+# Ising artifact directory for the trt_decoder profile (six locally prepared
+# files: model.onnx, H_csr.bin, O_csr.bin, priors.bin, metadata.txt,
+# D_sparse.txt). Nothing in it ships with CUDA-QX; see the docs recipe.
+ISING_ARTIFACTS_DIR="${QEC_ISING_ARTIFACTS_DIR:-}"
 
 # Surface-code experiment parameters. The generator applies two-qubit
 # depolarizing noise on the stabilizer-extraction CNOTs (p_cnot); the fixed
@@ -76,7 +80,18 @@ NV_QLDPC_PLUGIN="${CUDAQ_QEC_NV_QLDPC_PLUGIN:-}"
 GEN_DISTANCE=3
 GEN_ROUNDS=4
 GEN_P_CNOT=0.001
+# SPAM (single-qubit depolarizing) rate for the Ising trt_decoder profile,
+# whose noise model is SPAM rather than CNOT depolarizing; 0.01 is the
+# published model's trained operating point.
+GEN_P_SPAM=0.01
 SEED=42
+# Explicit-flag trackers: the trt_decoder profile pins d=7/T=7/SPAM noise and
+# must reject conflicting explicit values rather than silently override them
+# (and only re-defaults --spacing when the user did not set it).
+DISTANCE_EXPLICIT=false
+ROUNDS_EXPLICIT=false
+PCNOT_EXPLICIT=false
+SPACING_EXPLICIT=false
 
 # Shot counts differ by mode: the FPGA plays back a fixed set through a 64-slot
 # RDMA RX ring; the qpu-kernel self-paces via its blocking get_corrections and
@@ -84,6 +99,11 @@ SEED=42
 FPGA_SHOTS=85
 QPU_KERNEL_SHOTS=200
 NUM_SHOTS=""                 # explicit override
+# The FPGA playback BRAM holds 512 frames and per-round playback spends
+# (syndrome slices + 1 get_corrections) frames per shot. The Ising profile's
+# d7/T7 geometry has 8 slices/shot -> 9 frames/shot -> at most 56 shots per
+# playback run (504/512), just as the d3/T4 default 85 fills 510/512.
+TRT_FPGA_SHOTS=56
 
 # FPGA pacing: inter-shot spacing (us) keeps playback from overrunning the
 # FPGA's fixed 64-slot RX ring.  The qpu-kernel path needs none.
@@ -133,7 +153,11 @@ Sources:
   --source fpga           Delivered playback streams from a real FPGA over RoCE.
 
 Common:
-  --decoder NAME          pymatching (default) | nv-qldpc-decoder | multi_error_lut
+  --decoder NAME          pymatching (default) | nv-qldpc-decoder |
+                          multi_error_lut | trt_decoder (the Ising profile:
+                          TensorRT NN predecoder + PyMatching global decoder;
+                          pinned to d=7, rounds=7, SPAM noise 0.01, and
+                          requires the Ising artifact directory below)
   --install-prefix DIR    Deliverables prefix (decoding_server, playback, libs,
                           plugins in DIR/bin and DIR/lib).  Required (or give the
                           per-artifact overrides).
@@ -144,9 +168,18 @@ Common:
                           (default: <script dir>/build)
   --nv-qldpc-plugin PATH  Prebuilt libcudaq-qec-nv-qldpc-decoder.so (or set
                           CUDAQ_QEC_NV_QLDPC_PLUGIN); required for nv-qldpc
-  --distance N            Surface-code distance (default 3)
-  --num-rounds N          Measurement rounds (default 4; must be >= distance)
-  --p-cnot F              Two-qubit depolarizing rate on the CNOTs (default 0.001)
+  --ising-artifacts-dir D Prepared Ising artifact directory (model.onnx,
+                          H_csr.bin, O_csr.bin, priors.bin, metadata.txt,
+                          D_sparse.txt); required for trt_decoder (or set
+                          QEC_ISING_ARTIFACTS_DIR).  Absent/incomplete => the
+                          profile SKIPS (exit 77) listing what is missing.
+  --distance N            Surface-code distance (default 3; trt_decoder pins 7)
+  --num-rounds N          Measurement rounds (default 4; must be >= distance;
+                          trt_decoder pins 7)
+  --p-cnot F              Two-qubit depolarizing rate on the CNOTs (default
+                          0.001; not applicable to trt_decoder)
+  --p-spam F              SPAM depolarizing rate for trt_decoder (default 0.01,
+                          the published Ising model's operating point)
   --seed N                Simulator seed; -1 = unseeded (default 42)
   --num-shots N           Shots (default: 85 fpga / 200 qpu-kernel)
   --gpu N                 GPU id for nv-qldpc (default 0)
@@ -198,9 +231,11 @@ while [[ $# -gt 0 ]]; do
         --example-build-dir) EXAMPLE_BUILD_DIR="$2"; shift ;;
         --seed)             SEED="$2"; shift ;;
         --nv-qldpc-plugin)  NV_QLDPC_PLUGIN="$2"; shift ;;
-        --distance)         GEN_DISTANCE="$2"; shift ;;
-        --num-rounds)       GEN_ROUNDS="$2"; shift ;;
-        --p-cnot)           GEN_P_CNOT="$2"; shift ;;
+        --distance)         GEN_DISTANCE="$2"; DISTANCE_EXPLICIT=true; shift ;;
+        --num-rounds)       GEN_ROUNDS="$2"; ROUNDS_EXPLICIT=true; shift ;;
+        --p-cnot)           GEN_P_CNOT="$2"; PCNOT_EXPLICIT=true; shift ;;
+        --p-spam)           GEN_P_SPAM="$2"; shift ;;
+        --ising-artifacts-dir) ISING_ARTIFACTS_DIR="$2"; shift ;;
         --num-shots)        NUM_SHOTS="$2"; shift ;;
         --gpu)              GPU_ID="$2"; shift ;;
         --server)           SERVER_BIN="$2"; shift ;;
@@ -212,7 +247,7 @@ while [[ $# -gt 0 ]]; do
         --bridge-ip)        BRIDGE_IP="$2"; shift ;;
         --fpga-ip)          FPGA_IP="$2"; shift ;;
         --mtu)              MTU="$2"; shift ;;
-        --spacing)          SPACING="$2"; shift ;;
+        --spacing)          SPACING="$2"; SPACING_EXPLICIT=true; shift ;;
         --wire)             WIRE="$2"; shift ;;
         --dispatch)         DISPATCH="$2"; shift ;;
         --no-verify)        VERIFY=false ;;
@@ -231,20 +266,57 @@ fi
 # updates to the proprietary cudevice archive), so this script does not accept
 # it.
 case "$DECODER" in
-    pymatching|nv-qldpc-decoder|multi_error_lut) ;;
+    pymatching|nv-qldpc-decoder|multi_error_lut|trt_decoder) ;;
     sliding_window)
        echo "ERROR: sliding_window is not yet supported over the realtime" >&2
        echo "       decoding path to the GPU." >&2; exit 1 ;;
-    *) echo "ERROR: --decoder must be pymatching, nv-qldpc-decoder, or" >&2
-       echo "       multi_error_lut (got '$DECODER')" >&2; exit 1 ;;
+    *) echo "ERROR: --decoder must be pymatching, nv-qldpc-decoder," >&2
+       echo "       multi_error_lut, or trt_decoder (got '$DECODER')" >&2; exit 1 ;;
 esac
+
+# ---------------------------------------------------------------------------
+# The Ising profile (trt_decoder = TensorRT NN predecoder + PyMatching global
+# decoder) is pinned to the published model's operating point: d=7, rounds=7,
+# basis Z, orientation XV, SPAM noise (--p-spam, default 0.01). Conflicting
+# explicit knobs are rejected rather than silently overridden. On the FPGA the
+# playback BRAM caps it at TRT_FPGA_SHOTS shots per run (see above).
+# ---------------------------------------------------------------------------
+if [[ "$DECODER" == "trt_decoder" ]]; then
+    if { $DISTANCE_EXPLICIT && [[ "$GEN_DISTANCE" != 7 ]]; } || \
+       { $ROUNDS_EXPLICIT && [[ "$GEN_ROUNDS" != 7 ]]; }; then
+        echo "ERROR: the trt_decoder (Ising) profile supports distance=7," >&2
+        echo "       num-rounds=7 only (the published model's operating point)." >&2
+        exit 1
+    fi
+    if $PCNOT_EXPLICIT; then
+        echo "ERROR: trt_decoder uses SPAM noise (--p-spam), not --p-cnot." >&2
+        exit 1
+    fi
+    GEN_DISTANCE=7
+    GEN_ROUNDS=7
+    FPGA_SHOTS="$TRT_FPGA_SHOTS"
+    # d7/T7 bursts 9 frames per shot into the server's 64-slot RX ring (~7
+    # shots of buffer) and the measured decode round trip averages ~35us --
+    # the 10us default inter-shot spacing overruns the ring around shot 8-18
+    # (a corrupted stream then kills the decode with an invalid-syndrome
+    # matching error). 5ms spacing drains the ring fully every shot and costs
+    # only ~0.3s over the 56-shot run.
+    $SPACING_EXPLICIT || SPACING=5000
+    if [[ "$SOURCE" == "fpga" && -n "$NUM_SHOTS" ]] && \
+       (( NUM_SHOTS > TRT_FPGA_SHOTS )); then
+        echo "ERROR: the FPGA playback BRAM holds 512 frames; at d7/T7" >&2
+        echo "       (9 frames/shot) at most $TRT_FPGA_SHOTS shots fit per run" >&2
+        echo "       (got --num-shots $NUM_SHOTS)." >&2
+        exit 1
+    fi
+fi
 
 # ---------------------------------------------------------------------------
 # Derive the wire + dispatch defaults, then gate on the combinations this
 # example has wired up and verified:
-#   qpu-kernel : udp wire,      host dispatch          (any decoder)
-#   qpu-kernel : cpu_roce wire, host dispatch          (any decoder)
-#   fpga       : cpu_roce wire, host dispatch          (any decoder)
+#   qpu-kernel : udp wire,      host dispatch  (any decoder incl. trt_decoder)
+#   qpu-kernel : cpu_roce wire, host dispatch  (any decoder incl. trt_decoder)
+#   fpga       : cpu_roce wire, host dispatch  (any decoder incl. trt_decoder)
 #   fpga       : hololink wire, device_graph dispatch  (nv-qldpc-decoder)
 # Everything else is a real configuration of the decoding server that this
 # example does not (yet) exercise, so it is rejected with the reason.
@@ -357,8 +429,12 @@ resolve_paths() {
 
     if [[ -z "$SERVER_BIN"    && -n "$INSTALL_PREFIX" ]]; then SERVER_BIN="$INSTALL_PREFIX/bin/decoding_server"; fi
     if [[ -z "$PLAYBACK_BIN"  && -n "$INSTALL_PREFIX" ]]; then PLAYBACK_BIN="$INSTALL_PREFIX/bin/hololink_fpga_syndrome_playback"; fi
-    if [[ -z "$GENERATOR_BIN" ]]; then GENERATOR_BIN="$EXAMPLE_BUILD_DIR/surface_code_realtime_decoding"; fi
-    if [[ -z "$KERNEL_BIN"    ]]; then KERNEL_BIN="$EXAMPLE_BUILD_DIR/surface_code_realtime_decoding-cqr"; fi
+    # The Ising profile runs its own example pair (the surface_code-4-lineage
+    # source the artifacts are bound to); everything else runs the original.
+    local _example_stem="surface_code_realtime_decoding"
+    [[ "$DECODER" == "trt_decoder" ]] && _example_stem="surface_code_ising_realtime_decoding"
+    if [[ -z "$GENERATOR_BIN" ]]; then GENERATOR_BIN="$EXAMPLE_BUILD_DIR/${_example_stem}"; fi
+    if [[ -z "$KERNEL_BIN"    ]]; then KERNEL_BIN="$EXAMPLE_BUILD_DIR/${_example_stem}-cqr"; fi
 
     if [[ -z "$SERVER_BIN" ]]; then
         _err "No decoding_server: pass --install-prefix DIR (or --server PATH)."; exit 1
@@ -405,6 +481,50 @@ resolve_paths() {
             fi
         fi
     fi
+
+    # trt_decoder needs (a) the SDK's TensorRT decoder plugin (shipped only
+    # when TensorRT was available at the SDK build) and (b) the locally
+    # prepared Ising artifact directory. Both absences are SKIPs, not
+    # failures, mirroring the nv-qldpc plugin policy.
+    if [[ "$DECODER" == "trt_decoder" ]]; then
+        if [[ -z "$INSTALL_PREFIX" \
+              || ! -f "$INSTALL_PREFIX/lib/decoder-plugins/libcudaq-qec-trt-decoder.so" ]]; then
+            _err "TensorRT decoder plugin not found:"
+            _err "  ${INSTALL_PREFIX:-<install-prefix>}/lib/decoder-plugins/libcudaq-qec-trt-decoder.so"
+            _err "Skipping the trt_decoder profile."
+            exit 77
+        fi
+        validate_ising_artifacts
+    fi
+}
+
+# The Ising artifact directory holds six locally prepared files (gated Hugging
+# Face weights + the NVIDIA/Ising-Decoding repository -- see the docs for the
+# recipe). Missing or empty files are listed BY NAME; an unprepared setup is a
+# SKIP (77), not a failure. metadata.txt's content (d7/T7/Z/XV) is enforced by
+# the generator binary itself.
+validate_ising_artifacts() {
+    if [[ -z "$ISING_ARTIFACTS_DIR" ]]; then
+        _err "trt_decoder needs the Ising artifact directory: pass"
+        _err "--ising-artifacts-dir DIR or set QEC_ISING_ARTIFACTS_DIR."
+        _err "See the example documentation for the preparation recipe."
+        _err "Skipping the trt_decoder profile."
+        exit 77
+    fi
+    local f missing=""
+    for f in model.onnx H_csr.bin O_csr.bin priors.bin metadata.txt D_sparse.txt; do
+        [[ -s "$ISING_ARTIFACTS_DIR/$f" ]] || missing="$missing $f"
+    done
+    if [[ -n "$missing" ]]; then
+        _err "Ising artifact directory '$ISING_ARTIFACTS_DIR' is incomplete;"
+        _err "missing or empty:$missing"
+        _err "See the example documentation for the preparation recipe."
+        _err "Skipping the trt_decoder profile."
+        exit 77
+    fi
+    # Canonicalize: the generator embeds this path (model.onnx) into the
+    # config, which the server later reads from a different working directory.
+    ISING_ARTIFACTS_DIR="$(readlink -f -- "$ISING_ARTIFACTS_DIR")"
 }
 
 # ============================================================================
@@ -420,9 +540,17 @@ generate_data() {
     CONFIG_FILE="$GEN_DIR/config_${DECODER}.yml"
     SYNDROMES_FILE="$GEN_DIR/syndromes_${DECODER}.txt"
 
+    # The Ising profile's app takes SPAM noise and the artifact directory;
+    # the original app takes CNOT-depolarizing noise.
+    local gen_noise_args=(--p_cnot "$GEN_P_CNOT")
+    if [[ "$DECODER" == "trt_decoder" ]]; then
+        gen_noise_args=(--p_spam "$GEN_P_SPAM"
+                        --ising-artifacts-dir "$ISING_ARTIFACTS_DIR")
+    fi
+
     _log "Generating decoder config (decoder=$DECODER, d=$GEN_DISTANCE, rounds=$GEN_ROUNDS)"
     ( cd "$GEN_DIR" && "$GENERATOR_BIN" \
-        --distance "$GEN_DISTANCE" --num_rounds "$GEN_ROUNDS" --p_cnot "$GEN_P_CNOT" \
+        --distance "$GEN_DISTANCE" --num_rounds "$GEN_ROUNDS" "${gen_noise_args[@]}" \
         --decoder_type "$DECODER" \
         --save_dem "$CONFIG_FILE" ) >"$GEN_DIR/gen_config.log" 2>&1 || {
         _err "config generation failed; see $GEN_DIR/gen_config.log"; tail -5 "$GEN_DIR/gen_config.log" >&2; exit 1; }
@@ -454,13 +582,29 @@ generate_data() {
         fi
     fi
 
+    # The trt_decoder entry must carry the Ising model: a config with the
+    # right type but no onnx_load_path would silently construct a bare
+    # matching session on the server instead of the NN predecoder.
+    if [[ "$DECODER" == "trt_decoder" ]]; then
+        if ! grep -qE "type:[[:space:]]+trt_decoder" "$CONFIG_FILE" || \
+           ! grep -q "onnx_load_path" "$CONFIG_FILE"; then
+            _err "generated config lacks a trt_decoder entry with onnx_load_path: $CONFIG_FILE"
+            exit 1
+        fi
+    fi
+
     # The FPGA source replays a pre-generated syndrome file; the qpu-kernel
     # source generates syndromes live inside the kernel, so it needs none.
+    # For trt_decoder this run constructs the TensorRT decoder in-process
+    # (engine build from model.onnx) to compute the expected corrections the
+    # playback tool verifies per shot.
     if [[ "$SOURCE" == "fpga" ]]; then
         local shots="${NUM_SHOTS:-$FPGA_SHOTS}"
+        local synd_noise_args=(--p_cnot "$GEN_P_CNOT")
+        [[ "$DECODER" == "trt_decoder" ]] && synd_noise_args=(--p_spam "$GEN_P_SPAM")
         _log "Generating $shots syndromes for playback"
         ( cd "$GEN_DIR" && "$GENERATOR_BIN" \
-            --distance "$GEN_DISTANCE" --num_rounds "$GEN_ROUNDS" --p_cnot "$GEN_P_CNOT" \
+            --distance "$GEN_DISTANCE" --num_rounds "$GEN_ROUNDS" "${synd_noise_args[@]}" \
             --seed "$SEED" --num_shots "$shots" --load_dem "$CONFIG_FILE" \
             --save_syndrome "$SYNDROMES_FILE" ) >"$GEN_DIR/gen_syndromes.log" 2>&1 || {
             _err "syndrome generation failed; see $GEN_DIR/gen_syndromes.log"; tail -5 "$GEN_DIR/gen_syndromes.log" >&2; exit 1; }
@@ -601,7 +745,11 @@ run_qpu_kernel() {
     fi
     "$SERVER_BIN" "${server_args[@]}" >"$server_log" 2>&1 &
     local spid=$!; PIDS+=("$spid")
-    wait_for_pattern "$server_log" "QEC_DECODING_SERVER_READY" 60 "$spid" >/dev/null || {
+    # trt_decoder builds its TensorRT engine from model.onnx while the server
+    # constructs decoders, delaying READY; give it a longer allowance.
+    local ready_wait=60
+    [[ "$DECODER" == "trt_decoder" ]] && ready_wait=180
+    wait_for_pattern "$server_log" "QEC_DECODING_SERVER_READY" "$ready_wait" "$spid" >/dev/null || {
         cat "$server_log" >&2; return 1; }
     # udp: the UDP data port; cpu_roce: the TCP rendezvous port (the RDMA wire
     # itself is negotiated via the QP/rkey exchange).
@@ -624,11 +772,13 @@ run_qpu_kernel() {
                      CUDAQ_CPU_ROCE_TEST_CHANNEL_IP="$CHANNEL_IP"
                      CUDAQ_CPU_ROCE_TEST_DAEMON_IP="$DAEMON_IP")
     fi
+    local kernel_noise_args=(--p_cnot "$GEN_P_CNOT")
+    [[ "$DECODER" == "trt_decoder" ]] && kernel_noise_args=(--p_spam "$GEN_P_SPAM")
     local rc=0
     env "${kernel_env[@]}" \
         "$KERNEL_BIN" --load_dem "$CONFIG_FILE" \
         --distance "$GEN_DISTANCE" --num_rounds "$GEN_ROUNDS" \
-        --p_cnot "$GEN_P_CNOT" --seed "$SEED" \
+        "${kernel_noise_args[@]}" --seed "$SEED" \
         --num_shots "$shots" 2>&1 | tee "$kernel_log" || rc=$?
     # Stop the server and wait for it to exit so its shutdown stats
     # (QEC_DECODING_SERVER_DISPATCHED ...) are flushed to the log.
@@ -738,6 +888,24 @@ setup_network_cpu_roce() {
     _log "Setting up the cpu_roce channel + daemon port pair"
     _setup_roce_port "channel (kernel side)" "$CHANNEL_DEVICE" "$CHANNEL_IP"
     _setup_roce_port "daemon (server side)"  "$DAEMON_DEVICE"  "$DAEMON_IP"
+
+    # Same-host port pairs never ARP for each other's address: the kernel
+    # routes local IPs via lo and never probes the wire, so the RoCE path
+    # resolution (ibv_modify_qp to RTR) times out with errno=110 unless static
+    # neighbor entries pin each peer IP to the other port's MAC -- the exact
+    # same-host analogue of the FPGA path's seed_fpga_neighbor. Harmless on a
+    # genuine two-host topology (the entries are simply correct there too when
+    # the devices are local; skipped if either netdev is not resolvable).
+    local ch_if dm_if ch_mac dm_mac
+    ch_if=$(ib_to_netdev "$CHANNEL_DEVICE" 1)
+    dm_if=$(ib_to_netdev "$DAEMON_DEVICE" 1)
+    if [[ -n "$ch_if" && -n "$dm_if" ]]; then
+        ch_mac=$(cat "/sys/class/net/$ch_if/address")
+        dm_mac=$(cat "/sys/class/net/$dm_if/address")
+        sudo ip neigh replace "$DAEMON_IP" lladdr "$dm_mac" nud permanent dev "$ch_if"
+        sudo ip neigh replace "$CHANNEL_IP" lladdr "$ch_mac" nud permanent dev "$dm_if"
+        _info "static neighbors: $DAEMON_IP -> $dm_mac on $ch_if; $CHANNEL_IP -> $ch_mac on $dm_if"
+    fi
 }
 
 start_roce_server() {

@@ -8,15 +8,24 @@
 
 # Realtime-decoding example.
 #
-# This builds ONE source (surface_code_realtime_decoding.cpp) two ways, against
-# the *installed* CUDA-Q / CUDA-QX SDK -- nothing here reaches into a build tree:
+# This builds TWO sources, each two ways, against the *installed* CUDA-Q /
+# CUDA-QX SDK -- nothing here reaches into a build tree:
 #
-#   surface_code_realtime_decoding       generator: --target stim; writes the
-#                                        decoder config + syndrome files.
-#   surface_code_realtime_decoding-cqr   lowered kernel: adds -frealtime-lowering
-#                                        -DQEC_APP_CQR; the live QPU kernel that
-#                                        streams syndromes to the delivered
-#                                        decoding_server over UDP.
+#   surface_code_realtime_decoding            generator: --target stim; writes
+#                                             the decoder config + syndrome
+#                                             files (pymatching /
+#                                             multi_error_lut / nv-qldpc).
+#   surface_code_realtime_decoding-cqr        lowered kernel: adds
+#                                             -frealtime-lowering -DQEC_APP_CQR;
+#                                             the live QPU kernel that streams
+#                                             syndromes to the delivered
+#                                             decoding_server.
+#   surface_code_ising_realtime_decoding      generator for the Ising decoder
+#                                             profile (trt_decoder: TensorRT
+#                                             predecoder + PyMatching), built
+#                                             from the surface_code-4 lineage
+#                                             the Ising artifacts are bound to.
+#   surface_code_ising_realtime_decoding-cqr  its lowered-kernel counterpart.
 #
 # The decoding_server and the FPGA playback tool are DELIVERABLES (installed,
 # not built here); run_realtime_decoding.sh resolves them from --install-prefix.
@@ -82,6 +91,8 @@ link_directories(
   "${CUDAQ_INSTALL_DIR}/lib/plugins")
 
 set(_src "${CMAKE_CURRENT_SOURCE_DIR}/surface_code_realtime_decoding.cpp")
+set(_ising_src
+    "${CMAKE_CURRENT_SOURCE_DIR}/surface_code_ising_realtime_decoding.cpp")
 
 # Only the CUDA-QX headers need an explicit -I; nvq++ already knows its own
 # CUDA-Q include dir (cudaq/*.h, cudaq/realtime.h, common/*.h).
@@ -104,16 +115,16 @@ set(_cudaq_core_libs
 # directory (nvq++ drops intermediates named after the source, so two compiles
 # of the same file must not share a cwd).
 # ---------------------------------------------------------------------------- #
-function(_add_nvqpp_object out_var obj_name)
+function(_add_nvqpp_object out_var obj_name src)
   set(_obj "${CMAKE_CURRENT_BINARY_DIR}/${obj_name}.o")
   set(_wd  "${CMAKE_CURRENT_BINARY_DIR}/${obj_name}.nvqpp")
   file(MAKE_DIRECTORY "${_wd}")
   add_custom_command(
     OUTPUT "${_obj}"
-    COMMAND ${NVQPP} ${ARGN} -c -fPIC "${_src}" -o "${_obj}" ${_nvqpp_includes}
-    DEPENDS "${_src}"
+    COMMAND ${NVQPP} ${ARGN} -c -fPIC "${src}" -o "${_obj}" ${_nvqpp_includes}
+    DEPENDS "${src}"
     WORKING_DIRECTORY "${_wd}"
-    COMMENT "Compiling surface_code_realtime_decoding.cpp with nvq++ (${obj_name})"
+    COMMENT "Compiling with nvq++ (${obj_name})"
     VERBATIM)
   set_source_files_properties("${_obj}" PROPERTIES EXTERNAL_OBJECT TRUE GENERATED TRUE)
   set(${out_var} "${_obj}" PARENT_SCOPE)
@@ -122,7 +133,7 @@ endfunction()
 # ---------------------------------------------------------------------------- #
 # Generator (plain): writes the decoder config + syndrome files.
 # ---------------------------------------------------------------------------- #
-_add_nvqpp_object(_gen_obj generator --target stim)
+_add_nvqpp_object(_gen_obj generator "${_src}" --target stim)
 add_executable(surface_code_realtime_decoding "${_gen_obj}")
 set_target_properties(surface_code_realtime_decoding PROPERTIES LINKER_LANGUAGE CXX)
 # --no-as-needed: nvqir-stim (the --target stim simulator) and
@@ -143,7 +154,7 @@ target_link_options(surface_code_realtime_decoding PRIVATE
 # LINKER_LANGUAGE CUDA + CUDA_RESOLVE_DEVICE_SYMBOLS runs the device-link
 # (nvcc -dlink) that resolves the dispatch archive's RDC registration symbols.
 # ---------------------------------------------------------------------------- #
-_add_nvqpp_object(_cqr_obj generator-cqr
+_add_nvqpp_object(_cqr_obj generator-cqr "${_src}"
   --target stim -frealtime-lowering -DQEC_APP_CQR)
 add_executable(surface_code_realtime_decoding-cqr "${_cqr_obj}")
 set_target_properties(surface_code_realtime_decoding-cqr PROPERTIES
@@ -164,4 +175,43 @@ target_link_libraries(surface_code_realtime_decoding-cqr PRIVATE
   -Wl,--as-needed
   "${CUDAQ_REALTIME_DISPATCH_LIB}" CUDA::cudart)
 target_link_options(surface_code_realtime_decoding-cqr PRIVATE
+  LINKER:--allow-shlib-undefined LINKER:--export-dynamic)
+
+# ---------------------------------------------------------------------------- #
+# Ising decoder profile (trt_decoder): the surface_code-4-lineage source, same
+# two build variants. Requires no extra link inputs -- the TensorRT decoder is
+# a runtime-loaded plugin (lib/decoder-plugins/libcudaq-qec-trt-decoder.so in
+# the CUDA-QX install), discovered by the serving side, never linked here.
+# ---------------------------------------------------------------------------- #
+_add_nvqpp_object(_ising_gen_obj ising-generator "${_ising_src}" --target stim)
+add_executable(surface_code_ising_realtime_decoding "${_ising_gen_obj}")
+set_target_properties(surface_code_ising_realtime_decoding PROPERTIES
+  LINKER_LANGUAGE CXX)
+target_link_libraries(surface_code_ising_realtime_decoding PRIVATE
+  -Wl,--no-as-needed
+  cudaq-qec cudaq-qec-realtime-decoding
+  cudaq-qec-realtime-decoding-simulation ${_cudaq_core_libs}
+  -Wl,--as-needed
+  "${CUDAQ_REALTIME_DISPATCH_LIB}")
+target_link_options(surface_code_ising_realtime_decoding PRIVATE
+  LINKER:--allow-shlib-undefined LINKER:--export-dynamic)
+
+_add_nvqpp_object(_ising_cqr_obj ising-generator-cqr "${_ising_src}"
+  --target stim -frealtime-lowering -DQEC_APP_CQR)
+add_executable(surface_code_ising_realtime_decoding-cqr "${_ising_cqr_obj}")
+set_target_properties(surface_code_ising_realtime_decoding-cqr PROPERTIES
+  CUDA_SEPARABLE_COMPILATION ON
+  CUDA_RESOLVE_DEVICE_SYMBOLS ON
+  CUDA_STANDARD 17
+  LINKER_LANGUAGE CUDA)
+target_link_libraries(surface_code_ising_realtime_decoding-cqr PRIVATE
+  -Wl,--no-as-needed
+  cudaq-qec cudaq-qec-realtime-decoding
+  cudaq-qec-realtime-decoding-simulation-cqr
+  cudaq-qec-realtime-decoding-server-cqr
+  cudaq-device-call-runtime
+  ${_cudaq_core_libs}
+  -Wl,--as-needed
+  "${CUDAQ_REALTIME_DISPATCH_LIB}" CUDA::cudart)
+target_link_options(surface_code_ising_realtime_decoding-cqr PRIVATE
   LINKER:--allow-shlib-undefined LINKER:--export-dynamic)

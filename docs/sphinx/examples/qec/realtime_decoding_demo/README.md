@@ -8,14 +8,17 @@ or a lowered QPU kernel — both decoding through the **same prebuilt server**.
 - **Deliverables** (installed, *not* built here): `decoding_server`, the FPGA
   playback tool `hololink_fpga_syndrome_playback`, the QEC + realtime libraries,
   and the decoder plugins.
-- **The example** (the only thing you compile): one source,
-  `surface_code_realtime_decoding.cpp`, built two ways by `CMakeLists.txt`
-  against the **installed SDK** (installed headers/libs only):
+- **The example** (the only thing you compile): two sources, each built two
+  ways by `CMakeLists.txt` against the **installed SDK** (installed
+  headers/libs only):
   - `surface_code_realtime_decoding` — the **generator** (`--target stim`):
     writes the decoder config and, for the FPGA source, the syndrome file.
   - `surface_code_realtime_decoding-cqr` — the **lowered kernel**
     (`-frealtime-lowering`): the live syndrome source that streams to the server
     over UDP or, with `--wire cpu_roce`, over real RDMA.
+  - `surface_code_ising_realtime_decoding` / `…-cqr` — the same pair for the
+    opt-in Ising `trt_decoder` profile (see below), a separate source whose
+    measurement layout matches the Ising artifact contract.
 
 ## Build (once)
 
@@ -103,6 +106,35 @@ playback so it does not overrun the FPGA's fixed 64-slot ring. There is **no
 emulator** in this example — `--source fpga` requires a real FPGA. (Emulator
 testing lives in the unittests `hsb_fpga_decoding_server_test.sh`.)
 
+### Ising decoder (`trt_decoder`, opt-in)
+
+The `trt_decoder` profile decodes with the published **Ising neural-network
+predecoder** (TensorRT engine from its ONNX export) chained into a PyMatching
+global decoder — same server, any wire above, host dispatch. It is pinned to
+the model's operating point (d=7, rounds=7, Z/XV, SPAM noise `--p-spam`
+0.01) and requires a locally prepared six-file artifact directory
+(`--ising-artifacts-dir DIR` or `QEC_ISING_ARTIFACTS_DIR`): `model.onnx`,
+`H_csr.bin`, `O_csr.bin`, `priors.bin`, `metadata.txt`, `D_sparse.txt`.
+Nothing in it ships with CUDA-QX — the weights are a gated Hugging Face
+download processed through the NVIDIA/Ising-Decoding repository (full recipe
+in the Sphinx page for this example). Missing/incomplete artifacts make the
+run **skip** (exit 77), listing the absent files.
+
+```bash
+./run_realtime_decoding.sh --source qpu-kernel --decoder trt_decoder \
+    --ising-artifacts-dir <dir> --install-prefix <prefix>
+./run_realtime_decoding.sh --source qpu-kernel --decoder trt_decoder --wire cpu_roce \
+    --setup-network --ising-artifacts-dir <dir> --install-prefix <prefix>
+./run_realtime_decoding.sh --source fpga --decoder trt_decoder \
+    --setup-network --device <nic> --bridge-ip <host-ip> --fpga-ip <fpga-ip> \
+    --ising-artifacts-dir <dir> --install-prefix <prefix>
+```
+
+On the FPGA source, the playback BRAM (512 frames; 9 frames/shot at d7/T7)
+caps the run at **56 shots** — the script's default for this profile — and
+`--spacing` defaults to 5 ms here (the 9-frame bursts would overrun the
+server's 64-slot RX ring at the usual 10 µs).
+
 ## Decoders
 
 | decoder | qpu-kernel (udp / cpu_roce wire) | fpga (real FPGA) | extra requirement |
@@ -110,6 +142,7 @@ testing lives in the unittests `hsb_fpga_decoding_server_test.sh`.)
 | `pymatching` | CPU (udp: no hardware) | NIC | none |
 | `multi_error_lut` | CPU (udp: no hardware) | NIC | none |
 | `nv-qldpc-decoder` | GPU (host dispatch) | NIC + GPU (device_graph dispatch) | plugin + `--gpu` |
+| `trt_decoder` | GPU (host dispatch) | NIC + GPU (host dispatch) | TRT plugin + Ising artifacts (opt-in) |
 
 - **`pymatching`** — CPU matching decoder; nothing extra.
 - **`multi_error_lut`** — CPU lookup-table decoder; nothing extra.
