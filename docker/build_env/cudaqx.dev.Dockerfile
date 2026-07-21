@@ -6,7 +6,7 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
-ARG base_image=ghcr.io/nvidia/cuda-quantum-devcontainer@sha256:46d0b72f85b083b8fb20af243eeca1308fbdee4fa2e87d1166f029a38d0d72e7
+ARG base_image=ghcr.io/nvidia/cuda-quantum-devcontainer:amd64-cu12.6-gcc12-releases-v0.15.1
 FROM $base_image
 
 ARG cuda_version=12.6
