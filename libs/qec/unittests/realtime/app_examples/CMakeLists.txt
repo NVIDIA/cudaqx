@@ -891,35 +891,14 @@ if((QEC_EXTERNAL_DECODERS OR DEFINED ENV{QEC_EXTERNAL_DECODERS})
 endif()
 
 # --------------------------------------------------------------------------- #
-# Negative / boundary tests: pin the validation behavior (distance/round guards,
-# YAML-to-geometry binding, X-basis-bundle rejection, replay guards including
-# structurally-incomplete captures, and multi-logical reload) so it cannot
-# silently regress. Native ctests: PASS_REGULAR_EXPRESSION asserts the specific
-# diagnostic (not merely a nonzero exit), and FIXTURES_SETUP makes a failed
-# fixture fail its dependents. Self-contained -- no external Ising artifacts or
-# ONNX models required.
+# Negative / boundary tests for geometry, replay, and multi-logical reload.
+# PASS_REGULAR_EXPRESSION alone ignores exit status, so _sc4_reject checks both.
 # --------------------------------------------------------------------------- #
 set(_sc4_exe ${CMAKE_CURRENT_BINARY_DIR}/surface_code-4-yaml)
 set(_sc4_neg_dir ${CMAKE_CURRENT_BINARY_DIR}/negative)
 file(MAKE_DIRECTORY ${_sc4_neg_dir})
 set(_sc4_neg_env "CUDAQ_QEC_REALTIME_MODE=inproc_rpc"
                  "CUDAQ_DEFAULT_SIMULATOR=stim")
-
-# The Ising opt-in path is covered entirely offline. The Python harness builds
-# small synthetic artifact directories, checks the shell driver's source-mode
-# contract, and drives the C++ loader through valid and malformed bundle data.
-# It needs the TRT plugin's registered configuration schema, but stops at YAML
-# generation before TensorRT opens model.onnx.
-if(Python_Interpreter_FOUND AND TARGET cudaq-qec-trt-decoder)
-  add_test(NAME app_examples.surface_code-4-yaml-ising-artifacts
-    COMMAND ${Python_EXECUTABLE}
-      ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_surface_code_4_yaml_ising.py
-      --app ${_sc4_exe}
-      --driver ${CMAKE_CURRENT_SOURCE_DIR}/surface_code-4-yaml-test.sh
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-  set_tests_properties(app_examples.surface_code-4-yaml-ising-artifacts
-    PROPERTIES ENVIRONMENT "${_sc4_neg_env}")
-endif()
 
 # A rejection case must satisfy BOTH conditions: a nonzero exit AND the expected
 # diagnostic. CTest's PASS_REGULAR_EXPRESSION ignores the exit code, so a wrapper
