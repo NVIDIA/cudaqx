@@ -19,10 +19,6 @@ on:
         type: string
         default: ''
         required: false
-      cudaq_dev_images:
-        type: string
-        default: '{"amd64-cu12.6":"ghcr.io/nvidia/cuda-quantum-devcontainer:amd64-cu12.6-gcc12-main","amd64-cu13.0":"ghcr.io/nvidia/cuda-quantum-devcontainer:amd64-cu13.0-gcc12-main","arm64-cu12.6":"ghcr.io/nvidia/cuda-quantum-devcontainer:arm64-cu12.6-gcc12-main","arm64-cu13.0":"ghcr.io/nvidia/cuda-quantum-devcontainer:arm64-cu13.0-gcc12-main"}'
-        required: false
   workflow_dispatch:
     inputs:
       deploy_docs:
@@ -48,7 +44,7 @@ jobs:
   build:
     name: Build
     runs-on: ${{ startsWith(github.repository, 'NVIDIA/cudaqx') && 'linux-amd64-cpu8' || 'ubuntu-latest' }}
-    container: ${{ fromJSON(inputs.cudaq_dev_images || '{"amd64-cu12.6":"ghcr.io/nvidia/cuda-quantum-devcontainer:amd64-cu12.6-gcc12-main"}')['amd64-cu12.6'] }}
+    container: ghcr.io/nvidia/cuda-quantum-devcontainer:amd64-cu12.6-gcc12-releases-v0.15.1
     permissions:
       actions: write
       contents: read

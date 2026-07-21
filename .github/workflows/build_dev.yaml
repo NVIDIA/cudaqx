@@ -86,14 +86,8 @@ jobs:
         if [ -n "$other_tag" ]; then
           TAGS+=" -t ghcr.io/nvidia/cudaqx-dev:${other_tag}-${{ matrix.platform }}-cu${{ matrix.cuda_version }}"
         fi
-        image_key="${{ matrix.platform }}-cu${{ matrix.cuda_version }}"
-        base_image=$(jq -r --arg key "$image_key" '.[$key] // empty' .github/workflows/cudaq-dev-images.json)
-        if [ -z "$base_image" ]; then
-          echo "No CUDA-Q devcontainer image configured for $image_key" >&2
-          exit 1
-        fi
         docker build $TAGS -f docker/build_env/cudaqx.dev.Dockerfile . \
-          --build-arg base_image="$base_image" \
+          --build-arg base_image=ghcr.io/nvidia/cuda-quantum-devcontainer:${{ matrix.platform }}-cu${{ matrix.cuda_version }}-gcc12-releases-v0.15.1 \
           --build-arg cuda_version=${{ matrix.cuda_version }}
         docker push -a ghcr.io/nvidia/cudaqx-dev
       shell: bash --noprofile --norc -euo pipefail {0}
