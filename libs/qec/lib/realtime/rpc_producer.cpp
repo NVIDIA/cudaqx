@@ -6,7 +6,7 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
-#ifdef CUDAQ_REALTIME_ROOT
+#if defined(CUDAQ_REALTIME_ROOT) && defined(CUDAQ_REALTIME_FOR_0_16)
 
 #include "rpc_producer.h"
 
@@ -446,4 +446,4 @@ void reset_decoder(cudaq::qec::realtime::qec_realtime_session &session,
 
 } // namespace cudaq::qec::decoding::rpc_producer
 
-#endif // CUDAQ_REALTIME_ROOT
+#endif // CUDAQ_REALTIME_ROOT && CUDAQ_REALTIME_FOR_0_16

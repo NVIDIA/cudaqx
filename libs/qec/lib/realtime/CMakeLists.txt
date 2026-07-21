@@ -70,7 +70,26 @@ if(CMAKE_CUDA_COMPILER)
       PATH_SUFFIXES include ../include
     )
   endif()
-  
+
+  # CUDAQ_REALTIME_FOR_0_16: TRUE when the discovered cuda-quantum realtime
+  # install provides the 0.16-era shared-ring graph-launch dispatch API
+  # (cuda-quantum PRs #4712/#4770/#4783), which the in-process RPC decoder
+  # session requires.  The 0.15.x releases predate it; there the session
+  # compiles as a stub so the rest of the realtime decoding path still builds.
+  # TEMPORARY (remove once the minimum supported CUDA-Q provides these APIs):
+  # to revert, grep for CUDAQ_REALTIME_FOR_0_16 and delete every gate,
+  # restoring the plain CUDAQ_REALTIME_ROOT conditions.
+  set(CUDAQ_REALTIME_FOR_0_16 FALSE CACHE INTERNAL
+      "cuda-quantum realtime provides the 0.16-era graph-launch dispatch API")
+  if(CUDAQ_REALTIME_INCLUDE_DIR AND EXISTS
+      "${CUDAQ_REALTIME_INCLUDE_DIR}/cudaq/realtime/daemon/dispatcher/graph_launch_engine.h")
+    set(CUDAQ_REALTIME_FOR_0_16 TRUE CACHE INTERNAL
+        "cuda-quantum realtime provides the 0.16-era graph-launch dispatch API")
+  elseif(CUDAQ_REALTIME_INCLUDE_DIR)
+    message(STATUS "cuda-quantum realtime graph-launch dispatch API not found; "
+                   "in-process RPC decoding disabled (stub).")
+  endif()
+
   if(CUDAQ_REALTIME_INCLUDE_DIR)
     message(STATUS "Found cuda-quantum realtime headers at ${CUDAQ_REALTIME_INCLUDE_DIR}")
     cudaq_qec_find_realtime_library(CUDAQ_REALTIME_LIBRARY
@@ -226,7 +245,8 @@ target_include_directories(cudaq-qec-realtime-decoding
 
 if(CUDAQ_REALTIME_INCLUDE_DIR)
   target_compile_definitions(cudaq-qec-realtime-decoding PRIVATE
-    CUDAQ_REALTIME_ROOT)
+    CUDAQ_REALTIME_ROOT
+    $<$<BOOL:${CUDAQ_REALTIME_FOR_0_16}>:CUDAQ_REALTIME_FOR_0_16>)
 endif()
 
 target_link_options(cudaq-qec-realtime-decoding PRIVATE
