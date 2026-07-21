@@ -58,25 +58,6 @@ Decoder Interfaces
 .. doxygenstruct:: cudaq::qec::decoder_result
     :members:
 
-Sparse Parity-Check Matrices
-============================
-
-``sparse_binary_matrix`` stores a binary matrix in compressed sparse column
-(CSC) or compressed sparse row (CSR) layout without storing values for its
-nonzero entries. Input indices are preserved as supplied. Use
-:cpp:func:`cudaq::qec::sparse_binary_matrix::canonicalize` when duplicate
-indices should be combined over GF(2) and each compressed row or column should
-be sorted. Canonicalization preserves the matrix layout.
-
-The matrix uses ``std::uint32_t`` indices, so each dimension and the number of
-stored entries must fit in that type. Dense ``cudaqx::tensor<std::uint8_t>``
-PCMs remain accepted by decoder entry points through an implicit conversion.
-
-.. doxygenenum:: cudaq::qec::sparse_binary_matrix_layout
-
-.. doxygenclass:: cudaq::qec::sparse_binary_matrix
-    :members:
-
 Built-in Decoders
 =================
 
@@ -111,11 +92,31 @@ Real-Time Decoding
 Parity Check Matrix Utilities
 =============================
 
-The overloads that accept ``sparse_binary_matrix`` operate without
-materializing the full input as a dense tensor. Use
+The utilities below create, convert, inspect, and transform parity-check
+matrices (PCMs). CUDA-Q QEC supports dense matrices as
+``cudaqx::tensor<std::uint8_t>`` and sparse matrices as
+``sparse_binary_matrix``. Decoder entry points accept either representation
+and store the PCM internally as a sparse matrix.
+
+``sparse_binary_matrix`` stores a binary matrix in compressed sparse column
+(CSC) or compressed sparse row (CSR) layout without storing values for its
+nonzero entries. Input indices are preserved as supplied. Use
+:cpp:func:`cudaq::qec::sparse_binary_matrix::canonicalize` when duplicate
+indices should be combined over GF(2) and each compressed row or column should
+be sorted. Canonicalization preserves the matrix layout. The matrix uses
+``std::uint32_t`` indices, so each dimension and the number of stored entries
+must fit in that type.
+
+Sparse utility overloads operate without materializing the full input as a
+dense tensor. Use
 :cpp:func:`cudaq::qec::generate_random_pcm_sparse` when a generated PCM would
 be impractical to allocate densely. The dense generator remains available and
 rejects dimensions whose products overflow ``std::size_t``.
+
+.. doxygenenum:: cudaq::qec::sparse_binary_matrix_layout
+
+.. doxygenclass:: cudaq::qec::sparse_binary_matrix
+    :members:
 
 .. doxygenfunction:: cudaq::qec::to_parity_matrix(const std::vector<cudaq::spin_op_term> &, stabilizer_type)
 .. doxygenfunction:: cudaq::qec::to_parity_matrix(const std::vector<std::string> &, stabilizer_type)
