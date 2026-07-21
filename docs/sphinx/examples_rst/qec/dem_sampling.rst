@@ -5,14 +5,22 @@ DEM Sampling — Monte-Carlo Sampling from Detector Error Models
 
 A **detector error model** (DEM) describes the probabilistic relationship
 between independent error mechanisms and the detectors (syndrome bits) that
-observe them. Given a binary check matrix :math:`H` and a vector of per-mechanism
-error probabilities, DEM sampling generates random error vectors and the
-corresponding syndromes via
+observe them. Given a binary check matrix :math:`H` and a
+length-:math:`n_\text{mechanisms}` vector of per-mechanism error probabilities
+:math:`p`, DEM sampling generates, over ``num_shots`` independent shots, a
+random error matrix and the corresponding syndrome matrix via
 
 .. math::
 
    \text{errors}_{ij} \sim \text{Bernoulli}(p_j), \qquad
    \text{syndromes} = \text{errors} \cdot H^T \pmod{2}.
+
+The objects have shapes :math:`H : [n_\text{checks} \times n_\text{mechanisms}]`,
+:math:`\text{errors} : [\text{num\_shots} \times n_\text{mechanisms}]`, and
+:math:`\text{syndromes} : [\text{num\_shots} \times n_\text{checks}]`, one row
+per shot. The :math:`\text{errors} \cdot H^T` form is the batched, row-vector
+version of the :math:`S = H \cdot E` convention used elsewhere in the QEC
+documentation.
 
 In Python, ``cudaq_qec.dem_sampling`` provides this capability with automatic
 backend selection: it uses GPU-accelerated sampling via cuStabilizer when

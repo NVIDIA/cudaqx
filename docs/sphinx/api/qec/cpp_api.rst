@@ -58,7 +58,8 @@ GPU sampling (device pointers, requires cuStabilizer):
 
 .. doxygenfunction:: cudaq::qec::dem_sampler::gpu::sample_dem
 
-Convenience wrappers (delegate to ``cpu::sample_dem``):
+Legacy convenience wrappers (delegate to ``cpu::sample_dem``; prefer the
+``dem_sampler::cpu::sample_dem`` overloads above):
 
 .. doxygenfunction:: cudaq::qec::dem_sampling(const cudaqx::tensor<uint8_t> &, std::size_t, const std::vector<double> &)
 .. doxygenfunction:: cudaq::qec::dem_sampling(const cudaqx::tensor<uint8_t> &, std::size_t, const std::vector<double> &, unsigned)

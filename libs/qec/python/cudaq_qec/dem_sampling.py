@@ -60,8 +60,9 @@ def dem_sampling(
     CUDA tensors are provided, outputs are returned as CUDA tensors.
     Otherwise, outputs are NumPy arrays.
 
-    PyTorch CPU tensors are moved to CUDA under ``backend="gpu"`` but rejected
-    under ``"auto"``/``"cpu"``; convert to NumPy first for the CPU path.
+    PyTorch CPU tensors are moved to CUDA under ``backend="gpu"`` (raising a
+    GPU-unavailable error if there is no GPU) but rejected under
+    ``"auto"``/``"cpu"``; convert to NumPy first for the CPU path.
     PyTorch is an optional dependency; install with ``pip install torch``.
     """
     for obj in (check_matrix, error_probabilities):
