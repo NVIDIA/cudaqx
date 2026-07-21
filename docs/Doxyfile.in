@@ -21,6 +21,12 @@ EXTRACT_PRIVATE        = YES
 EXTRACT_STATIC         = YES
 
 #---------------------------------------------------------------------------
+# Configuration options related to warning and progress messages
+#---------------------------------------------------------------------------
+
+WARN_AS_ERROR          = FAIL_ON_WARNINGS
+
+#---------------------------------------------------------------------------
 # Configuration options related to the preprocessor
 #---------------------------------------------------------------------------
 
