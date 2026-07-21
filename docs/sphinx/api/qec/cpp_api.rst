@@ -46,7 +46,7 @@ Detector Error Model
 
 .. _dem_sampling_cpp_api:
 
-DEM Sampling
+Detector Error Model (DEM) Sampling
 ============
 
 CPU sampling (host tensors):
