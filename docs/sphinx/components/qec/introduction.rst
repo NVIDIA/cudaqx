@@ -985,10 +985,14 @@ Key Steps:
    ``H`` (for example ``dem.detector_error_matrix``) and ``error_rate_vec`` with
    one entry per column of ``H`` (for example ``dem.error_rates`` from the same
    DEM). The matrix must be in the sorted form expected by :code:`pcm_is_sorted`
-   for your ``num_syndromes_per_round``; DEMs from :code:`z_dem_from_memory_circuit`
-   are canonicalized. Hand-built matrices may need :code:`simplify_pcm`.
-2. **Set the schedule and window**: Provide ``num_syndromes_per_round`` (constant
-   every round). Choose ``window_size`` and ``step_size`` so ``window_size`` and
+   for your ``num_syndromes_per_round``; DEMs from :code:`dem_from_memory_circuit`
+   (and its single-basis variants :code:`z_dem_from_memory_circuit` /
+   :code:`x_dem_from_memory_circuit`) are canonicalized. Hand-built matrices may
+   need :code:`simplify_pcm`.
+2. **Set the schedule and window**: Provide ``num_syndromes_per_round`` (the number of 
+   syndrome measurements per round) and ``num_boundary_syndromes`` (the number of 
+   stabilizer syndromes fixed by the state-prep at the beginning and end of the circuit).
+   Choose ``window_size`` and ``step_size`` so ``window_size`` and
    ``step_size`` stay within valid bounds and ``num_rounds - window_size`` is
    divisible by ``step_size``, with ``num_rounds`` inferred from ``H`` and
    ``num_syndromes_per_round``.
@@ -1019,12 +1023,13 @@ Usage:
         noise = cudaq.NoiseModel()
         noise.add_all_qubit_channel("x", cudaq.Depolarization2(0.001), 1)
         statePrep = qec.operation.prep0
-        dem = qec.z_dem_from_memory_circuit(code, statePrep, num_rounds, noise)
+        dem = qec.dem_from_memory_circuit(code, statePrep, num_rounds, noise)
         inner_decoder_params = {'use_osd': True, 'max_iterations': 50, 'use_sparsity': True}
         opts = {
             'error_rate_vec': np.array(dem.error_rates),
             'window_size': 1,
-            'num_syndromes_per_round': code.get_num_z_stabilizers(),
+            'num_syndromes_per_round': code.get_num_z_stabilizers() + code.get_num_x_stabilizers(),
+            'num_boundary_syndromes': code.get_num_z_stabilizers(),
             'inner_decoder_name': 'nv-qldpc-decoder',
             'inner_decoder_params': inner_decoder_params,
         }
@@ -1046,14 +1051,15 @@ Usage:
             cudaq::noise_model noise;
             noise.add_all_qubit_channel("x", cudaq::depolarization2(0.001), 1);
             auto statePrep = cudaq::qec::operation::prep0;
-            auto dem = cudaq::qec::z_dem_from_memory_circuit(*code, statePrep, num_rounds,
+            auto dem = cudaq::qec::dem_from_memory_circuit(*code, statePrep, num_rounds,
                                                             noise);
             auto inner_decoder_params = cudaqx::heterogeneous_map{
                 {"use_osd", true}, {"max_iterations", 50}, {"use_sparsity", true}};
             auto opts = cudaqx::heterogeneous_map{
                 {"error_rate_vec", dem.error_rates},
                 {"window_size", 1},
-                {"num_syndromes_per_round", code->get_num_z_stabilizers()},
+                {"num_syndromes_per_round", code->get_num_z_stabilizers() + code->get_num_x_stabilizers()},
+                {"num_boundary_syndromes", code->get_num_z_stabilizers()},
                 {"inner_decoder_name", "nv-qldpc-decoder"},
                 {"inner_decoder_params", inner_decoder_params}};
             auto swdec = cudaq::qec::get_decoder("sliding_window",
@@ -1290,11 +1296,14 @@ The functions return a tuple containing:
 1. **Syndrome Measurements** (:code:`tensor<uint8_t>`):
 
    * Shape: :code:`(num_shots, num_detectors)`
-   * Columns are ordered as: ``num_fixed`` boundary detectors (only the
-     stabilizer type matching the state-prep basis, since that is the only
-     type that is deterministic at the circuit's endpoints), then one
-     detector block per inter-round transition (``num_rounds - 1`` of
-     them), then ``num_fixed`` more boundary detectors
+   * Columns follow the layout ``[ B  S  S  …  S  B ]``, where:
+
+     - ``B`` (boundary block) = ``numAncZ = code.get_num_z_stabilizers()`` for Z-basis
+       preparations (``prep0``/``prep1``), or ``numAncX = code.get_num_x_stabilizers()``
+       for X-basis preparations (``prepp``/``prepm``)
+     - ``S`` (inter-round block) = ``numAncZ + numAncX`` detectors per round transition
+       (``num_rounds - 1`` blocks total)
+     - Total: ``num_detectors = 2*B + (num_rounds - 1)*S``
    * Values are 0 or 1 representing measurement outcomes
 
 2. **Data Measurements** (:code:`tensor<uint8_t>`):
