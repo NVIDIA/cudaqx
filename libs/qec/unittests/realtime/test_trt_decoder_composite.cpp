@@ -281,7 +281,7 @@ struct RawDiagnostics {
 };
 
 struct DecoderSetup {
-  std::unique_ptr<cudaq::qec::decoder> decoder;
+  std::shared_ptr<cudaq::qec::decoder> decoder;
   cudaqx::tensor<uint8_t> H;
   cudaqx::heterogeneous_map trt_params;
   std::string label;
