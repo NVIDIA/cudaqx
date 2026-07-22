@@ -159,36 +159,36 @@ namespace cudaq::qec::decoding::host {
 cudaqx::heterogeneous_map prepare_decoder_params(
     const cudaq::qec::decoding::config::decoder_config &decoder_config) {
   auto params = decoder_config.decoder_custom_args_to_heterogeneous_map();
-  // Placement knob: surfaced for every decoder type (deliberately before the
-  // trt-only early return below); consumed by decoder::get() at construction.
+
+  // Consumed by decoder::get() at construction for GPU placement.
   if (decoder_config.cuda_device_id.has_value())
     params.insert("cuda_device_id", decoder_config.cuda_device_id.value());
-  if (decoder_config.type != "trt_decoder")
-    return params;
+
+  // Expose D_sparse at construction time so decoders that derive internal
+  // structure from it can do so before set_D_sparse() is called after
+  // construction. Decoders that don't read D_sparse from params ignore it.
+  if (!decoder_config.D_sparse.empty())
+    params.insert("D_sparse", decoder_config.D_sparse);
 
   // batch_size > 1 has no effect on the realtime path: enqueue_syndrome decodes
-  // one syndrome per call, so the trt_decoder zero-pads the batch and discards
-  // all but slot 0. Warn rather than reject -- the result is correct, just
+  // one syndrome per call, so batch decoders zero-pad the batch and discard all
+  // but slot 0. Warn rather than reject -- the result is correct, just
   // wasteful. (Offline decode_batch users set batch_size via a raw params map,
   // not this realtime config path.)
   if (params.contains("batch_size") &&
       params.get<std::size_t>("batch_size") > 1)
     CUDA_QEC_WARN(
-        "trt_decoder batch_size > 1 has no effect on the realtime decode path "
-        "(one syndrome is decoded per call); the extra batch slots are "
-        "zero-padded and discarded. Use batch_size = 1 for realtime.");
+        "batch_size > 1 has no effect on the realtime decode path (one "
+        "syndrome is decoded per call); the extra batch slots are zero-padded "
+        "and discarded. Use batch_size = 1 for realtime.");
 
-  // The trt_decoder plugin attaches a global decoder only when both
-  // "global_decoder" and "global_decoder_params" are present. Most config
-  // paths materialize defaults for known global decoders, but callers can still
-  // provide a hand-built map with only "global_decoder"; synthesize params here
-  // before the O_sparse early return so that decoder still attaches.
+  // Some decoders (e.g. trt_decoder) attach a global decoder only when both
+  // "global_decoder" and "global_decoder_params" are present. Synthesize an
+  // empty params map when only "global_decoder" was supplied so those decoders
+  // still attach their global sub-decoder.
   const bool has_global_decoder =
       params.contains("global_decoder") &&
       !params.get<std::string>("global_decoder").empty();
-  const bool has_pymatching_global =
-      has_global_decoder &&
-      params.get<std::string>("global_decoder") == "pymatching";
   if (has_global_decoder && !params.contains("global_decoder_params"))
     params.insert("global_decoder_params", cudaqx::heterogeneous_map());
 
@@ -204,13 +204,16 @@ cudaqx::heterogeneous_map prepare_decoder_params(
       decoder_config.O_sparse, num_observables, decoder_config.block_size);
   params.insert("O", O);
 
-  // PyMatching consumes the observable matrix through its params; other global
-  // decoders receive only the top-level O until they define a matching
-  // contract.
-  if (has_pymatching_global) {
+  // Forward O and D_sparse into the global sub-decoder's params. The global
+  // decoder is constructed with its own params map (not the top-level one), so
+  // keys injected above are not visible to it. Decoders that don't read a key
+  // from params ignore it.
+  if (has_global_decoder) {
     auto global_decoder_params =
         params.get<cudaqx::heterogeneous_map>("global_decoder_params");
     global_decoder_params.insert("O", O);
+    if (!decoder_config.D_sparse.empty())
+      global_decoder_params.insert("D_sparse", decoder_config.D_sparse);
     params.insert("global_decoder_params", global_decoder_params);
   }
 
