@@ -12,6 +12,9 @@
 error indices of the parent decoder.  The networks are combined with the
 code / logical / syndrome tensor networks inside
 :class:`TensorNetworkDecoder`.
+
+For differentiable noise learning (:class:`NMOptimizer`,
+:func:`make_compiled_step`), see :mod:`.nm_optimizer`.
 """
 from __future__ import annotations
 
