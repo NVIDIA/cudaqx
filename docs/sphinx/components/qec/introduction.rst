@@ -574,7 +574,7 @@ The decoder base class defines the core interface for syndrome decoding:
     protected:
         std::size_t block_size;       // For [n,k] code, this is n
         std::size_t syndrome_size;    // For [n,k] code, this is n-k
-        tensor<uint8_t> H;            // Parity check matrix
+        sparse_binary_matrix H;       // Parity check matrix
 
     public:
         struct decoder_result {
@@ -591,7 +591,7 @@ The decoder base class defines the core interface for syndrome decoding:
 
 Key Components:
 
-* **Parity Check Matrix**: Defines the code structure via :code:`H`
+* **Parity Check Matrix**: Defines the code structure via the sparse :code:`H` member
 * **Block Size**: Number of physical qubits in the code
 * **Syndrome Size**: Number of stabilizer measurements
 * **Decoder Result**: Contains convergence status and error probabilities
@@ -611,7 +611,7 @@ To implement a new decoder:
         // Decoder-specific members
 
     public:
-        my_decoder(const tensor<uint8_t>& H,
+        my_decoder(const qec::sparse_binary_matrix& H,
                   const heterogeneous_map& params)
             : decoder(H) {
             // Initialize decoder
@@ -630,13 +630,18 @@ To implement a new decoder:
     CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
         my_decoder,
         static std::unique_ptr<decoder> create(
-            const tensor<uint8_t>& H,
+            const qec::decoder_init& init,
             const heterogeneous_map& params) {
-            return std::make_unique<my_decoder>(H, params);
+            return qec::make_pcm_decoder<my_decoder>(init, params);
         }
     )
 
     CUDAQ_EXT_PT_REGISTER_TYPE(my_decoder)
+
+The :code:`make_pcm_decoder` helper dispatches :code:`decoder_init`. It
+passes a stored sparse PCM directly to the decoder constructor; when the
+variant contains Stim DEM text, it parses the DEM and constructs the sparse
+detector matrix before invoking the same constructor.
 
 Example: Lookup Table Decoder
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -650,18 +655,17 @@ Here's a simple lookup table decoder for the Steane code:
         std::map<std::string, std::size_t> single_qubit_err_signatures;
 
     public:
-        single_error_lut(const tensor<uint8_t>& H,
+        single_error_lut(const qec::sparse_binary_matrix& H,
                           const heterogeneous_map& params)
             : decoder(H) {
-            // Build lookup table for single-qubit errors
+            // Canonicalize before using each sparse column as an error
+            // signature so duplicate row indices cancel over GF(2).
+            auto H_e2d = H.canonicalize().to_nested_csc();
+
             for (std::size_t qErr = 0; qErr < block_size; qErr++) {
                 std::string err_sig(syndrome_size, '0');
-                for (std::size_t r = 0; r < syndrome_size; r++) {
-                    bool syndrome = 0;
-                    for (std::size_t c = 0; c < block_size; c++)
-                        syndrome ^= (c != qErr) && H.at({r, c});
-                    err_sig[r] = syndrome ? '1' : '0';
-                }
+                for (std::uint32_t row : H_e2d[qErr])
+                    err_sig[row] = '1';
                 single_qubit_err_signatures.insert({err_sig, qErr});
             }
         }
