@@ -44,6 +44,26 @@ Detector Error Model
 .. doxygenfunction:: cudaq::qec::decoder_context_from_memory_circuit(const code &, operation, std::size_t, cudaq::noise_model &, bool)
 .. doxygenfunction:: cudaq::qec::dem_from_stim_text(const std::string &, bool)
 
+.. _dem_sampling_cpp_api:
+
+Detector Error Model (DEM) Sampling
+===================================
+
+CPU sampling (host tensors):
+
+.. doxygenfunction:: cudaq::qec::dem_sampler::cpu::sample_dem(const cudaqx::tensor<uint8_t> &, std::size_t, const std::vector<double> &)
+.. doxygenfunction:: cudaq::qec::dem_sampler::cpu::sample_dem(const cudaqx::tensor<uint8_t> &, std::size_t, const std::vector<double> &, unsigned)
+
+GPU sampling (device pointers, requires cuStabilizer):
+
+.. doxygenfunction:: cudaq::qec::dem_sampler::gpu::sample_dem
+
+Legacy convenience wrappers (delegate to ``cpu::sample_dem``; prefer the
+``dem_sampler::cpu::sample_dem`` overloads above):
+
+.. doxygenfunction:: cudaq::qec::dem_sampling(const cudaqx::tensor<uint8_t> &, std::size_t, const std::vector<double> &)
+.. doxygenfunction:: cudaq::qec::dem_sampling(const cudaqx::tensor<uint8_t> &, std::size_t, const std::vector<double> &, unsigned)
+
 Decoder Interfaces
 ==================
 
