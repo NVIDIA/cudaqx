@@ -8,11 +8,14 @@
 
 #pragma once
 
+#include "HopStats.h"
 #include "ITransceiver.h"
+#include "SpinPolicy.h"
 #include "cudaq/qec/realtime/decoder_rpc_wire_format.h"
 #include "cudaq/realtime/daemon/dispatcher/cudaq_realtime.h"
 #include "cudaq/realtime/daemon/dispatcher/dispatch_kernel_launch.h"
 
+#include <atomic>
 #include <condition_variable>
 #include <cstring>
 #include <deque>
@@ -122,17 +125,29 @@ inline bool parse_cqr_enqueue_frame(const void *rx_slot, std::size_t slot_size,
 class CqrTransceiver final : public ITransceiver {
 public:
   /// Called from CUDAQ handler threads for each incoming RPC.
-  /// Translates the CUDAQ-format payload to our wire format, enqueues an
-  /// RxFrame, then blocks until DecodingServer sends the response.
+  /// Translates the CUDAQ-format payload to our wire format, hands the frame
+  /// to the dispatch sink (direct mode) or enqueues it for recv(), then for
+  /// response-bearing calls blocks until DecodingServer sends the response.
   void inject(const void *rx_slot, void *tx_slot, std::size_t slot_size,
               uint32_t function_id);
+
+  /// Direct-dispatch mode: inject() invokes \p sink inline on its calling
+  /// CUDAQ dispatcher thread instead of queueing frames for the recv() loop,
+  /// removing one cross-thread handoff per RPC.  Installed by DecodingServer
+  /// during construction, before the transceiver is published to handler
+  /// threads (write-once, unsynchronized).
+  bool install_dispatch_sink(DispatchSink sink) override {
+    sink_ = std::move(sink);
+    return true;
+  }
 
   RxFrame recv() override;
   void send(const PeerId &peer, const uint8_t *data, std::size_t len) override;
   void shutdown() override;
 
 private:
-  bool stopped_ = false;
+  DispatchSink sink_;
+  std::atomic<bool> stopped_{false};
 
   // Write an immediate RPCResponse (no result payload) into the CUDAQ
   // tx_slot: OK acks fire-and-forget calls; error statuses complete blocking
@@ -144,6 +159,12 @@ private:
   struct PendingTx {
     void *tx_slot;
     std::size_t slot_size;
+    /// Completion flag on the blocked inject() caller's stack; every
+    /// completer stores 1 (release) immediately before set_value so a
+    /// spinning waiter (SpinPolicy.h) skips the futex wake.  Never dangles:
+    /// each pending entry is completed exactly once, and the waiter's frame
+    /// cannot unwind before set_value releases fut.wait().
+    std::atomic<uint32_t> *done_flag = nullptr;
     std::promise<void> done;
   };
 
@@ -171,6 +192,10 @@ private:
 inline void CqrTransceiver::inject(const void *rx_slot, void *tx_slot,
                                    std::size_t slot_size,
                                    uint32_t function_id) {
+  // inject() runs ON the CUDAQ transport dispatcher thread, so entry/exit
+  // here bracket the HOST_CALL handler as the dispatcher sees it.
+  hopstats::on_dispatcher_thread();
+  const uint64_t hs_entry = hopstats::entry_stamp();
   if (!rx_slot || !tx_slot || slot_size < sizeof(RPCHeader))
     return;
 
@@ -197,52 +222,118 @@ inline void CqrTransceiver::inject(const void *rx_slot, void *tx_slot,
   const auto *hdr = reinterpret_cast<const RPCHeader *>(frame.buf.data());
   const uint32_t rid = hdr->request_id;
   const uint64_t ptp = hdr->ptp_timestamp; // save before frame is moved
+  hopstats::begin_request(rid, function_id, hs_entry);
 
   if (function_id == kEnqueueSyndromesFunctionId) {
-    // Fire-and-forget: hand the frame to the server and ACK immediately
-    // (status OK = ACCEPTED) -- the dispatcher thread must not park on
-    // decoder execution, and per the spec the dispatcher still emits an
-    // RPCResponse into the tx_slot (the transport needs it to complete the
-    // slot; the caller drops it). A deferred decoder error is reported at
-    // this decoder's next get_corrections.
+    // Fire-and-forget: ACK immediately (status OK = ACCEPTED) -- the
+    // dispatcher thread must not park on decoder execution, and per the spec
+    // the dispatcher still emits an RPCResponse into the tx_slot (the
+    // transport needs it to complete the slot; the caller drops it). A
+    // deferred decoder error is reported at this decoder's next
+    // get_corrections.
+    if (sink_) {
+      // Direct dispatch: run the routing handler (session lookup +
+      // try_enqueue) inline on this thread -- no inbox, no recv-thread
+      // handoff.  ACK first so the client-visible ACK never waits on the
+      // handler; after shutdown the frame is dropped, matching the
+      // recv-loop-exited behavior of the queued path.
+      write_ack(tx_slot, rid, ptp);
+      if (stopped_.load(std::memory_order_acquire))
+        return;
+      // Both hop-1 probe endpoints stamp here: the handoff no longer exists.
+      hopstats::stamp_inbox_push(rid);
+      hopstats::stamp_recv_wake(frame.buf.data(), frame.buf.size(),
+                                /*was_empty=*/false);
+      try {
+        sink_(std::move(frame));
+      } catch (...) {
+        // tx_slot is already complete and enqueue errors surface at the next
+        // get_corrections by contract; nothing more to do (the dispatcher
+        // contains handler exceptions -- this guards the sink glue itself).
+      }
+      return;
+    }
     {
       std::lock_guard<std::mutex> lk(mtx_);
       inbox_.push_back(std::move(frame));
+      // Stamped under mtx_ so the recv thread's read is ordered by the lock.
+      hopstats::stamp_inbox_push(rid);
     }
     cv_.notify_one();
+    hopstats::stamp_notify1_ret(rid);
     write_ack(tx_slot, rid, ptp);
     return;
   }
 
   std::future<void> fut;
+  std::atomic<uint32_t> done_flag{0};
   {
     std::lock_guard<std::mutex> lk(mtx_);
-    // Reject new blocking RPCs after shutdown: the recv loop is exiting and
-    // will never dispatch this frame, so parking on the promise would hang
-    // the CUDAQ dispatcher thread forever.  Complete the slot immediately.
-    if (stopped_) {
+    // Reject new blocking RPCs after shutdown: nothing will ever dispatch
+    // this frame, so parking on the promise would hang the CUDAQ dispatcher
+    // thread forever.  Complete the slot immediately.
+    if (stopped_.load(std::memory_order_relaxed)) {
       write_ack(tx_slot, rid, ptp, RpcStatus::BAD_REQUEST);
       return;
     }
+    // pending_[rid] must exist BEFORE the frame is dispatched (either path):
+    // a synchronous handler error resolves the tx_slot through send(), which
+    // looks the entry up by request_id.
     auto &p = pending_[rid];
     p.tx_slot = tx_slot;
     p.slot_size = slot_size;
+    p.done_flag = &done_flag;
     fut = p.done.get_future();
-    inbox_.push_back(std::move(frame));
+    if (!sink_)
+      inbox_.push_back(std::move(frame));
+    hopstats::stamp_inbox_push(rid);
   }
-  cv_.notify_one();
+  if (sink_) {
+    // Direct dispatch on this thread.  mtx_ is NOT held here: the handler's
+    // error path re-enters send(), which takes mtx_.
+    hopstats::stamp_recv_wake(frame.buf.data(), frame.buf.size(),
+                              /*was_empty=*/false);
+    try {
+      sink_(std::move(frame));
+    } catch (...) {
+      // Self-complete on the sink-glue exception path: a live pending entry
+      // left behind would be completed by a later shutdown() drain against a
+      // tx_slot the transport has long since abandoned.
+      std::lock_guard<std::mutex> lk(mtx_);
+      if (pending_.erase(rid))
+        write_ack(tx_slot, rid, ptp, RpcStatus::INTERNAL_ERROR);
+      hopstats::invalidate(rid);
+      return;
+    }
+  } else {
+    cv_.notify_one();
+    hopstats::stamp_notify1_ret(rid);
+  }
 
   // Block until the DecodingSession worker calls send() with the response.
+  // Bounded spin on the stack completion flag first (SpinPolicy.h); the
+  // promise is still armed by every completer, so fut.wait() is the blocking
+  // fallback and returns immediately on a spin hit.
+  hopstats::stamp_wait_begin(rid);
+  spin_until([&] { return done_flag.load(std::memory_order_acquire) != 0; });
   fut.wait();
+  hopstats::finish_blocking(rid);
 }
 
 inline RxFrame CqrTransceiver::recv() {
   std::unique_lock<std::mutex> lk(mtx_);
-  cv_.wait(lk, [this] { return !inbox_.empty() || stopped_; });
+  // cold = inbox empty on arrival: a successful pop below means this thread
+  // really waited (or spun) for the producer's wakeup.
+  const bool hs_was_empty =
+      inbox_.empty() && !stopped_.load(std::memory_order_relaxed);
+  cv_.wait(lk, [this] {
+    return !inbox_.empty() || stopped_.load(std::memory_order_relaxed);
+  });
   if (inbox_.empty())
     return {}; // shutdown sentinel (empty buf)
   RxFrame frame = std::move(inbox_.front());
   inbox_.pop_front();
+  hopstats::stamp_recv_wake(frame.buf.data(), frame.buf.size(), hs_was_empty);
   return frame;
 }
 
@@ -256,13 +347,16 @@ inline void CqrTransceiver::shutdown() {
   std::unordered_map<uint32_t, PendingTx> drained;
   {
     std::lock_guard<std::mutex> lk(mtx_);
-    stopped_ = true;
+    stopped_.store(true, std::memory_order_release);
     drained = std::move(pending_);
     pending_.clear();
   }
   cv_.notify_all();
   for (auto &[rid, p] : drained) {
     write_ack(p.tx_slot, rid, /*ptp_timestamp=*/0, RpcStatus::BAD_REQUEST);
+    hopstats::invalidate(rid); // shutdown completions are not latency samples
+    if (p.done_flag)
+      p.done_flag->store(1, std::memory_order_release);
     p.done.set_value();
   }
 }
@@ -301,6 +395,9 @@ inline void CqrTransceiver::send(const PeerId & /*peer*/, const uint8_t *data,
     // bits.  Fail the RPC explicitly instead (the pre-decoding-server code
     // returned result-buffer-too-small here).
     write_ack(p.tx_slot, rid, resp->ptp_timestamp, RpcStatus::INTERNAL_ERROR);
+    hopstats::stamp_send_done(rid);
+    if (p.done_flag)
+      p.done_flag->store(1, std::memory_order_release);
     p.done.set_value();
     pending_.erase(it);
     return;
@@ -313,6 +410,9 @@ inline void CqrTransceiver::send(const PeerId & /*peer*/, const uint8_t *data,
   __atomic_store_n(reinterpret_cast<uint32_t *>(p.tx_slot),
                    cudaq::realtime::RPC_MAGIC_RESPONSE, __ATOMIC_RELEASE);
 
+  hopstats::stamp_send_done(rid);
+  if (p.done_flag)
+    p.done_flag->store(1, std::memory_order_release);
   p.done.set_value();
   pending_.erase(it);
 }

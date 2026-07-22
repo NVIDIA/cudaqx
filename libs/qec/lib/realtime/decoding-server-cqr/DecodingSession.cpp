@@ -7,6 +7,8 @@
  ******************************************************************************/
 
 #include "DecodingSession.h"
+#include "HopStats.h"
+#include "SpinPolicy.h"
 #include "../../hardware_guards.h"
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/realtime/decoder_rpc_wire_format.h"
@@ -113,6 +115,7 @@ void DecodingSession::start_worker() {
       pinned.set_exception(std::current_exception());
       return; // never serve work from a mispinned thread
     }
+    hopstats::on_worker_thread();
     worker_loop();
   });
   try {
@@ -125,13 +128,24 @@ void DecodingSession::start_worker() {
 }
 
 bool DecodingSession::try_enqueue(WorkItem item) {
-  std::lock_guard<std::mutex> lk(queue_mutex);
-  if (work_queue.size() >= queue_depth) {
-    ++busy_count;
-    return false;
+  const uint32_t hs_rid = item.request_id;
+  {
+    std::lock_guard<std::mutex> lk(queue_mutex);
+    if (work_queue.size() >= queue_depth) {
+      ++busy_count;
+      return false;
+    }
+    work_queue.push(std::move(item));
+    // Bumped under the lock: no missed-update window for the worker's spin,
+    // regardless of producer count.
+    queue_seq.fetch_add(1, std::memory_order_release);
+    hopstats::stamp_queue_push(hs_rid);
   }
-  work_queue.push(std::move(item));
+  // Notify after the unlock: a waiter woken while the producer still holds
+  // queue_mutex would immediately re-block on the lock (an extra futex
+  // round trip on every wakeup).
   queue_cv.notify_one();
+  hopstats::stamp_notify2_ret(hs_rid);
   return true;
 }
 
@@ -364,6 +378,23 @@ void DecodingSession::worker_loop() {
     WorkItem item;
     {
       std::unique_lock<std::mutex> lk(queue_mutex);
+      // cold = queue empty on arrival: a successful pop below means this
+      // thread really waited (or spun) for try_enqueue's wakeup.
+      const bool hs_was_empty = work_queue.empty();
+      if (work_queue.empty() && !shutdown.load(std::memory_order_acquire)) {
+        // Bounded spin on the queue sequence before the condvar sleep
+        // (SpinPolicy.h): the snapshot is taken under the lock while the
+        // queue is empty, so it can only change when try_enqueue pushes;
+        // shutdown is observed directly.  Budget expiry falls through to
+        // the untimed wait below, whose predicate re-checks under the lock.
+        const uint64_t seen = queue_seq.load(std::memory_order_relaxed);
+        lk.unlock();
+        spin_until([&] {
+          return queue_seq.load(std::memory_order_acquire) != seen ||
+                 shutdown.load(std::memory_order_acquire);
+        });
+        lk.lock();
+      }
       // Untimed wait: stop_worker() stores the shutdown flag under
       // queue_mutex before notifying, so the wakeup cannot be lost and no
       // 100 ms poll is needed.
@@ -376,6 +407,7 @@ void DecodingSession::worker_loop() {
 
       item = std::move(work_queue.front());
       work_queue.pop();
+      hopstats::stamp_worker_wake(item.request_id, hs_was_empty);
     }
 
     const uint64_t busy =
@@ -407,6 +439,11 @@ void DecodingSession::worker_loop() {
       ++error_count;
       shot_state = ShotState::failed;
     }
+
+    // Fire-and-forget enqueues have no blocking waiter to close their
+    // sample; the worker closes it (blocking kinds close in inject()).
+    if (item.function_id == kEnqueueSyndromesFunctionId)
+      hopstats::finish_enqueue(item.request_id);
 
     g_busy_sessions.fetch_sub(1, std::memory_order_relaxed);
   }
