@@ -70,6 +70,8 @@ Decoder Interfaces
 .. doxygenstruct:: cudaq::qec::decoder_inputs
     :members:
 
+.. doxygenfunction:: cudaq::qec::d_sparse(const cudaq::M2DSparseMatrix &)
+
 .. doxygentypedef:: cudaq::qec::decoder_init
 
 .. doxygenclass:: cudaq::qec::decoder
