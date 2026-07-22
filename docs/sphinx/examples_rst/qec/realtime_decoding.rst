@@ -547,16 +547,16 @@ Python Execution
 .. code-block:: bash
 
    # Generate a decoder configuration file
-   python3 surface_code-1.py --distance 3 --save_dem config.yaml
+   python3 surface_code_1.py --distance 3 --save_dem config.yaml
    # Run the circuit with the decoder configuration
-   python3 surface_code-1.py --distance 3 --load_dem config.yaml --num_shots 1000
+   python3 surface_code_1.py --distance 3 --load_dem config.yaml --num_shots 1000
 
 
 **Quantinuum Backend (Hardware)**
 
 .. code-block:: bash
 
-   python3 surface_code-1.py --distance 3 --load_dem config.yaml --num_shots 1000 --target quantinuum --machine-name Helios-1
+   python3 surface_code_1.py --distance 3 --load_dem config.yaml --num_shots 1000 --target quantinuum --machine_name Helios-1
 
 **Key Points:**
 
@@ -567,7 +567,7 @@ Python Execution
 
 .. code-block:: bash
 
-   python3 surface_code-1.py --distance 3 --load_dem config.yaml --num_shots 1000 --target quantinuum --emulate
+   python3 surface_code_1.py --distance 3 --load_dem config.yaml --num_shots 1000 --target quantinuum --emulate true
 
 **Key Points:**
 
@@ -591,7 +591,7 @@ Given that the user follows the structure of the examples provided, where each e
                     --save_dem config_d3.yaml --num_rounds 12
 
    ## Python
-   python surface_code-1.py --distance 3 --num_shots 1000 --p_cnot 0.001 \
+   python surface_code_1.py --distance 3 --num_shots 1000 --p_cnot 0.001 \
                             --save_dem config_d3.yaml --num_rounds 12
 
    # Phase 2: Run with Real-Time Decoding
