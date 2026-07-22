@@ -112,6 +112,13 @@ Common
 
 .. autofunction:: cudaq_qec.sample_code_capacity
 
+.. _dem_sampling_python_api:
+
+Detector Error Model (DEM) Sampling
+===================================
+
+.. autofunction:: cudaq_qec.dem_sampling
+
 .. _parity_check_matrix_utilities_python:
 
 Parity Check Matrix Utilities

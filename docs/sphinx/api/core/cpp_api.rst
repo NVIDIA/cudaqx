@@ -13,6 +13,12 @@ Namespaces
     :desc-only:
 .. doxygennamespace:: cudaq::qec::decoding::config
     :desc-only:
+.. doxygennamespace:: cudaq::qec::dem_sampler
+    :desc-only:
+.. doxygennamespace:: cudaq::qec::dem_sampler::cpu
+    :desc-only:
+.. doxygennamespace:: cudaq::qec::dem_sampler::gpu
+    :desc-only:
 .. doxygennamespace:: cudaq::qec::detail
     :desc-only:
 .. doxygennamespace:: cudaq::qec::realtime
