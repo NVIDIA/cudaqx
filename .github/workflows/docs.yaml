@@ -22,7 +22,7 @@ on:
   workflow_dispatch:
     inputs:
       deploy_docs:
-        description: 'Deploy docs to GitHub Pages. Deployment only runs on main.'
+        description: 'Deploy docs to GitHub Pages. Deployment only runs on releases/vX.Y.Z branches.'
         type: boolean
         default: true
         required: false
@@ -113,24 +113,21 @@ jobs:
         with:
           path: build/docs/build/
 
-  # Disable for now, re-enable closer to release.
-  # deploy:
-  #   name: Deploy latest docs
-  #   if: |
-  #     github.ref == 'refs/heads/main' &&
-  #     (
-  #       github.event_name == 'push' ||
-  #       inputs.deploy_docs == true
-  #     )
-  #   environment:
-  #     name: github-pages
-  #     url: ${{ steps.deployment.outputs.page_url }}
-  #   runs-on: ubuntu-latest
-  #   permissions:
-  #     pages: write
-  #     id-token: write
-  #   needs: build
-  #   steps:
-  #     - name: Deploy to GitHub Pages
-  #       id: deployment
-  #       uses: actions/deploy-pages@v4
+  deploy:
+    name: Deploy latest docs
+    if: |
+      github.event_name == 'workflow_dispatch' &&
+      inputs.deploy_docs == true &&
+      startsWith(github.ref, 'refs/heads/releases/v')
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
