@@ -24,7 +24,7 @@ on:
       deploy_docs:
         description: 'Deploy docs to GitHub Pages. Deployment only runs on releases/vX.Y.Z branches.'
         type: boolean
-        default: true
+        default: false
         required: false
   push:
     branches:
