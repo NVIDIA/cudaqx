@@ -332,6 +332,16 @@ case "$DISPATCH" in host|device_graph) ;;
     *) echo "ERROR: --dispatch must be host or device_graph (got '$DISPATCH')" >&2; exit 1 ;;
 esac
 
+# nv-qldpc's GPU decode (plus first-call PTX JIT on new hardware) cannot
+# drain the server's 64-slot RX ring at the 10us default playback spacing --
+# measured on-rig: 171/510 frames captured (host dispatch) and ~15/85 shots
+# verified (device_graph) before the ring overruns. Mirror the trt profile's
+# auto-pacing with the measured-good values; an explicit --spacing wins.
+if [[ "$SOURCE" == "fpga" && "$DECODER" == "nv-qldpc-decoder" ]] && \
+   ! $SPACING_EXPLICIT; then
+    if [[ "$DISPATCH" == "device_graph" ]]; then SPACING=100; else SPACING=5000; fi
+fi
+
 [[ "$WIRE" == "cpu-roce" ]] && WIRE="cpu_roce"   # accept both spellings
 if [[ -z "$WIRE" ]]; then
     if [[ "$SOURCE" == "qpu-kernel" ]]; then WIRE="udp"

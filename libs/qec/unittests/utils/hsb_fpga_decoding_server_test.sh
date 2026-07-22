@@ -125,7 +125,8 @@ NV_QLDPC_PLUGIN="${CUDAQ_QEC_NV_QLDPC_PLUGIN:-}"
 
 # Network defaults
 IB_DEVICE=""           # auto-detect
-BRIDGE_IP="10.0.0.1"   # server-side NIC IP (kept the qldpc script's name)
+BRIDGE_IP=""           # resolved after arg parsing (kept the qldpc script's
+                       # name): emulate -> 10.0.0.1, real FPGA -> 192.168.0.1
 EMULATOR_IP="10.0.0.2"
 FPGA_IP="192.168.0.2"
 MTU=4096
@@ -209,7 +210,9 @@ Build options:
 
 Network options:
   --device DEV           ConnectX IB device name (default: auto-detect)
-  --bridge-ip ADDR       Server-side NIC IP (default: 10.0.0.1)
+  --bridge-ip ADDR       Server-side NIC IP (default: 10.0.0.1 with
+                         --emulate, 192.168.0.1 on the real FPGA; must share
+                         the FPGA's /24 in FPGA mode)
   --emulator-ip ADDR     Emulator IP (default: 10.0.0.2)
   --fpga-ip ADDR         FPGA IP for non-emulate mode (default: 192.168.0.2)
   --mtu N                MTU size (default: 4096)
@@ -276,6 +279,22 @@ while [[ $# -gt 0 ]]; do
     esac
     shift
 done
+
+# Resolve the server-side NIC IP by mode: the emulate loop lives on
+# 10.0.0.0/24, the real FPGA on 192.168.0.0/24.  A bridge IP outside the
+# FPGA's subnet does not fail loudly -- the hololink control plane just
+# times out (read_uint32) as if the FPGA were dead -- so reject the
+# mismatch up front instead of letting it masquerade as broken hardware.
+if [[ -z "$BRIDGE_IP" ]]; then
+    if $EMULATE; then BRIDGE_IP="10.0.0.1"; else BRIDGE_IP="192.168.0.1"; fi
+fi
+if ! $EMULATE && [[ "${BRIDGE_IP%.*}" != "${FPGA_IP%.*}" ]]; then
+    echo "ERROR: --bridge-ip $BRIDGE_IP is not in the FPGA's /24 subnet" >&2
+    echo "       ($FPGA_IP): the hololink control plane would time out" >&2
+    echo "       (read_uint32) as if the FPGA were unreachable.  Pass a" >&2
+    echo "       matching --bridge-ip/--fpga-ip pair." >&2
+    exit 1
+fi
 
 # Derive the transport from the decoder profile unless explicitly chosen.
 if [[ -z "$TRANSPORT" ]]; then

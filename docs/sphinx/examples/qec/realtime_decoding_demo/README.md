@@ -102,9 +102,13 @@ criteria apply unchanged.
 
 The delivered playback tool streams pre-generated syndromes over RoCE from the
 FPGA into the server's RDMA RX ring. `--spacing` (default 10 µs) paces the
-playback so it does not overrun the FPGA's fixed 64-slot ring. There is **no
-emulator** in this example — `--source fpga` requires a real FPGA. (Emulator
-testing lives in the unittests `hsb_fpga_decoding_server_test.sh`.)
+playback so it does not overrun the FPGA's fixed 64-slot ring. The
+`nv-qldpc-decoder` profiles auto-pace slower — 5 ms on host dispatch, 100 µs
+on device_graph — because the GPU decode cannot drain the ring at 10 µs (an
+explicit `--spacing` always wins); `trt_decoder` does the same (see below).
+There is **no emulator** in this example — `--source fpga` requires a real
+FPGA. (Emulator testing lives in the unittests
+`hsb_fpga_decoding_server_test.sh`.)
 
 ### Ising decoder (`trt_decoder`, opt-in)
 
