@@ -125,9 +125,13 @@ Decoder parameters are validated against the parameter schema each decoder regis
 
 The configuration is then saved to a YAML file for reuse. The YAML format is human-readable, making it easy to inspect, modify, and share configurations across different execution environments.
 
-For example, a PyMatching real-time decoder can be configured programmatically:
+Use :func:`~cudaq_qec.decoder_context_from_memory_circuit` to obtain the parity-check, observable,
+and measurement-to-detector matrices in one call, then assemble the decoder config:
 
 .. code-block:: python
+
+   ctx = qec.decoder_context_from_memory_circuit(code, statePrep, num_rounds, noise)
+   dem, m2d, m2o = ctx.z_component()  # or x_component() / full_component()
 
    config = qec.decoder_config()
    config.id = 0
@@ -136,8 +140,7 @@ For example, a PyMatching real-time decoder can be configured programmatically:
    config.syndrome_size = dem.num_detectors()
    config.H_sparse = qec.pcm_to_sparse_vec(dem.detector_error_matrix)
    config.O_sparse = qec.pcm_to_sparse_vec(dem.observables_flips_matrix)
-   config.D_sparse = qec.generate_timelike_sparse_detector_matrix(
-       num_syndromes_per_round, num_rounds, include_first_round=False)
+   config.D_sparse = qec.d_sparse(m2d)
 
    config.decoder_custom_args = {
        "error_rate_vec": list(dem.error_rates),

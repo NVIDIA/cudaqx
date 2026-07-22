@@ -31,11 +31,25 @@ Detector Error Model
 .. autoclass:: cudaq_qec.DecoderContext
     :members:
 
+.. note::
+
+   The ``x_component()``, ``z_component()``, and ``full_component()`` methods each
+   return a ``(dem, m2d, m2o)`` tuple:
+
+   - ``dem`` (:class:`DetectorErrorModel`) — canonicalized detector error model
+   - ``m2d`` (``list[list[int]]``) — measurement-to-detector map; ``m2d[d]`` lists
+     the measurement indices whose XOR forms detector ``d``
+   - ``m2o`` (``list[list[int]]``) — measurement-to-observable map
+
+   Pass ``m2d`` to :func:`d_sparse` to produce the ``D_sparse`` vector for a
+   real-time decoder config.
+
 .. autofunction:: cudaq_qec.dem_from_memory_circuit
 .. autofunction:: cudaq_qec.x_dem_from_memory_circuit
 .. autofunction:: cudaq_qec.z_dem_from_memory_circuit
 .. autofunction:: cudaq_qec.decoder_context_from_memory_circuit
 .. autofunction:: cudaq_qec.dem_from_stim_text
+.. autofunction:: cudaq_qec.d_sparse
 
 Decoder Interfaces
 ==================
