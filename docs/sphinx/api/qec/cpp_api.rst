@@ -126,6 +126,8 @@ rejects dimensions whose products overflow ``std::size_t``.
 .. doxygenfunction:: cudaq::qec::dense_to_sparse(const cudaqx::tensor<uint8_t> &)
 .. doxygenfunction:: cudaq::qec::generate_random_pcm(std::size_t, std::size_t, std::size_t, int, std::mt19937_64 &&);
 .. doxygenfunction:: cudaq::qec::generate_random_pcm_sparse(std::size_t, std::size_t, std::size_t, int, std::mt19937_64 &&);
+.. doxygenfunction:: cudaq::qec::generate_timelike_sparse_detector_matrix(std::uint32_t num_syndromes_per_round, std::uint32_t num_rounds, bool include_first_round = false)
+.. doxygenfunction:: cudaq::qec::generate_timelike_sparse_detector_matrix(std::uint32_t num_syndromes_per_round, std::uint32_t num_rounds, std::vector<std::int64_t> first_round_matrix)
 .. doxygenfunction:: cudaq::qec::get_pcm_for_rounds(const cudaqx::tensor<uint8_t> &, std::uint32_t, std::uint32_t, std::uint32_t, bool, bool, std::uint32_t);
 .. doxygenfunction:: cudaq::qec::get_pcm_for_rounds(const sparse_binary_matrix &, std::uint32_t, std::uint32_t, std::uint32_t, bool, bool, bool, std::uint32_t);
 .. doxygenfunction:: cudaq::qec::get_sorted_pcm_column_indices(const std::vector<std::vector<std::uint32_t>> &, std::uint32_t);
