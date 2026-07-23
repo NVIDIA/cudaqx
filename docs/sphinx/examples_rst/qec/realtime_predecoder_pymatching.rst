@@ -6,6 +6,15 @@ AI Predecoder with CUDA-Q Realtime
   The following information is about a C++ demonstration that must be built
   from source and is not part of any distributed CUDA-Q QEC binaries.
 
+.. warning::
+
+   This benchmark is not supported by CUDA-QX 0.7.  CUDA-QX 0.7 pins
+   CUDA-Q 0.15.1, while the benchmark source requires the 0.16-era realtime
+   device-graph API (including ``graph_launch_engine.h``).  With the release
+   dependency, CMake normally skips the benchmark target; forcing the target
+   on results in a compilation failure.  The remaining benchmark build and run
+   instructions cannot be used with CUDA-QX 0.7.
+
 This guide explains how to build and run the hybrid AI predecoder + PyMatching
 streaming benchmark. The benchmark uses a TensorRT-accelerated neural network
 (the *predecoder*) to reduce syndrome density on the GPU, then feeds the
@@ -111,6 +120,7 @@ Configure and build:
      -DCUDAQ_DIR=/usr/local/cudaq/lib/cmake/cudaq \
      -DCUDAQ_REALTIME_ROOT=/tmp/cudaq-realtime \
      -DCUDAQ_QEC_BUILD_TRT_DECODER=ON \
+     -DCUDAQX_QEC_ENABLE_REALTIME_PIPELINE=ON \
      -DCUDAQX_ENABLE_LIBS=qec \
      -DCUDAQX_INCLUDE_TESTS=ON \
      -DCUDAQX_QEC_INCLUDE_TESTS=ON

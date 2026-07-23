@@ -6,6 +6,16 @@ Relay BP Decoding with CUDA-Q Realtime
   The following information is about a C++ demonstration that must be built
   from source and is not part of any distributed CUDA-Q QEC binaries.
 
+.. warning::
+
+   The device-graph Relay BP path described in this guide is not supported by
+   CUDA-QX 0.7.  CUDA-QX 0.7 pins CUDA-Q 0.15.1, which does not provide the
+   required 0.16-era realtime device-graph scheduler.  The relevant targets
+   are gated by ``CUDAQ_REALTIME_FOR_0_16`` and are skipped in the 0.7 build.
+   The source and build commands below retain the v0.7 dependency layout for
+   reference, but the graph targets and run steps cannot be used in this
+   release.
+
 This guide explains how to build, test, and run the nv-qldpc-decoder Relay BP
 decoder using CUDA-Q's realtime dispatch system.  The decoder is driven by a
 **self-relaunching device-graph scheduler** and can operate in three
@@ -166,13 +176,13 @@ Source Repositories
 buffer management, and the device-graph scheduler).  ``holoscan-sensor-bridge``
 provides the Hololink ``GpuRoceTransceiver`` library for RDMA transport.
 
-.. note::
+.. warning::
 
    The self-relaunching device-graph scheduler is provided by the
-   ``releases/v0.15.1`` branch of ``cuda-quantum`` (the extension that adds the
-   ``CUDAQ_DISPATCH_STATUS_TRIGGER_GRAPH`` sentinel, the triggered
+   0.16-era ``cuda-quantum`` realtime API, not by ``releases/v0.15.1``.  It
+   includes the ``CUDAQ_DISPATCH_STATUS_TRIGGER_GRAPH`` sentinel, triggered
    fire-and-forget decode launch, and tail self-relaunch on top of the
-   device-side graph dispatch).
+   device-side graph dispatch.
 
 .. note::
 
@@ -291,8 +301,8 @@ To also build the bridge and playback tools for emulated or FPGA testing:
    cd cudaq-realtime-src/realtime && mkdir -p build && cd build
    cmake -G Ninja -DCMAKE_INSTALL_PREFIX=/tmp/cudaq-realtime \
      -DCUDAQ_REALTIME_ENABLE_HOLOLINK_TOOLS=ON \
-     -DHOLOSCAN_SENSOR_BRIDGE_SOURCE_DIR=../../holoscan-sensor-bridge \
-     -DHOLOSCAN_SENSOR_BRIDGE_BUILD_DIR=../../holoscan-sensor-bridge/build \
+     -DHOLOSCAN_SENSOR_BRIDGE_SOURCE_DIR=../../../holoscan-sensor-bridge \
+     -DHOLOSCAN_SENSOR_BRIDGE_BUILD_DIR=../../../holoscan-sensor-bridge/build \
      ..
    ninja && ninja install
    cd ../../..
