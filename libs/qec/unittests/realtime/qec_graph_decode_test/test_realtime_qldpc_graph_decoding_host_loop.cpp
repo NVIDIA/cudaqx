@@ -198,8 +198,8 @@ protected:
                 flags_err == cudaErrorSetOnActiveProcess);
 
     // --- Load config via public API ---
-    auto mdc = decoding::config::multi_decoder_config::from_yaml_str(
-        read_file(std::string(TEST_DATA_DIR) + "/config_nv_qldpc_relay_host_loop.yml"));
+    auto mdc = decoding::config::multi_decoder_config::from_yaml_str(read_file(
+        std::string(TEST_DATA_DIR) + "/config_nv_qldpc_relay_host_loop.yml"));
     ASSERT_EQ(mdc.decoders.size(), 1u);
     auto &dec = mdc.decoders[0];
 
