@@ -840,7 +840,6 @@ run_emulated() {
     _log "Starting syndrome playback (control-port=$CONTROL_PORT)"
     local playback_args=(
         --hololink "$EMULATOR_IP"
-        --per-round
         --control-port "$CONTROL_PORT"
         --config "$CONFIG_FILE"
         --syndromes "$SYNDROMES_FILE"
@@ -850,6 +849,12 @@ run_emulated() {
         --buffer-addr "$bridge_addr"
         --page-size "$PAGE_SIZE"
     )
+    if grep -q "device-graph scheduler" "$bridge_log"; then
+        playback_args+=(--per-round)
+        _info "Playback protocol: per-round device graph"
+    else
+        _info "Playback protocol: HOST_LOOP full window"
+    fi
     if $VERIFY; then
         playback_args+=(--verify)
     fi
@@ -921,7 +926,6 @@ run_fpga() {
     _log "Starting syndrome playback (fpga=$FPGA_IP)"
     local playback_args=(
         --hololink "$FPGA_IP"
-        --per-round
         --config "$CONFIG_FILE"
         --syndromes "$SYNDROMES_FILE"
         --function-name nv_qldpc_decode
@@ -930,6 +934,12 @@ run_fpga() {
         --buffer-addr "$bridge_addr"
         --page-size "$PAGE_SIZE"
     )
+    if grep -q "device-graph scheduler" "$bridge_log"; then
+        playback_args+=(--per-round)
+        _info "Playback protocol: per-round device graph"
+    else
+        _info "Playback protocol: HOST_LOOP full window"
+    fi
     if $VERIFY; then
         playback_args+=(--verify)
     fi

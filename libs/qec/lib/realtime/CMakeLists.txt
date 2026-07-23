@@ -71,6 +71,17 @@ if(CMAKE_CUDA_COMPILER)
     )
   endif()
   
+  # Detect whether cuda-quantum provides the device-graph scheduler API.  The
+  # v0.7 release uses this result to select its retained HOST_LOOP bridge when
+  # building against CUDA-Q 0.15.1.
+  set(CUDAQ_REALTIME_FOR_0_16 FALSE CACHE INTERNAL
+      "cuda-quantum realtime provides the graph-launch dispatch API")
+  if(CUDAQ_REALTIME_INCLUDE_DIR AND EXISTS
+      "${CUDAQ_REALTIME_INCLUDE_DIR}/cudaq/realtime/daemon/dispatcher/graph_launch_engine.h")
+    set(CUDAQ_REALTIME_FOR_0_16 TRUE CACHE INTERNAL
+        "cuda-quantum realtime provides the graph-launch dispatch API")
+  endif()
+
   if(CUDAQ_REALTIME_INCLUDE_DIR)
     message(STATUS "Found cuda-quantum realtime headers at ${CUDAQ_REALTIME_INCLUDE_DIR}")
     cudaq_qec_find_realtime_library(CUDAQ_REALTIME_LIBRARY

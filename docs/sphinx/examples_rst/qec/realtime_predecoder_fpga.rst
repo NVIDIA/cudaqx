@@ -6,12 +6,6 @@ AI Predecoder with CUDA-Q Realtime (with FPGA Data Injection)
    The following information is about a C++ demonstration that must be built
    from source and is not part of any distributed CUDA-Q QEC binaries.
 
-.. important::
-
-   CUDA-QX 0.7 supports the legacy ``HOST_LOOP`` implementation described in
-   this guide.  The newer standalone decode-server and device-graph paths
-   require the 0.16-era CUDA-Q realtime API and are not active with the
-   CUDA-Q 0.15.1 dependency pinned by CUDA-QX 0.7.
 
 This guide explains how to build, test, and run the AI predecoder + PyMatching
 pipeline over Hololink RDMA using CUDA-Q's realtime host dispatch system.

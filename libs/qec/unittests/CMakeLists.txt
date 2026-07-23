@@ -524,9 +524,17 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
             ${CUDAQ_DIR}/.. $ENV{CUDAQ_DIR}/..
       PATH_SUFFIXES lib)
 
+    if(CUDAQ_REALTIME_FOR_0_16)
+      set(_qldpc_graph_test_sources
+        ${CMAKE_CURRENT_SOURCE_DIR}/realtime/qec_graph_decode_test/test_realtime_qldpc_graph_decoding.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/realtime/qec_graph_decode_test/qldpc_config_loader.cpp)
+    else()
+      set(_qldpc_graph_test_sources
+        ${CMAKE_CURRENT_SOURCE_DIR}/realtime/qec_graph_decode_test/test_realtime_qldpc_graph_decoding_host_loop.cpp)
+    endif()
+
     add_executable(test_realtime_qldpc_graph_decoding
-      ${CMAKE_CURRENT_SOURCE_DIR}/realtime/qec_graph_decode_test/test_realtime_qldpc_graph_decoding.cpp
-      ${CMAKE_CURRENT_SOURCE_DIR}/realtime/qec_graph_decode_test/qldpc_config_loader.cpp
+      ${_qldpc_graph_test_sources}
     )
 
     set_target_properties(test_realtime_qldpc_graph_decoding PROPERTIES
@@ -556,10 +564,15 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
       ${CUDAQ_REALTIME_DISPATCH_LIBRARY}
       $<$<BOOL:${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}>:${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}>
       cudaq-qec-realtime-decoding
-      $<$<TARGET_EXISTS:cudaq-qec-realtime-cudevice-proprietary>:$<LINK_LIBRARY:WHOLE_ARCHIVE,cudaq-qec-realtime-cudevice-proprietary>>
       $<$<BOOL:${_CUDAQ_LIBRARY}>:${_CUDAQ_LIBRARY}>
       $<$<BOOL:${_NVQIR_LIBRARY}>:${_NVQIR_LIBRARY}>
     )
+
+    if(CUDAQ_REALTIME_FOR_0_16 AND
+       TARGET cudaq-qec-realtime-cudevice-proprietary)
+      target_link_libraries(test_realtime_qldpc_graph_decoding PRIVATE
+        $<LINK_LIBRARY:WHOLE_ARCHIVE,cudaq-qec-realtime-cudevice-proprietary>)
+    endif()
 
     target_link_options(test_realtime_qldpc_graph_decoding PRIVATE
       "LINKER:--allow-shlib-undefined"
@@ -584,7 +597,8 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
     add_dependencies(CUDAQXQECUnitTests test_realtime_qldpc_graph_decoding)
 
     if((QEC_EXTERNAL_DECODERS OR DEFINED ENV{QEC_EXTERNAL_DECODERS})
-       AND TARGET cudaq-qec-realtime-cudevice-proprietary)
+       AND (NOT CUDAQ_REALTIME_FOR_0_16
+            OR TARGET cudaq-qec-realtime-cudevice-proprietary))
       add_test(NAME test_realtime_qldpc_graph_decoding
         COMMAND test_realtime_qldpc_graph_decoding)
       set_tests_properties(test_realtime_qldpc_graph_decoding PROPERTIES
