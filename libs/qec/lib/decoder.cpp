@@ -290,6 +290,7 @@ void decoder::set_O_sparse(const std::vector<std::vector<uint32_t>> &O_sparse) {
   validate_sparse_column_indices(this->O_sparse, block_size, "O_sparse");
   this->pimpl->corrections.clear();
   this->pimpl->corrections.resize(O_sparse.size());
+  on_o_sparse_configured();
 }
 
 void decoder::set_O_sparse(const std::vector<int64_t> &O_sparse_vec_in) {
@@ -297,6 +298,7 @@ void decoder::set_O_sparse(const std::vector<int64_t> &O_sparse_vec_in) {
   validate_sparse_column_indices(this->O_sparse, block_size, "O_sparse");
   this->pimpl->corrections.clear();
   this->pimpl->corrections.resize(O_sparse.size());
+  on_o_sparse_configured();
 }
 
 uint32_t decoder::get_num_msyn_per_decode() const {
@@ -352,11 +354,13 @@ void set_D_sparse_common(decoder *decoder,
 void decoder::set_D_sparse(const std::vector<std::vector<uint32_t>> &D_sparse) {
   this->D_sparse = D_sparse;
   set_D_sparse_common(this, D_sparse, pimpl.get());
+  on_d_sparse_configured();
 }
 
 void decoder::set_D_sparse(const std::vector<int64_t> &D_sparse_vec_in) {
   set_sparse_from_vec(D_sparse_vec_in, this->D_sparse);
   set_D_sparse_common(this, this->D_sparse, pimpl.get());
+  on_d_sparse_configured();
 }
 
 bool decoder::enqueue_syndrome(const uint8_t *syndrome,
