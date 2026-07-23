@@ -6,6 +6,13 @@ AI Predecoder with CUDA-Q Realtime (with FPGA Data Injection)
    The following information is about a C++ demonstration that must be built
    from source and is not part of any distributed CUDA-Q QEC binaries.
 
+.. important::
+
+   CUDA-QX 0.7 supports the legacy ``HOST_LOOP`` implementation described in
+   this guide.  The newer standalone decode-server and device-graph paths
+   require the 0.16-era CUDA-Q realtime API and are not active with the
+   CUDA-Q 0.15.1 dependency pinned by CUDA-QX 0.7.
+
 This guide explains how to build, test, and run the AI predecoder + PyMatching
 pipeline over Hololink RDMA using CUDA-Q's realtime host dispatch system.
 The pipeline runs a TensorRT-accelerated neural network (the *predecoder*) on
@@ -76,7 +83,7 @@ Source Repositories
      - ``main`` branch (or your feature branch)
    * - **cuda-quantum** (realtime)
      - https://github.com/NVIDIA/cuda-quantum
-     - Branch ``releases/v0.14.1``
+     - Branch ``releases/v0.15.1``
    * - **holoscan-sensor-bridge**
      - https://github.com/nvidia-holoscan/holoscan-sensor-bridge
      - Tag ``2.6.0-EA2``
@@ -163,7 +170,7 @@ Building the FPGA demo requires ``holoscan-sensor-bridge`` and
    cd cudaq-realtime-src
    git sparse-checkout init --cone
    git sparse-checkout set realtime
-   git checkout releases/v0.14.1
+   git checkout releases/v0.15.1
    cd ..
 
    # 2. Build holoscan-sensor-bridge (tag 2.6.0-EA2)
@@ -197,8 +204,8 @@ Building the FPGA demo requires ``holoscan-sensor-bridge`` and
    cd cudaq-realtime-src/realtime && mkdir -p build && cd build
    cmake -G Ninja -DCMAKE_INSTALL_PREFIX=/tmp/cudaq-realtime \
      -DCUDAQ_REALTIME_ENABLE_HOLOLINK_TOOLS=ON \
-     -DHOLOSCAN_SENSOR_BRIDGE_SOURCE_DIR=../../holoscan-sensor-bridge \
-     -DHOLOSCAN_SENSOR_BRIDGE_BUILD_DIR=../../holoscan-sensor-bridge/build \
+     -DHOLOSCAN_SENSOR_BRIDGE_SOURCE_DIR=../../../holoscan-sensor-bridge \
+     -DHOLOSCAN_SENSOR_BRIDGE_BUILD_DIR=../../../holoscan-sensor-bridge/build \
      ..
    ninja && ninja install
    cd ../../..
@@ -208,16 +215,37 @@ Building the FPGA demo requires ``holoscan-sensor-bridge`` and
      -DCMAKE_BUILD_TYPE=Release \
      -DCUDAQ_DIR=/path/to/cudaq-install/lib/cmake/cudaq/ \
      -DCUDAQ_REALTIME_ROOT=/tmp/cudaq-realtime \
+     -DCUDAQ_REALTIME_BRIDGE_HOLOLINK_LIBRARY=/tmp/cudaq-realtime/lib/libcudaq-realtime-bridge-hololink.so \
      -DCUDAQ_QEC_BUILD_TRT_DECODER=ON \
+     -DCUDAQX_QEC_ENABLE_REALTIME_PIPELINE=ON \
      -DCUDAQX_ENABLE_LIBS="qec" \
      -DCUDAQX_INCLUDE_TESTS=ON \
+     -DCUDAQX_INCLUDE_DOCS=OFF \
      -DCUDAQX_QEC_ENABLE_HOLOLINK_TOOLS=ON \
+     -DTENSORRT_ONNX_PARSER_LIBRARY=/usr/lib/$(uname -m)-linux-gnu/libnvonnxparser.so \
      -DHOLOSCAN_SENSOR_BRIDGE_SOURCE_DIR=/path/to/holoscan-sensor-bridge \
-     -DHOLOSCAN_SENSOR_BRIDGE_BUILD_DIR=/path/to/holoscan-sensor-bridge/build
+     -DHOLOSCAN_SENSOR_BRIDGE_BUILD_DIR=/path/to/holoscan-sensor-bridge/build \
+     -DGPU_ROCE_TRANSCEIVER_LIB=/path/to/holoscan-sensor-bridge/build/src/hololink/operators/gpu_roce_transceiver/libgpu_roce_transceiver.a \
+     -DBASE_RECEIVER_OP_LIB=/path/to/holoscan-sensor-bridge/build/src/hololink/operators/libbase_receiver_op.a \
+     -DHOLOLINK_CORE_LIB=/path/to/holoscan-sensor-bridge/build/src/hololink/core/libhololink_core.a \
+     -DHOLOLINK_COMMON_LIB=/path/to/holoscan-sensor-bridge/build/src/hololink/common/libhololink.a \
+     -DDOCA_INCLUDE_DIR=/opt/mellanox/doca/include \
+     -DDOCA_VERBS_LIB=/opt/mellanox/doca/lib/$(uname -m)-linux-gnu/libdoca_verbs.so \
+     -DDOCA_COMMON_LIB=/opt/mellanox/doca/lib/$(uname -m)-linux-gnu/libdoca_common.so \
+     -DDOCA_GPUNETIO_LIB=/opt/mellanox/doca/lib/$(uname -m)-linux-gnu/libdoca_gpunetio.so \
+     -DIBVERBS_LIB=/usr/lib/$(uname -m)-linux-gnu/libibverbs.so
    cmake --build cudaqx/build --target \
      hololink_predecoder_bridge \
      hololink_fpga_syndrome_playback \
      cudaq-qec-pymatching
+
+.. note::
+
+   CUDA-QX 0.7 requires the Hololink, DOCA, TensorRT ONNX parser, and realtime
+   Hololink bridge libraries to be supplied explicitly.  Its CMake build
+   discovers these dependencies after evaluating the
+   ``hololink_predecoder_bridge`` target, so passing only the HSB source and
+   build directories causes the target to be skipped.
 
 
 Emulated End-to-End Test
