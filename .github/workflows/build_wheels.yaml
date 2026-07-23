@@ -34,7 +34,7 @@ on:
         required: false
       artifacts_from_run:
         type: string
-        description: Optional argument to take artifacts from a prior run of this workflow; facilitates rerunning a failed workflow without re-building the artifacts.
+        description: GitHub Actions run ID from a prior run of this workflow. Skips wheel builds and reuses that run's CUDA-QX wheels and metapackages, plus its CUDA-Q wheels when using Custom CUDA-Q wheels.
         required: false
       cache_key_suffix:
         type: string
@@ -90,9 +90,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  fetch-assets:
+    name: Fetch release assets
+    if: ${{ !inputs.artifacts_from_run && inputs.assets_repo != '' && inputs.assets_tag != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download -R "${{ inputs.assets_repo }}" "${{ inputs.assets_tag }}"
+
+      - name: Upload release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: '*.tar.gz'
+          if-no-files-found: error
+          retention-days: 1
+
   build-cudaqx-wheels:
     name: Build CUDA-QX wheels
-    if: ${{ !inputs.artifacts_from_run }}
+    needs: fetch-assets
+    if: ${{ !cancelled() && !inputs.artifacts_from_run && (needs.fetch-assets.result == 'success' || needs.fetch-assets.result == 'skipped') }}
     runs-on: linux-${{ matrix.platform }}-cpu8
     # CUDAQ requires a highly specialized environment to build. Thus, it is much
     # easier to rely on their's devdeps images to do the building.
@@ -170,18 +192,12 @@ jobs:
         with:
           set-safe-directory: true
 
-      # Do this early to help validate user inputs (if present)
-      - name: Fetch assets
-        env:
-          GH_TOKEN: ${{ github.token }}
-        id: fetch-assets
-        run: |
-          bash .github/workflows/scripts/install_git_cli.sh
-          if [[ -n "${{ inputs.assets_repo }}" ]] && [[ -n "${{ inputs.assets_tag }}" ]]; then
-            # Fetch the assets into this directory
-            gh release download -R "${{ inputs.assets_repo }}" "${{ inputs.assets_tag }}"
-            ls
-          fi
+      - name: Download release assets
+        if: ${{ inputs.assets_repo != '' && inputs.assets_tag != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: .
 
       - name: Get required CUDAQ version
         id: get-cudaq-version
