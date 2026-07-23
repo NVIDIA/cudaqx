@@ -305,6 +305,43 @@ Expected output:
    [==========] 1 test from 1 test suite ran.
    [  PASSED  ] 1 test.
 
+Surface Code Test (Relay BP)
+----------------------------
+
+The ``surface_code-1-local`` app example runs a surface code memory experiment
+with the nv-qldpc-decoder configured for Relay BP.  It simulates a surface code
+with ``stim`` and generates syndromes on the fly, so -- unlike the fixed-fixture
+CI unit test -- it can run an arbitrary number of shots.
+
+Build the app example (the nv-qldpc-decoder plugin must be installed as
+explained above):
+
+.. code-block:: bash
+
+   cmake --build cudaqx/build --target surface_code-1-local
+
+Run it in two steps -- generate the decoder config (DEM), then run the shots:
+
+.. code-block:: bash
+
+   cd cudaqx/build
+   export CUDAQ_DEFAULT_SIMULATOR=stim
+
+   APP=./libs/qec/unittests/realtime/app_examples/surface_code-1-local
+
+   # 1. Generate the Relay BP decoder config (DEM) for a distance-3 surface code
+   "$APP" --distance 3 --num_rounds 12 \
+          --decoder_type nv-qldpc-decoder \
+          --num_shots 1000 --save_dem config.yml
+
+   # 2. Run the shots
+   "$APP" --distance 3 --num_rounds 12 \
+          --decoder_type nv-qldpc-decoder \
+          --num_shots 1000 --load_dem config.yml
+
+A clean run exits ``0`` and reports a small number of non-zero syndrome
+measurements alongside a larger number of corrections found.
+
 Emulated End-to-End Test
 ------------------------
 
@@ -543,9 +580,7 @@ Run Options
    * - ``--page-size N``
      - ``384``
      - Ring buffer slot size in bytes
-   * - ``--num-pages N``
-     - ``128``
-     - Number of ring buffer slots
+
    * - ``--spacing N``
      - ``10``
      - Inter-shot spacing in microseconds

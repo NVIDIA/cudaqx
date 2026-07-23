@@ -6,9 +6,6 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
-// The per-round device-graph scheduler implementation below requires
-// cuda-quantum's graph-launch engine. When that capability is absent, the
-// #else branch compiles the retained HOST_LOOP full-window bridge instead.
 #if defined(CUDAQ_REALTIME_HAS_GRAPH_LAUNCH_ENGINE)
 
 /// @file hololink_qldpc_graph_decoder_bridge.cpp
@@ -483,25 +480,6 @@ int main(int argc, char *argv[]) {
 
 #include "../realtime/qec_graph_decode_test/relay_bp_host_loop_params.h"
 
-/// @file hololink_qldpc_graph_decoder_bridge.cpp
-/// @brief QLDPC BP decoder bridge adapter using CPU-launched CUDA graph
-///        dispatch (HOST_LOOP) with the generic Hololink bridge skeleton.
-///
-/// This thin adapter:
-///   1. Parses --config argument (Relay BP config YAML)
-///   2. Loads the decoder config, builds the H tensor, creates the decoder
-///   3. Calls capture_decode_graph() to get a CUDA graph + mailbox
-///   4. Builds a cudaq_function_entry_t with the graph_exec
-///   5. Configures BridgeConfig for HOST_LOOP backend
-///   6. Delegates all Hololink / dispatcher plumbing to bridge_run()
-///
-/// The HOST_LOOP dispatcher (CPU thread) polls Hololink ring flags, then
-/// launches the CUDA graph for each incoming RPC request.  This avoids
-/// the 120-outstanding-graph limit of device-side cudaGraphLaunch.
-///
-/// Requires a Grace-based system (DGX Spark / GB200) where GPU memory
-/// is CPU-accessible via NVLink-C2C.
-
 #include <algorithm>
 #include <cstdint>
 #include <fstream>
@@ -566,7 +544,6 @@ int main(int argc, char *argv[]) {
   std::cout << "=== Hololink QLDPC BP Decoder Bridge (Graph Launch) ==="
             << std::endl;
 
-  // ---- Load decoder config ----
   std::string yaml_str = read_file(config_path);
   if (yaml_str.empty())
     return 1;
@@ -579,7 +556,6 @@ int main(int argc, char *argv[]) {
   }
   auto &dec = mdc.decoders[0];
 
-  // ---- Build H tensor from sparse representation ----
   std::vector<uint32_t> h_row_ptr, h_col_idx;
   std::size_t h_rows = cudaq::qec::realtime::sparse_vec_to_csr(
       dec.H_sparse, h_row_ptr, h_col_idx);
@@ -591,7 +567,6 @@ int main(int argc, char *argv[]) {
     for (uint32_t j = h_row_ptr[r]; j < h_row_ptr[r + 1]; ++j)
       H_tensor.at({r, static_cast<std::size_t>(h_col_idx[j])}) = 1;
 
-  // ---- Create decoder ----
   auto params = test_realtime_qldpc::relay_bp_host_loop_params(yaml_str);
   auto decoder = cudaq::qec::decoder::get("nv-qldpc-decoder", H_tensor, params);
   if (!decoder) {
@@ -602,7 +577,6 @@ int main(int argc, char *argv[]) {
   decoder->set_D_sparse(dec.D_sparse);
   decoder->set_O_sparse(dec.O_sparse);
 
-  // Derive num_measurements and num_observables for frame size calculation
   std::vector<uint32_t> d_rp, d_ci;
   cudaq::qec::realtime::sparse_vec_to_csr(dec.D_sparse, d_rp, d_ci);
   std::size_t num_measurements = 0;
@@ -619,7 +593,6 @@ int main(int argc, char *argv[]) {
   std::cout << "  num_observables: " << num_observables << std::endl;
   (void)h_rows;
 
-  // ---- Capture CUDA graph ----
   if (!decoder->supports_graph_dispatch()) {
     std::cerr << "ERROR: nv-qldpc-decoder does not support graph dispatch"
               << std::endl;
@@ -642,7 +615,6 @@ int main(int argc, char *argv[]) {
   std::cout << "  Graph captured: function_id=0x" << std::hex
             << graph_res->function_id << std::dec << std::endl;
 
-  // ---- Configure HOST_LOOP bridge ----
   cudaq_function_entry_t entry{};
   entry.handler.graph_exec = graph_res->graph_exec;
   entry.function_id = graph_res->function_id;

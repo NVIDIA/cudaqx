@@ -50,11 +50,8 @@ CUDA_QUANTUM_DIR="/workspaces/cuda-quantum"
 CUDA_QX_DIR="/workspaces/cudaqx"
 DATA_DIR=""  # auto-detected if empty
 
-# Proprietary device-graph artifacts built in the cuda-qx (decode_server1) tree:
-#   - cudevice archive: enqueue/get/reset DEVICE_CALL handlers + register/
-#     populate shims (WHOLE_ARCHIVE-linked + device-linked into the bridge).
-#   - nv-qldpc plugin .so (dlopen'd; capture_decode_graph builds the decode).
-# Override the parent dir with --cuda-qx-priv-dir or each path individually.
+# Proprietary artifacts built in the cuda-qx tree. The plugin is always needed;
+# the cudevice archive is used only when graph-launch support is available.
 CUDA_QX_PRIV_DIR="/workspaces/cuda-qx"
 PROPRIETARY_ARCHIVE="${CUDA_QX_PRIV_DIR}/build/lib/libcudaq-qec-realtime-cudevice-proprietary.a"
 NV_QLDPC_PLUGIN="${CUDA_QX_PRIV_DIR}/build/lib/decoder-plugins/libcudaq-qec-nv-qldpc-decoder.so"
@@ -71,13 +68,7 @@ GPU_ID=0
 TIMEOUT=60
 NUM_SHOTS=""
 PAGE_SIZE=384
-# Ring depth (num_pages) is intentionally NOT configurable: stock HSB
-# (gpu_roce_transceiver, 2.6.0-EA2) posts WQE_NUM=64 receive/send WQEs and one
-# thread per WQE, so a ring deeper than 64 makes a single thread service
-# multiple slots (slot t and t+64 share a WQE) and races the RX/TX kernels --
-# observed as a duplicated frame W + dropped frame W+64.  The bridge and
-# playback both default num_pages=64 (1:1 slot<->WQE), which is the only safe
-# configuration; the bridge also guards/clamps to 64.
+# Use the 64-slot bridge and playback defaults to match the HSB work queues.
 SPACING=""
 CONTROL_PORT=8193
 
@@ -111,12 +102,11 @@ Build options:
                          (default: /workspaces/cuda-quantum)
   --cuda-qx-dir DIR      cudaqx (public) source dir that builds the bridge +
                          playback (default: /workspaces/cudaqx)
-  --cuda-qx-priv-dir DIR cuda-qx (proprietary, decode_server1) tree that
-                         provides the cudevice archive + nv-qldpc plugin
+  --cuda-qx-priv-dir DIR cuda-qx proprietary tree that provides the
+                         nv-qldpc plugin and optional cudevice archive
                          (default: /workspaces/cuda-qx); sets the two paths below
   --proprietary-archive PATH  Prebuilt libcudaq-qec-realtime-cudevice-proprietary.a
-                         (enqueue/get/reset DEVICE_CALL handlers; WHOLE_ARCHIVE-
-                         linked into the bridge)
+                         (required only with graph-launch-capable cuda-quantum)
   --nv-qldpc-plugin PATH      Prebuilt libcudaq-qec-nv-qldpc-decoder.so (dlopen'd)
   --jobs N               Parallel build jobs (default: nproc)
 
@@ -615,15 +605,18 @@ do_build() {
         return 1
     fi
 
-    # The device-graph scheduler bridge needs the proprietary cudevice archive
-    # (enqueue/get/reset DEVICE_CALL handlers + register/populate shims) built
-    # in the cuda-qx (decode_server1) tree, plus the nv-qldpc plugin .so.  These
-    # are produced outside this script; verify they exist and wire them in.
-    if [[ ! -f "$PROPRIETARY_ARCHIVE" ]]; then
-        _err "Proprietary cudevice archive not found: $PROPRIETARY_ARCHIVE"
-        _err "Build it in cuda-qx (decode_server1): target cudaq-qec-realtime-cudevice-proprietary"
-        _err "or pass --proprietary-archive PATH."
-        return 1
+    local graph_launch_header="${CUDA_QUANTUM_DIR}/realtime/include/cudaq/realtime/daemon/dispatcher/graph_launch_engine.h"
+    local proprietary_cmake_args=()
+    if [[ -f "$graph_launch_header" ]]; then
+        if [[ ! -f "$PROPRIETARY_ARCHIVE" ]]; then
+            _err "Proprietary cudevice archive not found: $PROPRIETARY_ARCHIVE"
+            _err "Build target cudaq-qec-realtime-cudevice-proprietary in cuda-qx"
+            _err "or pass --proprietary-archive PATH."
+            return 1
+        fi
+        proprietary_cmake_args+=(
+            "-DCUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE=$PROPRIETARY_ARCHIVE"
+        )
     fi
     if [[ ! -f "$NV_QLDPC_PLUGIN" ]]; then
         _err "nv-qldpc plugin not found: $NV_QLDPC_PLUGIN (build it in cuda-qx)."
@@ -640,7 +633,7 @@ do_build() {
         -DCUDAToolkit_ROOT="$cuda_toolkit_root" \
         -DCUDAQX_QEC_ENABLE_HOLOLINK_TOOLS=ON \
         -DCUDAQ_QEC_BUILD_TRT_DECODER=OFF \
-        -DCUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE="$PROPRIETARY_ARCHIVE" \
+        "${proprietary_cmake_args[@]}" \
         -DHOLOSCAN_SENSOR_BRIDGE_SOURCE_DIR="$HSB_DIR" \
         -DHOLOSCAN_SENSOR_BRIDGE_BUILD_DIR="$hsb_build" \
         -DGPU_ROCE_TRANSCEIVER_LIB="$hsb_gpu_roce_lib" \

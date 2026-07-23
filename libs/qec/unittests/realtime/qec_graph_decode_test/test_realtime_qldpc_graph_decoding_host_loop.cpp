@@ -6,20 +6,6 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
-/// @file test_realtime_qldpc_graph_decoding_host_loop.cpp
-/// @brief CI test for the CPU-launched CUDA graph relay BP decode path,
-/// exercising the full libcudaq-realtime CUDAQ_DISPATCH_PATH_HOST dispatch.
-///
-/// Flow:
-///   1. Loads a relay BP config YAML and syndrome data
-///   2. Creates the decoder via the generic decoder::get() API
-///   3. Calls capture_decode_graph() to get an opaque graph_resources*
-///   4. Wires the libcudaq-realtime C API: manager -> dispatcher (HOST_LOOP)
-///      -> ringbuffer -> function table (GRAPH_LAUNCH) -> mailbox -> start
-///   5. For each syndrome: writes an RPC request into a ring buffer slot,
-///      signals the slot, the host dispatcher launches the CUDA graph,
-///      and the test polls for the RPCResponse and verifies corrections.
-
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -55,10 +41,6 @@
 
 using namespace cudaq::qec;
 using namespace cudaq::realtime;
-
-//==============================================================================
-// Syndrome file loader
-//==============================================================================
 
 struct SyndromeEntry {
   std::vector<uint8_t> measurements;
@@ -111,10 +93,6 @@ static std::vector<SyndromeEntry> load_syndromes(const std::string &path,
   return entries;
 }
 
-//==============================================================================
-// Ring buffer helpers
-//==============================================================================
-
 static bool allocate_ring_buffer(std::size_t num_slots, std::size_t slot_size,
                                  volatile uint64_t **host_flags_out,
                                  volatile uint64_t **device_flags_out,
@@ -157,10 +135,6 @@ static void free_ring_buffer(volatile uint64_t *host_flags,
     cudaFreeHost(host_data);
 }
 
-//==============================================================================
-// GTest fixture
-//==============================================================================
-
 class GraphDecodeTest : public ::testing::Test {
 protected:
   std::unique_ptr<decoder> decoder_;
@@ -197,8 +171,6 @@ protected:
     cudaError_t flags_err = cudaSetDeviceFlags(cudaDeviceMapHost);
     ASSERT_TRUE(flags_err == cudaSuccess ||
                 flags_err == cudaErrorSetOnActiveProcess);
-
-    // --- Load config via public API ---
     auto config_yaml =
         read_file(std::string(TEST_DATA_DIR) + "/config_nv_qldpc_relay.yml");
     auto mdc = decoding::config::multi_decoder_config::from_yaml_str(
@@ -237,23 +209,17 @@ protected:
     printf("Config: block_size=%zu, syndrome_size=%zu, "
            "num_measurements=%zu, num_observables=%zu\n",
            bs, ss, num_measurements_, num_observables_);
-
-    // --- Capture CUDA graph ---
     ASSERT_TRUE(decoder_->supports_graph_dispatch());
     void *raw = decoder_->capture_decode_graph();
     ASSERT_NE(raw, nullptr);
     graph_res_ = static_cast<realtime::graph_resources *>(raw);
     ASSERT_NE(graph_res_->graph_exec, nullptr);
     printf("Graph captured: function_id=0x%08X\n", graph_res_->function_id);
-
-    // --- Load syndromes ---
     syndromes_ = load_syndromes(std::string(TEST_DATA_DIR) +
                                     "/syndromes_nv_qldpc_relay.txt",
                                 num_measurements_);
     printf("Loaded %zu test syndromes\n", syndromes_.size());
     ASSERT_GT(syndromes_.size(), 0u);
-
-    // --- Allocate ring buffers ---
     slot_size_ = std::max(sizeof(RPCHeader) + num_measurements_,
                           sizeof(RPCResponse) + num_observables_);
     slot_size_ = (slot_size_ + 255) & ~255u;
@@ -265,8 +231,6 @@ protected:
     ASSERT_TRUE(allocate_ring_buffer(num_slots_, slot_size_, &tx_flags_host_,
                                      &tx_flags_dev_, &tx_data_host_,
                                      &tx_data_dev_));
-
-    // --- Wire the C API: HOST_LOOP dispatcher with separate RX/TX ---
     memset(&ringbuffer_, 0, sizeof(ringbuffer_));
     ringbuffer_.rx_flags = rx_flags_dev_;
     ringbuffer_.tx_flags = tx_flags_dev_;
@@ -340,10 +304,6 @@ protected:
   }
 };
 
-//==============================================================================
-// Test: Graph decode of all test syndromes via HOST_LOOP dispatch
-//==============================================================================
-
 TEST_F(GraphDecodeTest, DecodesAllSyndromes) {
   int success_count = 0;
   int error_count = 0;
@@ -354,20 +314,14 @@ TEST_F(GraphDecodeTest, DecodesAllSyndromes) {
 
   for (std::size_t shot = 0; shot < syndromes_.size(); ++shot) {
     uint32_t slot = static_cast<uint32_t>(shot % num_slots_);
-
-    // Wait for slot to be available (both rx and tx flags clear)
     int timeout = 5000;
     while (!cudaq_host_ringbuffer_slot_available(&ringbuffer_, slot) &&
            timeout-- > 0)
       usleep(200);
     ASSERT_GT(timeout, 0) << "Timeout waiting for slot " << slot << " at shot "
                           << shot;
-
-    // Clear stale data in both RX and TX slots
     memset(rx_data_host_ + slot * slot_size_, 0, slot_size_);
     memset(tx_data_host_ + slot * slot_size_, 0, slot_size_);
-
-    // Write RPC request into the RX ring buffer slot
     ASSERT_EQ(cudaq_host_ringbuffer_write_rpc_request(
                   &ringbuffer_, slot, graph_res_->function_id,
                   syndromes_[shot].measurements.data(),
@@ -376,11 +330,7 @@ TEST_F(GraphDecodeTest, DecodesAllSyndromes) {
               CUDAQ_OK);
 
     auto t_start = clock_t::now();
-
-    // Signal the slot (host dispatcher picks it up)
     cudaq_host_ringbuffer_signal_slot(&ringbuffer_, slot);
-
-    // Poll for READY -- the graph kernel signals via tx_flag
     int cuda_err = 0;
     cudaq_tx_status_t st = CUDAQ_TX_EMPTY;
     for (int i = 0; i < 50000 && st != CUDAQ_TX_READY; ++i) {
@@ -397,8 +347,6 @@ TEST_F(GraphDecodeTest, DecodesAllSyndromes) {
     double duration_us =
         std::chrono::duration<double, std::micro>(t_end - t_start).count();
     shot_durations_us.push_back(duration_us);
-
-    // Read response from the TX buffer (separate from RX)
     __sync_synchronize();
     uint8_t *slot_data = tx_data_host_ + slot * slot_size_;
     auto *response = reinterpret_cast<const RPCResponse *>(slot_data);
@@ -440,16 +388,12 @@ TEST_F(GraphDecodeTest, DecodesAllSyndromes) {
         printf(",");
     }
     printf("]\n");
-
-    // Release the worker and clear the slot for reuse
     cudaq_host_release_worker(dispatcher_, 0);
     cudaq_host_ringbuffer_clear_slot(&ringbuffer_, slot);
   }
 
   printf("\nCompleted: %d/%zu shots successful, %d errors\n", success_count,
          syndromes_.size(), error_count);
-
-  // Timing summary (skip shot 0 as warmup)
   if (shot_durations_us.size() > 1) {
     auto begin = shot_durations_us.begin() + 1;
     auto end = shot_durations_us.end();

@@ -559,7 +559,14 @@ Python Execution
 
 .. code-block:: bash
 
-   python3 surface_code_1.py --distance 3 --load_dem config.yaml --num_shots 1000 --target quantinuum --machine_name Helios-1 --emulate false --project_id <project-id>
+   python3 surface_code_1.py \
+     --distance 3 \
+     --load_dem config.yaml \
+     --num_shots 1000 \
+     --target quantinuum \
+     --machine_name Helios-1 \
+     --emulate false \
+     --project_id <project-id>
 
 **Key Points:**
 
@@ -650,7 +657,7 @@ They are valid both for python and C++ applications, however, they must be set b
 1. **Missing libraries**: Ensure all ``-lcudaq-qec-*`` libraries are linked
 2. **Wrong backend library**: Use ``-simulation`` for Stim, ``-quantinuum`` for Quantinuum
 3. **Missing** ``-Wl,--export-dynamic`` **flag**: Required for Quantinuum targets
-4. **Wrong target flags**: ``--emulate`` with ``Helios-Fake`` for emulation, remove for hardware
+4. **Wrong target flags**: Use ``--emulate true`` for emulation and ``--emulate false`` with ``--project_id`` for hardware
 
 **Common Runtime Issues:**
 

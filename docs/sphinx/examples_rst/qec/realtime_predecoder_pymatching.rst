@@ -6,7 +6,6 @@ AI Predecoder with CUDA-Q Realtime
   The following information is about a C++ demonstration that must be built
   from source and is not part of any distributed CUDA-Q QEC binaries.
 
-
 This guide explains how to build and run the hybrid AI predecoder + PyMatching
 streaming benchmark. The benchmark uses a TensorRT-accelerated neural network
 (the *predecoder*) to reduce syndrome density on the GPU, then feeds the

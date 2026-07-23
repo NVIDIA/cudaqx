@@ -6,7 +6,7 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
-# External Dependencies
+# External Dependencies 
 # ==============================================================================
 
 FetchContent_Declare(
@@ -32,7 +32,7 @@ include(GoogleTest)
 find_package(CUDAToolkit REQUIRED)
 
 # ==============================================================================
-add_compile_options(-Wno-attributes)
+add_compile_options(-Wno-attributes) 
 
 add_executable(test_decoders test_decoders.cpp decoders/sample_decoder.cpp)
 target_link_libraries(test_decoders PRIVATE GTest::gtest_main cudaq-qec-decoders libstim CUDA::cudart)
@@ -179,36 +179,36 @@ endif()
 # GPU kernel tests for realtime decoder infrastructure
 if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
   enable_language(CUDA)
-
-  add_executable(test_gpu_kernels
+  
+  add_executable(test_gpu_kernels 
     ${CMAKE_CURRENT_SOURCE_DIR}/decoders/realtime/test_gpu_kernels.cu
   )
-
+  
   set_target_properties(test_gpu_kernels PROPERTIES
     CUDA_SEPARABLE_COMPILATION ON
     CUDA_STANDARD 17
   )
-
+  
   target_include_directories(test_gpu_kernels PRIVATE
     ${CUDAToolkit_INCLUDE_DIRS}
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
     ${CMAKE_SOURCE_DIR}/libs/core/include
   )
-
+  
   # Define the test data directory path
   target_compile_definitions(test_gpu_kernels PRIVATE
     TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/decoders/realtime/data"
   )
-
-  target_link_libraries(test_gpu_kernels PRIVATE
-    GTest::gtest_main
+  
+  target_link_libraries(test_gpu_kernels PRIVATE 
+    GTest::gtest_main 
     CUDA::cudart
     cudaq-qec-realtime-cudevice
   )
-
+  
   add_dependencies(CUDAQXQECUnitTests test_gpu_kernels)
   gtest_discover_tests(test_gpu_kernels)
-
+  
   # Realtime decoding end-to-end test with mock decoder
   # This test integrates with cuda-quantum's host API (libcudaq-realtime.so)
 
@@ -281,14 +281,14 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
   endif()
 
   if(_have_realtime_for_tests)
-    add_executable(test_realtime_decoding
+    add_executable(test_realtime_decoding 
       ${CMAKE_CURRENT_SOURCE_DIR}/decoders/realtime/test_realtime_decoding.cu
       ${CMAKE_CURRENT_SOURCE_DIR}/realtime/mock_decode_handler.cu
       ${CMAKE_CURRENT_SOURCE_DIR}/realtime/mock_decoder_launch_params.cpp
     )
 
     # TODO: Re-enable once libcudaq-realtime-host-dispatch.so RPATH is resolved
-    # add_executable(test_realtime_decoding
+    # add_executable(test_realtime_decoding 
     #   ${CMAKE_CURRENT_SOURCE_DIR}/decoders/realtime/test_realtime_decoding.cu
     # )
     #
@@ -309,8 +309,8 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
     #   TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/decoders/realtime/data"
     # )
     #
-    # target_link_libraries(test_realtime_decoding PRIVATE
-    #   GTest::gtest_main
+    # target_link_libraries(test_realtime_decoding PRIVATE 
+    #   GTest::gtest_main 
     #   CUDA::cudart
     #   cudaq-qec-realtime-cudevice
     #   ${CUDAQ_REALTIME_LIBRARY}
@@ -340,8 +340,8 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
       TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/decoders/realtime/data"
     )
 
-    target_link_libraries(test_realtime_decoding PRIVATE
-      GTest::gtest_main
+    target_link_libraries(test_realtime_decoding PRIVATE 
+      GTest::gtest_main 
       CUDA::cudart
       cudaq-qec-realtime-cudevice
       ${CUDAQ_REALTIME_LIBRARY}

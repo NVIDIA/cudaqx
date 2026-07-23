@@ -234,8 +234,7 @@ if (GPU_ROCE_TRANSCEIVER_LIB AND CUDAQ_REALTIME_INCLUDE_DIR AND
     cuda_link_stub.cu
   )
 
-  # Select the per-round scheduler only when cuda-quantum provides its
-  # graph-launch engine. Otherwise compile the HOST_LOOP full-window bridge.
+  # Select the bridge implementation by realtime API capability.
   target_compile_definitions(hololink_qldpc_graph_decoder_bridge PRIVATE
     $<$<BOOL:${CUDAQ_REALTIME_HAS_GRAPH_LAUNCH_ENGINE}>:CUDAQ_REALTIME_HAS_GRAPH_LAUNCH_ENGINE>)
 

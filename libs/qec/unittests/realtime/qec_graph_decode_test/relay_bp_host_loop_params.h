@@ -64,10 +64,7 @@ inline bool boolean(const std::string &yaml, const std::string &key) {
 
 } // namespace detail
 
-/// Remove decoder_custom_args before passing the document to CUDA-Q 0.15.1.
-/// That release rejects plugin arguments when the proprietary decoder has not
-/// registered a YAML schema. The same arguments are supplied as typed values by
-/// relay_bp_host_loop_params() below.
+// Parse plugin arguments separately when the decoder has no registered schema.
 inline std::string relay_bp_host_loop_config_yaml(const std::string &yaml) {
   std::istringstream input(yaml);
   std::ostringstream output;
@@ -96,9 +93,6 @@ inline std::string relay_bp_host_loop_config_yaml(const std::string &yaml) {
   return output.str();
 }
 
-/// Materialize the Relay BP arguments directly from the YAML document. CUDA-Q
-/// 0.15.1 cannot materialize decoder_custom_args without a registered plugin
-/// schema, but decoder::get() accepts the same values as a heterogeneous_map.
 inline cudaqx::heterogeneous_map
 relay_bp_host_loop_params(const std::string &yaml) {
   cudaqx::heterogeneous_map params;

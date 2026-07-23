@@ -1038,8 +1038,8 @@ Key Steps:
    (and its single-basis variants :code:`z_dem_from_memory_circuit` /
    :code:`x_dem_from_memory_circuit`) are canonicalized. Hand-built matrices may
    need :code:`simplify_pcm`.
-2. **Set the schedule and window**: Provide ``num_syndromes_per_round`` (the number of
-   syndrome measurements per round) and ``num_boundary_syndromes`` (the number of
+2. **Set the schedule and window**: Provide ``num_syndromes_per_round`` (the number of 
+   syndrome measurements per round) and ``num_boundary_syndromes`` (the number of 
    stabilizer syndromes fixed by the state-prep at the beginning and end of the circuit).
    Choose ``window_size`` and ``step_size`` so ``window_size`` and
    ``step_size`` stay within valid bounds and ``num_rounds - window_size`` is
@@ -1480,3 +1480,4 @@ Additional Noise Models
       noise.add_all_qubit_channel(
           "x", cudaq::depolarization2(/*probability*/ 0.01),
           /*numControls*/ 1);
+

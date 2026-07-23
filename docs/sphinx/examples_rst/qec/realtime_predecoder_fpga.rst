@@ -6,7 +6,6 @@ AI Predecoder with CUDA-Q Realtime (with FPGA Data Injection)
    The following information is about a C++ demonstration that must be built
    from source and is not part of any distributed CUDA-Q QEC binaries.
 
-
 This guide explains how to build, test, and run the AI predecoder + PyMatching
 pipeline over Hololink RDMA using CUDA-Q's realtime host dispatch system.
 The pipeline runs a TensorRT-accelerated neural network (the *predecoder*) on
