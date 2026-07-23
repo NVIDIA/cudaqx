@@ -524,17 +524,8 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
             ${CUDAQ_DIR}/.. $ENV{CUDAQ_DIR}/..
       PATH_SUFFIXES lib)
 
-    if(CUDAQ_REALTIME_HAS_GRAPH_LAUNCH_ENGINE)
-      set(_qldpc_graph_test_sources
-        ${CMAKE_CURRENT_SOURCE_DIR}/realtime/qec_graph_decode_test/test_realtime_qldpc_graph_decoding.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/realtime/qec_graph_decode_test/qldpc_config_loader.cpp)
-    else()
-      set(_qldpc_graph_test_sources
-        ${CMAKE_CURRENT_SOURCE_DIR}/realtime/qec_graph_decode_test/test_realtime_qldpc_graph_decoding_host_loop.cpp)
-    endif()
-
     add_executable(test_realtime_qldpc_graph_decoding
-      ${_qldpc_graph_test_sources}
+      ${CMAKE_CURRENT_SOURCE_DIR}/realtime/qec_graph_decode_test/test_realtime_qldpc_graph_decoding.cpp
     )
 
     set_target_properties(test_realtime_qldpc_graph_decoding PROPERTIES
@@ -561,23 +552,15 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
       GTest::gtest_main
       CUDA::cudart
       ${CUDAQ_REALTIME_LIBRARY}
-      ${CUDAQ_REALTIME_DISPATCH_LIBRARY}
       $<$<BOOL:${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}>:${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}>
       cudaq-qec-realtime-decoding
       $<$<BOOL:${_CUDAQ_LIBRARY}>:${_CUDAQ_LIBRARY}>
       $<$<BOOL:${_NVQIR_LIBRARY}>:${_NVQIR_LIBRARY}>
     )
 
-    if(CUDAQ_REALTIME_HAS_GRAPH_LAUNCH_ENGINE AND
-       TARGET cudaq-qec-realtime-cudevice-proprietary)
-      target_link_libraries(test_realtime_qldpc_graph_decoding PRIVATE
-        $<LINK_LIBRARY:WHOLE_ARCHIVE,cudaq-qec-realtime-cudevice-proprietary>)
-    endif()
-
     target_link_options(test_realtime_qldpc_graph_decoding PRIVATE
       "LINKER:--allow-shlib-undefined"
       "LINKER:--disable-new-dtags"
-      "LINKER:--export-dynamic"
     )
 
     # Resolve CUDAQ SDK lib dir for RPATH (libnvqir, libcudaq)
@@ -596,9 +579,7 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
 
     add_dependencies(CUDAQXQECUnitTests test_realtime_qldpc_graph_decoding)
 
-    if((QEC_EXTERNAL_DECODERS OR DEFINED ENV{QEC_EXTERNAL_DECODERS})
-       AND (NOT CUDAQ_REALTIME_HAS_GRAPH_LAUNCH_ENGINE
-            OR TARGET cudaq-qec-realtime-cudevice-proprietary))
+    if(QEC_EXTERNAL_DECODERS OR DEFINED ENV{QEC_EXTERNAL_DECODERS})
       add_test(NAME test_realtime_qldpc_graph_decoding
         COMMAND test_realtime_qldpc_graph_decoding)
       set_tests_properties(test_realtime_qldpc_graph_decoding PROPERTIES

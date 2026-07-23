@@ -559,14 +559,7 @@ Python Execution
 
 .. code-block:: bash
 
-   python3 surface_code_1.py \
-     --distance 3 \
-     --load_dem config.yaml \
-     --num_shots 1000 \
-     --target quantinuum \
-     --machine_name Helios-1 \
-     --emulate false \
-     --project_id <project-id>
+   python3 surface_code_1.py --distance 3 --load_dem config.yaml --num_shots 1000 --target quantinuum --machine_name Helios-1 --emulate false --project_id <project-id>
 
 **Key Points:**
 

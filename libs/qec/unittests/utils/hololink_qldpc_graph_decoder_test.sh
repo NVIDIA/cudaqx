@@ -50,10 +50,8 @@ CUDA_QUANTUM_DIR="/workspaces/cuda-quantum"
 CUDA_QX_DIR="/workspaces/cudaqx"
 DATA_DIR=""  # auto-detected if empty
 
-# Proprietary artifacts built in the cuda-qx tree. The plugin is always needed;
-# the cudevice archive is used only when graph-launch support is available.
+# Proprietary nv-qldpc plugin built in the cuda-qx tree.
 CUDA_QX_PRIV_DIR="/workspaces/cuda-qx"
-PROPRIETARY_ARCHIVE="${CUDA_QX_PRIV_DIR}/build/lib/libcudaq-qec-realtime-cudevice-proprietary.a"
 NV_QLDPC_PLUGIN="${CUDA_QX_PRIV_DIR}/build/lib/decoder-plugins/libcudaq-qec-nv-qldpc-decoder.so"
 
 # Network defaults
@@ -103,10 +101,7 @@ Build options:
   --cuda-qx-dir DIR      cudaqx (public) source dir that builds the bridge +
                          playback (default: /workspaces/cudaqx)
   --cuda-qx-priv-dir DIR cuda-qx proprietary tree that provides the
-                         nv-qldpc plugin and optional cudevice archive
-                         (default: /workspaces/cuda-qx); sets the two paths below
-  --proprietary-archive PATH  Prebuilt libcudaq-qec-realtime-cudevice-proprietary.a
-                         (required only with graph-launch-capable cuda-quantum)
+                         nv-qldpc plugin (default: /workspaces/cuda-qx)
   --nv-qldpc-plugin PATH      Prebuilt libcudaq-qec-nv-qldpc-decoder.so (dlopen'd)
   --jobs N               Parallel build jobs (default: nproc)
 
@@ -143,10 +138,8 @@ while [[ $# -gt 0 ]]; do
         --cuda-qx-dir)      CUDA_QX_DIR="$2"; shift ;;
         --cuda-qx-priv-dir)
             CUDA_QX_PRIV_DIR="$2"
-            PROPRIETARY_ARCHIVE="${CUDA_QX_PRIV_DIR}/build/lib/libcudaq-qec-realtime-cudevice-proprietary.a"
             NV_QLDPC_PLUGIN="${CUDA_QX_PRIV_DIR}/build/lib/decoder-plugins/libcudaq-qec-nv-qldpc-decoder.so"
             shift ;;
-        --proprietary-archive) PROPRIETARY_ARCHIVE="$2"; shift ;;
         --nv-qldpc-plugin)  NV_QLDPC_PLUGIN="$2"; shift ;;
         --jobs)             JOBS="$2"; shift ;;
         --device)           IB_DEVICE="$2"; shift ;;
@@ -605,19 +598,6 @@ do_build() {
         return 1
     fi
 
-    local graph_launch_header="${CUDA_QUANTUM_DIR}/realtime/include/cudaq/realtime/daemon/dispatcher/graph_launch_engine.h"
-    local proprietary_cmake_args=()
-    if [[ -f "$graph_launch_header" ]]; then
-        if [[ ! -f "$PROPRIETARY_ARCHIVE" ]]; then
-            _err "Proprietary cudevice archive not found: $PROPRIETARY_ARCHIVE"
-            _err "Build target cudaq-qec-realtime-cudevice-proprietary in cuda-qx"
-            _err "or pass --proprietary-archive PATH."
-            return 1
-        fi
-        proprietary_cmake_args+=(
-            "-DCUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE=$PROPRIETARY_ARCHIVE"
-        )
-    fi
     if [[ ! -f "$NV_QLDPC_PLUGIN" ]]; then
         _err "nv-qldpc plugin not found: $NV_QLDPC_PLUGIN (build it in cuda-qx)."
         return 1
@@ -633,7 +613,6 @@ do_build() {
         -DCUDAToolkit_ROOT="$cuda_toolkit_root" \
         -DCUDAQX_QEC_ENABLE_HOLOLINK_TOOLS=ON \
         -DCUDAQ_QEC_BUILD_TRT_DECODER=OFF \
-        "${proprietary_cmake_args[@]}" \
         -DHOLOSCAN_SENSOR_BRIDGE_SOURCE_DIR="$HSB_DIR" \
         -DHOLOSCAN_SENSOR_BRIDGE_BUILD_DIR="$hsb_build" \
         -DGPU_ROCE_TRANSCEIVER_LIB="$hsb_gpu_roce_lib" \
@@ -842,12 +821,7 @@ run_emulated() {
         --buffer-addr "$bridge_addr"
         --page-size "$PAGE_SIZE"
     )
-    if grep -q "device-graph scheduler" "$bridge_log"; then
-        playback_args+=(--per-round)
-        _info "Playback protocol: per-round device graph"
-    else
-        _info "Playback protocol: HOST_LOOP full window"
-    fi
+    _info "Playback protocol: HOST_LOOP full window"
     if $VERIFY; then
         playback_args+=(--verify)
     fi
@@ -927,12 +901,7 @@ run_fpga() {
         --buffer-addr "$bridge_addr"
         --page-size "$PAGE_SIZE"
     )
-    if grep -q "device-graph scheduler" "$bridge_log"; then
-        playback_args+=(--per-round)
-        _info "Playback protocol: per-round device graph"
-    else
-        _info "Playback protocol: HOST_LOOP full window"
-    fi
+    _info "Playback protocol: HOST_LOOP full window"
     if $VERIFY; then
         playback_args+=(--verify)
     fi
