@@ -8,13 +8,14 @@ Relay BP Decoding with CUDA-Q Realtime
 
 .. warning::
 
-   The device-graph Relay BP path described in this guide is not supported by
-   CUDA-QX 0.7.  CUDA-QX 0.7 pins CUDA-Q 0.15.1, which does not provide the
-   required 0.16-era realtime device-graph scheduler.  The relevant targets
-   are gated by ``CUDAQ_REALTIME_FOR_0_16`` and are skipped in the 0.7 build.
-   The source and build commands below retain the v0.7 dependency layout for
-   reference, but the graph targets and run steps cannot be used in this
-   release.
+   CUDA-QX 0.7 retains the legacy full-window ``HOST_LOOP`` Hololink Relay BP
+   bridge.  It does not support the per-round device-graph scheduler described
+   in this guide, the standalone decoding server, or the graph CI test.
+   CUDA-QX 0.7 pins CUDA-Q 0.15.1, which does not provide the required
+   0.16-era realtime device-graph API.  These graph-based targets are gated by
+   ``CUDAQ_REALTIME_FOR_0_16`` and are skipped in the 0.7 build.  The Hololink
+   build instructions below select the retained ``HOST_LOOP`` bridge when
+   ``CUDAQ_REALTIME_FOR_0_16`` is false.
 
 This guide explains how to build, test, and run the nv-qldpc-decoder Relay BP
 decoder using CUDA-Q's realtime dispatch system.  The decoder is driven by a
@@ -179,10 +180,10 @@ provides the Hololink ``GpuRoceTransceiver`` library for RDMA transport.
 .. warning::
 
    The self-relaunching device-graph scheduler is provided by the
-   0.16-era ``cuda-quantum`` realtime API, not by ``releases/v0.15.1``.  It
-   includes the ``CUDAQ_DISPATCH_STATUS_TRIGGER_GRAPH`` sentinel, triggered
-   fire-and-forget decode launch, and tail self-relaunch on top of the
-   device-side graph dispatch.
+   0.16-era ``cuda-quantum`` realtime API and is not available in CUDA-Q
+   0.15.1.  It includes the ``CUDAQ_DISPATCH_STATUS_TRIGGER_GRAPH`` sentinel,
+   triggered fire-and-forget decode launch, and tail self-relaunch on top of
+   the device-side graph dispatch.
 
 .. note::
 
@@ -221,38 +222,17 @@ The FPGA emulator is in the ``cuda-quantum`` repository:
 Building
 --------
 
-CI unit test only (no Hololink tools)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Graph CI unit test (unavailable in 0.7)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-If you only need to run the CI unit test, you can build without
-``holoscan-sensor-bridge``:
+The ``test_realtime_qldpc_graph_decoding`` target requires the 0.16-era
+device-graph API and is not built by CUDA-QX 0.7 with CUDA-Q 0.15.1.  The
+legacy ``HOST_LOOP`` implementation is available through the Hololink bridge
+described in the following section; it does not have a standalone CI-only
+target.
 
-.. code-block:: bash
-
-   # 1. Build libcudaq-realtime
-   git clone https://github.com/NVIDIA/cuda-quantum.git cudaq-realtime-src
-   cd cudaq-realtime-src
-   git checkout releases/v0.15.1
-   cd realtime && mkdir -p build && cd build
-   cmake -G Ninja -DCMAKE_INSTALL_PREFIX=/tmp/cudaq-realtime ..
-   ninja && ninja install
-   cd ../../..
-
-   # 2. Build cudaqx with the nv-qldpc-decoder test.
-   #    CUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE points at the static
-   #    archive with the DEVICE_CALL handlers; it is linked WHOLE_ARCHIVE into
-   #    the test (see "Obtaining the proprietary components").
-   cmake -S cudaqx -B cudaqx/build \
-     -DCMAKE_BUILD_TYPE=Release \
-     -DCUDAQ_DIR=/path/to/cudaq-install/lib/cmake/cudaq/ \
-     -DCUDAQ_REALTIME_ROOT=/tmp/cudaq-realtime \
-     -DCUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE=/path/to/libcudaq-qec-realtime-cudevice-proprietary.a \
-     -DCUDAQX_ENABLE_LIBS="qec" \
-     -DCUDAQX_INCLUDE_TESTS=ON
-   cmake --build cudaqx/build --target test_realtime_qldpc_graph_decoding
-
-Full build (CI test + Hololink bridge/playback tools)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Hololink bridge/playback tools
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 To also build the bridge and playback tools for emulated or FPGA testing:
 
@@ -309,7 +289,7 @@ To also build the bridge and playback tools for emulated or FPGA testing:
 
    # 4. Build cudaqx with Hololink tools enabled.
    #    CUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE supplies the DEVICE_CALL
-   #    handlers (WHOLE_ARCHIVE-linked into the bridge + test).
+   #    handlers used by graph-based builds with a compatible realtime API.
    cmake -S cudaqx -B cudaqx/build \
      -DCMAKE_BUILD_TYPE=Release \
      -DCUDAQ_DIR=/path/to/cudaq-install/lib/cmake/cudaq/ \
@@ -321,7 +301,6 @@ To also build the bridge and playback tools for emulated or FPGA testing:
      -DHOLOSCAN_SENSOR_BRIDGE_SOURCE_DIR=/path/to/holoscan-sensor-bridge \
      -DHOLOSCAN_SENSOR_BRIDGE_BUILD_DIR=/path/to/holoscan-sensor-bridge/build
    cmake --build cudaqx/build --target \
-     test_realtime_qldpc_graph_decoding \
      hololink_qldpc_graph_decoder_bridge \
      hololink_fpga_syndrome_playback
 
@@ -338,47 +317,13 @@ The orchestration script can build everything automatically:
      --cuda-quantum-dir /path/to/cuda-quantum \
      --no-run
 
-CI Unit Test
-------------
+Graph CI Unit Test (Unavailable in 0.7)
+---------------------------------------
 
-The CI unit test (``test_realtime_qldpc_graph_decoding``) exercises the full
-device-graph scheduler decode path without any network hardware.  It:
-
-1. Loads the Relay BP config and syndrome data from YAML/text files
-2. Creates the decoder via the ``decoder::get("nv-qldpc-decoder", ...)`` plugin API
-3. Constructs a ``qec_realtime_session``, which captures the decoder's
-   device-launchable cooperative decode graph and starts the device-graph
-   scheduler on a pinned-mapped ring (3 ``DEVICE_CALL`` entries:
-   ``enqueue_syndromes`` / ``get_corrections`` / ``reset_decoder``)
-4. Drives the per-round protocol with ``rpc_producer``: for each shot it sends
-   one ``enqueue_syndromes`` per round, then a ``get_corrections``; the
-   scheduler fires the decode when a window completes and tail self-relaunches
-5. Verifies each shot's correction against the fixture, then a final
-   ``reset_decoder`` + ``get_corrections`` confirms reset
-
-Running
-^^^^^^^
-
-.. code-block:: bash
-
-   cd cudaqx/build
-
-   # The nv-qldpc-decoder plugin must be in <cudaqx-build>/lib/decoder-plugins/
-   # before running -- see "Obtaining the proprietary components" above.
-
-   ./libs/qec/unittests/test_realtime_qldpc_graph_decoding
-
-Expected output:
-
-.. code-block:: text
-
-   [==========] Running 1 test from 1 test suite.
-   [----------] 1 test from GraphDecodeTest
-   [ RUN      ] GraphDecodeTest.DecodesAllSyndromes
-   ...
-   [       OK ] GraphDecodeTest.DecodesAllSyndromes (XXX ms)
-   [==========] 1 test from 1 test suite ran.
-   [  PASSED  ] 1 test.
+The ``test_realtime_qldpc_graph_decoding`` test exercises the full
+per-round device-graph scheduler without network hardware.  It requires the
+0.16-era realtime device-graph API, so CUDA-QX 0.7 does not build or run this
+test with its pinned CUDA-Q 0.15.1 dependency.
 
 Surface Code Test (Relay BP)
 ----------------------------
