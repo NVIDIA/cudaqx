@@ -313,7 +313,9 @@ private:
   // cv_.wait(), so this notify either happens before the check (observed via
   // the acquire load) or after the waiter is parked (delivered by notify).
   void notify_flush_waiters() {
-    { std::lock_guard<std::mutex> lock(wait_mutex_); }
+    {
+      std::lock_guard<std::mutex> lock(wait_mutex_);
+    }
     cv_.notify_all();
   }
 
