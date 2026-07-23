@@ -6,7 +6,7 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
-/// @file test_realtime_qldpc_graph_decoding.cpp
+/// @file test_realtime_qldpc_graph_decoding_host_loop.cpp
 /// @brief CI test for the CPU-launched CUDA graph relay BP decode path,
 /// exercising the full libcudaq-realtime CUDAQ_DISPATCH_PATH_HOST dispatch.
 ///
@@ -39,6 +39,7 @@
 #include "cudaq/qec/realtime/graph_resources.h"
 #include "cudaq/qec/realtime/sparse_to_csr.h"
 
+#include "relay_bp_host_loop_params.h"
 #include "cudaq/realtime/daemon/dispatcher/cudaq_realtime.h"
 #include "cudaq/realtime/daemon/dispatcher/dispatch_kernel_launch.h"
 
@@ -198,8 +199,10 @@ protected:
                 flags_err == cudaErrorSetOnActiveProcess);
 
     // --- Load config via public API ---
-    auto mdc = decoding::config::multi_decoder_config::from_yaml_str(read_file(
-        std::string(TEST_DATA_DIR) + "/config_nv_qldpc_relay_host_loop.yml"));
+    auto config_yaml =
+        read_file(std::string(TEST_DATA_DIR) + "/config_nv_qldpc_relay.yml");
+    auto mdc = decoding::config::multi_decoder_config::from_yaml_str(
+        test_realtime_qldpc::relay_bp_host_loop_config_yaml(config_yaml));
     ASSERT_EQ(mdc.decoders.size(), 1u);
     auto &dec = mdc.decoders[0];
 
@@ -215,7 +218,7 @@ protected:
       for (uint32_t j = h_row_ptr[r]; j < h_row_ptr[r + 1]; ++j)
         H_tensor.at({r, static_cast<std::size_t>(h_col_idx[j])}) = 1;
 
-    auto params = dec.decoder_custom_args_to_heterogeneous_map();
+    auto params = test_realtime_qldpc::relay_bp_host_loop_params(config_yaml);
     decoder_ = decoder::get("nv-qldpc-decoder", H_tensor, params);
     ASSERT_NE(decoder_, nullptr);
 
@@ -410,8 +413,20 @@ TEST_F(GraphDecodeTest, DecodesAllSyndromes) {
 
     const uint8_t *corrections = slot_data + sizeof(RPCResponse);
 
+    const bool correction_matches =
+        response->result_len > 0 &&
+        corrections[0] == syndromes_[shot].expected_correction;
+    EXPECT_TRUE(correction_matches)
+        << "Correction mismatch for shot " << shot << ": expected "
+        << static_cast<unsigned>(syndromes_[shot].expected_correction)
+        << ", got "
+        << (response->result_len > 0
+                ? std::to_string(static_cast<unsigned>(corrections[0]))
+                : std::string("<missing>"));
+
     if (response->status == 0 &&
-        response->result_len == static_cast<uint32_t>(num_observables_)) {
+        response->result_len == static_cast<uint32_t>(num_observables_) &&
+        correction_matches) {
       success_count++;
     } else {
       error_count++;

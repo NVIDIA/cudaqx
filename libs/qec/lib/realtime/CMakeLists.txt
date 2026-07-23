@@ -11,7 +11,7 @@ find_package(LLVM 22.1.4 EXACT REQUIRED CONFIG)
 # Enable CUDA for device code
 if(CMAKE_CUDA_COMPILER)
   enable_language(CUDA)
-  
+
   # Find cuda-quantum realtime headers for device library
   set(CUDAQ_REALTIME_ROOT "" CACHE PATH "Prefix to cuda-quantum install")
   set(_cudaq_realtime_prefixes "")
@@ -25,7 +25,7 @@ if(CMAKE_CUDA_COMPILER)
   if(CUDAQ_INSTALL_PREFIX)
     list(APPEND _cudaq_realtime_prefixes "${CUDAQ_INSTALL_PREFIX}")
   endif()
-  
+
   macro(cudaq_qec_find_realtime_path output_var)
     cmake_parse_arguments(ARG "" "" "NAMES;PATH_SUFFIXES" ${ARGN})
     find_path(${output_var}
@@ -70,16 +70,15 @@ if(CMAKE_CUDA_COMPILER)
       PATH_SUFFIXES include ../include
     )
   endif()
-  
-  # Detect whether cuda-quantum provides the device-graph scheduler API.  The
-  # v0.7 release uses this result to select its retained HOST_LOOP bridge when
-  # building against CUDA-Q 0.15.1.
-  set(CUDAQ_REALTIME_FOR_0_16 FALSE CACHE INTERNAL
-      "cuda-quantum realtime provides the graph-launch dispatch API")
+
+  # Detect the graph-launch engine capability used by the device-graph
+  # scheduler. When it is absent, select the retained HOST_LOOP bridge.
+  set(CUDAQ_REALTIME_HAS_GRAPH_LAUNCH_ENGINE FALSE CACHE INTERNAL
+      "cuda-quantum realtime provides graph_launch_engine.h" FORCE)
   if(CUDAQ_REALTIME_INCLUDE_DIR AND EXISTS
       "${CUDAQ_REALTIME_INCLUDE_DIR}/cudaq/realtime/daemon/dispatcher/graph_launch_engine.h")
-    set(CUDAQ_REALTIME_FOR_0_16 TRUE CACHE INTERNAL
-        "cuda-quantum realtime provides the graph-launch dispatch API")
+    set(CUDAQ_REALTIME_HAS_GRAPH_LAUNCH_ENGINE TRUE CACHE INTERNAL
+        "cuda-quantum realtime provides graph_launch_engine.h" FORCE)
   endif()
 
   if(CUDAQ_REALTIME_INCLUDE_DIR)
@@ -155,38 +154,38 @@ if(CMAKE_CUDA_COMPILER)
     if(CUDAQ_DEVICE_CALL_INCLUDE_DIR AND CUDAQ_DEVICE_CALL_RUNTIME_LIBRARY)
       set(CUDAQ_QEC_DEVICE_CALL_SERVICE_AVAILABLE TRUE)
     endif()
-    
+
     # Create static device library for device code
     add_library(cudaq-qec-realtime-cudevice STATIC
       gpu_kernels.cu
     )
-    
+
     set_target_properties(cudaq-qec-realtime-cudevice PROPERTIES
       CUDA_SEPARABLE_COMPILATION ON
       CUDA_STANDARD 17
       POSITION_INDEPENDENT_CODE ON
     )
-    
+
     # Handle both standalone (libs/qec) and full repo builds
     if(CUDAQX_QEC_STANDALONE_BUILD)
       set(_core_include_dir "${CMAKE_SOURCE_DIR}/../core/include")
     else()
       set(_core_include_dir "${CMAKE_SOURCE_DIR}/libs/core/include")
     endif()
-    
+
     target_include_directories(cudaq-qec-realtime-cudevice PUBLIC
       $<BUILD_INTERFACE:${CUDAQX_QEC_INCLUDE_DIR}>
       $<BUILD_INTERFACE:${_core_include_dir}>
       $<BUILD_INTERFACE:${CUDAQ_REALTIME_INCLUDE_DIR}>
       $<INSTALL_INTERFACE:include>
     )
-    
+
     target_link_libraries(cudaq-qec-realtime-cudevice PUBLIC CUDA::cudart)
-    
+
     set_target_properties(cudaq-qec-realtime-cudevice PROPERTIES
       ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
     )
-    
+
     # NOTE: cudaq-qec-realtime-cudevice is a STATIC archive consumed only at
     # link time -- the decoding_server executable (and the realtime tests)
     # absorb its objects WHOLE_ARCHIVE during their own link.  It is not needed
@@ -221,11 +220,11 @@ add_library(cudaq-qec-realtime-decoding SHARED
   rpc_producer.cpp
 )
 
-target_compile_options(cudaq-qec-realtime-decoding 
+target_compile_options(cudaq-qec-realtime-decoding
   PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden)
 
 target_include_directories(cudaq-qec-realtime-decoding
-  PUBLIC 
+  PUBLIC
     $<BUILD_INTERFACE:${CUDAQX_QEC_INCLUDE_DIR}>
     $<BUILD_INTERFACE:${LLVM_INCLUDE_DIRS}>
     $<INSTALL_INTERFACE:${CUDAQ_INCLUDE_DIR}>
@@ -245,7 +244,7 @@ target_link_options(cudaq-qec-realtime-decoding PRIVATE
 )
 
 target_link_libraries(cudaq-qec-realtime-decoding
-  PUBLIC 
+  PUBLIC
     cudaq-qec-decoders
   PRIVATE
     LLVMSupport

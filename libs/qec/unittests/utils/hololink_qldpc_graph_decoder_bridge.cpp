@@ -6,14 +6,10 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
-// The per-round device-graph scheduler implementation below requires the
-// 0.16-era cuda-quantum realtime dispatch-graph API (see
-// CUDAQ_REALTIME_FOR_0_16 in libs/qec/lib/realtime/CMakeLists.txt).  Against
-// an older cuda-quantum realtime, the #else branch compiles the previous
-// (v0.6.0) HOST_LOOP full-window implementation of this bridge instead.
-// TEMPORARY: remove the #else branch (and this guard) once the minimum
-// supported CUDA-Q provides the dispatch-graph API.
-#if defined(CUDAQ_REALTIME_FOR_0_16)
+// The per-round device-graph scheduler implementation below requires
+// cuda-quantum's graph-launch engine. When that capability is absent, the
+// #else branch compiles the retained HOST_LOOP full-window bridge instead.
+#if defined(CUDAQ_REALTIME_HAS_GRAPH_LAUNCH_ENGINE)
 
 /// @file hololink_qldpc_graph_decoder_bridge.cpp
 /// @brief QLDPC Relay-BP decoder bridge: Hololink GPU-RoCE ring <-> the
@@ -483,7 +479,9 @@ int main(int argc, char *argv[]) {
   return 0;
 }
 
-#else // CUDAQ_REALTIME_FOR_0_16
+#else // CUDAQ_REALTIME_HAS_GRAPH_LAUNCH_ENGINE
+
+#include "../realtime/qec_graph_decode_test/relay_bp_host_loop_params.h"
 
 /// @file hololink_qldpc_graph_decoder_bridge.cpp
 /// @brief QLDPC BP decoder bridge adapter using CPU-launched CUDA graph
@@ -574,7 +572,7 @@ int main(int argc, char *argv[]) {
     return 1;
 
   auto mdc = cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(
-      yaml_str);
+      test_realtime_qldpc::relay_bp_host_loop_config_yaml(yaml_str));
   if (mdc.decoders.empty()) {
     std::cerr << "ERROR: No decoders found in config" << std::endl;
     return 1;
@@ -594,7 +592,7 @@ int main(int argc, char *argv[]) {
       H_tensor.at({r, static_cast<std::size_t>(h_col_idx[j])}) = 1;
 
   // ---- Create decoder ----
-  auto params = dec.decoder_custom_args_to_heterogeneous_map();
+  auto params = test_realtime_qldpc::relay_bp_host_loop_params(yaml_str);
   auto decoder = cudaq::qec::decoder::get("nv-qldpc-decoder", H_tensor, params);
   if (!decoder) {
     std::cerr << "ERROR: Failed to create nv-qldpc-decoder" << std::endl;
@@ -669,4 +667,4 @@ int main(int argc, char *argv[]) {
   return cudaq::realtime::bridge_run(config);
 }
 
-#endif // CUDAQ_REALTIME_FOR_0_16
+#endif // CUDAQ_REALTIME_HAS_GRAPH_LAUNCH_ENGINE

@@ -298,10 +298,10 @@ Expected output:
 .. code-block:: text
 
    [==========] Running 1 test from 1 test suite.
-   [----------] 1 test from RealtimeQLDPCGraphDecodingTest
-   [ RUN      ] RealtimeQLDPCGraphDecodingTest.DispatchHostLoopAllShots
+   [----------] 1 test from GraphDecodeTest
+   [ RUN      ] GraphDecodeTest.DecodesAllSyndromes
    ...
-   [       OK ] RealtimeQLDPCGraphDecodingTest.DispatchHostLoopAllShots (XXX ms)
+   [       OK ] GraphDecodeTest.DecodesAllSyndromes (XXX ms)
    [==========] 1 test from 1 test suite ran.
    [  PASSED  ] 1 test.
 
