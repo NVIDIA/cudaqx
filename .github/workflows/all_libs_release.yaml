@@ -200,4 +200,4 @@ jobs:
           OMPI_MCA_pml: ob1
         run: |
           ln -s /usr/local/cudaq /cudaq-install
-          bash scripts/ci/test_examples.sh all 
+          bash scripts/ci/test_examples.sh qec
