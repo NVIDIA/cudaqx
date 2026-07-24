@@ -38,8 +38,8 @@ else
 fi
 
 CURRENT_ARCH=$(uname -m)
-PY_TARGETS=("nvidia" "nvidia --option fp64", "qpp-cpu")
-CPP_TARGETS=("nvidia" "nvidia --target-option fp64", "qpp-cpu")
+PY_TARGETS=("nvidia" "nvidia --option fp64" "qpp-cpu")
+CPP_TARGETS=("nvidia" "nvidia --target-option fp64" "qpp-cpu")
 cuda_major=$(echo ${CUDA_VERSION} | cut -d '.' -f 1)
 cuda_minor=$(echo ${CUDA_VERSION} | cut -d '.' -f 2)
 cuda_no_dot="${cuda_major}${cuda_minor}"
@@ -54,10 +54,12 @@ run_python_tests() {
     docker exec ${container_name} bash -c "\
         python3 -m pip install pytest --user"
 
-    # Clone repository and run tests with specific target
+    # Clone repository and run tests with specific target.
+    # chromobius reference data is not packaged in the image (that test is
+    # covered in CI), so skip it here.
     docker exec ${container_name} bash -c "\
         cd /home/cudaq && \
-        python3 -m pytest /home/cudaq/cudaqx_pytests -v"
+        python3 -m pytest /home/cudaq/cudaqx_pytests -v -k 'not chromobius'"
 
     local test_result=$?
     if [ ${test_result} -ne 0 ]; then
