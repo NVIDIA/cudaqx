@@ -13,6 +13,7 @@ classDiagram
         +stop()
         +create_injector() ring_buffer_injector
         +complete_deferred(slot)
+        +complete_deferred(slot, request_id)
         +ringbuffer_bases() ring_buffer_bases
         +stats() Stats
     }
@@ -198,8 +199,8 @@ sequenceDiagram
     PMW->>PMW: read deferred_outputs[S]: logical_pred + residual detectors
     PMW->>PMW: PyMatching MWPM decode over full H matrix
     PMW->>PMW: project corrections onto observable O
-    PMW->>RB: write RPCResponse + DecodeResponse to ring buffer slot
-    PMW->>RB: complete_deferred(S): tx_flags S .store slot_host_addr, release
+    PMW->>RB: write RPCResponse + one-byte correction to TX response slot
+    PMW->>RB: complete_deferred(S): tx_flags S .store TX device-slot addr, release
 
     Note over Prod,App: === PHASE 6: Completion ===
 
@@ -212,6 +213,11 @@ sequenceDiagram
     Note over Prod: Slot S now available for next submission
 ```
 
+### External-Ring Completion
+
+The sequence above describes the internally allocated ring. With a caller-owned external ring, the dispatcher sets `skip_tx_markers`, no pipeline consumer thread is created, and the external transport owns TX flag clearing. A deferred worker writes to `cpu_stage_context::response_buffer` and calls `complete_deferred(slot, request_id)`. That call publishes the TX device-slot pointer with release ordering, increments `Stats.completed`, and invokes the completion callback on the completing thread.
+
+`Stats.submitted` remains zero in external mode because the FPGA/Hololink transport, rather than `ring_buffer_injector`, owns submission.
 ## 4. Atomic Variables Reference
 
 Every atomic used in the pipeline, its scope, who writes it, who reads it,
@@ -276,7 +282,7 @@ stateDiagram-v2
         GPU processing + predecoder worker + PyMatch queue
     end note
 
-    DISPATCHED --> TX_READY : PyMatch worker calls complete_deferred → tx_flags = slot_host_addr
+    DISPATCHED --> TX_READY : PyMatch worker calls complete_deferred → tx_flags = TX device-slot address
     note right of TX_READY
         slot_occupied = 1, rx_flags = 0, tx_flags = valid addr
         Result available for consumer
@@ -443,9 +449,9 @@ sequenceDiagram
 
     PMW->>PMQ: pop(PyMatchJob)
     PMW->>PMW: PyMatching MWPM decode
-    PMW->>PMW: Write RPC response to ring buffer
+    PMW->>PMW: Write RPC response to TX response buffer
     PMW->>Pipeline: complete_deferred(slot)
-    Pipeline->>Pipeline: tx_flags[slot].store(host_addr, release)
+    Pipeline->>Pipeline: tx_flags[slot].store(TX device-slot addr, release)
     Note over Pipeline: Slot S now READY<br>Consumer can harvest
 ```
 
