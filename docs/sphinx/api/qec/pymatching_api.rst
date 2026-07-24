@@ -8,8 +8,8 @@
     edge whose weight is derived from the error prior.
 
     .. note::
-      It is required to create decoders with the `get_decoder` API from the
-      CUDA-QX extension points API, such as
+      To use the decoder, use the `get_decoder` API with a parity-check matrix
+      as the decoder input:
 
       .. tab:: Python
 

@@ -7,9 +7,8 @@
     predicts logical observable flips directly.
 
     .. note::
-      It is required to create decoders with the `get_decoder` API from the
-      CUDA-QX extension points API, passing the Stim DEM **text** (not a
-      parity-check matrix) as the decoder input:
+      To use the decoder, use the `get_decoder` API with the Stim DEM text as
+      the decoder input:
 
       .. tab:: Python
 

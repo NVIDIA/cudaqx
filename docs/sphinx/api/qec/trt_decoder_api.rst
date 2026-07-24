@@ -159,5 +159,6 @@
 
         - `cuda_device_id` (int): Zero-based CUDA device ordinal on which to
           construct the decoder and run every decode. Must be ``>= 0`` and less
-          than the number of visible GPUs. When omitted, the current/default CUDA
-          device is used. Introduced in 0.7.0.
+          than the number of visible GPUs. When omitted, the decoder is not
+          pinned to a specific device and runs on the default device (GPU 0).
+          Introduced in 0.7.0.
