@@ -25,9 +25,15 @@ The configuration API enables setting up decoders before circuit execution. Deco
 .. doxygenstruct:: cudaq::qec::realtime::graph_resources
    :members:
 
-.. doxygenenum:: cudaq::qec::decoding::config::DecoderTransport
+.. doxygenenum:: cudaq::qec::decoding::config::DecoderDispatch
 
 .. doxygenstruct:: cudaq::qec::decoding::config::decoder_config
+   :members:
+
+.. doxygenstruct:: cudaq::qec::decoding::config::transport_shape_override
+   :members:
+
+.. doxygenstruct:: cudaq::qec::decoding::config::transport_config
    :members:
 
 .. doxygenclass:: cudaq::qec::decoding::config::multi_decoder_config

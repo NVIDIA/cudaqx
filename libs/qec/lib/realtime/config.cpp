@@ -262,13 +262,13 @@ struct CustomMappingTraits<schema_binding> {
 };
 
 template <>
-struct ScalarEnumerationTraits<cudaq::qec::decoding::config::DecoderTransport> {
+struct ScalarEnumerationTraits<cudaq::qec::decoding::config::DecoderDispatch> {
   static void
-  enumeration(IO &io, cudaq::qec::decoding::config::DecoderTransport &value) {
-    io.enumCase(value, "cpu_roce",
-                cudaq::qec::decoding::config::DecoderTransport::cpu_roce);
-    io.enumCase(value, "gpu_roce",
-                cudaq::qec::decoding::config::DecoderTransport::gpu_roce);
+  enumeration(IO &io, cudaq::qec::decoding::config::DecoderDispatch &value) {
+    io.enumCase(value, "host",
+                cudaq::qec::decoding::config::DecoderDispatch::host);
+    io.enumCase(value, "device_graph",
+                cudaq::qec::decoding::config::DecoderDispatch::device_graph);
   }
 };
 
@@ -278,8 +278,8 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
                       cudaq::qec::decoding::config::decoder_config &config) {
     io.mapRequired("id", config.id);
     io.mapRequired("type", config.type);
-    io.mapOptional("transport", config.transport,
-                   cudaq::qec::decoding::config::DecoderTransport::cpu_roce);
+    io.mapOptional("dispatch", config.dispatch,
+                   cudaq::qec::decoding::config::DecoderDispatch::host);
     io.mapOptional("cuda_device_id", config.cuda_device_id);
     io.mapRequired("block_size", config.block_size);
     io.mapRequired("syndrome_size", config.syndrome_size);
@@ -385,12 +385,36 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
   }
 };
 
+// transport section mapping traits
+template <>
+struct MappingTraits<cudaq::qec::decoding::config::transport_shape_override> {
+  static void
+  mapping(IO &io,
+          cudaq::qec::decoding::config::transport_shape_override &override_) {
+    io.mapOptional("provider", override_.provider, std::string());
+    io.mapOptional("args", override_.args);
+  }
+};
+
+template <>
+struct MappingTraits<cudaq::qec::decoding::config::transport_config> {
+  static void
+  mapping(IO &io, cudaq::qec::decoding::config::transport_config &transport) {
+    io.mapOptional("provider", transport.provider, std::string());
+    io.mapOptional("args", transport.args);
+    io.mapOptional("device_graph", transport.device_graph,
+                   cudaq::qec::decoding::config::transport_shape_override());
+  }
+};
+
 // multi_decoder_config mapping traits
 template <>
 struct MappingTraits<cudaq::qec::decoding::config::multi_decoder_config> {
   static void
   mapping(IO &io, cudaq::qec::decoding::config::multi_decoder_config &config) {
     io.mapRequired("decoders", config.decoders);
+    io.mapOptional("transport", config.transport,
+                   cudaq::qec::decoding::config::transport_config());
   }
 };
 
@@ -577,8 +601,8 @@ std::string decoder_config_json_schema() {
   llvm::json::Object config_properties{
       {"id", llvm::json::Object{{"type", "integer"}}},
       {"type", llvm::json::Object{{"type", "string"}}},
-      {"transport",
-       llvm::json::Object{{"enum", llvm::json::Array{"cpu_roce", "gpu_roce"}}}},
+      {"dispatch",
+       llvm::json::Object{{"enum", llvm::json::Array{"host", "device_graph"}}}},
       {"cuda_device_id",
        llvm::json::Object{{"type", "integer"}, {"minimum", 0}}},
       {"block_size", llvm::json::Object{{"type", "integer"}, {"minimum", 0}}},
@@ -627,6 +651,34 @@ std::string decoder_config_json_schema() {
        llvm::json::Object{{"type", "array"},
                           {"items", llvm::json::Object{{"type", "integer"},
                                                        {"minimum", -1}}}}},
+      // Server-level transport section (see transport_config /
+      // transport_shape_override); the wire is deployment config and lives
+      // outside the decoders list.
+      {"transport_shape_override",
+       llvm::json::Object{
+           {"type", "object"},
+           {"properties",
+            llvm::json::Object{
+                {"provider", llvm::json::Object{{"type", "string"}}},
+                {"args",
+                 llvm::json::Object{
+                     {"type", "array"},
+                     {"items", llvm::json::Object{{"type", "string"}}}}}}},
+           {"additionalProperties", false}}},
+      {"transport_config",
+       llvm::json::Object{
+           {"type", "object"},
+           {"properties",
+            llvm::json::Object{
+                {"provider", llvm::json::Object{{"type", "string"}}},
+                {"args",
+                 llvm::json::Object{
+                     {"type", "array"},
+                     {"items", llvm::json::Object{{"type", "string"}}}}},
+                {"device_graph",
+                 llvm::json::Object{
+                     {"$ref", "#/$defs/transport_shape_override"}}}}},
+           {"additionalProperties", false}}},
       {"decoder_config",
        llvm::json::Object{
            {"type", "object"},
@@ -656,7 +708,9 @@ std::string decoder_config_json_schema() {
             llvm::json::Object{
                 {"type", "array"},
                 {"items",
-                 llvm::json::Object{{"$ref", "#/$defs/decoder_config"}}}}}}},
+                 llvm::json::Object{{"$ref", "#/$defs/decoder_config"}}}}},
+           {"transport",
+            llvm::json::Object{{"$ref", "#/$defs/transport_config"}}}}},
       {"required", llvm::json::Array{"decoders"}},
       {"additionalProperties", false},
       {"$defs", std::move(defs)},

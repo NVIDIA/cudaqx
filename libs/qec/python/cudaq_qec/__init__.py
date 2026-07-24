@@ -118,6 +118,9 @@ pcm_to_sparse_vec = qecrt.pcm_to_sparse_vec
 
 multi_decoder_config = qecrt.config.multi_decoder_config
 decoder_config = qecrt.config.decoder_config
+decoder_dispatch = qecrt.config.decoder_dispatch
+transport_config = qecrt.config.transport_config
+transport_shape_override = qecrt.config.transport_shape_override
 configure_decoders_from_file = qecrt.config.configure_decoders_from_file
 configure_decoders_from_str = qecrt.config.configure_decoders_from_str
 finalize_decoders = qecrt.config.finalize_decoders
