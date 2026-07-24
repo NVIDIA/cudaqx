@@ -260,11 +260,6 @@ if (GPU_ROCE_TRANSCEIVER_LIB AND CUDAQ_REALTIME_INCLUDE_DIR AND
       ${HOLOLINK_COMMON_LIB}
       ${CUDAQ_REALTIME_LIBRARY}
       cudaq-qec-realtime-decoding
-      # Device-graph scheduler path: absorb the proprietary cudevice archive
-      # WHOLE so the enqueue/get/reset DEVICE_CALL handlers + register/populate
-      # shims merge into this exe's cubin (device-linked with the dispatch
-      # kernel) and stay in the dynamic table for the plugin's dlsym lookups.
-      $<$<TARGET_EXISTS:cudaq-qec-realtime-cudevice-proprietary>:$<LINK_LIBRARY:WHOLE_ARCHIVE,cudaq-qec-realtime-cudevice-proprietary>>
       $<$<BOOL:${_CUDAQ_LIBRARY}>:${_CUDAQ_LIBRARY}>
       $<$<BOOL:${_NVQIR_LIBRARY}>:${_NVQIR_LIBRARY}>
       CUDA::cudart
@@ -279,10 +274,6 @@ if (GPU_ROCE_TRANSCEIVER_LIB AND CUDAQ_REALTIME_INCLUDE_DIR AND
 
   target_link_options(hololink_qldpc_graph_decoder_bridge PRIVATE
     "LINKER:--allow-shlib-undefined"
-    # Export the proprietary register/populate C-ABI shims so the dlopen'd
-    # nv-qldpc plugin (capture_decode_graph) and this bridge resolve them via
-    # dlsym(RTLD_DEFAULT, ...).
-    "LINKER:--export-dynamic"
   )
 
   if (holoscan_FOUND)

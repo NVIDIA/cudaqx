@@ -107,10 +107,11 @@ Configure and build:
 
    cmake -S . -B build \
      -DCMAKE_BUILD_TYPE=Release \
-     -DCMAKE_CUDA_COMPILER=/usr/local/cuda-13.0/bin/nvcc \
+     -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc \
      -DCUDAQ_DIR=/usr/local/cudaq/lib/cmake/cudaq \
      -DCUDAQ_REALTIME_ROOT=/tmp/cudaq-realtime \
      -DCUDAQ_QEC_BUILD_TRT_DECODER=ON \
+     -DCUDAQX_QEC_ENABLE_REALTIME_PIPELINE=ON \
      -DCUDAQX_ENABLE_LIBS=qec \
      -DCUDAQX_INCLUDE_TESTS=ON \
      -DCUDAQX_QEC_INCLUDE_TESTS=ON

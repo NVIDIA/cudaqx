@@ -370,9 +370,10 @@ Use the simulation backend for local development and testing:
       cudaq.set_target("stim")  # Or other simulator
       qec.configure_decoders_from_file("config.yaml")
       
-      # Run circuit with noise model
-      results = cudaq.run(my_circuit, shots_count=100, 
-                         noise_model=cudaq.NoiseModel())
+      # Create an empty noise model; add noise channels as needed
+      noise_model = cudaq.NoiseModel()
+      results = cudaq.run(my_circuit, shots_count=100,
+                         noise_model=noise_model)
 
 .. tab:: C++
 
@@ -427,11 +428,13 @@ Use the Quantinuum backend for hardware or emulation:
 
       # Compile for Quantinuum
       nvq++ --target quantinuum --quantinuum-machine Helios-1 \
+            --quantinuum-extra-payload-provider decoder      \
             my_circuit.cpp -lcudaq-qec \
             -lcudaq-qec-decoders \
             -lcudaq-qec-realtime-decoding \
-            -lcudaq-qec-realtime-decoding-quantinuum
-      
+            -lcudaq-qec-realtime-decoding-quantinuum \
+            -Wl,--export-dynamic
+
       ./a.out
 
 Compilation and Execution Examples
@@ -547,27 +550,28 @@ Python Execution
 .. code-block:: bash
 
    # Generate a decoder configuration file
-   python3 surface_code-1.py --distance 3 --save_dem config.yaml
+   python3 surface_code_1.py --distance 3 --save_dem config.yaml
    # Run the circuit with the decoder configuration
-   python3 surface_code-1.py --distance 3 --load_dem config.yaml --num_shots 1000
+   python3 surface_code_1.py --distance 3 --load_dem config.yaml --num_shots 1000
 
 
 **Quantinuum Backend (Hardware)**
 
 .. code-block:: bash
 
-   python3 surface_code-1.py --distance 3 --load_dem config.yaml --num_shots 1000 --target quantinuum --machine-name Helios-1
+   python3 surface_code_1.py --distance 3 --load_dem config.yaml --num_shots 1000 --target quantinuum --machine_name Helios-1 --emulate false --project_id <project-id>
 
 **Key Points:**
 
 - Use real machine names (check Quantinuum portal for available machines)
+- ``--project_id``: Specify the Quantinuum project ID used for the hardware submission.
 - Reduce shot count for hardware experiments (hardware time is expensive)
 
 **Emulated Quantinuum Compilation Workflow**
 
 .. code-block:: bash
 
-   python3 surface_code-1.py --distance 3 --load_dem config.yaml --num_shots 1000 --target quantinuum --emulate
+   python3 surface_code_1.py --distance 3 --load_dem config.yaml --num_shots 1000 --target quantinuum --emulate true
 
 **Key Points:**
 
@@ -591,7 +595,7 @@ Given that the user follows the structure of the examples provided, where each e
                     --save_dem config_d3.yaml --num_rounds 12
 
    ## Python
-   python surface_code-1.py --distance 3 --num_shots 1000 --p_cnot 0.001 \
+   python3 surface_code_1.py --distance 3 --num_shots 1000 --p_cnot 0.001 \
                             --save_dem config_d3.yaml --num_rounds 12
 
    # Phase 2: Run with Real-Time Decoding
@@ -645,8 +649,8 @@ They are valid both for python and C++ applications, however, they must be set b
 
 1. **Missing libraries**: Ensure all ``-lcudaq-qec-*`` libraries are linked
 2. **Wrong backend library**: Use ``-simulation`` for Stim, ``-quantinuum`` for Quantinuum
-3. **Missing** ``--export-dynamic`` **flag**: Required for Quantinuum targets
-4. **Wrong target flags**: ``--emulate`` with ``Helios-Fake`` for emulation, remove for hardware
+3. **Missing** ``-Wl,--export-dynamic`` **flag**: Required for Quantinuum targets
+4. **Wrong target flags**: Use ``--emulate true`` for emulation and ``--emulate false`` with ``--project_id`` for hardware
 
 **Common Runtime Issues:**
 
