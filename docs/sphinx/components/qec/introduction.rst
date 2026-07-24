@@ -505,6 +505,18 @@ grid; use :ref:`stabilizer_grid <qec_stabilizer_grid_python>` or
 
 You must pass ``distance`` when constructing the code; there is no default.
 
+**Orientation**
+
+The surface code accepts an optional ``orientation`` string that selects which
+Pauli type occupies the bulk checkerboard and which boundary pair carries the
+X- versus Z-type stabilizers. The first character (``X`` or ``Z``) sets the bulk
+type; the second character (``H`` or ``V``) sets the boundary placement. Valid
+values are ``"XV"``, ``"XH"``, ``"ZV"``, and ``"ZH"`` (aliases ``"O1"``, ``"O2"``,
+``"O3"``, and ``"O4"`` respectively; case-insensitive). The default is ``"ZH"``,
+which reproduces the layout described above. The logical observables and the CNOT
+extraction schedule are orientation-aware, so changing the orientation changes the
+returned stabilizers, observables, and measurement schedule consistently.
+
 The :ref:`stabilizer_grid <qec_stabilizer_grid_python>` helper documents how
 stabilizers and data qubits are indexed on the grid and provides helpers to
 print the layout. **Python:** :ref:`cudaq_qec.stabilizer_grid <qec_stabilizer_grid_python>` — **C++:**
@@ -541,7 +553,10 @@ Usage:
         import cudaq_qec as qec
 
         # Rotated surface code; distance is required
-        code = qec.get_code('surface_code', distance=3)
+        code = qec.get_code('surface_code', distance=3)  # default orientation "ZH"
+
+        # Optionally select an orientation (one of "XV", "XH", "ZV", "ZH")
+        code_xh = qec.get_code('surface_code', distance=3, orientation='XH')
 
         stabilizers = code.get_stabilizers()
         parity = code.get_parity()
@@ -552,6 +567,12 @@ Usage:
 
         auto code = cudaq::qec::get_code(
             "surface_code", cudaqx::heterogeneous_map{{"distance", 3}});
+
+        // Optionally select an orientation (one of "XV", "XH", "ZV", "ZH")
+        auto code_xh = cudaq::qec::get_code(
+            "surface_code", cudaqx::heterogeneous_map{
+                                {"distance", 3},
+                                {"orientation", std::string("XH")}});
 
         auto stabilizers = code->get_stabilizers();
         auto parity = code->get_parity();
