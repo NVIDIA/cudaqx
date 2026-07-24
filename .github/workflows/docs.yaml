@@ -22,9 +22,9 @@ on:
   workflow_dispatch:
     inputs:
       deploy_docs:
-        description: 'Deploy docs to GitHub Pages. Deployment only runs on main.'
+        description: 'Deploy docs to GitHub Pages. Deployment only runs on releases/vX.Y.Z branches.'
         type: boolean
-        default: true
+        default: false
         required: false
   push:
     branches:
@@ -41,10 +41,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  setup:
+    name: Setup
+    runs-on: ubuntu-latest
+    outputs:
+      container: ${{ steps.set-container.outputs.container }}
+    steps:
+      - name: Set container image
+        id: set-container
+        run: |
+          if [[ "$GITHUB_REF" =~ ^refs/heads/releases/v(.+)$ ]]; then
+            echo "container=ghcr.io/nvidia/cudaqx-dev:${BASH_REMATCH[1]}-amd64-cu12.6" >> $GITHUB_OUTPUT
+          else
+            echo "container=ghcr.io/nvidia/cudaqx-dev:latest-amd64-cu12.6" >> $GITHUB_OUTPUT
+          fi
+
   build:
     name: Build
+    needs: setup
     runs-on: ${{ startsWith(github.repository, 'NVIDIA/cudaqx') && 'linux-amd64-cpu8' || 'ubuntu-latest' }}
-    container: ghcr.io/nvidia/cuda-quantum-devcontainer:amd64-cu12.6-gcc12-main
+    container: ${{ needs.setup.outputs.container }}
     permissions:
       actions: write
       contents: read
@@ -113,24 +129,21 @@ jobs:
         with:
           path: build/docs/build/
 
-  # Disable for now, re-enable closer to release.
-  # deploy:
-  #   name: Deploy latest docs
-  #   if: |
-  #     github.ref == 'refs/heads/main' &&
-  #     (
-  #       github.event_name == 'push' ||
-  #       inputs.deploy_docs == true
-  #     )
-  #   environment:
-  #     name: github-pages
-  #     url: ${{ steps.deployment.outputs.page_url }}
-  #   runs-on: ubuntu-latest
-  #   permissions:
-  #     pages: write
-  #     id-token: write
-  #   needs: build
-  #   steps:
-  #     - name: Deploy to GitHub Pages
-  #       id: deployment
-  #       uses: actions/deploy-pages@v4
+  deploy:
+    name: Deploy latest docs
+    if: |
+      github.event_name == 'workflow_dispatch' &&
+      inputs.deploy_docs == true &&
+      startsWith(github.ref, 'refs/heads/releases/v')
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -154,11 +154,38 @@ void bindDecodingConfig(nb::module_ &mod) {
   auto mod_cfg =
       qecmod.def_submodule("config", "Realtime decoding configuration");
 
+  // Per-decoder dispatch shape (host thread vs. GPU device-graph scheduler).
+  nb::enum_<DecoderDispatch>(mod_cfg, "decoder_dispatch",
+                             "How a decoder's RPCs are executed.")
+      .value("host", DecoderDispatch::host)
+      .value("device_graph", DecoderDispatch::device_graph);
+
+  // transport_shape_override: the wire override applied to one dispatch
+  // shape's rings (the `device_graph` member of transport_config).
+  nb::class_<transport_shape_override>(mod_cfg, "transport_shape_override")
+      .def(nb::init<>())
+      .def_rw("provider", &transport_shape_override::provider)
+      .def_rw("args", &transport_shape_override::args)
+      .def("__eq__", [](const transport_shape_override &a,
+                        const transport_shape_override &b) { return a == b; });
+
+  // transport_config: the server-level transport section (the wire is
+  // deployment config, so it lives outside the decoders list).
+  nb::class_<transport_config>(mod_cfg, "transport_config")
+      .def(nb::init<>())
+      .def_rw("provider", &transport_config::provider)
+      .def_rw("args", &transport_config::args)
+      .def_rw("device_graph", &transport_config::device_graph)
+      .def("__eq__", [](const transport_config &a, const transport_config &b) {
+        return a == b;
+      });
+
   // decoder_config
   nb::class_<config::decoder_config>(mod_cfg, "decoder_config")
       .def(nb::init<>())
       .def_rw("id", &decoder_config::id)
       .def_rw("type", &decoder_config::type)
+      .def_rw("dispatch", &decoder_config::dispatch)
       .def_rw("cuda_device_id", &decoder_config::cuda_device_id)
       .def_rw("block_size", &decoder_config::block_size)
       .def_rw("syndrome_size", &decoder_config::syndrome_size)
@@ -207,6 +234,7 @@ void bindDecodingConfig(nb::module_ &mod) {
   nb::class_<multi_decoder_config>(mod_cfg, "multi_decoder_config")
       .def(nb::init<>())
       .def_rw("decoders", &multi_decoder_config::decoders)
+      .def_rw("transport", &multi_decoder_config::transport)
       .def("validate_custom_args", &multi_decoder_config::validate_custom_args,
            "Validate every decoder's custom args against its registered "
            "parameter schema (see decoder_config.validate_custom_args).")

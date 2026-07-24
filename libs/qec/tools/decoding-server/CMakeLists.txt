@@ -63,7 +63,7 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-decoding-server-cqr)
     # the core DecodingServer API, so compile it whenever the bridge API is
     # available -- machines without the proprietary archive (CI in
     # particular) still build the branch; at runtime it fails with a clear
-    # "GPU RoCE support is not linked into this binary" error from
+    # "the device-graph component is not linked into this binary" error from
     # make_transport.
     if(CUDAQ_QEC_DEVICE_GRAPH_AVAILABLE)
       target_compile_definitions(decoding_server PRIVATE
@@ -102,8 +102,9 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-decoding-server-cqr)
           "install prefix and re-run CMake.")
       endif()
       target_link_libraries(decoding_server PRIVATE
-        # WHOLE_ARCHIVE: DecodingServer reaches gpu_roce through a weak
-        # factory symbol, and a weak reference does not pull archive members.
+        # WHOLE_ARCHIVE: DecodingServer reaches the device-graph transceiver
+        # through a weak factory symbol, and a weak reference does not pull
+        # archive members.
         $<LINK_LIBRARY:WHOLE_ARCHIVE,cudaq-qec-decoding-server-device-graph>
         ${CUDAQ_REALTIME_DISPATCH_LIBRARY}
         $<LINK_LIBRARY:WHOLE_ARCHIVE,cudaq-qec-realtime-cudevice-proprietary>

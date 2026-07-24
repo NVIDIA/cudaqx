@@ -6,7 +6,8 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
-// Strong definition of the GPU RoCE factory that DecodingServer.cpp declares
+// Strong definition of the device-graph transceiver factory that
+// DecodingServer.cpp declares
 // weakly.  This translation unit lives in
 // cudaq-qec-decoding-server-device-graph (NOT the core library) so that only
 // binaries linking that component carry the DOCA / Hololink / CUDA-driver

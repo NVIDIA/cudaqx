@@ -35,11 +35,13 @@
 #include "cudaq.h"
 #include "cudaq/qec/code.h"
 #include "cudaq/qec/decoder.h"
+#include "cudaq/qec/decoder_config_schema.h"
 #include "cudaq/qec/experiments.h"
 #include "cudaq/qec/noise_model.h"
 #include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/realtime/decoding.h"
 #include "cudaq/qec/realtime/decoding_config.h"
+#include <algorithm>
 #include <cstdlib>
 #include <fstream>
 #include <mutex>
@@ -127,6 +129,9 @@ struct run_options {
   int sw_window_size =
       -1; // sliding_window size in rounds; defaults to distance
   int sw_step_size = 1;
+  std::string sw_inner_decoder = "multi_error_lut";
+  bool sw_inner_decoder_set = false;
+  std::vector<std::string> decoder_params; // --param key=value overrides
   bool save_dem = false;
   bool load_dem = false;
   std::string dem_filename;
@@ -158,6 +163,114 @@ syndrome_capture_state g_capture;
 
 } // namespace
 
+// Return the custom-args map for a named decoder given the DEM error rates,
+// with any --param key=value overrides applied on top. The registered decoder
+// schema drives type coercion for each override.
+static cudaqx::heterogeneous_map
+decoder_args(const std::string &type, const std::vector<double> &error_rates,
+             const std::vector<std::string> &params = {}) {
+  cudaqx::heterogeneous_map args;
+  if (type == "nv-qldpc-decoder") {
+    args.insert("use_sparsity", true);
+    args.insert("error_rate_vec", error_rates);
+    args.insert("max_iterations", 50);
+    args.insert("bp_method", 3);   // min-sum + dmem (required for relay)
+    args.insert("composition", 1); // sequential relay
+    args.insert("gamma0", 0.0);
+    args.insert("clip_value", 200.0);
+    args.insert("repeatable", true);
+    cudaqx::heterogeneous_map srelay_args;
+    srelay_args.insert("pre_iter", std::size_t{5});
+    srelay_args.insert("num_sets", std::size_t{10});
+    srelay_args.insert("stopping_criterion", "All");
+    srelay_args.insert("stop_nconv", std::size_t{1});
+    args.insert("srelay_config", srelay_args);
+    args.insert("gamma_dist", std::vector<double>{0.1, 0.2});
+  } else if (type == "pymatching") {
+    args.insert("merge_strategy", "smallest_weight");
+    args.insert("error_rate_vec", error_rates);
+  } else if (type == "multi_error_lut") {
+    args.insert("lut_error_depth", 2);
+  } else {
+    throw std::runtime_error("Unknown decoder type: " + type);
+  }
+  if (params.empty())
+    return args;
+  namespace cfg = cudaq::qec::decoding::config;
+  const auto *schema = cfg::find_decoder_schema(type);
+  if (!schema)
+    throw std::runtime_error("No parameter schema registered for decoder '" +
+                             type + "'; --param overrides unavailable");
+  for (const auto &kv : params) {
+    const auto eq = kv.find('=');
+    if (eq == std::string::npos)
+      throw std::runtime_error("--param requires key=value format: " + kv);
+    const std::string key = kv.substr(0, eq);
+    const std::string val = kv.substr(eq + 1);
+    const cfg::param_spec *spec = nullptr;
+    for (const auto &p : schema->params)
+      if (p.key == key) {
+        spec = &p;
+        break;
+      }
+    if (!spec)
+      throw std::runtime_error("Unknown parameter '" + key + "' for decoder '" +
+                               type + "'");
+    // Parse s with fn, reject trailing garbage, rethrow anything as a
+    // user-friendly message naming the key. `throw 0` is the trailing-garbage
+    // sentinel; both it and parser exceptions are caught by catch(...).
+    auto coerce = [&](const std::string &s, auto fn) {
+      try {
+        std::size_t n;
+        auto v = fn(s, &n);
+        if (n != s.size())
+          throw 0;
+        return v;
+      } catch (...) {
+        throw std::runtime_error("--param '" + key + "': invalid value '" +
+                                 val + "'");
+      }
+    };
+    switch (spec->kind) {
+    case cfg::param_kind::f64:
+      args.insert(
+          key, coerce(val, [](auto &s, auto *p) { return std::stod(s, p); }));
+      break;
+    case cfg::param_kind::int32:
+      args.insert(
+          key, coerce(val, [](auto &s, auto *p) { return std::stoi(s, p); }));
+      break;
+    case cfg::param_kind::uint64:
+      args.insert(key, (std::size_t)coerce(val, [](auto &s, auto *p) {
+                    return std::stoull(s, p);
+                  }));
+      break;
+    case cfg::param_kind::boolean:
+      if (val != "true" && val != "false" && val != "1" && val != "0")
+        throw std::runtime_error("--param '" + key + "': invalid value '" +
+                                 val + "'");
+      args.insert(key, val == "true" || val == "1");
+      break;
+    case cfg::param_kind::string:
+      args.insert(key, val);
+      break;
+    case cfg::param_kind::f64_vec: {
+      std::vector<double> vec;
+      std::istringstream ss(val);
+      std::string tok;
+      while (std::getline(ss, tok, ','))
+        vec.push_back(
+            coerce(tok, [](auto &s, auto *p) { return std::stod(s, p); }));
+      args.insert(key, vec);
+      break;
+    }
+    default:
+      throw std::runtime_error("--param: unsupported type for '" + key + "'");
+    }
+  }
+  return args;
+}
+
 // Build one decoder config per logical qubit from the decoder_inputs produced
 // by `decoder_context_from_memory_circuit(...).full_component()`. All decoders
 // share the same DEM (`H_sparse`), observables (`O_sparse`) and
@@ -183,26 +296,7 @@ build_multi_decoder_config(const cudaq::qec::decoder_inputs &inputs,
     dc.O_sparse = cudaq::qec::pcm_to_sparse_vec(dem.observables_flips_matrix);
     dc.D_sparse = d_sparse;
 
-    if (opts.decoder_type == "nv-qldpc-decoder") {
-      dc.type = "nv-qldpc-decoder";
-      cudaqx::heterogeneous_map nv_args;
-      nv_args.insert("use_sparsity", true);
-      nv_args.insert("error_rate_vec", dem.error_rates);
-      nv_args.insert("max_iterations", 50);
-      nv_args.insert("bp_method", 3);   // min-sum + dmem (required for relay)
-      nv_args.insert("composition", 1); // sequential relay
-      nv_args.insert("gamma0", 0.0);
-      nv_args.insert("clip_value", 200.0);
-      nv_args.insert("repeatable", true);
-      cudaqx::heterogeneous_map srelay_args;
-      srelay_args.insert("pre_iter", std::size_t{5});
-      srelay_args.insert("num_sets", std::size_t{10});
-      srelay_args.insert("stopping_criterion", "All");
-      srelay_args.insert("stop_nconv", std::size_t{1});
-      nv_args.insert("srelay_config", srelay_args);
-      nv_args.insert("gamma_dist", std::vector<double>{0.1, 0.2});
-      dc.decoder_custom_args = nv_args;
-    } else if (opts.decoder_type == "sliding_window") {
+    if (opts.decoder_type == "sliding_window") {
       dc.type = "sliding_window";
       cudaqx::heterogeneous_map sw_args;
       sw_args.insert("window_size", opts.sw_window_size);
@@ -211,23 +305,16 @@ build_multi_decoder_config(const cudaq::qec::decoder_inputs &inputs,
       sw_args.insert("num_boundary_syndromes", num_boundary_syndromes);
       sw_args.insert("straddle_start_round", false);
       sw_args.insert("straddle_end_round", true);
-      sw_args.insert("inner_decoder_name", "multi_error_lut");
+      sw_args.insert("inner_decoder_name", opts.sw_inner_decoder);
       sw_args.insert("error_rate_vec", dem.error_rates);
-      cudaqx::heterogeneous_map inner_lut_args;
-      inner_lut_args.insert("lut_error_depth", 2);
-      sw_args.insert("inner_decoder_params", inner_lut_args);
+      sw_args.insert("inner_decoder_params",
+                     decoder_args(opts.sw_inner_decoder, dem.error_rates,
+                                  opts.decoder_params));
       dc.decoder_custom_args = sw_args;
-    } else if (opts.decoder_type == "pymatching") {
-      dc.type = "pymatching";
-      cudaqx::heterogeneous_map pm_args;
-      pm_args.insert("merge_strategy", "smallest_weight");
-      pm_args.insert("error_rate_vec", dem.error_rates);
-      dc.decoder_custom_args = pm_args;
     } else {
-      dc.type = "multi_error_lut";
-      cudaqx::heterogeneous_map lut_args;
-      lut_args.insert("lut_error_depth", 2);
-      dc.decoder_custom_args = lut_args;
+      dc.type = opts.decoder_type;
+      dc.decoder_custom_args =
+          decoder_args(opts.decoder_type, dem.error_rates, opts.decoder_params);
     }
 
     multi_config.decoders.push_back(dc);
@@ -375,6 +462,43 @@ bool setup_decoders(const cudaq::qec::code &code,
     std::stringstream config_text;
     config_text << config_file.rdbuf();
     auto cfg = config::multi_decoder_config::from_yaml_str(config_text.str());
+
+    // Cross-check the saved syndrome_size against the current code geometry.
+    if (!cfg.decoders.empty()) {
+      const bool is_z_prep = state_prep == cudaq::qec::operation::prep0 ||
+                             state_prep == cudaq::qec::operation::prep1;
+      const std::size_t num_ancx = code.get_num_ancilla_x_qubits();
+      const std::size_t num_ancz = code.get_num_ancilla_z_qubits();
+      const std::size_t num_boundary = is_z_prep ? num_ancz : num_ancx;
+      const std::size_t expected_syndromes =
+          2 * num_boundary + (opts.num_rounds - 1) * (num_ancx + num_ancz);
+      if (cfg.decoders[0].syndrome_size != expected_syndromes)
+        throw std::runtime_error(
+            "Loaded DEM syndrome_size (" +
+            std::to_string(cfg.decoders[0].syndrome_size) +
+            ") does not match current geometry (" +
+            std::to_string(expected_syndromes) +
+            " = 2*num_boundary + (num_rounds-1)*num_stabilizers); "
+            "check --distance and --num_rounds");
+
+      // also cross-check the raw-measurement span: the largest measurement
+      // index in D_sparse, plus one.
+      const auto &D = cfg.decoders[0].D_sparse;
+      if (D.empty())
+        throw std::runtime_error("Loaded DEM has empty D_sparse");
+      const std::size_t loaded_measurements =
+          *std::max_element(D.begin(), D.end()) + 1;
+      const std::size_t expected_measurements =
+          opts.num_rounds * (num_ancx + num_ancz) + code.get_num_data_qubits();
+      if (loaded_measurements != expected_measurements)
+        throw std::runtime_error("Loaded DEM measurement span (" +
+                                 std::to_string(loaded_measurements) +
+                                 ") does not match current geometry (" +
+                                 std::to_string(expected_measurements) +
+                                 " = num_rounds*num_stabilizers + num_data); "
+                                 "check --distance and --num_rounds");
+    }
+
     config::configure_decoders(cfg);
     printf("Loaded decoder config from %s (%zu decoders)\n",
            opts.dem_filename.c_str(), cfg.decoders.size());
@@ -383,7 +507,10 @@ bool setup_decoders(const cudaq::qec::code &code,
 
   // Characterize the DEM and build the decoder configuration. full_component()
   // canonicalizes both stabilizer types (boundary-aware) into decoder_inputs.
-  const bool decompose_errors = (opts.decoder_type == "pymatching");
+  const std::string &leaf_decoder = opts.decoder_type == "sliding_window"
+                                        ? opts.sw_inner_decoder
+                                        : opts.decoder_type;
+  const bool decompose_errors = (leaf_decoder == "pymatching");
   auto ctx = cudaq::qec::decoder_context_from_memory_circuit(
       code, state_prep, opts.num_rounds, noise, decompose_errors);
   const auto inputs = ctx.full_component();
@@ -698,6 +825,13 @@ void show_help() {
   printf("  --sw_window_size <int>  Sliding window size (only for "
          "sliding_window decoder). Default: distance\n");
   printf("  --sw_step_size <int>    Sliding window step size. Default: 1\n");
+  printf("  --sw_inner_decoder <string> Inner decoder for sliding_window. "
+         "Default: multi_error_lut\n");
+  printf(
+      "  --param <key=value> Override a decoder parameter (repeatable). For\n"
+      "      --decoder_type sliding_window the override targets the inner\n"
+      "      decoder; otherwise the outer decoder. Uses the registered\n"
+      "      schema for type coercion. Example: --param lut_error_depth=1\n");
   printf("  --save_dem <string> Characterize the DEM, write the decoder config "
          "YAML to a file, and exit (to configure a standalone "
          "decoding_server).\n");
@@ -713,59 +847,76 @@ void show_help() {
 int main(int argc, char **argv) {
   run_options opts;
 
-  for (int i = 1; i < argc; i++) {
-    std::string arg = argv[i];
-    if (arg == "--distance") {
-      opts.distance = std::stoi(argv[i + 1]);
-      i++;
-    } else if (arg == "--num_shots") {
-      opts.num_shots = std::stoi(argv[i + 1]);
-      i++;
-    } else if (arg == "--p_cnot") {
-      opts.p_cnot = std::stod(argv[i + 1]);
-      i++;
-    } else if (arg == "--help" || arg == "-h") {
-      show_help();
-      return 0;
-    } else if (arg == "--num_logical") {
-      opts.num_logical = std::stoi(argv[i + 1]);
-      i++;
-    } else if (arg == "--num_rounds") {
-      opts.num_rounds = std::stoi(argv[i + 1]);
-      i++;
-    } else if (arg == "--seed") {
-      opts.seed = std::stoi(argv[i + 1]);
-      i++;
-    } else if (arg == "--decoder_type") {
-      opts.decoder_type = argv[i + 1];
-      i++;
-    } else if (arg == "--sw_window_size") {
-      opts.sw_window_size = std::stoi(argv[i + 1]);
-      i++;
-    } else if (arg == "--sw_step_size") {
-      opts.sw_step_size = std::stoi(argv[i + 1]);
-      i++;
-    } else if (arg == "--save_dem") {
-      opts.save_dem = true;
-      opts.dem_filename = argv[i + 1];
-      i++;
-    } else if (arg == "--load_dem") {
-      opts.load_dem = true;
-      opts.dem_filename = argv[i + 1];
-      i++;
-    } else if (arg == "--save_syndrome") {
-      opts.save_syndrome = true;
-      opts.syndrome_filename = argv[i + 1];
-      i++;
-    } else if (arg == "--load_syndrome") {
-      opts.load_syndrome = true;
-      opts.syndrome_filename = argv[i + 1];
-      i++;
-    } else {
-      printf("Unknown argument: %s\n", arg.c_str());
-      show_help();
-      return 1;
+  auto val = [&](int i) {
+    if (i + 1 >= argc)
+      throw std::runtime_error(std::string(argv[i]) + " requires a value");
+    return std::string(argv[i + 1]);
+  };
+  try {
+    for (int i = 1; i < argc; i++) {
+      std::string arg = argv[i];
+      if (arg == "--distance") {
+        opts.distance = std::stoi(val(i));
+        i++;
+      } else if (arg == "--num_shots") {
+        opts.num_shots = std::stoi(val(i));
+        i++;
+      } else if (arg == "--p_cnot") {
+        opts.p_cnot = std::stod(val(i));
+        i++;
+      } else if (arg == "--help" || arg == "-h") {
+        show_help();
+        return 0;
+      } else if (arg == "--num_logical") {
+        opts.num_logical = std::stoi(val(i));
+        i++;
+      } else if (arg == "--num_rounds") {
+        opts.num_rounds = std::stoi(val(i));
+        i++;
+      } else if (arg == "--seed") {
+        opts.seed = std::stoi(val(i));
+        i++;
+      } else if (arg == "--decoder_type") {
+        opts.decoder_type = val(i);
+        i++;
+      } else if (arg == "--sw_window_size") {
+        opts.sw_window_size = std::stoi(val(i));
+        i++;
+      } else if (arg == "--sw_step_size") {
+        opts.sw_step_size = std::stoi(val(i));
+        i++;
+      } else if (arg == "--param") {
+        opts.decoder_params.push_back(val(i));
+        i++;
+      } else if (arg == "--sw_inner_decoder") {
+        opts.sw_inner_decoder = val(i);
+        opts.sw_inner_decoder_set = true;
+        i++;
+      } else if (arg == "--save_dem") {
+        opts.save_dem = true;
+        opts.dem_filename = val(i);
+        i++;
+      } else if (arg == "--load_dem") {
+        opts.load_dem = true;
+        opts.dem_filename = val(i);
+        i++;
+      } else if (arg == "--save_syndrome") {
+        opts.save_syndrome = true;
+        opts.syndrome_filename = val(i);
+        i++;
+      } else if (arg == "--load_syndrome") {
+        opts.load_syndrome = true;
+        opts.syndrome_filename = val(i);
+        i++;
+      } else {
+        printf("Unknown argument: %s\n", arg.c_str());
+        show_help();
+        return 1;
+      }
     }
+  } catch (const std::exception &e) {
+    printf("Error parsing arguments: %s\n", e.what());
+    return 1;
   }
 
   if (opts.save_syndrome && opts.load_syndrome) {
@@ -792,12 +943,26 @@ int main(int argc, char **argv) {
   if (opts.sw_window_size == -1)
     opts.sw_window_size = opts.distance;
 
-  if (opts.decoder_type != "multi_error_lut" &&
-      opts.decoder_type != "sliding_window" &&
-      opts.decoder_type != "nv-qldpc-decoder" &&
-      opts.decoder_type != "pymatching") {
+  // Leaf decoders: valid as --decoder_type or --sw_inner_decoder.
+  auto is_leaf_decoder = [](const std::string &t) {
+    return t == "multi_error_lut" || t == "nv-qldpc-decoder" ||
+           t == "pymatching";
+  };
+  if (!is_leaf_decoder(opts.decoder_type) &&
+      opts.decoder_type != "sliding_window") {
     printf("Error: --decoder_type must be 'multi_error_lut', "
            "'nv-qldpc-decoder', 'sliding_window', or 'pymatching'\n");
+    return 1;
+  }
+  if (opts.decoder_type == "sliding_window" &&
+      !is_leaf_decoder(opts.sw_inner_decoder)) {
+    printf("Error: --sw_inner_decoder must be 'multi_error_lut', "
+           "'nv-qldpc-decoder', or 'pymatching'\n");
+    return 1;
+  }
+  if (opts.sw_inner_decoder_set && is_leaf_decoder(opts.decoder_type)) {
+    printf("Error: --sw_inner_decoder is only valid with "
+           "--decoder_type sliding_window\n");
     return 1;
   }
 
@@ -805,6 +970,22 @@ int main(int argc, char **argv) {
     printf("Error: num_rounds (%d) must be at least equal to distance (%d)\n",
            opts.num_rounds, opts.distance);
     return 1;
+  }
+  if (opts.decoder_type == "sliding_window") {
+    if (opts.sw_step_size < 1) {
+      printf("Error: sw_step_size (%d) must be >= 1\n", opts.sw_step_size);
+      return 1;
+    }
+    if (opts.sw_window_size > opts.num_rounds) {
+      printf("Error: sw_window_size (%d) must be <= num_rounds (%d)\n",
+             opts.sw_window_size, opts.num_rounds);
+      return 1;
+    }
+    if (opts.sw_step_size > opts.sw_window_size) {
+      printf("Error: sw_step_size (%d) must be <= sw_window_size (%d)\n",
+             opts.sw_step_size, opts.sw_window_size);
+      return 1;
+    }
   }
 
   if (opts.num_logical > 32) {

@@ -34,12 +34,16 @@
 /// (enqueue_syndromes / get_corrections / reset_decoder) regardless of
 /// transport or decoder.
 ///
-/// Prints `QEC_DECODING_SERVER_READY port=<P> ...` on stdout once the caller
-/// can start connecting (the rest of the line is the provider's endpoint
-/// description, e.g. `transport=udp` or `transport=cpu_roce roce_ip=<IP>`),
-/// and `QEC_DECODING_SERVER_DISPATCHED count=<N>` at shutdown (the
-/// two-process stand-in for the in-process
-/// cudaqx_qec_device_call_dispatch_count() assertion).
+/// Prints `QEC_DECODING_SERVER_READY port=<P0> ...` on stdout once the caller
+/// can start connecting. The rest of the line is the provider's endpoint
+/// description (e.g. `transport=udp` or `transport=cpu_roce roce_ip=<IP>`)
+/// followed by one `ring<id>=<port>` token per decoder ring, so a caller can
+/// route `device_call(decoder_id, ...)` to the right endpoint. At shutdown
+/// each ring reports its traffic as `QEC_DECODING_SERVER_RING decoder=<id>
+/// dispatched=<n>` (the two-process stand-in for the in-process
+/// cudaqx_qec_device_call_dispatch_count() assertion). The standalone
+/// all-device_graph path instead prints only `QEC_DECODING_SERVER_READY
+/// device_graph` and reports execution via the trigger diagnostics.
 ///
 /// Usage:
 ///   decoding_server --config=<decoders.yaml>
@@ -284,11 +288,6 @@ int main(int argc, char **argv) {
   // ([2a], the HSB flow); any other mix runs the composed per-decoder ring
   // loop, where each decoder's ring gets the consumer its dispatch shape
   // requires (host dispatcher thread, or device-graph scheduler).
-  const bool wants_device_graph =
-      std::any_of(decoder_config.decoders.begin(),
-                  decoder_config.decoders.end(), [](const auto &d) {
-                    return d.dispatch == config::DecoderDispatch::device_graph;
-                  });
   const bool all_device_graph =
       std::all_of(decoder_config.decoders.begin(),
                   decoder_config.decoders.end(), [](const auto &d) {

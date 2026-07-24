@@ -16,6 +16,13 @@ that would result from those errors.
    ``H``.  This is the preferred form for large PCMs because no dense
    ``rows x cols`` allocation is made — the matrix is normalised to CSR
    internally.  Dense NumPy ``uint8`` arrays remain supported.
+   The PCM utilities :func:`cudaq_qec.reorder_pcm_columns`,
+   :func:`cudaq_qec.shuffle_pcm_columns`, and
+   :func:`cudaq_qec.pcm_to_sparse_vec` also accept SciPy sparse matrices
+   without creating a dense ``cudaqx::tensor``. Reordering and shuffling a
+   sparse input returns a ``scipy.sparse.csc_matrix``; a dense input continues
+   to return a NumPy array.
+
    ``scipy`` is an optional dependency; if it is not installed, pass a dense
    NumPy array instead.
 
@@ -132,7 +139,7 @@ Exact Maximum Likelihood Decoding with NVIDIA Tensor Network Decoder
 Starting with CUDA-Q QEC v0.4.0, a GPU-accelerated Maximum Likelihood Decoder is included with the
 CUDA-Q QEC library. The library follows the CUDA-Q decoder Python interface, namely :class:`cudaq_qec.Decoder`.
 At this time, we only support the Python interface for the decoder, which is
-available at :class:`cudaq_qec.plugins.decoders.tensor_network_decoder.TensorNetworkDecoder`.
+available at :ref:`TensorNetworkDecoder <tensor_network_decoder_api_python>`.
 As documented in the API sections :ref:`tensor_network_decoder_api_python`, there are many configuration options
 that can be passed to the constructor. The decoder requires Python 3.11 or higher.
 
@@ -170,7 +177,7 @@ to decode surface code syndromes using PyTorch and Stim, exporting the model to 
 deploying it with the TensorRT decoder for accelerated inference.
 
 Overview of the Training-to-Deployment Pipeline
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The workflow consists of three main stages:
 
@@ -186,7 +193,7 @@ The workflow consists of three main stages:
    be loaded by the TensorRT decoder for optimized GPU inference in production QEC workflows.
 
 Training a Neural Network Decoder with PyTorch and Stim
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The following example shows how to generate training data using Stim's built-in surface code
 generator, train an MLP decoder with PyTorch, and export the model to ONNX format.
@@ -197,7 +204,7 @@ For instructions on installing PyTorch, see :ref:`Installing PyTorch <installing
    :start-after: [Begin Documentation]
 
 Using the TensorRT Decoder in CUDA-Q QEC
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Once you have a trained ONNX model, you can load it with the TensorRT decoder for accelerated
 inference. The decoder can be used in both C++ and Python workflows.
@@ -279,7 +286,7 @@ you can load it directly:
                                 engine_load_path="surface_code_decoder.trt")
 
 Converting ONNX Models to TensorRT Engines
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 For production deployments where initialization time is critical, you can pre-build a TensorRT
 engine from your ONNX model using the ``trtexec`` command-line tool that comes with TensorRT:
@@ -310,7 +317,7 @@ Pre-built engines offer several advantages:
 
 
 Dependencies and Requirements
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The TensorRT decoder requires:
 
@@ -324,7 +331,7 @@ For training:
 - **Stim**: For quantum circuit simulation and data generation
 
 See Also
-^^^^^^^^
+~~~~~~~~
 
 - :class:`cudaq_qec.Decoder` - Base decoder interface
 - `ONNX <https://onnx.ai/>`_ - Open Neural Network Exchange format

@@ -208,7 +208,7 @@ public:
   /// the data qubits of the remaining CNOTs, land perpendicular to the
   /// same-type logical operator instead of along it, following the standard
   /// zigzag schedule of https://arxiv.org/abs/1404.3747. Rows are ordered to
-  /// match the rows of to_parity_matrix()/code::get_parity_x().
+  /// match the rows of %to_parity_matrix() / %code::get_parity_x().
   cudaqx::tensor<uint8_t> get_cnot_schedule_x() const;
 
   /// @brief Get the CNOT schedule matrix for the Z stabilizers.

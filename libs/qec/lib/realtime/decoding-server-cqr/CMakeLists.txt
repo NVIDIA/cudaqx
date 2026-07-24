@@ -83,9 +83,10 @@ endif()
 #
 # Deliberately excludes DeviceGraphTransceiver: consumers of this library (unit
 # tests, the CQR plugin) must stay loadable on driverless machines, and the
-# GPU RoCE deps (DOCA, the hololink bridge) require libcuda.so.1 at load
-# time.  gpu_roce lives in the cudaq-qec-decoding-server-device-graph component
-# below, reached through a weak factory symbol (see DecodingServer.cpp).
+# device-graph deps (DOCA, the hololink bridge) require libcuda.so.1 at load
+# time.  The device-graph transceiver lives in the
+# cudaq-qec-decoding-server-device-graph component below, reached through a
+# weak factory symbol (see DecodingServer.cpp).
 # ---------------------------------------------------------------------------
 if(NOT CUDAQ_REALTIME_INCLUDE_DIR)
   message(STATUS
@@ -187,7 +188,7 @@ if(CUDAQ_QEC_DEVICE_GRAPH_AVAILABLE)
 
   # Link canary (never executed, not installed, not a test): a static
   # archive alone never resolves symbols, and the one real consumer
-  # (decoding_server's gpu_roce block) is additionally gated on the
+  # (decoding_server's device_graph block) is additionally gated on the
   # proprietary cudevice archive, which CI does not provision.  Without
   # this target, nothing would validate the component's link against the
   # CUDA-Q realtime bridge API.  The strong factory reference pulls the

@@ -118,9 +118,9 @@ DecodingServer::DecodingServer(const std::string &config_yaml) {
   function_transport_[kGetCorrectionsFunctionId] = raw;
   function_transport_[kResetDecoderFunctionId] = raw;
 
-  // For the GPU RoCE path, wire the first (and only) session's decoder graph
-  // to the Hololink ring buffer via the CUDAQ device-graph scheduler.
-  // Multi-decoder GPU RoCE binding is deferred to a follow-up.
+  // For the device_graph path, wire the first (and only) session's decoder
+  // graph to the ring buffer via the CUDAQ device-graph scheduler.
+  // Multi-decoder device_graph binding is deferred to a follow-up.
   if (dispatch == DecoderDispatch::device_graph) {
     const auto &sessions = registry_.sessions();
     if (sessions.size() != 1)

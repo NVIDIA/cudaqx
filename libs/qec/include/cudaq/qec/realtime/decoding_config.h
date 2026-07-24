@@ -100,8 +100,8 @@ struct decoder_config {
   from_yaml_str(const std::string &yaml_str);
 };
 
-/// Transport override applied to the rings of one dispatch shape (see
-/// transport_config::device_graph).
+/// Transport override applied to the rings of one dispatch shape (see the
+/// `device_graph` member of `transport_config`).
 struct transport_shape_override {
   /// Provider name (e.g. udp, cpu_roce, hololink) or /path/to/lib.so.
   /// Empty = inherit the section/CLI default.

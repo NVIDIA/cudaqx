@@ -6,8 +6,9 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
-// Link canary for the GPU RoCE component -- not meant to be executed
-// (running it would require HOLOLINK_* env, a GPU driver, and RDMA-capable
+// Link canary for the device-graph component -- not meant to be executed
+// (running it would require QEC_DEVICE_GRAPH_* env, a GPU driver, and
+// RDMA-capable
 // hardware).  Building it forces the linker to resolve DeviceGraphTransceiver's
 // full dependency chain (hololink, DOCA, CUDA driver stubs), so HSB API
 // drift is caught at build time even on machines where nothing links the

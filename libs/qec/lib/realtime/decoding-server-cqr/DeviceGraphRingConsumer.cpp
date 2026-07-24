@@ -263,13 +263,25 @@ std::uint64_t DeviceGraphRingConsumer::dispatched() const {
   std::uint64_t value = 0;
   if (!d_stats_)
     return value;
-  cudaStream_t stream = nullptr;
-  if (cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking) != cudaSuccess)
+  // d_stats_ was allocated on gpu_id_, but this const accessor may be called
+  // from a thread whose current device differs (e.g. the server teardown
+  // path), which would make the stream/copy target the wrong context and
+  // silently return 0. Pin gpu_id_ for the copy and restore the caller's
+  // device afterward.
+  int prev_device = 0;
+  if (cudaGetDevice(&prev_device) != cudaSuccess)
     return value;
-  if (cudaMemcpyAsync(&value, d_stats_, sizeof(value), cudaMemcpyDeviceToHost,
-                      stream) == cudaSuccess)
-    cudaStreamSynchronize(stream);
-  cudaStreamDestroy(stream);
+  if (cudaSetDevice(gpu_id_) != cudaSuccess)
+    return value;
+  cudaStream_t stream = nullptr;
+  if (cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking) ==
+      cudaSuccess) {
+    if (cudaMemcpyAsync(&value, d_stats_, sizeof(value), cudaMemcpyDeviceToHost,
+                        stream) == cudaSuccess)
+      cudaStreamSynchronize(stream);
+    cudaStreamDestroy(stream);
+  }
+  cudaSetDevice(prev_device);
   return value;
 }
 

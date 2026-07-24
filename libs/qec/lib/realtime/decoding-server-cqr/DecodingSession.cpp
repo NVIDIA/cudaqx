@@ -74,8 +74,20 @@ DecodingSession::create(std::unique_ptr<cudaq::qec::decoder> decoder,
     // silently queues forever.  Overridable for rigs with more coresident
     // kernels (e.g. Hololink RX/TX) via QEC_DEVICE_GRAPH_RESERVED_SMS.
     int reserved_sms = 1;
-    if (const char *env = std::getenv("QEC_DEVICE_GRAPH_RESERVED_SMS"))
-      reserved_sms = std::atoi(env);
+    if (const char *env = std::getenv("QEC_DEVICE_GRAPH_RESERVED_SMS")) {
+      char *end = nullptr;
+      long v = std::strtol(env, &end, 10);
+      // A malformed, zero, or negative override would reinstate the
+      // reserve-all-SMs behavior this fix exists to prevent (atoi silently
+      // yields 0 for junk), so accept only a fully-parsed value >= 1 and keep
+      // the safe floor otherwise.
+      if (end != env && *end == '\0' && v >= 1)
+        reserved_sms = static_cast<int>(v);
+      else
+        cudaq::qec::warn("QEC_DEVICE_GRAPH_RESERVED_SMS='{}' is not a positive "
+                         "integer; keeping reserved_sms=1",
+                         env);
+    }
     void *gr = cudaq::qec::detail_affinity::capture_graph_pinned(*s->dec,
                                                                  reserved_sms);
     s->graph_resources =
@@ -223,7 +235,7 @@ void DecodingSession::on_enqueue(const WorkItem &item) {
     // Host-decoder path (CQR / Loopback transports).  On the device_graph path,
     // the CUDAQ device-graph scheduler (cudaq_create_dispatch_graph_regular)
     // handles RX→dispatch→decode→TX entirely on the GPU; this worker thread
-    // is never reached for GPU RoCE sessions.
+    // is never reached for device_graph sessions.
     const bool did_decode =
         dec->enqueue_syndrome(completed->bits.data(), completed->bits.size());
 

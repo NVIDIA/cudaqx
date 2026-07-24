@@ -1098,13 +1098,11 @@ start_server() {
         return 1
     }
 
-    # The RDMA rendezvous tokens (qp=/rkey=/buffer_addr=) are published on ONE
-    # line: the device-graph transceiver prints a dedicated
-    # QEC_DECODING_SERVER_ENDPOINT line, while the host/cpu-roce path carries
-    # the provider's endpoint info on the READY line itself. Scrape whichever
-    # arrives.
+    # The transceiver publishes the provider's endpoint description verbatim
+    # (one `key=value ...` line); pull the RDMA rendezvous tokens the
+    # playback tool needs out of it.
     local ep_line
-    ep_line=$(wait_for_pattern "$server_log" "buffer_addr=" 5 "$SERVER_PID") || return 1
+    ep_line=$(wait_for_pattern "$server_log" "QEC_DECODING_SERVER_ENDPOINT" 5 "$SERVER_PID") || return 1
 
     SERVER_QP=$(sed -n 's/.*[[:space:]]qp=\([0-9a-fA-FxX]*\).*/\1/p' <<<"$ep_line")
     SERVER_RKEY=$(sed -n 's/.*[[:space:]]rkey=\([0-9]*\).*/\1/p' <<<"$ep_line")

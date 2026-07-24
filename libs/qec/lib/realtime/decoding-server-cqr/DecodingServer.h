@@ -95,7 +95,7 @@ private:
   make_transport(cudaq::qec::decoding::config::DecoderDispatch dispatch,
                  int pinned_cuda_device);
 
-  // Destruction order matters: the GPU RoCE scheduler (inside
+  // Destruction order matters: the device-graph scheduler (inside
   // owned_transports_) holds a cudaGraphExec_t captured from a session's
   // decoder.  The scheduler must be destroyed (cudaStreamSynchronize +
   // cudaq_destroy_dispatch_graph) before registry_ releases the decoder and its
