@@ -141,9 +141,9 @@ FPGA source (real FPGA over RoCE)
 ``--setup-network`` configures the ConnectX interface (needs ``sudo``);
 ``--spacing`` (default 10 µs) paces the playback so it does not overrun the
 FPGA's fixed 64-slot RDMA RX ring. The ``nv-qldpc-decoder`` profiles
-auto-pace slower — 5 ms on host dispatch, 100 µs on device_graph — because
-the GPU decode cannot drain the ring at 10 µs; an explicit ``--spacing``
-always wins (``trt_decoder`` auto-paces the same way).
+auto-pace slower — 100 µs — because the GPU decode cannot drain the ring at
+10 µs; an explicit ``--spacing`` always wins (``trt_decoder`` auto-paces the
+same way).
 
 The server has two independent knobs, both derived automatically (override
 with ``--wire`` / ``--dispatch``): the **wire** is the bridge-provider library
@@ -208,7 +208,7 @@ orientation and per-round bit order and cannot consume these artifacts).
 On the FPGA source the playback BRAM (512 frames) caps this geometry at **56
 shots** per run (9 frames per shot: 8 syndrome slices + 1 corrections frame);
 the script defaults to exactly that, and also raises the inter-shot
-``--spacing`` to 5 ms for this profile — the 9-frame bursts would otherwise
+``--spacing`` to 100 µs for this profile — the 9-frame bursts would otherwise
 overrun the server's 64-slot RX ring (about 7 shots of buffer against a
 ~35 µs decode round trip).
 

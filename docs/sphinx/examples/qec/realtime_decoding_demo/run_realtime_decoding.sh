@@ -299,9 +299,8 @@ if [[ "$DECODER" == "trt_decoder" ]]; then
     # shots of buffer) and the measured decode round trip averages ~35us --
     # the 10us default inter-shot spacing overruns the ring around shot 8-18
     # (a corrupted stream then kills the decode with an invalid-syndrome
-    # matching error). 5ms spacing drains the ring fully every shot and costs
-    # only ~0.3s over the 56-shot run.
-    $SPACING_EXPLICIT || SPACING=5000
+    # matching error). 100us clears the measured decode with ~3x margin.
+    $SPACING_EXPLICIT || SPACING=100
     if [[ "$SOURCE" == "fpga" && -n "$NUM_SHOTS" ]] && \
        (( NUM_SHOTS > TRT_FPGA_SHOTS )); then
         echo "ERROR: the FPGA playback BRAM holds 512 frames; at d7/T7" >&2
@@ -335,11 +334,11 @@ esac
 # nv-qldpc's GPU decode (plus first-call PTX JIT on new hardware) cannot
 # drain the server's 64-slot RX ring at the 10us default playback spacing --
 # measured on-rig: 171/510 frames captured (host dispatch) and ~15/85 shots
-# verified (device_graph) before the ring overruns. Mirror the trt profile's
-# auto-pacing with the measured-good values; an explicit --spacing wins.
+# verified (device_graph) before the ring overruns. 100us clears the
+# measured floors on both dispatch paths; an explicit --spacing wins.
 if [[ "$SOURCE" == "fpga" && "$DECODER" == "nv-qldpc-decoder" ]] && \
    ! $SPACING_EXPLICIT; then
-    if [[ "$DISPATCH" == "device_graph" ]]; then SPACING=100; else SPACING=5000; fi
+    SPACING=100
 fi
 
 [[ "$WIRE" == "cpu-roce" ]] && WIRE="cpu_roce"   # accept both spellings

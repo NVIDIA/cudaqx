@@ -228,7 +228,11 @@ Run options:
   --gpu-roce-num-pages N Server GPU RoCE ring slots (default: the HSB 64-WQE
                          depth; values above it are clamped, since a ring with
                          more slots than WQEs drops frames)
-  --spacing N            Inter-shot spacing in microseconds (default: 10)
+  --spacing N            Inter-shot spacing in microseconds (default: 10;
+                         the slow-decode profiles trt_decoder and
+                         nv-qldpc-decoder default to 100 instead, so the
+                         playback stream cannot overrun the 64-slot RX
+                         ring mid-decode)
   --control-port N       UDP control port for emulator (default: 8193)
 
   --help, -h             Show this help
@@ -306,6 +310,26 @@ fi
 if [[ "$TRANSPORT" != "cpu_roce" && "$TRANSPORT" != "gpu_roce" ]]; then
     echo "ERROR: unknown --transport $TRANSPORT (expected cpu_roce or gpu_roce)" >&2
     exit 1
+fi
+
+# Per-decoder playback pacing: a profile whose per-shot decode latency
+# exceeds the playback tool's 10us default inter-shot spacing overruns the
+# 64-slot RX ring under an unpaced stream (dropped enqueues mis-assemble a
+# shot's volume and the decode dies with an invalid-syndrome matching error;
+# the ILA sample count comes up short).  For this test's profiles the slow
+# ones are trt_decoder (fixed per-invocation TensorRT engine overhead at
+# batch 1) and nv-qldpc-decoder (iterative relay-BP); pymatching decodes
+# these d3 volumes in microseconds and keeps the unpaced default -- the
+# burst path is part of what its profile exercises.
+#
+# 100us clears every measured floor on this loop with margin: at d3/T4 the
+# host-dispatch runs fail at 25us (nv-qldpc) and 10us (trt) and pass at
+# 100us, and 100us is the validated value for the device-graph scheduler.
+# --spacing overrides.
+if [[ -z "$SPACING" ]]; then
+    case "$DECODER" in
+        trt_decoder|nv-qldpc-decoder) SPACING=100 ;;
+    esac
 fi
 
 # The HSB QP exposes a fixed 64-entry receive WQE depth, and the receiver
@@ -1098,11 +1122,13 @@ start_server() {
         return 1
     }
 
-    # The transceiver publishes the provider's endpoint description verbatim
-    # (one `key=value ...` line); pull the RDMA rendezvous tokens the
-    # playback tool needs out of it.
+    # The RDMA rendezvous tokens (qp=/rkey=/buffer_addr=) are published on ONE
+    # line: the device-graph transceiver prints a dedicated
+    # QEC_DECODING_SERVER_ENDPOINT line, while the host/cpu-roce path carries
+    # the provider's endpoint info on the READY line itself. Scrape whichever
+    # arrives.
     local ep_line
-    ep_line=$(wait_for_pattern "$server_log" "QEC_DECODING_SERVER_ENDPOINT" 5 "$SERVER_PID") || return 1
+    ep_line=$(wait_for_pattern "$server_log" "buffer_addr=" 5 "$SERVER_PID") || return 1
 
     SERVER_QP=$(sed -n 's/.*[[:space:]]qp=\([0-9a-fA-FxX]*\).*/\1/p' <<<"$ep_line")
     SERVER_RKEY=$(sed -n 's/.*[[:space:]]rkey=\([0-9]*\).*/\1/p' <<<"$ep_line")
