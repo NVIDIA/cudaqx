@@ -120,8 +120,9 @@ the model's operating point (d=7, rounds=7, Z/XV, SPAM noise `--p-spam`
 (`--ising-artifacts-dir DIR` or `QEC_ISING_ARTIFACTS_DIR`): `model.onnx`,
 `H_csr.bin`, `O_csr.bin`, `priors.bin`, `metadata.txt`, `D_sparse.txt`.
 Nothing in it ships with CUDA-QX — the weights are a gated Hugging Face
-download processed through the NVIDIA/Ising-Decoding repository (full recipe
-in the Sphinx page for this example). Missing/incomplete artifacts make the
+download processed through the NVIDIA/Ising-Decoding repository; the shipped
+`prepare_ising_artifacts.py` automates the whole preparation (full recipe in
+the Sphinx page for this example). Missing/incomplete artifacts make the
 run **skip** (exit 77), listing the absent files.
 
 ```bash

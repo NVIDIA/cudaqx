@@ -212,31 +212,31 @@ the script defaults to exactly that, and also raises the inter-shot
 overrun the server's 64-slot RX ring (about 7 shots of buffer against a
 ~35 µs decode round trip).
 
-Preparing the artifact directory (once, on any machine):
+Preparing the artifact directory (once, on any machine) is automated by the
+``prepare_ising_artifacts.py`` script that ships in this example's directory:
 
 1. Accept the gated model terms at
    ``https://huggingface.co/nvidia/Ising-Decoder-SurfaceCode-1-Fast`` and
-   download the SafeTensors checkpoint:
-   ``hf download nvidia/Ising-Decoder-SurfaceCode-1-Fast --include '*.safetensors' --local-dir <weights>``.
-2. Clone ``https://github.com/NVIDIA/Ising-Decoding`` and install its
-   inference requirements (``code/requirements_public_inference.txt``; on
-   aarch64 install torch from a CUDA wheel index, and ``pip install onnx``
-   for the export step).
-3. Export the Z-basis ONNX model from the checkpoint (from the Ising repo
-   root; the file lands in the repo root)::
+   authenticate the ``hf`` CLI (``hf auth login``). The script also needs
+   ``git``, ``bash``, and the Ising exporter's Python packages
+   (``beliefmatching hydra ldpc matplotlib numpy omegaconf onnx pymatching
+   safetensors scipy stim torch``; on aarch64 install torch from a CUDA
+   wheel index).
+2. Run (from this example's directory, after building the example)::
 
-      PREDECODER_SAFETENSORS_CHECKPOINT=<weights>/<ckpt>.safetensors \
-      PREDECODER_INFERENCE_MEAS_BASIS=Z ONNX_WORKFLOW=1 WORKFLOW=inference \
-      DISTANCE=7 N_ROUNDS=7 bash code/scripts/local_run.sh
+      python prepare_ising_artifacts.py \
+          --app build/surface_code_ising_realtime_decoding \
+          --artifacts-dir <dir>
 
-4. Generate the decoder matrices:
-   ``python code/export/generate_test_data.py --distance 7 --n-rounds 7 --basis Z --code-rotation XV --num-samples 1 --output-dir <dir>``,
-   then copy the exported ONNX in as ``<dir>/model.onnx``.
-5. Generate ``D_sparse.txt`` against THIS example's measurement layout: run
-   ``surface_code_ising_realtime_decoding --save_dem cfg.yml --decoder_type pymatching > sched.txt``
-   (it prints the CNOT schedules), then
-   ``python gen_dsparse_from_memory_circuit.py 7 7 Z XV sched.txt <dir>/D_sparse.txt --ising-repo <Ising-Decoding>/code``
-   (the script ships in this example's directory).
+   This sparse-checkouts the pinned Ising-Decoding revision, downloads the
+   gated weights, exports the Z-basis ONNX model, generates the decoder
+   matrices, captures THIS example's printed CNOT schedules to build a
+   matching ``D_sparse.txt``, validates the six files, and installs them
+   atomically at ``<dir>``.
+
+For a custom Ising export, the script's ``d-sparse`` subcommand regenerates
+just the measurement mapping from a saved schedule printout — see
+``python prepare_ising_artifacts.py d-sparse --help``.
 
 Decoders
 --------
@@ -275,7 +275,7 @@ The example source
 
 The Ising profile builds its own companion source,
 ``surface_code_ising_realtime_decoding.cpp`` (plus the shipped
-``gen_dsparse_from_memory_circuit.py`` used during artifact preparation), in
+``prepare_ising_artifacts.py`` used during artifact preparation), in
 the same example directory. The primary example source:
 
 .. literalinclude:: ../../examples/qec/realtime_decoding_demo/surface_code_realtime_decoding.cpp

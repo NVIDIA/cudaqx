@@ -35,7 +35,7 @@
 //                 n_rounds
 //   D_sparse.txt  each Ising detector as a parity over THIS app's live
 //                 measurement buffer (generated with the shipped
-//                 gen_dsparse_from_memory_circuit.py from this app's printed
+//                 prepare_ising_artifacts.py from this app's printed
 //                 CNOT schedules)
 // See the example documentation for the full preparation recipe.
 //
@@ -853,9 +853,10 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
   auto cnot_schedZ_flat = get_stab_cnot_schedule('Z', distance);
   std::size_t numSyndromesPerRound = 0;
 
-  // Print the CNOT schedules: gen_dsparse_from_memory_circuit.py consumes
-  // these lines (saved to a sched.txt) to build the artifact directory's
-  // D_sparse.txt against THIS app's measurement layout.
+  // Print the CNOT schedules: prepare_ising_artifacts.py consumes these
+  // lines to build the artifact directory's D_sparse.txt against THIS app's
+  // measurement layout (its prepare mode runs this app itself; its d-sparse
+  // mode takes them from a saved sched.txt).
   printf("cnot_schedX_flat: ");
   for (std::size_t i = 0; i < cnot_schedX_flat.size(); i += 2)
     printf("%lu %lu, ", cnot_schedX_flat[i], cnot_schedX_flat[i + 1]);
