@@ -316,6 +316,76 @@ def qec_yaml_for(dc):
     return mdc.to_yaml_str()
 
 
+def test_decoder_config_json_schema_covers_dispatch_and_transport():
+    # The exported JSON schema is generated separately from the YAML parser, so
+    # validate a real document that populates `dispatch:` and the server-level
+    # `transport:` section. The other schema test only exercises documents that
+    # omit these keys (they default, and to_yaml_str drops defaults), so it
+    # cannot catch the schema drifting behind the parser.
+    jsonschema = pytest.importorskip("jsonschema")
+    yaml = pytest.importorskip("yaml")
+    import json
+
+    schema = json.loads(qec.decoder_config_json_schema())
+    jsonschema.Draft202012Validator.check_schema(schema)
+    validator = jsonschema.Draft202012Validator(schema)
+
+    dc = qec.decoder_config()
+    dc.id = 0
+    dc.type = "pymatching"
+    dc.dispatch = qec.decoder_dispatch.device_graph
+    dc.block_size = 3
+    dc.syndrome_size = 3
+    dc.H_sparse = [0, -1, 1, -1, 2, -1]
+    dc.O_sparse = [0, -1, 1, -1, 2, -1]
+    dc.D_sparse = [0, -1, 1, -1, 2, -1]
+    dc.decoder_custom_args = {
+        "error_rate_vec": [0.1, 0.1, 0.1],
+        "merge_strategy": "smallest_weight",
+    }
+
+    mdc = qec.multi_decoder_config()
+    mdc.decoders = [dc]
+    mdc.transport.provider = "udp"
+    mdc.transport.args = ["--num-slots=8"]
+    mdc.transport.device_graph.provider = "hololink"
+    mdc.transport.device_graph.args = ["--pinned-rings"]
+
+    document = yaml.safe_load(mdc.to_yaml_str())
+
+    # Sanity: the emitted YAML really carries the keys we mean to validate.
+    # to_yaml_str drops defaults, so if the bindings failed to set them this
+    # test would be vacuous rather than failing.
+    assert document["decoders"][0]["dispatch"] == "device_graph"
+    assert document["transport"]["provider"] == "udp"
+    assert document["transport"]["device_graph"]["args"] == ["--pinned-rings"]
+
+    # The populated document validates against the exported schema.
+    validator.validate(document)
+
+    # An unknown dispatch value is rejected (the schema's dispatch enum is
+    # host|device_graph).
+    bad_dispatch = yaml.safe_load(mdc.to_yaml_str())
+    bad_dispatch["decoders"][0]["dispatch"] = "gpu_roce"
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(bad_dispatch)
+
+    # A per-decoder `transport:` key is rejected: additionalProperties is false
+    # on the decoder envelope, so a config carrying this (non-existent) key
+    # fails validation rather than being silently ignored.
+    old_key = yaml.safe_load(mdc.to_yaml_str())
+    old_key["decoders"][0]["transport"] = "gpu_roce"
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(old_key)
+
+    # An unknown key in the transport section is rejected (additionalProperties
+    # false on transport_config).
+    bad_transport = yaml.safe_load(mdc.to_yaml_str())
+    bad_transport["transport"]["bogus"] = 1
+    with pytest.raises(jsonschema.ValidationError):
+        validator.validate(bad_transport)
+
+
 # trt_decoder tests (need the trt_decoder plugin for its parameter schema)
 
 trt_schema_missing = qec.decoder_param_schema("trt_decoder") is None

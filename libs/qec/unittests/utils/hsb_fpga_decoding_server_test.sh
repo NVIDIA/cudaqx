@@ -21,7 +21,8 @@
 #
 # Division of labor (identical to hololink_qldpc_graph_decoder_test.sh):
 #   - decoding_server (--transport=cpu_roce --qp_config=hsb_fpga) owns the
-#     RDMA ring and prints its QP / RKey / Buffer Addr handshake.  It performs
+#     RDMA ring and prints its endpoint line (QEC_DECODING_SERVER_ENDPOINT
+#     qp=... rkey=... buffer_addr=...).  It performs
 #     NO Hololink control-plane traffic.
 #   - hololink_fpga_syndrome_playback is the sole FPGA control-plane writer:
 #     it programs the SIF RDMA target with the server's handshake values,
@@ -218,7 +219,7 @@ Run options:
   --num-shots N          Limit number of shots
   --page-size N          Ring buffer slot size in bytes (default: 384)
   --frame-size N         Server TX SGE bytes, cpu_roce only (default: 64;
-                         gpu_roce uses page-size as HOLOLINK_FRAME_SIZE)
+                         gpu_roce uses page-size as QEC_DEVICE_GRAPH_FRAME_SIZE)
   --gpu N                GPU device id for gpu_roce (default: 0)
   --gpu-roce-num-pages N Server GPU RoCE ring pages (default: auto-align;
                          starts from playback window pages)
@@ -821,23 +822,23 @@ generate_data_files() {
         _info "Config carries the trt_decoder entry (onnx_load_path set)"
     fi
 
-    # The server selects its transceiver from the per-decoder `transport:` YAML
-    # key (default cpu_roce). For gpu_roce, `cuda_device_id` pins graph capture
-    # and worker-thread execution to the selected GPU. The generator doesn't emit
-    # these non-default optional fields, so inject them into our generated config
-    # directly under the decoder's `type:` line.
+    # The server selects the dispatch shape from the per-decoder `dispatch:`
+    # YAML key (default host). For device_graph, `cuda_device_id` pins graph
+    # capture and worker-thread execution to the selected GPU. The generator
+    # doesn't emit these non-default optional fields, so inject them into our
+    # generated config directly under the decoder's `type:` line.
     if [[ "$TRANSPORT" == "gpu_roce" ]]; then
-        _info "Injecting 'transport: gpu_roce' and cuda_device_id=$GPU_ID into $(basename "$CONFIG_FILE")"
+        _info "Injecting 'dispatch: device_graph' and cuda_device_id=$GPU_ID into $(basename "$CONFIG_FILE")"
         awk -v gpu_id="$GPU_ID" '{ print }
              /^[[:space:]]*type:/ && !done {
-                 print "    transport:       gpu_roce"
+                 print "    dispatch:        device_graph"
                  print "    cuda_device_id:  " gpu_id
                  done = 1
              }' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" \
             && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
-        if ! grep -q "transport:.*gpu_roce" "$CONFIG_FILE" || \
+        if ! grep -q "dispatch:.*device_graph" "$CONFIG_FILE" || \
            ! grep -q "cuda_device_id:.*$GPU_ID" "$CONFIG_FILE"; then
-            _err "Failed to inject gpu_roce transport/cuda_device_id into $CONFIG_FILE"
+            _err "Failed to inject device_graph dispatch/cuda_device_id into $CONFIG_FILE"
             return 1
         fi
     fi
@@ -974,17 +975,12 @@ extract_hex() {
     echo "$line" | grep -oP '0x[0-9a-fA-F]+' | head -1
 }
 
-extract_decimal() {
-    local line="$1"
-    echo "$line" | awk -F': ' '{print $NF}' | tr -d ' '
-}
-
 # ============================================================================
 # Server + Playback (shared by both modes)
 # ============================================================================
 
 # Start the decoding server against $1=peer_ip $2=remote_qp; scrape its
-# Bridge Ready handshake into SERVER_QP / SERVER_RKEY / SERVER_ADDR.
+# endpoint line into SERVER_QP / SERVER_RKEY / SERVER_ADDR.
 start_server() {
     local peer_ip="$1" remote_qp="$2" server_log="$3"
 
@@ -998,26 +994,27 @@ start_server() {
     if [[ "$TRANSPORT" == "gpu_roce" ]]; then
         # Device-graph scheduler path: enqueue/get/reset run as DEVICE_CALLs
         # on the GPU and the captured RelayBP decode graph fires device-side.
-        # The Hololink transceiver is configured via HOLOLINK_* env (the
-        # server's gpu_roce mode ignores the cpu_roce CLI flags), and eager
-        # module loading avoids lazy-load stalls inside the persistent
+        # The device-graph transceiver is configured via QEC_DEVICE_GRAPH_*
+        # env (the server's device_graph mode ignores the cpu_roce CLI
+        # flags); dispatch-shape selection comes from the config's
+        # `dispatch: device_graph` key, injected at config-generation time.
+        # Eager module loading avoids lazy-load stalls inside the persistent
         # scheduler (same as the old bridge launcher).
         CUDA_MODULE_LOADING=EAGER \
         LD_LIBRARY_PATH="${server_ld_path}:${LD_LIBRARY_PATH:-}" \
-        HOLOLINK_DEVICE="$BRIDGE_DEVICE" \
-        HOLOLINK_PEER_IP="$peer_ip" \
-        HOLOLINK_REMOTE_QP="$((remote_qp))" \
-        HOLOLINK_FRAME_SIZE="$PAGE_SIZE" \
-        HOLOLINK_NUM_PAGES="$GPU_ROCE_NUM_PAGES" \
+        QEC_DEVICE_GRAPH_DEVICE="$BRIDGE_DEVICE" \
+        QEC_DEVICE_GRAPH_PEER_IP="$peer_ip" \
+        QEC_DEVICE_GRAPH_REMOTE_QP="$((remote_qp))" \
+        QEC_DEVICE_GRAPH_FRAME_SIZE="$PAGE_SIZE" \
+        QEC_DEVICE_GRAPH_NUM_PAGES="$GPU_ROCE_NUM_PAGES" \
         "$SERVER_BIN" \
             --config="$CONFIG_FILE" \
-            --transport=gpu_roce \
             --timeout="$TIMEOUT" \
             > >(tee "$server_log") 2>&1 &
-        # The GpuRoceTransceiver prints the QP/RKey/Buffer handshake during
+        # The DeviceGraphTransceiver prints the QP/RKey/Buffer handshake during
         # server construction, BEFORE this READY sentinel -- so waiting for
         # READY guarantees the three lines are scrapeable.
-        ready_pattern="QEC_DECODING_SERVER_READY gpu_roce"
+        ready_pattern="QEC_DECODING_SERVER_READY device_graph"
     else
         LD_LIBRARY_PATH="${server_ld_path}:${LD_LIBRARY_PATH:-}" \
         "$SERVER_BIN" \
@@ -1056,14 +1053,19 @@ start_server() {
         return 1
     }
 
-    local qp_line rkey_line addr_line
-    qp_line=$(wait_for_pattern "$server_log" "QP Number:" 5 "$SERVER_PID") || return 1
-    rkey_line=$(wait_for_pattern "$server_log" "RKey:" 5 "$SERVER_PID") || return 1
-    addr_line=$(wait_for_pattern "$server_log" "Buffer Addr:" 5 "$SERVER_PID") || return 1
+    # The transceiver publishes the provider's endpoint description verbatim
+    # (one `key=value ...` line); pull the RDMA rendezvous tokens the
+    # playback tool needs out of it.
+    local ep_line
+    ep_line=$(wait_for_pattern "$server_log" "QEC_DECODING_SERVER_ENDPOINT" 5 "$SERVER_PID") || return 1
 
-    SERVER_QP=$(extract_hex "$qp_line")
-    SERVER_RKEY=$(extract_decimal "$rkey_line")
-    SERVER_ADDR=$(extract_hex "$addr_line")
+    SERVER_QP=$(sed -n 's/.*[[:space:]]qp=\([0-9a-fA-FxX]*\).*/\1/p' <<<"$ep_line")
+    SERVER_RKEY=$(sed -n 's/.*[[:space:]]rkey=\([0-9]*\).*/\1/p' <<<"$ep_line")
+    SERVER_ADDR=$(sed -n 's/.*[[:space:]]buffer_addr=\([0-9a-fA-FxX]*\).*/\1/p' <<<"$ep_line")
+    if [[ -z "$SERVER_QP" || -z "$SERVER_RKEY" || -z "$SERVER_ADDR" ]]; then
+        _err "Endpoint line missing qp=/rkey=/buffer_addr= tokens: $ep_line"
+        return 1
+    fi
 
     _info "Server QP:     $SERVER_QP"
     _info "Server RKey:   $SERVER_RKEY"
