@@ -200,6 +200,15 @@ target_link_libraries(hololink_fpga_syndrome_playback
     CUDA::cuda_driver
     Threads::Threads)
 
+# Ship the FPGA syndrome-playback tool as a deliverable alongside decoding_server
+# (see tools/decoding-server/CMakeLists.txt). This whole file is already gated by
+# the hololink tools, so this install is a no-op in the vanilla release and is
+# present only in the hololink-enabled deliverable image. The
+# realtime_decoding_demo example resolves this tool from the install prefix.
+install(TARGETS hololink_fpga_syndrome_playback
+  COMPONENT qec-tools
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
 # =========================================================================== #
 # hololink_qldpc_graph_decoder_bridge
 # =========================================================================== #

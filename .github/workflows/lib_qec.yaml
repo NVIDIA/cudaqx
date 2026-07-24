@@ -136,6 +136,37 @@ jobs:
         run: bash scripts/ci/test_examples.sh qec
 
       # ========================================================================
+      # Realtime decoding demo example
+      #
+      # Build the two example binaries against the INSTALLED SDK -- this is what
+      # enforces the installed-headers-only rule: a build-tree-only include
+      # would fail to compile here. Then drive the delivered decoding_server
+      # over UDP loopback with a real pymatching decode (the qpu-kernel source).
+      # No hardware: the FPGA source needs a ConnectX NIC and is not run in CI.
+      # ========================================================================
+      - name: Build & run realtime_decoding_demo (qpu-kernel, UDP loopback)
+        shell: bash
+        run: |
+          export PATH=/cudaq-install/bin:$PATH
+          # Mirror build_qec.sh: it builds+installs cudaq-realtime to
+          # $CUDAQ_REALTIME_ROOT, defaulting to /tmp/cudaq-realtime when unset
+          # (the case for this workflow). Track the same value so this step
+          # stays correct if the job ever sets CUDAQ_REALTIME_ROOT.
+          RT="${CUDAQ_REALTIME_ROOT:-/tmp/cudaq-realtime}"
+          EX=docs/sphinx/examples/qec/realtime_decoding_demo
+          cmake -S "$EX" -B /tmp/rtdemo-build -G Ninja \
+            -DCUDAQ_INSTALL_DIR=/cudaq-install \
+            -DCUDAQX_INSTALL_DIR="$HOME/.cudaqx" \
+            -DCUDAQ_REALTIME_DIR="$RT"
+          cmake --build /tmp/rtdemo-build -j
+          bash "$EX/run_realtime_decoding.sh" \
+            --source qpu-kernel --decoder pymatching \
+            --install-prefix "$HOME/.cudaqx" \
+            --cudaq-prefix /cudaq-install \
+            --realtime-lib-dir "$RT" \
+            --example-build-dir /tmp/rtdemo-build
+
+      # ========================================================================
       # Upload build artifacts for GPU tests
       # ========================================================================
       - name: Create artifact archive

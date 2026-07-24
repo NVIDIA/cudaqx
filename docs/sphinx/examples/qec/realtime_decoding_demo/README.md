@@ -1,0 +1,158 @@
+# Realtime decoding demo
+
+Drive the delivered `decoding_server` from two syndrome sources — a real FPGA,
+or a lowered QPU kernel — both decoding through the **same prebuilt server**.
+
+## What this example is
+
+- **Deliverables** (installed, *not* built here): `decoding_server`, the FPGA
+  playback tool `hololink_fpga_syndrome_playback`, the QEC + realtime libraries,
+  and the decoder plugins.
+- **The example** (the only thing you compile): two sources, each built two
+  ways by `CMakeLists.txt` against the **installed SDK** (installed
+  headers/libs only):
+  - `surface_code_realtime_decoding` — the **generator** (`--target stim`):
+    writes the decoder config and, for the FPGA source, the syndrome file.
+  - `surface_code_realtime_decoding-cqr` — the **lowered kernel**
+    (`-frealtime-lowering`): the live syndrome source that streams to the server
+    over UDP or, with `--wire cpu_roce`, over real RDMA.
+  - `surface_code_ising_realtime_decoding` / `…-cqr` — the same pair for the
+    opt-in Ising `trt_decoder` profile (see below), a separate source whose
+    measurement layout matches the Ising artifact contract.
+
+## Build (once)
+
+```bash
+cmake -S . -B build \
+  -DCUDAQ_INSTALL_DIR=<cuda-quantum install prefix> \
+  -DCUDAQX_INSTALL_DIR=<cuda-qx install prefix>
+cmake --build build
+# -> build/surface_code_realtime_decoding      (generator)
+# -> build/surface_code_realtime_decoding-cqr  (lowered kernel)
+```
+
+In a CUDA-QX container `CUDAQ_INSTALL_DIR` defaults to `/usr/local/cudaq` (or
+`$CUDA_QUANTUM_PATH`); point `CUDAQX_INSTALL_DIR` at where the CUDA-QX SDK is
+installed. If the realtime libraries live in a separate prefix, add
+`-DCUDAQ_REALTIME_DIR=<realtime prefix>`. The lowered kernel links the realtime
+dispatch archive (relocatable CUDA device code), so the build needs a CUDA
+toolchain; the device-link architecture defaults to `80` (Ampere) — override
+with `-DCMAKE_CUDA_ARCHITECTURES=90` for Hopper or
+`-DCMAKE_CUDA_ARCHITECTURES=100` for Blackwell (e.g. GB200).
+
+## Run
+
+`run_realtime_decoding.sh` resolves the deliverables from `--install-prefix`
+(`$PREFIX/bin`, `$PREFIX/lib`) and the two example binaries from
+`--example-build-dir` (default `./build`).
+
+### QPU-kernel source (software; udp by default, no NIC)
+
+```bash
+./run_realtime_decoding.sh --source qpu-kernel --decoder pymatching        --install-prefix <prefix>
+./run_realtime_decoding.sh --source qpu-kernel --decoder multi_error_lut   --install-prefix <prefix>
+./run_realtime_decoding.sh --source qpu-kernel --decoder nv-qldpc-decoder --gpu 0 --install-prefix <prefix>
+```
+
+The lowered kernel runs the surface-code memory experiment and streams each
+shot's syndromes to the server over UDP; the server decodes and returns
+corrections. No NIC, no FPGA, no network setup. Runs are seeded (`--seed`,
+default 42), so the reported counts are reproducible.
+
+PASS/FAIL uses the same criteria as the in-tree surface-code tests: the run
+must complete without decoder errors, the residual logical-error count must
+stay at or under `num_shots/50` (a decoder that is connected but decoding
+wrong produces far more), the kernel's in-process dispatch count must be 0
+(proof the decode stayed in the external server), and the server must have
+dispatched at least `num_shots * (num_rounds + 3)` RPCs.
+
+### QPU-kernel source over real RDMA (`--wire cpu_roce`)
+
+The same kernel can carry its syndromes over the `cpu_roce` wire instead: its
+channel RDMA-writes each request straight into the server's ring. This needs
+two RoCE-capable ports (kernel side = *channel*, server side = *daemon*) that
+can reach each other — e.g. loopback-cabled ConnectX ports, or SoftRoCE
+(`rdma_rxe`) devices. The topology comes from the same env vars as the
+in-tree cpu_roce tests; `--setup-network` assigns the IPs and waits for the
+RoCE v2 GIDs:
+
+```bash
+export CUDAQ_CPU_ROCE_TEST_CHANNEL_DEVICE=<kernel-side ibdev>   # e.g. mlx5_0
+export CUDAQ_CPU_ROCE_TEST_DAEMON_DEVICE=<server-side ibdev>    # e.g. mlx5_1
+# IPs default to 10.0.0.1 (channel) / 10.0.0.2 (daemon); override with
+# CUDAQ_CPU_ROCE_TEST_CHANNEL_IP / CUDAQ_CPU_ROCE_TEST_DAEMON_IP.
+
+./run_realtime_decoding.sh --source qpu-kernel --decoder pymatching        --wire cpu_roce --setup-network --install-prefix <prefix>
+./run_realtime_decoding.sh --source qpu-kernel --decoder multi_error_lut   --wire cpu_roce --setup-network --install-prefix <prefix>
+./run_realtime_decoding.sh --source qpu-kernel --decoder nv-qldpc-decoder --gpu 0 --wire cpu_roce --setup-network --install-prefix <prefix>
+```
+
+The server's READY `port=` is then the TCP rendezvous port (the RDMA wire
+itself is negotiated via the QP/rkey exchange), and the same PASS/FAIL
+criteria apply unchanged.
+
+### FPGA source (real FPGA; needs a ConnectX NIC)
+
+```bash
+./run_realtime_decoding.sh --source fpga --decoder pymatching \
+    --setup-network --device <nic> --bridge-ip <host-ip> --fpga-ip <fpga-ip> \
+    --install-prefix <prefix>
+#   --decoder multi_error_lut / --decoder nv-qldpc-decoder --gpu 0 likewise
+```
+
+The delivered playback tool streams pre-generated syndromes over RoCE from the
+FPGA into the server's RDMA RX ring. `--spacing` (default 10 µs) paces the
+playback so it does not overrun the FPGA's fixed 64-slot ring. The
+`nv-qldpc-decoder` profiles auto-pace slower — 5 ms on host dispatch, 100 µs
+on device_graph — because the GPU decode cannot drain the ring at 10 µs (an
+explicit `--spacing` always wins); `trt_decoder` does the same (see below).
+There is **no emulator** in this example — `--source fpga` requires a real
+FPGA. (Emulator testing lives in the unittests
+`hsb_fpga_decoding_server_test.sh`.)
+
+### Ising decoder (`trt_decoder`, opt-in)
+
+The `trt_decoder` profile decodes with the published **Ising neural-network
+predecoder** (TensorRT engine from its ONNX export) chained into a PyMatching
+global decoder — same server, any wire above, host dispatch. It is pinned to
+the model's operating point (d=7, rounds=7, Z/XV, SPAM noise `--p-spam`
+0.01) and requires a locally prepared six-file artifact directory
+(`--ising-artifacts-dir DIR` or `QEC_ISING_ARTIFACTS_DIR`): `model.onnx`,
+`H_csr.bin`, `O_csr.bin`, `priors.bin`, `metadata.txt`, `D_sparse.txt`.
+Nothing in it ships with CUDA-QX — the weights are a gated Hugging Face
+download processed through the NVIDIA/Ising-Decoding repository (full recipe
+in the Sphinx page for this example). Missing/incomplete artifacts make the
+run **skip** (exit 77), listing the absent files.
+
+```bash
+./run_realtime_decoding.sh --source qpu-kernel --decoder trt_decoder \
+    --ising-artifacts-dir <dir> --install-prefix <prefix>
+./run_realtime_decoding.sh --source qpu-kernel --decoder trt_decoder --wire cpu_roce \
+    --setup-network --ising-artifacts-dir <dir> --install-prefix <prefix>
+./run_realtime_decoding.sh --source fpga --decoder trt_decoder \
+    --setup-network --device <nic> --bridge-ip <host-ip> --fpga-ip <fpga-ip> \
+    --ising-artifacts-dir <dir> --install-prefix <prefix>
+```
+
+On the FPGA source, the playback BRAM (512 frames; 9 frames/shot at d7/T7)
+caps the run at **56 shots** — the script's default for this profile — and
+`--spacing` defaults to 5 ms here (the 9-frame bursts would overrun the
+server's 64-slot RX ring at the usual 10 µs).
+
+## Decoders
+
+| decoder | qpu-kernel (udp / cpu_roce wire) | fpga (real FPGA) | extra requirement |
+|---|---|---|---|
+| `pymatching` | CPU (udp: no hardware) | NIC | none |
+| `multi_error_lut` | CPU (udp: no hardware) | NIC | none |
+| `nv-qldpc-decoder` | GPU (host dispatch) | NIC + GPU (device_graph dispatch) | plugin + `--gpu` |
+| `trt_decoder` | GPU (host dispatch) | NIC + GPU (host dispatch) | TRT plugin + Ising artifacts (opt-in) |
+
+- **`pymatching`** — CPU matching decoder; nothing extra.
+- **`multi_error_lut`** — CPU lookup-table decoder; nothing extra.
+- **`nv-qldpc-decoder`** — GPU relay-BP. Needs the prebuilt plugin
+  (auto-found in the install prefix, else pass `--nv-qldpc-plugin <path.so>`)
+  and a GPU selected with `--gpu <id>`. If the plugin is unavailable the script
+  exits `77` (skip).
+
+See `./run_realtime_decoding.sh --help` for the full option list.
