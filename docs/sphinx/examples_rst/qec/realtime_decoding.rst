@@ -556,7 +556,7 @@ Python Execution
 
 .. code-block:: bash
 
-   python3 surface_code_1.py --distance 3 --load_dem config.yaml --num_shots 1000 --target quantinuum --machine_name Helios-1 --emulate false --project_id <project-id>
+   python3 surface_code_1.py --distance 3 --load_dem config.yaml --num_shots 1000 --target quantinuum --machine_name Helios-1 --no-emulate --project_id <project-id>
 
 **Key Points:**
 
@@ -568,11 +568,11 @@ Python Execution
 
 .. code-block:: bash
 
-   python3 surface_code_1.py --distance 3 --load_dem config.yaml --num_shots 1000 --target quantinuum --emulate true
+   python3 surface_code_1.py --distance 3 --load_dem config.yaml --num_shots 1000 --target quantinuum --emulate
 
 **Key Points:**
 
-- ``emulate=True``: Emulate Quantinuum compilation path
+- ``--emulate``: Emulate the Quantinuum execution path
 - Decoder config is automatically uploaded to Quantinuum's servers when
   ``cudaq_qec.configure_decoders_from_file`` (Python) or
   :cpp:func:`cudaq::qec::decoding::config::configure_decoders_from_file` (C++) is called
@@ -647,7 +647,7 @@ They are valid both for python and C++ applications, however, they must be set b
 1. **Missing libraries**: Ensure all ``-lcudaq-qec-*`` libraries are linked
 2. **Wrong backend library**: Use ``-simulation`` for Stim, ``-quantinuum`` for Quantinuum
 3. **Missing** ``-Wl,--export-dynamic`` **flag**: Required for Quantinuum targets
-4. **Wrong target flags**: Use ``--emulate true`` for emulation and ``--emulate false`` with ``--project_id`` for hardware
+4. **Wrong target flags**: Use ``--emulate`` for emulation and ``--no-emulate`` with ``--project_id`` for hardware
 
 **Common Runtime Issues:**
 

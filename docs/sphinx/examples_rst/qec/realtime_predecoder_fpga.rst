@@ -234,7 +234,7 @@ Building the FPGA demo requires ``holoscan-sensor-bridge`` and
 
 .. note::
 
-   CUDA-QX 0.7 requires the Hololink, DOCA, TensorRT ONNX parser, and realtime
+   CUDA-Q QEC 0.7 requires the Hololink, DOCA, TensorRT ONNX parser, and realtime
    Hololink bridge libraries to be supplied explicitly.  Its CMake build
    discovers these dependencies after evaluating the
    ``hololink_predecoder_bridge`` target, so passing only the HSB source and

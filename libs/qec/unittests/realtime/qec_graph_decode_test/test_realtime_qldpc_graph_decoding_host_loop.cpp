@@ -25,7 +25,6 @@
 #include "cudaq/qec/realtime/graph_resources.h"
 #include "cudaq/qec/realtime/sparse_to_csr.h"
 
-#include "relay_bp_host_loop_schema.h"
 #include "cudaq/realtime/daemon/dispatcher/cudaq_realtime.h"
 #include "cudaq/realtime/daemon/dispatcher/dispatch_kernel_launch.h"
 
@@ -171,7 +170,6 @@ protected:
     cudaError_t flags_err = cudaSetDeviceFlags(cudaDeviceMapHost);
     ASSERT_TRUE(flags_err == cudaSuccess ||
                 flags_err == cudaErrorSetOnActiveProcess);
-    test_realtime_qldpc::register_relay_bp_host_loop_schema();
     auto config_yaml =
         read_file(std::string(TEST_DATA_DIR) + "/config_nv_qldpc_relay.yml");
     auto mdc =

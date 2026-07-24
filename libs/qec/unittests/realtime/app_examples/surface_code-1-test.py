@@ -168,8 +168,7 @@ def test_quantinuum_requires_machine_name(case, dem_file):
             str(dem_file),
             "--target",
             "quantinuum",
-            "--emulate",
-            "false",
+            "--no-emulate",
             # no --machine_name → should fail
         ])
 
@@ -187,8 +186,7 @@ def test_quantinuum_requires_project_id_remote(case, dem_file):
             str(dem_file),
             "--target",
             "quantinuum",
-            "--emulate",
-            "false",
+            "--no-emulate",
             "--machine_name",
             "Helios-1SC",
             # no --project_id → should fail
