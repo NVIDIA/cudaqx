@@ -66,6 +66,10 @@
     :param H: Parity check matrix (tensor format)
     :param params: Heterogeneous map of parameters:
 
+        - `cuda_device_id` (int): Zero-based CUDA device ordinal on which to
+          construct the decoder and run every decode. Must be ``>= 0`` and less
+          than the number of visible GPUs. When omitted, the current/default CUDA
+          device is used. Introduced in 0.7.0.
         - `use_sparsity` (bool): Whether or not to use a sparse matrix solver
         - `error_rate` (double): Probability of an error (in 0-1 range) on a
           block data bit (defaults to 0.001)

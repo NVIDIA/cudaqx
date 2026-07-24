@@ -66,6 +66,15 @@ Decoder Interfaces
 .. autoclass:: cudaq_qec.AsyncDecoderResult
     :members:
 
+.. note::
+   **NumPy result arrays** — As of 0.7.0, the ``result`` field of
+   :class:`cudaq_qec.DecoderResult` (and the per-shot results returned by
+   :class:`cudaq_qec.BatchDecoderResult` and
+   :class:`cudaq_qec.AsyncDecoderResult`) is a 1-D NumPy array rather than a
+   Python ``list``. Indexing and iteration are unchanged, but code that relied
+   on the result being a ``list`` specifically (for example ``isinstance(res,
+   list)`` or ``list``-only methods) should be updated.
+
 .. autofunction:: cudaq_qec.get_decoder
 
 Built-in Decoders
@@ -96,6 +105,20 @@ Tensor Network Decoder
 ----------------------
 
 .. include:: tensor_network_decoder_api.rst
+
+.. _pymatching_decoder_api_python:
+
+PyMatching Decoder
+------------------
+
+.. include:: pymatching_api.rst
+
+.. _chromobius_decoder_api_python:
+
+Chromobius Decoder
+------------------
+
+.. include:: chromobius_api.rst
 
 Real-Time Decoding
 ==================

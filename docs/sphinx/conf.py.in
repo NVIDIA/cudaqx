@@ -102,6 +102,8 @@ exclude_patterns = [
     'api/qec/sliding_window_api.rst',
     'api/qec/trt_decoder_api.rst',
     'api/qec/tensor_network_decoder_api.rst',
+    'api/qec/pymatching_api.rst',
+    'api/qec/chromobius_api.rst',
     'api/qec/python_realtime_decoding_api.rst',
     'api/qec/cpp_realtime_decoding_api.rst',
     'api/qec/realtime_pipeline_api.rst',

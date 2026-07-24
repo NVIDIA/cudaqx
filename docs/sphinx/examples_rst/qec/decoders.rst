@@ -26,6 +26,13 @@ that would result from those errors.
    ``scipy`` is an optional dependency; if it is not installed, pass a dense
    NumPy array instead.
 
+.. note::
+   **NumPy result arrays** — As of v0.7.0, a decoder's ``result`` (from
+   :class:`cudaq_qec.DecoderResult`, and the per-shot results of
+   :class:`cudaq_qec.BatchDecoderResult` / :class:`cudaq_qec.AsyncDecoderResult`)
+   is a 1-D NumPy array rather than a Python ``list``. Indexing and iteration are
+   unchanged.
+
 Detector Error Model
 +++++++++++++++++++++
 
@@ -337,3 +344,57 @@ See Also
 - `ONNX <https://onnx.ai/>`_ - Open Neural Network Exchange format
 - `TensorRT Documentation <https://docs.nvidia.com/deeplearning/tensorrt/>`_ - NVIDIA TensorRT
 - `Stim Documentation <https://github.com/quantumlib/Stim>`_ - Fast stabilizer circuit simulator
+
+Matching-Based Decoding with PyMatching
++++++++++++++++++++++++++++++++++++++++
+
+CUDA-Q QEC bundles a minimum-weight perfect matching (MWPM) decoder built on the
+open-source `PyMatching <https://github.com/oscarhiggott/PyMatching>`_ library,
+suitable for matchable codes such as the surface code. It is selected by name
+through :func:`cudaq_qec.get_decoder` and takes a parity-check matrix whose
+columns each have one or two set entries:
+
+.. tab:: Python
+
+   .. code-block:: python
+
+      import cudaq_qec as qec
+      import numpy as np
+
+      H = np.array([[1, 1, 0],
+                    [0, 1, 1]], dtype=np.uint8)
+
+      dec = qec.get_decoder("pymatching", H,
+                            error_rate_vec=[0.1, 0.1, 0.1],
+                            merge_strategy="smallest_weight")
+      result = dec.decode(syndrome)
+
+Per-error priors are supplied via ``error_rate_vec`` (values in ``(0, 0.5]``),
+and parallel edges are combined according to ``merge_strategy``. See the
+:ref:`PyMatching Decoder API <pymatching_decoder_api_python>` for the full list
+of options.
+
+Color-Code Decoding with Chromobius
++++++++++++++++++++++++++++++++++++
+
+For color codes, CUDA-Q QEC bundles a decoder built on the open-source
+`Chromobius <https://github.com/quantumlib/chromobius>`_ Mobius decoder. Unlike
+the matrix-based decoders, Chromobius is *detector-error-model native*: it is
+constructed from Stim detector-error-model (DEM) **text** rather than a
+parity-check matrix, and predicts logical observable flips directly.
+
+.. tab:: Python
+
+   .. code-block:: python
+
+      import cudaq_qec as qec
+
+      with open("color_code.dem") as f:
+          dem_text = f.read()
+
+      dec = qec.get_decoder("chromobius", dem_text)
+      corrections = dec.decode(syndrome)  # predicted observable flips
+
+Constructing Chromobius from a parity-check matrix is rejected with an error.
+See the :ref:`Chromobius Decoder API <chromobius_decoder_api_python>` for the
+available options.

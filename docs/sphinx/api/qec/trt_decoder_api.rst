@@ -141,3 +141,23 @@
           the `decode()` method automatically zero-pads single syndromes to fill
           the batch. The `decode_batch()` method requires the number of syndromes
           to be an integral multiple of the model's batch size.
+
+        - `global_decoder` (string): Name of an optional second-stage "global"
+          decoder to chain after the TensorRT model (composite decoding). The TRT
+          model acts as a first-stage predecoder whose output is passed to the
+          named global decoder (for example ``"pymatching"`` or ``"chromobius"``).
+          When omitted, the TRT model's output is returned directly. See
+          :ref:`the real-time decoding API <python_realtime_decoding_api>` for
+          configuring composite decoding from YAML. Introduced in 0.7.0.
+
+        - `global_decoder_params` (map): Parameters forwarded to the
+          `global_decoder`. The accepted keys follow the parameter schema of the
+          named global decoder. When constructing the decoder directly (rather
+          than from YAML), supply `global_decoder_params` (which may be an empty
+          map) whenever `global_decoder` is set; otherwise the global stage is
+          skipped. Introduced in 0.7.0.
+
+        - `cuda_device_id` (int): Zero-based CUDA device ordinal on which to
+          construct the decoder and run every decode. Must be ``>= 0`` and less
+          than the number of visible GPUs. When omitted, the current/default CUDA
+          device is used. Introduced in 0.7.0.
