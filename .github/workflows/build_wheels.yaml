@@ -271,7 +271,7 @@ jobs:
           bash scripts/ci/build_metapackages.sh ${{ inputs.version || '0.15.99' }}
           find libs -name dist | xargs ls -la
           mkdir -p /metapackages
-          mv libs/{qec,solvers}/python/metapackages/dist/* /metapackages/
+          mv libs/qec/python/metapackages/dist/* /metapackages/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

@@ -34,12 +34,7 @@ fi
 
 FILES_TO_COPY=(NOTICE CITATION.cff)
 
-# Copy setup.py file for the qec meta-package to the solvers meta-package directory.
-cp $TOP_DIR/libs/qec/python/metapackages/setup.py $TOP_DIR/libs/solvers/python/metapackages/setup.py
-# Replace the package name in the setup.py file.
-sed -i "s/^package_name = 'cudaq-qec'/package_name = 'cudaq-solvers'/g" $TOP_DIR/libs/solvers/python/metapackages/setup.py
-
-for package in qec solvers; do
+for package in qec; do
   echo "Building $package metapackage..."
   cd $TOP_DIR/libs/$package/python/metapackages
 

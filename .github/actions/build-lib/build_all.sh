@@ -18,7 +18,7 @@ cmake -S . -B "$build_dir" \
   -DCMAKE_C_COMPILER_LAUNCHER=ccache \
   -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
   -DCUDAQ_DIR="$cudaq_prefix/lib/cmake/cudaq/" \
-  -DCUDAQX_ENABLE_LIBS="all" \
+  -DCUDAQX_ENABLE_LIBS="qec" \
   -DCUDAQX_INCLUDE_TESTS=ON \
   -DCUDAQX_BINDINGS_PYTHON=ON \
   -DCMAKE_INSTALL_PREFIX="$install_prefix" \
