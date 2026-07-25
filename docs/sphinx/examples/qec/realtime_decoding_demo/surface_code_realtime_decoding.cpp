@@ -740,59 +740,63 @@ void show_help() {
 int main(int argc, char **argv) {
   run_options opts;
 
-  for (int i = 1; i < argc; i++) {
-    std::string arg = argv[i];
-    if (arg == "--distance") {
-      opts.distance = std::stoi(argv[i + 1]);
-      i++;
-    } else if (arg == "--num_shots") {
-      opts.num_shots = std::stoi(argv[i + 1]);
-      i++;
-    } else if (arg == "--p_cnot") {
-      opts.p_cnot = std::stod(argv[i + 1]);
-      i++;
-    } else if (arg == "--help" || arg == "-h") {
-      show_help();
-      return 0;
-    } else if (arg == "--num_logical") {
-      opts.num_logical = std::stoi(argv[i + 1]);
-      i++;
-    } else if (arg == "--num_rounds") {
-      opts.num_rounds = std::stoi(argv[i + 1]);
-      i++;
-    } else if (arg == "--seed") {
-      opts.seed = std::stoi(argv[i + 1]);
-      i++;
-    } else if (arg == "--decoder_type") {
-      opts.decoder_type = argv[i + 1];
-      i++;
-    } else if (arg == "--sw_window_size") {
-      opts.sw_window_size = std::stoi(argv[i + 1]);
-      i++;
-    } else if (arg == "--sw_step_size") {
-      opts.sw_step_size = std::stoi(argv[i + 1]);
-      i++;
-    } else if (arg == "--save_dem") {
-      opts.save_dem = true;
-      opts.dem_filename = argv[i + 1];
-      i++;
-    } else if (arg == "--load_dem") {
-      opts.load_dem = true;
-      opts.dem_filename = argv[i + 1];
-      i++;
-    } else if (arg == "--save_syndrome") {
-      opts.save_syndrome = true;
-      opts.syndrome_filename = argv[i + 1];
-      i++;
-    } else if (arg == "--load_syndrome") {
-      opts.load_syndrome = true;
-      opts.syndrome_filename = argv[i + 1];
-      i++;
-    } else {
-      printf("Unknown argument: %s\n", arg.c_str());
-      show_help();
-      return 1;
+  // A value-taking option must not read past argv, and a malformed number
+  // must exit with a message instead of unwinding out of main.
+  try {
+    for (int i = 1; i < argc; i++) {
+      std::string arg = argv[i];
+      auto next_value = [&]() -> const char * {
+        if (i + 1 >= argc)
+          throw std::runtime_error(arg + " requires a value");
+        return argv[++i];
+      };
+      if (arg == "--distance") {
+        opts.distance = std::stoi(next_value());
+      } else if (arg == "--num_shots") {
+        opts.num_shots = std::stoi(next_value());
+      } else if (arg == "--p_cnot") {
+        opts.p_cnot = std::stod(next_value());
+      } else if (arg == "--help" || arg == "-h") {
+        show_help();
+        return 0;
+      } else if (arg == "--num_logical") {
+        opts.num_logical = std::stoi(next_value());
+      } else if (arg == "--num_rounds") {
+        opts.num_rounds = std::stoi(next_value());
+      } else if (arg == "--seed") {
+        opts.seed = std::stoi(next_value());
+      } else if (arg == "--decoder_type") {
+        opts.decoder_type = next_value();
+      } else if (arg == "--sw_window_size") {
+        opts.sw_window_size = std::stoi(next_value());
+      } else if (arg == "--sw_step_size") {
+        opts.sw_step_size = std::stoi(next_value());
+      } else if (arg == "--save_dem") {
+        opts.save_dem = true;
+        opts.dem_filename = next_value();
+      } else if (arg == "--load_dem") {
+        opts.load_dem = true;
+        opts.dem_filename = next_value();
+      } else if (arg == "--save_syndrome") {
+        opts.save_syndrome = true;
+        opts.syndrome_filename = next_value();
+      } else if (arg == "--load_syndrome") {
+        opts.load_syndrome = true;
+        opts.syndrome_filename = next_value();
+      } else {
+        printf("Unknown argument: %s\n", arg.c_str());
+        show_help();
+        return 1;
+      }
     }
+  } catch (const std::invalid_argument &) {
+    printf("Error: invalid numeric value on the command line\n");
+    show_help();
+    return 1;
+  } catch (const std::exception &e) {
+    printf("Error: %s\n", e.what());
+    show_help();
+    return 1;
   }
 
   if (opts.save_syndrome && opts.load_syndrome) {

@@ -140,10 +140,11 @@ FPGA source (real FPGA over RoCE)
 
 ``--setup-network`` configures the ConnectX interface (needs ``sudo``);
 ``--spacing`` (default 10 µs) paces the playback so it does not overrun the
-FPGA's fixed 64-slot RDMA RX ring. The ``nv-qldpc-decoder`` profiles
-auto-pace slower — 100 µs — because the GPU decode cannot drain the ring at
-10 µs; an explicit ``--spacing`` always wins (``trt_decoder`` auto-paces the
-same way).
+server's 64-slot RDMA RX ring. The playback timer fires once per **frame**
+(one BRAM window), so a shot spans frames-per-shot × spacing. The
+``nv-qldpc-decoder`` profiles auto-pace slower — 100 µs per frame — because
+the GPU decode cannot drain the ring at 10 µs; an explicit ``--spacing``
+always wins (``trt_decoder`` auto-paces the same way).
 
 The server has two independent knobs, both derived automatically (override
 with ``--wire`` / ``--dispatch``): the **wire** is the bridge-provider library
@@ -207,12 +208,13 @@ orientation and per-round bit order and cannot consume these artifacts).
 
 On the FPGA source the playback BRAM (512 frames) caps this geometry at **56
 shots** per run (9 frames per shot: 8 syndrome slices + 1 corrections frame);
-the script defaults to exactly that, and also raises the inter-shot
-``--spacing`` to 100 µs for this profile — the 9-frame bursts would otherwise
-overrun the server's 64-slot RX ring (about 7 shots of buffer against a
-~35 µs decode round trip).
+the script defaults to exactly that, and also raises the per-frame
+``--spacing`` to 100 µs for this profile — at the default 10 µs the stream
+outruns the served rate and overruns the server's 64-slot RX ring (about 7
+shots of buffer).
 
-Preparing the artifact directory (once, on any machine) is automated by the
+Preparing the artifact directory (once, on a machine with an NVIDIA GPU —
+the pinned workflow runs GPU inference for the export) is automated by the
 ``prepare_ising_artifacts.py`` script that ships in this example's directory:
 
 1. Accept the gated model terms at

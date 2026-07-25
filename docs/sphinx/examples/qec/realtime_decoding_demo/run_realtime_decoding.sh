@@ -105,8 +105,10 @@ NUM_SHOTS=""                 # explicit override
 # playback run (504/512), just as the d3/T4 default 85 fills 510/512.
 TRT_FPGA_SHOTS=56
 
-# FPGA pacing: inter-shot spacing (us) keeps playback from overrunning the
-# FPGA's fixed 64-slot RX ring.  The qpu-kernel path needs none.
+# FPGA pacing (us): the playback engine's timer fires once per FRAME (one
+# BRAM window per frame), so a shot takes frames-per-shot x SPACING on the
+# wire.  Pacing keeps playback from overrunning the server's 64-slot RX
+# ring.  The qpu-kernel path needs none.
 SPACING="10"
 
 # The decoding server's two knobs (both default from --source/--decoder):
@@ -119,10 +121,11 @@ WIRE=""                      # udp | cpu_roce | hololink
 DISPATCH=""                  # host | device_graph
 GPU_ID=0
 
-# Network (fpga source only)
+# Network (fpga source only).  The FPGA data path is same-/24 routed (no
+# gateway), so the bridge NIC's default IP lives on the FPGA's subnet.
 DO_SETUP_NETWORK=false
 IB_DEVICE=""                 # auto-detect first Up ConnectX
-BRIDGE_IP="10.0.0.1"
+BRIDGE_IP="192.168.0.1"
 FPGA_IP="192.168.0.2"
 MTU=4096
 PAGE_SIZE=384
@@ -211,10 +214,13 @@ RoCE-capable ports, e.g. loopback-cabled):
 
 FPGA-only:
   --device DEV            ConnectX IB device (default: auto-detect)
-  --bridge-ip ADDR        Server-side NIC IP (default 10.0.0.1)
+  --bridge-ip ADDR        Server-side NIC IP (default 192.168.0.1; must share
+                          the FPGA's /24)
   --fpga-ip ADDR          FPGA IP (default 192.168.0.2)
-  --spacing US            Inter-shot spacing us (default 10; keeps the RX ring
-                          from overrunning)
+  --spacing US            Playback pacing in us (default 10). The FPGA timer
+                          fires once per FRAME (one BRAM window), so a shot
+                          spans frames-per-shot x spacing; keeps the RX ring
+                          from overrunning
   --no-verify             Skip playback correction verification
 
   --help, -h              Show this help
@@ -261,6 +267,16 @@ if [[ "$SOURCE" != "qpu-kernel" && "$SOURCE" != "fpga" ]]; then
     echo "ERROR: --source must be qpu-kernel or fpga (got '$SOURCE')" >&2; exit 1
 fi
 
+# The bridge NIC and the FPGA must share a /24: there is no gateway on the
+# FPGA link, and --setup-network flushes the NIC and assigns BRIDGE_IP/24, so
+# a mismatched pair leaves the FPGA unreachable -- the run then dies minutes
+# later as an opaque hololink read_timeout_error. Reject it up front.
+if [[ "$SOURCE" == "fpga" && "${BRIDGE_IP%.*}" != "${FPGA_IP%.*}" ]]; then
+    echo "ERROR: --bridge-ip $BRIDGE_IP and --fpga-ip $FPGA_IP are on different" >&2
+    echo "       /24 subnets; the FPGA data path is same-subnet routed." >&2
+    exit 1
+fi
+
 # The example source also supports 'sliding_window', but that decoder is not
 # yet supported over the realtime decoding path to the GPU (it needs matching
 # updates to the proprietary cudevice archive), so this script does not accept
@@ -295,11 +311,11 @@ if [[ "$DECODER" == "trt_decoder" ]]; then
     GEN_DISTANCE=7
     GEN_ROUNDS=7
     FPGA_SHOTS="$TRT_FPGA_SHOTS"
-    # d7/T7 bursts 9 frames per shot into the server's 64-slot RX ring (~7
-    # shots of buffer) and the measured decode round trip averages ~35us --
-    # the 10us default inter-shot spacing overruns the ring around shot 8-18
+    # d7/T7 sends 9 frames per shot (each frame paced by SPACING) into the
+    # server's 64-slot RX ring (~7 shots of buffer). At the 10us default the
+    # stream outruns the served rate and the ring overruns around shot 8-18
     # (a corrupted stream then kills the decode with an invalid-syndrome
-    # matching error). 100us clears the measured decode with ~3x margin.
+    # matching error). 100us per frame is validated on hardware.
     $SPACING_EXPLICIT || SPACING=100
     if [[ "$SOURCE" == "fpga" && -n "$NUM_SHOTS" ]] && \
        (( NUM_SHOTS > TRT_FPGA_SHOTS )); then
@@ -332,10 +348,11 @@ case "$DISPATCH" in host|device_graph) ;;
 esac
 
 # nv-qldpc's GPU decode (plus first-call PTX JIT on new hardware) cannot
-# drain the server's 64-slot RX ring at the 10us default playback spacing --
-# measured on-rig: 171/510 frames captured (host dispatch) and ~15/85 shots
-# verified (device_graph) before the ring overruns. 100us clears the
-# measured floors on both dispatch paths; an explicit --spacing wins.
+# drain the server's 64-slot RX ring at the default 10us-per-frame playback
+# pacing -- measured on-rig: 171/510 frames captured (host dispatch) and
+# ~15/85 shots verified (device_graph) before the ring overruns. 100us per
+# frame clears the measured floors on both dispatch paths; an explicit
+# --spacing wins.
 if [[ "$SOURCE" == "fpga" && "$DECODER" == "nv-qldpc-decoder" ]] && \
    ! $SPACING_EXPLICIT; then
     SPACING=100
@@ -461,10 +478,15 @@ resolve_paths() {
     fi
 
     # Load path: deliverable libs + plugins, plus the CUDA-Q runtime/realtime.
+    # The explicit realtime override goes FIRST: a CUDA-Q prefix may carry its
+    # own libcudaq-realtime.so, and appending the override after it would let
+    # the prefix's copy shadow the one the user asked for (symptom: undefined
+    # symbol errors against the newer realtime ABI).
     local p=""
-    [[ -n "$INSTALL_PREFIX"   ]] && p="$INSTALL_PREFIX/lib:$INSTALL_PREFIX/lib/decoder-plugins"
+    [[ -n "$REALTIME_LIB_DIR" ]] && p="$REALTIME_LIB_DIR/lib:$REALTIME_LIB_DIR"
+    [[ -n "$INSTALL_PREFIX"   ]] && p="$p:$INSTALL_PREFIX/lib:$INSTALL_PREFIX/lib/decoder-plugins"
     [[ -n "$CUDAQ_PREFIX"     ]] && p="$p:$CUDAQ_PREFIX/lib:$CUDAQ_PREFIX/lib/plugins"
-    [[ -n "$REALTIME_LIB_DIR" ]] && p="$p:$REALTIME_LIB_DIR/lib:$REALTIME_LIB_DIR"
+    p="${p#:}"
     export LD_LIBRARY_PATH="${p}:${LD_LIBRARY_PATH:-}"
 
     # nv-qldpc plugin must be dlopen-able from the deliverable plugins dir.

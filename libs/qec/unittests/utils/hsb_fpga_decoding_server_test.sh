@@ -228,11 +228,12 @@ Run options:
   --gpu-roce-num-pages N Server GPU RoCE ring slots (default: the HSB 64-WQE
                          depth; values above it are clamped, since a ring with
                          more slots than WQEs drops frames)
-  --spacing N            Inter-shot spacing in microseconds (default: 10;
-                         the slow-decode profiles trt_decoder and
-                         nv-qldpc-decoder default to 100 instead, so the
-                         playback stream cannot overrun the 64-slot RX
-                         ring mid-decode)
+  --spacing N            Per-frame playback pacing in microseconds (default:
+                         10; the FPGA timer fires once per frame, so a shot
+                         spans frames-per-shot x spacing). The slow-decode
+                         profiles trt_decoder and nv-qldpc-decoder default
+                         to 100 instead, so the playback stream cannot
+                         overrun the 64-slot RX ring mid-decode
   --control-port N       UDP control port for emulator (default: 8193)
 
   --help, -h             Show this help
@@ -312,15 +313,17 @@ if [[ "$TRANSPORT" != "cpu_roce" && "$TRANSPORT" != "gpu_roce" ]]; then
     exit 1
 fi
 
-# Per-decoder playback pacing: a profile whose per-shot decode latency
-# exceeds the playback tool's 10us default inter-shot spacing overruns the
-# 64-slot RX ring under an unpaced stream (dropped enqueues mis-assemble a
-# shot's volume and the decode dies with an invalid-syndrome matching error;
-# the ILA sample count comes up short).  For this test's profiles the slow
-# ones are trt_decoder (fixed per-invocation TensorRT engine overhead at
-# batch 1) and nv-qldpc-decoder (iterative relay-BP); pymatching decodes
-# these d3 volumes in microseconds and keeps the unpaced default -- the
-# burst path is part of what its profile exercises.
+# Per-decoder playback pacing.  The playback engine's timer fires once per
+# FRAME (one BRAM window per frame), so --spacing is per-frame pacing and a
+# shot spans frames-per-shot x spacing on the wire.  A profile whose
+# per-shot decode latency exceeds that arrival window overruns the 64-slot
+# RX ring (dropped enqueues mis-assemble a shot's volume and the decode dies
+# with an invalid-syndrome matching error; the ILA sample count comes up
+# short).  For this test's profiles the slow ones are trt_decoder (fixed
+# per-invocation TensorRT engine overhead at batch 1) and nv-qldpc-decoder
+# (iterative relay-BP); pymatching decodes these d3 volumes in microseconds
+# and keeps the unpaced default -- the tightly paced path is part of what
+# its profile exercises.
 #
 # 100us clears every measured floor on this loop with margin: at d3/T4 the
 # host-dispatch runs fail at 25us (nv-qldpc) and 10us (trt) and pass at

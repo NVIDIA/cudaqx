@@ -81,8 +81,11 @@ find_package(CUDAToolkit REQUIRED)
 
 # The realtime dispatch archive carries relocatable (RDC) device code, so the
 # -cqr executable must be linked with a CUDA device-link step (see below).
+# The explicit realtime prefix is searched FIRST: when the user passes a
+# separate CUDAQ_REALTIME_DIR they mean it to win over any copy the CUDA-Q
+# install carries, or the build silently mixes realtime revisions.
 find_library(CUDAQ_REALTIME_DISPATCH_LIB cudaq-realtime-dispatch
-  PATHS "${CUDAQ_INSTALL_DIR}" "${CUDAQ_REALTIME_DIR}" PATH_SUFFIXES lib REQUIRED)
+  PATHS "${CUDAQ_REALTIME_DIR}" "${CUDAQ_INSTALL_DIR}" PATH_SUFFIXES lib REQUIRED)
 
 link_directories(
   "${CUDAQX_INSTALL_DIR}/lib"
