@@ -505,6 +505,18 @@ grid; use :ref:`stabilizer_grid <qec_stabilizer_grid_python>` or
 
 You must pass ``distance`` when constructing the code; there is no default.
 
+**Orientation**
+
+The surface code accepts an optional ``orientation`` string that selects which
+Pauli type occupies the bulk checkerboard and which boundary pair carries the
+X- versus Z-type stabilizers. The first character (``X`` or ``Z``) sets the bulk
+type; the second character (``H`` or ``V``) sets the boundary placement. Valid
+values are ``"XV"``, ``"XH"``, ``"ZV"``, and ``"ZH"`` (aliases ``"O1"``, ``"O2"``,
+``"O3"``, and ``"O4"`` respectively; case-insensitive). The default is ``"ZH"``,
+which reproduces the layout described above. The logical observables and the CNOT
+extraction schedule are orientation-aware, so changing the orientation changes the
+returned stabilizers, observables, and measurement schedule consistently.
+
 The :ref:`stabilizer_grid <qec_stabilizer_grid_python>` helper documents how
 stabilizers and data qubits are indexed on the grid and provides helpers to
 print the layout. **Python:** :ref:`cudaq_qec.stabilizer_grid <qec_stabilizer_grid_python>` — **C++:**
@@ -541,7 +553,10 @@ Usage:
         import cudaq_qec as qec
 
         # Rotated surface code; distance is required
-        code = qec.get_code('surface_code', distance=3)
+        code = qec.get_code('surface_code', distance=3)  # default orientation "ZH"
+
+        # Optionally select an orientation (one of "XV", "XH", "ZV", "ZH")
+        code_xh = qec.get_code('surface_code', distance=3, orientation='XH')
 
         stabilizers = code.get_stabilizers()
         parity = code.get_parity()
@@ -552,6 +567,12 @@ Usage:
 
         auto code = cudaq::qec::get_code(
             "surface_code", cudaqx::heterogeneous_map{{"distance", 3}});
+
+        // Optionally select an orientation (one of "XV", "XH", "ZV", "ZH")
+        auto code_xh = cudaq::qec::get_code(
+            "surface_code", cudaqx::heterogeneous_map{
+                                {"distance", 3},
+                                {"orientation", std::string("XH")}});
 
         auto stabilizers = code->get_stabilizers();
         auto parity = code->get_parity();
@@ -789,6 +810,55 @@ Usage Example
         auto result = decoder->decode(syndromes[0]);
 
 
+DEM Sampling
+^^^^^^^^^^^^
+
+The ``dem_sampling`` function samples errors and syndromes from a detector error
+model (DEM). Given a binary check matrix :math:`H` of shape
+``[num_checks x num_error_mechanisms]`` and a vector of per-mechanism Bernoulli
+probabilities, it generates random error vectors and computes
+:math:`\text{syndromes} = \text{errors} \cdot H^T \pmod{2}`.
+
+In Python, the ``backend`` parameter (``"auto"``, ``"gpu"``, or ``"cpu"``)
+controls whether sampling runs on the GPU via cuStabilizer or on the CPU. The
+function accepts NumPy arrays and PyTorch CUDA tensors. In C++ the CPU and GPU
+paths live in separate namespaces (``cudaq::qec::dem_sampler::cpu`` and
+``cudaq::qec::dem_sampler::gpu``).
+
+.. tab:: Python
+
+    .. code-block:: python
+
+        import cudaq_qec as qec
+        import numpy as np
+
+        H = np.array([[1, 1, 0],
+                      [0, 1, 1]], dtype=np.uint8)
+        error_probs = np.array([0.05, 0.10, 0.05])
+
+        # backend="auto": GPU when available, else CPU
+        syndromes, errors = qec.dem_sampling(
+            H, num_shots=1000, error_probabilities=error_probs, seed=42)
+        # syndromes: uint8 [1000 x 2], errors: uint8 [1000 x 3]
+
+.. tab:: C++
+
+    .. literalinclude:: ../../examples/qec/cpp/dem_sampling.cpp
+       :language: cpp
+       :start-after: [Begin Documentation]
+
+    Compile and run with
+
+    .. code-block:: bash
+
+       nvq++ -lcudaq-qec dem_sampling.cpp
+       ./a.out
+
+For a complete walkthrough including GPU acceleration, input type handling, and
+backend selection details, see the
+:doc:`DEM Sampling example </examples_rst/qec/dem_sampling>`.
+
+
 Pre-built QEC Decoders
 ----------------------
 
@@ -985,10 +1055,14 @@ Key Steps:
    ``H`` (for example ``dem.detector_error_matrix``) and ``error_rate_vec`` with
    one entry per column of ``H`` (for example ``dem.error_rates`` from the same
    DEM). The matrix must be in the sorted form expected by :code:`pcm_is_sorted`
-   for your ``num_syndromes_per_round``; DEMs from :code:`z_dem_from_memory_circuit`
-   are canonicalized. Hand-built matrices may need :code:`simplify_pcm`.
-2. **Set the schedule and window**: Provide ``num_syndromes_per_round`` (constant
-   every round). Choose ``window_size`` and ``step_size`` so ``window_size`` and
+   for your ``num_syndromes_per_round``; DEMs from :code:`dem_from_memory_circuit`
+   (and its single-basis variants :code:`z_dem_from_memory_circuit` /
+   :code:`x_dem_from_memory_circuit`) are canonicalized. Hand-built matrices may
+   need :code:`simplify_pcm`.
+2. **Set the schedule and window**: Provide ``num_syndromes_per_round`` (the number of 
+   syndrome measurements per round) and ``num_boundary_syndromes`` (the number of 
+   stabilizer syndromes fixed by the state-prep at the beginning and end of the circuit).
+   Choose ``window_size`` and ``step_size`` so ``window_size`` and
    ``step_size`` stay within valid bounds and ``num_rounds - window_size`` is
    divisible by ``step_size``, with ``num_rounds`` inferred from ``H`` and
    ``num_syndromes_per_round``.
@@ -1019,12 +1093,13 @@ Usage:
         noise = cudaq.NoiseModel()
         noise.add_all_qubit_channel("x", cudaq.Depolarization2(0.001), 1)
         statePrep = qec.operation.prep0
-        dem = qec.z_dem_from_memory_circuit(code, statePrep, num_rounds, noise)
+        dem = qec.dem_from_memory_circuit(code, statePrep, num_rounds, noise)
         inner_decoder_params = {'use_osd': True, 'max_iterations': 50, 'use_sparsity': True}
         opts = {
             'error_rate_vec': np.array(dem.error_rates),
             'window_size': 1,
-            'num_syndromes_per_round': code.get_num_z_stabilizers(),
+            'num_syndromes_per_round': code.get_num_z_stabilizers() + code.get_num_x_stabilizers(),
+            'num_boundary_syndromes': code.get_num_z_stabilizers(),
             'inner_decoder_name': 'nv-qldpc-decoder',
             'inner_decoder_params': inner_decoder_params,
         }
@@ -1046,14 +1121,15 @@ Usage:
             cudaq::noise_model noise;
             noise.add_all_qubit_channel("x", cudaq::depolarization2(0.001), 1);
             auto statePrep = cudaq::qec::operation::prep0;
-            auto dem = cudaq::qec::z_dem_from_memory_circuit(*code, statePrep, num_rounds,
+            auto dem = cudaq::qec::dem_from_memory_circuit(*code, statePrep, num_rounds,
                                                             noise);
             auto inner_decoder_params = cudaqx::heterogeneous_map{
                 {"use_osd", true}, {"max_iterations", 50}, {"use_sparsity", true}};
             auto opts = cudaqx::heterogeneous_map{
                 {"error_rate_vec", dem.error_rates},
                 {"window_size", 1},
-                {"num_syndromes_per_round", code->get_num_z_stabilizers()},
+                {"num_syndromes_per_round", code->get_num_z_stabilizers() + code->get_num_x_stabilizers()},
+                {"num_boundary_syndromes", code->get_num_z_stabilizers()},
                 {"inner_decoder_name", "nv-qldpc-decoder"},
                 {"inner_decoder_params", inner_decoder_params}};
             auto swdec = cudaq::qec::get_decoder("sliding_window",
@@ -1290,11 +1366,14 @@ The functions return a tuple containing:
 1. **Syndrome Measurements** (:code:`tensor<uint8_t>`):
 
    * Shape: :code:`(num_shots, num_detectors)`
-   * Columns are ordered as: ``num_fixed`` boundary detectors (only the
-     stabilizer type matching the state-prep basis, since that is the only
-     type that is deterministic at the circuit's endpoints), then one
-     detector block per inter-round transition (``num_rounds - 1`` of
-     them), then ``num_fixed`` more boundary detectors
+   * Columns follow the layout ``[ B  S  S  …  S  B ]``, where:
+
+     - ``B`` (boundary block) = ``numAncZ = code.get_num_z_stabilizers()`` for Z-basis
+       preparations (``prep0``/``prep1``), or ``numAncX = code.get_num_x_stabilizers()``
+       for X-basis preparations (``prepp``/``prepm``)
+     - ``S`` (inter-round block) = ``numAncZ + numAncX`` detectors per round transition
+       (``num_rounds - 1`` blocks total)
+     - Total: ``num_detectors = 2*B + (num_rounds - 1)*S``
    * Values are 0 or 1 representing measurement outcomes
 
 2. **Data Measurements** (:code:`tensor<uint8_t>`):
@@ -1422,3 +1501,4 @@ Additional Noise Models
       noise.add_all_qubit_channel(
           "x", cudaq::depolarization2(/*probability*/ 0.01),
           /*numControls*/ 1);
+

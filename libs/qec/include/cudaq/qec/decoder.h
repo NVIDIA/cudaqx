@@ -349,6 +349,18 @@ protected:
   /// before the first enqueue_syndrome().
   void set_result_type(decode_result_type type) { result_type_ = type; }
 
+  /// @brief Hook called by both set_D_sparse overloads after base-class buffer
+  /// setup is complete. Override to react to a new D_sparse without having to
+  /// call the base-class implementation explicitly. The protected D_sparse
+  /// member holds the newly set matrix when this is called.
+  virtual void on_d_sparse_configured() {}
+
+  /// @brief Hook called by both set_O_sparse overloads after base-class buffer
+  /// setup is complete. Override to react to a new O_sparse without having to
+  /// call the base-class implementation explicitly. The protected O_sparse
+  /// member holds the newly set matrix when this is called.
+  virtual void on_o_sparse_configured() {}
+
   /// @brief For a classical `[n,k]` code, this is `n`.
   std::size_t block_size = 0;
 

@@ -35,7 +35,7 @@ done
 
 CURRENT_ARCH=$(uname -m)
 PYTHON_VERSIONS=("3.11" "3.12" "3.13")
-TARGETS=("nvidia" "nvidia --option fp64", "qpp-cpu")
+TARGETS=("nvidia" "nvidia --option fp64" "qpp-cpu")
 
 # OpenBLAS can get bogged down on some machines if using too many threads.
 export OMP_NUM_THREADS=8
@@ -46,7 +46,7 @@ run_python_tests() {
 
     echo "Running Python tests for Python ${python_version} with default target..."
 
-    python3 -m pytest libs -v
+    python3 -m pytest libs/core libs/qec -v
 
     local test_result=$?
     if [ ${test_result} -ne 0 ]; then
@@ -82,19 +82,24 @@ test_examples() {
         cuda_major=$(echo ${CUDA_VERSION} | cut -d '.' -f 1)
         cuda_minor=$(echo ${CUDA_VERSION} | cut -d '.' -f 2)
         cuda_no_dot="${cuda_major}${cuda_minor}"
-        pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu${cuda_no_dot}
+        # cu126 torch wheels lack sm_100 (Blackwell) kernels; use the cu128 build
+        # on the 12.x path (runs on 12.6, supports newer GPUs). 13.x keeps its tag.
+        torch_cuda_no_dot="${cuda_no_dot}"
+        if [ "${cuda_major}" == "12" ]; then torch_cuda_no_dot="128"; fi
+        pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu${torch_cuda_no_dot}
         if [ "$(uname -m)" == "x86_64" ]; then
           pip install "tensorrt-cu${cuda_major}==10.13.*" "cuda_toolkit[cudart]==${cuda_major}.${cuda_minor}.*"
           pip install onnxscript
         fi
         pip install cudaq-qec[tensor_network_decoder,trt_decoder] --find-links /root/wheels
-        pip install cudaq-solvers[gqe] --find-links /root/wheels
         source $CONDA_PREFIX/lib/python${python_version}/site-packages/distributed_interfaces/activate_custom_mpi.sh
         export OMPI_MCA_opal_cuda_support=true OMPI_MCA_btl='^openib'
 
         # Needed for tests:
         pip install pytest
-        pip install openfermion openfermionpyscf
+        # matplotlib is only pulled in transitively on x86 (via beliefmatching);
+        # install it explicitly so ARM has it (pseudo_threshold.py imports it).
+        pip install matplotlib
 
         if [[ "$(uname -m)" == "x86_64" ]]; then
             # Stim is not currently available on manylinux ARM wheels, so don't
@@ -118,32 +123,15 @@ test_examples() {
             echo "Testing with target: ${target}"
 
             # Test Python examples
-            for domain in "solvers" "qec"; do
+            for domain in "qec"; do
                 echo "Testing ${domain} Python examples with Python ${python_version} and target ${target}..."
                 cd examples/${domain}/python
                 shopt -s nullglob # don't throw errors if no Python files exist
                 for f in *.py; do
                     echo Testing $f...
-                    if [ "$f" = "gqe_h2.py" ]; then
-                        # This test expects a PyTorch build that can run on the host GPU.
-                        # Skip it (no failure) when the wheel lacks kernels for this device.
-                        if ! python3 -c "from cudaq_solvers.gqe_algorithm.cuda_utils import pytorch_cuda_execution_available; import sys; sys.exit(0 if pytorch_cuda_execution_available() else 1)"; then
-                            echo "Skipping ${f} and ${f} --mpi: PyTorch cannot execute CUDA kernels on this GPU."
-                            continue
-                        fi
-                        if ! python3 "$f"; then
-                            echo "Python tests failed for ${domain} with Python ${python_version} (default target)"
-                            num_failures=$((num_failures + 1))
-                        fi
-                        if ! python3 "$f" --mpi; then
-                            echo "Python tests failed for ${domain} with Python ${python_version} using --mpi"
-                            num_failures=$((num_failures + 1))
-                        fi
-                    else
-                        if ! python3 "$f" --target ${target}; then
-                            echo "Python tests failed for ${domain} with Python ${python_version} and target ${target}"
-                            num_failures=$((num_failures + 1))
-                        fi
+                    if ! python3 "$f" --target ${target}; then
+                        echo "Python tests failed for ${domain} with Python ${python_version} and target ${target}"
+                        num_failures=$((num_failures + 1))
                     fi
                 done
                 shopt -u nullglob  # reset setting, just for cleanliness

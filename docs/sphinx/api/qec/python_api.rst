@@ -31,11 +31,25 @@ Detector Error Model
 .. autoclass:: cudaq_qec.DecoderContext
     :members:
 
+.. note::
+
+   The ``x_component()``, ``z_component()``, and ``full_component()`` methods each
+   return a ``(dem, m2d, m2o)`` tuple:
+
+   - ``dem`` (:class:`DetectorErrorModel`) — canonicalized detector error model
+   - ``m2d`` (``list[list[int]]``) — measurement-to-detector map; ``m2d[d]`` lists
+     the measurement indices whose XOR forms detector ``d``
+   - ``m2o`` (``list[list[int]]``) — measurement-to-observable map
+
+   Pass ``m2d`` to :func:`d_sparse` to produce the ``D_sparse`` vector for a
+   real-time decoder config.
+
 .. autofunction:: cudaq_qec.dem_from_memory_circuit
 .. autofunction:: cudaq_qec.x_dem_from_memory_circuit
 .. autofunction:: cudaq_qec.z_dem_from_memory_circuit
 .. autofunction:: cudaq_qec.decoder_context_from_memory_circuit
 .. autofunction:: cudaq_qec.dem_from_stim_text
+.. autofunction:: cudaq_qec.d_sparse
 
 Decoder Interfaces
 ==================
@@ -51,6 +65,15 @@ Decoder Interfaces
 
 .. autoclass:: cudaq_qec.AsyncDecoderResult
     :members:
+
+.. note::
+   **NumPy result arrays** — As of 0.7.0, the ``result`` field of
+   :class:`cudaq_qec.DecoderResult` (and the per-shot results returned by
+   :class:`cudaq_qec.BatchDecoderResult` and
+   :class:`cudaq_qec.AsyncDecoderResult`) is a 1-D NumPy array rather than a
+   Python ``list``. Indexing and iteration are unchanged, but code that relied
+   on the result being a ``list`` specifically (for example ``isinstance(res,
+   list)`` or ``list``-only methods) should be updated.
 
 .. autofunction:: cudaq_qec.get_decoder
 
@@ -83,6 +106,20 @@ Tensor Network Decoder
 
 .. include:: tensor_network_decoder_api.rst
 
+.. _pymatching_decoder_api_python:
+
+PyMatching Decoder
+------------------
+
+.. include:: pymatching_api.rst
+
+.. _chromobius_decoder_api_python:
+
+Chromobius Decoder
+------------------
+
+.. include:: chromobius_api.rst
+
 Real-Time Decoding
 ==================
 
@@ -97,6 +134,13 @@ Common
 .. autofunction:: cudaq_qec.z_sample_memory_circuit
 
 .. autofunction:: cudaq_qec.sample_code_capacity
+
+.. _dem_sampling_python_api:
+
+Detector Error Model (DEM) Sampling
+===================================
+
+.. autofunction:: cudaq_qec.dem_sampling
 
 .. _parity_check_matrix_utilities_python:
 
