@@ -343,6 +343,28 @@ if(TARGET cudaq-qec-realtime-decoding-server-cqr)
           12
       WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     )
+
+    # Two-process with two logical qubits: the server opens one ring per
+    # decoder and the client must wire each logical qubit's device_call
+    # session to its own ring (QEC_DECODING_SERVER_PORT_<id>, exported by the
+    # test script from the READY line's ring<id>= tokens). The script
+    # additionally asserts per-ring traffic (a client that funnels every
+    # decoder over ring 0 fails even if the totals look right) and exact
+    # per-decoder session stats (resets == shots, errors == 0 — the guard
+    # against concurrent rings losing RPCs to request-id collisions).
+    # Thresholds are the single-logical values scaled by 2.
+    add_test(
+      NAME app_examples.surface_code-1-cqr-two-process-test-distance-3-num-logical-2
+      COMMAND
+        bash "${CMAKE_CURRENT_SOURCE_DIR}/surface_code-1-cqr-two-process-test.sh"
+          ${CMAKE_CURRENT_BINARY_DIR}/surface_code-1-cqr
+          3 120 60
+          $<TARGET_FILE:decoding_server>
+          12
+          multi_error_lut
+          2
+      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
   endif()
 endif()
 

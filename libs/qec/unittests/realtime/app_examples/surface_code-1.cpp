@@ -56,7 +56,9 @@
 // of resolving to the in-process trampolines. The decoding is served either by
 // the in-process decoding-server-cqr service
 // (CUDAQ_DEVICE_CALL_CHANNEL=host_dispatch) or by a standalone
-// decoding_server (QEC_DECODING_SERVER_PORT=<port>). The wire to the
+// decoding_server (QEC_DECODING_SERVER_PORT=<port>; with --num_logical N > 1
+// the server opens one ring per decoder, so ring i's port must additionally
+// be supplied as QEC_DECODING_SERVER_PORT_<i>). The wire to the
 // server defaults to udp loopback; set QEC_DECODING_SERVER_TRANSPORT=cpu_roce
 // to use the CPU RoCE RDMA channel instead (works over SoftRoCE/rdma_rxe; the
 // RDMA topology comes from the same CUDAQ_CPU_ROCE_TEST_* env vars as CUDA-Q's
@@ -73,13 +75,17 @@ std::string env_or(const char *name, const std::string &fallback) {
   return (value && *value) ? std::string(value) : fallback;
 }
 
-void initialize_realtime_channel(const char *prog) {
+void initialize_realtime_channel(const char *prog, int num_logical) {
   std::vector<std::string> args = {prog};
   if (const char *port = std::getenv("QEC_DECODING_SERVER_PORT");
       port && *port) {
     const std::string transport =
         env_or("QEC_DECODING_SERVER_TRANSPORT", "udp");
     if (transport == "cpu_roce") {
+      if (num_logical > 1)
+        throw std::runtime_error(
+            "--num_logical > 1 over cpu_roce is not supported by this "
+            "example (only the udp channel wires per-decoder rings here)");
       // The RDMA ring geometry (slots x slot-size) is part of the cpu_roce
       // wire contract: the channel writes requests directly into the server's
       // rings, so these must match decoding_server's --num-slots /
@@ -98,7 +104,31 @@ void initialize_realtime_channel(const char *prog) {
       args.push_back("--cudaq-device-call=udp");
       args.push_back("udp-host=127.0.0.1");
       args.push_back(std::string("udp-port=") + port);
+      // A one-ring-per-decoder server publishes one endpoint per decoder
+      // (READY line: `... ring0=<p0> ring1=<p1> ...`). Wire logical qubit
+      // i's device_call session to its own ring via device-scoped channel
+      // args (QEC_DECODING_SERVER_PORT_<i> -> udp-port.<i>=), the same
+      // convention as surface_code-4-yaml.
+      for (int device = 1; device < num_logical; ++device) {
+        const std::string name =
+            "QEC_DECODING_SERVER_PORT_" + std::to_string(device);
+        const char *scoped = std::getenv(name.c_str());
+        if (!scoped || !*scoped)
+          throw std::runtime_error(
+              name + " is required: with --num_logical " +
+              std::to_string(num_logical) +
+              " the decoding server serves each decoder on its own ring; "
+              "set " +
+              name + " to the ring" + std::to_string(device) +
+              "= port from the server's QEC_DECODING_SERVER_READY line");
+        args.push_back("udp-port." + std::to_string(device) + "=" + scoped);
+      }
     }
+  } else if (!std::getenv("CUDAQ_DEVICE_CALL_CHANNEL")) {
+    throw std::runtime_error(
+        "no realtime channel configured: set QEC_DECODING_SERVER_PORT=<port> "
+        "to decode via a standalone decoding_server (two-process), or "
+        "CUDAQ_DEVICE_CALL_CHANNEL=host_dispatch to decode in-process");
   }
   std::vector<char *> argv;
   for (auto &arg : args)
@@ -814,7 +844,12 @@ void show_help() {
   printf("  --num_shots <int>     Number of shots. Default: 10\n");
   printf("  --p_cnot <double>     Two-qubit depolarizing rate on CNOT gates. "
          "Range[0, 1]. Default: 0.001\n");
-  printf("  --num_logical <int>   Number of logical qubits. Default: 1\n");
+  printf("  --num_logical <int>   Number of logical qubits. Default: 1\n"
+         "      (Two-process runs against a decoding_server serve each\n"
+         "      logical qubit's decoder on its own ring: pass ring 0's port\n"
+         "      as QEC_DECODING_SERVER_PORT and ring i's port as\n"
+         "      QEC_DECODING_SERVER_PORT_<i>, from the server's READY "
+         "line.)\n");
   printf("  --num_rounds <int>    Number of measurement rounds. Default: "
          "distance\n");
   printf("  --seed <int>          Simulator seed for reproducible shots; "
@@ -999,15 +1034,14 @@ int main(int argc, char **argv) {
   auto code = cudaq::qec::get_code(
       "surface_code", cudaqx::heterogeneous_map{{"distance", opts.distance}});
 
-#ifdef QEC_APP_CQR
-  // Bring up the cudaq-realtime device-call channel for the shots' decoding
-  // device_calls. The --save_dem pass only characterizes the DEM (no shots, no
-  // device_calls), so it needs no channel.
-  if (!opts.save_dem)
-    initialize_realtime_channel(argv[0]);
-#endif
-
   try {
+#ifdef QEC_APP_CQR
+    // Bring up the cudaq-realtime device-call channel for the shots' decoding
+    // device_calls. The --save_dem pass only characterizes the DEM (no shots,
+    // no device_calls), so it needs no channel.
+    if (!opts.save_dem)
+      initialize_realtime_channel(argv[0], opts.num_logical);
+#endif
     demo_circuit_host(*code, opts);
   } catch (const std::exception &e) {
     printf("Error: %s\n", e.what());
