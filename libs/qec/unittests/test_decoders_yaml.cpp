@@ -273,6 +273,66 @@ TEST(DecoderYAMLTest, MultiLUTDecoder) {
   test_decoder_creation(multi_config);
 }
 
+TEST(DecoderYAMLTest, TransportSectionAndMixedDispatch) {
+  // The top-level transport section (server-level deployment config,
+  // shape-keyed override) and a host + device_graph decoder mix must
+  // survive a YAML round trip...
+  cudaq::qec::decoding::config::multi_decoder_config multi_config;
+  auto host_decoder = create_test_empty_decoder_config(0);
+  auto dg_decoder = create_test_empty_decoder_config(1);
+  dg_decoder.dispatch =
+      cudaq::qec::decoding::config::DecoderDispatch::device_graph;
+  multi_config.decoders.push_back(host_decoder);
+  multi_config.decoders.push_back(dg_decoder);
+  multi_config.transport.provider = "udp";
+  multi_config.transport.args = {"--num-slots=8"};
+  multi_config.transport.device_graph.provider = "hololink";
+  multi_config.transport.device_graph.args = {"--pinned-rings"};
+  test_decoder_yaml_roundtrip(multi_config);
+
+  // ...and the exact YAML key spelling is part of the contract (a round
+  // trip alone cannot catch a symmetric key rename).
+  const std::string yaml_text = R"(%YAML 1.2
+---
+transport:
+  provider:      udp
+  args:          [--num-slots=8]
+  device_graph:
+    provider:    hololink
+    args:        [--pinned-rings]
+decoders:
+  - id:            0
+    type:          single_error_lut
+    block_size:    3
+    syndrome_size: 3
+    H_sparse:      [0, -1, 1, -1, 2, -1]
+    O_sparse:      [0, -1, 1, -1, 2, -1]
+    D_sparse:      [0, -1, 1, -1, 2, -1]
+  - id:            1
+    type:          single_error_lut
+    dispatch:      device_graph
+    block_size:    3
+    syndrome_size: 3
+    H_sparse:      [0, -1, 1, -1, 2, -1]
+    O_sparse:      [0, -1, 1, -1, 2, -1]
+    D_sparse:      [0, -1, 1, -1, 2, -1]
+)";
+  const auto parsed =
+      cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(
+          yaml_text);
+  EXPECT_EQ(parsed.transport.provider, "udp");
+  ASSERT_EQ(parsed.transport.args.size(), 1u);
+  EXPECT_EQ(parsed.transport.args[0], "--num-slots=8");
+  EXPECT_EQ(parsed.transport.device_graph.provider, "hololink");
+  ASSERT_EQ(parsed.transport.device_graph.args.size(), 1u);
+  EXPECT_EQ(parsed.transport.device_graph.args[0], "--pinned-rings");
+  ASSERT_EQ(parsed.decoders.size(), 2u);
+  EXPECT_EQ(parsed.decoders[0].dispatch,
+            cudaq::qec::decoding::config::DecoderDispatch::host);
+  EXPECT_EQ(parsed.decoders[1].dispatch,
+            cudaq::qec::decoding::config::DecoderDispatch::device_graph);
+}
+
 TEST(DecoderYAMLTest, SingleLUTDecoder) {
   cudaq::qec::decoding::config::multi_decoder_config multi_config;
   cudaq::qec::decoding::config::decoder_config config =
