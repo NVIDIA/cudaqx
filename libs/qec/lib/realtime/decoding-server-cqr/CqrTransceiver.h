@@ -13,6 +13,7 @@
 #include "cudaq/realtime/daemon/dispatcher/cudaq_realtime.h"
 #include "cudaq/realtime/daemon/dispatcher/dispatch_kernel_launch.h"
 
+#include <atomic>
 #include <condition_variable>
 #include <cstring>
 #include <deque>
@@ -99,13 +100,19 @@ inline bool parse_cqr_enqueue_frame(const void *rx_slot, std::size_t slot_size,
 /// Bridges CUDAQ_REALTIME DeviceCallService handler callbacks to ITransceiver.
 ///
 /// CUDAQ calls handler functions synchronously with (rx_slot, tx_slot,
-/// slot_size), all on the SINGLE transport dispatcher thread.
+/// slot_size). With one ring (and one dispatcher thread) per decoder, these
+/// calls arrive CONCURRENTLY, one thread per ring — and each ring's caller
+/// session numbers its requests independently, so request_ids from different
+/// rings collide.
 ///
 /// Response-bearing calls (get_corrections, reset_decoder): inject() copies
-/// rx_slot bytes into an RxFrame, stores the tx_slot pointer keyed by
-/// request_id, and blocks until the DecodingSession worker calls send() with
-/// the response — at which point send() copies the bytes to tx_slot and
-/// unblocks the handler thread so CUDAQ can return.
+/// rx_slot bytes into an RxFrame, rewrites the frame's request_id to a
+/// process-unique token (the correlation key the DecodingSession worker
+/// echoes back — the client's original id is NOT unique across rings),
+/// stores the tx_slot pointer keyed by that token, and blocks until the
+/// worker calls send() with the response — at which point send() copies the
+/// bytes to tx_slot, restores the client's original request_id, and unblocks
+/// the handler thread so CUDAQ can return.
 ///
 /// Fire-and-forget calls (enqueue_syndromes): inject() enqueues the frame
 /// and writes an immediate ACCEPTED response into tx_slot WITHOUT blocking —
@@ -144,13 +151,19 @@ private:
   struct PendingTx {
     void *tx_slot;
     std::size_t slot_size;
+    uint32_t client_rid; // the caller's original request_id, restored in the
+                         // response written to tx_slot
     std::promise<void> done;
   };
 
   std::mutex mtx_;
   std::condition_variable cv_;
   std::deque<RxFrame> inbox_;
-  std::unordered_map<uint32_t, PendingTx> pending_; // keyed by request_id
+  // Keyed by a process-unique token (NOT the client's request_id: each
+  // ring's caller session numbers requests independently, so ids from
+  // different rings collide).
+  std::unordered_map<uint32_t, PendingTx> pending_;
+  std::atomic<uint32_t> next_token_{1};
 
   // Translate CUDAQ enqueue_syndromes payload (stdvec<i1> format) to our
   // RPCHeader + EnqueueRequestPayload + bit-packed bytes.
@@ -214,6 +227,13 @@ inline void CqrTransceiver::inject(const void *rx_slot, void *tx_slot,
     return;
   }
 
+  // Correlate by a process-unique token: rewrite the frame's request_id so
+  // the DecodingSession worker echoes the token back in its response.  (The
+  // client's rid is restored in send(); it cannot be the map key because
+  // concurrent injects from different rings carry colliding rids.)
+  const uint32_t token = next_token_.fetch_add(1, std::memory_order_relaxed);
+  reinterpret_cast<RPCHeader *>(frame.buf.data())->request_id = token;
+
   std::future<void> fut;
   {
     std::lock_guard<std::mutex> lk(mtx_);
@@ -224,9 +244,10 @@ inline void CqrTransceiver::inject(const void *rx_slot, void *tx_slot,
       write_ack(tx_slot, rid, ptp, RpcStatus::BAD_REQUEST);
       return;
     }
-    auto &p = pending_[rid];
+    auto &p = pending_[token];
     p.tx_slot = tx_slot;
     p.slot_size = slot_size;
+    p.client_rid = rid;
     fut = p.done.get_future();
     inbox_.push_back(std::move(frame));
   }
@@ -261,8 +282,9 @@ inline void CqrTransceiver::shutdown() {
     pending_.clear();
   }
   cv_.notify_all();
-  for (auto &[rid, p] : drained) {
-    write_ack(p.tx_slot, rid, /*ptp_timestamp=*/0, RpcStatus::BAD_REQUEST);
+  for (auto &[token, p] : drained) {
+    write_ack(p.tx_slot, p.client_rid, /*ptp_timestamp=*/0,
+              RpcStatus::BAD_REQUEST);
     p.done.set_value();
   }
 }
@@ -287,10 +309,10 @@ inline void CqrTransceiver::send(const PeerId & /*peer*/, const uint8_t *data,
     return;
 
   const auto *resp = reinterpret_cast<const RPCResponse *>(data);
-  const uint32_t rid = resp->request_id;
+  const uint32_t token = resp->request_id; // inject()'s rewritten id
 
   std::lock_guard<std::mutex> lk(mtx_);
-  auto it = pending_.find(rid);
+  auto it = pending_.find(token);
   if (it == pending_.end())
     return;
 
@@ -300,14 +322,17 @@ inline void CqrTransceiver::send(const PeerId & /*peer*/, const uint8_t *data,
     // written, so the client would read stale slot memory as correction
     // bits.  Fail the RPC explicitly instead (the pre-decoding-server code
     // returned result-buffer-too-small here).
-    write_ack(p.tx_slot, rid, resp->ptp_timestamp, RpcStatus::INTERNAL_ERROR);
+    write_ack(p.tx_slot, p.client_rid, resp->ptp_timestamp,
+              RpcStatus::INTERNAL_ERROR);
     p.done.set_value();
     pending_.erase(it);
     return;
   }
 
-  // Write our RPCResponse into the CUDAQ tx_slot (layouts are compatible).
+  // Write our RPCResponse into the CUDAQ tx_slot (layouts are compatible),
+  // restoring the caller's original request_id in place of the token.
   std::memcpy(p.tx_slot, data, len);
+  static_cast<RPCResponse *>(p.tx_slot)->request_id = p.client_rid;
   // Publish the magic last (release store) so the CUDAQ runtime sees a
   // complete response before observing the magic word.
   __atomic_store_n(reinterpret_cast<uint32_t *>(p.tx_slot),
