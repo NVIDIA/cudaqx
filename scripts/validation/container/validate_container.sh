@@ -11,7 +11,7 @@
 set -e
 
 # Parse command line arguments
-FINAL_IMAGE="ghcr.io/nvidia/private/cuda-quantum:cu12-0.14.0-cudaqx-rc1"
+FINAL_IMAGE="ghcr.io/nvidia/private/cuda-quantum:cu12-0.15.1-base-cudaqx-rc1"
 CUDA_VERSION="12.6"
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -43,6 +43,10 @@ CPP_TARGETS=("nvidia" "nvidia --target-option fp64" "qpp-cpu")
 cuda_major=$(echo ${CUDA_VERSION} | cut -d '.' -f 1)
 cuda_minor=$(echo ${CUDA_VERSION} | cut -d '.' -f 2)
 cuda_no_dot="${cuda_major}${cuda_minor}"
+# cu126 torch wheels lack sm_100 (Blackwell) kernels; use the cu128 build on the
+# 12.x path (runs on 12.6, supports newer GPUs). 13.x keeps its tag.
+torch_cuda_no_dot="${cuda_no_dot}"
+if [ "${cuda_major}" == "12" ]; then torch_cuda_no_dot="128"; fi
 
 # Function to run Python tests
 run_python_tests() {
@@ -59,7 +63,7 @@ run_python_tests() {
     # covered in CI), so skip it here.
     docker exec ${container_name} bash -c "\
         cd /home/cudaq && \
-        python3 -m pytest /home/cudaq/cudaqx_pytests -v -k 'not chromobius'"
+        python3 -m pytest /home/cudaq/cudaqx_pytests/qec -v -k 'not chromobius'"
 
     local test_result=$?
     if [ ${test_result} -ne 0 ]; then
@@ -95,11 +99,12 @@ test_examples() {
 
     num_failures=0
 
-    docker exec ${container_name} bash -c "pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu${cuda_no_dot}"
+    docker exec ${container_name} bash -c "pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu${torch_cuda_no_dot}"
     docker exec ${container_name} bash -c "pip install onnxscript"
-    # Install other required packages
-    docker exec ${container_name} bash -c "pip install 'lightning>=2.0.0' 'ml_collections>=0.1.0' 'mpi4py>=3.1.0' 'transformers>=4.30.0'"
     docker exec ${container_name} bash -c "pip install 'quimb' 'opt_einsum' 'cuquantum-python-cu${cuda_major}==26.03.1'"
+    # matplotlib is only pulled in transitively on x86 (via beliefmatching);
+    # install it explicitly so ARM has it (pseudo_threshold.py imports it).
+    docker exec ${container_name} bash -c "pip install matplotlib"
     if [ "${CURRENT_ARCH}" == "x86_64" ]; then
         docker exec ${container_name} bash -c "pip install 'stim' 'beliefmatching'"
     fi
@@ -131,19 +136,13 @@ test_examples() {
         echo "Testing with target: ${target}"
 
         # Test Python examples
-        for domain in "solvers" "qec"; do
+        for domain in "qec"; do
             if docker exec ${container_name} bash -c "[ -d /home/cudaq/cudaqx-examples/${domain}/python ] && [ -n \"\$(ls -A /home/cudaq/cudaqx-examples/${domain}/python/*.py 2>/dev/null)\" ]"; then
                 echo "Testing ${domain} Python examples with target ${target}..."
                 if ! docker exec ${container_name} bash -c "cd /home/cudaq/cudaqx-examples/${domain}/python && \
                     for f in *.py; do \
                         echo Testing \$f...; \
-                        if [ \"\$f\" = \"gqe_h2.py\" ]; then \
-                            python3 -c \"from cudaq_solvers.gqe_algorithm.cuda_utils import pytorch_cuda_execution_available; import sys; sys.exit(0 if pytorch_cuda_execution_available() else 1)\" || { echo \"Skipping \$f: PyTorch cannot execute CUDA kernels on this GPU.\"; continue; }; \
-                            python3 \"\$f\" || exit 1; \
-                            python3 \"\$f\" --mpi || exit 1; \
-                        else \
-                            python3 \"\$f\" --target ${target} || exit 1; \
-                        fi; \
+                        python3 \"\$f\" --target ${target} || exit 1; \
                     done"; then
                     echo "Python tests failed for ${domain} with target ${target}"
                     docker stop ${container_name}
@@ -159,7 +158,7 @@ test_examples() {
     for target in "${CPP_TARGETS[@]}"; do
 
         # Test C++ examples
-        for domain in "solvers" "qec"; do
+        for domain in "qec"; do
             if docker exec ${container_name} bash -c "[ -d /home/cudaq/cudaqx-examples/${domain}/cpp ] && [ -n \"\$(ls -A /home/cudaq/cudaqx-examples/${domain}/cpp/*.cpp 2>/dev/null)\" ]"; then
                 echo "Testing ${domain} C++ examples with target ${target}..."
                 if ! docker exec ${container_name} bash -c "cd /home/cudaq/cudaqx-examples/${domain}/cpp && \
