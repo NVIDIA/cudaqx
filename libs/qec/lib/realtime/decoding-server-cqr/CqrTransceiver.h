@@ -231,8 +231,7 @@ inline void CqrTransceiver::inject(const void *rx_slot, void *tx_slot,
   // the DecodingSession worker echoes the token back in its response.  (The
   // client's rid is restored in send(); it cannot be the map key because
   // concurrent injects from different rings carry colliding rids.)
-  const uint32_t token =
-      next_token_.fetch_add(1, std::memory_order_relaxed);
+  const uint32_t token = next_token_.fetch_add(1, std::memory_order_relaxed);
   reinterpret_cast<RPCHeader *>(frame.buf.data())->request_id = token;
 
   std::future<void> fut;
