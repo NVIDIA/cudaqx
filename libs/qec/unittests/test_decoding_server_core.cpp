@@ -20,6 +20,7 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
@@ -479,6 +480,61 @@ TEST(CqrDirectDispatch, ShutdownReleasesBlockedInjectWaiter) {
   EXPECT_EQ(response->magic, cudaq::realtime::RPC_MAGIC_RESPONSE);
   EXPECT_EQ(response->status, static_cast<int32_t>(RpcStatus::BAD_REQUEST));
   EXPECT_EQ(response->request_id, 7u);
+}
+
+TEST(CqrDirectDispatch, ConcurrentCollidingClientRidsCompleteTheirOwnSlots) {
+  // Per-decoder rings mean one dispatcher thread per ring calls inject()
+  // concurrently, and each ring's caller session numbers its requests
+  // independently -- so distinct in-flight blocking calls legitimately carry
+  // the SAME client request_id.  Every caller must still receive ITS OWN
+  // response in ITS tx_slot (correlation is by the transceiver's unique
+  // token), discriminated here by the echoed ptp_timestamp.  Under
+  // client-rid keying this deadlocks or cross-completes slots.
+  constexpr int kThreads = 4;
+  CqrTransceiver transceiver;
+  RpcDispatcher dispatcher;
+  std::atomic<int> arrived{0};
+  dispatcher.register_handler(
+      kGetCorrectionsFunctionId, [&](RxFrame, ResponseWriter &writer) {
+        // Hold every handler until all callers hold a live pending entry, so
+        // the colliding-rid window genuinely overlaps.
+        arrived.fetch_add(1, std::memory_order_acq_rel);
+        while (arrived.load(std::memory_order_acquire) < kThreads)
+          std::this_thread::yield();
+        writer.write_error(RpcStatus::NOT_READY);
+      });
+  ASSERT_TRUE(transceiver.install_dispatch_sink([&](RxFrame &&frame) {
+    dispatcher.dispatch(std::move(frame), transceiver);
+  }));
+
+  constexpr uint32_t kSharedClientRid = 42; // collides across all "rings"
+  std::vector<std::vector<uint8_t>> rx(kThreads);
+  std::vector<std::vector<uint8_t>> tx(kThreads);
+  for (int t = 0; t < kThreads; ++t) {
+    rx[t] = make_cqr_slot(kGetCorrectionsFunctionId, kSharedClientRid);
+    reinterpret_cast<RPCHeader *>(rx[t].data())->ptp_timestamp = 1000 + t;
+    tx[t].assign(sizeof(RPCResponse), 0);
+  }
+
+  std::vector<std::thread> callers;
+  for (int t = 0; t < kThreads; ++t)
+    callers.emplace_back([&, t] {
+      transceiver.inject(rx[t].data(), tx[t].data(), rx[t].size(),
+                         kGetCorrectionsFunctionId);
+    });
+  for (auto &caller : callers)
+    caller.join();
+
+  for (int t = 0; t < kThreads; ++t) {
+    const auto *response = reinterpret_cast<const RPCResponse *>(tx[t].data());
+    EXPECT_EQ(response->magic, cudaq::realtime::RPC_MAGIC_RESPONSE) << t;
+    EXPECT_EQ(response->status, static_cast<int32_t>(RpcStatus::NOT_READY))
+        << t;
+    EXPECT_EQ(response->request_id, kSharedClientRid)
+        << "client rid not restored for caller " << t;
+    EXPECT_EQ(response->ptp_timestamp, 1000u + t)
+        << "response landed in the wrong caller's tx_slot";
+  }
 }
 
 // ---------------------------------------------------------------------------
