@@ -235,6 +235,8 @@ Usage Example
         auto result = decoder->decode(syndromes[0]);
 
 
+.. _detector_error_model:
+
 Detector Error Model
 --------------------
 

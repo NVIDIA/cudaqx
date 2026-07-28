@@ -137,8 +137,10 @@ Chromobius Decoder
 
 .. include:: chromobius_api.rst
 
-Real-Time Decoding
-==================
+.. _python_realtime_decoding_api:
+
+Realtime Decoding
+=================
 
 .. include:: python_realtime_decoding_api.rst
 

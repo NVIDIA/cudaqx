@@ -9,7 +9,7 @@ The relationship between errors and syndromes is captured mathematically by the 
 stabilizer measurement, while each column represents a possible error. When we multiply an error pattern by this matrix, we get the syndrome 
 that would result from those errors.
 
-A detector error model (DEM) describes how the errors in a QEC circuit produce the syndrome bits that detect them. The examples below work with DEMs in three ways: the first constructs a decoder directly from raw Stim ``.dem`` text; the second expands a DEM into a multi-round parity check matrix; and the third samples synthetic error and syndrome data from a DEM to exercise a decoder. See :doc:`QEC Decoders </components/qec/decoders>` for more details.
+A detector error model (DEM) describes how the errors in a QEC circuit produce the syndrome bits that detect them. The examples below work with DEMs in three ways: the first constructs a decoder directly from raw Stim ``.dem`` text; the second expands a DEM into a multi-round parity check matrix; and the third samples synthetic error and syndrome data from a DEM to exercise a decoder. See :ref:`Detector Error Model <detector_error_model>` for more details.
 
 .. _stim_dem_text_example:
 

@@ -60,4 +60,4 @@ See Also
 
 * :doc:`Pre-built QEC Decoders </components/qec/decoders>` — decoders available for realtime use
 * :ref:`realtime_pipeline_api` — Realtime Pipeline C++ API
-* :doc:`/api/qec/cpp_api` and :doc:`/api/qec/python_api` — API reference (Realtime Decoding sections)
+* :ref:`C++ realtime decoding API <cpp_realtime_decoding_api>` and :ref:`Python realtime decoding API <python_realtime_decoding_api>`

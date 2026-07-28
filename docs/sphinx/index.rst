@@ -59,9 +59,8 @@ APIs for common quantum-classical solver workflows.
     * Quantum Approximate Optimization Algorithm (QAOA)
     * More to come...
 
-Indices and Tables
-------------------
+Indices
+-------
 
 * :ref:`genindex`
-* :ref:`modindex`
 * :ref:`search`
