@@ -18,7 +18,7 @@ solvers.
    :maxdepth: 1
    :caption: Libraries
 
-   components/qec/introduction
+   components/qec/index
    components/solvers/introduction
 
 .. toctree::

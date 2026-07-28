@@ -9,41 +9,14 @@ The relationship between errors and syndromes is captured mathematically by the 
 stabilizer measurement, while each column represents a possible error. When we multiply an error pattern by this matrix, we get the syndrome 
 that would result from those errors.
 
-Detector Error Model
-+++++++++++++++++++++
+A detector error model (DEM) describes how the errors in a QEC circuit produce the syndrome bits that detect them. The examples below work with DEMs in three ways: the first constructs a decoder directly from raw Stim ``.dem`` text; the second expands a DEM into a multi-round parity check matrix; and the third samples synthetic error and syndrome data from a DEM to exercise a decoder. See :doc:`QEC Decoders </components/qec/decoders>` for more details.
 
-The parity check matrix above describes how errors map to syndromes for a single round of measurement. To capture a full circuit — including how errors propagate through gates and accumulate over measurement rounds — CUDA-Q QEC uses the `cudaq.qec.detector_error_model` type, which builds a detector error model (DEM) from a QEC circuit and noise model.
-
-The DEM is generated using functions like `dem_from_memory_circuit()`. For circuit-level noise, it can be put into a canonical form organized by measurement rounds, making it suitable for multi-round decoding.
-
-For a complete example of using the surface code with a DEM to generate parity check matrices and perform decoding, see the :doc:`circuit level noise example <modeling_noise>`.
-
-The sections below cover the three ways this error model shows up in practice: supplying an existing DEM as Stim text, expanding it into a multi-round parity check matrix, and sampling synthetic syndromes from it.
+.. _stim_dem_text_example:
 
 Decoding From Stim DEM Text
 +++++++++++++++++++++++++++
 
-The DEM does not have to be produced inside CUDA-Q. Decoders can be constructed
-from either a parity-check matrix or raw Stim detector error model (DEM) text.
-Passing the DEM text is useful when the model is already available in Stim's
-``.dem`` format, such as from a saved file, Stim workflow, or CUDA-Q DEM
-generation.
-
-For PCM-based decoders, CUDA-Q QEC parses the DEM text into a detector error
-matrix and supplies DEM-derived ``O`` and ``error_rate_vec`` defaults when the
-user does not provide them. C++ decoder plugins that need full Stim DEM
-metadata can consume the raw DEM string from the decoder construction input.
-
-By default, ``get_decoder(..., dem_text)`` and ``dem_from_stim_text(dem_text)``
-parse with ``use_decomp_suggestions=False``. Stim ``^`` decomposition hints are
-ignored and each ``error(...)`` instruction becomes one matrix column. The
-example below constructs a decoder this way and uses the matching parsed matrix
-for observable predictions.
-
-``dem_from_stim_text`` also accepts ``use_decomp_suggestions=True`` to split
-``^``-separated components into separate columns. That call is shown for
-inspection only; it does not change how ``get_decoder`` parses the same DEM
-text string.
+This example constructs a decoder from raw Stim ``.dem`` text and uses the matching parsed matrix for observable predictions. For what a detector error model is and how the text is parsed, see :doc:`Decoding from Stim DEM Text </components/qec/decoders>`.
 
 .. tab:: Python
 
@@ -94,30 +67,7 @@ This example illustrates how to:
 DEM Sampling — Monte-Carlo Sampling from Detector Error Models
 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
-With a parity check matrix and per-mechanism error probabilities in hand, we can
-generate synthetic syndrome data to exercise a decoder. Given the DEM's binary
-check matrix :math:`H` and a length-:math:`n_\text{mechanisms}` vector of
-per-mechanism error probabilities :math:`p`, DEM sampling generates, over
-``num_shots`` independent shots, a random error matrix and the corresponding
-syndrome matrix via
-
-.. math::
-
-   \text{errors}_{ij} \sim \text{Bernoulli}(p_j), \qquad
-   \text{syndromes} = \text{errors} \cdot H^T \pmod{2}.
-
-The objects have shapes :math:`H : [n_\text{checks} \times n_\text{mechanisms}]`,
-:math:`\text{errors} : [\text{num\_shots} \times n_\text{mechanisms}]`, and
-:math:`\text{syndromes} : [\text{num\_shots} \times n_\text{checks}]`, one row
-per shot. The :math:`\text{errors} \cdot H^T` form is the batched, row-vector
-version of the :math:`S = H \cdot E` convention used elsewhere in the QEC
-documentation.
-
-In Python, ``cudaq_qec.dem_sampling`` provides this capability with automatic
-backend selection: it uses GPU-accelerated sampling via cuStabilizer when
-available and falls back to a CPU implementation otherwise. In C++ the CPU and
-GPU paths are exposed as separate functions in the ``cudaq::qec::dem_sampler``
-namespace (see :ref:`dem_sampling_cpp_api`).
+This example samples synthetic error and syndrome data from a detector error model, then walks through the GPU-accelerated and CPU paths and the supported input types. For the sampling model itself, see :doc:`DEM Sampling </components/qec/decoders>`.
 
 Example
 ~~~~~~~
@@ -239,6 +189,8 @@ See Also
 - :doc:`/api/qec/python_api` — ``dem_sampling`` Python API reference
 - :doc:`/api/qec/cpp_api` — ``dem_sampler`` C++ API reference
 
+.. _qldpc_decoder_example:
+
 Getting Started with the NVIDIA QLDPC Decoder
 +++++++++++++++++++++++++++++++++++++++++++++
 
@@ -285,6 +237,8 @@ The example demonstrates:
 .. rubric:: Footnotes
 
 .. [#f1] [BCGMRY] Sergey Bravyi, Andrew Cross, Jay Gambetta, Dmitri Maslov, Patrick Rall, Theodore Yoder, High-threshold and low-overhead fault-tolerant quantum memory https://arxiv.org/abs/2308.07915
+
+.. _tensor_network_decoder_example:
 
 Exact Maximum Likelihood Decoding with NVIDIA Tensor Network Decoder
 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -495,6 +449,8 @@ See Also
 - `TensorRT Documentation <https://docs.nvidia.com/deeplearning/tensorrt/>`_ - NVIDIA TensorRT
 - `Stim Documentation <https://github.com/quantumlib/Stim>`_ - Fast stabilizer circuit simulator
 
+.. _pymatching_decoder_example:
+
 Matching-Based Decoding with PyMatching
 +++++++++++++++++++++++++++++++++++++++
 
@@ -523,6 +479,8 @@ Per-error priors are supplied via ``error_rate_vec`` (values in ``(0, 0.5]``),
 and parallel edges are combined according to ``merge_strategy``. See the
 :ref:`PyMatching Decoder API <pymatching_decoder_api_python>` for the full list
 of options.
+
+.. _chromobius_decoder_example:
 
 Color-Code Decoding with Chromobius
 +++++++++++++++++++++++++++++++++++

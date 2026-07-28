@@ -150,6 +150,23 @@ Common
 .. autofunction:: cudaq_qec.x_sample_memory_circuit
 .. autofunction:: cudaq_qec.z_sample_memory_circuit
 
+.. _syndrome_measurement_layout:
+
+.. note::
+   **Syndrome measurement layout** — ``sample_memory_circuit`` returns a tuple
+   ``(syndromes, data)``. The ``syndromes`` tensor has shape
+   ``(num_shots, num_detectors)`` with columns laid out as ``[ B  S  S  …  S  B ]``:
+
+   - ``B`` (boundary block) = ``code.get_num_z_stabilizers()`` for Z-basis
+     preparations (``prep0``/``prep1``), or ``code.get_num_x_stabilizers()`` for
+     X-basis preparations (``prepp``/``prepm``).
+   - ``S`` (inter-round block) = ``num_z_stabilizers + num_x_stabilizers``
+     detectors per round transition (``num_rounds - 1`` blocks total).
+   - Total: ``num_detectors = 2*B + (num_rounds - 1)*S``.
+
+   The ``data`` tensor has shape ``(num_shots, block_size)`` and holds the final
+   data-qubit measurements used to verify logical-state preservation.
+
 .. autofunction:: cudaq_qec.sample_code_capacity
 
 .. _dem_sampling_python_api:
