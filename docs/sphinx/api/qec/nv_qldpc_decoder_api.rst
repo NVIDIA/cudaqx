@@ -185,7 +185,7 @@
           lane explores a distinct gamma set drawn from `gamma_dist` (or
           `explicit_gammas`). The constructor requires
           `num_sets >= gamma_ensemble_size` so the N per-lane gamma-set
-          offsets stay pairwise distinct.
+          offsets stay pairwise distinct. Introduced in 0.7.0.
 
           **Design semantics (race-to-fastest):** the ensemble is optimized
           for decode latency. The kernel runs the N lanes in parallel and
