@@ -7,11 +7,12 @@
  ******************************************************************************/
 
 /// @file gpu_roce_predecoder_bridge.cpp
-/// @brief GpuRoceTransceiver bridge for the AI predecoder + PyMatching pipeline.
+/// @brief GpuRoceTransceiver bridge for the AI predecoder + PyMatching
+/// pipeline.
 ///
-/// Combines GpuRoceTransceiver RDMA transport with the realtime_pipeline infrastructure
-/// to run AI pre-decoding and PyMatching on syndrome data arriving from an
-/// FPGA or emulator.
+/// Combines GpuRoceTransceiver RDMA transport with the realtime_pipeline
+/// infrastructure to run AI pre-decoding and PyMatching on syndrome data
+/// arriving from an FPGA or emulator.
 ///
 /// GpuRoceTransceiver setup is extracted from bridge_run() (HOST_LOOP path).
 /// The ring buffer pointers from the transceiver are fed into realtime_pipeline
@@ -132,7 +133,8 @@ int main(int argc, char *argv[]) {
   PipelineConfig pcfg = *pcfg_opt;
   pcfg.apply_cli_overrides(argc, argv);
 
-  std::cout << "=== GpuRoceTransceiver Predecoder + PyMatching Bridge ===" << std::endl;
+  std::cout << "=== GpuRoceTransceiver Predecoder + PyMatching Bridge ==="
+            << std::endl;
   std::cout << "  Config: " << pcfg.label << std::endl;
 
   // -- Initialize CUDA -------------------------------------------------------
@@ -291,7 +293,8 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  // -- Build external cudaq_ringbuffer_t from GpuRoceTransceiver pointers --------------
+  // -- Build external cudaq_ringbuffer_t from GpuRoceTransceiver pointers
+  // --------------
 
   cudaq_ringbuffer_t ext_rb{};
   ext_rb.rx_flags = reinterpret_cast<volatile uint64_t *>(rx_ring_flag);
@@ -474,7 +477,8 @@ int main(int argc, char *argv[]) {
     });
   }
 
-  // -- Start pipeline and GpuRoceTransceiver -------------------------------------------
+  // -- Start pipeline and GpuRoceTransceiver
+  // -------------------------------------------
 
   std::cout << "\n[3/3] Starting..." << std::endl;
   pipeline.start();

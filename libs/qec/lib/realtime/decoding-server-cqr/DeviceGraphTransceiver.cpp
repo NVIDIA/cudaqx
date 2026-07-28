@@ -157,9 +157,10 @@ DeviceGraphTransceiver::DeviceGraphTransceiver(const DeviceGraphConfig &config)
     argv.push_back(const_cast<char *>(a.c_str()));
 
   // A provider is just a library name/path to the loader (cached per
-  // process, keyed by that string).  Default to the gpu_roce (GpuRoceTransceiver)
-  // provider shipped with cudaq-realtime; CUDAQ_REALTIME_BRIDGE_LIB names a
-  // replacement library (same mechanism as the decoding server's
+  // process, keyed by that string).  Default to the gpu_roce
+  // (GpuRoceTransceiver) provider shipped with cudaq-realtime;
+  // CUDAQ_REALTIME_BRIDGE_LIB names a replacement library (same mechanism as
+  // the decoding server's
   // --transport=<path>.so partner drop-in).
   const char *env_lib = std::getenv("CUDAQ_REALTIME_BRIDGE_LIB");
   const std::string provider_lib =
@@ -254,8 +255,8 @@ void DeviceGraphTransceiver::launch_scheduler(void *raw_graph_resources) {
   consumer_ = std::make_unique<DeviceGraphRingConsumer>(
       ring, num_pages_, page_size_, gpu_id_, raw_graph_resources);
 
-  // Start the provider's I/O loop (GpuRoceTransceiver RX/TX kernels + monitor thread,
-  // owned by the provider) now that the scheduler is polling the rings.
+  // Start the provider's I/O loop (GpuRoceTransceiver RX/TX kernels + monitor
+  // thread, owned by the provider) now that the scheduler is polling the rings.
   if (cudaq_bridge_launch(bridge_) != CUDAQ_OK) {
     consumer_->shutdown();
     throw std::runtime_error(
@@ -291,7 +292,8 @@ void DeviceGraphTransceiver::send(const PeerId & /*peer*/,
   throw std::logic_error(
       "DeviceGraphTransceiver::send() must not be called: the CUDAQ "
       "device-graph "
-      "scheduler writes TX responses directly to the GpuRoceTransceiver ring buffer");
+      "scheduler writes TX responses directly to the GpuRoceTransceiver ring "
+      "buffer");
 }
 
 // ---------------------------------------------------------------------------
@@ -306,7 +308,8 @@ void DeviceGraphTransceiver::shutdown() {
   if (consumer_)
     consumer_->shutdown();
 
-  // Stop the GpuRoceTransceiver RX/TX kernels and join the provider's monitor thread.
+  // Stop the GpuRoceTransceiver RX/TX kernels and join the provider's monitor
+  // thread.
   if (bridge_)
     cudaq_bridge_disconnect(bridge_);
 }

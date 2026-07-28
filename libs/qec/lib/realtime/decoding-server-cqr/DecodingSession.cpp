@@ -74,7 +74,8 @@ DecodingSession::create(std::unique_ptr<cudaq::qec::decoder> decoder,
     // kernels.  A cooperative grid sized for ALL SMs deadlocks at
     // grid.sync() the moment anything else is resident -- the launch
     // silently queues forever.  Overridable for rigs with more coresident
-    // kernels (e.g. GpuRoceTransceiver RX/TX) via QEC_DEVICE_GRAPH_RESERVED_SMS.
+    // kernels (e.g. GpuRoceTransceiver RX/TX) via
+    // QEC_DEVICE_GRAPH_RESERVED_SMS.
     int reserved_sms = 1;
     if (const char *env = std::getenv("QEC_DEVICE_GRAPH_RESERVED_SMS")) {
       char *end = nullptr;

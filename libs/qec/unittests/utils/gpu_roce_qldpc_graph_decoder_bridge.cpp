@@ -7,19 +7,22 @@
  ******************************************************************************/
 
 /// @file gpu_roce_qldpc_graph_decoder_bridge.cpp
-/// @brief QLDPC Relay-BP decoder bridge: GpuRoceTransceiver GPU-RoCE ring <-> the
+/// @brief QLDPC Relay-BP decoder bridge: GpuRoceTransceiver GPU-RoCE ring <->
+/// the
 ///        self-relaunching device-graph scheduler.
 ///
 /// This bridge wires the per-round decode-server protocol onto a real
 /// (or emulated) FPGA over RoCE.  Unlike the inproc_rpc path
 /// (qec_realtime_session, which allocates its own pinned ring), the bridge
-/// runs the SAME device-graph scheduler directly on the GpuRoceTransceiver DOCA ring:
+/// runs the SAME device-graph scheduler directly on the GpuRoceTransceiver DOCA
+/// ring:
 ///
-///   FPGA --RDMA--> GpuRoceTransceiver RX kernel --writes rx_flags--> scheduler graph
-///   scheduler graph --DEVICE_CALL append/get/reset; fires decode on a full
+///   FPGA --RDMA--> GpuRoceTransceiver RX kernel --writes rx_flags--> scheduler
+///   graph scheduler graph --DEVICE_CALL append/get/reset; fires decode on a
+///   full
 ///     window (CUDAQ_DISPATCH_STATUS_TRIGGER_GRAPH); tail-self-relaunches-->
-///   scheduler writes RPCResponse + tx_flags --> GpuRoceTransceiver TX kernel --RDMA-->
-///   FPGA
+///   scheduler writes RPCResponse + tx_flags --> GpuRoceTransceiver TX kernel
+///   --RDMA--> FPGA
 ///
 /// Flow:
 ///   1. Parse --config (Relay BP YAML) + generic bridge args.
@@ -34,8 +37,8 @@
 ///      libcudaq-qec-realtime-cudevice-proprietary.a and device-links it with
 ///      the dispatch kernel).
 ///   5. Launch the device-graph scheduler on the DOCA ring with the decode
-///      graph as its triggered graph, then run the GpuRoceTransceiver RX/TX kernels
-///      (blocking_monitor) on a worker thread.
+///      graph as its triggered graph, then run the GpuRoceTransceiver RX/TX
+///      kernels (blocking_monitor) on a worker thread.
 ///   6. Run until --timeout or SIGINT, then shut down cleanly.
 
 #include <algorithm>
@@ -132,20 +135,21 @@ int main(int argc, char *argv[]) {
     if (arg.find("--config=") == 0)
       config_path = arg.substr(9);
     else if (arg == "--help" || arg == "-h") {
-      std::cout
-          << "Usage: " << argv[0] << " --config=PATH [bridge options]\n\n"
-          << "QLDPC Relay-BP bridge: GpuRoceTransceiver GPU-RoCE ring <-> device-graph "
-             "scheduler.\n\n"
-          << "  --config=PATH      Relay BP config YAML (required)\n"
-          << "  --device=NAME      IB device (default: rocep1s0f0)\n"
-          << "  --peer-ip=ADDR     FPGA/emulator IP (default: 10.0.0.2)\n"
-          << "  --remote-qp=N      Remote QP number (default: 0x2)\n"
-          << "  --gpu=N            GPU device ID (default: 0)\n"
-          << "  --timeout=N        Timeout seconds (default: 60)\n"
-          << "  --page-size=N      Ring slot size (default: 384)\n"
-          << "  --num-pages=N      Ring slots (default: 64)\n"
-          << "  --reserved-sms=N   SMs reserved for GpuRoceTransceiver RX/TX (default: "
-             "2)\n";
+      std::cout << "Usage: " << argv[0] << " --config=PATH [bridge options]\n\n"
+                << "QLDPC Relay-BP bridge: GpuRoceTransceiver GPU-RoCE ring "
+                   "<-> device-graph "
+                   "scheduler.\n\n"
+                << "  --config=PATH      Relay BP config YAML (required)\n"
+                << "  --device=NAME      IB device (default: rocep1s0f0)\n"
+                << "  --peer-ip=ADDR     FPGA/emulator IP (default: 10.0.0.2)\n"
+                << "  --remote-qp=N      Remote QP number (default: 0x2)\n"
+                << "  --gpu=N            GPU device ID (default: 0)\n"
+                << "  --timeout=N        Timeout seconds (default: 60)\n"
+                << "  --page-size=N      Ring slot size (default: 384)\n"
+                << "  --num-pages=N      Ring slots (default: 64)\n"
+                << "  --reserved-sms=N   SMs reserved for GpuRoceTransceiver "
+                   "RX/TX (default: "
+                   "2)\n";
       return 0;
     }
   }
@@ -164,7 +168,8 @@ int main(int argc, char *argv[]) {
       reserved_sms = std::stoi(arg.substr(15));
   }
 
-  // Guard: clamp num_pages to the GpuRoceTransceiver receive/send work-queue depth.
+  // Guard: clamp num_pages to the GpuRoceTransceiver receive/send work-queue
+  // depth.
   //
   // The GpuRoceTransceiver (HSB 2.6.0-EA2) posts WQE_NUM=64
   // receive/send WQEs and runs one kernel thread per WQE.  When the ring is
@@ -179,15 +184,16 @@ int main(int argc, char *argv[]) {
       64; // == GpuRoceTransceiver WQE_NUM (gpu_roce_transceiver_common.hpp)
   if (config.num_pages > kGpuRoceWqeNum) {
     std::cerr << "WARNING: --num-pages=" << config.num_pages
-              << " exceeds the GpuRoceTransceiver's WQE depth (" << kGpuRoceWqeNum
-              << "); clamping to " << kGpuRoceWqeNum
+              << " exceeds the GpuRoceTransceiver's WQE depth ("
+              << kGpuRoceWqeNum << "); clamping to " << kGpuRoceWqeNum
               << " (a deeper ring multiplexes >1 slot per WQE and races the "
                  "RX/TX kernels -> duplicate/drop)."
               << std::endl;
     config.num_pages = kGpuRoceWqeNum;
   }
 
-  std::cout << "=== GpuRoceTransceiver QLDPC Relay-BP Bridge (device-graph scheduler) ==="
+  std::cout << "=== GpuRoceTransceiver QLDPC Relay-BP Bridge (device-graph "
+               "scheduler) ==="
             << std::endl;
 
   // -- Load decoder config + build the decoder --------------------------------
@@ -243,9 +249,10 @@ int main(int argc, char *argv[]) {
   BRIDGE_CUDA_CHECK(cudaSetDevice(config.gpu_id));
 
   // -- Capture the device-launchable cooperative decode graph -----------------
-  // Reserve SMs for the GpuRoceTransceiver RX/TX kernels so the cooperative decode can
-  // still co-reside.  This also registers the decoder's GpuDecoderState with
-  // the proprietary device table (read by the DEVICE_CALL handlers).
+  // Reserve SMs for the GpuRoceTransceiver RX/TX kernels so the cooperative
+  // decode can still co-reside.  This also registers the decoder's
+  // GpuDecoderState with the proprietary device table (read by the DEVICE_CALL
+  // handlers).
   void *raw_res = decoder->capture_decode_graph(reserved_sms);
   if (!raw_res) {
     std::cerr << "ERROR: capture_decode_graph() returned null" << std::endl;
@@ -377,14 +384,14 @@ int main(int argc, char *argv[]) {
 
   // -- Launch the device-graph scheduler on the DOCA ring ---------------------
   // Strict-FIFO consumption: shared_ring_mode is OFF.  This scheduler is the
-  // SOLE consumer of the DOCA RX ring (no peer dispatcher), and the GpuRoceTransceiver RX
-  // kernel fills slots strictly in order (window N -> slot N % num_pages).  The
-  // persistent cursor in dispatch_kernel_with_graph keeps current_slot across
-  // the tail self-relaunch, so the scheduler waits at the next slot in order
-  // rather than rescanning from 0 -- which is what avoids the slot-reuse race
-  // (out-of-order grab + flag-clear vs. refill) that shared_ring scanning
-  // introduced here.  The dispatch kernel default is shared-ring OFF, so no
-  // setter call is needed.
+  // SOLE consumer of the DOCA RX ring (no peer dispatcher), and the
+  // GpuRoceTransceiver RX kernel fills slots strictly in order (window N ->
+  // slot N % num_pages).  The persistent cursor in dispatch_kernel_with_graph
+  // keeps current_slot across the tail self-relaunch, so the scheduler waits at
+  // the next slot in order rather than rescanning from 0 -- which is what
+  // avoids the slot-reuse race (out-of-order grab + flag-clear vs. refill) that
+  // shared_ring scanning introduced here.  The dispatch kernel default is
+  // shared-ring OFF, so no setter call is needed.
 
   cudaStream_t sched_stream = nullptr;
   BRIDGE_CUDA_CHECK(cudaStreamCreate(&sched_stream));
@@ -425,13 +432,14 @@ int main(int argc, char *argv[]) {
                "graph)"
             << std::endl;
 
-  // -- Run the GpuRoceTransceiver RX/TX kernels on a worker thread ----------------------
+  // -- Run the GpuRoceTransceiver RX/TX kernels on a worker thread
+  // ----------------------
   std::signal(SIGINT, handle_sigint);
   std::thread monitor([&]() { gpu_roce_blocking_monitor(transceiver); });
 
-  // blocking_monitor() launches the GpuRoceTransceiver RX/TX kernels inside the worker
-  // thread.  Give those launches a short grace period before the orchestration
-  // script sees "Bridge Ready" and starts playback.
+  // blocking_monitor() launches the GpuRoceTransceiver RX/TX kernels inside the
+  // worker thread.  Give those launches a short grace period before the
+  // orchestration script sees "Bridge Ready" and starts playback.
   std::this_thread::sleep_for(kGpuRoceMonitorStartupGrace);
 
   // Emit the bridge's RDMA target info in the exact format the orchestration

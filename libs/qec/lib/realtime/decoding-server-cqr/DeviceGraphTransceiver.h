@@ -80,9 +80,10 @@ struct DeviceGraphConfig {
 /// the captured decoder CUDA graph, then starts the provider's I/O loop.
 ///
 /// Consequence of the provider split: this library needs only the CUDA-Q
-/// realtime headers + libcudaq-realtime.so at build time; the GpuRoceTransceiver /
-/// DOCA / HSB dependency chain lives entirely inside the provider .so, which
-/// is built (and dlopen'd) on the machine with the hardware.
+/// realtime headers + libcudaq-realtime.so at build time; the
+/// GpuRoceTransceiver / DOCA / HSB dependency chain lives entirely inside the
+/// provider .so, which is built (and dlopen'd) on the machine with the
+/// hardware.
 ///
 /// After `launch_scheduler()` returns, the GPU handles the full
 /// RX → dispatch → decode → TX loop autonomously.  No CPU `recv()` or `send()`

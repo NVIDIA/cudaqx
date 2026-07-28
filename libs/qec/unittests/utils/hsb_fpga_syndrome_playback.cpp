@@ -451,8 +451,7 @@ struct Options {
 
 void print_usage(const char *argv0) {
   std::cerr
-      << "Usage: " << argv0
-      << " --hsb-ip <ip> --data-dir <path> [options]\n\n"
+      << "Usage: " << argv0 << " --hsb-ip <ip> --data-dir <path> [options]\n\n"
       << "Required:\n"
       << "  --hsb-ip <ip>       FPGA or emulator IP address\n"
       << "  --data-dir <path>     Path to syndrome data directory\n"
@@ -666,8 +665,7 @@ bool verify_bram(hololink::Hololink &hsb,
 
   for (std::uint32_t i = 0; i < RAM_NUM; ++i) {
     std::uint32_t bank_base = RAM_ADDR + (i << (w_sample_addr + 2));
-    auto [ok, readback] =
-        chunked_read_uint32(hsb, bank_base, total_cycles);
+    auto [ok, readback] = chunked_read_uint32(hsb, bank_base, total_cycles);
     if (!ok) {
       std::cerr << "BRAM readback: failed to read bank " << i << "\n";
       return false;
@@ -1252,8 +1250,8 @@ int main(int argc, char **argv) {
   if (using_emulator) {
     // Direct connection to emulator — bypass BOOTP enumeration.
     // Construct synthetic metadata with the required fields.
-    std::cout << "Using direct connection to emulator at "
-              << options.hsb_ip << ":" << *options.control_port << "\n";
+    std::cout << "Using direct connection to emulator at " << options.hsb_ip
+              << ":" << *options.control_port << "\n";
     channel_metadata["peer_ip"] = options.hsb_ip;
     channel_metadata["control_port"] =
         static_cast<std::int64_t>(*options.control_port);
@@ -1306,8 +1304,7 @@ int main(int argc, char **argv) {
     // packets that arrive on any other port.
     constexpr std::uint32_t ROCEV2_UDP_PORT = 4791;
     hsb_channel.configure_roce(*options.buffer_addr, bytes_per_window,
-                                    rdma_page_size, rdma_num_pages,
-                                    ROCEV2_UDP_PORT);
+                               rdma_page_size, rdma_num_pages, ROCEV2_UDP_PORT);
 
     std::cout << "FPGA SIF registers configured for RDMA" << std::endl;
   }
@@ -1315,8 +1312,7 @@ int main(int argc, char **argv) {
   // ------------------------------------------------------------------
   // Disable player, configure, and write BRAM
   // ------------------------------------------------------------------
-  if (!hsb->write_uint32(PLAYER_ADDR + PLAYER_ENABLE_OFFSET,
-                              PLAYER_DISABLE))
+  if (!hsb->write_uint32(PLAYER_ADDR + PLAYER_ENABLE_OFFSET, PLAYER_DISABLE))
     throw std::runtime_error("Failed to disable player");
 
   hololink::Hololink::WriteData config_write;
@@ -1379,15 +1375,13 @@ int main(int argc, char **argv) {
   // Set sensor TX streaming threshold to zero so captured responses
   // stream to the ILA immediately (required for small capture counts).
   // ------------------------------------------------------------------
-  if (!hsb->write_uint32(SIF_TX_THRESHOLD_ADDR,
-                              SIF_TX_THRESHOLD_IMMEDIATE))
+  if (!hsb->write_uint32(SIF_TX_THRESHOLD_ADDR, SIF_TX_THRESHOLD_IMMEDIATE))
     throw std::runtime_error("Failed to set SIF TX streaming threshold");
 
   // ------------------------------------------------------------------
   // Enable playback
   // ------------------------------------------------------------------
-  if (!hsb->write_uint32(PLAYER_ADDR + PLAYER_ENABLE_OFFSET,
-                              PLAYER_ENABLE))
+  if (!hsb->write_uint32(PLAYER_ADDR + PLAYER_ENABLE_OFFSET, PLAYER_ENABLE))
     throw std::runtime_error("Failed to enable player");
 
   std::cout << "Playback enabled: " << num_shots << " shots / " << num_windows
