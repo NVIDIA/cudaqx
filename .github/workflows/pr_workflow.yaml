@@ -222,6 +222,7 @@ jobs:
     if: ${{ always() }}
     needs:
       - build-cudaq
+      - build-docs
       - build-all
       - build-qec
       - build-solvers
@@ -245,6 +246,7 @@ jobs:
           }
 
           check_result "build-cudaq"   "${{needs.build-cudaq.result}}"
+          check_result "build-docs"    "${{needs.build-docs.result}}"
           check_result "build-all"     "${{needs.build-all.result}}"
           check_result "build-qec"     "${{needs.build-qec.result}}"
           check_result "build-solvers" "${{needs.build-solvers.result}}"

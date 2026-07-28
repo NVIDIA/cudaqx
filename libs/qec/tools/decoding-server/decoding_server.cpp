@@ -86,11 +86,13 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <fcntl.h>
 #include <fstream>
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <thread>
+#include <unistd.h>
 #include <vector>
 
 extern "C" void cudaqx_qec_realtime_device_call_service_force_link();
@@ -184,6 +186,47 @@ bool parse_args(int argc, char **argv, ServerConfig &cfg) {
 std::atomic<int> g_shutdown{0};
 void on_signal(int) { g_shutdown.store(1, std::memory_order_release); }
 
+/// Env-gated /dev/cpu_dma_latency hold: while the fd stays open, the kernel
+/// keeps every CPU out of idle states whose exit latency exceeds the written
+/// target, removing the deep-idle wakeup tail (~90 us outliers at p99) from
+/// served RPCs.  QEC_DECODING_SERVER_CPU_DMA_LATENCY_US = target in
+/// microseconds (0 = shallowest idle only); requires write access to
+/// /dev/cpu_dma_latency (root).  Failure warns and continues -- it is a
+/// latency QoS, not a correctness requirement.  In-process applications hold
+/// the fd themselves; this belongs to the process owner, hence the tool.
+class CpuDmaLatencyHold {
+public:
+  CpuDmaLatencyHold() {
+    const char *env = std::getenv("QEC_DECODING_SERVER_CPU_DMA_LATENCY_US");
+    if (!env || !env[0])
+      return;
+    const int32_t target_us = std::atoi(env);
+    fd_ = ::open("/dev/cpu_dma_latency", O_WRONLY);
+    if (fd_ < 0 || ::write(fd_, &target_us, sizeof(target_us)) !=
+                       static_cast<ssize_t>(sizeof(target_us))) {
+      std::cerr << "WARNING: cannot hold /dev/cpu_dma_latency at " << target_us
+                << " us (need root); deep-idle wakeup outliers remain"
+                << std::endl;
+      if (fd_ >= 0) {
+        ::close(fd_);
+        fd_ = -1;
+      }
+      return;
+    }
+    std::cout << "QEC_DECODING_SERVER_CPU_DMA_LATENCY held at " << target_us
+              << " us" << std::endl;
+  }
+  ~CpuDmaLatencyHold() {
+    if (fd_ >= 0)
+      ::close(fd_);
+  }
+  CpuDmaLatencyHold(const CpuDmaLatencyHold &) = delete;
+  CpuDmaLatencyHold &operator=(const CpuDmaLatencyHold &) = delete;
+
+private:
+  int fd_ = -1;
+};
+
 // Resolve a --transport value to the provider shared library to load:
 // anything with a '/' is a caller-supplied library path (the partner
 // drop-in); a bare name maps to libcudaq-realtime-bridge-<name>.so next to
@@ -229,6 +272,9 @@ int main(int argc, char **argv) {
   ServerConfig cfg;
   if (!parse_args(argc, argv, cfg))
     return 1;
+
+  // Held for the whole run (env-gated no-op when unset); see the class doc.
+  CpuDmaLatencyHold dma_latency_hold;
 
   std::signal(SIGINT, on_signal);
   std::signal(SIGTERM, on_signal);
@@ -516,6 +562,23 @@ int main(int argc, char **argv) {
                                          ring_argv.data()) != CUDAQ_OK) {
       std::cerr << "ERROR: failed to load/create transport provider '"
                 << ring_lib << "' for decoder " << ring.decoder_id << std::endl;
+      // A later ring failing where an earlier one succeeded is the signature
+      // of endpoint args that cannot be shared: every ring receives the same
+      // provider args, so an explicit --port=N binds ring 0 and collides on
+      // every ring after it.
+      const auto is_explicit_port = [](const std::string &a) {
+        return starts_with(a, "--port=") && a != "--port=0";
+      };
+      if (i > 0 && (std::any_of(cfg.provider_args.begin(),
+                                cfg.provider_args.end(), is_explicit_port) ||
+                    std::any_of(ring_extra_args.begin(), ring_extra_args.end(),
+                                is_explicit_port)))
+        std::cerr << "note: all " << rings.size()
+                  << " rings receive the same provider args; an explicit "
+                     "--port=N cannot be shared across rings -- use --port=0 "
+                     "and read each ring's port from the "
+                     "QEC_DECODING_SERVER_READY line"
+                  << std::endl;
       teardown_rings();
       return 1;
     }
