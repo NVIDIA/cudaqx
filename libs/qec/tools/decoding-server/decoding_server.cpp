@@ -118,6 +118,8 @@ extern "C" std::uint64_t cudaqx_qec_device_call_dispatch_count();
 extern "C" std::uint64_t cudaqx_qec_decoding_server_max_concurrent();
 extern "C" void cudaqx_qec_decoding_server_print_stats();
 extern "C" void cudaqx_qec_decoding_server_shutdown();
+extern "C" int cudaqx_qec_decoding_server_apply_config_from_yaml(
+    const char *yaml, std::size_t yaml_len, char *error, std::size_t error_len);
 
 namespace {
 
@@ -184,7 +186,70 @@ bool parse_args(int argc, char **argv, ServerConfig &cfg) {
 }
 
 std::atomic<int> g_shutdown{0};
-void on_signal(int) { g_shutdown.store(1, std::memory_order_release); }
+std::atomic<int> g_apply_config{0};
+void on_signal(int signal) {
+#ifdef SIGHUP
+  if (signal == SIGHUP) {
+    g_apply_config.store(1, std::memory_order_release);
+    return;
+  }
+#endif
+  g_shutdown.store(1, std::memory_order_release);
+}
+
+bool consume_apply_request() {
+  return g_apply_config.exchange(0, std::memory_order_acq_rel) != 0;
+}
+
+bool read_config_text(const std::string &path, std::string &yaml,
+                      std::string &error) {
+  std::ifstream file(path);
+  if (!file) {
+    error = "cannot open " + path;
+    return false;
+  }
+  std::stringstream contents;
+  contents << file.rdbuf();
+  yaml = contents.str();
+  if (yaml.empty()) {
+    error = "configuration file is empty";
+    return false;
+  }
+  return true;
+}
+
+std::string one_line(std::string message) {
+  for (char &c : message)
+    if (c == '\n' || c == '\r' || c == '\t')
+      c = ' ';
+  return message;
+}
+
+void apply_cqr_config(const std::string &path) {
+  std::string yaml, error;
+  if (!read_config_text(path, yaml, error)) {
+    std::cout << "QEC_DECODING_SERVER_CONFIG_REJECTED old_config_active reason="
+              << one_line(error) << std::endl;
+    return;
+  }
+  char reason[1024] = {0};
+  const int status = cudaqx_qec_decoding_server_apply_config_from_yaml(
+      yaml.data(), yaml.size(), reason, sizeof(reason));
+  const std::string detail = one_line(reason);
+  if (status == 0)
+    std::cout << "QEC_DECODING_SERVER_CONFIG_APPLIED reason=" << detail
+              << std::endl;
+  else if (status == 1)
+    std::cout << "QEC_DECODING_SERVER_CONFIG_REJECTED old_config_active reason="
+              << detail << std::endl;
+  else if (status == 2)
+    std::cout << "QEC_DECODING_SERVER_CONFIG_FAILED awaiting_config reason="
+              << detail << std::endl;
+  else
+    std::cout << "QEC_DECODING_SERVER_CONFIG_BUSY reason=" << detail
+              << std::endl;
+  std::cout.flush();
+}
 
 /// Env-gated /dev/cpu_dma_latency hold: while the fd stays open, the kernel
 /// keeps every CPU out of idle states whose exit latency exceeds the written
@@ -278,6 +343,9 @@ int main(int argc, char **argv) {
 
   std::signal(SIGINT, on_signal);
   std::signal(SIGTERM, on_signal);
+#ifdef SIGHUP
+  std::signal(SIGHUP, on_signal);
+#endif
 
   // [1] Validate the YAML and hand its path to the decoding-server service:
   // the DecodingServer (one DecodingSession worker thread per decoder) builds
@@ -397,6 +465,36 @@ int main(int argc, char **argv) {
       std::thread server_thread([&server] { server.run(); });
       const auto start_time_gr = std::chrono::steady_clock::now();
       while (g_shutdown.load(std::memory_order_acquire) == 0) {
+        if (consume_apply_request()) {
+          std::string yaml, error;
+          if (!read_config_text(cfg.config_path, yaml, error)) {
+            std::cout << "QEC_DECODING_SERVER_CONFIG_REJECTED "
+                         "old_config_active reason="
+                      << one_line(error) << std::endl;
+          } else {
+            try {
+              auto next = config::multi_decoder_config::from_yaml_str(yaml);
+              const auto result = server.apply_config(next, cfg.config_path);
+              using cudaq::qec::decoding_server::ConfigApplyState;
+              if (result.state == ConfigApplyState::applied ||
+                  result.state == ConfigApplyState::unchanged)
+                std::cout << "QEC_DECODING_SERVER_CONFIG_APPLIED reason="
+                          << one_line(result.message) << std::endl;
+              else if (result.state == ConfigApplyState::busy)
+                std::cout << "QEC_DECODING_SERVER_CONFIG_BUSY reason="
+                          << one_line(result.message) << std::endl;
+              else
+                std::cout << "QEC_DECODING_SERVER_CONFIG_REJECTED "
+                             "old_config_active reason="
+                          << one_line(result.message) << std::endl;
+            } catch (const std::exception &e) {
+              std::cout << "QEC_DECODING_SERVER_CONFIG_REJECTED "
+                           "old_config_active reason="
+                        << one_line(e.what()) << std::endl;
+            }
+          }
+          std::cout.flush();
+        }
         const auto elapsed =
             std::chrono::duration_cast<std::chrono::seconds>(
                 std::chrono::steady_clock::now() - start_time_gr)
@@ -727,6 +825,8 @@ int main(int argc, char **argv) {
   // [5] Run until signalled or timed out.
   const auto start_time = std::chrono::steady_clock::now();
   while (g_shutdown.load(std::memory_order_acquire) == 0) {
+    if (consume_apply_request())
+      apply_cqr_config(cfg.config_path);
     const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
                              std::chrono::steady_clock::now() - start_time)
                              .count();

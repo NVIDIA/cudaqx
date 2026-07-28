@@ -7,6 +7,7 @@
  ******************************************************************************/
 
 #include "RpcDispatcher.h"
+#include "SessionRegistry.h"
 
 #include "cudaq/qec/logger.h"
 
@@ -69,6 +70,8 @@ void RpcDispatcher::dispatch(RxFrame frame, ITransceiver &transport) {
 
   try {
     it->second(std::move(frame), writer);
+  } catch (const SessionNotReady &) {
+    writer.write_error(RpcStatus::NOT_READY);
   } catch (const std::out_of_range &) {
     // SessionRegistry::get() throws std::out_of_range for unknown decoder_id.
     writer.write_error(RpcStatus::INVALID_DECODER);

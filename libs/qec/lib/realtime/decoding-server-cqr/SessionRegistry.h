@@ -15,15 +15,35 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace cudaq::qec::decoding_server {
 
 using cudaq::qec::decoding::config::DecoderDispatch;
 
+enum class ConfigApplyState {
+  applied,
+  unchanged,
+  rejected,
+  awaiting_config,
+  busy,
+};
+
+struct ConfigApplyResult {
+  ConfigApplyState state;
+  std::string message;
+};
+
+class SessionNotReady : public std::runtime_error {
+public:
+  using std::runtime_error::runtime_error;
+};
+
 /// Owns all DecodingSession instances, keyed by uint64_t decoder_id.
 ///
-/// Populated eagerly at startup from the YAML config.  The map is read-only
-/// after load_from_config() returns, so no locking is required at runtime.
+/// Populated eagerly at startup. Live config apply is serialized by
+/// DecodingServer's lifecycle lock, so request handlers never access this map
+/// while host sessions are being replaced.
 class SessionRegistry {
 public:
   /// Parse \p yaml_path and construct one DecodingSession per decoder entry.
@@ -39,6 +59,19 @@ public:
       const cudaq::qec::decoding::config::multi_decoder_config &config,
       const std::string &source_name);
 
+  /// Apply decoder-only changes while preserving the process-owned ring
+  /// topology. Decoder ids, dispatch shapes, and transport configuration are
+  /// immutable. device_graph entries are also immutable because their
+  /// captured graph resources are bound to live ring consumers outside this
+  /// registry. Host sessions are drained, destroyed, and reconstructed.
+  ///
+  /// Static/topology rejection leaves the old sessions serving. A host
+  /// decoder construction failure occurs after the old host resources have
+  /// been released and leaves those ids unavailable until a later successful
+  /// apply.
+  ConfigApplyResult
+  apply_config(const cudaq::qec::decoding::config::multi_decoder_config &config,
+               const std::string &source_name);
   DecodingSession &get(uint64_t decoder_id);
   const DecodingSession &get(uint64_t decoder_id) const;
 
@@ -77,8 +110,14 @@ public:
   }
 
 private:
+  static std::unique_ptr<DecodingSession>
+  make_session(const cudaq::qec::decoding::config::decoder_config &config);
+
   std::unordered_map<uint64_t, std::unique_ptr<DecodingSession>> sessions_;
   std::unordered_map<uint64_t, DecoderDispatch> dispatch_by_id_;
+  std::unordered_set<uint64_t> unavailable_ids_;
+  cudaq::qec::decoding::config::multi_decoder_config active_config_;
+  bool loaded_ = false;
   DecoderDispatch dispatch_{DecoderDispatch::host};
   bool mixed_ = false;
 };

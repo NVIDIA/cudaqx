@@ -34,6 +34,7 @@
 
 #include <atomic>
 #include <cstddef>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <vector>
@@ -42,6 +43,7 @@ extern "C" void cudaqx_qec_decoding_server_shutdown();
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -63,6 +65,9 @@ static CqrTransceiver *g_transceiver = nullptr;
 static std::unique_ptr<DecodingServer> g_server;
 static std::thread g_server_thread;
 static std::once_flag g_init_flag;
+static std::mutex g_apply_config_mutex;
+static std::shared_mutex g_rpc_gate;
+static std::atomic<bool> g_config_apply_requested{false};
 
 // Counts requests dispatched through this service (test hook).
 static std::atomic<uint64_t> g_service_dispatch_count{0};
@@ -104,6 +109,8 @@ static void init_server() {
 // propagate into the transport dispatcher loop).
 constexpr int32_t kStatusHandlerException =
     static_cast<int32_t>(cudaq::qec::decoding::rpc::RpcStatus::INTERNAL_ERROR);
+constexpr int32_t kStatusNotReady =
+    static_cast<int32_t>(cudaq::qec::decoding::rpc::RpcStatus::NOT_READY);
 
 static void write_error_response(const void *rx_slot, void *tx_slot,
                                  std::size_t slot_size, int32_t status) {
@@ -148,6 +155,16 @@ static void dispatch_rpc(const void *rx_slot, void *tx_slot,
                          std::size_t slot_size, uint32_t function_id) {
   g_service_dispatch_count.fetch_add(1, std::memory_order_relaxed);
   try {
+    if (g_config_apply_requested.load(std::memory_order_acquire)) {
+      write_error_response(rx_slot, tx_slot, slot_size, kStatusNotReady);
+      return;
+    }
+    std::shared_lock rpc_guard(g_rpc_gate, std::try_to_lock);
+    if (!rpc_guard.owns_lock() ||
+        g_config_apply_requested.load(std::memory_order_acquire)) {
+      write_error_response(rx_slot, tx_slot, slot_size, kStatusNotReady);
+      return;
+    }
     std::call_once(g_init_flag, init_server);
     // g_transceiver is null if init_server failed or after shutdown().
     // g_init_flag is not resettable, so call_once won't retry after shutdown.
@@ -406,4 +423,66 @@ cudaqx_qec_decoding_server_shutdown() {
   // Latency-probe report (QEC_DECODING_SERVER_HOP_STATS); prints once, after
   // all producers (dispatcher handlers, session workers) have quiesced.
   cudaq::qec::decoding_server::hopstats::report();
+}
+
+namespace {
+void set_apply_error(char *error, size_t error_len,
+                     const std::string &message) {
+  if (error && error_len > 0)
+    std::snprintf(error, error_len, "%s", message.c_str());
+}
+} // namespace
+
+/// Apply a pre-read YAML document to the live host decoder sessions.
+/// Return codes: 0=applied/unchanged, 1=rejected (old config still serving),
+/// 2=construction failed (host decoders awaiting config), 3=busy.
+extern "C" __attribute__((visibility("default"))) int
+cudaqx_qec_decoding_server_apply_config_from_yaml(const char *yaml,
+                                                  size_t yaml_len, char *error,
+                                                  size_t error_len) {
+  std::unique_lock apply_guard(g_apply_config_mutex, std::try_to_lock);
+  if (!apply_guard.owns_lock()) {
+    set_apply_error(error, error_len, "another config apply is in progress");
+    return 3;
+  }
+  if (!yaml || yaml_len == 0) {
+    set_apply_error(error, error_len, "configuration file is empty");
+    return 1;
+  }
+  if (!g_server) {
+    set_apply_error(error, error_len, "decoding server is not initialized");
+    return 2;
+  }
+
+  cudaq::qec::decoding::config::multi_decoder_config config;
+  try {
+    config = cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(
+        std::string(yaml, yaml_len));
+  } catch (const std::exception &e) {
+    set_apply_error(error, error_len, e.what());
+    return 1;
+  }
+
+  g_config_apply_requested.store(true, std::memory_order_release);
+  struct ResetApplyRequest {
+    ~ResetApplyRequest() {
+      g_config_apply_requested.store(false, std::memory_order_release);
+    }
+  } reset_apply_request;
+  std::unique_lock rpc_guard(g_rpc_gate);
+  const auto result = g_server->apply_config(config, "SIGHUP config");
+  set_apply_error(error, error_len, result.message);
+  using cudaq::qec::decoding_server::ConfigApplyState;
+  switch (result.state) {
+  case ConfigApplyState::applied:
+  case ConfigApplyState::unchanged:
+    return 0;
+  case ConfigApplyState::rejected:
+    return 1;
+  case ConfigApplyState::awaiting_config:
+    return 2;
+  case ConfigApplyState::busy:
+    return 3;
+  }
+  return 2;
 }
