@@ -130,6 +130,7 @@ using cpu_stage_callback = std::function<size_t(const cpu_stage_context &ctx)>;
 /// (idle_mask) but do NOT signal slot completion (tx_flags). The caller
 /// is responsible for calling realtime_pipeline::complete_deferred(slot)
 /// once the deferred work (e.g. a separate decode thread) finishes.
+/// @note External rings use the overload that also takes the request ID.
 static constexpr size_t DEFERRED_COMPLETION = SIZE_MAX;
 
 // ---------------------------------------------------------------------------
@@ -149,6 +150,8 @@ struct completion {
 };
 
 /// @brief Callback invoked by the consumer thread for each completed request.
+/// @note For an external ring, the callback runs synchronously on the CPU
+/// worker or deferred-completion thread instead.
 /// @param c Metadata for the completed or errored request.
 using completion_callback = std::function<void(const completion &c)>;
 
@@ -214,6 +217,8 @@ private:
 /// post-processing (e.g. PyMatching), and a consumer thread for completion
 /// signaling. It supports both an internal ring buffer (for software testing
 /// via ring_buffer_injector) and an external ring buffer (for FPGA RDMA).
+/// @note External transports own TX flag consumption, so the consumer thread
+/// is only created for an internal ring.
 class realtime_pipeline {
 public:
   /// @brief Construct a pipeline and allocate ring buffer resources.
@@ -241,6 +246,8 @@ public:
   /// @brief Register the completion callback. Must be called before start().
   /// @param handler Function invoked by the consumer thread for each
   ///   completed or errored request.
+  /// @note For an external ring, the handler runs on the CPU worker or
+  ///   deferred-completion thread instead.
   void set_completion_handler(completion_callback handler);
 
   /// @brief Allocate resources, build dispatcher config, and spawn all threads.
@@ -262,6 +269,8 @@ public:
   /// @brief Pipeline throughput and backpressure statistics.
   struct Stats {
     /// @brief Total requests submitted to the ring buffer.
+    /// @note External transports own submission, so this remains zero when an
+    /// external ring buffer is used.
     uint64_t submitted;
     /// @brief Total requests that completed (success or error).
     uint64_t completed;
@@ -281,7 +290,20 @@ public:
   /// DEFERRED_COMPLETION and the deferred work has finished writing the
   /// response into the slot's ring buffer area.
   /// @param slot Ring buffer slot index to complete.
+  /// @note This overload is for an internal ring buffer.
+  /// @throws std::logic_error If the pipeline uses an external ring buffer.
+  /// @throws std::out_of_range If @p slot is not a valid ring slot.
   void complete_deferred(int slot);
+
+  /// @brief Signal external-ring deferred processing for a slot is complete.
+  ///
+  /// Publishes the caller-written TX response, accounts the completion, and
+  /// invokes the registered completion callback synchronously.
+  /// @param slot Ring buffer slot index to complete.
+  /// @param request_id Original RPC request identifier.
+  /// @throws std::logic_error If the pipeline uses an internal ring buffer.
+  /// @throws std::out_of_range If @p slot is not a valid ring slot.
+  void complete_deferred(int slot, uint64_t request_id);
 
   /// @brief Host and device base addresses of the RX data ring.
   struct ring_buffer_bases {

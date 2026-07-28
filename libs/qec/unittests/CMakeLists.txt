@@ -510,6 +510,30 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
     )
 
     # test_realtime_predecoder_w_pymatching is now in unittests/realtime/
+
+  endif()
+
+  if(CUDAQ_REALTIME_FOR_0_16)
+    set(_qldpc_graph_sources
+      ${CMAKE_CURRENT_SOURCE_DIR}/realtime/qec_graph_decode_test/test_realtime_qldpc_graph_decoding.cpp
+      ${CMAKE_CURRENT_SOURCE_DIR}/realtime/qec_graph_decode_test/qldpc_config_loader.cpp)
+    set(_qldpc_graph_required_library ${CUDAQ_REALTIME_DISPATCH_LIBRARY})
+    set(_qldpc_graph_compile_definition CUDAQ_REALTIME_FOR_0_16)
+    set(_qldpc_graph_libraries
+      ${CUDAQ_REALTIME_DISPATCH_LIBRARY}
+      $<$<BOOL:${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}>:${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}>
+      $<$<TARGET_EXISTS:cudaq-qec-realtime-cudevice-proprietary>:$<LINK_LIBRARY:WHOLE_ARCHIVE,cudaq-qec-realtime-cudevice-proprietary>>)
+  else()
+    set(_qldpc_graph_sources
+      ${CMAKE_CURRENT_SOURCE_DIR}/realtime/qec_graph_decode_test/test_realtime_qldpc_graph_decoding_host_loop.cpp)
+    set(_qldpc_graph_required_library
+      ${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY})
+    set(_qldpc_graph_compile_definition)
+    set(_qldpc_graph_libraries ${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY})
+  endif()
+
+  if(CUDAQ_REALTIME_INCLUDE_DIR AND CUDAQ_REALTIME_LIBRARY
+     AND _qldpc_graph_required_library)
     # ------------------------------------------------------------------
     # Realtime QLDPC graph decode CI test (CPU-launched CUDA graph + relay BP)
     # ------------------------------------------------------------------
@@ -526,9 +550,7 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
       PATH_SUFFIXES lib)
 
     add_executable(test_realtime_qldpc_graph_decoding
-      ${CMAKE_CURRENT_SOURCE_DIR}/realtime/qec_graph_decode_test/test_realtime_qldpc_graph_decoding.cpp
-      ${CMAKE_CURRENT_SOURCE_DIR}/realtime/qec_graph_decode_test/qldpc_config_loader.cpp
-    )
+      ${_qldpc_graph_sources})
 
     set_target_properties(test_realtime_qldpc_graph_decoding PROPERTIES
       CUDA_SEPARABLE_COMPILATION ON
@@ -548,17 +570,15 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
     target_compile_definitions(test_realtime_qldpc_graph_decoding PRIVATE
       TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/realtime/qec_roce_decode_test/data"
       CUDAQ_REALTIME_ROOT
-      CUDAQ_REALTIME_FOR_0_16
+      ${_qldpc_graph_compile_definition}
     )
 
     target_link_libraries(test_realtime_qldpc_graph_decoding PRIVATE
       GTest::gtest_main
       CUDA::cudart
       ${CUDAQ_REALTIME_LIBRARY}
-      ${CUDAQ_REALTIME_DISPATCH_LIBRARY}
-      $<$<BOOL:${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}>:${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}>
+      ${_qldpc_graph_libraries}
       cudaq-qec-realtime-decoding
-      $<$<TARGET_EXISTS:cudaq-qec-realtime-cudevice-proprietary>:$<LINK_LIBRARY:WHOLE_ARCHIVE,cudaq-qec-realtime-cudevice-proprietary>>
       $<$<BOOL:${_CUDAQ_LIBRARY}>:${_CUDAQ_LIBRARY}>
       $<$<BOOL:${_NVQIR_LIBRARY}>:${_NVQIR_LIBRARY}>
     )
@@ -586,18 +606,18 @@ if(CUDAQ_REALTIME_ROOT AND CMAKE_CUDA_COMPILER)
     add_dependencies(CUDAQXQECUnitTests test_realtime_qldpc_graph_decoding)
 
     if((QEC_EXTERNAL_DECODERS OR DEFINED ENV{QEC_EXTERNAL_DECODERS})
-       AND TARGET cudaq-qec-realtime-cudevice-proprietary)
+       AND (NOT CUDAQ_REALTIME_FOR_0_16
+            OR TARGET cudaq-qec-realtime-cudevice-proprietary))
       add_test(NAME test_realtime_qldpc_graph_decoding
         COMMAND test_realtime_qldpc_graph_decoding)
       set_tests_properties(test_realtime_qldpc_graph_decoding PROPERTIES
         LABELS "qec")
     endif()
-
-  else()
-    message(WARNING "cuda-quantum realtime dependency not found. "
-                    "Set CUDAQ_REALTIME_ROOT to enable "
-                    "test_realtime_pipeline and test_realtime_predecoder_w_pymatching.")
   endif()
+else()
+  message(WARNING "cuda-quantum realtime dependency not found. "
+                  "Set CUDAQ_REALTIME_ROOT to enable "
+                  "test_realtime_pipeline and test_realtime_predecoder_w_pymatching.")
 endif()
 
 # ==============================================================================

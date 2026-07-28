@@ -32,7 +32,7 @@
 #include <unistd.h>
 
 #include "cudaq/qec/realtime/ai_decoder_service.h"
-#include "cudaq/realtime/daemon/dispatcher/graph_launch_engine.h"
+#include "cudaq/realtime/daemon/dispatcher/host_dispatcher.h"
 
 #define CUDA_CHECK(call)                                                       \
   do {                                                                         \
@@ -437,7 +437,8 @@ int main(int argc, char *argv[]) {
             static_cast<const rt_sdk::RPCHeader *>(job.ring_buffer_ptr);
         uint32_t rid = rpc_hdr->request_id;
 
-        pymatch_queue.push({origin_slot, rid, job.ring_buffer_ptr});
+        pymatch_queue.push({origin_slot, rid, job.ring_buffer_ptr,
+                            ctx.response_buffer, ctx.max_response_size});
 
         NVTX_POP(); // PredecoderPoll
         return rt_pipeline::DEFERRED_COMPLETION;
@@ -533,16 +534,38 @@ int main(int argc, char *argv[]) {
         NVTX_POP(); // PyMatchDecode
 
         // Write RPC response into ring buffer slot
-        DecodeResponse resp{total_corrections, all_converged ? 1 : 0};
-        char *response_payload =
-            (char *)job.ring_buffer_ptr + sizeof(rt_sdk::RPCResponse);
-        std::memcpy(response_payload, &resp, sizeof(resp));
+        // The pipeline-provided response pointer selects the TX slot.
+        constexpr size_t response_size =
+            sizeof(rt_sdk::RPCResponse) + sizeof(uint8_t);
+        if (!job.response_buffer_ptr ||
+            job.response_buffer_size < response_size) {
+          throw std::runtime_error("deferred response buffer is too small");
+        }
 
-        auto *header = static_cast<rt_sdk::RPCResponse *>(job.ring_buffer_ptr);
-        header->magic = rt_sdk::RPC_MAGIC_RESPONSE;
+        const uint8_t correction = static_cast<uint8_t>(total_corrections & 1);
+        const auto *request =
+            static_cast<const rt_sdk::RPCHeader *>(job.ring_buffer_ptr);
+        char *response_payload = static_cast<char *>(job.response_buffer_ptr) +
+                                 sizeof(rt_sdk::RPCResponse);
+        std::memcpy(response_payload, &correction, sizeof(correction));
+
+        auto *header =
+            static_cast<rt_sdk::RPCResponse *>(job.response_buffer_ptr);
         header->status = 0;
-        header->result_len = sizeof(resp);
+        header->result_len = sizeof(correction);
+        header->request_id = request->request_id;
+        header->ptp_timestamp = request->ptp_timestamp;
+        __atomic_store_n(&header->magic, rt_sdk::RPC_MAGIC_RESPONSE,
+                         __ATOMIC_RELEASE);
 
+        uint32_t rid = static_cast<uint32_t>(job.request_id);
+        if (rid < static_cast<uint32_t>(max_requests)) {
+          decode_corrections[rid] = total_corrections;
+          decode_logical_pred[rid] = logical_pred;
+        }
+
+        // Publish only after all result bookkeeping for this request is
+        // visible.
         pipeline.complete_deferred(job.origin_slot);
 
         auto worker_end = hrclock::now();
@@ -557,12 +580,6 @@ int main(int argc, char *argv[]) {
         decoder_ctx.total_worker_us.fetch_add(worker_us,
                                               std::memory_order_relaxed);
         decoder_ctx.decode_count.fetch_add(1, std::memory_order_relaxed);
-
-        uint32_t rid = static_cast<uint32_t>(job.request_id);
-        if (rid < static_cast<uint32_t>(max_requests)) {
-          decode_corrections[rid] = total_corrections;
-          decode_logical_pred[rid] = logical_pred;
-        }
       }
     });
   }
