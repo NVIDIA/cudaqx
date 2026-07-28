@@ -562,6 +562,23 @@ int main(int argc, char **argv) {
                                          ring_argv.data()) != CUDAQ_OK) {
       std::cerr << "ERROR: failed to load/create transport provider '"
                 << ring_lib << "' for decoder " << ring.decoder_id << std::endl;
+      // A later ring failing where an earlier one succeeded is the signature
+      // of endpoint args that cannot be shared: every ring receives the same
+      // provider args, so an explicit --port=N binds ring 0 and collides on
+      // every ring after it.
+      const auto is_explicit_port = [](const std::string &a) {
+        return starts_with(a, "--port=") && a != "--port=0";
+      };
+      if (i > 0 && (std::any_of(cfg.provider_args.begin(),
+                                cfg.provider_args.end(), is_explicit_port) ||
+                    std::any_of(ring_extra_args.begin(), ring_extra_args.end(),
+                                is_explicit_port)))
+        std::cerr << "note: all " << rings.size()
+                  << " rings receive the same provider args; an explicit "
+                     "--port=N cannot be shared across rings -- use --port=0 "
+                     "and read each ring's port from the "
+                     "QEC_DECODING_SERVER_READY line"
+                  << std::endl;
       teardown_rings();
       return 1;
     }
