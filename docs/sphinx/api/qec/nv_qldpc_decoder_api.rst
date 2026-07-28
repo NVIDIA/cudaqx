@@ -223,8 +223,3 @@
           yet support ensembles and raise at call time; support for
           `gamma_ensemble_size > 1` with `capture_decode_graph()` is
           intended in a future release.
-
-          For guidance on tuning sequential relay BP and the gamma
-          ensemble (legs, stopping criterion, pre-iterations, and the
-          gamma schedule), see :ref:`relay_bp_tuning`.
-
