@@ -23,6 +23,7 @@
 
 #include "CqrTransceiver.h"
 #include "DecodingServer.h"
+#include "HopStats.h"
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/realtime/decoder_rpc_wire_format.h"
 #include "cudaq/qec/realtime/decoding_config.h"
@@ -387,6 +388,7 @@ extern "C" __attribute__((visibility("default"))) void
 cudaqx_qec_decoding_server_print_stats() {
   if (g_server)
     g_server->print_session_stats();
+  cudaq::qec::decoding_server::hopstats::report();
 }
 
 /// Stop the DecodingServer receive loop and join its thread. The server calls
@@ -401,4 +403,7 @@ cudaqx_qec_decoding_server_shutdown() {
     g_server.reset();
     g_transceiver = nullptr;
   }
+  // Latency-probe report (QEC_DECODING_SERVER_HOP_STATS); prints once, after
+  // all producers (dispatcher handlers, session workers) have quiesced.
+  cudaq::qec::decoding_server::hopstats::report();
 }

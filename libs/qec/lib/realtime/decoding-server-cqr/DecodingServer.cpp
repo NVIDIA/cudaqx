@@ -7,6 +7,7 @@
  ******************************************************************************/
 
 #include "DecodingServer.h"
+#include "HopStats.h"
 #include "../../hardware_guards.h"
 
 #include "cudaq/qec/logger.h"
@@ -141,6 +142,7 @@ DecodingServer::DecodingServer(const std::string &config_yaml) {
       throw std::runtime_error(
           "device_graph transceiver did not provide a device scheduler");
   }
+  install_direct_dispatch();
 }
 
 DecodingServer::DecodingServer(std::unique_ptr<ITransceiver> transport,
@@ -156,6 +158,7 @@ DecodingServer::DecodingServer(std::unique_ptr<ITransceiver> transport,
     registry_.stop_workers();
     throw;
   }
+  install_direct_dispatch();
 }
 
 DecodingServer::DecodingServer(
@@ -175,6 +178,7 @@ DecodingServer::DecodingServer(
     throw;
   }
   register_handlers();
+  install_direct_dispatch();
 }
 
 DecodingServer::DecodingServer(std::vector<std::unique_ptr<ITransceiver>> owned,
@@ -188,6 +192,7 @@ DecodingServer::DecodingServer(std::vector<std::unique_ptr<ITransceiver>> owned,
     registry_.stop_workers();
     throw;
   }
+  install_direct_dispatch();
 }
 
 void *DecodingServer::graph_resources_for(uint64_t decoder_id) const {
@@ -214,6 +219,19 @@ DecodingServer::~DecodingServer() {
 void DecodingServer::init(const std::string &config_yaml) {
   registry_.load_from_config(config_yaml);
   register_handlers();
+}
+
+void DecodingServer::install_direct_dispatch() {
+  for (auto &[fid, t] : function_transport_) {
+    if (std::find(direct_dispatch_transports_.begin(),
+                  direct_dispatch_transports_.end(),
+                  t) != direct_dispatch_transports_.end())
+      continue;
+    if (t->install_dispatch_sink([this, transport = t](RxFrame &&frame) {
+          dispatcher_.dispatch(std::move(frame), *transport);
+        }))
+      direct_dispatch_transports_.push_back(t);
+  }
 }
 
 void DecodingServer::register_handlers() {
@@ -313,9 +331,22 @@ void DecodingServer::register_handlers() {
 void DecodingServer::run() {
   std::vector<ITransceiver *> unique_transports;
   for (auto &[fid, t] : function_transport_) {
+    // Direct-dispatch transports deliver frames from their own producer
+    // threads via the installed sink; a receiver thread here would park in
+    // recv() forever.
+    if (std::find(direct_dispatch_transports_.begin(),
+                  direct_dispatch_transports_.end(),
+                  t) != direct_dispatch_transports_.end())
+      continue;
     if (std::find(unique_transports.begin(), unique_transports.end(), t) ==
         unique_transports.end())
       unique_transports.push_back(t);
+  }
+
+  if (unique_transports.empty()) {
+    CUDA_QEC_INFO(
+        "DecodingServer: all transports direct-dispatch; no receiver threads");
+    return;
   }
 
   CUDA_QEC_INFO("DecodingServer: starting {} receiver thread(s)",
@@ -326,6 +357,7 @@ void DecodingServer::run() {
   recv_threads.reserve(unique_transports.size());
   for (ITransceiver *t : unique_transports) {
     recv_threads.emplace_back([this, t] {
+      hopstats::on_recv_thread();
       while (!shutdown_.load(std::memory_order_acquire)) {
         RxFrame frame = t->recv();
         if (frame.buf.empty())

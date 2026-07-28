@@ -102,6 +102,21 @@ DeviceGraphRingConsumer::DeviceGraphRingConsumer(const cudaq_ringbuffer_t &ring,
 
   DGRC_CUDA_CHECK(cudaSetDevice(gpu_id_));
 
+  // Device-side graph launch (the scheduler's decode-graph trigger path) only
+  // exists for __CUDA_ARCH__ >= 900; the dispatch kernel compiles it out on
+  // older architectures. On such a GPU every host-side call below still
+  // succeeds and the scheduler services the DEVICE_CALL RPCs, but the decode
+  // graph can never fire and the decoder silently returns all-zero
+  // corrections. Fail loudly instead.
+  cudaDeviceProp props{};
+  DGRC_CUDA_CHECK(cudaGetDeviceProperties(&props, gpu_id_));
+  if (props.major < 9)
+    throw std::runtime_error(
+        "DeviceGraphRingConsumer: device_graph dispatch requires compute "
+        "capability >= 9.0 for device-side graph launch; device " +
+        std::to_string(gpu_id_) + " (" + props.name + ") is " +
+        std::to_string(props.major) + "." + std::to_string(props.minor));
+
   void *ft_dev = nullptr;
   if (!alloc_pinned_mapped(3 * sizeof(cudaq_function_entry_t), &ft_host_,
                            &ft_dev))
@@ -240,9 +255,17 @@ void DeviceGraphRingConsumer::shutdown() {
       cudaError_t (*)(int *, unsigned long long *, unsigned long long *);
   if (auto get_debug = reinterpret_cast<debug_fn_t>(
           ::dlsym(RTLD_DEFAULT, "cudaq_dispatch_get_trigger_debug"))) {
+    // The getter reads per-device module globals via cudaMemcpyFromSymbol in
+    // the CALLER's current device context. shutdown() can run on a teardown
+    // thread whose current device differs from gpu_id_ (same hazard as
+    // dispatched() below); reading the wrong device's copy would report the
+    // pristine "never fired" state. Pin gpu_id_ for the call and restore.
+    int prev_device = 0;
+    bool device_pinned = cudaGetDevice(&prev_device) == cudaSuccess &&
+                         cudaSetDevice(gpu_id_) == cudaSuccess;
     int trigger_rc = -1;
     unsigned long long fires = 0, tails = 0;
-    if (get_debug(&trigger_rc, &fires, &tails) == cudaSuccess)
+    if (device_pinned && get_debug(&trigger_rc, &fires, &tails) == cudaSuccess)
       CUDA_QEC_INFO(
           "DeviceGraphRingConsumer: trigger debug rc={} ({}) fires={} "
           "tail_relaunches={}",
@@ -251,6 +274,8 @@ void DeviceGraphRingConsumer::shutdown() {
               ? "never fired"
               : cudaGetErrorString(static_cast<cudaError_t>(trigger_rc)),
           fires, tails);
+    if (device_pinned)
+      cudaSetDevice(prev_device);
   }
   if (shutdown_host_)
     __atomic_store_n(shutdown_host_, 1, __ATOMIC_RELEASE);

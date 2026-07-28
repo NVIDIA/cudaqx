@@ -73,6 +73,10 @@ struct RxFrame {
   ReleaseFn release_fn; ///< null except on GPU ring-buffer path
 };
 
+/// Sink a direct-dispatch transport invokes for each received frame, on the
+/// transport's own producer thread (see install_dispatch_sink).
+using DispatchSink = std::function<void(RxFrame &&)>;
+
 /// Transport abstraction used by DecodingServer and DecodingSession.
 struct ITransceiver {
   /// Block until a frame is available and return it (buf is owned by caller).
@@ -80,6 +84,15 @@ struct ITransceiver {
   /// sentinel that unblocks the receive loop so it can observe the shutdown
   /// flag and exit.
   virtual RxFrame recv() = 0;
+
+  /// Optional direct-dispatch hook: a transport whose frames originate on a
+  /// caller thread (CqrTransceiver::inject) may accept \p sink and invoke it
+  /// inline for each frame instead of queueing frames for recv() -- removing
+  /// one cross-thread handoff per RPC.  Returns true when accepted; the
+  /// server then must NOT run a recv() thread for this transport.  Installed
+  /// once, before the transport starts serving; the sink must be safe for
+  /// concurrent callers (one per producer thread).
+  virtual bool install_dispatch_sink(DispatchSink /*sink*/) { return false; }
 
   /// Unblock any thread waiting in recv() (which then returns an empty
   /// sentinel frame). Called by DecodingServer::stop().

@@ -102,6 +102,20 @@ TensorRT Decoder
 
 .. include:: trt_decoder_api.rst
 
+.. _pymatching_decoder_api_cpp:
+
+PyMatching Decoder
+------------------
+
+.. include:: pymatching_api.rst
+
+.. _chromobius_decoder_api_cpp:
+
+Chromobius Decoder
+------------------
+
+.. include:: chromobius_api.rst
+
 Real-Time Decoding
 ==================
 
