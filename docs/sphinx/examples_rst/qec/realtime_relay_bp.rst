@@ -11,12 +11,12 @@ decoder using CUDA-Q's realtime dispatch system.  The decoder is driven by a
 **self-relaunching device-graph scheduler** and can operate in three
 configurations:
 
-- **CI unit test** -- standalone executable, no FPGA or network hardware needed
+- **Unit test** -- standalone executable, no FPGA or network hardware needed
 - **Emulated end-to-end test** -- software FPGA emulator replaces real hardware
 - **FPGA end-to-end test** -- real FPGA connected via ConnectX RDMA/RoCE
 
 Decode dispatch architecture
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+----------------------------
 
 The realtime path uses the per-round decode-server protocol with three RPCs:
 ``enqueue_syndromes`` (append one round of syndromes), ``get_corrections``
@@ -59,7 +59,7 @@ Hardware
      - GPU
      - ConnectX NIC
      - FPGA
-   * - CI unit test
+   * - Unit test
      - Any CUDA-capable GPU
      - Not required
      - Not required
@@ -97,7 +97,7 @@ built from this (cudaqx) repository:
   needed at **build** time.  It contains the ``enqueue_syndromes`` /
   ``get_corrections`` / ``reset_decoder`` ``DEVICE_CALL`` handlers (the device
   functions the scheduler dispatches).  It is linked ``WHOLE_ARCHIVE`` and
-  device-linked into the bridge and the CI test, and is pointed at via the
+  device-linked into the bridge and the unit test, and is pointed at via the
   ``-DCUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE=<path>`` CMake variable.
   Both artifacts come from the same closed-source decoder package; build the
   ``cudaq-qec-realtime-cudevice-proprietary`` target from the proprietary
@@ -177,7 +177,7 @@ provides the Hololink ``GpuRoceTransceiver`` library for RDMA transport.
 .. note::
 
    ``holoscan-sensor-bridge`` is only needed for the emulated and FPGA
-   end-to-end tests.  The CI unit test requires only ``libcudaq-realtime``.
+   end-to-end tests.  The unit test requires only ``libcudaq-realtime``.
 
 Repository Layout
 -----------------
@@ -190,7 +190,7 @@ Key files within ``cudaqx``:
      unittests/
        realtime/
          qec_graph_decode_test/
-           test_realtime_qldpc_graph_decoding.cpp   # CI unit test
+           test_realtime_qldpc_graph_decoding.cpp   # Unit test
          qec_roce_decode_test/
            data/
              config_nv_qldpc_relay.yml              # Relay BP decoder config
@@ -208,13 +208,13 @@ The FPGA emulator is in the ``cuda-quantum`` repository:
      unittests/utils/
        hololink_fpga_emulator.cpp                   # Software FPGA emulator
 
-Building
---------
+Build and Unit Test
+-------------------
 
-CI unit test only (no Hololink tools)
+Unit test only (no Hololink tools)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-If you only need to run the CI unit test, you can build without
+If you only need to run the unit test, you can build without
 ``holoscan-sensor-bridge``:
 
 .. code-block:: bash
@@ -241,8 +241,8 @@ If you only need to run the CI unit test, you can build without
      -DCUDAQX_INCLUDE_TESTS=ON
    cmake --build cudaqx/build --target test_realtime_qldpc_graph_decoding
 
-Full build (CI test + Hololink bridge/playback tools)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Full build (unit test + Hololink bridge/playback tools)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 To also build the bridge and playback tools for emulated or FPGA testing:
 
@@ -328,10 +328,10 @@ The orchestration script can build everything automatically:
      --cuda-quantum-dir /path/to/cuda-quantum \
      --no-run
 
-CI Unit Test
-------------
+Unit Test
+^^^^^^^^^^^^
 
-The CI unit test (``test_realtime_qldpc_graph_decoding``) exercises the full
+The unit test (``test_realtime_qldpc_graph_decoding``) exercises the full
 device-graph scheduler decode path without any network hardware.  It:
 
 1. Loads the Relay BP config and syndrome data from YAML/text files
@@ -346,8 +346,7 @@ device-graph scheduler decode path without any network hardware.  It:
 5. Verifies each shot's correction against the fixture, then a final
    ``reset_decoder`` + ``get_corrections`` confirms reset
 
-Running
-^^^^^^^
+Run it with:
 
 .. code-block:: bash
 
@@ -370,16 +369,18 @@ Expected output:
    [==========] 1 test from 1 test suite ran.
    [  PASSED  ] 1 test.
 
-Surface Code Test (Relay BP)
-----------------------------
+Surface Code Test
+-----------------
+
+While the unit test above checks the decode path against a fixed set of pre-recorded syndromes, this test measures how Relay BP actually performs on a code: it runs a full surface code memory experiment, generating fresh syndromes on the fly and decoding as many shots as you like.
 
 The ``surface_code-1-local`` app example runs a surface code memory experiment
 with the nv-qldpc-decoder configured for Relay BP.  It simulates a surface code
-with ``stim`` and generates syndromes on the fly, so -- unlike the fixed-fixture
-CI unit test -- it can run an arbitrary number of shots.
+with ``stim`` and generates syndromes on the fly, so it can run an arbitrary
+number of shots.
 
 Build the app example (it links the same plugin + proprietary archive as the
-CI test):
+unit test):
 
 .. code-block:: bash
 
@@ -535,7 +536,7 @@ Key parameters for FPGA mode:
 
       spacing >= decode_time / (rounds + 1)
 
-   For this ``[[8,3,6]]`` relay-BP config (~200 us decode, 4 rounds -> 5
+   For this ``[[8,3,6]]`` Relay BP config (~200 us decode, 4 rounds -> 5
    frames/shot) that is ``>= ~40 us``.  Start **conservative** (e.g.
    ``--spacing 100``) for the first run to rule out ring overrun while
    confirming corrections, then tune down toward ``~50 us`` for a realistic

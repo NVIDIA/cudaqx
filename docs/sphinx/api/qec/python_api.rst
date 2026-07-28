@@ -77,6 +77,23 @@ Decoder Interfaces
 
 .. autofunction:: cudaq_qec.get_decoder
 
+.. note::
+   **scipy.sparse interop** — :func:`cudaq_qec.get_decoder` and
+   :class:`cudaq_qec.Decoder` accept a ``scipy.sparse`` matrix (CSR, CSC,
+   COO, or any other ``scipy.sparse`` format) as the parity-check matrix
+   ``H``.  This is the preferred form for large PCMs because no dense
+   ``rows x cols`` allocation is made — the matrix is normalised to CSR
+   internally.  Dense NumPy ``uint8`` arrays remain supported.
+   The PCM utilities :func:`cudaq_qec.reorder_pcm_columns`,
+   :func:`cudaq_qec.shuffle_pcm_columns`, and
+   :func:`cudaq_qec.pcm_to_sparse_vec` also accept SciPy sparse matrices
+   without creating a dense ``cudaqx::tensor``. Reordering and shuffling a
+   sparse input returns a ``scipy.sparse.csc_matrix``; a dense input continues
+   to return a NumPy array.
+
+   ``scipy`` is an optional dependency; if it is not installed, pass a dense
+   NumPy array instead.
+
 Built-in Decoders
 =================
 

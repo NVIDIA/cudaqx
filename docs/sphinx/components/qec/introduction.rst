@@ -7,7 +7,7 @@ The ``cudaq-qec`` library provides a comprehensive framework for quantum
 error correction research and development. It leverages GPU acceleration
 for efficient syndrome decoding and error correction simulations (coming soon).
 
-The library supports both offline analysis and real-time error correction on quantum hardware,
+The library supports both offline analysis and realtime error correction on quantum hardware,
 enabling low-latency decoding for practical quantum computing applications.
 
 Core Components
@@ -16,7 +16,7 @@ Core Components
 
 1. **QEC Codes** (:code:`cudaq::qec::code`) - Define quantum error correcting codes with logical operations
 2. **Decoders** (:code:`cudaq::qec::decoder`) - Implement syndrome decoding algorithms
-3. **Real-Time Decoding** (:code:`cudaq::qec::decoding`) - Enable online error correction on quantum hardware
+3. **Realtime Decoding** (:code:`cudaq::qec::decoding`) - Enable online error correction on quantum hardware
 
 These types are meant to be extended by developers to provide new error correcting codes and decoding strategies.
 
@@ -856,7 +856,7 @@ paths live in separate namespaces (``cudaq::qec::dem_sampler::cpu`` and
 
 For a complete walkthrough including GPU acceleration, input type handling, and
 backend selection details, see the
-:doc:`DEM Sampling example </examples_rst/qec/dem_sampling>`.
+:ref:`DEM Sampling example <dem_sampling_example>`.
 
 
 Pre-built QEC Decoders
@@ -865,7 +865,7 @@ Pre-built QEC Decoders
 CUDA-Q QEC provides pre-built decoders for a variety of use cases.
 
 +------------------------+-----------------------------+----------+----------+-------------------+--------------------------------------------------+
-| Decoder                | Decoder String Identifier   | Python   | C++      | Real-Time Enabled | Notes                                            |
+| Decoder                | Decoder String Identifier   | Python   | C++      | Realtime Enabled  | Notes                                            |
 +========================+=============================+==========+==========+===================+==================================================+
 | NVIDIA QLDPC Decoder¹  | `"nv-qldpc-decoder"`        | Yes      | Yes      | Yes               | Supports Relay BP and BP+OSD                     |
 +------------------------+-----------------------------+----------+----------+-------------------+--------------------------------------------------+
@@ -1143,11 +1143,11 @@ Once a decode step completes, results use the same types as other pre-built
 decoders (:class:`cudaq_qec.Decoder` in Python, :cpp:class:`cudaq::qec::decoder`
 in C++).
 
-Real-Time Decoding
+Realtime Decoding
 ------------------
 
-CUDA-Q QEC provides real-time decoding capabilities for quantum error correction on actual quantum hardware.
-Real-time decoding enables decoders to process syndromes and compute corrections within qubit coherence times,
+CUDA-Q QEC provides realtime decoding capabilities for quantum error correction on actual quantum hardware.
+Realtime decoding enables decoders to process syndromes and compute corrections within qubit coherence times,
 making active error correction practical for real quantum computers.
 
 Key Features
@@ -1155,26 +1155,26 @@ Key Features
 
 * **In-Kernel Operation**: Syndrome decoding within CUDA-Q kernels.
 * **Hardware Integration**: Direct integration with quantum hardware backends (`Quantinuum's Helios QPU <https://www.quantinuum.com/products-solutions/quantinuum-systems/helios>`_).
-* **Simulation Support**: Test real-time workflows locally before deploying to hardware.
-* **Multiple Decoder Types**: For real-time decoders, see the table `Pre-built QEC Decoders <https://nvidia.github.io/cudaqx/components/qec/introduction.html#pre-built-qec-decoders>`__.
+* **Simulation Support**: Test realtime workflows locally before deploying to hardware.
+* **Multiple Decoder Types**: For realtime decoders, see the table `Pre-built QEC Decoders <https://nvidia.github.io/cudaqx/components/qec/introduction.html#pre-built-qec-decoders>`__.
 * **GPU Acceleration**: Leverage CUDA for high-performance syndrome decoding.
 
-Note: The real-time decoding interfaces are experimental, and subject to change. Real-time decoding on Quantinuum's Helios-1 device is currently only available to partners and collaborators. Please email QCSupport@quantinuum.com for more information.
+Note: The realtime decoding interfaces are experimental, and subject to change. Realtime decoding on Quantinuum's Helios-1 device is currently only available to partners and collaborators. Please email QCSupport@quantinuum.com for more information.
 
 Workflow and Terminology
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
-The real-time decoding workflow involves configuring a decoder (or many) before CUDA-Q kernel launch, and communicating to the decoders with special in-kernel functions.
+The realtime decoding workflow involves configuring a decoder (or many) before CUDA-Q kernel launch, and communicating to the decoders with special in-kernel functions.
 A decoder is a single software instance of a decoding algorithm, and all its relevant inputs (parity-check matrices, error rates, etc.) which will remain static for the execution of the quantum program.
 A decoder config may contain many decoders, each with different algorithms and input parameters.
 
 In a quantum kernel, a user interacts with the decoders via the `enqueue_syndromes` and `get_corrections` interfaces.
 The behavior of these functions depends on their configuration and their usage.
 
-The real-time decoding workflow can be described with respect to the offline decoding workflow.
-The non-real-time decoders require a detector error model which is specified via a detector error matrix which is the parity check matrix `H` of the decoding problem, and a vector of weights (error rates).
+The realtime decoding workflow can be described with respect to the offline decoding workflow.
+The non-realtime decoders require a detector error model which is specified via a detector error matrix which is the parity check matrix `H` of the decoding problem, and a vector of weights (error rates).
 This matrix has dimensions of `[numDetectors, numErrors]`, where the each row is a detector, and each column is a possible error.
-For real-time decoding, we first need to convert the circuit measurements into detectors.
+For realtime decoding, we first need to convert the circuit measurements into detectors.
 This is specified via the detector matrix `D`, which has dimensions `[numDetectors, numMeasurements]`.
 Each column of the detector matrix defines which detectors a measurement participates in by including an entry of `1`.
 This when, once all `numMeasurements` measurements are enqueued, a matrix-vector multiply can convert this buffer of raw measurements into detectors which are then passed into the decoding algorithm.
@@ -1184,7 +1184,7 @@ Each column of the observables flips matrix describes for each error, which obse
 Once the decoding algorithm has process the detectors it provides a vector of predicted errors of length `numErrors`.
 This vector then executes a matrix-vector multiply with the observables flips matrix to yield a new vector of length `numObs` which contains an entry of `1` if the observable is predicted to have flipped.
 
-Thus once a decoder is configured, we can view the real-time decoder as a transformation of data starting from a vector of raw measurements, then transformed into detectors via `D`, then error predictions via `H`, then observable flip predictions via `O`. This last step is what is returned via `get_corrections`. The user configures how many bits of information are returned, and what they represent via the `O` matrix in the decoder config.
+Thus once a decoder is configured, we can view the realtime decoder as a transformation of data starting from a vector of raw measurements, then transformed into detectors via `D`, then error predictions via `H`, then observable flip predictions via `O`. This last step is what is returned via `get_corrections`. The user configures how many bits of information are returned, and what they represent via the `O` matrix in the decoder config.
 
 Similarly, the user determines how many measurements are needed for the decoder via the `D` matrix in the decoder config, and they are sent to the decoder via `enqueue_syndromes`.
 For flexibility, the user can choose to send all measurements with a single `enqueue_syndromes` call, or send them over several calls.
@@ -1192,15 +1192,15 @@ However they are split up, the decoder will not begin decoding until all `numMea
 Thus it is the final `enqueue_syndromes` call which kicks off the decoder, and is an asynchronous function.
 Additional quantum gates can be applied, and only when `get_corrections` is called does the kernel sync and wait for the corrections.
 
-For detailed information on real-time decoding, see:
+For detailed information on realtime decoding, see:
 
 * :doc:`/examples_rst/qec/realtime_decoding` - Complete Guide with Examples
-* :doc:`/examples_rst/qec/realtime_predecoder_pymatching` - Realtime AI Predecoder Pipeline
-* :doc:`/examples_rst/qec/realtime_predecoder_fpga` - Realtime AI Predecoder Pipeline with FPGA
+* :doc:`/examples_rst/qec/ai_predecoder` - Realtime AI Predecoder Pipeline
+* :doc:`/examples_rst/qec/ai_predecoder_fpga` - Realtime AI Predecoder Pipeline with FPGA
 * :ref:`realtime_pipeline_api` - Realtime Pipeline C++ API
 * :doc:`/examples_rst/qec/realtime_relay_bp` - Relay BP Decoding with CUDA-Q Realtime
-* :doc:`/api/qec/cpp_api` - C++ API Reference (see Real-Time Decoding section)
-* :doc:`/api/qec/python_api` - Python API Reference (see Real-Time Decoding section)
+* :doc:`/api/qec/cpp_api` - C++ API Reference (see Realtime Decoding section)
+* :doc:`/api/qec/python_api` - Python API Reference (see Realtime Decoding section)
 
 
 

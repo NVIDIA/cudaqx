@@ -133,6 +133,7 @@ html_theme = 'sphinx_rtd_theme'
 # documentation.
 html_theme_options = {
     "collapse_navigation": False,
+    "navigation_depth": 4,
     "sticky_navigation": False,
     "prev_next_buttons_location": "both",
     "style_nav_header_background":

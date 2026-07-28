@@ -17,7 +17,7 @@ configurations:
 - **FPGA end-to-end test** -- real FPGA connected via ConnectX RDMA/RoCE
 
 For the software-only benchmark (no FPGA or network hardware), see
-:doc:`/examples_rst/qec/realtime_predecoder_pymatching`.
+:doc:`/examples_rst/qec/ai_predecoder`.
 
 
 Prerequisites
@@ -130,7 +130,7 @@ Data Directory Layout
   for how to generate these files.
 
 The syndrome data directory follows the same format as the software benchmark.
-See :doc:`/examples_rst/qec/realtime_predecoder_pymatching` for the full
+See :doc:`/examples_rst/qec/ai_predecoder` for the full
 specification.  In summary, it must contain:
 
 - ``detectors.bin`` -- detector samples (binary, int32)

@@ -56,8 +56,10 @@ Additional inputs:
   engine is built from the ONNX file on first run (this can take 1--2 minutes
   for large models).
 - **Syndrome data directory** containing pre-generated detector samples,
-  observables, and matching graph data (see `Data Directory Layout`_).
+  observables, and matching graph data (see :ref:`Data Directory Layout <sw_data_directory_layout>`).
 
+
+.. _sw_data_directory_layout:
 
 Data Directory Layout
 ---------------------
@@ -170,7 +172,7 @@ Named Flags
    * - Flag
      - Description
    * - ``--data-dir <path>``
-     - Path to syndrome data directory (see `Data Directory Layout`_). When
+     - Path to syndrome data directory (see :ref:`Data Directory Layout <sw_data_directory_layout>`). When
        omitted, random syndromes with 1% error rate are generated.
    * - ``--num-gpus <n>``
      - Number of GPUs to use. Currently clamped to 1 (multi-GPU dispatch is
