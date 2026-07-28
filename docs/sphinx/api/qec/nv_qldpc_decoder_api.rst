@@ -112,30 +112,37 @@
           are guaranteed to get repeatable results, which is often useful for
           both timing and detailed syndrome analysis. Introduced in 0.6.0.
         - `bp_method` (int): Core BP algorithm to use (defaults to 0). Introduced in 0.4.0,
-          expanded in 0.5.0:
+          expanded in 0.5.0 and 0.7.0:
 
           - 0: sum-product
           - 1: min-sum (introduced in 0.4.0)
           - 2: min-sum+mem (uniform memory strength, requires `use_sparsity=True`. Introduced in 0.5.0)
           - 3: min-sum+dmem (disordered memory strength, requires `use_sparsity=True`. Introduced in 0.5.0)
+          - 4: sum-product+mem (uniform memory strength, requires `use_sparsity=True`. Introduced in 0.7.0)
+          - 5: sum-product+dmem (disordered memory strength, requires `use_sparsity=True`. Introduced in 0.7.0)
         - `composition` (int): Iteration strategy (defaults to 0). Introduced in 0.5.0:
 
           - 0: Standard (single run)
-          - 1: Sequential relay (multiple gamma legs). Requires: `bp_method=3`, `use_sparsity=True`, and `srelay_config`
+          - 1: Sequential relay (multiple gamma legs). Requires: `bp_method=3` (min-sum+dmem) or
+            `bp_method=5` (sum-product+dmem), `use_sparsity=True`, and `srelay_config`. Support for
+            `bp_method=5` was added in 0.7.0.
         - `scale_factor` (float): The scale factor to use for min-sum. Defaults to 1.0.
           When set to 0.0, the scale factor is dynamically computed based on the
           number of iterations. Introduced in 0.4.0.
         - `proc_float` (string): The processing float type to use. Defaults to
           "fp64". Valid values are "fp32" and "fp64". Introduced in 0.5.0.
-        - `gamma0` (float): Memory strength parameter. Required for `bp_method=2`, and for
-          `composition=1` (sequential relay). Introduced in 0.5.0.
+        - `gamma0` (float): Memory strength parameter. Required for `bp_method=2` (min-sum+mem)
+          and `bp_method=4` (sum-product+mem), and for `composition=1` (sequential relay).
+          Introduced in 0.5.0; extended in 0.7.0 for `bp_method=4`.
         - `gamma_dist` (vector<float>): Gamma distribution interval [min, max] for disordered
-          memory strength. Required for `bp_method=3` if `explicit_gammas` not provided.
-          Introduced in 0.5.0.
+          memory strength. Required for `bp_method=3` (min-sum+dmem) or `bp_method=5`
+          (sum-product+dmem) if `explicit_gammas` not provided. Introduced in 0.5.0; extended in
+          0.7.0 for `bp_method=5`.
         - `explicit_gammas` (vector<vector<float>>): Explicit gamma values for each variable node.
-          For `bp_method=3` with `composition=0`, provide a 2D vector where each row has
-          `block_size` columns. For `composition=1` (Sequential relay), provide `num_sets` rows
-          (one per relay leg). Overrides `gamma_dist` if provided. Introduced in 0.5.0.
+          For `bp_method=3` or `bp_method=5` with `composition=0`, provide a 2D vector where each
+          row has `block_size` columns. For `composition=1` (Sequential relay), provide `num_sets`
+          rows (one per relay leg). Overrides `gamma_dist` if provided. Introduced in 0.5.0;
+          extended in 0.7.0 for `bp_method=5`.
         - `srelay_config` (heterogeneous_map): Sequential relay configuration (required for
           `composition=1`). Contains the following parameters. Introduced in 0.5.0:
 
@@ -153,8 +160,15 @@
              Starting in version 0.6.0, convergence during the ``pre_iter`` phase counts as a
              successful convergence towards the stopping criteria. Prior to 0.6.0, convergence
              during pre-iterations did not count.
-        - `bp_seed` (int): Seed for random number generation used in `bp_method=3` (disordered
-          memory BP). Optional parameter, defaults to 42 if not provided. Introduced in 0.5.0.
+        - `bp_seed` (int): Seed for random number generation used in `bp_method=3` or
+          `bp_method=5` (disordered memory BP), or in `composition=1` (sequential relay).
+          Optional parameter, defaults to 42 if not provided. Introduced in 0.5.0.
+        - `O` (tensor<uint8_t>): Optional observables matrix with shape
+          (num_observables, block_size). When provided, `decode()` and
+          `decode_batch()` return observable flips (`O * correction (mod 2)`)
+          in `DecoderResult.result` instead of the raw decoded correction
+          vector. Mutually exclusive with the realtime `enqueue_syndrome` path:
+          use one or the other, not both. Introduced in 0.7.0.
         - `opt_results` (heterogeneous_map): Optional results to return. This field can be
           left empty if no additional results are desired. Choices are:
 
@@ -165,4 +179,52 @@
             iterations. Introduced in 0.4.0. Note: Not supported for `composition=1`.
           - `num_iter` (bool): If true, return the number of BP iterations run.
             Introduced in 0.5.0.
+        - `gamma_ensemble_size` (int): Number of parallel gamma trajectories
+          ("lanes") run per sequential-relay BP iteration. Allowed values are
+          1, 2, 4, and 8 (defaults to 1, which disables the ensemble). Each
+          lane explores a distinct gamma set drawn from `gamma_dist` (or
+          `explicit_gammas`). The constructor requires
+          `num_sets >= gamma_ensemble_size` so the N per-lane gamma-set
+          offsets stay pairwise distinct.
+
+          **Design semantics (race-to-fastest):** the ensemble is optimized
+          for decode latency. The kernel runs the N lanes in parallel and
+          applies the user-supplied `stopping_criterion` across the
+          ensemble: the first lane to satisfy the criterion stops the
+          others. The winning lane is the converged lane with the
+          lowest-weight correction (sum of error-rate LLRs over bits
+          decoded as 1). If no lane converges across all `num_sets` legs
+          the decoder falls back to lane 0's last-leg marginals. The
+          speedups are maximized for the long-tail (p99) syndromes: easy
+          syndromes converge in the first leg either way, while hard
+          syndromes that would otherwise walk through many sequential legs
+          get them raced in parallel instead.
+
+          **Warm-up (`pre_iter`) semantics:** with the ensemble, the search
+          diversity comes entirely from the relay legs, because each lane
+          runs its own sequence of gamma sets. The `pre_iter` warm-up is
+          the opposite: every lane would run it with the same uniform
+          `gamma0` value, so the kernel computes it once (on one lane) and
+          broadcasts the warmed-up marginals to every lane before the legs
+          start. The warm-up helps convergence by settling the messages
+          before the disordered gammas are applied and by letting easy
+          syndromes converge early (which counts toward the stopping
+          criterion), at the cost of delaying the start of the legs by the
+          warm-up iterations. Ensemble speedups are therefore maximized
+          when `pre_iter` is small or zero.
+
+          The gamma ensemble is supported on the sparse GPU single-decode
+          path with `composition=1` and `bp_method=3` (min-sum + dmem) or
+          `bp_method=5` (sum-product + dmem). Passing
+          `gamma_ensemble_size > 1` with any other `bp_method` or with the
+          CPU or dense GPU path raises `std::invalid_argument` at
+          construction. The batched relay path (`decode_batch()`) and the
+          realtime / graph-dispatch path (`capture_decode_graph()`) do not
+          yet support ensembles and raise at call time; support for
+          `gamma_ensemble_size > 1` with `capture_decode_graph()` is
+          intended in a future release.
+
+          For guidance on tuning sequential relay BP and the gamma
+          ensemble (legs, stopping criterion, pre-iterations, and the
+          gamma schedule), see :ref:`relay_bp_tuning`.
 
