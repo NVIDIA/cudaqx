@@ -10,7 +10,7 @@
 // DecodingServer.cpp declares
 // weakly.  This translation unit lives in
 // cudaq-qec-decoding-server-device-graph (NOT the core library) so that only
-// binaries linking that component carry the DOCA / Hololink / CUDA-driver
+// binaries linking that component carry the DOCA / GpuRoceTransceiver / CUDA-driver
 // dependencies.  Consumers must link the component WHOLE_ARCHIVE: the sole
 // reference to this symbol is weak, which does not pull archive members on its
 // own.

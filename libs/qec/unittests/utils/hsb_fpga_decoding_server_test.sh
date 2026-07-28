@@ -19,12 +19,12 @@
 #   FPGA/emulator --RDMA WRITE--> server cpu_roce rx ring
 #   server        --RDMA SEND---> FPGA SIF TX (captured by the ILA)
 #
-# Division of labor (identical to hololink_qldpc_graph_decoder_test.sh):
+# Division of labor (identical to gpu_roce_qldpc_graph_decoder_test.sh):
 #   - decoding_server (--transport=cpu_roce --qp_config=hsb_fpga) owns the
 #     RDMA ring and prints its endpoint line (QEC_DECODING_SERVER_ENDPOINT
 #     qp=... rkey=... buffer_addr=...).  It performs
-#     NO Hololink control-plane traffic.
-#   - hololink_fpga_syndrome_playback is the sole FPGA control-plane writer:
+#     NO HSB control-plane traffic.
+#   - hsb_fpga_syndrome_playback is the sole FPGA control-plane writer:
 #     it programs the SIF RDMA target with the server's handshake values,
 #     writes the syndrome frames to BRAM, arms the ILA, enables the player,
 #     and verifies the captured RPC responses.
@@ -343,7 +343,7 @@ cleanup() {
 trap cleanup EXIT
 
 # ============================================================================
-# Network Setup (mirrors hololink_qldpc_graph_decoder_test.sh)
+# Network Setup (mirrors gpu_roce_qldpc_graph_decoder_test.sh)
 # ============================================================================
 
 detect_interfaces() {
@@ -896,8 +896,8 @@ resolve_paths() {
     local cq_build_dir="${CUDA_QUANTUM_DIR}/realtime/build/unittests"
 
     SERVER_BIN="${CUDAQX_DIR}/build/bin/decoding_server"
-    PLAYBACK_BIN="${cudaqx_utils}/hololink_fpga_syndrome_playback"
-    EMULATOR_BIN="${cq_build_dir}/utils/hololink_fpga_emulator"
+    PLAYBACK_BIN="${cudaqx_utils}/hsb_fpga_syndrome_playback"
+    EMULATOR_BIN="${cq_build_dir}/utils/hsb_fpga_emulator"
 
     if [[ ! -x "$SERVER_BIN" ]]; then
         _err "Decoding server binary not found: $SERVER_BIN"
@@ -1072,13 +1072,13 @@ start_server() {
     _info "Server Buffer: $SERVER_ADDR"
 }
 
-# Run playback against $1=hololink_ip; extra args appended from $2...
+# Run playback against $1=hsb_ip; extra args appended from $2...
 run_playback() {
-    local hololink_ip="$1"; shift
+    local hsb_ip="$1"; shift
 
-    _log "Starting syndrome playback (hololink=$hololink_ip)"
+    _log "Starting syndrome playback (hsb_ip=$hsb_ip)"
     local playback_args=(
-        --hololink "$hololink_ip"
+        --hsb-ip "$hsb_ip"
         --per-round
         --config "$CONFIG_FILE"
         --syndromes "$SYNDROMES_FILE"
@@ -1112,8 +1112,8 @@ run_emulated() {
     _banner "Decoding Server Decode Loop Test (Emulated FPGA, $DECODER)"
 
     local emu_log server_log
-    emu_log=$(mktemp /tmp/hsb_decoding_server_emulator.XXXXXX.log)
-    server_log=$(mktemp /tmp/hsb_decoding_server.XXXXXX.log)
+    emu_log=$(mktemp /tmp/decoding_server_emulator.XXXXXX.log)
+    server_log=$(mktemp /tmp/decoding_server.XXXXXX.log)
     TEMP_FILES+=("$emu_log" "$server_log")
 
     # ---- 1. Start emulator ----
@@ -1153,7 +1153,7 @@ run_fpga() {
     _banner "Decoding Server Decode Loop Test (Real FPGA, $DECODER)"
 
     local server_log
-    server_log=$(mktemp /tmp/hsb_decoding_server.XXXXXX.log)
+    server_log=$(mktemp /tmp/decoding_server.XXXXXX.log)
     TEMP_FILES+=("$server_log")
 
     # ---- 1. Start decoding server (FPGA data-plane QP is fixed 0x2) ----

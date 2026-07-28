@@ -58,7 +58,7 @@
 /// dispatcher below; a device_graph decoder routes the whole server through
 /// the CQR DecodingServer, whose DeviceGraphTransceiver runs the
 /// self-relaunching GPU scheduler over the same kind of runtime-loaded
-/// provider (the hololink library by default; the YAML transport section or
+/// provider (the gpu_roce library by default; the YAML transport section or
 /// the --transport fallback selects another).
 
 #include "cudaq/qec/realtime/decoding_config.h"
@@ -349,7 +349,7 @@ int main(int argc, char **argv) {
   if (all_device_graph) {
     // DecodingServer(config_yaml) reads the YAML, creates the
     // DeviceGraphTransceiver (which loads a bridge provider: the built-in
-    // hololink one, or CUDAQ_REALTIME_BRIDGE_LIB), loads decoder sessions,
+    // gpu_roce one, or CUDAQ_REALTIME_BRIDGE_LIB), loads decoder sessions,
     // and calls launch_scheduler() to wire the CUDAQ device-graph scheduler
     // to the provider's GPU rings.  The GPU scheduler then handles
     // RX→dispatch→decode→TX autonomously; this thread just waits for signal.
@@ -361,7 +361,7 @@ int main(int argc, char **argv) {
     // Provider resolution for the standalone transceiver mirrors the
     // per-ring loop below: the transport section's device_graph shape
     // override > the section's provider > the --transport CLI fallback >
-    // the transceiver's built-in default (hololink).  A YAML that names a
+    // the transceiver's built-in default (gpu_roce).  A YAML that names a
     // provider plus a CLI --transport is rejected before reaching here.
     std::string dg_provider;
     if (!decoder_config.transport.device_graph.provider.empty())

@@ -26,7 +26,7 @@ namespace cudaq::qec::decoding_server {
 /// (a self-relaunching GPU dispatch graph with the three QEC DEVICE_CALL
 /// entries and one decoder's captured decode graph) to a ring buffer it does
 /// NOT own.  This is the "GPU consumer" counterpart of a host dispatcher
-/// object: give it any GPU-pollable ring (Hololink DOCA rings, or pinned+
+/// object: give it any GPU-pollable ring (GpuRoceTransceiver DOCA rings, or pinned+
 /// mapped rings from a provider's --pinned-rings) plus the decoder's graph
 /// resources, and RX->dispatch->decode->TX runs autonomously on the GPU.
 ///

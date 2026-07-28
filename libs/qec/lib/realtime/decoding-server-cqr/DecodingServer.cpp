@@ -23,7 +23,7 @@
 
 // Device-graph dispatch is an optional component
 // (cudaq-qec-decoding-server-device-graph) so this core library carries no DOCA
-// / Hololink / CUDA-driver dependencies: those .so's require libcuda.so.1 at
+// / GpuRoceTransceiver / CUDA-driver dependencies: those .so's require libcuda.so.1 at
 // load time, which core consumers (unit tests, the CQR plugin) must not impose
 // on driverless machines.  Binaries that want device_graph dispatch link the
 // component WHOLE_ARCHIVE, whose DeviceGraphFactory.cpp provides the strong

@@ -45,7 +45,7 @@ cmake -G Ninja -S "$CUDAQ_SRC/realtime" -B "$CUDAQ_SRC/realtime/build" \
   -DCMAKE_CUDA_FLAGS="$(cudaq_realtime_cmake_cuda_flags)" \
   -DCUDAQ_REALTIME_BUILD_TESTS=OFF \
   -DCUDAQ_REALTIME_BUILD_EXAMPLES=OFF \
-  -DCUDAQ_REALTIME_ENABLE_HOLOLINK_TOOLS=OFF
+  -DCUDAQ_REALTIME_ENABLE_HSB_TOOLS=OFF
 cmake --build "$CUDAQ_SRC/realtime/build" --target install --parallel
 
 log "Building CUDA-Q with realtime support"

@@ -164,7 +164,7 @@ Source Repositories
 
 ``cuda-quantum`` provides ``libcudaq-realtime`` (the dispatch kernel, ring
 buffer management, and the device-graph scheduler).  ``holoscan-sensor-bridge``
-provides the Hololink ``GpuRoceTransceiver`` library for RDMA transport.
+provides the ``GpuRoceTransceiver`` library for RDMA transport.
 
 .. note::
 
@@ -196,9 +196,9 @@ Key files within ``cudaqx``:
              config_nv_qldpc_relay.yml              # Relay BP decoder config
              syndromes_nv_qldpc_relay.txt           # 100 test syndrome shots
        utils/
-         hololink_qldpc_graph_decoder_bridge.cpp    # Bridge tool (RDMA <-> decoder)
-         hololink_qldpc_graph_decoder_test.sh       # Orchestration script
-         hololink_fpga_syndrome_playback.cpp        # Playback tool (loads syndromes)
+         gpu_roce_qldpc_graph_decoder_bridge.cpp    # Bridge tool (RDMA <-> decoder)
+         gpu_roce_qldpc_graph_decoder_test.sh       # Orchestration script
+         hsb_fpga_syndrome_playback.cpp        # Playback tool (loads syndromes)
 
 The FPGA emulator is in the ``cuda-quantum`` repository:
 
@@ -206,12 +206,12 @@ The FPGA emulator is in the ``cuda-quantum`` repository:
 
    cuda-quantum/realtime/
      unittests/utils/
-       hololink_fpga_emulator.cpp                   # Software FPGA emulator
+       hsb_fpga_emulator.cpp                   # Software FPGA emulator
 
 Building
 --------
 
-CI unit test only (no Hololink tools)
+CI unit test only (no HSB tools)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 If you only need to run the CI unit test, you can build without
@@ -241,7 +241,7 @@ If you only need to run the CI unit test, you can build without
      -DCUDAQX_INCLUDE_TESTS=ON
    cmake --build cudaqx/build --target test_realtime_qldpc_graph_decoding
 
-Full build (CI test + Hololink bridge/playback tools)
+Full build (CI test + HSB bridge/playback tools)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 To also build the bridge and playback tools for emulated or FPGA testing:
@@ -285,19 +285,19 @@ To also build the bridge and playback tools for emulated or FPGA testing:
    cmake --build . --target gpu_roce_transceiver hololink_core
    cd ../..
 
-   # 3. Build libcudaq-realtime with Hololink tools enabled
-   #    This produces libcudaq-realtime-bridge-hololink.so (needed by the bridge
+   # 3. Build libcudaq-realtime with HSB tools enabled
+   #    This produces libcudaq-realtime-bridge-gpu-roce.so (needed by the bridge
    #    tool) as well as the FPGA emulator.
    cd cudaq-realtime-src/realtime && mkdir -p build && cd build
    cmake -G Ninja -DCMAKE_INSTALL_PREFIX=/tmp/cudaq-realtime \
-     -DCUDAQ_REALTIME_ENABLE_HOLOLINK_TOOLS=ON \
+     -DCUDAQ_REALTIME_ENABLE_HSB_TOOLS=ON \
      -DHOLOSCAN_SENSOR_BRIDGE_SOURCE_DIR=../../holoscan-sensor-bridge \
      -DHOLOSCAN_SENSOR_BRIDGE_BUILD_DIR=../../holoscan-sensor-bridge/build \
      ..
    ninja && ninja install
    cd ../../..
 
-   # 4. Build cudaqx with Hololink tools enabled.
+   # 4. Build cudaqx with HSB tools enabled.
    #    CUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE supplies the DEVICE_CALL
    #    handlers (WHOLE_ARCHIVE-linked into the bridge + test).
    cmake -S cudaqx -B cudaqx/build \
@@ -307,13 +307,13 @@ To also build the bridge and playback tools for emulated or FPGA testing:
      -DCUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE=/path/to/libcudaq-qec-realtime-cudevice-proprietary.a \
      -DCUDAQX_ENABLE_LIBS="qec" \
      -DCUDAQX_INCLUDE_TESTS=ON \
-     -DCUDAQX_QEC_ENABLE_HOLOLINK_TOOLS=ON \
+     -DCUDAQX_QEC_ENABLE_HSB_TOOLS=ON \
      -DHOLOSCAN_SENSOR_BRIDGE_SOURCE_DIR=/path/to/holoscan-sensor-bridge \
      -DHOLOSCAN_SENSOR_BRIDGE_BUILD_DIR=/path/to/holoscan-sensor-bridge/build
    cmake --build cudaqx/build --target \
      test_realtime_qldpc_graph_decoding \
-     hololink_qldpc_graph_decoder_bridge \
-     hololink_fpga_syndrome_playback
+     gpu_roce_qldpc_graph_decoder_bridge \
+     hsb_fpga_syndrome_playback
 
 Using the orchestration script
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -322,7 +322,7 @@ The orchestration script can build everything automatically:
 
 .. code-block:: bash
 
-   ./libs/qec/unittests/utils/hololink_qldpc_graph_decoder_test.sh \
+   ./libs/qec/unittests/utils/gpu_roce_qldpc_graph_decoder_test.sh \
      --build \
      --hsb-dir /path/to/holoscan-sensor-bridge \
      --cuda-quantum-dir /path/to/cuda-quantum \
@@ -416,8 +416,8 @@ processes run concurrently:
 1. **Emulator** -- receives syndromes via the UDP control plane, sends them
    to the bridge via RDMA, and captures corrections
 2. **Bridge** -- runs the device-graph scheduler on the GPU directly on the
-   Hololink DOCA ring (the scheduler polls the RX flags written by the
-   Hololink RX kernel and writes responses for the TX kernel), firing the
+   GpuRoceTransceiver DOCA ring (the scheduler polls the RX flags written by the
+   GpuRoceTransceiver RX kernel and writes responses for the TX kernel), firing the
    cooperative Relay BP decode fire-and-forget per completed shot
 3. **Playback** -- loads syndrome data into the emulator's BRAM and triggers
    playback in **per-round** mode (``--per-round``: N ``enqueue_syndromes``
@@ -444,7 +444,7 @@ Running the Emulated Test
 
 .. code-block:: bash
 
-   ./libs/qec/unittests/utils/hololink_qldpc_graph_decoder_test.sh \
+   ./libs/qec/unittests/utils/gpu_roce_qldpc_graph_decoder_test.sh \
      --emulate \
      --build \
      --setup-network \
@@ -457,7 +457,7 @@ After the initial build and network setup, subsequent runs are faster:
 
 .. code-block:: bash
 
-   ./libs/qec/unittests/utils/hololink_qldpc_graph_decoder_test.sh --emulate
+   ./libs/qec/unittests/utils/gpu_roce_qldpc_graph_decoder_test.sh --emulate
 
 FPGA End-to-End Test
 --------------------
@@ -485,7 +485,7 @@ Running the FPGA Test
 
 .. code-block:: bash
 
-   ./libs/qec/unittests/utils/hololink_qldpc_graph_decoder_test.sh \
+   ./libs/qec/unittests/utils/gpu_roce_qldpc_graph_decoder_test.sh \
      --build \
      --setup-network \
      --device mlx5_5 \
@@ -571,7 +571,7 @@ Orchestration Script Reference
 
 .. code-block:: text
 
-   hololink_qldpc_graph_decoder_test.sh [options]
+   gpu_roce_qldpc_graph_decoder_test.sh [options]
 
 Modes
 ^^^^^
@@ -689,7 +689,7 @@ Ring buffer depth (``num_pages``)
 
 The ring depth is intentionally **not** a script option and is fixed at
 **64** (both the bridge and playback default to it).  This matches the
-Hololink ``gpu_roce_transceiver`` work-queue depth ``WQE_NUM = 64``: the
+GpuRoceTransceiver work-queue depth ``WQE_NUM = 64``: the
 transceiver posts 64 receive/send WQEs and runs one kernel thread per WQE.
 
 A ring deeper than ``WQE_NUM`` makes a single transceiver thread service more

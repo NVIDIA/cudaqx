@@ -10,7 +10,7 @@
 // (running it would require QEC_DEVICE_GRAPH_* env, a GPU driver, and
 // RDMA-capable
 // hardware).  Building it forces the linker to resolve DeviceGraphTransceiver's
-// full dependency chain (hololink, DOCA, CUDA driver stubs), so HSB API
+// full dependency chain (gpu_roce, DOCA, CUDA driver stubs), so GpuRoceTransceiver API
 // drift is caught at build time even on machines where nothing links the
 // component into a runnable binary (driverless CI: the decoding_server
 // tool's device_graph block is additionally gated on the proprietary cudevice

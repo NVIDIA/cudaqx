@@ -7,10 +7,10 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.    #
 # ============================================================================ #
 #
-# hololink_qldpc_graph_decoder_test.sh
+# gpu_roce_qldpc_graph_decoder_test.sh
 #
 # Orchestration script for end-to-end QLDPC BP decode loop testing over
-# Hololink RDMA/RoCE.  Uses CPU-launched CUDA graph dispatch (HOST_LOOP)
+# GPU RoCE RDMA.  Uses CPU-launched CUDA graph dispatch (HOST_LOOP)
 # with Relay BP.
 #
 # Modes:
@@ -24,13 +24,13 @@
 #
 # Examples:
 #   # Full emulated test: build, configure network, run
-#   ./hololink_qldpc_graph_decoder_test.sh --emulate --build --setup-network
+#   ./gpu_roce_qldpc_graph_decoder_test.sh --emulate --build --setup-network
 #
 #   # Just run (tools already built, network already set up)
-#   ./hololink_qldpc_graph_decoder_test.sh --emulate
+#   ./gpu_roce_qldpc_graph_decoder_test.sh --emulate
 #
 #   # Build only
-#   ./hololink_qldpc_graph_decoder_test.sh --build --no-run
+#   ./gpu_roce_qldpc_graph_decoder_test.sh --build --no-run
 #
 set -euo pipefail
 
@@ -90,10 +90,10 @@ JOBS=$(nproc 2>/dev/null || echo 8)
 
 print_usage() {
     cat <<'EOF'
-Usage: hololink_qldpc_graph_decoder_test.sh [options]
+Usage: gpu_roce_qldpc_graph_decoder_test.sh [options]
 
 Orchestration script for QLDPC BP decoder end-to-end testing over
-Hololink RDMA/RoCE with CPU-launched CUDA graph dispatch (HOST_LOOP).
+GPU RoCE RDMA with CPU-launched CUDA graph dispatch (HOST_LOOP).
 
 Modes:
   --emulate              Use FPGA emulator (3-tool mode, no FPGA needed)
@@ -338,7 +338,7 @@ ipv4_to_gid_suffix() {
 # The gpu_roce_transceiver requires this specific GID (subnet_prefix==0,
 # interface_id low32==0xFFFF0000); it only exists while the netdev has the
 # IPv4 address AND is up, and it populates asynchronously -- so a blind sleep
-# races the bridge's hololink_start GID lookup.
+# races the bridge's gpu_roce_start GID lookup.
 wait_for_roce_v2_gid() {
     local ib_dev="$1" ip="$2" timeout_s="${3:-15}"
     local suffix gids_dir types_dir elapsed=0
@@ -366,7 +366,7 @@ wait_for_roce_v2_gid() {
         elapsed=$((elapsed + 1))
     done
     _err "Timed out waiting for IPv4 RoCE v2 GID (${suffix}) on ${ib_dev}."
-    _err "The bridge's hololink_start will fail GID lookup.  Verify ${ip} is"
+    _err "The bridge's gpu_roce_start will fail GID lookup.  Verify ${ip} is"
     _err "assigned to the bridge netdev and the interface is up."
     return 1
 }
@@ -429,7 +429,7 @@ do_setup_network() {
         fi
 
         # Wait for the bridge device's IPv4 RoCE v2 GID before proceeding so the
-        # bridge's hololink_start GID lookup can't race GID-table population.
+        # bridge's gpu_roce_start GID lookup can't race GID-table population.
         wait_for_roce_v2_gid "$BRIDGE_DEVICE" "$BRIDGE_IP" 15 || true
     else
         local iface_bridge
@@ -537,7 +537,7 @@ do_build() {
     cmake --build "$cq_build" -j "$JOBS" 2>&1 | tail -5
     _info "cuda-quantum/realtime built: $cq_build/lib/"
 
-    # ---- Stage 2: holoscan-sensor-bridge (Hololink) ----
+    # ---- Stage 2: holoscan-sensor-bridge (HSB) ----
     _banner "Stage 2/3: Building holoscan-sensor-bridge"
     if [[ ! -d "$HSB_DIR" ]]; then
         _err "holoscan-sensor-bridge source not found at $HSB_DIR"
@@ -583,7 +583,7 @@ do_build() {
     fi
 
     if [[ -f "$hsb_build/CMakeCache.txt" ]]; then
-        _info "Hololink cache options:"
+        _info "HSB cache options:"
         grep -E '^HOLOLINK_BUILD_(TOOLS|EXAMPLES|TESTS|PYTHON|EMULATOR|ONLY_NATIVE):BOOL=' \
             "$hsb_build/CMakeCache.txt" | sed 's/^/      /' || true
     fi
@@ -592,21 +592,21 @@ do_build() {
         --target gpu_roce_transceiver hololink_core 2>&1 | tail -5
     _info "holoscan-sensor-bridge built: $hsb_build/"
 
-    # Reconfigure cuda-quantum/realtime with hololink tools (for emulator).
+    # Reconfigure cuda-quantum/realtime with HSB tools (for emulator).
     # Force GPU_ROCE_TRANSCEIVER_LIB to prevent stale cache from a different
-    # hololink repo (e.g. switching between holoscan-sensor-bridge and hololink).
+    # HSB repo (e.g. switching between holoscan-sensor-bridge and hololink checkouts).
     local hsb_gpu_roce_lib="${hsb_build}/src/hololink/operators/gpu_roce_transceiver/libgpu_roce_transceiver.a"
     cmake -G Ninja -S "$cq_src" -B "$cq_build" \
         -DCMAKE_BUILD_TYPE=Release \
         $cuda_arch_flag \
-        -DCUDAQ_REALTIME_ENABLE_HOLOLINK_TOOLS=ON \
+        -DCUDAQ_REALTIME_ENABLE_HSB_TOOLS=ON \
         -DHOLOSCAN_SENSOR_BRIDGE_SOURCE_DIR="$HSB_DIR" \
         -DHOLOSCAN_SENSOR_BRIDGE_BUILD_DIR="$hsb_build" \
         -DGPU_ROCE_TRANSCEIVER_LIB="$hsb_gpu_roce_lib" \
         2>&1 | tail -5
-    # Rebuild bridge-hololink .so (has hololink .a baked in) and emulator.
+    # Rebuild bridge-gpu-roce .so (has the HSB .a baked in) and emulator.
     cmake --build "$cq_build" -j "$JOBS" \
-        --target cudaq-realtime-bridge-hololink hololink_fpga_emulator 2>&1 | tail -5
+        --target cudaq-realtime-bridge-gpu-roce hsb_fpga_emulator 2>&1 | tail -5
 
     # ---- Stage 3: cuda-qx QLDPC graph bridge + playback ----
     _banner "Stage 3/3: Building cuda-qx QLDPC graph bridge + playback"
@@ -638,7 +638,7 @@ do_build() {
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_CUDA_COMPILER="$cuda_compiler" \
         -DCUDAToolkit_ROOT="$cuda_toolkit_root" \
-        -DCUDAQX_QEC_ENABLE_HOLOLINK_TOOLS=ON \
+        -DCUDAQX_QEC_ENABLE_HSB_TOOLS=ON \
         -DCUDAQ_QEC_BUILD_TRT_DECODER=OFF \
         -DCUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE="$PROPRIETARY_ARCHIVE" \
         -DHOLOSCAN_SENSOR_BRIDGE_SOURCE_DIR="$HSB_DIR" \
@@ -649,7 +649,7 @@ do_build() {
         -DCUDAQ_REALTIME_LIBRARY="${cq_build}/lib/libcudaq-realtime.so" \
         -DCUDAQ_REALTIME_DISPATCH_LIBRARY="${cq_build}/lib/libcudaq-realtime-dispatch.a" \
         -DCUDAQ_REALTIME_HOST_DISPATCH_LIBRARY="${cq_build}/lib/libcudaq-realtime-host-dispatch.a" \
-        -DCUDAQ_REALTIME_BRIDGE_HOLOLINK_LIBRARY="${cq_build}/lib/libcudaq-realtime-bridge-hololink.so" \
+        -DCUDAQ_REALTIME_BRIDGE_GPU_ROCE_LIBRARY="${cq_build}/lib/libcudaq-realtime-bridge-gpu-roce.so" \
         -DCUDAQ_INSTALL_PREFIX="${CUDAQ_INSTALL_PREFIX:-/usr/local/cudaq}" \
         -DCUDAQ_DIR="${CUDAQ_INSTALL_PREFIX:-/usr/local/cudaq}/lib/cmake/cudaq" \
         2>&1 | tail -5
@@ -661,8 +661,8 @@ do_build() {
         "$cuda_qx_build/lib/decoder-plugins/$(basename "$NV_QLDPC_PLUGIN")"
 
     cmake --build "$cuda_qx_build" -j "$JOBS" \
-        --target hololink_qldpc_graph_decoder_bridge \
-                 hololink_fpga_syndrome_playback \
+        --target gpu_roce_qldpc_graph_decoder_bridge \
+                 hsb_fpga_syndrome_playback \
         2>&1 | tail -5
     _info "cuda-qx tools built: $cuda_qx_build/libs/qec/unittests/utils/"
 
@@ -677,9 +677,9 @@ resolve_paths() {
     local cuda_qx_utils="${CUDA_QX_DIR}/build/libs/qec/unittests/utils"
     local cq_build_dir="${CUDA_QUANTUM_DIR}/realtime/build/unittests"
 
-    BRIDGE_BIN="${cuda_qx_utils}/hololink_qldpc_graph_decoder_bridge"
-    PLAYBACK_BIN="${cuda_qx_utils}/hololink_fpga_syndrome_playback"
-    EMULATOR_BIN="${cq_build_dir}/utils/hololink_fpga_emulator"
+    BRIDGE_BIN="${cuda_qx_utils}/gpu_roce_qldpc_graph_decoder_bridge"
+    PLAYBACK_BIN="${cuda_qx_utils}/hsb_fpga_syndrome_playback"
+    EMULATOR_BIN="${cq_build_dir}/utils/hsb_fpga_emulator"
 
     if [[ -z "$DATA_DIR" ]]; then
         DATA_DIR="${CUDA_QX_DIR}/libs/qec/unittests/realtime/qec_roce_decode_test/data"
@@ -839,7 +839,7 @@ run_emulated() {
     # ---- 3. Start playback tool ----
     _log "Starting syndrome playback (control-port=$CONTROL_PORT)"
     local playback_args=(
-        --hololink "$EMULATOR_IP"
+        --hsb-ip "$EMULATOR_IP"
         --per-round
         --control-port "$CONTROL_PORT"
         --config "$CONFIG_FILE"
@@ -920,7 +920,7 @@ run_fpga() {
     # ---- 2. Start playback tool ----
     _log "Starting syndrome playback (fpga=$FPGA_IP)"
     local playback_args=(
-        --hololink "$FPGA_IP"
+        --hsb-ip "$FPGA_IP"
         --per-round
         --config "$CONFIG_FILE"
         --syndromes "$SYNDROMES_FILE"
@@ -951,7 +951,7 @@ run_fpga() {
 # ============================================================================
 
 main() {
-    _banner "Hololink QLDPC BP Decoder Test (Graph Launch)"
+    _banner "GPU RoCE QLDPC BP Decoder Test (Graph Launch)"
 
     _info "Decoder: nv-qldpc-decoder (Relay BP, CPU-launched CUDA graph)"
     if $EMULATE; then
