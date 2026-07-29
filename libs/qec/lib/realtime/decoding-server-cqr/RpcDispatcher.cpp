@@ -77,6 +77,12 @@ void RpcDispatcher::dispatch(RxFrame frame, ITransceiver &transport) {
   } catch (const std::exception &e) {
     cudaq::qec::error("RpcDispatcher: handler threw: {}", e.what());
     writer.write_error(RpcStatus::INTERNAL_ERROR);
+  } catch (...) {
+    // Non-std exceptions (decoder plugins): under direct dispatch an escape
+    // would unwind into the transport's inject() caller instead of a recv
+    // thread; contain it here on both paths.
+    cudaq::qec::error("RpcDispatcher: handler threw a non-std exception");
+    writer.write_error(RpcStatus::INTERNAL_ERROR);
   }
 }
 

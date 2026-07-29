@@ -88,6 +88,16 @@ private:
   void init(const std::string &config_yaml);
   void register_handlers();
 
+  /// Offer each transport in function_transport_ a sink that routes frames
+  /// inline into dispatcher_ on the transport's own producer thread
+  /// (RpcDispatcher::dispatch and the registered handlers are safe for
+  /// concurrent callers: the dispatch table and session registry are
+  /// read-only once construction completes).  Transports that accept are
+  /// recorded in direct_dispatch_transports_ and excluded from run()'s
+  /// receiver threads.  Called at the end of every constructor, after
+  /// register_handlers() and after function_transport_ is populated.
+  void install_direct_dispatch();
+
   /// Create a transceiver for \p transport_type.  Throws for RoCE transports
   /// until per-session transceiver adapters are
   /// available via CUDAQ_REALTIME.
@@ -108,6 +118,9 @@ private:
   /// Routing within the server is by function_id, not by decoder_id.
   TransportMap function_transport_;
   std::vector<std::unique_ptr<ITransceiver>> owned_transports_;
+  /// Transports that accepted a direct-dispatch sink (non-owning pointers
+  /// into owned_transports_); run() starts no receiver thread for these.
+  std::vector<ITransceiver *> direct_dispatch_transports_;
 };
 
 } // namespace cudaq::qec::decoding_server

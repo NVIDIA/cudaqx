@@ -56,6 +56,7 @@ CASES = [
             "num_shots": 100,
             "decoder_type": "multi_error_lut",
             "target": "quantinuum",
+            "emulate": True,
             "machine_name": "Helios-1Dummy",
             "number_of_non_zero_values_threshold": 0,
             "number_of_corrections_decoder_threshold": 0
@@ -69,6 +70,7 @@ CASES = [
             "num_shots": 100,
             "decoder_type": "multi_error_lut",
             "target": "quantinuum",
+            "emulate": True,
             "machine_name": "Helios-1Dummy",
             "number_of_non_zero_values_threshold": 0,
             "number_of_corrections_decoder_threshold": 0
@@ -126,6 +128,8 @@ def test_run_from_dem(case, dem_file):
     ]
     if "target" in case:
         argv += ["--target", case["target"]]
+    if case.get("emulate", False):
+        argv += ["--emulate"]
     if "machine_name" in case:
         argv += ["--machine_name", case["machine_name"]]
 
@@ -168,8 +172,6 @@ def test_quantinuum_requires_machine_name(case, dem_file):
             str(dem_file),
             "--target",
             "quantinuum",
-            "--emulate",
-            "false",
             # no --machine_name → should fail
         ])
 
@@ -187,8 +189,6 @@ def test_quantinuum_requires_project_id_remote(case, dem_file):
             str(dem_file),
             "--target",
             "quantinuum",
-            "--emulate",
-            "false",
             "--machine_name",
             "Helios-1SC",
             # no --project_id → should fail
