@@ -82,7 +82,7 @@ As the ensemble size N grows, the median number of iterations to converge (left)
 Latency Distribution
 ++++++++++++++++++++
 
-One of the benefits of ensembling is that the latency distribution becomes narrower, leading to more consistent latency for hard-to-decode syndromes. Using the same decoders as above, we now focus on the behavior of the 50th percentile, 90th percentile, and 99th percentile decoding latencies.
+One of the benefits of ensembling is that the latency distribution becomes narrower, leading to more consistent latency for hard-to-decode syndromes. Using the same decoders as above, we now focus on the behavior of the decoding latencies at various percentiles, from the median through the extreme tail.
 
 .. image:: ../../../../assets/docs/relaybp_latency_percentiles.png
    :align: center
