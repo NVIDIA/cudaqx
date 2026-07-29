@@ -6,6 +6,7 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.
  ******************************************************************************/
 
+#include <atomic>
 #include <cfloat>
 #include <chrono>
 #include <cmath>
@@ -16,12 +17,14 @@
 #include <gtest/gtest.h>
 #include <memory>
 #include <random>
+#include <stdexcept>
 #include <thread>
 #include <unistd.h>
 #include <vector>
 
 #include "cudaq/qec/realtime/ai_decoder_service.h"
 #include "cudaq/qec/realtime/ai_predecoder_service.h"
+#include "cudaq/qec/realtime/pipeline.h"
 #include "cudaq/realtime/daemon/dispatcher/cudaq_realtime.h"
 #include "cudaq/realtime/daemon/dispatcher/dispatch_kernel_launch.h"
 #include "cudaq/realtime/daemon/dispatcher/host_dispatcher.h"
@@ -105,11 +108,13 @@ static void free_mapped_buffer(uint8_t *host_ptr) {
 // ============================================================================
 
 static void write_rpc_slot(uint8_t *slot_host, uint32_t function_id,
-                           const void *payload, size_t payload_len) {
+                           const void *payload, size_t payload_len,
+                           uint64_t request_id = 0) {
   rt_sdk::RPCHeader hdr{};
   hdr.magic = rt_sdk::RPC_MAGIC_REQUEST;
   hdr.function_id = function_id;
   hdr.arg_len = static_cast<uint32_t>(payload_len);
+  hdr.request_id = request_id;
   std::memcpy(slot_host, &hdr, sizeof(hdr));
   if (payload && payload_len > 0)
     std::memcpy(slot_host + sizeof(hdr), payload, payload_len);
@@ -172,6 +177,20 @@ protected:
                       cuda::std::memory_order_release);
   }
 
+  cudaq_ringbuffer_t external_ring() const {
+    cudaq_ringbuffer_t ring{};
+    ring.rx_flags = reinterpret_cast<volatile uint64_t *>(rx_flags_dev_);
+    ring.tx_flags = reinterpret_cast<volatile uint64_t *>(tx_flags_dev_);
+    ring.rx_data = rx_data_dev_;
+    ring.tx_data = tx_data_dev_;
+    ring.rx_stride_sz = kSlotSize;
+    ring.tx_stride_sz = kSlotSize;
+    ring.rx_flags_host = reinterpret_cast<volatile uint64_t *>(rx_flags_host_);
+    ring.tx_flags_host = reinterpret_cast<volatile uint64_t *>(tx_flags_host_);
+    ring.rx_data_host = rx_data_host_;
+    ring.tx_data_host = tx_data_host_;
+    return ring;
+  }
   bool wait_ready_flag(ai_predecoder_service *pd, int timeout_ms = 2000) {
     auto deadline = std::chrono::steady_clock::now() +
                     std::chrono::milliseconds(timeout_ms);
@@ -200,6 +219,147 @@ protected:
   cudaStream_t stream_ = nullptr;
 };
 
+// ============================================================================
+// realtime_pipeline external-ring completion tests
+// ============================================================================
+
+TEST_F(RealtimePipelineTest, ExternalDeferredCompletionPublishesAndAccounts) {
+  auto external_ring = this->external_ring();
+
+  pipeline_stage_config config;
+  config.num_workers = 1;
+  config.num_slots = static_cast<int>(kNumSlots);
+  config.slot_size = kSlotSize;
+  config.external_ringbuffer = &external_ring;
+
+  realtime_pipeline pipeline(config);
+  completion observed{};
+  int callbacks = 0;
+  pipeline.set_completion_handler([&](const completion &result) {
+    observed = result;
+    ++callbacks;
+  });
+
+  constexpr int slot = 2;
+  constexpr uint64_t request_id = 47;
+  EXPECT_THROW(pipeline.complete_deferred(slot), std::logic_error);
+  EXPECT_THROW(pipeline.complete_deferred(-1, request_id), std::out_of_range);
+  EXPECT_THROW(
+      pipeline.complete_deferred(static_cast<int>(kNumSlots), request_id),
+      std::out_of_range);
+
+  pipeline.complete_deferred(slot, request_id);
+
+  auto *tx_flags = reinterpret_cast<atomic_uint64_sys *>(tx_flags_host_);
+  EXPECT_EQ(tx_flags[slot].load(cuda::std::memory_order_acquire),
+            reinterpret_cast<uint64_t>(tx_data_dev_ + slot * kSlotSize));
+  EXPECT_EQ(callbacks, 1);
+  EXPECT_EQ(observed.request_id, request_id);
+  EXPECT_EQ(observed.slot, slot);
+  EXPECT_TRUE(observed.success);
+  EXPECT_EQ(observed.cuda_error, 0);
+
+  const auto stats = pipeline.stats();
+  EXPECT_EQ(stats.submitted, 0u);
+  EXPECT_EQ(stats.completed, 1u);
+}
+
+TEST_F(RealtimePipelineTest, ExternalStopDrainsDeferredCompletion) {
+  auto external_ring = this->external_ring();
+
+  pipeline_stage_config config;
+  config.num_workers = 1;
+  config.num_slots = static_cast<int>(kNumSlots);
+  config.slot_size = kSlotSize;
+  config.external_ringbuffer = &external_ring;
+
+  auto predecoder = create_predecoder(0);
+  PreLaunchCopyCtx copy_ctx{predecoder->get_trt_input_ptr(),
+                            predecoder->get_input_size(),
+                            predecoder->get_host_ring_ptrs()};
+
+  realtime_pipeline pipeline(config);
+  pipeline.set_gpu_stage([&](int) -> gpu_worker_resources {
+    return {.graph_exec = predecoder->get_executable_graph(),
+            .stream = stream_,
+            .pre_launch_fn = pre_launch_input_copy,
+            .pre_launch_data = &copy_ctx,
+            .function_id = kTestFunctionId};
+  });
+
+  std::atomic<bool> deferred_ready{false};
+  std::atomic<int> deferred_slot{-1};
+  std::atomic<uint64_t> deferred_request_id{0};
+  std::atomic<void *> deferred_response{nullptr};
+  pipeline.set_cpu_stage([&](const cpu_stage_context &ctx) -> size_t {
+    pre_decoder_job job{};
+    if (!predecoder->poll_next_job(job))
+      return 0;
+
+    const auto *request =
+        static_cast<const rt_sdk::RPCHeader *>(job.ring_buffer_ptr);
+    deferred_slot.store(ctx.origin_slot, std::memory_order_relaxed);
+    deferred_request_id.store(request->request_id, std::memory_order_relaxed);
+    deferred_response.store(ctx.response_buffer, std::memory_order_relaxed);
+    predecoder->release_job(job.slot_idx);
+    deferred_ready.store(true, std::memory_order_release);
+    return DEFERRED_COMPLETION;
+  });
+
+  std::atomic<int> callbacks{0};
+  pipeline.set_completion_handler(
+      [&](const completion &) { callbacks.fetch_add(1); });
+  pipeline.start();
+
+  constexpr size_t slot = 2;
+  constexpr uint64_t request_id = 47;
+  float payload[kSkipTrtFloats]{};
+  write_rpc_slot(rx_data_host_ + slot * kSlotSize, kTestFunctionId, payload,
+                 sizeof(payload), request_id);
+  auto *rx_flags = reinterpret_cast<atomic_uint64_sys *>(rx_flags_host_);
+  rx_flags[slot].store(
+      reinterpret_cast<uint64_t>(rx_data_host_ + slot * kSlotSize),
+      cuda::std::memory_order_release);
+
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (!deferred_ready.load(std::memory_order_acquire) &&
+         std::chrono::steady_clock::now() < deadline)
+    std::this_thread::yield();
+  ASSERT_TRUE(deferred_ready.load(std::memory_order_acquire));
+
+  std::thread completer([&] {
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    auto *response = static_cast<rt_sdk::RPCResponse *>(
+        deferred_response.load(std::memory_order_relaxed));
+    response->status = 0;
+    response->result_len = 0;
+    response->request_id = request_id;
+    __atomic_store_n(&response->magic, rt_sdk::RPC_MAGIC_RESPONSE,
+                     __ATOMIC_RELEASE);
+    pipeline.complete_deferred(
+        deferred_slot.load(std::memory_order_relaxed),
+        deferred_request_id.load(std::memory_order_relaxed));
+  });
+
+  pipeline.stop();
+  EXPECT_EQ(callbacks.load(), 1);
+  completer.join();
+
+  auto *tx_flags = reinterpret_cast<atomic_uint64_sys *>(tx_flags_host_);
+  EXPECT_EQ(tx_flags[slot].load(cuda::std::memory_order_acquire),
+            reinterpret_cast<uint64_t>(tx_data_dev_ + slot * kSlotSize));
+  EXPECT_EQ(pipeline.stats().completed, 1u);
+}
+TEST_F(RealtimePipelineTest, ExternalRingRejectsInvalidConfiguration) {
+  cudaq_ringbuffer_t external_ring{};
+  pipeline_stage_config config;
+  config.num_workers = 1;
+  config.num_slots = static_cast<int>(kNumSlots);
+  config.slot_size = kSlotSize;
+  config.external_ringbuffer = &external_ring;
+
+  EXPECT_THROW({ realtime_pipeline pipeline(config); }, std::invalid_argument);
+}
 // ============================================================================
 // ai_decoder_service Unit Tests (passthrough)
 // ============================================================================

@@ -7,7 +7,7 @@
 **Supersedes**: Device-side persistent kernel dispatcher (`dispatch_kernel_with_graph`) and Statically-mapped Host Dispatcher
 **Target Platforms**: NVIDIA Grace Hopper (GH200), Grace Blackwell (GB200)
 **Shared-Memory Model**: libcu++ `cuda::std::atomic` with `thread_scope_system`
-**Last Updated**: 2026-04-01
+**Last Updated**: 2026-07-24
 
 ---
 
@@ -28,6 +28,15 @@ This document defines a **Host-Side Dispatcher with a Dynamic Worker Pool**.
 * Inflight jobs are tagged with their origin slot, allowing out-of-order execution and completion.
 * Synchronization relies exclusively on Grace Blackwell's NVLink-C2C hardware using libcu++ system-scope atomics.
 * **Decoupled architecture**: PyMatching decode runs in a separate thread pool from the predecoder workers, allowing GPU streams to be released immediately after inference completion rather than blocking on CPU decode.
+
+### 1.4 Ring Ownership Modes
+
+The pipeline supports two completion ownership models:
+
+* **Internal ring**: `ring_buffer_injector` owns submission and the pipeline consumer thread polls, accounts, invokes callbacks, and clears completed TX flags.
+* **External ring**: the FPGA/Hololink transport owns submission and TX flag consumption. The dispatcher does not write TX markers and the pipeline does not start a competing consumer. Deferred workers publish with `complete_deferred(slot, request_id)`, which accounts the completion and invokes the callback synchronously; the external transport clears the flag.
+
+Unless explicitly marked external, the producer and consumer sequences below describe the internal-ring path.
 
 ---
 
@@ -230,8 +239,8 @@ Each predecoder has a dedicated worker thread in the `realtime_pipeline`. These 
 A separate thread pool (16 workers for d13_r104) dequeues from `PyMatchQueue` and:
 
 1. **Decode** using a per-thread PyMatching decoder instance (lock-free `thread_local` acquisition).
-2. **Write** the RPC response (`DecodeResponse`) directly into the ring buffer slot.
-3. **Signal** slot completion via `pipeline.complete_deferred(origin_slot)`, which stores the slot host address into `tx_flags[origin_slot]`.
+2. **Write** `RPCResponse` and the one-byte logical correction into the pipeline-provided TX response slot.
+3. **Signal** slot completion. Internal rings call `pipeline.complete_deferred(origin_slot)` and let the consumer account it. External rings call `pipeline.complete_deferred(origin_slot, request_id)`, which publishes the TX device-slot address, accounts completion, and invokes the callback.
 
 ### 6.3 Why Decouple?
 
@@ -267,7 +276,9 @@ Thread-safe MPSC queue using `std::mutex` + `std::condition_variable`:
 struct PyMatchJob {
     int origin_slot;
     uint64_t request_id;
-    void *ring_buffer_ptr;
+    void *ring_buffer_ptr;       // RX request
+    void *response_buffer_ptr;   // TX response
+    size_t response_buffer_size;
 };
 
 class PyMatchQueue {
@@ -348,7 +359,7 @@ The low-level dispatcher, consumer, and worker threads are wrapped by a higher-l
 
 1. **GPU stage factory** (`gpu_stage_factory`): Called once per worker during `start()`. Returns the `cudaGraphExec_t`, `cudaStream_t`, `pre_launch_fn`, `post_launch_fn`, `function_id`, and an opaque `user_context` for each worker.
 2. **CPU stage callback** (`cpu_stage_callback`): Called by each worker thread when GPU inference completes. Receives `cpu_stage_context` containing `gpu_output`, `gpu_output_size`, `response_buffer`, and the `user_context`. Returns the number of bytes written, `0` if no result ready (poll again), or `DEFERRED_COMPLETION` to release the worker without signaling slot completion.
-3. **Completion callback** (`completion_callback`): Called by the consumer thread for each completed (or errored) request with a `completion` struct.
+3. **Completion callback** (`completion_callback`): Called by the internal-ring consumer or synchronously by the external-ring completion path with a `completion` struct.
 
 ```cpp
 realtime_pipeline pipeline(config);
@@ -368,7 +379,7 @@ When the CPU stage callback returns `DEFERRED_COMPLETION` (= `SIZE_MAX`), the pi
 - Sets the worker's bit in `idle_mask` (worker is free for next dispatch)
 - Does NOT write to `tx_flags[origin_slot]` (slot stays IN_FLIGHT)
 
-The caller is responsible for eventually calling `pipeline.complete_deferred(slot)`, which stores the slot host address into `tx_flags[slot]` with release semantics, making the completion visible to the consumer.
+The caller is responsible for eventually calling the appropriate overload of `complete_deferred`. Internal rings publish with `complete_deferred(slot)` for the consumer to harvest. External rings publish the TX device-slot address with `complete_deferred(slot, request_id)` and account the completion immediately because the transport owns TX flag consumption.
 
 ### 8.2 GPU-Only Mode
 
@@ -416,8 +427,8 @@ The `pipeline_stage_config` allows configuring `num_workers`, `num_slots`, `slot
 24. **Pipeline** restores bit 2 in `idle_mask` (worker free for next dispatch). Does NOT touch `tx_flags`.
 25. **PyMatching Worker** pops `PyMatchJob` from queue, acquires per-thread decoder.
 26. **PyMatching Worker** runs PyMatching MWPM decode over full parity check matrix.
-27. **PyMatching Worker** writes `RPCResponse + DecodeResponse` into ring buffer slot.
-28. **PyMatching Worker** calls `pipeline.complete_deferred(slot)` → `tx_flags[slot].store(host_addr, release)`.
+27. **PyMatching Worker** writes `RPCResponse` plus the one-byte correction into the TX response slot.
+28. **PyMatching Worker** calls `pipeline.complete_deferred(slot)` for an internal ring or `pipeline.complete_deferred(slot, request_id)` for an external ring → `tx_flags[slot].store(tx_device_slot, release)`.
 29. **Consumer** scans all slots where `slot_occupied[s]` is set, calls `poll_tx(s)` to check if result is ready (i.e., `tx_flags[slot]` is a valid address, not IN_FLIGHT).
 30. **Consumer** calls `completion_handler(request_id, slot, success)`.
 31. **Consumer** sets `slot_occupied[slot] = 0`, `__sync_synchronize()`, then calls `clear_slot(slot)` (clears rx/tx flags). Producer may now reuse slot.
@@ -490,10 +501,10 @@ Data-integrity tests that verify known payloads survive the full CUDA graph roun
 
 ## 13. Shutdown and Grace Period
 
-- **Grace period**: After the producer stops submitting, the pipeline waits up to 5 seconds for `total_completed >= total_submitted`.
-- **Consumer exit**: The consumer thread normally exits when `producer_stop && total_completed >= total_submitted`. To avoid hanging forever if some in-flight requests never complete, set a **consumer_stop** flag after the grace period; the consumer loop checks this and exits so `consumer.join()` returns and the process can print the final report and exit cleanly.
-- **Dispatcher shutdown**: Set `shutdown_flag = 1` after the consumer exits, then join the dispatcher thread. The dispatcher synchronizes all worker streams before returning.
-- **PyMatching thread pool**: Call `pymatch_queue.shutdown()` to unblock all waiting threads, then join all PyMatching worker threads.
+- **Drain target**: Internal rings stop software submission and drain until `total_completed >= total_submitted`. External rings first stop the dispatcher, then drain the stable `live_dispatched` count because their producer is not owned by the pipeline.
+- **Dispatcher shutdown**: Internal rings leave the dispatcher running during the grace period so already-submitted slots can be accepted, then stop it. External rings stop it before selecting the drain target so no additional requests enter the pipeline.
+- **Worker and consumer exit**: After the drain completes, or after the five-second grace period expires, set **consumer_stop** and join the pipeline-owned consumer and CPU workers.
+- **PyMatching thread pool**: Keep deferred workers running while `pipeline.stop()` drains accepted work. Then call `pymatch_queue.shutdown()` and join the PyMatching workers.
 
 ---
 
@@ -560,5 +571,5 @@ When generating code from this specification, the LLM **MUST** strictly adhere t
 - [ ] **CONSUMER MEMORY ORDERING**: The consumer MUST set `slot_occupied[s] = 0` BEFORE calling `cudaq_host_ringbuffer_clear_slot`, with a `__sync_synchronize()` fence between them, to prevent the producer-consumer race on ARM.
 - [ ] **DMA DATA MOVEMENT**: Use `cudaMemcpyAsync` (DMA engine) for data copies. Input copy is issued via `pre_launch_fn` callback before graph launch at offset `CUDAQ_RPC_HEADER_SIZE` (24 bytes) using `cudaMemcpyHostToDevice` from the pinned ring buffer host pointer. Output copy is captured inside the graph. Do not use SM-based byte-copy kernels for fixed-address transfers.
 - [ ] **NO INPUT KERNEL IN GRAPH**: The captured CUDA graph must NOT contain an input-copy kernel. All input data movement is handled by the `pre_launch_fn` DMA callback issued on the worker stream before `cudaGraphLaunch`.
-- [ ] **DEFERRED COMPLETION**: When the CPU stage returns `DEFERRED_COMPLETION`, the pipeline MUST release `idle_mask` but MUST NOT write `tx_flags`. The external caller MUST call `complete_deferred(slot)` to signal completion.
-- [ ] **SHUTDOWN**: Use a `consumer_stop` (or equivalent) flag so the consumer thread can exit after a grace period even when `total_completed < total_submitted`; join the consumer after setting the flag so the process exits cleanly. Shut down the PyMatching queue before stopping the pipeline.
+- [ ] **DEFERRED COMPLETION**: When the CPU stage returns `DEFERRED_COMPLETION`, the pipeline MUST release `idle_mask` but MUST NOT write `tx_flags`. The deferred worker MUST call `complete_deferred(slot)` for an internal ring or `complete_deferred(slot, request_id)` for an external ring.
+- [ ] **SHUTDOWN**: Stop admission before choosing a stable drain target, keep deferred workers alive while accepted work drains, then stop and join pipeline workers before shutting down the deferred-work queue.

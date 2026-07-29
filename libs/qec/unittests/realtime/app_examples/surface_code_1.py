@@ -482,8 +482,7 @@ def run(argv: List[str]) -> Optional[dict]:
                         default="",
                         help="Machine name for Quantinuum target")
     parser.add_argument("--emulate",
-                        type=lambda s: s.lower() != "false",
-                        default=True,
+                        action="store_true",
                         help="Use emulation when running on Quantinuum target")
     parser.add_argument("--project_id",
                         type=str,

@@ -627,6 +627,7 @@ run_emulated() {
         --buffer-addr "$bridge_addr"
         --page-size "$PAGE_SIZE"
         --num-pages "$NUM_PAGES"
+        --verify
     )
     if [[ -n "$NUM_SHOTS" ]]; then
         playback_args+=(--num-shots "$NUM_SHOTS")
@@ -706,6 +707,7 @@ run_fpga() {
         --buffer-addr "$bridge_addr"
         --page-size "$PAGE_SIZE"
         --num-pages "$NUM_PAGES"
+        --verify
     )
     if [[ -n "$NUM_SHOTS" ]]; then
         playback_args+=(--num-shots "$NUM_SHOTS")

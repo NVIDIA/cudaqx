@@ -295,17 +295,6 @@ struct WorkerCtx {
   size_t obs_row_size = 0;
 };
 
-/// @brief Packed RPC response containing decode results.
-/// @details This payload is written directly into the pipeline response buffer
-/// after the RPC header, so the struct remains packed to match the transport
-/// framing exactly.
-struct __attribute__((packed)) DecodeResponse {
-  /// @brief Total number of corrections applied (predecoder + PyMatching).
-  int32_t total_corrections;
-  /// @brief Whether the PyMatching decoder converged (1 = yes).
-  int32_t converged;
-};
-
 // =============================================================================
 // PyMatching work queue
 // =============================================================================
@@ -318,6 +307,10 @@ struct PyMatchJob {
   uint64_t request_id;
   /// @brief Pointer to the ring buffer data for this slot.
   void *ring_buffer_ptr;
+  /// @brief Pointer to the TX ring slot for the deferred response.
+  void *response_buffer_ptr;
+  /// @brief Writable capacity of the TX response slot.
+  size_t response_buffer_size;
 };
 
 /// @brief Thread-safe queue for dispatching PyMatching decode jobs.

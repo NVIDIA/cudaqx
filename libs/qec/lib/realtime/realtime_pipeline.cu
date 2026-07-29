@@ -15,6 +15,7 @@
 #include "cudaq/qec/realtime/nvtx_helpers.h"
 #include "cudaq/qec/realtime/pipeline.h"
 #include "cudaq/realtime/daemon/dispatcher/cudaq_realtime.h"
+#include "cudaq/realtime/daemon/dispatcher/dispatch_kernel_launch.h"
 #include "cudaq/realtime/daemon/dispatcher/host_dispatcher.h"
 
 #include <cuda/std/atomic>
@@ -293,6 +294,12 @@ struct realtime_pipeline::Impl {
 
   // Allocate mapped ring state and mailbox storage for the pipeline.
   void allocate(const pipeline_stage_config &cfg) {
+    if (cfg.num_workers <= 0)
+      throw std::invalid_argument("num_workers must be positive");
+    if (cfg.num_slots <= 0)
+      throw std::invalid_argument("num_slots must be positive");
+    if (cfg.slot_size == 0)
+      throw std::invalid_argument("slot_size must be positive");
     if (cfg.num_workers > 64) {
       throw std::invalid_argument("num_workers (" +
                                   std::to_string(cfg.num_workers) +
@@ -303,6 +310,18 @@ struct realtime_pipeline::Impl {
 
     if (cfg.external_ringbuffer) {
       active_rb_ = *static_cast<cudaq_ringbuffer_t *>(cfg.external_ringbuffer);
+      if (!active_rb_.rx_flags || !active_rb_.tx_flags ||
+          !active_rb_.rx_flags_host || !active_rb_.tx_flags_host ||
+          !active_rb_.rx_data || !active_rb_.tx_data ||
+          !active_rb_.rx_data_host || !active_rb_.tx_data_host) {
+        throw std::invalid_argument(
+            "external ring buffer contains null ring pointers");
+      }
+      if (active_rb_.rx_stride_sz < cfg.slot_size ||
+          active_rb_.tx_stride_sz < cfg.slot_size) {
+        throw std::invalid_argument(
+            "external ring strides must be at least slot_size");
+      }
       external_ring_ = true;
     } else {
       ring = std::make_unique<RingBufferManager>(
@@ -414,6 +433,8 @@ struct realtime_pipeline::Impl {
     disp_cfg.idle_mask = static_cast<void *>(&idle_mask);
     disp_cfg.inflight_slot_tags = inflight_slot_tags.data();
     disp_cfg.skip_stream_sweep = true;
+    // A caller-owned external transport owns the TX flag lifecycle.
+    disp_cfg.config.skip_tx_markers = external_ring_ ? 1 : 0;
 
     // --- Dispatcher thread ---
     // The config is copied by value into the lambda; the workers vector is
@@ -439,8 +460,11 @@ struct realtime_pipeline::Impl {
     }
 
     // --- Consumer thread ---
-    consumer_thread = std::thread([this]() { consumer_loop(); });
-    pin_thread(consumer_thread, config.cores.consumer);
+    // External transports consume and clear their own TX flags.
+    if (!external_ring_) {
+      consumer_thread = std::thread([this]() { consumer_loop(); });
+      pin_thread(consumer_thread, config.cores.consumer);
+    }
 
     started = true;
   }
@@ -451,25 +475,38 @@ struct realtime_pipeline::Impl {
     if (!started)
       return;
 
-    // Signal consumer to finish pending work
+    // Stop software submission. Internal rings leave the dispatcher running
+    // while queued submissions drain. External producers are outside this
+    // pipeline, so stop dispatch first and drain only requests already
+    // accepted.
     producer_stop.store(true, std::memory_order_release);
+    if (external_ring_) {
+      shutdown_flag.store(1, cuda::std::memory_order_release);
+      if (dispatcher_thread.joinable())
+        dispatcher_thread.join();
+    }
 
-    // Grace period for in-flight requests
+    const uint64_t drain_target =
+        external_ring_ ? live_dispatched.load(cuda::std::memory_order_acquire)
+                       : total_submitted.load(std::memory_order_acquire);
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (total_completed.load(std::memory_order_relaxed) <
-               total_submitted.load(std::memory_order_relaxed) &&
+    while (total_completed.load(std::memory_order_acquire) < drain_target &&
            std::chrono::steady_clock::now() < deadline) {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 
+    if (!external_ring_) {
+      shutdown_flag.store(1, cuda::std::memory_order_release);
+      if (dispatcher_thread.joinable())
+        dispatcher_thread.join();
+    }
+
     consumer_stop.store(true, std::memory_order_release);
 
-    // Shut down dispatcher
-    shutdown_flag.store(1, cuda::std::memory_order_release);
-    dispatcher_thread.join();
-
     // Consumer
-    consumer_thread.join();
+    // It is not created for caller-owned external transports.
+    if (consumer_thread.joinable())
+      consumer_thread.join();
 
     // Workers check shutdown via consumer_stop (they spin on ready_flags,
     // which will never fire after dispatcher is gone, so we need to break
@@ -517,8 +554,10 @@ struct realtime_pipeline::Impl {
       ctx.origin_slot = inflight_slot_tags[worker_id];
       ctx.gpu_output = nullptr;
       ctx.gpu_output_size = 0;
-      ctx.response_buffer = nullptr;
-      ctx.max_response_size = 0;
+      ctx.response_buffer =
+          active_rb_.tx_data_host +
+          static_cast<size_t>(ctx.origin_slot) * active_rb_.tx_stride_sz;
+      ctx.max_response_size = active_rb_.tx_stride_sz;
       ctx.user_context = wr->user_context;
 
       NVTX_PUSH("WorkerPoll");
@@ -536,12 +575,29 @@ struct realtime_pipeline::Impl {
 
       int origin_slot = inflight_slot_tags[worker_id];
 
-      uint8_t *slot_host = active_rb_.rx_data_host +
-                           static_cast<size_t>(origin_slot) * config.slot_size;
-      uint64_t rx_value = reinterpret_cast<uint64_t>(slot_host);
+      uint64_t request_id = 0;
+      if (external_ring_) {
+        const uint8_t *rx_slot =
+            active_rb_.rx_data_host +
+            static_cast<size_t>(origin_slot) * active_rb_.rx_stride_sz;
+        const auto *request =
+            reinterpret_cast<const ::cudaq::realtime::RPCHeader *>(rx_slot);
+        request_id = request->request_id;
+      }
 
-      volatile uint64_t *tf = active_rb_.tx_flags_host;
-      __atomic_store_n(&tf[origin_slot], rx_value, __ATOMIC_RELEASE);
+      uint8_t *tx_slot = active_rb_.tx_data + static_cast<size_t>(origin_slot) *
+                                                  active_rb_.tx_stride_sz;
+      const uint64_t tx_value = reinterpret_cast<uint64_t>(tx_slot);
+      __atomic_store_n(&active_rb_.tx_flags_host[origin_slot], tx_value,
+                       __ATOMIC_RELEASE);
+
+      if (external_ring_) {
+        if (completion_handler) {
+          completion c{request_id, origin_slot, true, 0};
+          completion_handler(c);
+        }
+        total_completed.fetch_add(1, std::memory_order_release);
+      }
 
       idle_mask.fetch_or(1ULL << worker_id, cuda::std::memory_order_release);
     }
@@ -596,7 +652,7 @@ struct realtime_pipeline::Impl {
             c.cuda_error = 0;
             completion_handler(c);
           }
-          total_completed.fetch_add(1, std::memory_order_relaxed);
+          total_completed.fetch_add(1, std::memory_order_release);
 
           // ARM memory ordering: clear occupancy BEFORE
           // clearing ring buffer flags, with a fence between.
@@ -615,7 +671,7 @@ struct realtime_pipeline::Impl {
             c.cuda_error = cuda_error;
             completion_handler(c);
           }
-          total_completed.fetch_add(1, std::memory_order_relaxed);
+          total_completed.fetch_add(1, std::memory_order_release);
           slot_occupied[s] = 0;
           __sync_synchronize();
           cudaq_host_ringbuffer_clear_slot(&active_rb_, s);
@@ -663,6 +719,8 @@ void realtime_pipeline::set_cpu_stage(cpu_stage_callback callback) {
 
 // The completion handler runs on the dedicated consumer thread after the
 // shared ring buffer indicates either success or CUDA error completion.
+// For external rings, it instead runs from the completing thread because the
+// external transport owns TX flag consumption.
 void realtime_pipeline::set_completion_handler(completion_callback handler) {
   impl_->completion_handler = std::move(handler);
 }
@@ -684,7 +742,7 @@ void realtime_pipeline::stop() { impl_->stop_all(); }
 // but each field is individually coherent.
 realtime_pipeline::Stats realtime_pipeline::stats() const {
   return {impl_->total_submitted.load(std::memory_order_relaxed),
-          impl_->total_completed.load(std::memory_order_relaxed),
+          impl_->total_completed.load(std::memory_order_acquire),
           impl_->live_dispatched.load(cuda::std::memory_order_relaxed),
           impl_->backpressure_stalls.load(std::memory_order_relaxed)};
 }
@@ -696,15 +754,41 @@ realtime_pipeline::ringbuffer_bases() const {
   return {impl_->active_rb_.rx_data_host, impl_->active_rb_.rx_data};
 }
 
-// Deferred completions publish the slot host pointer into the tx_flags array
-// using release ordering so the consumer can safely observe the completed
-// response payload.
+// Internal-ring deferred completions are harvested and accounted by the
+// consumer thread after this publication.
 void realtime_pipeline::complete_deferred(int slot) {
-  uint8_t *slot_host = impl_->active_rb_.rx_data_host +
-                       static_cast<size_t>(slot) * impl_->config.slot_size;
-  uint64_t rx_value = reinterpret_cast<uint64_t>(slot_host);
-  volatile uint64_t *tf = impl_->active_rb_.tx_flags_host;
-  __atomic_store_n(&tf[slot], rx_value, __ATOMIC_RELEASE);
+  if (impl_->external_ring_)
+    throw std::logic_error("external ring completion requires a request_id");
+  if (slot < 0 || slot >= impl_->config.num_slots)
+    throw std::out_of_range("deferred completion slot is out of range");
+
+  uint8_t *tx_slot = impl_->active_rb_.tx_data +
+                     static_cast<size_t>(slot) * impl_->active_rb_.tx_stride_sz;
+  const uint64_t tx_value = reinterpret_cast<uint64_t>(tx_slot);
+  __atomic_store_n(&impl_->active_rb_.tx_flags_host[slot], tx_value,
+                   __ATOMIC_RELEASE);
+}
+
+// External transports consume and clear their own TX flags, so publication,
+// accounting, and callback delivery all happen on the completing thread.
+void realtime_pipeline::complete_deferred(int slot, uint64_t request_id) {
+  if (!impl_->external_ring_)
+    throw std::logic_error(
+        "request_id overload is only valid for external rings");
+  if (slot < 0 || slot >= impl_->config.num_slots)
+    throw std::out_of_range("deferred completion slot is out of range");
+
+  uint8_t *tx_slot = impl_->active_rb_.tx_data +
+                     static_cast<size_t>(slot) * impl_->active_rb_.tx_stride_sz;
+  const uint64_t tx_value = reinterpret_cast<uint64_t>(tx_slot);
+  __atomic_store_n(&impl_->active_rb_.tx_flags_host[slot], tx_value,
+                   __ATOMIC_RELEASE);
+
+  if (impl_->completion_handler) {
+    completion c{request_id, slot, true, 0};
+    impl_->completion_handler(c);
+  }
+  impl_->total_completed.fetch_add(1, std::memory_order_release);
 }
 
 // ---------------------------------------------------------------------------
