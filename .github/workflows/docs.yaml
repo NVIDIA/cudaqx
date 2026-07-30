@@ -2,10 +2,28 @@ name: Documentation
 
 on:
   workflow_call:
+    inputs:
+      deploy_docs:
+        type: boolean
+        default: false
+        required: false
+      docs_version:
+        type: string
+        default: '0.6.0'
+        required: false
 
   workflow_dispatch:
-    branches:
-      - main
+    inputs:
+      deploy_docs:
+        description: 'Deploy docs to GitHub Pages under the resolved version directory.'
+        type: boolean
+        default: false
+        required: false
+      docs_version:
+        description: 'Docs version to publish under (directory name on the docs site).'
+        type: string
+        default: '0.6.0'
+        required: false
 
   push:
     branches:
@@ -57,14 +75,18 @@ jobs:
 
       - name: Install requirements
         run: |
+          apt update
           apt install -y --no-install-recommends \
             gfortran libblas-dev doxygen
 
           python3 -m pip install IPython breathe enum_tools myst_parser nbsphinx \
             sphinx_copybutton sphinx_inline_tabs sphinx_gallery sphinx_rtd_theme \
-            sphinx_reredirects sphinx_toolbox cupy-cuda12x cuquantum-python-cu12
+            sphinx_reredirects "sphinx<9" sphinx_toolbox cupy-cuda12x \
+            cuquantum-python-cu12
 
       - name: Build docs
+        env:
+          CUDAQX_VERSION: ${{ inputs.docs_version || '0.6.0' }}
         run: |
           # Note: TRT decoder is disabled because all docs for the TRT decoder
           # are generated independently of the source code (no Doxygen
@@ -84,23 +106,94 @@ jobs:
       # ========================================================================
 
       - name: Upload
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
+          name: docs-html
           path: build/docs/build/
+          retention-days: 7
 
   deploy:
-    name: Deploy latest docs
-    if: github.ref == 'refs/heads/main'
+    name: Deploy docs (${{ inputs.docs_version || '0.6.0' }})
+    # Only release versions are published; "latest" (dev docs) is never
+    # deployed.
+    if: |
+      github.event_name == 'workflow_dispatch' &&
+      inputs.deploy_docs == true &&
+      inputs.docs_version != 'latest'
+    # The versioned site is assembled on the gh-pages branch; serialize
+    # deployments so concurrent runs from different branches cannot race.
+    concurrency:
+      group: docs-deploy-gh-pages
+      cancel-in-progress: false
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     permissions:
+      contents: write
       pages: write
       id-token: write
     needs: build
     steps:
+      - name: Download docs
+        uses: actions/download-artifact@v4
+        with:
+          name: docs-html
+          path: docs-html
+
+      - name: Update versioned site on gh-pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DOCS_VERSION: ${{ inputs.docs_version || '0.6.0' }}
+        run: |
+          git config --global user.name "cudaqx-bot"
+          git config --global user.email "cudaqx-bot@users.noreply.github.com"
+
+          # The gh-pages branch holds the assembled site (one directory per
+          # version) and is expected to exist.
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git clone --depth 1 --branch gh-pages "$remote" site
+
+          # Replace this version's directory with the fresh build.
+          rm -rf "site/${DOCS_VERSION}"
+          cp -r docs-html "site/${DOCS_VERSION}"
+
+          cd site
+
+          # Mirror the newest release at the site root so that unversioned
+          # links (https://nvidia.github.io/cudaqx/...) keep working and
+          # always show the most recent release. Version directories are
+          # excluded from the mirror so they are left untouched.
+          newest=$(ls -d [0-9]*/ | sort -V | tail -1)
+          rsync -a --delete \
+            --exclude='/.git' \
+            --exclude='/.nojekyll' \
+            --exclude='/[0-9]*/' \
+            "$newest" ./
+
+          # Regenerate the manifest consumed by the sidebar version selector
+          # (docs/sphinx/_static/version-switcher.js).
+          {
+            printf '{"latest": "%s", "versions": [' "${newest%/}"
+            ls -d [0-9]*/ | sort -rV | sed 's|/$||; s|.*|"&"|' | paste -sd, -
+            printf ']}\n'
+          } > versions.json
+
+          git add -A
+          if git commit -m "Deploy ${DOCS_VERSION} docs from ${GITHUB_SHA}"; then
+            git push origin gh-pages
+          else
+            echo "Site already up to date; nothing to push"
+          fi
+
+          # The .git directory must not end up in the published site.
+          rm -rf .git
+
+      - name: Upload pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/
+
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-
