@@ -45,7 +45,7 @@ jobs:
     runs-on: ${{ startsWith(github.repository, 'NVIDIA/cudaqx') && 'linux-amd64-cpu8' || 'ubuntu-latest' }}
     # The 0.6.0-era cuda-quantum-devcontainer image no longer exists; use the
     # 0.6.0 release's cudaqx-dev image, which was built on top of it.
-    container: ghcr.io/nvidia/cudaqx-dev:0.6.0-py3.11-amd64-cu12.6
+    container: ghcr.io/nvidia/cudaqx-dev:0.6.0-amd64-cu12.6
     permissions:
       actions: write
       contents: read
@@ -56,23 +56,11 @@ jobs:
           set-safe-directory: true
 
       # ========================================================================
-      # CUDA Quantum build
-      # ========================================================================
-
-      - name: Get required CUDAQ version
-        id: get-cudaq-version
-        uses: ./.github/actions/get-cudaq-version
-
-      - name: Get CUDAQ build
-        uses: ./.github/actions/get-cudaq-build
-        with:
-          repo: ${{ steps.get-cudaq-version.outputs.repo }}
-          ref: ${{ steps.get-cudaq-version.outputs.ref }}
-          token: ${{ secrets.CUDAQ_ACCESS_TOKEN }}
-          platform: 'amd64-cu12' # Just choose one platform for docs
-
-      # ========================================================================
       # Build docs
+      #
+      # No get-cudaq-build step: the cudaqx-dev release image already contains
+      # the CUDA-Q build matching 0.6.0's .cudaq_version pin, installed at
+      # /usr/local/cudaq.
       # ========================================================================
 
       - name: Install requirements
@@ -97,7 +85,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER=gcc-11 \
             -DCMAKE_CXX_COMPILER=g++-11 \
-            -DCUDAQ_DIR=/cudaq-install/lib/cmake/cudaq/ \
+            -DCUDAQ_DIR=/usr/local/cudaq/lib/cmake/cudaq/ \
             -DCUDAQX_ENABLE_LIBS="all" \
             -DCUDAQX_INCLUDE_DOCS=ON \
             -DCUDAQX_BINDINGS_PYTHON=ON \
