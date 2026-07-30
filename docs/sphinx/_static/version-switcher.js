@@ -1,4 +1,7 @@
-// Version drop-down for the docs sidebar.
+// Version selector for the docs sidebar, rendered as the Read the Docs
+// style flyout panel. sphinx_rtd_theme ships the CSS (.rst-versions et al.)
+// and the expand/collapse handling for it even when not hosted on
+// readthedocs.org, so this only needs to build the markup.
 //
 // The docs site is laid out as one directory per release version, with the
 // newest release mirrored at the site root:
@@ -9,10 +12,9 @@
 //
 // The deployment workflow maintains a versions.json manifest at the site
 // root, e.g. {"latest": "0.7.0", "versions": ["0.7.0", "0.6.0"]}. This
-// script fetches the manifest and inserts a version selector below the
-// sidebar search box. When switching versions it tries to stay on the
-// current page, falling back to the target version's landing page if the
-// page does not exist there.
+// script fetches the manifest and inserts the flyout. When switching
+// versions it tries to stay on the current page, falling back to the target
+// version's landing page if the page does not exist there.
 (function () {
   "use strict";
 
@@ -31,12 +33,21 @@
     return "";
   }
 
-  function insertSelector(manifest, siteRoot) {
+  function navigateTo(version, siteRoot) {
+    var targetRoot = new URL(version + "/", siteRoot).href;
+    var samePage = targetRoot + relativePagePath();
+    fetch(samePage, { method: "HEAD" })
+      .then(function (response) {
+        window.location.href = response.ok ? samePage : targetRoot;
+      })
+      .catch(function () {
+        window.location.href = targetRoot;
+      });
+  }
+
+  function insertFlyout(manifest, siteRoot) {
     var versions = manifest.versions || [];
     if (versions.length < 2) return;
-
-    var sidebar = document.querySelector(".wy-side-nav-search");
-    if (!sidebar) return;
 
     var current = null;
     for (var i = 0; i < versions.length; i++) {
@@ -47,32 +58,51 @@
     // Pages at the site root are a mirror of the newest release.
     if (current === null) current = manifest.latest;
 
-    var select = document.createElement("select");
-    select.setAttribute("aria-label", "Documentation version");
-    select.style.cssText =
-      "display:block;margin:0.5em auto 0;padding:0.2em 0.5em;" +
-      "border-radius:3px;border:0;font-size:90%;";
-    for (var j = 0; j < versions.length; j++) {
-      var option = document.createElement("option");
-      option.value = versions[j];
-      option.textContent = "v" + versions[j];
-      option.selected = versions[j] === current;
-      select.appendChild(option);
-    }
+    var flyout = document.createElement("div");
+    flyout.className = "rst-versions";
+    flyout.setAttribute("data-toggle", "rst-versions");
+    flyout.setAttribute("role", "note");
+    flyout.setAttribute("aria-label", "Documentation versions");
 
-    select.addEventListener("change", function () {
-      var targetRoot = new URL(select.value + "/", siteRoot).href;
-      var samePage = targetRoot + relativePagePath();
-      fetch(samePage, { method: "HEAD" })
-        .then(function (response) {
-          window.location.href = response.ok ? samePage : targetRoot;
-        })
-        .catch(function () {
-          window.location.href = targetRoot;
+    var currentSpan = document.createElement("span");
+    currentSpan.className = "rst-current-version";
+    currentSpan.setAttribute("data-toggle", "rst-current-version");
+    currentSpan.innerHTML =
+      '<span class="fa fa-book"> CUDA-QX</span> v: ' + current + " " +
+      '<span class="fa fa-caret-down"></span>';
+    flyout.appendChild(currentSpan);
+
+    var others = document.createElement("div");
+    others.className = "rst-other-versions";
+    var dl = document.createElement("dl");
+    var dt = document.createElement("dt");
+    dt.textContent = "Versions";
+    dl.appendChild(dt);
+
+    versions.forEach(function (version) {
+      var dd = document.createElement("dd");
+      var link = document.createElement("a");
+      // Plain link to the version root as the no-JS fallback; the click
+      // handler upgrades it to a same-page switch when possible.
+      link.href = new URL(version + "/", siteRoot).href;
+      link.textContent = version;
+      if (version === current) {
+        var strong = document.createElement("strong");
+        strong.appendChild(link);
+        dd.appendChild(strong);
+      } else {
+        link.addEventListener("click", function (event) {
+          event.preventDefault();
+          navigateTo(version, siteRoot);
         });
+        dd.appendChild(link);
+      }
+      dl.appendChild(dd);
     });
 
-    sidebar.appendChild(select);
+    others.appendChild(dl);
+    flyout.appendChild(others);
+    document.body.appendChild(flyout);
   }
 
   // The manifest lives at the site root: one level up when this page is
@@ -81,7 +111,7 @@
     .then(function (response) {
       if (!response.ok) throw new Error("no parent manifest");
       return response.json().then(function (manifest) {
-        insertSelector(manifest, new URL("../", docRoot).href);
+        insertFlyout(manifest, new URL("../", docRoot).href);
       });
     })
     .catch(function () {
@@ -91,7 +121,7 @@
           return response.json();
         })
         .then(function (manifest) {
-          insertSelector(manifest, docRoot);
+          insertFlyout(manifest, docRoot);
         })
         .catch(function () {
           /* No manifest (e.g. local build): no selector. */
