@@ -76,8 +76,11 @@ jobs:
       - name: Set container image
         id: set-container
         run: |
-          version="${{ steps.set-version.outputs.version }}"
-          echo "container=ghcr.io/nvidia/cudaqx-dev:${version}-amd64-cu12.6" >> $GITHUB_OUTPUT
+          if [[ "$GITHUB_REF" =~ ^refs/heads/releases/v(.+)$ ]]; then
+            echo "container=ghcr.io/nvidia/cudaqx-dev:${BASH_REMATCH[1]}-amd64-cu12.6" >> $GITHUB_OUTPUT
+          else
+            echo "container=ghcr.io/nvidia/cudaqx-dev:latest-amd64-cu12.6" >> $GITHUB_OUTPUT
+          fi
 
   build:
     name: Build
