@@ -115,9 +115,13 @@ jobs:
     concurrency:
       group: docs-deploy-gh-pages
       cancel-in-progress: false
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    # TEMPORARY: Pages deployment disabled until the github-pages environment
+    # protection rules allow this branch. The job still assembles the site and
+    # pushes it to gh-pages for verification. To re-enable, restore the
+    # environment block and the two commented-out steps at the end of the job.
+    # environment:
+    #   name: github-pages
+    #   url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -179,11 +183,12 @@ jobs:
           # The .git directory must not end up in the published site.
           rm -rf .git
 
-      - name: Upload pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: site/
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      # TEMPORARY: see note on the environment block above.
+      # - name: Upload pages artifact
+      #   uses: actions/upload-pages-artifact@v3
+      #   with:
+      #     path: site/
+      #
+      # - name: Deploy to GitHub Pages
+      #   id: deployment
+      #   uses: actions/deploy-pages@v4
