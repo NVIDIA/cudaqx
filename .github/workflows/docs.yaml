@@ -160,6 +160,7 @@ jobs:
     name: Deploy docs (${{ needs.setup.outputs.version }})
     # Only release versions are published; docs built from main (version
     # "latest") are build-tested but never deployed.
+    
     # TODO: Before merging, restrict deployment to release branches again by
     # adding the following condition (relaxed temporarily so the deployment
     # can be tested from a non-release branch):
@@ -173,9 +174,11 @@ jobs:
     concurrency:
       group: docs-deploy-gh-pages
       cancel-in-progress: false
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    # TEMPORARY: Pages deployment disabled. The job still assembles the site and
+    # pushes it to gh-pages for verification. 
+    # environment:
+    #   name: github-pages
+    #   url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -237,11 +240,12 @@ jobs:
           # The .git directory must not end up in the published site.
           rm -rf .git
 
-      - name: Upload pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: site/
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      # TEMPORARY: see note on the environment block above.
+      # - name: Upload pages artifact
+      #   uses: actions/upload-pages-artifact@v3
+      #   with:
+      #     path: site/
+      #
+      # - name: Deploy to GitHub Pages
+      #   id: deployment
+      #   uses: actions/deploy-pages@v4
