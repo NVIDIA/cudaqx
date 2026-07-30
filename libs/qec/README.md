@@ -27,7 +27,7 @@ Some decoders require additional dependencies to operate. You can install them w
 ## Getting Started
 
 For detailed documentation, tutorials, and API reference, visit the
-[CUDA-Q QEC Documentation](https://nvidia.github.io/cudaqx/components/qec/introduction.html).
+[CUDA-Q QEC Documentation](https://nvidia.github.io/cudaqx/components/qec/index.html).
 
 ## License
 

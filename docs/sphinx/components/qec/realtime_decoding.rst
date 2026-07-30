@@ -58,6 +58,7 @@ Additional quantum gates can be applied, and only when `get_corrections` is call
 See Also
 ^^^^^^^^
 
-* :doc:`Pre-built QEC Decoders </components/qec/decoders>` — decoders available for realtime use
-* :ref:`realtime_pipeline_api` — Realtime Pipeline C++ API
+* :ref:`Pre-built QEC Decoders <prebuilt_qec_decoders>` — decoders available for realtime use
+* :doc:`Realtime Decoding examples </examples_rst/qec/realtime_decoding>` — runnable end-to-end examples
+* :ref:`realtime_pipeline_api` — Realtime Pipeline C++ API (experimental)
 * :ref:`C++ realtime decoding API <cpp_realtime_decoding_api>` and :ref:`Python realtime decoding API <python_realtime_decoding_api>`

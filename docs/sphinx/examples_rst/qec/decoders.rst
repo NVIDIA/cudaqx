@@ -16,7 +16,7 @@ A detector error model (DEM) describes how the errors in a QEC circuit produce t
 Decoding From Stim DEM Text
 +++++++++++++++++++++++++++
 
-This example constructs a decoder from raw Stim ``.dem`` text and uses the matching parsed matrix for observable predictions. For what a detector error model is and how the text is parsed, see :doc:`Decoding from Stim DEM Text </components/qec/decoders>`.
+This example constructs a decoder from raw Stim ``.dem`` text and uses the matching parsed matrix for observable predictions. For what a detector error model is and how the text is parsed, see :ref:`Decoding from Stim DEM Text <decoding_from_stim_dem_text>`.
 
 .. tab:: Python
 
@@ -67,7 +67,7 @@ This example illustrates how to:
 DEM Sampling — Monte-Carlo Sampling from Detector Error Models
 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
-This example samples synthetic error and syndrome data from a detector error model, then walks through the GPU-accelerated and CPU paths and the supported input types. For the sampling model itself, see :doc:`DEM Sampling </components/qec/decoders>`.
+This example samples synthetic error and syndrome data from a detector error model, then walks through the GPU-accelerated and CPU paths and the supported input types. For the sampling model itself, see :ref:`DEM Sampling <dem_sampling>`.
 
 Example
 ~~~~~~~

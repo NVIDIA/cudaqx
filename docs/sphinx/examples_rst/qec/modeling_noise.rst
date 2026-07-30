@@ -1,39 +1,12 @@
-Modeling Noise in QEC
-=====================
+Experiments and Noise Modeling
+==============================
 
-CUDA-Q QEC supports two noise-modeling regimes for numerical experiments: an abstract
-code-capacity model that applies errors directly to data qubits, and a circuit-level model
-that generates errors by running the underlying stabilizer-measurement circuits.
+These examples walk through several of the most common numerical error-correction experiments with the CUDA-Q QEC library: modeling noise at the **code-capacity** and **circuit-level**, and running full **memory circuit experiments**. For the concepts behind each, see :doc:`Experiments and Noise Modeling </components/qec/numerical_experiments>`.
 
-Quantum Error Correction with Code-Capacity Noise Modeling
-----------------------------------------------------------
+Code-Capacity Noise Modeling
+----------------------------
 
-Quantum error correction (QEC) describes a set of tools used to detect and correct errors which occur to qubits on quantum computers.
-This example will walk through how the CUDA-Q QEC library handles two of the most common objects in QEC: stabilizer codes, and decoders.
-A stabilizer code is the quantum generalization of linear codes in classical error correction, which use parity checks to detect errors on noisy bits.
-In QEC, we'll perform stabilizer measurements on ancilla qubits to check the parity of our data qubits.
-These stabilizer measurements are non-destructive, and thus allow us to check the relative parity of qubits without destroying our quantum information.
-
-For example, if we prepare two qubits in the state `\Psi = a|00> + b|11>`, we may want to check if a bit-flip error happened.
-We can measure the stabilizer `ZZ`, which will return 0 if there are no errors or an even number of errors, but will return 1 if either has flipped.
-This is how we can perform parity checks in quantum computing, without performing destructive measurements which collapse our superposition.
-How these measurements are physically performed can be seen in the circuit-level noise QEC example.
-
-We can specify a stabilizer code with either a list of stabilizer operators (like `ZZ` above), or equivalently, a parity check matrix.
-We can think of the columns of a parity check matrix as the types of errors that can occur. In this case, each qubit can experience a bit flip `X` or a phase flip `Z` error, so the parity check matrix will have 2N columns where N is the number of data qubits.
-Each row represents a stabilizer, or a parity check.
-The values are either 0 or 1, where a 1 means that the corresponding column does participate in the parity check, and a 0 means it does not.
-Therefore, if a single `X/Z` error happens to a qubit, the supported rows of the parity check matrix will trigger.
-This is called the syndrome, a string of 0's and 1's corresponding to which parity checks were violated.
-A special class of stabilizer codes are called CSS (Calderbank-Shor-Steane) codes, which means the `X` and `Z` components of their parity check matrix can be separated.
-
-This brings us to decoding. Decoding is the act of solving the problem: given a syndrome, which underlying errors are most likely?
-There are many decoding algorithms, but this example will use a simple single-error look-up table.
-This means that the decoder will enumerate for each single error bit string, what the resulting syndromes are.
-Then given a syndrome, it will look up the error string and return that as a result.
-
-The last thing we need, is a way to generate errors.
-This example will go through a code capacity noise model where we have an independent and identical chance that an `X` or `Z` error happens on each qubit with some probability `p`.
+This example implements a code-capacity noise experiment: random ``X``/``Z`` errors are applied directly to the data qubits and decoded with a single-error look-up table. See :ref:`Code-Capacity Noise Modeling <components/qec/numerical_experiments:Code-Capacity Noise Modeling>` for more details.
 
 CUDA-Q QEC Implementation
 +++++++++++++++++++++++++++++
@@ -89,24 +62,9 @@ Code Explanation
 5. Further automation:
     - While this workflow is nice for seeing things step by step, the `qec.sample_code_capacity` API is provided to generate a batch of noisy data and their corresponding syndromes.
 
-Quantum Error Correction with Circuit-level Noise Modeling
-----------------------------------------------------------
-This example builds upon the previous code-capacity noise model example.
-In the circuit-level noise modeling experiment, we have many of the same components from the CUDA-Q QEC library: QEC codes, decoders, and noisy data.
-The primary difference here, is that we can begin to run CUDA-Q kernels to generate noisy data, rather than just generating a random bit string to represent our errors.
-
-Along with the stabilizers, parity check matrices, and logical observables, the QEC code type also has an encoding map.
-This map allows codes to define logical gates in terms of gates on the underlying physical qubits.
-These encodings operate on the `qec.patch` type, which represents three registers of physical qubits making up a logical qubit.
-A data qubit register, an X-stabilizer ancilla register, and a Z-stabilizer ancilla register.
-
-The most notable encoding stored in the QEC map is the `qec.operation.stabilizer_round`, which encodes a `cudaq.kernel` that stores the gate-level information for performing a stabilizer measurement.
-These stabilizer rounds are the gate-level way to encode the parity check matrix of a QEC code into quantum circuits.
-
-This example walks through how to use the CUDA-Q QEC library to perform a quantum memory experiment simulation.
-These experiments model how well QEC cycles, or rounds of stabilizer measurements, can protect the information encoded in a logical qubit.
-If noise is turned off, then the information is protected indefinitely.
-Here, we will model depolarization noise after each CX gate, and track how many logical errors occur.
+Circuit-level Noise Modeling
+----------------------------
+This example runs a circuit-level memory experiment, generating syndromes by executing the stabilizer-measurement circuits under depolarizing noise. See :ref:`Circuit-level Noise Modeling <components/qec/numerical_experiments:Circuit-level Noise Modeling>` for more details.
 
 
 CUDA-Q QEC Implementation
@@ -171,3 +129,224 @@ Code Explanation
 
 The CUDA-Q QEC library thus provides a platform for numerical QEC experiments. The `qec.code` can be used to analyze a variety of QEC codes (both library or user provided), with a variety of decoders (both library or user provided).
 The CUDA-Q QEC library also provides tools to speed up the automation of generating noisy data and syndromes.
+
+
+Memory Circuit Experiments
+--------------------------
+
+The ``sample_memory_circuit`` API runs a memory circuit experiment end to end -- preparing a logical state, running rounds of stabilizer measurement under noise, and measuring the data qubits. See :ref:`Memory Circuit Experiments <components/qec/numerical_experiments:Memory Circuit Experiments>` for more details.
+
+Function Variants
++++++++++++++++++
+
+.. tab:: Python
+
+    .. code-block:: python
+
+        import cudaq
+        import cudaq_qec as qec
+
+        # Use the stim backend for performance in QEC settings
+        cudaq.set_target("stim")
+
+        # Get a code instance
+        code = qec.get_code("steane")
+
+        # Basic memory circuit with |0⟩ state
+        syndromes, measurements = qec.sample_memory_circuit(
+            code,           # QEC code instance
+            numShots=1000,  # Number of circuit executions
+            numRounds=1     # Number of stabilizer rounds
+        )
+
+        # Memory circuit with custom initial state
+        syndromes, measurements = qec.sample_memory_circuit(
+            code,                     # QEC code instance
+            op=qec.operation.prep1,   # Initial state
+            numShots=1000,            # Number of shots
+            numRounds=1               # Number of rounds
+        )
+
+        # Memory circuit with noise model
+        noise = cudaq.NoiseModel()
+        # Configure noise
+        noise.add_all_qubit_channel("x", cudaq.Depolarization2(0.01), 1)
+        syndromes, measurements = qec.sample_memory_circuit(
+            code,             # QEC code instance
+            numShots=1000,    # Number of shots
+            numRounds=1,      # Number of rounds
+            noise=noise       # Noise model
+        )
+
+.. tab:: C++
+
+    .. code-block:: cpp
+
+        // Basic memory circuit with |0⟩ state
+        auto [syndromes, measurements] = qec::sample_memory_circuit(
+            code,       // QEC code instance
+            numShots,   // Number of circuit executions
+            numRounds   // Number of stabilizer rounds
+        );
+
+        // Memory circuit with custom initial state
+        auto [syndromes, measurements] = qec::sample_memory_circuit(
+            code,               // QEC code instance
+            operation::prep1,   // Initial state preparation
+            numShots,           // Number of circuit executions
+            numRounds           // Number of stabilizer rounds
+        );
+
+        // Memory circuit with noise model
+        auto noise_model = cudaq::noise_model();
+        noise_model.add_channel(...);  // Configure noise
+        auto [syndromes, measurements] = qec::sample_memory_circuit(
+            code,         // QEC code instance
+            numShots,     // Number of circuit executions
+            numRounds,    // Number of stabilizer rounds
+            noise_model   // Noise model to apply
+        );
+
+Return Values
++++++++++++++
+
+The functions return a tuple containing:
+
+1. **Syndrome Measurements** (:code:`tensor<uint8_t>`):
+
+   * Shape: :code:`(num_shots, num_detectors)`
+   * Columns follow the layout ``[ B  S  S  …  S  B ]``, where:
+
+     - ``B`` (boundary block) = ``numAncZ = code.get_num_z_stabilizers()`` for Z-basis
+       preparations (``prep0``/``prep1``), or ``numAncX = code.get_num_x_stabilizers()``
+       for X-basis preparations (``prepp``/``prepm``)
+     - ``S`` (inter-round block) = ``numAncZ + numAncX`` detectors per round transition
+       (``num_rounds - 1`` blocks total)
+     - Total: ``num_detectors = 2*B + (num_rounds - 1)*S``
+   * Values are 0 or 1 representing measurement outcomes
+
+2. **Data Measurements** (:code:`tensor<uint8_t>`):
+
+   * Shape: :code:`(num_shots, block_size)`
+   * Contains final data qubit measurements
+   * Used to verify logical state preservation
+
+Example Usage
++++++++++++++
+
+Example of running a memory experiment:
+
+.. tab:: Python
+
+    .. code-block:: python
+
+        import cudaq
+        import cudaq_qec as qec
+
+        # Use the stim backend for performance in QEC settings
+        cudaq.set_target("stim")
+
+        # Create code and decoder
+        code = qec.get_code('steane')
+        decoder = qec.get_decoder('single_error_lut',
+                                  code.get_parity())
+
+        # Configure noise
+        noise = cudaq.NoiseModel()
+        noise.add_all_qubit_channel("x", cudaq.Depolarization2(0.01), 1)
+
+        # Run memory experiment
+        syndromes, measurements = qec.sample_memory_circuit(
+            code,
+            op=qec.operation.prep0,
+            numShots=1000,
+            numRounds=10,
+            noise=noise
+        )
+
+        # Analyze results
+        for shot in range(1000):
+            # Get syndrome for this shot
+            syndrome = syndromes[shot].tolist()
+
+            # Decode syndrome
+            result = decoder.decode(syndrome)
+            if result.converged:
+                # Process correction
+                pass
+
+.. tab:: C++
+
+    .. code-block:: cpp
+
+        // Compile and run with:
+        // nvq++ --target=stim -lcudaq-qec -lcudaq-qec-decoders example.cpp
+        // ./a.out
+
+        #include "cudaq.h"
+        #include "cudaq/qec/decoder.h"
+        #include "cudaq/qec/experiments.h"
+        #include "cudaq/qec/noise_model.h"
+
+        int main(){
+          // Create a Steane code instance
+          auto code = cudaq::qec::get_code("steane");
+
+          // Configure noise model
+          cudaq::noise_model noise;
+          noise.add_all_qubit_channel("x", cudaq::depolarization2(0.1),
+                              /*num_controls=*/1);
+
+          // Run memory experiment
+          auto [syndromes, data] = cudaq::qec::sample_memory_circuit(
+              *code,                          // Code instance
+              cudaq::qec::operation::prep0,   // Prepare |0⟩ state
+              1000,                           // 1000 shots
+              1,                              // 1 rounds
+              noise                           // Apply noise
+          );
+
+          // Analyze results
+          auto decoder = cudaq::qec::get_decoder("single_error_lut", code->get_parity());
+          for (std::size_t shot = 0; shot < 1000; shot++) {
+            // Get syndrome for this shot
+            std::vector<cudaq::qec::float_t> syndrome(syndromes.shape()[1]);
+            for (std::size_t i = 0; i < syndrome.size(); i++)
+              syndrome[i] = syndromes.at({shot, i});
+
+            // Decode syndrome
+            auto results = decoder->decode(syndrome);
+            // Process correction
+            // ...
+          }
+        }
+
+Additional Noise Models
++++++++++++++++++++++++
+
+.. tab:: Python
+
+  .. code-block:: python
+
+     noise = cudaq.NoiseModel()
+
+     # Add multiple error channels
+     noise.add_all_qubit_channel('h', cudaq.BitFlipChannel(0.001))
+
+     # Specify two qubit errors
+     noise.add_all_qubit_channel("x", cudaq.Depolarization2(p), 1)
+
+.. tab:: C++
+
+    .. code-block:: cpp
+
+      cudaq::noise_model noise;
+
+      // Add multiple error channels
+      noise.add_all_qubit_channel(
+          "x", cudaq::bit_flip_channel(/*probability*/ 0.01));
+
+      // Specify two qubit errors
+      noise.add_all_qubit_channel(
+          "x", cudaq::depolarization2(/*probability*/ 0.01),
+          /*numControls*/ 1);

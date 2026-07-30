@@ -247,7 +247,9 @@ Detector Error Model
 
 A detector error model (DEM) captures how the physical errors in a QEC circuit map to the detectors (syndrome bits) that observe them. CUDA-Q QEC represents it with the ``cudaq.qec.detector_error_model`` type, built from a QEC circuit and a noise model via functions like ``dem_from_memory_circuit()``. For circuit-level noise, the DEM can be put into a canonical form organized by measurement rounds, making it suitable for multi-round decoding.
 
-The parity check matrix a decoder consumes is derived from the DEM: each row is a detector and each column a possible error mechanism. For a runnable example that generates a DEM from a surface code and decodes with it, see the :doc:`Modeling Noise in QEC </examples_rst/qec/modeling_noise>` example.
+The parity check matrix a decoder consumes is derived from the DEM: each row is a detector and each column a possible error mechanism. For a runnable example that generates a DEM from a surface code and decodes with it, see the :doc:`Experiments and Noise Modeling </examples_rst/qec/modeling_noise>` example.
+
+.. _decoding_from_stim_dem_text:
 
 Decoding from Stim DEM Text
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -257,6 +259,8 @@ A DEM does not have to be produced inside CUDA-Q. Decoders can be constructed fr
 For PCM-based decoders, CUDA-Q QEC parses the DEM text into a detector error matrix and supplies DEM-derived ``O`` and ``error_rate_vec`` defaults when the user does not provide them. C++ decoder plugins that need full Stim DEM metadata can consume the raw DEM string from the decoder construction input. By default, ``get_decoder(..., dem_text)`` and ``dem_from_stim_text(dem_text)`` parse with ``use_decomp_suggestions=False`` — Stim ``^`` decomposition hints are ignored and each ``error(...)`` instruction becomes one matrix column; passing ``use_decomp_suggestions=True`` splits ``^``-separated components into separate columns.
 
 For a runnable example, see :ref:`Decoding From Stim DEM Text <stim_dem_text_example>`.
+
+.. _dem_sampling:
 
 DEM Sampling
 ^^^^^^^^^^^^
@@ -277,17 +281,15 @@ CUDA-Q QEC provides pre-built decoders for a variety of use cases.
 
 .. list-table::
    :header-rows: 1
-   :widths: 20 26 8 8 14 40
+   :widths: 20 30 9 9 40
 
    * - Decoder
      - Decoder String Identifier
      - Python
      - C++
-     - Realtime Enabled
      - Notes
    * - NVIDIA QLDPC Decoder¹
      - `"nv-qldpc-decoder"`
-     - Yes
      - Yes
      - Yes
      - Supports Relay BP and BP+OSD
@@ -295,17 +297,14 @@ CUDA-Q QEC provides pre-built decoders for a variety of use cases.
      - `"tensor_network_decoder"`
      - Yes²
      - No
-     - No
      - Exact Maximum Likelihood Decoder
    * - TensorRT Decoder¹
      - `"trt_decoder"`
      - Yes³
      - Yes
-     - No
      - AI decoder. Bring your own model.
    * - PyMatching Decoder
      - `"pymatching"`
-     - Yes
      - Yes
      - Yes
      - MWPM decoder for matchable codes such as the surface code
@@ -313,11 +312,9 @@ CUDA-Q QEC provides pre-built decoders for a variety of use cases.
      - `"chromobius"`
      - Yes
      - Yes
-     - No
      - Color-code (Möbius) decoder; constructed from Stim DEM text
    * - Look-Up Table Decoder
      - `"single_error_lut"` / `"multi_error_lut"`
-     - Yes
      - Yes
      - Yes
      - Simple LUT decoders; ``multi_error_lut`` handles up to ``lut_error_depth`` errors
@@ -325,7 +322,6 @@ CUDA-Q QEC provides pre-built decoders for a variety of use cases.
      - `"sliding_window"`
      - Yes
      - Yes
-     - No
      - Decodes syndromes in a sliding window; pairs with any inner decoder except the TensorRT Decoder
 
 | ¹ GPU-accelerated decoder
@@ -345,20 +341,14 @@ API provides various post-processing options, which can be selected through its 
 
 **Belief Propagation Methods:**
 
-The decoder supports multiple BP algorithms (configured via ``bp_method``):
+The decoder supports several belief-propagation algorithms -- sum-product, min-sum, and memory-based variants -- selected via ``bp_method``, with optional BP+OSD post-processing. For the complete list of methods, parameters, and defaults, see the ``nv-qldpc-decoder`` entries in the :ref:`C++ <nv_qldpc_decoder_api_cpp>` and :ref:`Python <nv_qldpc_decoder_api_python>` API reference.
 
-* **Sum-Product BP** (``bp_method=0``, default): Classic belief propagation algorithm that computes exact probabilities.
-* **Min-Sum BP** (``bp_method=1``): Approximation to sum-product that uses min operations instead of sum. Optionally accepts ``scale_factor``.
-* **Memory-based BP** (``bp_method=2``): Min-sum with uniform memory strength across all variable nodes. **Requires:** ``gamma0``.
-* **Disordered Memory BP** (``bp_method=3``): Min-sum with per-variable memory strengths. **Requires:** ``gamma_dist`` [min, max] OR ``explicit_gammas`` (2D vector).
+**Highlighted Features:**
 
-**Sequential Relay Decoding:**
+* **Sequential Relay BP** (``composition=1``): chains multiple "relay legs" -- sequential BP runs with different gamma configurations -- to decode syndromes that stall a single BP pass. **Requires:** ``bp_method=3``, ``gamma0``, ``srelay_config``, and either ``gamma_dist`` OR ``explicit_gammas``.
+* **Gamma ensembling** (``gamma_ensemble_size``): an extension of Relay BP that explores multiple sets of gamma values in parallel on a single GPU (N independent "lanes"). The first lane to converge lets the decoder exit early, so slow lanes are terminated without adding to the decode time -- narrowing the latency distribution and improving performance on hard-to-decode syndromes that would otherwise stall Relay BP.
 
-Starting with version 0.5.0, the decoder supports Sequential Relay BP (configured via ``composition=1``), which combines disordered memory BP 
-with multiple "relay legs" - sequential runs with different gamma configurations. **Requires:** ``bp_method=3``, ``gamma0``, ``srelay_config``, and either ``gamma_dist`` OR ``explicit_gammas``.
-
-The QLDPC decoder `nv-qldpc-decoder` requires a CUDA-Q compatible GPU. See the list below for dependencies and compatibility:
-https://nvidia.github.io/cuda-quantum/latest/using/install/local_installation.html#dependencies-and-compatibility
+The QLDPC decoder `nv-qldpc-decoder` requires a CUDA-Q compatible GPU. See the `CUDA-Q dependencies and compatibility <https://nvidia.github.io/cuda-quantum/latest/using/install/local_installation.html#dependencies-and-compatibility>`_ list.
 
 The decoder is based on the following references:
 
@@ -477,9 +467,7 @@ The decoder returns the probability that the logical observable has flipped for 
     In general, the Tensor Network Decoder has the same GPU support as the
     :ref:`Quantum Low-Density Parity-Check Decoder <qldpc_decoder>`.
     However, if you are using the V100 GPU (SM70), you will need to pin your
-    cuTensor version to 2.2 by running `pip install cutensor_cu12==2.2`. Note
-    that this GPU will not be supported by the Tensor Network Decoder when
-    CUDA-Q 0.5.0 is released.
+    cuTensor version to 2.2 by running `pip install cutensor_cu12==2.2`.
 
 For a runnable example, see :ref:`Exact Maximum Likelihood Decoding with NVIDIA Tensor Network Decoder <tensor_network_decoder_example>`.
 

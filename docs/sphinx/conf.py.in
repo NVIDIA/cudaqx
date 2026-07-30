@@ -222,7 +222,11 @@ intersphinx_mapping = {
     'cudaq': ('https://nvidia.github.io/cuda-quantum/latest', None)
 }
 
-redirects = {"versions": "../latest/releases.html"}
+redirects = {
+    "versions": "../latest/releases.html",
+    "components/qec/introduction": "index.html",
+    "examples_rst/qec/realtime_predecoder_pymatching": "ai_predecoder.html",
+}
 
 nitpick_ignore = [
     ('cpp:identifier', 'pid_t'),

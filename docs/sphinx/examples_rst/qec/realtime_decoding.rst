@@ -16,4 +16,6 @@ The examples below cover realtime decoding end to end — start with Getting Sta
 See Also
 --------
 
-* Example source code: ``libs/qec/unittests/realtime/app_examples/``
+* Example source code: `libs/qec/unittests/realtime/app_examples <https://github.com/NVIDIA/cudaqx/tree/releases/v0.7.0/libs/qec/unittests/realtime/app_examples>`_
+* :doc:`/api/qec/cpp_api` — C++ API Reference (includes Realtime Decoding)
+* :doc:`/api/qec/python_api` — Python API Reference (includes Realtime Decoding)
