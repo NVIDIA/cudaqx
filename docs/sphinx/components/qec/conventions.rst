@@ -3,8 +3,8 @@ Conventions
 
 The pre-built ``cudaq-qec`` codes and decoders follow a common set of conventions for how errors, syndromes, and logical observables are laid out. This page documents them; the decoders, examples, and API reference all build on these conventions.
 
-To address vectors of qubits (`cudaq::qvector`), CUDAQ indexing starts from 0, and 0 corresponds
-to the leftmost position when working with pauli strings (`cudaq::spin_op`). For example, applying a pauli X operator
+To address vectors of qubits (`cudaq::qvector`), CUDA-Q indexing starts from 0, and 0 corresponds
+to the leftmost position when working with Pauli strings (`cudaq::spin_op`). For example, applying a Pauli X operator
 to qubit 1 out of 7 would be `X_1 = IXIIIII`.
 
 While implementing your own codes and decoders, you are free to follow any convention that is convenient to you. However,
@@ -62,7 +62,7 @@ so that when determining logical errors, we can do matrix multiplication
 Here we're using `P` as this can be stored in a Pauli frame tracker to track observable flips.
 
 Each logical qubit has logical observables associated with it. Depending on what basis the data qubits are measured in, either the
-`X` or `Z` logical observables can be measured. The data qubits which support the logical observable is contained the `qec::code` class as well.
+`X` or `Z` logical observables can be measured. The data qubits which support the logical observables are contained in the `qec::code` class as well.
 
 To do a logical `Z(X)` measurement, measure out all of the data qubits in the `Z(X)` basis. Then check support on the appropriate
 `Z(x)` observable.

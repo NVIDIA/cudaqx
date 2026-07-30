@@ -10,12 +10,12 @@ Quantum Error Correction with Code-Capacity Noise Modeling
 
 Quantum error correction (QEC) describes a set of tools used to detect and correct errors which occur to qubits on quantum computers.
 This example will walk through how the CUDA-Q QEC library handles two of the most common objects in QEC: stabilizer codes, and decoders.
-A stabilizer code is the quantum generalization of linear codes in classical error correction, which use parity checks to detect errors on noise bits.
+A stabilizer code is the quantum generalization of linear codes in classical error correction, which use parity checks to detect errors on noisy bits.
 In QEC, we'll perform stabilizer measurements on ancilla qubits to check the parity of our data qubits.
 These stabilizer measurements are non-destructive, and thus allow us to check the relative parity of qubits without destroying our quantum information.
 
-For example, if we prepare two qubits in the state `\Psi = a|00> + b|11>`, we maybe want to check if a bit-flip error happened.
-We can measure the stabilizer `ZZ`, which will return 0 if there are no errors or even number of errors, but will return 1 if either has flipped.
+For example, if we prepare two qubits in the state `\Psi = a|00> + b|11>`, we may want to check if a bit-flip error happened.
+We can measure the stabilizer `ZZ`, which will return 0 if there are no errors or an even number of errors, but will return 1 if either has flipped.
 This is how we can perform parity checks in quantum computing, without performing destructive measurements which collapse our superposition.
 How these measurements are physically performed can be seen in the circuit-level noise QEC example.
 
@@ -82,8 +82,8 @@ Code Explanation
 
 4. Logical Errors:
     - Once we have noisy data, we see what the resulting syndromes are by multiplying our noisy data vector with our parity check matrix (mod 2).
-    - From this syndrome, we see what the decoder predicts what errors occurred in the data.
-    - To classify as a logical error, the decoder does not need to exactly guess what happened to the data, but if there was a flip in the logical observable or not.
+    - From this syndrome, we see what errors the decoder predicts occurred in the data.
+    - To classify as a logical error, the decoder does not need to exactly identify what happened to the data, but only whether there was a flip in the logical observable.
     - If the decoder guesses this successfully, we have corrected the quantum error. If not, we have incurred a logical error.
 
 5. Further automation:
@@ -93,18 +93,18 @@ Quantum Error Correction with Circuit-level Noise Modeling
 ----------------------------------------------------------
 This example builds upon the previous code-capacity noise model example.
 In the circuit-level noise modeling experiment, we have many of the same components from the CUDA-Q QEC library: QEC codes, decoders, and noisy data.
-The primary difference here, is that we can begin to run CUDA-Q kernels to generate noisy data, rather than just generating random bitstring to represent our errors.
+The primary difference here, is that we can begin to run CUDA-Q kernels to generate noisy data, rather than just generating a random bit string to represent our errors.
 
 Along with the stabilizers, parity check matrices, and logical observables, the QEC code type also has an encoding map.
 This map allows codes to define logical gates in terms of gates on the underlying physical qubits.
 These encodings operate on the `qec.patch` type, which represents three registers of physical qubits making up a logical qubit.
 A data qubit register, an X-stabilizer ancilla register, and a Z-stabilizer ancilla register.
 
-The most notable encoding stored in the QEC map, is how the `qec.operation.stabilizer_round`, which encodes a `cudaq.kernel` which stores the gate-level information for how to do a stabilizer measurement.
+The most notable encoding stored in the QEC map is the `qec.operation.stabilizer_round`, which encodes a `cudaq.kernel` that stores the gate-level information for performing a stabilizer measurement.
 These stabilizer rounds are the gate-level way to encode the parity check matrix of a QEC code into quantum circuits.
 
 This example walks through how to use the CUDA-Q QEC library to perform a quantum memory experiment simulation.
-These experiments model how well QEC cycles, or rounds of stabilizer measuments, can protect the information encoded in a logical qubit.
+These experiments model how well QEC cycles, or rounds of stabilizer measurements, can protect the information encoded in a logical qubit.
 If noise is turned off, then the information is protected indefinitely.
 Here, we will model depolarization noise after each CX gate, and track how many logical errors occur.
 
@@ -147,11 +147,11 @@ Code Explanation
     - To add noisy gates we use the `cudaq.NoiseModel` type.
     - CUDA-Q supports the generation of arbitrary noise channels. Here we use a `cudaq.Depolarization2` channel to add a depolarization channel.
     - This is added to the `CX` gate by adding it to the `X` gate with 1 control.
-    - This noisy gate is added to every qubit via that `noise.add_all_qubit_channel` function.
+    - This noisy gate is added to every qubit via the `noise.add_all_qubit_channel` function.
 
 4. Getting circuit-level noisy data:
     - The `qec.code` is the first input parameter here, as the code's `stabilizer_round` determines the circuits executed.
-    - Each memory circuit runs for an input number of `nRounds`, which specifies how many `stabilizer_round` kernels are ran.
+    - Each memory circuit runs for an input number of `nRounds`, which specifies how many `stabilizer_round` kernels are run.
     - After `nRounds` the data qubits are measured and the run is over.
     - This is performed `nShots` number of times.
     - During a shot, each stabilizer round's syndrome is `xor`'d against the preceding syndrome, so that we can track a sparser flow of data showing which round each parity check was violated.
@@ -164,8 +164,8 @@ Code Explanation
     - X-basis readout when preparing the logical `|+>` or logical `|->` state with the `qec.operation.prepp` or `qec.operation.prepm` kernels.
 
 6. Logical Errors:
-    - From here, the decoding procedure is again similar to the code capacity case, expect for we use a pauli frame to track errors that happen each QEC cycle.
-    - The final values of the pauli frame tell us how our logical state flipped during the experiment, and what needs to be done to correct it.
+    - From here, the decoding procedure is again similar to the code capacity case, except that we use a Pauli frame to track errors that happen each QEC cycle.
+    - The final values of the Pauli frame tell us how our logical state flipped during the experiment, and what needs to be done to correct it.
     - We compare our known initial state (corrected by the Pauli frame), against our measured data qubits to determine if a logical error occurred.
 
 

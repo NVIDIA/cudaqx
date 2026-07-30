@@ -58,7 +58,7 @@ To implement a new decoder:
 
     public:
         my_decoder(const qec::sparse_binary_matrix& H,
-                  const heterogeneous_map& params)
+                  const cudaqx::heterogeneous_map& params)
             : decoder(H) {
             // Initialize decoder
         }
@@ -73,14 +73,17 @@ To implement a new decoder:
 
 .. code-block:: cpp
 
-    CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
-        my_decoder,
-        static std::unique_ptr<decoder> create(
-            const qec::decoder_init& init,
-            const heterogeneous_map& params) {
-            return qec::make_pcm_decoder<my_decoder>(init, params);
-        }
-    )
+    class my_decoder : public qec::decoder {
+        // ... constructor and decode() from above ...
+
+        CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
+            my_decoder,
+            static std::unique_ptr<decoder> create(
+                const qec::decoder_init& init,
+                const cudaqx::heterogeneous_map& params) {
+                return qec::make_pcm_decoder<my_decoder>(init, params);
+            })
+    };
 
     CUDAQ_EXT_PT_REGISTER_TYPE(my_decoder)
 
@@ -102,7 +105,7 @@ Here's a simple lookup table decoder for the Steane code:
 
     public:
         single_error_lut(const qec::sparse_binary_matrix& H,
-                          const heterogeneous_map& params)
+                          const cudaqx::heterogeneous_map& params)
             : decoder(H) {
             // Canonicalize before using each sparse column as an error
             // signature so duplicate row indices cancel over GF(2).
@@ -166,7 +169,7 @@ CUDA-Q QEC supports implementing decoders in Python using the :code:`@qec.decode
 
             # Set results
             result.converged = True
-            result.result = [0.0] * self.block_size
+            result.result = [0.0] * self.get_block_size()
 
             return result
 
@@ -176,7 +179,7 @@ CUDA-Q QEC supports implementing decoders in Python using the :code:`@qec.decode
 
     # Create decoder with custom parameters
     decoder = qec.get_decoder("my_decoder",
-                            H=parity_check_matrix,
+                            parity_check_matrix,
                             custom_param=42)
 
 Key Features
@@ -229,10 +232,12 @@ Usage Example
                                 code->get_parity());
 
         // Run stabilizer measurements
-        auto [syndromes, dataQubitResults] = qec::sample_memory_circuit(*code, /*numShots*/numShots, /*numRounds*/ 1);
+        auto [syndromes, dataQubitResults] = qec::sample_memory_circuit(*code, /*numShots*/ numShots, /*numRounds*/ 1);
 
-        // Decode syndrome
-        auto result = decoder->decode(syndromes[0]);
+        // Copy a single shot syndrome and decode
+        std::vector<qec::float_t> syndrome(
+            syndromes.data(), syndromes.data() + syndromes.shape()[1]);
+        auto result = decoder->decode(syndrome);
 
 
 .. _detector_error_model:

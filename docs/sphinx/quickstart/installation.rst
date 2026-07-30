@@ -61,7 +61,7 @@ CUDA-QX is available as a Docker container with all dependencies pre-installed:
 
 .. note::
 
-    If your system does not have local GPUs (eg. a MacBook), omit the `--gpus all`
+    If your system does not have local GPUs (e.g., a MacBook), omit the `--gpus all`
     argument.
 
 The container includes:

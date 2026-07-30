@@ -36,15 +36,15 @@ The behavior of these functions depends on their configuration and their usage.
 
 The realtime decoding workflow can be described with respect to the offline decoding workflow.
 The non-realtime decoders require a detector error model which is specified via a detector error matrix which is the parity check matrix `H` of the decoding problem, and a vector of weights (error rates).
-This matrix has dimensions of `[numDetectors, numErrors]`, where the each row is a detector, and each column is a possible error.
+This matrix has dimensions of `[numDetectors, numErrors]`, where each row is a detector, and each column is a possible error.
 For realtime decoding, we first need to convert the circuit measurements into detectors.
 This is specified via the detector matrix `D`, which has dimensions `[numDetectors, numMeasurements]`.
 Each column of the detector matrix defines which detectors a measurement participates in by including an entry of `1`.
-This when, once all `numMeasurements` measurements are enqueued, a matrix-vector multiply can convert this buffer of raw measurements into detectors which are then passed into the decoding algorithm.
+Thus, once all `numMeasurements` measurements are enqueued, a matrix-vector multiply can convert this buffer of raw measurements into detectors which are then passed into the decoding algorithm.
 
 Similarly, an observables flips matrix `O` of size `[numObs, numErrors]` must be provided.
 Each column of the observables flips matrix describes for each error, which observables are flipped by that error by including an entry of `1`.
-Once the decoding algorithm has process the detectors it provides a vector of predicted errors of length `numErrors`.
+Once the decoding algorithm has processed the detectors it provides a vector of predicted errors of length `numErrors`.
 This vector then executes a matrix-vector multiply with the observables flips matrix to yield a new vector of length `numObs` which contains an entry of `1` if the observable is predicted to have flipped.
 
 Thus once a decoder is configured, we can view the realtime decoder as a transformation of data starting from a vector of raw measurements, then transformed into detectors via `D`, then error predictions via `H`, then observable flip predictions via `O`. This last step is what is returned via `get_corrections`. The user configures how many bits of information are returned, and what they represent via the `O` matrix in the decoder config.

@@ -153,7 +153,7 @@ To implement a new quantum error correcting code:
                std::make_pair(operation::stabilizer_round, stabilizer));
 
             // Define stabilizer generators
-            m_stabilizers = qec::stabilizers({"XXXX", "ZZZZ"});
+            m_stabilizers = fromPauliWords({"XXXX", "ZZZZ"});
         }
 
 
@@ -173,17 +173,20 @@ To implement a new quantum error correcting code:
 
 5. **Register Extension Point**:
 
-   Add extension point registration:
+   Add extension point registration.
 
    .. code-block:: cpp
 
-       CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
-           my_code,
-           static std::unique_ptr<qec::code> create(
-               const heterogeneous_map &options) {
-               return std::make_unique<my_code>(options);
-           }
-       )
+       class my_code : public qec::code {
+           // ... members from above ...
+
+           CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
+               my_code,
+               static std::unique_ptr<qec::code> create(
+                   const heterogeneous_map &options) {
+                   return std::make_unique<my_code>(options);
+               })
+       };
 
        CUDAQ_EXT_PT_REGISTER_TYPE(my_code)
 
@@ -209,7 +212,7 @@ The Steane [[7,1,3]] code provides a complete example implementation:
            // ... register other operations ...
 
            // Define stabilizer generators
-           m_stabilizers = qec::stabilizers({
+           m_stabilizers = fromPauliWords({
                "XXXXIII", "IXXIXXI", "IIXXIXX",
                "ZZZZIII", "IZZIZZI", "IIZZIZZ"
            });
@@ -305,7 +308,7 @@ Key Points
 
 * The :code:`@qec.code` decorator takes the name of the code as an argument
 * Operation encodings are registered via the :code:`operation_encodings` dictionary
-* Stabilizer generators are defined using the :code:`qec.Stabilizers` class
+* Stabilizer generators are defined as a list of :code:`cudaq.SpinOperator`
 * The code must implement all required methods from the base class interface
 
 
@@ -317,6 +320,8 @@ To use an implemented code:
 .. tab:: Python
 
     .. code-block:: python
+
+        import cudaq_qec as qec
 
         # Create a code instance
         code = qec.get_code("steane")

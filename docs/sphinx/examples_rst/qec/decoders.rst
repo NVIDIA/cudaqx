@@ -486,7 +486,7 @@ Color-Code Decoding with Chromobius
 +++++++++++++++++++++++++++++++++++
 
 Matching applies to surface-code-like codes; color codes call for a decoder built around their structure. Starting with CUDA-Q QEC v0.7.0, CUDA-Q QEC bundles a color-code decoder built on the open-source
-`Chromobius <https://github.com/quantumlib/chromobius>`_ Mobius decoder. Unlike
+`Chromobius <https://github.com/quantumlib/chromobius>`_ Möbius decoder. Unlike
 the matrix-based decoders, Chromobius is *detector-error-model native*: it is
 constructed from Stim detector-error-model (DEM) text rather than a
 parity-check matrix, and predicts logical observable flips directly.

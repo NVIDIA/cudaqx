@@ -72,7 +72,7 @@ and decoder-specific tuning parameters.
 
 These matrices are generated in sparse matrix format, which is crucial for performance. 
 They can be large considering error correcting codes with large number of physical qubits, and moreover, 
-realtime decoders process thousands of syndrome measurements per second, and take decision based on these matrices, so compact representations are essential.
+realtime decoders process thousands of syndrome measurements per second, and make decisions based on these matrices, so compact representations are essential.
 The helper function ``pcm_to_sparse_vec`` is used to convert the dense binary matrices into a space-efficient format where -1 marks row boundaries and integers represent column indices of non-zero elements.
 
 Each decoder type has its own configuration structure with specific parameters. 
@@ -625,7 +625,7 @@ They are valid both for python and C++ applications, however, they must be set b
 
 Decoder Selection
 ^^^^^^^^^^^^^^^^^
-The page `CUDA-Q QEC Decoders <https://nvidia.github.io/cudaqx/components/qec/introduction.html#pre-built-qec-decoders>`_ provides information about which decoders are compatible with realtime decoding.
+The page `CUDA-Q QEC Decoders <https://nvidia.github.io/cudaqx/components/qec/decoders.html#pre-built-qec-decoders>`_ provides information about which decoders are compatible with realtime decoding.
 
 The TRT decoder (``trt_decoder``) can be configured for realtime decoding by specifying
 its ``decoder_custom_args`` parameters. This is useful for neural network-based

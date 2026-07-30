@@ -41,7 +41,7 @@ solvers.
 Key Features
 -------------
 
-CUDA-QX is composed of two distinct libraries that build upon CUDA-Q programming model.
+CUDA-QX is composed of two distinct libraries that build upon the CUDA-Q programming model.
 The libraries provided are cudaq-qec, a library enabling performant research workflows
 for quantum error correction, and cudaq-solvers, a library that provides high-level
 APIs for common quantum-classical solver workflows.
