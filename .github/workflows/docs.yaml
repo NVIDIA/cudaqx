@@ -43,7 +43,9 @@ jobs:
   build:
     name: Build
     runs-on: ${{ startsWith(github.repository, 'NVIDIA/cudaqx') && 'linux-amd64-cpu8' || 'ubuntu-latest' }}
-    container: ghcr.io/nvidia/cuda-quantum-devcontainer:amd64-cu12.6-gcc11-main
+    # The 0.6.0-era cuda-quantum-devcontainer image no longer exists; use the
+    # 0.6.0 release's cudaqx-dev image, which was built on top of it.
+    container: ghcr.io/nvidia/cudaqx-dev:0.6.0-py3.11-amd64-cu12.6
     permissions:
       actions: write
       contents: read
