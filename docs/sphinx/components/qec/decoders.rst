@@ -268,6 +268,8 @@ In Python, the ``backend`` parameter (``"auto"``, ``"gpu"``, or ``"cpu"``) contr
 For a complete, runnable walkthrough — including GPU acceleration and input-type handling — see the :ref:`DEM Sampling example <dem_sampling_example>`.
 
 
+.. _prebuilt_qec_decoders:
+
 Pre-built QEC Decoders
 ----------------------
 
@@ -331,6 +333,8 @@ CUDA-Q QEC provides pre-built decoders for a variety of use cases.
 | ³ Requires installation with `pip install cudaq-qec[trt-decoder]` for Python
 
 Here's a detailed overview of each:
+
+.. _qldpc_decoder:
 
 Quantum Low-Density Parity-Check Decoder
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -471,7 +475,7 @@ The decoder returns the probability that the logical observable has flipped for 
 .. note::
 
     In general, the Tensor Network Decoder has the same GPU support as the
-    `Quantum Low-Density Parity-Check Decoder <https://nvidia.github.io/cudaqx/components/qec/decoders.html#quantum-low-density-parity-check-decoder>`__.
+    :ref:`Quantum Low-Density Parity-Check Decoder <qldpc_decoder>`.
     However, if you are using the V100 GPU (SM70), you will need to pin your
     cuTensor version to 2.2 by running `pip install cutensor_cu12==2.2`. Note
     that this GPU will not be supported by the Tensor Network Decoder when

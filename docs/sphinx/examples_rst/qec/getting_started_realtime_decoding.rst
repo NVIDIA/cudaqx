@@ -625,7 +625,7 @@ They are valid both for python and C++ applications, however, they must be set b
 
 Decoder Selection
 ^^^^^^^^^^^^^^^^^
-The page `CUDA-Q QEC Decoders <https://nvidia.github.io/cudaqx/components/qec/decoders.html#pre-built-qec-decoders>`_ provides information about which decoders are compatible with realtime decoding.
+The :ref:`Pre-built QEC Decoders <prebuilt_qec_decoders>` section provides information about which decoders are compatible with realtime decoding.
 
 The TRT decoder (``trt_decoder``) can be configured for realtime decoding by specifying
 its ``decoder_custom_args`` parameters. This is useful for neural network-based
