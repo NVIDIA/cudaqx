@@ -346,7 +346,7 @@ The decoder supports several belief-propagation algorithms -- sum-product, min-s
 **Highlighted Features:**
 
 * **Sequential Relay BP** (``composition=1``): chains multiple "relay legs" -- sequential BP runs with different gamma configurations -- to decode syndromes that stall a single BP pass. **Requires:** ``bp_method=3``, ``gamma0``, ``srelay_config``, and either ``gamma_dist`` OR ``explicit_gammas``.
-* **Gamma ensembling** (``gamma_ensemble_size``): an extension of Relay BP that explores multiple sets of gamma values in parallel on a single GPU (N independent "lanes"). The first lane to converge lets the decoder exit early, so slow lanes are terminated without adding to the decode time -- narrowing the latency distribution and improving performance on hard-to-decode syndromes that would otherwise stall Relay BP.
+* **Gamma ensembling** (``gamma_ensemble_size``): an extension of Relay BP that explores multiple sets of gamma values in parallel on a single GPU (N independent "lanes"). The first lane to converge lets the decoder exit early, so slow lanes are terminated without adding to the decode time -- narrowing the latency distribution and improving performance on hard-to-decode syndromes that would otherwise stall Relay BP. See :doc:`Improving Relay BP Decoding With Gamma Ensembles </performance/nv_qldpc_gamma_ensemble_user_guide>` for a performance study.
 
 The QLDPC decoder `nv-qldpc-decoder` requires a CUDA-Q compatible GPU. See the `CUDA-Q dependencies and compatibility <https://nvidia.github.io/cuda-quantum/latest/using/install/local_installation.html#dependencies-and-compatibility>`_ list.
 

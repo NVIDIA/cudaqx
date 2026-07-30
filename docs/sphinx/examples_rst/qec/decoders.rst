@@ -207,14 +207,7 @@ that can be passed to the constructor.
 Belief Propagation Methods
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The ``nv-qldpc-decoder`` supports multiple belief propagation (BP) algorithms, each with different trade-offs 
-between accuracy, convergence, and speed:
-
-* **Sum-Product BP** (``bp_method=0``): The standard BP algorithm. Good baseline performance.
-* **Min-Sum BP** (``bp_method=1``): Faster approximation to sum-product. Can be tuned with ``scale_factor``.
-* **Memory-based BP** (``bp_method=2``): Adds uniform memory (``gamma0``) to help escape local minima. Useful when standard BP fails to converge.
-* **Disordered Memory BP** (``bp_method=3``): Uses per-variable memory strengths for better adaptability to code structure.
-* **Sequential Relay BP** (``composition=1``): Advanced method that runs multiple "relay legs" with different gamma configurations. See examples below for configuration.
+The ``nv-qldpc-decoder`` supports several belief-propagation algorithms -- sum-product, min-sum, and memory-based variants, plus Sequential Relay BP -- selected via ``bp_method`` and ``composition``, with optional BP+OSD post-processing. For the complete list of methods, parameters, and defaults, see the ``nv-qldpc-decoder`` entries in the :ref:`C++ <nv_qldpc_decoder_api_cpp>` and :ref:`Python <nv_qldpc_decoder_api_python>` API reference.
 
 Usage Example
 ~~~~~~~~~~~~~

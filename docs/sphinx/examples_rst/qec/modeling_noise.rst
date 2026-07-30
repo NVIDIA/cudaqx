@@ -1,7 +1,7 @@
 Experiments and Noise Modeling
 ==============================
 
-These examples walk through several of the most common numerical error-correction experiments with the CUDA-Q QEC library: modeling noise at the **code-capacity** and **circuit-level**, and running full **memory circuit experiments**. For the concepts behind each, see :doc:`Experiments and Noise Modeling </components/qec/numerical_experiments>`.
+These examples walk through several of the most common numerical error-correction experiments with the CUDA-Q QEC library: modeling noise at the **code-capacity** and **circuit-level**, and running full **memory circuit experiments**. For the background behind each, see :doc:`Experiments and Noise Modeling </components/qec/numerical_experiments>`.
 
 Code-Capacity Noise Modeling
 ----------------------------

@@ -1,7 +1,7 @@
 Realtime Decoding
 ==================
 
-Realtime decoding runs CUDA-Q QEC decoders concurrently with quantum execution, applying corrections within qubit coherence times. For the concepts, the four-stage workflow, and terminology, see :doc:`Realtime Decoding </components/qec/realtime_decoding>`.
+Realtime decoding runs CUDA-Q QEC decoders concurrently with quantum execution, applying corrections within qubit coherence times. For how it works, the four-stage workflow, and terminology, see :doc:`Realtime Decoding </components/qec/realtime_decoding>`.
 
 The examples below cover realtime decoding end to end — start with Getting Started, then explore the specialized predecoding and decoding workloads:
 

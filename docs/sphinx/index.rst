@@ -30,6 +30,12 @@ solvers.
 
 .. toctree::
    :maxdepth: 1
+   :caption: Performance Studies
+
+   performance/index
+
+.. toctree::
+   :maxdepth: 1
    :caption: API Reference
 
    api/core/cpp_api
