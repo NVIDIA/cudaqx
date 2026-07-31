@@ -11,8 +11,7 @@
 #include "cuda-qx/core/extension_point.h"
 #include "cuda-qx/core/heterogeneous_map.h"
 #include "cuda-qx/core/tensor.h"
-#include "sparse_binary_matrix.h"
-#include "cudaq/qec/detector_error_model.h"
+#include "cudaq/qec/decoder_inputs.h"
 #include <algorithm>
 #include <functional>
 #include <future>
@@ -21,7 +20,6 @@
 #include <string>
 #include <string_view>
 #include <tuple>
-#include <variant>
 #include <vector>
 
 namespace cudaq::qec {
@@ -31,10 +29,6 @@ using float_t = CUDAQX_QEC_FLOAT_TYPE;
 #else
 using float_t = double;
 #endif
-
-/// Decoder construction input: either a parity-check matrix or raw Stim DEM
-/// text.
-using decoder_init = std::variant<sparse_binary_matrix, std::string>;
 
 /// @brief Validates that all keys in a heterogeneous map are found in a list of
 /// acceptable types
@@ -134,7 +128,7 @@ public:
 /// arbitrary constructor parameters that can be unique to each specific
 /// decoder.
 class decoder
-    : public cudaqx::extension_point<decoder, const decoder_init &,
+    : public cudaqx::extension_point<decoder, decoder_inputs,
                                      const cudaqx::heterogeneous_map &> {
 private:
   struct rt_impl;
@@ -150,22 +144,22 @@ public:
   /// constructor params should call set_result_type(decode_to_obs); all others
   /// default to decode_to_errs.
   ///
-  /// Note: even in decode_to_obs mode, set_O_sparse() must still be called so
-  /// that enqueue_syndrome() knows num_observables and can size the corrections
-  /// buffer correctly.
+  /// Note: legacy H-only construction must still call set_O_sparse() so that
+  /// enqueue_syndrome() knows num_observables. Construction with decoder_inputs
+  /// obtains the count from input metadata.
   enum decode_result_type {
     decode_to_errs, ///< result.size() == block_size; enqueue_syndrome projects
                     ///< via O_sparse
     decode_to_obs,  ///< result.size() == num_observables; enqueue_syndrome uses
-                    ///< result directly; set_O_sparse() still required
+                    ///< result directly
   };
 
   decoder() = delete;
 
   /// @brief Constructor
-  /// @param H Decoder's parity check matrix. Taken by value so rvalue
-  /// arguments are moved into the base member.
-  decoder(cudaq::qec::sparse_binary_matrix H);
+  /// @param inputs Stable model and measurement inputs. Taken by value so the
+  /// factory can move its immutable handle into the decoder.
+  decoder(decoder_inputs inputs);
 
   /// @brief Decode a single syndrome
   /// @param syndrome A vector of syndrome measurements where the floating point
@@ -201,17 +195,17 @@ public:
 
   /// @brief Construct a registered decoder by name.
   /// @param name The registered decoder name.
-  /// @param init A parity-check matrix or raw Stim DEM string.
+  /// @param inputs Stable decoder inputs.
   /// @param param_map Optional decoder-specific parameters.
   static std::unique_ptr<decoder>
-  get(const std::string &name, const decoder_init &init,
+  get(const std::string &name, decoder_inputs inputs,
       const cudaqx::heterogeneous_map &param_map = cudaqx::heterogeneous_map());
 
   static std::unique_ptr<decoder>
   get(const std::string &name, const cudaq::qec::sparse_binary_matrix &H,
       const cudaqx::heterogeneous_map &param_map =
           cudaqx::heterogeneous_map()) {
-    return get(name, decoder_init{H}, param_map);
+    return get(name, decoder_inputs{H}, param_map);
   }
 
   static std::unique_ptr<decoder>
@@ -225,21 +219,22 @@ public:
   get(const std::string &name, const std::string &stim_dem_text,
       const cudaqx::heterogeneous_map &param_map =
           cudaqx::heterogeneous_map()) {
-    return get(name, decoder_init{stim_dem_text}, param_map);
+    return get(name, decoder_inputs::from_stim_dem(stim_dem_text), param_map);
   }
 
   static std::unique_ptr<decoder>
   get(const std::string &name, const char *stim_dem_text,
       const cudaqx::heterogeneous_map &param_map =
           cudaqx::heterogeneous_map()) {
-    return get(name, decoder_init{std::string{stim_dem_text}}, param_map);
+    return get(name, decoder_inputs::from_stim_dem(stim_dem_text), param_map);
   }
 
   static std::unique_ptr<decoder>
   get(const std::string &name, std::string_view stim_dem_text,
       const cudaqx::heterogeneous_map &param_map =
           cudaqx::heterogeneous_map()) {
-    return get(name, decoder_init{std::string{stim_dem_text}}, param_map);
+    return get(name, decoder_inputs::from_stim_dem(std::string{stim_dem_text}),
+               param_map);
   }
 
   std::size_t get_block_size() { return block_size; }
@@ -273,12 +268,20 @@ public:
   /// row terminators.
   void set_O_sparse(const std::vector<int64_t> &O_sparse);
 
-  /// @brief Set the D_sparse matrix.
+  /// @brief Set D from nested rows. The measurement count is inferred as the
+  /// largest referenced column plus one, so trailing unused columns cannot be
+  /// represented.
   void set_D_sparse(const std::vector<std::vector<uint32_t>> &D_sparse);
 
   /// @brief Set the D_sparse matrix, using a single long vector with -1 as row
-  /// terminators.
+  /// terminators. Vector encodings infer the measurement count as the largest
+  /// referenced column plus one and therefore cannot represent trailing unused
+  /// measurement columns.
   void set_D_sparse(const std::vector<int64_t> &D_sparse);
+
+  /// @brief Set D from a shaped sparse matrix, preserving its exact measurement
+  /// column count, including trailing unused columns.
+  void set_D_sparse(const sparse_binary_matrix &D_sparse);
 
   /// @brief Set the decoder id.
   void set_decoder_id(uint32_t decoder_id);
@@ -344,6 +347,9 @@ public:
   virtual std::string get_version() const;
 
 protected:
+  /// @brief The immutable construction inputs owned by this decoder.
+  const decoder_inputs &get_inputs() const noexcept { return inputs_; }
+
   /// @brief Sets the result type. Call in the constructor when an "O"
   /// observable matrix is detected in the decoder params. Must be called
   /// before the first enqueue_syndrome().
@@ -367,9 +373,6 @@ protected:
   /// @brief For a classical `[n,k]` code, this is `n-k`
   std::size_t syndrome_size = 0;
 
-  /// @brief The decoder's parity check matrix
-  sparse_binary_matrix H;
-
   /// @brief The decoder's observable matrix in sparse format
   std::vector<std::vector<uint32_t>> O_sparse;
 
@@ -381,6 +384,9 @@ protected:
   int cuda_device_id_ = -1;
 
 private:
+  /// @brief The decoder's immutable construction inputs.
+  const decoder_inputs inputs_;
+
   decode_result_type result_type_ = decode_result_type::decode_to_errs;
 };
 
@@ -537,13 +543,13 @@ inline void convert_vec_hard_to_soft(const std::vector<std::vector<t_hard>> &in,
 }
 
 std::unique_ptr<decoder>
-get_decoder(const std::string &name, const decoder_init &init,
+get_decoder(const std::string &name, decoder_inputs inputs,
             const cudaqx::heterogeneous_map options = {});
 
 inline std::unique_ptr<decoder>
 get_decoder(const std::string &name, const cudaq::qec::sparse_binary_matrix &H,
             const cudaqx::heterogeneous_map options = {}) {
-  return get_decoder(name, decoder_init{H}, options);
+  return get_decoder(name, decoder_inputs{H}, options);
 }
 
 inline std::unique_ptr<decoder>
@@ -555,19 +561,22 @@ get_decoder(const std::string &name, const cudaqx::tensor<uint8_t> &H,
 inline std::unique_ptr<decoder>
 get_decoder(const std::string &name, const std::string &stim_dem_text,
             const cudaqx::heterogeneous_map options = {}) {
-  return get_decoder(name, decoder_init{stim_dem_text}, options);
+  return get_decoder(name, decoder_inputs::from_stim_dem(stim_dem_text),
+                     options);
 }
 
 inline std::unique_ptr<decoder>
 get_decoder(const std::string &name, const char *stim_dem_text,
             const cudaqx::heterogeneous_map options = {}) {
-  return get_decoder(name, decoder_init{std::string{stim_dem_text}}, options);
+  return get_decoder(name, decoder_inputs::from_stim_dem(stim_dem_text),
+                     options);
 }
 
 inline std::unique_ptr<decoder>
 get_decoder(const std::string &name, std::string_view stim_dem_text,
             const cudaqx::heterogeneous_map options = {}) {
-  return get_decoder(name, decoder_init{std::string{stim_dem_text}}, options);
+  return get_decoder(
+      name, decoder_inputs::from_stim_dem(std::string{stim_dem_text}), options);
 }
 
 namespace details {
@@ -584,25 +593,19 @@ dem_default_values dem_defaults_for_missing_keys(
     const detector_error_model &dem);
 } // namespace details
 
-/// If `init` holds DEM text, parse it and inject `"O"` / `"error_rate_vec"`
-/// defaults when absent.
+/// Transitional adapter for matrix-family decoders. Model data comes from
+/// `inputs`; until those constructors consume it directly, this helper injects
+/// O and error-rate defaults through their legacy parameter interface.
 template <typename DecoderT>
 std::unique_ptr<decoder>
-make_pcm_decoder(const decoder_init &init,
+make_pcm_decoder(decoder_inputs inputs,
                  const cudaqx::heterogeneous_map &params) {
-  if (const auto *H = std::get_if<cudaq::qec::sparse_binary_matrix>(&init))
-    return std::make_unique<DecoderT>(*H, params);
-
-  const auto dem = dem_from_stim_text(std::get<std::string>(init));
   cudaqx::heterogeneous_map merged = params;
-  const auto defaults = details::dem_defaults_for_missing_keys(
-      [&](const std::string &key) { return merged.contains(key); }, dem);
-  if (defaults.O)
-    merged.insert("O", *defaults.O);
-  if (defaults.error_rate_vec)
-    merged.insert("error_rate_vec", *defaults.error_rate_vec);
-  return std::make_unique<DecoderT>(
-      cudaq::qec::sparse_binary_matrix(dem.detector_error_matrix), merged);
+  if (!merged.contains("O") && inputs.num_observables() > 0)
+    merged.insert("O", inputs.observable_flips_matrix().to_dense());
+  if (!merged.contains("error_rate_vec") && !inputs.error_rates().empty())
+    merged.insert("error_rate_vec", inputs.error_rates());
+  return std::make_unique<DecoderT>(std::move(inputs), merged);
 }
 
 } // namespace cudaq::qec

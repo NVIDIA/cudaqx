@@ -820,6 +820,10 @@ def test_decoder_context_d_sparse_layout():
     assert rebuilt == [list(r) for r in fc_m2d]
 
 
+def test_d_sparse_does_not_require_explicit_measurement_width():
+    assert qec.d_sparse([[2], [], [0, 4]]) == [2, -1, -1, 0, 4, -1]
+
+
 def test_decoder_context_single_type_code_empty_component():
     # The repetition code has only Z stabilizers, so its X context has no
     # detectors. Verify the empty context is self-consistent (no detectors,

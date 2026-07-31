@@ -56,9 +56,10 @@ private:
 #endif
 
 public:
-  pymatching(const cudaq::qec::sparse_binary_matrix &H,
+  pymatching(cudaq::qec::decoder_inputs inputs,
              const cudaqx::heterogeneous_map &params)
-      : decoder(H) {
+      : decoder(std::move(inputs)) {
+    const auto &H = get_inputs().detector_error_matrix();
 
     if (params.contains("error_rate_vec")) {
       error_rate_vec = params.get<std::vector<double>>("error_rate_vec");
@@ -259,9 +260,10 @@ public:
 
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       pymatching, static std::unique_ptr<decoder> create(
-                      const cudaq::qec::decoder_init &init,
+                      cudaq::qec::decoder_inputs inputs,
                       const cudaqx::heterogeneous_map &params) {
-        return cudaq::qec::make_pcm_decoder<pymatching>(init, params);
+        return cudaq::qec::make_pcm_decoder<pymatching>(std::move(inputs),
+                                                        params);
       })
 };
 

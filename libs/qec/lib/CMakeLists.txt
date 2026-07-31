@@ -41,6 +41,7 @@ endif()
 
 set(DECODERS_SOURCES
   decoder.cpp
+  decoder_inputs.cpp
   decoder_config_payload.cpp
   decoder_config_schema.cpp
   detector_error_model.cpp

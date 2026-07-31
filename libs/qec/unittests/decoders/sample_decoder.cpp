@@ -20,9 +20,9 @@ private:
   bool decode_to_obs = false;
 
 public:
-  sample_decoder(const cudaq::qec::sparse_binary_matrix &H,
+  sample_decoder(cudaq::qec::decoder_inputs inputs,
                  const cudaqx::heterogeneous_map &params)
-      : decoder(H) {
+      : decoder(std::move(inputs)) {
     // Decoder-specific constructor arguments can be placed in `params`.
     decode_to_obs = params.get<bool>("decode_to_obs", decode_to_obs);
     if (decode_to_obs)
@@ -42,9 +42,10 @@ public:
 
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       sample_decoder, static std::unique_ptr<decoder> create(
-                          const cudaq::qec::decoder_init &init,
+                          cudaq::qec::decoder_inputs inputs,
                           const cudaqx::heterogeneous_map &params) {
-        return cudaq::qec::make_pcm_decoder<sample_decoder>(init, params);
+        return cudaq::qec::make_pcm_decoder<sample_decoder>(std::move(inputs),
+                                                            params);
       })
 };
 

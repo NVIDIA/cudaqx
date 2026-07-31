@@ -52,7 +52,7 @@ Real-time decoding requires converting matrices to sparse format for efficient d
 - :cpp:func:`cudaq::qec::pcm_to_sparse_vec` for converting a dense PCM to a sparse PCM.
 - :cpp:func:`cudaq::qec::pcm_from_sparse_vec` for converting a sparse PCM to a dense PCM.
 - :cpp:func:`cudaq::qec::d_sparse` for converting an ``M2DSparseMatrix`` (obtained from
-  a :cpp:struct:`cudaq::qec::decoder_inputs` component) into the ``-1``-terminated sparse
+  a :cpp:class:`cudaq::qec::decoder_inputs` component) into the ``-1``-terminated sparse
   vector a decoder config expects for ``D_sparse``.
 
    **Usage in real-time decoding:**
@@ -62,8 +62,9 @@ Real-time decoding requires converting matrices to sparse format for efficient d
       auto ctx = cudaq::qec::decoder_context_from_memory_circuit(
           code, statePrep, numRounds, noise);
       auto inputs = ctx.z_component(); // or x_component() / full_component()
-      config.H_sparse = cudaq::qec::pcm_to_sparse_vec(inputs.dem.detector_error_matrix);
-      config.O_sparse = cudaq::qec::pcm_to_sparse_vec(inputs.dem.observables_flips_matrix);
-      config.D_sparse = cudaq::qec::d_sparse(inputs.m2d);
+      const auto dem = inputs.materialize_detector_error_model();
+      config.H_sparse = cudaq::qec::pcm_to_sparse_vec(dem.detector_error_matrix);
+      config.O_sparse = cudaq::qec::pcm_to_sparse_vec(dem.observables_flips_matrix);
+      config.D_sparse = cudaq::qec::d_sparse(*inputs.measurement_to_detectors());
 
 See also :ref:`parity_check_matrix_utilities` for additional PCM manipulation functions.

@@ -8,6 +8,7 @@
 
 #include "stim.h"
 #include "cudaq/qec/decoder.h"
+#include "cudaq/qec/decoder_inputs.h"
 #include "cudaq/qec/detector_error_model.h"
 #include "cudaq/qec/pcm_utils.h"
 #include <atomic>
@@ -21,6 +22,20 @@
 #include <thread>
 
 namespace {
+class decoder_inputs_probe final : public cudaq::qec::decoder {
+public:
+  explicit decoder_inputs_probe(cudaq::qec::decoder_inputs inputs)
+      : decoder(std::move(inputs)) {}
+
+  cudaq::qec::decoder_result
+  decode(const std::vector<cudaq::qec::float_t> &) override {
+    return {true, std::vector<cudaq::qec::float_t>(block_size, 0.0)};
+  }
+
+  std::size_t configured_observable_rows() const { return O_sparse.size(); }
+  std::size_t configured_measurement_rows() const { return D_sparse.size(); }
+};
+
 class ScopedEnv {
 public:
   ScopedEnv(const char *name, const char *value) : name(name) {
@@ -41,6 +56,104 @@ private:
   std::optional<std::string> oldValue;
 };
 } // namespace
+
+TEST(DecoderInputs, PreservesMatrixShapesAndMeasurementMap) {
+  using matrix = cudaq::qec::sparse_binary_matrix;
+  auto H = matrix::from_nested_csc(2, 3, {{0}, {0, 1}, {1}});
+  auto O = matrix::from_nested_csr(3, 3, {{0}, {}, {2}});
+  auto D = matrix::from_nested_csr(2, 5, {{0, 1}, {2, 3}});
+
+  cudaq::qec::decoder_inputs inputs(std::move(H), std::move(O), {0.1, 0.2, 0.3},
+                                    std::move(D));
+
+  EXPECT_EQ(inputs.source(), cudaq::qec::decoder_model_source::matrices);
+  EXPECT_EQ(inputs.num_detectors(), 2);
+  EXPECT_EQ(inputs.num_error_mechanisms(), 3);
+  EXPECT_EQ(inputs.num_observables(), 3);
+  EXPECT_EQ(inputs.observable_flips_matrix().to_nested_csr(),
+            (std::vector<std::vector<std::uint32_t>>{{0}, {}, {2}}));
+  ASSERT_NE(inputs.measurement_to_detectors(), nullptr);
+  EXPECT_EQ(inputs.measurement_to_detectors()->num_rows(), 2);
+  EXPECT_EQ(inputs.measurement_to_detectors()->num_cols(), 5);
+  EXPECT_EQ(inputs.error_rates(), (std::vector<double>{0.1, 0.2, 0.3}));
+
+  const auto materialized = inputs.materialize_detector_error_model();
+  EXPECT_EQ(materialized.observables_flips_matrix.shape()[0], 3);
+  EXPECT_EQ(materialized.observables_flips_matrix.shape()[1], 3);
+  EXPECT_EQ(materialized.observables_flips_matrix.at({1, 0}), 0);
+  EXPECT_EQ(materialized.observables_flips_matrix.at({1, 1}), 0);
+  EXPECT_EQ(materialized.observables_flips_matrix.at({1, 2}), 0);
+
+  auto decoder = cudaq::qec::get_decoder("sample_decoder", inputs);
+  EXPECT_EQ(decoder->get_num_observables(), 3);
+  decoder->set_D_sparse(*inputs.measurement_to_detectors());
+  EXPECT_EQ(decoder->get_num_msyn_per_decode(), 5);
+  EXPECT_THROW(
+      decoder->set_O_sparse(std::vector<std::vector<std::uint32_t>>{{0}, {2}}),
+      std::invalid_argument);
+}
+
+TEST(DecoderInputs, BaseConstructionUsesMetadataWithoutMaterializingMatrices) {
+  using matrix = cudaq::qec::sparse_binary_matrix;
+  auto H = matrix::from_nested_csc(2, 3, {{0}, {0, 1}, {1}});
+  auto O = matrix::from_nested_csr(3, 3, {{0}, {}, {2}});
+  auto D = matrix::from_nested_csr(2, 5, {{0, 1}, {2, 3}});
+
+  decoder_inputs_probe decoder(
+      cudaq::qec::decoder_inputs(std::move(H), std::move(O), {}, std::move(D)));
+
+  EXPECT_EQ(decoder.configured_observable_rows(), 0);
+  EXPECT_EQ(decoder.configured_measurement_rows(), 0);
+  EXPECT_EQ(decoder.get_num_observables(), 3);
+  EXPECT_EQ(decoder.get_num_msyn_per_decode(), 0);
+  decoder.reset_decoder();
+  const auto *corrections = decoder.get_obs_corrections();
+  ASSERT_NE(corrections, nullptr);
+  EXPECT_EQ(corrections[0], 0);
+  EXPECT_EQ(corrections[1], 0);
+  EXPECT_EQ(corrections[2], 0);
+
+  decoder.set_D_sparse(matrix::from_nested_csr(2, 5, {{0, 1}, {2, 3}}));
+  EXPECT_THROW(decoder.enqueue_syndrome(std::vector<std::uint8_t>(5, 0)),
+               std::runtime_error);
+}
+
+TEST(DecoderInputs, RawStimRemainsAuthoritative) {
+  const std::string dem_text = "error(0.1) D0 L0\n"
+                               "error(0.2) D1\n";
+
+  auto inputs = cudaq::qec::decoder_inputs::from_stim_dem(dem_text);
+
+  EXPECT_EQ(inputs.source(), cudaq::qec::decoder_model_source::stim_dem);
+  ASSERT_TRUE(inputs.has_stim_dem());
+  EXPECT_EQ(inputs.stim_dem(), dem_text);
+  EXPECT_EQ(inputs.num_detectors(), 2);
+  EXPECT_EQ(inputs.num_error_mechanisms(), 2);
+  EXPECT_EQ(inputs.num_observables(), 1);
+  EXPECT_EQ(inputs.error_rates(), (std::vector<double>{0.1, 0.2}));
+  EXPECT_EQ(inputs.observable_flips_matrix().to_nested_csr(),
+            (std::vector<std::vector<std::uint32_t>>{{0}}));
+}
+
+TEST(DecoderInputs, RejectsInconsistentDimensions) {
+  using matrix = cudaq::qec::sparse_binary_matrix;
+  auto H = matrix::from_nested_csc(2, 3, {{0}, {0, 1}, {1}});
+
+  EXPECT_THROW(cudaq::qec::decoder_inputs(
+                   H, matrix::from_nested_csr(1, 2, {{0}}), {0.1, 0.2, 0.3}),
+               std::invalid_argument);
+  EXPECT_THROW(cudaq::qec::decoder_inputs(
+                   H, matrix::from_nested_csr(1, 3, {{0}}), {0.1, 0.2}),
+               std::invalid_argument);
+  EXPECT_THROW(cudaq::qec::decoder_inputs(
+                   H, matrix::from_nested_csr(1, 3, {{0}}), {0.1, 0.2, 0.3},
+                   matrix::from_nested_csr(1, 4, {{0}})),
+               std::invalid_argument);
+  EXPECT_THROW(cudaq::qec::decoder_inputs(
+                   H, matrix::from_nested_csr(1, 3, {{0}}), {0.1, 0.2, 0.3},
+                   std::nullopt, std::vector<std::size_t>{0, 1}),
+               std::invalid_argument);
+}
 
 TEST(DecoderUtils, CovertHardToSoft) {
   std::vector<int> in = {1, 0, 1, 1};
@@ -211,8 +324,8 @@ TEST(SampleDecoder, RealtimeApiAndDefaultGraphHooks) {
   // Reapply D and O through the flattened YAML-style representation to exercise
   // the -1 row separators used by realtime configs.
   decoder->set_D_sparse(std::vector<int64_t>{0, 1, -1, 2, -1});
-  decoder->set_O_sparse(std::vector<int64_t>{0, -1});
-  EXPECT_EQ(decoder->get_num_observables(), 1u);
+  decoder->set_O_sparse(std::vector<int64_t>{0, -1, -1, 2, -1});
+  EXPECT_EQ(decoder->get_num_observables(), 3u);
 
   // Three measurement bits fill the D buffer and trigger a decode.
   std::vector<uint8_t> msyn = {1, 0, 1};
@@ -1264,9 +1377,9 @@ private:
 /// proving decoder::get() strips cuda_device_id before the plugin ctor.
 class strict_keys_decoder : public cudaq::qec::decoder {
 public:
-  strict_keys_decoder(const cudaq::qec::sparse_binary_matrix &H,
+  strict_keys_decoder(cudaq::qec::decoder_inputs inputs,
                       const cudaqx::heterogeneous_map &params)
-      : decoder(H) {
+      : decoder(std::move(inputs)) {
     auto invalid =
         cudaq::qec::validate_config_parameters(params, {"decode_to_obs"});
     if (!invalid.empty())
@@ -1282,9 +1395,10 @@ public:
   }
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       strict_keys_decoder, static std::unique_ptr<cudaq::qec::decoder> create(
-                               const cudaq::qec::decoder_init &init,
+                               cudaq::qec::decoder_inputs inputs,
                                const cudaqx::heterogeneous_map &params) {
-        return cudaq::qec::make_pcm_decoder<strict_keys_decoder>(init, params);
+        return cudaq::qec::make_pcm_decoder<strict_keys_decoder>(
+            std::move(inputs), params);
       })
 };
 CUDAQ_EXT_PT_REGISTER_TYPE(strict_keys_decoder)
@@ -1299,9 +1413,9 @@ cudaq::qec::sparse_binary_matrix make_test_H() {
 class device_recording_decoder : public cudaq::qec::decoder {
 public:
   std::atomic<int> last_decode_device{-2};
-  device_recording_decoder(const cudaq::qec::sparse_binary_matrix &H,
+  device_recording_decoder(cudaq::qec::decoder_inputs inputs,
                            const cudaqx::heterogeneous_map &)
-      : decoder(H) {}
+      : decoder(std::move(inputs)) {}
   cudaq::qec::decoder_result
   decode(const std::vector<cudaq::qec::float_t> &) override {
     int dev = -1;
@@ -1316,10 +1430,10 @@ public:
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       device_recording_decoder,
       static std::unique_ptr<cudaq::qec::decoder> create(
-          const cudaq::qec::decoder_init &init,
+          cudaq::qec::decoder_inputs inputs,
           const cudaqx::heterogeneous_map &params) {
-        return cudaq::qec::make_pcm_decoder<device_recording_decoder>(init,
-                                                                      params);
+        return cudaq::qec::make_pcm_decoder<device_recording_decoder>(
+            std::move(inputs), params);
       })
 };
 CUDAQ_EXT_PT_REGISTER_TYPE(device_recording_decoder)

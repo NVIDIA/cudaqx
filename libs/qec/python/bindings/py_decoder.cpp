@@ -195,7 +195,7 @@ public:
   /// @brief Construct from a scipy sparse matrix (CSR, CSC, COO, ...) or a
   ///        dense numpy array of any numeric dtype.
   PyDecoder(nb::object mat)
-      : decoder([&mat]() -> cudaq::qec::sparse_binary_matrix {
+      : decoder(decoder_inputs([&mat]() -> cudaq::qec::sparse_binary_matrix {
           // Any scipy sparse format exposes tocsr(); detect via that rather
           // than indptr/indices, which COO and some other formats lack.
           if (nb::hasattr(mat, "tocsr"))
@@ -209,7 +209,7 @@ public:
           return make_sparse_from_dense(
               nb::cast<nb::ndarray<nb::numpy, uint8_t>>(
                   mat.attr("astype")("uint8", nb::arg("copy") = false)));
-        }()) {}
+        }())) {}
 
   decoder_result decode(const std::vector<float_t> &syndrome) override {
     NB_OVERRIDE_PURE(decode, syndrome);
@@ -896,7 +896,8 @@ void bindDecoder(nb::module_ &mod) {
       return PyDecoderRegistry::get_decoder(name, H_obj, options);
     }
 
-    return get_decoder(name, decoder_init{dem_text}, hetMapFromKwargs(options));
+    return get_decoder(name, decoder_inputs::from_stim_dem(dem_text),
+                       hetMapFromKwargs(options));
   };
 
   qecmod.def(
@@ -944,7 +945,7 @@ void bindDecoder(nb::module_ &mod) {
           ``cudaqx::tensor`` is built first, then converted to CSC sparse storage.
           For large PCMs this can allocate as much memory as ``rows * cols``.
         - A Stim detector error model string: native C++ decoders receive the
-          raw DEM text via ``decoder_init``; Python-registered decoders receive
+          raw DEM text via ``decoder_inputs``; Python-registered decoders receive
           the DEM-derived PCM plus ``O`` and ``error_rate_vec`` defaults.
 
         For Python-registered decoders (``cudaq.qec.decoder`` decorator), ``H``

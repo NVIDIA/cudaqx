@@ -711,7 +711,10 @@ void bindCode(nb::module_ &mod) {
           "x_component",
           [](const decoder_context &h) {
             auto ctx = h.x_component();
-            return nb::make_tuple(ctx.dem, ctx.m2d.rows, ctx.m2o.rows);
+            return nb::make_tuple(
+                ctx.materialize_detector_error_model(),
+                ctx.measurement_to_detectors()->to_nested_csr(),
+                h.measurement_to_observables().rows);
           },
           R"pbdoc(
        Canonicalize X-stabilizer detectors; return (dem, m2d, m2o).
@@ -723,7 +726,10 @@ void bindCode(nb::module_ &mod) {
           "z_component",
           [](const decoder_context &h) {
             auto ctx = h.z_component();
-            return nb::make_tuple(ctx.dem, ctx.m2d.rows, ctx.m2o.rows);
+            return nb::make_tuple(
+                ctx.materialize_detector_error_model(),
+                ctx.measurement_to_detectors()->to_nested_csr(),
+                h.measurement_to_observables().rows);
           },
           R"pbdoc(
        Canonicalize Z-stabilizer detectors; return (dem, m2d, m2o).
@@ -735,7 +741,10 @@ void bindCode(nb::module_ &mod) {
           "full_component",
           [](const decoder_context &h) {
             auto ctx = h.full_component();
-            return nb::make_tuple(ctx.dem, ctx.m2d.rows, ctx.m2o.rows);
+            return nb::make_tuple(
+                ctx.materialize_detector_error_model(),
+                ctx.measurement_to_detectors()->to_nested_csr(),
+                h.measurement_to_observables().rows);
           },
           R"pbdoc(
        Canonicalize both stabilizer types with boundary awareness;

@@ -22,9 +22,10 @@ private:
   std::map<std::string, std::size_t> single_qubit_err_signatures;
 
 public:
-  single_error_lut_example(const cudaq::qec::sparse_binary_matrix &H,
+  single_error_lut_example(cudaq::qec::decoder_inputs inputs,
                            const cudaqx::heterogeneous_map &params)
-      : decoder(H) {
+      : decoder(std::move(inputs)) {
+    const auto &H = get_inputs().detector_error_matrix();
     // Decoder-specific constructor arguments can be placed in `params`.
 
     // The loop below sets err_sig[r] = '1' (not XOR-toggle), so canonicalize
@@ -77,10 +78,10 @@ public:
 
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       single_error_lut_example, static std::unique_ptr<decoder> create(
-                                    const cudaq::qec::decoder_init &init,
+                                    cudaq::qec::decoder_inputs inputs,
                                     const cudaqx::heterogeneous_map &params) {
-        return cudaq::qec::make_pcm_decoder<single_error_lut_example>(init,
-                                                                      params);
+        return cudaq::qec::make_pcm_decoder<single_error_lut_example>(
+            std::move(inputs), params);
       })
 };
 

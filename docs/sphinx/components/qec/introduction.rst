@@ -632,9 +632,9 @@ To implement a new decoder:
         // Decoder-specific members
 
     public:
-        my_decoder(const qec::sparse_binary_matrix& H,
-                  const heterogeneous_map& params)
-            : decoder(H) {
+        my_decoder(qec::decoder_inputs inputs,
+                   const heterogeneous_map& params)
+            : decoder(std::move(inputs)) {
             // Initialize decoder
         }
 
@@ -651,18 +651,19 @@ To implement a new decoder:
     CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
         my_decoder,
         static std::unique_ptr<decoder> create(
-            const qec::decoder_init& init,
+            qec::decoder_inputs inputs,
             const heterogeneous_map& params) {
-            return qec::make_pcm_decoder<my_decoder>(init, params);
+            return qec::make_pcm_decoder<my_decoder>(std::move(inputs), params);
         }
     )
 
     CUDAQ_EXT_PT_REGISTER_TYPE(my_decoder)
 
-The :code:`make_pcm_decoder` helper dispatches :code:`decoder_init`. It
-passes a stored sparse PCM directly to the decoder constructor; when the
-variant contains Stim DEM text, it parses the DEM and constructs the sparse
-detector matrix before invoking the same constructor.
+The :code:`make_pcm_decoder` helper is a transitional adapter for matrix-family
+decoders. The factory always receives :code:`decoder_inputs`; the helper passes
+that stable input handle to the decoder and supplies legacy constructor
+defaults while decoder implementations migrate to reading model data directly
+from the owned inputs.
 
 Example: Lookup Table Decoder
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -676,11 +677,12 @@ Here's a simple lookup table decoder for the Steane code:
         std::map<std::string, std::size_t> single_qubit_err_signatures;
 
     public:
-        single_error_lut(const qec::sparse_binary_matrix& H,
+        single_error_lut(qec::decoder_inputs inputs,
                           const heterogeneous_map& params)
-            : decoder(H) {
+            : decoder(std::move(inputs)) {
             // Canonicalize before using each sparse column as an error
             // signature so duplicate row indices cancel over GF(2).
+            const auto& H = get_inputs().detector_error_matrix();
             auto H_e2d = H.canonicalize().to_nested_csc();
 
             for (std::size_t qErr = 0; qErr < block_size; qErr++) {
@@ -1501,4 +1503,3 @@ Additional Noise Models
       noise.add_all_qubit_channel(
           "x", cudaq::depolarization2(/*probability*/ 0.01),
           /*numControls*/ 1);
-

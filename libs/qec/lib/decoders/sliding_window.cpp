@@ -16,6 +16,25 @@
 
 namespace cudaq::qec {
 
+namespace {
+
+decoder_inputs canonicalize_sliding_window_inputs(decoder_inputs inputs) {
+  // Stim-derived sparse matrices are canonical at construction. Retain the
+  // authoritative raw source instead of rebuilding a matrix-authoritative
+  // handle solely to canonicalize its storage.
+  if (inputs.source() == decoder_model_source::stim_dem)
+    return inputs;
+
+  std::optional<sparse_binary_matrix> D;
+  if (const auto *measurement_map = inputs.measurement_to_detectors())
+    D = *measurement_map;
+  return decoder_inputs(inputs.detector_error_matrix().canonicalize().to_csc(),
+                        inputs.observable_flips_matrix(), inputs.error_rates(),
+                        std::move(D), inputs.error_ids());
+}
+
+} // namespace
+
 void sliding_window::validate_inputs() {
   uint32_t num_rows = H.num_rows();
   if (num_boundary_syndromes > num_syndromes_per_round)
@@ -108,11 +127,12 @@ void sliding_window::initialize_window(std::size_t batch_size) {
       std::chrono::duration<double>(t1 - t0).count() * 1000;
 }
 
-sliding_window::sliding_window(const cudaq::qec::sparse_binary_matrix &H,
+sliding_window::sliding_window(cudaq::qec::decoder_inputs inputs,
                                const cudaqx::heterogeneous_map &params)
     // Canonical CSC is the steady-state contract for decode_window's column
     // slices and for validate_inputs's per-column .front()/.back() reads.
-    : decoder(H.canonicalize().to_csc()) {
+    : decoder(canonicalize_sliding_window_inputs(std::move(inputs))),
+      H(get_inputs().detector_error_matrix()) {
   // Fetch parameters from the params map.
   window_size = params.get<std::size_t>("window_size", window_size);
   step_size = params.get<std::size_t>("step_size", step_size);

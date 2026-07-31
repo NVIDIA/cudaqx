@@ -49,9 +49,10 @@ private:
   bool decoding_time = false;
 
 public:
-  multi_error_lut(const cudaq::qec::sparse_binary_matrix &H,
+  multi_error_lut(cudaq::qec::decoder_inputs inputs,
                   const cudaqx::heterogeneous_map &params)
-      : decoder(H) {
+      : decoder(std::move(inputs)) {
+    const auto &H = get_inputs().detector_error_matrix();
     if (params.contains("lut_error_depth")) {
       lut_error_depth = params.get<int>("lut_error_depth");
       if (lut_error_depth < 1) {
@@ -230,9 +231,10 @@ public:
 
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       multi_error_lut, static std::unique_ptr<decoder> create(
-                           const cudaq::qec::decoder_init &init,
+                           cudaq::qec::decoder_inputs inputs,
                            const cudaqx::heterogeneous_map &params) {
-        return cudaq::qec::make_pcm_decoder<multi_error_lut>(init, params);
+        return cudaq::qec::make_pcm_decoder<multi_error_lut>(std::move(inputs),
+                                                             params);
       })
 };
 
@@ -240,17 +242,18 @@ CUDAQ_EXT_PT_REGISTER_TYPE(multi_error_lut)
 
 class single_error_lut : public multi_error_lut {
 public:
-  single_error_lut(const cudaq::qec::sparse_binary_matrix &H,
+  single_error_lut(cudaq::qec::decoder_inputs inputs,
                    const cudaqx::heterogeneous_map &params)
-      : multi_error_lut(H, params) {}
+      : multi_error_lut(std::move(inputs), params) {}
 
   virtual ~single_error_lut() {}
 
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       single_error_lut, static std::unique_ptr<decoder> create(
-                            const cudaq::qec::decoder_init &init,
+                            cudaq::qec::decoder_inputs inputs,
                             const cudaqx::heterogeneous_map &params) {
-        return cudaq::qec::make_pcm_decoder<single_error_lut>(init, params);
+        return cudaq::qec::make_pcm_decoder<single_error_lut>(std::move(inputs),
+                                                              params);
       })
 };
 

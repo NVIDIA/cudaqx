@@ -129,7 +129,8 @@ static Logger gLogger;
 ///   (b) when "O" is also provided, the concatenation [pre_L,
 ///   residual_dets] as the only output.
 /// - "global_decoder_params": Optional parameters for the global decoder. The
-///   decoder is created with the same H passed to the trt_decoder constructor.
+///   decoder receives the same model inputs passed to the trt_decoder
+///   constructor, including authoritative raw DEM provenance when present.
 /// - "O": Observables matrix (num_observables x block_size). Calls to
 ///   decode() and decode_batch() will return the logical frame of the
 ///   observables. Requires that the TRT model emits the concatenation
@@ -420,7 +421,7 @@ private:
   size_t num_observables_ = 0;
 
 public:
-  trt_decoder(const cudaq::qec::sparse_binary_matrix &H,
+  trt_decoder(cudaq::qec::decoder_inputs inputs,
               const cudaqx::heterogeneous_map &params);
 
   virtual decoder_result decode(const std::vector<float_t> &syndrome) override;
@@ -432,9 +433,10 @@ public:
 
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       trt_decoder, static std::unique_ptr<decoder> create(
-                       const cudaq::qec::decoder_init &init,
+                       cudaq::qec::decoder_inputs inputs,
                        const cudaqx::heterogeneous_map &params) {
-        return cudaq::qec::make_pcm_decoder<trt_decoder>(init, params);
+        return cudaq::qec::make_pcm_decoder<trt_decoder>(std::move(inputs),
+                                                         params);
       })
 
 private:
@@ -535,9 +537,10 @@ struct trt_decoder::Impl {
 // trt_decoder method implementations
 // ============================================================================
 
-trt_decoder::trt_decoder(const cudaq::qec::sparse_binary_matrix &H,
+trt_decoder::trt_decoder(cudaq::qec::decoder_inputs inputs,
                          const cudaqx::heterogeneous_map &params)
-    : decoder(H) {
+    : decoder(std::move(inputs)) {
+  const auto &H = get_inputs().detector_error_matrix();
 
   impl_ = std::make_unique<Impl>();
 
@@ -762,8 +765,11 @@ trt_decoder::trt_decoder(const cudaq::qec::sparse_binary_matrix &H,
       global_decoder_params_ =
           params.get<cudaqx::heterogeneous_map>("global_decoder_params");
       if (!global_decoder_name.empty()) {
-        global_decoder_ =
-            decoder::get(global_decoder_name, H, global_decoder_params_);
+        // Preserve authoritative model provenance for DEM-native children. The
+        // parent's D is inert on this decode_batch path; the shared child-input
+        // derivation utility will omit it when that phase lands.
+        global_decoder_ = decoder::get(global_decoder_name, get_inputs(),
+                                       global_decoder_params_);
         CUDA_QEC_INFO("TensorRT decoder: global_decoder '{}' attached",
                       global_decoder_name);
       }
@@ -790,7 +796,7 @@ trt_decoder::trt_decoder(const cudaq::qec::sparse_binary_matrix &H,
       // global decoders still carry their own O copies. This duplicate plumbing
       // is intentional for now; a follow-up can make O ownership less
       // redundant.
-      set_O_sparse(cudaq::qec::pcm_to_sparse_vec(O));
+      set_O_sparse(cudaq::qec::sparse_binary_matrix(O).to_nested_csr());
       set_result_type(decode_result_type::decode_to_obs);
 
       // The TRT model output must encode [pre_L (num_observables_ entries),

@@ -14,8 +14,10 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <numeric>
 #include <random>
+#include <stdexcept>
 
 using namespace cudaqx;
 
@@ -442,9 +444,9 @@ namespace details {
 /// so the simpler overload suffices.
 static decoder_inputs
 make_component(detector_error_model dem, cudaq::M2DSparseMatrix m2d,
-               cudaq::M2OSparseMatrix m2o, std::size_t num_rounds,
-               std::size_t num_x_stabilizers, std::size_t num_z_stabilizers,
-               bool fixed_basis_is_z, bool keep_x, bool keep_z) {
+               std::size_t num_rounds, std::size_t num_x_stabilizers,
+               std::size_t num_z_stabilizers, bool fixed_basis_is_z,
+               bool keep_x, bool keep_z) {
   if (keep_x && keep_z) {
     const uint32_t numBoundary = fixed_basis_is_z
                                      ? static_cast<uint32_t>(num_z_stabilizers)
@@ -452,7 +454,7 @@ make_component(detector_error_model dem, cudaq::M2DSparseMatrix m2d,
     dem.canonicalize_for_rounds_with_boundary(
         static_cast<uint32_t>(num_x_stabilizers + num_z_stabilizers),
         numBoundary, /*remove_zero_syndrome_errors=*/true);
-    return {std::move(dem), std::move(m2d), std::move(m2o)};
+    return decoder_inputs(std::move(dem), m2d_to_sparse(m2d));
   }
 
   const std::size_t numDetectors = dem.detector_error_matrix.shape()[0];
@@ -471,7 +473,7 @@ make_component(detector_error_model dem, cudaq::M2DSparseMatrix m2d,
     detector_error_model empty_dem;
     empty_dem.detector_error_matrix = cudaqx::tensor<uint8_t>({0, 0});
     empty_dem.observables_flips_matrix = cudaqx::tensor<uint8_t>({numObs, 0});
-    return {std::move(empty_dem), std::move(empty_m2d), std::move(m2o)};
+    return decoder_inputs(std::move(empty_dem), m2d_to_sparse(empty_m2d));
   }
 
   // Select the detector rows.
@@ -497,17 +499,55 @@ make_component(detector_error_model dem, cudaq::M2DSparseMatrix m2d,
       (keep_z ? num_z_stabilizers : 0) + (keep_x ? num_x_stabilizers : 0);
   dem.canonicalize_for_rounds(static_cast<uint32_t>(numReturnSynPerRound),
                               /*remove_zero_syndrome_errors=*/true);
-  return {std::move(dem), std::move(out_m2d), std::move(m2o)};
+  return decoder_inputs(std::move(dem), m2d_to_sparse(out_m2d));
 }
 
 } // namespace details
 
 std::vector<std::int64_t> d_sparse(const cudaq::M2DSparseMatrix &m2d) {
   std::vector<std::int64_t> out;
-  out.reserve(m2d.rows.size() * 2); // rough estimate
   for (const auto &row : m2d.rows) {
-    for (auto meas : row)
-      out.push_back(static_cast<std::int64_t>(meas));
+    for (const auto measurement : row) {
+      if (measurement >
+          static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max()))
+        throw std::overflow_error(
+            "measurement-to-detector index exceeds int64_t range");
+      out.push_back(static_cast<std::int64_t>(measurement));
+    }
+    out.push_back(-1);
+  }
+  return out;
+}
+
+sparse_binary_matrix m2d_to_sparse(const cudaq::M2DSparseMatrix &m2d) {
+  using index_type = sparse_binary_matrix::index_type;
+  if (m2d.rows.size() > std::numeric_limits<index_type>::max() ||
+      m2d.num_measurements > std::numeric_limits<index_type>::max())
+    throw std::overflow_error(
+        "measurement-to-detector map exceeds uint32_t dimensions");
+
+  std::vector<std::vector<index_type>> rows;
+  rows.reserve(m2d.rows.size());
+  for (const auto &source_row : m2d.rows) {
+    auto &row = rows.emplace_back();
+    row.reserve(source_row.size());
+    for (const auto measurement : source_row) {
+      if (measurement > std::numeric_limits<index_type>::max())
+        throw std::overflow_error(
+            "measurement-to-detector index exceeds uint32_t range");
+      row.push_back(static_cast<index_type>(measurement));
+    }
+  }
+  return sparse_binary_matrix::from_nested_csr(
+      static_cast<index_type>(rows.size()),
+      static_cast<index_type>(m2d.num_measurements), rows);
+}
+
+std::vector<std::int64_t> d_sparse(const sparse_binary_matrix &m2d) {
+  std::vector<std::int64_t> out;
+  for (const auto &row : m2d.to_nested_csr()) {
+    for (const auto measurement : row)
+      out.push_back(static_cast<std::int64_t>(measurement));
     out.push_back(-1);
   }
   return out;
@@ -575,24 +615,29 @@ std::size_t decoder_context::num_measurements() const {
   return m2d_.num_measurements;
 }
 
+const cudaq::M2OSparseMatrix &
+decoder_context::measurement_to_observables() const {
+  return m2o_;
+}
+
 decoder_inputs decoder_context::x_component() const {
-  return details::make_component(dem_, m2d_, m2o_, num_rounds_,
-                                 num_x_stabilizers_, num_z_stabilizers_,
-                                 fixed_basis_is_z_, /*keep_x=*/true,
+  return details::make_component(dem_, m2d_, num_rounds_, num_x_stabilizers_,
+                                 num_z_stabilizers_, fixed_basis_is_z_,
+                                 /*keep_x=*/true,
                                  /*keep_z=*/false);
 }
 
 decoder_inputs decoder_context::z_component() const {
-  return details::make_component(dem_, m2d_, m2o_, num_rounds_,
-                                 num_x_stabilizers_, num_z_stabilizers_,
-                                 fixed_basis_is_z_, /*keep_x=*/false,
+  return details::make_component(dem_, m2d_, num_rounds_, num_x_stabilizers_,
+                                 num_z_stabilizers_, fixed_basis_is_z_,
+                                 /*keep_x=*/false,
                                  /*keep_z=*/true);
 }
 
 decoder_inputs decoder_context::full_component() const {
-  return details::make_component(dem_, m2d_, m2o_, num_rounds_,
-                                 num_x_stabilizers_, num_z_stabilizers_,
-                                 fixed_basis_is_z_, /*keep_x=*/true,
+  return details::make_component(dem_, m2d_, num_rounds_, num_x_stabilizers_,
+                                 num_z_stabilizers_, fixed_basis_is_z_,
+                                 /*keep_x=*/true,
                                  /*keep_z=*/true);
 }
 
@@ -605,7 +650,7 @@ detector_error_model dem_from_memory_circuit(const code &code,
   return decoder_context_from_memory_circuit(code, statePrep, numRounds, noise,
                                              decompose_errors)
       .full_component()
-      .dem;
+      .materialize_detector_error_model();
 }
 
 // For CSS codes, may want to partition x vs z decoding
@@ -617,7 +662,7 @@ detector_error_model x_dem_from_memory_circuit(const code &code,
   return decoder_context_from_memory_circuit(code, statePrep, numRounds, noise,
                                              decompose_errors)
       .x_component()
-      .dem;
+      .materialize_detector_error_model();
 }
 
 detector_error_model z_dem_from_memory_circuit(const code &code,
@@ -628,7 +673,7 @@ detector_error_model z_dem_from_memory_circuit(const code &code,
   return decoder_context_from_memory_circuit(code, statePrep, numRounds, noise,
                                              decompose_errors)
       .z_component()
-      .dem;
+      .materialize_detector_error_model();
 }
 
 } // namespace cudaq::qec

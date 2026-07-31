@@ -19,7 +19,7 @@
 #include <fmt/ranges.h>
 #include <vector>
 
-INSTANTIATE_REGISTRY(cudaq::qec::decoder, const cudaq::qec::decoder_init &,
+INSTANTIATE_REGISTRY(cudaq::qec::decoder, cudaq::qec::decoder_inputs,
                      const cudaqx::heterogeneous_map &)
 
 // Include decoder implementations AFTER registry instantiation
@@ -78,11 +78,11 @@ struct decoder::rt_impl {
 
 void decoder::rt_impl_deleter::operator()(rt_impl *p) const { delete p; }
 
-decoder::decoder(cudaq::qec::sparse_binary_matrix H)
-    : H(std::move(H)),
-      pimpl(std::unique_ptr<rt_impl, rt_impl_deleter>(new rt_impl())) {
-  syndrome_size = this->H.num_rows();
-  block_size = this->H.num_cols();
+decoder::decoder(decoder_inputs inputs)
+    : pimpl(std::unique_ptr<rt_impl, rt_impl_deleter>(new rt_impl())),
+      inputs_(std::move(inputs)) {
+  syndrome_size = inputs_.num_detectors();
+  block_size = inputs_.num_error_mechanisms();
   reset_decoder();
   pimpl->persistent_detector_buffer.resize(this->syndrome_size);
   pimpl->persistent_soft_detector_buffer.resize(this->syndrome_size);
@@ -203,7 +203,7 @@ private:
 };
 
 std::unique_ptr<decoder>
-decoder::get(const std::string &name, const decoder_init &init,
+decoder::get(const std::string &name, decoder_inputs inputs,
              const cudaqx::heterogeneous_map &param_map) {
   auto [mutex, registry] = get_registry();
   std::lock_guard<std::recursive_mutex> lock(mutex);
@@ -215,7 +215,7 @@ decoder::get(const std::string &name, const decoder_init &init,
         "additional plugin diagnostics at startup.");
   const int cuda_device_id = read_cuda_device_id(param_map);
   if (cuda_device_id < 0)
-    return iter->second(init, param_map);
+    return iter->second(std::move(inputs), param_map);
   ConstructionDevicePin device_pin(cuda_device_id);
   // The key is consumed here; strip it so plugins that strictly validate
   // their parameter keys do not reject it.
@@ -223,7 +223,7 @@ decoder::get(const std::string &name, const decoder_init &init,
   for (const auto &kv : param_map)
     if (kv.first != "cuda_device_id")
       plugin_params.insert(kv.first, kv.second);
-  auto d = iter->second(init, plugin_params);
+  auto d = iter->second(std::move(inputs), plugin_params);
   d->cuda_device_id_ = cuda_device_id;
   device_pin.commit();
   return d;
@@ -247,10 +247,13 @@ dem_default_values dem_defaults_for_missing_keys(
 static uint32_t calculate_num_msyn_per_decode(
     const std::vector<std::vector<uint32_t>> &D_sparse) {
   uint32_t max_col = 0;
+  bool found_column = false;
   for (const auto &row : D_sparse)
-    for (const auto col : row)
+    for (const auto col : row) {
       max_col = std::max(max_col, col);
-  return max_col + 1;
+      found_column = true;
+    }
+  return found_column ? max_col + 1 : 0;
 }
 
 static void
@@ -271,33 +274,42 @@ static void
 set_sparse_from_vec(const std::vector<int64_t> &vec_in,
                     std::vector<std::vector<uint32_t>> &sparse_out) {
   sparse_out.clear();
-  bool first_of_row = true;
+  std::vector<uint32_t> row;
   for (auto elem : vec_in) {
     if (elem < 0) {
-      first_of_row = true;
+      sparse_out.push_back(std::move(row));
+      row.clear();
     } else {
-      if (first_of_row) {
-        sparse_out.emplace_back();
-        first_of_row = false;
-      }
-      sparse_out.back().push_back(static_cast<uint32_t>(elem));
+      row.push_back(static_cast<uint32_t>(elem));
     }
   }
+  if (!row.empty())
+    sparse_out.push_back(std::move(row));
 }
 
 void decoder::set_O_sparse(const std::vector<std::vector<uint32_t>> &O_sparse) {
+  if (inputs_.num_observables() > 0 &&
+      O_sparse.size() != inputs_.num_observables())
+    throw std::invalid_argument(
+        "O_sparse row count must match decoder_inputs observable count");
+  validate_sparse_column_indices(O_sparse, block_size, "O_sparse");
   this->O_sparse = O_sparse;
-  validate_sparse_column_indices(this->O_sparse, block_size, "O_sparse");
   this->pimpl->corrections.clear();
-  this->pimpl->corrections.resize(O_sparse.size());
+  this->pimpl->corrections.resize(get_num_observables());
   on_o_sparse_configured();
 }
 
 void decoder::set_O_sparse(const std::vector<int64_t> &O_sparse_vec_in) {
-  set_sparse_from_vec(O_sparse_vec_in, this->O_sparse);
-  validate_sparse_column_indices(this->O_sparse, block_size, "O_sparse");
+  std::vector<std::vector<uint32_t>> parsed;
+  set_sparse_from_vec(O_sparse_vec_in, parsed);
+  if (inputs_.num_observables() > 0 &&
+      parsed.size() != inputs_.num_observables())
+    throw std::invalid_argument(
+        "O_sparse row count must match decoder_inputs observable count");
+  validate_sparse_column_indices(parsed, block_size, "O_sparse");
+  this->O_sparse = std::move(parsed);
   this->pimpl->corrections.clear();
-  this->pimpl->corrections.resize(O_sparse.size());
+  this->pimpl->corrections.resize(get_num_observables());
   on_o_sparse_configured();
 }
 
@@ -314,7 +326,7 @@ uint32_t decoder::get_decoder_id() const { return pimpl->decoder_id; }
 template <typename PimplType>
 void set_D_sparse_common(decoder *decoder,
                          const std::vector<std::vector<uint32_t>> &D_sparse,
-                         PimplType *pimpl) {
+                         uint32_t num_measurements, PimplType *pimpl) {
   auto *sw_decoder = dynamic_cast<sliding_window *>(decoder);
 
   if (sw_decoder != nullptr) {
@@ -345,7 +357,7 @@ void set_D_sparse_common(decoder *decoder,
     }
   }
 
-  pimpl->num_msyn_per_decode = calculate_num_msyn_per_decode(D_sparse);
+  pimpl->num_msyn_per_decode = num_measurements;
   pimpl->msyn_buffer.clear();
   pimpl->msyn_buffer.resize(pimpl->num_msyn_per_decode);
   pimpl->msyn_buffer_index = 0;
@@ -353,13 +365,22 @@ void set_D_sparse_common(decoder *decoder,
 
 void decoder::set_D_sparse(const std::vector<std::vector<uint32_t>> &D_sparse) {
   this->D_sparse = D_sparse;
-  set_D_sparse_common(this, D_sparse, pimpl.get());
+  set_D_sparse_common(this, D_sparse, calculate_num_msyn_per_decode(D_sparse),
+                      pimpl.get());
   on_d_sparse_configured();
 }
 
 void decoder::set_D_sparse(const std::vector<int64_t> &D_sparse_vec_in) {
   set_sparse_from_vec(D_sparse_vec_in, this->D_sparse);
-  set_D_sparse_common(this, this->D_sparse, pimpl.get());
+  set_D_sparse_common(this, this->D_sparse,
+                      calculate_num_msyn_per_decode(this->D_sparse),
+                      pimpl.get());
+  on_d_sparse_configured();
+}
+
+void decoder::set_D_sparse(const sparse_binary_matrix &D_sparse) {
+  this->D_sparse = D_sparse.to_nested_csr();
+  set_D_sparse_common(this, this->D_sparse, D_sparse.num_cols(), pimpl.get());
   on_d_sparse_configured();
 }
 
@@ -406,8 +427,8 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
     if (should_log) {
       log_t0 = std::chrono::high_resolution_clock::now();
       log_errors.reserve(syndrome_length);
-      log_observables.reserve(O_sparse.size());
-      log_observable_corrections.resize(O_sparse.size());
+      log_observables.reserve(get_num_observables());
+      log_observable_corrections.resize(get_num_observables());
     }
 
     // Decode now.
@@ -514,6 +535,10 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
     case decode_result_type::decode_to_errs:
       // Error-frame path: decoder returns a block-sized error vector; project
       // to observables via O_sparse.
+      if (O_sparse.size() != num_observables)
+        throw std::runtime_error(fmt::format(
+            "Observable matrix is not configured: expected {} rows, got {}",
+            num_observables, O_sparse.size()));
       if (should_log)
         for (std::size_t e = 0, E = decoded_result.result.size(); e < E; e++)
           if (decoded_result.result[e])
@@ -569,7 +594,7 @@ bool decoder::enqueue_syndrome(const std::vector<uint8_t> &syndrome) {
 
 void decoder::clear_corrections() {
   pimpl->corrections.clear();
-  pimpl->corrections.resize(O_sparse.size());
+  pimpl->corrections.resize(get_num_observables());
   const bool log_due_to_log_level =
       cudaq::qec::detail::should_log(cudaq::qec::detail::log_level::info);
   const bool should_log = pimpl->should_log || log_due_to_log_level;
@@ -602,7 +627,10 @@ const uint8_t *decoder::get_obs_corrections() const {
   return pimpl->corrections.data();
 }
 
-std::size_t decoder::get_num_observables() const { return O_sparse.size(); }
+std::size_t decoder::get_num_observables() const {
+  return inputs_.num_observables() > 0 ? inputs_.num_observables()
+                                       : O_sparse.size();
+}
 
 void decoder::reset_decoder() {
   // Zero out all data that is considered "per-shot" memory.
@@ -612,7 +640,7 @@ void decoder::reset_decoder() {
   pimpl->msyn_buffer.clear();
   pimpl->msyn_buffer.resize(pimpl->num_msyn_per_decode);
   pimpl->corrections.clear();
-  pimpl->corrections.resize(O_sparse.size());
+  pimpl->corrections.resize(get_num_observables());
   const bool log_due_to_log_level =
       cudaq::qec::detail::should_log(cudaq::qec::detail::log_level::info);
   const bool should_log = pimpl->should_log || log_due_to_log_level;
@@ -629,9 +657,9 @@ void decoder::reset_decoder() {
 }
 
 std::unique_ptr<decoder> get_decoder(const std::string &name,
-                                     const decoder_init &init,
+                                     decoder_inputs inputs,
                                      const cudaqx::heterogeneous_map options) {
-  return decoder::get(name, init, options);
+  return decoder::get(name, std::move(inputs), options);
 }
 
 // Constructor function for auto-loading plugins

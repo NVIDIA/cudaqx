@@ -327,7 +327,7 @@ void save_dem_to_file(
     const auto &inputs = (decoder_type == "nv-qldpc-decoder")
                              ? bp_inputs[i]
                              : matching_inputs[i];
-    const auto &edem = inputs.dem;
+    const auto edem = inputs.materialize_detector_error_model();
     cudaq::qec::decoding::config::decoder_config config;
     config.id = i;
     config.type = decoder_type;
@@ -337,7 +337,10 @@ void save_dem_to_file(
     config.O_sparse =
         cudaq::qec::pcm_to_sparse_vec(edem.observables_flips_matrix);
     // Ising replaces this native mapping with its detector ordering below.
-    config.D_sparse = cudaq::qec::d_sparse(inputs.m2d);
+    const auto *D = inputs.measurement_to_detectors();
+    if (!D)
+      throw std::runtime_error("decoder inputs are missing D");
+    config.D_sparse = cudaq::qec::d_sparse(*D);
 
     if (decoder_type == "nv-qldpc-decoder") {
       cudaqx::heterogeneous_map nv_args;
@@ -394,20 +397,18 @@ void save_dem_to_file(
             ising_artifacts_dir + "/O_csr.bin", oRows, oCols);
         auto priors = read_priors_bin(ising_artifacts_dir + "/priors.bin");
         std::size_t dRows = 0;
-        config.D_sparse =
-            read_D_sparse_txt(ising_artifacts_dir + "/D_sparse.txt",
-                              inputs.m2d.num_measurements, dRows);
+        config.D_sparse = read_D_sparse_txt(
+            ising_artifacts_dir + "/D_sparse.txt", D->num_cols(), dRows);
 
-        if (hRows != inputs.m2d.rows.size())
+        if (hRows != D->num_rows())
           throw std::runtime_error("Ising H rows (" + std::to_string(hRows) +
                                    ") != cudaqx m2d detectors (" +
-                                   std::to_string(inputs.m2d.rows.size()) +
-                                   ")");
-        if (dRows != inputs.m2d.rows.size())
-          throw std::runtime_error(
-              "D_sparse.txt rows (" + std::to_string(dRows) +
-              ") != cudaqx m2d detectors (" +
-              std::to_string(inputs.m2d.rows.size()) + ")");
+                                   std::to_string(D->num_rows()) + ")");
+        if (dRows != D->num_rows())
+          throw std::runtime_error("D_sparse.txt rows (" +
+                                   std::to_string(dRows) +
+                                   ") != cudaqx m2d detectors (" +
+                                   std::to_string(D->num_rows()) + ")");
         if (hCols != oCols || hCols != priors.size())
           throw std::runtime_error("Ising H/O/priors column counts disagree");
         if (oRows != 1)
@@ -989,7 +990,11 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
           patch_m2o, prep, numData, numAncx, numAncz, pairedRounds,
           cnot_schedX_flat, cnot_schedZ_flat, p_spam_per_patch[patch],
           z_logical_indices, z_supports_flat, z_supports_offsets);
-      if (patch > 0 && patch_m2d.rows != matching_inputs.front().m2d.rows)
+      const auto patch_D = cudaq::qec::m2d_to_sparse(patch_m2d);
+      if (patch > 0 &&
+          patch_D.to_nested_csr() != matching_inputs.front()
+                                         .measurement_to_detectors()
+                                         ->to_nested_csr())
         throw std::runtime_error(
             "per-patch DEMs produced different measurement mappings");
 
@@ -999,11 +1004,10 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
           dual_parse ? cudaq::qec::dem_from_stim_text(
                            dem_text, /*use_decomp_suggestions=*/false)
                      : patch_dem;
-      matching_inputs.push_back({std::move(patch_dem), patch_m2d, patch_m2o});
-      bp_inputs.push_back({std::move(patch_dem_undecomposed),
-                           std::move(patch_m2d), std::move(patch_m2o)});
+      matching_inputs.emplace_back(std::move(patch_dem), patch_D);
+      bp_inputs.emplace_back(std::move(patch_dem_undecomposed), patch_D);
     }
-    dem = matching_inputs.front().dem;
+    dem = matching_inputs.front().materialize_detector_error_model();
 
     numSyndromesPerRound = numAncx + numAncz;
     printf("numSyndromesPerRound: %ld\n", numSyndromesPerRound);
