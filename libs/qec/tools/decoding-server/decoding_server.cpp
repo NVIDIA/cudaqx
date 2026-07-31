@@ -483,6 +483,10 @@ int main(int argc, char **argv) {
               else if (result.state == ConfigApplyState::busy)
                 std::cout << "QEC_DECODING_SERVER_CONFIG_BUSY reason="
                           << one_line(result.message) << std::endl;
+              else if (result.state == ConfigApplyState::awaiting_config)
+                std::cout << "QEC_DECODING_SERVER_CONFIG_FAILED "
+                             "awaiting_config reason="
+                          << one_line(result.message) << std::endl;
               else
                 std::cout << "QEC_DECODING_SERVER_CONFIG_REJECTED "
                              "old_config_active reason="

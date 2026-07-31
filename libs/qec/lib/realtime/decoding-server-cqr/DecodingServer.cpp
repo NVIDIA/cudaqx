@@ -433,7 +433,18 @@ ConfigApplyResult DecodingServer::apply_config(
   // handlers already between admission and queue insertion, then drain and
   // replace their sessions under exclusive ownership.
   std::unique_lock lifecycle_guard(lifecycle_mutex_);
-  return registry_.apply_config(config, source_name);
+  DeviceGraphLifecycle dg_lifecycle;
+  dg_lifecycle.stop = [this](uint64_t) {
+    if (owned_transports_.size() != 1)
+      return false;
+    return owned_transports_.front()->stop_device_scheduler();
+  };
+  dg_lifecycle.launch = [this](uint64_t, void *graph_resources) {
+    if (!graph_resources || owned_transports_.size() != 1)
+      return false;
+    return owned_transports_.front()->launch_device_scheduler(graph_resources);
+  };
+  return registry_.apply_config(config, source_name, dg_lifecycle);
 }
 
 void DecodingServer::stop() {

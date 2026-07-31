@@ -11,6 +11,7 @@
 #include "DecodingSession.h"
 #include "cudaq/qec/realtime/decoding_config.h"
 
+#include <functional>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -34,6 +35,14 @@ struct ConfigApplyResult {
   std::string message;
 };
 
+struct DeviceGraphLifecycle {
+  /// Stop the scheduler bound to decoder_id without releasing its provider
+  /// rings. Called before the old decoder graph is destroyed.
+  std::function<bool(uint64_t decoder_id)> stop;
+  /// Bind and launch the replacement graph on the preserved provider rings.
+  std::function<bool(uint64_t decoder_id, void *graph_resources)> launch;
+};
+
 class SessionNotReady : public std::runtime_error {
 public:
   using std::runtime_error::runtime_error;
@@ -43,7 +52,7 @@ public:
 ///
 /// Populated eagerly at startup. Live config apply is serialized by
 /// DecodingServer's lifecycle lock, so request handlers never access this map
-/// while host sessions are being replaced.
+/// while sessions are being replaced.
 class SessionRegistry {
 public:
   /// Parse \p yaml_path and construct one DecodingSession per decoder entry.
@@ -61,17 +70,18 @@ public:
 
   /// Apply decoder-only changes while preserving the process-owned ring
   /// topology. Decoder ids, dispatch shapes, and transport configuration are
-  /// immutable. device_graph entries are also immutable because their
-  /// captured graph resources are bound to live ring consumers outside this
-  /// registry. Host sessions are drained, destroyed, and reconstructed.
+  /// immutable. Changed device_graph sessions are supported when
+  /// device_graph_lifecycle supplies scheduler stop/relaunch hooks; the
+  /// provider and ring allocation remain process-owned and unchanged.
   ///
-  /// Static/topology rejection leaves the old sessions serving. A host
-  /// decoder construction failure occurs after the old host resources have
-  /// been released and leaves those ids unavailable until a later successful
-  /// apply.
+  /// Static/topology rejection leaves the old sessions serving. A decoder
+  /// construction or scheduler relaunch failure occurs after old resources
+  /// have been released and leaves those ids unavailable until a later
+  /// successful apply.
   ConfigApplyResult
   apply_config(const cudaq::qec::decoding::config::multi_decoder_config &config,
-               const std::string &source_name);
+               const std::string &source_name,
+               const DeviceGraphLifecycle &device_graph_lifecycle = {});
   DecodingSession &get(uint64_t decoder_id);
   const DecodingSession &get(uint64_t decoder_id) const;
 

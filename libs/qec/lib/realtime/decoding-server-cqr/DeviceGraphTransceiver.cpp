@@ -241,6 +241,13 @@ DeviceGraphTransceiver::DeviceGraphTransceiver(const DeviceGraphConfig &config)
 // ---------------------------------------------------------------------------
 
 void DeviceGraphTransceiver::launch_scheduler(void *raw_graph_resources) {
+  if (stopped_.load(std::memory_order_acquire))
+    throw std::runtime_error(
+        "DeviceGraphTransceiver::launch_scheduler: transport is stopped");
+  if (consumer_)
+    throw std::runtime_error(
+        "DeviceGraphTransceiver::launch_scheduler: scheduler already active");
+
   // All scheduler wiring (pinned function table + populate shims + dispatch
   // graph create/launch) lives in DeviceGraphRingConsumer; this transceiver
   // contributes only its provider's ring context and geometry.
@@ -251,26 +258,40 @@ void DeviceGraphTransceiver::launch_scheduler(void *raw_graph_resources) {
   ring.tx_data = tx_ring_data_;
   ring.rx_stride_sz = page_size_;
   ring.tx_stride_sz = page_size_;
-  consumer_ = std::make_unique<DeviceGraphRingConsumer>(
+  auto next_consumer = std::make_unique<DeviceGraphRingConsumer>(
       ring, num_pages_, page_size_, gpu_id_, raw_graph_resources);
 
-  // Start the provider's I/O loop (Hololink RX/TX kernels + monitor thread,
-  // owned by the provider) now that the scheduler is polling the rings.
-  if (cudaq_bridge_launch(bridge_) != CUDAQ_OK) {
-    consumer_->shutdown();
-    throw std::runtime_error(
-        "DeviceGraphTransceiver::launch_scheduler: provider launch() failed");
+  // Start the provider's I/O loop on the first scheduler bind. Live decoder
+  // reloads preserve that provider and only replace the scheduler consumer.
+  if (!provider_launched_) {
+    if (cudaq_bridge_launch(bridge_) != CUDAQ_OK) {
+      next_consumer->shutdown();
+      throw std::runtime_error(
+          "DeviceGraphTransceiver::launch_scheduler: provider launch() "
+          "failed");
+    }
+    provider_launched_ = true;
+
+    // Publish the endpoint only once. A decoder reload must not imply that the
+    // stable QP, rkey, or ring allocation was rebound.
+    std::cout << "QEC_DECODING_SERVER_ENDPOINT " << endpoint_info_ << "\n";
+    std::cout.flush();
   }
+  consumer_ = std::move(next_consumer);
 
   CUDA_QEC_INFO("DeviceGraphTransceiver: GPU scheduler launched ({})",
                 endpoint_info_);
+}
 
-  // Publish the provider's endpoint description VERBATIM so the
-  // orchestration layer can scrape whatever rendezvous tokens its wire
-  // needs (qp=/rkey=/buffer_addr= for RDMA playback, port= for sockets).
-  // This class does not know or care which tokens are present.
-  std::cout << "QEC_DECODING_SERVER_ENDPOINT " << endpoint_info_ << "\n";
-  std::cout.flush();
+bool DeviceGraphTransceiver::stop_device_scheduler() {
+  if (!consumer_)
+    return true;
+  consumer_->shutdown();
+  consumer_.reset();
+  CUDA_QEC_INFO(
+      "DeviceGraphTransceiver: GPU scheduler stopped; provider preserved ({})",
+      endpoint_info_);
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -302,9 +323,7 @@ void DeviceGraphTransceiver::shutdown() {
   if (stopped_.exchange(true, std::memory_order_acq_rel))
     return; // already stopped
 
-  // Signal the GPU scheduler's self-relaunch loop to stop.
-  if (consumer_)
-    consumer_->shutdown();
+  stop_device_scheduler();
 
   // Stop the Hololink RX/TX kernels and join the provider's monitor thread.
   if (bridge_)
@@ -314,14 +333,10 @@ void DeviceGraphTransceiver::shutdown() {
 DeviceGraphTransceiver::~DeviceGraphTransceiver() {
   // Ensure clean shutdown even if the caller omitted shutdown().
   if (!stopped_.exchange(true, std::memory_order_acq_rel)) {
-    if (consumer_)
-      consumer_->shutdown();
+    stop_device_scheduler();
     if (bridge_)
       cudaq_bridge_disconnect(bridge_);
   }
-  // Drain + destroy the scheduler BEFORE the provider (it polls the
-  // provider's ring memory).
-  consumer_.reset();
   if (bridge_)
     cudaq_bridge_destroy(bridge_);
 }

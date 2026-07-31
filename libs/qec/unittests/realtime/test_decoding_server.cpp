@@ -30,6 +30,7 @@
 /// syndrome bit 1 set -> correction bit 1 set for any sane decoder).
 
 #include "CqrTransceiver.h"
+#include "SessionRegistry.h"
 #include "cudaq.h"
 #include "cudaq/qec/realtime/decoding.h"
 #include "cudaq/realtime.h"
@@ -46,6 +47,7 @@
 #include <cstdio>
 #include <cstring>
 #include <map>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -728,17 +730,22 @@ std::string live_pymatching_yaml(int64_t decoder_id = 0,
   return yaml.str();
 }
 
-std::string live_multi_error_lut_yaml() {
-  return "decoders:\n"
-         "  - id: 0\n"
-         "    type: multi_error_lut\n"
-         "    block_size: 3\n"
-         "    syndrome_size: 3\n"
-         "    H_sparse: [0, -1, 1, -1, 2, -1]\n"
-         "    O_sparse: [0, -1, 1, -1, 2, -1]\n"
-         "    D_sparse: [0, -1, 1, -1, 2, -1]\n"
-         "    decoder_custom_args:\n"
-         "      lut_error_depth: 1\n";
+std::string live_multi_error_lut_yaml(int lut_error_depth = 1,
+                                      bool device_graph = false) {
+  std::ostringstream yaml;
+  yaml << "decoders:\n"
+       << "  - id: 0\n"
+       << "    type: multi_error_lut\n";
+  if (device_graph)
+    yaml << "    dispatch: device_graph\n";
+  yaml << "    block_size: 3\n"
+       << "    syndrome_size: 3\n"
+       << "    H_sparse: [0, -1, 1, -1, 2, -1]\n"
+       << "    O_sparse: [0, -1, 1, -1, 2, -1]\n"
+       << "    D_sparse: [0, -1, 1, -1, 2, -1]\n"
+       << "    decoder_custom_args:\n"
+       << "      lut_error_depth: " << lut_error_depth << "\n";
+  return yaml.str();
 }
 
 bool write_live_config(const std::string &path, const std::string &yaml) {
@@ -762,6 +769,101 @@ void initialize_live_config_client(std::uint16_t port,
 }
 
 } // namespace
+
+TEST(DecodingServerLiveConfig, RebindsChangedDeviceGraphWithLifecycleHooks) {
+  using namespace cudaq::qec::decoding_server;
+  using cudaq::qec::decoding::config::multi_decoder_config;
+
+  SessionRegistry registry;
+  const auto initial = multi_decoder_config::from_yaml_str(
+      live_multi_error_lut_yaml(/*lut_error_depth=*/1,
+                                /*device_graph=*/true));
+  const auto replacement = multi_decoder_config::from_yaml_str(
+      live_multi_error_lut_yaml(/*lut_error_depth=*/2,
+                                /*device_graph=*/true));
+  registry.load_from_config(initial, "device-graph initial config");
+
+  const auto unsupported =
+      registry.apply_config(replacement, "missing lifecycle hooks");
+  EXPECT_EQ(unsupported.state, ConfigApplyState::rejected)
+      << unsupported.message;
+  EXPECT_NO_THROW((void)registry.get(0));
+
+  std::vector<std::string> events;
+  DeviceGraphLifecycle lifecycle;
+  lifecycle.stop = [&](uint64_t id) {
+    EXPECT_EQ(id, 0u);
+    events.emplace_back("stop");
+    return true;
+  };
+  lifecycle.launch = [&](uint64_t id, void *graph_resources) {
+    EXPECT_EQ(id, 0u);
+    EXPECT_EQ(graph_resources, nullptr); // LUT is a hardware-free test double.
+    events.emplace_back("launch");
+    return true;
+  };
+
+  auto moved_device = replacement;
+  moved_device.decoders.front().cuda_device_id = 1;
+  const auto affinity_change =
+      registry.apply_config(moved_device, "changed CUDA device", lifecycle);
+  EXPECT_EQ(affinity_change.state, ConfigApplyState::rejected)
+      << affinity_change.message;
+  EXPECT_TRUE(events.empty());
+  EXPECT_NO_THROW((void)registry.get(0));
+
+  const auto result =
+      registry.apply_config(replacement, "device-graph replacement", lifecycle);
+  EXPECT_EQ(result.state, ConfigApplyState::applied) << result.message;
+  EXPECT_EQ(events, (std::vector<std::string>{"stop", "launch"}));
+  EXPECT_NO_THROW((void)registry.get(0));
+
+  events.clear();
+  const auto unchanged =
+      registry.apply_config(replacement, "unchanged config", lifecycle);
+  EXPECT_EQ(unchanged.state, ConfigApplyState::unchanged);
+  EXPECT_TRUE(events.empty());
+}
+
+TEST(DecodingServerLiveConfig, DeviceGraphLaunchFailureCanRecover) {
+  using namespace cudaq::qec::decoding_server;
+  using cudaq::qec::decoding::config::multi_decoder_config;
+
+  SessionRegistry registry;
+  const auto initial = multi_decoder_config::from_yaml_str(
+      live_multi_error_lut_yaml(/*lut_error_depth=*/1,
+                                /*device_graph=*/true));
+  const auto replacement = multi_decoder_config::from_yaml_str(
+      live_multi_error_lut_yaml(/*lut_error_depth=*/2,
+                                /*device_graph=*/true));
+  registry.load_from_config(initial, "device-graph initial config");
+
+  bool launch_succeeds = false;
+  std::vector<std::string> events;
+  DeviceGraphLifecycle lifecycle;
+  lifecycle.stop = [&](uint64_t) {
+    events.emplace_back("stop");
+    return true;
+  };
+  lifecycle.launch = [&](uint64_t, void *) {
+    events.emplace_back("launch");
+    return launch_succeeds;
+  };
+
+  const auto failed =
+      registry.apply_config(replacement, "failed replacement", lifecycle);
+  EXPECT_EQ(failed.state, ConfigApplyState::awaiting_config) << failed.message;
+  EXPECT_EQ(events, (std::vector<std::string>{"stop", "launch", "stop"}));
+  EXPECT_THROW((void)registry.get(0), SessionNotReady);
+
+  events.clear();
+  launch_succeeds = true;
+  const auto recovered =
+      registry.apply_config(replacement, "recovered replacement", lifecycle);
+  EXPECT_EQ(recovered.state, ConfigApplyState::applied) << recovered.message;
+  EXPECT_EQ(events, (std::vector<std::string>{"launch"}));
+  EXPECT_NO_THROW((void)registry.get(0));
+}
 
 TEST(DecodingServerLiveConfig, ReplacesHostDecoderWithoutRebindingRing) {
   const std::string path =
