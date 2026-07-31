@@ -11,7 +11,7 @@ decoder using CUDA-Q's realtime host dispatch system.  The decoder runs as a
 CPU-launched CUDA graph (``HOST_LOOP`` dispatch path) and can operate in three
 configurations:
 
-- **CI unit test** -- standalone executable, no FPGA or network hardware needed
+- **Unit test** -- standalone executable, no FPGA or network hardware needed
 - **Emulated end-to-end test** -- software FPGA emulator replaces real hardware
 - **FPGA end-to-end test** -- real FPGA connected via ConnectX RDMA/RoCE
 
@@ -29,7 +29,7 @@ Hardware
      - GPU
      - ConnectX NIC
      - FPGA
-   * - CI unit test
+   * - Unit test
      - Any CUDA-capable GPU
      - Not required
      - Not required
@@ -124,7 +124,7 @@ the Hololink ``GpuRoceTransceiver`` library for RDMA transport.
 .. note::
 
    ``holoscan-sensor-bridge`` is only needed for the emulated and FPGA
-   end-to-end tests.  The CI unit test requires only ``libcudaq-realtime``.
+   end-to-end tests.  The unit test requires only ``libcudaq-realtime``.
 
 Repository Layout
 -----------------
@@ -137,7 +137,7 @@ Key files within ``cudaqx``:
      unittests/
        realtime/
          qec_graph_decode_test/
-           test_realtime_qldpc_graph_decoding_host_loop.cpp  # v0.7 CI unit test
+           test_realtime_qldpc_graph_decoding_host_loop.cpp  # v0.7 unit test
          qec_roce_decode_test/
            data/
              config_nv_qldpc_relay.yml              # Relay BP decoder config
@@ -155,13 +155,13 @@ The FPGA emulator is in the ``cuda-quantum`` repository:
      unittests/utils/
        hololink_fpga_emulator.cpp                   # Software FPGA emulator
 
-Building
---------
+Build and Unit Test
+-------------------
 
-CI unit test only (no Hololink tools)
+Unit test only (no Hololink tools)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-If you only need to run the CI unit test, you can build without
+If you only need to run the unit test, you can build without
 ``holoscan-sensor-bridge``:
 
 .. code-block:: bash
@@ -184,8 +184,8 @@ If you only need to run the CI unit test, you can build without
      -DCUDAQX_INCLUDE_TESTS=ON
    cmake --build cudaqx/build --target test_realtime_qldpc_graph_decoding
 
-Full build (CI test + Hololink bridge/playback tools)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Full build (unit test + Hololink bridge/playback tools)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 To also build the bridge and playback tools for emulated or FPGA testing:
 
@@ -268,10 +268,10 @@ The orchestration script can build everything automatically:
      --cuda-quantum-dir /path/to/cuda-quantum \
      --no-run
 
-CI Unit Test
-------------
+Unit Test
+^^^^^^^^^^^^
 
-The CI unit test (``test_realtime_qldpc_graph_decoding``) exercises the full
+The unit test (``test_realtime_qldpc_graph_decoding``) exercises the full
 host dispatch decode path without any network hardware.  It:
 
 1. Loads the Relay BP config and syndrome data from YAML/text files
@@ -281,8 +281,7 @@ host dispatch decode path without any network hardware.  It:
 5. Writes RPC requests into the ring buffer, the host dispatcher launches the
    CUDA graph, and the test verifies corrections
 
-Running
-^^^^^^^
+Run it with:
 
 .. code-block:: bash
 
@@ -305,13 +304,15 @@ Expected output:
    [==========] 1 test from 1 test suite ran.
    [  PASSED  ] 1 test.
 
-Surface Code Test (Relay BP)
-----------------------------
+Surface Code Test
+-----------------
+
+While the unit test above checks the decode path against a fixed set of pre-recorded syndromes, this test measures how Relay BP actually performs on a code: it runs a full surface code memory experiment, generating fresh syndromes on the fly and decoding as many shots as you like.
 
 The ``surface_code-1-local`` app example runs a surface code memory experiment
 with the nv-qldpc-decoder configured for Relay BP.  It simulates a surface code
-with ``stim`` and generates syndromes on the fly, so -- unlike the fixed-fixture
-CI unit test -- it can run an arbitrary number of shots.
+with ``stim`` and generates syndromes on the fly, so it can run an arbitrary
+number of shots.
 
 Build the app example (the nv-qldpc-decoder plugin must be installed as
 explained above):
@@ -364,8 +365,8 @@ Requirements
   `cuda-quantum realtime build guide <https://github.com/NVIDIA/cuda-quantum/blob/main/realtime/docs/building.md>`__
 - All three tools built (bridge, playback, emulator)
 
-Running
-^^^^^^^
+Running the Emulated Test
+^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. code-block:: bash
 
@@ -394,8 +395,8 @@ processes run:
 2. **Playback** -- loads syndromes into the FPGA's BRAM and triggers playback,
    then reads back corrections from the FPGA's capture RAM to verify them
 
-Requirements
-^^^^^^^^^^^^
+FPGA Requirements
+^^^^^^^^^^^^^^^^^
 
 - FPGA programmed with the HSB IP bitfile, connected to a ConnectX NIC via
   direct cable or switch.  Bitfiles for supported FPGA vendors are available
@@ -405,8 +406,8 @@ Requirements
 - FPGA IP and bridge IP on the same subnet
 - ConnectX device name (e.g., ``mlx5_4``, ``mlx5_5``)
 
-Running
-^^^^^^^
+Running the FPGA Test
+^^^^^^^^^^^^^^^^^^^^^
 
 .. code-block:: bash
 

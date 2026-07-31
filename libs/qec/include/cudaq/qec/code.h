@@ -81,7 +81,7 @@ enum class operation {
 ///     // Register other required operations...
 ///
 ///     // Define the default stabilizers!
-///     m_stabilizers = qec::stabilizers({"XXXX", "ZZZZ"});
+///     m_stabilizers = fromPauliWords({"XXXX", "ZZZZ"});
 ///   }
 ///
 ///   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(

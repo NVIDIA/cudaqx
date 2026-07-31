@@ -34,7 +34,7 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://nvidia.github.io/cudaqx"
-Documentation = "https://nvidia.github.io/cudaqx/components/qec/introduction.html"
+Documentation = "https://nvidia.github.io/cudaqx/components/qec/index.html"
 Repository = "https://github.com/NVIDIA/cudaqx"
 
 [build-system]
