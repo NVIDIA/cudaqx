@@ -98,9 +98,15 @@ sed -i \
 sed -i 's/nanobind-static Python3::Python/nanobind-static Python3::Module/' \
   python/runtime/cudaq/domains/plugins/CMakeLists.txt
 
-if grep -q 'find_package(Python3\? \?3\? \?COMPONENTS Interpreter Development)' CMakeLists.txt ||
-   grep -q 'nanobind-static Python3::Python' \
-     python/runtime/cudaq/domains/plugins/CMakeLists.txt; then
+# Require the substituted forms to be present (not just the old forms gone):
+# if upstream reshapes these lines, sed matches nothing and the build would
+# otherwise silently produce a wheel that hard-links libpython.
+plugins_cmake=python/runtime/cudaq/domains/plugins/CMakeLists.txt
+if ! grep -qF 'find_package(Python 3 COMPONENTS Interpreter Development.Module)' CMakeLists.txt ||
+   ! grep -qF 'find_package(Python3 COMPONENTS Interpreter Development.Module)' CMakeLists.txt ||
+   ! grep -qF 'nanobind-static Python3::Module' "$plugins_cmake" ||
+   grep -qF 'COMPONENTS Interpreter Development)' CMakeLists.txt ||
+   grep -qF 'nanobind-static Python3::Python' "$plugins_cmake"; then
   echo "build_cudaq_wheel: Python component substitution did not take effect;" >&2
   echo "  the cuda-quantum CMake files have changed shape and this script" >&2
   echo "  needs updating." >&2

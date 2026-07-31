@@ -136,11 +136,17 @@ apply_sed python/runtime/cudaq/domains/plugins/CMakeLists.txt \
   's/nanobind-static Python3::Python/nanobind-static Python3::Module/' \
   'cudaq-pyscf Python3::Python -> Python3::Module'
 
-# Fail loudly if either substitution silently matched nothing -- an upstream
-# rename here would otherwise produce a wheel that links libpython.
-if grep -q 'find_package(Python3\? \?3\? \?COMPONENTS Interpreter Development)' CMakeLists.txt ||
-   grep -q 'nanobind-static Python3::Python' \
-     python/runtime/cudaq/domains/plugins/CMakeLists.txt; then
+# Fail loudly unless the substituted forms are actually present now and the
+# old forms are gone.  Requiring the NEW forms (not just the absence of the
+# old ones) matters: if upstream reshapes these lines, sed matches nothing,
+# the old-form greps also match nothing, and the build would otherwise
+# silently produce a wheel that hard-links libpython.
+plugins_cmake=python/runtime/cudaq/domains/plugins/CMakeLists.txt
+if ! grep -qF 'find_package(Python 3 COMPONENTS Interpreter Development.Module)' CMakeLists.txt ||
+   ! grep -qF 'find_package(Python3 COMPONENTS Interpreter Development.Module)' CMakeLists.txt ||
+   ! grep -qF 'nanobind-static Python3::Module' "$plugins_cmake" ||
+   grep -qF 'COMPONENTS Interpreter Development)' CMakeLists.txt ||
+   grep -qF 'nanobind-static Python3::Python' "$plugins_cmake"; then
   echo "build_cudaq: Python component substitution did not take effect; the" >&2
   echo "  cuda-quantum CMake files have changed shape and this script needs" >&2
   echo "  updating." >&2
