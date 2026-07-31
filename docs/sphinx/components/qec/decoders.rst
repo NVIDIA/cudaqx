@@ -281,15 +281,17 @@ CUDA-Q QEC provides pre-built decoders for a variety of use cases.
 
 .. list-table::
    :header-rows: 1
-   :widths: 20 30 9 9 40
+   :widths: 20 26 8 8 12 40
 
    * - Decoder
      - Decoder String Identifier
      - Python
      - C++
+     - Realtime Enabled
      - Notes
    * - NVIDIA QLDPC Decoder¹
      - `"nv-qldpc-decoder"`
+     - Yes
      - Yes
      - Yes
      - Supports Relay BP and BP+OSD
@@ -297,14 +299,17 @@ CUDA-Q QEC provides pre-built decoders for a variety of use cases.
      - `"tensor_network_decoder"`
      - Yes²
      - No
+     - No
      - Exact Maximum Likelihood Decoder
    * - TensorRT Decoder¹
      - `"trt_decoder"`
      - Yes³
      - Yes
+     - No
      - AI decoder. Bring your own model.
    * - PyMatching Decoder
      - `"pymatching"`
+     - Yes
      - Yes
      - Yes
      - MWPM decoder for matchable codes such as the surface code
@@ -312,9 +317,11 @@ CUDA-Q QEC provides pre-built decoders for a variety of use cases.
      - `"chromobius"`
      - Yes
      - Yes
+     - No
      - Color-code (Möbius) decoder; constructed from Stim DEM text
    * - Look-Up Table Decoder
      - `"single_error_lut"` / `"multi_error_lut"`
+     - Yes
      - Yes
      - Yes
      - Simple LUT decoders; ``multi_error_lut`` handles up to ``lut_error_depth`` errors
@@ -322,6 +329,7 @@ CUDA-Q QEC provides pre-built decoders for a variety of use cases.
      - `"sliding_window"`
      - Yes
      - Yes
+     - No
      - Decodes syndromes in a sliding window; pairs with any inner decoder except the TensorRT Decoder
 
 | ¹ GPU-accelerated decoder
