@@ -104,10 +104,10 @@ struct decoder_config {
 /// `device_graph` member of `transport_config`).
 struct transport_shape_override {
   /// Provider name (e.g. udp, cpu_roce, gpu_roce) or /path/to/lib.so.
-  /// A bare name resolves to the CUDA-Q realtime provider library
-  /// libcudaq-realtime-bridge-<name>.so, with '_' in the name mapping to
-  /// '-' to match the shipped hyphenated sonames (so gpu_roce loads
-  /// libcudaq-realtime-bridge-gpu-roce.so).
+  /// A bare name resolves to the CUDA-Q realtime provider library whose
+  /// soname is "libcudaq-realtime-bridge-" + name + ".so", with '_' in the
+  /// name mapping to '-' to match the shipped hyphenated sonames (so
+  /// gpu_roce loads libcudaq-realtime-bridge-gpu-roce.so).
   /// Empty = inherit the section/CLI default.
   std::string provider;
   /// Extra provider arguments appended for this shape's rings.
