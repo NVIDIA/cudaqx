@@ -326,6 +326,11 @@ decoders:
   EXPECT_EQ(parsed.transport.device_graph.provider, "hololink");
   ASSERT_EQ(parsed.transport.device_graph.args.size(), 1u);
   EXPECT_EQ(parsed.transport.device_graph.args[0], "--pinned-rings");
+  const auto resolved = parsed.transport.resolve_device_graph();
+  EXPECT_EQ(resolved.provider, "hololink");
+  ASSERT_EQ(resolved.args.size(), 2u);
+  EXPECT_EQ(resolved.args[0], "--num-slots=8");
+  EXPECT_EQ(resolved.args[1], "--pinned-rings");
   ASSERT_EQ(parsed.decoders.size(), 2u);
   EXPECT_EQ(parsed.decoders[0].dispatch,
             cudaq::qec::decoding::config::DecoderDispatch::host);

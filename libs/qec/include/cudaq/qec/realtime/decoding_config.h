@@ -135,6 +135,19 @@ struct transport_config {
   std::vector<std::string> args;
   transport_shape_override device_graph;
 
+  /// Resolve the provider and ordered arguments for a device-graph ring.
+  /// The shape-specific provider overrides the section provider, while its
+  /// arguments are appended to the section arguments.
+  transport_shape_override resolve_device_graph() const {
+    transport_shape_override resolved;
+    resolved.provider =
+        device_graph.provider.empty() ? provider : device_graph.provider;
+    resolved.args = args;
+    resolved.args.insert(resolved.args.end(), device_graph.args.begin(),
+                         device_graph.args.end());
+    return resolved;
+  }
+
   bool operator==(const transport_config &) const = default;
 };
 

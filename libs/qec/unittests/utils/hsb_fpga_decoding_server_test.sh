@@ -219,7 +219,7 @@ Run options:
   --num-shots N          Limit number of shots
   --page-size N          Ring buffer slot size in bytes (default: 384)
   --frame-size N         Server TX SGE bytes, cpu_roce only (default: 64;
-                         gpu_roce uses page-size as QEC_DEVICE_GRAPH_FRAME_SIZE)
+                         gpu_roce derives payload size from page-size in YAML)
   --gpu N                GPU device id for gpu_roce (default: 0)
   --gpu-roce-num-pages N Server GPU RoCE ring pages (default: auto-align;
                          starts from playback window pages)
@@ -292,17 +292,24 @@ fi
 # Some DOCA registrations require the gpu_roce server ring allocation to be
 # host-page aligned. Keep playback capacity independent from the server ring,
 # and choose a server page count that satisfies the allocation contract.
-if [[ "$TRANSPORT" == "gpu_roce" && "$GPU_ROCE_NUM_PAGES" == "auto" ]]; then
+if [[ "$TRANSPORT" == "gpu_roce" ]]; then
     HOST_PAGE_SIZE=$(getconf PAGESIZE 2>/dev/null || echo 4096)
     SERVER_PAGE_SIZE=$(( ((PAGE_SIZE + 127) / 128) * 128 ))
-    GPU_ROCE_NUM_PAGES="$PLAYBACK_NUM_PAGES"
-    while (( (SERVER_PAGE_SIZE * GPU_ROCE_NUM_PAGES) % HOST_PAGE_SIZE != 0 )); do
-        ((GPU_ROCE_NUM_PAGES++))
-        if (( GPU_ROCE_NUM_PAGES > 65536 )); then
-            echo "ERROR: unable to auto-align gpu_roce ring for page-size=$PAGE_SIZE host-page-size=$HOST_PAGE_SIZE" >&2
-            exit 1
-        fi
-    done
+    GPU_ROCE_PAYLOAD_SIZE=$((PAGE_SIZE - 24))  # RPCHeader is 24 bytes.
+    if (( GPU_ROCE_PAYLOAD_SIZE <= 0 )); then
+        echo "ERROR: gpu_roce page-size must exceed the 24-byte RPC header" >&2
+        exit 1
+    fi
+    if [[ "$GPU_ROCE_NUM_PAGES" == "auto" ]]; then
+        GPU_ROCE_NUM_PAGES="$PLAYBACK_NUM_PAGES"
+        while (( (SERVER_PAGE_SIZE * GPU_ROCE_NUM_PAGES) % HOST_PAGE_SIZE != 0 )); do
+            ((GPU_ROCE_NUM_PAGES++))
+            if (( GPU_ROCE_NUM_PAGES > 65536 )); then
+                echo "ERROR: unable to auto-align gpu_roce ring for page-size=$PAGE_SIZE host-page-size=$HOST_PAGE_SIZE" >&2
+                exit 1
+            fi
+        done
+    fi
 fi
 
 # ============================================================================
@@ -981,6 +988,41 @@ extract_hex() {
 
 # Start the decoding server against $1=peer_ip $2=remote_qp; scrape its
 # endpoint line into SERVER_QP / SERVER_RKEY / SERVER_ADDR.
+prepare_gpu_roce_config() {
+    local peer_ip="$1" remote_qp="$2"
+
+    # A caller-supplied transport section is already authoritative. Generated
+    # decoder-only configs get a temporary launch copy carrying the runtime
+    # endpoint discovered from the FPGA/emulator; never modify the source file.
+    if grep -Eq '^[[:space:]]*transport:' "$CONFIG_FILE"; then
+        _info "Using gpu_roce transport settings from $CONFIG_FILE"
+        return 0
+    fi
+
+    local runtime_config
+    runtime_config=$(mktemp /tmp/hsb_decoding_server_config.XXXXXX.yml)
+    TEMP_FILES+=("$runtime_config")
+    if [[ "$(tail -n 1 "$CONFIG_FILE")" == "..." ]]; then
+        sed '$d' "$CONFIG_FILE" > "$runtime_config"
+    else
+        cp "$CONFIG_FILE" "$runtime_config"
+    fi
+    cat >> "$runtime_config" <<EOF
+transport:
+  provider: hololink
+  args:
+    - --device=$BRIDGE_DEVICE
+    - --peer-ip=$peer_ip
+    - --remote-qp=$remote_qp
+    - --page-size=$SERVER_PAGE_SIZE
+    - --num-pages=$GPU_ROCE_NUM_PAGES
+    - --payload-size=$GPU_ROCE_PAYLOAD_SIZE
+...
+EOF
+    CONFIG_FILE="$runtime_config"
+    _info "GPU RoCE launch settings written to YAML: $CONFIG_FILE"
+}
+
 start_server() {
     local peer_ip="$1" remote_qp="$2" server_log="$3"
 
@@ -994,19 +1036,14 @@ start_server() {
     if [[ "$TRANSPORT" == "gpu_roce" ]]; then
         # Device-graph scheduler path: enqueue/get/reset run as DEVICE_CALLs
         # on the GPU and the captured RelayBP decode graph fires device-side.
-        # The device-graph transceiver is configured via QEC_DEVICE_GRAPH_*
-        # env (the server's device_graph mode ignores the cpu_roce CLI
-        # flags); dispatch-shape selection comes from the config's
-        # `dispatch: device_graph` key, injected at config-generation time.
+        # Provider selection and settings come only from YAML;
+        # dispatch-shape selection comes from the config's `dispatch:
+        # device_graph` key, injected at config-generation time.
         # Eager module loading avoids lazy-load stalls inside the persistent
         # scheduler (same as the old bridge launcher).
+        prepare_gpu_roce_config "$peer_ip" "$remote_qp"
         CUDA_MODULE_LOADING=EAGER \
         LD_LIBRARY_PATH="${server_ld_path}:${LD_LIBRARY_PATH:-}" \
-        QEC_DEVICE_GRAPH_DEVICE="$BRIDGE_DEVICE" \
-        QEC_DEVICE_GRAPH_PEER_IP="$peer_ip" \
-        QEC_DEVICE_GRAPH_REMOTE_QP="$((remote_qp))" \
-        QEC_DEVICE_GRAPH_FRAME_SIZE="$PAGE_SIZE" \
-        QEC_DEVICE_GRAPH_NUM_PAGES="$GPU_ROCE_NUM_PAGES" \
         "$SERVER_BIN" \
             --config="$CONFIG_FILE" \
             --timeout="$TIMEOUT" \
@@ -1170,7 +1207,7 @@ run_fpga() {
 main() {
     _banner "HSB FPGA Decoding Server Test"
 
-    _info "Decoder: $DECODER (decoding server, CPU HOST_CALL path)"
+    _info "Decoder: $DECODER (decoding server, transport=$TRANSPORT)"
     if $EMULATE; then
         _info "Mode: FPGA Emulation (3-tool)"
     else

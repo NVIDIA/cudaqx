@@ -18,12 +18,22 @@
 #include "DecodingServer.h" // resolve_decode_device (core symbol)
 #include "DeviceGraphTransceiver.h"
 
+#include <stdexcept>
+
 extern "C" cudaq::qec::decoding_server::ITransceiver *
-cudaqx_qec_make_device_graph_transceiver(int pinned_cuda_device) {
+cudaqx_qec_make_device_graph_transceiver(
+    int pinned_cuda_device,
+    const cudaq::qec::decoding::config::transport_shape_override *transport) {
   using namespace cudaq::qec::decoding_server;
+  if (!transport)
+    throw std::invalid_argument(
+        "device-graph transport configuration is missing");
+
   // The device-graph GPU is the decoder's cuda_device_id pin; resolve it
   // here, inside the component, where DeviceGraphConfig is visible.
-  auto cfg = DeviceGraphConfig::from_env();
+  DeviceGraphConfig cfg;
+  cfg.provider = transport->provider;
+  cfg.provider_args = transport->args;
   cfg.gpu_id = resolve_decode_device(pinned_cuda_device);
   return new DeviceGraphTransceiver(cfg);
 }

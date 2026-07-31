@@ -101,9 +101,10 @@ private:
   /// Create a transceiver for \p transport_type.  Throws for RoCE transports
   /// until per-session transceiver adapters are
   /// available via CUDAQ_REALTIME.
-  static std::unique_ptr<ITransceiver>
-  make_transport(cudaq::qec::decoding::config::DecoderDispatch dispatch,
-                 int pinned_cuda_device);
+  static std::unique_ptr<ITransceiver> make_transport(
+      cudaq::qec::decoding::config::DecoderDispatch dispatch,
+      int pinned_cuda_device,
+      const cudaq::qec::decoding::config::transport_shape_override &transport);
 
   // Destruction order matters: the device-graph scheduler (inside
   // owned_transports_) holds a cudaGraphExec_t captured from a session's

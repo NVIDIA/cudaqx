@@ -58,8 +58,7 @@
 /// dispatcher below; a device_graph decoder routes the whole server through
 /// the CQR DecodingServer, whose DeviceGraphTransceiver runs the
 /// self-relaunching GPU scheduler over the same kind of runtime-loaded
-/// provider (the hololink library by default; the YAML transport section or
-/// the --transport fallback selects another).
+/// provider selected and configured by the YAML transport section.
 
 #include "cudaq/qec/realtime/decoding_config.h"
 
@@ -93,6 +92,7 @@
 #include <string>
 #include <thread>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 extern "C" void cudaqx_qec_realtime_device_call_service_force_link();
@@ -348,45 +348,22 @@ int main(int argc, char **argv) {
 #ifdef QEC_HAVE_DEVICE_GRAPH_DISPATCH
   if (all_device_graph) {
     // DecodingServer(config_yaml) reads the YAML, creates the
-    // DeviceGraphTransceiver (which loads a bridge provider: the built-in
-    // hololink one, or CUDAQ_REALTIME_BRIDGE_LIB), loads decoder sessions,
-    // and calls launch_scheduler() to wire the CUDAQ device-graph scheduler
-    // to the provider's GPU rings.  The GPU scheduler then handles
+    // DeviceGraphTransceiver from the YAML transport section, loads decoder
+    // sessions, and calls launch_scheduler() to wire the CUDA-Q device-graph
+    // scheduler to the provider's GPU rings. The GPU scheduler then handles
     // RX→dispatch→decode→TX autonomously; this thread just waits for signal.
     //
     // Construction throws when the device-graph component is not linked into
     // this binary (no proprietary cudevice archive) or when provider
     // bring-up fails.
     //
-    // Provider resolution for the standalone transceiver mirrors the
-    // per-ring loop below: the transport section's device_graph shape
-    // override > the section's provider > the --transport CLI fallback >
-    // the transceiver's built-in default (hololink).  A YAML that names a
-    // provider plus a CLI --transport is rejected before reaching here.
-    std::string dg_provider;
-    if (!decoder_config.transport.device_graph.provider.empty())
-      dg_provider = decoder_config.transport.device_graph.provider;
-    else if (!decoder_config.transport.provider.empty())
-      dg_provider = decoder_config.transport.provider;
-    else if (cfg.transport_from_cli)
-      dg_provider = cfg.transport;
-    if (!dg_provider.empty())
-      ::setenv("CUDAQ_REALTIME_BRIDGE_LIB",
-               resolve_provider_lib(dg_provider).c_str(), /*overwrite=*/1);
-    // Provider args from the transport section ride the same generic
-    // pass-through the per-ring loop uses: section args first, then the
-    // device_graph shape override's args.  The transceiver forwards them
-    // verbatim after its named knobs (QEC_DEVICE_GRAPH_* env), so a
-    // non-HSB provider is configured entirely from the YAML.
-    {
-      std::string dg_args;
-      for (const auto &a : decoder_config.transport.args)
-        dg_args += (dg_args.empty() ? "" : " ") + a;
-      for (const auto &a : decoder_config.transport.device_graph.args)
-        dg_args += (dg_args.empty() ? "" : " ") + a;
-      if (!dg_args.empty())
-        ::setenv("QEC_DEVICE_GRAPH_PROVIDER_ARGS", dg_args.c_str(),
-                 /*overwrite=*/1);
+    // The standalone device-graph transport has no CLI or environment
+    // fallback: the deployment YAML is its single source of truth.
+    if (decoder_config.transport.resolve_device_graph().provider.empty()) {
+      std::cerr << "ERROR: an all-device_graph config must name its transport "
+                   "provider in the YAML transport section"
+                << std::endl;
+      return 1;
     }
     try {
       cudaq::qec::decoding_server::DecodingServer server(cfg.config_path);
@@ -485,6 +462,7 @@ int main(int argc, char **argv) {
   struct DecoderRing {
     std::int64_t decoder_id = 0;
     bool device_graph = false;
+    int gpu_id = 0;
     cudaq_realtime_bridge_handle_t bridge = nullptr;
     std::uint32_t num_slots = 0;
     std::uint32_t slot_size = 0;
@@ -532,6 +510,8 @@ int main(int argc, char **argv) {
     const auto &dc = decoder_config.decoders[i];
     ring.decoder_id = dc.id;
     ring.device_graph = (dc.dispatch == config::DecoderDispatch::device_graph);
+    if (ring.device_graph)
+      ring.gpu_id = dc.cuda_device_id.value_or(0);
 
     // The wire is deployment config, resolved from the YAML's top-level
     // `transport:` section (never from decoder entries).  Per-ring
@@ -544,14 +524,14 @@ int main(int argc, char **argv) {
     // different provider libraries in one process.
     const auto &transport_section = decoder_config.transport;
     std::string ring_provider_name = default_provider;
-    std::vector<std::string> ring_extra_args = transport_section.args;
+    std::vector<std::string> ring_extra_args;
     if (ring.device_graph) {
-      if (!transport_section.device_graph.provider.empty())
-        ring_provider_name = transport_section.device_graph.provider;
-      ring_extra_args.insert(ring_extra_args.end(),
-                             transport_section.device_graph.args.begin(),
-                             transport_section.device_graph.args.end());
-    }
+      const auto resolved = transport_section.resolve_device_graph();
+      if (!resolved.provider.empty())
+        ring_provider_name = resolved.provider;
+      ring_extra_args = std::move(resolved.args);
+    } else
+      ring_extra_args = transport_section.args;
     const std::string ring_lib = resolve_provider_lib(ring_provider_name);
     std::vector<char *> ring_argv = provider_argv;
     for (auto &a : ring_extra_args)
@@ -671,12 +651,9 @@ int main(int argc, char **argv) {
         teardown_rings();
         return 1;
       }
-      const int gpu_id = [] {
-        const char *value = std::getenv("QEC_DEVICE_GRAPH_GPU_ID");
-        return value ? std::atoi(value) : 0;
-      }();
       ring.dg_consumer = cudaqx_qec_make_device_graph_ring_consumer(
-          &ringbuffer, ring.num_slots, ring.slot_size, gpu_id, graph_resources);
+          &ringbuffer, ring.num_slots, ring.slot_size, ring.gpu_id,
+          graph_resources);
       if (!ring.dg_consumer) {
         std::cerr << "ERROR: device-graph scheduler launch failed (decoder "
                   << ring.decoder_id << "; see log above)" << std::endl;

@@ -34,36 +34,15 @@ struct cudaq_dispatch_graph_context;
 
 namespace cudaq::qec::decoding_server {
 
-/// Runtime configuration for DeviceGraphTransceiver.  Transport fields are
-/// read from environment variables so that the server can be reconfigured
-/// without a rebuild; gpu_id is the exception -- it is the decoder's
-/// cuda_device_id, filled in at transport creation.
-///
-/// The named fields are OPTIONAL convenience knobs: each becomes a
-/// `--<flag>=` argument to the provider only when its environment variable
-/// is set (they match the built-in hololink provider's flags; an RDMA-style
-/// provider will typically want the same shape).  A provider with a
-/// different argument surface is configured through `extra_args`
-/// (QEC_DEVICE_GRAPH_PROVIDER_ARGS, whitespace-separated tokens forwarded
-/// verbatim -- the same pass-through contract as the decoding server's
-/// provider args).  Providers should ignore arguments they do not
-/// recognize.
+/// Runtime configuration for DeviceGraphTransceiver. Provider identity and
+/// arguments come from the YAML transport section; gpu_id comes from the
+/// decoder entry's cuda_device_id.
 struct DeviceGraphConfig {
-  std::string
-      device_name;       ///< QEC_DEVICE_GRAPH_DEVICE (IB netdev, e.g. "mlx5_0")
-  uint32_t remote_qp{0}; ///< QEC_DEVICE_GRAPH_REMOTE_QP (FPGA/emulator QP)
-  int gpu_id{0};         ///< FPGA-affine GPU; set from the decoder's
-                         ///< cuda_device_id by resolve_decode_device()
-  size_t frame_size{0};  ///< QEC_DEVICE_GRAPH_FRAME_SIZE (max RPC frame bytes)
-  size_t page_size{0};   ///< QEC_DEVICE_GRAPH_PAGE_SIZE (0 → from frame_size)
-  size_t num_pages{0};   ///< QEC_DEVICE_GRAPH_NUM_PAGES (ring depth)
-  std::string peer_ip;   ///< QEC_DEVICE_GRAPH_PEER_IP (FPGA/emulator IPv4)
-  std::vector<std::string>
-      extra_args; ///< QEC_DEVICE_GRAPH_PROVIDER_ARGS, forwarded verbatim
+  std::string provider;                   ///< YAML transport provider/path
+  std::vector<std::string> provider_args; ///< YAML transport arguments
+  int gpu_id{0}; ///< FPGA-affine GPU, resolved from decoder cuda_device_id
   // (QEC_DEVICE_GRAPH_RESERVED_SMS is consumed by DecodingSession, where the
   // decode graph is captured.)
-
-  static DeviceGraphConfig from_env();
 };
 
 /// Device-graph dispatch engine (transport-blind) for the decoding server.
@@ -72,12 +51,11 @@ struct DeviceGraphConfig {
 ///
 /// The Hololink transceiver (DOCA GPU ring buffers fed by FPGA RDMA writes)
 /// is brought up through the CUDA-Q realtime bridge-provider interface: the
-/// constructor loads the provider (the built-in
-/// `libcudaq-realtime-bridge-hololink.so`, or the library named by
-/// `CUDAQ_REALTIME_BRIDGE_LIB` when set), and adopts the provider's
-/// RING_BUFFER context.  `launch_scheduler()` wires those ring buffers to the
-/// CUDAQ device-graph scheduler (`cudaq_create_dispatch_graph_regular`) and
-/// the captured decoder CUDA graph, then starts the provider's I/O loop.
+/// constructor loads the provider selected by the YAML transport section and
+/// adopts its RING_BUFFER context. `launch_scheduler()` wires those ring
+/// buffers to the CUDAQ device-graph scheduler
+/// (`cudaq_create_dispatch_graph_regular`) and the captured decoder CUDA graph,
+/// then starts the provider's I/O loop.
 ///
 /// Consequence of the provider split: this library needs only the CUDA-Q
 /// realtime headers + libcudaq-realtime.so at build time; the Hololink /

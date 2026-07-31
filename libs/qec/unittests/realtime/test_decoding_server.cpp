@@ -44,8 +44,10 @@
 #include <array>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -156,6 +158,26 @@ std::string env_or(const char *name, const std::string &fallback) {
   const char *value = std::getenv(name);
   return value && *value ? std::string(value) : fallback;
 }
+
+class ScopedEnv {
+public:
+  ScopedEnv(const char *name, const char *value) : name_(name) {
+    if (const char *old_value = std::getenv(name))
+      old_value_ = old_value;
+    ::setenv(name, value, 1);
+  }
+
+  ~ScopedEnv() {
+    if (old_value_)
+      ::setenv(name_.c_str(), old_value_->c_str(), 1);
+    else
+      ::unsetenv(name_.c_str());
+  }
+
+private:
+  std::string name_;
+  std::optional<std::string> old_value_;
+};
 
 // The server binary path is baked in at configure time (the server is built
 // from libs/qec/tools/decoding-server); QEC_DECODING_SERVER overrides it. The
@@ -620,6 +642,43 @@ TEST(DecodingServerTwoProcess, TransportCliConflictsWithYamlSection) {
       << "server unexpectedly reached READY: " << server.captured;
   EXPECT_NE(0, server.exitCode()) << server.captured;
   EXPECT_NE(server.captured.find("conflicts with the transport section"),
+            std::string::npos)
+      << server.captured;
+}
+
+TEST(DecodingServerTwoProcess, DeviceGraphRequiresYamlTransportProvider) {
+  ScopedEnv legacy_provider("CUDAQ_REALTIME_BRIDGE_LIB",
+                            "/tmp/legacy-provider.so");
+  ScopedEnv legacy_device("QEC_DEVICE_GRAPH_DEVICE", "mlx5_legacy");
+  ScopedEnv legacy_peer_ip("QEC_DEVICE_GRAPH_PEER_IP", "192.0.2.1");
+  ScopedEnv legacy_remote_qp("QEC_DEVICE_GRAPH_REMOTE_QP", "17");
+  ScopedEnv legacy_frame_size("QEC_DEVICE_GRAPH_FRAME_SIZE", "384");
+  ScopedEnv legacy_num_pages("QEC_DEVICE_GRAPH_NUM_PAGES", "64");
+
+  const std::string config_path =
+      ::testing::TempDir() + "/decoding_server_device_graph_no_transport.yaml";
+  {
+    std::ofstream config_file(config_path);
+    config_file << "decoders:\n"
+                << "  - id: 0\n"
+                << "    type: single_error_lut\n"
+                << "    dispatch: device_graph\n"
+                << "    block_size: 3\n"
+                << "    syndrome_size: 3\n"
+                << "    H_sparse: [0, -1, 1, -1, 2, -1]\n"
+                << "    O_sparse: [0, -1, 1, -1, 2, -1]\n"
+                << "    D_sparse: [0, -1, 1, -1, 2, -1]\n";
+  }
+
+  ServerProcess server;
+  std::string error;
+  EXPECT_FALSE(server.start(config_path, error, 8000,
+                            /*transport_cli=*/false,
+                            /*capture_stderr=*/true))
+      << "server unexpectedly reached READY: " << server.captured;
+  EXPECT_NE(0, server.exitCode()) << server.captured;
+  EXPECT_NE(server.captured.find("must name its transport provider in the "
+                                 "YAML transport section"),
             std::string::npos)
       << server.captured;
 }
