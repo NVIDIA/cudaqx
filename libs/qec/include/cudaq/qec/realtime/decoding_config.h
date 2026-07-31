@@ -9,6 +9,7 @@
 #pragma once
 
 #include "cuda-qx/core/heterogeneous_map.h"
+#include "cudaq/qec/extended_dem.h"
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -70,11 +71,37 @@ struct decoder_config {
   /// GPU-accelerated decoder, hence at this level rather than inside the
   /// per-decoder custom args. Unset = unpinned.
   std::optional<int> cuda_device_id;
+  /// The five fields below describe the DEM two alternative ways, and exactly
+  /// one of them applies:
+  ///
+  ///   - Flat form: H_sparse plus block_size, syndrome_size, O_sparse and
+  ///     D_sparse, all sized for the whole experiment.
+  ///   - Chunk form: dem_chunks plus num_rounds. The other five are derived by
+  ///     expanding the phases num_rounds times, and must be omitted.
+  ///
+  /// See expand_dem_chunks() for the derivation, which runs at decoder
+  /// construction so the rest of the pipeline only ever sees the flat form.
   uint64_t block_size = 0;
   uint64_t syndrome_size = 0;
   std::vector<std::int64_t> H_sparse;
   std::vector<std::int64_t> O_sparse;
   std::vector<std::int64_t> D_sparse;
+  /// Optional per-phase DEM for a streaming, repeated-round decomposition.
+  /// H_sparse above describes the whole experiment as one flat matrix, which
+  /// requires knowing the round count up front; these phases describe one
+  /// round each so the round count can be chosen (or grown) at run time. See
+  /// cudaq::qec::dem_chunks_from_spec() for expansion to a chunk sequence.
+  std::optional<dem_chunks_spec> dem_chunks;
+  /// How many rounds to expand `dem_chunks` into. Required with dem_chunks and
+  /// rejected without it. This is the round count the flat form would otherwise
+  /// have baked into its matrix dimensions; naming it here is what lets the
+  /// same phase description serve experiments of different lengths.
+  ///
+  /// This is the *total* round count, so the expansion is init, `num_rounds-2`
+  /// bulk copies, then final, and the minimum is 2. Note that the
+  /// decoder-tasking spec writes the same construction as `S_R` where `R`
+  /// counts bulk copies only: this field is that `R` plus 2.
+  std::optional<uint64_t> num_rounds;
   decoder_custom_args_t decoder_custom_args;
 
   bool operator==(const decoder_config &) const = default;
@@ -160,6 +187,24 @@ public:
   __attribute__((visibility("default"))) static multi_decoder_config
   from_yaml_str(const std::string_view yaml_str);
 };
+
+/// @brief Rewrite a chunk-form configuration into the equivalent flat form,
+/// filling block_size, syndrome_size, H_sparse, O_sparse and D_sparse from
+/// `dem_chunks` expanded `num_rounds` times. Everything downstream of this
+/// therefore only has to understand the flat form.
+///
+/// Does nothing to a configuration that is already flat (one whose `H_sparse`
+/// is set, or which carries no `dem_chunks` at all), so it is safe to call
+/// unconditionally.
+///
+/// @return The closed DEM the flat fields were derived from, so a caller that
+///         also wants its per-fault priors does not have to expand a second
+///         time. Empty when the configuration was already flat.
+/// @throws std::runtime_error if `num_rounds` is missing, or if the phases
+///         cannot be expanded to that many rounds.
+__attribute__((visibility("default")))
+std::optional<cudaq::qec::detector_error_model>
+expand_dem_chunks(decoder_config &config);
 
 /// @brief Generate a JSON Schema (draft 2020-12) document describing valid
 /// `multi_decoder_config` YAML files, so third-party tools (check-jsonschema,
