@@ -77,6 +77,23 @@ Decoder Interfaces
 
 .. autofunction:: cudaq_qec.get_decoder
 
+.. note::
+   **scipy.sparse interop** — :func:`cudaq_qec.get_decoder` and
+   :class:`cudaq_qec.Decoder` accept a ``scipy.sparse`` matrix (CSR, CSC,
+   COO, or any other ``scipy.sparse`` format) as the parity-check matrix
+   ``H``.  This is the preferred form for large PCMs because no dense
+   ``rows x cols`` allocation is made — the matrix is normalised to CSR
+   internally.  Dense NumPy ``uint8`` arrays remain supported.
+   The PCM utilities :func:`cudaq_qec.reorder_pcm_columns`,
+   :func:`cudaq_qec.shuffle_pcm_columns`, and
+   :func:`cudaq_qec.pcm_to_sparse_vec` also accept SciPy sparse matrices
+   without creating a dense ``cudaqx::tensor``. Reordering and shuffling a
+   sparse input returns a ``scipy.sparse.csc_matrix``; a dense input continues
+   to return a NumPy array.
+
+   ``scipy`` is an optional dependency; if it is not installed, pass a dense
+   NumPy array instead.
+
 Built-in Decoders
 =================
 
@@ -120,8 +137,8 @@ Chromobius Decoder
 
 .. include:: chromobius_api.rst
 
-Real-Time Decoding
-==================
+Realtime Decoding
+=================
 
 .. include:: python_realtime_decoding_api.rst
 
@@ -132,6 +149,23 @@ Common
 .. autofunction:: cudaq_qec.sample_memory_circuit
 .. autofunction:: cudaq_qec.x_sample_memory_circuit
 .. autofunction:: cudaq_qec.z_sample_memory_circuit
+
+.. _syndrome_measurement_layout:
+
+.. note::
+   **Syndrome measurement layout** — ``sample_memory_circuit`` returns a tuple
+   ``(syndromes, data)``. The ``syndromes`` tensor has shape
+   ``(num_shots, num_detectors)`` with columns laid out as ``[ B  S  S  …  S  B ]``:
+
+   - ``B`` (boundary block) = ``code.get_num_z_stabilizers()`` for Z-basis
+     preparations (``prep0``/``prep1``), or ``code.get_num_x_stabilizers()`` for
+     X-basis preparations (``prepp``/``prepm``).
+   - ``S`` (inter-round block) = ``num_z_stabilizers + num_x_stabilizers``
+     detectors per round transition (``num_rounds - 1`` blocks total).
+   - Total: ``num_detectors = 2*B + (num_rounds - 1)*S``.
+
+   The ``data`` tensor has shape ``(num_shots, block_size)`` and holds the final
+   data-qubit measurements used to verify logical-state preservation.
 
 .. autofunction:: cudaq_qec.sample_code_capacity
 
