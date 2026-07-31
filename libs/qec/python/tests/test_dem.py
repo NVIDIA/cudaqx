@@ -841,5 +841,246 @@ def test_decoder_context_single_type_code_empty_component():
     assert len(zc_m2d) == zc_dem.num_detectors()
 
 
+# ---------------------------------------------------------------------------
+# Tests for dem_stitch / dem_stitch_all / dem_close / dem_close_all and the
+# dem_chunks_to_* utility functions exposed via py_extended_dem.cpp.
+# All tests use a rep-3 single-round chunk (d=2 seam rows, 3 faults).
+# ---------------------------------------------------------------------------
+
+
+def _rep3_dem_chunk(px=0.01):
+    code = qec.css_matrices_from_code(qec.get_code("repetition", distance=3))
+    noise = qec.CssNoise()
+    noise.px_per_qubit = [px, px, px]
+    return qec.extended_dem_from_css_matrices(code, noise)
+
+
+def test_dem_stitch_interior_grows():
+    # After one stitch the interior must contain one seam's worth of rows (d=2).
+    c = _rep3_dem_chunk()
+    ab = qec.dem_stitch(c, c)
+    assert ab.num_interior() == 2
+    assert ab.num_seam_rows() == 2
+    assert ab.num_faults() == 6  # 2 rounds × 3 qubits
+
+
+def test_dem_stitch_fault_priors_concatenated():
+    px = 0.01
+    c = _rep3_dem_chunk(px)
+    ab = qec.dem_stitch(c, c)
+    assert len(ab.fault_priors) == 6
+    assert all(abs(p - px) < 1e-12 for p in ab.fault_priors)
+
+
+def test_dem_stitch_all_empty_raises():
+    with pytest.raises(Exception):
+        qec.dem_stitch_all([])
+
+
+def test_dem_stitch_all_single_chunk_identity():
+    c = _rep3_dem_chunk()
+    result = qec.dem_stitch_all([c])
+    assert result.num_interior() == c.num_interior()
+    assert result.num_faults() == c.num_faults()
+
+
+def test_dem_stitch_all_three_chunks_interior():
+    c = _rep3_dem_chunk()
+    abc = qec.dem_stitch_all([c, c, c])
+    # 2 seams × 2 rows each = 4 interior rows
+    assert abc.num_interior() == 4
+    assert abc.num_faults() == 9  # 3 rounds × 3 qubits
+
+
+def test_dem_close_single_chunk_shape():
+    # A single rep-3 chunk has d=2 seam rows and 3 fault columns.
+    # dem_close collapses in_syndrome rows (the seam) into the flat DEM, so
+    # the result must have exactly d=2 detectors and 3 error mechanisms.
+    px = 0.01
+    chunk = _rep3_dem_chunk(px)
+    closed = qec.dem_close(chunk)
+    d = chunk.num_seam_rows()
+    assert closed.num_detectors() == d
+    assert closed.num_error_mechanisms() == chunk.num_faults()
+    assert np.allclose(closed.error_rates, chunk.fault_priors)
+
+
+def test_dem_close_all_matches_close_stitch_all():
+    # dem_close_all must produce the same DEM as dem_close(dem_stitch_all(...)).
+    T = 4
+    chunks = [_rep3_dem_chunk() for _ in range(T)]
+    via_stitch = qec.dem_close(qec.dem_stitch_all(chunks))
+    via_close_all = qec.dem_close_all(chunks)
+    assert via_close_all.num_detectors() == via_stitch.num_detectors()
+    assert via_close_all.num_error_mechanisms() == \
+        via_stitch.num_error_mechanisms()
+    assert np.array_equal(np.asarray(via_close_all.detector_error_matrix),
+                          np.asarray(via_stitch.detector_error_matrix))
+    assert np.array_equal(np.asarray(via_close_all.observables_flips_matrix),
+                          np.asarray(via_stitch.observables_flips_matrix))
+    assert np.allclose(via_close_all.error_rates, via_stitch.error_rates)
+
+
+def test_dem_close_all_empty_raises():
+    with pytest.raises(Exception):
+        qec.dem_close_all([])
+
+
+def test_dem_chunk_rounds_single():
+    c = _rep3_dem_chunk()
+    assert qec.dem_chunk_rounds(c) == 1
+
+
+def test_dem_chunk_rounds_stitched():
+    c = _rep3_dem_chunk()
+    ab = qec.dem_stitch(c, c)
+    assert qec.dem_chunk_rounds(ab) == 2
+
+
+def test_dem_chunks_to_rounds():
+    T = 5
+    chunks = [_rep3_dem_chunk() for _ in range(T)]
+    assert qec.dem_chunks_to_rounds(chunks) == T
+
+
+def test_dem_chunks_to_detector_round_length_and_values():
+    # T chunks of d=2 seam rows → T*d detector entries; entry i belongs to
+    # round i//d.
+    T = 3
+    d = 2
+    chunks = [_rep3_dem_chunk() for _ in range(T)]
+    rounds = qec.dem_chunks_to_detector_round(chunks)
+    assert len(rounds) == T * d
+    for i, r in enumerate(rounds):
+        assert r == i // d, f"detector {i}: expected round {i // d}, got {r}"
+
+
+def test_dem_chunks_to_d_sparse_length():
+    T = 3
+    d = 2
+    chunks = [_rep3_dem_chunk() for _ in range(T)]
+    d_sparse = qec.dem_chunks_to_d_sparse(chunks)
+    # One entry per detector
+    assert len(d_sparse) == T * d
+
+
+def test_dem_chunks_to_o_sparse_length():
+    T = 3
+    chunks = [_rep3_dem_chunk() for _ in range(T)]
+    o_sparse = qec.dem_chunks_to_o_sparse(chunks)
+    # One entry per observable (rep-3 has 1)
+    assert len(o_sparse) == chunks[0].num_observables()
+
+
+# ---------------------------------------------------------------------------
+# Declarative phase specs
+# ---------------------------------------------------------------------------
+
+REP5_CHECKS = 4
+
+
+def _rep5_spec():
+    """A d=5 repetition code as init / bulk / final phases.
+
+    Fault columns 0..4 are data qubits and 5..8 measurement errors; the final
+    phase measures destructively so it has only the five data columns.
+    """
+    spec = qec.DemChunksSpec()
+
+    spec.init.num_faults = 9
+    spec.init.H_mid_sparse = [
+        0, 1, 5, -1, 1, 2, 6, -1, 2, 3, 7, -1, 3, 4, 8, -1
+    ]
+    spec.init.H_out_sparse = [5, -1, 6, -1, 7, -1, 8, -1]
+    spec.init.O_sparse = [0, -1]
+    spec.init.error_rates = [0.02] * 9
+
+    spec.bulk.num_faults = 9
+    spec.bulk.H_in_sparse = [0, 1, 5, -1, 1, 2, 6, -1, 2, 3, 7, -1, 3, 4, 8, -1]
+    spec.bulk.H_out_sparse = [5, -1, 6, -1, 7, -1, 8, -1]
+    spec.bulk.O_sparse = [0, -1]
+    spec.bulk.error_rates = [0.02] * 9
+
+    spec.final.num_faults = 5
+    spec.final.H_in_sparse = [0, 1, -1, 1, 2, -1, 2, 3, -1, 3, 4, -1]
+    spec.final.O_sparse = [0, -1]
+    spec.final.error_rates = [0.02] * 5
+
+    return spec
+
+
+def test_dem_chunks_spec_validates():
+    spec = _rep5_spec()
+    spec.validate()
+    assert spec.has_bulk()
+    assert not spec.is_empty()
+    assert qec.DemChunksSpec().is_empty()
+
+
+def test_dem_chunk_spec_round_trips_through_attributes():
+    spec = _rep5_spec()
+    assert spec.init.num_faults == 9
+    assert spec.final.num_faults == 5
+    # H_in_sparse is what makes a phase an init phase, so it has to stay empty.
+    assert spec.init.H_in_sparse == []
+    assert spec.final.H_out_sparse == []
+
+
+def test_dem_chunks_from_spec_expands_to_round_count():
+    spec = _rep5_spec()
+    for rounds in range(2, 7):
+        chunks = qec.dem_chunks_from_spec(spec, rounds)
+        assert len(chunks) == rounds
+        # The ends are open: nothing precedes the first round or follows the
+        # last, so those seams are empty.
+        assert chunks[0].num_in_seam_rows() == 0
+        assert chunks[-1].num_out_seam_rows() == 0
+        assert qec.dem_chunks_to_rounds(chunks) == rounds
+
+
+def test_dem_chunks_from_spec_closes_to_one_detector_band_per_round():
+    spec = _rep5_spec()
+    for rounds in range(2, 7):
+        chunks = qec.dem_chunks_from_spec(spec, rounds)
+        dem = qec.dem_close_all(chunks)
+        assert dem.detector_error_matrix.shape[0] == rounds * REP5_CHECKS
+        assert len(qec.dem_chunks_to_d_sparse(chunks)) == rounds * REP5_CHECKS
+
+
+def test_dem_chunk_from_spec_matches_the_phase_it_describes():
+    spec = _rep5_spec()
+    init = qec.dem_chunk_from_spec(spec.init, "init")
+    assert init.num_faults() == 9
+    assert init.num_in_seam_rows() == 0
+    assert init.num_out_seam_rows() == REP5_CHECKS
+    # init carries round 0 in its interior, having nothing to compare against.
+    assert init.num_interior() == REP5_CHECKS
+    assert qec.dem_chunk_rounds(init) == 1
+
+
+def test_dem_chunks_spec_rejects_an_init_with_an_incoming_seam():
+    spec = _rep5_spec()
+    spec.init.H_in_sparse = [0, -1, 1, -1, 2, -1, 3, -1]
+    with pytest.raises(Exception):
+        spec.validate()
+
+
+def test_dem_chunks_spec_rejects_mismatched_error_rate_count():
+    spec = _rep5_spec()
+    spec.init.error_rates = [0.02] * 8
+    with pytest.raises(Exception):
+        spec.validate()
+
+
+def test_dem_chunks_from_spec_needs_a_bulk_phase_to_repeat():
+    spec = _rep5_spec()
+    spec.bulk = qec.DemChunkSpec()
+    assert not spec.has_bulk()
+    # Two rounds are just init and final, so no bulk is needed.
+    assert len(qec.dem_chunks_from_spec(spec, 2)) == 2
+    with pytest.raises(Exception):
+        qec.dem_chunks_from_spec(spec, 3)
+
+
 if __name__ == "__main__":
     pytest.main()
