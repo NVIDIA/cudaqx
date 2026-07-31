@@ -116,6 +116,8 @@ Chromobius Decoder
 
 .. include:: chromobius_api.rst
 
+.. _cpp_realtime_decoding_api:
+
 Realtime Decoding
 =================
 

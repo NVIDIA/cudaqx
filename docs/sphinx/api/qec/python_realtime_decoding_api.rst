@@ -1,6 +1,3 @@
-.. _python_realtime_decoding_api:
-
-
 The Realtime Decoding API enables low-latency error correction on quantum hardware by allowing CUDA-Q quantum kernels to interact with decoders during circuit execution. This API is designed for use cases where corrections must be calculated and applied within qubit coherence times.
 
 The real-time decoding system supports simulation environments for local testing and hardware integration (e.g., on
