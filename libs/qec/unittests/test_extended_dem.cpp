@@ -25,7 +25,9 @@
 #include "cudaq/qec/extended_dem.h"
 #include <cstdint>
 #include <gtest/gtest.h>
+#include <limits>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace cudaq::qec {
@@ -250,9 +252,13 @@ TEST(ExtendedDem, Close_T5_MatchesMonolithic) {
   auto flat = dem_from_css_matrices(code, noise, 5);
 
   EXPECT_EQ(closed.num_detectors(), flat.num_detectors());
+  EXPECT_EQ(closed.num_observables(), flat.num_observables());
   EXPECT_EQ(closed.num_error_mechanisms(), flat.num_error_mechanisms());
   EXPECT_TRUE(
       tensors_equal(closed.detector_error_matrix, flat.detector_error_matrix));
+  EXPECT_TRUE(tensors_equal(closed.observables_flips_matrix,
+                            flat.observables_flips_matrix));
+  EXPECT_EQ(closed.error_rates, flat.error_rates);
 }
 
 // ---------------------------------------------------------------------------
@@ -268,7 +274,7 @@ TEST(ExtendedDem, Stitch_TagMismatch_Throws) {
   auto c1 = extended_dem_from_css_matrices(code, noise);
   c1.in_tags[0] = 999u; // corrupt a tag
 
-  EXPECT_THROW(dem_stitch(c0, c1), std::runtime_error);
+  EXPECT_THROW(dem_stitch(c0, c1), std::invalid_argument);
 }
 
 // Observable count mismatch must throw.
@@ -287,7 +293,7 @@ TEST(ExtendedDem, Stitch_ObservableMismatch_Throws) {
   auto c0 = extended_dem_from_css_matrices(code, nx_noise);
   auto c1 = extended_dem_from_css_matrices(code_with_lx, pxpz);
 
-  EXPECT_THROW(dem_stitch(c0, c1), std::runtime_error);
+  EXPECT_THROW(dem_stitch(c0, c1), std::invalid_argument);
 }
 
 // ---------------------------------------------------------------------------
@@ -652,8 +658,8 @@ TEST(ExtendedDem, MergeDuplicateColumns_MergesDuplicates_OrMode) {
   const auto canon =
       dem_merge_duplicate_columns(dem, prior_combine_mode::or_combine);
   EXPECT_EQ(canon.num_faults(), 1u);
-  // OR merge: 1 - (1-0.1)(1-0.2) = 1 - 0.9*0.8 = 0.28
-  EXPECT_NEAR(canon.fault_priors[0], 0.28, 1e-12);
+  // XOR / GF(2) merge: P(A xor B) = 0.1 + 0.2 - 2*0.1*0.2 = 0.26
+  EXPECT_NEAR(canon.fault_priors[0], 0.26, 1e-12);
   EXPECT_TRUE(are_dem_columns_unique(canon));
 }
 
@@ -721,8 +727,8 @@ TEST(ExtendedDem, MergeDuplicateColumns_ComparesColumnsOverGf2) {
   EXPECT_EQ(cols[0], std::vector<sparse_binary_matrix::index_type>{0});
   EXPECT_EQ(cols[1], std::vector<sparse_binary_matrix::index_type>{1});
   EXPECT_NEAR(canon.fault_priors[0], 0.3, 1e-12);
-  // OR merge of the two GF(2)-equal columns: 1 - 0.9*0.8 = 0.28.
-  EXPECT_NEAR(canon.fault_priors[1], 0.28, 1e-12);
+  // XOR merge of the two GF(2)-equal columns: 0.1 + 0.2 - 2*0.1*0.2 = 0.26.
+  EXPECT_NEAR(canon.fault_priors[1], 0.26, 1e-12);
 }
 
 // Tags and row-block sizes pass through unchanged after merging.
@@ -900,13 +906,13 @@ TEST(ExtendedDemPhases, RepeatingBulkAddsOneSeamPerRound) {
 // A final chunk cannot be followed by anything: its outgoing seam is empty.
 TEST(ExtendedDemPhases, StitchAfterFinalThrows) {
   EXPECT_THROW(dem_stitch(rep5_phase_final(), rep5_phase_bulk()),
-               std::runtime_error);
+               std::invalid_argument);
 }
 
 // Nothing can precede init: its incoming seam is empty.
 TEST(ExtendedDemPhases, StitchBeforeInitThrows) {
   EXPECT_THROW(dem_stitch(rep5_phase_bulk(), rep5_phase_init()),
-               std::runtime_error);
+               std::invalid_argument);
 }
 
 // init, `rounds - 2` bulks, final: one chunk per round.
@@ -1029,7 +1035,7 @@ TEST(ExtendedDemPhases, MismatchedSeamTagsThrow) {
 
   const std::vector<extended_dem> permuted{rep5_phase_init(), bulk,
                                            rep5_phase_final()};
-  EXPECT_THROW(dem_stitch_all(permuted), std::runtime_error);
+  EXPECT_THROW(dem_stitch_all(permuted), std::invalid_argument);
   EXPECT_THROW(dem_close_all(permuted), std::invalid_argument);
   EXPECT_THROW(dem_chunks_to_rounds(permuted), std::invalid_argument);
 }
@@ -1100,6 +1106,16 @@ TEST(DemChunkSpec, ValidSpecValidates) {
   EXPECT_TRUE(rep5_spec().has_bulk());
   EXPECT_FALSE(rep5_spec().is_empty());
   EXPECT_TRUE(dem_chunks_spec{}.is_empty());
+}
+
+// sparse_binary_matrix columns are uint32_t-indexed; reject a wider count
+// before error_rates.size() is compared (so the test need not allocate
+// UINT32_MAX+1 priors).
+TEST(DemChunkSpec, NumFaultsMustFitUint32) {
+  dem_chunk_spec spec;
+  spec.num_faults =
+      static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()) + 1ull;
+  EXPECT_THROW(spec.validate("test"), std::invalid_argument);
 }
 
 // Expansion produces init, one bulk per middle round, then final.
@@ -1215,7 +1231,7 @@ TEST(ExtendedDemPhases, MismatchedSeamWidthThrows) {
   narrow.in_syndrome =
       sparse_binary_matrix::from_nested_csr(2, 9, {{0, 1, 5}, {1, 2, 6}});
   narrow.in_tags = {0, 1};
-  EXPECT_THROW(dem_stitch(rep5_phase_init(), narrow), std::runtime_error);
+  EXPECT_THROW(dem_stitch(rep5_phase_init(), narrow), std::invalid_argument);
 }
 
 // ---------------------------------------------------------------------------
@@ -1425,6 +1441,181 @@ TEST(ExtendedDemStreaming, AWindowCarriesItsChunksObservables) {
                  offsets[first_chunk], offsets[past_chunk]))
         << "step=" << step;
   } // end - for(step)
+}
+
+// ---------------------------------------------------------------------------
+// Internal consistency of a chunk
+// ---------------------------------------------------------------------------
+
+// num_faults() reports in_syndrome's width alone, so a block that disagrees
+// with it would be scattered into the wrong columns (or past the end of the
+// closed matrix) with nothing else to signal the mistake.
+TEST(ExtendedDemValidate, BlockWiderThanTheChunkThrows) {
+  auto dem_chunk = extended_dem_from_css_matrices(rep3(), px_only(0.01));
+  ASSERT_EQ(dem_chunk.num_faults(), 3u);
+  // One interior row that claims four fault columns instead of three.
+  dem_chunk.interior = sparse_binary_matrix::from_nested_csr(1, 4, {{3}});
+
+  EXPECT_THROW(dem_chunk.validate("test"), std::invalid_argument);
+  EXPECT_THROW(dem_close(dem_chunk), std::invalid_argument);
+  EXPECT_THROW(dem_stitch(dem_chunk, dem_chunk), std::invalid_argument);
+  EXPECT_THROW(dem_close_all({dem_chunk}), std::invalid_argument);
+}
+
+// A prior per fault is what dem_close copies into error_rates, so a short or
+// long list would silently reweight the DEM.
+TEST(ExtendedDemValidate, PriorCountMustMatchFaultCount) {
+  auto dem_chunk = extended_dem_from_css_matrices(rep3(), px_only(0.01));
+  dem_chunk.fault_priors.pop_back();
+
+  EXPECT_THROW(dem_chunk.validate("test"), std::invalid_argument);
+  EXPECT_THROW(dem_close(dem_chunk), std::invalid_argument);
+  EXPECT_THROW(dem_stitch_all({dem_chunk}), std::invalid_argument);
+}
+
+// Tags name seam rows one for one; a mismatched count means the seam cannot be
+// checked for contractibility at all.
+TEST(ExtendedDemValidate, TagCountMustMatchSeamRows) {
+  auto dem_chunk = extended_dem_from_css_matrices(rep3(), px_only(0.01));
+  dem_chunk.out_tags.push_back(99u);
+
+  EXPECT_THROW(dem_chunk.validate("test"), std::invalid_argument);
+}
+
+// A well-formed chunk, and every chunk these builders produce, must pass.
+TEST(ExtendedDemValidate, WellFormedChunksPass) {
+  EXPECT_NO_THROW(
+      extended_dem_from_css_matrices(rep3(), px_only(0.01)).validate("test"));
+  // All-zero rates leave a default-constructed chunk, which is consistent.
+  EXPECT_NO_THROW(extended_dem_from_css_matrices(rep3(), css_noise_params{})
+                      .validate("test"));
+  for (const auto &phase : rep5_phases(4))
+    EXPECT_NO_THROW(phase.validate("test"));
+}
+
+// ---------------------------------------------------------------------------
+// Noise rate validation
+// ---------------------------------------------------------------------------
+
+// A negative or NaN rate is inactive under the "rate > 0" rule that selects
+// fault columns, so without this check a mistyped rate quietly builds a
+// smaller DEM instead of failing.
+TEST(ExtendedDemNoiseValidation, RejectsRatesOutsideTheUnitInterval) {
+  for (const double bad : {-0.01, 1.5, std::numeric_limits<double>::quiet_NaN(),
+                           std::numeric_limits<double>::infinity()}) {
+    css_noise_params noise;
+    noise.px = bad;
+    EXPECT_THROW(extended_dem_from_css_matrices(rep3(), noise),
+                 std::invalid_argument)
+        << "px=" << bad;
+    EXPECT_THROW(dem_from_css_matrices(rep3(), noise), std::invalid_argument)
+        << "px=" << bad;
+  }
+}
+
+TEST(ExtendedDemNoiseValidation, RejectsBadPerElementRates) {
+  css_noise_params per_qubit;
+  per_qubit.px_per_qubit = {0.01, -0.01, 0.01};
+  EXPECT_THROW(extended_dem_from_css_matrices(rep3(), per_qubit),
+               std::invalid_argument);
+
+  css_noise_params per_check;
+  per_check.pm_per_check = {0.01, 2.0};
+  EXPECT_THROW(extended_dem_from_css_matrices(rep3(), per_check),
+               std::invalid_argument);
+}
+
+// The bound is inclusive: 0 means "no such fault" and 1 means "always".
+TEST(ExtendedDemNoiseValidation, AcceptsTheEndpointsOfTheUnitInterval) {
+  css_noise_params certain;
+  certain.px = 1.0;
+  EXPECT_NO_THROW(extended_dem_from_css_matrices(rep3(), certain));
+  EXPECT_NO_THROW(extended_dem_from_css_matrices(rep3(), css_noise_params{}));
+}
+
+// pm_per_check is sized by checks, not qubits, so its message must say so --
+// the two dimensions differ and a wrong one sends the reader to the wrong
+// field.
+TEST(ExtendedDemNoiseValidation, PerCheckLengthErrorNamesTheCheckCount) {
+  css_noise_params noise;
+  noise.pm_per_check = {0.01}; // rep3 has 2 checks
+  try {
+    extended_dem_from_css_matrices(rep3(), noise);
+    ADD_FAILURE() << "expected a length mismatch";
+  } catch (const std::invalid_argument &error) {
+    const std::string message = error.what();
+    EXPECT_NE(message.find("n_checks"), std::string::npos) << message;
+    EXPECT_EQ(message.find("n_qubits"), std::string::npos) << message;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Prior combination
+// ---------------------------------------------------------------------------
+
+// sum_combine is a small-p approximation whose sum can leave the unit
+// interval. It is clamped, because every consumer reads fault_priors as a
+// probability.
+TEST(ExtendedDemMerge, SumCombineClampsToOne) {
+  // Three columns of identical support, so all three merge into one whose
+  // linear sum of priors is 1.2.
+  extended_dem dem_chunk;
+  dem_chunk.in_syndrome =
+      sparse_binary_matrix::from_nested_csc(1, 3, {{0}, {0}, {0}});
+  dem_chunk.out_syndrome = dem_chunk.in_syndrome;
+  dem_chunk.interior =
+      sparse_binary_matrix::from_nested_csc(0, 3, {{}, {}, {}});
+  dem_chunk.observables =
+      sparse_binary_matrix::from_nested_csc(0, 3, {{}, {}, {}});
+  dem_chunk.fault_priors = {0.4, 0.4, 0.4};
+  dem_chunk.in_tags = {0};
+  dem_chunk.out_tags = {0};
+  ASSERT_NO_THROW(dem_chunk.validate("test"));
+
+  const auto merged =
+      dem_merge_duplicate_columns(dem_chunk, prior_combine_mode::sum_combine);
+  ASSERT_EQ(merged.num_faults(), 1u);
+  EXPECT_DOUBLE_EQ(merged.fault_priors[0], 1.0);
+
+  // or_combine is the GF(2) / XOR rule, which also stays in [0, 1]:
+  // 1/2 * (1 - (1-2*0.4)^3) = 1/2 * (1 - 0.2^3) = 0.496.
+  const auto ored =
+      dem_merge_duplicate_columns(dem_chunk, prior_combine_mode::or_combine);
+  ASSERT_EQ(ored.num_faults(), 1u);
+  EXPECT_DOUBLE_EQ(ored.fault_priors[0], 0.5 * (1.0 - 0.2 * 0.2 * 0.2));
+}
+
+// A zero-row block still has to report the chunk's fault width. A
+// default-constructed (0-column) empty interior used to pass validate() and
+// then OOB inside dem_merge_duplicate_columns / dem_chunks_to_o_sparse.
+TEST(ExtendedDemValidate, EmptyBlockMustMatchFaultWidth) {
+  extended_dem dem_chunk;
+  dem_chunk.in_syndrome =
+      sparse_binary_matrix::from_nested_csc(1, 2, {{0}, {0}});
+  dem_chunk.out_syndrome = dem_chunk.in_syndrome;
+  dem_chunk.observables = sparse_binary_matrix::from_nested_csc(0, 2, {{}, {}});
+  dem_chunk.fault_priors = {0.1, 0.2};
+  dem_chunk.in_tags = {0};
+  dem_chunk.out_tags = {0};
+  // interior left default-constructed: 0 rows, 0 columns.
+
+  EXPECT_THROW(dem_chunk.validate("test"), std::invalid_argument);
+  EXPECT_THROW(dem_merge_duplicate_columns(dem_chunk), std::invalid_argument);
+  EXPECT_THROW(are_dem_columns_unique(dem_chunk), std::invalid_argument);
+  EXPECT_THROW(assert_dem_columns_unique(dem_chunk), std::invalid_argument);
+  EXPECT_THROW(dem_chunks_to_o_sparse({dem_chunk}), std::invalid_argument);
+}
+
+// Short prior lists used to be read past the end by merge helpers that skipped
+// validate().
+TEST(ExtendedDemValidate, MergeRejectsShortPriorList) {
+  auto dem_chunk = extended_dem_from_css_matrices(rep3(), px_only(0.01));
+  dem_chunk.fault_priors.pop_back();
+
+  EXPECT_THROW(dem_merge_duplicate_columns(dem_chunk), std::invalid_argument);
+  EXPECT_THROW(are_dem_columns_unique(dem_chunk), std::invalid_argument);
+  EXPECT_THROW(assert_dem_columns_unique(dem_chunk), std::invalid_argument);
+  EXPECT_THROW(dem_chunks_to_o_sparse({dem_chunk}), std::invalid_argument);
 }
 
 } // namespace

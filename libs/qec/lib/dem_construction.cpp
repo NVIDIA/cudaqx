@@ -29,6 +29,10 @@ detector_error_model dem_from_css_matrices(const css_code_matrices &code,
   if (num_rounds == 0)
     throw std::invalid_argument("num_rounds must be >= 1");
 
+  // Checked before the n == 0 early-out below so that a malformed rate is
+  // reported even when the code matrices describe no qubits to apply it to.
+  validate_noise_rates(noise);
+
   detector_error_model result;
   const std::size_t n = resolve_num_qubits(code);
 
@@ -62,7 +66,7 @@ detector_error_model dem_from_css_matrices(const css_code_matrices &code,
     const std::size_t d = nz + nx; // detector rows per round = total checks
 
     // pm_per_check must have length d (= nz + nx) when non-empty.
-    check_per_qubit_size(noise.pm_per_check, d, "pm_per_check");
+    check_rate_vector_size(noise.pm_per_check, d, "pm_per_check", "n_checks");
 
     const std::size_t n_detectors = num_rounds * d;
     const std::size_t n_observables = kz + kx;

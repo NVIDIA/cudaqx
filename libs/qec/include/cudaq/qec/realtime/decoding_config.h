@@ -91,6 +91,14 @@ struct decoder_config {
   /// requires knowing the round count up front; these phases describe one
   /// round each so the round count can be chosen (or grown) at run time. See
   /// cudaq::qec::dem_chunks_from_spec() for expansion to a chunk sequence.
+  ///
+  /// A configuration that also has a nonempty H_sparse is flat, and that
+  /// matrix is the one decoders are built from -- the phases are then only a
+  /// record of where it came from. Form selection keys off H_sparse.empty(),
+  /// so an omitted H_sparse and an explicit empty list both count as chunk
+  /// form. Nonempty H_sparse is exactly the state expand_dem_chunks() leaves
+  /// behind, which is what lets an expanded configuration round-trip through
+  /// YAML; it is not a way to override individual rounds.
   std::optional<dem_chunks_spec> dem_chunks;
   /// How many rounds to expand `dem_chunks` into. Required with dem_chunks and
   /// rejected without it. This is the round count the flat form would otherwise
@@ -194,8 +202,9 @@ public:
 /// therefore only has to understand the flat form.
 ///
 /// Does nothing to a configuration that is already flat (one whose `H_sparse`
-/// is set, or which carries no `dem_chunks` at all), so it is safe to call
-/// unconditionally.
+/// is nonempty, or which carries no `dem_chunks` at all), so it is safe to
+/// call unconditionally. An empty H_sparse with dem_chunks present is still
+/// treated as chunk form.
 ///
 /// @return The closed DEM the flat fields were derived from, so a caller that
 ///         also wants its per-fault priors does not have to expand a second

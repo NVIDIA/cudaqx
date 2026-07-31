@@ -1784,6 +1784,119 @@ decoders:
   }
 }
 
+// dem_chunks made the flat fields optional in the mapping, which must not turn
+// into accepting a flat config that only names some of them: the omission has
+// to be reported while the document is read, not when a decoder is eventually
+// built from a zero-sized DEM.
+TEST(DecoderChunkFormTest, IncompleteFlatConfigIsRejectedAtParse) {
+  // Each entry drops exactly one field from an otherwise complete flat config.
+  const std::vector<std::pair<std::string, std::string>> omissions{
+      {"block_size", "    syndrome_size: 3\n    H_sparse: [0, -1, 1, -1, 2, "
+                     "-1]\n    O_sparse: [0, -1]\n    D_sparse: [0, -1, 1, -1, "
+                     "2, -1]\n"},
+      {"syndrome_size", "    block_size: 3\n    H_sparse: [0, -1, 1, -1, 2, "
+                        "-1]\n    O_sparse: [0, -1]\n    D_sparse: [0, -1, 1, "
+                        "-1, 2, -1]\n"},
+      {"O_sparse", "    block_size: 3\n    syndrome_size: 3\n    H_sparse: [0, "
+                   "-1, 1, -1, 2, -1]\n    D_sparse: [0, -1, 1, -1, 2, -1]\n"},
+      {"D_sparse", "    block_size: 3\n    syndrome_size: 3\n    H_sparse: [0, "
+                   "-1, 1, -1, 2, -1]\n    O_sparse: [0, -1]\n"},
+  };
+
+  for (const auto &[omitted, body] : omissions) {
+    const std::string yaml =
+        "decoders:\n  - id: 0\n    type: multi_error_lut\n" + body;
+    try {
+      cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(yaml);
+      ADD_FAILURE() << "expected rejection when " << omitted << " is omitted";
+    } catch (const std::runtime_error &error) {
+      const std::string message = error.what();
+      EXPECT_NE(message.find(omitted), std::string::npos) << message;
+    }
+  } // end - for(omissions)
+}
+
+// The degenerate document that describes no DEM at all: before dem_chunks the
+// required-key check rejected it, and it must still be rejected rather than
+// parsing into an empty decoder.
+TEST(DecoderChunkFormTest, ConfigWithNeitherFormIsRejectedAtParse) {
+  const std::string yaml = R"(
+decoders:
+  - id: 0
+    type: multi_error_lut
+)";
+  EXPECT_THROW(
+      cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(yaml),
+      std::runtime_error);
+}
+
+// num_rounds counts init and final too, so 2 is the smallest expansion there
+// is. Rejecting 1 at parse keeps the failure next to the mistake instead of
+// deferring it to expand_dem_chunks() at decoder construction.
+TEST(DecoderChunkFormTest, RejectsNumRoundsBelowTwoAtParse) {
+  for (const unsigned rounds : {0u, 1u}) {
+    try {
+      cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(
+          chunk_form_yaml(rounds));
+      ADD_FAILURE() << "expected rejection of num_rounds: " << rounds;
+    } catch (const std::runtime_error &error) {
+      const std::string message = error.what();
+      EXPECT_NE(message.find("num_rounds"), std::string::npos) << message;
+    }
+  }
+  // Two rounds is init + final with no bulk copies, and is accepted.
+  EXPECT_EQ(*parse_one(chunk_form_yaml(2)).num_rounds, 2u);
+}
+
+// The schema has to agree with the parser about the minimum, or a document
+// that passes offline validation still fails to load.
+TEST(DecoderChunkFormTest, JsonSchemaNumRoundsMinimumMatchesTheParser) {
+  const auto schema =
+      cudaq::qec::decoding::config::decoder_config_json_schema();
+  const auto at = schema.find("\"num_rounds\"");
+  ASSERT_NE(at, std::string::npos);
+  EXPECT_NE(schema.find("\"minimum\": 2", at), std::string::npos)
+      << schema.substr(at, 200);
+}
+
+// Chunk form with no flat fields is the form users actually write, so it has to
+// survive a trip through emission and back unchanged.
+TEST(DecoderChunkFormTest, PureChunkFormRoundTripsThroughEmission) {
+  const auto config = parse_one(chunk_form_yaml(5));
+
+  cudaq::qec::decoding::config::multi_decoder_config wrapper;
+  wrapper.decoders.push_back(config);
+  const auto emitted = wrapper.to_yaml_str(200);
+  EXPECT_NE(emitted.find("dem_chunks"), std::string::npos) << emitted;
+
+  // Still chunk form after the trip: emission must not have materialized the
+  // derived fields, which re-parsing would reject as a config disagreeing
+  // with its own phases.
+  const auto reparsed = parse_one(emitted);
+  EXPECT_EQ(reparsed.dem_chunks, config.dem_chunks);
+  EXPECT_EQ(reparsed.num_rounds, config.num_rounds);
+  EXPECT_TRUE(reparsed.H_sparse.empty());
+}
+
+// A config carrying both forms is flat, and "flat wins" has to mean the
+// decoder is built from the explicit matrix -- not from an expansion that
+// silently disagrees with it.
+TEST(DecoderChunkFormTest, FlatMatrixWinsOverChunksThatDisagree) {
+  auto config = parse_one(chunk_form_yaml(5));
+  // A flat DEM deliberately unlike anything the phases expand to.
+  config.block_size = 3;
+  config.syndrome_size = 2;
+  config.H_sparse = {0, -1, 1, -1};
+  config.O_sparse = {0, -1};
+  config.D_sparse = {0, -1, 1, -1};
+  const auto flat_H = config.H_sparse;
+
+  const auto closed = cudaq::qec::decoding::config::expand_dem_chunks(config);
+  EXPECT_FALSE(closed.has_value()) << "an already-flat config must not expand";
+  EXPECT_EQ(config.H_sparse, flat_H);
+  EXPECT_EQ(config.syndrome_size, 2u);
+}
+
 // A config carrying both keeps validating H_sparse against syndrome_size: the
 // relaxation applies only when H_sparse is genuinely absent.
 TEST(DecoderChunkFormTest, PresentHSparseIsStillValidatedAlongsideChunks) {

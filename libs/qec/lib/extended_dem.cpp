@@ -23,7 +23,8 @@
 //
 // dem_close() places in_syndrome rows first (they become detector[0] =
 // syndrome[0] vs. zero initial state), then interior rows, matching the row
-// order of dem_from_css_matrices().
+// order of dem_from_css_matrices(). out_syndrome is dropped: closing ends the
+// experiment, so there is no later round for that seam to become a detector.
 
 #include "cudaq/qec/extended_dem.h"
 #include "cudaq/qec/code_matrices.h"
@@ -58,6 +59,47 @@ uint32_t extended_dem::num_seam_rows() const { return in_syndrome.num_rows(); }
 uint32_t extended_dem::num_in_seam_rows() const {
   return in_syndrome.num_rows();
 }
+
+// Everything downstream indexes fault columns by the chunk's own fault index,
+// so a block that is not that wide would be scattered into the wrong columns
+// (or past the end of a nested column list) with no other symptom. Zero-row
+// blocks must still report num_faults() columns: dem_merge_duplicate_columns
+// and dem_chunks_to_o_sparse walk every fault index through every block.
+void extended_dem::validate(const char *context) const {
+  const uint32_t n = num_faults();
+
+  const auto check_width = [&](const sparse_binary_matrix &block,
+                               const char *label) {
+    if (block.num_cols() != n)
+      throw std::invalid_argument(
+          std::string(context) + ": " + label + " has " +
+          std::to_string(block.num_cols()) + " columns but the chunk has " +
+          std::to_string(n) +
+          " faults; every block must be as wide as the chunk");
+  };
+  // in_syndrome is what num_faults() reports, so it defines n rather than
+  // being checked against it.
+  check_width(interior, "interior");
+  check_width(observables, "observables");
+  check_width(out_syndrome, "out_syndrome");
+
+  if (fault_priors.size() != n)
+    throw std::invalid_argument(std::string(context) + ": fault_priors has " +
+                                std::to_string(fault_priors.size()) +
+                                " entries but the chunk has " +
+                                std::to_string(n) + " faults");
+
+  const auto check_tags = [&context](const std::vector<uint64_t> &tags,
+                                     uint32_t rows, const char *label) {
+    if (tags.size() != rows)
+      throw std::invalid_argument(std::string(context) + ": " + label +
+                                  " has " + std::to_string(tags.size()) +
+                                  " entries but the seam it names has " +
+                                  std::to_string(rows) + " rows");
+  };
+  check_tags(in_tags, num_in_seam_rows(), "in_tags");
+  check_tags(out_tags, num_out_seam_rows(), "out_tags");
+} // end - extended_dem::validate()
 
 uint32_t extended_dem::num_out_seam_rows() const {
   return out_syndrome.num_rows();
@@ -143,6 +185,10 @@ static sparse_binary_matrix zero_matrix(uint32_t nrows, uint32_t ncols) {
 // in one pass, then wrapped into sparse_binary_matrix objects.
 extended_dem extended_dem_from_css_matrices(const css_code_matrices &code,
                                             const css_noise_params &noise) {
+  // Checked before the n == 0 early-out below so that a malformed rate is
+  // reported even when the code matrices describe no qubits to apply it to.
+  validate_noise_rates(noise);
+
   extended_dem result;
   const std::size_t n = resolve_num_qubits(code);
   if (n != 0) { // all code below depends on at least one qubit
@@ -166,20 +212,35 @@ extended_dem extended_dem_from_css_matrices(const css_code_matrices &code,
     const uint32_t nx = static_cast<uint32_t>(code.hx.num_rows());
     const uint32_t kz = static_cast<uint32_t>(code.lz.num_rows());
     const uint32_t kx = static_cast<uint32_t>(code.lx.num_rows());
+    // Seam/observable widths are uint32_t matrix dimensions; reject sums that
+    // would wrap before they become wrong sparse shapes.
+    if (static_cast<uint64_t>(nz) + nx > std::numeric_limits<uint32_t>::max())
+      throw std::invalid_argument(
+          "extended_dem_from_css_matrices: hz.num_rows() + hx.num_rows() "
+          "exceeds uint32_t max");
+    if (static_cast<uint64_t>(kz) + kx > std::numeric_limits<uint32_t>::max())
+      throw std::invalid_argument(
+          "extended_dem_from_css_matrices: lz.num_rows() + lx.num_rows() "
+          "exceeds uint32_t max");
     const uint32_t d = nz + nx; // seam rows (total checks per round)
     const uint32_t k = kz + kx; // observable rows
 
     // pm_per_check must have length d when non-empty.
-    check_per_qubit_size(noise.pm_per_check, static_cast<std::size_t>(d),
-                         "pm_per_check");
+    check_rate_vector_size(noise.pm_per_check, static_cast<std::size_t>(d),
+                           "pm_per_check", "n_checks");
 
     const auto x_qubits = active_qubits(noise.px, noise.px_per_qubit, n);
     const auto z_qubits = active_qubits(noise.pz, noise.pz_per_qubit, n);
     const auto y_qubits = active_qubits(noise.py, noise.py_per_qubit, n);
     const auto m_checks = active_checks(noise.pm, noise.pm_per_check,
                                         static_cast<std::size_t>(d));
-    const uint32_t n_faults = static_cast<uint32_t>(
-        x_qubits.size() + z_qubits.size() + y_qubits.size() + m_checks.size());
+    const std::size_t n_faults_sz =
+        x_qubits.size() + z_qubits.size() + y_qubits.size() + m_checks.size();
+    if (n_faults_sz > std::numeric_limits<uint32_t>::max())
+      throw std::invalid_argument(
+          "extended_dem_from_css_matrices: active fault count exceeds "
+          "uint32_t max");
+    const uint32_t n_faults = static_cast<uint32_t>(n_faults_sz);
 
     if (n_faults != 0) { // no columns to build when all rates are zero
 
@@ -322,6 +383,15 @@ bool dem_chunk_spec::is_empty() const {
 void dem_chunk_spec::validate(const std::string &context) const {
   if (num_faults == 0)
     throw std::invalid_argument(context + ".num_faults must be positive");
+  // sparse_binary_matrix columns are indexed with uint32_t; a wider count
+  // would wrap in sparse_from_terminated_rows and silently mis-size the chunk.
+  if (num_faults > std::numeric_limits<sparse_binary_matrix::index_type>::max())
+    throw std::invalid_argument(
+        context + ".num_faults (" + std::to_string(num_faults) +
+        ") exceeds uint32_t max (" +
+        std::to_string(
+            std::numeric_limits<sparse_binary_matrix::index_type>::max()) +
+        ")");
   if (error_rates.size() != num_faults)
     throw std::invalid_argument(
         context + ".error_rates has " + std::to_string(error_rates.size()) +
@@ -476,21 +546,23 @@ std::vector<extended_dem> dem_chunks_from_spec(const dem_chunks_spec &spec,
 // ---------------------------------------------------------------------------
 
 extended_dem dem_stitch(const extended_dem &a, const extended_dem &b) {
+  a.validate("dem_stitch: left chunk");
+  b.validate("dem_stitch: right chunk");
   if (a.num_observables() != b.num_observables())
-    throw std::runtime_error("dem_stitch: observable count mismatch (" +
-                             std::to_string(a.num_observables()) + " vs " +
-                             std::to_string(b.num_observables()) + ")");
+    throw std::invalid_argument("dem_stitch: observable count mismatch (" +
+                                std::to_string(a.num_observables()) + " vs " +
+                                std::to_string(b.num_observables()) + ")");
   // Only the contracted seam has to line up: a's outgoing side against b's
   // incoming side. Comparing a.num_seam_rows() to b.num_seam_rows() instead
   // would test a's *incoming* width, which is not part of this seam at all and
   // is legitimately zero for an init phase chunk.
   if (a.num_out_seam_rows() != b.num_in_seam_rows())
-    throw std::runtime_error(
+    throw std::invalid_argument(
         "dem_stitch: seam row count mismatch (a out_syndrome " +
         std::to_string(a.num_out_seam_rows()) + " vs b in_syndrome " +
         std::to_string(b.num_in_seam_rows()) + ")");
   if (a.out_tags != b.in_tags)
-    throw std::runtime_error(
+    throw std::invalid_argument(
         "dem_stitch: a.out_tags != b.in_tags — check ordering is incompatible");
 
   const auto n_A_sz = static_cast<std::size_t>(a.num_faults());
@@ -541,6 +613,10 @@ extended_dem dem_stitch(const extended_dem &a, const extended_dem &b) {
 extended_dem dem_stitch_all(const std::vector<extended_dem> &dem_chunks) {
   if (dem_chunks.empty())
     throw std::invalid_argument("dem_stitch_all: dem_chunks must be non-empty");
+  // dem_stitch validates both of its operands, which covers every chunk
+  // except when there is only one and no stitching happens at all.
+  if (dem_chunks.size() == 1)
+    dem_chunks[0].validate("dem_stitch_all: chunk 0");
   extended_dem acc = dem_chunks[0];
   for (std::size_t i = 1; i < dem_chunks.size(); ++i)
     acc = dem_stitch(acc, dem_chunks[i]);
@@ -573,7 +649,12 @@ static void write_sparse_rows(cudaqx::tensor<uint8_t> &dst,
 // tensor<uint8_t> — that is the existing public API for all decoders.
 // The sparse → dense conversion here is the only use of dense tensors
 // in the extended_dem layer.
+//
+// out_syndrome is not written: closing ends the experiment, so there is no
+// next round for that seam to become a detector against. Callers that need a
+// final-boundary detector must put it in in_syndrome or interior first.
 detector_error_model dem_close(const extended_dem &dem) {
+  dem.validate("dem_close");
   const uint32_t n_faults = dem.num_faults();
   const uint32_t n_seam = dem.num_in_seam_rows();
   const uint32_t n_interior = dem.num_interior();
@@ -775,6 +856,10 @@ dem_chunks_to_o_sparse(const std::vector<extended_dem> &dem_chunks) {
     throw std::invalid_argument(
         "dem_chunks_to_o_sparse: dem_chunks must be non-empty");
 
+  for (std::size_t i = 0; i < dem_chunks.size(); ++i)
+    dem_chunks[i].validate(
+        ("dem_chunks_to_o_sparse: chunk " + std::to_string(i)).c_str());
+
   const uint32_t k_obs = dem_chunks[0].num_observables();
 
   // Validate consistent observable count across chunks.
@@ -796,7 +881,8 @@ dem_chunks_to_o_sparse(const std::vector<extended_dem> &dem_chunks) {
                                 "index exceeds uint32_t max");
     // obs is stored as [k_obs × n_faults] in CSC. to_nested_csc() gives
     // outer index = fault column, inner = observable rows that flip.
-    // We need the transpose: observable → fault columns.
+    // We need the transpose: observable → fault columns. validate() above
+    // already required observables.num_cols() == nc.
     const auto obs_csc = c.observables.to_nested_csc();
     for (uint32_t fc = 0; fc < nc; ++fc)
       for (auto obs_row : obs_csc[fc])
@@ -813,9 +899,11 @@ dem_chunks_to_o_sparse(const std::vector<extended_dem> &dem_chunks) {
 // dem_close_all builds the closed DEM in a single forward pass over the chunk
 // list. Each fault column is written at most twice: once into the detector
 // band for the seam on its left (via in_syndrome) and once into the seam on
-// its right (via out_syndrome). The last chunk's out_syndrome is dropped,
-// matching dem_close()'s behaviour. For single-round chunks (num_interior==0),
-// the output is byte-identical to dem_close(dem_stitch_all(dem_chunks)).
+// its right (via out_syndrome). The last chunk's out_syndrome is dropped on
+// purpose — same terminal-boundary rule as dem_close() — so a detector that
+// should appear in the closed DEM must already be in some in_syndrome or
+// interior. For single-round chunks (num_interior==0), the output is
+// byte-identical to dem_close(dem_stitch_all(dem_chunks)).
 //
 // Detector row layout (round order, regardless of chunk granularity):
 //   rows 0..d-1:             dem_chunks[0].in_syndrome   (detector[0])
@@ -828,6 +916,10 @@ detector_error_model
 dem_close_all(const std::vector<extended_dem> &dem_chunks) {
   if (dem_chunks.empty())
     throw std::invalid_argument("dem_close_all: dem_chunks must be non-empty");
+
+  for (std::size_t i = 0; i < dem_chunks.size(); ++i)
+    dem_chunks[i].validate(
+        ("dem_close_all: chunk " + std::to_string(i)).c_str());
 
   const uint32_t k = dem_chunks[0].num_observables();
   const std::size_t T = dem_chunks.size();
@@ -976,6 +1068,7 @@ struct dem_column_view {
 
 extended_dem dem_merge_duplicate_columns(const extended_dem &dem,
                                          prior_combine_mode mode) {
+  dem.validate("dem_merge_duplicate_columns");
   const std::size_t n = dem.num_faults();
   if (n == 0)
     return dem;
@@ -986,7 +1079,7 @@ extended_dem dem_merge_duplicate_columns(const extended_dem &dem,
   // ordering so the output matches the Python reference.
   struct column_group {
     std::size_t representative;
-    // prod(1-p_i) for OR mode, sum(p_i) for SUM mode.
+    // prod(1-2p_i) for XOR (or_combine) mode, sum(p_i) for SUM mode.
     double accumulator;
     std::size_t members;
   };
@@ -997,12 +1090,13 @@ extended_dem dem_merge_duplicate_columns(const extended_dem &dem,
     const double p = dem.fault_priors[j];
     auto it = sup_map.find(sup);
     if (it == sup_map.end()) {
+      // XOR: track prod(1-2p). SUM: track sum(p).
       const double init =
-          (mode == prior_combine_mode::or_combine) ? (1.0 - p) : p;
+          (mode == prior_combine_mode::or_combine) ? (1.0 - 2.0 * p) : p;
       sup_map.emplace(std::move(sup), column_group{j, init, 1});
     } else {
       if (mode == prior_combine_mode::or_combine)
-        it->second.accumulator *= (1.0 - p);
+        it->second.accumulator *= (1.0 - 2.0 * p);
       else
         it->second.accumulator += p;
       ++it->second.members;
@@ -1022,14 +1116,19 @@ extended_dem dem_merge_duplicate_columns(const extended_dem &dem,
     new_obs[k] = cols.observables[rep];
     new_ins[k] = cols.in_syndrome[rep];
     new_out[k] = cols.out_syndrome[rep];
-    // A column with nothing to merge keeps its prior bit for bit: 1-(1-p) is
-    // not p in floating point, and merging a DEM whose columns are already
-    // unique must not perturb its weights.
-    const double fp =
-        group.members == 1
-            ? dem.fault_priors[rep]
-            : (mode == prior_combine_mode::or_combine ? 1.0 - group.accumulator
-                                                      : group.accumulator);
+    // A column with nothing to merge keeps its prior bit for bit:
+    // 0.5*(1-(1-2p)) is not always p in floating point, and merging a DEM
+    // whose columns are already unique must not perturb its weights.
+    //
+    // sum_combine is a small-p linear approximation, so its sum can leave the
+    // unit interval where or_combine (XOR) cannot. Clamp it: a prior above 1
+    // is not a probability, and every consumer of fault_priors treats it as
+    // one.
+    const double fp = group.members == 1
+                          ? dem.fault_priors[rep]
+                          : (mode == prior_combine_mode::or_combine
+                                 ? 0.5 * (1.0 - group.accumulator)
+                                 : std::min(1.0, group.accumulator));
     new_priors.push_back(fp);
     ++k;
   }
@@ -1050,6 +1149,7 @@ extended_dem dem_merge_duplicate_columns(const extended_dem &dem,
 } // end - dem_merge_duplicate_columns()
 
 bool are_dem_columns_unique(const extended_dem &dem) {
+  dem.validate("are_dem_columns_unique");
   const std::size_t n = dem.num_faults();
   const dem_column_view cols(dem);
 
@@ -1062,6 +1162,7 @@ bool are_dem_columns_unique(const extended_dem &dem) {
 } // end - are_dem_columns_unique()
 
 void assert_dem_columns_unique(const extended_dem &dem) {
+  dem.validate("assert_dem_columns_unique");
   const std::size_t n = dem.num_faults();
   const dem_column_view cols(dem);
 

@@ -158,10 +158,12 @@ void bindExtendedDem(nb::module_ &mod) {
       "Strategy for merging fault priors when dem_merge_duplicate_columns()\n"
       "collapses columns with identical row support.")
       .value("or_combine", prior_combine_mode::or_combine,
-             "p = 1 - prod(1 - p_i): exact probability that at least one\n"
-             "independent event fires. Use for physical fault mechanisms.")
+             "p = 1/2 * (1 - prod(1 - 2 p_i)): exact probability that an odd\n"
+             "number of independent events fire (GF(2) / XOR merge). Use for\n"
+             "physical fault mechanisms.")
       .value("sum_combine", prior_combine_mode::sum_combine,
-             "p = sum(p_i): linear approximation valid for small priors.");
+             "p = min(1, sum(p_i)): linear approximation valid for small\n"
+             "priors.");
 
   // -------------------------------------------------------------------------
   // dem_merge_duplicate_columns / are_dem_columns_unique /
@@ -216,13 +218,15 @@ void bindExtendedDem(nb::module_ &mod) {
   // -------------------------------------------------------------------------
   mod.def("dem_close", &dem_close, nb::arg("dem"),
           "Collapse an ExtendedDem into a flat detector_error_model.\n\n"
-          "Places in_syndrome rows first, then interior rows.");
+          "Places in_syndrome rows first, then interior rows. out_syndrome is\n"
+          "dropped: closing ends the experiment, so put any final-boundary\n"
+          "detector in in_syndrome or interior instead.");
 
   mod.def(
       "dem_close_all", &dem_close_all, nb::arg("dem_chunks"),
       "Build a flat detector_error_model from T DEM chunks in O(T) time.\n\n"
       "Equivalent to dem_close(dem_stitch_all(dem_chunks)) but avoids O(T^2) "
-      "cost.\n\n"
+      "cost. The last chunk's out_syndrome is dropped, same as dem_close().\n\n"
       "Args:\n"
       "    dem_chunks: Non-empty list of ExtendedDem in round order.\n"
       "Returns:\n"

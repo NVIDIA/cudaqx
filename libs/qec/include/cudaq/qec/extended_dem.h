@@ -87,6 +87,23 @@ struct extended_dem {
 
   /// Number of outgoing-seam rows, i.e. rows of out_syndrome.
   uint32_t num_out_seam_rows() const;
+
+  /// @brief Throw std::invalid_argument unless this chunk is internally
+  /// consistent, i.e. safe to stitch, close, or merge.
+  ///
+  /// num_faults() reports in_syndrome's width alone, so nothing else about a
+  /// chunk is self-describing: a block that disagrees with it, or a prior list
+  /// that does not have one entry per fault, would otherwise be read at the
+  /// wrong width and silently misalign columns (or walk past the end of a
+  /// nested column list). Checks that
+  ///   - every block is num_faults() columns wide, including zero-row blocks
+  ///     (use a width-n empty matrix, not a default-constructed one, when the
+  ///     chunk has faults),
+  ///   - fault_priors has one entry per fault, and
+  ///   - each tag vector has one entry per row of the seam it names.
+  ///
+  /// @param context Prefix for the error message, naming the caller.
+  void validate(const char *context) const;
 };
 
 /// @brief Build a one-round extended_dem from CSS matrices and noise.
@@ -141,9 +158,10 @@ struct dem_chunk_spec {
   /// True when nothing has been set, used to detect an omitted phase.
   bool is_empty() const;
 
-  /// @brief Check internal consistency: a positive fault count, one error rate
-  /// per fault with each in [0, 1], and index lists that are -1 terminated
-  /// with every index in [0, num_faults).
+  /// @brief Check internal consistency: a positive fault count that fits in
+  /// uint32_t (sparse matrix column index width), one error rate per fault with
+  /// each in [0, 1], and index lists that are -1 terminated with every index
+  /// in [0, num_faults).
   /// @param context Prefix for error messages, e.g. "dem_chunks.init".
   /// @throws std::invalid_argument on the first violation.
   void validate(const std::string &context) const;
@@ -260,12 +278,18 @@ extended_dem dem_stitch_all(const std::vector<extended_dem> &dem_chunks);
 /// into one. The merged prior is computed from the individual priors using
 /// one of these two rules:
 ///
-///   - or_combine (default): p_merged = 1 - prod_i(1 - p_i)
-///     Exact probability that at least one independent event fires.
-///     Use for physical fault mechanisms.
+///   - or_combine (default): p_merged = 1/2 * (1 - prod_i(1 - 2 p_i))
+///     Exact probability that an odd number of independent events fire, which
+///     is the net GF(2) effect of identical DEM columns (even counts cancel).
+///     Pairwise this is P(A xor B) = p + q - 2 p q, matching
+///     detector_error_model canonicalization. Prefer this for physical fault
+///     mechanisms.
 ///
-///   - sum_combine: p_merged = sum_i(p_i)
-///     Linear approximation valid when all p_i are small.
+///   - sum_combine: p_merged = min(1, sum_i(p_i))
+///     Linear approximation valid when all p_i are small. The sum of several
+///     larger priors can exceed 1, which is not a probability any decoder can
+///     use, so the result is clamped; prefer or_combine when the priors are
+///     not small.
 enum class prior_combine_mode { or_combine, sum_combine };
 
 /// @brief Merge fault columns with identical row support into single columns.
@@ -424,7 +448,10 @@ dem_chunks_to_o_sparse(const std::vector<extended_dem> &dem_chunks);
 ///
 /// Seams only have to contract pairwise, so a phase decomposition works: the
 /// first chunk may have no incoming seam (its interior carries round 0) and the
-/// last may have no outgoing one.
+/// last may have no outgoing one. As with dem_close(), the last chunk's
+/// out_syndrome is discarded: any detector that should appear in the closed
+/// DEM must already live in some chunk's in_syndrome or interior (for a
+/// dem_chunks_spec final phase, that means H_in_sparse / H_mid_sparse).
 ///
 /// @param dem_chunks Non-empty sequence of chunks in round order. Each chunk's
 ///               out_syndrome must match the next one's in_syndrome, and all
@@ -457,7 +484,15 @@ dem_chunks_to_pcm(const std::vector<extended_dem> &dem_chunks);
 ///   - detector_error_matrix: [in_syndrome stacked above interior]
 ///   - observables_flips_matrix: observables
 ///   - error_rates: fault_priors
-///   - out_syndrome rows are dropped (no final data measurement assumed).
+///
+/// out_syndrome is intentionally dropped. Closing models a terminated
+/// experiment: there is no later round for the outgoing seam to differ against,
+/// matching dem_from_css_matrices (final-round faults touch only the last
+/// detector band). Put any detector that must survive closing into in_syndrome
+/// or interior instead — for example a final data-readout boundary belongs in
+/// the last chunk's in_syndrome / interior (dem_chunks.final.H_in_sparse /
+/// H_mid_sparse), never only in out_syndrome. dem_chunks_spec::validate()
+/// already rejects a nonempty final.H_out_sparse for this reason.
 ///
 /// Invariant (up to canonicalization):
 ///   dem_close(dem_stitch_all(T one-round chunks))

@@ -389,6 +389,49 @@ D_sparse: [ 0, -1, 0, 1, -1 ]
         qec.decoder_config.from_yaml_str(yaml_str)
 
 
+def test_num_rounds_below_two_is_rejected():
+    # num_rounds counts init and final as well as the bulk copies between
+    # them, so 2 is the smallest expansion there is.
+    for rounds in (0, 1):
+        with pytest.raises(Exception):
+            qec.decoder_config.from_yaml_str(chunk_form_yaml(rounds))
+
+    assert qec.decoder_config.from_yaml_str(chunk_form_yaml(2)).num_rounds == 2
+
+
+def test_incomplete_flat_config_is_rejected():
+    # dem_chunks made the flat fields optional in the mapping; a flat config
+    # still has to name all of them, or it parses into an empty DEM that only
+    # fails when a decoder is built from it.
+    complete = {
+        "block_size": "block_size: 3",
+        "syndrome_size": "syndrome_size: 2",
+        "H_sparse": "H_sparse: [ 0, -1, 1, -1 ]",
+        "O_sparse": "O_sparse: [ 0, -1 ]",
+        "D_sparse": "D_sparse: [ 0, -1, 0, 1, -1 ]",
+    }
+    header = "id: 0\ntype: single_error_lut\n"
+    assert qec.decoder_config.from_yaml_str(header +
+                                            "\n".join(complete.values()))
+
+    for omitted in complete:
+        yaml_str = header + "\n".join(
+            line for key, line in complete.items() if key != omitted)
+        with pytest.raises(Exception):
+            qec.decoder_config.from_yaml_str(yaml_str)
+
+
+def test_config_describing_no_dem_at_all_is_rejected():
+    with pytest.raises(Exception):
+        qec.decoder_config.from_yaml_str("id: 0\ntype: single_error_lut\n")
+
+
+def test_expand_dem_chunks_is_exported_at_top_level():
+    config = qec.decoder_config.from_yaml_str(chunk_form_yaml(5))
+    assert qec.expand_dem_chunks(config) is not None
+    assert config.block_size == 41
+
+
 def test_derived_fields_are_rejected_in_chunk_form():
     with_block_size = chunk_form_yaml(5).replace(
         "num_rounds: 5", "num_rounds: 5\nblock_size: 41")

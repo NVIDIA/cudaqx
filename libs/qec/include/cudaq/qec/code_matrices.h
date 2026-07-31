@@ -115,13 +115,69 @@ inline void check_num_cols(const sparse_binary_matrix &m, std::size_t n,
         ") does not match n_qubits (" + std::to_string(n) + ")");
 }
 
-/// Throw if per_qubit is non-empty with a length that does not match n.
+/// Throw if rates is non-empty with a length that does not match n.
+/// size_label names the dimension n counts, so a per-check vector does not
+/// report a per-qubit mismatch.
+inline void check_rate_vector_size(const std::vector<double> &rates,
+                                   std::size_t n, const char *label,
+                                   const char *size_label) {
+  if (!rates.empty() && rates.size() != n)
+    throw std::invalid_argument(std::string(label) + " has " +
+                                std::to_string(rates.size()) + " entries but " +
+                                size_label + "=" + std::to_string(n));
+}
+
+/// Throw if per_qubit is non-empty with a length that does not match n_qubits.
 inline void check_per_qubit_size(const std::vector<double> &per_qubit,
                                  std::size_t n, const char *label) {
-  if (!per_qubit.empty() && per_qubit.size() != n)
-    throw std::invalid_argument(std::string(label) + " has " +
-                                std::to_string(per_qubit.size()) +
-                                " entries but n_qubits=" + std::to_string(n));
+  check_rate_vector_size(per_qubit, n, label, "n_qubits");
+}
+
+/// Throw unless p is a probability. Written as a negated range test so that
+/// NaN, which compares false against everything, is rejected too.
+inline void check_probability(double p, const std::string &label) {
+  if (!(p >= 0.0 && p <= 1.0))
+    throw std::invalid_argument(label + " must be a probability in [0, 1]," +
+                                " got " + std::to_string(p));
+}
+
+/// Throw unless every scalar and per-element rate is a probability. Zero rates
+/// are legal and simply produce no DEM column; the point of this check is that
+/// a negative or NaN rate is silently inactive under that same rule, so a
+/// mistyped configuration would otherwise build a smaller DEM instead of
+/// failing.
+inline void validate_noise_rates(const css_noise_params &noise) {
+  check_probability(noise.px, "px");
+  check_probability(noise.py, "py");
+  check_probability(noise.pz, "pz");
+  check_probability(noise.pm, "pm");
+
+  const auto check_each = [](const std::vector<double> &rates,
+                             const char *label) {
+    for (std::size_t i = 0; i < rates.size(); ++i)
+      check_probability(rates[i],
+                        std::string(label) + "[" + std::to_string(i) + "]");
+  };
+  check_each(noise.px_per_qubit, "px_per_qubit");
+  check_each(noise.py_per_qubit, "py_per_qubit");
+  check_each(noise.pz_per_qubit, "pz_per_qubit");
+  check_each(noise.pm_per_check, "pm_per_check");
+}
+
+/// True when any noise rate is nonzero, i.e. the model asks for at least one
+/// fault mechanism. Call only after validate_noise_rates(), so that a nonzero
+/// rate here really is a positive probability.
+inline bool has_any_noise(const css_noise_params &noise) {
+  const auto any_nonzero = [](const std::vector<double> &rates) {
+    for (const double p : rates)
+      if (p != 0.0)
+        return true;
+    return false;
+  };
+  return noise.px != 0.0 || noise.py != 0.0 || noise.pz != 0.0 ||
+         noise.pm != 0.0 || any_nonzero(noise.px_per_qubit) ||
+         any_nonzero(noise.py_per_qubit) || any_nonzero(noise.pz_per_qubit) ||
+         any_nonzero(noise.pm_per_check);
 }
 
 /// Nested CSC for m padded to outer size n; new entries are empty vectors.

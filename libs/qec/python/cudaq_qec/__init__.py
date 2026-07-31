@@ -125,6 +125,7 @@ configure_decoders_from_file = qecrt.config.configure_decoders_from_file
 configure_decoders_from_str = qecrt.config.configure_decoders_from_str
 finalize_decoders = qecrt.config.finalize_decoders
 configure_decoders = qecrt.config.configure_decoders
+expand_dem_chunks = qecrt.config.expand_dem_chunks
 decoder_param_schema = qecrt.config.decoder_param_schema
 registered_decoder_schemas = qecrt.config.registered_decoder_schemas
 decoder_config_json_schema = qecrt.config.decoder_config_json_schema

@@ -16,11 +16,14 @@
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/realtime/decoding_config.h"
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
+#include <string>
+#include <vector>
 
 namespace cudaq::qec::decoding::config {
 
@@ -366,6 +369,20 @@ template <>
 struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
   static void mapping(IO &io,
                       cudaq::qec::decoding::config::decoder_config &config) {
+    // io.keys() reports every key the traits below ask for as well as the ones
+    // the document actually carries, so it can only tell absent from present
+    // before any mapping call has registered a name. The flat-form check at
+    // the bottom needs that distinction, because a field that is missing and
+    // one that is present but empty parse to the same value.
+    std::vector<std::string> document_keys;
+    if (!io.outputting())
+      for (const auto key : io.keys())
+        document_keys.emplace_back(key.str());
+    const auto in_document = [&document_keys](const char *name) {
+      return std::find(document_keys.begin(), document_keys.end(), name) !=
+             document_keys.end();
+    };
+
     io.mapRequired("id", config.id);
     io.mapRequired("type", config.type);
     io.mapOptional("dispatch", config.dispatch,
@@ -375,17 +392,36 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
     // below the mapping calls enforces that exactly one of them is described,
     // because the chunk form derives the flat fields and a config that spelled
     // out both could disagree with itself.
-    io.mapOptional("block_size", config.block_size, std::uint64_t{0});
-    io.mapOptional("syndrome_size", config.syndrome_size, std::uint64_t{0});
-    io.mapOptional("H_sparse", config.H_sparse, std::vector<std::int64_t>{});
-    io.mapOptional("O_sparse", config.O_sparse, std::vector<std::int64_t>{});
-    io.mapOptional("D_sparse", config.D_sparse, std::vector<std::int64_t>{});
+    // A flat configuration names all five on the way out as well as the way
+    // in. Emitting only the ones that differ from their defaults would drop a
+    // legitimately empty O_sparse (a DEM with no observables) and leave behind
+    // a document that no longer parses. A chunk-form configuration takes the
+    // optional path so its derived fields stay absent, which is what makes the
+    // emitted document re-parse as chunk form.
+    const bool emitting_flat_form =
+        io.outputting() &&
+        !(config.dem_chunks.has_value() && config.H_sparse.empty());
+    if (emitting_flat_form) {
+      io.mapRequired("block_size", config.block_size);
+      io.mapRequired("syndrome_size", config.syndrome_size);
+      io.mapRequired("H_sparse", config.H_sparse);
+      io.mapRequired("O_sparse", config.O_sparse);
+      io.mapRequired("D_sparse", config.D_sparse);
+    } else {
+      io.mapOptional("block_size", config.block_size, std::uint64_t{0});
+      io.mapOptional("syndrome_size", config.syndrome_size, std::uint64_t{0});
+      io.mapOptional("H_sparse", config.H_sparse, std::vector<std::int64_t>{});
+      io.mapOptional("O_sparse", config.O_sparse, std::vector<std::int64_t>{});
+      io.mapOptional("D_sparse", config.D_sparse, std::vector<std::int64_t>{});
+    }
     io.mapOptional("dem_chunks", config.dem_chunks);
     io.mapOptional("num_rounds", config.num_rounds);
 
-    // Chunk form: dem_chunks supplies the DEM and H_sparse is absent. A config
-    // carrying both is flat -- the explicit matrix wins -- which is also what
-    // expand_dem_chunks() leaves behind after it runs.
+    // Chunk form when dem_chunks is set and H_sparse is empty. Emptiness is
+    // what the code keys off: an omitted H_sparse and an explicit H_sparse: []
+    // both parse to the same empty vector, so both are treated as chunk form.
+    // A nonempty H_sparse makes the config flat -- the matrix wins -- which is
+    // also what expand_dem_chunks() leaves behind after it runs.
     const bool chunk_form =
         config.dem_chunks.has_value() && config.H_sparse.empty();
 
@@ -398,6 +434,18 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
           "num_rounds is set for decoder " + std::to_string(config.id) +
           " but there are no dem_chunks for it to repeat. Either remove "
           "num_rounds or add dem_chunks to describe the DEM.");
+
+    // The expansion is init, num_rounds-2 bulk copies, then final, so a count
+    // below 2 describes no experiment dem_chunks_from_spec() can build. Reject
+    // it while the document is being read rather than leaving it to fail at
+    // decoder construction, which is where expansion actually runs.
+    if (config.num_rounds.has_value() && *config.num_rounds < 2)
+      throw std::runtime_error(
+          "num_rounds must be at least 2 for decoder " +
+          std::to_string(config.id) +
+          " because it counts the init and final rounds as well as the bulk "
+          "copies between them, but it is " +
+          std::to_string(*config.num_rounds) + ".");
 
     if (chunk_form) {
       if (!config.num_rounds.has_value())
@@ -420,6 +468,29 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
       reject_derived("O_sparse", !config.O_sparse.empty());
       reject_derived("D_sparse", !config.D_sparse.empty());
     } else {
+      // A flat document spells out its whole DEM, so every one of these fields
+      // has to be there. They are mapOptional only because the chunk form
+      // derives them; without this check a document that omits one parses into
+      // a zero-sized DEM and fails much later, at decoder construction.
+      if (!io.outputting()) {
+        std::string missing;
+        for (const char *name : {"block_size", "syndrome_size", "H_sparse",
+                                 "O_sparse", "D_sparse"}) {
+          if (!in_document(name)) {
+            if (!missing.empty())
+              missing += ", ";
+            missing += name;
+          }
+        } // end - for(name)
+        if (!missing.empty())
+          throw std::runtime_error(
+              "decoder " + std::to_string(config.id) +
+              " is missing required field(s): " + missing +
+              ". A flat DEM names block_size, syndrome_size, H_sparse, "
+              "O_sparse and D_sparse together; use dem_chunks with num_rounds "
+              "to describe the same DEM one round at a time instead.");
+      } // end - if(!io.outputting())
+
       if (config.H_sparse.empty() && config.syndrome_size > 0)
         throw std::runtime_error(
             "H_sparse is required for decoder " + std::to_string(config.id) +
@@ -777,7 +848,9 @@ std::string decoder_config_json_schema() {
       {"O_sparse", llvm::json::Object{{"$ref", "#/$defs/sparse_matrix"}}},
       {"D_sparse", llvm::json::Object{{"$ref", "#/$defs/sparse_matrix"}}},
       {"dem_chunks", llvm::json::Object{{"$ref", "#/$defs/dem_chunks"}}},
-      {"num_rounds", llvm::json::Object{{"type", "integer"}, {"minimum", 1}}},
+      // At least 2: num_rounds counts the init and final rounds as well as the
+      // bulk copies between them, which is what dem_chunks_from_spec() builds.
+      {"num_rounds", llvm::json::Object{{"type", "integer"}, {"minimum", 2}}},
       {"decoder_custom_args", llvm::json::Object{{"type", "object"}}},
   };
 
@@ -887,9 +960,7 @@ std::string decoder_config_json_schema() {
            {"required", llvm::json::Array{"id", "type"}},
            // The DEM is described either flat or as repeated phases. The
            // parser additionally rejects a chunk-form document that also sets
-           // the derived fields, and tolerates a degenerate flat document with
-           // no matrices at all when syndrome_size is 0; neither is expressible
-           // here.
+           // the derived fields, which is not expressible here.
            {"anyOf",
             llvm::json::Array{
                 llvm::json::Object{
