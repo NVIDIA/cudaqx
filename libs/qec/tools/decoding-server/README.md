@@ -38,7 +38,9 @@ Malformed YAML, schema failures, and topology changes print
 sessions serving. To avoid a temporary double allocation for large decoders,
 the old decoder resources are released before replacement construction. If
 construction or device-scheduler relaunch fails, the affected IDs return
-`NOT_READY` and the daemon prints
+`NOT_READY` on the host path. After a failed device-graph reload, no scheduler
+is consuming the preserved provider ring, so device-graph clients must remain
+idle until a later successful apply. The daemon prints
 `QEC_DECODING_SERVER_CONFIG_FAILED awaiting_config`; correct the file and send
 `SIGHUP` again. Applying an unchanged configuration is safe and reports
 `QEC_DECODING_SERVER_CONFIG_APPLIED`.

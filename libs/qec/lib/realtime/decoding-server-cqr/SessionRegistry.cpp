@@ -122,6 +122,7 @@ SessionRegistry::apply_config(const multi_decoder_config &config,
             "restart required: decoder id set changed"};
 
   bool changed = !unavailable_ids_.empty();
+  std::unordered_set<uint64_t> changed_host_ids;
   std::unordered_set<uint64_t> changed_device_graph_ids;
   for (const auto &[id, dispatch] : dispatch_by_id_) {
     const auto next_it = next_by_id.find(id);
@@ -141,8 +142,12 @@ SessionRegistry::apply_config(const multi_decoder_config &config,
               std::to_string(id)};
     const bool decoder_changed =
         unavailable_ids_.count(id) || *next_it->second != *active_it->second;
-    if (dispatch == DecoderDispatch::device_graph && decoder_changed)
-      changed_device_graph_ids.insert(id);
+    if (decoder_changed) {
+      if (dispatch == DecoderDispatch::host)
+        changed_host_ids.insert(id);
+      else
+        changed_device_graph_ids.insert(id);
+    }
     changed = changed || decoder_changed;
   }
 
@@ -168,9 +173,9 @@ SessionRegistry::apply_config(const multi_decoder_config &config,
   // caller owns the exclusive lifecycle lock, so no request can acquire a
   // session while this transition is in progress.
   std::unordered_map<uint64_t, std::unique_ptr<DecodingSession>> retired;
-  for (const auto &[id, dispatch] : dispatch_by_id_) {
-    if (dispatch != DecoderDispatch::host &&
-        !changed_device_graph_ids.count(id))
+  for (const auto &entry : dispatch_by_id_) {
+    const auto id = entry.first;
+    if (!changed_host_ids.count(id) && !changed_device_graph_ids.count(id))
       continue;
     unavailable_ids_.insert(id);
     auto it = sessions_.find(id);
@@ -187,8 +192,7 @@ SessionRegistry::apply_config(const multi_decoder_config &config,
   try {
     for (const auto &dc : config.decoders) {
       const uint64_t id = static_cast<uint64_t>(dc.id);
-      if (dc.dispatch != DecoderDispatch::host &&
-          !changed_device_graph_ids.count(id))
+      if (!changed_host_ids.count(id) && !changed_device_graph_ids.count(id))
         continue;
       replacements.emplace(id, make_session(dc));
     }

@@ -865,6 +865,38 @@ TEST(DecodingServerLiveConfig, DeviceGraphLaunchFailureCanRecover) {
   EXPECT_NO_THROW((void)registry.get(0));
 }
 
+TEST(DecodingServerLiveConfig,
+     UnchangedHostDecoderSurvivesAnotherDecoderConstructionFailure) {
+  using namespace cudaq::qec::decoding_server;
+  using cudaq::qec::decoding::config::multi_decoder_config;
+
+  auto decoder0 =
+      multi_decoder_config::from_yaml_str(live_multi_error_lut_yaml())
+          .decoders.front();
+  auto decoder1 = decoder0;
+  decoder1.id = 1;
+
+  multi_decoder_config initial;
+  initial.decoders = {decoder0, decoder1};
+
+  SessionRegistry registry;
+  registry.load_from_config(initial, "two-host initial config");
+  auto *unchanged_session = &registry.get(1);
+
+  auto replacement = initial;
+  replacement.decoders.front() =
+      multi_decoder_config::from_yaml_str(
+          live_pymatching_yaml(/*decoder_id=*/0,
+                               /*impossible_device=*/true))
+          .decoders.front();
+
+  const auto failed =
+      registry.apply_config(replacement, "decoder 0 construction failure");
+  EXPECT_EQ(failed.state, ConfigApplyState::awaiting_config) << failed.message;
+  EXPECT_THROW((void)registry.get(0), SessionNotReady);
+  EXPECT_EQ(&registry.get(1), unchanged_session);
+}
+
 TEST(DecodingServerLiveConfig, ReplacesHostDecoderWithoutRebindingRing) {
   const std::string path =
       ::testing::TempDir() + "/decoding_server_live_swap.yaml";
