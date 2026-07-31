@@ -32,9 +32,8 @@ on:
         required: false
       docs_version:
         description: >-
-          Docs version to build/publish (e.g. 0.6.0). If empty, it is derived
+          Docs version to build/publish (e.g. 0.6.0). If left empty, it is derived
           from the branch name (releases/vX.Y.Z -> X.Y.Z, otherwise "latest").
-          Only release versions are ever deployed.
         type: string
         default: ''
         required: false
