@@ -15,20 +15,20 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace cudaq::qec {
 
 /// @brief Authoritative representation from which a decoder model originates.
 ///
-/// Matrix and Stim sources are supported now. `dem_chunks` names the compact
-/// repeated-round representation being introduced by the dynamic DEM APIs.
-/// Adding its typed constructor and accessor does not change the
-/// `decoder_inputs` object layout or decoder factory signature.
+/// Matrix and Stim sources are supported. A compact repeated-round source is
+/// expected once the dynamic DEM APIs settle; adding it here needs only a new
+/// enumerator plus its typed constructor and accessor, and changes neither the
+/// `decoder_inputs` object layout nor the decoder factory signature.
 enum class decoder_model_source : std::uint8_t {
   matrices,
   stim_dem,
-  dem_chunks,
 };
 
 /// @brief Stable, owning input contract shared by offline and server decoders.
@@ -47,14 +47,16 @@ public:
   /// @brief Construct a materialized matrix model.
   /// @param detector_error_matrix H, with shape detectors x error mechanisms.
   /// @param observable_flips_matrix O, with shape observables x error
-  /// mechanisms. Its row count is retained even when a row has no nonzeros.
+  /// mechanisms. Supplying it establishes an observable model; its row count is
+  /// retained even when a row has no nonzeros, so a zero-row O is a supplied
+  /// model rather than an absent one.
   /// @param error_rates Optional rate per error mechanism.
   /// @param measurement_to_detectors Optional D, with shape detectors x raw
   /// measurements.
   /// @param error_ids Optional correlation ID per error mechanism.
   decoder_inputs(
       sparse_binary_matrix detector_error_matrix,
-      sparse_binary_matrix observable_flips_matrix,
+      std::optional<sparse_binary_matrix> observable_flips_matrix,
       std::vector<double> error_rates = {},
       std::optional<sparse_binary_matrix> measurement_to_detectors =
           std::nullopt,
@@ -89,7 +91,15 @@ public:
   /// @brief Return the stored common H projection.
   const sparse_binary_matrix &detector_error_matrix() const;
 
+  /// @brief Whether this model supplies an observable mapping at all.
+  ///
+  /// Distinct from `num_observables() == 0`: a supplied O with zero rows is an
+  /// observable model, an H-only input is not. Construction-time validation of
+  /// an observable-output request depends on this distinction.
+  bool has_observable_model() const noexcept;
+
   /// @brief Return the stored common O projection.
+  /// @throws std::logic_error if this model supplies no observable mapping.
   const sparse_binary_matrix &observable_flips_matrix() const;
 
   const std::vector<double> &error_rates() const;
@@ -97,6 +107,34 @@ public:
 
   /// @brief Return D, or nullptr when input syndromes are already detectors.
   const sparse_binary_matrix *measurement_to_detectors() const noexcept;
+
+  /// @brief Make a basis-preserving child input while independently removing
+  /// the raw-measurement map. Authoritative compact model provenance is kept.
+  decoder_inputs without_measurement_to_detectors() const;
+
+  /// @brief Return the same model with H in GF(2)-canonical CSC form.
+  ///
+  /// Basis-preserving: `canonicalize()` sorts indices within each compressed
+  /// group and XOR-merges duplicates, leaving column identity, ordering and
+  /// dimensions unchanged. Authoritative source, raw DEM provenance and any
+  /// existing provenance-loss reason are therefore all retained, whatever the
+  /// source kind. Consumers that need a canonical H should ask for it here
+  /// rather than rebuilding a matrix-authoritative handle by hand.
+  decoder_inputs canonicalized() const;
+
+  /// @brief Make child inputs after a detector/error-basis transformation.
+  /// Compact provenance is intentionally dropped because it no longer
+  /// describes the supplied matrices; `provenance_loss_reason` records why.
+  decoder_inputs derive_with_changed_basis(
+      sparse_binary_matrix detector_error_matrix,
+      std::optional<sparse_binary_matrix> observable_flips_matrix,
+      std::vector<double> error_rates,
+      std::optional<std::vector<std::size_t>> error_ids,
+      std::string provenance_loss_reason,
+      std::optional<sparse_binary_matrix> measurement_to_detectors =
+          std::nullopt) const;
+
+  std::optional<std::string_view> provenance_loss_reason() const noexcept;
 
   bool has_stim_dem() const noexcept;
 
@@ -117,11 +155,12 @@ private:
   struct impl;
   static std::shared_ptr<const impl> make_matrix_state(
       decoder_model_source source, sparse_binary_matrix detector_error_matrix,
-      sparse_binary_matrix observable_flips_matrix,
+      std::optional<sparse_binary_matrix> observable_flips_matrix,
       std::vector<double> error_rates,
       std::optional<std::vector<std::size_t>> error_ids,
       std::optional<sparse_binary_matrix> measurement_to_detectors,
-      std::optional<std::string> raw_stim_dem = std::nullopt);
+      std::optional<std::string> raw_stim_dem = std::nullopt,
+      std::optional<std::string> provenance_loss_reason = std::nullopt);
   explicit decoder_inputs(std::shared_ptr<const impl> state);
   std::shared_ptr<const impl> state_;
 };

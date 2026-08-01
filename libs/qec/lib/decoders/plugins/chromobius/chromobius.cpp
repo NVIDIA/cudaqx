@@ -53,13 +53,6 @@ chromobius_init_data make_chromobius_init_data(const decoder_inputs &inputs) {
   return chromobius_init_data{std::move(dem)};
 }
 
-std::vector<std::vector<uint32_t>> identity_sparse(std::size_t size) {
-  std::vector<std::vector<uint32_t>> result(size);
-  for (std::size_t i = 0; i < size; ++i)
-    result[i].push_back(static_cast<uint32_t>(i));
-  return result;
-}
-
 bool get_bool_param(const cudaqx::heterogeneous_map &params,
                     const std::string &key, bool default_value) {
   return params.contains(key) ? params.get<bool>(key) : default_value;
@@ -82,8 +75,17 @@ private:
 
 public:
   chromobius(decoder_inputs inputs, chromobius_init_data init_data,
+             decoder_output default_output,
              const cudaqx::heterogeneous_map &params)
-      : decoder(std::move(inputs)), dem(std::move(init_data.dem)) {
+      : decoder(std::move(inputs), default_output),
+        dem(std::move(init_data.dem)) {
+    // Chromobius predicts observable flips directly and cannot be inverted to
+    // an error frame. Reject the request at construction rather than on the
+    // first live shot.
+    if (default_output != decoder_output::observables)
+      throw std::invalid_argument(
+          "Chromobius cannot return an error frame; construct it for "
+          "observable output");
     ::chromobius::DecoderConfigOptions options;
     options.drop_mobius_errors_involving_remnant_errors =
         get_bool_param(params, "drop_mobius_errors_involving_remnant_errors",
@@ -110,15 +112,9 @@ public:
           "CUDA-Q QEC wrapper supports at most 64 observables.");
     }
 
-    block_size = num_observables;
     num_detector_bytes = (syndrome_size + 7) / 8;
     hard_syndrome.resize(syndrome_size);
     packed_detection_events.resize(num_detector_bytes);
-
-    // Chromobius directly predicts observables. Make the base realtime
-    // observable-reduction logic treat each predicted bit as its own observable
-    // correction.
-    this->set_O_sparse(identity_sparse(num_observables));
   }
 
   decoder_result decode(const std::vector<float_t> &syndrome) override {
@@ -141,14 +137,15 @@ public:
                                  packed_detection_events.size()),
         return_weight ? &weight : nullptr);
 
-    decoder_result result{true, std::vector<float_t>(num_observables, 0.0)};
+    decoder_result result{.converged = true};
+    result.result.resize(num_observables);
     for (std::size_t i = 0; i < num_observables; ++i)
       result.result[i] = static_cast<float_t>((prediction >> i) & 1);
 
     if (return_weight) {
       cudaqx::heterogeneous_map opt_results;
       opt_results.insert("weight", static_cast<double>(weight));
-      result.opt_results = opt_results;
+      result.opt_results = std::move(opt_results);
     }
     return result;
   }
@@ -160,10 +157,12 @@ public:
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       chromobius, static std::unique_ptr<decoder> create(
                       cudaq::qec::decoder_inputs inputs,
+                      std::optional<decoder_output> output,
                       const cudaqx::heterogeneous_map &params) {
         auto init_data = make_chromobius_init_data(inputs);
-        return std::make_unique<chromobius>(std::move(inputs),
-                                            std::move(init_data), params);
+        return std::make_unique<chromobius>(
+            std::move(inputs), std::move(init_data),
+            output.value_or(decoder_output::observables), params);
       })
 };
 

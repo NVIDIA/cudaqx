@@ -286,6 +286,7 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
     io.mapRequired("H_sparse", config.H_sparse);
     io.mapRequired("O_sparse", config.O_sparse);
     io.mapRequired("D_sparse", config.D_sparse);
+    io.mapOptional("error_rate_vec", config.error_rate_vec);
 
     // Validate that the number of rows in the H_sparse vector is equal to
     // syndrome_size.
@@ -312,6 +313,14 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
         throw std::runtime_error("Value in O_sparse vector is out of range: " +
                                  std::to_string(value));
       }
+    }
+
+    if (!config.error_rate_vec.empty() &&
+        config.error_rate_vec.size() != config.block_size) {
+      throw std::runtime_error(
+          "error_rate_vec size is not equal to block_size: " +
+          std::to_string(config.error_rate_vec.size()) +
+          " != " + std::to_string(config.block_size));
     }
 
     // Validate that if the D_sparse is provided, it is a valid D matrix. That
@@ -611,6 +620,9 @@ std::string decoder_config_json_schema() {
       {"H_sparse", llvm::json::Object{{"$ref", "#/$defs/sparse_matrix"}}},
       {"O_sparse", llvm::json::Object{{"$ref", "#/$defs/sparse_matrix"}}},
       {"D_sparse", llvm::json::Object{{"$ref", "#/$defs/sparse_matrix"}}},
+      {"error_rate_vec",
+       llvm::json::Object{{"type", "array"},
+                          {"items", llvm::json::Object{{"type", "number"}}}}},
       {"decoder_custom_args", llvm::json::Object{{"type", "object"}}},
   };
 

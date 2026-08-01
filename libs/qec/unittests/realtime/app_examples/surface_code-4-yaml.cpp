@@ -341,13 +341,13 @@ void save_dem_to_file(
     if (!D)
       throw std::runtime_error("decoder inputs are missing D");
     config.D_sparse = cudaq::qec::d_sparse(*D);
+    config.error_rate_vec = edem.error_rates;
 
     if (decoder_type == "nv-qldpc-decoder") {
       cudaqx::heterogeneous_map nv_args;
 
       // Basic settings
       nv_args.insert("use_sparsity", true);
-      nv_args.insert("error_rate_vec", edem.error_rates);
       nv_args.insert("max_iterations", 50);
 
       if (use_relay_bp) {
@@ -373,7 +373,6 @@ void save_dem_to_file(
     } else if (decoder_type == "pymatching") {
       cudaqx::heterogeneous_map pm_args;
       pm_args.insert("merge_strategy", "smallest_weight");
-      pm_args.insert("error_rate_vec", edem.error_rates);
       config.decoder_custom_args = pm_args;
     } else if (decoder_type == "trt_decoder") {
       cudaqx::heterogeneous_map trt_args;
@@ -383,6 +382,8 @@ void save_dem_to_file(
       trt_args.insert("batch_size", std::size_t{1});
       trt_args.insert("use_cuda_graph", true);
       trt_args.insert("global_decoder", "pymatching");
+      trt_args.insert("engine_output_format",
+                      "observables_and_residual_detectors");
 
       cudaqx::heterogeneous_map pm_args;
       pm_args.insert("merge_strategy", "smallest_weight");
@@ -417,13 +418,11 @@ void save_dem_to_file(
 
         config.syndrome_size = hRows;
         config.block_size = hCols;
-        pm_args.insert("error_rate_vec", priors);
+        config.error_rate_vec = priors;
         printf("trt+Ising: loaded Ising bundle '%s' (H %ux%u, O %u rows, "
                "priors %zu); D_sparse from D_sparse.txt (%zu detectors)\n",
                ising_artifacts_dir.c_str(), hRows, hCols, oRows, priors.size(),
                dRows);
-      } else {
-        pm_args.insert("error_rate_vec", edem.error_rates);
       }
       trt_args.insert("global_decoder_params", pm_args);
 

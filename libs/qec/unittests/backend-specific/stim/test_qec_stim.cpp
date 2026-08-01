@@ -448,9 +448,10 @@ TEST(QECCodeTester, checkNoisySampleMemoryCircuitAndDecodeStim) {
       }
       printf("syndrome:\n");
       syndrome.dump();
-      auto [converged, v_result, opt] = decoder->decode(syndrome);
+      auto decoded = decoder->decode(syndrome);
       cudaqx::tensor<uint8_t> result_tensor;
-      cudaq::qec::convert_vec_soft_to_tensor_hard(v_result, result_tensor);
+      cudaq::qec::convert_vec_soft_to_tensor_hard(decoded.result,
+                                                  result_tensor);
       printf("decode result:\n");
       result_tensor.dump();
       cudaqx::tensor<uint8_t> decoded_observables =
@@ -542,9 +543,10 @@ TEST(QECCodeTester, checkNoisySampleMemoryCircuitAndDecodeStim) {
         }
         printf("syndrome:\n");
         syndrome.dump();
-        auto [converged, v_result, opt] = decoder->decode(syndrome);
+        auto decoded = decoder->decode(syndrome);
         cudaqx::tensor<uint8_t> result_tensor;
-        cudaq::qec::convert_vec_soft_to_tensor_hard(v_result, result_tensor);
+        cudaq::qec::convert_vec_soft_to_tensor_hard(decoded.result,
+                                                    result_tensor);
 
         printf("decode result:\n");
         result_tensor.dump();
@@ -950,10 +952,9 @@ shor9_dem(std::size_t num_rounds,
 }
 
 // Build sliding_window parameters for a boundary-layout DEM.
-cudaqx::heterogeneous_map
-shor9_sliding_params(std::size_t window_size, std::size_t interior,
-                     std::size_t numBoundary,
-                     const std::vector<double> &error_rates) {
+cudaqx::heterogeneous_map shor9_sliding_params(std::size_t window_size,
+                                               std::size_t interior,
+                                               std::size_t numBoundary) {
   cudaqx::heterogeneous_map inner_params;
   inner_params.insert("dummy_param", 1);
   cudaqx::heterogeneous_map params;
@@ -963,7 +964,6 @@ shor9_sliding_params(std::size_t window_size, std::size_t interior,
   params.insert("num_boundary_syndromes", numBoundary);
   params.insert("straddle_start_round", false);
   params.insert("straddle_end_round", true);
-  params.insert("error_rate_vec", error_rates);
   params.insert("inner_decoder_name", std::string("single_error_lut"));
   params.insert("inner_decoder_params", inner_params);
   return params;
@@ -1112,9 +1112,8 @@ TEST(QECCodeTester, checkSlidingWindowShor9Boundary) {
         cudaq::qec::decoder::get("single_error_lut", dem.detector_error_matrix);
     // A single window spanning all layers -- should match the full decoder.
     auto sw = cudaq::qec::decoder::get(
-        "sliding_window", dem.detector_error_matrix,
-        shor9_sliding_params(num_layers, interior, numBoundary,
-                             dem.error_rates));
+        "sliding_window", cudaq::qec::decoder_inputs{dem},
+        shor9_sliding_params(num_layers, interior, numBoundary));
 
     expectObservablesMatchFullDecoder(
         dem, *full, [&](const std::vector<cudaq::qec::float_t> &syndrome) {
@@ -1156,9 +1155,8 @@ TEST(QECCodeTester, checkSlidingWindowShor9Streaming) {
         cudaq::qec::decoder::get("single_error_lut", dem.detector_error_matrix);
     // A genuinely sliding configuration: window of 2 rounds, stepping by 1.
     auto sw = cudaq::qec::decoder::get(
-        "sliding_window", dem.detector_error_matrix,
-        shor9_sliding_params(/*window_size=*/2, interior, numBoundary,
-                             dem.error_rates));
+        "sliding_window", cudaq::qec::decoder_inputs{dem},
+        shor9_sliding_params(/*window_size=*/2, interior, numBoundary));
 
     expectObservablesMatchFullDecoder(
         dem, *full, [&](const std::vector<cudaq::qec::float_t> &syndrome) {
@@ -1253,11 +1251,10 @@ TEST(QECCodeTester, checkSlidingWindowRealtimeBoundaryStreaming) {
     params.insert("num_boundary_syndromes", B);
     params.insert("straddle_start_round", false);
     params.insert("straddle_end_round", true);
-    params.insert("error_rate_vec", dem.error_rates);
     params.insert("inner_decoder_name", std::string("single_error_lut"));
     params.insert("inner_decoder_params", cudaqx::heterogeneous_map{});
-    return cudaq::qec::decoder::get("sliding_window", dem.detector_error_matrix,
-                                    params);
+    return cudaq::qec::decoder::get("sliding_window",
+                                    cudaq::qec::decoder_inputs{dem}, params);
   };
   auto sw = make_sw();     // realtime streaming
   auto sw_ref = make_sw(); // whole-block reference

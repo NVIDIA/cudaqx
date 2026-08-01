@@ -42,9 +42,10 @@ class ControlledDecoder final : public cudaq::qec::decoder {
 public:
   ControlledDecoder()
       : decoder(cudaq::qec::decoder_inputs(
-            cudaq::qec::sparse_binary_matrix::from_csr(
-                /*num_rows=*/1, /*num_cols=*/1, /*row_ptrs=*/{0, 1},
-                /*col_indices=*/{0}))) {
+                    cudaq::qec::sparse_binary_matrix::from_csr(
+                        /*num_rows=*/1, /*num_cols=*/1, /*row_ptrs=*/{0, 1},
+                        /*col_indices=*/{0})),
+                cudaq::qec::decoder_output::errors) {
     set_O_sparse(std::vector<std::vector<uint32_t>>{{0}});
     // One detector is the parity of two incoming measurement bits, so a decode
     // completes only after two one-bit enqueue calls.
@@ -302,9 +303,10 @@ class MispinnedDecoder final : public cudaq::qec::decoder {
 public:
   MispinnedDecoder()
       : decoder(cudaq::qec::decoder_inputs(
-            cudaq::qec::sparse_binary_matrix::from_csr(
-                /*num_rows=*/1, /*num_cols=*/1, /*row_ptrs=*/{0, 1},
-                /*col_indices=*/{0}))) {
+                    cudaq::qec::sparse_binary_matrix::from_csr(
+                        /*num_rows=*/1, /*num_cols=*/1, /*row_ptrs=*/{0, 1},
+                        /*col_indices=*/{0})),
+                cudaq::qec::decoder_output::errors) {
     set_O_sparse(std::vector<std::vector<uint32_t>>{{0}});
     set_D_sparse(std::vector<std::vector<uint32_t>>{{0, 1}});
     cuda_device_id_ = 1 << 20;

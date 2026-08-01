@@ -159,61 +159,9 @@ namespace cudaq::qec::decoding::host {
 cudaqx::heterogeneous_map prepare_decoder_params(
     const cudaq::qec::decoding::config::decoder_config &decoder_config) {
   auto params = decoder_config.decoder_custom_args_to_heterogeneous_map();
-  // Placement knob: surfaced for every decoder type (deliberately before the
-  // trt-only early return below); consumed by decoder::get() at construction.
+  // Placement is common factory policy and is consumed by decoder::get().
   if (decoder_config.cuda_device_id.has_value())
     params.insert("cuda_device_id", decoder_config.cuda_device_id.value());
-  if (decoder_config.type != "trt_decoder")
-    return params;
-
-  // batch_size > 1 has no effect on the realtime path: enqueue_syndrome decodes
-  // one syndrome per call, so the trt_decoder zero-pads the batch and discards
-  // all but slot 0. Warn rather than reject -- the result is correct, just
-  // wasteful. (Offline decode_batch users set batch_size via a raw params map,
-  // not this realtime config path.)
-  if (params.contains("batch_size") &&
-      params.get<std::size_t>("batch_size") > 1)
-    CUDA_QEC_WARN(
-        "trt_decoder batch_size > 1 has no effect on the realtime decode path "
-        "(one syndrome is decoded per call); the extra batch slots are "
-        "zero-padded and discarded. Use batch_size = 1 for realtime.");
-
-  // The trt_decoder plugin attaches a global decoder only when both
-  // "global_decoder" and "global_decoder_params" are present. Most config
-  // paths materialize defaults for known global decoders, but callers can still
-  // provide a hand-built map with only "global_decoder"; synthesize params here
-  // before the O_sparse early return so that decoder still attaches.
-  const bool has_global_decoder =
-      params.contains("global_decoder") &&
-      !params.get<std::string>("global_decoder").empty();
-  const bool has_pymatching_global =
-      has_global_decoder &&
-      params.get<std::string>("global_decoder") == "pymatching";
-  if (has_global_decoder && !params.contains("global_decoder_params"))
-    params.insert("global_decoder_params", cudaqx::heterogeneous_map());
-
-  if (decoder_config.O_sparse.empty())
-    return params;
-
-  const auto num_observables = std::count(decoder_config.O_sparse.begin(),
-                                          decoder_config.O_sparse.end(), -1);
-  if (num_observables == 0)
-    return params;
-
-  auto O = cudaq::qec::pcm_from_sparse_vec(
-      decoder_config.O_sparse, num_observables, decoder_config.block_size);
-  params.insert("O", O);
-
-  // PyMatching consumes the observable matrix through its params; other global
-  // decoders receive only the top-level O until they define a matching
-  // contract.
-  if (has_pymatching_global) {
-    auto global_decoder_params =
-        params.get<cudaqx::heterogeneous_map>("global_decoder_params");
-    global_decoder_params.insert("O", O);
-    params.insert("global_decoder_params", global_decoder_params);
-  }
-
   return params;
 }
 
@@ -236,13 +184,15 @@ std::unique_ptr<cudaq::qec::decoder> create_realtime_decoder(
                                              decoder_config.block_size);
   const auto num_observables = std::count(decoder_config.O_sparse.begin(),
                                           decoder_config.O_sparse.end(), -1);
-  // Materialize O before decoder construction to validate its sparse shape and
-  // column indices for every decoder type. TRT also receives this matrix in its
-  // constructor parameters through prepare_decoder_params() below.
-  (void)cudaq::qec::pcm_from_sparse_vec(
+  auto observable_matrix = cudaq::qec::pcm_from_sparse_vec(
       decoder_config.O_sparse, num_observables, decoder_config.block_size);
-  auto decoder = cudaq::qec::get_decoder(
-      decoder_config.type, pcm, prepare_decoder_params(decoder_config));
+  cudaq::qec::decoder_inputs inputs(std::move(pcm),
+                                    std::move(observable_matrix),
+                                    decoder_config.error_rate_vec);
+  auto decoder =
+      cudaq::qec::get_decoder(decoder_config.type, std::move(inputs),
+                              cudaq::qec::decoder_output::observables,
+                              prepare_decoder_params(decoder_config));
   decoder->set_decoder_id(decoder_config.id);
   decoder->set_O_sparse(decoder_config.O_sparse);
   decoder->set_D_sparse(decoder_config.D_sparse);

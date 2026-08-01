@@ -53,7 +53,7 @@ def test_decoder_param_schema_introspection():
     sw_schema = qec.decoder_param_schema("sliding_window")
     assert sw_schema is not None
     by_key = {entry["key"]: entry for entry in sw_schema}
-    assert by_key["error_rate_vec"]["required"] is True
+    assert "error_rate_vec" not in by_key
     assert by_key["inner_decoder_params"]["kind"] == "discriminated"
     assert by_key["inner_decoder_params"]["discriminator"] == \
         "inner_decoder_name"
@@ -89,11 +89,12 @@ def test_decoder_config_yaml_roundtrip_and_custom_args():
     dc.block_size = 10
     dc.syndrome_size = 3
     dc.H_sparse = [1, 2, 3, -1, 6, 7, 8, -1, -1]
+    dc.error_rate_vec = \
+        [0.1, 0.2, 0.3, 0.1, 0.2, 0.3, 0.1, 0.2, 0.3, 0.1]
     dc.decoder_custom_args = {
         "use_sparsity": True,
         "error_rate": 0.01,
         "max_iterations": 50,
-        "error_rate_vec": [0.1, 0.2, 0.3, 0.1, 0.2, 0.3, 0.1, 0.2, 0.3, 0.1],
         "srelay_config": {
             "pre_iter": 5,
             "stopping_criterion": "NConv",
@@ -129,8 +130,8 @@ def test_pymatching_config_yaml_roundtrip():
     dc.H_sparse = [0, -1, 1, -1, 2, -1]
     dc.O_sparse = [0, -1, 1, -1, 2, -1]
     dc.D_sparse = [0, -1, 1, -1, 2, -1]
+    dc.error_rate_vec = [0.1, 0.2, 0.3]
     dc.decoder_custom_args = {
-        "error_rate_vec": [0.1, 0.2, 0.3],
         "merge_strategy": "smallest_weight",
     }
 
@@ -142,7 +143,7 @@ def test_pymatching_config_yaml_roundtrip():
     assert dc2.type == "pymatching"
 
     args = dc2.decoder_custom_args
-    assert list(args["error_rate_vec"]) == [0.1, 0.2, 0.3]
+    assert list(dc2.error_rate_vec) == [0.1, 0.2, 0.3]
     assert args["merge_strategy"] == "smallest_weight"
 
 
@@ -228,10 +229,10 @@ def test_validate_custom_args_runs_schema_validate_hook():
     # (step_size must be between 1 and window_size).
     dc = qec.decoder_config()
     dc.type = "sliding_window"
+    dc.error_rate_vec = [0.01, 0.01]
     dc.decoder_custom_args = {
         "window_size": 4,
         "step_size": 2,
-        "error_rate_vec": [0.01, 0.01],
         "inner_decoder_name": "single_error_lut",
     }
     dc.validate_custom_args()
@@ -239,15 +240,14 @@ def test_validate_custom_args_runs_schema_validate_hook():
     dc.decoder_custom_args = {
         "window_size": 2,
         "step_size": 4,
-        "error_rate_vec": [0.01, 0.01],
         "inner_decoder_name": "single_error_lut",
     }
     with pytest.raises(RuntimeError, match="step_size"):
         dc.validate_custom_args()
 
-    # Missing required key (error_rate_vec).
-    dc.decoder_custom_args = {"inner_decoder_name": "single_error_lut"}
-    with pytest.raises(RuntimeError, match="error_rate_vec"):
+    # Missing required key (inner_decoder_name).
+    dc.decoder_custom_args = {"window_size": 2}
+    with pytest.raises(RuntimeError, match="inner_decoder_name"):
         dc.validate_custom_args()
 
 
@@ -275,8 +275,8 @@ def test_decoder_config_json_schema_validates_yaml_documents():
     dc.H_sparse = [0, -1, 1, -1, 2, -1]
     dc.O_sparse = [0, -1, 1, -1, 2, -1]
     dc.D_sparse = [0, -1, 1, -1, 2, -1]
+    dc.error_rate_vec = [0.1, 0.1, 0.1]
     dc.decoder_custom_args = {
-        "error_rate_vec": [0.1, 0.1, 0.1],
         "merge_strategy": "smallest_weight",
     }
     document = yaml.safe_load(qec_yaml_for(dc))
@@ -290,7 +290,7 @@ def test_decoder_config_json_schema_validates_yaml_documents():
         validator.validate(bad)
 
     # Missing required custom-arg keys fail validation (sliding_window
-    # requires error_rate_vec and inner_decoder_name).
+    # requires inner_decoder_name).
     missing = yaml.safe_load(qec_yaml_for(dc))
     missing["decoders"][0]["type"] = "sliding_window"
     missing["decoders"][0]["decoder_custom_args"] = {"window_size": 2}
@@ -339,8 +339,8 @@ def test_decoder_config_json_schema_covers_dispatch_and_transport():
     dc.H_sparse = [0, -1, 1, -1, 2, -1]
     dc.O_sparse = [0, -1, 1, -1, 2, -1]
     dc.D_sparse = [0, -1, 1, -1, 2, -1]
+    dc.error_rate_vec = [0.1, 0.1, 0.1]
     dc.decoder_custom_args = {
-        "error_rate_vec": [0.1, 0.1, 0.1],
         "merge_strategy": "smallest_weight",
     }
 
@@ -403,6 +403,7 @@ def test_trt_decoder_config_yaml_roundtrip():
     dc.H_sparse = [1, 2, 3, -1, 6, 7, 8, -1, -1]
     dc.decoder_custom_args = {
         "engine_load_path": "/path/to/engine.trt",
+        "engine_output_format": "errors",
         "precision": "fp16",
         "memory_workspace": 1073741824,  # 1GB
     }
@@ -436,6 +437,7 @@ def test_trt_decoder_chromobius_global_config_yaml_roundtrip():
     dc.D_sparse = [0, -1, 1, -1, 2, -1]
     dc.decoder_custom_args = {
         "onnx_load_path": "/tmp/predecoder.onnx",
+        "engine_output_format": "observables_and_residual_detectors",
         "global_decoder": "chromobius",
         "global_decoder_params": {
             "ignore_decomposition_failures": True,
@@ -471,7 +473,10 @@ def test_trt_decoder_default_global_params_materialized():
     dc.H_sparse = [0, -1, 1, -1, 2, -1]
     dc.O_sparse = [0, -1, 1, -1, 2, -1]
     dc.D_sparse = [0, -1, 1, -1, 2, -1]
-    dc.decoder_custom_args = {"global_decoder": "pymatching"}
+    dc.decoder_custom_args = {
+        "engine_output_format": "residual_detectors",
+        "global_decoder": "pymatching",
+    }
 
     mdc2 = qec.multi_decoder_config.from_yaml_str(qec_yaml_for(dc))
     args = mdc2.decoders[0].decoder_custom_args
@@ -570,10 +575,11 @@ def test_multi_decoder_config_yaml_roundtrip():
     d1.block_size = 10
     d1.syndrome_size = 3
     d1.H_sparse = [1, 2, 3, -1, 6, 7, 8, -1, -1]
+    d1.error_rate_vec = \
+        [0.1, 0.2, 0.3, 0.1, 0.2, 0.3, 0.1, 0.2, 0.3, 0.1]
     d1.decoder_custom_args = {
         "use_sparsity": True,
         "error_rate": 0.01,
-        "error_rate_vec": [0.1, 0.2, 0.3, 0.1, 0.2, 0.3, 0.1, 0.2, 0.3, 0.1],
         "max_iterations": 50,
     }
 
@@ -636,9 +642,8 @@ def test_configure_decoders_from_str_smoke():
     decoder_config.block_size = 10
     decoder_config.syndrome_size = 3
     decoder_config.H_sparse = [1, 2, 3, -1, 6, 7, 8, -1, -1]
-    decoder_config.decoder_custom_args = {
-        "error_rate_vec": [0.1, 0.2, 0.3, 0.1, 0.2, 0.3, 0.1, 0.2, 0.3, 0.1],
-    }
+    decoder_config.error_rate_vec = \
+        [0.1, 0.2, 0.3, 0.1, 0.2, 0.3, 0.1, 0.2, 0.3, 0.1]
     multi_decoder_config = qec.multi_decoder_config()
     multi_decoder_config.decoders = [decoder_config]
     yaml_str = multi_decoder_config.to_yaml_str()
@@ -668,6 +673,8 @@ def make_pymatching_multi_decoder_config(pm_args, h_sparse=None):
     dc.H_sparse = h_sparse if h_sparse is not None else [0, -1, 1, -1, 2, -1]
     dc.O_sparse = [0, -1, 1, -1, 2, -1]
     dc.D_sparse = [0, -1, 1, -1, 2, -1]
+    pm_args = dict(pm_args)
+    dc.error_rate_vec = pm_args.pop("error_rate_vec", [])
     dc.decoder_custom_args = pm_args
 
     mdc = qec.multi_decoder_config()
@@ -692,10 +699,15 @@ def test_configure_valid_pymatching_decoder():
     assert ret == 0
 
 
-@pytest.mark.parametrize(
-    "error_rate_vec",
-    ([0.1, 0.1], [0.0, 0.1, 0.1], [0.1, 0.6, 0.1]),
-)
+def test_configure_rejects_pymatching_error_rate_vec_size_mismatch():
+    with pytest.raises(RuntimeError, match="error_rate_vec size"):
+        configure_pymatching_status({
+            "error_rate_vec": [0.1, 0.1],
+            "merge_strategy": "smallest_weight",
+        })
+
+
+@pytest.mark.parametrize("error_rate_vec", ([0.0, 0.1, 0.1], [0.1, 0.6, 0.1]))
 def test_configure_invalid_pymatching_error_rate_vec(error_rate_vec):
     ret = configure_pymatching_status({
         "error_rate_vec": error_rate_vec,

@@ -23,8 +23,18 @@ private:
 
 public:
   single_error_lut_example(cudaq::qec::decoder_inputs inputs,
+                           decoder_output default_output,
                            const cudaqx::heterogeneous_map &params)
-      : decoder(std::move(inputs)) {
+      : decoder(std::move(inputs), default_output) {
+    // The requested result form is validated here, at construction, so an
+    // unsupported request fails at setup rather than on the first decode. This
+    // example produces an error frame only; a decoder that can also project to
+    // observables would instead call project_errors_to_observables() before
+    // returning.
+    if (default_output != decoder_output::errors)
+      throw std::invalid_argument(
+          "single_error_lut_example produces an error frame only; construct it "
+          "for error output");
     const auto &H = get_inputs().detector_error_matrix();
     // Decoder-specific constructor arguments can be placed in `params`.
 
@@ -42,7 +52,7 @@ public:
     }
   }
 
-  virtual decoder_result decode(const std::vector<float_t> &syndrome) {
+  decoder_result decode(const std::vector<float_t> &syndrome) override {
     // This is a simple decoder that simply results
     decoder_result result{false, std::vector<float_t>(block_size, 0.0)};
 
@@ -79,9 +89,10 @@ public:
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       single_error_lut_example, static std::unique_ptr<decoder> create(
                                     cudaq::qec::decoder_inputs inputs,
+                                    std::optional<decoder_output> output,
                                     const cudaqx::heterogeneous_map &params) {
-        return cudaq::qec::make_pcm_decoder<single_error_lut_example>(
-            std::move(inputs), params);
+        return std::make_unique<single_error_lut_example>(
+            std::move(inputs), output.value_or(decoder_output::errors), params);
       })
 };
 

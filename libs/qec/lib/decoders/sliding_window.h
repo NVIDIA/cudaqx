@@ -44,7 +44,7 @@ private:
   /// any subsequent rounds be included?
   bool straddle_end_round = true;
   /// The vector of error rates for the error mechanisms.
-  std::vector<cudaq::qec::float_t> error_rate_vec;
+  std::vector<double> error_rate_vec;
   /// The name of the inner decoder to use.
   std::string inner_decoder_name;
   /// The parameters to pass to the inner decoder.
@@ -108,6 +108,7 @@ public:
   ///   - inner_decoder_name: Name of the inner decoder to use
   ///   - inner_decoder_params: Parameters for the inner decoder (optional)
   sliding_window(cudaq::qec::decoder_inputs inputs,
+                 decoder_output default_output,
                  const cudaqx::heterogeneous_map &params);
 
   /// @brief Decode a syndrome vector
@@ -145,9 +146,10 @@ public:
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       sliding_window, static std::unique_ptr<decoder> create(
                           cudaq::qec::decoder_inputs inputs,
+                          std::optional<decoder_output> output,
                           const cudaqx::heterogeneous_map &params) {
-        return cudaq::qec::make_pcm_decoder<sliding_window>(std::move(inputs),
-                                                            params);
+        return std::make_unique<sliding_window>(
+            std::move(inputs), output.value_or(decoder_output::errors), params);
       })
 };
 

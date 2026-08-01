@@ -75,6 +75,9 @@ struct decoder_config {
   std::vector<std::int64_t> H_sparse;
   std::vector<std::int64_t> O_sparse;
   std::vector<std::int64_t> D_sparse;
+  /// Error probability per H column. This is framework model data and is
+  /// normalized into decoder_inputs rather than passed to plugin parameters.
+  std::vector<double> error_rate_vec;
   decoder_custom_args_t decoder_custom_args;
 
   bool operator==(const decoder_config &) const = default;

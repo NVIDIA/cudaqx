@@ -18,25 +18,24 @@ struct decoder_inputs::impl {
   std::size_t num_error_mechanisms = 0;
   std::size_t num_observables = 0;
   sparse_binary_matrix H;
-  sparse_binary_matrix O;
+  /// Absent when the model supplies no observable mapping. A present but
+  /// zero-row O is a supplied model, not an absent one.
+  std::optional<sparse_binary_matrix> O;
   std::vector<double> rates;
   std::optional<std::vector<std::size_t>> ids;
   std::optional<sparse_binary_matrix> D;
   std::optional<std::string> raw_stim_dem;
+  std::optional<std::string> provenance_loss_reason;
 };
 
 namespace {
 
-sparse_binary_matrix empty_observable_matrix(std::uint32_t num_columns) {
-  return sparse_binary_matrix::from_csr(0, num_columns, {0}, {});
-}
-
 void validate_model(const sparse_binary_matrix &H,
-                    const sparse_binary_matrix &O,
+                    const std::optional<sparse_binary_matrix> &O,
                     const std::vector<double> &rates,
                     const std::optional<std::vector<std::size_t>> &ids,
                     const std::optional<sparse_binary_matrix> &D) {
-  if (O.num_cols() != H.num_cols())
+  if (O && O->num_cols() != H.num_cols())
     throw std::invalid_argument(
         "decoder_inputs: O column count must match H column count");
   if (!rates.empty() && rates.size() != H.num_cols())
@@ -53,12 +52,15 @@ void validate_model(const sparse_binary_matrix &H,
 } // namespace
 
 std::shared_ptr<const decoder_inputs::impl> decoder_inputs::make_matrix_state(
-    decoder_model_source source, sparse_binary_matrix H, sparse_binary_matrix O,
-    std::vector<double> rates, std::optional<std::vector<std::size_t>> ids,
+    decoder_model_source source, sparse_binary_matrix H,
+    std::optional<sparse_binary_matrix> O, std::vector<double> rates,
+    std::optional<std::vector<std::size_t>> ids,
     std::optional<sparse_binary_matrix> D,
-    std::optional<std::string> raw_stim_dem) {
+    std::optional<std::string> raw_stim_dem,
+    std::optional<std::string> provenance_loss_reason) {
   H = H.to_csc();
-  O = O.to_csr();
+  if (O)
+    *O = O->to_csr();
   if (D)
     *D = D->to_csr();
   validate_model(H, O, rates, ids, D);
@@ -67,24 +69,24 @@ std::shared_ptr<const decoder_inputs::impl> decoder_inputs::make_matrix_state(
   state->source = source;
   state->num_detectors = H.num_rows();
   state->num_error_mechanisms = H.num_cols();
-  state->num_observables = O.num_rows();
+  state->num_observables = O ? O->num_rows() : 0;
   state->H = std::move(H);
   state->O = std::move(O);
   state->rates = std::move(rates);
   state->ids = std::move(ids);
   state->D = std::move(D);
   state->raw_stim_dem = std::move(raw_stim_dem);
+  state->provenance_loss_reason = std::move(provenance_loss_reason);
   return state;
 }
 
-decoder_inputs::decoder_inputs(sparse_binary_matrix H) : state_(nullptr) {
-  auto O = empty_observable_matrix(H.num_cols());
-  state_ = make_matrix_state(decoder_model_source::matrices, std::move(H),
-                             std::move(O), {}, std::nullopt, std::nullopt);
-}
+decoder_inputs::decoder_inputs(sparse_binary_matrix H)
+    : decoder_inputs(make_matrix_state(decoder_model_source::matrices,
+                                       std::move(H), std::nullopt, {},
+                                       std::nullopt, std::nullopt)) {}
 
 decoder_inputs::decoder_inputs(
-    sparse_binary_matrix H, sparse_binary_matrix O,
+    sparse_binary_matrix H, std::optional<sparse_binary_matrix> O,
     std::vector<double> error_rates,
     std::optional<sparse_binary_matrix> measurement_to_detectors,
     std::optional<std::vector<std::size_t>> error_ids)
@@ -133,8 +135,15 @@ const sparse_binary_matrix &decoder_inputs::detector_error_matrix() const {
   return state_->H;
 }
 
+bool decoder_inputs::has_observable_model() const noexcept {
+  return state_->O.has_value();
+}
+
 const sparse_binary_matrix &decoder_inputs::observable_flips_matrix() const {
-  return state_->O;
+  if (!state_->O)
+    throw std::logic_error(
+        "decoder_inputs: no observable mapping was supplied");
+  return *state_->O;
 }
 
 const std::vector<double> &decoder_inputs::error_rates() const {
@@ -151,6 +160,43 @@ decoder_inputs::measurement_to_detectors() const noexcept {
   return state_->D ? &*state_->D : nullptr;
 }
 
+decoder_inputs decoder_inputs::canonicalized() const {
+  auto H = state_->H.canonicalize().to_csc();
+  return decoder_inputs(make_matrix_state(
+      state_->source, std::move(H), state_->O, state_->rates, state_->ids,
+      state_->D, state_->raw_stim_dem, state_->provenance_loss_reason));
+}
+
+decoder_inputs decoder_inputs::without_measurement_to_detectors() const {
+  auto state = std::make_shared<impl>(*state_);
+  state->D.reset();
+  return decoder_inputs(std::move(state));
+}
+
+decoder_inputs decoder_inputs::derive_with_changed_basis(
+    sparse_binary_matrix H, std::optional<sparse_binary_matrix> O,
+    std::vector<double> error_rates,
+    std::optional<std::vector<std::size_t>> error_ids,
+    std::string provenance_loss_reason,
+    std::optional<sparse_binary_matrix> measurement_to_detectors) const {
+  if (provenance_loss_reason.empty())
+    throw std::invalid_argument(
+        "decoder_inputs: a basis-changing derivation requires a provenance "
+        "loss reason");
+  return decoder_inputs(make_matrix_state(
+      decoder_model_source::matrices, std::move(H), std::move(O),
+      std::move(error_rates), std::move(error_ids),
+      std::move(measurement_to_detectors), std::nullopt,
+      std::move(provenance_loss_reason)));
+}
+
+std::optional<std::string_view>
+decoder_inputs::provenance_loss_reason() const noexcept {
+  if (!state_->provenance_loss_reason)
+    return std::nullopt;
+  return *state_->provenance_loss_reason;
+}
+
 bool decoder_inputs::has_stim_dem() const noexcept {
   return state_->raw_stim_dem.has_value();
 }
@@ -165,7 +211,12 @@ const std::string &decoder_inputs::stim_dem() const {
 detector_error_model decoder_inputs::materialize_detector_error_model() const {
   detector_error_model model;
   model.detector_error_matrix = state_->H.to_dense();
-  model.observables_flips_matrix = state_->O.to_dense();
+  // A model with no observable mapping materializes as zero observable rows,
+  // matching a DEM that declares no observables.
+  model.observables_flips_matrix =
+      state_->O ? state_->O->to_dense()
+                : cudaqx::tensor<uint8_t>(
+                      {std::size_t{0}, state_->num_error_mechanisms});
   model.error_rates = state_->rates;
   model.error_ids = state_->ids;
   return model;

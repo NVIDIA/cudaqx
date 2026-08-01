@@ -162,6 +162,7 @@ create_test_decoder_config_nv_qldpc(int id) {
   cudaq::qec::decoding::config::decoder_config config =
       create_test_empty_decoder_config(id);
   config.type = "nv-qldpc-decoder";
+  config.error_rate_vec = std::vector<double>(config.block_size, 0.1);
 
   cudaqx::heterogeneous_map nv_args;
   nv_args.insert("use_sparsity", true);
@@ -169,7 +170,6 @@ create_test_decoder_config_nv_qldpc(int id) {
   nv_args.insert("use_osd", true);
   nv_args.insert("osd_order", 60);
   nv_args.insert("osd_method", 3);
-  nv_args.insert("error_rate_vec", std::vector<double>(config.block_size, 0.1));
   nv_args.insert("n_threads", 128);
   nv_args.insert("bp_batch_size", 1);
   nv_args.insert("osd_batch_size", 16);
@@ -355,6 +355,7 @@ create_test_decoder_config_trt(int id) {
   O.at({0, 1}) = 1;
   O.at({1, 3}) = 1;
   config.O_sparse = cudaq::qec::pcm_to_sparse_vec(O);
+  config.error_rate_vec = std::vector<double>(config.block_size, 0.1);
 
   cudaqx::heterogeneous_map trt_args;
   trt_args.insert("onnx_load_path", "/tmp/predecoder.onnx");
@@ -363,11 +364,10 @@ create_test_decoder_config_trt(int id) {
   trt_args.insert("memory_workspace", std::size_t{1ULL << 20});
   trt_args.insert("batch_size", std::size_t{4});
   trt_args.insert("use_cuda_graph", false);
+  trt_args.insert("engine_output_format", "observables_and_residual_detectors");
   trt_args.insert("global_decoder", "pymatching");
   cudaqx::heterogeneous_map pymatching_params;
   pymatching_params.insert("merge_strategy", "smallest_weight");
-  pymatching_params.insert("error_rate_vec",
-                           std::vector<double>(config.block_size, 0.1));
   trt_args.insert("global_decoder_params", pymatching_params);
   config.decoder_custom_args = trt_args;
 
@@ -399,31 +399,27 @@ TEST(DecoderYAMLTest, TrtDecoderConfigToHeterogeneousMap) {
   EXPECT_EQ(params.get<std::size_t>("memory_workspace"), 1ULL << 20);
   EXPECT_EQ(params.get<std::size_t>("batch_size"), 4u);
   EXPECT_FALSE(params.get<bool>("use_cuda_graph"));
+  EXPECT_EQ(params.get<std::string>("engine_output_format"),
+            "observables_and_residual_detectors");
   EXPECT_EQ(params.get<std::string>("global_decoder"), "pymatching");
 
   auto global_params =
       params.get<cudaqx::heterogeneous_map>("global_decoder_params");
   EXPECT_EQ(global_params.get<std::string>("merge_strategy"),
             "smallest_weight");
-  EXPECT_EQ(global_params.get<std::vector<double>>("error_rate_vec").size(),
-            config.block_size);
+  EXPECT_FALSE(global_params.contains("error_rate_vec"));
 }
 
-TEST(DecoderYAMLTest, TrtDecoderRealtimeParamsIncludeObservableMatrix) {
+TEST(DecoderYAMLTest, RealtimeParamsDoNotInjectObservableMatrix) {
   auto config = create_test_decoder_config_trt(0);
   auto params = cudaq::qec::decoding::host::prepare_decoder_params(config);
 
-  auto O = params.get<cudaqx::tensor<uint8_t>>("O");
-  EXPECT_EQ(O.shape()[0], 2u);
-  EXPECT_EQ(O.shape()[1], config.block_size);
-  EXPECT_EQ(O.at({0, 1}), 1);
-  EXPECT_EQ(O.at({1, 3}), 1);
+  EXPECT_FALSE(params.contains("O"));
+  EXPECT_FALSE(params.contains("error_rate_vec"));
 
   auto global_params =
       params.get<cudaqx::heterogeneous_map>("global_decoder_params");
-  auto global_O = global_params.get<cudaqx::tensor<uint8_t>>("O");
-  EXPECT_EQ(global_O.shape()[0], 2u);
-  EXPECT_EQ(global_O.shape()[1], config.block_size);
+  EXPECT_FALSE(global_params.contains("O"));
 }
 
 TEST(DecoderYAMLTest, TrtDecoderEmptyGlobalDecoderParams) {
@@ -457,7 +453,7 @@ TEST(DecoderYAMLTest, TrtDecoderEmptyGlobalDecoderParams) {
 
   params = cudaq::qec::decoding::host::prepare_decoder_params(config);
   EXPECT_TRUE(params.contains("global_decoder_params"));
-  EXPECT_TRUE(params.contains("O"));
+  EXPECT_FALSE(params.contains("O"));
 
   config.O_sparse.clear();
   params = cudaq::qec::decoding::host::prepare_decoder_params(config);
@@ -480,6 +476,7 @@ decoders:
     O_sparse: []
     D_sparse: [0, -1]
     decoder_custom_args:
+      engine_output_format: residual_detectors
       global_decoder: chromobius
 )";
   auto parsed =
@@ -513,6 +510,7 @@ decoders:
     O_sparse: []
     D_sparse: [0, -1]
     decoder_custom_args:
+      engine_output_format: residual_detectors
       global_decoder: my_plugin
       global_decoder_params: {}
 )";
@@ -533,6 +531,7 @@ decoders:
     O_sparse: []
     D_sparse: [0, -1]
     decoder_custom_args:
+      engine_output_format: residual_detectors
       global_decoder: my_plugin
 )";
   auto parsed =
@@ -556,6 +555,7 @@ decoders:
     O_sparse: []
     D_sparse: [0, -1]
     decoder_custom_args:
+      engine_output_format: errors
       onnx_load_path: /tmp/predecoder.onnx
       global_decoder_params:
         merge_strategy: smallest_weight
@@ -592,13 +592,13 @@ TEST(DecoderYAMLTest, SlidingWindowDecoder) {
       cudaq::qec::pcm_to_sparse_vec(cudaqx::tensor<uint8_t>({2, n_cols}));
   config.D_sparse = cudaq::qec::generate_timelike_sparse_detector_matrix(
       config.syndrome_size, 2, /*include_first_round=*/false);
+  config.error_rate_vec = std::vector<double>(config.block_size, 0.1);
   cudaqx::heterogeneous_map sw_args;
   sw_args.insert("window_size", std::size_t{1});
   sw_args.insert("step_size", std::size_t{1});
   sw_args.insert("num_syndromes_per_round", n_syndromes_per_round);
   sw_args.insert("straddle_start_round", false);
   sw_args.insert("straddle_end_round", true);
-  sw_args.insert("error_rate_vec", std::vector<double>(config.block_size, 0.1));
 
   // Inner decoder config
   sw_args.insert("inner_decoder_name", "multi_error_lut");
@@ -626,6 +626,7 @@ TEST(DecoderYAMLTest, TrtDecoderConfigRoundTripWithoutInstantiation) {
   trt_args.insert("engine_save_path", "/tmp/saved.engine");
   trt_args.insert("precision", "best");
   trt_args.insert("memory_workspace", std::size_t{1 << 20});
+  trt_args.insert("engine_output_format", "errors");
   config.decoder_custom_args = trt_args;
   multi_config.decoders.push_back(config);
 
@@ -647,6 +648,7 @@ TEST(DecoderYAMLTest, SlidingWindowInnerDecoderVariantRoundTrips) {
     config.O_sparse = cudaq::qec::pcm_to_sparse_vec(O);
     config.D_sparse = cudaq::qec::generate_timelike_sparse_detector_matrix(
         config.syndrome_size, 2, /*include_first_round=*/false);
+    config.error_rate_vec = std::vector<double>(config.block_size, 0.1);
     config.decoder_custom_args = sw_args;
     multi_config.decoders.push_back(config);
     test_decoder_yaml_roundtrip(multi_config);
@@ -657,7 +659,6 @@ TEST(DecoderYAMLTest, SlidingWindowInnerDecoderVariantRoundTrips) {
   single_lut_sw.insert("step_size", std::size_t{1});
   single_lut_sw.insert("num_syndromes_per_round", std::size_t{2});
   single_lut_sw.insert("num_boundary_syndromes", std::size_t{1});
-  single_lut_sw.insert("error_rate_vec", std::vector<double>(6, 0.1));
   single_lut_sw.insert("inner_decoder_name", "single_error_lut");
   check_roundtrip(single_lut_sw);
 
@@ -666,7 +667,6 @@ TEST(DecoderYAMLTest, SlidingWindowInnerDecoderVariantRoundTrips) {
     nv_sw.insert("inner_decoder_name", "nv-qldpc-decoder");
     cudaqx::heterogeneous_map nv_inner;
     nv_inner.insert("max_iterations", 5);
-    nv_inner.insert("error_rate_vec", std::vector<double>(6, 0.1));
     nv_sw.insert("inner_decoder_params", nv_inner);
     check_roundtrip(nv_sw);
   }
@@ -1090,10 +1090,10 @@ decoders:
     H_sparse: [0, -1, 1, -1]
     O_sparse: [0, -1, 1, -1]
     D_sparse: [0, -1, 1, -1]
+    error_rate_vec: [0.01, 0.01]
     decoder_custom_args:
       window_size: WINDOW
       step_size: STEP
-      error_rate_vec: [0.01, 0.01]
       inner_decoder_name: single_error_lut
 )";
   auto make_yaml = [&](const std::string &window, const std::string &step) {
@@ -1113,10 +1113,10 @@ decoders:
 
   decoder_config config;
   config.type = "sliding_window";
+  config.error_rate_vec = {0.01, 0.01};
   cudaqx::heterogeneous_map args;
   args.insert("window_size", std::size_t(2));
   args.insert("step_size", std::size_t(4));
-  args.insert("error_rate_vec", std::vector<double>{0.01, 0.01});
   args.insert("inner_decoder_name", std::string("single_error_lut"));
   config.decoder_custom_args = args;
   EXPECT_THROW(config.validate_custom_args(), std::runtime_error);
@@ -1135,10 +1135,6 @@ decoders:
   args.insert("num_boundary_syndromes", std::size_t(2));
   config.decoder_custom_args = args;
   EXPECT_NO_THROW(config.validate_custom_args());
-
-  args.insert("error_rate_vec", std::vector<double>{});
-  config.decoder_custom_args = args;
-  EXPECT_THROW(config.validate_custom_args(), std::runtime_error);
 }
 
 TEST(DecoderSchemaTest, JsonSchemaExportReflectsRegistry) {
@@ -1273,6 +1269,7 @@ TEST(DecoderYAMLTest, TrtFirstEmissionMaterializesGlobalDecoderParams) {
   auto config = create_test_empty_decoder_config(0);
   config.type = "trt_decoder";
   cudaqx::heterogeneous_map args;
+  args.insert("engine_output_format", std::string("residual_detectors"));
   args.insert("global_decoder", std::string("pymatching"));
   config.decoder_custom_args = args;
 

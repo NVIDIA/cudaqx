@@ -196,23 +196,26 @@ public:
   ///        dense numpy array of any numeric dtype.
   PyDecoder(nb::object mat)
       : decoder(decoder_inputs([&mat]() -> cudaq::qec::sparse_binary_matrix {
-          // Any scipy sparse format exposes tocsr(); detect via that rather
-          // than indptr/indices, which COO and some other formats lack.
-          if (nb::hasattr(mat, "tocsr"))
-            return sparse_binary_matrix_from_scipy(mat);
-          // Dense numpy array of any dtype: build sparse storage directly so
-          // qec.Decoder.__init__(self, H) has the same memory behavior as
-          // native get_decoder(..., H) (no intermediate dense tensor copy).
-          // copy=False makes astype a no-op when the input is already uint8;
-          // make_sparse_from_dense reads strides directly, so a non-contiguous
-          // uint8 input is also handled without a copy.
-          return make_sparse_from_dense(
-              nb::cast<nb::ndarray<nb::numpy, uint8_t>>(
-                  mat.attr("astype")("uint8", nb::arg("copy") = false)));
-        }())) {}
+                  // Any scipy sparse format exposes tocsr(); detect via that
+                  // rather than indptr/indices, which COO and some other
+                  // formats lack.
+                  if (nb::hasattr(mat, "tocsr"))
+                    return sparse_binary_matrix_from_scipy(mat);
+                  // Dense numpy array of any dtype: build sparse storage
+                  // directly so qec.Decoder.__init__(self, H) has the same
+                  // memory behavior as native get_decoder(..., H) (no
+                  // intermediate dense tensor copy). copy=False makes astype a
+                  // no-op when the input is already uint8;
+                  // make_sparse_from_dense reads strides directly, so a
+                  // non-contiguous uint8 input is also handled without a copy.
+                  return make_sparse_from_dense(
+                      nb::cast<nb::ndarray<nb::numpy, uint8_t>>(mat.attr(
+                          "astype")("uint8", nb::arg("copy") = false)));
+                }()),
+                decoder_output::errors) {}
 
   decoder_result decode(const std::vector<float_t> &syndrome) override {
-    NB_OVERRIDE_PURE(decode, syndrome);
+    NB_OVERRIDE_PURE_NAME("decode", decode, syndrome);
   }
 };
 
@@ -468,6 +471,10 @@ void bindDecoder(nb::module_ &mod) {
   auto qecmod = nb::hasattr(mod, "qecrt")
                     ? nb::cast<nb::module_>(mod.attr("qecrt"))
                     : mod.def_submodule("qecrt");
+
+  nb::enum_<decoder_output>(qecmod, "DecoderOutput")
+      .value("ERRORS", decoder_output::errors)
+      .value("OBSERVABLES", decoder_output::observables);
 
   nb::class_<decoder_result>(qecmod, "DecoderResult", R"pbdoc(
     Single-shot decoder result.
@@ -896,8 +903,22 @@ void bindDecoder(nb::module_ &mod) {
       return PyDecoderRegistry::get_decoder(name, H_obj, options);
     }
 
-    return get_decoder(name, decoder_inputs::from_stim_dem(dem_text),
-                       hetMapFromKwargs(options));
+    std::optional<decoder_output> output;
+    if (options.contains("output")) {
+      const auto value = nb::cast<std::string>(options["output"]);
+      options.attr("pop")("output");
+      if (value == "errors")
+        output = decoder_output::errors;
+      else if (value == "observables")
+        output = decoder_output::observables;
+      else
+        throw std::runtime_error("output must be 'errors' or 'observables'");
+    }
+    auto inputs = decoder_inputs::from_stim_dem(dem_text);
+    return output ? get_decoder(name, std::move(inputs), *output,
+                                hetMapFromKwargs(options))
+                  : get_decoder(name, std::move(inputs),
+                                hetMapFromKwargs(options));
   };
 
   qecmod.def(
@@ -924,6 +945,40 @@ void bindDecoder(nb::module_ &mod) {
           H_sparse = make_sparse_from_dense(
               nb::cast<nb::ndarray<nb::numpy, uint8_t>>(H));
 
+        std::optional<decoder_output> output;
+        if (options.contains("output")) {
+          const auto value = nb::cast<std::string>(options["output"]);
+          options.attr("pop")("output");
+          if (value == "errors")
+            output = decoder_output::errors;
+          else if (value == "observables")
+            output = decoder_output::observables;
+          else
+            throw std::runtime_error(
+                "output must be 'errors' or 'observables'");
+        }
+
+        // Absent O means no observable model, not a zero-row one. Fabricating
+        // an empty O here would make an H-only construction look like a
+        // supplied model and defeat the construction-time validation.
+        std::optional<sparse_binary_matrix> O_sparse;
+        if (options.contains("O")) {
+          nb::object O = nb::cast<nb::object>(options["O"]);
+          if (nb::hasattr(O, "tocsr"))
+            O_sparse = sparse_binary_matrix_from_scipy(O);
+          else
+            O_sparse = make_sparse_from_dense(
+                nb::cast<nb::ndarray<nb::numpy, uint8_t>>(O));
+          options.attr("pop")("O");
+        }
+
+        std::vector<double> error_rates;
+        if (options.contains("error_rate_vec")) {
+          error_rates =
+              nb::cast<std::vector<double>>(options["error_rate_vec"]);
+          options.attr("pop")("error_rate_vec");
+        }
+
         if (name == "tensor_network_decoder") {
           throw std::runtime_error(
               "Decoder 'tensor_network_decoder' is not available. "
@@ -931,7 +986,12 @@ void bindDecoder(nb::module_ &mod) {
               "    pip install cudaq-qec[tensor-network-decoder]\n");
         }
 
-        return get_decoder(name, H_sparse, hetMapFromKwargs(options));
+        decoder_inputs inputs(std::move(H_sparse), std::move(O_sparse),
+                              std::move(error_rates));
+        return output ? get_decoder(name, std::move(inputs), *output,
+                                    hetMapFromKwargs(options))
+                      : get_decoder(name, std::move(inputs),
+                                    hetMapFromKwargs(options));
       },
       R"pbdoc(
         Get a decoder by name.
@@ -947,6 +1007,11 @@ void bindDecoder(nb::module_ &mod) {
         - A Stim detector error model string: native C++ decoders receive the
           raw DEM text via ``decoder_inputs``; Python-registered decoders receive
           the DEM-derived PCM plus ``O`` and ``error_rate_vec`` defaults.
+
+        Native decoders may select their instance-default result with
+        ``output="errors"`` or ``output="observables"``. Matrix ``O`` and
+        ``error_rate_vec`` keyword adapters are normalized into decoder_inputs;
+        O never selects the output mode.
 
         For Python-registered decoders (``cudaq.qec.decoder`` decorator), ``H``
         is passed through to ``__init__`` unchanged (NumPy array or scipy sparse

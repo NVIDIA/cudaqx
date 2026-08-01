@@ -17,9 +17,11 @@
 #include <dlfcn.h>
 #include <filesystem>
 #include <fmt/ranges.h>
+#include <span>
 #include <vector>
 
 INSTANTIATE_REGISTRY(cudaq::qec::decoder, cudaq::qec::decoder_inputs,
+                     std::optional<cudaq::qec::decoder_output>,
                      const cudaqx::heterogeneous_map &)
 
 // Include decoder implementations AFTER registry instantiation
@@ -78,9 +80,9 @@ struct decoder::rt_impl {
 
 void decoder::rt_impl_deleter::operator()(rt_impl *p) const { delete p; }
 
-decoder::decoder(decoder_inputs inputs)
+decoder::decoder(decoder_inputs inputs, decoder_output default_output)
     : pimpl(std::unique_ptr<rt_impl, rt_impl_deleter>(new rt_impl())),
-      inputs_(std::move(inputs)) {
+      inputs_(std::move(inputs)), default_output_(default_output) {
   syndrome_size = inputs_.num_detectors();
   block_size = inputs_.num_error_mechanisms();
   reset_decoder();
@@ -94,6 +96,38 @@ decoder::decoder(decoder_inputs inputs)
   // it will be instrumented as a simple printf.
   if (auto *ch = std::getenv("CUDAQ_QEC_DEBUG_DECODER"))
     pimpl->should_log = ch[0] == '1' || ch[0] == 'y' || ch[0] == 'Y';
+}
+
+void decoder::project_errors_to_observables(
+    const float_t *errors, float_t *observables,
+    std::size_t observables_size) const {
+  // Hot path: one call per shot on the realtime path. Sizes and O-row counts
+  // are fixed by construction (and by set_O_sparse for the legacy late-bound
+  // path), so they are not re-checked here.
+  if (observables_size > 0)
+    std::fill(observables, observables + observables_size, float_t{0});
+  // Presence, not row count: a supplied zero-row O is a model that projects to
+  // no observables, which is different from having no observable model at all.
+  if (inputs_.has_observable_model()) {
+    const auto &O = inputs_.observable_flips_matrix();
+    assert(O.layout() == sparse_binary_matrix_layout::csr);
+    const auto &ptr = O.ptr();
+    const auto &indices = O.indices();
+    for (std::size_t row = 0; row < O.num_rows(); ++row) {
+      bool parity = false;
+      for (auto pos = ptr[row]; pos < ptr[row + 1]; ++pos)
+        parity ^= convert_soft_to_hard(errors[indices[pos]]);
+      observables[row] = static_cast<float_t>(parity);
+    }
+    return;
+  }
+
+  for (std::size_t row = 0; row < O_sparse.size(); ++row) {
+    bool parity = false;
+    for (auto col : O_sparse[row])
+      parity ^= convert_soft_to_hard(errors[col]);
+    observables[row] = static_cast<float_t>(parity);
+  }
 }
 
 // Provide a trivial implementation of for tensor<uint8_t> decode call. Child
@@ -205,6 +239,26 @@ private:
 std::unique_ptr<decoder>
 decoder::get(const std::string &name, decoder_inputs inputs,
              const cudaqx::heterogeneous_map &param_map) {
+  return get_impl(name, std::move(inputs), std::nullopt, param_map);
+}
+
+std::unique_ptr<decoder>
+decoder::get(const std::string &name, decoder_inputs inputs,
+             decoder_output output,
+             const cudaqx::heterogeneous_map &param_map) {
+  return get_impl(name, std::move(inputs), output, param_map);
+}
+
+std::unique_ptr<decoder>
+decoder::get_impl(const std::string &name, decoder_inputs inputs,
+                  std::optional<decoder_output> output,
+                  const cudaqx::heterogeneous_map &param_map) {
+  for (const char *reserved : {"H", "O", "D", "error_rate_vec"})
+    if (param_map.contains(reserved))
+      throw std::runtime_error(
+          fmt::format("'{}' is framework model data; provide it through "
+                      "decoder_inputs instead of decoder custom parameters",
+                      reserved));
   auto [mutex, registry] = get_registry();
   std::lock_guard<std::recursive_mutex> lock(mutex);
   auto iter = registry.find(name);
@@ -214,8 +268,11 @@ decoder::get(const std::string &name, decoder_inputs inputs,
         ". Run with CUDAQ_LOG_LEVEL=info (environment variable) to see "
         "additional plugin diagnostics at startup.");
   const int cuda_device_id = read_cuda_device_id(param_map);
-  if (cuda_device_id < 0)
-    return iter->second(std::move(inputs), param_map);
+  if (cuda_device_id < 0) {
+    // The plugin validates the requested form against its model during
+    // construction; there is nothing left for the factory to re-check.
+    return iter->second(std::move(inputs), output, param_map);
+  }
   ConstructionDevicePin device_pin(cuda_device_id);
   // The key is consumed here; strip it so plugins that strictly validate
   // their parameter keys do not reject it.
@@ -223,7 +280,7 @@ decoder::get(const std::string &name, decoder_inputs inputs,
   for (const auto &kv : param_map)
     if (kv.first != "cuda_device_id")
       plugin_params.insert(kv.first, kv.second);
-  auto d = iter->second(std::move(inputs), plugin_params);
+  auto d = iter->second(std::move(inputs), output, plugin_params);
   d->cuda_device_id_ = cuda_device_id;
   device_pin.commit();
   return d;
@@ -288,7 +345,10 @@ set_sparse_from_vec(const std::vector<int64_t> &vec_in,
 }
 
 void decoder::set_O_sparse(const std::vector<std::vector<uint32_t>> &O_sparse) {
-  if (inputs_.num_observables() > 0 &&
+  // Presence, not row count: an explicitly supplied zero-row O is a model, and
+  // the late setter must not be able to silently replace it with a different
+  // row count.
+  if (inputs_.has_observable_model() &&
       O_sparse.size() != inputs_.num_observables())
     throw std::invalid_argument(
         "O_sparse row count must match decoder_inputs observable count");
@@ -302,7 +362,10 @@ void decoder::set_O_sparse(const std::vector<std::vector<uint32_t>> &O_sparse) {
 void decoder::set_O_sparse(const std::vector<int64_t> &O_sparse_vec_in) {
   std::vector<std::vector<uint32_t>> parsed;
   set_sparse_from_vec(O_sparse_vec_in, parsed);
-  if (inputs_.num_observables() > 0 &&
+  // Presence, not row count: an explicitly supplied zero-row O is a model, and
+  // the late setter must not be able to silently replace it with a different
+  // row count.
+  if (inputs_.has_observable_model() &&
       parsed.size() != inputs_.num_observables())
     throw std::invalid_argument(
         "O_sparse row count must match decoder_inputs observable count");
@@ -469,45 +532,44 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
     convert_vec_hard_to_soft(pimpl->persistent_detector_buffer,
                              pimpl->persistent_soft_detector_buffer);
     auto decoded_result = decode(pimpl->persistent_soft_detector_buffer);
+    std::span<const float_t> decoded_values = decoded_result.result;
 
     // If we didn't get a decoded result, just return
     if (pimpl->is_sliding_window) {
-      if (decoded_result.result.size() == 0) {
+      if (decoded_values.empty()) {
         return false;
       }
     }
     // Process the results.
     // TODO - should this interrogate the decoded_result.converged flag?
-    const auto result_type = get_result_type();
     const auto num_observables = get_num_observables();
     const char *result_type_str = nullptr;
     const char *result_type_name = nullptr;
     std::size_t expected_result_size = 0;
-    switch (result_type) {
-    case decode_result_type::decode_to_errs:
+    switch (default_output_) {
+    case decoder_output::errors:
       result_type_str = "errs";
-      result_type_name = "decode_to_errs";
+      result_type_name = "errors";
       expected_result_size = block_size;
       break;
-    case decode_result_type::decode_to_obs:
+    case decoder_output::observables:
       result_type_str = "obs";
-      result_type_name = "decode_to_obs";
+      result_type_name = "observables";
       expected_result_size = num_observables;
       break;
     }
     if (!result_type_name)
       throw std::runtime_error(
           fmt::format("Unsupported decoder result type ({})",
-                      static_cast<int>(result_type)));
+                      static_cast<int>(default_output_)));
     if ((!pimpl->is_sliding_window &&
-         decoded_result.result.size() != expected_result_size) ||
-        (pimpl->is_sliding_window && !decoded_result.result.empty() &&
-         decoded_result.result.size() != expected_result_size)) {
+         decoded_values.size() != expected_result_size) ||
+        (pimpl->is_sliding_window && !decoded_values.empty() &&
+         decoded_values.size() != expected_result_size)) {
       throw std::runtime_error(fmt::format(
           "Decoder result size ({}) does not match expected size ({}) for "
           "result type {}",
-          decoded_result.result.size(), expected_result_size,
-          result_type_name));
+          decoded_values.size(), expected_result_size, result_type_name));
     }
 
     // Flip an observable correction and mirror it into the per-call log so the
@@ -521,18 +583,18 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
     if (should_log)
       log_t2 = std::chrono::high_resolution_clock::now();
 
-    switch (result_type) {
-    case decode_result_type::decode_to_obs:
+    switch (default_output_) {
+    case decoder_output::observables:
       // Observable-frame path: decoder already projected to observables via its
       // internal "O" matrix; use the result directly.
       for (std::size_t i = 0; i < num_observables; i++)
-        if (decoded_result.result[i]) {
+        if (decoded_values[i]) {
           if (should_log)
             log_observables.push_back(i);
           flip_correction(i);
         }
       break;
-    case decode_result_type::decode_to_errs:
+    case decoder_output::errors:
       // Error-frame path: decoder returns a block-sized error vector; project
       // to observables via O_sparse.
       if (O_sparse.size() != num_observables)
@@ -540,14 +602,14 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
             "Observable matrix is not configured: expected {} rows, got {}",
             num_observables, O_sparse.size()));
       if (should_log)
-        for (std::size_t e = 0, E = decoded_result.result.size(); e < E; e++)
-          if (decoded_result.result[e])
+        for (std::size_t e = 0, E = decoded_values.size(); e < E; e++)
+          if (decoded_values[e])
             log_errors.push_back(e);
       // For each observable, flip its correction once for each predicted error
       // that flips it (net parity over O_sparse[i]).
       for (std::size_t i = 0; i < num_observables; i++)
         for (auto col : O_sparse[i])
-          if (decoded_result.result[col])
+          if (decoded_values[col])
             flip_correction(i);
       break;
     }
@@ -628,8 +690,10 @@ const uint8_t *decoder::get_obs_corrections() const {
 }
 
 std::size_t decoder::get_num_observables() const {
-  return inputs_.num_observables() > 0 ? inputs_.num_observables()
-                                       : O_sparse.size();
+  // The model owns the count whenever it supplies an observable mapping, even
+  // a zero-row one. The late-setter fallback serves only H-only inputs.
+  return inputs_.has_observable_model() ? inputs_.num_observables()
+                                        : O_sparse.size();
 }
 
 void decoder::reset_decoder() {
@@ -660,6 +724,13 @@ std::unique_ptr<decoder> get_decoder(const std::string &name,
                                      decoder_inputs inputs,
                                      const cudaqx::heterogeneous_map options) {
   return decoder::get(name, std::move(inputs), options);
+}
+
+std::unique_ptr<decoder> get_decoder(const std::string &name,
+                                     decoder_inputs inputs,
+                                     decoder_output output,
+                                     const cudaqx::heterogeneous_map options) {
+  return decoder::get(name, std::move(inputs), output, options);
 }
 
 // Constructor function for auto-loading plugins

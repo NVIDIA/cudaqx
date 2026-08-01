@@ -173,9 +173,9 @@ TEST(PyMatchingRealtime, ConfiguresViaRealtimeDecoderConfig) {
   decoder_config.H_sparse = {0, -1, 1, -1, 2, -1};
   decoder_config.O_sparse = {0, -1, 1, -1, 2, -1};
   decoder_config.D_sparse = {0, -1, 1, -1, 2, -1};
+  decoder_config.error_rate_vec = {0.1, 0.1, 0.1};
 
   cudaqx::heterogeneous_map pymatching_args;
-  pymatching_args.insert("error_rate_vec", std::vector<double>{0.1, 0.1, 0.1});
   pymatching_args.insert("merge_strategy", "smallest_weight");
   decoder_config.decoder_custom_args = pymatching_args;
 
