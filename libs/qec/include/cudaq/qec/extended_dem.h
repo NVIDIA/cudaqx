@@ -393,7 +393,7 @@ std::size_t dem_chunks_to_rounds(const std::vector<extended_dem> &dem_chunks);
 ///         contract against its neighbour, a seam whose width differs from the
 ///         rest of the sequence, or a chunk whose interior rows are not a whole
 ///         number of rounds.
-std::vector<int32_t>
+std::vector<std::int32_t>
 dem_chunks_to_detector_round(const std::vector<extended_dem> &dem_chunks);
 
 /// @brief Extract the D_sparse measurement-to-detector map from T DEM chunks.

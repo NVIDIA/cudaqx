@@ -92,7 +92,8 @@ void bindExtendedDem(nb::module_ &mod) {
       .def_rw("H_out_sparse", &dem_chunk_spec::H_out_sparse,
               "Outgoing seam rows. Empty for a final phase.")
       .def_rw("O_sparse", &dem_chunk_spec::O_sparse,
-              "Observable rows: which faults flip each observable.")
+              "Which fault columns flip each observable (row-sparse, -1 "
+              "terminated).")
       .def_rw("error_rates", &dem_chunk_spec::error_rates,
               "One prior per fault column, in column order.")
       .def("is_empty", &dem_chunk_spec::is_empty,
@@ -270,6 +271,11 @@ void bindExtendedDem(nb::module_ &mod) {
           "o_sparse[obs_id] lists the global fault column indices that flip\n"
           "observable obs_id. Compatible with decoder.set_O_sparse() and\n"
           "to_logical_outcome().");
+
+  mod.def("dem_chunks_to_pcm", &dem_chunks_to_pcm, nb::arg("dem_chunks"),
+          "Build a canonicalized CSC parity-check matrix from T DEM chunks.\n\n"
+          "Equivalent to closing the chunks, then canonicalizing the detector\n"
+          "error matrix and converting it to CSC layout.");
 }
 
 } // namespace cudaq::qec

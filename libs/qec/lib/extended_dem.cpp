@@ -789,13 +789,13 @@ std::size_t dem_chunks_to_rounds(const std::vector<extended_dem> &dem_chunks) {
 
 // dem_chunks_to_detector_round: detector r*d+k belongs to round r.
 // Purely dimension-based — no CSC traversal needed.
-std::vector<int32_t>
+std::vector<std::int32_t>
 dem_chunks_to_detector_round(const std::vector<extended_dem> &dem_chunks) {
   validate_dem_chunk_sequence(dem_chunks, "dem_chunks_to_detector_round");
 
   const uint32_t d = chunk_seam_width(dem_chunks[0]);
-  std::vector<int32_t> result;
-  int32_t round = 0;
+  std::vector<std::int32_t> result;
+  std::int32_t round = 0;
 
   result.reserve(dem_chunks.size() * static_cast<std::size_t>(d));
   for (const auto &dem_chunk : dem_chunks) {

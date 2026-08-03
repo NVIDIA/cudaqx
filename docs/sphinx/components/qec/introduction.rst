@@ -859,6 +859,46 @@ backend selection details, see the
 :doc:`DEM Sampling example </examples_rst/qec/dem_sampling>`.
 
 
+Dynamic DEM Construction
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+When a Stim circuit is not available — or when the round count must stay
+flexible until decoder construction — build DEMs from CSS generator matrices
+and compose them as per-round chunks:
+
+* ``dem_from_css_matrices`` — :math:`T`-round code-capacity / phenomenological
+  DEM from ``CssCodes`` / ``css_code_matrices`` and ``CssNoise`` /
+  ``css_noise_params``.
+* ``extended_dem_from_css_matrices``, ``dem_stitch`` / ``dem_close_all`` —
+  one-round chunks that stitch and close to the same flat DEM.
+* YAML ``dem_chunks`` + ``num_rounds`` — declarative init / bulk / final
+  phases for real-time decoder configs; expanded by ``expand_dem_chunks``.
+
+.. tab:: Python
+
+    .. literalinclude:: ../../examples/qec/python/dyn_dem.py
+       :language: python
+       :start-after: [Begin Documentation]
+       :end-before: [End Documentation]
+
+.. tab:: C++
+
+    .. literalinclude:: ../../examples/qec/cpp/dyn_dem.cpp
+       :language: cpp
+       :start-after: [Begin Documentation]
+       :end-before: [End Documentation]
+
+    Compile and run with
+
+    .. code-block:: bash
+
+       nvq++ -lcudaq-qec -lcudaq-qec-decoders dyn_dem.cpp
+       ./a.out
+
+See the :doc:`Dynamic DEM Construction example </examples_rst/qec/dyn_dem>`
+for phase specs, YAML ``dem_chunks``, merge semantics, and closing rules.
+
+
 Pre-built QEC Decoders
 ----------------------
 
