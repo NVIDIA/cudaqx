@@ -26,7 +26,7 @@ on:
   workflow_dispatch:
     inputs:
       deploy_docs:
-        description: 'Deploy docs to GitHub Pages. Deployment only runs on releases/vX.Y.Z branches.'
+        description: 'Deploy docs to GitHub Pages. TODO: Deployment only runs on releases/vX.Y.Z branches.'
         type: boolean
         default: false
         required: false
@@ -162,10 +162,14 @@ jobs:
     name: Deploy docs (${{ needs.setup.outputs.version }})
     # Only release versions are published; docs built from main (version
     # "latest") are build-tested but never deployed.
+    
+    # TODO: Before merging, restrict deployment to release branches again by
+    # adding the following condition (relaxed temporarily so the deployment
+    # can be tested from a non-release branch):
+    #   startsWith(github.ref, 'refs/heads/releases/v') &&
     if: |
       github.event_name == 'workflow_dispatch' &&
       inputs.deploy_docs == true &&
-      startsWith(github.ref, 'refs/heads/releases/v') &&
       needs.setup.outputs.version != 'latest'
     # The versioned site is assembled on the gh-pages branch; serialize
     # deployments so concurrent runs from different branches cannot race.
