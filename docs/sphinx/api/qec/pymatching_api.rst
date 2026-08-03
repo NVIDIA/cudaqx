@@ -45,18 +45,26 @@
     :param H: Parity check matrix. Each column must have one or two set entries
               (matchable graph). In Python, a ``scipy.sparse`` matrix or a dense
               NumPy ``uint8`` array may be passed.
-    :param params: Heterogeneous map of parameters:
+    :param O: Observable-flips matrix, ``num_observables x block_size``.
+              Model data supplied alongside ``H``, not a decoder parameter.
+              Supplying it also defaults ``merge_strategy`` to
+              ``"independent"``, matching PyMatching's detector-error-model
+              construction.
+    :param error_rate_vec: Per-error prior probabilities, one per column of
+              ``H`` (length ``block_size``). Model data, like ``H`` and ``O``:
+              it describes the noise model rather than tuning the algorithm.
+              Each value must lie in ``(0, 0.5]`` and sets the matching edge
+              weight ``-log(p / (1 - p))``. When omitted, all edge weights
+              default to ``1.0``.
+    :param output: The result form this decoder instance produces, fixed at
+              construction: ``"errors"`` (default) for an error frame of length
+              ``block_size``, or ``"observables"`` for predicted observable
+              flips. Supplying ``O`` does not by itself change the result form;
+              ask for the form you want. A decoder constructed for observable
+              output without an observable model is rejected at construction.
+    :param params: Heterogeneous map of decoder parameters:
 
-        - `error_rate_vec` (vector<double>): Per-error prior probabilities, one
-          per column of ``H`` (length ``block_size``). Each value must lie in
-          ``(0, 0.5]`` and sets the matching edge weight ``-log(p / (1 - p))``.
-          When omitted, all edge weights default to ``1.0``.
         - `merge_strategy` (string): How to combine parallel edges that map to
           the same pair of detectors. One of ``"disallow"`` (default for the
           ``H``-only path), ``"independent"``, ``"smallest_weight"``,
           ``"keep_original"``, or ``"replace"``.
-        - `O` (tensor, optional): A ``num_observables x block_size`` binary
-          matrix. When provided, the decoder returns predicted observable flips
-          (``decode_to_obs``) instead of a raw error vector, and
-          ``merge_strategy`` defaults to ``"independent"`` to match PyMatching's
-          detector-error-model construction.
