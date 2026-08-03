@@ -22,5 +22,10 @@ jobs:
         git config --global user.email "action@github.com"
         git config --global user.name "GitHub Action"
         git remote add upstream https://github.com/NVIDIA/cudaqx
-        git pull --ff-only upstream ${{ github.ref_name }}
+        # LFS objects are stored per repository and are not mirrored by a git
+        # push, so pull without smudging (the objects referenced by new
+        # upstream commits may not exist in this repository's LFS storage
+        # yet), fetch them from upstream, and let the push upload them.
+        GIT_LFS_SKIP_SMUDGE=1 git pull --ff-only upstream ${{ github.ref_name }}
+        git lfs fetch upstream ${{ github.ref_name }}
         git push origin

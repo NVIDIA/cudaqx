@@ -40,6 +40,18 @@ SERVER="${2:?path to decoding_server}"
 command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1 || {
   echo "SKIP: no CUDA GPU available"; exit 77; }
 
+# Device-side graph launch (the trigger path this test asserts on) requires
+# compute capability >= 9.0; the dispatch kernel compiles the trigger block
+# out below that (#if __CUDA_ARCH__ >= 900), so on e.g. an A100 the scheduler
+# runs but the decode graph can never fire and the trigger-debug check would
+# false-FAIL with rc=-1000 fires=0.
+cc=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null \
+     | head -1)
+cc_major="${cc%%.*}"
+[[ -n "$cc_major" && "$cc_major" =~ ^[0-9]+$ && "$cc_major" -ge 9 ]] || {
+  echo "SKIP: device-graph dispatch requires compute capability >= 9.0" \
+       "(found ${cc:-unknown})"; exit 77; }
+
 plugin_dir="$(dirname "$SERVER")/../lib/decoder-plugins"
 [[ -e "$plugin_dir/libcudaq-qec-nv-qldpc-decoder.so" ]] || {
   echo "SKIP: nv-qldpc decoder plugin not present in $plugin_dir"; exit 77; }
