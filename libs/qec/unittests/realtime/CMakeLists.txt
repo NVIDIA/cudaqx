@@ -144,45 +144,45 @@ else()
 endif()
 
 # =========================================================================== #
-# hololink_predecoder_bridge
+# gpu_roce_predecoder_bridge
 # =========================================================================== #
-# FPGA bridge: Hololink RDMA -> realtime_pipeline with AI predecoder +
-# PyMatching (HOST_LOOP, external ring buffer from Hololink transceiver).
+# FPGA bridge: GPU RoCE RDMA -> realtime_pipeline with AI predecoder +
+# PyMatching (HOST_LOOP, external ring buffer from the GpuRoceTransceiver).
 
 if (GPU_ROCE_TRANSCEIVER_LIB AND CUDAQ_REALTIME_INCLUDE_DIR AND
     CUDAQ_REALTIME_LIBRARY AND CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY AND
-    CUDAQ_REALTIME_BRIDGE_HOLOLINK_LIBRARY AND
+    CUDAQ_REALTIME_BRIDGE_GPU_ROCE_LIBRARY AND
     DOCA_INCLUDE_DIR AND DOCA_VERBS_LIB AND DOCA_COMMON_LIB AND
     DOCA_GPUNETIO_LIB AND
     TENSORRT_INCLUDE_DIR AND TENSORRT_LIBRARY AND TENSORRT_ONNX_PARSER_LIBRARY AND
     TARGET cudaq-realtime-pipeline)
 
-  message(STATUS "Building hololink_predecoder_bridge")
+  message(STATUS "Building gpu_roce_predecoder_bridge")
 
   get_filename_component(_cuda_bin_bridge "${CMAKE_CUDA_COMPILER}" DIRECTORY)
   get_filename_component(_cuda_root_bridge "${_cuda_bin_bridge}" DIRECTORY)
   set(_cuda_cccl_include_bridge "${_cuda_root_bridge}/include/cccl")
 
-  add_executable(hololink_predecoder_bridge
-    hololink_predecoder_bridge.cpp
+  add_executable(gpu_roce_predecoder_bridge
+    gpu_roce_predecoder_bridge.cpp
     predecoder_pipeline_common.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/realtime/ai_predecoder_service.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/../../lib/realtime/ai_decoder_service.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/../utils/cuda_link_stub.cu
   )
 
-  set_target_properties(hololink_predecoder_bridge PROPERTIES
+  set_target_properties(gpu_roce_predecoder_bridge PROPERTIES
     LINKER_LANGUAGE CUDA
     CUDA_SEPARABLE_COMPILATION ON
     CUDA_RESOLVE_DEVICE_SYMBOLS ON
     CUDA_STANDARD 17
   )
 
-  target_compile_definitions(hololink_predecoder_bridge PRIVATE
+  target_compile_definitions(gpu_roce_predecoder_bridge PRIVATE
     ONNX_MODEL_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../lib/realtime"
   )
 
-  target_include_directories(hololink_predecoder_bridge PRIVATE
+  target_include_directories(gpu_roce_predecoder_bridge PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${_cuda_cccl_include_bridge}
     ${CUDAToolkit_INCLUDE_DIRS}
@@ -193,15 +193,15 @@ if (GPU_ROCE_TRANSCEIVER_LIB AND CUDAQ_REALTIME_INCLUDE_DIR AND
     ${HOLOSCAN_SENSOR_BRIDGE_SOURCE_DIR}/src
   )
 
-  target_link_libraries(hololink_predecoder_bridge PRIVATE
+  target_link_libraries(gpu_roce_predecoder_bridge PRIVATE
     cudaq-realtime-pipeline
     ${CUDAQ_REALTIME_DISPATCH_LIBRARY}
     ${CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY}
-    ${CUDAQ_REALTIME_BRIDGE_HOLOLINK_LIBRARY}
+    ${CUDAQ_REALTIME_BRIDGE_GPU_ROCE_LIBRARY}
     ${GPU_ROCE_TRANSCEIVER_LIB}
     ${BASE_RECEIVER_OP_LIB}
-    ${HOLOLINK_CORE_LIB}
-    ${HOLOLINK_COMMON_LIB}
+    ${HSB_CORE_LIB}
+    ${HSB_COMMON_LIB}
     ${CUDAQ_REALTIME_LIBRARY}
     ${TENSORRT_LIBRARY}
     ${TENSORRT_ONNX_PARSER_LIBRARY}
@@ -219,27 +219,27 @@ if (GPU_ROCE_TRANSCEIVER_LIB AND CUDAQ_REALTIME_INCLUDE_DIR AND
     ${CMAKE_DL_LIBS}
   )
 
-  target_link_options(hololink_predecoder_bridge PRIVATE
+  target_link_options(gpu_roce_predecoder_bridge PRIVATE
     "LINKER:--allow-shlib-undefined"
   )
 
   if (holoscan_FOUND)
-    target_link_libraries(hololink_predecoder_bridge PRIVATE holoscan::core)
+    target_link_libraries(gpu_roce_predecoder_bridge PRIVATE holoscan::core)
   endif()
 
   get_filename_component(_cudaq_rt_lib_dir_b "${CUDAQ_REALTIME_LIBRARY}" DIRECTORY)
-  set_target_properties(hololink_predecoder_bridge PROPERTIES
+  set_target_properties(gpu_roce_predecoder_bridge PROPERTIES
     BUILD_RPATH "${_cudaq_rt_lib_dir_b};${DOCA_LIB_DIR};${CMAKE_BINARY_DIR}/lib;${CMAKE_BINARY_DIR}/lib/decoder-plugins"
     INSTALL_RPATH "${_cudaq_rt_lib_dir_b};${DOCA_LIB_DIR};${CMAKE_BINARY_DIR}/lib;${CMAKE_BINARY_DIR}/lib/decoder-plugins"
   )
 
   if(ENABLE_NVTX)
-    target_compile_definitions(hololink_predecoder_bridge PRIVATE ENABLE_NVTX)
+    target_compile_definitions(gpu_roce_predecoder_bridge PRIVATE ENABLE_NVTX)
   endif()
 
 else()
-  message(WARNING "hololink_predecoder_bridge: skipped (missing deps). "
-                  "Requires hololink bridge libs + TensorRT + cudaq-realtime-pipeline.")
+  message(WARNING "gpu_roce_predecoder_bridge: skipped (missing deps). "
+                  "Requires gpu_roce bridge libs + TensorRT + cudaq-realtime-pipeline.")
 endif()
 
 # =========================================================================== #

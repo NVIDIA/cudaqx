@@ -416,7 +416,7 @@ std::vector<std::uint8_t> build_get_corrections_frame(std::uint32_t request_id,
 // ============================================================================
 
 struct Options {
-  std::string hololink_ip;
+  std::string hsb_ip;
   std::string data_dir;
   std::string config_file; // explicit config path (overrides data_dir default)
   std::string
@@ -454,10 +454,9 @@ struct Options {
 
 void print_usage(const char *argv0) {
   std::cerr
-      << "Usage: " << argv0
-      << " --hololink <ip> --data-dir <path> [options]\n\n"
+      << "Usage: " << argv0 << " --hsb-ip <ip> --data-dir <path> [options]\n\n"
       << "Required:\n"
-      << "  --hololink <ip>       FPGA or emulator IP address\n"
+      << "  --hsb-ip <ip>       FPGA or emulator IP address\n"
       << "  --data-dir <path>     Path to syndrome data directory\n"
       << "                        (expects config_multi_err_lut.yml and\n"
       << "                         syndromes_multi_err_lut.txt inside)\n\n"
@@ -506,8 +505,8 @@ Options parse_args(int argc, char **argv) {
   Options options;
   for (int i = 1; i < argc; ++i) {
     std::string arg(argv[i]);
-    if (arg == "--hololink" && i + 1 < argc) {
-      options.hololink_ip = argv[++i];
+    if (arg == "--hsb-ip" && i + 1 < argc) {
+      options.hsb_ip = argv[++i];
     } else if (arg == "--data-dir" && i + 1 < argc) {
       options.data_dir = argv[++i];
     } else if (arg == "--config" && i + 1 < argc) {
@@ -568,7 +567,7 @@ std::uint32_t bram_w_sample_addr() {
   return w;
 }
 
-void write_bram(hololink::Hololink &hololink,
+void write_bram(hololink::Hololink &hsb,
                 const std::vector<std::vector<std::uint8_t>> &windows,
                 std::size_t bytes_per_window) {
   if (bytes_per_window % 64 != 0)
@@ -587,7 +586,7 @@ void write_bram(hololink::Hololink &hololink,
 
   const std::uint32_t w_sample_addr = bram_w_sample_addr();
 
-  // Hololink WR_BLOCK packet has 6-byte header + 8 bytes per (addr, value)
+  // HSB WR_BLOCK packet has 6-byte header + 8 bytes per (addr, value)
   // pair. With CONTROL_PACKET_SIZE=1472, max pairs = (1472-6)/8 = 183.
   constexpr std::size_t kBatchWrites = 180;
   hololink::Hololink::WriteData write_data;
@@ -609,7 +608,7 @@ void write_bram(hololink::Hololink &hololink,
 
         write_data.queue_write_uint32(address, value);
         if (write_data.size() >= kBatchWrites) {
-          if (!hololink.write_uint32(write_data))
+          if (!hsb.write_uint32(write_data))
             throw std::runtime_error("Failed to write BRAM batch");
           write_data = hololink::Hololink::WriteData();
         }
@@ -618,7 +617,7 @@ void write_bram(hololink::Hololink &hololink,
   }
 
   if (write_data.size() > 0) {
-    if (!hololink.write_uint32(write_data))
+    if (!hsb.write_uint32(write_data))
       throw std::runtime_error("Failed to write BRAM batch");
   }
 }
@@ -627,7 +626,7 @@ void write_bram(hololink::Hololink &hololink,
 // Chunked block read helper
 // ============================================================================
 
-/// Hololink RD_BLOCK packets have a 6-byte header plus 8 bytes per address.
+/// HSB RD_BLOCK packets have a 6-byte header plus 8 bytes per address.
 /// With CONTROL_PACKET_SIZE=1472, the maximum number of contiguous 32-bit
 /// registers that can be read in one RD_BLOCK is (1472-6)/8 = 183.
 /// This helper splits a large block read into multiple chunks.
@@ -660,7 +659,7 @@ chunked_read_uint32(hololink::Hololink &hl, std::uint32_t base_addr,
 
 /// Read back playback BRAM using block reads (one per RAM bank) and compare
 /// against what was written.  Returns true if all words match.
-bool verify_bram(hololink::Hololink &hololink,
+bool verify_bram(hololink::Hololink &hsb,
                  const std::vector<std::vector<std::uint8_t>> &windows,
                  std::size_t bytes_per_window) {
   const std::size_t cycles = bytes_per_window / 64;
@@ -672,8 +671,7 @@ bool verify_bram(hololink::Hololink &hololink,
 
   for (std::uint32_t i = 0; i < RAM_NUM; ++i) {
     std::uint32_t bank_base = RAM_ADDR + (i << (w_sample_addr + 2));
-    auto [ok, readback] =
-        chunked_read_uint32(hololink, bank_base, total_cycles);
+    auto [ok, readback] = chunked_read_uint32(hsb, bank_base, total_cycles);
     if (!ok) {
       std::cerr << "BRAM readback: failed to read bank " << i << "\n";
       return false;
@@ -1040,7 +1038,7 @@ VerifyResult verify_captured_responses(
   // DIAGNOSTIC: per-request_id census -- report duplicated (count>1) and
   // dropped (count==0) frames with their (shot, local-frame) and ring slot, to
   // confirm a slot-aliasing race between the scheduler's flag clear and the
-  // Hololink RX kernel refilling reused slots.
+  // HSB RX kernel refilling reused slots.
   if (per_round && frames_per_shot) {
     const std::uint32_t total_frames =
         static_cast<std::uint32_t>(num_expected * frames_per_shot);
@@ -1082,7 +1080,7 @@ int main(int argc, char **argv) {
   // --data-dir is required unless both --config and --syndromes are given
   bool has_explicit_files =
       !options.config_file.empty() && !options.syndromes_file.empty();
-  if (options.hololink_ip.empty() ||
+  if (options.hsb_ip.empty() ||
       (options.data_dir.empty() && !has_explicit_files)) {
     print_usage(argv[0]);
     return 1;
@@ -1250,7 +1248,7 @@ int main(int argc, char **argv) {
             << cycles_per_window << " cycles/frame)\n";
 
   // ------------------------------------------------------------------
-  // Connect to Hololink (or emulator) and reset
+  // Connect to HSB (or emulator) and reset
   // ------------------------------------------------------------------
   hololink::Metadata channel_metadata;
   bool using_emulator = options.control_port.has_value();
@@ -1258,9 +1256,9 @@ int main(int argc, char **argv) {
   if (using_emulator) {
     // Direct connection to emulator — bypass BOOTP enumeration.
     // Construct synthetic metadata with the required fields.
-    std::cout << "Using direct connection to emulator at "
-              << options.hololink_ip << ":" << *options.control_port << "\n";
-    channel_metadata["peer_ip"] = options.hololink_ip;
+    std::cout << "Using direct connection to emulator at " << options.hsb_ip
+              << ":" << *options.control_port << "\n";
+    channel_metadata["peer_ip"] = options.hsb_ip;
     channel_metadata["control_port"] =
         static_cast<std::int64_t>(*options.control_port);
     channel_metadata["serial_number"] = std::string("emulator");
@@ -1277,16 +1275,16 @@ int main(int argc, char **argv) {
     channel_metadata["hif_address"] =
         static_cast<std::int64_t>(options.hif_address);
   } else {
-    channel_metadata = hololink::Enumerator::find_channel(options.hololink_ip);
+    channel_metadata = hololink::Enumerator::find_channel(options.hsb_ip);
     hololink::DataChannel::use_sensor(channel_metadata, 0);
   }
 
-  hololink::DataChannel hololink_channel(channel_metadata);
-  auto hololink = hololink_channel.hololink();
+  hololink::DataChannel hsb_channel(channel_metadata);
+  auto hsb = hsb_channel.hololink();
 
-  hololink->start();
+  hsb->start();
   if (!using_emulator) {
-    hololink->reset();
+    hsb->reset();
   }
 
   // ------------------------------------------------------------------
@@ -1306,14 +1304,13 @@ int main(int argc, char **argv) {
               << "  Num pages:    " << rdma_num_pages << "\n"
               << "  Frame size:   " << bytes_per_window << " bytes\n";
 
-    hololink_channel.authenticate(*options.qp_number, *options.rkey);
+    hsb_channel.authenticate(*options.qp_number, *options.rkey);
     // RoCE v2 uses IANA-assigned UDP destination port 4791. The FPGA
     // embeds this in outgoing RoCE packets; the host NIC silently drops
     // packets that arrive on any other port.
     constexpr std::uint32_t ROCEV2_UDP_PORT = 4791;
-    hololink_channel.configure_roce(*options.buffer_addr, bytes_per_window,
-                                    rdma_page_size, rdma_num_pages,
-                                    ROCEV2_UDP_PORT);
+    hsb_channel.configure_roce(*options.buffer_addr, bytes_per_window,
+                               rdma_page_size, rdma_num_pages, ROCEV2_UDP_PORT);
 
     std::cout << "FPGA SIF registers configured for RDMA" << std::endl;
   }
@@ -1321,8 +1318,7 @@ int main(int argc, char **argv) {
   // ------------------------------------------------------------------
   // Disable player, configure, and write BRAM
   // ------------------------------------------------------------------
-  if (!hololink->write_uint32(PLAYER_ADDR + PLAYER_ENABLE_OFFSET,
-                              PLAYER_DISABLE))
+  if (!hsb->write_uint32(PLAYER_ADDR + PLAYER_ENABLE_OFFSET, PLAYER_DISABLE))
     throw std::runtime_error("Failed to disable player");
 
   hololink::Hololink::WriteData config_write;
@@ -1332,13 +1328,13 @@ int main(int argc, char **argv) {
                                   static_cast<std::uint32_t>(num_windows));
   config_write.queue_write_uint32(PLAYER_ADDR + PLAYER_TIMER_OFFSET,
                                   RF_SOC_TIMER_SCALE * options.spacing_us);
-  if (!hololink->write_uint32(config_write))
+  if (!hsb->write_uint32(config_write))
     throw std::runtime_error("Failed to configure player");
 
   std::cout << "Writing " << num_windows << " windows to playback BRAM..."
             << std::endl;
   try {
-    write_bram(*hololink, windows, bytes_per_window);
+    write_bram(*hsb, windows, bytes_per_window);
     std::cout << "BRAM write completed successfully" << std::endl;
   } catch (const std::exception &e) {
     std::cerr << "BRAM write FAILED: " << e.what() << std::endl;
@@ -1347,7 +1343,7 @@ int main(int argc, char **argv) {
 
   std::cout << "Verifying playback BRAM contents..." << std::endl;
   try {
-    if (!verify_bram(*hololink, windows, bytes_per_window)) {
+    if (!verify_bram(*hsb, windows, bytes_per_window)) {
       std::cerr << "BRAM readback verification FAILED\n";
       return 1;
     } else {
@@ -1364,9 +1360,9 @@ int main(int argc, char **argv) {
   if (options.verify) {
     std::cout << "\n=== Arming ILA capture (SIF TX at 0x" << std::hex
               << ILA_BASE_ADDR << std::dec << ") ===\n";
-    ila_disable(*hololink);
-    ila_reset(*hololink);
-    ila_enable(*hololink);
+    ila_disable(*hsb);
+    ila_reset(*hsb);
+    ila_enable(*hsb);
     std::cout << "ILA: armed for capture\n";
   }
 
@@ -1376,8 +1372,8 @@ int main(int argc, char **argv) {
   // 0x2601).
   // ------------------------------------------------------------------
   {
-    std::uint32_t val = hololink->read_uint32(METADATA_PACKET_ADDR);
-    if (!hololink->write_uint32(METADATA_PACKET_ADDR, val | (1u << 16)))
+    std::uint32_t val = hsb->read_uint32(METADATA_PACKET_ADDR);
+    if (!hsb->write_uint32(METADATA_PACKET_ADDR, val | (1u << 16)))
       throw std::runtime_error("Failed to disable metadata packet");
   }
 
@@ -1385,19 +1381,17 @@ int main(int argc, char **argv) {
   // Set sensor TX streaming threshold to zero so captured responses
   // stream to the ILA immediately (required for small capture counts).
   // ------------------------------------------------------------------
-  if (!hololink->write_uint32(SIF_TX_THRESHOLD_ADDR,
-                              SIF_TX_THRESHOLD_IMMEDIATE))
+  if (!hsb->write_uint32(SIF_TX_THRESHOLD_ADDR, SIF_TX_THRESHOLD_IMMEDIATE))
     throw std::runtime_error("Failed to set SIF TX streaming threshold");
 
   // ------------------------------------------------------------------
   // Enable playback
   // ------------------------------------------------------------------
-  if (!hololink->write_uint32(PLAYER_ADDR + PLAYER_ENABLE_OFFSET,
-                              PLAYER_ENABLE))
+  if (!hsb->write_uint32(PLAYER_ADDR + PLAYER_ENABLE_OFFSET, PLAYER_ENABLE))
     throw std::runtime_error("Failed to enable player");
 
   std::cout << "Playback enabled: " << num_shots << " shots / " << num_windows
-            << " frames on hololink " << options.hololink_ip << "\n";
+            << " frames on hsb " << options.hsb_ip << "\n";
 
   // ------------------------------------------------------------------
   // ILA capture and correction verification
@@ -1416,13 +1410,13 @@ int main(int argc, char **argv) {
     while (elapsed < kVerifyTimeoutMs) {
       std::this_thread::sleep_for(std::chrono::milliseconds(kPollIntervalMs));
       elapsed += kPollIntervalMs;
-      const std::uint32_t count = ila_sample_count(*hololink);
+      const std::uint32_t count = ila_sample_count(*hsb);
       if (count >= expected_samples)
         break;
     }
 
-    std::uint32_t actual_samples = ila_sample_count(*hololink);
-    ila_disable(*hololink);
+    std::uint32_t actual_samples = ila_sample_count(*hsb);
+    ila_disable(*hsb);
 
     if (actual_samples < expected_samples) {
       std::cerr << "ILA: captured " << actual_samples << " of "
@@ -1434,7 +1428,7 @@ int main(int argc, char **argv) {
 
     // Read captured data from ILA RAM banks.
     std::cout << "Reading ILA data RAM...\n";
-    auto samples = ila_dump(*hololink, actual_samples);
+    auto samples = ila_dump(*hsb, actual_samples);
     std::cout << "Read " << samples.size() << " samples from ILA\n";
 
     // Verify correction responses against expected values.
