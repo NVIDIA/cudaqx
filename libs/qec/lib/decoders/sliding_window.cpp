@@ -21,8 +21,8 @@ namespace {
 decoder_inputs canonicalize_sliding_window_inputs(decoder_inputs inputs) {
   // Canonical CSC is the steady-state contract for decode_window's column
   // slices and validate_inputs's per-column reads. canonicalized() is
-  // basis-preserving and retains the authoritative source, raw DEM provenance
-  // and any provenance-loss reason, so no source needs special-casing here.
+  // basis-preserving and retains the authoritative source, so no source kind
+  // needs special-casing here.
   return inputs.canonicalized();
 }
 
@@ -205,10 +205,12 @@ sliding_window::sliding_window(cudaq::qec::decoder_inputs inputs,
     if (const auto &ids = get_inputs().error_ids())
       child_error_ids = std::vector<std::size_t>(
           ids->begin() + first_column, ids->begin() + last_column + 1);
+    // Slicing detector rows and error columns re-indexes both, so the child
+    // gets matrices only; any raw source the parent carried does not describe
+    // them.
     auto child_inputs = get_inputs().derive_with_changed_basis(
         sparse_binary_matrix(H_round), std::move(child_O),
-        std::move(error_vec_mod), std::move(child_error_ids),
-        "sliding-window child slices detector rows and error columns");
+        std::move(error_vec_mod), std::move(child_error_ids));
     auto inner_decoder =
         decoder::get(inner_decoder_name, std::move(child_inputs),
                      decoder_output::errors, inner_decoder_params);

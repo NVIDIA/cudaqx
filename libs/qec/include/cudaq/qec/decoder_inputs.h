@@ -116,25 +116,25 @@ public:
   ///
   /// Basis-preserving: `canonicalize()` sorts indices within each compressed
   /// group and XOR-merges duplicates, leaving column identity, ordering and
-  /// dimensions unchanged. Authoritative source, raw DEM provenance and any
-  /// existing provenance-loss reason are therefore all retained, whatever the
-  /// source kind. Consumers that need a canonical H should ask for it here
-  /// rather than rebuilding a matrix-authoritative handle by hand.
+  /// dimensions unchanged. The authoritative source is therefore retained,
+  /// whatever its kind. Consumers that need a canonical H should ask for it
+  /// here rather than rebuilding a matrix-authoritative handle by hand.
   decoder_inputs canonicalized() const;
 
   /// @brief Make child inputs after a detector/error-basis transformation.
-  /// Compact provenance is intentionally dropped because it no longer
-  /// describes the supplied matrices; `provenance_loss_reason` records why.
+  ///
+  /// The authoritative source is dropped: a raw DEM describes the parent's
+  /// detector and error indices, so it no longer applies once those are
+  /// re-indexed, and handing it down would let a child decode against a model
+  /// that does not match its own matrices. Derivations that preserve the basis
+  /// (`canonicalized`, `without_measurement_to_detectors`) keep it.
   decoder_inputs derive_with_changed_basis(
       sparse_binary_matrix detector_error_matrix,
       std::optional<sparse_binary_matrix> observable_flips_matrix,
       std::vector<double> error_rates,
       std::optional<std::vector<std::size_t>> error_ids,
-      std::string provenance_loss_reason,
       std::optional<sparse_binary_matrix> measurement_to_detectors =
           std::nullopt) const;
-
-  std::optional<std::string_view> provenance_loss_reason() const noexcept;
 
   bool has_stim_dem() const noexcept;
 
@@ -159,8 +159,7 @@ private:
       std::vector<double> error_rates,
       std::optional<std::vector<std::size_t>> error_ids,
       std::optional<sparse_binary_matrix> measurement_to_detectors,
-      std::optional<std::string> raw_stim_dem = std::nullopt,
-      std::optional<std::string> provenance_loss_reason = std::nullopt);
+      std::optional<std::string> raw_stim_dem = std::nullopt);
   explicit decoder_inputs(std::shared_ptr<const impl> state);
   std::shared_ptr<const impl> state_;
 };

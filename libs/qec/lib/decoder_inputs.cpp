@@ -7,6 +7,7 @@
  ******************************************************************************/
 
 #include "cudaq/qec/decoder_inputs.h"
+#include "dem_sparse_projection.h"
 #include <stdexcept>
 #include <utility>
 
@@ -25,7 +26,6 @@ struct decoder_inputs::impl {
   std::optional<std::vector<std::size_t>> ids;
   std::optional<sparse_binary_matrix> D;
   std::optional<std::string> raw_stim_dem;
-  std::optional<std::string> provenance_loss_reason;
 };
 
 namespace {
@@ -56,8 +56,7 @@ std::shared_ptr<const decoder_inputs::impl> decoder_inputs::make_matrix_state(
     std::optional<sparse_binary_matrix> O, std::vector<double> rates,
     std::optional<std::vector<std::size_t>> ids,
     std::optional<sparse_binary_matrix> D,
-    std::optional<std::string> raw_stim_dem,
-    std::optional<std::string> provenance_loss_reason) {
+    std::optional<std::string> raw_stim_dem) {
   H = H.to_csc();
   if (O)
     *O = O->to_csr();
@@ -76,7 +75,6 @@ std::shared_ptr<const decoder_inputs::impl> decoder_inputs::make_matrix_state(
   state->ids = std::move(ids);
   state->D = std::move(D);
   state->raw_stim_dem = std::move(raw_stim_dem);
-  state->provenance_loss_reason = std::move(provenance_loss_reason);
   return state;
 }
 
@@ -108,13 +106,15 @@ decoder_inputs::decoder_inputs(
 decoder_inputs decoder_inputs::from_stim_dem(
     std::string stim_dem_text,
     std::optional<sparse_binary_matrix> measurement_to_detectors) {
-  auto model = dem_from_stim_text(stim_dem_text);
+  // Project straight to sparse. Going through the materialized
+  // detector_error_model would allocate a dense detectors x mechanisms tensor
+  // only to scan it back out again: ~98 MiB for a distance-13 model whose
+  // sparse form is under 1 MiB, and wasted entirely for a DEM-native decoder.
+  auto [H, O, error_rates] = details::sparse_dem_from_stim_text(stim_dem_text);
   return decoder_inputs(make_matrix_state(
-      decoder_model_source::stim_dem,
-      sparse_binary_matrix(model.detector_error_matrix),
-      sparse_binary_matrix(model.observables_flips_matrix),
-      std::move(model.error_rates), std::move(model.error_ids),
-      std::move(measurement_to_detectors), std::move(stim_dem_text)));
+      decoder_model_source::stim_dem, std::move(H), std::move(O),
+      std::move(error_rates), std::nullopt, std::move(measurement_to_detectors),
+      std::move(stim_dem_text)));
 }
 
 decoder_inputs::decoder_inputs(std::shared_ptr<const impl> state)
@@ -162,9 +162,9 @@ decoder_inputs::measurement_to_detectors() const noexcept {
 
 decoder_inputs decoder_inputs::canonicalized() const {
   auto H = state_->H.canonicalize().to_csc();
-  return decoder_inputs(make_matrix_state(
-      state_->source, std::move(H), state_->O, state_->rates, state_->ids,
-      state_->D, state_->raw_stim_dem, state_->provenance_loss_reason));
+  return decoder_inputs(make_matrix_state(state_->source, std::move(H),
+                                          state_->O, state_->rates, state_->ids,
+                                          state_->D, state_->raw_stim_dem));
 }
 
 decoder_inputs decoder_inputs::without_measurement_to_detectors() const {
@@ -177,24 +177,13 @@ decoder_inputs decoder_inputs::derive_with_changed_basis(
     sparse_binary_matrix H, std::optional<sparse_binary_matrix> O,
     std::vector<double> error_rates,
     std::optional<std::vector<std::size_t>> error_ids,
-    std::string provenance_loss_reason,
     std::optional<sparse_binary_matrix> measurement_to_detectors) const {
-  if (provenance_loss_reason.empty())
-    throw std::invalid_argument(
-        "decoder_inputs: a basis-changing derivation requires a provenance "
-        "loss reason");
+  // No raw source is carried through: it indexes the parent's detectors and
+  // error mechanisms, which these matrices have re-indexed.
   return decoder_inputs(make_matrix_state(
       decoder_model_source::matrices, std::move(H), std::move(O),
       std::move(error_rates), std::move(error_ids),
-      std::move(measurement_to_detectors), std::nullopt,
-      std::move(provenance_loss_reason)));
-}
-
-std::optional<std::string_view>
-decoder_inputs::provenance_loss_reason() const noexcept {
-  if (!state_->provenance_loss_reason)
-    return std::nullopt;
-  return *state_->provenance_loss_reason;
+      std::move(measurement_to_detectors)));
 }
 
 bool decoder_inputs::has_stim_dem() const noexcept {

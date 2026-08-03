@@ -181,7 +181,7 @@ TEST(DecoderInputs, RejectsInconsistentDimensions) {
                std::invalid_argument);
 }
 
-TEST(DecoderInputs, ChildDerivationPreservesOrRecordsProvenance) {
+TEST(DecoderInputs, ChildDerivationKeepsRawSourceOnlyWhenBasisIsUnchanged) {
   auto inputs = cudaq::qec::decoder_inputs::from_stim_dem(
       "error(0.1) D0 L0\n",
       cudaq::qec::sparse_binary_matrix::from_nested_csr(1, 2, {{0, 1}}));
@@ -190,17 +190,20 @@ TEST(DecoderInputs, ChildDerivationPreservesOrRecordsProvenance) {
   EXPECT_TRUE(basis_preserving.has_stim_dem());
   EXPECT_EQ(basis_preserving.stim_dem(), inputs.stim_dem());
   EXPECT_EQ(basis_preserving.measurement_to_detectors(), nullptr);
-  EXPECT_FALSE(basis_preserving.provenance_loss_reason().has_value());
 
   auto child_H = cudaq::qec::sparse_binary_matrix::from_nested_csc(1, 1, {{0}});
   auto child_O = cudaq::qec::sparse_binary_matrix::from_nested_csr(0, 1, {});
   auto basis_changed = inputs.derive_with_changed_basis(
-      std::move(child_H), std::move(child_O), {0.1}, std::nullopt,
-      "test changes the detector and error basis");
+      std::move(child_H), std::move(child_O), {0.1}, std::nullopt);
+  // Re-indexing detectors and errors invalidates the raw source, so it is not
+  // carried into the child.
   EXPECT_FALSE(basis_changed.has_stim_dem());
-  ASSERT_TRUE(basis_changed.provenance_loss_reason().has_value());
-  EXPECT_EQ(*basis_changed.provenance_loss_reason(),
-            "test changes the detector and error basis");
+  EXPECT_THROW((void)basis_changed.stim_dem(), std::logic_error);
+
+  // Canonicalization preserves column identity and ordering, so it keeps it.
+  auto canonical = inputs.canonicalized();
+  EXPECT_TRUE(canonical.has_stim_dem());
+  EXPECT_EQ(canonical.stim_dem(), inputs.stim_dem());
 }
 
 TEST(DecoderOutputContract, OutputFormIsImmutablePerInstance) {
@@ -1137,6 +1140,46 @@ TEST(StimDemGetDecoder, StillAcceptsParityCheckMatrix) {
   ASSERT_NE(d, nullptr);
   EXPECT_EQ(d->get_syndrome_size(), 2u);
   EXPECT_EQ(d->get_block_size(), 3u);
+}
+
+// The handle a decoder actually receives must describe exactly the matrices the
+// materialized model does. Compared through decoder_inputs rather than the
+// internal projection helper, so a mistake wiring the projection into the
+// handle cannot pass. The sparse path exists to skip a dense intermediate --
+// a distance-13 dense H is ~98 MiB against under 1 MiB sparse -- not to mean
+// something different.
+TEST(StimDemGetDecoder, DecoderInputsMatchMaterializedModel) {
+  const std::string dem_text = R"(error(0.1) D0 L0
+error(0.2) D0 D1
+error(0.05) D1 D2 L1
+error(0.3) D2 D0 L0 L1
+error(0.1) D1 D1 D2
+)";
+
+  const auto dense = cudaq::qec::dem_from_stim_text(dem_text);
+  auto inputs = cudaq::qec::decoder_inputs::from_stim_dem(dem_text);
+
+  EXPECT_EQ(inputs.num_detectors(), dense.num_detectors());
+  EXPECT_EQ(inputs.num_error_mechanisms(), dense.num_error_mechanisms());
+  EXPECT_EQ(inputs.num_observables(), dense.num_observables());
+  EXPECT_EQ(inputs.error_rates(), dense.error_rates);
+
+  // Content, compared through a common dense view so a layout difference
+  // cannot hide a content difference.
+  const auto H = inputs.detector_error_matrix().to_dense();
+  ASSERT_EQ(H.shape(), dense.detector_error_matrix.shape());
+  for (std::size_t r = 0; r < H.shape()[0]; ++r)
+    for (std::size_t c = 0; c < H.shape()[1]; ++c)
+      EXPECT_EQ(H.at({r, c}), dense.detector_error_matrix.at({r, c}))
+          << "H differs at (" << r << ", " << c << ")";
+
+  ASSERT_TRUE(inputs.has_observable_model());
+  const auto O = inputs.observable_flips_matrix().to_dense();
+  ASSERT_EQ(O.shape(), dense.observables_flips_matrix.shape());
+  for (std::size_t r = 0; r < O.shape()[0]; ++r)
+    for (std::size_t c = 0; c < O.shape()[1]; ++c)
+      EXPECT_EQ(O.at({r, c}), dense.observables_flips_matrix.at({r, c}))
+          << "O differs at (" << r << ", " << c << ")";
 }
 
 TEST(StimDemGetDecoder, RepeatedDetectorOrObservableTargetsXorFold) {
