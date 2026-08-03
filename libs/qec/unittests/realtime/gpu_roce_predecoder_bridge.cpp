@@ -6,14 +6,15 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
-/// @file hololink_predecoder_bridge.cpp
-/// @brief Hololink bridge for the AI predecoder + PyMatching pipeline.
+/// @file gpu_roce_predecoder_bridge.cpp
+/// @brief GpuRoceTransceiver bridge for the AI predecoder + PyMatching
+/// pipeline.
 ///
-/// Combines Hololink RDMA transport with the realtime_pipeline infrastructure
-/// to run AI pre-decoding and PyMatching on syndrome data arriving from an
-/// FPGA or emulator.
+/// Combines GpuRoceTransceiver RDMA transport with the realtime_pipeline
+/// infrastructure to run AI pre-decoding and PyMatching on syndrome data
+/// arriving from an FPGA or emulator.
 ///
-/// Hololink transceiver setup is extracted from bridge_run() (HOST_LOOP path).
+/// GpuRoceTransceiver setup is extracted from bridge_run() (HOST_LOOP path).
 /// The ring buffer pointers from the transceiver are fed into realtime_pipeline
 /// via the external_ringbuffer mechanism, which avoids the double-dispatcher
 /// conflict that would arise from using bridge_run() directly.
@@ -27,7 +28,7 @@
 #include <iostream>
 #include <thread>
 
-#include "cudaq/realtime/daemon/bridge/hololink/hololink_wrapper.h"
+#include "cudaq/realtime/daemon/bridge/gpu_roce/gpu_roce_wrapper.h"
 
 #define BRIDGE_CUDA_CHECK(call)                                                \
   do {                                                                         \
@@ -97,7 +98,7 @@ int main(int argc, char *argv[]) {
     } else if (arg == "--help" || arg == "-h") {
       std::cout
           << "Usage: " << argv[0] << " [options]\n\n"
-          << "Hololink predecoder + PyMatching bridge.\n\n"
+          << "GpuRoceTransceiver predecoder + PyMatching bridge.\n\n"
           << "Decoder options:\n"
           << "  --config=NAME         d7|d13|d13_r104|d21|d31 (default: d7)\n"
           << "  --typing=MODE         auto|weak|strong (default: auto)\n\n"
@@ -132,7 +133,8 @@ int main(int argc, char *argv[]) {
   PipelineConfig pcfg = *pcfg_opt;
   pcfg.apply_cli_overrides(argc, argv);
 
-  std::cout << "=== Hololink Predecoder + PyMatching Bridge ===" << std::endl;
+  std::cout << "=== GpuRoceTransceiver Predecoder + PyMatching Bridge ==="
+            << std::endl;
   std::cout << "  Config: " << pcfg.label << std::endl;
 
   // -- Initialize CUDA -------------------------------------------------------
@@ -246,14 +248,14 @@ int main(int argc, char *argv[]) {
   std::vector<int32_t> result_logical_pred(MAX_RESULTS, -1);
   std::vector<int32_t> result_converged(MAX_RESULTS, -1);
 
-  // -- Create Hololink transceiver -------------------------------------------
+  // -- Create GpuRoceTransceiver -------------------------------------------
 
-  std::cout << "\n[1/3] Creating Hololink transceiver..." << std::endl;
+  std::cout << "\n[1/3] Creating GpuRoceTransceiver..." << std::endl;
   std::cout << "  Device: " << ib_device << ", Peer: " << peer_ip << std::endl;
   std::cout << "  Frame: " << frame_size << " B, Page: " << page_size
             << " B, Pages: " << num_pages << std::endl;
 
-  hololink_transceiver_t transceiver = hololink_create_transceiver(
+  gpu_roce_transceiver_t transceiver = gpu_roce_create_transceiver(
       ib_device.c_str(), 1, remote_qp, gpu_id, frame_size, page_size, num_pages,
       peer_ip.c_str(),
       0, // forward
@@ -261,37 +263,38 @@ int main(int argc, char *argv[]) {
       1  // tx_only
   );
   if (!transceiver) {
-    std::cerr << "ERROR: Failed to create Hololink transceiver" << std::endl;
+    std::cerr << "ERROR: Failed to create GpuRoceTransceiver" << std::endl;
     return 1;
   }
 
-  hololink_set_cpu_ring_buffers(transceiver, 1);
+  gpu_roce_set_cpu_ring_buffers(transceiver, 1);
 
-  if (!hololink_start(transceiver)) {
-    std::cerr << "ERROR: Failed to start Hololink transceiver" << std::endl;
-    hololink_destroy_transceiver(transceiver);
+  if (!gpu_roce_start(transceiver)) {
+    std::cerr << "ERROR: Failed to start GpuRoceTransceiver" << std::endl;
+    gpu_roce_destroy_transceiver(transceiver);
     return 1;
   }
   BRIDGE_CUDA_CHECK(cudaSetDevice(gpu_id));
 
-  uint32_t our_qp = hololink_get_qp_number(transceiver);
-  uint32_t our_rkey = hololink_get_rkey(transceiver);
-  uint64_t our_buffer = hololink_get_buffer_addr(transceiver);
+  uint32_t our_qp = gpu_roce_get_qp_number(transceiver);
+  uint32_t our_rkey = gpu_roce_get_rkey(transceiver);
+  uint64_t our_buffer = gpu_roce_get_buffer_addr(transceiver);
 
   uint8_t *rx_ring_data =
-      reinterpret_cast<uint8_t *>(hololink_get_rx_ring_data_addr(transceiver));
-  uint64_t *rx_ring_flag = hololink_get_rx_ring_flag_addr(transceiver);
+      reinterpret_cast<uint8_t *>(gpu_roce_get_rx_ring_data_addr(transceiver));
+  uint64_t *rx_ring_flag = gpu_roce_get_rx_ring_flag_addr(transceiver);
   uint8_t *tx_ring_data =
-      reinterpret_cast<uint8_t *>(hololink_get_tx_ring_data_addr(transceiver));
-  uint64_t *tx_ring_flag = hololink_get_tx_ring_flag_addr(transceiver);
+      reinterpret_cast<uint8_t *>(gpu_roce_get_tx_ring_data_addr(transceiver));
+  uint64_t *tx_ring_flag = gpu_roce_get_tx_ring_flag_addr(transceiver);
 
   if (!rx_ring_data || !rx_ring_flag || !tx_ring_data || !tx_ring_flag) {
     std::cerr << "ERROR: Failed to get ring buffer pointers" << std::endl;
-    hololink_destroy_transceiver(transceiver);
+    gpu_roce_destroy_transceiver(transceiver);
     return 1;
   }
 
-  // -- Build external cudaq_ringbuffer_t from Hololink pointers --------------
+  // -- Build external cudaq_ringbuffer_t from GpuRoceTransceiver pointers
+  // --------------
 
   cudaq_ringbuffer_t ext_rb{};
   ext_rb.rx_flags = reinterpret_cast<volatile uint64_t *>(rx_ring_flag);
@@ -474,13 +477,14 @@ int main(int argc, char *argv[]) {
     });
   }
 
-  // -- Start pipeline and Hololink -------------------------------------------
+  // -- Start pipeline and GpuRoceTransceiver
+  // -------------------------------------------
 
   std::cout << "\n[3/3] Starting..." << std::endl;
   pipeline.start();
 
-  std::thread hololink_thread(
-      [transceiver]() { hololink_blocking_monitor(transceiver); });
+  std::thread gpu_roce_thread(
+      [transceiver]() { gpu_roce_blocking_monitor(transceiver); });
   std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
   std::cout << "\n=== Bridge Ready ===" << std::endl;
@@ -589,10 +593,10 @@ int main(int argc, char *argv[]) {
 
   pipeline.stop();
 
-  hololink_close(transceiver);
-  if (hololink_thread.joinable())
-    hololink_thread.join();
-  hololink_destroy_transceiver(transceiver);
+  gpu_roce_close(transceiver);
+  if (gpu_roce_thread.joinable())
+    gpu_roce_thread.join();
+  gpu_roce_destroy_transceiver(transceiver);
 
   for (auto &s : predecoder_streams) {
     cudaStreamSynchronize(s);

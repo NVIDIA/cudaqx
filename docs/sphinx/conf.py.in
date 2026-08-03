@@ -95,9 +95,13 @@ master_doc = 'index'
 # This pattern also affects html_static_path and html_extra_path.
 # Fragment files pulled in via ``.. include::`` must not also be processed as
 # standalone documents — doing so causes duplicate C++ / Python domain
-# declarations in the Sphinx domain registry.
+# declarations in the Sphinx domain registry.  Example-directory READMEs are
+# for the shipped example tree (rendered on GitHub), not standalone doc pages
+# -- without the exclusion they are ingested via the '.md' source suffix and
+# warn as toctree orphans.
 exclude_patterns = [
     '_templates',
+    'examples/**/README.md',
     'api/qec/nv_qldpc_decoder_api.rst',
     'api/qec/sliding_window_api.rst',
     'api/qec/trt_decoder_api.rst',

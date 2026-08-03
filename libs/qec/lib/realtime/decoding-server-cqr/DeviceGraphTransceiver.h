@@ -23,9 +23,9 @@
 
 #include <cuda_runtime.h>
 
-// CUDA-Q realtime transport-provider interface.  The Hololink transceiver is
-// behind a runtime-loaded bridge provider (libcudaq-realtime-bridge-hololink),
-// so this library carries NO Hololink / DOCA link-time dependencies.
+// CUDA-Q realtime transport-provider interface.  The GpuRoceTransceiver is
+// behind a runtime-loaded bridge provider (libcudaq-realtime-bridge-gpu-roce),
+// so this library carries NO GpuRoceTransceiver / DOCA link-time dependencies.
 #include "cudaq/realtime/daemon/bridge/bridge_interface.h"
 
 // Forward-declare the opaque scheduler context so the header stays independent
@@ -41,7 +41,7 @@ namespace cudaq::qec::decoding_server {
 ///
 /// The named fields are OPTIONAL convenience knobs: each becomes a
 /// `--<flag>=` argument to the provider only when its environment variable
-/// is set (they match the built-in hololink provider's flags; an RDMA-style
+/// is set (they match the built-in gpu_roce provider's flags; an RDMA-style
 /// provider will typically want the same shape).  A provider with a
 /// different argument surface is configured through `extra_args`
 /// (QEC_DEVICE_GRAPH_PROVIDER_ARGS, whitespace-separated tokens forwarded
@@ -70,19 +70,20 @@ struct DeviceGraphConfig {
 ///
 /// ## Architecture
 ///
-/// The Hololink transceiver (DOCA GPU ring buffers fed by FPGA RDMA writes)
+/// The GpuRoceTransceiver (DOCA GPU ring buffers fed by FPGA RDMA writes)
 /// is brought up through the CUDA-Q realtime bridge-provider interface: the
 /// constructor loads the provider (the built-in
-/// `libcudaq-realtime-bridge-hololink.so`, or the library named by
+/// `libcudaq-realtime-bridge-gpu-roce.so`, or the library named by
 /// `CUDAQ_REALTIME_BRIDGE_LIB` when set), and adopts the provider's
 /// RING_BUFFER context.  `launch_scheduler()` wires those ring buffers to the
 /// CUDAQ device-graph scheduler (`cudaq_create_dispatch_graph_regular`) and
 /// the captured decoder CUDA graph, then starts the provider's I/O loop.
 ///
 /// Consequence of the provider split: this library needs only the CUDA-Q
-/// realtime headers + libcudaq-realtime.so at build time; the Hololink /
-/// DOCA / HSB dependency chain lives entirely inside the provider .so, which
-/// is built (and dlopen'd) on the machine with the hardware.
+/// realtime headers + libcudaq-realtime.so at build time; the
+/// GpuRoceTransceiver / DOCA / HSB dependency chain lives entirely inside the
+/// provider .so, which is built (and dlopen'd) on the machine with the
+/// hardware.
 ///
 /// After `launch_scheduler()` returns, the GPU handles the full
 /// RX → dispatch → decode → TX loop autonomously.  No CPU `recv()` or `send()`
