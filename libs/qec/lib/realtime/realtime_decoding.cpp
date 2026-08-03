@@ -268,6 +268,16 @@ cudaq::qec::decoder_inputs resolve_decoder_inputs(
     std::string dem_text((std::istreambuf_iterator<char>(dem_file)),
                          std::istreambuf_iterator<char>());
 
+    // Known gap, deliberately not addressed here: the model is identified by
+    // path, and a reload compares configurations. An operator who edits a DEM
+    // in place leaves the configuration byte-identical, so the reload sees no
+    // change and keeps serving the previous model. Closing this needs the
+    // reload path to compare model content (a hash in the effective
+    // configuration) or to always reconstruct decoders that reference an
+    // external file. That belongs with the transactional reload work, which
+    // owns configuration comparison; until then, change the path to change the
+    // model.
+
     auto inputs = cudaq::qec::decoder_inputs::from_stim_dem(std::move(dem_text),
                                                             std::move(D));
 

@@ -133,6 +133,10 @@ if(CUDAQ_QEC_TRT_DECODER_ENABLED AND CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64)|(A
   )
 
   target_link_libraries(test_trt_decoder PRIVATE GTest::gtest_main cudaq-qec-decoders cudaq-qec-trt-decoder CUDA::cudart ${TENSORRT_LIBRARY})
+  # Chromobius is the DEM-native child the raw-DEM nesting case needs.
+  if(TARGET cudaq-qec-chromobius)
+    target_link_libraries(test_trt_decoder PRIVATE cudaq-qec-chromobius)
+  endif()
 
   find_package(Python COMPONENTS Interpreter QUIET)
   if(Python_Interpreter_FOUND)

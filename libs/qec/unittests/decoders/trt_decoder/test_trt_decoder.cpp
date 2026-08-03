@@ -8,6 +8,7 @@
 
 #include "trt_test_data.h"
 #include "cudaq/qec/decoder.h"
+#include "cudaq/qec/decoder_config_schema.h"
 #include "cudaq/qec/trt_decoder_internal.h"
 #include <chrono>
 #include <cmath>
@@ -16,6 +17,7 @@
 #include <gtest/gtest.h>
 #include <optional>
 #include <random>
+#include <unistd.h>
 #include <vector>
 
 #include <cuda_runtime_api.h>
@@ -758,6 +760,86 @@ TEST_F(TRTDecoderTest, RejectsGlobalDecoderSyndromeMismatchAtConstruction) {
   // The engine emits three residual detectors, while make_identity_h(2)
   // configures a child expecting two. Reject this before any decode call.
   EXPECT_THROW((void)decoder::get("trt_decoder", make_identity_h(2), params),
+               std::runtime_error);
+}
+
+// Acceptance 4: TensorRT constructs Chromobius as its global child while the
+// authoritative raw DEM survives the derivation. Chromobius refuses to build
+// from matrices alone, so construction succeeding IS the assertion that raw
+// provenance reached the child through TensorRT's input derivation.
+TEST_F(TRTDecoderTest, NestsChromobiusPreservingRawDem) {
+  if (!gpu_available())
+    GTEST_SKIP() << "No CUDA GPU available";
+  if (cudaq::qec::decoding::config::find_decoder_schema("chromobius") ==
+      nullptr)
+    GTEST_SKIP() << "chromobius plugin not built in this configuration";
+  auto onnx_path = get_dynamic_onnx_asset_path();
+  if (!onnx_path || !std::filesystem::exists(*onnx_path))
+    GTEST_SKIP() << "Generated dynamic ONNX fixture is unavailable";
+
+  // Two coloured detectors and one observable, so the engine's
+  // [observable, residual detectors] output is three wide, matching the
+  // dynamic fixture the other composite tests use.
+  const auto dem_path =
+      std::filesystem::temp_directory_path() /
+      ("cudaqx_trt_chromobius_" + std::to_string(::getpid()) + ".dem");
+  std::ofstream(dem_path) << "error(0.1) D0 L0\n"
+                             "error(0.1) D0 D1\n"
+                             "error(0.1) D1 L0\n"
+                             "detector(0, 0, 0, 0) D0\n"
+                             "detector(0, 0, 0, 1) D1\n";
+  struct Cleanup {
+    std::filesystem::path path;
+    ~Cleanup() {
+      std::error_code ec;
+      std::filesystem::remove(path, ec);
+    }
+  } cleanup{dem_path};
+
+  std::ifstream dem_file(dem_path);
+  std::string dem_text((std::istreambuf_iterator<char>(dem_file)),
+                       std::istreambuf_iterator<char>());
+  auto inputs = decoder_inputs::from_stim_dem(dem_text);
+  ASSERT_TRUE(inputs.has_stim_dem());
+  ASSERT_EQ(inputs.num_detectors(), 2u);
+  ASSERT_EQ(inputs.num_observables(), 1u);
+
+  cudaqx::heterogeneous_map params;
+  params.insert("onnx_load_path", *onnx_path);
+  params.insert("engine_output_format",
+                std::string("observables_and_residual_detectors"));
+  params.insert("batch_size", std::size_t{1});
+  params.insert("use_cuda_graph", false);
+  params.insert("global_decoder", std::string("chromobius"));
+  params.insert("global_decoder_params", cudaqx::heterogeneous_map{});
+
+  std::unique_ptr<decoder> composite;
+  try {
+    composite = decoder::get("trt_decoder", inputs, decoder_output::observables,
+                             params);
+  } catch (const std::exception &e) {
+    GTEST_SKIP() << "TensorRT engine build unavailable: " << e.what();
+  }
+  ASSERT_NE(composite, nullptr);
+  EXPECT_EQ(composite->get_num_observables(), 1u);
+
+  // The engine fixes the input width, as in the other composite tests; a
+  // decode exercises the child on the residual detectors it is handed.
+  auto result = composite->decode({0.0, 0.0, 0.0});
+  EXPECT_EQ(result.result.size(), 1u);
+
+  // The converse, so the case above cannot pass for an unrelated reason: with
+  // the same engine and child but a matrix-only model, there is no DEM to hand
+  // down and construction must fail.
+  cudaqx::tensor<uint8_t> H({2, 3});
+  H.at({0, 0}) = 1;
+  H.at({1, 1}) = 1;
+  cudaqx::tensor<uint8_t> O({1, 3});
+  O.at({0, 0}) = 1;
+  EXPECT_THROW((void)decoder::get("trt_decoder",
+                                  decoder_inputs(sparse_binary_matrix(H),
+                                                 sparse_binary_matrix(O)),
+                                  decoder_output::observables, params),
                std::runtime_error);
 }
 

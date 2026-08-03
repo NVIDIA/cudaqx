@@ -27,6 +27,23 @@ namespace cudaq::qec {
 
 /// Records the measurement-to-detector map exactly as a plugin sees it at
 /// construction, so a test can pin what the construction inputs carry.
+/// The whole model exactly as the plugin received it, so two construction
+/// paths can be compared field by field.
+struct captured_model {
+  std::vector<std::vector<std::uint32_t>> H;
+  std::vector<std::vector<std::uint32_t>> O;
+  bool has_observable_model = false;
+  std::vector<double> rates;
+  std::vector<std::vector<std::uint32_t>> D;
+  bool has_d = false;
+  bool has_stim_dem = false;
+  std::size_t num_detectors = 0;
+  std::size_t num_error_mechanisms = 0;
+  std::size_t num_observables = 0;
+
+  bool operator==(const captured_model &) const = default;
+};
+
 struct construction_d_probe {
   static inline bool has_d = false;
   static inline std::vector<std::vector<std::uint32_t>> rows;
@@ -34,6 +51,8 @@ struct construction_d_probe {
   /// Detector syndrome handed to decode(), i.e. D as the realtime path applies
   /// it, so a test can compare that against the construction copy above.
   static inline std::vector<float_t> last_decode_syndrome;
+
+  static inline captured_model model;
 };
 
 class d_capture_decoder : public decoder {
@@ -41,7 +60,8 @@ public:
   d_capture_decoder(decoder_inputs inputs, decoder_output default_output,
                     const cudaqx::heterogeneous_map &)
       : decoder(std::move(inputs), default_output) {
-    const auto *D = get_inputs().measurement_to_detectors();
+    const auto &in = get_inputs();
+    const auto *D = in.measurement_to_detectors();
     construction_d_probe::has_d = D != nullptr;
     construction_d_probe::rows.clear();
     construction_d_probe::num_cols = 0;
@@ -49,6 +69,21 @@ public:
       construction_d_probe::rows = D->to_nested_csr();
       construction_d_probe::num_cols = D->num_cols();
     }
+
+    captured_model captured;
+    captured.H = in.detector_error_matrix().canonicalize().to_nested_csr();
+    captured.has_observable_model = in.has_observable_model();
+    if (captured.has_observable_model)
+      captured.O = in.observable_flips_matrix().canonicalize().to_nested_csr();
+    captured.rates = in.error_rates();
+    captured.has_d = D != nullptr;
+    if (D)
+      captured.D = D->to_nested_csr();
+    captured.has_stim_dem = in.has_stim_dem();
+    captured.num_detectors = in.num_detectors();
+    captured.num_error_mechanisms = in.num_error_mechanisms();
+    captured.num_observables = in.num_observables();
+    construction_d_probe::model = std::move(captured);
   }
 
   decoder_result decode(const std::vector<float_t> &syndrome) override {
@@ -1008,6 +1043,104 @@ TEST(ConfigureDecodersLifecycle, ConstructionFailureIsNotAdvertised) {
   EXPECT_EQ(*cached_after_failure, *cached_after_good);
 
   finalize_decoders();
+}
+
+// Acceptance 2: a plugin must receive the same model at construction whether it
+// is built offline or through the decoding server. This is the test that finds
+// divergences between the two construction paths -- the class of defect where
+// one path canonicalized a matrix and the other did not, which was invisible
+// end to end because only the plugin could see both.
+TEST(DecodingServerAcceptance,
+     ConstructionInputsAgreeAcrossOfflineAndServerPaths) {
+  using namespace cudaq::qec::decoding::config;
+
+  auto config = create_test_empty_decoder_config(0);
+  config.type = "d_capture_decoder";
+  config.error_rate_vec = std::vector<double>(config.block_size, 0.01);
+  // A duplicate index, so the two paths must agree on GF(2) collapse too.
+  config.D_sparse = {9,  9, 2,  -1, 0,  -1, 1,  -1, 2,  -1, 3,
+                     -1, 4, -1, 5,  -1, 6,  -1, 7,  -1, 8,  -1};
+
+  // Server path: resolve the configuration, then construct through the factory.
+  auto server_inputs = cudaq::qec::decoding::host::resolve_decoder_inputs(
+      config, std::filesystem::current_path());
+  auto server_decoder = cudaq::qec::decoding::host::create_realtime_decoder(
+      config, server_inputs);
+  ASSERT_NE(server_decoder, nullptr);
+  const auto server_model = cudaq::qec::construction_d_probe::model;
+
+  // Offline path: build the model the way an offline caller does, directly from
+  // the same matrices. Reusing the handle the server just produced would only
+  // prove that an object equals itself.
+  auto offline_H = cudaq::qec::pcm_from_sparse_vec(
+      config.H_sparse, config.syndrome_size, config.block_size);
+  const auto offline_num_obs =
+      std::count(config.O_sparse.begin(), config.O_sparse.end(), -1);
+  auto offline_O = cudaq::qec::pcm_from_sparse_vec(
+      config.O_sparse, offline_num_obs, config.block_size);
+  std::vector<std::vector<std::uint32_t>> offline_d_rows;
+  {
+    std::vector<std::uint32_t> row;
+    for (std::int64_t entry : config.D_sparse) {
+      if (entry < 0) {
+        offline_d_rows.push_back(std::move(row));
+        row.clear();
+      } else {
+        row.push_back(static_cast<std::uint32_t>(entry));
+      }
+    }
+  }
+  std::uint32_t offline_measurements = 0;
+  for (const auto &r : offline_d_rows)
+    for (auto c : r)
+      offline_measurements = std::max(offline_measurements, c + 1);
+  auto offline_D = cudaq::qec::sparse_binary_matrix::from_nested_csr(
+                       static_cast<std::uint32_t>(offline_d_rows.size()),
+                       offline_measurements, offline_d_rows)
+                       .canonicalize();
+  cudaq::qec::decoder_inputs offline_inputs(
+      std::move(offline_H), std::move(offline_O), config.error_rate_vec,
+      std::move(offline_D));
+
+  auto offline_decoder =
+      cudaq::qec::decoder::get("d_capture_decoder", offline_inputs,
+                               cudaq::qec::decoder_output::observables);
+  ASSERT_NE(offline_decoder, nullptr);
+  const auto offline_model = cudaq::qec::construction_d_probe::model;
+
+  EXPECT_EQ(server_model, offline_model);
+  // And the model is complete, not merely equal: all four fields present.
+  EXPECT_FALSE(server_model.H.empty());
+  EXPECT_TRUE(server_model.has_observable_model);
+  EXPECT_EQ(server_model.rates.size(), config.block_size);
+  EXPECT_TRUE(server_model.has_d);
+  // The duplicate pair cancelled on both paths.
+  EXPECT_EQ(server_model.D[0], std::vector<std::uint32_t>{2});
+}
+
+// Acceptance 1: an H-based plugin remains usable offline and through the server
+// without any decoder-specific framework change. Uses the same registered
+// plugin on both routes and asserts each produces a working decoder.
+TEST(DecodingServerAcceptance, MatrixSourcePluginWorksOfflineAndOnServer) {
+  using namespace cudaq::qec::decoding::config;
+
+  auto config = create_test_sample_realtime_decoder_config(0);
+
+  // Server route.
+  multi_decoder_config multi;
+  multi.decoders.push_back(config);
+  ASSERT_EQ(configure_decoders(multi), 0);
+  finalize_decoders();
+
+  // Offline route, same plugin and the same resolved model.
+  auto inputs = cudaq::qec::decoding::host::resolve_decoder_inputs(
+      config, std::filesystem::current_path());
+  auto offline = cudaq::qec::decoder::get(config.type, inputs,
+                                          cudaq::qec::decoder_output::errors);
+  ASSERT_NE(offline, nullptr);
+  auto result = offline->decode(
+      std::vector<cudaq::qec::float_t>(config.syndrome_size, 0.0));
+  EXPECT_EQ(result.result.size(), config.block_size);
 }
 
 TEST(ConfigureDecodersLifecycle,
