@@ -213,14 +213,12 @@ jobs:
 
           # Mirror the newest release at the site root so that unversioned
           # links (https://nvidia.github.io/cudaqx/...) keep working and
-          # always show the most recent release. Version directories are
-          # excluded from the mirror so they are left untouched.
+          # always show the most recent release: remove everything except the
+          # version directories and housekeeping files, then copy the newest
+          # release's tree in.
           newest=$(ls -d [0-9]*/ | sort -V | tail -1)
-          rsync -a --delete \
-            --exclude='/.git' \
-            --exclude='/.nojekyll' \
-            --exclude='/[0-9]*/' \
-            "$newest" ./
+          find . -maxdepth 1 ! -name . ! -name '.git' ! -name '.nojekyll' ! -name '[0-9]*' -exec rm -rf {} +
+          cp -r "${newest}." ./
 
           # Regenerate the manifest consumed by the sidebar version selector
           # (docs/sphinx/_static/version-switcher.js).
