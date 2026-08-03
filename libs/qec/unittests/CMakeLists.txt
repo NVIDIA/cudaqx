@@ -53,6 +53,11 @@ if(TARGET cudaq-qec-decoding-server)
     cudaq-qec-realtime-decoding
     cudaq-qec-realtime-decoding-simulation
     cudaq::cudaq)
+  # Chromobius is the DEM-native decoder the raw-DEM model source exists for;
+  # link it when this configuration built it so the acceptance test can run.
+  if(TARGET cudaq-qec-chromobius)
+    target_link_libraries(test_decoders_yaml PRIVATE cudaq-qec-chromobius)
+  endif()
   add_dependencies(CUDAQXQECUnitTests test_decoders_yaml)
   gtest_discover_tests(test_decoders_yaml)
 

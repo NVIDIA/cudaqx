@@ -238,6 +238,12 @@ void bindDecodingConfig(nb::module_ &mod) {
       .def_rw("type", &decoder_config::type)
       .def_rw("dispatch", &decoder_config::dispatch)
       .def_rw("cuda_device_id", &decoder_config::cuda_device_id)
+      .def_rw(
+          "stim_dem_path", &decoder_config::stim_dem_path,
+          "Path to a Stim detector error model. Authoritative when set, and "
+          "mutually exclusive with H_sparse, O_sparse and error_rate_vec. "
+          "Relative paths resolve against the configuration file's "
+          "directory, or the working directory for a programmatic config.")
       .def_rw("block_size", &decoder_config::block_size)
       .def_rw("syndrome_size", &decoder_config::syndrome_size)
       .def_rw("H_sparse", &decoder_config::H_sparse)
@@ -298,7 +304,9 @@ void bindDecodingConfig(nb::module_ &mod) {
 
   // Library helpers
   mod_cfg.def(
-      "configure_decoders", &configure_decoders, nb::arg("config"),
+      "configure_decoders",
+      static_cast<int (*)(multi_decoder_config &)>(&configure_decoders),
+      nb::arg("config"),
       "Configure decoders in a multi_decoder_config list; returns int status.");
   mod_cfg.def("configure_decoders_from_file", &configure_decoders_from_file,
               nb::arg("config_file"),

@@ -446,6 +446,9 @@ def test_configure_valid_multi_error_lut_decoders():
     dc.block_size = 10
     dc.syndrome_size = 3
     dc.H_sparse = [1, 2, 3, -1, 6, 7, 8, -1, -1]
+    # The decoding server constructs for observable output, so a server config
+    # must supply an observable mapping.
+    dc.O_sparse = [0, -1]
     dc.D_sparse = qec.generate_timelike_sparse_detector_matrix(
         dc.syndrome_size, 2, include_first_round=False)
     dc.set_decoder_custom_args(nv)
@@ -860,6 +863,9 @@ def test_configure_valid_decoders():
     dc.block_size = 10
     dc.syndrome_size = 3
     dc.H_sparse = [1, 2, 3, -1, 6, 7, 8, -1, -1]
+    # The decoding server constructs for observable output, so a server config
+    # must supply an observable mapping.
+    dc.O_sparse = [0, -1]
     dc.D_sparse = qec.generate_timelike_sparse_detector_matrix(
         dc.syndrome_size, 2, include_first_round=False)
     lut_config = qec.multi_error_lut_config()
@@ -966,6 +972,10 @@ def test_configure_invalid_decoders():
     decoder_config.block_size = 10
     decoder_config.syndrome_size = 3
     decoder_config.H_sparse = [1, 2, 3, -1, 6, 7, 8, -1, -1]
+    # A resolvable model, so the failure under test is the unregistered
+    # decoder type at construction rather than an unresolvable configuration.
+    decoder_config.O_sparse = [0, -1]
+    decoder_config.D_sparse = [0, -1, 1, -1, 2, -1]
     decoder_config.set_decoder_custom_args(nv)
 
     multi_decoder_config = qec.multi_decoder_config()

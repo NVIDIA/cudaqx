@@ -10,6 +10,7 @@
 #include "../realtime_decoding.h"
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/realtime/decoding_config.h"
+#include <filesystem>
 
 #include <fstream>
 #include <iterator>
@@ -44,11 +45,16 @@ void SessionRegistry::load_from_config(const std::string &yaml_path) {
 
   std::string yaml_str((std::istreambuf_iterator<char>(f)),
                        std::istreambuf_iterator<char>());
-  load_from_config(multi_decoder_config::from_yaml_str(yaml_str), yaml_path);
+  // A model path in the document is relative to the document, not to wherever
+  // the server happened to be started from.
+  auto base_dir = std::filesystem::absolute(yaml_path).parent_path();
+  load_from_config(multi_decoder_config::from_yaml_str(yaml_str), yaml_path,
+                   base_dir);
 }
 
 void SessionRegistry::load_from_config(const multi_decoder_config &config,
-                                       const std::string &source_name) {
+                                       const std::string &source_name,
+                                       const std::filesystem::path &base_dir) {
   for (const auto &dc : config.decoders) {
     if (dc.id < 0)
       throw std::runtime_error("Negative decoder id " + std::to_string(dc.id) +
@@ -71,7 +77,8 @@ void SessionRegistry::load_from_config(const multi_decoder_config &config,
     CUDA_QEC_INFO("SessionRegistry: creating decoder id={} type={}", dc.id,
                   dc.type);
 
-    auto decoder = cudaq::qec::decoding::host::create_realtime_decoder(dc);
+    auto decoder = cudaq::qec::decoding::host::create_realtime_decoder(
+        dc, cudaq::qec::decoding::host::resolve_decoder_inputs(dc, base_dir));
     auto session = DecodingSession::create(std::move(decoder),
                                            make_default_mapping_table());
 

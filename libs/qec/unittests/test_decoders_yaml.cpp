@@ -21,6 +21,7 @@
 #include <limits>
 #include <optional>
 #include <stdexcept>
+#include <unistd.h>
 
 namespace cudaq::qec {
 
@@ -72,6 +73,46 @@ CUDAQ_EXT_PT_REGISTER_TYPE(d_capture_decoder)
 } // namespace cudaq::qec
 
 namespace {
+// A Stim DEM on disk, removed when the test finishes. Two detectors, three
+// error mechanisms, one observable.
+constexpr const char *kTinyDem = "error(0.1) D0 L0\n"
+                                 "error(0.1) D0 D1\n"
+                                 "error(0.2) D1\n";
+
+class ScopedDemFile {
+public:
+  explicit ScopedDemFile(const char *contents = kTinyDem) {
+    // GoogleTest binaries run concurrently under ctest, and this file is
+    // discovered by more than one target, so a process-local counter alone
+    // collides. Qualify by pid.
+    static int counter = 0;
+    path_ = std::filesystem::temp_directory_path() /
+            ("cudaqx_resolver_" + std::to_string(::getpid()) + "_" +
+             std::to_string(counter++) + ".dem");
+    std::ofstream(path_) << contents;
+  }
+  ~ScopedDemFile() {
+    std::error_code ec;
+    std::filesystem::remove(path_, ec);
+  }
+  const std::filesystem::path &path() const { return path_; }
+
+private:
+  std::filesystem::path path_;
+};
+
+/// Config carrying only what both model branches need: an id, a type, and a
+/// two-row measurement-to-detector map matching the tiny DEM's detectors.
+cudaq::qec::decoding::config::decoder_config
+make_dem_config(const std::filesystem::path &dem_path) {
+  cudaq::qec::decoding::config::decoder_config config;
+  config.id = 0;
+  config.type = "d_capture_decoder";
+  config.stim_dem_path = dem_path.string();
+  config.D_sparse = {0, -1, 1, -1};
+  return config;
+}
+
 class ScopedEnv {
 public:
   ScopedEnv(const char *name, const char *value) : name(name) {
@@ -738,7 +779,9 @@ TEST(DecoderConfigTest, ConfigureRejectsDuplicateAndNegativeIds) {
 TEST(DecoderConfigTest, CreateRealtimeDecoderConfiguresRuntimeState) {
   auto config = create_test_sample_realtime_decoder_config(7);
 
-  auto decoder = cudaq::qec::decoding::host::create_realtime_decoder(config);
+  auto decoder = cudaq::qec::decoding::host::create_realtime_decoder(
+      config, cudaq::qec::decoding::host::resolve_decoder_inputs(
+                  config, std::filesystem::current_path()));
 
   ASSERT_NE(decoder, nullptr);
   EXPECT_EQ(decoder->get_decoder_id(), 7u);
@@ -763,7 +806,9 @@ TEST(DecoderConfigTest, DuplicateDetectorIndicesCollapseInConstructionInputs) {
   auto parsed = cudaq::qec::decoding::config::decoder_config::from_yaml_str(
       config.to_yaml_str(200));
 
-  auto decoder = cudaq::qec::decoding::host::create_realtime_decoder(parsed);
+  auto decoder = cudaq::qec::decoding::host::create_realtime_decoder(
+      parsed, cudaq::qec::decoding::host::resolve_decoder_inputs(
+                  parsed, std::filesystem::current_path()));
   ASSERT_NE(decoder, nullptr);
 
   // Construction copy: the duplicate pair has cancelled, measurement 2 remains.
@@ -792,11 +837,400 @@ TEST(DecoderConfigTest, DuplicateDetectorIndicesCollapseInConstructionInputs) {
             expected_detectors);
 }
 
+// --- raw Stim DEM model source ---------------------------------------------
+
+TEST(ResolveDecoderInputs, DemSourceCarriesRawProvenanceAndDerivedSizes) {
+  ScopedDemFile dem;
+  auto config = make_dem_config(dem.path());
+
+  auto inputs = cudaq::qec::decoding::host::resolve_decoder_inputs(
+      config, std::filesystem::current_path());
+
+  // The DEM stays authoritative, so a DEM-native decoder can read it back.
+  ASSERT_TRUE(inputs.has_stim_dem());
+  EXPECT_NE(inputs.stim_dem().find("error(0.1) D0 L0"), std::string::npos);
+  // Sizes come from the DEM rather than the configuration.
+  EXPECT_EQ(inputs.num_detectors(), 2u);
+  EXPECT_EQ(inputs.num_error_mechanisms(), 3u);
+  EXPECT_EQ(inputs.num_observables(), 1u);
+  // D is orthogonal to the model source and survives resolution.
+  ASSERT_NE(inputs.measurement_to_detectors(), nullptr);
+  EXPECT_EQ(inputs.measurement_to_detectors()->num_rows(), 2u);
+}
+
+TEST(ResolveDecoderInputs, DemSourceRejectsCompetingMatrixKeys) {
+  ScopedDemFile dem;
+  const std::filesystem::path cwd = std::filesystem::current_path();
+
+  auto with_H = make_dem_config(dem.path());
+  with_H.H_sparse = {0, -1, 1, -1};
+  EXPECT_THROW(cudaq::qec::decoding::host::resolve_decoder_inputs(with_H, cwd),
+               std::runtime_error);
+
+  auto with_O = make_dem_config(dem.path());
+  with_O.O_sparse = {0, -1};
+  EXPECT_THROW(cudaq::qec::decoding::host::resolve_decoder_inputs(with_O, cwd),
+               std::runtime_error);
+
+  auto with_rates = make_dem_config(dem.path());
+  with_rates.error_rate_vec = {0.1, 0.1, 0.1};
+  EXPECT_THROW(
+      cudaq::qec::decoding::host::resolve_decoder_inputs(with_rates, cwd),
+      std::runtime_error);
+}
+
+TEST(ResolveDecoderInputs, DemSourceRejectsUnreadableFile) {
+  auto config = make_dem_config("/nonexistent/definitely-not-here.dem");
+  EXPECT_THROW(cudaq::qec::decoding::host::resolve_decoder_inputs(
+                   config, std::filesystem::current_path()),
+               std::runtime_error);
+}
+
+TEST(ResolveDecoderInputs, DemSourceTreatsSuppliedSizesAsAssertions) {
+  ScopedDemFile dem;
+  const std::filesystem::path cwd = std::filesystem::current_path();
+
+  // Matching values are accepted.
+  auto matching = make_dem_config(dem.path());
+  matching.syndrome_size = 2;
+  matching.block_size = 3;
+  EXPECT_NO_THROW(
+      cudaq::qec::decoding::host::resolve_decoder_inputs(matching, cwd));
+
+  auto wrong_detectors = make_dem_config(dem.path());
+  wrong_detectors.syndrome_size = 99;
+  EXPECT_THROW(
+      cudaq::qec::decoding::host::resolve_decoder_inputs(wrong_detectors, cwd),
+      std::runtime_error);
+
+  auto wrong_mechanisms = make_dem_config(dem.path());
+  wrong_mechanisms.block_size = 99;
+  EXPECT_THROW(
+      cudaq::qec::decoding::host::resolve_decoder_inputs(wrong_mechanisms, cwd),
+      std::runtime_error);
+}
+
+TEST(ResolveDecoderInputs, DemSourceResolvesRelativePathAgainstBaseDir) {
+  ScopedDemFile dem;
+  auto config = make_dem_config(dem.path().filename());
+  ASSERT_TRUE(std::filesystem::path(config.stim_dem_path).is_relative());
+
+  // Against the containing directory it resolves; against an unrelated one it
+  // does not, which is what makes the base directory meaningful.
+  EXPECT_NO_THROW(cudaq::qec::decoding::host::resolve_decoder_inputs(
+      config, dem.path().parent_path()));
+  EXPECT_THROW(cudaq::qec::decoding::host::resolve_decoder_inputs(
+                   config, "/definitely/not/the/right/place"),
+               std::runtime_error);
+}
+
+TEST(ResolveDecoderInputs, MatrixSourceStillRequiresItsDimensions) {
+  auto config = create_test_empty_decoder_config(0);
+  config.block_size = 0;
+  EXPECT_THROW(cudaq::qec::decoding::host::resolve_decoder_inputs(
+                   config, std::filesystem::current_path()),
+               std::runtime_error);
+}
+
+TEST(ResolveDecoderInputs, MatrixSourceRequiresAnObservableMapping) {
+  auto config = create_test_empty_decoder_config(0);
+  config.O_sparse.clear();
+  // The realtime path returns observable corrections, so a model with no
+  // observable mapping cannot serve it. Without this it constructed happily
+  // and decoded to a zero-length observable frame.
+  EXPECT_THROW(cudaq::qec::decoding::host::resolve_decoder_inputs(
+                   config, std::filesystem::current_path()),
+               std::runtime_error);
+}
+
+// Acceptance: a DEM-native decoder can be configured and constructed for the
+// decoding server straight from a raw Stim DEM, with no decoder-specific
+// branch anywhere in the configuration or construction path. Chromobius
+// requires the DEM itself -- it throws when handed only matrices -- so this
+// only passes if raw provenance survives resolution.
+// Acceptance: a decoding-server configuration on disk names its model with a
+// path relative to itself, and the server resolves it through its own session
+// path. Deliberately goes through SessionRegistry rather than calling the
+// resolver directly: an earlier version of this test bypassed the registry and
+// therefore missed that the registry resolved every model against the process
+// working directory.
+// --- configuration lifecycle -----------------------------------------------
+//
+// Applying a configuration must not damage a working one. Resolution happens
+// before any process state is touched, and the configuration is cached and
+// published only once it is actually in effect.
+
+TEST(ConfigureDecodersLifecycle, InvalidModelLeavesPriorConfigurationInPlace) {
+  using namespace cudaq::qec::decoding::config;
+
+  multi_decoder_config good;
+  good.decoders.push_back(create_test_sample_realtime_decoder_config(0));
+  ASSERT_EQ(configure_decoders(good), 0);
+  const auto cached_after_good = last_configured_multi_decoder_config();
+  ASSERT_NE(cached_after_good, nullptr);
+
+  // An unresolvable model: resolution failures propagate as exceptions rather
+  // than a status code, and must happen before anything is replaced.
+  multi_decoder_config bad;
+  auto broken = create_test_sample_realtime_decoder_config(0);
+  broken.O_sparse.clear(); // no observable mapping for an observable server
+  bad.decoders.push_back(broken);
+  EXPECT_THROW(configure_decoders(bad), std::runtime_error);
+
+  // The previously applied configuration is still the cached one, and is not
+  // replaced by the configuration that failed to apply.
+  const auto cached_after_bad = last_configured_multi_decoder_config();
+  ASSERT_NE(cached_after_bad, nullptr);
+  EXPECT_EQ(*cached_after_bad, *cached_after_good);
+
+  finalize_decoders();
+}
+
+TEST(ConfigureDecodersLifecycle, ConstructionFailureIsNotAdvertised) {
+  using namespace cudaq::qec::decoding::config;
+
+  multi_decoder_config good;
+  good.decoders.push_back(create_test_sample_realtime_decoder_config(0));
+  ASSERT_EQ(configure_decoders(good), 0);
+  const auto cached_after_good = last_configured_multi_decoder_config();
+  ASSERT_NE(cached_after_good, nullptr);
+
+  // Resolves cleanly, then fails in the factory: an unregistered decoder type.
+  multi_decoder_config unbuildable;
+  auto unknown = create_test_sample_realtime_decoder_config(0);
+  unknown.type = "no-such-decoder-is-registered";
+  unbuildable.decoders.push_back(unknown);
+  EXPECT_NE(configure_decoders(unbuildable), 0);
+
+  // A configuration that never took effect must not be cached or published.
+  const auto cached_after_failure = last_configured_multi_decoder_config();
+  ASSERT_NE(cached_after_failure, nullptr);
+  EXPECT_EQ(*cached_after_failure, *cached_after_good);
+
+  finalize_decoders();
+}
+
+TEST(ConfigureDecodersLifecycle,
+     AppliedConfigurationStoresAnAbsoluteModelPath) {
+  using namespace cudaq::qec::decoding::config;
+
+  const auto root = std::filesystem::temp_directory_path() /
+                    ("cudaqx_abs_" + std::to_string(::getpid()));
+  std::filesystem::create_directories(root / "configs");
+  struct Cleanup {
+    std::filesystem::path dir;
+    ~Cleanup() {
+      std::error_code ec;
+      std::filesystem::remove_all(dir, ec);
+    }
+  } cleanup{root};
+  std::ofstream(root / "configs" / "model.dem") << kTinyDem;
+
+  const auto previous_cwd = std::filesystem::current_path();
+  std::filesystem::current_path(root);
+  struct RestoreCwd {
+    std::filesystem::path path;
+    ~RestoreCwd() { std::filesystem::current_path(path); }
+  } restore{previous_cwd};
+
+  decoder_config dc;
+  dc.id = 0;
+  dc.type = "d_capture_decoder";
+  dc.stim_dem_path = "model.dem";
+  dc.D_sparse = {0, -1, 1, -1};
+  multi_decoder_config mc;
+  mc.decoders.push_back(dc);
+
+  // A RELATIVE base directory: normalizing the join without absolutizing it
+  // would store "configs/model.dem", which stops resolving once the working
+  // directory moves.
+  ASSERT_EQ(configure_decoders(mc, "configs"), 0);
+
+  EXPECT_TRUE(
+      std::filesystem::path(mc.decoders[0].stim_dem_path).is_absolute());
+  const auto cached = last_configured_multi_decoder_config();
+  ASSERT_NE(cached, nullptr);
+  EXPECT_TRUE(
+      std::filesystem::path(cached->decoders[0].stim_dem_path).is_absolute());
+  EXPECT_TRUE(std::filesystem::exists(cached->decoders[0].stim_dem_path));
+
+  finalize_decoders();
+}
+
+TEST(ConfigureDecodersLifecycle, FailedResolutionLeavesCallerConfigUnmodified) {
+  using namespace cudaq::qec::decoding::config;
+
+  ScopedDemFile dem;
+  const auto base = dem.path().parent_path();
+
+  decoder_config first;
+  first.id = 0;
+  first.type = "d_capture_decoder";
+  first.stim_dem_path = dem.path().filename().string();
+  first.D_sparse = {0, -1, 1, -1};
+
+  decoder_config second = first;
+  second.id = 1;
+  second.stim_dem_path = "definitely-not-present.dem";
+
+  multi_decoder_config mc;
+  mc.decoders.push_back(first);
+  mc.decoders.push_back(second);
+  const std::string original_path = mc.decoders[0].stim_dem_path;
+
+  // The second entry cannot resolve, so nothing is applied -- including the
+  // path rewrite on the entry that did resolve. Otherwise a retry against a
+  // different base directory would silently keep the first one.
+  EXPECT_THROW(configure_decoders(mc, base), std::runtime_error);
+  EXPECT_EQ(mc.decoders[0].stim_dem_path, original_path);
+}
+
+TEST(ConfigureDecodersLifecycle, RejectsReconfigurationWhileSessionActive) {
+  using namespace cudaq::qec::decoding::config;
+  // A CPU decoder gives a HOST-mode session, which needs no GPU.
+  ScopedEnv realtime_mode("CUDAQ_QEC_REALTIME_MODE", "inproc_rpc");
+
+  multi_decoder_config first;
+  first.decoders.push_back(create_test_sample_realtime_decoder_config(0));
+  ASSERT_EQ(configure_decoders(first), 0);
+  ASSERT_NE(cudaq::qec::decoding::host::get_realtime_session(), nullptr);
+
+  // The session holds a reference to the decoder vector and inspects it at
+  // initialize(), so replacing decoders underneath it is unsafe. Reject
+  // instead, without resolving, destroying, replacing or publishing anything.
+  multi_decoder_config second;
+  second.decoders.push_back(create_test_sample_realtime_decoder_config(0));
+  EXPECT_EQ(configure_decoders(second), 5);
+  EXPECT_NE(cudaq::qec::decoding::host::get_realtime_session(), nullptr);
+
+  // Finalizing first is the supported way to reconfigure.
+  finalize_decoders();
+  EXPECT_EQ(configure_decoders(second), 0);
+  finalize_decoders();
+}
+
+TEST(ResolveDecoderInputs, DetectorMapIndicesMustBeRepresentable) {
+  auto config = create_test_empty_decoder_config(0);
+  // Only -1 terminates a row; anything else must be a measurement index that
+  // fits the sparse index type. Narrowing would alias onto a real measurement.
+  config.D_sparse = {
+      static_cast<std::int64_t>(std::numeric_limits<std::uint32_t>::max()), -1};
+  EXPECT_THROW(cudaq::qec::decoding::host::resolve_decoder_inputs(
+                   config, std::filesystem::current_path()),
+               std::runtime_error);
+
+  auto negative = create_test_empty_decoder_config(0);
+  negative.D_sparse = {-2, -1};
+  EXPECT_THROW(cudaq::qec::decoding::host::resolve_decoder_inputs(
+                   negative, std::filesystem::current_path()),
+               std::runtime_error);
+}
+
+TEST(DecodingServerAcceptance,
+     ServerLoadsFileRelativeDemThroughSessionRegistry) {
+  if (cudaq::qec::decoding::config::find_decoder_schema("chromobius") ==
+      nullptr)
+    GTEST_SKIP() << "chromobius plugin not built in this configuration";
+
+  // A config directory holding both the document and its model, so the model
+  // is findable only by resolving relative to the document.
+  const auto dir = std::filesystem::temp_directory_path() /
+                   ("cudaqx_server_acc_" + std::to_string(::getpid()));
+  std::filesystem::create_directories(dir);
+  struct Cleanup {
+    std::filesystem::path dir;
+    ~Cleanup() {
+      std::error_code ec;
+      std::filesystem::remove_all(dir, ec);
+    }
+  } cleanup{dir};
+
+  std::ofstream(dir / "model.dem") << "error(0.1) D0 L0\n"
+                                      "error(0.1) D0 D1 L1\n"
+                                      "error(0.1) D1 L2\n"
+                                      "detector(0, 0, 0, 0) D0\n"
+                                      "detector(0, 0, 0, 1) D1\n";
+
+  cudaq::qec::decoding::config::decoder_config config;
+  config.id = 0;
+  config.type = "chromobius";
+  config.stim_dem_path = "model.dem"; // relative to the document, not the CWD
+  config.D_sparse = {0, -1, 1, -1};
+  cudaq::qec::decoding::config::multi_decoder_config multi;
+  multi.decoders.push_back(config);
+  const auto config_path = dir / "decoders.yml";
+  std::ofstream(config_path) << multi.to_yaml_str(200);
+
+  // Run from somewhere else entirely, so a CWD-relative resolution fails.
+  const auto previous_cwd = std::filesystem::current_path();
+  std::filesystem::current_path(std::filesystem::temp_directory_path());
+  struct RestoreCwd {
+    std::filesystem::path path;
+    ~RestoreCwd() { std::filesystem::current_path(path); }
+  } restore{previous_cwd};
+
+  // The model is genuinely unreachable from the working directory, so this
+  // fixture fails unless the registry resolves against the document.
+  EXPECT_THROW(cudaq::qec::decoding::host::resolve_decoder_inputs(
+                   config, std::filesystem::current_path()),
+               std::runtime_error);
+
+  cudaq::qec::decoding_server::SessionRegistry registry;
+  ASSERT_NO_THROW(registry.load_from_config(config_path.string()));
+  EXPECT_NO_THROW((void)registry.get(0));
+}
+
+TEST(DecodingServerAcceptance, ChromobiusConstructsFromRawDemSource) {
+  if (cudaq::qec::decoding::config::find_decoder_schema("chromobius") ==
+      nullptr)
+    GTEST_SKIP() << "chromobius plugin not built in this configuration";
+
+  // The reference case from quantumlib/chromobius: two detectors carrying
+  // colour coordinates, three error mechanisms, three observables.
+  ScopedDemFile dem("error(0.1) D0 L0\n"
+                    "error(0.1) D0 D1 L1\n"
+                    "error(0.1) D1 L2\n"
+                    "detector(0, 0, 0, 0) D0\n"
+                    "detector(0, 0, 0, 1) D1\n");
+
+  cudaq::qec::decoding::config::decoder_config config;
+  config.id = 0;
+  config.type = "chromobius";
+  config.stim_dem_path = dem.path().string();
+  config.D_sparse = {0, -1, 1, -1};
+
+  // Round-trip so this is provably a configuration the server would accept.
+  auto parsed = cudaq::qec::decoding::config::decoder_config::from_yaml_str(
+      config.to_yaml_str(200));
+  EXPECT_EQ(parsed.stim_dem_path, config.stim_dem_path);
+  EXPECT_TRUE(parsed.H_sparse.empty());
+
+  auto inputs = cudaq::qec::decoding::host::resolve_decoder_inputs(
+      parsed, std::filesystem::current_path());
+  ASSERT_TRUE(inputs.has_stim_dem());
+
+  auto decoder = cudaq::qec::decoding::host::create_realtime_decoder(
+      parsed, std::move(inputs));
+  ASSERT_NE(decoder, nullptr);
+  EXPECT_EQ(decoder->get_num_observables(), 3u);
+  EXPECT_EQ(decoder->get_default_output(),
+            cudaq::qec::decoder_output::observables);
+
+  // Decoding works off the DEM-derived detector basis, and returns one entry
+  // per observable the DEM declares.
+  ASSERT_EQ(decoder->get_syndrome_size(), 2u);
+  auto result = decoder->decode(
+      std::vector<cudaq::qec::float_t>(decoder->get_syndrome_size(), 0.0));
+  EXPECT_EQ(result.result.size(), 3u);
+}
+
 TEST(DecoderConfigTest, CreateRealtimeDecoderRequiresDetectorMatrix) {
   auto config = create_test_sample_realtime_decoder_config(0);
   config.D_sparse.clear();
 
-  EXPECT_THROW(cudaq::qec::decoding::host::create_realtime_decoder(config),
+  EXPECT_THROW(cudaq::qec::decoding::host::create_realtime_decoder(
+                   config, cudaq::qec::decoding::host::resolve_decoder_inputs(
+                               config, std::filesystem::current_path())),
                std::runtime_error);
 }
 
@@ -805,7 +1239,9 @@ TEST(DecoderConfigTest, CreateRealtimeDecoderRejectsUnrepresentableId) {
   config.id =
       static_cast<std::int64_t>(std::numeric_limits<std::uint32_t>::max()) + 1;
 
-  EXPECT_THROW(cudaq::qec::decoding::host::create_realtime_decoder(config),
+  EXPECT_THROW(cudaq::qec::decoding::host::create_realtime_decoder(
+                   config, cudaq::qec::decoding::host::resolve_decoder_inputs(
+                               config, std::filesystem::current_path())),
                std::invalid_argument);
 }
 

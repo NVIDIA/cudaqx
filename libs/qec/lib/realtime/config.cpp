@@ -281,69 +281,16 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
     io.mapOptional("dispatch", config.dispatch,
                    cudaq::qec::decoding::config::DecoderDispatch::host);
     io.mapOptional("cuda_device_id", config.cuda_device_id);
-    io.mapRequired("block_size", config.block_size);
-    io.mapRequired("syndrome_size", config.syndrome_size);
-    io.mapRequired("H_sparse", config.H_sparse);
-    io.mapRequired("O_sparse", config.O_sparse);
+    // A decoder model comes from exactly one source: the matrix keys or
+    // stim_dem_path. Neither branch's keys can be mapRequired, so which are
+    // needed is decided by resolve_decoder_inputs(), not by the parser.
+    io.mapOptional("stim_dem_path", config.stim_dem_path, std::string{});
+    io.mapOptional("block_size", config.block_size, std::uint64_t{0});
+    io.mapOptional("syndrome_size", config.syndrome_size, std::uint64_t{0});
+    io.mapOptional("H_sparse", config.H_sparse);
+    io.mapOptional("O_sparse", config.O_sparse);
     io.mapRequired("D_sparse", config.D_sparse);
     io.mapOptional("error_rate_vec", config.error_rate_vec);
-
-    // Validate that the number of rows in the H_sparse vector is equal to
-    // syndrome_size.
-    auto num_H_rows =
-        std::count(config.H_sparse.begin(), config.H_sparse.end(), -1);
-    if (num_H_rows != config.syndrome_size) {
-      throw std::runtime_error(
-          "Number of rows in H_sparse vector is not equal to syndrome_size: " +
-          std::to_string(num_H_rows) +
-          " != " + std::to_string(config.syndrome_size));
-    }
-
-    // Validate that no values in the H_sparse vector are out of range.
-    for (auto value : config.H_sparse) {
-      if (value < -1 || (value >= 0 && value >= config.block_size)) {
-        throw std::runtime_error("Value in H_sparse vector is out of range: " +
-                                 std::to_string(value));
-      }
-    }
-
-    // Validate that no values in the O_sparse vector are out of range.
-    for (auto value : config.O_sparse) {
-      if (value < -1 || (value >= 0 && value >= config.block_size)) {
-        throw std::runtime_error("Value in O_sparse vector is out of range: " +
-                                 std::to_string(value));
-      }
-    }
-
-    if (!config.error_rate_vec.empty() &&
-        config.error_rate_vec.size() != config.block_size) {
-      throw std::runtime_error(
-          "error_rate_vec size is not equal to block_size: " +
-          std::to_string(config.error_rate_vec.size()) +
-          " != " + std::to_string(config.block_size));
-    }
-
-    // Validate that if the D_sparse is provided, it is a valid D matrix. That
-    // means that the number of rows in the D_sparse matrix should be equal to
-    // the number of rows in the H_sparse matrix, and no row should be empty.
-    if (!config.D_sparse.empty()) {
-      auto num_D_rows =
-          std::count(config.D_sparse.begin(), config.D_sparse.end(), -1);
-      if (num_D_rows != config.syndrome_size) {
-        throw std::runtime_error("Number of rows in D_sparse vector is not "
-                                 "equal to syndrome_size: " +
-                                 std::to_string(num_D_rows) +
-                                 " != " + std::to_string(config.syndrome_size));
-      }
-      // No row should be empty, which means that there should be no
-      // back-to-back -1 values.
-      for (std::size_t i = 0; i < config.D_sparse.size() - 1; ++i) {
-        if (config.D_sparse.at(i) == -1 && config.D_sparse.at(i + 1) == -1) {
-          throw std::runtime_error("D_sparse row is empty for decoder " +
-                                   std::to_string(config.id));
-        }
-      }
-    }
 
     // Convert decoder_custom_args through the schema registered for this
     // decoder type. When no schema is registered, the key is intentionally
@@ -614,6 +561,7 @@ std::string decoder_config_json_schema() {
        llvm::json::Object{{"enum", llvm::json::Array{"host", "device_graph"}}}},
       {"cuda_device_id",
        llvm::json::Object{{"type", "integer"}, {"minimum", 0}}},
+      {"stim_dem_path", llvm::json::Object{{"type", "string"}}},
       {"block_size", llvm::json::Object{{"type", "integer"}, {"minimum", 0}}},
       {"syndrome_size",
        llvm::json::Object{{"type", "integer"}, {"minimum", 0}}},
@@ -695,9 +643,42 @@ std::string decoder_config_json_schema() {
        llvm::json::Object{
            {"type", "object"},
            {"properties", std::move(config_properties)},
-           {"required",
-            llvm::json::Array{"id", "type", "block_size", "syndrome_size",
-                              "H_sparse", "O_sparse", "D_sparse"}},
+           {"required", llvm::json::Array{"id", "type", "D_sparse"}},
+           // Exactly one model source. The matrix branch needs the dimensions
+           // that make its flat encodings interpretable; the DEM branch
+           // derives them and forbids the competing matrix keys.
+           {"oneOf",
+            llvm::json::Array{
+                llvm::json::Object{
+                    {"required",
+                     llvm::json::Array{"block_size", "syndrome_size",
+                                       "H_sparse", "O_sparse"}},
+                    // Runtime selects the DEM source on a NON-EMPTY path, so
+                    // an explicitly empty one is still a matrix configuration.
+                    {"properties",
+                     llvm::json::Object{
+                         {"stim_dem_path",
+                          llvm::json::Object{{"maxLength", 0}}}}}},
+                llvm::json::Object{
+                    {"required", llvm::json::Array{"stim_dem_path"}},
+                    {"properties", llvm::json::Object{{"stim_dem_path",
+                                                       llvm::json::Object{
+                                                           {"minLength", 1}}}}},
+                    {"allOf",
+                     llvm::json::Array{
+                         llvm::json::Object{
+                             {"not", llvm::json::Object{{"required",
+                                                         llvm::json::Array{
+                                                             "H_sparse"}}}}},
+                         llvm::json::Object{
+                             {"not", llvm::json::Object{{"required",
+                                                         llvm::json::Array{
+                                                             "O_sparse"}}}}},
+                         llvm::json::Object{
+                             {"not",
+                              llvm::json::Object{
+                                  {"required",
+                                   llvm::json::Array{"error_rate_vec"}}}}}}}}}},
            {"additionalProperties", false},
            {"allOf", std::move(dispatch)}}},
       {"decoder_params", std::move(decoder_params)},
@@ -745,20 +726,33 @@ std::string decoder_config_json_schema() {
 static std::mutex g_last_multi_decoder_config_mutex;
 static std::shared_ptr<const multi_decoder_config> g_last_multi_decoder_config;
 
-int configure_decoders(multi_decoder_config &config) {
+int configure_decoders(multi_decoder_config &config,
+                       const std::filesystem::path &base_dir) {
   CUDA_QEC_INFO("Initializing realtime decoding library with config object");
+  const int status =
+      cudaq::qec::decoding::host::configure_decoders(config, base_dir);
+  if (status != 0)
+    return status;
+
+  // Stash and publish only once the configuration is actually in effect, so a
+  // failed application cannot leave a configuration cached here or advertised
+  // to remote targets that nothing is honoring.
   {
     std::lock_guard<std::mutex> lock(g_last_multi_decoder_config_mutex);
     g_last_multi_decoder_config =
         std::make_shared<const multi_decoder_config>(config);
   }
-  // Publish the decoder configuration so CUDA-Q can inject it into
-  // remote-target job requests. The cudaq integration (ExtraPayloadProvider) is
-  // installed by cudaq-qec at load time; this call is a no-op when cudaq-qec is
-  // not loaded, keeping this library free of any direct cudaq-common
-  // dependency.
+  // The cudaq integration (ExtraPayloadProvider) is installed by cudaq-qec at
+  // load time; this call is a no-op when cudaq-qec is not loaded, keeping this
+  // library free of any direct cudaq-common dependency.
   cudaq::qec::publish_decoder_config_payload(config.to_yaml_str());
-  return cudaq::qec::decoding::host::configure_decoders(config);
+  return status;
+}
+
+int configure_decoders(multi_decoder_config &config) {
+  // No originating file: relative model paths resolve against the working
+  // directory as it stands when resolution starts.
+  return configure_decoders(config, std::filesystem::current_path());
 }
 
 std::shared_ptr<const multi_decoder_config>
@@ -805,7 +799,10 @@ int configure_decoders_from_file(const char *config_file) {
                            std::istreambuf_iterator<char>());
   log_config(config_str.c_str(), /*from_file=*/true);
   auto config = multi_decoder_config::from_yaml_str(config_str);
-  return configure_decoders(config);
+  // Relative model paths resolve against the configuration file's directory,
+  // absolute so the resolved paths stay valid if the working directory moves.
+  return configure_decoders(
+      config, std::filesystem::absolute(config_file_str).parent_path());
 }
 
 int configure_decoders_from_str(const char *config_str) {

@@ -6,6 +6,7 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.     #
 # ============================================================================ #
 
+import json
 import math
 
 import numpy as np
@@ -615,6 +616,9 @@ def test_configure_valid_multi_error_lut_decoders():
     dc.block_size = 10
     dc.syndrome_size = 3
     dc.H_sparse = [1, 2, 3, -1, 6, 7, 8, -1, -1]
+    # The decoding server constructs for observable output, so a server config
+    # must supply an observable mapping.
+    dc.O_sparse = [0, -1]
     dc.D_sparse = qec.generate_timelike_sparse_detector_matrix(
         dc.syndrome_size, 2, include_first_round=False)
     dc.decoder_custom_args = {"lut_error_depth": 2}
@@ -744,6 +748,10 @@ def test_configure_invalid_decoders():
     decoder_config.block_size = 10
     decoder_config.syndrome_size = 3
     decoder_config.H_sparse = [1, 2, 3, -1, 6, 7, 8, -1, -1]
+    # A resolvable model, so the failure under test is the unregistered
+    # decoder type at construction rather than an unresolvable configuration.
+    decoder_config.O_sparse = [0, -1]
+    decoder_config.D_sparse = [0, -1, 1, -1, 2, -1]
     decoder_config.decoder_custom_args = {"max_iterations": 50}
 
     multi_decoder_config = qec.multi_decoder_config()
@@ -755,3 +763,56 @@ def test_configure_invalid_decoders():
 
 if __name__ == "__main__":
     pytest.main()
+
+
+# --- exported JSON Schema: the two model sources ----------------------------
+#
+# The schema must describe the language the runtime actually accepts. It keys
+# the DEM source on a NON-EMPTY stim_dem_path, matching resolve_decoder_inputs.
+
+def _decoder_doc(**overrides):
+    doc = {"id": 0, "type": "pymatching", "D_sparse": [0, -1, 1, -1]}
+    doc.update(overrides)
+    return {"decoders": [doc]}
+
+
+_MATRIX_KEYS = {
+    "block_size": 4,
+    "syndrome_size": 2,
+    "H_sparse": [0, -1, 1, -1],
+    "O_sparse": [0, -1],
+}
+
+
+def _schema_accepts(doc):
+    jsonschema = pytest.importorskip("jsonschema")
+    schema = json.loads(qec.qecrt.config.decoder_config_json_schema())
+    try:
+        jsonschema.validate(doc, schema)
+        return True
+    except jsonschema.ValidationError:
+        return False
+
+
+def test_json_schema_accepts_matrix_source():
+    assert _schema_accepts(_decoder_doc(**_MATRIX_KEYS))
+
+
+def test_json_schema_accepts_dem_source():
+    assert _schema_accepts(_decoder_doc(stim_dem_path="model.dem"))
+
+
+def test_json_schema_rejects_both_sources():
+    assert not _schema_accepts(
+        _decoder_doc(stim_dem_path="model.dem", **_MATRIX_KEYS))
+
+
+def test_json_schema_rejects_neither_source():
+    assert not _schema_accepts(_decoder_doc())
+
+
+def test_json_schema_treats_empty_dem_path_as_matrix_source():
+    # An explicitly empty path is not a DEM source at runtime, so the schema
+    # must accept it alongside matrices and reject it on its own.
+    assert _schema_accepts(_decoder_doc(stim_dem_path="", **_MATRIX_KEYS))
+    assert not _schema_accepts(_decoder_doc(stim_dem_path=""))
