@@ -433,9 +433,9 @@ void set_apply_error(char *error, size_t error_len,
 }
 } // namespace
 
-/// Apply a pre-read YAML document to the live host decoder sessions.
+/// Apply a pre-read YAML document to the live decoder sessions.
 /// Return codes: 0=applied/unchanged, 1=rejected (old config still serving),
-/// 2=construction failed (host decoders awaiting config), 3=busy.
+/// 2=construction failed (affected decoders awaiting config), 3=busy.
 extern "C" __attribute__((visibility("default"))) int
 cudaqx_qec_decoding_server_apply_config_from_yaml(const char *yaml,
                                                   size_t yaml_len, char *error,

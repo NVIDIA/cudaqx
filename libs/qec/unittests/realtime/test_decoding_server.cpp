@@ -131,12 +131,72 @@ TEST(CqrTransceiverTest, AcceptsAnExactlySizedEnqueueRequestPayload) {
   EXPECT_EQ(response->status, 0);
 }
 
+TEST(CqrTransceiverTest, RejectsResponseBeyondReportedSlot) {
+  using namespace cudaq::qec::decoding_server;
+
+  constexpr std::size_t slot_size =
+      sizeof(cudaq::realtime::RPCHeader) + sizeof(GetCorrectionsRequestPayload);
+  std::array<uint8_t, slot_size> rx{};
+  std::array<uint8_t, slot_size> tx{};
+
+  auto *header = reinterpret_cast<cudaq::realtime::RPCHeader *>(rx.data());
+  header->magic = cudaq::realtime::RPC_MAGIC_REQUEST;
+  header->function_id = kGetCorrectionsFunctionId;
+  header->arg_len = sizeof(GetCorrectionsRequestPayload);
+  header->request_id = 31;
+
+  CqrTransceiver transceiver;
+  ASSERT_TRUE(transceiver.install_dispatch_sink([&](RxFrame frame) {
+    std::vector<uint8_t> oversized(slot_size + 1);
+    auto *response =
+        reinterpret_cast<cudaq::realtime::RPCResponse *>(oversized.data());
+    response->magic = cudaq::realtime::RPC_MAGIC_RESPONSE;
+    response->request_id =
+        reinterpret_cast<const cudaq::realtime::RPCHeader *>(frame.buf.data())
+            ->request_id;
+    transceiver.send(PeerId{}, oversized.data(), oversized.size());
+  }));
+
+  transceiver.inject(rx.data(), tx.data(), slot_size,
+                     kGetCorrectionsFunctionId);
+
+  const auto *written =
+      reinterpret_cast<const cudaq::realtime::RPCResponse *>(tx.data());
+  EXPECT_EQ(written->magic, cudaq::realtime::RPC_MAGIC_RESPONSE);
+  EXPECT_EQ(written->status, static_cast<int32_t>(RpcStatus::INTERNAL_ERROR));
+  EXPECT_EQ(written->result_len, 0u);
+  EXPECT_EQ(written->request_id, header->request_id);
+}
+
 __qpu__ std::int64_t decoding_server_kernel() {
   constexpr std::uint64_t kKernelDecoderId = 0;
   constexpr std::uint64_t kKernelBlockSize = 3;
   constexpr std::uint64_t kKernelSyndromeSize = 3;
   constexpr std::uint64_t kKernelSyndromeTag = 1;
   constexpr std::size_t kKernelActiveSyndromeIndex = 1;
+
+  cudaq::qec::decoding::reset_decoder(/*decoder_id=*/kKernelDecoderId);
+
+  std::vector<bool> syndrome(kKernelSyndromeSize);
+  for (std::size_t i = 0; i < kKernelSyndromeSize; ++i)
+    syndrome[i] = false;
+  syndrome[kKernelActiveSyndromeIndex] = true;
+  cudaq::qec::decoding::enqueue_syndromes_test(
+      /*decoder_id=*/kKernelDecoderId, syndrome, /*tag=*/kKernelSyndromeTag);
+
+  auto corrections = cudaq::qec::decoding::get_corrections(
+      /*decoder_id=*/kKernelDecoderId, /*return_size=*/kKernelBlockSize,
+      /*reset=*/true);
+  return corrections[kKernelActiveSyndromeIndex] ? std::int64_t{1}
+                                                 : std::int64_t{0};
+}
+
+__qpu__ std::int64_t decoding_server_kernel_size7() {
+  constexpr std::uint64_t kKernelDecoderId = 0;
+  constexpr std::uint64_t kKernelBlockSize = 7;
+  constexpr std::uint64_t kKernelSyndromeSize = 7;
+  constexpr std::uint64_t kKernelSyndromeTag = 1;
+  constexpr std::size_t kKernelActiveSyndromeIndex = 5;
 
   cudaq::qec::decoding::reset_decoder(/*decoder_id=*/kKernelDecoderId);
 
@@ -269,7 +329,7 @@ public:
     return readLineWithPrefix(prefix, timeout_ms, line);
   }
 
-  // Terminate the server and return its dispatched-request count (-1 if the  //
+  // Terminate the server and return its dispatched-request count (-1 if the
   // shutdown line never appeared). Also captures the per-decoder-worker
   // concurrency high-water mark into max_concurrent_decoders.
   std::int64_t stopAndGetDispatchCount(int num_rings = 0) {
@@ -748,6 +808,21 @@ std::string live_multi_error_lut_yaml(int lut_error_depth = 1,
   return yaml.str();
 }
 
+std::string live_pymatching_size7_yaml() {
+  return R"yaml(decoders:
+  - id: 0
+    type: pymatching
+    block_size: 7
+    syndrome_size: 7
+    H_sparse: [0, -1, 1, -1, 2, -1, 3, -1, 4, -1, 5, -1, 6, -1]
+    O_sparse: [0, -1, 1, -1, 2, -1, 3, -1, 4, -1, 5, -1, 6, -1]
+    D_sparse: [0, -1, 1, -1, 2, -1, 3, -1, 4, -1, 5, -1, 6, -1]
+    decoder_custom_args:
+      merge_strategy: smallest_weight
+      error_rate_vec: [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1]
+)yaml";
+}
+
 bool write_live_config(const std::string &path, const std::string &yaml) {
   std::ofstream file(path, std::ios::trunc);
   file << yaml;
@@ -789,6 +864,20 @@ TEST(DecodingServerLiveConfig, RebindsChangedDeviceGraphWithLifecycleHooks) {
       << unsupported.message;
   EXPECT_NO_THROW((void)registry.get(0));
 
+  bool launch_called = false;
+  DeviceGraphLifecycle failing_stop;
+  failing_stop.stop = [](uint64_t) { return false; };
+  failing_stop.launch = [&](uint64_t, void *) {
+    launch_called = true;
+    return true;
+  };
+  const auto stop_failed = registry.apply_config(
+      replacement, "scheduler stop failure", failing_stop);
+  EXPECT_EQ(stop_failed.state, ConfigApplyState::rejected)
+      << stop_failed.message;
+  EXPECT_FALSE(launch_called);
+  EXPECT_NO_THROW((void)registry.get(0));
+
   std::vector<std::string> events;
   DeviceGraphLifecycle lifecycle;
   lifecycle.stop = [&](uint64_t id) {
@@ -823,6 +912,57 @@ TEST(DecodingServerLiveConfig, RebindsChangedDeviceGraphWithLifecycleHooks) {
       registry.apply_config(replacement, "unchanged config", lifecycle);
   EXPECT_EQ(unchanged.state, ConfigApplyState::unchanged);
   EXPECT_TRUE(events.empty());
+}
+
+TEST(DecodingServerLiveConfig, RejectsTransportAndDispatchTopologyChanges) {
+  using namespace cudaq::qec::decoding_server;
+  using cudaq::qec::decoding::config::multi_decoder_config;
+
+  auto initial =
+      multi_decoder_config::from_yaml_str(live_multi_error_lut_yaml());
+  initial.transport.provider = "udp";
+  initial.transport.args = {"--slot-size=256"};
+
+  SessionRegistry registry;
+  registry.load_from_config(initial, "topology initial config");
+  auto *active_session = &registry.get(0);
+
+  auto changed_provider = initial;
+  changed_provider.transport.provider = "cpu_roce";
+  const auto provider_result =
+      registry.apply_config(changed_provider, "changed provider");
+  EXPECT_EQ(provider_result.state, ConfigApplyState::rejected);
+  EXPECT_NE(provider_result.message.find("restart required"),
+            std::string::npos);
+  EXPECT_EQ(&registry.get(0), active_session);
+
+  auto changed_args = initial;
+  changed_args.transport.args = {"--slot-size=512"};
+  const auto args_result =
+      registry.apply_config(changed_args, "changed provider arguments");
+  EXPECT_EQ(args_result.state, ConfigApplyState::rejected);
+  EXPECT_NE(args_result.message.find("restart required"), std::string::npos);
+  EXPECT_EQ(&registry.get(0), active_session);
+
+  bool lifecycle_called = false;
+  DeviceGraphLifecycle lifecycle;
+  lifecycle.stop = [&](uint64_t) {
+    lifecycle_called = true;
+    return true;
+  };
+  lifecycle.launch = [&](uint64_t, void *) {
+    lifecycle_called = true;
+    return true;
+  };
+  auto changed_dispatch = initial;
+  changed_dispatch.decoders.front().dispatch = DecoderDispatch::device_graph;
+  const auto dispatch_result =
+      registry.apply_config(changed_dispatch, "changed dispatch", lifecycle);
+  EXPECT_EQ(dispatch_result.state, ConfigApplyState::rejected);
+  EXPECT_NE(dispatch_result.message.find("restart required"),
+            std::string::npos);
+  EXPECT_FALSE(lifecycle_called);
+  EXPECT_EQ(&registry.get(0), active_session);
 }
 
 TEST(DecodingServerLiveConfig, DeviceGraphLaunchFailureCanRecover) {
@@ -897,7 +1037,7 @@ TEST(DecodingServerLiveConfig,
   EXPECT_EQ(&registry.get(1), unchanged_session);
 }
 
-TEST(DecodingServerLiveConfig, ReplacesHostDecoderWithoutRebindingRing) {
+TEST(DecodingServerLiveConfig, ReplacesHostDecoderWithDifferentDimensions) {
   const std::string path =
       ::testing::TempDir() + "/decoding_server_live_swap.yaml";
   ASSERT_TRUE(write_live_config(path, live_multi_error_lut_yaml()));
@@ -913,7 +1053,7 @@ TEST(DecodingServerLiveConfig, ReplacesHostDecoderWithoutRebindingRing) {
   ASSERT_EQ(before.size(), kRunShots);
   EXPECT_EQ(before[0], kExpectedCorrection);
 
-  ASSERT_TRUE(write_live_config(path, live_pymatching_yaml()));
+  ASSERT_TRUE(write_live_config(path, live_pymatching_size7_yaml()));
   ASSERT_TRUE(server.signalConfigApply());
   std::string applied;
   ASSERT_TRUE(
@@ -921,7 +1061,7 @@ TEST(DecodingServerLiveConfig, ReplacesHostDecoderWithoutRebindingRing) {
       << server.captured;
   EXPECT_EQ(server.port, original_port);
 
-  const auto after = cudaq::run(kRunShots, decoding_server_kernel);
+  const auto after = cudaq::run(kRunShots, decoding_server_kernel_size7);
   ASSERT_EQ(after.size(), kRunShots);
   EXPECT_EQ(after[0], kExpectedCorrection);
   EXPECT_GE(server.stopAndGetDispatchCount(), 6) << server.captured;
