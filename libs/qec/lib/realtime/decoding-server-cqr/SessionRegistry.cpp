@@ -14,28 +14,52 @@
 #include <fstream>
 #include <iterator>
 #include <stdexcept>
+#include <unordered_map>
+#include <vector>
 
 namespace cudaq::qec::decoding_server {
 
+using cudaq::qec::decoding::config::decoder_config;
 using cudaq::qec::decoding::config::multi_decoder_config;
 
 /// Build the default single-VP pass-through syndrome mapping table.
-/// mapping_id=0 → VP 0 → empty index list (pass-through)
-///
-/// An empty index list signals RoundAccumulator to copy bits directly without
-/// scatter.  This is correct for the nominal per-round enqueue pattern where
-/// the caller sends exactly the syndromes for one round and does not need
-/// index remapping.  An identity-sized index list would force every enqueue
-/// to provide exactly syndrome_size bits, which breaks per-round batching.
+/// mapping_id=0 -> VP 0 -> empty index list (pass-through)
 static SyndromeMappingTable make_default_mapping_table() {
   SyndromeMappingTable table;
-  table[0] = {{}}; // syndrome_mapping_id=0, VP 0, pass-through
+  table[0] = {{}};
   return table;
 }
 
-// ---------------------------------------------------------------------------
-// SessionRegistry
-// ---------------------------------------------------------------------------
+static std::unordered_map<uint64_t, const decoder_config *>
+index_config(const multi_decoder_config &config,
+             const std::string &source_name) {
+  if (config.decoders.empty())
+    throw std::runtime_error("No decoders in " + source_name);
+
+  config.validate_custom_args();
+  std::unordered_map<uint64_t, const decoder_config *> by_id;
+  for (const auto &dc : config.decoders) {
+    if (dc.id < 0)
+      throw std::runtime_error("Negative decoder id " + std::to_string(dc.id) +
+                               " in " + source_name);
+    const uint64_t id = static_cast<uint64_t>(dc.id);
+    if (!by_id.emplace(id, &dc).second)
+      throw std::runtime_error("Duplicate decoder id " + std::to_string(dc.id) +
+                               " in " + source_name);
+  }
+  return by_id;
+}
+
+std::unique_ptr<DecodingSession>
+SessionRegistry::make_session(const decoder_config &config) {
+  CUDA_QEC_INFO("SessionRegistry: creating decoder id={} type={}", config.id,
+                config.type);
+  auto decoder = cudaq::qec::decoding::host::create_realtime_decoder(config);
+  auto session =
+      DecodingSession::create(std::move(decoder), make_default_mapping_table());
+  session->start_worker();
+  return session;
+}
 
 void SessionRegistry::load_from_config(const std::string &yaml_path) {
   std::ifstream f(yaml_path);
@@ -49,45 +73,187 @@ void SessionRegistry::load_from_config(const std::string &yaml_path) {
 
 void SessionRegistry::load_from_config(const multi_decoder_config &config,
                                        const std::string &source_name) {
+  const auto by_id = index_config(config, source_name);
+  std::unordered_map<uint64_t, std::unique_ptr<DecodingSession>> next_sessions;
+  std::unordered_map<uint64_t, DecoderDispatch> next_dispatch;
+  DecoderDispatch first_dispatch = config.decoders.front().dispatch;
+  bool next_mixed = false;
+
   for (const auto &dc : config.decoders) {
-    if (dc.id < 0)
-      throw std::runtime_error("Negative decoder id " + std::to_string(dc.id) +
-                               " in " + source_name);
     const uint64_t id = static_cast<uint64_t>(dc.id);
-    if (sessions_.count(id))
-      throw std::runtime_error("Duplicate decoder id " + std::to_string(dc.id) +
-                               " in " + source_name);
-
-    // Record each decoder's dispatch shape.  Mixed shapes are allowed: the
-    // decoding_server process binds a consumer (host dispatcher or
-    // device-graph scheduler) per decoder; only the single-transceiver
-    // DecodingServer paths require uniformity (see required_dispatch()).
-    if (sessions_.empty())
-      dispatch_ = dc.dispatch;
-    else if (dc.dispatch != dispatch_)
-      mixed_ = true;
-    dispatch_by_id_[id] = dc.dispatch;
-
-    CUDA_QEC_INFO("SessionRegistry: creating decoder id={} type={}", dc.id,
-                  dc.type);
-
-    auto decoder = cudaq::qec::decoding::host::create_realtime_decoder(dc);
-    auto session = DecodingSession::create(std::move(decoder),
-                                           make_default_mapping_table());
-
-    // dc.dispatch (host / device_graph) is not consulted here: the mixed
-    // decoding_server binds each session to its ring consumer via
-    // dispatch_for(), and the split-transport DecodingServer constructor
-    // consumes the resulting dispatch map.
-    session->start_worker();
-    sessions_.emplace(id, std::move(session));
+    next_dispatch[id] = dc.dispatch;
+    next_mixed = next_mixed || dc.dispatch != first_dispatch;
+    next_sessions.emplace(id, make_session(dc));
   }
 
-  CUDA_QEC_INFO("SessionRegistry: loaded {} decoder session(s)",
-                sessions_.size());
+  sessions_ = std::move(next_sessions);
+  dispatch_by_id_ = std::move(next_dispatch);
+  unavailable_ids_.clear();
+  active_config_ = config;
+  dispatch_ = first_dispatch;
+  mixed_ = next_mixed;
+  loaded_ = true;
+
+  CUDA_QEC_INFO("SessionRegistry: loaded {} decoder session(s)", by_id.size());
+}
+
+ConfigApplyResult
+SessionRegistry::apply_config(const multi_decoder_config &config,
+                              const std::string &source_name,
+                              const DeviceGraphLifecycle &dg_lifecycle) {
+  if (!loaded_)
+    return {ConfigApplyState::rejected,
+            "decoder registry has not completed initial configuration"};
+
+  std::unordered_map<uint64_t, const decoder_config *> next_by_id;
+  std::unordered_map<uint64_t, const decoder_config *> active_by_id;
+  try {
+    next_by_id = index_config(config, source_name);
+    active_by_id = index_config(active_config_, "active config");
+  } catch (const std::exception &e) {
+    return {ConfigApplyState::rejected, e.what()};
+  }
+
+  if (config.transport != active_config_.transport)
+    return {ConfigApplyState::rejected,
+            "restart required: transport provider or arguments changed"};
+  if (next_by_id.size() != dispatch_by_id_.size())
+    return {ConfigApplyState::rejected,
+            "restart required: decoder id set changed"};
+
+  bool changed = !unavailable_ids_.empty();
+  std::unordered_set<uint64_t> changed_host_ids;
+  std::unordered_set<uint64_t> changed_device_graph_ids;
+  for (const auto &[id, dispatch] : dispatch_by_id_) {
+    const auto next_it = next_by_id.find(id);
+    const auto active_it = active_by_id.find(id);
+    if (next_it == next_by_id.end() || active_it == active_by_id.end())
+      return {ConfigApplyState::rejected,
+              "restart required: decoder id set changed"};
+    if (next_it->second->dispatch != dispatch)
+      return {ConfigApplyState::rejected,
+              "restart required: dispatch shape changed for decoder " +
+                  std::to_string(id)};
+    if (dispatch == DecoderDispatch::device_graph &&
+        next_it->second->cuda_device_id != active_it->second->cuda_device_id)
+      return {
+          ConfigApplyState::rejected,
+          "restart required: CUDA device changed for device_graph decoder " +
+              std::to_string(id)};
+    const bool decoder_changed =
+        unavailable_ids_.count(id) || *next_it->second != *active_it->second;
+    if (decoder_changed) {
+      if (dispatch == DecoderDispatch::host)
+        changed_host_ids.insert(id);
+      else
+        changed_device_graph_ids.insert(id);
+    }
+    changed = changed || decoder_changed;
+  }
+
+  if (!changed)
+    return {ConfigApplyState::unchanged, "configuration is already active"};
+
+  if (!changed_device_graph_ids.empty() &&
+      (!dg_lifecycle.stop || !dg_lifecycle.launch))
+    return {ConfigApplyState::rejected,
+            "device_graph live reload requires scheduler lifecycle support"};
+
+  // Stop every changed device scheduler before releasing the graph resources
+  // it references. The provider and its ring allocation remain alive.
+  for (const auto id : changed_device_graph_ids) {
+    if (sessions_.count(id) && !dg_lifecycle.stop(id))
+      return {ConfigApplyState::rejected,
+              "device_graph scheduler stop failed for decoder " +
+                  std::to_string(id)};
+  }
+
+  // Release old decoder resources before constructing replacements. This
+  // avoids a temporary double allocation for large GPU-backed decoders. The
+  // caller owns the exclusive lifecycle lock, so no request can acquire a
+  // session while this transition is in progress.
+  std::unordered_map<uint64_t, std::unique_ptr<DecodingSession>> retired;
+  for (const auto &entry : dispatch_by_id_) {
+    const auto id = entry.first;
+    if (!changed_host_ids.count(id) && !changed_device_graph_ids.count(id))
+      continue;
+    unavailable_ids_.insert(id);
+    auto it = sessions_.find(id);
+    if (it != sessions_.end()) {
+      retired.emplace(id, std::move(it->second));
+      sessions_.erase(it);
+    }
+  }
+  for (auto &[id, session] : retired)
+    session->stop_worker();
+  retired.clear();
+
+  std::unordered_map<uint64_t, std::unique_ptr<DecodingSession>> replacements;
+  try {
+    for (const auto &dc : config.decoders) {
+      const uint64_t id = static_cast<uint64_t>(dc.id);
+      if (!changed_host_ids.count(id) && !changed_device_graph_ids.count(id))
+        continue;
+      replacements.emplace(id, make_session(dc));
+    }
+  } catch (const std::exception &e) {
+    const char *kind = changed_device_graph_ids.empty()
+                           ? "host decoder construction failed: "
+                           : "decoder construction failed: ";
+    return {ConfigApplyState::awaiting_config, std::string(kind) + e.what()};
+  } catch (...) {
+    return {ConfigApplyState::awaiting_config,
+            "decoder construction failed with a non-standard exception"};
+  }
+
+  // Commit replacement ownership before launching. The launch path is then
+  // allocation-free; on failure, stop the scheduler before erasing any graph
+  // resource it may reference.
+  std::vector<uint64_t> replacement_ids;
+  replacement_ids.reserve(replacements.size());
+  for (auto &[id, session] : replacements) {
+    sessions_.emplace(id, std::move(session));
+    replacement_ids.push_back(id);
+  }
+
+  try {
+    for (const auto id : changed_device_graph_ids) {
+      auto &session = sessions_.at(id);
+      // The lifecycle owner validates the opaque resource. This keeps the
+      // registry transport-agnostic and permits hardware-free lifecycle tests.
+      if (!dg_lifecycle.launch(id, session->graph_resources.get()))
+        throw std::runtime_error("scheduler launch failed for decoder " +
+                                 std::to_string(id));
+    }
+  } catch (const std::exception &e) {
+    for (const auto id : changed_device_graph_ids)
+      dg_lifecycle.stop(id);
+    for (const auto id : replacement_ids)
+      sessions_.erase(id);
+    return {ConfigApplyState::awaiting_config,
+            std::string("device_graph scheduler launch failed: ") + e.what()};
+  } catch (...) {
+    for (const auto id : changed_device_graph_ids)
+      dg_lifecycle.stop(id);
+    for (const auto id : replacement_ids)
+      sessions_.erase(id);
+    return {ConfigApplyState::awaiting_config,
+            "device_graph scheduler launch failed with a non-standard "
+            "exception"};
+  }
+
+  for (const auto id : replacement_ids)
+    unavailable_ids_.erase(id);
+  active_config_ = config;
+  CUDA_QEC_INFO("SessionRegistry: live config applied to {} session(s)",
+                replacement_ids.size());
+  return {ConfigApplyState::applied, "decoder sessions replaced"};
 }
 
 DecodingSession &SessionRegistry::get(uint64_t decoder_id) {
+  if (unavailable_ids_.count(decoder_id))
+    throw SessionNotReady("Decoder " + std::to_string(decoder_id) +
+                          " is awaiting a valid live configuration");
   auto it = sessions_.find(decoder_id);
   if (it == sessions_.end())
     throw std::out_of_range("Unknown decoder_id: " +
@@ -96,6 +262,9 @@ DecodingSession &SessionRegistry::get(uint64_t decoder_id) {
 }
 
 const DecodingSession &SessionRegistry::get(uint64_t decoder_id) const {
+  if (unavailable_ids_.count(decoder_id))
+    throw SessionNotReady("Decoder " + std::to_string(decoder_id) +
+                          " is awaiting a valid live configuration");
   auto it = sessions_.find(decoder_id);
   if (it == sessions_.end())
     throw std::out_of_range("Unknown decoder_id: " +

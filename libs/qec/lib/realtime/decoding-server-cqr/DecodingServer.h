@@ -15,6 +15,7 @@
 
 #include <atomic>
 #include <memory>
+#include <shared_mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -25,7 +26,7 @@ namespace cudaq::qec::decoding_server {
 /// cuda_device_id (-1 when unpinned). An unpinned decoder defaults to device 0.
 int resolve_decode_device(int decoder_pin);
 
-/// Maps function_id → non-owning ITransceiver pointer.
+/// Maps function_id -> non-owning ITransceiver pointer.
 /// Ownership lives in DecodingServer::owned_transports_.
 using TransportMap = std::unordered_map<uint32_t, ITransceiver *>;
 
@@ -84,6 +85,14 @@ public:
   /// (test/diagnostic evidence; callers gate on QEC_DECODING_SERVER_STATS).
   void print_session_stats() const;
 
+  /// Apply a decoder configuration without rebinding process-owned transports
+  /// or per-decoder rings. Requests fail fast with NOT_READY while the apply
+  /// owns the lifecycle lock. See SessionRegistry::apply_config for the
+  /// topology and device_graph restrictions.
+  ConfigApplyResult
+  apply_config(const cudaq::qec::decoding::config::multi_decoder_config &config,
+               const std::string &source_name = "<live-config>");
+
 private:
   void init(const std::string &config_yaml);
   void register_handlers();
@@ -113,8 +122,10 @@ private:
   // registry_ must be declared BEFORE owned_transports_.
   SessionRegistry registry_;
   RpcDispatcher dispatcher_;
+  mutable std::shared_mutex lifecycle_mutex_;
+  std::atomic<bool> applying_config_{false};
   std::atomic<bool> shutdown_{false};
-  /// Maps function_id → transceiver; used to deduplicate receiver threads.
+  /// Maps function_id -> transceiver; used to deduplicate receiver threads.
   /// Routing within the server is by function_id, not by decoder_id.
   TransportMap function_transport_;
   std::vector<std::unique_ptr<ITransceiver>> owned_transports_;

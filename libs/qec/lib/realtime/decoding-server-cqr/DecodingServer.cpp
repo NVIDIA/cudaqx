@@ -17,6 +17,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <mutex>
 #include <stdexcept>
 #include <thread>
 #include <vector>
@@ -87,7 +88,7 @@ DecodingServer::make_transport(DecoderDispatch dispatch,
 
 DecodingServer::DecodingServer(const std::string &config_yaml) {
   // Parse the YAML once: SessionRegistry validates the decoder entries
-  // (including the uniform-dispatch rule — MVP limitation: heterogeneous
+  // (including the uniform-dispatch rule -- MVP limitation: heterogeneous
   // deployments require per-session transceiver binding, deferred to a
   // follow-up once CpuRoce/DeviceGraphTransceiverAdapter are available) and
   // required_dispatch() then drives transceiver creation.
@@ -196,6 +197,7 @@ DecodingServer::DecodingServer(std::vector<std::unique_ptr<ITransceiver>> owned,
 }
 
 void *DecodingServer::graph_resources_for(uint64_t decoder_id) const {
+  std::shared_lock lifecycle_guard(lifecycle_mutex_);
   const auto &sessions = registry_.sessions();
   const auto iter = sessions.find(decoder_id);
   if (iter == sessions.end() || !iter->second->graph_resources)
@@ -213,7 +215,7 @@ DecodingServer::~DecodingServer() {
 }
 
 // ---------------------------------------------------------------------------
-// init — load sessions and register RPC handlers
+// init -- load sessions and register RPC handlers
 // ---------------------------------------------------------------------------
 
 void DecodingServer::init(const std::string &config_yaml) {
@@ -235,12 +237,22 @@ void DecodingServer::install_direct_dispatch() {
 }
 
 void DecodingServer::register_handlers() {
-  // enqueue_syndromes — fire-and-forget at the RPC level; the transport
+  // enqueue_syndromes -- fire-and-forget at the RPC level; the transport
   // layer ACKs delivery (ACCEPTED), and a queue-full drop is reported both
   // here and at the next get_corrections.
   dispatcher_.register_handler(
       kEnqueueSyndromesFunctionId,
       [this](RxFrame frame, ResponseWriter &writer) {
+        if (applying_config_.load(std::memory_order_acquire)) {
+          writer.write_error(RpcStatus::NOT_READY);
+          return;
+        }
+        std::shared_lock lifecycle_guard(lifecycle_mutex_, std::try_to_lock);
+        if (!lifecycle_guard.owns_lock() ||
+            applying_config_.load(std::memory_order_acquire)) {
+          writer.write_error(RpcStatus::NOT_READY);
+          return;
+        }
         if (frame.buf.size() <
             sizeof(RPCHeader) + sizeof(EnqueueRequestPayload)) {
           writer.write_error(RpcStatus::BAD_REQUEST);
@@ -268,9 +280,19 @@ void DecodingServer::register_handlers() {
         }
       });
 
-  // get_corrections — response sent by the worker thread.
+  // get_corrections -- response sent by the worker thread.
   dispatcher_.register_handler(
       kGetCorrectionsFunctionId, [this](RxFrame frame, ResponseWriter &writer) {
+        if (applying_config_.load(std::memory_order_acquire)) {
+          writer.write_error(RpcStatus::NOT_READY);
+          return;
+        }
+        std::shared_lock lifecycle_guard(lifecycle_mutex_, std::try_to_lock);
+        if (!lifecycle_guard.owns_lock() ||
+            applying_config_.load(std::memory_order_acquire)) {
+          writer.write_error(RpcStatus::NOT_READY);
+          return;
+        }
         if (frame.buf.size() <
             sizeof(RPCHeader) + sizeof(GetCorrectionsRequestPayload)) {
           writer.write_error(RpcStatus::BAD_REQUEST);
@@ -296,9 +318,19 @@ void DecodingServer::register_handlers() {
           writer.write_error(RpcStatus::BUSY);
       });
 
-  // reset_decoder — response sent by the worker thread.
+  // reset_decoder -- response sent by the worker thread.
   dispatcher_.register_handler(
       kResetDecoderFunctionId, [this](RxFrame frame, ResponseWriter &writer) {
+        if (applying_config_.load(std::memory_order_acquire)) {
+          writer.write_error(RpcStatus::NOT_READY);
+          return;
+        }
+        std::shared_lock lifecycle_guard(lifecycle_mutex_, std::try_to_lock);
+        if (!lifecycle_guard.owns_lock() ||
+            applying_config_.load(std::memory_order_acquire)) {
+          writer.write_error(RpcStatus::NOT_READY);
+          return;
+        }
         if (frame.buf.size() <
             sizeof(RPCHeader) + sizeof(ResetRequestPayload)) {
           writer.write_error(RpcStatus::BAD_REQUEST);
@@ -352,7 +384,7 @@ void DecodingServer::run() {
   CUDA_QEC_INFO("DecodingServer: starting {} receiver thread(s)",
                 unique_transports.size());
 
-  // All threads share dispatcher_ — routing is by function_id, not transport.
+  // All threads share dispatcher_ -- routing is by function_id, not transport.
   std::vector<std::thread> recv_threads;
   recv_threads.reserve(unique_transports.size());
   for (ITransceiver *t : unique_transports) {
@@ -374,6 +406,7 @@ void DecodingServer::run() {
 }
 
 void DecodingServer::print_session_stats() const {
+  std::shared_lock lifecycle_guard(lifecycle_mutex_);
   for (const auto &[id, session] : registry_.sessions()) {
     std::cout << "QEC_DECODING_SERVER_DECODER_STATS id=" << id
               << " decodes=" << session->decode_count.load()
@@ -382,6 +415,36 @@ void DecodingServer::print_session_stats() const {
               << " resets=" << session->reset_count.load()
               << " errors=" << session->error_count.load() << std::endl;
   }
+}
+
+ConfigApplyResult DecodingServer::apply_config(
+    const cudaq::qec::decoding::config::multi_decoder_config &config,
+    const std::string &source_name) {
+  bool expected = false;
+  if (!applying_config_.compare_exchange_strong(
+          expected, true, std::memory_order_acq_rel, std::memory_order_acquire))
+    return {ConfigApplyState::busy, "another config apply is in progress"};
+  struct ResetApplyFlag {
+    std::atomic<bool> &flag;
+    ~ResetApplyFlag() { flag.store(false, std::memory_order_release); }
+  } reset_flag{applying_config_};
+
+  // Once applying_config_ is visible, new handlers fail fast. Wait only for
+  // handlers already between admission and queue insertion, then drain and
+  // replace their sessions under exclusive ownership.
+  std::unique_lock lifecycle_guard(lifecycle_mutex_);
+  DeviceGraphLifecycle dg_lifecycle;
+  dg_lifecycle.stop = [this](uint64_t) {
+    if (owned_transports_.size() != 1)
+      return false;
+    return owned_transports_.front()->stop_device_scheduler();
+  };
+  dg_lifecycle.launch = [this](uint64_t, void *graph_resources) {
+    if (!graph_resources || owned_transports_.size() != 1)
+      return false;
+    return owned_transports_.front()->launch_device_scheduler(graph_resources);
+  };
+  return registry_.apply_config(config, source_name, dg_lifecycle);
 }
 
 void DecodingServer::stop() {

@@ -46,6 +46,7 @@
 #include <cstdio>
 #include <cstring>
 #include <map>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -129,12 +130,73 @@ TEST(CqrTransceiverTest, AcceptsAnExactlySizedEnqueueRequestPayload) {
   EXPECT_EQ(response->status, 0);
 }
 
+TEST(CqrTransceiverTest, RejectsResponseBeyondReportedSlot) {
+  using namespace cudaq::qec::decoding::rpc;
+  using namespace cudaq::qec::decoding_server;
+
+  constexpr std::size_t slot_size =
+      sizeof(cudaq::realtime::RPCHeader) + sizeof(GetCorrectionsRequestPayload);
+  std::array<uint8_t, slot_size> rx{};
+  std::array<uint8_t, slot_size> tx{};
+
+  auto *header = reinterpret_cast<cudaq::realtime::RPCHeader *>(rx.data());
+  header->magic = cudaq::realtime::RPC_MAGIC_REQUEST;
+  header->function_id = kGetCorrectionsFunctionId;
+  header->arg_len = sizeof(GetCorrectionsRequestPayload);
+  header->request_id = 31;
+
+  CqrTransceiver transceiver;
+  ASSERT_TRUE(transceiver.install_dispatch_sink([&](RxFrame frame) {
+    std::vector<uint8_t> oversized(slot_size + 1);
+    auto *response =
+        reinterpret_cast<cudaq::realtime::RPCResponse *>(oversized.data());
+    response->magic = cudaq::realtime::RPC_MAGIC_RESPONSE;
+    response->request_id =
+        reinterpret_cast<const cudaq::realtime::RPCHeader *>(frame.buf.data())
+            ->request_id;
+    transceiver.send(PeerId{}, oversized.data(), oversized.size());
+  }));
+
+  transceiver.inject(rx.data(), tx.data(), slot_size,
+                     kGetCorrectionsFunctionId);
+
+  const auto *written =
+      reinterpret_cast<const cudaq::realtime::RPCResponse *>(tx.data());
+  EXPECT_EQ(written->magic, cudaq::realtime::RPC_MAGIC_RESPONSE);
+  EXPECT_EQ(written->status, static_cast<int32_t>(RpcStatus::INTERNAL_ERROR));
+  EXPECT_EQ(written->result_len, 0u);
+  EXPECT_EQ(written->request_id, header->request_id);
+}
+
 __qpu__ std::int64_t decoding_server_kernel() {
   constexpr std::uint64_t kKernelDecoderId = 0;
   constexpr std::uint64_t kKernelBlockSize = 3;
   constexpr std::uint64_t kKernelSyndromeSize = 3;
   constexpr std::uint64_t kKernelSyndromeTag = 1;
   constexpr std::size_t kKernelActiveSyndromeIndex = 1;
+
+  cudaq::qec::decoding::reset_decoder(/*decoder_id=*/kKernelDecoderId);
+
+  std::vector<bool> syndrome(kKernelSyndromeSize);
+  for (std::size_t i = 0; i < kKernelSyndromeSize; ++i)
+    syndrome[i] = false;
+  syndrome[kKernelActiveSyndromeIndex] = true;
+  cudaq::qec::decoding::enqueue_syndromes_test(
+      /*decoder_id=*/kKernelDecoderId, syndrome, /*tag=*/kKernelSyndromeTag);
+
+  auto corrections = cudaq::qec::decoding::get_corrections(
+      /*decoder_id=*/kKernelDecoderId, /*return_size=*/kKernelBlockSize,
+      /*reset=*/true);
+  return corrections[kKernelActiveSyndromeIndex] ? std::int64_t{1}
+                                                 : std::int64_t{0};
+}
+
+__qpu__ std::int64_t decoding_server_kernel_size7() {
+  constexpr std::uint64_t kKernelDecoderId = 0;
+  constexpr std::uint64_t kKernelBlockSize = 7;
+  constexpr std::uint64_t kKernelSyndromeSize = 7;
+  constexpr std::uint64_t kKernelSyndromeTag = 1;
+  constexpr std::size_t kKernelActiveSyndromeIndex = 5;
 
   cudaq::qec::decoding::reset_decoder(/*decoder_id=*/kKernelDecoderId);
 
@@ -253,6 +315,18 @@ public:
       }
     }
     return true;
+  }
+
+  bool signalConfigApply() const {
+#ifdef SIGHUP
+    return pid > 0 && ::kill(pid, SIGHUP) == 0;
+#else
+    return false;
+#endif
+  }
+
+  bool waitForLine(const char *prefix, int timeout_ms, std::string &line) {
+    return readLineWithPrefix(prefix, timeout_ms, line);
   }
 
   // Terminate the server and return its dispatched-request count (-1 if the
@@ -694,4 +768,195 @@ TEST(DecodingServerTwoProcess, TwoProcessPerDecoderRings) {
                                           << server.captured;
   EXPECT_GE(server.ring_dispatched[1], 3) << "ring 1 idle; server output:\n"
                                           << server.captured;
+}
+namespace {
+
+std::string live_pymatching_yaml(int64_t decoder_id = 0,
+                                 bool impossible_device = false) {
+  std::ostringstream yaml;
+  yaml << "decoders:\n"
+       << "  - id: " << decoder_id << "\n"
+       << "    type: pymatching\n"
+       << "    block_size: 3\n"
+       << "    syndrome_size: 3\n";
+  if (impossible_device)
+    yaml << "    cuda_device_id: 1048576\n";
+  yaml << "    H_sparse: [0, -1, 1, -1, 2, -1]\n"
+       << "    O_sparse: [0, -1, 1, -1, 2, -1]\n"
+       << "    D_sparse: [0, -1, 1, -1, 2, -1]\n"
+       << "    decoder_custom_args:\n"
+       << "      merge_strategy: smallest_weight\n"
+       << "      error_rate_vec: [0.1, 0.1, 0.1]\n";
+  return yaml.str();
+}
+
+std::string live_multi_error_lut_yaml(int lut_error_depth = 1,
+                                      bool device_graph = false) {
+  std::ostringstream yaml;
+  yaml << "decoders:\n"
+       << "  - id: 0\n"
+       << "    type: multi_error_lut\n";
+  if (device_graph)
+    yaml << "    dispatch: device_graph\n";
+  yaml << "    block_size: 3\n"
+       << "    syndrome_size: 3\n"
+       << "    H_sparse: [0, -1, 1, -1, 2, -1]\n"
+       << "    O_sparse: [0, -1, 1, -1, 2, -1]\n"
+       << "    D_sparse: [0, -1, 1, -1, 2, -1]\n"
+       << "    decoder_custom_args:\n"
+       << "      lut_error_depth: " << lut_error_depth << "\n";
+  return yaml.str();
+}
+
+std::string live_pymatching_size7_yaml() {
+  return R"yaml(decoders:
+  - id: 0
+    type: pymatching
+    block_size: 7
+    syndrome_size: 7
+    H_sparse: [0, -1, 1, -1, 2, -1, 3, -1, 4, -1, 5, -1, 6, -1]
+    O_sparse: [0, -1, 1, -1, 2, -1, 3, -1, 4, -1, 5, -1, 6, -1]
+    D_sparse: [0, -1, 1, -1, 2, -1, 3, -1, 4, -1, 5, -1, 6, -1]
+    decoder_custom_args:
+      merge_strategy: smallest_weight
+      error_rate_vec: [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1]
+)yaml";
+}
+
+bool write_live_config(const std::string &path, const std::string &yaml) {
+  std::ofstream file(path, std::ios::trunc);
+  file << yaml;
+  return file.good();
+}
+
+void initialize_live_config_client(std::uint16_t port,
+                                   RealtimeGuard &realtime_guard) {
+  std::vector<std::string> args = {"test_decoding_server"};
+  for (auto &arg : channel_arguments(port))
+    args.push_back(std::move(arg));
+  std::vector<char *> argv;
+  for (auto &arg : args)
+    argv.push_back(arg.data());
+  argv.push_back(nullptr);
+  int argc = static_cast<int>(args.size());
+  cudaq::realtime::initialize(argc, argv.data());
+  realtime_guard.armed = true;
+}
+
+} // namespace
+
+TEST(DecodingServerLiveConfig, ReplacesHostDecoderWithDifferentDimensions) {
+  const std::string path =
+      ::testing::TempDir() + "/decoding_server_live_swap.yaml";
+  ASSERT_TRUE(write_live_config(path, live_multi_error_lut_yaml()));
+
+  ServerProcess server;
+  std::string error;
+  ASSERT_TRUE(server.start(path, error)) << error;
+  const auto original_port = server.port;
+  RealtimeGuard realtime_guard;
+  initialize_live_config_client(server.port, realtime_guard);
+
+  const auto before = cudaq::run(kRunShots, decoding_server_kernel);
+  ASSERT_EQ(before.size(), kRunShots);
+  EXPECT_EQ(before[0], kExpectedCorrection);
+
+  ASSERT_TRUE(write_live_config(path, live_pymatching_size7_yaml()));
+  ASSERT_TRUE(server.signalConfigApply());
+  std::string applied;
+  ASSERT_TRUE(
+      server.waitForLine("QEC_DECODING_SERVER_CONFIG_APPLIED", 15000, applied))
+      << server.captured;
+  EXPECT_EQ(server.port, original_port);
+
+  const auto after = cudaq::run(kRunShots, decoding_server_kernel_size7);
+  ASSERT_EQ(after.size(), kRunShots);
+  EXPECT_EQ(after[0], kExpectedCorrection);
+  EXPECT_GE(server.stopAndGetDispatchCount(), 6) << server.captured;
+}
+
+TEST(DecodingServerLiveConfig, RejectsInvalidYamlAndKeepsOldDecoder) {
+  const std::string path =
+      ::testing::TempDir() + "/decoding_server_live_invalid.yaml";
+  ASSERT_TRUE(write_live_config(path, live_pymatching_yaml()));
+
+  ServerProcess server;
+  std::string error;
+  ASSERT_TRUE(server.start(path, error)) << error;
+  RealtimeGuard realtime_guard;
+  initialize_live_config_client(server.port, realtime_guard);
+
+  ASSERT_TRUE(write_live_config(path, "decoders: [\n"));
+  ASSERT_TRUE(server.signalConfigApply());
+  std::string rejected;
+  ASSERT_TRUE(server.waitForLine("QEC_DECODING_SERVER_CONFIG_REJECTED", 10000,
+                                 rejected))
+      << server.captured;
+  EXPECT_NE(rejected.find("old_config_active"), std::string::npos);
+
+  const auto result = cudaq::run(kRunShots, decoding_server_kernel);
+  ASSERT_EQ(result.size(), kRunShots);
+  EXPECT_EQ(result[0], kExpectedCorrection);
+  EXPECT_GE(server.stopAndGetDispatchCount(), 3) << server.captured;
+}
+
+TEST(DecodingServerLiveConfig, RejectsRingTopologyChanges) {
+  const std::string path =
+      ::testing::TempDir() + "/decoding_server_live_topology.yaml";
+  ASSERT_TRUE(write_live_config(path, live_pymatching_yaml()));
+
+  ServerProcess server;
+  std::string error;
+  ASSERT_TRUE(server.start(path, error)) << error;
+  RealtimeGuard realtime_guard;
+  initialize_live_config_client(server.port, realtime_guard);
+
+  ASSERT_TRUE(write_live_config(path, live_pymatching_yaml(/*decoder_id=*/1)));
+  ASSERT_TRUE(server.signalConfigApply());
+  std::string rejected;
+  ASSERT_TRUE(server.waitForLine("QEC_DECODING_SERVER_CONFIG_REJECTED", 10000,
+                                 rejected))
+      << server.captured;
+  EXPECT_NE(rejected.find("restart required"), std::string::npos) << rejected;
+
+  const auto result = cudaq::run(kRunShots, decoding_server_kernel);
+  ASSERT_EQ(result.size(), kRunShots);
+  EXPECT_EQ(result[0], kExpectedCorrection);
+  EXPECT_GE(server.stopAndGetDispatchCount(), 3) << server.captured;
+}
+
+TEST(DecodingServerLiveConfig, ConstructionFailureCanRecoverOnLaterApply) {
+  const std::string path =
+      ::testing::TempDir() + "/decoding_server_live_recover.yaml";
+  ASSERT_TRUE(write_live_config(path, live_pymatching_yaml()));
+
+  ServerProcess server;
+  std::string error;
+  ASSERT_TRUE(server.start(path, error)) << error;
+  RealtimeGuard realtime_guard;
+  initialize_live_config_client(server.port, realtime_guard);
+
+  ASSERT_TRUE(write_live_config(
+      path, live_pymatching_yaml(/*decoder_id=*/0,
+                                 /*impossible_device=*/true)));
+  ASSERT_TRUE(server.signalConfigApply());
+  std::string failed;
+  ASSERT_TRUE(
+      server.waitForLine("QEC_DECODING_SERVER_CONFIG_FAILED", 10000, failed))
+      << server.captured;
+  EXPECT_NE(failed.find("awaiting_config"), std::string::npos) << failed;
+  EXPECT_THROW((void)cudaq::run(kRunShots, decoding_server_kernel),
+               std::exception);
+
+  ASSERT_TRUE(write_live_config(path, live_multi_error_lut_yaml()));
+  ASSERT_TRUE(server.signalConfigApply());
+  std::string applied;
+  ASSERT_TRUE(
+      server.waitForLine("QEC_DECODING_SERVER_CONFIG_APPLIED", 15000, applied))
+      << server.captured;
+
+  const auto recovered = cudaq::run(kRunShots, decoding_server_kernel);
+  ASSERT_EQ(recovered.size(), kRunShots);
+  EXPECT_EQ(recovered[0], kExpectedCorrection);
+  EXPECT_GE(server.stopAndGetDispatchCount(), 3) << server.captured;
 }

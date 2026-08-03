@@ -99,8 +99,8 @@ public:
   ~DeviceGraphTransceiver() override;
 
   /// Wire the DOCA ring buffers to the CUDAQ device-graph scheduler and launch
-  /// the GPU dispatch loop.  Must be called exactly once after the transceiver
-  /// is created and before `run()`.
+  /// the GPU dispatch loop. May be called again after stop_device_scheduler()
+  /// to bind a replacement decoder graph to the same provider rings.
   ///
   /// \p raw_graph_resources is the `void *` returned by
   /// `decoder::capture_decode_graph()`; it is cast internally to
@@ -112,6 +112,10 @@ public:
     launch_scheduler(raw_graph_resources);
     return true;
   }
+
+  /// Stop and destroy the scheduler without disconnecting the provider or
+  /// releasing its rings. Idempotent.
+  bool stop_device_scheduler() override;
 
   /// Block until shutdown() is called.  The GPU scheduler handles RX/TX;
   /// this method only satisfies the ITransceiver contract for DecodingServer.
@@ -149,6 +153,7 @@ private:
   // launch_scheduler; owns all scheduler-side CUDA state).
   std::unique_ptr<DeviceGraphRingConsumer> consumer_;
 
+  bool provider_launched_{false};
   std::atomic<bool> stopped_{false};
 };
 

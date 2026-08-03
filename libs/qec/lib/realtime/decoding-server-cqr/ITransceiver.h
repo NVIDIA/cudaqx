@@ -112,6 +112,10 @@ struct ITransceiver {
     return false;
   }
 
+  /// Stop and destroy only the device scheduler while preserving the
+  /// transport provider and its ring allocation.
+  virtual bool stop_device_scheduler() { return false; }
+
   virtual ~ITransceiver() = default;
 };
 
