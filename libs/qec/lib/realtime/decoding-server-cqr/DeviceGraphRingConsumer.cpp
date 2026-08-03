@@ -277,8 +277,13 @@ void DeviceGraphRingConsumer::shutdown() {
     if (device_pinned)
       cudaSetDevice(prev_device);
   }
-  if (shutdown_host_)
+  if (shutdown_host_) {
     __atomic_store_n(shutdown_host_, 1, __ATOMIC_RELEASE);
+    // The device scheduler polls this mapped host-memory flag. In particular
+    // on weakly ordered ARM hosts, publish the store before waiting for the
+    // self-relaunch chain to drain in the destructor.
+    __sync_synchronize();
+  }
 }
 
 std::uint64_t DeviceGraphRingConsumer::dispatched() const {
