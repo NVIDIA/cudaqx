@@ -359,11 +359,7 @@ std::unique_ptr<cudaq::qec::decoder> create_realtime_decoder(
   CUDA_QEC_INFO("Creating decoder {} of type {}", decoder_config.id,
                 decoder_config.type);
 
-  // decoder_inputs is a shared-state handle, so this copy is O(1) and keeps D
-  // readable after the original is moved into the factory. Copying the matrix
-  // itself would deep-copy its index vectors for no reason.
-  const cudaq::qec::decoder_inputs inputs_handle = inputs;
-  if (!inputs_handle.measurement_to_detectors())
+  if (!inputs.measurement_to_detectors())
     throw std::runtime_error(
         "resolved decoder inputs carry no measurement-to-detector map");
   auto decoder =
@@ -371,11 +367,6 @@ std::unique_ptr<cudaq::qec::decoder> create_realtime_decoder(
                               cudaq::qec::decoder_output::observables,
                               prepare_decoder_params(decoder_config));
   decoder->set_decoder_id(decoder_config.id);
-  // O already reached the decoder through the construction inputs; the base
-  // sized its corrections buffer from them at construction. D still drives the
-  // realtime buffer allocation, so it is handed over again here, as the same
-  // matrix the inputs carry.
-  decoder->set_D_sparse(*inputs_handle.measurement_to_detectors());
 
   // Force plugin initialization before the caller publishes the decoder for
   // realtime work. This preserves configure_decoders()'s existing behavior.

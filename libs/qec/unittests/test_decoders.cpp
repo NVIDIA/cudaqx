@@ -32,8 +32,8 @@ public:
     return {true, std::vector<cudaq::qec::float_t>(block_size, 0.0)};
   }
 
-  std::size_t configured_observable_rows() const { return O_sparse.size(); }
-  std::size_t configured_measurement_rows() const { return D_sparse.size(); }
+  using cudaq::qec::decoder::get_num_msyn_per_decode;
+  using cudaq::qec::decoder::get_num_observables;
 };
 
 class observable_output_probe final : public cudaq::qec::decoder {
@@ -111,15 +111,13 @@ TEST(DecoderInputs, PreservesMatrixShapesAndMeasurementMap) {
   EXPECT_EQ(materialized.observables_flips_matrix.at({1, 2}), 0);
 
   auto decoder = cudaq::qec::get_decoder("sample_decoder", inputs);
+  // Both come from the model handed to the factory; there is no second way to
+  // supply either, so they cannot disagree with it.
   EXPECT_EQ(decoder->get_num_observables(), 3);
-  decoder->set_D_sparse(*inputs.measurement_to_detectors());
   EXPECT_EQ(decoder->get_num_msyn_per_decode(), 5);
-  EXPECT_THROW(
-      decoder->set_O_sparse(std::vector<std::vector<std::uint32_t>>{{0}, {2}}),
-      std::invalid_argument);
 }
 
-TEST(DecoderInputs, BaseConstructionUsesMetadataWithoutMaterializingMatrices) {
+TEST(DecoderInputs, BaseConstructionSizesRealtimeStateFromTheModel) {
   using matrix = cudaq::qec::sparse_binary_matrix;
   auto H = matrix::from_nested_csc(2, 3, {{0}, {0, 1}, {1}});
   auto O = matrix::from_nested_csr(3, 3, {{0}, {}, {2}});
@@ -128,20 +126,19 @@ TEST(DecoderInputs, BaseConstructionUsesMetadataWithoutMaterializingMatrices) {
   decoder_inputs_probe decoder(
       cudaq::qec::decoder_inputs(std::move(H), std::move(O), {}, std::move(D)));
 
-  EXPECT_EQ(decoder.configured_observable_rows(), 0);
-  EXPECT_EQ(decoder.configured_measurement_rows(), 0);
+  // Construction derives every realtime size from the model. Nothing arrives
+  // later, so a decoder is usable the moment it exists.
   EXPECT_EQ(decoder.get_num_observables(), 3);
-  EXPECT_EQ(decoder.get_num_msyn_per_decode(), 0);
-  decoder.reset_decoder();
+  EXPECT_EQ(decoder.get_num_msyn_per_decode(), 5);
   const auto *corrections = decoder.get_obs_corrections();
   ASSERT_NE(corrections, nullptr);
   EXPECT_EQ(corrections[0], 0);
   EXPECT_EQ(corrections[1], 0);
   EXPECT_EQ(corrections[2], 0);
 
-  decoder.set_D_sparse(matrix::from_nested_csr(2, 5, {{0, 1}, {2, 3}}));
-  EXPECT_THROW(decoder.enqueue_syndrome(std::vector<std::uint8_t>(5, 0)),
-               std::runtime_error);
+  // A full measurement volume decodes with no further setup: the model gave
+  // the base everything the realtime path needs.
+  EXPECT_TRUE(decoder.enqueue_syndrome(std::vector<std::uint8_t>(5, 0)));
 }
 
 TEST(DecoderInputs, RawStimRemainsAuthoritative) {
@@ -394,7 +391,16 @@ TEST(SampleDecoder, RealtimeApiAndDefaultGraphHooks) {
   constexpr std::size_t block_size = 4;
   constexpr std::size_t syndrome_size = 2;
   cudaqx::tensor<uint8_t> H({syndrome_size, block_size});
-  auto decoder = cudaq::qec::decoder::get("sample_decoder", H);
+  // The whole model up front: three observables, and a D mapping three
+  // measurement bits onto the two detectors.
+  auto decoder = cudaq::qec::decoder::get(
+      "sample_decoder", cudaq::qec::decoder_inputs(
+                            cudaq::qec::sparse_binary_matrix(H),
+                            cudaq::qec::sparse_binary_matrix::from_nested_csr(
+                                3, block_size, {{0}, {}, {2}}),
+                            /*error_rates=*/{},
+                            cudaq::qec::sparse_binary_matrix::from_nested_csr(
+                                syndrome_size, 3, {{0, 1}, {2}})));
   ASSERT_NE(decoder, nullptr);
 
   // Plain decoders do not support graph dispatch, and their default graph
@@ -406,13 +412,9 @@ TEST(SampleDecoder, RealtimeApiAndDefaultGraphHooks) {
   decoder->set_decoder_id(7);
   EXPECT_EQ(decoder->get_decoder_id(), 7u);
 
-  decoder->set_D_sparse(std::vector<std::vector<uint32_t>>{{0, 1}, {2}});
+  // Both sizes come from the construction model; there is no reapplication
+  // path, so they cannot be changed under a live decoder.
   EXPECT_EQ(decoder->get_num_msyn_per_decode(), 3u);
-
-  // Reapply D and O through the flattened YAML-style representation to exercise
-  // the -1 row separators used by realtime configs.
-  decoder->set_D_sparse(std::vector<int64_t>{0, 1, -1, 2, -1});
-  decoder->set_O_sparse(std::vector<int64_t>{0, -1, -1, 2, -1});
   EXPECT_EQ(decoder->get_num_observables(), 3u);
 
   // Three measurement bits fill the D buffer and trigger a decode.
@@ -1355,11 +1357,11 @@ TEST(EnqueueSyndrome, ObsFrameDecoderUsesResultDirectly) {
       2, 4, std::vector<std::vector<std::uint32_t>>{{0}, {1}});
   auto dec = cudaq::qec::decoder::get(
       "observable_output_probe",
-      cudaq::qec::decoder_inputs(std::move(H), std::move(O)),
+      // D maps the two enqueued syndrome bits directly to two detector bits.
+      cudaq::qec::decoder_inputs(
+          std::move(H), std::move(O), /*error_rates=*/{},
+          cudaq::qec::sparse_binary_matrix::from_nested_csr(2, 2, {{0}, {1}})),
       cudaq::qec::decoder_output::observables);
-
-  // D_sparse maps the two enqueued syndrome bits directly to two detector bits.
-  dec->set_D_sparse(std::vector<std::vector<uint32_t>>{{0}, {1}});
 
   bool did_decode = dec->enqueue_syndrome(std::vector<uint8_t>{1, 0});
   EXPECT_TRUE(did_decode);
@@ -1380,10 +1382,10 @@ TEST(EnqueueSyndrome, ObsFrameMultiShotAccumulation) {
       2, 4, std::vector<std::vector<std::uint32_t>>{{0}, {1}});
   auto dec = cudaq::qec::decoder::get(
       "observable_output_probe",
-      cudaq::qec::decoder_inputs(std::move(H), std::move(O)),
+      cudaq::qec::decoder_inputs(
+          std::move(H), std::move(O), /*error_rates=*/{},
+          cudaq::qec::sparse_binary_matrix::from_nested_csr(2, 2, {{0}, {1}})),
       cudaq::qec::decoder_output::observables);
-
-  dec->set_D_sparse(std::vector<std::vector<uint32_t>>{{0}, {1}});
 
   // Shot 1: obs[0]=1, obs[1]=0 -> corrections become [1, 0]
   EXPECT_TRUE(dec->enqueue_syndrome(std::vector<uint8_t>{1, 0}));
@@ -1415,10 +1417,11 @@ TEST(EnqueueSyndrome, ObsFrameSizeMismatchThrows) {
       2, 4, std::vector<std::vector<std::uint32_t>>{{0}, {1}});
   auto dec = cudaq::qec::decoder::get(
       "observable_output_probe",
-      cudaq::qec::decoder_inputs(std::move(H), std::move(O)),
+      cudaq::qec::decoder_inputs(
+          std::move(H), std::move(O), /*error_rates=*/{},
+          cudaq::qec::sparse_binary_matrix::from_nested_csr(3, 3,
+                                                            {{0}, {1}, {2}})),
       cudaq::qec::decoder_output::observables);
-
-  dec->set_D_sparse(std::vector<std::vector<uint32_t>>{{0}, {1}, {2}});
   // sample_decoder returns all three detector bits as observables.
   EXPECT_THROW(dec->enqueue_syndrome(std::vector<uint8_t>{1, 0, 1}),
                std::runtime_error);
@@ -1445,13 +1448,20 @@ TEST(SlidingWindowDecoder, BaseStreamingCopiesFirstRoundDetectors) {
   auto H = cudaq::qec::sparse_binary_matrix(pcm);
   auto O =
       cudaq::qec::sparse_binary_matrix::from_csr(1, H.num_cols(), {0, 1}, {0});
+  // D spans every detector the model declares, as the model requires. Only the
+  // first-round layer references measurements, so one round of two bits fills
+  // the measurement volume and drives the first streamed layer.
+  std::vector<std::vector<std::uint32_t>> m2d(H.num_rows());
+  m2d[0] = {0};
+  m2d[1] = {1};
   auto decoder = cudaq::qec::decoder::get(
       "sliding_window",
-      cudaq::qec::decoder_inputs(std::move(H), std::move(O),
-                                 std::vector<double>(pcm.shape()[1], 0.1)),
+      cudaq::qec::decoder_inputs(
+          std::move(H), std::move(O), std::vector<double>(pcm.shape()[1], 0.1),
+          cudaq::qec::sparse_binary_matrix::from_nested_csr(
+              static_cast<std::uint32_t>(m2d.size()), 2, m2d)),
       cudaq::qec::decoder_output::observables, params);
   ASSERT_NE(decoder, nullptr);
-  decoder->set_D_sparse(std::vector<std::vector<uint32_t>>{{0}, {1}});
 
   std::vector<uint8_t> first_round = {1, 0};
   EXPECT_FALSE(decoder->enqueue_syndrome(first_round))

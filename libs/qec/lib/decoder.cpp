@@ -60,6 +60,14 @@ struct decoder::rt_impl {
 
   bool is_sliding_window = false;
 
+  /// Set once initialize_streaming_layout() runs, so a second call is rejected
+  /// rather than silently resetting buffers on a live decoder.
+  bool streaming_layout_initialized = false;
+
+  /// The model's measurement-to-detector map, by detector row. Empty when the
+  /// model supplies none, i.e. the decoder is handed detectors directly.
+  std::vector<std::vector<uint32_t>> measurement_to_detectors;
+
   /// The number of syndromes per round.  Only used for sliding window decoder.
   size_t num_syndromes_per_round = 0;
 
@@ -85,9 +93,22 @@ decoder::decoder(decoder_inputs inputs, decoder_output default_output)
       inputs_(std::move(inputs)), default_output_(default_output) {
   syndrome_size = inputs_.num_detectors();
   block_size = inputs_.num_error_mechanisms();
-  reset_decoder();
+
+  // Everything the realtime path needs that the model determines is sized
+  // here, from the model. Nothing arrives later: a decoder is usable as soon
+  // as it is constructed.
+  if (const auto *D = inputs_.measurement_to_detectors()) {
+    if (D->num_rows() != syndrome_size)
+      throw std::invalid_argument(fmt::format(
+          "measurement-to-detector map row count ({}) must match the model's "
+          "detector count ({})",
+          D->num_rows(), syndrome_size));
+    pimpl->measurement_to_detectors = D->to_nested_csr();
+    pimpl->num_msyn_per_decode = D->num_cols();
+  }
   pimpl->persistent_detector_buffer.resize(this->syndrome_size);
   pimpl->persistent_soft_detector_buffer.resize(this->syndrome_size);
+  reset_decoder();
 
   // We allow detailed logging of decoder stats via the CUDAQ_QEC_DEBUG_DECODER
   // environment variable or the CUDAQ_LOG_LEVEL=info environment variable. If
@@ -102,30 +123,22 @@ void decoder::project_errors_to_observables(
     const float_t *errors, float_t *observables,
     std::size_t observables_size) const {
   // Hot path: one call per shot on the realtime path. Sizes and O-row counts
-  // are fixed by construction (and by set_O_sparse for the legacy late-bound
-  // path), so they are not re-checked here.
+  // are fixed by construction, so they are not re-checked here. There is one
+  // observable model -- the one this decoder was constructed with -- so there
+  // is no second source to fall back to.
   if (observables_size > 0)
     std::fill(observables, observables + observables_size, float_t{0});
-  // Presence, not row count: a supplied zero-row O is a model that projects to
-  // no observables, which is different from having no observable model at all.
-  if (inputs_.has_observable_model()) {
-    const auto &O = inputs_.observable_flips_matrix();
-    assert(O.layout() == sparse_binary_matrix_layout::csr);
-    const auto &ptr = O.ptr();
-    const auto &indices = O.indices();
-    for (std::size_t row = 0; row < O.num_rows(); ++row) {
-      bool parity = false;
-      for (auto pos = ptr[row]; pos < ptr[row + 1]; ++pos)
-        parity ^= convert_soft_to_hard(errors[indices[pos]]);
-      observables[row] = static_cast<float_t>(parity);
-    }
+  if (!inputs_.has_observable_model())
     return;
-  }
 
-  for (std::size_t row = 0; row < O_sparse.size(); ++row) {
+  const auto &O = inputs_.observable_flips_matrix();
+  assert(O.layout() == sparse_binary_matrix_layout::csr);
+  const auto &ptr = O.ptr();
+  const auto &indices = O.indices();
+  for (std::size_t row = 0; row < O.num_rows(); ++row) {
     bool parity = false;
-    for (auto col : O_sparse[row])
-      parity ^= convert_soft_to_hard(errors[col]);
+    for (auto pos = ptr[row]; pos < ptr[row + 1]; ++pos)
+      parity ^= convert_soft_to_hard(errors[indices[pos]]);
     observables[row] = static_cast<float_t>(parity);
   }
 }
@@ -344,38 +357,6 @@ set_sparse_from_vec(const std::vector<int64_t> &vec_in,
     sparse_out.push_back(std::move(row));
 }
 
-void decoder::set_O_sparse(const std::vector<std::vector<uint32_t>> &O_sparse) {
-  // Presence, not row count: an explicitly supplied zero-row O is a model, and
-  // the late setter must not be able to silently replace it with a different
-  // row count.
-  if (inputs_.has_observable_model() &&
-      O_sparse.size() != inputs_.num_observables())
-    throw std::invalid_argument(
-        "O_sparse row count must match decoder_inputs observable count");
-  validate_sparse_column_indices(O_sparse, block_size, "O_sparse");
-  this->O_sparse = O_sparse;
-  this->pimpl->corrections.clear();
-  this->pimpl->corrections.resize(get_num_observables());
-  on_o_sparse_configured();
-}
-
-void decoder::set_O_sparse(const std::vector<int64_t> &O_sparse_vec_in) {
-  std::vector<std::vector<uint32_t>> parsed;
-  set_sparse_from_vec(O_sparse_vec_in, parsed);
-  // Presence, not row count: an explicitly supplied zero-row O is a model, and
-  // the late setter must not be able to silently replace it with a different
-  // row count.
-  if (inputs_.has_observable_model() &&
-      parsed.size() != inputs_.num_observables())
-    throw std::invalid_argument(
-        "O_sparse row count must match decoder_inputs observable count");
-  validate_sparse_column_indices(parsed, block_size, "O_sparse");
-  this->O_sparse = std::move(parsed);
-  this->pimpl->corrections.clear();
-  this->pimpl->corrections.resize(get_num_observables());
-  on_o_sparse_configured();
-}
-
 uint32_t decoder::get_num_msyn_per_decode() const {
   return pimpl->num_msyn_per_decode;
 }
@@ -386,65 +367,35 @@ void decoder::set_decoder_id(uint32_t decoder_id) {
 
 uint32_t decoder::get_decoder_id() const { return pimpl->decoder_id; }
 
-template <typename PimplType>
-void set_D_sparse_common(decoder *decoder,
-                         const std::vector<std::vector<uint32_t>> &D_sparse,
-                         uint32_t num_measurements, PimplType *pimpl) {
-  auto *sw_decoder = dynamic_cast<sliding_window *>(decoder);
+void decoder::initialize_streaming_layout(
+    std::size_t num_syndromes_per_round,
+    std::vector<std::size_t> detector_layer_offsets) {
+  if (pimpl->streaming_layout_initialized)
+    throw std::logic_error(
+        "initialize_streaming_layout() is construction state and may be called "
+        "only once");
+  if (detector_layer_offsets.empty())
+    throw std::invalid_argument(
+        "initialize_streaming_layout() requires at least one detector layer");
+  if (detector_layer_offsets.back() != syndrome_size)
+    throw std::invalid_argument(fmt::format(
+        "detector layer offsets end at {} but the model has {} detectors",
+        detector_layer_offsets.back(), syndrome_size));
 
-  if (sw_decoder != nullptr) {
-    pimpl->is_sliding_window = true;
-    pimpl->num_syndromes_per_round = sw_decoder->get_num_syndromes_per_round();
-    // Check if first row is a first-round detector (single syndrome index)
-    pimpl->has_first_round_detectors =
-        (D_sparse.size() > 0 && D_sparse[0].size() == 1);
-    pimpl->current_round = 0;
-    // Detector-layer offsets for the [B | S...S | B] layout; each streamed
-    // layer's width comes from these.
-    const std::size_t num_layers = sw_decoder->get_num_detector_layers();
-    pimpl->detector_layer_offsets.resize(num_layers + 1);
-    for (std::size_t r = 0; r <= num_layers; ++r)
-      pimpl->detector_layer_offsets[r] = sw_decoder->get_layer_offset(r);
-    pimpl->detector_layer_index = 0;
-    // The interior width is the widest layer, so it bounds the buffers.
-    pimpl->persistent_detector_buffer.resize(pimpl->num_syndromes_per_round);
-    pimpl->persistent_soft_detector_buffer.resize(
-        pimpl->num_syndromes_per_round);
-
-  } else {
-    pimpl->is_sliding_window = false;
-    if (D_sparse.size() != decoder->get_syndrome_size()) {
-      throw std::invalid_argument(
-          fmt::format("D_sparse row count ({}) must match syndrome_size ({})",
-                      D_sparse.size(), decoder->get_syndrome_size()));
-    }
-  }
-
-  pimpl->num_msyn_per_decode = num_measurements;
-  pimpl->msyn_buffer.clear();
-  pimpl->msyn_buffer.resize(pimpl->num_msyn_per_decode);
-  pimpl->msyn_buffer_index = 0;
-}
-
-void decoder::set_D_sparse(const std::vector<std::vector<uint32_t>> &D_sparse) {
-  this->D_sparse = D_sparse;
-  set_D_sparse_common(this, D_sparse, calculate_num_msyn_per_decode(D_sparse),
-                      pimpl.get());
-  on_d_sparse_configured();
-}
-
-void decoder::set_D_sparse(const std::vector<int64_t> &D_sparse_vec_in) {
-  set_sparse_from_vec(D_sparse_vec_in, this->D_sparse);
-  set_D_sparse_common(this, this->D_sparse,
-                      calculate_num_msyn_per_decode(this->D_sparse),
-                      pimpl.get());
-  on_d_sparse_configured();
-}
-
-void decoder::set_D_sparse(const sparse_binary_matrix &D_sparse) {
-  this->D_sparse = D_sparse.to_nested_csr();
-  set_D_sparse_common(this, this->D_sparse, D_sparse.num_cols(), pimpl.get());
-  on_d_sparse_configured();
+  pimpl->is_sliding_window = true;
+  pimpl->num_syndromes_per_round = num_syndromes_per_round;
+  // A first-round detector layer references a single measurement per detector.
+  pimpl->has_first_round_detectors =
+      !pimpl->measurement_to_detectors.empty() &&
+      pimpl->measurement_to_detectors[0].size() == 1;
+  pimpl->detector_layer_offsets = std::move(detector_layer_offsets);
+  pimpl->detector_layer_index = 0;
+  pimpl->current_round = 0;
+  // Layers are emitted one at a time, so the widest layer bounds the buffers
+  // rather than the full detector count.
+  pimpl->persistent_detector_buffer.resize(num_syndromes_per_round);
+  pimpl->persistent_soft_detector_buffer.resize(num_syndromes_per_round);
+  pimpl->streaming_layout_initialized = true;
 }
 
 bool decoder::enqueue_syndrome(const uint8_t *syndrome,
@@ -496,9 +447,9 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
 
     // Decode now.
     if (!pimpl->is_sliding_window) {
-      for (std::size_t i = 0; i < this->D_sparse.size(); i++) {
+      for (std::size_t i = 0; i < pimpl->measurement_to_detectors.size(); i++) {
         pimpl->persistent_detector_buffer[i] = 0;
-        for (auto col : this->D_sparse[i])
+        for (auto col : pimpl->measurement_to_detectors[i])
           pimpl->persistent_detector_buffer[i] ^= pimpl->msyn_buffer[col];
       }
     } else {
@@ -508,7 +459,7 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
       pimpl->persistent_detector_buffer.resize(width);
       for (std::size_t j = 0; j < width; j++) {
         uint8_t v = 0;
-        for (auto col : this->D_sparse[off + j])
+        for (auto col : pimpl->measurement_to_detectors[off + j])
           v ^= pimpl->msyn_buffer[col];
         pimpl->persistent_detector_buffer[j] = v;
       }
@@ -597,20 +548,25 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
     case decoder_output::errors:
       // Error-frame path: decoder returns a block-sized error vector; project
       // to observables via O_sparse.
-      if (O_sparse.size() != num_observables)
-        throw std::runtime_error(fmt::format(
-            "Observable matrix is not configured: expected {} rows, got {}",
-            num_observables, O_sparse.size()));
+      if (!inputs_.has_observable_model())
+        throw std::runtime_error(
+            "Error-frame decoders need an observable model to project through; "
+            "this one was constructed without one");
       if (should_log)
         for (std::size_t e = 0, E = decoded_values.size(); e < E; e++)
           if (decoded_values[e])
             log_errors.push_back(e);
       // For each observable, flip its correction once for each predicted error
       // that flips it (net parity over O_sparse[i]).
-      for (std::size_t i = 0; i < num_observables; i++)
-        for (auto col : O_sparse[i])
-          if (decoded_values[col])
-            flip_correction(i);
+      {
+        const auto &O = inputs_.observable_flips_matrix();
+        const auto &ptr = O.ptr();
+        const auto &indices = O.indices();
+        for (std::size_t i = 0; i < num_observables; i++)
+          for (auto k = ptr[i]; k < ptr[i + 1]; ++k)
+            if (decoded_values[indices[k]])
+              flip_correction(i);
+      }
       break;
     }
     if (should_log) {
@@ -692,8 +648,7 @@ const uint8_t *decoder::get_obs_corrections() const {
 std::size_t decoder::get_num_observables() const {
   // The model owns the count whenever it supplies an observable mapping, even
   // a zero-row one. The late-setter fallback serves only H-only inputs.
-  return inputs_.has_observable_model() ? inputs_.num_observables()
-                                        : O_sparse.size();
+  return inputs_.num_observables();
 }
 
 void decoder::reset_decoder() {

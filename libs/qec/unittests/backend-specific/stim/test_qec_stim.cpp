@@ -633,13 +633,10 @@ TEST(QECCodeTester, checkRealtimeDecodeFromMemoryCircuit) {
   }
   EXPECT_LT(minRow, maxRow);
 
-  // Configure the realtime decoder from the decoder_inputs returned by
-  // full_component(). The server adapter explicitly requests and installs O
-  // and D; decoder base construction consumes metadata only.
+  // The decoder_inputs returned by full_component() already carry O and D, so
+  // construction configures the realtime path completely. There is no second
+  // step, and nothing to re-supply.
   auto decoder = cudaq::qec::get_decoder("single_error_lut", inputs);
-  EXPECT_EQ(decoder->get_num_msyn_per_decode(), 0);
-  decoder->set_O_sparse(inputs.observable_flips_matrix().to_nested_csr());
-  decoder->set_D_sparse(*D);
   ASSERT_EQ(decoder->get_num_msyn_per_decode(), D->num_cols());
 
   // Stream numCols ancilla per round, then the final data readout. The window
@@ -1253,13 +1250,22 @@ TEST(QECCodeTester, checkSlidingWindowRealtimeBoundaryStreaming) {
     params.insert("straddle_end_round", true);
     params.insert("inner_decoder_name", std::string("single_error_lut"));
     params.insert("inner_decoder_params", cudaqx::heterogeneous_map{});
-    return cudaq::qec::decoder::get("sliding_window",
-                                    cudaq::qec::decoder_inputs{dem}, params);
+    // O comes from the DEM and D is handed in alongside it, so the model is
+    // complete before the decoder exists.
+    std::uint32_t num_measurements = 0;
+    for (const auto &row : D_sparse)
+      for (auto col : row)
+        num_measurements = std::max(num_measurements, col + 1);
+    return cudaq::qec::decoder::get(
+        "sliding_window",
+        cudaq::qec::decoder_inputs{
+            dem, cudaq::qec::sparse_binary_matrix::from_nested_csr(
+                     static_cast<std::uint32_t>(D_sparse.size()),
+                     num_measurements, D_sparse)},
+        params);
   };
   auto sw = make_sw();     // realtime streaming
   auto sw_ref = make_sw(); // whole-block reference
-  sw->set_D_sparse(D_sparse);
-  sw->set_O_sparse(O_sparse);
 
   // Raw measurements: numRounds*numCols ancilla, then numData data, per shot.
   const std::size_t nShots = 200;

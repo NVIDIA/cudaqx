@@ -31,17 +31,28 @@ DecoderVec make_pymatching_decoders(const std::vector<std::uint8_t> &h_vec,
   h.copy(h_vec.data(), {syndrome_size, block_size});
 
   DecoderVec decoders;
-  auto decoder =
-      cudaq::qec::decoder::get("pymatching", h, cudaqx::heterogeneous_map{});
-  decoder->set_decoder_id(0);
+  // The whole model up front: an identity measurement-to-detector map and an
+  // identity observable map, supplied with H rather than installed after.
   std::vector<std::vector<std::uint32_t>> d_sparse(syndrome_size);
   for (std::size_t row = 0; row < syndrome_size; ++row)
     d_sparse[row].push_back(static_cast<std::uint32_t>(row));
-  decoder->set_D_sparse(d_sparse);
   std::vector<std::vector<std::uint32_t>> o_sparse(block_size);
   for (std::size_t row = 0; row < block_size; ++row)
     o_sparse[row].push_back(static_cast<std::uint32_t>(row));
-  decoder->set_O_sparse(o_sparse);
+
+  auto decoder = cudaq::qec::decoder::get(
+      "pymatching",
+      cudaq::qec::decoder_inputs(
+          cudaq::qec::sparse_binary_matrix(h),
+          cudaq::qec::sparse_binary_matrix::from_nested_csr(
+              static_cast<std::uint32_t>(block_size),
+              static_cast<std::uint32_t>(block_size), o_sparse),
+          /*error_rates=*/{},
+          cudaq::qec::sparse_binary_matrix::from_nested_csr(
+              static_cast<std::uint32_t>(syndrome_size),
+              static_cast<std::uint32_t>(syndrome_size), d_sparse)),
+      cudaqx::heterogeneous_map{});
+  decoder->set_decoder_id(0);
   decoders.push_back(std::move(decoder));
   return decoders;
 }

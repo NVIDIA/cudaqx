@@ -284,8 +284,10 @@ public:
   // Note: all of the current realtime decoding API is designed to be used with
   // hard syndromes.
 
-  /// @brief Get the number of measurement syndromes per decode call. This
-  /// depends on D_sparse, so you must have called set_D_sparse() first.
+  /// @brief Get the number of measurement syndromes per decode call, i.e. the
+  /// measurement count of the model's measurement-to-detector map. Zero when
+  /// the model supplies no such map, because its syndromes are already
+  /// detectors.
   uint32_t get_num_msyn_per_decode() const;
 
   /// @brief The CUDA device this decoder was pinned to at construction via
@@ -293,28 +295,6 @@ public:
   /// Construction pins the constructing thread persistently (the thread that
   /// creates a decoder is the thread expected to drive its decode calls).
   int get_cuda_device_id() const { return cuda_device_id_; }
-
-  /// @brief Set the observable matrix.
-  void set_O_sparse(const std::vector<std::vector<uint32_t>> &O_sparse);
-
-  /// @brief Set the observable matrix, using a single long vector with -1 as
-  /// row terminators.
-  void set_O_sparse(const std::vector<int64_t> &O_sparse);
-
-  /// @brief Set D from nested rows. The measurement count is inferred as the
-  /// largest referenced column plus one, so trailing unused columns cannot be
-  /// represented.
-  void set_D_sparse(const std::vector<std::vector<uint32_t>> &D_sparse);
-
-  /// @brief Set the D_sparse matrix, using a single long vector with -1 as row
-  /// terminators. Vector encodings infer the measurement count as the largest
-  /// referenced column plus one and therefore cannot represent trailing unused
-  /// measurement columns.
-  void set_D_sparse(const std::vector<int64_t> &D_sparse);
-
-  /// @brief Set D from a shaped sparse matrix, preserving its exact measurement
-  /// column count, including trailing unused columns.
-  void set_D_sparse(const sparse_binary_matrix &D_sparse);
 
   /// @brief Set the decoder id.
   void set_decoder_id(uint32_t decoder_id);
@@ -393,29 +373,33 @@ protected:
                                      float_t *observables,
                                      std::size_t observables_size) const;
 
-  /// @brief Hook called by both set_D_sparse overloads after base-class buffer
-  /// setup is complete. Override to react to a new D_sparse without having to
-  /// call the base-class implementation explicitly. The protected D_sparse
-  /// member holds the newly set matrix when this is called.
-  virtual void on_d_sparse_configured() {}
-
-  /// @brief Hook called by both set_O_sparse overloads after base-class buffer
-  /// setup is complete. Override to react to a new O_sparse without having to
-  /// call the base-class implementation explicitly. The protected O_sparse
-  /// member holds the newly set matrix when this is called.
-  virtual void on_o_sparse_configured() {}
+  /// @brief Declare that this decoder consumes its realtime input as a stream
+  /// of detector layers rather than one full syndrome per decode.
+  ///
+  /// Everything the realtime path can derive from the model -- D, the
+  /// measurement buffer, the detector buffers, the corrections buffer -- is
+  /// sized by the base constructor from `decoder_inputs`. Layer geometry is
+  /// the exception: it is a property of how the decoder consumes rounds, not
+  /// of the model, and the base cannot ask a subclass for it while the
+  /// subclass is still being constructed. A streaming decoder therefore hands
+  /// it over here, from its own constructor.
+  ///
+  /// @param num_syndromes_per_round Width of the widest detector layer, which
+  /// bounds the per-layer buffers.
+  /// @param detector_layer_offsets Offsets `[0, w0, w0+w1, ...]`; `back()`
+  /// must equal the model's detector count.
+  /// @throws std::logic_error if called more than once. This is construction
+  /// state, not a reconfiguration point: re-entering it on a live decoder is
+  /// the mid-stream buffer reset that fixing this lifecycle removed.
+  void
+  initialize_streaming_layout(std::size_t num_syndromes_per_round,
+                              std::vector<std::size_t> detector_layer_offsets);
 
   /// @brief For a classical `[n,k]` code, this is `n`.
   std::size_t block_size = 0;
 
   /// @brief For a classical `[n,k]` code, this is `n-k`
   std::size_t syndrome_size = 0;
-
-  /// @brief The decoder's observable matrix in sparse format
-  std::vector<std::vector<uint32_t>> O_sparse;
-
-  /// @brief The decoder's D matrix in sparse format
-  std::vector<std::vector<uint32_t>> D_sparse;
 
   /// @brief CUDA device id consumed from the construction parameters by
   /// decoder::get(); -1 = unpinned. See get_cuda_device_id().

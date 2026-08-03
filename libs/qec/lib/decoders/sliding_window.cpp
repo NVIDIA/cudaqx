@@ -170,6 +170,16 @@ sliding_window::sliding_window(cudaq::qec::decoder_inputs inputs,
 
   validate_inputs();
 
+  // Hand the base its streaming geometry. Everything else the realtime path
+  // needs came from the model at base construction; layer widths and offsets
+  // are a property of how this decoder consumes rounds, not of the model, and
+  // the base cannot ask for them while this constructor is still running.
+  std::vector<std::size_t> detector_layer_offsets(num_detector_layers + 1);
+  for (std::size_t r = 0; r <= num_detector_layers; ++r)
+    detector_layer_offsets[r] = get_layer_offset(r);
+  initialize_streaming_layout(num_syndromes_per_round,
+                              std::move(detector_layer_offsets));
+
   // Build the per-window inner decoders from the real (unpadded) sub-PCMs. The
   // boundary-aware round layout is handled by get_pcm_for_rounds.
   // this->H is canonical CSC (ctor init list), so skip the per-call
