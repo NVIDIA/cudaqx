@@ -186,16 +186,46 @@ std::unique_ptr<cudaq::qec::decoder> create_realtime_decoder(
                                           decoder_config.O_sparse.end(), -1);
   auto observable_matrix = cudaq::qec::pcm_from_sparse_vec(
       decoder_config.O_sparse, num_observables, decoder_config.block_size);
-  cudaq::qec::decoder_inputs inputs(std::move(pcm),
-                                    std::move(observable_matrix),
-                                    decoder_config.error_rate_vec);
+  // D belongs to the construction inputs like H and O. Build it once and hand
+  // the same matrix to both the inputs and the realtime setter, so the two
+  // cannot describe different matrices. Canonicalize rather than rasterize: a
+  // repeated index in a row cancels under the realtime detector XOR, and
+  // GF(2)-collapse encodes that rule in the model instead of leaving each
+  // consumer to interpret duplicates its own way.
+  std::vector<std::vector<std::uint32_t>> detector_rows;
+  {
+    std::vector<std::uint32_t> row;
+    for (std::int64_t entry : decoder_config.D_sparse) {
+      if (entry < 0) {
+        detector_rows.push_back(std::move(row));
+        row.clear();
+      } else {
+        row.push_back(static_cast<std::uint32_t>(entry));
+      }
+    }
+    if (!row.empty())
+      detector_rows.push_back(std::move(row));
+  }
+  std::uint32_t num_measurements = 0;
+  for (const auto &row : detector_rows)
+    for (auto column : row)
+      num_measurements = std::max(num_measurements, column + 1);
+  const auto measurement_to_detectors =
+      cudaq::qec::sparse_binary_matrix::from_nested_csr(
+          static_cast<std::uint32_t>(detector_rows.size()), num_measurements,
+          detector_rows)
+          .canonicalize();
+
+  cudaq::qec::decoder_inputs inputs(
+      std::move(pcm), std::move(observable_matrix),
+      decoder_config.error_rate_vec, measurement_to_detectors);
   auto decoder =
       cudaq::qec::get_decoder(decoder_config.type, std::move(inputs),
                               cudaq::qec::decoder_output::observables,
                               prepare_decoder_params(decoder_config));
   decoder->set_decoder_id(decoder_config.id);
   decoder->set_O_sparse(decoder_config.O_sparse);
-  decoder->set_D_sparse(decoder_config.D_sparse);
+  decoder->set_D_sparse(measurement_to_detectors);
 
   // Force plugin initialization before the caller publishes the decoder for
   // realtime work. This preserves configure_decoders()'s existing behavior.

@@ -22,6 +22,55 @@
 #include <optional>
 #include <stdexcept>
 
+namespace cudaq::qec {
+
+/// Records the measurement-to-detector map exactly as a plugin sees it at
+/// construction, so a test can pin what the construction inputs carry.
+struct construction_d_probe {
+  static inline bool has_d = false;
+  static inline std::vector<std::vector<std::uint32_t>> rows;
+  static inline std::uint32_t num_cols = 0;
+  /// Detector syndrome handed to decode(), i.e. D as the realtime path applies
+  /// it, so a test can compare that against the construction copy above.
+  static inline std::vector<float_t> last_decode_syndrome;
+};
+
+class d_capture_decoder : public decoder {
+public:
+  d_capture_decoder(decoder_inputs inputs, decoder_output default_output,
+                    const cudaqx::heterogeneous_map &)
+      : decoder(std::move(inputs), default_output) {
+    const auto *D = get_inputs().measurement_to_detectors();
+    construction_d_probe::has_d = D != nullptr;
+    construction_d_probe::rows.clear();
+    construction_d_probe::num_cols = 0;
+    if (D) {
+      construction_d_probe::rows = D->to_nested_csr();
+      construction_d_probe::num_cols = D->num_cols();
+    }
+  }
+
+  decoder_result decode(const std::vector<float_t> &syndrome) override {
+    construction_d_probe::last_decode_syndrome = syndrome;
+    return decoder_result{true,
+                          std::vector<float_t>(get_num_observables(), 0.0)};
+  }
+
+  CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
+      d_capture_decoder,
+      static std::unique_ptr<decoder> create(
+          decoder_inputs inputs, std::optional<decoder_output> output,
+          const cudaqx::heterogeneous_map &params) {
+        return std::make_unique<d_capture_decoder>(
+            std::move(inputs), output.value_or(decoder_output::observables),
+            params);
+      })
+};
+
+CUDAQ_EXT_PT_REGISTER_TYPE(d_capture_decoder)
+
+} // namespace cudaq::qec
+
 namespace {
 class ScopedEnv {
 public:
@@ -695,6 +744,52 @@ TEST(DecoderConfigTest, CreateRealtimeDecoderConfiguresRuntimeState) {
   EXPECT_EQ(decoder->get_decoder_id(), 7u);
   EXPECT_EQ(decoder->get_num_observables(), 2u);
   EXPECT_EQ(decoder->get_num_msyn_per_decode(), 20u);
+}
+
+// A repeated index within a D row cancels under the realtime detector XOR. The
+// construction inputs must encode that same rule, or a plugin reading its
+// inputs sees a different D from the one the realtime path applies.
+TEST(DecoderConfigTest, DuplicateDetectorIndicesCollapseInConstructionInputs) {
+  auto config = create_test_empty_decoder_config(0);
+  config.type = "d_capture_decoder";
+  // Ten non-empty detector rows, as the configuration layer requires. Row 0
+  // names measurement 9 twice, which cancels, plus measurement 2, which
+  // survives. No other row references measurement 9, so the inferred
+  // measurement width stays 10 only if width is taken before cancellation.
+  config.D_sparse = {9,  9, 2,  -1, 0,  -1, 1,  -1, 2,  -1, 3,
+                     -1, 4, -1, 5,  -1, 6,  -1, 7,  -1, 8,  -1};
+
+  // Round-trip so the fixture is a configuration the server would accept.
+  auto parsed = cudaq::qec::decoding::config::decoder_config::from_yaml_str(
+      config.to_yaml_str(200));
+
+  auto decoder = cudaq::qec::decoding::host::create_realtime_decoder(parsed);
+  ASSERT_NE(decoder, nullptr);
+
+  // Construction copy: the duplicate pair has cancelled, measurement 2 remains.
+  ASSERT_TRUE(cudaq::qec::construction_d_probe::has_d);
+  ASSERT_EQ(cudaq::qec::construction_d_probe::rows.size(),
+            parsed.syndrome_size);
+  EXPECT_EQ(cudaq::qec::construction_d_probe::rows[0],
+            std::vector<std::uint32_t>{2});
+  EXPECT_EQ(cudaq::qec::construction_d_probe::rows[1],
+            std::vector<std::uint32_t>{0});
+  // Width survives the cancellation of its only referencing entry.
+  EXPECT_EQ(cudaq::qec::construction_d_probe::num_cols, 10u);
+  EXPECT_EQ(decoder->get_num_msyn_per_decode(), 10u);
+
+  // Realtime application: feed one shot and check the detector syndrome the
+  // decoder receives matches the same canonical D.
+  cudaq::qec::construction_d_probe::last_decode_syndrome.clear();
+  std::vector<uint8_t> measurements(10, 0);
+  measurements[2] = 1; // survives in row 0 and row 3
+  measurements[9] = 1; // cancelled in row 0, referenced nowhere else
+  ASSERT_TRUE(decoder->enqueue_syndrome(measurements));
+
+  const std::vector<cudaq::qec::float_t> expected_detectors = {1, 0, 0, 1, 0,
+                                                               0, 0, 0, 0, 0};
+  EXPECT_EQ(cudaq::qec::construction_d_probe::last_decode_syndrome,
+            expected_detectors);
 }
 
 TEST(DecoderConfigTest, CreateRealtimeDecoderRequiresDetectorMatrix) {
