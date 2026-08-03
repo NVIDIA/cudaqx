@@ -417,6 +417,14 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
     io.mapOptional("dem_chunks", config.dem_chunks);
     io.mapOptional("num_rounds", config.num_rounds);
 
+    // LLVM's YAML parser records a diagnostic and keeps going, so a malformed
+    // document arrives here half-populated: keys the document never had look
+    // absent, and optionals it never set have been materialized to their
+    // defaults. Validating that state reports a problem the document does not
+    // have, in place of the parser's own message about the one it does.
+    if (io.error())
+      return;
+
     // Chunk form when dem_chunks is set and H_sparse is empty. Emptiness is
     // what the code keys off: an omitted H_sparse and an explicit H_sparse: []
     // both parse to the same empty vector, so both are treated as chunk form.
