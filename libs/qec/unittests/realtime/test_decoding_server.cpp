@@ -132,6 +132,7 @@ TEST(CqrTransceiverTest, AcceptsAnExactlySizedEnqueueRequestPayload) {
 }
 
 TEST(CqrTransceiverTest, RejectsResponseBeyondReportedSlot) {
+  using namespace cudaq::qec::decoding::rpc;
   using namespace cudaq::qec::decoding_server;
 
   constexpr std::size_t slot_size =
