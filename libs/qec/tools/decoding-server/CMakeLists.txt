@@ -78,7 +78,7 @@ if(CUDAQ_REALTIME_INCLUDE_DIR AND TARGET cudaq-qec-realtime-decoding-server-cqr)
     # cudaq-qec-decoding-server-device-graph component AND the proprietary
     # cudevice archive, which supplies the three populate-shim symbols
     # (cudaqx_qec_realtime_dispatch_populate_*_device_entry)
-    # that DeviceGraphTransceiver::launch_scheduler resolves via dlsym. Hololink
+    # that DeviceGraphTransceiver::launch_scheduler resolves via dlsym. GpuRoceTransceiver
     # presence and the proprietary archive are provisioned independently, so
     # treat a missing archive as "device_graph dispatch not available" and fall
     # back to the provider transports rather than failing configuration.

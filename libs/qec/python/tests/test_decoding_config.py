@@ -348,7 +348,7 @@ def test_decoder_config_json_schema_covers_dispatch_and_transport():
     mdc.decoders = [dc]
     mdc.transport.provider = "udp"
     mdc.transport.args = ["--num-slots=8"]
-    mdc.transport.device_graph.provider = "hololink"
+    mdc.transport.device_graph.provider = "gpu_roce"
     mdc.transport.device_graph.args = ["--pinned-rings"]
 
     document = yaml.safe_load(mdc.to_yaml_str())
