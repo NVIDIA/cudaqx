@@ -16,7 +16,7 @@ syndrome sources, both decoding through the **same prebuilt server**:
   path and is what CI exercises. With ``--wire cpu_roce`` the same kernel
   carries its syndromes over **real RDMA** between two RoCE-capable ports
   instead.
-- ``--source fpga`` — the delivered ``hololink_fpga_syndrome_playback`` tool
+- ``--source fpga`` — the delivered ``hsb_fpga_syndrome_playback`` tool
   streams pre-generated syndromes over **RoCE from a real FPGA** into the
   server's RDMA ring. Requires a ConnectX NIC cabled to the FPGA. There is no
   emulator here.
@@ -39,7 +39,7 @@ Deliverables versus the example
 **Deliverables** (installed, not built by this example):
 
 - ``decoding_server`` — the standalone server that owns the decoder instances.
-- ``hololink_fpga_syndrome_playback`` — the FPGA playback tool (present only in
+- ``hsb_fpga_syndrome_playback`` — the FPGA playback tool (present only in
   the hololink-enabled deliverable image).
 - the QEC + realtime libraries and the decoder plugins.
 

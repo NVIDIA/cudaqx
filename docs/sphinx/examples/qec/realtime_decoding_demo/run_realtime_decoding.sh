@@ -22,7 +22,7 @@
 #                         dispatch (a CPU thread calls the decoder; nv-qldpc
 #                         still decodes on its GPU).
 #
-#   --source fpga         The delivered hololink_fpga_syndrome_playback tool
+#   --source fpga         The delivered hsb_fpga_syndrome_playback tool
 #                         streams pre-generated syndromes over RoCE from a REAL
 #                         FPGA into the server's RDMA ring (needs a ConnectX NIC
 #                         cabled to the FPGA).  CPU decoders ride the cpu_roce
@@ -33,7 +33,7 @@
 #                         hsb_fpga_decoding_server_test.sh.
 #
 # DELIVERABLES (consumed prebuilt from --install-prefix, never built here):
-#   decoding_server, hololink_fpga_syndrome_playback, the QEC + realtime libs,
+#   decoding_server, hsb_fpga_syndrome_playback, the QEC + realtime libs,
 #   and the decoder plugins.
 # EXAMPLE BINARIES (the only things the user compiles; from --example-build-dir):
 #   surface_code_realtime_decoding       generator: writes config + syndromes
@@ -454,7 +454,7 @@ resolve_paths() {
     done
 
     if [[ -z "$SERVER_BIN"    && -n "$INSTALL_PREFIX" ]]; then SERVER_BIN="$INSTALL_PREFIX/bin/decoding_server"; fi
-    if [[ -z "$PLAYBACK_BIN"  && -n "$INSTALL_PREFIX" ]]; then PLAYBACK_BIN="$INSTALL_PREFIX/bin/hololink_fpga_syndrome_playback"; fi
+    if [[ -z "$PLAYBACK_BIN"  && -n "$INSTALL_PREFIX" ]]; then PLAYBACK_BIN="$INSTALL_PREFIX/bin/hsb_fpga_syndrome_playback"; fi
     # The Ising profile runs its own example pair (the surface_code-4-lineage
     # source the artifacts are bound to); everything else runs the original.
     local _example_stem="surface_code_realtime_decoding"
