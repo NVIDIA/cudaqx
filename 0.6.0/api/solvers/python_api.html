@@ -1,0 +1,1345 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.18.1: http://docutils.sourceforge.net/" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CUDA-Q Solvers Python API &mdash; NVIDIA CUDA-QX  documentation</title>
+      <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+      <link rel="stylesheet" href="../../_static/css/theme.css" type="text/css" />
+      <link rel="stylesheet" href="../../_static/tabs.css" type="text/css" />
+      <link rel="stylesheet" href="../../_static/copybutton.css" type="text/css" />
+      <link rel="stylesheet" href="../../_static/cudaq_override.css" type="text/css" />
+      <link rel="stylesheet" href="../../_static/sg_gallery.css" type="text/css" />
+      <link rel="stylesheet" href="/__w/cudaqx/cudaqx/docs/sphinx/_static/cudaq_override.css" type="text/css" />
+  <!--[if lt IE 9]>
+    <script src="../../_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script data-url_root="../../" id="documentation_options" src="../../_static/documentation_options.js"></script>
+        <script src="../../_static/jquery.js"></script>
+        <script src="../../_static/underscore.js"></script>
+        <script src="../../_static/_sphinx_javascript_frameworks_compat.js"></script>
+        <script src="../../_static/doctools.js"></script>
+        <script src="../../_static/sphinx_highlight.js"></script>
+        <script src="../../_static/tabs.js"></script>
+        <script src="../../_static/clipboard.min.js"></script>
+        <script src="../../_static/copybutton.js"></script>
+        <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+        <script src="../../_static/version-switcher.js"></script>
+    <script src="../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="prev" title="CUDA-Q Solvers C++ API" href="cpp_api.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search"  style="background: #76b900" > 
+
+          
+          
+          <a href="../../index.html" class="icon icon-home">
+            NVIDIA CUDA-QX
+          </a>
+              <div class="version">
+                0.6.0
+              </div>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+  <style>
+    /* Sidebar header (and topbar for mobile) */
+    .wy-side-nav-search, .wy-nav-top {
+      background: #76b900;
+    }
+
+    .wy-side-nav-search a:link, .wy-nav-top a:link {
+      color: #fff;
+    }
+    .wy-side-nav-search a:visited, .wy-nav-top a:visited {
+      color: #fff;
+    }
+    .wy-side-nav-search a:hover, .wy-nav-top a:hover {
+      color: #fff;
+    }
+
+    .wy-menu-vertical a:link, .wy-menu-vertical a:visited {
+      color: #d9d9d9
+    }
+
+    .wy-menu-vertical a:active {
+      background-color: #76b900
+    }
+
+    .wy-side-nav-search>div.version {
+      color: rgba(0, 0, 0, 0.3)
+    }
+
+    /* override table width restrictions */
+    .wy-table-responsive table td, .wy-table-responsive table th {
+        white-space: normal;
+    }
+
+    .wy-table-responsive {
+        margin-bottom: 24px;
+        max-width: 100%;
+        overflow: visible;
+    }
+  </style>
+  
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Getting Started</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../quickstart/installation.html">Installation Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../quickstart/installation.html#installation-methods">Installation Methods</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../quickstart/installation.html#pip-install">pip install</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../quickstart/installation.html#docker-container">Docker Container</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../quickstart/installation.html#building-from-source">Building from Source</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../quickstart/installation.html#installing-pytorch">Installing PyTorch</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Libraries</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../components/qec/introduction.html">CUDA-Q QEC - Quantum Error Correction Library</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../components/qec/introduction.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../components/qec/introduction.html#core-components">Core Components</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../components/qec/introduction.html#qec-code-framework-cudaq-qec-code">QEC Code Framework <code class="code docutils literal notranslate"><span class="pre">cudaq::qec::code</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#class-structure">Class Structure</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#implementing-a-new-code">Implementing a New Code</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#example-steane-code">Example: Steane Code</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#implementing-a-new-code-in-python">Implementing a New Code in Python</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#key-points">Key Points</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#using-the-code-framework">Using the Code Framework</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../components/qec/introduction.html#pre-built-qec-codes">Pre-built QEC Codes</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#steane-code">Steane Code</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#repetition-code">Repetition Code</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../components/qec/introduction.html#decoder-framework-cudaq-qec-decoder">Decoder Framework <code class="code docutils literal notranslate"><span class="pre">cudaq::qec::decoder</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#id1">Class Structure</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#implementing-a-new-decoder-in-c">Implementing a New Decoder in C++</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#example-lookup-table-decoder">Example: Lookup Table Decoder</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#implementing-a-decoder-in-python">Implementing a Decoder in Python</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#key-features">Key Features</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#usage-example">Usage Example</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../components/qec/introduction.html#pre-built-qec-decoders">Pre-built QEC Decoders</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#quantum-low-density-parity-check-decoder">Quantum Low-Density Parity-Check Decoder</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#tensor-network-decoder">Tensor Network Decoder</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../components/qec/introduction.html#real-time-decoding">Real-Time Decoding</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#id2">Key Features</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#workflow-and-terminology">Workflow and Terminology</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../components/qec/introduction.html#numerical-experiments">Numerical Experiments</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#conventions">Conventions</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#memory-circuit-experiments">Memory Circuit Experiments</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../components/qec/introduction.html#function-variants">Function Variants</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../components/qec/introduction.html#return-values">Return Values</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../components/qec/introduction.html#example-usage">Example Usage</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../components/qec/introduction.html#additional-noise-models">Additional Noise Models</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../components/solvers/introduction.html">CUDA-Q Solvers Library</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../components/solvers/introduction.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../components/solvers/introduction.html#core-components">Core Components</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../components/solvers/introduction.html#operator-infrastructure">Operator Infrastructure</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../components/solvers/introduction.html#molecular-hamiltonian-options">Molecular Hamiltonian Options</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/solvers/introduction.html#example-usage">Example Usage</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../components/solvers/introduction.html#variational-quantum-eigensolver-vqe">Variational Quantum Eigensolver (VQE)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../components/solvers/introduction.html#vqe-examples">VQE Examples</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../components/solvers/introduction.html#basic-usage">Basic Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/solvers/introduction.html#custom-optimization">Custom Optimization</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/solvers/introduction.html#shot-based-simulation">Shot-based Simulation</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../components/solvers/introduction.html#adapt-vqe">ADAPT-VQE</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../components/solvers/introduction.html#key-features">Key Features</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/solvers/introduction.html#id1">Basic Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/solvers/introduction.html#advanced-usage">Advanced Usage</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../components/solvers/introduction.html#custom-optimization-settings">Custom Optimization Settings</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/solvers/introduction.html#available-operator-pools">Available Operator Pools</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/solvers/introduction.html#available-ansatz">Available Ansatz</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/solvers/introduction.html#algorithm-parameters">Algorithm Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/solvers/introduction.html#results-analysis">Results Analysis</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Examples</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../examples_rst/qec/examples.html">CUDA-Q QEC by Example</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../examples_rst/qec/code_capacity_noise.html">   Code-Capacity QEC</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/qec/code_capacity_noise.html#cuda-q-qec-implementation">CUDA-Q QEC Implementation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/qec/code_capacity_noise.html#code-explanation">Code Explanation</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples_rst/qec/circuit_level_noise.html">   Circuit-Level QEC</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/qec/circuit_level_noise.html#cuda-q-qec-implementation">CUDA-Q QEC Implementation</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples_rst/qec/decoders.html">   Decoders</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/qec/decoders.html#detector-error-model">Detector Error Model</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/qec/decoders.html#generating-a-multi-round-parity-check-matrix">Generating a Multi-Round Parity Check Matrix</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/qec/decoders.html#creating-new-qec-codes">Creating New QEC codes</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/qec/decoders.html#getting-started-with-the-nvidia-qldpc-decoder">Getting Started with the NVIDIA QLDPC Decoder</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../examples_rst/qec/decoders.html#belief-propagation-methods">Belief Propagation Methods</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../examples_rst/qec/decoders.html#usage-example">Usage Example</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/qec/decoders.html#exact-maximum-likelihood-decoding-with-nvidia-tensor-network-decoder">Exact Maximum Likelihood Decoding with NVIDIA Tensor Network Decoder</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/qec/decoders.html#deploying-ai-decoders-with-tensorrt">Deploying AI Decoders with TensorRT</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html">   Real-Time Decoding</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#workflow-overview">Workflow Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#real-time-decoding-example">Real-Time Decoding Example</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#configuration">Configuration</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#step-1-generate-detector-error-model">Step 1: Generate Detector Error Model</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#step-2-configure-and-save-decoder">Step 2: Configure and Save Decoder</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#step-3-load-configuration">Step 3: Load Configuration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#step-4-use-in-quantum-kernels">Step 4: Use in Quantum Kernels</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#backend-selection">Backend Selection</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#simulation-backend">Simulation Backend</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#quantinuum-hardware-backend">Quantinuum Hardware Backend</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#compilation-and-execution-examples">Compilation and Execution Examples</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#common-use-cases">Common Use Cases</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#c-compilation">C++ Compilation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#python-execution">Python Execution</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#complete-workflow-example">Complete Workflow Example</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#debugging-and-environment-variables">Debugging and Environment Variables</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#decoder-selection">Decoder Selection</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#configuration-upload-failures-quantinuum-backend">Configuration Upload Failures (Quantinuum Backend)</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#see-also">See Also</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../examples_rst/solvers/examples.html">CUDA-Q Solvers by Example</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../examples_rst/solvers/molecular_hamiltonians.html">   Molecular-Hamiltonians</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/solvers/molecular_hamiltonians.html#molecular-orbitals-and-hamiltonians">Molecular Orbitals and Hamiltonians</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/solvers/molecular_hamiltonians.html#natural-orbitals-from-mp2">Natural Orbitals from MP2</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/solvers/molecular_hamiltonians.html#casscf-orbitals">CASSCF Orbitals</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/solvers/molecular_hamiltonians.html#for-open-shell-systems">For open-shell systems</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples_rst/solvers/adapt.html">   ADAPT-VQE</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples_rst/solvers/vqe.html">   VQE</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/solvers/vqe.html#cuda-q-solvers-implementation">CUDA-Q Solvers Implementation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/solvers/vqe.html#code-explanation">Code Explanation</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples_rst/solvers/qaoa.html">   QAOA</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/solvers/qaoa.html#cuda-q-solvers-implementation">CUDA-Q Solvers Implementation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/solvers/qaoa.html#code-explanation">Code Explanation</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples_rst/solvers/gqe.html">   GQE</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/solvers/gqe.html#cuda-q-solvers-implementation">CUDA-Q Solvers Implementation</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../core/cpp_api.html">CUDA-QX Namespaces and Core Library C++ API</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../core/cpp_api.html#namespaces">Namespaces</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../core/cpp_api.html#core">Core</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../qec/cpp_api.html">CUDA-Q QEC C++ API</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../qec/cpp_api.html#code">Code</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../qec/cpp_api.html#detector-error-model">Detector Error Model</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../qec/cpp_api.html#decoder-interfaces">Decoder Interfaces</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../qec/cpp_api.html#built-in-decoders">Built-in Decoders</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../qec/cpp_api.html#nvidia-qldpc-decoder">NVIDIA QLDPC Decoder</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../qec/cpp_api.html#nv_qldpc_decoder"><code class="docutils literal notranslate"><span class="pre">nv_qldpc_decoder</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../qec/cpp_api.html#sliding-window-decoder">Sliding Window Decoder</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../qec/cpp_api.html#sliding_window"><code class="docutils literal notranslate"><span class="pre">sliding_window</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../qec/cpp_api.html#tensorrt-decoder">TensorRT Decoder</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../qec/cpp_api.html#trt_decoder"><code class="docutils literal notranslate"><span class="pre">trt_decoder</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../qec/cpp_api.html#real-time-decoding">Real-Time Decoding</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../qec/cpp_api.html#core-decoding-functions">Core Decoding Functions</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../qec/cpp_api.html#configuration-api">Configuration API</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../qec/cpp_api.html#helper-functions">Helper Functions</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../qec/cpp_api.html#parity-check-matrix-utilities">Parity Check Matrix Utilities</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../qec/cpp_api.html#common">Common</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../qec/python_api.html">CUDA-Q QEC Python API</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../qec/python_api.html#code">Code</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../qec/python_api.html#detector-error-model">Detector Error Model</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../qec/python_api.html#decoder-interfaces">Decoder Interfaces</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../qec/python_api.html#built-in-decoders">Built-in Decoders</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../qec/python_api.html#nvidia-qldpc-decoder">NVIDIA QLDPC Decoder</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../qec/python_api.html#nv_qldpc_decoder"><code class="docutils literal notranslate"><span class="pre">nv_qldpc_decoder</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../qec/python_api.html#sliding-window-decoder">Sliding Window Decoder</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../qec/python_api.html#sliding_window"><code class="docutils literal notranslate"><span class="pre">sliding_window</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../qec/python_api.html#tensorrt-decoder">TensorRT Decoder</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../qec/python_api.html#trt_decoder"><code class="docutils literal notranslate"><span class="pre">trt_decoder</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../qec/python_api.html#tensor-network-decoder">Tensor Network Decoder</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../qec/python_api.html#cudaq_qec.plugin.decoders.tensor_network_decoder.TensorNetworkDecoder"><code class="docutils literal notranslate"><span class="pre">cudaq_qec.plugin.decoders.tensor_network_decoder.TensorNetworkDecoder</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../qec/python_api.html#real-time-decoding">Real-Time Decoding</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../qec/python_api.html#core-decoding-functions">Core Decoding Functions</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../qec/python_api.html#cudaq_qec.qec.enqueue_syndromes"><code class="docutils literal notranslate"><span class="pre">cudaq_qec.qec.enqueue_syndromes()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../qec/python_api.html#cudaq_qec.qec.get_corrections"><code class="docutils literal notranslate"><span class="pre">cudaq_qec.qec.get_corrections()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../qec/python_api.html#cudaq_qec.qec.reset_decoder"><code class="docutils literal notranslate"><span class="pre">cudaq_qec.qec.reset_decoder()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../qec/python_api.html#configuration-api">Configuration API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../qec/python_api.html#cudaq_qec.configure_decoders"><code class="docutils literal notranslate"><span class="pre">cudaq_qec.configure_decoders()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../qec/python_api.html#cudaq_qec.configure_decoders_from_file"><code class="docutils literal notranslate"><span class="pre">cudaq_qec.configure_decoders_from_file()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../qec/python_api.html#cudaq_qec.configure_decoders_from_str"><code class="docutils literal notranslate"><span class="pre">cudaq_qec.configure_decoders_from_str()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../qec/python_api.html#cudaq_qec.finalize_decoders"><code class="docutils literal notranslate"><span class="pre">cudaq_qec.finalize_decoders()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../qec/python_api.html#helper-functions">Helper Functions</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../qec/python_api.html#cudaq_qec.pcm_to_sparse_vec"><code class="docutils literal notranslate"><span class="pre">cudaq_qec.pcm_to_sparse_vec()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../qec/python_api.html#cudaq_qec.pcm_from_sparse_vec"><code class="docutils literal notranslate"><span class="pre">cudaq_qec.pcm_from_sparse_vec()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../qec/python_api.html#cudaq_qec.generate_timelike_sparse_detector_matrix"><code class="docutils literal notranslate"><span class="pre">cudaq_qec.generate_timelike_sparse_detector_matrix()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../qec/python_api.html#common">Common</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../qec/python_api.html#parity-check-matrix-utilities">Parity Check Matrix Utilities</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="cpp_api.html">CUDA-Q Solvers C++ API</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">CUDA-Q Solvers Python API</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#cudaq_solvers.jordan_wigner"><code class="docutils literal notranslate"><span class="pre">jordan_wigner()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#cudaq_solvers.bravyi_kitaev"><code class="docutils literal notranslate"><span class="pre">bravyi_kitaev()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#cudaq_solvers.MolecularHamiltonian"><code class="docutils literal notranslate"><span class="pre">MolecularHamiltonian</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#cudaq_solvers.MolecularHamiltonian.energies"><code class="docutils literal notranslate"><span class="pre">MolecularHamiltonian.energies</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#cudaq_solvers.MolecularHamiltonian.hamiltonian"><code class="docutils literal notranslate"><span class="pre">MolecularHamiltonian.hamiltonian</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#cudaq_solvers.MolecularHamiltonian.hpq"><code class="docutils literal notranslate"><span class="pre">MolecularHamiltonian.hpq</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#cudaq_solvers.MolecularHamiltonian.hpqrs"><code class="docutils literal notranslate"><span class="pre">MolecularHamiltonian.hpqrs</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#cudaq_solvers.MolecularHamiltonian.n_electrons"><code class="docutils literal notranslate"><span class="pre">MolecularHamiltonian.n_electrons</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#cudaq_solvers.MolecularHamiltonian.n_orbitals"><code class="docutils literal notranslate"><span class="pre">MolecularHamiltonian.n_orbitals</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#cudaq_solvers.get_operator_pool"><code class="docutils literal notranslate"><span class="pre">get_operator_pool()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#cudaq_solvers.optim.optimize"><code class="docutils literal notranslate"><span class="pre">optimize()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#cudaq_solvers.ObserveExecutionType"><code class="docutils literal notranslate"><span class="pre">ObserveExecutionType</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#cudaq_solvers.ObserveExecutionType.function"><code class="docutils literal notranslate"><span class="pre">ObserveExecutionType.function</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#cudaq_solvers.ObserveExecutionType.gradient"><code class="docutils literal notranslate"><span class="pre">ObserveExecutionType.gradient</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#cudaq_solvers.ObserveExecutionType.name"><code class="docutils literal notranslate"><span class="pre">ObserveExecutionType.name</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#cudaq_solvers.ObserveExecutionType.value"><code class="docutils literal notranslate"><span class="pre">ObserveExecutionType.value</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#cudaq_solvers.ObserveIteration"><code class="docutils literal notranslate"><span class="pre">ObserveIteration</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#cudaq_solvers.ObserveIteration.parameters"><code class="docutils literal notranslate"><span class="pre">ObserveIteration.parameters</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#cudaq_solvers.ObserveIteration.result"><code class="docutils literal notranslate"><span class="pre">ObserveIteration.result</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#cudaq_solvers.ObserveIteration.type"><code class="docutils literal notranslate"><span class="pre">ObserveIteration.type</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#cudaq_solvers.vqe"><code class="docutils literal notranslate"><span class="pre">vqe()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#cudaq_solvers.adapt_vqe"><code class="docutils literal notranslate"><span class="pre">adapt_vqe()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#cudaq_solvers.stateprep.uccsd"><code class="docutils literal notranslate"><span class="pre">uccsd()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#cudaq_solvers.stateprep.single_excitation"><code class="docutils literal notranslate"><span class="pre">single_excitation()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#cudaq_solvers.stateprep.double_excitation"><code class="docutils literal notranslate"><span class="pre">double_excitation()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#cudaq_solvers.stateprep.get_num_uccsd_parameters"><code class="docutils literal notranslate"><span class="pre">get_num_uccsd_parameters()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#cudaq_solvers.stateprep.get_uccsd_excitations"><code class="docutils literal notranslate"><span class="pre">get_uccsd_excitations()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#cudaq_solvers.stateprep.get_uccgsd_pauli_lists"><code class="docutils literal notranslate"><span class="pre">get_uccgsd_pauli_lists()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#cudaq_solvers.stateprep.uccgsd"><code class="docutils literal notranslate"><span class="pre">uccgsd()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#cudaq_solvers.get_num_qaoa_parameters"><code class="docutils literal notranslate"><span class="pre">get_num_qaoa_parameters()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#cudaq_solvers.gqe"><code class="docutils literal notranslate"><span class="pre">gqe()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="#cudaq_solvers.cudaq_solvers.gqe_algorithm.gqe.get_default_config"><code class="docutils literal notranslate"><span class="pre">cudaq_solvers.gqe_algorithm.gqe.get_default_config()</span></code></a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu"  style="background: #76b900" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../index.html">NVIDIA CUDA-QX</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">CUDA-Q Solvers Python API</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../../_sources/api/solvers/python_api.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul><div class="rst-breadcrumbs-buttons" role="navigation" aria-label="Sequential page navigation">
+        <a href="cpp_api.html" class="btn btn-neutral float-left" title="CUDA-Q Solvers C++ API" accesskey="p"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+  </div>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-cudaq_solvers">
+<span id="cuda-q-solvers-python-api"></span><h1>CUDA-Q Solvers Python API<a class="headerlink" href="#module-cudaq_solvers" title="Permalink to this heading"></a></h1>
+<dl class="py function">
+<dt class="sig sig-object py" id="cudaq_solvers.jordan_wigner">
+<span class="sig-prename descclassname"><span class="pre">cudaq_solvers.</span></span><span class="sig-name descname"><span class="pre">jordan_wigner</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#cudaq_solvers.jordan_wigner" title="Permalink to this definition"></a></dt>
+<dd><p>Overloaded function.</p>
+<ol class="arabic simple">
+<li><p>jordan_wigner(hpq: Buffer, hpqrs: Buffer, core_energy: float = 0.0, <a href="#id1"><span class="problematic" id="id2">**</span></a>kwargs) -&gt; SpinOperator</p></li>
+</ol>
+<p>Perform the Jordan-Wigner transformation on fermionic operators.</p>
+<p>This function applies the Jordan-Wigner transformation to convert fermionic operators
+(represented by one- and two-body integrals) into qubit operators.</p>
+<section id="parameters">
+<h2>Parameters:<a class="headerlink" href="#parameters" title="Permalink to this heading"></a></h2>
+<dl class="simple">
+<dt>hpq<span class="classifier">numpy.ndarray</span></dt><dd><p>A 2D complex numpy array representing the one-body integrals.
+Shape should be (N, N) where N is the number of spin molecular orbitals.</p>
+</dd>
+<dt>hpqrs<span class="classifier">numpy.ndarray</span></dt><dd><p>A 4D complex numpy array representing the two-body integrals.
+Shape should be (N, N, N, N) where N is the number of spin molecular orbitals.</p>
+</dd>
+<dt>core_energy<span class="classifier">float, optional</span></dt><dd><p>The core energy of the system when using active space Hamiltonian, nuclear energy otherwise. Default is 0.0.</p>
+</dd>
+<dt>tolerance<span class="classifier">float, optional</span></dt><dd><p>The threshold value for ignoring small coefficients.
+Can also be specified using ‘tol’.
+Coefficients with absolute values smaller than this tolerance are considered as zero.
+Default is 1e-15.</p>
+</dd>
+</dl>
+</section>
+<section id="returns">
+<h2>Returns:<a class="headerlink" href="#returns" title="Permalink to this heading"></a></h2>
+<dl class="simple">
+<dt>cudaq.SpinOperator</dt><dd><p>A qubit operator (spin operator) resulting from the Jordan-Wigner transformation.</p>
+</dd>
+</dl>
+</section>
+<section id="raises">
+<h2>Raises:<a class="headerlink" href="#raises" title="Permalink to this heading"></a></h2>
+<dl class="simple">
+<dt>ValueError</dt><dd><p>If the input arrays have incorrect shapes or types.</p>
+</dd>
+<dt>RuntimeError</dt><dd><p>If the Jordan-Wigner transformation fails for any reason.</p>
+</dd>
+</dl>
+</section>
+<section id="examples">
+<h2>Examples:<a class="headerlink" href="#examples" title="Permalink to this heading"></a></h2>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">h1</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">],</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">]],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">complex128</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">h2</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">complex128</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">h2</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">h2</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="mf">0.5</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">qubit_op</span> <span class="o">=</span> <span class="n">jordan_wigner</span><span class="p">(</span><span class="n">h1</span><span class="p">,</span> <span class="n">h2</span><span class="p">,</span> <span class="n">core_energy</span><span class="o">=</span><span class="mf">0.1</span><span class="p">,</span> <span class="n">tolerance</span><span class="o">=</span><span class="mf">1e-14</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="notes">
+<h2>Notes:<a class="headerlink" href="#notes" title="Permalink to this heading"></a></h2>
+<ul class="simple">
+<li><p>The input arrays <code class="code docutils literal notranslate"><span class="pre">hpq</span></code> and <code class="code docutils literal notranslate"><span class="pre">hpqrs</span></code> must be contiguous and in row-major order.</p></li>
+<li><p>This function uses the “jordan_wigner” fermion compiler internally to perform
+the transformation.</p></li>
+<li><p>The resulting qubit operator can be used directly in quantum algorithms or
+further manipulated using CUDA Quantum operations.</p></li>
+</ul>
+<ol class="arabic simple" start="2">
+<li><p>jordan_wigner(hpq: Buffer, core_energy: float = 0.0, <a href="#id3"><span class="problematic" id="id4">**</span></a>kwargs) -&gt; SpinOperator</p></li>
+</ol>
+<p>Perform the Jordan-Wigner transformation on fermionic operators.</p>
+<p>This function applies the Jordan-Wigner transformation to convert fermionic operators
+(represented by either one-body or two-body integrals) into qubit operators.</p>
+</section>
+<section id="id5">
+<h2>Parameters:<a class="headerlink" href="#id5" title="Permalink to this heading"></a></h2>
+<dl class="simple">
+<dt>hpq<span class="classifier">numpy.ndarray</span></dt><dd><p>A complex numpy array representing either:
+- One-body integrals: 2D array with shape (N, N)
+- Two-body integrals: 4D array with shape (N, N, N, N)
+where N is the number of orbitals.</p>
+</dd>
+<dt>core_energy<span class="classifier">float, optional</span></dt><dd><p>The core energy of the system. Default is 0.0.</p>
+</dd>
+<dt>tolerance<span class="classifier">float, optional</span></dt><dd><p>The threshold value for ignoring small coefficients.
+Can also be specified using ‘tol’.
+Coefficients with absolute values smaller than this tolerance are considered as zero.
+Default is 1e-15.</p>
+</dd>
+</dl>
+</section>
+<section id="id6">
+<h2>Returns:<a class="headerlink" href="#id6" title="Permalink to this heading"></a></h2>
+<dl class="simple">
+<dt>cudaq.SpinOperator</dt><dd><p>A qubit operator (spin operator) resulting from the Jordan-Wigner transformation.</p>
+</dd>
+</dl>
+</section>
+<section id="id7">
+<h2>Raises:<a class="headerlink" href="#id7" title="Permalink to this heading"></a></h2>
+<dl class="simple">
+<dt>ValueError</dt><dd><p>If the input array has an incorrect shape or type.</p>
+</dd>
+<dt>RuntimeError</dt><dd><p>If the Jordan-Wigner transformation fails for any reason.</p>
+</dd>
+</dl>
+</section>
+<section id="id8">
+<h2>Examples:<a class="headerlink" href="#id8" title="Permalink to this heading"></a></h2>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="c1"># One-body integrals</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">h1</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">],</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">]],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">complex128</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">qubit_op1</span> <span class="o">=</span> <span class="n">jordan_wigner</span><span class="p">(</span><span class="n">h1</span><span class="p">,</span> <span class="n">core_energy</span><span class="o">=</span><span class="mf">0.1</span><span class="p">,</span> <span class="n">tolerance</span><span class="o">=</span><span class="mf">1e-14</span><span class="p">)</span>
+</pre></div>
+</div>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="c1"># Two-body integrals</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">h2</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">complex128</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">h2</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">h2</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="mf">0.5</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">qubit_op2</span> <span class="o">=</span> <span class="n">jordan_wigner</span><span class="p">(</span><span class="n">h2</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="id9">
+<h2>Notes:<a class="headerlink" href="#id9" title="Permalink to this heading"></a></h2>
+<ul class="simple">
+<li><p>The input array must be contiguous and in row-major order.</p></li>
+<li><p>This function automatically detects whether the input represents one-body or
+two-body integrals based on its shape.</p></li>
+<li><p>For one-body integrals input, a zero-initialized two-body tensor is used internally.</p></li>
+<li><p>For two-body integrals input, a zero-initialized one-body tensor is used internally.</p></li>
+<li><p>This function uses the “jordan_wigner” fermion compiler internally to perform
+the transformation.</p></li>
+<li><p>The resulting qubit operator can be used directly in quantum algorithms or
+further manipulated using CUDA Quantum operations.</p></li>
+</ul>
+</section>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="cudaq_solvers.bravyi_kitaev">
+<span class="sig-prename descclassname"><span class="pre">cudaq_solvers.</span></span><span class="sig-name descname"><span class="pre">bravyi_kitaev</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#cudaq_solvers.bravyi_kitaev" title="Permalink to this definition"></a></dt>
+<dd><p>Overloaded function.</p>
+<ol class="arabic simple">
+<li><p>bravyi_kitaev(hpq: Buffer, hpqrs: Buffer, core_energy: float = 0.0, <a href="#id10"><span class="problematic" id="id11">**</span></a>kwargs) -&gt; SpinOperator</p></li>
+</ol>
+<p>Perform the Bravyi-Kitaev transformation on fermionic operators.</p>
+<p>This function applies the Bravyi-Kitaev transformation to convert fermionic operators
+(represented by one- and two-body integrals) into qubit operators.</p>
+<section id="id12">
+<h2>Parameters:<a class="headerlink" href="#id12" title="Permalink to this heading"></a></h2>
+<dl class="simple">
+<dt>hpq<span class="classifier">numpy.ndarray</span></dt><dd><p>A 2D complex numpy array representing the one-body integrals.
+Shape should be (N, N) where N is the number of spin molecular orbitals.</p>
+</dd>
+<dt>hpqrs<span class="classifier">numpy.ndarray</span></dt><dd><p>A 4D complex numpy array representing the two-body integrals.
+Shape should be (N, N, N, N) where N is the number of spin molecular orbitals.</p>
+</dd>
+<dt>core_energy<span class="classifier">float, optional</span></dt><dd><p>The core energy of the system when using active space Hamiltonian, nuclear energy otherwise. Default is 0.0.</p>
+</dd>
+<dt>tolerance<span class="classifier">float, optional</span></dt><dd><p>The threshold value for ignoring small coefficients.
+Can also be specified using ‘tol’.
+Coefficients with absolute values smaller than this tolerance are considered as zero.
+Default is 1e-15.</p>
+</dd>
+</dl>
+</section>
+<section id="id13">
+<h2>Returns:<a class="headerlink" href="#id13" title="Permalink to this heading"></a></h2>
+<dl class="simple">
+<dt>cudaq.SpinOperator</dt><dd><p>A qubit operator (spin operator) resulting from the Bravyi-Kitaev transformation.</p>
+</dd>
+</dl>
+</section>
+<section id="id14">
+<h2>Raises:<a class="headerlink" href="#id14" title="Permalink to this heading"></a></h2>
+<dl class="simple">
+<dt>ValueError</dt><dd><p>If the input arrays have incorrect shapes or types.</p>
+</dd>
+<dt>RuntimeError</dt><dd><p>If the Bravyi-Kitaev transformation fails for any reason.</p>
+</dd>
+</dl>
+</section>
+<section id="id15">
+<h2>Examples:<a class="headerlink" href="#id15" title="Permalink to this heading"></a></h2>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">h1</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">],</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">]],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">complex128</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">h2</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">complex128</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">h2</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">h2</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="mf">0.5</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">qubit_op</span> <span class="o">=</span> <span class="n">bravyi_kitaev</span><span class="p">(</span><span class="n">h1</span><span class="p">,</span> <span class="n">h2</span><span class="p">,</span> <span class="n">core_energy</span><span class="o">=</span><span class="mf">0.1</span><span class="p">,</span> <span class="n">tolerance</span><span class="o">=</span><span class="mf">1e-14</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="id16">
+<h2>Notes:<a class="headerlink" href="#id16" title="Permalink to this heading"></a></h2>
+<ul class="simple">
+<li><p>The input arrays <code class="code docutils literal notranslate"><span class="pre">hpq</span></code> and <code class="code docutils literal notranslate"><span class="pre">hpqrs</span></code> must be contiguous and in row-major order.</p></li>
+<li><p>This function uses the “bravyi_kitaev” fermion compiler internally to perform
+the transformation.</p></li>
+<li><p>The resulting qubit operator can be used directly in quantum algorithms or
+further manipulated using CUDA Quantum operations.</p></li>
+</ul>
+<ol class="arabic simple" start="2">
+<li><p>bravyi_kitaev(hpq: Buffer, core_energy: float = 0.0, <a href="#id17"><span class="problematic" id="id18">**</span></a>kwargs) -&gt; SpinOperator</p></li>
+</ol>
+<p>Perform the Bravyi-Kitaev transformation on fermionic operators.</p>
+<p>This function applies the Bravyi-Kitaev transformation to convert fermionic operators
+(represented by either one-body or two-body integrals) into qubit operators.</p>
+</section>
+<section id="id19">
+<h2>Parameters:<a class="headerlink" href="#id19" title="Permalink to this heading"></a></h2>
+<dl class="simple">
+<dt>hpq<span class="classifier">numpy.ndarray</span></dt><dd><p>A complex numpy array representing either:
+- One-body integrals: 2D array with shape (N, N)
+- Two-body integrals: 4D array with shape (N, N, N, N)
+where N is the number of orbitals.</p>
+</dd>
+<dt>core_energy<span class="classifier">float, optional</span></dt><dd><p>The core energy of the system. Default is 0.0.</p>
+</dd>
+<dt>tolerance<span class="classifier">float, optional</span></dt><dd><p>The threshold value for ignoring small coefficients.
+Can also be specified using ‘tol’.
+Coefficients with absolute values smaller than this tolerance are considered as zero.
+Default is 1e-15.</p>
+</dd>
+</dl>
+</section>
+<section id="id20">
+<h2>Returns:<a class="headerlink" href="#id20" title="Permalink to this heading"></a></h2>
+<dl class="simple">
+<dt>cudaq.SpinOperator</dt><dd><p>A qubit operator (spin operator) resulting from the Bravyi-Kitaev transformation.</p>
+</dd>
+</dl>
+</section>
+<section id="id21">
+<h2>Raises:<a class="headerlink" href="#id21" title="Permalink to this heading"></a></h2>
+<dl class="simple">
+<dt>ValueError</dt><dd><p>If the input array has an incorrect shape or type.</p>
+</dd>
+<dt>RuntimeError</dt><dd><p>If the Bravyi-Kitaev transformation fails for any reason.</p>
+</dd>
+</dl>
+</section>
+<section id="id22">
+<h2>Examples:<a class="headerlink" href="#id22" title="Permalink to this heading"></a></h2>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="c1"># One-body integrals</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">h1</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">],</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">]],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">complex128</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">qubit_op1</span> <span class="o">=</span> <span class="n">bravyi_kitaev</span><span class="p">(</span><span class="n">h1</span><span class="p">,</span> <span class="n">core_energy</span><span class="o">=</span><span class="mf">0.1</span><span class="p">,</span> <span class="n">tolerance</span><span class="o">=</span><span class="mf">1e-14</span><span class="p">)</span>
+</pre></div>
+</div>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="c1"># Two-body integrals</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">h2</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">complex128</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">h2</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">h2</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="mf">0.5</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">qubit_op2</span> <span class="o">=</span> <span class="n">bravyi_kitaev</span><span class="p">(</span><span class="n">h2</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="id23">
+<h2>Notes:<a class="headerlink" href="#id23" title="Permalink to this heading"></a></h2>
+<ul class="simple">
+<li><p>The input array must be contiguous and in row-major order.</p></li>
+<li><p>This function automatically detects whether the input represents one-body or
+two-body integrals based on its shape.</p></li>
+<li><p>For one-body integrals input, a zero-initialized two-body tensor is used internally.</p></li>
+<li><p>For two-body integrals input, a zero-initialized one-body tensor is used internally.</p></li>
+<li><p>This function uses the “bravyi_kitaev” fermion compiler internally to perform
+the transformation.</p></li>
+<li><p>The resulting qubit operator can be used directly in quantum algorithms or
+further manipulated using CUDA Quantum operations.</p></li>
+</ul>
+</section>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="cudaq_solvers.MolecularHamiltonian">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">cudaq_solvers.</span></span><span class="sig-name descname"><span class="pre">MolecularHamiltonian</span></span><a class="headerlink" href="#cudaq_solvers.MolecularHamiltonian" title="Permalink to this definition"></a></dt>
+<dd><dl class="py property">
+<dt class="sig sig-object py" id="cudaq_solvers.MolecularHamiltonian.energies">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">energies</span></span><a class="headerlink" href="#cudaq_solvers.MolecularHamiltonian.energies" title="Permalink to this definition"></a></dt>
+<dd><p>Dictionary of energies from classical computation.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="cudaq_solvers.MolecularHamiltonian.hamiltonian">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">hamiltonian</span></span><a class="headerlink" href="#cudaq_solvers.MolecularHamiltonian.hamiltonian" title="Permalink to this definition"></a></dt>
+<dd><p>The qubit representation of the molecular Hamiltonian.</p>
+<p>This is the full electronic Hamiltonian of the molecule, transformed into
+qubit operators using a specific mapping (e.g., Jordan-Wigner).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><code class="xref py py-class docutils literal notranslate"><span class="pre">cudaq.SpinOperator</span></code></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="cudaq_solvers.MolecularHamiltonian.hpq">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">hpq</span></span><a class="headerlink" href="#cudaq_solvers.MolecularHamiltonian.hpq" title="Permalink to this definition"></a></dt>
+<dd><p>One-electron integrals.</p>
+<p>A 2D complex array of shape (n_orbitals, n_orbitals), where n_orbitals is the
+number of spin molecular orbitals, representing
+the one-electron integrals in the molecular orbital basis. These
+include kinetic energy and electron-nuclear attraction terms.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference external" href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="(in NumPy v2.5)">numpy.ndarray</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="cudaq_solvers.MolecularHamiltonian.hpqrs">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">hpqrs</span></span><a class="headerlink" href="#cudaq_solvers.MolecularHamiltonian.hpqrs" title="Permalink to this definition"></a></dt>
+<dd><p>Two-electron integrals.</p>
+<p>A 4D complex array of shape (n_orbitals, n_orbitals, n_orbitals, n_orbitals),
+where n_orbitals is the number of spin molecular orbitals,
+representing the two-electron integrals in the molecular orbital basis.
+These describe electron-electron interactions.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference external" href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="(in NumPy v2.5)">numpy.ndarray</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="cudaq_solvers.MolecularHamiltonian.n_electrons">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">n_electrons</span></span><a class="headerlink" href="#cudaq_solvers.MolecularHamiltonian.n_electrons" title="Permalink to this definition"></a></dt>
+<dd><p>The number of electrons in the molecule.</p>
+<p>This represents the total number of electrons in the molecular system,
+which is crucial for determining the filling of orbitals and the overall
+electronic structure.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)">int</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="cudaq_solvers.MolecularHamiltonian.n_orbitals">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">n_orbitals</span></span><a class="headerlink" href="#cudaq_solvers.MolecularHamiltonian.n_orbitals" title="Permalink to this definition"></a></dt>
+<dd><p>The number of molecular orbitals.</p>
+<p>This is the total number of molecular orbitals considered in the
+calculation, which determines the size of the Hamiltonian and the
+complexity of the quantum simulation.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)">int</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="cudaq_solvers.get_operator_pool">
+<span class="sig-prename descclassname"><span class="pre">cudaq_solvers.</span></span><span class="sig-name descname"><span class="pre">get_operator_pool</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">arg0</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><span class="pre">SpinOperator</span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#cudaq_solvers.get_operator_pool" title="Permalink to this definition"></a></dt>
+<dd><p>Get and generate an operator pool based on the specified name and configuration.</p>
+<p>This function retrieves an operator pool implementation by name and generates
+a set of operators using the provided configuration.</p>
+<section id="id24">
+<h2>Parameters:<a class="headerlink" href="#id24" title="Permalink to this heading"></a></h2>
+<dl class="simple">
+<dt>name<span class="classifier">str</span></dt><dd><p>The name of the operator pool implementation to use.</p>
+</dd>
+<dt>config<span class="classifier">dict</span></dt><dd><p>Keyword arguments representing the configuration for operator pool generation.
+Supported value types:
+- int: Converted to std::size_t in C++.
+- list: Converted to std::vector&lt;double&gt; in C++.</p>
+</dd>
+</dl>
+</section>
+<section id="id25">
+<h2>Returns:<a class="headerlink" href="#id25" title="Permalink to this heading"></a></h2>
+<dl class="simple">
+<dt>list</dt><dd><p>A list of generated operators (<code class="xref py py-class docutils literal notranslate"><span class="pre">cudaq.SpinOperator</span></code> objects).</p>
+</dd>
+</dl>
+</section>
+<section id="id26">
+<h2>Raises:<a class="headerlink" href="#id26" title="Permalink to this heading"></a></h2>
+<dl class="simple">
+<dt>RuntimeError</dt><dd><p>If the specified operator pool implementation is not found.</p>
+</dd>
+<dt>TypeError</dt><dd><p>If an unsupported configuration value type is provided.</p>
+</dd>
+</dl>
+</section>
+<section id="id27">
+<h2>Examples:<a class="headerlink" href="#id27" title="Permalink to this heading"></a></h2>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">ops</span> <span class="o">=</span> <span class="n">get_operator_pool</span><span class="p">(</span><span class="s2">&quot;uccsd&quot;</span><span class="p">,</span> <span class="n">n_qubits</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="n">n_electrons</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">ops</span> <span class="o">=</span> <span class="n">get_operator_pool</span><span class="p">(</span><span class="s2">&quot;custom_pool&quot;</span><span class="p">,</span> <span class="n">cutoff</span><span class="o">=</span><span class="mf">1e-5</span><span class="p">,</span> <span class="n">parameters</span><span class="o">=</span><span class="p">[</span><span class="mf">0.1</span><span class="p">,</span> <span class="mf">0.2</span><span class="p">,</span> <span class="mf">0.3</span><span class="p">])</span>
+</pre></div>
+</div>
+</section>
+<section id="id28">
+<h2>Notes:<a class="headerlink" href="#id28" title="Permalink to this heading"></a></h2>
+<p>The function internally converts Python types to C++ types and uses the
+cudaq::operator_pool extension point system to retrieve and generate the
+operator pool. Only integer and list configuration values are currently supported.</p>
+</section>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="cudaq_solvers.optim.optimize">
+<span class="sig-prename descclassname"><span class="pre">cudaq_solvers.optim.</span></span><span class="sig-name descname"><span class="pre">optimize</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">function</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Callable</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">initial_parameters</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><span class="pre">float</span></a><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">method</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'cobyla'</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.14)"><span class="pre">tuple</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><span class="pre">float</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><span class="pre">float</span></a><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#cudaq_solvers.optim.optimize" title="Permalink to this definition"></a></dt>
+<dd><p>Optimize a given objective function using various optimization methods.</p>
+<p>This function performs optimization on a user-provided objective function
+using the specified optimization method. It supports both gradient-based
+and gradient-free optimization algorithms.</p>
+<section id="id29">
+<h2>Parameters:<a class="headerlink" href="#id29" title="Permalink to this heading"></a></h2>
+<dl class="simple">
+<dt>function<span class="classifier">callable</span></dt><dd><p>The objective function to be minimized. It should take a list of parameters
+as input and return either:
+- A single float value (for gradient-free methods)
+- A tuple (float, list[float]) where the first element is the function value and the second is the gradient (for gradient-based methods)</p>
+</dd>
+<dt>initial_parameters<span class="classifier">list[float]</span></dt><dd><p>Initial guess for the parameters to be optimized.</p>
+</dd>
+<dt>method<span class="classifier">str, optional</span></dt><dd><p>The optimization method to use. Default is ‘cobyla’.
+Must be a valid, registered cudaq-x optimizer.</p>
+</dd>
+<dt>options<span class="classifier">dict</span></dt><dd><p>Additional options for the optimizer. These are method-specific.</p>
+</dd>
+</dl>
+</section>
+<section id="id30">
+<h2>Returns:<a class="headerlink" href="#id30" title="Permalink to this heading"></a></h2>
+<dl class="simple">
+<dt>OptimizationResult</dt><dd><p>An object containing the results of the optimization process.</p>
+</dd>
+</dl>
+</section>
+<section id="id31">
+<h2>Raises:<a class="headerlink" href="#id31" title="Permalink to this heading"></a></h2>
+<dl class="simple">
+<dt>RuntimeError</dt><dd><p>If an invalid optimization method is specified or if the objective function
+returns an incorrect format for gradient-based optimizers.</p>
+</dd>
+</dl>
+</section>
+<section id="id32">
+<h2>Examples:<a class="headerlink" href="#id32" title="Permalink to this heading"></a></h2>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="k">def</span><span class="w"> </span><span class="nf">objective</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="gp">... </span>    <span class="k">return</span> <span class="nb">sum</span><span class="p">([</span><span class="n">xi</span><span class="o">**</span><span class="mi">2</span> <span class="k">for</span> <span class="n">xi</span> <span class="ow">in</span> <span class="n">x</span><span class="p">]),</span> <span class="p">[</span><span class="mi">2</span><span class="o">*</span><span class="n">xi</span> <span class="k">for</span> <span class="n">xi</span> <span class="ow">in</span> <span class="n">x</span><span class="p">]</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">result</span> <span class="o">=</span> <span class="n">optimize</span><span class="p">(</span><span class="n">objective</span><span class="p">,</span> <span class="p">[</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">,</span> <span class="mf">3.0</span><span class="p">],</span> <span class="n">method</span><span class="o">=</span><span class="s1">&#39;l-bfgs-b&#39;</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">optimal_parameters</span><span class="p">)</span>
+<span class="go">[0.0, 0.0, 0.0]</span>
+</pre></div>
+</div>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="k">def</span><span class="w"> </span><span class="nf">simple_objective</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="gp">... </span>    <span class="k">return</span> <span class="nb">sum</span><span class="p">([</span><span class="n">xi</span><span class="o">**</span><span class="mi">2</span> <span class="k">for</span> <span class="n">xi</span> <span class="ow">in</span> <span class="n">x</span><span class="p">])</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">result</span> <span class="o">=</span> <span class="n">optimize</span><span class="p">(</span><span class="n">simple_objective</span><span class="p">,</span> <span class="p">[</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">,</span> <span class="mf">3.0</span><span class="p">],</span> <span class="n">method</span><span class="o">=</span><span class="s1">&#39;cobyla&#39;</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">optimal_value</span><span class="p">)</span>
+<span class="go">0.0</span>
+</pre></div>
+</div>
+</section>
+<section id="id33">
+<h2>Notes:<a class="headerlink" href="#id33" title="Permalink to this heading"></a></h2>
+<ul class="simple">
+<li><p>The function automatically detects whether the optimization method requires
+gradients and expects the objective function to return the appropriate format.</p></li>
+<li><p>For gradient-based methods, the objective function must return a tuple of
+(value, gradient).</p></li>
+<li><p>For gradient-free methods, the objective function should return only the value.</p></li>
+<li><p>The optimization process uses the cudaq-x backend, which must be properly
+set up and have the specified optimization method registered.</p></li>
+</ul>
+</section>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="cudaq_solvers.ObserveExecutionType">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">cudaq_solvers.</span></span><span class="sig-name descname"><span class="pre">ObserveExecutionType</span></span><a class="headerlink" href="#cudaq_solvers.ObserveExecutionType" title="Permalink to this definition"></a></dt>
+<dd><p>An enumeration representing different types of execution in an optimization process.</p>
+<p>This enum defines the various types of operations that can occur during an
+optimization iteration, specifically distinguishing between function evaluations
+and gradient computations.</p>
+<section id="usage">
+<h2>Usage:<a class="headerlink" href="#usage" title="Permalink to this heading"></a></h2>
+<p>This enum is typically used in conjunction with optimization algorithms and
+observation mechanisms to indicate the nature of a particular step or evaluation
+in the optimization process.</p>
+</section>
+<section id="id34">
+<h2>Examples:<a class="headerlink" href="#id34" title="Permalink to this heading"></a></h2>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="k">def</span><span class="w"> </span><span class="nf">callback</span><span class="p">(</span><span class="n">iteration</span><span class="p">):</span>
+<span class="gp">... </span>    <span class="k">if</span> <span class="n">iteration</span><span class="o">.</span><span class="n">type</span> <span class="o">==</span> <span class="n">ObserveExecutionType</span><span class="o">.</span><span class="n">function</span><span class="p">:</span>
+<span class="gp">... </span>        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Function evaluation&quot;</span><span class="p">)</span>
+<span class="gp">... </span>    <span class="k">elif</span> <span class="n">iteration</span><span class="o">.</span><span class="n">type</span> <span class="o">==</span> <span class="n">ObserveExecutionType</span><span class="o">.</span><span class="n">gradient</span><span class="p">:</span>
+<span class="gp">... </span>        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Gradient computation&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="c1"># In an optimization loop</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="k">for</span> <span class="n">step</span> <span class="ow">in</span> <span class="n">optimization_steps</span><span class="p">:</span>
+<span class="gp">... </span>    <span class="k">if</span> <span class="n">step</span><span class="o">.</span><span class="n">type</span> <span class="o">==</span> <span class="n">ObserveExecutionType</span><span class="o">.</span><span class="n">function</span><span class="p">:</span>
+<span class="gp">... </span>        <span class="c1"># Process function evaluation</span>
+<span class="gp">... </span>    <span class="k">elif</span> <span class="n">step</span><span class="o">.</span><span class="n">type</span> <span class="o">==</span> <span class="n">ObserveExecutionType</span><span class="o">.</span><span class="n">gradient</span><span class="p">:</span>
+<span class="gp">... </span>        <span class="c1"># Process gradient information</span>
+</pre></div>
+</div>
+</section>
+<section id="id35">
+<h2>Notes:<a class="headerlink" href="#id35" title="Permalink to this heading"></a></h2>
+<ul class="simple">
+<li><p>The distinction between function evaluations and gradient computations is
+particularly important for gradient-based optimization methods.</p></li>
+<li><p>Some optimization algorithms may only use function evaluations (gradient-free methods),
+while others rely heavily on gradient information.</p></li>
+<li><p>This enum can be used for logging, debugging, or implementing custom behaviors
+based on the type of operation being performed during optimization.</p></li>
+</ul>
+<p>Members:</p>
+<blockquote>
+<div><p>function : Represents a standard function evaluation of the objective function.</p>
+</div></blockquote>
+<p>This typically involves computing the value of the objective function
+at a given point in the parameter space.</p>
+<blockquote>
+<div><p>gradient : Represents a gradient computation.</p>
+</div></blockquote>
+<p>This involves calculating the partial derivatives of the objective</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="cudaq_solvers.ObserveExecutionType.function">
+<span class="sig-name descname"><span class="pre">function</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">&lt;ObserveExecutionType.function:</span> <span class="pre">0&gt;</span></em><a class="headerlink" href="#cudaq_solvers.ObserveExecutionType.function" title="Permalink to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="cudaq_solvers.ObserveExecutionType.gradient">
+<span class="sig-name descname"><span class="pre">gradient</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">&lt;ObserveExecutionType.gradient:</span> <span class="pre">1&gt;</span></em><a class="headerlink" href="#cudaq_solvers.ObserveExecutionType.gradient" title="Permalink to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="cudaq_solvers.ObserveExecutionType.name">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">name</span></span><a class="headerlink" href="#cudaq_solvers.ObserveExecutionType.name" title="Permalink to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="cudaq_solvers.ObserveExecutionType.value">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">value</span></span><a class="headerlink" href="#cudaq_solvers.ObserveExecutionType.value" title="Permalink to this definition"></a></dt>
+<dd></dd></dl>
+
+</section>
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="cudaq_solvers.ObserveIteration">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">cudaq_solvers.</span></span><span class="sig-name descname"><span class="pre">ObserveIteration</span></span><a class="headerlink" href="#cudaq_solvers.ObserveIteration" title="Permalink to this definition"></a></dt>
+<dd><p>A class representing a single iteration of an optimization process.</p>
+<p>This class encapsulates the state of an optimization iteration, including
+the current parameter values, the result of the objective function evaluation,
+and the type of iteration</p>
+<dl class="py property">
+<dt class="sig sig-object py" id="cudaq_solvers.ObserveIteration.parameters">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">parameters</span></span><a class="headerlink" href="#cudaq_solvers.ObserveIteration.parameters" title="Permalink to this definition"></a></dt>
+<dd><p>The current values of the optimization parameters at this iteration.
+These represent the point in the parameter space being evaluated.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="cudaq_solvers.ObserveIteration.result">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">result</span></span><a class="headerlink" href="#cudaq_solvers.ObserveIteration.result" title="Permalink to this definition"></a></dt>
+<dd><p>The value of the objective function evaluated at the current parameters.
+For minimization problems, lower values indicate better solutions.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="cudaq_solvers.ObserveIteration.type">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">type</span></span><a class="headerlink" href="#cudaq_solvers.ObserveIteration.type" title="Permalink to this definition"></a></dt>
+<dd><p>A string indicating the type or purpose of this iteration. Common types might include:
+- ‘function’: A standard function evaluation
+- ‘gradient’: An iteration where gradients were computed
+The exact set of possible types may depend on the specific optimization algorithm used.</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="cudaq_solvers.vqe">
+<span class="sig-prename descclassname"><span class="pre">cudaq_solvers.</span></span><span class="sig-name descname"><span class="pre">vqe</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">kernel</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Callable</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">spin_op</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">SpinOperator</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">initial_parameters</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><span class="pre">float</span></a><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.14)"><span class="pre">tuple</span></a></span></span><a class="headerlink" href="#cudaq_solvers.vqe" title="Permalink to this definition"></a></dt>
+<dd><p>Execute the Variational Quantum Eigensolver (VQE) algorithm.</p>
+<p>This function implements the VQE algorithm, a hybrid quantum-classical algorithm
+used to find the ground state energy of a given Hamiltonian using a parameterized
+quantum circuit.</p>
+<section id="id36">
+<h2>Parameters:<a class="headerlink" href="#id36" title="Permalink to this heading"></a></h2>
+<dl class="simple">
+<dt>kernel<span class="classifier">callable</span></dt><dd><p>A function representing the parameterized quantum circuit (ansatz).
+It should take a list of parameters as input and prepare the quantum state.</p>
+</dd>
+<dt>spin_op<span class="classifier">cudaq.SpinOperator</span></dt><dd><p>The Hamiltonian operator for which to find the ground state energy.</p>
+</dd>
+<dt>initial_parameters<span class="classifier">List[float]</span></dt><dd><p>Initial values for the variational parameters of the quantum circuit.</p>
+</dd>
+<dt>options<span class="classifier">dict</span></dt><dd><p>Additional options for the VQE algorithm. Supported options include:
+- shots : int, optional, Number of measurement shots. Default is -1 (use maximum available).
+- max_iterations : int, optional Maximum number of optimization iterations. Default is -1 (no limit).
+- verbose : bool, optional Whether to print verbose output. Default is False.
+- optimizer : str, optional Name of the classical optimizer to use. Default is ‘cobyla’.
+- gradient : str, optional Method for gradient computation (for gradient-based optimizers). Default is ‘parameter_shift’.
+- tol (double): Tolerance value for the optimizer. Default 1e-12.</p>
+</dd>
+</dl>
+</section>
+<section id="id37">
+<h2>Returns:<a class="headerlink" href="#id37" title="Permalink to this heading"></a></h2>
+<dl class="simple">
+<dt>Tuple[float, List[float], List[ObserveIteration]]</dt><dd><p>A tuple containing:
+1. The optimized ground state energy.
+2. The optimal variational parameters.
+3. A list of ObserveIteration objects containing data from each iteration.</p>
+</dd>
+</dl>
+</section>
+<section id="id38">
+<h2>Raises:<a class="headerlink" href="#id38" title="Permalink to this heading"></a></h2>
+<dl class="simple">
+<dt>RuntimeError</dt><dd><p>If an invalid optimizer or gradient method is specified.</p>
+</dd>
+</dl>
+</section>
+<section id="id39">
+<h2>Examples:<a class="headerlink" href="#id39" title="Permalink to this heading"></a></h2>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="k">def</span><span class="w"> </span><span class="nf">ansatz</span><span class="p">(</span><span class="n">params</span><span class="p">):</span>
+<span class="gp">... </span>    <span class="c1"># Define your quantum circuit here</span>
+<span class="gp">... </span>    <span class="k">pass</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">hamiltonian</span> <span class="o">=</span> <span class="n">cudaq</span><span class="o">.</span><span class="n">SpinOperator</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>  <span class="c1"># Define your Hamiltonian</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">initial_params</span> <span class="o">=</span> <span class="p">[</span><span class="mf">0.1</span><span class="p">,</span> <span class="mf">0.2</span><span class="p">,</span> <span class="mf">0.3</span><span class="p">]</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">energy</span><span class="p">,</span> <span class="n">opt_params</span><span class="p">,</span> <span class="n">iterations</span> <span class="o">=</span> <span class="n">vqe</span><span class="p">(</span><span class="n">ansatz</span><span class="p">,</span> <span class="n">hamiltonian</span><span class="p">,</span> <span class="n">initial_params</span><span class="p">,</span>
+<span class="gp">... </span>                                     <span class="n">optimizer</span><span class="o">=</span><span class="s1">&#39;cobyla&#39;</span><span class="p">,</span> <span class="n">shots</span><span class="o">=</span><span class="mi">1000</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Ground state energy: </span><span class="si">{</span><span class="n">energy</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Optimal parameters: </span><span class="si">{</span><span class="n">opt_params</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="id40">
+<h2>Notes:<a class="headerlink" href="#id40" title="Permalink to this heading"></a></h2>
+<ul class="simple">
+<li><p>The function automatically selects between gradient-free and gradient-based
+optimization based on the chosen optimizer.</p></li>
+<li><p>For gradient-based optimization, the ‘parameter_shift’ method is used by default,
+but can be changed using the ‘gradient’ option.</p></li>
+<li><p>The ObserveIteration objects in the returned list contain detailed information
+about each optimization step, useful for analysis and visualization.</p></li>
+<li><p>The performance of VQE heavily depends on the choice of ansatz, initial parameters,
+and optimization method.</p></li>
+</ul>
+</section>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="cudaq_solvers.adapt_vqe">
+<span class="sig-prename descclassname"><span class="pre">cudaq_solvers.</span></span><span class="sig-name descname"><span class="pre">adapt_vqe</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">arg0</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.14)"><span class="pre">object</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">arg1</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">SpinOperator</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">arg2</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><span class="pre">SpinOperator</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.14)"><span class="pre">tuple</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><span class="pre">float</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><span class="pre">float</span></a><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><span class="pre">SpinOperator</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#cudaq_solvers.adapt_vqe" title="Permalink to this definition"></a></dt>
+<dd><p>Perform ADAPT-VQE (Adaptive Derivative-Assembled Pseudo-Trotter Variational Quantum Eigensolver) optimization.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>initialStateKernel</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.14)"><em>object</em></a>) – Python object representing the initial state kernel.</p></li>
+<li><p><strong>op</strong> (<em>cudaq.SpinOperator</em>) – The Hamiltonian operator to be optimized.</p></li>
+<li><p><strong>pool</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><em>list</em></a><em> of </em><em>cudaq.SpinOperator</em>) – Pool of operators for ADAPT-VQE.</p></li>
+<li><p><strong>options</strong> – Additional options for the optimization process.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Keyword Arguments<span class="colon">:</span></dt>
+<dd class="field-even"><ul class="simple">
+<li><p><strong>optimizer</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>) – Optional name of the optimizer to use. Defaults to cobyla.</p></li>
+<li><p><strong>gradient</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>) – Optional name of the gradient method to use. Defaults to empty.</p></li>
+</ul>
+</dd>
+</dl>
+<dl class="simple">
+<dt>Options Dictionary:</dt><dd><p>The following keys are supported in the options dictionary:
+- max_iter (int): Maximum number of iterations. Default: 30
+- grad_norm_tolerance (float): Convergence tolerance for gradient norm. Default: 1e-5
+- grad_norm_diff_tolerance (float): Tolerance for difference between gradient norms. Default: 1e-5
+- threshold_energy (float): Energy convergence threshold. Default: 1e-6
+- initial_theta (float): Initial value for theta parameter. Default: 0.0
+- verbose (bool): Enable detailed output logging. Default: False
+- shots (int): Number of measurement shots (-1 for exact simulation). Default: -1
+- tol (double): Tolerance value for the optimizer. Default 1e-12
+- dynamic_start (string): Optimization mode for the theta parameters at each iteration. It can be either “warm”, or “cold”. Default: “cold”</p>
+</dd>
+</dl>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>The result of the ADAPT-VQE optimization.</p>
+</dd>
+</dl>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>This function wraps the C++ implementation of ADAPT-VQE in CUDA-QX.
+It compiles and registers the initial state kernel, sets up the optimizer,
+and performs the ADAPT-VQE optimization using the provided parameters.</p>
+</div>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="cudaq_solvers.stateprep.uccsd">
+<span class="sig-prename descclassname"><span class="pre">cudaq_solvers.stateprep.</span></span><span class="sig-name descname"><span class="pre">uccsd</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="pre">arg0:</span> <span class="pre">cudaq::qview&lt;2ul&gt;,</span> <span class="pre">arg1:</span> <span class="pre">list[float],</span> <span class="pre">arg2:</span> <span class="pre">int,</span> <span class="pre">arg3:</span> <span class="pre">int</span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#cudaq_solvers.stateprep.uccsd" title="Permalink to this definition"></a></dt>
+<dd><p>Unitary Coupled Cluster Singles Doubles Ansatz. Takes as input the qubits to apply the ansatz on, the rotational parameters, the number of electrons in the system, and the total spin (the number of unpaired electrons).</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="cudaq_solvers.stateprep.single_excitation">
+<span class="sig-prename descclassname"><span class="pre">cudaq_solvers.stateprep.</span></span><span class="sig-name descname"><span class="pre">single_excitation</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">arg0:</span> <span class="pre">cudaq::qview&lt;2ul&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">arg1:</span> <span class="pre">float</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">arg2:</span> <span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">arg3:</span> <span class="pre">int</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#cudaq_solvers.stateprep.single_excitation" title="Permalink to this definition"></a></dt>
+<dd><p>Perform a single fermionic excitation.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="cudaq_solvers.stateprep.double_excitation">
+<span class="sig-prename descclassname"><span class="pre">cudaq_solvers.stateprep.</span></span><span class="sig-name descname"><span class="pre">double_excitation</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">arg0:</span> <span class="pre">cudaq::qview&lt;2ul&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">arg1:</span> <span class="pre">float</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">arg2:</span> <span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">arg3:</span> <span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">arg4:</span> <span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">arg5:</span> <span class="pre">int</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#cudaq_solvers.stateprep.double_excitation" title="Permalink to this definition"></a></dt>
+<dd><p>Perform a double fermionic excitation.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="cudaq_solvers.stateprep.get_num_uccsd_parameters">
+<span class="sig-prename descclassname"><span class="pre">cudaq_solvers.stateprep.</span></span><span class="sig-name descname"><span class="pre">get_num_uccsd_parameters</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">num_electrons</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">num_qubits</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">spin</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a></span></span><a class="headerlink" href="#cudaq_solvers.stateprep.get_num_uccsd_parameters" title="Permalink to this definition"></a></dt>
+<dd><p>Calculate the number of UCCSD parameters</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>num_electrons</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>) – Number of electrons</p></li>
+<li><p><strong>num_qubits</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>) – Number of qubits</p></li>
+<li><p><strong>spin</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>) – Spin value. Optional, defaults to 0.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Number of UCCSD parameters</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)">int</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="cudaq_solvers.stateprep.get_uccsd_excitations">
+<span class="sig-prename descclassname"><span class="pre">cudaq_solvers.stateprep.</span></span><span class="sig-name descname"><span class="pre">get_uccsd_excitations</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">arg0</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">arg1</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">arg2</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.14)"><span class="pre">tuple</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#cudaq_solvers.stateprep.get_uccsd_excitations" title="Permalink to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="cudaq_solvers.stateprep.get_uccgsd_pauli_lists">
+<span class="sig-prename descclassname"><span class="pre">cudaq_solvers.stateprep.</span></span><span class="sig-name descname"><span class="pre">get_uccgsd_pauli_lists</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">num_qubits</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">only_singles</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><span class="pre">bool</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">only_doubles</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><span class="pre">bool</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.14)"><span class="pre">tuple</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><span class="pre">pauli_word</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><span class="pre">float</span></a><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#cudaq_solvers.stateprep.get_uccgsd_pauli_lists" title="Permalink to this definition"></a></dt>
+<dd><p>Generate UCCGSD operator pool (Python-style unique singles/doubles) and extract Pauli words and coefficients grouped by excitation.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>num_qubits</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>) – Number of spin orbitals (qubits).</p></li>
+<li><p><strong>only_doubles</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>) – If True, only double excitations.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Pauli words and coefficients grouped by excitation.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Tuple[List[List[PauliWord]], List[List[<a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)">float</a>]]]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="cudaq_solvers.stateprep.uccgsd">
+<span class="sig-prename descclassname"><span class="pre">cudaq_solvers.stateprep.</span></span><span class="sig-name descname"><span class="pre">uccgsd</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="pre">arg0:</span> <span class="pre">cudaq::qview&lt;2ul&gt;,</span> <span class="pre">arg1:</span> <span class="pre">list[float],</span> <span class="pre">arg2:</span> <span class="pre">list[list[pauli_word]],</span> <span class="pre">arg3:</span> <span class="pre">list[list[float]]</span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#cudaq_solvers.stateprep.uccgsd" title="Permalink to this definition"></a></dt>
+<dd><p>Unitary Coupled Cluster Generalized Singles Doubles Ansatz. Takes as input the qubits, grouped rotational parameters, grouped Pauli words, and grouped coefficients.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="cudaq_solvers.get_num_qaoa_parameters">
+<span class="sig-prename descclassname"><span class="pre">cudaq_solvers.</span></span><span class="sig-name descname"><span class="pre">get_num_qaoa_parameters</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">arg0</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">SpinOperator</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">arg1</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a></span></span><a class="headerlink" href="#cudaq_solvers.get_num_qaoa_parameters" title="Permalink to this definition"></a></dt>
+<dd><p>Return the number of required QAOA rotation parameters.</p>
+</dd></dl>
+
+<span class="target" id="gqe-api-python"></span><dl class="py function">
+<dt class="sig sig-object py" id="cudaq_solvers.gqe">
+<span class="sig-prename descclassname"><span class="pre">cudaq_solvers.</span></span><span class="sig-name descname"><span class="pre">gqe</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">cost</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pool</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">config</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#cudaq_solvers.gqe" title="Permalink to this definition"></a></dt>
+<dd><p>Run the Generative Quantum Eigensolver algorithm.</p>
+<p>GQE uses a transformer model to learn which quantum operators from a pool
+should be applied to minimize a given cost function. Python-only implementation.</p>
+<p>The neural network uses <a class="reference external" href="https://pytorch.org/">PyTorch</a>. If the installed PyTorch build
+does not ship CUDA kernels for your GPU, use a wheel with <strong>CUDA 12.8 or newer</strong> that
+supports your architecture (<a class="reference external" href="https://pytorch.org/get-started/locally/">installation options</a>).
+If the driver exposes a GPU but PyTorch cannot execute CUDA kernels on it, <code class="docutils literal notranslate"><span class="pre">gqe()</span></code>
+writes an error to standard error and exits the process with a non-zero status.</p>
+<p>The GQE implementation in CUDA-Q Solvers is based on this paper: <a class="reference external" href="https://arxiv.org/abs/2401.09253">K. Nakaji et al. (2024)</a>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>cost</strong> – Cost function that evaluates operator sequences</p></li>
+<li><p><strong>pool</strong> – List of quantum operators to select from</p></li>
+<li><p><strong>config</strong> – Optional configuration object. If None, uses kwargs to override defaults</p></li>
+<li><p><strong>kwargs</strong> – <p>Optional keyword arguments to override default configuration. The following
+special arguments are supported:</p>
+<ul>
+<li><p><code class="code docutils literal notranslate"><span class="pre">model</span></code>: Can pass in an already constructed transformer</p></li>
+<li><p><code class="code docutils literal notranslate"><span class="pre">optimizer</span></code>: Can pass in an already constructed optimizer</p></li>
+</ul>
+<p>Additionally, any default config parameter can be overridden via kwargs if no
+config object is provided, for example:</p>
+<ul>
+<li><p><code class="code docutils literal notranslate"><span class="pre">max_iters</span></code>: Overrides cfg.max_iters for total number of epochs to run</p></li>
+<li><p><code class="code docutils literal notranslate"><span class="pre">energy_offset</span></code>: Overrides cfg.energy_offset for offset to add to expectation value</p></li>
+</ul>
+</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>tuple: Minimum energy found, corresponding operator indices</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="cudaq_solvers.cudaq_solvers.gqe_algorithm.gqe.get_default_config">
+<span class="sig-prename descclassname"><span class="pre">cudaq_solvers.gqe_algorithm.gqe.</span></span><span class="sig-name descname"><span class="pre">get_default_config</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#cudaq_solvers.cudaq_solvers.gqe_algorithm.gqe.get_default_config" title="Permalink to this definition"></a></dt>
+<dd><p>Create a default configuration for GQE.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p><p>Default configuration for GQE with the following parameters:</p>
+<ul class="simple">
+<li><p><code class="code docutils literal notranslate"><span class="pre">num_samples</span></code> (int): Number of circuits to generate during each epoch/batch. Default=5</p></li>
+<li><p><code class="code docutils literal notranslate"><span class="pre">max_iters</span></code> (int): Number of epochs to run. Default=100</p></li>
+<li><p><code class="code docutils literal notranslate"><span class="pre">ngates</span></code> (int): Number of gates that make up each generated circuit. Default=20</p></li>
+<li><p><code class="code docutils literal notranslate"><span class="pre">seed</span></code> (int): Random seed. Default=3047</p></li>
+<li><p><code class="code docutils literal notranslate"><span class="pre">lr</span></code> (float): Learning rate used by the optimizer. Default=5e-7</p></li>
+<li><dl class="simple">
+<dt><code class="code docutils literal notranslate"><span class="pre">energy_offset</span></code> (float): Offset added to expectation value of the circuit (Energy) for numerical</dt><dd><p>stability, see <a class="reference external" href="https://arxiv.org/abs/2401.09253">K. Nakaji et al. (2024)</a> Sec. 3. Default=0.0</p>
+</dd>
+</dl>
+</li>
+<li><p><code class="code docutils literal notranslate"><span class="pre">grad_norm_clip</span></code> (float): max_norm for clipping gradients, see <a class="reference external" href="https://lightning.ai/docs/fabric/stable/api/fabric_methods.html#clip-gradients">Lightning docs</a>. Default=1.0</p></li>
+<li><dl class="simple">
+<dt><code class="code docutils literal notranslate"><span class="pre">temperature</span></code> (float): Starting inverse temperature β as described in <a class="reference external" href="https://arxiv.org/abs/2401.09253">K. Nakaji et al. (2024)</a></dt><dd><p>Sec. 2.2. Default=5.0</p>
+</dd>
+</dl>
+</li>
+<li><p><code class="code docutils literal notranslate"><span class="pre">del_temperature</span></code> (float): Temperature increase after each epoch. Default=0.05</p></li>
+<li><dl class="simple">
+<dt><code class="code docutils literal notranslate"><span class="pre">resid_pdrop</span></code> (float): The dropout probability for all fully connected layers in the embeddings,</dt><dd><p>encoder, and pooler, see <a class="reference external" href="https://github.com/huggingface/transformers/blob/main/src/transformers/models/gpt2/configuration_gpt2.py">GPT2Config</a>. Default=0.0</p>
+</dd>
+</dl>
+</li>
+<li><p><code class="code docutils literal notranslate"><span class="pre">embd_pdrop</span></code> (float): The dropout ratio for the embeddings, see <a class="reference external" href="https://github.com/huggingface/transformers/blob/main/src/transformers/models/gpt2/configuration_gpt2.py">GPT2Config</a>. Default=0.0</p></li>
+<li><p><code class="code docutils literal notranslate"><span class="pre">attn_pdrop</span></code> (float): The dropout ratio for the attention, see <a class="reference external" href="https://github.com/huggingface/transformers/blob/main/src/transformers/models/gpt2/configuration_gpt2.py">GPT2Config</a>. Default=0.0</p></li>
+<li><dl class="simple">
+<dt><code class="code docutils literal notranslate"><span class="pre">small</span></code> (bool): Uses a small transformer (6 hidden layers and 6 attention heads as opposed to</dt><dd><p>the default transformer of 12 of each). Default=False</p>
+</dd>
+</dl>
+</li>
+<li><p><code class="code docutils literal notranslate"><span class="pre">use_fabric_logging</span></code> (bool): Whether to enable fabric logging. Default=False</p></li>
+<li><p><code class="code docutils literal notranslate"><span class="pre">fabric_logger</span></code> (object): Fabric logger to use for logging. If None, no logging will be done. Default=None</p></li>
+<li><p><code class="code docutils literal notranslate"><span class="pre">save_trajectory</span></code> (bool): Whether to save the trajectory data to a file. Default=False</p></li>
+<li><p><code class="code docutils literal notranslate"><span class="pre">trajectory_file_path</span></code> (str): Path to save the trajectory data file. Default=”gqe_logs/gqe_trajectory.json”</p></li>
+<li><dl class="simple">
+<dt><code class="code docutils literal notranslate"><span class="pre">verbose</span></code> (bool): Enable verbose output to the console. Output includes the epoch, loss,</dt><dd><p>model.train_step time, and minimum energy. Default=False</p>
+</dd>
+</dl>
+</li>
+</ul>
+</p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="cpp_api.html" class="btn btn-neutral float-left" title="CUDA-Q Solvers C++ API" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, NVIDIA Corporation &amp; Affiliates.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(false);
+      });
+  </script>  
+
+  <style>
+  a:link, a:visited {
+    color: #76b900;
+  }
+
+  a:hover {
+    color: #8c0;
+  }
+
+  .rst-content dl:not(.docutils) dt {
+    background: rgba(118, 185, 0, 0.1);
+    color: rgba(59,93,0,1);
+    border-top: solid 3px rgba(59,93,0,1);
+  }
+  </style>
+  
+
+</body>
+</html>

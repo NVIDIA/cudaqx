@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.18.1: http://docutils.sourceforge.net/" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Quantum Error Correction with Circuit-level Noise Modeling &mdash; NVIDIA CUDA-QX  documentation</title>
+      <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+      <link rel="stylesheet" href="../../_static/css/theme.css" type="text/css" />
+      <link rel="stylesheet" href="../../_static/tabs.css" type="text/css" />
+      <link rel="stylesheet" href="../../_static/copybutton.css" type="text/css" />
+      <link rel="stylesheet" href="../../_static/cudaq_override.css" type="text/css" />
+      <link rel="stylesheet" href="../../_static/sg_gallery.css" type="text/css" />
+      <link rel="stylesheet" href="/__w/cudaqx/cudaqx/docs/sphinx/_static/cudaq_override.css" type="text/css" />
+  <!--[if lt IE 9]>
+    <script src="../../_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script data-url_root="../../" id="documentation_options" src="../../_static/documentation_options.js"></script>
+        <script src="../../_static/jquery.js"></script>
+        <script src="../../_static/underscore.js"></script>
+        <script src="../../_static/_sphinx_javascript_frameworks_compat.js"></script>
+        <script src="../../_static/doctools.js"></script>
+        <script src="../../_static/sphinx_highlight.js"></script>
+        <script src="../../_static/tabs.js"></script>
+        <script src="../../_static/clipboard.min.js"></script>
+        <script src="../../_static/copybutton.js"></script>
+        <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+        <script src="../../_static/version-switcher.js"></script>
+    <script src="../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Decoders" href="decoders.html" />
+    <link rel="prev" title="Quantum Error Correction with Code-Capacity Noise Modeling" href="code_capacity_noise.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search"  style="background: #76b900" > 
+
+          
+          
+          <a href="../../index.html" class="icon icon-home">
+            NVIDIA CUDA-QX
+          </a>
+              <div class="version">
+                0.6.0
+              </div>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+  <style>
+    /* Sidebar header (and topbar for mobile) */
+    .wy-side-nav-search, .wy-nav-top {
+      background: #76b900;
+    }
+
+    .wy-side-nav-search a:link, .wy-nav-top a:link {
+      color: #fff;
+    }
+    .wy-side-nav-search a:visited, .wy-nav-top a:visited {
+      color: #fff;
+    }
+    .wy-side-nav-search a:hover, .wy-nav-top a:hover {
+      color: #fff;
+    }
+
+    .wy-menu-vertical a:link, .wy-menu-vertical a:visited {
+      color: #d9d9d9
+    }
+
+    .wy-menu-vertical a:active {
+      background-color: #76b900
+    }
+
+    .wy-side-nav-search>div.version {
+      color: rgba(0, 0, 0, 0.3)
+    }
+
+    /* override table width restrictions */
+    .wy-table-responsive table td, .wy-table-responsive table th {
+        white-space: normal;
+    }
+
+    .wy-table-responsive {
+        margin-bottom: 24px;
+        max-width: 100%;
+        overflow: visible;
+    }
+  </style>
+  
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Getting Started</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../quickstart/installation.html">Installation Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../quickstart/installation.html#installation-methods">Installation Methods</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../quickstart/installation.html#pip-install">pip install</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../quickstart/installation.html#docker-container">Docker Container</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../quickstart/installation.html#building-from-source">Building from Source</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../quickstart/installation.html#installing-pytorch">Installing PyTorch</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Libraries</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../components/qec/introduction.html">CUDA-Q QEC - Quantum Error Correction Library</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../components/qec/introduction.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../components/qec/introduction.html#core-components">Core Components</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../components/qec/introduction.html#qec-code-framework-cudaq-qec-code">QEC Code Framework <code class="code docutils literal notranslate"><span class="pre">cudaq::qec::code</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#class-structure">Class Structure</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#implementing-a-new-code">Implementing a New Code</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#example-steane-code">Example: Steane Code</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#implementing-a-new-code-in-python">Implementing a New Code in Python</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#key-points">Key Points</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#using-the-code-framework">Using the Code Framework</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../components/qec/introduction.html#pre-built-qec-codes">Pre-built QEC Codes</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#steane-code">Steane Code</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#repetition-code">Repetition Code</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../components/qec/introduction.html#decoder-framework-cudaq-qec-decoder">Decoder Framework <code class="code docutils literal notranslate"><span class="pre">cudaq::qec::decoder</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#id1">Class Structure</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#implementing-a-new-decoder-in-c">Implementing a New Decoder in C++</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#example-lookup-table-decoder">Example: Lookup Table Decoder</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#implementing-a-decoder-in-python">Implementing a Decoder in Python</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#key-features">Key Features</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#usage-example">Usage Example</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../components/qec/introduction.html#pre-built-qec-decoders">Pre-built QEC Decoders</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#quantum-low-density-parity-check-decoder">Quantum Low-Density Parity-Check Decoder</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#tensor-network-decoder">Tensor Network Decoder</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../components/qec/introduction.html#real-time-decoding">Real-Time Decoding</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#id2">Key Features</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#workflow-and-terminology">Workflow and Terminology</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../components/qec/introduction.html#numerical-experiments">Numerical Experiments</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#conventions">Conventions</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/qec/introduction.html#memory-circuit-experiments">Memory Circuit Experiments</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../components/qec/introduction.html#function-variants">Function Variants</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../components/qec/introduction.html#return-values">Return Values</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../components/qec/introduction.html#example-usage">Example Usage</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../components/qec/introduction.html#additional-noise-models">Additional Noise Models</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../components/solvers/introduction.html">CUDA-Q Solvers Library</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../components/solvers/introduction.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../components/solvers/introduction.html#core-components">Core Components</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../components/solvers/introduction.html#operator-infrastructure">Operator Infrastructure</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../components/solvers/introduction.html#molecular-hamiltonian-options">Molecular Hamiltonian Options</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/solvers/introduction.html#example-usage">Example Usage</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../components/solvers/introduction.html#variational-quantum-eigensolver-vqe">Variational Quantum Eigensolver (VQE)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../components/solvers/introduction.html#vqe-examples">VQE Examples</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../components/solvers/introduction.html#basic-usage">Basic Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/solvers/introduction.html#custom-optimization">Custom Optimization</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/solvers/introduction.html#shot-based-simulation">Shot-based Simulation</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../components/solvers/introduction.html#adapt-vqe">ADAPT-VQE</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../components/solvers/introduction.html#key-features">Key Features</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/solvers/introduction.html#id1">Basic Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/solvers/introduction.html#advanced-usage">Advanced Usage</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../components/solvers/introduction.html#custom-optimization-settings">Custom Optimization Settings</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/solvers/introduction.html#available-operator-pools">Available Operator Pools</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/solvers/introduction.html#available-ansatz">Available Ansatz</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/solvers/introduction.html#algorithm-parameters">Algorithm Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../components/solvers/introduction.html#results-analysis">Results Analysis</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Examples</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="examples.html">CUDA-Q QEC by Example</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="code_capacity_noise.html">   Code-Capacity QEC</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="code_capacity_noise.html#cuda-q-qec-implementation">CUDA-Q QEC Implementation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="code_capacity_noise.html#code-explanation">Code Explanation</a></li>
+</ul>
+</li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">   Circuit-Level QEC</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#cuda-q-qec-implementation">CUDA-Q QEC Implementation</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="decoders.html">   Decoders</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="decoders.html#detector-error-model">Detector Error Model</a></li>
+<li class="toctree-l3"><a class="reference internal" href="decoders.html#generating-a-multi-round-parity-check-matrix">Generating a Multi-Round Parity Check Matrix</a></li>
+<li class="toctree-l3"><a class="reference internal" href="decoders.html#creating-new-qec-codes">Creating New QEC codes</a></li>
+<li class="toctree-l3"><a class="reference internal" href="decoders.html#getting-started-with-the-nvidia-qldpc-decoder">Getting Started with the NVIDIA QLDPC Decoder</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="decoders.html#belief-propagation-methods">Belief Propagation Methods</a></li>
+<li class="toctree-l4"><a class="reference internal" href="decoders.html#usage-example">Usage Example</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="decoders.html#exact-maximum-likelihood-decoding-with-nvidia-tensor-network-decoder">Exact Maximum Likelihood Decoding with NVIDIA Tensor Network Decoder</a></li>
+<li class="toctree-l3"><a class="reference internal" href="decoders.html#deploying-ai-decoders-with-tensorrt">Deploying AI Decoders with TensorRT</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="realtime_decoding.html">   Real-Time Decoding</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="realtime_decoding.html#workflow-overview">Workflow Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="realtime_decoding.html#real-time-decoding-example">Real-Time Decoding Example</a></li>
+<li class="toctree-l3"><a class="reference internal" href="realtime_decoding.html#configuration">Configuration</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="realtime_decoding.html#step-1-generate-detector-error-model">Step 1: Generate Detector Error Model</a></li>
+<li class="toctree-l4"><a class="reference internal" href="realtime_decoding.html#step-2-configure-and-save-decoder">Step 2: Configure and Save Decoder</a></li>
+<li class="toctree-l4"><a class="reference internal" href="realtime_decoding.html#step-3-load-configuration">Step 3: Load Configuration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="realtime_decoding.html#step-4-use-in-quantum-kernels">Step 4: Use in Quantum Kernels</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="realtime_decoding.html#backend-selection">Backend Selection</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="realtime_decoding.html#simulation-backend">Simulation Backend</a></li>
+<li class="toctree-l4"><a class="reference internal" href="realtime_decoding.html#quantinuum-hardware-backend">Quantinuum Hardware Backend</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="realtime_decoding.html#compilation-and-execution-examples">Compilation and Execution Examples</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="realtime_decoding.html#common-use-cases">Common Use Cases</a></li>
+<li class="toctree-l4"><a class="reference internal" href="realtime_decoding.html#c-compilation">C++ Compilation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="realtime_decoding.html#python-execution">Python Execution</a></li>
+<li class="toctree-l4"><a class="reference internal" href="realtime_decoding.html#complete-workflow-example">Complete Workflow Example</a></li>
+<li class="toctree-l4"><a class="reference internal" href="realtime_decoding.html#debugging-and-environment-variables">Debugging and Environment Variables</a></li>
+<li class="toctree-l4"><a class="reference internal" href="realtime_decoding.html#decoder-selection">Decoder Selection</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="realtime_decoding.html#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="realtime_decoding.html#configuration-upload-failures-quantinuum-backend">Configuration Upload Failures (Quantinuum Backend)</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="realtime_decoding.html#see-also">See Also</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../solvers/examples.html">CUDA-Q Solvers by Example</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../solvers/molecular_hamiltonians.html">   Molecular-Hamiltonians</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../solvers/molecular_hamiltonians.html#molecular-orbitals-and-hamiltonians">Molecular Orbitals and Hamiltonians</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../solvers/molecular_hamiltonians.html#natural-orbitals-from-mp2">Natural Orbitals from MP2</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../solvers/molecular_hamiltonians.html#casscf-orbitals">CASSCF Orbitals</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../solvers/molecular_hamiltonians.html#for-open-shell-systems">For open-shell systems</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../solvers/adapt.html">   ADAPT-VQE</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../solvers/vqe.html">   VQE</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../solvers/vqe.html#cuda-q-solvers-implementation">CUDA-Q Solvers Implementation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../solvers/vqe.html#code-explanation">Code Explanation</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../solvers/qaoa.html">   QAOA</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../solvers/qaoa.html#cuda-q-solvers-implementation">CUDA-Q Solvers Implementation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../solvers/qaoa.html#code-explanation">Code Explanation</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../solvers/gqe.html">   GQE</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../solvers/gqe.html#cuda-q-solvers-implementation">CUDA-Q Solvers Implementation</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../api/core/cpp_api.html">CUDA-QX Namespaces and Core Library C++ API</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../api/core/cpp_api.html#namespaces">Namespaces</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/core/cpp_api.html#core">Core</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../api/qec/cpp_api.html">CUDA-Q QEC C++ API</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../api/qec/cpp_api.html#code">Code</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/qec/cpp_api.html#detector-error-model">Detector Error Model</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/qec/cpp_api.html#decoder-interfaces">Decoder Interfaces</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/qec/cpp_api.html#built-in-decoders">Built-in Decoders</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/qec/cpp_api.html#nvidia-qldpc-decoder">NVIDIA QLDPC Decoder</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../api/qec/cpp_api.html#nv_qldpc_decoder"><code class="docutils literal notranslate"><span class="pre">nv_qldpc_decoder</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/qec/cpp_api.html#sliding-window-decoder">Sliding Window Decoder</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../api/qec/cpp_api.html#sliding_window"><code class="docutils literal notranslate"><span class="pre">sliding_window</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/qec/cpp_api.html#tensorrt-decoder">TensorRT Decoder</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../api/qec/cpp_api.html#trt_decoder"><code class="docutils literal notranslate"><span class="pre">trt_decoder</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/qec/cpp_api.html#real-time-decoding">Real-Time Decoding</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/qec/cpp_api.html#core-decoding-functions">Core Decoding Functions</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/qec/cpp_api.html#configuration-api">Configuration API</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/qec/cpp_api.html#helper-functions">Helper Functions</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/qec/cpp_api.html#parity-check-matrix-utilities">Parity Check Matrix Utilities</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/qec/cpp_api.html#common">Common</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../api/qec/python_api.html">CUDA-Q QEC Python API</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../api/qec/python_api.html#code">Code</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/qec/python_api.html#detector-error-model">Detector Error Model</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/qec/python_api.html#decoder-interfaces">Decoder Interfaces</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/qec/python_api.html#built-in-decoders">Built-in Decoders</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/qec/python_api.html#nvidia-qldpc-decoder">NVIDIA QLDPC Decoder</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../api/qec/python_api.html#nv_qldpc_decoder"><code class="docutils literal notranslate"><span class="pre">nv_qldpc_decoder</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/qec/python_api.html#sliding-window-decoder">Sliding Window Decoder</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../api/qec/python_api.html#sliding_window"><code class="docutils literal notranslate"><span class="pre">sliding_window</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/qec/python_api.html#tensorrt-decoder">TensorRT Decoder</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../api/qec/python_api.html#trt_decoder"><code class="docutils literal notranslate"><span class="pre">trt_decoder</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/qec/python_api.html#tensor-network-decoder">Tensor Network Decoder</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../api/qec/python_api.html#cudaq_qec.plugin.decoders.tensor_network_decoder.TensorNetworkDecoder"><code class="docutils literal notranslate"><span class="pre">cudaq_qec.plugin.decoders.tensor_network_decoder.TensorNetworkDecoder</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/qec/python_api.html#real-time-decoding">Real-Time Decoding</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/qec/python_api.html#core-decoding-functions">Core Decoding Functions</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../api/qec/python_api.html#cudaq_qec.qec.enqueue_syndromes"><code class="docutils literal notranslate"><span class="pre">cudaq_qec.qec.enqueue_syndromes()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../api/qec/python_api.html#cudaq_qec.qec.get_corrections"><code class="docutils literal notranslate"><span class="pre">cudaq_qec.qec.get_corrections()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../api/qec/python_api.html#cudaq_qec.qec.reset_decoder"><code class="docutils literal notranslate"><span class="pre">cudaq_qec.qec.reset_decoder()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/qec/python_api.html#configuration-api">Configuration API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../api/qec/python_api.html#cudaq_qec.configure_decoders"><code class="docutils literal notranslate"><span class="pre">cudaq_qec.configure_decoders()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../api/qec/python_api.html#cudaq_qec.configure_decoders_from_file"><code class="docutils literal notranslate"><span class="pre">cudaq_qec.configure_decoders_from_file()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../api/qec/python_api.html#cudaq_qec.configure_decoders_from_str"><code class="docutils literal notranslate"><span class="pre">cudaq_qec.configure_decoders_from_str()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../api/qec/python_api.html#cudaq_qec.finalize_decoders"><code class="docutils literal notranslate"><span class="pre">cudaq_qec.finalize_decoders()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/qec/python_api.html#helper-functions">Helper Functions</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../api/qec/python_api.html#cudaq_qec.pcm_to_sparse_vec"><code class="docutils literal notranslate"><span class="pre">cudaq_qec.pcm_to_sparse_vec()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../api/qec/python_api.html#cudaq_qec.pcm_from_sparse_vec"><code class="docutils literal notranslate"><span class="pre">cudaq_qec.pcm_from_sparse_vec()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../api/qec/python_api.html#cudaq_qec.generate_timelike_sparse_detector_matrix"><code class="docutils literal notranslate"><span class="pre">cudaq_qec.generate_timelike_sparse_detector_matrix()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/qec/python_api.html#common">Common</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/qec/python_api.html#parity-check-matrix-utilities">Parity Check Matrix Utilities</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../api/solvers/cpp_api.html">CUDA-Q Solvers C++ API</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../api/solvers/python_api.html">CUDA-Q Solvers Python API</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.jordan_wigner"><code class="docutils literal notranslate"><span class="pre">jordan_wigner()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.bravyi_kitaev"><code class="docutils literal notranslate"><span class="pre">bravyi_kitaev()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.MolecularHamiltonian"><code class="docutils literal notranslate"><span class="pre">MolecularHamiltonian</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.MolecularHamiltonian.energies"><code class="docutils literal notranslate"><span class="pre">MolecularHamiltonian.energies</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.MolecularHamiltonian.hamiltonian"><code class="docutils literal notranslate"><span class="pre">MolecularHamiltonian.hamiltonian</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.MolecularHamiltonian.hpq"><code class="docutils literal notranslate"><span class="pre">MolecularHamiltonian.hpq</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.MolecularHamiltonian.hpqrs"><code class="docutils literal notranslate"><span class="pre">MolecularHamiltonian.hpqrs</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.MolecularHamiltonian.n_electrons"><code class="docutils literal notranslate"><span class="pre">MolecularHamiltonian.n_electrons</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.MolecularHamiltonian.n_orbitals"><code class="docutils literal notranslate"><span class="pre">MolecularHamiltonian.n_orbitals</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.get_operator_pool"><code class="docutils literal notranslate"><span class="pre">get_operator_pool()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.optim.optimize"><code class="docutils literal notranslate"><span class="pre">optimize()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.ObserveExecutionType"><code class="docutils literal notranslate"><span class="pre">ObserveExecutionType</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.ObserveExecutionType.function"><code class="docutils literal notranslate"><span class="pre">ObserveExecutionType.function</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.ObserveExecutionType.gradient"><code class="docutils literal notranslate"><span class="pre">ObserveExecutionType.gradient</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.ObserveExecutionType.name"><code class="docutils literal notranslate"><span class="pre">ObserveExecutionType.name</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.ObserveExecutionType.value"><code class="docutils literal notranslate"><span class="pre">ObserveExecutionType.value</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.ObserveIteration"><code class="docutils literal notranslate"><span class="pre">ObserveIteration</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.ObserveIteration.parameters"><code class="docutils literal notranslate"><span class="pre">ObserveIteration.parameters</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.ObserveIteration.result"><code class="docutils literal notranslate"><span class="pre">ObserveIteration.result</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.ObserveIteration.type"><code class="docutils literal notranslate"><span class="pre">ObserveIteration.type</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.vqe"><code class="docutils literal notranslate"><span class="pre">vqe()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.adapt_vqe"><code class="docutils literal notranslate"><span class="pre">adapt_vqe()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.stateprep.uccsd"><code class="docutils literal notranslate"><span class="pre">uccsd()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.stateprep.single_excitation"><code class="docutils literal notranslate"><span class="pre">single_excitation()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.stateprep.double_excitation"><code class="docutils literal notranslate"><span class="pre">double_excitation()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.stateprep.get_num_uccsd_parameters"><code class="docutils literal notranslate"><span class="pre">get_num_uccsd_parameters()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.stateprep.get_uccsd_excitations"><code class="docutils literal notranslate"><span class="pre">get_uccsd_excitations()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.stateprep.get_uccgsd_pauli_lists"><code class="docutils literal notranslate"><span class="pre">get_uccgsd_pauli_lists()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.stateprep.uccgsd"><code class="docutils literal notranslate"><span class="pre">uccgsd()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.get_num_qaoa_parameters"><code class="docutils literal notranslate"><span class="pre">get_num_qaoa_parameters()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.gqe"><code class="docutils literal notranslate"><span class="pre">gqe()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.cudaq_solvers.gqe_algorithm.gqe.get_default_config"><code class="docutils literal notranslate"><span class="pre">cudaq_solvers.gqe_algorithm.gqe.get_default_config()</span></code></a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu"  style="background: #76b900" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../index.html">NVIDIA CUDA-QX</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="examples.html">CUDA-Q QEC by Example</a></li>
+      <li class="breadcrumb-item active">Quantum Error Correction with Circuit-level Noise Modeling</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../../_sources/examples_rst/qec/circuit_level_noise.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul><div class="rst-breadcrumbs-buttons" role="navigation" aria-label="Sequential page navigation">
+        <a href="code_capacity_noise.html" class="btn btn-neutral float-left" title="Quantum Error Correction with Code-Capacity Noise Modeling" accesskey="p"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="decoders.html" class="btn btn-neutral float-right" title="Decoders" accesskey="n">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+  </div>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="quantum-error-correction-with-circuit-level-noise-modeling">
+<h1>Quantum Error Correction with Circuit-level Noise Modeling<a class="headerlink" href="#quantum-error-correction-with-circuit-level-noise-modeling" title="Permalink to this heading"></a></h1>
+<p>This example builds upon the previous code-capacity noise model example.
+In the circuit-level noise modeling experiment, we have many of the same components from the CUDA-Q QEC library: QEC codes, decoders, and noisy data.
+The primary difference here, is that we can begin to run CUDA-Q kernels to generate noisy data, rather than just generating random bitstring to represent our errors.</p>
+<p>Along with the stabilizers, parity check matrices, and logical observables, the QEC code type also has an encoding map.
+This map allows codes to define logical gates in terms of gates on the underlying physical qubits.
+These encodings operate on the <code class="code docutils literal notranslate"><span class="pre">qec.patch</span></code> type, which represents three registers of physical qubits making up a logical qubit.
+A data qubit register, an X-stabilizer ancilla register, and a Z-stabilizer ancilla register.</p>
+<p>The most notable encoding stored in the QEC map, is how the <code class="code docutils literal notranslate"><span class="pre">qec.operation.stabilizer_round</span></code>, which encodes a <code class="code docutils literal notranslate"><span class="pre">cudaq.kernel</span></code> which stores the gate-level information for how to do a stabilizer measurement.
+These stabilizer rounds are the gate-level way to encode the parity check matrix of a QEC code into quantum circuits.</p>
+<p>This example walks through how to use the CUDA-Q QEC library to perform a quantum memory experiment simulation.
+These experiments model how well QEC cycles, or rounds of stabilizer measuments, can protect the information encoded in a logical qubit.
+If noise is turned off, then the information is protected indefinitely.
+Here, we will model depolarization noise after each CX gate, and track how many logical errors occur.</p>
+<section id="cuda-q-qec-implementation">
+<h2>CUDA-Q QEC Implementation<a class="headerlink" href="#cuda-q-qec-implementation" title="Permalink to this heading"></a></h2>
+<p>Here’s how to use CUDA-Q QEC to perform a circuit-level noise model experiment in both Python and C++:</p>
+<div class="tab-set docutils">
+<input checked="True" class="tab-input" id="tab-set--0-input--1" name="tab-set--0" type="radio"><label class="tab-label" for="tab-set--0-input--1">Python</label><div class="tab-content docutils">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">cudaq</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">cudaq_qec</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">qec</span>
+
+<span class="c1"># Get a QEC code</span>
+<span class="n">cudaq</span><span class="o">.</span><span class="n">set_target</span><span class="p">(</span><span class="s2">&quot;stim&quot;</span><span class="p">)</span>
+<span class="n">distance</span> <span class="o">=</span> <span class="mi">5</span>
+<span class="n">surface_code</span> <span class="o">=</span> <span class="n">qec</span><span class="o">.</span><span class="n">get_code</span><span class="p">(</span><span class="s2">&quot;surface_code&quot;</span><span class="p">,</span> <span class="n">distance</span><span class="o">=</span><span class="n">distance</span><span class="p">)</span>
+
+<span class="c1"># Get the Z observables.</span>
+<span class="n">Lz</span> <span class="o">=</span> <span class="n">surface_code</span><span class="o">.</span><span class="n">get_observables_z</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Lz:</span><span class="se">\n</span><span class="si">{</span><span class="n">Lz</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="n">nShots</span> <span class="o">=</span> <span class="mi">1000</span>
+<span class="n">nRounds</span> <span class="o">=</span> <span class="n">distance</span>
+
+<span class="c1"># Uncomment for repeatability</span>
+<span class="c1"># cudaq.set_random_seed(13)</span>
+
+<span class="c1"># error probability</span>
+<span class="n">p</span> <span class="o">=</span> <span class="mf">0.001</span>
+<span class="n">noise</span> <span class="o">=</span> <span class="n">cudaq</span><span class="o">.</span><span class="n">NoiseModel</span><span class="p">()</span>
+<span class="n">noise</span><span class="o">.</span><span class="n">add_all_qubit_channel</span><span class="p">(</span><span class="s2">&quot;x&quot;</span><span class="p">,</span> <span class="n">cudaq</span><span class="o">.</span><span class="n">Depolarization2</span><span class="p">(</span><span class="n">p</span><span class="p">),</span> <span class="mi">1</span><span class="p">)</span>
+
+<span class="c1"># prepare logical |0&gt; state, tells the sampler to do z-basis experiment</span>
+<span class="n">statePrep</span> <span class="o">=</span> <span class="n">qec</span><span class="o">.</span><span class="n">operation</span><span class="o">.</span><span class="n">prep0</span>
+<span class="c1"># our expected measurement in this state is 0</span>
+<span class="n">expected_value</span> <span class="o">=</span> <span class="mi">0</span>
+
+<span class="c1"># Get the detector error model for this circuit.</span>
+<span class="n">dem</span> <span class="o">=</span> <span class="n">qec</span><span class="o">.</span><span class="n">z_dem_from_memory_circuit</span><span class="p">(</span><span class="n">surface_code</span><span class="p">,</span> <span class="n">statePrep</span><span class="p">,</span> <span class="n">nRounds</span><span class="p">,</span> <span class="n">noise</span><span class="p">)</span>
+
+<span class="c1"># For large runs, set verbose to False to suppress output</span>
+<span class="n">verbose</span> <span class="o">=</span> <span class="n">nShots</span> <span class="o">&lt;=</span> <span class="mi">10</span>
+
+<span class="c1"># Sample the surface code memory circuit with noise on each cx gate</span>
+<span class="n">syndromes</span><span class="p">,</span> <span class="n">data</span> <span class="o">=</span> <span class="n">qec</span><span class="o">.</span><span class="n">sample_memory_circuit</span><span class="p">(</span><span class="n">surface_code</span><span class="p">,</span> <span class="n">statePrep</span><span class="p">,</span> <span class="n">nShots</span><span class="p">,</span>
+                                            <span class="n">nRounds</span><span class="p">,</span> <span class="n">noise</span><span class="p">)</span>
+
+<span class="k">if</span> <span class="n">verbose</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;From sample function:</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;syndromes:</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">syndromes</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;data:</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">data</span><span class="p">)</span>
+
+<span class="c1"># Get a decoder</span>
+<span class="n">decoder</span> <span class="o">=</span> <span class="n">qec</span><span class="o">.</span><span class="n">get_decoder</span><span class="p">(</span><span class="s2">&quot;single_error_lut&quot;</span><span class="p">,</span> <span class="n">dem</span><span class="o">.</span><span class="n">detector_error_matrix</span><span class="p">)</span>
+<span class="n">nLogicalErrors</span> <span class="o">=</span> <span class="mi">0</span>
+
+<span class="c1"># Logical Mz each shot (use Lx if preparing in X-basis)</span>
+<span class="n">logical_measurements</span> <span class="o">=</span> <span class="p">(</span><span class="n">Lz</span> <span class="o">@</span> <span class="n">data</span><span class="o">.</span><span class="n">transpose</span><span class="p">())</span> <span class="o">%</span> <span class="mi">2</span>
+<span class="c1"># only one logical qubit, so do not need the second axis</span>
+<span class="n">logical_measurements</span> <span class="o">=</span> <span class="n">logical_measurements</span><span class="o">.</span><span class="n">flatten</span><span class="p">()</span>
+<span class="k">if</span> <span class="n">verbose</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;LMz:</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">logical_measurements</span><span class="p">)</span>
+
+<span class="c1"># Reshape and drop the X stabilizers, keeping just the Z stabilizers (since this is prep0)</span>
+<span class="n">syndromes</span> <span class="o">=</span> <span class="n">syndromes</span><span class="o">.</span><span class="n">reshape</span><span class="p">((</span><span class="n">nShots</span><span class="p">,</span> <span class="n">nRounds</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">))</span>
+<span class="n">syndromes</span> <span class="o">=</span> <span class="n">syndromes</span><span class="p">[:,</span> <span class="p">:,</span> <span class="p">:</span><span class="n">syndromes</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">//</span> <span class="mi">2</span><span class="p">]</span>
+<span class="c1"># Now flatten to two dimensions again</span>
+<span class="n">syndromes</span> <span class="o">=</span> <span class="n">syndromes</span><span class="o">.</span><span class="n">reshape</span><span class="p">((</span><span class="n">nShots</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">))</span>
+
+<span class="n">dr</span> <span class="o">=</span> <span class="n">decoder</span><span class="o">.</span><span class="n">decode_batch</span><span class="p">(</span><span class="n">syndromes</span><span class="p">)</span>
+<span class="n">error_predictions</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">e</span><span class="o">.</span><span class="n">result</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">dr</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">uint8</span><span class="p">)</span>
+<span class="n">data_predictions</span> <span class="o">=</span> <span class="p">(</span><span class="n">dem</span><span class="o">.</span><span class="n">observables_flips_matrix</span> <span class="o">@</span> <span class="n">error_predictions</span><span class="o">.</span><span class="n">T</span><span class="p">)</span> <span class="o">%</span> <span class="mi">2</span>
+
+<span class="n">nLogicalErrorsWithoutDecoding</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">logical_measurements</span><span class="p">)</span>
+<span class="n">nLogicalErrorsWithDecoding</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">data_predictions</span> <span class="o">^</span> <span class="n">logical_measurements</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span>
+    <span class="sa">f</span><span class="s1">&#39;Number of logical errors without decoding (out of </span><span class="si">{</span><span class="n">nShots</span><span class="si">}</span><span class="s1"> shots): </span><span class="si">{</span><span class="n">nLogicalErrorsWithoutDecoding</span><span class="si">}</span><span class="s1">&#39;</span>
+<span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span>
+    <span class="sa">f</span><span class="s1">&#39;Number of logical errors with decoding    (out of </span><span class="si">{</span><span class="n">nShots</span><span class="si">}</span><span class="s1"> shots): </span><span class="si">{</span><span class="n">nLogicalErrorsWithDecoding</span><span class="si">}</span><span class="s1">&#39;</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<input class="tab-input" id="tab-set--0-input--2" name="tab-set--0" type="radio"><label class="tab-label" for="tab-set--0-input--2">C++</label><div class="tab-content docutils">
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="c1">// Compile and run with:</span>
+<span class="c1">// nvq++ --enable-mlir --target=stim -lcudaq-qec circuit_level_noise.cpp</span>
+<span class="c1">// ./a.out</span>
+
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;cudaq.h&quot;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;cudaq/qec/decoder.h&quot;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;cudaq/qec/experiments.h&quot;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;cudaq/qec/noise_model.h&quot;</span>
+
+<span class="kt">int</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="c1">// Choose a QEC code</span>
+<span class="w">  </span><span class="k">auto</span><span class="w"> </span><span class="n">steane</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">cudaq</span><span class="o">::</span><span class="n">qec</span><span class="o">::</span><span class="n">get_code</span><span class="p">(</span><span class="s">&quot;steane&quot;</span><span class="p">);</span>
+
+<span class="w">  </span><span class="c1">// Access the parity check matrix</span>
+<span class="w">  </span><span class="k">auto</span><span class="w"> </span><span class="n">H</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">steane</span><span class="o">-&gt;</span><span class="n">get_parity</span><span class="p">();</span>
+<span class="w">  </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;H:</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">;</span>
+<span class="w">  </span><span class="n">H</span><span class="p">.</span><span class="n">dump</span><span class="p">();</span>
+
+<span class="w">  </span><span class="c1">// Access the logical observables</span>
+<span class="w">  </span><span class="k">auto</span><span class="w"> </span><span class="n">observables</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">steane</span><span class="o">-&gt;</span><span class="n">get_pauli_observables_matrix</span><span class="p">();</span>
+<span class="w">  </span><span class="k">auto</span><span class="w"> </span><span class="n">Lz</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">steane</span><span class="o">-&gt;</span><span class="n">get_observables_z</span><span class="p">();</span>
+
+<span class="w">  </span><span class="c1">// Data qubits the logical Z observable is supported on</span>
+<span class="w">  </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Lz:</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">;</span>
+<span class="w">  </span><span class="n">Lz</span><span class="p">.</span><span class="n">dump</span><span class="p">();</span>
+
+<span class="w">  </span><span class="c1">// Observables are stacked as Z over X for mat-vec multiplication</span>
+<span class="w">  </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Obs:</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">;</span>
+<span class="w">  </span><span class="n">observables</span><span class="p">.</span><span class="n">dump</span><span class="p">();</span>
+
+<span class="w">  </span><span class="c1">// How many shots to run the experiment</span>
+<span class="w">  </span><span class="kt">int</span><span class="w"> </span><span class="n">nShots</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span><span class="p">;</span>
+<span class="w">  </span><span class="c1">// For each shot, how many rounds of stabilizer measurements</span>
+<span class="w">  </span><span class="kt">int</span><span class="w"> </span><span class="n">nRounds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span><span class="p">;</span>
+
+<span class="w">  </span><span class="c1">// can set seed for reproducibility</span>
+<span class="w">  </span><span class="c1">// cudaq::set_random_seed(1337);</span>
+<span class="w">  </span><span class="n">cudaq</span><span class="o">::</span><span class="n">noise_model</span><span class="w"> </span><span class="n">noise</span><span class="p">;</span>
+
+<span class="w">  </span><span class="c1">// Add a depolarization noise channel after each cx gate</span>
+<span class="w">  </span><span class="n">noise</span><span class="p">.</span><span class="n">add_all_qubit_channel</span><span class="p">(</span><span class="s">&quot;x&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">cudaq</span><span class="o">::</span><span class="n">depolarization2</span><span class="p">(</span><span class="cm">/*probability*/</span><span class="w"> </span><span class="mf">0.01</span><span class="p">),</span>
+<span class="w">                              </span><span class="cm">/*numControls*/</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span>
+
+<span class="w">  </span><span class="c1">// Perform a noisy z-basis memory circuit experiment</span>
+<span class="w">  </span><span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">syndromes</span><span class="p">,</span><span class="w"> </span><span class="n">data</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">cudaq</span><span class="o">::</span><span class="n">qec</span><span class="o">::</span><span class="n">sample_memory_circuit</span><span class="p">(</span>
+<span class="w">      </span><span class="o">*</span><span class="n">steane</span><span class="p">,</span><span class="w"> </span><span class="n">cudaq</span><span class="o">::</span><span class="n">qec</span><span class="o">::</span><span class="n">operation</span><span class="o">::</span><span class="n">prep0</span><span class="p">,</span><span class="w"> </span><span class="n">nShots</span><span class="p">,</span><span class="w"> </span><span class="n">nRounds</span><span class="p">,</span><span class="w"> </span><span class="n">noise</span><span class="p">);</span>
+
+<span class="w">  </span><span class="c1">// With noise, many syndromes will flip each QEC cycle, these are the</span>
+<span class="w">  </span><span class="c1">// syndrome differences from the previous cycle.</span>
+<span class="w">  </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;syndromes:</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">;</span>
+<span class="w">  </span><span class="n">syndromes</span><span class="p">.</span><span class="n">dump</span><span class="p">();</span>
+
+<span class="w">  </span><span class="c1">// With noise, Lz will sometimes be flipped</span>
+<span class="w">  </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;data:</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">;</span>
+<span class="w">  </span><span class="n">data</span><span class="p">.</span><span class="n">dump</span><span class="p">();</span>
+
+<span class="w">  </span><span class="c1">// Use z-measurements on data qubits to determine the logical mz</span>
+<span class="w">  </span><span class="c1">// In an x-basis experiment, use Lx.</span>
+<span class="w">  </span><span class="k">auto</span><span class="w"> </span><span class="n">logical_mz</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Lz</span><span class="p">.</span><span class="n">dot</span><span class="p">(</span><span class="n">data</span><span class="p">.</span><span class="n">transpose</span><span class="p">())</span><span class="w"> </span><span class="o">%</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+<span class="w">  </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;logical_mz each shot:</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">;</span>
+<span class="w">  </span><span class="n">logical_mz</span><span class="p">.</span><span class="n">dump</span><span class="p">();</span>
+
+<span class="w">  </span><span class="c1">// Select a decoder</span>
+<span class="w">  </span><span class="k">auto</span><span class="w"> </span><span class="n">decoder</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">cudaq</span><span class="o">::</span><span class="n">qec</span><span class="o">::</span><span class="n">get_decoder</span><span class="p">(</span><span class="s">&quot;single_error_lut&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">H</span><span class="p">);</span>
+
+<span class="w">  </span><span class="c1">// Initialize a pauli_frame to track the logical errors</span>
+<span class="w">  </span><span class="n">cudaqx</span><span class="o">::</span><span class="n">tensor</span><span class="o">&lt;</span><span class="kt">uint8_t</span><span class="o">&gt;</span><span class="w"> </span><span class="n">pauli_frame</span><span class="p">({</span><span class="n">observables</span><span class="p">.</span><span class="n">shape</span><span class="p">()[</span><span class="mi">0</span><span class="p">]});</span>
+
+<span class="w">  </span><span class="c1">// Start a loop to count the number of logical errors</span>
+<span class="w">  </span><span class="kt">size_t</span><span class="w"> </span><span class="n">numLerrors</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">  </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">size_t</span><span class="w"> </span><span class="n">shot</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">shot</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">nShots</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">shot</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;shot: &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">shot</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">;</span>
+
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">size_t</span><span class="w"> </span><span class="n">round</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">round</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">nRounds</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">round</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;round: &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">round</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">;</span>
+
+<span class="w">      </span><span class="c1">// Access one row of the syndrome tensor</span>
+<span class="w">      </span><span class="kt">size_t</span><span class="w"> </span><span class="n">count</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">shot</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">nRounds</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">round</span><span class="p">;</span>
+<span class="w">      </span><span class="kt">size_t</span><span class="w"> </span><span class="n">stride</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">syndromes</span><span class="p">.</span><span class="n">shape</span><span class="p">()[</span><span class="mi">1</span><span class="p">];</span>
+<span class="w">      </span><span class="n">cudaqx</span><span class="o">::</span><span class="n">tensor</span><span class="o">&lt;</span><span class="kt">uint8_t</span><span class="o">&gt;</span><span class="w"> </span><span class="n">syndrome</span><span class="p">({</span><span class="n">stride</span><span class="p">});</span>
+<span class="w">      </span><span class="n">syndrome</span><span class="p">.</span><span class="n">borrow</span><span class="p">(</span><span class="n">syndromes</span><span class="p">.</span><span class="n">data</span><span class="p">()</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">stride</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">count</span><span class="p">);</span>
+<span class="w">      </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;syndrome:</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">;</span>
+<span class="w">      </span><span class="n">syndrome</span><span class="p">.</span><span class="n">dump</span><span class="p">();</span>
+
+<span class="w">      </span><span class="c1">// Decode the syndrome</span>
+<span class="w">      </span><span class="k">auto</span><span class="w"> </span><span class="n">result</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">decoder</span><span class="o">-&gt;</span><span class="n">decode</span><span class="p">(</span><span class="n">syndrome</span><span class="p">);</span>
+<span class="w">      </span><span class="n">cudaqx</span><span class="o">::</span><span class="n">tensor</span><span class="o">&lt;</span><span class="kt">uint8_t</span><span class="o">&gt;</span><span class="w"> </span><span class="n">result_tensor</span><span class="p">;</span>
+<span class="w">      </span><span class="n">cudaq</span><span class="o">::</span><span class="n">qec</span><span class="o">::</span><span class="n">convert_vec_soft_to_tensor_hard</span><span class="p">(</span><span class="n">result</span><span class="p">.</span><span class="n">result</span><span class="p">,</span><span class="w"> </span><span class="n">result_tensor</span><span class="p">);</span>
+<span class="w">      </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;decode result:</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">;</span>
+<span class="w">      </span><span class="n">result_tensor</span><span class="p">.</span><span class="n">dump</span><span class="p">();</span>
+
+<span class="w">      </span><span class="c1">// See if the decoded result anti-commutes with observables</span>
+<span class="w">      </span><span class="k">auto</span><span class="w"> </span><span class="n">decoded_observables</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">observables</span><span class="p">.</span><span class="n">dot</span><span class="p">(</span><span class="n">result_tensor</span><span class="p">);</span>
+<span class="w">      </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;decoded observable:</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">;</span>
+<span class="w">      </span><span class="n">decoded_observables</span><span class="p">.</span><span class="n">dump</span><span class="p">();</span>
+
+<span class="w">      </span><span class="c1">// update from previous stabilizer round</span>
+<span class="w">      </span><span class="n">pauli_frame</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">pauli_frame</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">decoded_observables</span><span class="p">)</span><span class="w"> </span><span class="o">%</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+<span class="w">      </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;pauli frame:</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">;</span>
+<span class="w">      </span><span class="n">pauli_frame</span><span class="p">.</span><span class="n">dump</span><span class="p">();</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// prep0 means we expected to measure out 0.</span>
+<span class="w">    </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">expected_mz</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">    </span><span class="c1">// Apply the pauli frame correction to our logical measurement</span>
+<span class="w">    </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">corrected_mz</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">logical_mz</span><span class="p">.</span><span class="n">at</span><span class="p">({</span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">shot</span><span class="p">})</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">pauli_frame</span><span class="p">.</span><span class="n">at</span><span class="p">({</span><span class="mi">0</span><span class="p">}))</span><span class="w"> </span><span class="o">%</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// Check if Logical_mz + pauli_frame_X = 0?</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Corrected readout: &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="o">+</span><span class="n">corrected_mz</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">;</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Expected readout: &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="o">+</span><span class="n">expected_mz</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">;</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">corrected_mz</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">expected_mz</span><span class="p">)</span>
+<span class="w">      </span><span class="n">numLerrors</span><span class="o">++</span><span class="p">;</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">;</span>
+<span class="w">  </span><span class="p">}</span>
+
+<span class="w">  </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;numLogicalErrors: &quot;</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">numLerrors</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">;</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>Compile and run with</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>nvq++<span class="w"> </span>--enable-mlir<span class="w"> </span>--target<span class="o">=</span>stim<span class="w"> </span>-lcudaq-qec<span class="w"> </span>circuit_level_noise.cpp<span class="w"> </span>-o<span class="w"> </span>circuit_level_noise
+./circuit_level_noise
+</pre></div>
+</div>
+</div>
+</div>
+<ol class="arabic simple">
+<li><dl class="simple">
+<dt>QEC Code and Decoder types:</dt><dd><ul class="simple">
+<li><p>As in the code capacity example, our central objects are the <code class="code docutils literal notranslate"><span class="pre">qec.code</span></code> and <code class="code docutils literal notranslate"><span class="pre">qec.decoder</span></code> types.</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>Clifford simulation backend:</dt><dd><ul class="simple">
+<li><p>As the size of QEC circuits can grow quite large, Clifford simulation is often the best tool for these simulations.</p></li>
+<li><p><code class="code docutils literal notranslate"><span class="pre">cudaq.set_target(&quot;stim&quot;)</span></code> selects the highly performant Stim simulator as the simulation backend.</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>Noise model:</dt><dd><ul class="simple">
+<li><p>To add noisy gates we use the <code class="code docutils literal notranslate"><span class="pre">cudaq.NoiseModel</span></code> type.</p></li>
+<li><p>CUDA-Q supports the generation of arbitrary noise channels. Here we use a <code class="code docutils literal notranslate"><span class="pre">cudaq.Depolarization2</span></code> channel to add a depolarization channel.</p></li>
+<li><p>This is added to the <code class="code docutils literal notranslate"><span class="pre">CX</span></code> gate by adding it to the <code class="code docutils literal notranslate"><span class="pre">X</span></code> gate with 1 control.</p></li>
+<li><p>This noisy gate is added to every qubit via that <code class="code docutils literal notranslate"><span class="pre">noise.add_all_qubit_channel</span></code> function.</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>Getting circuit-level noisy data:</dt><dd><ul class="simple">
+<li><p>The <code class="code docutils literal notranslate"><span class="pre">qec.code</span></code> is the first input parameter here, as the code’s <code class="code docutils literal notranslate"><span class="pre">stabilizer_round</span></code> determines the circuits executed.</p></li>
+<li><p>Each memory circuit runs for an input number of <code class="code docutils literal notranslate"><span class="pre">nRounds</span></code>, which specifies how many <code class="code docutils literal notranslate"><span class="pre">stabilizer_round</span></code> kernels are ran.</p></li>
+<li><p>After <code class="code docutils literal notranslate"><span class="pre">nRounds</span></code> the data qubits are measured and the run is over.</p></li>
+<li><p>This is performed <code class="code docutils literal notranslate"><span class="pre">nShots</span></code> number of times.</p></li>
+<li><p>During a shot, each stabilizer round’s syndrome is <code class="code docutils literal notranslate"><span class="pre">xor</span></code>’d against the preceding syndrome, so that we can track a sparser flow of data showing which round each parity check was violated.</p></li>
+<li><p>The first round returns the syndrome as is, as there is nothing preceding to <code class="code docutils literal notranslate"><span class="pre">xor</span></code> against.</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>Data qubit measurements:</dt><dd><ul class="simple">
+<li><p>The data qubits are only read out after the end of each shot, so there are <code class="code docutils literal notranslate"><span class="pre">nShots</span></code> worth of data readouts.</p></li>
+<li><p>The basis of the data qubit measurements depends on the state preparation used.</p></li>
+<li><p>Z-basis readout when preparing the logical <code class="code docutils literal notranslate"><span class="pre">|0&gt;</span></code> or logical <code class="code docutils literal notranslate"><span class="pre">|1&gt;</span></code> state with the <code class="code docutils literal notranslate"><span class="pre">qec.operation.prep0</span></code> or <code class="code docutils literal notranslate"><span class="pre">qec.operation.prep1</span></code> kernels.</p></li>
+<li><p>X-basis readout when preparing the logical <code class="code docutils literal notranslate"><span class="pre">|+&gt;</span></code> or logical <code class="code docutils literal notranslate"><span class="pre">|-&gt;</span></code> state with the <code class="code docutils literal notranslate"><span class="pre">qec.operation.prepp</span></code> or <code class="code docutils literal notranslate"><span class="pre">qec.operation.prepm</span></code> kernels.</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt>Logical Errors:</dt><dd><ul class="simple">
+<li><p>From here, the decoding procedure is again similar to the code capacity case, expect for we use a pauli frame to track errors that happen each QEC cycle.</p></li>
+<li><p>The final values of the pauli frame tell us how our logical state flipped during the experiment, and what needs to be done to correct it.</p></li>
+<li><p>We compare our known initial state (corrected by the Pauli frame), against our measured data qubits to determine if a logical error occurred.</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+</ol>
+<p>The CUDA-Q QEC library thus provides a platform for numerical QEC experiments. The <code class="code docutils literal notranslate"><span class="pre">qec.code</span></code> can be used to analyze a variety of QEC codes (both library or user provided), with a variety of decoders (both library or user provided).
+The CUDA-Q QEC library also provides tools to speed up the automation of generating noisy data and syndromes.</p>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="code_capacity_noise.html" class="btn btn-neutral float-left" title="Quantum Error Correction with Code-Capacity Noise Modeling" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="decoders.html" class="btn btn-neutral float-right" title="Decoders" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, NVIDIA Corporation &amp; Affiliates.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(false);
+      });
+  </script>  
+
+  <style>
+  a:link, a:visited {
+    color: #76b900;
+  }
+
+  a:hover {
+    color: #8c0;
+  }
+
+  .rst-content dl:not(.docutils) dt {
+    background: rgba(118, 185, 0, 0.1);
+    color: rgba(59,93,0,1);
+    border-top: solid 3px rgba(59,93,0,1);
+  }
+  </style>
+  
+
+</body>
+</html>

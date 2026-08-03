@@ -1,0 +1,1183 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.18.1: http://docutils.sourceforge.net/" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CUDA-Q Solvers Library &mdash; NVIDIA CUDA-QX  documentation</title>
+      <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" />
+      <link rel="stylesheet" href="../../_static/css/theme.css" type="text/css" />
+      <link rel="stylesheet" href="../../_static/tabs.css" type="text/css" />
+      <link rel="stylesheet" href="../../_static/copybutton.css" type="text/css" />
+      <link rel="stylesheet" href="../../_static/cudaq_override.css" type="text/css" />
+      <link rel="stylesheet" href="../../_static/sg_gallery.css" type="text/css" />
+      <link rel="stylesheet" href="/__w/cudaqx/cudaqx/docs/sphinx/_static/cudaq_override.css" type="text/css" />
+  <!--[if lt IE 9]>
+    <script src="../../_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script data-url_root="../../" id="documentation_options" src="../../_static/documentation_options.js"></script>
+        <script src="../../_static/jquery.js"></script>
+        <script src="../../_static/underscore.js"></script>
+        <script src="../../_static/_sphinx_javascript_frameworks_compat.js"></script>
+        <script src="../../_static/doctools.js"></script>
+        <script src="../../_static/sphinx_highlight.js"></script>
+        <script src="../../_static/tabs.js"></script>
+        <script src="../../_static/clipboard.min.js"></script>
+        <script src="../../_static/copybutton.js"></script>
+        <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+        <script src="../../_static/version-switcher.js"></script>
+    <script src="../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="CUDA-Q QEC by Example" href="../../examples_rst/qec/examples.html" />
+    <link rel="prev" title="CUDA-Q QEC - Quantum Error Correction Library" href="../qec/introduction.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search"  style="background: #76b900" > 
+
+          
+          
+          <a href="../../index.html" class="icon icon-home">
+            NVIDIA CUDA-QX
+          </a>
+              <div class="version">
+                0.6.0
+              </div>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+  <style>
+    /* Sidebar header (and topbar for mobile) */
+    .wy-side-nav-search, .wy-nav-top {
+      background: #76b900;
+    }
+
+    .wy-side-nav-search a:link, .wy-nav-top a:link {
+      color: #fff;
+    }
+    .wy-side-nav-search a:visited, .wy-nav-top a:visited {
+      color: #fff;
+    }
+    .wy-side-nav-search a:hover, .wy-nav-top a:hover {
+      color: #fff;
+    }
+
+    .wy-menu-vertical a:link, .wy-menu-vertical a:visited {
+      color: #d9d9d9
+    }
+
+    .wy-menu-vertical a:active {
+      background-color: #76b900
+    }
+
+    .wy-side-nav-search>div.version {
+      color: rgba(0, 0, 0, 0.3)
+    }
+
+    /* override table width restrictions */
+    .wy-table-responsive table td, .wy-table-responsive table th {
+        white-space: normal;
+    }
+
+    .wy-table-responsive {
+        margin-bottom: 24px;
+        max-width: 100%;
+        overflow: visible;
+    }
+  </style>
+  
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Getting Started</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../quickstart/installation.html">Installation Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../quickstart/installation.html#installation-methods">Installation Methods</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../quickstart/installation.html#pip-install">pip install</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../quickstart/installation.html#docker-container">Docker Container</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../quickstart/installation.html#building-from-source">Building from Source</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../quickstart/installation.html#installing-pytorch">Installing PyTorch</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Libraries</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../qec/introduction.html">CUDA-Q QEC - Quantum Error Correction Library</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../qec/introduction.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../qec/introduction.html#core-components">Core Components</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../qec/introduction.html#qec-code-framework-cudaq-qec-code">QEC Code Framework <code class="code docutils literal notranslate"><span class="pre">cudaq::qec::code</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../qec/introduction.html#class-structure">Class Structure</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../qec/introduction.html#implementing-a-new-code">Implementing a New Code</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../qec/introduction.html#example-steane-code">Example: Steane Code</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../qec/introduction.html#implementing-a-new-code-in-python">Implementing a New Code in Python</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../qec/introduction.html#key-points">Key Points</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../qec/introduction.html#using-the-code-framework">Using the Code Framework</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../qec/introduction.html#pre-built-qec-codes">Pre-built QEC Codes</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../qec/introduction.html#steane-code">Steane Code</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../qec/introduction.html#repetition-code">Repetition Code</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../qec/introduction.html#decoder-framework-cudaq-qec-decoder">Decoder Framework <code class="code docutils literal notranslate"><span class="pre">cudaq::qec::decoder</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../qec/introduction.html#id1">Class Structure</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../qec/introduction.html#implementing-a-new-decoder-in-c">Implementing a New Decoder in C++</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../qec/introduction.html#example-lookup-table-decoder">Example: Lookup Table Decoder</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../qec/introduction.html#implementing-a-decoder-in-python">Implementing a Decoder in Python</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../qec/introduction.html#key-features">Key Features</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../qec/introduction.html#usage-example">Usage Example</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../qec/introduction.html#pre-built-qec-decoders">Pre-built QEC Decoders</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../qec/introduction.html#quantum-low-density-parity-check-decoder">Quantum Low-Density Parity-Check Decoder</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../qec/introduction.html#tensor-network-decoder">Tensor Network Decoder</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../qec/introduction.html#real-time-decoding">Real-Time Decoding</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../qec/introduction.html#id2">Key Features</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../qec/introduction.html#workflow-and-terminology">Workflow and Terminology</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../qec/introduction.html#numerical-experiments">Numerical Experiments</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../qec/introduction.html#conventions">Conventions</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../qec/introduction.html#memory-circuit-experiments">Memory Circuit Experiments</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../qec/introduction.html#function-variants">Function Variants</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../qec/introduction.html#return-values">Return Values</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../qec/introduction.html#example-usage">Example Usage</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../qec/introduction.html#additional-noise-models">Additional Noise Models</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">CUDA-Q Solvers Library</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#core-components">Core Components</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#operator-infrastructure">Operator Infrastructure</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#molecular-hamiltonian-options">Molecular Hamiltonian Options</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#example-usage">Example Usage</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#variational-quantum-eigensolver-vqe">Variational Quantum Eigensolver (VQE)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#vqe-examples">VQE Examples</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#basic-usage">Basic Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#custom-optimization">Custom Optimization</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#shot-based-simulation">Shot-based Simulation</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#adapt-vqe">ADAPT-VQE</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#key-features">Key Features</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#id1">Basic Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#advanced-usage">Advanced Usage</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#custom-optimization-settings">Custom Optimization Settings</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#available-operator-pools">Available Operator Pools</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#available-ansatz">Available Ansatz</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#algorithm-parameters">Algorithm Parameters</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#results-analysis">Results Analysis</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Examples</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../examples_rst/qec/examples.html">CUDA-Q QEC by Example</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../examples_rst/qec/code_capacity_noise.html">   Code-Capacity QEC</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/qec/code_capacity_noise.html#cuda-q-qec-implementation">CUDA-Q QEC Implementation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/qec/code_capacity_noise.html#code-explanation">Code Explanation</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples_rst/qec/circuit_level_noise.html">   Circuit-Level QEC</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/qec/circuit_level_noise.html#cuda-q-qec-implementation">CUDA-Q QEC Implementation</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples_rst/qec/decoders.html">   Decoders</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/qec/decoders.html#detector-error-model">Detector Error Model</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/qec/decoders.html#generating-a-multi-round-parity-check-matrix">Generating a Multi-Round Parity Check Matrix</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/qec/decoders.html#creating-new-qec-codes">Creating New QEC codes</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/qec/decoders.html#getting-started-with-the-nvidia-qldpc-decoder">Getting Started with the NVIDIA QLDPC Decoder</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../examples_rst/qec/decoders.html#belief-propagation-methods">Belief Propagation Methods</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../examples_rst/qec/decoders.html#usage-example">Usage Example</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/qec/decoders.html#exact-maximum-likelihood-decoding-with-nvidia-tensor-network-decoder">Exact Maximum Likelihood Decoding with NVIDIA Tensor Network Decoder</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/qec/decoders.html#deploying-ai-decoders-with-tensorrt">Deploying AI Decoders with TensorRT</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html">   Real-Time Decoding</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#workflow-overview">Workflow Overview</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#real-time-decoding-example">Real-Time Decoding Example</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#configuration">Configuration</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#step-1-generate-detector-error-model">Step 1: Generate Detector Error Model</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#step-2-configure-and-save-decoder">Step 2: Configure and Save Decoder</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#step-3-load-configuration">Step 3: Load Configuration</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#step-4-use-in-quantum-kernels">Step 4: Use in Quantum Kernels</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#backend-selection">Backend Selection</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#simulation-backend">Simulation Backend</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#quantinuum-hardware-backend">Quantinuum Hardware Backend</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#compilation-and-execution-examples">Compilation and Execution Examples</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#common-use-cases">Common Use Cases</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#c-compilation">C++ Compilation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#python-execution">Python Execution</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#complete-workflow-example">Complete Workflow Example</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#debugging-and-environment-variables">Debugging and Environment Variables</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#decoder-selection">Decoder Selection</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#troubleshooting">Troubleshooting</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#configuration-upload-failures-quantinuum-backend">Configuration Upload Failures (Quantinuum Backend)</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/qec/realtime_decoding.html#see-also">See Also</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../examples_rst/solvers/examples.html">CUDA-Q Solvers by Example</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../examples_rst/solvers/molecular_hamiltonians.html">   Molecular-Hamiltonians</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/solvers/molecular_hamiltonians.html#molecular-orbitals-and-hamiltonians">Molecular Orbitals and Hamiltonians</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/solvers/molecular_hamiltonians.html#natural-orbitals-from-mp2">Natural Orbitals from MP2</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/solvers/molecular_hamiltonians.html#casscf-orbitals">CASSCF Orbitals</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/solvers/molecular_hamiltonians.html#for-open-shell-systems">For open-shell systems</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples_rst/solvers/adapt.html">   ADAPT-VQE</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples_rst/solvers/vqe.html">   VQE</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/solvers/vqe.html#cuda-q-solvers-implementation">CUDA-Q Solvers Implementation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/solvers/vqe.html#code-explanation">Code Explanation</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples_rst/solvers/qaoa.html">   QAOA</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/solvers/qaoa.html#cuda-q-solvers-implementation">CUDA-Q Solvers Implementation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/solvers/qaoa.html#code-explanation">Code Explanation</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../examples_rst/solvers/gqe.html">   GQE</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../examples_rst/solvers/gqe.html#cuda-q-solvers-implementation">CUDA-Q Solvers Implementation</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../api/core/cpp_api.html">CUDA-QX Namespaces and Core Library C++ API</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../api/core/cpp_api.html#namespaces">Namespaces</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/core/cpp_api.html#core">Core</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../api/qec/cpp_api.html">CUDA-Q QEC C++ API</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../api/qec/cpp_api.html#code">Code</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/qec/cpp_api.html#detector-error-model">Detector Error Model</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/qec/cpp_api.html#decoder-interfaces">Decoder Interfaces</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/qec/cpp_api.html#built-in-decoders">Built-in Decoders</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/qec/cpp_api.html#nvidia-qldpc-decoder">NVIDIA QLDPC Decoder</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../api/qec/cpp_api.html#nv_qldpc_decoder"><code class="docutils literal notranslate"><span class="pre">nv_qldpc_decoder</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/qec/cpp_api.html#sliding-window-decoder">Sliding Window Decoder</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../api/qec/cpp_api.html#sliding_window"><code class="docutils literal notranslate"><span class="pre">sliding_window</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/qec/cpp_api.html#tensorrt-decoder">TensorRT Decoder</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../api/qec/cpp_api.html#trt_decoder"><code class="docutils literal notranslate"><span class="pre">trt_decoder</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/qec/cpp_api.html#real-time-decoding">Real-Time Decoding</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/qec/cpp_api.html#core-decoding-functions">Core Decoding Functions</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/qec/cpp_api.html#configuration-api">Configuration API</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/qec/cpp_api.html#helper-functions">Helper Functions</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/qec/cpp_api.html#parity-check-matrix-utilities">Parity Check Matrix Utilities</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/qec/cpp_api.html#common">Common</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../api/qec/python_api.html">CUDA-Q QEC Python API</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../api/qec/python_api.html#code">Code</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/qec/python_api.html#detector-error-model">Detector Error Model</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/qec/python_api.html#decoder-interfaces">Decoder Interfaces</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/qec/python_api.html#built-in-decoders">Built-in Decoders</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/qec/python_api.html#nvidia-qldpc-decoder">NVIDIA QLDPC Decoder</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../api/qec/python_api.html#nv_qldpc_decoder"><code class="docutils literal notranslate"><span class="pre">nv_qldpc_decoder</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/qec/python_api.html#sliding-window-decoder">Sliding Window Decoder</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../api/qec/python_api.html#sliding_window"><code class="docutils literal notranslate"><span class="pre">sliding_window</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/qec/python_api.html#tensorrt-decoder">TensorRT Decoder</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../api/qec/python_api.html#trt_decoder"><code class="docutils literal notranslate"><span class="pre">trt_decoder</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/qec/python_api.html#tensor-network-decoder">Tensor Network Decoder</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../api/qec/python_api.html#cudaq_qec.plugin.decoders.tensor_network_decoder.TensorNetworkDecoder"><code class="docutils literal notranslate"><span class="pre">cudaq_qec.plugin.decoders.tensor_network_decoder.TensorNetworkDecoder</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/qec/python_api.html#real-time-decoding">Real-Time Decoding</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/qec/python_api.html#core-decoding-functions">Core Decoding Functions</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../api/qec/python_api.html#cudaq_qec.qec.enqueue_syndromes"><code class="docutils literal notranslate"><span class="pre">cudaq_qec.qec.enqueue_syndromes()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../api/qec/python_api.html#cudaq_qec.qec.get_corrections"><code class="docutils literal notranslate"><span class="pre">cudaq_qec.qec.get_corrections()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../api/qec/python_api.html#cudaq_qec.qec.reset_decoder"><code class="docutils literal notranslate"><span class="pre">cudaq_qec.qec.reset_decoder()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/qec/python_api.html#configuration-api">Configuration API</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../api/qec/python_api.html#cudaq_qec.configure_decoders"><code class="docutils literal notranslate"><span class="pre">cudaq_qec.configure_decoders()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../api/qec/python_api.html#cudaq_qec.configure_decoders_from_file"><code class="docutils literal notranslate"><span class="pre">cudaq_qec.configure_decoders_from_file()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../api/qec/python_api.html#cudaq_qec.configure_decoders_from_str"><code class="docutils literal notranslate"><span class="pre">cudaq_qec.configure_decoders_from_str()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../api/qec/python_api.html#cudaq_qec.finalize_decoders"><code class="docutils literal notranslate"><span class="pre">cudaq_qec.finalize_decoders()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/qec/python_api.html#helper-functions">Helper Functions</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../api/qec/python_api.html#cudaq_qec.pcm_to_sparse_vec"><code class="docutils literal notranslate"><span class="pre">cudaq_qec.pcm_to_sparse_vec()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../api/qec/python_api.html#cudaq_qec.pcm_from_sparse_vec"><code class="docutils literal notranslate"><span class="pre">cudaq_qec.pcm_from_sparse_vec()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../api/qec/python_api.html#cudaq_qec.generate_timelike_sparse_detector_matrix"><code class="docutils literal notranslate"><span class="pre">cudaq_qec.generate_timelike_sparse_detector_matrix()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/qec/python_api.html#common">Common</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/qec/python_api.html#parity-check-matrix-utilities">Parity Check Matrix Utilities</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../api/solvers/cpp_api.html">CUDA-Q Solvers C++ API</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../api/solvers/python_api.html">CUDA-Q Solvers Python API</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.jordan_wigner"><code class="docutils literal notranslate"><span class="pre">jordan_wigner()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.bravyi_kitaev"><code class="docutils literal notranslate"><span class="pre">bravyi_kitaev()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.MolecularHamiltonian"><code class="docutils literal notranslate"><span class="pre">MolecularHamiltonian</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.MolecularHamiltonian.energies"><code class="docutils literal notranslate"><span class="pre">MolecularHamiltonian.energies</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.MolecularHamiltonian.hamiltonian"><code class="docutils literal notranslate"><span class="pre">MolecularHamiltonian.hamiltonian</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.MolecularHamiltonian.hpq"><code class="docutils literal notranslate"><span class="pre">MolecularHamiltonian.hpq</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.MolecularHamiltonian.hpqrs"><code class="docutils literal notranslate"><span class="pre">MolecularHamiltonian.hpqrs</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.MolecularHamiltonian.n_electrons"><code class="docutils literal notranslate"><span class="pre">MolecularHamiltonian.n_electrons</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.MolecularHamiltonian.n_orbitals"><code class="docutils literal notranslate"><span class="pre">MolecularHamiltonian.n_orbitals</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.get_operator_pool"><code class="docutils literal notranslate"><span class="pre">get_operator_pool()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.optim.optimize"><code class="docutils literal notranslate"><span class="pre">optimize()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.ObserveExecutionType"><code class="docutils literal notranslate"><span class="pre">ObserveExecutionType</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.ObserveExecutionType.function"><code class="docutils literal notranslate"><span class="pre">ObserveExecutionType.function</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.ObserveExecutionType.gradient"><code class="docutils literal notranslate"><span class="pre">ObserveExecutionType.gradient</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.ObserveExecutionType.name"><code class="docutils literal notranslate"><span class="pre">ObserveExecutionType.name</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.ObserveExecutionType.value"><code class="docutils literal notranslate"><span class="pre">ObserveExecutionType.value</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.ObserveIteration"><code class="docutils literal notranslate"><span class="pre">ObserveIteration</span></code></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.ObserveIteration.parameters"><code class="docutils literal notranslate"><span class="pre">ObserveIteration.parameters</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.ObserveIteration.result"><code class="docutils literal notranslate"><span class="pre">ObserveIteration.result</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.ObserveIteration.type"><code class="docutils literal notranslate"><span class="pre">ObserveIteration.type</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.vqe"><code class="docutils literal notranslate"><span class="pre">vqe()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.adapt_vqe"><code class="docutils literal notranslate"><span class="pre">adapt_vqe()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.stateprep.uccsd"><code class="docutils literal notranslate"><span class="pre">uccsd()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.stateprep.single_excitation"><code class="docutils literal notranslate"><span class="pre">single_excitation()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.stateprep.double_excitation"><code class="docutils literal notranslate"><span class="pre">double_excitation()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.stateprep.get_num_uccsd_parameters"><code class="docutils literal notranslate"><span class="pre">get_num_uccsd_parameters()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.stateprep.get_uccsd_excitations"><code class="docutils literal notranslate"><span class="pre">get_uccsd_excitations()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.stateprep.get_uccgsd_pauli_lists"><code class="docutils literal notranslate"><span class="pre">get_uccgsd_pauli_lists()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.stateprep.uccgsd"><code class="docutils literal notranslate"><span class="pre">uccgsd()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.get_num_qaoa_parameters"><code class="docutils literal notranslate"><span class="pre">get_num_qaoa_parameters()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.gqe"><code class="docutils literal notranslate"><span class="pre">gqe()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../api/solvers/python_api.html#cudaq_solvers.cudaq_solvers.gqe_algorithm.gqe.get_default_config"><code class="docutils literal notranslate"><span class="pre">cudaq_solvers.gqe_algorithm.gqe.get_default_config()</span></code></a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu"  style="background: #76b900" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../index.html">NVIDIA CUDA-QX</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">CUDA-Q Solvers Library</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../../_sources/components/solvers/introduction.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul><div class="rst-breadcrumbs-buttons" role="navigation" aria-label="Sequential page navigation">
+        <a href="../qec/introduction.html" class="btn btn-neutral float-left" title="CUDA-Q QEC - Quantum Error Correction Library" accesskey="p"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="../../examples_rst/qec/examples.html" class="btn btn-neutral float-right" title="CUDA-Q QEC by Example" accesskey="n">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+  </div>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="cuda-q-solvers-library">
+<h1>CUDA-Q Solvers Library<a class="headerlink" href="#cuda-q-solvers-library" title="Permalink to this heading"></a></h1>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Permalink to this heading"></a></h2>
+<p>The CUDA-Q Solvers library provides high-level quantum-classical hybrid
+algorithms and supporting infrastructure for quantum chemistry and
+optimization problems. It features implementations of VQE, ADAPT-VQE,
+and supporting utilities for Hamiltonian generation and operator pool management.</p>
+</section>
+<section id="core-components">
+<h2>Core Components<a class="headerlink" href="#core-components" title="Permalink to this heading"></a></h2>
+<ol class="arabic simple">
+<li><p><strong>Variational Algorithms</strong>:</p>
+<ul class="simple">
+<li><p>Variational Quantum Eigensolver (VQE)</p></li>
+<li><p>Adaptive Derivative-Assembled Pseudo-Trotter VQE (ADAPT-VQE)</p></li>
+</ul>
+</li>
+<li><p><strong>Quantum Chemistry Tools</strong>:</p>
+<ul class="simple">
+<li><p>Molecular Hamiltonian Generation</p></li>
+<li><p>One-Particle Operator Creation</p></li>
+<li><p>Geometry Management</p></li>
+</ul>
+</li>
+<li><p><strong>Operator Infrastructure</strong>:</p>
+<ul class="simple">
+<li><p>Operator Pool Generation</p></li>
+<li><p>Fermion-to-Qubit Mappings</p></li>
+<li><p>Gradient Computation</p></li>
+</ul>
+</li>
+</ol>
+</section>
+<section id="operator-infrastructure">
+<h2>Operator Infrastructure<a class="headerlink" href="#operator-infrastructure" title="Permalink to this heading"></a></h2>
+<section id="molecular-hamiltonian-options">
+<h3>Molecular Hamiltonian Options<a class="headerlink" href="#molecular-hamiltonian-options" title="Permalink to this heading"></a></h3>
+<p>The <code class="code docutils literal notranslate"><span class="pre">molecule_options</span></code> structure provides extensive configuration for molecular calculations in CUDA-QX.</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Option</p></th>
+<th class="head"><p>Type</p></th>
+<th class="head"><p>Default</p></th>
+<th class="head"><p>Description</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>driver</p></td>
+<td><p>string</p></td>
+<td><p>“RESTPySCFDriver”</p></td>
+<td><p>Quantum chemistry driver backend</p></td>
+</tr>
+<tr class="row-odd"><td><p>fermion_to_spin</p></td>
+<td><p>string</p></td>
+<td><p>“jordan_wigner”</p></td>
+<td><p>Fermionic to qubit operator mapping</p></td>
+</tr>
+<tr class="row-even"><td><p>type</p></td>
+<td><p>string</p></td>
+<td><p>“gas_phase”</p></td>
+<td><p>Type of molecular system</p></td>
+</tr>
+<tr class="row-odd"><td><p>symmetry</p></td>
+<td><p>bool</p></td>
+<td><p>false</p></td>
+<td><p>Use molecular symmetry</p></td>
+</tr>
+<tr class="row-even"><td><p>memory</p></td>
+<td><p>double</p></td>
+<td><p>4000.0</p></td>
+<td><p>Memory allocation (MB)</p></td>
+</tr>
+<tr class="row-odd"><td><p>cycles</p></td>
+<td><p>size_t</p></td>
+<td><p>100</p></td>
+<td><p>Maximum SCF cycles</p></td>
+</tr>
+<tr class="row-even"><td><p>initguess</p></td>
+<td><p>string</p></td>
+<td><p>“minao”</p></td>
+<td><p>Initial SCF guess method</p></td>
+</tr>
+<tr class="row-odd"><td><p>UR</p></td>
+<td><p>bool</p></td>
+<td><p>false</p></td>
+<td><p>Enable unrestricted calculations</p></td>
+</tr>
+<tr class="row-even"><td><p>nele_cas</p></td>
+<td><p>optional
+&lt;size_t&gt;</p></td>
+<td><p>nullopt</p></td>
+<td><p>Number of electrons in active space</p></td>
+</tr>
+<tr class="row-odd"><td><p>norb_cas</p></td>
+<td><p>optional
+&lt;size_t&gt;</p></td>
+<td><p>nullopt</p></td>
+<td><p>Number of spatial orbitals in
+in active space</p></td>
+</tr>
+<tr class="row-even"><td><p>MP2</p></td>
+<td><p>bool</p></td>
+<td><p>false</p></td>
+<td><p>Enable MP2 calculations</p></td>
+</tr>
+<tr class="row-odd"><td><p>natorb</p></td>
+<td><p>bool</p></td>
+<td><p>false</p></td>
+<td><p>Use natural orbitals</p></td>
+</tr>
+<tr class="row-even"><td><p>casci</p></td>
+<td><p>bool</p></td>
+<td><p>false</p></td>
+<td><p>Perform CASCI calculations</p></td>
+</tr>
+<tr class="row-odd"><td><p>ccsd</p></td>
+<td><p>bool</p></td>
+<td><p>false</p></td>
+<td><p>Perform CCSD calculations</p></td>
+</tr>
+<tr class="row-even"><td><p>casscf</p></td>
+<td><p>bool</p></td>
+<td><p>false</p></td>
+<td><p>Perform CASSCF calculations</p></td>
+</tr>
+<tr class="row-odd"><td><p>integrals_natorb</p></td>
+<td><p>bool</p></td>
+<td><p>false</p></td>
+<td><p>Use natural orbitals for integrals</p></td>
+</tr>
+<tr class="row-even"><td><p>integrals_casscf</p></td>
+<td><p>bool</p></td>
+<td><p>false</p></td>
+<td><p>Use CASSCF orbitals for integrals</p></td>
+</tr>
+<tr class="row-odd"><td><p>verbose</p></td>
+<td><p>bool</p></td>
+<td><p>false</p></td>
+<td><p>Enable detailed output logging</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="example-usage">
+<h3>Example Usage<a class="headerlink" href="#example-usage" title="Permalink to this heading"></a></h3>
+<div class="tab-set docutils">
+<input checked="True" class="tab-input" id="tab-set--0-input--1" name="tab-set--0" type="radio"><label class="tab-label" for="tab-set--0-input--1">Python</label><div class="tab-content docutils">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">cudaq_solvers</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">solvers</span>
+
+<span class="c1"># Configure molecular options</span>
+<span class="n">options</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s1">&#39;fermion_to_spin&#39;</span><span class="p">:</span> <span class="s1">&#39;jordan_wigner&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;casci&#39;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+    <span class="s1">&#39;memory&#39;</span><span class="p">:</span> <span class="mf">8000.0</span><span class="p">,</span>
+    <span class="s1">&#39;verbose&#39;</span><span class="p">:</span> <span class="kc">True</span>
+<span class="p">}</span>
+
+<span class="c1"># Create molecular Hamiltonian</span>
+<span class="n">molecule</span> <span class="o">=</span> <span class="n">solvers</span><span class="o">.</span><span class="n">create_molecule</span><span class="p">(</span>
+    <span class="n">geometry</span><span class="o">=</span><span class="p">[(</span><span class="s1">&#39;H&#39;</span><span class="p">,</span> <span class="p">(</span><span class="mf">0.</span><span class="p">,</span> <span class="mf">0.</span><span class="p">,</span> <span class="mf">0.</span><span class="p">)),</span>
+            <span class="p">(</span><span class="s1">&#39;H&#39;</span><span class="p">,</span> <span class="p">(</span><span class="mf">0.</span><span class="p">,</span> <span class="mf">0.</span><span class="p">,</span> <span class="mf">0.7474</span><span class="p">))],</span>
+    <span class="n">basis</span><span class="o">=</span><span class="s1">&#39;sto-3g&#39;</span><span class="p">,</span>
+    <span class="n">spin</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+    <span class="n">charge</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+    <span class="o">**</span><span class="n">options</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<input class="tab-input" id="tab-set--0-input--2" name="tab-set--0" type="radio"><label class="tab-label" for="tab-set--0-input--2">C++</label><div class="tab-content docutils">
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="k">using</span><span class="w"> </span><span class="k">namespace</span><span class="w"> </span><span class="nn">cudaq</span><span class="o">::</span><span class="nn">solvers</span><span class="p">;</span>
+
+<span class="c1">// Configure molecular options</span>
+<span class="n">molecule_options</span><span class="w"> </span><span class="n">options</span><span class="p">;</span>
+<span class="n">options</span><span class="p">.</span><span class="n">fermion_to_spin</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">&quot;jordan_wigner&quot;</span><span class="p">;</span>
+<span class="n">options</span><span class="p">.</span><span class="n">casci</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span>
+<span class="n">options</span><span class="p">.</span><span class="n">memory</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">8000.0</span><span class="p">;</span>
+<span class="n">options</span><span class="p">.</span><span class="n">verbose</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span>
+
+<span class="c1">// Create molecular geometry</span>
+<span class="k">auto</span><span class="w"> </span><span class="n">geometry</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">molecular_geometry</span><span class="p">({</span>
+<span class="w">    </span><span class="n">atom</span><span class="p">{</span><span class="s">&quot;H&quot;</span><span class="p">,</span><span class="w"> </span><span class="p">{</span><span class="mf">0.0</span><span class="p">,</span><span class="w"> </span><span class="mf">0.0</span><span class="p">,</span><span class="w"> </span><span class="mf">0.0</span><span class="p">}},</span>
+<span class="w">    </span><span class="n">atom</span><span class="p">{</span><span class="s">&quot;H&quot;</span><span class="p">,</span><span class="w"> </span><span class="p">{</span><span class="mf">0.0</span><span class="p">,</span><span class="w"> </span><span class="mf">0.0</span><span class="p">,</span><span class="w"> </span><span class="mf">0.7474</span><span class="p">}}</span>
+<span class="p">});</span>
+
+<span class="c1">// Create molecular Hamiltonian</span>
+<span class="k">auto</span><span class="w"> </span><span class="n">molecule</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">create_molecule</span><span class="p">(</span>
+<span class="w">    </span><span class="n">geometry</span><span class="p">,</span>
+<span class="w">    </span><span class="s">&quot;sto-3g&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="mi">0</span><span class="p">,</span><span class="w">  </span><span class="c1">// spin</span>
+<span class="w">    </span><span class="mi">0</span><span class="p">,</span><span class="w">  </span><span class="c1">// charge</span>
+<span class="w">    </span><span class="n">options</span>
+<span class="p">);</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+</section>
+<section id="variational-quantum-eigensolver-vqe">
+<h2>Variational Quantum Eigensolver (VQE)<a class="headerlink" href="#variational-quantum-eigensolver-vqe" title="Permalink to this heading"></a></h2>
+<p>The VQE algorithm finds the minimum eigenvalue of a
+Hamiltonian using a hybrid quantum-classical approach.</p>
+</section>
+<section id="vqe-examples">
+<h2>VQE Examples<a class="headerlink" href="#vqe-examples" title="Permalink to this heading"></a></h2>
+<p>The VQE implementation supports multiple usage patterns with different levels of customization.</p>
+<section id="basic-usage">
+<h3>Basic Usage<a class="headerlink" href="#basic-usage" title="Permalink to this heading"></a></h3>
+<div class="tab-set docutils">
+<input checked="True" class="tab-input" id="tab-set--1-input--1" name="tab-set--1" type="radio"><label class="tab-label" for="tab-set--1-input--1">Python</label><div class="tab-content docutils">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">cudaq</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">cudaq</span><span class="w"> </span><span class="kn">import</span> <span class="n">spin</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">cudaq_solvers</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">solvers</span>
+
+<span class="c1"># Define quantum kernel (ansatz)</span>
+<span class="nd">@cudaq</span><span class="o">.</span><span class="n">kernel</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">ansatz</span><span class="p">(</span><span class="n">theta</span><span class="p">:</span> <span class="nb">float</span><span class="p">):</span>
+    <span class="n">q</span> <span class="o">=</span> <span class="n">cudaq</span><span class="o">.</span><span class="n">qvector</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+    <span class="n">x</span><span class="p">(</span><span class="n">q</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+    <span class="n">ry</span><span class="p">(</span><span class="n">theta</span><span class="p">,</span> <span class="n">q</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+    <span class="n">x</span><span class="o">.</span><span class="n">ctrl</span><span class="p">(</span><span class="n">q</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">q</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+
+<span class="c1"># Define Hamiltonian</span>
+<span class="n">H</span> <span class="o">=</span> <span class="mf">5.907</span> <span class="o">-</span> <span class="mf">2.1433</span> <span class="o">*</span> <span class="n">spin</span><span class="o">.</span><span class="n">x</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span> <span class="o">*</span> <span class="n">spin</span><span class="o">.</span><span class="n">x</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span> <span class="o">-</span> \
+    <span class="mf">2.1433</span> <span class="o">*</span> <span class="n">spin</span><span class="o">.</span><span class="n">y</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span> <span class="o">*</span> <span class="n">spin</span><span class="o">.</span><span class="n">y</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span> <span class="o">+</span> \
+    <span class="mf">0.21829</span> <span class="o">*</span> <span class="n">spin</span><span class="o">.</span><span class="n">z</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span> <span class="o">-</span> <span class="mf">6.125</span> <span class="o">*</span> <span class="n">spin</span><span class="o">.</span><span class="n">z</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+
+<span class="c1"># Run VQE with defaults (cobyla optimizer)</span>
+<span class="n">energy</span><span class="p">,</span> <span class="n">parameters</span><span class="p">,</span> <span class="n">data</span> <span class="o">=</span> <span class="n">solvers</span><span class="o">.</span><span class="n">vqe</span><span class="p">(</span>
+    <span class="k">lambda</span> <span class="n">thetas</span><span class="p">:</span> <span class="n">ansatz</span><span class="p">(</span><span class="n">thetas</span><span class="p">[</span><span class="mi">0</span><span class="p">]),</span>
+    <span class="n">H</span><span class="p">,</span>
+    <span class="n">initial_parameters</span><span class="o">=</span><span class="p">[</span><span class="mf">0.0</span><span class="p">],</span>
+    <span class="n">verbose</span><span class="o">=</span><span class="kc">True</span>
+<span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Ground state energy: </span><span class="si">{</span><span class="n">energy</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<input class="tab-input" id="tab-set--1-input--2" name="tab-set--1" type="radio"><label class="tab-label" for="tab-set--1-input--2">C++</label><div class="tab-content docutils">
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;cudaq.h&quot;</span>
+
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;cudaq/solvers/operators.h&quot;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;cudaq/solvers/vqe.h&quot;</span>
+
+<span class="c1">// Define quantum kernel</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">ansatz</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="kt">void</span><span class="w"> </span><span class="nf">operator</span><span class="p">()(</span><span class="n">std</span><span class="o">::</span><span class="n">vector</span><span class="o">&lt;</span><span class="kt">double</span><span class="o">&gt;</span><span class="w"> </span><span class="n">theta</span><span class="p">)</span><span class="w"> </span><span class="n">__qpu__</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="n">cudaq</span><span class="o">::</span><span class="n">qvector</span><span class="w"> </span><span class="n">q</span><span class="p">(</span><span class="mi">2</span><span class="p">);</span>
+<span class="w">      </span><span class="n">x</span><span class="p">(</span><span class="n">q</span><span class="p">[</span><span class="mi">0</span><span class="p">]);</span>
+<span class="w">      </span><span class="n">ry</span><span class="p">(</span><span class="n">theta</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span><span class="w"> </span><span class="n">q</span><span class="p">[</span><span class="mi">1</span><span class="p">]);</span>
+<span class="w">      </span><span class="n">x</span><span class="o">&lt;</span><span class="n">cudaq</span><span class="o">::</span><span class="n">ctrl</span><span class="o">&gt;</span><span class="p">(</span><span class="n">q</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span><span class="w"> </span><span class="n">q</span><span class="p">[</span><span class="mi">0</span><span class="p">]);</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">};</span>
+
+<span class="c1">// Create Hamiltonian</span>
+<span class="k">auto</span><span class="w"> </span><span class="n">H</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">5.907</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mf">2.1433</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">x</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">x</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="o">-</span>
+<span class="w">        </span><span class="mf">2.1433</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">y</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">y</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="o">+</span>
+<span class="w">        </span><span class="mf">0.21829</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">z</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mf">6.125</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">z</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span>
+
+<span class="c1">// Run VQE with default optimizer</span>
+<span class="k">auto</span><span class="w"> </span><span class="n">result</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">cudaq</span><span class="o">::</span><span class="n">solvers</span><span class="o">::</span><span class="n">vqe</span><span class="p">(</span>
+<span class="w">    </span><span class="n">ansatz</span><span class="p">{},</span>
+<span class="w">    </span><span class="n">H</span><span class="p">,</span>
+<span class="w">    </span><span class="p">{</span><span class="mf">0.0</span><span class="p">},</span><span class="w">  </span><span class="c1">// Initial parameters</span>
+<span class="w">    </span><span class="p">{{</span><span class="s">&quot;verbose&quot;</span><span class="p">,</span><span class="w"> </span><span class="nb">true</span><span class="p">}}</span>
+<span class="p">);</span>
+<span class="n">printf</span><span class="p">(</span><span class="s">&quot;Ground state energy: %lf</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">result</span><span class="p">.</span><span class="n">energy</span><span class="p">);</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="custom-optimization">
+<h3>Custom Optimization<a class="headerlink" href="#custom-optimization" title="Permalink to this heading"></a></h3>
+<div class="tab-set docutils">
+<input checked="True" class="tab-input" id="tab-set--2-input--1" name="tab-set--2" type="radio"><label class="tab-label" for="tab-set--2-input--1">Python</label><div class="tab-content docutils">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Using L-BFGS-B optimizer with parameter-shift gradients</span>
+<span class="n">energy</span><span class="p">,</span> <span class="n">parameters</span><span class="p">,</span> <span class="n">data</span> <span class="o">=</span> <span class="n">solvers</span><span class="o">.</span><span class="n">vqe</span><span class="p">(</span>
+    <span class="k">lambda</span> <span class="n">thetas</span><span class="p">:</span> <span class="n">ansatz</span><span class="p">(</span><span class="n">thetas</span><span class="p">[</span><span class="mi">0</span><span class="p">]),</span>
+    <span class="n">H</span><span class="p">,</span>
+    <span class="n">initial_parameters</span><span class="o">=</span><span class="p">[</span><span class="mf">0.0</span><span class="p">],</span>
+    <span class="n">optimizer</span><span class="o">=</span><span class="s1">&#39;lbfgs&#39;</span><span class="p">,</span>
+    <span class="n">gradient</span><span class="o">=</span><span class="s1">&#39;parameter_shift&#39;</span><span class="p">,</span>
+    <span class="n">verbose</span><span class="o">=</span><span class="kc">True</span>
+<span class="p">)</span>
+
+<span class="c1"># Using SciPy optimizer directly</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">scipy.optimize</span><span class="w"> </span><span class="kn">import</span> <span class="n">minimize</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">callback</span><span class="p">(</span><span class="n">xk</span><span class="p">):</span>
+    <span class="n">exp_val</span> <span class="o">=</span> <span class="n">cudaq</span><span class="o">.</span><span class="n">observe</span><span class="p">(</span><span class="n">ansatz</span><span class="p">,</span> <span class="n">H</span><span class="p">,</span> <span class="n">xk</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span><span class="o">.</span><span class="n">expectation</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Energy at iteration: </span><span class="si">{</span><span class="n">exp_val</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="n">energy</span><span class="p">,</span> <span class="n">parameters</span><span class="p">,</span> <span class="n">data</span> <span class="o">=</span> <span class="n">solvers</span><span class="o">.</span><span class="n">vqe</span><span class="p">(</span>
+    <span class="k">lambda</span> <span class="n">thetas</span><span class="p">:</span> <span class="n">ansatz</span><span class="p">(</span><span class="n">thetas</span><span class="p">[</span><span class="mi">0</span><span class="p">]),</span>
+    <span class="n">H</span><span class="p">,</span>
+    <span class="n">initial_parameters</span><span class="o">=</span><span class="p">[</span><span class="mf">0.0</span><span class="p">],</span>
+    <span class="n">optimizer</span><span class="o">=</span><span class="n">minimize</span><span class="p">,</span>
+    <span class="n">callback</span><span class="o">=</span><span class="n">callback</span><span class="p">,</span>
+    <span class="n">method</span><span class="o">=</span><span class="s1">&#39;L-BFGS-B&#39;</span><span class="p">,</span>
+    <span class="n">jac</span><span class="o">=</span><span class="s1">&#39;3-point&#39;</span><span class="p">,</span>
+    <span class="n">tol</span><span class="o">=</span><span class="mf">1e-4</span><span class="p">,</span>
+    <span class="n">options</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;disp&#39;</span><span class="p">:</span> <span class="kc">True</span><span class="p">}</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<input class="tab-input" id="tab-set--2-input--2" name="tab-set--2" type="radio"><label class="tab-label" for="tab-set--2-input--2">C++</label><div class="tab-content docutils">
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="c1">// Using L-BFGS optimizer with central difference gradients</span>
+<span class="k">auto</span><span class="w"> </span><span class="n">optimizer</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">cudaq</span><span class="o">::</span><span class="n">optim</span><span class="o">::</span><span class="n">optimizer</span><span class="o">::</span><span class="n">get</span><span class="p">(</span><span class="s">&quot;lbfgs&quot;</span><span class="p">);</span>
+<span class="k">auto</span><span class="w"> </span><span class="n">gradient</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">cudaq</span><span class="o">::</span><span class="n">observe_gradient</span><span class="o">::</span><span class="n">get</span><span class="p">(</span>
+<span class="w">    </span><span class="s">&quot;central_difference&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="n">ansatz</span><span class="p">{},</span>
+<span class="w">    </span><span class="n">H</span>
+<span class="p">);</span>
+
+<span class="k">auto</span><span class="w"> </span><span class="n">result</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">cudaq</span><span class="o">::</span><span class="n">solvers</span><span class="o">::</span><span class="n">vqe</span><span class="p">(</span>
+<span class="w">    </span><span class="n">ansatz</span><span class="p">{},</span>
+<span class="w">    </span><span class="n">H</span><span class="p">,</span>
+<span class="w">    </span><span class="o">*</span><span class="n">optimizer</span><span class="p">,</span>
+<span class="w">    </span><span class="o">*</span><span class="n">gradient</span><span class="p">,</span>
+<span class="w">    </span><span class="p">{</span><span class="mf">0.0</span><span class="p">},</span><span class="w">  </span><span class="c1">// Initial parameters</span>
+<span class="w">    </span><span class="p">{{</span><span class="s">&quot;verbose&quot;</span><span class="p">,</span><span class="w"> </span><span class="nb">true</span><span class="p">}}</span>
+<span class="p">);</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="shot-based-simulation">
+<h3>Shot-based Simulation<a class="headerlink" href="#shot-based-simulation" title="Permalink to this heading"></a></h3>
+<div class="tab-set docutils">
+<input checked="True" class="tab-input" id="tab-set--3-input--1" name="tab-set--3" type="radio"><label class="tab-label" for="tab-set--3-input--1">Python</label><div class="tab-content docutils">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Run VQE with finite shots</span>
+<span class="n">energy</span><span class="p">,</span> <span class="n">parameters</span><span class="p">,</span> <span class="n">data</span> <span class="o">=</span> <span class="n">solvers</span><span class="o">.</span><span class="n">vqe</span><span class="p">(</span>
+    <span class="k">lambda</span> <span class="n">thetas</span><span class="p">:</span> <span class="n">ansatz</span><span class="p">(</span><span class="n">thetas</span><span class="p">[</span><span class="mi">0</span><span class="p">]),</span>
+    <span class="n">H</span><span class="p">,</span>
+    <span class="n">initial_parameters</span><span class="o">=</span><span class="p">[</span><span class="mf">0.0</span><span class="p">],</span>
+    <span class="n">shots</span><span class="o">=</span><span class="mi">10000</span><span class="p">,</span>
+    <span class="n">max_iterations</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span>
+    <span class="n">verbose</span><span class="o">=</span><span class="kc">True</span>
+<span class="p">)</span>
+
+<span class="c1"># Analyze measurement data</span>
+<span class="k">for</span> <span class="n">iteration</span> <span class="ow">in</span> <span class="n">data</span><span class="p">:</span>
+    <span class="n">counts</span> <span class="o">=</span> <span class="n">iteration</span><span class="o">.</span><span class="n">result</span><span class="o">.</span><span class="n">counts</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Measurement counts:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;XX basis:&quot;</span><span class="p">,</span> <span class="n">counts</span><span class="o">.</span><span class="n">get_register_counts</span><span class="p">(</span><span class="s1">&#39;XX&#39;</span><span class="p">))</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;YY basis:&quot;</span><span class="p">,</span> <span class="n">counts</span><span class="o">.</span><span class="n">get_register_counts</span><span class="p">(</span><span class="s1">&#39;YY&#39;</span><span class="p">))</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;ZI basis:&quot;</span><span class="p">,</span> <span class="n">counts</span><span class="o">.</span><span class="n">get_register_counts</span><span class="p">(</span><span class="s1">&#39;ZI&#39;</span><span class="p">))</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;IZ basis:&quot;</span><span class="p">,</span> <span class="n">counts</span><span class="o">.</span><span class="n">get_register_counts</span><span class="p">(</span><span class="s1">&#39;IZ&#39;</span><span class="p">))</span>
+</pre></div>
+</div>
+</div>
+<input class="tab-input" id="tab-set--3-input--2" name="tab-set--3" type="radio"><label class="tab-label" for="tab-set--3-input--2">C++</label><div class="tab-content docutils">
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="c1">// Run VQE with finite shots</span>
+<span class="k">auto</span><span class="w"> </span><span class="n">optimizer</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">cudaq</span><span class="o">::</span><span class="n">optim</span><span class="o">::</span><span class="n">optimizer</span><span class="o">::</span><span class="n">get</span><span class="p">(</span><span class="s">&quot;lbfgs&quot;</span><span class="p">);</span>
+<span class="k">auto</span><span class="w"> </span><span class="n">gradient</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">cudaq</span><span class="o">::</span><span class="n">observe_gradient</span><span class="o">::</span><span class="n">get</span><span class="p">(</span>
+<span class="w">    </span><span class="s">&quot;parameter_shift&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="n">ansatz</span><span class="p">{},</span>
+<span class="w">    </span><span class="n">H</span>
+<span class="p">);</span>
+
+<span class="k">auto</span><span class="w"> </span><span class="n">result</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">cudaq</span><span class="o">::</span><span class="n">solvers</span><span class="o">::</span><span class="n">vqe</span><span class="p">(</span>
+<span class="w">    </span><span class="n">ansatz</span><span class="p">{},</span>
+<span class="w">    </span><span class="n">H</span><span class="p">,</span>
+<span class="w">    </span><span class="o">*</span><span class="n">optimizer</span><span class="p">,</span>
+<span class="w">    </span><span class="o">*</span><span class="n">gradient</span><span class="p">,</span>
+<span class="w">    </span><span class="p">{</span><span class="mf">0.0</span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">        </span><span class="p">{</span><span class="s">&quot;shots&quot;</span><span class="p">,</span><span class="w"> </span><span class="mi">10000</span><span class="p">},</span>
+<span class="w">        </span><span class="p">{</span><span class="s">&quot;verbose&quot;</span><span class="p">,</span><span class="w"> </span><span class="nb">true</span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">);</span>
+
+<span class="c1">// Analyze measurement data</span>
+<span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="k">auto</span><span class="o">&amp;</span><span class="w"> </span><span class="n">iteration</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">result</span><span class="p">.</span><span class="n">iteration_data</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">std</span><span class="o">::</span><span class="n">cout</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;Iteration type: &quot;</span>
+<span class="w">            </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="p">(</span><span class="n">iteration</span><span class="p">.</span><span class="n">type</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">observe_execution_type</span><span class="o">::</span><span class="n">gradient</span>
+<span class="w">                </span><span class="o">?</span><span class="w"> </span><span class="s">&quot;gradient&quot;</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="s">&quot;function&quot;</span><span class="p">)</span>
+<span class="w">            </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">&quot;</span><span class="se">\n</span><span class="s">&quot;</span><span class="p">;</span>
+<span class="w">    </span><span class="n">iteration</span><span class="p">.</span><span class="n">result</span><span class="p">.</span><span class="n">dump</span><span class="p">();</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+</section>
+<section id="adapt-vqe">
+<h2>ADAPT-VQE<a class="headerlink" href="#adapt-vqe" title="Permalink to this heading"></a></h2>
+<p>The Adaptive Derivative-Assembled Pseudo-Trotter Variational Quantum Eigensolver (ADAPT-VQE)
+is an advanced quantum algorithm that dynamically builds a problem-tailored ansatz
+based on operator gradients.</p>
+<section id="key-features">
+<h3>Key Features<a class="headerlink" href="#key-features" title="Permalink to this heading"></a></h3>
+<ul class="simple">
+<li><p>Dynamic ansatz construction</p></li>
+<li><p>Gradient-based operator selection</p></li>
+<li><p>Automatic termination criteria</p></li>
+<li><p>Support for various operator pools</p></li>
+<li><p>Compatible with multiple optimizers</p></li>
+</ul>
+</section>
+<section id="id1">
+<h3>Basic Usage<a class="headerlink" href="#id1" title="Permalink to this heading"></a></h3>
+<div class="tab-set docutils">
+<input checked="True" class="tab-input" id="tab-set--4-input--1" name="tab-set--4" type="radio"><label class="tab-label" for="tab-set--4-input--1">Python</label><div class="tab-content docutils">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">cudaq</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">cudaq_solvers</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">solvers</span>
+
+<span class="c1"># Define molecular geometry</span>
+<span class="n">geometry</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="p">(</span><span class="s1">&#39;H&#39;</span><span class="p">,</span> <span class="p">(</span><span class="mf">0.</span><span class="p">,</span> <span class="mf">0.</span><span class="p">,</span> <span class="mf">0.</span><span class="p">)),</span>
+    <span class="p">(</span><span class="s1">&#39;H&#39;</span><span class="p">,</span> <span class="p">(</span><span class="mf">0.</span><span class="p">,</span> <span class="mf">0.</span><span class="p">,</span> <span class="mf">0.7474</span><span class="p">))</span>
+<span class="p">]</span>
+
+<span class="c1"># Create molecular Hamiltonian</span>
+<span class="n">molecule</span> <span class="o">=</span> <span class="n">solvers</span><span class="o">.</span><span class="n">create_molecule</span><span class="p">(</span>
+    <span class="n">geometry</span><span class="p">,</span>
+    <span class="s1">&#39;sto-3g&#39;</span><span class="p">,</span>
+    <span class="n">spin</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+    <span class="n">charge</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+    <span class="n">casci</span><span class="o">=</span><span class="kc">True</span>
+<span class="p">)</span>
+
+<span class="c1"># Generate operator pool</span>
+<span class="n">operators</span> <span class="o">=</span> <span class="n">solvers</span><span class="o">.</span><span class="n">get_operator_pool</span><span class="p">(</span>
+    <span class="s2">&quot;spin_complement_gsd&quot;</span><span class="p">,</span>
+    <span class="n">num_orbitals</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">n_orbitals</span>
+<span class="p">)</span>
+
+<span class="n">numElectrons</span> <span class="o">=</span> <span class="n">molecule</span><span class="o">.</span><span class="n">n_electrons</span>
+
+<span class="c1"># Define initial state preparation</span>
+<span class="nd">@cudaq</span><span class="o">.</span><span class="n">kernel</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">initial_state</span><span class="p">(</span><span class="n">q</span><span class="p">:</span> <span class="n">cudaq</span><span class="o">.</span><span class="n">qview</span><span class="p">):</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">numElectrons</span><span class="p">):</span>
+        <span class="n">x</span><span class="p">(</span><span class="n">q</span><span class="p">[</span><span class="n">i</span><span class="p">])</span>
+
+<span class="c1"># Run ADAPT-VQE</span>
+<span class="n">energy</span><span class="p">,</span> <span class="n">parameters</span><span class="p">,</span> <span class="n">operators</span> <span class="o">=</span> <span class="n">solvers</span><span class="o">.</span><span class="n">adapt_vqe</span><span class="p">(</span>
+    <span class="n">initial_state</span><span class="p">,</span>
+    <span class="n">molecule</span><span class="o">.</span><span class="n">hamiltonian</span><span class="p">,</span>
+    <span class="n">operators</span><span class="p">,</span>
+    <span class="n">verbose</span><span class="o">=</span><span class="kc">True</span>
+<span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Ground state energy: </span><span class="si">{</span><span class="n">energy</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<input class="tab-input" id="tab-set--4-input--2" name="tab-set--4" type="radio"><label class="tab-label" for="tab-set--4-input--2">C++</label><div class="tab-content docutils">
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;cudaq/solvers/adapt.h&quot;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;cudaq/solvers/operators.h&quot;</span>
+
+<span class="c1">// compile with</span>
+<span class="c1">// nvq++ adaptEx.cpp --enable-mlir -lcudaq-solvers</span>
+<span class="c1">// ./a.out</span>
+
+<span class="kt">int</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// Define initial state preparation</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">initial_state</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[](</span><span class="n">cudaq</span><span class="o">::</span><span class="n">qvector</span><span class="o">&lt;&gt;&amp;</span><span class="w"> </span><span class="n">q</span><span class="p">)</span><span class="w"> </span><span class="n">__qpu__</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="kt">size_t</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">2</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">i</span><span class="p">)</span>
+<span class="w">            </span><span class="n">x</span><span class="p">(</span><span class="n">q</span><span class="p">[</span><span class="n">i</span><span class="p">]);</span>
+<span class="w">    </span><span class="p">};</span>
+
+<span class="w">    </span><span class="c1">// Create Hamiltonian (H2 molecule example)</span>
+<span class="w">    </span><span class="n">cudaq</span><span class="o">::</span><span class="n">solvers</span><span class="o">::</span><span class="n">molecular_geometry</span><span class="w"> </span><span class="n">geometry</span><span class="p">{{</span><span class="s">&quot;H&quot;</span><span class="p">,</span><span class="w"> </span><span class="p">{</span><span class="mf">0.</span><span class="p">,</span><span class="w"> </span><span class="mf">0.</span><span class="p">,</span><span class="w"> </span><span class="mf">0.</span><span class="p">}},</span>
+<span class="w">                                        </span><span class="p">{</span><span class="s">&quot;H&quot;</span><span class="p">,</span><span class="w"> </span><span class="p">{</span><span class="mf">0.</span><span class="p">,</span><span class="w"> </span><span class="mf">0.</span><span class="p">,</span><span class="w"> </span><span class="mf">.7474</span><span class="p">}}};</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">molecule</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">cudaq</span><span class="o">::</span><span class="n">solvers</span><span class="o">::</span><span class="n">create_molecule</span><span class="p">(</span>
+<span class="w">        </span><span class="n">geometry</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;sto-3g&quot;</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="p">{.</span><span class="n">casci</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">,</span><span class="w"> </span><span class="p">.</span><span class="n">verbose</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">});</span>
+
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">h</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">molecule</span><span class="p">.</span><span class="n">hamiltonian</span><span class="p">;</span>
+
+<span class="w">    </span><span class="c1">// Generate operator pool</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="n">operators</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">cudaq</span><span class="o">::</span><span class="n">solvers</span><span class="o">::</span><span class="n">get_operator_pool</span><span class="p">(</span>
+<span class="w">        </span><span class="s">&quot;spin_complement_gsd&quot;</span><span class="p">,</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="p">{</span><span class="s">&quot;num-orbitals&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">h</span><span class="p">.</span><span class="n">num_qubits</span><span class="p">()</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mi">2</span><span class="p">}</span>
+<span class="w">    </span><span class="p">});</span>
+
+<span class="w">    </span><span class="c1">// Run ADAPT-VQE</span>
+<span class="w">    </span><span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">energy</span><span class="p">,</span><span class="w"> </span><span class="n">parameters</span><span class="p">,</span><span class="w"> </span><span class="n">selected_ops</span><span class="p">]</span><span class="w"> </span><span class="o">=</span>
+<span class="w">        </span><span class="n">cudaq</span><span class="o">::</span><span class="n">solvers</span><span class="o">::</span><span class="n">adapt_vqe</span><span class="p">(</span>
+<span class="w">            </span><span class="n">initial_state</span><span class="p">,</span>
+<span class="w">            </span><span class="n">h</span><span class="p">,</span>
+<span class="w">            </span><span class="n">operators</span><span class="p">,</span>
+<span class="w">            </span><span class="p">{</span>
+<span class="w">                </span><span class="p">{</span><span class="s">&quot;grad_norm_tolerance&quot;</span><span class="p">,</span><span class="w"> </span><span class="mf">1e-3</span><span class="p">},</span>
+<span class="w">                </span><span class="p">{</span><span class="s">&quot;verbose&quot;</span><span class="p">,</span><span class="w"> </span><span class="nb">true</span><span class="p">}</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">        </span><span class="p">);</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="advanced-usage">
+<h3>Advanced Usage<a class="headerlink" href="#advanced-usage" title="Permalink to this heading"></a></h3>
+<section id="custom-optimization-settings">
+<h4>Custom Optimization Settings<a class="headerlink" href="#custom-optimization-settings" title="Permalink to this heading"></a></h4>
+<div class="tab-set docutils">
+<input checked="True" class="tab-input" id="tab-set--5-input--1" name="tab-set--5" type="radio"><label class="tab-label" for="tab-set--5-input--1">Python</label><div class="tab-content docutils">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Using L-BFGS-B optimizer with central difference gradients</span>
+<span class="n">energy</span><span class="p">,</span> <span class="n">parameters</span><span class="p">,</span> <span class="n">operators</span> <span class="o">=</span> <span class="n">solvers</span><span class="o">.</span><span class="n">adapt_vqe</span><span class="p">(</span>
+    <span class="n">initial_state</span><span class="p">,</span>
+    <span class="n">molecule</span><span class="o">.</span><span class="n">hamiltonian</span><span class="p">,</span>
+    <span class="n">operators</span><span class="p">,</span>
+    <span class="n">optimizer</span><span class="o">=</span><span class="s1">&#39;lbfgs&#39;</span><span class="p">,</span>
+    <span class="n">gradient</span><span class="o">=</span><span class="s1">&#39;central_difference&#39;</span><span class="p">,</span>
+    <span class="n">verbose</span><span class="o">=</span><span class="kc">True</span>
+<span class="p">)</span>
+
+<span class="c1"># Using SciPy optimizer directly</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">scipy.optimize</span><span class="w"> </span><span class="kn">import</span> <span class="n">minimize</span>
+<span class="n">energy</span><span class="p">,</span> <span class="n">parameters</span><span class="p">,</span> <span class="n">operators</span> <span class="o">=</span> <span class="n">solvers</span><span class="o">.</span><span class="n">adapt_vqe</span><span class="p">(</span>
+    <span class="n">initial_state</span><span class="p">,</span>
+    <span class="n">molecule</span><span class="o">.</span><span class="n">hamiltonian</span><span class="p">,</span>
+    <span class="n">operators</span><span class="p">,</span>
+    <span class="n">optimizer</span><span class="o">=</span><span class="n">minimize</span><span class="p">,</span>
+    <span class="n">method</span><span class="o">=</span><span class="s1">&#39;L-BFGS-B&#39;</span><span class="p">,</span>
+    <span class="n">jac</span><span class="o">=</span><span class="s1">&#39;3-point&#39;</span><span class="p">,</span>
+    <span class="n">tol</span><span class="o">=</span><span class="mf">1e-8</span><span class="p">,</span>
+    <span class="n">options</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;disp&#39;</span><span class="p">:</span> <span class="kc">True</span><span class="p">}</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<input class="tab-input" id="tab-set--5-input--2" name="tab-set--5" type="radio"><label class="tab-label" for="tab-set--5-input--2">C++</label><div class="tab-content docutils">
+<div class="highlight-cpp notranslate"><div class="highlight"><pre><span></span><span class="c1">// Using L-BFGS optimizer with central difference gradients</span>
+<span class="k">auto</span><span class="w"> </span><span class="n">optimizer</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">cudaq</span><span class="o">::</span><span class="n">optim</span><span class="o">::</span><span class="n">optimizer</span><span class="o">::</span><span class="n">get</span><span class="p">(</span><span class="s">&quot;lbfgs&quot;</span><span class="p">);</span>
+<span class="k">auto</span><span class="w"> </span><span class="p">[</span><span class="n">energy</span><span class="p">,</span><span class="w"> </span><span class="n">parameters</span><span class="p">,</span><span class="w"> </span><span class="n">operators</span><span class="p">]</span><span class="w"> </span><span class="o">=</span>
+<span class="w">    </span><span class="n">cudaq</span><span class="o">::</span><span class="n">solvers</span><span class="o">::</span><span class="n">adapt_vqe</span><span class="p">(</span>
+<span class="w">        </span><span class="n">initial_state</span><span class="p">{},</span>
+<span class="w">        </span><span class="n">h</span><span class="p">,</span>
+<span class="w">        </span><span class="n">operators</span><span class="p">,</span>
+<span class="w">        </span><span class="o">*</span><span class="n">optimizer</span><span class="p">,</span>
+<span class="w">        </span><span class="s">&quot;central_difference&quot;</span><span class="p">,</span>
+<span class="w">        </span><span class="p">{</span>
+<span class="w">            </span><span class="p">{</span><span class="s">&quot;grad_norm_tolerance&quot;</span><span class="p">,</span><span class="w"> </span><span class="mf">1e-3</span><span class="p">},</span>
+<span class="w">            </span><span class="p">{</span><span class="s">&quot;verbose&quot;</span><span class="p">,</span><span class="w"> </span><span class="nb">true</span><span class="p">}</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">);</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+</section>
+<section id="available-operator-pools">
+<h3>Available Operator Pools<a class="headerlink" href="#available-operator-pools" title="Permalink to this heading"></a></h3>
+<p>CUDA-QX provides several pre-built operator pools for ADAPT-VQE:</p>
+<ul class="simple">
+<li><dl class="simple">
+<dt><strong>spin_complement_gsd</strong>: Spin-complemented generalized singles and doubles.</dt><dd><p>This operator pool combines generalized excitations with enforced spin symmetry. It is
+more powerful than UCCSD because its generalized operators capture more electron correlation,
+and it is more reliable than both UCCSD and UCCGSD because its spin-complemented
+construction prevents the unphysical “spin-symmetry breaking”.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt><strong>uccsd</strong>: UCCSD operators.</dt><dd><p>The standard, chemically-inspired ansatz. Excitation Space
+is Restricted. It only includes single and double excitations
+where electrons move from a reference-occupied orbital (i)
+to a reference-virtual orbital (a),
+relative to the starting Hartree-Fock state. Excellent at capturing dynamic correlation
+(short-range, instantaneous electron interactions).</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt><strong>uccgsd</strong>: UCC generalized singles and doubles.</dt><dd><p>More expressive than UCCSD, as it includes all possible
+single and double excitations, regardless of their occupied/virtual status in the reference state.
+Capable of capturing both dynamic and static (strong) correlation
+but at the cost of increased circuit depth and parameter count.</p>
+</dd>
+</dl>
+</li>
+<li><dl class="simple">
+<dt><strong>qaoa</strong>: QAOA mixer excitation operators</dt><dd><p>It generates all possible single-qubit X and Y terms, along with all possible
+two-qubit interaction terms (XX, YY, XY, YX, XZ, ZX, YZ, ZY) across every pair of qubits.
+This pool offers a rich basis for constructing the mixer Hamiltonian for ADAPT-QAOA algorithms.</p>
+</dd>
+</dl>
+</li>
+</ul>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">cudaq_solvers</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">solvers</span>
+
+<span class="n">geometry</span> <span class="o">=</span> <span class="p">[(</span><span class="s1">&#39;H&#39;</span><span class="p">,</span> <span class="p">(</span><span class="mf">0.</span><span class="p">,</span> <span class="mf">0.</span><span class="p">,</span> <span class="mf">0.</span><span class="p">)),</span> <span class="p">(</span><span class="s1">&#39;H&#39;</span><span class="p">,</span> <span class="p">(</span><span class="mf">0.</span><span class="p">,</span> <span class="mf">0.</span><span class="p">,</span> <span class="mf">.7474</span><span class="p">))]</span>
+<span class="n">molecule</span> <span class="o">=</span> <span class="n">solvers</span><span class="o">.</span><span class="n">create_molecule</span><span class="p">(</span><span class="n">geometry</span><span class="p">,</span> <span class="s1">&#39;sto-3g&#39;</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="n">casci</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+<span class="c1"># Generate different operator pools</span>
+<span class="n">gsd_ops</span> <span class="o">=</span> <span class="n">solvers</span><span class="o">.</span><span class="n">get_operator_pool</span><span class="p">(</span>
+    <span class="s2">&quot;spin_complement_gsd&quot;</span><span class="p">,</span>
+    <span class="n">num_orbitals</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">n_orbitals</span>
+<span class="p">)</span>
+
+<span class="n">uccsd_ops</span> <span class="o">=</span> <span class="n">solvers</span><span class="o">.</span><span class="n">get_operator_pool</span><span class="p">(</span>
+    <span class="s2">&quot;uccsd&quot;</span><span class="p">,</span>
+    <span class="n">num_qubits</span> <span class="o">=</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">molecule</span><span class="o">.</span><span class="n">n_orbitals</span><span class="p">,</span>
+    <span class="n">num_electrons</span> <span class="o">=</span> <span class="n">molecule</span><span class="o">.</span><span class="n">n_electrons</span>
+<span class="p">)</span>
+
+<span class="n">uccgsd_ops</span> <span class="o">=</span> <span class="n">solvers</span><span class="o">.</span><span class="n">get_operator_pool</span><span class="p">(</span>
+    <span class="s2">&quot;uccgsd&quot;</span><span class="p">,</span>
+    <span class="n">num_orbitals</span><span class="o">=</span><span class="n">molecule</span><span class="o">.</span><span class="n">n_orbitals</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="available-ansatz">
+<h3>Available Ansatz<a class="headerlink" href="#available-ansatz" title="Permalink to this heading"></a></h3>
+<p>CUDA-QX provides several state preparations ansatz for VQE.</p>
+<ul class="simple">
+<li><p><strong>uccsd</strong>: UCCSD operators</p></li>
+<li><p><strong>uccgsd</strong>: UCC generalized singles and doubles</p></li>
+</ul>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">cudaq_solvers</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">solvers</span>
+
+<span class="c1"># Using UCCSD ansatz</span>
+<span class="n">geometry</span> <span class="o">=</span> <span class="p">[(</span><span class="s1">&#39;H&#39;</span><span class="p">,</span> <span class="p">(</span><span class="mf">0.</span><span class="p">,</span> <span class="mf">0.</span><span class="p">,</span> <span class="mf">0.</span><span class="p">)),</span> <span class="p">(</span><span class="s1">&#39;H&#39;</span><span class="p">,</span> <span class="p">(</span><span class="mf">0.</span><span class="p">,</span> <span class="mf">0.</span><span class="p">,</span> <span class="mf">.7474</span><span class="p">))]</span>
+<span class="n">molecule</span> <span class="o">=</span> <span class="n">solvers</span><span class="o">.</span><span class="n">create_molecule</span><span class="p">(</span><span class="n">geometry</span><span class="p">,</span> <span class="s1">&#39;sto-3g&#39;</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="n">casci</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+<span class="n">numQubits</span> <span class="o">=</span> <span class="n">molecule</span><span class="o">.</span><span class="n">n_orbitals</span> <span class="o">*</span> <span class="mi">2</span>
+<span class="n">numElectrons</span> <span class="o">=</span> <span class="n">molecule</span><span class="o">.</span><span class="n">n_electrons</span>
+<span class="n">spin</span> <span class="o">=</span> <span class="mi">0</span>
+
+<span class="nd">@cudaq</span><span class="o">.</span><span class="n">kernel</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">ansatz</span><span class="p">(</span><span class="n">thetas</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">float</span><span class="p">]):</span>
+    <span class="n">q</span> <span class="o">=</span> <span class="n">cudaq</span><span class="o">.</span><span class="n">qvector</span><span class="p">(</span><span class="n">numQubits</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">numElectrons</span><span class="p">):</span>
+        <span class="n">x</span><span class="p">(</span><span class="n">q</span><span class="p">[</span><span class="n">i</span><span class="p">])</span>
+    <span class="n">solvers</span><span class="o">.</span><span class="n">stateprep</span><span class="o">.</span><span class="n">uccsd</span><span class="p">(</span><span class="n">q</span><span class="p">,</span> <span class="n">thetas</span><span class="p">,</span> <span class="n">numElectrons</span><span class="p">,</span> <span class="n">spin</span><span class="p">)</span>
+
+
+<span class="c1"># Using UCCGSD ansatz</span>
+<span class="n">geometry</span> <span class="o">=</span> <span class="p">[(</span><span class="s1">&#39;H&#39;</span><span class="p">,</span> <span class="p">(</span><span class="mf">0.</span><span class="p">,</span> <span class="mf">0.</span><span class="p">,</span> <span class="mf">0.</span><span class="p">)),</span> <span class="p">(</span><span class="s1">&#39;H&#39;</span><span class="p">,</span> <span class="p">(</span><span class="mf">0.</span><span class="p">,</span> <span class="mf">0.</span><span class="p">,</span> <span class="mf">.7474</span><span class="p">))]</span>
+<span class="n">molecule</span> <span class="o">=</span> <span class="n">solvers</span><span class="o">.</span><span class="n">create_molecule</span><span class="p">(</span><span class="n">geometry</span><span class="p">,</span> <span class="s1">&#39;sto-3g&#39;</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="n">casci</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+<span class="n">numQubits</span> <span class="o">=</span> <span class="n">molecule</span><span class="o">.</span><span class="n">n_orbitals</span> <span class="o">*</span> <span class="mi">2</span>
+<span class="n">numElectrons</span> <span class="o">=</span> <span class="n">molecule</span><span class="o">.</span><span class="n">n_electrons</span>
+
+<span class="c1"># Get grouped Pauli words and coefficients from UCCGSD pool</span>
+<span class="n">pauliWordsList</span><span class="p">,</span> <span class="n">coefficientsList</span> <span class="o">=</span> <span class="n">solvers</span><span class="o">.</span><span class="n">stateprep</span><span class="o">.</span><span class="n">get_uccgsd_pauli_lists</span><span class="p">(</span>
+    <span class="n">numQubits</span><span class="p">,</span> <span class="n">only_singles</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">only_doubles</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+<span class="nd">@cudaq</span><span class="o">.</span><span class="n">kernel</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">ansatz</span><span class="p">(</span><span class="n">numQubits</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">numElectrons</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">thetas</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">float</span><span class="p">],</span>
+           <span class="n">pauliWordsList</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="n">cudaq</span><span class="o">.</span><span class="n">pauli_word</span><span class="p">]],</span>
+           <span class="n">coefficientsList</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">list</span><span class="p">[</span><span class="nb">float</span><span class="p">]]):</span>
+    <span class="n">q</span> <span class="o">=</span> <span class="n">cudaq</span><span class="o">.</span><span class="n">qvector</span><span class="p">(</span><span class="n">numQubits</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">numElectrons</span><span class="p">):</span>
+        <span class="n">x</span><span class="p">(</span><span class="n">q</span><span class="p">[</span><span class="n">i</span><span class="p">])</span>
+    <span class="n">solvers</span><span class="o">.</span><span class="n">stateprep</span><span class="o">.</span><span class="n">uccgsd</span><span class="p">(</span><span class="n">q</span><span class="p">,</span> <span class="n">thetas</span><span class="p">,</span> <span class="n">pauliWordsList</span><span class="p">,</span> <span class="n">coefficientsList</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="algorithm-parameters">
+<h3>Algorithm Parameters<a class="headerlink" href="#algorithm-parameters" title="Permalink to this heading"></a></h3>
+<p>ADAPT-VQE supports various configuration options:</p>
+<ul class="simple">
+<li><p><strong>grad_norm_tolerance</strong>: Convergence threshold for operator gradients</p></li>
+<li><p><strong>max_iterations</strong>: Maximum number of ADAPT iterations</p></li>
+<li><p><strong>verbose</strong>: Enable detailed output</p></li>
+<li><p><strong>shots</strong>: Number of measurements for shot-based simulation</p></li>
+</ul>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">energy</span><span class="p">,</span> <span class="n">parameters</span><span class="p">,</span> <span class="n">operators</span> <span class="o">=</span> <span class="n">solvers</span><span class="o">.</span><span class="n">adapt_vqe</span><span class="p">(</span>
+    <span class="n">initial_state</span><span class="p">,</span>
+    <span class="n">hamiltonian</span><span class="p">,</span>
+    <span class="n">operators</span><span class="p">,</span>
+    <span class="n">grad_norm_tolerance</span><span class="o">=</span><span class="mf">1e-3</span><span class="p">,</span>
+    <span class="n">max_iterations</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span>
+    <span class="n">verbose</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">shots</span><span class="o">=</span><span class="mi">10000</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="results-analysis">
+<h3>Results Analysis<a class="headerlink" href="#results-analysis" title="Permalink to this heading"></a></h3>
+<p>The algorithm returns three components:</p>
+<ol class="arabic simple">
+<li><p><strong>energy</strong>: Final ground state energy</p></li>
+<li><p><strong>parameters</strong>: Optimized parameters for each selected operator</p></li>
+<li><p><strong>operators</strong>: List of selected operators in order of application</p></li>
+</ol>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Analyze results</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Final energy: </span><span class="si">{</span><span class="n">energy</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Selected operators and parameters:&quot;</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">param</span><span class="p">,</span> <span class="n">op</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">parameters</span><span class="p">,</span> <span class="n">operators</span><span class="p">):</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;θ = </span><span class="si">{</span><span class="n">param</span><span class="si">:</span><span class="s2">.6f</span><span class="si">}</span><span class="s2"> : </span><span class="si">{</span><span class="n">op</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="../qec/introduction.html" class="btn btn-neutral float-left" title="CUDA-Q QEC - Quantum Error Correction Library" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="../../examples_rst/qec/examples.html" class="btn btn-neutral float-right" title="CUDA-Q QEC by Example" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, NVIDIA Corporation &amp; Affiliates.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(false);
+      });
+  </script>  
+
+  <style>
+  a:link, a:visited {
+    color: #76b900;
+  }
+
+  a:hover {
+    color: #8c0;
+  }
+
+  .rst-content dl:not(.docutils) dt {
+    background: rgba(118, 185, 0, 0.1);
+    color: rgba(59,93,0,1);
+    border-top: solid 3px rgba(59,93,0,1);
+  }
+  </style>
+  
+
+</body>
+</html>
