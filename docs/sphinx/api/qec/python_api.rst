@@ -51,6 +51,69 @@ Detector Error Model
 .. autofunction:: cudaq_qec.dem_from_stim_text
 .. autofunction:: cudaq_qec.d_sparse
 
+.. _dyn_dem_python_api:
+
+Dynamic DEM Construction
+========================
+
+Build a code-capacity or phenomenological DEM from CSS generator matrices
+(no Stim circuit required), or compose per-round DEM *chunks* that can be
+stitched and closed into a flat :class:`~cudaq_qec.DetectorErrorModel`.
+See :doc:`/examples_rst/qec/dyn_dem` for a walkthrough.
+
+CSS matrices and noise
+----------------------
+
+.. autoclass:: cudaq_qec.CssCodes
+    :members:
+
+.. autoclass:: cudaq_qec.CssNoise
+    :members:
+
+.. autofunction:: cudaq_qec.css_matrices_from_code
+.. autofunction:: cudaq_qec.dem_from_css_matrices
+
+Extended DEM chunks
+-------------------
+
+.. autoclass:: cudaq_qec.ExtendedDem
+    :members:
+
+.. autofunction:: cudaq_qec.extended_dem_from_css_matrices
+
+.. autoclass:: cudaq_qec.DemChunkSpec
+    :members:
+
+.. autoclass:: cudaq_qec.DemChunksSpec
+    :members:
+
+.. autofunction:: cudaq_qec.dem_chunk_from_spec
+.. autofunction:: cudaq_qec.dem_chunks_from_spec
+
+Stitch, close, and merge
+------------------------
+
+.. autoclass:: cudaq_qec.PriorCombineMode
+    :members:
+
+.. autofunction:: cudaq_qec.dem_stitch
+.. autofunction:: cudaq_qec.dem_stitch_all
+.. autofunction:: cudaq_qec.dem_stitch_merged
+.. autofunction:: cudaq_qec.dem_close
+.. autofunction:: cudaq_qec.dem_close_all
+.. autofunction:: cudaq_qec.dem_merge_duplicate_columns
+.. autofunction:: cudaq_qec.are_dem_columns_unique
+.. autofunction:: cudaq_qec.assert_dem_columns_unique
+
+Streaming decoder maps
+----------------------
+
+.. autofunction:: cudaq_qec.dem_chunk_rounds
+.. autofunction:: cudaq_qec.dem_chunks_to_rounds
+.. autofunction:: cudaq_qec.dem_chunks_to_detector_round
+.. autofunction:: cudaq_qec.dem_chunks_to_d_sparse
+.. autofunction:: cudaq_qec.dem_chunks_to_o_sparse
+
 Decoder Interfaces
 ==================
 
