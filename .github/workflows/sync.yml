@@ -27,5 +27,5 @@ jobs:
         # upstream commits may not exist in this repository's LFS storage
         # yet), fetch them from upstream, and let the push upload them.
         GIT_LFS_SKIP_SMUDGE=1 git pull --ff-only upstream ${{ github.ref_name }}
-        git lfs fetch upstream ${{ github.ref_name }}
+        git -c http.https://github.com/.extraheader= lfs fetch upstream ${{ github.ref_name }}
         git push origin
