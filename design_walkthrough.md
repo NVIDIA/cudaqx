@@ -340,10 +340,6 @@ That gives two cases, and only one of them needs an operation:
   is no operation for this and no need for one: a matrix-constructed handle carries no raw source, so
   the DEM text is dropped structurally rather than by a rule someone has to remember.
 
-(`canonicalize_H()` is neither of those. It returns the same inputs with H in GF(2)-canonical form,
-and sliding window calls it on *itself* before slicing so that its row and column reads are
-well-defined. It is a normalization, not a hand-off.)
-
 This also allows us to expand into more exotic wrapping schemes by utilizing `decoder_inputs`. 
 
 
