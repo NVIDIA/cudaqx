@@ -1,3 +1,7 @@
+.. The data and figures on this page are reproducible with the scripts in
+   benchmarks/qec/relaybp_gamma_ensemble/ (see the README there for the
+   parameter table, required Relay-BP testdata and expected runtime).
+
 .. _ensemble_gamma_user_guide:
 
 Improving Relay BP Decoding With Gamma Ensembles
