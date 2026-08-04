@@ -12,6 +12,7 @@
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/realtime/graph_resources.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -25,7 +26,7 @@
 #include <vector>
 
 // CUDA-Q realtime bridge-provider interface.
-#include "cudaq/realtime/hololink_bridge_common.h"
+#include "cudaq/realtime/gpu_roce_bridge_common.h"
 
 namespace cudaq::qec::decoding_server {
 
@@ -34,12 +35,18 @@ namespace {
 std::string resolve_provider_library(const std::string &provider) {
   if (provider.find('/') != std::string::npos)
     return provider;
-  const std::string soname = "libcudaq-realtime-bridge-" + provider + ".so";
+
+  std::string hyphenated = provider;
+  std::replace(hyphenated.begin(), hyphenated.end(), '_', '-');
+  const std::string soname = "libcudaq-realtime-bridge-" + hyphenated + ".so";
 #ifdef QEC_BRIDGE_PROVIDER_DIR
-  const std::string candidate =
-      std::string(QEC_BRIDGE_PROVIDER_DIR) + "/" + soname;
-  if (std::ifstream(candidate).good())
-    return candidate;
+  const std::string literal = "libcudaq-realtime-bridge-" + provider + ".so";
+  for (const auto &name : {soname, literal}) {
+    const std::string candidate =
+        std::string(QEC_BRIDGE_PROVIDER_DIR) + "/" + name;
+    if (std::ifstream(candidate).good())
+      return candidate;
+  }
 #endif
   return soname;
 }
@@ -57,8 +64,8 @@ DeviceGraphTransceiver::DeviceGraphTransceiver(const DeviceGraphConfig &config)
         "DeviceGraphTransceiver: device_graph transport provider must be set "
         "in YAML");
 
-  // Bring the Hololink transceiver up through the bridge-provider interface:
-  // create() = hololink_create_transceiver + hololink_start (3-kernel shape:
+  // Bring the GpuRoceTransceiver up through the bridge-provider interface:
+  // create() = gpu_roce_create_transceiver + gpu_roce_start (3-kernel shape:
   // no --forward / --unified => rx_only + tx_only kernels, with dispatch
   // supplied by our device-graph scheduler in launch_scheduler()).
   // args[0] is a program-name placeholder: the provider's parse_bridge_args
@@ -131,7 +138,7 @@ DeviceGraphTransceiver::DeviceGraphTransceiver(const DeviceGraphConfig &config)
   endpoint_info_ = info;
 
   // connect(): the provider finalizes whatever rendezvous its wire needs
-  // (no wire traffic for hololink; the playback tool alone programs the
+  // (no wire traffic for gpu_roce; the playback tool alone programs the
   // FPGA control plane).
   if (cudaq_bridge_connect(bridge_) != CUDAQ_OK) {
     cudaq_bridge_destroy(bridge_);
@@ -164,8 +171,8 @@ void DeviceGraphTransceiver::launch_scheduler(void *raw_graph_resources) {
   consumer_ = std::make_unique<DeviceGraphRingConsumer>(
       ring, num_pages_, page_size_, gpu_id_, raw_graph_resources);
 
-  // Start the provider's I/O loop (Hololink RX/TX kernels + monitor thread,
-  // owned by the provider) now that the scheduler is polling the rings.
+  // Start the provider's I/O loop (GpuRoceTransceiver RX/TX kernels + monitor
+  // thread, owned by the provider) now that the scheduler is polling the rings.
   if (cudaq_bridge_launch(bridge_) != CUDAQ_OK) {
     consumer_->shutdown();
     throw std::runtime_error(
@@ -201,7 +208,8 @@ void DeviceGraphTransceiver::send(const PeerId & /*peer*/,
   throw std::logic_error(
       "DeviceGraphTransceiver::send() must not be called: the CUDAQ "
       "device-graph "
-      "scheduler writes TX responses directly to the Hololink ring buffer");
+      "scheduler writes TX responses directly to the GpuRoceTransceiver ring "
+      "buffer");
 }
 
 // ---------------------------------------------------------------------------
@@ -216,7 +224,8 @@ void DeviceGraphTransceiver::shutdown() {
   if (consumer_)
     consumer_->shutdown();
 
-  // Stop the Hololink RX/TX kernels and join the provider's monitor thread.
+  // Stop the GpuRoceTransceiver RX/TX kernels and join the provider's monitor
+  // thread.
   if (bridge_)
     cudaq_bridge_disconnect(bridge_);
 }

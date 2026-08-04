@@ -17,11 +17,11 @@ endif()
 # Optional: device_graph dispatch via the CUDA-Q realtime bridge-provider
 # interface.
 #
-# The Hololink transceiver sits behind a runtime-loaded provider
-# (libcudaq-realtime-bridge-hololink.so, built in cuda-quantum where
+# The GpuRoceTransceiver sits behind a runtime-loaded provider
+# (libcudaq-realtime-bridge-gpu-roce.so, built in cuda-quantum where
 # HSB + DOCA are provisioned), so compiling this path needs only the CUDA-Q
 # realtime headers, libcudaq-realtime.so (the bridge loader + C API), and the
-# CUDA toolkit -- NO Hololink / DOCA / HSB build-time dependencies here.  The
+# CUDA toolkit -- NO GpuRoceTransceiver / DOCA / HSB build-time dependencies here.  The
 # provider .so is resolved at runtime (dlopen), so a build without it still
 # produces a server whose device_graph mode fails loudly at startup.
 #
@@ -83,7 +83,7 @@ endif()
 #
 # Deliberately excludes DeviceGraphTransceiver: consumers of this library (unit
 # tests, the CQR plugin) must stay loadable on driverless machines, and the
-# device-graph deps (DOCA, the hololink bridge) require libcuda.so.1 at load
+# device-graph deps (DOCA, the gpu_roce bridge) require libcuda.so.1 at load
 # time.  The device-graph transceiver lives in the
 # cudaq-qec-decoding-server-device-graph component below, reached through a
 # weak factory symbol (see DecodingServer.cpp).
@@ -148,7 +148,7 @@ set_target_properties(cudaq-qec-decoding-server PROPERTIES
 # machines without the CUDA runtime.  The transport itself is a runtime-
 # loaded bridge provider selected by the YAML transport section, so this
 # component links only the CUDA-Q realtime bridge C API and the CUDA runtime --
-# no Hololink / DOCA / HSB link-time dependencies.
+# no GpuRoceTransceiver / DOCA / HSB link-time dependencies.
 #
 # Consumers must link this WHOLE_ARCHIVE: the only reference to the factory
 # is weak, which does not pull archive members on its own.

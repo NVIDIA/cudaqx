@@ -23,9 +23,9 @@
 
 #include <cuda_runtime.h>
 
-// CUDA-Q realtime transport-provider interface.  The Hololink transceiver is
-// behind a runtime-loaded bridge provider (libcudaq-realtime-bridge-hololink),
-// so this library carries NO Hololink / DOCA link-time dependencies.
+// CUDA-Q realtime transport-provider interface.  The GpuRoceTransceiver is
+// behind a runtime-loaded bridge provider (libcudaq-realtime-bridge-gpu-roce),
+// so this library carries NO GpuRoceTransceiver / DOCA link-time dependencies.
 #include "cudaq/realtime/daemon/bridge/bridge_interface.h"
 
 // Forward-declare the opaque scheduler context so the header stays independent
@@ -49,7 +49,7 @@ struct DeviceGraphConfig {
 ///
 /// ## Architecture
 ///
-/// The Hololink transceiver (DOCA GPU ring buffers fed by FPGA RDMA writes)
+/// The GpuRoceTransceiver (DOCA GPU ring buffers fed by FPGA RDMA writes)
 /// is brought up through the CUDA-Q realtime bridge-provider interface: the
 /// constructor loads the provider selected by the YAML transport section and
 /// adopts its RING_BUFFER context. `launch_scheduler()` wires those ring
@@ -58,9 +58,10 @@ struct DeviceGraphConfig {
 /// then starts the provider's I/O loop.
 ///
 /// Consequence of the provider split: this library needs only the CUDA-Q
-/// realtime headers + libcudaq-realtime.so at build time; the Hololink /
-/// DOCA / HSB dependency chain lives entirely inside the provider .so, which
-/// is built (and dlopen'd) on the machine with the hardware.
+/// realtime headers + libcudaq-realtime.so at build time; the
+/// GpuRoceTransceiver / DOCA / HSB dependency chain lives entirely inside the
+/// provider .so, which is built (and dlopen'd) on the machine with the
+/// hardware.
 ///
 /// After `launch_scheduler()` returns, the GPU handles the full
 /// RX → dispatch → decode → TX loop autonomously.  No CPU `recv()` or `send()`

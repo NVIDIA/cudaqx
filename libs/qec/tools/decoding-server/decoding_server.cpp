@@ -18,9 +18,10 @@
 ///     realtime bridge PROVIDER, loaded at runtime through the transport-
 ///     provider interface (bridge_interface.h).  A bare name resolves to
 ///     `libcudaq-realtime-bridge-<name>.so` next to the CUDA-Q realtime
-///     libraries (udp and cpu_roce ship there); a value containing '/' is
-///     loaded verbatim, which is how a partner drops in an out-of-tree
-///     transport library with NO changes to this server.
+///     libraries, with '_' in the name mapping to '-' to match the shipped
+///     hyphenated sonames (udp, cpu_roce and gpu_roce ship there); a value
+///     containing '/' is loaded verbatim, which is how a partner drops in
+///     an out-of-tree transport library with NO changes to this server.
 ///
 /// This server contains no transport-specific code: it forwards all
 /// unrecognized command-line arguments to the provider's create() (e.g.
@@ -154,7 +155,8 @@ bool parse_args(int argc, char **argv, ServerConfig &cfg) {
                    "section names no provider (a conflict is a startup "
                    "error).\n"
                    "Providers and their args are defined by the installed "
-                   "cudaq-realtime (libcudaq-realtime-bridge-<name>.so); "
+                   "cudaq-realtime (libcudaq-realtime-bridge-<name>.so, "
+                   "with '_' in <name> mapping to '-'); "
                    "the names and args above are examples, not an "
                    "exhaustive list -- the installation is the source of "
                    "truth."
@@ -233,15 +235,27 @@ private:
 // the CUDA-Q realtime libraries (QEC_BRIDGE_PROVIDER_DIR, baked in by
 // CMake), falling back to the bare soname for the dynamic loader's regular
 // search path.
+//
+// Provider names are snake_case in YAML/CLI (udp, cpu_roce, gpu_roce)
+// while cudaq-realtime ships hyphenated sonames
+// (libcudaq-realtime-bridge-cpu-roce.so, ...-gpu-roce.so), so '_' in a
+// bare name maps to '-'.  The provider dir is probed with the literal
+// spelling as a fallback so an out-of-tree provider whose soname really
+// does contain an underscore keeps resolving.
 std::string resolve_provider_lib(const std::string &transport) {
   if (transport.find('/') != std::string::npos)
     return transport;
-  const std::string soname = "libcudaq-realtime-bridge-" + transport + ".so";
+  std::string hyphenated = transport;
+  std::replace(hyphenated.begin(), hyphenated.end(), '_', '-');
+  const std::string soname = "libcudaq-realtime-bridge-" + hyphenated + ".so";
 #ifdef QEC_BRIDGE_PROVIDER_DIR
-  const std::string candidate =
-      std::string(QEC_BRIDGE_PROVIDER_DIR) + "/" + soname;
-  if (std::ifstream(candidate).good())
-    return candidate;
+  const std::string literal = "libcudaq-realtime-bridge-" + transport + ".so";
+  for (const auto &name : {soname, literal}) {
+    const std::string candidate =
+        std::string(QEC_BRIDGE_PROVIDER_DIR) + "/" + name;
+    if (std::ifstream(candidate).good())
+      return candidate;
+  }
 #endif
   return soname;
 }
