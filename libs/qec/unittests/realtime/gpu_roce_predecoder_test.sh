@@ -7,10 +7,10 @@
 # the terms of the Apache License 2.0 which accompanies this distribution.    #
 # ============================================================================ #
 #
-# hololink_predecoder_test.sh
+# gpu_roce_predecoder_test.sh
 #
 # Orchestration script for the AI predecoder + PyMatching pipeline over
-# Hololink RDMA/RoCE.  Uses HOST_LOOP CPU-launched CUDA graph dispatch
+# GPU RoCE RDMA.  Uses HOST_LOOP CPU-launched CUDA graph dispatch
 # with the realtime_pipeline external ring buffer path.
 #
 # Modes:
@@ -19,16 +19,16 @@
 #
 # Data preparation:
 #   The predecoder test data (detectors.bin) is in binary format, but the
-#   hololink_fpga_syndrome_playback tool expects a text syndromes file and
+#   hsb_fpga_syndrome_playback tool expects a text syndromes file and
 #   a YAML config.  This script converts them automatically.
 #
 # Examples:
 #   # Full emulated test with d13_r104 data:
-#   ./hololink_predecoder_test.sh --emulate --setup-network \
+#   ./gpu_roce_predecoder_test.sh --emulate --setup-network \
 #       --data-dir predecoder/test_data/d13_T104_X
 #
 #   # Just run (network already set up):
-#   ./hololink_predecoder_test.sh --emulate \
+#   ./gpu_roce_predecoder_test.sh --emulate \
 #       --data-dir predecoder/test_data/d13_T104_X
 #
 set -euo pipefail
@@ -71,9 +71,9 @@ BRIDGE_OVERRIDES=()
 
 print_usage() {
     cat <<'EOF'
-Usage: hololink_predecoder_test.sh [options]
+Usage: gpu_roce_predecoder_test.sh [options]
 
-Orchestration for AI predecoder + PyMatching pipeline over Hololink.
+Orchestration for AI predecoder + PyMatching pipeline over GPU RoCE.
 
 Modes:
   --emulate              Use FPGA emulator (no FPGA needed)
@@ -194,7 +194,7 @@ cleanup() {
 trap cleanup EXIT
 
 # ============================================================================
-# Network Setup (reused from hololink_qldpc_graph_decoder_test.sh)
+# Network Setup (reused from gpu_roce_qldpc_graph_decoder_test.sh)
 # ============================================================================
 
 detect_interfaces() {
@@ -413,9 +413,9 @@ resolve_paths() {
     local cuda_qx_realtime="${CUDA_QX_DIR}/build/libs/qec/unittests/realtime"
     local cq_build_dir="${CUDA_QUANTUM_DIR}/realtime/build/unittests"
 
-    BRIDGE_BIN="${cuda_qx_realtime}/hololink_predecoder_bridge"
-    PLAYBACK_BIN="${cuda_qx_utils}/hololink_fpga_syndrome_playback"
-    EMULATOR_BIN="${cq_build_dir}/utils/hololink_fpga_emulator"
+    BRIDGE_BIN="${cuda_qx_realtime}/gpu_roce_predecoder_bridge"
+    PLAYBACK_BIN="${cuda_qx_utils}/hsb_fpga_syndrome_playback"
+    EMULATOR_BIN="${cq_build_dir}/utils/hsb_fpga_emulator"
 
     if [[ ! -x "$BRIDGE_BIN" ]]; then
         _err "Bridge binary not found: $BRIDGE_BIN"
@@ -617,7 +617,7 @@ run_emulated() {
     # ---- 3. Start playback tool ----
     _log "Starting syndrome playback (control-port=$CONTROL_PORT)"
     local playback_args=(
-        --hololink "$EMULATOR_IP"
+        --hsb-ip "$EMULATOR_IP"
         --control-port "$CONTROL_PORT"
         --config "$PLAYBACK_CONFIG"
         --syndromes "$PLAYBACK_SYNDROMES"
@@ -697,7 +697,7 @@ run_fpga() {
     # ---- 2. Start playback tool ----
     _log "Starting syndrome playback (fpga=$FPGA_IP)"
     local playback_args=(
-        --hololink "$FPGA_IP"
+        --hsb-ip "$FPGA_IP"
         --config "$PLAYBACK_CONFIG"
         --syndromes "$PLAYBACK_SYNDROMES"
         --function-name predecode
@@ -725,7 +725,7 @@ run_fpga() {
 # ============================================================================
 
 main() {
-    _banner "Hololink Predecoder + PyMatching Bridge Test"
+    _banner "GPU RoCE Predecoder + PyMatching Bridge Test"
 
     if $EMULATE; then
         _info "Mode: FPGA Emulation (3-tool)"
