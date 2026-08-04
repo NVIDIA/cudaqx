@@ -446,7 +446,10 @@ struct Options {
   std::optional<std::uint32_t> rdma_page_size; // ring buffer slot size (bytes)
   std::optional<std::uint32_t> rdma_num_pages; // number of ring buffer slots
   std::uint32_t spacing_us =
-      DEFAULT_TIMER_SPACING_US; // inter-shot spacing (us)
+      DEFAULT_TIMER_SPACING_US; // per-frame playback pacing (us): the FPGA
+                                // timer fires once per BRAM window (= one
+                                // frame), so a shot spans
+                                // frames-per-shot x spacing
 };
 
 void print_usage(const char *argv0) {
@@ -465,8 +468,11 @@ void print_usage(const char *argv0) {
       << "  --function-name <s>   RPC function name for dispatch "
          "(default: mock_decode)\n"
       << "  --num-shots <n>       Number of shots to play back (default: all)\n"
-      << "  --spacing <us>        Inter-shot spacing in microseconds "
-         "(default: 10)\n"
+      << "  --spacing <us>        Per-frame playback pacing in microseconds "
+         "(default: 10;\n"
+         "                        the FPGA timer fires once per frame, so a "
+         "shot spans\n"
+         "                        frames-per-shot x spacing)\n"
       << "  --verify              Capture and verify correction responses "
          "via ILA\n"
       << "  --per-round           Per-round protocol (device-graph scheduler): "
