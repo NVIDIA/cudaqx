@@ -93,13 +93,15 @@ public:
   ai_decoder_service(const std::string &model_path, void **device_mailbox_slot,
                      const std::string &engine_save_path = "",
                      network_typing_override typing_override =
-                         network_typing_override::automatic);
+                         network_typing_override::automatic,
+                     size_t rpc_slot_size_bytes = 0);
 
   /// Create a passthrough (identity copy) instance for testing without TRT.
   static std::unique_ptr<ai_decoder_service>
   create_passthrough(void **device_mailbox_slot,
                      size_t input_bytes = 1600 * sizeof(float),
-                     size_t output_bytes = 1600 * sizeof(float));
+                     size_t output_bytes = 1600 * sizeof(float),
+                     size_t rpc_slot_size_bytes = 0);
 
   virtual ~ai_decoder_service();
 
@@ -112,6 +114,16 @@ public:
 
   /// @brief Size of the primary output tensor in bytes (forwarded to CPU)
   size_t get_output_size() const { return output_size_; }
+
+  /// @brief Set the total RPC slot size, including the RPC header/response.
+  ///
+  /// If left as zero, the service assumes slots are sized for the input
+  /// request frame (RPCHeader + input bytes). Graph capture rejects models
+  /// whose response frame would not fit.
+  void set_rpc_slot_size_bytes(size_t rpc_slot_size_bytes);
+
+  /// @brief Total RPC slot size in bytes, including the RPC header/response.
+  size_t get_rpc_slot_size_bytes() const { return rpc_slot_size_bytes_; }
 
   /// @brief Logical element count (detector count) of the primary input
   /// tensor.  Computed from the engine's tensor volume; independent of
@@ -132,7 +144,7 @@ public:
 protected:
   /// Passthrough constructor (no TRT, identity copy kernel only).
   ai_decoder_service(void **device_mailbox_slot, size_t input_bytes,
-                     size_t output_bytes);
+                     size_t output_bytes, size_t rpc_slot_size_bytes = 0);
 
   void load_engine(const std::string &path);
   void build_engine_from_onnx(const std::string &onnx_path,
@@ -140,6 +152,8 @@ protected:
                               network_typing_override typing_override);
   void setup_bindings();
   void allocate_resources();
+  void set_default_rpc_slot_size();
+  void validate_rpc_slot_size() const;
 
   std::unique_ptr<nvinfer1::IRuntime> runtime_;
   std::unique_ptr<nvinfer1::ICudaEngine> engine_;
@@ -164,6 +178,7 @@ protected:
   size_t output_size_ = 0;
   size_t input_num_elements_ = 0;
   size_t output_num_elements_ = 0;
+  size_t rpc_slot_size_bytes_ = 0;
 
   onnx_quant_info quant_info_;
 };
