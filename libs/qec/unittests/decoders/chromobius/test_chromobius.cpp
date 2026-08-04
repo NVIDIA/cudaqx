@@ -52,8 +52,7 @@ TEST(ChromobiusDecoder, checkAllZeroSyndrome) {
   EXPECT_EQ(result.result[0], 0.0);
   EXPECT_EQ(decoder->get_block_size(), 6);
   EXPECT_EQ(decoder->get_syndrome_size(), 4);
-  EXPECT_EQ(decoder->get_default_output(),
-            cudaq::qec::decoder_output::observables);
+  EXPECT_EQ(decoder->get_output(), cudaq::qec::decoder_output::observables);
   EXPECT_THROW((void)cudaq::qec::decoder::get(
                    "chromobius",
                    cudaq::qec::decoder_inputs::from_stim_dem(

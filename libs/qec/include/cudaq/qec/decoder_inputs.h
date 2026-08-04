@@ -108,33 +108,19 @@ public:
   /// @brief Return D, or nullptr when input syndromes are already detectors.
   const sparse_binary_matrix *measurement_to_detectors() const noexcept;
 
-  /// @brief Make a basis-preserving child input while independently removing
-  /// the raw-measurement map. Authoritative compact model provenance is kept.
-  decoder_inputs without_measurement_to_detectors() const;
+  /// @brief Return the same inputs without D, for a decoder that is fed
+  /// detectors rather than a raw measurement stream. Everything else,
+  /// including the authoritative source, is preserved.
+  decoder_inputs decoder_inputs_without_d() const;
 
-  /// @brief Return the same model with H in GF(2)-canonical CSC form.
+  /// @brief Return the same inputs with H in GF(2)-canonical CSC form.
   ///
-  /// Basis-preserving: `canonicalize()` sorts indices within each compressed
-  /// group and XOR-merges duplicates, leaving column identity, ordering and
-  /// dimensions unchanged. The authoritative source is therefore retained,
-  /// whatever its kind. Consumers that need a canonical H should ask for it
-  /// here rather than rebuilding a matrix-authoritative handle by hand.
-  decoder_inputs canonicalized() const;
-
-  /// @brief Make child inputs after a detector/error-basis transformation.
-  ///
-  /// The authoritative source is dropped: a raw DEM describes the parent's
-  /// detector and error indices, so it no longer applies once those are
-  /// re-indexed, and handing it down would let a child decode against a model
-  /// that does not match its own matrices. Derivations that preserve the basis
-  /// (`canonicalized`, `without_measurement_to_detectors`) keep it.
-  decoder_inputs derive_with_changed_basis(
-      sparse_binary_matrix detector_error_matrix,
-      std::optional<sparse_binary_matrix> observable_flips_matrix,
-      std::vector<double> error_rates,
-      std::optional<std::vector<std::size_t>> error_ids,
-      std::optional<sparse_binary_matrix> measurement_to_detectors =
-          std::nullopt) const;
+  /// Sorts indices within each compressed group and XOR-merges duplicates,
+  /// leaving column identity, ordering and dimensions unchanged. O and D are
+  /// passed through untouched, and the authoritative source is retained.
+  /// Consumers that need a canonical H should ask for it here rather than
+  /// rebuilding a matrix-authoritative handle by hand.
+  decoder_inputs canonicalize_H() const;
 
   bool has_stim_dem() const noexcept;
 

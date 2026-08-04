@@ -39,9 +39,9 @@ public:
 class observable_output_probe final : public cudaq::qec::decoder {
 public:
   observable_output_probe(cudaq::qec::decoder_inputs inputs,
-                          cudaq::qec::decoder_output default_output,
+                          cudaq::qec::decoder_output requested_output,
                           const cudaqx::heterogeneous_map &)
-      : decoder(std::move(inputs), default_output) {}
+      : decoder(std::move(inputs), requested_output) {}
 
   cudaq::qec::decoder_result
   decode(const std::vector<cudaq::qec::float_t> &syndrome) override {
@@ -178,29 +178,28 @@ TEST(DecoderInputs, RejectsInconsistentDimensions) {
                std::invalid_argument);
 }
 
-TEST(DecoderInputs, ChildDerivationKeepsRawSourceOnlyWhenBasisIsUnchanged) {
+TEST(DecoderInputs, DerivationsKeepRawSourceAndFreshMatricesDoNot) {
   auto inputs = cudaq::qec::decoder_inputs::from_stim_dem(
       "error(0.1) D0 L0\n",
       cudaq::qec::sparse_binary_matrix::from_nested_csr(1, 2, {{0, 1}}));
 
-  auto basis_preserving = inputs.without_measurement_to_detectors();
-  EXPECT_TRUE(basis_preserving.has_stim_dem());
-  EXPECT_EQ(basis_preserving.stim_dem(), inputs.stim_dem());
-  EXPECT_EQ(basis_preserving.measurement_to_detectors(), nullptr);
-
-  auto child_H = cudaq::qec::sparse_binary_matrix::from_nested_csc(1, 1, {{0}});
-  auto child_O = cudaq::qec::sparse_binary_matrix::from_nested_csr(0, 1, {});
-  auto basis_changed = inputs.derive_with_changed_basis(
-      std::move(child_H), std::move(child_O), {0.1}, std::nullopt);
-  // Re-indexing detectors and errors invalidates the raw source, so it is not
-  // carried into the child.
-  EXPECT_FALSE(basis_changed.has_stim_dem());
-  EXPECT_THROW((void)basis_changed.stim_dem(), std::logic_error);
+  auto without_d = inputs.decoder_inputs_without_d();
+  EXPECT_TRUE(without_d.has_stim_dem());
+  EXPECT_EQ(without_d.stim_dem(), inputs.stim_dem());
+  EXPECT_EQ(without_d.measurement_to_detectors(), nullptr);
 
   // Canonicalization preserves column identity and ordering, so it keeps it.
-  auto canonical = inputs.canonicalized();
+  auto canonical = inputs.canonicalize_H();
   EXPECT_TRUE(canonical.has_stim_dem());
   EXPECT_EQ(canonical.stim_dem(), inputs.stim_dem());
+
+  // A caller that re-indexes detectors or errors builds fresh inputs, which
+  // carry no raw source: the DEM text names the original detectors.
+  cudaq::qec::decoder_inputs reindexed(
+      cudaq::qec::sparse_binary_matrix::from_nested_csc(1, 1, {{0}}),
+      cudaq::qec::sparse_binary_matrix::from_nested_csr(0, 1, {}), {0.1});
+  EXPECT_FALSE(reindexed.has_stim_dem());
+  EXPECT_THROW((void)reindexed.stim_dem(), std::logic_error);
 }
 
 TEST(DecoderOutputContract, OutputFormIsImmutablePerInstance) {
@@ -213,8 +212,7 @@ TEST(DecoderOutputContract, OutputFormIsImmutablePerInstance) {
       cudaq::qec::decoder_inputs(std::move(H), std::move(O)),
       cudaq::qec::decoder_output::observables);
 
-  EXPECT_EQ(decoder->get_default_output(),
-            cudaq::qec::decoder_output::observables);
+  EXPECT_EQ(decoder->get_output(), cudaq::qec::decoder_output::observables);
 
   const std::vector<cudaq::qec::float_t> syndrome{1.0, 0.0};
   auto observables = decoder->decode(syndrome);
@@ -1546,9 +1544,9 @@ private:
 class strict_keys_decoder : public cudaq::qec::decoder {
 public:
   strict_keys_decoder(cudaq::qec::decoder_inputs inputs,
-                      cudaq::qec::decoder_output default_output,
+                      cudaq::qec::decoder_output requested_output,
                       const cudaqx::heterogeneous_map &params)
-      : decoder(std::move(inputs), default_output) {
+      : decoder(std::move(inputs), requested_output) {
     auto invalid =
         cudaq::qec::validate_config_parameters(params, {"decode_to_obs"});
     if (!invalid.empty())
@@ -1585,9 +1583,9 @@ class device_recording_decoder : public cudaq::qec::decoder {
 public:
   std::atomic<int> last_decode_device{-2};
   device_recording_decoder(cudaq::qec::decoder_inputs inputs,
-                           cudaq::qec::decoder_output default_output,
+                           cudaq::qec::decoder_output requested_output,
                            const cudaqx::heterogeneous_map &)
-      : decoder(std::move(inputs), default_output) {}
+      : decoder(std::move(inputs), requested_output) {}
   cudaq::qec::decoder_result
   decode(const std::vector<cudaq::qec::float_t> &) override {
     int dev = -1;

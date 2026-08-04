@@ -509,8 +509,7 @@ int main(int argc, char *argv[]) {
               << " row(s).\n";
     return 1;
   }
-  if (setup.decoder->get_default_output() !=
-      cudaq::qec::decoder_output::observables) {
+  if (setup.decoder->get_output() != cudaq::qec::decoder_output::observables) {
     std::cerr << "ERROR: composite trt_decoder must use observable output.\n";
     return 1;
   }

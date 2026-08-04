@@ -57,9 +57,9 @@ struct construction_d_probe {
 
 class d_capture_decoder : public decoder {
 public:
-  d_capture_decoder(decoder_inputs inputs, decoder_output default_output,
+  d_capture_decoder(decoder_inputs inputs, decoder_output requested_output,
                     const cudaqx::heterogeneous_map &)
-      : decoder(std::move(inputs), default_output) {
+      : decoder(std::move(inputs), requested_output) {
     const auto &in = get_inputs();
     const auto *D = in.measurement_to_detectors();
     construction_d_probe::has_d = D != nullptr;
@@ -1346,8 +1346,7 @@ TEST(DecodingServerAcceptance, ChromobiusConstructsFromRawDemSource) {
       parsed, std::move(inputs));
   ASSERT_NE(decoder, nullptr);
   EXPECT_EQ(decoder->get_num_observables(), 3u);
-  EXPECT_EQ(decoder->get_default_output(),
-            cudaq::qec::decoder_output::observables);
+  EXPECT_EQ(decoder->get_output(), cudaq::qec::decoder_output::observables);
 
   // Decoding works off the DEM-derived detector basis, and returns one entry
   // per observable the DEM declares.

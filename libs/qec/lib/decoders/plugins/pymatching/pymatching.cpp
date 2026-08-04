@@ -75,12 +75,12 @@ private:
 #endif
 
 public:
-  pymatching(cudaq::qec::decoder_inputs inputs, decoder_output default_output,
+  pymatching(cudaq::qec::decoder_inputs inputs, decoder_output requested_output,
              const cudaqx::heterogeneous_map &params)
-      : decoder(std::move(inputs), default_output) {
+      : decoder(std::move(inputs), requested_output) {
     const auto &H = get_inputs().detector_error_matrix();
     error_rate_vec = get_inputs().error_rates();
-    decode_to_observables = default_output == decoder_output::observables;
+    decode_to_observables = requested_output == decoder_output::observables;
 
     if (!error_rate_vec.empty()) {
       if (error_rate_vec.size() != block_size) {

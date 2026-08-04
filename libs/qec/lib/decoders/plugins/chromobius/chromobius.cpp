@@ -75,14 +75,14 @@ private:
 
 public:
   chromobius(decoder_inputs inputs, chromobius_init_data init_data,
-             decoder_output default_output,
+             decoder_output requested_output,
              const cudaqx::heterogeneous_map &params)
-      : decoder(std::move(inputs), default_output),
+      : decoder(std::move(inputs), requested_output),
         dem(std::move(init_data.dem)) {
     // Chromobius predicts observable flips directly and cannot be inverted to
     // an error frame. Reject the request at construction rather than on the
     // first live shot.
-    if (default_output != decoder_output::observables)
+    if (requested_output != decoder_output::observables)
       throw std::invalid_argument(
           "Chromobius cannot return an error frame; construct it for "
           "observable output");

@@ -20,10 +20,10 @@ namespace {
 
 decoder_inputs canonicalize_sliding_window_inputs(decoder_inputs inputs) {
   // Canonical CSC is the steady-state contract for decode_window's column
-  // slices and validate_inputs's per-column reads. canonicalized() is
+  // slices and validate_inputs's per-column reads. canonicalize_H() is
   // basis-preserving and retains the authoritative source, so no source kind
   // needs special-casing here.
-  return inputs.canonicalized();
+  return inputs.canonicalize_H();
 }
 
 } // namespace
@@ -121,17 +121,17 @@ void sliding_window::initialize_window(std::size_t batch_size) {
 }
 
 sliding_window::sliding_window(cudaq::qec::decoder_inputs inputs,
-                               decoder_output default_output,
+                               decoder_output requested_output,
                                const cudaqx::heterogeneous_map &params)
     // Canonical CSC is the steady-state contract for decode_window's column
     // slices and for validate_inputs's per-column .front()/.back() reads.
     : decoder(canonicalize_sliding_window_inputs(std::move(inputs)),
-              default_output),
+              requested_output),
       H(get_inputs().detector_error_matrix()) {
   // This decoder composes an error frame from its windows. Producing
   // observables requires an observable mapping to project through; reject at
   // construction rather than on the first decode.
-  if (default_output == decoder_output::observables &&
+  if (requested_output == decoder_output::observables &&
       !get_inputs().has_observable_model())
     throw std::invalid_argument(
         "sliding_window was constructed for observable output but its model "
@@ -193,7 +193,7 @@ sliding_window::sliding_window(cudaq::qec::decoder_inputs inputs,
         num_boundary_syndromes);
     first_columns.push_back(first_column);
 
-    // Slice model rates to the same error-column basis as the child H.
+    // Slice model rates to the same error-column basis as the window H.
     std::vector<double> error_vec_mod(error_rate_vec.begin() + first_column,
                                       error_rate_vec.begin() + last_column + 1);
 
@@ -209,20 +209,21 @@ sliding_window::sliding_window(cudaq::qec::decoder_inputs inputs,
                       last_column - first_column + 1, H_round.shape()[1]));
     }
 
-    auto child_O = sparse_binary_matrix::from_csr(
+    auto inner_O = sparse_binary_matrix::from_csr(
         0, H_round.shape()[1], std::vector<std::uint32_t>{0}, {});
-    std::optional<std::vector<std::size_t>> child_error_ids;
+    std::optional<std::vector<std::size_t>> inner_error_ids;
     if (const auto &ids = get_inputs().error_ids())
-      child_error_ids = std::vector<std::size_t>(
+      inner_error_ids = std::vector<std::size_t>(
           ids->begin() + first_column, ids->begin() + last_column + 1);
-    // Slicing detector rows and error columns re-indexes both, so the child
-    // gets matrices only; any raw source the parent carried does not describe
-    // them.
-    auto child_inputs = get_inputs().derive_with_changed_basis(
-        sparse_binary_matrix(H_round), std::move(child_O),
-        std::move(error_vec_mod), std::move(child_error_ids));
+    // Slicing detector rows and error columns re-indexes both, so this window
+    // gets its own matrices. Nothing is inherited: a raw DEM names the outer
+    // detectors and would not describe these.
+    decoder_inputs inner_inputs(sparse_binary_matrix(H_round),
+                                std::move(inner_O), std::move(error_vec_mod),
+                                /*measurement_to_detectors=*/std::nullopt,
+                                std::move(inner_error_ids));
     auto inner_decoder =
-        decoder::get(inner_decoder_name, std::move(child_inputs),
+        decoder::get(inner_decoder_name, std::move(inner_inputs),
                      decoder_output::errors, inner_decoder_params);
     inner_decoders.push_back(std::move(inner_decoder));
   }
@@ -301,7 +302,7 @@ std::vector<decoder_result> sliding_window::decode_batch(
     // return is the empty streaming sentinel.
     // Composed frames are error frames; whether they are projected is fixed at
     // construction.
-    if (get_default_output() == decoder_output::observables)
+    if (get_output() == decoder_output::observables)
       for (auto &r : results) {
         if (r.result.empty())
           continue; // streaming sentinel

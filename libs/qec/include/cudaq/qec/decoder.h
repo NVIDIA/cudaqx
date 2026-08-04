@@ -151,7 +151,7 @@ public:
   /// @brief Constructor
   /// @param inputs Stable model and measurement inputs. Taken by value so the
   /// factory can move its immutable handle into the decoder.
-  decoder(decoder_inputs inputs, decoder_output default_output);
+  decoder(decoder_inputs inputs, decoder_output requested_output);
 
   /// @brief Decode a single syndrome
   /// @param syndrome A vector of syndrome measurements where the floating point
@@ -277,7 +277,7 @@ public:
 
   /// @brief The result form this instance was constructed to produce. Fixed at
   /// construction; every decode operation returns this form.
-  decoder_output get_default_output() const noexcept { return default_output_; }
+  decoder_output get_output() const noexcept { return output_; }
 
   // -- Begin realtime decoding API --
 
@@ -412,7 +412,7 @@ private:
            const cudaqx::heterogeneous_map &param_map);
   /// @brief The decoder's immutable construction inputs.
   const decoder_inputs inputs_;
-  const decoder_output default_output_;
+  const decoder_output output_;
 };
 
 /// @brief Convert a single soft probability to a hard 0/1 decision.

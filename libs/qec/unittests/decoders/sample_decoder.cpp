@@ -19,13 +19,13 @@ namespace cudaq::qec {
 class sample_decoder : public decoder {
 public:
   sample_decoder(cudaq::qec::decoder_inputs inputs,
-                 decoder_output default_output,
+                 decoder_output requested_output,
                  const cudaqx::heterogeneous_map &params)
-      : decoder(std::move(inputs), default_output) {
+      : decoder(std::move(inputs), requested_output) {
     // This decoder computes an error frame. Producing observables requires an
     // observable mapping to project through; reject at construction rather
     // than on the first decode.
-    if (default_output == decoder_output::observables &&
+    if (requested_output == decoder_output::observables &&
         !get_inputs().has_observable_model())
       throw std::invalid_argument(
           "sample_decoder was constructed for observable output but its model "
@@ -39,7 +39,7 @@ public:
 
     // Whether the frame is projected is fixed at construction, so the decision
     // is read from immutable instance state rather than negotiated per call.
-    if (get_default_output() == decoder_output::observables) {
+    if (get_output() == decoder_output::observables) {
       std::vector<float_t> observables(get_num_observables(), 0.0);
       project_errors_to_observables(result.result.data(), observables.data(),
                                     observables.size());

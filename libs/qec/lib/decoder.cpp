@@ -88,9 +88,9 @@ struct decoder::rt_impl {
 
 void decoder::rt_impl_deleter::operator()(rt_impl *p) const { delete p; }
 
-decoder::decoder(decoder_inputs inputs, decoder_output default_output)
+decoder::decoder(decoder_inputs inputs, decoder_output requested_output)
     : pimpl(std::unique_ptr<rt_impl, rt_impl_deleter>(new rt_impl())),
-      inputs_(std::move(inputs)), default_output_(default_output) {
+      inputs_(std::move(inputs)), output_(requested_output) {
   syndrome_size = inputs_.num_detectors();
   block_size = inputs_.num_error_mechanisms();
 
@@ -497,7 +497,7 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
     const char *result_type_str = nullptr;
     const char *result_type_name = nullptr;
     std::size_t expected_result_size = 0;
-    switch (default_output_) {
+    switch (output_) {
     case decoder_output::errors:
       result_type_str = "errs";
       result_type_name = "errors";
@@ -510,9 +510,8 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
       break;
     }
     if (!result_type_name)
-      throw std::runtime_error(
-          fmt::format("Unsupported decoder result type ({})",
-                      static_cast<int>(default_output_)));
+      throw std::runtime_error(fmt::format(
+          "Unsupported decoder result type ({})", static_cast<int>(output_)));
     if ((!pimpl->is_sliding_window &&
          decoded_values.size() != expected_result_size) ||
         (pimpl->is_sliding_window && !decoded_values.empty() &&
@@ -534,7 +533,7 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
     if (should_log)
       log_t2 = std::chrono::high_resolution_clock::now();
 
-    switch (default_output_) {
+    switch (output_) {
     case decoder_output::observables:
       // Observable-frame path: decoder already projected to observables via its
       // internal "O" matrix; use the result directly.

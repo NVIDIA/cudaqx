@@ -130,20 +130,20 @@ static Logger gLogger;
 ///   the engine emits residual detectors *in exactly the H-row basis and order
 ///   supplied at construction*. The width check below establishes size only,
 ///   not identity or ordering: a reordered engine would silently feed the
-///   global decoder a permuted syndrome, and a raw-DEM child would decode it
-///   against the wrong detector identities. Supporting reordered residuals
-///   would require an explicit detector mapping, which this contract does not
-///   provide.
+///   global decoder a permuted syndrome, and a raw-DEM global decoder would
+///   decode it against the wrong detector identities. Supporting reordered
+///   residuals would require an explicit detector mapping, which this contract
+///   does not provide.
 /// - "global_decoder": Optional name of a decoder to run after TRT when the
 ///   declared engine output includes residual detectors.
 /// - "global_decoder_params": Optional parameters for the global decoder. The
 ///   decoder receives the same model inputs passed to the trt_decoder
 ///   constructor, including authoritative raw DEM provenance when present.
-///   When the engine output includes an observable prefix, the child's result
-///   is XOR-combined with that prefix and the child's opt_results are carried
-///   through onto the combined result, so child options that surface only
-///   through opt_results (for example Chromobius's return_weight) remain
-///   externally visible.
+///   When the engine output includes an observable prefix, the global decoder's
+///   result is XOR-combined with that prefix and the global decoder's
+///   opt_results are carried through onto the combined result, so
+///   global-decoder options that surface only through opt_results (for example
+///   Chromobius's return_weight) remain externally visible.
 /// O is read from decoder_inputs only for model dimensions and observable
 /// combination. Its presence never selects an engine-output interpretation.
 ///
@@ -190,11 +190,11 @@ decoder_output natural_trt_output(trt_engine_output_format format) {
 }
 
 decoder_output trt_emitted_output(trt_engine_output_format format,
-                                  decoder_output default_output) {
+                                  decoder_output requested_output) {
   if (format == trt_engine_output_format::errors)
     return decoder_output::errors;
   if (format == trt_engine_output_format::residual_detectors)
-    return default_output;
+    return requested_output;
   return decoder_output::observables;
 }
 
@@ -467,7 +467,8 @@ private:
   size_t num_observables_ = 0;
 
 public:
-  trt_decoder(cudaq::qec::decoder_inputs inputs, decoder_output default_output,
+  trt_decoder(cudaq::qec::decoder_inputs inputs,
+              decoder_output requested_output,
               trt_engine_output_format engine_output_format,
               const cudaqx::heterogeneous_map &params);
 
@@ -588,17 +589,17 @@ struct trt_decoder::Impl {
 // ============================================================================
 
 trt_decoder::trt_decoder(cudaq::qec::decoder_inputs inputs,
-                         decoder_output default_output,
+                         decoder_output requested_output,
                          trt_engine_output_format engine_output_format,
                          const cudaqx::heterogeneous_map &params)
-    : decoder(std::move(inputs), default_output),
+    : decoder(std::move(inputs), requested_output),
       engine_output_format_(engine_output_format),
       emitted_output_(
-          trt_emitted_output(engine_output_format, default_output)) {
+          trt_emitted_output(engine_output_format, requested_output)) {
   if ((engine_output_format_ == trt_engine_output_format::observables ||
        engine_output_format_ ==
            trt_engine_output_format::observables_and_residual_detectors) &&
-      default_output != decoder_output::observables)
+      requested_output != decoder_output::observables)
     throw std::runtime_error(
         "This TensorRT engine_output_format only supports observable output");
 
@@ -607,7 +608,7 @@ trt_decoder::trt_decoder(cudaq::qec::decoder_inputs inputs,
   // observable mapping there is nothing to project through, so reject here
   // rather than returning an unprojected error frame at decode time.
   if (emitted_output_ == decoder_output::errors &&
-      default_output == decoder_output::observables &&
+      requested_output == decoder_output::observables &&
       !get_inputs().has_observable_model())
     throw std::runtime_error(
         "This TensorRT engine emits an error frame and was constructed for "
@@ -842,15 +843,14 @@ trt_decoder::trt_decoder(cudaq::qec::decoder_inputs inputs,
           throw std::runtime_error(
               "global_decoder requires an engine_output_format containing "
               "residual detectors");
-        const auto child_output =
+        const auto global_output =
             engine_output_format_ ==
                     trt_engine_output_format::observables_and_residual_detectors
                 ? decoder_output::observables
-                : default_output;
-        global_decoder_ =
-            decoder::get(global_decoder_name,
-                         get_inputs().without_measurement_to_detectors(),
-                         child_output, global_decoder_params_);
+                : requested_output;
+        global_decoder_ = decoder::get(global_decoder_name,
+                                       get_inputs().decoder_inputs_without_d(),
+                                       global_output, global_decoder_params_);
         CUDA_QEC_INFO("TensorRT decoder: global_decoder '{}' attached",
                       global_decoder_name);
       }
@@ -1003,7 +1003,7 @@ trt_decoder::decode_batch(const std::vector<std::vector<float_t>> &syndromes) {
                              std::to_string(syndromes.size()) + " syndromes");
   // The engine's output form and the instance's form are both fixed at
   // construction; only errors -> observables is reachable here.
-  if (emitted_output_ != get_default_output())
+  if (emitted_output_ != get_output())
     for (auto &r : results) {
       if (r.result.empty())
         continue;
@@ -1111,9 +1111,10 @@ std::vector<decoder_result> trt_decoder::decode_batch_impl(
         std::vector<decoder_result> global_results =
             global_decoder_->decode_batch(residual_soft);
 
-        // The child is an arbitrary registered decoder: validate its output
-        // before indexing it. This is composition safety at a trust boundary,
-        // checked once per batch, not per-decode contract re-validation.
+        // The global decoder is an arbitrary registered decoder: validate its
+        // output before indexing it. This is composition safety at a trust
+        // boundary, checked once per batch, not per-decode contract
+        // re-validation.
         if (global_results.size() != residual_soft.size())
           throw std::runtime_error(
               "TensorRT global decoder returned " +
@@ -1134,16 +1135,18 @@ std::vector<decoder_result> trt_decoder::decode_batch_impl(
           for (size_t batch_idx = 0; batch_idx < actual_batch; ++batch_idx) {
             decoder_result combined;
             combined.converged = global_results[batch_idx].converged;
-            // Carry the child's optional metadata through; the combination
-            // changes the result values, not the child's diagnostics.
+            // Carry the global decoder's optional metadata through; the
+            // combination changes the result values, not the global decoder's
+            // diagnostics.
             combined.opt_results =
                 std::move(global_results[batch_idx].opt_results);
             combined.result.resize(num_observables_, 0.0f);
             const OutputType *pre_L_row =
                 output_host.data() + batch_idx * output_size_per_sample_;
             const std::vector<float_t> &g = global_results[batch_idx].result;
-            // Width was validated above, so no bounds guard here: a short child
-            // result must fail loudly rather than be silently zero-filled.
+            // Width was validated above, so no bounds guard here: a short
+            // global-decoder result must fail loudly rather than be silently
+            // zero-filled.
             for (size_t k = 0; k < num_observables_; ++k) {
               const uint8_t a = trt_io_nonzero(pre_L_row[k]) ? 1u : 0u;
               const uint8_t b = g[k] >= 0.5f ? 1u : 0u;

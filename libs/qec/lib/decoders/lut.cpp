@@ -50,13 +50,13 @@ private:
 
 public:
   multi_error_lut(cudaq::qec::decoder_inputs inputs,
-                  decoder_output default_output,
+                  decoder_output requested_output,
                   const cudaqx::heterogeneous_map &params)
-      : decoder(std::move(inputs), default_output) {
+      : decoder(std::move(inputs), requested_output) {
     // This decoder computes an error frame. Producing observables requires an
     // observable mapping to project through; reject at construction rather
     // than on the first decode.
-    if (default_output == decoder_output::observables &&
+    if (requested_output == decoder_output::observables &&
         !get_inputs().has_observable_model())
       throw std::invalid_argument(
           "lut decoder was constructed for observable output but its model "
@@ -181,7 +181,7 @@ public:
     // This decoder computes an error frame. Whether that frame is projected is
     // fixed at construction, so the decision is read from immutable instance
     // state rather than negotiated per call.
-    const bool project = get_default_output() == decoder_output::observables;
+    const bool project = get_output() == decoder_output::observables;
     auto finish = [&](decoder_result &r) {
       if (project) {
         std::vector<float_t> observables(get_num_observables(), 0.0);
@@ -268,9 +268,9 @@ CUDAQ_EXT_PT_REGISTER_TYPE(multi_error_lut)
 class single_error_lut : public multi_error_lut {
 public:
   single_error_lut(cudaq::qec::decoder_inputs inputs,
-                   decoder_output default_output,
+                   decoder_output requested_output,
                    const cudaqx::heterogeneous_map &params)
-      : multi_error_lut(std::move(inputs), default_output, params) {}
+      : multi_error_lut(std::move(inputs), requested_output, params) {}
 
   virtual ~single_error_lut() {}
 

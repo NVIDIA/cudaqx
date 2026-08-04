@@ -160,30 +160,17 @@ decoder_inputs::measurement_to_detectors() const noexcept {
   return state_->D ? &*state_->D : nullptr;
 }
 
-decoder_inputs decoder_inputs::canonicalized() const {
+decoder_inputs decoder_inputs::canonicalize_H() const {
   auto H = state_->H.canonicalize().to_csc();
   return decoder_inputs(make_matrix_state(state_->source, std::move(H),
                                           state_->O, state_->rates, state_->ids,
                                           state_->D, state_->raw_stim_dem));
 }
 
-decoder_inputs decoder_inputs::without_measurement_to_detectors() const {
+decoder_inputs decoder_inputs::decoder_inputs_without_d() const {
   auto state = std::make_shared<impl>(*state_);
   state->D.reset();
   return decoder_inputs(std::move(state));
-}
-
-decoder_inputs decoder_inputs::derive_with_changed_basis(
-    sparse_binary_matrix H, std::optional<sparse_binary_matrix> O,
-    std::vector<double> error_rates,
-    std::optional<std::vector<std::size_t>> error_ids,
-    std::optional<sparse_binary_matrix> measurement_to_detectors) const {
-  // No raw source is carried through: it indexes the parent's detectors and
-  // error mechanisms, which these matrices have re-indexed.
-  return decoder_inputs(make_matrix_state(
-      decoder_model_source::matrices, std::move(H), std::move(O),
-      std::move(error_rates), std::move(error_ids),
-      std::move(measurement_to_detectors)));
 }
 
 bool decoder_inputs::has_stim_dem() const noexcept {

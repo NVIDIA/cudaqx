@@ -86,9 +86,10 @@ reusable_decode_barrier &decode_barrier() {
 /// subsequent decode rendezvous with all configured instances before returning.
 class concurrency_test_decoder : public decoder {
 public:
-  concurrency_test_decoder(decoder_inputs inputs, decoder_output default_output,
+  concurrency_test_decoder(decoder_inputs inputs,
+                           decoder_output requested_output,
                            const cudaqx::heterogeneous_map &)
-      : decoder(std::move(inputs), default_output) {
+      : decoder(std::move(inputs), requested_output) {
     std::cout << "QEC_CONCURRENCY_TEST_DECODER_CONSTRUCTED" << std::endl;
   }
 

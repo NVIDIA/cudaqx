@@ -108,7 +108,7 @@ public:
   ///   - inner_decoder_name: Name of the inner decoder to use
   ///   - inner_decoder_params: Parameters for the inner decoder (optional)
   sliding_window(cudaq::qec::decoder_inputs inputs,
-                 decoder_output default_output,
+                 decoder_output requested_output,
                  const cudaqx::heterogeneous_map &params);
 
   /// @brief Decode a syndrome vector
