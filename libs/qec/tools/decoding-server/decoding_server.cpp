@@ -14,9 +14,12 @@
 /// Both the decoder and the transport are configuration, not code:
 ///   - decoders come from `--config=<yaml>`
 ///     (multi_decoder_config::from_yaml_str);
-///   - the transport comes from `--transport=<name|/path/to/lib.so>`: a CUDA-Q
-///     realtime bridge PROVIDER, loaded at runtime through the transport-
-///     provider interface (bridge_interface.h).  A bare name resolves to
+///   - the transport comes from the YAML `transport:` section for every
+///     device_graph decoder. Host-only configurations using other providers
+///     may instead use `--transport=<name|/path/to/lib.so>`. The selected
+///     CUDA-Q realtime bridge PROVIDER is loaded at runtime through the
+///     transport-provider interface (bridge_interface.h). A bare name resolves
+///     to
 ///     `libcudaq-realtime-bridge-<name>.so` next to the CUDA-Q realtime
 ///     libraries, with '_' in the name mapping to '-' to match the shipped
 ///     hyphenated sonames (udp, cpu_roce and gpu_roce ship there); a value
@@ -50,6 +53,8 @@
 ///   decoding_server --config=<decoders.yaml>
 ///                   [--transport=<name|/path/to/lib.so>] [--timeout=60]
 ///                   [provider args, forwarded verbatim...]
+/// Configurations containing a device_graph decoder must put the provider and
+/// all provider arguments in the YAML transport section.
 ///
 /// NOTE: --slot-size must match the caller channel's slot size (each frame
 /// occupies one full slot stride on both wires).
@@ -151,9 +156,12 @@ bool parse_args(int argc, char **argv, ServerConfig &cfg) {
                    "--num-slots=N --slot-size=N --device=NAME "
                    "--local-ip=ADDR --qp_config=rendezvous|hsb_fpga "
                    "--peer-ip=ADDR --remote-qp=N --frame-size=N]\n"
-                   "--transport applies only when the YAML transport "
-                   "section names no provider (a conflict is a startup "
-                   "error).\n"
+                   "--transport and command-line provider arguments apply "
+                   "only to non-gpu_roce, host-only configurations whose "
+                   "YAML transport section names no provider (a conflict is "
+                   "a startup error). Configurations containing device_graph "
+                   "decoders or using gpu_roce must put the provider and its "
+                   "arguments in YAML.\n"
                    "Providers and their args are defined by the installed "
                    "cudaq-realtime (libcudaq-realtime-bridge-<name>.so, "
                    "with '_' in <name> mapping to '-'); "
@@ -260,6 +268,15 @@ std::string resolve_provider_lib(const std::string &transport) {
   return soname;
 }
 
+bool is_gpu_roce_provider(const std::string &provider) {
+  const auto slash = provider.find_last_of('/');
+  const std::string name =
+      slash == std::string::npos ? provider : provider.substr(slash + 1);
+  return name == "gpu_roce" || name == "gpu-roce" ||
+         name == "libcudaq-realtime-bridge-gpu-roce.so" ||
+         name == "libcudaq-realtime-bridge-gpu_roce.so";
+}
+
 // Split a provider endpoint-info line into its port and the remaining
 // tokens.
 std::uint16_t split_endpoint_info(const std::string &endpoint_info,
@@ -353,6 +370,42 @@ int main(int argc, char **argv) {
                   decoder_config.decoders.end(), [](const auto &d) {
                     return d.dispatch == config::DecoderDispatch::device_graph;
                   });
+  const bool has_device_graph =
+      std::any_of(decoder_config.decoders.begin(),
+                  decoder_config.decoders.end(), [](const auto &d) {
+                    return d.dispatch == config::DecoderDispatch::device_graph;
+                  });
+  const bool has_host = !all_device_graph;
+  const auto resolved_device_graph =
+      decoder_config.transport.resolve_device_graph();
+  const std::string resolved_host_provider =
+      decoder_config.transport.provider.empty()
+          ? cfg.transport
+          : decoder_config.transport.provider;
+  const bool host_uses_gpu_roce =
+      has_host && is_gpu_roce_provider(resolved_host_provider);
+  // device_graph providers own GPU-visible rings and must be reproducible from
+  // the deployment YAML in every server topology. Generic CLI provider
+  // arguments are intentionally rejected rather than guessed to belong to a
+  // host ring in a mixed-dispatch configuration.
+  if (has_device_graph && resolved_device_graph.provider.empty()) {
+    std::cerr << "ERROR: a config containing device_graph dispatch must name "
+                 "its transport provider in the YAML transport section"
+              << std::endl;
+    return 1;
+  }
+  if (host_uses_gpu_roce && decoder_config.transport.provider.empty()) {
+    std::cerr << "ERROR: gpu_roce transport must be selected and configured "
+                 "in the YAML transport section"
+              << std::endl;
+    return 1;
+  }
+  if ((has_device_graph || host_uses_gpu_roce) && !cfg.provider_args.empty()) {
+    std::cerr << "ERROR: provider arguments for device_graph or gpu_roce "
+                 "transport must be set in the YAML transport section"
+              << std::endl;
+    return 1;
+  }
 
   // [2a] device_graph dispatch takes a different shape (device-side
   // scheduler): bypass the CQR DeviceCallService / HOST_CALL dispatcher and
@@ -373,12 +426,6 @@ int main(int argc, char **argv) {
     //
     // The standalone device-graph transport has no CLI or environment
     // fallback: the deployment YAML is its single source of truth.
-    if (decoder_config.transport.resolve_device_graph().provider.empty()) {
-      std::cerr << "ERROR: an all-device_graph config must name its transport "
-                   "provider in the YAML transport section"
-                << std::endl;
-      return 1;
-    }
     try {
       cudaq::qec::decoding_server::DecodingServer server(cfg.config_path);
       // QP/rkey/buf already printed to stdout by launch_scheduler() so the
@@ -468,11 +515,6 @@ int main(int argc, char **argv) {
                                            ? cfg.transport
                                            : decoder_config.transport.provider;
 
-  std::vector<char *> provider_argv;
-  provider_argv.reserve(cfg.provider_args.size());
-  for (auto &a : cfg.provider_args)
-    provider_argv.push_back(a.data());
-
   struct DecoderRing {
     std::int64_t decoder_id = 0;
     bool device_graph = false;
@@ -529,10 +571,10 @@ int main(int argc, char **argv) {
 
     // The wire is deployment config, resolved from the YAML's top-level
     // `transport:` section (never from decoder entries).  Per-ring
-    // resolution: the section's dispatch-shape override (device_graph
-    // rings) > the section's provider/args > the --transport CLI fallback
-    // (which only applies when the YAML names no provider -- a conflict is
-    // rejected at startup above).
+    // resolution: the section's dispatch-shape override (device_graph rings)
+    // > the section's provider/args. Host-only configurations may fall back
+    // to --transport when the YAML names no provider; device_graph rings are
+    // validated above to be fully YAML-configured.
     // Every provider name/path resolves the same way --transport does; the
     // bridge loader caches libraries per name, so different rings may load
     // different provider libraries in one process.
@@ -541,13 +583,18 @@ int main(int argc, char **argv) {
     std::vector<std::string> ring_extra_args;
     if (ring.device_graph) {
       const auto resolved = transport_section.resolve_device_graph();
-      if (!resolved.provider.empty())
-        ring_provider_name = resolved.provider;
+      ring_provider_name = resolved.provider;
       ring_extra_args = std::move(resolved.args);
     } else
       ring_extra_args = transport_section.args;
     const std::string ring_lib = resolve_provider_lib(ring_provider_name);
-    std::vector<char *> ring_argv = provider_argv;
+    std::vector<char *> ring_argv;
+    if (!ring.device_graph) {
+      ring_argv.reserve(cfg.provider_args.size() + ring_extra_args.size());
+      for (auto &a : cfg.provider_args)
+        ring_argv.push_back(a.data());
+    } else
+      ring_argv.reserve(ring_extra_args.size());
     for (auto &a : ring_extra_args)
       ring_argv.push_back(a.data());
 
