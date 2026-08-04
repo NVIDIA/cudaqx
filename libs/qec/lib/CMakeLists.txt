@@ -43,6 +43,7 @@ set(DECODERS_SOURCES
   decoder.cpp
   decoder_config_payload.cpp
   decoder_config_schema.cpp
+  dem_chunks_memory.cpp
   dem_construction.cpp
   detector_error_model.cpp
   extended_dem.cpp

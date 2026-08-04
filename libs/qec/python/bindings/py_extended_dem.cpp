@@ -12,6 +12,7 @@
 #include "py_extended_dem.h"
 #include "type_casters.h"
 #include "cudaq/qec/code_matrices.h"
+#include "cudaq/qec/dem_chunks_memory.h"
 #include "cudaq/qec/extended_dem.h"
 
 #include <cstdint>
