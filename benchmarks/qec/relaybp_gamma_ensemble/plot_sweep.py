@@ -23,6 +23,81 @@ OUT = os.path.join(ROOT, "figures")
 os.makedirs(OUT, exist_ok=True)
 ORDER, NS = ["bb72", "bb144", "bb288"], [1, 2, 4, 8]
 LAB = {s: str(Z[f"{s}__label"]) for s in ORDER}
+
+# ── Values stated in nv_qldpc_gamma_ensemble_user_guide.rst ──────────────────
+print("=== rst-stated values ===")
+
+# Median iteration count at N=8 relative to N=1 (rst: "0.67×–0.71×")
+iter_ratios = {s: np.median(Z[f"{s}__N8__iter"]) / np.median(Z[f"{s}__N1__iter"])
+               for s in ORDER}
+print("Median iter N=8/N=1:")
+for s in ORDER:
+    print(f"  {LAB[s]}: {iter_ratios[s]:.2f}x")
+print(f"  range: {min(iter_ratios.values()):.2f}x – {max(iter_ratios.values()):.2f}x"
+      "  [rst: 0.67x–0.71x]")
+
+# Per-iteration time at N=8 relative to N=1 (rst: "1.53×–1.66×, largest for bb288")
+periter = {s: Z[f"{s}__periter"] for s in ORDER}
+periter_ratios = {s: periter[s][NS.index(8)] / periter[s][NS.index(1)] for s in ORDER}
+print("Per-iter time N=8/N=1:")
+for s in ORDER:
+    print(f"  {LAB[s]}: {periter_ratios[s]:.2f}x")
+print(f"  range: {min(periter_ratios.values()):.2f}x – {max(periter_ratios.values()):.2f}x"
+      "  [rst: 1.53x–1.66x, largest for bb288]")
+
+# Mean latency at N=8 relative to N=1 (rst: "0.88×–1.10×")
+mean_ratios = {s: np.mean(Z[f"{s}__N8__wall"]) / np.mean(Z[f"{s}__N1__wall"])
+               for s in ORDER}
+print("Mean latency N=8/N=1:")
+for s in ORDER:
+    print(f"  {LAB[s]}: {mean_ratios[s]:.2f}x")
+print(f"  range: {min(mean_ratios.values()):.2f}x – {max(mean_ratios.values()):.2f}x"
+      "  [rst: 0.88x–1.10x]")
+
+# p99.99 improvement at N=8 (rst: ~2.70x bb72, ~5.55x bb144, ~4.17x bb288)
+p9999_improvement = {s: np.percentile(Z[f"{s}__N1__wall"], 99.99) /
+                        np.percentile(Z[f"{s}__N8__wall"], 99.99)
+                     for s in ORDER}
+print("p99.99 latency N=1/N=8 (improvement):")
+for s, stated in zip(ORDER, ["~2.70x", "~5.55x", "~4.17x"]):
+    print(f"  {LAB[s]}: {p9999_improvement[s]:.2f}x  [rst: {stated}]")
+
+# p50 rise at N=8 (rst: "~1.12×–1.23×")
+p50_ratios = {s: np.percentile(Z[f"{s}__N8__wall"], 50) /
+                 np.percentile(Z[f"{s}__N1__wall"], 50)
+              for s in ORDER}
+print("p50 latency N=8/N=1:")
+for s in ORDER:
+    print(f"  {LAB[s]}: {p50_ratios[s]:.2f}x")
+print(f"  range: {min(p50_ratios.values()):.2f}x – {max(p50_ratios.values()):.2f}x"
+      "  [rst: ~1.12x–1.23x]")
+
+# Peak LER multiplier for N=8 (rst: ~41x bb144, ~89x bb288) and bb72 floor (~2x)
+# LER(t) = P(latency > t OR logical error); ratio = LER_1(t) / LER_N(t)
+_GRID_PTS = 400
+for s, stated_peak, stated_floor in [("bb72",  None,  "~2x"),
+                                      ("bb144", "~41x", None),
+                                      ("bb288", "~89x", None)]:
+    w1, le1 = Z[f"{s}__N1__wall"], Z[f"{s}__N1__lerr"]
+    w8, le8 = Z[f"{s}__N8__wall"], Z[f"{s}__N8__lerr"]
+    allw = np.concatenate([w1, w8])
+    grid = np.logspace(np.log10(allw.min() * .7), np.log10(allw.max() * 1.3), _GRID_PTS)
+    sh = len(w1)
+    ler1 = np.array([((w1 > t) | le1).mean() for t in grid])
+    ler8 = np.array([((w8 > t) | le8).mean() for t in grid])
+    ratio = np.where(ler8 * sh >= 10, ler1 / np.where(ler8 > 0, ler8, np.nan), np.nan)
+    valid = ratio[np.isfinite(ratio)]
+    peak = np.nanmax(ratio)
+    # "floor" = median of the last 10% of valid-ratio points (loose-deadline regime)
+    tail = valid[int(0.9 * len(valid)):]
+    floor_val = np.median(tail) if len(tail) else np.nan
+    if stated_peak:
+        print(f"Peak LER_1/LER_8 for {LAB[s]}: {peak:.0f}x  [rst: {stated_peak}]")
+    if stated_floor:
+        print(f"LER_1/LER_8 floor (loose deadlines) for {LAB[s]}: {floor_val:.1f}x"
+              f"  [rst: {stated_floor}]")
+
+print("=== end rst values ===\n")
 NCOL = {
     1: "#2a78d6",
     2: "#eb6834",

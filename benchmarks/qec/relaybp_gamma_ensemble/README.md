@@ -38,7 +38,7 @@ Pin the run to an idle GPU: another process on the same device distorts latency 
 ## Output
 
 `run_sweep.py` writes `$QEC_DATA_ROOT/report_data.npz` (~23 MB at 150,000
-shots; regenerable), holding the per-shot latency, iteration count and
+shots), holding the per-shot latency, iteration count and
 logical-error flag for every code and ensemble size.
 
 `plot_sweep.py` reads that file and writes to `$QEC_DATA_ROOT/figures/`:
@@ -47,3 +47,5 @@ logical-error flag for every code and ensemble size.
 - `relaybp_latency_percentiles.png`
 - `relaybp_hard_deadline_ler.png`
 - `relaybp_ler_multiplier.png`
+
+It also prints the numeric values reported in `nv_qldpc_gamma_ensemble_user_guide.rst`.
