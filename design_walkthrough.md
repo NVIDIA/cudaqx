@@ -538,11 +538,4 @@ Chromobius. It also does not work on its own, and leaves the rest in place:
 
 
 
-## Open questions for the draft discussion
-
-1. **Names.** Renamed in this branch after review: `get_output()` (was `get_default_output()`,
-   which implied it could be overridden later), `decoder_inputs_without_d()` and `canonicalize_H()`.
-   Still open to reviewer input.
-
-
 
