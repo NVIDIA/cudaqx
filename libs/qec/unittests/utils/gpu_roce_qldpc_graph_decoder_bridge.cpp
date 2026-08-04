@@ -6,27 +6,30 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
-/// @file hololink_qldpc_graph_decoder_bridge.cpp
-/// @brief QLDPC Relay-BP decoder bridge: Hololink GPU-RoCE ring <-> the
+/// @file gpu_roce_qldpc_graph_decoder_bridge.cpp
+/// @brief QLDPC Relay-BP decoder bridge: GpuRoceTransceiver GPU-RoCE ring <->
+/// the
 ///        self-relaunching device-graph scheduler.
 ///
 /// This bridge wires the per-round decode-server protocol onto a real
 /// (or emulated) FPGA over RoCE.  Unlike the inproc_rpc path
 /// (qec_realtime_session, which allocates its own pinned ring), the bridge
-/// runs the SAME device-graph scheduler directly on the Hololink DOCA ring:
+/// runs the SAME device-graph scheduler directly on the GpuRoceTransceiver DOCA
+/// ring:
 ///
-///   FPGA --RDMA--> Hololink RX kernel --writes rx_flags--> scheduler graph
-///   scheduler graph --DEVICE_CALL append/get/reset; fires decode on a full
+///   FPGA --RDMA--> GpuRoceTransceiver RX kernel --writes rx_flags--> scheduler
+///   graph scheduler graph --DEVICE_CALL append/get/reset; fires decode on a
+///   full
 ///     window (CUDAQ_DISPATCH_STATUS_TRIGGER_GRAPH); tail-self-relaunches-->
-///   scheduler writes RPCResponse + tx_flags --> Hololink TX kernel --RDMA-->
-///   FPGA
+///   scheduler writes RPCResponse + tx_flags --> GpuRoceTransceiver TX kernel
+///   --RDMA--> FPGA
 ///
 /// Flow:
 ///   1. Parse --config (Relay BP YAML) + generic bridge args.
 ///   2. Create the nv-qldpc decoder; capture_decode_graph(reserved_sms) gives a
 ///      device-launchable cooperative decode graph and registers the decoder's
 ///      GpuDecoderState (read by the append/get/reset DEVICE_CALL handlers).
-///   3. Create + start the Hololink transceiver (RX + TX kernels) and adopt its
+///   3. Create + start the GpuRoceTransceiver (RX + TX kernels) and adopt its
 ///      DOCA ring (rx/tx flags + data are GPU pointers).
 ///   4. Build a pinned-mapped 3-entry DEVICE_CALL function table (enqueue
 ///      accumulate, get_corrections, reset_decoder) via the proprietary
@@ -34,8 +37,8 @@
 ///      libcudaq-qec-realtime-cudevice-proprietary.a and device-links it with
 ///      the dispatch kernel).
 ///   5. Launch the device-graph scheduler on the DOCA ring with the decode
-///      graph as its triggered graph, then run the Hololink RX/TX kernels
-///      (blocking_monitor) on a worker thread.
+///      graph as its triggered graph, then run the GpuRoceTransceiver RX/TX
+///      kernels (blocking_monitor) on a worker thread.
 ///   6. Run until --timeout or SIGINT, then shut down cleanly.
 
 #include <algorithm>
@@ -54,8 +57,8 @@
 
 #include <cuda_runtime.h>
 
-#include "cudaq/realtime/daemon/bridge/hololink/hololink_wrapper.h"
-#include "cudaq/realtime/hololink_bridge_common.h"
+#include "cudaq/realtime/daemon/bridge/gpu_roce/gpu_roce_wrapper.h"
+#include "cudaq/realtime/gpu_roce_bridge_common.h"
 
 #include "cudaq/qec/decoder.h"
 #include "cudaq/qec/realtime/decoder_rpc_wire_format.h"
@@ -68,7 +71,7 @@ namespace {
 std::atomic<bool> g_stop{false};
 void handle_sigint(int) { g_stop.store(true, std::memory_order_release); }
 
-constexpr auto kHololinkMonitorStartupGrace = std::chrono::milliseconds(250);
+constexpr auto kGpuRoceMonitorStartupGrace = std::chrono::milliseconds(250);
 
 std::string read_file(const std::string &path) {
   std::ifstream f(path);
@@ -132,20 +135,21 @@ int main(int argc, char *argv[]) {
     if (arg.find("--config=") == 0)
       config_path = arg.substr(9);
     else if (arg == "--help" || arg == "-h") {
-      std::cout
-          << "Usage: " << argv[0] << " --config=PATH [bridge options]\n\n"
-          << "QLDPC Relay-BP bridge: Hololink GPU-RoCE ring <-> device-graph "
-             "scheduler.\n\n"
-          << "  --config=PATH      Relay BP config YAML (required)\n"
-          << "  --device=NAME      IB device (default: rocep1s0f0)\n"
-          << "  --peer-ip=ADDR     FPGA/emulator IP (default: 10.0.0.2)\n"
-          << "  --remote-qp=N      Remote QP number (default: 0x2)\n"
-          << "  --gpu=N            GPU device ID (default: 0)\n"
-          << "  --timeout=N        Timeout seconds (default: 60)\n"
-          << "  --page-size=N      Ring slot size (default: 384)\n"
-          << "  --num-pages=N      Ring slots (default: 64)\n"
-          << "  --reserved-sms=N   SMs reserved for Hololink RX/TX (default: "
-             "2)\n";
+      std::cout << "Usage: " << argv[0] << " --config=PATH [bridge options]\n\n"
+                << "QLDPC Relay-BP bridge: GpuRoceTransceiver GPU-RoCE ring "
+                   "<-> device-graph "
+                   "scheduler.\n\n"
+                << "  --config=PATH      Relay BP config YAML (required)\n"
+                << "  --device=NAME      IB device (default: rocep1s0f0)\n"
+                << "  --peer-ip=ADDR     FPGA/emulator IP (default: 10.0.0.2)\n"
+                << "  --remote-qp=N      Remote QP number (default: 0x2)\n"
+                << "  --gpu=N            GPU device ID (default: 0)\n"
+                << "  --timeout=N        Timeout seconds (default: 60)\n"
+                << "  --page-size=N      Ring slot size (default: 384)\n"
+                << "  --num-pages=N      Ring slots (default: 64)\n"
+                << "  --reserved-sms=N   SMs reserved for GpuRoceTransceiver "
+                   "RX/TX (default: "
+                   "2)\n";
       return 0;
     }
   }
@@ -164,9 +168,10 @@ int main(int argc, char *argv[]) {
       reserved_sms = std::stoi(arg.substr(15));
   }
 
-  // Guard: clamp num_pages to the HSB receive/send work-queue depth.
+  // Guard: clamp num_pages to the GpuRoceTransceiver receive/send work-queue
+  // depth.
   //
-  // The Hololink gpu_roce_transceiver (HSB 2.6.0-EA2) posts WQE_NUM=64
+  // The GpuRoceTransceiver (HSB 2.6.0-EA2) posts WQE_NUM=64
   // receive/send WQEs and runs one kernel thread per WQE.  When the ring is
   // deeper than that, a single thread services multiple ring slots (slot t and
   // t+64 share one WQE / CQ position), and the free-running RX/TX kernels race
@@ -175,19 +180,20 @@ int main(int argc, char *argv[]) {
   // pair on one thread, with no RDMA timeouts).  A 1:1 slot<->WQE mapping
   // (num_pages <= WQE_NUM) is the only safe configuration.  We clamp rather
   // than abort so a stale/oversized --num-pages can't silently corrupt data.
-  constexpr unsigned kHsbWqeNum =
-      64; // == HSB WQE_NUM (gpu_roce_transceiver_common.hpp)
-  if (config.num_pages > kHsbWqeNum) {
+  constexpr unsigned kGpuRoceWqeNum =
+      64; // == GpuRoceTransceiver WQE_NUM (gpu_roce_transceiver_common.hpp)
+  if (config.num_pages > kGpuRoceWqeNum) {
     std::cerr << "WARNING: --num-pages=" << config.num_pages
-              << " exceeds the HSB transceiver's WQE depth (" << kHsbWqeNum
-              << "); clamping to " << kHsbWqeNum
+              << " exceeds the GpuRoceTransceiver's WQE depth ("
+              << kGpuRoceWqeNum << "); clamping to " << kGpuRoceWqeNum
               << " (a deeper ring multiplexes >1 slot per WQE and races the "
                  "RX/TX kernels -> duplicate/drop)."
               << std::endl;
-    config.num_pages = kHsbWqeNum;
+    config.num_pages = kGpuRoceWqeNum;
   }
 
-  std::cout << "=== Hololink QLDPC Relay-BP Bridge (device-graph scheduler) ==="
+  std::cout << "=== GpuRoceTransceiver QLDPC Relay-BP Bridge (device-graph "
+               "scheduler) ==="
             << std::endl;
 
   // -- Load decoder config + build the decoder --------------------------------
@@ -243,9 +249,10 @@ int main(int argc, char *argv[]) {
   BRIDGE_CUDA_CHECK(cudaSetDevice(config.gpu_id));
 
   // -- Capture the device-launchable cooperative decode graph -----------------
-  // Reserve SMs for the Hololink RX/TX kernels so the cooperative decode can
-  // still co-reside.  This also registers the decoder's GpuDecoderState with
-  // the proprietary device table (read by the DEVICE_CALL handlers).
+  // Reserve SMs for the GpuRoceTransceiver RX/TX kernels so the cooperative
+  // decode can still co-reside.  This also registers the decoder's
+  // GpuDecoderState with the proprietary device table (read by the DEVICE_CALL
+  // handlers).
   void *raw_res = decoder->capture_decode_graph(reserved_sms);
   if (!raw_res) {
     std::cerr << "ERROR: capture_decode_graph() returned null" << std::endl;
@@ -278,29 +285,29 @@ int main(int argc, char *argv[]) {
   config.frame_size = std::max<std::size_t>(config.frame_size, min_frame);
   if (config.page_size < config.frame_size)
     config.page_size = config.frame_size;
-  // 128-byte page granularity for Hololink.
+  // 128-byte page granularity for GpuRoceTransceiver.
   config.page_size = (config.page_size + 127) & ~static_cast<std::size_t>(127);
   std::cout << "  frame_size=" << config.frame_size
             << " page_size=" << config.page_size
             << " num_pages=" << config.num_pages << std::endl;
 
-  // -- Create + start the Hololink transceiver (RX + TX kernels) --------------
-  hololink_transceiver_t transceiver = hololink_create_transceiver(
+  // -- Create + start the GpuRoceTransceiver (RX + TX kernels) --------------
+  gpu_roce_transceiver_t transceiver = gpu_roce_create_transceiver(
       config.device.c_str(), 1, config.remote_qp, config.gpu_id,
       config.frame_size, config.page_size, config.num_pages,
       config.peer_ip.c_str(), /*forward=*/0, /*rx_only=*/1, /*tx_only=*/1);
   if (!transceiver) {
-    std::cerr << "ERROR: Failed to create Hololink transceiver" << std::endl;
+    std::cerr << "ERROR: Failed to create GpuRoceTransceiver" << std::endl;
     decoder->release_decode_graph(raw_res);
     return 1;
   }
-  if (!hololink_start(transceiver)) {
+  if (!gpu_roce_start(transceiver)) {
     // Do NOT destroy a half-initialized transceiver here: the DOCA teardown
     // path double-frees GPU memory that start() never allocated and segfaults,
     // which obscures the real error.  This is a fatal exit, so let the OS
     // reclaim.  The most common cause is a missing IPv4-mapped RoCE v2 GID --
     // ensure the bridge netdev has its IPv4 address assigned and is up.
-    std::cerr << "ERROR: hololink_start failed (often a missing RoCE v2 GID -- "
+    std::cerr << "ERROR: gpu_roce_start failed (often a missing RoCE v2 GID -- "
                  "check the IB device's IPv4 address is assigned)"
               << std::endl;
     return 1;
@@ -309,20 +316,20 @@ int main(int argc, char *argv[]) {
 
   // -- Adopt the DOCA ring (GPU pointers) -------------------------------------
   auto *rx_data =
-      reinterpret_cast<uint8_t *>(hololink_get_rx_ring_data_addr(transceiver));
-  auto *rx_flag = hololink_get_rx_ring_flag_addr(transceiver);
+      reinterpret_cast<uint8_t *>(gpu_roce_get_rx_ring_data_addr(transceiver));
+  auto *rx_flag = gpu_roce_get_rx_ring_flag_addr(transceiver);
   auto *tx_data =
-      reinterpret_cast<uint8_t *>(hololink_get_tx_ring_data_addr(transceiver));
-  auto *tx_flag = hololink_get_tx_ring_flag_addr(transceiver);
+      reinterpret_cast<uint8_t *>(gpu_roce_get_tx_ring_data_addr(transceiver));
+  auto *tx_flag = gpu_roce_get_tx_ring_flag_addr(transceiver);
   if (!rx_data || !rx_flag || !tx_data || !tx_flag) {
     std::cerr << "ERROR: null DOCA ring pointer(s)" << std::endl;
-    hololink_close(transceiver);
-    hololink_destroy_transceiver(transceiver);
+    gpu_roce_close(transceiver);
+    gpu_roce_destroy_transceiver(transceiver);
     decoder->release_decode_graph(raw_res);
     return 1;
   }
-  const std::size_t num_slots = hololink_get_num_pages(transceiver);
-  const std::size_t slot_size = hololink_get_page_size(transceiver);
+  const std::size_t num_slots = gpu_roce_get_num_pages(transceiver);
+  const std::size_t slot_size = gpu_roce_get_page_size(transceiver);
 
   // -- Build the pinned-mapped 3-entry DEVICE_CALL function table -------------
   void *ft_host = nullptr;
@@ -330,8 +337,8 @@ int main(int argc, char *argv[]) {
   if (!alloc_pinned_mapped(3 * sizeof(cudaq_function_entry_t), &ft_host,
                            &ft_dev)) {
     std::cerr << "ERROR: function-table alloc failed" << std::endl;
-    hololink_close(transceiver);
-    hololink_destroy_transceiver(transceiver);
+    gpu_roce_close(transceiver);
+    gpu_roce_destroy_transceiver(transceiver);
     decoder->release_decode_graph(raw_res);
     return 1;
   }
@@ -352,8 +359,8 @@ int main(int argc, char *argv[]) {
           rpc::kResetDecoderFunctionId);
   if (!ok) {
     cudaFreeHost(ft_host);
-    hololink_close(transceiver);
-    hololink_destroy_transceiver(transceiver);
+    gpu_roce_close(transceiver);
+    gpu_roce_destroy_transceiver(transceiver);
     decoder->release_decode_graph(raw_res);
     return 1;
   }
@@ -364,8 +371,8 @@ int main(int argc, char *argv[]) {
   if (!alloc_pinned_mapped(sizeof(int), &sd_host, &sd_dev)) {
     std::cerr << "ERROR: shutdown-flag alloc failed" << std::endl;
     cudaFreeHost(ft_host);
-    hololink_close(transceiver);
-    hololink_destroy_transceiver(transceiver);
+    gpu_roce_close(transceiver);
+    gpu_roce_destroy_transceiver(transceiver);
     decoder->release_decode_graph(raw_res);
     return 1;
   }
@@ -377,14 +384,14 @@ int main(int argc, char *argv[]) {
 
   // -- Launch the device-graph scheduler on the DOCA ring ---------------------
   // Strict-FIFO consumption: shared_ring_mode is OFF.  This scheduler is the
-  // SOLE consumer of the DOCA RX ring (no peer dispatcher), and the Hololink RX
-  // kernel fills slots strictly in order (window N -> slot N % num_pages).  The
-  // persistent cursor in dispatch_kernel_with_graph keeps current_slot across
-  // the tail self-relaunch, so the scheduler waits at the next slot in order
-  // rather than rescanning from 0 -- which is what avoids the slot-reuse race
-  // (out-of-order grab + flag-clear vs. refill) that shared_ring scanning
-  // introduced here.  The dispatch kernel default is shared-ring OFF, so no
-  // setter call is needed.
+  // SOLE consumer of the DOCA RX ring (no peer dispatcher), and the
+  // GpuRoceTransceiver RX kernel fills slots strictly in order (window N ->
+  // slot N % num_pages).  The persistent cursor in dispatch_kernel_with_graph
+  // keeps current_slot across the tail self-relaunch, so the scheduler waits at
+  // the next slot in order rather than rescanning from 0 -- which is what
+  // avoids the slot-reuse race (out-of-order grab + flag-clear vs. refill) that
+  // shared_ring scanning introduced here.  The dispatch kernel default is
+  // shared-ring OFF, so no setter call is needed.
 
   cudaStream_t sched_stream = nullptr;
   BRIDGE_CUDA_CHECK(cudaStreamCreate(&sched_stream));
@@ -403,8 +410,8 @@ int main(int argc, char *argv[]) {
     cudaFree(d_stats);
     cudaFreeHost(ft_host);
     cudaFreeHost(sd_host);
-    hololink_close(transceiver);
-    hololink_destroy_transceiver(transceiver);
+    gpu_roce_close(transceiver);
+    gpu_roce_destroy_transceiver(transceiver);
     decoder->release_decode_graph(raw_res);
     return 1;
   }
@@ -416,8 +423,8 @@ int main(int argc, char *argv[]) {
     cudaFree(d_stats);
     cudaFreeHost(ft_host);
     cudaFreeHost(sd_host);
-    hololink_close(transceiver);
-    hololink_destroy_transceiver(transceiver);
+    gpu_roce_close(transceiver);
+    gpu_roce_destroy_transceiver(transceiver);
     decoder->release_decode_graph(raw_res);
     return 1;
   }
@@ -425,24 +432,25 @@ int main(int argc, char *argv[]) {
                "graph)"
             << std::endl;
 
-  // -- Run the Hololink RX/TX kernels on a worker thread ----------------------
+  // -- Run the GpuRoceTransceiver RX/TX kernels on a worker thread
+  // ----------------------
   std::signal(SIGINT, handle_sigint);
-  std::thread monitor([&]() { hololink_blocking_monitor(transceiver); });
+  std::thread monitor([&]() { gpu_roce_blocking_monitor(transceiver); });
 
-  // blocking_monitor() launches the Hololink RX/TX kernels inside the worker
-  // thread.  Give those launches a short grace period before the orchestration
-  // script sees "Bridge Ready" and starts playback.
-  std::this_thread::sleep_for(kHololinkMonitorStartupGrace);
+  // blocking_monitor() launches the GpuRoceTransceiver RX/TX kernels inside the
+  // worker thread.  Give those launches a short grace period before the
+  // orchestration script sees "Bridge Ready" and starts playback.
+  std::this_thread::sleep_for(kGpuRoceMonitorStartupGrace);
 
   // Emit the bridge's RDMA target info in the exact format the orchestration
   // script greps (extract_hex for QP/Buffer, extract_decimal for RKey) so the
   // playback tool can point the FPGA/emulator SIF at our GPU ring, and signal
   // readiness AFTER the scheduler + RX/TX kernels are live.
   std::cout << "QP Number: 0x" << std::hex
-            << hololink_get_qp_number(transceiver) << std::dec << "\n";
-  std::cout << "RKey: " << hololink_get_rkey(transceiver) << "\n";
+            << gpu_roce_get_qp_number(transceiver) << std::dec << "\n";
+  std::cout << "RKey: " << gpu_roce_get_rkey(transceiver) << "\n";
   std::cout << "Buffer Addr: 0x" << std::hex
-            << hololink_get_buffer_addr(transceiver) << std::dec << "\n";
+            << gpu_roce_get_buffer_addr(transceiver) << std::dec << "\n";
   std::cout << "Bridge Ready" << std::endl;
 
   std::cout << "  Running for up to " << config.timeout_sec
@@ -458,7 +466,7 @@ int main(int argc, char *argv[]) {
   __atomic_store_n(shutdown_host, 1, __ATOMIC_RELEASE);
   __sync_synchronize();
   cudaStreamSynchronize(sched_stream); // drain the self-relaunch chain
-  hololink_close(transceiver);         // stop RX/TX monitor
+  gpu_roce_close(transceiver);         // stop RX/TX monitor
   if (monitor.joinable())
     monitor.join();
 
@@ -467,7 +475,7 @@ int main(int argc, char *argv[]) {
   cudaFree(d_stats);
   cudaFreeHost(ft_host);
   cudaFreeHost(sd_host);
-  hololink_destroy_transceiver(transceiver);
+  gpu_roce_destroy_transceiver(transceiver);
   decoder->release_decode_graph(raw_res);
 
   std::cout << "=== Bridge exited cleanly ===" << std::endl;
