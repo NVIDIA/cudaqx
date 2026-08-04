@@ -9,6 +9,7 @@
 #pragma once
 
 #include "cuda-qx/core/heterogeneous_map.h"
+#include "cudaq/qec/dem_chunks_memory.h"
 #include "cudaq/qec/extended_dem.h"
 #include <cstdint>
 #include <memory>

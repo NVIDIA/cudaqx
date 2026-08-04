@@ -167,33 +167,6 @@ struct dem_chunk_spec {
   void validate(const std::string &context) const;
 };
 
-/// @brief The init / bulk / final phases of a repeated-round decomposition.
-///
-/// A run of T rounds is `init`, then `bulk` repeated T-2 times, then `final`.
-/// Because `bulk` is what repeats, its incoming and outgoing seams must be the
-/// same width; init has no incoming seam and final no outgoing seam.
-struct dem_chunks_spec {
-  dem_chunk_spec init;
-  /// Optional: omit for a decomposition with no repeated middle.
-  dem_chunk_spec bulk;
-  dem_chunk_spec final;
-
-  bool operator==(const dem_chunks_spec &) const = default;
-
-  /// True when no phase has been set.
-  bool is_empty() const;
-
-  /// True when a repeated middle phase was supplied.
-  bool has_bulk() const;
-
-  /// @brief Validate each phase, then the relationships between them: init
-  /// carries no incoming seam, final no outgoing seam, bulk's two seams are
-  /// equally wide, the contracted seams line up, and every phase reports the
-  /// same number of observables.
-  /// @throws std::invalid_argument on the first violation.
-  void validate() const;
-};
-
 /// @brief Build an extended_dem from a dem_chunk_spec.
 ///
 /// Seam tags are assigned sequentially (in_tags[k] = out_tags[k] = k), which is
@@ -206,20 +179,6 @@ struct dem_chunks_spec {
 /// @throws std::invalid_argument if the spec is inconsistent.
 extended_dem dem_chunk_from_spec(const dem_chunk_spec &spec,
                                  const std::string &context = "dem_chunk");
-
-/// @brief Expand a phase spec into the chunk sequence for a given round count.
-///
-/// Produces init, `num_rounds - 2` copies of bulk, then final, which is the
-/// sequence dem_stitch_all() consumes to build the whole experiment. When the
-/// spec has no bulk phase, only num_rounds == 2 is representable.
-///
-/// @param spec       Validated phase specs.
-/// @param num_rounds Total rounds, counting init and final. Must be >= 2.
-/// @return           num_rounds chunks, ready to stitch left to right.
-/// @throws std::invalid_argument if num_rounds < 2, if bulk repeats are needed
-///         but no bulk phase was supplied, or if the spec is inconsistent.
-std::vector<extended_dem> dem_chunks_from_spec(const dem_chunks_spec &spec,
-                                               std::size_t num_rounds);
 
 /// @brief Stitch two adjacent DEM chunks: contract a.out_syndrome with
 /// b.in_syndrome.
@@ -396,27 +355,6 @@ std::size_t dem_chunks_to_rounds(const std::vector<extended_dem> &dem_chunks);
 std::vector<std::int32_t>
 dem_chunks_to_detector_round(const std::vector<extended_dem> &dem_chunks);
 
-/// @brief Extract the D_sparse measurement-to-detector map from T DEM chunks.
-///
-/// D_sparse[det_id] lists the raw per-round measurement bit positions (within
-/// a flat T*d buffer laid out as round-0 bits 0..d-1, round-1 bits d..2d-1,
-/// ...) that XOR-combine to produce detector det_id:
-///   - Detector k       (r=0): bits {k}               (vs zero initial state)
-///   - Detector r*d+k (r>0): bits {(r-1)*d+k, r*d+k} (syndrome difference)
-///
-/// The return type matches the nested overload of decoder::set_D_sparse().
-///
-/// T is dem_chunks_to_rounds(dem_chunks), so a chunk spanning several rounds
-/// contributes a measurement slot per round it carries.
-///
-/// @param dem_chunks Non-empty sequence of chunks in round order.
-/// @throws std::invalid_argument on an empty sequence, a seam that does not
-///         contract against its neighbour, a seam whose width differs from the
-///         rest of the sequence, or a chunk whose interior rows are not a whole
-///         number of rounds.
-std::vector<std::vector<uint32_t>>
-dem_chunks_to_d_sparse(const std::vector<extended_dem> &dem_chunks);
-
 /// @brief Extract the O_sparse observable-flip map from T DEM chunks.
 ///
 /// O_sparse[obs_id] lists the global fault column indices (across all T
@@ -451,7 +389,8 @@ dem_chunks_to_o_sparse(const std::vector<extended_dem> &dem_chunks);
 /// last may have no outgoing one. As with dem_close(), the last chunk's
 /// out_syndrome is discarded: any detector that should appear in the closed
 /// DEM must already live in some chunk's in_syndrome or interior (for a
-/// dem_chunks_spec final phase, that means H_in_sparse / H_mid_sparse).
+/// phase-decomposed experiment, that means the final chunk's H_in_sparse /
+/// H_mid_sparse).
 ///
 /// @param dem_chunks Non-empty sequence of chunks in round order. Each chunk's
 ///               out_syndrome must match the next one's in_syndrome, and all
@@ -490,9 +429,7 @@ dem_chunks_to_pcm(const std::vector<extended_dem> &dem_chunks);
 /// matching dem_from_css_matrices (final-round faults touch only the last
 /// detector band). Put any detector that must survive closing into in_syndrome
 /// or interior instead — for example a final data-readout boundary belongs in
-/// the last chunk's in_syndrome / interior (dem_chunks.final.H_in_sparse /
-/// H_mid_sparse), never only in out_syndrome. dem_chunks_spec::validate()
-/// already rejects a nonempty final.H_out_sparse for this reason.
+/// the last chunk's in_syndrome / interior, never only in out_syndrome.
 ///
 /// Invariant (up to canonicalization):
 ///   dem_close(dem_stitch_all(T one-round chunks))
