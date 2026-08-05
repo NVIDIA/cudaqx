@@ -776,6 +776,12 @@ if(Python_Interpreter_FOUND)
     set(_SC4_TRY_TRT_TEST TRUE)
   endif()
 endif()
+set(_SC4_HAVE_NV_QLDPC FALSE)
+if(TARGET cudaq-qec-nv-qldpc-decoder
+   OR QEC_EXTERNAL_DECODERS
+   OR DEFINED ENV{QEC_EXTERNAL_DECODERS})
+  set(_SC4_HAVE_NV_QLDPC TRUE)
+endif()
 # A silent skip here once masked a dead test check for a whole release cycle:
 # the trt surface-code tests register only when BOTH the trt plugin target and
 # python-onnx are available, so name whichever gate actually failed.
@@ -856,12 +862,9 @@ if(TARGET cudaq-qec-trt-decoder AND _SC4_TRY_TRT_TEST)
     --generate-identity-onnx)
 endif()
 
-# nv-qldpc relay-BP DEVICE-mode cases: disabled with the inproc_rpc removal --
-# they drove the removed device-graph scheduler. Re-point to the external
-# decoding server (HOST_CALL over UDP) as a follow-up (see todo.md).
-if(FALSE AND _APP_CUDAQ_REALTIME_DISPATCH_LIB
-   AND TARGET cudaq-qec-realtime-cudevice-proprietary
-   AND (QEC_EXTERNAL_DECODERS OR DEFINED ENV{QEC_EXTERNAL_DECODERS}))
+# nv-qldpc relay-BP: --use-relay-bp only sets nv-qldpc parameters at config
+# generation, so these need the plugin, not a dispatch backend.
+if(_SC4_HAVE_NV_QLDPC)
   add_surface_code_4_yaml_decoder_cases(relay-bp nv-qldpc-decoder
     --use-relay-bp)
 endif()
@@ -915,14 +918,36 @@ if(TARGET surface_code-4-yaml-cqr)
     APPEND PROPERTY ENVIRONMENT
       "CHECK_HARD_PATCH_MODELS=1;REQUIRE_DECODER_CONCURRENCY=2;SKIP_LOGICAL_ERROR_CEILING=1")
 
+  # relay-BP over the server's per-decoder rings: the dispatched coverage the
+  # inproc_rpc cases used to provide, now on one host ring per patch.
+  if(_SC4_HAVE_NV_QLDPC)
+    add_surface_code_4_yaml_external_test(relay-bp 3 3
+      "nv-qldpc-decoder,nv-qldpc-decoder,nv-qldpc-decoder" 200
+      --use-relay-bp)
+    # Relay BP iterates, so it needs more headroom than the 300s the pymatching
+    # and trt external cases run under.
+    set_tests_properties(app_examples.surface_code-4-yaml-cqr-relay-bp
+      PROPERTIES TIMEOUT 600)
+    set_property(TEST app_examples.surface_code-4-yaml-cqr-relay-bp
+      APPEND PROPERTY ENVIRONMENT
+        "REQUIRE_SERVER_DECODE_COUNTS=1")
+
+    if(TARGET cudaq-qec-trt-decoder AND _SC4_TRY_TRT_TEST)
+      add_surface_code_4_yaml_external_test(trio-relay 3 3
+        "pymatching,trt_decoder,nv-qldpc-decoder" 200
+        --generate-identity-onnx --use-relay-bp)
+      set_tests_properties(app_examples.surface_code-4-yaml-cqr-trio-relay
+        PROPERTIES TIMEOUT 600)
+      set_property(TEST app_examples.surface_code-4-yaml-cqr-trio-relay
+        APPEND PROPERTY ENVIRONMENT
+          "REQUIRE_SERVER_DECODE_COUNTS=1")
+    endif()
+  endif()
+
 endif()
 
 # Three-way heterogeneous trio incl. relay-BP (pymatching, trt, nv-qldpc).
-# Disabled with the inproc_rpc removal -- it drove the removed device-graph
-# scheduler. Re-point to the external decoding server (HOST_CALL over UDP) as a
-# follow-up (see todo.md).
-if(FALSE AND (QEC_EXTERNAL_DECODERS OR DEFINED ENV{QEC_EXTERNAL_DECODERS})
-   AND TARGET cudaq-qec-trt-decoder AND _SC4_TRY_TRT_TEST)
+if(_SC4_HAVE_NV_QLDPC AND TARGET cudaq-qec-trt-decoder AND _SC4_TRY_TRT_TEST)
   add_surface_code_4_yaml_test(trio-relay-d3 3 3
     "pymatching,trt_decoder,nv-qldpc-decoder" 1000
     --generate-identity-onnx
@@ -1162,9 +1187,7 @@ fi
   set_tests_properties(app_examples.surface_code-4-yaml-dual-parse-gen-d${distance}
     PROPERTIES ENVIRONMENT "${_sc4_neg_env}")
 endfunction()
-if(TARGET cudaq-qec-nv-qldpc-decoder
-   OR QEC_EXTERNAL_DECODERS
-   OR DEFINED ENV{QEC_EXTERNAL_DECODERS})
+if(_SC4_HAVE_NV_QLDPC)
   _sc4_dual_parse_test(3 3)
   _sc4_dual_parse_test(5 5)
 endif()
