@@ -301,11 +301,11 @@ Surface Code Test (Relay BP)
 
 The ``surface_code-1-local`` app example runs a surface code memory experiment
 with the nv-qldpc-decoder configured for Relay BP.  It simulates a surface code
-with ``stim`` and generates syndromes on the fly, so -- unlike the fixed-fixture
-CI unit test -- it can run an arbitrary number of shots.
+with ``stim`` and generates syndromes on the fly, so it can run an arbitrary
+number of shots.
 
 Build the app example (it links the same plugin + proprietary archive as the
-CI test):
+bridge):
 
 .. code-block:: bash
 

@@ -918,8 +918,7 @@ if(TARGET surface_code-4-yaml-cqr)
     APPEND PROPERTY ENVIRONMENT
       "CHECK_HARD_PATCH_MODELS=1;REQUIRE_DECODER_CONCURRENCY=2;SKIP_LOGICAL_ERROR_CEILING=1")
 
-  # relay-BP over the server's per-decoder rings: the dispatched coverage the
-  # inproc_rpc cases used to provide, now on one host ring per patch.
+  # relay-BP over the server's per-decoder rings, one host ring per patch.
   if(_SC4_HAVE_NV_QLDPC)
     add_surface_code_4_yaml_external_test(relay-bp 3 3
       "nv-qldpc-decoder,nv-qldpc-decoder,nv-qldpc-decoder" 200
