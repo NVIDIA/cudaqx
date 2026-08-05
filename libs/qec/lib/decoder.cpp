@@ -58,11 +58,10 @@ struct decoder::rt_impl {
   /// The id of the decoder (for instrumentation)
   uint32_t decoder_id = 0;
 
-  bool is_sliding_window = false;
-
-  /// Set once initialize_streaming_layout() runs, so a second call is rejected
-  /// rather than silently resetting buffers on a live decoder.
-  bool streaming_layout_initialized = false;
+  /// Written last by initialize_streaming_layout(), so per-round streaming
+  /// never activates on incomplete geometry. Also the one-shot construction
+  /// latch: a second call is rejected rather than resetting a live decoder.
+  bool round_streaming_initialized = false;
 
   /// The model's measurement-to-detector map, by detector row. Empty when the
   /// model supplies none, i.e. the decoder is handed detectors directly.
@@ -370,7 +369,7 @@ uint32_t decoder::get_decoder_id() const { return pimpl->decoder_id; }
 void decoder::initialize_streaming_layout(
     std::size_t num_syndromes_per_round,
     std::vector<std::size_t> detector_layer_offsets) {
-  if (pimpl->streaming_layout_initialized)
+  if (pimpl->round_streaming_initialized)
     throw std::logic_error(
         "initialize_streaming_layout() is construction state and may be called "
         "only once");
@@ -382,7 +381,6 @@ void decoder::initialize_streaming_layout(
         "detector layer offsets end at {} but the model has {} detectors",
         detector_layer_offsets.back(), syndrome_size));
 
-  pimpl->is_sliding_window = true;
   pimpl->num_syndromes_per_round = num_syndromes_per_round;
   // A first-round detector layer references a single measurement per detector.
   pimpl->has_first_round_detectors =
@@ -395,7 +393,7 @@ void decoder::initialize_streaming_layout(
   // rather than the full detector count.
   pimpl->persistent_detector_buffer.resize(num_syndromes_per_round);
   pimpl->persistent_soft_detector_buffer.resize(num_syndromes_per_round);
-  pimpl->streaming_layout_initialized = true;
+  pimpl->round_streaming_initialized = true;
 }
 
 bool decoder::enqueue_syndrome(const uint8_t *syndrome,
@@ -414,7 +412,7 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
   }
 
   bool should_decode = false;
-  if (!pimpl->is_sliding_window) {
+  if (!pimpl->round_streaming_initialized) {
     should_decode = (pimpl->msyn_buffer_index == pimpl->msyn_buffer.size());
   } else {
     should_decode =
@@ -446,7 +444,7 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
     }
 
     // Decode now.
-    if (!pimpl->is_sliding_window) {
+    if (!pimpl->round_streaming_initialized) {
       for (std::size_t i = 0; i < pimpl->measurement_to_detectors.size(); i++) {
         pimpl->persistent_detector_buffer[i] = 0;
         for (auto col : pimpl->measurement_to_detectors[i])
@@ -486,7 +484,7 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
     std::span<const float_t> decoded_values = decoded_result.result;
 
     // If we didn't get a decoded result, just return
-    if (pimpl->is_sliding_window) {
+    if (pimpl->round_streaming_initialized) {
       if (decoded_values.empty()) {
         return false;
       }
@@ -512,9 +510,9 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
     if (!result_type_name)
       throw std::runtime_error(fmt::format(
           "Unsupported decoder result type ({})", static_cast<int>(output_)));
-    if ((!pimpl->is_sliding_window &&
+    if ((!pimpl->round_streaming_initialized &&
          decoded_values.size() != expected_result_size) ||
-        (pimpl->is_sliding_window && !decoded_values.empty() &&
+        (pimpl->round_streaming_initialized && !decoded_values.empty() &&
          decoded_values.size() != expected_result_size)) {
       throw std::runtime_error(fmt::format(
           "Decoder result size ({}) does not match expected size ({}) for "
