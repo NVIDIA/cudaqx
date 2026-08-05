@@ -40,6 +40,10 @@ on:
         type: string
         description: Optional suffix to append to CUDA-Q wheel cache keys.
         required: false
+      artifact_name_suffix:
+        type: string
+        description: Optional suffix to append to every artifact name. Required when more than one instance of this workflow runs within a single parent run, so the instances do not overwrite each other's artifacts. Must match the value used by the run referenced by artifacts_from_run.
+        required: false
   workflow_call:
     inputs:
       build_type:
@@ -79,6 +83,11 @@ on:
         type: string
         default: ''
         required: false
+      artifact_name_suffix:
+        type: string
+        description: Optional suffix to append to every artifact name. Required when more than one instance of this workflow runs within a single parent run, so the instances do not overwrite each other's artifacts.
+        default: ''
+        required: false
     secrets:
       CUDAQ_ACCESS_TOKEN:
         required: false
@@ -106,7 +115,7 @@ jobs:
       - name: Upload release assets
         uses: actions/upload-artifact@v4
         with:
-          name: release-assets
+          name: release-assets${{ inputs.artifact_name_suffix }}
           path: '*.tar.gz'
           if-no-files-found: error
           retention-days: 1
@@ -196,7 +205,7 @@ jobs:
         if: ${{ inputs.assets_repo != '' && inputs.assets_tag != '' }}
         uses: actions/download-artifact@v4
         with:
-          name: release-assets
+          name: release-assets${{ inputs.artifact_name_suffix }}
           path: .
 
       - name: Get required CUDAQ version
@@ -241,7 +250,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-py${{ matrix.python }}-${{ matrix.platform }}-cu${{ steps.config.outputs.cuda_major }}
+          name: wheels-py${{ matrix.python }}-${{ matrix.platform }}-cu${{ steps.config.outputs.cuda_major }}${{ inputs.artifact_name_suffix }}
           path: /wheels/**
           retention-days: 14
 
@@ -276,7 +285,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: metapackages
+          name: metapackages${{ inputs.artifact_name_suffix }}
           path: /metapackages/**
           retention-days: 14
 
@@ -330,7 +339,7 @@ jobs:
       - name: Upload CUDAQ wheels
         uses: actions/upload-artifact@v4
         with:
-          name: cudaq-wheels-${{ matrix.platform }}-cu${{ steps.config.outputs.cuda_major }}
+          name: cudaq-wheels-${{ matrix.platform }}-cu${{ steps.config.outputs.cuda_major }}${{ inputs.artifact_name_suffix }}
           path: /cudaq-wheels
           retention-days: 14
           if-no-files-found: error
@@ -391,7 +400,7 @@ jobs:
         if: ${{ inputs.cudaq_wheels == 'Custom' }}
         uses: actions/download-artifact@v4
         with:
-          name: cudaq-wheels-${{ matrix.platform }}-cu${{ steps.config.outputs.cuda_major }}
+          name: cudaq-wheels-${{ matrix.platform }}-cu${{ steps.config.outputs.cuda_major }}${{ inputs.artifact_name_suffix }}
           path: /cudaq-wheels
           run-id: ${{ steps.config.outputs.run_id_to_use }}
           github-token: ${{ inputs.artifacts_from_run && secrets.WORKFLOW_TOKEN || github.token }}
@@ -399,7 +408,7 @@ jobs:
       - name: Download CUDA-QX Meta Packages
         uses: actions/download-artifact@v4
         with:
-          name: metapackages
+          name: metapackages${{ inputs.artifact_name_suffix }}
           path: /metapackages
           run-id: ${{ steps.config.outputs.run_id_to_use }}
           github-token: ${{ inputs.artifacts_from_run && secrets.WORKFLOW_TOKEN || github.token }}
@@ -407,7 +416,7 @@ jobs:
       - name: Download CUDA-QX wheels
         uses: actions/download-artifact@v4
         with:
-          name: wheels-py${{ matrix.python }}-${{ matrix.platform }}-cu${{ steps.config.outputs.cuda_major }}
+          name: wheels-py${{ matrix.python }}-${{ matrix.platform }}-cu${{ steps.config.outputs.cuda_major }}${{ inputs.artifact_name_suffix }}
           path: /wheels
           run-id: ${{ steps.config.outputs.run_id_to_use }}
           github-token: ${{ inputs.artifacts_from_run && secrets.WORKFLOW_TOKEN || github.token }}
@@ -508,7 +517,7 @@ jobs:
         if: ${{ inputs.cudaq_wheels == 'Custom' }}
         uses: actions/download-artifact@v4
         with:
-          name: cudaq-wheels-${{ matrix.runner.arch }}-cu${{ steps.config.outputs.cuda_major }}
+          name: cudaq-wheels-${{ matrix.runner.arch }}-cu${{ steps.config.outputs.cuda_major }}${{ inputs.artifact_name_suffix }}
           path: /cudaq-wheels
           run-id: ${{ steps.config.outputs.run_id_to_use }}
           github-token: ${{ inputs.artifacts_from_run && secrets.WORKFLOW_TOKEN || github.token }}
@@ -516,7 +525,7 @@ jobs:
       - name: Download CUDA-QX Meta Packages
         uses: actions/download-artifact@v4
         with:
-          name: metapackages
+          name: metapackages${{ inputs.artifact_name_suffix }}
           path: /metapackages
           run-id: ${{ steps.config.outputs.run_id_to_use }}
           github-token: ${{ inputs.artifacts_from_run && secrets.WORKFLOW_TOKEN || github.token }}
@@ -524,7 +533,7 @@ jobs:
       - name: Download CUDA-QX wheels
         uses: actions/download-artifact@v4
         with:
-          name: wheels-py${{ matrix.python }}-${{ matrix.runner.arch }}-cu${{ steps.config.outputs.cuda_major }}
+          name: wheels-py${{ matrix.python }}-${{ matrix.runner.arch }}-cu${{ steps.config.outputs.cuda_major }}${{ inputs.artifact_name_suffix }}
           path: /wheels
           run-id: ${{ steps.config.outputs.run_id_to_use }}
           github-token: ${{ inputs.artifacts_from_run && secrets.WORKFLOW_TOKEN || github.token }}
