@@ -1,6 +1,9 @@
 .. The data and figures on this page are reproducible with the scripts in
    benchmarks/qec/relaybp_gamma_ensemble/ (see the README there for the
    parameter table, required Relay-BP testdata and expected runtime).
+   Tested at:
+     cudaqx  5140d8930f3e8a5a9a74b63c93dcbd0cda85dc48
+     stim    e2fc1eca7fd21684d433aa5f10f4504ea4860d07  (v1.16.0)
 
 .. _ensemble_gamma_user_guide:
 

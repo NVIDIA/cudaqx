@@ -21,10 +21,6 @@
 # and ships in the released wheel; a build from public source does not include
 # it); stim, numpy, matplotlib.
 #
-# Tested at:
-#   cudaqx  5140d8930f3e8a5a9a74b63c93dcbd0cda85dc48
-#   stim    e2fc1eca7fd21684d433aa5f10f4504ea4860d07  (v1.16.0)
-#
 # Run both scripts, pinning run_sweep.py to an idle GPU -- another process on
 # the same device distorts latency data.
 #

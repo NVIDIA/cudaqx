@@ -12,10 +12,6 @@
 # with the published relaybp_* names, matching the copies in assets/docs/.
 # Also prints the numeric values reported in the guide.
 #
-# Tested at:
-#   cudaqx  5140d8930f3e8a5a9a74b63c93dcbd0cda85dc48
-#   stim    e2fc1eca7fd21684d433aa5f10f4504ea4860d07  (v1.16.0)
-#
 # Output figures (written to $QEC_DATA_ROOT/figures/):
 #   relaybp_gamma_ensemble_perf.png
 #   relaybp_latency_percentiles.png
