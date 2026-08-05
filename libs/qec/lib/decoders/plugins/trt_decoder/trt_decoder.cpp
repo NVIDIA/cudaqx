@@ -409,7 +409,7 @@ private:
   size_t output_size_per_sample_ = 0;
 
   // Optional global decoder (e.g. DEM decoder) applied after TRT + postprocess
-  std::shared_ptr<decoder> global_decoder_;
+  std::unique_ptr<decoder> global_decoder_;
   cudaqx::heterogeneous_map global_decoder_params_;
 
   // When true, decode()/decode_batch() return the predicted logical-frame

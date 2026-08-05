@@ -132,15 +132,14 @@ std::string decoder::get_version() const {
 
 std::future<decoder_result>
 decoder::decode_async(const std::vector<float_t> &syndrome) {
-  auto self = weak_from_this().lock();
-  if (!self)
-    throw std::runtime_error(
-        "decode_async requires shared decoder ownership; construct the "
-        "decoder with decoder::get()");
+  // Captured by value: the worker must not dereference decoder members to
+  // find its device. The std::async thread is brand-new and unpinned, so it
+  // guards itself for the duration of the call (the one exception to the
+  // one-thread-owns-one-decoder persistent pin).
   const int cuda_id = cuda_device_id_;
-  return std::async(std::launch::async, [self, syndrome, cuda_id] {
+  return std::async(std::launch::async, [this, syndrome, cuda_id] {
     cudaq::qec::detail_affinity::CudaDeviceGuard dev(cuda_id);
-    return self->decode(syndrome);
+    return this->decode(syndrome);
   });
 }
 
@@ -203,7 +202,7 @@ private:
   bool committed_ = false;
 };
 
-std::shared_ptr<decoder>
+std::unique_ptr<decoder>
 decoder::get(const std::string &name, const decoder_init &init,
              const cudaqx::heterogeneous_map &param_map) {
   auto [mutex, registry] = get_registry();
@@ -216,7 +215,7 @@ decoder::get(const std::string &name, const decoder_init &init,
         "additional plugin diagnostics at startup.");
   const int cuda_device_id = read_cuda_device_id(param_map);
   if (cuda_device_id < 0)
-    return std::shared_ptr<decoder>(iter->second(init, param_map));
+    return iter->second(init, param_map);
   ConstructionDevicePin device_pin(cuda_device_id);
   // The key is consumed here; strip it so plugins that strictly validate
   // their parameter keys do not reject it.
@@ -227,7 +226,7 @@ decoder::get(const std::string &name, const decoder_init &init,
   auto d = iter->second(init, plugin_params);
   d->cuda_device_id_ = cuda_device_id;
   device_pin.commit();
-  return std::shared_ptr<decoder>(std::move(d));
+  return d;
 }
 
 namespace details {
@@ -629,7 +628,7 @@ void decoder::reset_decoder() {
   }
 }
 
-std::shared_ptr<decoder> get_decoder(const std::string &name,
+std::unique_ptr<decoder> get_decoder(const std::string &name,
                                      const decoder_init &init,
                                      const cudaqx::heterogeneous_map options) {
   return decoder::get(name, init, options);

@@ -61,7 +61,7 @@ struct DecodingSession {
   enum class ShotState { collecting, result_ready, failed };
 
   // -- Decoder and GPU resources --
-  std::shared_ptr<cudaq::qec::decoder> dec;
+  std::unique_ptr<cudaq::qec::decoder> dec;
   GraphResourcesPtr graph_resources;
   SyndromeMappingTable mapping_table;
 
@@ -108,7 +108,7 @@ struct DecodingSession {
   /// Construct a session around an already configured decoder and capture graph
   /// resources if supported.
   static std::unique_ptr<DecodingSession>
-  create(std::shared_ptr<cudaq::qec::decoder> decoder,
+  create(std::unique_ptr<cudaq::qec::decoder> decoder,
          SyndromeMappingTable mapping_table);
 
   /// Start the FIFO worker thread.  Must be called after create().  The
