@@ -19,11 +19,12 @@
 #   FPGA/emulator --RDMA WRITE--> server cpu_roce rx ring
 #   server        --RDMA SEND---> FPGA SIF TX (captured by the ILA)
 #
-# Division of labor (identical to hololink_qldpc_graph_decoder_test.sh):
+# Division of labor (identical to gpu_roce_qldpc_graph_decoder_test.sh):
 #   - decoding_server (--transport=cpu_roce --qp_config=hsb_fpga) owns the
-#     RDMA ring and prints its QP / RKey / Buffer Addr handshake.  It performs
-#     NO Hololink control-plane traffic.
-#   - hololink_fpga_syndrome_playback is the sole FPGA control-plane writer:
+#     RDMA ring and prints its endpoint line (QEC_DECODING_SERVER_ENDPOINT
+#     qp=... rkey=... buffer_addr=...).  It performs
+#     NO HSB control-plane traffic.
+#   - hsb_fpga_syndrome_playback is the sole FPGA control-plane writer:
 #     it programs the SIF RDMA target with the server's handshake values,
 #     writes the syndrome frames to BRAM, arms the ILA, enables the player,
 #     and verifies the captured RPC responses.
@@ -107,8 +108,9 @@ GEN_SHOTS=100
 TRANSPORT=""
 # GPU for the gpu_roce scheduler + decode graph.
 GPU_ID=0
-# Server-side GPU RoCE ring depth. "auto" chooses a page count whose total
-# allocation satisfies the host page-size requirement.
+# Server-side GPU RoCE ring depth. "auto" uses the HSB QP's 64-entry receive
+# WQE depth (rings deeper than the WQE count drop frames under load); explicit
+# values above it are clamped.
 GPU_ROCE_NUM_PAGES=auto
 
 # Runtime nv-qldpc plugin for the Relay BP profile: the prebuilt
@@ -123,7 +125,8 @@ NV_QLDPC_PLUGIN="${CUDAQ_QEC_NV_QLDPC_PLUGIN:-}"
 
 # Network defaults
 IB_DEVICE=""           # auto-detect
-BRIDGE_IP="10.0.0.1"   # server-side NIC IP (kept the qldpc script's name)
+BRIDGE_IP=""           # resolved after arg parsing (kept the qldpc script's
+                       # name): emulate -> 10.0.0.1, real FPGA -> 192.168.0.1
 EMULATOR_IP="10.0.0.2"
 FPGA_IP="192.168.0.2"
 MTU=4096
@@ -132,10 +135,10 @@ MTU=4096
 TIMEOUT=60
 NUM_SHOTS=""
 PAGE_SIZE=384
-# CPU RoCE server ring slots.
+# RX ring depth for both transports, bounded by the HSB QP's 64 receive WQEs (a
+# ring with more slots than WQEs drops frames under load). The server clamps
+# cpu_roce --num-slots to this; the gpu_roce ring is capped to it below.
 NUM_SLOTS=64
-# FPGA/emulator playback window pages.
-PLAYBACK_NUM_PAGES=512
 # TX SGE bytes for the server's SEND responses.  RPCResponse (24B) + a
 # bit-packed correction byte fits well inside 64, keeping every response a
 # single 512-bit ILA beat.
@@ -207,7 +210,9 @@ Build options:
 
 Network options:
   --device DEV           ConnectX IB device name (default: auto-detect)
-  --bridge-ip ADDR       Server-side NIC IP (default: 10.0.0.1)
+  --bridge-ip ADDR       Server-side NIC IP (default: 10.0.0.1 with
+                         --emulate, 192.168.0.1 on the real FPGA; must share
+                         the FPGA's /24 in FPGA mode)
   --emulator-ip ADDR     Emulator IP (default: 10.0.0.2)
   --fpga-ip ADDR         FPGA IP for non-emulate mode (default: 192.168.0.2)
   --mtu N                MTU size (default: 4096)
@@ -218,12 +223,17 @@ Run options:
   --num-shots N          Limit number of shots
   --page-size N          Ring buffer slot size in bytes (default: 384)
   --frame-size N         Server TX SGE bytes, cpu_roce only (default: 64;
-                         gpu_roce uses page-size as HOLOLINK_FRAME_SIZE)
+                         gpu_roce uses page-size as QEC_DEVICE_GRAPH_FRAME_SIZE)
   --gpu N                GPU device id for gpu_roce (default: 0)
-  --gpu-roce-num-pages N Server GPU RoCE ring pages (default: auto-align;
-                         starts from playback window pages)
-  --playback-num-pages N FPGA/emulator playback window pages (default: 512)
-  --spacing N            Inter-shot spacing in microseconds (default: 10)
+  --gpu-roce-num-pages N Server GPU RoCE ring slots (default: the HSB 64-WQE
+                         depth; values above it are clamped, since a ring with
+                         more slots than WQEs drops frames)
+  --spacing N            Per-frame playback pacing in microseconds (default:
+                         10; the FPGA timer fires once per frame, so a shot
+                         spans frames-per-shot x spacing). The slow-decode
+                         profiles trt_decoder and nv-qldpc-decoder default
+                         to 100 instead, so the playback stream cannot
+                         overrun the 64-slot RX ring mid-decode
   --control-port N       UDP control port for emulator (default: 8193)
 
   --help, -h             Show this help
@@ -242,7 +252,6 @@ while [[ $# -gt 0 ]]; do
         --transport)        TRANSPORT="$2"; shift ;;
         --gpu)              GPU_ID="$2"; shift ;;
         --gpu-roce-num-pages) GPU_ROCE_NUM_PAGES="$2"; shift ;;
-        --playback-num-pages) PLAYBACK_NUM_PAGES="$2"; shift ;;
         --nv-qldpc-plugin)  NV_QLDPC_PLUGIN="$2"; shift ;;
         --config)           CONFIG_FILE="$2"; shift ;;
         --syndromes)        SYNDROMES_FILE="$2"; shift ;;
@@ -276,6 +285,22 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 
+# Resolve the server-side NIC IP by mode: the emulate loop lives on
+# 10.0.0.0/24, the real FPGA on 192.168.0.0/24.  A bridge IP outside the
+# FPGA's subnet does not fail loudly -- the HSB control plane just
+# times out (read_uint32) as if the FPGA were dead -- so reject the
+# mismatch up front instead of letting it masquerade as broken hardware.
+if [[ -z "$BRIDGE_IP" ]]; then
+    if $EMULATE; then BRIDGE_IP="10.0.0.1"; else BRIDGE_IP="192.168.0.1"; fi
+fi
+if ! $EMULATE && [[ "${BRIDGE_IP%.*}" != "${FPGA_IP%.*}" ]]; then
+    echo "ERROR: --bridge-ip $BRIDGE_IP is not in the FPGA's /24 subnet" >&2
+    echo "       ($FPGA_IP): the HSB control plane would time out" >&2
+    echo "       (read_uint32) as if the FPGA were unreachable.  Pass a" >&2
+    echo "       matching --bridge-ip/--fpga-ip pair." >&2
+    exit 1
+fi
+
 # Derive the transport from the decoder profile unless explicitly chosen.
 if [[ -z "$TRANSPORT" ]]; then
     case "$DECODER" in
@@ -288,20 +313,60 @@ if [[ "$TRANSPORT" != "cpu_roce" && "$TRANSPORT" != "gpu_roce" ]]; then
     exit 1
 fi
 
-# Some DOCA registrations require the gpu_roce server ring allocation to be
-# host-page aligned. Keep playback capacity independent from the server ring,
-# and choose a server page count that satisfies the allocation contract.
-if [[ "$TRANSPORT" == "gpu_roce" && "$GPU_ROCE_NUM_PAGES" == "auto" ]]; then
-    HOST_PAGE_SIZE=$(getconf PAGESIZE 2>/dev/null || echo 4096)
-    SERVER_PAGE_SIZE=$(( ((PAGE_SIZE + 127) / 128) * 128 ))
-    GPU_ROCE_NUM_PAGES="$PLAYBACK_NUM_PAGES"
-    while (( (SERVER_PAGE_SIZE * GPU_ROCE_NUM_PAGES) % HOST_PAGE_SIZE != 0 )); do
-        ((GPU_ROCE_NUM_PAGES++))
-        if (( GPU_ROCE_NUM_PAGES > 65536 )); then
-            echo "ERROR: unable to auto-align gpu_roce ring for page-size=$PAGE_SIZE host-page-size=$HOST_PAGE_SIZE" >&2
-            exit 1
-        fi
-    done
+# Per-decoder playback pacing.  The playback engine's timer fires once per
+# FRAME (one BRAM window per frame), so --spacing is per-frame pacing and a
+# shot spans frames-per-shot x spacing on the wire.  A profile whose
+# per-shot decode latency exceeds that arrival window overruns the 64-slot
+# RX ring (dropped enqueues mis-assemble a shot's volume and the decode dies
+# with an invalid-syndrome matching error; the ILA sample count comes up
+# short).  For this test's profiles the slow ones are trt_decoder (fixed
+# per-invocation TensorRT engine overhead at batch 1) and nv-qldpc-decoder
+# (iterative relay-BP); pymatching decodes these d3 volumes in microseconds
+# and keeps the unpaced default -- the tightly paced path is part of what
+# its profile exercises.
+#
+# 100us clears every measured floor on this loop with margin: at d3/T4 the
+# host-dispatch runs fail at 25us (nv-qldpc) and 10us (trt) and pass at
+# 100us, and 100us is the validated value for the device-graph scheduler.
+# --spacing overrides.
+if [[ -z "$SPACING" ]]; then
+    case "$DECODER" in
+        trt_decoder|nv-qldpc-decoder) SPACING=100 ;;
+    esac
+fi
+
+# The HSB QP exposes a fixed 64-entry receive WQE depth, and the receiver
+# pre-posts one WQE per ring slot. A ring with MORE slots than WQEs leaves slots
+# un-posted and drops frames under load: cpu_roce (whose registered MR is only
+# num_slots wide) fails outright, and gpu_roce (deeper MR) drops occasionally.
+# So both transports cap the RX ring at the WQE depth -- cpu_roce via
+# NUM_SLOTS (the server clamps its --num-slots the same way), gpu_roce here.
+readonly HSB_WQE_DEPTH=64
+if (( NUM_SLOTS > HSB_WQE_DEPTH )); then
+    echo "WARNING: NUM_SLOTS=$NUM_SLOTS exceeds the HSB WQE depth" \
+         "($HSB_WQE_DEPTH); clamping so the playback ring modulus matches the" \
+         "server's clamped RX ring" >&2
+    NUM_SLOTS="$HSB_WQE_DEPTH"
+fi
+if [[ "$TRANSPORT" == "gpu_roce" ]]; then
+    if [[ "$GPU_ROCE_NUM_PAGES" == "auto" ]]; then
+        GPU_ROCE_NUM_PAGES="$HSB_WQE_DEPTH"
+    elif (( GPU_ROCE_NUM_PAGES > HSB_WQE_DEPTH )); then
+        echo "WARNING: --gpu-roce-num-pages=$GPU_ROCE_NUM_PAGES exceeds the HSB WQE" \
+             "depth ($HSB_WQE_DEPTH); clamping to $HSB_WQE_DEPTH to avoid dropped frames" >&2
+        GPU_ROCE_NUM_PAGES="$HSB_WQE_DEPTH"
+    fi
+    # DOCA requires the gpu_roce ring allocation (num_pages * page size) to be
+    # a multiple of the HOST page size (GpuRoceTransceiver rejects it at
+    # startup otherwise). 64 x 384 B = 24 KiB satisfies 4K/8K-page kernels;
+    # 16K/64K-page hosts (some aarch64 configs) need a larger stride.
+    host_page=$(getconf PAGESIZE)
+    if (( (GPU_ROCE_NUM_PAGES * PAGE_SIZE) % host_page != 0 )); then
+        echo "ERROR: gpu_roce ring ($GPU_ROCE_NUM_PAGES pages x $PAGE_SIZE B) is not a multiple of" >&2
+        echo "       this host's page size ($host_page B). Pass --page-size <multiple of" >&2
+        echo "       $(( host_page / GPU_ROCE_NUM_PAGES ))> so the WQE-depth ring stays host-page aligned." >&2
+        exit 1
+    fi
 fi
 
 # ============================================================================
@@ -342,7 +407,7 @@ cleanup() {
 trap cleanup EXIT
 
 # ============================================================================
-# Network Setup (mirrors hololink_qldpc_graph_decoder_test.sh)
+# Network Setup (mirrors gpu_roce_qldpc_graph_decoder_test.sh)
 # ============================================================================
 
 detect_interfaces() {
@@ -821,23 +886,23 @@ generate_data_files() {
         _info "Config carries the trt_decoder entry (onnx_load_path set)"
     fi
 
-    # The server selects its transceiver from the per-decoder `transport:` YAML
-    # key (default cpu_roce). For gpu_roce, `cuda_device_id` pins graph capture
-    # and worker-thread execution to the selected GPU. The generator doesn't emit
-    # these non-default optional fields, so inject them into our generated config
-    # directly under the decoder's `type:` line.
+    # The server selects the dispatch shape from the per-decoder `dispatch:`
+    # YAML key (default host). For device_graph, `cuda_device_id` pins graph
+    # capture and worker-thread execution to the selected GPU. The generator
+    # doesn't emit these non-default optional fields, so inject them into our
+    # generated config directly under the decoder's `type:` line.
     if [[ "$TRANSPORT" == "gpu_roce" ]]; then
-        _info "Injecting 'transport: gpu_roce' and cuda_device_id=$GPU_ID into $(basename "$CONFIG_FILE")"
+        _info "Injecting 'dispatch: device_graph' and cuda_device_id=$GPU_ID into $(basename "$CONFIG_FILE")"
         awk -v gpu_id="$GPU_ID" '{ print }
              /^[[:space:]]*type:/ && !done {
-                 print "    transport:       gpu_roce"
+                 print "    dispatch:        device_graph"
                  print "    cuda_device_id:  " gpu_id
                  done = 1
              }' "$CONFIG_FILE" > "${CONFIG_FILE}.tmp" \
             && mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
-        if ! grep -q "transport:.*gpu_roce" "$CONFIG_FILE" || \
+        if ! grep -q "dispatch:.*device_graph" "$CONFIG_FILE" || \
            ! grep -q "cuda_device_id:.*$GPU_ID" "$CONFIG_FILE"; then
-            _err "Failed to inject gpu_roce transport/cuda_device_id into $CONFIG_FILE"
+            _err "Failed to inject device_graph dispatch/cuda_device_id into $CONFIG_FILE"
             return 1
         fi
     fi
@@ -895,8 +960,8 @@ resolve_paths() {
     local cq_build_dir="${CUDA_QUANTUM_DIR}/realtime/build/unittests"
 
     SERVER_BIN="${CUDAQX_DIR}/build/bin/decoding_server"
-    PLAYBACK_BIN="${cudaqx_utils}/hololink_fpga_syndrome_playback"
-    EMULATOR_BIN="${cq_build_dir}/utils/hololink_fpga_emulator"
+    PLAYBACK_BIN="${cudaqx_utils}/hsb_fpga_syndrome_playback"
+    EMULATOR_BIN="${cq_build_dir}/utils/hsb_fpga_emulator"
 
     if [[ ! -x "$SERVER_BIN" ]]; then
         _err "Decoding server binary not found: $SERVER_BIN"
@@ -974,55 +1039,59 @@ extract_hex() {
     echo "$line" | grep -oP '0x[0-9a-fA-F]+' | head -1
 }
 
-extract_decimal() {
-    local line="$1"
-    echo "$line" | awk -F': ' '{print $NF}' | tr -d ' '
-}
-
 # ============================================================================
 # Server + Playback (shared by both modes)
 # ============================================================================
 
 # Start the decoding server against $1=peer_ip $2=remote_qp; scrape its
-# Bridge Ready handshake into SERVER_QP / SERVER_RKEY / SERVER_ADDR.
+# endpoint line into SERVER_QP / SERVER_RKEY / SERVER_ADDR.
 start_server() {
     local peer_ip="$1" remote_qp="$2" server_log="$3"
 
     _log "Starting decoding server (decoder=$DECODER, transport=$TRANSPORT," \
          "remote-qp=$remote_qp)"
 
-    local server_ld_path
-    server_ld_path="${CUDA_QUANTUM_DIR}/realtime/build/lib:${CUDAQX_DIR}/build/lib"
+    # The server dlopens the realtime bridge providers and needs the
+    # cudaq-realtime that matches .cudaq_version. Prefer an explicit
+    # CUDAQ_REALTIME_LIB_DIR, then the conventional realtime build dirs.
+    local server_ld_path rt_lib=""
+    for d in "${CUDAQ_REALTIME_LIB_DIR:-}" \
+             "${CUDA_QUANTUM_DIR}/realtime/build-bridge/lib" \
+             "${CUDA_QUANTUM_DIR}/realtime/build/lib"; do
+        [[ -n "$d" && -f "$d/libcudaq-realtime.so" ]] && { rt_lib="$d"; break; }
+    done
+    server_ld_path="${rt_lib}:${CUDAQX_DIR}/build/lib"
 
     local ready_pattern
     if [[ "$TRANSPORT" == "gpu_roce" ]]; then
         # Device-graph scheduler path: enqueue/get/reset run as DEVICE_CALLs
         # on the GPU and the captured RelayBP decode graph fires device-side.
-        # The Hololink transceiver is configured via HOLOLINK_* env (the
-        # server's gpu_roce mode ignores the cpu_roce CLI flags), and eager
-        # module loading avoids lazy-load stalls inside the persistent
+        # The device-graph transceiver is configured via QEC_DEVICE_GRAPH_*
+        # env (the server's device_graph mode ignores the cpu_roce CLI
+        # flags); dispatch-shape selection comes from the config's
+        # `dispatch: device_graph` key, injected at config-generation time.
+        # Eager module loading avoids lazy-load stalls inside the persistent
         # scheduler (same as the old bridge launcher).
         CUDA_MODULE_LOADING=EAGER \
         LD_LIBRARY_PATH="${server_ld_path}:${LD_LIBRARY_PATH:-}" \
-        HOLOLINK_DEVICE="$BRIDGE_DEVICE" \
-        HOLOLINK_PEER_IP="$peer_ip" \
-        HOLOLINK_REMOTE_QP="$((remote_qp))" \
-        HOLOLINK_FRAME_SIZE="$PAGE_SIZE" \
-        HOLOLINK_NUM_PAGES="$GPU_ROCE_NUM_PAGES" \
+        QEC_DEVICE_GRAPH_DEVICE="$BRIDGE_DEVICE" \
+        QEC_DEVICE_GRAPH_PEER_IP="$peer_ip" \
+        QEC_DEVICE_GRAPH_REMOTE_QP="$((remote_qp))" \
+        QEC_DEVICE_GRAPH_FRAME_SIZE="$PAGE_SIZE" \
+        QEC_DEVICE_GRAPH_NUM_PAGES="$GPU_ROCE_NUM_PAGES" \
         "$SERVER_BIN" \
             --config="$CONFIG_FILE" \
-            --transport=gpu_roce \
             --timeout="$TIMEOUT" \
             > >(tee "$server_log") 2>&1 &
-        # The GpuRoceTransceiver prints the QP/RKey/Buffer handshake during
+        # The DeviceGraphTransceiver prints the QP/RKey/Buffer handshake during
         # server construction, BEFORE this READY sentinel -- so waiting for
         # READY guarantees the three lines are scrapeable.
-        ready_pattern="QEC_DECODING_SERVER_READY gpu_roce"
+        ready_pattern="QEC_DECODING_SERVER_READY device_graph"
     else
         LD_LIBRARY_PATH="${server_ld_path}:${LD_LIBRARY_PATH:-}" \
         "$SERVER_BIN" \
             --config="$CONFIG_FILE" \
-            --transport=cpu_roce \
+            --transport=cpu-roce \
             --qp_config=hsb_fpga \
             --device="$BRIDGE_DEVICE" \
             --peer-ip="$peer_ip" \
@@ -1056,27 +1125,44 @@ start_server() {
         return 1
     }
 
-    local qp_line rkey_line addr_line
-    qp_line=$(wait_for_pattern "$server_log" "QP Number:" 5 "$SERVER_PID") || return 1
-    rkey_line=$(wait_for_pattern "$server_log" "RKey:" 5 "$SERVER_PID") || return 1
-    addr_line=$(wait_for_pattern "$server_log" "Buffer Addr:" 5 "$SERVER_PID") || return 1
+    # The RDMA rendezvous tokens (qp=/rkey=/buffer_addr=) are published on ONE
+    # line: the device-graph transceiver prints a dedicated
+    # QEC_DECODING_SERVER_ENDPOINT line, while the host/cpu-roce path carries
+    # the provider's endpoint info on the READY line itself. Scrape whichever
+    # arrives.
+    local ep_line
+    ep_line=$(wait_for_pattern "$server_log" "buffer_addr=" 5 "$SERVER_PID") || return 1
 
-    SERVER_QP=$(extract_hex "$qp_line")
-    SERVER_RKEY=$(extract_decimal "$rkey_line")
-    SERVER_ADDR=$(extract_hex "$addr_line")
+    SERVER_QP=$(sed -n 's/.*[[:space:]]qp=\([0-9a-fA-FxX]*\).*/\1/p' <<<"$ep_line")
+    SERVER_RKEY=$(sed -n 's/.*[[:space:]]rkey=\([0-9]*\).*/\1/p' <<<"$ep_line")
+    SERVER_ADDR=$(sed -n 's/.*[[:space:]]buffer_addr=\([0-9a-fA-FxX]*\).*/\1/p' <<<"$ep_line")
+    if [[ -z "$SERVER_QP" || -z "$SERVER_RKEY" || -z "$SERVER_ADDR" ]]; then
+        _err "Endpoint line missing qp=/rkey=/buffer_addr= tokens: $ep_line"
+        return 1
+    fi
 
     _info "Server QP:     $SERVER_QP"
     _info "Server RKey:   $SERVER_RKEY"
     _info "Server Buffer: $SERVER_ADDR"
 }
 
-# Run playback against $1=hololink_ip; extra args appended from $2...
+# Run playback against $1=hsb_ip; extra args appended from $2...
 run_playback() {
-    local hololink_ip="$1"; shift
+    local hsb_ip="$1"; shift
 
-    _log "Starting syndrome playback (hololink=$hololink_ip)"
+    _log "Starting syndrome playback (hsb_ip=$hsb_ip)"
+    # The FPGA/emulator writes syndrome frame rid to RDMA slot (rid % num-pages);
+    # --num-pages programs that ring modulus (via the SIF RDMA target). It MUST
+    # equal the server's RX ring depth, or frames past one ring land outside the
+    # server's registered memory region and are silently lost -- the server then
+    # starves after exactly one ring's worth of slots. The cpu_roce server ring
+    # is NUM_SLOTS; the gpu_roce server ring is GPU_ROCE_NUM_PAGES (both == the 64
+    # WQE depth). This also programs the emulator's SIF target, so emulated mode
+    # tracks the same modulus.
+    local pb_pages="$NUM_SLOTS"
+    if [[ "$TRANSPORT" == "gpu_roce" ]]; then pb_pages="$GPU_ROCE_NUM_PAGES"; fi
     local playback_args=(
-        --hololink "$hololink_ip"
+        --hsb-ip "$hsb_ip"
         --per-round
         --config "$CONFIG_FILE"
         --syndromes "$SYNDROMES_FILE"
@@ -1084,7 +1170,7 @@ run_playback() {
         --rkey "$SERVER_RKEY"
         --buffer-addr "$SERVER_ADDR"
         --page-size "$PAGE_SIZE"
-        --num-pages "$PLAYBACK_NUM_PAGES"
+        --num-pages "$pb_pages"
         "$@"
     )
     if $VERIFY; then
@@ -1110,18 +1196,20 @@ run_emulated() {
     _banner "Decoding Server Decode Loop Test (Emulated FPGA, $DECODER)"
 
     local emu_log server_log
-    emu_log=$(mktemp /tmp/hsb_decoding_server_emulator.XXXXXX.log)
-    server_log=$(mktemp /tmp/hsb_decoding_server.XXXXXX.log)
+    emu_log=$(mktemp /tmp/decoding_server_emulator.XXXXXX.log)
+    server_log=$(mktemp /tmp/decoding_server.XXXXXX.log)
     TEMP_FILES+=("$emu_log" "$server_log")
 
     # ---- 1. Start emulator ----
+    # The emulator's RDMA-write ring modulus is the SIF target the playback
+    # programs it with (target.max_buff + 1), not a CLI flag -- it does not parse
+    # --num-pages -- so run_playback's page count drives emulated mode too.
     _log "Starting FPGA emulator on port $CONTROL_PORT"
     "$EMULATOR_BIN" \
         --device="$EMULATOR_DEVICE" \
         --port="$CONTROL_PORT" \
         --bridge-ip="$BRIDGE_IP" \
         --page-size="$PAGE_SIZE" \
-        --num-pages="$PLAYBACK_NUM_PAGES" \
         > >(tee "$emu_log") 2>&1 &
     local emu_pid=$!
     PIDS_TO_KILL+=("$emu_pid")
@@ -1151,7 +1239,7 @@ run_fpga() {
     _banner "Decoding Server Decode Loop Test (Real FPGA, $DECODER)"
 
     local server_log
-    server_log=$(mktemp /tmp/hsb_decoding_server.XXXXXX.log)
+    server_log=$(mktemp /tmp/decoding_server.XXXXXX.log)
     TEMP_FILES+=("$server_log")
 
     # ---- 1. Start decoding server (FPGA data-plane QP is fixed 0x2) ----

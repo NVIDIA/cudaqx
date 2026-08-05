@@ -61,12 +61,13 @@
             noise = cudaq.NoiseModel()
             noise.add_all_qubit_channel("x", cudaq.Depolarization2(0.001), 1)
             statePrep = qec.operation.prep0
-            dem = qec.z_dem_from_memory_circuit(code, statePrep, num_rounds, noise)
+            dem = qec.dem_from_memory_circuit(code, statePrep, num_rounds, noise)
             inner_decoder_params = {'use_osd': True, 'max_iterations': 50}
             opts = {
                 'error_rate_vec': np.array(dem.error_rates),
                 'window_size': 1,
-                'num_syndromes_per_round': code.get_num_z_stabilizers(),
+                'num_syndromes_per_round': code.get_num_z_stabilizers() + code.get_num_x_stabilizers(),
+                'num_boundary_syndromes': code.get_num_z_stabilizers(),
                 'inner_decoder_name': 'single_error_lut',
                 'inner_decoder_params': inner_decoder_params,
             }
@@ -89,7 +90,7 @@
                 cudaq::noise_model noise;
                 noise.add_all_qubit_channel("x", cudaq::depolarization2(0.001), 1);
                 auto statePrep = cudaq::qec::operation::prep0;
-                auto dem = cudaq::qec::z_dem_from_memory_circuit(*code, statePrep, num_rounds,
+                auto dem = cudaq::qec::dem_from_memory_circuit(*code, statePrep, num_rounds,
                                                                 noise);
                 // Use the DEM to create a sliding window decoder.
                 auto inner_decoder_params =
@@ -97,7 +98,8 @@
                 auto opts = cudaqx::heterogeneous_map{
                     {"error_rate_vec", dem.error_rates},
                     {"window_size", 1},
-                    {"num_syndromes_per_round", code->get_num_z_stabilizers()},
+                    {"num_syndromes_per_round", code->get_num_z_stabilizers() + code->get_num_x_stabilizers()},
+                    {"num_boundary_syndromes", code->get_num_z_stabilizers()},
                     {"inner_decoder_name", "single_error_lut"},
                     {"inner_decoder_params", inner_decoder_params}};
                 auto swdec = cudaq::qec::get_decoder("sliding_window",
@@ -121,9 +123,19 @@
         - `window_size` (int): The number of rounds of syndrome data in each window. (Defaults to 1.)
         - `step_size` (int): The number of rounds to advance the window by each time. (Defaults to 1.)
         - `num_syndromes_per_round` (int): The number of syndromes per round. (Must be provided.)
-        - `num_boundary_syndromes` (int): The number of boundary syndromes, i.e. the number of 
-          detectors in the first and last round of the memory experiment. (Defaults to 0, meaning all 
-          layers have `num_syndromes_per_round` detectors.)
+        - `num_boundary_syndromes` (int): The number of detectors in the first and last
+          (boundary) round of the memory experiment. (Defaults to 0, meaning all layers
+          have `num_syndromes_per_round` detectors.) For a single-basis DEM from
+          :func:`~cudaq_qec.z_dem_from_memory_circuit` (respectively
+          :func:`~cudaq_qec.x_dem_from_memory_circuit`), every layer has
+          ``code.get_num_z_stabilizers()`` (respectively
+          ``code.get_num_x_stabilizers()``) detectors, so this may be left at its
+          default. For a full DEM from :func:`~cudaq_qec.dem_from_memory_circuit`,
+          ``num_syndromes_per_round`` is ``code.get_num_z_stabilizers() +
+          code.get_num_x_stabilizers()`` while the boundary rounds only carry the
+          stabilizer type fixed by the state prep, so set this to
+          ``code.get_num_z_stabilizers()`` for Z-basis preps (``prep0``/``prep1``) or
+          ``code.get_num_x_stabilizers()`` for X-basis preps (``prepp``/``prepm``).
         - `straddle_start_round` (bool): When forming a window, should error
           mechanisms that span the start round and any preceding rounds be included? (Defaults to False.)
         - `straddle_end_round` (bool): When forming a window, should error

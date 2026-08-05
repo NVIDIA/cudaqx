@@ -87,6 +87,7 @@ get_decoder = qecrt.get_decoder
 dem_from_stim_text = qecrt.dem_from_stim_text
 DecoderResult = qecrt.DecoderResult
 BatchDecoderResult = qecrt.BatchDecoderResult
+AsyncDecoderResult = qecrt.AsyncDecoderResult
 DetectorErrorModel = qecrt.DetectorErrorModel
 generate_random_bit_flips = qecrt.generate_random_bit_flips
 sample_memory_circuit = qecrt.sample_memory_circuit
@@ -117,6 +118,9 @@ pcm_to_sparse_vec = qecrt.pcm_to_sparse_vec
 
 multi_decoder_config = qecrt.config.multi_decoder_config
 decoder_config = qecrt.config.decoder_config
+decoder_dispatch = qecrt.config.decoder_dispatch
+transport_config = qecrt.config.transport_config
+transport_shape_override = qecrt.config.transport_shape_override
 configure_decoders_from_file = qecrt.config.configure_decoders_from_file
 configure_decoders_from_str = qecrt.config.configure_decoders_from_str
 finalize_decoders = qecrt.config.finalize_decoders
@@ -164,18 +168,9 @@ for finder, name, ispkg in iter_namespace(codes):
     except (ModuleNotFoundError, ImportError) as e:
         pass
 
-# Surface the TN noise learner at the top level when its optional
-# dependencies (torch, quimb, opt_einsum) are installed; mirrors the
-# silent-skip pattern used by the plugin loaders above.
 try:
-    from .plugins.decoders.tensor_network_utils.nm_optimizer import (
-        NMOptimizer,
-        make_compiled_step,
-    )
-except (ModuleNotFoundError, ImportError):
+    import cudaq
+    from .loader import qec_set_target_callback
+    cudaq.register_set_target_callback(qec_set_target_callback, "cudaq_qec")
+except ImportError:
     pass
-
-import cudaq
-from .loader import qec_set_target_callback
-
-cudaq.register_set_target_callback(qec_set_target_callback, "cudaq_qec")

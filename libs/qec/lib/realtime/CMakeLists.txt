@@ -267,7 +267,7 @@ install(TARGETS cudaq-qec-realtime-decoding
 # ("Split graph launch dispatch from the host ring loop").  Until it is ported
 # to the new graph_launch_engine API, keep this target off by default so CI
 # builds green.  Dependent unit tests (test_realtime_pipeline,
-# test_realtime_predecoder_w_pymatching, hololink bridge) auto-skip when this
+# test_realtime_predecoder_w_pymatching, gpu_roce bridge) auto-skip when this
 # target does not exist.
 # ---------------------------------------------------------------------------
 option(CUDAQX_QEC_ENABLE_REALTIME_PIPELINE

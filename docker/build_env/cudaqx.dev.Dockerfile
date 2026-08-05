@@ -23,6 +23,7 @@ RUN apt-get update && CUDA_DASH=$(echo $cuda_version | tr '.' '-') \
 
 COPY .cudaq_version /cudaq_version
 COPY scripts/build_cudaq_with_realtime.sh /usr/local/bin/build_cudaq_with_realtime.sh
+COPY scripts/cudaq_realtime_cmake_flags.sh /usr/local/bin/cudaq_realtime_cmake_flags.sh
 
 ENV CUDAQ_INSTALL_PREFIX=/usr/local/cudaq
 

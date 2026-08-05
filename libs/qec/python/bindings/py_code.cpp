@@ -701,7 +701,7 @@ void bindCode(nb::module_ &mod) {
                               R"pbdoc(
       Lazy handle returned by ``decoder_context_from_memory_circuit``.
 
-      Stores the raw circuit analysis. Each *_component method canonicalizes
+      Stores the raw circuit analysis. Each ``*_component`` method canonicalizes
       exactly the requested stabilizer type and returns a ``(dem, m2d, m2o)``
       tuple.
     )pbdoc")

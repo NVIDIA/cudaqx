@@ -58,6 +58,16 @@ public:
                  TransportMap function_transport,
                  const std::string &config_yaml);
 
+  /// Opaque graph resources of one decoder session
+  /// (decoder::capture_decode_graph()), or nullptr when the decoder does not
+  /// support graph dispatch / the id is unknown.  Used by the decoding_server
+  /// process to wire a device-graph ring consumer to a decoder this server
+  /// hosts.
+  void *graph_resources_for(uint64_t decoder_id) const;
+
+  /// This server's session registry (read-only after construction).
+  const SessionRegistry &registry() const { return registry_; }
+
   /// Stops the transports and joins all session workers before any member is
   /// destroyed: workers drain queued items that reply through raw
   /// ITransceiver pointers into owned_transports_, so they must finish while
@@ -78,14 +88,24 @@ private:
   void init(const std::string &config_yaml);
   void register_handlers();
 
+  /// Offer each transport in function_transport_ a sink that routes frames
+  /// inline into dispatcher_ on the transport's own producer thread
+  /// (RpcDispatcher::dispatch and the registered handlers are safe for
+  /// concurrent callers: the dispatch table and session registry are
+  /// read-only once construction completes).  Transports that accept are
+  /// recorded in direct_dispatch_transports_ and excluded from run()'s
+  /// receiver threads.  Called at the end of every constructor, after
+  /// register_handlers() and after function_transport_ is populated.
+  void install_direct_dispatch();
+
   /// Create a transceiver for \p transport_type.  Throws for RoCE transports
-  /// until CpuRoceTransceiverAdapter / GpuRoceTransceiverAdapter are
+  /// until per-session transceiver adapters are
   /// available via CUDAQ_REALTIME.
   static std::unique_ptr<ITransceiver>
-  make_transport(cudaq::qec::decoding::config::DecoderTransport transport_type,
+  make_transport(cudaq::qec::decoding::config::DecoderDispatch dispatch,
                  int pinned_cuda_device);
 
-  // Destruction order matters: the GPU RoCE scheduler (inside
+  // Destruction order matters: the device-graph scheduler (inside
   // owned_transports_) holds a cudaGraphExec_t captured from a session's
   // decoder.  The scheduler must be destroyed (cudaStreamSynchronize +
   // cudaq_destroy_dispatch_graph) before registry_ releases the decoder and its
@@ -98,6 +118,9 @@ private:
   /// Routing within the server is by function_id, not by decoder_id.
   TransportMap function_transport_;
   std::vector<std::unique_ptr<ITransceiver>> owned_transports_;
+  /// Transports that accepted a direct-dispatch sink (non-owning pointers
+  /// into owned_transports_); run() starts no receiver thread for these.
+  std::vector<ITransceiver *> direct_dispatch_transports_;
 };
 
 } // namespace cudaq::qec::decoding_server

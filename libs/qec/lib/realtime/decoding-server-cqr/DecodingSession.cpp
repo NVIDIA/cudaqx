@@ -7,12 +7,14 @@
  ******************************************************************************/
 
 #include "DecodingSession.h"
-#include "DecodingServer.h"
+#include "HopStats.h"
+#include "SpinPolicy.h"
 #include "../../hardware_guards.h"
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/realtime/decoder_rpc_wire_format.h"
 
 #include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <future>
 #include <stdexcept>
@@ -31,19 +33,6 @@ using cudaq::qec::decoding::rpc::ResetRequestPayload;
 using cudaq::qec::decoding::rpc::RpcStatus;
 using cudaq::realtime::RPCHeader;
 using cudaq::realtime::RPCResponse;
-
-namespace {
-
-void set_graph_capture_device(const cudaq::qec::decoder &decoder) {
-  const int device = resolve_decode_device(decoder.get_cuda_device_id());
-  cudaq::qec::detail_affinity::set_cuda_device_for_decode(device);
-  if (device >= 0)
-    CUDA_QEC_INFO(
-        "DecodingSession::create: set CUDA device {} before graph capture",
-        device);
-}
-
-} // namespace
 
 // Busy high-water mark across all sessions (worker threads increment while
 // executing an item).
@@ -79,8 +68,31 @@ DecodingSession::create(std::unique_ptr<cudaq::qec::decoder> decoder,
   s->dec = std::move(decoder);
 
   if (s->dec->supports_graph_dispatch()) {
-    set_graph_capture_device(*s->dec);
-    void *gr = s->dec->capture_decode_graph();
+    // Reserve SMs so the cooperative decode graph can become co-resident
+    // with everything else occupying the GPU when it is fired device-side:
+    // the persistent dispatch graph itself (1 block) plus any transport
+    // kernels.  A cooperative grid sized for ALL SMs deadlocks at
+    // grid.sync() the moment anything else is resident -- the launch
+    // silently queues forever.  Overridable for rigs with more coresident
+    // kernels (e.g. GpuRoceTransceiver RX/TX) via
+    // QEC_DEVICE_GRAPH_RESERVED_SMS.
+    int reserved_sms = 1;
+    if (const char *env = std::getenv("QEC_DEVICE_GRAPH_RESERVED_SMS")) {
+      char *end = nullptr;
+      long v = std::strtol(env, &end, 10);
+      // A malformed, zero, or negative override would reinstate the
+      // reserve-all-SMs behavior this fix exists to prevent (atoi silently
+      // yields 0 for junk), so accept only a fully-parsed value >= 1 and keep
+      // the safe floor otherwise.
+      if (end != env && *end == '\0' && v >= 1)
+        reserved_sms = static_cast<int>(v);
+      else
+        cudaq::qec::warn("QEC_DEVICE_GRAPH_RESERVED_SMS='{}' is not a positive "
+                         "integer; keeping reserved_sms=1",
+                         env);
+    }
+    void *gr = cudaq::qec::detail_affinity::capture_graph_pinned(*s->dec,
+                                                                 reserved_sms);
     s->graph_resources =
         GraphResourcesPtr(gr, GraphResourcesDeleter{s->dec.get()});
   }
@@ -98,13 +110,13 @@ void DecodingSession::start_worker() {
   auto pin_result = pinned.get_future();
   worker = std::thread([this, &pinned] {
     try {
-      cudaq::qec::detail_affinity::set_cuda_device_for_decode(
-          dec->get_cuda_device_id());
+      cudaq::qec::detail_affinity::pin_decode_device(*dec);
       pinned.set_value();
     } catch (...) {
       pinned.set_exception(std::current_exception());
       return; // never serve work from a mispinned thread
     }
+    hopstats::on_worker_thread();
     worker_loop();
   });
   try {
@@ -117,13 +129,24 @@ void DecodingSession::start_worker() {
 }
 
 bool DecodingSession::try_enqueue(WorkItem item) {
-  std::lock_guard<std::mutex> lk(queue_mutex);
-  if (work_queue.size() >= queue_depth) {
-    ++busy_count;
-    return false;
+  const uint32_t hs_rid = item.request_id;
+  {
+    std::lock_guard<std::mutex> lk(queue_mutex);
+    if (work_queue.size() >= queue_depth) {
+      ++busy_count;
+      return false;
+    }
+    work_queue.push(std::move(item));
+    // Bumped under the lock: no missed-update window for the worker's spin,
+    // regardless of producer count.
+    queue_seq.fetch_add(1, std::memory_order_release);
+    hopstats::stamp_queue_push(hs_rid);
   }
-  work_queue.push(std::move(item));
+  // Notify after the unlock: a waiter woken while the producer still holds
+  // queue_mutex would immediately re-block on the lock (an extra futex
+  // round trip on every wakeup).
   queue_cv.notify_one();
+  hopstats::stamp_notify2_ret(hs_rid);
   return true;
 }
 
@@ -224,10 +247,10 @@ void DecodingSession::on_enqueue(const WorkItem &item) {
           "Syndrome volume exceeds decoder measurement capacity");
 
     accepted_syndromes += completed->bits.size();
-    // Host-decoder path (CQR / Loopback transports).  On the gpu_roce path,
+    // Host-decoder path (CQR / Loopback transports).  On the device_graph path,
     // the CUDAQ device-graph scheduler (cudaq_create_dispatch_graph_regular)
     // handles RX→dispatch→decode→TX entirely on the GPU; this worker thread
-    // is never reached for GPU RoCE sessions.
+    // is never reached for device_graph sessions.
     const bool did_decode =
         dec->enqueue_syndrome(completed->bits.data(), completed->bits.size());
 
@@ -356,6 +379,23 @@ void DecodingSession::worker_loop() {
     WorkItem item;
     {
       std::unique_lock<std::mutex> lk(queue_mutex);
+      // cold = queue empty on arrival: a successful pop below means this
+      // thread really waited (or spun) for try_enqueue's wakeup.
+      const bool hs_was_empty = work_queue.empty();
+      if (work_queue.empty() && !shutdown.load(std::memory_order_acquire)) {
+        // Bounded spin on the queue sequence before the condvar sleep
+        // (SpinPolicy.h): the snapshot is taken under the lock while the
+        // queue is empty, so it can only change when try_enqueue pushes;
+        // shutdown is observed directly.  Budget expiry falls through to
+        // the untimed wait below, whose predicate re-checks under the lock.
+        const uint64_t seen = queue_seq.load(std::memory_order_relaxed);
+        lk.unlock();
+        spin_until([&] {
+          return queue_seq.load(std::memory_order_acquire) != seen ||
+                 shutdown.load(std::memory_order_acquire);
+        });
+        lk.lock();
+      }
       // Untimed wait: stop_worker() stores the shutdown flag under
       // queue_mutex before notifying, so the wakeup cannot be lost and no
       // 100 ms poll is needed.
@@ -368,6 +408,7 @@ void DecodingSession::worker_loop() {
 
       item = std::move(work_queue.front());
       work_queue.pop();
+      hopstats::stamp_worker_wake(item.request_id, hs_was_empty);
     }
 
     const uint64_t busy =
@@ -399,6 +440,11 @@ void DecodingSession::worker_loop() {
       ++error_count;
       shot_state = ShotState::failed;
     }
+
+    // Fire-and-forget enqueues have no blocking waiter to close their
+    // sample; the worker closes it (blocking kinds close in inject()).
+    if (item.function_id == kEnqueueSyndromesFunctionId)
+      hopstats::finish_enqueue(item.request_id);
 
     g_busy_sessions.fetch_sub(1, std::memory_order_relaxed);
   }

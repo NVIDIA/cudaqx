@@ -75,6 +75,10 @@ struct DecodingSession {
   std::condition_variable queue_cv;
   std::atomic<bool> shutdown{false};
   size_t queue_depth{kDefaultQueueDepth};
+  /// Bumped under queue_mutex after every push; the worker's bounded spin
+  /// watches it (a snapshot taken under the lock while the queue is empty
+  /// can only change when new work arrives).  See SpinPolicy.h.
+  std::atomic<uint64_t> queue_seq{0};
 
   // Latched when enqueue_syndromes is dropped (queue full). The shot remains
   // poisoned until reset_decoder clears all mutable state.

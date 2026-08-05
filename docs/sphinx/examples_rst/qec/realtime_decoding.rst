@@ -24,7 +24,7 @@ The workflow consists of four stages:
 4. **Real-Time Decoding**: During quantum circuit execution, the decoding API is used within quantum kernels to interact with decoders. As the circuit measures stabilizers, syndromes are enqueued to the decoder, which processes them concurrently. When corrections are needed, the decoder is queried and the suggested operations are applied to the logical qubits. This entire process happens within the coherence time constraints of the quantum hardware.
 
 Real-Time Decoding Example
-----------------
+--------------------------
 
 Here are two examples demonstrating real-time decoding in Python and C++:
 
@@ -125,9 +125,13 @@ Decoder parameters are validated against the parameter schema each decoder regis
 
 The configuration is then saved to a YAML file for reuse. The YAML format is human-readable, making it easy to inspect, modify, and share configurations across different execution environments.
 
-For example, a PyMatching real-time decoder can be configured programmatically:
+Use :func:`~cudaq_qec.decoder_context_from_memory_circuit` to obtain the parity-check, observable,
+and measurement-to-detector matrices in one call, then assemble the decoder config:
 
 .. code-block:: python
+
+   ctx = qec.decoder_context_from_memory_circuit(code, statePrep, num_rounds, noise)
+   dem, m2d, m2o = ctx.z_component()  # or x_component() / full_component()
 
    config = qec.decoder_config()
    config.id = 0
@@ -136,8 +140,7 @@ For example, a PyMatching real-time decoder can be configured programmatically:
    config.syndrome_size = dem.num_detectors()
    config.H_sparse = qec.pcm_to_sparse_vec(dem.detector_error_matrix)
    config.O_sparse = qec.pcm_to_sparse_vec(dem.observables_flips_matrix)
-   config.D_sparse = qec.generate_timelike_sparse_detector_matrix(
-       num_syndromes_per_round, num_rounds, include_first_round=False)
+   config.D_sparse = qec.d_sparse(m2d)
 
    config.decoder_custom_args = {
        "error_rate_vec": list(dem.error_rates),
@@ -424,11 +427,13 @@ Use the Quantinuum backend for hardware or emulation:
 
       # Compile for Quantinuum
       nvq++ --target quantinuum --quantinuum-machine Helios-1 \
+            --quantinuum-extra-payload-provider decoder      \
             my_circuit.cpp -lcudaq-qec \
             -lcudaq-qec-decoders \
             -lcudaq-qec-realtime-decoding \
-            -lcudaq-qec-realtime-decoding-quantinuum
-      
+            -lcudaq-qec-realtime-decoding-quantinuum \
+            -Wl,--export-dynamic
+
       ./a.out
 
 Compilation and Execution Examples
@@ -544,32 +549,34 @@ Python Execution
 .. code-block:: bash
 
    # Generate a decoder configuration file
-   python3 surface_code-1.py --distance 3 --save_dem config.yaml
+   python3 surface_code_1.py --distance 3 --save_dem config.yaml
    # Run the circuit with the decoder configuration
-   python3 surface_code-1.py --distance 3 --load_dem config.yaml --num_shots 1000
+   python3 surface_code_1.py --distance 3 --load_dem config.yaml --num_shots 1000
 
 
 **Quantinuum Backend (Hardware)**
 
 .. code-block:: bash
 
-   python3 surface_code-1.py --distance 3 --load_dem config.yaml --num_shots 1000 --target quantinuum --machine-name Helios-1
+   python3 surface_code_1.py --distance 3 --load_dem config.yaml --num_shots 1000 --target quantinuum --machine_name Helios-1 --project_id <project-id>
 
 **Key Points:**
 
 - Use real machine names (check Quantinuum portal for available machines)
+- ``--project_id``: Specify the Quantinuum project ID used for the hardware submission.
 - Reduce shot count for hardware experiments (hardware time is expensive)
 
 **Emulated Quantinuum Compilation Workflow**
 
 .. code-block:: bash
 
-   python3 surface_code-1.py --distance 3 --load_dem config.yaml --num_shots 1000 --target quantinuum --emulate
+   python3 surface_code_1.py --distance 3 --load_dem config.yaml --num_shots 1000 --target quantinuum --emulate
+
 **Key Points:**
 
-- ``emulate=True``: Emulate Quantinuum compilation path
+- ``--emulate``: Emulate the Quantinuum execution path
 - Decoder config is automatically uploaded to Quantinuum's servers when
-  :py:func:`cudaq_qec.configure_decoders_from_file` (Python) or
+  ``cudaq_qec.configure_decoders_from_file`` (Python) or
   :cpp:func:`cudaq::qec::decoding::config::configure_decoders_from_file` (C++) is called
 
 Complete Workflow Example
@@ -587,8 +594,8 @@ Given that the user follows the structure of the examples provided, where each e
                     --save_dem config_d3.yaml --num_rounds 12
 
    ## Python
-   python surface_code-1.py --distance 3 --num_shots 1000 --p_spam 0.01 \
-                            --save_dem config_d3.yaml --num_rounds 12 --decoder_window 6
+   python3 surface_code_1.py --distance 3 --num_shots 1000 --p_cnot 0.001 \
+                            --save_dem config_d3.yaml --num_rounds 12
 
    # Phase 2: Run with Real-Time Decoding
    # Use the saved DEM configuration
@@ -610,12 +617,10 @@ Given that the user follows the structure of the examples provided, where each e
 
 - ``--distance``: Code distance (3, 5, 7, etc.)
 - ``--num_shots``: Number of circuit repetitions
-- ``--p_cnot``: Two-qubit depolarizing rate on CNOT gates for DEM generation (C++ binary)
-- ``--p_spam``: Single-qubit SPAM error rate for DEM generation (Python script)
+- ``--p_cnot``: Two-qubit depolarizing rate on CNOT gates for DEM generation
 - ``--save_dem``: Generate and save DEM configuration to file
 - ``--load_dem``: Load existing DEM configuration from file
 - ``--num_rounds``: Total number of syndrome measurement rounds
-- ``--decoder_window``: Number of rounds processed per decoding window (Python script only)
 
 Debugging and Environment Variables
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -643,8 +648,8 @@ They are valid both for python and C++ applications, however, they must be set b
 
 1. **Missing libraries**: Ensure all ``-lcudaq-qec-*`` libraries are linked
 2. **Wrong backend library**: Use ``-simulation`` for Stim, ``-quantinuum`` for Quantinuum
-3. **Missing** ``--export-dynamic`` **flag**: Required for Quantinuum targets
-4. **Wrong target flags**: ``--emulate`` with ``Helios-Fake`` for emulation, remove for hardware
+3. **Missing** ``-Wl,--export-dynamic`` **flag**: Required for Quantinuum targets
+4. **Wrong target flags**: Use ``--emulate`` for emulation. Omit it and provide ``--project_id`` for hardware
 
 **Common Runtime Issues:**
 

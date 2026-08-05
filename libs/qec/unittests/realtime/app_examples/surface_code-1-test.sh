@@ -24,7 +24,7 @@ return_code=0
 #  sw_window_size (optional, for sliding_window decoder)
 #  sw_step_size (optional, for sliding_window decoder, defaults to 1)
 
-# Check that at least 9 arguments are provided.
+# Check that at least 8 arguments are provided.
 if [[ $# -lt 8 ]]; then
   echo "Error: Expected at least 8 arguments (got $#)"
   exit 1

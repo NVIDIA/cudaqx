@@ -2,12 +2,13 @@
 set -e
 
 . "$(dirname "$0")/setup_custabilizer.sh"
+. "$(dirname "$0")/../../../scripts/cudaq_realtime_cmake_flags.sh"
 
 build_dir=$1
 install_prefix=$2
 cudaq_prefix=$3
 
-# Build cuda-quantum realtime library + hololink tools (if CUDAQ_REALTIME_ROOT not set)
+# Build cuda-quantum realtime library + HSB tools (if CUDAQ_REALTIME_ROOT not set)
 if [ -z "$CUDAQ_REALTIME_ROOT" ]; then
   CUDAQ_REALTIME_ROOT=/tmp/cudaq-realtime
   CUDAQ_REPO=${CUDAQ_REPO:-$(jq -r '.cudaq.repository' .cudaq_version)}
@@ -55,8 +56,8 @@ if [ -z "$CUDAQ_REALTIME_ROOT" ]; then
     rm -rf "$_hsdk_tmp"
   }
 
-  # Build holoscan-sensor-bridge (hololink) FIRST, so cuda-quantum realtime
-  # can build the bridge-hololink wrapper library that links against it.
+  # Build holoscan-sensor-bridge (HSB) FIRST, so cuda-quantum realtime
+  # can build the bridge-gpu-roce wrapper library that links against it.
   HSB_REPO=https://github.com/nvidia-holoscan/holoscan-sensor-bridge.git
   HSB_REF=2.6.0-EA2
   HSB_ROOT=/tmp/holoscan-sensor-bridge
@@ -96,12 +97,14 @@ if [ -z "$CUDAQ_REALTIME_ROOT" ]; then
   cmake --build build --target gpu_roce_transceiver hololink_core
   echo "holoscan-sensor-bridge built at $HSB_BUILD"
 
-  # Build cuda-quantum realtime with hololink tools enabled,
-  # which produces libcudaq-realtime-bridge-hololink.so needed by the bridge.
+  # Build cuda-quantum realtime with HSB tools enabled,
+  # which produces libcudaq-realtime-bridge-gpu-roce.so needed by the bridge.
   cd /tmp/cudaq-realtime-src/realtime
   mkdir -p build && cd build
+
   cmake -G Ninja -DCMAKE_INSTALL_PREFIX="$CUDAQ_REALTIME_ROOT" \
-    -DCUDAQ_REALTIME_ENABLE_HOLOLINK_TOOLS=ON \
+    -DCMAKE_CUDA_FLAGS="$(cudaq_realtime_cmake_cuda_flags)" \
+    -DCUDAQ_REALTIME_ENABLE_HSB_TOOLS=ON \
     -DHOLOSCAN_SENSOR_BRIDGE_SOURCE_DIR=$HSB_ROOT \
     -DHOLOSCAN_SENSOR_BRIDGE_BUILD_DIR=$HSB_BUILD \
     ..
@@ -130,7 +133,7 @@ cmake -S libs/qec -B "$build_dir" \
   -DCUDAQX_BINDINGS_PYTHON=ON \
   -DCMAKE_INSTALL_PREFIX="$install_prefix" \
   -DCUDAQ_REALTIME_ROOT=$CUDAQ_REALTIME_ROOT \
-  -DCUDAQX_QEC_ENABLE_HOLOLINK_TOOLS=ON \
+  -DCUDAQX_QEC_ENABLE_HSB_TOOLS=ON \
   -DHOLOSCAN_SENSOR_BRIDGE_SOURCE_DIR=$HSB_ROOT \
   -DHOLOSCAN_SENSOR_BRIDGE_BUILD_DIR=$HSB_BUILD \
   $_prop_archive_flag

@@ -16,8 +16,22 @@ that would result from those errors.
    ``H``.  This is the preferred form for large PCMs because no dense
    ``rows x cols`` allocation is made — the matrix is normalised to CSR
    internally.  Dense NumPy ``uint8`` arrays remain supported.
+   The PCM utilities :func:`cudaq_qec.reorder_pcm_columns`,
+   :func:`cudaq_qec.shuffle_pcm_columns`, and
+   :func:`cudaq_qec.pcm_to_sparse_vec` also accept SciPy sparse matrices
+   without creating a dense ``cudaqx::tensor``. Reordering and shuffling a
+   sparse input returns a ``scipy.sparse.csc_matrix``; a dense input continues
+   to return a NumPy array.
+
    ``scipy`` is an optional dependency; if it is not installed, pass a dense
    NumPy array instead.
+
+.. note::
+   **NumPy result arrays** — As of v0.7.0, a decoder's ``result`` (from
+   :class:`cudaq_qec.DecoderResult`, and the per-shot results of
+   :class:`cudaq_qec.BatchDecoderResult` / :class:`cudaq_qec.AsyncDecoderResult`)
+   is a 1-D NumPy array rather than a Python ``list``. Indexing and iteration are
+   unchanged.
 
 Detector Error Model
 +++++++++++++++++++++
@@ -132,7 +146,7 @@ Exact Maximum Likelihood Decoding with NVIDIA Tensor Network Decoder
 Starting with CUDA-Q QEC v0.4.0, a GPU-accelerated Maximum Likelihood Decoder is included with the
 CUDA-Q QEC library. The library follows the CUDA-Q decoder Python interface, namely :class:`cudaq_qec.Decoder`.
 At this time, we only support the Python interface for the decoder, which is
-available at :class:`cudaq_qec.plugins.decoders.tensor_network_decoder.TensorNetworkDecoder`.
+available at :ref:`TensorNetworkDecoder <tensor_network_decoder_api_python>`.
 As documented in the API sections :ref:`tensor_network_decoder_api_python`, there are many configuration options
 that can be passed to the constructor. The decoder requires Python 3.11 or higher.
 
@@ -170,7 +184,7 @@ to decode surface code syndromes using PyTorch and Stim, exporting the model to 
 deploying it with the TensorRT decoder for accelerated inference.
 
 Overview of the Training-to-Deployment Pipeline
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The workflow consists of three main stages:
 
@@ -186,7 +200,7 @@ The workflow consists of three main stages:
    be loaded by the TensorRT decoder for optimized GPU inference in production QEC workflows.
 
 Training a Neural Network Decoder with PyTorch and Stim
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The following example shows how to generate training data using Stim's built-in surface code
 generator, train an MLP decoder with PyTorch, and export the model to ONNX format.
@@ -197,7 +211,7 @@ For instructions on installing PyTorch, see :ref:`Installing PyTorch <installing
    :start-after: [Begin Documentation]
 
 Using the TensorRT Decoder in CUDA-Q QEC
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Once you have a trained ONNX model, you can load it with the TensorRT decoder for accelerated
 inference. The decoder can be used in both C++ and Python workflows.
@@ -279,7 +293,7 @@ you can load it directly:
                                 engine_load_path="surface_code_decoder.trt")
 
 Converting ONNX Models to TensorRT Engines
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 For production deployments where initialization time is critical, you can pre-build a TensorRT
 engine from your ONNX model using the ``trtexec`` command-line tool that comes with TensorRT:
@@ -310,7 +324,7 @@ Pre-built engines offer several advantages:
 
 
 Dependencies and Requirements
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The TensorRT decoder requires:
 
@@ -324,9 +338,63 @@ For training:
 - **Stim**: For quantum circuit simulation and data generation
 
 See Also
-^^^^^^^^
+~~~~~~~~
 
 - :class:`cudaq_qec.Decoder` - Base decoder interface
 - `ONNX <https://onnx.ai/>`_ - Open Neural Network Exchange format
 - `TensorRT Documentation <https://docs.nvidia.com/deeplearning/tensorrt/>`_ - NVIDIA TensorRT
 - `Stim Documentation <https://github.com/quantumlib/Stim>`_ - Fast stabilizer circuit simulator
+
+Matching-Based Decoding with PyMatching
++++++++++++++++++++++++++++++++++++++++
+
+CUDA-Q QEC bundles a minimum-weight perfect matching (MWPM) decoder built on the
+open-source `PyMatching <https://github.com/oscarhiggott/PyMatching>`_ library,
+suitable for matchable codes such as the surface code. It is selected by name
+through :func:`cudaq_qec.get_decoder` and takes a parity-check matrix whose
+columns each have one or two set entries:
+
+.. tab:: Python
+
+   .. code-block:: python
+
+      import cudaq_qec as qec
+      import numpy as np
+
+      H = np.array([[1, 1, 0],
+                    [0, 1, 1]], dtype=np.uint8)
+
+      dec = qec.get_decoder("pymatching", H,
+                            error_rate_vec=[0.1, 0.1, 0.1],
+                            merge_strategy="smallest_weight")
+      result = dec.decode(syndrome)
+
+Per-error priors are supplied via ``error_rate_vec`` (values in ``(0, 0.5]``),
+and parallel edges are combined according to ``merge_strategy``. See the
+:ref:`PyMatching Decoder API <pymatching_decoder_api_python>` for the full list
+of options.
+
+Color-Code Decoding with Chromobius
++++++++++++++++++++++++++++++++++++
+
+For color codes, CUDA-Q QEC bundles a decoder built on the open-source
+`Chromobius <https://github.com/quantumlib/chromobius>`_ Mobius decoder. Unlike
+the matrix-based decoders, Chromobius is *detector-error-model native*: it is
+constructed from Stim detector-error-model (DEM) **text** rather than a
+parity-check matrix, and predicts logical observable flips directly.
+
+.. tab:: Python
+
+   .. code-block:: python
+
+      import cudaq_qec as qec
+
+      with open("color_code.dem") as f:
+          dem_text = f.read()
+
+      dec = qec.get_decoder("chromobius", dem_text)
+      corrections = dec.decode(syndrome)  # predicted observable flips
+
+Constructing Chromobius from a parity-check matrix is rejected with an error.
+See the :ref:`Chromobius Decoder API <chromobius_decoder_api_python>` for the
+available options.

@@ -23,6 +23,7 @@
 
 #include "CqrTransceiver.h"
 #include "DecodingServer.h"
+#include "HopStats.h"
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/realtime/decoder_rpc_wire_format.h"
 #include "cudaq/qec/realtime/decoding_config.h"
@@ -369,6 +370,17 @@ cudaqx_qec_decoding_server_max_concurrent() {
   return cudaq::qec::decoding_server::max_concurrent_busy_sessions();
 }
 
+/// Opaque graph resources (decoder::capture_decode_graph()) of one decoder
+/// hosted by this service, or nullptr.  The decoding_server process uses
+/// this to wire a device-graph ring consumer to a decoder whose sessions
+/// live behind this plugin.
+extern "C" __attribute__((visibility("default"))) void *
+cudaqx_qec_decoding_server_graph_resources(uint64_t decoder_id) {
+  if (!g_server)
+    return nullptr;
+  return g_server->graph_resources_for(decoder_id);
+}
+
 /// Per-decoder session counters (decodes/enqueues/...), one stdout line per
 /// decoder. Test/diagnostic evidence; callers gate on the
 /// QEC_DECODING_SERVER_STATS environment variable.
@@ -376,6 +388,7 @@ extern "C" __attribute__((visibility("default"))) void
 cudaqx_qec_decoding_server_print_stats() {
   if (g_server)
     g_server->print_session_stats();
+  cudaq::qec::decoding_server::hopstats::report();
 }
 
 /// Stop the DecodingServer receive loop and join its thread. The server calls
@@ -390,4 +403,7 @@ cudaqx_qec_decoding_server_shutdown() {
     g_server.reset();
     g_transceiver = nullptr;
   }
+  // Latency-probe report (QEC_DECODING_SERVER_HOP_STATS); prints once, after
+  // all producers (dispatcher handlers, session workers) have quiesced.
+  cudaq::qec::decoding_server::hopstats::report();
 }
