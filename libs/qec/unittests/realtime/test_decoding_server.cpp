@@ -615,6 +615,35 @@ TEST(DecodingServerTwoProcess, TwoProcessHostDispatchYamlTransportSection) {
   EXPECT_GE(dispatched, 6) << "server output:\n" << server.captured;
 }
 
+// Provider parsers start at argv[1]. A malformed first YAML argument must be
+// observed and rejected rather than silently becoming the program name.
+TEST(DecodingServerTwoProcess, YamlProviderParsesFirstArgument) {
+  const std::string config_path =
+      ::testing::TempDir() + "/decoding_server_yaml_first_arg.yaml";
+  {
+    std::ofstream config_file(config_path);
+    config_file << "transport:\n"
+                << "  provider: udp\n"
+                << "  args: [--port=not-a-port]\n"
+                << "decoders:\n"
+                << "  - id: 0\n"
+                << "    type: single_error_lut\n"
+                << "    block_size: 3\n"
+                << "    syndrome_size: 3\n"
+                << "    H_sparse: [0, -1, 1, -1, 2, -1]\n"
+                << "    O_sparse: [0, -1, 1, -1, 2, -1]\n"
+                << "    D_sparse: [0, -1, 1, -1, 2, -1]\n";
+  }
+
+  ServerProcess server;
+  std::string error;
+  EXPECT_FALSE(server.start(config_path, error, 8000,
+                            /*transport_cli=*/false,
+                            /*capture_stderr=*/true))
+      << "server unexpectedly reached READY: " << server.captured;
+  EXPECT_NE(0, server.exitCode()) << server.captured;
+}
+
 // A YAML that names its provider cannot be contradicted from the command
 // line: --transport alongside a transport section is a startup error, not a
 // silent precedence decision.
@@ -757,6 +786,42 @@ TEST(DecodingServerTwoProcess, DeviceGraphRejectsCliProviderArguments) {
   EXPECT_NE(server.captured.find("provider arguments for device_graph "
                                  "or gpu_roce transport must be set in the "
                                  "YAML"),
+            std::string::npos)
+      << server.captured;
+}
+
+// GPU placement belongs to decoder.cuda_device_id. Allowing --gpu in the
+// transport arguments would put two contradictory settings in the same YAML.
+TEST(DecodingServerTwoProcess, DeviceGraphRejectsTransportGpuArgument) {
+  const std::string config_path =
+      ::testing::TempDir() + "/decoding_server_device_graph_gpu_arg.yaml";
+  {
+    std::ofstream config_file(config_path);
+    config_file << "transport:\n"
+                << "  provider: gpu_roce\n"
+                << "  device_graph:\n"
+                << "    args: [--gpu=1]\n"
+                << "decoders:\n"
+                << "  - id: 0\n"
+                << "    type: single_error_lut\n"
+                << "    dispatch: device_graph\n"
+                << "    cuda_device_id: 1\n"
+                << "    block_size: 3\n"
+                << "    syndrome_size: 3\n"
+                << "    H_sparse: [0, -1, 1, -1, 2, -1]\n"
+                << "    O_sparse: [0, -1, 1, -1, 2, -1]\n"
+                << "    D_sparse: [0, -1, 1, -1, 2, -1]\n";
+  }
+
+  ServerProcess server;
+  std::string error;
+  EXPECT_FALSE(server.start(config_path, error, 8000,
+                            /*transport_cli=*/false,
+                            /*capture_stderr=*/true))
+      << "server unexpectedly reached READY: " << server.captured;
+  EXPECT_NE(0, server.exitCode()) << server.captured;
+  EXPECT_NE(server.captured.find("must not set --gpu; set decoder "
+                                 "cuda_device_id in YAML instead"),
             std::string::npos)
       << server.captured;
 }

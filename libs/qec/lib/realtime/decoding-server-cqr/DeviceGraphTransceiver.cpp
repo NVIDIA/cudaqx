@@ -51,6 +51,10 @@ std::string resolve_provider_library(const std::string &provider) {
   return soname;
 }
 
+bool is_gpu_argument(const std::string &arg) {
+  return arg == "--gpu" || arg.rfind("--gpu=", 0) == 0;
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -63,6 +67,11 @@ DeviceGraphTransceiver::DeviceGraphTransceiver(const DeviceGraphConfig &config)
     throw std::runtime_error(
         "DeviceGraphTransceiver: device_graph transport provider must be set "
         "in YAML");
+  if (std::any_of(config.provider_args.begin(), config.provider_args.end(),
+                  is_gpu_argument))
+    throw std::runtime_error(
+        "DeviceGraphTransceiver: transport arguments must not set --gpu; "
+        "set decoder cuda_device_id in YAML instead");
 
   // Bring the GpuRoceTransceiver up through the bridge-provider interface:
   // create() = gpu_roce_create_transceiver + gpu_roce_start (3-kernel shape:

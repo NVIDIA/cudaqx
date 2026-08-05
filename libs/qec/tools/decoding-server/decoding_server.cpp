@@ -277,6 +277,10 @@ bool is_gpu_roce_provider(const std::string &provider) {
          name == "libcudaq-realtime-bridge-gpu_roce.so";
 }
 
+bool is_gpu_argument(const std::string &arg) {
+  return arg == "--gpu" || starts_with(arg, "--gpu=");
+}
+
 // Split a provider endpoint-info line into its port and the remaining
 // tokens.
 std::uint16_t split_endpoint_info(const std::string &endpoint_info,
@@ -403,6 +407,14 @@ int main(int argc, char **argv) {
   if ((has_device_graph || host_uses_gpu_roce) && !cfg.provider_args.empty()) {
     std::cerr << "ERROR: provider arguments for device_graph or gpu_roce "
                  "transport must be set in the YAML transport section"
+              << std::endl;
+    return 1;
+  }
+  if (has_device_graph &&
+      std::any_of(resolved_device_graph.args.begin(),
+                  resolved_device_graph.args.end(), is_gpu_argument)) {
+    std::cerr << "ERROR: device_graph transport arguments must not set --gpu; "
+                 "set decoder cuda_device_id in YAML instead"
               << std::endl;
     return 1;
   }
@@ -588,14 +600,23 @@ int main(int argc, char **argv) {
     } else
       ring_extra_args = transport_section.args;
     const std::string ring_lib = resolve_provider_lib(ring_provider_name);
-    std::vector<char *> ring_argv;
+    // Provider parsers follow the C argv convention and start at argv[1].
+    // Keep the strings alive until create() returns, add a program-name
+    // placeholder, and only then form the char-pointer view. For a
+    // device_graph ring, cuda_device_id is the sole GPU-placement setting.
+    std::vector<std::string> ring_args{"decoding-server-transport"};
     if (!ring.device_graph) {
-      ring_argv.reserve(cfg.provider_args.size() + ring_extra_args.size());
-      for (auto &a : cfg.provider_args)
-        ring_argv.push_back(a.data());
-    } else
-      ring_argv.reserve(ring_extra_args.size());
-    for (auto &a : ring_extra_args)
+      ring_args.insert(ring_args.end(), cfg.provider_args.begin(),
+                       cfg.provider_args.end());
+    }
+    ring_args.insert(ring_args.end(), ring_extra_args.begin(),
+                     ring_extra_args.end());
+    if (ring.device_graph)
+      ring_args.push_back("--gpu=" + std::to_string(ring.gpu_id));
+
+    std::vector<char *> ring_argv;
+    ring_argv.reserve(ring_args.size());
+    for (auto &a : ring_args)
       ring_argv.push_back(a.data());
 
     if (cudaq_bridge_create_from_library(&ring.bridge, ring_lib.c_str(),
