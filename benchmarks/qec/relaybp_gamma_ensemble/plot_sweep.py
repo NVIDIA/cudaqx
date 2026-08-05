@@ -10,6 +10,19 @@
 # (docs/sphinx/examples_rst/qec/nv_qldpc_gamma_ensemble_user_guide.rst) from
 # report_data.npz (run_sweep.py). Writes them under <QEC_DATA_ROOT>/figures/
 # with the published relaybp_* names, matching the copies in assets/docs/.
+# Also prints the numeric values reported in the guide.
+#
+# Tested at:
+#   cudaqx  5140d8930f3e8a5a9a74b63c93dcbd0cda85dc48
+#   stim    e2fc1eca7fd21684d433aa5f10f4504ea4860d07  (v1.16.0)
+#
+# Output figures (written to $QEC_DATA_ROOT/figures/):
+#   relaybp_gamma_ensemble_perf.png
+#   relaybp_latency_percentiles.png
+#   relaybp_hard_deadline_ler.png
+#   relaybp_ler_multiplier.png
+#
+# Usage:
 #   QEC_DATA_ROOT=<same dir as run_sweep.py> python3 plot_sweep.py
 import os, numpy as np
 import matplotlib

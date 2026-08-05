@@ -12,15 +12,35 @@
 # the per-iteration time, into report_data.npz, which plot_sweep.py turns into
 # the guide's figures.
 #
-# Requires the nv-qldpc-decoder plugin, which ships in the released cudaq-qec
-# wheel. The Z-only stim circuits are in assets/benchmarks/ (tracked via Git
-# LFS; run `git lfs pull` if they appear as pointer stubs). CIRCUIT_DIR points
-# the run at a different directory of them instead.
-# Run it, pinned to an idle GPU:
-#   CUDA_VISIBLE_DEVICES=<idle gpu> QEC_DATA_ROOT=<output dir> \
-#     python3 -u run_sweep.py
-# SHOTS overrides the shot count (default 150000, ~30 min on a GB200).
-# See README.md in this directory.
+# The Z-only stim circuits (assets/benchmarks/) come from Relay-BP
+# (https://github.com/trmue/relay, Apache-2.0); their detectors insensitive to
+# Z-stabilizer errors are stripped. They are tracked via Git LFS -- run
+# `git lfs pull` if they appear as pointer stubs.
+#
+# Requirements: a GPU; cudaq-qec (the nv-qldpc-decoder plugin is proprietary
+# and ships in the released wheel; a build from public source does not include
+# it); stim, numpy, matplotlib.
+#
+# Tested at:
+#   cudaqx  5140d8930f3e8a5a9a74b63c93dcbd0cda85dc48
+#   stim    e2fc1eca7fd21684d433aa5f10f4504ea4860d07  (v1.16.0)
+#
+# Run both scripts, pinning run_sweep.py to an idle GPU -- another process on
+# the same device distorts latency data.
+#
+# Usage:
+#   export QEC_DATA_ROOT=<output directory>
+#   CUDA_VISIBLE_DEVICES=<idle gpu> python3 -u run_sweep.py
+#   python3 plot_sweep.py
+#
+# Environment variables:
+#   QEC_DATA_ROOT   report_data                    Output root; both scripts must agree
+#   SHOTS           150000                         Shots per configuration (~30 min on a GB200)
+#   CIRCUIT_DIR     ../../../assets/benchmarks     Directory of Z-only stim circuits
+#
+# Writes $QEC_DATA_ROOT/report_data.npz (~23 MB at 150,000 shots), holding
+# per-shot latency, iteration count, and logical-error flag for every code and
+# ensemble size.
 import os, time, statistics as st, numpy as np, stim, cudaq_qec as qec
 
 CIRCUITS = os.environ.get(
