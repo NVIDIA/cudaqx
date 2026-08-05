@@ -15,6 +15,17 @@ configurations:
 - **Emulated end-to-end test** -- software FPGA emulator replaces real hardware
 - **FPGA end-to-end test** -- real FPGA connected via ConnectX RDMA/RoCE
 
+.. tip::
+
+   To run the nv-qldpc Relay BP decoder end-to-end against the delivered
+   ``decoding_server`` -- from either a real FPGA (GPU device-graph path) or a
+   lowered QPU kernel over UDP (GPU host-call path) -- use the
+   :doc:`/examples_rst/qec/realtime_decoding_demo` example with
+   ``--decoder nv-qldpc-decoder --gpu 0``. That example compiles against the
+   installed SDK and resolves the server + playback tool from the install
+   prefix. This page documents the underlying device-graph scheduler and its
+   emulator-based testing.
+
 Decode dispatch architecture
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
