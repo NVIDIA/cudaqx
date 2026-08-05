@@ -16,7 +16,7 @@ A stabilizer code is the quantum generalization of linear codes in classical err
 In QEC, we'll perform stabilizer measurements on ancilla qubits to check the parity of our data qubits.
 These stabilizer measurements are non-destructive, and thus allow us to check the relative parity of qubits without destroying our quantum information.
 
-For example, if we prepare two qubits in the state `\Psi = a|00> + b|11>`, we may want to check if a bit-flip error happened.
+For example, if we prepare two qubits in the state :math:`|\Psi\rangle = a|00\rangle + b|11\rangle`, we may want to check if a bit-flip error happened.
 We can measure the stabilizer `ZZ`, which will return 0 if there are no errors or an even number of errors, but will return 1 if either has flipped.
 This is how we can perform parity checks in quantum computing, without performing destructive measurements which collapse our superposition.
 How these measurements are physically performed is covered in circuit-level noise modeling below.

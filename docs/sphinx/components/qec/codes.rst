@@ -49,6 +49,7 @@ The code base class provides:
        };
 
    The `patch` type represents a logical qubit in quantum error correction codes. It contains:
+
    - `data`: A view of the data qubits in the patch
    - `ancx`: A view of the ancilla qubits used for X stabilizer measurements
    - `ancz`: A view of the ancilla qubits used for Z stabilizer measurements
