@@ -42,7 +42,7 @@ private:
 
   bool decode_to_observables = false;
   std::vector<uint64_t> detection_events;
-  std::vector<int64_t> matched_edges;
+  std::vector<int64_t> edges;
   std::vector<uint8_t> observable_bits;
 
   // Helper function to make a canonical edge from two nodes.
@@ -75,12 +75,13 @@ private:
 #endif
 
 public:
-  pymatching(cudaq::qec::decoder_inputs inputs, decoder_output requested_output,
+  pymatching(cudaq::qec::decoder_inputs inputs,
+             decode_result_type requested_output,
              const cudaqx::heterogeneous_map &params)
       : decoder(std::move(inputs), requested_output) {
     const auto &H = get_inputs().detector_error_matrix();
     error_rate_vec = get_inputs().error_rates();
-    decode_to_observables = requested_output == decoder_output::observables;
+    decode_to_observables = requested_output == decode_result_type::observables;
 
     if (!error_rate_vec.empty()) {
       if (error_rate_vec.size() != block_size) {
@@ -177,7 +178,7 @@ public:
                      ? &user_graph.get_mwpm()
                      : &user_graph.get_mwpm_with_search_graph();
     detection_events.reserve(syndrome_size);
-    matched_edges.reserve(block_size * 2);
+    edges.reserve(block_size * 2);
     observable_bits.resize(get_inputs().num_observables());
 #if PERFORM_TIMING
     std::fill(decode_times.begin(), decode_times.end(), 0.0);
@@ -228,14 +229,12 @@ public:
         }
       }
     } else {
-      matched_edges.clear();
-      pm::decode_detection_events_to_edges(*mwpm, detection_events,
-                                           matched_edges);
+      edges.clear();
+      pm::decode_detection_events_to_edges(*mwpm, detection_events, edges);
       // Loop over the edge pairs to reconstruct errors.
-      assert(matched_edges.size() % 2 == 0);
-      for (size_t i = 0; i < matched_edges.size(); i += 2) {
-        auto edge =
-            make_canonical_edge(matched_edges.at(i), matched_edges.at(i + 1));
+      assert(edges.size() % 2 == 0);
+      for (size_t i = 0; i < edges.size(); i += 2) {
+        auto edge = make_canonical_edge(edges.at(i), edges.at(i + 1));
         auto col_idx = edge2col_idx.at(edge);
         output[col_idx] = 1.0;
       }
@@ -271,10 +270,11 @@ public:
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       pymatching, static std::unique_ptr<decoder> create(
                       cudaq::qec::decoder_inputs inputs,
-                      std::optional<decoder_output> output,
+                      std::optional<decode_result_type> output,
                       const cudaqx::heterogeneous_map &params) {
         return std::make_unique<pymatching>(
-            std::move(inputs), output.value_or(decoder_output::errors), params);
+            std::move(inputs), output.value_or(decode_result_type::errors),
+            params);
       })
 };
 

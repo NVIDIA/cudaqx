@@ -172,7 +172,7 @@ TEST(PyMatchingDecoder, AcceptsAllMergeStrategiesAndRejectsUnknown) {
       d = cudaq::qec::decoder::get(
           "pymatching",
           cudaq::qec::decoder_inputs(std::move(sparse_H), std::move(O)),
-          cudaq::qec::decoder_output::observables, params);
+          cudaq::qec::decode_result_type::observables, params);
     }
     ASSERT_NE(d, nullptr) << strategy;
     auto result = d->decode(std::vector<cudaq::qec::float_t>{1.0});
@@ -204,9 +204,9 @@ TEST(PyMatchingDecoder, ErrorOutputTracksMergedParallelEdgeColumn) {
         0, 2, std::vector<std::uint32_t>{0}, {});
     auto inputs = cudaq::qec::decoder_inputs(
         cudaq::qec::sparse_binary_matrix(H), std::move(O), {0.1, 0.2});
-    auto decoder =
-        cudaq::qec::decoder::get("pymatching", std::move(inputs),
-                                 cudaq::qec::decoder_output::errors, params);
+    auto decoder = cudaq::qec::decoder::get(
+        "pymatching", std::move(inputs), cudaq::qec::decode_result_type::errors,
+        params);
     return decoder->decode(std::vector<cudaq::qec::float_t>{1.0}).result;
   };
 
@@ -251,7 +251,7 @@ TEST(PyMatchingDecoder, DecodesHighObservableIndicesAcrossPaths) {
         "pymatching",
         cudaq::qec::decoder_inputs(cudaq::qec::sparse_binary_matrix(H),
                                    cudaq::qec::sparse_binary_matrix(O)),
-        cudaq::qec::decoder_output::observables);
+        cudaq::qec::decode_result_type::observables);
     // ASSERT: valid graph-like identity matrices must construct a decoder.
     ASSERT_NE(d, nullptr);
 

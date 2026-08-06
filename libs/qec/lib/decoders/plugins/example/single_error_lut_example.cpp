@@ -23,7 +23,7 @@ private:
 
 public:
   single_error_lut_example(cudaq::qec::decoder_inputs inputs,
-                           decoder_output requested_output,
+                           decode_result_type requested_output,
                            const cudaqx::heterogeneous_map &params)
       : decoder(std::move(inputs), requested_output) {
     // The requested result form is validated here, at construction, so an
@@ -31,7 +31,7 @@ public:
     // example produces an error frame only; a decoder that can also project to
     // observables would instead call project_errors_to_observables() before
     // returning.
-    if (requested_output != decoder_output::errors)
+    if (requested_output != decode_result_type::errors)
       throw std::invalid_argument(
           "single_error_lut_example produces an error frame only; construct it "
           "for error output");
@@ -89,10 +89,11 @@ public:
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       single_error_lut_example, static std::unique_ptr<decoder> create(
                                     cudaq::qec::decoder_inputs inputs,
-                                    std::optional<decoder_output> output,
+                                    std::optional<decode_result_type> output,
                                     const cudaqx::heterogeneous_map &params) {
         return std::make_unique<single_error_lut_example>(
-            std::move(inputs), output.value_or(decoder_output::errors), params);
+            std::move(inputs), output.value_or(decode_result_type::errors),
+            params);
       })
 };
 

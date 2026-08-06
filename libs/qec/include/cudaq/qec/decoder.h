@@ -31,7 +31,7 @@ using float_t = double;
 #endif
 
 /// @brief The basis of a decoder result.
-enum class decoder_output : std::uint8_t {
+enum class decode_result_type : std::uint8_t {
   errors,
   observables,
 };
@@ -136,7 +136,7 @@ public:
 /// decoder.
 class decoder
     : public cudaqx::extension_point<decoder, decoder_inputs,
-                                     std::optional<decoder_output>,
+                                     std::optional<decode_result_type>,
                                      const cudaqx::heterogeneous_map &> {
 private:
   struct rt_impl;
@@ -153,7 +153,7 @@ public:
   /// factory can move its immutable handle into the decoder.
   /// @param requested_output The result basis this instance produces, fixed
   /// for its lifetime.
-  decoder(decoder_inputs inputs, decoder_output requested_output);
+  decoder(decoder_inputs inputs, decode_result_type requested_output);
 
   /// @brief Decode a single syndrome
   /// @param syndrome A vector of syndrome measurements where the floating point
@@ -198,7 +198,7 @@ public:
   /// @brief Construct a registered decoder with an explicit instance-default
   /// result form.
   static std::unique_ptr<decoder>
-  get(const std::string &name, decoder_inputs inputs, decoder_output output,
+  get(const std::string &name, decoder_inputs inputs, decode_result_type output,
       const cudaqx::heterogeneous_map &param_map = cudaqx::heterogeneous_map());
 
   static std::unique_ptr<decoder>
@@ -242,7 +242,7 @@ public:
 
   /// @brief The result form this instance was constructed to produce. Fixed at
   /// construction; every decode operation returns this form.
-  decoder_output get_output() const noexcept { return output_; }
+  decode_result_type get_result_type() const noexcept { return result_type_; }
 
   // -- Begin realtime decoding API --
 
@@ -373,11 +373,11 @@ protected:
 private:
   static std::unique_ptr<decoder>
   get_impl(const std::string &name, decoder_inputs inputs,
-           std::optional<decoder_output> output,
+           std::optional<decode_result_type> output,
            const cudaqx::heterogeneous_map &param_map);
   /// @brief The decoder's immutable construction inputs.
   const decoder_inputs inputs_;
-  const decoder_output output_;
+  const decode_result_type result_type_;
 };
 
 /// @brief Convert a single soft probability to a hard 0/1 decision.
@@ -538,7 +538,7 @@ get_decoder(const std::string &name, decoder_inputs inputs,
 
 std::unique_ptr<decoder>
 get_decoder(const std::string &name, decoder_inputs inputs,
-            decoder_output output,
+            decode_result_type output,
             const cudaqx::heterogeneous_map options = {});
 
 inline std::unique_ptr<decoder>

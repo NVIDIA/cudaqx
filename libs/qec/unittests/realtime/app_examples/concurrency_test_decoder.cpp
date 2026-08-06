@@ -87,7 +87,7 @@ reusable_decode_barrier &decode_barrier() {
 class concurrency_test_decoder : public decoder {
 public:
   concurrency_test_decoder(decoder_inputs inputs,
-                           decoder_output requested_output,
+                           decode_result_type requested_output,
                            const cudaqx::heterogeneous_map &)
       : decoder(std::move(inputs), requested_output) {
     std::cout << "QEC_CONCURRENCY_TEST_DECODER_CONSTRUCTED" << std::endl;
@@ -114,10 +114,10 @@ public:
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       concurrency_test_decoder,
       static std::unique_ptr<decoder> create(
-          decoder_inputs inputs, std::optional<decoder_output> output,
+          decoder_inputs inputs, std::optional<decode_result_type> output,
           const cudaqx::heterogeneous_map &params) {
         return std::make_unique<concurrency_test_decoder>(
-            std::move(inputs), output.value_or(decoder_output::observables),
+            std::move(inputs), output.value_or(decode_result_type::observables),
             params);
       })
 

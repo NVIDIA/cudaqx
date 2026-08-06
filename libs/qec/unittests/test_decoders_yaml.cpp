@@ -57,7 +57,7 @@ struct construction_d_probe {
 
 class d_capture_decoder : public decoder {
 public:
-  d_capture_decoder(decoder_inputs inputs, decoder_output requested_output,
+  d_capture_decoder(decoder_inputs inputs, decode_result_type requested_output,
                     const cudaqx::heterogeneous_map &)
       : decoder(std::move(inputs), requested_output) {
     const auto &in = get_inputs();
@@ -95,10 +95,10 @@ public:
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       d_capture_decoder,
       static std::unique_ptr<decoder> create(
-          decoder_inputs inputs, std::optional<decoder_output> output,
+          decoder_inputs inputs, std::optional<decode_result_type> output,
           const cudaqx::heterogeneous_map &params) {
         return std::make_unique<d_capture_decoder>(
-            std::move(inputs), output.value_or(decoder_output::observables),
+            std::move(inputs), output.value_or(decode_result_type::observables),
             params);
       })
 };
@@ -1125,7 +1125,7 @@ TEST(DecodingServerAcceptance,
 
   auto offline_decoder =
       cudaq::qec::decoder::get("d_capture_decoder", offline_inputs,
-                               cudaq::qec::decoder_output::observables);
+                               cudaq::qec::decode_result_type::observables);
   ASSERT_NE(offline_decoder, nullptr);
   const auto offline_model = cudaq::qec::construction_d_probe::model;
 
@@ -1156,8 +1156,8 @@ TEST(DecodingServerAcceptance, MatrixSourcePluginWorksOfflineAndOnServer) {
   // Offline route, same plugin and the same resolved model.
   auto inputs = cudaq::qec::decoding::host::resolve_decoder_inputs(
       config, std::filesystem::current_path());
-  auto offline = cudaq::qec::decoder::get(config.type, inputs,
-                                          cudaq::qec::decoder_output::errors);
+  auto offline = cudaq::qec::decoder::get(
+      config.type, inputs, cudaq::qec::decode_result_type::errors);
   ASSERT_NE(offline, nullptr);
   auto result = offline->decode(
       std::vector<cudaq::qec::float_t>(config.syndrome_size, 0.0));
@@ -1367,7 +1367,8 @@ TEST(DecodingServerAcceptance, ChromobiusConstructsFromRawDemSource) {
       parsed, std::move(inputs));
   ASSERT_NE(decoder, nullptr);
   EXPECT_EQ(decoder->get_num_observables(), 3u);
-  EXPECT_EQ(decoder->get_output(), cudaq::qec::decoder_output::observables);
+  EXPECT_EQ(decoder->get_result_type(),
+            cudaq::qec::decode_result_type::observables);
 
   // Decoding works off the DEM-derived detector basis, and returns one entry
   // per observable the DEM declares.

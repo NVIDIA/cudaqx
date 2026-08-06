@@ -212,7 +212,7 @@ public:
                       nb::cast<nb::ndarray<nb::numpy, uint8_t>>(mat.attr(
                           "astype")("uint8", nb::arg("copy") = false)));
                 }()),
-                decoder_output::errors) {}
+                decode_result_type::errors) {}
 
   decoder_result decode(const std::vector<float_t> &syndrome) override {
     NB_OVERRIDE_PURE_NAME("decode", decode, syndrome);
@@ -463,15 +463,15 @@ nb::object copyToPyArray(const std::vector<double> &v) {
 
 namespace {
 /// Read and remove the "output" keyword, which selects the result basis.
-std::optional<decoder_output> pop_requested_output(nb::kwargs &options) {
+std::optional<decode_result_type> pop_requested_output(nb::kwargs &options) {
   if (!options.contains("output"))
     return std::nullopt;
   const auto value = nb::cast<std::string>(options["output"]);
   options.attr("pop")("output");
   if (value == "errors")
-    return decoder_output::errors;
+    return decode_result_type::errors;
   if (value == "observables")
-    return decoder_output::observables;
+    return decode_result_type::observables;
   throw std::runtime_error("output must be 'errors' or 'observables'");
 }
 } // namespace
@@ -949,14 +949,14 @@ void bindDecoder(nb::module_ &mod) {
           H_sparse = make_sparse_from_dense(
               nb::cast<nb::ndarray<nb::numpy, uint8_t>>(H));
 
-        std::optional<decoder_output> output;
+        std::optional<decode_result_type> output;
         if (options.contains("output")) {
           const auto value = nb::cast<std::string>(options["output"]);
           options.attr("pop")("output");
           if (value == "errors")
-            output = decoder_output::errors;
+            output = decode_result_type::errors;
           else if (value == "observables")
-            output = decoder_output::observables;
+            output = decode_result_type::observables;
           else
             throw std::runtime_error(
                 "output must be 'errors' or 'observables'");

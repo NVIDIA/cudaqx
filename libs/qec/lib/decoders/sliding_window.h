@@ -108,7 +108,7 @@ public:
   ///   - inner_decoder_name: Name of the inner decoder to use
   ///   - inner_decoder_params: Parameters for the inner decoder (optional)
   sliding_window(cudaq::qec::decoder_inputs inputs,
-                 decoder_output requested_output,
+                 decode_result_type requested_output,
                  const cudaqx::heterogeneous_map &params);
 
   /// @brief Decode a syndrome vector
@@ -146,10 +146,11 @@ public:
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       sliding_window, static std::unique_ptr<decoder> create(
                           cudaq::qec::decoder_inputs inputs,
-                          std::optional<decoder_output> output,
+                          std::optional<decode_result_type> output,
                           const cudaqx::heterogeneous_map &params) {
         return std::make_unique<sliding_window>(
-            std::move(inputs), output.value_or(decoder_output::errors), params);
+            std::move(inputs), output.value_or(decode_result_type::errors),
+            params);
       })
 };
 

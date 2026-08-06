@@ -121,7 +121,7 @@ void sliding_window::initialize_window(std::size_t batch_size) {
 }
 
 sliding_window::sliding_window(cudaq::qec::decoder_inputs inputs,
-                               decoder_output requested_output,
+                               decode_result_type requested_output,
                                const cudaqx::heterogeneous_map &params)
     // Canonical CSC is the steady-state contract for decode_window's column
     // slices and for validate_inputs's per-column .front()/.back() reads.
@@ -131,7 +131,7 @@ sliding_window::sliding_window(cudaq::qec::decoder_inputs inputs,
   // This decoder composes an error frame from its windows. Producing
   // observables requires an observable mapping to project through; reject at
   // construction rather than on the first decode.
-  if (requested_output == decoder_output::observables &&
+  if (requested_output == decode_result_type::observables &&
       !get_inputs().has_observable_model())
     throw std::invalid_argument(
         "sliding_window was constructed for observable output but its model "
@@ -224,7 +224,7 @@ sliding_window::sliding_window(cudaq::qec::decoder_inputs inputs,
                                 std::move(inner_error_ids));
     auto inner_decoder =
         decoder::get(inner_decoder_name, std::move(inner_inputs),
-                     decoder_output::errors, inner_decoder_params);
+                     decode_result_type::errors, inner_decoder_params);
     inner_decoders.push_back(std::move(inner_decoder));
   }
 }
@@ -302,7 +302,7 @@ std::vector<decoder_result> sliding_window::decode_batch(
     // return is the empty streaming sentinel.
     // Composed frames are error frames; whether they are projected is fixed at
     // construction.
-    if (get_output() == decoder_output::observables)
+    if (get_result_type() == decode_result_type::observables)
       for (auto &r : results) {
         if (r.result.empty())
           continue; // streaming sentinel

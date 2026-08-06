@@ -358,7 +358,7 @@ std::unique_ptr<cudaq::qec::decoder> create_realtime_decoder(
 
   auto decoder =
       cudaq::qec::get_decoder(decoder_config.type, std::move(inputs),
-                              cudaq::qec::decoder_output::observables,
+                              cudaq::qec::decode_result_type::observables,
                               prepare_decoder_params(decoder_config));
   decoder->set_decoder_id(decoder_config.id);
 

@@ -183,19 +183,19 @@ parse_engine_output_format(const cudaqx::heterogeneous_map &params) {
       "observables, observables_and_residual_detectors");
 }
 
-decoder_output natural_trt_output(trt_engine_output_format format) {
+decode_result_type natural_trt_output(trt_engine_output_format format) {
   return format == trt_engine_output_format::errors
-             ? decoder_output::errors
-             : decoder_output::observables;
+             ? decode_result_type::errors
+             : decode_result_type::observables;
 }
 
-decoder_output trt_emitted_output(trt_engine_output_format format,
-                                  decoder_output requested_output) {
+decode_result_type trt_emitted_output(trt_engine_output_format format,
+                                      decode_result_type requested_output) {
   if (format == trt_engine_output_format::errors)
-    return decoder_output::errors;
+    return decode_result_type::errors;
   if (format == trt_engine_output_format::residual_detectors)
     return requested_output;
-  return decoder_output::observables;
+  return decode_result_type::observables;
 }
 
 // Helpers for templated I/O: binarize TRT output (float or uint8) to 0/1
@@ -463,12 +463,12 @@ private:
   cudaqx::heterogeneous_map global_decoder_params_;
 
   trt_engine_output_format engine_output_format_;
-  decoder_output emitted_output_;
+  decode_result_type emitted_output_;
   size_t num_observables_ = 0;
 
 public:
   trt_decoder(cudaq::qec::decoder_inputs inputs,
-              decoder_output requested_output,
+              decode_result_type requested_output,
               trt_engine_output_format engine_output_format,
               const cudaqx::heterogeneous_map &params);
 
@@ -482,7 +482,7 @@ public:
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       trt_decoder, static std::unique_ptr<decoder> create(
                        cudaq::qec::decoder_inputs inputs,
-                       std::optional<decoder_output> output,
+                       std::optional<decode_result_type> output,
                        const cudaqx::heterogeneous_map &params) {
         const auto format = parse_engine_output_format(params);
         return std::make_unique<trt_decoder>(
@@ -589,7 +589,7 @@ struct trt_decoder::Impl {
 // ============================================================================
 
 trt_decoder::trt_decoder(cudaq::qec::decoder_inputs inputs,
-                         decoder_output requested_output,
+                         decode_result_type requested_output,
                          trt_engine_output_format engine_output_format,
                          const cudaqx::heterogeneous_map &params)
     : decoder(std::move(inputs), requested_output),
@@ -599,7 +599,7 @@ trt_decoder::trt_decoder(cudaq::qec::decoder_inputs inputs,
   if ((engine_output_format_ == trt_engine_output_format::observables ||
        engine_output_format_ ==
            trt_engine_output_format::observables_and_residual_detectors) &&
-      requested_output != decoder_output::observables)
+      requested_output != decode_result_type::observables)
     throw std::runtime_error(
         "engine_output_format declares observables, so this decoder cannot be "
         "constructed for error-frame output");
@@ -608,8 +608,8 @@ trt_decoder::trt_decoder(cudaq::qec::decoder_inputs inputs,
   // instance, but only by projecting through the model's O. Without an
   // observable mapping there is nothing to project through, so reject here
   // rather than returning an unprojected error frame at decode time.
-  if (emitted_output_ == decoder_output::errors &&
-      requested_output == decoder_output::observables &&
+  if (emitted_output_ == decode_result_type::errors &&
+      requested_output == decode_result_type::observables &&
       !get_inputs().has_observable_model())
     throw std::runtime_error(
         "This TensorRT engine emits an error frame and was constructed for "
@@ -847,7 +847,7 @@ trt_decoder::trt_decoder(cudaq::qec::decoder_inputs inputs,
         const auto global_output =
             engine_output_format_ ==
                     trt_engine_output_format::observables_and_residual_detectors
-                ? decoder_output::observables
+                ? decode_result_type::observables
                 : requested_output;
         global_decoder_ = decoder::get(global_decoder_name,
                                        get_inputs().decoder_inputs_without_d(),
@@ -1004,7 +1004,7 @@ trt_decoder::decode_batch(const std::vector<std::vector<float_t>> &syndromes) {
                              std::to_string(syndromes.size()) + " syndromes");
   // The engine's output form and the instance's form are both fixed at
   // construction; only errors -> observables is reachable here.
-  if (emitted_output_ != get_output())
+  if (emitted_output_ != get_result_type())
     for (auto &r : results) {
       if (r.result.empty())
         continue;

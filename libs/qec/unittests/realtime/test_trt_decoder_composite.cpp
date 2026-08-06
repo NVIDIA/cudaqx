@@ -354,7 +354,7 @@ DecoderSetup create_decoder_from_yaml(const DemoConfig &demo_cfg) {
       decoder_config.type,
       cudaq::qec::decoder_inputs(cudaq::qec::sparse_binary_matrix(setup.H),
                                  cudaq::qec::sparse_binary_matrix(O)),
-      cudaq::qec::decoder_output::observables, setup.trt_params);
+      cudaq::qec::decode_result_type::observables, setup.trt_params);
   return setup;
 }
 
@@ -410,7 +410,7 @@ DecoderSetup create_decoder_from_cli(const PipelineConfig &config,
       cudaq::qec::decoder_inputs(cudaq::qec::sparse_binary_matrix(H),
                                  cudaq::qec::sparse_binary_matrix(O),
                                  stim.priors),
-      cudaq::qec::decoder_output::observables, setup.trt_params);
+      cudaq::qec::decode_result_type::observables, setup.trt_params);
   return setup;
 }
 
@@ -509,7 +509,8 @@ int main(int argc, char *argv[]) {
               << " row(s).\n";
     return 1;
   }
-  if (setup.decoder->get_output() != cudaq::qec::decoder_output::observables) {
+  if (setup.decoder->get_result_type() !=
+      cudaq::qec::decode_result_type::observables) {
     std::cerr << "ERROR: composite trt_decoder must use observable output.\n";
     return 1;
   }

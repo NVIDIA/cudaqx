@@ -633,7 +633,7 @@ To implement a new decoder:
 
     public:
         my_decoder(qec::decoder_inputs inputs,
-                   qec::decoder_output requested_output,
+                   qec::decode_result_type requested_output,
                    const heterogeneous_map& params)
             : decoder(std::move(inputs), requested_output) {
             // All model data is available here. Reject a result form this
@@ -655,11 +655,11 @@ To implement a new decoder:
         my_decoder,
         static std::unique_ptr<decoder> create(
             qec::decoder_inputs inputs,
-            std::optional<qec::decoder_output> requested_output,
+            std::optional<qec::decode_result_type> requested_output,
             const heterogeneous_map& params) {
             return std::make_unique<my_decoder>(
                 std::move(inputs),
-                requested_output.value_or(qec::decoder_output::errors),
+                requested_output.value_or(qec::decode_result_type::errors),
                 params);
         }
     )
@@ -667,7 +667,7 @@ To implement a new decoder:
     CUDAQ_EXT_PT_REGISTER_TYPE(my_decoder)
 
 The factory receives the model as :code:`decoder_inputs` and the caller's
-result form as an optional :code:`decoder_output`. A decoder that supports one
+result form as an optional :code:`decode_result_type`. A decoder that supports one
 form only should default the request to that form and reject any other.
 
 Example: Lookup Table Decoder

@@ -25,7 +25,7 @@ namespace {
 class decoder_inputs_probe final : public cudaq::qec::decoder {
 public:
   explicit decoder_inputs_probe(cudaq::qec::decoder_inputs inputs)
-      : decoder(std::move(inputs), cudaq::qec::decoder_output::errors) {}
+      : decoder(std::move(inputs), cudaq::qec::decode_result_type::errors) {}
 
   cudaq::qec::decoder_result
   decode(const std::vector<cudaq::qec::float_t> &) override {
@@ -39,7 +39,7 @@ public:
 class observable_output_probe final : public cudaq::qec::decoder {
 public:
   observable_output_probe(cudaq::qec::decoder_inputs inputs,
-                          cudaq::qec::decoder_output requested_output,
+                          cudaq::qec::decode_result_type requested_output,
                           const cudaqx::heterogeneous_map &)
       : decoder(std::move(inputs), requested_output) {}
 
@@ -52,11 +52,12 @@ public:
       observable_output_probe,
       static std::unique_ptr<cudaq::qec::decoder> create(
           cudaq::qec::decoder_inputs inputs,
-          std::optional<cudaq::qec::decoder_output> output,
+          std::optional<cudaq::qec::decode_result_type> output,
           const cudaqx::heterogeneous_map &params) {
         return std::make_unique<observable_output_probe>(
             std::move(inputs),
-            output.value_or(cudaq::qec::decoder_output::observables), params);
+            output.value_or(cudaq::qec::decode_result_type::observables),
+            params);
       })
 };
 
@@ -210,9 +211,10 @@ TEST(DecoderOutputContract, OutputFormIsImmutablePerInstance) {
   auto decoder = cudaq::qec::get_decoder(
       "single_error_lut",
       cudaq::qec::decoder_inputs(std::move(H), std::move(O)),
-      cudaq::qec::decoder_output::observables);
+      cudaq::qec::decode_result_type::observables);
 
-  EXPECT_EQ(decoder->get_output(), cudaq::qec::decoder_output::observables);
+  EXPECT_EQ(decoder->get_result_type(),
+            cudaq::qec::decode_result_type::observables);
 
   const std::vector<cudaq::qec::float_t> syndrome{1.0, 0.0};
   auto observables = decoder->decode(syndrome);
@@ -225,7 +227,7 @@ TEST(DecoderOutputContract, OutputFormIsImmutablePerInstance) {
               2, 2, std::vector<std::vector<std::uint32_t>>{{0}, {1}}),
           cudaq::qec::sparse_binary_matrix::from_nested_csr(
               1, 2, std::vector<std::vector<std::uint32_t>>{{0}})),
-      cudaq::qec::decoder_output::errors);
+      cudaq::qec::decode_result_type::errors);
   auto errors = error_decoder->decode(syndrome);
   EXPECT_EQ(errors.result, std::vector<cudaq::qec::float_t>({1.0, 0.0}));
 }
@@ -1359,7 +1361,7 @@ TEST(EnqueueSyndrome, ObsFrameDecoderUsesResultDirectly) {
       cudaq::qec::decoder_inputs(
           std::move(H), std::move(O), /*error_rates=*/{},
           cudaq::qec::sparse_binary_matrix::from_nested_csr(2, 2, {{0}, {1}})),
-      cudaq::qec::decoder_output::observables);
+      cudaq::qec::decode_result_type::observables);
 
   bool did_decode = dec->enqueue_syndrome(std::vector<uint8_t>{1, 0});
   EXPECT_TRUE(did_decode);
@@ -1383,7 +1385,7 @@ TEST(EnqueueSyndrome, ObsFrameMultiShotAccumulation) {
       cudaq::qec::decoder_inputs(
           std::move(H), std::move(O), /*error_rates=*/{},
           cudaq::qec::sparse_binary_matrix::from_nested_csr(2, 2, {{0}, {1}})),
-      cudaq::qec::decoder_output::observables);
+      cudaq::qec::decode_result_type::observables);
 
   // Shot 1: obs[0]=1, obs[1]=0 -> corrections become [1, 0]
   EXPECT_TRUE(dec->enqueue_syndrome(std::vector<uint8_t>{1, 0}));
@@ -1419,7 +1421,7 @@ TEST(EnqueueSyndrome, ObsFrameSizeMismatchThrows) {
           std::move(H), std::move(O), /*error_rates=*/{},
           cudaq::qec::sparse_binary_matrix::from_nested_csr(3, 3,
                                                             {{0}, {1}, {2}})),
-      cudaq::qec::decoder_output::observables);
+      cudaq::qec::decode_result_type::observables);
   // sample_decoder returns all three detector bits as observables.
   EXPECT_THROW(dec->enqueue_syndrome(std::vector<uint8_t>{1, 0, 1}),
                std::runtime_error);
@@ -1458,7 +1460,7 @@ TEST(SlidingWindowDecoder, BaseStreamingCopiesFirstRoundDetectors) {
           std::move(H), std::move(O), std::vector<double>(pcm.shape()[1], 0.1),
           cudaq::qec::sparse_binary_matrix::from_nested_csr(
               static_cast<std::uint32_t>(m2d.size()), 2, m2d)),
-      cudaq::qec::decoder_output::observables, params);
+      cudaq::qec::decode_result_type::observables, params);
   ASSERT_NE(decoder, nullptr);
 
   std::vector<uint8_t> first_round = {1, 0};
@@ -1544,7 +1546,7 @@ private:
 class strict_keys_decoder : public cudaq::qec::decoder {
 public:
   strict_keys_decoder(cudaq::qec::decoder_inputs inputs,
-                      cudaq::qec::decoder_output requested_output,
+                      cudaq::qec::decode_result_type requested_output,
                       const cudaqx::heterogeneous_map &params)
       : decoder(std::move(inputs), requested_output) {
     auto invalid =
@@ -1561,13 +1563,14 @@ public:
     return r;
   }
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
-      strict_keys_decoder, static std::unique_ptr<cudaq::qec::decoder> create(
-                               cudaq::qec::decoder_inputs inputs,
-                               std::optional<cudaq::qec::decoder_output> output,
-                               const cudaqx::heterogeneous_map &params) {
+      strict_keys_decoder,
+      static std::unique_ptr<cudaq::qec::decoder> create(
+          cudaq::qec::decoder_inputs inputs,
+          std::optional<cudaq::qec::decode_result_type> output,
+          const cudaqx::heterogeneous_map &params) {
         return std::make_unique<strict_keys_decoder>(
             std::move(inputs),
-            output.value_or(cudaq::qec::decoder_output::errors), params);
+            output.value_or(cudaq::qec::decode_result_type::errors), params);
       })
 };
 CUDAQ_EXT_PT_REGISTER_TYPE(strict_keys_decoder)
@@ -1583,7 +1586,7 @@ class device_recording_decoder : public cudaq::qec::decoder {
 public:
   std::atomic<int> last_decode_device{-2};
   device_recording_decoder(cudaq::qec::decoder_inputs inputs,
-                           cudaq::qec::decoder_output requested_output,
+                           cudaq::qec::decode_result_type requested_output,
                            const cudaqx::heterogeneous_map &)
       : decoder(std::move(inputs), requested_output) {}
   cudaq::qec::decoder_result
@@ -1601,11 +1604,11 @@ public:
       device_recording_decoder,
       static std::unique_ptr<cudaq::qec::decoder> create(
           cudaq::qec::decoder_inputs inputs,
-          std::optional<cudaq::qec::decoder_output> output,
+          std::optional<cudaq::qec::decode_result_type> output,
           const cudaqx::heterogeneous_map &params) {
         return std::make_unique<device_recording_decoder>(
             std::move(inputs),
-            output.value_or(cudaq::qec::decoder_output::errors), params);
+            output.value_or(cudaq::qec::decode_result_type::errors), params);
       })
 };
 CUDAQ_EXT_PT_REGISTER_TYPE(device_recording_decoder)

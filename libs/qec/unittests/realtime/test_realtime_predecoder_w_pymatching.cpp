@@ -301,7 +301,8 @@ int main(int argc, char *argv[]) {
               << " PyMatching decoders (full H)...\n";
     for (int i = 0; i < config.num_decode_workers; ++i)
       decoder_ctx.decoders.push_back(cudaq::qec::decoder::get(
-          "pymatching", inputs, cudaq::qec::decoder_output::errors, pm_params));
+          "pymatching", inputs, cudaq::qec::decode_result_type::errors,
+          pm_params));
   } else {
     // Fallback: per-slice decode with CUDA-Q surface code H_z
     std::cout << "[Setup] Creating PyMatching decoder (d=" << config.distance

@@ -54,7 +54,7 @@ public:
                 /*D=*/
                 cudaq::qec::sparse_binary_matrix::from_csr(1, 2, {0, 2},
                                                            {0, 1})),
-            cudaq::qec::decoder_output::errors) {}
+            cudaq::qec::decode_result_type::errors) {}
 
   cudaq::qec::decoder_result
   decode(const std::vector<cudaq::qec::float_t> &syndrome) override {
@@ -319,7 +319,7 @@ public:
                 /*D=*/
                 cudaq::qec::sparse_binary_matrix::from_csr(1, 2, {0, 2},
                                                            {0, 1})),
-            cudaq::qec::decoder_output::errors) {
+            cudaq::qec::decode_result_type::errors) {
     cuda_device_id_ = 1 << 20;
   }
   cudaq::qec::decoder_result

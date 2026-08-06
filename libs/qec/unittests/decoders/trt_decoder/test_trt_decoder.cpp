@@ -304,7 +304,7 @@ TEST_F(TRTDecoderTest, ValidateAgainstPyTorchModel) {
   try {
     trt_decoder = decoder::get(
         "trt_decoder", make_inputs_with_empty_observables(H, num_observables),
-        decoder_output::observables, params);
+        decode_result_type::observables, params);
   } catch (const std::exception &e) {
     GTEST_SKIP() << "Failed to create TRT decoder: " << e.what();
   }
@@ -400,7 +400,7 @@ TEST_F(TRTDecoderTest, ValidateSingleTestCase) {
   try {
     trt_decoder = decoder::get(
         "trt_decoder", make_inputs_with_empty_observables(H, NUM_OBSERVABLES),
-        decoder_output::observables, params);
+        decode_result_type::observables, params);
   } catch (const std::exception &e) {
     GTEST_SKIP() << "Failed to create TRT decoder: " << e.what();
   }
@@ -464,7 +464,7 @@ TEST_F(TRTDecoderTest, PerformanceComparisonCudaGraphVsTraditional) {
   try {
     decoder_cuda_graph = decoder::get(
         "trt_decoder", make_inputs_with_empty_observables(H, NUM_OBSERVABLES),
-        decoder_output::observables, params_cuda_graph);
+        decode_result_type::observables, params_cuda_graph);
   } catch (const std::exception &e) {
     GTEST_SKIP() << "Failed to create CUDA graph decoder: " << e.what();
   }
@@ -482,7 +482,7 @@ TEST_F(TRTDecoderTest, PerformanceComparisonCudaGraphVsTraditional) {
   try {
     decoder_traditional = decoder::get(
         "trt_decoder", make_inputs_with_empty_observables(H, NUM_OBSERVABLES),
-        decoder_output::observables, params_traditional);
+        decode_result_type::observables, params_traditional);
   } catch (const std::exception &e) {
     GTEST_SKIP() << "Failed to create traditional decoder: " << e.what();
   }
@@ -614,7 +614,7 @@ TEST_F(TRTDecoderTest, EngineSavePathAndEngineLoadPathRoundTrip) {
   try {
     built_decoder = decoder::get(
         "trt_decoder", make_inputs_with_empty_observables(H, NUM_OBSERVABLES),
-        decoder_output::observables, build_params);
+        decode_result_type::observables, build_params);
   } catch (const std::exception &e) {
     GTEST_SKIP() << "Failed to build TRT decoder: " << e.what();
   }
@@ -628,7 +628,7 @@ TEST_F(TRTDecoderTest, EngineSavePathAndEngineLoadPathRoundTrip) {
   try {
     loaded_decoder = decoder::get(
         "trt_decoder", make_inputs_with_empty_observables(H, NUM_OBSERVABLES),
-        decoder_output::observables, load_params);
+        decode_result_type::observables, load_params);
   } catch (const std::exception &e) {
     GTEST_SKIP() << "Failed to load TRT decoder: " << e.what();
   }
@@ -815,8 +815,8 @@ TEST_F(TRTDecoderTest, NestsChromobiusPreservingRawDem) {
 
   std::unique_ptr<decoder> composite;
   try {
-    composite = decoder::get("trt_decoder", inputs, decoder_output::observables,
-                             params);
+    composite = decoder::get("trt_decoder", inputs,
+                             decode_result_type::observables, params);
   } catch (const std::exception &e) {
     GTEST_SKIP() << "TensorRT engine build unavailable: " << e.what();
   }
@@ -839,7 +839,7 @@ TEST_F(TRTDecoderTest, NestsChromobiusPreservingRawDem) {
   EXPECT_THROW((void)decoder::get("trt_decoder",
                                   decoder_inputs(sparse_binary_matrix(H),
                                                  sparse_binary_matrix(O)),
-                                  decoder_output::observables, params),
+                                  decode_result_type::observables, params),
                std::runtime_error);
 }
 
@@ -871,7 +871,7 @@ TEST_F(TRTDecoderTest, CompositeGlobalDecoderCombinesLogicalFrame) {
     trt_decoder = decoder::get(
         "trt_decoder",
         decoder_inputs(sparse_binary_matrix(H), sparse_binary_matrix(O)),
-        decoder_output::observables, params);
+        decode_result_type::observables, params);
   } catch (const std::exception &e) {
     GTEST_SKIP() << "Failed to create composite TRT decoder: " << e.what();
   }
