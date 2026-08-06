@@ -22,10 +22,12 @@ namespace cudaq::qec {
 
 /// @brief Authoritative representation from which a decoder model originates.
 ///
-/// Matrix and Stim sources are supported. A compact repeated-round source is
-/// expected once the dynamic DEM APIs settle; adding it here needs only a new
-/// enumerator plus its typed constructor and accessor, and changes neither the
-/// `decoder_inputs` object layout nor the decoder factory signature.
+/// Matrix and Stim sources are implemented. This is the entry point for a
+/// compact chunked DEM: that source would be added here with a new enumerator
+/// plus its typed constructor and accessor, so a decoder that consumes chunks
+/// reads them directly instead of the handle first flattening them into
+/// matrices. Adding one changes neither the `decoder_inputs` object layout nor
+/// the decoder factory signature.
 enum class decoder_model_source : std::uint8_t {
   matrices,
   stim_dem,
@@ -86,6 +88,9 @@ public:
   decoder_inputs &operator=(decoder_inputs &&) noexcept;
   ~decoder_inputs();
 
+  /// @brief The authoritative representation. Consumers that only need to
+  /// know whether raw DEM text is available should ask has_stim_dem(); this
+  /// discriminator is what a future compact source would extend.
   decoder_model_source source() const noexcept;
 
   /// @brief Return the stored common H projection.

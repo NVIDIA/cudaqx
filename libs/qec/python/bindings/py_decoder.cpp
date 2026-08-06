@@ -461,6 +461,21 @@ nb::object copyToPyArray(const std::vector<double> &v) {
 
 } // namespace
 
+namespace {
+/// Read and remove the "output" keyword, which selects the result basis.
+std::optional<decoder_output> pop_requested_output(nb::kwargs &options) {
+  if (!options.contains("output"))
+    return std::nullopt;
+  const auto value = nb::cast<std::string>(options["output"]);
+  options.attr("pop")("output");
+  if (value == "errors")
+    return decoder_output::errors;
+  if (value == "observables")
+    return decoder_output::observables;
+  throw std::runtime_error("output must be 'errors' or 'observables'");
+}
+} // namespace
+
 void bindDecoder(nb::module_ &mod) {
   // Store a sentinel (non-null pointer required by PyCapsule_New) and invoke
   // plugin cleanup when the module is garbage-collected.
@@ -471,10 +486,6 @@ void bindDecoder(nb::module_ &mod) {
   auto qecmod = nb::hasattr(mod, "qecrt")
                     ? nb::cast<nb::module_>(mod.attr("qecrt"))
                     : mod.def_submodule("qecrt");
-
-  nb::enum_<decoder_output>(qecmod, "DecoderOutput")
-      .value("ERRORS", decoder_output::errors)
-      .value("OBSERVABLES", decoder_output::observables);
 
   nb::class_<decoder_result>(qecmod, "DecoderResult", R"pbdoc(
     Single-shot decoder result.
@@ -903,17 +914,7 @@ void bindDecoder(nb::module_ &mod) {
       return PyDecoderRegistry::get_decoder(name, H_obj, options);
     }
 
-    std::optional<decoder_output> output;
-    if (options.contains("output")) {
-      const auto value = nb::cast<std::string>(options["output"]);
-      options.attr("pop")("output");
-      if (value == "errors")
-        output = decoder_output::errors;
-      else if (value == "observables")
-        output = decoder_output::observables;
-      else
-        throw std::runtime_error("output must be 'errors' or 'observables'");
-    }
+    const auto output = pop_requested_output(options);
     auto inputs = decoder_inputs::from_stim_dem(dem_text);
     return output ? get_decoder(name, std::move(inputs), *output,
                                 hetMapFromKwargs(options))
