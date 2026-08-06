@@ -71,7 +71,7 @@ Decoder Interfaces
     :members:
 
 .. doxygenfunction:: cudaq::qec::d_sparse(const cudaq::M2DSparseMatrix &)
-.. doxygenfunction:: cudaq::qec::d_sparse(const cudaq::qec::sparse_binary_matrix &)
+.. doxygenfunction:: cudaq::qec::d_sparse(const sparse_binary_matrix &)
 
 .. doxygenclass:: cudaq::qec::decoder
     :members:
