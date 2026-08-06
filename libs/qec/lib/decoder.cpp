@@ -313,49 +313,6 @@ dem_default_values dem_defaults_for_missing_keys(
 
 } // namespace details
 
-static uint32_t calculate_num_msyn_per_decode(
-    const std::vector<std::vector<uint32_t>> &D_sparse) {
-  uint32_t max_col = 0;
-  bool found_column = false;
-  for (const auto &row : D_sparse)
-    for (const auto col : row) {
-      max_col = std::max(max_col, col);
-      found_column = true;
-    }
-  return found_column ? max_col + 1 : 0;
-}
-
-static void
-validate_sparse_column_indices(const std::vector<std::vector<uint32_t>> &sparse,
-                               std::size_t max_col, const char *name) {
-  for (std::size_t row = 0; row < sparse.size(); ++row) {
-    for (const auto col : sparse[row]) {
-      if (col >= max_col) {
-        throw std::invalid_argument(
-            fmt::format("{} column index {} out of range [0, {}) at row {}",
-                        name, col, max_col, row));
-      }
-    }
-  }
-}
-
-static void
-set_sparse_from_vec(const std::vector<int64_t> &vec_in,
-                    std::vector<std::vector<uint32_t>> &sparse_out) {
-  sparse_out.clear();
-  std::vector<uint32_t> row;
-  for (auto elem : vec_in) {
-    if (elem < 0) {
-      sparse_out.push_back(std::move(row));
-      row.clear();
-    } else {
-      row.push_back(static_cast<uint32_t>(elem));
-    }
-  }
-  if (!row.empty())
-    sparse_out.push_back(std::move(row));
-}
-
 uint32_t decoder::get_num_msyn_per_decode() const {
   return pimpl->num_msyn_per_decode;
 }
