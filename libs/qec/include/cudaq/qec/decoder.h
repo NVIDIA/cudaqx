@@ -151,6 +151,8 @@ public:
   /// @brief Constructor
   /// @param inputs Stable model and measurement inputs. Taken by value so the
   /// factory can move its immutable handle into the decoder.
+  /// @param requested_output The result basis this instance produces, fixed
+  /// for its lifetime.
   decoder(decoder_inputs inputs, decoder_output requested_output);
 
   /// @brief Decode a single syndrome

@@ -241,13 +241,13 @@ int main(int argc, char *argv[]) {
   auto params = dec.decoder_custom_args_to_heterogeneous_map();
   // O and D belong to the model, so they are supplied at construction rather
   // than installed afterwards.
-  const auto num_observables = static_cast<std::uint32_t>(
+  const auto num_observable_rows = static_cast<std::uint32_t>(
       std::count(dec.O_sparse.begin(), dec.O_sparse.end(), -1));
   auto decoder = cudaq::qec::decoder::get(
       "nv-qldpc-decoder",
       cudaq::qec::decoder_inputs(
           cudaq::qec::sparse_binary_matrix(H_tensor),
-          sparse_matrix_from_flat_rows(dec.O_sparse, num_observables),
+          sparse_matrix_from_flat_rows(dec.O_sparse, num_observable_rows),
           /*error_rates=*/{},
           sparse_matrix_from_flat_rows(dec.D_sparse,
                                        static_cast<std::uint32_t>(ss))),
