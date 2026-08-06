@@ -1,0 +1,38 @@
+{
+  "skill_name": "cudaq-skills-authoring",
+  "_note": "Prompts only. Assertions live in assertions.json so the agent under test never reads the answer key.",
+  "evals": [
+    {
+      "id": "S1",
+      "name": "add-new-skill",
+      "prompt": "How do I add a new skill to .agents/skills/, and what files does it need?",
+      "files": []
+    },
+    {
+      "id": "S2",
+      "name": "frontmatter-format",
+      "prompt": "What's the required YAML frontmatter format for SKILL.md, including the description field rules?",
+      "files": []
+    },
+    {
+      "id": "S3",
+      "name": "add-agent-target",
+      "prompt": "How do I add a new agent target like Copilot or Gemini to sync_agents_skills.sh?",
+      "files": []
+    }
+  ],
+  "activation": [
+    {
+      "id": "A1",
+      "prompt": "Add a SKILL.md for a new cudaq-mpi-runtime skill"
+    },
+    {
+      "id": "A2",
+      "prompt": "Pick a basis set for H2O"
+    },
+    {
+      "id": "A3",
+      "prompt": "Write an eval prompt and assertion for cudaq-build"
+    }
+  ]
+}

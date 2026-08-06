@@ -1,0 +1,38 @@
+{
+  "skill_name": "cudaq-quickstart",
+  "_note": "Prompts only. Assertions live in assertions.json so the agent under test never reads the answer key.",
+  "evals": [
+    {
+      "id": "S1",
+      "name": "first-example-after-pip",
+      "prompt": "I just installed cudaq-qec via pip. What's the simplest example I can run?",
+      "files": []
+    },
+    {
+      "id": "S2",
+      "name": "pip-vs-docker-vs-source",
+      "prompt": "Should I use pip, Docker, or build from source for cudaq?",
+      "files": []
+    },
+    {
+      "id": "S3",
+      "name": "minimal-steane-program",
+      "prompt": "What's the minimal Python program for a Steane code memory experiment?",
+      "files": []
+    }
+  ],
+  "activation": [
+    {
+      "id": "A1",
+      "prompt": "How do I get started with cudaq as a new user?"
+    },
+    {
+      "id": "A2",
+      "prompt": "What's the exact shape returned by sample_memory_circuit for distance-5 surface code?"
+    },
+    {
+      "id": "A3",
+      "prompt": "Hello world for cudaq-solvers VQE on H2"
+    }
+  ]
+}

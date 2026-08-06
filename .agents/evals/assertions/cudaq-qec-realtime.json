@@ -1,0 +1,95 @@
+{
+  "skill_name": "cudaq-qec-realtime",
+  "_note": "Answer key. NEVER read this file from inside SKILL.md or any references/*.md. Loaded by .agents/evals/graders/ only.",
+  "activation_marker": "cudaq-qec-realtime",
+  "scenarios": {
+    "S1": {
+      "must_include": [
+        "z_dem_from_memory_circuit",
+        "decoder_config",
+        "multi_decoder_config",
+        "configure_decoders_from_file",
+        "reset_decoder",
+        "enqueue_syndromes",
+        "get_corrections",
+        "finalize_decoders"
+      ],
+      "must_not_include": ["configure_decoders_from_file inside cudaq.run"]
+    },
+    "S2": {
+      "must_include": ["before cudaq.run", "Phase 3"],
+      "must_not_include": ["this is a known bug", "configure after run is supported"]
+    },
+    "S3": {
+      "must_include": ["block_size = 200", "syndrome_size = 60", "H.shape[1]", "H.shape[0]"],
+      "must_not_include": ["block_size = 60"],
+      "executable": {
+        "code_extractor": "first_python_block",
+        "interpreter": "python3",
+        "preamble": "import numpy as np\nclass _Dem: pass\ndem = _Dem()\ndem.detector_error_matrix = np.zeros((60, 200), dtype=np.uint8)\n",
+        "harness": "{code}\n# After the agent's snippet, both block_size and syndrome_size variables must exist with right values\nimport sys\ntry:\n    ok = (int(block_size) == 200) and (int(syndrome_size) == 60)\nexcept NameError:\n    ok = False\nprint('SIZES_OK' if ok else 'SIZES_WRONG')\n",
+        "expected_stdout_substr": "SIZES_OK",
+        "expected_exit": 0,
+        "timeout_s": 15,
+        "skip_if_missing": ["numpy"]
+      }
+    },
+    "S4": {
+      "must_include": ["num_rounds_plus_one", "num_syndromes_per_round", "+ 1"],
+      "must_not_include": ["num_rounds directly"]
+    },
+    "S5": {
+      "must_include": ["not real-time eligible", "nv-qldpc-decoder", "multi_error_lut", "single_error_lut"],
+      "must_not_include": ["tensor_network_decoder is real-time eligible"]
+    },
+    "S6": {
+      "must_include": [
+        "py_decoding.cpp",
+        "@cudaq.kernel",
+        "python_realtime_decoding_api.rst"
+      ],
+      "must_not_include": ["call from Python top level"]
+    },
+    "S7": {
+      "must_include": ["qec.finalize_decoders", "GPU resources"],
+      "must_not_include": ["restart Python", "this is unsupported"]
+    },
+    "S8": {
+      "must_include": ["decoder_config.id", "unique", "logical qubit"],
+      "must_not_include": ["id is optional"]
+    },
+    "S9": {
+      "must_include": ["pcm_is_sorted", "simplify_pcm", "sort_pcm_columns"],
+      "must_not_include": ["sliding_window auto-sorts"]
+    },
+    "S10": {
+      "must_include": ["emulate=True", "cudaq.set_target(\"quantinuum\"", "CUDAQ_QUANTINUUM_CREDENTIALS"],
+      "must_not_include": ["go straight to hardware"]
+    },
+    "S11": {
+      "must_include": ["autonomous_decoder", "CRTP", "autonomous_decoder.cuh", "autonomous_decoder_guide.md"],
+      "must_not_include": ["host code is fine"]
+    },
+    "S12": {
+      "must_include": ["d=7", "d=13", "d=21", "d=31", "T=104"],
+      "must_not_include": ["any d/T combo works"]
+    },
+    "S13": {
+      "must_include": ["CUDAQ_QEC_DEBUG_DECODER=1"],
+      "must_not_include": ["no logging available"]
+    }
+  },
+  "activation": {
+    "A1": {"should_activate": true},
+    "A2": {"should_activate": true},
+    "A3": {"should_activate": true},
+    "A4": {"should_activate": true},
+    "A5": {"should_activate": false},
+    "A6": {"should_activate": false},
+    "A7": {"should_activate": false},
+    "A8": {"should_activate": true},
+    "A9": {"should_activate": true},
+    "A10": {"should_activate": false},
+    "A11": {"should_activate": false}
+  }
+}

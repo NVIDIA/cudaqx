@@ -1,0 +1,118 @@
+[
+  {
+    "id": "AM01",
+    "prompt": "I want to deploy a hybrid AI predecoder pipeline with PyMatching for a surface code memory experiment. How do I wire AIDecoderService and AIPreDecoderService end-to-end?",
+    "owner": "cudaq-qec-realtime",
+    "allowed_co_activators": [],
+    "_notes": "Was 3-way leak before description fix (realtime + ai-decoders + qec-decode)."
+  },
+  {
+    "id": "AM02",
+    "prompt": "I'm contributing a new pytest test for the surface code decoder. What format does the project want, where does it go in the file tree, and what's the PR sign-off process?",
+    "owner": "cudaq-contributing",
+    "allowed_co_activators": [],
+    "_notes": "Was 4-way leak before merge of testing-ci into contributing."
+  },
+  {
+    "id": "AM03",
+    "prompt": "My TRT decoder is taking 8ms per syndrome batch on an H100 and I need it under 2ms for real-time decoding. How do I find the bottleneck and compare against pymatching for a fair latency number?",
+    "owner": "cudaq-profiling-perf",
+    "allowed_co_activators": ["cudaq-benchmarking"],
+    "_notes": "Was 5-way leak; benchmarking is a legit co-owner for the comparison half."
+  },
+  {
+    "id": "AM04",
+    "prompt": "I just pip installed cudaq-qec-cu12. What is the simplest hello-world example for the surface code I can run to make sure things work?",
+    "owner": "cudaq-quickstart",
+    "allowed_co_activators": [],
+    "_notes": "build skill used to leak in via cudaq-qec-cu12 literal."
+  },
+  {
+    "id": "AM05",
+    "prompt": "I want to add a new skill called cudaq-mpi-runtime to the repo and open a PR. What's the file layout, the frontmatter format, and the sign-off process?",
+    "owner": "cudaq-skills-authoring",
+    "allowed_co_activators": ["cudaq-contributing"],
+    "_notes": "Genuinely two-owner: skill content (skills-authoring) + PR mechanics (contributing)."
+  },
+  {
+    "id": "AM06",
+    "prompt": "I want to run ADAPT-VQE on H2 with a UCCSD operator pool and an LBFGS optimizer. How do I set up the molecule and choose the active space?",
+    "owner": "cudaq-solvers-chemistry",
+    "allowed_co_activators": ["cudaq-solvers-algorithms"],
+    "_notes": "Genuinely two-owner: chemistry sets up the molecule, algorithms picks ADAPT/LBFGS."
+  },
+  {
+    "id": "AM07",
+    "prompt": "Why does test_examples.sh fail in CI when I open a PR? It passes locally with ctest but the wheel validation step keeps timing out.",
+    "owner": "cudaq-contributing",
+    "allowed_co_activators": [],
+    "_notes": "build used to leak in via test_examples.sh / wheel validation literals."
+  },
+  {
+    "id": "AM08",
+    "prompt": "Compare ADAPT-VQE vs basic VQE energy convergence on H2 with reproducible error bars for a paper plot.",
+    "owner": "cudaq-benchmarking",
+    "allowed_co_activators": ["cudaq-solvers-algorithms"]
+  },
+  {
+    "id": "AM09",
+    "prompt": "Profile my MLP decoder training loop with the PyTorch profiler — the GPU utilization is too low and I want to see where the bottleneck is.",
+    "owner": "cudaq-profiling-perf",
+    "allowed_co_activators": ["cudaq-qec-ai-decoders"]
+  },
+  {
+    "id": "AM10",
+    "prompt": "What's the difference between code-capacity noise and circuit-level noise when sampling from a DEM for the surface code?",
+    "owner": "cudaq-qec-decode",
+    "allowed_co_activators": []
+  },
+  {
+    "id": "AM11",
+    "prompt": "Pick a basis set for a Cr2 active space study, charge 0, singlet ground state.",
+    "owner": "cudaq-solvers-chemistry",
+    "allowed_co_activators": []
+  },
+  {
+    "id": "AM12",
+    "prompt": "I want to register a custom belief-propagation decoder as a plugin in the QEC library and have it discoverable through cudaq_qec.get_decoder.",
+    "owner": "cudaq-qec-extending",
+    "allowed_co_activators": []
+  },
+  {
+    "id": "AM13",
+    "prompt": "How do I call configure_decoders_from_file with a multi_decoder_config YAML to set up a sliding window in-kernel?",
+    "owner": "cudaq-qec-realtime",
+    "allowed_co_activators": []
+  },
+  {
+    "id": "AM14",
+    "prompt": "I've never used cudaq before. Can you walk me through the very first thing I should run after installing it?",
+    "owner": "cudaq-quickstart",
+    "allowed_co_activators": []
+  },
+  {
+    "id": "AM15",
+    "prompt": "I want to register a custom UCCGSD-style operator pool plugin in cudaq_solvers and use it with ADAPT-VQE.",
+    "owner": "cudaq-solvers-extending",
+    "allowed_co_activators": ["cudaq-solvers-algorithms"]
+  },
+  {
+    "id": "AM16",
+    "prompt": "ninja install fails with 'libgfortran.so.5 not found' when building cudaq-solvers from source.",
+    "owner": "cudaq-build",
+    "allowed_co_activators": []
+  },
+  {
+    "id": "AM17",
+    "prompt": "How do I train a transformer decoder on Stim circuit data, export it to ONNX, and build a TensorRT engine?",
+    "owner": "cudaq-qec-ai-decoders",
+    "allowed_co_activators": []
+  },
+  {
+    "id": "AM18",
+    "prompt": "What's the weather like today?",
+    "owner": null,
+    "allowed_co_activators": [],
+    "_notes": "Off-domain control: no skill should fire."
+  }
+]
