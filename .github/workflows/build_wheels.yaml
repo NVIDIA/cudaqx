@@ -138,9 +138,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ['3.11', '3.12', '3.13']
-        platform: ['amd64', 'arm64']
-        cuda_version: ['12.6', '13.0']
+        # TEMP(PR767-test): trimmed to one combination. Restore
+        #   python: ['3.11', '3.12', '3.13']
+        #   platform: ['amd64', 'arm64']
+        #   cuda_version: ['12.6', '13.0']
+        # before merging.
+        python: ['3.11']
+        platform: ['amd64']
+        cuda_version: ['12.6']
         toolchain:
           - cc: gcc-12
             cxx: g++-12
@@ -297,8 +302,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: ['amd64', 'arm64']
-        cuda_version: ['12.6', '13.0']
+        # TEMP(PR767-test): trimmed to one combination. Restore
+        #   platform: ['amd64', 'arm64']
+        #   cuda_version: ['12.6', '13.0']
+        # before merging.
+        platform: ['amd64']
+        cuda_version: ['12.6']
     # Use 32 CPUs rather than 8 (above) because we are only spawning one job per
     # platform rather than one job per Python version per platform.
     runs-on: ${{ startsWith(github.repository, 'NVIDIA/cudaqx') && format('linux-{0}-cpu32', matrix.platform) || 'ubuntu-latest' }}
@@ -356,8 +365,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ['3.11', '3.12', '3.13']
-        platform: ['amd64', 'arm64']
+        # TEMP(PR767-test): trimmed to one combination. Restore
+        #   python: ['3.11', '3.12', '3.13']
+        #   platform: ['amd64', 'arm64']
+        # before merging.
+        python: ['3.11']
+        platform: ['amd64']
         cuda_version: ['12.6'] # intentionally not 13.0 because this is CPU.
   
     steps:
@@ -444,7 +457,10 @@ jobs:
   test-wheels-gpu:
     name: Test CUDA-QX wheels (GPU)
     needs: [build-cudaqx-wheels, build-cudaq-wheels]
-    if: ${{ !failure() && !cancelled() }}
+    # TEMP(PR767-test): GPU wheel tests disabled to keep the manual run cheap;
+    # the artifact-name fix is exercised by the CPU test jobs. Restore
+    # `if: ${{ !failure() && !cancelled() }}` before merging.
+    if: false
     runs-on: linux-${{ matrix.runner.arch }}-gpu-${{ matrix.runner.gpu }}-latest-1
     container:
       image: nvidia/cuda:${{ matrix.cuda_version }}.0-base-ubuntu24.04
