@@ -411,7 +411,7 @@ TEST(DecoderYAMLTest, TransportSectionAndMixedDispatch) {
   multi_config.decoders.push_back(dg_decoder);
   multi_config.transport.provider = "udp";
   multi_config.transport.args = {"--num-slots=8"};
-  multi_config.transport.device_graph.provider = "hololink";
+  multi_config.transport.device_graph.provider = "gpu_roce";
   multi_config.transport.device_graph.args = {"--pinned-rings"};
   test_decoder_yaml_roundtrip(multi_config);
 
@@ -423,7 +423,7 @@ transport:
   provider:      udp
   args:          [--num-slots=8]
   device_graph:
-    provider:    hololink
+    provider:    gpu_roce
     args:        [--pinned-rings]
 decoders:
   - id:            0
@@ -448,7 +448,7 @@ decoders:
   EXPECT_EQ(parsed.transport.provider, "udp");
   ASSERT_EQ(parsed.transport.args.size(), 1u);
   EXPECT_EQ(parsed.transport.args[0], "--num-slots=8");
-  EXPECT_EQ(parsed.transport.device_graph.provider, "hololink");
+  EXPECT_EQ(parsed.transport.device_graph.provider, "gpu_roce");
   ASSERT_EQ(parsed.transport.device_graph.args.size(), 1u);
   EXPECT_EQ(parsed.transport.device_graph.args[0], "--pinned-rings");
   ASSERT_EQ(parsed.decoders.size(), 2u);

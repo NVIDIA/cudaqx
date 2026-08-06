@@ -65,7 +65,8 @@ private:
 /// destroyed.  For host-copy transports (CQR, Loopback, CPU ring buffer path)
 /// it is always null — the copy itself constitutes "release."  For GPU ring
 /// buffer transports (full RelayBP path), the frame must be kept alive until
-/// GPU decode completes so the slot is not returned to Hololink early.
+/// GPU decode completes so the slot is not returned to GpuRoceTransceiver
+/// early.
 struct RxFrame {
   std::vector<uint8_t> buf; ///< RPCHeader + payload (owned copy)
   uint32_t vp_id = 0;

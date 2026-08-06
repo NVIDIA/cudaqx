@@ -26,7 +26,7 @@ namespace cudaq::qec::decoding::config {
 /// device_graph: requests are dispatched on the GPU by the self-relaunching
 ///               device-graph scheduler (DeviceGraphTransceiver); requires a
 ///               decoder with a captured decode graph and a provider whose
-///               rings are GPU-visible (e.g. Hololink/DOCA).
+///               rings are GPU-visible (e.g. GpuRoceTransceiver/DOCA).
 /// YAML key: `dispatch: host|device_graph`.
 enum class DecoderDispatch { host, device_graph };
 
@@ -118,7 +118,11 @@ struct decoder_config {
 /// Transport override applied to the rings of one dispatch shape (see the
 /// `device_graph` member of `transport_config`).
 struct transport_shape_override {
-  /// Provider name (e.g. udp, cpu_roce, hololink) or /path/to/lib.so.
+  /// Provider name (e.g. udp, cpu_roce, gpu_roce) or /path/to/lib.so.
+  /// A bare name resolves to the CUDA-Q realtime provider library whose
+  /// soname is "libcudaq-realtime-bridge-" + name + ".so", with '_' in the
+  /// name mapping to '-' to match the shipped hyphenated sonames (so
+  /// gpu_roce loads libcudaq-realtime-bridge-gpu-roce.so).
   /// Empty = inherit the section/CLI default.
   std::string provider;
   /// Extra provider arguments appended for this shape's rings.
@@ -137,7 +141,7 @@ struct transport_shape_override {
 ///     provider: udp
 ///     args: [--slot-size=256]
 ///     device_graph:
-///       provider: udp          # "hololink" on an HSB rig
+///       provider: udp          # "gpu_roce" on an HSB rig
 ///       args: [--pinned-rings]
 ///
 /// Resolution per ring: shape override (device_graph rings) > this

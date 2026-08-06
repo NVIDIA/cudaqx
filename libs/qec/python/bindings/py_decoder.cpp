@@ -713,7 +713,10 @@ void bindDecoder(nb::module_ &mod) {
             nb::gil_scoped_release release;
             return async_decoder_result(dec.decode_async(syndrome));
           },
-          "Asynchronously decode the given syndrome", nb::arg("syndrome"))
+          "Asynchronously decode the given syndrome", nb::arg("syndrome"),
+          // The worker dereferences the decoder, and ~async_decoder_result
+          // joins it before nanobind drops this reference.
+          nb::keep_alive<0, 1>())
       .def(
           "decode_batch",
           [](decoder &decoder,

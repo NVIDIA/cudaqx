@@ -124,6 +124,14 @@ jobs:
       cache_key_suffix: nightly
       cudaq_repo: ${{ needs.resolve-cudaq-main.outputs.repo }}
       cudaq_ref: ${{ needs.resolve-cudaq-main.outputs.ref }}
+      # This workflow runs build_wheels.yaml a second time within the same run
+      # (see the `wheels` job above, which builds against the pinned
+      # .cudaq_version). Without distinct artifact names the two instances
+      # upload artifacts under identical names, and the test jobs then download
+      # whichever instance happened to finish last. That mixes CUDA-QX wheels
+      # built against one CUDA-Q with the libcudaq of another, producing
+      # sporadic `undefined symbol` ImportErrors.
+      artifact_name_suffix: -cudaq-main
     secrets: inherit
 
   cleanup-nightly-cache:
