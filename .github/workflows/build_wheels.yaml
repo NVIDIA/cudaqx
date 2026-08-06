@@ -42,7 +42,7 @@ on:
         required: false
       artifact_name_suffix:
         type: string
-        description: Optional suffix to append to every artifact name. Required when more than one instance of this workflow runs within a single parent run, so the instances do not overwrite each other's artifacts. Must match the value used by the run referenced by artifacts_from_run.
+        description: Optional suffix to append to the CUDA-Q wheel, CUDA-QX wheel and metapackage artifact names. Required when more than one instance of this workflow runs within a single parent run, so the instances do not overwrite each other's artifacts. Must match the value used by the run referenced by artifacts_from_run.
         required: false
   workflow_call:
     inputs:
@@ -85,7 +85,7 @@ on:
         required: false
       artifact_name_suffix:
         type: string
-        description: Optional suffix to append to every artifact name. Required when more than one instance of this workflow runs within a single parent run, so the instances do not overwrite each other's artifacts.
+        description: Optional suffix to append to the CUDA-Q wheel, CUDA-QX wheel and metapackage artifact names. Required when more than one instance of this workflow runs within a single parent run, so the instances do not overwrite each other's artifacts.
         default: ''
         required: false
     secrets:
@@ -115,7 +115,7 @@ jobs:
       - name: Upload release assets
         uses: actions/upload-artifact@v4
         with:
-          name: release-assets${{ inputs.artifact_name_suffix }}
+          name: release-assets
           path: '*.tar.gz'
           if-no-files-found: error
           retention-days: 1
@@ -205,7 +205,7 @@ jobs:
         if: ${{ inputs.assets_repo != '' && inputs.assets_tag != '' }}
         uses: actions/download-artifact@v4
         with:
-          name: release-assets${{ inputs.artifact_name_suffix }}
+          name: release-assets
           path: .
 
       - name: Get required CUDAQ version
