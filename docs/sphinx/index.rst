@@ -18,7 +18,7 @@ solvers.
    :maxdepth: 1
    :caption: Libraries
 
-   components/qec/introduction
+   components/qec/index
    components/solvers/introduction
 
 .. toctree::
@@ -27,6 +27,12 @@ solvers.
 
    examples_rst/qec/examples
    examples_rst/solvers/examples
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Performance Studies
+
+   performance/index
 
 .. toctree::
    :maxdepth: 1
@@ -41,7 +47,7 @@ solvers.
 Key Features
 -------------
 
-CUDA-QX is composed of two distinct libraries that build upon CUDA-Q programming model.
+CUDA-QX is composed of two distinct libraries that build upon the CUDA-Q programming model.
 The libraries provided are cudaq-qec, a library enabling performant research workflows
 for quantum error correction, and cudaq-solvers, a library that provides high-level
 APIs for common quantum-classical solver workflows.
@@ -59,9 +65,8 @@ APIs for common quantum-classical solver workflows.
     * Quantum Approximate Optimization Algorithm (QAOA)
     * More to come...
 
-Indices and Tables
-------------------
+Indices
+-------
 
 * :ref:`genindex`
-* :ref:`modindex`
 * :ref:`search`

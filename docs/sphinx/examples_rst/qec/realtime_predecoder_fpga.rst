@@ -524,3 +524,9 @@ Run Options
      - ``8193``
      - UDP control port for emulator
 
+See Also
+--------
+
+* :doc:`Realtime Decoding </components/qec/realtime_decoding>` -- concept and workflow
+* :doc:`Getting Started with Realtime Decoding </examples_rst/qec/getting_started_realtime_decoding>`
+* :ref:`C++ <cpp_realtime_decoding_api>` and :ref:`Python <python_realtime_decoding_api>` realtime decoding API

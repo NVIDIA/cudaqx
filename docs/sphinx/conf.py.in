@@ -137,6 +137,7 @@ html_theme = 'sphinx_rtd_theme'
 # documentation.
 html_theme_options = {
     "collapse_navigation": False,
+    "navigation_depth": 4,
     "sticky_navigation": False,
     "prev_next_buttons_location": "both",
     "style_nav_header_background":
@@ -229,7 +230,15 @@ intersphinx_mapping = {
     'cudaq': ('https://nvidia.github.io/cuda-quantum/latest', None)
 }
 
-redirects = {"versions": "../latest/releases.html"}
+redirects = {
+    "versions": "../latest/releases.html",
+    "components/qec/introduction": "index.html",
+    "examples_rst/qec/code_capacity_noise": "modeling_noise.html",
+    "examples_rst/qec/circuit_level_noise": "modeling_noise.html",
+    "examples_rst/qec/stim_dem_decoder": "decoders.html",
+    "examples_rst/qec/dem_sampling": "decoders.html",
+    "examples_rst/qec/nv_qldpc_gamma_ensemble_user_guide": "../../performance/nv_qldpc_gamma_ensemble_user_guide.html",
+}
 
 nitpick_ignore = [
     ('cpp:identifier', 'pid_t'),
