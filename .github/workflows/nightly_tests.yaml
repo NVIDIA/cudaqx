@@ -1,35 +1,5 @@
 name: Nightly tests
 
-# =============================================================================
-# TEMP(PR767-test): DO NOT MERGE. Revert this entire block and every
-# "TEMP(PR767-test)" marker in this file and in build_wheels.yaml before merging.
-#
-# Purpose: exercise the artifact-name collision fix with a pared-down manual
-# nightly (workflow_dispatch) instead of the full ~2h nightly.
-#
-# What is temporarily changed here:
-#   1. resolve-cudaq-main pins CUDA-Q to 7f0f524a09 instead of resolving main.
-#      That is the ref from nightly run 30883444365 (2026-08-04), which is
-#      post-#5005 and therefore ABI-incompatible with the pinned .cudaq_version
-#      (90b0f4d8, pre-#5005). This recreates the exact skew that produced
-#      "undefined symbol: _ZNK5cudaq16quantum_platform13validateQpuIdEm".
-#   2. build-cudaq-main is disabled. It only populates the /cudaq-install cache
-#      for the lib jobs; the wheel path builds its own CUDA-Q wheels. Disabling
-#      it also transitively skips cudaq-main-{all-libs,qec,solvers,docs}, whose
-#      `needs` include it.
-#   3. cudaq-main-wheels no longer needs build-cudaq-main.
-#   4. cleanup-nightly-cache is disabled so it does not delete the warm
-#      "-nightly" caches (including the pinned CUDA-Q wheels) that keep this
-#      test and its negative-control re-run cheap.
-#
-# build_wheels.yaml is trimmed to one matrix combination; see markers there.
-#
-# Expected result WITH the fix: both "Test CUDA-QX wheels (CPU)" jobs pass and
-# every artifact name is unique. Negative control: drop the
-# "artifact_name_suffix: -cudaq-main" line below and re-run; the pinned
-# instance's test job should then fail on the undefined symbol above.
-# =============================================================================
-
 on:
   schedule:
     - cron: '30 5 * * *' # Runs at 5:30am UTC
@@ -56,10 +26,7 @@ jobs:
         id: resolve
         run: |
           repo=NVIDIA/cuda-quantum
-          # TEMP(PR767-test): pinned instead of resolving main. Restore the
-          # git ls-remote line below before merging.
-          # ref=$(git ls-remote "https://github.com/${repo}.git" refs/heads/main | awk '{print $1}')
-          ref=7f0f524a095143d4ab8d27a8d1fabb2008b29975
+          ref=$(git ls-remote "https://github.com/${repo}.git" refs/heads/main | awk '{print $1}')
 
           if [[ -z "$ref" ]]; then
             echo "Failed to resolve ${repo}@main"
@@ -73,9 +40,6 @@ jobs:
 
   build-cudaq-main:
     name: Build CUDA-Q main
-    # TEMP(PR767-test): disabled; remove this `if` before merging. This also
-    # transitively skips cudaq-main-{all-libs,qec,solvers,docs}.
-    if: false
     needs: resolve-cudaq-main
     strategy:
       fail-fast: false
@@ -152,9 +116,7 @@ jobs:
 
   cudaq-main-wheels:
     name: Wheels against CUDA-Q main
-    # TEMP(PR767-test): build-cudaq-main dropped from needs; restore
-    # `[resolve-cudaq-main, build-cudaq-main]` before merging.
-    needs: [resolve-cudaq-main]
+    needs: [resolve-cudaq-main, build-cudaq-main]
     uses: ./.github/workflows/build_wheels.yaml
     with:
       build_type: Release
@@ -174,9 +136,7 @@ jobs:
 
   cleanup-nightly-cache:
     name: Clean up nightly cache
-    # TEMP(PR767-test): disabled so the warm "-nightly" caches survive for the
-    # negative-control re-run. Restore `if: ${{ always() }}` before merging.
-    if: false
+    if: ${{ always() }}
     needs:
       - wheels
       - resolve-cudaq-main
