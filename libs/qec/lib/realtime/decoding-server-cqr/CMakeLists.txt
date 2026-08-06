@@ -96,10 +96,8 @@ if(NOT CUDAQ_REALTIME_INCLUDE_DIR)
 endif()
 
 add_library(cudaq-qec-decoding-server STATIC
-  RoundAccumulator.cpp
   DecodingSession.cpp
   SessionRegistry.cpp
-  RpcDispatcher.cpp
   DecodingServer.cpp
 )
 

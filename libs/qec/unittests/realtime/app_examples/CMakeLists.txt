@@ -930,10 +930,14 @@ if(TARGET surface_code-4-yaml-cqr)
 
   # A real-workload skew case: all three patches use PyMatching, but patch 1
   # receives a much higher physical error rate and a correspondingly generated
-  # decoder model. This exercises independent server workers without a
-  # test-only delay in the decoder implementation.
+  # decoder model. This exercises independent per-ring dispatchers without a
+  # test-only delay in the decoder implementation.  Requests execute inline
+  # on the dispatcher threads, so the >=2 concurrency evidence comes from
+  # patch 1's slow decode overlapping a neighbor's — an opportunistic race
+  # per shot; 500 shots make observing at least one overlap statistically
+  # certain (the deterministic proof is the three-way-overlap barrier test).
   add_surface_code_4_yaml_external_test(hard-patch-pymatching 7 7
-    "pymatching,pymatching,pymatching" 100
+    "pymatching,pymatching,pymatching" 500
     --p_spam_per_patch 0.001,0.20,0.001)
   set_property(TEST app_examples.surface_code-4-yaml-cqr-hard-patch-pymatching
     APPEND PROPERTY ENVIRONMENT
