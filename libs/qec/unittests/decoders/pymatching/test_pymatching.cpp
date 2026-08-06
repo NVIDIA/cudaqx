@@ -186,6 +186,12 @@ TEST(PyMatchingDecoder, AcceptsAllMergeStrategiesAndRejectsUnknown) {
                std::runtime_error);
 }
 
+// Parallel columns share one matching edge, so an error frame has to name one
+// of them. The column named is the one whose parameters the graph actually
+// holds after the merge: KEEP_ORIGINAL and INDEPENDENT retain the first
+// column's observables, REPLACE adopts the last, SMALLEST_WEIGHT adopts
+// whichever weight is smaller. Baseline main named the last column for every
+// strategy, which contradicts the retained edge for the first two.
 TEST(PyMatchingDecoder, ErrorOutputTracksMergedParallelEdgeColumn) {
   cudaqx::tensor<uint8_t> H;
   const std::vector<uint8_t> H_vec = {1, 1};
