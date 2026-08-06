@@ -97,11 +97,6 @@ decoder::decoder(decoder_inputs inputs, decoder_output requested_output)
   // here, from the model. Nothing arrives later: a decoder is usable as soon
   // as it is constructed.
   if (const auto *D = inputs_.measurement_to_detectors()) {
-    if (D->num_rows() != syndrome_size)
-      throw std::invalid_argument(fmt::format(
-          "measurement-to-detector map row count ({}) must match the model's "
-          "detector count ({})",
-          D->num_rows(), syndrome_size));
     pimpl->measurement_to_detectors = D->to_nested_csr();
     pimpl->num_msyn_per_decode = D->num_cols();
   }
@@ -125,10 +120,12 @@ void decoder::project_errors_to_observables(
   // are fixed by construction, so they are not re-checked here. There is one
   // observable model -- the one this decoder was constructed with -- so there
   // is no second source to fall back to.
+  if (!inputs_.has_observable_model())
+    throw std::runtime_error("decoder was asked to project an error frame onto "
+                             "observables but its model supplies no observable "
+                             "mapping");
   if (observables_size > 0)
     std::fill(observables, observables + observables_size, float_t{0});
-  if (!inputs_.has_observable_model())
-    return;
 
   const auto &O = inputs_.observable_flips_matrix();
   assert(O.layout() == sparse_binary_matrix_layout::csr);
@@ -464,9 +461,6 @@ bool decoder::enqueue_syndrome(const uint8_t *syndrome,
       expected_result_size = num_observables;
       break;
     }
-    if (!result_type_name)
-      throw std::runtime_error(fmt::format(
-          "Unsupported decoder result type ({})", static_cast<int>(output_)));
     if ((!pimpl->round_streaming_initialized &&
          decoded_values.size() != expected_result_size) ||
         (pimpl->round_streaming_initialized && !decoded_values.empty() &&
@@ -600,8 +594,6 @@ const uint8_t *decoder::get_obs_corrections() const {
 }
 
 std::size_t decoder::get_num_observables() const {
-  // The model owns the count whenever it supplies an observable mapping, even
-  // a zero-row one. The late-setter fallback serves only H-only inputs.
   return inputs_.num_observables();
 }
 

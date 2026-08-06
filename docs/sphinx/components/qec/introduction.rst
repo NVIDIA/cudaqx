@@ -633,9 +633,12 @@ To implement a new decoder:
 
     public:
         my_decoder(qec::decoder_inputs inputs,
+                   qec::decoder_output requested_output,
                    const heterogeneous_map& params)
-            : decoder(std::move(inputs)) {
-            // Initialize decoder
+            : decoder(std::move(inputs), requested_output) {
+            // All model data is available here. Reject a result form this
+            // decoder cannot produce, so an unsupported request fails at
+            // construction rather than on the first decode.
         }
 
         decoder_result decode(
@@ -652,18 +655,20 @@ To implement a new decoder:
         my_decoder,
         static std::unique_ptr<decoder> create(
             qec::decoder_inputs inputs,
+            std::optional<qec::decoder_output> requested_output,
             const heterogeneous_map& params) {
-            return qec::make_pcm_decoder<my_decoder>(std::move(inputs), params);
+            return std::make_unique<my_decoder>(
+                std::move(inputs),
+                requested_output.value_or(qec::decoder_output::errors),
+                params);
         }
     )
 
     CUDAQ_EXT_PT_REGISTER_TYPE(my_decoder)
 
-The :code:`make_pcm_decoder` helper is a transitional adapter for matrix-family
-decoders. The factory always receives :code:`decoder_inputs`; the helper passes
-that stable input handle to the decoder and supplies legacy constructor
-defaults while decoder implementations migrate to reading model data directly
-from the owned inputs.
+The factory receives the model as :code:`decoder_inputs` and the caller's
+result form as an optional :code:`decoder_output`. A decoder that supports one
+form only should default the request to that form and reject any other.
 
 Example: Lookup Table Decoder
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

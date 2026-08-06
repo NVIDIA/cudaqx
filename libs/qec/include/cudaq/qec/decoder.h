@@ -209,14 +209,6 @@ public:
   }
 
   static std::unique_ptr<decoder>
-  get(const std::string &name, const cudaq::qec::sparse_binary_matrix &H,
-      decoder_output output,
-      const cudaqx::heterogeneous_map &param_map =
-          cudaqx::heterogeneous_map()) {
-    return get(name, decoder_inputs{H}, output, param_map);
-  }
-
-  static std::unique_ptr<decoder>
   get(const std::string &name, const cudaqx::tensor<uint8_t> &H,
       const cudaqx::heterogeneous_map &param_map =
           cudaqx::heterogeneous_map()) {
@@ -228,35 +220,6 @@ public:
       const cudaqx::heterogeneous_map &param_map =
           cudaqx::heterogeneous_map()) {
     return get(name, decoder_inputs::from_stim_dem(stim_dem_text), param_map);
-  }
-
-  /// Each raw-DEM spelling needs its own explicit-output overload: string_view
-  /// does not convert to const std::string&, and with both present a string
-  /// literal would otherwise be ambiguous between them.
-  static std::unique_ptr<decoder>
-  get(const std::string &name, const std::string &stim_dem_text,
-      decoder_output output,
-      const cudaqx::heterogeneous_map &param_map =
-          cudaqx::heterogeneous_map()) {
-    return get(name, decoder_inputs::from_stim_dem(stim_dem_text), output,
-               param_map);
-  }
-
-  static std::unique_ptr<decoder>
-  get(const std::string &name, const char *stim_dem_text, decoder_output output,
-      const cudaqx::heterogeneous_map &param_map =
-          cudaqx::heterogeneous_map()) {
-    return get(name, decoder_inputs::from_stim_dem(stim_dem_text), output,
-               param_map);
-  }
-
-  static std::unique_ptr<decoder>
-  get(const std::string &name, std::string_view stim_dem_text,
-      decoder_output output,
-      const cudaqx::heterogeneous_map &param_map =
-          cudaqx::heterogeneous_map()) {
-    return get(name, decoder_inputs::from_stim_dem(std::string{stim_dem_text}),
-               output, param_map);
   }
 
   static std::unique_ptr<decoder>
@@ -391,8 +354,8 @@ protected:
   /// @param detector_layer_offsets Offsets `[0, w0, w0+w1, ...]`; `back()`
   /// must equal the model's detector count.
   /// @throws std::logic_error if called more than once. This is construction
-  /// state, not a reconfiguration point: re-entering it on a live decoder is
-  /// the mid-stream buffer reset that fixing this lifecycle removed.
+  /// state, not a reconfiguration point: re-entering it on a live decoder
+  /// would reset its buffers mid-stream.
   void
   initialize_streaming_layout(std::size_t num_syndromes_per_round,
                               std::vector<std::size_t> detector_layer_offsets);
@@ -585,13 +548,6 @@ get_decoder(const std::string &name, const cudaq::qec::sparse_binary_matrix &H,
 }
 
 inline std::unique_ptr<decoder>
-get_decoder(const std::string &name, const cudaq::qec::sparse_binary_matrix &H,
-            decoder_output output,
-            const cudaqx::heterogeneous_map options = {}) {
-  return get_decoder(name, decoder_inputs{H}, output, options);
-}
-
-inline std::unique_ptr<decoder>
 get_decoder(const std::string &name, const cudaqx::tensor<uint8_t> &H,
             const cudaqx::heterogeneous_map options = {}) {
   return get_decoder(name, cudaq::qec::sparse_binary_matrix(H), options);
@@ -607,31 +563,6 @@ get_decoder(const std::string &name, const std::string &stim_dem_text,
 /// Each raw-DEM spelling needs its own explicit-output overload: string_view
 /// does not convert to const std::string&, and with both present a string
 /// literal would otherwise be ambiguous between them.
-inline std::unique_ptr<decoder>
-get_decoder(const std::string &name, const std::string &stim_dem_text,
-            decoder_output output,
-            const cudaqx::heterogeneous_map options = {}) {
-  return get_decoder(name, decoder_inputs::from_stim_dem(stim_dem_text), output,
-                     options);
-}
-
-inline std::unique_ptr<decoder>
-get_decoder(const std::string &name, const char *stim_dem_text,
-            decoder_output output,
-            const cudaqx::heterogeneous_map options = {}) {
-  return get_decoder(name, decoder_inputs::from_stim_dem(stim_dem_text), output,
-                     options);
-}
-
-inline std::unique_ptr<decoder>
-get_decoder(const std::string &name, std::string_view stim_dem_text,
-            decoder_output output,
-            const cudaqx::heterogeneous_map options = {}) {
-  return get_decoder(name,
-                     decoder_inputs::from_stim_dem(std::string{stim_dem_text}),
-                     output, options);
-}
-
 inline std::unique_ptr<decoder>
 get_decoder(const std::string &name, const char *stim_dem_text,
             const cudaqx::heterogeneous_map options = {}) {

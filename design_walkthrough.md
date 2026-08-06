@@ -182,10 +182,11 @@ class decoder_inputs {
   // Build it from whichever source is authoritative. D is optional: it is only
   // meaningful for a decoder fed directly by the measurement transport.
   decoder_inputs(sparse_binary_matrix H,
-                 std::optional<sparse_binary_matrix> O = std::nullopt,
+                 std::optional<sparse_binary_matrix> O,
                  std::vector<double> error_rates = {},
                  std::optional<sparse_binary_matrix> D = std::nullopt,
                  std::optional<std::vector<std::size_t>> error_ids = std::nullopt);
+  explicit decoder_inputs(sparse_binary_matrix H);   // H-only models
 
   static decoder_inputs from_stim_dem(std::string stim_dem_text,
                                       std::optional<sparse_binary_matrix> D = std::nullopt);
@@ -233,7 +234,7 @@ if (!decoder_config.stim_dem_path.empty()) {
   auto dem_text = read_file(resolve_against(base_dir, decoder_config.stim_dem_path));
   return decoder_inputs::from_stim_dem(std::move(dem_text), std::move(D));
 }
-return decoder_inputs::from_matrices(H, O, rates, std::move(D));   // matrix source
+return decoder_inputs(H, O, rates, std::move(D));                  // matrix source
 
 // ...and later, after every decoder's inputs have resolved successfully:
 auto decoder = cudaq::qec::get_decoder(decoder_config.type, std::move(inputs),

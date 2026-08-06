@@ -1021,6 +1021,27 @@ TEST(ConfigureDecodersLifecycle, InvalidModelLeavesPriorConfigurationInPlace) {
   finalize_decoders();
 }
 
+TEST(ConfigureDecodersLifecycle, EmptyLeadingDetectorRowIsRejected) {
+  using namespace cudaq::qec::decoding::config;
+
+  // A -1 in first position is an empty detector row: that detector maps to no
+  // measurement and would decode as permanently zero. The row-emptiness check
+  // once looked only for adjacent -1 pairs, so a leading one reached
+  // construction and produced a silently wrong decoder.
+  multi_decoder_config config;
+  auto leading_empty = create_test_sample_realtime_decoder_config(0);
+  auto &d = leading_empty.D_sparse;
+  d.erase(d.begin(), std::find(d.begin(), d.end(), -1));
+  ASSERT_EQ(d.front(), -1);
+  ASSERT_EQ(std::count(d.begin(), d.end(), -1),
+            std::count(leading_empty.D_sparse.begin(),
+                       leading_empty.D_sparse.end(), -1));
+  config.decoders.push_back(leading_empty);
+  EXPECT_THROW(configure_decoders(config), std::runtime_error);
+
+  finalize_decoders();
+}
+
 TEST(ConfigureDecodersLifecycle, ConstructionFailureIsNotAdvertised) {
   using namespace cudaq::qec::decoding::config;
 

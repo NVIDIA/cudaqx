@@ -227,6 +227,9 @@ void validate_sparse_indices(const std::vector<std::int64_t> &sparse,
 
 void validate_detector_rows(const std::vector<std::int64_t> &d_sparse,
                             std::int64_t id) {
+  if (!d_sparse.empty() && d_sparse.front() == -1)
+    throw std::runtime_error(
+        fmt::format("D_sparse row is empty for decoder {}", id));
   for (std::size_t i = 0; i + 1 < d_sparse.size(); ++i)
     if (d_sparse.at(i) == -1 && d_sparse.at(i + 1) == -1)
       throw std::runtime_error(
@@ -268,15 +271,9 @@ cudaq::qec::decoder_inputs resolve_decoder_inputs(
     std::string dem_text((std::istreambuf_iterator<char>(dem_file)),
                          std::istreambuf_iterator<char>());
 
-    // Known gap, deliberately not addressed here: the model is identified by
-    // path, and a reload compares configurations. An operator who edits a DEM
-    // in place leaves the configuration byte-identical, so the reload sees no
-    // change and keeps serving the previous model. Closing this needs the
-    // reload path to compare model content (a hash in the effective
-    // configuration) or to always reconstruct decoders that reference an
-    // external file. That belongs with the transactional reload work, which
-    // owns configuration comparison; until then, change the path to change the
-    // model.
+    // The model is identified by path, so editing a DEM in place leaves the
+    // configuration byte-identical and a reload keeps serving the old model.
+    // Change the path to change the model.
 
     auto inputs = cudaq::qec::decoder_inputs::from_stim_dem(std::move(dem_text),
                                                             std::move(D));
@@ -359,9 +356,6 @@ std::unique_ptr<cudaq::qec::decoder> create_realtime_decoder(
   CUDA_QEC_INFO("Creating decoder {} of type {}", decoder_config.id,
                 decoder_config.type);
 
-  if (!inputs.measurement_to_detectors())
-    throw std::runtime_error(
-        "resolved decoder inputs carry no measurement-to-detector map");
   auto decoder =
       cudaq::qec::get_decoder(decoder_config.type, std::move(inputs),
                               cudaq::qec::decoder_output::observables,
@@ -400,8 +394,7 @@ int configure_decoders(
 
   // A live session holds a reference to g_decoders and inspects it at
   // initialize(), so replacing decoders underneath it is unsafe. Reject before
-  // doing any expensive work; callers must finalize first. PR #695 replaces
-  // this guard with real quiescence and rollback.
+  // doing any expensive work; callers must finalize first.
   if (g_realtime_session) {
     CUDA_QEC_WARN("Cannot reconfigure decoders while a realtime session is "
                   "active; call finalize_decoders() first.");

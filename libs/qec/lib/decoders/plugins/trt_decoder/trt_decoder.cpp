@@ -601,7 +601,8 @@ trt_decoder::trt_decoder(cudaq::qec::decoder_inputs inputs,
            trt_engine_output_format::observables_and_residual_detectors) &&
       requested_output != decoder_output::observables)
     throw std::runtime_error(
-        "This TensorRT engine_output_format only supports observable output");
+        "engine_output_format declares observables, so this decoder cannot be "
+        "constructed for error-frame output");
 
   // An engine that emits an error frame can still serve an observable-output
   // instance, but only by projecting through the model's O. Without an
