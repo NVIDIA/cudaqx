@@ -343,8 +343,7 @@ void DecodingSession::handle_enqueue(const void *rx_slot, void *tx_slot,
   slot::write_response(tx_slot, rid, ptp, RpcStatus::OK);
 }
 
-void DecodingSession::handle_get_corrections(const void *rx_slot,
-                                             void *tx_slot,
+void DecodingSession::handle_get_corrections(const void *rx_slot, void *tx_slot,
                                              std::size_t slot_size) noexcept {
   SingleCallerGuard serial_guard(*this);
   ++get_corrections_count;
@@ -372,10 +371,10 @@ void DecodingSession::handle_get_corrections(const void *rx_slot,
     // The corrections pack straight into the tx slot's payload area; the
     // header (and the magic, last) follow in commit().  result-too-large is
     // detected by the core against the slot capacity — no truncation.
-    status = get_corrections_core(
-        req.return_size, req.reset,
-        static_cast<uint8_t *>(tx_slot) + sizeof(RPCResponse),
-        slot_size - sizeof(RPCResponse), out_len);
+    status = get_corrections_core(req.return_size, req.reset,
+                                  static_cast<uint8_t *>(tx_slot) +
+                                      sizeof(RPCResponse),
+                                  slot_size - sizeof(RPCResponse), out_len);
   } catch (const std::exception &e) {
     cudaq::qec::error("DecodingSession::handle_get_corrections: {}", e.what());
     ++error_count;
@@ -396,7 +395,8 @@ void DecodingSession::handle_reset(const void *rx_slot, void *tx_slot,
                                    std::size_t slot_size) noexcept {
   SingleCallerGuard serial_guard(*this);
   ++reset_count;
-  hopstats::StageScope stats(cudaq::qec::decoding::rpc::kResetDecoderFunctionId);
+  hopstats::StageScope stats(
+      cudaq::qec::decoding::rpc::kResetDecoderFunctionId);
 
   slot::ResetView req;
   if (!slot::parse_reset(rx_slot, slot_size, req)) {

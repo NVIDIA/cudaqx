@@ -155,8 +155,7 @@ static void dispatch_rpc(const void *rx_slot, void *tx_slot,
     cudaq::qec::decoding_server::hopstats::on_dispatcher_thread();
     // An unreadable slot cannot even echo a request_id; leave it to the
     // transport (same contract as before this path existed).
-    if (!rx_slot || !tx_slot ||
-        slot_size < sizeof(cudaq::realtime::RPCHeader))
+    if (!rx_slot || !tx_slot || slot_size < sizeof(cudaq::realtime::RPCHeader))
       return;
     const auto *hdr = static_cast<const cudaq::realtime::RPCHeader *>(rx_slot);
     if (hdr->magic != cudaq::realtime::RPC_MAGIC_REQUEST) {

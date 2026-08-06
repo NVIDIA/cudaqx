@@ -276,14 +276,13 @@ inline void report() {
         sum += v;
       const double avg =
           static_cast<double>(sum) / static_cast<double>(vals.size()) / 1000.0;
-      std::printf(
-          "QEC_HOP_STATS kind=%s metric=%s subset=all count=%zu "
-          "min_us=%.2f avg_us=%.2f p50_us=%.2f p90_us=%.2f p99_us=%.2f "
-          "max_us=%.2f\n",
-          kind_names[kind], m.name, vals.size(), vals.front() / 1000.0, avg,
-          percentile_sorted(vals, 0.50) / 1000.0,
-          percentile_sorted(vals, 0.90) / 1000.0,
-          percentile_sorted(vals, 0.99) / 1000.0, vals.back() / 1000.0);
+      std::printf("QEC_HOP_STATS kind=%s metric=%s subset=all count=%zu "
+                  "min_us=%.2f avg_us=%.2f p50_us=%.2f p90_us=%.2f p99_us=%.2f "
+                  "max_us=%.2f\n",
+                  kind_names[kind], m.name, vals.size(), vals.front() / 1000.0,
+                  avg, percentile_sorted(vals, 0.50) / 1000.0,
+                  percentile_sorted(vals, 0.90) / 1000.0,
+                  percentile_sorted(vals, 0.99) / 1000.0, vals.back() / 1000.0);
     }
   }
 

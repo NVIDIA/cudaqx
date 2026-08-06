@@ -369,8 +369,8 @@ TEST(DecodingSessionInline, MalformedRequestsRespondBadRequest) {
   expect_tx_status(tx, RpcStatus::BAD_REQUEST, 5);
 
   // get_corrections with a short payload.
-  auto gc = make_cqr_slot(kGetCorrectionsFunctionId, 6,
-                          std::vector<uint8_t>(4, 0));
+  auto gc =
+      make_cqr_slot(kGetCorrectionsFunctionId, 6, std::vector<uint8_t>(4, 0));
   session->handle_get_corrections(gc.data(), tx.data(), gc.size());
   expect_tx_status(tx, RpcStatus::BAD_REQUEST, 6);
 
