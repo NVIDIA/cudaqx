@@ -235,6 +235,9 @@ void bindExtendedDem(nb::module_ &mod) {
       .def("phase_sequence", &dem_chunks_spec::phase_sequence,
            "Expand connections into an ordered list of PhaseIds.\n"
            "Requires num_rounds when a self-loop is present.")
+      .def("get_phase", &dem_chunks_spec::get_phase, nb::arg("id"),
+           "Return the DemChunkSpec for the phase with the given PhaseId.\n"
+           "Raises ValueError if no such phase exists.")
       .def("validate", &dem_chunks_spec::validate,
            "Raise ValueError if the spec is inconsistent.");
 
