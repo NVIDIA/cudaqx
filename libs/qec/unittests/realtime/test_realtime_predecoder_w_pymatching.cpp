@@ -294,8 +294,8 @@ int main(int argc, char *argv[]) {
                      ? stim.priors
                      : std::vector<double>{};
     auto inputs =
-        cudaq::qec::decoder_inputs(cudaq::qec::sparse_binary_matrix(H_full),
-                                   std::move(O), std::move(rates));
+        cudaq::qec::decoder_init(cudaq::qec::sparse_binary_matrix(H_full),
+                                 std::move(O), std::move(rates));
 
     std::cout << "[Setup] Creating " << config.num_decode_workers
               << " PyMatching decoders (full H)...\n";

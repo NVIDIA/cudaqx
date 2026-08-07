@@ -352,8 +352,8 @@ DecoderSetup create_decoder_from_yaml(const DemoConfig &demo_cfg) {
 
   setup.decoder = cudaq::qec::decoder::get(
       decoder_config.type,
-      cudaq::qec::decoder_inputs(cudaq::qec::sparse_binary_matrix(setup.H),
-                                 cudaq::qec::sparse_binary_matrix(O)),
+      cudaq::qec::decoder_init(cudaq::qec::sparse_binary_matrix(setup.H),
+                               cudaq::qec::sparse_binary_matrix(O)),
       cudaq::qec::decode_result_type::observables, setup.trt_params);
   return setup;
 }
@@ -407,9 +407,9 @@ DecoderSetup create_decoder_from_cli(const PipelineConfig &config,
 
   setup.decoder = cudaq::qec::decoder::get(
       "trt_decoder",
-      cudaq::qec::decoder_inputs(cudaq::qec::sparse_binary_matrix(H),
-                                 cudaq::qec::sparse_binary_matrix(O),
-                                 stim.priors),
+      cudaq::qec::decoder_init(cudaq::qec::sparse_binary_matrix(H),
+                               cudaq::qec::sparse_binary_matrix(O),
+                               stim.priors),
       cudaq::qec::decode_result_type::observables, setup.trt_params);
   return setup;
 }

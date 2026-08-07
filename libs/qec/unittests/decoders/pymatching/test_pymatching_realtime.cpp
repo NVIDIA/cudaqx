@@ -42,7 +42,7 @@ DecoderVec make_pymatching_decoders(const std::vector<std::uint8_t> &h_vec,
 
   auto decoder = cudaq::qec::decoder::get(
       "pymatching",
-      cudaq::qec::decoder_inputs(
+      cudaq::qec::decoder_init(
           cudaq::qec::sparse_binary_matrix(h),
           cudaq::qec::sparse_binary_matrix::from_nested_csr(
               static_cast<std::uint32_t>(block_size),

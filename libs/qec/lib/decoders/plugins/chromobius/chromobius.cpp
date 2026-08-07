@@ -27,7 +27,7 @@ struct chromobius_init_data {
   stim::DetectorErrorModel dem;
 };
 
-chromobius_init_data make_chromobius_init_data(const decoder_inputs &inputs) {
+chromobius_init_data make_chromobius_init_data(const decoder_init &inputs) {
   if (!inputs.has_stim_dem()) {
     throw std::runtime_error(
         "Chromobius decoder requires a Stim detector error model string as "
@@ -74,7 +74,7 @@ private:
   std::vector<uint8_t> packed_detection_events;
 
 public:
-  chromobius(decoder_inputs inputs, chromobius_init_data init_data,
+  chromobius(decoder_init inputs, chromobius_init_data init_data,
              decode_result_type requested_output,
              const cudaqx::heterogeneous_map &params)
       : decoder(std::move(inputs), requested_output),
@@ -156,7 +156,7 @@ public:
 
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       chromobius, static std::unique_ptr<decoder> create(
-                      cudaq::qec::decoder_inputs inputs,
+                      cudaq::qec::decoder_init inputs,
                       std::optional<decode_result_type> output,
                       const cudaqx::heterogeneous_map &params) {
         auto init_data = make_chromobius_init_data(inputs);

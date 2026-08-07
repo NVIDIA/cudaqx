@@ -49,7 +49,7 @@ private:
   bool decoding_time = false;
 
 public:
-  multi_error_lut(cudaq::qec::decoder_inputs inputs,
+  multi_error_lut(cudaq::qec::decoder_init inputs,
                   decode_result_type requested_output,
                   const cudaqx::heterogeneous_map &params)
       : decoder(std::move(inputs), requested_output) {
@@ -255,7 +255,7 @@ public:
 
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       multi_error_lut, static std::unique_ptr<decoder> create(
-                           cudaq::qec::decoder_inputs inputs,
+                           cudaq::qec::decoder_init inputs,
                            std::optional<decode_result_type> output,
                            const cudaqx::heterogeneous_map &params) {
         return std::make_unique<multi_error_lut>(
@@ -268,7 +268,7 @@ CUDAQ_EXT_PT_REGISTER_TYPE(multi_error_lut)
 
 class single_error_lut : public multi_error_lut {
 public:
-  single_error_lut(cudaq::qec::decoder_inputs inputs,
+  single_error_lut(cudaq::qec::decoder_init inputs,
                    decode_result_type requested_output,
                    const cudaqx::heterogeneous_map &params)
       : multi_error_lut(std::move(inputs), requested_output, params) {}
@@ -277,7 +277,7 @@ public:
 
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       single_error_lut, static std::unique_ptr<decoder> create(
-                            cudaq::qec::decoder_inputs inputs,
+                            cudaq::qec::decoder_init inputs,
                             std::optional<decode_result_type> output,
                             const cudaqx::heterogeneous_map &params) {
         return std::make_unique<single_error_lut>(

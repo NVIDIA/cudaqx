@@ -632,7 +632,7 @@ To implement a new decoder:
         // Decoder-specific members
 
     public:
-        my_decoder(qec::decoder_inputs inputs,
+        my_decoder(qec::decoder_init inputs,
                    qec::decode_result_type requested_output,
                    const heterogeneous_map& params)
             : decoder(std::move(inputs), requested_output) {
@@ -654,7 +654,7 @@ To implement a new decoder:
     CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
         my_decoder,
         static std::unique_ptr<decoder> create(
-            qec::decoder_inputs inputs,
+            qec::decoder_init inputs,
             std::optional<qec::decode_result_type> requested_output,
             const heterogeneous_map& params) {
             return std::make_unique<my_decoder>(
@@ -666,7 +666,7 @@ To implement a new decoder:
 
     CUDAQ_EXT_PT_REGISTER_TYPE(my_decoder)
 
-The factory receives the model as :code:`decoder_inputs` and the caller's
+The factory receives the model as :code:`decoder_init` and the caller's
 result form as an optional :code:`decode_result_type`. A decoder that supports one
 form only should default the request to that form and reject any other.
 
@@ -682,7 +682,7 @@ Here's a simple lookup table decoder for the Steane code:
         std::map<std::string, std::size_t> single_qubit_err_signatures;
 
     public:
-        single_error_lut(qec::decoder_inputs inputs,
+        single_error_lut(qec::decoder_init inputs,
                           const heterogeneous_map& params)
             : decoder(std::move(inputs)) {
             // Canonicalize before using each sparse column as an error

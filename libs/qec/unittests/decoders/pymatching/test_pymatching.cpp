@@ -171,7 +171,7 @@ TEST(PyMatchingDecoder, AcceptsAllMergeStrategiesAndRejectsUnknown) {
       auto O = cudaq::qec::sparse_binary_matrix::from_nested_csr(1, 1, {{0}});
       d = cudaq::qec::decoder::get(
           "pymatching",
-          cudaq::qec::decoder_inputs(std::move(sparse_H), std::move(O)),
+          cudaq::qec::decoder_init(std::move(sparse_H), std::move(O)),
           cudaq::qec::decode_result_type::observables, params);
     }
     ASSERT_NE(d, nullptr) << strategy;
@@ -202,8 +202,8 @@ TEST(PyMatchingDecoder, ErrorOutputTracksMergedParallelEdgeColumn) {
     params.insert("merge_strategy", strategy);
     auto O = cudaq::qec::sparse_binary_matrix::from_csr(
         0, 2, std::vector<std::uint32_t>{0}, {});
-    auto inputs = cudaq::qec::decoder_inputs(
-        cudaq::qec::sparse_binary_matrix(H), std::move(O), {0.1, 0.2});
+    auto inputs = cudaq::qec::decoder_init(cudaq::qec::sparse_binary_matrix(H),
+                                           std::move(O), {0.1, 0.2});
     auto decoder = cudaq::qec::decoder::get(
         "pymatching", std::move(inputs), cudaq::qec::decode_result_type::errors,
         params);
@@ -229,8 +229,8 @@ TEST(PyMatchingDecoder, RejectsObservableMatrixWithWrongBlockSize) {
   cudaqx::tensor<uint8_t> O({1, 3});
   O.at({0, 0}) = 1;
   EXPECT_THROW(
-      (void)cudaq::qec::decoder_inputs(cudaq::qec::sparse_binary_matrix(H),
-                                       cudaq::qec::sparse_binary_matrix(O)),
+      (void)cudaq::qec::decoder_init(cudaq::qec::sparse_binary_matrix(H),
+                                     cudaq::qec::sparse_binary_matrix(O)),
       std::invalid_argument);
 }
 
@@ -249,8 +249,8 @@ TEST(PyMatchingDecoder, DecodesHighObservableIndicesAcrossPaths) {
 
     auto d = cudaq::qec::decoder::get(
         "pymatching",
-        cudaq::qec::decoder_inputs(cudaq::qec::sparse_binary_matrix(H),
-                                   cudaq::qec::sparse_binary_matrix(O)),
+        cudaq::qec::decoder_init(cudaq::qec::sparse_binary_matrix(H),
+                                 cudaq::qec::sparse_binary_matrix(O)),
         cudaq::qec::decode_result_type::observables);
     // ASSERT: valid graph-like identity matrices must construct a decoder.
     ASSERT_NE(d, nullptr);

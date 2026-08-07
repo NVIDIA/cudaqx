@@ -18,7 +18,7 @@ namespace cudaq::qec {
 /// bare bones custom decoder based on the `cudaq::qec::decoder` interface.
 class sample_decoder : public decoder {
 public:
-  sample_decoder(cudaq::qec::decoder_inputs inputs,
+  sample_decoder(cudaq::qec::decoder_init inputs,
                  decode_result_type requested_output,
                  const cudaqx::heterogeneous_map &params)
       : decoder(std::move(inputs), requested_output) {
@@ -52,7 +52,7 @@ public:
 
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       sample_decoder, static std::unique_ptr<decoder> create(
-                          cudaq::qec::decoder_inputs inputs,
+                          cudaq::qec::decoder_init inputs,
                           std::optional<decode_result_type> output,
                           const cudaqx::heterogeneous_map &params) {
         return std::make_unique<sample_decoder>(

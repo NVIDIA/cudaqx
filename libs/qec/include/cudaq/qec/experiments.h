@@ -9,7 +9,7 @@
 
 #include "cudaq/algorithms/dem.h"
 #include "cudaq/qec/code.h"
-#include "cudaq/qec/decoder_inputs.h"
+#include "cudaq/qec/decoder_init.h"
 #include "cudaq/qec/detector_error_model.h"
 #include <cstddef>
 #include <vector>
@@ -161,24 +161,24 @@ std::tuple<cudaqx::tensor<uint8_t>, cudaqx::tensor<uint8_t>>
 sample_memory_circuit(const code &code, std::size_t numShots,
                       std::size_t numRounds, cudaq::noise_model &noise);
 
+/// @brief Finalized decoder inputs: a canonicalized DEM and measurement maps.
+struct decoder_inputs {
+  detector_error_model dem;
+  cudaq::M2DSparseMatrix m2d;
+  cudaq::M2OSparseMatrix m2o;
+};
+
 /// @brief Lazy handle returned by `decoder_context_from_memory_circuit`.
 ///
 /// Stores the raw (uncanonicalized) circuit analysis. Call a component method
-/// to canonicalize exactly the stabilizer type needed and obtain stable
-/// `decoder_inputs`. The circuit-only measurement-to-observable map is not
-/// part of the decoder plugin input contract.
+/// to canonicalize exactly the stabilizer type needed and obtain a
+/// `decoder_inputs`:
 ///   - `x_component()` — X-stabilizer detectors only
 ///   - `z_component()` — Z-stabilizer detectors only
 ///   - `full_component()` — both stabilizer types, boundary-aware
 struct decoder_context {
   /// @brief Total number of measurements per shot (column count of m2d/m2o).
   std::size_t num_measurements() const;
-
-  /// @brief Circuit-analysis measurement-to-observable metadata.
-  ///
-  /// This remains on the experiment handle and is not passed through the
-  /// decoder plugin factory in the first contract iteration.
-  const cudaq::M2OSparseMatrix &measurement_to_observables() const;
 
   /// @brief Canonicalize X-stabilizer detectors; return decoder_inputs.
   decoder_inputs x_component() const;
@@ -209,7 +209,7 @@ private:
 std::vector<std::int64_t> d_sparse(const cudaq::M2DSparseMatrix &m2d);
 
 /// @brief Convert CUDA-Q circuit-analysis M2D output to the QEC-owned sparse
-/// matrix used by decoder_inputs.
+/// matrix used by decoder_init.
 sparse_binary_matrix m2d_to_sparse(const cudaq::M2DSparseMatrix &m2d);
 
 /// @brief Flatten a QEC-owned detector-by-measurement matrix into the legacy

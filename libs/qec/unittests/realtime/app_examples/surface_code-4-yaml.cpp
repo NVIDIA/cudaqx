@@ -316,8 +316,8 @@ static void enforce_ising_metadata(const std::string &bundle, int distance,
 // same measurement span. The error-column representations are intentionally
 // not probabilistically identical.
 void save_dem_to_file(
-    const std::vector<cudaq::qec::decoder_inputs> &matching_inputs,
-    const std::vector<cudaq::qec::decoder_inputs> &bp_inputs,
+    const std::vector<cudaq::qec::decoder_init> &matching_inputs,
+    const std::vector<cudaq::qec::decoder_init> &bp_inputs,
     std::string dem_filename, const std::vector<std::string> &decoder_types,
     bool use_relay_bp, const std::string &onnx_path, bool use_ising,
     const std::string &ising_artifacts_dir) {
@@ -975,8 +975,8 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
         contains_type("pymatching") || contains_type("trt_decoder");
     const bool haveBp = contains_type("nv-qldpc-decoder");
     const bool decompose_errors = haveMatching;
-    std::vector<cudaq::qec::decoder_inputs> matching_inputs;
-    std::vector<cudaq::qec::decoder_inputs> bp_inputs;
+    std::vector<cudaq::qec::decoder_init> matching_inputs;
+    std::vector<cudaq::qec::decoder_init> bp_inputs;
     matching_inputs.reserve(numLogical);
     bp_inputs.reserve(numLogical);
     const bool dual_parse = haveMatching && haveBp;

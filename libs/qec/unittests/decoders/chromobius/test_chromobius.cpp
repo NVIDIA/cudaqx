@@ -54,12 +54,12 @@ TEST(ChromobiusDecoder, checkAllZeroSyndrome) {
   EXPECT_EQ(decoder->get_syndrome_size(), 4);
   EXPECT_EQ(decoder->get_result_type(),
             cudaq::qec::decode_result_type::observables);
-  EXPECT_THROW((void)cudaq::qec::decoder::get(
-                   "chromobius",
-                   cudaq::qec::decoder_inputs::from_stim_dem(
-                       std::string{chromobius_dem}),
-                   cudaq::qec::decode_result_type::errors, make_params()),
-               std::invalid_argument);
+  EXPECT_THROW(
+      (void)cudaq::qec::decoder::get(
+          "chromobius",
+          cudaq::qec::decoder_init::from_stim_dem(std::string{chromobius_dem}),
+          cudaq::qec::decode_result_type::errors, make_params()),
+      std::invalid_argument);
 }
 
 TEST(ChromobiusDecoder, checkKnownObservableFlip) {

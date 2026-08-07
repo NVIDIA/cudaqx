@@ -86,7 +86,7 @@ reusable_decode_barrier &decode_barrier() {
 /// subsequent decode rendezvous with all configured instances before returning.
 class concurrency_test_decoder : public decoder {
 public:
-  concurrency_test_decoder(decoder_inputs inputs,
+  concurrency_test_decoder(decoder_init inputs,
                            decode_result_type requested_output,
                            const cudaqx::heterogeneous_map &)
       : decoder(std::move(inputs), requested_output) {
@@ -114,7 +114,7 @@ public:
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       concurrency_test_decoder,
       static std::unique_ptr<decoder> create(
-          decoder_inputs inputs, std::optional<decode_result_type> output,
+          decoder_init inputs, std::optional<decode_result_type> output,
           const cudaqx::heterogeneous_map &params) {
         return std::make_unique<concurrency_test_decoder>(
             std::move(inputs), output.value_or(decode_result_type::observables),

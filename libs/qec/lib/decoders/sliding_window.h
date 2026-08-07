@@ -107,7 +107,7 @@ public:
   ///   - num_boundary_syndromes: Boundary-layer width (0 if uniform)
   ///   - inner_decoder_name: Name of the inner decoder to use
   ///   - inner_decoder_params: Parameters for the inner decoder (optional)
-  sliding_window(cudaq::qec::decoder_inputs inputs,
+  sliding_window(cudaq::qec::decoder_init inputs,
                  decode_result_type requested_output,
                  const cudaqx::heterogeneous_map &params);
 
@@ -145,7 +145,7 @@ public:
   // Plugin registration macros
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       sliding_window, static std::unique_ptr<decoder> create(
-                          cudaq::qec::decoder_inputs inputs,
+                          cudaq::qec::decoder_init inputs,
                           std::optional<decode_result_type> output,
                           const cudaqx::heterogeneous_map &params) {
         return std::make_unique<sliding_window>(

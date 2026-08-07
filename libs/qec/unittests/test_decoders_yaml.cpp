@@ -57,7 +57,7 @@ struct construction_d_probe {
 
 class d_capture_decoder : public decoder {
 public:
-  d_capture_decoder(decoder_inputs inputs, decode_result_type requested_output,
+  d_capture_decoder(decoder_init inputs, decode_result_type requested_output,
                     const cudaqx::heterogeneous_map &)
       : decoder(std::move(inputs), requested_output) {
     const auto &in = get_inputs();
@@ -95,7 +95,7 @@ public:
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       d_capture_decoder,
       static std::unique_ptr<decoder> create(
-          decoder_inputs inputs, std::optional<decode_result_type> output,
+          decoder_init inputs, std::optional<decode_result_type> output,
           const cudaqx::heterogeneous_map &params) {
         return std::make_unique<d_capture_decoder>(
             std::move(inputs), output.value_or(decode_result_type::observables),
@@ -815,7 +815,7 @@ TEST(DecoderConfigTest, CreateRealtimeDecoderConfiguresRuntimeState) {
   auto config = create_test_sample_realtime_decoder_config(7);
 
   auto decoder = cudaq::qec::decoding::host::create_realtime_decoder(
-      config, cudaq::qec::decoding::host::resolve_decoder_inputs(
+      config, cudaq::qec::decoding::host::resolve_decoder_init(
                   config, std::filesystem::current_path()));
 
   ASSERT_NE(decoder, nullptr);
@@ -842,7 +842,7 @@ TEST(DecoderConfigTest, DuplicateDetectorIndicesCollapseInConstructionInputs) {
       config.to_yaml_str(200));
 
   auto decoder = cudaq::qec::decoding::host::create_realtime_decoder(
-      parsed, cudaq::qec::decoding::host::resolve_decoder_inputs(
+      parsed, cudaq::qec::decoding::host::resolve_decoder_init(
                   parsed, std::filesystem::current_path()));
   ASSERT_NE(decoder, nullptr);
 
@@ -878,7 +878,7 @@ TEST(ResolveDecoderInputs, DemSourceCarriesRawProvenanceAndDerivedSizes) {
   ScopedDemFile dem;
   auto config = make_dem_config(dem.path());
 
-  auto inputs = cudaq::qec::decoding::host::resolve_decoder_inputs(
+  auto inputs = cudaq::qec::decoding::host::resolve_decoder_init(
       config, std::filesystem::current_path());
 
   // The DEM stays authoritative, so a DEM-native decoder can read it back.
@@ -899,24 +899,24 @@ TEST(ResolveDecoderInputs, DemSourceRejectsCompetingMatrixKeys) {
 
   auto with_H = make_dem_config(dem.path());
   with_H.H_sparse = {0, -1, 1, -1};
-  EXPECT_THROW(cudaq::qec::decoding::host::resolve_decoder_inputs(with_H, cwd),
+  EXPECT_THROW(cudaq::qec::decoding::host::resolve_decoder_init(with_H, cwd),
                std::runtime_error);
 
   auto with_O = make_dem_config(dem.path());
   with_O.O_sparse = {0, -1};
-  EXPECT_THROW(cudaq::qec::decoding::host::resolve_decoder_inputs(with_O, cwd),
+  EXPECT_THROW(cudaq::qec::decoding::host::resolve_decoder_init(with_O, cwd),
                std::runtime_error);
 
   auto with_rates = make_dem_config(dem.path());
   with_rates.error_rate_vec = {0.1, 0.1, 0.1};
   EXPECT_THROW(
-      cudaq::qec::decoding::host::resolve_decoder_inputs(with_rates, cwd),
+      cudaq::qec::decoding::host::resolve_decoder_init(with_rates, cwd),
       std::runtime_error);
 }
 
 TEST(ResolveDecoderInputs, DemSourceRejectsUnreadableFile) {
   auto config = make_dem_config("/nonexistent/definitely-not-here.dem");
-  EXPECT_THROW(cudaq::qec::decoding::host::resolve_decoder_inputs(
+  EXPECT_THROW(cudaq::qec::decoding::host::resolve_decoder_init(
                    config, std::filesystem::current_path()),
                std::runtime_error);
 }
@@ -930,18 +930,18 @@ TEST(ResolveDecoderInputs, DemSourceTreatsSuppliedSizesAsAssertions) {
   matching.syndrome_size = 2;
   matching.block_size = 3;
   EXPECT_NO_THROW(
-      cudaq::qec::decoding::host::resolve_decoder_inputs(matching, cwd));
+      cudaq::qec::decoding::host::resolve_decoder_init(matching, cwd));
 
   auto wrong_detectors = make_dem_config(dem.path());
   wrong_detectors.syndrome_size = 99;
   EXPECT_THROW(
-      cudaq::qec::decoding::host::resolve_decoder_inputs(wrong_detectors, cwd),
+      cudaq::qec::decoding::host::resolve_decoder_init(wrong_detectors, cwd),
       std::runtime_error);
 
   auto wrong_mechanisms = make_dem_config(dem.path());
   wrong_mechanisms.block_size = 99;
   EXPECT_THROW(
-      cudaq::qec::decoding::host::resolve_decoder_inputs(wrong_mechanisms, cwd),
+      cudaq::qec::decoding::host::resolve_decoder_init(wrong_mechanisms, cwd),
       std::runtime_error);
 }
 
@@ -952,9 +952,9 @@ TEST(ResolveDecoderInputs, DemSourceResolvesRelativePathAgainstBaseDir) {
 
   // Against the containing directory it resolves; against an unrelated one it
   // does not, which is what makes the base directory meaningful.
-  EXPECT_NO_THROW(cudaq::qec::decoding::host::resolve_decoder_inputs(
+  EXPECT_NO_THROW(cudaq::qec::decoding::host::resolve_decoder_init(
       config, dem.path().parent_path()));
-  EXPECT_THROW(cudaq::qec::decoding::host::resolve_decoder_inputs(
+  EXPECT_THROW(cudaq::qec::decoding::host::resolve_decoder_init(
                    config, "/definitely/not/the/right/place"),
                std::runtime_error);
 }
@@ -962,7 +962,7 @@ TEST(ResolveDecoderInputs, DemSourceResolvesRelativePathAgainstBaseDir) {
 TEST(ResolveDecoderInputs, MatrixSourceStillRequiresItsDimensions) {
   auto config = create_test_empty_decoder_config(0);
   config.block_size = 0;
-  EXPECT_THROW(cudaq::qec::decoding::host::resolve_decoder_inputs(
+  EXPECT_THROW(cudaq::qec::decoding::host::resolve_decoder_init(
                    config, std::filesystem::current_path()),
                std::runtime_error);
 }
@@ -973,7 +973,7 @@ TEST(ResolveDecoderInputs, MatrixSourceRequiresAnObservableMapping) {
   // The realtime path returns observable corrections, so a model with no
   // observable mapping cannot serve it. Without this it constructed happily
   // and decoded to a zero-length observable frame.
-  EXPECT_THROW(cudaq::qec::decoding::host::resolve_decoder_inputs(
+  EXPECT_THROW(cudaq::qec::decoding::host::resolve_decoder_init(
                    config, std::filesystem::current_path()),
                std::runtime_error);
 }
@@ -1083,7 +1083,7 @@ TEST(DecodingServerAcceptance,
                      -1, 4, -1, 5,  -1, 6,  -1, 7,  -1, 8,  -1};
 
   // Server path: resolve the configuration, then construct through the factory.
-  auto server_inputs = cudaq::qec::decoding::host::resolve_decoder_inputs(
+  auto server_inputs = cudaq::qec::decoding::host::resolve_decoder_init(
       config, std::filesystem::current_path());
   auto server_decoder = cudaq::qec::decoding::host::create_realtime_decoder(
       config, server_inputs);
@@ -1119,7 +1119,7 @@ TEST(DecodingServerAcceptance,
                        static_cast<std::uint32_t>(offline_d_rows.size()),
                        offline_measurements, offline_d_rows)
                        .canonicalize();
-  cudaq::qec::decoder_inputs offline_inputs(
+  cudaq::qec::decoder_init offline_inputs(
       std::move(offline_H), std::move(offline_O), config.error_rate_vec,
       std::move(offline_D));
 
@@ -1154,7 +1154,7 @@ TEST(DecodingServerAcceptance, MatrixSourcePluginWorksOfflineAndOnServer) {
   finalize_decoders();
 
   // Offline route, same plugin and the same resolved model.
-  auto inputs = cudaq::qec::decoding::host::resolve_decoder_inputs(
+  auto inputs = cudaq::qec::decoding::host::resolve_decoder_init(
       config, std::filesystem::current_path());
   auto offline = cudaq::qec::decoder::get(
       config.type, inputs, cudaq::qec::decode_result_type::errors);
@@ -1269,13 +1269,13 @@ TEST(ResolveDecoderInputs, DetectorMapIndicesMustBeRepresentable) {
   // fits the sparse index type. Narrowing would alias onto a real measurement.
   config.D_sparse = {
       static_cast<std::int64_t>(std::numeric_limits<std::uint32_t>::max()), -1};
-  EXPECT_THROW(cudaq::qec::decoding::host::resolve_decoder_inputs(
+  EXPECT_THROW(cudaq::qec::decoding::host::resolve_decoder_init(
                    config, std::filesystem::current_path()),
                std::runtime_error);
 
   auto negative = create_test_empty_decoder_config(0);
   negative.D_sparse = {-2, -1};
-  EXPECT_THROW(cudaq::qec::decoding::host::resolve_decoder_inputs(
+  EXPECT_THROW(cudaq::qec::decoding::host::resolve_decoder_init(
                    negative, std::filesystem::current_path()),
                std::runtime_error);
 }
@@ -1325,7 +1325,7 @@ TEST(DecodingServerAcceptance,
 
   // The model is genuinely unreachable from the working directory, so this
   // fixture fails unless the registry resolves against the document.
-  EXPECT_THROW(cudaq::qec::decoding::host::resolve_decoder_inputs(
+  EXPECT_THROW(cudaq::qec::decoding::host::resolve_decoder_init(
                    config, std::filesystem::current_path()),
                std::runtime_error);
 
@@ -1359,7 +1359,7 @@ TEST(DecodingServerAcceptance, ChromobiusConstructsFromRawDemSource) {
   EXPECT_EQ(parsed.stim_dem_path, config.stim_dem_path);
   EXPECT_TRUE(parsed.H_sparse.empty());
 
-  auto inputs = cudaq::qec::decoding::host::resolve_decoder_inputs(
+  auto inputs = cudaq::qec::decoding::host::resolve_decoder_init(
       parsed, std::filesystem::current_path());
   ASSERT_TRUE(inputs.has_stim_dem());
 
@@ -1383,7 +1383,7 @@ TEST(DecoderConfigTest, CreateRealtimeDecoderRequiresDetectorMatrix) {
   config.D_sparse.clear();
 
   EXPECT_THROW(cudaq::qec::decoding::host::create_realtime_decoder(
-                   config, cudaq::qec::decoding::host::resolve_decoder_inputs(
+                   config, cudaq::qec::decoding::host::resolve_decoder_init(
                                config, std::filesystem::current_path())),
                std::runtime_error);
 }
@@ -1394,7 +1394,7 @@ TEST(DecoderConfigTest, CreateRealtimeDecoderRejectsUnrepresentableId) {
       static_cast<std::int64_t>(std::numeric_limits<std::uint32_t>::max()) + 1;
 
   EXPECT_THROW(cudaq::qec::decoding::host::create_realtime_decoder(
-                   config, cudaq::qec::decoding::host::resolve_decoder_inputs(
+                   config, cudaq::qec::decoding::host::resolve_decoder_init(
                                config, std::filesystem::current_path())),
                std::invalid_argument);
 }

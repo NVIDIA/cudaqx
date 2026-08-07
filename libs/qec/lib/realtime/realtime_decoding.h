@@ -49,8 +49,8 @@ prepare_decoder_params(
 /// configuration file's parent directory for a file-based configuration, or
 /// the process working directory for a programmatic or raw-string one.
 /// @throws std::runtime_error on any resolution or validation failure.
-__attribute__((visibility("default"))) cudaq::qec::decoder_inputs
-resolve_decoder_inputs(
+__attribute__((visibility("default"))) cudaq::qec::decoder_init
+resolve_decoder_init(
     const cudaq::qec::decoding::config::decoder_config &decoder_config,
     const std::filesystem::path &base_dir);
 
@@ -64,7 +64,7 @@ resolve_decoder_inputs(
 __attribute__((visibility("default"))) std::unique_ptr<cudaq::qec::decoder>
 create_realtime_decoder(
     const cudaq::qec::decoding::config::decoder_config &decoder_config,
-    cudaq::qec::decoder_inputs inputs);
+    cudaq::qec::decoder_init inputs);
 
 __attribute__((visibility("default"))) void
 get_corrections(std::size_t decoder_id, uint8_t *corrections,

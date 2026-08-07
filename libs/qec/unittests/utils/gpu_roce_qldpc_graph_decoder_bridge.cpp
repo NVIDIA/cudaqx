@@ -251,7 +251,7 @@ int main(int argc, char *argv[]) {
       std::count(dec.O_sparse.begin(), dec.O_sparse.end(), -1));
   auto decoder = cudaq::qec::decoder::get(
       "nv-qldpc-decoder",
-      cudaq::qec::decoder_inputs(
+      cudaq::qec::decoder_init(
           cudaq::qec::sparse_binary_matrix(H_tensor),
           sparse_matrix_from_flat_rows(dec.O_sparse, num_observable_rows),
           /*error_rates=*/{},

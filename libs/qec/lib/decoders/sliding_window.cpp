@@ -18,7 +18,7 @@ namespace cudaq::qec {
 
 namespace {
 
-decoder_inputs canonicalize_sliding_window_inputs(decoder_inputs inputs) {
+decoder_init canonicalize_sliding_window_inputs(decoder_init inputs) {
   // Canonical CSC is the steady-state contract for decode_window's column
   // slices and validate_inputs's per-column reads. canonicalize_H() is
   // basis-preserving and retains the authoritative source, so no source kind
@@ -120,7 +120,7 @@ void sliding_window::initialize_window(std::size_t batch_size) {
       std::chrono::duration<double>(t1 - t0).count() * 1000;
 }
 
-sliding_window::sliding_window(cudaq::qec::decoder_inputs inputs,
+sliding_window::sliding_window(cudaq::qec::decoder_init inputs,
                                decode_result_type requested_output,
                                const cudaqx::heterogeneous_map &params)
     // Canonical CSC is the steady-state contract for decode_window's column
@@ -218,10 +218,10 @@ sliding_window::sliding_window(cudaq::qec::decoder_inputs inputs,
     // Slicing detector rows and error columns re-indexes both, so this window
     // gets its own matrices. Nothing is inherited: a raw DEM names the outer
     // detectors and would not describe these.
-    decoder_inputs inner_inputs(sparse_binary_matrix(H_round),
-                                std::move(inner_O), std::move(error_vec_mod),
-                                /*measurement_to_detectors=*/std::nullopt,
-                                std::move(inner_error_ids));
+    decoder_init inner_inputs(sparse_binary_matrix(H_round), std::move(inner_O),
+                              std::move(error_vec_mod),
+                              /*measurement_to_detectors=*/std::nullopt,
+                              std::move(inner_error_ids));
     auto inner_decoder =
         decoder::get(inner_decoder_name, std::move(inner_inputs),
                      decode_result_type::errors, inner_decoder_params);

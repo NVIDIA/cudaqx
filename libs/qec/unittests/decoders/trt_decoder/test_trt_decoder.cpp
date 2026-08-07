@@ -42,7 +42,7 @@ cudaqx::tensor<uint8_t> make_identity_h(std::size_t n) {
   return H;
 }
 
-decoder_inputs
+decoder_init
 make_inputs_with_empty_observables(const cudaqx::tensor<uint8_t> &H,
                                    std::size_t num_observables) {
   auto sparse_H = sparse_binary_matrix(H);
@@ -50,7 +50,7 @@ make_inputs_with_empty_observables(const cudaqx::tensor<uint8_t> &H,
   auto O = sparse_binary_matrix::from_csr(
       static_cast<std::uint32_t>(num_observables), sparse_H.num_cols(),
       std::move(row_ptrs), {});
-  return decoder_inputs(std::move(sparse_H), std::move(O));
+  return decoder_init(std::move(sparse_H), std::move(O));
 }
 
 std::filesystem::path make_temp_engine_path(const std::string &name) {
@@ -799,7 +799,7 @@ TEST_F(TRTDecoderTest, NestsChromobiusPreservingRawDem) {
   std::ifstream dem_file(dem_path);
   std::string dem_text((std::istreambuf_iterator<char>(dem_file)),
                        std::istreambuf_iterator<char>());
-  auto inputs = decoder_inputs::from_stim_dem(dem_text);
+  auto inputs = decoder_init::from_stim_dem(dem_text);
   ASSERT_TRUE(inputs.has_stim_dem());
   ASSERT_EQ(inputs.num_detectors(), 2u);
   ASSERT_EQ(inputs.num_observables(), 1u);
@@ -837,8 +837,8 @@ TEST_F(TRTDecoderTest, NestsChromobiusPreservingRawDem) {
   cudaqx::tensor<uint8_t> O({1, 3});
   O.at({0, 0}) = 1;
   EXPECT_THROW((void)decoder::get("trt_decoder",
-                                  decoder_inputs(sparse_binary_matrix(H),
-                                                 sparse_binary_matrix(O)),
+                                  decoder_init(sparse_binary_matrix(H),
+                                               sparse_binary_matrix(O)),
                                   decode_result_type::observables, params),
                std::runtime_error);
 }
@@ -870,7 +870,7 @@ TEST_F(TRTDecoderTest, CompositeGlobalDecoderCombinesLogicalFrame) {
   try {
     trt_decoder = decoder::get(
         "trt_decoder",
-        decoder_inputs(sparse_binary_matrix(H), sparse_binary_matrix(O)),
+        decoder_init(sparse_binary_matrix(H), sparse_binary_matrix(O)),
         decode_result_type::observables, params);
   } catch (const std::exception &e) {
     GTEST_SKIP() << "Failed to create composite TRT decoder: " << e.what();

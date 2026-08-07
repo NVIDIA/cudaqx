@@ -26,7 +26,7 @@ namespace cudaq::qec {
 /// compact chunked DEM: that source would be added here with a new enumerator
 /// plus its typed constructor and accessor, so a decoder that consumes chunks
 /// reads them directly instead of the handle first flattening them into
-/// matrices. Adding one changes neither the `decoder_inputs` object layout nor
+/// matrices. Adding one changes neither the `decoder_init` object layout nor
 /// the decoder factory signature.
 enum class decoder_model_source : std::uint8_t {
   matrices,
@@ -41,10 +41,15 @@ enum class decoder_model_source : std::uint8_t {
 /// expose the projection stored when the handle is constructed. Model matrices
 /// are stored sparsely instead of composing detector_error_model, whose matrix
 /// fields are dense tensors.
-class decoder_inputs {
+class decoder_init {
 public:
   /// @brief Construct an H-only matrix model.
-  explicit decoder_inputs(sparse_binary_matrix detector_error_matrix);
+  explicit decoder_init(sparse_binary_matrix detector_error_matrix);
+
+  /// Raw Stim DEM text enters through from_stim_dem(), which parses and
+  /// projects it. Deleted so the older spelling fails here rather than
+  /// through overload resolution somewhere less obvious.
+  explicit decoder_init(std::string) = delete;
 
   /// @brief Construct a materialized matrix model.
   /// @param detector_error_matrix H, with shape detectors x error mechanisms.
@@ -56,7 +61,7 @@ public:
   /// @param measurement_to_detectors Optional D, with shape detectors x raw
   /// measurements.
   /// @param error_ids Optional correlation ID per error mechanism.
-  decoder_inputs(
+  decoder_init(
       sparse_binary_matrix detector_error_matrix,
       std::optional<sparse_binary_matrix> observable_flips_matrix,
       std::vector<double> error_rates = {},
@@ -65,28 +70,28 @@ public:
       std::optional<std::vector<std::size_t>> error_ids = std::nullopt);
 
   /// @brief Construct from the existing materialized detector-error model.
-  explicit decoder_inputs(detector_error_model model,
-                          std::optional<sparse_binary_matrix>
-                              measurement_to_detectors = std::nullopt);
+  explicit decoder_init(detector_error_model model,
+                        std::optional<sparse_binary_matrix>
+                            measurement_to_detectors = std::nullopt);
 
   /// @brief Construct from authoritative raw Stim DEM text.
   ///
   /// Matrix accessors expose the common lossy projection produced by
   /// `dem_from_stim_text`; DEM-native decoders should consume `stim_dem()`.
-  static decoder_inputs
+  static decoder_init
   from_stim_dem(std::string stim_dem_text,
                 std::optional<sparse_binary_matrix> measurement_to_detectors =
                     std::nullopt);
 
-  decoder_inputs(const decoder_inputs &) noexcept;
+  decoder_init(const decoder_init &) noexcept;
   /// @brief Move construction leaves the source valid only for destruction or
   /// assignment.
-  decoder_inputs(decoder_inputs &&) noexcept;
-  decoder_inputs &operator=(const decoder_inputs &) noexcept;
+  decoder_init(decoder_init &&) noexcept;
+  decoder_init &operator=(const decoder_init &) noexcept;
   /// @brief Move assignment leaves the source valid only for destruction or
   /// assignment.
-  decoder_inputs &operator=(decoder_inputs &&) noexcept;
-  ~decoder_inputs();
+  decoder_init &operator=(decoder_init &&) noexcept;
+  ~decoder_init();
 
   /// @brief The authoritative representation. Consumers that only need to
   /// know whether raw DEM text is available should ask has_stim_dem(); this
@@ -116,7 +121,7 @@ public:
   /// @brief Return the same inputs without D, for a decoder that is fed
   /// detectors rather than a raw measurement stream. Everything else,
   /// including the authoritative source, is preserved.
-  decoder_inputs decoder_inputs_without_d() const;
+  decoder_init decoder_init_without_d() const;
 
   /// @brief Return the same inputs with H in GF(2)-canonical CSC form.
   ///
@@ -125,7 +130,7 @@ public:
   /// passed through untouched, and the authoritative source is retained.
   /// Consumers that need a canonical H should ask for it here rather than
   /// rebuilding a matrix-authoritative handle by hand.
-  decoder_inputs canonicalize_H() const;
+  decoder_init canonicalize_H() const;
 
   bool has_stim_dem() const noexcept;
 
@@ -151,7 +156,7 @@ private:
       std::optional<std::vector<std::size_t>> error_ids,
       std::optional<sparse_binary_matrix> measurement_to_detectors,
       std::optional<std::string> raw_stim_dem = std::nullopt);
-  explicit decoder_inputs(std::shared_ptr<const impl> state);
+  explicit decoder_init(std::shared_ptr<const impl> state);
   std::shared_ptr<const impl> state_;
 };
 

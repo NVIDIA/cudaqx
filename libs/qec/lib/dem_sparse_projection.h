@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-// Library-private: shared by detector_error_model.cpp and decoder_inputs.cpp.
+// Library-private: shared by detector_error_model.cpp and decoder_init.cpp.
 // Not installed and not exported, so it adds no plugin-visible API surface.
 // Use dem_from_stim_text() for the public materialized model.
 //
@@ -23,7 +23,7 @@
 
 namespace cudaq::qec::details {
 
-/// The sparse projection of a Stim DEM, in the layouts `decoder_inputs` stores.
+/// The sparse projection of a Stim DEM, in the layouts `decoder_init` stores.
 /// Named fields rather than a tuple: H and O share a type, so positional
 /// results would let them be swapped while still type-checking.
 struct sparse_dem_projection {

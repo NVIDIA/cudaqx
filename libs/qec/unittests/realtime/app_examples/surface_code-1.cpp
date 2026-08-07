@@ -311,9 +311,8 @@ build_multi_decoder_config(const cudaq::qec::decoder_inputs &inputs,
                            std::size_t num_boundary_syndromes,
                            const run_options &opts) {
   namespace config = cudaq::qec::decoding::config;
-  const auto dem = inputs.materialize_detector_error_model();
-  const auto d_sparse =
-      cudaq::qec::d_sparse(*inputs.measurement_to_detectors());
+  const auto &dem = inputs.dem;
+  const auto d_sparse = cudaq::qec::d_sparse(inputs.m2d);
 
   config::multi_decoder_config multi_config;
   for (int i = 0; i < opts.num_logical; i++) {
@@ -534,7 +533,7 @@ bool setup_decoders(const cudaq::qec::code &code,
   }
 
   // Characterize the DEM and build the decoder configuration. full_component()
-  // canonicalizes both stabilizer types (boundary-aware) into decoder_inputs.
+  // canonicalizes both stabilizer types (boundary-aware) into decoder_init.
   const std::string &leaf_decoder = opts.decoder_type == "sliding_window"
                                         ? opts.sw_inner_decoder
                                         : opts.decoder_type;
@@ -542,8 +541,8 @@ bool setup_decoders(const cudaq::qec::code &code,
   auto ctx = cudaq::qec::decoder_context_from_memory_circuit(
       code, state_prep, opts.num_rounds, noise, decompose_errors);
   const auto inputs = ctx.full_component();
-  printf("DEM: %ld detectors x %ld error mechanisms\n", inputs.num_detectors(),
-         inputs.num_error_mechanisms());
+  printf("DEM: %ld detectors x %ld error mechanisms\n",
+         inputs.dem.num_detectors(), inputs.dem.num_error_mechanisms());
 
   const bool is_z_prep = state_prep == cudaq::qec::operation::prep0 ||
                          state_prep == cudaq::qec::operation::prep1;

@@ -615,10 +615,9 @@ TEST(QECCodeTester, checkRealtimeDecodeFromMemoryCircuit) {
   auto ctx = cudaq::qec::decoder_context_from_memory_circuit(
       *steane, cudaq::qec::operation::prep0, nRounds, noise);
   auto inputs = ctx.full_component();
-  auto dem = inputs.materialize_detector_error_model();
-  const auto *D = inputs.measurement_to_detectors();
-  ASSERT_NE(D, nullptr);
-  const auto m2d_rows = D->to_nested_csr();
+  const auto &dem = inputs.dem;
+  const auto D = cudaq::qec::m2d_to_sparse(inputs.m2d);
+  const auto m2d_rows = D.to_nested_csr();
 
   ASSERT_FALSE(m2d_rows.empty());
   EXPECT_EQ(m2d_rows.size(), dem.num_detectors());
@@ -633,11 +632,13 @@ TEST(QECCodeTester, checkRealtimeDecodeFromMemoryCircuit) {
   }
   EXPECT_LT(minRow, maxRow);
 
-  // The decoder_inputs returned by full_component() already carry O and D, so
-  // construction configures the realtime path completely. There is no second
-  // step, and nothing to re-supply.
-  auto decoder = cudaq::qec::get_decoder("single_error_lut", inputs);
-  ASSERT_EQ(decoder->get_num_msyn_per_decode(), D->num_cols());
+  // Circuit analysis produces the model; decoder_init is what a decoder is
+  // built from. Bridging the two here is one expression, and it carries O and
+  // D, so construction configures the realtime path completely. There is no
+  // second step, and nothing to re-supply.
+  auto decoder = cudaq::qec::get_decoder(
+      "single_error_lut", cudaq::qec::decoder_init(dem, D));
+  ASSERT_EQ(decoder->get_num_msyn_per_decode(), D.num_cols());
 
   // Stream numCols ancilla per round, then the final data readout. The window
   // must not decode until that last chunk completes it.
@@ -684,7 +685,7 @@ TEST(QECCodeTester, checkDecoderContextAndComponents) {
 
   // full_component() matches the plain entry point.
   auto fc_inputs = ctx.full_component();
-  auto fc_dem = fc_inputs.materialize_detector_error_model();
+  const auto &fc_dem = fc_inputs.dem;
   EXPECT_TRUE(
       tensors_equal(fc_dem.detector_error_matrix, dem.detector_error_matrix));
 
@@ -692,17 +693,15 @@ TEST(QECCodeTester, checkDecoderContextAndComponents) {
   // the detectors without re-running dem_from_kernel.
   auto zc_inputs = ctx.z_component();
   auto xc_inputs = ctx.x_component();
-  auto zc_dem = zc_inputs.materialize_detector_error_model();
-  auto xc_dem = xc_inputs.materialize_detector_error_model();
+  const auto &zc_dem = zc_inputs.dem;
+  const auto &xc_dem = xc_inputs.dem;
   EXPECT_TRUE(
       tensors_equal(zc_dem.detector_error_matrix, z.detector_error_matrix));
   EXPECT_TRUE(
       tensors_equal(xc_dem.detector_error_matrix, x.detector_error_matrix));
   EXPECT_EQ(zc_dem.num_detectors() + xc_dem.num_detectors(),
             fc_dem.num_detectors());
-  ASSERT_NE(zc_inputs.measurement_to_detectors(), nullptr);
-  EXPECT_EQ(zc_inputs.measurement_to_detectors()->num_rows(),
-            zc_dem.num_detectors());
+  EXPECT_EQ(zc_inputs.m2d.rows.size(), zc_dem.num_detectors());
 }
 
 TEST(QECCodeTester, checkDemFromMemoryCircuit) {
@@ -1109,7 +1108,7 @@ TEST(QECCodeTester, checkSlidingWindowShor9Boundary) {
         cudaq::qec::decoder::get("single_error_lut", dem.detector_error_matrix);
     // A single window spanning all layers -- should match the full decoder.
     auto sw = cudaq::qec::decoder::get(
-        "sliding_window", cudaq::qec::decoder_inputs{dem},
+        "sliding_window", cudaq::qec::decoder_init{dem},
         shor9_sliding_params(num_layers, interior, numBoundary));
 
     expectObservablesMatchFullDecoder(
@@ -1152,7 +1151,7 @@ TEST(QECCodeTester, checkSlidingWindowShor9Streaming) {
         cudaq::qec::decoder::get("single_error_lut", dem.detector_error_matrix);
     // A genuinely sliding configuration: window of 2 rounds, stepping by 1.
     auto sw = cudaq::qec::decoder::get(
-        "sliding_window", cudaq::qec::decoder_inputs{dem},
+        "sliding_window", cudaq::qec::decoder_init{dem},
         shor9_sliding_params(/*window_size=*/2, interior, numBoundary));
 
     expectObservablesMatchFullDecoder(
@@ -1258,7 +1257,7 @@ TEST(QECCodeTester, checkSlidingWindowRealtimeBoundaryStreaming) {
         num_measurements = std::max(num_measurements, col + 1);
     return cudaq::qec::decoder::get(
         "sliding_window",
-        cudaq::qec::decoder_inputs{
+        cudaq::qec::decoder_init{
             dem, cudaq::qec::sparse_binary_matrix::from_nested_csr(
                      static_cast<std::uint32_t>(D_sparse.size()),
                      num_measurements, D_sparse)},

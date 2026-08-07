@@ -75,7 +75,7 @@ private:
 #endif
 
 public:
-  pymatching(cudaq::qec::decoder_inputs inputs,
+  pymatching(cudaq::qec::decoder_init inputs,
              decode_result_type requested_output,
              const cudaqx::heterogeneous_map &params)
       : decoder(std::move(inputs), requested_output) {
@@ -269,7 +269,7 @@ public:
 
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       pymatching, static std::unique_ptr<decoder> create(
-                      cudaq::qec::decoder_inputs inputs,
+                      cudaq::qec::decoder_init inputs,
                       std::optional<decode_result_type> output,
                       const cudaqx::heterogeneous_map &params) {
         return std::make_unique<pymatching>(

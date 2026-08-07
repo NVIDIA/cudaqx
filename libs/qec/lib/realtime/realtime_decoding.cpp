@@ -238,7 +238,7 @@ void validate_detector_rows(const std::vector<std::int64_t> &d_sparse,
 
 } // namespace
 
-cudaq::qec::decoder_inputs resolve_decoder_inputs(
+cudaq::qec::decoder_init resolve_decoder_init(
     const cudaq::qec::decoding::config::decoder_config &decoder_config,
     const std::filesystem::path &base_dir) {
   if (decoder_config.D_sparse.empty())
@@ -275,8 +275,8 @@ cudaq::qec::decoder_inputs resolve_decoder_inputs(
     // configuration byte-identical and a reload keeps serving the old model.
     // Change the path to change the model.
 
-    auto inputs = cudaq::qec::decoder_inputs::from_stim_dem(std::move(dem_text),
-                                                            std::move(D));
+    auto inputs = cudaq::qec::decoder_init::from_stim_dem(std::move(dem_text),
+                                                          std::move(D));
 
     // The DEM defines the detector basis; a supplied syndrome_size is only an
     // assertion about it.
@@ -339,14 +339,13 @@ cudaq::qec::decoder_inputs resolve_decoder_inputs(
                                           decoder_config.O_sparse.end(), -1);
   auto observable_matrix = cudaq::qec::pcm_from_sparse_vec(
       decoder_config.O_sparse, num_observables, decoder_config.block_size);
-  return cudaq::qec::decoder_inputs(
-      std::move(pcm), std::move(observable_matrix),
-      decoder_config.error_rate_vec, std::move(D));
+  return cudaq::qec::decoder_init(std::move(pcm), std::move(observable_matrix),
+                                  decoder_config.error_rate_vec, std::move(D));
 }
 
 std::unique_ptr<cudaq::qec::decoder> create_realtime_decoder(
     const cudaq::qec::decoding::config::decoder_config &decoder_config,
-    cudaq::qec::decoder_inputs inputs) {
+    cudaq::qec::decoder_init inputs) {
   if (decoder_config.id < 0 || static_cast<std::uint64_t>(decoder_config.id) >
                                    std::numeric_limits<std::uint32_t>::max())
     throw std::invalid_argument("Decoder ID is outside the uint32_t range: " +
@@ -476,7 +475,7 @@ int configure_decoders(
   const auto absolute_base =
       std::filesystem::absolute(base_dir).lexically_normal();
 
-  std::vector<cudaq::qec::decoder_inputs> resolved;
+  std::vector<cudaq::qec::decoder_init> resolved;
   resolved.reserve(config.decoders.size());
   // The absolute form of each model path, applied to the caller's
   // configuration only once the whole configuration has been applied. Rewriting
@@ -486,7 +485,7 @@ int configure_decoders(
   std::vector<std::string> absolute_model_paths(config.decoders.size());
   for (std::size_t i = 0; i < config.decoders.size(); ++i) {
     const auto &decoder_config = config.decoders[i];
-    resolved.push_back(resolve_decoder_inputs(decoder_config, absolute_base));
+    resolved.push_back(resolve_decoder_init(decoder_config, absolute_base));
     if (!decoder_config.stim_dem_path.empty()) {
       std::filesystem::path model(decoder_config.stim_dem_path);
       absolute_model_paths[i] =

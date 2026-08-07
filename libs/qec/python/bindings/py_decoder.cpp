@@ -195,7 +195,7 @@ public:
   /// @brief Construct from a scipy sparse matrix (CSR, CSC, COO, ...) or a
   ///        dense numpy array of any numeric dtype.
   PyDecoder(nb::object mat)
-      : decoder(decoder_inputs([&mat]() -> cudaq::qec::sparse_binary_matrix {
+      : decoder(decoder_init([&mat]() -> cudaq::qec::sparse_binary_matrix {
                   // Any scipy sparse format exposes tocsr(); detect via that
                   // rather than indptr/indices, which COO and some other
                   // formats lack.
@@ -918,7 +918,7 @@ void bindDecoder(nb::module_ &mod) {
     }
 
     const auto output = pop_requested_output(options);
-    auto inputs = decoder_inputs::from_stim_dem(dem_text);
+    auto inputs = decoder_init::from_stim_dem(dem_text);
     return output ? get_decoder(name, std::move(inputs), *output,
                                 hetMapFromKwargs(options))
                   : get_decoder(name, std::move(inputs),
@@ -990,8 +990,8 @@ void bindDecoder(nb::module_ &mod) {
               "    pip install cudaq-qec[tensor-network-decoder]\n");
         }
 
-        decoder_inputs inputs(std::move(H_sparse), std::move(O_sparse),
-                              std::move(error_rates));
+        decoder_init inputs(std::move(H_sparse), std::move(O_sparse),
+                            std::move(error_rates));
         return output ? get_decoder(name, std::move(inputs), *output,
                                     hetMapFromKwargs(options))
                       : get_decoder(name, std::move(inputs),
@@ -1009,12 +1009,12 @@ void bindDecoder(nb::module_ &mod) {
           ``cudaqx::tensor`` is built first, then converted to CSC sparse storage.
           For large PCMs this can allocate as much memory as ``rows * cols``.
         - A Stim detector error model string: native C++ decoders receive the
-          raw DEM text via ``decoder_inputs``; Python-registered decoders receive
+          raw DEM text via ``decoder_init``; Python-registered decoders receive
           the DEM-derived PCM plus ``O`` and ``error_rate_vec`` defaults.
 
         Native decoders may select their instance-default result with
         ``output="errors"`` or ``output="observables"``. Matrix ``O`` and
-        ``error_rate_vec`` keyword adapters are normalized into decoder_inputs;
+        ``error_rate_vec`` keyword adapters are normalized into decoder_init;
         O never selects the output mode.
 
         For Python-registered decoders (``cudaq.qec.decoder`` decorator), ``H``

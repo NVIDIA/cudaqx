@@ -42,7 +42,7 @@ class ControlledDecoder final : public cudaq::qec::decoder {
 public:
   ControlledDecoder()
       : decoder(
-            cudaq::qec::decoder_inputs(
+            cudaq::qec::decoder_init(
                 /*H=*/cudaq::qec::sparse_binary_matrix::from_csr(1, 1, {0, 1},
                                                                  {0}),
                 /*O=*/
@@ -307,7 +307,7 @@ class MispinnedDecoder final : public cudaq::qec::decoder {
 public:
   MispinnedDecoder()
       : decoder(
-            cudaq::qec::decoder_inputs(
+            cudaq::qec::decoder_init(
                 /*H=*/cudaq::qec::sparse_binary_matrix::from_csr(1, 1, {0, 1},
                                                                  {0}),
                 /*O=*/
@@ -353,7 +353,7 @@ TEST(DecodingSessionPinHandshake, PinnedWorkerStartsAndServes) {
   params.insert("cuda_device_id", 0);
   auto dec = cudaq::qec::decoder::get(
       "single_error_lut",
-      cudaq::qec::decoder_inputs(
+      cudaq::qec::decoder_init(
           /*H=*/cudaq::qec::sparse_binary_matrix::from_csr(1, 1, {0, 1}, {0}),
           /*O=*/
           cudaq::qec::sparse_binary_matrix::from_csr(1, 1, {0, 1}, {0}),

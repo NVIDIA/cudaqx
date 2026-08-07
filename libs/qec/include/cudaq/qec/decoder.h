@@ -11,7 +11,7 @@
 #include "cuda-qx/core/extension_point.h"
 #include "cuda-qx/core/heterogeneous_map.h"
 #include "cuda-qx/core/tensor.h"
-#include "cudaq/qec/decoder_inputs.h"
+#include "cudaq/qec/decoder_init.h"
 #include <algorithm>
 #include <functional>
 #include <future>
@@ -135,7 +135,7 @@ public:
 /// arbitrary constructor parameters that can be unique to each specific
 /// decoder.
 class decoder
-    : public cudaqx::extension_point<decoder, decoder_inputs,
+    : public cudaqx::extension_point<decoder, decoder_init,
                                      std::optional<decode_result_type>,
                                      const cudaqx::heterogeneous_map &> {
 private:
@@ -153,7 +153,7 @@ public:
   /// factory can move its immutable handle into the decoder.
   /// @param requested_output The result basis this instance produces, fixed
   /// for its lifetime.
-  decoder(decoder_inputs inputs, decode_result_type requested_output);
+  decoder(decoder_init inputs, decode_result_type requested_output);
 
   /// @brief Decode a single syndrome
   /// @param syndrome A vector of syndrome measurements where the floating point
@@ -192,20 +192,20 @@ public:
   /// @param inputs Stable decoder inputs.
   /// @param param_map Optional decoder-specific parameters.
   static std::unique_ptr<decoder>
-  get(const std::string &name, decoder_inputs inputs,
+  get(const std::string &name, decoder_init inputs,
       const cudaqx::heterogeneous_map &param_map = cudaqx::heterogeneous_map());
 
   /// @brief Construct a registered decoder with an explicit instance-default
   /// result form.
   static std::unique_ptr<decoder>
-  get(const std::string &name, decoder_inputs inputs, decode_result_type output,
+  get(const std::string &name, decoder_init inputs, decode_result_type output,
       const cudaqx::heterogeneous_map &param_map = cudaqx::heterogeneous_map());
 
   static std::unique_ptr<decoder>
   get(const std::string &name, const cudaq::qec::sparse_binary_matrix &H,
       const cudaqx::heterogeneous_map &param_map =
           cudaqx::heterogeneous_map()) {
-    return get(name, decoder_inputs{H}, param_map);
+    return get(name, decoder_init{H}, param_map);
   }
 
   static std::unique_ptr<decoder>
@@ -219,21 +219,21 @@ public:
   get(const std::string &name, const std::string &stim_dem_text,
       const cudaqx::heterogeneous_map &param_map =
           cudaqx::heterogeneous_map()) {
-    return get(name, decoder_inputs::from_stim_dem(stim_dem_text), param_map);
+    return get(name, decoder_init::from_stim_dem(stim_dem_text), param_map);
   }
 
   static std::unique_ptr<decoder>
   get(const std::string &name, const char *stim_dem_text,
       const cudaqx::heterogeneous_map &param_map =
           cudaqx::heterogeneous_map()) {
-    return get(name, decoder_inputs::from_stim_dem(stim_dem_text), param_map);
+    return get(name, decoder_init::from_stim_dem(stim_dem_text), param_map);
   }
 
   static std::unique_ptr<decoder>
   get(const std::string &name, std::string_view stim_dem_text,
       const cudaqx::heterogeneous_map &param_map =
           cudaqx::heterogeneous_map()) {
-    return get(name, decoder_inputs::from_stim_dem(std::string{stim_dem_text}),
+    return get(name, decoder_init::from_stim_dem(std::string{stim_dem_text}),
                param_map);
   }
 
@@ -326,7 +326,7 @@ public:
 
 protected:
   /// @brief The immutable construction inputs owned by this decoder.
-  const decoder_inputs &get_inputs() const noexcept { return inputs_; }
+  const decoder_init &get_inputs() const noexcept { return inputs_; }
 
   /// @brief Project an error frame onto observables through the model's O.
   ///
@@ -343,7 +343,7 @@ protected:
   ///
   /// Everything the realtime path can derive from the model -- D, the
   /// measurement buffer, the detector buffers, the corrections buffer -- is
-  /// sized by the base constructor from `decoder_inputs`. Layer geometry is
+  /// sized by the base constructor from `decoder_init`. Layer geometry is
   /// the exception: it is a property of how the decoder consumes rounds, not
   /// of the model, and the base cannot ask a subclass for it while the
   /// subclass is still being constructed. A streaming decoder therefore hands
@@ -372,11 +372,11 @@ protected:
 
 private:
   static std::unique_ptr<decoder>
-  get_impl(const std::string &name, decoder_inputs inputs,
+  get_impl(const std::string &name, decoder_init inputs,
            std::optional<decode_result_type> output,
            const cudaqx::heterogeneous_map &param_map);
   /// @brief The decoder's immutable construction inputs.
-  const decoder_inputs inputs_;
+  const decoder_init inputs_;
   const decode_result_type result_type_;
 };
 
@@ -533,18 +533,18 @@ inline void convert_vec_hard_to_soft(const std::vector<std::vector<t_hard>> &in,
 }
 
 std::unique_ptr<decoder>
-get_decoder(const std::string &name, decoder_inputs inputs,
+get_decoder(const std::string &name, decoder_init inputs,
             const cudaqx::heterogeneous_map options = {});
 
 std::unique_ptr<decoder>
-get_decoder(const std::string &name, decoder_inputs inputs,
+get_decoder(const std::string &name, decoder_init inputs,
             decode_result_type output,
             const cudaqx::heterogeneous_map options = {});
 
 inline std::unique_ptr<decoder>
 get_decoder(const std::string &name, const cudaq::qec::sparse_binary_matrix &H,
             const cudaqx::heterogeneous_map options = {}) {
-  return get_decoder(name, decoder_inputs{H}, options);
+  return get_decoder(name, decoder_init{H}, options);
 }
 
 inline std::unique_ptr<decoder>
@@ -556,8 +556,7 @@ get_decoder(const std::string &name, const cudaqx::tensor<uint8_t> &H,
 inline std::unique_ptr<decoder>
 get_decoder(const std::string &name, const std::string &stim_dem_text,
             const cudaqx::heterogeneous_map options = {}) {
-  return get_decoder(name, decoder_inputs::from_stim_dem(stim_dem_text),
-                     options);
+  return get_decoder(name, decoder_init::from_stim_dem(stim_dem_text), options);
 }
 
 /// Each raw-DEM spelling needs its own explicit-output overload: string_view
@@ -566,15 +565,14 @@ get_decoder(const std::string &name, const std::string &stim_dem_text,
 inline std::unique_ptr<decoder>
 get_decoder(const std::string &name, const char *stim_dem_text,
             const cudaqx::heterogeneous_map options = {}) {
-  return get_decoder(name, decoder_inputs::from_stim_dem(stim_dem_text),
-                     options);
+  return get_decoder(name, decoder_init::from_stim_dem(stim_dem_text), options);
 }
 
 inline std::unique_ptr<decoder>
 get_decoder(const std::string &name, std::string_view stim_dem_text,
             const cudaqx::heterogeneous_map options = {}) {
   return get_decoder(
-      name, decoder_inputs::from_stim_dem(std::string{stim_dem_text}), options);
+      name, decoder_init::from_stim_dem(std::string{stim_dem_text}), options);
 }
 
 namespace details {

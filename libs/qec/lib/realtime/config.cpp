@@ -283,7 +283,7 @@ struct MappingTraits<cudaq::qec::decoding::config::decoder_config> {
     io.mapOptional("cuda_device_id", config.cuda_device_id);
     // A decoder model comes from exactly one source: the matrix keys or
     // stim_dem_path. Neither branch's keys can be mapRequired, so which are
-    // needed is decided by resolve_decoder_inputs(), not by the parser.
+    // needed is decided by resolve_decoder_init(), not by the parser.
     io.mapOptional("stim_dem_path", config.stim_dem_path, std::string{});
     io.mapOptional("block_size", config.block_size, std::uint64_t{0});
     io.mapOptional("syndrome_size", config.syndrome_size, std::uint64_t{0});

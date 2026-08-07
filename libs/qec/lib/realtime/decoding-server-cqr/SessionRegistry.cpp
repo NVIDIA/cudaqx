@@ -78,7 +78,7 @@ void SessionRegistry::load_from_config(const multi_decoder_config &config,
                   dc.type);
 
     auto decoder = cudaq::qec::decoding::host::create_realtime_decoder(
-        dc, cudaq::qec::decoding::host::resolve_decoder_inputs(dc, base_dir));
+        dc, cudaq::qec::decoding::host::resolve_decoder_init(dc, base_dir));
     auto session = DecodingSession::create(std::move(decoder),
                                            make_default_mapping_table());
 

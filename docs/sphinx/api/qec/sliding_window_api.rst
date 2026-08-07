@@ -103,7 +103,7 @@
                     {"inner_decoder_params", inner_decoder_params}};
                 // Priors are model data, so they travel with H rather than in
                 // the parameter map.
-                auto inputs = cudaq::qec::decoder_inputs(
+                auto inputs = cudaq::qec::decoder_init(
                     cudaq::qec::sparse_binary_matrix(dem.detector_error_matrix),
                     std::nullopt, dem.error_rates);
                 auto swdec =

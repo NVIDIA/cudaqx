@@ -144,7 +144,7 @@ static Logger gLogger;
 ///   opt_results are carried through onto the combined result, so
 ///   global-decoder options that surface only through opt_results (for example
 ///   Chromobius's return_weight) remain externally visible.
-/// O is read from decoder_inputs only for model dimensions and observable
+/// O is read from decoder_init only for model dimensions and observable
 /// combination. Its presence never selects an engine-output interpretation.
 ///
 /// Note: Only one of onnx_load_path or engine_load_path should be specified,
@@ -467,7 +467,7 @@ private:
   size_t num_observables_ = 0;
 
 public:
-  trt_decoder(cudaq::qec::decoder_inputs inputs,
+  trt_decoder(cudaq::qec::decoder_init inputs,
               decode_result_type requested_output,
               trt_engine_output_format engine_output_format,
               const cudaqx::heterogeneous_map &params);
@@ -481,7 +481,7 @@ public:
 
   CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
       trt_decoder, static std::unique_ptr<decoder> create(
-                       cudaq::qec::decoder_inputs inputs,
+                       cudaq::qec::decoder_init inputs,
                        std::optional<decode_result_type> output,
                        const cudaqx::heterogeneous_map &params) {
         const auto format = parse_engine_output_format(params);
@@ -588,7 +588,7 @@ struct trt_decoder::Impl {
 // trt_decoder method implementations
 // ============================================================================
 
-trt_decoder::trt_decoder(cudaq::qec::decoder_inputs inputs,
+trt_decoder::trt_decoder(cudaq::qec::decoder_init inputs,
                          decode_result_type requested_output,
                          trt_engine_output_format engine_output_format,
                          const cudaqx::heterogeneous_map &params)
@@ -850,7 +850,7 @@ trt_decoder::trt_decoder(cudaq::qec::decoder_inputs inputs,
                 ? decode_result_type::observables
                 : requested_output;
         global_decoder_ = decoder::get(global_decoder_name,
-                                       get_inputs().decoder_inputs_without_d(),
+                                       get_inputs().decoder_init_without_d(),
                                        global_output, global_decoder_params_);
         CUDA_QEC_INFO("TensorRT decoder: global_decoder '{}' attached",
                       global_decoder_name);

@@ -20,7 +20,7 @@
 #include <span>
 #include <vector>
 
-INSTANTIATE_REGISTRY(cudaq::qec::decoder, cudaq::qec::decoder_inputs,
+INSTANTIATE_REGISTRY(cudaq::qec::decoder, cudaq::qec::decoder_init,
                      std::optional<cudaq::qec::decode_result_type>,
                      const cudaqx::heterogeneous_map &)
 
@@ -87,7 +87,7 @@ struct decoder::rt_impl {
 
 void decoder::rt_impl_deleter::operator()(rt_impl *p) const { delete p; }
 
-decoder::decoder(decoder_inputs inputs, decode_result_type requested_output)
+decoder::decoder(decoder_init inputs, decode_result_type requested_output)
     : pimpl(std::unique_ptr<rt_impl, rt_impl_deleter>(new rt_impl())),
       inputs_(std::move(inputs)), result_type_(requested_output) {
   syndrome_size = inputs_.num_detectors();
@@ -246,27 +246,27 @@ private:
 };
 
 std::unique_ptr<decoder>
-decoder::get(const std::string &name, decoder_inputs inputs,
+decoder::get(const std::string &name, decoder_init inputs,
              const cudaqx::heterogeneous_map &param_map) {
   return get_impl(name, std::move(inputs), std::nullopt, param_map);
 }
 
 std::unique_ptr<decoder>
-decoder::get(const std::string &name, decoder_inputs inputs,
+decoder::get(const std::string &name, decoder_init inputs,
              decode_result_type output,
              const cudaqx::heterogeneous_map &param_map) {
   return get_impl(name, std::move(inputs), output, param_map);
 }
 
 std::unique_ptr<decoder>
-decoder::get_impl(const std::string &name, decoder_inputs inputs,
+decoder::get_impl(const std::string &name, decoder_init inputs,
                   std::optional<decode_result_type> output,
                   const cudaqx::heterogeneous_map &param_map) {
   for (const char *reserved : {"H", "O", "D", "error_rate_vec"})
     if (param_map.contains(reserved))
       throw std::runtime_error(
           fmt::format("'{}' is framework model data; provide it through "
-                      "decoder_inputs instead of decoder custom parameters",
+                      "decoder_init instead of decoder custom parameters",
                       reserved));
   auto [mutex, registry] = get_registry();
   std::lock_guard<std::recursive_mutex> lock(mutex);
@@ -622,13 +622,13 @@ void decoder::reset_decoder() {
 }
 
 std::unique_ptr<decoder> get_decoder(const std::string &name,
-                                     decoder_inputs inputs,
+                                     decoder_init inputs,
                                      const cudaqx::heterogeneous_map options) {
   return decoder::get(name, std::move(inputs), options);
 }
 
 std::unique_ptr<decoder> get_decoder(const std::string &name,
-                                     decoder_inputs inputs,
+                                     decoder_init inputs,
                                      decode_result_type output,
                                      const cudaqx::heterogeneous_map options) {
   return decoder::get(name, std::move(inputs), output, options);
