@@ -8,10 +8,9 @@ Relay BP Decoding with CUDA-Q Realtime
 
 This guide explains how to build, test, and run the nv-qldpc-decoder Relay BP
 decoder using CUDA-Q's realtime dispatch system.  The decoder is driven by a
-**self-relaunching device-graph scheduler** and can operate in three
+**self-relaunching device-graph scheduler** and can operate in two
 configurations:
 
-- **CI unit test** -- standalone executable, no FPGA or network hardware needed
 - **Emulated end-to-end test** -- software FPGA emulator replaces real hardware
 - **FPGA end-to-end test** -- real FPGA connected via ConnectX RDMA/RoCE
 
@@ -70,10 +69,6 @@ Hardware
      - GPU
      - ConnectX NIC
      - FPGA
-   * - CI unit test
-     - Any CUDA-capable GPU
-     - Not required
-     - Not required
    * - Emulated E2E
      - CUDA GPU with GPUDirect RDMA
      - Required (loopback cable)
@@ -108,7 +103,7 @@ built from this (cudaqx) repository:
   needed at **build** time.  It contains the ``enqueue_syndromes`` /
   ``get_corrections`` / ``reset_decoder`` ``DEVICE_CALL`` handlers (the device
   functions the scheduler dispatches).  It is linked ``WHOLE_ARCHIVE`` and
-  device-linked into the bridge and the CI test, and is pointed at via the
+  device-linked into the bridge, and is pointed at via the
   ``-DCUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE=<path>`` CMake variable.
   Both artifacts come from the same closed-source decoder package; build the
   ``cudaq-qec-realtime-cudevice-proprietary`` target from the proprietary
@@ -185,11 +180,6 @@ provides the ``GpuRoceTransceiver`` library for RDMA transport.
    fire-and-forget decode launch, and tail self-relaunch on top of the
    device-side graph dispatch).
 
-.. note::
-
-   ``holoscan-sensor-bridge`` is only needed for the emulated and FPGA
-   end-to-end tests.  The CI unit test requires only ``libcudaq-realtime``.
-
 Repository Layout
 -----------------
 
@@ -200,8 +190,6 @@ Key files within ``cudaqx``:
    libs/qec/
      unittests/
        realtime/
-         qec_graph_decode_test/
-           test_realtime_qldpc_graph_decoding.cpp   # CI unit test
          qec_roce_decode_test/
            data/
              config_nv_qldpc_relay.yml              # Relay BP decoder config
@@ -222,37 +210,7 @@ The FPGA emulator is in the ``cuda-quantum`` repository:
 Building
 --------
 
-CI unit test only (no HSB tools)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-If you only need to run the CI unit test, you can build without
-``holoscan-sensor-bridge``:
-
-.. code-block:: bash
-
-   # 1. Build libcudaq-realtime
-   git clone https://github.com/NVIDIA/cuda-quantum.git cudaq-realtime-src
-   cd cudaq-realtime-src
-   git checkout releases/v0.15.1
-   cd realtime && mkdir -p build && cd build
-   cmake -G Ninja -DCMAKE_INSTALL_PREFIX=/tmp/cudaq-realtime ..
-   ninja && ninja install
-   cd ../../..
-
-   # 2. Build cudaqx with the nv-qldpc-decoder test.
-   #    CUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE points at the static
-   #    archive with the DEVICE_CALL handlers; it is linked WHOLE_ARCHIVE into
-   #    the test (see "Obtaining the proprietary components").
-   cmake -S cudaqx -B cudaqx/build \
-     -DCMAKE_BUILD_TYPE=Release \
-     -DCUDAQ_DIR=/path/to/cudaq-install/lib/cmake/cudaq/ \
-     -DCUDAQ_REALTIME_ROOT=/tmp/cudaq-realtime \
-     -DCUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE=/path/to/libcudaq-qec-realtime-cudevice-proprietary.a \
-     -DCUDAQX_ENABLE_LIBS="qec" \
-     -DCUDAQX_INCLUDE_TESTS=ON
-   cmake --build cudaqx/build --target test_realtime_qldpc_graph_decoding
-
-Full build (CI test + HSB bridge/playback tools)
+Build the HSB bridge and playback tools
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 To also build the bridge and playback tools for emulated or FPGA testing:
@@ -322,7 +280,6 @@ To also build the bridge and playback tools for emulated or FPGA testing:
      -DHOLOSCAN_SENSOR_BRIDGE_SOURCE_DIR=/path/to/holoscan-sensor-bridge \
      -DHOLOSCAN_SENSOR_BRIDGE_BUILD_DIR=/path/to/holoscan-sensor-bridge/build
    cmake --build cudaqx/build --target \
-     test_realtime_qldpc_graph_decoding \
      gpu_roce_qldpc_graph_decoder_bridge \
      hsb_fpga_syndrome_playback
 
@@ -339,58 +296,16 @@ The orchestration script can build everything automatically:
      --cuda-quantum-dir /path/to/cuda-quantum \
      --no-run
 
-CI Unit Test
-------------
-
-The CI unit test (``test_realtime_qldpc_graph_decoding``) exercises the full
-device-graph scheduler decode path without any network hardware.  It:
-
-1. Loads the Relay BP config and syndrome data from YAML/text files
-2. Creates the decoder via the ``decoder::get("nv-qldpc-decoder", ...)`` plugin API
-3. Constructs a ``qec_realtime_session``, which captures the decoder's
-   device-launchable cooperative decode graph and starts the device-graph
-   scheduler on a pinned-mapped ring (3 ``DEVICE_CALL`` entries:
-   ``enqueue_syndromes`` / ``get_corrections`` / ``reset_decoder``)
-4. Drives the per-round protocol with ``rpc_producer``: for each shot it sends
-   one ``enqueue_syndromes`` per round, then a ``get_corrections``; the
-   scheduler fires the decode when a window completes and tail self-relaunches
-5. Verifies each shot's correction against the fixture, then a final
-   ``reset_decoder`` + ``get_corrections`` confirms reset
-
-Running
-^^^^^^^
-
-.. code-block:: bash
-
-   cd cudaqx/build
-
-   # The nv-qldpc-decoder plugin must be in <cudaqx-build>/lib/decoder-plugins/
-   # before running -- see "Obtaining the proprietary components" above.
-
-   ./libs/qec/unittests/test_realtime_qldpc_graph_decoding
-
-Expected output:
-
-.. code-block:: text
-
-   [==========] Running 1 test from 1 test suite.
-   [----------] 1 test from GraphDecodeTest
-   [ RUN      ] GraphDecodeTest.DecodesAllSyndromes
-   ...
-   [       OK ] GraphDecodeTest.DecodesAllSyndromes (XXX ms)
-   [==========] 1 test from 1 test suite ran.
-   [  PASSED  ] 1 test.
-
 Surface Code Test (Relay BP)
 ----------------------------
 
 The ``surface_code-1-local`` app example runs a surface code memory experiment
 with the nv-qldpc-decoder configured for Relay BP.  It simulates a surface code
-with ``stim`` and generates syndromes on the fly, so -- unlike the fixed-fixture
-CI unit test -- it can run an arbitrary number of shots.
+with ``stim`` and generates syndromes on the fly, so it can run an arbitrary
+number of shots.
 
 Build the app example (it links the same plugin + proprietary archive as the
-CI test):
+bridge):
 
 .. code-block:: bash
 

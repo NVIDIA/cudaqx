@@ -82,10 +82,10 @@ if(CMAKE_CUDA_COMPILER)
       get_filename_component(_CUDAQ_REALTIME_LIB_DIR "${CUDAQ_REALTIME_LIBRARY}" DIRECTORY)
     endif()
 
-    # The host-side dispatch loop (cudaq_host_dispatcher_loop), used by
-    # qec_realtime_session, lives in libcudaq-realtime-host-dispatch -- separate
-    # from libcudaq-realtime.  Locate it so cudaq-qec-realtime-decoding can link
-    # it (mirrors the cudaq-realtime-pipeline target below).
+    # The host-side dispatch loop (cudaq_host_dispatcher_loop) lives in
+    # libcudaq-realtime-host-dispatch -- separate from libcudaq-realtime.  Locate
+    # it so cudaq-qec-realtime-decoding can link it (mirrors the
+    # cudaq-realtime-pipeline target below).
     cudaq_qec_find_realtime_library(CUDAQ_REALTIME_HOST_DISPATCH_LIBRARY
       NAMES cudaq-realtime-host-dispatch
       PATH_SUFFIXES lib
@@ -97,8 +97,8 @@ if(CMAKE_CUDA_COMPILER)
     # The device-graph dispatch API (cudaq_create_dispatch_graph_regular,
     # cudaq_launch_dispatch_graph, cudaq_destroy_dispatch_graph) lives in
     # libcudaq-realtime-dispatch, separate from libcudaq-realtime.  It is
-    # relocatable device code, and qec_realtime_session resolves it at runtime
-    # via dlsym(RTLD_DEFAULT, ...) from the host executable's absorbed copy --
+    # relocatable device code, resolved at runtime via dlsym(RTLD_DEFAULT, ...)
+    # from the host executable's absorbed copy --
     # it must NOT be linked into cudaq-qec-realtime-decoding.so: a second
     # device-linked copy of the dispatch kernel would live in a different CUDA
     # module than the decoder's DEVICE_CALL handlers (captured from the
@@ -206,8 +206,6 @@ endif()
 add_library(cudaq-qec-realtime-decoding SHARED
   realtime_decoding.cpp
   config.cpp
-  qec_realtime_session.cpp
-  rpc_producer.cpp
 )
 
 target_compile_options(cudaq-qec-realtime-decoding 
