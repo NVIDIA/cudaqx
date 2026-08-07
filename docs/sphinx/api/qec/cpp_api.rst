@@ -70,12 +70,44 @@ CSS matrices and noise
 Extended DEM chunks
 -------------------
 
+Seam and phase identifiers
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. doxygenstruct:: cudaq::qec::seam_id
+    :members:
+
+.. doxygentypedef:: cudaq::qec::phase_id
+
+.. doxygennamespace:: cudaq::qec::seam_name
+    :members:
+
+.. doxygennamespace:: cudaq::qec::phase_name
+    :members:
+
+Chunk types
+~~~~~~~~~~~
+
 .. doxygenstruct:: cudaq::qec::extended_dem
     :members:
 
 .. doxygenfunction:: cudaq::qec::extended_dem_from_css_matrices
 
+.. doxygenstruct:: cudaq::qec::dem_seam_spec
+    :members:
+
+.. doxygenstruct:: cudaq::qec::seam_spec_entry
+    :members:
+
 .. doxygenstruct:: cudaq::qec::dem_chunk_spec
+    :members:
+
+.. doxygenstruct:: cudaq::qec::seam_connection
+    :members:
+
+.. doxygenstruct:: cudaq::qec::phase_connection
+    :members:
+
+.. doxygenstruct:: cudaq::qec::phase_spec_entry
     :members:
 
 .. doxygenstruct:: cudaq::qec::dem_chunks_spec

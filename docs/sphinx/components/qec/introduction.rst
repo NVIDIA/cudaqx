@@ -871,8 +871,9 @@ and compose them as per-round chunks:
   ``css_noise_params``.
 * ``extended_dem_from_css_matrices``, ``dem_stitch`` / ``dem_close_all`` —
   one-round chunks that stitch and close to the same flat DEM.
-* YAML ``dem_chunks`` + ``num_rounds`` — declarative init / bulk / final
-  phases for real-time decoder configs; expanded by ``expand_dem_chunks``.
+* YAML ``dem_chunks`` with optional ``num_rounds`` inside — declarative
+  init / bulk / final phases for real-time decoder configs; expanded by
+  ``expand_dem_chunks``. Omit ``num_rounds`` for streaming decoders.
 
 .. tab:: Python
 

@@ -71,47 +71,81 @@ Example
       nvq++ -lcudaq-qec -lcudaq-qec-decoders dyn_dem.cpp
       ./a.out
 
+Named seams and phases
+++++++++++++++++++++++
+
+Each chunk carries a single ``H`` matrix (all detector rows) plus a list of
+named *seam descriptors* that identify which row bands participate in
+stitching. Seam and phase identities are :class:`~cudaq_qec.SeamId` values —
+lightweight wrappers around the FNV1a-32 hash of a name string — so the same
+string always produces the same ID with no manual numbering.
+
+Standard names for memory experiments:
+
+* ``seam_name.prev_round`` / ``seam_name.next_round`` — incoming and outgoing
+  syndrome boundaries.
+* ``phase_name.init``, ``phase_name.bulk``, ``phase_name.final`` — standard
+  phase constants whose string values are ``"init"``, ``"bulk"``, ``"final"``.
+  Use the string form in YAML.
+
 Phase specs and YAML ``dem_chunks``
 +++++++++++++++++++++++++++++++++++
 
 For asymmetric init / bulk / final rounds (for example dropping measurement
 errors on a destructive final readout), describe each phase as a
-:class:`~cudaq_qec.DemChunkSpec` — the same ``-1``-terminated sparse lists used
-by ``H_sparse`` / ``O_sparse`` — and group them in a
-:class:`~cudaq_qec.DemChunksSpec`. ``dem_chunks_from_spec(spec, num_rounds)``
-expands to ``init``, ``num_rounds - 2`` copies of ``bulk``, then ``final``.
+:class:`~cudaq_qec.DemChunkSpec` and group them in a
+:class:`~cudaq_qec.DemChunksSpec`. ``dem_chunks_from_spec(spec)`` expands to
+``init``, ``num_rounds - 2`` copies of ``bulk``, then ``final`` according to
+the ``connections`` list and ``num_rounds`` field inside ``spec``.
 
-Real-time decoder YAML accepts the same structure under ``dem_chunks`` with
-``num_rounds``. When ``H_sparse`` is empty, the configuration is *chunk form*:
-``expand_dem_chunks`` (called during decoder construction) derives
-``block_size``, ``syndrome_size``, ``H_sparse``, ``O_sparse``, and
-``D_sparse``, and supplies ``error_rate_vec`` from the closed DEM priors. A
-nonempty ``H_sparse`` keeps the config in flat form (the matrix wins).
+The ``H_sparse`` shorthand at chunk level means all seams share the same
+syndrome rows (the memory case). ``seam_specs`` gives per-seam rows for
+non-memory circuits.
+
+Real-time decoder YAML accepts the same structure under ``dem_chunks``.
+``num_rounds`` is optional: omit it for streaming decoders where the round
+count is not known at configuration time. When ``H_sparse`` is empty, the
+configuration is *chunk form*: ``expand_dem_chunks`` (called during decoder
+construction) derives ``block_size``, ``syndrome_size``, ``H_sparse``,
+``O_sparse``, and ``D_sparse`` from the closed DEM. A nonempty ``H_sparse``
+keeps the config in flat form.
 
 .. code-block:: yaml
 
    decoders:
      - id: 0
        type: single_error_lut
-       num_rounds: 5
        dem_chunks:
-         init:
-           num_faults: 9
-           H_mid_sparse: [ 0, 1, 5, -1, 1, 2, 6, -1, 2, 3, 7, -1, 3, 4, 8, -1 ]
-           H_out_sparse: [ 5, -1, 6, -1, 7, -1, 8, -1 ]
-           O_sparse: [ 0, -1 ]
-           error_rates: [ 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02 ]
-         bulk:
-           num_faults: 9
-           H_in_sparse: [ 0, 1, 5, -1, 1, 2, 6, -1, 2, 3, 7, -1, 3, 4, 8, -1 ]
-           H_out_sparse: [ 5, -1, 6, -1, 7, -1, 8, -1 ]
-           O_sparse: [ 0, -1 ]
-           error_rates: [ 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02 ]
-         final:
-           num_faults: 5
-           H_in_sparse: [ 0, 1, -1, 1, 2, -1, 2, 3, -1, 3, 4, -1 ]
-           O_sparse: [ 0, -1 ]
-           error_rates: [ 0.02, 0.02, 0.02, 0.02, 0.02 ]
+         seam: {from: next_round, to: prev_round}
+         connections:
+           - {from: init, to: bulk}
+           - {from: bulk, to: bulk}
+           - {from: bulk, to: final}
+         num_rounds: 5
+         phases:
+           - name: init
+             spec:
+               num_faults: 9
+               H_sparse: [ 0, 1, 5, -1, 1, 2, 6, -1, 2, 3, 7, -1, 3, 4, 8, -1 ]
+               O_sparse: [ 0, -1 ]
+               error_rates: [ 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02 ]
+           - name: bulk
+             spec:
+               num_faults: 9
+               H_sparse: [ 0, 1, 5, -1, 1, 2, 6, -1, 2, 3, 7, -1, 3, 4, 8, -1 ]
+               O_sparse: [ 0, -1 ]
+               error_rates: [ 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02 ]
+           - name: final
+             spec:
+               num_faults: 5
+               H_sparse: [ 0, 1, -1, 1, 2, -1, 2, 3, -1, 3, 4, -1 ]
+               O_sparse: [ 0, -1 ]
+               error_rates: [ 0.02, 0.02, 0.02, 0.02, 0.02 ]
+
+The ``connections`` list encodes the phase graph. A self-loop
+(``from: bulk, to: bulk``) identifies the repeating phase; ``num_rounds``
+controls how many copies are inserted. For a linear chain with no self-loop
+``num_rounds`` is not needed.
 
 Duplicate fault columns
 +++++++++++++++++++++++
@@ -124,14 +158,16 @@ physical fault is modelled on both sides of a seam. ``dem_merge_duplicate_column
 canonicalization elsewhere in CUDA-Q QEC. ``sum_combine`` is a small-:math:`p`
 linear approximation, clamped to :math:`[0, 1]`.
 
-Closing drops ``out_syndrome``
+Closing and the outgoing seam
 ++++++++++++++++++++++++++++++
 
-``dem_close`` and ``dem_close_all`` intentionally discard the last chunk's
-outgoing seam: there is no later round for it to differ against. Put any
-final-boundary detector in ``in_syndrome`` or ``interior`` (for a phase
-spec, ``H_in_sparse`` / ``H_mid_sparse``). ``dem_chunks_spec`` validation
-rejects a nonempty ``final.H_out_sparse`` for this reason.
+``dem_close`` and ``dem_close_all`` drop the last chunk's outgoing seam
+(``next_round`` by default): there is no later round for it to differ against.
+The incoming seam rows (``prev_round``) appear first in the output so that
+``detector[0]`` corresponds to ``syndrome[0]`` vs. the zero initial state.
+Any detector that belongs only to the final boundary should be placed in the
+``next_round`` seam of the preceding chunk, or in interior rows of the final
+chunk.
 
 See also
 ++++++++
