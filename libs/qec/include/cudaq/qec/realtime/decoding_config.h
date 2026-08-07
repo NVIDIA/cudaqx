@@ -9,7 +9,6 @@
 #pragma once
 
 #include "cuda-qx/core/heterogeneous_map.h"
-#include "cudaq/qec/dem_chunks_memory.h"
 #include "cudaq/qec/extended_dem.h"
 #include <cstdint>
 #include <memory>
@@ -77,8 +76,9 @@ struct decoder_config {
   ///
   ///   - Flat form: H_sparse plus block_size, syndrome_size, O_sparse and
   ///     D_sparse, all sized for the whole experiment.
-  ///   - Chunk form: dem_chunks plus num_rounds. The other five are derived by
-  ///     expanding the phases num_rounds times, and must be omitted.
+  ///   - Chunk form: dem_chunks (which carries phases, connections, seam, and
+  ///     num_rounds internally). The other five flat fields are derived by
+  ///     expanding the phases, and must be omitted.
   ///
   /// See expand_dem_chunks() for the derivation, which runs at decoder
   /// construction so the rest of the pipeline only ever sees the flat form.
@@ -88,29 +88,16 @@ struct decoder_config {
   std::vector<std::int64_t> O_sparse;
   std::vector<std::int64_t> D_sparse;
   /// Optional per-phase DEM for a streaming, repeated-round decomposition.
-  /// H_sparse above describes the whole experiment as one flat matrix, which
-  /// requires knowing the round count up front; these phases describe one
-  /// round each so the round count can be chosen (or grown) at run time. See
+  /// H_sparse above describes the whole experiment as one flat matrix; these
+  /// phases describe one round each so the round count can be chosen at run
+  /// time. num_rounds lives inside dem_chunks_spec. See
   /// cudaq::qec::dem_chunks_from_spec() for expansion to a chunk sequence.
   ///
   /// A configuration that also has a nonempty H_sparse is flat, and that
-  /// matrix is the one decoders are built from -- the phases are then only a
-  /// record of where it came from. Form selection keys off H_sparse.empty(),
-  /// so an omitted H_sparse and an explicit empty list both count as chunk
-  /// form. Nonempty H_sparse is exactly the state expand_dem_chunks() leaves
-  /// behind, which is what lets an expanded configuration round-trip through
-  /// YAML; it is not a way to override individual rounds.
-  std::optional<dem_chunks_spec> dem_chunks;
-  /// How many rounds to expand `dem_chunks` into. Required with dem_chunks and
-  /// rejected without it. This is the round count the flat form would otherwise
-  /// have baked into its matrix dimensions; naming it here is what lets the
-  /// same phase description serve experiments of different lengths.
-  ///
-  /// This is the *total* round count, so the expansion is init, `num_rounds-2`
-  /// bulk copies, then final, and the minimum is 2. Note that the
-  /// decoder-tasking spec writes the same construction as `S_R` where `R`
-  /// counts bulk copies only: this field is that `R` plus 2.
-  std::optional<uint64_t> num_rounds;
+  /// matrix is the one decoders are built from. Form selection keys off
+  /// H_sparse.empty(). Nonempty H_sparse is exactly the state
+  /// expand_dem_chunks() leaves behind, allowing round-trip through YAML.
+  std::optional<cudaq::qec::dem_chunks_spec> dem_chunks;
   decoder_custom_args_t decoder_custom_args;
 
   bool operator==(const decoder_config &) const = default;
