@@ -108,8 +108,9 @@ static void init_server() {
 // CUDAQ handler functions — inline dispatch to DecodingSession::handle_*
 // ---------------------------------------------------------------------------
 
-// Write an error RPCResponse into tx_slot (handler-level failures must not
-// propagate into the transport dispatcher loop).
+// Write an error RPCResponse into tx_slot, echoing the request identity from
+// rx_slot (handler-level failures must not propagate into the transport
+// dispatcher loop).  Guards the slots, then delegates to slot::write_response.
 constexpr int32_t kStatusHandlerException =
     static_cast<int32_t>(cudaq::qec::decoding::rpc::RpcStatus::INTERNAL_ERROR);
 
@@ -118,13 +119,8 @@ static void write_error_response(const void *rx_slot, void *tx_slot,
   if (!tx_slot || !rx_slot || slot_size < sizeof(cudaq::realtime::RPCHeader))
     return;
   const auto *req = static_cast<const cudaq::realtime::RPCHeader *>(rx_slot);
-  auto *resp = static_cast<cudaq::realtime::RPCResponse *>(tx_slot);
-  resp->status = status;
-  resp->result_len = 0;
-  resp->request_id = req->request_id;
-  resp->ptp_timestamp = req->ptp_timestamp;
-  __atomic_store_n(reinterpret_cast<uint32_t *>(tx_slot),
-                   cudaq::realtime::RPC_MAGIC_RESPONSE, __ATOMIC_RELEASE);
+  slot::write_response(tx_slot, req->request_id, req->ptp_timestamp,
+                       static_cast<RpcStatus>(status));
 }
 
 // The registry is constructed lazily on the first RPC (the in-process
@@ -215,11 +211,10 @@ void reset_decoder_host(const void *rx_slot, void *tx_slot,
 // DeviceCallService plugin
 // ---------------------------------------------------------------------------
 
-// The schema entries below register under the SAME function IDs the handlers
-// and CqrTransceiver route on: the kXFunctionId constants from
-// decoder_rpc_wire_format.h, which derives them from the RPC names via
-// cudaq::realtime::fnv1a_hash so a rename cannot silently desynchronize
-// registration from routing.
+// The schema entries below register under the SAME function IDs dispatch_rpc
+// routes on: the kXFunctionId constants from decoder_rpc_wire_format.h, which
+// derives them from the RPC names via cudaq::realtime::fnv1a_hash so a rename
+// cannot silently desynchronize registration from routing.
 
 constexpr int32_t kHostDispatchDeviceId = 0;
 constexpr uint8_t kNoResults = 0;

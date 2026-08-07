@@ -202,8 +202,8 @@ endif()
 
 # ---------------------------------------------------------------------------
 # CQR host-dispatch plugin (only when CUDAQ device_call headers are available):
-# CqrTransceiver bridges DeviceCallService handler callbacks to ITransceiver,
-# then hands off to DecodingServer for session management and decoding.
+# registers the HOST_CALL handlers, which serve each request inline on the
+# CUDAQ dispatcher thread (DecodingSession::handle_*).
 # ---------------------------------------------------------------------------
 if(CUDAQ_QEC_DEVICE_CALL_SERVICE_AVAILABLE)
   add_library(cudaq-qec-realtime-decoding-server-cqr SHARED
