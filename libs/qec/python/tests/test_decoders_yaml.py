@@ -277,5 +277,196 @@ def test_sliding_window_boundary_syndromes_roundtrip():
     check_decoder_yaml_roundtrip(multi_config)
 
 
+# ---------------------------------------------------------------------------
+# Chunk-form configurations
+# ---------------------------------------------------------------------------
+
+REP5_CHECKS = 4
+
+
+def chunk_form_yaml(num_rounds):
+    """A d=5 repetition code written as phases rather than flat matrices."""
+    return f"""
+id: 0
+type: single_error_lut
+num_rounds: {num_rounds}
+dem_chunks:
+  init:
+    num_faults: 9
+    H_mid_sparse: [ 0, 1, 5, -1, 1, 2, 6, -1, 2, 3, 7, -1, 3, 4, 8, -1 ]
+    H_out_sparse: [ 5, -1, 6, -1, 7, -1, 8, -1 ]
+    O_sparse: [ 0, -1 ]
+    error_rates: [ 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02 ]
+  bulk:
+    num_faults: 9
+    H_in_sparse: [ 0, 1, 5, -1, 1, 2, 6, -1, 2, 3, 7, -1, 3, 4, 8, -1 ]
+    H_out_sparse: [ 5, -1, 6, -1, 7, -1, 8, -1 ]
+    O_sparse: [ 0, -1 ]
+    error_rates: [ 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02 ]
+  final:
+    num_faults: 5
+    H_in_sparse: [ 0, 1, -1, 1, 2, -1, 2, 3, -1, 3, 4, -1 ]
+    O_sparse: [ 0, -1 ]
+    error_rates: [ 0.02, 0.02, 0.02, 0.02, 0.02 ]
+"""
+
+
+def test_chunk_form_parses_with_no_flat_matrices():
+    config = qec.decoder_config.from_yaml_str(chunk_form_yaml(5))
+
+    assert config.num_rounds == 5
+    assert config.dem_chunks is not None
+    assert config.dem_chunks.init.num_faults == 9
+    # The flat fields are derived, so they stay unset until expansion.
+    assert config.block_size == 0
+    assert config.syndrome_size == 0
+    assert len(config.H_sparse) == 0
+
+
+def test_expand_dem_chunks_fills_the_flat_fields():
+    config = qec.decoder_config.from_yaml_str(chunk_form_yaml(5))
+    closed = qec.qecrt.config.expand_dem_chunks(config)
+
+    assert closed is not None
+    assert config.syndrome_size == 5 * REP5_CHECKS
+    # 4 init/bulk phases of 9 faults, plus a 5-fault final round.
+    assert config.block_size == 41
+    assert len(closed.error_rates) == config.block_size
+    # One -1 terminator per row, so H and D are as tall as the DEM.
+    assert config.H_sparse.count(-1) == config.syndrome_size
+    assert config.D_sparse.count(-1) == config.syndrome_size
+
+
+def test_expand_dem_chunks_is_a_no_op_on_a_flat_config():
+    config = qec.decoder_config.from_yaml_str(chunk_form_yaml(3))
+    qec.qecrt.config.expand_dem_chunks(config)
+    flat_H = list(config.H_sparse)
+
+    # Already flat now, so a second call must leave it alone.
+    assert qec.qecrt.config.expand_dem_chunks(config) is None
+    assert list(config.H_sparse) == flat_H
+
+
+def test_same_chunks_serve_different_round_counts():
+    sizes = {}
+    for rounds in (2, 3, 5, 8):
+        config = qec.decoder_config.from_yaml_str(chunk_form_yaml(rounds))
+        qec.qecrt.config.expand_dem_chunks(config)
+        sizes[rounds] = (config.syndrome_size, config.block_size)
+
+    for rounds, (syndrome_size, block_size) in sizes.items():
+        assert syndrome_size == rounds * REP5_CHECKS
+        assert block_size == 9 * (rounds - 1) + 5
+
+
+def test_chunk_form_builds_a_working_decoder():
+    config = qec.decoder_config.from_yaml_str(chunk_form_yaml(5))
+    multi_config = qec.multi_decoder_config()
+    multi_config.decoders = [config]
+
+    assert qec.qecrt.config.configure_decoders(multi_config) == 0
+    qec.qecrt.config.finalize_decoders()
+
+
+def test_num_rounds_is_required_with_dem_chunks():
+    without = chunk_form_yaml(5).replace("num_rounds: 5\n", "")
+    with pytest.raises(Exception):
+        qec.decoder_config.from_yaml_str(without)
+
+
+def test_num_rounds_is_rejected_without_dem_chunks():
+    yaml_str = """
+id: 0
+type: single_error_lut
+num_rounds: 5
+block_size: 3
+syndrome_size: 2
+H_sparse: [ 0, -1, 1, -1 ]
+O_sparse: [ 0, -1 ]
+D_sparse: [ 0, -1, 0, 1, -1 ]
+"""
+    with pytest.raises(Exception):
+        qec.decoder_config.from_yaml_str(yaml_str)
+
+
+def test_num_rounds_below_two_is_rejected():
+    # num_rounds counts init and final as well as the bulk copies between
+    # them, so 2 is the smallest expansion there is.
+    for rounds in (0, 1):
+        with pytest.raises(Exception):
+            qec.decoder_config.from_yaml_str(chunk_form_yaml(rounds))
+
+    assert qec.decoder_config.from_yaml_str(chunk_form_yaml(2)).num_rounds == 2
+
+
+def test_incomplete_flat_config_is_rejected():
+    # dem_chunks made the flat fields optional in the mapping; a flat config
+    # still has to name all of them, or it parses into an empty DEM that only
+    # fails when a decoder is built from it.
+    complete = {
+        "block_size": "block_size: 3",
+        "syndrome_size": "syndrome_size: 2",
+        "H_sparse": "H_sparse: [ 0, -1, 1, -1 ]",
+        "O_sparse": "O_sparse: [ 0, -1 ]",
+        "D_sparse": "D_sparse: [ 0, -1, 0, 1, -1 ]",
+    }
+    header = "id: 0\ntype: single_error_lut\n"
+    assert qec.decoder_config.from_yaml_str(header +
+                                            "\n".join(complete.values()))
+
+    for omitted in complete:
+        yaml_str = header + "\n".join(
+            line for key, line in complete.items() if key != omitted)
+        with pytest.raises(Exception):
+            qec.decoder_config.from_yaml_str(yaml_str)
+
+
+def test_config_describing_no_dem_at_all_is_rejected():
+    with pytest.raises(Exception):
+        qec.decoder_config.from_yaml_str("id: 0\ntype: single_error_lut\n")
+
+
+def test_expand_dem_chunks_is_exported_at_top_level():
+    config = qec.decoder_config.from_yaml_str(chunk_form_yaml(5))
+    assert qec.expand_dem_chunks(config) is not None
+    assert config.block_size == 41
+
+
+def test_derived_fields_are_rejected_in_chunk_form():
+    with_block_size = chunk_form_yaml(5).replace(
+        "num_rounds: 5", "num_rounds: 5\nblock_size: 41")
+    with pytest.raises(Exception):
+        qec.decoder_config.from_yaml_str(with_block_size)
+
+
+def test_chunk_form_can_be_built_programmatically():
+    config = qec.decoder_config()
+    config.id = 0
+    config.type = "single_error_lut"
+    config.num_rounds = 4
+
+    spec = qec.DemChunksSpec()
+    spec.init.num_faults = 9
+    spec.init.H_mid_sparse = [
+        0, 1, 5, -1, 1, 2, 6, -1, 2, 3, 7, -1, 3, 4, 8, -1
+    ]
+    spec.init.H_out_sparse = [5, -1, 6, -1, 7, -1, 8, -1]
+    spec.init.O_sparse = [0, -1]
+    spec.init.error_rates = [0.02] * 9
+    spec.bulk.num_faults = 9
+    spec.bulk.H_in_sparse = [0, 1, 5, -1, 1, 2, 6, -1, 2, 3, 7, -1, 3, 4, 8, -1]
+    spec.bulk.H_out_sparse = [5, -1, 6, -1, 7, -1, 8, -1]
+    spec.bulk.O_sparse = [0, -1]
+    spec.bulk.error_rates = [0.02] * 9
+    spec.final.num_faults = 5
+    spec.final.H_in_sparse = [0, 1, -1, 1, 2, -1, 2, 3, -1, 3, 4, -1]
+    spec.final.O_sparse = [0, -1]
+    spec.final.error_rates = [0.02] * 5
+    config.dem_chunks = spec
+
+    qec.qecrt.config.expand_dem_chunks(config)
+    assert config.syndrome_size == 4 * REP5_CHECKS
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

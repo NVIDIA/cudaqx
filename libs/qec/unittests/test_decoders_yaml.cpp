@@ -1310,3 +1310,273 @@ TEST(DecoderYAMLTest, NonSchemaKeysDroppedFromDecoderParamsAndEmission) {
   // The stored args are untouched -- only the derived views are filtered.
   EXPECT_TRUE(config.decoder_custom_args.map().contains("not_a_real_param"));
 }
+
+// ---------------------------------------------------------------------------
+// dem_chunks: named-phase DEM for a repeated-round decomposition
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// A simple 1-check, 2-fault code:
+//   H: [[f0, f1]] (1 syndrome check)
+//   O: [[f0]]     (f0 flips the observable)
+// Phases:
+//   init:  num_faults=2, next_round seam only (H_sparse=[0,1,-1])
+//   bulk:  num_faults=2, both seams   (H_sparse=[0,1,-1])
+//   final: num_faults=2, prev_round seam only (H_sparse=[0,1,-1])
+std::string dem_chunks_yaml(unsigned num_rounds = 3) {
+  return R"(
+decoders:
+  - id: 0
+    type: sample_decoder
+    dem_chunks:
+      seam:
+        from: next_round
+        to: prev_round
+      connections:
+        - {from: init, to: bulk}
+        - {from: bulk, to: bulk}
+        - {from: bulk, to: final}
+      num_rounds: )" +
+         std::to_string(num_rounds) + R"(
+      phases:
+        - name: init
+          spec:
+            num_faults: 2
+            H_sparse: [0, 1, -1]
+            O_sparse: [0, -1]
+            error_rates: [0.01, 0.01]
+        - name: bulk
+          spec:
+            num_faults: 2
+            H_sparse: [0, 1, -1]
+            O_sparse: [0, -1]
+            error_rates: [0.01, 0.01]
+        - name: final
+          spec:
+            num_faults: 2
+            H_sparse: [0, 1, -1]
+            O_sparse: [0, -1]
+            error_rates: [0.01, 0.01]
+)";
+}
+
+cudaq::qec::decoding::config::decoder_config
+parse_one(const std::string &yaml) {
+  auto config =
+      cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(yaml);
+  EXPECT_EQ(config.decoders.size(), 1u);
+  return config.decoders.at(0);
+}
+
+} // namespace
+
+TEST(DecoderDemChunksYAMLTest, ParsesAllPhases) {
+  const auto config =
+      cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(
+          dem_chunks_yaml(3));
+  ASSERT_EQ(config.decoders.size(), 1u);
+  const auto &chunks = config.decoders[0].dem_chunks;
+  ASSERT_TRUE(chunks.has_value());
+  EXPECT_EQ(chunks->num_rounds, 3u);
+  EXPECT_EQ(chunks->phases.size(), 3u);
+  EXPECT_EQ(chunks->connections.size(), 3u);
+  EXPECT_FALSE(chunks->is_empty());
+  EXPECT_TRUE(chunks->has_repeating_phase());
+}
+
+TEST(DecoderDemChunksYAMLTest, ParsedPhasesExpandAndClose) {
+  const auto config =
+      cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(
+          dem_chunks_yaml(4));
+  const auto &spec = *config.decoders[0].dem_chunks;
+
+  const auto expanded = cudaq::qec::dem_chunks_from_spec(spec);
+  ASSERT_EQ(expanded.size(), 4u);
+
+  const auto flat = cudaq::qec::dem_close_all(expanded);
+  // (rounds-1) seam contractions = 3 detectors; 4 rounds × 2 faults = 8
+  EXPECT_EQ(flat.detector_error_matrix.shape()[0], 3u);
+  EXPECT_EQ(flat.detector_error_matrix.shape()[1], 8u);
+  EXPECT_EQ(flat.observables_flips_matrix.shape()[0], 1u);
+}
+
+TEST(DecoderDemChunksYAMLTest, SectionIsOptional) {
+  const std::string yaml = R"(
+decoders:
+  - id: 0
+    type: multi_error_lut
+    block_size: 3
+    syndrome_size: 3
+    H_sparse: [0, -1, 1, -1, 2, -1]
+    O_sparse: [0, -1, 1, -1, 2, -1]
+    D_sparse: [0, -1, 1, -1, 2, -1]
+)";
+  auto config =
+      cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(yaml);
+  EXPECT_FALSE(config.decoders[0].dem_chunks.has_value());
+  EXPECT_EQ(config.to_yaml_str(200).find("dem_chunks"), std::string::npos);
+}
+
+// Chunk form: dem_chunks describes the DEM as named phases
+TEST(DecoderChunkFormTest, ParsesWithNoFlatMatrices) {
+  const auto config = parse_one(dem_chunks_yaml(5));
+  EXPECT_TRUE(config.H_sparse.empty());
+  EXPECT_TRUE(config.O_sparse.empty());
+  EXPECT_TRUE(config.D_sparse.empty());
+  EXPECT_EQ(config.block_size, 0u);
+  EXPECT_EQ(config.syndrome_size, 0u);
+  ASSERT_TRUE(config.dem_chunks.has_value());
+  EXPECT_EQ(config.dem_chunks->num_rounds, 5u);
+}
+
+TEST(DecoderChunkFormTest, ExpandsToASelfConsistentFlatConfig) {
+  auto config = parse_one(dem_chunks_yaml(5));
+  const auto closed = cudaq::qec::decoding::config::expand_dem_chunks(config);
+
+  ASSERT_TRUE(closed.has_value());
+  EXPECT_GT(config.block_size, 0u);
+  EXPECT_GT(config.syndrome_size, 0u);
+
+  const auto count_rows = [](const std::vector<std::int64_t> &sparse) {
+    return static_cast<std::uint64_t>(
+        std::count(sparse.begin(), sparse.end(), -1));
+  };
+  EXPECT_EQ(count_rows(config.H_sparse), config.syndrome_size);
+  EXPECT_EQ(count_rows(config.O_sparse), 1u);
+
+  // 5 rounds × 2 faults = 10 fault columns
+  EXPECT_EQ(config.block_size, 10u);
+  // (5-1) seam contractions = 4 detectors; 5 rounds × 2 faults = 10
+  EXPECT_EQ(config.syndrome_size, 4u);
+
+  // Expanded config is flat, so re-expanding is a no-op.
+  EXPECT_FALSE(
+      cudaq::qec::decoding::config::expand_dem_chunks(config).has_value());
+}
+
+TEST(DecoderChunkFormTest, SameConnectionsDifferentRoundCounts) {
+  // Two configs with the same phases but different num_rounds should expand
+  // to different sizes.
+  auto three = parse_one(dem_chunks_yaml(3));
+  auto five = parse_one(dem_chunks_yaml(5));
+
+  cudaq::qec::decoding::config::expand_dem_chunks(three);
+  cudaq::qec::decoding::config::expand_dem_chunks(five);
+  EXPECT_LT(three.syndrome_size, five.syndrome_size);
+  EXPECT_EQ(three.block_size, 6u); // 3 rounds × 2 faults
+  EXPECT_EQ(five.block_size, 10u); // 5 rounds × 2 faults
+}
+
+TEST(DecoderChunkFormTest, DerivedFieldsAreRejected) {
+  for (const std::string derived :
+       {"    syndrome_size: 3\n", "    block_size: 10\n",
+        "    O_sparse: [0, -1]\n", "    D_sparse: [0, -1]\n"}) {
+    const std::string yaml =
+        R"(
+decoders:
+  - id: 3
+    type: sample_decoder
+)" + derived +
+        dem_chunks_yaml(3).substr(dem_chunks_yaml(3).find("    dem_chunks:"));
+    try {
+      cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(yaml);
+      ADD_FAILURE() << "expected rejection of derived field: " << derived;
+    } catch (const std::runtime_error &) {
+    }
+  }
+}
+
+TEST(DecoderChunkFormTest, ExpandedConfigIsItselfAValidFlatConfig) {
+  auto config = parse_one(dem_chunks_yaml(3));
+  cudaq::qec::decoding::config::expand_dem_chunks(config);
+
+  cudaq::qec::decoding::config::multi_decoder_config wrapper;
+  wrapper.decoders.push_back(config);
+  const auto emitted = wrapper.to_yaml_str(200);
+  EXPECT_NE(emitted.find("H_sparse"), std::string::npos);
+  EXPECT_NE(emitted.find("dem_chunks"), std::string::npos);
+}
+
+TEST(DecoderChunkFormTest, HSparseStillRequiredWithoutChunks) {
+  const std::string yaml = R"(
+decoders:
+  - id: 7
+    type: multi_error_lut
+    block_size: 3
+    syndrome_size: 3
+    O_sparse: [0, -1, 1, -1, 2, -1]
+    D_sparse: [0, -1, 1, -1, 2, -1]
+)";
+  try {
+    cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(yaml);
+    FAIL() << "expected a missing-H_sparse failure";
+  } catch (const std::runtime_error &error) {
+    const std::string message = error.what();
+    EXPECT_NE(message.find("H_sparse"), std::string::npos) << message;
+  }
+}
+
+TEST(DecoderChunkFormTest, IncompleteFlatConfigIsRejectedAtParse) {
+  const std::vector<std::pair<std::string, std::string>> omissions{
+      {"block_size", "    syndrome_size: 3\n    H_sparse: [0, -1, 1, -1, 2, "
+                     "-1]\n    O_sparse: [0, -1]\n    D_sparse: [0, -1, 1, -1, "
+                     "2, -1]\n"},
+      {"syndrome_size", "    block_size: 3\n    H_sparse: [0, -1, 1, -1, 2, "
+                        "-1]\n    O_sparse: [0, -1]\n    D_sparse: [0, -1, 1, "
+                        "-1, 2, -1]\n"},
+      {"O_sparse", "    block_size: 3\n    syndrome_size: 3\n    H_sparse: [0, "
+                   "-1, 1, -1, 2, -1]\n    D_sparse: [0, -1, 1, -1, 2, -1]\n"},
+      {"D_sparse", "    block_size: 3\n    syndrome_size: 3\n    H_sparse: [0, "
+                   "-1, 1, -1, 2, -1]\n    O_sparse: [0, -1]\n"},
+  };
+
+  for (const auto &[omitted, body] : omissions) {
+    const std::string yaml =
+        "decoders:\n  - id: 0\n    type: multi_error_lut\n" + body;
+    try {
+      cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(yaml);
+      ADD_FAILURE() << "expected rejection when " << omitted << " is omitted";
+    } catch (const std::runtime_error &error) {
+      const std::string message = error.what();
+      EXPECT_NE(message.find(omitted), std::string::npos) << message;
+    }
+  }
+}
+
+TEST(DecoderChunkFormTest, ConfigWithNeitherFormIsRejectedAtParse) {
+  const std::string yaml = R"(
+decoders:
+  - id: 0
+    type: multi_error_lut
+)";
+  EXPECT_THROW(
+      cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(yaml),
+      std::runtime_error);
+}
+
+TEST(DecoderChunkFormTest, NumRoundsBelowTwoIsRejected) {
+  // num_rounds must be at least 2 (init + final).
+  for (const unsigned rounds : {0u, 1u}) {
+    const auto yaml = dem_chunks_yaml(rounds);
+    try {
+      cudaq::qec::decoding::config::multi_decoder_config::from_yaml_str(yaml);
+      ADD_FAILURE() << "expected rejection of num_rounds: " << rounds;
+    } catch (const std::runtime_error &error) {
+      EXPECT_NE(std::string(error.what()).find("num_rounds"), std::string::npos)
+          << error.what();
+    }
+  }
+  // Two rounds (init + final, no bulk) is accepted.
+  const auto config = parse_one(dem_chunks_yaml(2));
+  EXPECT_EQ(config.dem_chunks->num_rounds, 2u);
+}
+
+TEST(DecoderChunkFormTest, JsonSchemaNumRoundsMinimumMatchesTheParser) {
+  const auto schema =
+      cudaq::qec::decoding::config::decoder_config_json_schema();
+  const auto at = schema.find("\"num_rounds\"");
+  ASSERT_NE(at, std::string::npos);
+  EXPECT_NE(schema.find("\"minimum\": 2", at), std::string::npos)
+      << schema.substr(at, 200);
+}
