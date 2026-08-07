@@ -76,12 +76,42 @@ CSS matrices and noise
 Extended DEM chunks
 -------------------
 
+Seam and phase identifiers
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. autoclass:: cudaq_qec.SeamId
+    :members:
+
+.. autodata:: cudaq_qec.seam_name
+.. autodata:: cudaq_qec.phase_name
+
+Chunk types
+^^^^^^^^^^^
+
+.. autoclass:: cudaq_qec.ExtendedDemSeam
+    :members:
+
 .. autoclass:: cudaq_qec.ExtendedDem
     :members:
 
 .. autofunction:: cudaq_qec.extended_dem_from_css_matrices
 
+.. autoclass:: cudaq_qec.DemSeamSpec
+    :members:
+
+.. autoclass:: cudaq_qec.SeamSpecEntry
+    :members:
+
 .. autoclass:: cudaq_qec.DemChunkSpec
+    :members:
+
+.. autoclass:: cudaq_qec.SeamConnection
+    :members:
+
+.. autoclass:: cudaq_qec.PhaseConnection
+    :members:
+
+.. autoclass:: cudaq_qec.PhaseSpecEntry
     :members:
 
 .. autoclass:: cudaq_qec.DemChunksSpec
