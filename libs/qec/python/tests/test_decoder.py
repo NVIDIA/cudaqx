@@ -98,6 +98,16 @@ def test_decoder_api():
     assert result.result.shape == (10,)
 
 
+def test_decode_async_temporary_keeps_decoder_alive():
+    # The future must retain this temporary decoder through virtual decode.
+    async_result = qec.get_decoder('example_byod',
+                                   H).decode_async(create_test_syndrome())
+    result = async_result.get()
+
+    # ASSERT: successful output proves the temporary survived until completion.
+    assert result.converged and result.result.shape == (10,)
+
+
 def test_decoder_result_structure():
     decoder = qec.get_decoder('example_byod', H)
     result = decoder.decode(create_test_syndrome())
