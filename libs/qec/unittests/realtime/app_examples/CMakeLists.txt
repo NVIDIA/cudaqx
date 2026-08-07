@@ -788,6 +788,31 @@ if(TARGET cudaq-qec-nv-qldpc-decoder
    OR DEFINED ENV{QEC_EXTERNAL_DECODERS})
   set(_SC4_HAVE_NV_QLDPC TRUE)
 endif()
+# The nv-qldpc decoder captures a CUDA device graph during construction even on
+# the udp/cpu_roce transports, so any test that builds one INSIDE the decoding
+# server also needs decoding_server linked against the proprietary cudevice
+# archive -- otherwise the server dies at bring-up with
+# "cudaqx_qec_realtime_dispatch_register_decoder_state not found via dlsym".
+# The direct-call cases construct the decoder in the app and need no such link,
+# which is why only the external-server cases carry this second gate.  Mirrors
+# the condition in tools/decoding-server/CMakeLists.txt.
+set(_SC4_NV_QLDPC_IN_SERVER FALSE)
+if(_SC4_HAVE_NV_QLDPC AND CUDAQ_QEC_DEVICE_GRAPH_AVAILABLE
+   AND TARGET cudaq-qec-realtime-cudevice-proprietary)
+  set(_SC4_NV_QLDPC_IN_SERVER TRUE)
+endif()
+# Same lesson as the trt gate below: name the gate that actually failed rather
+# than letting the nv-qldpc cases evaporate silently.
+if(NOT _SC4_HAVE_NV_QLDPC)
+  message(WARNING "surface_code-4-yaml: nv-qldpc-decoder tests NOT registered "
+    "(no cudaq-qec-nv-qldpc-decoder target and QEC_EXTERNAL_DECODERS unset); "
+    "point QEC_EXTERNAL_DECODERS at the plugin to enable them.")
+elseif(NOT _SC4_NV_QLDPC_IN_SERVER)
+  message(WARNING "surface_code-4-yaml: nv-qldpc-decoder EXTERNAL-SERVER tests "
+    "NOT registered (cudaq-qec-realtime-cudevice-proprietary target not "
+    "defined; set CUDAQ_QEC_REALTIME_CUDEVICE_PROPRIETARY_ARCHIVE to enable). "
+    "The direct-call nv-qldpc cases still register.")
+endif()
 # A silent skip here once masked a dead test check for a whole release cycle:
 # the trt surface-code tests register only when BOTH the trt plugin target and
 # python-onnx are available, so name whichever gate actually failed.
@@ -929,7 +954,7 @@ if(TARGET surface_code-4-yaml-cqr)
       "CHECK_HARD_PATCH_MODELS=1;REQUIRE_DECODER_CONCURRENCY=2;SKIP_LOGICAL_ERROR_CEILING=1")
 
   # relay-BP over the server's per-decoder rings, one host ring per patch.
-  if(_SC4_HAVE_NV_QLDPC)
+  if(_SC4_NV_QLDPC_IN_SERVER)
     add_surface_code_4_yaml_external_test(relay-bp 3 3
       "nv-qldpc-decoder,nv-qldpc-decoder,nv-qldpc-decoder" 200
       --use-relay-bp)
