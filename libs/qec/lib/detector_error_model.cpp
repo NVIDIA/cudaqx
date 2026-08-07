@@ -7,7 +7,7 @@
  ******************************************************************************/
 
 #include "cudaq/qec/detector_error_model.h"
-#include "dem_sparse_projection.h"
+#include "sparse_dem_from_stim_text.h"
 #include "cudaq/qec/logger.h"
 #include "cudaq/qec/pcm_utils.h"
 #include "cudaq/qec/sparse_binary_matrix.h"
@@ -168,7 +168,7 @@ detector_error_model dem_from_stim_text(const std::string &dem_text,
 
 namespace details {
 
-sparse_dem_projection sparse_dem_from_stim_text(const std::string &dem_text) {
+sparse_dem sparse_dem_from_stim_text(const std::string &dem_text) {
   auto parsed = parse_stim_dem(dem_text, /*use_decomp_suggestions=*/false);
   validate_hit_ids(parsed);
 
@@ -232,7 +232,7 @@ sparse_dem_projection sparse_dem_from_stim_text(const std::string &dem_text) {
     for (auto ob : parsed.observable_hits[err])
       col_indices[cursor[ob]++] = static_cast<index_type>(err);
 
-  sparse_dem_projection projection;
+  sparse_dem projection;
   projection.detector_error_matrix = sparse_binary_matrix::from_csc(
       static_cast<index_type>(parsed.num_detectors),
       static_cast<index_type>(num_cols), std::move(col_ptrs),

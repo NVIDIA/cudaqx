@@ -7,7 +7,7 @@
  ******************************************************************************/
 
 #include "cudaq/qec/decoder_init.h"
-#include "dem_sparse_projection.h"
+#include "sparse_dem_from_stim_text.h"
 #include <stdexcept>
 #include <utility>
 

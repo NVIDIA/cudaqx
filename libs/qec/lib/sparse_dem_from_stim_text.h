@@ -26,7 +26,7 @@ namespace cudaq::qec::details {
 /// The sparse projection of a Stim DEM, in the layouts `decoder_init` stores.
 /// Named fields rather than a tuple: H and O share a type, so positional
 /// results would let them be swapped while still type-checking.
-struct sparse_dem_projection {
+struct sparse_dem {
   /// H, detectors x error mechanisms, CSC (one compressed group per error).
   sparse_binary_matrix detector_error_matrix;
   /// O, observables x error mechanisms, CSR (one compressed group per
@@ -45,7 +45,7 @@ struct sparse_dem_projection {
 ///
 /// Hidden explicitly: this library does not set CXX_VISIBILITY_PRESET, so a
 /// non-inline symbol would otherwise reach the dynamic symbol table.
-__attribute__((visibility("hidden"))) sparse_dem_projection
+__attribute__((visibility("hidden"))) sparse_dem
 sparse_dem_from_stim_text(const std::string &dem_text);
 
 } // namespace cudaq::qec::details
