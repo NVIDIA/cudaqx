@@ -636,8 +636,8 @@ TEST(QECCodeTester, checkRealtimeDecodeFromMemoryCircuit) {
   // built from. Bridging the two here is one expression, and it carries O and
   // D, so construction configures the realtime path completely. There is no
   // second step, and nothing to re-supply.
-  auto decoder = cudaq::qec::get_decoder(
-      "single_error_lut", cudaq::qec::decoder_init(dem, D));
+  auto decoder = cudaq::qec::get_decoder("single_error_lut",
+                                         cudaq::qec::decoder_init(dem, D));
   ASSERT_EQ(decoder->get_num_msyn_per_decode(), D.num_cols());
 
   // Stream numCols ancilla per round, then the final data readout. The window

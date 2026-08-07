@@ -764,11 +764,11 @@ def test_configure_invalid_decoders():
 if __name__ == "__main__":
     pytest.main()
 
-
 # --- exported JSON Schema: the two model sources ----------------------------
 #
 # The schema must describe the language the runtime actually accepts. It keys
 # the DEM source on a NON-EMPTY stim_dem_path, matching resolve_decoder_init.
+
 
 def _decoder_doc(**overrides):
     doc = {"id": 0, "type": "pymatching", "D_sparse": [0, -1, 1, -1]}

@@ -541,16 +541,6 @@ sparse_binary_matrix m2d_to_sparse(const cudaq::M2DSparseMatrix &m2d) {
       static_cast<index_type>(m2d.num_measurements), rows);
 }
 
-std::vector<std::int64_t> d_sparse(const sparse_binary_matrix &m2d) {
-  std::vector<std::int64_t> out;
-  for (const auto &row : m2d.to_nested_csr()) {
-    for (const auto measurement : row)
-      out.push_back(static_cast<std::int64_t>(measurement));
-    out.push_back(-1);
-  }
-  return out;
-}
-
 decoder_context decoder_context_from_memory_circuit(const code &code,
                                                     operation statePrep,
                                                     std::size_t numRounds,

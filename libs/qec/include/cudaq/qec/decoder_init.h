@@ -137,9 +137,6 @@ public:
   /// @throws std::logic_error if the authoritative source is not a Stim DEM.
   const std::string &stim_dem() const;
 
-  /// @brief Materialize the common detector-error-model view.
-  detector_error_model materialize_detector_error_model() const;
-
   /// Dimensions are stored as source metadata so these accessors never need to
   /// request H or O. For matrix sources they intentionally duplicate the O(1)
   /// matrix shape values in preparation for compact source alternatives.

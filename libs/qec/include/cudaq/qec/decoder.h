@@ -153,7 +153,8 @@ public:
   /// factory can move its immutable handle into the decoder.
   /// @param requested_output The result basis this instance produces, fixed
   /// for its lifetime.
-  decoder(decoder_init inputs, decode_result_type requested_output);
+  decoder(decoder_init inputs,
+          decode_result_type requested_output = decode_result_type::errors);
 
   /// @brief Decode a single syndrome
   /// @param syndrome A vector of syndrome measurements where the floating point

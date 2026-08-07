@@ -533,7 +533,7 @@ bool setup_decoders(const cudaq::qec::code &code,
   }
 
   // Characterize the DEM and build the decoder configuration. full_component()
-  // canonicalizes both stabilizer types (boundary-aware) into decoder_init.
+  // canonicalizes both stabilizer types (boundary-aware) into decoder_inputs.
   const std::string &leaf_decoder = opts.decoder_type == "sliding_window"
                                         ? opts.sw_inner_decoder
                                         : opts.decoder_type;

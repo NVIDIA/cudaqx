@@ -87,8 +87,7 @@ struct decoder_config {
   /// Maps raw measurements to detectors. Orthogonal to the model source and
   /// required by both.
   std::vector<std::int64_t> D_sparse;
-  /// Error probability per H column. This is framework model data and is
-  /// normalized into decoder_init rather than passed to plugin parameters.
+  /// Error probability per H column.
   std::vector<double> error_rate_vec;
   decoder_custom_args_t decoder_custom_args;
 

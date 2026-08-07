@@ -181,20 +181,6 @@ const std::string &decoder_init::stim_dem() const {
   return *state_->raw_stim_dem;
 }
 
-detector_error_model decoder_init::materialize_detector_error_model() const {
-  detector_error_model model;
-  model.detector_error_matrix = state_->H.to_dense();
-  // A model with no observable mapping materializes as zero observable rows,
-  // matching a DEM that declares no observables.
-  model.observables_flips_matrix =
-      state_->O ? state_->O->to_dense()
-                : cudaqx::tensor<uint8_t>(
-                      {std::size_t{0}, state_->num_error_mechanisms});
-  model.error_rates = state_->rates;
-  model.error_ids = state_->ids;
-  return model;
-}
-
 std::size_t decoder_init::num_detectors() const noexcept {
   return state_->num_detectors;
 }

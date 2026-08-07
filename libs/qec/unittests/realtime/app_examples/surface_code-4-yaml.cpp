@@ -327,21 +327,26 @@ void save_dem_to_file(
     const auto &inputs = (decoder_type == "nv-qldpc-decoder")
                              ? bp_inputs[i]
                              : matching_inputs[i];
-    const auto edem = inputs.materialize_detector_error_model();
     cudaq::qec::decoding::config::decoder_config config;
     config.id = i;
     config.type = decoder_type;
-    config.block_size = edem.num_error_mechanisms();
-    config.syndrome_size = edem.num_detectors();
-    config.H_sparse = cudaq::qec::pcm_to_sparse_vec(edem.detector_error_matrix);
+    config.block_size = inputs.num_error_mechanisms();
+    config.syndrome_size = inputs.num_detectors();
+    config.H_sparse =
+        cudaq::qec::pcm_to_sparse_vec(inputs.detector_error_matrix());
     config.O_sparse =
-        cudaq::qec::pcm_to_sparse_vec(edem.observables_flips_matrix);
+        cudaq::qec::pcm_to_sparse_vec(inputs.observable_flips_matrix());
     // Ising replaces this native mapping with its detector ordering below.
     const auto *D = inputs.measurement_to_detectors();
     if (!D)
       throw std::runtime_error("decoder inputs are missing D");
-    config.D_sparse = cudaq::qec::d_sparse(*D);
-    config.error_rate_vec = edem.error_rates;
+    config.D_sparse.clear();
+    for (const auto &row : D->to_nested_csr()) {
+      for (const auto measurement : row)
+        config.D_sparse.push_back(static_cast<std::int64_t>(measurement));
+      config.D_sparse.push_back(-1);
+    }
+    config.error_rate_vec = inputs.error_rates();
 
     if (decoder_type == "nv-qldpc-decoder") {
       cudaqx::heterogeneous_map nv_args;
@@ -1006,15 +1011,16 @@ void demo_circuit_host(const cudaq::qec::code &code, int distance,
       matching_inputs.emplace_back(std::move(patch_dem), patch_D);
       bp_inputs.emplace_back(std::move(patch_dem_undecomposed), patch_D);
     }
-    dem = matching_inputs.front().materialize_detector_error_model();
+    const auto &front = matching_inputs.front();
 
     numSyndromesPerRound = numAncx + numAncz;
     printf("numSyndromesPerRound: %ld\n", numSyndromesPerRound);
 
-    printf("dem.detector_error_matrix:\n");
-    dem.detector_error_matrix.dump_bits();
-    printf("dem.observables_flips_matrix:\n");
-    dem.observables_flips_matrix.dump_bits();
+    printf("H: %u x %u (%u nonzeros)\n",
+           front.detector_error_matrix().num_rows(),
+           front.detector_error_matrix().num_cols(),
+           front.detector_error_matrix().num_nnz());
+    printf("O: %zu observables\n", front.num_observables());
 
     if (save_dem) {
       save_dem_to_file(matching_inputs, bp_inputs, dem_filename, decoder_types,

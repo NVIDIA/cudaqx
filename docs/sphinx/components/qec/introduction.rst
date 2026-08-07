@@ -632,13 +632,10 @@ To implement a new decoder:
         // Decoder-specific members
 
     public:
-        my_decoder(qec::decoder_init inputs,
-                   qec::decode_result_type requested_output,
-                   const heterogeneous_map& params)
-            : decoder(std::move(inputs), requested_output) {
-            // All model data is available here. Reject a result form this
-            // decoder cannot produce, so an unsupported request fails at
-            // construction rather than on the first decode.
+        my_decoder(const qec::sparse_binary_matrix& H,
+                  const heterogeneous_map& params)
+            : decoder(H) {
+            // Initialize decoder
         }
 
         decoder_result decode(
@@ -654,21 +651,18 @@ To implement a new decoder:
     CUDAQ_EXTENSION_CUSTOM_CREATOR_FUNCTION(
         my_decoder,
         static std::unique_ptr<decoder> create(
-            qec::decoder_init inputs,
-            std::optional<qec::decode_result_type> requested_output,
+            const qec::decoder_init& init,
             const heterogeneous_map& params) {
-            return std::make_unique<my_decoder>(
-                std::move(inputs),
-                requested_output.value_or(qec::decode_result_type::errors),
-                params);
+            return qec::make_pcm_decoder<my_decoder>(init, params);
         }
     )
 
     CUDAQ_EXT_PT_REGISTER_TYPE(my_decoder)
 
-The factory receives the model as :code:`decoder_init` and the caller's
-result form as an optional :code:`decode_result_type`. A decoder that supports one
-form only should default the request to that form and reject any other.
+The :code:`make_pcm_decoder` helper dispatches :code:`decoder_init`. It
+passes a stored sparse PCM directly to the decoder constructor; when the
+variant contains Stim DEM text, it parses the DEM and constructs the sparse
+detector matrix before invoking the same constructor.
 
 Example: Lookup Table Decoder
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -682,12 +676,11 @@ Here's a simple lookup table decoder for the Steane code:
         std::map<std::string, std::size_t> single_qubit_err_signatures;
 
     public:
-        single_error_lut(qec::decoder_init inputs,
+        single_error_lut(const qec::sparse_binary_matrix& H,
                           const heterogeneous_map& params)
-            : decoder(std::move(inputs)) {
+            : decoder(H) {
             // Canonicalize before using each sparse column as an error
             // signature so duplicate row indices cancel over GF(2).
-            const auto& H = get_inputs().detector_error_matrix();
             auto H_e2d = H.canonicalize().to_nested_csc();
 
             for (std::size_t qErr = 0; qErr < block_size; qErr++) {
@@ -1508,3 +1501,4 @@ Additional Noise Models
       noise.add_all_qubit_channel(
           "x", cudaq::depolarization2(/*probability*/ 0.01),
           /*numControls*/ 1);
+

@@ -104,12 +104,11 @@ TEST(DecoderInputs, PreservesMatrixShapesAndMeasurementMap) {
   EXPECT_EQ(inputs.measurement_to_detectors()->num_cols(), 5);
   EXPECT_EQ(inputs.error_rates(), (std::vector<double>{0.1, 0.2, 0.3}));
 
-  const auto materialized = inputs.materialize_detector_error_model();
-  EXPECT_EQ(materialized.observables_flips_matrix.shape()[0], 3);
-  EXPECT_EQ(materialized.observables_flips_matrix.shape()[1], 3);
-  EXPECT_EQ(materialized.observables_flips_matrix.at({1, 0}), 0);
-  EXPECT_EQ(materialized.observables_flips_matrix.at({1, 1}), 0);
-  EXPECT_EQ(materialized.observables_flips_matrix.at({1, 2}), 0);
+  // A supplied O with an all-zero row is still an observable model: the row
+  // count is retained rather than collapsed.
+  EXPECT_EQ(inputs.observable_flips_matrix().num_rows(), 3);
+  EXPECT_EQ(inputs.observable_flips_matrix().num_cols(), 3);
+  EXPECT_TRUE(inputs.observable_flips_matrix().to_nested_csr()[1].empty());
 
   auto decoder = cudaq::qec::get_decoder("sample_decoder", inputs);
   // Both come from the model handed to the factory; there is no second way to
