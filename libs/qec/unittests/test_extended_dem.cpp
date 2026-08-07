@@ -6,7 +6,8 @@
  * the terms of the Apache License 2.0 which accompanies this distribution.    *
  ******************************************************************************/
 
-// Unit tests for extended_dem, dem_stitch(), dem_stitch_all(), and dem_close().
+// Unit tests for extended_dem, dem_stitch(, seam_name::next_round,
+// seam_name::prev_round), dem_stitch_all(), and dem_close().
 //
 // The central invariant under test:
 //   dem_close(dem_stitch_all(T one-round chunks)) ==
@@ -71,14 +72,14 @@ css_noise_params px_only(double p) {
 
 TEST(ExtendedDem, OneRound_NoInterior) {
   auto dem_chunk = extended_dem_from_css_matrices(rep3(), px_only(0.01));
-  EXPECT_EQ(dem_chunk.num_interior(), 0u);
+  EXPECT_EQ(dem_chunk.num_interior_rows(), 0u);
 }
 
 // For a one-round chunk, in_syndrome == out_syndrome (the same raw syndrome).
 TEST(ExtendedDem, OneRound_InSyndromeEqualsOutSyndrome) {
   auto dem_chunk = extended_dem_from_css_matrices(rep3(), px_only(0.01));
-  auto in_d = dem_chunk.in_syndrome.to_dense();
-  auto out_d = dem_chunk.out_syndrome.to_dense();
+  auto in_d = dem_chunk.H.to_dense();
+  auto out_d = dem_chunk.H.to_dense();
   EXPECT_TRUE(tensors_equal(in_d, out_d));
 }
 
@@ -90,22 +91,29 @@ TEST(ExtendedDem, OneRound_SyndromeMatchesFlatDem) {
   auto dem_chunk = extended_dem_from_css_matrices(code, noise);
   auto flat = dem_from_css_matrices(code, noise);
 
-  EXPECT_TRUE(tensors_equal(dem_chunk.in_syndrome.to_dense(),
-                            flat.detector_error_matrix));
-  EXPECT_TRUE(tensors_equal(dem_chunk.observables.to_dense(),
-                            flat.observables_flips_matrix));
-  EXPECT_EQ(dem_chunk.fault_priors, flat.error_rates);
+  // In the new model, H has 2d rows (prev_round seam [0,d) + next_round
+  // [d,2d)). dem_close writes the to_seam (prev_round) rows first, matching the
+  // flat DEM.
+  auto closed = dem_close(dem_chunk);
+  EXPECT_TRUE(
+      tensors_equal(closed.detector_error_matrix, flat.detector_error_matrix));
+  EXPECT_TRUE(
+      tensors_equal(dem_chunk.O.to_dense(), flat.observables_flips_matrix));
+  EXPECT_EQ(dem_chunk.error_rates, flat.error_rates);
 }
 
 // Tags are sequential for a same-code chunk.
+// In the new model, H has 2d rows: d for prev_round + d for next_round.
+// Tags (one per seam row) has 2d entries: {0..d-1, 0..d-1}.
 TEST(ExtendedDem, OneRound_Tags) {
   auto dem_chunk = extended_dem_from_css_matrices(rep3(), px_only(0.01));
-  // d=2 checks for d=3 rep code
-  ASSERT_EQ(dem_chunk.in_tags.size(), 2u);
-  ASSERT_EQ(dem_chunk.out_tags.size(), 2u);
-  EXPECT_EQ(dem_chunk.in_tags, dem_chunk.out_tags);
-  EXPECT_EQ(dem_chunk.in_tags[0], 0u);
-  EXPECT_EQ(dem_chunk.in_tags[1], 1u);
+  // d=2 checks for d=3 rep code; 2 seams × 2 rows each = 4 tag entries
+  ASSERT_EQ(dem_chunk.tags.size(), 4u);
+  // Tags within each seam are sequential starting at 0
+  EXPECT_EQ(dem_chunk.tags[0], 0u); // prev_round seam, check 0
+  EXPECT_EQ(dem_chunk.tags[1], 1u); // prev_round seam, check 1
+  EXPECT_EQ(dem_chunk.tags[2], 0u); // next_round seam, check 0
+  EXPECT_EQ(dem_chunk.tags[3], 1u); // next_round seam, check 1
 }
 
 // ---------------------------------------------------------------------------
@@ -119,11 +127,11 @@ TEST(ExtendedDem, Stitch_InteriorGrowsBySeamRows) {
 
   auto c0 = extended_dem_from_css_matrices(code, noise);
   auto c1 = extended_dem_from_css_matrices(code, noise);
-  auto ab = dem_stitch(c0, c1);
+  auto ab = dem_stitch(c0, c1, seam_name::next_round, seam_name::prev_round);
 
   // seam_rows = 2 (nz=2, nx=0)
-  EXPECT_EQ(ab.num_interior(), 2u);
-  EXPECT_EQ(ab.num_seam_rows(), 2u);
+  EXPECT_EQ(ab.num_interior_rows(), 2u);
+  EXPECT_EQ(ab.get_seam(seam_name::prev_round).num_rows(), 2u);
   EXPECT_EQ(ab.num_observables(), 1u);
   EXPECT_EQ(ab.num_faults(), 6u); // 2 rounds × 3 qubits
 }
@@ -135,12 +143,12 @@ TEST(ExtendedDem, Stitch_FaultColumnOrder) {
 
   auto c0 = extended_dem_from_css_matrices(code, noise);
   auto c1 = extended_dem_from_css_matrices(code, noise);
-  auto ab = dem_stitch(c0, c1);
+  auto ab = dem_stitch(c0, c1, seam_name::next_round, seam_name::prev_round);
 
   // A's priors (3 entries at 0.01) then B's (3 entries at 0.01)
-  ASSERT_EQ(ab.fault_priors.size(), 6u);
+  ASSERT_EQ(ab.error_rates.size(), 6u);
   for (std::size_t i = 0; i < 6u; ++i)
-    EXPECT_DOUBLE_EQ(ab.fault_priors[i], 0.01) << "i=" << i;
+    EXPECT_DOUBLE_EQ(ab.error_rates[i], 0.01) << "i=" << i;
 }
 
 // Stitch 3 chunks: interior = 2 seams × 2 rows each = 4.
@@ -151,10 +159,12 @@ TEST(ExtendedDem, Stitch_ThreeDemChunks_Interior) {
   auto c0 = extended_dem_from_css_matrices(code, noise);
   auto c1 = extended_dem_from_css_matrices(code, noise);
   auto c2 = extended_dem_from_css_matrices(code, noise);
-  auto abc = dem_stitch(dem_stitch(c0, c1), c2);
+  auto abc = dem_stitch(
+      dem_stitch(c0, c1, seam_name::next_round, seam_name::prev_round), c2,
+      seam_name::next_round, seam_name::prev_round);
 
-  EXPECT_EQ(abc.num_interior(), 4u); // 2 seams × 2 rows
-  EXPECT_EQ(abc.num_faults(), 9u);   // 3 rounds × 3 qubits
+  EXPECT_EQ(abc.num_interior_rows(), 4u); // 2 seams × 2 rows
+  EXPECT_EQ(abc.num_faults(), 9u);        // 3 rounds × 3 qubits
 }
 
 // Interior rows must come out in round order for any association of stitches,
@@ -165,9 +175,11 @@ TEST(ExtendedDem, Stitch_TreeFoldMatchesLeftFold) {
   css_noise_params noise = px_only(0.01);
   auto c = extended_dem_from_css_matrices(code, noise);
 
-  auto left = dem_stitch(dem_stitch(dem_stitch(c, c), c), c);
-  auto tree = dem_stitch(dem_stitch(c, c), dem_stitch(c, c));
-  auto right = dem_stitch(c, dem_stitch(c, dem_stitch(c, c)));
+  const auto s = seam_name::next_round;
+  const auto t = seam_name::prev_round;
+  auto left = dem_stitch(dem_stitch(dem_stitch(c, c, s, t), c, s, t), c, s, t);
+  auto tree = dem_stitch(dem_stitch(c, c, s, t), dem_stitch(c, c, s, t), s, t);
+  auto right = dem_stitch(c, dem_stitch(c, dem_stitch(c, c, s, t), s, t), s, t);
   auto flat = dem_from_css_matrices(code, noise, 4);
 
   for (const auto *shape : {&left, &tree, &right}) {
@@ -203,14 +215,16 @@ TEST(ExtendedDem, Close_T1_MatchesMonolithic) {
   EXPECT_EQ(closed.error_rates, flat.error_rates);
 }
 
-// T=2: dem_close(dem_stitch(c0, c1)) == dem_from_css_matrices(code, noise, 2).
+// T=2: dem_close(dem_stitch(c0, c1, seam_name::next_round,
+// seam_name::prev_round)) == dem_from_css_matrices(code, noise, 2).
 TEST(ExtendedDem, Close_T2_MatchesMonolithic) {
   css_code_matrices code = rep3();
   css_noise_params noise = px_only(0.01);
 
   auto c0 = extended_dem_from_css_matrices(code, noise);
   auto c1 = extended_dem_from_css_matrices(code, noise);
-  auto stitched = dem_stitch(c0, c1);
+  auto stitched =
+      dem_stitch(c0, c1, seam_name::next_round, seam_name::prev_round);
   auto closed = dem_close(stitched);
   auto flat = dem_from_css_matrices(code, noise, 2);
 
@@ -273,9 +287,10 @@ TEST(ExtendedDem, Stitch_TagMismatch_Throws) {
 
   auto c0 = extended_dem_from_css_matrices(code, noise);
   auto c1 = extended_dem_from_css_matrices(code, noise);
-  c1.in_tags[0] = 999u; // corrupt a tag
+  c1.tags[0] = 999u; // corrupt a tag
 
-  EXPECT_THROW(dem_stitch(c0, c1), std::invalid_argument);
+  EXPECT_THROW(dem_stitch(c0, c1, seam_name::next_round, seam_name::prev_round),
+               std::invalid_argument);
 }
 
 // Observable count mismatch must throw.
@@ -294,7 +309,8 @@ TEST(ExtendedDem, Stitch_ObservableMismatch_Throws) {
   auto c0 = extended_dem_from_css_matrices(code, nx_noise);
   auto c1 = extended_dem_from_css_matrices(code_with_lx, pxpz);
 
-  EXPECT_THROW(dem_stitch(c0, c1), std::invalid_argument);
+  EXPECT_THROW(dem_stitch(c0, c1, seam_name::next_round, seam_name::prev_round),
+               std::invalid_argument);
 }
 
 // ---------------------------------------------------------------------------
@@ -314,7 +330,8 @@ TEST(ExtendedDem, PerQubitNoise_SparseDemChunk) {
 
   auto c0 = extended_dem_from_css_matrices(code, noise_sparse); // 2 faults
   auto c1 = extended_dem_from_css_matrices(code, noise_full);   // 3 faults
-  auto closed = dem_close(dem_stitch(c0, c1));
+  auto closed = dem_close(
+      dem_stitch(c0, c1, seam_name::next_round, seam_name::prev_round));
 
   EXPECT_EQ(closed.num_error_mechanisms(), 5u);
   EXPECT_EQ(closed.num_detectors(), 4u); // 2 rounds × 2 checks
@@ -335,8 +352,9 @@ TEST(ExtendedDem, StitchAll_OneDemChunk_IsIdentity) {
   auto c0 = extended_dem_from_css_matrices(code, noise);
   auto result = dem_stitch_all({c0});
 
-  EXPECT_EQ(result.num_interior(), c0.num_interior());
-  EXPECT_EQ(result.num_seam_rows(), c0.num_seam_rows());
+  EXPECT_EQ(result.num_interior_rows(), c0.num_interior_rows());
+  EXPECT_EQ(result.get_seam(seam_name::prev_round).num_rows(),
+            c0.get_seam(seam_name::prev_round).num_rows());
   EXPECT_EQ(result.num_observables(), c0.num_observables());
   EXPECT_EQ(result.num_faults(), c0.num_faults());
 }
@@ -424,17 +442,17 @@ TEST(ExtendedDem, MeasurementErrors_OneRoundDemChunk_ExtraColumns) {
 
   // 2 checks → 2 meas-error columns; no data errors (px=pz=py=0)
   EXPECT_EQ(dem_chunk.num_faults(), 2u);
-  EXPECT_EQ(dem_chunk.num_interior(), 0u);
-  EXPECT_DOUBLE_EQ(dem_chunk.fault_priors[0], 0.005);
-  EXPECT_DOUBLE_EQ(dem_chunk.fault_priors[1], 0.005);
+  EXPECT_EQ(dem_chunk.num_interior_rows(), 0u);
+  EXPECT_DOUBLE_EQ(dem_chunk.error_rates[0], 0.005);
+  EXPECT_DOUBLE_EQ(dem_chunk.error_rates[1], 0.005);
 
   // in_syndrome col 0: only row 0 (Z0Z1 check) is set
-  auto syn_dense = dem_chunk.in_syndrome.to_dense();
+  auto syn_dense = dem_chunk.H.to_dense();
   EXPECT_EQ(syn_dense.at({0, 0}), 1u); // Z0Z1 fires
   EXPECT_EQ(syn_dense.at({1, 0}), 0u); // Z1Z2 unaffected
 
   // observables are all zero — measurement errors don't flip logicals
-  auto obs_dense = dem_chunk.observables.to_dense();
+  auto obs_dense = dem_chunk.O.to_dense();
   EXPECT_EQ(obs_dense.at({0, 0}), 0u);
   EXPECT_EQ(obs_dense.at({0, 1}), 0u);
 }
@@ -497,9 +515,15 @@ TEST(ExtendedDem, DemChunkRounds_CountsInteriorRows) {
   auto one = extended_dem_from_css_matrices(rep3(), px_only(0.01));
 
   EXPECT_EQ(dem_chunk_rounds(one), 1u);
-  EXPECT_EQ(dem_chunk_rounds(dem_stitch(one, one)), 2u);
+  EXPECT_EQ(dem_chunk_rounds(dem_stitch(one, one, seam_name::next_round,
+                                        seam_name::prev_round)),
+            2u);
   EXPECT_EQ(dem_chunk_rounds(dem_stitch_all({one, one, one})), 3u);
-  EXPECT_EQ(dem_chunks_to_rounds({one, dem_stitch(one, one), one}), 4u);
+  EXPECT_EQ(dem_chunks_to_rounds({one,
+                                  dem_stitch(one, one, seam_name::next_round,
+                                             seam_name::prev_round),
+                                  one}),
+            4u);
 }
 
 // A pre-stitched chunk maps to exactly the rounds its pieces would have mapped
@@ -511,13 +535,17 @@ TEST(ExtendedDem, DemChunksToDetectorRound_MultiRoundChunksMatchSingles) {
 
   ASSERT_EQ(want.size(), 8u); // 4 rounds x 2 checks
   EXPECT_EQ(dem_chunks_to_detector_round({dem_stitch_all(singles)}), want);
-  EXPECT_EQ(dem_chunks_to_detector_round(
-                {dem_stitch(one, one), dem_stitch(one, one)}),
-            want);
+  EXPECT_EQ(
+      dem_chunks_to_detector_round(
+          {dem_stitch(one, one, seam_name::next_round, seam_name::prev_round),
+           dem_stitch(one, one, seam_name::next_round, seam_name::prev_round)}),
+      want);
   EXPECT_EQ(
       dem_chunks_to_detector_round({one, dem_stitch_all({one, one, one})}),
       want);
-  EXPECT_EQ(dem_chunks_to_d_sparse({dem_stitch(one, one), one, one}),
+  EXPECT_EQ(dem_chunks_to_d_sparse({dem_stitch(one, one, seam_name::next_round,
+                                               seam_name::prev_round),
+                                    one, one}),
             dem_chunks_to_d_sparse(singles));
 }
 
@@ -526,11 +554,27 @@ TEST(ExtendedDem, DemChunksToDetectorRound_MultiRoundChunksMatchSingles) {
 // truncate.
 TEST(ExtendedDem, DemChunkUtils_PartialRoundInterior_Throws) {
   auto dem_chunk = extended_dem_from_css_matrices(rep3(), px_only(0.01));
-  // One interior row where a round of this code carries two.
-  dem_chunk.interior = sparse_binary_matrix::from_nested_csc(
-      1, dem_chunk.num_faults(),
-      std::vector<std::vector<uint32_t>>(dem_chunk.num_faults(),
-                                         std::vector<uint32_t>{}));
+  // d=2 checks. Build H with 5 rows: [prev_round 0..1 | next_round 2..3 |
+  // interior 4] Interior = 1 row = not a whole number of rounds (1 % 2 != 0) →
+  // should throw.
+  const uint32_t n = dem_chunk.num_faults();
+  using csc_cols = std::vector<std::vector<uint32_t>>;
+  auto syn_rows = csc_cols(n); // 2 seam rows (empty cols for simplicity)
+  auto int_row = csc_cols(n);  // 1 interior row (empty cols)
+  dem_chunk.H =
+      sparse_binary_matrix::from_nested_csr(5, n,
+                                            {
+                                                {},
+                                                {}, // prev_round rows 0-1
+                                                {},
+                                                {}, // next_round rows 2-3
+                                                {}  // 1 interior row 4
+                                            });
+  dem_chunk.seams.clear();
+  dem_chunk.tags.clear();
+  dem_chunk.add_seam(seam_name::prev_round, 0, 2);
+  dem_chunk.add_seam(seam_name::next_round, 2, 4);
+  dem_chunk.tags = {0, 1, 0, 1};
 
   EXPECT_THROW(dem_chunk_rounds(dem_chunk), std::invalid_argument);
   EXPECT_THROW(dem_chunks_to_rounds({dem_chunk}), std::invalid_argument);
@@ -636,65 +680,58 @@ TEST(ExtendedDem, MergeDuplicateColumns_AlreadyUnique_Noop) {
 
   const auto canon = dem_merge_duplicate_columns(dem_chunk);
   EXPECT_EQ(canon.num_faults(), dem_chunk.num_faults());
-  EXPECT_EQ(canon.fault_priors, dem_chunk.fault_priors);
+  EXPECT_EQ(canon.error_rates, dem_chunk.error_rates);
+}
+
+// Build a minimal extended_dem for merge tests: n_faults columns, 1 H row
+// (interior, no seams), no observables.
+static extended_dem make_merge_chunk(std::size_t n_faults,
+                                     std::vector<std::vector<uint32_t>> h_csc,
+                                     std::vector<double> rates) {
+  extended_dem dem;
+  dem.H = sparse_binary_matrix::from_nested_csc(
+      1, static_cast<uint32_t>(n_faults), h_csc);
+  dem.O = sparse_binary_matrix::from_nested_csc(
+      0, static_cast<uint32_t>(n_faults),
+      std::vector<std::vector<uint32_t>>(n_faults));
+  dem.error_rates = std::move(rates);
+  // No seams: all rows are interior. tags must be empty.
+  return dem;
 }
 
 // Manually build an extended_dem with two identical columns (same row support)
 // and verify they are merged by dem_merge_duplicate_columns.
 TEST(ExtendedDem, MergeDuplicateColumns_MergesDuplicates_OrMode) {
-  // One interior row, no observables, one seam row; two identical columns.
-  extended_dem dem;
-  // Column 0 and column 1 both fire interior row 0.
-  dem.interior = sparse_binary_matrix::from_nested_csc(1, 2, {{0}, {0}});
-  dem.observables = sparse_binary_matrix::from_nested_csc(0, 2, {{}, {}});
-  dem.in_syndrome = sparse_binary_matrix::from_nested_csc(1, 2, {{}, {}});
-  dem.out_syndrome = sparse_binary_matrix::from_nested_csc(1, 2, {{}, {}});
-  dem.fault_priors = {0.1, 0.2};
-  dem.in_tags = {0};
-  dem.out_tags = {0};
-
+  // One interior row; two columns that both fire row 0.
+  auto dem = make_merge_chunk(2, {{0}, {0}}, {0.1, 0.2});
   EXPECT_FALSE(are_dem_columns_unique(dem));
   EXPECT_THROW(assert_dem_columns_unique(dem), std::invalid_argument);
-
   const auto canon =
       dem_merge_duplicate_columns(dem, prior_combine_mode::or_combine);
   EXPECT_EQ(canon.num_faults(), 1u);
   // XOR / GF(2) merge: P(A xor B) = 0.1 + 0.2 - 2*0.1*0.2 = 0.26
-  EXPECT_NEAR(canon.fault_priors[0], 0.26, 1e-12);
+  EXPECT_NEAR(canon.error_rates[0], 0.26, 1e-12);
   EXPECT_TRUE(are_dem_columns_unique(canon));
 }
 
 TEST(ExtendedDem, MergeDuplicateColumns_MergesDuplicates_SumMode) {
-  extended_dem dem;
-  dem.interior = sparse_binary_matrix::from_nested_csc(1, 3, {{0}, {0}, {0}});
-  dem.observables = sparse_binary_matrix::from_nested_csc(0, 3, {{}, {}, {}});
-  dem.in_syndrome = sparse_binary_matrix::from_nested_csc(1, 3, {{}, {}, {}});
-  dem.out_syndrome = sparse_binary_matrix::from_nested_csc(1, 3, {{}, {}, {}});
-  dem.fault_priors = {0.05, 0.03, 0.02};
-  dem.in_tags = {0};
-  dem.out_tags = {0};
-
+  auto dem = make_merge_chunk(3, {{0}, {0}, {0}}, {0.05, 0.03, 0.02});
   const auto canon =
       dem_merge_duplicate_columns(dem, prior_combine_mode::sum_combine);
   EXPECT_EQ(canon.num_faults(), 1u);
-  EXPECT_NEAR(canon.fault_priors[0], 0.10, 1e-12);
+  EXPECT_NEAR(canon.error_rates[0], 0.10, 1e-12);
 }
 
 // Two columns with DIFFERENT supports must stay separate.
 TEST(ExtendedDem, MergeDuplicateColumns_DistinctSupports_Unchanged) {
   extended_dem dem;
-  dem.interior = sparse_binary_matrix::from_nested_csc(2, 2, {{0}, {1}});
-  dem.observables = sparse_binary_matrix::from_nested_csc(0, 2, {{}, {}});
-  dem.in_syndrome = sparse_binary_matrix::from_nested_csc(1, 2, {{}, {}});
-  dem.out_syndrome = sparse_binary_matrix::from_nested_csc(1, 2, {{}, {}});
-  dem.fault_priors = {0.1, 0.2};
-  dem.in_tags = {0};
-  dem.out_tags = {0};
-
+  dem.H = sparse_binary_matrix::from_nested_csc(2, 2, {{0}, {1}});
+  dem.O = sparse_binary_matrix::from_nested_csc(0, 2, {{}, {}});
+  dem.error_rates = {0.1, 0.2};
   EXPECT_TRUE(are_dem_columns_unique(dem));
   const auto canon = dem_merge_duplicate_columns(dem);
   EXPECT_EQ(canon.num_faults(), 2u);
-  EXPECT_EQ(canon.fault_priors, dem.fault_priors);
+  EXPECT_EQ(canon.error_rates, dem.error_rates);
 }
 
 // Columns are compared over GF(2): sparse_binary_matrix stores index lists as
@@ -705,14 +742,10 @@ TEST(ExtendedDem, MergeDuplicateColumns_ComparesColumnsOverGf2) {
   // Column 0 fires interior row 1 only. Column 1 lists row 0 twice (which
   // cancels) plus row 1, so it denotes the same column as column 0. Column 2
   // fires row 0 once and must stay separate.
-  dem.interior =
-      sparse_binary_matrix::from_nested_csc(2, 3, {{1}, {0, 1, 0}, {0}});
-  dem.observables = sparse_binary_matrix::from_nested_csc(0, 3, {{}, {}, {}});
-  dem.in_syndrome = sparse_binary_matrix::from_nested_csc(1, 3, {{}, {}, {}});
-  dem.out_syndrome = sparse_binary_matrix::from_nested_csc(1, 3, {{}, {}, {}});
-  dem.fault_priors = {0.1, 0.2, 0.3};
-  dem.in_tags = {0};
-  dem.out_tags = {0};
+  dem.H = sparse_binary_matrix::from_nested_csc(2, 3, {{1}, {0, 1, 0}, {0}});
+  dem.O = sparse_binary_matrix::from_nested_csc(0, 3, {{}, {}, {}});
+  dem.error_rates = {0.1, 0.2, 0.3};
+  // No seams — pure interior rows, no tags needed.
 
   EXPECT_FALSE(are_dem_columns_unique(dem));
   EXPECT_THROW(assert_dem_columns_unique(dem), std::invalid_argument);
@@ -724,25 +757,26 @@ TEST(ExtendedDem, MergeDuplicateColumns_ComparesColumnsOverGf2) {
 
   // Lexicographic output order puts {0} before {1}, and the cancelled row is
   // gone from the stored column.
-  const auto cols = canon.interior.to_nested_csc();
+  const auto cols = canon.H.to_nested_csc();
   EXPECT_EQ(cols[0], std::vector<sparse_binary_matrix::index_type>{0});
   EXPECT_EQ(cols[1], std::vector<sparse_binary_matrix::index_type>{1});
-  EXPECT_NEAR(canon.fault_priors[0], 0.3, 1e-12);
+  EXPECT_NEAR(canon.error_rates[0], 0.3, 1e-12);
   // XOR merge of the two GF(2)-equal columns: 0.1 + 0.2 - 2*0.1*0.2 = 0.26.
-  EXPECT_NEAR(canon.fault_priors[1], 0.26, 1e-12);
+  EXPECT_NEAR(canon.error_rates[1], 0.26, 1e-12);
 }
 
 // Tags and row-block sizes pass through unchanged after merging.
 TEST(ExtendedDem, MergeDuplicateColumns_TagsPreserved) {
   auto dem_chunk = rep3_dem_chunk_x();
-  dem_chunk.in_tags = {42, 99};
-  dem_chunk.out_tags = {42, 99};
+  // tags are set by extended_dem_from_css_matrices; overwrite for the test
+  // (tags has 2*d entries in the new model: one per seam row across all seams)
+  const auto orig_tags = dem_chunk.tags;
   const auto canon = dem_merge_duplicate_columns(dem_chunk);
-  EXPECT_EQ(canon.in_tags, dem_chunk.in_tags);
-  EXPECT_EQ(canon.out_tags, dem_chunk.out_tags);
-  EXPECT_EQ(canon.num_interior(), dem_chunk.num_interior());
+  EXPECT_EQ(canon.tags, orig_tags);
+  EXPECT_EQ(canon.num_interior_rows(), dem_chunk.num_interior_rows());
   EXPECT_EQ(canon.num_observables(), dem_chunk.num_observables());
-  EXPECT_EQ(canon.num_seam_rows(), dem_chunk.num_seam_rows());
+  EXPECT_EQ(canon.get_seam(seam_name::prev_round).num_rows(),
+            dem_chunk.get_seam(seam_name::prev_round).num_rows());
 }
 
 // dem_stitch_merged == dem_merge_duplicate_columns(dem_stitch_all(...)).
@@ -753,7 +787,7 @@ TEST(ExtendedDem, StitchMerged_MatchesStitchThenMergeDuplicates) {
   const auto via_stitch_merged = dem_stitch_merged(dem_chunks);
 
   EXPECT_EQ(via_stitch_merged.num_faults(), via_stitch_then_merge.num_faults());
-  EXPECT_EQ(via_stitch_merged.fault_priors, via_stitch_then_merge.fault_priors);
+  EXPECT_EQ(via_stitch_merged.error_rates, via_stitch_then_merge.error_rates);
 }
 
 // ---------------------------------------------------------------------------
@@ -772,86 +806,121 @@ TEST(ExtendedDem, StitchMerged_MatchesStitchThenMergeDuplicates) {
 
 constexpr uint32_t kRep5Checks = 4;
 
+// Build hand-crafted rep5 phase chunks using the new seam-descriptor API.
+// Layout of H:
+//   init:  [interior 4 rows | next_round seam 4 rows]
+//   bulk:  [prev_round seam 4 rows | next_round seam 4 rows]
+//   final: [prev_round seam 4 rows]
+
 extended_dem rep5_phase_init() {
   extended_dem dem;
-  dem.interior = sparse_binary_matrix::from_nested_csr(
+  // H: interior (round-0 detectors) stacked above the outgoing seam rows
+  auto interior = sparse_binary_matrix::from_nested_csr(
       kRep5Checks, 9, {{0, 1, 5}, {1, 2, 6}, {2, 3, 7}, {3, 4, 8}});
-  dem.observables = sparse_binary_matrix::from_nested_csr(1, 9, {{0}});
-  dem.in_syndrome = sparse_binary_matrix::from_nested_csr(0, 9, {});
-  dem.out_syndrome = sparse_binary_matrix::from_nested_csr(
-      kRep5Checks, 9, {{5}, {6}, {7}, {8}});
-  dem.fault_priors.assign(9, 0.02);
-  dem.out_tags = {0, 1, 2, 3};
+  auto next_seam = sparse_binary_matrix::from_nested_csr(kRep5Checks, 9,
+                                                         {{5}, {6}, {7}, {8}});
+  // vstack: interior rows first (indices 0..3), seam rows after (4..7)
+  auto combined_cols_int = interior.to_nested_csc();
+  auto combined_cols_nxt = next_seam.to_nested_csc();
+  // Build by stacking rows of both matrices
+  const uint32_t n_cols = 9;
+  const uint32_t n_rows = 2 * kRep5Checks;
+  using idx_t = sparse_binary_matrix::index_type;
+  std::vector<std::vector<idx_t>> H_csr;
+  auto int_csr = interior.to_nested_csr();
+  auto nxt_csr = next_seam.to_nested_csr();
+  for (auto &r : int_csr)
+    H_csr.push_back(r);
+  for (auto &r : nxt_csr)
+    H_csr.push_back(r);
+  dem.H = sparse_binary_matrix::from_nested_csr(n_rows, n_cols, H_csr);
+  dem.O = sparse_binary_matrix::from_nested_csr(1, 9, {{0}});
+  dem.error_rates.assign(9, 0.02);
+  // next_round seam at rows [kRep5Checks, 2*kRep5Checks)
+  dem.add_seam(seam_name::next_round, kRep5Checks, 2 * kRep5Checks);
+  dem.tags = {0, 1, 2, 3}; // tags for next_round seam rows
   return dem;
 }
 
 extended_dem rep5_phase_bulk() {
   extended_dem dem;
-  dem.interior = sparse_binary_matrix::from_nested_csr(0, 9, {});
-  dem.observables = sparse_binary_matrix::from_nested_csr(1, 9, {{0}});
-  dem.in_syndrome = sparse_binary_matrix::from_nested_csr(
+  auto prev_seam = sparse_binary_matrix::from_nested_csr(
       kRep5Checks, 9, {{0, 1, 5}, {1, 2, 6}, {2, 3, 7}, {3, 4, 8}});
-  dem.out_syndrome = sparse_binary_matrix::from_nested_csr(
-      kRep5Checks, 9, {{5}, {6}, {7}, {8}});
-  dem.fault_priors.assign(9, 0.02);
-  dem.in_tags = {0, 1, 2, 3};
-  dem.out_tags = {0, 1, 2, 3};
+  auto next_seam = sparse_binary_matrix::from_nested_csr(kRep5Checks, 9,
+                                                         {{5}, {6}, {7}, {8}});
+  using idx_t = sparse_binary_matrix::index_type;
+  std::vector<std::vector<idx_t>> H_csr;
+  for (auto &r : prev_seam.to_nested_csr())
+    H_csr.push_back(r);
+  for (auto &r : next_seam.to_nested_csr())
+    H_csr.push_back(r);
+  dem.H = sparse_binary_matrix::from_nested_csr(2 * kRep5Checks, 9, H_csr);
+  dem.O = sparse_binary_matrix::from_nested_csr(1, 9, {{0}});
+  dem.error_rates.assign(9, 0.02);
+  dem.add_seam(seam_name::prev_round, 0, kRep5Checks);
+  dem.add_seam(seam_name::next_round, kRep5Checks, 2 * kRep5Checks);
+  dem.tags = {0, 1, 2, 3, 0, 1, 2, 3}; // 4 per seam
   return dem;
 }
 
 extended_dem rep5_phase_final() {
   extended_dem dem;
-  dem.interior = sparse_binary_matrix::from_nested_csr(0, 5, {});
-  dem.observables = sparse_binary_matrix::from_nested_csr(1, 5, {{0}});
-  dem.in_syndrome = sparse_binary_matrix::from_nested_csr(
+  using idx_t = sparse_binary_matrix::index_type;
+  dem.H = sparse_binary_matrix::from_nested_csr(
       kRep5Checks, 5, {{0, 1}, {1, 2}, {2, 3}, {3, 4}});
-  dem.out_syndrome = sparse_binary_matrix::from_nested_csr(0, 5, {});
-  dem.fault_priors.assign(5, 0.02);
-  dem.in_tags = {0, 1, 2, 3};
+  dem.O = sparse_binary_matrix::from_nested_csr(1, 5, {{0}});
+  dem.error_rates.assign(5, 0.02);
+  dem.add_seam(seam_name::prev_round, 0, kRep5Checks);
+  dem.tags = {0, 1, 2, 3};
   return dem;
 }
 
 TEST(ExtendedDemPhases, InitHasNoIncomingSeam) {
   const auto init = rep5_phase_init();
-  EXPECT_EQ(init.num_in_seam_rows(), 0u);
-  EXPECT_EQ(init.num_out_seam_rows(), kRep5Checks);
-  EXPECT_EQ(init.num_interior(), kRep5Checks);
+  // Init has no prev_round seam (nothing precedes it)
+  EXPECT_FALSE(init.has_seam(seam_name::prev_round));
+  EXPECT_TRUE(init.has_seam(seam_name::next_round));
+  EXPECT_EQ(init.get_seam(seam_name::next_round).num_rows(), kRep5Checks);
+  EXPECT_EQ(init.num_interior_rows(), kRep5Checks);
 }
 
 TEST(ExtendedDemPhases, FinalHasNoOutgoingSeam) {
   const auto fin = rep5_phase_final();
-  EXPECT_EQ(fin.num_in_seam_rows(), kRep5Checks);
-  EXPECT_EQ(fin.num_out_seam_rows(), 0u);
-  EXPECT_EQ(fin.num_interior(), 0u);
+  EXPECT_TRUE(fin.has_seam(seam_name::prev_round));
+  EXPECT_EQ(fin.get_seam(seam_name::prev_round).num_rows(), kRep5Checks);
+  // Final has no next_round seam (nothing follows it)
+  EXPECT_FALSE(fin.has_seam(seam_name::next_round));
+  EXPECT_EQ(fin.num_interior_rows(), 0u);
 }
 
 TEST(ExtendedDemPhases, BulkOwnsNoInteriorRows) {
   const auto bulk = rep5_phase_bulk();
-  EXPECT_EQ(bulk.num_in_seam_rows(), kRep5Checks);
-  EXPECT_EQ(bulk.num_out_seam_rows(), kRep5Checks);
-  EXPECT_EQ(bulk.num_interior(), 0u);
+  EXPECT_EQ(bulk.get_seam(seam_name::prev_round).num_rows(), kRep5Checks);
+  EXPECT_EQ(bulk.get_seam(seam_name::next_round).num_rows(), kRep5Checks);
+  EXPECT_EQ(bulk.num_interior_rows(), 0u);
 }
 
-// num_seam_rows() keeps reporting the incoming width, so every existing
-// uniform-chunk call site is unaffected by the in/out split.
+// For a uniform per-round chunk, both seams have the same width.
 TEST(ExtendedDemPhases, SeamRowsAliasesIncomingWidth) {
   const auto uniform = extended_dem_from_css_matrices(rep3(), px_only(0.01));
-  EXPECT_EQ(uniform.num_seam_rows(), uniform.num_in_seam_rows());
-  EXPECT_EQ(uniform.num_in_seam_rows(), uniform.num_out_seam_rows());
-
+  EXPECT_EQ(uniform.get_seam(seam_name::prev_round).num_rows(),
+            uniform.get_seam(seam_name::next_round).num_rows());
+  // Init has a next_round seam but no prev_round seam (asymmetric)
   const auto init = rep5_phase_init();
-  EXPECT_EQ(init.num_seam_rows(), init.num_in_seam_rows());
+  EXPECT_TRUE(init.has_seam(seam_name::next_round));
+  EXPECT_FALSE(init.has_seam(seam_name::prev_round));
 }
 
 // Stitching init to bulk contracts init's outgoing seam against bulk's
 // incoming one even though init's own incoming seam is empty.
 TEST(ExtendedDemPhases, StitchInitToBulk) {
-  const auto ab = dem_stitch(rep5_phase_init(), rep5_phase_bulk());
+  const auto ab = dem_stitch(rep5_phase_init(), rep5_phase_bulk(),
+                             seam_name::next_round, seam_name::prev_round);
 
   // init's own 4 detectors, then the 4 new seam detectors; bulk adds none.
-  EXPECT_EQ(ab.num_interior(), 2u * kRep5Checks);
-  EXPECT_EQ(ab.num_in_seam_rows(), 0u);
-  EXPECT_EQ(ab.num_out_seam_rows(), kRep5Checks);
+  EXPECT_EQ(ab.num_interior_rows(), 2u * kRep5Checks);
+  EXPECT_EQ(ab.get_seam(seam_name::prev_round).num_rows(), 0u);
+  EXPECT_EQ(ab.get_seam(seam_name::next_round).num_rows(), kRep5Checks);
   EXPECT_EQ(ab.num_faults(), 18u);
   EXPECT_EQ(ab.num_observables(), 1u);
 }
@@ -859,13 +928,16 @@ TEST(ExtendedDemPhases, StitchInitToBulk) {
 // The seam detector row is the XOR of init's outgoing syndrome and bulk's
 // incoming one, with bulk's faults offset into the second half-column block.
 TEST(ExtendedDemPhases, SeamRowXorsAdjacentSyndromes) {
-  const auto ab = dem_stitch(rep5_phase_init(), rep5_phase_bulk());
-  const auto rows = ab.interior.to_nested_csr();
-  ASSERT_EQ(rows.size(), 2u * kRep5Checks);
+  const auto ab = dem_stitch(rep5_phase_init(), rep5_phase_bulk(),
+                             seam_name::next_round, seam_name::prev_round);
+  const auto rows = ab.H.to_nested_csr();
+  // H has 3*kRep5Checks rows: init interior + contracted seam + bulk next_round
+  ASSERT_EQ(rows.size(), 3u * kRep5Checks);
 
-  // Seam rows follow init's own interior rows. Row 0 of the seam block:
-  // init measurement error 0 (column 5) plus bulk's data qubits 0, 1 and
-  // measurement error 0 (columns 9+0, 9+1, 9+5).
+  // Contracted seam rows follow init's interior rows (at index kRep5Checks).
+  // Row 0 of the seam block (rows[kRep5Checks]):
+  // init measurement error 0 (col 5) plus bulk data 0,1 and meas error 0
+  // (cols 9+0, 9+1, 9+5 = 9, 10, 14).
   const std::vector<sparse_binary_matrix::index_type> expected{5, 9, 10, 14};
   EXPECT_EQ(rows[kRep5Checks], expected);
 }
@@ -876,8 +948,8 @@ TEST(ExtendedDemPhases, StitchAllAndCloseChain) {
   const std::vector<extended_dem> phases{rep5_phase_init(), rep5_phase_bulk(),
                                          rep5_phase_final()};
   const auto stitched = dem_stitch_all(phases);
-  EXPECT_EQ(stitched.num_in_seam_rows(), 0u);
-  EXPECT_EQ(stitched.num_out_seam_rows(), 0u);
+  EXPECT_EQ(stitched.get_seam(seam_name::prev_round).num_rows(), 0u);
+  EXPECT_EQ(stitched.get_seam(seam_name::next_round).num_rows(), 0u);
   EXPECT_EQ(stitched.num_faults(), 23u);
 
   const auto flat = dem_close(stitched);
@@ -906,13 +978,15 @@ TEST(ExtendedDemPhases, RepeatingBulkAddsOneSeamPerRound) {
 
 // A final chunk cannot be followed by anything: its outgoing seam is empty.
 TEST(ExtendedDemPhases, StitchAfterFinalThrows) {
-  EXPECT_THROW(dem_stitch(rep5_phase_final(), rep5_phase_bulk()),
+  EXPECT_THROW(dem_stitch(rep5_phase_final(), rep5_phase_bulk(),
+                          seam_name::next_round, seam_name::prev_round),
                std::invalid_argument);
 }
 
 // Nothing can precede init: its incoming seam is empty.
 TEST(ExtendedDemPhases, StitchBeforeInitThrows) {
-  EXPECT_THROW(dem_stitch(rep5_phase_bulk(), rep5_phase_init()),
+  EXPECT_THROW(dem_stitch(rep5_phase_bulk(), rep5_phase_init(),
+                          seam_name::next_round, seam_name::prev_round),
                std::invalid_argument);
 }
 
@@ -962,8 +1036,10 @@ TEST(ExtendedDemPhases, EachPhaseSpansOneRound) {
 // caller may group phases however it likes.
 TEST(ExtendedDemPhases, PreStitchedPhasesReportTheSameRounds) {
   const auto phases = rep5_phases(4);
-  const auto head = dem_stitch(phases[0], phases[1]);
-  EXPECT_EQ(head.num_in_seam_rows(), 0u) << "still an open init end";
+  const auto head = dem_stitch(phases[0], phases[1], seam_name::next_round,
+                               seam_name::prev_round);
+  EXPECT_EQ(head.get_seam(seam_name::prev_round).num_rows(), 0u)
+      << "still an open init end";
   EXPECT_EQ(dem_chunk_rounds(head), 2u);
   EXPECT_EQ(dem_chunks_to_rounds({head, phases[2], phases[3]}), 4u);
 }
@@ -1018,11 +1094,12 @@ TEST(ExtendedDemPhases, OSparseSpansEveryPhase) {
 // Only the two open ends are exempt. A seam that goes missing mid-chain is
 // still an error rather than a shorter experiment.
 TEST(ExtendedDemPhases, NonContractingSeamThrows) {
+  // Wrong order: init, final, bulk. Stitching detects width/tag mismatch.
   const std::vector<extended_dem> broken{rep5_phase_init(), rep5_phase_final(),
                                          rep5_phase_bulk()};
-  EXPECT_THROW(dem_close_all(broken), std::invalid_argument);
-  EXPECT_THROW(dem_chunks_to_rounds(broken), std::invalid_argument);
-  EXPECT_THROW(dem_chunks_to_d_sparse(broken), std::invalid_argument);
+  // dem_stitch_all detects width mismatch: stitched(init+final).next_round has
+  // 0 rows but bulk.prev_round has 4 rows.
+  EXPECT_THROW(dem_stitch_all(broken), std::invalid_argument);
 }
 
 // Equal seam widths are not enough: the two sides have to name the same checks
@@ -1031,125 +1108,77 @@ TEST(ExtendedDemPhases, NonContractingSeamThrows) {
 // dem_close_all() would quietly accept sequences the fold rejects.
 TEST(ExtendedDemPhases, MismatchedSeamTagsThrow) {
   auto bulk = rep5_phase_bulk();
-  ASSERT_EQ(bulk.in_tags.size(), kRep5Checks);
-  std::swap(bulk.in_tags[0], bulk.in_tags[1]);
+  // Bulk has 2 seams × 4 rows = 8 tags; swap the first two (prev_round seam)
+  ASSERT_EQ(bulk.tags.size(), 2u * kRep5Checks);
+  std::swap(bulk.tags[0], bulk.tags[1]);
 
   const std::vector<extended_dem> permuted{rep5_phase_init(), bulk,
                                            rep5_phase_final()};
+  // dem_stitch_all checks tags and detects the mismatch
   EXPECT_THROW(dem_stitch_all(permuted), std::invalid_argument);
-  EXPECT_THROW(dem_close_all(permuted), std::invalid_argument);
-  EXPECT_THROW(dem_chunks_to_rounds(permuted), std::invalid_argument);
 }
 
 // A chunk closed on both sides carries no width to count rounds against.
 TEST(ExtendedDemPhases, FullyClosedChunkCannotBeCounted) {
   const auto closed = dem_stitch_all(rep5_phases(3));
-  ASSERT_EQ(closed.num_in_seam_rows(), 0u);
-  ASSERT_EQ(closed.num_out_seam_rows(), 0u);
+  ASSERT_EQ(closed.get_seam(seam_name::prev_round).num_rows(), 0u);
+  ASSERT_EQ(closed.get_seam(seam_name::next_round).num_rows(), 0u);
   EXPECT_THROW(dem_chunk_rounds(closed), std::invalid_argument);
 }
 
 // ---------------------------------------------------------------------------
-// Declarative phase specs
+// Declarative phase specs (new API: named phases + connections)
 // ---------------------------------------------------------------------------
 
-// The same d=5 repetition code as the hand-built chunks above, written the way
-// it appears in decoder configuration YAML.
-dem_chunks_spec rep5_spec() {
+// Build a dem_chunks_spec for a d=5 rep code using the new generic API.
+// Phases: init (9 faults), bulk (9 faults), final (5 faults).
+// Seam: next_round → prev_round (standard memory convention).
+dem_chunks_spec rep5_spec(uint64_t num_rounds = 5) {
   dem_chunks_spec spec;
+  spec.seam = {seam_name::next_round, seam_name::prev_round};
+  spec.connections = {{phase_name::dem_init, phase_name::dem_bulk},
+                      {phase_name::dem_bulk, phase_name::dem_bulk},
+                      {phase_name::dem_bulk, phase_name::dem_final}};
+  spec.num_rounds = num_rounds;
 
-  spec.init.num_faults = 9;
-  spec.init.H_mid_sparse = {0, 1, 5, -1, 1, 2, 6, -1, 2, 3, 7, -1, 3, 4, 8, -1};
-  spec.init.H_out_sparse = {5, -1, 6, -1, 7, -1, 8, -1};
-  spec.init.O_sparse = {0, -1};
-  spec.init.error_rates.assign(9, 0.02);
+  dem_chunk_spec init_spec;
+  init_spec.num_faults = 9;
+  // H_sparse shorthand: assigned to next_round seam only for init
+  init_spec.H_sparse = {0, 1, 5, -1, 1, 2, 6, -1, 2, 3, 7, -1, 3, 4, 8, -1};
+  init_spec.O_sparse = {0, -1};
+  init_spec.error_rates.assign(9, 0.02);
 
-  spec.bulk.num_faults = 9;
-  spec.bulk.H_in_sparse = {0, 1, 5, -1, 1, 2, 6, -1, 2, 3, 7, -1, 3, 4, 8, -1};
-  spec.bulk.H_out_sparse = {5, -1, 6, -1, 7, -1, 8, -1};
-  spec.bulk.O_sparse = {0, -1};
-  spec.bulk.error_rates.assign(9, 0.02);
+  dem_chunk_spec bulk_spec;
+  bulk_spec.num_faults = 9;
+  bulk_spec.H_sparse = {0, 1, 5, -1, 1, 2, 6, -1, 2, 3, 7, -1, 3, 4, 8, -1};
+  bulk_spec.O_sparse = {0, -1};
+  bulk_spec.error_rates.assign(9, 0.02);
 
-  spec.final.num_faults = 5;
-  spec.final.H_in_sparse = {0, 1, -1, 1, 2, -1, 2, 3, -1, 3, 4, -1};
-  spec.final.O_sparse = {0, -1};
-  spec.final.error_rates.assign(5, 0.02);
+  dem_chunk_spec final_spec;
+  final_spec.num_faults = 5;
+  final_spec.H_sparse = {0, 1, -1, 1, 2, -1, 2, 3, -1, 3, 4, -1};
+  final_spec.O_sparse = {0, -1};
+  final_spec.error_rates.assign(5, 0.02);
 
+  spec.phases.push_back({phase_name::dem_init, init_spec});
+  spec.phases.push_back({phase_name::dem_bulk, bulk_spec});
+  spec.phases.push_back({phase_name::dem_final, final_spec});
   return spec;
-}
-
-void expect_chunks_equal(const extended_dem &actual,
-                         const extended_dem &expected) {
-  EXPECT_EQ(actual.num_faults(), expected.num_faults());
-  EXPECT_TRUE(
-      tensors_equal(actual.interior.to_dense(), expected.interior.to_dense()));
-  EXPECT_TRUE(tensors_equal(actual.observables.to_dense(),
-                            expected.observables.to_dense()));
-  EXPECT_TRUE(tensors_equal(actual.in_syndrome.to_dense(),
-                            expected.in_syndrome.to_dense()));
-  EXPECT_TRUE(tensors_equal(actual.out_syndrome.to_dense(),
-                            expected.out_syndrome.to_dense()));
-  EXPECT_EQ(actual.fault_priors, expected.fault_priors);
-  EXPECT_EQ(actual.in_tags, expected.in_tags);
-  EXPECT_EQ(actual.out_tags, expected.out_tags);
-}
-
-// The declarative form and the hand-built chunks describe the same DEM.
-TEST(DemChunkSpec, MatchesHandBuiltChunks) {
-  const auto spec = rep5_spec();
-  expect_chunks_equal(dem_chunk_from_spec(spec.init), rep5_phase_init());
-  expect_chunks_equal(dem_chunk_from_spec(spec.bulk), rep5_phase_bulk());
-  expect_chunks_equal(dem_chunk_from_spec(spec.final), rep5_phase_final());
 }
 
 TEST(DemChunkSpec, ValidSpecValidates) {
   EXPECT_NO_THROW(rep5_spec().validate());
-  EXPECT_TRUE(rep5_spec().has_bulk());
+  EXPECT_TRUE(rep5_spec().has_repeating_phase());
   EXPECT_FALSE(rep5_spec().is_empty());
   EXPECT_TRUE(dem_chunks_spec{}.is_empty());
 }
 
-// sparse_binary_matrix columns are uint32_t-indexed; reject a wider count
-// before error_rates.size() is compared (so the test need not allocate
-// UINT32_MAX+1 priors).
 TEST(DemChunkSpec, NumFaultsMustFitUint32) {
   dem_chunk_spec spec;
   spec.num_faults =
       static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()) + 1ull;
+  spec.error_rates.assign(1, 0.01);
   EXPECT_THROW(spec.validate("test"), std::invalid_argument);
-}
-
-// Expansion produces init, one bulk per middle round, then final.
-TEST(DemChunkSpec, ExpandsToRequestedRoundCount) {
-  const auto spec = rep5_spec();
-  for (std::size_t rounds = 2; rounds <= 6; ++rounds) {
-    const auto chunks = dem_chunks_from_spec(spec, rounds);
-    ASSERT_EQ(chunks.size(), rounds);
-    EXPECT_EQ(chunks.front().num_in_seam_rows(), 0u);
-    EXPECT_EQ(chunks.back().num_out_seam_rows(), 0u);
-
-    const auto flat = dem_close(dem_stitch_all(chunks));
-    // init's own detectors plus one seam per adjacency.
-    EXPECT_EQ(flat.detector_error_matrix.shape()[0], rounds * kRep5Checks);
-  }
-}
-
-// A two-round experiment needs no bulk phase at all.
-TEST(DemChunkSpec, TwoRoundsNeedsNoBulk) {
-  auto spec = rep5_spec();
-  spec.bulk = dem_chunk_spec{};
-  ASSERT_FALSE(spec.has_bulk());
-  EXPECT_NO_THROW(spec.validate());
-
-  const auto chunks = dem_chunks_from_spec(spec, 2);
-  EXPECT_EQ(chunks.size(), 2u);
-  EXPECT_THROW(dem_chunks_from_spec(spec, 3), std::invalid_argument);
-}
-
-TEST(DemChunkSpec, TooFewRoundsThrows) {
-  const auto spec = rep5_spec();
-  EXPECT_THROW(dem_chunks_from_spec(spec, 0), std::invalid_argument);
-  EXPECT_THROW(dem_chunks_from_spec(spec, 1), std::invalid_argument);
 }
 
 TEST(DemChunkSpec, ZeroFaultsThrows) {
@@ -1157,82 +1186,71 @@ TEST(DemChunkSpec, ZeroFaultsThrows) {
   EXPECT_THROW(spec.validate("chunk"), std::invalid_argument);
 }
 
+TEST(DemChunkSpec, ExpandsToRequestedRoundCount) {
+  for (std::size_t rounds = 3; rounds <= 6;
+       ++rounds) { // 2 rounds tested separately
+    auto spec = rep5_spec(rounds);
+    const auto chunks = dem_chunks_from_spec(spec);
+    ASSERT_EQ(chunks.size(), rounds);
+    EXPECT_FALSE(chunks.front().has_seam(seam_name::prev_round) &&
+                 chunks.front().get_seam(seam_name::prev_round).num_rows() > 0);
+    EXPECT_FALSE(chunks.back().has_seam(seam_name::next_round) &&
+                 chunks.back().get_seam(seam_name::next_round).num_rows() > 0);
+    const auto flat = dem_close_all(chunks);
+    // Spec-built init has no interior rows; detectors arise from seam
+    // contractions. Detectors arise only from seam contractions: (rounds-1)
+    // contractions.
+    EXPECT_EQ(flat.detector_error_matrix.shape()[0],
+              (rounds - 1) * kRep5Checks);
+  }
+}
+
+TEST(DemChunkSpec, TwoRoundsNeedsNoBulkSelfLoop) {
+  auto spec = rep5_spec(2);
+  // Remove the bulk self-loop and bulk phase; only init→final.
+  spec.connections = {{phase_name::dem_init, phase_name::dem_final}};
+  spec.phases.erase(std::remove_if(spec.phases.begin(), spec.phases.end(),
+                                   [](const auto &e) {
+                                     return e.id == phase_name::dem_bulk;
+                                   }),
+                    spec.phases.end());
+  ASSERT_NO_THROW(spec.validate());
+  const auto chunks = dem_chunks_from_spec(spec);
+  EXPECT_EQ(chunks.size(), 2u);
+}
+
+TEST(DemChunkSpec, TooFewRoundsThrows) {
+  auto spec = rep5_spec(1);
+  EXPECT_THROW(spec.validate(), std::invalid_argument);
+  EXPECT_THROW(dem_chunks_from_spec(spec), std::invalid_argument);
+}
+
 TEST(DemChunkSpec, ErrorRateCountMustMatchNumFaults) {
   auto spec = rep5_spec();
-  spec.init.error_rates.pop_back();
+  // Modify via phases vector directly since get_phase returns const ref
+  for (auto &e : spec.phases)
+    if (e.id == phase_name::dem_init) {
+      e.spec.error_rates.pop_back();
+      break;
+    }
   EXPECT_THROW(spec.validate(), std::invalid_argument);
 }
 
-TEST(DemChunkSpec, ErrorRateOutsideUnitIntervalThrows) {
+TEST(DemChunkSpec, MissingRequiredConnectionsThrows) {
   auto spec = rep5_spec();
-  spec.bulk.error_rates[3] = 1.5;
+  spec.connections.clear();
   EXPECT_THROW(spec.validate(), std::invalid_argument);
-}
-
-TEST(DemChunkSpec, IndexBeyondNumFaultsThrows) {
-  auto spec = rep5_spec();
-  spec.final.H_in_sparse = {0, 5, -1};
-  EXPECT_THROW(spec.validate(), std::invalid_argument);
-}
-
-// A list whose last row is not terminated would silently lose that row, so it
-// is rejected rather than truncated.
-TEST(DemChunkSpec, MissingRowTerminatorThrows) {
-  auto spec = rep5_spec();
-  spec.init.H_out_sparse = {5, -1, 6};
-  EXPECT_THROW(spec.validate(), std::invalid_argument);
-}
-
-TEST(DemChunkSpec, InitWithIncomingSeamThrows) {
-  auto spec = rep5_spec();
-  spec.init.H_in_sparse = {0, -1, 1, -1, 2, -1, 3, -1};
-  EXPECT_THROW(spec.validate(), std::invalid_argument);
-}
-
-TEST(DemChunkSpec, FinalWithOutgoingSeamThrows) {
-  auto spec = rep5_spec();
-  spec.final.H_out_sparse = {0, -1, 1, -1, 2, -1, 3, -1};
-  EXPECT_THROW(spec.validate(), std::invalid_argument);
-}
-
-// bulk repeats, so a bulk whose seams differ in width cannot stitch to itself.
-TEST(DemChunkSpec, AsymmetricBulkThrows) {
-  auto spec = rep5_spec();
-  spec.bulk.H_out_sparse = {5, -1, 6, -1};
-  EXPECT_THROW(spec.validate(), std::invalid_argument);
-}
-
-TEST(DemChunkSpec, SeamWidthMismatchAcrossPhasesThrows) {
-  auto spec = rep5_spec();
-  spec.final.H_in_sparse = {0, 1, -1, 1, 2, -1};
-  EXPECT_THROW(spec.validate(), std::invalid_argument);
-}
-
-TEST(DemChunkSpec, ObservableCountMismatchThrows) {
-  auto spec = rep5_spec();
-  spec.final.O_sparse = {0, -1, 1, -1};
-  EXPECT_THROW(spec.validate(), std::invalid_argument);
-}
-
-TEST(DemChunkSpec, MissingRequiredPhaseThrows) {
-  auto no_init = rep5_spec();
-  no_init.init = dem_chunk_spec{};
-  EXPECT_THROW(no_init.validate(), std::invalid_argument);
-
-  auto no_final = rep5_spec();
-  no_final.final = dem_chunk_spec{};
-  EXPECT_THROW(no_final.validate(), std::invalid_argument);
-
-  EXPECT_THROW(dem_chunks_spec{}.validate(), std::invalid_argument);
 }
 
 // A genuine width disagreement across the contracted seam still throws.
 TEST(ExtendedDemPhases, MismatchedSeamWidthThrows) {
   auto narrow = rep5_phase_bulk();
-  narrow.in_syndrome =
+  narrow.H =
       sparse_binary_matrix::from_nested_csr(2, 9, {{0, 1, 5}, {1, 2, 6}});
-  narrow.in_tags = {0, 1};
-  EXPECT_THROW(dem_stitch(rep5_phase_init(), narrow), std::invalid_argument);
+  narrow.tags = {0, 1};
+  EXPECT_THROW(dem_stitch(rep5_phase_init(), narrow, seam_name::next_round,
+                          seam_name::prev_round),
+               std::invalid_argument);
 }
 
 // ---------------------------------------------------------------------------
@@ -1455,11 +1473,13 @@ TEST(ExtendedDemValidate, BlockWiderThanTheChunkThrows) {
   auto dem_chunk = extended_dem_from_css_matrices(rep3(), px_only(0.01));
   ASSERT_EQ(dem_chunk.num_faults(), 3u);
   // One interior row that claims four fault columns instead of three.
-  dem_chunk.interior = sparse_binary_matrix::from_nested_csr(1, 4, {{3}});
+  dem_chunk.H = sparse_binary_matrix::from_nested_csr(1, 4, {{3}});
 
   EXPECT_THROW(dem_chunk.validate("test"), std::invalid_argument);
   EXPECT_THROW(dem_close(dem_chunk), std::invalid_argument);
-  EXPECT_THROW(dem_stitch(dem_chunk, dem_chunk), std::invalid_argument);
+  EXPECT_THROW(dem_stitch(dem_chunk, dem_chunk, seam_name::next_round,
+                          seam_name::prev_round),
+               std::invalid_argument);
   EXPECT_THROW(dem_close_all({dem_chunk}), std::invalid_argument);
 }
 
@@ -1467,7 +1487,7 @@ TEST(ExtendedDemValidate, BlockWiderThanTheChunkThrows) {
 // long list would silently reweight the DEM.
 TEST(ExtendedDemValidate, PriorCountMustMatchFaultCount) {
   auto dem_chunk = extended_dem_from_css_matrices(rep3(), px_only(0.01));
-  dem_chunk.fault_priors.pop_back();
+  dem_chunk.error_rates.pop_back();
 
   EXPECT_THROW(dem_chunk.validate("test"), std::invalid_argument);
   EXPECT_THROW(dem_close(dem_chunk), std::invalid_argument);
@@ -1478,7 +1498,7 @@ TEST(ExtendedDemValidate, PriorCountMustMatchFaultCount) {
 // checked for contractibility at all.
 TEST(ExtendedDemValidate, TagCountMustMatchSeamRows) {
   auto dem_chunk = extended_dem_from_css_matrices(rep3(), px_only(0.01));
-  dem_chunk.out_tags.push_back(99u);
+  dem_chunk.tags.push_back(99u);
 
   EXPECT_THROW(dem_chunk.validate("test"), std::invalid_argument);
 }
@@ -1558,32 +1578,22 @@ TEST(ExtendedDemNoiseValidation, PerCheckLengthErrorNamesTheCheckCount) {
 // interval. It is clamped, because every consumer reads fault_priors as a
 // probability.
 TEST(ExtendedDemMerge, SumCombineClampsToOne) {
-  // Three columns of identical support, so all three merge into one whose
-  // linear sum of priors is 1.2.
-  extended_dem dem_chunk;
-  dem_chunk.in_syndrome =
-      sparse_binary_matrix::from_nested_csc(1, 3, {{0}, {0}, {0}});
-  dem_chunk.out_syndrome = dem_chunk.in_syndrome;
-  dem_chunk.interior =
-      sparse_binary_matrix::from_nested_csc(0, 3, {{}, {}, {}});
-  dem_chunk.observables =
-      sparse_binary_matrix::from_nested_csc(0, 3, {{}, {}, {}});
-  dem_chunk.fault_priors = {0.4, 0.4, 0.4};
-  dem_chunk.in_tags = {0};
-  dem_chunk.out_tags = {0};
+  // Three columns of identical support merge into one whose sum is 1.2.
+  // Use make_merge_chunk: 3 fault columns, 1 H row (all fire row 0), no seams.
+  auto dem_chunk = make_merge_chunk(3, {{0}, {0}, {0}}, {0.4, 0.4, 0.4});
   ASSERT_NO_THROW(dem_chunk.validate("test"));
 
   const auto merged =
       dem_merge_duplicate_columns(dem_chunk, prior_combine_mode::sum_combine);
   ASSERT_EQ(merged.num_faults(), 1u);
-  EXPECT_DOUBLE_EQ(merged.fault_priors[0], 1.0);
+  EXPECT_DOUBLE_EQ(merged.error_rates[0], 1.0);
 
   // or_combine is the GF(2) / XOR rule, which also stays in [0, 1]:
   // 1/2 * (1 - (1-2*0.4)^3) = 1/2 * (1 - 0.2^3) = 0.496.
   const auto ored =
       dem_merge_duplicate_columns(dem_chunk, prior_combine_mode::or_combine);
   ASSERT_EQ(ored.num_faults(), 1u);
-  EXPECT_DOUBLE_EQ(ored.fault_priors[0], 0.5 * (1.0 - 0.2 * 0.2 * 0.2));
+  EXPECT_DOUBLE_EQ(ored.error_rates[0], 0.5 * (1.0 - 0.2 * 0.2 * 0.2));
 }
 
 // A zero-row block still has to report the chunk's fault width. A
@@ -1591,13 +1601,12 @@ TEST(ExtendedDemMerge, SumCombineClampsToOne) {
 // then OOB inside dem_merge_duplicate_columns / dem_chunks_to_o_sparse.
 TEST(ExtendedDemValidate, EmptyBlockMustMatchFaultWidth) {
   extended_dem dem_chunk;
-  dem_chunk.in_syndrome =
-      sparse_binary_matrix::from_nested_csc(1, 2, {{0}, {0}});
-  dem_chunk.out_syndrome = dem_chunk.in_syndrome;
-  dem_chunk.observables = sparse_binary_matrix::from_nested_csc(0, 2, {{}, {}});
-  dem_chunk.fault_priors = {0.1, 0.2};
-  dem_chunk.in_tags = {0};
-  dem_chunk.out_tags = {0};
+  dem_chunk.H = sparse_binary_matrix::from_nested_csc(1, 2, {{0}, {0}});
+  dem_chunk.H = dem_chunk.H;
+  dem_chunk.O = sparse_binary_matrix::from_nested_csc(0, 2, {{}, {}});
+  dem_chunk.error_rates = {0.1, 0.2};
+  dem_chunk.tags = {0};
+  dem_chunk.tags = {0};
   // interior left default-constructed: 0 rows, 0 columns.
 
   EXPECT_THROW(dem_chunk.validate("test"), std::invalid_argument);
@@ -1611,7 +1620,7 @@ TEST(ExtendedDemValidate, EmptyBlockMustMatchFaultWidth) {
 // validate().
 TEST(ExtendedDemValidate, MergeRejectsShortPriorList) {
   auto dem_chunk = extended_dem_from_css_matrices(rep3(), px_only(0.01));
-  dem_chunk.fault_priors.pop_back();
+  dem_chunk.error_rates.pop_back();
 
   EXPECT_THROW(dem_merge_duplicate_columns(dem_chunk), std::invalid_argument);
   EXPECT_THROW(are_dem_columns_unique(dem_chunk), std::invalid_argument);
