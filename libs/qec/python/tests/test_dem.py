@@ -856,20 +856,22 @@ def _rep3_dem_chunk(px=0.01):
 
 
 def test_dem_stitch_interior_grows():
-    # After one stitch the interior must contain one seam's worth of rows (d=2).
+    # After one stitch the contracted seam rows become interior (d=2).
     c = _rep3_dem_chunk()
-    ab = qec.dem_stitch(c, c)
-    assert ab.num_interior() == 2
-    assert ab.num_seam_rows() == 2
+    ab = qec.dem_stitch(c, c, qec.seam_name.next_round,
+                        qec.seam_name.prev_round)
+    assert ab.num_interior_rows() == 2
+    assert ab.get_seam(qec.seam_name.prev_round).num_rows() == 2
     assert ab.num_faults() == 6  # 2 rounds × 3 qubits
 
 
-def test_dem_stitch_fault_priors_concatenated():
+def test_dem_stitch_error_rates_concatenated():
     px = 0.01
     c = _rep3_dem_chunk(px)
-    ab = qec.dem_stitch(c, c)
-    assert len(ab.fault_priors) == 6
-    assert all(abs(p - px) < 1e-12 for p in ab.fault_priors)
+    ab = qec.dem_stitch(c, c, qec.seam_name.next_round,
+                        qec.seam_name.prev_round)
+    assert len(ab.error_rates) == 6
+    assert all(abs(p - px) < 1e-12 for p in ab.error_rates)
 
 
 def test_dem_stitch_all_empty_raises():
@@ -880,29 +882,28 @@ def test_dem_stitch_all_empty_raises():
 def test_dem_stitch_all_single_chunk_identity():
     c = _rep3_dem_chunk()
     result = qec.dem_stitch_all([c])
-    assert result.num_interior() == c.num_interior()
+    assert result.num_interior_rows() == c.num_interior_rows()
     assert result.num_faults() == c.num_faults()
 
 
 def test_dem_stitch_all_three_chunks_interior():
     c = _rep3_dem_chunk()
     abc = qec.dem_stitch_all([c, c, c])
-    # 2 seams × 2 rows each = 4 interior rows
-    assert abc.num_interior() == 4
+    # 2 stitches × 2 contracted seam rows each = 4 interior rows
+    assert abc.num_interior_rows() == 4
     assert abc.num_faults() == 9  # 3 rounds × 3 qubits
 
 
 def test_dem_close_single_chunk_shape():
-    # A single rep-3 chunk has d=2 seam rows and 3 fault columns.
-    # dem_close collapses in_syndrome rows (the seam) into the flat DEM, so
-    # the result must have exactly d=2 detectors and 3 error mechanisms.
+    # A single rep-3 chunk has d=2 prev_round seam rows and 3 fault columns.
+    # dem_close emits the prev_round seam rows as detectors and drops next_round.
     px = 0.01
     chunk = _rep3_dem_chunk(px)
     closed = qec.dem_close(chunk)
-    d = chunk.num_seam_rows()
+    d = chunk.get_seam(qec.seam_name.prev_round).num_rows()
     assert closed.num_detectors() == d
     assert closed.num_error_mechanisms() == chunk.num_faults()
-    assert np.allclose(closed.error_rates, chunk.fault_priors)
+    assert np.allclose(closed.error_rates, chunk.error_rates)
 
 
 def test_dem_close_all_matches_close_stitch_all():
@@ -933,7 +934,8 @@ def test_dem_chunk_rounds_single():
 
 def test_dem_chunk_rounds_stitched():
     c = _rep3_dem_chunk()
-    ab = qec.dem_stitch(c, c)
+    ab = qec.dem_stitch(c, c, qec.seam_name.next_round,
+                        qec.seam_name.prev_round)
     assert qec.dem_chunk_rounds(ab) == 2
 
 
@@ -979,107 +981,143 @@ def test_dem_chunks_to_o_sparse_length():
 REP5_CHECKS = 4
 
 
-def _rep5_spec():
+def _make_phase_entry(name_str, num_faults, H_sparse, O_sparse, error_rates):
+    s = qec.DemChunkSpec()
+    s.num_faults = num_faults
+    s.H_sparse = list(H_sparse)
+    s.O_sparse = list(O_sparse)
+    s.error_rates = list(error_rates)
+    e = qec.PhaseSpecEntry()
+    e.id = qec.SeamId(name_str)
+    e.spec = s
+    return e
+
+
+def _make_connection(from_str, to_str):
+    c = qec.PhaseConnection()
+    c.from_phase = qec.SeamId(from_str)
+    c.to_phase = qec.SeamId(to_str)
+    return c
+
+
+def _rep5_spec(num_rounds=5):
     """A d=5 repetition code as init / bulk / final phases.
 
     Fault columns 0..4 are data qubits and 5..8 measurement errors; the final
     phase measures destructively so it has only the five data columns.
+    Spec-built chunks carry only seam rows (no interior rows).
     """
+    seam = qec.SeamConnection()
+    seam.from_seam = qec.seam_name.next_round
+    seam.to_seam = qec.seam_name.prev_round
+
     spec = qec.DemChunksSpec()
-
-    spec.init.num_faults = 9
-    spec.init.H_mid_sparse = [
-        0, 1, 5, -1, 1, 2, 6, -1, 2, 3, 7, -1, 3, 4, 8, -1
+    spec.phases = [
+        _make_phase_entry("init", 9,
+                          [0, 1, 5, -1, 1, 2, 6, -1, 2, 3, 7, -1, 3, 4, 8, -1],
+                          [0, -1], [0.02] * 9),
+        _make_phase_entry("bulk", 9,
+                          [0, 1, 5, -1, 1, 2, 6, -1, 2, 3, 7, -1, 3, 4, 8, -1],
+                          [0, -1], [0.02] * 9),
+        _make_phase_entry("final", 5, [0, 1, -1, 1, 2, -1, 2, 3, -1, 3, 4, -1],
+                          [0, -1], [0.02] * 5),
     ]
-    spec.init.H_out_sparse = [5, -1, 6, -1, 7, -1, 8, -1]
-    spec.init.O_sparse = [0, -1]
-    spec.init.error_rates = [0.02] * 9
-
-    spec.bulk.num_faults = 9
-    spec.bulk.H_in_sparse = [0, 1, 5, -1, 1, 2, 6, -1, 2, 3, 7, -1, 3, 4, 8, -1]
-    spec.bulk.H_out_sparse = [5, -1, 6, -1, 7, -1, 8, -1]
-    spec.bulk.O_sparse = [0, -1]
-    spec.bulk.error_rates = [0.02] * 9
-
-    spec.final.num_faults = 5
-    spec.final.H_in_sparse = [0, 1, -1, 1, 2, -1, 2, 3, -1, 3, 4, -1]
-    spec.final.O_sparse = [0, -1]
-    spec.final.error_rates = [0.02] * 5
-
+    spec.connections = [
+        _make_connection("init", "bulk"),
+        _make_connection("bulk", "bulk"),
+        _make_connection("bulk", "final"),
+    ]
+    spec.seam = seam
+    spec.num_rounds = num_rounds
     return spec
 
 
 def test_dem_chunks_spec_validates():
     spec = _rep5_spec()
     spec.validate()
-    assert spec.has_bulk()
+    assert spec.has_repeating_phase()
     assert not spec.is_empty()
     assert qec.DemChunksSpec().is_empty()
 
 
 def test_dem_chunk_spec_round_trips_through_attributes():
     spec = _rep5_spec()
-    assert spec.init.num_faults == 9
-    assert spec.final.num_faults == 5
-    # H_in_sparse is what makes a phase an init phase, so it has to stay empty.
-    assert spec.init.H_in_sparse == []
-    assert spec.final.H_out_sparse == []
+    assert spec.get_phase(qec.SeamId("init")).num_faults == 9
+    assert spec.get_phase(qec.SeamId("final")).num_faults == 5
 
 
 def test_dem_chunks_from_spec_expands_to_round_count():
-    spec = _rep5_spec()
-    for rounds in range(2, 7):
-        chunks = qec.dem_chunks_from_spec(spec, rounds)
+    for rounds in range(3, 8):
+        spec = _rep5_spec(rounds)
+        chunks = qec.dem_chunks_from_spec(spec)
         assert len(chunks) == rounds
-        # The ends are open: nothing precedes the first round or follows the
-        # last, so those seams are empty.
-        assert chunks[0].num_in_seam_rows() == 0
-        assert chunks[-1].num_out_seam_rows() == 0
-        assert qec.dem_chunks_to_rounds(chunks) == rounds
+        # init has no incoming seam; final has no outgoing seam.
+        assert not chunks[0].has_seam(qec.seam_name.prev_round)
+        assert not chunks[-1].has_seam(qec.seam_name.next_round)
+        # dem_chunks_to_rounds counts seam-difference boundaries: init
+        # contributes 0 (no prev_round seam), bulk/final each contribute 1.
+        assert qec.dem_chunks_to_rounds(chunks) == rounds - 1
 
 
 def test_dem_chunks_from_spec_closes_to_one_detector_band_per_round():
-    spec = _rep5_spec()
-    for rounds in range(2, 7):
-        chunks = qec.dem_chunks_from_spec(spec, rounds)
+    # Spec-built chunks have no interior rows; detectors come from seam
+    # contractions only: (rounds - 1) boundaries × REP5_CHECKS rows each.
+    for rounds in range(3, 8):
+        spec = _rep5_spec(rounds)
+        chunks = qec.dem_chunks_from_spec(spec)
         dem = qec.dem_close_all(chunks)
-        assert dem.detector_error_matrix.shape[0] == rounds * REP5_CHECKS
-        assert len(qec.dem_chunks_to_d_sparse(chunks)) == rounds * REP5_CHECKS
+        assert dem.detector_error_matrix.shape[0] == (rounds - 1) * REP5_CHECKS
+        assert len(qec.dem_chunks_to_d_sparse(chunks)) == \
+            (rounds - 1) * REP5_CHECKS
 
 
 def test_dem_chunk_from_spec_matches_the_phase_it_describes():
     spec = _rep5_spec()
-    init = qec.dem_chunk_from_spec(spec.init, "init")
+    init_spec = spec.get_phase(qec.SeamId("init"))
+    init = qec.dem_chunk_from_spec(init_spec, [qec.seam_name.next_round])
     assert init.num_faults() == 9
-    assert init.num_in_seam_rows() == 0
-    assert init.num_out_seam_rows() == REP5_CHECKS
-    # init carries round 0 in its interior, having nothing to compare against.
-    assert init.num_interior() == REP5_CHECKS
-    assert qec.dem_chunk_rounds(init) == 1
-
-
-def test_dem_chunks_spec_rejects_an_init_with_an_incoming_seam():
-    spec = _rep5_spec()
-    spec.init.H_in_sparse = [0, -1, 1, -1, 2, -1, 3, -1]
-    with pytest.raises(Exception):
-        spec.validate()
+    assert not init.has_seam(qec.seam_name.prev_round)
+    assert init.has_seam(qec.seam_name.next_round)
+    assert init.get_seam(qec.seam_name.next_round).num_rows() == REP5_CHECKS
+    # init has no prev_round seam so contributes 0 detector rounds on its own;
+    # its outgoing seam is the first syndrome, XOR'd against the next chunk.
+    assert qec.dem_chunk_rounds(init) == 0
 
 
 def test_dem_chunks_spec_rejects_mismatched_error_rate_count():
     spec = _rep5_spec()
-    spec.init.error_rates = [0.02] * 8
+    for entry in spec.phases:
+        if entry.id == qec.SeamId("init"):
+            entry.spec.error_rates = [0.02] * 8  # wrong count
     with pytest.raises(Exception):
         spec.validate()
 
 
-def test_dem_chunks_from_spec_needs_a_bulk_phase_to_repeat():
+def test_dem_chunks_from_spec_requires_num_rounds_for_repeating_phase():
     spec = _rep5_spec()
-    spec.bulk = qec.DemChunkSpec()
-    assert not spec.has_bulk()
-    # Two rounds are just init and final, so no bulk is needed.
-    assert len(qec.dem_chunks_from_spec(spec, 2)) == 2
+    spec.num_rounds = None
     with pytest.raises(Exception):
-        qec.dem_chunks_from_spec(spec, 3)
+        qec.dem_chunks_from_spec(spec)
+
+
+def test_dem_chunks_from_spec_linear_chain_needs_no_num_rounds():
+    # A two-phase linear chain (no self-loop) works without num_rounds.
+    seam = qec.SeamConnection()
+    seam.from_seam = qec.seam_name.next_round
+    seam.to_seam = qec.seam_name.prev_round
+
+    spec = qec.DemChunksSpec()
+    spec.phases = [
+        _make_phase_entry("init", 5, [0, 1, -1, 1, 2, -1, 2, 3, -1, 3, 4, -1],
+                          [0, -1], [0.02] * 5),
+        _make_phase_entry("final", 5, [0, 1, -1, 1, 2, -1, 2, 3, -1, 3, 4, -1],
+                          [0, -1], [0.02] * 5),
+    ]
+    spec.connections = [_make_connection("init", "final")]
+    spec.seam = seam
+    # num_rounds absent — valid for a linear chain with no self-loop
+    chunks = qec.dem_chunks_from_spec(spec)
+    assert len(chunks) == 2
 
 
 if __name__ == "__main__":

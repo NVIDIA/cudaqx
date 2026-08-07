@@ -1005,8 +1005,10 @@ std::string decoder_config_json_schema() {
                 {"num_rounds",
                  llvm::json::Object{{"type", "integer"}, {"minimum", 2}}},
                 {"phases", llvm::json::Object{{"type", "array"}}}}},
-           {"required",
-            llvm::json::Array{"seam", "connections", "num_rounds", "phases"}},
+           // num_rounds is absent from a streaming configuration, whose round
+           // count is only known once the experiment runs, so the parser
+           // accepts it as optional and expand_dem_chunks() is what demands it.
+           {"required", llvm::json::Array{"seam", "connections", "phases"}},
            {"additionalProperties", false}}},
       {"decoder_config",
        llvm::json::Object{

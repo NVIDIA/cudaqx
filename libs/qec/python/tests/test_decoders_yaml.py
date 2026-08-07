@@ -283,40 +283,72 @@ def test_sliding_window_boundary_syndromes_roundtrip():
 
 REP5_CHECKS = 4
 
+BULK_H_SPARSE = "[ 0, 1, 5, -1, 1, 2, 6, -1, 2, 3, 7, -1, 3, 4, 8, -1 ]"
+BULK_RATES = "[ 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02 ]"
+
 
 def chunk_form_yaml(num_rounds):
-    """A d=5 repetition code written as phases rather than flat matrices."""
+    """A d=5 repetition code written as phases rather than flat matrices.
+
+    num_rounds lives inside dem_chunks, alongside the phases and the
+    connection graph it expands. Pass None to omit it (the streaming form).
+    """
+    rounds = "" if num_rounds is None else f"  num_rounds: {num_rounds}\n"
     return f"""
 id: 0
 type: single_error_lut
-num_rounds: {num_rounds}
 dem_chunks:
-  init:
-    num_faults: 9
-    H_mid_sparse: [ 0, 1, 5, -1, 1, 2, 6, -1, 2, 3, 7, -1, 3, 4, 8, -1 ]
-    H_out_sparse: [ 5, -1, 6, -1, 7, -1, 8, -1 ]
-    O_sparse: [ 0, -1 ]
-    error_rates: [ 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02 ]
-  bulk:
-    num_faults: 9
-    H_in_sparse: [ 0, 1, 5, -1, 1, 2, 6, -1, 2, 3, 7, -1, 3, 4, 8, -1 ]
-    H_out_sparse: [ 5, -1, 6, -1, 7, -1, 8, -1 ]
-    O_sparse: [ 0, -1 ]
-    error_rates: [ 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02 ]
-  final:
-    num_faults: 5
-    H_in_sparse: [ 0, 1, -1, 1, 2, -1, 2, 3, -1, 3, 4, -1 ]
-    O_sparse: [ 0, -1 ]
-    error_rates: [ 0.02, 0.02, 0.02, 0.02, 0.02 ]
+  seam:
+    from: next_round
+    to: prev_round
+  connections:
+    - {{from: init, to: bulk}}
+    - {{from: bulk, to: bulk}}
+    - {{from: bulk, to: final}}
+{rounds}  phases:
+    - name: init
+      spec:
+        num_faults: 9
+        H_sparse: {BULK_H_SPARSE}
+        O_sparse: [ 0, -1 ]
+        error_rates: {BULK_RATES}
+    - name: bulk
+      spec:
+        num_faults: 9
+        H_sparse: {BULK_H_SPARSE}
+        O_sparse: [ 0, -1 ]
+        error_rates: {BULK_RATES}
+    - name: final
+      spec:
+        num_faults: 5
+        H_sparse: [ 0, 1, -1, 1, 2, -1, 2, 3, -1, 3, 4, -1 ]
+        O_sparse: [ 0, -1 ]
+        error_rates: [ 0.02, 0.02, 0.02, 0.02, 0.02 ]
 """
+
+
+def expected_syndrome_size(num_rounds):
+    """Spec-built chunks carry seam rows only, so detectors come from the
+    (num_rounds - 1) seam contractions, REP5_CHECKS rows each."""
+    return (num_rounds - 1) * REP5_CHECKS
+
+
+def expected_block_size(num_rounds):
+    """init plus (num_rounds - 2) bulk copies at 9 faults each, and a
+    destructively measured final phase with only its 5 data columns."""
+    return 9 * (num_rounds - 1) + 5
 
 
 def test_chunk_form_parses_with_no_flat_matrices():
     config = qec.decoder_config.from_yaml_str(chunk_form_yaml(5))
 
-    assert config.num_rounds == 5
     assert config.dem_chunks is not None
-    assert config.dem_chunks.init.num_faults == 9
+    assert config.dem_chunks.num_rounds == 5
+    assert len(config.dem_chunks.phases) == 3
+    assert len(config.dem_chunks.connections) == 3
+    assert config.dem_chunks.has_repeating_phase()
+    assert config.dem_chunks.get_phase(qec.SeamId("init")).num_faults == 9
+    assert config.dem_chunks.get_phase(qec.SeamId("final")).num_faults == 5
     # The flat fields are derived, so they stay unset until expansion.
     assert config.block_size == 0
     assert config.syndrome_size == 0
@@ -328,9 +360,8 @@ def test_expand_dem_chunks_fills_the_flat_fields():
     closed = qec.qecrt.config.expand_dem_chunks(config)
 
     assert closed is not None
-    assert config.syndrome_size == 5 * REP5_CHECKS
-    # 4 init/bulk phases of 9 faults, plus a 5-fault final round.
-    assert config.block_size == 41
+    assert config.syndrome_size == expected_syndrome_size(5)
+    assert config.block_size == expected_block_size(5)
     assert len(closed.error_rates) == config.block_size
     # One -1 terminator per row, so H and D are as tall as the DEM.
     assert config.H_sparse.count(-1) == config.syndrome_size
@@ -349,14 +380,15 @@ def test_expand_dem_chunks_is_a_no_op_on_a_flat_config():
 
 def test_same_chunks_serve_different_round_counts():
     sizes = {}
-    for rounds in (2, 3, 5, 8):
+    # 3 is the shortest sequence these phases expand to (init, bulk, final).
+    for rounds in (3, 4, 5, 8):
         config = qec.decoder_config.from_yaml_str(chunk_form_yaml(rounds))
         qec.qecrt.config.expand_dem_chunks(config)
         sizes[rounds] = (config.syndrome_size, config.block_size)
 
     for rounds, (syndrome_size, block_size) in sizes.items():
-        assert syndrome_size == rounds * REP5_CHECKS
-        assert block_size == 9 * (rounds - 1) + 5
+        assert syndrome_size == expected_syndrome_size(rounds)
+        assert block_size == expected_block_size(rounds)
 
 
 def test_chunk_form_builds_a_working_decoder():
@@ -368,13 +400,18 @@ def test_chunk_form_builds_a_working_decoder():
     qec.qecrt.config.finalize_decoders()
 
 
-def test_num_rounds_is_required_with_dem_chunks():
-    without = chunk_form_yaml(5).replace("num_rounds: 5\n", "")
+def test_num_rounds_is_optional_until_expansion():
+    # Streaming configs leave num_rounds out: the round count is unknown when
+    # the file is written. Expansion is what needs it, because the repeating
+    # phase has no other way to know how many copies to emit.
+    config = qec.decoder_config.from_yaml_str(chunk_form_yaml(None))
+    assert config.dem_chunks.num_rounds is None
+
     with pytest.raises(Exception):
-        qec.decoder_config.from_yaml_str(without)
+        qec.qecrt.config.expand_dem_chunks(config)
 
 
-def test_num_rounds_is_rejected_without_dem_chunks():
+def test_num_rounds_is_rejected_outside_dem_chunks():
     yaml_str = """
 id: 0
 type: single_error_lut
@@ -391,12 +428,17 @@ D_sparse: [ 0, -1, 0, 1, -1 ]
 
 def test_num_rounds_below_two_is_rejected():
     # num_rounds counts init and final as well as the bulk copies between
-    # them, so 2 is the smallest expansion there is.
+    # them, so 2 is the smallest value the parser accepts.
     for rounds in (0, 1):
         with pytest.raises(Exception):
             qec.decoder_config.from_yaml_str(chunk_form_yaml(rounds))
 
-    assert qec.decoder_config.from_yaml_str(chunk_form_yaml(2)).num_rounds == 2
+    config = qec.decoder_config.from_yaml_str(chunk_form_yaml(2))
+    assert config.dem_chunks.num_rounds == 2
+    # These particular phases need three rounds to lay out, so 2 parses but
+    # cannot expand. The parser only enforces the floor common to every spec.
+    with pytest.raises(Exception):
+        qec.qecrt.config.expand_dem_chunks(config)
 
 
 def test_incomplete_flat_config_is_rejected():
@@ -429,43 +471,62 @@ def test_config_describing_no_dem_at_all_is_rejected():
 def test_expand_dem_chunks_is_exported_at_top_level():
     config = qec.decoder_config.from_yaml_str(chunk_form_yaml(5))
     assert qec.expand_dem_chunks(config) is not None
-    assert config.block_size == 41
+    assert config.block_size == expected_block_size(5)
 
 
 def test_derived_fields_are_rejected_in_chunk_form():
     with_block_size = chunk_form_yaml(5).replace(
-        "num_rounds: 5", "num_rounds: 5\nblock_size: 41")
+        "type: single_error_lut",
+        f"type: single_error_lut\nblock_size: {expected_block_size(5)}")
     with pytest.raises(Exception):
         qec.decoder_config.from_yaml_str(with_block_size)
+
+
+def _phase_entry(name, num_faults, h_sparse):
+    entry = qec.PhaseSpecEntry()
+    entry.id = qec.SeamId(name)
+    entry.spec.num_faults = num_faults
+    entry.spec.H_sparse = h_sparse
+    entry.spec.O_sparse = [0, -1]
+    entry.spec.error_rates = [0.02] * num_faults
+    return entry
+
+
+def _connection(from_name, to_name):
+    connection = qec.PhaseConnection()
+    connection.from_phase = qec.SeamId(from_name)
+    connection.to_phase = qec.SeamId(to_name)
+    return connection
 
 
 def test_chunk_form_can_be_built_programmatically():
     config = qec.decoder_config()
     config.id = 0
     config.type = "single_error_lut"
-    config.num_rounds = 4
+
+    bulk_h = [0, 1, 5, -1, 1, 2, 6, -1, 2, 3, 7, -1, 3, 4, 8, -1]
+    seam = qec.SeamConnection()
+    seam.from_seam = qec.seam_name.next_round
+    seam.to_seam = qec.seam_name.prev_round
 
     spec = qec.DemChunksSpec()
-    spec.init.num_faults = 9
-    spec.init.H_mid_sparse = [
-        0, 1, 5, -1, 1, 2, 6, -1, 2, 3, 7, -1, 3, 4, 8, -1
+    spec.phases = [
+        _phase_entry("init", 9, bulk_h),
+        _phase_entry("bulk", 9, bulk_h),
+        _phase_entry("final", 5, [0, 1, -1, 1, 2, -1, 2, 3, -1, 3, 4, -1]),
     ]
-    spec.init.H_out_sparse = [5, -1, 6, -1, 7, -1, 8, -1]
-    spec.init.O_sparse = [0, -1]
-    spec.init.error_rates = [0.02] * 9
-    spec.bulk.num_faults = 9
-    spec.bulk.H_in_sparse = [0, 1, 5, -1, 1, 2, 6, -1, 2, 3, 7, -1, 3, 4, 8, -1]
-    spec.bulk.H_out_sparse = [5, -1, 6, -1, 7, -1, 8, -1]
-    spec.bulk.O_sparse = [0, -1]
-    spec.bulk.error_rates = [0.02] * 9
-    spec.final.num_faults = 5
-    spec.final.H_in_sparse = [0, 1, -1, 1, 2, -1, 2, 3, -1, 3, 4, -1]
-    spec.final.O_sparse = [0, -1]
-    spec.final.error_rates = [0.02] * 5
+    spec.connections = [
+        _connection("init", "bulk"),
+        _connection("bulk", "bulk"),
+        _connection("bulk", "final"),
+    ]
+    spec.seam = seam
+    spec.num_rounds = 4
     config.dem_chunks = spec
 
     qec.qecrt.config.expand_dem_chunks(config)
-    assert config.syndrome_size == 4 * REP5_CHECKS
+    assert config.syndrome_size == expected_syndrome_size(4)
+    assert config.block_size == expected_block_size(4)
 
 
 if __name__ == "__main__":

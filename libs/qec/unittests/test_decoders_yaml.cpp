@@ -1580,3 +1580,29 @@ TEST(DecoderChunkFormTest, JsonSchemaNumRoundsMinimumMatchesTheParser) {
   EXPECT_NE(schema.find("\"minimum\": 2", at), std::string::npos)
       << schema.substr(at, 200);
 }
+
+TEST(DecoderChunkFormTest, StreamingConfigParsesWithoutNumRounds) {
+  const auto yaml = dem_chunks_yaml(3);
+  const auto without = yaml.substr(0, yaml.find("      num_rounds:")) +
+                       yaml.substr(yaml.find("      phases:"));
+  const auto config = parse_one(without);
+  ASSERT_TRUE(config.dem_chunks.has_value());
+  EXPECT_FALSE(config.dem_chunks->num_rounds.has_value());
+
+  // The schema has to agree, or a validating tool would reject a streaming
+  // configuration the parser accepts.
+  const auto schema =
+      cudaq::qec::decoding::config::decoder_config_json_schema();
+  const auto at = schema.find("\"dem_chunks\"");
+  ASSERT_NE(at, std::string::npos);
+  const auto required = schema.find("\"required\"", at);
+  ASSERT_NE(required, std::string::npos);
+  EXPECT_EQ(schema.find("num_rounds", required),
+            schema.find("num_rounds", schema.find(']', required)))
+      << schema.substr(required, 200);
+
+  // Expansion is where the missing round count is caught.
+  auto expandable = config;
+  EXPECT_THROW(cudaq::qec::decoding::config::expand_dem_chunks(expandable),
+               std::runtime_error);
+}
